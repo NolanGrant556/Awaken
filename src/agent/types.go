@@ -1,7 +1,5 @@
 package agent
 
-import "context"
-
 type Message struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
@@ -16,9 +14,9 @@ type Thought struct {
 }
 
 type AgentConfig struct {
-	MaxThoughts     int
-	ModelConfig     LLMConfig
-	SystemPrompt    string
+	MaxThoughts  int
+	ModelConfig  LLMConfig
+	SystemPrompt string
 }
 
 type LLMConfig struct {
@@ -30,24 +28,4 @@ type LLMConfig struct {
 type AgentState struct {
 	Messages []Message
 	Thoughts []Thought
-}
-
-type Tool interface {
-	Name() string
-	Description() string
-	Parameters() []ToolParameter
-	Execute(ctx context.Context, input string) (string, error)
-}
-
-type ToolParameter struct {
-	Name        string
-	Description string
-	Type        string
-	Required    bool
-}
-
-type ActionResult struct {
-	Success     bool
-	Output      string
-	Error       string
 }

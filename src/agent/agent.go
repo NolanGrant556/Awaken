@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"awaken/src/llm"
+	"awaken/src/tool"
 )
 
 type Agent struct {
@@ -82,7 +83,7 @@ func (a *Agent) Run(ctx context.Context, userInput string) (string, error) {
 			return parsed.Input, nil
 		}
 		
-		observation, err := ExecuteTool(ctx, parsed.ToolName, parsed.Input)
+		observation, err := tool.ExecuteTool(ctx, parsed.ToolName, parsed.Input)
 		if err != nil {
 			observation = fmt.Sprintf("工具执行失败: %v", err)
 		}

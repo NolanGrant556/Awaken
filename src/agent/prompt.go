@@ -3,6 +3,8 @@ package agent
 import (
 	"fmt"
 	"strings"
+
+	"awaken/src/tool"
 )
 
 const reactPromptTemplate = `你是一个智能助手，能够通过思考和行动来解决问题。
@@ -47,7 +49,7 @@ const finalAnswerTemplate = `## 总结
 %s`
 
 func BuildReActPrompt(state AgentState, userInput string) string {
-	toolsDesc := GetToolsDescription()
+	toolsDesc := tool.GetToolsDescription()
 	
 	var history strings.Builder
 	for _, msg := range state.Messages {

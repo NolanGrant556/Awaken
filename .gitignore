@@ -25,3 +25,6 @@ go.sum
 
 # Test files with ignore directive
 test-*.go
+
+# CLI binary
+awaken

@@ -31,6 +31,7 @@ type Request struct {
 	Model        string
 	Temperature  float64
 	MaxTokens    int
+	Stream       bool
 }
 
 type chatMessage struct {
@@ -70,6 +71,16 @@ type anthropicResponse struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"content"`
+}
+
+type StreamCallback func(content string, isThinking bool)
+
+type streamChunk struct {
+	Choices []struct {
+		Delta struct {
+			Content string `json:"content"`
+		} `json:"delta"`
+	} `json:"choices"`
 }
 
 func LoadConfig() Config {
@@ -116,6 +127,15 @@ func loadEnvFile() {
 }
 
 func Call(ctx context.Context, cfg Config, req Request) (string, error) {
+	if req.Stream {
+		var result strings.Builder
+		callback := func(content string, isThinking bool) {
+			result.WriteString(content)
+		}
+		err := StreamCall(ctx, cfg, req, callback)
+		return result.String(), err
+	}
+
 	if cfg.APIKey == "" {
 		return "", ErrMissingAPIKey
 	}
@@ -229,4 +249,131 @@ func Call(ctx context.Context, cfg Config, req Request) (string, error) {
 
 		return chatResp.Choices[0].Message.Content, nil
 	}
+}
+
+func StreamCall(ctx context.Context, cfg Config, req Request, callback StreamCallback) error {
+	if cfg.APIKey == "" {
+		return ErrMissingAPIKey
+	}
+
+	model := req.Model
+	if model == "" {
+		model = cfg.Model
+	}
+	if model == "" {
+		return ErrMissingModel
+	}
+
+	temperature := req.Temperature
+	if temperature == 0 {
+		temperature = 0.7
+	}
+
+	maxTokens := req.MaxTokens
+	if maxTokens == 0 {
+		maxTokens = 1024
+	}
+
+	isAnthropic := strings.Contains(cfg.BaseURL, "/anthropic")
+
+	var url string
+	var body []byte
+	var err error
+
+	if isAnthropic {
+		url = cfg.BaseURL + "/v1/messages"
+
+		messages := []anthropicMessage{}
+		if req.SystemPrompt != "" {
+			messages = append(messages, anthropicMessage{Role: "system", Content: req.SystemPrompt})
+		}
+		messages = append(messages, anthropicMessage{Role: "user", Content: req.UserPrompt})
+
+		anthropicReq := anthropicRequest{
+			Model:       model,
+			Messages:    messages,
+			Temperature: temperature,
+			MaxTokens:   maxTokens,
+		}
+
+		body, err = json.Marshal(anthropicReq)
+		if err != nil {
+			return fmt.Errorf("failed to marshal request: %w", err)
+		}
+	} else {
+		url = cfg.BaseURL + "/chat/completions"
+
+		messages := []chatMessage{}
+		if req.SystemPrompt != "" {
+			messages = append(messages, chatMessage{Role: "system", Content: req.SystemPrompt})
+		}
+		messages = append(messages, chatMessage{Role: "user", Content: req.UserPrompt})
+
+		chatReq := chatRequest{
+			Model:       model,
+			Messages:    messages,
+			Temperature: temperature,
+			MaxTokens:   maxTokens,
+		}
+
+		body, err = json.Marshal(chatReq)
+		if err != nil {
+			return fmt.Errorf("failed to marshal request: %w", err)
+		}
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrRequestFailed, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%w: status %d", ErrRequestFailed, resp.StatusCode)
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "data: ") {
+			line = strings.TrimPrefix(line, "data: ")
+			if line == "[DONE]" {
+				break
+			}
+
+			if isAnthropic {
+				var chunk anthropicResponse
+				if err := json.Unmarshal([]byte(line), &chunk); err == nil {
+					for _, c := range chunk.Content {
+						if c.Type == "thinking" && c.Text != "" {
+							callback(c.Text, true)
+						} else if c.Type == "text" && c.Text != "" {
+							callback(c.Text, false)
+						}
+					}
+				}
+			} else {
+				var chunk streamChunk
+				if err := json.Unmarshal([]byte(line), &chunk); err == nil {
+					if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
+						callback(chunk.Choices[0].Delta.Content, false)
+					}
+				}
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("failed to read stream: %w", err)
+	}
+
+	return nil
 }

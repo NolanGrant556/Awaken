@@ -229,6 +229,75 @@ func TestRunnerMaxThoughts(t *testing.T) {
 	}
 }
 
+func TestRunnerRunStreamEmitsTextDeltas(t *testing.T) {
+	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeRunnerStreamLines(t, w, []string{
+			`data: {"choices":[{"delta":{"content":"Hel"}}]}`,
+			`data: {"choices":[{"delta":{"content":"lo"}}]}`,
+			`data: [DONE]`,
+		})
+	})
+	defer server.Close()
+
+	agent := NewAgent(testAgentConfig(server.URL, 2))
+	var chunks []string
+	answer, err := agent.RunStream(context.Background(), "stream", func(content string, isThinking bool) {
+		if isThinking {
+			t.Fatalf("unexpected thinking callback: %q", content)
+		}
+		chunks = append(chunks, content)
+	})
+	if err != nil {
+		t.Fatalf("RunStream returned error: %v", err)
+	}
+	if answer != "Hello" {
+		t.Fatalf("expected Hello, got %q", answer)
+	}
+	if len(chunks) != 2 || chunks[0] != "Hel" || chunks[1] != "lo" {
+		t.Fatalf("expected streamed chunks, got %+v", chunks)
+	}
+}
+
+func TestRunnerRunStreamNativeToolCallLoop(t *testing.T) {
+	toolName := "runner_stream_tool"
+	tool.RegisterTool(runnerTestTool{name: toolName})
+
+	var calls int
+	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			writeRunnerStreamLines(t, w, []string{
+				`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_stream","type":"function","function":{"name":"` + toolName + `","arguments":"{\"value\""}}]}}]}`,
+				`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"hello\"}"}}]}}]}`,
+				`data: [DONE]`,
+			})
+			return
+		}
+		writeRunnerStreamLines(t, w, []string{
+			`data: {"choices":[{"delta":{"content":"done"}}]}`,
+			`data: [DONE]`,
+		})
+	})
+	defer server.Close()
+
+	agent := NewAgent(testAgentConfig(server.URL, 3))
+	var output string
+	answer, err := agent.RunStream(context.Background(), "stream tool", func(content string, isThinking bool) {
+		if !isThinking {
+			output += content
+		}
+	})
+	if err != nil {
+		t.Fatalf("RunStream returned error: %v", err)
+	}
+	if answer != "done" {
+		t.Fatalf("expected done, got %q", answer)
+	}
+	if !strings.Contains(output, "echo:hello") || !strings.Contains(output, "done") {
+		t.Fatalf("expected tool result and final output, got %q", output)
+	}
+}
+
 type chatRequestSnapshot struct {
 	Messages []struct {
 		Role       string `json:"role"`
@@ -274,10 +343,33 @@ func newRunnerServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 	}))
 }
 
+func newRunnerStreamServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("expected /chat/completions, got %s", r.URL.Path)
+		}
+		handler(w, r)
+	}))
+}
+
 func writeRunnerJSON(t *testing.T, w http.ResponseWriter, value interface{}) {
 	t.Helper()
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(value); err != nil {
 		t.Fatalf("failed to encode response: %v", err)
+	}
+}
+
+func writeRunnerStreamLines(t *testing.T, w http.ResponseWriter, lines []string) {
+	t.Helper()
+	w.Header().Set("Content-Type", "text/event-stream")
+	for _, line := range lines {
+		if _, err := w.Write([]byte(line + "\n\n")); err != nil {
+			t.Fatalf("failed to write stream line: %v", err)
+		}
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
 	}
 }

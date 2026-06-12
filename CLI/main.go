@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -15,8 +14,6 @@ import (
 )
 
 func main() {
-	flag.Parse()
-
 	cfg := llm.LoadConfig()
 
 	if cfg.APIKey == "" || cfg.APIKey == "YOUR-API-KEY" {
@@ -24,12 +21,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	args := flag.Args()
-	if len(args) == 0 {
-		interactiveMode(cfg)
-	} else {
-		oneShotMode(cfg, strings.Join(args, " "))
-	}
+	interactiveMode(cfg)
 }
 
 func createAgent(cfg llm.Config) *agentcore.Agent {
@@ -45,23 +37,6 @@ func createAgent(cfg llm.Config) *agentcore.Agent {
 		},
 	}
 	return agentcore.NewAgent(agentCfg)
-}
-
-func oneShotMode(cfg llm.Config, prompt string) {
-	fmt.Printf("Question: %s\n", prompt)
-	fmt.Println("Thinking...")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	ag := createAgent(cfg)
-	resp, err := ag.Run(ctx, prompt)
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("\nAnswer:\n%s\n", resp)
 }
 
 func interactiveMode(cfg llm.Config) {
@@ -106,9 +81,7 @@ func interactiveMode(cfg llm.Config) {
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 
 		fmt.Print("\nAnswer: ")
-		_, err := ag.RunStream(ctx, input, func(content string) {
-			fmt.Print(content)
-		})
+		_, err := ag.RunStream(ctx, input, newStreamPrinter())
 		cancel()
 
 		if err != nil {
@@ -116,5 +89,25 @@ func interactiveMode(cfg llm.Config) {
 		} else {
 			fmt.Println()
 		}
+	}
+}
+
+func newStreamPrinter() func(content string, isThinking bool) {
+	thinkingActive := false
+	return func(content string, isThinking bool) {
+		if isThinking {
+			if !thinkingActive {
+				fmt.Print("\n[Thinking]\n")
+				thinkingActive = true
+			}
+			fmt.Print(content)
+			return
+		}
+
+		if thinkingActive {
+			fmt.Print("\n\n")
+			thinkingActive = false
+		}
+		fmt.Print(content)
 	}
 }

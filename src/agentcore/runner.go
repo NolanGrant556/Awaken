@@ -55,11 +55,11 @@ func (r *Runner) Run(ctx stdcontext.Context) (string, error) {
 	return "", fmt.Errorf("达到最大思考次数 %d，未能完成任务", r.config.MaxThoughts)
 }
 
-func (r *Runner) RunStream(ctx stdcontext.Context, callback func(string)) (string, error) {
+func (r *Runner) RunStream(ctx stdcontext.Context, callback StreamCallback) (string, error) {
 	for i := 0; i < r.config.MaxThoughts; i++ {
-		response, err := r.invokeLLM(ctx)
+		response, err := r.streamLLM(ctx, callback)
 		if err != nil {
-			return "", fmt.Errorf("LLM call failed: %w", err)
+			return "", fmt.Errorf("LLM stream call failed: %w", err)
 		}
 
 		if len(response.ToolCalls) > 0 {
@@ -79,7 +79,6 @@ func (r *Runner) RunStream(ctx stdcontext.Context, callback func(string)) (strin
 		if response.Content == "" {
 			return "", llm.ErrEmptyResponse
 		}
-		callback(response.Content)
 		r.conversation.AssistantOutput(response.Content, nil)
 		return response.Content, nil
 	}
@@ -106,7 +105,22 @@ func (r *Runner) invokeLLM(ctx stdcontext.Context) (*llm.Response, error) {
 	})
 }
 
-func (r *Runner) handleXMLFallback(ctx stdcontext.Context, response string, callback func(string)) (bool, string) {
+func (r *Runner) streamLLM(ctx stdcontext.Context, callback StreamCallback) (*llm.Response, error) {
+	llmReq := r.buildLLMRequest()
+	return llm.StreamInvoke(ctx, llm.Config{
+		APIKey:      r.config.ModelConfig.APIKey,
+		BaseURL:     r.config.ModelConfig.BaseURL,
+		Model:       llmReq.Model,
+		Temperature: llmReq.Temperature,
+		MaxTokens:   llmReq.MaxTokens,
+	}, llm.Request{
+		SystemPrompt: llmReq.SystemPrompt,
+		Messages:     llmReq.Messages,
+		Tools:        llmReq.Tools,
+	}, llm.StreamCallback(callback))
+}
+
+func (r *Runner) handleXMLFallback(ctx stdcontext.Context, response string, callback StreamCallback) (bool, string) {
 	parsed, err := ParseAction(response)
 	if err != nil {
 		return false, ""
@@ -115,7 +129,7 @@ func (r *Runner) handleXMLFallback(ctx stdcontext.Context, response string, call
 	if parsed.ToolName == "final" || parsed.ToolName == "总结" {
 		r.conversation.AssistantOutput(parsed.Input, nil)
 		if callback != nil {
-			callback(parsed.Input)
+			callback(parsed.Input, false)
 		}
 		return true, parsed.Input
 	}
@@ -133,14 +147,14 @@ func (r *Runner) handleXMLFallback(ctx stdcontext.Context, response string, call
 	return true, ""
 }
 
-func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.ToolCall, callback func(string)) {
+func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.ToolCall, callback StreamCallback) {
 	for _, tc := range toolCalls {
 		observation, err := executeToolCall(ctx, tc)
 		if err != nil {
 			observation = fmt.Sprintf("工具执行失败: %v", err)
 		}
 		if callback != nil {
-			callback(fmt.Sprintf("\n\n[工具结果] %s: %s\n\n", tc.Function.Name, observation))
+			callback(fmt.Sprintf("\n\n[工具结果] %s: %s\n\n", tc.Function.Name, observation), false)
 		}
 		r.conversation.ToolResult(tc.ID, tc.Function.Name, observation)
 	}

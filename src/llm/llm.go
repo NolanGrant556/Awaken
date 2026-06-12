@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -115,6 +116,25 @@ type chatResponse struct {
 	} `json:"choices"`
 }
 
+type chatStreamResponse struct {
+	Choices []struct {
+		Delta struct {
+			Content   string               `json:"content,omitempty"`
+			ToolCalls []chatStreamToolCall `json:"tool_calls,omitempty"`
+		} `json:"delta"`
+	} `json:"choices"`
+}
+
+type chatStreamToolCall struct {
+	Index    int    `json:"index"`
+	ID       string `json:"id,omitempty"`
+	Type     string `json:"type,omitempty"`
+	Function struct {
+		Name      string `json:"name,omitempty"`
+		Arguments string `json:"arguments,omitempty"`
+	} `json:"function,omitempty"`
+}
+
 type anthropicMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
@@ -136,14 +156,6 @@ type anthropicResponse struct {
 }
 
 type StreamCallback func(content string, isThinking bool)
-
-type streamChunk struct {
-	Choices []struct {
-		Delta struct {
-			Content string `json:"content"`
-		} `json:"delta"`
-	} `json:"choices"`
-}
 
 func LoadConfig() Config {
 	loadEnvFile()
@@ -404,8 +416,13 @@ func buildAnthropicMessages(req Request) []anthropicMessage {
 }
 
 func StreamCall(ctx context.Context, cfg Config, req Request, callback StreamCallback) error {
+	_, err := StreamInvoke(ctx, cfg, req, callback)
+	return err
+}
+
+func StreamInvoke(ctx context.Context, cfg Config, req Request, callback StreamCallback) (*Response, error) {
 	if cfg.APIKey == "" {
-		return ErrMissingAPIKey
+		return nil, ErrMissingAPIKey
 	}
 
 	model := req.Model
@@ -413,7 +430,7 @@ func StreamCall(ctx context.Context, cfg Config, req Request, callback StreamCal
 		model = cfg.Model
 	}
 	if model == "" {
-		return ErrMissingModel
+		return nil, ErrMissingModel
 	}
 
 	temperature := req.Temperature
@@ -440,7 +457,6 @@ func StreamCall(ctx context.Context, cfg Config, req Request, callback StreamCal
 
 	if isAnthropic {
 		url = cfg.BaseURL + "/v1/messages"
-
 		anthropicReq := anthropicRequest{
 			Model:       model,
 			Messages:    buildAnthropicMessages(req),
@@ -448,14 +464,12 @@ func StreamCall(ctx context.Context, cfg Config, req Request, callback StreamCal
 			MaxTokens:   maxTokens,
 			Stream:      true,
 		}
-
 		body, err = json.Marshal(anthropicReq)
 		if err != nil {
-			return fmt.Errorf("failed to marshal request: %w", err)
+			return nil, fmt.Errorf("failed to marshal request: %w", err)
 		}
 	} else {
 		url = cfg.BaseURL + "/chat/completions"
-
 		chatReq := chatRequest{
 			Model:       model,
 			Messages:    buildChatMessages(req),
@@ -467,16 +481,15 @@ func StreamCall(ctx context.Context, cfg Config, req Request, callback StreamCal
 		if len(req.Tools) > 0 {
 			chatReq.Tools = convertToolsToOpenAI(req.Tools)
 		}
-
 		body, err = json.Marshal(chatReq)
 		if err != nil {
-			return fmt.Errorf("failed to marshal request: %w", err)
+			return nil, fmt.Errorf("failed to marshal request: %w", err)
 		}
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
@@ -484,20 +497,20 @@ func StreamCall(ctx context.Context, cfg Config, req Request, callback StreamCal
 
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrRequestFailed, err)
+		return nil, fmt.Errorf("%w: %v", ErrRequestFailed, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%w: status %d", ErrRequestFailed, resp.StatusCode)
+		return nil, fmt.Errorf("%w: status %d", ErrRequestFailed, resp.StatusCode)
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
+	streamState := newStreamState(callback)
+	currentEvent := ""
 
-	var currentEvent string
 	for scanner.Scan() {
-		line := scanner.Text()
-		line = strings.TrimSpace(line)
+		line := strings.TrimSpace(scanner.Text())
 
 		if line == "" {
 			continue
@@ -509,79 +522,147 @@ func StreamCall(ctx context.Context, cfg Config, req Request, callback StreamCal
 			continue
 		}
 
-		// SSE 数据行：data: xxx
 		if strings.HasPrefix(line, "data:") {
 			data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-
-			if data == "" || data == "[DONE]" {
+			if data == "" {
 				continue
 			}
-
-			// 通用 JSON 解析，提取所有可能的文本内容
-			parseAndEmit(data, currentEvent, callback)
-			continue
-		}
-
-		// 非 SSE 格式（OpenAI 格式直接就是 data: 行）
-		if strings.HasPrefix(line, "data: ") {
-			data := strings.TrimPrefix(line, "data: ")
 			if data == "[DONE]" {
 				break
 			}
-			parseAndEmit(data, "", callback)
+			streamState.consume(data, currentEvent)
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("failed to read stream: %w", err)
+		return nil, fmt.Errorf("failed to read stream: %w", err)
 	}
 
-	return nil
+	return streamState.response()
 }
 
-func parseAndEmit(data string, event string, callback StreamCallback) {
+type streamState struct {
+	callback  StreamCallback
+	content   strings.Builder
+	toolCalls map[int]*streamToolCallAccumulator
+}
+
+type streamToolCallAccumulator struct {
+	id        string
+	callType  string
+	name      strings.Builder
+	arguments strings.Builder
+}
+
+func newStreamState(callback StreamCallback) *streamState {
+	return &streamState{
+		callback:  callback,
+		toolCalls: make(map[int]*streamToolCallAccumulator),
+	}
+}
+
+func (s *streamState) consume(data string, event string) {
 	var generic map[string]interface{}
 	if err := json.Unmarshal([]byte(data), &generic); err != nil {
 		return
 	}
 
-	// Anthropic SSE 格式检测
 	if event != "" || generic["type"] == "content_block_delta" {
-		// content_block_delta 类型
-		if delta, ok := generic["delta"].(map[string]interface{}); ok {
-			if deltaType, ok := delta["type"].(string); ok {
-				switch deltaType {
-				case "thinking_delta":
-					if thinking, ok := delta["thinking"].(string); ok && thinking != "" {
-						callback(thinking, true)
-					}
-				case "text_delta":
-					if text, ok := delta["text"].(string); ok && text != "" {
-						callback(text, false)
-					}
-				}
-			}
-		}
+		s.consumeAnthropic(generic)
+		return
+	}
+	s.consumeOpenAI(data)
+}
 
-		// message_stop / content_block_stop 等结束事件
-		if generic["type"] == "message_stop" || generic["type"] == "content_block_stop" {
-			return
-		}
+func (s *streamState) consumeAnthropic(generic map[string]interface{}) {
+	delta, ok := generic["delta"].(map[string]interface{})
+	if !ok {
 		return
 	}
 
-	// OpenAI 格式检测
-	if choices, ok := generic["choices"].([]interface{}); ok {
-		for _, choice := range choices {
-			if c, ok := choice.(map[string]interface{}); ok {
-				if delta, ok := c["delta"].(map[string]interface{}); ok {
-					if content, ok := delta["content"].(string); ok && content != "" {
-						callback(content, false)
-					}
-				}
+	if thinking, ok := delta["thinking"].(string); ok && thinking != "" {
+		s.emit(thinking, true)
+	}
+	if text, ok := delta["text"].(string); ok && text != "" {
+		s.content.WriteString(text)
+		s.emit(text, false)
+	}
+}
+
+func (s *streamState) consumeOpenAI(data string) {
+	var chunk chatStreamResponse
+	if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+		return
+	}
+
+	for _, choice := range chunk.Choices {
+		if choice.Delta.Content != "" {
+			s.content.WriteString(choice.Delta.Content)
+			s.emit(choice.Delta.Content, false)
+		}
+
+		for _, toolCall := range choice.Delta.ToolCalls {
+			acc := s.toolCalls[toolCall.Index]
+			if acc == nil {
+				acc = &streamToolCallAccumulator{}
+				s.toolCalls[toolCall.Index] = acc
+			}
+			if toolCall.ID != "" {
+				acc.id = toolCall.ID
+			}
+			if toolCall.Type != "" {
+				acc.callType = toolCall.Type
+			}
+			if toolCall.Function.Name != "" {
+				acc.name.WriteString(toolCall.Function.Name)
+			}
+			if toolCall.Function.Arguments != "" {
+				acc.arguments.WriteString(toolCall.Function.Arguments)
 			}
 		}
 	}
+}
+
+func (s *streamState) emit(content string, isThinking bool) {
+	if s.callback != nil {
+		s.callback(content, isThinking)
+	}
+}
+
+func (s *streamState) response() (*Response, error) {
+	toolCalls := s.sortedToolCalls()
+	result := &Response{
+		Content:    s.content.String(),
+		ToolCalls:  toolCalls,
+		IsFinished: len(toolCalls) == 0,
+	}
+	if result.Content == "" && len(result.ToolCalls) == 0 {
+		return nil, ErrEmptyResponse
+	}
+	return result, nil
+}
+
+func (s *streamState) sortedToolCalls() []ToolCall {
+	if len(s.toolCalls) == 0 {
+		return nil
+	}
+
+	indexes := make([]int, 0, len(s.toolCalls))
+	for index := range s.toolCalls {
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+
+	result := make([]ToolCall, 0, len(indexes))
+	for _, index := range indexes {
+		acc := s.toolCalls[index]
+		result = append(result, ToolCall{
+			ID:    acc.id,
+			Name:  acc.name.String(),
+			Input: acc.arguments.String(),
+		})
+	}
+	return result
 }
 
 func CallWithContext(c context.Context, cfg Config, convCtx *ctx.Context, req Request) (*Response, error) {

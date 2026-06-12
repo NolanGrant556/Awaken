@@ -5,6 +5,8 @@ import (
 	stdcontext "context"
 )
 
+type StreamCallback func(content string, isThinking bool)
+
 type Agent struct {
 	config       AgentConfig
 	conversation *context.Conversation
@@ -51,7 +53,7 @@ func (a *Agent) Run(ctx stdcontext.Context, userInput string) (string, error) {
 	return runner.Run(ctx)
 }
 
-func (a *Agent) RunStream(ctx stdcontext.Context, userInput string, callback func(string)) (string, error) {
+func (a *Agent) RunStream(ctx stdcontext.Context, userInput string, callback StreamCallback) (string, error) {
 	a.conversation.UserInput(userInput)
 
 	runner := NewRunner(a.config, a.conversation, a.reqBuilder)

@@ -12,24 +12,23 @@ import (
 type Role string
 
 const (
-	RoleSystem    Role = "system"
-	RoleUser     Role = "user"
+	RoleUser      Role = "user"
 	RoleAssistant Role = "assistant"
-	RoleTool     Role = "tool"
+	RoleTool      Role = "tool"
 )
 
 type Message struct {
-	Role       Role            `json:"role"`
-	Content    string          `json:"content"`
-	ToolCalls  []ToolCall     `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-	Name       string          `json:"name,omitempty"`
+	Role       Role       `json:"role"`
+	Content    string     `json:"content"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Name       string     `json:"name,omitempty"`
 }
 
 type ToolCall struct {
-	ID       string         `json:"id"`
-	Type     string         `json:"type"`
-	Function FunctionCall    `json:"function"`
+	ID       string       `json:"id"`
+	Type     string       `json:"type"`
+	Function FunctionCall `json:"function"`
 }
 
 type FunctionCall struct {
@@ -38,14 +37,14 @@ type FunctionCall struct {
 }
 
 type ToolDefinition struct {
-	Type     string              `json:"type"`
+	Type     string             `json:"type"`
 	Function ToolFunctionSchema `json:"function"`
 }
 
 type ToolFunctionSchema struct {
-	Name        string                  `json:"name"`
-	Description string                 `json:"description"`
-	Parameters  ToolParametersSchema    `json:"parameters"`
+	Name        string               `json:"name"`
+	Description string               `json:"description"`
+	Parameters  ToolParametersSchema `json:"parameters"`
 }
 
 type ToolParametersSchema struct {
@@ -60,11 +59,10 @@ type ToolParam struct {
 }
 
 type Context struct {
-	mu           sync.RWMutex
-	messages     []Message
-	maxMessages  int
+	mu          sync.RWMutex
+	messages    []Message
+	maxMessages int
 	maxTokens   int
-	systemPrompt string
 	tools       []ToolDefinition
 }
 
@@ -82,12 +80,6 @@ func WithMaxTokens(max int) Option {
 	}
 }
 
-func WithSystemPrompt(prompt string) Option {
-	return func(c *Context) {
-		c.systemPrompt = prompt
-	}
-}
-
 func WithTools(tools []ToolDefinition) Option {
 	return func(c *Context) {
 		c.tools = tools
@@ -99,19 +91,11 @@ func New(opts ...Option) *Context {
 		messages:    []Message{},
 		maxMessages: 100,
 		maxTokens:   32000,
-		systemPrompt: "",
 		tools:       []ToolDefinition{},
 	}
 
 	for _, opt := range opts {
 		opt(c)
-	}
-
-	if c.systemPrompt != "" {
-		c.messages = append(c.messages, Message{
-			Role:    RoleSystem,
-			Content: c.systemPrompt,
-		})
 	}
 
 	return c
@@ -192,12 +176,6 @@ func (c *Context) Clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.messages = []Message{}
-	if c.systemPrompt != "" {
-		c.messages = append(c.messages, Message{
-			Role:    RoleSystem,
-			Content: c.systemPrompt,
-		})
-	}
 }
 
 func (c *Context) Trim() {
@@ -205,19 +183,7 @@ func (c *Context) Trim() {
 	defer c.mu.Unlock()
 
 	if c.maxMessages > 0 && len(c.messages) > c.maxMessages {
-		keep := c.maxMessages
-		for i, msg := range c.messages {
-			if msg.Role == RoleSystem {
-				keep = i + 1
-				break
-			}
-		}
-		if keep < c.maxMessages {
-			keep = c.maxMessages
-		}
-		if keep < len(c.messages) {
-			c.messages = c.messages[len(c.messages)-keep:]
-		}
+		c.messages = c.messages[len(c.messages)-c.maxMessages:]
 	}
 }
 
@@ -285,18 +251,15 @@ func (c *Context) EstimateTotalTokens() int {
 }
 
 type Conversation struct {
-	Context    *Context
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	Metadata   map[string]interface{}
+	Context   *Context
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	Metadata  map[string]interface{}
 }
 
-func NewConversation(systemPrompt string, tools []ToolDefinition) *Conversation {
+func NewConversation(tools []ToolDefinition) *Conversation {
 	return &Conversation{
-		Context: New(
-			WithSystemPrompt(systemPrompt),
-			WithTools(tools),
-		),
+		Context:   New(WithTools(tools)),
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 		Metadata:  make(map[string]interface{}),

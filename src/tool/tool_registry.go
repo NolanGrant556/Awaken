@@ -8,8 +8,8 @@ import (
 )
 
 var (
-	toolRegistry = make(map[string]Tool)
-	mu           sync.RWMutex
+	toolRegistry    = make(map[string]Tool)
+	mu              sync.RWMutex
 	ErrToolNotFound = errors.New("tool not found")
 )
 
@@ -44,7 +44,7 @@ func GetToolsDescription() string {
 	if len(tools) == 0 {
 		return "No tools available."
 	}
-	
+
 	var desc string
 	for _, tool := range tools {
 		desc += fmt.Sprintf("- %s: %s\n", tool.Name(), tool.Description())

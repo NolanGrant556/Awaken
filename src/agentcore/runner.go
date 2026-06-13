@@ -98,6 +98,7 @@ func (r *Runner) invokeLLM(ctx stdcontext.Context) (*llm.Response, error) {
 		Model:       llmReq.Model,
 		Temperature: llmReq.Temperature,
 		MaxTokens:   llmReq.MaxTokens,
+		AuthScheme:  r.config.ModelConfig.AuthScheme,
 	}, llm.Request{
 		SystemPrompt: llmReq.SystemPrompt,
 		Messages:     llmReq.Messages,
@@ -113,6 +114,7 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, callback StreamCallback) (*ll
 		Model:       llmReq.Model,
 		Temperature: llmReq.Temperature,
 		MaxTokens:   llmReq.MaxTokens,
+		AuthScheme:  r.config.ModelConfig.AuthScheme,
 	}, llm.Request{
 		SystemPrompt: llmReq.SystemPrompt,
 		Messages:     llmReq.Messages,

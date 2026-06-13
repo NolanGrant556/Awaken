@@ -77,7 +77,7 @@ func TestInvokeOpenAIToolCallsWithoutContent(t *testing.T) {
 func TestInvokeSendsToolCallMessages(t *testing.T) {
 	server := newChatServer(t, func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Messages []chatMessage `json:"messages"`
+			Messages []openaiChatMessage `json:"messages"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("failed to decode request: %v", err)

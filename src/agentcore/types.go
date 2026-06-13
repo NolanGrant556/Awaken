@@ -18,6 +18,7 @@ type ModelConfig struct {
 	Model       string
 	Temperature float64
 	MaxTokens   int
+	AuthScheme  string
 }
 
 type LLMRequest struct {

@@ -67,7 +67,7 @@ func TestStreamInvokeAnthropicThinkingAndTextDeltas(t *testing.T) {
 
 	var thinking string
 	var text string
-	resp, err := StreamInvoke(context.Background(), testConfig(server.URL+"/anthropic"), Request{UserPrompt: "hi"}, func(content string, isThinking bool) {
+	resp, err := StreamInvoke(context.Background(), anthropicConfig(server.URL), Request{UserPrompt: "hi"}, func(content string, isThinking bool) {
 		if isThinking {
 			thinking += content
 			return
@@ -82,6 +82,55 @@ func TestStreamInvokeAnthropicThinkingAndTextDeltas(t *testing.T) {
 	}
 	if text != "done" || resp.Content != "done" {
 		t.Fatalf("expected text done, got callback=%q response=%q", text, resp.Content)
+	}
+}
+
+func TestStreamInvokeOpenAITextDeltasNoSpace(t *testing.T) {
+	server := newStreamServer(t, "/chat/completions", []string{
+		`data:{"choices":[{"delta":{"content":"Hel"}}]}`,
+		`data:{"choices":[{"delta":{"content":"lo"}}]}`,
+		`data:[DONE]`,
+	})
+	defer server.Close()
+
+	var chunks []string
+	resp, err := StreamInvoke(context.Background(), testConfig(server.URL), Request{UserPrompt: "hi"}, func(content string, isThinking bool) {
+		if isThinking {
+			t.Fatalf("unexpected thinking callback: %q", content)
+		}
+		chunks = append(chunks, content)
+	})
+	if err != nil {
+		t.Fatalf("StreamInvoke returned error: %v", err)
+	}
+	if resp.Content != "Hello" {
+		t.Fatalf("expected Hello, got %q", resp.Content)
+	}
+	if len(chunks) != 2 || chunks[0] != "Hel" || chunks[1] != "lo" {
+		t.Fatalf("expected two streamed chunks, got %+v", chunks)
+	}
+}
+
+func TestStreamInvokeOpenAIToolCallDeltasNoSpace(t *testing.T) {
+	server := newStreamServer(t, "/chat/completions", []string{
+		`data:{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"value\""}}]}}]}`,
+		`data:{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"abc\"}"}}]}}]}`,
+		`data:[DONE]`,
+	})
+	defer server.Close()
+
+	resp, err := StreamInvoke(context.Background(), testConfig(server.URL), Request{UserPrompt: "tool"}, nil)
+	if err != nil {
+		t.Fatalf("StreamInvoke returned error: %v", err)
+	}
+	if resp.IsFinished {
+		t.Fatal("expected tool call stream to be unfinished")
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("expected one tool call, got %d", len(resp.ToolCalls))
+	}
+	if resp.ToolCalls[0].ID != "call_1" || resp.ToolCalls[0].Name != "lookup" || resp.ToolCalls[0].Input != `{"value":"abc"}` {
+		t.Fatalf("unexpected tool call: %+v", resp.ToolCalls[0])
 	}
 }
 

@@ -298,6 +298,85 @@ func TestRunnerRunStreamNativeToolCallLoop(t *testing.T) {
 	}
 }
 
+func TestRunnerPropagatesBearerAuthByDefault(t *testing.T) {
+	var capturedHeaders http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedHeaders = r.Header.Clone()
+		writeRunnerJSON(t, w, map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{"message": map[string]interface{}{"content": "ok"}},
+			},
+		})
+	}))
+	defer server.Close()
+
+	cfg := testAgentConfig(server.URL, 2)
+	agent := NewAgent(cfg)
+	if _, err := agent.Run(context.Background(), "hi"); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	if got := capturedHeaders.Get("Authorization"); got != "Bearer test-key" {
+		t.Fatalf("expected Authorization 'Bearer test-key', got %q", got)
+	}
+	if got := capturedHeaders.Get("x-api-key"); got != "" {
+		t.Fatalf("expected no x-api-key header, got %q", got)
+	}
+}
+
+func TestRunnerPropagatesXAPIKeyAuthScheme(t *testing.T) {
+	var capturedHeaders http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedHeaders = r.Header.Clone()
+		writeRunnerJSON(t, w, map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{"message": map[string]interface{}{"content": "ok"}},
+			},
+		})
+	}))
+	defer server.Close()
+
+	cfg := testAgentConfig(server.URL, 2)
+	cfg.ModelConfig.AuthScheme = "x-api-key"
+	agent := NewAgent(cfg)
+	if _, err := agent.Run(context.Background(), "hi"); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	if got := capturedHeaders.Get("Authorization"); got != "" {
+		t.Fatalf("expected no Authorization header, got %q", got)
+	}
+	if got := capturedHeaders.Get("x-api-key"); got != "test-key" {
+		t.Fatalf("expected x-api-key 'test-key', got %q", got)
+	}
+	if got := capturedHeaders.Get("anthropic-version"); got != "2023-06-01" {
+		t.Fatalf("expected anthropic-version '2023-06-01', got %q", got)
+	}
+}
+
+func TestRunnerPropagatesAuthSchemeInStream(t *testing.T) {
+	var capturedHeaders http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedHeaders = r.Header.Clone()
+		writeRunnerStreamLines(t, w, []string{
+			`data: {"choices":[{"delta":{"content":"ok"}}]}`,
+			`data: [DONE]`,
+		})
+	}))
+	defer server.Close()
+
+	cfg := testAgentConfig(server.URL, 2)
+	cfg.ModelConfig.AuthScheme = "x-api-key"
+	agent := NewAgent(cfg)
+	if _, err := agent.RunStream(context.Background(), "hi", nil); err != nil {
+		t.Fatalf("RunStream returned error: %v", err)
+	}
+
+	if got := capturedHeaders.Get("x-api-key"); got != "test-key" {
+		t.Fatalf("expected x-api-key 'test-key' in stream, got %q", got)
+	}
+}
+
 type chatRequestSnapshot struct {
 	Messages []struct {
 		Role       string `json:"role"`

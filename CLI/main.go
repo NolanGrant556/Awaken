@@ -34,6 +34,7 @@ func createAgent(cfg llm.Config) *agentcore.Agent {
 			Model:       cfg.Model,
 			Temperature: cfg.Temperature,
 			MaxTokens:   cfg.MaxTokens,
+			AuthScheme:  cfg.AuthScheme,
 		},
 	}
 	return agentcore.NewAgent(agentCfg)

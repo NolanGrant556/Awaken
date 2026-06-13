@@ -15,7 +15,7 @@ import (
 type CalculatorTool struct{}
 
 func (t *CalculatorTool) Name() string {
-	return "计算器"
+	return "calculator"
 }
 
 func (t *CalculatorTool) Description() string {
@@ -149,7 +149,7 @@ func evaluateExpression(expr string) (float64, error) {
 type FileReadTool struct{}
 
 func (t *FileReadTool) Name() string {
-	return "读取文件"
+	return "read_file"
 }
 
 func (t *FileReadTool) Description() string {
@@ -184,7 +184,7 @@ func (t *FileReadTool) Execute(ctx context.Context, input string) (string, error
 type FileWriteTool struct{}
 
 func (t *FileWriteTool) Name() string {
-	return "写入文件"
+	return "write_file"
 }
 
 func (t *FileWriteTool) Description() string {
@@ -208,7 +208,7 @@ func (t *FileWriteTool) Parameters() []ToolParameter {
 		{
 			Name:        "append",
 			Description: "是否追加模式，默认false（覆盖）",
-			Type:        "bool",
+			Type:        "boolean",
 			Required:    false,
 		},
 	}
@@ -260,7 +260,7 @@ func (t *FileWriteTool) Execute(ctx context.Context, input string) (string, erro
 type WebSearchTool struct{}
 
 func (t *WebSearchTool) Name() string {
-	return "网络搜索"
+	return "web_search"
 }
 
 func (t *WebSearchTool) Description() string {

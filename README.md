@@ -30,11 +30,25 @@ docs/agent-core-system-prompt-design.md
 
 ```bash
 LLM_API_KEY=你的 API Key
-LLM_BASE_URL=https://api.example.com/v1
-LLM_MODEL_ID=你的模型名
 ```
 
-当前 CLI 会通过 `llm.LoadConfig()` 读取 `.env` 中的配置。
+`.env` 只负责敏感信息。模型、协议和输出长度等非敏感配置放在 `config.toml`：
+
+```toml
+[llm]
+base_url = "https://api.deepseek.com/anthropic"
+model_id = "deepseek-v4-pro"
+protocol = "anthropic_messages"
+auth_scheme = "auto"
+
+[model]
+context_window = 400000
+temperature = 0.7
+max_output_tokens = 8192
+auto_compact_token_limit = 360000
+```
+
+当前 CLI 会通过 `llm.LoadConfig()` 读取 `.env` 和 `config.toml`。如果 `config.toml` 缺少旧字段，仍会 fallback 到旧环境变量 `LLM_BASE_URL`、`LLM_MODEL_ID`、`LLM_PROTOCOL`、`LLM_AUTH_SCHEME`，便于平滑迁移。
 
 ## 启动 CLI 交互模式
 

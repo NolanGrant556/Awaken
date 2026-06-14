@@ -40,25 +40,42 @@ func smartProxy(req *http.Request) (*url.URL, error) {
 	return nil, nil // 无代理配置，直连
 }
 
-// LoadConfig 从环境变量加载配置
+// LoadConfig 从 .env 和 config.toml 加载配置。
+// .env 主要承载 LLM_API_KEY；config.toml 承载非敏感模型参数。
 func LoadConfig() Config {
 	loadEnvFile()
+	fileCfg := loadConfigFile("config.toml")
 
 	apiKey := os.Getenv("LLM_API_KEY")
-	baseURL := os.Getenv("LLM_BASE_URL")
-	model := os.Getenv("LLM_MODEL_ID")
-	authScheme := os.Getenv("LLM_AUTH_SCHEME")
+	baseURL := firstNonEmpty(fileCfg.LLM.BaseURL, os.Getenv("LLM_BASE_URL"))
+	model := firstNonEmpty(fileCfg.LLM.ModelID, os.Getenv("LLM_MODEL_ID"))
+	protocol := firstNonEmpty(fileCfg.LLM.Protocol, os.Getenv("LLM_PROTOCOL"))
+	authScheme := firstNonEmpty(fileCfg.LLM.AuthScheme, os.Getenv("LLM_AUTH_SCHEME"))
+	temperature := fileCfg.Model.Temperature
+	maxTokens := fileCfg.Model.MaxOutputTokens
 
 	if baseURL == "" {
 		baseURL = "https://api.openai.com/v1"
 	}
 
 	return Config{
-		APIKey:     apiKey,
-		BaseURL:    strings.TrimSuffix(baseURL, "/"),
-		Model:      model,
-		AuthScheme: authScheme,
+		APIKey:      apiKey,
+		BaseURL:     strings.TrimSuffix(baseURL, "/"),
+		Model:       model,
+		Protocol:    Protocol(protocol),
+		Temperature: temperature,
+		MaxTokens:   maxTokens,
+		AuthScheme:  authScheme,
 	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func loadEnvFile() {

@@ -22,6 +22,7 @@ type Config struct {
 	APIKey      string
 	BaseURL     string
 	Model       string
+	Protocol    Protocol
 	Temperature float64
 	MaxTokens   int
 	AuthScheme  string
@@ -64,6 +65,15 @@ type Transport interface {
 
 // resolveProtocol 解析协议类型
 func resolveProtocol(cfg Config) Protocol {
+	if cfg.Protocol != "" && cfg.Protocol != "auto" {
+		switch cfg.Protocol {
+		case ProtocolOpenAIChat:
+			return ProtocolOpenAIChat
+		case ProtocolAnthropicMessages:
+			return ProtocolAnthropicMessages
+		}
+	}
+
 	// 检查环境变量
 	protocol := os.Getenv("LLM_PROTOCOL")
 	if protocol != "" && protocol != "auto" {

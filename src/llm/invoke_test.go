@@ -123,6 +123,32 @@ func TestInvokeSendsToolCallMessages(t *testing.T) {
 	}
 }
 
+func TestInvokeOpenAISendsConfigMaxTokens(t *testing.T) {
+	server := newChatServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			MaxTokens int `json:"max_tokens"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+		if body.MaxTokens != 8192 {
+			t.Fatalf("expected max_tokens 8192, got %d", body.MaxTokens)
+		}
+		writeJSON(t, w, map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{"message": map[string]interface{}{"content": "ok"}},
+			},
+		})
+	})
+	defer server.Close()
+
+	cfg := testConfig(server.URL)
+	cfg.MaxTokens = 8192
+	if _, err := Invoke(context.Background(), cfg, Request{UserPrompt: "hi"}); err != nil {
+		t.Fatalf("Invoke returned error: %v", err)
+	}
+}
+
 func TestInvokeOpenAIEmptyChoices(t *testing.T) {
 	server := newChatServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(t, w, map[string]interface{}{"choices": []interface{}{}})

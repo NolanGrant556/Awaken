@@ -152,6 +152,31 @@ func TestInvokeAnthropicToolsSchema(t *testing.T) {
 	}
 }
 
+func TestInvokeAnthropicSendsConfigMaxTokens(t *testing.T) {
+	server := newAnthropicServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			MaxTokens int `json:"max_tokens"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+		if body.MaxTokens != 8192 {
+			t.Fatalf("expected max_tokens 8192, got %d", body.MaxTokens)
+		}
+		writeJSON(t, w, map[string]interface{}{
+			"content":     []map[string]interface{}{{"type": "text", "text": "ok"}},
+			"stop_reason": "end_turn",
+		})
+	})
+	defer server.Close()
+
+	cfg := anthropicConfig(server.URL)
+	cfg.MaxTokens = 8192
+	if _, err := Invoke(context.Background(), cfg, Request{UserPrompt: "hi"}); err != nil {
+		t.Fatalf("Invoke returned error: %v", err)
+	}
+}
+
 func TestInvokeAnthropicToolCallsConversion(t *testing.T) {
 	server := newAnthropicServer(t, func(w http.ResponseWriter, r *http.Request) {
 		var body struct {

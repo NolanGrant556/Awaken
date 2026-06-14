@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"awaken/src/tool"
 )
 
 type Role string
@@ -36,34 +38,12 @@ type FunctionCall struct {
 	Arguments string `json:"arguments"`
 }
 
-type ToolDefinition struct {
-	Type     string             `json:"type"`
-	Function ToolFunctionSchema `json:"function"`
-}
-
-type ToolFunctionSchema struct {
-	Name        string               `json:"name"`
-	Description string               `json:"description"`
-	Parameters  ToolParametersSchema `json:"parameters"`
-}
-
-type ToolParametersSchema struct {
-	Type       string               `json:"type"`
-	Properties map[string]ToolParam `json:"properties"`
-	Required   []string             `json:"required"`
-}
-
-type ToolParam struct {
-	Type        string `json:"type"`
-	Description string `json:"description"`
-}
-
 type Context struct {
 	mu          sync.RWMutex
 	messages    []Message
 	maxMessages int
 	maxTokens   int
-	tools       []ToolDefinition
+	tools       []tool.ToolDefinition
 }
 
 type Option func(*Context)
@@ -80,7 +60,7 @@ func WithMaxTokens(max int) Option {
 	}
 }
 
-func WithTools(tools []ToolDefinition) Option {
+func WithTools(tools []tool.ToolDefinition) Option {
 	return func(c *Context) {
 		c.tools = tools
 	}
@@ -91,7 +71,7 @@ func New(opts ...Option) *Context {
 		messages:    []Message{},
 		maxMessages: 100,
 		maxTokens:   32000,
-		tools:       []ToolDefinition{},
+		tools:       []tool.ToolDefinition{},
 	}
 
 	for _, opt := range opts {
@@ -149,7 +129,7 @@ func (c *Context) GetMessages() []Message {
 	return result
 }
 
-func (c *Context) GetTools() []ToolDefinition {
+func (c *Context) GetTools() []tool.ToolDefinition {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.tools
@@ -257,7 +237,7 @@ type Conversation struct {
 	Metadata  map[string]interface{}
 }
 
-func NewConversation(tools []ToolDefinition) *Conversation {
+func NewConversation(tools []tool.ToolDefinition) *Conversation {
 	return &Conversation{
 		Context:   New(WithTools(tools)),
 		CreatedAt: time.Now(),

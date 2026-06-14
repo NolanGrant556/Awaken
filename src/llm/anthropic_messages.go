@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"awaken/src/context"
+	"awaken/src/tool"
 )
 
 // anthropicTransport 实现 Anthropic Messages 协议
@@ -84,11 +85,15 @@ func buildAnthropicMessagesURL(baseURL string) string {
 
 func (t *anthropicTransport) Invoke(ctx stdctx.Context, cfg Config, req Request) (*Response, error) {
 	url := buildAnthropicMessagesURL(cfg.BaseURL)
+	messages, err := buildAnthropicMessages(req)
+	if err != nil {
+		return nil, err
+	}
 
 	anthropicReq := anthropicRequest{
 		Model:     resolveModel(cfg, req),
 		System:    req.SystemPrompt,
-		Messages:  buildAnthropicMessages(req),
+		Messages:  messages,
 		Tools:     convertToolsToAnthropic(req.Tools),
 		MaxTokens: resolveMaxTokens(cfg, req),
 	}
@@ -125,11 +130,15 @@ func (t *anthropicTransport) Invoke(ctx stdctx.Context, cfg Config, req Request)
 
 func (t *anthropicTransport) StreamInvoke(ctx stdctx.Context, cfg Config, req Request, callback StreamCallback) (*Response, error) {
 	url := buildAnthropicMessagesURL(cfg.BaseURL)
+	messages, err := buildAnthropicMessages(req)
+	if err != nil {
+		return nil, err
+	}
 
 	anthropicReq := anthropicRequest{
 		Model:     resolveModel(cfg, req),
 		System:    req.SystemPrompt,
-		Messages:  buildAnthropicMessages(req),
+		Messages:  messages,
 		Tools:     convertToolsToAnthropic(req.Tools),
 		MaxTokens: resolveMaxTokens(cfg, req),
 		Stream:    true,
@@ -190,10 +199,14 @@ func (t *anthropicTransport) StreamInvoke(ctx stdctx.Context, cfg Config, req Re
 
 // --- 消息转换 ---
 
-func buildAnthropicMessages(req Request) []anthropicMessage {
+func buildAnthropicMessages(req Request) ([]anthropicMessage, error) {
 	var messages []anthropicMessage
 
 	if len(req.Messages) > 0 {
+		if err := context.ValidateToolResultPairing(req.Messages); err != nil {
+			return nil, fmt.Errorf("invalid Anthropic tool result pairing: %w", err)
+		}
+
 		i := 0
 		for i < len(req.Messages) {
 			msg := req.Messages[i]
@@ -223,7 +236,11 @@ func buildAnthropicMessages(req Request) []anthropicMessage {
 					})
 				}
 			} else {
-				messages = append(messages, convertContextMessageToAnthropic(msg))
+				converted, err := convertContextMessageToAnthropic(msg)
+				if err != nil {
+					return nil, err
+				}
+				messages = append(messages, converted)
 				i++
 			}
 		}
@@ -234,7 +251,7 @@ func buildAnthropicMessages(req Request) []anthropicMessage {
 		})
 	}
 
-	return messages
+	return messages, nil
 }
 
 func buildAssistantContentBlocks(msg context.Message) []map[string]interface{} {
@@ -264,49 +281,37 @@ func parseToolUseInput(arguments string) map[string]interface{} {
 	return input
 }
 
-func convertContextMessageToAnthropic(msg context.Message) anthropicMessage {
+func convertContextMessageToAnthropic(msg context.Message) (anthropicMessage, error) {
 	switch msg.Role {
 	case context.RoleUser:
 		return anthropicMessage{
 			Role:    "user",
 			Content: msg.Content,
-		}
+		}, nil
 
 	case context.RoleAssistant:
 		if len(msg.ToolCalls) > 0 {
-			return anthropicMessage{
-				Role:    "assistant",
-				Content: buildAssistantContentBlocks(msg),
-			}
+			return anthropicMessage{}, fmt.Errorf("assistant tool calls must be converted by buildAnthropicMessages")
 		}
 		return anthropicMessage{
 			Role:    "assistant",
 			Content: msg.Content,
-		}
+		}, nil
 
 	case context.RoleTool:
-		return anthropicMessage{
-			Role: "user",
-			Content: []map[string]interface{}{
-				{
-					"type":        "tool_result",
-					"tool_use_id": msg.ToolCallID,
-					"content":     msg.Content,
-				},
-			},
-		}
+		return anthropicMessage{}, fmt.Errorf("tool results must follow assistant tool calls and be merged by buildAnthropicMessages")
 
 	default:
 		return anthropicMessage{
 			Role:    string(msg.Role),
 			Content: msg.Content,
-		}
+		}, nil
 	}
 }
 
 // --- 工具转换 ---
 
-func convertToolsToAnthropic(tools []context.ToolDefinition) []anthropicTool {
+func convertToolsToAnthropic(tools []tool.ToolDefinition) []anthropicTool {
 	if len(tools) == 0 {
 		return nil
 	}

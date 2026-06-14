@@ -14,3 +14,57 @@ func TestContextDoesNotStoreSystemPrompt(t *testing.T) {
 		t.Fatalf("expected cleared context to have no messages, got %d", len(got))
 	}
 }
+
+func TestValidateToolResultPairingPassesMatchedResults(t *testing.T) {
+	messages := []Message{
+		{Role: RoleUser, Content: "use tools"},
+		{Role: RoleAssistant, ToolCalls: []ToolCall{
+			{ID: "call_1", Type: "function", Function: FunctionCall{Name: "lookup", Arguments: `{"value":"a"}`}},
+			{ID: "call_2", Type: "function", Function: FunctionCall{Name: "lookup", Arguments: `{"value":"b"}`}},
+		}},
+		{Role: RoleTool, ToolCallID: "call_2", Name: "lookup", Content: "b"},
+		{Role: RoleTool, ToolCallID: "call_1", Name: "lookup", Content: "a"},
+		{Role: RoleAssistant, Content: "done"},
+	}
+
+	if err := ValidateToolResultPairing(messages); err != nil {
+		t.Fatalf("expected valid pairing, got %v", err)
+	}
+}
+
+func TestValidateToolResultPairingRejectsMissingResult(t *testing.T) {
+	messages := []Message{
+		{Role: RoleAssistant, ToolCalls: []ToolCall{
+			{ID: "call_1", Type: "function", Function: FunctionCall{Name: "lookup", Arguments: `{}`}},
+		}},
+		{Role: RoleUser, Content: "next"},
+	}
+
+	if err := ValidateToolResultPairing(messages); err == nil {
+		t.Fatal("expected missing tool result error")
+	}
+}
+
+func TestValidateToolResultPairingRejectsOrphanResult(t *testing.T) {
+	messages := []Message{
+		{Role: RoleUser, Content: "hello"},
+		{Role: RoleTool, ToolCallID: "call_1", Name: "lookup", Content: "result"},
+	}
+
+	if err := ValidateToolResultPairing(messages); err == nil {
+		t.Fatal("expected orphan tool result error")
+	}
+}
+
+func TestValidateToolResultPairingRejectsNameMismatch(t *testing.T) {
+	messages := []Message{
+		{Role: RoleAssistant, ToolCalls: []ToolCall{
+			{ID: "call_1", Type: "function", Function: FunctionCall{Name: "lookup", Arguments: `{}`}},
+		}},
+		{Role: RoleTool, ToolCallID: "call_1", Name: "other", Content: "result"},
+	}
+
+	if err := ValidateToolResultPairing(messages); err == nil {
+		t.Fatal("expected tool result name mismatch error")
+	}
+}

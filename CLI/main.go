@@ -10,7 +10,7 @@ import (
 
 	agentcore "awaken/src/agentcore"
 	llm "awaken/src/llm"
-	_ "awaken/src/tool"
+	_ "awaken/src/tools"
 )
 
 func main() {

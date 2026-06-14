@@ -1,0 +1,1 @@
+Awaken write_file update smoke test

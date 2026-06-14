@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	ctx "awaken/src/context"
+	"awaken/src/tool"
 )
 
 func TestInvokeAnthropicTextResponse(t *testing.T) {
@@ -125,15 +126,15 @@ func TestInvokeAnthropicToolsSchema(t *testing.T) {
 	})
 	defer server.Close()
 
-	tools := []ctx.ToolDefinition{
+	tools := []tool.ToolDefinition{
 		{
 			Type: "function",
-			Function: ctx.ToolFunctionSchema{
+			Function: tool.ToolFunctionSchema{
 				Name:        "calculator",
 				Description: "calc",
-				Parameters: ctx.ToolParametersSchema{
+				Parameters: tool.ToolParametersSchema{
 					Type: "object",
-					Properties: map[string]ctx.ToolParam{
+					Properties: map[string]tool.ToolParam{
 						"expression": {Type: "string", Description: "expr"},
 					},
 					Required: []string{"expression"},
@@ -444,7 +445,10 @@ func TestBuildAnthropicMessagesMergesToolResults(t *testing.T) {
 		},
 	}
 
-	messages := buildAnthropicMessages(req)
+	messages, err := buildAnthropicMessages(req)
+	if err != nil {
+		t.Fatalf("buildAnthropicMessages returned error: %v", err)
+	}
 	if len(messages) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(messages))
 	}
@@ -479,12 +483,16 @@ func TestBuildAnthropicMessagesInvalidToolInput(t *testing.T) {
 					{ID: "call_1", Type: "function", Function: ctx.FunctionCall{Name: "calc", Arguments: "not-json"}},
 				},
 			},
+			{Role: ctx.RoleTool, ToolCallID: "call_1", Name: "calc", Content: "2"},
 		},
 	}
 
-	messages := buildAnthropicMessages(req)
-	if len(messages) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(messages))
+	messages, err := buildAnthropicMessages(req)
+	if err != nil {
+		t.Fatalf("buildAnthropicMessages returned error: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(messages))
 	}
 	blocks, ok := messages[0].Content.([]map[string]interface{})
 	if !ok || len(blocks) != 1 {
@@ -496,6 +504,30 @@ func TestBuildAnthropicMessagesInvalidToolInput(t *testing.T) {
 	}
 	if len(input) != 0 {
 		t.Fatalf("expected empty object, got %v", input)
+	}
+}
+
+func TestInvokeAnthropicRejectsOrphanToolResultBeforeRequest(t *testing.T) {
+	called := false
+	server := newAnthropicServer(t, func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		writeJSON(t, w, map[string]interface{}{
+			"content":     []map[string]interface{}{{"type": "text", "text": "should not be called"}},
+			"stop_reason": "end_turn",
+		})
+	})
+	defer server.Close()
+
+	_, err := Invoke(context.Background(), anthropicConfig(server.URL), Request{
+		Messages: []ctx.Message{
+			{Role: ctx.RoleTool, ToolCallID: "call_orphan", Name: "calc", Content: "2"},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid Anthropic tool result pairing") {
+		t.Fatalf("expected local pairing error, got %v", err)
+	}
+	if called {
+		t.Fatal("expected invalid request to be rejected before reaching provider")
 	}
 }
 

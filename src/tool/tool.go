@@ -9,6 +9,14 @@ type Tool interface {
 	Execute(ctx context.Context, input string) (string, error)
 }
 
+type ReadOnlyTool interface {
+	IsReadOnly() bool
+}
+
+type ApprovalRequiredTool interface {
+	RequiresApproval() bool
+}
+
 type ToolParameter struct {
 	Name        string
 	Description string

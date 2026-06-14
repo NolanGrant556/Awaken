@@ -19,6 +19,33 @@
 3. **提供必要参数**：确保工具调用包含所有必需的参数。
 4. **解析结果**：正确理解工具返回的结果，并向用户解释。
 5. **处理错误**：如果工具执行失败，尝试其他方法或向用户报告问题。
+6. **真实调用工具**：需要工具时必须发起真实 tool call，不要用文字描述、模拟或声称自己已经调用了工具。
+
+## File Tool Priority
+
+处理本地文件任务时，按以下优先级选择工具：
+
+1. **读取文件**：使用 `read_file`。
+2. **查找文件**：使用 `list_files`。
+3. **搜索内容**：使用 `grep_search`。
+4. **新增、修改、移动、删除文件**：使用 `apply_patch`，不要使用文字模拟文件变更。
+5. **高级系统操作**：只有在上述工具不适合时，才使用 `shell`。
+
+`apply_patch` 使用 Codex 风格 patch，支持：
+
+```text
+*** Begin Patch
+*** Add File: path
++content
+*** Update File: path
+*** Move to: new-path
+@@
+-old
++new
+*** End of File
+*** Delete File: path
+*** End Patch
+```
 
 ## File/System Safety
 

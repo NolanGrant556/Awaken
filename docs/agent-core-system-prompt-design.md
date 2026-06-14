@@ -55,10 +55,20 @@ flowchart LR
     ├── prompt/
     │   ├── system_prompt.go
     │   └── system_prompt_test.go
-    └── tool/
-        ├── tool_registry.go
-        ├── tools.go
-        └── types.go
+    ├── tool/
+    │   ├── tool.go
+    │   ├── schema.go
+    │   ├── registry.go
+    │   └── tool_test.go
+    └── tools/
+        ├── apply_patch/
+        ├── calculator/
+        ├── file_read/
+        ├── grep_search/
+        ├── list_files/
+        ├── shell/
+        ├── web_search/
+        └── tools.go
 ```
 
 当前主要问题：
@@ -96,10 +106,20 @@ flowchart LR
     │       └── default_system.md
     ├── llm/
     │   └── llm.go
-    └── tool/
-        ├── tool_registry.go
-        ├── tools.go
-        └── types.go
+    ├── tool/
+    │   ├── tool.go
+    │   ├── schema.go
+    │   ├── registry.go
+    │   └── tool_test.go
+    └── tools/
+        ├── apply_patch/
+        ├── calculator/
+        ├── file_read/
+        ├── grep_search/
+        ├── list_files/
+        ├── shell/
+        ├── web_search/
+        └── tools.go
 ```
 
 说明：
@@ -118,7 +138,18 @@ flowchart LR
 | `src/prompt/loader.go` | 加载 Markdown prompt 模板 |
 | `src/context/context.go` | 只保存 conversation messages，不负责 system prompt |
 | `src/llm/llm.go` | LLM Provider 适配层 |
-| `src/tool/*` | 工具定义、注册、执行 |
+| `src/tool/tool.go` | 本地工具接口与工具参数 |
+| `src/tool/schema.go` | 暴露给 LLM 的工具 schema |
+| `src/tool/registry.go` | 工具注册、查找、排序、校验 |
+| `src/tools/*` | 具体工具实现与内置工具聚合注册 |
+
+文件 CRUD 工具面采用组合设计：
+
+1. `read_file` 负责读取文件。
+2. `list_files` 负责按 glob 模式查找文件。
+3. `grep_search` 负责搜索文件内容。
+4. `apply_patch` 负责新增、修改、移动、删除文件，是文件变更的统一入口，支持 Codex 风格的 `Add File`、`Update File`、`Move to`、`Delete File` 和 `End of File`。
+5. `shell` 只作为高级命令兜底，不作为普通文件 CRUD 首选。
 
 ## 模块关系
 
@@ -511,7 +542,10 @@ src/llm/llm.go
 ```text
 src/agentcore/runner.go
 src/llm/llm.go
-src/tool/types.go
+src/tool/tool.go
+src/tool/schema.go
+src/tool/registry.go
+src/tools/*
 ```
 
 成功标准：

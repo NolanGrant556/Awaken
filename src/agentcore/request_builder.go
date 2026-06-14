@@ -1,7 +1,6 @@
 package agentcore
 
 import (
-	"awaken/src/context"
 	"awaken/src/prompt"
 	"awaken/src/tool"
 )
@@ -22,7 +21,7 @@ func (rb *RequestBuilder) UpdateRuntimeInfo(info prompt.RuntimeInfo) {
 	rb.runtimeInfo = info
 }
 
-func (rb *RequestBuilder) Build(ctx ContextProvider, tools []context.ToolDefinition) LLMRequest {
+func (rb *RequestBuilder) Build(ctx ContextProvider, tools []tool.ToolDefinition) LLMRequest {
 	if tools == nil {
 		tools = rb.getTools()
 	}
@@ -51,14 +50,14 @@ func (rb *RequestBuilder) buildSystemPrompt() string {
 	return prompt.BuildEffectiveSystemPrompt(staticContent, rb.runtimeInfo)
 }
 
-func (rb *RequestBuilder) getTools() []context.ToolDefinition {
+func (rb *RequestBuilder) getTools() []tool.ToolDefinition {
 	tools := tool.ListTools()
-	definitions := make([]context.ToolDefinition, 0, len(tools))
+	definitions := make([]tool.ToolDefinition, 0, len(tools))
 
 	for _, t := range tools {
-		definitions = append(definitions, context.ToolDefinition{
+		definitions = append(definitions, tool.ToolDefinition{
 			Type: "function",
-			Function: context.ToolFunctionSchema{
+			Function: tool.ToolFunctionSchema{
 				Name:        t.Name(),
 				Description: t.Description(),
 				Parameters:  rb.buildToolParameters(t),
@@ -68,13 +67,13 @@ func (rb *RequestBuilder) getTools() []context.ToolDefinition {
 	return definitions
 }
 
-func (rb *RequestBuilder) buildToolParameters(t tool.Tool) context.ToolParametersSchema {
+func (rb *RequestBuilder) buildToolParameters(t tool.Tool) tool.ToolParametersSchema {
 	params := t.Parameters()
-	properties := make(map[string]context.ToolParam, len(params))
+	properties := make(map[string]tool.ToolParam, len(params))
 	required := make([]string, 0)
 
 	for _, p := range params {
-		properties[p.Name] = context.ToolParam{
+		properties[p.Name] = tool.ToolParam{
 			Type:        p.Type,
 			Description: p.Description,
 		}
@@ -83,14 +82,14 @@ func (rb *RequestBuilder) buildToolParameters(t tool.Tool) context.ToolParameter
 		}
 	}
 
-	return context.ToolParametersSchema{
+	return tool.ToolParametersSchema{
 		Type:       "object",
 		Properties: properties,
 		Required:   required,
 	}
 }
 
-func (rb *RequestBuilder) updateRuntimeInfoFromConfig(tools []context.ToolDefinition) {
+func (rb *RequestBuilder) updateRuntimeInfoFromConfig(tools []tool.ToolDefinition) {
 	rb.runtimeInfo.UpdateCurrentDate()
 	rb.runtimeInfo.UpdateWorkingDir()
 	rb.runtimeInfo.SetModelName(rb.config.ModelConfig.Model)
@@ -98,7 +97,7 @@ func (rb *RequestBuilder) updateRuntimeInfoFromConfig(tools []context.ToolDefini
 	rb.runtimeInfo.SetToolSummary(rb.buildToolSummary(tools))
 }
 
-func (rb *RequestBuilder) buildToolSummary(tools []context.ToolDefinition) string {
+func (rb *RequestBuilder) buildToolSummary(tools []tool.ToolDefinition) string {
 	if len(tools) == 0 {
 		return "无可用工具"
 	}

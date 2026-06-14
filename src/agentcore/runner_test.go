@@ -6,12 +6,14 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
 
 	convcontext "awaken/src/context"
 	"awaken/src/tool"
+	_ "awaken/src/tools/apply_patch"
 )
 
 type runnerTestTool struct {
@@ -42,7 +44,7 @@ func (t runnerTestTool) Execute(ctx context.Context, input string) (string, erro
 
 func TestRunnerNativeToolCallLoop(t *testing.T) {
 	toolName := "runner_echo_native"
-	tool.RegisterTool(runnerTestTool{name: toolName})
+	mustRegisterRunnerTool(t, runnerTestTool{name: toolName})
 
 	var mu sync.Mutex
 	requests := make([]chatRequestSnapshot, 0)
@@ -113,7 +115,7 @@ func TestRunnerNativeToolCallLoop(t *testing.T) {
 
 func TestRunnerXMLFallbackLoop(t *testing.T) {
 	toolName := "runner_echo_xml"
-	tool.RegisterTool(runnerTestTool{name: toolName})
+	mustRegisterRunnerTool(t, runnerTestTool{name: toolName})
 
 	var calls int
 	server := newRunnerServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -151,7 +153,7 @@ func TestRunnerXMLFallbackLoop(t *testing.T) {
 
 func TestRunnerToolErrorObservation(t *testing.T) {
 	toolName := "runner_fail_tool"
-	tool.RegisterTool(runnerTestTool{name: toolName, fail: true})
+	mustRegisterRunnerTool(t, runnerTestTool{name: toolName, fail: true})
 
 	var calls int
 	server := newRunnerServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -196,9 +198,135 @@ func TestRunnerToolErrorObservation(t *testing.T) {
 	}
 }
 
+func TestRunnerOpenAIApplyPatchCreateAndDelete(t *testing.T) {
+	root := t.TempDir()
+	target := root + "/runner_patch.txt"
+	createPatch := "*** Begin Patch\n" +
+		"*** Add File: " + target + "\n" +
+		"+created by runner\n" +
+		"*** End Patch"
+	deletePatch := "*** Begin Patch\n" +
+		"*** Delete File: " + target + "\n" +
+		"*** End Patch"
+
+	var calls int
+	server := newRunnerServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			writeRunnerToolCallJSON(t, w, "call_create_patch", "apply_patch", map[string]string{"patch": createPatch})
+			return
+		}
+		if calls == 2 {
+			var body chatRequestSnapshot
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("failed to decode request: %v", err)
+			}
+			if !containsToolResultSubstring(body.Messages, "call_create_patch", "Success. Updated the following files") {
+				t.Fatalf("expected create patch result, got %+v", body.Messages)
+			}
+			if content, err := os.ReadFile(target); err != nil || string(content) != "created by runner\n" {
+				t.Fatalf("expected created file, content=%q err=%v", string(content), err)
+			}
+			writeRunnerToolCallJSON(t, w, "call_delete_patch", "apply_patch", map[string]string{"patch": deletePatch})
+			return
+		}
+		if calls == 3 {
+			var body chatRequestSnapshot
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("failed to decode request: %v", err)
+			}
+			if !containsToolResultSubstring(body.Messages, "call_delete_patch", "Success. Updated the following files") {
+				t.Fatalf("expected delete patch result, got %+v", body.Messages)
+			}
+			if _, err := os.Stat(target); !os.IsNotExist(err) {
+				t.Fatalf("expected deleted file, stat err=%v", err)
+			}
+			writeRunnerJSON(t, w, map[string]interface{}{
+				"choices": []map[string]interface{}{
+					{"message": map[string]interface{}{"content": "patch complete"}},
+				},
+			})
+			return
+		}
+		t.Fatalf("unexpected call %d", calls)
+	})
+	defer server.Close()
+
+	agent := NewAgent(testAgentConfig(server.URL, 5))
+	answer, err := agent.Run(context.Background(), "create then delete via apply_patch")
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if answer != "patch complete" {
+		t.Fatalf("expected final answer, got %q", answer)
+	}
+}
+
+func TestRunnerAnthropicApplyPatchToolUse(t *testing.T) {
+	root := t.TempDir()
+	target := root + "/anthropic_patch.txt"
+	patch := "*** Begin Patch\n" +
+		"*** Add File: " + target + "\n" +
+		"+created by anthropic\n" +
+		"*** End Patch"
+
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/anthropic/v1/messages" {
+			t.Fatalf("expected /anthropic/v1/messages, got %s", r.URL.Path)
+		}
+		calls++
+		if calls == 1 {
+			writeRunnerJSON(t, w, map[string]interface{}{
+				"content": []map[string]interface{}{
+					{
+						"type":  "tool_use",
+						"id":    "toolu_patch",
+						"name":  "apply_patch",
+						"input": map[string]string{"patch": patch},
+					},
+				},
+				"stop_reason": "tool_use",
+			})
+			return
+		}
+
+		var body struct {
+			Messages []struct {
+				Role    string          `json:"role"`
+				Content json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode anthropic request: %v", err)
+		}
+		if !anthropicRequestContainsToolResult(body.Messages, "toolu_patch") {
+			t.Fatalf("expected anthropic tool_result, got %+v", body.Messages)
+		}
+		if content, err := os.ReadFile(target); err != nil || string(content) != "created by anthropic\n" {
+			t.Fatalf("expected created file, content=%q err=%v", string(content), err)
+		}
+		writeRunnerJSON(t, w, map[string]interface{}{
+			"content":     []map[string]interface{}{{"type": "text", "text": "anthropic patch complete"}},
+			"stop_reason": "end_turn",
+		})
+	}))
+	defer server.Close()
+
+	cfg := testAgentConfig(server.URL+"/anthropic", 3)
+	agent := NewAgent(cfg)
+	answer, err := agent.Run(context.Background(), "create via anthropic apply_patch")
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if answer != "anthropic patch complete" {
+		t.Fatalf("expected final answer, got %q", answer)
+	}
+}
+
 func TestRunnerMaxThoughts(t *testing.T) {
 	toolName := "runner_max_tool"
-	tool.RegisterTool(runnerTestTool{name: toolName})
+	mustRegisterRunnerTool(t, runnerTestTool{name: toolName})
 
 	server := newRunnerServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeRunnerJSON(t, w, map[string]interface{}{
@@ -260,7 +388,7 @@ func TestRunnerRunStreamEmitsTextDeltas(t *testing.T) {
 
 func TestRunnerRunStreamNativeToolCallLoop(t *testing.T) {
 	toolName := "runner_stream_tool"
-	tool.RegisterTool(runnerTestTool{name: toolName})
+	mustRegisterRunnerTool(t, runnerTestTool{name: toolName})
 
 	var calls int
 	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -377,6 +505,36 @@ func TestRunnerPropagatesAuthSchemeInStream(t *testing.T) {
 	}
 }
 
+func TestRunnerRejectsInvalidToolResultPairingBeforeLLM(t *testing.T) {
+	var called bool
+	server := newRunnerServer(t, func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		writeRunnerJSON(t, w, map[string]interface{}{"choices": []interface{}{}})
+	})
+	defer server.Close()
+
+	conv := convcontext.NewConversation(nil)
+	conv.AssistantOutput("", []convcontext.ToolCall{
+		{ID: "call_missing", Type: "function", Function: convcontext.FunctionCall{Name: "lookup", Arguments: `{}`}},
+	})
+	runner := NewRunner(testAgentConfig(server.URL, 1), conv, NewRequestBuilder(testAgentConfig(server.URL, 1)))
+
+	_, err := runner.Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "invalid tool result pairing") {
+		t.Fatalf("expected pairing error, got %v", err)
+	}
+	if called {
+		t.Fatal("expected invalid pairing to be rejected before LLM request")
+	}
+}
+
+func mustRegisterRunnerTool(t *testing.T, candidate tool.Tool) {
+	t.Helper()
+	if err := tool.RegisterTool(candidate); err != nil {
+		t.Fatalf("failed to register test tool %s: %v", candidate.Name(), err)
+	}
+}
+
 type chatRequestSnapshot struct {
 	Messages []struct {
 		Role       string `json:"role"`
@@ -384,6 +542,33 @@ type chatRequestSnapshot struct {
 		ToolCallID string `json:"tool_call_id"`
 		Name       string `json:"name"`
 	} `json:"messages"`
+}
+
+type toolResultIn struct {
+	Type      string `json:"type"`
+	ToolUseID string `json:"tool_use_id"`
+	Content   string `json:"content"`
+}
+
+func anthropicRequestContainsToolResult(messages []struct {
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"`
+}, id string) bool {
+	for _, msg := range messages {
+		if msg.Role != "user" {
+			continue
+		}
+		var blocks []toolResultIn
+		if err := json.Unmarshal(msg.Content, &blocks); err != nil {
+			continue
+		}
+		for _, block := range blocks {
+			if block.Type == "tool_result" && block.ToolUseID == id {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func containsToolResult(messages []struct {
@@ -394,6 +579,20 @@ func containsToolResult(messages []struct {
 }, id, content string) bool {
 	for _, msg := range messages {
 		if msg.Role == "tool" && msg.ToolCallID == id && msg.Content == content {
+			return true
+		}
+	}
+	return false
+}
+
+func containsToolResultSubstring(messages []struct {
+	Role       string `json:"role"`
+	Content    string `json:"content"`
+	ToolCallID string `json:"tool_call_id"`
+	Name       string `json:"name"`
+}, id, content string) bool {
+	for _, msg := range messages {
+		if msg.Role == "tool" && msg.ToolCallID == id && strings.Contains(msg.Content, content) {
 			return true
 		}
 	}
@@ -438,6 +637,32 @@ func writeRunnerJSON(t *testing.T, w http.ResponseWriter, value interface{}) {
 	if err := json.NewEncoder(w).Encode(value); err != nil {
 		t.Fatalf("failed to encode response: %v", err)
 	}
+}
+
+func writeRunnerToolCallJSON(t *testing.T, w http.ResponseWriter, id, name string, arguments interface{}) {
+	t.Helper()
+	argumentData, err := json.Marshal(arguments)
+	if err != nil {
+		t.Fatalf("failed to marshal tool arguments: %v", err)
+	}
+	writeRunnerJSON(t, w, map[string]interface{}{
+		"choices": []map[string]interface{}{
+			{
+				"message": map[string]interface{}{
+					"tool_calls": []map[string]interface{}{
+						{
+							"id":   id,
+							"type": "function",
+							"function": map[string]interface{}{
+								"name":      name,
+								"arguments": string(argumentData),
+							},
+						},
+					},
+				},
+			},
+		},
+	})
 }
 
 func writeRunnerStreamLines(t *testing.T, w http.ResponseWriter, lines []string) {

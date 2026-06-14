@@ -2,18 +2,17 @@ package agentcore
 
 import (
 	stdcontext "context"
-	"encoding/json"
 	"fmt"
 
 	"awaken/src/context"
 	"awaken/src/llm"
-	"awaken/src/tool"
 )
 
 type Runner struct {
 	config       AgentConfig
 	conversation *context.Conversation
 	reqBuilder   *RequestBuilder
+	toolRuntime  *ToolRuntime
 }
 
 func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *RequestBuilder) *Runner {
@@ -21,6 +20,7 @@ func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *Reque
 		config:       config,
 		conversation: conv,
 		reqBuilder:   reqBuilder,
+		toolRuntime:  NewToolRuntime(),
 	}
 }
 
@@ -86,12 +86,19 @@ func (r *Runner) RunStream(ctx stdcontext.Context, callback StreamCallback) (str
 	return "", fmt.Errorf("达到最大思考次数 %d，未能完成任务", r.config.MaxThoughts)
 }
 
-func (r *Runner) buildLLMRequest() LLMRequest {
-	return r.reqBuilder.Build(r.conversation.Context, nil)
+func (r *Runner) buildLLMRequest() (LLMRequest, error) {
+	llmReq := r.reqBuilder.Build(r.conversation.Context, nil)
+	if err := context.ValidateToolResultPairing(llmReq.Messages); err != nil {
+		return LLMRequest{}, fmt.Errorf("invalid tool result pairing: %w", err)
+	}
+	return llmReq, nil
 }
 
 func (r *Runner) invokeLLM(ctx stdcontext.Context) (*llm.Response, error) {
-	llmReq := r.buildLLMRequest()
+	llmReq, err := r.buildLLMRequest()
+	if err != nil {
+		return nil, err
+	}
 	return llm.Invoke(ctx, llm.Config{
 		APIKey:      r.config.ModelConfig.APIKey,
 		BaseURL:     r.config.ModelConfig.BaseURL,
@@ -107,7 +114,10 @@ func (r *Runner) invokeLLM(ctx stdcontext.Context) (*llm.Response, error) {
 }
 
 func (r *Runner) streamLLM(ctx stdcontext.Context, callback StreamCallback) (*llm.Response, error) {
-	llmReq := r.buildLLMRequest()
+	llmReq, err := r.buildLLMRequest()
+	if err != nil {
+		return nil, err
+	}
 	return llm.StreamInvoke(ctx, llm.Config{
 		APIKey:      r.config.ModelConfig.APIKey,
 		BaseURL:     r.config.ModelConfig.BaseURL,
@@ -141,7 +151,7 @@ func (r *Runner) handleXMLFallback(ctx stdcontext.Context, response string, call
 		Type: "function",
 		Function: context.FunctionCall{
 			Name:      parsed.ToolName,
-			Arguments: parsed.Input,
+			Arguments: argumentsForXMLFallback(parsed.ToolName, parsed.Input),
 		},
 	}
 	r.conversation.AssistantOutput(response, []context.ToolCall{toolCall})
@@ -150,49 +160,12 @@ func (r *Runner) handleXMLFallback(ctx stdcontext.Context, response string, call
 }
 
 func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.ToolCall, callback StreamCallback) {
-	for _, tc := range toolCalls {
-		observation, err := executeToolCall(ctx, tc)
-		if err != nil {
-			observation = fmt.Sprintf("工具执行失败: %v", err)
-		}
+	for _, result := range r.toolRuntime.ExecuteToolCalls(ctx, toolCalls) {
 		if callback != nil {
-			callback(fmt.Sprintf("\n\n[工具结果] %s: %s\n\n", tc.Function.Name, observation), false)
+			callback(fmt.Sprintf("\n\n[工具结果] %s: %s\n\n", result.Name, result.Content), false)
 		}
-		r.conversation.ToolResult(tc.ID, tc.Function.Name, observation)
+		r.conversation.ToolResult(result.ToolCallID, result.Name, result.Content)
 	}
-}
-
-func executeToolCall(ctx stdcontext.Context, tc context.ToolCall) (string, error) {
-	selectedTool, err := tool.GetTool(tc.Function.Name)
-	if err != nil {
-		return "", err
-	}
-	return selectedTool.Execute(ctx, normalizeToolInput(tc.Function.Arguments, selectedTool.Parameters()))
-}
-
-func normalizeToolInput(arguments string, params []tool.ToolParameter) string {
-	if len(params) != 1 {
-		return arguments
-	}
-
-	var decoded map[string]interface{}
-	if err := json.Unmarshal([]byte(arguments), &decoded); err != nil {
-		return arguments
-	}
-
-	value, ok := decoded[params[0].Name]
-	if !ok {
-		return arguments
-	}
-	if str, ok := value.(string); ok {
-		return str
-	}
-
-	data, err := json.Marshal(value)
-	if err != nil {
-		return arguments
-	}
-	return string(data)
 }
 
 func llmToolCallsToContext(toolCalls []llm.ToolCall) []context.ToolCall {

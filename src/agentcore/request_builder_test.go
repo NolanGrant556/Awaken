@@ -12,15 +12,15 @@ func TestRequestBuilderBuildsCompleteRequest(t *testing.T) {
 	ctx := convcontext.New()
 	ctx.AddUserMessage("hello")
 
-	tools := []convcontext.ToolDefinition{
+	tools := []tool.ToolDefinition{
 		{
 			Type: "function",
-			Function: convcontext.ToolFunctionSchema{
+			Function: tool.ToolFunctionSchema{
 				Name:        "explicit_tool",
 				Description: "explicit tool",
-				Parameters: convcontext.ToolParametersSchema{
+				Parameters: tool.ToolParametersSchema{
 					Type:       "object",
-					Properties: map[string]convcontext.ToolParam{},
+					Properties: map[string]tool.ToolParam{},
 				},
 			},
 		},
@@ -55,7 +55,9 @@ func TestRequestBuilderBuildsCompleteRequest(t *testing.T) {
 
 func TestRequestBuilderUsesRegisteredTools(t *testing.T) {
 	toolName := "request_builder_registered_tool"
-	tool.RegisterTool(runnerTestTool{name: toolName})
+	if err := tool.RegisterTool(runnerTestTool{name: toolName}); err != nil {
+		t.Fatalf("failed to register test tool %s: %v", toolName, err)
+	}
 
 	builder := NewRequestBuilder(AgentConfig{})
 	req := builder.Build(convcontext.New(), nil)

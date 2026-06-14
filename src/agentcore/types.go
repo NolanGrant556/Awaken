@@ -3,6 +3,7 @@ package agentcore
 import (
 	"awaken/src/context"
 	"awaken/src/prompt"
+	"awaken/src/tool"
 )
 
 type AgentConfig struct {
@@ -24,7 +25,7 @@ type ModelConfig struct {
 type LLMRequest struct {
 	SystemPrompt string
 	Messages     []context.Message
-	Tools        []context.ToolDefinition
+	Tools        []tool.ToolDefinition
 	Model        string
 	Temperature  float64
 	MaxTokens    int

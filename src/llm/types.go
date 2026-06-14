@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"awaken/src/context"
+	"awaken/src/tool"
 )
 
 // Protocol 定义 LLM 协议类型
@@ -35,7 +36,7 @@ type Request struct {
 	MaxTokens    int
 	Stream       bool
 	Messages     []context.Message
-	Tools        []context.ToolDefinition
+	Tools        []tool.ToolDefinition
 }
 
 // Response 是统一响应结构

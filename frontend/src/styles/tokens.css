@@ -1,0 +1,112 @@
+:root {
+  /* Background */
+  --aw-bg-main: #f8f8f7;
+  --aw-bg-nav: #f2f2f2;
+  --aw-bg-white: #ffffff;
+  --aw-bg-fill-light: rgba(55, 53, 47, 0.04);
+  --aw-bg-fill-main: rgba(55, 53, 47, 0.06);
+  --aw-bg-fill-dark: rgba(55, 53, 47, 0.08);
+
+  /* Text */
+  --aw-text-primary: #34322d;
+  --aw-text-secondary: #5e5e5b;
+  --aw-text-tertiary: #858481;
+  --aw-text-disabled: #b9b9b7;
+  --aw-text-blue: #0081f2;
+  --aw-text-onblack: #ffffff;
+
+  /* Border */
+  --aw-border-main: rgba(0, 0, 0, 0.06);
+  --aw-border-light: rgba(0, 0, 0, 0.04);
+  --aw-border-active: rgba(0, 0, 0, 0.3);
+
+  /* Button */
+  --aw-button-black: #1a1a19;
+  --aw-button-black-hover: #000000;
+
+  /* Status */
+  --aw-success: #25ba3b;
+  --aw-warning: #efa201;
+  --aw-error: #f25a5a;
+
+  --aw-success-soft-bg: rgba(37, 186, 59, 0.12);
+  --aw-success-soft-border: rgba(37, 186, 59, 0.24);
+  --aw-warning-soft-bg: rgba(239, 162, 1, 0.12);
+  --aw-warning-soft-border: rgba(239, 162, 1, 0.24);
+  --aw-error-soft-bg: rgba(242, 90, 90, 0.12);
+  --aw-error-soft-border: rgba(242, 90, 90, 0.24);
+
+  /* Spacing */
+  --aw-space-1: 2px;
+  --aw-space-2: 4px;
+  --aw-space-3: 8px;
+  --aw-space-4: 10px;
+  --aw-space-5: 12px;
+  --aw-space-6: 14px;
+  --aw-space-7: 16px;
+  --aw-space-8: 20px;
+  --aw-space-9: 24px;
+  --aw-space-10: 28px;
+  --aw-space-11: 32px;
+  --aw-space-12: 38px;
+  --aw-space-13: 40px;
+  --aw-space-14: 48px;
+  --aw-space-15: 56px;
+  --aw-space-16: 96px;
+
+  /* Radius */
+  --aw-radius-sm: 8px;
+  --aw-radius-md: 12px;
+  --aw-radius-lg: 16px;
+  --aw-radius-pill: 999px;
+
+  /* Shadow */
+  --aw-shadow-menu: 0 16px 42px rgba(0, 0, 0, 0.12);
+  --aw-shadow-toast: 0 14px 34px rgba(0, 0, 0, 0.12);
+
+  /* Font */
+  --aw-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", Helvetica, "Apple Color Emoji", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol";
+  --aw-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Font size */
+  --aw-font-size-xs: 12px;
+  --aw-font-size-sm: 13px;
+  --aw-font-size-base: 14px;
+  --aw-font-size-md: 15px;
+  --aw-font-size-lg: 15px;
+  --aw-font-size-xl: 30px;
+
+  /* Line height */
+  --aw-line-height-xs: 16px;
+  --aw-line-height-sm: 18px;
+  --aw-line-height-base: 20px;
+  --aw-line-height-md: 22px;
+  --aw-line-height-lg: 24px;
+  --aw-line-height-xl: 40px;
+
+  /* Font weight */
+  --aw-font-weight-regular: 400;
+  --aw-font-weight-medium: 500;
+  --aw-font-weight-semibold: 560;
+  --aw-font-weight-bold: 650;
+  --aw-font-weight-heavy: 700;
+
+  /* Legacy typography shorthand (kept for reference) */
+  --aw-text-xs: var(--aw-font-size-xs) / var(--aw-line-height-xs) / var(--aw-font-weight-regular);
+  --aw-text-sm: var(--aw-font-size-sm) / var(--aw-line-height-sm) / var(--aw-font-weight-regular);
+  --aw-text-base: var(--aw-font-size-base) / var(--aw-line-height-base) / var(--aw-font-weight-regular);
+  --aw-text-md: var(--aw-font-size-md) / var(--aw-line-height-md) / var(--aw-font-weight-regular);
+  --aw-text-lg: var(--aw-font-size-lg) / var(--aw-line-height-lg) / var(--aw-font-weight-regular);
+  --aw-text-xl: var(--aw-font-size-xl) / var(--aw-line-height-xl) / 620;
+
+  /* Layout */
+  --aw-sidebar-width: 300px;
+  --aw-content-width: 768px;
+}
+
+@media (max-width: 1180px) {
+  :root {
+    --aw-sidebar-width: 280px;
+    --aw-content-width: 720px;
+  }
+}

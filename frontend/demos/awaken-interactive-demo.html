@@ -1,0 +1,1325 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Awaken 前端交互原型</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family:
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI Variable Display",
+          "Segoe UI",
+          Helvetica,
+          "Apple Color Emoji",
+          Arial,
+          sans-serif,
+          "Segoe UI Emoji",
+          "Segoe UI Symbol";
+        --sidebar-width: 300px;
+        --content-width: 768px;
+        --background-gray-main: #f8f8f7;
+        --background-nav: #f2f2f2;
+        --background-menu-white: #ffffff;
+        --text-primary: #34322d;
+        --text-secondary: #5e5e5b;
+        --text-tertiary: #858481;
+        --text-disable: #b9b9b7;
+        --text-blue: #0081f2;
+        --text-onblack: #ffffff;
+        --border-main: rgba(0, 0, 0, 0.06);
+        --border-light: rgba(0, 0, 0, 0.04);
+        --border-active: rgba(0, 0, 0, 0.3);
+        --fill-tsp-white-main: rgba(55, 53, 47, 0.06);
+        --fill-tsp-white-dark: rgba(55, 53, 47, 0.08);
+        --fill-tsp-white-light: rgba(55, 53, 47, 0.04);
+        --button-black: #1a1a19;
+        --function-success: #25ba3b;
+        --function-warning: #efa201;
+        --function-error: #f25a5a;
+        --radius-sm: 8px;
+        --radius-md: 12px;
+        --radius-lg: 16px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        height: 100%;
+      }
+
+      body {
+        margin: 0;
+        min-width: 1080px;
+        overflow: hidden;
+        background: var(--background-gray-main);
+        color: var(--text-primary);
+        font-size: 16px;
+        line-height: 24px;
+      }
+
+      button,
+      textarea {
+        font: inherit;
+      }
+
+      button {
+        border: 0;
+        cursor: pointer;
+      }
+
+      button:focus-visible,
+      textarea:focus-visible {
+        outline: 1px solid var(--border-active);
+        outline-offset: 2px;
+      }
+
+      .icon {
+        display: inline-flex;
+        flex: 0 0 auto;
+        width: 18px;
+        height: 18px;
+        color: currentColor;
+      }
+
+      .icon svg {
+        width: 100%;
+        height: 100%;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.85;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .app-shell {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+        overflow: hidden;
+        background: var(--background-gray-main);
+      }
+
+      .sidebar {
+        display: grid;
+        grid-template-rows: auto auto minmax(0, 1fr) auto;
+        height: 100%;
+        min-width: 0;
+        overflow: hidden;
+        background: var(--background-nav);
+      }
+
+      .sidebar-top {
+        display: grid;
+        gap: 10px;
+        padding: 12px 8px 8px;
+      }
+
+      .brand-row {
+        display: grid;
+        grid-template-columns: 32px minmax(0, 1fr);
+        gap: 8px;
+        align-items: center;
+        min-height: 32px;
+        padding: 0 6px;
+      }
+
+      .brand-mark {
+        display: grid;
+        width: 32px;
+        height: 32px;
+        place-items: center;
+        border: 1px solid var(--border-light);
+        border-radius: var(--radius-sm);
+        background: var(--background-menu-white);
+        color: var(--text-primary);
+      }
+
+      .brand-copy {
+        min-width: 0;
+      }
+
+      .brand-name {
+        display: block;
+        overflow: hidden;
+        font-size: 14px;
+        font-weight: 650;
+        line-height: 18px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .brand-meta {
+        display: block;
+        overflow: hidden;
+        color: var(--text-tertiary);
+        font-size: 12px;
+        line-height: 16px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .square-button,
+      .icon-button,
+      .send-button {
+        display: inline-grid;
+        place-items: center;
+        background: transparent;
+        color: var(--text-secondary);
+      }
+
+      .square-button {
+        width: 32px;
+        height: 32px;
+        border-radius: var(--radius-sm);
+      }
+
+      .square-button:hover,
+      .icon-button:hover {
+        background: var(--fill-tsp-white-main);
+      }
+
+      .new-task {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 40px;
+        padding: 0 10px;
+        border: 1px solid var(--border-light);
+        border-radius: var(--radius-md);
+        background: var(--background-menu-white);
+        color: var(--text-primary);
+        font-size: 14px;
+        line-height: 20px;
+        text-align: left;
+      }
+
+      .new-task span:first-child {
+        display: inline-flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .nav-list,
+      .task-list,
+      .project-list {
+        display: grid;
+        gap: 2px;
+      }
+
+      .project-group {
+        display: block;
+      }
+
+      .project-group + .project-group {
+        margin-top: 1px;
+      }
+
+      .project-summary {
+        cursor: default;
+        list-style: none;
+      }
+
+      .project-summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .nav-list {
+        padding: 2px 14px 12px;
+      }
+
+      .nav-row,
+      .task-row,
+      .project-row {
+        display: grid;
+        align-items: center;
+        width: 100%;
+        min-width: 0;
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--text-primary);
+        text-align: left;
+      }
+
+      .nav-row {
+        grid-template-columns: 20px minmax(0, 1fr) auto;
+        height: 32px;
+        gap: 9px;
+        padding: 0 8px;
+        color: var(--text-secondary);
+        font-size: 14px;
+        line-height: 20px;
+      }
+
+      .nav-row:hover,
+      .task-row:hover,
+      .project-row:hover,
+      .profile-button:hover {
+        background: var(--fill-tsp-white-light);
+      }
+
+      .nav-row.is-active {
+        background: var(--fill-tsp-white-main);
+        color: var(--text-primary);
+      }
+
+      .nav-badge {
+        min-width: 18px;
+        color: var(--text-tertiary);
+        font-size: 12px;
+        text-align: right;
+      }
+
+      .sidebar-scroll {
+        min-height: 0;
+        overflow: auto;
+        padding-bottom: 12px;
+      }
+
+      .sidebar-scroll::-webkit-scrollbar {
+        width: 0;
+      }
+
+      .sidebar-section {
+        padding: 10px 8px 0;
+      }
+
+      .section-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 28px;
+        padding: 0 8px;
+        color: var(--text-tertiary);
+        font-size: 12px;
+        line-height: 16px;
+      }
+
+      .task-row {
+        grid-template-columns: minmax(0, 1fr) auto;
+        min-height: 34px;
+        gap: 8px;
+        padding: 0 10px;
+      }
+
+      .row-main {
+        min-width: 0;
+      }
+
+      .row-title,
+      .project-label {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .row-title {
+        color: var(--text-primary);
+        font-size: 13px;
+        font-weight: 560;
+        line-height: 18px;
+      }
+
+      .row-time {
+        color: var(--text-tertiary);
+        font-size: 12px;
+        line-height: 16px;
+        white-space: nowrap;
+      }
+
+      .project-row {
+        grid-template-columns: 18px minmax(0, 1fr) auto 14px;
+        height: 32px;
+        gap: 8px;
+        padding: 0 10px;
+        color: var(--text-secondary);
+        font-size: 13px;
+        line-height: 18px;
+      }
+
+      .project-row.is-selected {
+        background: var(--fill-tsp-white-main);
+        color: var(--text-primary);
+      }
+
+      .folder-chevron {
+        color: var(--text-tertiary);
+        transition: transform 140ms ease;
+      }
+
+      .project-group[open] .folder-chevron {
+        transform: rotate(90deg);
+      }
+
+      .project-sessions {
+        display: none;
+        gap: 1px;
+        padding: 3px 0 4px 34px;
+      }
+
+      .project-group[open] .project-sessions {
+        display: grid;
+      }
+
+      .project-session {
+        display: block;
+        width: 100%;
+        height: 26px;
+        min-width: 0;
+        overflow: hidden;
+        padding: 0 8px;
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--text-tertiary);
+        font-size: 12px;
+        line-height: 26px;
+        text-align: left;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .project-session:hover {
+        background: var(--fill-tsp-white-light);
+        color: var(--text-primary);
+      }
+
+      .project-session.is-active {
+        background: transparent;
+        color: var(--text-tertiary);
+      }
+
+      .sidebar-bottom {
+        display: grid;
+        gap: 8px;
+        padding: 8px;
+      }
+
+      .profile-button {
+        display: grid;
+        grid-template-columns: 32px minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: center;
+        min-height: 44px;
+        padding: 6px 8px;
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--text-primary);
+        text-align: left;
+      }
+
+      .profile-button .row-main {
+        display: flex;
+        align-items: center;
+        min-height: 32px;
+      }
+
+      .profile-button .row-title {
+        line-height: 20px;
+      }
+
+      .avatar {
+        display: grid;
+        width: 32px;
+        height: 32px;
+        place-items: center;
+        border-radius: 999px;
+        background: var(--button-black);
+        color: var(--text-onblack);
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .main {
+        display: grid;
+        min-height: 0;
+        min-width: 0;
+        grid-template-rows: 56px minmax(0, 1fr);
+        overflow: hidden;
+        background: var(--background-gray-main);
+      }
+
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        height: 56px;
+        padding: 12px 20px 12px 14px;
+        background: var(--background-gray-main);
+      }
+
+      .top-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .top-pill,
+      .model-pill,
+      .toolbar-pill,
+      .quick-chip {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--border-main);
+        background: transparent;
+        color: var(--text-secondary);
+        white-space: nowrap;
+      }
+
+      .top-pill {
+        height: 32px;
+        gap: 6px;
+        padding: 0 10px;
+        border-radius: 999px;
+        font-size: 13px;
+        line-height: 18px;
+      }
+
+      .workspace {
+        position: relative;
+        min-height: 0;
+        overflow: auto;
+      }
+
+      .workspace::-webkit-scrollbar {
+        width: 0;
+      }
+
+      .center-stage {
+        width: var(--content-width);
+        max-width: calc(100vw - var(--sidebar-width) - 120px);
+        margin: 96px auto 0;
+      }
+
+      .hero-title {
+        margin: 0 0 28px;
+        color: var(--text-primary);
+        font-size: 30px;
+        font-weight: 620;
+        letter-spacing: 0;
+        line-height: 40px;
+        text-align: center;
+      }
+
+      .composer {
+        width: 100%;
+      }
+
+      .composer-box {
+        display: grid;
+        gap: 12px;
+        min-height: 116px;
+        padding: 12px 16px;
+        border: 1px solid var(--border-light);
+        border-radius: var(--radius-lg);
+        background: var(--fill-tsp-white-light);
+      }
+
+      .composer-input-wrap {
+        min-height: 50px;
+        padding: 1px 8px 0 0;
+      }
+
+      .composer textarea {
+        display: block;
+        width: 100%;
+        height: 50px;
+        resize: none;
+        border: 0;
+        padding: 0;
+        background: transparent;
+        color: var(--text-primary);
+        font-size: 15px;
+        line-height: 24px;
+      }
+
+      .composer textarea::placeholder {
+        color: var(--text-disable);
+      }
+
+      .composer textarea:focus {
+        outline: 0;
+      }
+
+      .composer-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 32px;
+      }
+
+      .toolbar-left,
+      .toolbar-right,
+      .quick-actions {
+        display: flex;
+        align-items: center;
+      }
+
+      .toolbar-left {
+        gap: 8px;
+      }
+
+      .toolbar-right {
+        gap: 6px;
+      }
+
+      .icon-button,
+      .send-button {
+        width: 32px;
+        height: 32px;
+        border: 1px solid var(--border-main);
+        border-radius: 999px;
+      }
+
+      .toolbar-pill {
+        height: 32px;
+        gap: 6px;
+        padding: 0 10px;
+        border-radius: 999px;
+        font-size: 13px;
+        line-height: 18px;
+      }
+
+      .model-pill {
+        height: 32px;
+        max-width: 190px;
+        gap: 6px;
+        padding: 0 10px;
+        border-radius: 999px;
+        font-size: 13px;
+        line-height: 18px;
+      }
+
+      .model-pill .model-label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .send-button {
+        background: rgba(55, 53, 47, 0.08);
+        color: var(--text-onblack);
+        transition:
+          background 160ms ease,
+          transform 160ms ease;
+      }
+
+      .send-button.is-ready {
+        background: var(--button-black);
+      }
+
+      .send-button.is-ready:hover {
+        transform: translateY(-1px);
+      }
+
+      .quick-actions {
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 8px;
+        margin-top: 32px;
+      }
+
+      .quick-chip {
+        height: 40px;
+        gap: 8px;
+        padding: 7px 14px;
+        border-radius: 999px;
+        font-size: 15px;
+        line-height: 22px;
+      }
+
+      .quick-chip:hover,
+      .top-pill:hover,
+      .toolbar-pill:hover {
+        background: var(--fill-tsp-white-light);
+      }
+
+      .run-panel {
+        display: none;
+        width: 100%;
+        margin-top: 38px;
+        padding-bottom: 56px;
+      }
+
+      .run-panel.is-visible {
+        display: block;
+        animation: panel-in 180ms ease both;
+      }
+
+      .run-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 28px;
+        margin-bottom: 12px;
+      }
+
+      .run-head strong {
+        overflow: hidden;
+        color: var(--text-primary);
+        font-size: 14px;
+        font-weight: 650;
+        line-height: 20px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .run-status {
+        color: var(--text-tertiary);
+        font-size: 12px;
+        line-height: 16px;
+      }
+
+      .timeline {
+        display: grid;
+        overflow: hidden;
+        border: 1px solid var(--border-light);
+        border-radius: var(--radius-lg);
+        background: var(--background-menu-white);
+      }
+
+      .step {
+        display: grid;
+        grid-template-columns: 26px minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+        min-height: 48px;
+        padding: 0 14px;
+        color: var(--text-secondary);
+      }
+
+      .step + .step {
+        border-top: 1px solid var(--border-light);
+      }
+
+      .step-mark {
+        display: inline-grid;
+        width: 18px;
+        height: 18px;
+        place-items: center;
+        border: 1px solid var(--border-main);
+        border-radius: 999px;
+        color: var(--text-tertiary);
+        font-size: 11px;
+        font-weight: 650;
+      }
+
+      .step strong,
+      .step span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .step strong {
+        display: block;
+        color: var(--text-primary);
+        font-size: 13px;
+        font-weight: 560;
+        line-height: 18px;
+      }
+
+      .step span {
+        display: block;
+        color: var(--text-tertiary);
+        font-size: 12px;
+        line-height: 16px;
+      }
+
+      .step code {
+        border-radius: 999px;
+        background: var(--fill-tsp-white-light);
+        color: var(--text-tertiary);
+        padding: 2px 7px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 11px;
+        line-height: 16px;
+      }
+
+      .step.is-active {
+        background: var(--fill-tsp-white-light);
+      }
+
+      .step.is-active .step-mark {
+        border-color: rgba(0, 129, 242, 0.25);
+        color: var(--text-blue);
+        animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      }
+
+      .step.is-done .step-mark {
+        border-color: rgba(37, 186, 59, 0.24);
+        background: rgba(37, 186, 59, 0.12);
+        color: var(--function-success);
+      }
+
+      .artifact-row {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 8px;
+      }
+
+      .artifact {
+        display: grid;
+        gap: 4px;
+        min-height: 70px;
+        padding: 11px 12px;
+        border: 1px solid var(--border-light);
+        border-radius: var(--radius-md);
+        background: var(--background-menu-white);
+      }
+
+      .artifact strong {
+        font-size: 13px;
+        line-height: 18px;
+      }
+
+      .artifact span {
+        color: var(--text-tertiary);
+        font-size: 12px;
+        line-height: 16px;
+      }
+
+      .model-menu {
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 10;
+        display: none;
+        width: 220px;
+        overflow: hidden;
+        border: 1px solid var(--border-main);
+        border-radius: var(--radius-md);
+        background: rgba(255, 255, 255, 0.98);
+        box-shadow: 0 16px 42px rgba(0, 0, 0, 0.12);
+      }
+
+      .model-menu.is-open {
+        display: grid;
+        animation: panel-in 140ms ease both;
+      }
+
+      .model-menu button {
+        height: 40px;
+        padding: 0 12px;
+        background: transparent;
+        color: var(--text-primary);
+        font-size: 13px;
+        line-height: 18px;
+        text-align: left;
+      }
+
+      .model-menu button:hover,
+      .model-menu button.is-selected {
+        background: var(--fill-tsp-white-light);
+      }
+
+      .toast {
+        position: fixed;
+        right: 24px;
+        bottom: 24px;
+        z-index: 20;
+        display: none;
+        max-width: 320px;
+        padding: 10px 12px;
+        border: 1px solid var(--border-light);
+        border-radius: var(--radius-md);
+        background: rgba(255, 255, 255, 0.98);
+        box-shadow: 0 14px 34px rgba(0, 0, 0, 0.12);
+        color: var(--text-primary);
+        font-size: 13px;
+        line-height: 18px;
+      }
+
+      .toast.is-visible {
+        display: block;
+        animation: panel-in 160ms ease both;
+      }
+
+      @keyframes pulse {
+        50% {
+          opacity: 0.48;
+        }
+      }
+
+      @keyframes panel-in {
+        from {
+          opacity: 0;
+          transform: translateY(8px);
+        }
+
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @media (max-height: 760px) {
+        .center-stage {
+          margin-top: 72px;
+        }
+      }
+
+      @media (max-width: 1180px) {
+        body {
+          min-width: 920px;
+        }
+
+        :root {
+          --sidebar-width: 280px;
+          --content-width: 720px;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 1ms !important;
+          scroll-behavior: auto !important;
+          transition-duration: 1ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Awaken 导航">
+        <div class="sidebar-top">
+          <div class="brand-row">
+            <div class="brand-mark" aria-hidden="true">
+              <span class="icon">
+                <svg viewBox="0 0 24 24"><path d="M12 4v16" /><path d="M12 8c-4.2 0-6.4 2.8-7 6.6 4.2.2 6.8-1.7 7-6.6z" /><path d="M12 8c4.2 0 6.4 2.8 7 6.6-4.2.2-6.8-1.7-7-6.6z" /></svg>
+              </span>
+            </div>
+            <div class="brand-copy">
+              <span class="brand-name">Awaken</span>
+            </div>
+          </div>
+
+          <button class="new-task" id="newTaskButton">
+            <span>
+              <span class="icon"><svg viewBox="0 0 24 24"><path d="M12 5v14" /><path d="M5 12h14" /></svg></span>
+              新建任务
+            </span>
+            <span class="nav-badge">⌘N</span>
+          </button>
+        </div>
+
+        <nav class="nav-list">
+          <button class="nav-row">
+            <span class="icon"><svg viewBox="0 0 24 24"><path d="M7 8h10" /><path d="M7 12h7" /><path d="M21 12a8 8 0 0 1-8 8H7l-4 3 1.2-5.2A8 8 0 1 1 21 12z" /></svg></span>
+            <span>WorkFlow</span>
+            <span class="nav-badge"></span>
+          </button>
+          <button class="nav-row">
+            <span class="icon"><svg viewBox="0 0 24 24"><path d="M9 3h6v4h4v6h-4v4H9v-4H5V7h4z" /></svg></span>
+            <span>插件 & Skills</span>
+            <span class="nav-badge"></span>
+          </button>
+          <button class="nav-row">
+            <span class="icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 7v6l4 2" /></svg></span>
+            <span>定时任务</span>
+            <span class="nav-badge"></span>
+          </button>
+        </nav>
+
+        <div class="sidebar-scroll">
+          <section class="sidebar-section">
+            <div class="section-head">
+              <span>对话</span>
+            </div>
+            <div class="task-list">
+              <button class="task-row" id="activeTask">
+                <span class="row-main">
+                  <span class="row-title">设计前端设计组件</span>
+                </span>
+                <span class="row-time">now</span>
+              </button>
+              <button class="task-row">
+                <span class="row-main">
+                  <span class="row-title">组件库成熟度审查</span>
+                </span>
+                <span class="row-time">1h</span>
+              </button>
+              <button class="task-row">
+                <span class="row-main">
+                  <span class="row-title">Electron renderer 方向</span>
+                </span>
+                <span class="row-time">2h</span>
+              </button>
+            </div>
+          </section>
+
+          <section class="sidebar-section">
+            <div class="section-head">
+              <span>项目</span>
+              <span>5</span>
+            </div>
+            <div class="project-list">
+              <details class="project-group" open>
+                <summary class="project-summary">
+                  <span class="project-row project-folder is-selected">
+                    <span class="icon"><svg viewBox="0 0 24 24"><path d="M3 7h7l2 2h9v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M3 7V5a2 2 0 0 1 2-2h4l2 2h4" /></svg></span>
+                    <span class="project-label">产品设计</span>
+                    <span class="row-time">当前</span>
+                    <span class="icon folder-chevron"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg></span>
+                  </span>
+                </summary>
+                <div class="project-sessions" id="project-product">
+                  <button class="project-session is-active" type="button">整理新工作台信息架构</button>
+                  <button class="project-session" type="button">优化任务输入框交互</button>
+                  <button class="project-session" type="button">定义组件状态规范</button>
+                </div>
+              </details>
+
+              <details class="project-group">
+                <summary class="project-summary">
+                  <span class="project-row project-folder">
+                    <span class="icon"><svg viewBox="0 0 24 24"><path d="M3 7h7l2 2h9v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M3 7V5a2 2 0 0 1 2-2h4l2 2h4" /></svg></span>
+                    <span class="project-label">市场调研</span>
+                    <span class="row-time">3</span>
+                    <span class="icon folder-chevron"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg></span>
+                  </span>
+                </summary>
+                <div class="project-sessions" id="project-research">
+                  <button class="project-session" type="button">收集竞品定价与定位</button>
+                  <button class="project-session" type="button">生成用户访谈提纲</button>
+                  <button class="project-session" type="button">提炼市场机会假设</button>
+                </div>
+              </details>
+
+              <details class="project-group">
+                <summary class="project-summary">
+                  <span class="project-row project-folder">
+                    <span class="icon"><svg viewBox="0 0 24 24"><path d="M3 7h7l2 2h9v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M3 7V5a2 2 0 0 1 2-2h4l2 2h4" /></svg></span>
+                    <span class="project-label">客户提案</span>
+                    <span class="row-time">3</span>
+                    <span class="icon folder-chevron"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg></span>
+                  </span>
+                </summary>
+                <div class="project-sessions" id="project-proposal">
+                  <button class="project-session" type="button">起草客户方案大纲</button>
+                  <button class="project-session" type="button">生成报价说明</button>
+                  <button class="project-session" type="button">整理交付里程碑</button>
+                </div>
+              </details>
+
+              <details class="project-group">
+                <summary class="project-summary">
+                  <span class="project-row project-folder">
+                    <span class="icon"><svg viewBox="0 0 24 24"><path d="M3 7h7l2 2h9v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M3 7V5a2 2 0 0 1 2-2h4l2 2h4" /></svg></span>
+                    <span class="project-label">数据分析</span>
+                    <span class="row-time">3</span>
+                    <span class="icon folder-chevron"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg></span>
+                  </span>
+                </summary>
+                <div class="project-sessions" id="project-data">
+                  <button class="project-session" type="button">汇总本周销售漏斗</button>
+                  <button class="project-session" type="button">定位转化下降原因</button>
+                  <button class="project-session" type="button">生成经营周报图表</button>
+                </div>
+              </details>
+
+              <details class="project-group">
+                <summary class="project-summary">
+                  <span class="project-row project-folder">
+                    <span class="icon"><svg viewBox="0 0 24 24"><path d="M3 7h7l2 2h9v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M3 7V5a2 2 0 0 1 2-2h4l2 2h4" /></svg></span>
+                    <span class="project-label">会议纪要</span>
+                    <span class="row-time">3</span>
+                    <span class="icon folder-chevron"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg></span>
+                  </span>
+                </summary>
+                <div class="project-sessions" id="project-meeting">
+                  <button class="project-session" type="button">整理客户周会纪要</button>
+                  <button class="project-session" type="button">提炼待办与负责人</button>
+                  <button class="project-session" type="button">生成跟进邮件</button>
+                </div>
+              </details>
+            </div>
+          </section>
+        </div>
+
+        <div class="sidebar-bottom">
+          <button class="profile-button">
+            <span class="avatar">NG</span>
+            <span class="row-main">
+              <span class="row-title">Nolan</span>
+            </span>
+            <span class="icon"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6" /></svg></span>
+          </button>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div class="top-actions">
+            <button class="square-button" aria-label="更多操作">
+              <span class="icon"><svg viewBox="0 0 24 24"><path d="M5 12h.01" /><path d="M12 12h.01" /><path d="M19 12h.01" /></svg></span>
+            </button>
+          </div>
+        </header>
+
+        <section class="workspace">
+          <div class="center-stage">
+            <h1 class="hero-title">今天要让 Awaken 完成什么？</h1>
+
+            <div class="composer">
+              <div class="composer-box">
+                <div class="composer-input-wrap">
+                  <textarea id="taskInput" aria-label="输入任务" placeholder="描述工作目标，例如：整理今天的客户会议纪要，提炼待办并生成跟进邮件"></textarea>
+                </div>
+
+                <div class="composer-toolbar">
+                  <div class="toolbar-left">
+                    <button class="icon-button" id="addButton" aria-label="添加上下文">
+                      <span class="icon"><svg viewBox="0 0 24 24"><path d="M12 5v14" /><path d="M5 12h14" /></svg></span>
+                    </button>
+                    <button class="toolbar-pill" id="modeButton">Plan</button>
+                  </div>
+                  <div class="toolbar-right">
+                    <button class="model-pill" id="modelButton">
+                      <span class="model-label">Doubao-Seed-2.0-Code</span>
+                      <span class="icon" style="width: 14px; height: 14px"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6" /></svg></span>
+                    </button>
+                    <button class="send-button" id="sendButton" aria-label="运行任务">
+                      <span class="icon"><svg viewBox="0 0 24 24"><path d="M12 19V5" /><path d="M5 12l7-7 7 7" /></svg></span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="quick-actions" aria-label="快捷任务">
+                <button class="quick-chip" data-prompt="整理今天的客户会议纪要，提炼关键结论、待办事项和跟进邮件">
+                  <span class="icon"><svg viewBox="0 0 24 24"><path d="M4 6h16" /><path d="M4 12h10" /><path d="M4 18h7" /></svg></span>
+                  会议纪要
+                </button>
+                <button class="quick-chip" data-prompt="根据本周销售线索生成客户分层、优先级和下一步行动计划">
+                  <span class="icon"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2" /><path d="M8 9h8" /><path d="M8 13h5" /></svg></span>
+                  销售跟进
+                </button>
+                <button class="quick-chip" data-prompt="把竞品资料整理成一页对比表，并输出可直接分享的摘要">
+                  <span class="icon"><svg viewBox="0 0 24 24"><path d="M5 12h14" /><path d="M12 5v14" /><circle cx="12" cy="12" r="8" /></svg></span>
+                  竞品对比
+                </button>
+                <button class="quick-chip" data-prompt="根据项目进展生成周报，包括风险、阻塞和下周计划">
+                  <span class="icon"><svg viewBox="0 0 24 24"><path d="M12 3l7 4v6c0 4.5-3 7-7 8-4-1-7-3.5-7-8V7z" /><path d="M9 12l2 2 4-5" /></svg></span>
+                  项目周报
+                </button>
+                <button class="quick-chip" data-prompt="生成一个新的工作流任务">
+                  更多
+                </button>
+              </div>
+            </div>
+
+            <section class="run-panel" id="runPreview" aria-label="模拟运行状态">
+              <div class="run-head">
+                <strong id="runTitle">整理任务</strong>
+                <span class="run-status" id="runStatus">ready</span>
+              </div>
+              <div class="timeline">
+                <div class="step" data-step="0">
+                  <span class="step-mark">1</span>
+                  <span>
+                    <strong>确认边界</strong>
+                    <span>只更新独立 HTML demo，不侵入现有 React 前端</span>
+                  </span>
+                  <code>scope</code>
+                </div>
+                <div class="step" data-step="1">
+                  <span class="step-mark">2</span>
+                  <span>
+                    <strong>对齐参考</strong>
+                    <span>300px 侧栏，768px 主轴，32px 工具按钮，40px 快捷任务</span>
+                  </span>
+                  <code>design</code>
+                </div>
+                <div class="step" data-step="2">
+                  <span class="step-mark">3</span>
+                  <span>
+                    <strong>生成产物</strong>
+                    <span>纯前端 UI 原型，仅展示视觉与交互状态，不连接任何服务</span>
+                  </span>
+                  <code>html</code>
+                </div>
+              </div>
+
+              <div class="artifact-row">
+                <div class="artifact">
+                  <strong>HTML Demo</strong>
+                  <span>single file prototype</span>
+                </div>
+                <div class="artifact">
+                  <strong>Design Tokens</strong>
+                  <span>measured desktop spacing</span>
+                </div>
+                <div class="artifact">
+                  <strong>Electron Path</strong>
+                  <span>renderer-ready shell</span>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="model-menu" id="modelMenu">
+      <button class="is-selected" data-model="Doubao-Seed-2.0-Code">Doubao-Seed-2.0-Code</button>
+      <button data-model="Deepseek-v4-pro">Deepseek-v4-pro</button>
+      <button data-model="kimi-K2.7code">kimi-K2.7code</button>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+      const taskInput = document.querySelector("#taskInput");
+      const sendButton = document.querySelector("#sendButton");
+      const runPreview = document.querySelector("#runPreview");
+      const runTitle = document.querySelector("#runTitle");
+      const runStatus = document.querySelector("#runStatus");
+      const steps = Array.from(document.querySelectorAll(".step"));
+      const modelButton = document.querySelector("#modelButton");
+      const modelMenu = document.querySelector("#modelMenu");
+      const addButton = document.querySelector("#addButton");
+      const newTaskButton = document.querySelector("#newTaskButton");
+      const modeButton = document.querySelector("#modeButton");
+      const toast = document.querySelector("#toast");
+      const quickChips = Array.from(document.querySelectorAll(".quick-chip[data-prompt]"));
+      let stepTimer = null;
+      let modeState = "Plan";
+      let extraContextCount = 0;
+
+      function showToast(message) {
+        toast.textContent = message;
+        toast.classList.add("is-visible");
+        window.clearTimeout(showToast.timer);
+        showToast.timer = window.setTimeout(() => {
+          toast.classList.remove("is-visible");
+        }, 1500);
+      }
+
+      function resetSteps() {
+        steps.forEach((step) => step.classList.remove("is-active", "is-done"));
+      }
+
+      function syncSendState() {
+        sendButton.classList.toggle("is-ready", taskInput.value.trim().length > 0);
+      }
+
+      function runDemo() {
+        const text = taskInput.value.trim() || "构建 Awaken 前端 demo";
+        runPreview.classList.add("is-visible");
+        runTitle.textContent = text;
+        runStatus.textContent = "running";
+        resetSteps();
+        let index = 0;
+        window.clearTimeout(stepTimer);
+
+        function advance() {
+          steps.forEach((step, stepIndex) => {
+            step.classList.toggle("is-done", stepIndex < index);
+            step.classList.toggle("is-active", stepIndex === index);
+          });
+
+          if (index >= steps.length) {
+            runStatus.textContent = "done";
+            showToast("模拟完成：HTML demo 已生成");
+            return;
+          }
+
+          index += 1;
+          stepTimer = window.setTimeout(advance, 760);
+        }
+
+        advance();
+      }
+
+      sendButton.addEventListener("click", runDemo);
+
+      taskInput.addEventListener("input", syncSendState);
+      taskInput.addEventListener("keydown", (event) => {
+        if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+          event.preventDefault();
+          runDemo();
+        }
+      });
+
+      function positionModelMenu() {
+        const rect = modelButton.getBoundingClientRect();
+        const menuWidth = 220;
+        const left = Math.min(window.innerWidth - menuWidth - 12, Math.max(12, rect.right - menuWidth));
+        modelMenu.style.left = `${left}px`;
+        modelMenu.style.top = `${rect.bottom + 6}px`;
+      }
+
+      modelButton.addEventListener("click", () => {
+        positionModelMenu();
+        modelMenu.classList.toggle("is-open");
+      });
+
+      modelMenu.addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-model]");
+        if (!button) {
+          return;
+        }
+
+        Array.from(modelMenu.querySelectorAll("button")).forEach((item) => item.classList.remove("is-selected"));
+        button.classList.add("is-selected");
+        modelButton.querySelector(".model-label").textContent = button.dataset.model;
+        modelMenu.classList.remove("is-open");
+        showToast(`模型：${button.dataset.model}`);
+      });
+
+      modeButton.addEventListener("click", () => {
+        modeState = modeState === "Plan" ? "Act" : "Plan";
+        modeButton.textContent = modeState;
+        showToast(`模式：${modeState}`);
+      });
+
+      addButton.addEventListener("click", () => {
+        extraContextCount += 1;
+        showToast(`已添加上下文 ${extraContextCount}`);
+      });
+
+      newTaskButton.addEventListener("click", () => {
+        taskInput.value = "";
+        runPreview.classList.remove("is-visible");
+        syncSendState();
+        taskInput.focus();
+      });
+
+      quickChips.forEach((chip) => {
+        chip.addEventListener("click", () => {
+          taskInput.value = chip.dataset.prompt;
+          syncSendState();
+          taskInput.focus();
+        });
+      });
+
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          modelMenu.classList.remove("is-open");
+        }
+      });
+
+      window.addEventListener("resize", () => {
+        if (modelMenu.classList.contains("is-open")) {
+          positionModelMenu();
+        }
+      });
+
+      syncSendState();
+    </script>
+  </body>
+</html>

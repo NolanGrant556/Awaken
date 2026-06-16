@@ -7,6 +7,20 @@ export { Avatar } from "./primitives/Avatar";
 export { Divider } from "./primitives/Divider";
 export { Kbd } from "./primitives/Kbd";
 
+export { Popover } from "./overlays/Popover";
+
+export { Dropdown } from "./selectors/Dropdown";
+export { ModelSelector } from "./selectors/ModelSelector";
+export { ModeToggle } from "./selectors/ModeToggle";
+
+export { ComposerInput } from "./inputs/ComposerInput";
+export { Composer } from "./inputs/Composer";
+export { SendButton } from "./inputs/SendButton";
+export { ContextButton } from "./inputs/ContextButton";
+
+export { QuickActionChip } from "./content/QuickActionChip";
+export { QuickActionGrid } from "./content/QuickActionGrid";
+
 export type {
   PlatformKind,
   ComponentSize,

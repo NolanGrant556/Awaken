@@ -90,6 +90,40 @@ quit   # 退出
 
 然后继续输出最终回答。
 
+## 查看前端组件预览
+
+Awaken 的 React 组件库预览在 `frontend/` 目录下运行。启动方式：
+
+```bash
+cd /Users/nolangrant/Awaken/frontend
+npm run dev -- --port 5173
+```
+
+启动后打开：
+
+```text
+http://127.0.0.1:5173/
+```
+
+页面顶部有预览切换按钮。点击 `Phase 1 基础组件`，可以查看当前已实现的 primitives：
+
+```text
+Icon
+IconButton
+Button
+Pill
+StatusPill
+Avatar
+Divider
+Kbd
+```
+
+组件库实现规格见：
+
+```bash
+docs/component-library.md
+```
+
 ## LLM 手动 Smoke 测试
 
 LLM 包下有一个手动 smoke 程序：

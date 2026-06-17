@@ -77,10 +77,54 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 	case agentcore.ToolResultEventType:
 		base.Type = EventToolCallResult
 		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
 		base.Content = event.Content
 		if base.Role == "" {
 			base.Role = "tool"
 		}
+		return []Event{base}
+	case agentcore.ApprovalRequestedEventType:
+		base.Type = EventAwakenApprovalRequested
+		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
+		base.ApprovalID = event.ApprovalID
+		base.ApprovalTitle = event.ApprovalTitle
+		base.ApprovalDescription = event.ApprovalDescription
+		base.ApprovalRiskTone = string(event.ApprovalRiskTone)
+		return []Event{base}
+	case agentcore.ApprovalResolvedEventType:
+		base.Type = EventAwakenApprovalResolved
+		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
+		base.ApprovalID = event.ApprovalID
+		base.ApprovalTitle = event.ApprovalTitle
+		base.ApprovalDescription = event.ApprovalDescription
+		base.ApprovalRiskTone = string(event.ApprovalRiskTone)
+		base.ApprovalDecision = string(event.ApprovalDecision)
+		return []Event{base}
+	case agentcore.ArtifactCreatedEventType:
+		base.Type = EventAwakenArtifactCreated
+		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
+		base.ArtifactID = event.ArtifactID
+		base.ArtifactTitle = event.ArtifactTitle
+		base.ArtifactDescription = event.ArtifactDescription
+		base.ArtifactKind = event.ArtifactKind
+		base.ArtifactPath = event.ArtifactPath
+		base.ArtifactContent = event.ArtifactContent
+		base.ArtifactStatus = string(event.ArtifactStatus)
+		return []Event{base}
+	case agentcore.ArtifactUpdatedEventType:
+		base.Type = EventAwakenArtifactUpdated
+		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
+		base.ArtifactID = event.ArtifactID
+		base.ArtifactTitle = event.ArtifactTitle
+		base.ArtifactDescription = event.ArtifactDescription
+		base.ArtifactKind = event.ArtifactKind
+		base.ArtifactPath = event.ArtifactPath
+		base.ArtifactContent = event.ArtifactContent
+		base.ArtifactStatus = string(event.ArtifactStatus)
 		return []Event{base}
 	default:
 		return nil

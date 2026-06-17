@@ -198,6 +198,137 @@ pre {
   background: rgba(248, 248, 247, 0.9);
 }
 
+.a2ui-stack {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.a2ui-shell {
+  padding: 14px;
+  border: 1px solid rgba(0, 129, 242, 0.18);
+  border-radius: var(--aw-radius-md);
+  background: rgba(247, 251, 255, 0.86);
+}
+
+.a2ui-header,
+.a2ui-meta,
+.a2ui-row,
+.a2ui-key-value {
+  display: flex;
+  align-items: center;
+}
+
+.a2ui-header {
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.a2ui-header h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.a2ui-header span,
+.a2ui-meta span {
+  color: var(--aw-text-tertiary);
+  font-size: 11px;
+}
+
+.a2ui-meta {
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.a2ui-card,
+.a2ui-column {
+  display: grid;
+  gap: 10px;
+}
+
+.a2ui-card {
+  padding: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: var(--aw-radius-md);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.a2ui-row {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.a2ui-text {
+  margin: 0;
+  color: var(--aw-text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.a2ui-text-title {
+  color: var(--aw-text-primary);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.a2ui-text-caption {
+  color: var(--aw-text-tertiary);
+  font-size: 12px;
+}
+
+.a2ui-badge {
+  width: fit-content;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.a2ui-badge-safe {
+  color: #166534;
+  background: rgba(34, 197, 94, 0.12);
+}
+
+.a2ui-badge-warning {
+  color: #8a4b00;
+  background: rgba(245, 158, 11, 0.14);
+}
+
+.a2ui-badge-danger {
+  color: #b42318;
+  background: rgba(242, 90, 90, 0.14);
+}
+
+.a2ui-key-value {
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.a2ui-key-value span {
+  color: var(--aw-text-tertiary);
+  font-size: 12px;
+}
+
+.a2ui-key-value strong {
+  min-width: 0;
+  color: var(--aw-text-primary);
+  font-size: 12px;
+  text-align: right;
+  word-break: break-word;
+}
+
+.a2ui-error,
+.a2ui-unsupported {
+  margin: 0;
+  color: #b42318;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 @media (max-width: 1180px) {
   .runtime-columns {
     grid-template-columns: 1fr;

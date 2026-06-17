@@ -1,10 +1,11 @@
 # Awaken Desktop
 
-`apps/desktop` 现在承载一个最小可运行的 Electron + React + Vite desktop consumer，用来消费 Phase 2 runtime stream：
+`apps/desktop` 承载当前最小可运行的 Electron + React + Vite desktop consumer。它连接本地 `awaken-core` runtime，消费 AG-UI-compatible SSE events，处理 approval resolve，并预览只读 `a2ui_surface` artifacts：
 
 - `main` 负责创建 `BrowserWindow`，并通过 Node/Electron 侧 HTTP 请求访问 `awaken-core`
 - `preload` 暴露 `window.awaken`，屏蔽 renderer 对 Electron IPC 的感知
-- `renderer` 通过 adapter 创建 run、订阅 SSE、取消 run，并把 AG-UI events reduce 成 view state
+- `renderer` 通过 adapter 创建 run、订阅 SSE、取消 run、resolve approval，并把 AG-UI events reduce 成 view state
+- `renderer/a2ui` 只识别 `artifactKind: "a2ui_surface"` 的受限 JSON payload，并映射到白名单 React 组件
 - `@awaken/ui` 仍然保持 UI-only；desktop 只通过包出口 import，不读 `packages/ui/src/...`
 
 ## 目录
@@ -27,6 +28,11 @@ type AwakenBridge = {
   runtimeBaseUrl: string;
   createRun(input: string): Promise<RuntimeRun>;
   cancelRun(runId: string): Promise<RuntimeRun>;
+  resolveApproval(
+    runId: string,
+    approvalId: string,
+    decision: "approved" | "rejected",
+  ): Promise<void>;
   subscribeRun(
     runId: string,
     handlers: {
@@ -43,7 +49,7 @@ renderer 内部再把它包装成更适合 React 使用的 runtime client；浏�
 
 ## 开发流程
 
-### 1. 启动 Phase 2 runtime
+### 1. 启动 runtime
 
 默认地址是 `http://127.0.0.1:8787`：
 
@@ -88,10 +94,17 @@ npm --workspace @awaken/desktop run dev:renderer
 
 ## 验收边界
 
-- Phase 3 只消费现有 Phase 2 runtime endpoints：
+- Desktop 消费以下 runtime endpoints：
   - `GET /health`
   - `POST /v1/runs`
   - `GET /v1/runs/{run_id}/events`
   - `POST /v1/runs/{run_id}/cancel`
-- 不新增 Approval/Artifact runtime 事件，不改 Go runtime contract
-- Approval / Artifact 在 renderer 中仅保留 UI 占位，不接 Phase 4 事件
+  - `POST /v1/runs/{run_id}/approvals/{approval_id}/resolve`
+- renderer 消费的 runtime event 除标准 AG-UI run/text/reasoning/tool 事件外，还包括 Awaken extension events：
+  - `AWAKEN_APPROVAL_REQUESTED`
+  - `AWAKEN_APPROVAL_RESOLVED`
+  - `AWAKEN_ARTIFACT_CREATED`
+  - `AWAKEN_ARTIFACT_UPDATED`
+- `@awaken/ui` 仍保持 UI-only；desktop 负责 bridge、SSE、reducer、approval resolve 调用
+- Desktop 只负责 bridge、SSE、renderer state 和 UI 交互，不在 desktop 里实现新的 policy/domain logic
+- Approval request 会附带一个 `a2ui_surface` artifact，renderer 只读预览，不执行 surface action，不替代 `ApprovalCard`

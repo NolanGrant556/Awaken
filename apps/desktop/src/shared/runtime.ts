@@ -33,6 +33,8 @@ export type RuntimeRun = {
   finishedAt?: string;
 };
 
+export type ApprovalDecision = "approved" | "rejected";
+
 export type RunStreamHandlers = {
   onEvent: (event: AguiEvent) => void;
   onError?: (message: string) => void;
@@ -44,6 +46,11 @@ export type AwakenBridge = {
   runtimeBaseUrl: string;
   createRun: (input: string) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
+  resolveApproval: (
+    runId: string,
+    approvalId: string,
+    decision: ApprovalDecision,
+  ) => Promise<void>;
   subscribeRun: (runId: string, handlers: RunStreamHandlers) => Promise<string>;
   unsubscribeRun: (subscriptionId: string) => void;
 };

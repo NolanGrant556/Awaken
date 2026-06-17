@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -55,6 +56,31 @@ func (t *ShellTool) Parameters() []tool.ToolParameter {
 	}
 }
 
+func (t *ShellTool) CheckPermission(ctx context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {
+	if err := ctx.Err(); err != nil {
+		return tool.DenyPermission(err.Error())
+	}
+
+	params, err := parseParams(input)
+	if err != nil {
+		return tool.AllowPermission()
+	}
+	params.Command = strings.TrimSpace(params.Command)
+	if params.Command == "" {
+		return tool.AllowPermission()
+	}
+
+	reason, riskTone := shellPermissionReason(params, permissionContext)
+	if reason == "" {
+		return tool.AllowPermission()
+	}
+	return tool.AskPermission(reason, tool.ApprovalRequest{
+		Title:       "Approve shell command",
+		Description: shellApprovalDescription(params, reason),
+		RiskTone:    riskTone,
+	})
+}
+
 func (t *ShellTool) Execute(ctx context.Context, input string) (string, error) {
 	params, err := parseParams(input)
 	if err != nil {
@@ -69,10 +95,13 @@ func (t *ShellTool) Execute(ctx context.Context, input string) (string, error) {
 	maxOutputChars := normalizeMaxOutputChars(params.MaxOutputChars)
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	permissionContext := tool.PermissionContextFromContext(ctx)
 
 	cmd := exec.CommandContext(runCtx, "/bin/sh", "-c", params.Command)
 	if strings.TrimSpace(params.Workdir) != "" {
-		cmd.Dir = strings.TrimSpace(params.Workdir)
+		cmd.Dir = permissionContext.ResolvePath(params.Workdir)
+	} else {
+		cmd.Dir = permissionContext.WorkspaceRootOrCWD()
 	}
 
 	stdout := outputlimit.NewCappedBuffer(maxOutputChars)
@@ -112,6 +141,110 @@ func (t *ShellTool) Execute(ctx context.Context, input string) (string, error) {
 		return "", err
 	}
 	return string(data), nil
+}
+
+func shellPermissionReason(params shellParams, permissionContext tool.PermissionContext) (string, string) {
+	if workdirOutsideWorkspace(params.Workdir, permissionContext) {
+		return "shell command uses a working directory outside the workspace root", "danger"
+	}
+	if isDangerousShellCommand(params.Command) {
+		return "shell command may mutate files, change repository state, or access external systems", "danger"
+	}
+	if hasShellControlOperator(params.Command) {
+		return "shell command contains operators, redirections, substitutions, or multiple operations", "warning"
+	}
+	if isSafeReadOnlyShellCommand(params.Command) {
+		return "", ""
+	}
+	return "shell command is not classified as read-only", "warning"
+}
+
+func shellApprovalDescription(params shellParams, reason string) string {
+	var builder strings.Builder
+	builder.WriteString(reason)
+	builder.WriteString("\n\n")
+	builder.WriteString(strings.TrimSpace(params.Command))
+	if strings.TrimSpace(params.Workdir) != "" {
+		builder.WriteString("\n\nworkdir: ")
+		builder.WriteString(strings.TrimSpace(params.Workdir))
+	}
+	return builder.String()
+}
+
+func hasShellControlOperator(command string) bool {
+	for _, marker := range []string{"\n", "&&", "||", ";", "|", ">", "<", "`", "$("} {
+		if strings.Contains(command, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func isSafeReadOnlyShellCommand(command string) bool {
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return true
+	}
+	base := filepath.Base(fields[0])
+	switch base {
+	case "pwd", "ls", "cat", "head", "tail", "wc", "stat", "file", "strings", "rg", "grep", "tree", "du", "echo", "printf", "which", "whereis", "whoami", "date":
+		return true
+	case "find":
+		return !containsAnyShellToken(fields[1:], "-delete", "-exec", "-execdir")
+	case "git":
+		return isSafeReadOnlyGitCommand(fields[1:])
+	default:
+		return false
+	}
+}
+
+func isSafeReadOnlyGitCommand(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "status", "diff", "log", "show", "rev-parse", "ls-files":
+		return true
+	case "branch":
+		return len(args) == 2 && args[1] == "--show-current"
+	default:
+		return false
+	}
+}
+
+func isDangerousShellCommand(command string) bool {
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return false
+	}
+	base := filepath.Base(fields[0])
+	switch base {
+	case "rm", "mv", "cp", "mkdir", "rmdir", "chmod", "chown", "chgrp", "touch", "ln", "sudo", "doas", "pkexec", "curl", "wget", "ssh", "scp", "rsync":
+		return true
+	case "git":
+		return containsAnyShellToken(fields[1:], "push", "reset", "clean", "checkout", "switch", "commit", "merge", "rebase", "pull", "fetch", "restore")
+	default:
+		return false
+	}
+}
+
+func containsAnyShellToken(values []string, candidates ...string) bool {
+	for _, value := range values {
+		for _, candidate := range candidates {
+			if value == candidate {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func workdirOutsideWorkspace(workdir string, permissionContext tool.PermissionContext) bool {
+	workdir = strings.TrimSpace(workdir)
+	if workdir == "" {
+		return false
+	}
+	return !permissionContext.IsWithinWorkspace(workdir)
 }
 
 func parseParams(input string) (shellParams, error) {

@@ -11,6 +11,12 @@ type AgentConfig struct {
 	MaxThoughts  int
 	ModelConfig  ModelConfig
 	EntryPoint   string
+	Workspace    WorkspaceConfig
+}
+
+type WorkspaceConfig struct {
+	Root          string
+	WritableRoots []string
 }
 
 type ModelConfig struct {

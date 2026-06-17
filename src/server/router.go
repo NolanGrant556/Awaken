@@ -18,6 +18,7 @@ func NewRouter(runService *awruntime.RunService) http.Handler {
 		mux.HandleFunc("POST /v1/runs", handlers.handleCreateRun)
 		mux.HandleFunc("GET /v1/runs/{run_id}/events", handlers.handleRunEvents)
 		mux.HandleFunc("POST /v1/runs/{run_id}/cancel", handlers.handleCancelRun)
+		mux.HandleFunc("POST /v1/runs/{run_id}/approvals/{approval_id}/resolve", handlers.handleResolveApproval)
 	}
 	return mux
 }

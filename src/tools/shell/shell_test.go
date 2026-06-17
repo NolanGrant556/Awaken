@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"awaken/src/tool"
 )
 
 func TestShellSuccess(t *testing.T) {
@@ -48,6 +50,62 @@ func TestShellOutputTruncation(t *testing.T) {
 	result := decodeResult(t, out)
 	if !result.Truncated || !strings.Contains(result.Stdout, "truncated") {
 		t.Fatalf("expected truncated output, got %+v", result)
+	}
+}
+
+func TestShellPermissionAllowsSimpleReadOnlyCommands(t *testing.T) {
+	permissionContext := tool.NewPermissionContext(t.TempDir(), nil)
+	decision := (&ShellTool{}).CheckPermission(context.Background(), `{"command":"ls -la"}`, permissionContext)
+	if decision.Behavior != tool.PermissionAllow {
+		t.Fatalf("expected read-only command to be allowed, got %+v", decision)
+	}
+
+	decision = (&ShellTool{}).CheckPermission(context.Background(), `{"command":"git status --short"}`, permissionContext)
+	if decision.Behavior != tool.PermissionAllow {
+		t.Fatalf("expected read-only git command to be allowed, got %+v", decision)
+	}
+}
+
+func TestShellPermissionAsksForComplexOrDangerousCommands(t *testing.T) {
+	permissionContext := tool.NewPermissionContext(t.TempDir(), nil)
+	decision := (&ShellTool{}).CheckPermission(context.Background(), `{"command":"printf hello > out.txt"}`, permissionContext)
+	if decision.Behavior != tool.PermissionAsk || decision.ApprovalRequest.RiskTone != "warning" {
+		t.Fatalf("expected complex command to ask with warning risk, got %+v", decision)
+	}
+
+	decision = (&ShellTool{}).CheckPermission(context.Background(), `{"command":"rm -rf build"}`, permissionContext)
+	if decision.Behavior != tool.PermissionAsk || decision.ApprovalRequest.RiskTone != "danger" {
+		t.Fatalf("expected dangerous command to ask with danger risk, got %+v", decision)
+	}
+}
+
+func TestShellPermissionUsesWorkspaceRootForWorkdir(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	permissionContext := tool.NewPermissionContext(root, nil)
+
+	decision := (&ShellTool{}).CheckPermission(context.Background(), `{"command":"ls","workdir":"`+outside+`"}`, permissionContext)
+	if decision.Behavior != tool.PermissionAsk || decision.ApprovalRequest.RiskTone != "danger" {
+		t.Fatalf("expected outside workdir to ask with danger risk, got %+v", decision)
+	}
+
+	decision = (&ShellTool{}).CheckPermission(context.Background(), `{"command":"ls","workdir":"`+root+`"}`, permissionContext)
+	if decision.Behavior != tool.PermissionAllow {
+		t.Fatalf("expected inside workspace workdir to be allowed for read-only command, got %+v", decision)
+	}
+}
+
+func TestShellExecutesFromWorkspaceRootByDefault(t *testing.T) {
+	root := t.TempDir()
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, nil))
+
+	out, err := (&ShellTool{}).Execute(ctx, `{"command":"pwd"}`)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	result := decodeResult(t, out)
+	if strings.TrimSpace(result.Stdout) != root {
+		t.Fatalf("expected pwd to run from workspace root %q, got %+v", root, result)
 	}
 }
 

@@ -57,8 +57,8 @@ func TestRunServiceReplaysHistoryAndStreamsLiveEvents(t *testing.T) {
 		t.Fatalf("expected final RunFinished event, got %+v", live[1])
 	}
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
+	finishedDeadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(finishedDeadline) {
 		snapshot, err := service.CancelRun(run.RunID)
 		if err != nil {
 			t.Fatalf("CancelRun returned error while waiting for terminal state: %v", err)
@@ -215,6 +215,102 @@ func TestRunServiceCancelWinsOverLateSuccessfulReturn(t *testing.T) {
 	}
 }
 
+func TestRunServiceResolveApprovalUnblocksExecutorAndReplaysEvents(t *testing.T) {
+	approvalReady := make(chan struct{})
+	service := NewRunService(func() Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			awaiter, ok := sink.(agentcore.ApprovalAwaiter)
+			if !ok {
+				return "", errors.New("expected approval awaiter on runtime sink")
+			}
+			close(approvalReady)
+			decision, err := awaiter.AwaitApproval(ctx, agentcore.ApprovalRequest{
+				ID:          "approval-1",
+				ToolCallID:  "tool-1",
+				ToolName:    "write_file",
+				Title:       "Approve write_file",
+				Description: "Write README.md",
+				RiskTone:    agentcore.ApprovalRiskDanger,
+			})
+			if err != nil {
+				return "", err
+			}
+			sink.Emit(agentcore.AwakenEvent{
+				Type:            agentcore.ArtifactCreatedEventType,
+				ToolCallID:      "tool-1",
+				ToolName:        "write_file",
+				ArtifactID:      "artifact-1",
+				ArtifactTitle:   "README.md",
+				ArtifactPath:    "/tmp/README.md",
+				ArtifactStatus:  agentcore.ArtifactStatusReady,
+				ArtifactContent: "# hello",
+			})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: string(decision)})
+			return string(decision), nil
+		})
+	})
+
+	run, err := service.StartRun("needs approval")
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	<-approvalReady
+
+	var sub Subscription
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		sub, err = service.Subscribe(run.RunID)
+		if err != nil {
+			t.Fatalf("Subscribe returned error: %v", err)
+		}
+		if len(sub.History) >= 3 {
+			break
+		}
+		if sub.Close != nil {
+			sub.Close()
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for approval surface event, got %+v", sub.History)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if len(sub.History) != 3 {
+		t.Fatalf("expected RunStarted + ApprovalRequested + A2UI surface in history, got %+v", sub.History)
+	}
+	if sub.History[1].AgentEvent.Type != agentcore.ApprovalRequestedEventType {
+		t.Fatalf("expected approval request in history, got %+v", sub.History[1])
+	}
+	if sub.History[2].AgentEvent.Type != agentcore.ArtifactCreatedEventType ||
+		sub.History[2].AgentEvent.ArtifactKind != "a2ui_surface" {
+		t.Fatalf("expected A2UI surface artifact in history, got %+v", sub.History[2])
+	}
+
+	if err := service.ResolveApproval(run.RunID, "approval-1", agentcore.ApprovalDecisionApproved); err != nil {
+		t.Fatalf("ResolveApproval returned error: %v", err)
+	}
+
+	var got []Event
+	got = append(got, sub.History...)
+	for event := range sub.Events {
+		got = append(got, event)
+	}
+
+	if len(got) != 6 {
+		t.Fatalf("expected 6 total events, got %+v", got)
+	}
+	if got[3].AgentEvent.Type != agentcore.ApprovalResolvedEventType {
+		t.Fatalf("expected approval resolved event, got %+v", got[3])
+	}
+	if got[4].AgentEvent.Type != agentcore.ArtifactCreatedEventType {
+		t.Fatalf("expected artifact event after approval, got %+v", got[4])
+	}
+	if got[5].AgentEvent.Type != agentcore.RunFinishedEventType {
+		t.Fatalf("expected terminal RunFinished event, got %+v", got[5])
+	}
+}
+
 func TestRunServiceValidatesInputAndMissingRun(t *testing.T) {
 	service := NewRunService(func() Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
@@ -230,5 +326,8 @@ func TestRunServiceValidatesInputAndMissingRun(t *testing.T) {
 	}
 	if _, err := service.CancelRun("missing"); !errors.Is(err, ErrRunNotFound) {
 		t.Fatalf("expected ErrRunNotFound from CancelRun, got %v", err)
+	}
+	if err := service.ResolveApproval("missing", "approval-1", agentcore.ApprovalDecisionApproved); !errors.Is(err, ErrRunNotFound) {
+		t.Fatalf("expected ErrRunNotFound from ResolveApproval, got %v", err)
 	}
 }

@@ -9,36 +9,75 @@ import (
 type AwakenEventType string
 
 const (
-	RunStartedEventType           AwakenEventType = "RunStarted"
-	RunFinishedEventType          AwakenEventType = "RunFinished"
-	RunErrorEventType             AwakenEventType = "RunError"
-	TextMessageStartedEventType   AwakenEventType = "TextMessageStarted"
-	TextDeltaEventType            AwakenEventType = "TextDelta"
-	TextMessageFinishedEventType  AwakenEventType = "TextMessageFinished"
-	ReasoningStartedEventType     AwakenEventType = "ReasoningStarted"
-	ReasoningDeltaEventType       AwakenEventType = "ReasoningDelta"
-	ReasoningFinishedEventType    AwakenEventType = "ReasoningFinished"
-	ToolCallStartedEventType      AwakenEventType = "ToolCallStarted"
-	ToolCallArgsEventType         AwakenEventType = "ToolCallArgs"
-	ToolCallFinishedEventType     AwakenEventType = "ToolCallFinished"
-	ToolResultEventType           AwakenEventType = "ToolResult"
+	RunStartedEventType          AwakenEventType = "RunStarted"
+	RunFinishedEventType         AwakenEventType = "RunFinished"
+	RunErrorEventType            AwakenEventType = "RunError"
+	TextMessageStartedEventType  AwakenEventType = "TextMessageStarted"
+	TextDeltaEventType           AwakenEventType = "TextDelta"
+	TextMessageFinishedEventType AwakenEventType = "TextMessageFinished"
+	ReasoningStartedEventType    AwakenEventType = "ReasoningStarted"
+	ReasoningDeltaEventType      AwakenEventType = "ReasoningDelta"
+	ReasoningFinishedEventType   AwakenEventType = "ReasoningFinished"
+	ToolCallStartedEventType     AwakenEventType = "ToolCallStarted"
+	ToolCallArgsEventType        AwakenEventType = "ToolCallArgs"
+	ToolCallFinishedEventType    AwakenEventType = "ToolCallFinished"
+	ToolResultEventType          AwakenEventType = "ToolResult"
+	ApprovalRequestedEventType   AwakenEventType = "ApprovalRequested"
+	ApprovalResolvedEventType    AwakenEventType = "ApprovalResolved"
+	ArtifactCreatedEventType     AwakenEventType = "ArtifactCreated"
+	ArtifactUpdatedEventType     AwakenEventType = "ArtifactUpdated"
+)
+
+type ApprovalRiskTone string
+
+const (
+	ApprovalRiskSafe    ApprovalRiskTone = "safe"
+	ApprovalRiskWarning ApprovalRiskTone = "warning"
+	ApprovalRiskDanger  ApprovalRiskTone = "danger"
+)
+
+type ApprovalDecision string
+
+const (
+	ApprovalDecisionApproved ApprovalDecision = "approved"
+	ApprovalDecisionRejected ApprovalDecision = "rejected"
+)
+
+type ArtifactStatus string
+
+const (
+	ArtifactStatusReady   ArtifactStatus = "ready"
+	ArtifactStatusPending ArtifactStatus = "pending"
+	ArtifactStatusError   ArtifactStatus = "error"
 )
 
 type AwakenEvent struct {
-	Type            AwakenEventType
-	Timestamp       time.Time
-	ThreadID        string
-	RunID           string
-	MessageID       string
-	ParentMessageID string
-	Role            string
-	Delta           string
-	Content         string
-	ToolCallID      string
-	ToolName        string
-	Arguments       string
-	Error           string
-	Code            string
+	Type                AwakenEventType
+	Timestamp           time.Time
+	ThreadID            string
+	RunID               string
+	MessageID           string
+	ParentMessageID     string
+	Role                string
+	Delta               string
+	Content             string
+	ToolCallID          string
+	ToolName            string
+	Arguments           string
+	Error               string
+	Code                string
+	ApprovalID          string
+	ApprovalTitle       string
+	ApprovalDescription string
+	ApprovalRiskTone    ApprovalRiskTone
+	ApprovalDecision    ApprovalDecision
+	ArtifactID          string
+	ArtifactTitle       string
+	ArtifactDescription string
+	ArtifactKind        string
+	ArtifactPath        string
+	ArtifactContent     string
+	ArtifactStatus      ArtifactStatus
 }
 
 var awakenIDCounter uint64

@@ -39,6 +39,10 @@ func (r *RuntimeInfo) UpdateWorkingDir() {
 	r.WorkingDir = getWorkingDir()
 }
 
+func (r *RuntimeInfo) SetWorkingDir(dir string) {
+	r.WorkingDir = dir
+}
+
 func (r *RuntimeInfo) UpdateCurrentDate() {
 	r.CurrentDate = getCurrentDate()
 }

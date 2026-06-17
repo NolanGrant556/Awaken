@@ -1,6 +1,7 @@
 package agentcore
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -89,5 +90,17 @@ func TestRequestBuilderRefreshesRuntimeInfo(t *testing.T) {
 	}
 	if !strings.Contains(second.SystemPrompt, "second") || !strings.Contains(second.SystemPrompt, "second-model") {
 		t.Fatalf("expected updated runtime info, got %s", second.SystemPrompt)
+	}
+}
+
+func TestRequestBuilderUsesConfiguredWorkspaceRoot(t *testing.T) {
+	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
+	builder := NewRequestBuilder(AgentConfig{
+		Workspace: WorkspaceConfig{Root: workspaceRoot},
+	})
+
+	req := builder.Build(convcontext.New(), nil)
+	if !strings.Contains(req.SystemPrompt, workspaceRoot) {
+		t.Fatalf("expected system prompt to include workspace root %q, got %s", workspaceRoot, req.SystemPrompt)
 	}
 }

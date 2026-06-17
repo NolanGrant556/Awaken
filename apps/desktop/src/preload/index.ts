@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { AguiEvent } from "../shared/agui.js";
 import {
+  type ApprovalDecision,
   type AwakenBridge,
   type DesktopPlatform,
   type RunStreamHandlers,
@@ -51,6 +52,12 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:create-run", input) as Promise<RuntimeRun>,
   cancelRun: (runId: string) =>
     ipcRenderer.invoke("awaken:cancel-run", runId) as Promise<RuntimeRun>,
+  resolveApproval: (runId: string, approvalId: string, decision: ApprovalDecision) =>
+    ipcRenderer.invoke("awaken:resolve-approval", {
+      runId,
+      approvalId,
+      decision,
+    }) as Promise<void>,
   subscribeRun: async (runId: string, handlers: RunStreamHandlers) => {
     const subscriptionId = crypto.randomUUID();
     subscriptions.set(subscriptionId, handlers);

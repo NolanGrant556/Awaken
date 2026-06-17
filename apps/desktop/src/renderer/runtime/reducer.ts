@@ -1,5 +1,5 @@
-import type { ArtifactItem, RunStepItem } from "@awaken/ui";
-import type { AguiEvent } from "./agui";
+import type { ApprovalItem, RunStepItem } from "@awaken/ui";
+import type { AguiApprovalRiskTone, AguiArtifactStatus, AguiEvent } from "./agui";
 import type { RuntimeRun } from "../../shared/runtime";
 
 type RuntimePhase = "idle" | "starting" | "running" | "cancelling" | "done" | "error";
@@ -8,6 +8,16 @@ type TimelineStatus = "ready" | "running" | "done" | "error";
 
 type StepRecord = RunStepItem & {
   key: string;
+};
+
+export type ArtifactRecord = {
+  id: string;
+  title: string;
+  description?: string;
+  kind: string;
+  path?: string;
+  content?: string;
+  status: AguiArtifactStatus;
 };
 
 export type RuntimeViewState = {
@@ -21,7 +31,8 @@ export type RuntimeViewState = {
   assistantText: string;
   reasoningText: string;
   toolResults: Array<{ id: string; title: string; content: string }>;
-  artifactItems: ArtifactItem[];
+  approvals: ApprovalItem[];
+  artifacts: ArtifactRecord[];
   errorMessage?: string;
 };
 
@@ -44,7 +55,8 @@ const initialState: RuntimeViewState = {
   assistantText: "",
   reasoningText: "",
   toolResults: [],
-  artifactItems: [],
+  approvals: [],
+  artifacts: [],
 };
 
 function toSteps(records: StepRecord[]): RunStepItem[] {
@@ -85,7 +97,85 @@ function excerpt(value: string, max = 96): string {
   if (trimmed.length <= max) {
     return trimmed;
   }
-  return `${trimmed.slice(0, max - 1)}…`;
+  return `${trimmed.slice(0, max - 3)}...`;
+}
+
+function normalizeRiskTone(value?: string): AguiApprovalRiskTone {
+  switch (value) {
+    case "safe":
+    case "danger":
+      return value;
+    default:
+      return "warning";
+  }
+}
+
+function normalizeArtifactStatus(value?: string): AguiArtifactStatus {
+  switch (value) {
+    case "pending":
+    case "error":
+      return value;
+    default:
+      return "ready";
+  }
+}
+
+function buildArtifactDescription(artifact: ArtifactRecord): string {
+  const details: string[] = [];
+  if (artifact.description) {
+    details.push(artifact.description);
+  }
+
+  const meta = [artifact.kind, artifact.status].filter(Boolean).join(" / ");
+  if (meta) {
+    details.push(meta);
+  }
+  if (artifact.path) {
+    details.push(artifact.path);
+  }
+
+  return details.join(" | ");
+}
+
+function upsertApproval(approvals: ApprovalItem[], next: ApprovalItem): ApprovalItem[] {
+  const index = approvals.findIndex((approval) => approval.id === next.id);
+  if (index < 0) {
+    return [...approvals, next];
+  }
+
+  const updated = approvals.slice();
+  updated[index] = next;
+  return updated;
+}
+
+function removeApproval(approvals: ApprovalItem[], approvalId?: string): ApprovalItem[] {
+  if (!approvalId) {
+    return approvals;
+  }
+  return approvals.filter((approval) => approval.id !== approvalId);
+}
+
+function upsertArtifact(artifacts: ArtifactRecord[], event: AguiEvent): ArtifactRecord[] {
+  const id = event.artifactId ?? `artifact-${artifacts.length + 1}`;
+  const existingIndex = artifacts.findIndex((artifact) => artifact.id === id);
+  const existing = existingIndex >= 0 ? artifacts[existingIndex] : undefined;
+  const next: ArtifactRecord = {
+    id,
+    title: event.artifactTitle || existing?.title || "Artifact",
+    description: event.artifactDescription || existing?.description,
+    kind: event.artifactKind || existing?.kind || "file",
+    path: event.artifactPath || existing?.path,
+    content: event.artifactContent ?? existing?.content,
+    status: normalizeArtifactStatus(event.artifactStatus || existing?.status),
+  };
+
+  if (existingIndex >= 0) {
+    const updated = artifacts.slice();
+    updated[existingIndex] = next;
+    return updated;
+  }
+
+  return [...artifacts, next];
 }
 
 function syncFromRun(state: RuntimeViewState, run: RuntimeRun): RuntimeViewState {
@@ -97,12 +187,16 @@ function syncFromRun(state: RuntimeViewState, run: RuntimeRun): RuntimeViewState
       phase: "cancelling",
       timelineStatus: "running",
       steps: toSteps(
-        upsertStep(state.steps.map((step, index) => ({ ...step, key: step.id, index: index + 1 })), "run-cancel", {
-          title: "Cancelling run",
-          description: "Waiting for runtime shutdown",
-          status: "active",
-          tag: "cancel",
-        }),
+        upsertStep(
+          state.steps.map((step, index) => ({ ...step, key: step.id, index: index + 1 })),
+          "run-cancel",
+          {
+            title: "Cancelling run",
+            description: "Waiting for runtime shutdown",
+            status: "active",
+            tag: "cancel",
+          },
+        ),
       ),
     };
   }
@@ -158,7 +252,8 @@ export function reduceRuntimeState(
         assistantText: "",
         reasoningText: "",
         toolResults: [],
-        artifactItems: [],
+        approvals: [],
+        artifacts: [],
       };
     case "run/created":
       return syncFromRun(state, action.run);
@@ -193,7 +288,7 @@ export function reduceRuntimeState(
         errorMessage: action.message,
       };
     case "run/event": {
-      let nextState = { ...state };
+      const nextState = { ...state };
       let records = state.steps.map((step, index) => ({
         ...step,
         key: step.id,
@@ -315,6 +410,53 @@ export function reduceRuntimeState(
             tag: "tool",
           });
           break;
+        case "AWAKEN_APPROVAL_REQUESTED": {
+          const approvalId = action.event.approvalId ?? `approval-${nextState.approvals.length + 1}`;
+          const approval: ApprovalItem = {
+            id: approvalId,
+            title: action.event.approvalTitle || "Approval required",
+            description: action.event.approvalDescription,
+            riskTone: normalizeRiskTone(action.event.approvalRiskTone),
+            approveLabel: "Approve",
+            rejectLabel: "Reject",
+          };
+          nextState.approvals = upsertApproval(nextState.approvals, approval);
+          records = upsertStep(records, `approval:${approvalId}`, {
+            title: approval.title,
+            description: approval.description || "Waiting for approval decision",
+            status: "active",
+            tag: "approval",
+          });
+          break;
+        }
+        case "AWAKEN_APPROVAL_RESOLVED": {
+          const approvalId = action.event.approvalId ?? "approval";
+          nextState.approvals = removeApproval(nextState.approvals, action.event.approvalId);
+          const decision = action.event.approvalDecision || "resolved";
+          records = upsertStep(records, `approval:${approvalId}`, {
+            title: action.event.approvalTitle || "Approval resolved",
+            description:
+              action.event.approvalDescription ||
+              `Decision: ${decision}`,
+            status: decision === "approved" ? "done" : "error",
+            tag: decision,
+          });
+          break;
+        }
+        case "AWAKEN_ARTIFACT_CREATED":
+        case "AWAKEN_ARTIFACT_UPDATED": {
+          nextState.artifacts = upsertArtifact(nextState.artifacts, action.event);
+          const artifact =
+            nextState.artifacts.find((candidate) => candidate.id === action.event.artifactId) ??
+            nextState.artifacts[nextState.artifacts.length - 1];
+          records = upsertStep(records, `artifact:${artifact.id}`, {
+            title: artifact.title,
+            description: excerpt(buildArtifactDescription(artifact)) || "Artifact updated",
+            status: "done",
+            tag: action.event.type === "AWAKEN_ARTIFACT_CREATED" ? "artifact:new" : "artifact:update",
+          });
+          break;
+        }
         case "RUN_FINISHED":
           nextState.phase = "done";
           nextState.timelineStatus = "done";

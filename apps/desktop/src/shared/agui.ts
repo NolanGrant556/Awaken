@@ -13,7 +13,17 @@ export type AguiEventType =
   | "TOOL_CALL_START"
   | "TOOL_CALL_ARGS"
   | "TOOL_CALL_END"
-  | "TOOL_CALL_RESULT";
+  | "TOOL_CALL_RESULT"
+  | "AWAKEN_APPROVAL_REQUESTED"
+  | "AWAKEN_APPROVAL_RESOLVED"
+  | "AWAKEN_ARTIFACT_CREATED"
+  | "AWAKEN_ARTIFACT_UPDATED";
+
+export type AguiApprovalRiskTone = "safe" | "warning" | "danger";
+
+export type AguiApprovalDecision = "approved" | "rejected";
+
+export type AguiArtifactStatus = "ready" | "pending" | "error";
 
 export type AguiRunOutcome = {
   type: string;
@@ -36,5 +46,17 @@ export type AguiEvent = {
   result?: string;
   message?: string;
   code?: string;
+  approvalId?: string;
+  approvalTitle?: string;
+  approvalDescription?: string;
+  approvalRiskTone?: AguiApprovalRiskTone;
+  approvalDecision?: AguiApprovalDecision;
+  artifactId?: string;
+  artifactTitle?: string;
+  artifactDescription?: string;
+  artifactKind?: string;
+  artifactPath?: string;
+  artifactContent?: string;
+  artifactStatus?: AguiArtifactStatus;
   outcome?: AguiRunOutcome;
 };

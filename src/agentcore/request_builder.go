@@ -1,6 +1,8 @@
 package agentcore
 
 import (
+	"strings"
+
 	"awaken/src/prompt"
 	"awaken/src/tool"
 )
@@ -91,7 +93,11 @@ func (rb *RequestBuilder) buildToolParameters(t tool.Tool) tool.ToolParametersSc
 
 func (rb *RequestBuilder) updateRuntimeInfoFromConfig(tools []tool.ToolDefinition) {
 	rb.runtimeInfo.UpdateCurrentDate()
-	rb.runtimeInfo.UpdateWorkingDir()
+	if strings.TrimSpace(rb.config.Workspace.Root) != "" {
+		rb.runtimeInfo.SetWorkingDir(tool.NewPermissionContext(rb.config.Workspace.Root, rb.config.Workspace.WritableRoots).WorkspaceRootOrCWD())
+	} else {
+		rb.runtimeInfo.UpdateWorkingDir()
+	}
 	rb.runtimeInfo.SetModelName(rb.config.ModelConfig.Model)
 	rb.runtimeInfo.SetEntryPoint(rb.config.EntryPoint)
 	rb.runtimeInfo.SetToolSummary(rb.buildToolSummary(tools))

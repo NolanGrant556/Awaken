@@ -8,6 +8,7 @@ import (
 
 	"awaken/src/context"
 	"awaken/src/llm"
+	"awaken/src/tool"
 )
 
 type Runner struct {
@@ -23,7 +24,7 @@ func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *Reque
 		config:       config,
 		conversation: conv,
 		reqBuilder:   reqBuilder,
-		toolRuntime:  NewToolRuntime(),
+		toolRuntime:  NewToolRuntimeWithConfig(nil, toolRuntimeConfigFromAgentConfig(config)),
 	}
 }
 
@@ -91,6 +92,7 @@ func (r *Runner) RunStream(ctx stdcontext.Context, callback StreamCallback) (str
 
 func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, callback StreamCallback, sink EventSink) (string, error) {
 	events := newRunEventEmitter(r.threadID, sink)
+	r.toolRuntime = NewToolRuntimeWithConfig(sink, toolRuntimeConfigFromAgentConfig(r.config))
 	events.runStarted()
 
 	for i := 0; i < r.config.MaxThoughts; i++ {
@@ -134,6 +136,12 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, callback StreamCall
 	err := fmt.Errorf("达到最大思考次数 %d，未能完成任务", r.config.MaxThoughts)
 	events.runErrored(err)
 	return "", err
+}
+
+func toolRuntimeConfigFromAgentConfig(config AgentConfig) ToolRuntimeConfig {
+	return ToolRuntimeConfig{
+		PermissionContext: tool.NewPermissionContext(config.Workspace.Root, config.Workspace.WritableRoots),
+	}
 }
 
 func (r *Runner) buildLLMRequest() (LLMRequest, error) {

@@ -78,6 +78,10 @@ func (t *GrepSearchTool) Parameters() []tool.ToolParameter {
 	}
 }
 
+func (t *GrepSearchTool) IsReadOnly() bool {
+	return true
+}
+
 func (t *GrepSearchTool) Execute(ctx context.Context, input string) (string, error) {
 	params, err := parseParams(input)
 	if err != nil {

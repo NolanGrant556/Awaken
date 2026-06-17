@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import type { AguiEvent } from "../shared/agui.js";
 import {
   normalizeRuntimeRun,
+  type ApprovalDecision,
   type DesktopPlatform,
   type RuntimeRunWire,
 } from "../shared/runtime.js";
@@ -56,6 +57,13 @@ async function requestRuntime(pathname: string, init?: RequestInit): Promise<Run
   }
 
   return (await response.json()) as RuntimeRunWire;
+}
+
+async function requestRuntimeOK(pathname: string, init?: RequestInit): Promise<void> {
+  const response = await fetch(runtimeUrl(pathname), init);
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response));
+  }
 }
 
 function sendToRenderer(channel: string, payload: unknown, targetId: number): void {
@@ -243,6 +251,19 @@ ipcMain.handle("awaken:cancel-run", async (_event, runId: string) => {
 
   return normalizeRuntimeRun(run);
 });
+
+ipcMain.handle(
+  "awaken:resolve-approval",
+  async (_event, payload: { runId: string; approvalId: string; decision: ApprovalDecision }) => {
+    await requestRuntimeOK(`/v1/runs/${payload.runId}/approvals/${payload.approvalId}/resolve`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ decision: payload.decision }),
+    });
+  },
+);
 
 ipcMain.handle(
   "awaken:subscribe-run",

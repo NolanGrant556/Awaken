@@ -31,6 +31,10 @@ func (t *CalculatorTool) Parameters() []tool.ToolParameter {
 	}
 }
 
+func (t *CalculatorTool) IsReadOnly() bool {
+	return true
+}
+
 func (t *CalculatorTool) Execute(ctx context.Context, input string) (string, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {

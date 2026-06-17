@@ -21,12 +21,8 @@ import {
   createInitialRuntimeState,
   reduceRuntimeState,
 } from "./runtime/reducer";
-
-const navItems: NavItem[] = [
-  { id: "runs", label: "Runs" },
-  { id: "artifacts", label: "Artifacts", disabled: true },
-  { id: "approvals", label: "Approvals", disabled: true },
-];
+import type { ApprovalDecision } from "../shared/runtime";
+import { A2UISurfaceView } from "./a2ui/A2UISurfaceView";
 
 const models: ModelOption[] = [
   { id: "awaken-core", label: "awaken-core" },
@@ -39,9 +35,9 @@ const projects: ProjectItem[] = [
     timeLabel: "当前",
     children: [
       {
-        id: "desktop-phase-3",
-        label: "Desktop Phase 3",
-        timeLabel: "stream",
+        id: "desktop-phase-4",
+        label: "Desktop Phase 4",
+        timeLabel: "runtime",
       },
     ],
   },
@@ -70,6 +66,7 @@ export function App() {
   const runtimeClientRef = useRef(createRuntimeClient());
   const unsubscribeRef = useRef<null | (() => void)>(null);
   const terminalSeenRef = useRef(false);
+  const resolvingApprovalIdRef = useRef<string | null>(null);
   const runtimeClient = runtimeClientRef.current;
 
   const [runtimeState, dispatch] = useReducer(
@@ -81,8 +78,8 @@ export function App() {
   const [mode, setMode] = useState<ComposerMode>("Plan");
   const [selectedModel, setSelectedModel] = useState<ModelOption>(models[0]);
   const [activeNavId, setActiveNavId] = useState("runs");
-  const [showApprovalPlaceholder, setShowApprovalPlaceholder] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
 
   useEffect(() => {
     return () => {
@@ -96,6 +93,21 @@ export function App() {
     runtimeState.phase === "running" ||
     runtimeState.phase === "cancelling";
 
+  const activeApproval = runtimeState.approvals[0];
+  const latestArtifact =
+    runtimeState.artifacts.length > 0
+      ? runtimeState.artifacts[runtimeState.artifacts.length - 1]
+      : undefined;
+  const a2uiArtifacts = runtimeState.artifacts.filter(
+    (artifact) => artifact.kind === "a2ui_surface",
+  );
+
+  const navItems: NavItem[] = [
+    { id: "runs", label: "Runs" },
+    { id: "artifacts", label: "Artifacts", badge: runtimeState.artifacts.length || undefined },
+    { id: "approvals", label: "Approvals", badge: runtimeState.approvals.length || undefined },
+  ];
+
   const conversations: ConversationItem[] = runtimeState.prompt
     ? [
         {
@@ -106,8 +118,8 @@ export function App() {
       ]
     : [
         {
-          id: "phase-3-placeholder",
-          label: "Phase 3 desktop stream consumer",
+          id: "phase-4-placeholder",
+          label: "Phase 4 runtime approvals and artifacts",
           timeLabel: "ready",
         },
       ];
@@ -122,6 +134,8 @@ export function App() {
     unsubscribeRef.current = null;
     terminalSeenRef.current = false;
     setNotice(null);
+    setResolvingApprovalId(null);
+    resolvingApprovalIdRef.current = null;
     dispatch({ type: "run/requested", prompt });
 
     try {
@@ -131,6 +145,14 @@ export function App() {
         onEvent: (event) => {
           if (event.type === "RUN_FINISHED" || event.type === "RUN_ERROR") {
             terminalSeenRef.current = true;
+          }
+          if (
+            event.type === "AWAKEN_APPROVAL_RESOLVED" &&
+            event.approvalId &&
+            event.approvalId === resolvingApprovalIdRef.current
+          ) {
+            resolvingApprovalIdRef.current = null;
+            setResolvingApprovalId(null);
           }
           dispatch({ type: "run/event", event });
         },
@@ -171,8 +193,32 @@ export function App() {
     }
   }
 
+  async function handleResolveApproval(decision: ApprovalDecision): Promise<void> {
+    if (!runtimeState.runId || !activeApproval) {
+      return;
+    }
+    if (
+      resolvingApprovalId === activeApproval.id ||
+      resolvingApprovalIdRef.current === activeApproval.id
+    ) {
+      return;
+    }
+
+    setNotice(null);
+    setResolvingApprovalId(activeApproval.id);
+    resolvingApprovalIdRef.current = activeApproval.id;
+
+    try {
+      await runtimeClient.resolveApproval(runtimeState.runId, activeApproval.id, decision);
+    } catch (error) {
+      setResolvingApprovalId(null);
+      resolvingApprovalIdRef.current = null;
+      setNotice(error instanceof Error ? error.message : "Failed to resolve approval");
+    }
+  }
+
   function handleAddContext(): void {
-    setNotice("Phase 3 只接 runtime stream；context / approvals / artifacts 在后续阶段接入。");
+    setNotice("Context picker is not wired yet. Phase 4 only closes the run, approval, and artifact runtime loop.");
   }
 
   const platform = (runtimeClient.platform === "web"
@@ -193,7 +239,7 @@ export function App() {
               conversations={conversations}
               activeConversationId={conversations[0]?.id}
               projects={projects}
-              activeProjectId="desktop-phase-3"
+              activeProjectId="desktop-phase-4"
               defaultExpandedIds={["awaken"]}
               profileName="Desktop Consumer"
               profileAvatarFallback="AW"
@@ -204,6 +250,8 @@ export function App() {
                 unsubscribeRef.current = null;
                 setComposerValue("");
                 setNotice(null);
+                setResolvingApprovalId(null);
+                resolvingApprovalIdRef.current = null;
                 terminalSeenRef.current = false;
                 dispatch({ type: "run/reset" });
               }}
@@ -220,13 +268,12 @@ export function App() {
                   <span className="runtime-pill runtime-pill-status">
                     {formatStatusLabel(runtimeState.phase)}
                   </span>
-                  <button
-                    type="button"
-                    className="runtime-action"
-                    onClick={() => setShowApprovalPlaceholder(true)}
-                  >
-                    Approval placeholder
-                  </button>
+                  <span className="runtime-pill">
+                    approvals {runtimeState.approvals.length}
+                  </span>
+                  <span className="runtime-pill">
+                    artifacts {runtimeState.artifacts.length}
+                  </span>
                   <button
                     type="button"
                     className="runtime-action"
@@ -242,11 +289,12 @@ export function App() {
 
               <CenterStage width={860} topMargin={72}>
                 <div className="hero-block">
-                  <p className="eyebrow">AG-UI Phase 3</p>
-                  <h1>Desktop runtime stream consumer</h1>
+                  <p className="eyebrow">AG-UI Phase 4</p>
+                  <h1>Desktop runtime approvals and artifacts</h1>
                   <p className="lede">
-                    Renderer 通过 adapter 创建 run、订阅 Phase 2 SSE、取消 run，再把 AG-UI
-                    事件 reduce 成 view state 喂给 `@awaken/ui`。
+                    Renderer 现在会消费 approval/artifact extension events，调用 runtime
+                    resolve API，并把真实 runtime state 映射到 `ApprovalCard` 和
+                    `ArtifactGrid`。
                   </p>
                 </div>
 
@@ -307,6 +355,23 @@ export function App() {
 
                     <section className="runtime-panel">
                       <div className="panel-heading">
+                        <h2>Approvals</h2>
+                        <span>{runtimeState.approvals.length}</span>
+                      </div>
+                      {activeApproval ? (
+                        <p className="placeholder-copy">
+                          Pending decision: {activeApproval.title}
+                          {resolvingApprovalId === activeApproval.id ? " (resolving...)" : ""}
+                        </p>
+                      ) : (
+                        <p className="placeholder-copy">
+                          No pending approval requests.
+                        </p>
+                      )}
+                    </section>
+
+                    <section className="runtime-panel">
+                      <div className="panel-heading">
                         <h2>Tool results</h2>
                         <span>{runtimeState.toolResults.length}</span>
                       </div>
@@ -329,9 +394,48 @@ export function App() {
                     <section className="runtime-panel">
                       <div className="panel-heading">
                         <h2>Artifacts</h2>
-                        <span>Phase 4</span>
+                        <span>{runtimeState.artifacts.length}</span>
                       </div>
-                      <ArtifactGrid items={runtimeState.artifactItems} />
+                      <ArtifactGrid
+                        items={runtimeState.artifacts.map((artifact) => ({
+                          id: artifact.id,
+                          title: artifact.title,
+                          description: [
+                            artifact.description,
+                            [artifact.kind, artifact.status].filter(Boolean).join(" / "),
+                            artifact.path,
+                          ]
+                            .filter(Boolean)
+                            .join(" | "),
+                        }))}
+                      />
+                      {latestArtifact && latestArtifact.kind !== "a2ui_surface" ? (
+                        <div style={{ marginTop: "12px" }}>
+                          <strong>{latestArtifact.title}</strong>
+                          <pre>
+                            {[
+                              latestArtifact.path ? `path: ${latestArtifact.path}` : "",
+                              `kind: ${latestArtifact.kind}`,
+                              `status: ${latestArtifact.status}`,
+                              latestArtifact.content ? "" : "No artifact content provided.",
+                              latestArtifact.content || "",
+                            ]
+                              .filter(Boolean)
+                              .join("\n")}
+                          </pre>
+                        </div>
+                      ) : null}
+                      {a2uiArtifacts.length > 0 ? (
+                        <div className="a2ui-stack">
+                          {a2uiArtifacts.map((artifact) => (
+                            <A2UISurfaceView
+                              key={artifact.id}
+                              title={artifact.title}
+                              content={artifact.content}
+                            />
+                          ))}
+                        </div>
+                      ) : null}
                     </section>
                   </RunTimeline>
                 </div>
@@ -342,13 +446,19 @@ export function App() {
       </div>
 
       <ApprovalCard
-        open={showApprovalPlaceholder}
-        onOpenChange={setShowApprovalPlaceholder}
-        title="Approval event placeholder"
-        description="Phase 3 不接 runtime approval 事件；这里只保留 Electron + UI 对接位置。"
-        riskTone="warning"
-        approveLabel="关闭占位"
-        rejectLabel="稍后"
+        open={Boolean(activeApproval)}
+        onOpenChange={() => {}}
+        title={activeApproval?.title || "Approval required"}
+        description={activeApproval?.description}
+        riskTone={activeApproval?.riskTone}
+        approveLabel={resolvingApprovalId === activeApproval?.id ? "Resolving..." : "Approve"}
+        rejectLabel={resolvingApprovalId === activeApproval?.id ? "Resolving..." : "Reject"}
+        onApprove={() => {
+          void handleResolveApproval("approved");
+        }}
+        onReject={() => {
+          void handleResolveApproval("rejected");
+        }}
       />
     </>
   );

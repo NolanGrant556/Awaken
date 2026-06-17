@@ -11,11 +11,15 @@ import (
 )
 
 type runtimeTestTool struct {
-	name    string
-	params  []tool.ToolParameter
-	fail    bool
-	output  string
-	observe *string
+	name            string
+	params          []tool.ToolParameter
+	fail            bool
+	output          string
+	observe         *string
+	permission      tool.PermissionDecision
+	observePolicy   *tool.PermissionContext
+	approvalRequest tool.ApprovalRequest
+	artifacts       []tool.ArtifactDescriptor
 }
 
 func (t runtimeTestTool) Name() string {
@@ -43,6 +47,24 @@ func (t runtimeTestTool) Execute(ctx context.Context, input string) (string, err
 	return "ran:" + input, nil
 }
 
+func (t runtimeTestTool) CheckPermission(ctx context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {
+	if t.observePolicy != nil {
+		*t.observePolicy = permissionContext
+	}
+	if t.permission.Behavior == "" {
+		return tool.AllowPermission()
+	}
+	return t.permission
+}
+
+func (t runtimeTestTool) ApprovalRequest(input string) tool.ApprovalRequest {
+	return t.approvalRequest
+}
+
+func (t runtimeTestTool) Artifacts(input string, output string) []tool.ArtifactDescriptor {
+	return t.artifacts
+}
+
 func TestToolRuntimeExecutesKnownTool(t *testing.T) {
 	var observed string
 	toolName := "runtime_known_tool"
@@ -54,7 +76,7 @@ func TestToolRuntimeExecutesKnownTool(t *testing.T) {
 		},
 	})
 
-	result := NewToolRuntime().Execute(context.Background(), convcontext.ToolCall{
+	result := NewToolRuntime(nil).Execute(context.Background(), convcontext.ToolCall{
 		ID:   "call_1",
 		Type: "function",
 		Function: convcontext.FunctionCall{
@@ -75,7 +97,7 @@ func TestToolRuntimeExecutesKnownTool(t *testing.T) {
 }
 
 func TestToolRuntimeUnknownToolReturnsErrorResult(t *testing.T) {
-	result := NewToolRuntime().Execute(context.Background(), convcontext.ToolCall{
+	result := NewToolRuntime(nil).Execute(context.Background(), convcontext.ToolCall{
 		ID: "call_unknown",
 		Function: convcontext.FunctionCall{
 			Name:      "runtime_missing_tool",
@@ -98,7 +120,7 @@ func TestToolRuntimeInvalidJSONReturnsErrorResult(t *testing.T) {
 		},
 	})
 
-	result := NewToolRuntime().Execute(context.Background(), convcontext.ToolCall{
+	result := NewToolRuntime(nil).Execute(context.Background(), convcontext.ToolCall{
 		ID: "call_bad_json",
 		Function: convcontext.FunctionCall{
 			Name:      toolName,
@@ -121,7 +143,7 @@ func TestToolRuntimeToolFailureReturnsErrorResult(t *testing.T) {
 		},
 	})
 
-	result := NewToolRuntime().Execute(context.Background(), convcontext.ToolCall{
+	result := NewToolRuntime(nil).Execute(context.Background(), convcontext.ToolCall{
 		ID: "call_fail",
 		Function: convcontext.FunctionCall{
 			Name:      toolName,
@@ -143,7 +165,7 @@ func TestToolRuntimeExecutesMultipleCalls(t *testing.T) {
 		},
 	})
 
-	results := NewToolRuntime().ExecuteToolCalls(context.Background(), []convcontext.ToolCall{
+	results := NewToolRuntime(nil).ExecuteToolCalls(context.Background(), []convcontext.ToolCall{
 		{ID: "call_1", Function: convcontext.FunctionCall{Name: toolName, Arguments: `{"value":"one"}`}},
 		{ID: "call_2", Function: convcontext.FunctionCall{Name: toolName, Arguments: `{"value":"two"}`}},
 	})
@@ -163,7 +185,7 @@ func TestToolRuntimeTruncatesLargeToolResult(t *testing.T) {
 		output: strings.Repeat("x", 25000),
 	})
 
-	result := NewToolRuntime().Execute(context.Background(), convcontext.ToolCall{
+	result := NewToolRuntime(nil).Execute(context.Background(), convcontext.ToolCall{
 		ID: "call_large",
 		Function: convcontext.FunctionCall{
 			Name:      toolName,
@@ -194,6 +216,168 @@ func TestArgumentsForXMLFallbackUsesSingleRequiredStringParam(t *testing.T) {
 	if got != `{"path":"README.md"}` {
 		t.Fatalf("unexpected fallback arguments: %q", got)
 	}
+}
+
+func TestToolRuntimeFailsClosedWhenNoApprovalAwaiterIsWired(t *testing.T) {
+	toolName := "runtime_no_awaiter_tool"
+	mustRegisterRuntimeTool(t, runtimeTestTool{
+		name:       toolName,
+		permission: tool.AskPermission("test tool requires approval", tool.ApprovalRequest{}),
+		params: []tool.ToolParameter{
+			{Name: "value", Type: "string", Required: true},
+		},
+	})
+
+	result := NewToolRuntime(nil).Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_missing_awaiter",
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{"value":"hello"}`,
+		},
+	})
+
+	if !result.IsError || !strings.Contains(result.Content, "no approval awaiter") {
+		t.Fatalf("expected missing approval awaiter to fail closed, got %+v", result)
+	}
+}
+
+func TestToolRuntimeEmitsArtifactsAndRejectsOnApprovalDecision(t *testing.T) {
+	toolName := "runtime_approval_artifact_tool"
+	mustRegisterRuntimeTool(t, runtimeTestTool{
+		name: toolName,
+		permission: tool.AskPermission("test tool writes files", tool.ApprovalRequest{
+			Title:       "Approve write",
+			Description: "Write README.md",
+			RiskTone:    "danger",
+		}),
+		artifacts: []tool.ArtifactDescriptor{{
+			Action:      tool.ArtifactActionCreated,
+			ID:          "artifact-1",
+			Title:       "README.md",
+			Description: "Generated readme",
+			Kind:        "file",
+			Path:        "/tmp/README.md",
+			Content:     "# hello",
+			Status:      "ready",
+		}},
+		params: []tool.ToolParameter{
+			{Name: "value", Type: "string", Required: true},
+		},
+	})
+
+	var got []AwakenEvent
+	runtime := NewToolRuntime(testApprovalAwaiter{
+		decision: ApprovalDecisionApproved,
+		events:   &got,
+	})
+	result := runtime.Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_with_approval",
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{"value":"hello"}`,
+		},
+	})
+
+	if result.IsError {
+		t.Fatalf("expected approved tool to succeed, got %+v", result)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected approval and artifact events, got %+v", got)
+	}
+	if got[0].Type != ApprovalRequestedEventType || got[1].Type != ArtifactCreatedEventType {
+		t.Fatalf("unexpected emitted events: %+v", got)
+	}
+
+	rejected := NewToolRuntime(testApprovalAwaiter{decision: ApprovalDecisionRejected})
+	rejectedResult := rejected.Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_rejected",
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{"value":"hello"}`,
+		},
+	})
+
+	if !rejectedResult.IsError || !strings.Contains(rejectedResult.Content, "审批拒绝") {
+		t.Fatalf("expected rejected approval to stop tool execution, got %+v", rejectedResult)
+	}
+}
+
+func TestToolRuntimeDeniesBeforeExecution(t *testing.T) {
+	var observed string
+	toolName := "runtime_denied_tool"
+	mustRegisterRuntimeTool(t, runtimeTestTool{
+		name:       toolName,
+		observe:    &observed,
+		permission: tool.DenyPermission("policy denied test tool"),
+		params: []tool.ToolParameter{
+			{Name: "value", Type: "string", Required: true},
+		},
+	})
+
+	result := NewToolRuntime(nil).Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_denied",
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{"value":"hello"}`,
+		},
+	})
+
+	if !result.IsError || !strings.Contains(result.Content, "policy denied test tool") {
+		t.Fatalf("expected policy denial, got %+v", result)
+	}
+	if observed != "" {
+		t.Fatalf("expected denied tool not to execute, observed %q", observed)
+	}
+}
+
+func TestToolRuntimePassesPermissionContextToTools(t *testing.T) {
+	var observed tool.PermissionContext
+	root := t.TempDir()
+	writable := t.TempDir()
+	toolName := "runtime_policy_tool"
+	mustRegisterRuntimeTool(t, runtimeTestTool{
+		name:          toolName,
+		observePolicy: &observed,
+		params: []tool.ToolParameter{
+			{Name: "value", Type: "string", Required: true},
+		},
+	})
+
+	runtime := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
+		PermissionContext: tool.NewPermissionContext(root, []string{writable}),
+	})
+	result := runtime.Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_policy",
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{"value":"hello"}`,
+		},
+	})
+
+	if result.IsError {
+		t.Fatalf("expected tool to execute, got %+v", result)
+	}
+	if observed.WorkspaceRoot != root || len(observed.WritableRoots) != 1 || observed.WritableRoots[0] != writable {
+		t.Fatalf("unexpected permission context: %+v", observed)
+	}
+}
+
+type testApprovalAwaiter struct {
+	decision ApprovalDecision
+	events   *[]AwakenEvent
+}
+
+func (t testApprovalAwaiter) Emit(event AwakenEvent) {
+	if t.events != nil {
+		*t.events = append(*t.events, event)
+	}
+}
+
+func (t testApprovalAwaiter) AwaitApproval(context.Context, ApprovalRequest) (ApprovalDecision, error) {
+	if t.events != nil {
+		*t.events = append(*t.events, AwakenEvent{Type: ApprovalRequestedEventType})
+	}
+	return t.decision, nil
 }
 
 func mustRegisterRuntimeTool(t *testing.T, candidate tool.Tool) {

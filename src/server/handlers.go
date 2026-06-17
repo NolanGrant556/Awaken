@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"awaken/src/agentcore"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
 )
@@ -15,6 +16,10 @@ type runHandlers struct {
 
 type createRunRequest struct {
 	Input string `json:"input"`
+}
+
+type resolveApprovalRequest struct {
+	Decision string `json:"decision"`
 }
 
 func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
@@ -96,6 +101,40 @@ func (h runHandlers) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, run)
+}
+
+func (h runHandlers) handleResolveApproval(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("run_id")
+	approvalID := r.PathValue("approval_id")
+
+	var req resolveApprovalRequest
+	if err := decodeJSON(r, &req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var decision agentcore.ApprovalDecision
+	switch req.Decision {
+	case string(agentcore.ApprovalDecisionApproved):
+		decision = agentcore.ApprovalDecisionApproved
+	case string(agentcore.ApprovalDecisionRejected):
+		decision = agentcore.ApprovalDecisionRejected
+	default:
+		http.Error(w, "decision must be approved or rejected", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.runService.ResolveApproval(runID, approvalID, decision); err != nil {
+		switch {
+		case errors.Is(err, awruntime.ErrRunNotFound), errors.Is(err, awruntime.ErrApprovalNotFound):
+			http.NotFound(w, r)
+		default:
+			http.Error(w, "failed to resolve approval", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func decodeJSON(r *http.Request, dst any) error {

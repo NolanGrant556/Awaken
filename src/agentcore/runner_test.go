@@ -253,8 +253,9 @@ func TestRunnerOpenAIApplyPatchCreateAndDelete(t *testing.T) {
 	})
 	defer server.Close()
 
-	agent := NewAgent(testAgentConfig(server.URL, 5))
-	answer, err := agent.Run(context.Background(), "create then delete via apply_patch")
+	answer, err := runAgentWithApprovalSink(context.Background(), testAgentConfig(server.URL, 5), "create then delete via apply_patch", testApprovalAwaiter{
+		decision: ApprovalDecisionApproved,
+	})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -315,14 +316,23 @@ func TestRunnerAnthropicApplyPatchToolUse(t *testing.T) {
 	defer server.Close()
 
 	cfg := testAgentConfig(server.URL+"/anthropic", 3)
-	agent := NewAgent(cfg)
-	answer, err := agent.Run(context.Background(), "create via anthropic apply_patch")
+	answer, err := runAgentWithApprovalSink(context.Background(), cfg, "create via anthropic apply_patch", testApprovalAwaiter{
+		decision: ApprovalDecisionApproved,
+	})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
 	if answer != "anthropic patch complete" {
 		t.Fatalf("expected final answer, got %q", answer)
 	}
+}
+
+func runAgentWithApprovalSink(ctx context.Context, cfg AgentConfig, userInput string, sink EventSink) (string, error) {
+	conv := convcontext.NewConversation(nil)
+	conv.UserInput(userInput)
+	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
+	runner.toolRuntime = NewToolRuntimeWithConfig(sink, toolRuntimeConfigFromAgentConfig(cfg))
+	return runner.Run(ctx)
 }
 
 func TestRunnerMaxThoughts(t *testing.T) {

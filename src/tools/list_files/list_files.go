@@ -44,6 +44,10 @@ func (t *ListFilesTool) Parameters() []tool.ToolParameter {
 	}
 }
 
+func (t *ListFilesTool) IsReadOnly() bool {
+	return true
+}
+
 func (t *ListFilesTool) Execute(ctx context.Context, input string) (string, error) {
 	params, err := parseParams(input)
 	if err != nil {

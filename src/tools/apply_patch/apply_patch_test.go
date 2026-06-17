@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"awaken/src/tool"
 )
 
 func TestApplyPatchAddsUpdatesAndDeletesFiles(t *testing.T) {
@@ -223,6 +225,81 @@ func TestApplyPatchDeleteDirectoryReturnsError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "directory") {
 		t.Fatalf("expected directory delete error, got %v", err)
 	}
+}
+
+func TestApplyPatchPermissionAsksWithPatchSummary(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	permissionContext := tool.NewPermissionContext(root, nil)
+
+	decision := (&ApplyPatchTool{}).CheckPermission(context.Background(), "*** Begin Patch\n"+
+		"*** Add File: note.md\n"+
+		"+hello\n"+
+		"*** End Patch", permissionContext)
+
+	if decision.Behavior != tool.PermissionAsk {
+		t.Fatalf("expected apply_patch to ask, got %+v", decision)
+	}
+	if decision.ApprovalRequest.RiskTone != "warning" || !strings.Contains(decision.ApprovalRequest.Description, "A note.md") {
+		t.Fatalf("unexpected approval request: %+v", decision.ApprovalRequest)
+	}
+}
+
+func TestApplyPatchPermissionMarksDeleteAsDanger(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	permissionContext := tool.NewPermissionContext(root, nil)
+
+	decision := (&ApplyPatchTool{}).CheckPermission(context.Background(), "*** Begin Patch\n"+
+		"*** Delete File: note.md\n"+
+		"*** End Patch", permissionContext)
+
+	if decision.Behavior != tool.PermissionAsk || decision.ApprovalRequest.RiskTone != "danger" {
+		t.Fatalf("expected delete patch to ask with danger risk, got %+v", decision)
+	}
+}
+
+func TestApplyPatchPermissionUsesWritableRoots(t *testing.T) {
+	workspace := t.TempDir()
+	writable := t.TempDir()
+	permissionContext := tool.NewPermissionContext(workspace, []string{writable})
+
+	insideWritable := filepath.Join(writable, "note.md")
+	decision := (&ApplyPatchTool{}).CheckPermission(context.Background(), "*** Begin Patch\n"+
+		"*** Add File: "+insideWritable+"\n"+
+		"+hello\n"+
+		"*** End Patch", permissionContext)
+	if decision.Behavior != tool.PermissionAsk || decision.ApprovalRequest.RiskTone != "warning" {
+		t.Fatalf("expected writable root patch to ask with warning risk, got %+v", decision)
+	}
+
+	outsideWritable := filepath.Join(workspace, "note.md")
+	decision = (&ApplyPatchTool{}).CheckPermission(context.Background(), "*** Begin Patch\n"+
+		"*** Add File: "+outsideWritable+"\n"+
+		"+hello\n"+
+		"*** End Patch", permissionContext)
+	if decision.Behavior != tool.PermissionAsk || decision.ApprovalRequest.RiskTone != "danger" {
+		t.Fatalf("expected outside writable roots patch to ask with danger risk, got %+v", decision)
+	}
+}
+
+func TestApplyPatchExecutesRelativePathsUnderWorkspaceRoot(t *testing.T) {
+	workspace := t.TempDir()
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(workspace, nil))
+
+	out, err := (&ApplyPatchTool{}).Execute(ctx, "*** Begin Patch\n"+
+		"*** Add File: nested/note.md\n"+
+		"+hello\n"+
+		"*** End Patch")
+	if err != nil {
+		t.Fatalf("patch failed: %v", err)
+	}
+
+	target := filepath.Join(workspace, "nested", "note.md")
+	if !strings.Contains(out, "A "+target) {
+		t.Fatalf("expected resolved path in summary, got %q", out)
+	}
+	assertFileContent(t, target, "hello\n")
 }
 
 func applyPatchText(t *testing.T, patch string) string {

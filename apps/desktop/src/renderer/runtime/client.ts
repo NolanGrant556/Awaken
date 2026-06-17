@@ -1,6 +1,7 @@
 import type { AguiEvent } from "./agui";
 import {
   normalizeRuntimeRun,
+  type ApprovalDecision,
   type AwakenBridge,
   type DesktopPlatform,
   type RuntimeRun,
@@ -13,6 +14,11 @@ export type RuntimeClient = {
   runtimeBaseUrl: string;
   createRun: (input: string) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
+  resolveApproval: (
+    runId: string,
+    approvalId: string,
+    decision: ApprovalDecision,
+  ) => Promise<void>;
   subscribeRun: (
     runId: string,
     handlers: {
@@ -44,6 +50,13 @@ async function requestRuntime(baseUrl: string, pathname: string, init?: RequestI
   return normalizeRuntimeRun((await response.json()) as RuntimeRunWire);
 }
 
+async function requestRuntimeOK(baseUrl: string, pathname: string, init?: RequestInit): Promise<void> {
+  const response = await fetch(joinRuntimeUrl(baseUrl, pathname), init);
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response));
+  }
+}
+
 function createElectronClient(bridge: AwakenBridge): RuntimeClient {
   return {
     source: "electron",
@@ -51,6 +64,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     runtimeBaseUrl: bridge.runtimeBaseUrl,
     createRun: bridge.createRun,
     cancelRun: bridge.cancelRun,
+    resolveApproval: bridge.resolveApproval,
     subscribeRun: async (runId, handlers) => {
       const subscriptionId = await bridge.subscribeRun(runId, handlers);
       return () => bridge.unsubscribeRun(subscriptionId);
@@ -77,6 +91,18 @@ function createBrowserClient(): RuntimeClient {
       requestRuntime(runtimeBaseUrl, `/v1/runs/${runId}/cancel`, {
         method: "POST",
       }),
+    resolveApproval: (runId, approvalId, decision) =>
+      requestRuntimeOK(
+        runtimeBaseUrl,
+        `/v1/runs/${runId}/approvals/${approvalId}/resolve`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ decision }),
+        },
+      ),
     subscribeRun: async (runId, handlers) => {
       const source = new EventSource(joinRuntimeUrl(runtimeBaseUrl, `/v1/runs/${runId}/events`));
       let terminalSeen = false;

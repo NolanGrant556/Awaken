@@ -1,0 +1,154 @@
+# 外部参考项目
+
+Awaken 会参考 AG-UI 和 A2UI 的协议与设计思路，但不会把它们的源码复制进本仓库，也不要求它们作为运行时依赖。
+
+这份文件用于帮助从 GitHub 新拉取 Awaken 的开发者复现外部参考环境，并知道应该对照哪些上游内容继续开发。
+
+## 参考仓库放在哪里
+
+AG-UI 和 A2UI 应该 clone 在 Awaken 仓库外部：
+
+```bash
+cd ..
+git clone https://github.com/ag-ui-protocol/ag-ui.git ag-ui
+git -C ag-ui checkout 88ce4bca9f6fec6d778367fc7c197c262ffbcf61
+
+git clone https://github.com/a2ui-project/a2ui.git a2ui
+git -C a2ui checkout 76dff6a9b006cd877e9333c418931da2992fca4b
+```
+
+原始开发机上的参考路径是：
+
+```text
+/Users/nolangrant/ag-ui
+/Users/nolangrant/a2ui
+```
+
+这些只是本机示例路径。不要把这些路径写进 Awaken 的代码、配置或测试。
+
+## AG-UI 参考说明
+
+上游仓库：
+
+```text
+https://github.com/ag-ui-protocol/ag-ui
+```
+
+当前固定参考 commit：
+
+```text
+88ce4bca9f6fec6d778367fc7c197c262ffbcf61
+```
+
+Awaken 参考 AG-UI 的目的：
+
+- 确认标准 run lifecycle event 名称。
+- 确认 text stream 和 reasoning stream 的事件形态。
+- 确认 tool call start / args / result / end 的事件形态。
+- 确认 SSE 输出的 wire format 预期。
+- 给 desktop consumer 的 TypeScript event shape 命名提供对照。
+
+建议优先阅读的上游位置：
+
+```text
+ag-ui/README.md
+ag-ui/docs/concepts/events.mdx
+ag-ui/docs/concepts/architecture.mdx
+ag-ui/docs/concepts/reasoning.mdx
+ag-ui/docs/concepts/tools.mdx
+ag-ui/docs/concepts/serialization.mdx
+ag-ui/sdks/typescript
+```
+
+Awaken 内部对应实现位置：
+
+```text
+src/agentcore/events.go              # Awaken 内部事件模型
+src/protocol/agui/events.go          # AG-UI-compatible 对外事件结构
+src/protocol/agui/mapper.go          # AwakenEvent -> AG-UI-compatible events
+src/protocol/agui/encoder.go         # JSON / SSE event 编码
+src/server/sse.go                    # SSE writer
+apps/desktop/src/shared/agui.ts      # desktop 侧 event shape
+apps/desktop/src/renderer/runtime    # desktop stream client 与 reducer
+```
+
+关键边界：
+
+- `src/agentcore` 不能 import `src/protocol/agui`。
+- Awaken 可以保留自己的扩展事件，例如 `AWAKEN_APPROVAL_REQUESTED`。
+- 除非项目边界被明确调整，否则不要添加 `@ag-ui/*` 作为运行时依赖。
+- 不要把 AG-UI monorepo 源码复制进 Awaken。
+
+## A2UI 参考说明
+
+上游仓库：
+
+```text
+https://github.com/a2ui-project/a2ui
+```
+
+当前固定参考 commit：
+
+```text
+76dff6a9b006cd877e9333c418931da2992fca4b
+```
+
+Awaken 参考 A2UI 的目的：
+
+- 理解 generated UI surface 的概念。
+- 对照 component / catalog / data-binding 这类术语。
+- 参考只读 renderer boundary 的设计思路。
+- 理解 action handling 的风险，并解释为什么 Awaken 当前仍保留原生 approval 控制。
+
+建议优先阅读的上游位置：
+
+```text
+a2ui/README.md
+a2ui/docs/concepts/overview.md
+a2ui/docs/concepts/components.md
+a2ui/docs/concepts/data-flow.md
+a2ui/docs/concepts/actions.md
+a2ui/docs/concepts/catalogs.md
+a2ui/docs/reference/components.md
+a2ui/docs/reference/renderers.md
+a2ui/renderers/react
+a2ui/renderers/web_core
+a2ui/specification/v0_9_1/README.md
+```
+
+Awaken 内部对应实现位置：
+
+```text
+src/protocol/a2ui/surface.go                  # 窄范围只读 surface payload builder
+apps/desktop/src/renderer/a2ui/surface.ts     # desktop 侧 payload parser
+apps/desktop/src/renderer/a2ui/A2UISurfaceView.tsx
+```
+
+关键边界：
+
+- 当前 Awaken 的 A2UI 工作只是有限范围的只读 `a2ui_surface` artifact。
+- 不要用 generated A2UI actions 替代原生 approval 控制。
+- 除非项目边界被明确调整，否则不要添加 `@a2ui/*` 作为运行时依赖。
+- 不要把上游 renderer 源码复制进 Awaken。
+
+## 更新参考版本的流程
+
+只有在明确需要跟进上游变化时，才更新 AG-UI 或 A2UI 的固定参考 commit。
+
+更新步骤：
+
+1. 在 Awaken 仓库外部的参考 checkout 中切到新的上游 commit。
+2. 对照上游协议或规格变化，检查 Awaken 的协议代码是否需要调整。
+3. 更新本文件里的 commit hash。
+4. 如果事件契约或边界发生变化，同步更新 `docs/agui-a2ui-architecture.md`。
+5. 运行 Awaken 验证命令：
+
+```bash
+go test ./...
+go vet ./...
+npm run typecheck:desktop
+npm run build:desktop
+git diff --check
+```
+
+不要随手刷新这些 commit。它们定义了本仓库当前使用的外部参考快照。

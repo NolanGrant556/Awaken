@@ -1,433 +1,306 @@
-# Awaken AG-UI / A2UI 架构边界
+# AG-UI / A2UI Runtime Boundary
 
-本文用于固定 Awaken 接入 AG-UI、评估 A2UI 时的代码边界、文件树和阶段计划。
+本文描述 Awaken 当前 protocol boundary。它是实现契约，不是历史记录。
 
-核心结论：
+## 核心定位
 
-- AG-UI 是 Awaken runtime 对外输出的事件协议，不是要部署的 Agent 服务，也不是 UI 页面。
-- A2UI 是后续可评估的“Agent 生成声明式 UI surface”方案，不是 Awaken 主界面的基础。
-- Awaken 必须先保留自己的内部事件模型，再由 adapter 映射成 AG-UI JSON event。
-- `packages/ui` 继续保持 UI-only，不接后端、不接 Electron IPC、不接 SSE/WebSocket。
+一句话：Awaken 用 AG-UI-compatible event names 和 payload shape 作为对外事件格式，但 runtime、adapter、SSE server 和 desktop consumer 都是 Awaken 自己实现的代码。
 
-## 当前现状
+- AG-UI 是 Awaken 对客户端输出的事件格式，不是本项目要运行的服务。
+- Awaken 不 vendor AG-UI 外部参考仓库，也不让 Agent Core 直接依赖 AG-UI structs。
+- 内部协议是 `AwakenEvent`；外部协议是 `src/protocol/agui` 输出的 AG-UI-compatible JSON events。
+- A2UI 当前只作为窄范围只读 generated surface payload。
+- Awaken 保留自己的内部事件模型，位于 `src/agentcore`。
+- 协议 adapter 位于 `src/protocol`。
+- `packages/ui` 里的组件不知道 AG-UI、A2UI、SSE、Electron 或 Agent runtime。
 
-Awaken 当前是本地优先的 Agent runtime 原型：
-
-- Go Agent Core 在 `src/agentcore`。
-- LLM streaming、thinking delta、native tool calls 解析在 `src/llm`。
-- 工具契约和工具实现在 `src/tool`、`src/tools`。
-- React 组件库已经独立为 `packages/ui`。
-- 未来桌面客户端边界预留在 `apps/desktop`。
-
-当前真正缺口不是组件库，而是 runtime 还没有结构化事件流。现在的 stream 形态能表达文本和 thinking delta，但不足以稳定表达：
-
-- run lifecycle
-- tool call lifecycle
-- tool result
-- approval
-- artifact
-- cancellation
-- workspace/runtime policy
-
-因此第一阶段要先补内部事件模型和协议输出，不要先搬 AG-UI 仓库，也不要先上 A2UI。
-
-## 总体设计
-
-Awaken 的事件链路应该是：
+## 当前事件链路
 
 ```text
 Agent Core
   -> AwakenEvent
-  -> Protocol Adapter
-  -> Transport
-  -> Desktop/Web Client
-  -> @awaken/ui Components
+  -> runtime session/event bus
+  -> protocol adapter
+  -> HTTP/SSE
+  -> desktop runtime client
+  -> renderer reducer
+  -> @awaken/ui props
 ```
 
-AG-UI 只存在于 protocol adapter 边界：
+AG-UI 只出现在协议层和 desktop consumer 边界：
 
 ```text
-AwakenEvent -> AG-UI JSON event
+src/protocol/agui
+apps/desktop/src/shared/agui.ts
+apps/desktop/src/renderer/runtime/agui.ts
+apps/desktop/src/renderer/runtime/reducer.ts
 ```
 
-不要让 Agent Core 直接依赖 AG-UI；不要让 UI 组件库知道 AG-UI。
+## 当前 Runtime API
 
-## 目标文件树
+`cmd/awaken-core` 启动本地 runtime server。默认地址：
 
 ```text
-/Users/nolangrant/Awaken
-├── cmd/
-│   └── awaken-core/
-│       └── main.go
-│
-├── src/
-│   ├── agentcore/
-│   │   ├── agent.go
-│   │   ├── runner.go
-│   │   ├── events.go
-│   │   ├── event_sink.go
-│   │   └── ...
-│   │
-│   ├── runtime/
-│   │   ├── session.go
-│   │   ├── run_service.go
-│   │   ├── event_bus.go
-│   │   └── store.go
-│   │
-│   ├── protocol/
-│   │   └── agui/
-│   │       ├── events.go
-│   │       ├── mapper.go
-│   │       ├── encoder.go
-│   │       └── README.md
-│   │
-│   ├── server/
-│   │   ├── router.go
-│   │   ├── handlers.go
-│   │   ├── sse.go
-│   │   └── middleware.go
-│   │
-│   ├── context/
-│   ├── llm/
-│   ├── tool/
-│   └── tools/
-│
-├── apps/
-│   └── desktop/
-│       ├── main/
-│       ├── preload/
-│       └── renderer/
-│
-└── packages/
-    └── ui/
-        ├── src/
-        ├── playground/
-        └── demos/
+http://127.0.0.1:8787
 ```
 
-这是目标方向，不要求一次性全部建完。后续实现应按阶段逐步引入。
+Routes：
 
-## 职责边界
+```text
+GET  /health
+GET  /v1/agui/demo
+POST /v1/runs
+GET  /v1/runs/{run_id}/events
+POST /v1/runs/{run_id}/cancel
+POST /v1/runs/{run_id}/approvals/{approval_id}/resolve
+```
 
-### `src/agentcore`
+Route owner：
 
-职责：Agent 执行循环。
+```text
+src/server/router.go
+src/server/handlers.go
+src/server/sse.go
+```
 
-可以做：
+Run/session owner：
 
-- 组装 LLM request。
-- 处理 LLM response。
-- 通过 `ToolRuntime` 执行工具。
-- 写入 conversation context。
-- 发出 Awaken 内部事件，例如 `RunStarted`、`TextDelta`、`ToolCallStarted`、`ToolResult`。
+```text
+src/runtime/run_service.go
+src/runtime/session.go
+src/runtime/event_bus.go
+```
 
-不可以做：
+## 内部 Awaken Events
 
-- import `src/protocol/agui`。
-- 知道 SSE、WebSocket、HTTP 或 Electron。
-- 直接输出 AG-UI JSON。
-- 管理前端状态。
+当前内部事件定义在：
 
-### `src/runtime`
+```text
+src/agentcore/events.go
+src/agentcore/event_sink.go
+```
 
-职责：应用级 session / run 编排。
-
-可以做：
-
-- 创建 session、thread、run。
-- 把一次用户输入转成一次 Agent run。
-- 存储或回放 run events。
-- 把事件分发给监听者。
-- 承担 approval、workspace access、cancel 等 runtime policy。
-
-不可以做：
-
-- 放 AG-UI JSON struct。
-- 渲染 UI。
-- 绕过 `agentcore` 直接执行工具。
-
-### `src/protocol/agui`
-
-职责：AG-UI 兼容层。
-
-可以做：
-
-- 定义 Awaken 需要输出的最小 AG-UI JSON struct。
-- 映射 `agentcore.Event` 或 `runtime.Event` 到 AG-UI event。
-- 编码 JSON 和 SSE frame。
-- 写测试锁定 wire format。
-
-不可以做：
-
-- 调 LLM。
-- 执行工具。
-- 管理 session。
-- import Electron 或 React。
-- vendor AG-UI monorepo。
-
-### `src/server`
-
-职责：本地 HTTP API 和 streaming transport。
-
-可以做：
-
-- 定义路由。
-- 校验请求。
-- 通过 SSE 输出 AG-UI-compatible events。
-- 暴露 health / readiness endpoint。
-- 把 handler 接到 `src/runtime`。
-
-不可以做：
-
-- 组装 Agent prompt。
-- 放本应属于 `runtime` 或 `agentcore` 的业务逻辑。
-- import UI package。
-
-### `cmd/awaken-core`
-
-职责：进程启动入口。
-
-可以做：
-
-- 加载配置。
-- 创建 runtime service。
-- 启动本地 HTTP server。
-- 后续处理 graceful shutdown。
-
-不可以做：
-
-- 写 handler 逻辑。
-- 写 Agent 执行逻辑。
-
-### `apps/desktop`
-
-职责：未来 Electron 桌面产品。
-
-可以做：
-
-- 启动或连接 `awaken-core`。
-- 管 Electron main / preload / renderer。
-- 提供 `window.awaken` adapter。
-- 消费 SSE 或本地 IPC 事件。
-- 把 runtime 数据转成 `@awaken/ui` props。
-
-不可以做：
-
-- 从 `packages/ui/src` 做源码路径 import。
-- 在 renderer 里执行后端工具。
-- 把 AG-UI protocol mapping 放进 UI components。
-
-### `packages/ui`
-
-职责：可复用 React UI 组件库。
-
-可以做：
-
-- 渲染 primitives、inputs、navigation、layout、feedback、content components。
-- 通过 props 接收数据。
-- 通过 callbacks 把用户操作交给业务层。
-- 提供 visual tokens 和 platform-aware UI affordances。
-
-不可以做：
-
-- 调 `fetch`。
-- 打开 SSE/WebSocket。
-- 使用 Electron IPC 或 `window.awaken`。
-- import AG-UI 或 A2UI protocol package。
-- 知道 Agent runtime 内部实现。
-
-## 最小 AwakenEvent 集合
-
-Phase 1 只需要最小事件集，能驱动 Run Timeline 即可：
+当前事件族：
 
 ```text
 RunStarted
 RunFinished
 RunError
+
 TextMessageStarted
 TextDelta
 TextMessageFinished
+
 ReasoningStarted
 ReasoningDelta
 ReasoningFinished
+
 ToolCallStarted
 ToolCallArgs
 ToolCallFinished
 ToolResult
-```
 
-后续有真实消费方后，再增加：
-
-```text
 ApprovalRequested
 ApprovalResolved
+
 ArtifactCreated
 ArtifactUpdated
-RunCancelled
-StepStarted
-StepFinished
-WorkspaceChanged
 ```
 
-不要为了“完整性”提前加事件。事件是 runtime contract，应该随真实需求扩展。
+`agentcore` 只能发内部事件，不应 import `src/protocol/agui`。
 
-## AG-UI 映射规则
+## AG-UI Mapping
 
-Phase 1 映射必须明确并有测试：
-
-```text
-Awaken RunStarted            -> AG-UI RUN_STARTED
-Awaken RunFinished           -> AG-UI RUN_FINISHED
-Awaken RunError              -> AG-UI RUN_ERROR
-Awaken TextMessageStarted    -> AG-UI TEXT_MESSAGE_START
-Awaken TextDelta             -> AG-UI TEXT_MESSAGE_CONTENT
-Awaken TextMessageFinished   -> AG-UI TEXT_MESSAGE_END
-Awaken ReasoningStarted      -> AG-UI REASONING_START + REASONING_MESSAGE_START
-Awaken ReasoningDelta        -> AG-UI REASONING_MESSAGE_CONTENT
-Awaken ReasoningFinished     -> AG-UI REASONING_MESSAGE_END + REASONING_END
-Awaken ToolCallStarted       -> AG-UI TOOL_CALL_START
-Awaken ToolCallArgs          -> AG-UI TOOL_CALL_ARGS
-Awaken ToolCallFinished      -> AG-UI TOOL_CALL_END
-Awaken ToolResult            -> AG-UI TOOL_CALL_RESULT
-```
-
-如果某个模型 provider 暂时不能实时 streaming tool args，Phase 1 可以在 provider response 完成后一次性发 `TOOL_CALL_ARGS`。实时 tool args delta 是后续优化，不是第一阶段门槛。
-
-## A2UI 边界
-
-A2UI 不进入 AG-UI Phase 1。
-
-只有当 Agent 需要生成临时声明式 UI surface 时，才评估 A2UI，例如：
-
-- 生成表单。
-- 结构化审批面板。
-- 选择器。
-- artifact 预览 surface。
-- tool call 参数编辑面板。
-
-未来可能的链路是：
+当前 Go mapper：
 
 ```text
-Agent output / runtime event
-  -> ArtifactCreated(kind: "a2ui_surface")
-  -> AG-UI CUSTOM or state event carrying A2UI payload
-  -> apps/desktop renderer validates payload
-  -> trusted renderer maps payload to Awaken UI components
-```
-
-A2UI 不替代 Awaken 主界面。Sidebar、Composer、RunTimeline、ApprovalCard、ArtifactGrid 等主界面组件继续来自 `@awaken/ui`。
-
-## 第三方引用记录
-
-不要把 AG-UI 或 A2UI monorepo 复制进 Awaken。
-
-如果需要记录参考来源，只加一个很小的文档：
-
-```text
-third_party/README.md
-```
-
-记录内容包括：
-
-- 项目名。
-- 本地参考路径。
-- commit SHA。
-- Awaken 用它参考什么。
-- Awaken 明确不 import / 不 vendor 什么。
-
-## Phase 计划
-
-### Phase 1: 协议出口 spike（已完成）
-
-状态：已完成。Awaken 已具备最小 AG-UI-compatible SSE 出口，当前 `/v1/agui/demo` 是 fake/demo stream，用于验证 wire format；真实 runtime session stream 留到 Phase 2。
-
-目标：证明 Awaken 可以输出 AG-UI-compatible SSE events，不改变 UI 架构。
-
-实现范围：
-
-```text
-src/agentcore/events.go
-src/agentcore/event_sink.go
-src/protocol/agui/events.go
 src/protocol/agui/mapper.go
+src/protocol/agui/events.go
 src/protocol/agui/encoder.go
-src/server/sse.go
-cmd/awaken-core/main.go
 ```
 
-最小验收：
-
-```bash
-go test ./...
-go build ./...
-go vet ./...
-curl --noproxy 127.0.0.1 http://127.0.0.1:<port>/health
-curl --noproxy 127.0.0.1 http://127.0.0.1:<port>/v1/agui/demo
-```
-
-demo stream 必须包含：
+当前映射：
 
 ```text
-RUN_STARTED
-TEXT_MESSAGE_CONTENT
-TOOL_CALL_START
-TOOL_CALL_RESULT
-RUN_FINISHED
+RunStarted            -> RUN_STARTED
+RunFinished           -> RUN_FINISHED
+RunError              -> RUN_ERROR
+
+TextMessageStarted    -> TEXT_MESSAGE_START
+TextDelta             -> TEXT_MESSAGE_CONTENT
+TextMessageFinished   -> TEXT_MESSAGE_END
+
+ReasoningStarted      -> REASONING_START + REASONING_MESSAGE_START
+ReasoningDelta        -> REASONING_MESSAGE_CONTENT
+ReasoningFinished     -> REASONING_MESSAGE_END + REASONING_END
+
+ToolCallStarted       -> TOOL_CALL_START
+ToolCallArgs          -> TOOL_CALL_ARGS
+ToolCallFinished      -> TOOL_CALL_END
+ToolResult            -> TOOL_CALL_RESULT
+
+ApprovalRequested     -> AWAKEN_APPROVAL_REQUESTED
+ApprovalResolved      -> AWAKEN_APPROVAL_RESOLVED
+
+ArtifactCreated       -> AWAKEN_ARTIFACT_CREATED
+ArtifactUpdated       -> AWAKEN_ARTIFACT_UPDATED
 ```
 
-### Phase 2: 真实 runtime session stream
+`AWAKEN_*` 是 Awaken extension events。保持显式，并用测试锁定。
 
-目标：用真实 Agent run 替换 fake/demo events。
+## Approval And Artifact Contract
 
-实现范围：
+Runtime approval wait 位于：
 
 ```text
 src/runtime/session.go
 src/runtime/run_service.go
-src/runtime/event_bus.go
-src/server/handlers.go
 ```
 
-建议 endpoints：
+Tool permission decision 位于：
 
 ```text
-GET  /health
-POST /v1/runs
-GET  /v1/runs/{run_id}/events
-POST /v1/runs/{run_id}/cancel
+src/tool/permission.go
+src/agentcore/tool_runtime.go
 ```
 
-endpoint 名字可以后续调整，但职责边界不要变。
-
-### Phase 3: Desktop consumer
-
-目标：让 `apps/desktop` 消费 runtime stream。
-
-实现范围：
+当前 approval flow：
 
 ```text
-apps/desktop/main/
-apps/desktop/preload/
-apps/desktop/renderer/
+ToolRuntime decides ask
+  -> ApprovalAwaiter.AwaitApproval
+  -> runtime emits ApprovalRequested
+  -> runtime emits read-only a2ui_surface artifact
+  -> desktop shows ApprovalCard
+  -> user resolves approval
+  -> POST /v1/runs/{run_id}/approvals/{approval_id}/resolve
+  -> runtime emits ApprovalResolved
+  -> ToolRuntime continues or returns rejected result
 ```
 
-renderer 应把 AG-UI events 转成 view state，再把 props 传给 `@awaken/ui`。
+Artifact event 是 runtime 可见记录，不等于自动写文件，也不能当作可信可执行内容。
 
-### Phase 4: Approvals and artifacts
+## A2UI Evaluation Boundary
 
-目标：让本地权限审批和 artifact 成为一等 runtime event。
-
-只在 runtime 有真实生产和消费需求后增加：
+当前 A2UI Go 代码：
 
 ```text
-ApprovalRequested
-ApprovalResolved
-ArtifactCreated
-ArtifactUpdated
+src/protocol/a2ui/surface.go
 ```
 
-### Phase 5: A2UI evaluation
+当前 desktop A2UI 代码：
 
-目标：判断 A2UI 是否值得用于 generated surfaces。
+```text
+apps/desktop/src/renderer/a2ui/surface.ts
+apps/desktop/src/renderer/a2ui/A2UISurfaceView.tsx
+```
 
-从一个窄场景开始，例如 generated parameter editor 或 approval form。不要一开始就在主应用里做通用 A2UI renderer。
+当前 A2UI 行为：
+
+- Runtime 生成只读 approval surface artifact。
+- Artifact kind 是 `a2ui_surface`。
+- Payload 使用窄范围 v0.9-style JSON shape。
+- Desktop 只校验和渲染小白名单。
+- Generated surface action 不执行。
+- 真正的 approval decision 仍走 `ApprovalCard` 和 runtime resolve API。
+
+支持的 renderer 白名单：
+
+```text
+Card
+Column
+Row
+Text
+Badge
+KeyValue
+Button
+```
+
+没有明确产品需求前，不要把它扩成通用 renderer。
+
+## Desktop Consumer Boundary
+
+Desktop 代码位于：
+
+```text
+apps/desktop/src/main
+apps/desktop/src/preload
+apps/desktop/src/renderer
+apps/desktop/src/shared
+```
+
+职责：
+
+- Electron main 创建窗口，并代理 runtime HTTP/SSE 访问。
+- Preload 暴露 `window.awaken`。
+- Renderer 创建 run、订阅 run events、取消 run、resolve approvals，并把 events reduce 成 view state。
+- Renderer 把普通 props 传给 `@awaken/ui`。
+
+Desktop app 可以知道 AG-UI event shape，但 UI library components 不可以知道。
+
+## UI Package Boundary
+
+UI package：
+
+```text
+packages/ui
+```
+
+允许：
+
+- Components。
+- Tokens 和 styles。
+- 局部组件交互。
+- Props 和 callbacks。
+- Platform-aware visual affordances。
+
+不允许：
+
+- `fetch`。
+- SSE 或 WebSocket。
+- Electron IPC。
+- `window.awaken`。
+- AG-UI 或 A2UI imports。
+- Agent runtime logic。
+
+## 外部参考项目
+
+AG-UI 和 A2UI 是外部参考项目，不是 Awaken 的 vendored source，也不是运行时必需依赖。
+
+Fresh GitHub clone 如果需要对照上游协议，应按 `docs/external-references.md` 在 Awaken repo 外部 clone 并 checkout 固定 commit。
+
+引用说明位于：
+
+```text
+docs/external-references.md
+```
+
+## Verification
+
+Protocol/runtime/tool 改动：
+
+```bash
+go test ./...
+go vet ./...
+go build ./...
+```
+
+Desktop 或 renderer 改动：
+
+```bash
+npm run typecheck:desktop
+npm run build:desktop
+```
+
+UI package 改动：
+
+```bash
+npm run typecheck:ui
+npm run build:ui
+```
+
+始终运行：
+
+```bash
+git diff --check
+```

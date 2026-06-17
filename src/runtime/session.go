@@ -2,11 +2,13 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	"awaken/src/agentcore"
+	"awaken/src/protocol/a2ui"
 )
 
 type RunStatus string
@@ -50,10 +52,11 @@ type Event struct {
 }
 
 type Session struct {
-	mu     sync.RWMutex
-	run    Run
-	cancel context.CancelFunc
-	bus    *EventBus
+	mu        sync.RWMutex
+	run       Run
+	cancel    context.CancelFunc
+	bus       *EventBus
+	approvals map[string]*pendingApproval
 }
 
 func NewSession(runID, threadID string, cancel context.CancelFunc) *Session {
@@ -66,9 +69,15 @@ func NewSession(runID, threadID string, cancel context.CancelFunc) *Session {
 			CreatedAt: now,
 			UpdatedAt: now,
 		},
-		cancel: cancel,
-		bus:    NewEventBus(),
+		cancel:    cancel,
+		bus:       NewEventBus(),
+		approvals: make(map[string]*pendingApproval),
 	}
+}
+
+type pendingApproval struct {
+	request  agentcore.ApprovalRequest
+	decision chan agentcore.ApprovalDecision
 }
 
 func (s *Session) Snapshot() Run {
@@ -161,6 +170,102 @@ func (s *Session) RecordAgentEvent(event agentcore.AwakenEvent) {
 	s.mu.Unlock()
 
 	bus.Append(wrapped, terminal)
+}
+
+func (s *Session) AwaitApproval(ctx context.Context, request agentcore.ApprovalRequest) (agentcore.ApprovalDecision, error) {
+	request = normalizeApprovalRequest(request)
+	pending := &pendingApproval{
+		request:  request,
+		decision: make(chan agentcore.ApprovalDecision, 1),
+	}
+
+	s.mu.Lock()
+	if isTerminalStatus(s.run.Status) {
+		s.mu.Unlock()
+		return "", context.Canceled
+	}
+	s.approvals[request.ID] = pending
+	s.mu.Unlock()
+
+	s.RecordAgentEvent(agentcore.AwakenEvent{
+		Type:                agentcore.ApprovalRequestedEventType,
+		ApprovalID:          request.ID,
+		ToolCallID:          request.ToolCallID,
+		ToolName:            request.ToolName,
+		ApprovalTitle:       request.Title,
+		ApprovalDescription: request.Description,
+		ApprovalRiskTone:    request.RiskTone,
+	})
+	s.RecordAgentEvent(approvalSurfaceArtifactEvent(request))
+
+	select {
+	case decision := <-pending.decision:
+		return decision, nil
+	case <-ctx.Done():
+		s.mu.Lock()
+		delete(s.approvals, request.ID)
+		s.mu.Unlock()
+		return "", ctx.Err()
+	}
+}
+
+func approvalSurfaceArtifactEvent(request agentcore.ApprovalRequest) agentcore.AwakenEvent {
+	content, err := a2ui.ApprovalSurfaceJSON(a2ui.ApprovalSurfaceRequest{
+		ApprovalID:  request.ID,
+		Title:       request.Title,
+		Description: request.Description,
+		RiskTone:    string(request.RiskTone),
+		ToolName:    request.ToolName,
+		ToolCallID:  request.ToolCallID,
+	})
+	if err != nil {
+		content = ""
+	}
+
+	return agentcore.AwakenEvent{
+		Type:                agentcore.ArtifactCreatedEventType,
+		ApprovalID:          request.ID,
+		ToolCallID:          request.ToolCallID,
+		ToolName:            request.ToolName,
+		ArtifactID:          fmt.Sprintf("%s-a2ui-surface", request.ID),
+		ArtifactTitle:       "Generated approval surface",
+		ArtifactDescription: "Phase 5 read-only A2UI evaluation payload generated from the approval request.",
+		ArtifactKind:        a2ui.ArtifactKind,
+		ArtifactContent:     content,
+		ArtifactStatus:      agentcore.ArtifactStatusReady,
+	}
+}
+
+func (s *Session) ResolveApproval(approvalID string, decision agentcore.ApprovalDecision) error {
+	approvalID = strings.TrimSpace(approvalID)
+	if approvalID == "" {
+		return ErrApprovalNotFound
+	}
+
+	s.mu.Lock()
+	pending, ok := s.approvals[approvalID]
+	if !ok {
+		s.mu.Unlock()
+		return ErrApprovalNotFound
+	}
+	delete(s.approvals, approvalID)
+	request := pending.request
+	s.mu.Unlock()
+
+	s.RecordAgentEvent(agentcore.AwakenEvent{
+		Type:                agentcore.ApprovalResolvedEventType,
+		ApprovalID:          approvalID,
+		ToolCallID:          request.ToolCallID,
+		ToolName:            request.ToolName,
+		ApprovalTitle:       request.Title,
+		ApprovalDescription: request.Description,
+		ApprovalRiskTone:    request.RiskTone,
+		ApprovalDecision:    decision,
+	})
+
+	pending.decision <- decision
+	close(pending.decision)
+	return nil
 }
 
 func (s *Session) CompleteCancelled(message string) {
@@ -257,6 +362,30 @@ func (s *Session) CompleteError(message, code string) {
 	s.mu.Unlock()
 
 	bus.Append(event, true)
+}
+
+func normalizeApprovalRequest(request agentcore.ApprovalRequest) agentcore.ApprovalRequest {
+	request.ID = strings.TrimSpace(request.ID)
+	request.ToolCallID = strings.TrimSpace(request.ToolCallID)
+	request.ToolName = strings.TrimSpace(request.ToolName)
+	request.Title = strings.TrimSpace(request.Title)
+	request.Description = strings.TrimSpace(request.Description)
+
+	if request.ID == "" {
+		request.ID = newRuntimeID("approval")
+	}
+	if request.Title == "" {
+		if request.ToolName != "" {
+			request.Title = fmt.Sprintf("Approve %s", request.ToolName)
+		} else {
+			request.Title = "Approval required"
+		}
+	}
+	if request.RiskTone == "" {
+		request.RiskTone = agentcore.ApprovalRiskWarning
+	}
+
+	return request
 }
 
 func isTerminalStatus(status RunStatus) bool {

@@ -46,6 +46,10 @@ func (t *FileReadTool) Parameters() []tool.ToolParameter {
 	}
 }
 
+func (t *FileReadTool) IsReadOnly() bool {
+	return true
+}
+
 func (t *FileReadTool) Execute(ctx context.Context, input string) (string, error) {
 	params, err := parseParams(input)
 	if err != nil {

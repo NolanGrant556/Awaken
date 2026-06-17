@@ -6,7 +6,7 @@ Awaken 的 UI-only React 组件库。这个包只负责组件渲染、局部交�
 
 - `src/` 是组件库源码，包含 `components/`、`styles/`、`types.ts` 和公共入口 `index.ts`。
 - `playground/` 是组件预览和验收台，不是 Awaken 产品入口。
-- `demos/` 保存历史 HTML 原型，不参与包发布。
+- `demos/` 保存独立 HTML 原型，不参与包发布。
 - Electron、`window.awaken`、preload、SSE/WebSocket、`/v1` API 调用都属于未来 `apps/desktop`，不能进入本包。
 
 ## 使用方式
@@ -51,7 +51,7 @@ npm run typecheck
 
 ## 设计档案
 
-组件库建设历史见：
+组件库实现档案见：
 
 ```text
 ../../docs/component-library.md

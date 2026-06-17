@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -173,6 +174,22 @@ func TestRunsEndpointsValidationAndNotFound(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for missing cancel run, got %d", rec.Code)
 	}
+
+	req = httptest.NewRequest(http.MethodPost, "/v1/runs/missing/approvals/approval-1/resolve", strings.NewReader(`{"decision":"approved"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for missing approval run, got %d", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/v1/runs/missing/approvals/approval-1/resolve", strings.NewReader(`{"decision":"later"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid approval decision, got %d", rec.Code)
+	}
 }
 
 func TestMapRuntimeCancelledUsesAGUIRunErrorWithCancelCode(t *testing.T) {
@@ -191,5 +208,110 @@ func TestMapRuntimeCancelledUsesAGUIRunErrorWithCancelCode(t *testing.T) {
 	}
 	if events[0].Code != "RUN_CANCELLED" {
 		t.Fatalf("expected RUN_CANCELLED code, got %q", events[0].Code)
+	}
+}
+
+func TestResolveApprovalEndpointPublishesExtensionEvents(t *testing.T) {
+	approvalReady := make(chan struct{})
+	runService := awruntime.NewRunService(func() awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			awaiter, ok := sink.(agentcore.ApprovalAwaiter)
+			if !ok {
+				return "", errors.New("expected approval awaiter on runtime sink")
+			}
+			close(approvalReady)
+			decision, err := awaiter.AwaitApproval(ctx, agentcore.ApprovalRequest{
+				ID:          "approval-1",
+				ToolCallID:  "tool-1",
+				ToolName:    "write_file",
+				Title:       "Approve write_file",
+				Description: "Write README.md",
+				RiskTone:    agentcore.ApprovalRiskDanger,
+			})
+			if err != nil {
+				return "", err
+			}
+			sink.Emit(agentcore.AwakenEvent{
+				Type:                agentcore.ArtifactCreatedEventType,
+				ToolCallID:          "tool-1",
+				ToolName:            "write_file",
+				ArtifactID:          "artifact-1",
+				ArtifactTitle:       "README.md",
+				ArtifactDescription: "Generated file",
+				ArtifactKind:        "file",
+				ArtifactPath:        "/tmp/README.md",
+				ArtifactContent:     "# hello",
+				ArtifactStatus:      agentcore.ArtifactStatusReady,
+			})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: string(decision)})
+			return string(decision), nil
+		})
+	})
+
+	ts := httptest.NewServer(NewRouter(runService))
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello"}`))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var created awruntime.Run
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+
+	<-approvalReady
+
+	done := make(chan string, 1)
+	go func() {
+		streamResp, err := http.Get(ts.URL + "/v1/runs/" + created.RunID + "/events")
+		if err != nil {
+			done <- "request error: " + err.Error()
+			return
+		}
+		defer streamResp.Body.Close()
+		body, err := io.ReadAll(streamResp.Body)
+		if err != nil {
+			done <- "read error: " + err.Error()
+			return
+		}
+		done <- string(body)
+	}()
+
+	resolveURL := ts.URL + "/v1/runs/" + created.RunID + "/approvals/approval-1/resolve"
+	var resolveResp *http.Response
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		resolveResp, err = http.Post(resolveURL, "application/json", strings.NewReader(`{"decision":"approved"}`))
+		if err != nil {
+			t.Fatalf("POST resolve approval failed: %v", err)
+		}
+		if resolveResp.StatusCode == http.StatusNoContent {
+			break
+		}
+		_ = resolveResp.Body.Close()
+		if time.Now().After(deadline) {
+			t.Fatalf("approval resolve never succeeded, last status %d", resolveResp.StatusCode)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	_ = resolveResp.Body.Close()
+
+	body := <-done
+	for _, token := range []string{
+		"AWAKEN_APPROVAL_REQUESTED",
+		"AWAKEN_APPROVAL_RESOLVED",
+		"AWAKEN_ARTIFACT_CREATED",
+		`"artifactKind":"a2ui_surface"`,
+		`"approvalId":"approval-1"`,
+		`"artifactId":"artifact-1"`,
+		"RUN_FINISHED",
+	} {
+		if !strings.Contains(body, token) {
+			t.Fatalf("expected stream body to contain %q, got %s", token, body)
+		}
 	}
 }

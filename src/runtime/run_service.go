@@ -13,8 +13,9 @@ import (
 )
 
 var (
-	ErrInvalidInput = errors.New("input is required")
-	ErrRunNotFound  = errors.New("run not found")
+	ErrInvalidInput     = errors.New("input is required")
+	ErrRunNotFound      = errors.New("run not found")
+	ErrApprovalNotFound = errors.New("approval not found")
 )
 
 type Executor interface {
@@ -80,18 +81,21 @@ func (s *RunService) CancelRun(runID string) (Run, error) {
 	return session.RequestCancel(), nil
 }
 
+func (s *RunService) ResolveApproval(runID, approvalID string, decision agentcore.ApprovalDecision) error {
+	session, err := s.session(runID)
+	if err != nil {
+		return err
+	}
+	return session.ResolveApproval(approvalID, decision)
+}
+
 func (s *RunService) execute(session *Session, executor Executor, input string, ctx context.Context) {
 	if executor == nil {
 		session.CompleteError("run executor is not configured", "executor_missing")
 		return
 	}
 
-	result, err := executor.Run(ctx, input, agentcore.EventSinkFunc(func(event agentcore.AwakenEvent) {
-		if session.CancelRequested() {
-			return
-		}
-		session.RecordAgentEvent(event)
-	}))
+	result, err := executor.Run(ctx, input, sessionEventSink{session: session})
 	if err == nil {
 		if session.CancelRequested() {
 			session.CompleteCancelled("run cancelled")
@@ -124,4 +128,22 @@ var runtimeIDCounter uint64
 func newRuntimeID(prefix string) string {
 	seq := atomic.AddUint64(&runtimeIDCounter, 1)
 	return fmt.Sprintf("%s_%d_%d", prefix, time.Now().UnixNano(), seq)
+}
+
+type sessionEventSink struct {
+	session *Session
+}
+
+func (s sessionEventSink) Emit(event agentcore.AwakenEvent) {
+	if s.session == nil || s.session.CancelRequested() {
+		return
+	}
+	s.session.RecordAgentEvent(event)
+}
+
+func (s sessionEventSink) AwaitApproval(ctx context.Context, request agentcore.ApprovalRequest) (agentcore.ApprovalDecision, error) {
+	if s.session == nil {
+		return "", context.Canceled
+	}
+	return s.session.AwaitApproval(ctx, request)
 }

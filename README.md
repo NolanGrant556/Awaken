@@ -1,42 +1,122 @@
 # Awaken
 
-Awaken 是一个本地运行的 Agent 原型。当前仓库重点在 Agent Core、System Prompt、Conversation Context、Tool Runtime 和 LLM Client 的职责拆分。
+Awaken 是一个本地优先的 Agent runtime 与桌面应用原型。当前仓库有四个活跃面：
+
+- `src/`：Go Agent Core、工具系统、runtime、协议层与本地 server。
+- `cmd/awaken-core`：本地 HTTP/SSE runtime 进程。
+- `apps/desktop`：Electron + React 桌面端 consumer。
+- `packages/ui`：UI-only React 组件库。
+
+## 协议归属
+
+一句话：Awaken 用的是 AG-UI 的事件协议格式，但实现是 Awaken 自己写的轻量兼容层；本项目不部署、不 vendor、不直接依赖 AG-UI 项目。
+
+当前边界：
+
+- 内部事件模型是 Awaken 自己的 `AwakenEvent`，位于 `src/agentcore`。
+- 对外 SSE 输出是 AG-UI-compatible JSON events，映射层位于 `src/protocol/agui`。
+- Desktop 可以消费 AG-UI-compatible events，但 `packages/ui` 组件库不知道 AG-UI、SSE、Electron 或 runtime。
+- A2UI 当前只用于窄范围只读 `a2ui_surface` payload 评估，不是完整 A2UI SDK 集成，也不 vendor A2UI 项目。
+
+## 先读这里
+
+0 上下文 Coding Agent 接手时，先读：
+
+```text
+README.md
+docs/README.md
+docs/coding-agent-handoff.md
+```
+
+然后按任务继续读：
+
+- 改 runtime / protocol / AG-UI / A2UI：读 `docs/agui-a2ui-architecture.md`。
+- 需要对照 AG-UI / A2UI 上游：读 `docs/external-references.md`。
+- 改 desktop：读 `apps/desktop/README.md`。
+- 改 UI 组件库：读 `packages/ui/README.md`。
+
+开始改代码前先看真实工作区：
+
+```bash
+cd /Users/nolangrant/Awaken
+git status --short
+```
+
+当前仓库可能存在未提交实现。除非用户明确要求撤回或丢弃，否则以当前工作区为事实来源。
 
 ## 目录结构
 
 ```text
 .
-├── CLI/                 # CLI 交互入口
+├── CLI/                         # 本地交互式 CLI 入口
+├── cmd/
+│   └── awaken-core/             # 本地 HTTP/SSE runtime 进程
 ├── apps/
-│   └── desktop/         # 未来 Awaken 桌面客户端边界（当前仅 README）
-├── docs/                # 架构与设计文档
+│   └── desktop/                 # Electron main/preload/renderer consumer
+├── docs/                        # 当前架构与接手指引
 ├── packages/
-│   └── ui/              # @awaken/ui：UI-only React 组件库与 playground
+│   └── ui/                      # @awaken/ui，UI-only React 组件库
 ├── src/
-│   ├── agentcore/       # Agent Core：执行循环、请求组装、工具调用
-│   ├── context/         # Conversation Context：用户/助手/工具消息历史
-│   ├── llm/             # LLM Client：模型请求、streaming、tool_calls 解析
-│   ├── prompt/          # System Prompt：Markdown 模板与运行时注入
-│   ├── tool/            # 工具系统公共层：接口、schema、注册、校验
-│   └── tools/           # 具体工具实现与内置工具聚合注册
-└── config.toml
+│   ├── agentcore/               # agent loop、request builder、tool runtime、内部事件
+│   ├── context/                 # conversation messages 与 tool result pairing
+│   ├── llm/                     # provider transport、streaming、native tool_calls
+│   ├── prompt/                  # system prompt 模板与 runtime metadata
+│   ├── protocol/
+│   │   ├── agui/                # AwakenEvent -> AG-UI-compatible events
+│   │   └── a2ui/                # 窄范围只读 generated surface payload
+│   ├── runtime/                 # run/session/event bus/cancel/approval
+│   ├── server/                  # 本地 HTTP routes 与 SSE
+│   ├── tool/                    # tool interface、registry、schema、permission model
+│   └── tools/                   # 内置工具实现
+├── config.toml                  # 非敏感本地 LLM/runtime 配置
+└── package.json                 # npm workspaces：ui 与 desktop
 ```
 
-核心设计说明见：
+## 当前 Runtime
+
+本地 runtime 进程：
 
 ```bash
-docs/agent-core-system-prompt-design.md
+go run ./cmd/awaken-core
 ```
 
-## 环境配置
+默认地址：
 
-在项目根目录创建 `.env`：
+```text
+http://127.0.0.1:8787
+```
+
+当前 HTTP surface：
+
+```text
+GET  /health
+GET  /v1/agui/demo
+POST /v1/runs
+GET  /v1/runs/{run_id}/events
+POST /v1/runs/{run_id}/cancel
+POST /v1/runs/{run_id}/approvals/{approval_id}/resolve
+```
+
+`/v1/runs/{run_id}/events` 输出 AG-UI-compatible SSE events。Awaken 目前有这些 extension events：
+
+```text
+AWAKEN_APPROVAL_REQUESTED
+AWAKEN_APPROVAL_RESOLVED
+AWAKEN_ARTIFACT_CREATED
+AWAKEN_ARTIFACT_UPDATED
+```
+
+approval request 还会生成一个只读的 `artifactKind: "a2ui_surface"` payload，用于 desktop generated surface 评估。
+
+## 配置
+
+敏感信息放 `.env`：
 
 ```bash
-LLM_API_KEY=你的 API Key
+LLM_API_KEY=your_api_key
 ```
 
-`.env` 只负责敏感信息。模型、协议和输出长度等非敏感配置放在 `config.toml`：
+非敏感配置放 `config.toml`：
 
 ```toml
 [llm]
@@ -52,176 +132,111 @@ max_output_tokens = 8192
 auto_compact_token_limit = 360000
 ```
 
-当前 CLI 会通过 `llm.LoadConfig()` 读取 `.env` 和 `config.toml`。如果 `config.toml` 缺少旧字段，仍会 fallback 到旧环境变量 `LLM_BASE_URL`、`LLM_MODEL_ID`、`LLM_PROTOCOL`、`LLM_AUTH_SCHEME`，便于平滑迁移。
+`.env` 已被 git ignore，不能提交。
 
-## 启动 CLI 交互模式
+## 开发命令
 
-进入项目根目录：
-
-```bash
-cd /Users/nolangrant/Awaken
-```
-
-启动交互模式：
+安装 npm workspace 依赖：
 
 ```bash
-go run ./CLI/main.go
-```
-
-进入后可以直接输入问题：
-
-```text
-> 你好
-```
-
-交互模式内置命令：
-
-```text
-reset  # 重置当前对话上下文
-clear  # 清屏
-exit   # 退出
-quit   # 退出
-```
-
-交互模式会保留同一次会话中的上下文，直到输入 `reset` 或退出程序。
-
-当前 CLI 支持 streaming 输出。如果模型返回 thinking delta，CLI 会显示：
-
-```text
-[Thinking]
-...
-```
-
-然后继续输出最终回答。
-
-## 查看 UI 组件库预览
-
-Awaken 的 React 组件库已经独立为 workspace 包 `@awaken/ui`，源码位于 `packages/ui/src`。组件预览和验收台位于 `packages/ui/playground`，不是正式 Awaken 产品入口。
-
-从仓库根目录启动预览：
-
-```bash
-cd /Users/nolangrant/Awaken
 npm install
-npm run dev:ui
 ```
 
-启动后打开：
-
-```text
-http://127.0.0.1:5173/
-```
-
-页面顶部有预览切换按钮，可以查看完整主界面 smoke preview 以及 Phase 1～5 的组件验收台。
-
-构建组件库：
-
-```bash
-npm run build:ui
-```
-
-类型检查：
-
-```bash
-npm run typecheck:ui
-```
-
-组件库实现规格见：
-
-```bash
-docs/component-library.md
-```
-
-组件库包说明见：
-
-```bash
-packages/ui/README.md
-```
-
-## LLM 手动 Smoke 测试
-
-LLM 包下有一个手动 smoke 程序：
-
-```bash
-go run ./src/llm/test-llm.go
-```
-
-这个文件带有 `//go:build ignore`，不会参与普通 `go test ./...` 编译。
-
-## 当前工具面
-
-模型可见的内置工具包括：
-
-```text
-calculator     # 数学计算
-read_file      # 读取文件
-list_files     # 按 glob 模式查找文件
-grep_search    # 按正则搜索文件内容
-apply_patch    # 使用 Codex 风格 patch 新增、修改、移动、删除文件
-shell          # 高级 shell 兜底
-web_search     # 网络搜索
-```
-
-文件任务的推荐顺序：
-
-```text
-读取文件 -> read_file
-查找文件 -> list_files
-搜索内容 -> grep_search
-新增/修改/移动/删除文件 -> apply_patch
-高级系统操作 -> shell
-```
-
-`write_file` 已删除；文件新增、修改、移动、删除统一通过 `apply_patch` 完成。`apply_patch` 支持 Codex 风格的 `Add File`、`Update File`、`Move to`、`Delete File` 和 `End of File`。
-
-文件工具带有基础防洪保护：`read_file` 支持 `offset`、`limit`、`max_bytes` 并拒绝二进制文件；`list_files` 和 `grep_search` 默认跳过常见依赖、构建和版本控制目录；`grep_search` 会裁剪超长匹配行；所有工具结果写回上下文前还会经过统一 head/tail 截断。
-
-## CLI CRUD Smoke 示例
-
-启动 CLI 后，可以用这些输入验证文件工具链：
-
-```text
-读取 README.md
-搜索 package agentcore
-帮我看看项目里工具相关代码在哪
-运行一个会产生大量输出的命令，并确认输出会被截断
-请使用 apply_patch 在项目根目录创建 tmp_cli_patch_test.md，内容写入 Awaken patch smoke test
-把 tmp_cli_patch_test.md 内容改为 Awaken patch update smoke test
-删除 tmp_cli_patch_test.md
-```
-
-## 测试与验证
-
-运行全部测试：
+Go 测试与检查：
 
 ```bash
 go test ./...
-```
-
-构建检查：
-
-```bash
+go vet ./...
 go build ./...
 ```
 
-静态检查：
+UI package 检查：
 
 ```bash
-go vet ./...
+npm run typecheck:ui
+npm run build:ui
+```
+
+desktop 检查：
+
+```bash
+npm run typecheck:desktop
+npm run build:desktop
 ```
 
 常用完整验证：
 
 ```bash
-go test ./... && go build ./... && go vet ./...
+go test ./... && go vet ./... && go build ./... && npm run build:desktop && git diff --check
 ```
 
-## 当前架构要点
+## 本地运行
 
-- CLI 只负责输入输出，不写 System Prompt。
-- System Prompt 静态内容在 Markdown 模板中，动态信息由运行时注入。
-- Context 只保存对话历史，不保存 System Prompt。
-- Agent Core 每轮调用前组装 `system prompt + messages + tools`。
-- `src/tool` 管工具契约、schema 和 registry，`src/tools/*` 放具体工具实现。
-- LLM Client 支持普通调用、streaming 输出、thinking delta 和 native `tool_calls`。
-- XML `<action>` parser 仍保留为兼容 fallback，不是目标核心协议。
+交互式 CLI：
+
+```bash
+go run ./CLI/main.go
+```
+
+UI 组件库 playground：
+
+```bash
+npm run dev:ui
+```
+
+打开：
+
+```text
+http://127.0.0.1:5173/
+```
+
+桌面端：
+
+```bash
+go run ./cmd/awaken-core
+npm run dev:desktop
+```
+
+`npm run dev:desktop` 会构建 `@awaken/ui`，启动 Vite renderer（`127.0.0.1:5174`），编译 Electron main/preload，并启动 Electron。
+
+## 当前工具面
+
+模型可见的内置工具：
+
+```text
+calculator
+read_file
+list_files
+grep_search
+apply_patch
+shell
+web_search
+```
+
+只读工具不应要求审批。会修改文件或有风险的工具通过 `src/tool/permission.go` 与 `src/agentcore/tool_runtime.go` 走权限模型。
+
+当前权限规则：
+
+- `apply_patch` 修改文件前需要审批。
+- `shell` 允许窄范围只读命令，复杂或危险命令需要审批。
+- `web_search` 不需要审批。
+- 相对路径按配置的 workspace root 解析。
+
+## 硬边界
+
+- 不要把后端、Electron、SSE、AG-UI 或 A2UI 逻辑放进 `packages/ui`。
+- desktop 不要从 `packages/ui/src` 做源码路径 import，要用 `@awaken/ui` 包出口。
+- `src/agentcore` 不要 import `src/protocol/agui`，协议映射只属于 `src/protocol/agui`。
+- 不要 vendor AG-UI / A2UI 外部参考仓库，也不要把本机参考路径写进代码或配置。
+- 不要提交 `.env`、依赖目录或构建产物。
+- 不要擅自回滚未提交的用户改动。
+
+## 当前文档
+
+```text
+docs/README.md                    # docs 索引
+docs/coding-agent-handoff.md      # 0 上下文 Coding Agent 接手指引
+docs/agui-a2ui-architecture.md    # 当前 protocol/runtime/desktop 边界
+docs/external-references.md       # AG-UI / A2UI 上游参考与固定 commit
+docs/component-library.md         # 组件库实现档案
+```

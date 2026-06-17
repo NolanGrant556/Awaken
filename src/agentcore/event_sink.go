@@ -1,5 +1,7 @@
 package agentcore
 
+import stdcontext "context"
+
 type EventSink interface {
 	Emit(AwakenEvent)
 }
@@ -21,4 +23,17 @@ func normalizeEventSink(sink EventSink) EventSink {
 		return noopEventSink{}
 	}
 	return sink
+}
+
+type ApprovalRequest struct {
+	ID          string
+	ToolCallID  string
+	ToolName    string
+	Title       string
+	Description string
+	RiskTone    ApprovalRiskTone
+}
+
+type ApprovalAwaiter interface {
+	AwaitApproval(ctx stdcontext.Context, request ApprovalRequest) (ApprovalDecision, error)
 }

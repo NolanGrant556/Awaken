@@ -13,8 +13,36 @@ type ReadOnlyTool interface {
 	IsReadOnly() bool
 }
 
-type ApprovalRequiredTool interface {
-	RequiresApproval() bool
+type ApprovalRequest struct {
+	Title       string
+	Description string
+	RiskTone    string
+}
+
+type ApprovalDescribingTool interface {
+	ApprovalRequest(input string) ApprovalRequest
+}
+
+type ArtifactAction string
+
+const (
+	ArtifactActionCreated ArtifactAction = "created"
+	ArtifactActionUpdated ArtifactAction = "updated"
+)
+
+type ArtifactDescriptor struct {
+	Action      ArtifactAction
+	ID          string
+	Title       string
+	Description string
+	Kind        string
+	Path        string
+	Content     string
+	Status      string
+}
+
+type ArtifactProducingTool interface {
+	Artifacts(input string, output string) []ArtifactDescriptor
 }
 
 type ToolParameter struct {

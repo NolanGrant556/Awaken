@@ -1,1 +1,6 @@
-export type { AguiEvent, AguiEventType } from "../../shared/agui";
+export type {
+  AguiApprovalRiskTone,
+  AguiArtifactStatus,
+  AguiEvent,
+  AguiEventType,
+} from "../../shared/agui";

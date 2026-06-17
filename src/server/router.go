@@ -6,30 +6,28 @@ import (
 
 	"awaken/src/agentcore"
 	"awaken/src/protocol/agui"
+	awruntime "awaken/src/runtime"
 )
 
-func NewRouter() http.Handler {
+func NewRouter(runService *awruntime.RunService) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", handleHealth)
-	mux.HandleFunc("/v1/agui/demo", handleAGUIDemo)
+	mux.HandleFunc("GET /health", handleHealth)
+	mux.HandleFunc("GET /v1/agui/demo", handleAGUIDemo)
+	if runService != nil {
+		handlers := runHandlers{runService: runService}
+		mux.HandleFunc("POST /v1/runs", handlers.handleCreateRun)
+		mux.HandleFunc("GET /v1/runs/{run_id}/events", handlers.handleRunEvents)
+		mux.HandleFunc("POST /v1/runs/{run_id}/cancel", handlers.handleCancelRun)
+	}
 	return mux
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = io.WriteString(w, "ok")
 }
 
 func handleAGUIDemo(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
 	stream, ok := NewSSEStream(w)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)

@@ -50,3 +50,83 @@
     transition-duration: 1ms !important;
   }
 }
+
+/* Global reset */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  font-family: var(--aw-font-sans);
+  color: var(--aw-text-primary);
+  background: var(--aw-bg-main);
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 0;
+}
+
+/* Preview chrome helpers */
+.preview-root {
+  position: relative;
+  min-height: 100vh;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(238, 246, 250, 0.92)),
+    radial-gradient(circle at 72% 18%, rgba(190, 230, 212, 0.35), transparent 32%);
+}
+
+.preview-switcher {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  z-index: 30;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  max-width: 95vw;
+  padding: 5px;
+  border: 1px solid rgba(199, 214, 223, 0.8);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 8px 24px rgba(55, 78, 92, 0.1);
+  transform: translateX(-50%);
+  backdrop-filter: blur(14px);
+}
+
+.preview-switcher button {
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 13px;
+  border-radius: 6px;
+  background: transparent;
+  color: #60707c;
+  font-size: 13px;
+  white-space: nowrap;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.preview-switcher button:hover,
+.preview-switcher button.is-active {
+  background: #22313b;
+  color: #fff;
+}
+
+.zoom-stage {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 48px;
+}

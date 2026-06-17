@@ -1,8 +1,4 @@
 import { useState } from "react";
-import { AppShell } from "./components/AppShell";
-import { ChatComposer } from "./components/ChatComposer";
-import { ChatHome } from "./components/ChatHome";
-import { Sidebar } from "./components/Sidebar";
 import { Icon, IconButton, Button, Pill, StatusPill, Avatar, Divider, Kbd } from "./components";
 import { Composer, SendButton, ModelSelector, ModeToggle, QuickActionChip, QuickActionGrid } from "./components";
 import {
@@ -13,6 +9,12 @@ import {
   ArtifactGrid,
   ApprovalCard,
   Toast,
+  PlatformProvider,
+  usePlatform,
+  AppShell,
+  TopBar,
+  WindowTitleBar,
+  CenterStage,
 } from "./components";
 import type {
   ModelOption,
@@ -23,20 +25,20 @@ import type {
   RunStepItem,
   ArtifactItem,
   ApprovalRiskTone,
+  PlatformKind,
 } from "./types";
-import { conversations, projects } from "./data/mockData";
+
 import { Wand2, Code, FileText, Search, Zap, MessageSquare, Puzzle, Clock3 } from "lucide-react";
 
-type PreviewMode = "full" | "sidebar" | "composer" | "primitives" | "phase2" | "phase3" | "phase4";
+type PreviewMode = "full" | "primitives" | "phase2" | "phase3" | "phase4" | "phase5";
 
 const previewTabs: Array<{ id: PreviewMode; label: string }> = [
   { id: "full", label: "完整主界面" },
-  { id: "sidebar", label: "侧边栏近景" },
-  { id: "composer", label: "聊天框近景" },
   { id: "primitives", label: "Phase 1 基础组件" },
   { id: "phase2", label: "Phase 2 输入组件" },
   { id: "phase3", label: "Phase 3 导航/侧栏" },
   { id: "phase4", label: "Phase 4 反馈组件" },
+  { id: "phase5", label: "Phase 5 布局/平台" },
 ];
 
 const mockModels: ModelOption[] = [
@@ -877,8 +879,317 @@ function Phase4Preview() {
   );
 }
 
+function Phase5Preview() {
+  const [platform, setPlatform] = useState<PlatformKind>("macos");
+  const [windowEvent, setWindowEvent] = useState("无");
+
+  return (
+    <PlatformProvider platform={platform}>
+      <Phase5Demo
+        platform={platform}
+        onPlatformChange={setPlatform}
+        onWindowEvent={setWindowEvent}
+        windowEvent={windowEvent}
+      />
+    </PlatformProvider>
+  );
+}
+
+function Phase5Demo({
+  platform,
+  onPlatformChange,
+  onWindowEvent,
+  windowEvent,
+}: {
+  platform: PlatformKind;
+  onPlatformChange: (p: PlatformKind) => void;
+  onWindowEvent: (e: string) => void;
+  windowEvent: string;
+}) {
+  const { isMac, isWindows, modifierKey } = usePlatform();
+
+  const platformButton = (p: PlatformKind, label: string) => {
+    const active = platform === p;
+    return (
+      <button
+        key={p}
+        style={{
+          ...phase4BtnStyle,
+          background: active
+            ? "var(--aw-button-black)"
+            : phase4BtnStyle.background,
+          color: active ? "var(--aw-text-onblack)" : phase4BtnStyle.color,
+          borderColor: active
+            ? "var(--aw-button-black)"
+            : phase4BtnStyle.borderColor,
+        }}
+        onClick={() => onPlatformChange(p)}
+      >
+        {label}
+      </button>
+    );
+  };
+
+  return (
+    <div
+      style={{
+        height: "100vh",
+        display: "grid",
+        gridTemplateRows: "auto 1fr",
+      }}
+    >
+      <WindowTitleBar
+        platform={platform}
+        onMinimize={() => onWindowEvent("minimize")}
+        onMaximize={() => onWindowEvent("maximize")}
+        onClose={() => onWindowEvent("close")}
+      />
+      <AppShell
+        platform={platform}
+        sidebar={
+          <AwakenSidebar
+            conversations={phase3Conversations}
+            projects={phase3Projects}
+            navItems={phase3NavItems}
+            activeConversationId="conv-1"
+            platform={platform}
+            onSelectConversation={() => {}}
+            onSelectNav={() => {}}
+            onSelectProject={() => {}}
+          />
+        }
+        main={
+          <>
+            <TopBar>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "12px",
+                  minWidth: 0,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: "var(--aw-font-size-sm)",
+                    color: "var(--aw-text-secondary)",
+                  }}
+                >
+                  modifierKey:{" "}
+                  <strong style={{ color: "var(--aw-text-primary)" }}>
+                    {modifierKey}
+                  </strong>
+                </span>
+                <span
+                  style={{
+                    fontSize: "var(--aw-font-size-xs)",
+                    color: "var(--aw-text-tertiary)",
+                    fontFamily: "var(--aw-font-mono)",
+                  }}
+                >
+                  {isMac ? "macOS" : isWindows ? "Windows" : "other"}
+                </span>
+                {platformButton("macos", "macOS")}
+                {platformButton("windows", "Windows")}
+              </div>
+            </TopBar>
+            <CenterStage>
+              <div
+                style={{
+                  display: "grid",
+                  gap: "16px",
+                  padding: "24px",
+                  border: "1px solid var(--aw-border-main)",
+                  borderRadius: "var(--aw-radius-lg)",
+                  background: "var(--aw-bg-white)",
+                  color: "var(--aw-text-primary)",
+                }}
+              >
+                <h2
+                  style={{
+                    margin: 0,
+                    fontSize: "var(--aw-font-size-xl)",
+                    lineHeight: "var(--aw-line-height-xl)",
+                  }}
+                >
+                  Phase 5 布局与平台适配
+                </h2>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: "var(--aw-font-size-sm)",
+                    color: "var(--aw-text-secondary)",
+                  }}
+                >
+                  当前 platform:{" "}
+                  <strong style={{ color: "var(--aw-text-primary)" }}>
+                    {platform}
+                  </strong>
+                  ；modifierKey:{" "}
+                  <strong style={{ color: "var(--aw-text-primary)" }}>
+                    {modifierKey}
+                  </strong>
+                </p>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: "var(--aw-font-size-sm)",
+                    color: "var(--aw-text-secondary)",
+                  }}
+                >
+                  WindowTitleBar callback:{" "}
+                  <strong style={{ color: "var(--aw-text-primary)" }}>
+                    {windowEvent}
+                  </strong>
+                </p>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <Kbd platform={platform}>K</Kbd>
+                  <Kbd platform={platform}>Enter</Kbd>
+                </div>
+              </div>
+            </CenterStage>
+          </>
+        }
+      />
+    </div>
+  );
+}
+
+function FullPage() {
+  const [platform, setPlatform] = useState<PlatformKind>("macos");
+  const [activeNavId, setActiveNavId] = useState("nav-workflow");
+  const [activeConversationId, setActiveConversationId] = useState("conv-1");
+  const [activeProjectId, setActiveProjectId] = useState("proj-product");
+  const [expandedIds, setExpandedIds] = useState<string[]>(["proj-product"]);
+  const [composerValue, setComposerValue] = useState("");
+  const [mode, setMode] = useState<ComposerMode>("Act");
+  const [selectedModel, setSelectedModel] = useState<ModelOption>(mockModels[0]);
+  const [runStatus, setRunStatus] = useState<"ready" | "running" | "done" | "error">("ready");
+  const [toastVisible, setToastVisible] = useState(false);
+
+  const handleSubmit = () => {
+    if (!composerValue.trim()) return;
+    setToastVisible(true);
+    setRunStatus("running");
+    setTimeout(() => setRunStatus("done"), 2500);
+  };
+
+  const runSteps: RunStepItem[] = [
+    { id: "s1", index: 1, title: "确认边界", description: "只更新独立 HTML demo，不侵入现有 React 前端", tag: "scope", status: "done" },
+    { id: "s2", index: 2, title: "对齐参考", description: "300px 侧栏，768px 主轴，32px 工具按钮", tag: "design", status: runStatus === "running" ? "active" : runStatus === "done" ? "done" : "pending" },
+    { id: "s3", index: 3, title: "生成产物", description: "纯前端 UI 原型，仅展示视觉与交互状态", tag: "html", status: runStatus === "done" ? "done" : "pending" },
+  ];
+
+  const artifacts: ArtifactItem[] = [
+    { id: "a1", title: "HTML Demo", description: "single file prototype" },
+    { id: "a2", title: "Design Tokens", description: "measured desktop spacing" },
+    { id: "a3", title: "Electron Path", description: "renderer-ready shell" },
+  ];
+
+  return (
+    <PlatformProvider platform={platform}>
+      <div style={{ height: "100vh", display: "grid", gridTemplateRows: "auto 1fr" }}>
+        <WindowTitleBar
+          platform={platform}
+          onMinimize={() => setToastVisible(false)}
+          onMaximize={() => setToastVisible(false)}
+          onClose={() => setToastVisible(false)}
+        />
+        <AppShell
+          platform={platform}
+          sidebar={
+            <AwakenSidebar
+              title="Awaken"
+              navItems={phase3NavItems}
+              activeNavId={activeNavId}
+              conversations={phase3Conversations}
+              activeConversationId={activeConversationId}
+              projects={phase3Projects}
+              activeProjectId={activeProjectId}
+              expandedIds={expandedIds}
+              onSelectNav={setActiveNavId}
+              onSelectConversation={setActiveConversationId}
+              onSelectProject={setActiveProjectId}
+              onExpandedChange={setExpandedIds}
+              profileName="Nolan"
+              profileAvatarFallback="NG"
+              platform={platform}
+            />
+          }
+          main={
+            <>
+              <TopBar>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <Pill>Pro</Pill>
+                  <button
+                    style={phase4BtnStyle}
+                    onClick={() => setPlatform((p) => (p === "macos" ? "windows" : "macos"))}
+                  >
+                    切换平台
+                  </button>
+                </div>
+              </TopBar>
+              <CenterStage>
+                <h1
+                  style={{
+                    margin: "0 0 28px",
+                    textAlign: "center",
+                    fontSize: "var(--aw-font-size-xl)",
+                    lineHeight: "var(--aw-line-height-xl)",
+                    fontWeight: 620,
+                    color: "var(--aw-text-primary)",
+                  }}
+                >
+                  今天要让 Awaken 完成什么？
+                </h1>
+
+                <Composer
+                  value={composerValue}
+                  onChange={setComposerValue}
+                  onSubmit={handleSubmit}
+                  mode={mode}
+                  onModeChange={setMode}
+                  model={selectedModel}
+                  models={mockModels}
+                  onModelChange={setSelectedModel}
+                  isReady={composerValue.trim().length > 0}
+                  placeholder="描述工作目标，例如：整理今天的客户会议纪要，提炼待办并生成跟进邮件"
+                />
+
+                <QuickActionGrid>
+                  {quickActions.map((action) => (
+                    <QuickActionChip
+                      key={action.id}
+                      icon={action.icon}
+                      label={action.label}
+                      prompt={action.prompt}
+                      onClick={(prompt) => setComposerValue(prompt)}
+                    />
+                  ))}
+                </QuickActionGrid>
+
+                {runStatus !== "ready" ? (
+                  <div style={{ marginTop: 38 }}>
+                    <RunTimeline title="整理任务" status={runStatus} steps={runSteps}>
+                      <ArtifactGrid items={artifacts} />
+                    </RunTimeline>
+                  </div>
+                ) : null}
+              </CenterStage>
+              <Toast
+                message="任务已发送"
+                visible={toastVisible}
+                onClose={() => setToastVisible(false)}
+              />
+            </>
+          }
+        />
+      </div>
+    </PlatformProvider>
+  );
+}
+
 export default function App() {
-  const [activeItemId, setActiveItemId] = useState("design-components");
   const [previewMode, setPreviewMode] = useState<PreviewMode>("full");
 
   return (
@@ -895,50 +1206,13 @@ export default function App() {
         ))}
       </div>
 
-      {previewMode === "full" ? (
-        <AppShell
-          sidebar={
-            <Sidebar
-              conversations={conversations}
-              projects={projects}
-              activeItemId={activeItemId}
-              onSelectItem={setActiveItemId}
-            />
-          }
-          main={<ChatHome />}
-        />
-      ) : null}
-
-      {previewMode === "sidebar" ? (
-        <div className="zoom-stage sidebar-zoom">
-          <Sidebar
-            conversations={conversations}
-            projects={projects}
-            activeItemId={activeItemId}
-            onSelectItem={setActiveItemId}
-          />
-        </div>
-      ) : null}
-
-      {previewMode === "composer" ? (
-        <div className="zoom-stage composer-zoom">
-          <div className="composer-demo-heading">
-            <span>聊天输入组件</span>
-            <strong>主界面就是聊天框</strong>
-          </div>
-          <ChatComposer
-            placeholder="告诉 Awaken 你要完成的任务"
-            modelName="Qwen3.7-Max"
-            workspaceName="Awaken"
-            permissionLabel="完全访问"
-          />
-        </div>
-      ) : null}
+      {previewMode === "full" ? <FullPage /> : null}
 
       {previewMode === "primitives" ? <PrimitivePreview /> : null}
       {previewMode === "phase2" ? <Phase2Preview /> : null}
       {previewMode === "phase3" ? <Phase3Preview /> : null}
       {previewMode === "phase4" ? <Phase4Preview /> : null}
+      {previewMode === "phase5" ? <Phase5Preview /> : null}
     </div>
   );
 }

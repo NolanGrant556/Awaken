@@ -36,6 +36,14 @@ export { ArtifactGrid } from "./feedback/ArtifactGrid";
 export { ApprovalCard } from "./feedback/ApprovalCard";
 export { Toast } from "./feedback/Toast";
 
+export { AppShell } from "./layout/AppShell";
+export { TopBar } from "./layout/TopBar";
+export { WindowTitleBar } from "./layout/WindowTitleBar";
+export { CenterStage } from "./layout/CenterStage";
+
+export { PlatformProvider } from "./platform/PlatformProvider";
+export { usePlatform } from "./platform/usePlatform";
+
 export type {
   PlatformKind,
   ComponentSize,

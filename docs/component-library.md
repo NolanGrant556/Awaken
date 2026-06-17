@@ -1,9 +1,23 @@
-# Awaken UI Kit — 生产级实现规格
+# Awaken UI Kit — 组件库建设历史档案
 
-> 版本：定稿 v1.1
-> 目标：作为下一轮 Coding Agent 的唯一实现依据，将 `frontend/demos/awaken-interactive-demo.html` 拆解为一套 UI-only、可复用、可发布的 React 组件库。
+> 版本：归档 v1.2
+> 状态：Phase 1～6 已完成并推送，最终实现提交 `068296d feat(ui-kit): Phase 5 layout/platform and Phase 6 full page assembly`
+> 原始目标：作为 Coding Agent 的实现依据，将 `frontend/demos/awaken-interactive-demo.html` 拆解为一套 UI-only、可复用、可发布的 React 组件库。
 > 设计源：`frontend/demos/awaken-interactive-demo.html`（唯一视觉与交互标准）
 > 旧组件引用：`frontend/src/components/`（现状参考，不作为视觉标准）
+
+## 0. 归档说明
+
+本文档最初是 Awaken UI Kit 的生产级实现规格，用于指导 Coding Agent 分阶段完成组件库重建。归档时，Phase 1～6 均已实现、review、修正并推送到 `origin/main`。
+
+本文档保留原规格、组件契约、验收标准和分阶段计划，用作后续追溯：
+
+- 为什么从 HTML 交互 demo 拆组件，而不是沿用旧 React 样式。
+- 为什么组件库坚持 UI-only、props/callbacks、零后端依赖。
+- 每个组件类别的职责边界、数据契约和跨平台预留点。
+- Phase 1～6 的实际建设路径、验收方式和已关闭风险。
+
+后续若继续演进组件库，应基于当前实现另开新规格或追加变更记录，不再把本文档当作“下一轮唯一实现指令”。
 
 ---
 
@@ -12,7 +26,7 @@
 - **UI-only React component library**。只负责渲染与交互，不承载业务逻辑，不调用任何 Agent runtime。
 - **零后端依赖**。不依赖 Agent runtime、不调用后端 API、不读取 Electron IPC。组件本身不引入 `window.awaken`、`require('electron')` 或 `fetch`。
 - **纯 props / callbacks / controlled state 接入业务**。所有数据通过 props 传入，所有事件通过 callbacks 传出。
-- **HTML demo 是唯一视觉与交互标准**。现有 React 组件（`frontend/src/components/*`）使用旧样式（`styles.css` 绿色渐变主题），仅作为现状参考。下一实现周期须以 HTML demo 的浅灰中性设计为准。
+- **HTML demo 是唯一视觉与交互标准**。旧 React 组件（`frontend/src/components/*`）曾使用旧样式（`styles.css` 绿色渐变主题），本轮实现仅将其作为现状参考，最终以 HTML demo 的浅灰中性设计为准。
 - **桌面产品优先**。当前面向 Electron 桌面端，最小窗口宽度 `920px`，不考虑移动端网页适配。macOS / Windows titlebar 通过 `platform` prop 预留适配点。
 - **向可发布库靠拢**。当前阶段仍在 `frontend` 内部开发，但目录结构、导出方式、类型定义按可发布 npm 包设计。
 
@@ -652,7 +666,7 @@ frontend/src/
   - `matchTriggerWidth?: boolean`
 - **必须支持的状态**：open, closed
 - **可访问性**：焦点陷阱（可选，menu 场景建议实现）；点击外部关闭；Escape 关闭。
-- **实现方案**：**允许引入 `@floating-ui/react`**。`@floating-ui/react` 成熟稳定，手写 portal + viewport detection + flip/shift 容易出错。Phase 2 开始前评估，预期会引入。详见 Phase 2 依赖变更。
+- **实现方案**：**允许引入 `@floating-ui/react`**。`@floating-ui/react` 成熟稳定，手写 portal + viewport detection + flip/shift 容易出错。Phase 2 实现阶段已采用该方案。详见 Phase 2 依赖变更。
 - **来源**：HTML demo `.model-menu` 的定位逻辑抽象。
 - **禁止**：禁止直接读取 `window.innerWidth` 做同步渲染（应使用 ResizeObserver 或防抖）。
 
@@ -933,9 +947,9 @@ import '@awaken/ui-kit/styles/components.css';
 
 ---
 
-## 9. 验证标准
+## 9. 验证标准与归档验收
 
-下一轮实现完成后，按以下标准验收：
+实现阶段按以下标准验收；归档时，Phase 1～6 已按这些标准完成验证。
 
 ### 9.1 构建与类型检查
 
@@ -993,7 +1007,9 @@ grep -r "fetch(" frontend/src/components/
 
 ## 10. 分阶段实现计划
 
-### Phase 1：地基（tokens、types、assets、primitives）
+> 归档状态：以下 6 个 Phase 已全部完成。此节保留为实施路径记录，而不是待办清单。
+
+### Phase 1：地基（tokens、types、assets、primitives）— 已完成
 
 **目标**：建立基础设施工具，所有组件能渲染。
 
@@ -1032,7 +1048,7 @@ grep -r "fetch(" frontend/src/components/
 
 ---
 
-### Phase 2：核心输入与选择器（composer、dropdown/model selector、quick actions）
+### Phase 2：核心输入与选择器（composer、dropdown/model selector、quick actions）— 已完成
 
 **目标**：Composer 和相关选择器组件完整可用。
 
@@ -1091,7 +1107,7 @@ grep -r "fetch(" frontend/src/components/
 
 ---
 
-### Phase 3：导航与侧边栏（sidebar/navigation/project tree）
+### Phase 3：导航与侧边栏（sidebar/navigation/project tree）— 已完成
 
 **目标**：完整侧边栏，所有导航组件可用。
 
@@ -1127,7 +1143,7 @@ grep -r "fetch(" frontend/src/components/
 
 ---
 
-### Phase 4：运行反馈（run feedback、toast、artifact、approvals）
+### Phase 4：运行反馈（run feedback、toast、artifact、approvals）— 已完成
 
 **目标**：时间线、产物、权限确认组件完整可用。
 
@@ -1164,7 +1180,7 @@ grep -r "fetch(" frontend/src/components/
 
 ---
 
-### Phase 5：布局与平台适配（AppShell/platform/titlebar）
+### Phase 5：布局与平台适配（AppShell/platform/titlebar）— 已完成
 
 **目标**：完整 AppShell 和跨平台适配。
 
@@ -1197,7 +1213,7 @@ grep -r "fetch(" frontend/src/components/
 
 ---
 
-### Phase 6：预览验证与清理
+### Phase 6：预览验证与清理 — 已完成
 
 **目标**：完整 demo 可运行，所有验收标准通过。
 
@@ -1225,9 +1241,9 @@ grep -r "fetch(" frontend/src/components/
 
 ---
 
-## 11. 本轮修改总结
+## 11. 归档总结
 
-### 11.1 本轮改了哪些章节
+### 11.1 规格定稿阶段改了哪些章节
 
 | 章节 | 修改内容 |
 |---|---|
@@ -1243,32 +1259,34 @@ grep -r "fetch(" frontend/src/components/
 | **Props 一致性** | Pill 补 `disabled?: boolean`；QuickActionChip 补 `disabled?: boolean` |
 | **风险表（第 11.3 节）** | Popover 和 ProjectTree 风险已解决，标注 ~~删除线~~ |
 
-### 11.2 为什么现在可以定稿
+### 11.2 为什么可以作为历史文档沉淀
 
 1. **token 值已与 HTML demo 完全对齐**：第 2.2 节语义 token 的值（如 `--aw-bg-main: #f8f8f7`）与 HTML demo 原始值一一对应，仅添加 `--aw-` 前缀以区分命名空间。
 
 2. **组件职责边界清晰**：每个组件的 props/callback 契约、必须支持的状态、禁止依赖项、来源区域均已明确。
 
-3. **Sidebar API 已定稿**：采用 data-driven 模式，提供完整字段清单，下一轮实现时无需猜测 slot vs props 的边界。
+3. **Sidebar API 已定稿**：采用 data-driven 模式，提供完整字段清单，实现时无需猜测 slot vs props 的边界。
 
 4. **ProjectTree 展开/折叠契约已统一**：`ProjectItem.expanded` 已移除，改为 `expandedIds[]` + `defaultExpandedIds[]` + `onExpandedChange`，避免 controlled/uncontrolled 混用。
 
-5. **Popover/Dropdown 方案已明确**：允许引入 `@floating-ui/react`，Phase 2 开始前即可安装，无需手写边界检测。
+5. **Popover/Dropdown 方案已明确并落地**：允许引入 `@floating-ui/react`，Phase 2 已采用该方案，无需手写边界检测。
 
 6. **ApprovalCard 已纳入组件体系**：Agent 权限确认是 Awaken 核心交互，已在 Phase 4 中定义完整契约。
 
 7. **类型定义完整且 UI 模型化**：不绑定 Agent runtime，全部为 UI 数据模型，实现阶段可直接复制到 `types.ts`。
 
-8. **分阶段计划可执行**：6 个 Phase，每阶段有明确文件清单和验收标准，下一轮 Coding Agent 可直接按顺序实现。
+8. **分阶段计划已被验证可执行**：6 个 Phase 均按文件清单和验收标准完成实现，最终形成可运行的组件库预览与完整主界面。
 
-9. **验证标准可操作**：构建命令、类型检查、交互验收表、grep 检查均已给出，下一轮实现完成后可立即自验。
+9. **验证标准已形成闭环**：构建命令、类型检查、交互验收表、grep 检查和浏览器布局验证已用于最终 review。
 
-### 11.3 还剩哪些实现阶段风险
+### 11.3 已关闭风险与后续边界
 
-| 风险 | 缓解方案 |
+| 风险 | 归档状态 |
 |---|---|
-| ~~**Popover 边界检测复杂度**~~ | ~~已决定引入 `@floating-ui/react`，Phase 2 开始前安装即可规避手写 bug~~ |
-| **ProjectTree 展开/折叠状态** | ~~已解决：使用 `expandedIds`/`defaultExpandedIds`/`onExpandedChange`，`ProjectItem.expanded` 已移除~~ |
-| **WindowTitleBar 的 Electron 窗口控制**：macOS traffic lights 和 Windows 按钮需要 Electron IPC callbacks | callbacks 只传事件，由应用层调用 Electron API，组件本身不依赖 Electron |
-| **logo SVG 内嵌打包**：需验证 Vite 正确处理 `.svg` import | Phase 1 中明确验证步骤，若失败可改用 base64 PNG |
-| **旧文件删除时机**：Phase 6 要求确认替换完成后再删 | 逐步替换，每阶段验证无引用后再删 |
+| ~~**Popover 边界检测复杂度**~~ | ~~已引入 `@floating-ui/react`，Dropdown/ModelSelector 复用 Popover 边界处理~~ |
+| ~~**ProjectTree 展开/折叠状态**~~ | ~~已使用 `expandedIds`/`defaultExpandedIds`/`onExpandedChange`，`ProjectItem.expanded` 已移除~~ |
+| ~~**WindowTitleBar 的 Electron 窗口控制**~~ | ~~已关闭：组件只暴露 callbacks，Electron IPC 由应用层接入，组件库保持 UI-only~~ |
+| ~~**logo SVG 内嵌打包**~~ | ~~已关闭：`BrandRow` 从本地 `components/assets/logo.svg` import，构建产物无网络 logo 请求~~ |
+| ~~**旧文件删除时机**~~ | ~~已关闭：Phase 6 删除旧 `UiPrimitives`、旧 `ChatComposer`、旧 `AppShell`、旧 `Sidebar`、旧 `styles.css` 等替代文件，并完成构建验证~~ |
+
+后续边界：本文档只记录 UI Kit 从 HTML demo 到 React 组件库的第一轮建设。Electron 主进程、真实 Agent runtime、后端数据接入、发布 npm 包和跨项目迁移，应另开文档设计。

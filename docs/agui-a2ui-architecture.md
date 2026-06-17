@@ -337,7 +337,9 @@ third_party/README.md
 
 ## Phase 计划
 
-### Phase 1: 协议出口 spike
+### Phase 1: 协议出口 spike（已完成）
+
+状态：已完成。Awaken 已具备最小 AG-UI-compatible SSE 出口，当前 `/v1/agui/demo` 是 fake/demo stream，用于验证 wire format；真实 runtime session stream 留到 Phase 2。
 
 目标：证明 Awaken 可以输出 AG-UI-compatible SSE events，不改变 UI 架构。
 
@@ -429,35 +431,3 @@ ArtifactUpdated
 目标：判断 A2UI 是否值得用于 generated surfaces。
 
 从一个窄场景开始，例如 generated parameter editor 或 approval form。不要一开始就在主应用里做通用 A2UI renderer。
-
-## Phase 1 明确不做
-
-- 不 vendor `/Users/nolangrant/ag-ui`。
-- 不 vendor `/Users/nolangrant/a2ui`。
-- 不引 CopilotKit。
-- 不添加 `@ag-ui/*` 或 `@a2ui/*` 依赖，除非后续阶段证明必要。
-- 不把 SSE、WebSocket、`fetch`、Electron IPC、`window.awaken` 放进 `packages/ui`。
-- 不让 Agent Core import AG-UI structs。
-- 不在 SSE 不够用之前做 WebSocket。
-- 不在固定 Run Timeline 跑通之前做 A2UI renderer。
-- 不把它扩展成 cloud multi-user 架构，除非产品方向明确要求。
-
-## 第一阶段 Coding Agent 指示词
-
-本文定稿后，下一位 Coding Agent 应只收到窄任务：
-
-```text
-Implement Phase 1 from docs/agui-a2ui-architecture.md only.
-
-Do not implement A2UI.
-Do not modify packages/ui.
-Do not vendor AG-UI or A2UI.
-Do not introduce external protocol dependencies.
-
-Acceptance:
-- go test ./...
-- go build ./...
-- go vet ./...
-- curl /health returns ok
-- curl /v1/agui/demo returns AG-UI-compatible SSE containing RUN_STARTED, TEXT_MESSAGE_CONTENT, TOOL_CALL_START, TOOL_CALL_RESULT, RUN_FINISHED
-```

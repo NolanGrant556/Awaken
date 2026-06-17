@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -426,6 +427,111 @@ func TestRunnerRunStreamNativeToolCallLoop(t *testing.T) {
 	}
 }
 
+func TestRunnerRunStreamWithEventsEmitsLifecycleSequence(t *testing.T) {
+	toolName := "runner_event_tool"
+	mustRegisterRunnerTool(t, runnerTestTool{name: toolName})
+
+	var calls int
+	server := newRunnerAnthropicStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			writeRunnerAnthropicStreamEvents(t, w, []string{
+				`event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking"}}`,
+				`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me think"}}`,
+				`event: content_block_stop
+data: {"type":"content_block_stop","index":0}`,
+				`event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_evt","name":"` + toolName + `"}}`,
+				`event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{"}}`,
+				`event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\"value\":\"hello\""}}`,
+				`event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"}"}}`,
+				`event: content_block_stop
+data: {"type":"content_block_stop","index":1}`,
+				`event: message_stop
+data: {"type":"message_stop"}`,
+			})
+			return
+		}
+
+		var body struct {
+			Messages []struct {
+				Role    string          `json:"role"`
+				Content json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode anthropic request: %v", err)
+		}
+		if !anthropicRequestContainsToolResult(body.Messages, "toolu_evt") {
+			t.Fatalf("expected tool result in second request, got %+v", body.Messages)
+		}
+
+		writeRunnerAnthropicStreamEvents(t, w, []string{
+			`event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text"}}`,
+			`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"done"}}`,
+			`event: content_block_stop
+data: {"type":"content_block_stop","index":0}`,
+			`event: message_stop
+data: {"type":"message_stop"}`,
+		})
+	})
+	defer server.Close()
+
+	cfg := testAgentConfig(server.URL+"/anthropic", 3)
+	var gotEvents []AwakenEvent
+	agent := NewAgent(cfg)
+	answer, err := agent.RunStreamWithEvents(context.Background(), "stream tool with events", nil, EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+	if err != nil {
+		t.Fatalf("RunStreamWithEvents returned error: %v", err)
+	}
+	if answer != "done" {
+		t.Fatalf("expected done, got %q", answer)
+	}
+
+	var gotTypes []AwakenEventType
+	for _, event := range gotEvents {
+		gotTypes = append(gotTypes, event.Type)
+	}
+
+	wantTypes := []AwakenEventType{
+		RunStartedEventType,
+		ReasoningStartedEventType,
+		ReasoningDeltaEventType,
+		ReasoningFinishedEventType,
+		ToolCallStartedEventType,
+		ToolCallArgsEventType,
+		ToolCallFinishedEventType,
+		ToolResultEventType,
+		TextMessageStartedEventType,
+		TextDeltaEventType,
+		TextMessageFinishedEventType,
+		RunFinishedEventType,
+	}
+	if len(gotTypes) != len(wantTypes) {
+		t.Fatalf("unexpected event count: want %d got %d (%v)", len(wantTypes), len(gotTypes), gotTypes)
+	}
+	for i, want := range wantTypes {
+		if gotTypes[i] != want {
+			t.Fatalf("unexpected event type at %d: want %s got %s (%v)", i, want, gotTypes[i], gotTypes)
+		}
+	}
+	if gotEvents[7].Content != "echo:hello" {
+		t.Fatalf("expected tool result content echo:hello, got %q", gotEvents[7].Content)
+	}
+	if gotEvents[9].Delta != "done" {
+		t.Fatalf("expected final text delta done, got %q", gotEvents[9].Delta)
+	}
+}
+
 func TestRunnerPropagatesBearerAuthByDefault(t *testing.T) {
 	var capturedHeaders http.Header
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -631,6 +737,16 @@ func newRunnerStreamServer(t *testing.T, handler http.HandlerFunc) *httptest.Ser
 	}))
 }
 
+func newRunnerAnthropicStreamServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/anthropic/v1/messages" {
+			t.Fatalf("expected /anthropic/v1/messages, got %s", r.URL.Path)
+		}
+		handler(w, r)
+	}))
+}
+
 func writeRunnerJSON(t *testing.T, w http.ResponseWriter, value interface{}) {
 	t.Helper()
 	w.Header().Set("Content-Type", "application/json")
@@ -671,6 +787,19 @@ func writeRunnerStreamLines(t *testing.T, w http.ResponseWriter, lines []string)
 	for _, line := range lines {
 		if _, err := w.Write([]byte(line + "\n\n")); err != nil {
 			t.Fatalf("failed to write stream line: %v", err)
+		}
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+	}
+}
+
+func writeRunnerAnthropicStreamEvents(t *testing.T, w http.ResponseWriter, events []string) {
+	t.Helper()
+	w.Header().Set("Content-Type", "text/event-stream")
+	for _, event := range events {
+		if _, err := io.WriteString(w, event+"\n\n"); err != nil {
+			t.Fatalf("failed to write anthropic stream event: %v", err)
 		}
 		if flusher, ok := w.(http.Flusher); ok {
 			flusher.Flush()

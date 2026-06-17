@@ -11,6 +11,7 @@ type Agent struct {
 	config       AgentConfig
 	conversation *context.Conversation
 	reqBuilder   *RequestBuilder
+	threadID     string
 }
 
 func NewAgent(config AgentConfig) *Agent {
@@ -21,6 +22,7 @@ func NewAgent(config AgentConfig) *Agent {
 		config:       config,
 		conversation: conv,
 		reqBuilder:   reqBuilder,
+		threadID:     newAwakenID("thread"),
 	}
 }
 
@@ -31,6 +33,7 @@ func NewAgentWithConversation(config AgentConfig, conv *context.Conversation) *A
 		config:       config,
 		conversation: conv,
 		reqBuilder:   reqBuilder,
+		threadID:     newAwakenID("thread"),
 	}
 }
 
@@ -50,6 +53,7 @@ func (a *Agent) Run(ctx stdcontext.Context, userInput string) (string, error) {
 	a.conversation.UserInput(userInput)
 
 	runner := NewRunner(a.config, a.conversation, a.reqBuilder)
+	runner.threadID = a.threadID
 	return runner.Run(ctx)
 }
 
@@ -57,5 +61,14 @@ func (a *Agent) RunStream(ctx stdcontext.Context, userInput string, callback Str
 	a.conversation.UserInput(userInput)
 
 	runner := NewRunner(a.config, a.conversation, a.reqBuilder)
+	runner.threadID = a.threadID
 	return runner.RunStream(ctx, callback)
+}
+
+func (a *Agent) RunStreamWithEvents(ctx stdcontext.Context, userInput string, callback StreamCallback, sink EventSink) (string, error) {
+	a.conversation.UserInput(userInput)
+
+	runner := NewRunner(a.config, a.conversation, a.reqBuilder)
+	runner.threadID = a.threadID
+	return runner.RunStreamWithEvents(ctx, callback, sink)
 }

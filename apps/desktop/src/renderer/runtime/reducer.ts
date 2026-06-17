@@ -1,0 +1,349 @@
+import type { ArtifactItem, RunStepItem } from "@awaken/ui";
+import type { AguiEvent } from "./agui";
+import type { RuntimeRun } from "../../shared/runtime";
+
+type RuntimePhase = "idle" | "starting" | "running" | "cancelling" | "done" | "error";
+
+type TimelineStatus = "ready" | "running" | "done" | "error";
+
+type StepRecord = RunStepItem & {
+  key: string;
+};
+
+export type RuntimeViewState = {
+  prompt: string;
+  runId?: string;
+  threadId?: string;
+  phase: RuntimePhase;
+  timelineTitle: string;
+  timelineStatus: TimelineStatus;
+  steps: RunStepItem[];
+  assistantText: string;
+  reasoningText: string;
+  toolResults: Array<{ id: string; title: string; content: string }>;
+  artifactItems: ArtifactItem[];
+  errorMessage?: string;
+};
+
+export type RuntimeAction =
+  | { type: "run/reset" }
+  | { type: "run/requested"; prompt: string }
+  | { type: "run/created"; run: RuntimeRun }
+  | { type: "run/createFailed"; message: string }
+  | { type: "run/cancelRequested" }
+  | { type: "run/cancelSync"; run: RuntimeRun }
+  | { type: "run/streamError"; message: string }
+  | { type: "run/event"; event: AguiEvent };
+
+const initialState: RuntimeViewState = {
+  prompt: "",
+  phase: "idle",
+  timelineTitle: "等待运行",
+  timelineStatus: "ready",
+  steps: [],
+  assistantText: "",
+  reasoningText: "",
+  toolResults: [],
+  artifactItems: [],
+};
+
+function toSteps(records: StepRecord[]): RunStepItem[] {
+  return records.map(({ key: _key, ...step }) => step);
+}
+
+function upsertStep(
+  records: StepRecord[],
+  key: string,
+  next: Omit<RunStepItem, "id" | "index"> & { id?: string },
+): StepRecord[] {
+  const existingIndex = records.findIndex((record) => record.key === key);
+  const existing = existingIndex >= 0 ? records[existingIndex] : undefined;
+  const record: StepRecord = {
+    id: next.id ?? existing?.id ?? key,
+    index: existing?.index ?? records.length + 1,
+    key,
+    title: next.title,
+    description: next.description,
+    tag: next.tag,
+    status: next.status,
+  };
+
+  if (existingIndex >= 0) {
+    const updated = records.slice();
+    updated[existingIndex] = record;
+    return updated;
+  }
+
+  return [...records, record];
+}
+
+function excerpt(value: string, max = 96): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+  if (trimmed.length <= max) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, max - 1)}…`;
+}
+
+function syncFromRun(state: RuntimeViewState, run: RuntimeRun): RuntimeViewState {
+  if (run.status === "cancelling") {
+    return {
+      ...state,
+      runId: run.runId,
+      threadId: run.threadId,
+      phase: "cancelling",
+      timelineStatus: "running",
+      steps: toSteps(
+        upsertStep(state.steps.map((step, index) => ({ ...step, key: step.id, index: index + 1 })), "run-cancel", {
+          title: "Cancelling run",
+          description: "Waiting for runtime shutdown",
+          status: "active",
+          tag: "cancel",
+        }),
+      ),
+    };
+  }
+
+  if (run.status === "finished") {
+    return {
+      ...state,
+      runId: run.runId,
+      threadId: run.threadId,
+      phase: "done",
+      timelineStatus: "done",
+    };
+  }
+
+  if (run.status === "error" || run.status === "cancelled") {
+    return {
+      ...state,
+      runId: run.runId,
+      threadId: run.threadId,
+      phase: "error",
+      timelineStatus: "error",
+      errorMessage: run.error || "Run failed",
+    };
+  }
+
+  return {
+    ...state,
+    runId: run.runId,
+    threadId: run.threadId,
+    phase: "running",
+    timelineStatus: "running",
+  };
+}
+
+export function createInitialRuntimeState(): RuntimeViewState {
+  return initialState;
+}
+
+export function reduceRuntimeState(
+  state: RuntimeViewState,
+  action: RuntimeAction,
+): RuntimeViewState {
+  switch (action.type) {
+    case "run/reset":
+      return initialState;
+    case "run/requested":
+      return {
+        prompt: action.prompt,
+        phase: "starting",
+        timelineTitle: excerpt(action.prompt, 72) || "New run",
+        timelineStatus: "running",
+        steps: [],
+        assistantText: "",
+        reasoningText: "",
+        toolResults: [],
+        artifactItems: [],
+      };
+    case "run/created":
+      return syncFromRun(state, action.run);
+    case "run/createFailed":
+      return {
+        ...state,
+        phase: "error",
+        timelineStatus: "error",
+        errorMessage: action.message,
+        steps: toSteps(
+          upsertStep([], "run-create-error", {
+            title: "Create run failed",
+            description: action.message,
+            status: "error",
+            tag: "http",
+          }),
+        ),
+      };
+    case "run/cancelRequested":
+      return {
+        ...state,
+        phase: "cancelling",
+        timelineStatus: "running",
+      };
+    case "run/cancelSync":
+      return syncFromRun(state, action.run);
+    case "run/streamError":
+      return {
+        ...state,
+        phase: "error",
+        timelineStatus: "error",
+        errorMessage: action.message,
+      };
+    case "run/event": {
+      let nextState = { ...state };
+      let records = state.steps.map((step, index) => ({
+        ...step,
+        key: step.id,
+        index: index + 1,
+      }));
+
+      switch (action.event.type) {
+        case "RUN_STARTED":
+          nextState.phase = "running";
+          nextState.timelineStatus = "running";
+          nextState.runId = action.event.runId ?? nextState.runId;
+          nextState.threadId = action.event.threadId ?? nextState.threadId;
+          records = upsertStep(records, "run-started", {
+            title: "Runtime accepted run",
+            description: action.event.runId ? `run ${action.event.runId}` : "Awaiting streamed events",
+            status: "done",
+            tag: "runtime",
+          });
+          break;
+        case "TEXT_MESSAGE_START":
+          records = upsertStep(records, `assistant:${action.event.messageId ?? "message"}`, {
+            title: "Assistant response",
+            description: "Streaming text output",
+            status: "active",
+            tag: action.event.role || "assistant",
+          });
+          break;
+        case "TEXT_MESSAGE_CONTENT": {
+          const delta = action.event.delta ?? "";
+          nextState.assistantText += delta;
+          records = upsertStep(records, `assistant:${action.event.messageId ?? "message"}`, {
+            title: "Assistant response",
+            description: excerpt(nextState.assistantText) || "Streaming text output",
+            status: "active",
+            tag: action.event.role || "assistant",
+          });
+          break;
+        }
+        case "TEXT_MESSAGE_END":
+          records = upsertStep(records, `assistant:${action.event.messageId ?? "message"}`, {
+            title: "Assistant response",
+            description: excerpt(nextState.assistantText) || "Completed text output",
+            status: "done",
+            tag: action.event.role || "assistant",
+          });
+          break;
+        case "REASONING_START":
+          records = upsertStep(records, `reasoning:${action.event.messageId ?? "reasoning"}`, {
+            title: "Reasoning",
+            description: "Streaming internal reasoning summary",
+            status: "active",
+            tag: "thinking",
+          });
+          break;
+        case "REASONING_MESSAGE_CONTENT": {
+          const delta = action.event.delta ?? "";
+          nextState.reasoningText += delta;
+          records = upsertStep(records, `reasoning:${action.event.messageId ?? "reasoning"}`, {
+            title: "Reasoning",
+            description: excerpt(nextState.reasoningText) || "Streaming internal reasoning summary",
+            status: "active",
+            tag: "thinking",
+          });
+          break;
+        }
+        case "REASONING_END":
+          records = upsertStep(records, `reasoning:${action.event.messageId ?? "reasoning"}`, {
+            title: "Reasoning",
+            description: excerpt(nextState.reasoningText) || "Reasoning complete",
+            status: "done",
+            tag: "thinking",
+          });
+          break;
+        case "TOOL_CALL_START":
+          records = upsertStep(records, `tool:${action.event.toolCallId ?? "tool"}`, {
+            title: action.event.toolCallName || "Tool call",
+            description: "Tool invocation started",
+            status: "active",
+            tag: "tool",
+          });
+          break;
+        case "TOOL_CALL_ARGS":
+          records = upsertStep(records, `tool:${action.event.toolCallId ?? "tool"}`, {
+            title: action.event.toolCallName || "Tool call",
+            description: excerpt(action.event.delta || "Streaming tool arguments"),
+            status: "active",
+            tag: "tool",
+          });
+          break;
+        case "TOOL_CALL_RESULT": {
+          const content = action.event.content || "Tool returned empty content";
+          const id = action.event.toolCallId || `tool-result-${state.toolResults.length + 1}`;
+          const existingIndex = nextState.toolResults.findIndex((tool) => tool.id === id);
+          const nextToolResults = nextState.toolResults.slice();
+          const record = {
+            id,
+            title: action.event.toolCallName || "Tool result",
+            content,
+          };
+          if (existingIndex >= 0) {
+            nextToolResults[existingIndex] = record;
+          } else {
+            nextToolResults.push(record);
+          }
+          nextState.toolResults = nextToolResults;
+          records = upsertStep(records, `tool:${id}`, {
+            title: action.event.toolCallName || "Tool call",
+            description: excerpt(content),
+            status: "active",
+            tag: "tool",
+          });
+          break;
+        }
+        case "TOOL_CALL_END":
+          records = upsertStep(records, `tool:${action.event.toolCallId ?? "tool"}`, {
+            title: action.event.toolCallName || "Tool call",
+            description: "Tool call complete",
+            status: "done",
+            tag: "tool",
+          });
+          break;
+        case "RUN_FINISHED":
+          nextState.phase = "done";
+          nextState.timelineStatus = "done";
+          records = upsertStep(records, "run-finished", {
+            title: "Run finished",
+            description: excerpt(action.event.result || nextState.assistantText || "Runtime completed"),
+            status: "done",
+            tag: action.event.outcome?.type || "success",
+          });
+          break;
+        case "RUN_ERROR":
+          nextState.phase = "error";
+          nextState.timelineStatus = "error";
+          nextState.errorMessage = action.event.message || "Run failed";
+          records = upsertStep(records, "run-error", {
+            title: action.event.code === "RUN_CANCELLED" ? "Run cancelled" : "Run failed",
+            description: action.event.message || "Runtime returned an error",
+            status: "error",
+            tag: action.event.code || "error",
+          });
+          break;
+        default:
+          break;
+      }
+
+      nextState.steps = toSteps(records);
+      return nextState;
+    }
+    default:
+      return state;
+  }
+}

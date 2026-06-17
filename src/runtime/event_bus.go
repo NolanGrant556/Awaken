@@ -2,6 +2,8 @@ package runtime
 
 import "sync"
 
+const subscriberBufferSize = 2048
+
 type Subscription struct {
 	History []Event
 	Events  <-chan Event
@@ -70,7 +72,7 @@ func (b *EventBus) Subscribe() Subscription {
 
 	id := b.nextID
 	b.nextID++
-	ch := make(chan Event, 32)
+	ch := make(chan Event, subscriberBufferSize)
 	b.subscribers[id] = ch
 
 	return Subscription{

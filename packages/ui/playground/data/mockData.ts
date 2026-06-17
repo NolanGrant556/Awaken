@@ -1,4 +1,4 @@
-import type { ConversationItem, ProjectItem } from "../types";
+import type { ConversationItem, ProjectItem } from "../../src";
 
 export const conversations: ConversationItem[] = [
   { id: "conv-status", label: "检查 Claude Code 任务状态", timeLabel: "1 天" },

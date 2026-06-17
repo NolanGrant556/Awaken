@@ -7,7 +7,11 @@ Awaken 是一个本地运行的 Agent 原型。当前仓库重点在 Agent Core�
 ```text
 .
 ├── CLI/                 # CLI 交互入口
+├── apps/
+│   └── desktop/         # 未来 Awaken 桌面客户端边界（当前仅 README）
 ├── docs/                # 架构与设计文档
+├── packages/
+│   └── ui/              # @awaken/ui：UI-only React 组件库与 playground
 ├── src/
 │   ├── agentcore/       # Agent Core：执行循环、请求组装、工具调用
 │   ├── context/         # Conversation Context：用户/助手/工具消息历史
@@ -90,13 +94,16 @@ quit   # 退出
 
 然后继续输出最终回答。
 
-## 查看前端组件预览
+## 查看 UI 组件库预览
 
-Awaken 的 React 组件库预览在 `frontend/` 目录下运行。启动方式：
+Awaken 的 React 组件库已经独立为 workspace 包 `@awaken/ui`，源码位于 `packages/ui/src`。组件预览和验收台位于 `packages/ui/playground`，不是正式 Awaken 产品入口。
+
+从仓库根目录启动预览：
 
 ```bash
-cd /Users/nolangrant/Awaken/frontend
-npm run dev -- --port 5173
+cd /Users/nolangrant/Awaken
+npm install
+npm run dev:ui
 ```
 
 启动后打开：
@@ -105,23 +112,30 @@ npm run dev -- --port 5173
 http://127.0.0.1:5173/
 ```
 
-页面顶部有预览切换按钮。点击 `Phase 1 基础组件`，可以查看当前已实现的 primitives：
+页面顶部有预览切换按钮，可以查看完整主界面 smoke preview 以及 Phase 1～5 的组件验收台。
 
-```text
-Icon
-IconButton
-Button
-Pill
-StatusPill
-Avatar
-Divider
-Kbd
+构建组件库：
+
+```bash
+npm run build:ui
+```
+
+类型检查：
+
+```bash
+npm run typecheck:ui
 ```
 
 组件库实现规格见：
 
 ```bash
 docs/component-library.md
+```
+
+组件库包说明见：
+
+```bash
+packages/ui/README.md
 ```
 
 ## LLM 手动 Smoke 测试

@@ -1,0 +1,13 @@
+{
+  "name": "awaken",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:ui": "npm --workspace @awaken/ui run dev",
+    "build:ui": "npm --workspace @awaken/ui run build",
+    "typecheck:ui": "npm --workspace @awaken/ui run typecheck"
+  }
+}

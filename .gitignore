@@ -16,11 +16,16 @@ _testmain.go
 # Go module cache
 go.sum
 
-# Frontend dependencies and build artifacts
-frontend/node_modules/
-frontend/dist/
-frontend/.vite/
-frontend/*.tsbuildinfo
+# Frontend/workspace dependencies and build artifacts
+node_modules/
+packages/*/node_modules/
+packages/*/dist/
+packages/*/.vite/
+packages/*/*.tsbuildinfo
+apps/*/node_modules/
+apps/*/dist/
+apps/*/.vite/
+apps/*/*.tsbuildinfo
 
 # IDE files
 .vscode/

@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { Icon, IconButton, Button, Pill, StatusPill, Avatar, Divider, Kbd } from "./components";
-import { Composer, SendButton, ModelSelector, ModeToggle, QuickActionChip, QuickActionGrid } from "./components";
+import { Icon, IconButton, Button, Pill, StatusPill, Avatar, Divider, Kbd } from "../src";
+import { Composer, SendButton, ModelSelector, ModeToggle, QuickActionChip, QuickActionGrid } from "../src";
 import {
   ProjectTree as NavProjectTree,
   Sidebar as AwakenSidebar,
@@ -15,7 +15,7 @@ import {
   TopBar,
   WindowTitleBar,
   CenterStage,
-} from "./components";
+} from "../src";
 import type {
   ModelOption,
   ComposerMode,
@@ -26,7 +26,7 @@ import type {
   ArtifactItem,
   ApprovalRiskTone,
   PlatformKind,
-} from "./types";
+} from "../src";
 
 import { Wand2, Code, FileText, Search, Zap, MessageSquare, Puzzle, Clock3 } from "lucide-react";
 

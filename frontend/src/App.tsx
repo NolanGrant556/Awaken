@@ -5,11 +5,29 @@ import { ChatHome } from "./components/ChatHome";
 import { Sidebar } from "./components/Sidebar";
 import { Icon, IconButton, Button, Pill, StatusPill, Avatar, Divider, Kbd } from "./components";
 import { Composer, SendButton, ModelSelector, ModeToggle, QuickActionChip, QuickActionGrid } from "./components";
-import type { ModelOption, ComposerMode } from "./types";
+import {
+  ProjectTree as NavProjectTree,
+  Sidebar as AwakenSidebar,
+  RunStep,
+  RunTimeline,
+  ArtifactGrid,
+  ApprovalCard,
+  Toast,
+} from "./components";
+import type {
+  ModelOption,
+  ComposerMode,
+  NavItem,
+  ConversationItem,
+  ProjectItem,
+  RunStepItem,
+  ArtifactItem,
+  ApprovalRiskTone,
+} from "./types";
 import { conversations, projects } from "./data/mockData";
-import { Wand2, Code, FileText, Search, Zap } from "lucide-react";
+import { Wand2, Code, FileText, Search, Zap, MessageSquare, Puzzle, Clock3 } from "lucide-react";
 
-type PreviewMode = "full" | "sidebar" | "composer" | "primitives" | "phase2";
+type PreviewMode = "full" | "sidebar" | "composer" | "primitives" | "phase2" | "phase3" | "phase4";
 
 const previewTabs: Array<{ id: PreviewMode; label: string }> = [
   { id: "full", label: "完整主界面" },
@@ -17,6 +35,8 @@ const previewTabs: Array<{ id: PreviewMode; label: string }> = [
   { id: "composer", label: "聊天框近景" },
   { id: "primitives", label: "Phase 1 基础组件" },
   { id: "phase2", label: "Phase 2 输入组件" },
+  { id: "phase3", label: "Phase 3 导航/侧栏" },
+  { id: "phase4", label: "Phase 4 反馈组件" },
 ];
 
 const mockModels: ModelOption[] = [
@@ -313,6 +333,550 @@ function Phase2Preview() {
   );
 }
 
+const phase3NavItems: NavItem[] = [
+  { id: "nav-workflow", label: "WorkFlow", icon: <MessageSquare size={16} strokeWidth={1.85} /> },
+  { id: "nav-plugins", label: "插件 & Skills", icon: <Puzzle size={16} strokeWidth={1.85} /> },
+  { id: "nav-timer", label: "定时任务", icon: <Clock3 size={16} strokeWidth={1.85} /> },
+];
+
+const phase3LongText =
+  "这是一个用于验证侧边栏长文本截断能力的超长标题当文本超过容器宽度时应当显示省略号而不是换行或撑破布局此处刻意写入超过一百个字符以确保截断逻辑被触发并可见Awaken组件库Phase3导航与侧边栏验收长文本场景测试用例结束";
+
+const phase3Conversations: ConversationItem[] = [
+  { id: "conv-1", label: "设计前端设计组件", timeLabel: "now" },
+  { id: "conv-2", label: "组件库成熟度审查", timeLabel: "1h" },
+  { id: "conv-long", label: phase3LongText, timeLabel: "2h" },
+];
+
+const phase3Projects: ProjectItem[] = [
+  {
+    id: "proj-product",
+    label: "产品设计",
+    timeLabel: "当前",
+    children: [
+      { id: "proj-product-1", label: "整理新工作台信息架构" },
+      { id: "proj-product-2", label: "优化任务输入框交互" },
+      { id: "proj-product-3", label: "定义组件状态规范" },
+    ],
+  },
+  {
+    id: "proj-research",
+    label: "市场调研",
+    timeLabel: "3",
+    children: [
+      { id: "proj-research-1", label: "收集竞品定价与定位" },
+      { id: "proj-research-2", label: "生成用户访谈提纲" },
+    ],
+  },
+  {
+    id: "proj-loading",
+    label: "数据同步中",
+    timeLabel: "加载",
+    isLoading: true,
+    children: [{ id: "proj-loading-1", label: "正在拉取远程会话..." }],
+  },
+  {
+    id: "proj-long",
+    label: phase3LongText,
+    timeLabel: "3",
+    children: [{ id: "proj-long-1", label: "长名称项目下的子任务" }],
+  },
+];
+
+const phase3CardStyle = {
+  padding: 16,
+  border: "1px solid var(--aw-border-main)",
+  borderRadius: "var(--aw-radius-md)",
+  background: "var(--aw-bg-white)",
+  color: "var(--aw-text-primary)",
+} as const;
+
+const phase3H3Style = {
+  margin: "0 0 10px",
+  fontSize: "var(--aw-font-size-sm)",
+  color: "var(--aw-text-tertiary)",
+  fontWeight: "var(--aw-font-weight-bold)",
+} as const;
+
+const phase3CtrlBtnStyle = {
+  height: 30,
+  padding: "0 12px",
+  border: "1px solid var(--aw-border-main)",
+  borderRadius: "var(--aw-radius-sm)",
+  background: "var(--aw-bg-white)",
+  color: "var(--aw-text-primary)",
+  fontSize: "var(--aw-font-size-sm)",
+  cursor: "pointer",
+} as const;
+
+function Phase3Preview() {
+  const [activeNav, setActiveNav] = useState("nav-workflow");
+  const [activeConv, setActiveConv] = useState("conv-1");
+  const [activeProj, setActiveProj] = useState("proj-product");
+  const [expandedIds, setExpandedIds] = useState<string[]>(["proj-product"]);
+  const [convs, setConvs] = useState<ConversationItem[]>(phase3Conversations);
+  const [projs, setProjs] = useState<ProjectItem[]>(phase3Projects);
+  const [newTaskCount, setNewTaskCount] = useState(0);
+  const [profileCount, setProfileCount] = useState(0);
+  const [lastEvent, setLastEvent] = useState("就绪");
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "auto minmax(0, 1fr)",
+        gap: 24,
+        padding: "48px 32px",
+        alignItems: "start",
+        minHeight: "100vh",
+      }}
+    >
+      <div
+        style={{
+          height: "min(760px, calc(100vh - 140px))",
+          border: "1px solid var(--aw-border-main)",
+          borderRadius: "var(--aw-radius-lg)",
+          overflow: "hidden",
+          boxShadow: "var(--aw-shadow-menu)",
+        }}
+      >
+        <AwakenSidebar
+          title="Awaken"
+          navItems={phase3NavItems}
+          activeNavId={activeNav}
+          conversations={convs}
+          activeConversationId={activeConv}
+          projects={projs}
+          activeProjectId={activeProj}
+          expandedIds={expandedIds}
+          onExpandedChange={setExpandedIds}
+          profileName="Nolan"
+          profileAvatarFallback="NG"
+          newTaskShortcut="N"
+          platform="macos"
+          onSelectNav={(id) => {
+            setActiveNav(id);
+            setLastEvent(`导航选中: ${id}`);
+          }}
+          onSelectConversation={(id) => {
+            setActiveConv(id);
+            setLastEvent(`对话选中: ${id}`);
+          }}
+          onSelectProject={(id) => {
+            setActiveProj(id);
+            setLastEvent(`项目选中: ${id}`);
+          }}
+          onNewTask={() => {
+            setNewTaskCount((c) => c + 1);
+            setLastEvent("新建任务已触发");
+          }}
+          onProfileClick={() => {
+            setProfileCount((c) => c + 1);
+            setLastEvent("Profile 已点击");
+          }}
+        />
+      </div>
+
+      <div style={{ display: "grid", gap: 16, alignContent: "start" }}>
+        <div style={phase3CardStyle}>
+          <h3 style={phase3H3Style}>Smoke 状态</h3>
+          <div
+            style={{
+              display: "grid",
+              gap: 6,
+              fontSize: "var(--aw-font-size-sm)",
+              color: "var(--aw-text-secondary)",
+            }}
+          >
+            <span>
+              新建任务点击:{" "}
+              <strong style={{ color: "var(--aw-text-primary)" }}>{newTaskCount}</strong>
+            </span>
+            <span>
+              Profile 点击:{" "}
+              <strong style={{ color: "var(--aw-text-primary)" }}>{profileCount}</strong>
+            </span>
+            <span>
+              当前事件:{" "}
+              <strong style={{ color: "var(--aw-text-primary)" }}>{lastEvent}</strong>
+            </span>
+            <span className="aw-truncate" style={{ maxWidth: 420 }}>
+              展开节点:{" "}
+              <strong style={{ color: "var(--aw-text-primary)" }}>
+                {expandedIds.join(", ") || "(无)"}
+              </strong>
+            </span>
+          </div>
+        </div>
+
+        <div style={phase3CardStyle}>
+          <h3 style={phase3H3Style}>空状态 / 长文本 控制台</h3>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              style={phase3CtrlBtnStyle}
+              onClick={() => setConvs(convs.length ? [] : phase3Conversations)}
+            >
+              {convs.length ? "清空对话" : "恢复对话"}
+            </button>
+            <button
+              style={phase3CtrlBtnStyle}
+              onClick={() => setProjs(projs.length ? [] : phase3Projects)}
+            >
+              {projs.length ? "清空项目" : "恢复项目"}
+            </button>
+          </div>
+          <p
+            style={{
+              fontSize: "var(--aw-font-size-xs)",
+              color: "var(--aw-text-tertiary)",
+              margin: "8px 0 0",
+            }}
+          >
+            清空后可在侧栏查看 ConversationList / ProjectTree 的 empty 状态。长文本节点已包含在对话与项目列表中。
+          </p>
+        </div>
+
+        <div style={phase3CardStyle}>
+          <h3 style={phase3H3Style}>非受控 ProjectTree（defaultExpandedIds）</h3>
+          <div
+            style={{
+              width: 280,
+              border: "1px solid var(--aw-border-light)",
+              borderRadius: "var(--aw-radius-md)",
+              padding: 8,
+              background: "var(--aw-bg-nav)",
+            }}
+          >
+            <NavProjectTree
+              items={phase3Projects}
+              activeId={activeProj}
+              defaultExpandedIds={["proj-product", "proj-loading"]}
+              onSelect={(id) => {
+                setActiveProj(id);
+                setLastEvent(`(非受控) 项目选中: ${id}`);
+              }}
+            />
+          </div>
+          <p
+            style={{
+              fontSize: "var(--aw-font-size-xs)",
+              color: "var(--aw-text-tertiary)",
+              margin: "8px 0 0",
+            }}
+          >
+            此树使用 defaultExpandedIds 非受控模式，内部自管展开状态。
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const phase4CardStyle = {
+  padding: 16,
+  border: "1px solid var(--aw-border-main)",
+  borderRadius: "var(--aw-radius-md)",
+  background: "var(--aw-bg-white)",
+  color: "var(--aw-text-primary)",
+} as const;
+
+const phase4H3Style = {
+  margin: "0 0 10px",
+  fontSize: "var(--aw-font-size-sm)",
+  color: "var(--aw-text-tertiary)",
+  fontWeight: "var(--aw-font-weight-bold)",
+} as const;
+
+const phase4BtnStyle = {
+  height: 30,
+  padding: "0 12px",
+  border: "1px solid var(--aw-border-main)",
+  borderColor: "var(--aw-border-main)",
+  borderRadius: "var(--aw-radius-sm)",
+  background: "var(--aw-bg-white)",
+  color: "var(--aw-text-primary)",
+  fontSize: "var(--aw-font-size-sm)",
+  cursor: "pointer",
+} as const;
+
+const phase4LongArtifactTitle =
+  "这是一个超长标题用于验证 ArtifactCard 和 ArtifactGrid 的长文本截断能力，不应撑破卡片布局，Awaken 组件库 Phase 4 验收用例";
+
+const phase4LongArtifactDesc =
+  "这是一个超长的描述文本，用于验证描述在两行截断后的显示效果。当文本长度超过两行时应该被截断并显示省略号，而不是无限扩展或撑破网格布局，这是 Phase 4 的关键验收场景之一。";
+
+const phase4ArtifactSets: Record<string, ArtifactItem[]> = {
+  normal: [
+    { id: "a1", title: "需求文档.md", description: "整理后的产品需求文档" },
+    { id: "a2", title: "接口设计.json", description: "后端 API 接口定义" },
+    { id: "a3", title: "测试用例.csv", description: "核心流程覆盖用例" },
+  ],
+  empty: [],
+  long: [
+    { id: "a-long-1", title: phase4LongArtifactTitle, description: phase4LongArtifactDesc },
+    { id: "a-long-2", title: phase4LongArtifactTitle, description: phase4LongArtifactDesc },
+    { id: "a-long-3", title: phase4LongArtifactTitle, description: phase4LongArtifactDesc },
+  ],
+};
+
+const phase4ApprovalTitles: Record<ApprovalRiskTone, string> = {
+  safe: "读取本地文件",
+  warning: "执行 shell 命令",
+  danger: "删除项目文件",
+};
+
+const phase4ApprovalDescs: Record<ApprovalRiskTone, string> = {
+  safe: "将读取 /Users/nolan/project/README.md",
+  warning: "即将执行：npm run build",
+  danger: "即将执行：rm -rf /tmp/awaken-staging",
+};
+
+const phase4ToneLabels: Record<ApprovalRiskTone, string> = {
+  safe: "安全",
+  warning: "警告",
+  danger: "危险",
+};
+
+function Phase4Preview() {
+  const [timelineStatus, setTimelineStatus] = useState<
+    "ready" | "running" | "done" | "error"
+  >("running");
+  const [artifactSet, setArtifactSet] = useState<"normal" | "empty" | "long">(
+    "normal"
+  );
+  const [approvalOpen, setApprovalOpen] = useState(false);
+  const [approvalTone, setApprovalTone] = useState<ApprovalRiskTone>("safe");
+  const [approvalSmoke, setApprovalSmoke] = useState("无");
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastMsg, setToastMsg] = useState("");
+
+  const timelineSteps: RunStepItem[] = (() => {
+    switch (timelineStatus) {
+      case "ready":
+        return [];
+      case "running":
+        return [
+          { id: "rs-1", index: 1, title: "解析任务", status: "done" },
+          {
+            id: "rs-2",
+            index: 2,
+            title: "检索上下文",
+            description: "加载项目文件...",
+            status: "active",
+          },
+          { id: "rs-3", index: 3, title: "生成计划", status: "pending" },
+          { id: "rs-4", index: 4, title: "执行计划", status: "pending" },
+        ];
+      case "done":
+        return [
+          { id: "rs-1", index: 1, title: "解析任务", status: "done" },
+          { id: "rs-2", index: 2, title: "检索上下文", status: "done" },
+          { id: "rs-3", index: 3, title: "生成计划", status: "done" },
+          { id: "rs-4", index: 4, title: "执行计划", status: "done" },
+        ];
+      case "error":
+        return [
+          { id: "rs-1", index: 1, title: "解析任务", status: "done" },
+          {
+            id: "rs-2",
+            index: 2,
+            title: "检索上下文",
+            description: "网络超时",
+            status: "error",
+          },
+          { id: "rs-3", index: 3, title: "生成计划", status: "pending" },
+          { id: "rs-4", index: 4, title: "执行计划", status: "pending" },
+        ];
+    }
+  })();
+
+  const statusButton = (status: typeof timelineStatus, label: string) => {
+    const active = timelineStatus === status;
+    return (
+      <button
+        key={status}
+        style={{
+          ...phase4BtnStyle,
+          background: active ? "var(--aw-button-black)" : phase4BtnStyle.background,
+          color: active ? "var(--aw-text-onblack)" : phase4BtnStyle.color,
+          borderColor: active ? "var(--aw-button-black)" : phase4BtnStyle.borderColor,
+        }}
+        onClick={() => setTimelineStatus(status)}
+      >
+        {label}
+      </button>
+    );
+  };
+
+  const artifactButton = (set: typeof artifactSet, label: string) => {
+    const active = artifactSet === set;
+    return (
+      <button
+        key={set}
+        style={{
+          ...phase4BtnStyle,
+          background: active ? "var(--aw-button-black)" : phase4BtnStyle.background,
+          color: active ? "var(--aw-text-onblack)" : phase4BtnStyle.color,
+          borderColor: active ? "var(--aw-button-black)" : phase4BtnStyle.borderColor,
+        }}
+        onClick={() => setArtifactSet(set)}
+      >
+        {label}
+      </button>
+    );
+  };
+
+  return (
+    <div className="zoom-stage" style={{ justifyContent: "flex-start", padding: "48px 24px" }}>
+      <div
+        style={{
+          width: "min(900px, calc(100vw - 80px))",
+          display: "grid",
+          gap: 24,
+          padding: 24,
+          border: "1px solid var(--aw-border-main)",
+          borderRadius: "var(--aw-radius-lg)",
+          background: "var(--aw-bg-main)",
+          color: "var(--aw-text-primary)",
+        }}
+      >
+        <h2
+          style={{
+            margin: 0,
+            fontSize: "var(--aw-font-size-xl)",
+            lineHeight: "var(--aw-line-height-xl)",
+          }}
+        >
+          Phase 4 反馈组件
+        </h2>
+
+        <section style={phase4CardStyle}>
+          <h3 style={phase4H3Style}>RunTimeline 状态切换</h3>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+            {statusButton("ready", "就绪")}
+            {statusButton("running", "运行中")}
+            {statusButton("done", "已完成")}
+            {statusButton("error", "出错")}
+          </div>
+          <RunTimeline title="Agent 运行" status={timelineStatus} steps={timelineSteps}>
+            {timelineStatus !== "ready" ? (
+              <ArtifactGrid items={phase4ArtifactSets[artifactSet]} />
+            ) : null}
+          </RunTimeline>
+        </section>
+
+        <section style={phase4CardStyle}>
+          <h3 style={phase4H3Style}>RunStep 状态矩阵</h3>
+          <div style={{ display: "grid", gap: 4 }}>
+            <RunStep
+              index={1}
+              title="待处理步骤"
+              description="等待前置步骤完成"
+              tag="pending"
+              status="pending"
+            />
+            <RunStep
+              index={2}
+              title="进行中步骤"
+              description="正在处理数据"
+              tag="active"
+              status="active"
+            />
+            <RunStep
+              index={3}
+              title="已完成步骤"
+              description="成功返回结果"
+              tag="done"
+              status="done"
+            />
+            <RunStep
+              index={4}
+              title="出错步骤"
+              description="发生超时"
+              tag="error"
+              status="error"
+            />
+          </div>
+        </section>
+
+        <section style={phase4CardStyle}>
+          <h3 style={phase4H3Style}>ArtifactGrid 状态切换</h3>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+            {artifactButton("normal", "正常")}
+            {artifactButton("empty", "Empty")}
+            {artifactButton("long", "长文本")}
+          </div>
+          <ArtifactGrid items={phase4ArtifactSets[artifactSet]} />
+        </section>
+
+        <section style={phase4CardStyle}>
+          <h3 style={phase4H3Style}>ApprovalCard riskTone / callback</h3>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+            {(["safe", "warning", "danger"] as const).map((tone) => (
+              <button
+                key={tone}
+                style={phase4BtnStyle}
+                onClick={() => {
+                  setApprovalTone(tone);
+                  setApprovalOpen(true);
+                }}
+              >
+                {phase4ToneLabels[tone]}
+              </button>
+            ))}
+          </div>
+          <div
+            style={{
+              fontSize: "var(--aw-font-size-sm)",
+              color: "var(--aw-text-secondary)",
+            }}
+          >
+            Smoke 状态:{" "}
+            <strong style={{ color: "var(--aw-text-primary)" }}>
+              {approvalSmoke}
+            </strong>
+          </div>
+          <ApprovalCard
+            open={approvalOpen}
+            onOpenChange={setApprovalOpen}
+            title={phase4ApprovalTitles[approvalTone]}
+            description={phase4ApprovalDescs[approvalTone]}
+            riskTone={approvalTone}
+            onApprove={() => setApprovalSmoke(`approve: ${approvalTone}`)}
+            onReject={() => setApprovalSmoke(`reject: ${approvalTone}`)}
+          />
+        </section>
+
+        <section style={phase4CardStyle}>
+          <h3 style={phase4H3Style}>Toast 自动关闭 / 手动触发</h3>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              style={phase4BtnStyle}
+              onClick={() => {
+                setToastMsg("Toast 已显示");
+                setToastVisible(true);
+              }}
+            >
+              显示 Toast
+            </button>
+            <button
+              style={phase4BtnStyle}
+              onClick={() => setToastVisible(false)}
+            >
+              手动关闭
+            </button>
+          </div>
+          <Toast
+            message={toastMsg}
+            visible={toastVisible}
+            onClose={() => setToastVisible(false)}
+          />
+        </section>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [activeItemId, setActiveItemId] = useState("design-components");
   const [previewMode, setPreviewMode] = useState<PreviewMode>("full");
@@ -373,6 +937,8 @@ export default function App() {
 
       {previewMode === "primitives" ? <PrimitivePreview /> : null}
       {previewMode === "phase2" ? <Phase2Preview /> : null}
+      {previewMode === "phase3" ? <Phase3Preview /> : null}
+      {previewMode === "phase4" ? <Phase4Preview /> : null}
     </div>
   );
 }

@@ -2,6 +2,7 @@ export type AguiEventType =
   | "RUN_STARTED"
   | "RUN_FINISHED"
   | "RUN_ERROR"
+  | "RUN_STATUS_CHANGED"
   | "TEXT_MESSAGE_START"
   | "TEXT_MESSAGE_CONTENT"
   | "TEXT_MESSAGE_END"
@@ -34,6 +35,7 @@ export type AguiEvent = {
   timestamp?: number;
   threadId?: string;
   runId?: string;
+  status?: string;
   messageId?: string;
   parentRunId?: string;
   parentMessageId?: string;
@@ -51,6 +53,8 @@ export type AguiEvent = {
   approvalDescription?: string;
   approvalRiskTone?: AguiApprovalRiskTone;
   approvalDecision?: AguiApprovalDecision;
+  approvalAffectedPaths?: string[];
+  approvalPatchSummary?: string;
   artifactId?: string;
   artifactTitle?: string;
   artifactDescription?: string;

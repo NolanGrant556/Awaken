@@ -52,32 +52,34 @@ const (
 )
 
 type AwakenEvent struct {
-	Type                AwakenEventType
-	Timestamp           time.Time
-	ThreadID            string
-	RunID               string
-	MessageID           string
-	ParentMessageID     string
-	Role                string
-	Delta               string
-	Content             string
-	ToolCallID          string
-	ToolName            string
-	Arguments           string
-	Error               string
-	Code                string
-	ApprovalID          string
-	ApprovalTitle       string
-	ApprovalDescription string
-	ApprovalRiskTone    ApprovalRiskTone
-	ApprovalDecision    ApprovalDecision
-	ArtifactID          string
-	ArtifactTitle       string
-	ArtifactDescription string
-	ArtifactKind        string
-	ArtifactPath        string
-	ArtifactContent     string
-	ArtifactStatus      ArtifactStatus
+	Type                  AwakenEventType
+	Timestamp             time.Time
+	ThreadID              string
+	RunID                 string
+	MessageID             string
+	ParentMessageID       string
+	Role                  string
+	Delta                 string
+	Content               string
+	ToolCallID            string
+	ToolName              string
+	Arguments             string
+	Error                 string
+	Code                  string
+	ApprovalID            string
+	ApprovalTitle         string
+	ApprovalDescription   string
+	ApprovalRiskTone      ApprovalRiskTone
+	ApprovalDecision      ApprovalDecision
+	ApprovalAffectedPaths []string
+	ApprovalPatchSummary  string
+	ArtifactID            string
+	ArtifactTitle         string
+	ArtifactDescription   string
+	ArtifactKind          string
+	ArtifactPath          string
+	ArtifactContent       string
+	ArtifactStatus        ArtifactStatus
 }
 
 var awakenIDCounter uint64

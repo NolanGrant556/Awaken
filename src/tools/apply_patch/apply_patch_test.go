@@ -302,6 +302,224 @@ func TestApplyPatchExecutesRelativePathsUnderWorkspaceRoot(t *testing.T) {
 	assertFileContent(t, target, "hello\n")
 }
 
+func TestApplyPatchCheckPermissionOutsideWritableRoot(t *testing.T) {
+	workspace := t.TempDir()
+	writable := t.TempDir()
+	permissionContext := tool.NewPermissionContext(workspace, []string{writable})
+
+	outsidePath := "/etc/hosts"
+	decision := (&ApplyPatchTool{}).CheckPermission(context.Background(), "*** Begin Patch\n"+
+		"*** Add File: "+outsidePath+"\n"+
+		"+hello\n"+
+		"*** End Patch", permissionContext)
+	if decision.Behavior != tool.PermissionAsk {
+		t.Fatalf("expected ask decision, got %+v", decision)
+	}
+	if decision.ApprovalRequest.RiskTone != "danger" {
+		t.Fatalf("expected danger risk tone, got %+v", decision.ApprovalRequest)
+	}
+
+	ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
+	_, err := (&ApplyPatchTool{}).Execute(ctx, "*** Begin Patch\n"+
+		"*** Add File: "+outsidePath+"\n"+
+		"+hello\n"+
+		"*** End Patch")
+	if err == nil || !strings.Contains(err.Error(), "outside writable roots") {
+		t.Fatalf("expected permission error for outside writable root, got %v", err)
+	}
+}
+
+func TestApplyPatchCheckPermissionInsideWritableRoot(t *testing.T) {
+	workspace := t.TempDir()
+	permissionContext := tool.NewPermissionContext(workspace, nil)
+	writeSeedFile(t, filepath.Join(workspace, "note.md"), "old\n")
+
+	patch := "*** Begin Patch\n" +
+		"*** Update File: note.md\n" +
+		"@@\n" +
+		"-old\n" +
+		"+new\n" +
+		"*** End Patch"
+
+	decision := (&ApplyPatchTool{}).CheckPermission(context.Background(), patch, permissionContext)
+	if decision.Behavior != tool.PermissionAsk {
+		t.Fatalf("expected ask decision, got %+v", decision)
+	}
+	if decision.ApprovalRequest.RiskTone != "warning" {
+		t.Fatalf("expected warning risk tone, got %+v", decision.ApprovalRequest)
+	}
+
+	ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
+	out, err := (&ApplyPatchTool{}).Execute(ctx, patch)
+	if err != nil {
+		t.Fatalf("patch failed: %v", err)
+	}
+	target := filepath.Join(workspace, "note.md")
+	if !strings.Contains(out, "M "+target) {
+		t.Fatalf("expected resolved path in summary, got %q", out)
+	}
+	assertFileContent(t, target, "new\n")
+}
+
+func TestApplyPatchRelativePathResolvesToWorkspace(t *testing.T) {
+	workspace := t.TempDir()
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(workspace, nil))
+
+	out, err := (&ApplyPatchTool{}).Execute(ctx, "*** Begin Patch\n"+
+		"*** Add File: note.md\n"+
+		"+hello\n"+
+		"*** End Patch")
+	if err != nil {
+		t.Fatalf("patch failed: %v", err)
+	}
+
+	target := filepath.Join(workspace, "note.md")
+	if !strings.Contains(out, "A "+target) {
+		t.Fatalf("expected resolved path in summary, got %q", out)
+	}
+	assertFileContent(t, target, "hello\n")
+}
+
+func TestApplyPatchCheckPermissionSymlinkEscapeMarkedDanger(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	permissionContext := tool.NewPermissionContext(workspace, []string{workspace})
+
+	outsideFile := filepath.Join(outside, "note.txt")
+	writeSeedFile(t, outsideFile, "secret\n")
+
+	linkPath := filepath.Join(workspace, "link")
+	if err := os.Symlink(outsideFile, linkPath); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	decision := (&ApplyPatchTool{}).CheckPermission(context.Background(), "*** Begin Patch\n"+
+		"*** Update File: link\n"+
+		"@@\n"+
+		"-secret\n"+
+		"+hacked\n"+
+		"*** End Patch", permissionContext)
+	if decision.Behavior != tool.PermissionAsk {
+		t.Fatalf("expected ask permission, got %v", decision.Behavior)
+	}
+	if decision.ApprovalRequest.RiskTone != "danger" {
+		t.Fatalf("expected danger risk tone for symlink escape, got %v", decision.ApprovalRequest.RiskTone)
+	}
+}
+
+func TestApplyPatchRejectsSymlinkEscapeUpdate(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	permissionContext := tool.NewPermissionContext(workspace, []string{workspace})
+
+	outsideFile := filepath.Join(outside, "note.txt")
+	writeSeedFile(t, outsideFile, "secret\n")
+
+	linkPath := filepath.Join(workspace, "link")
+	if err := os.Symlink(outsideFile, linkPath); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
+	_, err := (&ApplyPatchTool{}).Execute(ctx, "*** Begin Patch\n"+
+		"*** Update File: link\n"+
+		"@@\n"+
+		"-secret\n"+
+		"+hacked\n"+
+		"*** End Patch")
+	if err == nil || !strings.Contains(err.Error(), "outside writable roots") {
+		t.Fatalf("expected symlink escape error, got %v", err)
+	}
+
+	assertFileContent(t, outsideFile, "secret\n")
+}
+
+func TestApplyPatchRejectsSymlinkEscapeAdd(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	permissionContext := tool.NewPermissionContext(workspace, []string{workspace})
+
+	outsideDir := filepath.Join(outside, "dir")
+	if err := os.MkdirAll(outsideDir, 0755); err != nil {
+		t.Fatalf("failed to create outside dir: %v", err)
+	}
+
+	linkPath := filepath.Join(workspace, "dirLink")
+	if err := os.Symlink(outsideDir, linkPath); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
+	_, err := (&ApplyPatchTool{}).Execute(ctx, "*** Begin Patch\n"+
+		"*** Add File: dirLink/new.txt\n"+
+		"+injected\n"+
+		"*** End Patch")
+	if err == nil || !strings.Contains(err.Error(), "outside writable roots") {
+		t.Fatalf("expected symlink escape error, got %v", err)
+	}
+
+	injected := filepath.Join(outsideDir, "new.txt")
+	if _, statErr := os.Stat(injected); !os.IsNotExist(statErr) {
+		t.Fatalf("expected no file to be written outside workspace, found %s", injected)
+	}
+}
+
+func TestApplyPatchRejectsSymlinkEscapeDelete(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	permissionContext := tool.NewPermissionContext(workspace, []string{workspace})
+
+	outsideFile := filepath.Join(outside, "note.txt")
+	writeSeedFile(t, outsideFile, "secret\n")
+
+	linkPath := filepath.Join(workspace, "link")
+	if err := os.Symlink(outsideFile, linkPath); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
+	_, err := (&ApplyPatchTool{}).Execute(ctx, "*** Begin Patch\n"+
+		"*** Delete File: link\n"+
+		"*** End Patch")
+	if err == nil || !strings.Contains(err.Error(), "outside writable roots") {
+		t.Fatalf("expected symlink escape error, got %v", err)
+	}
+
+	assertFileContent(t, outsideFile, "secret\n")
+}
+
+func TestApplyPatchRejectsSymlinkEscapeMove(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	permissionContext := tool.NewPermissionContext(workspace, []string{workspace})
+
+	outsideFile := filepath.Join(outside, "note.txt")
+	writeSeedFile(t, outsideFile, "secret\n")
+
+	linkPath := filepath.Join(workspace, "link")
+	if err := os.Symlink(outsideFile, linkPath); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	safeFile := filepath.Join(workspace, "safe.txt")
+	writeSeedFile(t, safeFile, "old\n")
+
+	ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
+	_, err := (&ApplyPatchTool{}).Execute(ctx, "*** Begin Patch\n"+
+		"*** Update File: safe.txt\n"+
+		"*** Move to: link\n"+
+		"@@\n"+
+		"-old\n"+
+		"+new\n"+
+		"*** End Patch")
+	if err == nil || !strings.Contains(err.Error(), "outside writable roots") {
+		t.Fatalf("expected symlink escape error, got %v", err)
+	}
+
+	assertFileContent(t, outsideFile, "secret\n")
+	assertFileContent(t, safeFile, "old\n")
+}
+
 func applyPatchText(t *testing.T, patch string) string {
 	t.Helper()
 	out, err := (&ApplyPatchTool{}).Execute(context.Background(), patch)

@@ -26,12 +26,14 @@ func normalizeEventSink(sink EventSink) EventSink {
 }
 
 type ApprovalRequest struct {
-	ID          string
-	ToolCallID  string
-	ToolName    string
-	Title       string
-	Description string
-	RiskTone    ApprovalRiskTone
+	ID            string
+	ToolCallID    string
+	ToolName      string
+	Title         string
+	Description   string
+	RiskTone      ApprovalRiskTone
+	AffectedPaths []string
+	PatchSummary  string
 }
 
 type ApprovalAwaiter interface {

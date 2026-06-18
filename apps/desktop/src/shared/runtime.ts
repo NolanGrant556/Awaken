@@ -4,6 +4,7 @@ export type DesktopPlatform = "macos" | "windows" | "linux";
 
 export type RuntimeRunStatus =
   | "running"
+  | "awaiting_approval"
   | "cancelling"
   | "finished"
   | "error"

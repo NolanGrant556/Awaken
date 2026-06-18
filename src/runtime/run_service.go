@@ -18,6 +18,8 @@ var (
 	ErrInvalidInput     = errors.New("input is required")
 	ErrRunNotFound      = errors.New("run not found")
 	ErrApprovalNotFound = errors.New("approval not found")
+	ErrRunTerminal      = errors.New("run is already finished")
+	ErrRunCancelling    = errors.New("run is being cancelled")
 )
 
 type WorkspaceConfig struct {

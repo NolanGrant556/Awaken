@@ -96,6 +96,28 @@ func (c PermissionContext) IsWithinWritableRoots(path string) bool {
 	return false
 }
 
+// IsWithinWritableRootsResolved resolves symlinks on both the path and the
+// writable roots before checking boundary. It returns false if the path cannot
+// be resolved, treating unresolvable paths as unsafe.
+func (c PermissionContext) IsWithinWritableRootsResolved(path string) bool {
+	normalized := c.Normalize()
+	resolved := normalized.resolvePath(path)
+	realPath, err := filepath.EvalSymlinks(resolved)
+	if err != nil {
+		return false
+	}
+	for _, root := range normalized.WritableRoots {
+		realRoot, err := filepath.EvalSymlinks(root)
+		if err != nil {
+			continue
+		}
+		if PathWithinRoot(realPath, realRoot) {
+			return true
+		}
+	}
+	return false
+}
+
 func (c PermissionContext) WorkspaceRootOrCWD() string {
 	normalized := c.Normalize()
 	return normalized.WorkspaceRoot

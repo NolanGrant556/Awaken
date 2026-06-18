@@ -91,6 +91,8 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.ApprovalTitle = event.ApprovalTitle
 		base.ApprovalDescription = event.ApprovalDescription
 		base.ApprovalRiskTone = string(event.ApprovalRiskTone)
+		base.ApprovalAffectedPaths = event.ApprovalAffectedPaths
+		base.ApprovalPatchSummary = event.ApprovalPatchSummary
 		return []Event{base}
 	case agentcore.ApprovalResolvedEventType:
 		base.Type = EventAwakenApprovalResolved
@@ -101,6 +103,8 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.ApprovalDescription = event.ApprovalDescription
 		base.ApprovalRiskTone = string(event.ApprovalRiskTone)
 		base.ApprovalDecision = string(event.ApprovalDecision)
+		base.ApprovalAffectedPaths = event.ApprovalAffectedPaths
+		base.ApprovalPatchSummary = event.ApprovalPatchSummary
 		return []Event{base}
 	case agentcore.ArtifactCreatedEventType:
 		base.Type = EventAwakenArtifactCreated

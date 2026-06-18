@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -767,6 +768,252 @@ func isReadOnlyTool(name string) bool {
 		return true
 	}
 	return false
+}
+
+// TestFileMutationApprovalSmoke 通过真实 LLM 调用验证 apply_patch 文件修改审批流程。
+// 需要项目根目录的 .env/config.toml 提供 LLM_API_KEY；未设置时自动跳过。
+func TestFileMutationApprovalSmoke(t *testing.T) {
+	workspaceRoot, err := findProjectRoot()
+	if err != nil {
+		t.Fatalf("failed to find project root: %v", err)
+	}
+
+	// llm.LoadConfig 从当前工作目录读取 .env/config.toml，而 go test ./src/server
+	// 的工作目录是 src/server/，因此先切换到项目根目录再加载配置。
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	if err := os.Chdir(workspaceRoot); err != nil {
+		t.Fatalf("failed to chdir to project root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	cfg := llm.LoadConfig()
+	if cfg.APIKey == "" {
+		t.Skip("LLM_API_KEY not set")
+	}
+
+	tempDir := t.TempDir()
+	notePath := filepath.Join(tempDir, "note.md")
+	if err := os.WriteFile(notePath, []byte("hello"), 0644); err != nil {
+		t.Fatalf("failed to create note.md: %v", err)
+	}
+
+	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
+		agentCfg := agentcore.AgentConfig{
+			MaxThoughts: 10,
+			EntryPoint:  "awaken-core-smoke",
+			ModelConfig: agentcore.ModelConfig{
+				APIKey:      cfg.APIKey,
+				BaseURL:     cfg.BaseURL,
+				Model:       cfg.Model,
+				Temperature: cfg.Temperature,
+				MaxTokens:   cfg.MaxTokens,
+				AuthScheme:  cfg.AuthScheme,
+			},
+			Workspace: agentcore.WorkspaceConfig{
+				Root:          workspace.WorkspaceRoot,
+				WritableRoots: workspace.WritableRoots,
+			},
+		}
+
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			agent := agentcore.NewAgent(agentCfg)
+			return agent.RunStreamWithEvents(ctx, input, nil, sink)
+		})
+	})
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	reqBody := fmt.Sprintf(`{
+		"input": "把 note.md 中 hello 改成 world",
+		"workspace": { "workspace_root": %q, "writable_roots": [%q] },
+		"client": { "session_id": "smoke-3", "request_id": "smoke-req-3", "entrypoint": "smoke" }
+	}`, tempDir, tempDir)
+
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var created awruntime.Run
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	if created.RunID == "" {
+		t.Fatalf("expected run id, got empty")
+	}
+
+	events, resolveErr := streamEventsAndResolveApproval(t, ts.URL, created.RunID)
+	if resolveErr != nil {
+		t.Fatalf("failed to stream and resolve approval: %v", resolveErr)
+	}
+
+	var (
+		sawRunStarted                 bool
+		sawApplyPatchToolCallStart    bool
+		sawApprovalRequested          bool
+		sawStatusAwaitingApproval     bool
+		sawStatusRunningAfterApproval bool
+		sawApplyPatchToolCallResult   bool
+		sawRunFinished                bool
+		finalOutcome                  string
+	)
+
+	for _, ev := range events {
+		t.Logf("event: type=%s tool=%s status=%s approval=%s paths=%v outcome=%v",
+			ev.Type, ev.ToolCallName, ev.Status, ev.ApprovalID, ev.ApprovalAffectedPaths, ev.Outcome)
+		switch ev.Type {
+		case agui.EventRunStarted:
+			sawRunStarted = true
+		case agui.EventToolCallStart:
+			if ev.ToolCallName == "apply_patch" {
+				sawApplyPatchToolCallStart = true
+			}
+		case agui.EventAwakenApprovalRequested:
+			sawApprovalRequested = true
+			hasNoteMD := false
+			for _, p := range ev.ApprovalAffectedPaths {
+				if strings.Contains(p, "note.md") {
+					hasNoteMD = true
+					break
+				}
+			}
+			if !hasNoteMD {
+				t.Fatalf("expected approval affected paths to contain note.md, got %v", ev.ApprovalAffectedPaths)
+			}
+		case agui.EventRunStatusChanged:
+			if ev.Status == "awaiting_approval" {
+				sawStatusAwaitingApproval = true
+			}
+			if sawStatusAwaitingApproval && ev.Status == "running" {
+				sawStatusRunningAfterApproval = true
+			}
+		case agui.EventToolCallResult:
+			if ev.ToolCallName == "apply_patch" {
+				sawApplyPatchToolCallResult = true
+			}
+		case agui.EventRunFinished:
+			sawRunFinished = true
+			if ev.Outcome != nil {
+				finalOutcome = ev.Outcome.Type
+			}
+		case agui.EventRunError:
+			t.Fatalf("run error: %s (code=%s)", ev.Message, ev.Code)
+		}
+	}
+
+	if !sawRunStarted {
+		t.Fatalf("expected RUN_STARTED event")
+	}
+	if !sawApplyPatchToolCallStart {
+		t.Fatalf("expected TOOL_CALL_START event for apply_patch")
+	}
+	if !sawApprovalRequested {
+		t.Fatalf("expected AWAKEN_APPROVAL_REQUESTED event")
+	}
+	if !sawStatusAwaitingApproval {
+		t.Fatalf("expected RUN_STATUS_CHANGED event with awaiting_approval")
+	}
+	if !sawStatusRunningAfterApproval {
+		t.Fatalf("expected RUN_STATUS_CHANGED event with running after approval resolved")
+	}
+	if !sawApplyPatchToolCallResult {
+		t.Fatalf("expected TOOL_CALL_RESULT event for apply_patch")
+	}
+	if !sawRunFinished {
+		t.Fatalf("expected RUN_FINISHED event")
+	}
+	if finalOutcome != "success" {
+		t.Fatalf("expected outcome success, got %q", finalOutcome)
+	}
+
+	content, err := os.ReadFile(notePath)
+	if err != nil {
+		t.Fatalf("failed to read note.md: %v", err)
+	}
+	if strings.TrimSpace(string(content)) != "world" {
+		t.Fatalf("expected note.md to contain 'world', got %q", string(content))
+	}
+}
+
+func streamEventsAndResolveApproval(t *testing.T, baseURL, runID string) ([]agui.Event, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	eventsReq, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/v1/runs/"+runID+"/events", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	streamResp, err := http.DefaultClient.Do(eventsReq)
+	if err != nil {
+		return nil, err
+	}
+	defer streamResp.Body.Close()
+	if streamResp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("expected 200 from events, got %d", streamResp.StatusCode)
+	}
+
+	var events []agui.Event
+	var resolveErr error
+	var resolveOnce sync.Once
+
+	scanner := bufio.NewScanner(streamResp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		payload := strings.TrimPrefix(line, "data: ")
+		if payload == "" {
+			continue
+		}
+		var ev agui.Event
+		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
+			return nil, fmt.Errorf("decode event %q: %w", payload, err)
+		}
+		events = append(events, ev)
+
+		if ev.Type == agui.EventAwakenApprovalRequested {
+			resolveOnce.Do(func() {
+				resolveErr = resolveApprovalWithRetry(baseURL, runID, ev.ApprovalID)
+			})
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+	return events, nil
+}
+
+func resolveApprovalWithRetry(baseURL, runID, approvalID string) error {
+	resolveURL := baseURL + "/v1/runs/" + runID + "/approvals/" + approvalID + "/resolve"
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		resp, err := http.Post(resolveURL, "application/json", strings.NewReader(`{"decision":"approved"}`))
+		if err != nil {
+			return fmt.Errorf("POST resolve approval failed: %w", err)
+		}
+		status := resp.StatusCode
+		_ = resp.Body.Close()
+		if status == http.StatusNoContent {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("approval resolve never succeeded, last status %d", status)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 func collectSSEEvents(r io.Reader) ([]agui.Event, error) {

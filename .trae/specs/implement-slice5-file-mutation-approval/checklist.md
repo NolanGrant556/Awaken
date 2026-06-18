@@ -1,0 +1,21 @@
+# Checklist
+
+- [x] `RunStatusAwaitingApproval` 状态已定义
+- [x] 进入 approval wait 时发射 `RUN_STATUS_CHANGED` 事件，状态为 `awaiting_approval`
+- [x] resolve approval 后发射 `RUN_STATUS_CHANGED` 事件，状态为 `running`
+- [x] `ApprovalItem` 包含 `affectedPaths` 与 `patchSummary`
+- [x] `apply_patch` 的 `ApprovalRequest` 携带 affected paths 与 patch summary
+- [x] `reducer.ts` 将 affected paths / patch summary 写入 approval item
+- [x] `ApprovalCard` 展示 affected paths、patch summary、risk tone
+- [x] 批准前 `apply_patch` 不修改文件
+- [x] 批准后文件内容符合 patch
+- [x] 只产生预期最小 diff
+- [x] 拒绝后返回 `IsError=true` 的 tool result 并继续 run
+- [x] 越界 writable root 的 patch 返回 danger risk tone
+- [x] 越界 writable root 的 patch 即使 approve 也不能修改目标文件
+- [x] `resolveApproval` 后 run 状态恢复，不依赖 UI 猜测
+- [x] 真实 LLM smoke：输入"把 note.md 中 hello 改成 world"触发 apply_patch approval
+- [x] 真实 LLM smoke：approve 后 `note.md` 内容变为 `world`
+- [x] 真实 LLM smoke：run 完成且状态为成功
+- [x] `go test ./src/runtime/... ./src/agentcore/... ./src/tools/...` 通过
+- [x] Desktop build 与 type check 通过

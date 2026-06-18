@@ -116,7 +116,7 @@ func (h runHandlers) handleResolveApproval(w http.ResponseWriter, r *http.Reques
 
 	var req resolveApprovalRequest
 	if err := decodeJSON(r, &req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
 		return
 	}
 
@@ -127,16 +127,20 @@ func (h runHandlers) handleResolveApproval(w http.ResponseWriter, r *http.Reques
 	case string(agentcore.ApprovalDecisionRejected):
 		decision = agentcore.ApprovalDecisionRejected
 	default:
-		http.Error(w, "decision must be approved or rejected", http.StatusBadRequest)
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_DECISION", "decision must be approved or rejected")
 		return
 	}
 
 	if err := h.runService.ResolveApproval(runID, approvalID, decision); err != nil {
 		switch {
 		case errors.Is(err, awruntime.ErrRunNotFound), errors.Is(err, awruntime.ErrApprovalNotFound):
-			http.NotFound(w, r)
+			writeErrorJSON(w, http.StatusNotFound, "APPROVAL_NOT_FOUND", err.Error())
+		case errors.Is(err, awruntime.ErrRunTerminal):
+			writeErrorJSON(w, http.StatusConflict, "RUN_TERMINAL", err.Error())
+		case errors.Is(err, awruntime.ErrRunCancelling):
+			writeErrorJSON(w, http.StatusConflict, "RUN_CANCELLING", err.Error())
 		default:
-			http.Error(w, "failed to resolve approval", http.StatusInternalServerError)
+			writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to resolve approval")
 		}
 		return
 	}
@@ -208,6 +212,14 @@ func mapRuntimeEvent(event awruntime.Event) []agui.Event {
 			RunID:     event.RunID,
 			Message:   event.Message,
 			Code:      event.Code,
+		}}
+	case awruntime.EventKindRunStatusChanged:
+		return []agui.Event{{
+			Type:      agui.EventRunStatusChanged,
+			Timestamp: event.Timestamp.UnixMilli(),
+			ThreadID:  event.ThreadID,
+			RunID:     event.RunID,
+			Status:    event.Status,
 		}}
 	default:
 		return nil

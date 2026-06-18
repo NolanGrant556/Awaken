@@ -50,15 +50,17 @@ type ActionEvent struct {
 }
 
 type ApprovalSurfaceRequest struct {
-	SurfaceID    string
-	ApprovalID   string
-	Title        string
-	Description  string
-	RiskTone     string
-	ToolName     string
-	ToolCallID   string
-	ApproveLabel string
-	RejectLabel  string
+	SurfaceID     string
+	ApprovalID    string
+	Title         string
+	Description   string
+	RiskTone      string
+	ToolName      string
+	ToolCallID    string
+	ApproveLabel  string
+	RejectLabel   string
+	AffectedPaths []string
+	PatchSummary  string
 }
 
 func ApprovalSurfaceJSON(request ApprovalSurfaceRequest) (string, error) {
@@ -93,7 +95,7 @@ func ApprovalSurface(request ApprovalSurfaceRequest) Surface {
 				{
 					ID:        "root",
 					Component: "Card",
-					Children:  []string{"title", "risk", "description", "tool", "tool-call", "approval", "actions-note", "actions"},
+					Children:  []string{"title", "risk", "description", "patch-summary", "affected-paths", "tool", "tool-call", "approval", "actions-note", "actions"},
 				},
 				{
 					ID:        "title",
@@ -112,6 +114,18 @@ func ApprovalSurface(request ApprovalSurfaceRequest) Surface {
 					Component: "Text",
 					Text:      description,
 					Variant:   "body",
+				},
+				{
+					ID:        "patch-summary",
+					Component: "KeyValue",
+					Label:     "Summary",
+					Value:     request.PatchSummary,
+				},
+				{
+					ID:        "affected-paths",
+					Component: "KeyValue",
+					Label:     "Affected paths",
+					Value:     strings.Join(request.AffectedPaths, "\n"),
 				},
 				{
 					ID:        "tool",

@@ -14,9 +14,11 @@ type ReadOnlyTool interface {
 }
 
 type ApprovalRequest struct {
-	Title       string
-	Description string
-	RiskTone    string
+	Title         string
+	Description   string
+	RiskTone      string
+	AffectedPaths []string
+	PatchSummary  string
 }
 
 type ApprovalDescribingTool interface {

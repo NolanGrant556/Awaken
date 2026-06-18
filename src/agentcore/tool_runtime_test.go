@@ -20,6 +20,7 @@ type runtimeTestTool struct {
 	observePolicy   *tool.PermissionContext
 	approvalRequest tool.ApprovalRequest
 	artifacts       []tool.ArtifactDescriptor
+	executeCount    *int
 }
 
 func (t runtimeTestTool) Name() string {
@@ -35,6 +36,9 @@ func (t runtimeTestTool) Parameters() []tool.ToolParameter {
 }
 
 func (t runtimeTestTool) Execute(ctx context.Context, input string) (string, error) {
+	if t.executeCount != nil {
+		*t.executeCount++
+	}
 	if t.observe != nil {
 		*t.observe = input
 	}
@@ -359,6 +363,97 @@ func TestToolRuntimePassesPermissionContextToTools(t *testing.T) {
 	}
 	if observed.WorkspaceRoot != root || len(observed.WritableRoots) != 1 || observed.WritableRoots[0] != writable {
 		t.Fatalf("unexpected permission context: %+v", observed)
+	}
+}
+
+func TestToolRuntimeApproveBeforeExecute(t *testing.T) {
+	var executeCount int
+	toolName := "runtime_approve_before_execute_tool"
+	mustRegisterRuntimeTool(t, runtimeTestTool{
+		name:         toolName,
+		permission:   tool.AskPermission("test tool requires approval", tool.ApprovalRequest{}),
+		executeCount: &executeCount,
+		params: []tool.ToolParameter{
+			{Name: "value", Type: "string", Required: true},
+		},
+	})
+
+	runtime := NewToolRuntime(testApprovalAwaiter{decision: ApprovalDecisionApproved})
+	result := runtime.Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_approved",
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{"value":"hello"}`,
+		},
+	})
+
+	if result.IsError {
+		t.Fatalf("expected approved tool to succeed, got %+v", result)
+	}
+	if executeCount != 1 {
+		t.Fatalf("expected tool to execute exactly once, got %d", executeCount)
+	}
+}
+
+func TestToolRuntimeRejectDoesNotExecute(t *testing.T) {
+	var executeCount int
+	toolName := "runtime_reject_no_execute_tool"
+	mustRegisterRuntimeTool(t, runtimeTestTool{
+		name:         toolName,
+		permission:   tool.AskPermission("test tool requires approval", tool.ApprovalRequest{}),
+		executeCount: &executeCount,
+		params: []tool.ToolParameter{
+			{Name: "value", Type: "string", Required: true},
+		},
+	})
+
+	runtime := NewToolRuntime(testApprovalAwaiter{decision: ApprovalDecisionRejected})
+	result := runtime.Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_rejected",
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{"value":"hello"}`,
+		},
+	})
+
+	if executeCount != 0 {
+		t.Fatalf("expected rejected tool not to execute, got %d executions", executeCount)
+	}
+	if !result.IsError || result.Content != "工具执行已被审批拒绝" {
+		t.Fatalf("expected rejection error result, got %+v", result)
+	}
+}
+
+func TestToolRuntimeRejectResultFedBack(t *testing.T) {
+	toolName := "runtime_reject_fed_back_tool"
+	mustRegisterRuntimeTool(t, runtimeTestTool{
+		name:       toolName,
+		permission: tool.AskPermission("test tool requires approval", tool.ApprovalRequest{}),
+		params: []tool.ToolParameter{
+			{Name: "value", Type: "string", Required: true},
+		},
+	})
+
+	callID := "call_rejected_fed_back"
+	runtime := NewToolRuntime(testApprovalAwaiter{decision: ApprovalDecisionRejected})
+	result := runtime.Execute(context.Background(), convcontext.ToolCall{
+		ID: callID,
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{"value":"hello"}`,
+		},
+	})
+
+	if !result.IsError || result.Content != "工具执行已被审批拒绝" {
+		t.Fatalf("expected rejection error result, got %+v", result)
+	}
+
+	contextResults := toolExecutionResultsToContext([]ToolExecutionResult{result})
+	if len(contextResults) != 1 {
+		t.Fatalf("expected 1 context result, got %d", len(contextResults))
+	}
+	if contextResults[0].ToolCallID != callID || contextResults[0].Name != toolName || contextResults[0].Content != "工具执行已被审批拒绝" {
+		t.Fatalf("expected result to be fed back to conversation, got %+v", contextResults[0])
 	}
 }
 

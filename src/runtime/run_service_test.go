@@ -264,7 +264,7 @@ func TestRunServiceResolveApprovalUnblocksExecutorAndReplaysEvents(t *testing.T)
 		if err != nil {
 			t.Fatalf("Subscribe returned error: %v", err)
 		}
-		if len(sub.History) >= 3 {
+		if len(sub.History) >= 4 {
 			break
 		}
 		if sub.Close != nil {
@@ -276,15 +276,18 @@ func TestRunServiceResolveApprovalUnblocksExecutorAndReplaysEvents(t *testing.T)
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	if len(sub.History) != 3 {
-		t.Fatalf("expected RunStarted + ApprovalRequested + A2UI surface in history, got %+v", sub.History)
+	if len(sub.History) != 4 {
+		t.Fatalf("expected RunStarted + RunStatusChanged + ApprovalRequested + A2UI surface in history, got %+v", sub.History)
 	}
-	if sub.History[1].AgentEvent.Type != agentcore.ApprovalRequestedEventType {
-		t.Fatalf("expected approval request in history, got %+v", sub.History[1])
+	if sub.History[1].Kind != EventKindRunStatusChanged || sub.History[1].Status != string(RunStatusAwaitingApproval) {
+		t.Fatalf("expected awaiting_approval status change in history, got %+v", sub.History[1])
 	}
-	if sub.History[2].AgentEvent.Type != agentcore.ArtifactCreatedEventType ||
-		sub.History[2].AgentEvent.ArtifactKind != "a2ui_surface" {
-		t.Fatalf("expected A2UI surface artifact in history, got %+v", sub.History[2])
+	if sub.History[2].AgentEvent.Type != agentcore.ApprovalRequestedEventType {
+		t.Fatalf("expected approval request in history, got %+v", sub.History[2])
+	}
+	if sub.History[3].AgentEvent.Type != agentcore.ArtifactCreatedEventType ||
+		sub.History[3].AgentEvent.ArtifactKind != "a2ui_surface" {
+		t.Fatalf("expected A2UI surface artifact in history, got %+v", sub.History[3])
 	}
 
 	if err := service.ResolveApproval(run.RunID, "approval-1", agentcore.ApprovalDecisionApproved); err != nil {
@@ -297,17 +300,20 @@ func TestRunServiceResolveApprovalUnblocksExecutorAndReplaysEvents(t *testing.T)
 		got = append(got, event)
 	}
 
-	if len(got) != 6 {
-		t.Fatalf("expected 6 total events, got %+v", got)
+	if len(got) != 8 {
+		t.Fatalf("expected 8 total events, got %+v", got)
 	}
-	if got[3].AgentEvent.Type != agentcore.ApprovalResolvedEventType {
-		t.Fatalf("expected approval resolved event, got %+v", got[3])
+	if got[4].Kind != EventKindRunStatusChanged || got[4].Status != string(RunStatusRunning) {
+		t.Fatalf("expected running status change after resolve, got %+v", got[4])
 	}
-	if got[4].AgentEvent.Type != agentcore.ArtifactCreatedEventType {
-		t.Fatalf("expected artifact event after approval, got %+v", got[4])
+	if got[5].AgentEvent.Type != agentcore.ApprovalResolvedEventType {
+		t.Fatalf("expected approval resolved event, got %+v", got[5])
 	}
-	if got[5].AgentEvent.Type != agentcore.RunFinishedEventType {
-		t.Fatalf("expected terminal RunFinished event, got %+v", got[5])
+	if got[6].AgentEvent.Type != agentcore.ArtifactCreatedEventType {
+		t.Fatalf("expected artifact event after approval, got %+v", got[6])
+	}
+	if got[7].AgentEvent.Type != agentcore.RunFinishedEventType {
+		t.Fatalf("expected terminal RunFinished event, got %+v", got[7])
 	}
 }
 

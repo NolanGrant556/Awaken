@@ -5,6 +5,8 @@ import { ShieldCheck, AlertTriangle, AlertOctagon } from "lucide-react";
 type ApprovalCardProps = {
   title: string;
   description?: string;
+  affectedPaths?: string[];
+  patchSummary?: string;
   riskTone?: ApprovalRiskTone;
   approveLabel?: string;
   rejectLabel?: string;
@@ -45,6 +47,8 @@ const toneConfig: Record<ApprovalRiskTone, ToneConfig> = {
 export function ApprovalCard({
   title,
   description,
+  affectedPaths,
+  patchSummary,
   riskTone = "warning",
   approveLabel = "允许",
   rejectLabel = "拒绝",
@@ -55,7 +59,17 @@ export function ApprovalCard({
 }: ApprovalCardProps) {
   const titleId = useId();
   const descId = useId();
+  const summaryId = useId();
+  const pathsId = useId();
   const tone = toneConfig[riskTone];
+
+  const describedBy = [
+    description ? descId : undefined,
+    patchSummary ? summaryId : undefined,
+    affectedPaths && affectedPaths.length > 0 ? pathsId : undefined,
+  ]
+    .filter(Boolean)
+    .join(" ") || undefined;
   const { Icon } = tone;
 
   const handleApprove = () => {
@@ -93,7 +107,7 @@ export function ApprovalCard({
         alignItems: "center",
         justifyContent: "center",
         padding: "24px",
-        background: "rgba(0, 0, 0, 0.28)",
+        background: "var(--aw-overlay-backdrop)",
       }}
       onClick={(e) => {
         if (e.currentTarget === e.target) {
@@ -105,7 +119,7 @@ export function ApprovalCard({
         role="alertdialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        aria-describedby={description ? descId : undefined}
+        aria-describedby={describedBy}
         tabIndex={-1}
         style={{
           width: "100%",
@@ -169,6 +183,75 @@ export function ApprovalCard({
               >
                 {description}
               </p>
+            ) : null}
+            {patchSummary ? (
+              <div id={summaryId} style={{ marginTop: "12px" }}>
+                <span
+                  style={{
+                    fontSize: "var(--aw-font-size-xs)",
+                    lineHeight: "var(--aw-line-height-xs)",
+                    color: "var(--aw-text-tertiary)",
+                    fontWeight: "var(--aw-font-weight-bold)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.02em",
+                  }}
+                >
+                  变更摘要
+                </span>
+                <p
+                  style={{
+                    margin: "4px 0 0",
+                    fontSize: "var(--aw-font-size-sm)",
+                    lineHeight: "var(--aw-line-height-sm)",
+                    color: "var(--aw-text-primary)",
+                  }}
+                >
+                  {patchSummary}
+                </p>
+              </div>
+            ) : null}
+            {affectedPaths && affectedPaths.length > 0 ? (
+              <div id={pathsId} style={{ marginTop: "12px" }}>
+                <span
+                  style={{
+                    fontSize: "var(--aw-font-size-xs)",
+                    lineHeight: "var(--aw-line-height-xs)",
+                    color: "var(--aw-text-tertiary)",
+                    fontWeight: "var(--aw-font-weight-bold)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.02em",
+                  }}
+                >
+                  受影响路径
+                </span>
+                <ul
+                  style={{
+                    margin: "4px 0 0",
+                    padding: 0,
+                    listStyle: "none",
+                    maxHeight: "96px",
+                    overflowY: "auto",
+                    fontSize: "var(--aw-font-size-xs)",
+                    lineHeight: "var(--aw-line-height-xs)",
+                    color: "var(--aw-text-secondary)",
+                    fontFamily: "var(--aw-font-mono)",
+                  }}
+                >
+                  {affectedPaths.map((path) => (
+                    <li
+                      key={path}
+                      className="aw-truncate"
+                      title={path}
+                      style={{
+                        padding: "2px 0",
+                        borderBottom: "1px solid var(--aw-border-light)",
+                      }}
+                    >
+                      {path}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ) : null}
           </div>
         </div>

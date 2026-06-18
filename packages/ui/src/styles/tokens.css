@@ -6,6 +6,7 @@
   --aw-bg-fill-light: rgba(55, 53, 47, 0.04);
   --aw-bg-fill-main: rgba(55, 53, 47, 0.06);
   --aw-bg-fill-dark: rgba(55, 53, 47, 0.08);
+  --aw-overlay-backdrop: rgba(0, 0, 0, 0.28);
 
   /* Text */
   --aw-text-primary: #34322d;

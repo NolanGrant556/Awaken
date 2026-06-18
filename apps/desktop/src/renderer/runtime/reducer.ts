@@ -1,6 +1,6 @@
 import type { ApprovalItem, RunStepItem } from "@awaken/ui";
 import type { AguiApprovalRiskTone, AguiArtifactStatus, AguiEvent } from "./agui";
-import type { RuntimeRun } from "../../shared/runtime";
+import type { RuntimeRun, RuntimeRunStatus } from "../../shared/runtime";
 
 type RuntimePhase = "idle" | "starting" | "running" | "cancelling" | "done" | "error";
 
@@ -25,6 +25,7 @@ export type RuntimeViewState = {
   runId?: string;
   threadId?: string;
   phase: RuntimePhase;
+  status?: RuntimeRunStatus;
   timelineTitle: string;
   timelineStatus: TimelineStatus;
   steps: RunStepItem[];
@@ -185,7 +186,9 @@ function syncFromRun(state: RuntimeViewState, run: RuntimeRun): RuntimeViewState
       runId: run.runId,
       threadId: run.threadId,
       phase: "cancelling",
+      status: run.status,
       timelineStatus: "running",
+      approvals: [],
       steps: toSteps(
         upsertStep(
           state.steps.map((step, index) => ({ ...step, key: step.id, index: index + 1 })),
@@ -207,7 +210,9 @@ function syncFromRun(state: RuntimeViewState, run: RuntimeRun): RuntimeViewState
       runId: run.runId,
       threadId: run.threadId,
       phase: "done",
+      status: run.status,
       timelineStatus: "done",
+      approvals: [],
     };
   }
 
@@ -217,8 +222,10 @@ function syncFromRun(state: RuntimeViewState, run: RuntimeRun): RuntimeViewState
       runId: run.runId,
       threadId: run.threadId,
       phase: "error",
+      status: run.status,
       timelineStatus: "error",
       errorMessage: run.error || "Run failed",
+      approvals: [],
     };
   }
 
@@ -227,6 +234,7 @@ function syncFromRun(state: RuntimeViewState, run: RuntimeRun): RuntimeViewState
     runId: run.runId,
     threadId: run.threadId,
     phase: "running",
+    status: run.status,
     timelineStatus: "running",
   };
 }
@@ -277,6 +285,7 @@ export function reduceRuntimeState(
         ...state,
         phase: "cancelling",
         timelineStatus: "running",
+        approvals: [],
       };
     case "run/cancelSync":
       return syncFromRun(state, action.run);
@@ -286,6 +295,7 @@ export function reduceRuntimeState(
         phase: "error",
         timelineStatus: "error",
         errorMessage: action.message,
+        approvals: [],
       };
     case "run/event": {
       const nextState = { ...state };
@@ -306,6 +316,34 @@ export function reduceRuntimeState(
             description: action.event.runId ? `run ${action.event.runId}` : "Awaiting streamed events",
             status: "done",
             tag: "runtime",
+          });
+          break;
+        case "RUN_STATUS_CHANGED": {
+          const status = action.event.status;
+          nextState.status = status as RuntimeRunStatus | undefined;
+          if (status === "running") {
+            nextState.phase = "running";
+            nextState.timelineStatus = "running";
+          } else if (status === "awaiting_approval") {
+            nextState.phase = "running";
+          }
+          records = upsertStep(records, `status:${status ?? "unknown"}`, {
+            title: status === "awaiting_approval" ? "Awaiting approval" : "Run status changed",
+            description: `Status: ${status ?? "unknown"}`,
+            status: "done",
+            tag: "runtime",
+          });
+          break;
+        }
+        case "RUN_FINISHED":
+          nextState.phase = "done";
+          nextState.timelineStatus = "done";
+          nextState.approvals = [];
+          records = upsertStep(records, "run-finished", {
+            title: "Run finished",
+            description: excerpt(action.event.result || nextState.assistantText || "Runtime completed"),
+            status: "done",
+            tag: action.event.outcome?.type || "success",
           });
           break;
         case "TEXT_MESSAGE_START":
@@ -423,6 +461,8 @@ export function reduceRuntimeState(
             riskTone: normalizeRiskTone(action.event.approvalRiskTone),
             approveLabel: "Approve",
             rejectLabel: "Reject",
+            affectedPaths: action.event.approvalAffectedPaths,
+            patchSummary: action.event.approvalPatchSummary,
           };
           nextState.approvals = upsertApproval(nextState.approvals, approval);
           records = upsertStep(records, `approval:${approvalId}`, {
@@ -461,20 +501,11 @@ export function reduceRuntimeState(
           });
           break;
         }
-        case "RUN_FINISHED":
-          nextState.phase = "done";
-          nextState.timelineStatus = "done";
-          records = upsertStep(records, "run-finished", {
-            title: "Run finished",
-            description: excerpt(action.event.result || nextState.assistantText || "Runtime completed"),
-            status: "done",
-            tag: action.event.outcome?.type || "success",
-          });
-          break;
         case "RUN_ERROR":
           nextState.phase = "error";
           nextState.timelineStatus = "error";
           nextState.errorMessage = action.event.message || "Run failed";
+          nextState.approvals = [];
           records = upsertStep(records, "run-error", {
             title: action.event.code === "RUN_CANCELLED" ? "Run cancelled" : "Run failed",
             description: action.event.message || "Runtime returned an error",

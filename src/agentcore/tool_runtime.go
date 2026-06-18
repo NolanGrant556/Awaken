@@ -240,6 +240,12 @@ func mergeApprovalRequest(request *ApprovalRequest, metadata tool.ApprovalReques
 	if riskTone, ok := approvalRiskToneFromString(metadata.RiskTone); ok {
 		request.RiskTone = riskTone
 	}
+	if len(metadata.AffectedPaths) > 0 {
+		request.AffectedPaths = metadata.AffectedPaths
+	}
+	if strings.TrimSpace(metadata.PatchSummary) != "" {
+		request.PatchSummary = strings.TrimSpace(metadata.PatchSummary)
+	}
 }
 
 func approvalRiskToneFromString(value string) (ApprovalRiskTone, bool) {

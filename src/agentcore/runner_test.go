@@ -254,7 +254,7 @@ func TestRunnerOpenAIApplyPatchCreateAndDelete(t *testing.T) {
 	})
 	defer server.Close()
 
-	answer, err := runAgentWithApprovalSink(context.Background(), testAgentConfig(server.URL, 5), "create then delete via apply_patch", testApprovalAwaiter{
+	answer, err := runAgentWithApprovalSink(context.Background(), testAgentConfigWithWorkspace(server.URL, 5, root), "create then delete via apply_patch", testApprovalAwaiter{
 		decision: ApprovalDecisionApproved,
 	})
 	if err != nil {
@@ -316,7 +316,7 @@ func TestRunnerAnthropicApplyPatchToolUse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cfg := testAgentConfig(server.URL+"/anthropic", 3)
+	cfg := testAgentConfigWithWorkspace(server.URL+"/anthropic", 3, root)
 	answer, err := runAgentWithApprovalSink(context.Background(), cfg, "create via anthropic apply_patch", testApprovalAwaiter{
 		decision: ApprovalDecisionApproved,
 	})
@@ -558,7 +558,7 @@ data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use"
 data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{"}}`,
 				`event: content_block_delta
 data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"value\":\"hello\""}}`,
-			`event: content_block_delta
+				`event: content_block_delta
 data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"}"}}`,
 				`event: content_block_stop
 data: {"type":"content_block_stop","index":0}`,
@@ -939,6 +939,15 @@ func testAgentConfig(baseURL string, maxThoughts int) AgentConfig {
 			Model:   "test-model",
 		},
 	}
+}
+
+func testAgentConfigWithWorkspace(baseURL string, maxThoughts int, root string) AgentConfig {
+	cfg := testAgentConfig(baseURL, maxThoughts)
+	if root != "" {
+		cfg.Workspace.Root = root
+		cfg.Workspace.WritableRoots = []string{root}
+	}
+	return cfg
 }
 
 func newRunnerServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {

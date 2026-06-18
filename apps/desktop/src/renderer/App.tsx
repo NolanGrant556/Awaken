@@ -46,7 +46,11 @@ const projects: ProjectItem[] = [
 
 function formatStatusLabel(
   phase: ReturnType<typeof createInitialRuntimeState>["phase"],
+  status?: ReturnType<typeof createInitialRuntimeState>["status"],
 ): string {
+  if (status === "awaiting_approval") {
+    return "Awaiting approval";
+  }
   switch (phase) {
     case "starting":
       return "Creating run";
@@ -346,7 +350,7 @@ export function App() {
                 <div className="runtime-pills">
                   <span className="runtime-pill">{runtimeClient.source}</span>
                   <span className="runtime-pill runtime-pill-status">
-                    {formatStatusLabel(runtimeState.phase)}
+                    {formatStatusLabel(runtimeState.phase, runtimeState.status)}
                   </span>
                   <span className="runtime-pill runtime-pill-muted">
                     {runtimeClient.runtimeBaseUrl}
@@ -581,6 +585,8 @@ export function App() {
         onOpenChange={() => {}}
         title={activeApproval?.title || "Approval required"}
         description={activeApproval?.description}
+        affectedPaths={activeApproval?.affectedPaths}
+        patchSummary={activeApproval?.patchSummary}
         riskTone={activeApproval?.riskTone}
         approveLabel={resolvingApprovalId === activeApproval?.id ? "Resolving..." : "Approve"}
         rejectLabel={resolvingApprovalId === activeApproval?.id ? "Resolving..." : "Reject"}

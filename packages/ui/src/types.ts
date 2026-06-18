@@ -109,6 +109,8 @@ export type ApprovalItem = {
   riskTone: ApprovalRiskTone;
   approveLabel?: string;
   rejectLabel?: string;
+  affectedPaths?: string[];
+  patchSummary?: string;
 };
 
 // === Composer 状态 ===

@@ -20,6 +20,12 @@ func main() {
 	}
 
 	cfg := llm.LoadConfig()
+	cwd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("failed to get working directory: %v", err)
+	}
+	infoProvider := server.NewLLMRuntimeInfoProvider(cfg.Model, cfg.BaseURL, cfg.APIKey, cwd)
+
 	runService := runtime.NewRunService(func() runtime.Executor {
 		agentCfg := agentcore.AgentConfig{
 			MaxThoughts: 5,
@@ -42,7 +48,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: server.NewRouter(runService),
+		Handler: server.NewRouter(runService, infoProvider),
 	}
 
 	log.Printf("awaken-core listening on http://%s", addr)

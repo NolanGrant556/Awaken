@@ -148,6 +148,23 @@ func decodeJSON(r *http.Request, dst any) error {
 	return nil
 }
 
+func handleRuntimeInfo(w http.ResponseWriter, r *http.Request, provider RuntimeInfoProvider) {
+	if provider == nil {
+		http.Error(w, "runtime info unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	data, err := json.Marshal(provider.GetRuntimeInfo())
+	if err != nil {
+		http.Error(w, "failed to serialize runtime info", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
 func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)

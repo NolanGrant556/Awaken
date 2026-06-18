@@ -1,9 +1,12 @@
 import type { AguiEvent } from "./agui";
 import {
   normalizeRuntimeRun,
+  normalizeRuntimeInfo,
   type ApprovalDecision,
   type AwakenBridge,
   type DesktopPlatform,
+  type RuntimeInfo,
+  type RuntimeInfoWire,
   type RuntimeRun,
   type RuntimeRunWire,
 } from "../../shared/runtime";
@@ -12,6 +15,7 @@ export type RuntimeClient = {
   source: "electron" | "browser";
   platform: DesktopPlatform | "web";
   runtimeBaseUrl: string;
+  getRuntimeInfo: () => Promise<RuntimeInfo>;
   createRun: (input: string) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
   resolveApproval: (
@@ -62,6 +66,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     source: "electron",
     platform: bridge.platform,
     runtimeBaseUrl: bridge.runtimeBaseUrl,
+    getRuntimeInfo: () => bridge.getRuntimeInfo(),
     createRun: bridge.createRun,
     cancelRun: bridge.cancelRun,
     resolveApproval: bridge.resolveApproval,
@@ -79,6 +84,13 @@ function createBrowserClient(): RuntimeClient {
     source: "browser",
     platform: "web",
     runtimeBaseUrl: runtimeBaseUrl || window.location.origin,
+    getRuntimeInfo: async () => {
+      const response = await fetch(joinRuntimeUrl(runtimeBaseUrl, "/v1/runtime/info"));
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response));
+      }
+      return normalizeRuntimeInfo((await response.json()) as RuntimeInfoWire);
+    },
     createRun: (input) =>
       requestRuntime(runtimeBaseUrl, "/v1/runs", {
         method: "POST",

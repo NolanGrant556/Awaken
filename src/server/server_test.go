@@ -19,7 +19,7 @@ func TestHealthEndpoint(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 
-	NewRouter(nil).ServeHTTP(rec, req)
+	NewRouter(nil, nil).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
@@ -33,7 +33,7 @@ func TestAGUIDemoEndpoint(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/agui/demo", nil)
 	rec := httptest.NewRecorder()
 
-	NewRouter(nil).ServeHTTP(rec, req)
+	NewRouter(nil, nil).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
@@ -53,6 +53,97 @@ func TestAGUIDemoEndpoint(t *testing.T) {
 		if !strings.Contains(body, eventType) {
 			t.Fatalf("expected body to contain %s, got %s", eventType, body)
 		}
+	}
+}
+
+func TestRuntimeInfoEndpoint(t *testing.T) {
+	provider := &StaticRuntimeInfoProvider{
+		Info: RuntimeInfo{
+			RuntimeVersion:   RuntimeVersion,
+			APIVersion:       "v1",
+			ConfiguredModel:  "gpt-4-test",
+			HasAPIKey:        true,
+			DefaultWorkspace: "/tmp/awaken-test",
+			BaseURLHost:      "api.example.com",
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/runtime/info", nil)
+	rec := httptest.NewRecorder()
+
+	NewRouter(nil, provider).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "application/json") {
+		t.Fatalf("expected json content type, got %q", got)
+	}
+
+	var info RuntimeInfo
+	if err := json.NewDecoder(rec.Body).Decode(&info); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if info.RuntimeVersion != RuntimeVersion {
+		t.Fatalf("expected runtime_version %q, got %q", RuntimeVersion, info.RuntimeVersion)
+	}
+	if info.APIVersion != "v1" {
+		t.Fatalf("expected api_version v1, got %q", info.APIVersion)
+	}
+	if info.ConfiguredModel != "gpt-4-test" {
+		t.Fatalf("expected configured_model gpt-4-test, got %q", info.ConfiguredModel)
+	}
+	if !info.HasAPIKey {
+		t.Fatalf("expected has_api_key true")
+	}
+	if info.DefaultWorkspace != "/tmp/awaken-test" {
+		t.Fatalf("expected default_workspace /tmp/awaken-test, got %q", info.DefaultWorkspace)
+	}
+	if info.BaseURLHost != "api.example.com" {
+		t.Fatalf("expected base_url_host api.example.com, got %q", info.BaseURLHost)
+	}
+
+	body := rec.Body.String()
+	if strings.Contains(body, "secret-api-key") {
+		t.Fatalf("response body must not contain api key")
+	}
+	if strings.Contains(body, "https://api.example.com/v1") {
+		t.Fatalf("response body must not contain full base url")
+	}
+}
+
+func TestRuntimeInfoEndpointDoesNotLeakSecrets(t *testing.T) {
+	provider := NewLLMRuntimeInfoProvider(
+		"claude-test",
+		"https://api.anthropic.com/v1",
+		"sk-secret-key-must-not-appear",
+		"/workspace/secret",
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/runtime/info", nil)
+	rec := httptest.NewRecorder()
+
+	NewRouter(nil, provider).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if strings.Contains(body, "sk-secret-key-must-not-appear") {
+		t.Fatalf("response body leaked api key")
+	}
+	if strings.Contains(body, "https://api.anthropic.com/v1") {
+		t.Fatalf("response body leaked full base url")
+	}
+
+	var info RuntimeInfo
+	if err := json.NewDecoder(strings.NewReader(body)).Decode(&info); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if info.BaseURLHost != "api.anthropic.com" {
+		t.Fatalf("expected base_url_host api.anthropic.com, got %q", info.BaseURLHost)
 	}
 }
 
@@ -77,7 +168,7 @@ func TestRunsEndpointsCreateReplayAndCancel(t *testing.T) {
 		})
 	})
 
-	ts := httptest.NewServer(NewRouter(runService))
+	ts := httptest.NewServer(NewRouter(runService, nil))
 	defer ts.Close()
 
 	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello"}`))
@@ -151,7 +242,7 @@ func TestRunsEndpointsValidationAndNotFound(t *testing.T) {
 		})
 	})
 
-	router := NewRouter(runService)
+	router := NewRouter(runService, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/runs", strings.NewReader(`{"input":"   "}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -249,7 +340,7 @@ func TestResolveApprovalEndpointPublishesExtensionEvents(t *testing.T) {
 		})
 	})
 
-	ts := httptest.NewServer(NewRouter(runService))
+	ts := httptest.NewServer(NewRouter(runService, nil))
 	defer ts.Close()
 
 	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello"}`))

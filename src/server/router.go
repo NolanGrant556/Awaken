@@ -9,10 +9,13 @@ import (
 	awruntime "awaken/src/runtime"
 )
 
-func NewRouter(runService *awruntime.RunService) http.Handler {
+func NewRouter(runService *awruntime.RunService, infoProvider RuntimeInfoProvider) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handleHealth)
 	mux.HandleFunc("GET /v1/agui/demo", handleAGUIDemo)
+	mux.HandleFunc("GET /v1/runtime/info", func(w http.ResponseWriter, r *http.Request) {
+		handleRuntimeInfo(w, r, infoProvider)
+	})
 	if runService != nil {
 		handlers := runHandlers{runService: runService}
 		mux.HandleFunc("POST /v1/runs", handlers.handleCreateRun)

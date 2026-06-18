@@ -5,6 +5,7 @@ import {
   type AwakenBridge,
   type DesktopPlatform,
   type RunStreamHandlers,
+  type RuntimeInfo,
   type RuntimeRun,
 } from "../shared/runtime.js";
 
@@ -77,6 +78,8 @@ const bridge: AwakenBridge = {
     subscriptions.delete(subscriptionId);
     ipcRenderer.send("awaken:unsubscribe-run", subscriptionId);
   },
+  getRuntimeInfo: () =>
+    ipcRenderer.invoke("awaken:get-runtime-info") as Promise<RuntimeInfo>,
 };
 
 contextBridge.exposeInMainWorld("awaken", bridge);

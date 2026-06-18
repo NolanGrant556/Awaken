@@ -17,6 +17,7 @@ import {
   type ProjectItem,
 } from "@awaken/ui";
 import { createRuntimeClient } from "./runtime/client";
+import type { RuntimeInfo } from "../shared/runtime";
 import {
   createInitialRuntimeState,
   reduceRuntimeState,
@@ -80,6 +81,37 @@ export function App() {
   const [activeNavId, setActiveNavId] = useState("runs");
   const [notice, setNotice] = useState<string | null>(null);
   const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
+  const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function poll(): Promise<void> {
+      try {
+        const info = await runtimeClient.getRuntimeInfo();
+        if (!cancelled) {
+          setRuntimeInfo(info);
+          setConnectionError(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setRuntimeInfo(null);
+          setConnectionError(error instanceof Error ? error.message : "Runtime unreachable");
+        }
+      }
+    }
+
+    void poll();
+    const interval = setInterval(() => {
+      void poll();
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [runtimeClient]);
 
   useEffect(() => {
     return () => {
@@ -265,9 +297,18 @@ export function App() {
                   <span className="runtime-pill runtime-pill-muted">
                     {runtimeClient.runtimeBaseUrl}
                   </span>
-                  <span className="runtime-pill runtime-pill-status">
-                    {formatStatusLabel(runtimeState.phase)}
+                  <span
+                    className={`runtime-pill runtime-pill-status ${
+                      runtimeInfo ? "runtime-pill-connected" : "runtime-pill-disconnected"
+                    }`}
+                  >
+                    {runtimeInfo ? "Connected" : "Disconnected"}
                   </span>
+                  {runtimeInfo ? (
+                    <span className="runtime-pill">
+                      {runtimeInfo.configuredModel || "unknown model"}
+                    </span>
+                  ) : null}
                   <span className="runtime-pill">
                     approvals {runtimeState.approvals.length}
                   </span>
@@ -288,6 +329,16 @@ export function App() {
               </TopBar>
 
               <CenterStage width={860} topMargin={72}>
+                {connectionError ? (
+                  <div className="runtime-panel runtime-panel-error">
+                    <strong>Runtime disconnected</strong>
+                    <p>
+                      Unable to reach runtime at {runtimeClient.runtimeBaseUrl}. Please start
+                      awaken-core.
+                    </p>
+                  </div>
+                ) : null}
+
                 <div className="hero-block">
                   <p className="eyebrow">AG-UI Phase 4</p>
                   <h1>Desktop runtime approvals and artifacts</h1>

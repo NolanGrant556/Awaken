@@ -33,6 +33,24 @@ export type RuntimeRun = {
   finishedAt?: string;
 };
 
+export type RuntimeInfoWire = {
+  runtime_version: string;
+  api_version: string;
+  configured_model: string;
+  has_api_key: boolean;
+  default_workspace: string;
+  base_url_host: string;
+};
+
+export type RuntimeInfo = {
+  runtimeVersion: string;
+  apiVersion: string;
+  configuredModel: string;
+  hasApiKey: boolean;
+  defaultWorkspace: string;
+  baseUrlHost: string;
+};
+
 export type ApprovalDecision = "approved" | "rejected";
 
 export type RunStreamHandlers = {
@@ -53,6 +71,7 @@ export type AwakenBridge = {
   ) => Promise<void>;
   subscribeRun: (runId: string, handlers: RunStreamHandlers) => Promise<string>;
   unsubscribeRun: (subscriptionId: string) => void;
+  getRuntimeInfo: () => Promise<RuntimeInfo>;
 };
 
 export function normalizeRuntimeRun(run: RuntimeRunWire): RuntimeRun {
@@ -66,5 +85,16 @@ export function normalizeRuntimeRun(run: RuntimeRunWire): RuntimeRun {
     createdAt: run.created_at,
     updatedAt: run.updated_at,
     finishedAt: run.finished_at ?? undefined,
+  };
+}
+
+export function normalizeRuntimeInfo(info: RuntimeInfoWire): RuntimeInfo {
+  return {
+    runtimeVersion: info.runtime_version,
+    apiVersion: info.api_version,
+    configuredModel: info.configured_model,
+    hasApiKey: info.has_api_key,
+    defaultWorkspace: info.default_workspace,
+    baseUrlHost: info.base_url_host,
   };
 }

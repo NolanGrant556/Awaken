@@ -12,9 +12,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AguiEvent } from "../shared/agui.js";
 import {
+  normalizeRuntimeInfo,
   normalizeRuntimeRun,
   type ApprovalDecision,
   type DesktopPlatform,
+  type RuntimeInfoWire,
   type RuntimeRunWire,
 } from "../shared/runtime.js";
 
@@ -50,13 +52,13 @@ async function readErrorMessage(response: Response): Promise<string> {
   return body || fallback;
 }
 
-async function requestRuntime(pathname: string, init?: RequestInit): Promise<RuntimeRunWire> {
+async function requestRuntime<T = RuntimeRunWire>(pathname: string, init?: RequestInit): Promise<T> {
   const response = await fetch(runtimeUrl(pathname), init);
   if (!response.ok) {
     throw new Error(await readErrorMessage(response));
   }
 
-  return (await response.json()) as RuntimeRunWire;
+  return (await response.json()) as T;
 }
 
 async function requestRuntimeOK(pathname: string, init?: RequestInit): Promise<void> {
@@ -231,6 +233,19 @@ function createMainWindow(): BrowserWindow {
 
   return mainWindow;
 }
+
+ipcMain.handle("awaken:get-runtime-info", async () => {
+  try {
+    const info = await requestRuntime<RuntimeInfoWire>("/v1/runtime/info", {
+      method: "GET",
+    });
+
+    return normalizeRuntimeInfo(info);
+  } catch {
+    console.error("[awaken-desktop] failed to get runtime info");
+    throw new Error("Runtime unavailable");
+  }
+});
 
 ipcMain.handle("awaken:create-run", async (_event, input: string) => {
   const run = await requestRuntime("/v1/runs", {

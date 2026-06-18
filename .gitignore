@@ -38,4 +38,8 @@ apps/*/*.tsbuildinfo
 test-*.go
 
 # CLI binary
-awaken
+/awaken
+/awaken-core
+
+# macOS
+.DS_Store

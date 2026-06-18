@@ -7,6 +7,9 @@ import {
   type RunStreamHandlers,
   type RuntimeInfo,
   type RuntimeRun,
+  type StartRunRequest,
+  type WorkspacePickResult,
+  type WorkspaceValidationResult,
 } from "../shared/runtime.js";
 
 const runtimeBaseUrl = process.env.AWAKEN_DESKTOP_RUNTIME_URL?.trim() || "http://127.0.0.1:8787";
@@ -49,8 +52,8 @@ ipcRenderer.on("awaken:run-closed", (_event, payload: { subscriptionId: string }
 const bridge: AwakenBridge = {
   platform: toDesktopPlatform(process.platform),
   runtimeBaseUrl,
-  createRun: (input: string) =>
-    ipcRenderer.invoke("awaken:create-run", input) as Promise<RuntimeRun>,
+  startRun: (request: StartRunRequest) =>
+    ipcRenderer.invoke("awaken:start-run", request) as Promise<RuntimeRun>,
   cancelRun: (runId: string) =>
     ipcRenderer.invoke("awaken:cancel-run", runId) as Promise<RuntimeRun>,
   resolveApproval: (runId: string, approvalId: string, decision: ApprovalDecision) =>
@@ -80,6 +83,10 @@ const bridge: AwakenBridge = {
   },
   getRuntimeInfo: () =>
     ipcRenderer.invoke("awaken:get-runtime-info") as Promise<RuntimeInfo>,
+  pickWorkspace: (defaultPath?: string) =>
+    ipcRenderer.invoke("awaken:pick-workspace", defaultPath) as Promise<WorkspacePickResult>,
+  validateWorkspace: (path: string) =>
+    ipcRenderer.invoke("awaken:validate-workspace", path) as Promise<WorkspaceValidationResult>,
 };
 
 contextBridge.exposeInMainWorld("awaken", bridge);

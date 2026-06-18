@@ -26,7 +26,7 @@ apps/desktop/
 type AwakenBridge = {
   platform: "macos" | "windows" | "linux";
   runtimeBaseUrl: string;
-  createRun(input: string): Promise<RuntimeRun>;
+  startRun(request: StartRunRequest): Promise<RuntimeRun>;
   cancelRun(runId: string): Promise<RuntimeRun>;
   resolveApproval(
     runId: string,
@@ -42,6 +42,9 @@ type AwakenBridge = {
     },
   ): Promise<string>;
   unsubscribeRun(subscriptionId: string): void;
+  getRuntimeInfo: () => Promise<RuntimeInfo>;
+  pickWorkspace: (defaultPath?: string) => Promise<WorkspacePickResult>;
+  validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
 };
 ```
 

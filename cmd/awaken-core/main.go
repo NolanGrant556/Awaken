@@ -26,7 +26,7 @@ func main() {
 	}
 	infoProvider := server.NewLLMRuntimeInfoProvider(cfg.Model, cfg.BaseURL, cfg.APIKey, cwd)
 
-	runService := runtime.NewRunService(func() runtime.Executor {
+	runService := runtime.NewRunService(func(workspace runtime.WorkspaceConfig) runtime.Executor {
 		agentCfg := agentcore.AgentConfig{
 			MaxThoughts: 5,
 			EntryPoint:  "awaken-core",
@@ -37,6 +37,10 @@ func main() {
 				Temperature: cfg.Temperature,
 				MaxTokens:   cfg.MaxTokens,
 				AuthScheme:  cfg.AuthScheme,
+			},
+			Workspace: agentcore.WorkspaceConfig{
+				Root:          workspace.WorkspaceRoot,
+				WritableRoots: workspace.WritableRoots,
 			},
 		}
 

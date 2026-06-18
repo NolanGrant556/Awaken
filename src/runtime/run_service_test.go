@@ -12,7 +12,7 @@ import (
 func TestRunServiceReplaysHistoryAndStreamsLiveEvents(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{})
-	service := NewRunService(func() Executor {
+	service := NewRunService(func(workspace WorkspaceConfig) Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextMessageStartedEventType, MessageID: "msg-1", Role: "assistant"})
@@ -25,7 +25,7 @@ func TestRunServiceReplaysHistoryAndStreamsLiveEvents(t *testing.T) {
 		})
 	})
 
-	run, err := service.StartRun("hello")
+	run, err := service.StartRun(StartRunRequest{Input: "hello", Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()}})
 	if err != nil {
 		t.Fatalf("StartRun returned error: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestRunServiceReplaysHistoryAndStreamsLiveEvents(t *testing.T) {
 
 func TestRunServiceCancelSuppressesRunErrorAndEmitsCancelled(t *testing.T) {
 	started := make(chan struct{})
-	service := NewRunService(func() Executor {
+	service := NewRunService(func(workspace WorkspaceConfig) Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			close(started)
@@ -83,7 +83,7 @@ func TestRunServiceCancelSuppressesRunErrorAndEmitsCancelled(t *testing.T) {
 		})
 	})
 
-	run, err := service.StartRun("cancel me")
+	run, err := service.StartRun(StartRunRequest{Input: "cancel me", Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()}})
 	if err != nil {
 		t.Fatalf("StartRun returned error: %v", err)
 	}
@@ -127,14 +127,14 @@ func TestRunServiceCancelSuppressesRunErrorAndEmitsCancelled(t *testing.T) {
 }
 
 func TestRunServiceCompletesWhenExecutorReturnsWithoutTerminalEvent(t *testing.T) {
-	service := NewRunService(func() Executor {
+	service := NewRunService(func(workspace WorkspaceConfig) Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			return "done without explicit terminal event", nil
 		})
 	})
 
-	run, err := service.StartRun("finish me")
+	run, err := service.StartRun(StartRunRequest{Input: "finish me", Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()}})
 	if err != nil {
 		t.Fatalf("StartRun returned error: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestRunServiceCompletesWhenExecutorReturnsWithoutTerminalEvent(t *testing.T
 
 func TestRunServiceCancelWinsOverLateSuccessfulReturn(t *testing.T) {
 	started := make(chan struct{})
-	service := NewRunService(func() Executor {
+	service := NewRunService(func(workspace WorkspaceConfig) Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			close(started)
@@ -178,7 +178,7 @@ func TestRunServiceCancelWinsOverLateSuccessfulReturn(t *testing.T) {
 		})
 	})
 
-	run, err := service.StartRun("cancel me")
+	run, err := service.StartRun(StartRunRequest{Input: "cancel me", Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()}})
 	if err != nil {
 		t.Fatalf("StartRun returned error: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestRunServiceCancelWinsOverLateSuccessfulReturn(t *testing.T) {
 
 func TestRunServiceResolveApprovalUnblocksExecutorAndReplaysEvents(t *testing.T) {
 	approvalReady := make(chan struct{})
-	service := NewRunService(func() Executor {
+	service := NewRunService(func(workspace WorkspaceConfig) Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			awaiter, ok := sink.(agentcore.ApprovalAwaiter)
@@ -251,7 +251,7 @@ func TestRunServiceResolveApprovalUnblocksExecutorAndReplaysEvents(t *testing.T)
 		})
 	})
 
-	run, err := service.StartRun("needs approval")
+	run, err := service.StartRun(StartRunRequest{Input: "needs approval", Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()}})
 	if err != nil {
 		t.Fatalf("StartRun returned error: %v", err)
 	}
@@ -312,13 +312,13 @@ func TestRunServiceResolveApprovalUnblocksExecutorAndReplaysEvents(t *testing.T)
 }
 
 func TestRunServiceValidatesInputAndMissingRun(t *testing.T) {
-	service := NewRunService(func() Executor {
+	service := NewRunService(func(workspace WorkspaceConfig) Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			return "", errors.New("should not run")
 		})
 	})
 
-	if _, err := service.StartRun("   "); !errors.Is(err, ErrInvalidInput) {
+	if _, err := service.StartRun(StartRunRequest{Input: "   ", Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()}}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("expected ErrInvalidInput, got %v", err)
 	}
 	if _, err := service.Subscribe("missing"); !errors.Is(err, ErrRunNotFound) {
@@ -329,5 +329,70 @@ func TestRunServiceValidatesInputAndMissingRun(t *testing.T) {
 	}
 	if err := service.ResolveApproval("missing", "approval-1", agentcore.ApprovalDecisionApproved); !errors.Is(err, ErrRunNotFound) {
 		t.Fatalf("expected ErrRunNotFound from ResolveApproval, got %v", err)
+	}
+}
+
+func TestStartRunValidWorkspaceStartsRun(t *testing.T) {
+	root := t.TempDir()
+	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+		if workspace.WorkspaceRoot != root {
+			t.Fatalf("expected workspace root %q, got %q", root, workspace.WorkspaceRoot)
+		}
+		if len(workspace.WritableRoots) != 1 || workspace.WritableRoots[0] != root {
+			t.Fatalf("expected writable roots [%q], got %v", root, workspace.WritableRoots)
+		}
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			return "done", nil
+		})
+	})
+
+	run, err := service.StartRun(StartRunRequest{Input: "hello", Workspace: WorkspaceConfig{WorkspaceRoot: root}})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	if run.Status != RunStatusRunning {
+		t.Fatalf("expected running status, got %s", run.Status)
+	}
+}
+
+func TestStartRunEmptyWorkspaceReturnsInvalidInput(t *testing.T) {
+	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			return "done", nil
+		})
+	})
+
+	if _, err := service.StartRun(StartRunRequest{Input: "hello"}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput for empty workspace, got %v", err)
+	}
+}
+
+func TestStartRunNonAbsoluteWorkspaceReturnsInvalidInput(t *testing.T) {
+	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			return "done", nil
+		})
+	})
+
+	if _, err := service.StartRun(StartRunRequest{Input: "hello", Workspace: WorkspaceConfig{WorkspaceRoot: "relative/path"}}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput for non-absolute workspace, got %v", err)
+	}
+}
+
+func TestStartRunOmittedWritableRootsDefaultsToWorkspaceRoot(t *testing.T) {
+	root := t.TempDir()
+	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			return "done", nil
+		})
+	})
+
+	run, err := service.StartRun(StartRunRequest{Input: "hello", Workspace: WorkspaceConfig{WorkspaceRoot: root}})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	if run.RunID == "" {
+		t.Fatalf("expected run to be created")
 	}
 }

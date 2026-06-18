@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"awaken/src/tool"
 )
 
 func TestFileReadRawPath(t *testing.T) {
@@ -66,6 +68,104 @@ func TestFileReadRejectsBinary(t *testing.T) {
 	_, err := (&FileReadTool{}).Execute(context.Background(), `{"path":"`+escapePath(path)+`"}`)
 	if err == nil || !strings.Contains(err.Error(), "二进制") {
 		t.Fatalf("expected binary rejection, got %v", err)
+	}
+}
+
+func TestFileReadResolvesRelativePath(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "README.md")
+	if err := os.WriteFile(path, []byte("hello"), 0644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	out, err := (&FileReadTool{}).Execute(ctx, `{"path":"README.md"}`)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if out != "hello" {
+		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
+func TestReadFileDeniesEtcHosts(t *testing.T) {
+	root := t.TempDir()
+	permissionContext := tool.NewPermissionContext(root, []string{root})
+	decision := (&FileReadTool{}).CheckPermission(context.Background(), `{"path":"/etc/hosts"}`, permissionContext)
+	if decision.Behavior != tool.PermissionDeny {
+		t.Fatalf("expected deny for /etc/hosts, got %v", decision.Behavior)
+	}
+}
+
+func TestReadFileBlocksTraversal(t *testing.T) {
+	parent := t.TempDir()
+	workspace := filepath.Join(parent, "workspace")
+	if err := os.MkdirAll(workspace, 0755); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+	outsideFile := filepath.Join(parent, "outside.txt")
+	if err := os.WriteFile(outsideFile, []byte("secret"), 0644); err != nil {
+		t.Fatalf("failed to write outside file: %v", err)
+	}
+
+	permissionContext := tool.NewPermissionContext(workspace, []string{workspace})
+	decision := (&FileReadTool{}).CheckPermission(context.Background(), `{"path":"../outside.txt"}`, permissionContext)
+	if decision.Behavior != tool.PermissionDeny {
+		t.Fatalf("expected deny for traversal, got %v", decision.Behavior)
+	}
+}
+
+func TestFileReadDeniesOutsideWorkspace(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("secret"), 0644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	permissionContext := tool.NewPermissionContext(root, []string{root})
+	decision := (&FileReadTool{}).CheckPermission(context.Background(), `{"path":"`+escapePath(outsideFile)+`"}`, permissionContext)
+	if decision.Behavior != tool.PermissionDeny {
+		t.Fatalf("expected deny for outside workspace, got %v", decision.Behavior)
+	}
+}
+
+func TestFileReadAllowsInsideWorkspace(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "notes.txt")
+	if err := os.WriteFile(path, []byte("hello"), 0644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	permissionContext := tool.NewPermissionContext(root, []string{root})
+	decision := (&FileReadTool{}).CheckPermission(context.Background(), `{"path":"`+escapePath(path)+`"}`, permissionContext)
+	if decision.Behavior != tool.PermissionAllow {
+		t.Fatalf("expected allow for inside workspace, got %v", decision.Behavior)
+	}
+}
+
+func TestFileReadDeniesSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("secret"), 0644); err != nil {
+		t.Fatalf("failed to write outside file: %v", err)
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(outsideFile, link); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	permissionContext := tool.NewPermissionContext(root, []string{root})
+	decision := (&FileReadTool{}).CheckPermission(context.Background(), `{"path":"link"}`, permissionContext)
+	if decision.Behavior != tool.PermissionDeny {
+		t.Fatalf("expected deny for symlink escape, got %v", decision.Behavior)
+	}
+
+	ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
+	_, err := (&FileReadTool{}).Execute(ctx, `{"path":"link"}`)
+	if err == nil || !strings.Contains(err.Error(), "outside workspace") {
+		t.Fatalf("expected Execute to fail for symlink escape, got %v", err)
 	}
 }
 

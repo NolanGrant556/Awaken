@@ -150,7 +150,7 @@ func TestRuntimeInfoEndpointDoesNotLeakSecrets(t *testing.T) {
 func TestRunsEndpointsCreateReplayAndCancel(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{})
-	runService := awruntime.NewRunService(func() awruntime.Executor {
+	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
 		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextMessageStartedEventType, MessageID: "msg-1", Role: "assistant"})
@@ -171,7 +171,7 @@ func TestRunsEndpointsCreateReplayAndCancel(t *testing.T) {
 	ts := httptest.NewServer(NewRouter(runService, nil))
 	defer ts.Close()
 
-	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello"}`))
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello","workspace":{"workspace_root":"/tmp/awaken-test-workspace"}}`))
 	if err != nil {
 		t.Fatalf("POST /v1/runs failed: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestRunsEndpointsCreateReplayAndCancel(t *testing.T) {
 }
 
 func TestRunsEndpointsValidationAndNotFound(t *testing.T) {
-	runService := awruntime.NewRunService(func() awruntime.Executor {
+	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
 		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			return "", nil
 		})
@@ -250,6 +250,13 @@ func TestRunsEndpointsValidationAndNotFound(t *testing.T) {
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for empty input, got %d", rec.Code)
+	}
+	var errResp errorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("expected JSON error response, got %q", rec.Body.String())
+	}
+	if errResp.Code != "INVALID_INPUT" {
+		t.Fatalf("expected INVALID_INPUT code, got %q", errResp.Code)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/v1/runs/missing/events", nil)
@@ -304,7 +311,7 @@ func TestMapRuntimeCancelledUsesAGUIRunErrorWithCancelCode(t *testing.T) {
 
 func TestResolveApprovalEndpointPublishesExtensionEvents(t *testing.T) {
 	approvalReady := make(chan struct{})
-	runService := awruntime.NewRunService(func() awruntime.Executor {
+	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
 		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			awaiter, ok := sink.(agentcore.ApprovalAwaiter)
@@ -343,7 +350,7 @@ func TestResolveApprovalEndpointPublishesExtensionEvents(t *testing.T) {
 	ts := httptest.NewServer(NewRouter(runService, nil))
 	defer ts.Close()
 
-	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello"}`))
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello","workspace":{"workspace_root":"/tmp/awaken-test-workspace"}}`))
 	if err != nil {
 		t.Fatalf("POST /v1/runs failed: %v", err)
 	}

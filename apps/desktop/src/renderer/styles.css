@@ -123,6 +123,38 @@ pre {
   cursor: default;
 }
 
+.workspace-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workspace-picker-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--aw-text-secondary);
+}
+
+.workspace-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workspace-picker-input {
+  width: 260px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: rgba(255, 255, 255, 0.86);
+  font-size: 12px;
+}
+
+.workspace-picker-input:disabled {
+  opacity: 0.5;
+}
+
 .runtime-columns {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

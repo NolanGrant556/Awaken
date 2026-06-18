@@ -51,7 +51,49 @@ export type RuntimeInfo = {
   baseUrlHost: string;
 };
 
+export type WorkspaceConfigWire = {
+  workspace_root: string;
+  writable_roots?: string[];
+};
+
+export type WorkspaceConfig = {
+  workspaceRoot: string;
+  writableRoots: string[];
+};
+
+export type ClientInfoWire = {
+  session_id: string;
+  request_id: string;
+  entrypoint: string;
+};
+
+export type ClientInfo = {
+  sessionId: string;
+  requestId: string;
+  entrypoint: string;
+};
+
+export type StartRunRequestWire = {
+  input: string;
+  workspace: WorkspaceConfigWire;
+  client: ClientInfoWire;
+};
+
+export type StartRunRequest = {
+  input: string;
+  workspace: WorkspaceConfig;
+  client: ClientInfo;
+};
+
 export type ApprovalDecision = "approved" | "rejected";
+
+export type WorkspacePickResult =
+  | { canceled: true; error?: string }
+  | { canceled: false; path: string };
+
+export type WorkspaceValidationResult =
+  | { valid: true }
+  | { valid: false; error: string };
 
 export type RunStreamHandlers = {
   onEvent: (event: AguiEvent) => void;
@@ -62,7 +104,7 @@ export type RunStreamHandlers = {
 export type AwakenBridge = {
   platform: DesktopPlatform;
   runtimeBaseUrl: string;
-  createRun: (input: string) => Promise<RuntimeRun>;
+  startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
   resolveApproval: (
     runId: string,
@@ -72,6 +114,8 @@ export type AwakenBridge = {
   subscribeRun: (runId: string, handlers: RunStreamHandlers) => Promise<string>;
   unsubscribeRun: (subscriptionId: string) => void;
   getRuntimeInfo: () => Promise<RuntimeInfo>;
+  pickWorkspace: (defaultPath?: string) => Promise<WorkspacePickResult>;
+  validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
 };
 
 export function normalizeRuntimeRun(run: RuntimeRunWire): RuntimeRun {
@@ -96,5 +140,20 @@ export function normalizeRuntimeInfo(info: RuntimeInfoWire): RuntimeInfo {
     hasApiKey: info.has_api_key,
     defaultWorkspace: info.default_workspace,
     baseUrlHost: info.base_url_host,
+  };
+}
+
+export function normalizeStartRunRequest(request: StartRunRequest): StartRunRequestWire {
+  return {
+    input: request.input,
+    workspace: {
+      workspace_root: request.workspace.workspaceRoot,
+      writable_roots: request.workspace.writableRoots,
+    },
+    client: {
+      session_id: request.client.sessionId,
+      request_id: request.client.requestId,
+      entrypoint: request.client.entrypoint,
+    },
   };
 }

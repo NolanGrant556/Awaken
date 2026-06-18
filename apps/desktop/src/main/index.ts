@@ -3,6 +3,7 @@ import { TextDecoder } from "node:util";
 import {
   app,
   BrowserWindow,
+  dialog,
   ipcMain,
   shell,
   webContents,
@@ -10,14 +11,18 @@ import {
 } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import fs from "node:fs/promises";
+import path from "node:path";
 import type { AguiEvent } from "../shared/agui.js";
 import {
   normalizeRuntimeInfo,
   normalizeRuntimeRun,
+  normalizeStartRunRequest,
   type ApprovalDecision,
   type DesktopPlatform,
   type RuntimeInfoWire,
   type RuntimeRunWire,
+  type StartRunRequest,
 } from "../shared/runtime.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -49,7 +54,16 @@ function runtimeUrl(pathname: string): string {
 async function readErrorMessage(response: Response): Promise<string> {
   const fallback = `Runtime request failed (${response.status})`;
   const body = (await response.text()).trim();
-  return body || fallback;
+  if (!body) return fallback;
+  try {
+    const parsed = JSON.parse(body);
+    if (parsed.code && parsed.message) {
+      return `${parsed.code}: ${parsed.message}`;
+    }
+  } catch {
+    // fall through
+  }
+  return body;
 }
 
 async function requestRuntime<T = RuntimeRunWire>(pathname: string, init?: RequestInit): Promise<T> {
@@ -247,13 +261,13 @@ ipcMain.handle("awaken:get-runtime-info", async () => {
   }
 });
 
-ipcMain.handle("awaken:create-run", async (_event, input: string) => {
+ipcMain.handle("awaken:start-run", async (_event, request: StartRunRequest) => {
   const run = await requestRuntime("/v1/runs", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ input }),
+    body: JSON.stringify(normalizeStartRunRequest(request)),
   });
 
   return normalizeRuntimeRun(run);
@@ -296,6 +310,48 @@ ipcMain.on("awaken:unsubscribe-run", (_event, subscriptionId: string) => {
 
   subscription.controller.abort();
   subscriptions.delete(subscriptionId);
+});
+
+ipcMain.handle(
+  "awaken:pick-workspace",
+  async (_event, defaultPath?: string) => {
+    const result = await dialog.showOpenDialog({
+      properties: ["openDirectory"],
+      defaultPath,
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true };
+    }
+    const selected = result.filePaths[0];
+    try {
+      const stat = await fs.stat(selected);
+      if (!stat.isDirectory()) {
+        return { canceled: true, error: "Selected path is not a directory" };
+      }
+      return { canceled: false, path: selected };
+    } catch {
+      return { canceled: true, error: "Cannot access selected directory" };
+    }
+  },
+);
+
+ipcMain.handle("awaken:validate-workspace", async (_event, candidate: string) => {
+  const trimmed = typeof candidate === "string" ? candidate.trim() : "";
+  if (trimmed === "") {
+    return { valid: false, error: "Workspace path is required" };
+  }
+  if (!path.isAbsolute(trimmed)) {
+    return { valid: false, error: "Workspace path must be absolute" };
+  }
+  try {
+    const stat = await fs.stat(trimmed);
+    if (!stat.isDirectory()) {
+      return { valid: false, error: "Workspace path is not a directory" };
+    }
+    return { valid: true };
+  } catch {
+    return { valid: false, error: "Workspace directory does not exist or is not accessible" };
+  }
 });
 
 app.whenReady().then(() => {

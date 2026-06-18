@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"awaken/src/tool"
 )
 
 func TestGrepSearchFindsMatchesWithLineNumbers(t *testing.T) {
@@ -13,7 +15,8 @@ func TestGrepSearchFindsMatchesWithLineNumbers(t *testing.T) {
 	writeTestFile(t, root, "a.go", "package main\nfunc main() {}\n")
 	writeTestFile(t, root, "b.md", "# main\n")
 
-	out, err := (&GrepSearchTool{}).Execute(context.Background(), `{"root":"`+escapePath(root)+`","query":"func main","include":"**/*.go"}`)
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	out, err := (&GrepSearchTool{}).Execute(ctx, `{"root":"`+escapePath(root)+`","query":"func main","include":"**/*.go"}`)
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -26,7 +29,8 @@ func TestGrepSearchEmptyResult(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, root, "a.go", "package main\n")
 
-	out, err := (&GrepSearchTool{}).Execute(context.Background(), `{"root":"`+escapePath(root)+`","query":"not_found"}`)
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	out, err := (&GrepSearchTool{}).Execute(ctx, `{"root":"`+escapePath(root)+`","query":"not_found"}`)
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -46,7 +50,8 @@ func TestGrepSearchLimitsResults(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, root, "a.txt", "hit 1\nhit 2\nhit 3\n")
 
-	out, err := (&GrepSearchTool{}).Execute(context.Background(), `{"root":"`+escapePath(root)+`","query":"hit","max_results":2}`)
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	out, err := (&GrepSearchTool{}).Execute(ctx, `{"root":"`+escapePath(root)+`","query":"hit","max_results":2}`)
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -63,7 +68,8 @@ func TestGrepSearchSkipsNoisyDirectoriesAndBinary(t *testing.T) {
 		t.Fatalf("failed to write binary file: %v", err)
 	}
 
-	out, err := (&GrepSearchTool{}).Execute(context.Background(), `{"root":"`+escapePath(root)+`","query":"hit"}`)
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	out, err := (&GrepSearchTool{}).Execute(ctx, `{"root":"`+escapePath(root)+`","query":"hit"}`)
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -79,7 +85,8 @@ func TestGrepSearchTruncatesLongLines(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, root, "a.txt", "hit "+strings.Repeat("x", 20)+"\n")
 
-	out, err := (&GrepSearchTool{}).Execute(context.Background(), `{"root":"`+escapePath(root)+`","query":"hit","max_line_chars":6}`)
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	out, err := (&GrepSearchTool{}).Execute(ctx, `{"root":"`+escapePath(root)+`","query":"hit","max_line_chars":6}`)
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -93,12 +100,112 @@ func TestGrepSearchOutputModesAndOffset(t *testing.T) {
 	writeTestFile(t, root, "a.txt", "hit\nhit\n")
 	writeTestFile(t, root, "b.txt", "hit\n")
 
-	out, err := (&GrepSearchTool{}).Execute(context.Background(), `{"root":"`+escapePath(root)+`","query":"hit","output_mode":"count","offset":1}`)
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	out, err := (&GrepSearchTool{}).Execute(ctx, `{"root":"`+escapePath(root)+`","query":"hit","output_mode":"count","offset":1}`)
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
 	if out != "b.txt:1" {
 		t.Fatalf("unexpected count output: %q", out)
+	}
+}
+
+func TestGrepSearchResolvesRelativePath(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "README.md", "# README\n")
+
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	out, err := (&GrepSearchTool{}).Execute(ctx, `{"query":"README"}`)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if out != "README.md:1:# README" {
+		t.Fatalf("expected relative workspace path, got %q", out)
+	}
+}
+
+func TestGrepSearchDeniesOutsideWorkspace(t *testing.T) {
+	root := t.TempDir()
+	permissionContext := tool.NewPermissionContext(root, []string{root})
+	decision := (&GrepSearchTool{}).CheckPermission(context.Background(), `{"query":"foo","root":"/etc"}`, permissionContext)
+	if decision.Behavior != tool.PermissionDeny {
+		t.Fatalf("expected deny for /etc, got %v", decision.Behavior)
+	}
+}
+
+func TestGrepSearchResolvesRelativeRoot(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "src/main.go", "hello")
+
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	out, err := (&GrepSearchTool{}).Execute(ctx, `{"query":"hello","root":"src"}`)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if out != "src/main.go:1:hello" {
+		t.Fatalf("expected src/main.go:1:hello, got %q", out)
+	}
+}
+
+func TestGrepSearchDeniesArbitraryOutsideWorkspace(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	writeTestFile(t, outside, "secret.txt", "secret")
+
+	permissionContext := tool.NewPermissionContext(root, []string{root})
+	decision := (&GrepSearchTool{}).CheckPermission(context.Background(), `{"root":"`+escapePath(outside)+`","query":"secret"}`, permissionContext)
+	if decision.Behavior != tool.PermissionDeny {
+		t.Fatalf("expected deny for outside workspace, got %v", decision.Behavior)
+	}
+}
+
+func TestGrepSearchAllowsInsideWorkspace(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "a.go", "package main\n")
+
+	permissionContext := tool.NewPermissionContext(root, []string{root})
+	decision := (&GrepSearchTool{}).CheckPermission(context.Background(), `{"root":"`+escapePath(root)+`","query":"package"}`, permissionContext)
+	if decision.Behavior != tool.PermissionAllow {
+		t.Fatalf("expected allow for inside workspace, got %v", decision.Behavior)
+	}
+}
+
+func TestGrepSearchDeniesSymlinkRootEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	writeTestFile(t, outside, "secret.txt", "secret")
+	link := filepath.Join(root, "outside-link")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	permissionContext := tool.NewPermissionContext(root, []string{root})
+	decision := (&GrepSearchTool{}).CheckPermission(context.Background(), `{"root":"outside-link","query":"secret"}`, permissionContext)
+	if decision.Behavior != tool.PermissionDeny {
+		t.Fatalf("expected deny for symlink root escape, got %v", decision.Behavior)
+	}
+}
+
+func TestGrepSearchSkipsSymlinkFileEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	writeTestFile(t, outside, "secret.txt", "secret content")
+	link := filepath.Join(root, "secret-link")
+	if err := os.Symlink(filepath.Join(outside, "secret.txt"), link); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+	writeTestFile(t, root, "real.txt", "real content")
+
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	out, err := (&GrepSearchTool{}).Execute(ctx, `{"query":"content"}`)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if strings.Contains(out, "secret") {
+		t.Fatalf("expected symlink escape to be skipped, got %q", out)
+	}
+	if !strings.Contains(out, "real.txt") {
+		t.Fatalf("expected real file to be searched, got %q", out)
 	}
 }
 

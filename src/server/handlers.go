@@ -14,28 +14,35 @@ type runHandlers struct {
 	runService *awruntime.RunService
 }
 
-type createRunRequest struct {
-	Input string `json:"input"`
-}
-
 type resolveApprovalRequest struct {
 	Decision string `json:"decision"`
 }
 
+type errorResponse struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+func writeErrorJSON(w http.ResponseWriter, status int, code, message string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(errorResponse{Code: code, Message: message})
+}
+
 func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
-	var req createRunRequest
+	var req awruntime.StartRunRequest
 	if err := decodeJSON(r, &req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
 		return
 	}
 
-	run, err := h.runService.StartRun(req.Input)
+	run, err := h.runService.StartRun(req)
 	if err != nil {
 		if errors.Is(err, awruntime.ErrInvalidInput) {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 			return
 		}
-		http.Error(w, "failed to start run", http.StatusInternalServerError)
+		writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to start run")
 		return
 	}
 

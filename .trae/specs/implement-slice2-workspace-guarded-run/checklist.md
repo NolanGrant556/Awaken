@@ -1,0 +1,23 @@
+# Checklist
+
+- [x] `StartRunRequest` 已定义并包含 input、workspace、client 字段
+- [x] `RunService.StartRun` 接收 `StartRunRequest` 并验证 workspace_root
+- [x] `AgentConfig.Workspace` 由 request 注入，不再只依赖 process cwd
+- [x] `writable_roots` 默认等于 `[workspace_root]`
+- [x] `src/server/handlers.go` 的 create-run 处理器解析新请求体
+- [x] `read_file` 接入 PermissionContext，workspace 外读取被拒绝
+- [x] `list_files` 接入 PermissionContext，workspace 外 root 被拒绝
+- [x] `grep_search` 接入 PermissionContext，workspace 外 root 被拒绝
+- [x] 三个只读工具返回的相对路径都相对于 workspace
+- [x] `shell` 只读命令读取 workspace 外信息属于允许的本地能力，不按 workspace 文件工具拒绝
+- [x] `apps/desktop/src/shared/runtime.ts` 新增 `StartRunRequest` 与 `WorkspaceConfig` 类型
+- [x] `AwakenBridge` 与 `RuntimeClient` 的 `startRun` 方法使用 request 对象
+- [x] Electron main/preload 的 `startRun` IPC 已更新
+- [x] App.tsx 新增 workspace picker 与当前 workspace 展示
+- [x] workspace 无效时显示警告并禁用发送
+- [x] 发送时传入 workspace 与 client 信息
+- [x] Go 测试（runtime/server/tools）全部通过
+- [x] Desktop build 与 type check 通过
+- [x] 真实 LLM smoke 覆盖 workspace 内只读任务
+- [x] 确定性测试覆盖 `read_file /etc/hosts` 失败、`~/Desktop` list 失败、路径归一化
+- [x] 真实 LLM smoke 覆盖 `shell` 只读外部读取按设计允许

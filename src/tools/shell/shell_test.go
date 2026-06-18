@@ -3,6 +3,8 @@ package shelltool
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -106,6 +108,90 @@ func TestShellExecutesFromWorkspaceRootByDefault(t *testing.T) {
 	result := decodeResult(t, out)
 	if strings.TrimSpace(result.Stdout) != root {
 		t.Fatalf("expected pwd to run from workspace root %q, got %+v", root, result)
+	}
+}
+
+func TestShellPermissionAsksWhenReadOnlyCommandAccessesExternalPath(t *testing.T) {
+	root := t.TempDir()
+	ctx := tool.NewPermissionContext(root, nil)
+	shellTool := &ShellTool{}
+
+	cases := []string{
+		`{"command":"cat /etc/hosts"}`,
+		`{"command":"head -1 /etc/passwd"}`,
+		`{"command":"tail -n 5 /var/log/system.log"}`,
+		`{"command":"ls /tmp"}`,
+		`{"command":"grep root /etc/passwd"}`,
+		`{"command":"cat README.md /etc/hosts"}`,
+	}
+	for _, input := range cases {
+		decision := shellTool.CheckPermission(context.Background(), input, ctx)
+		if decision.Behavior != tool.PermissionAsk {
+			t.Fatalf("expected ask for %q, got %+v", input, decision)
+		}
+	}
+}
+
+func TestShellPermissionAllowsReadOnlyCommandInsideWorkspace(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("hello"), 0644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+	ctx := tool.NewPermissionContext(root, nil)
+	shellTool := &ShellTool{}
+
+	cases := []string{
+		`{"command":"cat README.md"}`,
+		`{"command":"ls ./src"}`,
+		`{"command":"grep hello README.md"}`,
+		`{"command":"head -n 1 README.md"}`,
+		`{"command":"wc -l README.md"}`,
+	}
+	for _, input := range cases {
+		decision := shellTool.CheckPermission(context.Background(), input, ctx)
+		if decision.Behavior != tool.PermissionAllow {
+			t.Fatalf("expected allow for %q, got %+v", input, decision)
+		}
+	}
+}
+
+func TestShellPermissionAsksForSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("secret"), 0644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(outsideFile, link); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	ctx := tool.NewPermissionContext(root, nil)
+	decision := (&ShellTool{}).CheckPermission(context.Background(), `{"command":"cat link"}`, ctx)
+	if decision.Behavior != tool.PermissionAsk {
+		t.Fatalf("expected ask for symlink escape, got %+v", decision)
+	}
+}
+
+func TestShellPermissionControlOperatorsStillAsk(t *testing.T) {
+	root := t.TempDir()
+	ctx := tool.NewPermissionContext(root, nil)
+	shellTool := &ShellTool{}
+
+	cases := []string{
+		`{"command":"cat README.md | head"}`,
+		`{"command":"cat README.md > out.txt"}`,
+		`{"command":"cat README.md && echo done"}`,
+	}
+	for _, input := range cases {
+		decision := shellTool.CheckPermission(context.Background(), input, ctx)
+		if decision.Behavior != tool.PermissionAsk {
+			t.Fatalf("expected ask for control operator in %q, got %+v", input, decision)
+		}
 	}
 }
 

@@ -2,6 +2,7 @@ import type { AguiEvent } from "./agui";
 import {
   normalizeRuntimeRun,
   normalizeRuntimeInfo,
+  normalizeStartRunRequest,
   type ApprovalDecision,
   type AwakenBridge,
   type DesktopPlatform,
@@ -9,6 +10,9 @@ import {
   type RuntimeInfoWire,
   type RuntimeRun,
   type RuntimeRunWire,
+  type StartRunRequest,
+  type WorkspacePickResult,
+  type WorkspaceValidationResult,
 } from "../../shared/runtime";
 
 export type RuntimeClient = {
@@ -16,7 +20,7 @@ export type RuntimeClient = {
   platform: DesktopPlatform | "web";
   runtimeBaseUrl: string;
   getRuntimeInfo: () => Promise<RuntimeInfo>;
-  createRun: (input: string) => Promise<RuntimeRun>;
+  startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
   resolveApproval: (
     runId: string,
@@ -31,6 +35,8 @@ export type RuntimeClient = {
       onClose?: () => void;
     },
   ) => Promise<() => void>;
+  pickWorkspace: (defaultPath?: string) => Promise<WorkspacePickResult>;
+  validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
 };
 
 function joinRuntimeUrl(baseUrl: string, pathname: string): string {
@@ -42,7 +48,16 @@ function joinRuntimeUrl(baseUrl: string, pathname: string): string {
 
 async function readErrorMessage(response: Response): Promise<string> {
   const body = (await response.text()).trim();
-  return body || `Runtime request failed (${response.status})`;
+  if (!body) return `Runtime request failed (${response.status})`;
+  try {
+    const parsed = JSON.parse(body);
+    if (parsed.code && parsed.message) {
+      return `${parsed.code}: ${parsed.message}`;
+    }
+  } catch {
+    // fall through
+  }
+  return body;
 }
 
 async function requestRuntime(baseUrl: string, pathname: string, init?: RequestInit): Promise<RuntimeRun> {
@@ -67,13 +82,15 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     platform: bridge.platform,
     runtimeBaseUrl: bridge.runtimeBaseUrl,
     getRuntimeInfo: () => bridge.getRuntimeInfo(),
-    createRun: bridge.createRun,
+    startRun: (request) => bridge.startRun(request),
     cancelRun: bridge.cancelRun,
     resolveApproval: bridge.resolveApproval,
     subscribeRun: async (runId, handlers) => {
       const subscriptionId = await bridge.subscribeRun(runId, handlers);
       return () => bridge.unsubscribeRun(subscriptionId);
     },
+    pickWorkspace: (defaultPath) => bridge.pickWorkspace(defaultPath),
+    validateWorkspace: (path) => bridge.validateWorkspace(path),
   };
 }
 
@@ -91,13 +108,13 @@ function createBrowserClient(): RuntimeClient {
       }
       return normalizeRuntimeInfo((await response.json()) as RuntimeInfoWire);
     },
-    createRun: (input) =>
+    startRun: (request) =>
       requestRuntime(runtimeBaseUrl, "/v1/runs", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ input }),
+        body: JSON.stringify(normalizeStartRunRequest(request)),
       }),
     cancelRun: (runId) =>
       requestRuntime(runtimeBaseUrl, `/v1/runs/${runId}/cancel`, {
@@ -141,6 +158,20 @@ function createBrowserClient(): RuntimeClient {
       return () => {
         source.close();
       };
+    },
+    pickWorkspace: async () => ({
+      canceled: true as const,
+      error: "Browser fallback does not support directory picker",
+    }),
+    validateWorkspace: async (path) => {
+      const trimmed = path.trim();
+      if (trimmed === "") {
+        return { valid: false as const, error: "Workspace path is required" };
+      }
+      if (!/^([A-Za-z]:[\\/]|\/)/.test(trimmed)) {
+        return { valid: false as const, error: "Workspace path must be absolute" };
+      }
+      return { valid: true };
     },
   };
 }

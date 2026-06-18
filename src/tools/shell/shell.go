@@ -154,9 +154,230 @@ func shellPermissionReason(params shellParams, permissionContext tool.Permission
 		return "shell command contains operators, redirections, substitutions, or multiple operations", "warning"
 	}
 	if isSafeReadOnlyShellCommand(params.Command) {
+		paths, ok := safeReadOnlyCommandPaths(params.Command)
+		if !ok {
+			return "shell command uses an unrecognized argument pattern and may access files outside the workspace", "warning"
+		}
+		for _, p := range paths {
+			if !permissionContext.IsWithinWorkspaceResolved(p) {
+				return fmt.Sprintf("shell command would read path outside workspace: %s", p), "warning"
+			}
+		}
 		return "", ""
 	}
 	return "shell command is not classified as read-only", "warning"
+}
+
+// safeReadOnlyCommandPaths extracts filesystem path arguments from a simple read-only shell command.
+// It returns ok=false when the argument pattern is too complex to analyze safely (e.g. unknown options),
+// in which case the caller should request approval instead of allowing the command.
+func safeReadOnlyCommandPaths(command string) ([]string, bool) {
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return nil, true
+	}
+	base := filepath.Base(fields[0])
+	args := fields[1:]
+
+	switch base {
+	case "pwd", "echo", "printf", "which", "whereis", "whoami", "date":
+		return nil, true
+	case "cat", "head", "tail", "wc", "stat", "file", "strings":
+		return trailingFileArgs(args, map[string]bool{"-n": true, "-c": true, "-w": true, "-l": true, "-m": true, "-L": true})
+	case "ls", "tree", "du":
+		return trailingFileArgs(args, map[string]bool{"-a": false, "-l": false, "-h": false, "-r": false, "-s": false, "-d": true, "-L": false})
+	case "grep":
+		return grepPathArgs(args)
+	case "rg":
+		return rgPathArgs(args)
+	case "find":
+		return findPathArgs(args)
+	case "git":
+		// Read-only git commands (status/diff/log/...) do not read arbitrary external paths.
+		return nil, true
+	default:
+		return trailingFileArgs(args, nil)
+	}
+}
+
+func trailingFileArgs(args []string, optionArgs map[string]bool) ([]string, bool) {
+	i := 0
+	for i < len(args) {
+		arg := args[i]
+		if arg == "--" {
+			i++
+			break
+		}
+		if !strings.HasPrefix(arg, "-") {
+			break
+		}
+		if takesOptionArgument(arg, optionArgs) {
+			i += 2
+			if i > len(args) {
+				return nil, false
+			}
+		} else {
+			i++
+		}
+	}
+	var paths []string
+	for ; i < len(args); i++ {
+		if args[i] != "-" {
+			paths = append(paths, args[i])
+		}
+	}
+	return paths, true
+}
+
+func takesOptionArgument(arg string, optionArgs map[string]bool) bool {
+	if optionArgs == nil {
+		return false
+	}
+	// Short option stack like -n10 or -abc is not supported; treat as no-argument.
+	if _, ok := optionArgs[arg]; ok {
+		return ok
+	}
+	return false
+}
+
+func grepPathArgs(args []string) ([]string, bool) {
+	i := 0
+	var paths []string
+	for i < len(args) {
+		arg := args[i]
+		if arg == "--" {
+			i++
+			break
+		}
+		if !strings.HasPrefix(arg, "-") {
+			break
+		}
+		switch arg {
+		case "-e", "--regexp":
+			i += 2
+			if i > len(args) {
+				return nil, false
+			}
+		case "-f", "--file":
+			i++
+			if i >= len(args) {
+				return nil, false
+			}
+			paths = append(paths, args[i])
+			i++
+		case "-d", "-D", "--binary-files", "--color", "-C", "-B", "-A", "--context", "--group-separator", "--line-buffered":
+			i += 2
+			if i > len(args) {
+				return nil, false
+			}
+		default:
+			if strings.HasPrefix(arg, "--file=") {
+				paths = append(paths, strings.TrimPrefix(arg, "--file="))
+				i++
+				continue
+			}
+			// Unknown grep option; argument pattern is too complex.
+			if strings.HasPrefix(arg, "--") {
+				return nil, false
+			}
+			// Short options we don't recognize; conservative.
+			return nil, false
+		}
+	}
+	if i >= len(args) {
+		return paths, true
+	}
+	// First non-option is the pattern; the rest are files.
+	for j := i + 1; j < len(args); j++ {
+		if args[j] != "-" {
+			paths = append(paths, args[j])
+		}
+	}
+	return paths, true
+}
+
+func rgPathArgs(args []string) ([]string, bool) {
+	i := 0
+	var paths []string
+	for i < len(args) {
+		arg := args[i]
+		if arg == "--" {
+			i++
+			break
+		}
+		if !strings.HasPrefix(arg, "-") {
+			break
+		}
+		switch arg {
+		case "-e", "--regexp":
+			i += 2
+			if i > len(args) {
+				return nil, false
+			}
+		case "-f", "--file":
+			i++
+			if i >= len(args) {
+				return nil, false
+			}
+			paths = append(paths, args[i])
+			i++
+		case "-g", "--glob", "-t", "--type", "-T", "--type-not", "-C", "-B", "-A", "--context", "--sort", "--sortr", "--binary-files", "--color", "--colors", "--line-buffered":
+			i += 2
+			if i > len(args) {
+				return nil, false
+			}
+		default:
+			if strings.HasPrefix(arg, "--file=") {
+				paths = append(paths, strings.TrimPrefix(arg, "--file="))
+				i++
+				continue
+			}
+			if strings.HasPrefix(arg, "--") {
+				return nil, false
+			}
+			return nil, false
+		}
+	}
+	if i >= len(args) {
+		return paths, true
+	}
+	// First non-option is the pattern; the rest are paths.
+	for j := i + 1; j < len(args); j++ {
+		paths = append(paths, args[j])
+	}
+	return paths, true
+}
+
+func findPathArgs(args []string) ([]string, bool) {
+	expressionMarkers := map[string]bool{
+		"-name": true, "-iname": true, "-type": true, "-mtime": true,
+		"-exec": true, "-execdir": true, "-ok": true, "-delete": true,
+		"-print": true, "-print0": true, "-printf": true,
+		"-and": true, "-or": true, "-not": true, "!": true,
+		"-maxdepth": true, "-mindepth": true, "-path": true, "-ipath": true,
+		"-newer": true, "-size": true, "-empty": true, "-perm": true,
+		"-user": true, "-group": true, "-links": true,
+	}
+	globalOptions := map[string]bool{"-L": true, "-P": true, "-H": true, "-D": true, "-O": true}
+
+	i := 0
+	for i < len(args) {
+		arg := args[i]
+		if arg == "--" {
+			i++
+			break
+		}
+		if globalOptions[arg] {
+			i++
+			continue
+		}
+		if strings.HasPrefix(arg, "-") || expressionMarkers[arg] {
+			break
+		}
+		i++
+	}
+	// Everything before i is a path argument.
+	return args[:i], true
 }
 
 func shellApprovalDescription(params shellParams, reason string) string {

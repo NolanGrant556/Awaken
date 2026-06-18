@@ -38,12 +38,13 @@ type grepSearchParams struct {
 }
 
 type grepOptions struct {
-	root         string
-	include      string
-	maxResults   int
-	offset       int
-	maxLineChars int
-	outputMode   string
+	root          string
+	workspaceRoot string
+	include       string
+	maxResults    int
+	offset        int
+	maxLineChars  int
+	outputMode    string
 }
 
 type fileMatch struct {
@@ -91,21 +92,27 @@ func (t *GrepSearchTool) Execute(ctx context.Context, input string) (string, err
 		return "", fmt.Errorf("缺少必需参数: query")
 	}
 
-	root := strings.TrimSpace(params.Root)
-	if root == "" {
-		root = "."
+	permissionContext := tool.PermissionContextFromContext(ctx)
+	root := permissionContext.ResolvePath(params.Root)
+	if tool.HasPermissionContext(ctx) {
+		checkedRoot, err := permissionContext.ResolvePathChecked(params.Root)
+		if err != nil {
+			return "", err
+		}
+		root = checkedRoot
 	}
 	include := strings.TrimSpace(params.Include)
 	if include == "" {
 		include = defaultInclude
 	}
 	options := grepOptions{
-		root:         root,
-		include:      include,
-		maxResults:   normalizeMaxResults(params.MaxResults),
-		offset:       normalizeOffset(params.Offset),
-		maxLineChars: normalizeMaxLineChars(params.MaxLineChars),
-		outputMode:   normalizeOutputMode(params.OutputMode),
+		root:          root,
+		workspaceRoot: permissionContext.WorkspaceRootOrCWD(),
+		include:       include,
+		maxResults:    normalizeMaxResults(params.MaxResults),
+		offset:        normalizeOffset(params.Offset),
+		maxLineChars:  normalizeMaxLineChars(params.MaxLineChars),
+		outputMode:    normalizeOutputMode(params.OutputMode),
 	}
 
 	re, err := regexp.Compile(params.Query)
@@ -113,7 +120,7 @@ func (t *GrepSearchTool) Execute(ctx context.Context, input string) (string, err
 		return "", fmt.Errorf("query 不是有效正则表达式: %w", err)
 	}
 
-	results, truncated, err := searchFiles(ctx, re, options)
+	results, truncated, err := searchFiles(ctx, re, options, permissionContext)
 	if err != nil {
 		return "", err
 	}
@@ -124,6 +131,17 @@ func (t *GrepSearchTool) Execute(ctx context.Context, input string) (string, err
 		results = append(results, fmt.Sprintf("[grep_search truncated: showing %d results after offset %d]", len(results), options.offset))
 	}
 	return strings.Join(results, "\n"), nil
+}
+
+func (t *GrepSearchTool) CheckPermission(ctx context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {
+	params, err := parseParams(input)
+	if err != nil {
+		return tool.DenyPermission(fmt.Sprintf("invalid parameters: %v", err))
+	}
+	if !permissionContext.IsWithinWorkspaceResolved(params.Root) {
+		return tool.DenyPermission(fmt.Sprintf("root %s is outside workspace or escapes via symlink", params.Root))
+	}
+	return tool.AllowPermission()
 }
 
 func parseParams(input string) (grepSearchParams, error) {
@@ -177,8 +195,8 @@ func normalizeOutputMode(value string) string {
 	}
 }
 
-func searchFiles(ctx context.Context, re *regexp.Regexp, options grepOptions) ([]string, bool, error) {
-	paths, err := matchingFiles(ctx, options.root, options.include)
+func searchFiles(ctx context.Context, re *regexp.Regexp, options grepOptions, permissionContext tool.PermissionContext) ([]string, bool, error) {
+	paths, err := matchingFiles(ctx, options.root, options.include, permissionContext)
 	if err != nil {
 		return nil, false, err
 	}
@@ -198,7 +216,7 @@ func searchFiles(ctx context.Context, re *regexp.Regexp, options grepOptions) ([
 			continue
 		}
 
-		match, err := searchFile(options.root, path, re, options.maxLineChars)
+		match, err := searchFile(path, re, options)
 		if err != nil {
 			return nil, false, err
 		}
@@ -252,7 +270,7 @@ func appendMatchResults(results *[]string, match fileMatch, options grepOptions,
 	return added, len(*results) >= options.maxResults
 }
 
-func matchingFiles(ctx context.Context, root, include string) ([]string, error) {
+func matchingFiles(ctx context.Context, root, include string, permissionContext tool.PermissionContext) ([]string, error) {
 	var paths []string
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -267,6 +285,12 @@ func matchingFiles(ctx context.Context, root, include string) ([]string, error) 
 			}
 			return nil
 		}
+
+		// Skip files that escape the workspace through symlinks.
+		if !permissionContext.IsWithinWorkspaceResolved(path) {
+			return nil
+		}
+
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
@@ -284,7 +308,7 @@ func matchingFiles(ctx context.Context, root, include string) ([]string, error) 
 	return paths, nil
 }
 
-func searchFile(root, path string, re *regexp.Regexp, maxLineChars int) (fileMatch, error) {
+func searchFile(path string, re *regexp.Regexp, options grepOptions) (fileMatch, error) {
 	result := fileMatch{path: path}
 	file, err := os.Open(path)
 	if err != nil {
@@ -292,7 +316,7 @@ func searchFile(root, path string, re *regexp.Regexp, maxLineChars int) (fileMat
 	}
 	defer file.Close()
 
-	rel, err := filepath.Rel(root, path)
+	rel, err := filepath.Rel(options.workspaceRoot, path)
 	if err != nil {
 		return result, err
 	}
@@ -308,7 +332,7 @@ func searchFile(root, path string, re *regexp.Regexp, maxLineChars int) (fileMat
 			result.count++
 			result.lines = append(result.lines, lineMatch{
 				number:  lineNumber,
-				content: trimMatchLine(line, maxLineChars),
+				content: trimMatchLine(line, options.maxLineChars),
 			})
 		}
 	}

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"awaken/src/tool"
 )
 
 func TestListFilesMatchesAndSorts(t *testing.T) {
@@ -14,7 +16,8 @@ func TestListFilesMatchesAndSorts(t *testing.T) {
 	writeTestFile(t, root, "a.go", "package a")
 	writeTestFile(t, root, "notes.md", "# notes")
 
-	out, err := (&ListFilesTool{}).Execute(context.Background(), `{"root":"`+escapePath(root)+`","pattern":"*.go"}`)
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	out, err := (&ListFilesTool{}).Execute(ctx, `{"root":"`+escapePath(root)+`","pattern":"*.go"}`)
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -29,7 +32,8 @@ func TestListFilesSupportsRecursivePatternAndLimit(t *testing.T) {
 	writeTestFile(t, root, "nested/b.go", "package b")
 	writeTestFile(t, root, "nested/c.go", "package c")
 
-	out, err := (&ListFilesTool{}).Execute(context.Background(), `{"root":"`+escapePath(root)+`","pattern":"**/*.go","max_results":2}`)
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	out, err := (&ListFilesTool{}).Execute(ctx, `{"root":"`+escapePath(root)+`","pattern":"**/*.go","max_results":2}`)
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -49,7 +53,8 @@ func TestListFilesEmptyResult(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, root, "notes.md", "# notes")
 
-	out, err := (&ListFilesTool{}).Execute(context.Background(), `{"root":"`+escapePath(root)+`","pattern":"*.go"}`)
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	out, err := (&ListFilesTool{}).Execute(ctx, `{"root":"`+escapePath(root)+`","pattern":"*.go"}`)
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -63,12 +68,112 @@ func TestListFilesSkipsNoisyDirectories(t *testing.T) {
 	writeTestFile(t, root, "src/main.go", "package main")
 	writeTestFile(t, root, "node_modules/pkg/index.go", "package pkg")
 
-	out, err := (&ListFilesTool{}).Execute(context.Background(), `{"root":"`+escapePath(root)+`","pattern":"**/*.go"}`)
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	out, err := (&ListFilesTool{}).Execute(ctx, `{"root":"`+escapePath(root)+`","pattern":"**/*.go"}`)
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
 	if out != "src/main.go" {
 		t.Fatalf("unexpected results: %q", out)
+	}
+}
+
+func TestListFilesResolvesRelativePath(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "README.md", "# readme")
+
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	out, err := (&ListFilesTool{}).Execute(ctx, `{"pattern":"*.md"}`)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if out != "README.md" {
+		t.Fatalf("expected relative workspace path, got %q", out)
+	}
+}
+
+func TestListFilesDeniesHomeDesktop(t *testing.T) {
+	root := t.TempDir()
+	permissionContext := tool.NewPermissionContext(root, []string{root})
+	decision := (&ListFilesTool{}).CheckPermission(context.Background(), `{"root":"~/Desktop"}`, permissionContext)
+	if decision.Behavior != tool.PermissionDeny {
+		t.Fatalf("expected deny for ~/Desktop, got %v", decision.Behavior)
+	}
+}
+
+func TestListFilesResolvesRelativeRoot(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "src/main.go", "package main")
+
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	out, err := (&ListFilesTool{}).Execute(ctx, `{"root":"src"}`)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if out != "src/main.go" {
+		t.Fatalf("expected src/main.go, got %q", out)
+	}
+}
+
+func TestListFilesDeniesOutsideWorkspace(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	writeTestFile(t, outside, "secret.txt", "secret")
+
+	permissionContext := tool.NewPermissionContext(root, []string{root})
+	decision := (&ListFilesTool{}).CheckPermission(context.Background(), `{"root":"`+escapePath(outside)+`"}`, permissionContext)
+	if decision.Behavior != tool.PermissionDeny {
+		t.Fatalf("expected deny for outside workspace, got %v", decision.Behavior)
+	}
+}
+
+func TestListFilesAllowsInsideWorkspace(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "a.go", "package a")
+
+	permissionContext := tool.NewPermissionContext(root, []string{root})
+	decision := (&ListFilesTool{}).CheckPermission(context.Background(), `{"root":"`+escapePath(root)+`"}`, permissionContext)
+	if decision.Behavior != tool.PermissionAllow {
+		t.Fatalf("expected allow for inside workspace, got %v", decision.Behavior)
+	}
+}
+
+func TestListFilesDeniesSymlinkRootEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	writeTestFile(t, outside, "secret.txt", "secret")
+	link := filepath.Join(root, "outside-link")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	permissionContext := tool.NewPermissionContext(root, []string{root})
+	decision := (&ListFilesTool{}).CheckPermission(context.Background(), `{"root":"outside-link"}`, permissionContext)
+	if decision.Behavior != tool.PermissionDeny {
+		t.Fatalf("expected deny for symlink root escape, got %v", decision.Behavior)
+	}
+}
+
+func TestListFilesSkipsSymlinkFileEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	writeTestFile(t, outside, "secret.txt", "secret")
+	link := filepath.Join(root, "secret-link")
+	if err := os.Symlink(filepath.Join(outside, "secret.txt"), link); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+	writeTestFile(t, root, "real.txt", "real")
+
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	out, err := (&ListFilesTool{}).Execute(ctx, `{}`)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if strings.Contains(out, "secret-link") || strings.Contains(out, "secret.txt") {
+		t.Fatalf("expected symlink escape to be skipped, got %q", out)
+	}
+	if !strings.Contains(out, "real.txt") {
+		t.Fatalf("expected real file to be listed, got %q", out)
 	}
 }
 

@@ -50,6 +50,17 @@ func (t *FileReadTool) IsReadOnly() bool {
 	return true
 }
 
+func (t *FileReadTool) CheckPermission(ctx context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {
+	params, err := parseParams(input)
+	if err != nil {
+		return tool.DenyPermission(fmt.Sprintf("invalid parameters: %v", err))
+	}
+	if !permissionContext.IsWithinWorkspaceResolved(params.Path) {
+		return tool.DenyPermission(fmt.Sprintf("path %s is outside workspace or escapes via symlink", params.Path))
+	}
+	return tool.AllowPermission()
+}
+
 func (t *FileReadTool) Execute(ctx context.Context, input string) (string, error) {
 	params, err := parseParams(input)
 	if err != nil {
@@ -59,6 +70,16 @@ func (t *FileReadTool) Execute(ctx context.Context, input string) (string, error
 		return "", fmt.Errorf("文件路径不能为空")
 	}
 
+	permissionContext := tool.PermissionContextFromContext(ctx)
+	if tool.HasPermissionContext(ctx) {
+		checkedPath, err := permissionContext.ResolvePathChecked(params.Path)
+		if err != nil {
+			return "", err
+		}
+		params.Path = checkedPath
+	} else {
+		params.Path = permissionContext.ResolvePath(params.Path)
+	}
 	return readTextRange(ctx, params)
 }
 

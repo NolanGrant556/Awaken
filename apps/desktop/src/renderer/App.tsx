@@ -17,7 +17,7 @@ import {
   type ProjectItem,
 } from "@awaken/ui";
 import { createRuntimeClient } from "./runtime/client";
-import type { RuntimeInfo } from "../shared/runtime";
+import type { RuntimeInfo, StartRunRequest } from "../shared/runtime";
 import {
   createInitialRuntimeState,
   reduceRuntimeState,
@@ -83,6 +83,7 @@ export function App() {
   const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [workspacePath, setWorkspacePath] = useState<string>("");
 
   useEffect(() => {
     let cancelled = false;
@@ -120,10 +121,19 @@ export function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (runtimeInfo && workspacePath === "") {
+      setWorkspacePath(runtimeInfo.defaultWorkspace);
+    }
+  }, [runtimeInfo, workspacePath]);
+
   const isBusy =
     runtimeState.phase === "starting" ||
     runtimeState.phase === "running" ||
     runtimeState.phase === "cancelling";
+
+  const isWorkspaceValid =
+    workspacePath.trim() !== "" && /^([A-Za-z]:[\\/]|\/)/.test(workspacePath.trim());
 
   const activeApproval = runtimeState.approvals[0];
   const latestArtifact =
@@ -161,6 +171,17 @@ export function App() {
     if (!prompt || isBusy) {
       return;
     }
+    if (!isWorkspaceValid) {
+      setNotice("Please enter a valid absolute workspace path.");
+      return;
+    }
+
+    const workspaceRoot = workspacePath.trim();
+    const validation = await runtimeClient.validateWorkspace(workspaceRoot);
+    if (!validation.valid) {
+      setNotice(validation.error);
+      return;
+    }
 
     unsubscribeRef.current?.();
     unsubscribeRef.current = null;
@@ -171,7 +192,19 @@ export function App() {
     dispatch({ type: "run/requested", prompt });
 
     try {
-      const run = await runtimeClient.createRun(prompt);
+      const startRunRequest: StartRunRequest = {
+        input: prompt,
+        workspace: {
+          workspaceRoot,
+          writableRoots: workspaceRoot ? [workspaceRoot] : [],
+        },
+        client: {
+          sessionId: window.crypto.randomUUID(),
+          requestId: window.crypto.randomUUID(),
+          entrypoint: "desktop",
+        },
+      };
+      const run = await runtimeClient.startRun(startRunRequest);
       dispatch({ type: "run/created", run });
       const unsubscribe = await runtimeClient.subscribeRun(run.runId, {
         onEvent: (event) => {
@@ -222,6 +255,20 @@ export function App() {
         type: "run/streamError",
         message: error instanceof Error ? error.message : "Failed to cancel run",
       });
+    }
+  }
+
+  async function handlePickWorkspace(): Promise<void> {
+    try {
+      const result = await runtimeClient.pickWorkspace(workspacePath || runtimeInfo?.defaultWorkspace);
+      if (!result.canceled) {
+        setWorkspacePath(result.path);
+        setNotice(null);
+      } else if (result.error) {
+        setNotice(result.error);
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to pick workspace");
     }
   }
 
@@ -309,6 +356,32 @@ export function App() {
                       {runtimeInfo.configuredModel || "unknown model"}
                     </span>
                   ) : null}
+                  <label className="workspace-picker">
+                    <span className="workspace-picker-label">Workspace</span>
+                    <div className="workspace-picker-row">
+                      <input
+                        type="text"
+                        className="workspace-picker-input"
+                        value={workspacePath}
+                        onChange={(e) => setWorkspacePath(e.target.value)}
+                        placeholder="/path/to/project"
+                        disabled={isBusy}
+                      />
+                      <button
+                        type="button"
+                        className="runtime-action"
+                        onClick={() => {
+                          void handlePickWorkspace();
+                        }}
+                        disabled={isBusy}
+                      >
+                        Choose…
+                      </button>
+                    </div>
+                  </label>
+                  {!isWorkspaceValid ? (
+                    <span className="runtime-pill runtime-pill-warning">Workspace required</span>
+                  ) : null}
                   <span className="runtime-pill">
                     approvals {runtimeState.approvals.length}
                   </span>
@@ -362,8 +435,8 @@ export function App() {
                   models={models}
                   onModelChange={setSelectedModel}
                   placeholder="Describe the change you want Awaken to run"
-                  disabled={isBusy}
-                  isReady={composerValue.trim().length > 0}
+                  disabled={isBusy || !isWorkspaceValid}
+                  isReady={composerValue.trim().length > 0 && isWorkspaceValid}
                 />
 
                 <div className="panel-stack">

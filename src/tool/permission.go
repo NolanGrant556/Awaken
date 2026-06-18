@@ -2,6 +2,7 @@ package tool
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,7 +67,7 @@ func (c PermissionContext) Normalize() PermissionContext {
 
 	writableRoots := make([]string, 0, len(c.WritableRoots)+1)
 	for _, candidate := range c.WritableRoots {
-		if root, ok := absoluteCleanPath(candidate, root); ok {
+		if root, ok := AbsoluteCleanPath(candidate, root); ok {
 			writableRoots = append(writableRoots, root)
 		}
 	}
@@ -82,13 +83,13 @@ func (c PermissionContext) Normalize() PermissionContext {
 
 func (c PermissionContext) IsWithinWorkspace(path string) bool {
 	normalized := c.Normalize()
-	return pathWithinRoot(normalized.resolvePath(path), normalized.WorkspaceRoot)
+	return PathWithinRoot(normalized.resolvePath(path), normalized.WorkspaceRoot)
 }
 
 func (c PermissionContext) IsWithinWritableRoots(path string) bool {
 	normalized := c.Normalize()
 	for _, root := range normalized.WritableRoots {
-		if pathWithinRoot(normalized.resolvePath(path), root) {
+		if PathWithinRoot(normalized.resolvePath(path), root) {
 			return true
 		}
 	}
@@ -102,6 +103,41 @@ func (c PermissionContext) WorkspaceRootOrCWD() string {
 
 func (c PermissionContext) ResolvePath(path string) string {
 	return c.Normalize().resolvePath(path)
+}
+
+// IsWithinWorkspaceResolved resolves symlinks before checking workspace boundary.
+// It returns false if the path cannot be resolved, treating unresolvable paths as unsafe.
+func (c PermissionContext) IsWithinWorkspaceResolved(path string) bool {
+	normalized := c.Normalize()
+	resolved := normalized.resolvePath(path)
+	realPath, err := filepath.EvalSymlinks(resolved)
+	if err != nil {
+		return false
+	}
+	realRoot, err := filepath.EvalSymlinks(normalized.WorkspaceRoot)
+	if err != nil {
+		return false
+	}
+	return PathWithinRoot(realPath, realRoot)
+}
+
+// ResolvePathChecked returns the cleaned path if its symlink-resolved target is within the workspace,
+// otherwise returns an error describing the boundary violation (including symlink escapes).
+func (c PermissionContext) ResolvePathChecked(path string) (string, error) {
+	normalized := c.Normalize()
+	resolved := normalized.resolvePath(path)
+	realPath, err := filepath.EvalSymlinks(resolved)
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve path %q: %w", path, err)
+	}
+	realRoot, err := filepath.EvalSymlinks(normalized.WorkspaceRoot)
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve workspace root %q: %w", normalized.WorkspaceRoot, err)
+	}
+	if !PathWithinRoot(realPath, realRoot) {
+		return "", fmt.Errorf("path %q resolves to %q which is outside workspace", path, realPath)
+	}
+	return resolved, nil
 }
 
 func ContextWithPermissionContext(ctx context.Context, permissionContext PermissionContext) context.Context {
@@ -120,11 +156,23 @@ func PermissionContextFromContext(ctx context.Context) PermissionContext {
 	return NewPermissionContext("", nil)
 }
 
+// HasPermissionContext reports whether a PermissionContext was explicitly
+// attached to the context. When false, callers may choose to skip workspace
+// boundary enforcement for backward-compatible direct tool execution.
+func HasPermissionContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	_, ok := ctx.Value(permissionContextKey{}).(PermissionContext)
+	return ok
+}
+
 func (c PermissionContext) resolvePath(path string) string {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return c.WorkspaceRoot
 	}
+	path = expandTilde(path)
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(c.WorkspaceRoot, path)
 	}
@@ -135,14 +183,31 @@ func (c PermissionContext) resolvePath(path string) string {
 	return filepath.Clean(abs)
 }
 
+func expandTilde(path string) string {
+	if path == "~" {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			return home
+		}
+		return path
+	}
+	if strings.HasPrefix(path, "~/") || strings.HasPrefix(path, "~\\") {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			return filepath.Join(home, path[2:])
+		}
+	}
+	return path
+}
+
 func absoluteCleanRoot(path string) (string, bool) {
 	if strings.TrimSpace(path) == "" {
 		path = "."
 	}
-	return absoluteCleanPath(path, "")
+	return AbsoluteCleanPath(path, "")
 }
 
-func absoluteCleanPath(path string, base string) (string, bool) {
+func AbsoluteCleanPath(path string, base string) (string, bool) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return "", false
@@ -157,12 +222,12 @@ func absoluteCleanPath(path string, base string) (string, bool) {
 	return filepath.Clean(abs), true
 }
 
-func pathWithinRoot(path string, root string) bool {
-	absPath, ok := absoluteCleanPath(path, "")
+func PathWithinRoot(path string, root string) bool {
+	absPath, ok := AbsoluteCleanPath(path, "")
 	if !ok {
 		return false
 	}
-	absRoot, ok := absoluteCleanPath(root, "")
+	absRoot, ok := AbsoluteCleanPath(root, "")
 	if !ok {
 		return false
 	}

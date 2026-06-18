@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"awaken/src/agentcore"
+	"awaken/src/tool"
 )
 
 var (
@@ -17,6 +19,23 @@ var (
 	ErrRunNotFound      = errors.New("run not found")
 	ErrApprovalNotFound = errors.New("approval not found")
 )
+
+type WorkspaceConfig struct {
+	WorkspaceRoot string   `json:"workspace_root"`
+	WritableRoots []string `json:"writable_roots"`
+}
+
+type ClientInfo struct {
+	SessionID  string `json:"session_id"`
+	RequestID  string `json:"request_id"`
+	EntryPoint string `json:"entrypoint"`
+}
+
+type StartRunRequest struct {
+	Input     string          `json:"input"`
+	Workspace WorkspaceConfig `json:"workspace"`
+	Client    ClientInfo      `json:"client"`
+}
 
 type Executor interface {
 	Run(ctx context.Context, input string, sink agentcore.EventSink) (string, error)
@@ -31,23 +50,28 @@ func (f ExecutorFunc) Run(ctx context.Context, input string, sink agentcore.Even
 type RunService struct {
 	mu          sync.RWMutex
 	sessions    map[string]*Session
-	newExecutor func() Executor
+	newExecutor func(workspace WorkspaceConfig) Executor
 }
 
-func NewRunService(newExecutor func() Executor) *RunService {
+func NewRunService(newExecutor func(workspace WorkspaceConfig) Executor) *RunService {
 	return &RunService{
 		sessions:    make(map[string]*Session),
 		newExecutor: newExecutor,
 	}
 }
 
-func (s *RunService) StartRun(input string) (Run, error) {
-	trimmed := strings.TrimSpace(input)
+func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
+	trimmed := strings.TrimSpace(req.Input)
 	if trimmed == "" {
-		return Run{}, ErrInvalidInput
+		return Run{}, fmt.Errorf("%w: input is required", ErrInvalidInput)
 	}
 	if s.newExecutor == nil {
 		return Run{}, fmt.Errorf("run executor is not configured")
+	}
+
+	workspace, err := normalizeWorkspace(req.Workspace)
+	if err != nil {
+		return Run{}, err
 	}
 
 	runID := newRuntimeID("run")
@@ -59,7 +83,7 @@ func (s *RunService) StartRun(input string) (Run, error) {
 	s.sessions[runID] = session
 	s.mu.Unlock()
 
-	executor := s.newExecutor()
+	executor := s.newExecutor(workspace)
 	go s.execute(session, executor, trimmed, ctx)
 
 	return session.Snapshot(), nil
@@ -146,4 +170,45 @@ func (s sessionEventSink) AwaitApproval(ctx context.Context, request agentcore.A
 		return "", context.Canceled
 	}
 	return s.session.AwaitApproval(ctx, request)
+}
+
+func normalizeWorkspace(ws WorkspaceConfig) (WorkspaceConfig, error) {
+	root := strings.TrimSpace(ws.WorkspaceRoot)
+	if root == "" {
+		return WorkspaceConfig{}, fmt.Errorf("%w: workspace_root is required", ErrInvalidInput)
+	}
+	if !filepath.IsAbs(root) {
+		return WorkspaceConfig{}, fmt.Errorf("%w: workspace_root must be an absolute path", ErrInvalidInput)
+	}
+	root = filepath.Clean(root)
+
+	writableRoots := ws.WritableRoots
+	if len(writableRoots) == 0 {
+		writableRoots = []string{root}
+	} else {
+		normalized := make([]string, 0, len(writableRoots))
+		for _, w := range writableRoots {
+			w = strings.TrimSpace(w)
+			if w == "" {
+				continue
+			}
+			if !filepath.IsAbs(w) {
+				w = filepath.Join(root, w)
+			}
+			w = filepath.Clean(w)
+			if !tool.PathWithinRoot(w, root) {
+				w = root
+			}
+			normalized = append(normalized, w)
+		}
+		if len(normalized) == 0 {
+			normalized = []string{root}
+		}
+		writableRoots = normalized
+	}
+
+	return WorkspaceConfig{
+		WorkspaceRoot: root,
+		WritableRoots: writableRoots,
+	}, nil
 }

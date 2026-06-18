@@ -62,14 +62,15 @@ Awaken Desktop
 
 ### 用户目标
 
-用户选择一个 workspace 后，Awaken 的所有文件读写都被限制在该 workspace 内。
+用户选择一个 workspace 后，Awaken 将该 workspace 作为项目上下文与默认文件操作边界。专用 workspace 文件工具必须限制在该 workspace 内；本地 `shell` 的只读命令允许按用户本机权限读取 workspace 外信息；写入、修改与高风险操作仍受 `writable_roots` 与审批约束。
 
 ### 用户流程
 
 1. 用户点击 workspace picker。
 2. 选择 `/path/to/project`。
 3. 输入任务并启动 run。
-4. 模型只能读取或修改该 workspace 内的文件。
+4. 模型通过 `read_file`、`list_files`、`grep_search` 读取项目文件时只能访问该 workspace。
+5. 模型通过 `shell` 执行本地只读诊断命令时，可以读取 workspace 外信息；涉及写入、删除、移动、网络或复杂 shell 操作时必须进入审批或拒绝。
 
 ### 开发范围
 
@@ -79,6 +80,7 @@ Awaken Desktop
 - Agent Core：`AgentConfig.Workspace` 由 request 注入，不再只依赖 process cwd。
 - Tools：`read_file`、`list_files`、`grep_search` 全部接入 `PermissionContext`。
 - Safety：`writable_roots` v1 默认等于 `[workspace_root]`，且必须在 workspace 内。
+- Safety：区分“workspace 文件工具边界”和“本地 shell 只读能力”。`shell` 只读命令读取 workspace 外文件不是 Slice 2 blocker；mutation 与高风险命令仍不能静默越界执行。
 
 ### 建议请求形态
 
@@ -99,12 +101,14 @@ Awaken Desktop
 
 ### 完成定义
 
-- 真实 LLM run 中，请求读取 `/etc/hosts` 必须失败或进入显式风险审批，不能静默成功。
-- 请求列出 `~/Desktop` 必须失败或进入显式风险审批。
+- 真实 LLM run 中，通过 `read_file` 请求读取 `/etc/hosts` 必须失败，不能静默返回内容。
+- 通过 `list_files` / `grep_search` 请求访问 `~/Desktop` 或 workspace 外 root 必须失败。
+- 通过 `shell` 执行只读命令读取 `/etc/hosts` 可以成功；这属于本地只读 shell 能力，不计为 workspace guard 失败。
 - 请求读取当前 workspace 内 `README.md` 可以成功。
-- 所有工具返回的相对路径都相对于 workspace。
-- 有确定性测试覆盖 path normalize、workspace 内读取、workspace 外拒绝。
+- workspace 文件工具返回的相对路径都相对于 workspace。
+- 有确定性测试覆盖 path normalize、workspace 内读取、workspace 文件工具外部拒绝、symlink 逃逸拒绝。
 - 有真实 LLM smoke 覆盖至少一次 workspace 内只读任务。
+- 有真实 LLM smoke 覆盖 `read_file /etc/hosts` 被拒绝，以及 `shell` 只读外部读取符合当前设计。
 - 不破坏 `packages/ui` 的 UI-only 边界。
 - 不把 workspace policy 移入 renderer。
 
@@ -174,9 +178,10 @@ Awaken Desktop
 - 真实 LLM 自主选择只读工具，不在 prompt 中点名具体工具。
 - 出现 `TOOL_CALL_START` 和 `TOOL_CALL_RESULT`。
 - 不出现 approval。
-- 不允许 workspace 外读取。
+- `read_file`、`list_files`、`grep_search` 不允许 workspace 外读取。
 - 有确定性测试覆盖只读工具的 workspace guard。
 - 有 failure path：workspace 外 read/list/grep 必须失败或进入显式风险审批。
+- `shell` 只读命令的 workspace 外读取属于本地 shell 能力，不作为本切片的只读文件工具 failure path。
 - Tool policy 仍在 Go runtime/tool 层，不移入 renderer。
 
 ### 暂不做

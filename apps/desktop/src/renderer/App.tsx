@@ -85,6 +85,10 @@ export function App() {
   const [activeNavId, setActiveNavId] = useState("runs");
   const [notice, setNotice] = useState<string | null>(null);
   const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
+  const [resolvedApproval, setResolvedApproval] = useState<{
+    approvalId: string;
+    decision: "approved" | "rejected";
+  } | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [workspacePath, setWorkspacePath] = useState<string>("");
@@ -196,6 +200,7 @@ export function App() {
     terminalSeenRef.current = false;
     setNotice(null);
     setResolvingApprovalId(null);
+    setResolvedApproval(null);
     resolvingApprovalIdRef.current = null;
     dispatch({ type: "run/requested", prompt });
 
@@ -219,11 +224,18 @@ export function App() {
           if (event.type === "RUN_FINISHED" || event.type === "RUN_ERROR") {
             terminalSeenRef.current = true;
           }
+          if (event.type === "AWAKEN_APPROVAL_REQUESTED" && event.approvalId) {
+            setResolvedApproval(null);
+          }
           if (
             event.type === "AWAKEN_APPROVAL_RESOLVED" &&
             event.approvalId &&
             event.approvalId === resolvingApprovalIdRef.current
           ) {
+            setResolvedApproval({
+              approvalId: event.approvalId,
+              decision: event.approvalDecision === "rejected" ? "rejected" : "approved",
+            });
             resolvingApprovalIdRef.current = null;
             setResolvingApprovalId(null);
           }
@@ -294,12 +306,14 @@ export function App() {
     setNotice(null);
     setResolvingApprovalId(activeApproval.id);
     resolvingApprovalIdRef.current = activeApproval.id;
+    setResolvedApproval(null);
 
     try {
       await runtimeClient.resolveApproval(runtimeState.runId, activeApproval.id, decision);
     } catch (error) {
       setResolvingApprovalId(null);
       resolvingApprovalIdRef.current = null;
+      setResolvedApproval(null);
       setNotice(error instanceof Error ? error.message : "Failed to resolve approval");
     }
   }
@@ -338,6 +352,7 @@ export function App() {
                 setComposerValue("");
                 setNotice(null);
                 setResolvingApprovalId(null);
+                setResolvedApproval(null);
                 resolvingApprovalIdRef.current = null;
                 terminalSeenRef.current = false;
                 dispatch({ type: "run/reset" });
@@ -590,6 +605,12 @@ export function App() {
         riskTone={activeApproval?.riskTone}
         approveLabel={resolvingApprovalId === activeApproval?.id ? "Resolving..." : "Approve"}
         rejectLabel={resolvingApprovalId === activeApproval?.id ? "Resolving..." : "Reject"}
+        resolving={resolvingApprovalId === activeApproval?.id}
+        resolvedDecision={
+          resolvedApproval?.approvalId === activeApproval?.id
+            ? resolvedApproval.decision
+            : undefined
+        }
         onApprove={() => {
           void handleResolveApproval("approved");
         }}

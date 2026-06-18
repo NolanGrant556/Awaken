@@ -10,6 +10,8 @@ type ApprovalCardProps = {
   riskTone?: ApprovalRiskTone;
   approveLabel?: string;
   rejectLabel?: string;
+  resolvedDecision?: "approved" | "rejected";
+  resolving?: boolean;
   onApprove?: () => void;
   onReject?: () => void;
   open?: boolean;
@@ -52,6 +54,8 @@ export function ApprovalCard({
   riskTone = "warning",
   approveLabel = "允许",
   rejectLabel = "拒绝",
+  resolvedDecision,
+  resolving = false,
   onApprove,
   onReject,
   open,
@@ -72,12 +76,16 @@ export function ApprovalCard({
     .join(" ") || undefined;
   const { Icon } = tone;
 
+  const interactiveDisabled = Boolean(resolvedDecision) || resolving;
+
   const handleApprove = () => {
+    if (interactiveDisabled) return;
     onApprove?.();
     onOpenChange?.(false);
   };
 
   const handleReject = () => {
+    if (interactiveDisabled) return;
     onReject?.();
     onOpenChange?.(false);
   };
@@ -88,12 +96,14 @@ export function ApprovalCard({
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
-        handleReject();
+        if (!interactiveDisabled) {
+          handleReject();
+        }
       }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, onReject, onOpenChange]);
+  }, [open, onReject, onOpenChange, interactiveDisabled]);
 
   if (!open) return null;
 
@@ -110,7 +120,7 @@ export function ApprovalCard({
         background: "var(--aw-overlay-backdrop)",
       }}
       onClick={(e) => {
-        if (e.currentTarget === e.target) {
+        if (e.currentTarget === e.target && !interactiveDisabled) {
           handleReject();
         }
       }}
@@ -265,6 +275,7 @@ export function ApprovalCard({
         >
           <button
             type="button"
+            disabled={interactiveDisabled}
             onClick={handleReject}
             style={{
               height: "34px",
@@ -275,21 +286,25 @@ export function ApprovalCard({
               color: "var(--aw-text-primary)",
               fontSize: "var(--aw-font-size-sm)",
               fontWeight: "var(--aw-font-weight-bold)",
-              cursor: "pointer",
+              cursor: interactiveDisabled ? "default" : "pointer",
+              opacity: interactiveDisabled ? 0.5 : 1,
               transition:
                 "background-color 160ms ease, color 160ms ease, transform 160ms ease",
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = "var(--aw-bg-fill-light)";
+              if (!interactiveDisabled) {
+                e.currentTarget.style.background = "var(--aw-bg-fill-light)";
+              }
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background = "var(--aw-bg-white)";
             }}
           >
-            {rejectLabel}
+            {resolvedDecision === "rejected" ? "已拒绝" : rejectLabel}
           </button>
           <button
             type="button"
+            disabled={interactiveDisabled}
             onClick={handleApprove}
             style={{
               height: "34px",
@@ -301,18 +316,21 @@ export function ApprovalCard({
               color: "var(--aw-text-onblack)",
               fontSize: "var(--aw-font-size-sm)",
               fontWeight: "var(--aw-font-weight-bold)",
-              cursor: "pointer",
+              cursor: interactiveDisabled ? "default" : "pointer",
+              opacity: interactiveDisabled ? 0.5 : 1,
               transition:
                 "filter 160ms ease, transform 160ms ease",
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.filter = "brightness(0.92)";
+              if (!interactiveDisabled) {
+                e.currentTarget.style.filter = "brightness(0.92)";
+              }
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.filter = "none";
             }}
           >
-            {approveLabel}
+            {resolvedDecision === "approved" ? "已允许" : approveLabel}
           </button>
         </div>
       </div>

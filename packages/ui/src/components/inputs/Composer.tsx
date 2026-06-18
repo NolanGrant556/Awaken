@@ -36,10 +36,10 @@ export function Composer({
   isReady = false,
 }: ComposerProps) {
   const handleSubmit = useCallback(() => {
-    if (isReady && !disabled) {
+    if (!disabled) {
       onSubmit?.();
     }
-  }, [isReady, disabled, onSubmit]);
+  }, [disabled, onSubmit]);
 
   return (
     <div

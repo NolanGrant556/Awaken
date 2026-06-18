@@ -1,17 +1,23 @@
 package server
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"awaken/src/agentcore"
+	"awaken/src/llm"
+	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
 )
 
@@ -255,8 +261,8 @@ func TestRunsEndpointsValidationAndNotFound(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
 		t.Fatalf("expected JSON error response, got %q", rec.Body.String())
 	}
-	if errResp.Code != "INVALID_INPUT" {
-		t.Fatalf("expected INVALID_INPUT code, got %q", errResp.Code)
+	if errResp.Error != "INVALID_INPUT" {
+		t.Fatalf("expected INVALID_INPUT error, got %q", errResp.Error)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/v1/runs/missing/events", nil)
@@ -287,6 +293,48 @@ func TestRunsEndpointsValidationAndNotFound(t *testing.T) {
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for invalid approval decision, got %d", rec.Code)
+	}
+}
+
+func TestCreateRunEmptyInputReturnsInvalidInput(t *testing.T) {
+	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			return "", nil
+		})
+	})
+
+	router := NewRouter(runService, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/runs", strings.NewReader(`{"input":"","workspace":{"workspace_root":"/tmp"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for empty input, got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "INVALID_INPUT") {
+		t.Fatalf("expected INVALID_INPUT in response body, got %q", body)
+	}
+
+	var created awruntime.Run
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err == nil {
+		if created.RunID != "" || created.Status == awruntime.RunStatusRunning {
+			t.Fatalf("expected no run to be created, got %+v", created)
+		}
+	}
+
+	var errResp errorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("expected JSON error response, got %q", body)
+	}
+	if errResp.Error != "INVALID_INPUT" {
+		t.Fatalf("expected INVALID_INPUT error, got %q", errResp.Error)
+	}
+	if errResp.Message != "input is required" {
+		t.Fatalf("expected message 'input is required', got %q", errResp.Message)
 	}
 }
 
@@ -411,5 +459,186 @@ func TestResolveApprovalEndpointPublishesExtensionEvents(t *testing.T) {
 		if !strings.Contains(body, token) {
 			t.Fatalf("expected stream body to contain %q, got %s", token, body)
 		}
+	}
+}
+
+// TestPlainQASmoke 通过真实 LLM 调用验证运行时能否完成一次无工具的纯问答 run。
+// 需要项目根目录的 .env/config.toml 提供 LLM_API_KEY；未设置时自动跳过。
+func TestPlainQASmoke(t *testing.T) {
+	workspaceRoot, err := findProjectRoot()
+	if err != nil {
+		t.Fatalf("failed to find project root: %v", err)
+	}
+
+	// llm.LoadConfig 从当前工作目录读取 .env/config.toml，而 go test ./src/server
+	// 的工作目录是 src/server/，因此先切换到项目根目录再加载配置。
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	if err := os.Chdir(workspaceRoot); err != nil {
+		t.Fatalf("failed to chdir to project root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	cfg := llm.LoadConfig()
+	if cfg.APIKey == "" {
+		t.Skip("LLM_API_KEY not set")
+	}
+
+	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
+		agentCfg := agentcore.AgentConfig{
+			MaxThoughts: 5,
+			EntryPoint:  "awaken-core-smoke",
+			ModelConfig: agentcore.ModelConfig{
+				APIKey:      cfg.APIKey,
+				BaseURL:     cfg.BaseURL,
+				Model:       cfg.Model,
+				Temperature: cfg.Temperature,
+				MaxTokens:   cfg.MaxTokens,
+				AuthScheme:  cfg.AuthScheme,
+			},
+			Workspace: agentcore.WorkspaceConfig{
+				Root:          workspace.WorkspaceRoot,
+				WritableRoots: workspace.WritableRoots,
+			},
+		}
+
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			agent := agentcore.NewAgent(agentCfg)
+			return agent.RunStreamWithEvents(ctx, input, nil, sink)
+		})
+	})
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	reqBody := fmt.Sprintf(`{
+		"input": "请只回复 pong",
+		"workspace": { "workspace_root": %q, "writable_roots": [%q] },
+		"client": { "session_id": "smoke-1", "request_id": "smoke-req-1", "entrypoint": "smoke" }
+	}`, workspaceRoot, workspaceRoot)
+
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var created awruntime.Run
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	if created.RunID == "" {
+		t.Fatalf("expected run id, got empty")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	eventsReq, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/v1/runs/"+created.RunID+"/events", nil)
+	if err != nil {
+		t.Fatalf("failed to create event request: %v", err)
+	}
+
+	streamResp, err := http.DefaultClient.Do(eventsReq)
+	if err != nil {
+		t.Fatalf("GET events failed: %v", err)
+	}
+	defer streamResp.Body.Close()
+	if streamResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from events, got %d", streamResp.StatusCode)
+	}
+
+	events, err := collectSSEEvents(streamResp.Body)
+	if err != nil {
+		t.Fatalf("failed to collect events: %v", err)
+	}
+
+	var sawRunStarted, sawTextMessageContent, sawRunFinished bool
+	var assistantText strings.Builder
+	var finalOutcome string
+
+	for _, ev := range events {
+		switch ev.Type {
+		case agui.EventRunStarted:
+			sawRunStarted = true
+		case agui.EventTextMessageContent:
+			sawTextMessageContent = true
+			assistantText.WriteString(ev.Delta)
+		case agui.EventRunFinished:
+			sawRunFinished = true
+			if ev.Outcome != nil {
+				finalOutcome = ev.Outcome.Type
+			}
+		case agui.EventToolCallStart:
+			t.Fatalf("unexpected TOOL_CALL_START event")
+		case agui.EventAwakenApprovalRequested:
+			t.Fatalf("unexpected AWAKEN_APPROVAL_REQUESTED event")
+		case agui.EventAwakenArtifactCreated:
+			t.Fatalf("unexpected AWAKEN_ARTIFACT_CREATED event")
+		case agui.EventRunError:
+			t.Fatalf("run error: %s (code=%s)", ev.Message, ev.Code)
+		}
+	}
+
+	if !sawRunStarted {
+		t.Fatalf("expected RUN_STARTED event")
+	}
+	if !sawTextMessageContent {
+		t.Fatalf("expected TEXT_MESSAGE_CONTENT event")
+	}
+	if !sawRunFinished {
+		t.Fatalf("expected RUN_FINISHED event")
+	}
+	if strings.TrimSpace(assistantText.String()) != "pong" {
+		t.Fatalf("expected assistant text 'pong', got %q", assistantText.String())
+	}
+	if finalOutcome != "success" {
+		t.Fatalf("expected outcome success, got %q", finalOutcome)
+	}
+}
+
+func collectSSEEvents(r io.Reader) ([]agui.Event, error) {
+	var events []agui.Event
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		payload := strings.TrimPrefix(line, "data: ")
+		if payload == "" {
+			continue
+		}
+		var ev agui.Event
+		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
+			return nil, fmt.Errorf("decode event %q: %w", payload, err)
+		}
+		events = append(events, ev)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return events, nil
+}
+
+func findProjectRoot() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("go.mod not found")
+		}
+		dir = parent
 	}
 }

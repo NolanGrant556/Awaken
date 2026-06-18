@@ -51,8 +51,9 @@ async function readErrorMessage(response: Response): Promise<string> {
   if (!body) return `Runtime request failed (${response.status})`;
   try {
     const parsed = JSON.parse(body);
-    if (parsed.code && parsed.message) {
-      return `${parsed.code}: ${parsed.message}`;
+    const code = parsed.code ?? parsed.error;
+    if (code && parsed.message) {
+      return `${code}: ${parsed.message}`;
     }
   } catch {
     // fall through

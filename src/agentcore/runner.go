@@ -129,6 +129,7 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, callback StreamCall
 			return "", llm.ErrEmptyResponse
 		}
 		r.conversation.AssistantOutput(response.Content, nil)
+		events.finishTextIfOpen()
 		events.runFinished(response.Content)
 		return response.Content, nil
 	}

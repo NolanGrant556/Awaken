@@ -19,14 +19,14 @@ type resolveApprovalRequest struct {
 }
 
 type errorResponse struct {
-	Code    string `json:"code"`
+	Error   string `json:"error"`
 	Message string `json:"message"`
 }
 
 func writeErrorJSON(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(errorResponse{Code: code, Message: message})
+	_ = json.NewEncoder(w).Encode(errorResponse{Error: code, Message: message})
 }
 
 func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {

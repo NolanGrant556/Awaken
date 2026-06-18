@@ -63,7 +63,7 @@ func NewRunService(newExecutor func(workspace WorkspaceConfig) Executor) *RunSer
 func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	trimmed := strings.TrimSpace(req.Input)
 	if trimmed == "" {
-		return Run{}, fmt.Errorf("%w: input is required", ErrInvalidInput)
+		return Run{}, ErrInvalidInput
 	}
 	if s.newExecutor == nil {
 		return Run{}, fmt.Errorf("run executor is not configured")

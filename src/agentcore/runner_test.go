@@ -542,6 +542,56 @@ data: {"type":"message_stop"}`,
 	}
 }
 
+func TestRunnerRunStreamWithEventsPlainQA(t *testing.T) {
+	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeRunnerStreamLines(t, w, []string{
+			`data: {"choices":[{"delta":{"content":"pong"}}]}`,
+			`data: [DONE]`,
+		})
+	})
+	defer server.Close()
+
+	cfg := testAgentConfig(server.URL, 2)
+	var gotEvents []AwakenEvent
+	agent := NewAgent(cfg)
+	answer, err := agent.RunStreamWithEvents(context.Background(), "ping", nil, EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+	if err != nil {
+		t.Fatalf("RunStreamWithEvents returned error: %v", err)
+	}
+	if answer != "pong" {
+		t.Fatalf("expected pong, got %q", answer)
+	}
+
+	wantTypes := []AwakenEventType{
+		RunStartedEventType,
+		TextMessageStartedEventType,
+		TextDeltaEventType,
+		TextMessageFinishedEventType,
+		RunFinishedEventType,
+	}
+	var gotTypes []AwakenEventType
+	for _, event := range gotEvents {
+		gotTypes = append(gotTypes, event.Type)
+	}
+	if len(gotTypes) != len(wantTypes) {
+		t.Fatalf("unexpected event count: want %d got %d (%v)", len(wantTypes), len(gotTypes), gotTypes)
+	}
+	for i, want := range wantTypes {
+		if gotTypes[i] != want {
+			t.Fatalf("unexpected event type at %d: want %s got %s (%v)", i, want, gotTypes[i], gotTypes)
+		}
+	}
+
+	for _, event := range gotEvents {
+		switch event.Type {
+		case ToolCallStartedEventType, ToolCallArgsEventType, ToolCallFinishedEventType, ToolResultEventType, ApprovalRequestedEventType:
+			t.Fatalf("unexpected event type in plain Q&A: %s", event.Type)
+		}
+	}
+}
+
 func TestRunnerPropagatesBearerAuthByDefault(t *testing.T) {
 	var capturedHeaders http.Header
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

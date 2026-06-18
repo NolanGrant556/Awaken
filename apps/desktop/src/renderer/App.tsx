@@ -168,7 +168,11 @@ export function App() {
 
   async function handleSubmit(): Promise<void> {
     const prompt = composerValue.trim();
-    if (!prompt || isBusy) {
+    if (!prompt) {
+      setNotice("Input is required");
+      return;
+    }
+    if (isBusy) {
       return;
     }
     if (!isWorkspaceValid) {
@@ -341,6 +345,9 @@ export function App() {
               <TopBar>
                 <div className="runtime-pills">
                   <span className="runtime-pill">{runtimeClient.source}</span>
+                  <span className="runtime-pill runtime-pill-status">
+                    {formatStatusLabel(runtimeState.phase)}
+                  </span>
                   <span className="runtime-pill runtime-pill-muted">
                     {runtimeClient.runtimeBaseUrl}
                   </span>

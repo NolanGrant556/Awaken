@@ -1,9 +1,12 @@
-import { FileText } from "lucide-react";
+import { FileText, FilePlus, FilePen, FileMinus, FileOutput } from "lucide-react";
+import type { ArtifactChangeType } from "../../types";
 
 type ArtifactCardProps = {
   title: string;
   description?: string;
   onClick?: () => void;
+  changeType?: ArtifactChangeType;
+  path?: string;
 };
 
 const baseCardStyle = {
@@ -17,7 +20,29 @@ const baseCardStyle = {
   textAlign: "left" as const,
 };
 
-export function ArtifactCard({ title, description, onClick }: ArtifactCardProps) {
+function getIconConfig(changeType?: ArtifactChangeType) {
+  switch (changeType) {
+    case "added":
+      return { Icon: FilePlus, color: "var(--aw-success)" };
+    case "modified":
+      return { Icon: FilePen, color: "var(--aw-text-blue)" };
+    case "deleted":
+      return { Icon: FileMinus, color: "var(--aw-error)" };
+    case "moved":
+      return { Icon: FileOutput, color: "var(--aw-accent-purple)" };
+    default:
+      return { Icon: FileText, color: "var(--aw-text-tertiary)" };
+  }
+}
+
+export function ArtifactCard({
+  title,
+  description,
+  onClick,
+  changeType,
+  path,
+}: ArtifactCardProps) {
+  const { Icon, color } = getIconConfig(changeType);
   const content = (
     <>
       <div
@@ -28,10 +53,10 @@ export function ArtifactCard({ title, description, onClick }: ArtifactCardProps)
           minWidth: 0,
         }}
       >
-        <FileText
+        <Icon
           size={16}
           strokeWidth={1.85}
-          style={{ flex: "0 0 auto", color: "var(--aw-text-tertiary)" }}
+          style={{ flex: "0 0 auto", color }}
         />
         <span
           className="aw-truncate"
@@ -46,6 +71,20 @@ export function ArtifactCard({ title, description, onClick }: ArtifactCardProps)
           {title}
         </span>
       </div>
+      {path ? (
+        <span
+          className="aw-truncate"
+          style={{
+            fontFamily: "var(--aw-font-mono)",
+            fontSize: "var(--aw-font-size-xs)",
+            lineHeight: "var(--aw-line-height-xs)",
+            color: "var(--aw-text-tertiary)",
+          }}
+          title={path}
+        >
+          {path}
+        </span>
+      ) : null}
       {description ? (
         <span
           style={{

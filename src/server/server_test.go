@@ -1170,12 +1170,12 @@ func TestFileMutationRejectSmoke(t *testing.T) {
 	}
 
 	var (
-		sawRunStarted              bool
-		sawApplyPatchToolCallStart bool
-		sawApprovalRequested       bool
-		sawStatusAwaitingApproval  bool
+		sawRunStarted               bool
+		sawApplyPatchToolCallStart  bool
+		sawApprovalRequested        bool
+		sawStatusAwaitingApproval   bool
 		sawStatusRunningAfterReject bool
-		sawRunFinished             bool
+		sawRunFinished              bool
 		sawApprovalResolvedRejected bool
 		rejectedToolResultContent   string
 		approvalRequestedCount      int
@@ -1292,6 +1292,184 @@ func TestFileMutationRejectSmoke(t *testing.T) {
 		strings.Contains(combinedText, "抱歉")
 	if !hasExplanation {
 		t.Fatalf("expected assistant text to contain some explanation about the rejection, got %q", assistantText.String())
+	}
+}
+
+// TestFileMutationArtifactSmoke 通过真实 LLM 调用验证 apply_patch 文件修改审批通过后
+// 会发出文件变更 Artifact 事件，且 Artifact 的 kind/path/toolCallName 符合预期。
+// 需要项目根目录的 .env/config.toml 提供 LLM_API_KEY；未设置时自动跳过。
+func TestFileMutationArtifactSmoke(t *testing.T) {
+	workspaceRoot, err := findProjectRoot()
+	if err != nil {
+		t.Fatalf("failed to find project root: %v", err)
+	}
+
+	// llm.LoadConfig 从当前工作目录读取 .env/config.toml，而 go test ./src/server
+	// 的工作目录是 src/server/，因此先切换到项目根目录再加载配置。
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	if err := os.Chdir(workspaceRoot); err != nil {
+		t.Fatalf("failed to chdir to project root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	cfg := llm.LoadConfig()
+	if cfg.APIKey == "" {
+		t.Skip("LLM_API_KEY not set")
+	}
+
+	tempDir := t.TempDir()
+	notePath := filepath.Join(tempDir, "note.md")
+	if err := os.WriteFile(notePath, []byte("hello"), 0644); err != nil {
+		t.Fatalf("failed to create note.md: %v", err)
+	}
+
+	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
+		agentCfg := agentcore.AgentConfig{
+			MaxThoughts: 10,
+			EntryPoint:  "awaken-core-smoke",
+			ModelConfig: agentcore.ModelConfig{
+				APIKey:      cfg.APIKey,
+				BaseURL:     cfg.BaseURL,
+				Model:       cfg.Model,
+				Temperature: cfg.Temperature,
+				MaxTokens:   cfg.MaxTokens,
+				AuthScheme:  cfg.AuthScheme,
+			},
+			Workspace: agentcore.WorkspaceConfig{
+				Root:          workspace.WorkspaceRoot,
+				WritableRoots: workspace.WritableRoots,
+			},
+		}
+
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			agent := agentcore.NewAgent(agentCfg)
+			return agent.RunStreamWithEvents(ctx, input, nil, sink)
+		})
+	})
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	reqBody := fmt.Sprintf(`{
+		"input": "把 note.md 中 hello 改成 world",
+		"workspace": { "workspace_root": %q, "writable_roots": [%q] },
+		"client": { "session_id": "smoke-artifact-1", "request_id": "smoke-req-artifact-1", "entrypoint": "smoke" }
+	}`, tempDir, tempDir)
+
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var created awruntime.Run
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	if created.RunID == "" {
+		t.Fatalf("expected run id, got empty")
+	}
+
+	events, resolveErr := streamEventsAndResolveApproval(t, ts.URL, created.RunID)
+	if resolveErr != nil {
+		t.Fatalf("failed to stream and resolve approval: %v", resolveErr)
+	}
+
+	var (
+		sawRunStarted      bool
+		sawRunFinished     bool
+		finalOutcome       string
+		sawArtifactEvent   bool
+		artifactKind       string
+		artifactPath       string
+		artifactToolCall   string
+		artifactEventTypes []string
+		approvalPaths      []string
+	)
+
+	for _, ev := range events {
+		t.Logf("event: type=%s tool=%s artifactKind=%s artifactPath=%s outcome=%v",
+			ev.Type, ev.ToolCallName, ev.ArtifactKind, ev.ArtifactPath, ev.Outcome)
+		switch ev.Type {
+		case agui.EventRunStarted:
+			sawRunStarted = true
+		case agui.EventAwakenApprovalRequested:
+			if ev.ToolCallName == "apply_patch" && len(approvalPaths) == 0 {
+				approvalPaths = append(approvalPaths, ev.ApprovalAffectedPaths...)
+			}
+		case agui.EventAwakenArtifactCreated, agui.EventAwakenArtifactUpdated:
+			sawArtifactEvent = true
+			artifactEventTypes = append(artifactEventTypes, string(ev.Type))
+			// 优先记录关联 apply_patch 的 Artifact；apply_patch 修改 note.md 应产生 modified Artifact。
+			if ev.ToolCallName == "apply_patch" {
+				artifactToolCall = ev.ToolCallName
+				artifactKind = ev.ArtifactKind
+				artifactPath = ev.ArtifactPath
+			}
+		case agui.EventRunFinished:
+			sawRunFinished = true
+			if ev.Outcome != nil {
+				finalOutcome = ev.Outcome.Type
+			}
+		case agui.EventRunError:
+			t.Fatalf("run error: %s (code=%s)", ev.Message, ev.Code)
+		}
+	}
+
+	if !sawRunStarted {
+		t.Fatalf("expected RUN_STARTED event")
+	}
+	if !sawArtifactEvent {
+		t.Fatalf("expected AWAKEN_ARTIFACT_CREATED or AWAKEN_ARTIFACT_UPDATED event, got event types=%v", artifactEventTypes)
+	}
+	if artifactToolCall != "apply_patch" {
+		t.Fatalf("expected artifact toolCallName to be apply_patch, got %q (artifact events=%v)", artifactToolCall, artifactEventTypes)
+	}
+	if artifactKind != "modified" {
+		t.Fatalf("expected artifact kind to be 'modified', got %q", artifactKind)
+	}
+	// Tight path assertion: artifact path must be the workspace-relative
+	// "note.md", not an absolute path and not merely a substring match.
+	if artifactPath != "note.md" {
+		t.Fatalf("expected artifact path to be exactly 'note.md', got %q", artifactPath)
+	}
+	if filepath.IsAbs(artifactPath) {
+		t.Fatalf("artifact path should not be absolute, got %q", artifactPath)
+	}
+	if strings.Contains(artifactPath, "\\") {
+		t.Fatalf("artifact path should not contain backslashes, got %q", artifactPath)
+	}
+	// Cross-check: artifact path must appear in approval affectedPaths so the
+	// two口径 stay consistent end-to-end.
+	pathInApproval := false
+	for _, p := range approvalPaths {
+		if p == artifactPath {
+			pathInApproval = true
+			break
+		}
+	}
+	if !pathInApproval {
+		t.Fatalf("artifact path %q not found in approval affectedPaths %v", artifactPath, approvalPaths)
+	}
+	if !sawRunFinished {
+		t.Fatalf("expected RUN_FINISHED event")
+	}
+	if finalOutcome != "success" {
+		t.Fatalf("expected outcome success, got %q", finalOutcome)
+	}
+
+	content, err := os.ReadFile(notePath)
+	if err != nil {
+		t.Fatalf("failed to read note.md: %v", err)
+	}
+	if strings.TrimSpace(string(content)) != "world" {
+		t.Fatalf("expected note.md to contain 'world', got %q", string(content))
 	}
 }
 

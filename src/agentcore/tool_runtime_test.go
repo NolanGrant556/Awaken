@@ -65,7 +65,7 @@ func (t runtimeTestTool) ApprovalRequest(input string) tool.ApprovalRequest {
 	return t.approvalRequest
 }
 
-func (t runtimeTestTool) Artifacts(input string, output string) []tool.ArtifactDescriptor {
+func (t runtimeTestTool) Artifacts(input string, output string, permissionContext tool.PermissionContext) []tool.ArtifactDescriptor {
 	return t.artifacts
 }
 
@@ -292,7 +292,8 @@ func TestToolRuntimeEmitsArtifactsAndRejectsOnApprovalDecision(t *testing.T) {
 		t.Fatalf("unexpected emitted events: %+v", got)
 	}
 
-	rejected := NewToolRuntime(testApprovalAwaiter{decision: ApprovalDecisionRejected})
+	var rejectedEvents []AwakenEvent
+	rejected := NewToolRuntime(testApprovalAwaiter{decision: ApprovalDecisionRejected, events: &rejectedEvents})
 	rejectedResult := rejected.Execute(context.Background(), convcontext.ToolCall{
 		ID: "call_rejected",
 		Function: convcontext.FunctionCall{
@@ -303,6 +304,11 @@ func TestToolRuntimeEmitsArtifactsAndRejectsOnApprovalDecision(t *testing.T) {
 
 	if !rejectedResult.IsError || !strings.Contains(rejectedResult.Content, "审批拒绝") {
 		t.Fatalf("expected rejected approval to stop tool execution, got %+v", rejectedResult)
+	}
+	for _, event := range rejectedEvents {
+		if event.Type == ArtifactCreatedEventType || event.Type == ArtifactUpdatedEventType {
+			t.Fatalf("expected no artifact events on rejected approval, got %+v", event)
+		}
 	}
 }
 

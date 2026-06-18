@@ -550,13 +550,15 @@ export function App() {
                         items={runtimeState.artifacts.map((artifact) => ({
                           id: artifact.id,
                           title: artifact.title,
-                          description: [
-                            artifact.description,
-                            [artifact.kind, artifact.status].filter(Boolean).join(" / "),
-                            artifact.path,
-                          ]
-                            .filter(Boolean)
-                            .join(" | "),
+                          description: artifact.description,
+                          changeType:
+                            artifact.kind === "added" ||
+                            artifact.kind === "modified" ||
+                            artifact.kind === "deleted" ||
+                            artifact.kind === "moved"
+                              ? artifact.kind
+                              : undefined,
+                          path: artifact.path,
                         }))}
                       />
                       {latestArtifact && latestArtifact.kind !== "a2ui_surface" ? (

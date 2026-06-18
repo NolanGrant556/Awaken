@@ -82,11 +82,15 @@ export type RunStepItem = {
 
 // === 产物 ===
 
+export type ArtifactChangeType = "added" | "modified" | "deleted" | "moved";
+
 export type ArtifactItem = {
   id: string;
   title: string;
   description?: string;
   onClick?: () => void;
+  changeType?: ArtifactChangeType;
+  path?: string;
 };
 
 // === Toast ===

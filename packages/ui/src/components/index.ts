@@ -57,6 +57,7 @@ export type {
   ModelOption,
   RunStepItem,
   ArtifactItem,
+  ArtifactChangeType,
   ToastItem,
   ApprovalRiskTone,
   ApprovalItem,

@@ -168,7 +168,7 @@ func (rt *ToolRuntime) emitArtifacts(
 		return
 	}
 
-	for _, artifact := range producingTool.Artifacts(input, output) {
+	for _, artifact := range producingTool.Artifacts(input, output, rt.permissionContext) {
 		eventType := ArtifactUpdatedEventType
 		if artifact.Action == tool.ArtifactActionCreated {
 			eventType = ArtifactCreatedEventType

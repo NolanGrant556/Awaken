@@ -58,6 +58,74 @@ func (t *ApplyPatchTool) Execute(ctx context.Context, input string) (string, err
 	return summary.String(), nil
 }
 
+func (t *ApplyPatchTool) Artifacts(input string, output string, permissionContext tool.PermissionContext) []tool.ArtifactDescriptor {
+	patch, err := parsePatch(input)
+	if err != nil {
+		return nil
+	}
+	root := permissionContext.WorkspaceRootOrCWD()
+	artifacts := make([]tool.ArtifactDescriptor, 0, len(patch.operations))
+	for _, op := range patch.operations {
+		var kind string
+		var action tool.ArtifactAction
+		// Normalize source and (for move) destination paths so description,
+		// title, id, and path all share the same workspace-relative口径.
+		sourcePath := normalizeArtifactPath(op.path, permissionContext, root)
+		switch op.kind {
+		case patchKindAdd:
+			kind = "added"
+			action = tool.ArtifactActionCreated
+		case patchKindDelete:
+			kind = "deleted"
+			action = tool.ArtifactActionUpdated
+		case patchKindUpdate:
+			if strings.TrimSpace(op.movePath) != "" {
+				kind = "moved"
+				action = tool.ArtifactActionUpdated
+			} else {
+				kind = "modified"
+				action = tool.ArtifactActionUpdated
+			}
+		default:
+			continue
+		}
+		// summaryPath() returns movePath for move operations, so the
+		// destination path is used as the artifact path.
+		path := normalizeArtifactPath(op.summaryPath(), permissionContext, root)
+		var description string
+		switch kind {
+		case "added":
+			description = "Added " + path
+		case "deleted":
+			description = "Deleted " + path
+		case "modified":
+			description = "Modified " + path
+		case "moved":
+			description = "Moved " + sourcePath + " to " + path
+		}
+		artifacts = append(artifacts, tool.ArtifactDescriptor{
+			Action:      action,
+			ID:          fmt.Sprintf("apply_patch:%s:%s", kind, path),
+			Title:       path,
+			Description: description,
+			Kind:        kind,
+			Path:        path,
+			Status:      "ready",
+		})
+	}
+	return artifacts
+}
+
+// normalizeArtifactPath resolves the raw patch path against the permission
+// context and converts it to a workspace-relative path with forward slashes,
+// matching the口径 of patchAffectedPaths so artifact paths stay consistent
+// with approval affected paths.
+func normalizeArtifactPath(rawPath string, permissionContext tool.PermissionContext, root string) string {
+	resolved := permissionContext.ResolvePath(rawPath)
+	rel := relativeToRoot(resolved, root)
+	return filepath.ToSlash(rel)
+}
+
 func resolvePatchPaths(patch *patchDocument, permissionContext tool.PermissionContext) *patchDocument {
 	if patch == nil {
 		return nil
@@ -153,7 +221,7 @@ func patchAffectedPaths(patch *patchDocument, permissionContext tool.PermissionC
 }
 
 func addPath(seen map[string]struct{}, paths *[]string, path, root string) {
-	rel := relativeToRoot(path, root)
+	rel := filepath.ToSlash(relativeToRoot(path, root))
 	if _, ok := seen[rel]; ok {
 		return
 	}

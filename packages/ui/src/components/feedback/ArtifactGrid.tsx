@@ -39,6 +39,8 @@ export function ArtifactGrid({ items }: ArtifactGridProps) {
             title={item.title}
             description={item.description}
             onClick={item.onClick}
+            changeType={item.changeType}
+            path={item.path}
           />
         </div>
       ))}

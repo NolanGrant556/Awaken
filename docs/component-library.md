@@ -75,6 +75,7 @@
 | `--aw-success` | `#25ba3b` | 成功态 |
 | `--aw-warning` | `#efa201` | 警告态 |
 | `--aw-error` | `#f25a5a` | 错误态 |
+| `--aw-accent-purple` | `#8b5cf6` | 强调紫（如 ArtifactCard moved 图标） |
 
 #### 尺寸与间距
 

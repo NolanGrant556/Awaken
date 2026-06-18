@@ -1,0 +1,12 @@
+- [x] apply_patch 实现 `ArtifactProducingTool`，产出 Added/Modified/Deleted/Moved artifact
+- [x] 创建文件后显示 Added（`AWAKEN_ARTIFACT_CREATED`，kind=`added`）
+- [x] 修改文件后显示 Modified（`AWAKEN_ARTIFACT_UPDATED`，kind=`modified`）
+- [x] 删除文件后显示 Deleted（`AWAKEN_ARTIFACT_UPDATED`，kind=`deleted`）
+- [x] 移动文件后显示 Moved（`AWAKEN_ARTIFACT_UPDATED`，kind=`moved`）
+- [x] artifact path 与实际 workspace 文件一致（相对 workspace 根，与 approval affectedPaths 口径一致）
+- [x] Reject 后不产生文件变更 artifact
+- [x] ArtifactCard 按 changeType 区分图标与色调（Added 绿/Modified 蓝/Deleted 红/Moved 紫）
+- [x] Artifact 是只读记录，不提供执行动作
+- [x] 真实 LLM smoke：Approve 后产生 changed-file artifact，kind 与 path 正确
+- [x] `go test ./src/tools/... ./src/agentcore/... ./src/server/...` 通过
+- [x] Desktop build 与 type check 通过

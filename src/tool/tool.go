@@ -44,7 +44,7 @@ type ArtifactDescriptor struct {
 }
 
 type ArtifactProducingTool interface {
-	Artifacts(input string, output string) []ArtifactDescriptor
+	Artifacts(input string, output string, permissionContext PermissionContext) []ArtifactDescriptor
 }
 
 type ToolParameter struct {

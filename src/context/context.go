@@ -261,6 +261,20 @@ func (conv *Conversation) ToolResult(toolCallID, name, result string) {
 	conv.UpdatedAt = time.Now()
 }
 
+type ToolResult struct {
+	ToolCallID string
+	Name       string
+	Content    string
+}
+
+func (conv *Conversation) ToolExchange(content string, toolCalls []ToolCall, results []ToolResult) {
+	conv.AssistantOutput(content, toolCalls)
+	for _, result := range results {
+		conv.Context.AddToolResult(result.ToolCallID, result.Name, result.Content)
+	}
+	conv.UpdatedAt = time.Now()
+}
+
 func (conv *Conversation) Reset() {
 	conv.Context.Clear()
 	conv.UpdatedAt = time.Now()

@@ -89,18 +89,20 @@ func TestFileReadResolvesRelativePath(t *testing.T) {
 }
 
 func TestReadFileDeniesEtcHosts(t *testing.T) {
-	root := t.TempDir()
-	permissionContext := tool.NewPermissionContext(root, []string{root})
-	decision := (&FileReadTool{}).CheckPermission(context.Background(), `{"path":"/etc/hosts"}`, permissionContext)
-	if decision.Behavior != tool.PermissionDeny {
-		t.Fatalf("expected deny for /etc/hosts, got %v", decision.Behavior)
+	workspaceRoot := t.TempDir()
+	pc := tool.NewPermissionContext(workspaceRoot, []string{workspaceRoot})
+	ctx := tool.ContextWithPermissionContext(context.Background(), pc)
+
+	_, err := (&FileReadTool{}).Execute(ctx, `{"path":"/etc/hosts"}`)
+	if err == nil || !strings.Contains(err.Error(), "outside workspace") {
+		t.Fatalf("expected /etc/hosts to be denied, got %v", err)
 	}
 }
 
 func TestReadFileBlocksTraversal(t *testing.T) {
 	parent := t.TempDir()
-	workspace := filepath.Join(parent, "workspace")
-	if err := os.MkdirAll(workspace, 0755); err != nil {
+	workspaceRoot := filepath.Join(parent, "workspace")
+	if err := os.MkdirAll(workspaceRoot, 0755); err != nil {
 		t.Fatalf("failed to create workspace: %v", err)
 	}
 	outsideFile := filepath.Join(parent, "outside.txt")
@@ -108,10 +110,11 @@ func TestReadFileBlocksTraversal(t *testing.T) {
 		t.Fatalf("failed to write outside file: %v", err)
 	}
 
-	permissionContext := tool.NewPermissionContext(workspace, []string{workspace})
-	decision := (&FileReadTool{}).CheckPermission(context.Background(), `{"path":"../outside.txt"}`, permissionContext)
-	if decision.Behavior != tool.PermissionDeny {
-		t.Fatalf("expected deny for traversal, got %v", decision.Behavior)
+	pc := tool.NewPermissionContext(workspaceRoot, []string{workspaceRoot})
+	ctx := tool.ContextWithPermissionContext(context.Background(), pc)
+	_, err := (&FileReadTool{}).Execute(ctx, `{"path":"../outside.txt"}`)
+	if err == nil || !strings.Contains(err.Error(), "outside workspace") {
+		t.Fatalf("expected traversal to be denied, got %v", err)
 	}
 }
 

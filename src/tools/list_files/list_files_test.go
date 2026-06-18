@@ -93,11 +93,32 @@ func TestListFilesResolvesRelativePath(t *testing.T) {
 }
 
 func TestListFilesDeniesHomeDesktop(t *testing.T) {
-	root := t.TempDir()
-	permissionContext := tool.NewPermissionContext(root, []string{root})
-	decision := (&ListFilesTool{}).CheckPermission(context.Background(), `{"root":"~/Desktop"}`, permissionContext)
-	if decision.Behavior != tool.PermissionDeny {
-		t.Fatalf("expected deny for ~/Desktop, got %v", decision.Behavior)
+	workspaceRoot := t.TempDir()
+	pc := tool.NewPermissionContext(workspaceRoot, []string{workspaceRoot})
+	ctx := tool.ContextWithPermissionContext(context.Background(), pc)
+
+	_, err := (&ListFilesTool{}).Execute(ctx, `{"root":"~/Desktop"}`)
+	if err == nil || !strings.Contains(err.Error(), "outside workspace") {
+		t.Fatalf("expected ~/Desktop to be denied, got %v", err)
+	}
+}
+
+func TestListFilesBlocksTraversal(t *testing.T) {
+	parent := t.TempDir()
+	workspaceRoot := filepath.Join(parent, "workspace")
+	if err := os.MkdirAll(workspaceRoot, 0755); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+	outsideDir := filepath.Join(parent, "outside")
+	if err := os.MkdirAll(outsideDir, 0755); err != nil {
+		t.Fatalf("failed to create outside dir: %v", err)
+	}
+
+	pc := tool.NewPermissionContext(workspaceRoot, []string{workspaceRoot})
+	ctx := tool.ContextWithPermissionContext(context.Background(), pc)
+	_, err := (&ListFilesTool{}).Execute(ctx, `{"root":"../outside"}`)
+	if err == nil || !strings.Contains(err.Error(), "outside workspace") {
+		t.Fatalf("expected traversal to be denied, got %v", err)
 	}
 }
 

@@ -125,11 +125,29 @@ func TestGrepSearchResolvesRelativePath(t *testing.T) {
 }
 
 func TestGrepSearchDeniesOutsideWorkspace(t *testing.T) {
-	root := t.TempDir()
-	permissionContext := tool.NewPermissionContext(root, []string{root})
-	decision := (&GrepSearchTool{}).CheckPermission(context.Background(), `{"query":"foo","root":"/etc"}`, permissionContext)
-	if decision.Behavior != tool.PermissionDeny {
-		t.Fatalf("expected deny for /etc, got %v", decision.Behavior)
+	workspaceRoot := t.TempDir()
+	pc := tool.NewPermissionContext(workspaceRoot, []string{workspaceRoot})
+	ctx := tool.ContextWithPermissionContext(context.Background(), pc)
+
+	_, err := (&GrepSearchTool{}).Execute(ctx, `{"query":"foo","root":"/etc"}`)
+	if err == nil || !strings.Contains(err.Error(), "outside workspace") {
+		t.Fatalf("expected /etc to be denied, got %v", err)
+	}
+}
+
+func TestGrepSearchBlocksTraversal(t *testing.T) {
+	parent := t.TempDir()
+	workspaceRoot := filepath.Join(parent, "workspace")
+	if err := os.MkdirAll(workspaceRoot, 0755); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+	writeTestFile(t, parent, "outside/secret.txt", "secret")
+
+	pc := tool.NewPermissionContext(workspaceRoot, []string{workspaceRoot})
+	ctx := tool.ContextWithPermissionContext(context.Background(), pc)
+	_, err := (&GrepSearchTool{}).Execute(ctx, `{"query":"secret","root":"../outside"}`)
+	if err == nil || !strings.Contains(err.Error(), "outside workspace") {
+		t.Fatalf("expected traversal to be denied, got %v", err)
 	}
 }
 

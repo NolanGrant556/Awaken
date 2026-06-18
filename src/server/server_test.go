@@ -19,6 +19,7 @@ import (
 	"awaken/src/llm"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
+	_ "awaken/src/tools"
 )
 
 func TestHealthEndpoint(t *testing.T) {
@@ -600,6 +601,172 @@ func TestPlainQASmoke(t *testing.T) {
 	if finalOutcome != "success" {
 		t.Fatalf("expected outcome success, got %q", finalOutcome)
 	}
+}
+
+// TestReadOnlyFileSmoke 通过真实 LLM 调用验证运行时能否完成一次只读文件任务。
+// 需要项目根目录的 .env/config.toml 提供 LLM_API_KEY；未设置时自动跳过。
+func TestReadOnlyFileSmoke(t *testing.T) {
+	workspaceRoot, err := findProjectRoot()
+	if err != nil {
+		t.Fatalf("failed to find project root: %v", err)
+	}
+
+	// llm.LoadConfig 从当前工作目录读取 .env/config.toml，而 go test ./src/server
+	// 的工作目录是 src/server/，因此先切换到项目根目录再加载配置。
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	if err := os.Chdir(workspaceRoot); err != nil {
+		t.Fatalf("failed to chdir to project root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	cfg := llm.LoadConfig()
+	if cfg.APIKey == "" {
+		t.Skip("LLM_API_KEY not set")
+	}
+
+	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
+		agentCfg := agentcore.AgentConfig{
+			MaxThoughts: 10,
+			EntryPoint:  "awaken-core-smoke",
+			ModelConfig: agentcore.ModelConfig{
+				APIKey:      cfg.APIKey,
+				BaseURL:     cfg.BaseURL,
+				Model:       cfg.Model,
+				Temperature: cfg.Temperature,
+				MaxTokens:   cfg.MaxTokens,
+				AuthScheme:  cfg.AuthScheme,
+			},
+			Workspace: agentcore.WorkspaceConfig{
+				Root:          workspace.WorkspaceRoot,
+				WritableRoots: workspace.WritableRoots,
+			},
+		}
+
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			agent := agentcore.NewAgent(agentCfg)
+			return agent.RunStreamWithEvents(ctx, input, nil, sink)
+		})
+	})
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	reqBody := fmt.Sprintf(`{
+		"input": "找出 README 并总结项目",
+		"workspace": { "workspace_root": %q, "writable_roots": [%q] },
+		"client": { "session_id": "smoke-2", "request_id": "smoke-req-2", "entrypoint": "smoke" }
+	}`, workspaceRoot, workspaceRoot)
+
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var created awruntime.Run
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	if created.RunID == "" {
+		t.Fatalf("expected run id, got empty")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	eventsReq, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/v1/runs/"+created.RunID+"/events", nil)
+	if err != nil {
+		t.Fatalf("failed to create event request: %v", err)
+	}
+
+	streamResp, err := http.DefaultClient.Do(eventsReq)
+	if err != nil {
+		t.Fatalf("GET events failed: %v", err)
+	}
+	defer streamResp.Body.Close()
+	if streamResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from events, got %d", streamResp.StatusCode)
+	}
+
+	events, err := collectSSEEvents(streamResp.Body)
+	if err != nil {
+		t.Fatalf("failed to collect events: %v", err)
+	}
+
+	var sawToolCallStart, sawToolCallResult, sawRunFinished bool
+	var sawReadOnlyTool bool
+	var assistantText strings.Builder
+	var finalResult string
+	var toolResultContents []string
+
+	for _, ev := range events {
+		switch ev.Type {
+		case agui.EventToolCallStart:
+			sawToolCallStart = true
+			if isReadOnlyTool(ev.ToolCallName) {
+				sawReadOnlyTool = true
+			}
+		case agui.EventToolCallResult:
+			sawToolCallResult = true
+			toolResultContents = append(toolResultContents, ev.Content)
+		case agui.EventTextMessageContent:
+			assistantText.WriteString(ev.Delta)
+		case agui.EventRunFinished:
+			sawRunFinished = true
+			finalResult = ev.Result
+		case agui.EventAwakenApprovalRequested:
+			t.Fatalf("unexpected AWAKEN_APPROVAL_REQUESTED event")
+		case agui.EventAwakenArtifactCreated:
+			t.Fatalf("unexpected AWAKEN_ARTIFACT_CREATED event")
+		case agui.EventAwakenArtifactUpdated:
+			t.Fatalf("unexpected AWAKEN_ARTIFACT_UPDATED event")
+		case agui.EventRunError:
+			t.Fatalf("run error: %s (code=%s)", ev.Message, ev.Code)
+		}
+	}
+
+	if !sawToolCallStart {
+		t.Fatalf("expected TOOL_CALL_START event")
+	}
+	if !sawToolCallResult {
+		t.Fatalf("expected TOOL_CALL_RESULT event")
+	}
+	if !sawReadOnlyTool {
+		t.Fatalf("expected at least one read-only tool call (read_file/list_files/grep_search)")
+	}
+	if !sawRunFinished {
+		t.Fatalf("expected RUN_FINISHED event")
+	}
+
+	combinedText := strings.ToLower(strings.TrimSpace(assistantText.String()) + " " + strings.TrimSpace(finalResult))
+	readmeInResults := false
+	for _, content := range toolResultContents {
+		if strings.Contains(strings.ToLower(content), "readme") {
+			readmeInResults = true
+			break
+		}
+	}
+	summaryMatchesProject := strings.Contains(combinedText, "readme") ||
+		strings.Contains(combinedText, "项目") ||
+		strings.Contains(combinedText, "project") ||
+		strings.Contains(combinedText, "awaken")
+	if !readmeInResults && !summaryMatchesProject {
+		t.Fatalf("expected tool results to mention README or final summary to mention README/project/Awaken, got tool results=%v final=%q", toolResultContents, combinedText)
+	}
+}
+
+func isReadOnlyTool(name string) bool {
+	switch name {
+	case "read_file", "list_files", "grep_search":
+		return true
+	}
+	return false
 }
 
 func collectSSEEvents(r io.Reader) ([]agui.Event, error) {

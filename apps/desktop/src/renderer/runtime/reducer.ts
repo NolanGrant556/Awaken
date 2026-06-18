@@ -394,10 +394,14 @@ export function reduceRuntimeState(
             nextToolResults.push(record);
           }
           nextState.toolResults = nextToolResults;
-          records = upsertStep(records, `tool:${id}`, {
-            title: action.event.toolCallName || "Tool call",
+
+          const stepKey = action.event.toolCallId
+            ? `tool:${action.event.toolCallId}`
+            : `tool-result:${id}`;
+          records = upsertStep(records, stepKey, {
+            title: action.event.toolCallName || "Tool result",
             description: excerpt(content),
-            status: "active",
+            status: "done",
             tag: "tool",
           });
           break;

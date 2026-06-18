@@ -37,8 +37,8 @@ func (r *Runner) Run(ctx stdcontext.Context) (string, error) {
 
 		if len(response.ToolCalls) > 0 {
 			toolCalls := llmToolCallsToContext(response.ToolCalls)
-			r.conversation.AssistantOutput(response.Content, toolCalls)
-			r.executeToolCalls(ctx, toolCalls, nil, nil)
+			results := r.executeToolCalls(ctx, toolCalls, nil, nil)
+			r.conversation.ToolExchange(response.Content, toolCalls, toolExecutionResultsToContext(results))
 			continue
 		}
 
@@ -68,8 +68,8 @@ func (r *Runner) RunStream(ctx stdcontext.Context, callback StreamCallback) (str
 
 		if len(response.ToolCalls) > 0 {
 			toolCalls := llmToolCallsToContext(response.ToolCalls)
-			r.conversation.AssistantOutput(response.Content, toolCalls)
-			r.executeToolCalls(ctx, toolCalls, callback, nil)
+			results := r.executeToolCalls(ctx, toolCalls, callback, nil)
+			r.conversation.ToolExchange(response.Content, toolCalls, toolExecutionResultsToContext(results))
 			continue
 		}
 
@@ -108,9 +108,9 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, callback StreamCall
 
 		if len(response.ToolCalls) > 0 {
 			toolCalls := llmToolCallsToContext(response.ToolCalls)
-			r.conversation.AssistantOutput(response.Content, toolCalls)
 			r.emitToolCallEvents(toolCalls, events)
-			r.executeToolCalls(ctx, toolCalls, callback, events)
+			results := r.executeToolCalls(ctx, toolCalls, callback, events)
+			r.conversation.ToolExchange(response.Content, toolCalls, toolExecutionResultsToContext(results))
 			events.resetTurn()
 			continue
 		}
@@ -225,11 +225,11 @@ func (r *Runner) handleXMLFallback(ctx stdcontext.Context, response string, call
 			Arguments: argumentsForXMLFallback(parsed.ToolName, parsed.Input),
 		},
 	}
-	r.conversation.AssistantOutput(response, []context.ToolCall{toolCall})
 	if events != nil {
 		events.emitToolCall(toolCall)
 	}
-	r.executeToolCalls(ctx, []context.ToolCall{toolCall}, callback, events)
+	results := r.executeToolCalls(ctx, []context.ToolCall{toolCall}, callback, events)
+	r.conversation.ToolExchange(response, []context.ToolCall{toolCall}, toolExecutionResultsToContext(results))
 	return true, ""
 }
 
@@ -242,16 +242,29 @@ func (r *Runner) emitToolCallEvents(toolCalls []context.ToolCall, events *runEve
 	}
 }
 
-func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.ToolCall, callback StreamCallback, events *runEventEmitter) {
-	for _, result := range r.toolRuntime.ExecuteToolCalls(ctx, toolCalls) {
+func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.ToolCall, callback StreamCallback, events *runEventEmitter) []ToolExecutionResult {
+	results := r.toolRuntime.ExecuteToolCalls(ctx, toolCalls)
+	for _, result := range results {
 		if callback != nil {
 			callback(fmt.Sprintf("\n\n[工具结果] %s: %s\n\n", result.Name, result.Content), false)
 		}
-		r.conversation.ToolResult(result.ToolCallID, result.Name, result.Content)
 		if events != nil {
 			events.emitToolResult(result)
 		}
 	}
+	return results
+}
+
+func toolExecutionResultsToContext(results []ToolExecutionResult) []context.ToolResult {
+	out := make([]context.ToolResult, 0, len(results))
+	for _, result := range results {
+		out = append(out, context.ToolResult{
+			ToolCallID: result.ToolCallID,
+			Name:       result.Name,
+			Content:    result.Content,
+		})
+	}
+	return out
 }
 
 func llmToolCallsToContext(toolCalls []llm.ToolCall) []context.ToolCall {

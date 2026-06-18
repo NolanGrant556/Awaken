@@ -15,6 +15,7 @@ import (
 	convcontext "awaken/src/context"
 	"awaken/src/tool"
 	_ "awaken/src/tools/apply_patch"
+	_ "awaken/src/tools/file_read"
 )
 
 type runnerTestTool struct {
@@ -539,6 +540,169 @@ data: {"type":"message_stop"}`,
 	}
 	if gotEvents[9].Delta != "done" {
 		t.Fatalf("expected final text delta done, got %q", gotEvents[9].Delta)
+	}
+}
+
+func TestRunnerRunStreamWithEventsFeedsToolResultsBack(t *testing.T) {
+	toolName := "runner_event_feedback_tool"
+	mustRegisterRunnerTool(t, runnerTestTool{name: toolName})
+
+	var calls int
+	server := newRunnerAnthropicStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			writeRunnerAnthropicStreamEvents(t, w, []string{
+				`event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_feedback","name":"` + toolName + `"}}`,
+				`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{"}}`,
+				`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"value\":\"hello\""}}`,
+			`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"}"}}`,
+				`event: content_block_stop
+data: {"type":"content_block_stop","index":0}`,
+				`event: message_stop
+data: {"type":"message_stop"}`,
+			})
+			return
+		}
+
+		writeRunnerAnthropicStreamEvents(t, w, []string{
+			`event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text"}}`,
+			`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"done"}}`,
+			`event: content_block_stop
+data: {"type":"content_block_stop","index":0}`,
+			`event: message_stop
+data: {"type":"message_stop"}`,
+		})
+	})
+	defer server.Close()
+
+	cfg := testAgentConfig(server.URL+"/anthropic", 3)
+	conv := convcontext.NewConversation(nil)
+	conv.UserInput("use tool")
+	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
+	answer, err := runner.RunStreamWithEvents(context.Background(), nil, nil)
+	if err != nil {
+		t.Fatalf("RunStreamWithEvents returned error: %v", err)
+	}
+	if answer != "done" {
+		t.Fatalf("expected done, got %q", answer)
+	}
+
+	messages := conv.Context.GetMessages()
+	if len(messages) != 4 {
+		t.Fatalf("expected 4 context messages, got %d: %+v", len(messages), messages)
+	}
+	if messages[0].Role != convcontext.RoleUser {
+		t.Fatalf("expected first message to be user, got %+v", messages[0])
+	}
+	if messages[1].Role != convcontext.RoleAssistant || len(messages[1].ToolCalls) != 1 {
+		t.Fatalf("expected assistant message with tool_calls, got %+v", messages[1])
+	}
+	if messages[1].ToolCalls[0].ID != "toolu_feedback" {
+		t.Fatalf("expected tool_call id toolu_feedback, got %q", messages[1].ToolCalls[0].ID)
+	}
+	if messages[2].Role != convcontext.RoleTool || messages[2].ToolCallID != "toolu_feedback" {
+		t.Fatalf("expected tool result message with matching tool_call_id, got %+v", messages[2])
+	}
+	if messages[2].Content != "echo:hello" {
+		t.Fatalf("expected tool result content echo:hello, got %q", messages[2].Content)
+	}
+	if messages[3].Role != convcontext.RoleAssistant || messages[3].Content != "done" {
+		t.Fatalf("expected final assistant message, got %+v", messages[3])
+	}
+}
+
+func TestRunnerReadOnlyToolOutsideWorkspaceFeedsErrorBack(t *testing.T) {
+	workspaceRoot := t.TempDir()
+
+	var calls int
+	server := newRunnerAnthropicStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			writeRunnerAnthropicStreamEvents(t, w, []string{
+				`event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_outside","name":"read_file"}}`,
+				`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{"}}`,
+				`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"path\":\"/etc/hosts\""}}`,
+				`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"}"}}`,
+				`event: content_block_stop
+data: {"type":"content_block_stop","index":0}`,
+				`event: message_stop
+data: {"type":"message_stop"}`,
+			})
+			return
+		}
+
+		writeRunnerAnthropicStreamEvents(t, w, []string{
+			`event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text"}}`,
+			`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"handled"}}`,
+			`event: content_block_stop
+data: {"type":"content_block_stop","index":0}`,
+			`event: message_stop
+data: {"type":"message_stop"}`,
+		})
+	})
+	defer server.Close()
+
+	cfg := testAgentConfig(server.URL+"/anthropic", 3)
+	cfg.Workspace.Root = workspaceRoot
+	cfg.Workspace.WritableRoots = []string{workspaceRoot}
+
+	var gotEvents []AwakenEvent
+	agent := NewAgent(cfg)
+	answer, err := agent.RunStreamWithEvents(context.Background(), "read outside workspace", nil, EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+	if err != nil {
+		t.Fatalf("RunStreamWithEvents returned error: %v", err)
+	}
+	if answer != "handled" {
+		t.Fatalf("expected handled, got %q", answer)
+	}
+
+	var sawToolResult, sawApproval bool
+	var toolResultContent string
+	for _, ev := range gotEvents {
+		switch ev.Type {
+		case ToolResultEventType:
+			sawToolResult = true
+			toolResultContent = ev.Content
+		case ApprovalRequestedEventType:
+			sawApproval = true
+		}
+	}
+	if !sawToolResult {
+		t.Fatalf("expected ToolResult event, got events: %+v", gotEvents)
+	}
+	if sawApproval {
+		t.Fatalf("unexpected approval request for read-only tool")
+	}
+	if !strings.Contains(toolResultContent, "outside workspace") && !strings.Contains(toolResultContent, "permission") {
+		t.Fatalf("expected tool result to contain workspace denial, got %q", toolResultContent)
+	}
+
+	messages := agent.GetConversation().Context.GetMessages()
+	if len(messages) != 4 {
+		t.Fatalf("expected 4 messages, got %d: %+v", len(messages), messages)
+	}
+	if messages[1].Role != convcontext.RoleAssistant || len(messages[1].ToolCalls) != 1 {
+		t.Fatalf("expected assistant message with tool call, got %+v", messages[1])
+	}
+	if messages[2].Role != convcontext.RoleTool || messages[2].ToolCallID != "toolu_outside" {
+		t.Fatalf("expected tool result message, got %+v", messages[2])
+	}
+	if !strings.Contains(messages[2].Content, "outside workspace") {
+		t.Fatalf("expected tool result content to contain denial, got %q", messages[2].Content)
 	}
 }
 

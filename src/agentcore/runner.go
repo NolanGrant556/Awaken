@@ -96,8 +96,21 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, callback StreamCall
 	events.runStarted()
 
 	for i := 0; i < r.config.MaxThoughts; i++ {
+		select {
+		case <-ctx.Done():
+			r.injectSyntheticToolResultsForCancel()
+			events.runErrored(ctx.Err())
+			return "", ctx.Err()
+		default:
+		}
+
 		response, err := r.streamLLM(ctx, callback, events)
 		if err != nil {
+			if ctx.Err() != nil {
+				r.injectSyntheticToolResultsForCancel()
+				events.runErrored(ctx.Err())
+				return "", ctx.Err()
+			}
 			runErr := fmt.Errorf("LLM stream call failed: %w", err)
 			events.runErrored(runErr)
 			return "", runErr
@@ -108,7 +121,6 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, callback StreamCall
 
 		if len(response.ToolCalls) > 0 {
 			toolCalls := llmToolCallsToContext(response.ToolCalls)
-			r.emitToolCallEvents(toolCalls, events)
 			results := r.executeToolCalls(ctx, toolCalls, callback, events)
 			r.conversation.ToolExchange(response.Content, toolCalls, toolExecutionResultsToContext(results))
 			events.resetTurn()
@@ -137,6 +149,45 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, callback StreamCall
 	err := fmt.Errorf("达到最大思考次数 %d，未能完成任务", r.config.MaxThoughts)
 	events.runErrored(err)
 	return "", err
+}
+
+func (r *Runner) injectSyntheticToolResultsForCancel() {
+	messages := r.conversation.Context.GetMessages()
+
+	pendingToolCalls := map[string]string{}
+	for _, msg := range messages {
+		if msg.Role == context.RoleAssistant {
+			for _, tc := range msg.ToolCalls {
+				if tc.ID != "" {
+					pendingToolCalls[tc.ID] = tc.Function.Name
+				}
+			}
+		}
+		if msg.Role == context.RoleTool {
+			delete(pendingToolCalls, msg.ToolCallID)
+		}
+	}
+
+	if len(pendingToolCalls) == 0 {
+		return
+	}
+
+	injected := map[string]bool{}
+	for _, msg := range messages {
+		if msg.Role != context.RoleAssistant {
+			continue
+		}
+		for _, tc := range msg.ToolCalls {
+			if tc.ID == "" || injected[tc.ID] {
+				continue
+			}
+			if _, orphan := pendingToolCalls[tc.ID]; !orphan {
+				continue
+			}
+			r.conversation.Context.AddToolResultWithError(tc.ID, tc.Function.Name, "工具执行已被取消")
+			injected[tc.ID] = true
+		}
+	}
 }
 
 func toolRuntimeConfigFromAgentConfig(config AgentConfig) ToolRuntimeConfig {
@@ -225,26 +276,23 @@ func (r *Runner) handleXMLFallback(ctx stdcontext.Context, response string, call
 			Arguments: argumentsForXMLFallback(parsed.ToolName, parsed.Input),
 		},
 	}
-	if events != nil {
-		events.emitToolCall(toolCall)
-	}
 	results := r.executeToolCalls(ctx, []context.ToolCall{toolCall}, callback, events)
 	r.conversation.ToolExchange(response, []context.ToolCall{toolCall}, toolExecutionResultsToContext(results))
 	return true, ""
 }
 
-func (r *Runner) emitToolCallEvents(toolCalls []context.ToolCall, events *runEventEmitter) {
-	if events == nil {
-		return
-	}
-	for _, toolCall := range toolCalls {
-		events.emitToolCall(toolCall)
-	}
-}
-
 func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.ToolCall, callback StreamCallback, events *runEventEmitter) []ToolExecutionResult {
-	results := r.toolRuntime.ExecuteToolCalls(ctx, toolCalls)
-	for _, result := range results {
+	results := make([]ToolExecutionResult, 0, len(toolCalls))
+	for _, call := range toolCalls {
+		if ctx.Err() != nil {
+			results = append(results, syntheticCancelledToolResult(call))
+			continue
+		}
+		if events != nil {
+			events.emitToolCall(call)
+		}
+		result := r.toolRuntime.Execute(ctx, call)
+		results = append(results, result)
 		if callback != nil {
 			callback(fmt.Sprintf("\n\n[工具结果] %s: %s\n\n", result.Name, result.Content), false)
 		}
@@ -255,6 +303,15 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 	return results
 }
 
+func syntheticCancelledToolResult(call context.ToolCall) ToolExecutionResult {
+	return ToolExecutionResult{
+		ToolCallID: call.ID,
+		Name:       call.Function.Name,
+		Content:    "工具执行已被取消",
+		IsError:    true,
+	}
+}
+
 func toolExecutionResultsToContext(results []ToolExecutionResult) []context.ToolResult {
 	out := make([]context.ToolResult, 0, len(results))
 	for _, result := range results {
@@ -262,6 +319,7 @@ func toolExecutionResultsToContext(results []ToolExecutionResult) []context.Tool
 			ToolCallID: result.ToolCallID,
 			Name:       result.Name,
 			Content:    result.Content,
+			IsError:    result.IsError,
 		})
 	}
 	return out

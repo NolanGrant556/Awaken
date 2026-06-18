@@ -2,7 +2,7 @@ import type { ApprovalItem, RunStepItem } from "@awaken/ui";
 import type { AguiApprovalRiskTone, AguiArtifactStatus, AguiEvent } from "./agui";
 import type { RuntimeRun, RuntimeRunStatus } from "../../shared/runtime";
 
-type RuntimePhase = "idle" | "starting" | "running" | "cancelling" | "done" | "error";
+type RuntimePhase = "idle" | "starting" | "running" | "cancelling" | "done" | "error" | "cancelled";
 
 type TimelineStatus = "ready" | "running" | "done" | "error";
 
@@ -216,7 +216,19 @@ function syncFromRun(state: RuntimeViewState, run: RuntimeRun): RuntimeViewState
     };
   }
 
-  if (run.status === "error" || run.status === "cancelled") {
+  if (run.status === "cancelled") {
+    return {
+      ...state,
+      runId: run.runId,
+      threadId: run.threadId,
+      phase: "cancelled",
+      status: run.status,
+      timelineStatus: "done",
+      approvals: [],
+    };
+  }
+
+  if (run.status === "error") {
     return {
       ...state,
       runId: run.runId,
@@ -284,6 +296,7 @@ export function reduceRuntimeState(
       return {
         ...state,
         phase: "cancelling",
+        status: "cancelling",
         timelineStatus: "running",
         approvals: [],
       };
@@ -326,9 +339,23 @@ export function reduceRuntimeState(
             nextState.timelineStatus = "running";
           } else if (status === "awaiting_approval") {
             nextState.phase = "running";
+          } else if (status === "cancelling") {
+            nextState.phase = "cancelling";
+            nextState.timelineStatus = "running";
+            nextState.approvals = [];
+          } else if (status === "cancelled") {
+            nextState.phase = "cancelled";
+            nextState.timelineStatus = "done";
+            nextState.approvals = [];
           }
-          records = upsertStep(records, `status:${status ?? "unknown"}`, {
-            title: status === "awaiting_approval" ? "Awaiting approval" : "Run status changed",
+          records = upsertStep(records, status === "cancelled" ? "run-cancelled" : `status:${status ?? "unknown"}`, {
+            title: status === "awaiting_approval"
+              ? "Awaiting approval"
+              : status === "cancelling"
+                ? "Cancelling run"
+                : status === "cancelled"
+                  ? "Run cancelled"
+                  : "Run status changed",
             description: `Status: ${status ?? "unknown"}`,
             status: "done",
             tag: "runtime",
@@ -502,16 +529,28 @@ export function reduceRuntimeState(
           break;
         }
         case "RUN_ERROR":
-          nextState.phase = "error";
-          nextState.timelineStatus = "error";
-          nextState.errorMessage = action.event.message || "Run failed";
-          nextState.approvals = [];
-          records = upsertStep(records, "run-error", {
-            title: action.event.code === "RUN_CANCELLED" ? "Run cancelled" : "Run failed",
-            description: action.event.message || "Runtime returned an error",
-            status: "error",
-            tag: action.event.code || "error",
-          });
+          if (action.event.code === "RUN_CANCELLED") {
+            nextState.phase = "cancelled";
+            nextState.timelineStatus = "done";
+            nextState.approvals = [];
+            records = upsertStep(records, "run-cancelled", {
+              title: "Run cancelled",
+              description: action.event.message || "Run was cancelled by user",
+              status: "done",
+              tag: "cancelled",
+            });
+          } else {
+            nextState.phase = "error";
+            nextState.timelineStatus = "error";
+            nextState.errorMessage = action.event.message || "Run failed";
+            nextState.approvals = [];
+            records = upsertStep(records, "run-error", {
+              title: "Run failed",
+              description: action.event.message || "Runtime returned an error",
+              status: "error",
+              tag: action.event.code || "error",
+            });
+          }
           break;
         default:
           break;

@@ -100,10 +100,10 @@ func (h runHandlers) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 	run, err := h.runService.CancelRun(runID)
 	if err != nil {
 		if errors.Is(err, awruntime.ErrRunNotFound) {
-			http.NotFound(w, r)
+			writeErrorJSON(w, http.StatusNotFound, "RUN_NOT_FOUND", err.Error())
 			return
 		}
-		http.Error(w, "failed to cancel run", http.StatusInternalServerError)
+		writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to cancel run")
 		return
 	}
 

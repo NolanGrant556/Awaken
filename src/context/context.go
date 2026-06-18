@@ -25,6 +25,7 @@ type Message struct {
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	Name       string     `json:"name,omitempty"`
+	IsError    bool       `json:"is_error,omitempty"`
 }
 
 type ToolCall struct {
@@ -118,6 +119,18 @@ func (c *Context) AddToolResult(toolCallID, name, content string) {
 		ToolCallID: toolCallID,
 		Name:       name,
 		Content:    content,
+	})
+}
+
+func (c *Context) AddToolResultWithError(toolCallID, name, content string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.messages = append(c.messages, Message{
+		Role:       RoleTool,
+		ToolCallID: toolCallID,
+		Name:       name,
+		Content:    content,
+		IsError:    true,
 	})
 }
 
@@ -265,11 +278,16 @@ type ToolResult struct {
 	ToolCallID string
 	Name       string
 	Content    string
+	IsError    bool
 }
 
 func (conv *Conversation) ToolExchange(content string, toolCalls []ToolCall, results []ToolResult) {
 	conv.AssistantOutput(content, toolCalls)
 	for _, result := range results {
+		if result.IsError {
+			conv.Context.AddToolResultWithError(result.ToolCallID, result.Name, result.Content)
+			continue
+		}
 		conv.Context.AddToolResult(result.ToolCallID, result.Name, result.Content)
 	}
 	conv.UpdatedAt = time.Now()

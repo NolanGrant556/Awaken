@@ -60,6 +60,8 @@ function formatStatusLabel(
       return "Cancelling";
     case "done":
       return "Completed";
+    case "cancelled":
+      return "Cancelled";
     case "error":
       return "Error";
     default:

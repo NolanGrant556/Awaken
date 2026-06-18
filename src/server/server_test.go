@@ -280,6 +280,16 @@ func TestRunsEndpointsValidationAndNotFound(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for missing cancel run, got %d", rec.Code)
 	}
+	var cancelErrResp errorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &cancelErrResp); err != nil {
+		t.Fatalf("expected JSON error response for missing cancel, got %q", rec.Body.String())
+	}
+	if cancelErrResp.Error != "RUN_NOT_FOUND" {
+		t.Fatalf("expected RUN_NOT_FOUND error code, got %q", cancelErrResp.Error)
+	}
+	if strings.TrimSpace(cancelErrResp.Message) == "" {
+		t.Fatalf("expected non-empty error message for missing cancel, got %+v", cancelErrResp)
+	}
 
 	req = httptest.NewRequest(http.MethodPost, "/v1/runs/missing/approvals/approval-1/resolve", strings.NewReader(`{"decision":"approved"}`))
 	req.Header.Set("Content-Type", "application/json")

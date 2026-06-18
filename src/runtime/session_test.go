@@ -146,11 +146,14 @@ func TestSessionAwaitApprovalAtomicWithCancel(t *testing.T) {
 		}
 	}
 
-	if len(statusChanges) != 1 {
-		t.Fatalf("expected 1 RUN_STATUS_CHANGED event, got %+v", statusChanges)
+	if len(statusChanges) != 2 {
+		t.Fatalf("expected 2 RUN_STATUS_CHANGED events, got %+v", statusChanges)
 	}
 	if statusChanges[0].Status != string(RunStatusAwaitingApproval) {
-		t.Fatalf("expected status awaiting_approval, got %s", statusChanges[0].Status)
+		t.Fatalf("expected first status awaiting_approval, got %s", statusChanges[0].Status)
+	}
+	if statusChanges[1].Status != string(RunStatusCancelling) {
+		t.Fatalf("expected second status cancelling, got %s", statusChanges[1].Status)
 	}
 }
 

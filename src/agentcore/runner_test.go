@@ -858,6 +858,356 @@ func TestRunnerRejectsInvalidToolResultPairingBeforeLLM(t *testing.T) {
 	}
 }
 
+func TestRunnerCancelInjectsSyntheticToolResults(t *testing.T) {
+	server := newRunnerAnthropicStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("expected no LLM call when context is already cancelled")
+	})
+	defer server.Close()
+
+	conv := convcontext.NewConversation(nil)
+	conv.UserInput("use tool")
+	conv.AssistantOutput("thinking", []convcontext.ToolCall{
+		{ID: "call_orphan_1", Type: "function", Function: convcontext.FunctionCall{Name: "orphan_tool_a", Arguments: `{}`}},
+		{ID: "call_orphan_2", Type: "function", Function: convcontext.FunctionCall{Name: "orphan_tool_b", Arguments: `{}`}},
+	})
+
+	cfg := testAgentConfig(server.URL+"/anthropic", 3)
+	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := runner.RunStreamWithEvents(ctx, nil, nil)
+	if err == nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled error, got %v", err)
+	}
+
+	messages := conv.Context.GetMessages()
+	if err := convcontext.ValidateToolResultPairing(messages); err != nil {
+		t.Fatalf("expected valid tool result pairing after cancel injection, got %v", err)
+	}
+
+	var syntheticResults []convcontext.Message
+	for _, msg := range messages {
+		if msg.Role == convcontext.RoleTool && msg.IsError {
+			syntheticResults = append(syntheticResults, msg)
+		}
+	}
+	if len(syntheticResults) != 2 {
+		t.Fatalf("expected 2 synthetic error tool results, got %d: %+v", len(syntheticResults), syntheticResults)
+	}
+
+	seenIDs := map[string]bool{}
+	for _, msg := range syntheticResults {
+		if msg.Content != "工具执行已被取消" {
+			t.Fatalf("expected synthetic result content '工具执行已被取消', got %q", msg.Content)
+		}
+		seenIDs[msg.ToolCallID] = true
+	}
+	if !seenIDs["call_orphan_1"] || !seenIDs["call_orphan_2"] {
+		t.Fatalf("expected synthetic results for call_orphan_1 and call_orphan_2, got %+v", seenIDs)
+	}
+}
+
+type cancelOnExecuteTool struct {
+	name   string
+	cancel context.CancelFunc
+}
+
+func (t cancelOnExecuteTool) Name() string {
+	return t.name
+}
+
+func (t cancelOnExecuteTool) Description() string {
+	return "cancels the run context on execute"
+}
+
+func (t cancelOnExecuteTool) Parameters() []tool.ToolParameter {
+	return []tool.ToolParameter{
+		{Name: "value", Description: "value", Type: "string", Required: true},
+	}
+}
+
+func (t cancelOnExecuteTool) Execute(ctx context.Context, input string) (string, error) {
+	t.cancel()
+	return "cancelled", nil
+}
+
+func TestRunnerCancelBetweenTurnsExitsEarly(t *testing.T) {
+	toolName := "runner_cancel_between_turns"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mustRegisterRunnerTool(t, cancelOnExecuteTool{name: toolName, cancel: cancel})
+
+	var calls int
+	server := newRunnerAnthropicStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			writeRunnerAnthropicStreamEvents(t, w, []string{
+				`event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_cancel","name":"` + toolName + `"}}`,
+				`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{"}}`,
+				`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"value\":\"hello\""}}`,
+				`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"}"}}`,
+				`event: content_block_stop
+data: {"type":"content_block_stop","index":0}`,
+				`event: message_stop
+data: {"type":"message_stop"}`,
+			})
+			return
+		}
+		t.Fatalf("expected no second LLM call after cancel between turns, got call %d", calls)
+	})
+	defer server.Close()
+
+	cfg := testAgentConfig(server.URL+"/anthropic", 3)
+	conv := convcontext.NewConversation(nil)
+	conv.UserInput("use cancel tool")
+	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
+
+	_, err := runner.RunStreamWithEvents(ctx, nil, nil)
+	if err == nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled error, got %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected exactly 1 LLM call, got %d", calls)
+	}
+
+	messages := conv.Context.GetMessages()
+	if err := convcontext.ValidateToolResultPairing(messages); err != nil {
+		t.Fatalf("expected valid tool result pairing after cancel, got %v", err)
+	}
+}
+
+type failIfExecutedTool struct {
+	name string
+}
+
+func (t failIfExecutedTool) Name() string {
+	return t.name
+}
+
+func (t failIfExecutedTool) Description() string {
+	return "fails the test if executed"
+}
+
+func (t failIfExecutedTool) Parameters() []tool.ToolParameter {
+	return []tool.ToolParameter{
+		{Name: "value", Description: "value", Type: "string", Required: true},
+	}
+}
+
+func (t failIfExecutedTool) Execute(ctx context.Context, input string) (string, error) {
+	panic("failIfExecutedTool should never be executed when run is cancelled")
+}
+
+func TestRunnerCancelStopsSubsequentToolsInBatch(t *testing.T) {
+	cancelToolName := "runner_cancel_in_batch"
+	failToolName := "runner_must_not_execute_in_batch"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mustRegisterRunnerTool(t, cancelOnExecuteTool{name: cancelToolName, cancel: cancel})
+	mustRegisterRunnerTool(t, failIfExecutedTool{name: failToolName})
+
+	var calls int
+	server := newRunnerAnthropicStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			writeRunnerAnthropicStreamEvents(t, w, []string{
+				`event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_cancel_1","name":"` + cancelToolName + `"}}`,
+				`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{"}}`,
+				`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"value\":\"hello\""}}`,
+				`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"}"}}`,
+				`event: content_block_stop
+data: {"type":"content_block_stop","index":0}`,
+				`event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_cancel_2","name":"` + failToolName + `"}}`,
+				`event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{"}}`,
+				`event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\"value\":\"world\""}}`,
+				`event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"}"}}`,
+				`event: content_block_stop
+data: {"type":"content_block_stop","index":1}`,
+				`event: message_stop
+data: {"type":"message_stop"}`,
+			})
+			return
+		}
+		t.Fatalf("expected no second LLM call after cancel in batch, got call %d", calls)
+	})
+	defer server.Close()
+
+	cfg := testAgentConfig(server.URL+"/anthropic", 3)
+	conv := convcontext.NewConversation(nil)
+	conv.UserInput("use cancel then fail tool")
+	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
+
+	var gotEvents []AwakenEvent
+	_, err := runner.RunStreamWithEvents(ctx, nil, EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+	if err == nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled error, got %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected exactly 1 LLM call, got %d", calls)
+	}
+
+	var toolCallStarts []string
+	for _, ev := range gotEvents {
+		if ev.Type == ToolCallStartedEventType {
+			toolCallStarts = append(toolCallStarts, ev.ToolCallID)
+		}
+	}
+	if len(toolCallStarts) != 1 || toolCallStarts[0] != "toolu_cancel_1" {
+		t.Fatalf("expected exactly 1 TOOL_CALL_START for toolu_cancel_1, got %+v", toolCallStarts)
+	}
+
+	messages := conv.Context.GetMessages()
+	if err := convcontext.ValidateToolResultPairing(messages); err != nil {
+		t.Fatalf("expected valid tool result pairing after batch cancel, got %v", err)
+	}
+
+	var cancel2Result *convcontext.Message
+	for i := range messages {
+		msg := messages[i]
+		if msg.Role == convcontext.RoleTool && msg.ToolCallID == "toolu_cancel_2" {
+			cancel2Result = &messages[i]
+			break
+		}
+	}
+	if cancel2Result == nil {
+		t.Fatalf("expected synthetic tool result for toolu_cancel_2, got messages: %+v", messages)
+	}
+	if !cancel2Result.IsError {
+		t.Fatalf("expected synthetic result to be error, got %+v", cancel2Result)
+	}
+	if cancel2Result.Content != "工具执行已被取消" {
+		t.Fatalf("expected synthetic result content '工具执行已被取消', got %q", cancel2Result.Content)
+	}
+}
+
+func TestRunnerXMLFallbackEmitsSingleToolCallEventSet(t *testing.T) {
+	toolName := "runner_xml_evt_single"
+	mustRegisterRunnerTool(t, runnerTestTool{name: toolName})
+
+	var calls int
+	server := newRunnerAnthropicStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			writeRunnerAnthropicStreamEvents(t, w, []string{
+				`event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text"}}`,
+				`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"<action><name>` + toolName + `</name><input>hello</input></action>"}}`,
+				`event: content_block_stop
+data: {"type":"content_block_stop","index":0}`,
+				`event: message_stop
+data: {"type":"message_stop"}`,
+			})
+			return
+		}
+		writeRunnerAnthropicStreamEvents(t, w, []string{
+			`event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text"}}`,
+			`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"done"}}`,
+			`event: content_block_stop
+data: {"type":"content_block_stop","index":0}`,
+			`event: message_stop
+data: {"type":"message_stop"}`,
+		})
+	})
+	defer server.Close()
+
+	cfg := testAgentConfig(server.URL+"/anthropic", 3)
+	conv := convcontext.NewConversation(nil)
+	conv.UserInput("use xml tool")
+	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
+
+	var gotEvents []AwakenEvent
+	_, err := runner.RunStreamWithEvents(context.Background(), nil, EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+	if err != nil {
+		t.Fatalf("RunStreamWithEvents returned error: %v", err)
+	}
+
+	var toolCallStarts, toolCallArgs, toolCallFinished int
+	for _, ev := range gotEvents {
+		switch ev.Type {
+		case ToolCallStartedEventType:
+			toolCallStarts++
+		case ToolCallArgsEventType:
+			toolCallArgs++
+		case ToolCallFinishedEventType:
+			toolCallFinished++
+		}
+	}
+	if toolCallStarts != 1 || toolCallArgs != 1 || toolCallFinished != 1 {
+		t.Fatalf("expected exactly 1 of each tool-call event, got starts=%d args=%d finished=%d",
+			toolCallStarts, toolCallArgs, toolCallFinished)
+	}
+}
+
+func TestRunnerXMLFallbackCancelBeforeExecutionEmitsNoToolCallStart(t *testing.T) {
+	toolName := "runner_xml_cancel_before"
+	mustRegisterRunnerTool(t, runnerTestTool{name: toolName})
+
+	cfg := testAgentConfig("http://unused", 3)
+	conv := convcontext.NewConversation(nil)
+	conv.UserInput("use xml tool")
+	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
+
+	var gotEvents []AwakenEvent
+	events := newRunEventEmitter("thread-test", EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	xmlAction := "<action><name>" + toolName + "</name><input>hello</input></action>"
+	handled, _ := runner.handleXMLFallback(ctx, xmlAction, nil, events)
+	if !handled {
+		t.Fatalf("expected XML fallback to be handled")
+	}
+
+	for _, ev := range gotEvents {
+		if ev.Type == ToolCallStartedEventType {
+			t.Fatalf("expected no ToolCallStarted event when ctx is cancelled, got %+v", ev)
+		}
+	}
+
+	messages := conv.Context.GetMessages()
+	if err := convcontext.ValidateToolResultPairing(messages); err != nil {
+		t.Fatalf("expected valid tool result pairing after cancel, got %v", err)
+	}
+
+	var syntheticResult *convcontext.Message
+	for i := range messages {
+		if messages[i].Role == convcontext.RoleTool && messages[i].IsError {
+			syntheticResult = &messages[i]
+			break
+		}
+	}
+	if syntheticResult == nil {
+		t.Fatalf("expected synthetic error tool result, got messages: %+v", messages)
+	}
+	if syntheticResult.Content != "工具执行已被取消" {
+		t.Fatalf("expected synthetic result content '工具执行已被取消', got %q", syntheticResult.Content)
+	}
+}
+
 func mustRegisterRunnerTool(t *testing.T, candidate tool.Tool) {
 	t.Helper()
 	if err := tool.RegisterTool(candidate); err != nil {

@@ -110,11 +110,20 @@ func TestRunServiceCancelSuppressesRunErrorAndEmitsCancelled(t *testing.T) {
 		}
 	}
 
-	if len(got) != 2 {
-		t.Fatalf("expected 2 events total, got %d", len(got))
+	if len(got) != 4 {
+		t.Fatalf("expected 4 events total, got %d", len(got))
 	}
-	if got[1].Kind != EventKindRunCancelled {
-		t.Fatalf("expected terminal cancelled event, got %+v", got[1])
+	if got[0].AgentEvent.Type != agentcore.RunStartedEventType {
+		t.Fatalf("expected RunStarted event, got %+v", got[0])
+	}
+	if got[1].Kind != EventKindRunStatusChanged || got[1].Status != string(RunStatusCancelling) {
+		t.Fatalf("expected RUN_STATUS_CHANGED(cancelling), got %+v", got[1])
+	}
+	if got[2].Kind != EventKindRunStatusChanged || got[2].Status != string(RunStatusCancelled) {
+		t.Fatalf("expected RUN_STATUS_CHANGED(cancelled), got %+v", got[2])
+	}
+	if got[3].Kind != EventKindRunCancelled {
+		t.Fatalf("expected terminal cancelled event, got %+v", got[3])
 	}
 
 	final, err := service.CancelRun(run.RunID)
@@ -199,11 +208,20 @@ func TestRunServiceCancelWinsOverLateSuccessfulReturn(t *testing.T) {
 		got = append(got, event)
 	}
 
-	if len(got) != 2 {
+	if len(got) != 4 {
 		t.Fatalf("expected RunStarted plus RunCancelled, got %d", len(got))
 	}
-	if got[1].Kind != EventKindRunCancelled {
-		t.Fatalf("expected cancellation to win over late success, got %+v", got[1])
+	if got[0].AgentEvent.Type != agentcore.RunStartedEventType {
+		t.Fatalf("expected RunStarted event, got %+v", got[0])
+	}
+	if got[1].Kind != EventKindRunStatusChanged || got[1].Status != string(RunStatusCancelling) {
+		t.Fatalf("expected RUN_STATUS_CHANGED(cancelling), got %+v", got[1])
+	}
+	if got[2].Kind != EventKindRunStatusChanged || got[2].Status != string(RunStatusCancelled) {
+		t.Fatalf("expected RUN_STATUS_CHANGED(cancelled), got %+v", got[2])
+	}
+	if got[3].Kind != EventKindRunCancelled {
+		t.Fatalf("expected cancellation to win over late success, got %+v", got[3])
 	}
 
 	final, err := service.CancelRun(run.RunID)

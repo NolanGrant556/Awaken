@@ -102,6 +102,7 @@ func (s *Session) CancelRequested() bool {
 }
 
 func (s *Session) RequestCancel() Run {
+	now := time.Now().UTC()
 	s.mu.Lock()
 	if isTerminalStatus(s.run.Status) {
 		snapshot := s.run
@@ -110,13 +111,30 @@ func (s *Session) RequestCancel() Run {
 	}
 
 	s.run.CancelRequested = true
+	statusChanged := false
 	if s.run.Status == RunStatusRunning || s.run.Status == RunStatusAwaitingApproval {
 		s.run.Status = RunStatusCancelling
+		statusChanged = true
 	}
-	s.run.UpdatedAt = time.Now().UTC()
+	s.run.UpdatedAt = now
+	var statusEvent Event
+	if statusChanged {
+		statusEvent = Event{
+			Kind:      EventKindRunStatusChanged,
+			Timestamp: now,
+			ThreadID:  s.run.ThreadID,
+			RunID:     s.run.RunID,
+			Status:    string(RunStatusCancelling),
+		}
+	}
 	cancel := s.cancel
 	snapshot := s.run
+	bus := s.bus
 	s.mu.Unlock()
+
+	if statusChanged {
+		bus.Append(statusEvent, false)
+	}
 
 	if cancel != nil {
 		cancel()
@@ -330,6 +348,13 @@ func (s *Session) CompleteCancelled(message string) {
 	s.run.UpdatedAt = now
 	finishedAt := now
 	s.run.FinishedAt = &finishedAt
+	statusEvent := Event{
+		Kind:      EventKindRunStatusChanged,
+		Timestamp: now,
+		ThreadID:  s.run.ThreadID,
+		RunID:     s.run.RunID,
+		Status:    string(RunStatusCancelled),
+	}
 	event := Event{
 		Kind:      EventKindRunCancelled,
 		Timestamp: now,
@@ -340,6 +365,7 @@ func (s *Session) CompleteCancelled(message string) {
 	bus := s.bus
 	s.mu.Unlock()
 
+	bus.Append(statusEvent, false)
 	bus.Append(event, true)
 }
 

@@ -1,0 +1,30 @@
+appId: com.awaken.desktop
+productName: Awaken
+directories:
+  output: dist-electron
+  buildResources: build
+files:
+  - dist/**/*
+  - package.json
+  - "!**/node_modules/*/{CHANGELOG.md,README.md,readme.md,readme}"
+  - "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}"
+  - "!**/.{idea,git,cache,vscode,DS_Store}"
+extraResources:
+  - from: resources/bin
+    to: bin
+    filter: ["**/*"]
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+dmg:
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications

@@ -20,11 +20,8 @@ func main() {
 	}
 
 	cfg := llm.LoadConfig()
-	cwd, err := os.Getwd()
-	if err != nil {
-		log.Fatalf("failed to get working directory: %v", err)
-	}
-	infoProvider := server.NewLLMRuntimeInfoProvider(cfg.Model, cfg.BaseURL, cfg.APIKey, cwd, string(llm.ResolveProtocol(cfg)))
+	defaultWorkspace := resolveDefaultWorkspace()
+	infoProvider := server.NewLLMRuntimeInfoProvider(cfg.Model, cfg.BaseURL, cfg.APIKey, defaultWorkspace, string(llm.ResolveProtocol(cfg)))
 
 	runService := runtime.NewRunService(
 		func(workspace runtime.WorkspaceConfig, threadID string) *agentcore.Agent {
@@ -60,4 +57,17 @@ func main() {
 
 	log.Printf("awaken-core listening on http://%s", addr)
 	log.Fatal(srv.ListenAndServe())
+}
+
+func resolveDefaultWorkspace() string {
+	defaultWorkspace := os.Getenv("AWAKEN_DEFAULT_WORKSPACE")
+	if defaultWorkspace != "" {
+		return defaultWorkspace
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("failed to get working directory: %v", err)
+	}
+	return cwd
 }

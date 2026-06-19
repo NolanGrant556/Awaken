@@ -1,0 +1,63 @@
+import { execFileSync } from "node:child_process";
+import { mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const root = join(__dirname, "..");
+
+const currentTarget = `${process.platform}-${process.arch}`;
+const targets = process.env.AWAKEN_BINARY_TARGETS
+  ? process.env.AWAKEN_BINARY_TARGETS.split(",").map((target) => target.trim()).filter(Boolean)
+  : process.platform === "darwin"
+    ? ["darwin-arm64", "darwin-x64"]
+    : [currentTarget];
+
+function parseTarget(target) {
+  const [platform, arch] = target.split("-");
+  if (!platform || !arch) {
+    throw new Error(`invalid target ${target}; expected <platform>-<arch>`);
+  }
+  return { platform, arch };
+}
+
+function goArch(nodeArch) {
+  switch (nodeArch) {
+    case "x64":
+      return "amd64";
+    case "arm64":
+      return "arm64";
+    default:
+      return nodeArch;
+  }
+}
+
+function goOS(nodePlatform) {
+  return nodePlatform === "win32" ? "windows" : nodePlatform;
+}
+
+for (const target of targets) {
+  const { platform, arch } = parseTarget(target);
+  const binName = platform === "win32" ? "awaken-core.exe" : "awaken-core";
+  const outputDir = join(root, "apps", "desktop", "resources", "bin", target);
+  const outputPath = join(outputDir, binName);
+
+  mkdirSync(outputDir, { recursive: true });
+
+  console.log(`[build-binary] building awaken-core for ${target} -> ${outputPath}`);
+  try {
+    execFileSync("go", ["build", "-o", outputPath, "./cmd/awaken-core"], {
+      cwd: root,
+      env: {
+        ...process.env,
+        GOOS: goOS(platform),
+        GOARCH: goArch(arch),
+      },
+      stdio: "inherit",
+    });
+  } catch (err) {
+    console.error("[build-binary] failed to build awaken-core:", err.message);
+    process.exit(1);
+  }
+  console.log(`[build-binary] done: ${outputPath}`);
+}

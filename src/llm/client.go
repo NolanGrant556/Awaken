@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -42,9 +43,18 @@ func smartProxy(req *http.Request) (*url.URL, error) {
 
 // LoadConfig 从 .env 和 config.toml 加载配置。
 // .env 主要承载 LLM_API_KEY；config.toml 承载非敏感模型参数。
+// 当设置了 AWAKEN_CONFIG_DIR 环境变量时，从该目录读取配置文件；
+// 否则从当前工作目录读取（向后兼容）。
 func LoadConfig() Config {
-	loadEnvFile()
-	fileCfg := loadConfigFile("config.toml")
+	configDir := os.Getenv("AWAKEN_CONFIG_DIR")
+	envPath := ".env"
+	configPath := "config.toml"
+	if configDir != "" {
+		envPath = filepath.Join(configDir, ".env")
+		configPath = filepath.Join(configDir, "config.toml")
+	}
+	loadEnvFile(envPath)
+	fileCfg := loadConfigFile(configPath)
 
 	apiKey := os.Getenv("LLM_API_KEY")
 	baseURL := firstNonEmpty(fileCfg.LLM.BaseURL, os.Getenv("LLM_BASE_URL"))
@@ -78,8 +88,8 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func loadEnvFile() {
-	file, err := os.Open(".env")
+func loadEnvFile(path string) {
+	file, err := os.Open(path)
 	if err != nil {
 		return
 	}
@@ -98,6 +108,13 @@ func loadEnvFile() {
 
 		value = strings.TrimPrefix(value, `"`)
 		value = strings.TrimSuffix(value, `"`)
+
+		// An empty value in .env (e.g. `LLM_API_KEY=`) must not clobber a
+		// non-empty value already present in the process environment (such as a
+		// real key injected by the parent process). Skip in that case.
+		if value == "" && os.Getenv(key) != "" {
+			continue
+		}
 
 		os.Setenv(key, value)
 	}

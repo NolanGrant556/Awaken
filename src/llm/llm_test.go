@@ -3,15 +3,17 @@ package llm
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
 func TestLoadConfig(t *testing.T) {
-	os.Unsetenv("LLM_API_KEY")
-	os.Unsetenv("LLM_BASE_URL")
-	os.Unsetenv("LLM_MODEL_ID")
-	os.Unsetenv("LLM_PROTOCOL")
-	os.Unsetenv("LLM_AUTH_SCHEME")
+	t.Setenv("AWAKEN_CONFIG_DIR", "")
+	t.Setenv("LLM_API_KEY", "")
+	t.Setenv("LLM_BASE_URL", "")
+	t.Setenv("LLM_MODEL_ID", "")
+	t.Setenv("LLM_PROTOCOL", "")
+	t.Setenv("LLM_AUTH_SCHEME", "")
 
 	cfg := LoadConfig()
 
@@ -27,18 +29,12 @@ func TestLoadConfig(t *testing.T) {
 }
 
 func TestLoadConfigWithEnv(t *testing.T) {
-	os.Setenv("LLM_API_KEY", "test-key")
-	os.Setenv("LLM_BASE_URL", "https://custom.api.com/v1")
-	os.Setenv("LLM_MODEL_ID", "test-model")
-	os.Setenv("LLM_PROTOCOL", "openai_chat")
-	os.Setenv("LLM_AUTH_SCHEME", "bearer")
-	defer func() {
-		os.Unsetenv("LLM_API_KEY")
-		os.Unsetenv("LLM_BASE_URL")
-		os.Unsetenv("LLM_MODEL_ID")
-		os.Unsetenv("LLM_PROTOCOL")
-		os.Unsetenv("LLM_AUTH_SCHEME")
-	}()
+	t.Setenv("AWAKEN_CONFIG_DIR", "")
+	t.Setenv("LLM_API_KEY", "test-key")
+	t.Setenv("LLM_BASE_URL", "https://custom.api.com/v1")
+	t.Setenv("LLM_MODEL_ID", "test-model")
+	t.Setenv("LLM_PROTOCOL", "openai_chat")
+	t.Setenv("LLM_AUTH_SCHEME", "bearer")
 
 	cfg := LoadConfig()
 
@@ -60,6 +56,7 @@ func TestLoadConfigWithEnv(t *testing.T) {
 }
 
 func TestLoadConfigUsesConfigTOMLForNonSecrets(t *testing.T) {
+	t.Setenv("AWAKEN_CONFIG_DIR", "")
 	originalDir, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("failed to get cwd: %v", err)
@@ -116,6 +113,60 @@ max_output_tokens = 8192
 	}
 	if cfg.MaxTokens != 8192 {
 		t.Fatalf("expected max output tokens from config.toml, got %d", cfg.MaxTokens)
+	}
+}
+
+func TestLoadConfigFromConfigDir(t *testing.T) {
+	// Clear LLM env vars so the config dir files are the source of truth.
+	// t.Setenv restores the original values (including unset) after the test,
+	// so a real LLM_API_KEY from the parent process is not leaked away for
+	// later smoke tests in the same process.
+	t.Setenv("LLM_API_KEY", "")
+	t.Setenv("LLM_BASE_URL", "")
+	t.Setenv("LLM_MODEL_ID", "")
+	t.Setenv("LLM_PROTOCOL", "")
+	t.Setenv("LLM_AUTH_SCHEME", "")
+
+	tmpDir := t.TempDir()
+	t.Setenv("AWAKEN_CONFIG_DIR", tmpDir)
+
+	if err := os.WriteFile(filepath.Join(tmpDir, ".env"), []byte("LLM_API_KEY=test-key-from-dir\n"), 0644); err != nil {
+		t.Fatalf("failed to write .env: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "config.toml"), []byte("[llm]\nbase_url = \"https://example.com/v1\"\nmodel_id = \"test-model\"\n"), 0644); err != nil {
+		t.Fatalf("failed to write config.toml: %v", err)
+	}
+
+	cfg := LoadConfig()
+
+	if cfg.APIKey != "test-key-from-dir" {
+		t.Errorf("expected APIKey from config dir .env, got %q", cfg.APIKey)
+	}
+	if cfg.BaseURL != "https://example.com/v1" {
+		t.Errorf("expected BaseURL from config dir config.toml, got %q", cfg.BaseURL)
+	}
+	if cfg.Model != "test-model" {
+		t.Errorf("expected Model from config dir config.toml, got %q", cfg.Model)
+	}
+}
+
+func TestLoadConfigPreservesParentEnvWhenDotEnvEmpty(t *testing.T) {
+	// Simulate a real key injected by the parent process.
+	t.Setenv("LLM_API_KEY", "real-key")
+
+	tmpDir := t.TempDir()
+	t.Setenv("AWAKEN_CONFIG_DIR", tmpDir)
+
+	// The .env template ships an empty LLM_API_KEY= placeholder; it must not
+	// clobber the real key from the parent environment.
+	if err := os.WriteFile(filepath.Join(tmpDir, ".env"), []byte("LLM_API_KEY=\n"), 0644); err != nil {
+		t.Fatalf("failed to write .env: %v", err)
+	}
+
+	cfg := LoadConfig()
+
+	if cfg.APIKey != "real-key" {
+		t.Errorf("expected parent env key to be preserved, got %q", cfg.APIKey)
 	}
 }
 

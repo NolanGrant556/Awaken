@@ -24,6 +24,7 @@ packages/*/.vite/
 packages/*/*.tsbuildinfo
 apps/*/node_modules/
 apps/*/dist/
+apps/*/dist-electron/
 apps/*/.vite/
 apps/*/*.tsbuildinfo
 
@@ -40,6 +41,9 @@ test-*.go
 # CLI binary
 /awaken
 /awaken-core
+
+# Desktop bundled awaken-core binaries
+apps/desktop/resources/bin/
 
 # macOS
 .DS_Store

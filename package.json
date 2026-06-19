@@ -11,6 +11,7 @@
     "typecheck:ui": "npm --workspace @awaken/ui run typecheck",
     "dev:desktop": "npm run build:ui && npm --workspace @awaken/desktop run dev",
     "build:desktop": "npm run build:ui && npm --workspace @awaken/desktop run build",
+    "build:binary": "node scripts/build-binary.mjs",
     "typecheck:desktop": "npm run build:ui && npm --workspace @awaken/desktop run typecheck"
   }
 }

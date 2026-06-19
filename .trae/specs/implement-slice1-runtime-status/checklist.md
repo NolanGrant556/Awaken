@@ -1,8 +1,8 @@
-- [ ] 不开任何额外终端，`npm run dev:desktop` 可以打开 Desktop 并完成一次真实 run
-- [ ] 不开任何额外终端，`Awaken.app` 可以完成一次真实 run
-- [ ] 删除 Desktop override URL 产品分支
-- [ ] Desktop UI 不显示 runtime 来源
-- [ ] README 不再要求手动启动 `awaken-core`
-- [ ] runtime 启动失败时 Desktop 不白屏，有可读恢复提示
-- [ ] 退出 Desktop 后没有残留 `awaken-core` 进程
-- [ ] 手动 runtime 调试入口只保留在 runtime 开发文档中
+- [x] 不开任何额外终端，`npm run dev:desktop` 可以打开 Desktop 并完成一次真实 run
+- [x] 不开任何额外终端，`Awaken.app` 可以完成一次真实 run
+- [x] 删除 Desktop override URL 产品分支
+- [x] Desktop UI 不显示 runtime 来源
+- [x] README 不再要求手动启动 `awaken-core`
+- [x] runtime 启动失败时 Desktop 不白屏，有可读恢复提示
+- [x] 退出 Desktop 后没有残留 `awaken-core` 进程
+- [x] 手动 runtime 调试入口只保留在 runtime 开发文档中

@@ -61,6 +61,14 @@ npm run dev:desktop
 - 启动 Vite renderer（`127.0.0.1:5174`）
 - 启动 Electron，并通过 `window.awaken` 走桌面 bridge
 
+## 发布前验收
+
+```bash
+npm run acceptance:desktop-hardening
+```
+
+这个 gate 会确保当前平台 runtime binary 存在，跑 Desktop typecheck、Desktop unit tests、Go runtime/server tests、真实 LLM smoke，并完成 packaged Desktop build。最后仍需实际打开 dev Desktop 和 `Awaken.app` 各完成一次真实 run，作为发布证据。
+
 ## 验收边界
 
 - Desktop 消费以下 runtime endpoints：

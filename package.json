@@ -12,6 +12,7 @@
     "dev:desktop": "npm run build:ui && node scripts/ensure-desktop-runtime.mjs && npm --workspace @awaken/desktop run dev",
     "build:desktop": "npm run build:ui && npm run build:binary && npm --workspace @awaken/desktop run build",
     "build:binary": "node scripts/build-binary.mjs",
-    "typecheck:desktop": "npm run build:ui && npm --workspace @awaken/desktop run typecheck"
+    "typecheck:desktop": "npm run build:ui && npm --workspace @awaken/desktop run typecheck",
+    "acceptance:desktop-hardening": "node scripts/accept-desktop-hardening.mjs"
   }
 }

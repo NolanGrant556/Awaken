@@ -52,15 +52,26 @@ func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 
 	run, err := h.runService.StartRun(req)
 	if err != nil {
-		if errors.Is(err, awruntime.ErrInvalidInput) {
+		switch {
+		case errors.Is(err, awruntime.ErrThreadNotFound):
+			writeErrorJSON(w, http.StatusNotFound, "THREAD_NOT_FOUND", err.Error())
+		case errors.Is(err, awruntime.ErrThreadWorkspaceMismatch):
+			writeErrorJSON(w, http.StatusBadRequest, "THREAD_WORKSPACE_MISMATCH", err.Error())
+		case errors.Is(err, awruntime.ErrThreadBusy):
+			writeErrorJSON(w, http.StatusConflict, "THREAD_BUSY", err.Error())
+		case errors.Is(err, awruntime.ErrInvalidInput):
 			writeErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
-			return
+		default:
+			writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to start run")
 		}
-		writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to start run")
 		return
 	}
 
 	writeJSON(w, http.StatusCreated, run)
+}
+
+func (h runHandlers) handleListThreads(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.runService.ListThreads())
 }
 
 func (h runHandlers) handleGetRun(w http.ResponseWriter, r *http.Request) {

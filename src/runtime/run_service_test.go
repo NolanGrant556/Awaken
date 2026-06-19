@@ -3,6 +3,9 @@ package runtime
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,7 +15,7 @@ import (
 func TestRunServiceReplaysHistoryAndStreamsLiveEvents(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{})
-	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextMessageStartedEventType, MessageID: "msg-1", Role: "assistant"})
@@ -73,7 +76,7 @@ func TestRunServiceReplaysHistoryAndStreamsLiveEvents(t *testing.T) {
 
 func TestRunServiceCancelSuppressesRunErrorAndEmitsCancelled(t *testing.T) {
 	started := make(chan struct{})
-	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			close(started)
@@ -136,7 +139,7 @@ func TestRunServiceCancelSuppressesRunErrorAndEmitsCancelled(t *testing.T) {
 }
 
 func TestRunServiceCompletesWhenExecutorReturnsWithoutTerminalEvent(t *testing.T) {
-	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			return "done without explicit terminal event", nil
@@ -177,7 +180,7 @@ func TestRunServiceCompletesWhenExecutorReturnsWithoutTerminalEvent(t *testing.T
 
 func TestRunServiceCancelWinsOverLateSuccessfulReturn(t *testing.T) {
 	started := make(chan struct{})
-	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			close(started)
@@ -235,7 +238,7 @@ func TestRunServiceCancelWinsOverLateSuccessfulReturn(t *testing.T) {
 
 func TestRunServiceResolveApprovalUnblocksExecutorAndReplaysEvents(t *testing.T) {
 	approvalReady := make(chan struct{})
-	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			awaiter, ok := sink.(agentcore.ApprovalAwaiter)
@@ -337,7 +340,7 @@ func TestRunServiceResolveApprovalUnblocksExecutorAndReplaysEvents(t *testing.T)
 
 func TestResolveApprovalDuplicateReturnsNotFound(t *testing.T) {
 	approvalReady := make(chan struct{})
-	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			awaiter, ok := sink.(agentcore.ApprovalAwaiter)
@@ -378,7 +381,7 @@ func TestResolveApprovalDuplicateReturnsNotFound(t *testing.T) {
 
 func TestResolveApprovalUnknownIDReturnsNotFound(t *testing.T) {
 	approvalReady := make(chan struct{})
-	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			awaiter, ok := sink.(agentcore.ApprovalAwaiter)
@@ -415,7 +418,7 @@ func TestResolveApprovalUnknownIDReturnsNotFound(t *testing.T) {
 
 func TestResolveApprovalRejectedRestoresRunningAndEmitsResolved(t *testing.T) {
 	approvalReady := make(chan struct{})
-	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			awaiter, ok := sink.(agentcore.ApprovalAwaiter)
@@ -543,7 +546,7 @@ func TestResolveApprovalRejectedRestoresRunningAndEmitsResolved(t *testing.T) {
 
 func TestResolveApprovalDuplicateRejectedReturnsNotFound(t *testing.T) {
 	approvalReady := make(chan struct{})
-	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			awaiter, ok := sink.(agentcore.ApprovalAwaiter)
@@ -583,7 +586,7 @@ func TestResolveApprovalDuplicateRejectedReturnsNotFound(t *testing.T) {
 }
 
 func TestRunServiceValidatesInputAndMissingRun(t *testing.T) {
-	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			return "", errors.New("should not run")
 		})
@@ -605,18 +608,23 @@ func TestRunServiceValidatesInputAndMissingRun(t *testing.T) {
 
 func TestStartRunValidWorkspaceStartsRun(t *testing.T) {
 	root := t.TempDir()
-	service := NewRunService(func(workspace WorkspaceConfig) Executor {
-		if workspace.WorkspaceRoot != root {
-			t.Fatalf("expected workspace root %q, got %q", root, workspace.WorkspaceRoot)
-		}
-		if len(workspace.WritableRoots) != 1 || workspace.WritableRoots[0] != root {
-			t.Fatalf("expected writable roots [%q], got %v", root, workspace.WritableRoots)
-		}
-		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
-			return "done", nil
-		})
-	})
+	service := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			if workspace.WorkspaceRoot != root {
+				t.Fatalf("expected workspace root %q, got %q", root, workspace.WorkspaceRoot)
+			}
+			if len(workspace.WritableRoots) != 1 || workspace.WritableRoots[0] != root {
+				t.Fatalf("expected writable roots [%q], got %v", root, workspace.WritableRoots)
+			}
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+				return "done", nil
+			})
+		},
+	)
 
 	run, err := service.StartRun(StartRunRequest{Input: "hello", Workspace: WorkspaceConfig{WorkspaceRoot: root}})
 	if err != nil {
@@ -628,7 +636,7 @@ func TestStartRunValidWorkspaceStartsRun(t *testing.T) {
 }
 
 func TestStartRunEmptyWorkspaceReturnsInvalidInput(t *testing.T) {
-	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			return "done", nil
 		})
@@ -640,7 +648,7 @@ func TestStartRunEmptyWorkspaceReturnsInvalidInput(t *testing.T) {
 }
 
 func TestStartRunNonAbsoluteWorkspaceReturnsInvalidInput(t *testing.T) {
-	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			return "done", nil
 		})
@@ -653,7 +661,7 @@ func TestStartRunNonAbsoluteWorkspaceReturnsInvalidInput(t *testing.T) {
 
 func TestStartRunOmittedWritableRootsDefaultsToWorkspaceRoot(t *testing.T) {
 	root := t.TempDir()
-	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			return "done", nil
 		})
@@ -672,7 +680,7 @@ func TestStartRunOmittedWritableRootsDefaultsToWorkspaceRoot(t *testing.T) {
 // run snapshot and that GetRun on a missing run returns ErrRunNotFound.
 func TestRunServiceGetRunReturnsSnapshot(t *testing.T) {
 	started := make(chan struct{})
-	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			close(started)
@@ -704,7 +712,7 @@ func TestRunServiceGetRunReturnsSnapshot(t *testing.T) {
 }
 
 func TestRunServiceGetRunMissingReturnsNotFound(t *testing.T) {
-	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			return "done", nil
 		})
@@ -721,7 +729,7 @@ func TestRunServiceGetRunMissingReturnsNotFound(t *testing.T) {
 func TestRunServiceSubscribeAfterSeqFiltersHistory(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{})
-	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextMessageStartedEventType, MessageID: "msg-1", Role: "assistant"})
@@ -802,7 +810,7 @@ func TestRunServiceSubscribeAfterSeqFiltersHistory(t *testing.T) {
 func TestRunServiceSubscribeAfterSeqZeroReplaysAllHistory(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{})
-	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextDeltaEventType, MessageID: "msg-1", Role: "assistant", Delta: "hi"})
@@ -861,4 +869,362 @@ func TestRunServiceSubscribeAfterSeqZeroReplaysAllHistory(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("run did not reach finished state")
+}
+
+// TestStartRunWithoutThreadIDCreatesNewThread verifies that StartRun without a
+// thread_id creates a new thread and stores it in the threads map.
+func TestStartRunWithoutThreadIDCreatesNewThread(t *testing.T) {
+	root := t.TempDir()
+
+	var agentCreateCount int
+	service := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			agentCreateCount++
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+				return "done", nil
+			})
+		},
+	)
+
+	run, err := service.StartRun(StartRunRequest{Input: "hello", Workspace: WorkspaceConfig{WorkspaceRoot: root}})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	if run.ThreadID == "" {
+		t.Fatalf("expected non-empty thread_id, got empty")
+	}
+	if agentCreateCount != 1 {
+		t.Fatalf("expected newAgent to be called once, got %d", agentCreateCount)
+	}
+	waitForRunTerminal(t, service, run.RunID)
+
+	// Verify the thread is stored and accessible by starting a second run with the thread_id.
+	secondRun, err := service.StartRun(StartRunRequest{
+		Input:     "world",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		ThreadID:  run.ThreadID,
+	})
+	if err != nil {
+		t.Fatalf("second StartRun with thread_id returned error: %v", err)
+	}
+	if secondRun.ThreadID != run.ThreadID {
+		t.Fatalf("expected second run to reuse thread_id %q, got %q", run.ThreadID, secondRun.ThreadID)
+	}
+	waitForRunTerminal(t, service, secondRun.RunID)
+	// Agent should not be created again for the second run.
+	if agentCreateCount != 1 {
+		t.Fatalf("expected newAgent to still be called once after reuse, got %d", agentCreateCount)
+	}
+}
+
+// TestStartRunWithValidThreadIDReusesAgent verifies that StartRun with a valid
+// thread_id reuses the same Agent instance across runs.
+func TestStartRunWithValidThreadIDReusesAgent(t *testing.T) {
+	root := t.TempDir()
+
+	var (
+		mu               sync.Mutex
+		agentCreateCount int
+		createdAgent     *agentcore.Agent
+		executorAgents   []*agentcore.Agent
+	)
+
+	service := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			mu.Lock()
+			defer mu.Unlock()
+			agentCreateCount++
+			createdAgent = agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}, threadID)
+			return createdAgent
+		},
+		func(agent *agentcore.Agent) Executor {
+			mu.Lock()
+			executorAgents = append(executorAgents, agent)
+			mu.Unlock()
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+				return "done", nil
+			})
+		},
+	)
+
+	// First run: creates a new thread and Agent.
+	firstRun, err := service.StartRun(StartRunRequest{Input: "hello", Workspace: WorkspaceConfig{WorkspaceRoot: root}})
+	if err != nil {
+		t.Fatalf("first StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, firstRun.RunID)
+
+	// Second run: reuses the same thread and Agent.
+	secondRun, err := service.StartRun(StartRunRequest{
+		Input:     "world",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		ThreadID:  firstRun.ThreadID,
+	})
+	if err != nil {
+		t.Fatalf("second StartRun with thread_id returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, secondRun.RunID)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if agentCreateCount != 1 {
+		t.Fatalf("expected newAgent to be called once, got %d", agentCreateCount)
+	}
+	if len(executorAgents) != 2 {
+		t.Fatalf("expected 2 executor agent captures, got %d", len(executorAgents))
+	}
+	if executorAgents[0] != executorAgents[1] {
+		t.Fatalf("expected both runs to receive the same Agent instance")
+	}
+	if executorAgents[0] != createdAgent {
+		t.Fatalf("expected executor to receive the agent created by newAgent")
+	}
+}
+
+// TestStartRunWithUnknownThreadIDReturnsErrThreadNotFound verifies that
+// StartRun with an unknown thread_id returns ErrThreadNotFound.
+func TestStartRunWithUnknownThreadIDReturnsErrThreadNotFound(t *testing.T) {
+	root := t.TempDir()
+	service := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return "done", nil
+			})
+		},
+	)
+
+	_, err := service.StartRun(StartRunRequest{
+		Input:     "hello",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		ThreadID:  "thread_unknown_123",
+	})
+	if !errors.Is(err, ErrThreadNotFound) {
+		t.Fatalf("expected ErrThreadNotFound, got %v", err)
+	}
+}
+
+// TestStartRunWithMismatchedWorkspaceReturnsErrThreadWorkspaceMismatch
+// verifies that StartRun with a thread_id from a different workspace returns
+// ErrThreadWorkspaceMismatch.
+func TestStartRunWithMismatchedWorkspaceReturnsErrThreadWorkspaceMismatch(t *testing.T) {
+	rootA := t.TempDir()
+	rootB := t.TempDir()
+
+	service := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+				return "done", nil
+			})
+		},
+	)
+
+	// First run: creates a thread with workspace A.
+	firstRun, err := service.StartRun(StartRunRequest{Input: "hello", Workspace: WorkspaceConfig{WorkspaceRoot: rootA}})
+	if err != nil {
+		t.Fatalf("first StartRun returned error: %v", err)
+	}
+
+	// Second run: tries to reuse the thread with workspace B.
+	_, err = service.StartRun(StartRunRequest{
+		Input:     "world",
+		Workspace: WorkspaceConfig{WorkspaceRoot: rootB},
+		ThreadID:  firstRun.ThreadID,
+	})
+	if !errors.Is(err, ErrThreadWorkspaceMismatch) {
+		t.Fatalf("expected ErrThreadWorkspaceMismatch, got %v", err)
+	}
+}
+
+func TestStartRunPassesRuntimeThreadIDToNewAgent(t *testing.T) {
+	root := t.TempDir()
+	var capturedThreadID string
+	service := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			capturedThreadID = threadID
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+				return "done", nil
+			})
+		},
+	)
+
+	run, err := service.StartRun(StartRunRequest{Input: "hello", Workspace: WorkspaceConfig{WorkspaceRoot: root}})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	if capturedThreadID != run.ThreadID {
+		t.Fatalf("expected newAgent to receive runtime thread_id %q, got %q", run.ThreadID, capturedThreadID)
+	}
+}
+
+func TestStartRunWithActiveThreadReturnsErrThreadBusy(t *testing.T) {
+	root := t.TempDir()
+	started := make(chan struct{})
+	var startedOnce sync.Once
+	release := make(chan struct{})
+	service := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+				startedOnce.Do(func() { close(started) })
+				<-release
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+				return "done", nil
+			})
+		},
+	)
+
+	firstRun, err := service.StartRun(StartRunRequest{Input: "hello", Workspace: WorkspaceConfig{WorkspaceRoot: root}})
+	if err != nil {
+		t.Fatalf("first StartRun returned error: %v", err)
+	}
+	<-started
+
+	_, err = service.StartRun(StartRunRequest{
+		Input:     "second",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		ThreadID:  firstRun.ThreadID,
+	})
+	if !errors.Is(err, ErrThreadBusy) {
+		t.Fatalf("expected ErrThreadBusy, got %v", err)
+	}
+
+	close(release)
+	waitForRunTerminal(t, service, firstRun.RunID)
+	thirdRun, err := service.StartRun(StartRunRequest{
+		Input:     "third",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		ThreadID:  firstRun.ThreadID,
+	})
+	if err != nil {
+		t.Fatalf("expected thread reuse after first run completed, got %v", err)
+	}
+	if thirdRun.ThreadID != firstRun.ThreadID {
+		t.Fatalf("expected third run to reuse thread %q, got %q", firstRun.ThreadID, thirdRun.ThreadID)
+	}
+}
+
+func TestStartRunWithSameRootDifferentWritableRootsReturnsWorkspaceMismatch(t *testing.T) {
+	root := t.TempDir()
+	child := filepath.Join(root, "child")
+	if err := os.Mkdir(child, 0755); err != nil {
+		t.Fatalf("failed to create child dir: %v", err)
+	}
+	service := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+				return "done", nil
+			})
+		},
+	)
+
+	firstRun, err := service.StartRun(StartRunRequest{
+		Input:     "hello",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root, WritableRoots: []string{root}},
+	})
+	if err != nil {
+		t.Fatalf("first StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, firstRun.RunID)
+
+	_, err = service.StartRun(StartRunRequest{
+		Input:     "world",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root, WritableRoots: []string{child}},
+		ThreadID:  firstRun.ThreadID,
+	})
+	if !errors.Is(err, ErrThreadWorkspaceMismatch) {
+		t.Fatalf("expected ErrThreadWorkspaceMismatch, got %v", err)
+	}
+}
+
+func TestListThreadsReturnsRuntimeThreads(t *testing.T) {
+	root := t.TempDir()
+	service := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+				return "done", nil
+			})
+		},
+	)
+
+	run, err := service.StartRun(StartRunRequest{Input: "hello thread", Workspace: WorkspaceConfig{WorkspaceRoot: root}})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, run.RunID)
+
+	threads := service.ListThreads()
+	if len(threads) != 1 {
+		t.Fatalf("expected one thread, got %d", len(threads))
+	}
+	if threads[0].ThreadID != run.ThreadID {
+		t.Fatalf("expected thread id %q, got %q", run.ThreadID, threads[0].ThreadID)
+	}
+	if threads[0].RunID != run.RunID {
+		t.Fatalf("expected latest run id %q, got %q", run.RunID, threads[0].RunID)
+	}
+	if threads[0].ActiveRunID != "" {
+		t.Fatalf("expected inactive terminal thread, got active_run_id %q", threads[0].ActiveRunID)
+	}
+	if threads[0].Label != "hello thread" {
+		t.Fatalf("expected thread label from first input, got %q", threads[0].Label)
+	}
+}
+
+func waitForRunTerminal(t *testing.T, service *RunService, runID string) Run {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		run, err := service.GetRun(runID)
+		if err != nil {
+			t.Fatalf("GetRun returned error: %v", err)
+		}
+		if isTerminalStatus(run.Status) {
+			return run
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("run %s did not reach terminal status", runID)
+	return Run{}
 }

@@ -18,6 +18,7 @@ func NewRouter(runService *awruntime.RunService, infoProvider RuntimeInfoProvide
 	})
 	if runService != nil {
 		handlers := runHandlers{runService: runService}
+		mux.HandleFunc("GET /v1/threads", handlers.handleListThreads)
 		mux.HandleFunc("POST /v1/runs", handlers.handleCreateRun)
 		mux.HandleFunc("GET /v1/runs/{run_id}", handlers.handleGetRun)
 		mux.HandleFunc("GET /v1/runs/{run_id}/events", handlers.handleRunEvents)

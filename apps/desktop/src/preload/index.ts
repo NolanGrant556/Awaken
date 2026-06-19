@@ -7,6 +7,7 @@ import {
   type RunStreamHandlers,
   type RuntimeInfo,
   type RuntimeRun,
+  type RuntimeThread,
   type StartRunRequest,
   type WorkspacePickResult,
   type WorkspaceValidationResult,
@@ -54,6 +55,8 @@ const bridge: AwakenBridge = {
   runtimeBaseUrl,
   getRun: (runId: string) =>
     ipcRenderer.invoke("awaken:get-run", runId) as Promise<RuntimeRun>,
+  listThreads: () =>
+    ipcRenderer.invoke("awaken:list-threads") as Promise<RuntimeThread[]>,
   startRun: (request: StartRunRequest) =>
     ipcRenderer.invoke("awaken:start-run", request) as Promise<RuntimeRun>,
   cancelRun: (runId: string) =>

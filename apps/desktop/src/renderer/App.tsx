@@ -76,6 +76,7 @@ export function App() {
   const unsubscribeRef = useRef<null | (() => void)>(null);
   const terminalSeenRef = useRef(false);
   const resolvingApprovalIdRef = useRef<string | null>(null);
+  const threadLoadSeqRef = useRef(0);
   const runtimeClient = runtimeClientRef.current;
 
   const [runtimeState, dispatch] = useReducer(
@@ -138,6 +139,24 @@ export function App() {
       setWorkspacePath(runtimeInfo.defaultWorkspace);
     }
   }, [runtimeInfo, workspacePath]);
+
+  async function refreshThreads(): Promise<void> {
+    try {
+      const threads = await runtimeClient.listThreads();
+      dispatch({ type: "run/threadsLoaded", threads });
+    } catch {
+      // Thread listing is best-effort; runtime reachability is already surfaced
+      // by the runtime info poll.
+    }
+  }
+
+  useEffect(() => {
+    if (!runtimeInfo) {
+      return;
+    }
+    void refreshThreads();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runtimeInfo, runtimeClient]);
 
   useEffect(() => {
     const persistedRunId = localStorage.getItem("awaken:runId");
@@ -204,21 +223,11 @@ export function App() {
     { id: "approvals", label: "Approvals", badge: runtimeState.approvals.length || undefined },
   ];
 
-  const conversations: ConversationItem[] = runtimeState.prompt
-    ? [
-        {
-          id: runtimeState.runId || "latest-run",
-          label: runtimeState.prompt,
-          timeLabel: runtimeState.phase === "done" ? "done" : "now",
-        },
-      ]
-    : [
-        {
-          id: "phase-4-placeholder",
-          label: "Phase 4 runtime approvals and artifacts",
-          timeLabel: "ready",
-        },
-      ];
+  const conversations: ConversationItem[] = runtimeState.threads.map((thread) => ({
+    id: thread.threadId,
+    label: thread.label,
+    timeLabel: thread.runId === runtimeState.runId ? "active" : "earlier",
+  }));
 
   function createSubscribeHandlers(): SubscribeHandlers {
     return {
@@ -282,6 +291,7 @@ export function App() {
 
     unsubscribeRef.current?.();
     unsubscribeRef.current = null;
+    threadLoadSeqRef.current += 1;
     terminalSeenRef.current = false;
     setNotice(null);
     setResolvingApprovalId(null);
@@ -292,6 +302,7 @@ export function App() {
     try {
       const startRunRequest: StartRunRequest = {
         input: prompt,
+        threadId: runtimeState.activeThreadId || undefined,
         workspace: {
           workspaceRoot,
           writableRoots: workspaceRoot ? [workspaceRoot] : [],
@@ -304,6 +315,13 @@ export function App() {
       };
       const run = await runtimeClient.startRun(startRunRequest);
       dispatch({ type: "run/created", run });
+      dispatch({
+        type: "run/threadAdded",
+        threadId: run.threadId,
+        label: prompt,
+        runId: run.runId,
+      });
+      void refreshThreads();
       localStorage.setItem("awaken:runId", run.runId);
       const unsubscribe = await runtimeClient.subscribeRun(
         run.runId,
@@ -314,6 +332,54 @@ export function App() {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to create run";
       dispatch({ type: "run/createFailed", message });
+    }
+  }
+
+  async function handleSelectConversation(threadId: string): Promise<void> {
+    if (threadId === runtimeState.activeThreadId) {
+      return;
+    }
+
+    unsubscribeRef.current?.();
+    unsubscribeRef.current = null;
+    const loadSeq = threadLoadSeqRef.current + 1;
+    threadLoadSeqRef.current = loadSeq;
+    terminalSeenRef.current = false;
+    setNotice(null);
+    setResolvingApprovalId(null);
+    setResolvedApproval(null);
+    resolvingApprovalIdRef.current = null;
+    dispatch({ type: "run/threadSwitch", threadId });
+
+    const thread = runtimeState.threads.find((item) => item.threadId === threadId);
+    if (!thread?.runId) {
+      localStorage.removeItem("awaken:runId");
+      return;
+    }
+
+    try {
+      const run = await runtimeClient.getRun(thread.runId);
+      if (threadLoadSeqRef.current !== loadSeq) {
+        return;
+      }
+      dispatch({ type: "run/recovered", run });
+      if (run.status === "running" || run.status === "awaiting_approval" || run.status === "cancelling") {
+        localStorage.setItem("awaken:runId", run.runId);
+      } else {
+        localStorage.removeItem("awaken:runId");
+      }
+      const unsubscribe = await runtimeClient.subscribeRun(
+        run.runId,
+        createSubscribeHandlers(),
+        0,
+      );
+      if (threadLoadSeqRef.current !== loadSeq) {
+        unsubscribe();
+        return;
+      }
+      unsubscribeRef.current = unsubscribe;
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to load thread");
     }
   }
 
@@ -399,7 +465,7 @@ export function App() {
               navItems={navItems}
               activeNavId={activeNavId}
               conversations={conversations}
-              activeConversationId={conversations[0]?.id}
+              activeConversationId={runtimeState.activeThreadId}
               projects={projects}
               activeProjectId="desktop-phase-4"
               defaultExpandedIds={["awaken"]}
@@ -407,9 +473,13 @@ export function App() {
               profileAvatarFallback="AW"
               platform={platform}
               onSelectNav={setActiveNavId}
+              onSelectConversation={(id) => {
+                void handleSelectConversation(id);
+              }}
               onNewTask={() => {
                 unsubscribeRef.current?.();
                 unsubscribeRef.current = null;
+                threadLoadSeqRef.current += 1;
                 setComposerValue("");
                 setNotice(null);
                 setResolvingApprovalId(null);

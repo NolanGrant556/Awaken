@@ -16,24 +16,26 @@ type Agent struct {
 
 func NewAgent(config AgentConfig) *Agent {
 	conv := context.NewConversation(nil)
-	reqBuilder := NewRequestBuilder(config)
+	return NewAgentWithConversationAndThreadID(config, conv, newAwakenID("thread"))
+}
 
-	return &Agent{
-		config:       config,
-		conversation: conv,
-		reqBuilder:   reqBuilder,
-		threadID:     newAwakenID("thread"),
-	}
+func NewAgentWithThreadID(config AgentConfig, threadID string) *Agent {
+	conv := context.NewConversation(nil)
+	return NewAgentWithConversationAndThreadID(config, conv, threadID)
 }
 
 func NewAgentWithConversation(config AgentConfig, conv *context.Conversation) *Agent {
+	return NewAgentWithConversationAndThreadID(config, conv, newAwakenID("thread"))
+}
+
+func NewAgentWithConversationAndThreadID(config AgentConfig, conv *context.Conversation, threadID string) *Agent {
 	reqBuilder := NewRequestBuilder(config)
 
 	return &Agent{
 		config:       config,
 		conversation: conv,
 		reqBuilder:   reqBuilder,
-		threadID:     newAwakenID("thread"),
+		threadID:     threadID,
 	}
 }
 

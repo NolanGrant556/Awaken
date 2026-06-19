@@ -159,7 +159,7 @@ func TestRuntimeInfoEndpointDoesNotLeakSecrets(t *testing.T) {
 func TestRunsEndpointsCreateReplayAndCancel(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{})
-	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
 		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextMessageStartedEventType, MessageID: "msg-1", Role: "assistant"})
@@ -245,7 +245,7 @@ func TestRunsEndpointsCreateReplayAndCancel(t *testing.T) {
 }
 
 func TestRunsEndpointsValidationAndNotFound(t *testing.T) {
-	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
 		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			return "", nil
 		})
@@ -310,7 +310,7 @@ func TestRunsEndpointsValidationAndNotFound(t *testing.T) {
 }
 
 func TestCreateRunEmptyInputReturnsInvalidInput(t *testing.T) {
-	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
 		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			return "", nil
 		})
@@ -351,6 +351,263 @@ func TestCreateRunEmptyInputReturnsInvalidInput(t *testing.T) {
 	}
 }
 
+func TestCreateRunWithUnknownThreadIDReturns404(t *testing.T) {
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			return "", nil
+		})
+	})
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello","thread_id":"unknown-thread","workspace":{"workspace_root":"/tmp"}}`))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 for unknown thread_id, got %d", resp.StatusCode)
+	}
+
+	var errResp errorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("expected JSON error response, got decode error: %v", err)
+	}
+	if errResp.Error != "THREAD_NOT_FOUND" {
+		t.Fatalf("expected THREAD_NOT_FOUND error code, got %q", errResp.Error)
+	}
+}
+
+func TestCreateRunWithValidThreadIDReusesThread(t *testing.T) {
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+			return "done", nil
+		})
+	})
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	// First run: no thread_id, server allocates one.
+	firstResp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello","workspace":{"workspace_root":"/tmp"}}`))
+	if err != nil {
+		t.Fatalf("POST /v1/runs (first) failed: %v", err)
+	}
+	defer firstResp.Body.Close()
+	if firstResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 from first run, got %d", firstResp.StatusCode)
+	}
+	var firstRun awruntime.Run
+	if err := json.NewDecoder(firstResp.Body).Decode(&firstRun); err != nil {
+		t.Fatalf("failed to decode first run response: %v", err)
+	}
+	if firstRun.ThreadID == "" {
+		t.Fatalf("expected non-empty thread_id on first run, got %+v", firstRun)
+	}
+	waitHTTPRunTerminal(t, ts.URL, firstRun.RunID)
+
+	// Second run: reuse the thread_id from the first run with the same workspace.
+	secondBody := fmt.Sprintf(`{"input":"follow up","thread_id":%q,"workspace":{"workspace_root":"/tmp"}}`, firstRun.ThreadID)
+	secondResp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(secondBody))
+	if err != nil {
+		t.Fatalf("POST /v1/runs (second) failed: %v", err)
+	}
+	defer secondResp.Body.Close()
+	if secondResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 from second run reusing thread_id, got %d", secondResp.StatusCode)
+	}
+	var secondRun awruntime.Run
+	if err := json.NewDecoder(secondResp.Body).Decode(&secondRun); err != nil {
+		t.Fatalf("failed to decode second run response: %v", err)
+	}
+	if secondRun.ThreadID != firstRun.ThreadID {
+		t.Fatalf("expected second run to reuse thread_id %q, got %q", firstRun.ThreadID, secondRun.ThreadID)
+	}
+	if secondRun.RunID == firstRun.RunID {
+		t.Fatalf("expected second run to have a new run_id, got duplicate %q", secondRun.RunID)
+	}
+}
+
+func TestCreateRunWithWorkspaceMismatchReturns400(t *testing.T) {
+	root := t.TempDir()
+	child := filepath.Join(root, "child")
+	if err := os.Mkdir(child, 0755); err != nil {
+		t.Fatalf("failed to create child dir: %v", err)
+	}
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+			return "done", nil
+		})
+	})
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	firstBody := fmt.Sprintf(`{"input":"hello","workspace":{"workspace_root":%q,"writable_roots":[%q]}}`, root, root)
+	firstResp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(firstBody))
+	if err != nil {
+		t.Fatalf("POST /v1/runs (first) failed: %v", err)
+	}
+	defer firstResp.Body.Close()
+	if firstResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 from first run, got %d", firstResp.StatusCode)
+	}
+	var firstRun awruntime.Run
+	if err := json.NewDecoder(firstResp.Body).Decode(&firstRun); err != nil {
+		t.Fatalf("failed to decode first run response: %v", err)
+	}
+	waitHTTPRunTerminal(t, ts.URL, firstRun.RunID)
+
+	secondBody := fmt.Sprintf(`{"input":"follow up","thread_id":%q,"workspace":{"workspace_root":%q,"writable_roots":[%q]}}`, firstRun.ThreadID, root, child)
+	secondResp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(secondBody))
+	if err != nil {
+		t.Fatalf("POST /v1/runs (second) failed: %v", err)
+	}
+	defer secondResp.Body.Close()
+	if secondResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for workspace mismatch, got %d", secondResp.StatusCode)
+	}
+	var errResp errorResponse
+	if err := json.NewDecoder(secondResp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("expected JSON error response, got decode error: %v", err)
+	}
+	if errResp.Error != "THREAD_WORKSPACE_MISMATCH" {
+		t.Fatalf("expected THREAD_WORKSPACE_MISMATCH error code, got %q", errResp.Error)
+	}
+}
+
+func TestCreateRunWithActiveThreadReturns409(t *testing.T) {
+	started := make(chan struct{})
+	var startedOnce sync.Once
+	release := make(chan struct{})
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			startedOnce.Do(func() { close(started) })
+			<-release
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+			return "done", nil
+		})
+	})
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	firstResp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello","workspace":{"workspace_root":"/tmp"}}`))
+	if err != nil {
+		t.Fatalf("POST /v1/runs (first) failed: %v", err)
+	}
+	defer firstResp.Body.Close()
+	if firstResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 from first run, got %d", firstResp.StatusCode)
+	}
+	var firstRun awruntime.Run
+	if err := json.NewDecoder(firstResp.Body).Decode(&firstRun); err != nil {
+		t.Fatalf("failed to decode first run response: %v", err)
+	}
+	<-started
+
+	secondBody := fmt.Sprintf(`{"input":"follow up","thread_id":%q,"workspace":{"workspace_root":"/tmp"}}`, firstRun.ThreadID)
+	secondResp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(secondBody))
+	if err != nil {
+		t.Fatalf("POST /v1/runs (second) failed: %v", err)
+	}
+	defer secondResp.Body.Close()
+	if secondResp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409 for active thread, got %d", secondResp.StatusCode)
+	}
+	var errResp errorResponse
+	if err := json.NewDecoder(secondResp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("expected JSON error response, got decode error: %v", err)
+	}
+	if errResp.Error != "THREAD_BUSY" {
+		t.Fatalf("expected THREAD_BUSY error code, got %q", errResp.Error)
+	}
+	close(release)
+	waitHTTPRunTerminal(t, ts.URL, firstRun.RunID)
+}
+
+func TestListThreadsEndpointReturnsRuntimeThreads(t *testing.T) {
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+			return "done", nil
+		})
+	})
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello list","workspace":{"workspace_root":"/tmp"}}`))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+	var created awruntime.Run
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode run response: %v", err)
+	}
+	waitHTTPRunTerminal(t, ts.URL, created.RunID)
+
+	listResp, err := http.Get(ts.URL + "/v1/threads")
+	if err != nil {
+		t.Fatalf("GET /v1/threads failed: %v", err)
+	}
+	defer listResp.Body.Close()
+	if listResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from /v1/threads, got %d", listResp.StatusCode)
+	}
+	var threads []awruntime.ThreadSnapshot
+	if err := json.NewDecoder(listResp.Body).Decode(&threads); err != nil {
+		t.Fatalf("failed to decode thread list: %v", err)
+	}
+	if len(threads) != 1 {
+		t.Fatalf("expected one thread, got %d", len(threads))
+	}
+	if threads[0].ThreadID != created.ThreadID {
+		t.Fatalf("expected thread id %q, got %q", created.ThreadID, threads[0].ThreadID)
+	}
+	if threads[0].RunID != created.RunID {
+		t.Fatalf("expected latest run id %q, got %q", created.RunID, threads[0].RunID)
+	}
+	if threads[0].Label != "hello list" {
+		t.Fatalf("expected label from first input, got %q", threads[0].Label)
+	}
+}
+
+func waitHTTPRunTerminal(t *testing.T, baseURL, runID string) awruntime.Run {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		getResp, err := http.Get(baseURL + "/v1/runs/" + runID)
+		if err != nil {
+			t.Fatalf("GET /v1/runs/{run_id} failed: %v", err)
+		}
+		var run awruntime.Run
+		err = json.NewDecoder(getResp.Body).Decode(&run)
+		getResp.Body.Close()
+		if err != nil {
+			t.Fatalf("failed to decode run response: %v", err)
+		}
+		switch run.Status {
+		case awruntime.RunStatusFinished, awruntime.RunStatusError, awruntime.RunStatusCancelled:
+			return run
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("run %s did not reach terminal status", runID)
+	return awruntime.Run{}
+}
+
 func TestMapRuntimeCancelledUsesAGUIRunErrorWithCancelCode(t *testing.T) {
 	events := mapRuntimeEvent(awruntime.Event{
 		Kind:     awruntime.EventKindRunCancelled,
@@ -372,7 +629,7 @@ func TestMapRuntimeCancelledUsesAGUIRunErrorWithCancelCode(t *testing.T) {
 
 func TestGetRunReturnsRunSnapshot(t *testing.T) {
 	started := make(chan struct{})
-	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
 		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			close(started)
@@ -427,7 +684,7 @@ func TestGetRunReturnsRunSnapshot(t *testing.T) {
 }
 
 func TestGetRunMissingReturns404(t *testing.T) {
-	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
 		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			return "", nil
 		})
@@ -454,7 +711,7 @@ func TestGetRunMissingReturns404(t *testing.T) {
 
 func TestRunEventsAfterSeqFiltersHistory(t *testing.T) {
 	finished := make(chan struct{})
-	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
 		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextMessageStartedEventType, MessageID: "msg-1", Role: "assistant"})
@@ -533,7 +790,7 @@ func TestRunEventsAfterSeqFiltersHistory(t *testing.T) {
 
 func TestSSEFrameIncludesIdLineWithSeq(t *testing.T) {
 	finished := make(chan struct{})
-	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
 		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
@@ -655,7 +912,7 @@ func fetchSSEEvents(t *testing.T, baseURL, runID, afterSeq string) []agui.Event 
 // seq values.
 func TestRunEventsMultiFrameSeqUnique(t *testing.T) {
 	finished := make(chan struct{})
-	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
 		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.ReasoningStartedEventType, MessageID: "reasoning-1"})
@@ -735,7 +992,7 @@ func TestRunEventsMultiFrameSeqUnique(t *testing.T) {
 // lose the second frame.
 func TestRunEventsAfterSeqReconnectMultiFrame(t *testing.T) {
 	finished := make(chan struct{})
-	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
 		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.ReasoningStartedEventType, MessageID: "reasoning-1"})
@@ -819,7 +1076,7 @@ func TestRunEventsAfterSeqReconnectMultiFrame(t *testing.T) {
 
 func TestResolveApprovalEndpointPublishesExtensionEvents(t *testing.T) {
 	approvalReady := make(chan struct{})
-	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
 		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			awaiter, ok := sink.(agentcore.ApprovalAwaiter)
@@ -924,7 +1181,7 @@ func TestResolveApprovalEndpointPublishesExtensionEvents(t *testing.T) {
 
 func TestResolveApprovalDuplicateHTTPReturnsNotFound(t *testing.T) {
 	approvalReady := make(chan struct{})
-	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
 		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			awaiter, ok := sink.(agentcore.ApprovalAwaiter)
@@ -995,7 +1252,7 @@ func TestResolveApprovalDuplicateHTTPReturnsNotFound(t *testing.T) {
 
 func TestResolveApprovalDuplicateRejectedHTTPReturnsNotFound(t *testing.T) {
 	approvalReady := make(chan struct{})
-	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
 		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			awaiter, ok := sink.(agentcore.ApprovalAwaiter)
@@ -1088,29 +1345,32 @@ func TestPlainQASmoke(t *testing.T) {
 		t.Skip("LLM_API_KEY not set")
 	}
 
-	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
-		agentCfg := agentcore.AgentConfig{
-			MaxThoughts: 5,
-			EntryPoint:  "awaken-core-smoke",
-			ModelConfig: agentcore.ModelConfig{
-				APIKey:      cfg.APIKey,
-				BaseURL:     cfg.BaseURL,
-				Model:       cfg.Model,
-				Temperature: cfg.Temperature,
-				MaxTokens:   cfg.MaxTokens,
-				AuthScheme:  cfg.AuthScheme,
-			},
-			Workspace: agentcore.WorkspaceConfig{
-				Root:          workspace.WorkspaceRoot,
-				WritableRoots: workspace.WritableRoots,
-			},
-		}
-
-		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-			agent := agentcore.NewAgent(agentCfg)
-			return agent.RunStreamWithEvents(ctx, input, nil, sink)
-		})
-	})
+	runService := awruntime.NewRunService(
+		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
+			agentCfg := agentcore.AgentConfig{
+				MaxThoughts: 5,
+				EntryPoint:  "awaken-core-smoke",
+				ModelConfig: agentcore.ModelConfig{
+					APIKey:      cfg.APIKey,
+					BaseURL:     cfg.BaseURL,
+					Model:       cfg.Model,
+					Temperature: cfg.Temperature,
+					MaxTokens:   cfg.MaxTokens,
+					AuthScheme:  cfg.AuthScheme,
+				},
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}
+			return agentcore.NewAgentWithThreadID(agentCfg, threadID)
+		},
+		func(agent *agentcore.Agent) awruntime.Executor {
+			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return agent.RunStreamWithEvents(ctx, input, nil, sink)
+			})
+		},
+	)
 
 	ts := httptest.NewServer(NewRouter(runService, nil))
 	defer ts.Close()
@@ -1228,29 +1488,32 @@ func TestReadOnlyFileSmoke(t *testing.T) {
 		t.Skip("LLM_API_KEY not set")
 	}
 
-	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
-		agentCfg := agentcore.AgentConfig{
-			MaxThoughts: 10,
-			EntryPoint:  "awaken-core-smoke",
-			ModelConfig: agentcore.ModelConfig{
-				APIKey:      cfg.APIKey,
-				BaseURL:     cfg.BaseURL,
-				Model:       cfg.Model,
-				Temperature: cfg.Temperature,
-				MaxTokens:   cfg.MaxTokens,
-				AuthScheme:  cfg.AuthScheme,
-			},
-			Workspace: agentcore.WorkspaceConfig{
-				Root:          workspace.WorkspaceRoot,
-				WritableRoots: workspace.WritableRoots,
-			},
-		}
-
-		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-			agent := agentcore.NewAgent(agentCfg)
-			return agent.RunStreamWithEvents(ctx, input, nil, sink)
-		})
-	})
+	runService := awruntime.NewRunService(
+		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
+			agentCfg := agentcore.AgentConfig{
+				MaxThoughts: 10,
+				EntryPoint:  "awaken-core-smoke",
+				ModelConfig: agentcore.ModelConfig{
+					APIKey:      cfg.APIKey,
+					BaseURL:     cfg.BaseURL,
+					Model:       cfg.Model,
+					Temperature: cfg.Temperature,
+					MaxTokens:   cfg.MaxTokens,
+					AuthScheme:  cfg.AuthScheme,
+				},
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}
+			return agentcore.NewAgentWithThreadID(agentCfg, threadID)
+		},
+		func(agent *agentcore.Agent) awruntime.Executor {
+			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return agent.RunStreamWithEvents(ctx, input, nil, sink)
+			})
+		},
+	)
 
 	ts := httptest.NewServer(NewRouter(runService, nil))
 	defer ts.Close()
@@ -1400,29 +1663,32 @@ func TestFileMutationApprovalSmoke(t *testing.T) {
 		t.Fatalf("failed to create note.md: %v", err)
 	}
 
-	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
-		agentCfg := agentcore.AgentConfig{
-			MaxThoughts: 10,
-			EntryPoint:  "awaken-core-smoke",
-			ModelConfig: agentcore.ModelConfig{
-				APIKey:      cfg.APIKey,
-				BaseURL:     cfg.BaseURL,
-				Model:       cfg.Model,
-				Temperature: cfg.Temperature,
-				MaxTokens:   cfg.MaxTokens,
-				AuthScheme:  cfg.AuthScheme,
-			},
-			Workspace: agentcore.WorkspaceConfig{
-				Root:          workspace.WorkspaceRoot,
-				WritableRoots: workspace.WritableRoots,
-			},
-		}
-
-		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-			agent := agentcore.NewAgent(agentCfg)
-			return agent.RunStreamWithEvents(ctx, input, nil, sink)
-		})
-	})
+	runService := awruntime.NewRunService(
+		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
+			agentCfg := agentcore.AgentConfig{
+				MaxThoughts: 10,
+				EntryPoint:  "awaken-core-smoke",
+				ModelConfig: agentcore.ModelConfig{
+					APIKey:      cfg.APIKey,
+					BaseURL:     cfg.BaseURL,
+					Model:       cfg.Model,
+					Temperature: cfg.Temperature,
+					MaxTokens:   cfg.MaxTokens,
+					AuthScheme:  cfg.AuthScheme,
+				},
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}
+			return agentcore.NewAgentWithThreadID(agentCfg, threadID)
+		},
+		func(agent *agentcore.Agent) awruntime.Executor {
+			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return agent.RunStreamWithEvents(ctx, input, nil, sink)
+			})
+		},
+	)
 
 	ts := httptest.NewServer(NewRouter(runService, nil))
 	defer ts.Close()
@@ -1572,29 +1838,32 @@ func TestFileMutationRejectSmoke(t *testing.T) {
 		t.Fatalf("failed to create note.md: %v", err)
 	}
 
-	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
-		agentCfg := agentcore.AgentConfig{
-			MaxThoughts: 10,
-			EntryPoint:  "awaken-core-smoke",
-			ModelConfig: agentcore.ModelConfig{
-				APIKey:      cfg.APIKey,
-				BaseURL:     cfg.BaseURL,
-				Model:       cfg.Model,
-				Temperature: cfg.Temperature,
-				MaxTokens:   cfg.MaxTokens,
-				AuthScheme:  cfg.AuthScheme,
-			},
-			Workspace: agentcore.WorkspaceConfig{
-				Root:          workspace.WorkspaceRoot,
-				WritableRoots: workspace.WritableRoots,
-			},
-		}
-
-		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-			agent := agentcore.NewAgent(agentCfg)
-			return agent.RunStreamWithEvents(ctx, input, nil, sink)
-		})
-	})
+	runService := awruntime.NewRunService(
+		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
+			agentCfg := agentcore.AgentConfig{
+				MaxThoughts: 10,
+				EntryPoint:  "awaken-core-smoke",
+				ModelConfig: agentcore.ModelConfig{
+					APIKey:      cfg.APIKey,
+					BaseURL:     cfg.BaseURL,
+					Model:       cfg.Model,
+					Temperature: cfg.Temperature,
+					MaxTokens:   cfg.MaxTokens,
+					AuthScheme:  cfg.AuthScheme,
+				},
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}
+			return agentcore.NewAgentWithThreadID(agentCfg, threadID)
+		},
+		func(agent *agentcore.Agent) awruntime.Executor {
+			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return agent.RunStreamWithEvents(ctx, input, nil, sink)
+			})
+		},
+	)
 
 	ts := httptest.NewServer(NewRouter(runService, nil))
 	defer ts.Close()
@@ -1784,29 +2053,32 @@ func TestFileMutationArtifactSmoke(t *testing.T) {
 		t.Fatalf("failed to create note.md: %v", err)
 	}
 
-	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
-		agentCfg := agentcore.AgentConfig{
-			MaxThoughts: 10,
-			EntryPoint:  "awaken-core-smoke",
-			ModelConfig: agentcore.ModelConfig{
-				APIKey:      cfg.APIKey,
-				BaseURL:     cfg.BaseURL,
-				Model:       cfg.Model,
-				Temperature: cfg.Temperature,
-				MaxTokens:   cfg.MaxTokens,
-				AuthScheme:  cfg.AuthScheme,
-			},
-			Workspace: agentcore.WorkspaceConfig{
-				Root:          workspace.WorkspaceRoot,
-				WritableRoots: workspace.WritableRoots,
-			},
-		}
-
-		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-			agent := agentcore.NewAgent(agentCfg)
-			return agent.RunStreamWithEvents(ctx, input, nil, sink)
-		})
-	})
+	runService := awruntime.NewRunService(
+		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
+			agentCfg := agentcore.AgentConfig{
+				MaxThoughts: 10,
+				EntryPoint:  "awaken-core-smoke",
+				ModelConfig: agentcore.ModelConfig{
+					APIKey:      cfg.APIKey,
+					BaseURL:     cfg.BaseURL,
+					Model:       cfg.Model,
+					Temperature: cfg.Temperature,
+					MaxTokens:   cfg.MaxTokens,
+					AuthScheme:  cfg.AuthScheme,
+				},
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}
+			return agentcore.NewAgentWithThreadID(agentCfg, threadID)
+		},
+		func(agent *agentcore.Agent) awruntime.Executor {
+			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return agent.RunStreamWithEvents(ctx, input, nil, sink)
+			})
+		},
+	)
 
 	ts := httptest.NewServer(NewRouter(runService, nil))
 	defer ts.Close()
@@ -1928,6 +2200,223 @@ func TestFileMutationArtifactSmoke(t *testing.T) {
 	}
 	if strings.TrimSpace(string(content)) != "world" {
 		t.Fatalf("expected note.md to contain 'world', got %q", string(content))
+	}
+}
+
+// TestMultiTurnThreadSmoke 通过真实 LLM 调用验证同一 thread 多轮对话：
+// 第一轮创建 a.txt（内容 hello），第二轮在同 thread 中追加 world，
+// 验证 agent 复用上下文识别上一轮文件；并验证未知 thread_id 返回 404。
+// 需要项目根目录的 .env/config.toml 提供 LLM_API_KEY；未设置时自动跳过。
+func TestMultiTurnThreadSmoke(t *testing.T) {
+	workspaceRoot, err := findProjectRoot()
+	if err != nil {
+		t.Fatalf("failed to find project root: %v", err)
+	}
+
+	// llm.LoadConfig 从当前工作目录读取 .env/config.toml，而 go test ./src/server
+	// 的工作目录是 src/server/，因此先切换到项目根目录再加载配置。
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	if err := os.Chdir(workspaceRoot); err != nil {
+		t.Fatalf("failed to chdir to project root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	cfg := llm.LoadConfig()
+	if cfg.APIKey == "" {
+		t.Skip("LLM_API_KEY not set")
+	}
+
+	tempDir := t.TempDir()
+	aTxtPath := filepath.Join(tempDir, "a.txt")
+
+	runService := awruntime.NewRunService(
+		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
+			agentCfg := agentcore.AgentConfig{
+				MaxThoughts: 10,
+				EntryPoint:  "awaken-core-smoke",
+				ModelConfig: agentcore.ModelConfig{
+					APIKey:      cfg.APIKey,
+					BaseURL:     cfg.BaseURL,
+					Model:       cfg.Model,
+					Temperature: cfg.Temperature,
+					MaxTokens:   cfg.MaxTokens,
+					AuthScheme:  cfg.AuthScheme,
+				},
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}
+			return agentcore.NewAgentWithThreadID(agentCfg, threadID)
+		},
+		func(agent *agentcore.Agent) awruntime.Executor {
+			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return agent.RunStreamWithEvents(ctx, input, nil, sink)
+			})
+		},
+	)
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	// ---------- 第一轮：创建 a.txt，内容 hello（不带 thread_id）----------
+	firstReqBody := fmt.Sprintf(`{
+		"input": "创建一个 a.txt 文件，内容是 hello",
+		"workspace": { "workspace_root": %q, "writable_roots": [%q] },
+		"client": { "session_id": "smoke-multiturn-1", "request_id": "smoke-req-multiturn-1", "entrypoint": "smoke" }
+	}`, tempDir, tempDir)
+
+	firstResp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(firstReqBody))
+	if err != nil {
+		t.Fatalf("POST /v1/runs (first) failed: %v", err)
+	}
+	defer firstResp.Body.Close()
+	if firstResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 from first run, got %d", firstResp.StatusCode)
+	}
+
+	var firstRun awruntime.Run
+	if err := json.NewDecoder(firstResp.Body).Decode(&firstRun); err != nil {
+		t.Fatalf("failed to decode first run response: %v", err)
+	}
+	if firstRun.RunID == "" {
+		t.Fatalf("expected run id on first run, got empty")
+	}
+	if firstRun.ThreadID == "" {
+		t.Fatalf("expected thread id on first run, got empty")
+	}
+	t.Logf("first run: run_id=%s thread_id=%s", firstRun.RunID, firstRun.ThreadID)
+
+	firstEvents, resolveErr := streamEventsAndResolveApproval(t, ts.URL, firstRun.RunID)
+	if resolveErr != nil {
+		t.Fatalf("failed to stream and resolve approval (first run): %v", resolveErr)
+	}
+
+	var firstSawRunFinished bool
+	var firstFinalOutcome string
+	for _, ev := range firstEvents {
+		t.Logf("first run event: type=%s tool=%s status=%s outcome=%v",
+			ev.Type, ev.ToolCallName, ev.Status, ev.Outcome)
+		switch ev.Type {
+		case agui.EventRunFinished:
+			firstSawRunFinished = true
+			if ev.Outcome != nil {
+				firstFinalOutcome = ev.Outcome.Type
+			}
+		case agui.EventRunError:
+			t.Fatalf("first run error: %s (code=%s)", ev.Message, ev.Code)
+		}
+	}
+	if !firstSawRunFinished {
+		t.Fatalf("expected RUN_FINISHED event on first run")
+	}
+	if firstFinalOutcome != "success" {
+		t.Fatalf("expected first run outcome success, got %q", firstFinalOutcome)
+	}
+
+	// 验证 a.txt 已创建且内容为 hello
+	content, err := os.ReadFile(aTxtPath)
+	if err != nil {
+		t.Fatalf("failed to read a.txt after first run: %v", err)
+	}
+	if strings.TrimSpace(string(content)) != "hello" {
+		t.Fatalf("expected a.txt to contain 'hello' after first run, got %q", string(content))
+	}
+	t.Logf("a.txt after first run: %q", string(content))
+
+	// ---------- 第二轮：同 thread_id，追加 world ----------
+	secondReqBody := fmt.Sprintf(`{
+		"input": "在 a.txt 末尾追加 world",
+		"thread_id": %q,
+		"workspace": { "workspace_root": %q, "writable_roots": [%q] },
+		"client": { "session_id": "smoke-multiturn-2", "request_id": "smoke-req-multiturn-2", "entrypoint": "smoke" }
+	}`, firstRun.ThreadID, tempDir, tempDir)
+
+	secondResp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(secondReqBody))
+	if err != nil {
+		t.Fatalf("POST /v1/runs (second) failed: %v", err)
+	}
+	defer secondResp.Body.Close()
+	if secondResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 from second run, got %d", secondResp.StatusCode)
+	}
+
+	var secondRun awruntime.Run
+	if err := json.NewDecoder(secondResp.Body).Decode(&secondRun); err != nil {
+		t.Fatalf("failed to decode second run response: %v", err)
+	}
+	if secondRun.RunID == "" {
+		t.Fatalf("expected run id on second run, got empty")
+	}
+	if secondRun.ThreadID != firstRun.ThreadID {
+		t.Fatalf("expected second run to reuse thread_id %q, got %q", firstRun.ThreadID, secondRun.ThreadID)
+	}
+	if secondRun.RunID == firstRun.RunID {
+		t.Fatalf("expected second run to have a new run_id, got duplicate %q", secondRun.RunID)
+	}
+	t.Logf("second run: run_id=%s thread_id=%s", secondRun.RunID, secondRun.ThreadID)
+
+	secondEvents, resolveErr := streamEventsAndResolveApproval(t, ts.URL, secondRun.RunID)
+	if resolveErr != nil {
+		t.Fatalf("failed to stream and resolve approval (second run): %v", resolveErr)
+	}
+
+	var secondSawRunFinished bool
+	var secondFinalOutcome string
+	for _, ev := range secondEvents {
+		t.Logf("second run event: type=%s tool=%s status=%s outcome=%v",
+			ev.Type, ev.ToolCallName, ev.Status, ev.Outcome)
+		switch ev.Type {
+		case agui.EventRunFinished:
+			secondSawRunFinished = true
+			if ev.Outcome != nil {
+				secondFinalOutcome = ev.Outcome.Type
+			}
+		case agui.EventRunError:
+			t.Fatalf("second run error: %s (code=%s)", ev.Message, ev.Code)
+		}
+	}
+	if !secondSawRunFinished {
+		t.Fatalf("expected RUN_FINISHED event on second run")
+	}
+	if secondFinalOutcome != "success" {
+		t.Fatalf("expected second run outcome success, got %q", secondFinalOutcome)
+	}
+
+	// 验证 a.txt 现在同时包含 hello 和 world（agent 应能从复用的上下文中识别 a.txt）
+	content, err = os.ReadFile(aTxtPath)
+	if err != nil {
+		t.Fatalf("failed to read a.txt after second run: %v", err)
+	}
+	lowerContent := strings.ToLower(string(content))
+	if !strings.Contains(lowerContent, "hello") || !strings.Contains(lowerContent, "world") {
+		t.Fatalf("expected a.txt to contain both 'hello' and 'world' after second run, got %q", string(content))
+	}
+	t.Logf("a.txt after second run: %q", string(content))
+
+	// ---------- 未知 thread_id 测试 ----------
+	unknownReqBody := fmt.Sprintf(`{
+		"input": "hello",
+		"thread_id": "nonexistent-thread",
+		"workspace": { "workspace_root": %q }
+	}`, tempDir)
+	unknownResp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(unknownReqBody))
+	if err != nil {
+		t.Fatalf("POST /v1/runs (unknown thread) failed: %v", err)
+	}
+	defer unknownResp.Body.Close()
+	if unknownResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 for unknown thread_id, got %d", unknownResp.StatusCode)
+	}
+	var errResp errorResponse
+	if err := json.NewDecoder(unknownResp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("expected JSON error response for unknown thread, got decode error: %v", err)
+	}
+	if errResp.Error != "THREAD_NOT_FOUND" {
+		t.Fatalf("expected THREAD_NOT_FOUND error code, got %q", errResp.Error)
 	}
 }
 

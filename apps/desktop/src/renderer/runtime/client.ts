@@ -2,6 +2,7 @@ import type { AguiEvent } from "./agui";
 import {
   normalizeRuntimeRun,
   normalizeRuntimeInfo,
+  normalizeRuntimeThread,
   normalizeStartRunRequest,
   type ApprovalDecision,
   type AwakenBridge,
@@ -10,6 +11,8 @@ import {
   type RuntimeInfoWire,
   type RuntimeRun,
   type RuntimeRunWire,
+  type RuntimeThread,
+  type RuntimeThreadWire,
   type StartRunRequest,
   type WorkspacePickResult,
   type WorkspaceValidationResult,
@@ -28,6 +31,7 @@ export type RuntimeClient = {
   runtimeBaseUrl: string;
   getRuntimeInfo: () => Promise<RuntimeInfo>;
   getRun: (runId: string) => Promise<RuntimeRun>;
+  listThreads: () => Promise<RuntimeThread[]>;
   startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
   resolveApproval: (
@@ -85,6 +89,14 @@ async function requestRuntime(baseUrl: string, pathname: string, init?: RequestI
   return normalizeRuntimeRun((await response.json()) as RuntimeRunWire);
 }
 
+async function requestThreads(baseUrl: string): Promise<RuntimeThread[]> {
+  const response = await fetch(joinRuntimeUrl(baseUrl, "/v1/threads"));
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response));
+  }
+  return ((await response.json()) as RuntimeThreadWire[]).map(normalizeRuntimeThread);
+}
+
 async function requestRuntimeOK(baseUrl: string, pathname: string, init?: RequestInit): Promise<void> {
   const response = await fetch(joinRuntimeUrl(baseUrl, pathname), init);
   if (!response.ok) {
@@ -99,6 +111,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     runtimeBaseUrl: bridge.runtimeBaseUrl,
     getRuntimeInfo: () => bridge.getRuntimeInfo(),
     getRun: (runId) => bridge.getRun(runId),
+    listThreads: () => bridge.listThreads(),
     startRun: (request) => bridge.startRun(request),
     cancelRun: bridge.cancelRun,
     resolveApproval: bridge.resolveApproval,
@@ -223,6 +236,7 @@ function createBrowserClient(): RuntimeClient {
       return normalizeRuntimeInfo((await response.json()) as RuntimeInfoWire);
     },
     getRun: (runId) => requestRuntime(runtimeBaseUrl, `/v1/runs/${runId}`),
+    listThreads: () => requestThreads(runtimeBaseUrl),
     startRun: (request) =>
       requestRuntime(runtimeBaseUrl, "/v1/runs", {
         method: "POST",

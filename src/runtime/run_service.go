@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,12 +16,17 @@ import (
 )
 
 var (
-	ErrInvalidInput     = errors.New("input is required")
-	ErrRunNotFound      = errors.New("run not found")
-	ErrApprovalNotFound = errors.New("approval not found")
-	ErrRunTerminal      = errors.New("run is already finished")
-	ErrRunCancelling    = errors.New("run is being cancelled")
+	ErrInvalidInput            = errors.New("input is required")
+	ErrRunNotFound             = errors.New("run not found")
+	ErrApprovalNotFound        = errors.New("approval not found")
+	ErrRunTerminal             = errors.New("run is already finished")
+	ErrRunCancelling           = errors.New("run is being cancelled")
+	ErrThreadNotFound          = errors.New("thread not found")
+	ErrThreadWorkspaceMismatch = errors.New("thread workspace mismatch")
+	ErrThreadBusy              = errors.New("thread already has an active run")
 )
+
+const maxRetainedThreads = 100
 
 type WorkspaceConfig struct {
 	WorkspaceRoot string   `json:"workspace_root"`
@@ -37,6 +43,7 @@ type StartRunRequest struct {
 	Input     string          `json:"input"`
 	Workspace WorkspaceConfig `json:"workspace"`
 	Client    ClientInfo      `json:"client"`
+	ThreadID  string          `json:"thread_id,omitempty"`
 }
 
 type Executor interface {
@@ -52,12 +59,42 @@ func (f ExecutorFunc) Run(ctx context.Context, input string, sink agentcore.Even
 type RunService struct {
 	mu          sync.RWMutex
 	sessions    map[string]*Session
-	newExecutor func(workspace WorkspaceConfig) Executor
+	threads     map[string]*Thread
+	newAgent    func(workspace WorkspaceConfig, threadID string) *agentcore.Agent
+	newExecutor func(agent *agentcore.Agent) Executor
 }
 
-func NewRunService(newExecutor func(workspace WorkspaceConfig) Executor) *RunService {
+// Thread holds the reusable Agent and metadata for a multi-turn conversation.
+// Runs with the same thread_id reuse the same Agent and Conversation.
+type Thread struct {
+	threadID    string
+	agent       *agentcore.Agent
+	workspace   WorkspaceConfig
+	label       string
+	latestRunID string
+	activeRunID string
+	createdAt   time.Time
+	updatedAt   time.Time
+}
+
+type ThreadSnapshot struct {
+	ThreadID    string          `json:"thread_id"`
+	Label       string          `json:"label"`
+	RunID       string          `json:"run_id,omitempty"`
+	ActiveRunID string          `json:"active_run_id,omitempty"`
+	Workspace   WorkspaceConfig `json:"workspace"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
+}
+
+func NewRunService(
+	newAgent func(workspace WorkspaceConfig, threadID string) *agentcore.Agent,
+	newExecutor func(agent *agentcore.Agent) Executor,
+) *RunService {
 	return &RunService{
 		sessions:    make(map[string]*Session),
+		threads:     make(map[string]*Thread),
+		newAgent:    newAgent,
 		newExecutor: newExecutor,
 	}
 }
@@ -77,18 +114,75 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	}
 
 	runID := newRuntimeID("run")
-	threadID := newRuntimeID("thread")
+	threadID := req.ThreadID
+	now := time.Now().UTC()
+	var agent *agentcore.Agent
+	if threadID == "" {
+		threadID = newRuntimeID("thread")
+		if s.newAgent != nil {
+			agent = s.newAgent(workspace, threadID)
+		}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	session := NewSession(runID, threadID, cancel)
 
 	s.mu.Lock()
+	if req.ThreadID != "" {
+		thread, ok := s.threads[req.ThreadID]
+		if !ok {
+			s.mu.Unlock()
+			return Run{}, ErrThreadNotFound
+		}
+		if !sameWorkspace(thread.workspace, workspace) {
+			s.mu.Unlock()
+			return Run{}, ErrThreadWorkspaceMismatch
+		}
+		if thread.activeRunID != "" {
+			s.mu.Unlock()
+			return Run{}, ErrThreadBusy
+		}
+		agent = thread.agent
+		thread.activeRunID = runID
+		thread.latestRunID = runID
+		thread.updatedAt = now
+	} else {
+		label := trimmed
+		if len(label) > 50 {
+			label = label[:50]
+		}
+		s.threads[threadID] = &Thread{
+			threadID:    threadID,
+			agent:       agent,
+			workspace:   workspace,
+			label:       label,
+			latestRunID: runID,
+			activeRunID: runID,
+			createdAt:   now,
+			updatedAt:   now,
+		}
+		s.pruneInactiveThreadsLocked()
+	}
 	s.sessions[runID] = session
 	s.mu.Unlock()
 
-	executor := s.newExecutor(workspace)
+	executor := s.newExecutor(agent)
 	go s.execute(session, executor, trimmed, ctx)
 
 	return session.Snapshot(), nil
+}
+
+func (s *RunService) ListThreads() []ThreadSnapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	threads := make([]ThreadSnapshot, 0, len(s.threads))
+	for _, thread := range s.threads {
+		threads = append(threads, thread.snapshot())
+	}
+	sort.Slice(threads, func(i, j int) bool {
+		return threads[i].CreatedAt.Before(threads[j].CreatedAt)
+	})
+	return threads
 }
 
 func (s *RunService) Subscribe(runID string, afterSeq uint64) (Subscription, error) {
@@ -124,6 +218,9 @@ func (s *RunService) ResolveApproval(runID, approvalID string, decision agentcor
 }
 
 func (s *RunService) execute(session *Session, executor Executor, input string, ctx context.Context) {
+	snapshot := session.Snapshot()
+	defer s.clearActiveRun(snapshot.ThreadID, snapshot.RunID)
+
 	if executor == nil {
 		session.CompleteError("run executor is not configured", "executor_missing")
 		return
@@ -147,6 +244,21 @@ func (s *RunService) execute(session *Session, executor Executor, input string, 
 	session.CompleteError(err.Error(), "")
 }
 
+func (s *RunService) clearActiveRun(threadID, runID string) {
+	if threadID == "" || runID == "" {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	thread, ok := s.threads[threadID]
+	if !ok || thread.activeRunID != runID {
+		return
+	}
+	thread.activeRunID = ""
+	thread.updatedAt = time.Now().UTC()
+}
+
 func (s *RunService) session(runID string) (*Session, error) {
 	s.mu.RLock()
 	session, ok := s.sessions[runID]
@@ -162,6 +274,63 @@ var runtimeIDCounter uint64
 func newRuntimeID(prefix string) string {
 	seq := atomic.AddUint64(&runtimeIDCounter, 1)
 	return fmt.Sprintf("%s_%d_%d", prefix, time.Now().UnixNano(), seq)
+}
+
+func (t *Thread) snapshot() ThreadSnapshot {
+	return ThreadSnapshot{
+		ThreadID:    t.threadID,
+		Label:       t.label,
+		RunID:       t.latestRunID,
+		ActiveRunID: t.activeRunID,
+		Workspace:   t.workspace,
+		CreatedAt:   t.createdAt,
+		UpdatedAt:   t.updatedAt,
+	}
+}
+
+func (s *RunService) pruneInactiveThreadsLocked() {
+	if len(s.threads) <= maxRetainedThreads {
+		return
+	}
+
+	inactive := make([]*Thread, 0, len(s.threads))
+	for _, thread := range s.threads {
+		if thread.activeRunID == "" {
+			inactive = append(inactive, thread)
+		}
+	}
+	sort.Slice(inactive, func(i, j int) bool {
+		return inactive[i].updatedAt.Before(inactive[j].updatedAt)
+	})
+	for len(s.threads) > maxRetainedThreads && len(inactive) > 0 {
+		thread := inactive[0]
+		inactive = inactive[1:]
+		delete(s.threads, thread.threadID)
+	}
+}
+
+func sameWorkspace(a, b WorkspaceConfig) bool {
+	if a.WorkspaceRoot != b.WorkspaceRoot {
+		return false
+	}
+	return sameStringSet(a.WritableRoots, b.WritableRoots)
+}
+
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]int, len(a))
+	for _, value := range a {
+		seen[value]++
+	}
+	for _, value := range b {
+		if seen[value] == 0 {
+			return false
+		}
+		seen[value]--
+	}
+	return true
 }
 
 type sessionEventSink struct {

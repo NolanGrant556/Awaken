@@ -17,11 +17,13 @@ import type { AguiEvent } from "../shared/agui.js";
 import {
   normalizeRuntimeInfo,
   normalizeRuntimeRun,
+  normalizeRuntimeThread,
   normalizeStartRunRequest,
   type ApprovalDecision,
   type DesktopPlatform,
   type RuntimeInfoWire,
   type RuntimeRunWire,
+  type RuntimeThreadWire,
   type StartRunRequest,
 } from "../shared/runtime.js";
 
@@ -280,7 +282,15 @@ ipcMain.handle("awaken:get-run", async (_event, runId: string) => {
     method: "GET",
   });
 
-  return normalizeRuntimeRun(run);
+	return normalizeRuntimeRun(run);
+});
+
+ipcMain.handle("awaken:list-threads", async () => {
+	const threads = await requestRuntime<RuntimeThreadWire[]>("/v1/threads", {
+		method: "GET",
+	});
+
+	return threads.map(normalizeRuntimeThread);
 });
 
 ipcMain.handle("awaken:start-run", async (_event, request: StartRunRequest) => {

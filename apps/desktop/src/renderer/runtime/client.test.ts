@@ -147,3 +147,38 @@ describe("browser client reconnect", () => {
     expect(onReconnect).not.toHaveBeenCalled();
   });
 });
+
+describe("browser client threads", () => {
+  it("normalizes runtime thread list", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      json: async () => [
+        {
+          thread_id: "thread-1",
+          label: "First task",
+          run_id: "run-1",
+          active_run_id: "",
+          workspace: { workspace_root: "/tmp", writable_roots: ["/tmp"] },
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    })));
+
+    const client = createRuntimeClient();
+    const threads = await client.listThreads();
+
+    expect(fetch).toHaveBeenCalledWith("/v1/threads");
+    expect(threads).toEqual([
+      {
+        threadId: "thread-1",
+        label: "First task",
+        runId: "run-1",
+        activeRunId: undefined,
+        workspace: { workspaceRoot: "/tmp", writableRoots: ["/tmp"] },
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    ]);
+  });
+});

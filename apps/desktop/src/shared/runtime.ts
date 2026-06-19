@@ -34,6 +34,26 @@ export type RuntimeRun = {
   finishedAt?: string;
 };
 
+export type RuntimeThreadWire = {
+  thread_id: string;
+  label: string;
+  run_id?: string;
+  active_run_id?: string;
+  workspace: WorkspaceConfigWire;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RuntimeThread = {
+  threadId: string;
+  label: string;
+  runId?: string;
+  activeRunId?: string;
+  workspace: WorkspaceConfig;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type RuntimeInfoWire = {
   runtime_version: string;
   api_version: string;
@@ -76,12 +96,14 @@ export type ClientInfo = {
 
 export type StartRunRequestWire = {
   input: string;
+  thread_id?: string;
   workspace: WorkspaceConfigWire;
   client: ClientInfoWire;
 };
 
 export type StartRunRequest = {
   input: string;
+  threadId?: string;
   workspace: WorkspaceConfig;
   client: ClientInfo;
 };
@@ -106,6 +128,7 @@ export type AwakenBridge = {
   platform: DesktopPlatform;
   runtimeBaseUrl: string;
   getRun: (runId: string) => Promise<RuntimeRun>;
+  listThreads: () => Promise<RuntimeThread[]>;
   startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
   resolveApproval: (
@@ -138,6 +161,21 @@ export function normalizeRuntimeRun(run: RuntimeRunWire): RuntimeRun {
   };
 }
 
+export function normalizeRuntimeThread(thread: RuntimeThreadWire): RuntimeThread {
+  return {
+    threadId: thread.thread_id,
+    label: thread.label,
+    runId: thread.run_id || undefined,
+    activeRunId: thread.active_run_id || undefined,
+    workspace: {
+      workspaceRoot: thread.workspace.workspace_root,
+      writableRoots: thread.workspace.writable_roots ?? [],
+    },
+    createdAt: thread.created_at,
+    updatedAt: thread.updated_at,
+  };
+}
+
 export function normalizeRuntimeInfo(info: RuntimeInfoWire): RuntimeInfo {
   return {
     runtimeVersion: info.runtime_version,
@@ -152,6 +190,7 @@ export function normalizeRuntimeInfo(info: RuntimeInfoWire): RuntimeInfo {
 export function normalizeStartRunRequest(request: StartRunRequest): StartRunRequestWire {
   return {
     input: request.input,
+    thread_id: request.threadId,
     workspace: {
       workspace_root: request.workspace.workspaceRoot,
       writable_roots: request.workspace.writableRoots,

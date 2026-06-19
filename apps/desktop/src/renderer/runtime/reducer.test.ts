@@ -163,3 +163,64 @@ describe("runtime reducer replay idempotency", () => {
     expect(state.timelineTitle).toContain("Build a feature");
   });
 });
+
+describe("runtime reducer thread snapshots", () => {
+  it("restores the selected thread view when switching conversations", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "first prompt" },
+      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
+      { type: "run/threadAdded", threadId: "thread-1", label: "first prompt", runId: "run-1" },
+      runEvent({ type: "TEXT_MESSAGE_CONTENT", threadId: "thread-1", runId: "run-1", messageId: "msg-1", delta: "first answer" }),
+      { type: "run/reset" },
+      { type: "run/requested", prompt: "second prompt" },
+      { type: "run/created", run: makeRun({ runId: "run-2", threadId: "thread-2" }) },
+      { type: "run/threadAdded", threadId: "thread-2", label: "second prompt", runId: "run-2" },
+      runEvent({ type: "TEXT_MESSAGE_CONTENT", threadId: "thread-2", runId: "run-2", messageId: "msg-2", delta: "second answer" }),
+      { type: "run/threadSwitch", threadId: "thread-1" },
+    ]);
+
+    expect(state.activeThreadId).toBe("thread-1");
+    expect(state.runId).toBe("run-1");
+    expect(state.assistantText).toBe("first answer");
+    expect(state.threads.map((thread) => thread.threadId)).toEqual(["thread-1", "thread-2"]);
+  });
+
+  it("loads runtime thread list without losing saved thread views", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "first prompt" },
+      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
+      { type: "run/threadAdded", threadId: "thread-1", label: "first prompt", runId: "run-1" },
+      runEvent({ type: "TEXT_MESSAGE_CONTENT", threadId: "thread-1", runId: "run-1", messageId: "msg-1", delta: "first answer" }),
+      {
+        type: "run/threadsLoaded",
+        threads: [
+          {
+            threadId: "thread-1",
+            label: "first prompt",
+            runId: "run-1",
+            workspace: { workspaceRoot: "/tmp", writableRoots: ["/tmp"] },
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        ],
+      },
+      { type: "run/threadSwitch", threadId: "thread-1" },
+    ]);
+
+    expect(state.assistantText).toBe("first answer");
+    expect(state.threads).toHaveLength(1);
+  });
+
+  it("clears stale active thread when runtime no longer lists it", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "first prompt" },
+      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
+      { type: "run/threadAdded", threadId: "thread-1", label: "first prompt", runId: "run-1" },
+      { type: "run/threadsLoaded", threads: [] },
+    ]);
+
+    expect(state.activeThreadId).toBeUndefined();
+    expect(state.threadId).toBeUndefined();
+    expect(state.runId).toBeUndefined();
+  });
+});

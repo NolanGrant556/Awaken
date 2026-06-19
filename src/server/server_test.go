@@ -71,6 +71,7 @@ func TestRuntimeInfoEndpoint(t *testing.T) {
 			RuntimeVersion:   RuntimeVersion,
 			APIVersion:       "v1",
 			ConfiguredModel:  "gpt-4-test",
+			Protocol:         "openai_chat",
 			HasAPIKey:        true,
 			DefaultWorkspace: "/tmp/awaken-test",
 			BaseURLHost:      "api.example.com",
@@ -128,6 +129,7 @@ func TestRuntimeInfoEndpointDoesNotLeakSecrets(t *testing.T) {
 		"https://api.anthropic.com/v1",
 		"sk-secret-key-must-not-appear",
 		"/workspace/secret",
+		"anthropic_messages",
 	)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/runtime/info", nil)
@@ -153,6 +155,9 @@ func TestRuntimeInfoEndpointDoesNotLeakSecrets(t *testing.T) {
 	}
 	if info.BaseURLHost != "api.anthropic.com" {
 		t.Fatalf("expected base_url_host api.anthropic.com, got %q", info.BaseURLHost)
+	}
+	if info.Protocol != "anthropic_messages" {
+		t.Fatalf("expected protocol anthropic_messages, got %q", info.Protocol)
 	}
 }
 
@@ -2554,5 +2559,476 @@ func findProjectRoot() (string, error) {
 			return "", fmt.Errorf("go.mod not found")
 		}
 		dir = parent
+	}
+}
+
+// TestModelStatusSmoke 通过真实 LLM 调用验证 /v1/runtime/info 返回当前 configured model
+// 和 protocol，且不泄漏 API key；同时发起一次真实 run 验证运行时可用。
+// 需要项目根目录的 .env/config.toml 提供 LLM_API_KEY；未设置时自动跳过。
+func TestModelStatusSmoke(t *testing.T) {
+	workspaceRoot, err := findProjectRoot()
+	if err != nil {
+		t.Fatalf("failed to find project root: %v", err)
+	}
+
+	// llm.LoadConfig 从当前工作目录读取 .env/config.toml，而 go test ./src/server
+	// 的工作目录是 src/server/，因此先切换到项目根目录再加载配置。
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	if err := os.Chdir(workspaceRoot); err != nil {
+		t.Fatalf("failed to chdir to project root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	cfg := llm.LoadConfig()
+	if cfg.APIKey == "" {
+		t.Skip("LLM_API_KEY not set")
+	}
+
+	provider := NewLLMRuntimeInfoProvider(cfg.Model, cfg.BaseURL, cfg.APIKey, workspaceRoot, string(llm.ResolveProtocol(cfg)))
+
+	runService := awruntime.NewRunService(
+		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
+			agentCfg := agentcore.AgentConfig{
+				MaxThoughts: 5,
+				EntryPoint:  "awaken-core-smoke",
+				ModelConfig: agentcore.ModelConfig{
+					APIKey:      cfg.APIKey,
+					BaseURL:     cfg.BaseURL,
+					Model:       cfg.Model,
+					Temperature: cfg.Temperature,
+					MaxTokens:   cfg.MaxTokens,
+					AuthScheme:  cfg.AuthScheme,
+				},
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}
+			return agentcore.NewAgentWithThreadID(agentCfg, threadID)
+		},
+		func(agent *agentcore.Agent) awruntime.Executor {
+			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return agent.RunStreamWithEvents(ctx, input, nil, sink)
+			})
+		},
+	)
+
+	ts := httptest.NewServer(NewRouter(runService, provider))
+	defer ts.Close()
+
+	// 1. 验证 /v1/runtime/info 返回正确的 model 和 protocol，且不泄漏 secret。
+	infoResp, err := http.Get(ts.URL + "/v1/runtime/info")
+	if err != nil {
+		t.Fatalf("GET /v1/runtime/info failed: %v", err)
+	}
+	defer infoResp.Body.Close()
+	if infoResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from runtime info, got %d", infoResp.StatusCode)
+	}
+
+	infoBody, err := io.ReadAll(infoResp.Body)
+	if err != nil {
+		t.Fatalf("failed to read runtime info body: %v", err)
+	}
+	if strings.Contains(string(infoBody), cfg.APIKey) {
+		t.Fatalf("runtime info response must not contain api key")
+	}
+
+	var info RuntimeInfo
+	if err := json.Unmarshal(infoBody, &info); err != nil {
+		t.Fatalf("failed to decode runtime info: %v", err)
+	}
+	if info.ConfiguredModel == "" {
+		t.Fatalf("expected non-empty configured_model")
+	}
+	if info.ConfiguredModel != cfg.Model {
+		t.Fatalf("expected configured_model %q, got %q", cfg.Model, info.ConfiguredModel)
+	}
+	if info.Protocol != "openai_chat" && info.Protocol != "anthropic_messages" {
+		t.Fatalf("expected protocol openai_chat or anthropic_messages, got %q", info.Protocol)
+	}
+	if !info.HasAPIKey {
+		t.Fatalf("expected has_api_key true")
+	}
+
+	// 2. 发起一次真实 run，验证运行时可用。
+	reqBody := fmt.Sprintf(`{
+		"input": "请只回复 pong",
+		"workspace": { "workspace_root": %q, "writable_roots": [%q] },
+		"client": { "session_id": "smoke-status-1", "request_id": "smoke-req-status-1", "entrypoint": "smoke" }
+	}`, workspaceRoot, workspaceRoot)
+
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var created awruntime.Run
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	if created.RunID == "" {
+		t.Fatalf("expected run id, got empty")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	eventsReq, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/v1/runs/"+created.RunID+"/events", nil)
+	if err != nil {
+		t.Fatalf("failed to create event request: %v", err)
+	}
+
+	streamResp, err := http.DefaultClient.Do(eventsReq)
+	if err != nil {
+		t.Fatalf("GET events failed: %v", err)
+	}
+	defer streamResp.Body.Close()
+	if streamResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from events, got %d", streamResp.StatusCode)
+	}
+
+	events, err := collectSSEEvents(streamResp.Body)
+	if err != nil {
+		t.Fatalf("failed to collect events: %v", err)
+	}
+
+	var sawRunFinished bool
+	for _, ev := range events {
+		switch ev.Type {
+		case agui.EventRunFinished:
+			sawRunFinished = true
+		case agui.EventRunError:
+			t.Fatalf("unexpected run error: %s (code=%s)", ev.Message, ev.Code)
+		}
+	}
+	if !sawRunFinished {
+		t.Fatalf("expected RUN_FINISHED event")
+	}
+}
+
+// TestRunWithoutAPIKeyEmitsProviderAuthMissing 验证缺少 API key 时 RunError 事件
+// code=PROVIDER_AUTH_MISSING。此测试不依赖真实 LLM，始终运行。
+func TestRunWithoutAPIKeyEmitsProviderAuthMissing(t *testing.T) {
+	runService := awruntime.NewRunService(
+		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
+			agentCfg := agentcore.AgentConfig{
+				MaxThoughts: 5,
+				EntryPoint:  "awaken-core-smoke",
+				ModelConfig: agentcore.ModelConfig{
+					APIKey:  "",
+					BaseURL: "https://api.anthropic.com/v1",
+					Model:   "test-model",
+				},
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}
+			return agentcore.NewAgentWithThreadID(agentCfg, threadID)
+		},
+		func(agent *agentcore.Agent) awruntime.Executor {
+			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return agent.RunStreamWithEvents(ctx, input, nil, sink)
+			})
+		},
+	)
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	workspaceRoot := t.TempDir()
+	reqBody := fmt.Sprintf(`{
+		"input": "hello",
+		"workspace": { "workspace_root": %q, "writable_roots": [%q] },
+		"client": { "session_id": "smoke-nokey-1", "request_id": "smoke-req-nokey-1", "entrypoint": "smoke" }
+	}`, workspaceRoot, workspaceRoot)
+
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var created awruntime.Run
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	if created.RunID == "" {
+		t.Fatalf("expected run id, got empty")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	eventsReq, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/v1/runs/"+created.RunID+"/events", nil)
+	if err != nil {
+		t.Fatalf("failed to create event request: %v", err)
+	}
+
+	streamResp, err := http.DefaultClient.Do(eventsReq)
+	if err != nil {
+		t.Fatalf("GET events failed: %v", err)
+	}
+	defer streamResp.Body.Close()
+	if streamResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from events, got %d", streamResp.StatusCode)
+	}
+
+	events, err := collectSSEEvents(streamResp.Body)
+	if err != nil {
+		t.Fatalf("failed to collect events: %v", err)
+	}
+
+	var sawRunError, sawRunFinished bool
+	var errorCode, errorMessage string
+	for _, ev := range events {
+		switch ev.Type {
+		case agui.EventRunError:
+			sawRunError = true
+			errorCode = ev.Code
+			errorMessage = ev.Message
+		case agui.EventRunFinished:
+			sawRunFinished = true
+		}
+	}
+	if !sawRunError {
+		t.Fatalf("expected RUN_ERROR event, got events: %v", events)
+	}
+	if errorCode != "PROVIDER_AUTH_MISSING" {
+		t.Fatalf("expected error code PROVIDER_AUTH_MISSING, got %q", errorCode)
+	}
+	if strings.Contains(errorMessage, "sk-") {
+		t.Fatalf("error message must not contain api key fragment: %q", errorMessage)
+	}
+	if sawRunFinished {
+		t.Fatalf("did not expect RUN_FINISHED event")
+	}
+}
+
+// TestRunWithBadBaseURLEmitsProviderRequestFailed 验证 provider 请求失败时
+// RunError 事件 code=PROVIDER_REQUEST_FAILED。此测试不依赖真实 LLM，始终运行。
+func TestRunWithBadBaseURLEmitsProviderRequestFailed(t *testing.T) {
+	runService := awruntime.NewRunService(
+		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
+			agentCfg := agentcore.AgentConfig{
+				MaxThoughts: 5,
+				EntryPoint:  "awaken-core-smoke",
+				ModelConfig: agentcore.ModelConfig{
+					APIKey:  "dummy-key-not-real",
+					BaseURL: "http://127.0.0.1:1/invalid",
+					Model:   "test-model",
+				},
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}
+			return agentcore.NewAgentWithThreadID(agentCfg, threadID)
+		},
+		func(agent *agentcore.Agent) awruntime.Executor {
+			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return agent.RunStreamWithEvents(ctx, input, nil, sink)
+			})
+		},
+	)
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	workspaceRoot := t.TempDir()
+	reqBody := fmt.Sprintf(`{
+		"input": "hello",
+		"workspace": { "workspace_root": %q, "writable_roots": [%q] },
+		"client": { "session_id": "smoke-badurl-1", "request_id": "smoke-req-badurl-1", "entrypoint": "smoke" }
+	}`, workspaceRoot, workspaceRoot)
+
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var created awruntime.Run
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	if created.RunID == "" {
+		t.Fatalf("expected run id, got empty")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	eventsReq, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/v1/runs/"+created.RunID+"/events", nil)
+	if err != nil {
+		t.Fatalf("failed to create event request: %v", err)
+	}
+
+	streamResp, err := http.DefaultClient.Do(eventsReq)
+	if err != nil {
+		t.Fatalf("GET events failed: %v", err)
+	}
+	defer streamResp.Body.Close()
+	if streamResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from events, got %d", streamResp.StatusCode)
+	}
+
+	events, err := collectSSEEvents(streamResp.Body)
+	if err != nil {
+		t.Fatalf("failed to collect events: %v", err)
+	}
+
+	var sawRunError, sawRunFinished bool
+	var errorCode, errorMessage string
+	for _, ev := range events {
+		switch ev.Type {
+		case agui.EventRunError:
+			sawRunError = true
+			errorCode = ev.Code
+			errorMessage = ev.Message
+		case agui.EventRunFinished:
+			sawRunFinished = true
+		}
+	}
+	if !sawRunError {
+		t.Fatalf("expected RUN_ERROR event, got events: %v", events)
+	}
+	if errorCode != "PROVIDER_REQUEST_FAILED" {
+		t.Fatalf("expected error code PROVIDER_REQUEST_FAILED, got %q", errorCode)
+	}
+	if strings.Contains(errorMessage, "dummy-key-not-real") {
+		t.Fatalf("error message must not contain api key: %q", errorMessage)
+	}
+	if strings.Contains(errorMessage, "127.0.0.1:1") {
+		t.Fatalf("error message must not contain full URL host:port: %q", errorMessage)
+	}
+	if strings.Contains(errorMessage, "/invalid") {
+		t.Fatalf("error message must not contain full URL path: %q", errorMessage)
+	}
+	if sawRunFinished {
+		t.Fatalf("did not expect RUN_FINISHED event")
+	}
+}
+
+// TestRunWithProviderBodySecretEmitsSanitizedMessage 验证 provider 返回非 2xx 且 body
+// 含敏感信息时，RunError 事件 message 不泄漏 body 内容，仅保留 status code。
+func TestRunWithProviderBodySecretEmitsSanitizedMessage(t *testing.T) {
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"error":"sk-test-secret is invalid","detail":"internal path /etc/secrets"}`))
+	}))
+	defer providerServer.Close()
+
+	runService := awruntime.NewRunService(
+		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
+			agentCfg := agentcore.AgentConfig{
+				MaxThoughts: 5,
+				EntryPoint:  "awaken-core-smoke",
+				ModelConfig: agentcore.ModelConfig{
+					APIKey:  "dummy-key-not-real",
+					BaseURL: providerServer.URL,
+					Model:   "test-model",
+				},
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}
+			return agentcore.NewAgentWithThreadID(agentCfg, threadID)
+		},
+		func(agent *agentcore.Agent) awruntime.Executor {
+			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return agent.RunStreamWithEvents(ctx, input, nil, sink)
+			})
+		},
+	)
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	workspaceRoot := t.TempDir()
+	reqBody := fmt.Sprintf(`{
+		"input": "hello",
+		"workspace": { "workspace_root": %q, "writable_roots": [%q] },
+		"client": { "session_id": "smoke-body-1", "request_id": "smoke-req-body-1", "entrypoint": "smoke" }
+	}`, workspaceRoot, workspaceRoot)
+
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var created awruntime.Run
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	if created.RunID == "" {
+		t.Fatalf("expected run id, got empty")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	eventsReq, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/v1/runs/"+created.RunID+"/events", nil)
+	if err != nil {
+		t.Fatalf("failed to create event request: %v", err)
+	}
+
+	streamResp, err := http.DefaultClient.Do(eventsReq)
+	if err != nil {
+		t.Fatalf("GET events failed: %v", err)
+	}
+	defer streamResp.Body.Close()
+	if streamResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from events, got %d", streamResp.StatusCode)
+	}
+
+	events, err := collectSSEEvents(streamResp.Body)
+	if err != nil {
+		t.Fatalf("failed to collect events: %v", err)
+	}
+
+	var sawRunError bool
+	var errorCode, errorMessage string
+	for _, ev := range events {
+		switch ev.Type {
+		case agui.EventRunError:
+			sawRunError = true
+			errorCode = ev.Code
+			errorMessage = ev.Message
+		}
+	}
+	if !sawRunError {
+		t.Fatalf("expected RUN_ERROR event, got events: %v", events)
+	}
+	if errorCode != "PROVIDER_REQUEST_FAILED" {
+		t.Fatalf("expected error code PROVIDER_REQUEST_FAILED, got %q", errorCode)
+	}
+	if strings.Contains(errorMessage, "sk-test-secret") {
+		t.Fatalf("error message must not contain response body secret: %q", errorMessage)
+	}
+	if strings.Contains(errorMessage, "/etc/secrets") {
+		t.Fatalf("error message must not contain response body detail: %q", errorMessage)
+	}
+	if !strings.Contains(errorMessage, "status 502") {
+		t.Fatalf("error message should contain status code, got %q", errorMessage)
 	}
 }

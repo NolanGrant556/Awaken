@@ -1,0 +1,14 @@
+- [x] `RuntimeInfo` 响应包含 `protocol` 字段，值为解析后的协议
+- [x] `NewLLMRuntimeInfoProvider` 接收并返回 `protocol`
+- [x] 缺 key 时 UI 顶部显示 `Not ready`
+- [x] 有 key 时 UI 顶部显示 `Ready`
+- [x] UI 展示当前 `protocol` 与 `configured_model`
+- [x] 缺 key 发 run 时 `RunError` 事件 `code=PROVIDER_AUTH_MISSING`
+- [x] provider 请求失败时 `RunError` 事件 `code=PROVIDER_REQUEST_FAILED`
+- [x] UI 按 `code` 显示可读 provider 错误（auth missing / request failed）
+- [x] 有 key 时真实 LLM smoke 不 skip，run 成功
+- [x] 无 key 路径返回结构化错误，UI 可读
+- [x] 请求失败路径返回结构化错误，UI 可读
+- [x] status 响应、run error 事件、UI 展示均不含 API key 或完整 base URL
+- [x] `go test ./src/server/... ./src/agentcore/...` 通过
+- [x] Desktop build 与 type check 通过

@@ -24,7 +24,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to get working directory: %v", err)
 	}
-	infoProvider := server.NewLLMRuntimeInfoProvider(cfg.Model, cfg.BaseURL, cfg.APIKey, cwd)
+	infoProvider := server.NewLLMRuntimeInfoProvider(cfg.Model, cfg.BaseURL, cfg.APIKey, cwd, string(llm.ResolveProtocol(cfg)))
 
 	runService := runtime.NewRunService(
 		func(workspace runtime.WorkspaceConfig, threadID string) *agentcore.Agent {

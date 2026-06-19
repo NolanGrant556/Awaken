@@ -99,3 +99,9 @@ func resolveProtocol(cfg Config) Protocol {
 
 	return ProtocolOpenAIChat
 }
+
+// ResolveProtocol 导出协议解析能力，供 llm 包外部（如 cmd/awaken-core）使用。
+// 内部仍复用 resolveProtocol，避免改动既有传输选择路径。
+func ResolveProtocol(cfg Config) Protocol {
+	return resolveProtocol(cfg)
+}

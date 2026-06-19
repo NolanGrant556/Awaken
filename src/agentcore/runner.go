@@ -2,6 +2,7 @@ package agentcore
 
 import (
 	stdcontext "context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -392,7 +393,14 @@ func (e *runEventEmitter) runErrored(err error) {
 	if err == nil {
 		return
 	}
-	e.emit(AwakenEvent{Type: RunErrorEventType, Error: err.Error()})
+	event := AwakenEvent{Type: RunErrorEventType, Error: err.Error()}
+	switch {
+	case errors.Is(err, llm.ErrMissingAPIKey):
+		event.Code = "PROVIDER_AUTH_MISSING"
+	case errors.Is(err, llm.ErrRequestFailed):
+		event.Code = "PROVIDER_REQUEST_FAILED"
+	}
+	e.emit(event)
 }
 
 func (e *runEventEmitter) onLLMDelta(content string, isThinking bool) {

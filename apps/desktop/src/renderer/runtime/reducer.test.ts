@@ -76,6 +76,40 @@ describe("runtime reducer cancel handling", () => {
     expect(state.errorMessage).toBe("boom");
     expect(countRunCancelledSteps(state)).toBe(0);
   });
+
+  it("RUN_ERROR with PROVIDER_AUTH_MISSING maps to readable API key message without leaking secrets", () => {
+    const state = dispatch([
+      runEvent({
+        type: "RUN_ERROR",
+        code: "PROVIDER_AUTH_MISSING",
+        message: "missing API key for provider",
+      }),
+    ]);
+    expect(state.phase).toBe("error");
+    expect(state.errorMessage).toBe("API key 缺失，请在 .env 中配置 LLM_API_KEY");
+    expect(state.errorMessage).not.toContain("sk-");
+    expect(state.errorMessage).not.toContain("LLM_API_KEY=");
+    const errorStep = state.steps.find((step) => step.id === "run-error");
+    expect(errorStep?.description).toBe("API key 缺失，请在 .env 中配置 LLM_API_KEY");
+    expect(errorStep?.tag).toBe("PROVIDER_AUTH_MISSING");
+  });
+
+  it("RUN_ERROR with PROVIDER_REQUEST_FAILED maps to readable provider failure message without leaking secrets", () => {
+    const state = dispatch([
+      runEvent({
+        type: "RUN_ERROR",
+        code: "PROVIDER_REQUEST_FAILED",
+        message: "upstream returned 503",
+      }),
+    ]);
+    expect(state.phase).toBe("error");
+    expect(state.errorMessage).toContain("Provider 请求失败：");
+    expect(state.errorMessage).toContain("upstream returned 503");
+    expect(state.errorMessage).not.toContain("sk-");
+    const errorStep = state.steps.find((step) => step.id === "run-error");
+    expect(errorStep?.description).toContain("Provider 请求失败：");
+    expect(errorStep?.tag).toBe("PROVIDER_REQUEST_FAILED");
+  });
 });
 
 describe("runtime reducer replay idempotency", () => {

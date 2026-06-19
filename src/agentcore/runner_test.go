@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"testing"
 
 	convcontext "awaken/src/context"
+	"awaken/src/llm"
 	"awaken/src/tool"
 	_ "awaken/src/tools/apply_patch"
 	_ "awaken/src/tools/file_read"
@@ -1205,6 +1207,92 @@ func TestRunnerXMLFallbackCancelBeforeExecutionEmitsNoToolCallStart(t *testing.T
 	}
 	if syntheticResult.Content != "工具执行已被取消" {
 		t.Fatalf("expected synthetic result content '工具执行已被取消', got %q", syntheticResult.Content)
+	}
+}
+
+func TestRunnerRunStreamWithEventsMissingAPIKeyEmitsAuthErrorCode(t *testing.T) {
+	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("expected no LLM call when API key is missing")
+	})
+	defer server.Close()
+
+	cfg := testAgentConfig(server.URL, 2)
+	cfg.ModelConfig.APIKey = ""
+	var gotEvents []AwakenEvent
+	agent := NewAgent(cfg)
+	_, err := agent.RunStreamWithEvents(context.Background(), "ping", nil, EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+	if err == nil {
+		t.Fatalf("expected error when API key is missing")
+	}
+
+	var runErrorEvent *AwakenEvent
+	for i := range gotEvents {
+		if gotEvents[i].Type == RunErrorEventType {
+			runErrorEvent = &gotEvents[i]
+			break
+		}
+	}
+	if runErrorEvent == nil {
+		t.Fatalf("expected RunError event, got events: %+v", gotEvents)
+	}
+	if runErrorEvent.Code != "PROVIDER_AUTH_MISSING" {
+		t.Fatalf("expected Code PROVIDER_AUTH_MISSING, got %q", runErrorEvent.Code)
+	}
+}
+
+func TestRunEventEmitterRunErroredSetsRequestFailedCode(t *testing.T) {
+	var gotEvents []AwakenEvent
+	emitter := newRunEventEmitter("thread-test", EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+
+	wrapped := fmt.Errorf("%w: status 500", llm.ErrRequestFailed)
+	emitter.runErrored(wrapped)
+
+	if len(gotEvents) != 1 {
+		t.Fatalf("expected 1 event, got %d: %+v", len(gotEvents), gotEvents)
+	}
+	if gotEvents[0].Type != RunErrorEventType {
+		t.Fatalf("expected RunError event, got %s", gotEvents[0].Type)
+	}
+	if gotEvents[0].Code != "PROVIDER_REQUEST_FAILED" {
+		t.Fatalf("expected Code PROVIDER_REQUEST_FAILED, got %q", gotEvents[0].Code)
+	}
+	if !strings.Contains(gotEvents[0].Error, llm.ErrRequestFailed.Error()) {
+		t.Fatalf("expected error text to contain %q, got %q", llm.ErrRequestFailed.Error(), gotEvents[0].Error)
+	}
+}
+
+func TestRunEventEmitterRunErroredTransportErrorDoesNotLeakURL(t *testing.T) {
+	var gotEvents []AwakenEvent
+	emitter := newRunEventEmitter("thread-test", EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+
+	// Simulate a sanitized transport error as produced by llm.transportError.
+	wrapped := fmt.Errorf("LLM stream call failed: %w", fmt.Errorf("%w: transport error", llm.ErrRequestFailed))
+	emitter.runErrored(wrapped)
+
+	if len(gotEvents) != 1 {
+		t.Fatalf("expected 1 event, got %d: %+v", len(gotEvents), gotEvents)
+	}
+	if gotEvents[0].Type != RunErrorEventType {
+		t.Fatalf("expected RunError event, got %s", gotEvents[0].Type)
+	}
+	if gotEvents[0].Code != "PROVIDER_REQUEST_FAILED" {
+		t.Fatalf("expected Code PROVIDER_REQUEST_FAILED, got %q", gotEvents[0].Code)
+	}
+	msg := gotEvents[0].Error
+	if strings.Contains(msg, "127.0.0.1") {
+		t.Fatalf("error message must not contain URL host: %q", msg)
+	}
+	if strings.Contains(msg, "/invalid") {
+		t.Fatalf("error message must not contain URL path: %q", msg)
+	}
+	if !strings.Contains(msg, "transport error") {
+		t.Fatalf("error message should contain transport error, got %q", msg)
 	}
 }
 

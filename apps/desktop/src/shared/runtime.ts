@@ -58,6 +58,7 @@ export type RuntimeInfoWire = {
   runtime_version: string;
   api_version: string;
   configured_model: string;
+  protocol: string;
   has_api_key: boolean;
   default_workspace: string;
   base_url_host: string;
@@ -67,6 +68,7 @@ export type RuntimeInfo = {
   runtimeVersion: string;
   apiVersion: string;
   configuredModel: string;
+  protocol: string;
   hasApiKey: boolean;
   defaultWorkspace: string;
   baseUrlHost: string;
@@ -181,6 +183,7 @@ export function normalizeRuntimeInfo(info: RuntimeInfoWire): RuntimeInfo {
     runtimeVersion: info.runtime_version,
     apiVersion: info.api_version,
     configuredModel: info.configured_model,
+    protocol: info.protocol,
     hasApiKey: info.has_api_key,
     defaultWorkspace: info.default_workspace,
     baseUrlHost: info.base_url_host,

@@ -102,6 +102,21 @@ pre {
   color: #005ea8;
 }
 
+.runtime-pill-connected {
+  background: rgba(34, 197, 94, 0.12);
+  color: #166534;
+}
+
+.runtime-pill-warning {
+  background: rgba(234, 88, 12, 0.12);
+  color: #9a3412;
+}
+
+.runtime-pill-disconnected {
+  background: rgba(107, 114, 128, 0.12);
+  color: #374151;
+}
+
 .runtime-action {
   height: 30px;
   padding: 0 12px;

@@ -729,11 +729,21 @@ export function reduceRuntimeState(
           } else {
             nextState.phase = "error";
             nextState.timelineStatus = "error";
-            nextState.errorMessage = action.event.message || "Run failed";
+            const rawMessage = action.event.message || "Runtime returned an error";
+            let errorMessage = rawMessage;
+            let errorDescription = rawMessage;
+            if (action.event.code === "PROVIDER_AUTH_MISSING") {
+              errorMessage = "API key 缺失，请在 .env 中配置 LLM_API_KEY";
+              errorDescription = "API key 缺失，请在 .env 中配置 LLM_API_KEY";
+            } else if (action.event.code === "PROVIDER_REQUEST_FAILED") {
+              errorMessage = `Provider 请求失败：${rawMessage}`;
+              errorDescription = `Provider 请求失败：${rawMessage}`;
+            }
+            nextState.errorMessage = errorMessage;
             nextState.approvals = [];
             records = upsertStep(records, "run-error", {
               title: "Run failed",
-              description: action.event.message || "Runtime returned an error",
+              description: errorDescription,
               status: "error",
               tag: action.event.code || "error",
             });

@@ -104,14 +104,14 @@ func (t *openaiTransport) Invoke(ctx stdctx.Context, cfg Config, req Request) (*
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, requestBuildError(err)
 	}
 
 	applyAuthHeaders(httpReq, cfg, ProtocolOpenAIChat)
 
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrRequestFailed, err)
+		return nil, transportError(err)
 	}
 	defer resp.Body.Close()
 
@@ -153,14 +153,14 @@ func (t *openaiTransport) StreamInvoke(ctx stdctx.Context, cfg Config, req Reque
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, requestBuildError(err)
 	}
 
 	applyAuthHeaders(httpReq, cfg, ProtocolOpenAIChat)
 
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrRequestFailed, err)
+		return nil, transportError(err)
 	}
 	defer resp.Body.Close()
 

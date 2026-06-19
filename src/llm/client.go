@@ -166,15 +166,20 @@ func applyAuthHeaders(httpReq *http.Request, cfg Config, protocol Protocol) {
 }
 
 func requestFailedError(resp *http.Response) error {
-	body, _ := io.ReadAll(resp.Body)
-	detail := strings.TrimSpace(string(body))
-	if detail == "" {
-		return fmt.Errorf("%w: status %d", ErrRequestFailed, resp.StatusCode)
-	}
-	if len(detail) > 1000 {
-		detail = detail[:1000] + "...(truncated)"
-	}
-	return fmt.Errorf("%w: status %d: %s", ErrRequestFailed, resp.StatusCode, detail)
+	// Drain body to allow connection reuse, but do not include body in error
+	// message to avoid leaking provider-internal details or secrets.
+	io.Copy(io.Discard, resp.Body)
+	return fmt.Errorf("%w: status %d", ErrRequestFailed, resp.StatusCode)
+}
+
+// transportError 返回脱敏的 transport 错误，不暴露完整 URL 或 url.Error 细节。
+func transportError(err error) error {
+	return fmt.Errorf("%w: transport error", ErrRequestFailed)
+}
+
+// requestBuildError 返回脱敏的请求构造错误，不暴露完整 URL（例如 malformed base URL）。
+func requestBuildError(err error) error {
+	return fmt.Errorf("%w: request build error", ErrRequestFailed)
 }
 
 func getTransport(cfg Config) Transport {

@@ -510,9 +510,31 @@ export function App() {
                     {runtimeInfo ? "Connected" : "Disconnected"}
                   </span>
                   {runtimeInfo ? (
-                    <span className="runtime-pill">
-                      {runtimeInfo.configuredModel || "unknown model"}
-                    </span>
+                    <>
+                      <span className="runtime-pill">
+                        {runtimeInfo.configuredModel || "unknown model"}
+                      </span>
+                      <span
+                        className={`runtime-pill runtime-pill-status ${
+                          runtimeInfo.hasApiKey
+                            ? "runtime-pill-connected"
+                            : "runtime-pill-warning"
+                        }`}
+                      >
+                        {runtimeInfo.hasApiKey ? "Ready" : "Not ready"}
+                      </span>
+                      <span className="runtime-pill runtime-pill-muted">
+                        {runtimeInfo.protocol || "unknown protocol"}
+                      </span>
+                      <span className="runtime-pill runtime-pill-muted">
+                        {runtimeInfo.baseUrlHost || "unknown provider"}
+                      </span>
+                      {!runtimeInfo.hasApiKey ? (
+                        <span className="runtime-pill runtime-pill-warning">
+                          LLM_API_KEY required
+                        </span>
+                      ) : null}
+                    </>
                   ) : null}
                   <label className="workspace-picker">
                     <span className="workspace-picker-label">Workspace</span>

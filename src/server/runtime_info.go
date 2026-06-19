@@ -9,6 +9,7 @@ type RuntimeInfo struct {
 	RuntimeVersion   string `json:"runtime_version"`
 	APIVersion       string `json:"api_version"`
 	ConfiguredModel  string `json:"configured_model"`
+	Protocol         string `json:"protocol"`
 	HasAPIKey        bool   `json:"has_api_key"`
 	DefaultWorkspace string `json:"default_workspace"`
 	BaseURLHost      string `json:"base_url_host"`
@@ -30,6 +31,7 @@ func (s *StaticRuntimeInfoProvider) GetRuntimeInfo() RuntimeInfo {
 
 type llmRuntimeInfoProvider struct {
 	configuredModel  string
+	protocol         string
 	hasAPIKey        bool
 	defaultWorkspace string
 	baseURL          string
@@ -40,6 +42,7 @@ func (p *llmRuntimeInfoProvider) GetRuntimeInfo() RuntimeInfo {
 		RuntimeVersion:   RuntimeVersion,
 		APIVersion:       "v1",
 		ConfiguredModel:  p.configuredModel,
+		Protocol:         p.protocol,
 		HasAPIKey:        p.hasAPIKey,
 		DefaultWorkspace: p.defaultWorkspace,
 		BaseURLHost:      extractHost(p.baseURL),
@@ -48,9 +51,10 @@ func (p *llmRuntimeInfoProvider) GetRuntimeInfo() RuntimeInfo {
 
 // NewLLMRuntimeInfoProvider 根据 LLM 配置构造一个 RuntimeInfoProvider。
 // 它只接收非敏感字段，避免在响应中泄漏 API key 或完整 base URL。
-func NewLLMRuntimeInfoProvider(model, baseURL, apiKey, workspace string) RuntimeInfoProvider {
+func NewLLMRuntimeInfoProvider(model, baseURL, apiKey, workspace, protocol string) RuntimeInfoProvider {
 	return &llmRuntimeInfoProvider{
 		configuredModel:  model,
+		protocol:         protocol,
 		hasAPIKey:        apiKey != "",
 		defaultWorkspace: workspace,
 		baseURL:          baseURL,

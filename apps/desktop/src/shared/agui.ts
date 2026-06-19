@@ -33,6 +33,7 @@ export type AguiRunOutcome = {
 export type AguiEvent = {
   type: AguiEventType;
   timestamp?: number;
+  seq?: number;
   threadId?: string;
   runId?: string;
   status?: string;

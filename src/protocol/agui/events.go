@@ -31,6 +31,7 @@ type RunOutcome struct {
 
 type Event struct {
 	Type                  EventType   `json:"type"`
+	Seq                   uint64      `json:"seq,omitempty"`
 	Timestamp             int64       `json:"timestamp,omitempty"`
 	ThreadID              string      `json:"threadId,omitempty"`
 	RunID                 string      `json:"runId,omitempty"`

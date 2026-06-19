@@ -2,7 +2,7 @@ import type { ApprovalItem, RunStepItem } from "@awaken/ui";
 import type { AguiApprovalRiskTone, AguiArtifactStatus, AguiEvent } from "./agui";
 import type { RuntimeRun, RuntimeRunStatus } from "../../shared/runtime";
 
-type RuntimePhase = "idle" | "starting" | "running" | "cancelling" | "done" | "error" | "cancelled";
+type RuntimePhase = "idle" | "starting" | "running" | "reconnecting" | "cancelling" | "done" | "error" | "cancelled";
 
 type TimelineStatus = "ready" | "running" | "done" | "error";
 
@@ -45,6 +45,8 @@ export type RuntimeAction =
   | { type: "run/cancelRequested" }
   | { type: "run/cancelSync"; run: RuntimeRun }
   | { type: "run/streamError"; message: string }
+  | { type: "run/reconnecting" }
+  | { type: "run/recovered"; run: RuntimeRun }
   | { type: "run/event"; event: AguiEvent };
 
 const initialState: RuntimeViewState = {
@@ -310,6 +312,14 @@ export function reduceRuntimeState(
         errorMessage: action.message,
         approvals: [],
       };
+    case "run/reconnecting":
+      return {
+        ...state,
+        phase: "reconnecting",
+        timelineStatus: "running",
+      };
+    case "run/recovered":
+      return { ...syncFromRun(initialState, action.run), timelineTitle: "恢复运行" };
     case "run/event": {
       const nextState = { ...state };
       let records = state.steps.map((step, index) => ({

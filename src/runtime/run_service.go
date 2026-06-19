@@ -91,12 +91,20 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	return session.Snapshot(), nil
 }
 
-func (s *RunService) Subscribe(runID string) (Subscription, error) {
+func (s *RunService) Subscribe(runID string, afterSeq uint64) (Subscription, error) {
 	session, err := s.session(runID)
 	if err != nil {
 		return Subscription{}, err
 	}
-	return session.Subscribe(), nil
+	return session.Subscribe(afterSeq), nil
+}
+
+func (s *RunService) GetRun(runID string) (Run, error) {
+	session, err := s.session(runID)
+	if err != nil {
+		return Run{}, err
+	}
+	return session.Snapshot(), nil
 }
 
 func (s *RunService) CancelRun(runID string) (Run, error) {

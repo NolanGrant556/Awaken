@@ -1,6 +1,9 @@
 package agui
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 type Encoder struct{}
 
@@ -13,7 +16,12 @@ func (enc Encoder) EncodeSSE(event Event) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	frame := append([]byte("data: "), payload...)
+	var frame []byte
+	if event.Seq > 0 {
+		frame = append(frame, []byte(fmt.Sprintf("id: %d\n", event.Seq))...)
+	}
+	frame = append(frame, []byte("data: ")...)
+	frame = append(frame, payload...)
 	frame = append(frame, '\n', '\n')
 	return frame, nil
 }

@@ -105,6 +105,7 @@ export type RunStreamHandlers = {
 export type AwakenBridge = {
   platform: DesktopPlatform;
   runtimeBaseUrl: string;
+  getRun: (runId: string) => Promise<RuntimeRun>;
   startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
   resolveApproval: (
@@ -112,7 +113,11 @@ export type AwakenBridge = {
     approvalId: string,
     decision: ApprovalDecision,
   ) => Promise<void>;
-  subscribeRun: (runId: string, handlers: RunStreamHandlers) => Promise<string>;
+  subscribeRun: (
+    runId: string,
+    handlers: RunStreamHandlers,
+    afterSeq?: number,
+  ) => Promise<string>;
   unsubscribeRun: (subscriptionId: string) => void;
   getRuntimeInfo: () => Promise<RuntimeInfo>;
   pickWorkspace: (defaultPath?: string) => Promise<WorkspacePickResult>;

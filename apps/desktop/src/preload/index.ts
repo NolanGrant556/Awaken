@@ -52,6 +52,8 @@ ipcRenderer.on("awaken:run-closed", (_event, payload: { subscriptionId: string }
 const bridge: AwakenBridge = {
   platform: toDesktopPlatform(process.platform),
   runtimeBaseUrl,
+  getRun: (runId: string) =>
+    ipcRenderer.invoke("awaken:get-run", runId) as Promise<RuntimeRun>,
   startRun: (request: StartRunRequest) =>
     ipcRenderer.invoke("awaken:start-run", request) as Promise<RuntimeRun>,
   cancelRun: (runId: string) =>
@@ -62,7 +64,7 @@ const bridge: AwakenBridge = {
       approvalId,
       decision,
     }) as Promise<void>,
-  subscribeRun: async (runId: string, handlers: RunStreamHandlers) => {
+  subscribeRun: async (runId: string, handlers: RunStreamHandlers, afterSeq?: number) => {
     const subscriptionId = crypto.randomUUID();
     subscriptions.set(subscriptionId, handlers);
 
@@ -70,6 +72,7 @@ const bridge: AwakenBridge = {
       await ipcRenderer.invoke("awaken:subscribe-run", {
         runId,
         subscriptionId,
+        afterSeq,
       });
       return subscriptionId;
     } catch (error) {

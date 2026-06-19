@@ -65,7 +65,7 @@ func TestSessionAwaitApprovalTransitionsStatus(t *testing.T) {
 		t.Fatalf("expected running status after resolve, got %s", session.Snapshot().Status)
 	}
 
-	sub := session.Subscribe()
+	sub := session.Subscribe(0)
 	if sub.Close != nil {
 		defer sub.Close()
 	}
@@ -134,7 +134,7 @@ func TestSessionAwaitApprovalAtomicWithCancel(t *testing.T) {
 		t.Fatalf("timed out waiting for AwaitApproval to return")
 	}
 
-	sub := session.Subscribe()
+	sub := session.Subscribe(0)
 	if sub.Close != nil {
 		defer sub.Close()
 	}
@@ -218,7 +218,7 @@ func TestSessionResolveApprovalAfterCancelReturnsCancelling(t *testing.T) {
 		t.Fatalf("expected cancelling status after resolve, got %s", session.Snapshot().Status)
 	}
 
-	sub := session.Subscribe()
+	sub := session.Subscribe(0)
 	if sub.Close != nil {
 		defer sub.Close()
 	}
@@ -261,7 +261,7 @@ func TestSessionResolveApprovalAfterTerminalReturnsTerminal(t *testing.T) {
 		t.Fatalf("expected finished status after resolve, got %s", session.Snapshot().Status)
 	}
 
-	sub := session.Subscribe()
+	sub := session.Subscribe(0)
 	if sub.Close != nil {
 		defer sub.Close()
 	}

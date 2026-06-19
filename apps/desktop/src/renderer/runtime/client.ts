@@ -15,11 +15,19 @@ import {
   type WorkspaceValidationResult,
 } from "../../shared/runtime";
 
+export type SubscribeHandlers = {
+  onEvent: (event: AguiEvent) => void;
+  onError?: (message: string) => void;
+  onReconnect?: () => void;
+  onClose?: () => void;
+};
+
 export type RuntimeClient = {
   source: "electron" | "browser";
   platform: DesktopPlatform | "web";
   runtimeBaseUrl: string;
   getRuntimeInfo: () => Promise<RuntimeInfo>;
+  getRun: (runId: string) => Promise<RuntimeRun>;
   startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
   resolveApproval: (
@@ -29,15 +37,22 @@ export type RuntimeClient = {
   ) => Promise<void>;
   subscribeRun: (
     runId: string,
-    handlers: {
-      onEvent: (event: AguiEvent) => void;
-      onError?: (message: string) => void;
-      onClose?: () => void;
-    },
+    handlers: SubscribeHandlers,
+    afterSeq?: number,
   ) => Promise<() => void>;
   pickWorkspace: (defaultPath?: string) => Promise<WorkspacePickResult>;
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
 };
+
+const MAX_RECONNECT_RETRIES = 5;
+
+function reconnectDelay(retryCount: number): number {
+  return Math.min(1000 * Math.pow(2, retryCount), 10000);
+}
+
+function isTerminalEvent(event: AguiEvent): boolean {
+  return event.type === "RUN_FINISHED" || event.type === "RUN_ERROR";
+}
 
 function joinRuntimeUrl(baseUrl: string, pathname: string): string {
   if (!baseUrl) {
@@ -83,12 +98,110 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     platform: bridge.platform,
     runtimeBaseUrl: bridge.runtimeBaseUrl,
     getRuntimeInfo: () => bridge.getRuntimeInfo(),
+    getRun: (runId) => bridge.getRun(runId),
     startRun: (request) => bridge.startRun(request),
     cancelRun: bridge.cancelRun,
     resolveApproval: bridge.resolveApproval,
-    subscribeRun: async (runId, handlers) => {
-      const subscriptionId = await bridge.subscribeRun(runId, handlers);
-      return () => bridge.unsubscribeRun(subscriptionId);
+    subscribeRun: async (runId, handlers, afterSeq) => {
+      let lastSeq = afterSeq ?? 0;
+      let terminalSeen = false;
+      let retryCount = 0;
+      let currentSubscriptionId: string | null = null;
+      let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+      let disposed = false;
+
+      const wrappedHandlers = {
+        onEvent: (event: AguiEvent) => {
+          if (event.seq !== undefined && event.seq > lastSeq) {
+            lastSeq = event.seq;
+          }
+          if (isTerminalEvent(event)) {
+            terminalSeen = true;
+          }
+          handlers.onEvent(event);
+        },
+        onError: (message: string) => {
+          if (disposed || terminalSeen) return;
+          attemptReconnect(message);
+        },
+        onClose: () => {
+          if (disposed) return;
+          if (terminalSeen) {
+            handlers.onClose?.();
+            return;
+          }
+          attemptReconnect("Runtime stream closed before a terminal event");
+        },
+      };
+
+      function attemptReconnect(reason: string): void {
+        if (disposed || terminalSeen) return;
+        // Reentrancy guard: if a reconnect is already pending, ignore
+        // additional onError/onClose triggers that fire in the same window.
+        if (reconnectTimer) return;
+        if (retryCount >= MAX_RECONNECT_RETRIES) {
+          handlers.onError?.(
+            `Runtime stream failed after ${MAX_RECONNECT_RETRIES} reconnect attempts: ${reason}`,
+          );
+          return;
+        }
+
+        handlers.onReconnect?.();
+        const delay = reconnectDelay(retryCount);
+        retryCount += 1;
+
+        if (currentSubscriptionId) {
+          bridge.unsubscribeRun(currentSubscriptionId);
+          currentSubscriptionId = null;
+        }
+
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          if (disposed || terminalSeen) return;
+          void resubscribe();
+        }, delay);
+      }
+
+      async function resubscribe(): Promise<void> {
+        if (disposed || terminalSeen) return;
+        try {
+          currentSubscriptionId = await bridge.subscribeRun(
+            runId,
+            wrappedHandlers,
+            lastSeq,
+          );
+        } catch (error) {
+          if (disposed || terminalSeen) return;
+          attemptReconnect(
+            error instanceof Error ? error.message : "Reconnection failed",
+          );
+        }
+      }
+
+      try {
+        currentSubscriptionId = await bridge.subscribeRun(
+          runId,
+          wrappedHandlers,
+          lastSeq,
+        );
+      } catch (error) {
+        if (disposed) throw error;
+        attemptReconnect(
+          error instanceof Error ? error.message : "Initial subscription failed",
+        );
+      }
+
+      return () => {
+        disposed = true;
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
+        if (currentSubscriptionId) {
+          bridge.unsubscribeRun(currentSubscriptionId);
+          currentSubscriptionId = null;
+        }
+      };
     },
     pickWorkspace: (defaultPath) => bridge.pickWorkspace(defaultPath),
     validateWorkspace: (path) => bridge.validateWorkspace(path),
@@ -109,6 +222,7 @@ function createBrowserClient(): RuntimeClient {
       }
       return normalizeRuntimeInfo((await response.json()) as RuntimeInfoWire);
     },
+    getRun: (runId) => requestRuntime(runtimeBaseUrl, `/v1/runs/${runId}`),
     startRun: (request) =>
       requestRuntime(runtimeBaseUrl, "/v1/runs", {
         method: "POST",
@@ -133,31 +247,88 @@ function createBrowserClient(): RuntimeClient {
           body: JSON.stringify({ decision }),
         },
       ),
-    subscribeRun: async (runId, handlers) => {
-      const source = new EventSource(joinRuntimeUrl(runtimeBaseUrl, `/v1/runs/${runId}/events`));
+    subscribeRun: async (runId, handlers, afterSeq) => {
+      let lastSeq = afterSeq ?? 0;
       let terminalSeen = false;
+      let retryCount = 0;
+      let disposed = false;
+      let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+      let source: EventSource | null = null;
 
-      source.onmessage = (event) => {
-        const parsed = JSON.parse(event.data) as AguiEvent;
-        if (parsed.type === "RUN_FINISHED" || parsed.type === "RUN_ERROR") {
-          terminalSeen = true;
-        }
-        handlers.onEvent(parsed);
-        if (terminalSeen) {
+      function buildEventsUrl(): string {
+        const base = joinRuntimeUrl(runtimeBaseUrl, `/v1/runs/${runId}/events`);
+        return lastSeq > 0 ? `${base}?after_seq=${lastSeq}` : base;
+      }
+
+      function closeSource(): void {
+        if (source) {
+          source.onmessage = null;
+          source.onerror = null;
           source.close();
-          handlers.onClose?.();
+          source = null;
         }
-      };
-      source.onerror = () => {
-        source.close();
-        if (!terminalSeen) {
-          handlers.onError?.("Runtime stream connection failed");
+      }
+
+      function attemptReconnect(reason: string): void {
+        if (disposed || terminalSeen) return;
+        // Reentrancy guard: if a reconnect is already pending, ignore
+        // additional onError/onClose triggers that fire in the same window.
+        if (reconnectTimer) return;
+        closeSource();
+
+        if (retryCount >= MAX_RECONNECT_RETRIES) {
+          handlers.onError?.(
+            `Runtime stream failed after ${MAX_RECONNECT_RETRIES} reconnect attempts: ${reason}`,
+          );
+          return;
         }
-        handlers.onClose?.();
-      };
+
+        handlers.onReconnect?.();
+        const delay = reconnectDelay(retryCount);
+        retryCount += 1;
+
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          if (disposed || terminalSeen) return;
+          connect();
+        }, delay);
+      }
+
+      function connect(): void {
+        if (disposed || terminalSeen) return;
+
+        source = new EventSource(buildEventsUrl());
+
+        source.onmessage = (event) => {
+          const parsed = JSON.parse(event.data) as AguiEvent;
+          if (parsed.seq !== undefined && parsed.seq > lastSeq) {
+            lastSeq = parsed.seq;
+          }
+          if (isTerminalEvent(parsed)) {
+            terminalSeen = true;
+          }
+          handlers.onEvent(parsed);
+          if (terminalSeen) {
+            closeSource();
+            handlers.onClose?.();
+          }
+        };
+
+        source.onerror = () => {
+          if (disposed || terminalSeen) return;
+          attemptReconnect("Runtime stream connection failed");
+        };
+      }
+
+      connect();
 
       return () => {
-        source.close();
+        disposed = true;
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
+        closeSource();
       };
     },
     pickWorkspace: async () => ({

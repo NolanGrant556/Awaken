@@ -16,8 +16,8 @@ import {
   type PlatformKind,
   type ProjectItem,
 } from "@awaken/ui";
-import { createRuntimeClient } from "./runtime/client";
-import type { RuntimeInfo, StartRunRequest } from "../shared/runtime";
+import { createRuntimeClient, type SubscribeHandlers } from "./runtime/client";
+import type { RuntimeInfo, RuntimeRunStatus, StartRunRequest } from "../shared/runtime";
 import {
   createInitialRuntimeState,
   reduceRuntimeState,
@@ -56,6 +56,8 @@ function formatStatusLabel(
       return "Creating run";
     case "running":
       return "Streaming";
+    case "reconnecting":
+      return "Reconnecting...";
     case "cancelling":
       return "Cancelling";
     case "done":
@@ -137,9 +139,51 @@ export function App() {
     }
   }, [runtimeInfo, workspacePath]);
 
+  useEffect(() => {
+    const persistedRunId = localStorage.getItem("awaken:runId");
+    if (!persistedRunId) return;
+
+    let cancelled = false;
+
+    async function recover(): Promise<void> {
+      try {
+        const run = await runtimeClient.getRun(persistedRunId!);
+        if (cancelled) return;
+
+        // Always replay full history (after_seq=0) regardless of run status.
+        // For terminal runs, the replay restores timeline/artifacts/final text,
+        // and the terminal event in the stream clears localStorage via onEvent.
+        dispatch({ type: "run/recovered", run });
+
+        const unsubscribe = await runtimeClient.subscribeRun(
+          run.runId,
+          createSubscribeHandlers(),
+          0,
+        );
+        if (cancelled) {
+          unsubscribe();
+          return;
+        }
+        unsubscribeRef.current = unsubscribe;
+      } catch {
+        if (!cancelled) {
+          localStorage.removeItem("awaken:runId");
+        }
+      }
+    }
+
+    void recover();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runtimeClient]);
+
   const isBusy =
     runtimeState.phase === "starting" ||
     runtimeState.phase === "running" ||
+    runtimeState.phase === "reconnecting" ||
     runtimeState.phase === "cancelling";
 
   const isWorkspaceValid =
@@ -175,6 +219,45 @@ export function App() {
           timeLabel: "ready",
         },
       ];
+
+  function createSubscribeHandlers(): SubscribeHandlers {
+    return {
+      onEvent: (event) => {
+        if (event.type === "RUN_FINISHED" || event.type === "RUN_ERROR") {
+          terminalSeenRef.current = true;
+          localStorage.removeItem("awaken:runId");
+        }
+        if (event.type === "RUN_STATUS_CHANGED" && event.status === "cancelled") {
+          localStorage.removeItem("awaken:runId");
+        }
+        if (event.type === "AWAKEN_APPROVAL_REQUESTED" && event.approvalId) {
+          setResolvedApproval(null);
+        }
+        if (
+          event.type === "AWAKEN_APPROVAL_RESOLVED" &&
+          event.approvalId &&
+          event.approvalId === resolvingApprovalIdRef.current
+        ) {
+          setResolvedApproval({
+            approvalId: event.approvalId,
+            decision: event.approvalDecision === "rejected" ? "rejected" : "approved",
+          });
+          resolvingApprovalIdRef.current = null;
+          setResolvingApprovalId(null);
+        }
+        dispatch({ type: "run/event", event });
+      },
+      onError: (message) => dispatch({ type: "run/streamError", message }),
+      onReconnect: () => dispatch({ type: "run/reconnecting" }),
+      onClose: () => {
+        // Non-terminal close is handled by the client layer's attemptReconnect
+        // (which dispatches run/reconnecting and retries). This callback only
+        // fires on terminal close; the give-up path (max retries exceeded) is
+        // delivered through onError.
+        unsubscribeRef.current = null;
+      },
+    };
+  }
 
   async function handleSubmit(): Promise<void> {
     const prompt = composerValue.trim();
@@ -221,39 +304,11 @@ export function App() {
       };
       const run = await runtimeClient.startRun(startRunRequest);
       dispatch({ type: "run/created", run });
-      const unsubscribe = await runtimeClient.subscribeRun(run.runId, {
-        onEvent: (event) => {
-          if (event.type === "RUN_FINISHED" || event.type === "RUN_ERROR") {
-            terminalSeenRef.current = true;
-          }
-          if (event.type === "AWAKEN_APPROVAL_REQUESTED" && event.approvalId) {
-            setResolvedApproval(null);
-          }
-          if (
-            event.type === "AWAKEN_APPROVAL_RESOLVED" &&
-            event.approvalId &&
-            event.approvalId === resolvingApprovalIdRef.current
-          ) {
-            setResolvedApproval({
-              approvalId: event.approvalId,
-              decision: event.approvalDecision === "rejected" ? "rejected" : "approved",
-            });
-            resolvingApprovalIdRef.current = null;
-            setResolvingApprovalId(null);
-          }
-          dispatch({ type: "run/event", event });
-        },
-        onError: (message) => dispatch({ type: "run/streamError", message }),
-        onClose: () => {
-          if (!terminalSeenRef.current) {
-            dispatch({
-              type: "run/streamError",
-              message: "Runtime stream closed before a terminal event. Please retry the run.",
-            });
-          }
-          unsubscribeRef.current = null;
-        },
-      });
+      localStorage.setItem("awaken:runId", run.runId);
+      const unsubscribe = await runtimeClient.subscribeRun(
+        run.runId,
+        createSubscribeHandlers(),
+      );
       unsubscribeRef.current = unsubscribe;
       setComposerValue("");
     } catch (error) {
@@ -272,6 +327,10 @@ export function App() {
     try {
       const run = await runtimeClient.cancelRun(runtimeState.runId);
       dispatch({ type: "run/cancelSync", run });
+      const terminalStatuses: RuntimeRunStatus[] = ["finished", "error", "cancelled"];
+      if (terminalStatuses.includes(run.status)) {
+        localStorage.removeItem("awaken:runId");
+      }
     } catch (error) {
       dispatch({
         type: "run/streamError",
@@ -357,6 +416,7 @@ export function App() {
                 setResolvedApproval(null);
                 resolvingApprovalIdRef.current = null;
                 terminalSeenRef.current = false;
+                localStorage.removeItem("awaken:runId");
                 dispatch({ type: "run/reset" });
               }}
             />

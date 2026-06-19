@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -366,6 +367,453 @@ func TestMapRuntimeCancelledUsesAGUIRunErrorWithCancelCode(t *testing.T) {
 	}
 	if events[0].Code != "RUN_CANCELLED" {
 		t.Fatalf("expected RUN_CANCELLED code, got %q", events[0].Code)
+	}
+}
+
+func TestGetRunReturnsRunSnapshot(t *testing.T) {
+	started := make(chan struct{})
+	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			close(started)
+			return "done", nil
+		})
+	})
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello","workspace":{"workspace_root":"/tmp/awaken-test-workspace"}}`))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var created awruntime.Run
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+
+	<-started
+
+	// Wait for run to reach finished state.
+	deadline := time.Now().Add(2 * time.Second)
+	var run awruntime.Run
+	for time.Now().Before(deadline) {
+		getResp, err := http.Get(ts.URL + "/v1/runs/" + created.RunID)
+		if err != nil {
+			t.Fatalf("GET /v1/runs/{run_id} failed: %v", err)
+		}
+		_ = json.NewDecoder(getResp.Body).Decode(&run)
+		getResp.Body.Close()
+		if run.Status == awruntime.RunStatusFinished {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if run.Status != awruntime.RunStatusFinished {
+		t.Fatalf("expected finished status, got %s", run.Status)
+	}
+	if run.RunID != created.RunID {
+		t.Fatalf("expected run_id %q, got %q", created.RunID, run.RunID)
+	}
+	if run.ThreadID != created.ThreadID {
+		t.Fatalf("expected thread_id %q, got %q", created.ThreadID, run.ThreadID)
+	}
+}
+
+func TestGetRunMissingReturns404(t *testing.T) {
+	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			return "", nil
+		})
+	})
+
+	router := NewRouter(runService, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/runs/missing", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for missing run, got %d", rec.Code)
+	}
+
+	var errResp errorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("expected JSON error response, got %q", rec.Body.String())
+	}
+	if errResp.Error != "RUN_NOT_FOUND" {
+		t.Fatalf("expected RUN_NOT_FOUND error code, got %q", errResp.Error)
+	}
+}
+
+func TestRunEventsAfterSeqFiltersHistory(t *testing.T) {
+	finished := make(chan struct{})
+	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextMessageStartedEventType, MessageID: "msg-1", Role: "assistant"})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextDeltaEventType, MessageID: "msg-1", Role: "assistant", Delta: "hello"})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextMessageFinishedEventType, MessageID: "msg-1"})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+			close(finished)
+			return "done", nil
+		})
+	})
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello","workspace":{"workspace_root":"/tmp/awaken-test-workspace"}}`))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var created awruntime.Run
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+
+	<-finished
+
+	// Wait for the run to reach terminal state so the event bus is closed
+	// and the subscription returns history only (no live tail).
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		getResp, err := http.Get(ts.URL + "/v1/runs/" + created.RunID)
+		if err != nil {
+			t.Fatalf("GET /v1/runs/{run_id} failed: %v", err)
+		}
+		var run awruntime.Run
+		_ = json.NewDecoder(getResp.Body).Decode(&run)
+		getResp.Body.Close()
+		if run.Status == awruntime.RunStatusFinished {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// First, get all events (after_seq=0) to determine the seq values.
+	allEvents := fetchSSEEvents(t, ts.URL, created.RunID, "")
+	if len(allEvents) == 0 {
+		t.Fatalf("expected at least one event with after_seq=0, got none")
+	}
+	// Verify events have strictly increasing seq values.
+	for i, ev := range allEvents {
+		if ev.Seq == 0 {
+			t.Fatalf("event %d has seq=0, expected non-zero seq", i)
+		}
+		if i > 0 && ev.Seq <= allEvents[i-1].Seq {
+			t.Fatalf("seq not strictly increasing: event %d has seq=%d, previous has seq=%d", i, ev.Seq, allEvents[i-1].Seq)
+		}
+	}
+
+	// Now subscribe with after_seq=<first frame seq> and verify only frames
+	// with seq > firstSeq are returned (one fewer than the full set).
+	firstSeq := allEvents[0].Seq
+	filteredEvents := fetchSSEEvents(t, ts.URL, created.RunID, strconv.FormatUint(firstSeq, 10))
+	for _, ev := range filteredEvents {
+		if ev.Seq <= firstSeq {
+			t.Fatalf("expected all events to have seq > %d, got seq=%d", firstSeq, ev.Seq)
+		}
+	}
+	if len(filteredEvents) != len(allEvents)-1 {
+		t.Fatalf("expected %d events after filtering (one less than %d), got %d", len(allEvents)-1, len(allEvents), len(filteredEvents))
+	}
+}
+
+func TestSSEFrameIncludesIdLineWithSeq(t *testing.T) {
+	finished := make(chan struct{})
+	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+			close(finished)
+			return "done", nil
+		})
+	})
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello","workspace":{"workspace_root":"/tmp/awaken-test-workspace"}}`))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var created awruntime.Run
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+
+	<-finished
+
+	// Wait for terminal state.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		getResp, err := http.Get(ts.URL + "/v1/runs/" + created.RunID)
+		if err != nil {
+			t.Fatalf("GET /v1/runs/{run_id} failed: %v", err)
+		}
+		var run awruntime.Run
+		_ = json.NewDecoder(getResp.Body).Decode(&run)
+		getResp.Body.Close()
+		if run.Status == awruntime.RunStatusFinished {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Fetch raw SSE body and verify id: lines are present.
+	eventsURL := ts.URL + "/v1/runs/" + created.RunID + "/events"
+	streamResp, err := http.Get(eventsURL)
+	if err != nil {
+		t.Fatalf("GET events failed: %v", err)
+	}
+	defer streamResp.Body.Close()
+	if streamResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from events, got %d", streamResp.StatusCode)
+	}
+
+	body, err := io.ReadAll(streamResp.Body)
+	if err != nil {
+		t.Fatalf("failed to read events body: %v", err)
+	}
+
+	bodyStr := string(body)
+	if !strings.Contains(bodyStr, "id: ") {
+		t.Fatalf("expected SSE body to contain 'id: ' lines, got:\n%s", bodyStr)
+	}
+
+	// Verify each id: line is followed by a data: line.
+	scanner := bufio.NewScanner(strings.NewReader(bodyStr))
+	var idLines, dataLines int
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "id: ") {
+			idLines++
+		}
+		if strings.HasPrefix(line, "data: ") {
+			dataLines++
+		}
+	}
+	if idLines == 0 {
+		t.Fatalf("expected at least one id: line, got 0")
+	}
+	if idLines != dataLines {
+		t.Fatalf("expected id: line count (%d) to equal data: line count (%d)", idLines, dataLines)
+	}
+}
+
+func fetchSSEEvents(t *testing.T, baseURL, runID, afterSeq string) []agui.Event {
+	t.Helper()
+	eventsURL := baseURL + "/v1/runs/" + runID + "/events"
+	if afterSeq != "" {
+		eventsURL += "?after_seq=" + afterSeq
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, eventsURL, nil)
+	if err != nil {
+		t.Fatalf("failed to create events request: %v", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET events failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from events, got %d", resp.StatusCode)
+	}
+
+	events, err := collectSSEEvents(resp.Body)
+	if err != nil {
+		t.Fatalf("failed to collect SSE events: %v", err)
+	}
+	return events
+}
+
+// TestRunEventsMultiFrameSeqUnique verifies that a runtime event mapping to
+// multiple AG-UI frames (e.g. ReasoningStartedEventType → REASONING_START +
+// REASONING_MESSAGE_START) produces frames with distinct, strictly increasing
+// seq values.
+func TestRunEventsMultiFrameSeqUnique(t *testing.T) {
+	finished := make(chan struct{})
+	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.ReasoningStartedEventType, MessageID: "reasoning-1"})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.ReasoningDeltaEventType, MessageID: "reasoning-1", Delta: "thinking"})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.ReasoningFinishedEventType, MessageID: "reasoning-1"})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+			close(finished)
+			return "done", nil
+		})
+	})
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello","workspace":{"workspace_root":"/tmp/awaken-test-workspace"}}`))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var created awruntime.Run
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+
+	<-finished
+
+	// Wait for terminal state.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		getResp, err := http.Get(ts.URL + "/v1/runs/" + created.RunID)
+		if err != nil {
+			t.Fatalf("GET /v1/runs/{run_id} failed: %v", err)
+		}
+		var run awruntime.Run
+		_ = json.NewDecoder(getResp.Body).Decode(&run)
+		getResp.Body.Close()
+		if run.Status == awruntime.RunStatusFinished {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	allEvents := fetchSSEEvents(t, ts.URL, created.RunID, "")
+
+	// Find the REASONING_START and REASONING_MESSAGE_START frames — they both
+	// originate from the same ReasoningStartedEventType runtime event and must
+	// have distinct seqs.
+	var reasoningStartSeq, reasoningMessageStartSeq uint64
+	foundStart, foundMessageStart := false, false
+	for _, ev := range allEvents {
+		if ev.Type == agui.EventReasoningStart {
+			reasoningStartSeq = ev.Seq
+			foundStart = true
+		}
+		if ev.Type == agui.EventReasoningMessageStart {
+			reasoningMessageStartSeq = ev.Seq
+			foundMessageStart = true
+		}
+	}
+	if !foundStart || !foundMessageStart {
+		t.Fatalf("expected REASONING_START and REASONING_MESSAGE_START frames, got events: %+v", allEvents)
+	}
+	if reasoningStartSeq == reasoningMessageStartSeq {
+		t.Fatalf("expected distinct seqs for REASONING_START (%d) and REASONING_MESSAGE_START (%d)", reasoningStartSeq, reasoningMessageStartSeq)
+	}
+	if reasoningMessageStartSeq <= reasoningStartSeq {
+		t.Fatalf("expected REASONING_MESSAGE_START seq (%d) > REASONING_START seq (%d)", reasoningMessageStartSeq, reasoningStartSeq)
+	}
+}
+
+// TestRunEventsAfterSeqReconnectMultiFrame verifies that reconnecting with
+// after_seq set to the first frame of a multi-frame runtime event does not
+// lose the second frame.
+func TestRunEventsAfterSeqReconnectMultiFrame(t *testing.T) {
+	finished := make(chan struct{})
+	runService := awruntime.NewRunService(func(workspace awruntime.WorkspaceConfig) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.ReasoningStartedEventType, MessageID: "reasoning-1"})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.ReasoningDeltaEventType, MessageID: "reasoning-1", Delta: "thinking"})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.ReasoningFinishedEventType, MessageID: "reasoning-1"})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+			close(finished)
+			return "done", nil
+		})
+	})
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello","workspace":{"workspace_root":"/tmp/awaken-test-workspace"}}`))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var created awruntime.Run
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+
+	<-finished
+
+	// Wait for terminal state.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		getResp, err := http.Get(ts.URL + "/v1/runs/" + created.RunID)
+		if err != nil {
+			t.Fatalf("GET /v1/runs/{run_id} failed: %v", err)
+		}
+		var run awruntime.Run
+		_ = json.NewDecoder(getResp.Body).Decode(&run)
+		getResp.Body.Close()
+		if run.Status == awruntime.RunStatusFinished {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	allEvents := fetchSSEEvents(t, ts.URL, created.RunID, "")
+
+	// Find the REASONING_START frame seq (first frame of the multi-frame event).
+	var reasoningStartSeq uint64
+	found := false
+	for _, ev := range allEvents {
+		if ev.Type == agui.EventReasoningStart {
+			reasoningStartSeq = ev.Seq
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected REASONING_START frame, got events: %+v", allEvents)
+	}
+
+	// Simulate reconnect: client received REASONING_START (seq=reasoningStartSeq)
+	// then disconnected. Reconnect with after_seq=reasoningStartSeq should still
+	// deliver REASONING_MESSAGE_START (the second frame of the same runtime event).
+	replayedEvents := fetchSSEEvents(t, ts.URL, created.RunID, strconv.FormatUint(reasoningStartSeq, 10))
+
+	hasMessageStart := false
+	for _, ev := range replayedEvents {
+		if ev.Seq <= reasoningStartSeq {
+			t.Fatalf("expected all replayed frames to have seq > %d, got seq=%d (type=%s)", reasoningStartSeq, ev.Seq, ev.Type)
+		}
+		if ev.Type == agui.EventReasoningMessageStart {
+			hasMessageStart = true
+		}
+	}
+	if !hasMessageStart {
+		t.Fatalf("expected replayed events to include REASONING_MESSAGE_START after reconnect with after_seq=%d, got: %+v", reasoningStartSeq, replayedEvents)
 	}
 }
 

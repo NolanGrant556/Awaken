@@ -45,6 +45,7 @@ type Run struct {
 
 type Event struct {
 	Kind       EventKind
+	Seq        uint64 // monotonically increasing sequence number assigned by EventBus
 	Timestamp  time.Time
 	ThreadID   string
 	RunID      string
@@ -89,8 +90,8 @@ func (s *Session) Snapshot() Run {
 	return s.run
 }
 
-func (s *Session) Subscribe() Subscription {
-	sub := s.bus.Subscribe()
+func (s *Session) Subscribe(afterSeq uint64) Subscription {
+	sub := s.bus.Subscribe(afterSeq)
 	sub.History = append([]Event(nil), sub.History...)
 	return sub
 }

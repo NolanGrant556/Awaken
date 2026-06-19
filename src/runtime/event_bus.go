@@ -13,6 +13,7 @@ type Subscription struct {
 type EventBus struct {
 	mu          sync.Mutex
 	events      []Event
+	nextSeq     uint64
 	subscribers map[int]chan Event
 	nextID      int
 	closed      bool
@@ -30,6 +31,9 @@ func (b *EventBus) Append(event Event, terminal bool) {
 	if b.closed {
 		return
 	}
+
+	b.nextSeq++
+	event.Seq = b.nextSeq
 
 	b.events = append(b.events, event)
 
@@ -61,11 +65,16 @@ func (b *EventBus) Append(event Event, terminal bool) {
 	}
 }
 
-func (b *EventBus) Subscribe() Subscription {
+func (b *EventBus) Subscribe(afterSeq uint64) Subscription {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	history := append([]Event(nil), b.events...)
+	history := make([]Event, 0, len(b.events))
+	for _, event := range b.events {
+		if event.Seq > afterSeq {
+			history = append(history, event)
+		}
+	}
 	if b.closed {
 		return Subscription{History: history}
 	}

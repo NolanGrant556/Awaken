@@ -156,18 +156,27 @@ async function pumpRunEvents(
     }
   } finally {
     reader.releaseLock();
-    subscriptions.delete(subscriptionId);
-    sendToRenderer("awaken:run-closed", { subscriptionId }, targetId);
   }
+
+  // Normal completion: cleanup and notify renderer. On error, this path is
+  // skipped (the rejection propagates to the .catch() handler in
+  // subscribeToRun, which sends run-error BEFORE run-closed so the renderer
+  // receives the real error message before the subscription is torn down).
+  subscriptions.delete(subscriptionId);
+  sendToRenderer("awaken:run-closed", { subscriptionId }, targetId);
 }
 
 async function subscribeToRun(
   target: WebContents,
   runId: string,
   subscriptionId: string,
+  afterSeq?: number,
 ): Promise<void> {
   const controller = new AbortController();
-  const response = await fetch(runtimeUrl(`/v1/runs/${runId}/events`), {
+  const eventsUrl = afterSeq
+    ? `/v1/runs/${runId}/events?after_seq=${afterSeq}`
+    : `/v1/runs/${runId}/events`;
+  const response = await fetch(runtimeUrl(eventsUrl), {
     headers: {
       Accept: "text/event-stream",
     },
@@ -191,7 +200,10 @@ async function subscribeToRun(
       return;
     }
 
-    subscriptions.delete(subscriptionId);
+    // Send run-error BEFORE run-closed so the preload layer can still look up
+    // the subscription handlers and deliver the real error message. The
+    // run-closed handler in preload deletes the subscription entry, so sending
+    // run-error after run-closed would be a no-op.
     sendToRenderer(
       "awaken:run-error",
       {
@@ -201,6 +213,7 @@ async function subscribeToRun(
       target.id,
     );
     sendToRenderer("awaken:run-closed", { subscriptionId }, target.id);
+    subscriptions.delete(subscriptionId);
   });
 }
 
@@ -262,6 +275,14 @@ ipcMain.handle("awaken:get-runtime-info", async () => {
   }
 });
 
+ipcMain.handle("awaken:get-run", async (_event, runId: string) => {
+  const run = await requestRuntime(`/v1/runs/${runId}`, {
+    method: "GET",
+  });
+
+  return normalizeRuntimeRun(run);
+});
+
 ipcMain.handle("awaken:start-run", async (_event, request: StartRunRequest) => {
   const run = await requestRuntime("/v1/runs", {
     method: "POST",
@@ -297,8 +318,8 @@ ipcMain.handle(
 
 ipcMain.handle(
   "awaken:subscribe-run",
-  async (event, payload: { runId: string; subscriptionId: string }) => {
-    await subscribeToRun(event.sender, payload.runId, payload.subscriptionId);
+  async (event, payload: { runId: string; subscriptionId: string; afterSeq?: number }) => {
+    await subscribeToRun(event.sender, payload.runId, payload.subscriptionId, payload.afterSeq);
     return payload.subscriptionId;
   },
 );

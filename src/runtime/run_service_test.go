@@ -31,7 +31,7 @@ func TestRunServiceReplaysHistoryAndStreamsLiveEvents(t *testing.T) {
 	}
 	<-started
 
-	sub, err := service.Subscribe(run.RunID)
+	sub, err := service.Subscribe(run.RunID, 0)
 	if err != nil {
 		t.Fatalf("Subscribe returned error: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestRunServiceCancelSuppressesRunErrorAndEmitsCancelled(t *testing.T) {
 	}
 	<-started
 
-	sub, err := service.Subscribe(run.RunID)
+	sub, err := service.Subscribe(run.RunID, 0)
 	if err != nil {
 		t.Fatalf("Subscribe returned error: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestRunServiceCompletesWhenExecutorReturnsWithoutTerminalEvent(t *testing.T
 		t.Fatalf("StartRun returned error: %v", err)
 	}
 
-	sub, err := service.Subscribe(run.RunID)
+	sub, err := service.Subscribe(run.RunID, 0)
 	if err != nil {
 		t.Fatalf("Subscribe returned error: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestRunServiceCancelWinsOverLateSuccessfulReturn(t *testing.T) {
 	}
 	<-started
 
-	sub, err := service.Subscribe(run.RunID)
+	sub, err := service.Subscribe(run.RunID, 0)
 	if err != nil {
 		t.Fatalf("Subscribe returned error: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestRunServiceResolveApprovalUnblocksExecutorAndReplaysEvents(t *testing.T)
 	var sub Subscription
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		sub, err = service.Subscribe(run.RunID)
+		sub, err = service.Subscribe(run.RunID, 0)
 		if err != nil {
 			t.Fatalf("Subscribe returned error: %v", err)
 		}
@@ -448,7 +448,7 @@ func TestResolveApprovalRejectedRestoresRunningAndEmitsResolved(t *testing.T) {
 	var sub Subscription
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		sub, err = service.Subscribe(run.RunID)
+		sub, err = service.Subscribe(run.RunID, 0)
 		if err != nil {
 			t.Fatalf("Subscribe returned error: %v", err)
 		}
@@ -592,7 +592,7 @@ func TestRunServiceValidatesInputAndMissingRun(t *testing.T) {
 	if _, err := service.StartRun(StartRunRequest{Input: "   ", Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()}}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("expected ErrInvalidInput, got %v", err)
 	}
-	if _, err := service.Subscribe("missing"); !errors.Is(err, ErrRunNotFound) {
+	if _, err := service.Subscribe("missing", 0); !errors.Is(err, ErrRunNotFound) {
 		t.Fatalf("expected ErrRunNotFound from Subscribe, got %v", err)
 	}
 	if _, err := service.CancelRun("missing"); !errors.Is(err, ErrRunNotFound) {
@@ -666,4 +666,199 @@ func TestStartRunOmittedWritableRootsDefaultsToWorkspaceRoot(t *testing.T) {
 	if run.RunID == "" {
 		t.Fatalf("expected run to be created")
 	}
+}
+
+// TestRunServiceGetRunReturnsSnapshot verifies that GetRun returns the current
+// run snapshot and that GetRun on a missing run returns ErrRunNotFound.
+func TestRunServiceGetRunReturnsSnapshot(t *testing.T) {
+	started := make(chan struct{})
+	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			close(started)
+			<-ctx.Done()
+			return "", ctx.Err()
+		})
+	})
+
+	run, err := service.StartRun(StartRunRequest{Input: "hello", Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()}})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	<-started
+
+	got, err := service.GetRun(run.RunID)
+	if err != nil {
+		t.Fatalf("GetRun returned error: %v", err)
+	}
+	if got.RunID != run.RunID {
+		t.Fatalf("expected run id %q, got %q", run.RunID, got.RunID)
+	}
+	if got.Status != RunStatusRunning {
+		t.Fatalf("expected running status, got %s", got.Status)
+	}
+
+	if _, err := service.CancelRun(run.RunID); err != nil {
+		t.Fatalf("CancelRun returned error: %v", err)
+	}
+}
+
+func TestRunServiceGetRunMissingReturnsNotFound(t *testing.T) {
+	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			return "done", nil
+		})
+	})
+
+	if _, err := service.GetRun("missing"); !errors.Is(err, ErrRunNotFound) {
+		t.Fatalf("expected ErrRunNotFound from GetRun, got %v", err)
+	}
+}
+
+// TestRunServiceSubscribeAfterSeqFiltersHistory verifies that Subscribe with an
+// afterSeq parameter only replays events whose Seq is strictly greater than
+// afterSeq, and that live events continue to stream.
+func TestRunServiceSubscribeAfterSeqFiltersHistory(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{})
+	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextMessageStartedEventType, MessageID: "msg-1", Role: "assistant"})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextDeltaEventType, MessageID: "msg-1", Role: "assistant", Delta: "hello"})
+			close(started)
+			<-release
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextMessageFinishedEventType, MessageID: "msg-1"})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+			return "done", nil
+		})
+	})
+
+	run, err := service.StartRun(StartRunRequest{Input: "hello", Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()}})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	<-started
+
+	// First subscription captures the first 3 events and records the last seq.
+	full, err := service.Subscribe(run.RunID, 0)
+	if err != nil {
+		t.Fatalf("Subscribe returned error: %v", err)
+	}
+	if len(full.History) != 3 {
+		t.Fatalf("expected 3 replayed events, got %d", len(full.History))
+	}
+	lastSeq := full.History[len(full.History)-1].Seq
+	if lastSeq != 3 {
+		t.Fatalf("expected last seq 3, got %d", lastSeq)
+	}
+	if full.Close != nil {
+		full.Close()
+	}
+
+	// Subscribing with afterSeq=lastSeq should return an empty history but
+	// still receive the 2 live events emitted after release.
+	incremental, err := service.Subscribe(run.RunID, lastSeq)
+	if err != nil {
+		t.Fatalf("Subscribe returned error: %v", err)
+	}
+	if len(incremental.History) != 0 {
+		t.Fatalf("expected 0 replayed events after seq=%d, got %d", lastSeq, len(incremental.History))
+	}
+
+	close(release)
+
+	var live []Event
+	for event := range incremental.Events {
+		live = append(live, event)
+	}
+	if len(live) != 2 {
+		t.Fatalf("expected 2 live events, got %d", len(live))
+	}
+	// Live events must have seq strictly greater than lastSeq.
+	for i, event := range live {
+		expected := lastSeq + uint64(i+1)
+		if event.Seq != expected {
+			t.Fatalf("live event %d: expected seq %d, got %d", i, expected, event.Seq)
+		}
+	}
+
+	finishedDeadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(finishedDeadline) {
+		snapshot, err := service.CancelRun(run.RunID)
+		if err != nil {
+			t.Fatalf("CancelRun returned error while waiting for terminal state: %v", err)
+		}
+		if snapshot.Status == RunStatusFinished {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("run did not reach finished state")
+}
+
+// TestRunServiceSubscribeAfterSeqZeroReplaysAllHistory verifies that
+// Subscribe(runID, 0) replays the full history (all events have seq > 0).
+func TestRunServiceSubscribeAfterSeqZeroReplaysAllHistory(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{})
+	service := NewRunService(func(workspace WorkspaceConfig) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextDeltaEventType, MessageID: "msg-1", Role: "assistant", Delta: "hi"})
+			close(started)
+			<-release
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+			return "done", nil
+		})
+	})
+
+	run, err := service.StartRun(StartRunRequest{Input: "hello", Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()}})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	<-started
+
+	sub, err := service.Subscribe(run.RunID, 0)
+	if err != nil {
+		t.Fatalf("Subscribe returned error: %v", err)
+	}
+
+	// History should contain the 2 events emitted before release.
+	if len(sub.History) != 2 {
+		t.Fatalf("expected 2 replayed events, got %d", len(sub.History))
+	}
+	for i, event := range sub.History {
+		expected := uint64(i + 1)
+		if event.Seq != expected {
+			t.Fatalf("replay event %d: expected seq %d, got %d", i, expected, event.Seq)
+		}
+	}
+
+	close(release)
+
+	// Live channel should receive the terminal RunFinished event (seq=3).
+	var live []Event
+	for event := range sub.Events {
+		live = append(live, event)
+	}
+	if len(live) != 1 {
+		t.Fatalf("expected 1 live event, got %d", len(live))
+	}
+	if live[0].Seq != 3 {
+		t.Fatalf("expected live event seq 3, got %d", live[0].Seq)
+	}
+
+	finishedDeadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(finishedDeadline) {
+		snapshot, err := service.CancelRun(run.RunID)
+		if err != nil {
+			t.Fatalf("CancelRun returned error while waiting for terminal state: %v", err)
+		}
+		if snapshot.Status == RunStatusFinished {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("run did not reach finished state")
 }

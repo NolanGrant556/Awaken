@@ -26,10 +26,15 @@ import {
   type RuntimeThreadWire,
   type StartRunRequest,
 } from "../shared/runtime.js";
+import { RuntimeSupervisor, type SupervisorStatusInfo } from "./runtime-supervisor.js";
+import { ensureConfigDir } from "./config-bootstrap.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const runtimeBaseUrl = process.env.AWAKEN_DESKTOP_RUNTIME_URL?.trim() || "http://127.0.0.1:8787";
+let runtimeBaseUrl = process.env.AWAKEN_DESKTOP_RUNTIME_URL?.trim() || "http://127.0.0.1:8787";
 const isDevServer = process.argv.includes("--dev");
+
+let supervisor: RuntimeSupervisor | null = null;
+let isQuitting = false;
 
 type StreamSubscription = {
   controller: AbortController;
@@ -360,6 +365,7 @@ ipcMain.handle(
       if (!stat.isDirectory()) {
         return { canceled: true, error: "Selected path is not a directory" };
       }
+      await writeLastWorkspace(selected);
       return { canceled: false, path: selected };
     } catch {
       return { canceled: true, error: "Cannot access selected directory" };
@@ -386,8 +392,81 @@ ipcMain.handle("awaken:validate-workspace", async (_event, candidate: string) =>
   }
 });
 
-app.whenReady().then(() => {
+ipcMain.handle("awaken:runtime-supervisor-status", async () => {
+  return supervisor?.getStatus() ?? { status: "stopped" };
+});
+
+ipcMain.handle("awaken:restart-runtime", async () => {
+  if (!supervisor) throw new Error("supervisor not initialized");
+  const info = await supervisor.restart();
+  if (info.runtimeBaseUrl) {
+    runtimeBaseUrl = info.runtimeBaseUrl;
+  }
+  return info;
+});
+
+ipcMain.handle("awaken:get-runtime-logs", async () => {
+  return supervisor?.getLogs() ?? [];
+});
+
+// Persist the last user-selected workspace so the supervisor can default to it
+// on the next launch instead of always falling back to the home directory.
+async function readLastWorkspace(): Promise<string | undefined> {
+  try {
+    const file = path.join(app.getPath("userData"), "last-workspace.json");
+    const raw = await fs.readFile(file, "utf8");
+    const parsed = JSON.parse(raw) as { path?: unknown };
+    const value = typeof parsed.path === "string" ? parsed.path : "";
+    if (!path.isAbsolute(value)) {
+      return undefined;
+    }
+    return value;
+  } catch {
+    return undefined;
+  }
+}
+
+async function writeLastWorkspace(workspacePath: string): Promise<void> {
+  try {
+    const file = path.join(app.getPath("userData"), "last-workspace.json");
+    await fs.writeFile(file, JSON.stringify({ path: workspacePath }), "utf8");
+  } catch {
+    // Persistence is best-effort; a write failure must not block the picker.
+  }
+}
+
+app.whenReady().then(async () => {
+  const devRuntimeUrl = process.env.AWAKEN_DESKTOP_RUNTIME_URL?.trim() || "";
+  const configDir = await ensureConfigDir();
+  const lastWorkspace = await readLastWorkspace();
+  supervisor = new RuntimeSupervisor({
+    configDir,
+    devRuntimeUrl: devRuntimeUrl || undefined,
+    defaultWorkspace: lastWorkspace ?? app.getPath("home"),
+  });
+  supervisor.onStatusChange((info) => {
+    if (info.runtimeBaseUrl) {
+      runtimeBaseUrl = info.runtimeBaseUrl;
+    }
+    for (const wc of webContents.getAllWebContents()) {
+      if (!wc.isDestroyed()) {
+        wc.send("awaken:supervisor-status-changed", info);
+      }
+    }
+  });
+  supervisor.onLogs((entry) => {
+    for (const wc of webContents.getAllWebContents()) {
+      if (!wc.isDestroyed()) {
+        wc.send("awaken:runtime-logs", entry);
+      }
+    }
+  });
   createMainWindow();
+  void supervisor.start().then((statusInfo) => {
+    if (statusInfo.runtimeBaseUrl) {
+      runtimeBaseUrl = statusInfo.runtimeBaseUrl;
+    }
+  });
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -402,11 +481,24 @@ app.on("window-all-closed", () => {
   }
 });
 
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
+  if (isQuitting) return;
+  event.preventDefault();
+  isQuitting = true;
   for (const subscription of subscriptions.values()) {
     subscription.controller.abort();
   }
   subscriptions.clear();
+  void (async () => {
+    try {
+      if (supervisor) {
+        await supervisor.stop();
+      }
+    } catch (err) {
+      console.error("[awaken-desktop] supervisor stop failed", err);
+    }
+    app.quit();
+  })();
 });
 
 process.on("uncaughtException", (error) => {

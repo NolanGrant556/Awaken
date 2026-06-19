@@ -126,6 +126,22 @@ export type RunStreamHandlers = {
   onClose?: () => void;
 };
 
+export type SupervisorStatus = "stopped" | "starting" | "running" | "crashed" | "stopping";
+
+export type RuntimeLogEntry = {
+  id: number;
+  timestamp: number;
+  stream: "stdout" | "stderr";
+  line: string;
+};
+
+export type SupervisorStatusInfo = {
+  status: SupervisorStatus;
+  runtimeBaseUrl?: string;
+  exitCode?: number;
+  errorMessage?: string;
+};
+
 export type AwakenBridge = {
   platform: DesktopPlatform;
   runtimeBaseUrl: string;
@@ -147,6 +163,11 @@ export type AwakenBridge = {
   getRuntimeInfo: () => Promise<RuntimeInfo>;
   pickWorkspace: (defaultPath?: string) => Promise<WorkspacePickResult>;
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
+  getRuntimeLogs: () => Promise<RuntimeLogEntry[]>;
+  restartRuntime: () => Promise<SupervisorStatusInfo>;
+  getSupervisorStatus: () => Promise<SupervisorStatusInfo>;
+  onRuntimeLogs: (callback: (entry: RuntimeLogEntry) => void) => () => void;
+  onSupervisorStatusChange: (callback: (info: SupervisorStatusInfo) => void) => () => void;
 };
 
 export function normalizeRuntimeRun(run: RuntimeRunWire): RuntimeRun {

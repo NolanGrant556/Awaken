@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type { AguiEvent } from "../shared/agui.js";
 import {
   type ApprovalDecision,
@@ -6,9 +6,11 @@ import {
   type DesktopPlatform,
   type RunStreamHandlers,
   type RuntimeInfo,
+  type RuntimeLogEntry,
   type RuntimeRun,
   type RuntimeThread,
   type StartRunRequest,
+  type SupervisorStatusInfo,
   type WorkspacePickResult,
   type WorkspaceValidationResult,
 } from "../shared/runtime.js";
@@ -93,6 +95,22 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:pick-workspace", defaultPath) as Promise<WorkspacePickResult>,
   validateWorkspace: (path: string) =>
     ipcRenderer.invoke("awaken:validate-workspace", path) as Promise<WorkspaceValidationResult>,
+  getRuntimeLogs: () =>
+    ipcRenderer.invoke("awaken:get-runtime-logs") as Promise<RuntimeLogEntry[]>,
+  restartRuntime: () =>
+    ipcRenderer.invoke("awaken:restart-runtime") as Promise<SupervisorStatusInfo>,
+  getSupervisorStatus: () =>
+    ipcRenderer.invoke("awaken:runtime-supervisor-status") as Promise<SupervisorStatusInfo>,
+  onRuntimeLogs: (callback: (entry: RuntimeLogEntry) => void) => {
+    const handler = (_event: IpcRendererEvent, entry: RuntimeLogEntry) => callback(entry);
+    ipcRenderer.on("awaken:runtime-logs", handler);
+    return () => ipcRenderer.removeListener("awaken:runtime-logs", handler);
+  },
+  onSupervisorStatusChange: (callback: (info: SupervisorStatusInfo) => void) => {
+    const handler = (_event: IpcRendererEvent, info: SupervisorStatusInfo) => callback(info);
+    ipcRenderer.on("awaken:supervisor-status-changed", handler);
+    return () => ipcRenderer.removeListener("awaken:supervisor-status-changed", handler);
+  },
 };
 
 contextBridge.exposeInMainWorld("awaken", bridge);

@@ -42,9 +42,9 @@ pre {
 
 .hero-block h1 {
   margin: 0;
-  font-size: clamp(2rem, 4vw, 2.75rem);
+  font-size: 40px;
   line-height: 1.05;
-  letter-spacing: -0.04em;
+  letter-spacing: 0;
 }
 
 .hero-block .eyebrow {
@@ -110,11 +110,6 @@ pre {
 .runtime-pill-warning {
   background: rgba(234, 88, 12, 0.12);
   color: #9a3412;
-}
-
-.runtime-pill-disconnected {
-  background: rgba(107, 114, 128, 0.12);
-  color: #374151;
 }
 
 .runtime-pill-error {
@@ -211,36 +206,6 @@ pre {
   color: var(--aw-text-secondary);
   font-size: 12px;
   line-height: 1.6;
-}
-
-.runtime-logs {
-  max-height: 200px;
-  overflow: auto;
-}
-
-.runtime-logs-empty {
-  margin: 0;
-  color: var(--aw-text-tertiary);
-  font-size: 13px;
-}
-
-.runtime-log-entry {
-  font-family: var(--aw-font-mono);
-  font-size: 12px;
-  white-space: pre-wrap;
-  line-height: 1.5;
-}
-
-.runtime-log-time {
-  color: var(--aw-text-tertiary);
-}
-
-.runtime-log-stream-stdout {
-  color: var(--aw-success);
-}
-
-.runtime-log-stream-stderr {
-  color: var(--aw-error);
 }
 
 .panel-heading {

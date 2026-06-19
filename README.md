@@ -31,7 +31,7 @@ docs/coding-agent-handoff.md
 然后按任务继续读：
 
 - 改 runtime / protocol / AG-UI / A2UI：读 `docs/agui-a2ui-architecture.md`。
-- 需要对照 AG-UI / A2UI 上游：读 `docs/external-references.md`。
+- 需要对照 AG-UI / A2UI 上游：读 `docs/upstream-references.md`。
 - 改 desktop：读 `apps/desktop/README.md`。
 - 改 UI 组件库：读 `packages/ui/README.md`。
 
@@ -72,19 +72,11 @@ git status --short
 └── package.json                 # npm workspaces：ui 与 desktop
 ```
 
-## 当前 Runtime
+## 当前 Runtime 契约
 
-本地 runtime 进程：
+Desktop 会自己启动并管理 `cmd/awaken-core`。用户和 Desktop 开发者不需要单独启动 runtime。
 
-```bash
-go run ./cmd/awaken-core
-```
-
-默认地址：
-
-```text
-http://127.0.0.1:8787
-```
+Runtime 开发调试入口见 `docs/runtime-development.md`。
 
 当前 HTTP surface：
 
@@ -193,11 +185,10 @@ http://127.0.0.1:5173/
 桌面端：
 
 ```bash
-go run ./cmd/awaken-core
 npm run dev:desktop
 ```
 
-`npm run dev:desktop` 会构建 `@awaken/ui`，启动 Vite renderer（`127.0.0.1:5174`），编译 Electron main/preload，并启动 Electron。
+`npm run dev:desktop` 会构建 `@awaken/ui`，确保 `awaken-core` binary 存在，启动 Vite renderer（`127.0.0.1:5174`），编译 Electron main/preload，并启动 Electron。
 
 ## 当前工具面
 
@@ -237,6 +228,6 @@ web_search
 docs/README.md                    # docs 索引
 docs/coding-agent-handoff.md      # 0 上下文 Coding Agent 接手指引
 docs/agui-a2ui-architecture.md    # 当前 protocol/runtime/desktop 边界
-docs/external-references.md       # AG-UI / A2UI 上游参考与固定 commit
+docs/upstream-references.md       # AG-UI / A2UI 上游参考与固定 commit
 docs/component-library.md         # 组件库实现档案
 ```

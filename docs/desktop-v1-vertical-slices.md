@@ -24,37 +24,40 @@ Awaken Desktop
 
 每个切片完成后，都要能被真实运行验证。不能只交付“接口写好了”或“界面画好了”。
 
-## Slice 1：打开 Desktop，确认 Runtime 可用
+## Slice 1：统一 Desktop 启动体验：删除外部 runtime 默认路径
 
 ### 用户目标
 
-用户打开 Awaken Desktop 后，能立即知道本地 runtime 是否可用，而不是点发送后才发现失败。
+用户和开发者都只打开 Awaken Desktop。Desktop 自己启动并管理本机 `awaken-core`，不要求用户先开终端。
 
 ### 用户流程
 
 1. 用户打开 Desktop。
-2. 顶部状态区显示 `Connected` 或 `Disconnected`。
-3. runtime 未启动时，界面显示明确错误。
-4. runtime 启动后，Desktop 能恢复为 connected。
+2. Electron main 自动启动 `awaken-core`。
+3. Desktop 等 `/health` ready 后进入可用状态。
+4. 用户选择 workspace 并发起 run。
+5. 用户退出 Desktop 后，子进程自动清理。
 
 ### 开发范围
 
-- UI：顶部 runtime 状态、runtime 地址、基础错误提示。
-- Bridge/API：新增或收口 `getRuntimeInfo()` / runtime status 调用。
-- Runtime：返回 runtime version、API version、configured model、has_api_key、default workspace。
-- Desktop main：保持代理 runtime HTTP/SSE，不在本切片启动 runtime 进程。
+- Build：`npm run dev:desktop` 自动确保当前平台 `awaken-core` binary 存在，缺失时自动 build。
+- Electron main：保留内部 `RuntimeSupervisor`，负责启动/停止子进程、分配本地端口、等待 `/health` ready。
+- Bridge/API：所有 runtime HTTP/SSE 仍由 main 代理；renderer 不感知 runtime URL。
+- UI：启动中禁用交互；启动失败或运行中崩溃时只显示 `Awaken needs restart`。
+- Docs：README 和 Desktop README 只写 `npm run dev:desktop`。
 
 ### 完成定义
 
-- 不启动 `awaken-core`，启动 Desktop，不白屏、不崩溃，显示 disconnected。
-- 启动 `go run ./cmd/awaken-core` 后，Desktop 能显示 connected。
-- runtime status 不返回 secret，只能返回 `has_api_key` 和 base URL host 等摘要信息。
-- 有用户可见状态变化，不能只在 console 里报错。
-- renderer 只消费 runtime 状态，不承载 runtime policy。
+- 不开任何额外终端，`npm run dev:desktop` 可以打开 Desktop 并完成一次真实 run。
+- 不开任何额外终端，`Awaken.app` 可以完成一次真实 run。
+- 删除旧的 Desktop override URL 产品分支。
+- Desktop UI 不显示 runtime 来源。
+- README 不再要求手动启动 `awaken-core`。
+- runtime 启动失败时，Desktop 不白屏，有可读恢复提示。
+- 退出 Desktop 后没有残留 `awaken-core` 进程。
 
 ### 暂不做
 
-- 不做 bundled runtime 启动。
 - 不做模型配置编辑器。
 - 不做复杂 onboarding。
 
@@ -446,25 +449,25 @@ runtime stream 断开或 Desktop 刷新后，用户不丢失当前 run 状态。
 ### 用户流程
 
 1. 用户启动 Awaken.app。
-2. Electron main 启动 bundled `awaken-core`。
+2. Electron main 启动 `awaken-core`。
 3. renderer 连接 runtime。
 4. 用户直接发起 run。
 5. 退出 app 后 runtime 子进程被清理。
 
 ### 开发范围
 
-- Build：构建 bundled `awaken-core` binary。
+- Build：构建 `awaken-core` binary。
 - Electron main：启动/停止子进程。
 - Runtime：支持固定或随机 localhost 端口。
-- UI：runtime logs、restart runtime。
+- UI：保持用户级恢复提示，不暴露进程细节。
 - Config：正式配置迁移到 Application Support。
 
 ### 完成定义
 
 - 不开终端，启动 Desktop 后可完成一次真实 run。
-- runtime crash 后 UI 显示错误并允许重启。
+- runtime crash 后 UI 显示 `Awaken needs restart`。
 - 退出 app 后无残留 `awaken-core` 进程。
-- 有 happy path：bundled runtime 完成一次真实 run。
+- 有 happy path：Desktop 管理的 runtime 完成一次真实 run。
 - 有 failure path：runtime 启动失败、端口冲突、crash 能恢复或提示。
 - runtime policy 仍在 Go runtime/tool 层，Electron main 只管理进程生命周期。
 

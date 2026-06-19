@@ -267,12 +267,12 @@ packages/ui
 
 AG-UI 和 A2UI 是外部参考项目，不是 Awaken 的 vendored source，也不是运行时必需依赖。
 
-Fresh GitHub clone 如果需要对照上游协议，应按 `docs/external-references.md` 在 Awaken repo 外部 clone 并 checkout 固定 commit。
+Fresh GitHub clone 如果需要对照上游协议，应按 `docs/upstream-references.md` 在 Awaken repo 外部 clone 并 checkout 固定 commit。
 
 引用说明位于：
 
 ```text
-docs/external-references.md
+docs/upstream-references.md
 ```
 
 ## Verification

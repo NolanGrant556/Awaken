@@ -1,111 +1,63 @@
-# Slice 1：打开 Desktop，确认 Runtime 可用 Spec
+# 统一 Desktop 启动体验：删除外部 runtime 默认路径 Spec
 
 ## Why
 
-用户打开 Awaken Desktop 后，需要立即知道本地 runtime 是否可用，而不是在点击发送后才发现失败。本切片从用户可见的 runtime 状态出发，打通 Runtime 状态 API、Electron main 代理与 Renderer 展示。
+Awaken Desktop 的产品路径应只有一个：用户打开 Desktop，开发者运行 `npm run dev:desktop`。Desktop 自己管理本机 `awaken-core`，不再把“先手动启动 runtime 再连接 Desktop”作为正常流程。
 
 ## What Changes
 
-- 在 `awaken-core` 新增 `GET /v1/runtime/info` 端点，返回 runtime 版本、API 版本、当前配置模型、`has_api_key`、默认 workspace 以及 base URL host 摘要。
-- 在 Electron main 进程新增 `getRuntimeInfo()` bridge 调用，代理到 runtime 的 `/v1/runtime/info`。
-- 在 preload/renderer 共享类型中新增 `RuntimeInfo` / `RuntimeInfoWire` 与 bridge 方法。
-- 在 Desktop Renderer 顶部状态区显示 `Connected` / `Disconnected`、runtime 地址与基础错误提示。
-- 在 App.tsx 中增加定时轮询，runtime 启动后可自动从 `Disconnected` 恢复为 `Connected`。
-- 不启动 runtime 时，Desktop 不白屏、不崩溃，明确显示 disconnected 状态。
+- Electron main 保留内部 `RuntimeSupervisor`，启动时自动分配本地端口、启动 `awaken-core`、等待 `/health` ready。
+- Renderer 不接收 runtime URL，不展示 runtime 来源、端口、进程日志、exit code 或恢复工程细节。
+- 启动失败或运行中崩溃时，UI 只显示 `Awaken needs restart`，并禁用 run/workspace 操作。
+- `npm run dev:desktop` 自动确保当前平台 `awaken-core` binary 存在；缺失时自动 build。
+- README 和 Desktop README 的主流程只写 `npm run dev:desktop`。
 
-## Impact
+## Requirements
 
-- 受影响能力：Desktop 启动体验、runtime 健康状态展示。
-- 受影响代码：
-  - `src/server/router.go`
-  - `src/server/handlers.go`
-  - `cmd/awaken-core/main.go`
-  - `apps/desktop/src/main/index.ts`
-  - `apps/desktop/src/preload/index.ts`
-  - `apps/desktop/src/shared/runtime.ts`
-  - `apps/desktop/src/renderer/runtime/client.ts`
-  - `apps/desktop/src/renderer/App.tsx`
+### Requirement: Desktop 自己管理 runtime
 
-## ADDED Requirements
+The system SHALL start and stop `awaken-core` from Electron main for both development and app launch flows.
 
-### Requirement: Runtime 信息端点
+#### Scenario: Dev desktop starts without another terminal
 
-The system SHALL expose a `GET /v1/runtime/info` endpoint that returns runtime metadata without secrets.
+- **WHEN** the developer runs `npm run dev:desktop`
+- **THEN** the command ensures the current-platform `awaken-core` binary exists
+- **AND** Electron main starts `awaken-core`
+- **AND** renderer becomes usable after `/health` is ready
 
-#### Scenario: Success case
+#### Scenario: App launch starts without another terminal
 
-- **WHEN** a client sends `GET /v1/runtime/info`
-- **THEN** the response status is `200 OK`
-- **AND** the response body contains `runtime_version`, `api_version`, `configured_model`, `has_api_key`, `default_workspace`, and `base_url_host`
-- **AND** `has_api_key` is a boolean derived from whether the configured API key is non-empty
-- **AND** no API key value, secret, or full base URL is included in the response
+- **WHEN** the user opens `Awaken.app`
+- **THEN** Electron main starts `awaken-core`
+- **AND** the user can complete a real run from Desktop
 
-#### Scenario: Failure case
+### Requirement: 删除外部 runtime 产品分支
 
-- **WHEN** the runtime HTTP handler fails to serialize the info
-- **THEN** the response status is `500 Internal Server Error`
-- **AND** the response body contains a readable error message without secrets
+The system SHALL NOT expose or document a Desktop path that connects to a manually-started runtime.
 
-### Requirement: Electron main 代理 runtime 信息
+#### Scenario: No Desktop override URL
 
-The system SHALL allow the renderer to query runtime info through the existing Electron bridge.
+- **WHEN** Desktop starts
+- **THEN** it always uses the runtime managed by Electron main
+- **AND** renderer does not receive a runtime URL
+- **AND** docs do not instruct users to start `awaken-core` before Desktop
 
-#### Scenario: Runtime reachable
+### Requirement: 用户级恢复提示
 
-- **WHEN** the renderer invokes `window.awaken.getRuntimeInfo()`
-- **AND** the runtime is reachable
-- **THEN** the main process returns the normalized `RuntimeInfo` object
+The system SHALL avoid blank screens and avoid exposing process details when startup or runtime lifecycle fails.
 
-#### Scenario: Runtime unreachable
+#### Scenario: Startup failure or crash
 
-- **WHEN** the renderer invokes `window.awaken.getRuntimeInfo()`
-- **AND** the runtime is not reachable or returns an error
-- **THEN** the main process rejects with a readable error message
-- **AND** the rejection does not crash the renderer
+- **WHEN** `awaken-core` fails to start or exits unexpectedly
+- **THEN** Desktop shows `Awaken needs restart`
+- **AND** Desktop does not show runtime source, port, process logs, exit code, or spawn errors
 
-### Requirement: Renderer 顶部状态展示
+### Requirement: 退出清理
 
-The system SHALL display the runtime connection status in the Desktop top bar.
+The system SHALL clean up its child process when Desktop quits.
 
-#### Scenario: Runtime disconnected
+#### Scenario: App exits
 
-- **WHEN** Desktop starts and `getRuntimeInfo()` fails
-- **THEN** the top bar shows a `Disconnected` status pill
-- **AND** the runtime base URL is still visible
-- **AND** a user-visible error notice explains that the runtime is unavailable
-
-#### Scenario: Runtime connected
-
-- **WHEN** `getRuntimeInfo()` succeeds
-- **THEN** the top bar shows a `Connected` status pill
-- **AND** the configured model is shown next to the status
-
-#### Scenario: Runtime recovers
-
-- **WHEN** the runtime was disconnected
-- **AND** the user starts `go run ./cmd/awaken-core`
-- **THEN** the next poll detects the runtime
-- **AND** the status pill changes from `Disconnected` to `Connected`
-- **AND** the error notice is removed
-
-### Requirement: 不泄露 Secret
-
-The system SHALL prevent runtime secrets from being exposed to the renderer or logs.
-
-#### Scenario: Status endpoint
-
-- **WHEN** `GET /v1/runtime/info` is called
-- **THEN** the response MUST NOT contain `api_key`, `apikey`, or the full configured `base_url`
-
-#### Scenario: Bridge error
-
-- **WHEN** a runtime request fails
-- **THEN** the error message shown to the user MUST NOT contain the API key
-
-## MODIFIED Requirements
-
-无
-
-## REMOVED Requirements
-
-无
+- **WHEN** Desktop quits
+- **THEN** Electron main stops its `awaken-core` child process
+- **AND** no Desktop-started `awaken-core` process remains

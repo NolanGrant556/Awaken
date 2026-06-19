@@ -30,7 +30,7 @@ import { RuntimeSupervisor, type SupervisorStatusInfo } from "./runtime-supervis
 import { ensureConfigDir } from "./config-bootstrap.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-let runtimeBaseUrl = process.env.AWAKEN_DESKTOP_RUNTIME_URL?.trim() || "http://127.0.0.1:8787";
+let runtimeBaseUrl: string | null = null;
 const isDevServer = process.argv.includes("--dev");
 
 let supervisor: RuntimeSupervisor | null = null;
@@ -55,7 +55,14 @@ function toDesktopPlatform(platform: NodeJS.Platform): DesktopPlatform {
 }
 
 function runtimeUrl(pathname: string): string {
+  if (!runtimeBaseUrl) {
+    throw new Error("Runtime unavailable");
+  }
   return new URL(pathname, runtimeBaseUrl.endsWith("/") ? runtimeBaseUrl : `${runtimeBaseUrl}/`).toString();
+}
+
+function toRendererSupervisorStatus(info: SupervisorStatusInfo): { status: SupervisorStatusInfo["status"] } {
+  return { status: info.status };
 }
 
 async function readErrorMessage(response: Response): Promise<string> {
@@ -255,13 +262,13 @@ function createMainWindow(): BrowserWindow {
     return { action: "deny" };
   });
 
+  const webContentsId = mainWindow.webContents.id;
   mainWindow.on("closed", () => {
-    cleanupWindowSubscriptions(mainWindow.webContents.id);
+    cleanupWindowSubscriptions(webContentsId);
   });
 
   if (isDevServer) {
     void mainWindow.loadURL("http://127.0.0.1:5174");
-    mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
     void mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
   }
@@ -393,20 +400,7 @@ ipcMain.handle("awaken:validate-workspace", async (_event, candidate: string) =>
 });
 
 ipcMain.handle("awaken:runtime-supervisor-status", async () => {
-  return supervisor?.getStatus() ?? { status: "stopped" };
-});
-
-ipcMain.handle("awaken:restart-runtime", async () => {
-  if (!supervisor) throw new Error("supervisor not initialized");
-  const info = await supervisor.restart();
-  if (info.runtimeBaseUrl) {
-    runtimeBaseUrl = info.runtimeBaseUrl;
-  }
-  return info;
-});
-
-ipcMain.handle("awaken:get-runtime-logs", async () => {
-  return supervisor?.getLogs() ?? [];
+  return toRendererSupervisorStatus(supervisor?.getStatus() ?? { status: "stopped" });
 });
 
 // Persist the last user-selected workspace so the supervisor can default to it
@@ -436,28 +430,21 @@ async function writeLastWorkspace(workspacePath: string): Promise<void> {
 }
 
 app.whenReady().then(async () => {
-  const devRuntimeUrl = process.env.AWAKEN_DESKTOP_RUNTIME_URL?.trim() || "";
   const configDir = await ensureConfigDir();
   const lastWorkspace = await readLastWorkspace();
   supervisor = new RuntimeSupervisor({
     configDir,
-    devRuntimeUrl: devRuntimeUrl || undefined,
     defaultWorkspace: lastWorkspace ?? app.getPath("home"),
   });
   supervisor.onStatusChange((info) => {
     if (info.runtimeBaseUrl) {
       runtimeBaseUrl = info.runtimeBaseUrl;
+    } else if (info.status !== "running") {
+      runtimeBaseUrl = null;
     }
     for (const wc of webContents.getAllWebContents()) {
       if (!wc.isDestroyed()) {
-        wc.send("awaken:supervisor-status-changed", info);
-      }
-    }
-  });
-  supervisor.onLogs((entry) => {
-    for (const wc of webContents.getAllWebContents()) {
-      if (!wc.isDestroyed()) {
-        wc.send("awaken:runtime-logs", entry);
+        wc.send("awaken:supervisor-status-changed", toRendererSupervisorStatus(info));
       }
     }
   });
@@ -510,5 +497,5 @@ process.on("unhandledRejection", (error) => {
 });
 
 console.info(
-  `[awaken-desktop] platform=${toDesktopPlatform(process.platform)} runtime=${runtimeBaseUrl}`,
+  `[awaken-desktop] platform=${toDesktopPlatform(process.platform)}`,
 );

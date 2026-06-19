@@ -25,7 +25,7 @@ Awaken 用 AG-UI 的事件协议格式对外输出 run stream，但实现是 Awa
 - Desktop 消费：`apps/desktop`。
 - UI 组件：`packages/ui` 只收 props/callbacks，不知道 AG-UI。
 - A2UI 当前只是只读 `a2ui_surface` payload，不是完整 SDK/runtime 集成。
-- 上游参考与固定 commit：`docs/external-references.md`。
+- 上游参考与固定 commit：`docs/upstream-references.md`。
 
 ## 当前实现面
 
@@ -183,17 +183,13 @@ npm run build:desktop
 
 ## 本地运行
 
-启动 runtime：
-
-```bash
-go run ./cmd/awaken-core
-```
-
 启动 desktop：
 
 ```bash
 npm run dev:desktop
 ```
+
+单独调试 `awaken-core` 时读 `docs/runtime-development.md`。
 
 启动 UI playground：
 

@@ -17,7 +17,7 @@ import {
   type ProjectItem,
 } from "@awaken/ui";
 import { createRuntimeClient, type SubscribeHandlers } from "./runtime/client";
-import type { RuntimeInfo, RuntimeRunStatus, StartRunRequest, SupervisorStatus } from "../shared/runtime";
+import type { RuntimeInfo, RuntimeRunStatus, StartRunRequest } from "../shared/runtime";
 import {
   createInitialRuntimeState,
   reduceRuntimeState,
@@ -26,7 +26,7 @@ import type { ApprovalDecision } from "../shared/runtime";
 import { A2UISurfaceView } from "./a2ui/A2UISurfaceView";
 
 const models: ModelOption[] = [
-  { id: "awaken-core", label: "awaken-core" },
+  { id: "awaken", label: "Awaken" },
 ];
 
 const projects: ProjectItem[] = [
@@ -38,7 +38,7 @@ const projects: ProjectItem[] = [
       {
         id: "desktop-phase-4",
         label: "Desktop Phase 4",
-        timeLabel: "runtime",
+        timeLabel: "desktop",
       },
     ],
   },
@@ -68,40 +68,6 @@ function formatStatusLabel(
       return "Error";
     default:
       return "Idle";
-  }
-}
-
-function formatSupervisorPill(
-  status: SupervisorStatus | null,
-): { label: string; className: string } | null {
-  switch (status) {
-    case "starting":
-      return {
-        label: "Runtime starting",
-        className: "runtime-pill runtime-pill-status runtime-pill-warning",
-      };
-    case "running":
-      return {
-        label: "Runtime running",
-        className: "runtime-pill runtime-pill-status runtime-pill-connected",
-      };
-    case "crashed":
-      return {
-        label: "Runtime crashed",
-        className: "runtime-pill runtime-pill-status runtime-pill-error",
-      };
-    case "stopping":
-      return {
-        label: "Runtime stopping",
-        className: "runtime-pill runtime-pill-status runtime-pill-muted",
-      };
-    case "stopped":
-      return {
-        label: "Runtime stopped",
-        className: "runtime-pill runtime-pill-status runtime-pill-muted",
-      };
-    default:
-      return null;
   }
 }
 
@@ -141,25 +107,37 @@ export function App() {
   const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
   const [resolvedApproval, setResolvedApproval] = useState<ResolvedApprovalState>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
-  const [connectionError, setConnectionError] = useState<string | null>(null);
   const [workspacePath, setWorkspacePath] = useState<string>("");
-  const [logsExpanded, setLogsExpanded] = useState(false);
-  const [restartingRuntime, setRestartingRuntime] = useState(false);
+
+  const isBusy =
+    runtimeState.phase === "starting" ||
+    runtimeState.phase === "running" ||
+    runtimeState.phase === "reconnecting" ||
+    runtimeState.phase === "cancelling";
+  const desktopReady = runtimeState.supervisorStatus === "running" && runtimeInfo !== null;
+  const desktopStarting =
+    runtimeState.supervisorStatus === null ||
+    runtimeState.supervisorStatus === "starting" ||
+    runtimeState.supervisorStatus === "stopping" ||
+    runtimeState.supervisorStatus === "stopped";
+  const desktopNeedsRestart = runtimeState.supervisorStatus === "crashed";
 
   useEffect(() => {
     let cancelled = false;
 
     async function poll(): Promise<void> {
+      if (runtimeClient.source === "electron" && runtimeState.supervisorStatus !== "running") {
+        setRuntimeInfo(null);
+        return;
+      }
       try {
         const info = await runtimeClient.getRuntimeInfo();
         if (!cancelled) {
           setRuntimeInfo(info);
-          setConnectionError(null);
         }
-      } catch (error) {
+      } catch {
         if (!cancelled) {
           setRuntimeInfo(null);
-          setConnectionError(error instanceof Error ? error.message : "Runtime unreachable");
         }
       }
     }
@@ -173,7 +151,7 @@ export function App() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [runtimeClient]);
+  }, [runtimeClient, runtimeState.supervisorStatus]);
 
   useEffect(() => {
     let cancelled = false;
@@ -187,15 +165,6 @@ export function App() {
       } catch {
         // best-effort: supervisor may not be available yet
       }
-
-      try {
-        const logs = await runtimeClient.getRuntimeLogs();
-        if (!cancelled) {
-          dispatch({ type: "supervisor/logs-replace", logs });
-        }
-      } catch {
-        // best-effort
-      }
     }
 
     void initSupervisor();
@@ -206,16 +175,9 @@ export function App() {
       }
     });
 
-    const unsubscribeLogs = runtimeClient.onRuntimeLogs((entry) => {
-      if (!cancelled) {
-        dispatch({ type: "supervisor/log", entry });
-      }
-    });
-
     return () => {
       cancelled = true;
       unsubscribeStatus();
-      unsubscribeLogs();
     };
   }, [runtimeClient]);
 
@@ -233,6 +195,9 @@ export function App() {
   }, [runtimeInfo, workspacePath]);
 
   async function refreshThreads(): Promise<void> {
+    if (!desktopReady) {
+      return;
+    }
     try {
       const threads = await runtimeClient.listThreads();
       dispatch({ type: "run/threadsLoaded", threads });
@@ -243,14 +208,17 @@ export function App() {
   }
 
   useEffect(() => {
-    if (!runtimeInfo) {
+    if (!desktopReady) {
       return;
     }
     void refreshThreads();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runtimeInfo, runtimeClient]);
+  }, [desktopReady, runtimeClient]);
 
   useEffect(() => {
+    if (!desktopReady) {
+      return;
+    }
     const persistedRunId = localStorage.getItem("awaken:runId");
     if (!persistedRunId) return;
 
@@ -289,13 +257,7 @@ export function App() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runtimeClient]);
-
-  const isBusy =
-    runtimeState.phase === "starting" ||
-    runtimeState.phase === "running" ||
-    runtimeState.phase === "reconnecting" ||
-    runtimeState.phase === "cancelling";
+  }, [desktopReady, runtimeClient]);
 
   const isWorkspaceValid =
     workspacePath.trim() !== "" && /^([A-Za-z]:[\\/]|\/)/.test(workspacePath.trim());
@@ -308,9 +270,6 @@ export function App() {
   const a2uiArtifacts = runtimeState.artifacts.filter(
     (artifact) => artifact.kind === "a2ui_surface",
   );
-  const displayRuntimeBaseUrl =
-    runtimeState.supervisorRuntimeBaseUrl || runtimeClient.runtimeBaseUrl;
-
   const navItems: NavItem[] = [
     { id: "runs", label: "Runs" },
     { id: "artifacts", label: "Artifacts", badge: runtimeState.artifacts.length || undefined },
@@ -363,6 +322,10 @@ export function App() {
   }
 
   async function handleSubmit(): Promise<void> {
+    if (!desktopReady) {
+      setNotice(desktopNeedsRestart ? "Awaken needs restart" : "Awaken is starting");
+      return;
+    }
     const prompt = composerValue.trim();
     if (!prompt) {
       setNotice("Input is required");
@@ -430,6 +393,9 @@ export function App() {
   }
 
   async function handleSelectConversation(threadId: string): Promise<void> {
+    if (!desktopReady) {
+      return;
+    }
     if (threadId === runtimeState.activeThreadId) {
       return;
     }
@@ -500,6 +466,10 @@ export function App() {
   }
 
   async function handlePickWorkspace(): Promise<void> {
+    if (!desktopReady) {
+      setNotice(desktopNeedsRestart ? "Awaken needs restart" : "Awaken is starting");
+      return;
+    }
     try {
       const result = await runtimeClient.pickWorkspace(workspacePath || runtimeInfo?.defaultWorkspace);
       if (!result.canceled) {
@@ -510,19 +480,6 @@ export function App() {
       }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Failed to pick workspace");
-    }
-  }
-
-  async function handleRestartRuntime(): Promise<void> {
-    setRestartingRuntime(true);
-    try {
-      dispatch({ type: "supervisor/reset" });
-      const info = await runtimeClient.restartRuntime();
-      dispatch({ type: "supervisor/status-changed", info });
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Failed to restart runtime");
-    } finally {
-      setRestartingRuntime(false);
     }
   }
 
@@ -553,7 +510,7 @@ export function App() {
   }
 
   function handleAddContext(): void {
-    setNotice("Context picker is not wired yet. Phase 4 only closes the run, approval, and artifact runtime loop.");
+    setNotice("Context picker is not wired yet. Phase 4 only closes the run, approval, and artifact loop.");
   }
 
   const platform = (runtimeClient.platform === "web"
@@ -601,31 +558,24 @@ export function App() {
           main={
             <div className="desktop-main">
               <TopBar>
-                <div className="runtime-pills">
-                  <span className="runtime-pill">{runtimeClient.source}</span>
-                  <span className="runtime-pill runtime-pill-status">
-                    {formatStatusLabel(runtimeState.phase, runtimeState.status)}
-                  </span>
-                  <span className="runtime-pill runtime-pill-muted">
-                    {displayRuntimeBaseUrl}
-                  </span>
-                  <span
-                    className={`runtime-pill runtime-pill-status ${
-                      runtimeInfo ? "runtime-pill-connected" : "runtime-pill-disconnected"
-                    }`}
-                  >
-                    {runtimeInfo ? "Connected" : "Disconnected"}
-                  </span>
-                  {(() => {
-                    const supervisorPill = formatSupervisorPill(runtimeState.supervisorStatus);
-                    return supervisorPill ? (
-                      <span className={supervisorPill.className}>{supervisorPill.label}</span>
-                    ) : null;
-                  })()}
-                  {runtimeInfo ? (
-                    <>
-                      <span className="runtime-pill">
-                        {runtimeInfo.configuredModel || "unknown model"}
+	                <div className="runtime-pills">
+	                  <span className="runtime-pill runtime-pill-status">
+	                    {formatStatusLabel(runtimeState.phase, runtimeState.status)}
+	                  </span>
+	                  {desktopStarting ? (
+	                    <span className="runtime-pill runtime-pill-status runtime-pill-warning">
+	                      Starting
+	                    </span>
+	                  ) : null}
+	                  {desktopNeedsRestart ? (
+	                    <span className="runtime-pill runtime-pill-status runtime-pill-error">
+	                      Needs restart
+	                    </span>
+	                  ) : null}
+	                  {runtimeInfo ? (
+	                    <>
+	                      <span className="runtime-pill">
+	                        {runtimeInfo.configuredModel || "unknown model"}
                       </span>
                       <span
                         className={`runtime-pill runtime-pill-status ${
@@ -650,31 +600,31 @@ export function App() {
                     </>
                   ) : null}
                   <label className="workspace-picker">
-                    <span className="workspace-picker-label">Workspace</span>
-                    <div className="workspace-picker-row">
-                      <input
-                        type="text"
-                        className="workspace-picker-input"
-                        value={workspacePath}
-                        onChange={(e) => setWorkspacePath(e.target.value)}
-                        placeholder="/path/to/project"
-                        disabled={isBusy}
-                      />
-                      <button
-                        type="button"
-                        className="runtime-action"
-                        onClick={() => {
-                          void handlePickWorkspace();
-                        }}
-                        disabled={isBusy}
-                      >
-                        Choose…
-                      </button>
-                    </div>
-                  </label>
-                  {!isWorkspaceValid ? (
-                    <span className="runtime-pill runtime-pill-warning">Workspace required</span>
-                  ) : null}
+	                    <span className="workspace-picker-label">Workspace</span>
+	                    <div className="workspace-picker-row">
+	                      <input
+	                        type="text"
+	                        className="workspace-picker-input"
+	                        value={workspacePath}
+	                        onChange={(e) => setWorkspacePath(e.target.value)}
+	                        placeholder="/path/to/project"
+	                        disabled={!desktopReady || isBusy}
+	                      />
+	                      <button
+	                        type="button"
+	                        className="runtime-action"
+	                        onClick={() => {
+	                          void handlePickWorkspace();
+	                        }}
+	                        disabled={!desktopReady || isBusy}
+	                      >
+	                        Choose…
+	                      </button>
+	                    </div>
+	                  </label>
+	                  {desktopReady && !isWorkspaceValid ? (
+	                    <span className="runtime-pill runtime-pill-warning">Workspace required</span>
+	                  ) : null}
                   <span className="runtime-pill">
                     approvals {runtimeState.approvals.length}
                   </span>
@@ -684,58 +634,36 @@ export function App() {
                   <button
                     type="button"
                     className="runtime-action"
-                    onClick={() => {
-                      void handleCancel();
-                    }}
-                    disabled={!runtimeState.runId || !isBusy}
-                  >
-                    Cancel run
-                  </button>
+	                    onClick={() => {
+	                      void handleCancel();
+	                    }}
+	                    disabled={!desktopReady || !runtimeState.runId || !isBusy}
+	                  >
+	                    Cancel run
+	                  </button>
                 </div>
               </TopBar>
 
               <CenterStage width={860} topMargin={72}>
-                {connectionError ? (
-                  <div className="runtime-panel runtime-panel-error">
-                    <strong>Runtime disconnected</strong>
-                    <p>
-                      Runtime is not reachable at {displayRuntimeBaseUrl}. Check supervisor
-                      status and runtime logs.
-                    </p>
-                  </div>
-                ) : null}
+	                {desktopNeedsRestart ? (
+	                  <div className="runtime-panel runtime-panel-error">
+	                    <strong>Awaken needs restart</strong>
+	                    <p>Quit Awaken and open it again.</p>
+	                  </div>
+	                ) : null}
 
-                {runtimeState.supervisorStatus === "crashed" ? (
-                  <div className="runtime-panel runtime-panel-error">
-                    <strong>Runtime crashed</strong>
-                    <p>
-                      {runtimeState.supervisorErrorMessage ||
-                        "The runtime process exited unexpectedly."}
-                      {runtimeState.supervisorExitCode !== undefined
-                        ? ` (exit code: ${runtimeState.supervisorExitCode})`
-                        : ""}
-                    </p>
-                    <button
-                      type="button"
-                      className="runtime-action"
-                      onClick={() => {
-                        void handleRestartRuntime();
-                      }}
-                      disabled={restartingRuntime}
-                    >
-                      {restartingRuntime ? "Restarting..." : "Restart Runtime"}
-                    </button>
-                  </div>
-                ) : null}
+	                {desktopStarting ? (
+	                  <div className="runtime-panel">
+	                    <strong>Starting Awaken</strong>
+	                    <p>Preparing the desktop app.</p>
+	                  </div>
+	                ) : null}
 
-                <div className="hero-block">
-                  <p className="eyebrow">Desktop Runtime</p>
-                  <h1>Managed awaken-core runtime</h1>
-                  <p className="lede">
-                    Electron main 现在会管理 bundled runtime，展示进程状态、日志和
-                    restart 恢复路径，同时保留 approval/artifact runtime loop。
-                  </p>
-                </div>
+	                <div className="hero-block">
+	                  <p className="eyebrow">Awaken</p>
+	                  <h1>Awaken Desktop</h1>
+	                  <p className="lede">Choose a workspace and start a run.</p>
+	                </div>
 
                 <Composer
                   value={composerValue}
@@ -748,11 +676,11 @@ export function App() {
                   onModeChange={setMode}
                   model={selectedModel}
                   models={models}
-                  onModelChange={setSelectedModel}
-                  placeholder="Describe the change you want Awaken to run"
-                  disabled={isBusy || !isWorkspaceValid}
-                  isReady={composerValue.trim().length > 0 && isWorkspaceValid}
-                />
+	                  onModelChange={setSelectedModel}
+	                  placeholder="Describe the change you want Awaken to run"
+	                  disabled={!desktopReady || isBusy || !isWorkspaceValid}
+	                  isReady={desktopReady && composerValue.trim().length > 0 && isWorkspaceValid}
+	                />
 
                 <div className="panel-stack">
                   <RunTimeline
@@ -760,11 +688,11 @@ export function App() {
                     status={runtimeState.timelineStatus}
                     steps={runtimeState.steps}
                   >
-                    {runtimeState.errorMessage ? (
-                      <div className="runtime-panel runtime-panel-error">
-                        <strong>Runtime error</strong>
-                        <p>{runtimeState.errorMessage}</p>
-                      </div>
+	                    {runtimeState.errorMessage ? (
+	                      <div className="runtime-panel runtime-panel-error">
+	                        <strong>Run error</strong>
+	                        <p>{runtimeState.errorMessage}</p>
+	                      </div>
                     ) : null}
 
                     {notice ? (
@@ -881,49 +809,7 @@ export function App() {
                   </RunTimeline>
                 </div>
 
-                <section className="runtime-panel">
-                  <div className="panel-heading">
-                    <h2>Runtime Logs</h2>
-                    <span>{runtimeState.runtimeLogs.length} rows</span>
-                    <button
-                      type="button"
-                      className="runtime-action"
-                      onClick={() => setLogsExpanded(!logsExpanded)}
-                    >
-                      {logsExpanded ? "Collapse" : "Expand"}
-                    </button>
-                    <button
-                      type="button"
-                      className="runtime-action"
-                      onClick={() => {
-                        void handleRestartRuntime();
-                      }}
-                      disabled={restartingRuntime}
-                    >
-                      {restartingRuntime ? "Restarting..." : "Restart Runtime"}
-                    </button>
-                  </div>
-                  {logsExpanded ? (
-                    <div className="runtime-logs">
-                      {runtimeState.runtimeLogs.length === 0 ? (
-                        <p className="runtime-logs-empty">No runtime logs yet.</p>
-                      ) : (
-                        runtimeState.runtimeLogs.map((entry) => (
-                          <div key={entry.id} className="runtime-log-entry">
-                            <span className="runtime-log-time">
-                              {new Date(entry.timestamp).toLocaleTimeString()}
-                            </span>{" "}
-                            <span className={`runtime-log-stream-${entry.stream}`}>
-                              [{entry.stream}]
-                            </span>{" "}
-                            <span>{entry.line}</span>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  ) : null}
-                </section>
-              </CenterStage>
+	              </CenterStage>
             </div>
           }
         />

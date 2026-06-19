@@ -37,27 +37,6 @@ function tick(): Promise<void> {
 }
 
 describe("RuntimeSupervisor", () => {
-  it("uses the external runtime URL in dev mode without spawning a child", async () => {
-    const spawnProcess = vi.fn();
-    const supervisor = new RuntimeSupervisor(
-      {
-        configDir: "/tmp/awaken-config",
-        devRuntimeUrl: "http://127.0.0.1:8787",
-      },
-      {
-        spawnProcess,
-      },
-    );
-
-    const info = await supervisor.start();
-
-    expect(info).toEqual({
-      status: "running",
-      runtimeBaseUrl: "http://127.0.0.1:8787",
-    });
-    expect(spawnProcess).not.toHaveBeenCalled();
-  });
-
   it("passes runtime env and reports running after health succeeds", async () => {
     let spawnOptions: SpawnOptions | undefined;
     const supervisor = new RuntimeSupervisor(

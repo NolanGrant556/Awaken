@@ -6,7 +6,6 @@ import {
   type DesktopPlatform,
   type RunStreamHandlers,
   type RuntimeInfo,
-  type RuntimeLogEntry,
   type RuntimeRun,
   type RuntimeThread,
   type StartRunRequest,
@@ -15,7 +14,6 @@ import {
   type WorkspaceValidationResult,
 } from "../shared/runtime.js";
 
-const runtimeBaseUrl = process.env.AWAKEN_DESKTOP_RUNTIME_URL?.trim() || "http://127.0.0.1:8787";
 const subscriptions = new Map<string, RunStreamHandlers>();
 
 function toDesktopPlatform(platform: string): DesktopPlatform {
@@ -54,7 +52,6 @@ ipcRenderer.on("awaken:run-closed", (_event, payload: { subscriptionId: string }
 
 const bridge: AwakenBridge = {
   platform: toDesktopPlatform(process.platform),
-  runtimeBaseUrl,
   getRun: (runId: string) =>
     ipcRenderer.invoke("awaken:get-run", runId) as Promise<RuntimeRun>,
   listThreads: () =>
@@ -95,17 +92,8 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:pick-workspace", defaultPath) as Promise<WorkspacePickResult>,
   validateWorkspace: (path: string) =>
     ipcRenderer.invoke("awaken:validate-workspace", path) as Promise<WorkspaceValidationResult>,
-  getRuntimeLogs: () =>
-    ipcRenderer.invoke("awaken:get-runtime-logs") as Promise<RuntimeLogEntry[]>,
-  restartRuntime: () =>
-    ipcRenderer.invoke("awaken:restart-runtime") as Promise<SupervisorStatusInfo>,
   getSupervisorStatus: () =>
     ipcRenderer.invoke("awaken:runtime-supervisor-status") as Promise<SupervisorStatusInfo>,
-  onRuntimeLogs: (callback: (entry: RuntimeLogEntry) => void) => {
-    const handler = (_event: IpcRendererEvent, entry: RuntimeLogEntry) => callback(entry);
-    ipcRenderer.on("awaken:runtime-logs", handler);
-    return () => ipcRenderer.removeListener("awaken:runtime-logs", handler);
-  },
   onSupervisorStatusChange: (callback: (info: SupervisorStatusInfo) => void) => {
     const handler = (_event: IpcRendererEvent, info: SupervisorStatusInfo) => callback(info);
     ipcRenderer.on("awaken:supervisor-status-changed", handler);

@@ -1,7 +1,6 @@
 import type { ApprovalItem, RunStepItem } from "@awaken/ui";
 import type { AguiApprovalRiskTone, AguiArtifactStatus, AguiEvent } from "./agui";
 import type {
-  RuntimeLogEntry,
   RuntimeRun,
   RuntimeRunStatus,
   RuntimeThread,
@@ -70,10 +69,6 @@ export type RuntimeViewState = {
   activeThreadId?: string;
   threadViews: Record<string, ThreadViewState>;
   supervisorStatus: SupervisorStatus | null;
-  supervisorRuntimeBaseUrl?: string;
-  supervisorErrorMessage?: string;
-  supervisorExitCode?: number;
-  runtimeLogs: RuntimeLogEntry[];
 };
 
 export type RuntimeAction =
@@ -90,10 +85,7 @@ export type RuntimeAction =
   | { type: "run/threadAdded"; threadId: string; label: string; runId: string }
   | { type: "run/threadSwitch"; threadId: string }
   | { type: "run/event"; event: AguiEvent }
-  | { type: "supervisor/status-changed"; info: SupervisorStatusInfo }
-  | { type: "supervisor/log"; entry: RuntimeLogEntry }
-  | { type: "supervisor/logs-replace"; logs: RuntimeLogEntry[] }
-  | { type: "supervisor/reset" };
+  | { type: "supervisor/status-changed"; info: SupervisorStatusInfo };
 
 const initialState: RuntimeViewState = {
   prompt: "",
@@ -109,7 +101,6 @@ const initialState: RuntimeViewState = {
   threads: [],
   threadViews: {},
   supervisorStatus: null,
-  runtimeLogs: [],
 };
 
 function viewFromState(state: RuntimeViewState): ThreadViewState {
@@ -389,10 +380,6 @@ export function reduceRuntimeState(
       return {
         ...initialState,
         supervisorStatus: state.supervisorStatus,
-        supervisorRuntimeBaseUrl: state.supervisorRuntimeBaseUrl,
-        supervisorErrorMessage: state.supervisorErrorMessage,
-        supervisorExitCode: state.supervisorExitCode,
-        runtimeLogs: state.runtimeLogs,
         threads: state.threads,
         threadViews: saveActiveThreadView(state).threadViews,
       };
@@ -409,10 +396,6 @@ export function reduceRuntimeState(
         approvals: [],
         artifacts: [],
         supervisorStatus: state.supervisorStatus,
-        supervisorRuntimeBaseUrl: state.supervisorRuntimeBaseUrl,
-        supervisorErrorMessage: state.supervisorErrorMessage,
-        supervisorExitCode: state.supervisorExitCode,
-        runtimeLogs: state.runtimeLogs,
         threads: state.threads,
         activeThreadId: state.activeThreadId,
         threadViews: state.threadViews,
@@ -465,10 +448,6 @@ export function reduceRuntimeState(
       return saveActiveThreadView({
         ...syncFromRun(initialState, action.run),
         supervisorStatus: state.supervisorStatus,
-        supervisorRuntimeBaseUrl: state.supervisorRuntimeBaseUrl,
-        supervisorErrorMessage: state.supervisorErrorMessage,
-        supervisorExitCode: state.supervisorExitCode,
-        runtimeLogs: state.runtimeLogs,
         timelineTitle: "恢复运行",
         threads: upsertThread(state.threads, {
           threadId: action.run.threadId,
@@ -498,10 +477,6 @@ export function reduceRuntimeState(
         return {
           ...initialState,
           supervisorStatus: state.supervisorStatus,
-          supervisorRuntimeBaseUrl: state.supervisorRuntimeBaseUrl,
-          supervisorErrorMessage: state.supervisorErrorMessage,
-          supervisorExitCode: state.supervisorExitCode,
-          runtimeLogs: state.runtimeLogs,
           threads: loaded,
           threadViews,
         };
@@ -814,33 +789,6 @@ export function reduceRuntimeState(
       return {
         ...state,
         supervisorStatus: action.info.status,
-        supervisorRuntimeBaseUrl: action.info.runtimeBaseUrl,
-        supervisorErrorMessage: action.info.errorMessage,
-        supervisorExitCode: action.info.exitCode,
-      };
-    case "supervisor/log": {
-      const logs = [...state.runtimeLogs, action.entry];
-      if (logs.length > 1000) {
-        logs.splice(0, logs.length - 1000);
-      }
-      return {
-        ...state,
-        runtimeLogs: logs,
-      };
-    }
-    case "supervisor/logs-replace":
-      return {
-        ...state,
-        runtimeLogs: action.logs,
-      };
-    case "supervisor/reset":
-      return {
-        ...state,
-        supervisorStatus: null,
-        supervisorRuntimeBaseUrl: undefined,
-        supervisorErrorMessage: undefined,
-        supervisorExitCode: undefined,
-        runtimeLogs: [],
       };
     default:
       return state;

@@ -26,7 +26,6 @@ export interface SupervisorStatusInfo {
 export interface SupervisorOptions {
   configDir: string;
   defaultWorkspace?: string;
-  devRuntimeUrl?: string;
   maxStartAttempts?: number;
 }
 
@@ -119,12 +118,6 @@ export class RuntimeSupervisor {
   }
 
   async start(): Promise<SupervisorStatusInfo> {
-    if (this.options.devRuntimeUrl) {
-      this.runtimeBaseUrl = this.options.devRuntimeUrl;
-      this.setStatus("running");
-      return this.getStatus();
-    }
-
     if (this.status !== "stopped" && this.status !== "crashed") {
       return this.getStatus();
     }

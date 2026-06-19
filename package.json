@@ -9,8 +9,8 @@
     "dev:ui": "npm --workspace @awaken/ui run dev",
     "build:ui": "npm --workspace @awaken/ui run build",
     "typecheck:ui": "npm --workspace @awaken/ui run typecheck",
-    "dev:desktop": "npm run build:ui && npm --workspace @awaken/desktop run dev",
-    "build:desktop": "npm run build:ui && npm --workspace @awaken/desktop run build",
+    "dev:desktop": "npm run build:ui && node scripts/ensure-desktop-runtime.mjs && npm --workspace @awaken/desktop run dev",
+    "build:desktop": "npm run build:ui && npm run build:binary && npm --workspace @awaken/desktop run build",
     "build:binary": "node scripts/build-binary.mjs",
     "typecheck:desktop": "npm run build:ui && npm --workspace @awaken/desktop run typecheck"
   }

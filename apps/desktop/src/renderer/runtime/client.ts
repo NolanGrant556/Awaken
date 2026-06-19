@@ -9,11 +9,13 @@ import {
   type DesktopPlatform,
   type RuntimeInfo,
   type RuntimeInfoWire,
+  type RuntimeLogEntry,
   type RuntimeRun,
   type RuntimeRunWire,
   type RuntimeThread,
   type RuntimeThreadWire,
   type StartRunRequest,
+  type SupervisorStatusInfo,
   type WorkspacePickResult,
   type WorkspaceValidationResult,
 } from "../../shared/runtime";
@@ -46,6 +48,11 @@ export type RuntimeClient = {
   ) => Promise<() => void>;
   pickWorkspace: (defaultPath?: string) => Promise<WorkspacePickResult>;
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
+  getSupervisorStatus: () => Promise<SupervisorStatusInfo>;
+  restartRuntime: () => Promise<SupervisorStatusInfo>;
+  getRuntimeLogs: () => Promise<RuntimeLogEntry[]>;
+  onRuntimeLogs: (callback: (entry: RuntimeLogEntry) => void) => () => void;
+  onSupervisorStatusChange: (callback: (info: SupervisorStatusInfo) => void) => () => void;
 };
 
 const MAX_RECONNECT_RETRIES = 5;
@@ -105,10 +112,37 @@ async function requestRuntimeOK(baseUrl: string, pathname: string, init?: Reques
 }
 
 function createElectronClient(bridge: AwakenBridge): RuntimeClient {
+  // Track the runtime base URL as the supervisor allocates ports. The preload
+  // value is captured once at load time (before the supervisor has picked a
+  // port in packaged mode), so we refresh it from supervisor status changes.
+  let currentBaseUrl = bridge.runtimeBaseUrl;
+  let supervisorEventSeen = false;
+  const updateRuntimeBaseUrl = (info: SupervisorStatusInfo): void => {
+    if (info.runtimeBaseUrl) {
+      currentBaseUrl = info.runtimeBaseUrl;
+    }
+  };
+  bridge.onSupervisorStatusChange((info) => {
+    supervisorEventSeen = true;
+    updateRuntimeBaseUrl(info);
+  });
+  void bridge
+    .getSupervisorStatus()
+    .then((info) => {
+      if (!supervisorEventSeen) {
+        updateRuntimeBaseUrl(info);
+      }
+    })
+    .catch(() => {
+      // Best effort: the status event stream will update the value once available.
+    });
+
   return {
     source: "electron",
     platform: bridge.platform,
-    runtimeBaseUrl: bridge.runtimeBaseUrl,
+    get runtimeBaseUrl() {
+      return currentBaseUrl;
+    },
     getRuntimeInfo: () => bridge.getRuntimeInfo(),
     getRun: (runId) => bridge.getRun(runId),
     listThreads: () => bridge.listThreads(),
@@ -218,6 +252,11 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     },
     pickWorkspace: (defaultPath) => bridge.pickWorkspace(defaultPath),
     validateWorkspace: (path) => bridge.validateWorkspace(path),
+    getSupervisorStatus: () => bridge.getSupervisorStatus(),
+    restartRuntime: () => bridge.restartRuntime(),
+    getRuntimeLogs: () => bridge.getRuntimeLogs(),
+    onRuntimeLogs: (callback) => bridge.onRuntimeLogs(callback),
+    onSupervisorStatusChange: (callback) => bridge.onSupervisorStatusChange(callback),
   };
 }
 
@@ -359,6 +398,11 @@ function createBrowserClient(): RuntimeClient {
       }
       return { valid: true };
     },
+    getSupervisorStatus: async () => ({ status: "running" }),
+    restartRuntime: async () => ({ status: "running" }),
+    getRuntimeLogs: async () => [],
+    onRuntimeLogs: () => () => {},
+    onSupervisorStatusChange: () => () => {},
   };
 }
 

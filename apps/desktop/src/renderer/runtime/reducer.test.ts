@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AguiEvent } from "../../shared/agui";
-import type { RuntimeRun } from "../../shared/runtime";
+import type { RuntimeLogEntry, RuntimeRun, SupervisorStatusInfo } from "../../shared/runtime";
 import {
   createInitialRuntimeState,
   reduceRuntimeState,
@@ -256,5 +256,128 @@ describe("runtime reducer thread snapshots", () => {
     expect(state.activeThreadId).toBeUndefined();
     expect(state.threadId).toBeUndefined();
     expect(state.runId).toBeUndefined();
+  });
+});
+
+describe("runtime reducer supervisor state", () => {
+  it("initial state has null supervisorStatus and empty runtimeLogs", () => {
+    const state = createInitialRuntimeState();
+    expect(state.supervisorStatus).toBeNull();
+    expect(state.supervisorRuntimeBaseUrl).toBeUndefined();
+    expect(state.runtimeLogs).toEqual([]);
+    expect(state.supervisorErrorMessage).toBeUndefined();
+    expect(state.supervisorExitCode).toBeUndefined();
+  });
+
+  it("supervisor/status-changed updates status, errorMessage, and exitCode", () => {
+    const info: SupervisorStatusInfo = {
+      status: "crashed",
+      runtimeBaseUrl: "http://127.0.0.1:9001",
+      errorMessage: "runtime exited",
+      exitCode: 1,
+    };
+    const state = dispatch([{ type: "supervisor/status-changed", info }]);
+    expect(state.supervisorStatus).toBe("crashed");
+    expect(state.supervisorRuntimeBaseUrl).toBe("http://127.0.0.1:9001");
+    expect(state.supervisorErrorMessage).toBe("runtime exited");
+    expect(state.supervisorExitCode).toBe(1);
+  });
+
+  it("supervisor/status-changed clears runtimeBaseUrl, errorMessage, and exitCode when not provided", () => {
+    const state = dispatch([
+      {
+        type: "supervisor/status-changed",
+        info: {
+          status: "crashed",
+          runtimeBaseUrl: "http://127.0.0.1:9001",
+          errorMessage: "boom",
+          exitCode: 1,
+        },
+      },
+      { type: "supervisor/status-changed", info: { status: "running" } },
+    ]);
+    expect(state.supervisorStatus).toBe("running");
+    expect(state.supervisorRuntimeBaseUrl).toBeUndefined();
+    expect(state.supervisorErrorMessage).toBeUndefined();
+    expect(state.supervisorExitCode).toBeUndefined();
+  });
+
+  it("supervisor/log appends entries to runtimeLogs", () => {
+    const entry1: RuntimeLogEntry = { id: 0, timestamp: 1000, stream: "stdout", line: "line 1" };
+    const entry2: RuntimeLogEntry = { id: 1, timestamp: 2000, stream: "stderr", line: "line 2" };
+    const state = dispatch([
+      { type: "supervisor/log", entry: entry1 },
+      { type: "supervisor/log", entry: entry2 },
+    ]);
+    expect(state.runtimeLogs).toEqual([entry1, entry2]);
+  });
+
+  it("supervisor/log caps at 1000 entries by shifting oldest", () => {
+    const actions: RuntimeAction[] = [];
+    for (let i = 0; i < 1005; i++) {
+      actions.push({
+        type: "supervisor/log",
+        entry: { id: i, timestamp: i, stream: "stdout", line: `line ${i}` },
+      });
+    }
+    const state = dispatch(actions);
+    expect(state.runtimeLogs).toHaveLength(1000);
+    expect(state.runtimeLogs[0].line).toBe("line 5");
+    expect(state.runtimeLogs[999].line).toBe("line 1004");
+  });
+
+  it("supervisor/logs-replace replaces entire runtimeLogs", () => {
+    const logs: RuntimeLogEntry[] = [
+      { id: 0, timestamp: 1000, stream: "stdout", line: "replaced 1" },
+      { id: 1, timestamp: 2000, stream: "stderr", line: "replaced 2" },
+    ];
+    const state = dispatch([
+      { type: "supervisor/log", entry: { id: 0, timestamp: 0, stream: "stdout", line: "old" } },
+      { type: "supervisor/logs-replace", logs },
+    ]);
+    expect(state.runtimeLogs).toEqual(logs);
+  });
+
+  it("supervisor/reset clears supervisor status and logs", () => {
+    const state = dispatch([
+      { type: "supervisor/status-changed", info: { status: "crashed", errorMessage: "boom", exitCode: 1 } },
+      { type: "supervisor/log", entry: { id: 0, timestamp: 0, stream: "stdout", line: "log" } },
+      { type: "supervisor/reset" },
+    ]);
+    expect(state.supervisorStatus).toBeNull();
+    expect(state.supervisorRuntimeBaseUrl).toBeUndefined();
+    expect(state.supervisorErrorMessage).toBeUndefined();
+    expect(state.supervisorExitCode).toBeUndefined();
+    expect(state.runtimeLogs).toEqual([]);
+  });
+
+  it("supervisor state is preserved across run/reset", () => {
+    const state = dispatch([
+      {
+        type: "supervisor/status-changed",
+        info: { status: "running", runtimeBaseUrl: "http://127.0.0.1:9001" },
+      },
+      { type: "supervisor/log", entry: { id: 0, timestamp: 0, stream: "stdout", line: "log" } },
+      { type: "run/requested", prompt: "test" },
+      { type: "run/reset" },
+    ]);
+    expect(state.supervisorStatus).toBe("running");
+    expect(state.supervisorRuntimeBaseUrl).toBe("http://127.0.0.1:9001");
+    expect(state.runtimeLogs).toHaveLength(1);
+    expect(state.runtimeLogs[0].line).toBe("log");
+  });
+
+  it("supervisor state is preserved across run/recovered", () => {
+    const state = dispatch([
+      {
+        type: "supervisor/status-changed",
+        info: { status: "running", runtimeBaseUrl: "http://127.0.0.1:9001" },
+      },
+      { type: "supervisor/log", entry: { id: 0, timestamp: 0, stream: "stdout", line: "log" } },
+      { type: "run/recovered", run: makeRun({ status: "running" }) },
+    ]);
+    expect(state.supervisorStatus).toBe("running");
+    expect(state.supervisorRuntimeBaseUrl).toBe("http://127.0.0.1:9001");
+    expect(state.runtimeLogs).toHaveLength(1);
   });
 });

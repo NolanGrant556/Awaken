@@ -17,7 +17,7 @@ import {
   type ProjectItem,
 } from "@awaken/ui";
 import { createRuntimeClient, type SubscribeHandlers } from "./runtime/client";
-import type { RuntimeInfo, RuntimeRunStatus, StartRunRequest } from "../shared/runtime";
+import type { RuntimeInfo, RuntimeRunStatus, StartRunRequest, SupervisorStatus } from "../shared/runtime";
 import {
   createInitialRuntimeState,
   reduceRuntimeState,
@@ -71,6 +71,55 @@ function formatStatusLabel(
   }
 }
 
+function formatSupervisorPill(
+  status: SupervisorStatus | null,
+): { label: string; className: string } | null {
+  switch (status) {
+    case "starting":
+      return {
+        label: "Runtime starting",
+        className: "runtime-pill runtime-pill-status runtime-pill-warning",
+      };
+    case "running":
+      return {
+        label: "Runtime running",
+        className: "runtime-pill runtime-pill-status runtime-pill-connected",
+      };
+    case "crashed":
+      return {
+        label: "Runtime crashed",
+        className: "runtime-pill runtime-pill-status runtime-pill-error",
+      };
+    case "stopping":
+      return {
+        label: "Runtime stopping",
+        className: "runtime-pill runtime-pill-status runtime-pill-muted",
+      };
+    case "stopped":
+      return {
+        label: "Runtime stopped",
+        className: "runtime-pill runtime-pill-status runtime-pill-muted",
+      };
+    default:
+      return null;
+  }
+}
+
+type ResolvedApprovalState = {
+  approvalId: string;
+  decision: "approved" | "rejected";
+} | null;
+
+export function resolvedDecisionForApproval(
+  activeApproval: { id: string } | undefined,
+  resolvedApproval: ResolvedApprovalState,
+): "approved" | "rejected" | undefined {
+  if (!activeApproval || !resolvedApproval || resolvedApproval.approvalId !== activeApproval.id) {
+    return undefined;
+  }
+  return resolvedApproval.decision;
+}
+
 export function App() {
   const runtimeClientRef = useRef(createRuntimeClient());
   const unsubscribeRef = useRef<null | (() => void)>(null);
@@ -90,13 +139,12 @@ export function App() {
   const [activeNavId, setActiveNavId] = useState("runs");
   const [notice, setNotice] = useState<string | null>(null);
   const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
-  const [resolvedApproval, setResolvedApproval] = useState<{
-    approvalId: string;
-    decision: "approved" | "rejected";
-  } | null>(null);
+  const [resolvedApproval, setResolvedApproval] = useState<ResolvedApprovalState>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [workspacePath, setWorkspacePath] = useState<string>("");
+  const [logsExpanded, setLogsExpanded] = useState(false);
+  const [restartingRuntime, setRestartingRuntime] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -124,6 +172,50 @@ export function App() {
     return () => {
       cancelled = true;
       clearInterval(interval);
+    };
+  }, [runtimeClient]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function initSupervisor(): Promise<void> {
+      try {
+        const info = await runtimeClient.getSupervisorStatus();
+        if (!cancelled) {
+          dispatch({ type: "supervisor/status-changed", info });
+        }
+      } catch {
+        // best-effort: supervisor may not be available yet
+      }
+
+      try {
+        const logs = await runtimeClient.getRuntimeLogs();
+        if (!cancelled) {
+          dispatch({ type: "supervisor/logs-replace", logs });
+        }
+      } catch {
+        // best-effort
+      }
+    }
+
+    void initSupervisor();
+
+    const unsubscribeStatus = runtimeClient.onSupervisorStatusChange((info) => {
+      if (!cancelled) {
+        dispatch({ type: "supervisor/status-changed", info });
+      }
+    });
+
+    const unsubscribeLogs = runtimeClient.onRuntimeLogs((entry) => {
+      if (!cancelled) {
+        dispatch({ type: "supervisor/log", entry });
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribeStatus();
+      unsubscribeLogs();
     };
   }, [runtimeClient]);
 
@@ -216,6 +308,8 @@ export function App() {
   const a2uiArtifacts = runtimeState.artifacts.filter(
     (artifact) => artifact.kind === "a2ui_surface",
   );
+  const displayRuntimeBaseUrl =
+    runtimeState.supervisorRuntimeBaseUrl || runtimeClient.runtimeBaseUrl;
 
   const navItems: NavItem[] = [
     { id: "runs", label: "Runs" },
@@ -419,6 +513,19 @@ export function App() {
     }
   }
 
+  async function handleRestartRuntime(): Promise<void> {
+    setRestartingRuntime(true);
+    try {
+      dispatch({ type: "supervisor/reset" });
+      const info = await runtimeClient.restartRuntime();
+      dispatch({ type: "supervisor/status-changed", info });
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to restart runtime");
+    } finally {
+      setRestartingRuntime(false);
+    }
+  }
+
   async function handleResolveApproval(decision: ApprovalDecision): Promise<void> {
     if (!runtimeState.runId || !activeApproval) {
       return;
@@ -500,7 +607,7 @@ export function App() {
                     {formatStatusLabel(runtimeState.phase, runtimeState.status)}
                   </span>
                   <span className="runtime-pill runtime-pill-muted">
-                    {runtimeClient.runtimeBaseUrl}
+                    {displayRuntimeBaseUrl}
                   </span>
                   <span
                     className={`runtime-pill runtime-pill-status ${
@@ -509,6 +616,12 @@ export function App() {
                   >
                     {runtimeInfo ? "Connected" : "Disconnected"}
                   </span>
+                  {(() => {
+                    const supervisorPill = formatSupervisorPill(runtimeState.supervisorStatus);
+                    return supervisorPill ? (
+                      <span className={supervisorPill.className}>{supervisorPill.label}</span>
+                    ) : null;
+                  })()}
                   {runtimeInfo ? (
                     <>
                       <span className="runtime-pill">
@@ -586,19 +699,41 @@ export function App() {
                   <div className="runtime-panel runtime-panel-error">
                     <strong>Runtime disconnected</strong>
                     <p>
-                      Unable to reach runtime at {runtimeClient.runtimeBaseUrl}. Please start
-                      awaken-core.
+                      Runtime is not reachable at {displayRuntimeBaseUrl}. Check supervisor
+                      status and runtime logs.
                     </p>
                   </div>
                 ) : null}
 
+                {runtimeState.supervisorStatus === "crashed" ? (
+                  <div className="runtime-panel runtime-panel-error">
+                    <strong>Runtime crashed</strong>
+                    <p>
+                      {runtimeState.supervisorErrorMessage ||
+                        "The runtime process exited unexpectedly."}
+                      {runtimeState.supervisorExitCode !== undefined
+                        ? ` (exit code: ${runtimeState.supervisorExitCode})`
+                        : ""}
+                    </p>
+                    <button
+                      type="button"
+                      className="runtime-action"
+                      onClick={() => {
+                        void handleRestartRuntime();
+                      }}
+                      disabled={restartingRuntime}
+                    >
+                      {restartingRuntime ? "Restarting..." : "Restart Runtime"}
+                    </button>
+                  </div>
+                ) : null}
+
                 <div className="hero-block">
-                  <p className="eyebrow">AG-UI Phase 4</p>
-                  <h1>Desktop runtime approvals and artifacts</h1>
+                  <p className="eyebrow">Desktop Runtime</p>
+                  <h1>Managed awaken-core runtime</h1>
                   <p className="lede">
-                    Renderer 现在会消费 approval/artifact extension events，调用 runtime
-                    resolve API，并把真实 runtime state 映射到 `ApprovalCard` 和
-                    `ArtifactGrid`。
+                    Electron main 现在会管理 bundled runtime，展示进程状态、日志和
+                    restart 恢复路径，同时保留 approval/artifact runtime loop。
                   </p>
                 </div>
 
@@ -745,6 +880,49 @@ export function App() {
                     </section>
                   </RunTimeline>
                 </div>
+
+                <section className="runtime-panel">
+                  <div className="panel-heading">
+                    <h2>Runtime Logs</h2>
+                    <span>{runtimeState.runtimeLogs.length} rows</span>
+                    <button
+                      type="button"
+                      className="runtime-action"
+                      onClick={() => setLogsExpanded(!logsExpanded)}
+                    >
+                      {logsExpanded ? "Collapse" : "Expand"}
+                    </button>
+                    <button
+                      type="button"
+                      className="runtime-action"
+                      onClick={() => {
+                        void handleRestartRuntime();
+                      }}
+                      disabled={restartingRuntime}
+                    >
+                      {restartingRuntime ? "Restarting..." : "Restart Runtime"}
+                    </button>
+                  </div>
+                  {logsExpanded ? (
+                    <div className="runtime-logs">
+                      {runtimeState.runtimeLogs.length === 0 ? (
+                        <p className="runtime-logs-empty">No runtime logs yet.</p>
+                      ) : (
+                        runtimeState.runtimeLogs.map((entry) => (
+                          <div key={entry.id} className="runtime-log-entry">
+                            <span className="runtime-log-time">
+                              {new Date(entry.timestamp).toLocaleTimeString()}
+                            </span>{" "}
+                            <span className={`runtime-log-stream-${entry.stream}`}>
+                              [{entry.stream}]
+                            </span>{" "}
+                            <span>{entry.line}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  ) : null}
+                </section>
               </CenterStage>
             </div>
           }
@@ -762,11 +940,7 @@ export function App() {
         approveLabel={resolvingApprovalId === activeApproval?.id ? "Resolving..." : "Approve"}
         rejectLabel={resolvingApprovalId === activeApproval?.id ? "Resolving..." : "Reject"}
         resolving={resolvingApprovalId === activeApproval?.id}
-        resolvedDecision={
-          resolvedApproval?.approvalId === activeApproval?.id
-            ? resolvedApproval.decision
-            : undefined
-        }
+        resolvedDecision={resolvedDecisionForApproval(activeApproval, resolvedApproval)}
         onApprove={() => {
           void handleResolveApproval("approved");
         }}

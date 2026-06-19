@@ -1,0 +1,24 @@
+- [x] `npm run build:binary` 产出可执行的 bundled `awaken-core` binary
+- [x] Electron main 启动时自动 spawn bundled runtime 子进程（非 dev 模式）
+- [x] dev 模式（`AWAKEN_DESKTOP_RUNTIME_URL` 已设置）不 spawn 子进程，走外部 runtime
+- [x] supervisor 分配随机 localhost 端口，避免冲突
+- [x] supervisor 轮询 `/health` 等待 runtime ready
+- [x] runtime ready 后 renderer 连接到 supervisor 分配的端口
+- [x] 退出 app 后无残留 `awaken-core` 进程
+- [x] runtime crash 后 UI 显示 crashed 状态和错误
+- [x] crashed 状态下可点击 Restart Runtime 恢复
+- [x] runtime stdout/stderr 收集到 ring buffer 并推送到 renderer
+- [x] UI 有可折叠的 runtime logs 面板
+- [x] 配置目录迁移到 `app.getPath('userData')/config`
+- [x] 首次启动生成默认 `config.toml` 和 `.env` 模板
+- [x] 已存在的配置文件不被覆盖
+- [x] `AWAKEN_CONFIG_DIR` 环境变量被 `llm.LoadConfig` 识别
+- [x] `AWAKEN_DEFAULT_WORKSPACE` 环境变量被 `cmd/awaken-core` 识别
+- [x] 不开终端，启动 Desktop 后可完成一次真实 run
+- [x] runtime 启动失败（binary 缺失）UI 显示错误，不白屏
+- [x] 端口冲突能重试或报错可读
+- [x] runtime policy 仍在 Go runtime/tool 层，Electron main 只管理进程生命周期
+- [x] electron-builder 配置把 binary 打包进 app
+- [x] `go test ./src/llm/... ./cmd/awaken-core/...` 通过
+- [x] `npm run typecheck:desktop` 通过
+- [x] `npm --workspace @awaken/desktop run test` 通过

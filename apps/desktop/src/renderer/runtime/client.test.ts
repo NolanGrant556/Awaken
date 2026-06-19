@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AguiEvent } from "../../shared/agui";
+import type { AwakenBridge, SupervisorStatusInfo } from "../../shared/runtime";
 import { createRuntimeClient } from "./client";
 
 type MockEventSourceInstance = {
@@ -43,6 +44,43 @@ afterEach(() => {
 
 function emitEvent(source: MockEventSourceInstance, event: AguiEvent): void {
   source.onmessage?.({ data: JSON.stringify(event) });
+}
+
+function createElectronBridge(
+  status: SupervisorStatusInfo | Promise<SupervisorStatusInfo>,
+): { bridge: AwakenBridge; emitStatus: (info: SupervisorStatusInfo) => void } {
+  const statusCallbacks: Array<(info: SupervisorStatusInfo) => void> = [];
+  const bridge = {
+    platform: "macos",
+    runtimeBaseUrl: "http://127.0.0.1:8787",
+    getRun: vi.fn(),
+    listThreads: vi.fn(async () => []),
+    startRun: vi.fn(),
+    cancelRun: vi.fn(),
+    resolveApproval: vi.fn(),
+    subscribeRun: vi.fn(async () => "subscription-1"),
+    unsubscribeRun: vi.fn(),
+    getRuntimeInfo: vi.fn(),
+    pickWorkspace: vi.fn(async () => ({ canceled: true as const })),
+    validateWorkspace: vi.fn(async () => ({ valid: true as const })),
+    getRuntimeLogs: vi.fn(async () => []),
+    restartRuntime: vi.fn(() => Promise.resolve(status)),
+    getSupervisorStatus: vi.fn(() => Promise.resolve(status)),
+    onRuntimeLogs: vi.fn(() => () => {}),
+    onSupervisorStatusChange: vi.fn((callback: (info: SupervisorStatusInfo) => void) => {
+      statusCallbacks.push(callback);
+      return () => {};
+    }),
+  } as unknown as AwakenBridge;
+
+  return {
+    bridge,
+    emitStatus: (info: SupervisorStatusInfo) => {
+      for (const callback of statusCallbacks) {
+        callback(info);
+      }
+    },
+  };
 }
 
 describe("browser client reconnect", () => {
@@ -180,5 +218,94 @@ describe("browser client threads", () => {
         updatedAt: "2026-01-01T00:00:00Z",
       },
     ]);
+  });
+});
+
+describe("browser client supervisor fallback", () => {
+  it("getSupervisorStatus returns running status in browser fallback", async () => {
+    const client = createRuntimeClient();
+    const info = await client.getSupervisorStatus();
+    expect(info).toEqual({ status: "running" });
+  });
+
+  it("restartRuntime returns running status in browser fallback", async () => {
+    const client = createRuntimeClient();
+    const info = await client.restartRuntime();
+    expect(info).toEqual({ status: "running" });
+  });
+
+  it("getRuntimeLogs returns empty array in browser fallback", async () => {
+    const client = createRuntimeClient();
+    const logs = await client.getRuntimeLogs();
+    expect(logs).toEqual([]);
+  });
+
+  it("onRuntimeLogs returns a no-op unsubscribe in browser fallback", () => {
+    const client = createRuntimeClient();
+    const unsubscribe = client.onRuntimeLogs(() => {});
+    expect(typeof unsubscribe).toBe("function");
+    expect(() => unsubscribe()).not.toThrow();
+  });
+
+  it("onSupervisorStatusChange returns a no-op unsubscribe in browser fallback", () => {
+    const client = createRuntimeClient();
+    const unsubscribe = client.onSupervisorStatusChange(() => {});
+    expect(typeof unsubscribe).toBe("function");
+    expect(() => unsubscribe()).not.toThrow();
+  });
+});
+
+describe("electron client supervisor state", () => {
+  it("refreshes runtimeBaseUrl from the current supervisor status on creation", async () => {
+    const { bridge } = createElectronBridge({
+      status: "running",
+      runtimeBaseUrl: "http://127.0.0.1:19001",
+    });
+    vi.stubGlobal("window", {
+      location: { origin: "http://localhost" },
+      awaken: bridge,
+    });
+
+    const client = createRuntimeClient();
+    expect(client.runtimeBaseUrl).toBe("http://127.0.0.1:8787");
+
+    await Promise.resolve();
+
+    expect(client.runtimeBaseUrl).toBe("http://127.0.0.1:19001");
+  });
+
+  it("updates runtimeBaseUrl from supervisor status events", () => {
+    const { bridge, emitStatus } = createElectronBridge({
+      status: "running",
+      runtimeBaseUrl: "http://127.0.0.1:19001",
+    });
+    vi.stubGlobal("window", {
+      location: { origin: "http://localhost" },
+      awaken: bridge,
+    });
+
+    const client = createRuntimeClient();
+    emitStatus({ status: "running", runtimeBaseUrl: "http://127.0.0.1:19002" });
+
+    expect(client.runtimeBaseUrl).toBe("http://127.0.0.1:19002");
+  });
+
+  it("does not let a stale initial status overwrite a newer supervisor event", async () => {
+    let resolveStatus: (info: SupervisorStatusInfo) => void = () => {};
+    const pendingStatus = new Promise<SupervisorStatusInfo>((resolve) => {
+      resolveStatus = resolve;
+    });
+    const { bridge, emitStatus } = createElectronBridge(pendingStatus);
+    vi.stubGlobal("window", {
+      location: { origin: "http://localhost" },
+      awaken: bridge,
+    });
+
+    const client = createRuntimeClient();
+    emitStatus({ status: "running", runtimeBaseUrl: "http://127.0.0.1:19002" });
+    resolveStatus({ status: "running", runtimeBaseUrl: "http://127.0.0.1:19001" });
+    await Promise.resolve();
+
+    expect(client.runtimeBaseUrl).toBe("http://127.0.0.1:19002");
   });
 });

@@ -19,6 +19,7 @@ type ComposerProps = {
   placeholder?: string;
   disabled?: boolean;
   isReady?: boolean;
+  submitMode?: "send" | "stop";
 };
 
 export function Composer({
@@ -34,12 +35,14 @@ export function Composer({
   placeholder,
   disabled,
   isReady = false,
+  submitMode = "send",
 }: ComposerProps) {
+  const canSubmit = submitMode === "stop" || !disabled;
   const handleSubmit = useCallback(() => {
-    if (!disabled) {
+    if (canSubmit) {
       onSubmit?.();
     }
-  }, [disabled, onSubmit]);
+  }, [canSubmit, onSubmit]);
 
   return (
     <div
@@ -48,8 +51,8 @@ export function Composer({
         flexDirection: "column",
         gap: "8px",
         padding: "12px 16px",
-        borderRadius: "var(--aw-radius-lg)",
-        background: "var(--aw-bg-fill-light)",
+        borderRadius: "var(--aw-radius-workbench)",
+        background: "var(--aw-surface-composer)",
         border: "1px solid var(--aw-border-light)",
         minHeight: 116,
       }}
@@ -88,7 +91,8 @@ export function Composer({
         <SendButton
           ready={isReady}
           onClick={handleSubmit}
-          disabled={disabled}
+          disabled={submitMode === "stop" ? false : disabled}
+          mode={submitMode}
         />
       </div>
     </div>

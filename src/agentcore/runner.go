@@ -1,16 +1,22 @@
 package agentcore
 
 import (
+	"bytes"
 	stdcontext "context"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 
 	"awaken/src/context"
+	"awaken/src/internal/outputlimit"
 	"awaken/src/llm"
 	"awaken/src/tool"
 )
+
+const maxTurnDiffChars = 50000
 
 type Runner struct {
 	config       AgentConfig
@@ -130,6 +136,7 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, callback StreamCall
 
 		if handled, finalAnswer := r.handleXMLFallback(ctx, response.Content, callback, events); handled {
 			if finalAnswer != "" {
+				events.emitTurnDiff(ctx, r.config.Workspace.Root)
 				events.runFinished(finalAnswer)
 				return finalAnswer, nil
 			}
@@ -143,6 +150,7 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, callback StreamCall
 		}
 		r.conversation.AssistantOutput(response.Content, nil)
 		events.finishTextIfOpen()
+		events.emitTurnDiff(ctx, r.config.Workspace.Root)
 		events.runFinished(response.Content)
 		return response.Content, nil
 	}
@@ -238,7 +246,14 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, callback StreamCallback, even
 			}
 		}
 	}
-	return llm.StreamInvoke(ctx, llm.Config{
+	observer := llm.StreamObserver{}
+	if streamCallback != nil {
+		observer.OnContent = llm.StreamCallback(streamCallback)
+	}
+	if events != nil {
+		observer.OnToolCallDelta = events.onToolCallArgsDelta
+	}
+	return llm.StreamInvokeWithObserver(ctx, llm.Config{
 		APIKey:      r.config.ModelConfig.APIKey,
 		BaseURL:     r.config.ModelConfig.BaseURL,
 		Model:       llmReq.Model,
@@ -249,7 +264,7 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, callback StreamCallback, even
 		SystemPrompt: llmReq.SystemPrompt,
 		Messages:     llmReq.Messages,
 		Tools:        llmReq.Tools,
-	}, llm.StreamCallback(streamCallback))
+	}, observer)
 }
 
 func (r *Runner) handleXMLFallback(ctx stdcontext.Context, response string, callback StreamCallback, events *runEventEmitter) (bool, string) {
@@ -291,17 +306,29 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 		}
 		if events != nil {
 			events.emitToolCall(call)
+			events.emitToolProgress(call, "Executing tool")
 		}
 		result := r.toolRuntime.Execute(ctx, call)
 		results = append(results, result)
+		if events != nil && call.Function.Name == "apply_patch" && !result.IsError {
+			events.markMutation()
+		}
 		if callback != nil {
 			callback(fmt.Sprintf("\n\n[工具结果] %s: %s\n\n", result.Name, result.Content), false)
 		}
 		if events != nil {
+			events.emitToolProgress(call, toolProgressForResult(result))
 			events.emitToolResult(result)
 		}
 	}
 	return results
+}
+
+func toolProgressForResult(result ToolExecutionResult) string {
+	if result.IsError {
+		return "Tool execution failed"
+	}
+	return "Tool execution complete"
 }
 
 func syntheticCancelledToolResult(call context.ToolCall) ToolExecutionResult {
@@ -355,6 +382,7 @@ type runEventEmitter struct {
 	textOpen            bool
 	reasoningOpen       bool
 	textStartedThisTurn bool
+	mutationOccurred    bool
 }
 
 func newRunEventEmitter(threadID string, sink EventSink) *runEventEmitter {
@@ -425,6 +453,23 @@ func (e *runEventEmitter) onLLMDelta(content string, isThinking bool) {
 	})
 }
 
+func (e *runEventEmitter) onToolCallArgsDelta(delta llm.ToolCallDelta) {
+	if delta.ArgumentsDelta == "" {
+		return
+	}
+	e.ensureAssistantMessageID()
+	toolCallID := delta.ID
+	if toolCallID == "" {
+		toolCallID = fmt.Sprintf("tool_index_%d", delta.Index)
+	}
+	e.emit(AwakenEvent{
+		Type:       ToolCallArgsDeltaEventType,
+		ToolCallID: toolCallID,
+		ToolName:   delta.Name,
+		Delta:      delta.ArgumentsDelta,
+	})
+}
+
 func (e *runEventEmitter) emitStandaloneText(content string) {
 	if content == "" {
 		return
@@ -452,12 +497,26 @@ func (e *runEventEmitter) emitToolCall(call context.ToolCall) {
 		e.emit(AwakenEvent{
 			Type:       ToolCallArgsEventType,
 			ToolCallID: call.ID,
+			ToolName:   call.Function.Name,
 			Arguments:  call.Function.Arguments,
 		})
 	}
 	e.emit(AwakenEvent{
 		Type:       ToolCallFinishedEventType,
 		ToolCallID: call.ID,
+		ToolName:   call.Function.Name,
+	})
+}
+
+func (e *runEventEmitter) emitToolProgress(call context.ToolCall, progress string) {
+	if progress == "" {
+		return
+	}
+	e.emit(AwakenEvent{
+		Type:       ToolProgressEventType,
+		ToolCallID: call.ID,
+		ToolName:   call.Function.Name,
+		Progress:   progress,
 	})
 }
 
@@ -470,6 +529,91 @@ func (e *runEventEmitter) emitToolResult(result ToolExecutionResult) {
 		Content:    result.Content,
 		Role:       "tool",
 	})
+}
+
+func (e *runEventEmitter) markMutation() {
+	e.mutationOccurred = true
+}
+
+func (e *runEventEmitter) emitTurnDiff(ctx stdcontext.Context, workspaceRoot string) {
+	if !e.mutationOccurred {
+		return
+	}
+	diff, truncated, ok := collectWorkspaceDiff(ctx, workspaceRoot)
+	if !ok || strings.TrimSpace(diff) == "" {
+		return
+	}
+	e.emit(AwakenEvent{
+		Type:      TurnDiffEventType,
+		Diff:      diff,
+		Truncated: truncated,
+	})
+}
+
+func collectWorkspaceDiff(ctx stdcontext.Context, workspaceRoot string) (string, bool, bool) {
+	if strings.TrimSpace(workspaceRoot) == "" {
+		return "", false, false
+	}
+	trackedDiff, ok := gitOutput(ctx, workspaceRoot, "diff", "--")
+	if !ok {
+		return "", false, false
+	}
+	untrackedDiff, _ := collectUntrackedWorkspaceDiff(ctx, workspaceRoot)
+	diff := trackedDiff
+	if diff != "" && untrackedDiff != "" && !strings.HasSuffix(diff, "\n") {
+		diff += "\n"
+	}
+	diff += untrackedDiff
+	limited := outputlimit.Limit(diff, maxTurnDiffChars)
+	return limited.Content, limited.Truncated, true
+}
+
+func collectUntrackedWorkspaceDiff(ctx stdcontext.Context, workspaceRoot string) (string, bool) {
+	untracked, ok := gitOutput(ctx, workspaceRoot, "ls-files", "--others", "--exclude-standard", "-z")
+	if !ok || untracked == "" {
+		return "", ok
+	}
+	var combined strings.Builder
+	for _, relPath := range strings.Split(untracked, "\x00") {
+		if relPath == "" {
+			continue
+		}
+		diff, ok := gitOutputAllowDiffExit(ctx, workspaceRoot, "diff", "--no-index", "--", os.DevNull, relPath)
+		if !ok {
+			return combined.String(), false
+		}
+		if combined.Len() > 0 && diff != "" && !strings.HasSuffix(combined.String(), "\n") {
+			combined.WriteString("\n")
+		}
+		combined.WriteString(diff)
+	}
+	return combined.String(), true
+}
+
+func gitOutput(ctx stdcontext.Context, workspaceRoot string, args ...string) (string, bool) {
+	cmdArgs := append([]string{"-C", workspaceRoot}, args...)
+	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return "", false
+	}
+	return stdout.String(), true
+}
+
+func gitOutputAllowDiffExit(ctx stdcontext.Context, workspaceRoot string, args ...string) (string, bool) {
+	cmdArgs := append([]string{"-C", workspaceRoot}, args...)
+	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	err := cmd.Run()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+			return "", false
+		}
+	}
+	return stdout.String(), true
 }
 
 func (e *runEventEmitter) startTextIfNeeded() {

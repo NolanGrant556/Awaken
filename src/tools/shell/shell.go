@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"awaken/src/internal/outputlimit"
@@ -82,6 +83,14 @@ func (t *ShellTool) CheckPermission(ctx context.Context, input string, permissio
 }
 
 func (t *ShellTool) Execute(ctx context.Context, input string) (string, error) {
+	return t.execute(ctx, input, nil)
+}
+
+func (t *ShellTool) ExecuteWithObserver(ctx context.Context, input string, observer tool.ToolObserver) (string, error) {
+	return t.execute(ctx, input, observer)
+}
+
+func (t *ShellTool) execute(ctx context.Context, input string, observer tool.ToolObserver) (string, error) {
 	params, err := parseParams(input)
 	if err != nil {
 		return "", err
@@ -104,8 +113,8 @@ func (t *ShellTool) Execute(ctx context.Context, input string) (string, error) {
 		cmd.Dir = permissionContext.WorkspaceRootOrCWD()
 	}
 
-	stdout := outputlimit.NewCappedBuffer(maxOutputChars)
-	stderr := outputlimit.NewCappedBuffer(maxOutputChars)
+	stdout := newShellOutputWriter("stdout", maxOutputChars, observer)
+	stderr := newShellOutputWriter("stderr", maxOutputChars, observer)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
@@ -141,6 +150,69 @@ func (t *ShellTool) Execute(ctx context.Context, input string) (string, error) {
 		return "", err
 	}
 	return string(data), nil
+}
+
+type shellOutputWriter struct {
+	stream        string
+	buffer        *outputlimit.CappedBuffer
+	observer      tool.ToolObserver
+	maxChars      int
+	emittedChars  int
+	truncatedSent bool
+	mu            sync.Mutex
+}
+
+func newShellOutputWriter(stream string, maxChars int, observer tool.ToolObserver) *shellOutputWriter {
+	return &shellOutputWriter{
+		stream:   stream,
+		buffer:   outputlimit.NewCappedBuffer(maxChars),
+		observer: observer,
+		maxChars: maxChars,
+	}
+}
+
+func (w *shellOutputWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	n, err := w.buffer.Write(p)
+	w.emitDelta(string(p))
+	return n, err
+}
+
+func (w *shellOutputWriter) Result() outputlimit.Result {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buffer.Result()
+}
+
+func (w *shellOutputWriter) emitDelta(delta string) {
+	if w.observer == nil || delta == "" || w.maxChars <= 0 {
+		return
+	}
+
+	runes := []rune(delta)
+	remaining := w.maxChars - w.emittedChars
+	if remaining > 0 {
+		if remaining > len(runes) {
+			remaining = len(runes)
+		}
+		chunk := string(runes[:remaining])
+		w.emittedChars += remaining
+		w.observer.OnCommandOutput(tool.CommandOutput{
+			Stream: w.stream,
+			Delta:  chunk,
+		})
+	}
+
+	if w.emittedChars >= w.maxChars && len(runes) > remaining && !w.truncatedSent {
+		w.truncatedSent = true
+		w.observer.OnCommandOutput(tool.CommandOutput{
+			Stream:    w.stream,
+			Delta:     "\n[... output truncated ...]\n",
+			Truncated: true,
+		})
+	}
 }
 
 func shellPermissionReason(params shellParams, permissionContext tool.PermissionContext) (string, string) {

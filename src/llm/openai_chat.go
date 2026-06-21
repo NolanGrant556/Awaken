@@ -132,6 +132,10 @@ func (t *openaiTransport) Invoke(ctx stdctx.Context, cfg Config, req Request) (*
 }
 
 func (t *openaiTransport) StreamInvoke(ctx stdctx.Context, cfg Config, req Request, callback StreamCallback) (*Response, error) {
+	return t.StreamInvokeWithObserver(ctx, cfg, req, StreamObserver{OnContent: callback})
+}
+
+func (t *openaiTransport) StreamInvokeWithObserver(ctx stdctx.Context, cfg Config, req Request, observer StreamObserver) (*Response, error) {
 	url := cfg.BaseURL + "/chat/completions"
 
 	chatReq := openaiChatRequest{
@@ -168,7 +172,7 @@ func (t *openaiTransport) StreamInvoke(ctx stdctx.Context, cfg Config, req Reque
 		return nil, requestFailedError(resp)
 	}
 
-	state := newOpenAIStreamState(callback)
+	state := newOpenAIStreamState(observer)
 	scanner := bufio.NewScanner(resp.Body)
 
 	for scanner.Scan() {
@@ -275,7 +279,7 @@ func convertToolsToOpenAI(tools []tool.ToolDefinition) []map[string]interface{} 
 // --- OpenAI Stream State ---
 
 type openAIStreamState struct {
-	callback  StreamCallback
+	observer  StreamObserver
 	content   strings.Builder
 	toolCalls map[int]*openaiStreamToolAccumulator
 }
@@ -287,9 +291,9 @@ type openaiStreamToolAccumulator struct {
 	arguments strings.Builder
 }
 
-func newOpenAIStreamState(callback StreamCallback) *openAIStreamState {
+func newOpenAIStreamState(observer StreamObserver) *openAIStreamState {
 	return &openAIStreamState{
-		callback:  callback,
+		observer:  observer,
 		toolCalls: make(map[int]*openaiStreamToolAccumulator),
 	}
 }
@@ -323,14 +327,26 @@ func (s *openAIStreamState) consume(data string) {
 			}
 			if toolCall.Function.Arguments != "" {
 				acc.arguments.WriteString(toolCall.Function.Arguments)
+				s.emitToolCallDelta(ToolCallDelta{
+					Index:          toolCall.Index,
+					ID:             acc.id,
+					Name:           acc.name.String(),
+					ArgumentsDelta: toolCall.Function.Arguments,
+				})
 			}
 		}
 	}
 }
 
 func (s *openAIStreamState) emit(content string, isThinking bool) {
-	if s.callback != nil {
-		s.callback(content, isThinking)
+	if s.observer.OnContent != nil {
+		s.observer.OnContent(content, isThinking)
+	}
+}
+
+func (s *openAIStreamState) emitToolCallDelta(delta ToolCallDelta) {
+	if s.observer.OnToolCallDelta != nil {
+		s.observer.OnToolCallDelta(delta)
 	}
 }
 
@@ -361,8 +377,12 @@ func (s *openAIStreamState) sortedToolCalls() []ToolCall {
 	result := make([]ToolCall, 0, len(indexes))
 	for _, index := range indexes {
 		acc := s.toolCalls[index]
+		id := acc.id
+		if id == "" {
+			id = fmt.Sprintf("tool_index_%d", index)
+		}
 		result = append(result, ToolCall{
-			ID:    acc.id,
+			ID:    id,
 			Name:  acc.name.String(),
 			Input: acc.arguments.String(),
 		})

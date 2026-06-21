@@ -1,0 +1,29 @@
+# Checklist
+
+- [x] 内部 command output 事件已新增
+- [x] 内部 patch updated 事件已新增
+- [x] 内部 turn diff 事件已新增
+- [x] shell stdout/stderr 能发出 output delta
+- [x] output delta 有截断策略
+- [x] apply_patch 审批前发出 patch updated
+- [x] patch updated 包含 raw patch、summary、affected paths
+- [x] reject 后不产生 changed-file artifact
+- [x] run 完成后发出 turn diff
+- [x] turn diff 与实际 `git diff` 一致
+- [x] turn diff 有截断策略
+- [x] AG-UI mapper 映射 command output
+- [x] AG-UI mapper 映射 patch updated
+- [x] AG-UI mapper 映射 turn diff
+- [x] Desktop Terminal inspector 接收 output delta
+- [x] Desktop Changes inspector 展示 patch preview
+- [x] Desktop Changes inspector 展示 turn diff
+- [x] shell/apply_patch/runtime 测试覆盖新事件
+- [x] mapper 测试覆盖三类事件
+- [x] reducer 测试覆盖 Terminal/Changes 投影
+- [x] 真实 mutation smoke 通过
+- [x] 相关 Go tests 通过
+- [x] `npm --workspace @awaken/desktop run test` 通过
+- [x] `npm run typecheck:desktop` 通过
+- [x] `npm run build:desktop` 通过
+- [x] `git diff --check` 通过
+- [x] 独立 review pass 未发现 blocker / correctness / acceptance finding

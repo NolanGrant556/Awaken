@@ -1,0 +1,20 @@
+- [x] `ThinkingBlock` 已新增并导出
+- [x] `MarkdownAnswer` 已新增并导出
+- [x] `packages/ui` 新组件未引入 AG-UI、A2UI、Electron、runtime client、SSE 或 `window.awaken`
+- [x] markdown paragraph 基础渲染可见
+- [x] markdown list 基础渲染可见
+- [x] inline code 基础渲染可见
+- [x] Desktop thinking item 使用 `ThinkingBlock`
+- [x] Desktop answer item 使用 `MarkdownAnswer`
+- [x] replay 后不会重复显示同一段 answer
+- [x] provider 缺失或 stream error 显示 error narrative item
+- [x] 普通 pong 问答不出现 tool、approval、artifact
+- [x] Run Stage 靠近底部时自动滚动到 live tail
+- [x] 用户手动向上滚动时不强制抢回
+- [x] `npm --workspace @awaken/desktop run test` 通过
+- [x] `npm run typecheck:ui` 通过
+- [x] `npm run typecheck:desktop` 通过
+- [x] `npm run build:desktop` 通过
+- [x] `git diff --check` 通过
+- [x] 真实 LLM pong smoke 通过
+- [x] 独立 review pass 未发现 blocker / correctness / acceptance finding

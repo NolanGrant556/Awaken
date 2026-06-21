@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -519,10 +521,15 @@ data: {"type":"message_stop"}`,
 		RunStartedEventType,
 		ReasoningStartedEventType,
 		ReasoningDeltaEventType,
+		ToolCallArgsDeltaEventType,
+		ToolCallArgsDeltaEventType,
+		ToolCallArgsDeltaEventType,
 		ReasoningFinishedEventType,
 		ToolCallStartedEventType,
 		ToolCallArgsEventType,
 		ToolCallFinishedEventType,
+		ToolProgressEventType,
+		ToolProgressEventType,
 		ToolResultEventType,
 		TextMessageStartedEventType,
 		TextDeltaEventType,
@@ -537,11 +544,23 @@ data: {"type":"message_stop"}`,
 			t.Fatalf("unexpected event type at %d: want %s got %s (%v)", i, want, gotTypes[i], gotTypes)
 		}
 	}
-	if gotEvents[7].Content != "echo:hello" {
-		t.Fatalf("expected tool result content echo:hello, got %q", gotEvents[7].Content)
+	if gotEvents[3].Delta != "{" || gotEvents[4].Delta != "\"value\":\"hello\"" || gotEvents[5].Delta != "}" {
+		t.Fatalf("unexpected tool args deltas: %q %q %q", gotEvents[3].Delta, gotEvents[4].Delta, gotEvents[5].Delta)
 	}
-	if gotEvents[9].Delta != "done" {
-		t.Fatalf("expected final text delta done, got %q", gotEvents[9].Delta)
+	if gotEvents[7].ToolName != toolName || gotEvents[8].ToolName != toolName || gotEvents[9].ToolName != toolName {
+		t.Fatalf("expected tool identity on start/args/end events, got %q %q %q", gotEvents[7].ToolName, gotEvents[8].ToolName, gotEvents[9].ToolName)
+	}
+	if gotEvents[8].Arguments != `{"value":"hello"}` {
+		t.Fatalf("expected complete tool args fallback, got %q", gotEvents[8].Arguments)
+	}
+	if gotEvents[10].Progress != "Executing tool" || gotEvents[11].Progress != "Tool execution complete" {
+		t.Fatalf("unexpected tool progress events: %q %q", gotEvents[10].Progress, gotEvents[11].Progress)
+	}
+	if gotEvents[12].Content != "echo:hello" {
+		t.Fatalf("expected tool result content echo:hello, got %q", gotEvents[12].Content)
+	}
+	if gotEvents[14].Delta != "done" {
+		t.Fatalf("expected final text delta done, got %q", gotEvents[14].Delta)
 	}
 }
 
@@ -758,6 +777,93 @@ func TestRunnerRunStreamWithEventsPlainQA(t *testing.T) {
 	}
 }
 
+func TestRunEventEmitterEmitsTurnDiffAfterMutation(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git not available: %v", err)
+	}
+
+	root := t.TempDir()
+	runGitInRepo(t, root, "init")
+	runGitInRepo(t, root, "config", "user.email", "test@example.com")
+	runGitInRepo(t, root, "config", "user.name", "Test User")
+
+	target := filepath.Join(root, "note.md")
+	if err := os.WriteFile(target, []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write initial file: %v", err)
+	}
+	runGitInRepo(t, root, "add", "note.md")
+	runGitInRepo(t, root, "commit", "-m", "initial")
+
+	if err := os.WriteFile(target, []byte("world\n"), 0o644); err != nil {
+		t.Fatalf("write changed file: %v", err)
+	}
+	wantDiff := runGitOutputInRepo(t, root, "diff", "--")
+
+	var events []AwakenEvent
+	emitter := newRunEventEmitter("thread-test", EventSinkFunc(func(event AwakenEvent) {
+		events = append(events, event)
+	}))
+	emitter.emitTurnDiff(context.Background(), root)
+	if len(events) != 0 {
+		t.Fatalf("expected no turn diff before mutation marker, got %+v", events)
+	}
+
+	emitter.markMutation()
+	emitter.emitTurnDiff(context.Background(), root)
+	if len(events) != 1 {
+		t.Fatalf("expected one turn diff event, got %+v", events)
+	}
+	if events[0].Type != TurnDiffEventType {
+		t.Fatalf("expected TurnDiff event, got %s", events[0].Type)
+	}
+	if events[0].Diff != wantDiff {
+		t.Fatalf("expected turn diff to match git diff\nwant:\n%s\ngot:\n%s", wantDiff, events[0].Diff)
+	}
+	if events[0].Truncated {
+		t.Fatalf("expected small diff not to be truncated")
+	}
+}
+
+func TestRunEventEmitterEmitsTurnDiffForUntrackedAddedFile(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git not available: %v", err)
+	}
+
+	root := t.TempDir()
+	runGitInRepo(t, root, "init")
+	runGitInRepo(t, root, "config", "user.email", "test@example.com")
+	runGitInRepo(t, root, "config", "user.name", "Test User")
+
+	tracked := filepath.Join(root, "tracked.md")
+	if err := os.WriteFile(tracked, []byte("base\n"), 0o644); err != nil {
+		t.Fatalf("write tracked file: %v", err)
+	}
+	runGitInRepo(t, root, "add", "tracked.md")
+	runGitInRepo(t, root, "commit", "-m", "initial")
+
+	added := filepath.Join(root, "added.md")
+	if err := os.WriteFile(added, []byte("created\n"), 0o644); err != nil {
+		t.Fatalf("write added file: %v", err)
+	}
+
+	var events []AwakenEvent
+	emitter := newRunEventEmitter("thread-test", EventSinkFunc(func(event AwakenEvent) {
+		events = append(events, event)
+	}))
+	emitter.markMutation()
+	emitter.emitTurnDiff(context.Background(), root)
+
+	if len(events) != 1 {
+		t.Fatalf("expected one turn diff event, got %+v", events)
+	}
+	if events[0].Type != TurnDiffEventType {
+		t.Fatalf("expected TurnDiff event, got %s", events[0].Type)
+	}
+	if !strings.Contains(events[0].Diff, "added.md") || !strings.Contains(events[0].Diff, "+created") {
+		t.Fatalf("expected turn diff to include untracked added file, got:\n%s", events[0].Diff)
+	}
+}
+
 func TestRunnerPropagatesBearerAuthByDefault(t *testing.T) {
 	var capturedHeaders http.Header
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -858,6 +964,21 @@ func TestRunnerRejectsInvalidToolResultPairingBeforeLLM(t *testing.T) {
 	if called {
 		t.Fatal("expected invalid pairing to be rejected before LLM request")
 	}
+}
+
+func runGitInRepo(t *testing.T, root string, args ...string) {
+	t.Helper()
+	_ = runGitOutputInRepo(t, root, args...)
+}
+
+func runGitOutputInRepo(t *testing.T, root string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, output)
+	}
+	return string(output)
 }
 
 func TestRunnerCancelInjectsSyntheticToolResults(t *testing.T) {

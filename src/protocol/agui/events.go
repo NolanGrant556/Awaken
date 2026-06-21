@@ -16,9 +16,14 @@ const (
 	EventReasoningMessageEnd     EventType = "REASONING_MESSAGE_END"
 	EventReasoningEnd            EventType = "REASONING_END"
 	EventToolCallStart           EventType = "TOOL_CALL_START"
+	EventToolCallArgsDelta       EventType = "TOOL_CALL_ARGS_DELTA"
 	EventToolCallArgs            EventType = "TOOL_CALL_ARGS"
 	EventToolCallEnd             EventType = "TOOL_CALL_END"
+	EventToolProgress            EventType = "TOOL_PROGRESS"
 	EventToolCallResult          EventType = "TOOL_CALL_RESULT"
+	EventAwakenCommandOutput     EventType = "AWAKEN_COMMAND_OUTPUT"
+	EventAwakenPatchUpdated      EventType = "AWAKEN_PATCH_UPDATED"
+	EventAwakenTurnDiff          EventType = "AWAKEN_TURN_DIFF"
 	EventAwakenApprovalRequested EventType = "AWAKEN_APPROVAL_REQUESTED"
 	EventAwakenApprovalResolved  EventType = "AWAKEN_APPROVAL_RESOLVED"
 	EventAwakenArtifactCreated   EventType = "AWAKEN_ARTIFACT_CREATED"
@@ -46,6 +51,12 @@ type Event struct {
 	ToolCallName          string      `json:"toolCallName,omitempty"`
 	Content               string      `json:"content,omitempty"`
 	Result                string      `json:"result,omitempty"`
+	Progress              string      `json:"progress,omitempty"`
+	CommandStream         string      `json:"commandStream,omitempty"`
+	Patch                 string      `json:"patch,omitempty"`
+	PatchSummary          string      `json:"patchSummary,omitempty"`
+	Diff                  string      `json:"diff,omitempty"`
+	Truncated             bool        `json:"truncated,omitempty"`
 	Message               string      `json:"message,omitempty"`
 	Code                  string      `json:"code,omitempty"`
 	ApprovalID            string      `json:"approvalId,omitempty"`

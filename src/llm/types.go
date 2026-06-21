@@ -57,10 +57,26 @@ type ToolCall struct {
 // StreamCallback 是流式回调函数
 type StreamCallback func(content string, isThinking bool)
 
+type ToolCallDelta struct {
+	Index          int
+	ID             string
+	Name           string
+	ArgumentsDelta string
+}
+
+type StreamObserver struct {
+	OnContent       StreamCallback
+	OnToolCallDelta func(ToolCallDelta)
+}
+
 // Transport 是 LLM 传输层接口
 type Transport interface {
 	Invoke(ctx stdctx.Context, cfg Config, req Request) (*Response, error)
 	StreamInvoke(ctx stdctx.Context, cfg Config, req Request, callback StreamCallback) (*Response, error)
+}
+
+type observerTransport interface {
+	StreamInvokeWithObserver(ctx stdctx.Context, cfg Config, req Request, observer StreamObserver) (*Response, error)
 }
 
 // resolveProtocol 解析协议类型

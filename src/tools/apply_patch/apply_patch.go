@@ -116,6 +116,18 @@ func (t *ApplyPatchTool) Artifacts(input string, output string, permissionContex
 	return artifacts
 }
 
+func (t *ApplyPatchTool) PatchPreview(input string, permissionContext tool.PermissionContext) (tool.PatchPreview, bool) {
+	patch, err := parsePatch(input)
+	if err != nil {
+		return tool.PatchPreview{}, false
+	}
+	return tool.PatchPreview{
+		Patch:         strings.TrimSpace(input),
+		Summary:       buildPatchSummary(patch),
+		AffectedPaths: patchAffectedPaths(patch, permissionContext),
+	}, true
+}
+
 // normalizeArtifactPath resolves the raw patch path against the permission
 // context and converts it to a workspace-relative path with forward slashes,
 // matching the口径 of patchAffectedPaths so artifact paths stay consistent

@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { Tooltip } from "../overlays/Tooltip";
 
 type IconButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   label: string;
@@ -18,7 +19,7 @@ export function IconButton({
   const dimension = size === "sm" ? 32 : 34;
   const borderRadius = variant === "circle" ? "999px" : "var(--aw-radius-sm)";
 
-  return (
+  const button = (
     <button
       type="button"
       aria-label={label}
@@ -63,4 +64,6 @@ export function IconButton({
       {children}
     </button>
   );
+
+  return <Tooltip label={label}>{button}</Tooltip>;
 }

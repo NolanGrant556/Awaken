@@ -215,6 +215,28 @@ func TestArtifactsEmptyInputReturnsNil(t *testing.T) {
 	}
 }
 
+func TestPatchPreviewIncludesPatchSummaryAndAffectedPaths(t *testing.T) {
+	permissionContext, _ := newTestPermissionContext(t)
+	input := "*** Begin Patch\n" +
+		"*** Add File: note.md\n" +
+		"+hello\n" +
+		"*** End Patch"
+
+	preview, ok := (&ApplyPatchTool{}).PatchPreview(input, permissionContext)
+	if !ok {
+		t.Fatal("expected patch preview")
+	}
+	if preview.Patch != input {
+		t.Fatalf("expected raw patch to be preserved, got %q", preview.Patch)
+	}
+	if preview.Summary != "新增 1 个文件" {
+		t.Fatalf("unexpected summary %q", preview.Summary)
+	}
+	if len(preview.AffectedPaths) != 1 || preview.AffectedPaths[0] != "note.md" {
+		t.Fatalf("unexpected affected paths %+v", preview.AffectedPaths)
+	}
+}
+
 // TestArtifactsPathConsistencyWithApprovalAffectedPaths verifies that artifact
 // paths match the corresponding entries in approval affectedPaths, using the
 // same normalization (workspace-relative + forward slash).

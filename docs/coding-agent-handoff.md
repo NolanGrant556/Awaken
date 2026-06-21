@@ -15,6 +15,8 @@ Awaken Desktop
 
 当前项目重点是让本地 run 可观察、可取消、可审批、可产出 artifact，并能被桌面端消费。它不是托管式多用户后端。
 
+Desktop 当前主界面是 Run Workbench：左 Sidebar、中心 Run Narrative、右 Inspector、底部 Composer。不要恢复旧 Dashboard、卡片墙或开发者日志主面板。
+
 ## AG-UI / A2UI 一句话边界
 
 Awaken 用 AG-UI 的事件协议格式对外输出 run stream，但实现是 Awaken 自己写的轻量兼容层；不要把 AG-UI / A2UI 外部参考仓库当成要部署或 vendor 的服务。
@@ -82,7 +84,10 @@ UI-only component library。只接收 props 和 callbacks。
 ```text
 GET  /health
 GET  /v1/agui/demo
+GET  /v1/runtime/info
+GET  /v1/threads
 POST /v1/runs
+GET  /v1/runs/{run_id}
 GET  /v1/runs/{run_id}/events
 POST /v1/runs/{run_id}/cancel
 POST /v1/runs/{run_id}/approvals/{approval_id}/resolve
@@ -98,6 +103,7 @@ desktop 通过 Electron preload bridge 或 browser fallback client 消费这些�
 RUN_STARTED
 RUN_FINISHED
 RUN_ERROR
+RUN_STATUS_CHANGED
 TEXT_MESSAGE_START
 TEXT_MESSAGE_CONTENT
 TEXT_MESSAGE_END
@@ -107,14 +113,19 @@ REASONING_MESSAGE_CONTENT
 REASONING_MESSAGE_END
 REASONING_END
 TOOL_CALL_START
+TOOL_CALL_ARGS_DELTA
 TOOL_CALL_ARGS
 TOOL_CALL_END
+TOOL_PROGRESS
 TOOL_CALL_RESULT
 ```
 
 Awaken extension events：
 
 ```text
+AWAKEN_COMMAND_OUTPUT
+AWAKEN_PATCH_UPDATED
+AWAKEN_TURN_DIFF
 AWAKEN_APPROVAL_REQUESTED
 AWAKEN_APPROVAL_RESOLVED
 AWAKEN_ARTIFACT_CREATED
@@ -177,8 +188,18 @@ npm run build:ui
 desktop 工作：
 
 ```bash
+npm --workspace @awaken/desktop run test
 npm run typecheck:desktop
 npm run build:desktop
+```
+
+Run Workbench 收口验收：
+
+```bash
+rg -n "Dashboard|card wall|developer log|开发者日志|卡片墙" apps/desktop packages/ui
+go test ./src/server -run 'TestPlainQASmoke|TestReadOnlyFileSmoke|TestFileMutation(Approval|Reject|Artifact|PatchAndTurnDiff)Smoke' -count=1 -v
+go test ./src/server -run 'TestRunsEndpointsCreateReplayAndCancel|TestRunEventsAfterSeq|TestRunEventsAfterSeqReconnectMultiFrame' -count=1
+git diff --check
 ```
 
 ## 本地运行
@@ -221,5 +242,6 @@ npm run dev:ui
 - 不要让 `apps/desktop` 拥有后端 policy。
 - 不要让 `packages/ui` 依赖 Electron 或 runtime API。
 - 不要用 generated A2UI surface 替代当前 approval UI。
+- 不要把 UI playground/mock state 当成真实 run 验收。
 - 不要提交 secrets 或构建产物。
 - 不要清理无关 dirty files。

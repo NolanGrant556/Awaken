@@ -1,0 +1,18 @@
+- [x] `InspectorRail` 已新增并导出
+- [x] `InspectorTabs` 已新增并导出，包含 `Changes`、`Browser`、`Terminal`、`Files`
+- [x] 新 UI 未引入 AG-UI、A2UI、Electron、runtime client、SSE 或 `window.awaken`
+- [x] 点击中心 tool/exploring action 可设置 Inspector selection
+- [x] 点击中心 fileChange 可设置 Inspector selection
+- [x] 点击中心 approval 可设置 Inspector selection
+- [x] Changes pane 显示 path、status/change type、summary
+- [x] Terminal pane 显示 args/result 或 result 摘要
+- [x] Files pane 显示 file-oriented detail 或空状态
+- [x] Browser pane 无 runtime 时显示 disabled/empty state，不显示假页面
+- [x] 右侧 tab 切换不影响 run streaming/reducer projection
+- [x] `npm --workspace @awaken/desktop run test` 通过
+- [x] `npm run typecheck:ui` 通过
+- [x] `npm run typecheck:desktop` 通过
+- [x] `npm run build:desktop` 通过
+- [x] `git diff --check` 通过
+- [x] UI 视觉检查通过
+- [x] 独立 review pass 未发现 blocker / correctness / acceptance finding

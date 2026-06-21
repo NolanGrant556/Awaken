@@ -249,6 +249,12 @@ function createMainWindow(): BrowserWindow {
     backgroundColor: "#f8f8f7",
     autoHideMenuBar: true,
     title: "Awaken Desktop",
+    ...(process.platform === "darwin"
+      ? {
+          titleBarStyle: "hiddenInset" as const,
+          trafficLightPosition: { x: 18, y: 18 },
+        }
+      : {}),
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       contextIsolation: true,

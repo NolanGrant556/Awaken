@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type {
   ConversationItem,
   NavItem,
@@ -26,6 +26,13 @@ type SidebarProps = {
   profileAvatarFallback?: string;
   profileAvatarSrc?: string;
   newTaskShortcut?: string;
+  newTaskLabel?: ReactNode;
+  conversationSectionLabel?: string;
+  projectSectionLabel?: string;
+  showProjectCount?: boolean;
+  projectSectionActions?: ReactNode;
+  profileSubtitle?: string;
+  showBrand?: boolean;
   platform?: PlatformKind;
   onSelectNav?: (id: string) => void;
   onSelectConversation?: (id: string) => void;
@@ -96,6 +103,13 @@ export function Sidebar({
   profileAvatarFallback = "",
   profileAvatarSrc,
   newTaskShortcut = "N",
+  newTaskLabel = "新建任务",
+  conversationSectionLabel = "对话",
+  projectSectionLabel = "项目",
+  showProjectCount = true,
+  projectSectionActions,
+  profileSubtitle,
+  showBrand = true,
   platform = "macos",
   onSelectNav,
   onSelectConversation,
@@ -104,53 +118,71 @@ export function Sidebar({
   onExpandedChange,
   onProfileClick,
 }: SidebarProps) {
+  const showConversations = conversationSectionLabel !== "" || conversations.length > 0;
+  const showProjects = projectSectionLabel !== "" || projects.length > 0;
+
   return (
     <aside className="aw-sidebar" aria-label="Awaken 导航" style={sidebarStyle}>
-      <div style={topStyle}>
-        <BrandRow title={title} />
+      <div
+        style={{
+          ...topStyle,
+          padding: showBrand ? topStyle.padding : "18px 8px 8px",
+        }}
+      >
+        {showBrand ? <BrandRow title={title} /> : null}
         <NewTaskButton
           onClick={onNewTask}
           shortcut={newTaskShortcut}
           platform={platform}
-        />
+        >
+          {newTaskLabel}
+        </NewTaskButton>
       </div>
 
       <PrimaryNav items={navItems} activeId={activeNavId} onSelect={onSelectNav} />
 
       <div className="aw-scroll-hidden" style={scrollStyle}>
-        <section style={sectionStyle}>
-          <div style={sectionHeadStyle}>
-            <span>对话</span>
-          </div>
-          <ConversationList
-            items={conversations}
-            activeId={activeConversationId}
-            onSelect={onSelectConversation}
-          />
-        </section>
+        {showConversations ? (
+          <section style={sectionStyle}>
+            <div style={sectionHeadStyle}>
+              <span>{conversationSectionLabel}</span>
+            </div>
+            <ConversationList
+              items={conversations}
+              activeId={activeConversationId}
+              onSelect={onSelectConversation}
+            />
+          </section>
+        ) : null}
 
-        <section style={sectionStyle}>
-          <div style={sectionHeadStyle}>
-            <span>项目</span>
-            {projects.length > 0 ? (
-              <span style={headCountStyle}>{projects.length}</span>
-            ) : null}
-          </div>
-          <ProjectTree
-            items={projects}
-            activeId={activeProjectId}
-            expandedIds={expandedIds}
-            defaultExpandedIds={defaultExpandedIds}
-            onExpandedChange={onExpandedChange}
-            onSelect={onSelectProject}
-          />
-        </section>
+        {showProjects ? (
+          <section style={sectionStyle}>
+            <div style={sectionHeadStyle}>
+              <span>{projectSectionLabel}</span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                {showProjectCount && projects.length > 0 ? (
+                  <span style={headCountStyle}>{projects.length}</span>
+                ) : null}
+                {projectSectionActions}
+              </span>
+            </div>
+            <ProjectTree
+              items={projects}
+              activeId={activeProjectId}
+              expandedIds={expandedIds}
+              defaultExpandedIds={defaultExpandedIds}
+              onExpandedChange={onExpandedChange}
+              onSelect={onSelectProject}
+            />
+          </section>
+        ) : null}
       </div>
 
       {profileName || profileAvatarFallback || profileAvatarSrc || onProfileClick ? (
         <div style={bottomStyle}>
           <ProfileButton
             name={profileName}
+            subtitle={profileSubtitle}
             avatarFallback={profileAvatarFallback}
             avatarSrc={profileAvatarSrc}
             onClick={onProfileClick}

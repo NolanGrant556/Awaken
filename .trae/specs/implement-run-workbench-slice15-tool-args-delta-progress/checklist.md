@@ -1,0 +1,23 @@
+# Checklist
+
+- [x] 内部 `ToolCallArgsDelta` 事件已新增
+- [x] 内部 `ToolProgress` 事件已新增
+- [x] Anthropic `input_json_delta` 能发出 args delta
+- [x] OpenAI tool call arguments delta 能发出 args delta
+- [x] 完整 `ToolCallArgs` fallback 保持
+- [x] Tool runtime 能发出 progress
+- [x] AG-UI mapper 映射 args delta
+- [x] AG-UI mapper 映射 tool progress
+- [x] Desktop reducer/projector 接收 args delta
+- [x] Desktop reducer/projector 接收 tool progress
+- [x] cancel 不留下 orphan active item
+- [x] provider parser / runner 测试覆盖 args delta
+- [x] mapper 测试覆盖 args delta/progress
+- [x] reducer/projector 测试覆盖 args delta/progress
+- [x] 真实 LLM tool task smoke 通过
+- [x] 相关 Go tests 通过
+- [x] `npm --workspace @awaken/desktop run test` 通过
+- [x] `npm run typecheck:desktop` 通过
+- [x] `npm run build:desktop` 通过
+- [x] `git diff --check` 通过
+- [x] 独立 review pass 未发现 blocker / correctness / acceptance finding

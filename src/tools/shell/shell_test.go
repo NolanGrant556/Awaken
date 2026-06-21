@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"awaken/src/tool"
@@ -52,6 +53,64 @@ func TestShellOutputTruncation(t *testing.T) {
 	result := decodeResult(t, out)
 	if !result.Truncated || !strings.Contains(result.Stdout, "truncated") {
 		t.Fatalf("expected truncated output, got %+v", result)
+	}
+}
+
+func TestShellExecuteWithObserverStreamsOutput(t *testing.T) {
+	var mu sync.Mutex
+	var outputs []tool.CommandOutput
+	observer := shellObserverFunc(func(output tool.CommandOutput) {
+		mu.Lock()
+		defer mu.Unlock()
+		outputs = append(outputs, output)
+	})
+
+	out, err := (&ShellTool{}).ExecuteWithObserver(context.Background(), `{"command":"printf hello; printf err >&2"}`, observer)
+	if err != nil {
+		t.Fatalf("ExecuteWithObserver returned error: %v", err)
+	}
+	result := decodeResult(t, out)
+	if result.Stdout != "hello" || result.Stderr != "err" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+
+	joined := map[string]string{}
+	for _, output := range outputs {
+		joined[output.Stream] += output.Delta
+	}
+	if joined["stdout"] != "hello" || joined["stderr"] != "err" {
+		t.Fatalf("unexpected streamed output: %+v", outputs)
+	}
+}
+
+func TestShellExecuteWithObserverCapsOutputDelta(t *testing.T) {
+	var mu sync.Mutex
+	var outputs []tool.CommandOutput
+	observer := shellObserverFunc(func(output tool.CommandOutput) {
+		mu.Lock()
+		defer mu.Unlock()
+		outputs = append(outputs, output)
+	})
+
+	_, err := (&ShellTool{}).ExecuteWithObserver(context.Background(), `{"command":"printf 123456789","max_output_chars":4}`, observer)
+	if err != nil {
+		t.Fatalf("ExecuteWithObserver returned error: %v", err)
+	}
+
+	var stdout string
+	var sawTruncated bool
+	for _, output := range outputs {
+		if output.Stream != "stdout" {
+			continue
+		}
+		stdout += output.Delta
+		sawTruncated = sawTruncated || output.Truncated
+	}
+	if !sawTruncated || !strings.Contains(stdout, "output truncated") {
+		t.Fatalf("expected truncated stdout delta, got outputs=%+v joined=%q", outputs, stdout)
+	}
+	if strings.Contains(stdout, "123456789") {
+		t.Fatalf("expected streamed delta to be capped, got %q", stdout)
 	}
 }
 
@@ -202,4 +261,10 @@ func decodeResult(t *testing.T, out string) shellResult {
 		t.Fatalf("failed to decode shell result %q: %v", out, err)
 	}
 	return result
+}
+
+type shellObserverFunc func(tool.CommandOutput)
+
+func (fn shellObserverFunc) OnCommandOutput(output tool.CommandOutput) {
+	fn(output)
 }

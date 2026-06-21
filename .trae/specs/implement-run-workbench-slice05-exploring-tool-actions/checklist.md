@@ -1,0 +1,18 @@
+- [x] `read_file` 进入 exploring item
+- [x] `list_files` 进入 exploring item
+- [x] `grep_search` 进入 exploring item
+- [x] 连续只读工具合并为一个 exploring group
+- [x] action id 稳定且 replay 不重复
+- [x] 工具失败时对应 action 显示 error
+- [x] 主叙事不显示完整 tool result JSON 或大段输出
+- [x] Inspector 保存 raw args
+- [x] Inspector 保存 raw result
+- [x] 右侧 Latest Tool 显示 args 与 result
+- [x] 非只读工具仍走 tool narrative item
+- [x] `npm --workspace @awaken/desktop run test` 通过
+- [x] `npm run typecheck:ui` 通过
+- [x] `npm run typecheck:desktop` 通过
+- [x] `npm run build:desktop` 通过
+- [x] `git diff --check` 通过
+- [x] 真实 LLM read-only smoke 通过
+- [x] 独立 review pass 未发现 blocker / correctness / acceptance finding

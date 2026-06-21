@@ -24,6 +24,7 @@
     "build:types": "tsc -p tsconfig.build.json",
     "copy:styles": "mkdir -p dist/styles && cp src/styles/*.css dist/styles/",
     "preview": "npm run build:playground && vite preview --host 127.0.0.1",
+    "smoke:render": "npm run build && node playground/render-smoke.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

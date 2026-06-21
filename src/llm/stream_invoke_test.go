@@ -56,6 +56,56 @@ func TestStreamInvokeOpenAIToolCallDeltas(t *testing.T) {
 	}
 }
 
+func TestStreamInvokeWithObserverOpenAIToolCallArgumentDeltas(t *testing.T) {
+	server := newStreamServer(t, "/chat/completions", []string{
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"value\""}}]}}]}`,
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"abc\"}"}}]}}]}`,
+		`data: [DONE]`,
+	})
+	defer server.Close()
+
+	var deltas []ToolCallDelta
+	resp, err := StreamInvokeWithObserver(context.Background(), testConfig(server.URL), Request{UserPrompt: "tool"}, StreamObserver{
+		OnToolCallDelta: func(delta ToolCallDelta) {
+			deltas = append(deltas, delta)
+		},
+	})
+	if err != nil {
+		t.Fatalf("StreamInvokeWithObserver returned error: %v", err)
+	}
+	if len(deltas) != 2 {
+		t.Fatalf("expected two argument deltas, got %+v", deltas)
+	}
+	if deltas[0].Index != 0 || deltas[0].ID != "call_1" || deltas[0].Name != "lookup" || deltas[0].ArgumentsDelta != `{"value"` {
+		t.Fatalf("unexpected first delta: %+v", deltas[0])
+	}
+	if deltas[1].Index != 0 || deltas[1].ID != "call_1" || deltas[1].Name != "lookup" || deltas[1].ArgumentsDelta != `:"abc"}` {
+		t.Fatalf("unexpected second delta: %+v", deltas[1])
+	}
+	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].Input != `{"value":"abc"}` {
+		t.Fatalf("unexpected response tool calls: %+v", resp.ToolCalls)
+	}
+}
+
+func TestStreamInvokeOpenAIToolCallFallbackID(t *testing.T) {
+	server := newStreamServer(t, "/chat/completions", []string{
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"type":"function","function":{"name":"lookup","arguments":"{}"}}]}}]}`,
+		`data: [DONE]`,
+	})
+	defer server.Close()
+
+	resp, err := StreamInvoke(context.Background(), testConfig(server.URL), Request{UserPrompt: "tool"}, nil)
+	if err != nil {
+		t.Fatalf("StreamInvoke returned error: %v", err)
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("expected one tool call, got %d", len(resp.ToolCalls))
+	}
+	if resp.ToolCalls[0].ID != "tool_index_0" {
+		t.Fatalf("expected fallback tool id tool_index_0, got %q", resp.ToolCalls[0].ID)
+	}
+}
+
 func TestStreamInvokeAnthropicThinkingAndTextDeltas(t *testing.T) {
 	server := newStreamServer(t, "/anthropic/v1/messages", []string{
 		`event: content_block_delta`,

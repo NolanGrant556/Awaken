@@ -15,6 +15,7 @@ type ApprovalCardProps = {
   onApprove?: () => void;
   onReject?: () => void;
   open?: boolean;
+  inline?: boolean;
   onOpenChange?: (open: boolean) => void;
 };
 
@@ -59,6 +60,7 @@ export function ApprovalCard({
   onApprove,
   onReject,
   open,
+  inline = false,
   onOpenChange,
 }: ApprovalCardProps) {
   const titleId = useId();
@@ -76,7 +78,8 @@ export function ApprovalCard({
     .join(" ") || undefined;
   const { Icon } = tone;
 
-  const interactiveDisabled = Boolean(resolvedDecision) || resolving;
+  const interactiveDisabled =
+    Boolean(resolvedDecision) || resolving || !onApprove || !onReject;
 
   const handleApprove = () => {
     if (interactiveDisabled) return;
@@ -91,7 +94,7 @@ export function ApprovalCard({
   };
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || inline) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -103,9 +106,226 @@ export function ApprovalCard({
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, onReject, onOpenChange, interactiveDisabled]);
+  }, [open, inline, onReject, onOpenChange, interactiveDisabled]);
 
   if (!open) return null;
+
+  const card = (
+    <div
+      role={inline ? "group" : "alertdialog"}
+      aria-modal={inline ? undefined : "true"}
+      aria-labelledby={titleId}
+      aria-describedby={describedBy}
+      tabIndex={inline ? undefined : -1}
+      style={{
+        width: "100%",
+        maxWidth: inline ? "100%" : "400px",
+        boxSizing: "border-box",
+        padding: "20px",
+        border: "1px solid",
+        borderColor: tone.softBorder,
+        borderRadius: "var(--aw-radius-lg)",
+        background: "var(--aw-bg-white)",
+        boxShadow: inline ? "0 10px 28px rgba(0, 0, 0, 0.05)" : "var(--aw-shadow-menu)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: "12px",
+          marginBottom: "16px",
+        }}
+      >
+        <div
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: "36px",
+            height: "36px",
+            flex: "0 0 auto",
+            borderRadius: "var(--aw-radius-md)",
+            background: tone.softBg,
+            color: tone.color,
+          }}
+        >
+          <Icon size={20} strokeWidth={1.85} />
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <h2
+            id={titleId}
+            className="aw-truncate"
+            style={{
+              margin: "0 0 4px",
+              fontSize: "var(--aw-font-size-base)",
+              lineHeight: "var(--aw-line-height-base)",
+              fontWeight: "var(--aw-font-weight-bold)",
+              color: "var(--aw-text-primary)",
+            }}
+            title={title}
+          >
+            {title}
+          </h2>
+          {description ? (
+            <p
+              id={descId}
+              style={{
+                margin: 0,
+                fontSize: "var(--aw-font-size-sm)",
+                lineHeight: "var(--aw-line-height-sm)",
+                color: "var(--aw-text-secondary)",
+                wordBreak: "break-word",
+              }}
+            >
+              {description}
+            </p>
+          ) : null}
+          {patchSummary ? (
+            <div id={summaryId} style={{ marginTop: "12px" }}>
+              <span
+                style={{
+                  fontSize: "var(--aw-font-size-xs)",
+                  lineHeight: "var(--aw-line-height-xs)",
+                  color: "var(--aw-text-tertiary)",
+                  fontWeight: "var(--aw-font-weight-bold)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.02em",
+                }}
+              >
+                变更摘要
+              </span>
+              <p
+                style={{
+                  margin: "4px 0 0",
+                  fontSize: "var(--aw-font-size-sm)",
+                  lineHeight: "var(--aw-line-height-sm)",
+                  color: "var(--aw-text-primary)",
+                }}
+              >
+                {patchSummary}
+              </p>
+            </div>
+          ) : null}
+          {affectedPaths && affectedPaths.length > 0 ? (
+            <div id={pathsId} style={{ marginTop: "12px" }}>
+              <span
+                style={{
+                  fontSize: "var(--aw-font-size-xs)",
+                  lineHeight: "var(--aw-line-height-xs)",
+                  color: "var(--aw-text-tertiary)",
+                  fontWeight: "var(--aw-font-weight-bold)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.02em",
+                }}
+              >
+                受影响路径
+              </span>
+              <ul
+                style={{
+                  margin: "4px 0 0",
+                  padding: 0,
+                  listStyle: "none",
+                  maxHeight: "96px",
+                  overflowY: "auto",
+                  fontSize: "var(--aw-font-size-xs)",
+                  lineHeight: "var(--aw-line-height-xs)",
+                  color: "var(--aw-text-secondary)",
+                  fontFamily: "var(--aw-font-mono)",
+                }}
+              >
+                {affectedPaths.map((path) => (
+                  <li
+                    key={path}
+                    className="aw-truncate"
+                    title={path}
+                    style={{
+                      padding: "2px 0",
+                      borderBottom: "1px solid var(--aw-border-light)",
+                    }}
+                  >
+                    {path}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          gap: "8px",
+        }}
+      >
+        <button
+          type="button"
+          disabled={interactiveDisabled}
+          onClick={handleReject}
+          style={{
+            height: "34px",
+            padding: "0 14px",
+            border: "1px solid var(--aw-border-main)",
+            borderRadius: "var(--aw-radius-sm)",
+            background: "var(--aw-bg-white)",
+            color: "var(--aw-text-primary)",
+            fontSize: "var(--aw-font-size-sm)",
+            fontWeight: "var(--aw-font-weight-bold)",
+            cursor: interactiveDisabled ? "default" : "pointer",
+            opacity: interactiveDisabled ? 0.5 : 1,
+            transition:
+              "background-color 160ms ease, color 160ms ease, transform 160ms ease",
+          }}
+          onMouseEnter={(e) => {
+            if (!interactiveDisabled) {
+              e.currentTarget.style.background = "var(--aw-bg-fill-light)";
+            }
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "var(--aw-bg-white)";
+          }}
+        >
+          {resolvedDecision === "rejected" ? "已拒绝" : rejectLabel}
+        </button>
+        <button
+          type="button"
+          disabled={interactiveDisabled}
+          onClick={handleApprove}
+          style={{
+            height: "34px",
+            padding: "0 14px",
+            border: "1px solid",
+            borderColor: tone.color,
+            borderRadius: "var(--aw-radius-sm)",
+            background: tone.color,
+            color: "var(--aw-text-onblack)",
+            fontSize: "var(--aw-font-size-sm)",
+            fontWeight: "var(--aw-font-weight-bold)",
+            cursor: interactiveDisabled ? "default" : "pointer",
+            opacity: interactiveDisabled ? 0.5 : 1,
+            transition:
+              "filter 160ms ease, transform 160ms ease",
+          }}
+          onMouseEnter={(e) => {
+            if (!interactiveDisabled) {
+              e.currentTarget.style.filter = "brightness(0.92)";
+            }
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.filter = "none";
+          }}
+        >
+          {resolvedDecision === "approved" ? "已允许" : approveLabel}
+        </button>
+      </div>
+    </div>
+  );
+
+  if (inline) {
+    return card;
+  }
 
   return (
     <div
@@ -125,215 +345,7 @@ export function ApprovalCard({
         }
       }}
     >
-      <div
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={describedBy}
-        tabIndex={-1}
-        style={{
-          width: "100%",
-          maxWidth: "400px",
-          padding: "20px",
-          border: "1px solid",
-          borderColor: tone.softBorder,
-          borderRadius: "var(--aw-radius-lg)",
-          background: "var(--aw-bg-white)",
-          boxShadow: "var(--aw-shadow-menu)",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "flex-start",
-            gap: "12px",
-            marginBottom: "16px",
-          }}
-        >
-          <div
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: "36px",
-              height: "36px",
-              flex: "0 0 auto",
-              borderRadius: "var(--aw-radius-md)",
-              background: tone.softBg,
-              color: tone.color,
-            }}
-          >
-            <Icon size={20} strokeWidth={1.85} />
-          </div>
-          <div style={{ minWidth: 0 }}>
-            <h2
-              id={titleId}
-              className="aw-truncate"
-              style={{
-                margin: "0 0 4px",
-                fontSize: "var(--aw-font-size-base)",
-                lineHeight: "var(--aw-line-height-base)",
-                fontWeight: "var(--aw-font-weight-bold)",
-                color: "var(--aw-text-primary)",
-              }}
-              title={title}
-            >
-              {title}
-            </h2>
-            {description ? (
-              <p
-                id={descId}
-                style={{
-                  margin: 0,
-                  fontSize: "var(--aw-font-size-sm)",
-                  lineHeight: "var(--aw-line-height-sm)",
-                  color: "var(--aw-text-secondary)",
-                  wordBreak: "break-word",
-                }}
-              >
-                {description}
-              </p>
-            ) : null}
-            {patchSummary ? (
-              <div id={summaryId} style={{ marginTop: "12px" }}>
-                <span
-                  style={{
-                    fontSize: "var(--aw-font-size-xs)",
-                    lineHeight: "var(--aw-line-height-xs)",
-                    color: "var(--aw-text-tertiary)",
-                    fontWeight: "var(--aw-font-weight-bold)",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.02em",
-                  }}
-                >
-                  变更摘要
-                </span>
-                <p
-                  style={{
-                    margin: "4px 0 0",
-                    fontSize: "var(--aw-font-size-sm)",
-                    lineHeight: "var(--aw-line-height-sm)",
-                    color: "var(--aw-text-primary)",
-                  }}
-                >
-                  {patchSummary}
-                </p>
-              </div>
-            ) : null}
-            {affectedPaths && affectedPaths.length > 0 ? (
-              <div id={pathsId} style={{ marginTop: "12px" }}>
-                <span
-                  style={{
-                    fontSize: "var(--aw-font-size-xs)",
-                    lineHeight: "var(--aw-line-height-xs)",
-                    color: "var(--aw-text-tertiary)",
-                    fontWeight: "var(--aw-font-weight-bold)",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.02em",
-                  }}
-                >
-                  受影响路径
-                </span>
-                <ul
-                  style={{
-                    margin: "4px 0 0",
-                    padding: 0,
-                    listStyle: "none",
-                    maxHeight: "96px",
-                    overflowY: "auto",
-                    fontSize: "var(--aw-font-size-xs)",
-                    lineHeight: "var(--aw-line-height-xs)",
-                    color: "var(--aw-text-secondary)",
-                    fontFamily: "var(--aw-font-mono)",
-                  }}
-                >
-                  {affectedPaths.map((path) => (
-                    <li
-                      key={path}
-                      className="aw-truncate"
-                      title={path}
-                      style={{
-                        padding: "2px 0",
-                        borderBottom: "1px solid var(--aw-border-light)",
-                      }}
-                    >
-                      {path}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-          </div>
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: "8px",
-          }}
-        >
-          <button
-            type="button"
-            disabled={interactiveDisabled}
-            onClick={handleReject}
-            style={{
-              height: "34px",
-              padding: "0 14px",
-              border: "1px solid var(--aw-border-main)",
-              borderRadius: "var(--aw-radius-sm)",
-              background: "var(--aw-bg-white)",
-              color: "var(--aw-text-primary)",
-              fontSize: "var(--aw-font-size-sm)",
-              fontWeight: "var(--aw-font-weight-bold)",
-              cursor: interactiveDisabled ? "default" : "pointer",
-              opacity: interactiveDisabled ? 0.5 : 1,
-              transition:
-                "background-color 160ms ease, color 160ms ease, transform 160ms ease",
-            }}
-            onMouseEnter={(e) => {
-              if (!interactiveDisabled) {
-                e.currentTarget.style.background = "var(--aw-bg-fill-light)";
-              }
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "var(--aw-bg-white)";
-            }}
-          >
-            {resolvedDecision === "rejected" ? "已拒绝" : rejectLabel}
-          </button>
-          <button
-            type="button"
-            disabled={interactiveDisabled}
-            onClick={handleApprove}
-            style={{
-              height: "34px",
-              padding: "0 14px",
-              border: "1px solid",
-              borderColor: tone.color,
-              borderRadius: "var(--aw-radius-sm)",
-              background: tone.color,
-              color: "var(--aw-text-onblack)",
-              fontSize: "var(--aw-font-size-sm)",
-              fontWeight: "var(--aw-font-weight-bold)",
-              cursor: interactiveDisabled ? "default" : "pointer",
-              opacity: interactiveDisabled ? 0.5 : 1,
-              transition:
-                "filter 160ms ease, transform 160ms ease",
-            }}
-            onMouseEnter={(e) => {
-              if (!interactiveDisabled) {
-                e.currentTarget.style.filter = "brightness(0.92)";
-              }
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.filter = "none";
-            }}
-          >
-            {resolvedDecision === "approved" ? "已允许" : approveLabel}
-          </button>
-        </div>
-      </div>
+      {card}
     </div>
   );
 }

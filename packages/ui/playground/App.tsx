@@ -12,9 +12,34 @@ import {
   PlatformProvider,
   usePlatform,
   AppShell,
+  ActivityLine,
+  AssistantMessage,
+  ComposerBar,
+  ExecutionFeed,
+  FileChangeSummary,
+  MarkdownAnswer,
   TopBar,
+  ThinkingBlock,
+  ExploringGroup,
+  LightInspectorRail,
+  ToolActionRow,
+  ToolTraceGroup,
+  ToolTraceLine,
   WindowTitleBar,
   CenterStage,
+  CopyButton,
+  Disclosure,
+  PromptCard,
+  Tooltip,
+  WorkbenchShell,
+  WorkbenchSidebarFrame,
+  RunStage,
+  ComposerDock,
+  InspectorRail,
+  InspectorTabs,
+  ThoughtTrace,
+  UserPromptBlock,
+  useAutoScrollTail,
 } from "../src";
 import type {
   ModelOption,
@@ -28,9 +53,21 @@ import type {
   PlatformKind,
 } from "../src";
 
-import { Wand2, Code, FileText, Search, Zap, MessageSquare, Puzzle, Clock3 } from "lucide-react";
+import {
+  Wand2,
+  Code,
+  FileText,
+  Search,
+  Zap,
+  MessageSquare,
+  Puzzle,
+  Clock3,
+  Info,
+  FolderPlus,
+  ListFilter,
+} from "lucide-react";
 
-type PreviewMode = "full" | "primitives" | "phase2" | "phase3" | "phase4" | "phase5";
+type PreviewMode = "full" | "primitives" | "phase2" | "phase3" | "phase4" | "phase5" | "workbench";
 
 const previewTabs: Array<{ id: PreviewMode; label: string }> = [
   { id: "full", label: "完整主界面" },
@@ -39,6 +76,7 @@ const previewTabs: Array<{ id: PreviewMode; label: string }> = [
   { id: "phase3", label: "Phase 3 导航/侧栏" },
   { id: "phase4", label: "Phase 4 反馈组件" },
   { id: "phase5", label: "Phase 5 布局/平台" },
+  { id: "workbench", label: "Run Workbench" },
 ];
 
 const mockModels: ModelOption[] = [
@@ -345,9 +383,9 @@ const phase3LongText =
   "这是一个用于验证侧边栏长文本截断能力的超长标题当文本超过容器宽度时应当显示省略号而不是换行或撑破布局此处刻意写入超过一百个字符以确保截断逻辑被触发并可见Awaken组件库Phase3导航与侧边栏验收长文本场景测试用例结束";
 
 const phase3Conversations: ConversationItem[] = [
-  { id: "conv-1", label: "设计前端设计组件", timeLabel: "now" },
-  { id: "conv-2", label: "组件库成熟度审查", timeLabel: "1h" },
-  { id: "conv-long", label: phase3LongText, timeLabel: "2h" },
+  { id: "conv-1", label: "设计前端设计组件", timeLabel: "now", statusLabel: "running", statusTone: "local" },
+  { id: "conv-2", label: "组件库成熟度审查", timeLabel: "1h", statusLabel: "needs input", statusTone: "permission" },
+  { id: "conv-long", label: phase3LongText, timeLabel: "2h", statusLabel: "done", statusTone: "success" },
 ];
 
 const phase3Projects: ProjectItem[] = [
@@ -895,6 +933,586 @@ function Phase5Preview() {
   );
 }
 
+const workbenchPrompts = {
+  short: "Create a focused Run Workbench shell.",
+  long:
+    "Refactor the current desktop renderer into a Run Workbench while preserving runtime supervisor status, workspace validation, thread recovery, cancel flow, approvals, artifacts, and provider readiness. The prompt is intentionally long so PromptCard must wrap and scroll without pushing the composer or inspector out of the layout.",
+  chinese:
+    "把 Awaken Desktop 的中心区域改成执行叙事：顶部固定用户任务，下面展示 Planning、Thinking、Tool、Approval、File Change 和 Final Answer，并且长中文任务不能撑破布局。",
+};
+
+const workbenchAnswers = {
+  paragraph: "pong",
+  list: "- Keep the prompt fixed\n- Stream the answer below it\n- Preserve `inline code` styling",
+  code: "Use `packages/ui/src/components/narrative/MarkdownAnswer-with-a-very-long-inline-code-span.tsx` for final output and keep `ThinkingBlock` separate.",
+};
+
+type WorkbenchGalleryState = "idle" | "running" | "approval" | "done" | "error";
+
+const workbenchGalleryToolActions = [
+  {
+    id: "read-long-path",
+    title: "Read a long workspace path",
+    detail:
+      "packages/ui/src/components/narrative/this-is-a-deliberately-long-file-name-for-overflow-validation.tsx",
+    status: "done" as const,
+  },
+  {
+    id: "grep-cn",
+    title: "检索非常长的中文查询条件以验证布局不会被撑破",
+    detail: "query: Run Narrative 组件 keyboard focus inspector callback",
+    status: "active" as const,
+  },
+];
+
+const workbenchGalleryTabs = [
+  { id: "changes" as const, label: "Changes", badge: 1 },
+  { id: "browser" as const, label: "Browser" },
+  { id: "terminal" as const, label: "Terminal", badge: 2 },
+  { id: "files" as const, label: "Files" },
+];
+
+const workbenchGalleryFile = {
+  id: "app",
+  title: "this-is-a-deliberately-long-file-name-for-overflow-validation.tsx",
+  path: "apps/desktop/src/renderer/very/deep/path/this-is-a-deliberately-long-file-name-for-overflow-validation.tsx",
+  description: "Approval rendered in the run narrative.",
+  status: "done" as const,
+};
+
+function AutoScrollTailPreview() {
+  const [lines, setLines] = useState([
+    "Planning next move",
+    "Reading files",
+    "Waiting at the tail",
+  ]);
+  const tail = useAutoScrollTail<HTMLDivElement>({ dependencies: [lines] });
+
+  return (
+    <div style={{ display: "grid", gap: 8, minWidth: 0 }}>
+      <div
+        ref={tail.scrollRef}
+        onScroll={tail.onScroll}
+        style={{
+          display: "grid",
+          gap: 6,
+          height: 96,
+          minWidth: 0,
+          overflow: "auto",
+          padding: 10,
+          border: "1px solid var(--aw-border-light)",
+          borderRadius: "var(--aw-radius-control)",
+          background: "var(--aw-surface-panel-muted)",
+        }}
+      >
+        {lines.map((line, index) => (
+          <span
+            key={`${line}:${index}`}
+            style={{
+              color: "var(--aw-text-muted)",
+              fontSize: "var(--aw-font-size-xs)",
+              lineHeight: "var(--aw-line-height-xs)",
+            }}
+          >
+            {line} #{index + 1}
+          </span>
+        ))}
+      </div>
+      <Button
+        size="sm"
+        onClick={() => setLines((current) => [...current, `Streaming item ${current.length + 1}`])}
+      >
+        Append stream item
+      </Button>
+    </div>
+  );
+}
+
+function WorkbenchNarrativePreview() {
+  const [promptKind, setPromptKind] = useState<keyof typeof workbenchPrompts>("short");
+  const [answerKind, setAnswerKind] = useState<keyof typeof workbenchAnswers>("paragraph");
+  const [planningDone, setPlanningDone] = useState(false);
+  const [layoutState, setLayoutState] = useState<WorkbenchGalleryState>("running");
+  const [interactionTab, setInteractionTab] = useState<"changes" | "browser" | "terminal" | "files">("changes");
+
+  const promptButton = (kind: keyof typeof workbenchPrompts, label: string) => {
+    const active = promptKind === kind;
+    return (
+      <button
+        key={kind}
+        style={{
+          ...phase4BtnStyle,
+          background: active ? "var(--aw-button-black)" : phase4BtnStyle.background,
+          color: active ? "var(--aw-text-onblack)" : phase4BtnStyle.color,
+          borderColor: active ? "var(--aw-button-black)" : phase4BtnStyle.borderColor,
+        }}
+        onClick={() => setPromptKind(kind)}
+      >
+        {label}
+      </button>
+    );
+  };
+
+  const answerButton = (kind: keyof typeof workbenchAnswers, label: string) => {
+    const active = answerKind === kind;
+    return (
+      <button
+        key={kind}
+        style={{
+          ...phase4BtnStyle,
+          background: active ? "var(--aw-button-black)" : phase4BtnStyle.background,
+          color: active ? "var(--aw-text-onblack)" : phase4BtnStyle.color,
+          borderColor: active ? "var(--aw-button-black)" : phase4BtnStyle.borderColor,
+        }}
+        onClick={() => setAnswerKind(kind)}
+      >
+        {label}
+      </button>
+    );
+  };
+
+  const layoutStateButton = (state: typeof layoutState, label: string) => {
+    const active = layoutState === state;
+    return (
+      <button
+        key={state}
+        style={{
+          ...phase4BtnStyle,
+          background: active ? "var(--aw-button-black)" : phase4BtnStyle.background,
+          color: active ? "var(--aw-text-onblack)" : phase4BtnStyle.color,
+          borderColor: active ? "var(--aw-button-black)" : phase4BtnStyle.borderColor,
+        }}
+        onClick={() => setLayoutState(state)}
+      >
+        {label}
+      </button>
+    );
+  };
+
+  const isRunning = layoutState === "running" || layoutState === "approval";
+  const isDone = layoutState === "done" || layoutState === "error";
+  const workbenchMetaItems = [
+    { id: "repo", label: "awaken" },
+    { id: "branch", label: "main" },
+    { id: "model", label: "Composer" },
+    { id: "runtime", label: "Local" },
+  ];
+  const sidebarRuns: ConversationItem[] = [
+    {
+      id: "run-current",
+      label: "Run Workbench layout mock",
+      timeLabel: "active",
+      statusLabel:
+        layoutState === "idle"
+          ? "idle"
+          : layoutState === "approval"
+            ? "needs input"
+            : layoutState,
+      statusTone:
+        layoutState === "error"
+          ? "error"
+          : layoutState === "approval"
+          ? "permission"
+          : layoutState === "done"
+            ? "success"
+            : layoutState === "running"
+              ? "local"
+              : "neutral",
+    },
+  ];
+
+  return (
+    <div className="zoom-stage" style={{ justifyContent: "flex-start", padding: "48px 24px" }}>
+      <div
+        style={{
+          width: "min(900px, calc(100vw - 48px))",
+          boxSizing: "border-box",
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr)",
+          gap: 16,
+          padding: 24,
+          border: "1px solid var(--aw-border-main)",
+          borderRadius: "var(--aw-radius-lg)",
+          background: "var(--aw-bg-main)",
+        }}
+      >
+        <h2
+          style={{
+            margin: 0,
+            color: "var(--aw-text-primary)",
+            fontSize: "var(--aw-font-size-xl)",
+            lineHeight: "var(--aw-line-height-xl)",
+          }}
+        >
+          Run Workbench Narrative
+        </h2>
+        <section
+          style={{
+            display: "grid",
+            gap: 12,
+            minWidth: 0,
+            padding: 14,
+            border: "1px solid var(--aw-border-light)",
+            borderRadius: "var(--aw-radius-panel)",
+            background: "var(--aw-surface-raised)",
+          }}
+        >
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+            <Tooltip label="Tooltip appears on hover or focus">
+              <button
+                type="button"
+                aria-label="Tooltip preview"
+                title="Tooltip preview"
+                style={{
+                  display: "inline-grid",
+                  placeItems: "center",
+                  width: 32,
+                  height: 32,
+                  border: "1px solid var(--aw-border-main)",
+                  borderRadius: "var(--aw-radius-control)",
+                  background: "var(--aw-surface-raised)",
+                  color: "var(--aw-text-muted)",
+                }}
+              >
+                <Info size={16} strokeWidth={2} />
+              </button>
+            </Tooltip>
+            <CopyButton
+              text="packages/ui/src/components/primitives/CopyButton.tsx"
+              label="Copy demo path"
+            />
+          </div>
+          <InspectorTabs
+            tabs={workbenchGalleryTabs}
+            activeTabId={interactionTab}
+            onTabChange={setInteractionTab}
+          />
+          <Disclosure title="Tool details" meta={interactionTab} defaultOpen>
+            <pre
+              style={{
+                margin: 0,
+                padding: 10,
+                overflow: "auto",
+                border: "1px solid var(--aw-border-light)",
+                borderRadius: "var(--aw-radius-control)",
+                background: "var(--aw-surface-panel-muted)",
+                color: "var(--aw-text-muted)",
+                fontSize: "var(--aw-font-size-xs)",
+                lineHeight: "var(--aw-line-height-xs)",
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {`command: rg \"InspectorTabs\" packages/ui/src\npath: packages/ui/src/components/inspector/InspectorTabs.tsx`}
+            </pre>
+          </Disclosure>
+          <AutoScrollTailPreview />
+        </section>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {promptButton("short", "短 prompt")}
+          {promptButton("long", "长 prompt")}
+          {promptButton("chinese", "中文 prompt")}
+          {answerButton("paragraph", "Paragraph")}
+          {answerButton("list", "List")}
+          {answerButton("code", "Inline code")}
+          <button
+            style={{
+              ...phase4BtnStyle,
+              background: planningDone ? "var(--aw-button-black)" : phase4BtnStyle.background,
+              color: planningDone ? "var(--aw-text-onblack)" : phase4BtnStyle.color,
+              borderColor: planningDone ? "var(--aw-button-black)" : phase4BtnStyle.borderColor,
+            }}
+            onClick={() => setPlanningDone((value) => !value)}
+          >
+            {planningDone ? "Planning done" : "Planning active"}
+          </button>
+        </div>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+            maxWidth: 760,
+            minWidth: 0,
+          }}
+        >
+          <PromptCard text={workbenchPrompts[promptKind]} status="done" />
+          <ActivityLine
+            title="Planning next moves"
+            detail="Preparing the first action from the frozen prompt."
+            status={planningDone ? "done" : "active"}
+          />
+          <ThinkingBlock
+            text="Checking whether this run should answer directly or call tools."
+            status={planningDone ? "done" : "active"}
+          />
+          <ExploringGroup
+            status="active"
+            actions={workbenchGalleryToolActions}
+            onSelectAction={() => {}}
+          />
+          <article className="narrative-item narrative-kind-tool">
+            <ToolActionRow
+              title="Run shell command"
+              detail="npm run typecheck:ui"
+              status="done"
+              onSelect={() => {}}
+            />
+          </article>
+          <ApprovalCard
+            inline
+            open
+            title="Approve patch"
+            description="Awaken wants to modify a workspace file."
+            affectedPaths={["apps/desktop/src/renderer/App.tsx"]}
+            patchSummary="Render approval inside the center narrative."
+            riskTone="warning"
+            approveLabel="Approve"
+            rejectLabel="Reject"
+            onApprove={() => {}}
+            onReject={() => {}}
+          />
+          <FileChangeSummary
+            files={[workbenchGalleryFile]}
+            status="done"
+          />
+          <MarkdownAnswer markdown={workbenchAnswers[answerKind]} status="done" />
+          <Composer
+            value="Run is streaming. The text area is locked while stop remains available."
+            onChange={() => {}}
+            onSubmit={() => {}}
+            mode="Act"
+            onModeChange={() => {}}
+            model={mockModels[0]}
+            models={mockModels}
+            onModelChange={() => {}}
+            placeholder="Follow-up is available after this run finishes"
+            disabled
+            isReady
+            submitMode="stop"
+          />
+        </div>
+      </div>
+      <div
+        style={{
+          width: "min(1180px, calc(100vw - 48px))",
+          height: "min(720px, calc(100vh - 120px))",
+          minHeight: 620,
+          display: "grid",
+          gridTemplateRows: "auto minmax(0, 1fr)",
+          gap: 12,
+          padding: 12,
+          border: "1px solid var(--aw-border-main)",
+          borderRadius: "var(--aw-radius-workbench)",
+          background: "var(--aw-surface-canvas)",
+        }}
+      >
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {layoutStateButton("idle", "Idle")}
+          {layoutStateButton("running", "Running")}
+          {layoutStateButton("approval", "Approval")}
+          {layoutStateButton("done", "Done")}
+          {layoutStateButton("error", "Error")}
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "300px minmax(0, 1fr)",
+            minHeight: 0,
+            border: "1px solid var(--aw-border-light)",
+            borderRadius: "var(--aw-radius-panel)",
+            overflow: "hidden",
+          }}
+        >
+          <WorkbenchSidebarFrame>
+            <AwakenSidebar
+              navItems={[
+                { id: "automations", label: "Automations" },
+                { id: "customize", label: "Customize" },
+              ]}
+              conversations={[]}
+              projects={[
+                {
+                  id: "awaken",
+                  label: "awaken",
+                  children: [
+                    {
+                      id: "run-current",
+                      label: "Refactor renderer",
+                      timeLabel: isRunning ? "active" : layoutState,
+                    },
+                  ],
+                },
+              ]}
+              activeProjectId="run-current"
+              newTaskLabel="New Agent"
+              conversationSectionLabel=""
+              projectSectionLabel="Repositories"
+              projectSectionActions={
+                <span className="sidebar-section-actions">
+                  <button type="button" className="sidebar-section-action" aria-label="Filter repositories">
+                    <ListFilter size={13} strokeWidth={1.85} />
+                  </button>
+                  <button type="button" className="sidebar-section-action" aria-label="Add repository">
+                    <FolderPlus size={13} strokeWidth={1.85} />
+                  </button>
+                </span>
+              }
+              showProjectCount={false}
+              profileName="Nolan"
+              profileSubtitle="Local"
+              profileAvatarFallback="NG"
+              onSelectConversation={() => {}}
+              onSelectNav={() => {}}
+              onSelectProject={() => {}}
+            />
+          </WorkbenchSidebarFrame>
+          <WorkbenchShell
+            stage={
+              <RunStage
+                composer={
+                  layoutState === "idle" ? undefined : (
+                    <ComposerDock>
+                      <ComposerBar
+                        value={
+                          layoutState === "done"
+                            ? "Follow up in the same thread"
+                            : layoutState === "error"
+                              ? "Recover from the failed build"
+                              : ""
+                        }
+                        onChange={() => {}}
+                        onSubmit={() => {}}
+                        placeholder={isRunning ? "Awaken is working..." : layoutState === "done" ? "Send follow-up" : "Ask Awaken to work on..."}
+                        disabled={isRunning}
+                        isReady={isRunning || isDone}
+                        submitMode={isRunning ? "stop" : "send"}
+                        variant="dock"
+                        metaItems={workbenchMetaItems}
+                      />
+                    </ComposerDock>
+                  )
+                }
+              >
+                {layoutState === "idle" ? (
+                  <div className="run-stage-center-composer">
+                    <ComposerBar
+                      value=""
+                      onChange={() => {}}
+                      onSubmit={() => {}}
+                      placeholder="Plan, Build, / for skills, @ for context"
+                      variant="center"
+                      metaItems={workbenchMetaItems}
+                    />
+                  </div>
+                ) : null}
+                <ExecutionFeed label="Workbench layout mock narrative">
+                  {layoutState !== "idle" ? (
+                    <>
+                      <UserPromptBlock text="Refactor the desktop renderer into a Run Workbench." />
+                      <ThoughtTrace
+                        text="Inspecting workbench layout boundaries."
+                        status={isDone ? "done" : "active"}
+                      />
+                      <ToolTraceGroup
+                        actions={[
+                          {
+                            id: "read-app",
+                            title: "Read App.tsx",
+                            detail: "apps/desktop/src/renderer/App.tsx",
+                            status: "done",
+                          },
+                          {
+                            id: "search-ui",
+                            title: "Search workbench components",
+                            detail: "packages/ui/src/components",
+                            status: isRunning ? "active" : "done",
+                          },
+                        ]}
+                      />
+                    </>
+                  ) : null}
+                  {layoutState === "approval" ? (
+                    <ApprovalCard
+                      inline
+                      open
+                      title="Approve layout extraction"
+                      description="Move layout wrappers into @awaken/ui."
+                      affectedPaths={["packages/ui/src/components/workbench/RunStage.tsx"]}
+                      riskTone="warning"
+                      onApprove={() => {}}
+                      onReject={() => {}}
+                    />
+                  ) : null}
+                  {layoutState === "done" ? (
+                    <>
+                      <FileChangeSummary
+                        files={[
+                          {
+                            id: "shell",
+                            title: "WorkbenchShell.tsx",
+                            path: "packages/ui/src/components/workbench/WorkbenchShell.tsx",
+                            status: "done",
+                          },
+                        ]}
+                        status="done"
+                      />
+                      <AssistantMessage markdown="Workbench layout components are ready." status="done" />
+                    </>
+                  ) : null}
+                  {layoutState === "error" ? (
+                    <>
+                      <ToolTraceLine
+                        title="Shell command failed"
+                        detail="npm run build:desktop exited with code 1"
+                        status="error"
+                        onSelect={() => {}}
+                      />
+                      <AssistantMessage
+                        markdown="The run stopped after a build error. Inspector keeps the terminal tab available for recovery."
+                        status="error"
+                      />
+                    </>
+                  ) : null}
+                </ExecutionFeed>
+              </RunStage>
+            }
+            inspector={
+              <LightInspectorRail
+                title="On Awaken"
+                status="Local"
+                items={[
+                  {
+                    id: "changes",
+                    label: "Changes",
+                    badge: isDone ? 1 : undefined,
+                    deltaAdded: isDone ? 24 : undefined,
+                    deltaRemoved: isDone ? 8 : undefined,
+                  },
+                  { id: "browser", label: "Browser" },
+                  { id: "terminal", label: "Terminal", badge: isRunning ? 1 : undefined },
+                  { id: "files", label: "Files", badge: isDone ? 1 : undefined },
+                ]}
+                activeId={isDone ? "changes" : "terminal"}
+                onSelect={() => {}}
+              >
+                <section className="inspector-section">
+                  <div className="inspector-section-head">
+                    <h2>Mock State</h2>
+                    <span>{layoutState}</span>
+                  </div>
+                  <p className="placeholder-copy">
+                    This playground uses props only; runtime data belongs to Desktop.
+                  </p>
+                </section>
+              </LightInspectorRail>
+            }
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Phase5Demo({
   platform,
   onPlatformChange,
@@ -1213,6 +1831,7 @@ export default function App() {
       {previewMode === "phase3" ? <Phase3Preview /> : null}
       {previewMode === "phase4" ? <Phase4Preview /> : null}
       {previewMode === "phase5" ? <Phase5Preview /> : null}
+      {previewMode === "workbench" ? <WorkbenchNarrativePreview /> : null}
     </div>
   );
 }

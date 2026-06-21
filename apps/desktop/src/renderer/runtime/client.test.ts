@@ -269,4 +269,41 @@ describe("electron client supervisor state", () => {
 
     expect(onStatus).toHaveBeenCalledWith({ status: "crashed" });
   });
+
+  it("reconnects bridge subscriptions with after_seq", async () => {
+    const { bridge } = createElectronBridge({ status: "running" });
+    const subscriptions: Array<{
+      handlers: Parameters<AwakenBridge["subscribeRun"]>[1];
+      afterSeq?: number;
+    }> = [];
+    bridge.subscribeRun = vi.fn(async (_runId, handlers, afterSeq) => {
+      subscriptions.push({ handlers, afterSeq });
+      return `subscription-${subscriptions.length}`;
+    });
+
+    vi.stubGlobal("window", {
+      location: { origin: "http://localhost" },
+      awaken: bridge,
+    });
+
+    const client = createRuntimeClient();
+    const onReconnect = vi.fn();
+    const unsubscribe = await client.subscribeRun("run-1", {
+      onEvent: vi.fn(),
+      onReconnect,
+    });
+
+    subscriptions[0].handlers.onEvent({ type: "TEXT_MESSAGE_CONTENT", seq: 32, delta: "partial" });
+    subscriptions[0].handlers.onError?.("connection dropped");
+
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+    expect(bridge.unsubscribeRun).toHaveBeenCalledWith("subscription-1");
+
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(subscriptions).toHaveLength(2);
+    expect(subscriptions[1].afterSeq).toBe(32);
+
+    unsubscribe();
+  });
 });

@@ -47,6 +47,31 @@ type ArtifactProducingTool interface {
 	Artifacts(input string, output string, permissionContext PermissionContext) []ArtifactDescriptor
 }
 
+type CommandOutput struct {
+	Stream    string
+	Delta     string
+	Truncated bool
+}
+
+type PatchPreview struct {
+	Patch         string
+	Summary       string
+	AffectedPaths []string
+	Truncated     bool
+}
+
+type ToolObserver interface {
+	OnCommandOutput(output CommandOutput)
+}
+
+type ObservableTool interface {
+	ExecuteWithObserver(ctx context.Context, input string, observer ToolObserver) (string, error)
+}
+
+type PatchPreviewingTool interface {
+	PatchPreview(input string, permissionContext PermissionContext) (PatchPreview, bool)
+}
+
 type ToolParameter struct {
 	Name        string
 	Description string

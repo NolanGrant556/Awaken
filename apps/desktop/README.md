@@ -2,6 +2,8 @@
 
 `apps/desktop` 是 Awaken 的 Electron + React 桌面端。Desktop 是唯一用户入口：Electron main 管理本机 `awaken-core` 生命周期，renderer 只通过 `window.awaken` bridge 发起 run、订阅事件、取消 run、处理 approval，并预览只读 `a2ui_surface` artifacts。
 
+当前主界面是 Run Workbench：左侧 Sidebar 管理 runs/threads，中间 Run Narrative 展示 prompt、thinking、tool、approval、file change、answer，右侧 Inspector 展示 Changes/Browser/Terminal/Files，底部 Composer 发起 run、follow-up 和 stop/cancel。
+
 ## 目录
 
 ```text
@@ -19,6 +21,8 @@ apps/desktop/
 ```ts
 type AwakenBridge = {
   platform: "macos" | "windows" | "linux";
+  getRun(runId: string): Promise<RuntimeRun>;
+  listThreads(): Promise<RuntimeThread[]>;
   startRun(request: StartRunRequest): Promise<RuntimeRun>;
   cancelRun(runId: string): Promise<RuntimeRun>;
   resolveApproval(
@@ -33,6 +37,7 @@ type AwakenBridge = {
       onError?: (message: string) => void;
       onClose?: () => void;
     },
+    afterSeq?: number,
   ): Promise<string>;
   unsubscribeRun(subscriptionId: string): void;
   getRuntimeInfo(): Promise<RuntimeInfo>;
@@ -69,6 +74,22 @@ npm run acceptance:desktop-hardening
 
 这个 gate 会确保当前平台 runtime binary 存在，跑 Desktop typecheck、Desktop unit tests、Go runtime/server tests、真实 LLM smoke，并完成 packaged Desktop build。最后仍需实际打开 dev Desktop 和 `Awaken.app` 各完成一次真实 run，作为发布证据。
 
+Run Workbench 收口验收常用命令：
+
+```bash
+npm --workspace @awaken/desktop run test
+npm run typecheck:desktop
+npm run build:desktop
+npm run typecheck:ui
+go test ./src/server -run 'TestPlainQASmoke|TestReadOnlyFileSmoke|TestFileMutation(Approval|Reject|Artifact|PatchAndTurnDiff)Smoke' -count=1 -v
+go test ./src/server -run 'TestRunsEndpointsCreateReplayAndCancel|TestRunEventsAfterSeq|TestRunEventsAfterSeqReconnectMultiFrame' -count=1
+git diff --check
+```
+
+旧主界面关键词扫描命令记录在仓库根部 handoff 文档，避免 Desktop 文档自身被产品路径扫描误命中。
+
+视觉 QA 要打开 Desktop，确认第一屏是左 Sidebar、中间 Run Narrative、右 Inspector、底部 Composer；不要把 UI playground 或 mock run 当作真实验收。
+
 ## 验收边界
 
 - Desktop 消费以下 runtime endpoints：
@@ -81,6 +102,11 @@ npm run acceptance:desktop-hardening
   - `POST /v1/runs/{run_id}/cancel`
   - `POST /v1/runs/{run_id}/approvals/{approval_id}/resolve`
 - Renderer 消费标准 AG-UI run/text/reasoning/tool 事件，以及 Awaken extension events：
+  - `TOOL_CALL_ARGS_DELTA`
+  - `TOOL_PROGRESS`
+  - `AWAKEN_COMMAND_OUTPUT`
+  - `AWAKEN_PATCH_UPDATED`
+  - `AWAKEN_TURN_DIFF`
   - `AWAKEN_APPROVAL_REQUESTED`
   - `AWAKEN_APPROVAL_RESOLVED`
   - `AWAKEN_ARTIFACT_CREATED`

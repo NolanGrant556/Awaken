@@ -1,5 +1,5 @@
 import type { CSSProperties, MouseEvent } from "react";
-import type { ConversationItem } from "../../types";
+import type { ComponentTone, ConversationItem } from "../../types";
 
 type ConversationListProps = {
   items: ConversationItem[];
@@ -46,6 +46,63 @@ const timeStyle: CSSProperties = {
   fontSize: "var(--aw-font-size-xs)",
   lineHeight: "var(--aw-line-height-xs)",
   whiteSpace: "nowrap",
+};
+
+const metaRowStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  minWidth: 0,
+  marginTop: 4,
+};
+
+const statusBaseStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  maxWidth: "100%",
+  minHeight: 18,
+  padding: "0 6px",
+  border: "1px solid transparent",
+  borderRadius: "var(--aw-radius-xs)",
+  fontSize: "var(--aw-font-size-xs)",
+  fontWeight: "var(--aw-font-weight-semibold)",
+  lineHeight: "var(--aw-line-height-xs)",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const statusToneStyles: Record<ComponentTone, CSSProperties> = {
+  neutral: {
+    color: "var(--aw-text-secondary)",
+    background: "var(--aw-bg-fill-light)",
+    borderColor: "var(--aw-border-main)",
+  },
+  local: {
+    color: "var(--aw-success)",
+    background: "var(--aw-success-soft-bg)",
+    borderColor: "var(--aw-success-soft-border)",
+  },
+  permission: {
+    color: "var(--aw-warning)",
+    background: "var(--aw-warning-soft-bg)",
+    borderColor: "var(--aw-warning-soft-border)",
+  },
+  success: {
+    color: "var(--aw-success)",
+    background: "var(--aw-success-soft-bg)",
+    borderColor: "var(--aw-success-soft-border)",
+  },
+  warning: {
+    color: "var(--aw-warning)",
+    background: "var(--aw-warning-soft-bg)",
+    borderColor: "var(--aw-warning-soft-border)",
+  },
+  error: {
+    color: "var(--aw-error)",
+    background: "var(--aw-error-soft-bg)",
+    borderColor: "var(--aw-error-soft-border)",
+  },
 };
 
 const emptyStyle: CSSProperties = {
@@ -98,6 +155,8 @@ export function ConversationList({ items, activeId, onSelect, onContextMenu }: C
             title={item.label}
             style={{
               ...rowBase,
+              minHeight: item.statusLabel ? 48 : rowBase.minHeight,
+              padding: item.statusLabel ? "6px 10px" : rowBase.padding,
               background: baseBg,
               cursor: isDisabled ? "not-allowed" : "pointer",
               opacity: isDisabled ? 0.6 : 1,
@@ -109,6 +168,18 @@ export function ConversationList({ items, activeId, onSelect, onContextMenu }: C
           >
             <span style={{ minWidth: 0 }}>
               <span style={titleStyle}>{item.label}</span>
+              {item.statusLabel ? (
+                <span style={metaRowStyle}>
+                  <span
+                    style={{
+                      ...statusBaseStyle,
+                      ...statusToneStyles[item.statusTone ?? "neutral"],
+                    }}
+                  >
+                    {item.statusLabel}
+                  </span>
+                </span>
+              ) : null}
             </span>
             <span style={timeStyle}>{item.timeLabel}</span>
           </button>

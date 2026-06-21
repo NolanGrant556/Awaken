@@ -6,6 +6,8 @@
 > 设计源：`frontend/demos/awaken-interactive-demo.html`（唯一视觉与交互标准）
 > 旧组件引用：`frontend/src/components/`（现状参考，不作为视觉标准）
 
+> 当前说明：本文档是 HTML demo 时代的组件库历史档案。Run Workbench 视觉语言已进入 v2，当前 token 来源以 `docs/desktop-run-workbench-vertical-slices.md` 和 `packages/ui/src/styles/tokens.css` 中的 Run Workbench semantic tokens v2 为准，不再以旧 HTML demo 作为唯一视觉源。
+
 ## 0. 归档说明
 
 本文档最初是 Awaken UI Kit 的生产级实现规格，用于指导 Coding Agent 分阶段完成组件库重建。归档时，Phase 1～6 均已实现、review、修正并推送到 `origin/main`。
@@ -17,7 +19,7 @@
 - 每个组件类别的职责边界、数据契约和跨平台预留点。
 - Phase 1～6 的实际建设路径、验收方式和已关闭风险。
 
-后续若继续演进组件库，应基于当前实现另开新规格或追加变更记录，不再把本文档当作“下一轮唯一实现指令”。
+后续若继续演进组件库，应基于当前 Run Workbench 实现另开新规格或追加变更记录，不再把本文档当作“下一轮唯一实现指令”。其中 v2 token 的视觉源是 Run Workbench 的 sidebar、stage、inspector、composer、narrative item、terminal/diff 状态，而不是旧 HTML demo。
 
 ---
 

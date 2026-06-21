@@ -252,6 +252,10 @@ func StreamCall(ctx stdctx.Context, cfg Config, req Request, callback StreamCall
 
 // StreamInvoke 流式调用，返回完整响应
 func StreamInvoke(ctx stdctx.Context, cfg Config, req Request, callback StreamCallback) (*Response, error) {
+	return StreamInvokeWithObserver(ctx, cfg, req, StreamObserver{OnContent: callback})
+}
+
+func StreamInvokeWithObserver(ctx stdctx.Context, cfg Config, req Request, observer StreamObserver) (*Response, error) {
 	if cfg.APIKey == "" {
 		return nil, ErrMissingAPIKey
 	}
@@ -262,7 +266,10 @@ func StreamInvoke(ctx stdctx.Context, cfg Config, req Request, callback StreamCa
 	}
 
 	transport := getTransport(cfg)
-	return transport.StreamInvoke(ctx, cfg, req, callback)
+	if observerTransport, ok := transport.(observerTransport); ok {
+		return observerTransport.StreamInvokeWithObserver(ctx, cfg, req, observer)
+	}
+	return transport.StreamInvoke(ctx, cfg, req, observer.OnContent)
 }
 
 // CallWithContext 使用 Conversation Context 调用

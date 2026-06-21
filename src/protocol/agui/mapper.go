@@ -65,14 +65,29 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.ToolCallName = event.ToolName
 		base.ParentMessageID = event.ParentMessageID
 		return []Event{base}
+	case agentcore.ToolCallArgsDeltaEventType:
+		base.Type = EventToolCallArgsDelta
+		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
+		base.Delta = event.Delta
+		return []Event{base}
 	case agentcore.ToolCallArgsEventType:
 		base.Type = EventToolCallArgs
 		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
 		base.Delta = event.Arguments
 		return []Event{base}
 	case agentcore.ToolCallFinishedEventType:
 		base.Type = EventToolCallEnd
 		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
+		return []Event{base}
+	case agentcore.ToolProgressEventType:
+		base.Type = EventToolProgress
+		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
+		base.Progress = event.Progress
+		base.Message = event.Progress
 		return []Event{base}
 	case agentcore.ToolResultEventType:
 		base.Type = EventToolCallResult
@@ -82,6 +97,28 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		if base.Role == "" {
 			base.Role = "tool"
 		}
+		return []Event{base}
+	case agentcore.CommandOutputEventType:
+		base.Type = EventAwakenCommandOutput
+		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
+		base.CommandStream = event.CommandStream
+		base.Delta = event.Delta
+		base.Truncated = event.Truncated
+		return []Event{base}
+	case agentcore.PatchUpdatedEventType:
+		base.Type = EventAwakenPatchUpdated
+		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
+		base.Patch = event.Patch
+		base.PatchSummary = event.PatchSummary
+		base.ApprovalAffectedPaths = event.ApprovalAffectedPaths
+		base.Truncated = event.Truncated
+		return []Event{base}
+	case agentcore.TurnDiffEventType:
+		base.Type = EventAwakenTurnDiff
+		base.Diff = event.Diff
+		base.Truncated = event.Truncated
 		return []Event{base}
 	case agentcore.ApprovalRequestedEventType:
 		base.Type = EventAwakenApprovalRequested

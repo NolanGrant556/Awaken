@@ -19,9 +19,14 @@ const (
 	ReasoningDeltaEventType      AwakenEventType = "ReasoningDelta"
 	ReasoningFinishedEventType   AwakenEventType = "ReasoningFinished"
 	ToolCallStartedEventType     AwakenEventType = "ToolCallStarted"
+	ToolCallArgsDeltaEventType   AwakenEventType = "ToolCallArgsDelta"
 	ToolCallArgsEventType        AwakenEventType = "ToolCallArgs"
 	ToolCallFinishedEventType    AwakenEventType = "ToolCallFinished"
+	ToolProgressEventType        AwakenEventType = "ToolProgress"
 	ToolResultEventType          AwakenEventType = "ToolResult"
+	CommandOutputEventType       AwakenEventType = "CommandOutput"
+	PatchUpdatedEventType        AwakenEventType = "PatchUpdated"
+	TurnDiffEventType            AwakenEventType = "TurnDiff"
 	ApprovalRequestedEventType   AwakenEventType = "ApprovalRequested"
 	ApprovalResolvedEventType    AwakenEventType = "ApprovalResolved"
 	ArtifactCreatedEventType     AwakenEventType = "ArtifactCreated"
@@ -64,6 +69,12 @@ type AwakenEvent struct {
 	ToolCallID            string
 	ToolName              string
 	Arguments             string
+	Progress              string
+	CommandStream         string
+	Patch                 string
+	PatchSummary          string
+	Diff                  string
+	Truncated             bool
 	Error                 string
 	Code                  string
 	ApprovalID            string

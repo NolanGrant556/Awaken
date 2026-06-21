@@ -12,9 +12,14 @@ export type AguiEventType =
   | "REASONING_MESSAGE_END"
   | "REASONING_END"
   | "TOOL_CALL_START"
+  | "TOOL_CALL_ARGS_DELTA"
   | "TOOL_CALL_ARGS"
   | "TOOL_CALL_END"
+  | "TOOL_PROGRESS"
   | "TOOL_CALL_RESULT"
+  | "AWAKEN_COMMAND_OUTPUT"
+  | "AWAKEN_PATCH_UPDATED"
+  | "AWAKEN_TURN_DIFF"
   | "AWAKEN_APPROVAL_REQUESTED"
   | "AWAKEN_APPROVAL_RESOLVED"
   | "AWAKEN_ARTIFACT_CREATED"
@@ -47,6 +52,12 @@ export type AguiEvent = {
   toolCallName?: string;
   content?: string;
   result?: string;
+  progress?: string;
+  commandStream?: string;
+  patch?: string;
+  patchSummary?: string;
+  diff?: string;
+  truncated?: boolean;
   message?: string;
   code?: string;
   approvalId?: string;

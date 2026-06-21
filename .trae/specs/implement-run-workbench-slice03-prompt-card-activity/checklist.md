@@ -1,0 +1,16 @@
+- [x] `PromptCard` 已新增并导出
+- [x] `ActivityLine` 已新增并导出
+- [x] `packages/ui` 新组件未引入 AG-UI、A2UI、Electron、runtime client、SSE 或 `window.awaken`
+- [x] playground 覆盖短 prompt
+- [x] playground 覆盖长 prompt
+- [x] playground 覆盖中文 prompt
+- [x] Desktop prompt item 使用 `PromptCard`
+- [x] Desktop planning item 使用 `ActivityLine`
+- [x] 长 prompt 不撑破 Run Stage 布局
+- [x] prompt card 在 run 过程中不被 streaming answer 挤掉
+- [x] cancel/error/reconnect 后 prompt card 仍随 narrative state 保留
+- [x] `npm run typecheck:ui` 通过
+- [x] `npm run typecheck:desktop` 通过
+- [x] `npm run build:desktop` 通过
+- [x] `git diff --check` 通过
+- [x] 独立 review pass 未发现 blocker / correctness / acceptance finding

@@ -4,6 +4,7 @@ import { Icon } from "../primitives/Icon";
 
 type ProfileButtonProps = {
   name: string;
+  subtitle?: string;
   avatarFallback: string;
   avatarSrc?: string;
   onClick?: () => void;
@@ -37,7 +38,23 @@ const nameStyle: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-export function ProfileButton({ name, avatarFallback, avatarSrc, onClick }: ProfileButtonProps) {
+const subtitleStyle: CSSProperties = {
+  display: "block",
+  overflow: "hidden",
+  color: "var(--aw-text-tertiary)",
+  fontSize: "var(--aw-font-size-xs)",
+  lineHeight: "var(--aw-line-height-xs)",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+export function ProfileButton({
+  name,
+  subtitle,
+  avatarFallback,
+  avatarSrc,
+  onClick,
+}: ProfileButtonProps) {
   const handleEnter = (e: MouseEvent<HTMLButtonElement>) => {
     e.currentTarget.style.background = "var(--aw-bg-fill-light)";
   };
@@ -63,8 +80,9 @@ export function ProfileButton({ name, avatarFallback, avatarSrc, onClick }: Prof
       onMouseUp={handleUp}
     >
       <Avatar src={avatarSrc} fallback={avatarFallback} />
-      <span style={{ minWidth: 0, display: "flex", alignItems: "center", minHeight: 32 }}>
+      <span style={{ minWidth: 0, display: "grid", alignContent: "center", minHeight: 32 }}>
         <span style={nameStyle}>{name}</span>
+        {subtitle ? <span style={subtitleStyle}>{subtitle}</span> : null}
       </span>
       <span style={{ display: "inline-flex", color: "var(--aw-text-tertiary)" }}>
         <Icon size={16}>

@@ -1,0 +1,13 @@
+- [x] 启动 Desktop 后第一屏是 Run Workbench 壳
+- [x] 主界面不再出现 Dashboard、卡片墙、开发者日志面板
+- [x] 主界面不再以 Phase 4 hero、assistant stream、reasoning stream、tool result debug 面板作为中心体验
+- [x] 左侧 Sidebar 保留 runs/thread 入口
+- [x] 中间 Run Stage 显示当前 run 状态、错误、answer/reasoning 的临时摘要或空状态
+- [x] 右侧 Inspector Rail 显示 runtime、workspace、provider/model、approval、artifact、tool result 摘要
+- [x] 底部 Composer 可以继续发起真实 run
+- [x] runtime unavailable / starting / crashed 仍有可读状态提示
+- [x] `packages/ui` 未引入 AG-UI、A2UI、Electron、runtime client、SSE 或 `window.awaken`
+- [x] `npm run typecheck:ui` 通过
+- [x] `npm run build:desktop` 通过
+- [x] `git diff --check` 通过
+- [x] 独立 review pass 未发现 blocker / correctness / acceptance finding

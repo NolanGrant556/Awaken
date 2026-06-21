@@ -2,6 +2,8 @@
 
 Awaken 的 UI-only React 组件库。这个包只负责组件渲染、局部交互、视觉 token、布局和跨平台 UI 适配，不接入 Agent runtime、Electron IPC 或后端 API。
 
+当前 v2 设计 token 来源是 Run Workbench，而不是早期 HTML demo。`docs/component-library.md` 只作为历史档案；新增或调整 token 时优先从已进入 Desktop Workbench 的 sidebar、stage、inspector、composer、narrative、terminal/diff 状态中抽象。
+
 ## 边界
 
 - `src/` 是组件库源码，包含 `components/`、`styles/`、`types.ts` 和公共入口 `index.ts`。

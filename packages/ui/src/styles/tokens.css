@@ -20,6 +20,8 @@
   --aw-border-main: rgba(0, 0, 0, 0.06);
   --aw-border-light: rgba(0, 0, 0, 0.04);
   --aw-border-active: rgba(0, 0, 0, 0.3);
+  --aw-border-control: rgba(0, 0, 0, 0.08);
+  --aw-border-control-hover: rgba(0, 0, 0, 0.14);
 
   /* Button */
   --aw-button-black: #1a1a19;
@@ -37,6 +39,51 @@
   --aw-warning-soft-border: rgba(239, 162, 1, 0.24);
   --aw-error-soft-bg: rgba(242, 90, 90, 0.12);
   --aw-error-soft-border: rgba(242, 90, 90, 0.24);
+
+  /* Run Workbench semantic tokens v2 */
+  --aw-surface-canvas: var(--aw-bg-main);
+  --aw-surface-navigation: var(--aw-bg-nav);
+  --aw-surface-work: rgba(248, 248, 247, 0.96);
+  --aw-surface-detail: rgba(255, 255, 255, 0.82);
+  --aw-surface-raised: rgba(255, 255, 255, 0.86);
+  --aw-surface-panel: rgba(255, 255, 255, 0.74);
+  --aw-surface-panel-muted: rgba(248, 248, 247, 0.78);
+  --aw-surface-hover: rgba(255, 255, 255, 0.64);
+  --aw-surface-composer: var(--aw-bg-fill-light);
+  --aw-surface-code: #f5f5f3;
+  --aw-surface-selection: rgba(0, 129, 242, 0.11);
+  --aw-surface-focus: rgba(255, 255, 255, 1);
+  --aw-surface-danger: rgba(255, 244, 244, 0.92);
+  --aw-surface-status-pill: rgba(20, 32, 43, 0.08);
+  --aw-surface-muted-fill: rgba(55, 53, 47, 0.05);
+  --aw-surface-sidebar: var(--aw-surface-navigation);
+  --aw-surface-stage: var(--aw-surface-work);
+  --aw-surface-inspector: var(--aw-surface-detail);
+  --aw-surface-runtime-pill: var(--aw-surface-status-pill);
+  --aw-text-muted: var(--aw-text-secondary);
+  --aw-text-subtle: var(--aw-text-tertiary);
+  --aw-text-code: #244261;
+  --aw-text-selection: #005ea8;
+  --aw-status-running: var(--aw-text-blue);
+  --aw-status-running-bg: rgba(0, 129, 242, 0.11);
+  --aw-status-running-border: rgba(0, 129, 242, 0.18);
+  --aw-status-waiting: var(--aw-warning);
+  --aw-status-waiting-bg: rgba(234, 88, 12, 0.12);
+  --aw-status-waiting-text: #9a3412;
+  --aw-status-success: var(--aw-success);
+  --aw-status-success-bg: rgba(34, 197, 94, 0.12);
+  --aw-status-success-text: #166534;
+  --aw-status-danger: var(--aw-error);
+  --aw-status-danger-bg: rgba(242, 90, 90, 0.14);
+  --aw-status-danger-text: #b42318;
+  --aw-diff-added: rgba(34, 197, 94, 0.12);
+  --aw-diff-added-text: #166534;
+  --aw-diff-removed: rgba(242, 90, 90, 0.14);
+  --aw-diff-removed-text: #b42318;
+  --aw-diff-changed: rgba(245, 158, 11, 0.14);
+  --aw-diff-changed-text: #8a4b00;
+  --aw-terminal-bg: #22313b;
+  --aw-terminal-text: #ffffff;
 
   /* Spacing */
   --aw-space-1: 2px;
@@ -61,10 +108,15 @@
   --aw-radius-md: 12px;
   --aw-radius-lg: 16px;
   --aw-radius-pill: 999px;
+  --aw-radius-control: var(--aw-radius-sm);
+  --aw-radius-panel: var(--aw-radius-md);
+  --aw-radius-workbench: var(--aw-radius-lg);
 
   /* Shadow */
   --aw-shadow-menu: 0 16px 42px rgba(0, 0, 0, 0.12);
   --aw-shadow-toast: 0 14px 34px rgba(0, 0, 0, 0.12);
+  --aw-shadow-raised: 0 10px 28px rgba(0, 0, 0, 0.05);
+  --aw-shadow-focus: 0 0 0 3px color-mix(in srgb, var(--aw-status-running) 18%, transparent);
 
   /* Font */
   --aw-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", Helvetica, "Apple Color Emoji", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol";
@@ -104,6 +156,7 @@
   /* Layout */
   --aw-sidebar-width: 300px;
   --aw-content-width: 768px;
+  --aw-chrome-height: 72px;
 }
 
 @media (max-width: 1180px) {

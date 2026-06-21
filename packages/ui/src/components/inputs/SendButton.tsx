@@ -1,35 +1,45 @@
-import { ArrowUp } from "lucide-react";
+import { ArrowUp, Square } from "lucide-react";
+import { Tooltip } from "../overlays/Tooltip";
 
 type SendButtonProps = {
   ready: boolean;
   onClick?: () => void;
   disabled?: boolean;
   loading?: boolean;
+  mode?: "send" | "stop";
 };
 
-export function SendButton({ ready, onClick, disabled, loading }: SendButtonProps) {
-  return (
+export function SendButton({ ready, onClick, disabled, loading, mode = "send" }: SendButtonProps) {
+  const isStop = mode === "stop";
+  const label = isStop ? "停止运行" : loading ? "发送中" : "发送";
+  const isDisabled = disabled || loading;
+
+  const button = (
     <button
       type="button"
       onClick={onClick}
-      disabled={disabled || loading}
-      aria-label={loading ? "发送中" : "发送"}
-      title={loading ? "发送中" : "发送"}
+      disabled={isDisabled}
+      aria-label={label}
+      title={label}
       style={{
         display: "inline-grid",
         placeItems: "center",
         width: 32,
         height: 32,
         border: "none",
-        borderRadius: "999px",
-        background: ready ? "var(--aw-button-black)" : "var(--aw-bg-fill-dark)",
+        borderRadius: "var(--aw-radius-pill)",
+        background: isStop
+          ? "var(--aw-status-danger)"
+          : ready
+            ? "var(--aw-button-black)"
+            : "var(--aw-bg-fill-dark)",
         color: "var(--aw-text-onblack)",
-        cursor: disabled || loading ? "not-allowed" : "pointer",
-        opacity: disabled || loading ? 0.45 : 1,
+        cursor: isDisabled ? "not-allowed" : "pointer",
+        opacity: isDisabled ? 0.45 : 1,
         transition: "background-color 160ms ease, transform 160ms ease",
       }}
       onMouseEnter={(e) => {
-        if (!disabled && !loading && ready) {
+        if (!isDisabled && (ready || isStop)) {
           e.currentTarget.style.transform = "translateY(-1px)";
         }
       }}
@@ -44,13 +54,17 @@ export function SendButton({ ready, onClick, disabled, loading }: SendButtonProp
             height: 14,
             border: "2px solid currentColor",
             borderTopColor: "transparent",
-            borderRadius: "999px",
+            borderRadius: "var(--aw-radius-pill)",
             animation: "spin 900ms linear infinite",
           }}
         />
+      ) : isStop ? (
+        <Square size={14} strokeWidth={2.2} fill="currentColor" />
       ) : (
         <ArrowUp size={18} strokeWidth={1.85} />
       )}
     </button>
   );
+
+  return <Tooltip label={label}>{button}</Tooltip>;
 }

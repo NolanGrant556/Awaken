@@ -129,6 +129,10 @@ func (t *anthropicTransport) Invoke(ctx stdctx.Context, cfg Config, req Request)
 }
 
 func (t *anthropicTransport) StreamInvoke(ctx stdctx.Context, cfg Config, req Request, callback StreamCallback) (*Response, error) {
+	return t.StreamInvokeWithObserver(ctx, cfg, req, StreamObserver{OnContent: callback})
+}
+
+func (t *anthropicTransport) StreamInvokeWithObserver(ctx stdctx.Context, cfg Config, req Request, observer StreamObserver) (*Response, error) {
 	url := buildAnthropicMessagesURL(cfg.BaseURL)
 	messages, err := buildAnthropicMessages(req)
 	if err != nil {
@@ -166,7 +170,7 @@ func (t *anthropicTransport) StreamInvoke(ctx stdctx.Context, cfg Config, req Re
 		return nil, requestFailedError(resp)
 	}
 
-	state := newAnthropicStreamState(callback)
+	state := newAnthropicStreamState(observer)
 	scanner := bufio.NewScanner(resp.Body)
 	currentEvent := ""
 
@@ -367,7 +371,7 @@ func responseFromAnthropic(resp anthropicResponse) (*Response, error) {
 // --- Anthropic Stream State ---
 
 type anthropicStreamState struct {
-	callback    StreamCallback
+	observer    StreamObserver
 	content     strings.Builder
 	toolCalls   []ToolCall
 	currentTool *anthropicToolAccumulator
@@ -375,13 +379,14 @@ type anthropicStreamState struct {
 
 type anthropicToolAccumulator struct {
 	id        string
+	index     int
 	name      string
 	arguments strings.Builder
 }
 
-func newAnthropicStreamState(callback StreamCallback) *anthropicStreamState {
+func newAnthropicStreamState(observer StreamObserver) *anthropicStreamState {
 	return &anthropicStreamState{
-		callback:  callback,
+		observer:  observer,
 		toolCalls: make([]ToolCall, 0),
 	}
 }
@@ -396,8 +401,9 @@ func (s *anthropicStreamState) consume(data string, event string) {
 	case "content_block_start":
 		if streamEvent.ContentBlock != nil && streamEvent.ContentBlock.Type == "tool_use" {
 			s.currentTool = &anthropicToolAccumulator{
-				id:   streamEvent.ContentBlock.ID,
-				name: streamEvent.ContentBlock.Name,
+				id:    streamEvent.ContentBlock.ID,
+				index: streamEvent.Index,
+				name:  streamEvent.ContentBlock.Name,
 			}
 		}
 
@@ -418,13 +424,23 @@ func (s *anthropicStreamState) consume(data string, event string) {
 		case "input_json_delta":
 			if s.currentTool != nil && streamEvent.Delta.PartialJSON != "" {
 				s.currentTool.arguments.WriteString(streamEvent.Delta.PartialJSON)
+				s.emitToolCallDelta(ToolCallDelta{
+					Index:          streamEvent.Index,
+					ID:             s.currentTool.id,
+					Name:           s.currentTool.name,
+					ArgumentsDelta: streamEvent.Delta.PartialJSON,
+				})
 			}
 		}
 
 	case "content_block_stop":
 		if s.currentTool != nil {
+			id := s.currentTool.id
+			if id == "" {
+				id = fmt.Sprintf("tool_index_%d", s.currentTool.index)
+			}
 			s.toolCalls = append(s.toolCalls, ToolCall{
-				ID:    s.currentTool.id,
+				ID:    id,
 				Name:  s.currentTool.name,
 				Input: s.currentTool.arguments.String(),
 			})
@@ -434,8 +450,14 @@ func (s *anthropicStreamState) consume(data string, event string) {
 }
 
 func (s *anthropicStreamState) emit(content string, isThinking bool) {
-	if s.callback != nil {
-		s.callback(content, isThinking)
+	if s.observer.OnContent != nil {
+		s.observer.OnContent(content, isThinking)
+	}
+}
+
+func (s *anthropicStreamState) emitToolCallDelta(delta ToolCallDelta) {
+	if s.observer.OnToolCallDelta != nil {
+		s.observer.OnToolCallDelta(delta)
 	}
 }
 

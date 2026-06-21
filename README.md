@@ -4,7 +4,7 @@ Awaken 是一个本地优先的 Agent runtime 与桌面应用原型。当前仓�
 
 - `src/`：Go Agent Core、工具系统、runtime、协议层与本地 server。
 - `cmd/awaken-core`：本地 HTTP/SSE runtime 进程。
-- `apps/desktop`：Electron + React 桌面端 consumer。
+- `apps/desktop`：Electron + React 桌面端 consumer，当前主界面是 Run Workbench。
 - `packages/ui`：UI-only React 组件库。
 
 ## 协议归属
@@ -83,7 +83,10 @@ Runtime 开发调试入口见 `docs/runtime-development.md`。
 ```text
 GET  /health
 GET  /v1/agui/demo
+GET  /v1/runtime/info
+GET  /v1/threads
 POST /v1/runs
+GET  /v1/runs/{run_id}
 GET  /v1/runs/{run_id}/events
 POST /v1/runs/{run_id}/cancel
 POST /v1/runs/{run_id}/approvals/{approval_id}/resolve
@@ -96,6 +99,9 @@ AWAKEN_APPROVAL_REQUESTED
 AWAKEN_APPROVAL_RESOLVED
 AWAKEN_ARTIFACT_CREATED
 AWAKEN_ARTIFACT_UPDATED
+AWAKEN_COMMAND_OUTPUT
+AWAKEN_PATCH_UPDATED
+AWAKEN_TURN_DIFF
 ```
 
 approval request 还会生成一个只读的 `artifactKind: "a2ui_surface"` payload，用于 desktop generated surface 评估。

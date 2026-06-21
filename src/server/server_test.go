@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -2208,6 +2209,177 @@ func TestFileMutationArtifactSmoke(t *testing.T) {
 	}
 }
 
+// TestFileMutationPatchAndTurnDiffSmoke 通过真实 LLM 调用验证 apply_patch
+// approval 前可见 patch preview，并在完成时发出与 git diff 一致的 turn diff。
+// 需要项目根目录的 .env/config.toml 提供 LLM_API_KEY；未设置时自动跳过。
+func TestFileMutationPatchAndTurnDiffSmoke(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git not available: %v", err)
+	}
+
+	workspaceRoot, err := findProjectRoot()
+	if err != nil {
+		t.Fatalf("failed to find project root: %v", err)
+	}
+
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	if err := os.Chdir(workspaceRoot); err != nil {
+		t.Fatalf("failed to chdir to project root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	cfg := llm.LoadConfig()
+	if cfg.APIKey == "" {
+		t.Skip("LLM_API_KEY not set")
+	}
+
+	tempDir := t.TempDir()
+	runGitForServerTest(t, tempDir, "init")
+	runGitForServerTest(t, tempDir, "config", "user.email", "test@example.com")
+	runGitForServerTest(t, tempDir, "config", "user.name", "Test User")
+	notePath := filepath.Join(tempDir, "note.md")
+	if err := os.WriteFile(notePath, []byte("hello\n"), 0644); err != nil {
+		t.Fatalf("failed to create note.md: %v", err)
+	}
+	runGitForServerTest(t, tempDir, "add", "note.md")
+	runGitForServerTest(t, tempDir, "commit", "-m", "initial")
+
+	runService := awruntime.NewRunService(
+		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
+			agentCfg := agentcore.AgentConfig{
+				MaxThoughts: 10,
+				EntryPoint:  "awaken-core-smoke",
+				ModelConfig: agentcore.ModelConfig{
+					APIKey:      cfg.APIKey,
+					BaseURL:     cfg.BaseURL,
+					Model:       cfg.Model,
+					Temperature: cfg.Temperature,
+					MaxTokens:   cfg.MaxTokens,
+					AuthScheme:  cfg.AuthScheme,
+				},
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}
+			return agentcore.NewAgentWithThreadID(agentCfg, threadID)
+		},
+		func(agent *agentcore.Agent) awruntime.Executor {
+			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return agent.RunStreamWithEvents(ctx, input, nil, sink)
+			})
+		},
+	)
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	reqBody := fmt.Sprintf(`{
+		"input": "请必须调用 apply_patch 修改当前工作区的 note.md，把唯一内容 hello 改成 world。不要使用 shell。修改后只用一句话确认。",
+		"workspace": { "workspace_root": %q, "writable_roots": [%q] },
+		"client": { "session_id": "smoke-patch-diff-1", "request_id": "smoke-req-patch-diff-1", "entrypoint": "smoke" }
+	}`, tempDir, tempDir)
+
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var created awruntime.Run
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	if created.RunID == "" {
+		t.Fatalf("expected run id, got empty")
+	}
+
+	events, resolveErr := streamEventsAndResolveApproval(t, ts.URL, created.RunID)
+	if resolveErr != nil {
+		t.Fatalf("failed to stream and resolve approval: %v", resolveErr)
+	}
+
+	var (
+		patchUpdatedIndex    = -1
+		approvalRequestIndex = -1
+		turnDiff             string
+		sawRunFinished       bool
+	)
+
+	for i, ev := range events {
+		t.Logf("event: type=%s tool=%s approval=%s patchSummary=%q diffLen=%d outcome=%v",
+			ev.Type, ev.ToolCallName, ev.ApprovalID, ev.PatchSummary, len(ev.Diff), ev.Outcome)
+		switch ev.Type {
+		case agui.EventAwakenPatchUpdated:
+			if ev.ToolCallName == "apply_patch" {
+				if patchUpdatedIndex < 0 {
+					patchUpdatedIndex = i
+				}
+				if !strings.Contains(ev.Patch, "note.md") || !strings.Contains(ev.Patch, "world") {
+					t.Fatalf("expected patch preview to contain note.md and world, got %q", ev.Patch)
+				}
+				if ev.PatchSummary == "" {
+					t.Fatalf("expected non-empty patch summary")
+				}
+				hasNoteMD := false
+				for _, p := range ev.ApprovalAffectedPaths {
+					if p == "note.md" {
+						hasNoteMD = true
+						break
+					}
+				}
+				if !hasNoteMD {
+					t.Fatalf("expected patch preview affected paths to contain note.md, got %v", ev.ApprovalAffectedPaths)
+				}
+			}
+		case agui.EventAwakenApprovalRequested:
+			if ev.ToolCallName == "apply_patch" && approvalRequestIndex < 0 {
+				approvalRequestIndex = i
+			}
+		case agui.EventAwakenTurnDiff:
+			turnDiff = ev.Diff
+		case agui.EventRunFinished:
+			sawRunFinished = true
+		case agui.EventRunError:
+			t.Fatalf("run error: %s (code=%s)", ev.Message, ev.Code)
+		}
+	}
+
+	if patchUpdatedIndex < 0 {
+		t.Fatalf("expected AWAKEN_PATCH_UPDATED event")
+	}
+	if approvalRequestIndex < 0 {
+		t.Fatalf("expected AWAKEN_APPROVAL_REQUESTED event")
+	}
+	if patchUpdatedIndex > approvalRequestIndex {
+		t.Fatalf("expected patch preview before approval request, got patch index %d approval index %d", patchUpdatedIndex, approvalRequestIndex)
+	}
+	if !sawRunFinished {
+		t.Fatalf("expected RUN_FINISHED event")
+	}
+
+	content, err := os.ReadFile(notePath)
+	if err != nil {
+		t.Fatalf("failed to read note.md: %v", err)
+	}
+	if string(content) != "world\n" {
+		t.Fatalf("expected note.md to contain world, got %q", string(content))
+	}
+	wantDiff := runGitOutputForServerTest(t, tempDir, "diff", "--")
+	if turnDiff == "" {
+		t.Fatalf("expected AWAKEN_TURN_DIFF event")
+	}
+	if turnDiff != wantDiff {
+		t.Fatalf("expected turn diff to match git diff\nwant:\n%s\ngot:\n%s", wantDiff, turnDiff)
+	}
+}
+
 // TestMultiTurnThreadSmoke 通过真实 LLM 调用验证同一 thread 多轮对话：
 // 第一轮创建 a.txt（内容 hello），第二轮在同 thread 中追加 world，
 // 验证 agent 复用上下文识别上一轮文件；并验证未知 thread_id 返回 404。
@@ -2543,6 +2715,21 @@ func collectSSEEvents(r io.Reader) ([]agui.Event, error) {
 		return nil, err
 	}
 	return events, nil
+}
+
+func runGitForServerTest(t *testing.T, root string, args ...string) {
+	t.Helper()
+	_ = runGitOutputForServerTest(t, root, args...)
+}
+
+func runGitOutputForServerTest(t *testing.T, root string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, output)
+	}
+	return string(output)
 }
 
 func findProjectRoot() (string, error) {

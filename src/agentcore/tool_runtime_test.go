@@ -2,6 +2,7 @@ package agentcore
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -21,6 +22,7 @@ type runtimeTestTool struct {
 	approvalRequest tool.ApprovalRequest
 	artifacts       []tool.ArtifactDescriptor
 	executeCount    *int
+	commandOutputs  []tool.CommandOutput
 }
 
 func (t runtimeTestTool) Name() string {
@@ -49,6 +51,13 @@ func (t runtimeTestTool) Execute(ctx context.Context, input string) (string, err
 		return t.output, nil
 	}
 	return "ran:" + input, nil
+}
+
+func (t runtimeTestTool) ExecuteWithObserver(ctx context.Context, input string, observer tool.ToolObserver) (string, error) {
+	for _, output := range t.commandOutputs {
+		observer.OnCommandOutput(output)
+	}
+	return t.Execute(ctx, input)
 }
 
 func (t runtimeTestTool) CheckPermission(ctx context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {
@@ -312,6 +321,88 @@ func TestToolRuntimeEmitsArtifactsAndRejectsOnApprovalDecision(t *testing.T) {
 	}
 }
 
+func TestToolRuntimeEmitsCommandOutputFromObservableTool(t *testing.T) {
+	toolName := "runtime_observable_tool"
+	mustRegisterRuntimeTool(t, runtimeTestTool{
+		name: toolName,
+		commandOutputs: []tool.CommandOutput{
+			{Stream: "stdout", Delta: "hello"},
+			{Stream: "stderr", Delta: "warn", Truncated: true},
+		},
+		params: []tool.ToolParameter{
+			{Name: "value", Type: "string", Required: true},
+		},
+	})
+
+	var got []AwakenEvent
+	result := NewToolRuntime(EventSinkFunc(func(event AwakenEvent) {
+		got = append(got, event)
+	})).Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_observable",
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{"value":"hello"}`,
+		},
+	})
+
+	if result.IsError {
+		t.Fatalf("expected success, got %+v", result)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected two command output events, got %+v", got)
+	}
+	if got[0].Type != CommandOutputEventType || got[0].ToolCallID != "call_observable" || got[0].CommandStream != "stdout" || got[0].Delta != "hello" {
+		t.Fatalf("unexpected stdout event: %+v", got[0])
+	}
+	if got[1].Type != CommandOutputEventType || got[1].CommandStream != "stderr" || got[1].Delta != "warn" || !got[1].Truncated {
+		t.Fatalf("unexpected stderr event: %+v", got[1])
+	}
+}
+
+func TestToolRuntimeEmitsPatchPreviewBeforeApplyPatchApproval(t *testing.T) {
+	root := t.TempDir()
+	patch := "*** Begin Patch\n" +
+		"*** Add File: note.md\n" +
+		"+hello\n" +
+		"*** End Patch"
+
+	var got []AwakenEvent
+	runtime := NewToolRuntimeWithConfig(testApprovalAwaiter{
+		decision: ApprovalDecisionRejected,
+		events:   &got,
+	}, ToolRuntimeConfig{
+		PermissionContext: tool.NewPermissionContext(root, []string{root}),
+	})
+	result := runtime.Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_patch_preview",
+		Function: convcontext.FunctionCall{
+			Name:      "apply_patch",
+			Arguments: `{"patch":` + mustJSONQuote(t, patch) + `}`,
+		},
+	})
+
+	if !result.IsError || !strings.Contains(result.Content, "审批拒绝") {
+		t.Fatalf("expected rejected apply_patch result, got %+v", result)
+	}
+	if len(got) < 2 {
+		t.Fatalf("expected patch preview and approval events, got %+v", got)
+	}
+	if got[0].Type != PatchUpdatedEventType {
+		t.Fatalf("expected first event to be patch updated, got %+v", got)
+	}
+	if got[0].ToolCallID != "call_patch_preview" || got[0].Patch != patch || got[0].PatchSummary != "新增 1 个文件" {
+		t.Fatalf("unexpected patch preview event: %+v", got[0])
+	}
+	if len(got[0].ApprovalAffectedPaths) != 1 || got[0].ApprovalAffectedPaths[0] != "note.md" {
+		t.Fatalf("unexpected affected paths: %+v", got[0].ApprovalAffectedPaths)
+	}
+	for _, event := range got {
+		if event.Type == ArtifactCreatedEventType || event.Type == ArtifactUpdatedEventType {
+			t.Fatalf("expected rejected patch not to emit changed-file artifact, got %+v", event)
+		}
+	}
+}
+
 func TestToolRuntimeDeniesBeforeExecution(t *testing.T) {
 	var observed string
 	toolName := "runtime_denied_tool"
@@ -486,4 +577,13 @@ func mustRegisterRuntimeTool(t *testing.T, candidate tool.Tool) {
 	if err := tool.RegisterTool(candidate); err != nil {
 		t.Fatalf("failed to register test tool %s: %v", candidate.Name(), err)
 	}
+}
+
+func mustJSONQuote(t *testing.T, value string) string {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("failed to quote JSON string: %v", err)
+	}
+	return string(data)
 }

@@ -16,8 +16,8 @@ export function TopBar({ children }: TopBarProps) {
         alignItems: "center",
         justifyContent: "flex-end",
         gap: "12px",
-        height: "56px",
-        padding: "12px 20px 12px 14px",
+        height: "44px",
+        padding: "8px 16px 8px 12px",
         background: "var(--aw-bg-main)",
         borderBottom: "1px solid var(--aw-border-light)",
       }}

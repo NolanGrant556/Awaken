@@ -295,11 +295,17 @@ data: {"type":"message_stop"}`,
 	defer server.Close()
 
 	var content string
-	resp, err := StreamInvoke(context.Background(), anthropicConfig(server.URL), Request{UserPrompt: "calc"}, func(c string, isThinking bool) {
-		content += c
+	var deltas []ToolCallDelta
+	resp, err := StreamInvokeWithObserver(context.Background(), anthropicConfig(server.URL), Request{UserPrompt: "calc"}, StreamObserver{
+		OnContent: func(c string, isThinking bool) {
+			content += c
+		},
+		OnToolCallDelta: func(delta ToolCallDelta) {
+			deltas = append(deltas, delta)
+		},
 	})
 	if err != nil {
-		t.Fatalf("StreamInvoke returned error: %v", err)
+		t.Fatalf("StreamInvokeWithObserver returned error: %v", err)
 	}
 	if resp.IsFinished {
 		t.Fatal("expected tool call response to be unfinished")
@@ -312,6 +318,15 @@ data: {"type":"message_stop"}`,
 	}
 	if !strings.Contains(resp.ToolCalls[0].Input, "expression") {
 		t.Fatalf("expected input to contain expression, got %s", resp.ToolCalls[0].Input)
+	}
+	if len(deltas) != 3 {
+		t.Fatalf("expected three input_json_delta callbacks, got %+v", deltas)
+	}
+	if deltas[0].ID != "toolu_123" || deltas[0].Name != "calculator" || deltas[0].ArgumentsDelta != "{" {
+		t.Fatalf("unexpected first delta: %+v", deltas[0])
+	}
+	if deltas[1].ArgumentsDelta != `"expression":"1+1"` || deltas[2].ArgumentsDelta != "}" {
+		t.Fatalf("unexpected argument deltas: %+v", deltas)
 	}
 }
 

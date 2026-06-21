@@ -13,6 +13,8 @@ import (
 	"awaken/src/tool"
 )
 
+const maxPatchPreviewChars = 50000
+
 type ToolRuntime struct {
 	sink              EventSink
 	permissionContext tool.PermissionContext
@@ -68,6 +70,7 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 
 	toolCtx := tool.ContextWithPermissionContext(ctx, rt.permissionContext)
 	permission := rt.decideToolPermission(toolCtx, selectedTool, input)
+	rt.emitPatchPreview(result, selectedTool, input)
 	switch permission.Behavior {
 	case tool.PermissionAllow:
 	case tool.PermissionDeny:
@@ -92,7 +95,7 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		return finalizeToolResult(result)
 	}
 
-	output, err := selectedTool.Execute(toolCtx, input)
+	output, err := rt.executeTool(toolCtx, result, selectedTool, input)
 	if err != nil {
 		result.Content = fmt.Sprintf("工具执行失败: %v", err)
 		result.IsError = true
@@ -102,6 +105,20 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	result.Content = output
 	rt.emitArtifacts(result, selectedTool, input, output)
 	return finalizeToolResult(result)
+}
+
+func (rt *ToolRuntime) executeTool(
+	ctx stdcontext.Context,
+	result ToolExecutionResult,
+	selectedTool tool.Tool,
+	input string,
+) (string, error) {
+	if observableTool, ok := selectedTool.(tool.ObservableTool); ok {
+		return observableTool.ExecuteWithObserver(ctx, input, toolObserverFunc(func(output tool.CommandOutput) {
+			rt.emitCommandOutput(result, output)
+		}))
+	}
+	return selectedTool.Execute(ctx, input)
 }
 
 func (rt *ToolRuntime) ExecuteToolCalls(ctx stdcontext.Context, calls []convcontext.ToolCall) []ToolExecutionResult {
@@ -187,6 +204,49 @@ func (rt *ToolRuntime) emitArtifacts(
 			ArtifactStatus:      normalizeArtifactStatus(artifact.Status),
 		})
 	}
+}
+
+func (rt *ToolRuntime) emitCommandOutput(result ToolExecutionResult, output tool.CommandOutput) {
+	if output.Delta == "" {
+		return
+	}
+	rt.sink.Emit(AwakenEvent{
+		Type:          CommandOutputEventType,
+		Timestamp:     timeNowUTC(),
+		ToolCallID:    result.ToolCallID,
+		ToolName:      result.Name,
+		CommandStream: output.Stream,
+		Delta:         output.Delta,
+		Truncated:     output.Truncated,
+	})
+}
+
+func (rt *ToolRuntime) emitPatchPreview(result ToolExecutionResult, selectedTool tool.Tool, input string) {
+	previewingTool, ok := selectedTool.(tool.PatchPreviewingTool)
+	if !ok {
+		return
+	}
+	preview, ok := previewingTool.PatchPreview(input, rt.permissionContext)
+	if !ok {
+		return
+	}
+	limited := outputlimit.Limit(preview.Patch, maxPatchPreviewChars)
+	rt.sink.Emit(AwakenEvent{
+		Type:                  PatchUpdatedEventType,
+		Timestamp:             timeNowUTC(),
+		ToolCallID:            result.ToolCallID,
+		ToolName:              result.Name,
+		Patch:                 limited.Content,
+		PatchSummary:          strings.TrimSpace(preview.Summary),
+		ApprovalAffectedPaths: preview.AffectedPaths,
+		Truncated:             preview.Truncated || limited.Truncated,
+	})
+}
+
+type toolObserverFunc func(tool.CommandOutput)
+
+func (fn toolObserverFunc) OnCommandOutput(output tool.CommandOutput) {
+	fn(output)
 }
 
 func finalizeToolResult(result ToolExecutionResult) ToolExecutionResult {

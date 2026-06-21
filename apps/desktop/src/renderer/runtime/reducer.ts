@@ -7,6 +7,13 @@ import type {
   SupervisorStatus,
   SupervisorStatusInfo,
 } from "../../shared/runtime";
+import {
+  addRunErrorToNarrative,
+  createInitialRunNarrativeState,
+  createRunRequestedNarrative,
+  projectAguiEventToNarrative,
+  type RunNarrativeState,
+} from "../run-narrative";
 
 type RuntimePhase = "idle" | "starting" | "running" | "reconnecting" | "cancelling" | "done" | "error" | "cancelled";
 
@@ -14,6 +21,25 @@ type TimelineStatus = "ready" | "running" | "done" | "error";
 
 type StepRecord = RunStepItem & {
   key: string;
+};
+
+type ToolResultRecord = {
+  id: string;
+  title: string;
+  content: string;
+  args?: string;
+  commandOutput?: string;
+  commandOutputTruncated?: boolean;
+  status?: "active" | "done" | "error";
+};
+
+export type PatchPreviewRecord = {
+  id: string;
+  title: string;
+  patch: string;
+  summary?: string;
+  affectedPaths: string[];
+  truncated?: boolean;
 };
 
 export type ArtifactRecord = {
@@ -26,11 +52,19 @@ export type ArtifactRecord = {
   status: AguiArtifactStatus;
 };
 
+export type TurnDiffRecord = {
+  diff: string;
+  truncated?: boolean;
+};
+
 export type ThreadItem = {
   threadId: string;
   label: string;
   runId?: string;
   activeRunId?: string;
+  runStatus?: RuntimeRunStatus;
+  approvalCount?: number;
+  artifactCount?: number;
 };
 
 type ThreadViewState = {
@@ -44,9 +78,12 @@ type ThreadViewState = {
   steps: RunStepItem[];
   assistantText: string;
   reasoningText: string;
-  toolResults: Array<{ id: string; title: string; content: string }>;
+  toolResults: ToolResultRecord[];
+  patchPreviews: PatchPreviewRecord[];
   approvals: ApprovalItem[];
   artifacts: ArtifactRecord[];
+  turnDiff?: TurnDiffRecord;
+  narrative: RunNarrativeState;
   errorMessage?: string;
 };
 
@@ -61,9 +98,12 @@ export type RuntimeViewState = {
   steps: RunStepItem[];
   assistantText: string;
   reasoningText: string;
-  toolResults: Array<{ id: string; title: string; content: string }>;
+  toolResults: ToolResultRecord[];
+  patchPreviews: PatchPreviewRecord[];
   approvals: ApprovalItem[];
   artifacts: ArtifactRecord[];
+  turnDiff?: TurnDiffRecord;
+  narrative: RunNarrativeState;
   errorMessage?: string;
   threads: ThreadItem[];
   activeThreadId?: string;
@@ -79,8 +119,9 @@ export type RuntimeAction =
   | { type: "run/cancelRequested" }
   | { type: "run/cancelSync"; run: RuntimeRun }
   | { type: "run/streamError"; message: string }
+  | { type: "run/streamFailed"; message: string }
   | { type: "run/reconnecting" }
-  | { type: "run/recovered"; run: RuntimeRun }
+  | { type: "run/recovered"; run: RuntimeRun; prompt?: string }
   | { type: "run/threadsLoaded"; threads: RuntimeThread[] }
   | { type: "run/threadAdded"; threadId: string; label: string; runId: string }
   | { type: "run/threadSwitch"; threadId: string }
@@ -90,14 +131,16 @@ export type RuntimeAction =
 const initialState: RuntimeViewState = {
   prompt: "",
   phase: "idle",
-  timelineTitle: "等待运行",
+  timelineTitle: "Run",
   timelineStatus: "ready",
   steps: [],
   assistantText: "",
   reasoningText: "",
   toolResults: [],
+  patchPreviews: [],
   approvals: [],
   artifacts: [],
+  narrative: createInitialRunNarrativeState(),
   threads: [],
   threadViews: {},
   supervisorStatus: null,
@@ -116,8 +159,11 @@ function viewFromState(state: RuntimeViewState): ThreadViewState {
     assistantText: state.assistantText,
     reasoningText: state.reasoningText,
     toolResults: state.toolResults,
+    patchPreviews: state.patchPreviews,
     approvals: state.approvals,
     artifacts: state.artifacts,
+    turnDiff: state.turnDiff,
+    narrative: state.narrative,
     errorMessage: state.errorMessage,
   };
 }
@@ -125,6 +171,7 @@ function viewFromState(state: RuntimeViewState): ThreadViewState {
 function emptyThreadView(threadId: string, runId?: string): ThreadViewState {
   return {
     ...viewFromState(initialState),
+    narrative: createInitialRunNarrativeState(),
     threadId,
     runId,
   };
@@ -146,11 +193,11 @@ function saveActiveThreadView(state: RuntimeViewState): RuntimeViewState {
 function restoreThreadView(state: RuntimeViewState, threadId: string): RuntimeViewState {
   const thread = state.threads.find((item) => item.threadId === threadId);
   const view = state.threadViews[threadId] ?? emptyThreadView(threadId, thread?.runId);
-  return {
+  return syncActiveThreadSummary({
     ...state,
     ...view,
     activeThreadId: threadId,
-  };
+  });
 }
 
 function upsertThread(threads: ThreadItem[], next: ThreadItem): ThreadItem[] {
@@ -173,7 +220,43 @@ function threadItemFromRuntime(thread: RuntimeThread): ThreadItem {
     label: thread.label || "Untitled thread",
     runId: thread.runId,
     activeRunId: thread.activeRunId,
+    runStatus: thread.activeRunId ? "running" : undefined,
+    approvalCount: 0,
+    artifactCount: 0,
   };
+}
+
+function isActiveRunStatus(status?: RuntimeRunStatus): boolean {
+  return status === "running" || status === "awaiting_approval" || status === "cancelling";
+}
+
+function syncActiveThreadSummary(state: RuntimeViewState): RuntimeViewState {
+  const threadId = state.threadId ?? state.activeThreadId;
+  if (!threadId) {
+    return state;
+  }
+
+  const existing = state.threads.find((thread) => thread.threadId === threadId);
+  return {
+    ...state,
+    threads: upsertThread(state.threads, {
+      threadId,
+      label: existing?.label || state.prompt || "Untitled thread",
+      runId: state.runId ?? existing?.runId,
+      activeRunId: isActiveRunStatus(state.status) ? state.runId : undefined,
+      runStatus: state.status ?? existing?.runStatus,
+      approvalCount: state.approvals.length,
+      artifactCount: state.artifacts.length,
+    }),
+  };
+}
+
+function recoveryPrompt(state: RuntimeViewState, run: RuntimeRun, prompt?: string): string {
+  const explicit = prompt?.trim();
+  if (explicit) {
+    return explicit;
+  }
+  return state.threads.find((thread) => thread.threadId === run.threadId)?.label ?? "";
 }
 
 function toSteps(records: StepRecord[]): RunStepItem[] {
@@ -215,6 +298,60 @@ function excerpt(value: string, max = 96): string {
     return trimmed;
   }
   return `${trimmed.slice(0, max - 3)}...`;
+}
+
+function upsertToolResult(
+  records: ToolResultRecord[],
+  next: ToolResultRecord,
+): ToolResultRecord[] {
+  const index = records.findIndex((record) => record.id === next.id);
+  if (index < 0) {
+    return [...records, next];
+  }
+  const updated = records.slice();
+  updated[index] = {
+    ...updated[index],
+    ...next,
+    args: next.args ?? updated[index].args,
+    content: next.content || updated[index].content,
+    commandOutput: next.commandOutput ?? updated[index].commandOutput,
+    commandOutputTruncated: next.commandOutputTruncated ?? updated[index].commandOutputTruncated,
+  };
+  return updated;
+}
+
+function upsertPatchPreview(
+  records: PatchPreviewRecord[],
+  next: PatchPreviewRecord,
+): PatchPreviewRecord[] {
+  const index = records.findIndex((record) => record.id === next.id);
+  if (index < 0) {
+    return [...records, next];
+  }
+  const updated = records.slice();
+  updated[index] = {
+    ...updated[index],
+    ...next,
+    patch: next.patch || updated[index].patch,
+    affectedPaths: next.affectedPaths.length > 0 ? next.affectedPaths : updated[index].affectedPaths,
+  };
+  return updated;
+}
+
+function toolRecordStatus(content?: string): "done" | "error" {
+  const normalized = (content ?? "").trim();
+  if (!normalized) {
+    return "error";
+  }
+  if (
+    normalized.includes("工具执行失败") ||
+    normalized.includes("工具权限拒绝") ||
+    normalized.includes("工具参数错误") ||
+    normalized.includes("审批拒绝")
+  ) {
+    return "error";
+  }
+  return "done";
 }
 
 function normalizeRiskTone(value?: string): AguiApprovalRiskTone {
@@ -379,6 +516,7 @@ export function reduceRuntimeState(
     case "run/reset":
       return {
         ...initialState,
+        narrative: createInitialRunNarrativeState(),
         supervisorStatus: state.supervisorStatus,
         threads: state.threads,
         threadViews: saveActiveThreadView(state).threadViews,
@@ -393,18 +531,23 @@ export function reduceRuntimeState(
         assistantText: "",
         reasoningText: "",
         toolResults: [],
+        patchPreviews: [],
         approvals: [],
         artifacts: [],
+        turnDiff: undefined,
+        narrative: createRunRequestedNarrative(action.prompt),
         supervisorStatus: state.supervisorStatus,
         threads: state.threads,
         activeThreadId: state.activeThreadId,
         threadViews: state.threadViews,
       };
     case "run/created":
-      return saveActiveThreadView({
-        ...syncFromRun(state, action.run),
-        activeThreadId: action.run.threadId,
-      });
+      return saveActiveThreadView(
+        syncActiveThreadSummary({
+          ...syncFromRun(state, action.run),
+          activeThreadId: action.run.threadId,
+        }),
+      );
     case "run/createFailed":
       return saveActiveThreadView({
         ...state,
@@ -421,51 +564,98 @@ export function reduceRuntimeState(
         ),
       });
     case "run/cancelRequested":
-      return saveActiveThreadView({
-        ...state,
-        phase: "cancelling",
-        status: "cancelling",
-        timelineStatus: "running",
-        approvals: [],
-      });
-    case "run/cancelSync":
-      return saveActiveThreadView(syncFromRun(state, action.run));
-    case "run/streamError":
-      return saveActiveThreadView({
-        ...state,
-        phase: "error",
-        timelineStatus: "error",
-        errorMessage: action.message,
-        approvals: [],
-      });
-    case "run/reconnecting":
-      return saveActiveThreadView({
-        ...state,
-        phase: "reconnecting",
-        timelineStatus: "running",
-      });
-    case "run/recovered":
-      return saveActiveThreadView({
-        ...syncFromRun(initialState, action.run),
-        supervisorStatus: state.supervisorStatus,
-        timelineTitle: "恢复运行",
-        threads: upsertThread(state.threads, {
-          threadId: action.run.threadId,
-          label:
-            state.threads.find((thread) => thread.threadId === action.run.threadId)?.label ||
-            "Recovered thread",
-          runId: action.run.runId,
-          activeRunId:
-            action.run.status === "running" || action.run.status === "awaiting_approval"
-              ? action.run.runId
-              : undefined,
+      return saveActiveThreadView(
+        syncActiveThreadSummary({
+          ...state,
+          phase: "cancelling",
+          status: "cancelling",
+          timelineStatus: "running",
+          approvals: [],
         }),
-        threadViews: state.threadViews,
-        activeThreadId: action.run.threadId,
-      });
+      );
+    case "run/cancelSync":
+      return saveActiveThreadView(syncActiveThreadSummary(syncFromRun(state, action.run)));
+    case "run/streamError":
+      return saveActiveThreadView(
+        syncActiveThreadSummary({
+          ...state,
+          phase: "reconnecting",
+          timelineStatus: "running",
+          errorMessage: undefined,
+          steps: toSteps(
+            upsertStep(
+              state.steps.map((step, index) => ({ ...step, key: step.id, index: index + 1 })),
+              "stream-interrupted",
+              {
+                title: "Stream interrupted",
+                description: action.message,
+                status: "active",
+                tag: "reconnect",
+              },
+            ),
+          ),
+        }),
+      );
+    case "run/streamFailed":
+      return saveActiveThreadView(
+        syncActiveThreadSummary({
+          ...state,
+          phase: "error",
+          status: "error",
+          timelineStatus: "error",
+          errorMessage: action.message,
+          approvals: [],
+          steps: toSteps(
+            upsertStep(
+              state.steps.map((step, index) => ({ ...step, key: step.id, index: index + 1 })),
+              "stream-failed",
+              {
+                title: "Stream failed",
+                description: action.message,
+                status: "error",
+                tag: "reconnect",
+              },
+            ),
+          ),
+          narrative: addRunErrorToNarrative(state.narrative, action.message, "stream"),
+        }),
+      );
+    case "run/reconnecting":
+      return saveActiveThreadView(
+        syncActiveThreadSummary({
+          ...state,
+          phase: "reconnecting",
+          timelineStatus: "running",
+        }),
+      );
+    case "run/recovered": {
+      const prompt = recoveryPrompt(state, action.run, action.prompt);
+      return saveActiveThreadView(
+        syncActiveThreadSummary({
+          ...syncFromRun(initialState, action.run),
+          prompt,
+          narrative: prompt
+            ? createRunRequestedNarrative(prompt)
+            : createInitialRunNarrativeState(),
+          supervisorStatus: state.supervisorStatus,
+          timelineTitle: "恢复运行",
+          threads: state.threads,
+          threadViews: state.threadViews,
+          activeThreadId: action.run.threadId,
+        }),
+      );
+    }
     case "run/threadsLoaded": {
       const threadViews = { ...state.threadViews };
-      const loaded = action.threads.map(threadItemFromRuntime);
+      const loaded = action.threads.map((thread) => {
+        const existing = state.threads.find((item) => item.threadId === thread.threadId);
+        return {
+          ...threadItemFromRuntime(thread),
+          runStatus: existing?.runStatus ?? (thread.activeRunId ? "running" : undefined),
+          approvalCount: existing?.approvalCount ?? 0,
+          artifactCount: existing?.artifactCount ?? 0,
+        };
+      });
       for (const thread of loaded) {
         if (!threadViews[thread.threadId]) {
           threadViews[thread.threadId] = emptyThreadView(thread.threadId, thread.runId);
@@ -476,6 +666,7 @@ export function reduceRuntimeState(
       if (!activeThreadStillExists) {
         return {
           ...initialState,
+          narrative: createInitialRunNarrativeState(),
           supervisorStatus: state.supervisorStatus,
           threads: loaded,
           threadViews,
@@ -495,6 +686,10 @@ export function reduceRuntimeState(
           threadId: action.threadId,
           label: action.label,
           runId: action.runId,
+          activeRunId: action.runId,
+          runStatus: "running",
+          approvalCount: 0,
+          artifactCount: 0,
         }),
       };
       return saveActiveThreadView(next);
@@ -547,6 +742,14 @@ export function reduceRuntimeState(
             nextState.phase = "cancelled";
             nextState.timelineStatus = "done";
             nextState.approvals = [];
+          } else if (status === "finished") {
+            nextState.phase = "done";
+            nextState.timelineStatus = "done";
+            nextState.approvals = [];
+          } else if (status === "error") {
+            nextState.phase = "error";
+            nextState.timelineStatus = "error";
+            nextState.approvals = [];
           }
           records = upsertStep(records, status === "cancelled" ? "run-cancelled" : `status:${status ?? "unknown"}`, {
             title: status === "awaiting_approval"
@@ -564,6 +767,7 @@ export function reduceRuntimeState(
         }
         case "RUN_FINISHED":
           nextState.phase = "done";
+          nextState.status = "finished";
           nextState.timelineStatus = "done";
           nextState.approvals = [];
           records = upsertStep(records, "run-finished", {
@@ -636,29 +840,86 @@ export function reduceRuntimeState(
           });
           break;
         case "TOOL_CALL_ARGS":
+        case "TOOL_CALL_ARGS_DELTA": {
+          const id = action.event.toolCallId || `tool-result-${nextState.toolResults.length + 1}`;
+          const existing = nextState.toolResults.find((tool) => tool.id === id);
+          const delta = action.event.delta ?? "";
+          const args =
+            action.event.type === "TOOL_CALL_ARGS"
+              ? delta || existing?.args
+              : `${existing?.args ?? ""}${delta}`;
+          nextState.toolResults = upsertToolResult(nextState.toolResults, {
+            id,
+            title: action.event.toolCallName || existing?.title || "Tool call",
+            args,
+            content: existing?.content ?? "",
+            status: "active",
+          });
           records = upsertStep(records, `tool:${action.event.toolCallId ?? "tool"}`, {
             title: action.event.toolCallName || "Tool call",
-            description: excerpt(action.event.delta || "Streaming tool arguments"),
+            description: excerpt(
+              delta ||
+                (action.event.type === "TOOL_CALL_ARGS_DELTA"
+                  ? "Preparing tool arguments"
+                  : "Streaming tool arguments"),
+            ),
             status: "active",
             tag: "tool",
           });
           break;
+        }
+        case "TOOL_PROGRESS": {
+          const id = action.event.toolCallId || `tool-result-${nextState.toolResults.length + 1}`;
+          const existing = nextState.toolResults.find((tool) => tool.id === id);
+          const progress = action.event.progress || action.event.message || "Tool is running";
+          nextState.toolResults = upsertToolResult(nextState.toolResults, {
+            id,
+            title: action.event.toolCallName || existing?.title || "Tool call",
+            args: existing?.args,
+            content: existing?.content ?? "",
+            status: "active",
+          });
+          records = upsertStep(records, `tool:${action.event.toolCallId ?? "tool"}`, {
+            title: action.event.toolCallName || existing?.title || "Tool call",
+            description: excerpt(progress),
+            status: "active",
+            tag: "tool",
+          });
+          break;
+        }
+        case "AWAKEN_COMMAND_OUTPUT": {
+          const id = action.event.toolCallId || `tool-result-${nextState.toolResults.length + 1}`;
+          const existing = nextState.toolResults.find((tool) => tool.id === id);
+          const delta = action.event.delta ?? "";
+          const stream = action.event.commandStream || "output";
+          nextState.toolResults = upsertToolResult(nextState.toolResults, {
+            id,
+            title: action.event.toolCallName || existing?.title || "Command",
+            args: existing?.args,
+            content: existing?.content ?? "",
+            commandOutput: `${existing?.commandOutput ?? ""}${delta}`,
+            commandOutputTruncated: action.event.truncated || existing?.commandOutputTruncated,
+            status: "active",
+          });
+          records = upsertStep(records, `tool:${action.event.toolCallId ?? "tool"}`, {
+            title: action.event.toolCallName || existing?.title || "Command",
+            description: excerpt(delta || `Streaming ${stream}`),
+            status: "active",
+            tag: stream,
+          });
+          break;
+        }
         case "TOOL_CALL_RESULT": {
           const content = action.event.content || "Tool returned empty content";
-          const id = action.event.toolCallId || `tool-result-${state.toolResults.length + 1}`;
-          const existingIndex = nextState.toolResults.findIndex((tool) => tool.id === id);
-          const nextToolResults = nextState.toolResults.slice();
-          const record = {
+          const id = action.event.toolCallId || `tool-result-${nextState.toolResults.length + 1}`;
+          const existing = nextState.toolResults.find((tool) => tool.id === id);
+          nextState.toolResults = upsertToolResult(nextState.toolResults, {
             id,
-            title: action.event.toolCallName || "Tool result",
+            title: action.event.toolCallName || existing?.title || "Tool result",
             content,
-          };
-          if (existingIndex >= 0) {
-            nextToolResults[existingIndex] = record;
-          } else {
-            nextToolResults.push(record);
-          }
-          nextState.toolResults = nextToolResults;
+            args: existing?.args,
+            status: toolRecordStatus(action.event.content),
+          });
 
           const stepKey = action.event.toolCallId
             ? `tool:${action.event.toolCallId}`
@@ -677,6 +938,36 @@ export function reduceRuntimeState(
             description: "Tool call complete",
             status: "done",
             tag: "tool",
+          });
+          break;
+        case "AWAKEN_PATCH_UPDATED": {
+          const id = action.event.toolCallId || `patch-${nextState.patchPreviews.length + 1}`;
+          nextState.patchPreviews = upsertPatchPreview(nextState.patchPreviews, {
+            id,
+            title: action.event.toolCallName || "Patch preview",
+            patch: action.event.patch || "",
+            summary: action.event.patchSummary,
+            affectedPaths: action.event.approvalAffectedPaths ?? [],
+            truncated: action.event.truncated,
+          });
+          records = upsertStep(records, `patch:${id}`, {
+            title: "Patch preview updated",
+            description: excerpt(action.event.patchSummary || action.event.patch || "Patch updated"),
+            status: "active",
+            tag: action.event.truncated ? "truncated" : "patch",
+          });
+          break;
+        }
+        case "AWAKEN_TURN_DIFF":
+          nextState.turnDiff = {
+            diff: action.event.diff || "",
+            truncated: action.event.truncated,
+          };
+          records = upsertStep(records, "turn-diff", {
+            title: "Turn diff captured",
+            description: excerpt(action.event.diff || "No diff content"),
+            status: "done",
+            tag: action.event.truncated ? "truncated" : "diff",
           });
           break;
         case "AWAKEN_APPROVAL_REQUESTED": {
@@ -731,6 +1022,7 @@ export function reduceRuntimeState(
         case "RUN_ERROR":
           if (action.event.code === "RUN_CANCELLED") {
             nextState.phase = "cancelled";
+            nextState.status = "cancelled";
             nextState.timelineStatus = "done";
             nextState.approvals = [];
             records = upsertStep(records, "run-cancelled", {
@@ -741,6 +1033,7 @@ export function reduceRuntimeState(
             });
           } else {
             nextState.phase = "error";
+            nextState.status = "error";
             nextState.timelineStatus = "error";
             const rawMessage = action.event.message || "Runtime returned an error";
             let errorMessage = rawMessage;
@@ -783,7 +1076,8 @@ export function reduceRuntimeState(
       }
 
       nextState.steps = toSteps(records);
-      return saveActiveThreadView(nextState);
+      nextState.narrative = projectAguiEventToNarrative(state.narrative, action.event);
+      return saveActiveThreadView(syncActiveThreadSummary(nextState));
     }
     case "supervisor/status-changed":
       return {

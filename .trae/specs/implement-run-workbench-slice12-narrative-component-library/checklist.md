@@ -1,0 +1,21 @@
+# Checklist
+
+- [x] `NarrativeFeed` 已新增并导出
+- [x] `ToolActionRow` 已新增并导出
+- [x] `ExploringGroup` 已新增并导出
+- [x] 已复用 `PromptCard`
+- [x] 已复用 `ActivityLine`
+- [x] 已复用 `ThinkingBlock`
+- [x] 已复用 `FileChangeSummary`
+- [x] 已复用 `MarkdownAnswer`
+- [x] 新 narrative 组件未引入 runtime/Electron/AG-UI/A2UI/SSE/window.awaken
+- [x] Desktop exploring/tool action 可 keyboard focus 并触发 Inspector callback
+- [x] Playground 展示 idle/running/approval/done 与长文本状态
+- [x] 长中文、长文件名、长 code span 不撑破布局
+- [x] `npm --workspace @awaken/desktop run test` 通过
+- [x] `npm run typecheck:ui` 通过
+- [x] `npm run typecheck:desktop` 通过
+- [x] `npm run build:desktop` 通过
+- [x] `git diff --check` 通过
+- [x] UI 视觉检查通过
+- [x] 独立 review pass 未发现 blocker / correctness / acceptance finding

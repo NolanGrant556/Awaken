@@ -1,5 +1,12 @@
-import { describe, expect, it } from "vitest";
-import { resolvedDecisionForApproval } from "./App";
+import React from "react";
+import { renderToString } from "react-dom/server";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { App } from "./App";
+import {
+  diffLineStats,
+  resolvedDecisionForApproval,
+  shouldUseCenterComposer,
+} from "./workbenchPresentation";
 
 describe("resolvedDecisionForApproval", () => {
   it("returns undefined when both approval states are empty", () => {
@@ -22,5 +29,77 @@ describe("resolvedDecisionForApproval", () => {
         { approvalId: "approval-1", decision: "rejected" },
       ),
     ).toBe("rejected");
+  });
+});
+
+describe("App workbench presentation", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("renders idle as a blank execution stage with the light shell", () => {
+    vi.stubGlobal("window", {});
+
+    const html = renderToString(React.createElement(App));
+
+    expect(html).toContain("On Awaken");
+    expect(html).toContain("Plan, Build, / for skills, @ for context");
+    expect(html).toContain("New Agent");
+    expect(html).toContain("composer-bar-center");
+    expect(html).not.toContain("composer-bar-dock");
+    expect(html).not.toContain("Planning next moves");
+    expect(html).not.toContain("Ready for a run");
+    expect(html).not.toContain("No narrative yet");
+    expect(html).not.toContain("等待运行");
+    expect(html).not.toContain("run-stage-header");
+    expect(html).not.toContain("run-timeline-shell");
+  });
+
+  it("uses the dock composer after a run exists or narrative appears", () => {
+    expect(
+      shouldUseCenterComposer({
+        hasNarrative: false,
+        hasRun: false,
+        hasNotice: false,
+        hasError: false,
+        needsRestart: false,
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldUseCenterComposer({
+        hasNarrative: true,
+        hasRun: false,
+        hasNotice: false,
+        hasError: false,
+        needsRestart: false,
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldUseCenterComposer({
+        hasNarrative: false,
+        hasRun: true,
+        hasNotice: false,
+        hasError: false,
+        needsRestart: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("counts real diff additions and removals for inspector deltas", () => {
+    expect(
+      diffLineStats(
+        [
+          "diff --git a/file b/file",
+          "--- a/file",
+          "+++ b/file",
+          "-old",
+          "+new",
+          "+another",
+          " context",
+        ].join("\n"),
+      ),
+    ).toEqual({ added: 2, removed: 1 });
   });
 });

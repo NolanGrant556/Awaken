@@ -35,6 +35,8 @@ export type ConversationItem = {
   id: string;
   label: string;       // 任务标题
   timeLabel: string;   // 显示文本，如 "now", "1h", "2h"
+  statusLabel?: string;
+  statusTone?: ComponentTone;
   disabled?: boolean;
 };
 

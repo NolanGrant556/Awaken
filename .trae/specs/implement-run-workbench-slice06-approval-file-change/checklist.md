@@ -1,0 +1,17 @@
+- [x] `ApprovalCard` 支持 inline narrative 模式
+- [x] `FileChangeSummary` 已新增并导出
+- [x] 新 UI 未引入 AG-UI、A2UI、Electron、runtime client、SSE 或 `window.awaken`
+- [x] pending approval 在中心叙事可 approve/reject
+- [x] approved/rejected approval 不可点击
+- [x] cancel 后 pending approval 不残留为可点击状态
+- [x] stream error 后 pending approval 不残留为可点击状态
+- [x] fileChange 显示 path/title/status
+- [x] Inspector artifact list 继续可见
+- [x] artifact path 与 approval affected paths 的真实 smoke 一致性通过
+- [x] `npm --workspace @awaken/desktop run test` 通过
+- [x] `npm run typecheck:ui` 通过
+- [x] `npm run typecheck:desktop` 通过
+- [x] `npm run build:desktop` 通过
+- [x] `git diff --check` 通过
+- [x] 真实 LLM mutation approval 或 artifact smoke 通过
+- [x] 独立 review pass 未发现 blocker / correctness / acceptance finding

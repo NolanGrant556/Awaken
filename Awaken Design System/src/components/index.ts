@@ -32,6 +32,7 @@ export * from "./AwakenModelSelector";
 export * from "./AwakenModeToggle";
 export * from "./AwakenNarrativeFeed";
 export * from "./AwakenNewTaskButton";
+export * from "./AwakenOriginalThinking";
 export * from "./AwakenPill";
 export * from "./AwakenPlatformProvider";
 export * from "./AwakenPopover";

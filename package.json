@@ -6,6 +6,7 @@
     "apps/*"
   ],
   "scripts": {
+    "open:ui": "node scripts/open-ui.mjs",
     "dev:ui": "npm --workspace @awaken/design-system run dev",
     "build:ui": "npm --workspace @awaken/design-system run build",
     "typecheck:ui": "npm --workspace @awaken/design-system run typecheck",

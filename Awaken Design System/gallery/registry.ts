@@ -33,6 +33,7 @@ import { AwakenModelSelectorDemo } from "../src/components/AwakenModelSelector";
 import { AwakenModeToggleDemo } from "../src/components/AwakenModeToggle";
 import { AwakenNarrativeFeedDemo } from "../src/components/AwakenNarrativeFeed";
 import { AwakenNewTaskButtonDemo } from "../src/components/AwakenNewTaskButton";
+import { AwakenOriginalThinkingDemo } from "../src/components/AwakenOriginalThinking";
 import { AwakenPillDemo } from "../src/components/AwakenPill";
 import { AwakenPlatformProviderDemo } from "../src/components/AwakenPlatformProvider";
 import { AwakenPopoverDemo } from "../src/components/AwakenPopover";
@@ -104,6 +105,7 @@ export const awakenGalleryEntries: AwakenGalleryEntry[] = [
   { id: "awaken-mode-toggle", name: "AwakenModeToggle", displayName: "模式切换", demo: AwakenModeToggleDemo },
   { id: "awaken-narrative-feed", name: "AwakenNarrativeFeed", displayName: "叙事动态流", demo: AwakenNarrativeFeedDemo },
   { id: "awaken-new-task-button", name: "AwakenNewTaskButton", displayName: "新任务按钮", demo: AwakenNewTaskButtonDemo },
+  { id: "awaken-original-thinking", name: "AwakenOriginalThinking", displayName: "原始思考动效", demo: AwakenOriginalThinkingDemo },
   { id: "awaken-pill", name: "AwakenPill", displayName: "胶囊标签", demo: AwakenPillDemo },
   { id: "awaken-platform-provider", name: "AwakenPlatformProvider", displayName: "平台提供器", demo: AwakenPlatformProviderDemo },
   { id: "awaken-popover", name: "AwakenPopover", displayName: "弹出层", demo: AwakenPopoverDemo },

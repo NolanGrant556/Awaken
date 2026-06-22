@@ -52,14 +52,24 @@ npm run dev:desktop
 
 2. 组件独立观测入口：
 
-```text
-http://127.0.0.1:5173/#/components/<component-id>
-```
-
-先启动本地组件观测服务：
+从仓库根目录启动并打开 Gallery：
 
 ```bash
+cd /Users/nolangrant/Awaken
+npm run open:ui
+```
+
+如果只需要启动服务、不需要自动打开浏览器：
+
+```bash
+cd /Users/nolangrant/Awaken
 npm run dev:ui
+```
+
+Gallery 地址：
+
+```text
+http://127.0.0.1:5173/#/components/<component-id>
 ```
 
 然后打开具体组件 URL，例如：

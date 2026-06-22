@@ -15,8 +15,10 @@ Awaken 是一个本地优先的 Agent runtime 与桌面应用原型。当前仓�
    - 用户和开发者都从这里打开同一个 Awaken Desktop。
    - Desktop 自己启动并管理 `awaken-core`。
    - 不要把 `cmd/awaken-core`、Vite renderer 或 Electron 子脚本当成独立使用入口。
-2. 组件独立观测入口：`http://127.0.0.1:5173/#/components/<component-id>`
-   - 先用 `npm run dev:ui` 启动本地组件观测服务。
+2. 组件独立观测入口：`npm run open:ui`
+   - 在仓库根目录运行，会启动本地组件观测服务并打开 Gallery。
+   - 如果服务已经在跑，会直接打开 `http://127.0.0.1:5173/`。
+   - 只需要启动服务、不需要自动打开浏览器时，用 `npm run dev:ui`。
    - 每个组件都有自己的可刷新、可截图 URL。
    - `http://127.0.0.1:5173/` 只会自动落到某个组件 URL，本身不作为独立入口。
 
@@ -202,6 +204,12 @@ Go 测试与检查：
 go test ./...
 go vet ./...
 go build ./...
+```
+
+打开组件 Gallery：
+
+```bash
+npm run open:ui
 ```
 
 UI package 检查：

@@ -8,10 +8,10 @@ export function AwakenDisclosureDemo() {
   const defaultProps = AwakenDisclosureStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenDisclosure demo">
+    <section className="ads-component-demo" aria-label="展开折叠 AwakenDisclosure 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenDisclosure</h2>
-        <p>Standalone observable states for AwakenDisclosure.</p>
+        <h2>展开折叠 <code>AwakenDisclosure</code></h2>
+        <p>用于折叠和展开一段可选细节内容，适合收纳执行日志、说明和补充信息。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenDisclosureStates.map((state) => (

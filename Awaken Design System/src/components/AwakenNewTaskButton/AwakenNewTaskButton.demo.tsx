@@ -8,10 +8,10 @@ export function AwakenNewTaskButtonDemo() {
   const defaultProps = AwakenNewTaskButtonStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenNewTaskButton demo">
+    <section className="ads-component-demo" aria-label="新任务按钮 AwakenNewTaskButton 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenNewTaskButton</h2>
-        <p>Standalone observable states for AwakenNewTaskButton.</p>
+        <h2>新任务按钮 <code>AwakenNewTaskButton</code></h2>
+        <p>用于在侧边栏或任务入口区域触发新建任务。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenNewTaskButtonStates.map((state) => (

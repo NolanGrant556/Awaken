@@ -8,10 +8,10 @@ export function AwakenTooltipDemo() {
   const defaultProps = AwakenTooltipStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenTooltip demo">
+    <section className="ads-component-demo" aria-label="工具提示 AwakenTooltip 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenTooltip</h2>
-        <p>Standalone observable states for AwakenTooltip.</p>
+        <h2>工具提示 <code>AwakenTooltip</code></h2>
+        <p>用于给图标按钮或紧凑控件补充悬停与聚焦说明。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenTooltipStates.map((state) => (

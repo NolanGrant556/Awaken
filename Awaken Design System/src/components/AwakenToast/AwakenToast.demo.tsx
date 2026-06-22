@@ -8,10 +8,10 @@ export function AwakenToastDemo() {
   const defaultProps = AwakenToastStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenToast demo">
+    <section className="ads-component-demo" aria-label="提示通知 AwakenToast 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenToast</h2>
-        <p>Standalone observable states for AwakenToast.</p>
+        <h2>提示通知 <code>AwakenToast</code></h2>
+        <p>用于在窗口右下角展示短暂的非阻塞状态提示。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenToastStates.map((state) => (

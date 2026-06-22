@@ -120,6 +120,7 @@ export function AwakenApprovalCard({
       tabIndex={inline ? undefined : -1}
       style={{
         width: "100%",
+        minWidth: 0,
         maxWidth: inline ? "100%" : "400px",
         boxSizing: "border-box",
         padding: "20px",

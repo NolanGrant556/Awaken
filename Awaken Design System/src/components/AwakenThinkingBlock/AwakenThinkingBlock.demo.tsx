@@ -8,10 +8,10 @@ export function AwakenThinkingBlockDemo() {
   const defaultProps = AwakenThinkingBlockStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenThinkingBlock demo">
+    <section className="ads-component-demo" aria-label="思考块 AwakenThinkingBlock 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenThinkingBlock</h2>
-        <p>Standalone observable states for AwakenThinkingBlock.</p>
+        <h2>思考块 <code>AwakenThinkingBlock</code></h2>
+        <p>用于展示模型正在思考或已完成思考的一段可滚动推理文本。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenThinkingBlockStates.map((state) => (

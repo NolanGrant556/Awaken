@@ -7,21 +7,19 @@ export type AwakenWorkbenchSidebarFrameState = {
   props: Partial<ComponentProps<typeof AwakenWorkbenchSidebarFrame>>;
 };
 
-const noop = () => {};
-
 export const AwakenWorkbenchSidebarFrameStates: AwakenWorkbenchSidebarFrameState[] = [
   {
-    id: "default",
-    label: "Default",
+    id: "sidebar-content",
+    label: "侧栏内容",
     props: {
-      children: "AwakenWorkbenchSidebarFrame",
+      children: "AwakenSidebar：仓库、会话和个人入口由父级提供。",
     } as unknown as Partial<ComponentProps<typeof AwakenWorkbenchSidebarFrame>>,
   },
   {
     id: "long-content",
-    label: "Long content",
+    label: "较长侧栏内容",
     props: {
-      children: "AwakenWorkbenchSidebarFrame with a deliberately long value that should remain readable inside its container",
+      children: "较长的侧栏框架内容：用于验证仓库列表、会话入口和用户区被包裹时仍然保持在统一边界内。",
     } as unknown as Partial<ComponentProps<typeof AwakenWorkbenchSidebarFrame>>,
   },
 ];

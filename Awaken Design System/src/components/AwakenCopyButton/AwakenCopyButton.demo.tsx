@@ -8,10 +8,10 @@ export function AwakenCopyButtonDemo() {
   const defaultProps = AwakenCopyButtonStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenCopyButton demo">
+    <section className="ads-component-demo" aria-label="复制按钮 AwakenCopyButton 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenCopyButton</h2>
-        <p>Standalone observable states for AwakenCopyButton.</p>
+        <h2>复制按钮 <code>AwakenCopyButton</code></h2>
+        <p>用于把回答、代码片段或路径复制到剪贴板，并在按钮内反馈复制结果。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenCopyButtonStates.map((state) => (

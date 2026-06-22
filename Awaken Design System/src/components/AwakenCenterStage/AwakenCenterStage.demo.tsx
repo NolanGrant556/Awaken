@@ -8,10 +8,10 @@ export function AwakenCenterStageDemo() {
   const defaultProps = AwakenCenterStageStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenCenterStage demo">
+    <section className="ads-component-demo" aria-label="中央舞台 AwakenCenterStage 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenCenterStage</h2>
-        <p>Standalone observable states for AwakenCenterStage.</p>
+        <h2>中央舞台 <code>AwakenCenterStage</code></h2>
+        <p>用于把起始 composer、空状态或核心任务入口限制在主工作区中心宽度内。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenCenterStageStates.map((state) => (

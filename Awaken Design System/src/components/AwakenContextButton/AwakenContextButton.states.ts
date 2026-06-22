@@ -11,19 +11,19 @@ const noop = () => {};
 
 export const AwakenContextButtonStates: AwakenContextButtonState[] = [
   {
-    id: "default",
-    label: "Default",
+    id: "enabled",
+    label: "可添加上下文",
     props: {
       onClick: noop,
       disabled: false,
-      children: "AwakenContextButton",
     } as unknown as Partial<ComponentProps<typeof AwakenContextButton>>,
   },
   {
-    id: "long-content",
-    label: "Long content",
+    id: "disabled",
+    label: "暂不可添加",
     props: {
-      children: "AwakenContextButton with a deliberately long value that should remain readable inside its container",
+      onClick: noop,
+      disabled: true,
     } as unknown as Partial<ComponentProps<typeof AwakenContextButton>>,
   },
 ];

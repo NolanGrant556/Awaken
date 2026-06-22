@@ -8,10 +8,10 @@ export function AwakenModelSelectorDemo() {
   const defaultProps = AwakenModelSelectorStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenModelSelector demo">
+    <section className="ads-component-demo" aria-label="模型选择器 AwakenModelSelector 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenModelSelector</h2>
-        <p>Standalone observable states for AwakenModelSelector.</p>
+        <h2>模型选择器 <code>AwakenModelSelector</code></h2>
+        <p>用于在 Composer 控件区选择当前模型，并通过下拉列表处理可用、禁用和空选项。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenModelSelectorStates.map((state) => (

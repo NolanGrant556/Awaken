@@ -7,22 +7,37 @@ export type AwakenKbdState = {
   props: Partial<ComponentProps<typeof AwakenKbd>>;
 };
 
-const noop = () => {};
-
 export const AwakenKbdStates: AwakenKbdState[] = [
   {
-    id: "default",
-    label: "Default",
+    id: "macos-command",
+    label: "macOS 快捷键",
     props: {
-      children: "AwakenKbd",
+      children: "K",
       platform: "macos",
     } as unknown as Partial<ComponentProps<typeof AwakenKbd>>,
   },
   {
-    id: "long-content",
-    label: "Long content",
+    id: "macos-explicit",
+    label: "已有前缀",
     props: {
-      children: "AwakenKbd with a deliberately long value that should remain readable inside its container",
+      children: "⌘Enter",
+      platform: "macos",
+    } as unknown as Partial<ComponentProps<typeof AwakenKbd>>,
+  },
+  {
+    id: "windows-control",
+    label: "Windows 快捷键",
+    props: {
+      children: "Enter",
+      platform: "windows",
+    } as unknown as Partial<ComponentProps<typeof AwakenKbd>>,
+  },
+  {
+    id: "long-combo",
+    label: "组合快捷键",
+    props: {
+      children: "Ctrl+Shift+P",
+      platform: "windows",
     } as unknown as Partial<ComponentProps<typeof AwakenKbd>>,
   },
 ];

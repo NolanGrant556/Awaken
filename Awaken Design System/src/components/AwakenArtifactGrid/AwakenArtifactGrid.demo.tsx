@@ -8,10 +8,10 @@ export function AwakenArtifactGridDemo() {
   const defaultProps = AwakenArtifactGridStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenArtifactGrid demo">
+    <section className="ads-component-demo" aria-label="产物网格 AwakenArtifactGrid 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenArtifactGrid</h2>
-        <p>Standalone observable states for AwakenArtifactGrid.</p>
+        <h2>产物网格 <code>AwakenArtifactGrid</code></h2>
+        <p>用于把多个文件产物按网格排列，并在没有产物时显示空状态。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenArtifactGridStates.map((state) => (

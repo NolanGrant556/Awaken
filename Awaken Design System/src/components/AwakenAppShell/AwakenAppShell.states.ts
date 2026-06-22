@@ -7,26 +7,36 @@ export type AwakenAppShellState = {
   props: Partial<ComponentProps<typeof AwakenAppShell>>;
 };
 
-const noop = () => {};
-
 export const AwakenAppShellStates: AwakenAppShellState[] = [
   {
-    id: "default",
-    label: "Default",
+    id: "desktop-shell",
+    label: "桌面双栏骨架",
     props: {
-      sidebar: "AwakenAppShell",
-      main: "AwakenAppShell",
-      chrome: "AwakenAppShell",
-      sidebarCollapsed: "AwakenAppShell",
+      sidebar: "左侧导航、会话列表和项目入口",
+      main: "运行工作台主区域，承载当前任务的执行内容",
+      chrome: "窗口标题栏和全局操作区",
+      sidebarCollapsed: false,
       platform: "macos",
-      children: "AwakenAppShell",
     } as unknown as Partial<ComponentProps<typeof AwakenAppShell>>,
   },
   {
-    id: "long-content",
-    label: "Long content",
+    id: "sidebar-collapsed",
+    label: "侧边栏收起",
     props: {
-      children: "AwakenAppShell with a deliberately long value that should remain readable inside its container",
+      sidebar: "收起后不可见的导航内容",
+      main: "主区域接管剩余宽度，用于专注查看执行结果",
+      chrome: "窗口标题栏保留全局上下文",
+      sidebarCollapsed: true,
+      platform: "macos",
+    } as unknown as Partial<ComponentProps<typeof AwakenAppShell>>,
+  },
+  {
+    id: "web-shell",
+    label: "无顶部 Chrome",
+    props: {
+      sidebar: "Web 侧栏导航",
+      main: "嵌入式页面主体",
+      platform: "web",
     } as unknown as Partial<ComponentProps<typeof AwakenAppShell>>,
   },
 ];

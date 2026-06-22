@@ -7,25 +7,29 @@ export type AwakenBrandRowState = {
   props: Partial<ComponentProps<typeof AwakenBrandRow>>;
 };
 
-const noop = () => {};
-
 export const AwakenBrandRowStates: AwakenBrandRowState[] = [
   {
-    id: "default",
-    label: "Default",
+    id: "default-brand",
+    label: "默认品牌",
     props: {
-      logoSrc: "AwakenBrandRow",
-      title: "AwakenBrandRow",
-      meta: "AwakenBrandRow",
-      children: "AwakenBrandRow",
+      title: "Awaken",
+      meta: "Local-first desktop agent",
     } as unknown as Partial<ComponentProps<typeof AwakenBrandRow>>,
   },
   {
-    id: "long-content",
-    label: "Long content",
+    id: "workspace-brand",
+    label: "工作区标识",
     props: {
-      title: "AwakenBrandRow with a deliberately long value that should remain readable inside its container",
-      children: "AwakenBrandRow with a deliberately long value that should remain readable inside its container",
+      title: "Awaken Design System",
+      meta: "组件库 Gallery",
+    } as unknown as Partial<ComponentProps<typeof AwakenBrandRow>>,
+  },
+  {
+    id: "long-brand",
+    label: "长品牌文本",
+    props: {
+      title: "Awaken Local Desktop Runtime",
+      meta: "用于验证侧栏品牌行的标题和辅助信息截断",
     } as unknown as Partial<ComponentProps<typeof AwakenBrandRow>>,
   },
 ];

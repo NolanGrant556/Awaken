@@ -8,10 +8,10 @@ export function AwakenModeToggleDemo() {
   const defaultProps = AwakenModeToggleStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenModeToggle demo">
+    <section className="ads-component-demo" aria-label="模式切换 AwakenModeToggle 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenModeToggle</h2>
-        <p>Standalone observable states for AwakenModeToggle.</p>
+        <h2>模式切换 <code>AwakenModeToggle</code></h2>
+        <p>用于在 Composer 中显示并切换 Plan 与 Act 两种执行模式。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenModeToggleStates.map((state) => (

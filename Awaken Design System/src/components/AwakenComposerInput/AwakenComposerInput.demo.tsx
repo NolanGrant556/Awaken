@@ -8,10 +8,10 @@ export function AwakenComposerInputDemo() {
   const defaultProps = AwakenComposerInputStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenComposerInput demo">
+    <section className="ads-component-demo" aria-label="输入框 AwakenComposerInput 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenComposerInput</h2>
-        <p>Standalone observable states for AwakenComposerInput.</p>
+        <h2>输入框 <code>AwakenComposerInput</code></h2>
+        <p>用于输入任务草稿，支持受控值、自动高度和 Command/Ctrl+Enter 提交。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenComposerInputStates.map((state) => (

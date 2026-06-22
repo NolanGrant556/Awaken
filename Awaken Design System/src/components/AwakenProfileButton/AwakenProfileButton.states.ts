@@ -11,22 +11,35 @@ const noop = () => {};
 
 export const AwakenProfileButtonStates: AwakenProfileButtonState[] = [
   {
-    id: "default",
-    label: "Default",
+    id: "local-profile",
+    label: "本机账号",
     props: {
-      name: "AwakenProfileButton",
-      subtitle: "AwakenProfileButton",
-      avatarFallback: "AwakenProfileButton",
-      avatarSrc: "AwakenProfileButton",
+      name: "Nolan Grant",
+      subtitle: "本机运行时已连接",
+      avatarFallback: "NG",
       onClick: noop,
-      children: "AwakenProfileButton",
     } as unknown as Partial<ComponentProps<typeof AwakenProfileButton>>,
   },
   {
-    id: "long-content",
-    label: "Long content",
+    id: "without-subtitle",
+    label: "仅显示姓名",
     props: {
-      children: "AwakenProfileButton with a deliberately long value that should remain readable inside its container",
+      name: "本地访客",
+      subtitle: undefined,
+      avatarFallback: "访",
+      avatarSrc: undefined,
+      onClick: noop,
+    } as unknown as Partial<ComponentProps<typeof AwakenProfileButton>>,
+  },
+  {
+    id: "long-identity",
+    label: "长身份信息",
+    props: {
+      name: "Nolan Grant 的本机 Awaken 开发环境",
+      subtitle: "连接到 /Users/nolangrant/Awaken 工作区",
+      avatarFallback: "AW",
+      avatarSrc: undefined,
+      onClick: noop,
     } as unknown as Partial<ComponentProps<typeof AwakenProfileButton>>,
   },
 ];

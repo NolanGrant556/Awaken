@@ -8,10 +8,10 @@ export function AwakenWorkbenchSidebarFrameDemo() {
   const defaultProps = AwakenWorkbenchSidebarFrameStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenWorkbenchSidebarFrame demo">
+    <section className="ads-component-demo" aria-label="工作台侧栏框架 AwakenWorkbenchSidebarFrame 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenWorkbenchSidebarFrame</h2>
-        <p>Standalone observable states for AwakenWorkbenchSidebarFrame.</p>
+        <h2>工作台侧栏框架 <code>AwakenWorkbenchSidebarFrame</code></h2>
+        <p>用于给 Workbench 侧栏内容提供统一的外层框架。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenWorkbenchSidebarFrameStates.map((state) => (

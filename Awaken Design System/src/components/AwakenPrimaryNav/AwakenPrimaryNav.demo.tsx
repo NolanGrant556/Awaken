@@ -8,10 +8,10 @@ export function AwakenPrimaryNavDemo() {
   const defaultProps = AwakenPrimaryNavStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenPrimaryNav demo">
+    <section className="ads-component-demo" aria-label="主导航 AwakenPrimaryNav 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenPrimaryNav</h2>
-        <p>Standalone observable states for AwakenPrimaryNav.</p>
+        <h2>主导航 <code>AwakenPrimaryNav</code></h2>
+        <p>用于渲染侧边栏中的一级导航入口和当前选中项。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenPrimaryNavStates.map((state) => (

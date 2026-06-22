@@ -8,10 +8,10 @@ export function AwakenComposerBarDemo() {
   const defaultProps = AwakenComposerBarStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenComposerBar demo">
+    <section className="ads-component-demo" aria-label="输入栏 AwakenComposerBar 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenComposerBar</h2>
-        <p>Standalone observable states for AwakenComposerBar.</p>
+        <h2>输入栏 <code>AwakenComposerBar</code></h2>
+        <p>用于在中心入口或底部停靠区提供紧凑任务输入栏和提交控制。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenComposerBarStates.map((state) => (

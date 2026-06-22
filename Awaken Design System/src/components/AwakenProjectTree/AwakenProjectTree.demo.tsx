@@ -8,10 +8,10 @@ export function AwakenProjectTreeDemo() {
   const defaultProps = AwakenProjectTreeStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenProjectTree demo">
+    <section className="ads-component-demo" aria-label="项目树 AwakenProjectTree 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenProjectTree</h2>
-        <p>Standalone observable states for AwakenProjectTree.</p>
+        <h2>项目树 <code>AwakenProjectTree</code></h2>
+        <p>用于展示工作区项目、会话或文件组的可展开树形列表。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenProjectTreeStates.map((state) => (

@@ -8,10 +8,10 @@ export function AwakenRunTimelineDemo() {
   const defaultProps = AwakenRunTimelineStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenRunTimeline demo">
+    <section className="ads-component-demo" aria-label="运行时间线 AwakenRunTimeline 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenRunTimeline</h2>
-        <p>Standalone observable states for AwakenRunTimeline.</p>
+        <h2>运行时间线 <code>AwakenRunTimeline</code></h2>
+        <p>用于汇总一次运行的阶段状态和步骤进度。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenRunTimelineStates.map((state) => (

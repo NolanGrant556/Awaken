@@ -8,10 +8,10 @@ export function AwakenPillDemo() {
   const defaultProps = AwakenPillStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenPill demo">
+    <section className="ads-component-demo" aria-label="胶囊标签 AwakenPill 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenPill</h2>
-        <p>Standalone observable states for AwakenPill.</p>
+        <h2>胶囊标签 <code>AwakenPill</code></h2>
+        <p>用于展示可点击的筛选项、模式项或轻量状态选项。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenPillStates.map((state) => (

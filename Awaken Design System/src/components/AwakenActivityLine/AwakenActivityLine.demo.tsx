@@ -8,10 +8,10 @@ export function AwakenActivityLineDemo() {
   const defaultProps = AwakenActivityLineStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenActivityLine demo">
+    <section className="ads-component-demo" aria-label="活动状态行 AwakenActivityLine 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenActivityLine</h2>
-        <p>Standalone observable states for AwakenActivityLine.</p>
+        <h2>活动状态行 <code>AwakenActivityLine</code></h2>
+        <p>用于在运行过程、工具调用或任务流中展示单条活动状态。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenActivityLineStates.map((state) => (

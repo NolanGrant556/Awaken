@@ -7,23 +7,49 @@ export type AwakenStatusPillState = {
   props: Partial<ComponentProps<typeof AwakenStatusPill>>;
 };
 
-const noop = () => {};
-
 export const AwakenStatusPillStates: AwakenStatusPillState[] = [
   {
-    id: "default",
-    label: "Default",
+    id: "local",
+    label: "本地运行",
     props: {
-      tone: "neutral",
-      icon: "AwakenStatusPill",
-      children: "AwakenStatusPill",
+      tone: "local",
+      icon: "●",
+      children: "本地运行中",
+    } as unknown as Partial<ComponentProps<typeof AwakenStatusPill>>,
+  },
+  {
+    id: "permission",
+    label: "需要确认",
+    props: {
+      tone: "permission",
+      icon: "!",
+      children: "等待权限确认",
+    } as unknown as Partial<ComponentProps<typeof AwakenStatusPill>>,
+  },
+  {
+    id: "success",
+    label: "已完成",
+    props: {
+      tone: "success",
+      icon: "✓",
+      children: "运行已完成",
+    } as unknown as Partial<ComponentProps<typeof AwakenStatusPill>>,
+  },
+  {
+    id: "error",
+    label: "错误",
+    props: {
+      tone: "error",
+      icon: "!",
+      children: "运行出错",
     } as unknown as Partial<ComponentProps<typeof AwakenStatusPill>>,
   },
   {
     id: "long-content",
-    label: "Long content",
+    label: "较长状态",
     props: {
-      children: "AwakenStatusPill with a deliberately long value that should remain readable inside its container",
+      tone: "warning",
+      children: "文件变更已准备好等待复核",
     } as unknown as Partial<ComponentProps<typeof AwakenStatusPill>>,
   },
 ];

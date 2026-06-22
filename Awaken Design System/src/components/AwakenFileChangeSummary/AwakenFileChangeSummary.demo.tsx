@@ -8,10 +8,10 @@ export function AwakenFileChangeSummaryDemo() {
   const defaultProps = AwakenFileChangeSummaryStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenFileChangeSummary demo">
+    <section className="ads-component-demo" aria-label="文件变更摘要 AwakenFileChangeSummary 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenFileChangeSummary</h2>
-        <p>Standalone observable states for AwakenFileChangeSummary.</p>
+        <h2>文件变更摘要 <code>AwakenFileChangeSummary</code></h2>
+        <p>用于汇总一次执行产生的文件改动，展示文件路径、说明和每个文件的处理状态。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenFileChangeSummaryStates.map((state) => (

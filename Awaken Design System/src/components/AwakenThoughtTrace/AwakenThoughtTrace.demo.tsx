@@ -8,10 +8,10 @@ export function AwakenThoughtTraceDemo() {
   const defaultProps = AwakenThoughtTraceStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenThoughtTrace demo">
+    <section className="ads-component-demo" aria-label="思路轨迹 AwakenThoughtTrace 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenThoughtTrace</h2>
-        <p>Standalone observable states for AwakenThoughtTrace.</p>
+        <h2>思路轨迹 <code>AwakenThoughtTrace</code></h2>
+        <p>用于在执行流中折叠展示单段模型思考轨迹及其状态。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenThoughtTraceStates.map((state) => (

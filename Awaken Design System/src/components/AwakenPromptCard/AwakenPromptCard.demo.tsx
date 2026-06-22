@@ -8,10 +8,10 @@ export function AwakenPromptCardDemo() {
   const defaultProps = AwakenPromptCardStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenPromptCard demo">
+    <section className="ads-component-demo" aria-label="提示卡片 AwakenPromptCard 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenPromptCard</h2>
-        <p>Standalone observable states for AwakenPromptCard.</p>
+        <h2>提示卡片 <code>AwakenPromptCard</code></h2>
+        <p>用于在运行叙事中固定展示用户提交的原始任务提示。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenPromptCardStates.map((state) => (

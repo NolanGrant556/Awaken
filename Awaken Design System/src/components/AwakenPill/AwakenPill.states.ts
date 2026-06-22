@@ -7,26 +7,65 @@ export type AwakenPillState = {
   props: Partial<ComponentProps<typeof AwakenPill>>;
 };
 
-const noop = () => {};
-
 export const AwakenPillStates: AwakenPillState[] = [
   {
-    id: "default",
-    label: "Default",
+    id: "filter-idle",
+    label: "筛选项",
     props: {
       variant: "default",
       size: "md",
-      icon: "AwakenPill",
+      icon: "任务",
       active: false,
-      children: "AwakenPill",
+      children: "全部任务",
       disabled: false,
     } as unknown as Partial<ComponentProps<typeof AwakenPill>>,
   },
   {
-    id: "long-content",
-    label: "Long content",
+    id: "active-mode",
+    label: "已选模式",
     props: {
-      children: "AwakenPill with a deliberately long value that should remain readable inside its container",
+      variant: "default",
+      size: "md",
+      icon: "模式",
+      active: true,
+      children: "Act",
+      disabled: false,
+    } as unknown as Partial<ComponentProps<typeof AwakenPill>>,
+  },
+  {
+    id: "bordered-small",
+    label: "小号边框",
+    props: {
+      variant: "bordered",
+      size: "sm",
+      icon: "本地",
+      active: false,
+      children: "本地上下文",
+      disabled: false,
+    } as unknown as Partial<ComponentProps<typeof AwakenPill>>,
+  },
+  {
+    id: "disabled",
+    label: "不可选择",
+    props: {
+      variant: "bordered",
+      size: "md",
+      icon: "云端",
+      active: false,
+      children: "远程执行",
+      disabled: true,
+    } as unknown as Partial<ComponentProps<typeof AwakenPill>>,
+  },
+  {
+    id: "long-label",
+    label: "长标签",
+    props: {
+      variant: "default",
+      size: "md",
+      icon: "筛选",
+      active: true,
+      children: "只看包含本机权限请求的运行记录",
+      disabled: false,
     } as unknown as Partial<ComponentProps<typeof AwakenPill>>,
   },
 ];

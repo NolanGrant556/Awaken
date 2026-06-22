@@ -1,4 +1,5 @@
-import type { ComponentProps } from "react";
+import { createElement, type ComponentProps } from "react";
+import { PanelRightClose, RefreshCw, X } from "lucide-react";
 import type { AwakenIconButton } from "./AwakenIconButton";
 
 export type AwakenIconButtonState = {
@@ -7,26 +8,47 @@ export type AwakenIconButtonState = {
   props: Partial<ComponentProps<typeof AwakenIconButton>>;
 };
 
-const noop = () => {};
-
 export const AwakenIconButtonStates: AwakenIconButtonState[] = [
   {
-    id: "default",
-    label: "Default",
+    id: "close-inspector",
+    label: "关闭检查器",
     props: {
-      label: "AwakenIconButton",
-      variant: "circle",
+      label: "关闭检查器",
+      variant: "square",
       size: "md",
-      children: "AwakenIconButton",
+      children: createElement(PanelRightClose, { size: 16, strokeWidth: 2 }),
       disabled: false,
     } as unknown as Partial<ComponentProps<typeof AwakenIconButton>>,
   },
   {
-    id: "long-content",
-    label: "Long content",
+    id: "refresh-small",
+    label: "小圆形按钮",
     props: {
-      label: "AwakenIconButton with a deliberately long value that should remain readable inside its container",
-      children: "AwakenIconButton with a deliberately long value that should remain readable inside its container",
+      label: "重新运行检查",
+      variant: "circle",
+      size: "sm",
+      children: createElement(RefreshCw, { size: 15, strokeWidth: 2 }),
+    } as unknown as Partial<ComponentProps<typeof AwakenIconButton>>,
+  },
+  {
+    id: "disabled",
+    label: "禁用状态",
+    props: {
+      label: "当前无法关闭",
+      variant: "square",
+      size: "md",
+      children: createElement(X, { size: 16, strokeWidth: 2 }),
+      disabled: true,
+    } as unknown as Partial<ComponentProps<typeof AwakenIconButton>>,
+  },
+  {
+    id: "long-label",
+    label: "长提示文案",
+    props: {
+      label: "关闭右侧检查器并回到主执行叙事视图",
+      variant: "square",
+      size: "md",
+      children: createElement(PanelRightClose, { size: 16, strokeWidth: 2 }),
     } as unknown as Partial<ComponentProps<typeof AwakenIconButton>>,
   },
 ];

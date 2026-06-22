@@ -8,10 +8,10 @@ export function AwakenPopoverDemo() {
   const defaultProps = AwakenPopoverStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenPopover demo">
+    <section className="ads-component-demo" aria-label="弹出层 AwakenPopover 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenPopover</h2>
-        <p>Standalone observable states for AwakenPopover.</p>
+        <h2>弹出层 <code>AwakenPopover</code></h2>
+        <p>用于把触发器和浮层内容组合成可点击打开的弹出面板。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenPopoverStates.map((state) => (

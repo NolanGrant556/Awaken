@@ -8,10 +8,10 @@ export function AwakenWindowTitleBarDemo() {
   const defaultProps = AwakenWindowTitleBarStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenWindowTitleBar demo">
+    <section className="ads-component-demo" aria-label="窗口标题栏 AwakenWindowTitleBar 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenWindowTitleBar</h2>
-        <p>Standalone observable states for AwakenWindowTitleBar.</p>
+        <h2>窗口标题栏 <code>AwakenWindowTitleBar</code></h2>
+        <p>用于渲染桌面窗口顶部的 macOS 或 Windows 原生控制区。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenWindowTitleBarStates.map((state) => (

@@ -1,17 +1,21 @@
 # AwakenExecutionFeed
 
-This folder contains a standalone Awaken Design System component, its observable demo states, and its Gallery entry.
+此目录包含一个独立的 Awaken 设计系统组件、可观测演示状态，以及对应的 Gallery 入口。
 
-## Files
+## 用途
 
-- `AwakenExecutionFeed.tsx` - component implementation.
-- `AwakenExecutionFeed.css` - component-local style entry.
-- `AwakenExecutionFeed.states.ts` - observable states and mock props.
-- `AwakenExecutionFeed.demo.tsx` - standalone Gallery demo.
-- `index.ts` - component export.
+`AwakenExecutionFeed` 用于承载 Agent 执行叙事中的一组可见事件、步骤或消息，并在没有子项时提供空态 class。父级负责生成和排序具体执行内容；组件只负责 section 容器、可访问标签和过滤空子项，不订阅 runtime 事件，也不生成活动记录。
 
-## Rules
+## 文件
 
-- UI-only: no runtime, Electron, AG-UI, A2UI, or file-system side effects.
-- Props in, callbacks out.
-- Keep observable states updated when the public API changes.
+- `AwakenExecutionFeed.tsx` - 组件实现。
+- `AwakenExecutionFeed.css` - 组件局部样式入口。
+- `AwakenExecutionFeed.states.ts` - 可观测状态与模拟 props。
+- `AwakenExecutionFeed.demo.tsx` - 独立 Gallery 演示。
+- `index.ts` - 组件导出。
+
+## 规则
+
+- 仅包含 UI：不产生 runtime、Electron、AG-UI、A2UI 或文件系统副作用。
+- 通过 props 输入，通过回调输出。
+- 公共 API 变化时同步更新可观测状态。

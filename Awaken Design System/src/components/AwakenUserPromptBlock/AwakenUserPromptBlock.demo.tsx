@@ -8,10 +8,10 @@ export function AwakenUserPromptBlockDemo() {
   const defaultProps = AwakenUserPromptBlockStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenUserPromptBlock demo">
+    <section className="ads-component-demo" aria-label="用户提示块 AwakenUserPromptBlock 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenUserPromptBlock</h2>
-        <p>Standalone observable states for AwakenUserPromptBlock.</p>
+        <h2>用户提示块 <code>AwakenUserPromptBlock</code></h2>
+        <p>用于在执行流中展示用户发起本轮任务的原始提示。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenUserPromptBlockStates.map((state) => (

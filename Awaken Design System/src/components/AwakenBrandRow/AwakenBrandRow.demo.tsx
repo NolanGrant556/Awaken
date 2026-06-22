@@ -8,10 +8,10 @@ export function AwakenBrandRowDemo() {
   const defaultProps = AwakenBrandRowStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenBrandRow demo">
+    <section className="ads-component-demo" aria-label="品牌行 AwakenBrandRow 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenBrandRow</h2>
-        <p>Standalone observable states for AwakenBrandRow.</p>
+        <h2>品牌行 <code>AwakenBrandRow</code></h2>
+        <p>用于在侧栏或启动区域展示 Awaken 品牌标识、名称和辅助元信息。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenBrandRowStates.map((state) => (

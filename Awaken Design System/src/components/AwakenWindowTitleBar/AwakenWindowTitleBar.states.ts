@@ -11,22 +11,37 @@ const noop = () => {};
 
 export const AwakenWindowTitleBarStates: AwakenWindowTitleBarState[] = [
   {
-    id: "default",
-    label: "Default",
+    id: "macos",
+    label: "macOS 控制区",
     props: {
       platform: "macos",
-      onMinimize: noop,
-      onMaximize: noop,
-      onClose: noop,
-      children: "AwakenWindowTitleBar",
-      onClick: noop,
     } as unknown as Partial<ComponentProps<typeof AwakenWindowTitleBar>>,
   },
   {
-    id: "long-content",
-    label: "Long content",
+    id: "windows",
+    label: "Windows 控制区",
     props: {
-      children: "AwakenWindowTitleBar with a deliberately long value that should remain readable inside its container",
+      platform: "windows",
+      onMinimize: noop,
+      onMaximize: noop,
+      onClose: noop,
+    } as unknown as Partial<ComponentProps<typeof AwakenWindowTitleBar>>,
+  },
+  {
+    id: "windows-disabled",
+    label: "Windows 禁用按钮",
+    props: {
+      platform: "windows",
+      onMinimize: undefined,
+      onMaximize: undefined,
+      onClose: undefined,
+    } as unknown as Partial<ComponentProps<typeof AwakenWindowTitleBar>>,
+  },
+  {
+    id: "non-desktop",
+    label: "非桌面平台",
+    props: {
+      platform: "web",
     } as unknown as Partial<ComponentProps<typeof AwakenWindowTitleBar>>,
   },
 ];

@@ -8,10 +8,10 @@ export function AwakenComposerDockDemo() {
   const defaultProps = AwakenComposerDockStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenComposerDock demo">
+    <section className="ads-component-demo" aria-label="输入停靠栏 AwakenComposerDock 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenComposerDock</h2>
-        <p>Standalone observable states for AwakenComposerDock.</p>
+        <h2>输入停靠栏 <code>AwakenComposerDock</code></h2>
+        <p>用于承载固定在工作台底部的 composer 内容，并提供停靠容器边界。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenComposerDockStates.map((state) => (

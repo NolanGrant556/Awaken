@@ -8,10 +8,10 @@ export function AwakenDropdownDemo() {
   const defaultProps = AwakenDropdownStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenDropdown demo">
+    <section className="ads-component-demo" aria-label="下拉菜单 AwakenDropdown 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenDropdown</h2>
-        <p>Standalone observable states for AwakenDropdown.</p>
+        <h2>下拉菜单 <code>AwakenDropdown</code></h2>
+        <p>用于把触发器和浮层内容组合成下拉容器，承载模型、视图或轻量操作菜单。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenDropdownStates.map((state) => (

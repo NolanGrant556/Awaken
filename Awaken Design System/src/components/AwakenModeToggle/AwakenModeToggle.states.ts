@@ -11,21 +11,30 @@ const noop = () => {};
 
 export const AwakenModeToggleStates: AwakenModeToggleState[] = [
   {
-    id: "default",
-    label: "Default",
+    id: "plan-mode",
+    label: "计划模式",
     props: {
       mode: "Plan",
       onChange: noop,
       disabled: false,
-      children: "AwakenModeToggle",
-      onClick: noop,
     } as unknown as Partial<ComponentProps<typeof AwakenModeToggle>>,
   },
   {
-    id: "long-content",
-    label: "Long content",
+    id: "act-mode",
+    label: "执行模式",
     props: {
-      children: "AwakenModeToggle with a deliberately long value that should remain readable inside its container",
+      mode: "Act",
+      onChange: noop,
+      disabled: false,
+    } as unknown as Partial<ComponentProps<typeof AwakenModeToggle>>,
+  },
+  {
+    id: "disabled-plan",
+    label: "禁用切换",
+    props: {
+      mode: "Plan",
+      onChange: noop,
+      disabled: true,
     } as unknown as Partial<ComponentProps<typeof AwakenModeToggle>>,
   },
 ];

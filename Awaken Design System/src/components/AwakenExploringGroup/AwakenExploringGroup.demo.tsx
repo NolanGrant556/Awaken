@@ -8,10 +8,10 @@ export function AwakenExploringGroupDemo() {
   const defaultProps = AwakenExploringGroupStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenExploringGroup demo">
+    <section className="ads-component-demo" aria-label="探索分组 AwakenExploringGroup 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenExploringGroup</h2>
-        <p>Standalone observable states for AwakenExploringGroup.</p>
+        <h2>探索分组 <code>AwakenExploringGroup</code></h2>
+        <p>用于把探索阶段的多个工具动作归组展示，表达正在分析或已完成的上下文收集。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenExploringGroupStates.map((state) => (

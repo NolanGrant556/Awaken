@@ -11,22 +11,43 @@ const noop = () => {};
 
 export const AwakenWorkbenchChromeStates: AwakenWorkbenchChromeState[] = [
   {
-    id: "default",
-    label: "Default",
+    id: "expanded-sidebar",
+    label: "侧栏展开",
     props: {
-      sidebarCollapsed: "AwakenWorkbenchChrome",
+      sidebarCollapsed: false,
       onToggleSidebar: noop,
       onNewTask: noop,
-      right: "AwakenWorkbenchChrome",
-      children: "AwakenWorkbenchChrome",
-      onClick: noop,
+      right: "Local runtime / Awaken",
+    } as unknown as Partial<ComponentProps<typeof AwakenWorkbenchChrome>>,
+  },
+  {
+    id: "collapsed-sidebar",
+    label: "侧栏折叠",
+    props: {
+      sidebarCollapsed: true,
+      onToggleSidebar: noop,
+      onNewTask: noop,
+      right: "Choose workspace",
+    } as unknown as Partial<ComponentProps<typeof AwakenWorkbenchChrome>>,
+  },
+  {
+    id: "starting",
+    label: "启动状态",
+    props: {
+      sidebarCollapsed: false,
+      onToggleSidebar: noop,
+      onNewTask: noop,
+      right: "Starting Awaken / runtime 准备中",
     } as unknown as Partial<ComponentProps<typeof AwakenWorkbenchChrome>>,
   },
   {
     id: "long-content",
-    label: "Long content",
+    label: "较长右侧状态",
     props: {
-      children: "AwakenWorkbenchChrome with a deliberately long value that should remain readable inside its container",
+      sidebarCollapsed: false,
+      onToggleSidebar: noop,
+      onNewTask: noop,
+      right: "当前工作区路径等待校验：/Users/nolangrant/Awaken",
     } as unknown as Partial<ComponentProps<typeof AwakenWorkbenchChrome>>,
   },
 ];

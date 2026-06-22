@@ -8,12 +8,12 @@ export function AwakenApprovalCardDemo() {
   const defaultProps = AwakenApprovalCardStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenApprovalCard demo">
+    <section className="ads-component-demo" aria-label="审批卡片 AwakenApprovalCard 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenApprovalCard</h2>
-        <p>Standalone observable states for AwakenApprovalCard.</p>
+        <h2>审批卡片 <code>AwakenApprovalCard</code></h2>
+        <p>用于在高影响操作前呈现审批说明、受影响路径和允许/拒绝决策。</p>
       </header>
-      <div className="ads-component-demo-grid">
+      <div className="ads-component-demo-grid aw-approval-card-demo-grid">
         {AwakenApprovalCardStates.map((state) => (
           <article key={state.id} className="ads-component-demo-state">
             <h3>{state.label}</h3>

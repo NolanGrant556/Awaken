@@ -8,10 +8,10 @@ export function AwakenRunStepDemo() {
   const defaultProps = AwakenRunStepStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenRunStep demo">
+    <section className="ads-component-demo" aria-label="运行步骤 AwakenRunStep 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenRunStep</h2>
-        <p>Standalone observable states for AwakenRunStep.</p>
+        <h2>运行步骤 <code>AwakenRunStep</code></h2>
+        <p>用于展示一次运行流程中的单个步骤状态。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenRunStepStates.map((state) => (

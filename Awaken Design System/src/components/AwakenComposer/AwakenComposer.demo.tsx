@@ -8,10 +8,10 @@ export function AwakenComposerDemo() {
   const defaultProps = AwakenComposerStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenComposer demo">
+    <section className="ads-component-demo" aria-label="指令编写器 AwakenComposer 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenComposer</h2>
-        <p>Standalone observable states for AwakenComposer.</p>
+        <h2>指令编写器 <code>AwakenComposer</code></h2>
+        <p>用于组合任务输入、上下文添加、Plan/Act 模式、模型选择和发送/停止操作。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenComposerStates.map((state) => (

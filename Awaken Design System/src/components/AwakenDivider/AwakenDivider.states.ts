@@ -7,22 +7,26 @@ export type AwakenDividerState = {
   props: Partial<ComponentProps<typeof AwakenDivider>>;
 };
 
-const noop = () => {};
-
 export const AwakenDividerStates: AwakenDividerState[] = [
   {
-    id: "default",
-    label: "Default",
+    id: "compact",
+    label: "紧凑分隔",
     props: {
-      spacing: "AwakenDivider",
-      children: "AwakenDivider",
+      spacing: "sm",
     } as unknown as Partial<ComponentProps<typeof AwakenDivider>>,
   },
   {
-    id: "long-content",
-    label: "Long content",
+    id: "standard",
+    label: "标准分隔",
     props: {
-      children: "AwakenDivider with a deliberately long value that should remain readable inside its container",
+      spacing: "md",
+    } as unknown as Partial<ComponentProps<typeof AwakenDivider>>,
+  },
+  {
+    id: "section-break",
+    label: "区块分隔",
+    props: {
+      spacing: "lg",
     } as unknown as Partial<ComponentProps<typeof AwakenDivider>>,
   },
 ];

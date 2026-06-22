@@ -8,10 +8,10 @@ export function AwakenIconDemo() {
   const defaultProps = AwakenIconStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenIcon demo">
+    <section className="ads-component-demo" aria-label="图标 AwakenIcon 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenIcon</h2>
-        <p>Standalone observable states for AwakenIcon.</p>
+        <h2>图标 <code>AwakenIcon</code></h2>
+        <p>用于以统一尺寸、描边和可访问性规则承载 Awaken 自定义 SVG 图标。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenIconStates.map((state) => (

@@ -8,10 +8,10 @@ export function AwakenSidebarDemo() {
   const defaultProps = AwakenSidebarStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenSidebar demo">
+    <section className="ads-component-demo" aria-label="侧栏 AwakenSidebar 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenSidebar</h2>
-        <p>Standalone observable states for AwakenSidebar.</p>
+        <h2>侧栏 <code>AwakenSidebar</code></h2>
+        <p>用于组合 Awaken 桌面端的品牌、新建任务、导航、项目和账号入口。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenSidebarStates.map((state) => (

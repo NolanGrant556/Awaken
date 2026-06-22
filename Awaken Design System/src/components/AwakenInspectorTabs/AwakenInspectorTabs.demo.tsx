@@ -8,10 +8,10 @@ export function AwakenInspectorTabsDemo() {
   const defaultProps = AwakenInspectorTabsStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenInspectorTabs demo">
+    <section className="ads-component-demo" aria-label="检查器标签 AwakenInspectorTabs 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenInspectorTabs</h2>
-        <p>Standalone observable states for AwakenInspectorTabs.</p>
+        <h2>检查器标签 <code>AwakenInspectorTabs</code></h2>
+        <p>用于在检查器内切换改动、浏览器、终端和文件等固定视图。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenInspectorTabsStates.map((state) => (

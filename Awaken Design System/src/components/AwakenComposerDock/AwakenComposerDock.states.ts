@@ -7,21 +7,19 @@ export type AwakenComposerDockState = {
   props: Partial<ComponentProps<typeof AwakenComposerDock>>;
 };
 
-const noop = () => {};
-
 export const AwakenComposerDockStates: AwakenComposerDockState[] = [
   {
-    id: "default",
-    label: "Default",
+    id: "dock-slot",
+    label: "底部停靠槽",
     props: {
-      children: "AwakenComposerDock",
+      children: "这里承载停靠在工作台底部的输入栏。",
     } as unknown as Partial<ComponentProps<typeof AwakenComposerDock>>,
   },
   {
-    id: "long-content",
-    label: "Long content",
+    id: "long-dock-content",
+    label: "长停靠内容",
     props: {
-      children: "AwakenComposerDock with a deliberately long value that should remain readable inside its container",
+      children: "父级把 AwakenComposerBar 或自定义 composer 作为 children 传入；Dock 只提供固定的底部容器和边界样式。",
     } as unknown as Partial<ComponentProps<typeof AwakenComposerDock>>,
   },
 ];

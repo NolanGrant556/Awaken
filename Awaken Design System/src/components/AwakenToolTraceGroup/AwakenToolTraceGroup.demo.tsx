@@ -8,10 +8,10 @@ export function AwakenToolTraceGroupDemo() {
   const defaultProps = AwakenToolTraceGroupStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenToolTraceGroup demo">
+    <section className="ads-component-demo" aria-label="工具轨迹组 AwakenToolTraceGroup 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenToolTraceGroup</h2>
-        <p>Standalone observable states for AwakenToolTraceGroup.</p>
+        <h2>工具轨迹组 <code>AwakenToolTraceGroup</code></h2>
+        <p>用于把同一探索阶段的多条工具执行轨迹分组成一组。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenToolTraceGroupStates.map((state) => (

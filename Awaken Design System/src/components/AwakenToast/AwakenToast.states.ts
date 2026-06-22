@@ -11,21 +11,33 @@ const noop = () => {};
 
 export const AwakenToastStates: AwakenToastState[] = [
   {
-    id: "default",
-    label: "Default",
+    id: "visible",
+    label: "可见提示",
     props: {
-      message: "AwakenToast",
-      visible: "AwakenToast",
-      duration: "AwakenToast",
+      message: "工作区已切换到 /Users/nolangrant/Awaken",
+      visible: true,
+      duration: 5000,
       onClose: noop,
-      children: "AwakenToast",
+    } as unknown as Partial<ComponentProps<typeof AwakenToast>>,
+  },
+  {
+    id: "hidden",
+    label: "隐藏状态",
+    props: {
+      message: "这条提示由父级隐藏，不会渲染到画布。",
+      visible: false,
+      duration: 1500,
+      onClose: noop,
     } as unknown as Partial<ComponentProps<typeof AwakenToast>>,
   },
   {
     id: "long-content",
-    label: "Long content",
+    label: "长提示",
     props: {
-      children: "AwakenToast with a deliberately long value that should remain readable inside its container",
+      message: "运行启动失败：请确认本地 runtime 已启动，并检查工作区路径是否为绝对路径。",
+      visible: true,
+      duration: 5000,
+      onClose: noop,
     } as unknown as Partial<ComponentProps<typeof AwakenToast>>,
   },
 ];

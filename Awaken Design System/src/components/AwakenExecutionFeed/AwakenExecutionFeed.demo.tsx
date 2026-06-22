@@ -8,10 +8,10 @@ export function AwakenExecutionFeedDemo() {
   const defaultProps = AwakenExecutionFeedStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenExecutionFeed demo">
+    <section className="ads-component-demo" aria-label="执行动态流 AwakenExecutionFeed 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenExecutionFeed</h2>
-        <p>Standalone observable states for AwakenExecutionFeed.</p>
+        <h2>执行动态流 <code>AwakenExecutionFeed</code></h2>
+        <p>用于承载 Agent 执行叙事中的一组可见事件或步骤，保持空态与可访问标签。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenExecutionFeedStates.map((state) => (

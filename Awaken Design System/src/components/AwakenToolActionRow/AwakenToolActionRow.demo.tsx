@@ -8,10 +8,10 @@ export function AwakenToolActionRowDemo() {
   const defaultProps = AwakenToolActionRowStates[0]?.props ?? {};
 
   return (
-    <section className="ads-component-demo" aria-label="AwakenToolActionRow demo">
+    <section className="ads-component-demo" aria-label="工具操作行 AwakenToolActionRow 组件演示">
       <header className="ads-component-demo-header">
-        <h2>AwakenToolActionRow</h2>
-        <p>Standalone observable states for AwakenToolActionRow.</p>
+        <h2>工具操作行 <code>AwakenToolActionRow</code></h2>
+        <p>用于在探索步骤中展示一条可选中的工具动作摘要。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenToolActionRowStates.map((state) => (

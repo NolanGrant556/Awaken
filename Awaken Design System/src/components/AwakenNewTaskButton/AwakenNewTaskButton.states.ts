@@ -11,21 +11,47 @@ const noop = () => {};
 
 export const AwakenNewTaskButtonStates: AwakenNewTaskButtonState[] = [
   {
-    id: "default",
-    label: "Default",
+    id: "sidebar-entry",
+    label: "侧边栏入口",
     props: {
       onClick: noop,
-      shortcut: "AwakenNewTaskButton",
+      shortcut: "N",
       platform: "macos",
-      children: "AwakenNewTaskButton",
+      children: "新建任务",
       disabled: false,
     } as unknown as Partial<ComponentProps<typeof AwakenNewTaskButton>>,
   },
   {
-    id: "long-content",
-    label: "Long content",
+    id: "windows-shortcut",
+    label: "Windows 快捷键",
     props: {
-      children: "AwakenNewTaskButton with a deliberately long value that should remain readable inside its container",
+      onClick: noop,
+      shortcut: "Ctrl+N",
+      platform: "windows",
+      children: "新建任务",
+      disabled: false,
+    } as unknown as Partial<ComponentProps<typeof AwakenNewTaskButton>>,
+  },
+  {
+    id: "disabled",
+    label: "暂不可用",
+    props: {
+      onClick: noop,
+      shortcut: "N",
+      platform: "macos",
+      children: "正在启动运行时",
+      disabled: true,
+    } as unknown as Partial<ComponentProps<typeof AwakenNewTaskButton>>,
+  },
+  {
+    id: "long-label",
+    label: "长入口文案",
+    props: {
+      onClick: noop,
+      shortcut: "N",
+      platform: "macos",
+      children: "新建带当前工作区上下文的任务",
+      disabled: false,
     } as unknown as Partial<ComponentProps<typeof AwakenNewTaskButton>>,
   },
 ];

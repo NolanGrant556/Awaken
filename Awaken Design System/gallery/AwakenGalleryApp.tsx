@@ -68,18 +68,20 @@ export function AwakenGalleryApp() {
     <main className="ads-gallery">
       <aside className="ads-gallery-sidebar">
         <div className="ads-gallery-brand">
-          <span>Awaken Design System</span>
-          <strong>{awakenGalleryEntries.length} components</strong>
+          <span>Awaken 设计系统</span>
+          <strong>{awakenGalleryEntries.length} 个组件</strong>
         </div>
-        <nav aria-label="Components">
+        <nav aria-label="组件列表">
           {awakenGalleryEntries.map((entry) => (
             <button
               key={entry.id}
               type="button"
               className={entry.id === activeId ? "is-active" : ""}
+              aria-label={`${entry.displayName} ${entry.name}`}
               onClick={() => selectComponent(entry.id)}
             >
-              {entry.name}
+              <span className="ads-gallery-entry-name">{entry.displayName}</span>
+              <span className="ads-gallery-entry-code">{entry.name}</span>
             </button>
           ))}
         </nav>

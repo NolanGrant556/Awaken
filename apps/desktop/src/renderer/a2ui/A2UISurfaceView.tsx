@@ -1,4 +1,4 @@
-import { Button } from "@awaken/ui";
+import { AwakenButton as Button } from "@awaken/design-system";
 import type { ReactNode } from "react";
 import { parseA2UISurface, type A2UIComponent } from "./surface";
 

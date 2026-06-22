@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import "@awaken/ui/styles/tokens.css";
-import "@awaken/ui/styles/components.css";
+import "@awaken/design-system/tokens/tokens.css";
+import "@awaken/design-system/tokens/components.css";
 import "./styles.css";
 import { App } from "./App";
 

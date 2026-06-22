@@ -12,7 +12,7 @@
 - A2UI 当前只作为窄范围只读 generated surface payload。
 - Awaken 保留自己的内部事件模型，位于 `src/agentcore`。
 - 协议 adapter 位于 `src/protocol`。
-- `packages/ui` 里的组件不知道 AG-UI、A2UI、SSE、Electron 或 Agent runtime。
+- `Awaken Design System` 里的组件不知道 AG-UI、A2UI、SSE、Electron 或 Agent runtime。
 
 ## 当前事件链路
 
@@ -24,7 +24,7 @@ Agent Core
   -> HTTP/SSE
   -> desktop runtime client
   -> renderer reducer
-  -> @awaken/ui props
+  -> @awaken/design-system props
 ```
 
 AG-UI 只出现在协议层和 desktop consumer 边界：
@@ -234,16 +234,16 @@ apps/desktop/src/shared
 - Electron main 创建窗口，并代理 runtime HTTP/SSE 访问。
 - Preload 暴露 `window.awaken`。
 - Renderer 创建 run、订阅 run events、取消 run、resolve approvals，并把 events reduce 成 view state。
-- Renderer 把普通 props 传给 `@awaken/ui`。
+- Renderer 把普通 props 传给 `@awaken/design-system`。
 
 Desktop app 可以知道 AG-UI event shape，但 UI library components 不可以知道。
 
-## UI Package Boundary
+## Awaken Design System Boundary
 
 UI package：
 
 ```text
-packages/ui
+Awaken Design System
 ```
 
 允许：

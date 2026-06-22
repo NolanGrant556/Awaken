@@ -1,0 +1,21 @@
+@import "../src/tokens/tokens.css";
+@import "../src/tokens/components.css";
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 1024px; color: var(--aw-text-primary); background: var(--aw-surface-canvas, #f7f7f5); font-family: var(--aw-font-sans); }
+.ads-gallery { min-height: 100vh; display: grid; grid-template-columns: 292px minmax(0, 1fr); }
+.ads-gallery-sidebar { border-right: 1px solid var(--aw-border-main); background: var(--aw-bg-nav); padding: 16px 10px; overflow: auto; }
+.ads-gallery-brand { display: grid; gap: 4px; padding: 8px 10px 16px; }
+.ads-gallery-brand span { font-weight: 700; }
+.ads-gallery-brand strong { color: var(--aw-text-tertiary); font-size: 12px; font-weight: 500; }
+.ads-gallery-sidebar nav { display: grid; gap: 2px; }
+.ads-gallery-sidebar button { border: 0; background: transparent; border-radius: 8px; padding: 8px 10px; text-align: left; color: var(--aw-text-secondary); font: inherit; cursor: pointer; }
+.ads-gallery-sidebar button:hover, .ads-gallery-sidebar button.is-active { background: var(--aw-bg-fill-main); color: var(--aw-text-primary); }
+.ads-gallery-stage { min-width: 0; padding: 44px; overflow: auto; }
+.ads-component-demo { display: grid; gap: 20px; max-width: 1180px; }
+.ads-component-demo-header h2 { margin: 0; font-size: 26px; line-height: 34px; }
+.ads-component-demo-header p { margin: 6px 0 0; color: var(--aw-text-tertiary); }
+.ads-component-demo-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); align-items: start; }
+.ads-component-demo-state { display: grid; gap: 12px; border: 1px solid var(--aw-border-main); border-radius: 12px; background: var(--aw-bg-white); padding: 14px; min-width: 0; }
+.ads-component-demo-state h3 { margin: 0; color: var(--aw-text-tertiary); font-size: 12px; line-height: 16px; text-transform: uppercase; letter-spacing: 0; }
+.ads-component-demo-canvas { min-width: 0; display: grid; gap: 10px; align-items: start; }

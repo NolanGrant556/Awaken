@@ -15,10 +15,8 @@ coding-agent-handoff.md
 - 单独调试 `awaken-core`：读 `runtime-development.md`。
 - 需要对照 AG-UI / A2UI 上游仓库：读 `upstream-references.md`。
 - 改 Electron desktop consumer：读 `../apps/desktop/README.md`。
-- 改 `@awaken/ui` 组件库：读 `../packages/ui/README.md`。
-- 查组件库历史规格：读 `component-library.md`。当前 v2 token 来源是 Run Workbench，不再是旧 HTML demo。
 
-当前 Desktop 主产品形态是 Run Workbench。最终验收要以真实 LLM run、Desktop visual QA 和 `apps/desktop packages/ui` 产品路径关键词检查为准；UI playground 只作为组件视觉辅助。
+当前 Desktop 主产品形态是 Run Workbench。最终验收要以真实 LLM run、Desktop visual QA 和 `apps/desktop Awaken Design System` 产品路径关键词检查为准；组件 Gallery 只作为组件视觉辅助。
 
 ## 文件说明
 
@@ -28,8 +26,6 @@ coding-agent-handoff.md
 - `runtime-development.md`：仅面向 Go runtime/API 调试；Desktop 使用与开发仍走 `npm run dev:desktop`。
 - `upstream-references.md`：AG-UI / A2UI 上游参考说明。记录 upstream、固定 commit、clone 方式和参考范围；只有需要对照上游时才读。
 - `../apps/desktop/README.md`：Electron desktop consumer 的本地开发和 bridge/adapter 契约。
-- `../packages/ui/README.md`：`@awaken/ui` 组件库边界、使用方式和包出口。
-- `component-library.md`：已完成的 `@awaken/ui` 组件库实现档案。它是历史档案，不作为当前待办计划；Run Workbench semantic tokens v2 以当前 Desktop Workbench 和 `packages/ui/src/styles/tokens.css` 为准。
 
 ## 职责边界
 

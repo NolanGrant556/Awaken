@@ -1,4 +1,4 @@
-import type { ApprovalItem, RunStepItem } from "@awaken/ui";
+import type { ApprovalItem, RunStepItem } from "@awaken/design-system";
 import type { AguiApprovalRiskTone, AguiArtifactStatus, AguiEvent } from "./agui";
 import type {
   RuntimeRun,

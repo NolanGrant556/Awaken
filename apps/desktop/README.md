@@ -50,7 +50,7 @@ type AwakenBridge = {
 };
 ```
 
-Renderer 内部再把 bridge 包装成 React 使用的 client。`@awaken/ui` 仍保持 UI-only；desktop 只通过包出口 import，不读 `packages/ui/src/...`。
+Renderer 内部再把 bridge 包装成 React 使用的 client。`@awaken/design-system` 仍保持 UI-only；desktop 只通过包出口 import，不读 `Awaken Design System/src/...`。
 
 ## 开发流程
 
@@ -60,7 +60,7 @@ npm run dev:desktop
 
 这个命令会：
 
-- 构建 `@awaken/ui`
+- 构建 `@awaken/design-system`
 - 确保当前平台的 `awaken-core` binary 存在，缺失时自动构建
 - watch 编译 Electron `main` / `preload`
 - 启动 Vite renderer（`127.0.0.1:5174`）

@@ -25,7 +25,7 @@ Awaken 用 AG-UI 的事件协议格式对外输出 run stream，但实现是 Awa
 - 协议映射：`src/protocol/agui`。
 - SSE 输出：`src/server`。
 - Desktop 消费：`apps/desktop`。
-- UI 组件：`packages/ui` 只收 props/callbacks，不知道 AG-UI。
+- UI 组件：`Awaken Design System` 只收 props/callbacks，不知道 AG-UI。
 - A2UI 当前只是只读 `a2ui_surface` payload，不是完整 SDK/runtime 集成。
 - 上游参考与固定 commit：`docs/upstream-references.md`。
 
@@ -74,10 +74,10 @@ apps/desktop
 Electron + React desktop consumer。它连接 `awaken-core`，订阅 run events，resolve approvals，并把 AG-UI events reduce 成 view state。
 
 ```text
-packages/ui
+Awaken Design System
 ```
 
-UI-only component library。只接收 props 和 callbacks。
+Awaken Design System component library。只接收 props 和 callbacks。
 
 ## 当前 Runtime API
 
@@ -196,7 +196,7 @@ npm run build:desktop
 Run Workbench 收口验收：
 
 ```bash
-rg -n "Dashboard|card wall|developer log|开发者日志|卡片墙" apps/desktop packages/ui
+rg -n "Dashboard|card wall|developer log|开发者日志|卡片墙" apps/desktop "Awaken Design System"
 go test ./src/server -run 'TestPlainQASmoke|TestReadOnlyFileSmoke|TestFileMutation(Approval|Reject|Artifact|PatchAndTurnDiff)Smoke' -count=1 -v
 go test ./src/server -run 'TestRunsEndpointsCreateReplayAndCancel|TestRunEventsAfterSeq|TestRunEventsAfterSeqReconnectMultiFrame' -count=1
 git diff --check
@@ -212,7 +212,7 @@ npm run dev:desktop
 
 单独调试 `awaken-core` 时读 `docs/runtime-development.md`。
 
-启动 UI playground：
+启动 Awaken Design System Gallery：
 
 ```bash
 npm run dev:ui
@@ -220,8 +220,8 @@ npm run dev:ui
 
 ## 必须保留的边界
 
-- `packages/ui` 必须保持 UI-only。不能出现 `fetch`、Electron IPC、`window.awaken`、SSE、AG-UI、A2UI imports。
-- `apps/desktop` 应通过 `@awaken/ui` 使用组件，不要引用 `packages/ui/src`。
+- `Awaken Design System` 必须保持 UI-only。不能出现 `fetch`、Electron IPC、`window.awaken`、SSE、AG-UI、A2UI imports。
+- `apps/desktop` 后续应通过 `@awaken/design-system` 使用组件，不要引用 `Awaken Design System/src`。
 - `src/agentcore` 只发内部事件，不 import AG-UI structs。
 - `src/protocol/agui` 只做协议映射，不执行工具、不管理 session。
 - `src/protocol/a2ui` 是窄范围 payload builder，不是 vendored A2UI dependency。
@@ -240,8 +240,8 @@ npm run dev:ui
 
 - 不要 vendor AG-UI / A2UI 外部参考仓库，也不要把本机参考路径写进代码或配置。
 - 不要让 `apps/desktop` 拥有后端 policy。
-- 不要让 `packages/ui` 依赖 Electron 或 runtime API。
+- 不要让 `Awaken Design System` 依赖 Electron 或 runtime API。
 - 不要用 generated A2UI surface 替代当前 approval UI。
-- 不要把 UI playground/mock state 当成真实 run 验收。
+- 不要把 Gallery/mock state 当成真实 run 验收。
 - 不要提交 secrets 或构建产物。
 - 不要清理无关 dirty files。

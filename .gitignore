@@ -18,10 +18,9 @@ go.sum
 
 # Frontend/workspace dependencies and build artifacts
 node_modules/
-packages/*/node_modules/
-packages/*/dist/
-packages/*/.vite/
-packages/*/*.tsbuildinfo
+Awaken Design System/dist/
+Awaken Design System/.vite/
+Awaken Design System/*.tsbuildinfo
 apps/*/node_modules/
 apps/*/dist/
 apps/*/dist-electron/

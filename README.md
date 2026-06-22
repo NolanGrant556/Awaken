@@ -42,6 +42,7 @@ docs/README.md
 
 然后按任务继续读：
 
+- 需要项目文件职责总览：读 `docs/01_项目情况说明/项目文件清单/README.md`。
 - 改 runtime / protocol / AG-UI / A2UI：读 `docs/01_项目情况说明/AG-UI&A2UI说明/agui-a2ui-architecture.md`。
 - 需要对照 AG-UI / A2UI 上游：读 `docs/01_项目情况说明/AG-UI&A2UI说明/upstream-references.md`。
 - 改 desktop：读 `apps/desktop/README.md`。

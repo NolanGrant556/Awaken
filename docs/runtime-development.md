@@ -1,23 +1,15 @@
-# Runtime Development
+# Runtime Internal Verification
 
-本文档只面向 `awaken-core` / Go runtime 开发调试，不是 Desktop 使用流程。Desktop 开发与使用入口始终是：
+本文档只面向 `awaken-core` / Go runtime 的内部测试与验证，不是 Awaken 使用流程，也不是独立启动入口。Awaken 的本地使用入口始终是：
 
 ```bash
 npm run dev:desktop
 ```
 
-## 直接运行 awaken-core
-
-需要单独调试 HTTP route、SSE、runtime state、tool policy 或 provider transport 时，可以直接运行：
+## 验证 runtime/server
 
 ```bash
-go run ./cmd/awaken-core
-```
-
-默认监听地址由 `AWAKEN_CORE_ADDR` 控制，未设置时为 `127.0.0.1:8787`：
-
-```bash
-AWAKEN_CORE_ADDR=127.0.0.1:9999 go run ./cmd/awaken-core
+go test ./src/runtime ./src/server ./src/agentcore
 ```
 
 ## 配置
@@ -29,7 +21,7 @@ AWAKEN_CORE_ADDR=127.0.0.1:9999 go run ./cmd/awaken-core
 ## Smoke
 
 ```bash
-curl --noproxy 127.0.0.1 http://127.0.0.1:8787/health
+go test ./src/server -run 'TestPlainQASmoke|TestReadOnlyFileSmoke|TestFileMutation(Approval|Reject|Artifact|PatchAndTurnDiff)Smoke' -count=1 -v
 ```
 
-本机有代理环境变量时，localhost smoke 优先使用 `--noproxy 127.0.0.1`。
+这些 smoke 会在测试进程内启动本地 server，不形成 Awaken 的第三个使用入口。

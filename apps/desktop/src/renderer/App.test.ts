@@ -7,6 +7,27 @@ import {
   resolvedDecisionForApproval,
   shouldUseCenterComposer,
 } from "./workbenchPresentation";
+import type { AwakenBridge } from "../shared/runtime";
+
+function stubElectronBridge(): void {
+  vi.stubGlobal("window", {
+    awaken: {
+      platform: "macos",
+      getRun: vi.fn(),
+      listThreads: vi.fn(async () => []),
+      startRun: vi.fn(),
+      cancelRun: vi.fn(),
+      resolveApproval: vi.fn(),
+      subscribeRun: vi.fn(),
+      unsubscribeRun: vi.fn(),
+      getRuntimeInfo: vi.fn(),
+      pickWorkspace: vi.fn(async () => ({ canceled: true as const })),
+      validateWorkspace: vi.fn(async () => ({ valid: true as const })),
+      getSupervisorStatus: vi.fn(async () => ({ status: "running" as const })),
+      onSupervisorStatusChange: vi.fn(() => () => {}),
+    } satisfies AwakenBridge,
+  });
+}
 
 describe("resolvedDecisionForApproval", () => {
   it("returns undefined when both approval states are empty", () => {
@@ -38,7 +59,7 @@ describe("App workbench presentation", () => {
   });
 
   it("renders idle as a blank execution stage with the light shell", () => {
-    vi.stubGlobal("window", {});
+    stubElectronBridge();
 
     const html = renderToString(React.createElement(App));
 

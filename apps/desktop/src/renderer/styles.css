@@ -33,11 +33,6 @@ pre {
   overflow: hidden;
 }
 
-.desktop-root-browser {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-}
-
 .desktop-root-electron {
   display: block;
 }

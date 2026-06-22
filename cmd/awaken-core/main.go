@@ -45,7 +45,7 @@ func main() {
 		},
 		func(agent *agentcore.Agent) runtime.Executor {
 			return runtime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-				return agent.RunStreamWithEvents(ctx, input, nil, sink)
+				return agent.RunStreamWithEvents(ctx, input, sink)
 			})
 		},
 	)

@@ -49,8 +49,8 @@ func TestRuntimeInfoUpdates(t *testing.T) {
 		t.Fatal("expected model name to be updated")
 	}
 
-	runtimeInfo.SetEntryPoint("cli")
-	if runtimeInfo.EntryPoint != "cli" {
+	runtimeInfo.SetEntryPoint("desktop")
+	if runtimeInfo.EntryPoint != "desktop" {
 		t.Fatal("expected entry point to be updated")
 	}
 

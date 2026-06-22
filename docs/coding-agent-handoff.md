@@ -204,19 +204,21 @@ git diff --check
 
 ## 本地运行
 
-启动 desktop：
+Awaken 使用入口，用户与开发者看到同一个 Desktop：
 
 ```bash
 npm run dev:desktop
 ```
 
-单独调试 `awaken-core` 时读 `docs/runtime-development.md`。
+验证 runtime/server 内部行为时读 `docs/runtime-development.md`；不要把 `awaken-core` 作为 Awaken 使用入口单独暴露。
 
-启动 Awaken Design System Gallery：
+组件独立观测入口：
 
 ```bash
 npm run dev:ui
 ```
+
+`npm run dev:ui` 只启动本地组件观测服务；具体入口是每个组件自己的 URL，例如 `http://127.0.0.1:5173/#/components/awaken-composer-bar`。
 
 ## 必须保留的边界
 

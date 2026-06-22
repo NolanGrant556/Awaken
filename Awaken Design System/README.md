@@ -1,0 +1,98 @@
+# Awaken Design System
+
+Awaken Design System 是 Awaken 的 UI-only 组件系统。它包含可复用 React 组件、CSS tokens、组件局部样式、可观测 demo states，以及用于肉眼检查组件真实形态的本地 Gallery。
+
+这套组件必须可以从 Awaken Desktop 中抽离后继续复用。它不能依赖 Go runtime、Electron、AG-UI、A2UI、SSE、本地文件系统或 `window.awaken`。
+
+## 入口契约
+
+Awaken 本地只允许两套入口：
+
+1. Awaken 使用入口：
+
+```bash
+npm run dev:desktop
+```
+
+用户和开发者都通过同一个入口打开同一个 Awaken Desktop，看到同一套界面形态。
+
+2. 组件独立观测入口：
+
+```text
+http://127.0.0.1:5173/#/components/<component-id>
+```
+
+先启动本地组件观测服务：
+
+```bash
+npm run dev:ui
+```
+
+然后打开具体组件 URL，例如：
+
+```text
+http://127.0.0.1:5173/#/components/awaken-composer-bar
+http://127.0.0.1:5173/#/components/awaken-execution-feed
+http://127.0.0.1:5173/#/components/awaken-light-inspector-rail
+```
+
+`npm run dev:ui` 只是启动组件观测服务的命令。真正的观测入口是每个组件自己的 URL。`http://127.0.0.1:5173/` 会自动落到某个组件 URL，本身不作为独立入口。
+
+## 组件 URL 规则
+
+每个组件的 `component-id` 由组件名转换为 kebab case：
+
+```text
+AwakenComposerBar -> awaken-composer-bar
+AwakenExecutionFeed -> awaken-execution-feed
+AwakenLightInspectorRail -> awaken-light-inspector-rail
+```
+
+已注册组件 URL 的唯一事实源是：
+
+```text
+Awaken Design System/gallery/registry.ts
+```
+
+## 组件文件夹契约
+
+每个组件都应该独立放在自己的文件夹里：
+
+```text
+src/components/AwakenComponentName/
+├── AwakenComponentName.tsx
+├── AwakenComponentName.css
+├── AwakenComponentName.states.ts
+├── AwakenComponentName.demo.tsx
+├── README.md
+└── index.ts
+```
+
+文件职责：
+
+- `*.tsx`：组件实现。
+- `*.css`：组件局部样式入口。
+- `*.states.ts`：可观测状态与 mock props。
+- `*.demo.tsx`：由 Gallery 渲染的独立视觉 demo。
+- `README.md`：给人和 Coding Agent 看的组件契约。
+- `index.ts`：组件导出。
+
+## Coding Agent 规则
+
+- 组件必须保持 UI-only：不能调用 runtime、Electron IPC、AG-UI、A2UI、SSE、本地文件系统或 `window.awaken`。
+- 数据通过 props 进入，行为通过 callbacks 传出。
+- 组件 props 或视觉状态变化时，必须同步更新可观测 states。
+- 每个新组件 demo 都必须注册到 `gallery/registry.ts`。
+- Desktop 应优先通过 `@awaken/design-system` 包出口使用组件，不要从 `Awaken Design System/src/...` 做源码路径 import。
+- 一个组件只有能通过自己的 `#/components/<component-id>` URL 打开时，才算完成。
+
+## 验证
+
+修改组件或 tokens 后运行：
+
+```bash
+npm --workspace @awaken/design-system run typecheck
+npm --workspace @awaken/design-system run smoke:render
+```
+
+`smoke:render` 会 server-render 所有导出的 `Awaken*Demo` 组件。如果 demo 缺失或渲染失败，命令会失败。

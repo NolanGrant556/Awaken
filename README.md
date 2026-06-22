@@ -7,6 +7,20 @@ Awaken 是一个本地优先的 Agent runtime 与桌面应用原型。当前仓�
 - `apps/desktop`：Electron + React 桌面端 consumer，当前主界面是 Run Workbench。
 - `Awaken Design System`：Awaken Design System package、Gallery、tokens 和组件源码。
 
+## 入口契约
+
+本项目只允许两套本地入口：
+
+1. Awaken 使用入口：`npm run dev:desktop`
+   - 用户和开发者都从这里打开同一个 Awaken Desktop。
+   - Desktop 自己启动并管理 `awaken-core`。
+   - 不要把 `cmd/awaken-core`、Vite renderer 或 Electron 子脚本当成独立使用入口。
+
+2. 组件独立观测入口：`http://127.0.0.1:5173/#/components/<component-id>`
+   - 先用 `npm run dev:ui` 启动本地组件观测服务。
+   - 每个组件都有自己的可刷新、可截图 URL。
+   - `http://127.0.0.1:5173/` 只会自动落到某个组件 URL，本身不作为独立入口。
+
 ## 协议归属
 
 一句话：Awaken 用的是 AG-UI 的事件协议格式，但实现是 Awaken 自己写的轻量兼容层；本项目不部署、不 vendor、不直接依赖 AG-UI 项目。
@@ -48,7 +62,6 @@ git status --short
 
 ```text
 .
-├── CLI/                         # 本地交互式 CLI 入口
 ├── cmd/
 │   └── awaken-core/             # 本地 HTTP/SSE runtime 进程
 ├── apps/
@@ -68,14 +81,14 @@ git status --short
 │   ├── tool/                    # tool interface、registry、schema、permission model
 │   └── tools/                   # 内置工具实现
 ├── config.toml                  # 非敏感本地 LLM/runtime 配置
-└── package.json                 # npm workspaces：ui 与 desktop
+└── package.json                 # npm workspaces：Awaken Design System 与 desktop
 ```
 
 ## 当前 Runtime 契约
 
-Desktop 会自己启动并管理 `cmd/awaken-core`。用户和 Desktop 开发者不需要单独启动 runtime。
+Desktop 会自己启动并管理 `cmd/awaken-core`。用户和 Desktop 开发者不需要单独启动 runtime，也不应绕过 Electron bridge 直连 runtime。
 
-Runtime 开发调试入口见 `docs/runtime-development.md`。
+Runtime / server 只作为内部工程层测试与验证，说明见 `docs/runtime-development.md`。
 
 当前 HTTP surface：
 
@@ -169,31 +182,30 @@ go test ./... && go vet ./... && go build ./... && npm run build:desktop && git 
 
 ## 本地运行
 
-交互式 CLI：
-
-```bash
-go run ./CLI/main.go
-```
-
-UI 组件库 playground：
-
-```bash
-npm run dev:ui
-```
-
-打开：
-
-```text
-http://127.0.0.1:5173/
-```
-
-桌面端：
+### Awaken 使用入口
 
 ```bash
 npm run dev:desktop
 ```
 
 `npm run dev:desktop` 会构建 `@awaken/design-system`，确保 `awaken-core` binary 存在，启动 Vite renderer（`127.0.0.1:5174`），编译 Electron main/preload，并启动 Electron。
+
+### 组件独立观测入口
+
+先启动本地组件观测服务：
+
+```bash
+npm run dev:ui
+```
+
+然后打开具体组件 URL。每个组件 URL 都可刷新、可截图、可作为视觉回归目标，例如：
+
+```text
+http://127.0.0.1:5173/#/components/awaken-composer-bar
+http://127.0.0.1:5173/#/components/awaken-execution-feed
+```
+
+`http://127.0.0.1:5173/` 只会自动落到某个组件 URL，本身不作为独立入口。
 
 ## 当前工具面
 

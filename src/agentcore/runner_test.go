@@ -54,7 +54,7 @@ func TestRunnerNativeToolCallLoop(t *testing.T) {
 
 	var mu sync.Mutex
 	requests := make([]chatRequestSnapshot, 0)
-	server := newRunnerServer(t, func(w http.ResponseWriter, r *http.Request) {
+	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
 		var body chatRequestSnapshot
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("failed to decode request: %v", err)
@@ -66,42 +66,21 @@ func TestRunnerNativeToolCallLoop(t *testing.T) {
 		mu.Unlock()
 
 		if callNumber == 1 {
-			writeRunnerJSON(t, w, map[string]interface{}{
-				"choices": []map[string]interface{}{
-					{
-						"message": map[string]interface{}{
-							"tool_calls": []map[string]interface{}{
-								{
-									"id":   "call_native",
-									"type": "function",
-									"function": map[string]interface{}{
-										"name":      toolName,
-										"arguments": `{"value":"hello"}`,
-									},
-								},
-							},
-						},
-					},
-				},
-			})
+			writeRunnerStreamToolCall(t, w, "call_native", toolName, map[string]string{"value": "hello"})
 			return
 		}
 
 		if !containsToolResult(body.Messages, "call_native", "echo:hello") {
 			t.Fatalf("expected second request to contain tool result, got %+v", body.Messages)
 		}
-		writeRunnerJSON(t, w, map[string]interface{}{
-			"choices": []map[string]interface{}{
-				{"message": map[string]interface{}{"content": "final answer"}},
-			},
-		})
+		writeRunnerStreamText(t, w, "final answer")
 	})
 	defer server.Close()
 
 	agent := NewAgent(testAgentConfig(server.URL, 3))
-	answer, err := agent.Run(context.Background(), "use native tool")
+	answer, err := agent.RunStreamWithEvents(context.Background(), "use native tool", nil)
 	if err != nil {
-		t.Fatalf("Run returned error: %v", err)
+		t.Fatalf("RunStreamWithEvents returned error: %v", err)
 	}
 	if answer != "final answer" {
 		t.Fatalf("expected final answer, got %q", answer)
@@ -124,28 +103,20 @@ func TestRunnerXMLFallbackLoop(t *testing.T) {
 	mustRegisterRunnerTool(t, runnerTestTool{name: toolName})
 
 	var calls int
-	server := newRunnerServer(t, func(w http.ResponseWriter, r *http.Request) {
+	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		if calls == 1 {
-			writeRunnerJSON(t, w, map[string]interface{}{
-				"choices": []map[string]interface{}{
-					{"message": map[string]interface{}{"content": "<action><name>" + toolName + "</name><input>ping</input></action>"}},
-				},
-			})
+			writeRunnerStreamText(t, w, "<action><name>"+toolName+"</name><input>ping</input></action>")
 			return
 		}
-		writeRunnerJSON(t, w, map[string]interface{}{
-			"choices": []map[string]interface{}{
-				{"message": map[string]interface{}{"content": "xml final"}},
-			},
-		})
+		writeRunnerStreamText(t, w, "xml final")
 	})
 	defer server.Close()
 
 	agent := NewAgent(testAgentConfig(server.URL, 3))
-	answer, err := agent.Run(context.Background(), "use xml tool")
+	answer, err := agent.RunStreamWithEvents(context.Background(), "use xml tool", nil)
 	if err != nil {
-		t.Fatalf("Run returned error: %v", err)
+		t.Fatalf("RunStreamWithEvents returned error: %v", err)
 	}
 	if answer != "xml final" {
 		t.Fatalf("expected xml final, got %q", answer)
@@ -162,40 +133,19 @@ func TestRunnerToolErrorObservation(t *testing.T) {
 	mustRegisterRunnerTool(t, runnerTestTool{name: toolName, fail: true})
 
 	var calls int
-	server := newRunnerServer(t, func(w http.ResponseWriter, r *http.Request) {
+	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		if calls == 1 {
-			writeRunnerJSON(t, w, map[string]interface{}{
-				"choices": []map[string]interface{}{
-					{
-						"message": map[string]interface{}{
-							"tool_calls": []map[string]interface{}{
-								{
-									"id":   "call_fail",
-									"type": "function",
-									"function": map[string]interface{}{
-										"name":      toolName,
-										"arguments": `{"value":"hello"}`,
-									},
-								},
-							},
-						},
-					},
-				},
-			})
+			writeRunnerStreamToolCall(t, w, "call_fail", toolName, map[string]string{"value": "hello"})
 			return
 		}
-		writeRunnerJSON(t, w, map[string]interface{}{
-			"choices": []map[string]interface{}{
-				{"message": map[string]interface{}{"content": "handled"}},
-			},
-		})
+		writeRunnerStreamText(t, w, "handled")
 	})
 	defer server.Close()
 
 	agent := NewAgent(testAgentConfig(server.URL, 3))
-	if _, err := agent.Run(context.Background(), "fail tool"); err != nil {
-		t.Fatalf("Run returned error: %v", err)
+	if _, err := agent.RunStreamWithEvents(context.Background(), "fail tool", nil); err != nil {
+		t.Fatalf("RunStreamWithEvents returned error: %v", err)
 	}
 
 	messages := agent.GetConversation().Context.GetMessages()
@@ -216,10 +166,10 @@ func TestRunnerOpenAIApplyPatchCreateAndDelete(t *testing.T) {
 		"*** End Patch"
 
 	var calls int
-	server := newRunnerServer(t, func(w http.ResponseWriter, r *http.Request) {
+	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		if calls == 1 {
-			writeRunnerToolCallJSON(t, w, "call_create_patch", "apply_patch", map[string]string{"patch": createPatch})
+			writeRunnerStreamToolCall(t, w, "call_create_patch", "apply_patch", map[string]string{"patch": createPatch})
 			return
 		}
 		if calls == 2 {
@@ -233,7 +183,7 @@ func TestRunnerOpenAIApplyPatchCreateAndDelete(t *testing.T) {
 			if content, err := os.ReadFile(target); err != nil || string(content) != "created by runner\n" {
 				t.Fatalf("expected created file, content=%q err=%v", string(content), err)
 			}
-			writeRunnerToolCallJSON(t, w, "call_delete_patch", "apply_patch", map[string]string{"patch": deletePatch})
+			writeRunnerStreamToolCall(t, w, "call_delete_patch", "apply_patch", map[string]string{"patch": deletePatch})
 			return
 		}
 		if calls == 3 {
@@ -247,11 +197,7 @@ func TestRunnerOpenAIApplyPatchCreateAndDelete(t *testing.T) {
 			if _, err := os.Stat(target); !os.IsNotExist(err) {
 				t.Fatalf("expected deleted file, stat err=%v", err)
 			}
-			writeRunnerJSON(t, w, map[string]interface{}{
-				"choices": []map[string]interface{}{
-					{"message": map[string]interface{}{"content": "patch complete"}},
-				},
-			})
+			writeRunnerStreamText(t, w, "patch complete")
 			return
 		}
 		t.Fatalf("unexpected call %d", calls)
@@ -284,16 +230,8 @@ func TestRunnerAnthropicApplyPatchToolUse(t *testing.T) {
 		}
 		calls++
 		if calls == 1 {
-			writeRunnerJSON(t, w, map[string]interface{}{
-				"content": []map[string]interface{}{
-					{
-						"type":  "tool_use",
-						"id":    "toolu_patch",
-						"name":  "apply_patch",
-						"input": map[string]string{"patch": patch},
-					},
-				},
-				"stop_reason": "tool_use",
+			writeRunnerAnthropicToolUseStream(t, w, "toolu_patch", "apply_patch", map[string]string{
+				"patch": patch,
 			})
 			return
 		}
@@ -313,10 +251,7 @@ func TestRunnerAnthropicApplyPatchToolUse(t *testing.T) {
 		if content, err := os.ReadFile(target); err != nil || string(content) != "created by anthropic\n" {
 			t.Fatalf("expected created file, content=%q err=%v", string(content), err)
 		}
-		writeRunnerJSON(t, w, map[string]interface{}{
-			"content":     []map[string]interface{}{{"type": "text", "text": "anthropic patch complete"}},
-			"stop_reason": "end_turn",
-		})
+		writeRunnerAnthropicTextStream(t, w, "anthropic patch complete")
 	}))
 	defer server.Close()
 
@@ -336,44 +271,26 @@ func runAgentWithApprovalSink(ctx context.Context, cfg AgentConfig, userInput st
 	conv := convcontext.NewConversation(nil)
 	conv.UserInput(userInput)
 	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
-	runner.toolRuntime = NewToolRuntimeWithConfig(sink, toolRuntimeConfigFromAgentConfig(cfg))
-	return runner.Run(ctx)
+	return runner.RunStreamWithEvents(ctx, sink)
 }
 
 func TestRunnerMaxThoughts(t *testing.T) {
 	toolName := "runner_max_tool"
 	mustRegisterRunnerTool(t, runnerTestTool{name: toolName})
 
-	server := newRunnerServer(t, func(w http.ResponseWriter, r *http.Request) {
-		writeRunnerJSON(t, w, map[string]interface{}{
-			"choices": []map[string]interface{}{
-				{
-					"message": map[string]interface{}{
-						"tool_calls": []map[string]interface{}{
-							{
-								"id":   "call_max",
-								"type": "function",
-								"function": map[string]interface{}{
-									"name":      toolName,
-									"arguments": `{"value":"again"}`,
-								},
-							},
-						},
-					},
-				},
-			},
-		})
+	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeRunnerStreamToolCall(t, w, "call_max", toolName, map[string]string{"value": "again"})
 	})
 	defer server.Close()
 
 	agent := NewAgent(testAgentConfig(server.URL, 1))
-	_, err := agent.Run(context.Background(), "loop")
+	_, err := agent.RunStreamWithEvents(context.Background(), "loop", nil)
 	if err == nil || !strings.Contains(err.Error(), "达到最大思考次数") {
 		t.Fatalf("expected max thoughts error, got %v", err)
 	}
 }
 
-func TestRunnerRunStreamEmitsTextDeltas(t *testing.T) {
+func TestRunnerRunStreamWithEventsEmitsTextDeltas(t *testing.T) {
 	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeRunnerStreamLines(t, w, []string{
 			`data: {"choices":[{"delta":{"content":"Hel"}}]}`,
@@ -385,14 +302,13 @@ func TestRunnerRunStreamEmitsTextDeltas(t *testing.T) {
 
 	agent := NewAgent(testAgentConfig(server.URL, 2))
 	var chunks []string
-	answer, err := agent.RunStream(context.Background(), "stream", func(content string, isThinking bool) {
-		if isThinking {
-			t.Fatalf("unexpected thinking callback: %q", content)
+	answer, err := agent.RunStreamWithEvents(context.Background(), "stream", EventSinkFunc(func(event AwakenEvent) {
+		if event.Type == TextDeltaEventType {
+			chunks = append(chunks, event.Delta)
 		}
-		chunks = append(chunks, content)
-	})
+	}))
 	if err != nil {
-		t.Fatalf("RunStream returned error: %v", err)
+		t.Fatalf("RunStreamWithEvents returned error: %v", err)
 	}
 	if answer != "Hello" {
 		t.Fatalf("expected Hello, got %q", answer)
@@ -402,7 +318,7 @@ func TestRunnerRunStreamEmitsTextDeltas(t *testing.T) {
 	}
 }
 
-func TestRunnerRunStreamNativeToolCallLoop(t *testing.T) {
+func TestRunnerRunStreamWithEventsNativeToolCallLoop(t *testing.T) {
 	toolName := "runner_stream_tool"
 	mustRegisterRunnerTool(t, runnerTestTool{name: toolName})
 
@@ -425,20 +341,24 @@ func TestRunnerRunStreamNativeToolCallLoop(t *testing.T) {
 	defer server.Close()
 
 	agent := NewAgent(testAgentConfig(server.URL, 3))
-	var output string
-	answer, err := agent.RunStream(context.Background(), "stream tool", func(content string, isThinking bool) {
-		if !isThinking {
-			output += content
+	var toolResultSeen bool
+	var text string
+	answer, err := agent.RunStreamWithEvents(context.Background(), "stream tool", EventSinkFunc(func(event AwakenEvent) {
+		if event.Type == ToolResultEventType && strings.Contains(event.Content, "echo:hello") {
+			toolResultSeen = true
 		}
-	})
+		if event.Type == TextDeltaEventType {
+			text += event.Delta
+		}
+	}))
 	if err != nil {
-		t.Fatalf("RunStream returned error: %v", err)
+		t.Fatalf("RunStreamWithEvents returned error: %v", err)
 	}
 	if answer != "done" {
 		t.Fatalf("expected done, got %q", answer)
 	}
-	if !strings.Contains(output, "echo:hello") || !strings.Contains(output, "done") {
-		t.Fatalf("expected tool result and final output, got %q", output)
+	if !toolResultSeen || !strings.Contains(text, "done") {
+		t.Fatalf("expected tool result and final output, got toolResultSeen=%v text=%q", toolResultSeen, text)
 	}
 }
 
@@ -502,7 +422,7 @@ data: {"type":"message_stop"}`,
 	cfg := testAgentConfig(server.URL+"/anthropic", 3)
 	var gotEvents []AwakenEvent
 	agent := NewAgent(cfg)
-	answer, err := agent.RunStreamWithEvents(context.Background(), "stream tool with events", nil, EventSinkFunc(func(event AwakenEvent) {
+	answer, err := agent.RunStreamWithEvents(context.Background(), "stream tool with events", EventSinkFunc(func(event AwakenEvent) {
 		gotEvents = append(gotEvents, event)
 	}))
 	if err != nil {
@@ -606,7 +526,7 @@ data: {"type":"message_stop"}`,
 	conv := convcontext.NewConversation(nil)
 	conv.UserInput("use tool")
 	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
-	answer, err := runner.RunStreamWithEvents(context.Background(), nil, nil)
+	answer, err := runner.RunStreamWithEvents(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("RunStreamWithEvents returned error: %v", err)
 	}
@@ -681,7 +601,7 @@ data: {"type":"message_stop"}`,
 
 	var gotEvents []AwakenEvent
 	agent := NewAgent(cfg)
-	answer, err := agent.RunStreamWithEvents(context.Background(), "read outside workspace", nil, EventSinkFunc(func(event AwakenEvent) {
+	answer, err := agent.RunStreamWithEvents(context.Background(), "read outside workspace", EventSinkFunc(func(event AwakenEvent) {
 		gotEvents = append(gotEvents, event)
 	}))
 	if err != nil {
@@ -739,7 +659,7 @@ func TestRunnerRunStreamWithEventsPlainQA(t *testing.T) {
 	cfg := testAgentConfig(server.URL, 2)
 	var gotEvents []AwakenEvent
 	agent := NewAgent(cfg)
-	answer, err := agent.RunStreamWithEvents(context.Background(), "ping", nil, EventSinkFunc(func(event AwakenEvent) {
+	answer, err := agent.RunStreamWithEvents(context.Background(), "ping", EventSinkFunc(func(event AwakenEvent) {
 		gotEvents = append(gotEvents, event)
 	}))
 	if err != nil {
@@ -868,18 +788,14 @@ func TestRunnerPropagatesBearerAuthByDefault(t *testing.T) {
 	var capturedHeaders http.Header
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedHeaders = r.Header.Clone()
-		writeRunnerJSON(t, w, map[string]interface{}{
-			"choices": []map[string]interface{}{
-				{"message": map[string]interface{}{"content": "ok"}},
-			},
-		})
+		writeRunnerStreamText(t, w, "ok")
 	}))
 	defer server.Close()
 
 	cfg := testAgentConfig(server.URL, 2)
 	agent := NewAgent(cfg)
-	if _, err := agent.Run(context.Background(), "hi"); err != nil {
-		t.Fatalf("Run returned error: %v", err)
+	if _, err := agent.RunStreamWithEvents(context.Background(), "hi", nil); err != nil {
+		t.Fatalf("RunStreamWithEvents returned error: %v", err)
 	}
 
 	if got := capturedHeaders.Get("Authorization"); got != "Bearer test-key" {
@@ -894,19 +810,15 @@ func TestRunnerPropagatesXAPIKeyAuthScheme(t *testing.T) {
 	var capturedHeaders http.Header
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedHeaders = r.Header.Clone()
-		writeRunnerJSON(t, w, map[string]interface{}{
-			"choices": []map[string]interface{}{
-				{"message": map[string]interface{}{"content": "ok"}},
-			},
-		})
+		writeRunnerStreamText(t, w, "ok")
 	}))
 	defer server.Close()
 
 	cfg := testAgentConfig(server.URL, 2)
 	cfg.ModelConfig.AuthScheme = "x-api-key"
 	agent := NewAgent(cfg)
-	if _, err := agent.Run(context.Background(), "hi"); err != nil {
-		t.Fatalf("Run returned error: %v", err)
+	if _, err := agent.RunStreamWithEvents(context.Background(), "hi", nil); err != nil {
+		t.Fatalf("RunStreamWithEvents returned error: %v", err)
 	}
 
 	if got := capturedHeaders.Get("Authorization"); got != "" {
@@ -934,8 +846,8 @@ func TestRunnerPropagatesAuthSchemeInStream(t *testing.T) {
 	cfg := testAgentConfig(server.URL, 2)
 	cfg.ModelConfig.AuthScheme = "x-api-key"
 	agent := NewAgent(cfg)
-	if _, err := agent.RunStream(context.Background(), "hi", nil); err != nil {
-		t.Fatalf("RunStream returned error: %v", err)
+	if _, err := agent.RunStreamWithEvents(context.Background(), "hi", nil); err != nil {
+		t.Fatalf("RunStreamWithEvents returned error: %v", err)
 	}
 
 	if got := capturedHeaders.Get("x-api-key"); got != "test-key" {
@@ -957,7 +869,7 @@ func TestRunnerRejectsInvalidToolResultPairingBeforeLLM(t *testing.T) {
 	})
 	runner := NewRunner(testAgentConfig(server.URL, 1), conv, NewRequestBuilder(testAgentConfig(server.URL, 1)))
 
-	_, err := runner.Run(context.Background())
+	_, err := runner.RunStreamWithEvents(context.Background(), nil)
 	if err == nil || !strings.Contains(err.Error(), "invalid tool result pairing") {
 		t.Fatalf("expected pairing error, got %v", err)
 	}
@@ -1000,7 +912,7 @@ func TestRunnerCancelInjectsSyntheticToolResults(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := runner.RunStreamWithEvents(ctx, nil, nil)
+	_, err := runner.RunStreamWithEvents(ctx, nil)
 	if err == nil || !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled error, got %v", err)
 	}
@@ -1091,7 +1003,7 @@ data: {"type":"message_stop"}`,
 	conv.UserInput("use cancel tool")
 	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
 
-	_, err := runner.RunStreamWithEvents(ctx, nil, nil)
+	_, err := runner.RunStreamWithEvents(ctx, nil)
 	if err == nil || !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled error, got %v", err)
 	}
@@ -1175,7 +1087,7 @@ data: {"type":"message_stop"}`,
 	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
 
 	var gotEvents []AwakenEvent
-	_, err := runner.RunStreamWithEvents(ctx, nil, EventSinkFunc(func(event AwakenEvent) {
+	_, err := runner.RunStreamWithEvents(ctx, EventSinkFunc(func(event AwakenEvent) {
 		gotEvents = append(gotEvents, event)
 	}))
 	if err == nil || !errors.Is(err, context.Canceled) {
@@ -1258,7 +1170,7 @@ data: {"type":"message_stop"}`,
 	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
 
 	var gotEvents []AwakenEvent
-	_, err := runner.RunStreamWithEvents(context.Background(), nil, EventSinkFunc(func(event AwakenEvent) {
+	_, err := runner.RunStreamWithEvents(context.Background(), EventSinkFunc(func(event AwakenEvent) {
 		gotEvents = append(gotEvents, event)
 	}))
 	if err != nil {
@@ -1300,7 +1212,7 @@ func TestRunnerXMLFallbackCancelBeforeExecutionEmitsNoToolCallStart(t *testing.T
 	cancel()
 
 	xmlAction := "<action><name>" + toolName + "</name><input>hello</input></action>"
-	handled, _ := runner.handleXMLFallback(ctx, xmlAction, nil, events)
+	handled, _ := runner.handleXMLFallback(ctx, xmlAction, events)
 	if !handled {
 		t.Fatalf("expected XML fallback to be handled")
 	}
@@ -1341,7 +1253,7 @@ func TestRunnerRunStreamWithEventsMissingAPIKeyEmitsAuthErrorCode(t *testing.T) 
 	cfg.ModelConfig.APIKey = ""
 	var gotEvents []AwakenEvent
 	agent := NewAgent(cfg)
-	_, err := agent.RunStreamWithEvents(context.Background(), "ping", nil, EventSinkFunc(func(event AwakenEvent) {
+	_, err := agent.RunStreamWithEvents(context.Background(), "ping", EventSinkFunc(func(event AwakenEvent) {
 		gotEvents = append(gotEvents, event)
 	}))
 	if err == nil {
@@ -1547,20 +1459,31 @@ func writeRunnerJSON(t *testing.T, w http.ResponseWriter, value interface{}) {
 	}
 }
 
-func writeRunnerToolCallJSON(t *testing.T, w http.ResponseWriter, id, name string, arguments interface{}) {
+func writeRunnerStreamText(t *testing.T, w http.ResponseWriter, text string) {
+	t.Helper()
+	writeRunnerStreamEvent(t, w, map[string]interface{}{
+		"choices": []map[string]interface{}{
+			{"delta": map[string]interface{}{"content": text}},
+		},
+	})
+	writeRunnerStreamLines(t, w, []string{"data: [DONE]"})
+}
+
+func writeRunnerStreamToolCall(t *testing.T, w http.ResponseWriter, id, name string, arguments interface{}) {
 	t.Helper()
 	argumentData, err := json.Marshal(arguments)
 	if err != nil {
 		t.Fatalf("failed to marshal tool arguments: %v", err)
 	}
-	writeRunnerJSON(t, w, map[string]interface{}{
+	writeRunnerStreamEvent(t, w, map[string]interface{}{
 		"choices": []map[string]interface{}{
 			{
-				"message": map[string]interface{}{
+				"delta": map[string]interface{}{
 					"tool_calls": []map[string]interface{}{
 						{
-							"id":   id,
-							"type": "function",
+							"index": 0,
+							"id":    id,
+							"type":  "function",
 							"function": map[string]interface{}{
 								"name":      name,
 								"arguments": string(argumentData),
@@ -1571,6 +1494,16 @@ func writeRunnerToolCallJSON(t *testing.T, w http.ResponseWriter, id, name strin
 			},
 		},
 	})
+	writeRunnerStreamLines(t, w, []string{"data: [DONE]"})
+}
+
+func writeRunnerStreamEvent(t *testing.T, w http.ResponseWriter, value interface{}) {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("failed to marshal stream event: %v", err)
+	}
+	writeRunnerStreamLines(t, w, []string{"data: " + string(data)})
 }
 
 func writeRunnerStreamLines(t *testing.T, w http.ResponseWriter, lines []string) {
@@ -1584,6 +1517,75 @@ func writeRunnerStreamLines(t *testing.T, w http.ResponseWriter, lines []string)
 			flusher.Flush()
 		}
 	}
+}
+
+func writeRunnerAnthropicToolUseStream(t *testing.T, w http.ResponseWriter, id, name string, input interface{}) {
+	t.Helper()
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("failed to marshal anthropic tool input: %v", err)
+	}
+	writeRunnerAnthropicStreamEvent(t, w, "content_block_start", map[string]interface{}{
+		"type":  "content_block_start",
+		"index": 0,
+		"content_block": map[string]interface{}{
+			"type": "tool_use",
+			"id":   id,
+			"name": name,
+		},
+	})
+	writeRunnerAnthropicStreamEvent(t, w, "content_block_delta", map[string]interface{}{
+		"type":  "content_block_delta",
+		"index": 0,
+		"delta": map[string]interface{}{
+			"type":         "input_json_delta",
+			"partial_json": string(inputJSON),
+		},
+	})
+	writeRunnerAnthropicStreamEvent(t, w, "content_block_stop", map[string]interface{}{
+		"type":  "content_block_stop",
+		"index": 0,
+	})
+	writeRunnerAnthropicStreamEvent(t, w, "message_stop", map[string]interface{}{
+		"type": "message_stop",
+	})
+}
+
+func writeRunnerAnthropicTextStream(t *testing.T, w http.ResponseWriter, text string) {
+	t.Helper()
+	writeRunnerAnthropicStreamEvent(t, w, "content_block_start", map[string]interface{}{
+		"type":  "content_block_start",
+		"index": 0,
+		"content_block": map[string]interface{}{
+			"type": "text",
+		},
+	})
+	writeRunnerAnthropicStreamEvent(t, w, "content_block_delta", map[string]interface{}{
+		"type":  "content_block_delta",
+		"index": 0,
+		"delta": map[string]interface{}{
+			"type": "text_delta",
+			"text": text,
+		},
+	})
+	writeRunnerAnthropicStreamEvent(t, w, "content_block_stop", map[string]interface{}{
+		"type":  "content_block_stop",
+		"index": 0,
+	})
+	writeRunnerAnthropicStreamEvent(t, w, "message_stop", map[string]interface{}{
+		"type": "message_stop",
+	})
+}
+
+func writeRunnerAnthropicStreamEvent(t *testing.T, w http.ResponseWriter, name string, value interface{}) {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("failed to marshal anthropic stream event: %v", err)
+	}
+	writeRunnerAnthropicStreamEvents(t, w, []string{
+		"event: " + name + "\n" + "data: " + string(data),
+	})
 }
 
 func writeRunnerAnthropicStreamEvents(t *testing.T, w http.ResponseWriter, events []string) {

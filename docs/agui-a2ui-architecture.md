@@ -38,7 +38,7 @@ apps/desktop/src/renderer/runtime/reducer.ts
 
 ## 当前 Runtime API
 
-`cmd/awaken-core` 启动本地 runtime server。默认地址：
+`cmd/awaken-core` 是 Desktop 管理的本地 runtime server 进程，不作为 Awaken 的独立使用入口。默认地址：
 
 ```text
 http://127.0.0.1:8787

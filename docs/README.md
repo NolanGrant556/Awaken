@@ -12,7 +12,7 @@ coding-agent-handoff.md
 ## 按任务继续读
 
 - 改 runtime、protocol、AG-UI、A2UI：读 `agui-a2ui-architecture.md`。
-- 单独调试 `awaken-core`：读 `runtime-development.md`。
+- 验证 runtime/server 内部行为：读 `runtime-development.md`。
 - 需要对照 AG-UI / A2UI 上游仓库：读 `upstream-references.md`。
 - 改 Electron desktop consumer：读 `../apps/desktop/README.md`。
 
@@ -23,7 +23,7 @@ coding-agent-handoff.md
 - `../README.md`：仓库总入口。说明当前产品形态、目录、常用命令和最高层硬边界。
 - `coding-agent-handoff.md`：0 上下文 Coding Agent 的执行入口。说明接手步骤、当前 owner 划分、改代码前检查和不要做的事。
 - `agui-a2ui-architecture.md`：AG-UI / A2UI / runtime / desktop 的实现契约。协议映射、事件链路、approval/artifact 边界以这里为准。
-- `runtime-development.md`：仅面向 Go runtime/API 调试；Desktop 使用与开发仍走 `npm run dev:desktop`。
+- `runtime-development.md`：仅面向 Go runtime/API 内部测试与验证；Awaken 使用入口仍走 `npm run dev:desktop`。
 - `upstream-references.md`：AG-UI / A2UI 上游参考说明。记录 upstream、固定 commit、clone 方式和参考范围；只有需要对照上游时才读。
 - `../apps/desktop/README.md`：Electron desktop consumer 的本地开发和 bridge/adapter 契约。
 

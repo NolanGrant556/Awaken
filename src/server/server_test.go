@@ -1373,7 +1373,7 @@ func TestPlainQASmoke(t *testing.T) {
 		},
 		func(agent *agentcore.Agent) awruntime.Executor {
 			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-				return agent.RunStreamWithEvents(ctx, input, nil, sink)
+				return agent.RunStreamWithEvents(ctx, input, sink)
 			})
 		},
 	)
@@ -1516,7 +1516,7 @@ func TestReadOnlyFileSmoke(t *testing.T) {
 		},
 		func(agent *agentcore.Agent) awruntime.Executor {
 			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-				return agent.RunStreamWithEvents(ctx, input, nil, sink)
+				return agent.RunStreamWithEvents(ctx, input, sink)
 			})
 		},
 	)
@@ -1691,7 +1691,7 @@ func TestFileMutationApprovalSmoke(t *testing.T) {
 		},
 		func(agent *agentcore.Agent) awruntime.Executor {
 			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-				return agent.RunStreamWithEvents(ctx, input, nil, sink)
+				return agent.RunStreamWithEvents(ctx, input, sink)
 			})
 		},
 	)
@@ -1866,7 +1866,7 @@ func TestFileMutationRejectSmoke(t *testing.T) {
 		},
 		func(agent *agentcore.Agent) awruntime.Executor {
 			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-				return agent.RunStreamWithEvents(ctx, input, nil, sink)
+				return agent.RunStreamWithEvents(ctx, input, sink)
 			})
 		},
 	)
@@ -2081,7 +2081,7 @@ func TestFileMutationArtifactSmoke(t *testing.T) {
 		},
 		func(agent *agentcore.Agent) awruntime.Executor {
 			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-				return agent.RunStreamWithEvents(ctx, input, nil, sink)
+				return agent.RunStreamWithEvents(ctx, input, sink)
 			})
 		},
 	)
@@ -2269,7 +2269,7 @@ func TestFileMutationPatchAndTurnDiffSmoke(t *testing.T) {
 		},
 		func(agent *agentcore.Agent) awruntime.Executor {
 			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-				return agent.RunStreamWithEvents(ctx, input, nil, sink)
+				return agent.RunStreamWithEvents(ctx, input, sink)
 			})
 		},
 	)
@@ -2431,7 +2431,7 @@ func TestMultiTurnThreadSmoke(t *testing.T) {
 		},
 		func(agent *agentcore.Agent) awruntime.Executor {
 			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-				return agent.RunStreamWithEvents(ctx, input, nil, sink)
+				return agent.RunStreamWithEvents(ctx, input, sink)
 			})
 		},
 	)
@@ -2798,7 +2798,7 @@ func TestModelStatusSmoke(t *testing.T) {
 		},
 		func(agent *agentcore.Agent) awruntime.Executor {
 			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-				return agent.RunStreamWithEvents(ctx, input, nil, sink)
+				return agent.RunStreamWithEvents(ctx, input, sink)
 			})
 		},
 	)
@@ -2923,7 +2923,7 @@ func TestRunWithoutAPIKeyEmitsProviderAuthMissing(t *testing.T) {
 		},
 		func(agent *agentcore.Agent) awruntime.Executor {
 			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-				return agent.RunStreamWithEvents(ctx, input, nil, sink)
+				return agent.RunStreamWithEvents(ctx, input, sink)
 			})
 		},
 	)
@@ -3025,7 +3025,7 @@ func TestRunWithBadBaseURLEmitsProviderRequestFailed(t *testing.T) {
 		},
 		func(agent *agentcore.Agent) awruntime.Executor {
 			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-				return agent.RunStreamWithEvents(ctx, input, nil, sink)
+				return agent.RunStreamWithEvents(ctx, input, sink)
 			})
 		},
 	)
@@ -3139,7 +3139,7 @@ func TestRunWithProviderBodySecretEmitsSanitizedMessage(t *testing.T) {
 		},
 		func(agent *agentcore.Agent) awruntime.Executor {
 			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-				return agent.RunStreamWithEvents(ctx, input, nil, sink)
+				return agent.RunStreamWithEvents(ctx, input, sink)
 			})
 		},
 	)

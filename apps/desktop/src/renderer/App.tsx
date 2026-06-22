@@ -32,7 +32,6 @@ import {
   AwakenWorkbenchSidebarFrame as WorkbenchSidebarFrame,
   AwakenRunStage as RunStage,
   AwakenComposerDock as ComposerDock,
-  AwakenWindowTitleBar as WindowTitleBar,
   useAwakenAutoScrollTail as useAutoScrollTail,
   type ComponentTone,
   type InspectorTabId,
@@ -196,7 +195,7 @@ export function App() {
     let cancelled = false;
 
     async function poll(): Promise<void> {
-      if (runtimeClient.source === "electron" && runtimeState.supervisorStatus !== "running") {
+      if (runtimeState.supervisorStatus !== "running") {
         setRuntimeInfo(null);
         return;
       }
@@ -1036,14 +1035,11 @@ export function App() {
     }
   }
 
-  const platform = (runtimeClient.platform === "web"
-    ? "macos"
-    : runtimeClient.platform) as PlatformKind;
+  const platform = runtimeClient.platform as PlatformKind;
 
   return (
     <>
-      <div className={`desktop-root desktop-root-${runtimeClient.source}`}>
-        {runtimeClient.source === "browser" ? <WindowTitleBar platform={platform} /> : null}
+      <div className="desktop-root desktop-root-electron">
         <AppShell
           platform={platform}
           sidebarCollapsed={sidebarCollapsed}

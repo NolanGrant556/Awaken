@@ -5,8 +5,6 @@ import (
 	stdcontext "context"
 )
 
-type StreamCallback func(content string, isThinking bool)
-
 type Agent struct {
 	config       AgentConfig
 	conversation *context.Conversation
@@ -51,26 +49,10 @@ func (a *Agent) GetConfig() AgentConfig {
 	return a.config
 }
 
-func (a *Agent) Run(ctx stdcontext.Context, userInput string) (string, error) {
+func (a *Agent) RunStreamWithEvents(ctx stdcontext.Context, userInput string, sink EventSink) (string, error) {
 	a.conversation.UserInput(userInput)
 
 	runner := NewRunner(a.config, a.conversation, a.reqBuilder)
 	runner.threadID = a.threadID
-	return runner.Run(ctx)
-}
-
-func (a *Agent) RunStream(ctx stdcontext.Context, userInput string, callback StreamCallback) (string, error) {
-	a.conversation.UserInput(userInput)
-
-	runner := NewRunner(a.config, a.conversation, a.reqBuilder)
-	runner.threadID = a.threadID
-	return runner.RunStream(ctx, callback)
-}
-
-func (a *Agent) RunStreamWithEvents(ctx stdcontext.Context, userInput string, callback StreamCallback, sink EventSink) (string, error) {
-	a.conversation.UserInput(userInput)
-
-	runner := NewRunner(a.config, a.conversation, a.reqBuilder)
-	runner.threadID = a.threadID
-	return runner.RunStreamWithEvents(ctx, callback, sink)
+	return runner.RunStreamWithEvents(ctx, sink)
 }

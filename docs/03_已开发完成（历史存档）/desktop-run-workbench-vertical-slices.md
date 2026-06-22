@@ -765,7 +765,7 @@ Awaken 的常见交互一致：tab、popover、tooltip、copy、collapse、auto-
 
 - Desktop：删除不再使用的 Dashboard/card wall/dev log 组件、样式、mock 数据。
 - UI：删除只服务旧主界面的组件或降级为 playground-only。
-- Docs：更新 Desktop README 和 handoff docs。
+- Docs：更新根 README 和 Desktop README。
 - QA：真实 LLM smoke + visual QA。
 
 ### 完成定义
@@ -846,7 +846,7 @@ Phase 4：收口
 
 ## 给 Coding Agent 的执行约束
 
-- 每个切片开始前先读本文件、`docs/agui-a2ui-architecture.md`、相关 Desktop reducer/UI 文件。
+- 每个切片开始前先读本文件、根 README、`docs/01_项目情况说明/AG-UI&A2UI说明/agui-a2ui-architecture.md`、相关 Desktop reducer/UI 文件。
 - 修改范围要小，优先让一个真实用户流程闭环。
 - `packages/ui` 只放 UI-only 组件。
 - Runtime policy 只能在 Go runtime/tool 层，不能移到 renderer。

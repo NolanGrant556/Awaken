@@ -15,7 +15,6 @@ Awaken 是一个本地优先的 Agent runtime 与桌面应用原型。当前仓�
    - 用户和开发者都从这里打开同一个 Awaken Desktop。
    - Desktop 自己启动并管理 `awaken-core`。
    - 不要把 `cmd/awaken-core`、Vite renderer 或 Electron 子脚本当成独立使用入口。
-
 2. 组件独立观测入口：`http://127.0.0.1:5173/#/components/<component-id>`
    - 先用 `npm run dev:ui` 启动本地组件观测服务。
    - 每个组件都有自己的可刷新、可截图 URL。
@@ -39,13 +38,12 @@ Awaken 是一个本地优先的 Agent runtime 与桌面应用原型。当前仓�
 ```text
 README.md
 docs/README.md
-docs/coding-agent-handoff.md
 ```
 
 然后按任务继续读：
 
-- 改 runtime / protocol / AG-UI / A2UI：读 `docs/agui-a2ui-architecture.md`。
-- 需要对照 AG-UI / A2UI 上游：读 `docs/upstream-references.md`。
+- 改 runtime / protocol / AG-UI / A2UI：读 `docs/01_项目情况说明/AG-UI&A2UI说明/agui-a2ui-architecture.md`。
+- 需要对照 AG-UI / A2UI 上游：读 `docs/01_项目情况说明/AG-UI&A2UI说明/upstream-references.md`。
 - 改 desktop：读 `apps/desktop/README.md`。
 - 改 Awaken Design System / UI 组件库：读 `Awaken Design System/README.md`。
 
@@ -67,6 +65,7 @@ git status --short
 ├── apps/
 │   └── desktop/                 # Electron main/preload/renderer consumer
 ├── docs/                        # 当前架构与接手指引
+├── scripts/                     # 构建、验收、runtime binary 自动化脚本；不是使用入口
 ├── Awaken Design System/         # @awaken/design-system，组件源码、tokens、Gallery
 ├── src/
 │   ├── agentcore/               # agent loop、request builder、tool runtime、内部事件
@@ -88,7 +87,7 @@ git status --short
 
 Desktop 会自己启动并管理 `cmd/awaken-core`。用户和 Desktop 开发者不需要单独启动 runtime，也不应绕过 Electron bridge 直连 runtime。
 
-Runtime / server 只作为内部工程层测试与验证，说明见 `docs/runtime-development.md`。
+Runtime / server 只作为内部工程层测试与验证，不形成第三个使用入口。
 
 当前 HTTP surface：
 
@@ -117,6 +116,50 @@ AWAKEN_TURN_DIFF
 ```
 
 approval request 还会生成一个只读的 `artifactKind: "a2ui_surface"` payload，用于 desktop generated surface 评估。
+
+## Coding Agent 接手规则
+
+0 上下文 Coding Agent 应以本 README 为唯一接手入口。
+
+当前产品形态：
+
+```text
+Awaken Desktop
+  -> awaken-core local HTTP/SSE runtime
+  -> Agent Core
+  -> LLM provider + local tools
+```
+
+当前主界面是 Run Workbench：左 Sidebar、中心 Run Narrative、右 Inspector、底部 Composer。不要恢复旧 Dashboard、卡片墙或开发者日志主面板。
+
+实现 owner 速查：
+
+- `src/agentcore`：agent 执行循环、LLM request 组装、工具执行、内部 `AwakenEvent` 发射、workspace config、permission-aware `ToolRuntime`。
+- `src/runtime`：run/session 生命周期、事件历史与回放、取消、approval wait/resolve、runtime event dispatch。
+- `src/protocol/agui`：把内部 Awaken events 映射为 AG-UI-compatible JSON events。
+- `src/protocol/a2ui`：生成窄范围只读 approval surface payload；不是完整 A2UI renderer 或 SDK 集成。
+- `src/server`：本地 HTTP endpoints 与 SSE streams。
+- `src/tool` 和 `src/tools`：工具接口、schema generation、registry、permission decisions、内置工具实现。
+- `apps/desktop`：Electron + React Desktop consumer，通过 `window.awaken` bridge 消费 runtime。
+- `Awaken Design System`：UI-only component library，只接收 props 和 callbacks。
+
+改代码前：
+
+1. 先看当前 worktree 和 diff：`git status --short`。
+2. 判断改动属于哪个 owner：Agent Core、runtime、protocol、server、desktop、UI kit 或 docs。
+3. 把改动限制在 owner 边界内。
+4. 修改 runtime/protocol/tool 行为时，加或更新聚焦测试。
+5. 先跑最小相关检查，交付前再跑更大的验证。
+
+现在不要做：
+
+- 不要 vendor AG-UI / A2UI 外部参考仓库，也不要把本机参考路径写进代码或配置。
+- 不要让 `apps/desktop` 拥有后端 policy。
+- 不要让 `Awaken Design System` 依赖 Electron 或 runtime API。
+- 不要用 generated A2UI surface 替代当前 approval UI。
+- 不要把 Gallery/mock state 当成真实 run 验收。
+- 不要提交 secrets、依赖目录或构建产物。
+- 不要清理无关 dirty files，不要回滚用户未提交改动。
 
 ## 配置
 
@@ -174,10 +217,30 @@ npm run typecheck:desktop
 npm run build:desktop
 ```
 
+runtime/server 内部验证：
+
+```bash
+go test ./src/runtime ./src/server ./src/agentcore
+```
+
+真实 LLM smoke：
+
+```bash
+go test ./src/server -run 'TestPlainQASmoke|TestReadOnlyFileSmoke|TestFileMutation(Approval|Reject|Artifact|PatchAndTurnDiff)Smoke' -count=1 -v
+```
+
 常用完整验证：
 
 ```bash
 go test ./... && go vet ./... && go build ./... && npm run build:desktop && git diff --check
+```
+
+Run Workbench 收口验收：
+
+```bash
+rg -n "Dashboard|card wall|developer log|开发者日志|卡片墙" apps/desktop "Awaken Design System"
+go test ./src/server -run 'TestRunsEndpointsCreateReplayAndCancel|TestRunEventsAfterSeq|TestRunEventsAfterSeqReconnectMultiFrame' -count=1
+git diff --check
 ```
 
 ## 本地运行
@@ -230,6 +293,25 @@ web_search
 - `web_search` 不需要审批。
 - 相对路径按配置的 workspace root 解析。
 
+## Runtime 内部验证配置
+
+这部分只面向 `awaken-core` / Go runtime 的内部测试与验证，不是 Awaken 使用流程，也不是独立启动入口。
+
+- `AWAKEN_CONFIG_DIR`：指定 `.env` 与 `config.toml` 所在目录。
+- `AWAKEN_DEFAULT_WORKSPACE`：指定 `/v1/runtime/info` 返回的默认 workspace。
+- 未设置这些环境变量时，runtime 保持 Go 侧默认行为。
+- Runtime smoke 会在测试进程内启动本地 server，不形成 Awaken 的第三个使用入口。
+
+## Desktop 打包状态
+
+`electron-builder` 当前可以完成本地 Desktop 打包，但正式分发前还有 release packaging readiness 项：
+
+- `apps/desktop/package.json` 还没有完整的 `description` / `author`。
+- 还没有配置 Awaken 自己的 `.icns` / app icon，当前可能使用默认 Electron 图标。
+- 本机没有有效的 `Developer ID Application` 证书时，macOS code signing 会跳过，打包产物未签名、未公证。
+
+这些提醒不影响本机开发测试、统一启动流程、真实 LLM run 或 runtime supervisor 验收。正式分发给其他 macOS 用户前，需要补齐 app icon、Developer ID signing 和 notarization，否则可能触发 Gatekeeper 的“无法验证开发者”等提示。
+
 ## 硬边界
 
 - 不要把后端、Electron、SSE、AG-UI 或 A2UI 逻辑放进 `Awaken Design System`。
@@ -238,13 +320,3 @@ web_search
 - 不要 vendor AG-UI / A2UI 外部参考仓库，也不要把本机参考路径写进代码或配置。
 - 不要提交 `.env`、依赖目录或构建产物。
 - 不要擅自回滚未提交的用户改动。
-
-## 当前文档
-
-```text
-docs/README.md                    # docs 索引
-docs/coding-agent-handoff.md      # 0 上下文 Coding Agent 接手指引
-docs/agui-a2ui-architecture.md    # 当前 protocol/runtime/desktop 边界
-Awaken Design System/README.md    # Awaken Design System 当前主规范
-docs/upstream-references.md       # AG-UI / A2UI 上游参考与固定 commit
-```

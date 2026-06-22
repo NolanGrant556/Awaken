@@ -140,7 +140,7 @@ apps/desktop/src/renderer/a2ui/A2UISurfaceView.tsx
 1. 在 Awaken 仓库外部的参考 checkout 中切到新的上游 commit。
 2. 对照上游协议或规格变化，检查 Awaken 的协议代码是否需要调整。
 3. 更新本文件里的 commit hash。
-4. 如果事件契约或边界发生变化，同步更新 `docs/agui-a2ui-architecture.md`。
+4. 如果事件契约或边界发生变化，同步更新 `docs/01_项目情况说明/AG-UI&A2UI说明/agui-a2ui-architecture.md`。
 5. 运行 Awaken 验证命令：
 
 ```bash

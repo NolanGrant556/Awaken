@@ -4,6 +4,40 @@ Awaken Design System 是 Awaken 的 UI-only 组件系统。它包含可复用 Re
 
 这套组件必须可以从 Awaken Desktop 中抽离后继续复用。它不能依赖 Go runtime、Electron、AG-UI、A2UI、SSE、本地文件系统或 `window.awaken`。
 
+## 目录职责
+
+```text
+Awaken Design System/
+├── src/                         # 设计系统源码，只放可复用 UI 能力
+│   ├── components/              # 独立组件目录，每个组件一个文件夹
+│   ├── tokens/                  # 全局设计令牌与组件基础样式
+│   ├── hooks/                   # UI-only React hooks
+│   ├── assets/                  # 设计系统可复用静态资源
+│   ├── index.ts                 # 包主出口，Desktop 与外部项目应从这里导入
+│   └── types.ts                 # 设计系统共享类型
+├── gallery/                     # 本地组件观测服务源码
+│   ├── registry.ts              # 组件 URL 与 demo 注册表，组件观测入口的事实源
+│   ├── AwakenGalleryApp.tsx     # Gallery 壳层与 hash 路由
+│   ├── main.tsx                 # Gallery Vite 入口
+│   └── styles.css               # Gallery 专用样式，不应变成组件样式事实源
+├── smoke/                       # 自动化渲染冒烟检查
+│   └── render-smoke.mjs         # server-render 所有 Awaken*Demo
+├── dist/                        # 构建产物，由 build 生成，不手写维护
+├── index.html                   # Gallery HTML 入口
+├── package.json                 # @awaken/design-system 包、脚本与依赖声明
+├── vite.config.ts               # Gallery 与包构建配置
+├── tsconfig.json                # 开发期 TypeScript 配置
+└── tsconfig.build.json          # 类型声明构建配置
+```
+
+关键边界：
+
+- `src/components/` 是组件真实实现；`gallery/` 只负责观测，不承载产品逻辑。
+- `src/tokens/` 是颜色、间距、字体、边框、组件基础类等设计令牌事实源。
+- `dist/` 是生成目录，可以删除后重建；不要在里面修 bug。
+- `gallery/registry.ts` 决定哪些组件拥有独立观测 URL。
+- `src/index.ts` 决定哪些能力对 Desktop 或外部项目公开。
+
 ## 入口契约
 
 Awaken 本地只允许两套入口：

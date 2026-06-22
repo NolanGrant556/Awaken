@@ -86,7 +86,7 @@ go test ./src/server -run 'TestRunsEndpointsCreateReplayAndCancel|TestRunEventsA
 git diff --check
 ```
 
-旧主界面关键词扫描命令记录在仓库根部 handoff 文档，避免 Desktop 文档自身被产品路径扫描误命中。
+旧主界面关键词扫描命令记录在仓库根部 README，避免 Desktop 文档自身被产品路径扫描误命中。
 
 视觉 QA 要打开 Desktop，确认第一屏是左 Sidebar、中间 Run Narrative、右 Inspector、底部 Composer；不要把 UI playground 或 mock run 当作真实验收。
 

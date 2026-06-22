@@ -32,6 +32,7 @@ export function AwakenIconButton({
         placeItems: "center",
         width: dimension,
         height: dimension,
+        padding: 0,
         border: "1px solid transparent",
         borderRadius,
         background: "transparent",

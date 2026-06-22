@@ -15,7 +15,7 @@ export function AwakenComposerInput({
   value,
   onChange,
   onSubmit,
-  placeholder = "输入任务...",
+  placeholder = "",
   minRows = 2,
   maxRows = 6,
   disabled,
@@ -44,7 +44,7 @@ export function AwakenComposerInput({
     if (!textarea) return;
 
     textarea.style.height = "auto";
-    const lineHeight = 22;
+    const lineHeight = Number.parseFloat(window.getComputedStyle(textarea).lineHeight) || 22;
     const minHeight = minRows * lineHeight;
     const maxHeight = maxRows * lineHeight;
     const scrollHeight = textarea.scrollHeight;

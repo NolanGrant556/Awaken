@@ -27,6 +27,7 @@ export function AwakenSendButton({ ready, onClick, disabled, loading, mode = "se
         placeItems: "center",
         width: 32,
         height: 32,
+        padding: 0,
         border: "none",
         borderRadius: "var(--aw-radius-pill)",
         background: isStop

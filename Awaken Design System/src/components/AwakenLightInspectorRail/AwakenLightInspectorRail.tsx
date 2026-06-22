@@ -18,6 +18,7 @@ export type AwakenLightInspectorRailProps = {
   items: LightInspectorRailItem[];
   activeId?: string;
   onSelect?: (id: string) => void;
+  action?: ReactNode;
   children?: ReactNode;
 };
 
@@ -27,13 +28,19 @@ export function AwakenLightInspectorRail({
   items,
   activeId,
   onSelect,
+  action,
   children,
 }: AwakenLightInspectorRailProps) {
   return (
     <aside className="light-inspector-rail" aria-label={title}>
       <div className="light-inspector-head">
         <h2>{title}</h2>
-        {status ? <span>{status}</span> : null}
+        {status || action ? (
+          <div className="light-inspector-head-meta">
+            {status ? <span>{status}</span> : null}
+            {action}
+          </div>
+        ) : null}
       </div>
       <nav className="light-inspector-nav" aria-label="Inspector views">
         {items.map((item) => {

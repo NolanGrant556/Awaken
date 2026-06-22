@@ -1,7 +1,6 @@
 import "./AwakenWorkbenchChrome.css";
 import type { ReactNode } from "react";
 import { MessageCirclePlus, PanelLeft } from "lucide-react";
-import { AwakenTooltip } from "../AwakenTooltip";
 
 export type AwakenWorkbenchChromeProps = {
   sidebarCollapsed?: boolean;
@@ -21,19 +20,16 @@ function ChromeIconButton({
   children: ReactNode;
   active?: boolean;
 }) {
-  const button = (
+  return (
     <button
       type="button"
       className={`workbench-chrome-icon${active ? " is-active" : ""}`}
       aria-label={label}
-      title={label}
       onClick={onClick}
     >
       {children}
     </button>
   );
-
-  return <AwakenTooltip label={label}>{button}</AwakenTooltip>;
 }
 
 export function AwakenWorkbenchChrome({
@@ -54,13 +50,12 @@ export function AwakenWorkbenchChrome({
         <ChromeIconButton
           label={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
           onClick={onToggleSidebar}
-          active
         >
-          <PanelLeft size={20} strokeWidth={1.9} />
+          <PanelLeft size={14} strokeWidth={1.9} />
         </ChromeIconButton>
         {sidebarCollapsed ? (
           <ChromeIconButton label="New Agent" onClick={onNewTask}>
-            <MessageCirclePlus size={20} strokeWidth={1.9} />
+            <MessageCirclePlus size={14} strokeWidth={1.9} />
           </ChromeIconButton>
         ) : null}
       </div>

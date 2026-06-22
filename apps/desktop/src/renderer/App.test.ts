@@ -64,9 +64,11 @@ describe("App workbench presentation", () => {
     const html = renderToString(React.createElement(App));
 
     expect(html).toContain("On Awaken");
-    expect(html).toContain("Plan, Build, / for skills, @ for context");
+    expect(html).toContain('placeholder=""');
+    expect(html).toContain('rows="2"');
     expect(html).toContain("New Agent");
     expect(html).toContain("composer-bar-center");
+    expect(html).not.toContain("Plan, Build, / for skills, @ for context");
     expect(html).not.toContain("composer-bar-dock");
     expect(html).not.toContain("Planning next moves");
     expect(html).not.toContain("Ready for a run");

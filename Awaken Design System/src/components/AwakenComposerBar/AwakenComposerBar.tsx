@@ -76,7 +76,7 @@ export function AwakenComposerBar({
               onSubmit={handleSubmit}
               placeholder={placeholder}
               disabled={disabled}
-              minRows={variant === "center" ? 3 : 1}
+              minRows={variant === "center" ? 2 : 1}
               maxRows={variant === "center" ? 8 : 5}
             />
           </div>

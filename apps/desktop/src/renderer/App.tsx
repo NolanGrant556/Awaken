@@ -1,14 +1,18 @@
 import { useEffect, useReducer, useRef, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import type {
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+} from "react";
 import {
   CalendarClock,
-  Cpu,
   Files,
   FolderPlus,
   GitBranch,
   Globe,
-  HardDrive,
   ListFilter,
+  PanelRightClose,
+  PanelRightOpen,
   SlidersHorizontal,
   Terminal,
 } from "lucide-react";
@@ -150,6 +154,64 @@ function rawFileChangeId(selectionId: string): string {
     : selectionId;
 }
 
+const DEFAULT_SIDEBAR_WIDTH = 300;
+const MIN_SIDEBAR_WIDTH = 228;
+const MAX_SIDEBAR_WIDTH = 420;
+const DEFAULT_INSPECTOR_WIDTH = 300;
+const MIN_INSPECTOR_WIDTH = 260;
+const MAX_INSPECTOR_WIDTH = 520;
+const LAYOUT_STEP = 12;
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function readStoredNumber(
+  key: string,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return fallback;
+  }
+  try {
+    const value = Number(window.localStorage.getItem(key));
+    if (!Number.isFinite(value)) {
+      return fallback;
+    }
+    return clampNumber(value, min, max);
+  } catch {
+    return fallback;
+  }
+}
+
+function readStoredBoolean(key: string, fallback: boolean): boolean {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return fallback;
+  }
+  try {
+    const value = window.localStorage.getItem(key);
+    if (value === null) {
+      return fallback;
+    }
+    return value === "true";
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStoredValue(key: string, value: string): void {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Layout persistence is best-effort.
+  }
+}
+
 export function App() {
   const runtimeClientRef = useRef(createRuntimeClient());
   const unsubscribeRef = useRef<null | (() => void)>(null);
@@ -173,6 +235,25 @@ export function App() {
   const [inspectorTab, setInspectorTab] = useState<InspectorTabId>("changes");
   const [inspectorSelection, setInspectorSelection] = useState<InspectorSelection | undefined>();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(() =>
+    readStoredNumber(
+      "awaken:layout:sidebarWidth",
+      DEFAULT_SIDEBAR_WIDTH,
+      MIN_SIDEBAR_WIDTH,
+      MAX_SIDEBAR_WIDTH,
+    ),
+  );
+  const [inspectorWidth, setInspectorWidth] = useState(() =>
+    readStoredNumber(
+      "awaken:layout:inspectorWidth",
+      DEFAULT_INSPECTOR_WIDTH,
+      MIN_INSPECTOR_WIDTH,
+      MAX_INSPECTOR_WIDTH,
+    ),
+  );
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(() =>
+    readStoredBoolean("awaken:layout:inspectorCollapsed", false),
+  );
   const runTail = useAutoScrollTail<HTMLDivElement>({
     dependencies: [runtimeState.narrative],
     resetKeys: [runtimeState.runId, runtimeState.activeThreadId],
@@ -190,6 +271,18 @@ export function App() {
     runtimeState.supervisorStatus === "stopping" ||
     runtimeState.supervisorStatus === "stopped";
   const desktopNeedsRestart = runtimeState.supervisorStatus === "crashed";
+
+  useEffect(() => {
+    writeStoredValue("awaken:layout:sidebarWidth", String(sidebarWidth));
+  }, [sidebarWidth]);
+
+  useEffect(() => {
+    writeStoredValue("awaken:layout:inspectorWidth", String(inspectorWidth));
+  }, [inspectorWidth]);
+
+  useEffect(() => {
+    writeStoredValue("awaken:layout:inspectorCollapsed", String(inspectorCollapsed));
+  }, [inspectorCollapsed]);
 
   useEffect(() => {
     let cancelled = false;
@@ -390,8 +483,6 @@ export function App() {
     ...(runtimeState.narrative.activeItem ? [runtimeState.narrative.activeItem] : []),
   ];
   const visibleNarrativeItems = narrativeItems.filter((item) => item.kind !== "planning");
-  const workspaceParts = workspacePath.trim().split(/[\\/]/).filter(Boolean);
-  const workspaceName = workspaceParts[workspaceParts.length - 1] || "awaken";
   const topbarStatusLabel = desktopNeedsRestart
     ? "Needs restart"
     : desktopStarting
@@ -489,20 +580,6 @@ export function App() {
       label: "Files",
       badge: runtimeState.artifacts.length || undefined,
       icon: <Files size={16} strokeWidth={1.85} />,
-    },
-  ];
-  const composerMetaItems = [
-    { id: "repo", label: "awaken", icon: <GitBranch size={13} strokeWidth={1.85} /> },
-    { id: "workspace", label: workspaceName, icon: <HardDrive size={13} strokeWidth={1.85} /> },
-    {
-      id: "model",
-      label: runtimeInfo?.configuredModel || "model",
-      icon: <Cpu size={13} strokeWidth={1.85} />,
-    },
-    {
-      id: "runtime",
-      label: desktopReady ? "Local" : "Offline",
-      icon: <Terminal size={13} strokeWidth={1.85} />,
     },
   ];
   const showCenterComposer = shouldUseCenterComposer({
@@ -728,24 +805,6 @@ export function App() {
     }
   }
 
-  async function handlePickWorkspace(): Promise<void> {
-    if (!desktopReady) {
-      setNotice(desktopNeedsRestart ? "Awaken needs restart" : "Awaken is starting");
-      return;
-    }
-    try {
-      const result = await runtimeClient.pickWorkspace(workspacePath || runtimeInfo?.defaultWorkspace);
-      if (!result.canceled) {
-        setWorkspacePath(result.path);
-        setNotice(null);
-      } else if (result.error) {
-        setNotice(result.error);
-      }
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Failed to pick workspace");
-    }
-  }
-
   async function handleResolveApproval(decision: ApprovalDecision): Promise<void> {
     if (!runtimeState.runId || !activeApproval) {
       return;
@@ -788,6 +847,98 @@ export function App() {
 
   function handleAddContext(): void {
     setNotice("Context picker is not wired yet.");
+  }
+
+  function handleSidebarResizeStart(event: ReactPointerEvent<HTMLDivElement>): void {
+    event.preventDefault();
+    const target = event.currentTarget;
+    target.setPointerCapture?.(event.pointerId);
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+
+    function handlePointerMove(moveEvent: PointerEvent): void {
+      moveEvent.preventDefault();
+      const nextWidth = clampNumber(
+        startWidth + moveEvent.clientX - startX,
+        MIN_SIDEBAR_WIDTH,
+        MAX_SIDEBAR_WIDTH,
+      );
+      setSidebarWidth(nextWidth);
+    }
+
+    function handlePointerUp(): void {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+      try {
+        target.releasePointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture may already be released if the drag ends outside the window.
+      }
+      document.body.classList.remove("is-layout-resizing", "is-sidebar-resizing");
+    }
+
+    document.body.classList.add("is-layout-resizing", "is-sidebar-resizing");
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+    window.addEventListener("pointercancel", handlePointerUp, { once: true });
+  }
+
+  function handleInspectorResizeStart(event: ReactPointerEvent<HTMLDivElement>): void {
+    event.preventDefault();
+    const target = event.currentTarget;
+    target.setPointerCapture?.(event.pointerId);
+    const startX = event.clientX;
+    const startWidth = inspectorWidth;
+
+    function handlePointerMove(moveEvent: PointerEvent): void {
+      moveEvent.preventDefault();
+      const nextWidth = clampNumber(
+        startWidth - (moveEvent.clientX - startX),
+        MIN_INSPECTOR_WIDTH,
+        MAX_INSPECTOR_WIDTH,
+      );
+      setInspectorWidth(nextWidth);
+    }
+
+    function handlePointerUp(): void {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+      try {
+        target.releasePointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture may already be released if the drag ends outside the window.
+      }
+      document.body.classList.remove("is-layout-resizing", "is-inspector-resizing");
+    }
+
+    document.body.classList.add("is-layout-resizing", "is-inspector-resizing");
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+    window.addEventListener("pointercancel", handlePointerUp, { once: true });
+  }
+
+  function handleSidebarResizeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+      return;
+    }
+    event.preventDefault();
+    const delta = event.key === "ArrowRight" ? LAYOUT_STEP : -LAYOUT_STEP;
+    setSidebarWidth((width) =>
+      clampNumber(width + delta, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH),
+    );
+  }
+
+  function handleInspectorResizeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+      return;
+    }
+    event.preventDefault();
+    const delta = event.key === "ArrowLeft" ? LAYOUT_STEP : -LAYOUT_STEP;
+    setInspectorWidth((width) =>
+      clampNumber(width + delta, MIN_INSPECTOR_WIDTH, MAX_INSPECTOR_WIDTH),
+    );
   }
 
   function renderInspectorEmpty(title: string, detail: string) {
@@ -1036,13 +1187,35 @@ export function App() {
   }
 
   const platform = runtimeClient.platform as PlatformKind;
+  const layoutStyle = {
+    "--aw-sidebar-width": `${sidebarWidth}px`,
+    "--aw-inspector-width": `${inspectorWidth}px`,
+  } as CSSProperties;
 
   return (
     <>
-      <div className="desktop-root desktop-root-electron">
+      <div
+        className={`desktop-root desktop-root-electron${
+          inspectorCollapsed
+            ? " desktop-root-inspector-collapsed"
+            : " desktop-root-inspector-expanded"
+        }`}
+        style={layoutStyle}
+      >
         <AppShell
           platform={platform}
           sidebarCollapsed={sidebarCollapsed}
+          sidebarResizeHandleProps={{
+            role: "separator",
+            "aria-label": "Resize sidebar",
+            "aria-orientation": "vertical",
+            "aria-valuemin": MIN_SIDEBAR_WIDTH,
+            "aria-valuemax": MAX_SIDEBAR_WIDTH,
+            "aria-valuenow": sidebarWidth,
+            tabIndex: 0,
+            onPointerDown: handleSidebarResizeStart,
+            onKeyDown: handleSidebarResizeKeyDown,
+          }}
           chrome={
             <WorkbenchChrome
               sidebarCollapsed={sidebarCollapsed}
@@ -1055,14 +1228,15 @@ export function App() {
                   ) : null}
                   <button
                     type="button"
-                    className="workbench-chrome-workspace"
-                    onClick={() => {
-                      void handlePickWorkspace();
-                    }}
-                    disabled={!desktopReady || isBusy}
-                    title={workspacePath || "Choose workspace"}
+                    className="workbench-chrome-icon workbench-chrome-panel-toggle"
+                    aria-label={inspectorCollapsed ? "Expand inspector" : "Collapse inspector"}
+                    onClick={() => setInspectorCollapsed((collapsed) => !collapsed)}
                   >
-                    {isWorkspaceValid ? workspaceName : "Choose workspace"}
+                    {inspectorCollapsed ? (
+                      <PanelRightOpen size={14} strokeWidth={1.9} />
+                    ) : (
+                      <PanelRightClose size={14} strokeWidth={1.9} />
+                    )}
                   </button>
                 </div>
               }
@@ -1114,6 +1288,18 @@ export function App() {
           main={
             <div className="desktop-main">
               <WorkbenchShell
+                inspectorCollapsed={inspectorCollapsed}
+                inspectorResizeHandleProps={{
+                  role: "separator",
+                  "aria-label": "Resize inspector",
+                  "aria-orientation": "vertical",
+                  "aria-valuemin": MIN_INSPECTOR_WIDTH,
+                  "aria-valuemax": MAX_INSPECTOR_WIDTH,
+                  "aria-valuenow": inspectorWidth,
+                  tabIndex: 0,
+                  onPointerDown: handleInspectorResizeStart,
+                  onKeyDown: handleInspectorResizeKeyDown,
+                }}
                 stage={
                   <RunStage
                     scrollRef={showCenterComposer ? undefined : runTail.scrollRef}
@@ -1128,13 +1314,7 @@ export function App() {
                               void handleComposerSubmit();
                             }}
                             onAddContext={handleAddContext}
-                            placeholder={
-                              isBusy
-                                ? "Awaken is working..."
-                                : runtimeState.phase === "done"
-                                  ? "Send follow-up"
-                                  : "Ask Awaken to work on..."
-                            }
+                            placeholder=""
                             disabled={!desktopReady || isBusy || !isWorkspaceValid}
                             isReady={
                               isBusy ||
@@ -1142,7 +1322,6 @@ export function App() {
                             }
                             submitMode={isBusy ? "stop" : "send"}
                             variant="dock"
-                            metaItems={composerMetaItems}
                           />
                         </ComposerDock>
                       )
@@ -1185,7 +1364,7 @@ export function App() {
                             void handleComposerSubmit();
                           }}
                           onAddContext={handleAddContext}
-                          placeholder="Plan, Build, / for skills, @ for context"
+                          placeholder=""
                           disabled={!desktopReady || isBusy || !isWorkspaceValid}
                           isReady={
                             isBusy ||
@@ -1193,7 +1372,6 @@ export function App() {
                           }
                           submitMode={isBusy ? "stop" : "send"}
                           variant="center"
-                          metaItems={composerMetaItems}
                         />
                       </div>
                     ) : null}

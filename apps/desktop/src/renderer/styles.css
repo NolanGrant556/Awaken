@@ -134,6 +134,8 @@ pre {
 
 .run-stage-center-composer {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
   place-items: center;
   align-self: stretch;
   width: 100%;

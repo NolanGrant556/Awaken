@@ -155,8 +155,10 @@
 
   /* Layout */
   --aw-sidebar-width: 300px;
+  --aw-inspector-width: 300px;
+  --aw-inspector-collapsed-width: 42px;
   --aw-content-width: 768px;
-  --aw-chrome-height: 72px;
+  --aw-chrome-height: 44px;
 }
 
 @media (max-width: 1180px) {

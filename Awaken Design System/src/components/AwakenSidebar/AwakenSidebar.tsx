@@ -127,7 +127,9 @@ export function AwakenSidebar({
       <div
         style={{
           ...topStyle,
-          padding: showBrand ? topStyle.padding : "18px 8px 8px",
+          padding: showBrand
+            ? topStyle.padding
+            : "var(--aw-sidebar-top-inset, 8px) 8px 8px",
         }}
       >
         {showBrand ? <AwakenBrandRow title={title} /> : null}

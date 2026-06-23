@@ -64,6 +64,8 @@ describe("App workbench presentation", () => {
     const html = renderToString(React.createElement(App));
 
     expect(html).toContain("On Awaken");
+    expect(html).toContain("aw-task-welcome__logo");
+    expect(html).toContain("把任务交给 Awaken，自主执行，唤醒自由。");
     expect(html).toContain('placeholder=""');
     expect(html).toContain('rows="2"');
     expect(html).toContain("New Agent");

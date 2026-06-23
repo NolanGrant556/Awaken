@@ -137,10 +137,13 @@ pre {
   grid-template-columns: minmax(0, 1fr);
   justify-items: center;
   place-items: center;
+  align-content: center;
+  gap: 16px;
   align-self: stretch;
   width: 100%;
   min-height: 100%;
   padding-bottom: 4vh;
+  transform: translateY(-32px);
 }
 
 .aw-run-stage-scroll:has(.run-stage-center-composer) {

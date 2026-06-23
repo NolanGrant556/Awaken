@@ -49,6 +49,7 @@ import { AwakenRunTimelineDemo } from "../src/components/AwakenRunTimeline";
 import { AwakenSendButtonDemo } from "../src/components/AwakenSendButton";
 import { AwakenSidebarDemo } from "../src/components/AwakenSidebar";
 import { AwakenStatusPillDemo } from "../src/components/AwakenStatusPill";
+import { AwakenTaskWelcomeDemo } from "../src/components/AwakenTaskWelcome";
 import { AwakenThinkingBlockDemo } from "../src/components/AwakenThinkingBlock";
 import { AwakenThoughtTraceDemo } from "../src/components/AwakenThoughtTrace";
 import { AwakenToastDemo } from "../src/components/AwakenToast";
@@ -121,6 +122,7 @@ export const awakenGalleryEntries: AwakenGalleryEntry[] = [
   { id: "awaken-send-button", name: "AwakenSendButton", displayName: "发送按钮", demo: AwakenSendButtonDemo },
   { id: "awaken-sidebar", name: "AwakenSidebar", displayName: "侧栏", demo: AwakenSidebarDemo },
   { id: "awaken-status-pill", name: "AwakenStatusPill", displayName: "状态胶囊", demo: AwakenStatusPillDemo },
+  { id: "awaken-task-welcome", name: "AwakenTaskWelcome", displayName: "任务欢迎区", demo: AwakenTaskWelcomeDemo },
   { id: "awaken-thinking-block", name: "AwakenThinkingBlock", displayName: "思考块", demo: AwakenThinkingBlockDemo },
   { id: "awaken-thought-trace", name: "AwakenThoughtTrace", displayName: "思路轨迹", demo: AwakenThoughtTraceDemo },
   { id: "awaken-toast", name: "AwakenToast", displayName: "提示通知", demo: AwakenToastDemo },

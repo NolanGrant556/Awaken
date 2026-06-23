@@ -48,6 +48,7 @@ export * from "./AwakenRunTimeline";
 export * from "./AwakenSendButton";
 export * from "./AwakenSidebar";
 export * from "./AwakenStatusPill";
+export * from "./AwakenTaskWelcome";
 export * from "./AwakenThinkingBlock";
 export * from "./AwakenThoughtTrace";
 export * from "./AwakenToast";

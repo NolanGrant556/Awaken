@@ -27,6 +27,7 @@ import {
   AwakenFileChangeSummary as FileChangeSummary,
   AwakenLightInspectorRail as LightInspectorRail,
   AwakenSidebar as Sidebar,
+  AwakenTaskWelcome as TaskWelcome,
   AwakenThoughtTrace as ThoughtTrace,
   AwakenToolTraceGroup as ToolTraceGroup,
   AwakenToolTraceLine as ToolTraceLine,
@@ -1357,6 +1358,7 @@ export function App() {
 
                     {showCenterComposer ? (
                       <div className="run-stage-center-composer">
+                        <TaskWelcome />
                         <ComposerBar
                           value={composerValue}
                           onChange={setComposerValue}

@@ -1,88 +1,89 @@
 :root {
   /* Background */
-  --aw-bg-main: #f8f8f7;
-  --aw-bg-nav: #f2f2f2;
+  --aw-bg-main: #ffffff;
+  --aw-bg-nav: #f5f5f5;
   --aw-bg-white: #ffffff;
-  --aw-bg-fill-light: rgba(55, 53, 47, 0.04);
-  --aw-bg-fill-main: rgba(55, 53, 47, 0.06);
-  --aw-bg-fill-dark: rgba(55, 53, 47, 0.08);
+  --aw-bg-fill-light: rgba(115, 115, 115, 0.08);
+  --aw-bg-fill-main: rgba(115, 115, 115, 0.12);
+  --aw-bg-fill-dark: rgba(115, 115, 115, 0.16);
   --aw-overlay-backdrop: rgba(0, 0, 0, 0.28);
 
   /* Text */
-  --aw-text-primary: #34322d;
-  --aw-text-secondary: #5e5e5b;
-  --aw-text-tertiary: #858481;
-  --aw-text-disabled: #b9b9b7;
-  --aw-text-blue: #0081f2;
+  --aw-text-primary: #171717;
+  --aw-text-secondary: #404040;
+  --aw-text-tertiary: #737373;
+  --aw-text-disabled: #a1a1a1;
+  --aw-text-blue: #2f74ff;
   --aw-text-onblack: #ffffff;
 
   /* Border */
-  --aw-border-main: rgba(0, 0, 0, 0.06);
-  --aw-border-light: rgba(0, 0, 0, 0.04);
-  --aw-border-active: rgba(0, 0, 0, 0.3);
-  --aw-border-control: rgba(0, 0, 0, 0.08);
-  --aw-border-control-hover: rgba(0, 0, 0, 0.14);
+  --aw-border-main: rgba(115, 115, 115, 0.12);
+  --aw-border-light: rgba(115, 115, 115, 0.08);
+  --aw-border-active: rgba(0, 0, 0, 0.72);
+  --aw-border-control: rgba(115, 115, 115, 0.14);
+  --aw-border-control-hover: rgba(115, 115, 115, 0.22);
 
   /* Button */
-  --aw-button-black: #1a1a19;
-  --aw-button-black-hover: #000000;
+  --aw-button-black: #262626;
+  --aw-button-black-hover: #171717;
+  --aw-button-black-active: #0a0a0a;
 
   /* Status */
-  --aw-success: #25ba3b;
-  --aw-warning: #efa201;
-  --aw-error: #f25a5a;
-  --aw-accent-purple: #8b5cf6;
+  --aw-success: #15a877;
+  --aw-warning: #e27900;
+  --aw-error: #e8463a;
+  --aw-accent-purple: #4b3fe3;
 
-  --aw-success-soft-bg: rgba(37, 186, 59, 0.12);
-  --aw-success-soft-border: rgba(37, 186, 59, 0.24);
-  --aw-warning-soft-bg: rgba(239, 162, 1, 0.12);
-  --aw-warning-soft-border: rgba(239, 162, 1, 0.24);
-  --aw-error-soft-bg: rgba(242, 90, 90, 0.12);
-  --aw-error-soft-border: rgba(242, 90, 90, 0.24);
+  --aw-success-soft-bg: rgba(64, 176, 139, 0.12);
+  --aw-success-soft-border: rgba(64, 176, 139, 0.18);
+  --aw-warning-soft-bg: rgba(226, 121, 0, 0.12);
+  --aw-warning-soft-border: rgba(226, 121, 0, 0.16);
+  --aw-error-soft-bg: rgba(232, 70, 58, 0.12);
+  --aw-error-soft-border: rgba(232, 70, 58, 0.16);
 
   /* Run Workbench semantic tokens v2 */
   --aw-surface-canvas: var(--aw-bg-main);
   --aw-surface-navigation: var(--aw-bg-nav);
-  --aw-surface-work: rgba(248, 248, 247, 0.96);
-  --aw-surface-detail: rgba(255, 255, 255, 0.82);
-  --aw-surface-raised: rgba(255, 255, 255, 0.86);
-  --aw-surface-panel: rgba(255, 255, 255, 0.74);
-  --aw-surface-panel-muted: rgba(248, 248, 247, 0.78);
-  --aw-surface-hover: rgba(255, 255, 255, 0.64);
+  --aw-surface-work: #ffffff;
+  --aw-surface-detail: #ffffff;
+  --aw-surface-raised: #ffffff;
+  --aw-surface-panel: #f5f5f5;
+  --aw-surface-panel-muted: rgba(115, 115, 115, 0.08);
+  --aw-surface-hover: rgba(115, 115, 115, 0.08);
   --aw-surface-composer: var(--aw-bg-fill-light);
-  --aw-surface-code: #f5f5f3;
-  --aw-surface-selection: rgba(0, 129, 242, 0.11);
+  --aw-surface-code: #f5f5f5;
+  --aw-surface-selection: rgba(115, 115, 115, 0.12);
   --aw-surface-focus: rgba(255, 255, 255, 1);
-  --aw-surface-danger: rgba(255, 244, 244, 0.92);
-  --aw-surface-status-pill: rgba(20, 32, 43, 0.08);
-  --aw-surface-muted-fill: rgba(55, 53, 47, 0.05);
+  --aw-surface-danger: rgba(232, 70, 58, 0.08);
+  --aw-surface-status-pill: rgba(115, 115, 115, 0.08);
+  --aw-surface-muted-fill: rgba(115, 115, 115, 0.08);
   --aw-surface-sidebar: var(--aw-surface-navigation);
   --aw-surface-stage: var(--aw-surface-work);
   --aw-surface-inspector: var(--aw-surface-detail);
   --aw-surface-runtime-pill: var(--aw-surface-status-pill);
   --aw-text-muted: var(--aw-text-secondary);
   --aw-text-subtle: var(--aw-text-tertiary);
-  --aw-text-code: #244261;
-  --aw-text-selection: #005ea8;
+  --aw-text-code: #17181a;
+  --aw-text-selection: #2f74ff;
   --aw-status-running: var(--aw-text-blue);
   --aw-status-running-bg: rgba(0, 129, 242, 0.11);
   --aw-status-running-border: rgba(0, 129, 242, 0.18);
   --aw-status-waiting: var(--aw-warning);
   --aw-status-waiting-bg: rgba(234, 88, 12, 0.12);
-  --aw-status-waiting-text: #9a3412;
+  --aw-status-waiting-text: #c46f11;
   --aw-status-success: var(--aw-success);
   --aw-status-success-bg: rgba(34, 197, 94, 0.12);
-  --aw-status-success-text: #166534;
+  --aw-status-success-text: #1e8b56;
   --aw-status-danger: var(--aw-error);
   --aw-status-danger-bg: rgba(242, 90, 90, 0.14);
-  --aw-status-danger-text: #b42318;
+  --aw-status-danger-text: #c9382f;
   --aw-diff-added: rgba(34, 197, 94, 0.12);
   --aw-diff-added-text: #166534;
   --aw-diff-removed: rgba(242, 90, 90, 0.14);
   --aw-diff-removed-text: #b42318;
   --aw-diff-changed: rgba(245, 158, 11, 0.14);
   --aw-diff-changed-text: #8a4b00;
-  --aw-terminal-bg: #22313b;
+  --aw-terminal-bg: #17181a;
   --aw-terminal-text: #ffffff;
 
   /* Spacing */
@@ -102,48 +103,56 @@
   --aw-space-14: 48px;
   --aw-space-15: 56px;
   --aw-space-16: 96px;
+  --aw-icon-size-12: 12px;
+  --aw-icon-size-14: 14px;
+  --aw-icon-size-16: 16px;
+  --aw-icon-size-20: 20px;
+  --aw-icon-size-24: 24px;
 
   /* Radius */
   --aw-radius-sm: 8px;
   --aw-radius-md: 12px;
-  --aw-radius-lg: 16px;
+  --aw-radius-lg: 12px;
   --aw-radius-pill: 999px;
   --aw-radius-control: var(--aw-radius-sm);
   --aw-radius-panel: var(--aw-radius-md);
-  --aw-radius-workbench: var(--aw-radius-lg);
+  --aw-radius-workbench: var(--aw-radius-md);
 
   /* Shadow */
-  --aw-shadow-menu: 0 16px 42px rgba(0, 0, 0, 0.12);
-  --aw-shadow-toast: 0 14px 34px rgba(0, 0, 0, 0.12);
-  --aw-shadow-raised: 0 10px 28px rgba(0, 0, 0, 0.05);
-  --aw-shadow-focus: 0 0 0 3px color-mix(in srgb, var(--aw-status-running) 18%, transparent);
+  --aw-shadow-menu: 0 12px 32px rgba(23, 23, 23, 0.12), 0 2px 8px rgba(23, 23, 23, 0.08);
+  --aw-shadow-popover: var(--aw-shadow-menu);
+  --aw-shadow-toast: 0 12px 32px rgba(23, 23, 23, 0.12);
+  --aw-shadow-raised: 0 1px 2px rgba(23, 23, 23, 0.04);
+  --aw-shadow-focus: 0 0 0 2px rgba(0, 0, 0, 0.08);
 
   /* Font */
-  --aw-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", Helvetica, "Apple Color Emoji", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol";
-  --aw-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --aw-font-sans: "SF Pro Text", "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --aw-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
   /* Font size */
-  --aw-font-size-xs: 12px;
-  --aw-font-size-sm: 13px;
+  --aw-font-size-xs: 11px;
+  --aw-font-size-sm: 12px;
   --aw-font-size-base: 14px;
-  --aw-font-size-md: 15px;
-  --aw-font-size-lg: 15px;
-  --aw-font-size-xl: 30px;
+  --aw-font-size-md: 14px;
+  --aw-font-size-lg: 16px;
+  --aw-font-size-xl: 28px;
 
   /* Line height */
   --aw-line-height-xs: 16px;
   --aw-line-height-sm: 18px;
   --aw-line-height-base: 20px;
-  --aw-line-height-md: 22px;
+  --aw-line-height-md: 20px;
   --aw-line-height-lg: 24px;
-  --aw-line-height-xl: 40px;
+  --aw-line-height-xl: 36px;
 
   /* Font weight */
   --aw-font-weight-regular: 400;
   --aw-font-weight-medium: 500;
-  --aw-font-weight-semibold: 560;
-  --aw-font-weight-bold: 650;
-  --aw-font-weight-heavy: 700;
+  --aw-font-weight-semibold: 500;
+  --aw-font-weight-bold: 600;
+  --aw-font-weight-heavy: 600;
+  --aw-transition-fast: 120ms ease;
+  --aw-transition-normal: 160ms ease;
 
   /* Legacy typography shorthand (kept for reference) */
   --aw-text-xs: var(--aw-font-size-xs) / var(--aw-line-height-xs) / var(--aw-font-weight-regular);

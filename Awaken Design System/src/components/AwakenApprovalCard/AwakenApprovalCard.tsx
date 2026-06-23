@@ -123,12 +123,12 @@ export function AwakenApprovalCard({
         minWidth: 0,
         maxWidth: inline ? "100%" : "400px",
         boxSizing: "border-box",
-        padding: "20px",
+        padding: "16px",
         border: "1px solid",
         borderColor: tone.softBorder,
-        borderRadius: "var(--aw-radius-lg)",
+        borderRadius: "var(--aw-radius-panel)",
         background: "var(--aw-bg-white)",
-        boxShadow: inline ? "0 10px 28px rgba(0, 0, 0, 0.05)" : "var(--aw-shadow-menu)",
+        boxShadow: inline ? "var(--aw-shadow-raised)" : "var(--aw-shadow-menu)",
       }}
     >
       <div
@@ -136,7 +136,7 @@ export function AwakenApprovalCard({
           display: "flex",
           alignItems: "flex-start",
           gap: "12px",
-          marginBottom: "16px",
+          marginBottom: "14px",
         }}
       >
         <div
@@ -144,15 +144,15 @@ export function AwakenApprovalCard({
             display: "inline-flex",
             alignItems: "center",
             justifyContent: "center",
-            width: "36px",
-            height: "36px",
+            width: "32px",
+            height: "32px",
             flex: "0 0 auto",
-            borderRadius: "var(--aw-radius-md)",
+            borderRadius: "var(--aw-radius-sm)",
             background: tone.softBg,
             color: tone.color,
           }}
         >
-          <AwakenIcon size={20} strokeWidth={1.85} />
+          <AwakenIcon size={18} strokeWidth={1.85} />
         </div>
         <div style={{ minWidth: 0 }}>
           <h2
@@ -162,7 +162,7 @@ export function AwakenApprovalCard({
               margin: "0 0 4px",
               fontSize: "var(--aw-font-size-base)",
               lineHeight: "var(--aw-line-height-base)",
-              fontWeight: "var(--aw-font-weight-bold)",
+              fontWeight: "var(--aw-font-weight-semibold)",
               color: "var(--aw-text-primary)",
             }}
             title={title}
@@ -190,7 +190,7 @@ export function AwakenApprovalCard({
                   fontSize: "var(--aw-font-size-xs)",
                   lineHeight: "var(--aw-line-height-xs)",
                   color: "var(--aw-text-tertiary)",
-                  fontWeight: "var(--aw-font-weight-bold)",
+                  fontWeight: "var(--aw-font-weight-semibold)",
                   textTransform: "uppercase",
                   letterSpacing: "0.02em",
                 }}
@@ -216,7 +216,7 @@ export function AwakenApprovalCard({
                   fontSize: "var(--aw-font-size-xs)",
                   lineHeight: "var(--aw-line-height-xs)",
                   color: "var(--aw-text-tertiary)",
-                  fontWeight: "var(--aw-font-weight-bold)",
+                  fontWeight: "var(--aw-font-weight-semibold)",
                   textTransform: "uppercase",
                   letterSpacing: "0.02em",
                 }}
@@ -267,18 +267,18 @@ export function AwakenApprovalCard({
           disabled={interactiveDisabled}
           onClick={handleReject}
           style={{
-            height: "34px",
-            padding: "0 14px",
+            height: "28px",
+            padding: "0 12px",
             border: "1px solid var(--aw-border-main)",
             borderRadius: "var(--aw-radius-sm)",
             background: "var(--aw-bg-white)",
             color: "var(--aw-text-primary)",
-            fontSize: "var(--aw-font-size-sm)",
-            fontWeight: "var(--aw-font-weight-bold)",
+            fontSize: "var(--aw-font-size-base)",
+            fontWeight: "var(--aw-font-weight-semibold)",
             cursor: interactiveDisabled ? "default" : "pointer",
             opacity: interactiveDisabled ? 0.5 : 1,
             transition:
-              "background-color 160ms ease, color 160ms ease, transform 160ms ease",
+              "background-color var(--aw-transition-fast), color var(--aw-transition-fast)",
           }}
           onMouseEnter={(e) => {
             if (!interactiveDisabled) {
@@ -296,15 +296,15 @@ export function AwakenApprovalCard({
           disabled={interactiveDisabled}
           onClick={handleApprove}
           style={{
-            height: "34px",
-            padding: "0 14px",
+            height: "28px",
+            padding: "0 12px",
             border: "1px solid",
             borderColor: tone.color,
             borderRadius: "var(--aw-radius-sm)",
             background: tone.color,
             color: "var(--aw-text-onblack)",
-            fontSize: "var(--aw-font-size-sm)",
-            fontWeight: "var(--aw-font-weight-bold)",
+            fontSize: "var(--aw-font-size-base)",
+            fontWeight: "var(--aw-font-weight-semibold)",
             cursor: interactiveDisabled ? "default" : "pointer",
             opacity: interactiveDisabled ? 0.5 : 1,
             transition:

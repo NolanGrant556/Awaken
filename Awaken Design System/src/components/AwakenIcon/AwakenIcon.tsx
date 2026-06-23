@@ -8,7 +8,7 @@ export type AwakenIconProps = {
   children: ReactNode;
 };
 
-export function AwakenIcon({ size = 18, strokeWidth = 1.85, ariaHidden = true, children }: AwakenIconProps) {
+export function AwakenIcon({ size = 16, strokeWidth = 1.85, ariaHidden = true, children }: AwakenIconProps) {
   return (
     <span
       className="aw-icon"

@@ -8,6 +8,8 @@ export type AwakenAppShellProps = {
   chrome?: ReactNode;
   sidebarCollapsed?: boolean;
   sidebarResizeHandleProps?: HTMLAttributes<HTMLDivElement>;
+  inspectorCollapsed?: boolean;
+  inspectorResizeHandleProps?: HTMLAttributes<HTMLDivElement>;
   platform?: PlatformKind;
 };
 
@@ -17,11 +19,19 @@ export function AwakenAppShell({
   chrome,
   sidebarCollapsed,
   sidebarResizeHandleProps,
+  inspectorCollapsed,
+  inspectorResizeHandleProps,
   platform,
 }: AwakenAppShellProps) {
   const sidebarResizeHandleClass = [
     "aw-app-sidebar-resize-handle",
     sidebarResizeHandleProps?.className,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const inspectorResizeHandleClass = [
+    "aw-workbench-inspector-resize-handle",
+    inspectorResizeHandleProps?.className,
   ]
     .filter(Boolean)
     .join(" ");
@@ -85,6 +95,13 @@ export function AwakenAppShell({
           {...sidebarResizeHandleProps}
           className={sidebarResizeHandleClass}
           style={sidebarResizeHandleProps.style}
+        />
+      ) : null}
+      {inspectorResizeHandleProps && !inspectorCollapsed ? (
+        <div
+          {...inspectorResizeHandleProps}
+          className={inspectorResizeHandleClass}
+          style={inspectorResizeHandleProps.style}
         />
       ) : null}
       <div

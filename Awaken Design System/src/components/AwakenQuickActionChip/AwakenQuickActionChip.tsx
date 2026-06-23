@@ -25,7 +25,7 @@ export function AwakenQuickActionChip({
         display: "inline-flex",
         alignItems: "center",
         gap: "6px",
-        height: 32,
+        height: 28,
         padding: "0 12px",
         border: "1px solid var(--aw-border-main)",
         borderRadius: "var(--aw-radius-pill)",
@@ -36,21 +36,19 @@ export function AwakenQuickActionChip({
         whiteSpace: "nowrap",
         cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.45 : 1,
-        transition: "background-color 160ms ease, color 160ms ease, border-color 160ms ease, transform 160ms ease",
+        transition: "background-color var(--aw-transition-fast), color var(--aw-transition-fast), border-color var(--aw-transition-fast)",
       }}
       onMouseEnter={(e) => {
         if (!disabled) {
           e.currentTarget.style.background = "var(--aw-bg-fill-light)";
           e.currentTarget.style.color = "var(--aw-text-primary)";
           e.currentTarget.style.borderColor = "var(--aw-border-main)";
-          e.currentTarget.style.transform = "translateY(-1px)";
         }
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.background = "transparent";
         e.currentTarget.style.color = "var(--aw-text-secondary)";
         e.currentTarget.style.borderColor = "var(--aw-border-main)";
-        e.currentTarget.style.transform = "translateY(0)";
       }}
       onMouseDown={(e) => {
         if (!disabled) {

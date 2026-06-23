@@ -15,21 +15,22 @@ const buttonStyle: CSSProperties = {
   alignItems: "center",
   justifyContent: "space-between",
   height: 40,
-  padding: "0 10px",
-  border: "1px solid var(--aw-border-light)",
+  padding: "0 12px",
+  border: "1px solid var(--aw-button-black)",
   borderRadius: "var(--aw-radius-md)",
-  background: "var(--aw-bg-white)",
-  color: "var(--aw-text-primary)",
+  background: "var(--aw-button-black)",
+  color: "var(--aw-text-onblack)",
   fontSize: "var(--aw-font-size-base)",
   lineHeight: "var(--aw-line-height-base)",
+  fontWeight: "var(--aw-font-weight-semibold)",
   textAlign: "left",
   cursor: "pointer",
-  transition: "background-color 160ms ease, border-color 160ms ease",
+  transition: "background-color var(--aw-transition-fast), border-color var(--aw-transition-fast)",
 };
 
 const leftStyle: CSSProperties = {
   display: "inline-flex",
-  gap: 8,
+  gap: 9,
   alignItems: "center",
   minWidth: 0,
 };
@@ -40,22 +41,23 @@ export function AwakenNewTaskButton({
   platform = "macos",
   disabled,
   children = "新建任务",
+  className,
   ...props
 }: AwakenNewTaskButtonProps) {
   const handleEnter = (e: MouseEvent<HTMLButtonElement>) => {
-    if (!disabled) e.currentTarget.style.background = "var(--aw-bg-fill-light)";
+    if (!disabled) e.currentTarget.style.background = "var(--aw-button-black-hover)";
     props.onMouseEnter?.(e);
   };
   const handleLeave = (e: MouseEvent<HTMLButtonElement>) => {
-    e.currentTarget.style.background = "var(--aw-bg-white)";
+    e.currentTarget.style.background = "var(--aw-button-black)";
     props.onMouseLeave?.(e);
   };
   const handleDown = (e: MouseEvent<HTMLButtonElement>) => {
-    if (!disabled) e.currentTarget.style.background = "var(--aw-bg-fill-main)";
+    if (!disabled) e.currentTarget.style.background = "var(--aw-button-black-active)";
     props.onMouseDown?.(e);
   };
   const handleUp = (e: MouseEvent<HTMLButtonElement>) => {
-    if (!disabled) e.currentTarget.style.background = "var(--aw-bg-fill-light)";
+    if (!disabled) e.currentTarget.style.background = "var(--aw-button-black-hover)";
     props.onMouseUp?.(e);
   };
 
@@ -65,6 +67,7 @@ export function AwakenNewTaskButton({
       disabled={disabled}
       onClick={onClick}
       aria-label={typeof children === "string" ? children : "新建任务"}
+      className={["aw-new-task-button", className].filter(Boolean).join(" ")}
       style={{
         ...buttonStyle,
         cursor: disabled ? "not-allowed" : "pointer",

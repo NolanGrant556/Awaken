@@ -10,8 +10,8 @@ export type AwakenPrimaryNavProps = {
 
 const navStyle: CSSProperties = {
   display: "grid",
-  gap: 2,
-  padding: "2px 14px 12px",
+  gap: 3,
+  padding: "0 14px 10px",
 };
 
 const rowBase: CSSProperties = {
@@ -21,16 +21,17 @@ const rowBase: CSSProperties = {
   width: "100%",
   height: 32,
   gap: 9,
-  padding: "0 8px",
+  padding: "0 10px",
   border: 0,
   borderRadius: "var(--aw-radius-sm)",
   background: "transparent",
   color: "var(--aw-text-secondary)",
   fontSize: "var(--aw-font-size-base)",
   lineHeight: "var(--aw-line-height-base)",
+  fontWeight: "var(--aw-font-weight-semibold)",
   textAlign: "left",
   cursor: "pointer",
-  transition: "background-color 160ms ease, color 160ms ease",
+  transition: "background-color var(--aw-transition-fast), color var(--aw-transition-fast)",
 };
 
 const iconWrapStyle: CSSProperties = {
@@ -63,7 +64,7 @@ export function AwakenPrimaryNav({ items, activeId, onSelect }: AwakenPrimaryNav
       {items.map((item) => {
         const isActive = item.id === activeId;
         const isDisabled = item.disabled;
-        const baseBg = isActive ? "var(--aw-bg-fill-main)" : "transparent";
+        const baseBg = isActive ? "var(--aw-bg-fill-dark)" : "transparent";
         const baseColor = isActive
           ? "var(--aw-text-primary)"
           : isDisabled
@@ -73,7 +74,7 @@ export function AwakenPrimaryNav({ items, activeId, onSelect }: AwakenPrimaryNav
         const handleEnter = (e: MouseEvent<HTMLButtonElement>) => {
           if (!isDisabled) {
             e.currentTarget.style.background = isActive
-              ? "var(--aw-bg-fill-main)"
+              ? "var(--aw-bg-fill-dark)"
               : "var(--aw-bg-fill-light)";
           }
         };
@@ -86,7 +87,7 @@ export function AwakenPrimaryNav({ items, activeId, onSelect }: AwakenPrimaryNav
         const handleUp = (e: MouseEvent<HTMLButtonElement>) => {
           if (!isDisabled) {
             e.currentTarget.style.background = isActive
-              ? "var(--aw-bg-fill-main)"
+              ? "var(--aw-bg-fill-dark)"
               : "var(--aw-bg-fill-light)";
           }
         };

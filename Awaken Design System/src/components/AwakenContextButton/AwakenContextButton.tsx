@@ -16,7 +16,7 @@ export function AwakenContextButton({ onClick, disabled }: AwakenContextButtonPr
       variant="square"
       size="sm"
     >
-      <Plus size={18} strokeWidth={1.85} />
+      <Plus size={16} strokeWidth={1.85} />
     </AwakenIconButton>
   );
 }

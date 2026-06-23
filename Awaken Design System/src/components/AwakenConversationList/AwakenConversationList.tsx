@@ -19,16 +19,16 @@ const rowBase: CSSProperties = {
   gridTemplateColumns: "minmax(0, 1fr) auto",
   alignItems: "center",
   width: "100%",
-  minHeight: 34,
+  minHeight: 30,
   gap: 8,
-  padding: "0 10px",
+  padding: "0 8px",
   border: 0,
   borderRadius: "var(--aw-radius-sm)",
   background: "transparent",
   color: "var(--aw-text-primary)",
   textAlign: "left",
   cursor: "pointer",
-  transition: "background-color 160ms ease, color 160ms ease",
+  transition: "background-color var(--aw-transition-fast), color var(--aw-transition-fast)",
 };
 
 const titleStyle: CSSProperties = {
@@ -36,7 +36,7 @@ const titleStyle: CSSProperties = {
   overflow: "hidden",
   color: "var(--aw-text-primary)",
   fontSize: "var(--aw-font-size-sm)",
-  fontWeight: "var(--aw-font-weight-semibold)",
+  fontWeight: "var(--aw-font-weight-medium)",
   lineHeight: "var(--aw-line-height-sm)",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
@@ -64,7 +64,7 @@ const statusBaseStyle: CSSProperties = {
   minHeight: 18,
   padding: "0 6px",
   border: "1px solid transparent",
-  borderRadius: "var(--aw-radius-xs)",
+  borderRadius: "var(--aw-radius-sm)",
   fontSize: "var(--aw-font-size-xs)",
   fontWeight: "var(--aw-font-weight-semibold)",
   lineHeight: "var(--aw-line-height-xs)",
@@ -156,8 +156,8 @@ export function AwakenConversationList({ items, activeId, onSelect, onContextMen
             title={item.label}
             style={{
               ...rowBase,
-              minHeight: item.statusLabel ? 48 : rowBase.minHeight,
-              padding: item.statusLabel ? "6px 10px" : rowBase.padding,
+              minHeight: item.statusLabel ? 46 : rowBase.minHeight,
+              padding: item.statusLabel ? "6px 8px" : rowBase.padding,
               background: baseBg,
               cursor: isDisabled ? "not-allowed" : "pointer",
               opacity: isDisabled ? 0.6 : 1,

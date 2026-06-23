@@ -6,7 +6,7 @@ export type AwakenAvatarProps = {
 };
 
 export function AwakenAvatar({ src, fallback, size = "md" }: AwakenAvatarProps) {
-  const dimension = size === "sm" ? 28 : 32;
+  const dimension = size === "sm" ? 24 : 30;
   const letters = fallback.slice(0, 2).toUpperCase();
 
   return (
@@ -20,7 +20,7 @@ export function AwakenAvatar({ src, fallback, size = "md" }: AwakenAvatarProps) 
         background: "var(--aw-button-black)",
         color: "var(--aw-text-onblack)",
         fontSize: "var(--aw-font-size-xs)",
-        fontWeight: "var(--aw-font-weight-bold)",
+        fontWeight: "var(--aw-font-weight-semibold)",
         overflow: "hidden",
         flexShrink: 0,
       }}

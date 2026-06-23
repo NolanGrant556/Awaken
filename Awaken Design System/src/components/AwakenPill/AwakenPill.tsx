@@ -18,7 +18,7 @@ export function AwakenPill({
   disabled,
   ...props
 }: AwakenPillProps) {
-  const height = size === "sm" ? 32 : 40;
+  const height = size === "sm" ? 28 : 32;
   const isBordered = variant === "bordered";
 
   const baseStyle: React.CSSProperties = {
@@ -38,7 +38,7 @@ export function AwakenPill({
     whiteSpace: "nowrap",
     cursor: disabled ? "not-allowed" : "pointer",
     opacity: disabled ? 0.45 : 1,
-    transition: "background-color 160ms ease, color 160ms ease, border-color 160ms ease",
+    transition: "background-color var(--aw-transition-fast), color var(--aw-transition-fast), border-color var(--aw-transition-fast)",
   };
 
   return (

@@ -30,9 +30,9 @@ export function AwakenDropdown({
           style={{
             background: "var(--aw-bg-white)",
             border: "1px solid var(--aw-border-main)",
-            borderRadius: "var(--aw-radius-md)",
+            borderRadius: "var(--aw-radius-panel)",
             boxShadow: "var(--aw-shadow-menu)",
-            padding: "4px",
+            padding: "6px",
             minWidth: "180px",
           }}
         >

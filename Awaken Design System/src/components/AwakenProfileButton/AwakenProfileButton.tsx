@@ -13,19 +13,19 @@ export type AwakenProfileButtonProps = {
 
 const buttonStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "32px minmax(0, 1fr) auto",
-  gap: 8,
+  gridTemplateColumns: "30px minmax(0, 1fr) auto",
+  gap: 10,
   alignItems: "center",
   width: "100%",
-  minHeight: 44,
-  padding: "6px 8px",
+  minHeight: 46,
+  padding: "8px 10px",
   border: 0,
-  borderRadius: "var(--aw-radius-sm)",
+  borderRadius: "var(--aw-radius-md)",
   background: "transparent",
   color: "var(--aw-text-primary)",
   textAlign: "left",
   cursor: "pointer",
-  transition: "background-color 160ms ease",
+  transition: "background-color var(--aw-transition-fast)",
 };
 
 const nameStyle: CSSProperties = {
@@ -34,7 +34,7 @@ const nameStyle: CSSProperties = {
   color: "var(--aw-text-primary)",
   fontSize: "var(--aw-font-size-sm)",
   fontWeight: "var(--aw-font-weight-semibold)",
-  lineHeight: "var(--aw-line-height-base)",
+  lineHeight: "var(--aw-line-height-sm)",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
 };

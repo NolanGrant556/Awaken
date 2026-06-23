@@ -138,12 +138,12 @@ pre {
   justify-items: center;
   place-items: center;
   align-content: center;
-  gap: 16px;
+  gap: 10px;
   align-self: stretch;
   width: 100%;
   min-height: 100%;
-  padding-bottom: 4vh;
-  transform: translateY(-32px);
+  padding-bottom: 0;
+  transform: translateY(-118px);
 }
 
 .aw-run-stage-scroll:has(.run-stage-center-composer) {

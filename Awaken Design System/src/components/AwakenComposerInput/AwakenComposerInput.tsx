@@ -86,8 +86,8 @@ export function AwakenComposerInput({
       rows={minRows}
       style={{
         width: "100%",
-        minHeight: minRows * 22,
-        maxHeight: maxRows * 22,
+        minHeight: minRows * 20,
+        maxHeight: maxRows * 20,
         padding: 0,
         border: "none",
         outline: "none",

@@ -14,7 +14,7 @@ export type AwakenProjectTreeProps = {
 
 const listStyle: CSSProperties = {
   display: "grid",
-  gap: 2,
+  gap: 3,
 };
 
 const emptyStyle: CSSProperties = {
@@ -95,7 +95,7 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
   const isDisabled = item.disabled;
   const isLoading = item.isLoading;
 
-  const rowHeight = depth === 0 ? 32 : 26;
+  const rowHeight = depth === 0 ? 32 : 28;
   const fontSize =
     depth === 0 ? "var(--aw-font-size-sm)" : "var(--aw-font-size-xs)";
   const lineHeight =
@@ -103,17 +103,17 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
   const idleColor =
     depth === 0 ? "var(--aw-text-secondary)" : "var(--aw-text-tertiary)";
   const baseColor = isActive ? "var(--aw-text-primary)" : idleColor;
-  const baseBg = isActive ? "var(--aw-bg-fill-main)" : "transparent";
+  const baseBg = isActive ? "var(--aw-bg-fill-dark)" : "transparent";
 
   const rowStyle: CSSProperties = {
     display: "grid",
     gridTemplateColumns: hasChildren
-      ? "18px minmax(0, 1fr) auto 14px"
-      : "18px minmax(0, 1fr) auto 14px",
+      ? "20px minmax(0, 1fr) auto 14px"
+      : "20px minmax(0, 1fr) auto 14px",
     alignItems: "center",
     width: "100%",
     height: rowHeight,
-    gap: 8,
+    gap: 9,
     padding: "0 10px",
     border: 0,
     borderRadius: "var(--aw-radius-sm)",
@@ -124,7 +124,7 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
     textAlign: "left",
     cursor: isDisabled ? "not-allowed" : "pointer",
     opacity: isDisabled ? 0.6 : 1,
-    transition: "background-color 140ms ease, color 140ms ease",
+    transition: "background-color var(--aw-transition-fast), color var(--aw-transition-fast)",
   };
 
   const labelStyle: CSSProperties = {
@@ -143,7 +143,7 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
   const handleEnter = (e: MouseEvent<HTMLButtonElement>) => {
     if (!isDisabled) {
       e.currentTarget.style.background = isActive
-        ? "var(--aw-bg-fill-main)"
+        ? "var(--aw-bg-fill-dark)"
         : "var(--aw-bg-fill-light)";
     }
   };
@@ -156,7 +156,7 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
   const handleUp = (e: MouseEvent<HTMLButtonElement>) => {
     if (!isDisabled) {
       e.currentTarget.style.background = isActive
-        ? "var(--aw-bg-fill-main)"
+        ? "var(--aw-bg-fill-dark)"
         : "var(--aw-bg-fill-light)";
     }
   };
@@ -187,7 +187,7 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
         onMouseDown={handleDown}
         onMouseUp={handleUp}
       >
-        <span style={{ display: "inline-flex", width: 18, height: 18, alignItems: "center", justifyContent: "center", flexShrink: 0, color: "var(--aw-text-tertiary)" }}>
+        <span style={{ display: "inline-flex", width: 20, height: 20, alignItems: "center", justifyContent: "center", flexShrink: 0, color: "var(--aw-text-tertiary)" }}>
           {hasChildren ? (
             <AwakenIcon size={16}>
               <path d="M3 7h7l2 2h9v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />

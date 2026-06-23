@@ -18,9 +18,9 @@ export function AwakenButton({
   disabled,
   ...props
 }: AwakenButtonProps) {
-  const height = size === "sm" ? 28 : size === "md" ? 34 : 40;
-  const padding = size === "sm" ? "0 8px" : size === "md" ? "0 10px" : "0 14px";
-  const fontSize = size === "sm" ? "var(--aw-font-size-xs)" : size === "md" ? "var(--aw-font-size-sm)" : "var(--aw-font-size-base)";
+  const height = size === "sm" ? 24 : size === "md" ? 28 : 32;
+  const padding = size === "sm" ? "0 8px" : size === "md" ? "0 12px" : "0 16px";
+  const fontSize = size === "sm" ? "var(--aw-font-size-sm)" : "var(--aw-font-size-base)";
 
   const isPrimary = variant === "primary";
   const isGhost = variant === "ghost";
@@ -34,12 +34,12 @@ export function AwakenButton({
     padding,
     borderRadius: "var(--aw-radius-sm)",
     fontSize,
-    fontWeight: "var(--aw-font-weight-bold)",
-    lineHeight: "var(--aw-line-height-sm)",
+    fontWeight: "var(--aw-font-weight-semibold)",
+    lineHeight: "var(--aw-line-height-base)",
     whiteSpace: "nowrap",
     cursor: disabled || loading ? "not-allowed" : "pointer",
     opacity: disabled || loading ? 0.45 : 1,
-    transition: "background-color 160ms ease, color 160ms ease, border-color 160ms ease, transform 160ms ease",
+    transition: "background-color var(--aw-transition-fast), color var(--aw-transition-fast), border-color var(--aw-transition-fast), opacity var(--aw-transition-fast)",
   };
 
   const variantStyle: React.CSSProperties = isPrimary
@@ -55,9 +55,9 @@ export function AwakenButton({
           color: "var(--aw-text-secondary)",
         }
       : {
-          border: "1px solid var(--aw-border-main)",
-          background: "var(--aw-bg-white)",
-          color: "var(--aw-text-primary)",
+        border: "1px solid var(--aw-border-main)",
+        background: "var(--aw-bg-fill-light)",
+        color: "var(--aw-text-primary)",
         };
 
   return (
@@ -70,16 +70,14 @@ export function AwakenButton({
         if (!disabled && !loading) {
           if (isPrimary) {
             e.currentTarget.style.background = "var(--aw-button-black-hover)";
-            e.currentTarget.style.transform = "translateY(-1px)";
           } else {
-            e.currentTarget.style.background = "var(--aw-bg-fill-light)";
+            e.currentTarget.style.background = isGhost ? "var(--aw-bg-fill-light)" : "var(--aw-bg-fill-main)";
           }
         }
         props.onMouseEnter?.(e);
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.background = variantStyle.background as string;
-        e.currentTarget.style.transform = "translateY(0)";
         props.onMouseLeave?.(e);
       }}
     >

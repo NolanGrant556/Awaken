@@ -17,7 +17,7 @@ export function AwakenIconButton({
   disabled,
   ...props
 }: AwakenIconButtonProps) {
-  const dimension = size === "sm" ? 32 : 34;
+  const dimension = size === "sm" ? 28 : 32;
   const borderRadius = variant === "circle" ? "999px" : "var(--aw-radius-sm)";
 
   const button = (
@@ -39,12 +39,12 @@ export function AwakenIconButton({
         color: "var(--aw-text-secondary)",
         cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.45 : 1,
-        transition: "background-color 160ms ease, color 160ms ease, border-color 160ms ease",
+        transition: "background-color var(--aw-transition-fast), color var(--aw-transition-fast), border-color var(--aw-transition-fast)",
         ...props.style,
       }}
       onMouseEnter={(e) => {
         if (!disabled) {
-          e.currentTarget.style.background = "var(--aw-bg-fill-main)";
+          e.currentTarget.style.background = "var(--aw-bg-fill-light)";
         }
         props.onMouseEnter?.(e);
       }}
@@ -54,12 +54,12 @@ export function AwakenIconButton({
       }}
       onMouseDown={(e) => {
         if (!disabled) {
-          e.currentTarget.style.background = "var(--aw-bg-fill-dark)";
+          e.currentTarget.style.background = "var(--aw-bg-fill-main)";
         }
         props.onMouseDown?.(e);
       }}
       onMouseUp={(e) => {
-        e.currentTarget.style.background = "var(--aw-bg-fill-main)";
+        e.currentTarget.style.background = "var(--aw-bg-fill-light)";
         props.onMouseUp?.(e);
       }}
     >

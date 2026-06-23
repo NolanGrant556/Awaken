@@ -10,21 +10,21 @@ export type AwakenBrandRowProps = {
 
 const brandRowStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "32px minmax(0, 1fr)",
+  gridTemplateColumns: "28px minmax(0, 1fr)",
   gap: 8,
   alignItems: "center",
   minHeight: 32,
-  padding: "0 6px",
+  padding: "0 2px",
 };
 
 const brandMarkStyle: CSSProperties = {
   display: "grid",
-  width: 32,
-  height: 32,
+  width: 28,
+  height: 28,
   placeItems: "center",
-  border: "1px solid var(--aw-border-light)",
+  border: "1px solid var(--aw-border-main)",
   borderRadius: "var(--aw-radius-sm)",
-  background: "var(--aw-bg-white)",
+  background: "var(--aw-button-black)",
   color: "var(--aw-text-primary)",
 };
 
@@ -36,7 +36,7 @@ const brandNameStyle: CSSProperties = {
   display: "block",
   overflow: "hidden",
   fontSize: "var(--aw-font-size-base)",
-  fontWeight: "var(--aw-font-weight-bold)",
+  fontWeight: "var(--aw-font-weight-semibold)",
   lineHeight: "var(--aw-line-height-sm)",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
@@ -57,7 +57,7 @@ export function AwakenBrandRow({ logoSrc, title = "Awaken", meta }: AwakenBrandR
   return (
     <div className="aw-brand-row" style={brandRowStyle}>
       <div style={brandMarkStyle} aria-hidden="true">
-        <img src={src} alt="" width={18} height={18} />
+        <img src={src} alt="" width={16} height={16} style={{ filter: "invert(1)" }} />
       </div>
       <div style={brandCopyStyle}>
         <span style={brandNameStyle}>{title}</span>

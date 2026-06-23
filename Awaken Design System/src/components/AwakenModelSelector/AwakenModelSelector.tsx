@@ -68,7 +68,8 @@ export function AwakenModelSelector({
               display: "flex",
               alignItems: "center",
               width: "100%",
-              padding: "6px 10px",
+              minHeight: 28,
+              padding: "0 8px",
               border: "none",
               borderRadius: "var(--aw-radius-sm)",
               background:
@@ -76,12 +77,12 @@ export function AwakenModelSelector({
                   ? "var(--aw-bg-fill-main)"
                   : "transparent",
               color: "var(--aw-text-primary)",
-              fontSize: "var(--aw-font-size-sm)",
-              lineHeight: "var(--aw-line-height-sm)",
+              fontSize: "var(--aw-font-size-base)",
+              lineHeight: "var(--aw-line-height-base)",
               textAlign: "left",
               cursor: option.disabled ? "not-allowed" : "pointer",
               opacity: option.disabled ? 0.45 : 1,
-              transition: "background-color 120ms ease",
+              transition: "background-color var(--aw-transition-fast)",
               whiteSpace: "nowrap",
             }}
             onMouseEnter={(e) => {

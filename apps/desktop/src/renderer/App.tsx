@@ -1217,6 +1217,18 @@ export function App() {
             onPointerDown: handleSidebarResizeStart,
             onKeyDown: handleSidebarResizeKeyDown,
           }}
+          inspectorCollapsed={inspectorCollapsed}
+          inspectorResizeHandleProps={{
+            role: "separator",
+            "aria-label": "Resize inspector",
+            "aria-orientation": "vertical",
+            "aria-valuemin": MIN_INSPECTOR_WIDTH,
+            "aria-valuemax": MAX_INSPECTOR_WIDTH,
+            "aria-valuenow": inspectorWidth,
+            tabIndex: 0,
+            onPointerDown: handleInspectorResizeStart,
+            onKeyDown: handleInspectorResizeKeyDown,
+          }}
           chrome={
             <WorkbenchChrome
               sidebarCollapsed={sidebarCollapsed}
@@ -1290,17 +1302,6 @@ export function App() {
             <div className="desktop-main">
               <WorkbenchShell
                 inspectorCollapsed={inspectorCollapsed}
-                inspectorResizeHandleProps={{
-                  role: "separator",
-                  "aria-label": "Resize inspector",
-                  "aria-orientation": "vertical",
-                  "aria-valuemin": MIN_INSPECTOR_WIDTH,
-                  "aria-valuemax": MAX_INSPECTOR_WIDTH,
-                  "aria-valuenow": inspectorWidth,
-                  tabIndex: 0,
-                  onPointerDown: handleInspectorResizeStart,
-                  onKeyDown: handleInspectorResizeKeyDown,
-                }}
                 stage={
                   <RunStage
                     scrollRef={showCenterComposer ? undefined : runTail.scrollRef}

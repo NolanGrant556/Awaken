@@ -55,28 +55,30 @@ const sidebarStyle: CSSProperties = {
 
 const topStyle: CSSProperties = {
   display: "grid",
-  gap: 10,
-  padding: "12px 8px 8px",
+  gap: 12,
+  padding: "16px 14px 10px",
 };
 
 const scrollStyle: CSSProperties = {
   minHeight: 0,
-  paddingBottom: 12,
+  padding: "2px 0 14px",
+  borderTop: "1px solid var(--aw-border-light)",
 };
 
 const sectionStyle: CSSProperties = {
-  padding: "10px 8px 0",
+  padding: "12px 14px 0",
 };
 
 const sectionHeadStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
-  minHeight: 28,
-  padding: "0 8px",
+  minHeight: 24,
+  padding: "0 6px 4px",
   color: "var(--aw-text-tertiary)",
   fontSize: "var(--aw-font-size-xs)",
   lineHeight: "var(--aw-line-height-xs)",
+  fontWeight: "var(--aw-font-weight-medium)",
 };
 
 const headCountStyle: CSSProperties = {
@@ -87,7 +89,8 @@ const headCountStyle: CSSProperties = {
 const bottomStyle: CSSProperties = {
   display: "grid",
   gap: 8,
-  padding: 8,
+  padding: "10px 14px 14px",
+  borderTop: "1px solid var(--aw-border-light)",
 };
 
 export function AwakenSidebar({
@@ -129,7 +132,7 @@ export function AwakenSidebar({
           ...topStyle,
           padding: showBrand
             ? topStyle.padding
-            : "var(--aw-sidebar-top-inset, 8px) 8px 8px",
+            : "calc(var(--aw-sidebar-top-inset, 8px) + 4px) 14px 10px",
         }}
       >
         {showBrand ? <AwakenBrandRow title={title} /> : null}

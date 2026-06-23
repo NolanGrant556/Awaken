@@ -1,3 +1,7 @@
 @import "../../tokens/components.css";
 
-/* AwakenNewTaskButton currently uses shared Awaken Design System tokens and component classes. */
+.aw-new-task-button kbd {
+  border-color: rgba(255, 255, 255, 0.22) !important;
+  background: rgba(255, 255, 255, 0.12) !important;
+  color: rgba(255, 255, 255, 0.84) !important;
+}

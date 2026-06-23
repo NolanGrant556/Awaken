@@ -35,18 +35,24 @@ export function AwakenSendButton({ ready, onClick, disabled, loading, mode = "se
           : ready
             ? "var(--aw-button-black)"
             : "var(--aw-bg-fill-dark)",
-        color: "var(--aw-text-onblack)",
+        color: ready || isStop ? "var(--aw-text-onblack)" : "var(--aw-text-disabled)",
         cursor: isDisabled ? "not-allowed" : "pointer",
         opacity: isDisabled ? 0.45 : 1,
-        transition: "background-color 160ms ease, transform 160ms ease",
+        transition: "background-color var(--aw-transition-fast), color var(--aw-transition-fast), opacity var(--aw-transition-fast)",
       }}
       onMouseEnter={(e) => {
         if (!isDisabled && (ready || isStop)) {
-          e.currentTarget.style.transform = "translateY(-1px)";
+          e.currentTarget.style.background = isStop
+            ? "var(--aw-status-danger-text)"
+            : "var(--aw-button-black-hover)";
         }
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.transform = "translateY(0)";
+        e.currentTarget.style.background = isStop
+          ? "var(--aw-status-danger)"
+          : ready
+            ? "var(--aw-button-black)"
+            : "var(--aw-bg-fill-dark)";
       }}
     >
       {loading ? (

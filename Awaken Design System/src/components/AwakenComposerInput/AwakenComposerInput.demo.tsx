@@ -11,7 +11,7 @@ export function AwakenComposerInputDemo() {
     <section className="ads-component-demo" aria-label="输入框 AwakenComposerInput 组件演示">
       <header className="ads-component-demo-header">
         <h2>输入框 <code>AwakenComposerInput</code></h2>
-        <p>用于输入任务草稿，支持受控值、自动高度和 Command/Ctrl+Enter 提交。</p>
+        <p>用于输入任务草稿，支持受控值、自动高度、Enter 提交和 Shift+Enter 换行。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenComposerInputStates.map((state) => (

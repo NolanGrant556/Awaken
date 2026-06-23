@@ -4,7 +4,7 @@
 
 ## 用途
 
-`AwakenComposerInput` 用于输入任务草稿，是受控 textarea，支持自动高度、禁用态和 Command/Ctrl+Enter 提交回调。它适合被 `AwakenComposer` 或 `AwakenComposerBar` 包裹使用；父级负责 value、onChange、onSubmit、校验和发送按钮，本组件只处理文本输入、键盘提交和高度约束。
+`AwakenComposerInput` 用于输入任务草稿，是受控 textarea，支持自动高度、禁用态、Enter 提交回调和 Shift+Enter 换行。它适合被 `AwakenComposer` 或 `AwakenComposerBar` 包裹使用；父级负责 value、onChange、onSubmit、校验和发送按钮，本组件只处理文本输入、键盘提交和高度约束。
 
 ## 文件
 

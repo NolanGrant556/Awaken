@@ -1,4 +1,5 @@
 import React from "react";
+import { shouldSubmitComposerInputKey } from "@awaken/design-system";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
@@ -50,6 +51,15 @@ describe("resolvedDecisionForApproval", () => {
         { approvalId: "approval-1", decision: "rejected" },
       ),
     ).toBe("rejected");
+  });
+});
+
+describe("AwakenComposerInput keyboard behavior", () => {
+  it("submits with Enter and keeps Shift+Enter for new lines", () => {
+    expect(shouldSubmitComposerInputKey({ key: "Enter" })).toBe(true);
+    expect(shouldSubmitComposerInputKey({ key: "Enter", shiftKey: true })).toBe(false);
+    expect(shouldSubmitComposerInputKey({ key: "Enter", isComposing: true })).toBe(false);
+    expect(shouldSubmitComposerInputKey({ key: "a" })).toBe(false);
   });
 });
 

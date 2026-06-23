@@ -11,6 +11,20 @@ export type AwakenComposerInputProps = {
   disabled?: boolean;
 };
 
+export type ComposerInputKeyState = {
+  key: string;
+  shiftKey?: boolean;
+  isComposing?: boolean;
+};
+
+export function shouldSubmitComposerInputKey({
+  key,
+  shiftKey,
+  isComposing,
+}: ComposerInputKeyState): boolean {
+  return key === "Enter" && !shiftKey && !isComposing;
+}
+
 export function AwakenComposerInput({
   value,
   onChange,
@@ -31,10 +45,18 @@ export function AwakenComposerInput({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        onSubmit?.();
+      if (
+        !shouldSubmitComposerInputKey({
+          key: e.key,
+          shiftKey: e.shiftKey,
+          isComposing: e.nativeEvent.isComposing,
+        })
+      ) {
+        return;
       }
+
+      e.preventDefault();
+      onSubmit?.();
     },
     [onSubmit]
   );

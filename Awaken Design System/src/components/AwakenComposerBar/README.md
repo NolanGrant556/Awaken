@@ -6,6 +6,8 @@
 
 `AwakenComposerBar` 用于提供紧凑任务输入栏，可作为中心入口或底部 dock 输入栏使用，并展示 repo/model/status 等元信息。它适合运行中的追加输入、首屏快速开始和停靠 composer；父级负责受控输入、metaItems、提交/停止和添加上下文动作，本组件负责布局 `AwakenComposerInput`、`AwakenContextButton` 与发送按钮。
 
+当前 Desktop 首屏空闲态使用 `variant="center"`，并显式传入空 `value`、空 `placeholder` 与空 `metaItems`，使组件呈现为干净的居中输入框，仅保留加上下文和发送控制。
+
 ## 文件
 
 - `AwakenComposerBar.tsx` - 组件实现。

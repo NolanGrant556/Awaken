@@ -30,17 +30,14 @@ export const AwakenComposerBarStates: AwakenComposerBarState[] = [
     } as unknown as Partial<ComponentProps<typeof AwakenComposerBar>>,
   },
   {
-    id: "center-ready",
-    label: "中心输入栏",
+    id: "center-idle",
+    label: "桌面首屏空闲输入",
     props: {
-      value: "帮我梳理这个组件库还缺哪些可观测状态。",
-      placeholder: "描述一个新任务...",
-      isReady: true,
+      value: "",
+      placeholder: "",
+      isReady: false,
       variant: "center",
-      metaItems: [
-        { id: "repo", label: "Awaken Design System" },
-        { id: "model", label: "GPT-5" },
-      ],
+      metaItems: [],
     } as unknown as Partial<ComponentProps<typeof AwakenComposerBar>>,
   },
   {

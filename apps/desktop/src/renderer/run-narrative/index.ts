@@ -1,5 +1,6 @@
 export {
   addRunErrorToNarrative,
+  appendRunRequestedNarrative,
   createInitialRunNarrativeState,
   createRunRequestedNarrative,
   projectAguiEventToNarrative,

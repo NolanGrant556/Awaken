@@ -9,6 +9,7 @@ import type {
 } from "../../shared/runtime";
 import {
   addRunErrorToNarrative,
+  appendRunRequestedNarrative,
   createInitialRunNarrativeState,
   createRunRequestedNarrative,
   projectAguiEventToNarrative,
@@ -257,6 +258,35 @@ function recoveryPrompt(state: RuntimeViewState, run: RuntimeRun, prompt?: strin
     return explicit;
   }
   return state.threads.find((thread) => thread.threadId === run.threadId)?.label ?? "";
+}
+
+function nextNarrativeScope(state: RuntimeViewState): string {
+  const owner = state.activeThreadId ?? state.threadId ?? "draft";
+  const committedPromptCount = state.narrative.committedItems.filter(
+    (item) => item.kind === "prompt",
+  ).length;
+  const activePromptCount = state.narrative.activeItem?.kind === "prompt" ? 1 : 0;
+  return `${owner}:${committedPromptCount + activePromptCount + 1}`;
+}
+
+function currentNarrativeScope(state: RuntimeViewState): string {
+  return state.runId ?? state.threadId ?? state.activeThreadId ?? "current";
+}
+
+function recoveredNarrativeScope(run: RuntimeRun): string {
+  return `${run.threadId ?? run.runId ?? "recovered"}:1`;
+}
+
+function shouldAppendNarrative(state: RuntimeViewState): boolean {
+  return Boolean(state.activeThreadId || state.threadId);
+}
+
+function scopeNarrativeEvent(event: AguiEvent, state: RuntimeViewState): AguiEvent {
+  return {
+    ...event,
+    threadId: event.threadId ?? state.threadId ?? state.activeThreadId,
+    runId: event.runId ?? state.runId,
+  };
 }
 
 function toSteps(records: StepRecord[]): RunStepItem[] {
@@ -535,7 +565,13 @@ export function reduceRuntimeState(
         approvals: [],
         artifacts: [],
         turnDiff: undefined,
-        narrative: createRunRequestedNarrative(action.prompt),
+        narrative: shouldAppendNarrative(state)
+          ? appendRunRequestedNarrative(
+              state.narrative,
+              action.prompt,
+              nextNarrativeScope(state),
+            )
+          : createRunRequestedNarrative(action.prompt, nextNarrativeScope(state)),
         supervisorStatus: state.supervisorStatus,
         threads: state.threads,
         activeThreadId: state.activeThreadId,
@@ -617,7 +653,11 @@ export function reduceRuntimeState(
               },
             ),
           ),
-          narrative: addRunErrorToNarrative(state.narrative, action.message, "stream"),
+          narrative: addRunErrorToNarrative(
+            state.narrative,
+            action.message,
+            `${currentNarrativeScope(state)}:stream`,
+          ),
         }),
       );
     case "run/reconnecting":
@@ -635,7 +675,7 @@ export function reduceRuntimeState(
           ...syncFromRun(initialState, action.run),
           prompt,
           narrative: prompt
-            ? createRunRequestedNarrative(prompt)
+            ? createRunRequestedNarrative(prompt, recoveredNarrativeScope(action.run))
             : createInitialRunNarrativeState(),
           supervisorStatus: state.supervisorStatus,
           timelineTitle: "恢复运行",
@@ -698,6 +738,7 @@ export function reduceRuntimeState(
       return restoreThreadView(saveActiveThreadView(state), action.threadId);
     case "run/event": {
       const nextState = { ...state };
+      const narrativeEvent = scopeNarrativeEvent(action.event, nextState);
       let records = state.steps.map((step, index) => ({
         ...step,
         key: step.id,
@@ -1076,7 +1117,7 @@ export function reduceRuntimeState(
       }
 
       nextState.steps = toSteps(records);
-      nextState.narrative = projectAguiEventToNarrative(state.narrative, action.event);
+      nextState.narrative = projectAguiEventToNarrative(state.narrative, narrativeEvent);
       return saveActiveThreadView(syncActiveThreadSummary(nextState));
     }
     case "supervisor/status-changed":

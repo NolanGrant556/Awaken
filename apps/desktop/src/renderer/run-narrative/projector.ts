@@ -7,7 +7,6 @@ import type {
 } from "./types";
 
 const MAX_SEEN_EVENTS = 1000;
-const EXPLORING_ID = "exploring:readonly";
 const READ_ONLY_TOOL_NAMES = new Set(["read_file", "list_files", "grep_search"]);
 
 export function createInitialRunNarrativeState(): RunNarrativeState {
@@ -17,18 +16,38 @@ export function createInitialRunNarrativeState(): RunNarrativeState {
   };
 }
 
-export function createRunRequestedNarrative(prompt: string): RunNarrativeState {
+export function createRunRequestedNarrative(
+  prompt: string,
+  scopeId = "current",
+): RunNarrativeState {
+  return appendRunRequestedNarrative(createInitialRunNarrativeState(), prompt, scopeId);
+}
+
+export function appendRunRequestedNarrative(
+  state: RunNarrativeState,
+  prompt: string,
+  scopeId = "current",
+): RunNarrativeState {
   const trimmed = prompt.trim();
+  const settledState = state.activeItem ? commitActive(state, "done") : state;
+  const committedItems = trimmed
+    ? upsertCommitted(settledState.committedItems, {
+        kind: "prompt",
+        id: `prompt:${scopeId}`,
+        text: trimmed,
+      })
+    : settledState.committedItems;
+
   return {
-    committedItems: trimmed
-      ? [{ kind: "prompt", id: "prompt:current", text: trimmed }]
-      : [],
+    ...settledState,
+    committedItems,
     activeItem: {
       kind: "planning",
-      id: "planning:current",
+      id: `planning:${scopeId}`,
       text: "Planning next moves",
       status: "active",
     },
+    inspectorSelection: undefined,
     seenEventKeys: [],
   };
 }
@@ -157,7 +176,7 @@ export function projectAguiEventToNarrative(
 
 function eventKey(event: AguiEvent): string | undefined {
   if (typeof event.seq === "number") {
-    return `seq:${event.seq}`;
+    return `seq:${eventScope(event)}:${event.seq}`;
   }
 
   if (
@@ -178,7 +197,7 @@ function eventKey(event: AguiEvent): string | undefined {
     event.runId ||
     event.type;
   const content = event.delta || event.content || event.status || event.approvalDecision || "";
-  return `${event.type}:${id}:${content}`;
+  return `${event.type}:${eventScope(event)}:${id}:${content}`;
 }
 
 function markSeen(state: RunNarrativeState, key: string): RunNarrativeState {
@@ -278,11 +297,11 @@ function applyStatus(
 }
 
 function thinkingId(event: AguiEvent): string {
-  return `thinking:${event.messageId ?? "current"}`;
+  return `thinking:${eventScopedId(event, event.messageId)}`;
 }
 
 function answerId(event: AguiEvent): string {
-  return `answer:${event.messageId ?? "current"}`;
+  return `answer:${eventScopedId(event, event.messageId)}`;
 }
 
 function narrativeErrorMessage(event: AguiEvent): string {
@@ -297,19 +316,37 @@ function narrativeErrorMessage(event: AguiEvent): string {
 }
 
 function toolId(event: AguiEvent): string {
-  return `tool:${event.toolCallId ?? event.toolCallName ?? "current"}`;
+  return `tool:${eventScopedId(event, event.toolCallId ?? event.toolCallName)}`;
 }
 
 function approvalId(event: AguiEvent): string {
-  return `approval:${event.approvalId ?? "current"}`;
+  return `approval:${eventScopedId(event, event.approvalId)}`;
 }
 
 function artifactId(event: AguiEvent): string {
-  return `fileChange:${event.artifactId ?? "current"}`;
+  return `fileChange:${eventScopedId(event, event.artifactId)}`;
 }
 
 function exploringActionId(event: AguiEvent): string {
-  return `explore:${event.toolCallId ?? event.toolCallName ?? "current"}`;
+  return `explore:${eventScopedId(event, event.toolCallId ?? event.toolCallName)}`;
+}
+
+function exploringId(event: AguiEvent): string {
+  return `exploring:${eventScope(event)}:readonly`;
+}
+
+function eventScope(event: AguiEvent): string {
+  return event.runId ?? event.threadId ?? "current";
+}
+
+function eventScopedId(event: AguiEvent, value?: string): string {
+  if (event.runId && value) {
+    return `${event.runId}:${value}`;
+  }
+  if (event.threadId && value) {
+    return `${event.threadId}:${value}`;
+  }
+  return value ?? eventScope(event);
 }
 
 function isReadOnlyToolEvent(event: AguiEvent): boolean {
@@ -432,8 +469,9 @@ function updateExploringAction(
   status: "active" | "done" | "error",
   detail?: string,
 ): RunNarrativeState {
+  const id = exploringId(event);
   const existing =
-    state.activeItem?.id === EXPLORING_ID && state.activeItem.kind === "exploring"
+    state.activeItem?.id === id && state.activeItem.kind === "exploring"
       ? state.activeItem
       : undefined;
   const action: RunAction = {
@@ -450,7 +488,7 @@ function updateExploringAction(
     },
     {
       kind: "exploring",
-      id: EXPLORING_ID,
+      id,
       actions: upsertAction(existing?.actions ?? [], action),
       status: status === "active" ? "active" : existing?.status ?? "active",
     },

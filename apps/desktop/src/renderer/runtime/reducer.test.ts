@@ -229,7 +229,7 @@ describe("runtime reducer replay idempotency", () => {
 
     expect(state.prompt).toBe("Restore this run");
     expect(state.narrative.committedItems.filter((item) => item.kind === "prompt")).toEqual([
-      { kind: "prompt", id: "prompt:current", text: "Restore this run" },
+      { kind: "prompt", id: "prompt:thread-1:1", text: "Restore this run" },
     ]);
   });
 
@@ -255,7 +255,7 @@ describe("runtime reducer replay idempotency", () => {
     expect(state.approvals[0].id).toBe("approval-1");
     expect(state.narrative.activeItem).toEqual({
       kind: "approval",
-      id: "approval:approval-1",
+      id: "approval:run-1:approval-1",
       title: "Approve patch",
       status: "waiting",
     });
@@ -277,7 +277,7 @@ describe("runtime reducer replay idempotency", () => {
     expect(state.narrative.activeItem).toBeUndefined();
     expect(state.narrative.committedItems).toContainEqual({
       kind: "answer",
-      id: "answer:msg-1",
+      id: "answer:run-1:msg-1",
       markdown: "done",
       status: "done",
     });
@@ -313,7 +313,7 @@ describe("runtime reducer replay idempotency", () => {
     expect(state.artifacts).toHaveLength(1);
     expect(state.narrative.activeItem).toMatchObject({
       kind: "answer",
-      id: "answer:msg-1",
+      id: "answer:run-1:msg-1",
       markdown: "hello world",
       status: "active",
     });
@@ -325,11 +325,11 @@ describe("runtime reducer run narrative projection", () => {
     const state = dispatch([{ type: "run/requested", prompt: "Build the workbench" }]);
 
     expect(state.narrative.committedItems).toEqual([
-      { kind: "prompt", id: "prompt:current", text: "Build the workbench" },
+      { kind: "prompt", id: "prompt:draft:1", text: "Build the workbench" },
     ]);
     expect(state.narrative.activeItem).toEqual({
       kind: "planning",
-      id: "planning:current",
+      id: "planning:draft:1",
       text: "Planning next moves",
       status: "active",
     });
@@ -415,7 +415,7 @@ describe("runtime reducer run narrative projection", () => {
 
     expect(state.narrative.activeItem).toMatchObject({
       kind: "exploring",
-      id: "exploring:readonly",
+      id: "exploring:current:readonly",
       status: "active",
     });
     if (state.narrative.activeItem?.kind !== "exploring") {
@@ -455,7 +455,7 @@ describe("runtime reducer run narrative projection", () => {
 
     expect(state.narrative.activeItem).toMatchObject({
       kind: "exploring",
-      id: "exploring:readonly",
+      id: "exploring:current:readonly",
     });
     if (state.narrative.activeItem?.kind !== "exploring") {
       throw new Error("expected exploring item");
@@ -503,7 +503,7 @@ describe("runtime reducer run narrative projection", () => {
     });
     expect(state.narrative.activeItem).toMatchObject({
       kind: "exploring",
-      id: "exploring:readonly",
+      id: "exploring:current:readonly",
       status: "active",
     });
     if (state.narrative.activeItem?.kind !== "exploring") {
@@ -628,7 +628,7 @@ describe("runtime reducer run narrative projection", () => {
 
     expect(state.narrative.activeItem).toMatchObject({
       kind: "exploring",
-      id: "exploring:readonly",
+      id: "exploring:current:readonly",
     });
     if (state.narrative.activeItem?.kind !== "exploring") {
       throw new Error("expected exploring item");
@@ -827,7 +827,7 @@ describe("runtime reducer run narrative projection", () => {
       title: "Stream failed",
       status: "error",
     });
-    expect(state.narrative.committedItems.some((item) => item.id === "answer:error:stream")).toBe(true);
+    expect(state.narrative.committedItems.some((item) => item.id === "answer:error:current:stream")).toBe(true);
   });
 
   it("projects artifact path, title, and status into file change narrative and artifacts", () => {
@@ -1032,7 +1032,13 @@ describe("runtime reducer thread snapshots", () => {
       { type: "run/requested", prompt: "first prompt" },
       { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
       { type: "run/threadAdded", threadId: "thread-1", label: "first prompt", runId: "run-1" },
-      runEvent({ type: "TEXT_MESSAGE_CONTENT", threadId: "thread-1", runId: "run-1", messageId: "msg-1", delta: "first answer" }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        threadId: "thread-1",
+        runId: "run-1",
+        messageId: "msg-1",
+        delta: "first answer",
+      }),
       { type: "run/reset" },
       { type: "run/requested", prompt: "second prompt" },
       { type: "run/created", run: makeRun({ runId: "run-2", threadId: "thread-2" }) },
@@ -1044,10 +1050,19 @@ describe("runtime reducer thread snapshots", () => {
     expect(state.activeThreadId).toBe("thread-1");
     expect(state.runId).toBe("run-1");
     expect(state.assistantText).toBe("first answer");
-    expect([
+    const narrativeItems = [
       ...state.narrative.committedItems,
       ...(state.narrative.activeItem ? [state.narrative.activeItem] : []),
-    ].some((item) => item.kind === "answer")).toBe(true);
+    ];
+    expect(narrativeItems.some((item) => item.kind === "answer")).toBe(true);
+    expect(narrativeItems).toContainEqual({
+      kind: "prompt",
+      id: "prompt:draft:1",
+      text: "first prompt",
+    });
+    expect(
+      narrativeItems.some((item) => item.kind === "prompt" && item.text === "second prompt"),
+    ).toBe(false);
     expect(state.threads.map((thread) => thread.threadId)).toEqual(["thread-1", "thread-2"]);
   });
 
@@ -1093,6 +1108,13 @@ describe("runtime reducer thread snapshots", () => {
       { type: "run/requested", prompt: "first prompt" },
       { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
       { type: "run/threadAdded", threadId: "thread-1", label: "first prompt", runId: "run-1" },
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        threadId: "thread-1",
+        runId: "run-1",
+        messageId: "msg-1",
+        delta: "first answer",
+      }),
       runEvent({ type: "RUN_FINISHED", result: "first done" }),
       { type: "run/requested", prompt: "follow up prompt" },
       { type: "run/created", run: makeRun({ runId: "run-2", threadId: "thread-1" }) },
@@ -1109,11 +1131,45 @@ describe("runtime reducer thread snapshots", () => {
       runStatus: "running",
       activeRunId: "run-2",
     });
+    const prompts = state.narrative.committedItems.filter((item) => item.kind === "prompt");
+    expect(prompts).toEqual([
+      { kind: "prompt", id: "prompt:draft:1", text: "first prompt" },
+      { kind: "prompt", id: "prompt:thread-1:2", text: "follow up prompt" },
+    ]);
+    expect(new Set(prompts.map((item) => item.id)).size).toBe(2);
     expect(state.narrative.committedItems).toContainEqual({
-      kind: "prompt",
-      id: "prompt:current",
-      text: "follow up prompt",
+      kind: "answer",
+      id: "answer:run-1:msg-1",
+      markdown: "first answer",
+      status: "done",
     });
+    expect(state.narrative.activeItem).toEqual({
+      kind: "planning",
+      id: "planning:thread-1:2",
+      text: "Planning next moves",
+      status: "active",
+    });
+  });
+
+  it("uses run-scoped fallback ids for consecutive answers without message ids", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "first prompt" },
+      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
+      { type: "run/threadAdded", threadId: "thread-1", label: "first prompt", runId: "run-1" },
+      runEvent({ type: "TEXT_MESSAGE_CONTENT", delta: "first answer" }),
+      runEvent({ type: "RUN_FINISHED", result: "first done" }),
+      { type: "run/requested", prompt: "follow up prompt" },
+      { type: "run/created", run: makeRun({ runId: "run-2", threadId: "thread-1" }) },
+      { type: "run/threadAdded", threadId: "thread-1", label: "follow up prompt", runId: "run-2" },
+      runEvent({ type: "TEXT_MESSAGE_CONTENT", delta: "second answer" }),
+      runEvent({ type: "RUN_FINISHED", result: "second done" }),
+    ]);
+
+    const answers = state.narrative.committedItems.filter((item) => item.kind === "answer");
+    expect(answers).toEqual([
+      { kind: "answer", id: "answer:run-1", markdown: "first answer", status: "done" },
+      { kind: "answer", id: "answer:run-2", markdown: "second answer", status: "done" },
+    ]);
   });
 
   it("loads runtime thread list without losing saved thread views", () => {

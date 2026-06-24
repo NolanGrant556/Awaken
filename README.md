@@ -11,10 +11,13 @@ Awaken 是一个本地优先的 Agent runtime 与桌面应用原型。当前仓�
 
 本项目只允许两套本地入口：
 
-1. Awaken 使用入口：`npm run dev:desktop`
+1. Awaken 使用入口：`npm run open:desktop`
    - 用户和开发者都从这里打开同一个 Awaken Desktop。
+   - 这个命令会复用或启动 `awaken-dev-desktop` screen 会话，并检查 renderer、Electron、`awaken-core` 和真实窗口。
    - Desktop 自己启动并管理 `awaken-core`。
+   - 底层开发服务命令仍是 `npm run dev:desktop`，但只作为 `open:desktop` 使用的长期进程，不作为日常打开入口。
    - 不要把 `cmd/awaken-core`、Vite renderer 或 Electron 子脚本当成独立使用入口。
+   - 不要用普通浏览器打开 `127.0.0.1:5174` 判断 Desktop 是否成功；renderer 需要 `window.awaken` Electron bridge。
 2. 组件独立观测入口：`npm run open:ui`
    - 在仓库根目录运行，会启动本地组件观测服务并打开 Gallery。
    - 如果服务已经在跑，会直接打开 `http://127.0.0.1:5173/`。
@@ -39,7 +42,6 @@ Awaken 是一个本地优先的 Agent runtime 与桌面应用原型。当前仓�
 
 ```text
 README.md
-docs/README.md
 ```
 
 然后按任务继续读：
@@ -47,7 +49,7 @@ docs/README.md
 - 需要项目文件职责总览：读 `docs/01_项目情况说明/项目文件清单/README.md`。
 - 改 runtime / protocol / AG-UI / A2UI：读 `docs/01_项目情况说明/AG-UI&A2UI说明/agui-a2ui-architecture.md`。
 - 需要对照 AG-UI / A2UI 上游：读 `docs/01_项目情况说明/AG-UI&A2UI说明/upstream-references.md`。
-- 改 desktop：读 `apps/desktop/README.md`。
+- 改 desktop：以本 README 的入口契约、验收命令和 `apps/desktop/src` 下真实实现为准。
 - 改 Awaken Design System / UI 组件库：读 `Awaken Design System/README.md`。
 
 开始改代码前先看真实工作区：
@@ -257,20 +259,18 @@ git diff --check
 ### Awaken 使用入口
 
 ```bash
-npm run dev:desktop
+npm run open:desktop
 ```
 
-`npm run dev:desktop` 会构建 `@awaken/design-system`，确保 `awaken-core` binary 存在，启动 Vite renderer（`127.0.0.1:5174`），编译 Electron main/preload，并启动 Electron。
+`npm run open:desktop` 会复用或启动 `awaken-dev-desktop` screen 会话，并确认 renderer、Electron、`awaken-core` 和真实 Desktop 窗口都已就绪。底层的 `npm run dev:desktop` 会构建 `@awaken/design-system`，确保 `awaken-core` binary 存在，启动 Vite renderer（`127.0.0.1:5174`），编译 Electron main/preload，并启动 Electron；日常不要直接用它打开 Awaken。
 
 ### 组件独立观测入口
 
-先启动本地组件观测服务：
-
 ```bash
-npm run dev:ui
+npm run open:ui
 ```
 
-然后打开具体组件 URL。每个组件 URL 都可刷新、可截图、可作为视觉回归目标，例如：
+`npm run open:ui` 会复用或启动本地组件观测服务，然后打开 Gallery。每个组件 URL 都可刷新、可截图、可作为视觉回归目标，例如：
 
 ```text
 http://127.0.0.1:5173/#/components/awaken-composer-bar

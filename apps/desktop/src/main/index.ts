@@ -5,8 +5,10 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  screen as electronScreen,
   shell,
   webContents,
+  type Rectangle,
   type WebContents,
 } from "electron";
 import { dirname, join } from "node:path";
@@ -42,6 +44,50 @@ type StreamSubscription = {
 };
 
 const subscriptions = new Map<string, StreamSubscription>();
+
+const defaultWindowWidth = 1440;
+const defaultWindowHeight = 960;
+const minimumWindowWidth = 1120;
+const minimumWindowHeight = 760;
+
+function centeredBounds(width: number, height: number, workArea: Rectangle): Rectangle {
+  return {
+    width,
+    height,
+    x: workArea.x + Math.round((workArea.width - width) / 2),
+    y: workArea.y + Math.round((workArea.height - height) / 2),
+  };
+}
+
+function shouldResetWindowBounds(bounds: Rectangle, workArea: Rectangle): boolean {
+  const hasUsableSize = bounds.width >= minimumWindowWidth && bounds.height >= minimumWindowHeight;
+  const hasVisibleCenter =
+    bounds.x + bounds.width > workArea.x + 120 &&
+    bounds.x < workArea.x + workArea.width - 120 &&
+    bounds.y + bounds.height > workArea.y + 120 &&
+    bounds.y < workArea.y + workArea.height - 120;
+
+  return !hasUsableSize || !hasVisibleCenter;
+}
+
+function ensureWindowVisible(window: BrowserWindow): void {
+  if (window.isDestroyed()) {
+    return;
+  }
+
+  if (window.isMinimized()) {
+    window.restore();
+  }
+
+  const currentBounds = window.getBounds();
+  const workArea = electronScreen.getDisplayMatching(currentBounds).workArea;
+  const nextWidth = Math.min(Math.max(currentBounds.width, minimumWindowWidth), workArea.width);
+  const nextHeight = Math.min(Math.max(currentBounds.height, minimumWindowHeight), workArea.height);
+
+  if (shouldResetWindowBounds(currentBounds, workArea)) {
+    window.setBounds(centeredBounds(nextWidth, nextHeight, workArea));
+  }
+}
 
 function toDesktopPlatform(platform: NodeJS.Platform): DesktopPlatform {
   switch (platform) {
@@ -242,12 +288,13 @@ function cleanupWindowSubscriptions(targetId: number): void {
 
 function createMainWindow(): BrowserWindow {
   const mainWindow = new BrowserWindow({
-    width: 1440,
-    height: 960,
-    minWidth: 1120,
-    minHeight: 760,
+    width: defaultWindowWidth,
+    height: defaultWindowHeight,
+    minWidth: minimumWindowWidth,
+    minHeight: minimumWindowHeight,
     backgroundColor: "#f8f8f7",
     autoHideMenuBar: true,
+    show: false,
     title: "Awaken Desktop",
     ...(process.platform === "darwin"
       ? {
@@ -273,11 +320,31 @@ function createMainWindow(): BrowserWindow {
     cleanupWindowSubscriptions(webContentsId);
   });
 
-  if (isDevServer) {
-    void mainWindow.loadURL("http://127.0.0.1:5174");
-  } else {
-    void mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
-  }
+  mainWindow.once("ready-to-show", () => {
+    ensureWindowVisible(mainWindow);
+    mainWindow.show();
+    mainWindow.focus();
+  });
+
+  mainWindow.on("show", () => {
+    ensureWindowVisible(mainWindow);
+  });
+
+  mainWindow.on("restore", () => {
+    ensureWindowVisible(mainWindow);
+  });
+
+  const loadWindow = isDevServer
+    ? mainWindow.loadURL("http://127.0.0.1:5174")
+    : mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
+
+  void loadWindow.finally(() => {
+    if (!mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      ensureWindowVisible(mainWindow);
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
 
   return mainWindow;
 }

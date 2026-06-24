@@ -356,6 +356,8 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
 }
 
 .aw-run-stage-scroll {
+  --aw-prompt-anchor-offset: 0px;
+  --aw-turn-content-width: 760px;
   display: grid;
   align-content: start;
   gap: 16px;
@@ -363,8 +365,9 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
   min-width: 0;
   max-width: 100%;
   min-height: 0;
-  padding: 24px 32px 28px;
+  padding: 0 32px 28px;
   overflow: auto;
+  scroll-padding-top: var(--aw-prompt-anchor-offset);
 }
 
 .aw-run-stage-scroll > * {
@@ -448,7 +451,7 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   display: grid;
   align-content: start;
   gap: 14px;
-  width: min(760px, 100%);
+  width: min(var(--aw-turn-content-width), 100%);
   min-width: 0;
   justify-self: center;
 }
@@ -458,13 +461,16 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 }
 
 .execution-prompt-block {
+  box-sizing: border-box;
+  width: 100%;
   min-width: 0;
   padding: 0 0 6px;
 }
 
 .execution-prompt-block p {
-  width: fit-content;
-  max-width: min(680px, 100%);
+  width: 100%;
+  box-sizing: border-box;
+  max-width: 100%;
   margin: 0;
   padding: 7px 12px;
   border: 1px solid var(--aw-border-light);
@@ -516,6 +522,8 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 .tool-trace-group {
   display: grid;
   gap: 5px;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
 }
 
@@ -529,6 +537,8 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 .tool-trace-group-lines {
   display: grid;
   gap: 2px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .tool-trace-line {
@@ -608,7 +618,9 @@ button.tool-trace-line:focus-visible {
 .assistant-message {
   display: grid;
   gap: 9px;
-  width: min(720px, 100%);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
   color: var(--aw-text-primary);
   font-size: var(--aw-font-size-sm);
@@ -617,28 +629,51 @@ button.tool-trace-line:focus-visible {
 }
 
 .assistant-message p {
+  max-width: 100%;
   margin: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .assistant-message ul,
 .assistant-message ol {
   display: grid;
   gap: 4px;
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
   margin: 0;
   padding-left: 20px;
+  overflow-wrap: anywhere;
+}
+
+.assistant-message > *,
+.assistant-message li {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .assistant-message-code {
+  max-width: 100%;
   padding: 1px 5px;
   border-radius: var(--aw-radius-control);
   background: var(--aw-bg-fill-main);
   color: var(--aw-text-primary);
   font-family: var(--aw-font-mono);
   font-size: 0.92em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .assistant-message-table-wrap {
+  box-sizing: border-box;
+  width: 100%;
   max-width: 100%;
+  min-width: 0;
   overflow: auto;
   border: 1px solid var(--aw-border-light);
   border-radius: 8px;
@@ -796,6 +831,51 @@ button.tool-trace-line:focus-visible {
   min-width: 0;
   min-height: 0;
   overflow: auto;
+}
+
+.aw-run-stage-scroll,
+.aw-workbench-inspector,
+.light-inspector-detail {
+  scrollbar-color: rgba(115, 115, 115, 0.28) transparent;
+  scrollbar-width: thin;
+}
+
+.aw-run-stage-scroll::-webkit-scrollbar,
+.aw-workbench-inspector::-webkit-scrollbar,
+.light-inspector-detail::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+  background: transparent;
+}
+
+.aw-run-stage-scroll::-webkit-scrollbar-track,
+.aw-run-stage-scroll::-webkit-scrollbar-track-piece,
+.aw-run-stage-scroll::-webkit-scrollbar-corner,
+.aw-workbench-inspector::-webkit-scrollbar-track,
+.aw-workbench-inspector::-webkit-scrollbar-track-piece,
+.aw-workbench-inspector::-webkit-scrollbar-corner,
+.light-inspector-detail::-webkit-scrollbar-track,
+.light-inspector-detail::-webkit-scrollbar-track-piece,
+.light-inspector-detail::-webkit-scrollbar-corner {
+  background: transparent;
+  border: 0;
+}
+
+.aw-run-stage-scroll::-webkit-scrollbar-thumb,
+.aw-workbench-inspector::-webkit-scrollbar-thumb,
+.light-inspector-detail::-webkit-scrollbar-thumb {
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--aw-radius-pill);
+  background: rgba(115, 115, 115, 0.28);
+}
+
+.aw-run-stage-scroll::-webkit-scrollbar-button,
+.aw-workbench-inspector::-webkit-scrollbar-button,
+.light-inspector-detail::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .aw-task-welcome {

@@ -123,6 +123,7 @@ export type RuntimeAction =
   | { type: "run/streamFailed"; message: string }
   | { type: "run/reconnecting" }
   | { type: "run/recovered"; run: RuntimeRun; prompt?: string }
+  | { type: "run/threadReplayStarted"; threadId: string; runId?: string }
   | { type: "run/threadsLoaded"; threads: RuntimeThread[] }
   | { type: "run/threadAdded"; threadId: string; label: string; runId: string }
   | { type: "run/threadSwitch"; threadId: string }
@@ -684,6 +685,20 @@ export function reduceRuntimeState(
           activeThreadId: action.run.threadId,
         }),
       );
+    }
+    case "run/threadReplayStarted": {
+      const view = emptyThreadView(action.threadId, action.runId);
+      return {
+        ...initialState,
+        ...view,
+        activeThreadId: action.threadId,
+        supervisorStatus: state.supervisorStatus,
+        threads: state.threads,
+        threadViews: {
+          ...state.threadViews,
+          [action.threadId]: view,
+        },
+      };
     }
     case "run/threadsLoaded": {
       const threadViews = { ...state.threadViews };

@@ -590,6 +590,82 @@ func TestListThreadsEndpointReturnsRuntimeThreads(t *testing.T) {
 	}
 }
 
+func TestGetThreadTranscriptEndpointReturnsMappedRuns(t *testing.T) {
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			sink.Emit(agentcore.AwakenEvent{
+				Type:      agentcore.TextMessageStartedEventType,
+				MessageID: "msg-1",
+				Role:      "assistant",
+			})
+			sink.Emit(agentcore.AwakenEvent{
+				Type:      agentcore.TextDeltaEventType,
+				MessageID: "msg-1",
+				Role:      "assistant",
+				Delta:     input,
+			})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: input})
+			return input, nil
+		})
+	})
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	firstResp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello","workspace":{"workspace_root":"/tmp"}}`))
+	if err != nil {
+		t.Fatalf("POST /v1/runs (first) failed: %v", err)
+	}
+	defer firstResp.Body.Close()
+	var firstRun awruntime.Run
+	if err := json.NewDecoder(firstResp.Body).Decode(&firstRun); err != nil {
+		t.Fatalf("failed to decode first run: %v", err)
+	}
+	waitHTTPRunTerminal(t, ts.URL, firstRun.RunID)
+
+	secondBody := fmt.Sprintf(`{"input":"follow up","thread_id":%q,"workspace":{"workspace_root":"/tmp"}}`, firstRun.ThreadID)
+	secondResp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(secondBody))
+	if err != nil {
+		t.Fatalf("POST /v1/runs (second) failed: %v", err)
+	}
+	defer secondResp.Body.Close()
+	var secondRun awruntime.Run
+	if err := json.NewDecoder(secondResp.Body).Decode(&secondRun); err != nil {
+		t.Fatalf("failed to decode second run: %v", err)
+	}
+	waitHTTPRunTerminal(t, ts.URL, secondRun.RunID)
+
+	transcriptResp, err := http.Get(ts.URL + "/v1/threads/" + firstRun.ThreadID + "/transcript")
+	if err != nil {
+		t.Fatalf("GET /v1/threads/{thread_id}/transcript failed: %v", err)
+	}
+	defer transcriptResp.Body.Close()
+	if transcriptResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from transcript endpoint, got %d", transcriptResp.StatusCode)
+	}
+
+	var transcript threadTranscriptResponse
+	if err := json.NewDecoder(transcriptResp.Body).Decode(&transcript); err != nil {
+		t.Fatalf("failed to decode transcript response: %v", err)
+	}
+	if transcript.Thread.ThreadID != firstRun.ThreadID {
+		t.Fatalf("expected thread id %q, got %q", firstRun.ThreadID, transcript.Thread.ThreadID)
+	}
+	if len(transcript.Runs) != 2 {
+		t.Fatalf("expected 2 transcript runs, got %d", len(transcript.Runs))
+	}
+	if transcript.Runs[1].Run.Input != "follow up" {
+		t.Fatalf("expected second run input to be preserved, got %q", transcript.Runs[1].Run.Input)
+	}
+	if len(transcript.Runs[1].Events) == 0 {
+		t.Fatalf("expected mapped events in transcript response")
+	}
+	if transcript.Runs[1].Events[0].Type != "RUN_STARTED" {
+		t.Fatalf("expected transcript event to be mapped as AG-UI frame, got %s", transcript.Runs[1].Events[0].Type)
+	}
+}
+
 func waitHTTPRunTerminal(t *testing.T, baseURL, runID string) awruntime.Run {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

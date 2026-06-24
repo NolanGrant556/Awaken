@@ -37,6 +37,16 @@ type errorResponse struct {
 	Message string `json:"message"`
 }
 
+type threadTranscriptRunResponse struct {
+	Run    awruntime.Run `json:"run"`
+	Events []agui.Event  `json:"events"`
+}
+
+type threadTranscriptResponse struct {
+	Thread awruntime.ThreadSnapshot      `json:"thread"`
+	Runs   []threadTranscriptRunResponse `json:"runs"`
+}
+
 func writeErrorJSON(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
@@ -72,6 +82,36 @@ func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 
 func (h runHandlers) handleListThreads(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.runService.ListThreads())
+}
+
+func (h runHandlers) handleGetThreadTranscript(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	transcript, err := h.runService.GetThreadTranscript(threadID)
+	if err != nil {
+		if errors.Is(err, awruntime.ErrThreadNotFound) {
+			writeErrorJSON(w, http.StatusNotFound, "THREAD_NOT_FOUND", err.Error())
+			return
+		}
+		writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get thread transcript")
+		return
+	}
+
+	response := threadTranscriptResponse{
+		Thread: transcript.Thread,
+		Runs:   make([]threadTranscriptRunResponse, 0, len(transcript.Runs)),
+	}
+	for _, run := range transcript.Runs {
+		frames := make([]agui.Event, 0, len(run.Events))
+		for _, event := range run.Events {
+			frames = append(frames, mapRuntimeEvent(event)...)
+		}
+		response.Runs = append(response.Runs, threadTranscriptRunResponse{
+			Run:    run.Run,
+			Events: frames,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h runHandlers) handleGetRun(w http.ResponseWriter, r *http.Request) {

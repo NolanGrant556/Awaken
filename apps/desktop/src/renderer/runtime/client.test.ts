@@ -18,6 +18,7 @@ function createElectronBridge(
   const bridge = {
     platform: "macos",
     getRun: vi.fn(),
+    getThreadTranscript: vi.fn(),
     listThreads: vi.fn(async () => []),
     startRun: vi.fn(),
     cancelRun: vi.fn(),

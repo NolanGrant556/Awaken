@@ -14,17 +14,23 @@ export function useAwakenAutoScrollTail<T extends HTMLElement = HTMLDivElement>(
   enabled = true,
 }: UseAutoScrollTailOptions = {}) {
   const elementRef = useRef<T | null>(null);
+  const enabledRef = useRef(enabled);
   const shouldFollowTailRef = useRef(true);
+  enabledRef.current = enabled;
 
   const scrollToTail = useCallback(() => {
     const element = elementRef.current;
-    if (!element || !enabled) {
+    if (!element || !enabledRef.current) {
       return;
     }
     window.requestAnimationFrame(() => {
-      element.scrollTop = element.scrollHeight;
+      const latestElement = elementRef.current;
+      if (!latestElement || !enabledRef.current) {
+        return;
+      }
+      latestElement.scrollTop = latestElement.scrollHeight;
     });
-  }, [enabled]);
+  }, []);
 
   const scrollRef = useCallback<RefCallback<T>>(
     (element) => {
@@ -61,6 +67,7 @@ export function useAwakenAutoScrollTail<T extends HTMLElement = HTMLDivElement>(
     scrollRef,
     onScroll,
     scrollToTail,
+    getElement: () => elementRef.current,
     isFollowingTail: () => shouldFollowTailRef.current,
   };
 }

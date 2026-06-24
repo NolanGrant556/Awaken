@@ -19,12 +19,14 @@ import type { AguiEvent } from "../shared/agui.js";
 import {
   normalizeRuntimeInfo,
   normalizeRuntimeRun,
+  normalizeRuntimeThreadTranscript,
   normalizeRuntimeThread,
   normalizeStartRunRequest,
   type ApprovalDecision,
   type DesktopPlatform,
   type RuntimeInfoWire,
   type RuntimeRunWire,
+  type RuntimeThreadTranscriptWire,
   type RuntimeThreadWire,
   type StartRunRequest,
 } from "../shared/runtime.js";
@@ -368,6 +370,17 @@ ipcMain.handle("awaken:get-run", async (_event, runId: string) => {
   });
 
 	return normalizeRuntimeRun(run);
+});
+
+ipcMain.handle("awaken:get-thread-transcript", async (_event, threadId: string) => {
+  const transcript = await requestRuntime<RuntimeThreadTranscriptWire>(
+    `/v1/threads/${threadId}/transcript`,
+    {
+      method: "GET",
+    },
+  );
+
+  return normalizeRuntimeThreadTranscript(transcript);
 });
 
 ipcMain.handle("awaken:list-threads", async () => {

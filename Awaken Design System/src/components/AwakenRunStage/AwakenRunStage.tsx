@@ -1,5 +1,9 @@
 import "./AwakenRunStage.css";
-import type { ReactNode, Ref, UIEventHandler } from "react";
+import type {
+  ReactNode,
+  Ref,
+  UIEventHandler,
+} from "react";
 
 export type AwakenRunStageProps = {
   children: ReactNode;
@@ -16,7 +20,12 @@ export function AwakenRunStage({
 }: AwakenRunStageProps) {
   return (
     <main className="aw-run-stage" aria-label="Run stage">
-      <div className="aw-run-stage-scroll" ref={scrollRef} onScroll={onScroll}>
+      <div
+        className="aw-run-stage-scroll"
+        ref={scrollRef}
+        tabIndex={-1}
+        onScroll={onScroll}
+      >
         {children}
       </div>
       {composer}

@@ -5,6 +5,7 @@ import {
   type DesktopPlatform,
   type RuntimeInfo,
   type RuntimeRun,
+  type RuntimeThreadTranscript,
   type RuntimeThread,
   type StartRunRequest,
   type SupervisorStatusInfo,
@@ -24,6 +25,7 @@ export type RuntimeClient = {
   platform: DesktopPlatform;
   getRuntimeInfo: () => Promise<RuntimeInfo>;
   getRun: (runId: string) => Promise<RuntimeRun>;
+  getThreadTranscript: (threadId: string) => Promise<RuntimeThreadTranscript>;
   listThreads: () => Promise<RuntimeThread[]>;
   startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
@@ -59,6 +61,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     platform: bridge.platform,
     getRuntimeInfo: () => bridge.getRuntimeInfo(),
     getRun: (runId) => bridge.getRun(runId),
+    getThreadTranscript: (threadId) => bridge.getThreadTranscript(threadId),
     listThreads: () => bridge.listThreads(),
     startRun: (request) => bridge.startRun(request),
     cancelRun: bridge.cancelRun,

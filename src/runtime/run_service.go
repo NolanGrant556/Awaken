@@ -73,6 +73,7 @@ type Thread struct {
 	label       string
 	latestRunID string
 	activeRunID string
+	runIDs      []string
 	createdAt   time.Time
 	updatedAt   time.Time
 }
@@ -85,6 +86,16 @@ type ThreadSnapshot struct {
 	Workspace   WorkspaceConfig `json:"workspace"`
 	CreatedAt   time.Time       `json:"created_at"`
 	UpdatedAt   time.Time       `json:"updated_at"`
+}
+
+type ThreadTranscriptRun struct {
+	Run    Run
+	Events []Event
+}
+
+type ThreadTranscript struct {
+	Thread ThreadSnapshot
+	Runs   []ThreadTranscriptRun
 }
 
 func NewRunService(
@@ -124,7 +135,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	session := NewSession(runID, threadID, cancel)
+	session := NewSession(runID, threadID, trimmed, cancel)
 
 	s.mu.Lock()
 	if req.ThreadID != "" {
@@ -144,6 +155,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		agent = thread.agent
 		thread.activeRunID = runID
 		thread.latestRunID = runID
+		thread.runIDs = append(thread.runIDs, runID)
 		thread.updatedAt = now
 	} else {
 		label := trimmed
@@ -157,6 +169,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			label:       label,
 			latestRunID: runID,
 			activeRunID: runID,
+			runIDs:      []string{runID},
 			createdAt:   now,
 			updatedAt:   now,
 		}
@@ -199,6 +212,39 @@ func (s *RunService) GetRun(runID string) (Run, error) {
 		return Run{}, err
 	}
 	return session.Snapshot(), nil
+}
+
+func (s *RunService) GetThreadTranscript(threadID string) (ThreadTranscript, error) {
+	s.mu.RLock()
+	thread, ok := s.threads[threadID]
+	if !ok {
+		s.mu.RUnlock()
+		return ThreadTranscript{}, ErrThreadNotFound
+	}
+	snapshot := thread.snapshot()
+	runIDs := append([]string(nil), thread.runIDs...)
+	sessions := make([]*Session, 0, len(runIDs))
+	for _, runID := range runIDs {
+		session, ok := s.sessions[runID]
+		if !ok {
+			continue
+		}
+		sessions = append(sessions, session)
+	}
+	s.mu.RUnlock()
+
+	runs := make([]ThreadTranscriptRun, 0, len(sessions))
+	for _, session := range sessions {
+		runs = append(runs, ThreadTranscriptRun{
+			Run:    session.Snapshot(),
+			Events: session.History(0),
+		})
+	}
+
+	return ThreadTranscript{
+		Thread: snapshot,
+		Runs:   runs,
+	}, nil
 }
 
 func (s *RunService) CancelRun(runID string) (Run, error) {

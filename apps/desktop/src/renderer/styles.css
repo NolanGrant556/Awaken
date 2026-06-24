@@ -146,6 +146,13 @@ pre {
   transform: translateY(-118px);
 }
 
+.aw-run-stage-scroll {
+  --aw-prompt-anchor-offset: 0px;
+  --aw-turn-content-width: 760px;
+  padding-top: 0;
+  scroll-padding-top: var(--aw-prompt-anchor-offset);
+}
+
 .aw-run-stage-scroll:has(.run-stage-center-composer) {
   align-content: stretch;
   grid-template-rows: minmax(0, 1fr);
@@ -229,6 +236,99 @@ pre {
 .narrative-click-target {
   cursor: pointer;
   outline: none;
+}
+
+.execution-turn-section {
+  display: grid;
+  align-content: start;
+  justify-items: center;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  scroll-margin-top: var(--aw-prompt-anchor-offset, 0px);
+}
+
+.execution-turn-section-latest {
+  min-height: var(--aw-latest-turn-min-height, auto);
+  overflow-anchor: none;
+}
+
+.execution-turn-column {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  box-sizing: border-box;
+  width: min(var(--aw-turn-content-width), 100%);
+  max-width: var(--aw-turn-content-width);
+  min-width: 0;
+}
+
+.execution-turn-header {
+  position: sticky;
+  top: var(--aw-prompt-anchor-offset, 0px);
+  z-index: 3;
+  box-sizing: border-box;
+  width: 100%;
+  padding-top: 0;
+  padding-bottom: 4px;
+  background:
+    linear-gradient(
+      180deg,
+      var(--aw-surface-work) 0%,
+      var(--aw-surface-work) 78%,
+      rgba(248, 248, 247, 0) 100%
+    );
+}
+
+.execution-turn-header .execution-prompt-block {
+  padding: 0;
+}
+
+.execution-turn-header .execution-prompt-block p {
+  width: 100%;
+  max-width: 100%;
+  padding: 10px 16px;
+  border-color: rgba(31, 31, 31, 0.08);
+  border-radius: 12px;
+  background: #fbfbf8;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+}
+
+.execution-turn-body {
+  display: grid;
+  gap: 14px;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 0 16px;
+}
+
+.execution-turn-body > * {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.execution-feed {
+  width: 100%;
+  max-width: 100%;
+  justify-self: stretch;
+}
+
+.execution-feed > :not(.execution-turn-section) {
+  box-sizing: border-box;
+  width: min(var(--aw-turn-content-width), 100%);
+  max-width: var(--aw-turn-content-width);
+  min-width: 0;
+  justify-self: center;
+}
+
+.narrative-click-target {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .narrative-click-target:hover,

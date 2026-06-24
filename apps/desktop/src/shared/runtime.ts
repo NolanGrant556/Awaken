@@ -13,6 +13,7 @@ export type RuntimeRunStatus =
 export type RuntimeRunWire = {
   run_id: string;
   thread_id: string;
+  input?: string;
   status: RuntimeRunStatus;
   result?: string;
   error?: string;
@@ -25,6 +26,7 @@ export type RuntimeRunWire = {
 export type RuntimeRun = {
   runId: string;
   threadId: string;
+  input?: string;
   status: RuntimeRunStatus;
   result?: string;
   error?: string;
@@ -52,6 +54,26 @@ export type RuntimeThread = {
   workspace: WorkspaceConfig;
   createdAt: string;
   updatedAt: string;
+};
+
+export type RuntimeThreadTranscriptRunWire = {
+  run: RuntimeRunWire;
+  events: AguiEvent[];
+};
+
+export type RuntimeThreadTranscriptWire = {
+  thread: RuntimeThreadWire;
+  runs: RuntimeThreadTranscriptRunWire[];
+};
+
+export type RuntimeThreadTranscriptRun = {
+  run: RuntimeRun;
+  events: AguiEvent[];
+};
+
+export type RuntimeThreadTranscript = {
+  thread: RuntimeThread;
+  runs: RuntimeThreadTranscriptRun[];
 };
 
 export type RuntimeInfoWire = {
@@ -135,6 +157,7 @@ export type SupervisorStatusInfo = {
 export type AwakenBridge = {
   platform: DesktopPlatform;
   getRun: (runId: string) => Promise<RuntimeRun>;
+  getThreadTranscript: (threadId: string) => Promise<RuntimeThreadTranscript>;
   listThreads: () => Promise<RuntimeThread[]>;
   startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
@@ -160,6 +183,7 @@ export function normalizeRuntimeRun(run: RuntimeRunWire): RuntimeRun {
   return {
     runId: run.run_id,
     threadId: run.thread_id,
+    input: run.input?.trim() || undefined,
     status: run.status,
     result: run.result,
     error: run.error,
@@ -182,6 +206,18 @@ export function normalizeRuntimeThread(thread: RuntimeThreadWire): RuntimeThread
     },
     createdAt: thread.created_at,
     updatedAt: thread.updated_at,
+  };
+}
+
+export function normalizeRuntimeThreadTranscript(
+  transcript: RuntimeThreadTranscriptWire,
+): RuntimeThreadTranscript {
+  return {
+    thread: normalizeRuntimeThread(transcript.thread),
+    runs: transcript.runs.map((entry) => ({
+      run: normalizeRuntimeRun(entry.run),
+      events: entry.events,
+    })),
   };
 }
 

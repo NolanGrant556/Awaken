@@ -4,8 +4,11 @@ import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import {
+  anchoredTurnMinHeight,
   diffLineStats,
+  groupNarrativeByTurns,
   resolvedDecisionForApproval,
+  scrollTopForPromptAnchor,
   shouldUseCenterComposer,
 } from "./workbenchPresentation";
 import type { AwakenBridge } from "../shared/runtime";
@@ -15,6 +18,7 @@ function stubElectronBridge(): void {
     awaken: {
       platform: "macos",
       getRun: vi.fn(),
+      getThreadTranscript: vi.fn(),
       listThreads: vi.fn(async () => []),
       startRun: vi.fn(),
       cancelRun: vi.fn(),
@@ -136,5 +140,61 @@ describe("App workbench presentation", () => {
         ].join("\n"),
       ),
     ).toEqual({ added: 2, removed: 1 });
+  });
+
+  it("groups prompt-led narrative items into turn sections", () => {
+    const grouped = groupNarrativeByTurns([
+      { kind: "thinking", id: "intro", text: "warmup", status: "done" },
+      { kind: "prompt", id: "prompt:thread-1:1", text: "你好" },
+      { kind: "thinking", id: "thinking:1", text: "first thought", status: "done" },
+      { kind: "answer", id: "answer:1", markdown: "first answer", status: "done" },
+      { kind: "prompt", id: "prompt:thread-1:2", text: "再次告诉我" },
+      { kind: "answer", id: "answer:2", markdown: "second answer", status: "active" },
+    ]);
+
+    expect(grouped.leadItems).toEqual([
+      { kind: "thinking", id: "intro", text: "warmup", status: "done" },
+    ]);
+    expect(grouped.turns).toHaveLength(2);
+    expect(grouped.turns[0].prompt.text).toBe("你好");
+    expect(grouped.turns[0].items).toHaveLength(2);
+    expect(grouped.turns[1].prompt.text).toBe("再次告诉我");
+    expect(grouped.turns[1].items).toEqual([
+      { kind: "answer", id: "answer:2", markdown: "second answer", status: "active" },
+    ]);
+  });
+
+  it("calculates the scroll position that pins a prompt at the anchor", () => {
+    expect(
+      scrollTopForPromptAnchor({
+        currentScrollTop: 240,
+        containerTop: 100,
+        promptTop: 460,
+        anchorOffset: 0,
+      }),
+    ).toBe(600);
+    expect(
+      scrollTopForPromptAnchor({
+        currentScrollTop: 0,
+        containerTop: 100,
+        promptTop: 50,
+        anchorOffset: 0,
+      }),
+    ).toBe(0);
+  });
+
+  it("keeps an anchored empty turn tall enough to reach the top", () => {
+    expect(
+      anchoredTurnMinHeight({
+        containerHeight: 640,
+        anchorOffset: 0,
+      }),
+    ).toBe(640);
+    expect(
+      anchoredTurnMinHeight({
+        containerHeight: 640,
+        anchorOffset: 12,
+      }),
+    ).toBe(628);
   });
 });

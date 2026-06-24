@@ -50,16 +50,24 @@ import {
   createInitialRuntimeState,
   reduceRuntimeState,
   type ThreadItem,
+  type RuntimeAction,
 } from "./runtime/reducer";
 import type { ApprovalDecision } from "../shared/runtime";
 import { A2UISurfaceView } from "./a2ui/A2UISurfaceView";
 import type { InspectorSelection, RunNarrativeItem } from "./run-narrative";
 import {
+  anchoredTurnMinHeight,
   diffLineStats,
+  groupNarrativeByTurns,
   resolvedDecisionForApproval,
+  scrollTopForPromptAnchor,
   shouldUseCenterComposer,
   type ResolvedApprovalState,
 } from "./workbenchPresentation";
+import {
+  actionsForThreadTranscript,
+  afterSeqForTranscriptRun,
+} from "./runtime/thread-transcript";
 
 function formatStatusLabel(
   phase: ReturnType<typeof createInitialRuntimeState>["phase"],
@@ -162,6 +170,7 @@ const DEFAULT_INSPECTOR_WIDTH = 300;
 const MIN_INSPECTOR_WIDTH = 260;
 const MAX_INSPECTOR_WIDTH = 520;
 const LAYOUT_STEP = 12;
+const DEFAULT_PROMPT_ANCHOR_OFFSET = 0;
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -218,6 +227,7 @@ export function App() {
   const unsubscribeRef = useRef<null | (() => void)>(null);
   const terminalSeenRef = useRef(false);
   const resolvingApprovalIdRef = useRef<string | null>(null);
+  const pendingPromptAnchorRef = useRef(false);
   const threadLoadSeqRef = useRef(0);
   const runtimeClient = runtimeClientRef.current;
 
@@ -229,6 +239,7 @@ export function App() {
   const [composerValue, setComposerValue] = useState("");
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
+  const [latestTurnMinHeightPx, setLatestTurnMinHeightPx] = useState(0);
   const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
   const [resolvedApproval, setResolvedApproval] = useState<ResolvedApprovalState>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
@@ -255,9 +266,19 @@ export function App() {
   const [inspectorCollapsed, setInspectorCollapsed] = useState(() =>
     readStoredBoolean("awaken:layout:inspectorCollapsed", false),
   );
+  const narrativeItems: RunNarrativeItem[] = [
+    ...runtimeState.narrative.committedItems,
+    ...(runtimeState.narrative.activeItem ? [runtimeState.narrative.activeItem] : []),
+  ];
+  const visibleNarrativeItems = narrativeItems.filter((item) => item.kind !== "planning");
+  const narrativeSections = groupNarrativeByTurns(visibleNarrativeItems);
+  const latestTurn = narrativeSections.turns[narrativeSections.turns.length - 1];
+  const latestPromptId = latestTurn ? latestTurn.id : undefined;
+  const hasPromptNarrative = narrativeSections.turns.length > 0;
   const runTail = useAutoScrollTail<HTMLDivElement>({
     dependencies: [runtimeState.narrative],
-    resetKeys: [runtimeState.runId, runtimeState.activeThreadId],
+    resetKeys: [runtimeState.activeThreadId],
+    enabled: !hasPromptNarrative,
   });
 
   const isBusy =
@@ -416,31 +437,17 @@ export function App() {
       try {
         const run = await runtimeClient.getRun(persistedRunId!);
         if (cancelled) return;
-        let recoveredPrompt: string | undefined;
         try {
           const threads = await runtimeClient.listThreads();
           if (cancelled) return;
-          recoveredPrompt = threads.find((thread) => thread.threadId === run.threadId)?.label;
           dispatch({ type: "run/threadsLoaded", threads });
         } catch {
-          // Recovery can still replay the run history even if thread listing fails.
+          // Recovery can still rebuild the thread transcript even if thread
+          // listing fails temporarily.
         }
-
-        // Always replay full history (after_seq=0) regardless of run status.
-        // For terminal runs, the replay restores timeline/artifacts/final text,
-        // and the terminal event in the stream clears localStorage via onEvent.
-        dispatch({ type: "run/recovered", run, prompt: recoveredPrompt });
-
-        const unsubscribe = await runtimeClient.subscribeRun(
-          run.runId,
-          createSubscribeHandlers(),
-          0,
-        );
-        if (cancelled) {
-          unsubscribe();
-          return;
-        }
-        unsubscribeRef.current = unsubscribe;
+        const loadSeq = threadLoadSeqRef.current + 1;
+        threadLoadSeqRef.current = loadSeq;
+        await replayThreadTranscript(run.threadId, loadSeq);
       } catch {
         if (!cancelled) {
           localStorage.removeItem("awaken:runId");
@@ -479,11 +486,6 @@ export function App() {
     runtimeState.toolResults.length > 0
       ? runtimeState.toolResults[runtimeState.toolResults.length - 1]
       : undefined;
-  const narrativeItems = [
-    ...runtimeState.narrative.committedItems,
-    ...(runtimeState.narrative.activeItem ? [runtimeState.narrative.activeItem] : []),
-  ];
-  const visibleNarrativeItems = narrativeItems.filter((item) => item.kind !== "planning");
   const topbarStatusLabel = desktopNeedsRestart
     ? "Needs restart"
     : desktopStarting
@@ -647,6 +649,156 @@ export function App() {
     };
   }
 
+  function promptAnchorOffset(element: HTMLElement): number {
+    const value = window
+      .getComputedStyle(element)
+      .getPropertyValue("--aw-prompt-anchor-offset")
+      .trim();
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : DEFAULT_PROMPT_ANCHOR_OFFSET;
+  }
+
+  function turnElements(element: HTMLElement): HTMLElement[] {
+    return Array.from(
+      element.querySelectorAll<HTMLElement>("[data-execution-turn-id]"),
+    );
+  }
+
+  function findTurnElement(element: HTMLElement, turnId: string): HTMLElement | undefined {
+    return turnElements(element).find((turn) => turn.dataset.executionTurnId === turnId);
+  }
+
+  function measureLatestTurnMinHeight(promptId: string): void {
+    const element = runTail.getElement();
+    if (!element || !findTurnElement(element, promptId)) {
+      setLatestTurnMinHeightPx(0);
+      return;
+    }
+
+    setLatestTurnMinHeightPx(
+      Math.ceil(
+        anchoredTurnMinHeight({
+          containerHeight: element.clientHeight,
+          anchorOffset: promptAnchorOffset(element),
+        }),
+      ),
+    );
+  }
+
+  function scrollPromptToAnchor(promptId: string): void {
+    const element = runTail.getElement();
+    if (!element) {
+      return;
+    }
+
+    const turn = findTurnElement(element, promptId);
+    if (!turn) {
+      return;
+    }
+
+    const elementRect = element.getBoundingClientRect();
+    const turnRect = turn.getBoundingClientRect();
+    element.scrollTo({
+      top: scrollTopForPromptAnchor({
+        currentScrollTop: element.scrollTop,
+        containerTop: elementRect.top,
+        promptTop: turnRect.top,
+        anchorOffset: promptAnchorOffset(element),
+      }),
+      behavior: "auto",
+    });
+  }
+
+  function requestLatestPromptAnchor(promptId: string): void {
+    window.requestAnimationFrame(() => {
+      measureLatestTurnMinHeight(promptId);
+      window.requestAnimationFrame(() => scrollPromptToAnchor(promptId));
+    });
+  }
+
+  useEffect(() => {
+    if (!latestPromptId) {
+      pendingPromptAnchorRef.current = false;
+      setLatestTurnMinHeightPx(0);
+      return;
+    }
+
+    measureLatestTurnMinHeight(latestPromptId);
+    if (!pendingPromptAnchorRef.current) {
+      return;
+    }
+
+    pendingPromptAnchorRef.current = false;
+    requestLatestPromptAnchor(latestPromptId);
+  }, [latestPromptId]);
+
+  useEffect(() => {
+    if (!latestPromptId) {
+      return;
+    }
+
+    const element = runTail.getElement();
+    if (!element) {
+      return;
+    }
+
+    const resizeObserver = new ResizeObserver(() => {
+      measureLatestTurnMinHeight(latestPromptId);
+    });
+    resizeObserver.observe(element);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [latestPromptId]);
+
+  function applyRuntimeActions(actions: RuntimeAction[]): void {
+    for (const action of actions) {
+      dispatch(action);
+    }
+  }
+
+  function shouldResumeSubscription(status: RuntimeRunStatus): boolean {
+    return status === "running" || status === "awaiting_approval" || status === "cancelling";
+  }
+
+  async function replayThreadTranscript(
+    threadId: string,
+    loadSeq: number,
+  ): Promise<RuntimeRunStatus | undefined> {
+    const transcript = await runtimeClient.getThreadTranscript(threadId);
+    if (threadLoadSeqRef.current !== loadSeq) {
+      return undefined;
+    }
+
+    applyRuntimeActions(actionsForThreadTranscript(transcript));
+
+    const latestRun = transcript.runs[transcript.runs.length - 1]?.run;
+    if (!latestRun) {
+      localStorage.removeItem("awaken:runId");
+      return undefined;
+    }
+
+    if (!shouldResumeSubscription(latestRun.status)) {
+      localStorage.removeItem("awaken:runId");
+      return latestRun.status;
+    }
+
+    localStorage.setItem("awaken:runId", latestRun.runId);
+    const unsubscribe = await runtimeClient.subscribeRun(
+      latestRun.runId,
+      createSubscribeHandlers(),
+      afterSeqForTranscriptRun(transcript, latestRun.runId),
+    );
+    if (threadLoadSeqRef.current !== loadSeq) {
+      unsubscribe();
+      return latestRun.status;
+    }
+
+    unsubscribeRef.current = unsubscribe;
+    return latestRun.status;
+  }
+
   async function handleSubmit(): Promise<void> {
     if (!desktopReady) {
       setNotice(desktopNeedsRestart ? "Awaken needs restart" : "Awaken is starting");
@@ -680,6 +832,8 @@ export function App() {
     setResolvingApprovalId(null);
     setResolvedApproval(null);
     resolvingApprovalIdRef.current = null;
+    pendingPromptAnchorRef.current = true;
+    setLatestTurnMinHeightPx(0);
     dispatch({ type: "run/requested", prompt });
 
     try {
@@ -743,6 +897,8 @@ export function App() {
     setResolvingApprovalId(null);
     setResolvedApproval(null);
     resolvingApprovalIdRef.current = null;
+    pendingPromptAnchorRef.current = false;
+    setLatestTurnMinHeightPx(0);
     dispatch({ type: "run/threadSwitch", threadId });
 
     const thread = runtimeState.threads.find((item) => item.threadId === threadId);
@@ -752,26 +908,7 @@ export function App() {
     }
 
     try {
-      const run = await runtimeClient.getRun(thread.runId);
-      if (threadLoadSeqRef.current !== loadSeq) {
-        return;
-      }
-      dispatch({ type: "run/recovered", run, prompt: thread.label });
-      if (run.status === "running" || run.status === "awaiting_approval" || run.status === "cancelling") {
-        localStorage.setItem("awaken:runId", run.runId);
-      } else {
-        localStorage.removeItem("awaken:runId");
-      }
-      const unsubscribe = await runtimeClient.subscribeRun(
-        run.runId,
-        createSubscribeHandlers(),
-        0,
-      );
-      if (threadLoadSeqRef.current !== loadSeq) {
-        unsubscribe();
-        return;
-      }
-      unsubscribeRef.current = unsubscribe;
+      await replayThreadTranscript(threadId, loadSeq);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Failed to load thread");
     }
@@ -841,6 +978,8 @@ export function App() {
     setResolvingApprovalId(null);
     setResolvedApproval(null);
     resolvingApprovalIdRef.current = null;
+    pendingPromptAnchorRef.current = false;
+    setLatestTurnMinHeightPx(0);
     terminalSeenRef.current = false;
     localStorage.removeItem("awaken:runId");
     dispatch({ type: "run/reset" });
@@ -940,6 +1079,133 @@ export function App() {
     setInspectorWidth((width) =>
       clampNumber(width + delta, MIN_INSPECTOR_WIDTH, MAX_INSPECTOR_WIDTH),
     );
+  }
+
+  function renderNarrativeItem(item: RunNarrativeItem, key: string) {
+    if (item.kind === "thinking") {
+      return (
+        <ThoughtTrace
+          key={key}
+          text={item.text}
+          status={item.status}
+        />
+      );
+    }
+    if (item.kind === "answer") {
+      return (
+        <AssistantMessage
+          key={key}
+          markdown={item.markdown}
+          status={item.status}
+        />
+      );
+    }
+    if (item.kind === "exploring") {
+      return (
+        <ToolTraceGroup
+          key={key}
+          actions={item.actions}
+          onSelectAction={(action) => {
+            const selection: InspectorSelection = {
+              kind: "tool",
+              id: action.id.startsWith("explore:")
+                ? `tool:${action.id.slice("explore:".length)}`
+                : action.id,
+            };
+            selectInspector(selection, "files");
+          }}
+        />
+      );
+    }
+    if (item.kind === "tool") {
+      const selection: InspectorSelection = { kind: "tool", id: item.id };
+      return (
+        <ToolTraceLine
+          key={key}
+          title={item.title}
+          detail={item.detail}
+          status={item.status}
+          onSelect={() => selectInspector(selection, "terminal")}
+        />
+      );
+    }
+    if (item.kind === "approval") {
+      const approvalId = item.id.startsWith("approval:")
+        ? item.id.slice("approval:".length)
+        : item.id;
+      const itemApproval = runtimeState.approvals.find(
+        (approval) => approval.id === approvalId,
+      );
+      const canResolve =
+        item.status === "waiting" &&
+        activeApproval?.id === itemApproval?.id;
+      const resolvedDecision =
+        item.status === "approved" || item.status === "rejected"
+          ? item.status
+          : resolvedDecisionForApproval(itemApproval, resolvedApproval);
+      const selection: InspectorSelection = { kind: "approval", id: item.id };
+
+      return (
+        <div
+          key={key}
+          className="narrative-click-target"
+          onClick={() => selectInspector(selection, "changes")}
+        >
+          <ApprovalCard
+            inline
+            open
+            title={itemApproval?.title || item.title}
+            description={itemApproval?.description}
+            affectedPaths={itemApproval?.affectedPaths}
+            patchSummary={itemApproval?.patchSummary}
+            riskTone={itemApproval?.riskTone}
+            approveLabel={
+              resolvingApprovalId === itemApproval?.id ? "Resolving..." : "Approve"
+            }
+            rejectLabel={
+              resolvingApprovalId === itemApproval?.id ? "Resolving..." : "Reject"
+            }
+            resolving={resolvingApprovalId === itemApproval?.id}
+            resolvedDecision={resolvedDecision}
+            onApprove={
+              canResolve
+                ? () => {
+                    void handleResolveApproval("approved");
+                  }
+                : undefined
+            }
+            onReject={
+              canResolve
+                ? () => {
+                    void handleResolveApproval("rejected");
+                  }
+                : undefined
+            }
+          />
+        </div>
+      );
+    }
+    if (item.kind === "fileChange") {
+      const selection: InspectorSelection = { kind: "fileChange", id: item.id };
+      return (
+        <div
+          key={key}
+          className="narrative-click-target"
+          role="button"
+          tabIndex={0}
+          onClick={() => selectInspector(selection, "changes")}
+          onKeyDown={(event) =>
+            handleInspectorTargetKeyDown(event, selection, "changes")
+          }
+        >
+          <FileChangeSummary
+            files={item.files}
+            status={item.status}
+          />
+        </div>
+      );
+    }
+    return null;
   }
 
   function renderInspectorEmpty(title: string, detail: string) {
@@ -1381,135 +1647,43 @@ export function App() {
 
                     {showCenterComposer ? null : (
                       <ExecutionFeed>
-                        {visibleNarrativeItems.map((item, index) => {
-                          const key = `${item.id}:${index}`;
-                          if (item.kind === "prompt") {
-                            return <UserPromptBlock key={key} text={item.text} />;
-                          }
-                          if (item.kind === "thinking") {
-                            return (
-                              <ThoughtTrace
-                                key={key}
-                                text={item.text}
-                                status={item.status}
-                              />
-                            );
-                          }
-                          if (item.kind === "answer") {
-                            return (
-                              <AssistantMessage
-                                key={key}
-                                markdown={item.markdown}
-                                status={item.status}
-                              />
-                            );
-                          }
-                          if (item.kind === "exploring") {
-                            return (
-                              <ToolTraceGroup
-                                key={key}
-                                actions={item.actions}
-                                onSelectAction={(action) => {
-                                    const selection: InspectorSelection = {
-                                      kind: "tool",
-                                      id: action.id.startsWith("explore:")
-                                        ? `tool:${action.id.slice("explore:".length)}`
-                                        : action.id,
-                                    };
-                                    selectInspector(selection, "files");
-                                  }}
-                              />
-                            );
-                          }
-                          if (item.kind === "tool") {
-                            const selection: InspectorSelection = { kind: "tool", id: item.id };
-                            return (
-                              <ToolTraceLine
-                                key={key}
-                                title={item.title}
-                                detail={item.detail}
-                                status={item.status}
-                                onSelect={() => selectInspector(selection, "terminal")}
-                              />
-                            );
-                          }
-                          if (item.kind === "approval") {
-                            const approvalId = item.id.startsWith("approval:")
-                              ? item.id.slice("approval:".length)
-                              : item.id;
-                            const itemApproval = runtimeState.approvals.find(
-                              (approval) => approval.id === approvalId,
-                            );
-                            const canResolve =
-                              item.status === "waiting" &&
-                              activeApproval?.id === itemApproval?.id;
-                            const resolvedDecision =
-                              item.status === "approved" || item.status === "rejected"
-                                ? item.status
-                                : resolvedDecisionForApproval(itemApproval, resolvedApproval);
-                            const selection: InspectorSelection = { kind: "approval", id: item.id };
+                        {narrativeSections.leadItems.map((item, index) =>
+                          renderNarrativeItem(item, `lead:${item.id}:${index}`),
+                        )}
+                        {narrativeSections.turns.map((turn, index) => {
+                          const isLatestPrompt = turn.id === latestPromptId;
+                          const turnStyle =
+                            isLatestPrompt && latestTurnMinHeightPx > 0
+                              ? ({
+                                  "--aw-latest-turn-min-height": `${latestTurnMinHeightPx}px`,
+                                } as CSSProperties)
+                              : undefined;
 
-                            return (
-                              <div
-                                key={key}
-                                className="narrative-click-target"
-                                onClick={() => selectInspector(selection, "changes")}
-                              >
-                                <ApprovalCard
-                                  inline
-                                  open
-                                  title={itemApproval?.title || item.title}
-                                  description={itemApproval?.description}
-                                  affectedPaths={itemApproval?.affectedPaths}
-                                  patchSummary={itemApproval?.patchSummary}
-                                  riskTone={itemApproval?.riskTone}
-                                  approveLabel={
-                                    resolvingApprovalId === itemApproval?.id ? "Resolving..." : "Approve"
-                                  }
-                                  rejectLabel={
-                                    resolvingApprovalId === itemApproval?.id ? "Resolving..." : "Reject"
-                                  }
-                                  resolving={resolvingApprovalId === itemApproval?.id}
-                                  resolvedDecision={resolvedDecision}
-                                  onApprove={
-                                    canResolve
-                                      ? () => {
-                                          void handleResolveApproval("approved");
-                                        }
-                                      : undefined
-                                  }
-                                  onReject={
-                                    canResolve
-                                      ? () => {
-                                          void handleResolveApproval("rejected");
-                                        }
-                                      : undefined
-                                  }
-                                />
+                          return (
+                            <section
+                              key={`${turn.id}:${index}`}
+                              data-execution-turn-id={turn.id}
+                              className={`execution-turn-section${
+                                isLatestPrompt ? " execution-turn-section-latest" : ""
+                              }`}
+                              style={turnStyle}
+                              aria-label={`Turn ${index + 1}`}
+                            >
+                              <div className="execution-turn-column">
+                                <div className="execution-turn-header">
+                                  <UserPromptBlock text={turn.prompt.text} />
+                                </div>
+                                <div className="execution-turn-body">
+                                  {turn.items.map((item, itemIndex) =>
+                                    renderNarrativeItem(
+                                      item,
+                                      `${turn.id}:${item.id}:${itemIndex}`,
+                                    ),
+                                  )}
+                                </div>
                               </div>
-                            );
-                          }
-                          if (item.kind === "fileChange") {
-                            const selection: InspectorSelection = { kind: "fileChange", id: item.id };
-                            return (
-                              <div
-                                key={key}
-                                className="narrative-click-target"
-                                role="button"
-                                tabIndex={0}
-                                onClick={() => selectInspector(selection, "changes")}
-                                onKeyDown={(event) =>
-                                  handleInspectorTargetKeyDown(event, selection, "changes")
-                                }
-                              >
-                                <FileChangeSummary
-                                  files={item.files}
-                                  status={item.status}
-                                />
-                              </div>
-                            );
-                          }
-                          return null;
+                            </section>
+                          );
                         })}
                       </ExecutionFeed>
                     )}

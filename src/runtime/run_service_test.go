@@ -1212,6 +1212,67 @@ func TestListThreadsReturnsRuntimeThreads(t *testing.T) {
 	}
 }
 
+func TestGetThreadTranscriptReturnsOrderedRunsAndInputs(t *testing.T) {
+	root := t.TempDir()
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			sink.Emit(agentcore.AwakenEvent{
+				Type:      agentcore.TextMessageStartedEventType,
+				MessageID: "msg-1",
+				Role:      "assistant",
+			})
+			sink.Emit(agentcore.AwakenEvent{
+				Type:      agentcore.TextDeltaEventType,
+				MessageID: "msg-1",
+				Role:      "assistant",
+				Delta:     input,
+			})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: input})
+			return input, nil
+		})
+	})
+
+	firstRun, err := service.StartRun(StartRunRequest{
+		Input:     "hello",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("first StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, firstRun.RunID)
+
+	secondRun, err := service.StartRun(StartRunRequest{
+		Input:     "follow up",
+		ThreadID:  firstRun.ThreadID,
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("second StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, secondRun.RunID)
+
+	transcript, err := service.GetThreadTranscript(firstRun.ThreadID)
+	if err != nil {
+		t.Fatalf("GetThreadTranscript returned error: %v", err)
+	}
+	if transcript.Thread.ThreadID != firstRun.ThreadID {
+		t.Fatalf("expected thread id %q, got %q", firstRun.ThreadID, transcript.Thread.ThreadID)
+	}
+	if len(transcript.Runs) != 2 {
+		t.Fatalf("expected 2 transcript runs, got %d", len(transcript.Runs))
+	}
+	if transcript.Runs[0].Run.RunID != firstRun.RunID || transcript.Runs[0].Run.Input != "hello" {
+		t.Fatalf("unexpected first transcript run: %+v", transcript.Runs[0].Run)
+	}
+	if transcript.Runs[1].Run.RunID != secondRun.RunID || transcript.Runs[1].Run.Input != "follow up" {
+		t.Fatalf("unexpected second transcript run: %+v", transcript.Runs[1].Run)
+	}
+	if len(transcript.Runs[1].Events) == 0 {
+		t.Fatalf("expected transcript history for second run")
+	}
+}
+
 func waitForRunTerminal(t *testing.T, service *RunService, runID string) Run {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

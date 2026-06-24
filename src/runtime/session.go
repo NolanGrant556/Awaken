@@ -34,6 +34,7 @@ const (
 type Run struct {
 	RunID           string     `json:"run_id"`
 	ThreadID        string     `json:"thread_id"`
+	Input           string     `json:"input,omitempty"`
 	Status          RunStatus  `json:"status"`
 	Result          string     `json:"result,omitempty"`
 	Error           string     `json:"error,omitempty"`
@@ -63,12 +64,13 @@ type Session struct {
 	approvals map[string]*pendingApproval
 }
 
-func NewSession(runID, threadID string, cancel context.CancelFunc) *Session {
+func NewSession(runID, threadID, input string, cancel context.CancelFunc) *Session {
 	now := time.Now().UTC()
 	return &Session{
 		run: Run{
 			RunID:     runID,
 			ThreadID:  threadID,
+			Input:     strings.TrimSpace(input),
 			Status:    RunStatusRunning,
 			CreatedAt: now,
 			UpdatedAt: now,
@@ -94,6 +96,14 @@ func (s *Session) Subscribe(afterSeq uint64) Subscription {
 	sub := s.bus.Subscribe(afterSeq)
 	sub.History = append([]Event(nil), sub.History...)
 	return sub
+}
+
+func (s *Session) History(afterSeq uint64) []Event {
+	sub := s.Subscribe(afterSeq)
+	if sub.Close != nil {
+		sub.Close()
+	}
+	return sub.History
 }
 
 func (s *Session) CancelRequested() bool {

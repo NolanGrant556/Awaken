@@ -7,6 +7,7 @@ import {
   type RunStreamHandlers,
   type RuntimeInfo,
   type RuntimeRun,
+  type RuntimeThreadTranscript,
   type RuntimeThread,
   type StartRunRequest,
   type SupervisorStatusInfo,
@@ -54,6 +55,8 @@ const bridge: AwakenBridge = {
   platform: toDesktopPlatform(process.platform),
   getRun: (runId: string) =>
     ipcRenderer.invoke("awaken:get-run", runId) as Promise<RuntimeRun>,
+  getThreadTranscript: (threadId: string) =>
+    ipcRenderer.invoke("awaken:get-thread-transcript", threadId) as Promise<RuntimeThreadTranscript>,
   listThreads: () =>
     ipcRenderer.invoke("awaken:list-threads") as Promise<RuntimeThread[]>,
   startRun: (request: StartRunRequest) =>

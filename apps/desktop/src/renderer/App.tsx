@@ -3,6 +3,7 @@ import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
+  UIEvent as ReactUIEvent,
 } from "react";
 import {
   CalendarClock,
@@ -59,8 +60,15 @@ import {
   composerBottomSafeArea,
   diffLineStats,
   groupNarrativeByTurns,
+  isNearLatestTurnOutputTail,
   resolvedDecisionForApproval,
+  scrollTopForLatestTurnOutputTail,
   scrollTopForPromptAnchor,
+  shouldPauseLatestOutputFollowForTouchMove,
+  shouldPauseLatestOutputFollowForWheel,
+  shouldRequestLatestOutputFollowResumeForTouchMove,
+  shouldRequestLatestOutputFollowResumeForWheel,
+  shouldResumeLatestOutputFollow,
   shouldUseCenterComposer,
   type ResolvedApprovalState,
 } from "./workbenchPresentation";
@@ -172,6 +180,7 @@ const MAX_INSPECTOR_WIDTH = 520;
 const LAYOUT_STEP = 12;
 const DEFAULT_PROMPT_ANCHOR_OFFSET = 0;
 const RUN_STAGE_COMPOSER_SAFE_GAP = 24;
+const LATEST_OUTPUT_FOLLOW_THRESHOLD = 48;
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -229,6 +238,11 @@ export function App() {
   const terminalSeenRef = useRef(false);
   const resolvingApprovalIdRef = useRef<string | null>(null);
   const pendingPromptAnchorRef = useRef(false);
+  const followLatestOutputRef = useRef(false);
+  const latestOutputFollowPausedByUserRef = useRef(false);
+  const latestOutputFollowResumeIntentRef = useRef(false);
+  const runStageTouchStartYRef = useRef<number | null>(null);
+  const runStageInputIntentCleanupRef = useRef<(() => void) | null>(null);
   const threadLoadSeqRef = useRef(0);
   const runStageScrollRef = useRef<HTMLDivElement | null>(null);
   const composerDockRef = useRef<HTMLDivElement | null>(null);
@@ -654,9 +668,56 @@ export function App() {
   }
 
   const setRunStageScrollElement = useCallback((element: HTMLDivElement | null) => {
+    runStageInputIntentCleanupRef.current?.();
+    runStageInputIntentCleanupRef.current = null;
     runStageScrollRef.current = element;
     if (element) {
       element.style.setProperty("--aw-composer-safe-area", `${composerSafeAreaPx}px`);
+
+      const handleWheel = (event: WheelEvent) => {
+        if (shouldPauseLatestOutputFollowForWheel({ deltaY: event.deltaY })) {
+          latestOutputFollowPausedByUserRef.current = true;
+          latestOutputFollowResumeIntentRef.current = false;
+          followLatestOutputRef.current = false;
+          return;
+        }
+        if (shouldRequestLatestOutputFollowResumeForWheel({ deltaY: event.deltaY })) {
+          latestOutputFollowResumeIntentRef.current = true;
+        }
+      };
+      const handleTouchStart = (event: TouchEvent) => {
+        runStageTouchStartYRef.current = event.touches[0]?.clientY ?? null;
+      };
+      const handleTouchMove = (event: TouchEvent) => {
+        const startY = runStageTouchStartYRef.current;
+        const currentY = event.touches[0]?.clientY;
+        if (
+          startY !== null &&
+          currentY !== undefined &&
+          shouldPauseLatestOutputFollowForTouchMove({ startY, currentY })
+        ) {
+          latestOutputFollowPausedByUserRef.current = true;
+          latestOutputFollowResumeIntentRef.current = false;
+          followLatestOutputRef.current = false;
+          return;
+        }
+        if (
+          startY !== null &&
+          currentY !== undefined &&
+          shouldRequestLatestOutputFollowResumeForTouchMove({ startY, currentY })
+        ) {
+          latestOutputFollowResumeIntentRef.current = true;
+        }
+      };
+
+      element.addEventListener("wheel", handleWheel, { passive: true });
+      element.addEventListener("touchstart", handleTouchStart, { passive: true });
+      element.addEventListener("touchmove", handleTouchMove, { passive: true });
+      runStageInputIntentCleanupRef.current = () => {
+        element.removeEventListener("wheel", handleWheel);
+        element.removeEventListener("touchstart", handleTouchStart);
+        element.removeEventListener("touchmove", handleTouchMove);
+      };
     }
   }, [composerSafeAreaPx]);
 
@@ -679,6 +740,17 @@ export function App() {
     return turnElements(element).find((turn) => turn.dataset.executionTurnId === turnId);
   }
 
+  function latestTurnOutputBottom(turn: HTMLElement): number {
+    const body = turn.querySelector<HTMLElement>(".execution-turn-body");
+    const latestBodyItem = body?.lastElementChild;
+    if (latestBodyItem instanceof HTMLElement) {
+      return latestBodyItem.getBoundingClientRect().bottom;
+    }
+
+    const header = turn.querySelector<HTMLElement>(".execution-turn-header");
+    return (header ?? turn).getBoundingClientRect().bottom;
+  }
+
   function measureLatestTurnMinHeight(promptId: string): void {
     const element = runStageScrollRef.current;
     if (!element || !findTurnElement(element, promptId)) {
@@ -691,6 +763,7 @@ export function App() {
         anchoredTurnMinHeight({
           containerHeight: element.clientHeight,
           anchorOffset: promptAnchorOffset(element),
+          bottomReserve: composerSafeAreaPx,
         }),
       ),
     );
@@ -718,6 +791,78 @@ export function App() {
       }),
       behavior: "auto",
     });
+  }
+
+  function scrollLatestTurnOutputToTail(promptId: string): void {
+    const element = runStageScrollRef.current;
+    if (!element) {
+      return;
+    }
+
+    const turn = findTurnElement(element, promptId);
+    if (!turn) {
+      return;
+    }
+
+    const elementRect = element.getBoundingClientRect();
+    const turnRect = turn.getBoundingClientRect();
+    const anchorScrollTop = scrollTopForPromptAnchor({
+      currentScrollTop: element.scrollTop,
+      containerTop: elementRect.top,
+      promptTop: turnRect.top,
+      anchorOffset: promptAnchorOffset(element),
+    });
+    const nextScrollTop = scrollTopForLatestTurnOutputTail({
+      currentScrollTop: element.scrollTop,
+      containerTop: elementRect.top,
+      outputBottom: latestTurnOutputBottom(turn),
+      containerHeight: element.clientHeight,
+      bottomReserve: composerSafeAreaPx,
+      anchorScrollTop,
+    });
+
+    if (Math.abs(nextScrollTop - element.scrollTop) < 1) {
+      return;
+    }
+
+    element.scrollTo({
+      top: nextScrollTop,
+      behavior: "auto",
+    });
+  }
+
+  function handleRunStageScroll(event: ReactUIEvent<HTMLDivElement>): void {
+    if (!latestPromptId) {
+      followLatestOutputRef.current = false;
+      return;
+    }
+
+    const element = event.currentTarget;
+    const turn = findTurnElement(element, latestPromptId);
+    if (!turn) {
+      followLatestOutputRef.current = false;
+      return;
+    }
+
+    const elementRect = element.getBoundingClientRect();
+    const isNearTail = isNearLatestTurnOutputTail({
+      containerTop: elementRect.top,
+      outputBottom: latestTurnOutputBottom(turn),
+      containerHeight: element.clientHeight,
+      bottomReserve: composerSafeAreaPx,
+      threshold: LATEST_OUTPUT_FOLLOW_THRESHOLD,
+    });
+    const shouldResume = shouldResumeLatestOutputFollow({
+      isPausedByUser: latestOutputFollowPausedByUserRef.current,
+      isNearTail,
+      hasResumeIntent: latestOutputFollowResumeIntentRef.current,
+    });
+
+    if (shouldResume) {
+      latestOutputFollowPausedByUserRef.current = false;
+      latestOutputFollowResumeIntentRef.current = false;
+    }
+    followLatestOutputRef.current = shouldResume;
   }
 
   useLayoutEffect(() => {
@@ -780,6 +925,7 @@ export function App() {
       anchoredTurnMinHeight({
         containerHeight: element.clientHeight,
         anchorOffset: promptAnchorOffset(element),
+        bottomReserve: composerSafeAreaPx,
       }),
     );
     if (nextMinHeight !== latestTurnMinHeightPx) {
@@ -792,7 +938,12 @@ export function App() {
       scrollPromptToAnchor(latestPromptId);
       return;
     }
+
+    if (followLatestOutputRef.current && !latestOutputFollowPausedByUserRef.current) {
+      scrollLatestTurnOutputToTail(latestPromptId);
+    }
   }, [
+    composerSafeAreaPx,
     latestPromptId,
     latestTurnMinHeightPx,
     runtimeState.narrative,
@@ -816,7 +967,14 @@ export function App() {
     return () => {
       resizeObserver.disconnect();
     };
-  }, [latestPromptId]);
+  }, [composerSafeAreaPx, latestPromptId]);
+
+  useEffect(() => {
+    return () => {
+      runStageInputIntentCleanupRef.current?.();
+      runStageInputIntentCleanupRef.current = null;
+    };
+  }, []);
 
   function applyRuntimeActions(actions: RuntimeAction[]): void {
     for (const action of actions) {
@@ -899,6 +1057,9 @@ export function App() {
     setResolvedApproval(null);
     resolvingApprovalIdRef.current = null;
     pendingPromptAnchorRef.current = true;
+    followLatestOutputRef.current = true;
+    latestOutputFollowPausedByUserRef.current = false;
+    latestOutputFollowResumeIntentRef.current = false;
     setLatestTurnMinHeightPx(0);
     dispatch({ type: "run/requested", prompt, startedAtMs: Date.now() });
 
@@ -964,6 +1125,9 @@ export function App() {
     setResolvedApproval(null);
     resolvingApprovalIdRef.current = null;
     pendingPromptAnchorRef.current = false;
+    followLatestOutputRef.current = false;
+    latestOutputFollowPausedByUserRef.current = false;
+    latestOutputFollowResumeIntentRef.current = false;
     setLatestTurnMinHeightPx(0);
     dispatch({ type: "run/threadSwitch", threadId });
 
@@ -1045,6 +1209,9 @@ export function App() {
     setResolvedApproval(null);
     resolvingApprovalIdRef.current = null;
     pendingPromptAnchorRef.current = false;
+    followLatestOutputRef.current = false;
+    latestOutputFollowPausedByUserRef.current = false;
+    latestOutputFollowResumeIntentRef.current = false;
     setLatestTurnMinHeightPx(0);
     terminalSeenRef.current = false;
     localStorage.removeItem("awaken:runId");
@@ -1639,6 +1806,7 @@ export function App() {
                 stage={
                   <RunStage
                     scrollRef={showCenterComposer ? undefined : setRunStageScrollElement}
+                    onScroll={showCenterComposer ? undefined : handleRunStageScroll}
                     composer={
                       showCenterComposer ? undefined : (
                         <ComposerDock ref={composerDockRef}>

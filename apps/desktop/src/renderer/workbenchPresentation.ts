@@ -119,9 +119,107 @@ export function composerBottomSafeArea({
 export function anchoredTurnMinHeight({
   containerHeight,
   anchorOffset,
+  bottomReserve = 0,
 }: {
   containerHeight: number;
   anchorOffset: number;
+  bottomReserve?: number;
 }): number {
-  return Math.max(0, containerHeight - anchorOffset);
+  return Math.max(0, containerHeight - anchorOffset - Math.max(0, bottomReserve));
+}
+
+export function scrollTopForLatestTurnOutputTail({
+  currentScrollTop,
+  containerTop,
+  outputBottom,
+  containerHeight,
+  bottomReserve,
+  anchorScrollTop,
+}: {
+  currentScrollTop: number;
+  containerTop: number;
+  outputBottom: number;
+  containerHeight: number;
+  bottomReserve: number;
+  anchorScrollTop: number;
+}): number {
+  const visibleHeight = Math.max(1, containerHeight - Math.max(0, bottomReserve));
+  const scrollTopForTail =
+    currentScrollTop + outputBottom - containerTop - visibleHeight;
+  return Math.max(0, anchorScrollTop, scrollTopForTail);
+}
+
+export function isNearLatestTurnOutputTail({
+  containerTop,
+  outputBottom,
+  containerHeight,
+  bottomReserve,
+  threshold,
+}: {
+  containerTop: number;
+  outputBottom: number;
+  containerHeight: number;
+  bottomReserve: number;
+  threshold: number;
+}): boolean {
+  const visibleHeight = Math.max(1, containerHeight - Math.max(0, bottomReserve));
+  return outputBottom - containerTop <= visibleHeight + Math.max(0, threshold);
+}
+
+export function shouldPauseLatestOutputFollowForWheel({
+  deltaY,
+}: {
+  deltaY: number;
+}): boolean {
+  return deltaY < -1;
+}
+
+export function shouldRequestLatestOutputFollowResumeForWheel({
+  deltaY,
+}: {
+  deltaY: number;
+}): boolean {
+  return deltaY > 1;
+}
+
+export function shouldPauseLatestOutputFollowForTouchMove({
+  startY,
+  currentY,
+  threshold = 4,
+}: {
+  startY: number;
+  currentY: number;
+  threshold?: number;
+}): boolean {
+  return currentY - startY > Math.max(0, threshold);
+}
+
+export function shouldRequestLatestOutputFollowResumeForTouchMove({
+  startY,
+  currentY,
+  threshold = 4,
+}: {
+  startY: number;
+  currentY: number;
+  threshold?: number;
+}): boolean {
+  return startY - currentY > Math.max(0, threshold);
+}
+
+export function shouldResumeLatestOutputFollow({
+  isPausedByUser,
+  isNearTail,
+  hasResumeIntent,
+}: {
+  isPausedByUser: boolean;
+  isNearTail: boolean;
+  hasResumeIntent: boolean;
+}): boolean {
+  if (!isNearTail) {
+    return false;
+  }
+  if (!isPausedByUser) {
+    return true;
+  }
+  return hasResumeIntent;
 }

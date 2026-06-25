@@ -8,8 +8,15 @@ import {
   composerBottomSafeArea,
   diffLineStats,
   groupNarrativeByTurns,
+  isNearLatestTurnOutputTail,
   resolvedDecisionForApproval,
+  scrollTopForLatestTurnOutputTail,
   scrollTopForPromptAnchor,
+  shouldPauseLatestOutputFollowForTouchMove,
+  shouldPauseLatestOutputFollowForWheel,
+  shouldRequestLatestOutputFollowResumeForTouchMove,
+  shouldRequestLatestOutputFollowResumeForWheel,
+  shouldResumeLatestOutputFollow,
   shouldUseCenterComposer,
 } from "./workbenchPresentation";
 import type { AwakenBridge } from "../shared/runtime";
@@ -212,5 +219,114 @@ describe("App workbench presentation", () => {
         anchorOffset: 12,
       }),
     ).toBe(628);
+    expect(
+      anchoredTurnMinHeight({
+        containerHeight: 640,
+        anchorOffset: 0,
+        bottomReserve: 124,
+      }),
+    ).toBe(516);
+  });
+
+  it("keeps latest output visible without scrolling past the prompt anchor for short output", () => {
+    expect(
+      scrollTopForLatestTurnOutputTail({
+        currentScrollTop: 260,
+        containerTop: 100,
+        outputBottom: 360,
+        containerHeight: 640,
+        bottomReserve: 120,
+        anchorScrollTop: 480,
+      }),
+    ).toBe(480);
+  });
+
+  it("scrolls the latest turn tail above the composer when output overflows", () => {
+    expect(
+      scrollTopForLatestTurnOutputTail({
+        currentScrollTop: 260,
+        containerTop: 100,
+        outputBottom: 980,
+        containerHeight: 640,
+        bottomReserve: 120,
+        anchorScrollTop: 480,
+      }),
+    ).toBe(620);
+  });
+
+  it("detects whether the user is still following the latest output", () => {
+    expect(
+      isNearLatestTurnOutputTail({
+        containerTop: 100,
+        outputBottom: 650,
+        containerHeight: 640,
+        bottomReserve: 120,
+        threshold: 48,
+      }),
+    ).toBe(true);
+    expect(
+      isNearLatestTurnOutputTail({
+        containerTop: 100,
+        outputBottom: 700,
+        containerHeight: 640,
+        bottomReserve: 120,
+        threshold: 48,
+      }),
+    ).toBe(false);
+  });
+
+  it("pauses latest output follow as soon as the user scrolls toward history", () => {
+    expect(shouldPauseLatestOutputFollowForWheel({ deltaY: -12 })).toBe(true);
+    expect(shouldPauseLatestOutputFollowForWheel({ deltaY: 12 })).toBe(false);
+    expect(shouldRequestLatestOutputFollowResumeForWheel({ deltaY: 12 })).toBe(true);
+    expect(shouldRequestLatestOutputFollowResumeForWheel({ deltaY: -12 })).toBe(false);
+    expect(
+      shouldPauseLatestOutputFollowForTouchMove({
+        startY: 100,
+        currentY: 112,
+      }),
+    ).toBe(true);
+    expect(
+      shouldPauseLatestOutputFollowForTouchMove({
+        startY: 100,
+        currentY: 96,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRequestLatestOutputFollowResumeForTouchMove({
+        startY: 100,
+        currentY: 88,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRequestLatestOutputFollowResumeForTouchMove({
+        startY: 100,
+        currentY: 112,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not resume latest output follow until the user asks to return to the tail", () => {
+    expect(
+      shouldResumeLatestOutputFollow({
+        isPausedByUser: true,
+        isNearTail: true,
+        hasResumeIntent: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldResumeLatestOutputFollow({
+        isPausedByUser: true,
+        isNearTail: true,
+        hasResumeIntent: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldResumeLatestOutputFollow({
+        isPausedByUser: false,
+        isNearTail: true,
+        hasResumeIntent: false,
+      }),
+    ).toBe(true);
   });
 });

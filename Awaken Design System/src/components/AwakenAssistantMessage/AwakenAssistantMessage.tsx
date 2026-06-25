@@ -40,7 +40,7 @@ export function AwakenAssistantMessage({
   showFooter,
 }: AwakenAssistantMessageProps) {
   const hasElapsedMs = typeof elapsedMs === "number" && Number.isFinite(elapsedMs);
-  const shouldShowFooter = status === "done" && (showFooter ?? hasElapsedMs) && hasElapsedMs;
+  const shouldShowFooter = status === "done" && (showFooter ?? true);
 
   const className = `assistant-message assistant-message-${status}${
     shouldShowFooter ? " assistant-message-has-footer" : ""
@@ -51,15 +51,19 @@ export function AwakenAssistantMessage({
       <AwakenMarkdownRenderer className="assistant-message-markdown" markdown={markdown} />
       {shouldShowFooter ? (
         <footer className="assistant-message-footer" aria-label="Assistant response actions">
-          <span className="assistant-message-footer-meta">
-            Agent ran {formatElapsedMs(elapsedMs)}
-          </span>
+          {hasElapsedMs ? (
+            <span className="assistant-message-footer-meta">
+              Agent ran {formatElapsedMs(elapsedMs)}
+            </span>
+          ) : null}
           <AwakenCopyButton
             className="assistant-message-footer-copy"
             text={markdown}
             label="Copy final answer"
             copiedLabel="Copied final answer"
             errorLabel="Copy failed"
+            iconOnly
+            feedbackDurationMs={2000}
           />
         </footer>
       ) : null}

@@ -1164,7 +1164,7 @@ export function App() {
           markdown={item.markdown}
           status={item.status}
           elapsedMs={item.elapsedMs}
-          showFooter={item.status === "done" && item.elapsedMs !== undefined}
+          showFooter={item.status === "done"}
         />
       );
     }

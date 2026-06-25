@@ -715,6 +715,7 @@ button.tool-trace-line:focus-visible {
 
 .assistant-message-footer-copy {
   flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .assistant-message h1,

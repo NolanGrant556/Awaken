@@ -74,6 +74,29 @@ if (!footerHtml.includes("Copy final answer")) {
   throw new Error("AwakenAssistantMessage did not render the final answer copy action");
 }
 
+if (footerHtml.includes(">Copy final answer</span>")) {
+  throw new Error("AwakenAssistantMessage should render the final answer copy action as an icon-only control");
+}
+
+const copyOnlyFooterHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenAssistantMessage, {
+    markdown: "done without elapsed timing",
+    status: "done",
+  }),
+);
+
+if (!copyOnlyFooterHtml.includes("assistant-message-footer")) {
+  throw new Error("AwakenAssistantMessage should keep the completed answer footer without elapsed timing");
+}
+
+if (!copyOnlyFooterHtml.includes("Copy final answer")) {
+  throw new Error("AwakenAssistantMessage should keep the final answer copy action without elapsed timing");
+}
+
+if (copyOnlyFooterHtml.includes("Agent ran")) {
+  throw new Error("AwakenAssistantMessage should not show an elapsed runtime label without elapsed timing");
+}
+
 const activeFooterHtml = renderToString(
   React.createElement(AwakenDesignSystem.AwakenAssistantMessage, {
     markdown: "still running",

@@ -976,6 +976,28 @@ describe("runtime reducer run narrative projection", () => {
     });
   });
 
+  it("commits a streaming answer and annotates elapsed runtime when finished status arrives", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "Finish", startedAtMs: 2000 },
+      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        runId: "run-1",
+        messageId: "m1",
+        delta: "streamed done",
+      }),
+      runEventAt({ type: "RUN_STATUS_CHANGED", runId: "run-1", status: "finished" }, 47000),
+    ]);
+
+    expect(state.narrative.committedItems).toContainEqual({
+      kind: "answer",
+      id: "answer:run-1:m1",
+      markdown: "streamed done",
+      status: "done",
+      elapsedMs: 45000,
+    });
+  });
+
   it("does not annotate cancelled or error answers with elapsed runtime", () => {
     const cancelled = dispatch([
       { type: "run/requested", prompt: "Cancel", startedAtMs: 1000 },

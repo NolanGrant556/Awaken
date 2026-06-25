@@ -168,6 +168,9 @@ export function projectAguiEventToNarrative(
       if (event.status === "cancelled") {
         return commitActive(base, "done");
       }
+      if (event.status === "finished") {
+        return commitActive(base, "done");
+      }
       return base;
     default:
       return base;

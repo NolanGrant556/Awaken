@@ -8,6 +8,8 @@ export type AwakenCopyButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>
   label?: string;
   copiedLabel?: string;
   errorLabel?: string;
+  iconOnly?: boolean;
+  feedbackDurationMs?: number;
   onCopied?: () => void;
   onCopyError?: (error: unknown) => void;
 };
@@ -50,6 +52,8 @@ export function AwakenCopyButton({
   label = "Copy",
   copiedLabel = "Copied",
   errorLabel = "Copy failed",
+  iconOnly = false,
+  feedbackDurationMs = 1200,
   onCopied,
   onCopyError,
   disabled,
@@ -83,7 +87,7 @@ export function AwakenCopyButton({
     }
     timerRef.current = window.setTimeout(() => {
       setCopyState("idle");
-    }, 1200);
+    }, feedbackDurationMs);
   }
 
   const icon =
@@ -113,10 +117,12 @@ export function AwakenCopyButton({
         style={{
           display: "inline-flex",
           alignItems: "center",
-          gap: "6px",
+          justifyContent: "center",
+          gap: iconOnly ? 0 : "6px",
           minWidth: 0,
           height: "28px",
-          padding: "0 8px",
+          width: iconOnly ? "28px" : undefined,
+          padding: iconOnly ? 0 : "0 8px",
           border: "1px solid var(--aw-border-main)",
           borderRadius: "var(--aw-radius-control)",
           background: copyState === "copied" ? "var(--aw-success-soft-bg)" : "var(--aw-surface-raised)",
@@ -135,7 +141,7 @@ export function AwakenCopyButton({
         }}
       >
         {icon}
-        <span style={{ color: "inherit" }}>{currentLabel}</span>
+        {iconOnly ? null : <span style={{ color: "inherit" }}>{currentLabel}</span>}
       </button>
     </AwakenTooltip>
   );

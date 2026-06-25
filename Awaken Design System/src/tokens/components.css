@@ -616,8 +616,7 @@ button.tool-trace-line:focus-visible {
 }
 
 .assistant-message {
-  display: grid;
-  gap: 9px;
+  display: block;
   box-sizing: border-box;
   width: 100%;
   max-width: 100%;
@@ -628,11 +627,79 @@ button.tool-trace-line:focus-visible {
   overflow-wrap: anywhere;
 }
 
-.assistant-message p {
+.assistant-message-markdown {
+  display: grid;
+  gap: 10px;
+  box-sizing: border-box;
+  width: 100%;
   max-width: 100%;
-  margin: 0;
+  min-width: 0;
+}
+
+.assistant-message-markdown > * {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.assistant-message h1,
+.assistant-message h2,
+.assistant-message h3,
+.assistant-message h4,
+.assistant-message h5,
+.assistant-message h6 {
+  margin: 4px 0 0;
+  color: var(--aw-text-primary);
+  font-weight: var(--aw-font-weight-bold);
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.assistant-message h1 {
+  font-size: var(--aw-font-size-lg);
+  line-height: var(--aw-line-height-lg);
+}
+
+.assistant-message h2 {
+  font-size: var(--aw-font-size-base);
+  line-height: var(--aw-line-height-base);
+}
+
+.assistant-message h3,
+.assistant-message h4,
+.assistant-message h5,
+.assistant-message h6 {
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+}
+
+.assistant-message p {
+  margin: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.assistant-message strong {
+  font-weight: var(--aw-font-weight-bold);
+}
+
+.assistant-message em {
+  font-style: italic;
+}
+
+.assistant-message del {
+  color: var(--aw-text-tertiary);
+}
+
+.assistant-message a {
+  color: var(--aw-text-blue);
+  text-decoration: none;
+}
+
+.assistant-message a:hover,
+.assistant-message a:focus-visible {
+  text-decoration: underline;
 }
 
 .assistant-message ul,
@@ -647,6 +714,25 @@ button.tool-trace-line:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.assistant-message ul.contains-task-list {
+  padding-left: 0;
+  list-style: none;
+}
+
+.assistant-message li.task-list-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.assistant-message li.task-list-item input[type="checkbox"] {
+  width: 13px;
+  height: 13px;
+  margin: 2px 0 0;
+  accent-color: var(--aw-text-primary);
+}
+
 .assistant-message > *,
 .assistant-message li {
   box-sizing: border-box;
@@ -654,6 +740,21 @@ button.tool-trace-line:focus-visible {
   min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.assistant-message blockquote {
+  margin: 2px 0;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--aw-border-control);
+  color: var(--aw-text-secondary);
+}
+
+.assistant-message hr {
+  width: 100%;
+  height: 1px;
+  margin: 6px 0;
+  border: 0;
+  background: var(--aw-border-light);
 }
 
 .assistant-message-code {
@@ -667,6 +768,35 @@ button.tool-trace-line:focus-visible {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.assistant-message-code-block {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--aw-border-light);
+  border-radius: 8px;
+  background: var(--aw-surface-code);
+  color: var(--aw-text-code);
+  font-family: var(--aw-font-mono);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-base);
+}
+
+.assistant-message-code-block .assistant-message-code {
+  display: block;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .assistant-message-table-wrap {
@@ -703,6 +833,222 @@ button.tool-trace-line:focus-visible {
 
 .assistant-message-table tr:last-child td {
   border-bottom: 0;
+}
+
+.assistant-mermaid-diagram {
+  display: grid;
+  position: relative;
+  align-content: start;
+  gap: 10px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  max-height: min(420px, 70vh);
+  min-width: 0;
+  margin: 2px 0;
+  padding: 14px;
+  overflow: auto;
+  border: 1px solid var(--aw-border-light);
+  border-radius: 8px;
+  background: var(--aw-bg-white);
+}
+
+.assistant-mermaid-toolbar {
+  display: inline-flex;
+  z-index: 2;
+  align-items: center;
+  justify-self: end;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--aw-border-light);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+}
+
+.assistant-mermaid-diagram > .assistant-mermaid-toolbar {
+  position: sticky;
+  top: 0;
+}
+
+.assistant-mermaid-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--aw-text-muted);
+  cursor: pointer;
+}
+
+.assistant-mermaid-action:hover,
+.assistant-mermaid-action:focus-visible {
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-primary);
+}
+
+.assistant-mermaid-action:focus-visible {
+  outline: 2px solid var(--aw-border-active);
+  outline-offset: 2px;
+}
+
+.assistant-mermaid-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.assistant-mermaid-action.is-copied {
+  background: var(--aw-success-soft-bg);
+  color: var(--aw-status-success);
+}
+
+.assistant-mermaid-action.is-error {
+  background: var(--aw-error-soft-bg);
+  color: var(--aw-status-danger);
+}
+
+.assistant-mermaid-diagram::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+  background: transparent;
+}
+
+.assistant-mermaid-diagram::-webkit-scrollbar-track,
+.assistant-mermaid-diagram::-webkit-scrollbar-track-piece,
+.assistant-mermaid-diagram::-webkit-scrollbar-corner {
+  border: 0;
+  background: transparent;
+}
+
+.assistant-mermaid-diagram::-webkit-scrollbar-thumb {
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--aw-radius-pill);
+  background: rgba(115, 115, 115, 0.28);
+}
+
+.assistant-mermaid-diagram::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.assistant-mermaid-diagram-svg {
+  display: flex;
+  width: max-content;
+  min-width: 100%;
+  min-height: 100%;
+  justify-content: center;
+}
+
+.assistant-mermaid-diagram-svg svg {
+  display: block;
+  max-width: none;
+  height: auto;
+}
+
+.assistant-mermaid-expanded-backdrop {
+  position: fixed;
+  z-index: 60;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.38);
+}
+
+.assistant-mermaid-expanded-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  box-sizing: border-box;
+  width: min(1120px, calc(100vw - 48px));
+  height: min(760px, calc(100vh - 48px));
+  min-width: 0;
+  min-height: 0;
+  padding: 10px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: 12px;
+  background: var(--aw-bg-white);
+  box-shadow: var(--aw-shadow-popover);
+}
+
+.assistant-mermaid-expanded-panel .assistant-mermaid-toolbar {
+  position: static;
+  margin-bottom: 8px;
+}
+
+.assistant-mermaid-expanded-scroll {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  padding: 16px;
+  overflow: auto;
+  border: 1px solid var(--aw-border-light);
+  border-radius: 8px;
+  background: var(--aw-bg-white);
+}
+
+.assistant-mermaid-expanded-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+  background: transparent;
+}
+
+.assistant-mermaid-expanded-scroll::-webkit-scrollbar-track,
+.assistant-mermaid-expanded-scroll::-webkit-scrollbar-track-piece,
+.assistant-mermaid-expanded-scroll::-webkit-scrollbar-corner {
+  border: 0;
+  background: transparent;
+}
+
+.assistant-mermaid-expanded-scroll::-webkit-scrollbar-thumb {
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--aw-radius-pill);
+  background: rgba(115, 115, 115, 0.28);
+}
+
+.assistant-mermaid-expanded-scroll::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.assistant-mermaid-diagram-loading {
+  place-items: center;
+  min-height: 140px;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-sm);
+}
+
+.assistant-mermaid-diagram-error {
+  gap: 8px;
+  border-color: var(--aw-error-soft-border);
+  background: var(--aw-error-soft-bg);
+}
+
+.assistant-mermaid-error-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.assistant-mermaid-diagram-error figcaption {
+  margin: 0;
+  color: var(--aw-status-danger-text);
+  font-weight: var(--aw-font-weight-semibold);
+}
+
+.assistant-mermaid-diagram-error p {
+  color: var(--aw-status-danger-text);
+  font-size: var(--aw-font-size-xs);
+  line-height: var(--aw-line-height-xs);
 }
 
 .assistant-message-error {

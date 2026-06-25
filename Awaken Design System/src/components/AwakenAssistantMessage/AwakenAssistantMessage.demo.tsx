@@ -11,7 +11,7 @@ export function AwakenAssistantMessageDemo() {
     <section className="ads-component-demo" aria-label="助手消息 AwakenAssistantMessage 组件演示">
       <header className="ads-component-demo-header">
         <h2>助手消息 <code>AwakenAssistantMessage</code></h2>
-        <p>用于渲染助手输出的轻量 markdown 回答，包括段落、列表、表格和运行状态样式。</p>
+        <p>用于渲染助手输出的富 Markdown 回答，包括 GFM、代码块、表格、Mermaid 图表和运行状态样式。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenAssistantMessageStates.map((state) => (

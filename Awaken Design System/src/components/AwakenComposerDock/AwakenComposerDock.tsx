@@ -1,10 +1,16 @@
 import "./AwakenComposerDock.css";
-import type { ReactNode } from "react";
+import { forwardRef, type ReactNode } from "react";
 
 export type AwakenComposerDockProps = {
   children: ReactNode;
 };
 
-export function AwakenComposerDock({ children }: AwakenComposerDockProps) {
-  return <div className="aw-composer-dock">{children}</div>;
-}
+export const AwakenComposerDock = forwardRef<HTMLDivElement, AwakenComposerDockProps>(
+  function AwakenComposerDock({ children }, ref) {
+    return (
+      <div className="aw-composer-dock" ref={ref}>
+        {children}
+      </div>
+    );
+  },
+);

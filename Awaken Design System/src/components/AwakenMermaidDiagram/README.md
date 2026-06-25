@@ -8,5 +8,5 @@
 
 - 使用 Mermaid `startOnLoad: false` 和 `securityLevel: "strict"`。
 - 渲染失败时显示原始 Mermaid 代码块和简短错误信息。
-- 渲染成功时提供放大查看和复制 Mermaid 源码，不复制渲染后的 SVG。
+- 渲染成功时提供展开查看、展开态缩放、自由拖拽平移和复制 Mermaid 源码，不复制渲染后的 SVG。
 - 不执行 runtime、Electron、AG-UI、A2UI 或文件系统副作用。

@@ -106,6 +106,16 @@ export function scrollTopForPromptAnchor({
   return Math.max(0, currentScrollTop + promptTop - containerTop - anchorOffset);
 }
 
+export function composerBottomSafeArea({
+  composerHeight,
+  safeGap,
+}: {
+  composerHeight: number;
+  safeGap: number;
+}): number {
+  return Math.max(0, composerHeight) + Math.max(0, safeGap);
+}
+
 export function anchoredTurnMinHeight({
   containerHeight,
   anchorOffset,

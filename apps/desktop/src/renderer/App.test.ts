@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import {
   anchoredTurnMinHeight,
+  composerBottomSafeArea,
   diffLineStats,
   groupNarrativeByTurns,
   resolvedDecisionForApproval,
@@ -183,7 +184,22 @@ describe("App workbench presentation", () => {
     ).toBe(0);
   });
 
-  it("keeps an anchored empty turn tall enough to reach the top", () => {
+  it("calculates composer bottom safe area", () => {
+    expect(
+      composerBottomSafeArea({
+        composerHeight: 88,
+        safeGap: 24,
+      }),
+    ).toBe(112);
+    expect(
+      composerBottomSafeArea({
+        composerHeight: -1,
+        safeGap: 24,
+      }),
+    ).toBe(24);
+  });
+
+  it("keeps the latest turn tall enough for sticky prompt reading", () => {
     expect(
       anchoredTurnMinHeight({
         containerHeight: 640,

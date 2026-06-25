@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
@@ -37,7 +37,6 @@ import {
   AwakenWorkbenchSidebarFrame as WorkbenchSidebarFrame,
   AwakenRunStage as RunStage,
   AwakenComposerDock as ComposerDock,
-  useAwakenAutoScrollTail as useAutoScrollTail,
   type ComponentTone,
   type InspectorTabId,
   type NavItem,
@@ -57,6 +56,7 @@ import { A2UISurfaceView } from "./a2ui/A2UISurfaceView";
 import type { InspectorSelection, RunNarrativeItem } from "./run-narrative";
 import {
   anchoredTurnMinHeight,
+  composerBottomSafeArea,
   diffLineStats,
   groupNarrativeByTurns,
   resolvedDecisionForApproval,
@@ -171,6 +171,7 @@ const MIN_INSPECTOR_WIDTH = 260;
 const MAX_INSPECTOR_WIDTH = 520;
 const LAYOUT_STEP = 12;
 const DEFAULT_PROMPT_ANCHOR_OFFSET = 0;
+const RUN_STAGE_COMPOSER_SAFE_GAP = 24;
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -229,6 +230,8 @@ export function App() {
   const resolvingApprovalIdRef = useRef<string | null>(null);
   const pendingPromptAnchorRef = useRef(false);
   const threadLoadSeqRef = useRef(0);
+  const runStageScrollRef = useRef<HTMLDivElement | null>(null);
+  const composerDockRef = useRef<HTMLDivElement | null>(null);
   const runtimeClient = runtimeClientRef.current;
 
   const [runtimeState, dispatch] = useReducer(
@@ -240,6 +243,7 @@ export function App() {
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
   const [latestTurnMinHeightPx, setLatestTurnMinHeightPx] = useState(0);
+  const [composerDockHeightPx, setComposerDockHeightPx] = useState(0);
   const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
   const [resolvedApproval, setResolvedApproval] = useState<ResolvedApprovalState>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
@@ -275,10 +279,9 @@ export function App() {
   const latestTurn = narrativeSections.turns[narrativeSections.turns.length - 1];
   const latestPromptId = latestTurn ? latestTurn.id : undefined;
   const hasPromptNarrative = narrativeSections.turns.length > 0;
-  const runTail = useAutoScrollTail<HTMLDivElement>({
-    dependencies: [runtimeState.narrative],
-    resetKeys: [runtimeState.activeThreadId],
-    enabled: !hasPromptNarrative,
+  const composerSafeAreaPx = composerBottomSafeArea({
+    composerHeight: hasPromptNarrative ? composerDockHeightPx : 0,
+    safeGap: hasPromptNarrative ? RUN_STAGE_COMPOSER_SAFE_GAP : 0,
   });
 
   const isBusy =
@@ -613,6 +616,7 @@ export function App() {
   function createSubscribeHandlers(): SubscribeHandlers {
     return {
       onEvent: (event) => {
+        const receivedAtMs = Date.now();
         if (event.type === "RUN_FINISHED" || event.type === "RUN_ERROR") {
           terminalSeenRef.current = true;
           localStorage.removeItem("awaken:runId");
@@ -635,7 +639,7 @@ export function App() {
           resolvingApprovalIdRef.current = null;
           setResolvingApprovalId(null);
         }
-        dispatch({ type: "run/event", event });
+        dispatch({ type: "run/event", event, receivedAtMs });
       },
       onError: (message) => dispatch({ type: "run/streamFailed", message }),
       onReconnect: () => dispatch({ type: "run/reconnecting" }),
@@ -648,6 +652,13 @@ export function App() {
       },
     };
   }
+
+  const setRunStageScrollElement = useCallback((element: HTMLDivElement | null) => {
+    runStageScrollRef.current = element;
+    if (element) {
+      element.style.setProperty("--aw-composer-safe-area", `${composerSafeAreaPx}px`);
+    }
+  }, [composerSafeAreaPx]);
 
   function promptAnchorOffset(element: HTMLElement): number {
     const value = window
@@ -669,7 +680,7 @@ export function App() {
   }
 
   function measureLatestTurnMinHeight(promptId: string): void {
-    const element = runTail.getElement();
+    const element = runStageScrollRef.current;
     if (!element || !findTurnElement(element, promptId)) {
       setLatestTurnMinHeightPx(0);
       return;
@@ -686,7 +697,7 @@ export function App() {
   }
 
   function scrollPromptToAnchor(promptId: string): void {
-    const element = runTail.getElement();
+    const element = runStageScrollRef.current;
     if (!element) {
       return;
     }
@@ -709,35 +720,90 @@ export function App() {
     });
   }
 
-  function requestLatestPromptAnchor(promptId: string): void {
-    window.requestAnimationFrame(() => {
-      measureLatestTurnMinHeight(promptId);
-      window.requestAnimationFrame(() => scrollPromptToAnchor(promptId));
-    });
-  }
+  useLayoutEffect(() => {
+    const element = runStageScrollRef.current;
+    if (!element) {
+      return;
+    }
+    element.style.setProperty("--aw-composer-safe-area", `${composerSafeAreaPx}px`);
+  }, [composerSafeAreaPx]);
 
-  useEffect(() => {
-    if (!latestPromptId) {
+  useLayoutEffect(() => {
+    if (showCenterComposer) {
+      setComposerDockHeightPx(0);
+      return;
+    }
+
+    const dockElement = composerDockRef.current;
+    if (!dockElement) {
+      return;
+    }
+    const measuredDockElement: HTMLDivElement = dockElement;
+
+    function syncComposerHeight(): void {
+      const content = measuredDockElement.firstElementChild instanceof HTMLElement
+        ? measuredDockElement.firstElementChild
+        : measuredDockElement;
+      const paddingBottom = Number.parseFloat(
+        window.getComputedStyle(measuredDockElement).paddingBottom,
+      );
+      const measuredHeight =
+        content.getBoundingClientRect().height +
+        (Number.isFinite(paddingBottom) ? paddingBottom : 0);
+      setComposerDockHeightPx(Math.ceil(measuredHeight));
+    }
+
+    syncComposerHeight();
+    const resizeObserver = new ResizeObserver(syncComposerHeight);
+    resizeObserver.observe(measuredDockElement);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [showCenterComposer]);
+
+  useLayoutEffect(() => {
+    const element = runStageScrollRef.current;
+    if (!latestPromptId || !element) {
       pendingPromptAnchorRef.current = false;
-      setLatestTurnMinHeightPx(0);
+      setLatestTurnMinHeightPx((current) => current === 0 ? current : 0);
       return;
     }
 
-    measureLatestTurnMinHeight(latestPromptId);
-    if (!pendingPromptAnchorRef.current) {
+    const turn = findTurnElement(element, latestPromptId);
+    if (!turn) {
+      setLatestTurnMinHeightPx((current) => current === 0 ? current : 0);
       return;
     }
 
-    pendingPromptAnchorRef.current = false;
-    requestLatestPromptAnchor(latestPromptId);
-  }, [latestPromptId]);
+    const nextMinHeight = Math.ceil(
+      anchoredTurnMinHeight({
+        containerHeight: element.clientHeight,
+        anchorOffset: promptAnchorOffset(element),
+      }),
+    );
+    if (nextMinHeight !== latestTurnMinHeightPx) {
+      setLatestTurnMinHeightPx(nextMinHeight);
+      return;
+    }
 
-  useEffect(() => {
+    if (pendingPromptAnchorRef.current) {
+      pendingPromptAnchorRef.current = false;
+      scrollPromptToAnchor(latestPromptId);
+      return;
+    }
+  }, [
+    latestPromptId,
+    latestTurnMinHeightPx,
+    runtimeState.narrative,
+  ]);
+
+  useLayoutEffect(() => {
     if (!latestPromptId) {
       return;
     }
 
-    const element = runTail.getElement();
+    const element = runStageScrollRef.current;
     if (!element) {
       return;
     }
@@ -834,7 +900,7 @@ export function App() {
     resolvingApprovalIdRef.current = null;
     pendingPromptAnchorRef.current = true;
     setLatestTurnMinHeightPx(0);
-    dispatch({ type: "run/requested", prompt });
+    dispatch({ type: "run/requested", prompt, startedAtMs: Date.now() });
 
     try {
       const startRunRequest: StartRunRequest = {
@@ -1097,6 +1163,8 @@ export function App() {
           key={key}
           markdown={item.markdown}
           status={item.status}
+          elapsedMs={item.elapsedMs}
+          showFooter={item.status === "done" && item.elapsedMs !== undefined}
         />
       );
     }
@@ -1570,11 +1638,10 @@ export function App() {
                 inspectorCollapsed={inspectorCollapsed}
                 stage={
                   <RunStage
-                    scrollRef={showCenterComposer ? undefined : runTail.scrollRef}
-                    onScroll={showCenterComposer ? undefined : runTail.onScroll}
+                    scrollRef={showCenterComposer ? undefined : setRunStageScrollElement}
                     composer={
                       showCenterComposer ? undefined : (
-                        <ComposerDock>
+                        <ComposerDock ref={composerDockRef}>
                           <ComposerBar
                             value={composerValue}
                             onChange={setComposerValue}

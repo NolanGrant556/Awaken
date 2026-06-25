@@ -36,7 +36,13 @@ export type RunNarrativeItem =
   | { kind: "tool"; id: string; title: string; detail?: string; status: "active" | "done" | "error" }
   | { kind: "approval"; id: string; title: string; status: "waiting" | "approved" | "rejected" }
   | { kind: "fileChange"; id: string; files: ChangedFile[]; status: "active" | "done" }
-  | { kind: "answer"; id: string; markdown: string; status: "active" | "done" | "error" };
+  | {
+      kind: "answer";
+      id: string;
+      markdown: string;
+      status: "active" | "done" | "error";
+      elapsedMs?: number;
+    };
 
 export type RunNarrativeState = {
   committedItems: RunNarrativeItem[];

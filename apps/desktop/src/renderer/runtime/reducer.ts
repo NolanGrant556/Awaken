@@ -86,6 +86,8 @@ type ThreadViewState = {
   turnDiff?: TurnDiffRecord;
   narrative: RunNarrativeState;
   errorMessage?: string;
+  runStartedAtMs?: number;
+  runCompletedAtMs?: number;
 };
 
 export type RuntimeViewState = {
@@ -106,6 +108,8 @@ export type RuntimeViewState = {
   turnDiff?: TurnDiffRecord;
   narrative: RunNarrativeState;
   errorMessage?: string;
+  runStartedAtMs?: number;
+  runCompletedAtMs?: number;
   threads: ThreadItem[];
   activeThreadId?: string;
   threadViews: Record<string, ThreadViewState>;
@@ -114,7 +118,7 @@ export type RuntimeViewState = {
 
 export type RuntimeAction =
   | { type: "run/reset" }
-  | { type: "run/requested"; prompt: string }
+  | { type: "run/requested"; prompt: string; startedAtMs?: number }
   | { type: "run/created"; run: RuntimeRun }
   | { type: "run/createFailed"; message: string }
   | { type: "run/cancelRequested" }
@@ -127,7 +131,7 @@ export type RuntimeAction =
   | { type: "run/threadsLoaded"; threads: RuntimeThread[] }
   | { type: "run/threadAdded"; threadId: string; label: string; runId: string }
   | { type: "run/threadSwitch"; threadId: string }
-  | { type: "run/event"; event: AguiEvent }
+  | { type: "run/event"; event: AguiEvent; receivedAtMs?: number }
   | { type: "supervisor/status-changed"; info: SupervisorStatusInfo };
 
 const initialState: RuntimeViewState = {
@@ -167,6 +171,8 @@ function viewFromState(state: RuntimeViewState): ThreadViewState {
     turnDiff: state.turnDiff,
     narrative: state.narrative,
     errorMessage: state.errorMessage,
+    runStartedAtMs: state.runStartedAtMs,
+    runCompletedAtMs: state.runCompletedAtMs,
   };
 }
 
@@ -287,6 +293,81 @@ function scopeNarrativeEvent(event: AguiEvent, state: RuntimeViewState): AguiEve
     ...event,
     threadId: event.threadId ?? state.threadId ?? state.activeThreadId,
     runId: event.runId ?? state.runId,
+  };
+}
+
+function validTimestamp(value?: number): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isSuccessfulTerminalEvent(event: AguiEvent): boolean {
+  return event.type === "RUN_FINISHED" ||
+    (event.type === "RUN_STATUS_CHANGED" && event.status === "finished");
+}
+
+function elapsedMsForTerminalRun(state: RuntimeViewState, receivedAtMs?: number): number | undefined {
+  if (!validTimestamp(state.runStartedAtMs)) {
+    return undefined;
+  }
+
+  const completedAtMs = validTimestamp(state.runCompletedAtMs)
+    ? state.runCompletedAtMs
+    : receivedAtMs;
+  if (!validTimestamp(completedAtMs)) {
+    return undefined;
+  }
+
+  return Math.max(0, completedAtMs - state.runStartedAtMs);
+}
+
+function isAnswerForRun(itemId: string, runId?: string): boolean {
+  if (!runId) {
+    return true;
+  }
+  return itemId === `answer:${runId}` || itemId.startsWith(`answer:${runId}:`);
+}
+
+function attachElapsedMsToLatestAnswer(
+  narrative: RunNarrativeState,
+  elapsedMs: number | undefined,
+  runId?: string,
+): RunNarrativeState {
+  if (!validTimestamp(elapsedMs)) {
+    return narrative;
+  }
+
+  let answerIndex = -1;
+  for (let index = narrative.committedItems.length - 1; index >= 0; index -= 1) {
+    const item = narrative.committedItems[index];
+    if (
+      item.kind === "answer" &&
+      item.status === "done" &&
+      item.elapsedMs === undefined &&
+      isAnswerForRun(item.id, runId)
+    ) {
+      answerIndex = index;
+      break;
+    }
+  }
+
+  if (answerIndex < 0) {
+    return narrative;
+  }
+
+  const committedItems = narrative.committedItems.slice();
+  const answer = committedItems[answerIndex];
+  if (answer.kind !== "answer") {
+    return narrative;
+  }
+
+  committedItems[answerIndex] = {
+    ...answer,
+    elapsedMs,
+  };
+
+  return {
+    ...narrative,
+    committedItems,
   };
 }
 
@@ -577,6 +658,8 @@ export function reduceRuntimeState(
         threads: state.threads,
         activeThreadId: state.activeThreadId,
         threadViews: state.threadViews,
+        runStartedAtMs: action.startedAtMs,
+        runCompletedAtMs: undefined,
       };
     case "run/created":
       return saveActiveThreadView(
@@ -802,6 +885,7 @@ export function reduceRuntimeState(
             nextState.phase = "done";
             nextState.timelineStatus = "done";
             nextState.approvals = [];
+            nextState.runCompletedAtMs = nextState.runCompletedAtMs ?? action.receivedAtMs;
           } else if (status === "error") {
             nextState.phase = "error";
             nextState.timelineStatus = "error";
@@ -826,6 +910,7 @@ export function reduceRuntimeState(
           nextState.status = "finished";
           nextState.timelineStatus = "done";
           nextState.approvals = [];
+          nextState.runCompletedAtMs = nextState.runCompletedAtMs ?? action.receivedAtMs;
           records = upsertStep(records, "run-finished", {
             title: "Run finished",
             description: excerpt(action.event.result || nextState.assistantText || "Runtime completed"),
@@ -1132,7 +1217,14 @@ export function reduceRuntimeState(
       }
 
       nextState.steps = toSteps(records);
-      nextState.narrative = projectAguiEventToNarrative(state.narrative, narrativeEvent);
+      const projectedNarrative = projectAguiEventToNarrative(state.narrative, narrativeEvent);
+      nextState.narrative = isSuccessfulTerminalEvent(action.event)
+        ? attachElapsedMsToLatestAnswer(
+            projectedNarrative,
+            elapsedMsForTerminalRun(nextState, action.receivedAtMs),
+            nextState.runId,
+          )
+        : projectedNarrative;
       return saveActiveThreadView(syncActiveThreadSummary(nextState));
     }
     case "supervisor/status-changed":

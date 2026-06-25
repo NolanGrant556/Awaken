@@ -19,6 +19,10 @@ function runEvent(event: AguiEvent): RuntimeAction {
   return { type: "run/event", event };
 }
 
+function runEventAt(event: AguiEvent, receivedAtMs: number): RuntimeAction {
+  return { type: "run/event", event, receivedAtMs };
+}
+
 function countRunCancelledSteps(state: ReturnType<typeof createInitialRuntimeState>): number {
   return state.steps.filter((step) => step.id === "run-cancelled").length;
 }
@@ -925,6 +929,73 @@ describe("runtime reducer run narrative projection", () => {
       markdown: "done",
       status: "done",
     });
+  });
+
+  it("annotates the successful final answer with elapsed runtime", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "Finish", startedAtMs: 1000 },
+      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        runId: "run-1",
+        messageId: "m1",
+        delta: "done",
+      }),
+      runEventAt({ type: "RUN_FINISHED", runId: "run-1", result: "done" }, 66000),
+    ]);
+
+    expect(state.narrative.committedItems).toContainEqual({
+      kind: "answer",
+      id: "answer:run-1:m1",
+      markdown: "done",
+      status: "done",
+      elapsedMs: 65000,
+    });
+  });
+
+  it("annotates an already committed text message when finished status arrives", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "Finish", startedAtMs: 2000 },
+      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        runId: "run-1",
+        messageId: "m1",
+        delta: "done",
+      }),
+      runEvent({ type: "TEXT_MESSAGE_END", runId: "run-1", messageId: "m1" }),
+      runEventAt({ type: "RUN_STATUS_CHANGED", runId: "run-1", status: "finished" }, 47000),
+    ]);
+
+    expect(state.narrative.committedItems).toContainEqual({
+      kind: "answer",
+      id: "answer:run-1:m1",
+      markdown: "done",
+      status: "done",
+      elapsedMs: 45000,
+    });
+  });
+
+  it("does not annotate cancelled or error answers with elapsed runtime", () => {
+    const cancelled = dispatch([
+      { type: "run/requested", prompt: "Cancel", startedAtMs: 1000 },
+      runEvent({ type: "TEXT_MESSAGE_CONTENT", messageId: "m1", delta: "partial" }),
+      runEventAt({ type: "RUN_STATUS_CHANGED", status: "cancelled" }, 3000),
+    ]);
+    const errored = dispatch([
+      { type: "run/requested", prompt: "Error", startedAtMs: 1000 },
+      runEventAt({ type: "RUN_ERROR", code: "INTERNAL_ERROR", message: "boom" }, 3000),
+    ]);
+
+    const cancelledAnswer = cancelled.narrative.committedItems.find(
+      (item) => item.kind === "answer",
+    );
+    const errorAnswer = errored.narrative.committedItems.find(
+      (item) => item.kind === "answer",
+    );
+
+    expect(cancelledAnswer).not.toHaveProperty("elapsedMs");
+    expect(errorAnswer).not.toHaveProperty("elapsedMs");
   });
 
   it("projects provider errors into sanitized error answer items", () => {

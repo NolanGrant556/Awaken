@@ -26,9 +26,16 @@ for (const [name, Demo] of demoEntries) {
 const richMarkdownState = AwakenDesignSystem.AwakenAssistantMessageStates.find(
   (state) => state.id === "rich-markdown",
 );
+const footerState = AwakenDesignSystem.AwakenAssistantMessageStates.find(
+  (state) => state.id === "completed-answer-footer",
+);
 
 if (!richMarkdownState) {
   throw new Error("AwakenAssistantMessage rich-markdown state is missing");
+}
+
+if (!footerState) {
+  throw new Error("AwakenAssistantMessage completed-answer-footer state is missing");
 }
 
 const richMarkdownHtml = renderToString(
@@ -45,6 +52,50 @@ if (!richMarkdownHtml.includes("assistant-message-table-wrap")) {
 
 if (!richMarkdownHtml.includes("assistant-mermaid-diagram")) {
   throw new Error("AwakenAssistantMessage did not route closed Mermaid blocks to the diagram component");
+}
+
+const footerHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenAssistantMessage, footerState.props),
+);
+
+if (!footerHtml.includes("assistant-message-footer")) {
+  throw new Error("AwakenAssistantMessage did not render the completed answer footer");
+}
+
+if (!footerHtml.includes("assistant-message-has-footer")) {
+  throw new Error("AwakenAssistantMessage did not expose the completed footer spacing class");
+}
+
+if (!footerHtml.includes("Agent ran") || !footerHtml.includes("1m 05s")) {
+  throw new Error("AwakenAssistantMessage did not render the elapsed runtime label");
+}
+
+if (!footerHtml.includes("Copy final answer")) {
+  throw new Error("AwakenAssistantMessage did not render the final answer copy action");
+}
+
+const activeFooterHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenAssistantMessage, {
+    markdown: "still running",
+    status: "active",
+    elapsedMs: 12000,
+  }),
+);
+
+if (activeFooterHtml.includes("assistant-message-footer")) {
+  throw new Error("AwakenAssistantMessage should not render the footer while active");
+}
+
+const errorFooterHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenAssistantMessage, {
+    markdown: "failed",
+    status: "error",
+    elapsedMs: 12000,
+  }),
+);
+
+if (errorFooterHtml.includes("assistant-message-footer")) {
+  throw new Error("AwakenAssistantMessage should not render the footer for error answers");
 }
 
 const unclosedMermaidHtml = renderToString(

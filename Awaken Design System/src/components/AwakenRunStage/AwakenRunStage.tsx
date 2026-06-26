@@ -8,6 +8,7 @@ import type {
 export type AwakenRunStageProps = {
   children: ReactNode;
   composer?: ReactNode;
+  overlay?: ReactNode;
   scrollRef?: Ref<HTMLDivElement>;
   onScroll?: UIEventHandler<HTMLDivElement>;
 };
@@ -15,6 +16,7 @@ export type AwakenRunStageProps = {
 export function AwakenRunStage({
   children,
   composer,
+  overlay,
   scrollRef,
   onScroll,
 }: AwakenRunStageProps) {
@@ -28,6 +30,7 @@ export function AwakenRunStage({
       >
         {children}
       </div>
+      {overlay}
       {composer}
     </main>
   );

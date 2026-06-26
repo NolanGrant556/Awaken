@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import {
   anchoredTurnMinHeight,
+  activeTurnIdForAnchor,
   composerBottomSafeArea,
   diffLineStats,
   groupNarrativeByTurns,
@@ -17,7 +18,9 @@ import {
   shouldRequestLatestOutputFollowResumeForTouchMove,
   shouldRequestLatestOutputFollowResumeForWheel,
   shouldResumeLatestOutputFollow,
+  shouldShowTurnMarkerRail,
   shouldUseCenterComposer,
+  turnMarkerRailDisplay,
 } from "./workbenchPresentation";
 import type { AwakenBridge } from "../shared/runtime";
 
@@ -134,6 +137,81 @@ describe("App workbench presentation", () => {
     ).toBe(false);
   });
 
+  it("shows turn markers once the run stage has at least three turns", () => {
+    expect(
+      shouldShowTurnMarkerRail({
+        showCenterComposer: true,
+        turnCount: 4,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowTurnMarkerRail({
+        showCenterComposer: false,
+        turnCount: 2,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowTurnMarkerRail({
+        showCenterComposer: false,
+        turnCount: 3,
+      }),
+    ).toBe(true);
+  });
+
+  it("adapts turn marker density to the available rail height", () => {
+    const eightTurns = Array.from({ length: 8 }, (_, index) => `turn-${index + 1}`);
+    expect(
+      turnMarkerRailDisplay({
+        showCenterComposer: false,
+        turnIds: eightTurns,
+        latestTurnId: "turn-8",
+        railHeight: 420,
+      }),
+    ).toEqual({
+      mode: "regular",
+      items: eightTurns.map((id, index) => ({ id, index })),
+    });
+
+    const twentyTurns = Array.from({ length: 20 }, (_, index) => `turn-${index + 1}`);
+    const compactDisplay = turnMarkerRailDisplay({
+      showCenterComposer: false,
+      turnIds: twentyTurns,
+      latestTurnId: "turn-20",
+      railHeight: 420,
+    });
+    expect(compactDisplay.mode).toBe("compact");
+    expect(compactDisplay.items).toHaveLength(20);
+  });
+
+  it("samples dense turn markers around the active turn without dropping endpoints", () => {
+    const fortyTurns = Array.from({ length: 40 }, (_, index) => `turn-${index + 1}`);
+    const display = turnMarkerRailDisplay({
+      showCenterComposer: false,
+      turnIds: fortyTurns,
+      activeTurnId: "turn-20",
+      latestTurnId: "turn-40",
+      railHeight: 110,
+    });
+
+    expect(display.mode).toBe("summary");
+    expect(display.items.length).toBeLessThanOrEqual(8);
+    expect(display.items.map((item) => item.id)).toEqual(
+      expect.arrayContaining(["turn-1", "turn-19", "turn-20", "turn-21", "turn-40"]),
+    );
+  });
+
+  it("hides dense markers when the rail is too short to render a useful set", () => {
+    const turns = Array.from({ length: 40 }, (_, index) => `turn-${index + 1}`);
+    expect(
+      turnMarkerRailDisplay({
+        showCenterComposer: false,
+        turnIds: turns,
+        latestTurnId: "turn-40",
+        railHeight: 20,
+      }),
+    ).toEqual({ mode: "hidden", items: [] });
+  });
+
   it("counts real diff additions and removals for inspector deltas", () => {
     expect(
       diffLineStats(
@@ -189,6 +267,19 @@ describe("App workbench presentation", () => {
         anchorOffset: 0,
       }),
     ).toBe(0);
+  });
+
+  it("selects the turn nearest to the prompt anchor for marker state", () => {
+    const turns = [
+      { id: "turn-1", top: 100 },
+      { id: "turn-2", top: 260 },
+      { id: "turn-3", top: 480 },
+    ];
+
+    expect(activeTurnIdForAnchor({ turns: [], anchorY: 200 })).toBeUndefined();
+    expect(activeTurnIdForAnchor({ turns, anchorY: 90 })).toBe("turn-1");
+    expect(activeTurnIdForAnchor({ turns, anchorY: 260 })).toBe("turn-2");
+    expect(activeTurnIdForAnchor({ turns, anchorY: 999 })).toBe("turn-3");
   });
 
   it("calculates composer bottom safe area", () => {

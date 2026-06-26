@@ -18,6 +18,32 @@ export type NarrativeTurnSections = {
   turns: NarrativeTurnSection[];
 };
 
+export type TurnAnchorPosition = {
+  id: string;
+  top: number;
+};
+
+export type TurnMarkerRailMode = "hidden" | "regular" | "compact" | "summary";
+
+export type TurnMarkerRailItem = {
+  id: string;
+  index: number;
+};
+
+export type TurnMarkerRailDisplay = {
+  mode: TurnMarkerRailMode;
+  items: TurnMarkerRailItem[];
+};
+
+const TURN_MARKER_MIN_TURN_COUNT = 3;
+const TURN_MARKER_REGULAR_LIMIT = 12;
+const TURN_MARKER_COMPACT_LIMIT = 24;
+const TURN_MARKER_SUMMARY_LIMIT = 24;
+
+const TURN_MARKER_REGULAR_SIZE = { itemHeight: 18, gap: 14 };
+const TURN_MARKER_COMPACT_SIZE = { itemHeight: 12, gap: 8 };
+const TURN_MARKER_SUMMARY_SIZE = { itemHeight: 8, gap: 5 };
+
 export function resolvedDecisionForApproval(
   activeApproval: { id: string } | undefined,
   resolvedApproval: ResolvedApprovalState,
@@ -63,6 +89,161 @@ export function shouldUseCenterComposer({
   return !hasNarrative && !hasRun && !hasNotice && !hasError && !needsRestart;
 }
 
+export function shouldShowTurnMarkerRail({
+  showCenterComposer,
+  turnCount,
+}: {
+  showCenterComposer: boolean;
+  turnCount: number;
+}): boolean {
+  return !showCenterComposer && turnCount >= TURN_MARKER_MIN_TURN_COUNT;
+}
+
+function markerSetHeight({
+  count,
+  itemHeight,
+  gap,
+}: {
+  count: number;
+  itemHeight: number;
+  gap: number;
+}): number {
+  if (count <= 0) {
+    return 0;
+  }
+  return count * itemHeight + (count - 1) * gap;
+}
+
+function markerCapacityForHeight({
+  height,
+  itemHeight,
+  gap,
+}: {
+  height: number;
+  itemHeight: number;
+  gap: number;
+}): number {
+  if (height <= 0) {
+    return 0;
+  }
+  return Math.max(1, Math.floor((height + gap) / (itemHeight + gap)));
+}
+
+function turnMarkerItemsForAll(turnIds: string[]): TurnMarkerRailItem[] {
+  return turnIds.map((id, index) => ({ id, index }));
+}
+
+function sampledTurnMarkerItems({
+  turnIds,
+  maxItems,
+  activeTurnId,
+  latestTurnId,
+}: {
+  turnIds: string[];
+  maxItems: number;
+  activeTurnId?: string;
+  latestTurnId?: string;
+}): TurnMarkerRailItem[] {
+  const turnCount = turnIds.length;
+  const itemCount = Math.min(Math.max(0, maxItems), turnCount);
+  if (itemCount >= turnCount) {
+    return turnMarkerItemsForAll(turnIds);
+  }
+  if (itemCount <= 0) {
+    return [];
+  }
+
+  const focusIndex = Math.max(
+    0,
+    turnIds.findIndex((id) => id === activeTurnId || id === latestTurnId),
+  );
+  const indexes = new Set<number>();
+  const addIndex = (index: number) => {
+    if (index >= 0 && index < turnCount && indexes.size < itemCount) {
+      indexes.add(index);
+    }
+  };
+
+  addIndex(0);
+  addIndex(focusIndex);
+  addIndex(turnCount - 1);
+  addIndex(focusIndex - 1);
+  addIndex(focusIndex + 1);
+
+  for (let step = 1; indexes.size < itemCount && step < itemCount; step += 1) {
+    addIndex(Math.round((step * (turnCount - 1)) / (itemCount - 1)));
+  }
+
+  for (let index = 0; indexes.size < itemCount && index < turnCount; index += 1) {
+    addIndex(index);
+  }
+
+  return Array.from(indexes)
+    .sort((a, b) => a - b)
+    .map((index) => ({ id: turnIds[index], index }));
+}
+
+export function turnMarkerRailDisplay({
+  showCenterComposer,
+  turnIds,
+  activeTurnId,
+  latestTurnId,
+  railHeight,
+}: {
+  showCenterComposer: boolean;
+  turnIds: string[];
+  activeTurnId?: string;
+  latestTurnId?: string;
+  railHeight: number;
+}): TurnMarkerRailDisplay {
+  const cleanTurnIds = turnIds.filter((id) => id.length > 0);
+  const turnCount = cleanTurnIds.length;
+  if (!shouldShowTurnMarkerRail({ showCenterComposer, turnCount })) {
+    return { mode: "hidden", items: [] };
+  }
+
+  const availableHeight = Math.max(0, railHeight);
+  if (
+    turnCount <= TURN_MARKER_REGULAR_LIMIT &&
+    (
+      availableHeight === 0 ||
+      markerSetHeight({ count: turnCount, ...TURN_MARKER_REGULAR_SIZE }) <= availableHeight
+    )
+  ) {
+    return { mode: "regular", items: turnMarkerItemsForAll(cleanTurnIds) };
+  }
+
+  if (
+    turnCount <= TURN_MARKER_COMPACT_LIMIT &&
+    (
+      availableHeight === 0 ||
+      markerSetHeight({ count: turnCount, ...TURN_MARKER_COMPACT_SIZE }) <= availableHeight
+    )
+  ) {
+    return { mode: "compact", items: turnMarkerItemsForAll(cleanTurnIds) };
+  }
+
+  const summaryCapacity = availableHeight === 0
+    ? TURN_MARKER_SUMMARY_LIMIT
+    : Math.min(
+      TURN_MARKER_SUMMARY_LIMIT,
+      markerCapacityForHeight({ height: availableHeight, ...TURN_MARKER_SUMMARY_SIZE }),
+    );
+  if (summaryCapacity < TURN_MARKER_MIN_TURN_COUNT) {
+    return { mode: "hidden", items: [] };
+  }
+
+  return {
+    mode: "summary",
+    items: sampledTurnMarkerItems({
+      turnIds: cleanTurnIds,
+      maxItems: summaryCapacity,
+      activeTurnId,
+      latestTurnId,
+    }),
+  };
+}
+
 export function groupNarrativeByTurns(
   items: RunNarrativeItem[],
 ): NarrativeTurnSections {
@@ -104,6 +285,23 @@ export function scrollTopForPromptAnchor({
   anchorOffset: number;
 }): number {
   return Math.max(0, currentScrollTop + promptTop - containerTop - anchorOffset);
+}
+
+export function activeTurnIdForAnchor({
+  turns,
+  anchorY,
+}: {
+  turns: TurnAnchorPosition[];
+  anchorY: number;
+}): string | undefined {
+  let activeId = turns[0]?.id;
+  for (const turn of turns) {
+    if (turn.top > anchorY) {
+      break;
+    }
+    activeId = turn.id;
+  }
+  return activeId;
 }
 
 export function composerBottomSafeArea({

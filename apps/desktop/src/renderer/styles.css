@@ -248,6 +248,109 @@ pre {
   scroll-margin-top: var(--aw-prompt-anchor-offset, 0px);
 }
 
+.turn-marker-rail {
+  position: absolute;
+  top: 28px;
+  right: 12px;
+  bottom: 112px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  width: 18px;
+  gap: 14px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.turn-marker-button {
+  display: grid;
+  place-items: center end;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.turn-marker-button:focus-visible {
+  outline: 2px solid rgba(31, 31, 31, 0.18);
+  outline-offset: 1px;
+}
+
+.turn-marker-bar {
+  display: block;
+  width: 12px;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(31, 31, 31, 0.14);
+  transition:
+    width 140ms ease,
+    background-color 140ms ease;
+}
+
+.turn-marker-button:hover .turn-marker-bar,
+.turn-marker-button:focus-visible .turn-marker-bar {
+  width: 14px;
+  background: rgba(31, 31, 31, 0.28);
+}
+
+.turn-marker-button-active .turn-marker-bar {
+  width: 16px;
+  background: rgba(31, 31, 31, 0.46);
+}
+
+.turn-marker-rail-compact {
+  gap: 8px;
+}
+
+.turn-marker-rail-compact .turn-marker-button {
+  height: 12px;
+}
+
+.turn-marker-rail-compact .turn-marker-bar {
+  width: 10px;
+}
+
+.turn-marker-rail-compact .turn-marker-button:hover .turn-marker-bar,
+.turn-marker-rail-compact .turn-marker-button:focus-visible .turn-marker-bar {
+  width: 12px;
+}
+
+.turn-marker-rail-compact .turn-marker-button-active .turn-marker-bar {
+  width: 14px;
+}
+
+.turn-marker-rail-summary {
+  gap: 5px;
+}
+
+.turn-marker-rail-summary .turn-marker-button {
+  width: 16px;
+  height: 8px;
+}
+
+.turn-marker-rail-summary .turn-marker-bar {
+  width: 8px;
+  height: 2px;
+  background: rgba(31, 31, 31, 0.12);
+}
+
+.turn-marker-rail-summary .turn-marker-button:hover .turn-marker-bar,
+.turn-marker-rail-summary .turn-marker-button:focus-visible .turn-marker-bar {
+  width: 10px;
+}
+
+.turn-marker-rail-summary .turn-marker-button-active .turn-marker-bar {
+  width: 12px;
+  height: 3px;
+  background: rgba(31, 31, 31, 0.44);
+}
+
 .execution-turn-section-latest {
   min-height: var(--aw-latest-turn-min-height, auto);
   overflow-anchor: none;

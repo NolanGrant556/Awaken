@@ -57,6 +57,7 @@ import { A2UISurfaceView } from "./a2ui/A2UISurfaceView";
 import type { InspectorSelection, RunNarrativeItem } from "./run-narrative";
 import {
   anchoredTurnMinHeight,
+  activeTurnIdForAnchor,
   composerBottomSafeArea,
   diffLineStats,
   groupNarrativeByTurns,
@@ -70,6 +71,7 @@ import {
   shouldRequestLatestOutputFollowResumeForWheel,
   shouldResumeLatestOutputFollow,
   shouldUseCenterComposer,
+  turnMarkerRailDisplay,
   type ResolvedApprovalState,
 } from "./workbenchPresentation";
 import {
@@ -243,6 +245,7 @@ export function App() {
   const latestOutputFollowResumeIntentRef = useRef(false);
   const runStageTouchStartYRef = useRef<number | null>(null);
   const runStageInputIntentCleanupRef = useRef<(() => void) | null>(null);
+  const runStageResizeObserverRef = useRef<ResizeObserver | null>(null);
   const threadLoadSeqRef = useRef(0);
   const runStageScrollRef = useRef<HTMLDivElement | null>(null);
   const composerDockRef = useRef<HTMLDivElement | null>(null);
@@ -255,10 +258,12 @@ export function App() {
   );
   const [composerValue, setComposerValue] = useState("");
   const [composerFocusRequest, setComposerFocusRequest] = useState(0);
+  const [activeTurnMarkerId, setActiveTurnMarkerId] = useState<string | undefined>();
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
   const [latestTurnMinHeightPx, setLatestTurnMinHeightPx] = useState(0);
   const [composerDockHeightPx, setComposerDockHeightPx] = useState(0);
+  const [runStageViewportHeightPx, setRunStageViewportHeightPx] = useState(0);
   const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
   const [resolvedApproval, setResolvedApproval] = useState<ResolvedApprovalState>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
@@ -610,6 +615,19 @@ export function App() {
     hasError: Boolean(runtimeState.errorMessage),
     needsRestart: desktopNeedsRestart,
   });
+  const markerActiveTurnId =
+    activeTurnMarkerId &&
+    narrativeSections.turns.some((turn) => turn.id === activeTurnMarkerId)
+      ? activeTurnMarkerId
+      : latestPromptId;
+  const turnMarkerDisplay = turnMarkerRailDisplay({
+    showCenterComposer,
+    turnIds: narrativeSections.turns.map((turn) => turn.id),
+    activeTurnId: markerActiveTurnId,
+    latestTurnId: latestPromptId,
+    railHeight: Math.max(0, runStageViewportHeightPx - 28 - Math.max(28, composerSafeAreaPx)),
+  });
+  const showTurnMarkerRail = turnMarkerDisplay.mode !== "hidden";
 
   function selectInspector(selection: InspectorSelection, tabId = defaultInspectorTab(selection)): void {
     setInspectorSelection(selection);
@@ -671,55 +689,70 @@ export function App() {
   const setRunStageScrollElement = useCallback((element: HTMLDivElement | null) => {
     runStageInputIntentCleanupRef.current?.();
     runStageInputIntentCleanupRef.current = null;
+    runStageResizeObserverRef.current?.disconnect();
+    runStageResizeObserverRef.current = null;
     runStageScrollRef.current = element;
-    if (element) {
-      element.style.setProperty("--aw-composer-safe-area", `${composerSafeAreaPx}px`);
-
-      const handleWheel = (event: WheelEvent) => {
-        if (shouldPauseLatestOutputFollowForWheel({ deltaY: event.deltaY })) {
-          latestOutputFollowPausedByUserRef.current = true;
-          latestOutputFollowResumeIntentRef.current = false;
-          followLatestOutputRef.current = false;
-          return;
-        }
-        if (shouldRequestLatestOutputFollowResumeForWheel({ deltaY: event.deltaY })) {
-          latestOutputFollowResumeIntentRef.current = true;
-        }
-      };
-      const handleTouchStart = (event: TouchEvent) => {
-        runStageTouchStartYRef.current = event.touches[0]?.clientY ?? null;
-      };
-      const handleTouchMove = (event: TouchEvent) => {
-        const startY = runStageTouchStartYRef.current;
-        const currentY = event.touches[0]?.clientY;
-        if (
-          startY !== null &&
-          currentY !== undefined &&
-          shouldPauseLatestOutputFollowForTouchMove({ startY, currentY })
-        ) {
-          latestOutputFollowPausedByUserRef.current = true;
-          latestOutputFollowResumeIntentRef.current = false;
-          followLatestOutputRef.current = false;
-          return;
-        }
-        if (
-          startY !== null &&
-          currentY !== undefined &&
-          shouldRequestLatestOutputFollowResumeForTouchMove({ startY, currentY })
-        ) {
-          latestOutputFollowResumeIntentRef.current = true;
-        }
-      };
-
-      element.addEventListener("wheel", handleWheel, { passive: true });
-      element.addEventListener("touchstart", handleTouchStart, { passive: true });
-      element.addEventListener("touchmove", handleTouchMove, { passive: true });
-      runStageInputIntentCleanupRef.current = () => {
-        element.removeEventListener("wheel", handleWheel);
-        element.removeEventListener("touchstart", handleTouchStart);
-        element.removeEventListener("touchmove", handleTouchMove);
-      };
+    if (!element) {
+      setRunStageViewportHeightPx((current) => current === 0 ? current : 0);
+      return;
     }
+    element.style.setProperty("--aw-composer-safe-area", `${composerSafeAreaPx}px`);
+
+    const syncRunStageViewportHeight = () => {
+      const nextHeight = element.clientHeight;
+      setRunStageViewportHeightPx((current) => current === nextHeight ? current : nextHeight);
+    };
+    syncRunStageViewportHeight();
+    if (typeof ResizeObserver !== "undefined") {
+      const resizeObserver = new ResizeObserver(syncRunStageViewportHeight);
+      resizeObserver.observe(element);
+      runStageResizeObserverRef.current = resizeObserver;
+    }
+
+    const handleWheel = (event: WheelEvent) => {
+      if (shouldPauseLatestOutputFollowForWheel({ deltaY: event.deltaY })) {
+        latestOutputFollowPausedByUserRef.current = true;
+        latestOutputFollowResumeIntentRef.current = false;
+        followLatestOutputRef.current = false;
+        return;
+      }
+      if (shouldRequestLatestOutputFollowResumeForWheel({ deltaY: event.deltaY })) {
+        latestOutputFollowResumeIntentRef.current = true;
+      }
+    };
+    const handleTouchStart = (event: TouchEvent) => {
+      runStageTouchStartYRef.current = event.touches[0]?.clientY ?? null;
+    };
+    const handleTouchMove = (event: TouchEvent) => {
+      const startY = runStageTouchStartYRef.current;
+      const currentY = event.touches[0]?.clientY;
+      if (
+        startY !== null &&
+        currentY !== undefined &&
+        shouldPauseLatestOutputFollowForTouchMove({ startY, currentY })
+      ) {
+        latestOutputFollowPausedByUserRef.current = true;
+        latestOutputFollowResumeIntentRef.current = false;
+        followLatestOutputRef.current = false;
+        return;
+      }
+      if (
+        startY !== null &&
+        currentY !== undefined &&
+        shouldRequestLatestOutputFollowResumeForTouchMove({ startY, currentY })
+      ) {
+        latestOutputFollowResumeIntentRef.current = true;
+      }
+    };
+
+    element.addEventListener("wheel", handleWheel, { passive: true });
+    element.addEventListener("touchstart", handleTouchStart, { passive: true });
+    element.addEventListener("touchmove", handleTouchMove, { passive: true });
+    runStageInputIntentCleanupRef.current = () => {
+      element.removeEventListener("wheel", handleWheel);
+      element.removeEventListener("touchstart", handleTouchStart);
+      element.removeEventListener("touchmove", handleTouchMove);
+    };
   }, [composerSafeAreaPx]);
 
   function promptAnchorOffset(element: HTMLElement): number {
@@ -739,6 +772,28 @@ export function App() {
 
   function findTurnElement(element: HTMLElement, turnId: string): HTMLElement | undefined {
     return turnElements(element).find((turn) => turn.dataset.executionTurnId === turnId);
+  }
+
+  function activeTurnMarkerFromScroll(element: HTMLElement): string | undefined {
+    const containerTop = element.getBoundingClientRect().top;
+    const anchorY = containerTop + promptAnchorOffset(element) + 1;
+    return activeTurnIdForAnchor({
+      anchorY,
+      turns: turnElements(element)
+        .map((turn) => ({
+          id: turn.dataset.executionTurnId ?? "",
+          top: turn.getBoundingClientRect().top,
+        }))
+        .filter((turn) => turn.id.length > 0),
+    });
+  }
+
+  function syncActiveTurnMarker(element: HTMLElement): void {
+    const nextActiveId = activeTurnMarkerFromScroll(element);
+    if (!nextActiveId) {
+      return;
+    }
+    setActiveTurnMarkerId((current) => current === nextActiveId ? current : nextActiveId);
   }
 
   function latestTurnOutputBottom(turn: HTMLElement): number {
@@ -832,13 +887,25 @@ export function App() {
     });
   }
 
+  function handleTurnMarkerClick(turnId: string): void {
+    latestOutputFollowPausedByUserRef.current = true;
+    latestOutputFollowResumeIntentRef.current = false;
+    followLatestOutputRef.current = false;
+    setActiveTurnMarkerId(turnId);
+    scrollPromptToAnchor(turnId);
+  }
+
   function handleRunStageScroll(event: ReactUIEvent<HTMLDivElement>): void {
+    const element = event.currentTarget;
+    if (showTurnMarkerRail) {
+      syncActiveTurnMarker(element);
+    }
+
     if (!latestPromptId) {
       followLatestOutputRef.current = false;
       return;
     }
 
-    const element = event.currentTarget;
     const turn = findTurnElement(element, latestPromptId);
     if (!turn) {
       followLatestOutputRef.current = false;
@@ -974,6 +1041,8 @@ export function App() {
     return () => {
       runStageInputIntentCleanupRef.current?.();
       runStageInputIntentCleanupRef.current = null;
+      runStageResizeObserverRef.current?.disconnect();
+      runStageResizeObserverRef.current = null;
     };
   }, []);
 
@@ -1810,6 +1879,31 @@ export function App() {
                   <RunStage
                     scrollRef={showCenterComposer ? undefined : setRunStageScrollElement}
                     onScroll={showCenterComposer ? undefined : handleRunStageScroll}
+                    overlay={
+                      showTurnMarkerRail ? (
+                        <nav
+                          className={`turn-marker-rail turn-marker-rail-${turnMarkerDisplay.mode}`}
+                          aria-label="Message shortcuts"
+                          style={{ bottom: Math.max(28, composerSafeAreaPx) }}
+                        >
+                          {turnMarkerDisplay.items.map((marker) => (
+                            <button
+                              key={`${marker.id}:${marker.index}`}
+                              type="button"
+                              className={`turn-marker-button${
+                                marker.id === markerActiveTurnId ? " turn-marker-button-active" : ""
+                              }`}
+                              aria-current={marker.id === markerActiveTurnId ? "true" : undefined}
+                              aria-label={`跳转到第 ${marker.index + 1} 条消息`}
+                              title={`第 ${marker.index + 1} 条消息`}
+                              onClick={() => handleTurnMarkerClick(marker.id)}
+                            >
+                              <span className="turn-marker-bar" aria-hidden="true" />
+                            </button>
+                          ))}
+                        </nav>
+                      ) : undefined
+                    }
                     composer={
                       showCenterComposer ? undefined : (
                         <ComposerDock ref={composerDockRef}>

@@ -9,6 +9,7 @@ export type AwakenComposerInputProps = {
   minRows?: number;
   maxRows?: number;
   disabled?: boolean;
+  focusRequest?: number;
 };
 
 export type ComposerInputKeyState = {
@@ -33,6 +34,7 @@ export function AwakenComposerInput({
   minRows = 2,
   maxRows = 6,
   disabled,
+  focusRequest = 0,
 }: AwakenComposerInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -73,6 +75,15 @@ export function AwakenComposerInput({
     const newHeight = Math.min(Math.max(scrollHeight, minHeight), maxHeight);
     textarea.style.height = `${newHeight}px`;
   }, [value, minRows, maxRows]);
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea || disabled || focusRequest <= 0) return;
+
+    textarea.focus({ preventScroll: true });
+    const cursorPosition = textarea.value.length;
+    textarea.setSelectionRange(cursorPosition, cursorPosition);
+  }, [disabled, focusRequest]);
 
   return (
     <textarea

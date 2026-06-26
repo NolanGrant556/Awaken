@@ -23,6 +23,7 @@ export type AwakenComposerBarProps = {
   submitMode?: "send" | "stop";
   variant?: "center" | "dock";
   metaItems?: ComposerBarMetaItem[];
+  focusRequest?: number;
 };
 
 export function AwakenComposerBar({
@@ -36,6 +37,7 @@ export function AwakenComposerBar({
   submitMode = "send",
   variant = "dock",
   metaItems = [],
+  focusRequest = 0,
 }: AwakenComposerBarProps) {
   const canSubmit = submitMode === "stop" || !disabled;
   const toolbarMetaItem =
@@ -76,6 +78,7 @@ export function AwakenComposerBar({
               onSubmit={handleSubmit}
               placeholder={placeholder}
               disabled={disabled}
+              focusRequest={focusRequest}
               minRows={variant === "center" ? 2 : 1}
               maxRows={variant === "center" ? 8 : 5}
             />

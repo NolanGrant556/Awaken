@@ -254,6 +254,7 @@ export function App() {
     createInitialRuntimeState,
   );
   const [composerValue, setComposerValue] = useState("");
+  const [composerFocusRequest, setComposerFocusRequest] = useState(0);
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
   const [latestTurnMinHeightPx, setLatestTurnMinHeightPx] = useState(0);
@@ -1102,9 +1103,11 @@ export function App() {
   async function handleComposerSubmit(): Promise<void> {
     if (isBusy) {
       await handleCancel();
+      setComposerFocusRequest((request) => request + 1);
       return;
     }
     await handleSubmit();
+    setComposerFocusRequest((request) => request + 1);
   }
 
   async function handleSelectConversation(threadId: string): Promise<void> {
@@ -1825,6 +1828,7 @@ export function App() {
                             }
                             submitMode={isBusy ? "stop" : "send"}
                             variant="dock"
+                            focusRequest={composerFocusRequest}
                           />
                         </ComposerDock>
                       )
@@ -1876,6 +1880,7 @@ export function App() {
                           }
                           submitMode={isBusy ? "stop" : "send"}
                           variant="center"
+                          focusRequest={composerFocusRequest}
                         />
                       </div>
                     ) : null}

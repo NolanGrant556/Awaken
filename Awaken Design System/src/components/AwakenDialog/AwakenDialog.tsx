@@ -1,0 +1,138 @@
+import "./AwakenDialog.css";
+import { X } from "lucide-react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
+import { AwakenIconButton } from "../AwakenIconButton";
+
+export type AwakenDialogProps = {
+  open: boolean;
+  title: ReactNode;
+  children: ReactNode;
+  footer?: ReactNode;
+  onOpenChange: (open: boolean) => void;
+  ariaLabelledBy?: string;
+};
+
+const focusableSelector = [
+  "a[href]",
+  "button:not([disabled])",
+  "textarea:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
+
+export function AwakenDialog({
+  open,
+  title,
+  children,
+  footer,
+  onOpenChange,
+  ariaLabelledBy,
+}: AwakenDialogProps) {
+  const generatedTitleId = useId();
+  const titleId = ariaLabelledBy ?? generatedTitleId;
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open || typeof document === "undefined") {
+      return;
+    }
+
+    const previousActiveElement = document.activeElement;
+    const dialog = dialogRef.current;
+    const firstFocusable = dialog?.querySelector<HTMLElement>(focusableSelector);
+    (firstFocusable ?? dialog)?.focus();
+
+    return () => {
+      if (previousActiveElement instanceof HTMLElement) {
+        previousActiveElement.focus();
+      }
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || typeof document === "undefined") {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onOpenChange(false);
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onOpenChange, open]);
+
+  if (!open) {
+    return null;
+  }
+
+  const dialog = (
+    <div
+      className="aw-dialog-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onOpenChange(false);
+        }
+      }}
+    >
+      <div
+        ref={dialogRef}
+        className="aw-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        onKeyDown={(event: ReactKeyboardEvent<HTMLDivElement>) => {
+          if (event.key !== "Tab") {
+            return;
+          }
+          const focusable = Array.from(
+            event.currentTarget.querySelectorAll<HTMLElement>(focusableSelector),
+          );
+          if (focusable.length === 0) {
+            event.preventDefault();
+            return;
+          }
+          const first = focusable[0];
+          const last = focusable[focusable.length - 1];
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }}
+      >
+        <header className="aw-dialog__head">
+          <h2 className="aw-dialog__title" id={titleId}>
+            {title}
+          </h2>
+          <AwakenIconButton label="关闭" size="sm" onClick={() => onOpenChange(false)}>
+            <X size={15} strokeWidth={1.9} />
+          </AwakenIconButton>
+        </header>
+        <div className="aw-dialog__body">{children}</div>
+        {footer ? <footer className="aw-dialog__foot">{footer}</footer> : null}
+      </div>
+    </div>
+  );
+
+  if (typeof document === "undefined") {
+    return dialog;
+  }
+
+  return createPortal(dialog, document.body);
+}

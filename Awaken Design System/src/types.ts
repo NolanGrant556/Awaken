@@ -45,8 +45,11 @@ export type ConversationItem = {
 export type ProjectItem = {
   id: string;
   label: string;
+  kind?: "project" | "thread";
+  path?: string;
   timeLabel?: string;           // 如 "当前", "3"
   children?: ProjectItem[];     // 子项目/会话
+  action?: React.ReactNode;      // 行内操作，如在项目下创建新会话
   isLoading?: boolean;          // 展开时显示 loading ring
   disabled?: boolean;
   // 注意：展开状态由 ProjectTree 组件通过 expandedIds / defaultExpandedIds 管理，

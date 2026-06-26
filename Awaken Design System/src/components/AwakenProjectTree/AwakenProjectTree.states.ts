@@ -1,4 +1,6 @@
-import type { ComponentProps } from "react";
+import { createElement, type ComponentProps } from "react";
+import { MessageCirclePlus } from "lucide-react";
+import { AwakenSidebarSectionAction } from "../AwakenSidebarSectionAction";
 import type { AwakenProjectTree } from "./AwakenProjectTree";
 
 export type AwakenProjectTreeState = {
@@ -18,10 +20,18 @@ export const AwakenProjectTreeStates: AwakenProjectTreeState[] = [
         {
           id: "awaken",
           label: "Awaken",
+          kind: "project",
           timeLabel: "当前",
+          action: createElement(
+            AwakenSidebarSectionAction,
+            {
+              label: "新建会话",
+              children: createElement(MessageCirclePlus, { size: 13, strokeWidth: 1.85 }),
+            },
+          ),
           children: [
-            { id: "design-system", label: "Awaken Design System", timeLabel: "16" },
-            { id: "desktop", label: "apps/desktop", timeLabel: "8" },
+            { id: "design-system", kind: "thread", label: "Awaken Design System", timeLabel: "16" },
+            { id: "desktop", kind: "thread", label: "apps/desktop", timeLabel: "8" },
           ],
         },
       ],
@@ -40,9 +50,10 @@ export const AwakenProjectTreeStates: AwakenProjectTreeState[] = [
         {
           id: "workspace",
           label: "当前工作区",
+          kind: "project",
           children: [
-            { id: "scan-components", label: "正在扫描组件目录", isLoading: true },
-            { id: "docs", label: "docs", disabled: true },
+            { id: "scan-components", kind: "thread", label: "正在扫描组件目录", isLoading: true },
+            { id: "docs", kind: "thread", label: "docs", disabled: true },
           ],
         },
       ],
@@ -73,10 +84,13 @@ export const AwakenProjectTreeStates: AwakenProjectTreeState[] = [
         {
           id: "long-project",
           label: "包含多个本地 runtime 与设计系统验收任务的 Awaken 工作区",
+          kind: "project",
+          path: "/Users/nolangrant/Awaken",
           timeLabel: "今天",
           children: [
             {
               id: "long-child",
+              kind: "thread",
               label: "第 3 组组件用途说明与真实状态示例",
               timeLabel: "进行中",
             },

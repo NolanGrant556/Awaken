@@ -94,6 +94,7 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
   const isActive = item.id === activeId;
   const isDisabled = item.disabled;
   const isLoading = item.isLoading;
+  const kind = item.kind ?? (depth === 0 || hasChildren ? "project" : "thread");
 
   const rowHeight = depth === 0 ? 32 : 28;
   const fontSize =
@@ -105,26 +106,52 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
   const baseColor = isActive ? "var(--aw-text-primary)" : idleColor;
   const baseBg = isActive ? "var(--aw-bg-fill-dark)" : "transparent";
 
-  const rowStyle: CSSProperties = {
+  const rowFrameStyle: CSSProperties = {
     display: "grid",
-    gridTemplateColumns: hasChildren
-      ? "20px minmax(0, 1fr) auto 14px"
-      : "20px minmax(0, 1fr) auto 14px",
+    gridTemplateColumns: "minmax(0, 1fr) auto auto",
     alignItems: "center",
     width: "100%",
     height: rowHeight,
-    gap: 9,
-    padding: "0 10px",
+    gap: 3,
     border: 0,
     borderRadius: "var(--aw-radius-sm)",
     background: baseBg,
     color: baseColor,
+    transition: "background-color var(--aw-transition-fast), color var(--aw-transition-fast)",
+  };
+
+  const rowButtonStyle: CSSProperties = {
+    display: "grid",
+    gridTemplateColumns: "20px minmax(0, 1fr) auto",
+    alignItems: "center",
+    width: "100%",
+    height: rowHeight,
+    minWidth: 0,
+    gap: 9,
+    padding: "0 0 0 10px",
+    border: 0,
+    borderRadius: "var(--aw-radius-sm)",
+    background: "transparent",
+    color: "inherit",
     fontSize,
     lineHeight,
     textAlign: "left",
     cursor: isDisabled ? "not-allowed" : "pointer",
     opacity: isDisabled ? 0.6 : 1,
-    transition: "background-color var(--aw-transition-fast), color var(--aw-transition-fast)",
+  };
+
+  const utilityButtonStyle: CSSProperties = {
+    display: "inline-grid",
+    placeItems: "center",
+    width: 22,
+    height: 22,
+    padding: 0,
+    border: 0,
+    borderRadius: "var(--aw-radius-sm)",
+    background: "transparent",
+    color: "var(--aw-text-tertiary)",
+    cursor: isDisabled ? "not-allowed" : "pointer",
+    opacity: isDisabled ? 0.6 : 1,
   };
 
   const labelStyle: CSSProperties = {
@@ -140,20 +167,20 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
     whiteSpace: "nowrap",
   };
 
-  const handleEnter = (e: MouseEvent<HTMLButtonElement>) => {
+  const handleEnter = (e: MouseEvent<HTMLDivElement>) => {
     if (!isDisabled) {
       e.currentTarget.style.background = isActive
         ? "var(--aw-bg-fill-dark)"
         : "var(--aw-bg-fill-light)";
     }
   };
-  const handleLeave = (e: MouseEvent<HTMLButtonElement>) => {
+  const handleLeave = (e: MouseEvent<HTMLDivElement>) => {
     e.currentTarget.style.background = baseBg;
   };
-  const handleDown = (e: MouseEvent<HTMLButtonElement>) => {
+  const handleDown = (e: MouseEvent<HTMLDivElement>) => {
     if (!isDisabled) e.currentTarget.style.background = "var(--aw-bg-fill-dark)";
   };
-  const handleUp = (e: MouseEvent<HTMLButtonElement>) => {
+  const handleUp = (e: MouseEvent<HTMLDivElement>) => {
     if (!isDisabled) {
       e.currentTarget.style.background = isActive
         ? "var(--aw-bg-fill-dark)"
@@ -163,8 +190,13 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
 
   const handleClick = () => {
     if (isDisabled) return;
-    if (hasChildren) onToggle(item.id);
     onSelect?.(item.id);
+  };
+
+  const handleToggle = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (isDisabled || !hasChildren) return;
+    onToggle(item.id);
   };
 
   const childrenContainerStyle: CSSProperties = {
@@ -175,36 +207,53 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
 
   return (
     <div className="aw-project-group">
-      <button
-        type="button"
-        disabled={isDisabled}
-        onClick={handleClick}
-        title={item.label}
-        aria-expanded={hasChildren ? isExpanded : undefined}
-        style={rowStyle}
+      <div
+        style={rowFrameStyle}
         onMouseEnter={handleEnter}
         onMouseLeave={handleLeave}
         onMouseDown={handleDown}
         onMouseUp={handleUp}
       >
-        <span style={{ display: "inline-flex", width: 20, height: 20, alignItems: "center", justifyContent: "center", flexShrink: 0, color: "var(--aw-text-tertiary)" }}>
-          {hasChildren ? (
-            <AwakenIcon size={16}>
-              <path d="M3 7h7l2 2h9v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-              <path d="M3 7V5a2 2 0 0 1 2-2h4l2 2h4" />
-            </AwakenIcon>
-          ) : null}
-        </span>
-        <span style={labelStyle}>{item.label}</span>
-        {item.timeLabel ? <span style={timeStyle}>{item.timeLabel}</span> : <span />}
-        <span style={{ display: "inline-flex", width: 14, height: 14, alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+        <button
+          type="button"
+          disabled={isDisabled}
+          onClick={handleClick}
+          title={item.path ?? item.label}
+          aria-current={isActive ? "true" : undefined}
+          style={rowButtonStyle}
+        >
+          <span style={{ display: "inline-flex", width: 20, height: 20, alignItems: "center", justifyContent: "center", flexShrink: 0, color: "var(--aw-text-tertiary)" }}>
+            {kind === "project" ? (
+              <AwakenIcon size={16}>
+                <path d="M3 7h7l2 2h9v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                <path d="M3 7V5a2 2 0 0 1 2-2h4l2 2h4" />
+              </AwakenIcon>
+            ) : null}
+          </span>
+          <span style={labelStyle}>{item.label}</span>
+          {item.timeLabel ? <span style={timeStyle}>{item.timeLabel}</span> : <span />}
+        </button>
+        {item.action ? (
+          <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+            {item.action}
+          </span>
+        ) : null}
+        <span style={{ display: "inline-flex", width: 22, height: 22, alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           {isLoading ? (
             <span style={spinnerStyle} aria-label="加载中" />
           ) : hasChildren ? (
+            <button
+              type="button"
+              aria-label={isExpanded ? `折叠 ${item.label}` : `展开 ${item.label}`}
+              aria-expanded={isExpanded}
+              disabled={isDisabled}
+              style={utilityButtonStyle}
+              onClick={handleToggle}
+            >
             <span
               style={{
                 display: "inline-flex",
-                color: "var(--aw-text-tertiary)",
+                color: "inherit",
                 transform: isExpanded ? "rotate(90deg)" : "none",
                 transition: "transform 140ms ease",
               }}
@@ -213,9 +262,10 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
                 <path d="M9 6l6 6-6 6" />
               </AwakenIcon>
             </span>
+            </button>
           ) : null}
         </span>
-      </button>
+      </div>
 
       {hasChildren && isExpanded ? (
         <div style={childrenContainerStyle}>

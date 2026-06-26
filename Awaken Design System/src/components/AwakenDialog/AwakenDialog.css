@@ -1,0 +1,70 @@
+@import "../../tokens/components.css";
+
+.aw-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: var(--aw-space-9);
+  background: var(--aw-overlay-backdrop);
+  animation: aw-dialog-backdrop-in var(--aw-transition-normal);
+}
+
+.aw-dialog {
+  width: min(560px, calc(100vw - 48px));
+  max-height: min(680px, calc(100vh - 48px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-bg-white);
+  color: var(--aw-text-primary);
+  box-shadow: var(--aw-shadow-popover);
+  animation: panel-in var(--aw-transition-normal);
+}
+
+.aw-dialog__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aw-space-7);
+  padding: var(--aw-space-7) var(--aw-space-8) var(--aw-space-4);
+}
+
+.aw-dialog__title {
+  margin: 0;
+  min-width: 0;
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-lg);
+  line-height: var(--aw-line-height-lg);
+  font-weight: var(--aw-font-weight-bold);
+}
+
+.aw-dialog__body {
+  min-width: 0;
+  overflow: auto;
+  padding: var(--aw-space-5) var(--aw-space-8);
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-base);
+  line-height: var(--aw-line-height-base);
+}
+
+.aw-dialog__foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--aw-space-3);
+  padding: var(--aw-space-5) var(--aw-space-8) var(--aw-space-7);
+}
+
+@keyframes aw-dialog-backdrop-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}

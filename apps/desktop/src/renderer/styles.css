@@ -182,6 +182,11 @@ pre {
   color: var(--aw-text-secondary);
 }
 
+.create-project-dialog-body {
+  display: grid;
+  gap: 10px;
+}
+
 .narrative-list {
   display: grid;
   gap: 12px;

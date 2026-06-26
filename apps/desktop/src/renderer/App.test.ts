@@ -4,6 +4,14 @@ import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import {
+  DEFAULT_WORKSPACE_PROJECT_ID,
+  assignThreadToProject,
+  normalizeWorkspacePath,
+  projectIdForThread,
+  upsertWorkspaceProject,
+  workspaceLabelForPath,
+} from "./projectWorkspace";
+import {
   anchoredTurnMinHeight,
   activeTurnIdForAnchor,
   composerBottomSafeArea,
@@ -78,6 +86,39 @@ describe("AwakenComposerInput keyboard behavior", () => {
   });
 });
 
+describe("project workspace helpers", () => {
+  it("normalizes workspace paths and labels them by folder name", () => {
+    expect(normalizeWorkspacePath("/Users/nolangrant/Awaken/")).toBe("/Users/nolangrant/Awaken");
+    expect(workspaceLabelForPath("/Users/nolangrant/Awaken/")).toBe("Awaken");
+  });
+
+  it("maps the default workspace to the built-in project", () => {
+    const result = upsertWorkspaceProject([], "/Users/nolangrant/Awaken", "/Users/nolangrant/Awaken/");
+
+    expect(result.projectId).toBe(DEFAULT_WORKSPACE_PROJECT_ID);
+    expect(result.projects).toEqual([]);
+  });
+
+  it("adds and deduplicates local folder projects", () => {
+    const first = upsertWorkspaceProject([], "/Users/nolangrant/Other", "/Users/nolangrant/Awaken");
+    const second = upsertWorkspaceProject(first.projects, "/Users/nolangrant/Other/", "/Users/nolangrant/Awaken");
+
+    expect(first.projectId).toBe(second.projectId);
+    expect(second.projects).toHaveLength(1);
+    expect(second.projects[0]).toMatchObject({
+      label: "Other",
+      path: "/Users/nolangrant/Other",
+    });
+  });
+
+  it("assigns new threads to the selected project with default fallback", () => {
+    const mapping = assignThreadToProject({}, "thread-1", "workspace:%2Ftmp%2Fdemo");
+
+    expect(projectIdForThread("thread-1", mapping)).toBe("workspace:%2Ftmp%2Fdemo");
+    expect(projectIdForThread("thread-2", mapping)).toBe(DEFAULT_WORKSPACE_PROJECT_ID);
+  });
+});
+
 describe("App workbench presentation", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -94,6 +135,7 @@ describe("App workbench presentation", () => {
     expect(html).toContain('placeholder=""');
     expect(html).toContain('rows="2"');
     expect(html).toContain("New Agent");
+    expect(html).toContain("Add folder");
     expect(html).toContain("composer-bar-center");
     expect(html).not.toContain("Plan, Build, / for skills, @ for context");
     expect(html).not.toContain("composer-bar-dock");

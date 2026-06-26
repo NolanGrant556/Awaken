@@ -1,4 +1,6 @@
-import type { ComponentProps } from "react";
+import { createElement, type ComponentProps } from "react";
+import { FolderPlus, ListFilter, MessageCirclePlus } from "lucide-react";
+import { AwakenSidebarSectionAction } from "../AwakenSidebarSectionAction";
 import type { AwakenSidebar } from "./AwakenSidebar";
 
 export type AwakenSidebarState = {
@@ -42,10 +44,18 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
         {
           id: "awaken",
           label: "Awaken",
+          kind: "project",
           timeLabel: "当前",
+          action: createElement(
+            AwakenSidebarSectionAction,
+            {
+              label: "新建会话",
+              children: createElement(MessageCirclePlus, { size: 13, strokeWidth: 1.85 }),
+            },
+          ),
           children: [
-            { id: "group-3", label: "Design System 第 3 组", timeLabel: "16" },
-            { id: "desktop", label: "apps/desktop", timeLabel: "8" },
+            { id: "group-3", kind: "thread", label: "Design System 第 3 组", timeLabel: "16" },
+            { id: "desktop", kind: "thread", label: "apps/desktop", timeLabel: "8" },
           ],
         },
       ],
@@ -60,7 +70,24 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
       conversationSectionLabel: "最近任务",
       projectSectionLabel: "项目",
       showProjectCount: true,
-      projectSectionActions: "＋",
+      projectSectionActions: createElement(
+        "span",
+        { style: { display: "inline-flex", alignItems: "center", gap: 2 } },
+        createElement(
+          AwakenSidebarSectionAction,
+          {
+            label: "筛选项目",
+            children: createElement(ListFilter, { size: 13, strokeWidth: 1.85 }),
+          },
+        ),
+        createElement(
+          AwakenSidebarSectionAction,
+          {
+            label: "添加文件夹",
+            children: createElement(FolderPlus, { size: 13, strokeWidth: 1.85 }),
+          },
+        ),
+      ),
       profileSubtitle: "本机运行时已连接",
       showBrand: true,
       platform: "macos",
@@ -127,9 +154,10 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
         {
           id: "workspace",
           label: "当前工作区",
+          kind: "project",
           children: [
-            { id: "scan", label: "正在读取项目目录", isLoading: true },
-            { id: "archive", label: "归档项目", disabled: true },
+            { id: "scan", kind: "thread", label: "正在读取项目目录", isLoading: true },
+            { id: "archive", kind: "thread", label: "归档项目", disabled: true },
           ],
         },
       ],
@@ -179,9 +207,11 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
         {
           id: "long-project",
           label: "包含多个本地 runtime 与设计系统验收任务的 Awaken 工作区",
+          kind: "project",
+          path: "/Users/nolangrant/Awaken",
           timeLabel: "当前",
           children: [
-            { id: "long-child", label: "Awaken Design System/src/components 第 3 组", timeLabel: "16" },
+            { id: "long-child", kind: "thread", label: "Awaken Design System/src/components 第 3 组", timeLabel: "16" },
           ],
         },
       ],
@@ -196,7 +226,13 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
       conversationSectionLabel: "最近任务",
       projectSectionLabel: "当前项目与组件分组",
       showProjectCount: true,
-      projectSectionActions: "＋",
+      projectSectionActions: createElement(
+        AwakenSidebarSectionAction,
+        {
+          label: "添加文件夹",
+          children: createElement(FolderPlus, { size: 13, strokeWidth: 1.85 }),
+        },
+      ),
       profileSubtitle: "/Users/nolangrant/Awaken",
       showBrand: true,
       platform: "macos",

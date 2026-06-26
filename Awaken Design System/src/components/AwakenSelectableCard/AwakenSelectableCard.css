@@ -1,0 +1,93 @@
+@import "../../tokens/components.css";
+
+.aw-selectable-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  width: 100%;
+  min-height: 76px;
+  gap: var(--aw-space-5);
+  padding: var(--aw-space-5);
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-bg-white);
+  color: var(--aw-text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--aw-transition-fast),
+    border-color var(--aw-transition-fast),
+    box-shadow var(--aw-transition-fast),
+    opacity var(--aw-transition-fast);
+}
+
+.aw-selectable-card:hover,
+.aw-selectable-card:focus-visible {
+  background: var(--aw-bg-fill-light);
+  border-color: var(--aw-border-control-hover);
+}
+
+.aw-selectable-card[data-selected="true"] {
+  background: var(--aw-bg-fill-light);
+  border-color: var(--aw-border-active);
+  box-shadow: var(--aw-shadow-focus);
+}
+
+.aw-selectable-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.aw-selectable-card__icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-secondary);
+  flex-shrink: 0;
+}
+
+.aw-selectable-card__content {
+  min-width: 0;
+  display: grid;
+  gap: var(--aw-space-1);
+}
+
+.aw-selectable-card__title {
+  overflow: hidden;
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-base);
+  line-height: var(--aw-line-height-base);
+  font-weight: var(--aw-font-weight-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-selectable-card__description {
+  overflow: hidden;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-selectable-card__indicator {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--aw-border-control-hover);
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-bg-white);
+}
+
+.aw-selectable-card[data-selected="true"] .aw-selectable-card__indicator::after {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-button-black);
+}

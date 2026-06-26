@@ -18,6 +18,7 @@ import { AwakenConversationListDemo } from "../src/components/AwakenConversation
 import { AwakenCopyButtonDemo } from "../src/components/AwakenCopyButton";
 import { AwakenDisclosureDemo } from "../src/components/AwakenDisclosure";
 import { AwakenDividerDemo } from "../src/components/AwakenDivider";
+import { AwakenDialogDemo } from "../src/components/AwakenDialog";
 import { AwakenDropdownDemo } from "../src/components/AwakenDropdown";
 import { AwakenExecutionFeedDemo } from "../src/components/AwakenExecutionFeed";
 import { AwakenExploringGroupDemo } from "../src/components/AwakenExploringGroup";
@@ -47,7 +48,9 @@ import { AwakenRunStageDemo } from "../src/components/AwakenRunStage";
 import { AwakenRunStepDemo } from "../src/components/AwakenRunStep";
 import { AwakenRunTimelineDemo } from "../src/components/AwakenRunTimeline";
 import { AwakenSendButtonDemo } from "../src/components/AwakenSendButton";
+import { AwakenSelectableCardDemo } from "../src/components/AwakenSelectableCard";
 import { AwakenSidebarDemo } from "../src/components/AwakenSidebar";
+import { AwakenSidebarSectionActionDemo } from "../src/components/AwakenSidebarSectionAction";
 import { AwakenStatusPillDemo } from "../src/components/AwakenStatusPill";
 import { AwakenTaskWelcomeDemo } from "../src/components/AwakenTaskWelcome";
 import { AwakenThinkingBlockDemo } from "../src/components/AwakenThinkingBlock";
@@ -91,6 +94,7 @@ export const awakenGalleryEntries: AwakenGalleryEntry[] = [
   { id: "awaken-copy-button", name: "AwakenCopyButton", displayName: "复制按钮", demo: AwakenCopyButtonDemo },
   { id: "awaken-disclosure", name: "AwakenDisclosure", displayName: "展开折叠", demo: AwakenDisclosureDemo },
   { id: "awaken-divider", name: "AwakenDivider", displayName: "分隔线", demo: AwakenDividerDemo },
+  { id: "awaken-dialog", name: "AwakenDialog", displayName: "弹窗", demo: AwakenDialogDemo },
   { id: "awaken-dropdown", name: "AwakenDropdown", displayName: "下拉菜单", demo: AwakenDropdownDemo },
   { id: "awaken-execution-feed", name: "AwakenExecutionFeed", displayName: "执行动态流", demo: AwakenExecutionFeedDemo },
   { id: "awaken-exploring-group", name: "AwakenExploringGroup", displayName: "探索分组", demo: AwakenExploringGroupDemo },
@@ -120,7 +124,9 @@ export const awakenGalleryEntries: AwakenGalleryEntry[] = [
   { id: "awaken-run-step", name: "AwakenRunStep", displayName: "运行步骤", demo: AwakenRunStepDemo },
   { id: "awaken-run-timeline", name: "AwakenRunTimeline", displayName: "运行时间线", demo: AwakenRunTimelineDemo },
   { id: "awaken-send-button", name: "AwakenSendButton", displayName: "发送按钮", demo: AwakenSendButtonDemo },
+  { id: "awaken-selectable-card", name: "AwakenSelectableCard", displayName: "选择卡片", demo: AwakenSelectableCardDemo },
   { id: "awaken-sidebar", name: "AwakenSidebar", displayName: "侧栏", demo: AwakenSidebarDemo },
+  { id: "awaken-sidebar-section-action", name: "AwakenSidebarSectionAction", displayName: "侧栏区块动作", demo: AwakenSidebarSectionActionDemo },
   { id: "awaken-status-pill", name: "AwakenStatusPill", displayName: "状态胶囊", demo: AwakenStatusPillDemo },
   { id: "awaken-task-welcome", name: "AwakenTaskWelcome", displayName: "任务欢迎区", demo: AwakenTaskWelcomeDemo },
   { id: "awaken-thinking-block", name: "AwakenThinkingBlock", displayName: "思考块", demo: AwakenThinkingBlockDemo },

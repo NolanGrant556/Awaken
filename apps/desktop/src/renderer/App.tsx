@@ -12,6 +12,8 @@ import {
   GitBranch,
   Globe,
   ListFilter,
+  MessageCirclePlus,
+  Monitor,
   PanelRightClose,
   PanelRightOpen,
   SlidersHorizontal,
@@ -21,13 +23,17 @@ import {
   AwakenAppShell as AppShell,
   AwakenApprovalCard as ApprovalCard,
   AwakenAssistantMessage as AssistantMessage,
+  AwakenButton as Button,
   AwakenComposerBar as ComposerBar,
   AwakenCopyButton as CopyButton,
+  AwakenDialog as Dialog,
   AwakenDisclosure as Disclosure,
   AwakenExecutionFeed as ExecutionFeed,
   AwakenFileChangeSummary as FileChangeSummary,
   AwakenLightInspectorRail as LightInspectorRail,
+  AwakenSelectableCard as SelectableCard,
   AwakenSidebar as Sidebar,
+  AwakenSidebarSectionAction as SidebarSectionAction,
   AwakenTaskWelcome as TaskWelcome,
   AwakenThoughtTrace as ThoughtTrace,
   AwakenToolTraceGroup as ToolTraceGroup,
@@ -39,6 +45,7 @@ import {
   AwakenRunStage as RunStage,
   AwakenComposerDock as ComposerDock,
   type ComponentTone,
+  type ComposerBarMetaItem,
   type InspectorTabId,
   type NavItem,
   type PlatformKind,
@@ -78,6 +85,15 @@ import {
   actionsForThreadTranscript,
   afterSeqForTranscriptRun,
 } from "./runtime/thread-transcript";
+import {
+  DEFAULT_WORKSPACE_PROJECT_ID,
+  assignThreadToProject,
+  isSameWorkspacePath,
+  projectIdForThread,
+  upsertWorkspaceProject,
+  workspaceLabelForPath,
+  type WorkspaceProject,
+} from "./projectWorkspace";
 
 function formatStatusLabel(
   phase: ReturnType<typeof createInitialRuntimeState>["phase"],
@@ -268,6 +284,15 @@ export function App() {
   const [resolvedApproval, setResolvedApproval] = useState<ResolvedApprovalState>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
   const [workspacePath, setWorkspacePath] = useState<string>("");
+  const [createProjectDialogOpen, setCreateProjectDialogOpen] = useState(false);
+  const [pendingProjectMode, setPendingProjectMode] = useState<"local">("local");
+  const [pickingWorkspace, setPickingWorkspace] = useState(false);
+  const [projectsFromWorkspace, setProjectsFromWorkspace] = useState<WorkspaceProject[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState(DEFAULT_WORKSPACE_PROJECT_ID);
+  const [expandedProjectIds, setExpandedProjectIds] = useState<string[]>([
+    DEFAULT_WORKSPACE_PROJECT_ID,
+  ]);
+  const [threadProjectIds, setThreadProjectIds] = useState<Record<string, string>>({});
   const [inspectorTab, setInspectorTab] = useState<InspectorTabId>("changes");
   const [inspectorSelection, setInspectorSelection] = useState<InspectorSelection | undefined>();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -514,30 +539,93 @@ export function App() {
     : desktopStarting
       ? "Starting"
       : undefined;
-  const repositoryThreadItems: ProjectItem[] = runtimeState.threads.map((thread) => {
-    const sidebarStatus = sidebarStatusForThread(thread);
-    const timeLabel =
-      thread.threadId === runtimeState.activeThreadId
-        ? "active"
-        : sidebarStatus.label === "idle"
-          ? undefined
-          : sidebarStatus.label;
-    return {
-      id: `thread:${thread.threadId}`,
-      label: thread.label,
-      timeLabel,
-    };
-  });
+  const defaultWorkspacePath = runtimeInfo?.defaultWorkspace ?? workspacePath;
+  const projectLabelById = new Map<string, string>([
+    [
+      DEFAULT_WORKSPACE_PROJECT_ID,
+      defaultWorkspacePath ? workspaceLabelForPath(defaultWorkspacePath) : "awaken",
+    ],
+    ...projectsFromWorkspace.map((project) => [project.id, project.label] as const),
+  ]);
+  const pathForSelectedProject =
+    selectedProjectId === DEFAULT_WORKSPACE_PROJECT_ID
+      ? defaultWorkspacePath
+      : projectsFromWorkspace.find((project) => project.id === selectedProjectId)?.path;
+  const activeProjectLabel =
+    projectLabelById.get(selectedProjectId) ??
+    (pathForSelectedProject ? workspaceLabelForPath(pathForSelectedProject) : "awaken");
+  const composerMetaItems: ComposerBarMetaItem[] = [
+    { id: "workspace", label: activeProjectLabel },
+    { id: "runtime", label: "Local" },
+    { id: "branch", label: "main" },
+  ];
+
+  function projectAction(projectId: string, label: string) {
+    return (
+      <SidebarSectionAction
+        label={`New session in ${label}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          handleNewProjectSession(projectId);
+        }}
+      >
+        <MessageCirclePlus size={13} strokeWidth={1.85} />
+      </SidebarSectionAction>
+    );
+  }
+
+  function threadItemsForProject(projectId: string): ProjectItem[] {
+    return runtimeState.threads
+      .filter((thread) => projectIdForThread(thread.threadId, threadProjectIds) === projectId)
+      .map((thread) => {
+        const sidebarStatus = sidebarStatusForThread(thread);
+        const timeLabel =
+          thread.threadId === runtimeState.activeThreadId
+            ? "active"
+            : sidebarStatus.label === "idle"
+              ? undefined
+              : sidebarStatus.label;
+        return {
+          id: `thread:${thread.threadId}`,
+          kind: "thread",
+          label: thread.label,
+          timeLabel,
+        };
+      });
+  }
+
+  const defaultProjectThreads = threadItemsForProject(DEFAULT_WORKSPACE_PROJECT_ID);
   const repositoryProjects: ProjectItem[] = [
     {
-      id: "awaken",
-      label: "awaken",
-      children: repositoryThreadItems.length > 0 ? repositoryThreadItems : undefined,
+      id: DEFAULT_WORKSPACE_PROJECT_ID,
+      kind: "project",
+      label: projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ?? "awaken",
+      path: defaultWorkspacePath,
+      timeLabel: selectedProjectId === DEFAULT_WORKSPACE_PROJECT_ID ? "current" : undefined,
+      action: projectAction(
+        DEFAULT_WORKSPACE_PROJECT_ID,
+        projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ?? "awaken",
+      ),
+      children: defaultProjectThreads.length > 0 ? defaultProjectThreads : undefined,
     },
+    ...projectsFromWorkspace
+      .filter((project) => !isSameWorkspacePath(project.path, defaultWorkspacePath))
+      .map((project) => {
+        const threads = threadItemsForProject(project.id);
+        return {
+          id: project.id,
+          kind: "project" as const,
+          label: project.label,
+          path: project.path,
+          timeLabel: selectedProjectId === project.id ? "current" : undefined,
+          action: projectAction(project.id, project.label),
+          children: threads.length > 0 ? threads : undefined,
+        };
+      }),
   ];
   const activeProjectId = runtimeState.activeThreadId
     ? `thread:${runtimeState.activeThreadId}`
-    : "awaken";
+    : selectedProjectId;
   const selectedToolResult =
     inspectorSelection?.kind === "tool"
       ? runtimeState.toolResults.find((tool) => tool.id === rawToolId(inspectorSelection.id))
@@ -1134,6 +1222,7 @@ export function App() {
     dispatch({ type: "run/requested", prompt, startedAtMs: Date.now() });
 
     try {
+      const runProjectId = selectedProjectId;
       const startRunRequest: StartRunRequest = {
         input: prompt,
         threadId: runtimeState.activeThreadId || undefined,
@@ -1148,6 +1237,7 @@ export function App() {
         },
       };
       const run = await runtimeClient.startRun(startRunRequest);
+      setThreadProjectIds((current) => assignThreadToProject(current, run.threadId, runProjectId));
       dispatch({ type: "run/created", run });
       dispatch({
         type: "run/threadAdded",
@@ -1217,10 +1307,75 @@ export function App() {
   }
 
   function handleSelectProject(id: string): void {
-    if (!id.startsWith("thread:")) {
+    if (id.startsWith("thread:")) {
+      void handleSelectConversation(id.slice("thread:".length));
       return;
     }
-    void handleSelectConversation(id.slice("thread:".length));
+
+    const projectPath =
+      id === DEFAULT_WORKSPACE_PROJECT_ID
+        ? defaultWorkspacePath
+        : projectsFromWorkspace.find((project) => project.id === id)?.path;
+    setSelectedProjectId(id);
+    setExpandedProjectIds((current) => (
+      current.includes(id) ? current : [...current, id]
+    ));
+    if (projectPath) {
+      setWorkspacePath(projectPath);
+    }
+  }
+
+  function handleOpenCreateProject(): void {
+    setPendingProjectMode("local");
+    setCreateProjectDialogOpen(true);
+    setNotice(null);
+  }
+
+  async function handleUseExistingFolder(): Promise<void> {
+    if (pickingWorkspace) {
+      return;
+    }
+    setPickingWorkspace(true);
+    setNotice(null);
+
+    try {
+      const result = await runtimeClient.pickWorkspace(workspacePath || defaultWorkspacePath);
+      if (result.canceled) {
+        if (result.error) {
+          setNotice(result.error);
+        }
+        return;
+      }
+
+      const validation = await runtimeClient.validateWorkspace(result.path);
+      if (!validation.valid) {
+        setNotice(validation.error);
+        return;
+      }
+
+      const next = upsertWorkspaceProject(
+        projectsFromWorkspace,
+        result.path,
+        defaultWorkspacePath,
+      );
+      setProjectsFromWorkspace(next.projects);
+      setWorkspacePath(result.path);
+      setSelectedProjectId(next.projectId);
+      setExpandedProjectIds((current) => (
+        current.includes(next.projectId) ? current : [...current, next.projectId]
+      ));
+      setCreateProjectDialogOpen(false);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to select folder");
+    } finally {
+      setPickingWorkspace(false);
+    }
+  }
+
+  function handleNewProjectSession(projectId: string): void {
+    handleSelectProject(projectId);
+    handleNewTask();
+    setComposerFocusRequest((request) => request + 1);
   }
 
   async function handleCancel(): Promise<void> {
@@ -1838,35 +1993,35 @@ export function App() {
                 conversations={[]}
                 projects={repositoryProjects}
                 activeProjectId={activeProjectId}
-                defaultExpandedIds={["awaken"]}
+                expandedIds={expandedProjectIds}
+                defaultExpandedIds={[DEFAULT_WORKSPACE_PROJECT_ID]}
                 profileName="Nolan"
                 profileAvatarFallback="AW"
                 profileSubtitle="Local"
                 newTaskLabel="New Agent"
                 conversationSectionLabel=""
-                projectSectionLabel="Repositories"
+                projectSectionLabel="Projects"
                 projectSectionActions={
                   <span className="sidebar-section-actions">
-                    <button
-                      type="button"
-                      className="sidebar-section-action"
-                      aria-label="Filter repositories"
+                    <SidebarSectionAction
+                      label="Filter projects"
+                      onClick={() => setNotice("Project filters are not available yet.")}
                     >
                       <ListFilter size={13} strokeWidth={1.85} />
-                    </button>
-                    <button
-                      type="button"
-                      className="sidebar-section-action"
-                      aria-label="Add repository"
+                    </SidebarSectionAction>
+                    <SidebarSectionAction
+                      label="Add folder"
+                      onClick={handleOpenCreateProject}
                     >
                       <FolderPlus size={13} strokeWidth={1.85} />
-                    </button>
+                    </SidebarSectionAction>
                   </span>
                 }
                 showProjectCount={false}
                 platform={platform}
                 onSelectNav={setActiveNavId}
                 onSelectProject={handleSelectProject}
+                onExpandedChange={setExpandedProjectIds}
                 onNewTask={handleNewTask}
               />
             </WorkbenchSidebarFrame>
@@ -1922,6 +2077,7 @@ export function App() {
                             }
                             submitMode={isBusy ? "stop" : "send"}
                             variant="dock"
+                            metaItems={composerMetaItems}
                             focusRequest={composerFocusRequest}
                           />
                         </ComposerDock>
@@ -1974,6 +2130,7 @@ export function App() {
                           }
                           submitMode={isBusy ? "stop" : "send"}
                           variant="center"
+                          metaItems={composerMetaItems}
                           focusRequest={composerFocusRequest}
                         />
                       </div>
@@ -2057,6 +2214,45 @@ export function App() {
           }
         />
       </div>
+      <Dialog
+        open={createProjectDialogOpen}
+        title="Create project"
+        onOpenChange={setCreateProjectDialogOpen}
+        footer={
+          <>
+            <Button
+              variant="default"
+              size="md"
+              loading={pickingWorkspace}
+              onClick={() => {
+                void handleUseExistingFolder();
+              }}
+            >
+              Use existing folder
+            </Button>
+            <Button
+              variant="primary"
+              size="md"
+              loading={pickingWorkspace}
+              onClick={() => {
+                void handleUseExistingFolder();
+              }}
+            >
+              Next
+            </Button>
+          </>
+        }
+      >
+        <div className="create-project-dialog-body">
+          <SelectableCard
+            selected={pendingProjectMode === "local"}
+            icon={<Monitor size={18} strokeWidth={1.9} />}
+            title="Local"
+            description="Use a folder on this Mac as an Awaken project."
+            onSelect={() => setPendingProjectMode("local")}
+          />
+        </div>
+      </Dialog>
     </>
   );
 }

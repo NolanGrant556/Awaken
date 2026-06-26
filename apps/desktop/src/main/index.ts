@@ -8,6 +8,7 @@ import {
   screen as electronScreen,
   shell,
   webContents,
+  type IpcMainEvent,
   type Rectangle,
   type WebContents,
 } from "electron";
@@ -318,14 +319,49 @@ function createMainWindow(): BrowserWindow {
   });
 
   const webContentsId = mainWindow.webContents.id;
+  let electronReadyToShow = false;
+  let rendererReadyToShow = false;
+  let didShowWindow = false;
+  let fallbackShowTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function showMainWindow(): void {
+    if (didShowWindow || !electronReadyToShow || mainWindow.isDestroyed()) {
+      return;
+    }
+    didShowWindow = true;
+    if (fallbackShowTimer) {
+      clearTimeout(fallbackShowTimer);
+      fallbackShowTimer = undefined;
+    }
+    ensureWindowVisible(mainWindow);
+    mainWindow.show();
+    mainWindow.focus();
+  }
+
+  function handleRendererReady(event: IpcMainEvent): void {
+    if (event.sender.id !== webContentsId) {
+      return;
+    }
+    rendererReadyToShow = true;
+    showMainWindow();
+  }
+
+  ipcMain.on("awaken:renderer-ready", handleRendererReady);
+
   mainWindow.on("closed", () => {
+    ipcMain.removeListener("awaken:renderer-ready", handleRendererReady);
+    if (fallbackShowTimer) {
+      clearTimeout(fallbackShowTimer);
+      fallbackShowTimer = undefined;
+    }
     cleanupWindowSubscriptions(webContentsId);
   });
 
   mainWindow.once("ready-to-show", () => {
-    ensureWindowVisible(mainWindow);
-    mainWindow.show();
-    mainWindow.focus();
+    electronReadyToShow = true;
+    if (rendererReadyToShow) {
+      showMainWindow();
+    }
   });
 
   mainWindow.on("show", () => {
@@ -341,11 +377,10 @@ function createMainWindow(): BrowserWindow {
     : mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
 
   void loadWindow.finally(() => {
-    if (!mainWindow.isDestroyed() && !mainWindow.isVisible()) {
-      ensureWindowVisible(mainWindow);
-      mainWindow.show();
-      mainWindow.focus();
-    }
+    fallbackShowTimer = setTimeout(() => {
+      rendererReadyToShow = true;
+      showMainWindow();
+    }, 2500);
   });
 
   return mainWindow;

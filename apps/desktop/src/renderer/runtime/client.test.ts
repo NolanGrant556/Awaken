@@ -33,6 +33,7 @@ function createElectronBridge(
       statusCallbacks.push(callback);
       return () => {};
     }),
+    notifyRendererReady: vi.fn(),
   } as unknown as AwakenBridge;
 
   return {

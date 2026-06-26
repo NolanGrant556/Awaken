@@ -177,6 +177,7 @@ export type AwakenBridge = {
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
   getSupervisorStatus: () => Promise<SupervisorStatusInfo>;
   onSupervisorStatusChange: (callback: (info: SupervisorStatusInfo) => void) => () => void;
+  notifyRendererReady: () => void;
 };
 
 export function normalizeRuntimeRun(run: RuntimeRunWire): RuntimeRun {

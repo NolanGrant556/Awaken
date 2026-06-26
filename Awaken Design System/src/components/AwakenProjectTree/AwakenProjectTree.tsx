@@ -1,5 +1,5 @@
 import "./AwakenProjectTree.css";
-import { useState, type CSSProperties, type MouseEvent } from "react";
+import { useState, type CSSProperties } from "react";
 import type { ProjectItem } from "../../types";
 import { AwakenIcon } from "../AwakenIcon";
 
@@ -95,6 +95,9 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
   const isDisabled = item.disabled;
   const isLoading = item.isLoading;
   const kind = item.kind ?? (depth === 0 || hasChildren ? "project" : "thread");
+  const isProject = kind === "project";
+  const showTimeLabel = !isProject && item.timeLabel;
+  const showInlineChevron = isProject && hasChildren;
 
   const rowHeight = depth === 0 ? 32 : 28;
   const fontSize =
@@ -104,99 +107,36 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
   const idleColor =
     depth === 0 ? "var(--aw-text-secondary)" : "var(--aw-text-tertiary)";
   const baseColor = isActive ? "var(--aw-text-primary)" : idleColor;
-  const baseBg = isActive ? "var(--aw-bg-fill-dark)" : "transparent";
 
-  const rowFrameStyle: CSSProperties = {
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) auto auto",
-    alignItems: "center",
-    width: "100%",
-    height: rowHeight,
-    gap: 3,
-    border: 0,
-    borderRadius: "var(--aw-radius-sm)",
-    background: baseBg,
-    color: baseColor,
-    transition: "background-color var(--aw-transition-fast), color var(--aw-transition-fast)",
-  };
+  const nodeClassName = [
+    "aw-project-node",
+    `aw-project-node--${kind}`,
+    hasChildren ? "aw-project-node--has-children" : "",
+    isExpanded ? "aw-project-node--expanded" : "",
+    isActive ? "aw-project-node--active" : "",
+    isDisabled ? "aw-project-node--disabled" : "",
+  ].filter(Boolean).join(" ");
+
+  const rowStyle = {
+    "--aw-project-row-height": `${rowHeight}px`,
+    "--aw-project-row-font-size": fontSize,
+    "--aw-project-row-line-height": lineHeight,
+    "--aw-project-row-color": baseColor,
+  } as CSSProperties;
 
   const rowButtonStyle: CSSProperties = {
-    display: "grid",
-    gridTemplateColumns: "20px minmax(0, 1fr) auto",
-    alignItems: "center",
-    width: "100%",
-    height: rowHeight,
-    minWidth: 0,
-    gap: 9,
-    padding: "0 0 0 10px",
-    border: 0,
-    borderRadius: "var(--aw-radius-sm)",
-    background: "transparent",
-    color: "inherit",
     fontSize,
     lineHeight,
-    textAlign: "left",
     cursor: isDisabled ? "not-allowed" : "pointer",
     opacity: isDisabled ? 0.6 : 1,
-  };
-
-  const utilityButtonStyle: CSSProperties = {
-    display: "inline-grid",
-    placeItems: "center",
-    width: 22,
-    height: 22,
-    padding: 0,
-    border: 0,
-    borderRadius: "var(--aw-radius-sm)",
-    background: "transparent",
-    color: "var(--aw-text-tertiary)",
-    cursor: isDisabled ? "not-allowed" : "pointer",
-    opacity: isDisabled ? 0.6 : 1,
-  };
-
-  const labelStyle: CSSProperties = {
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-  };
-
-  const timeStyle: CSSProperties = {
-    color: "var(--aw-text-tertiary)",
-    fontSize: "var(--aw-font-size-xs)",
-    lineHeight: "var(--aw-line-height-xs)",
-    whiteSpace: "nowrap",
-  };
-
-  const handleEnter = (e: MouseEvent<HTMLDivElement>) => {
-    if (!isDisabled) {
-      e.currentTarget.style.background = isActive
-        ? "var(--aw-bg-fill-dark)"
-        : "var(--aw-bg-fill-light)";
-    }
-  };
-  const handleLeave = (e: MouseEvent<HTMLDivElement>) => {
-    e.currentTarget.style.background = baseBg;
-  };
-  const handleDown = (e: MouseEvent<HTMLDivElement>) => {
-    if (!isDisabled) e.currentTarget.style.background = "var(--aw-bg-fill-dark)";
-  };
-  const handleUp = (e: MouseEvent<HTMLDivElement>) => {
-    if (!isDisabled) {
-      e.currentTarget.style.background = isActive
-        ? "var(--aw-bg-fill-dark)"
-        : "var(--aw-bg-fill-light)";
-    }
   };
 
   const handleClick = () => {
     if (isDisabled) return;
+    if (isProject && hasChildren) {
+      onToggle(item.id);
+    }
     onSelect?.(item.id);
-  };
-
-  const handleToggle = (event: MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-    if (isDisabled || !hasChildren) return;
-    onToggle(item.id);
   };
 
   const childrenContainerStyle: CSSProperties = {
@@ -206,65 +146,47 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
   };
 
   return (
-    <div className="aw-project-group">
-      <div
-        style={rowFrameStyle}
-        onMouseEnter={handleEnter}
-        onMouseLeave={handleLeave}
-        onMouseDown={handleDown}
-        onMouseUp={handleUp}
-      >
+    <div className={nodeClassName}>
+      <div className="aw-project-row" style={rowStyle}>
         <button
           type="button"
+          className="aw-project-row-main"
           disabled={isDisabled}
           onClick={handleClick}
           title={item.path ?? item.label}
           aria-current={isActive ? "true" : undefined}
+          aria-expanded={hasChildren ? isExpanded : undefined}
           style={rowButtonStyle}
         >
-          <span style={{ display: "inline-flex", width: 20, height: 20, alignItems: "center", justifyContent: "center", flexShrink: 0, color: "var(--aw-text-tertiary)" }}>
-            {kind === "project" ? (
+          <span className="aw-project-row-icon">
+            {isProject ? (
               <AwakenIcon size={16}>
-                <path d="M3 7h7l2 2h9v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-                <path d="M3 7V5a2 2 0 0 1 2-2h4l2 2h4" />
+                <g className="aw-project-folder-icon" data-expanded={isExpanded ? "true" : "false"}>
+                  <path d="M3 8.5h7l2 2h9v7.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                  <path
+                    className="aw-project-folder-icon__lid"
+                    d="M3 8.5V6a2 2 0 0 1 2-2h4l2 2h4"
+                  />
+                </g>
               </AwakenIcon>
             ) : null}
           </span>
-          <span style={labelStyle}>{item.label}</span>
-          {item.timeLabel ? <span style={timeStyle}>{item.timeLabel}</span> : <span />}
-        </button>
-        {item.action ? (
-          <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-            {item.action}
-          </span>
-        ) : null}
-        <span style={{ display: "inline-flex", width: 22, height: 22, alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-          {isLoading ? (
-            <span style={spinnerStyle} aria-label="加载中" />
-          ) : hasChildren ? (
-            <button
-              type="button"
-              aria-label={isExpanded ? `折叠 ${item.label}` : `展开 ${item.label}`}
-              aria-expanded={isExpanded}
-              disabled={isDisabled}
-              style={utilityButtonStyle}
-              onClick={handleToggle}
-            >
-            <span
-              style={{
-                display: "inline-flex",
-                color: "inherit",
-                transform: isExpanded ? "rotate(90deg)" : "none",
-                transition: "transform 140ms ease",
-              }}
-            >
+          <span className="aw-project-row-label">{item.label}</span>
+          {showInlineChevron ? (
+            <span className="aw-project-inline-chevron" aria-hidden="true">
               <AwakenIcon size={14}>
                 <path d="M9 6l6 6-6 6" />
               </AwakenIcon>
             </span>
-            </button>
           ) : null}
-        </span>
+          {isLoading ? <span style={spinnerStyle} aria-label="加载中" /> : null}
+          {showTimeLabel ? <span className="aw-project-row-meta">{item.timeLabel}</span> : null}
+        </button>
+        {item.action ? (
+          <span className="aw-project-row-actions">
+            {item.action}
+          </span>
+        ) : null}
       </div>
 
       {hasChildren && isExpanded ? (

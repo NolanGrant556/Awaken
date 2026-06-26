@@ -21,7 +21,6 @@ export const AwakenProjectTreeStates: AwakenProjectTreeState[] = [
           id: "awaken",
           label: "Awaken",
           kind: "project",
-          timeLabel: "当前",
           action: createElement(
             AwakenSidebarSectionAction,
             {
@@ -36,9 +35,7 @@ export const AwakenProjectTreeStates: AwakenProjectTreeState[] = [
         },
       ],
       activeId: "design-system",
-      expandedIds: ["awaken"],
       defaultExpandedIds: ["awaken"],
-      onExpandedChange: noop,
       onSelect: noop,
     } as unknown as Partial<ComponentProps<typeof AwakenProjectTree>>,
   },
@@ -58,9 +55,7 @@ export const AwakenProjectTreeStates: AwakenProjectTreeState[] = [
         },
       ],
       activeId: "scan-components",
-      expandedIds: ["workspace"],
       defaultExpandedIds: ["workspace"],
-      onExpandedChange: noop,
       onSelect: noop,
     } as unknown as Partial<ComponentProps<typeof AwakenProjectTree>>,
   },
@@ -86,7 +81,6 @@ export const AwakenProjectTreeStates: AwakenProjectTreeState[] = [
           label: "包含多个本地 runtime 与设计系统验收任务的 Awaken 工作区",
           kind: "project",
           path: "/Users/nolangrant/Awaken",
-          timeLabel: "今天",
           children: [
             {
               id: "long-child",
@@ -98,9 +92,7 @@ export const AwakenProjectTreeStates: AwakenProjectTreeState[] = [
         },
       ],
       activeId: "long-child",
-      expandedIds: ["long-project"],
       defaultExpandedIds: ["long-project"],
-      onExpandedChange: noop,
       onSelect: noop,
     } as unknown as Partial<ComponentProps<typeof AwakenProjectTree>>,
   },

@@ -43,6 +43,7 @@ export type RuntimeClient = {
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
   getSupervisorStatus: () => Promise<SupervisorStatusInfo>;
   onSupervisorStatusChange: (callback: (info: SupervisorStatusInfo) => void) => () => void;
+  notifyRendererReady: () => void;
 };
 
 const MAX_RECONNECT_RETRIES = 5;
@@ -171,6 +172,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     validateWorkspace: (path) => bridge.validateWorkspace(path),
     getSupervisorStatus: () => bridge.getSupervisorStatus(),
     onSupervisorStatusChange: (callback) => bridge.onSupervisorStatusChange(callback),
+    notifyRendererReady: () => bridge.notifyRendererReady(),
   };
 }
 

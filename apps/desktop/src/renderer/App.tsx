@@ -262,6 +262,7 @@ export function App() {
   const runStageTouchStartYRef = useRef<number | null>(null);
   const runStageInputIntentCleanupRef = useRef<(() => void) | null>(null);
   const runStageResizeObserverRef = useRef<ResizeObserver | null>(null);
+  const rendererReadyNotifiedRef = useRef(false);
   const threadLoadSeqRef = useRef(0);
   const runStageScrollRef = useRef<HTMLDivElement | null>(null);
   const composerDockRef = useRef<HTMLDivElement | null>(null);
@@ -419,6 +420,34 @@ export function App() {
       unsubscribeRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    if (rendererReadyNotifiedRef.current || (!desktopReady && !desktopNeedsRestart)) {
+      return;
+    }
+
+    rendererReadyNotifiedRef.current = true;
+    let cancelled = false;
+
+    async function notifyWhenStable(): Promise<void> {
+      try {
+        await document.fonts?.ready;
+      } catch {
+        // Font readiness is a polish signal only; rendering should continue.
+      }
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      if (!cancelled) {
+        runtimeClient.notifyRendererReady();
+      }
+    }
+
+    void notifyWhenStable();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [desktopNeedsRestart, desktopReady, runtimeClient]);
 
   useEffect(() => {
     if (runtimeInfo && workspacePath === "") {
@@ -580,11 +609,9 @@ export function App() {
       .map((thread) => {
         const sidebarStatus = sidebarStatusForThread(thread);
         const timeLabel =
-          thread.threadId === runtimeState.activeThreadId
-            ? "active"
-            : sidebarStatus.label === "idle"
-              ? undefined
-              : sidebarStatus.label;
+          thread.threadId === runtimeState.activeThreadId || sidebarStatus.label === "idle"
+            ? undefined
+            : sidebarStatus.label;
         return {
           id: `thread:${thread.threadId}`,
           kind: "thread",
@@ -601,7 +628,6 @@ export function App() {
       kind: "project",
       label: projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ?? "awaken",
       path: defaultWorkspacePath,
-      timeLabel: selectedProjectId === DEFAULT_WORKSPACE_PROJECT_ID ? "current" : undefined,
       action: projectAction(
         DEFAULT_WORKSPACE_PROJECT_ID,
         projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ?? "awaken",
@@ -617,7 +643,6 @@ export function App() {
           kind: "project" as const,
           label: project.label,
           path: project.path,
-          timeLabel: selectedProjectId === project.id ? "current" : undefined,
           action: projectAction(project.id, project.label),
           children: threads.length > 0 ? threads : undefined,
         };
@@ -1317,9 +1342,6 @@ export function App() {
         ? defaultWorkspacePath
         : projectsFromWorkspace.find((project) => project.id === id)?.path;
     setSelectedProjectId(id);
-    setExpandedProjectIds((current) => (
-      current.includes(id) ? current : [...current, id]
-    ));
     if (projectPath) {
       setWorkspacePath(projectPath);
     }
@@ -1374,6 +1396,9 @@ export function App() {
 
   function handleNewProjectSession(projectId: string): void {
     handleSelectProject(projectId);
+    setExpandedProjectIds((current) => (
+      current.includes(projectId) ? current : [...current, projectId]
+    ));
     handleNewTask();
     setComposerFocusRequest((request) => request + 1);
   }

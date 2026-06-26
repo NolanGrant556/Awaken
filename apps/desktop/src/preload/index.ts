@@ -102,6 +102,9 @@ const bridge: AwakenBridge = {
     ipcRenderer.on("awaken:supervisor-status-changed", handler);
     return () => ipcRenderer.removeListener("awaken:supervisor-status-changed", handler);
   },
+  notifyRendererReady: () => {
+    ipcRenderer.send("awaken:renderer-ready");
+  },
 };
 
 contextBridge.exposeInMainWorld("awaken", bridge);

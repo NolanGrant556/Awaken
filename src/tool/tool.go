@@ -19,6 +19,7 @@ type ApprovalRequest struct {
 	RiskTone      string
 	AffectedPaths []string
 	PatchSummary  string
+	DiffReview    *DiffReviewMetadata
 }
 
 type ApprovalDescribingTool interface {
@@ -58,6 +59,7 @@ type PatchPreview struct {
 	Summary       string
 	AffectedPaths []string
 	Truncated     bool
+	DiffReview    *DiffReviewMetadata
 }
 
 type ToolObserver interface {

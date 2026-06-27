@@ -125,6 +125,7 @@ func (t *ApplyPatchTool) PatchPreview(input string, permissionContext tool.Permi
 		Patch:         strings.TrimSpace(input),
 		Summary:       buildPatchSummary(patch),
 		AffectedPaths: patchAffectedPaths(patch, permissionContext),
+		DiffReview:    buildDiffReviewMetadata(patch, permissionContext),
 	}, true
 }
 
@@ -171,6 +172,7 @@ func (t *ApplyPatchTool) CheckPermission(ctx context.Context, input string, perm
 		RiskTone:      patchRiskTone(patch, permissionContext),
 		AffectedPaths: patchAffectedPaths(patch, permissionContext),
 		PatchSummary:  buildPatchSummary(patch),
+		DiffReview:    buildDiffReviewMetadata(patch, permissionContext),
 	})
 }
 

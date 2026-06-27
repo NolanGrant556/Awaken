@@ -113,6 +113,7 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.Patch = event.Patch
 		base.PatchSummary = event.PatchSummary
 		base.ApprovalAffectedPaths = event.ApprovalAffectedPaths
+		base.DiffReview = event.DiffReview
 		base.Truncated = event.Truncated
 		return []Event{base}
 	case agentcore.TurnDiffEventType:
@@ -130,6 +131,7 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.ApprovalRiskTone = string(event.ApprovalRiskTone)
 		base.ApprovalAffectedPaths = event.ApprovalAffectedPaths
 		base.ApprovalPatchSummary = event.ApprovalPatchSummary
+		base.DiffReview = event.DiffReview
 		return []Event{base}
 	case agentcore.ApprovalResolvedEventType:
 		base.Type = EventAwakenApprovalResolved
@@ -142,6 +144,7 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.ApprovalDecision = string(event.ApprovalDecision)
 		base.ApprovalAffectedPaths = event.ApprovalAffectedPaths
 		base.ApprovalPatchSummary = event.ApprovalPatchSummary
+		base.DiffReview = event.DiffReview
 		return []Event{base}
 	case agentcore.ArtifactCreatedEventType:
 		base.Type = EventAwakenArtifactCreated
@@ -154,6 +157,7 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.ArtifactPath = event.ArtifactPath
 		base.ArtifactContent = event.ArtifactContent
 		base.ArtifactStatus = string(event.ArtifactStatus)
+		base.DiffReview = event.DiffReview
 		return []Event{base}
 	case agentcore.ArtifactUpdatedEventType:
 		base.Type = EventAwakenArtifactUpdated

@@ -3,6 +3,8 @@ package a2ui
 import (
 	"encoding/json"
 	"testing"
+
+	"awaken/src/tool"
 )
 
 func TestApprovalSurfaceJSONBuildsReadOnlySurface(t *testing.T) {
@@ -78,6 +80,10 @@ func TestApprovalSurfaceIncludesAffectedPathsAndPatchSummary(t *testing.T) {
 		ToolCallID:    "tool-1",
 		AffectedPaths: []string{"note.md", "README.md"},
 		PatchSummary:  "新增 1 个文件，修改 1 个文件",
+		DiffReview: &tool.DiffReviewMetadata{
+			LineCounts: tool.DiffReviewLineCounts{Added: 3, Deleted: 1},
+			Risk:       tool.DiffReviewRiskSummary{Summary: "2 file changes, +3/-1 lines. Stays within writable roots."},
+		},
 	})
 	if err != nil {
 		t.Fatalf("ApprovalSurfaceJSON returned error: %v", err)
@@ -94,6 +100,12 @@ func TestApprovalSurfaceIncludesAffectedPathsAndPatchSummary(t *testing.T) {
 		}
 		if component.ID == "affected-paths" && component.Value != "note.md\nREADME.md" {
 			t.Fatalf("unexpected affected paths value %q", component.Value)
+		}
+		if component.ID == "line-counts" && component.Value != "+3 / -1" {
+			t.Fatalf("unexpected line counts value %q", component.Value)
+		}
+		if component.ID == "risk-summary" && component.Value != "2 file changes, +3/-1 lines. Stays within writable roots." {
+			t.Fatalf("unexpected risk summary value %q", component.Value)
 		}
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sync/atomic"
 	"time"
+
+	"awaken/src/tool"
 )
 
 type AwakenEventType string
@@ -84,6 +86,7 @@ type AwakenEvent struct {
 	ApprovalDecision      ApprovalDecision
 	ApprovalAffectedPaths []string
 	ApprovalPatchSummary  string
+	DiffReview            *tool.DiffReviewMetadata
 	ArtifactID            string
 	ArtifactTitle         string
 	ArtifactDescription   string

@@ -235,6 +235,56 @@ func TestPatchPreviewIncludesPatchSummaryAndAffectedPaths(t *testing.T) {
 	if len(preview.AffectedPaths) != 1 || preview.AffectedPaths[0] != "note.md" {
 		t.Fatalf("unexpected affected paths %+v", preview.AffectedPaths)
 	}
+	if preview.DiffReview == nil {
+		t.Fatal("expected diff review metadata")
+	}
+	if preview.DiffReview.FileCounts.Added != 1 || preview.DiffReview.LineCounts.Added != 1 || preview.DiffReview.Risk.Level != "warning" {
+		t.Fatalf("unexpected diff review metadata %+v", preview.DiffReview)
+	}
+	if len(preview.DiffReview.AffectedPaths) != 1 || preview.DiffReview.AffectedPaths[0] != "note.md" {
+		t.Fatalf("unexpected diff review affected paths %+v", preview.DiffReview.AffectedPaths)
+	}
+	if !strings.Contains(preview.DiffReview.Risk.Summary, "Stays within writable roots") {
+		t.Fatalf("unexpected diff review risk summary %q", preview.DiffReview.Risk.Summary)
+	}
+}
+
+func TestPatchPreviewDiffReviewCapturesMovesDeletesAndWritableRootRisk(t *testing.T) {
+	workspace := t.TempDir()
+	writable := t.TempDir()
+	permissionContext := tool.NewPermissionContext(workspace, []string{writable})
+	input := "*** Begin Patch\n" +
+		"*** Update File: keep.md\n" +
+		"*** Move to: moved.md\n" +
+		"@@\n" +
+		"-old\n" +
+		"+new\n" +
+		"*** Delete File: gone.md\n" +
+		"*** End Patch"
+
+	preview, ok := (&ApplyPatchTool{}).PatchPreview(input, permissionContext)
+	if !ok {
+		t.Fatal("expected patch preview")
+	}
+	if preview.DiffReview == nil {
+		t.Fatal("expected diff review metadata")
+	}
+	if preview.DiffReview.FileCounts.Modified != 1 || preview.DiffReview.FileCounts.Deleted != 1 {
+		t.Fatalf("unexpected file counts %+v", preview.DiffReview.FileCounts)
+	}
+	if preview.DiffReview.LineCounts.Added != 1 || preview.DiffReview.LineCounts.Deleted != 1 {
+		t.Fatalf("unexpected line counts %+v", preview.DiffReview.LineCounts)
+	}
+	if preview.DiffReview.Risk.Level != "danger" {
+		t.Fatalf("expected danger risk, got %+v", preview.DiffReview.Risk)
+	}
+	if !strings.Contains(preview.DiffReview.Risk.Summary, "outside writable roots") {
+		t.Fatalf("unexpected risk summary %q", preview.DiffReview.Risk.Summary)
+	}
+	if strings.Join(preview.DiffReview.Risk.Reasons, ",") != "moves_files,deletes_files,touches_paths_outside_writable_roots" &&
+		strings.Join(preview.DiffReview.Risk.Reasons, ",") != "deletes_files,moves_files,touches_paths_outside_writable_roots" {
+		t.Fatalf("unexpected risk reasons %+v", preview.DiffReview.Risk.Reasons)
+	}
 }
 
 // TestArtifactsPathConsistencyWithApprovalAffectedPaths verifies that artifact

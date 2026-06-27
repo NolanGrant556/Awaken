@@ -239,6 +239,7 @@ func (rt *ToolRuntime) emitPatchPreview(result ToolExecutionResult, selectedTool
 		Patch:                 limited.Content,
 		PatchSummary:          strings.TrimSpace(preview.Summary),
 		ApprovalAffectedPaths: preview.AffectedPaths,
+		DiffReview:            preview.DiffReview,
 		Truncated:             preview.Truncated || limited.Truncated,
 	})
 }
@@ -305,6 +306,9 @@ func mergeApprovalRequest(request *ApprovalRequest, metadata tool.ApprovalReques
 	}
 	if strings.TrimSpace(metadata.PatchSummary) != "" {
 		request.PatchSummary = strings.TrimSpace(metadata.PatchSummary)
+	}
+	if metadata.DiffReview != nil {
+		request.DiffReview = metadata.DiffReview
 	}
 }
 

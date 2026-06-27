@@ -243,6 +243,15 @@ func TestApplyPatchPermissionAsksWithPatchSummary(t *testing.T) {
 	if decision.ApprovalRequest.RiskTone != "warning" || !strings.Contains(decision.ApprovalRequest.Description, "A note.md") {
 		t.Fatalf("unexpected approval request: %+v", decision.ApprovalRequest)
 	}
+	if decision.ApprovalRequest.DiffReview == nil {
+		t.Fatal("expected diff review metadata on approval request")
+	}
+	if decision.ApprovalRequest.DiffReview.FileCounts.Added != 1 || decision.ApprovalRequest.DiffReview.LineCounts.Added != 1 {
+		t.Fatalf("unexpected diff review metadata %+v", decision.ApprovalRequest.DiffReview)
+	}
+	if decision.ApprovalRequest.DiffReview.Risk.Level != "warning" {
+		t.Fatalf("unexpected risk metadata %+v", decision.ApprovalRequest.DiffReview.Risk)
+	}
 }
 
 func TestApplyPatchPermissionMarksDeleteAsDanger(t *testing.T) {
@@ -256,6 +265,12 @@ func TestApplyPatchPermissionMarksDeleteAsDanger(t *testing.T) {
 
 	if decision.Behavior != tool.PermissionAsk || decision.ApprovalRequest.RiskTone != "danger" {
 		t.Fatalf("expected delete patch to ask with danger risk, got %+v", decision)
+	}
+	if decision.ApprovalRequest.DiffReview == nil || decision.ApprovalRequest.DiffReview.FileCounts.Deleted != 1 {
+		t.Fatalf("expected delete metadata, got %+v", decision.ApprovalRequest.DiffReview)
+	}
+	if !strings.Contains(decision.ApprovalRequest.DiffReview.Risk.Summary, "Includes file deletions") {
+		t.Fatalf("unexpected delete risk summary %q", decision.ApprovalRequest.DiffReview.Risk.Summary)
 	}
 }
 

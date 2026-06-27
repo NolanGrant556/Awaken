@@ -9,6 +9,7 @@ import (
 	"awaken/src/agentcore"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
+	"awaken/src/workspaceguard"
 )
 
 type runHandlers struct {
@@ -37,6 +38,12 @@ type errorResponse struct {
 	Message string `json:"message"`
 }
 
+type workspaceGuardErrorResponse struct {
+	Error    string                  `json:"error"`
+	Message  string                  `json:"message"`
+	Decision workspaceguard.Decision `json:"decision"`
+}
+
 type threadTranscriptRunResponse struct {
 	Run    awruntime.Run `json:"run"`
 	Events []agui.Event  `json:"events"`
@@ -53,6 +60,20 @@ func writeErrorJSON(w http.ResponseWriter, status int, code, message string) {
 	_ = json.NewEncoder(w).Encode(errorResponse{Error: code, Message: message})
 }
 
+func writeWorkspaceGuardErrorJSON(w http.ResponseWriter, status int, policyErr *workspaceguard.PolicyError) {
+	code := policyErr.Decision.ErrorCode
+	if code == "" {
+		code = "WORKSPACE_GUARD_DENIED"
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(workspaceGuardErrorResponse{
+		Error:    code,
+		Message:  policyErr.Error(),
+		Decision: policyErr.Decision,
+	})
+}
+
 func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 	var req awruntime.StartRunRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -62,7 +83,10 @@ func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 
 	run, err := h.runService.StartRun(req)
 	if err != nil {
+		var policyErr *workspaceguard.PolicyError
 		switch {
+		case errors.As(err, &policyErr):
+			writeWorkspaceGuardErrorJSON(w, http.StatusConflict, policyErr)
 		case errors.Is(err, awruntime.ErrThreadNotFound):
 			writeErrorJSON(w, http.StatusNotFound, "THREAD_NOT_FOUND", err.Error())
 		case errors.Is(err, awruntime.ErrThreadWorkspaceMismatch):

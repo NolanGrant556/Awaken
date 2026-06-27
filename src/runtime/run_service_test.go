@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"awaken/src/agentcore"
+	"awaken/src/workspaceguard"
 )
 
 func TestRunServiceReplaysHistoryAndStreamsLiveEvents(t *testing.T) {
@@ -676,6 +679,67 @@ func TestStartRunOmittedWritableRootsDefaultsToWorkspaceRoot(t *testing.T) {
 	}
 }
 
+func TestStartRunDefaultAllowsDirtyGitWorkspace(t *testing.T) {
+	root := initRuntimeCleanRepo(t)
+	writeRuntimeFile(t, filepath.Join(root, "README.md"), "changed\n")
+	called := false
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			called = true
+			return "done", nil
+		})
+	})
+
+	run, err := service.StartRun(StartRunRequest{Input: "hello", Workspace: WorkspaceConfig{WorkspaceRoot: root}})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	if run.RunID == "" {
+		t.Fatalf("expected run to be created")
+	}
+	waitForRunTerminal(t, service, run.RunID)
+	if !called {
+		t.Fatalf("expected executor to run")
+	}
+}
+
+func TestStartRunRequireCleanRejectsDirtyGitWorkspace(t *testing.T) {
+	root := initRuntimeCleanRepo(t)
+	writeRuntimeFile(t, filepath.Join(root, "README.md"), "changed\n")
+	writeRuntimeFile(t, filepath.Join(root, "scratch.txt"), "draft\n")
+	called := false
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			called = true
+			return "should not run", nil
+		})
+	})
+
+	_, err := service.StartRun(StartRunRequest{
+		Input:     "hello",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		WorkspacePolicy: workspaceguard.Policy{
+			Mode: workspaceguard.PolicyRequireClean,
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected StartRun to reject dirty workspace")
+	}
+	var policyErr *workspaceguard.PolicyError
+	if !errors.As(err, &policyErr) {
+		t.Fatalf("expected PolicyError, got %T: %v", err, err)
+	}
+	if !errors.Is(err, workspaceguard.ErrWorkspaceDirty) {
+		t.Fatalf("expected ErrWorkspaceDirty, got %v", err)
+	}
+	if !strings.Contains(policyErr.Error(), "modified") || !strings.Contains(policyErr.Error(), "untracked") {
+		t.Fatalf("expected summary to mention modified and untracked files, got %q", policyErr.Error())
+	}
+	if called {
+		t.Fatalf("executor should not run when workspace guard rejects start")
+	}
+}
+
 // TestRunServiceGetRunReturnsSnapshot verifies that GetRun returns the current
 // run snapshot and that GetRun on a missing run returns ErrRunNotFound.
 func TestRunServiceGetRunReturnsSnapshot(t *testing.T) {
@@ -1288,4 +1352,34 @@ func waitForRunTerminal(t *testing.T, service *RunService, runID string) Run {
 	}
 	t.Fatalf("run %s did not reach terminal status", runID)
 	return Run{}
+}
+
+func initRuntimeCleanRepo(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	runRuntimeGit(t, repo, "init")
+	runRuntimeGit(t, repo, "checkout", "-B", "main")
+	runRuntimeGit(t, repo, "config", "user.email", "awaken@example.invalid")
+	runRuntimeGit(t, repo, "config", "user.name", "Awaken Test")
+	writeRuntimeFile(t, filepath.Join(repo, "README.md"), "initial\n")
+	runRuntimeGit(t, repo, "add", "README.md")
+	runRuntimeGit(t, repo, "commit", "-m", "initial")
+	return repo
+}
+
+func runRuntimeGit(t *testing.T, repo string, args ...string) {
+	t.Helper()
+	cmdArgs := append([]string{"-C", repo}, args...)
+	cmd := exec.Command("git", cmdArgs...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, output)
+	}
+}
+
+func writeRuntimeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write %s: %v", path, err)
+	}
 }

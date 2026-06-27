@@ -40,10 +40,11 @@ type ClientInfo struct {
 }
 
 type StartRunRequest struct {
-	Input     string          `json:"input"`
-	Workspace WorkspaceConfig `json:"workspace"`
-	Client    ClientInfo      `json:"client"`
-	ThreadID  string          `json:"thread_id,omitempty"`
+	Input     string                `json:"input"`
+	Workspace WorkspaceConfig       `json:"workspace"`
+	Client    ClientInfo            `json:"client"`
+	ThreadID  string                `json:"thread_id,omitempty"`
+	Profile   *agentcore.RunProfile `json:"profile,omitempty"`
 }
 
 type Executor interface {
@@ -123,15 +124,30 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	if err != nil {
 		return Run{}, err
 	}
+	if req.Profile != nil {
+		normalized := req.Profile.Normalize()
+		if err := normalized.Validate(); err != nil {
+			return Run{}, fmt.Errorf("%w: invalid profile: %v", ErrInvalidInput, err)
+		}
+		req.Profile = &normalized
+	}
 
 	runID := newRuntimeID("run")
 	threadID := req.ThreadID
 	now := time.Now().UTC()
 	var agent *agentcore.Agent
+	var effectiveAgent *agentcore.Agent
 	if threadID == "" {
 		threadID = newRuntimeID("thread")
 		if s.newAgent != nil {
 			agent = s.newAgent(workspace, threadID)
+		}
+		effectiveAgent = agent
+		if agent != nil && req.Profile != nil {
+			effectiveAgent, err = agent.WithRunProfile(req.Profile)
+			if err != nil {
+				return Run{}, fmt.Errorf("%w: invalid profile: %v", ErrInvalidInput, err)
+			}
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -153,6 +169,14 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			return Run{}, ErrThreadBusy
 		}
 		agent = thread.agent
+		effectiveAgent = agent
+		if agent != nil && req.Profile != nil {
+			effectiveAgent, err = agent.WithRunProfile(req.Profile)
+			if err != nil {
+				s.mu.Unlock()
+				return Run{}, fmt.Errorf("%w: invalid profile: %v", ErrInvalidInput, err)
+			}
+		}
 		thread.activeRunID = runID
 		thread.latestRunID = runID
 		thread.runIDs = append(thread.runIDs, runID)
@@ -178,7 +202,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	s.sessions[runID] = session
 	s.mu.Unlock()
 
-	executor := s.newExecutor(agent)
+	executor := s.newExecutor(effectiveAgent)
 	go s.execute(session, executor, trimmed, ctx)
 
 	return session.Snapshot(), nil

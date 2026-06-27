@@ -49,6 +49,29 @@ func (a *Agent) GetConfig() AgentConfig {
 	return a.config
 }
 
+func (a *Agent) WithConfig(config AgentConfig) *Agent {
+	if a == nil {
+		return nil
+	}
+	return &Agent{
+		config:       config,
+		conversation: a.conversation,
+		reqBuilder:   NewRequestBuilder(config),
+		threadID:     a.threadID,
+	}
+}
+
+func (a *Agent) WithRunProfile(profile *RunProfile) (*Agent, error) {
+	if a == nil || profile == nil {
+		return a, nil
+	}
+	config, err := a.config.WithRunProfile(profile)
+	if err != nil {
+		return nil, err
+	}
+	return a.WithConfig(config), nil
+}
+
 func (a *Agent) RunStreamWithEvents(ctx stdcontext.Context, userInput string, sink EventSink) (string, error) {
 	a.conversation.UserInput(userInput)
 

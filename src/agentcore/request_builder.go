@@ -27,6 +27,8 @@ func (rb *RequestBuilder) Build(ctx ContextProvider, tools []tool.ToolDefinition
 	if tools == nil {
 		tools = rb.getTools()
 	}
+	tools = rb.config.ToolAccessPolicy().FilterDefinitions(tools)
+	tools = rb.filterToolsForPermissionMode(tools)
 	rb.updateRuntimeInfoFromConfig(tools)
 
 	systemPrompt := rb.buildSystemPrompt()
@@ -116,6 +118,25 @@ func (rb *RequestBuilder) buildToolSummary(tools []tool.ToolDefinition) string {
 		summary += t.Function.Name
 	}
 	return summary
+}
+
+func (rb *RequestBuilder) filterToolsForPermissionMode(definitions []tool.ToolDefinition) []tool.ToolDefinition {
+	if rb.config.PermissionMode() != PermissionModeDeny || len(definitions) == 0 {
+		return definitions
+	}
+
+	filtered := make([]tool.ToolDefinition, 0, len(definitions))
+	for _, definition := range definitions {
+		registeredTool, err := tool.GetTool(definition.Function.Name)
+		if err != nil {
+			continue
+		}
+		readOnlyTool, ok := registeredTool.(tool.ReadOnlyTool)
+		if ok && readOnlyTool.IsReadOnly() {
+			filtered = append(filtered, definition)
+		}
+	}
+	return filtered
 }
 
 func BuildRequest(config AgentConfig, ctx ContextProvider) LLMRequest {

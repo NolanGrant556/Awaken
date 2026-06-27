@@ -12,6 +12,7 @@ type AgentConfig struct {
 	ModelConfig  ModelConfig
 	EntryPoint   string
 	Workspace    WorkspaceConfig
+	RunProfile   RunProfile
 }
 
 type WorkspaceConfig struct {

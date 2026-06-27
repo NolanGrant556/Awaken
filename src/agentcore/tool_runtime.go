@@ -18,10 +18,14 @@ const maxPatchPreviewChars = 50000
 type ToolRuntime struct {
 	sink              EventSink
 	permissionContext tool.PermissionContext
+	toolAccessPolicy  ToolAccessPolicy
+	permissionMode    PermissionMode
 }
 
 type ToolRuntimeConfig struct {
 	PermissionContext tool.PermissionContext
+	ToolAccessPolicy  ToolAccessPolicy
+	PermissionMode    PermissionMode
 }
 
 type ToolExecutionResult struct {
@@ -40,6 +44,8 @@ func NewToolRuntimeWithConfig(sink EventSink, config ToolRuntimeConfig) *ToolRun
 	return &ToolRuntime{
 		sink:              normalizeEventSink(sink),
 		permissionContext: config.PermissionContext.Normalize(),
+		toolAccessPolicy:  config.ToolAccessPolicy,
+		permissionMode:    config.PermissionMode,
 	}
 }
 
@@ -52,6 +58,12 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	result := ToolExecutionResult{
 		ToolCallID: id,
 		Name:       call.Function.Name,
+	}
+
+	if !rt.toolAccessPolicy.Allows(call.Function.Name) {
+		result.Content = fmt.Sprintf("工具权限拒绝: tool %q is not allowed for this run profile", call.Function.Name)
+		result.IsError = true
+		return finalizeToolResult(result)
 	}
 
 	selectedTool, err := tool.GetTool(call.Function.Name)
@@ -138,15 +150,58 @@ func (rt *ToolRuntime) decideToolPermission(
 	selectedTool tool.Tool,
 	input string,
 ) tool.PermissionDecision {
-	if checker, ok := selectedTool.(tool.PermissionCheckingTool); ok {
-		decision := checker.CheckPermission(ctx, input, rt.permissionContext)
-		if decision.Behavior == "" {
-			return tool.DenyPermission("tool returned an empty permission decision")
-		}
-		return decision
+	readOnly := false
+	if readOnlyTool, ok := selectedTool.(tool.ReadOnlyTool); ok && readOnlyTool.IsReadOnly() {
+		readOnly = true
 	}
 
-	if readOnlyTool, ok := selectedTool.(tool.ReadOnlyTool); ok && readOnlyTool.IsReadOnly() {
+	var (
+		toolDecision tool.PermissionDecision
+		hasDecision  bool
+	)
+	if checker, ok := selectedTool.(tool.PermissionCheckingTool); ok {
+		toolDecision = checker.CheckPermission(ctx, input, rt.permissionContext)
+		hasDecision = true
+		if toolDecision.Behavior == "" {
+			return tool.DenyPermission("tool returned an empty permission decision")
+		}
+	}
+
+	switch rt.permissionMode {
+	case PermissionModeDeny:
+		if hasDecision && toolDecision.Behavior == tool.PermissionDeny {
+			return toolDecision
+		}
+		if readOnly && (!hasDecision || toolDecision.Behavior == tool.PermissionAllow) {
+			return tool.AllowPermission()
+		}
+		return tool.DenyPermission("run profile permission_mode=deny blocked tool execution")
+	case PermissionModeAsk:
+		if hasDecision {
+			return toolDecision
+		}
+		if readOnly {
+			return tool.AllowPermission()
+		}
+		return tool.AskPermission("run profile permission_mode=ask requires approval for non-read-only tool", tool.ApprovalRequest{})
+	case PermissionModeAllow:
+		if hasDecision {
+			if toolDecision.Behavior == tool.PermissionDeny {
+				return toolDecision
+			}
+			return tool.AllowPermission()
+		}
+		if readOnly {
+			return tool.AllowPermission()
+		}
+		return tool.AllowPermission()
+	}
+
+	if hasDecision {
+		return toolDecision
+	}
+
+	if readOnly {
 		return tool.AllowPermission()
 	}
 

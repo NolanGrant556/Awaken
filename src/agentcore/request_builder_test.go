@@ -1,6 +1,7 @@
 package agentcore
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -8,6 +9,31 @@ import (
 	convcontext "awaken/src/context"
 	"awaken/src/tool"
 )
+
+type requestBuilderReadOnlyTool struct {
+	name     string
+	readOnly bool
+}
+
+func (t requestBuilderReadOnlyTool) Name() string {
+	return t.name
+}
+
+func (t requestBuilderReadOnlyTool) Description() string {
+	return "request builder test tool"
+}
+
+func (t requestBuilderReadOnlyTool) Parameters() []tool.ToolParameter {
+	return nil
+}
+
+func (t requestBuilderReadOnlyTool) Execute(context.Context, string) (string, error) {
+	return "ok", nil
+}
+
+func (t requestBuilderReadOnlyTool) IsReadOnly() bool {
+	return t.readOnly
+}
 
 func TestRequestBuilderBuildsCompleteRequest(t *testing.T) {
 	ctx := convcontext.New()
@@ -102,5 +128,93 @@ func TestRequestBuilderUsesConfiguredWorkspaceRoot(t *testing.T) {
 	req := builder.Build(convcontext.New(), nil)
 	if !strings.Contains(req.SystemPrompt, workspaceRoot) {
 		t.Fatalf("expected system prompt to include workspace root %q, got %s", workspaceRoot, req.SystemPrompt)
+	}
+}
+
+func TestRequestBuilderFiltersToolsFromRunProfile(t *testing.T) {
+	builder := NewRequestBuilder(AgentConfig{
+		RunProfile: RunProfile{
+			Tools:           []string{"allowed_tool"},
+			DisallowedTools: []string{"blocked_tool"},
+		},
+	})
+
+	req := builder.Build(convcontext.New(), []tool.ToolDefinition{
+		{
+			Type: "function",
+			Function: tool.ToolFunctionSchema{
+				Name:        "allowed_tool",
+				Description: "allowed",
+				Parameters:  tool.ToolParametersSchema{Type: "object", Properties: map[string]tool.ToolParam{}},
+			},
+		},
+		{
+			Type: "function",
+			Function: tool.ToolFunctionSchema{
+				Name:        "blocked_tool",
+				Description: "blocked",
+				Parameters:  tool.ToolParametersSchema{Type: "object", Properties: map[string]tool.ToolParam{}},
+			},
+		},
+		{
+			Type: "function",
+			Function: tool.ToolFunctionSchema{
+				Name:        "other_tool",
+				Description: "other",
+				Parameters:  tool.ToolParametersSchema{Type: "object", Properties: map[string]tool.ToolParam{}},
+			},
+		},
+	})
+
+	if len(req.Tools) != 1 || req.Tools[0].Function.Name != "allowed_tool" {
+		t.Fatalf("expected only allowed_tool after filtering, got %+v", req.Tools)
+	}
+	if !strings.Contains(req.SystemPrompt, "allowed_tool") || strings.Contains(req.SystemPrompt, "blocked_tool") {
+		t.Fatalf("expected runtime tool summary to reflect filtered tools, got %s", req.SystemPrompt)
+	}
+}
+
+func TestRequestBuilderDenyModeOnlyExposesReadOnlyRegisteredTools(t *testing.T) {
+	readOnlyName := "request_builder_read_only_tool"
+	mutatingName := "request_builder_mutating_tool"
+	for _, candidate := range []tool.Tool{
+		requestBuilderReadOnlyTool{name: readOnlyName, readOnly: true},
+		requestBuilderReadOnlyTool{name: mutatingName, readOnly: false},
+	} {
+		if err := tool.RegisterTool(candidate); err != nil {
+			t.Fatalf("failed to register test tool %s: %v", candidate.Name(), err)
+		}
+	}
+
+	builder := NewRequestBuilder(AgentConfig{
+		RunProfile: RunProfile{
+			PermissionMode: PermissionModeDeny,
+		},
+	})
+
+	req := builder.Build(convcontext.New(), []tool.ToolDefinition{
+		{
+			Type: "function",
+			Function: tool.ToolFunctionSchema{
+				Name:        readOnlyName,
+				Description: "read only",
+				Parameters:  tool.ToolParametersSchema{Type: "object", Properties: map[string]tool.ToolParam{}},
+			},
+		},
+		{
+			Type: "function",
+			Function: tool.ToolFunctionSchema{
+				Name:        mutatingName,
+				Description: "mutating",
+				Parameters:  tool.ToolParametersSchema{Type: "object", Properties: map[string]tool.ToolParam{}},
+			},
+		},
+	})
+
+	if len(req.Tools) != 1 || req.Tools[0].Function.Name != readOnlyName {
+		t.Fatalf("expected deny mode to expose only read-only tool, got %+v", req.Tools)
+	}
+	if !strings.Contains(req.SystemPrompt, readOnlyName) || strings.Contains(req.SystemPrompt, mutatingName) {
+		t.Fatalf("expected tool summary to exclude mutating tool, got %s", req.SystemPrompt)
 	}
 }

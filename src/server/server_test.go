@@ -357,6 +357,58 @@ func TestCreateRunEmptyInputReturnsInvalidInput(t *testing.T) {
 	}
 }
 
+func TestCreateRunProfileOverridesFlowIntoAgentConfig(t *testing.T) {
+	root := t.TempDir()
+	captured := make(chan agentcore.AgentConfig, 1)
+	runService := awruntime.NewRunService(
+		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				SystemPrompt: "default prompt",
+				MaxThoughts:  5,
+				ModelConfig: agentcore.ModelConfig{
+					Model: "default-model",
+				},
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}, threadID)
+		},
+		func(agent *agentcore.Agent) awruntime.Executor {
+			captured <- agent.GetConfig()
+			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+				return "done", nil
+			})
+		},
+	)
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	body := fmt.Sprintf(`{"input":"hello","workspace":{"workspace_root":%q},"profile":{"id":"analysis","model":"override-model","max_turns":2,"tools":["list_files"],"disallowed_tools":["shell"]}}`, root)
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	cfg := <-captured
+	if cfg.ModelConfig.Model != "override-model" {
+		t.Fatalf("expected overridden model, got %q", cfg.ModelConfig.Model)
+	}
+	if cfg.MaxThoughts != 2 {
+		t.Fatalf("expected overridden max thoughts, got %d", cfg.MaxThoughts)
+	}
+	if cfg.RunProfile.ID != "analysis" || len(cfg.RunProfile.Tools) != 1 || cfg.RunProfile.Tools[0] != "list_files" {
+		t.Fatalf("expected normalized run profile on agent config, got %+v", cfg.RunProfile)
+	}
+}
+
 func TestCreateRunWithUnknownThreadIDReturns404(t *testing.T) {
 	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
 		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {

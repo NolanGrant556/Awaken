@@ -118,11 +118,36 @@ export type ClientInfo = {
   entrypoint: string;
 };
 
+export type RunProfileWire = {
+  id?: string;
+  name?: string;
+  description?: string;
+  system_prompt?: string;
+  model?: string;
+  max_turns?: number;
+  tools?: string[];
+  disallowed_tools?: string[];
+  permission_mode?: string;
+};
+
+export type RunProfile = {
+  id?: string;
+  name?: string;
+  description?: string;
+  systemPrompt?: string;
+  model?: string;
+  maxTurns?: number;
+  tools?: string[];
+  disallowedTools?: string[];
+  permissionMode?: string;
+};
+
 export type StartRunRequestWire = {
   input: string;
   thread_id?: string;
   workspace: WorkspaceConfigWire;
   client: ClientInfoWire;
+  profile?: RunProfileWire;
 };
 
 export type StartRunRequest = {
@@ -130,6 +155,7 @@ export type StartRunRequest = {
   threadId?: string;
   workspace: WorkspaceConfig;
   client: ClientInfo;
+  profile?: RunProfile;
 };
 
 export type ApprovalDecision = "approved" | "rejected";
@@ -234,6 +260,26 @@ export function normalizeRuntimeInfo(info: RuntimeInfoWire): RuntimeInfo {
   };
 }
 
+export function normalizeRunProfile(profile?: RunProfile): RunProfileWire | undefined {
+  if (!profile) {
+    return undefined;
+  }
+
+  const wire: RunProfileWire = {
+    id: profile.id,
+    name: profile.name,
+    description: profile.description,
+    system_prompt: profile.systemPrompt,
+    model: profile.model,
+    max_turns: profile.maxTurns,
+    tools: profile.tools,
+    disallowed_tools: profile.disallowedTools,
+    permission_mode: profile.permissionMode,
+  };
+
+  return Object.values(wire).some((value) => value !== undefined) ? wire : undefined;
+}
+
 export function normalizeStartRunRequest(request: StartRunRequest): StartRunRequestWire {
   return {
     input: request.input,
@@ -247,5 +293,6 @@ export function normalizeStartRunRequest(request: StartRunRequest): StartRunRequ
       request_id: request.client.requestId,
       entrypoint: request.client.entrypoint,
     },
+    profile: normalizeRunProfile(request.profile),
   };
 }

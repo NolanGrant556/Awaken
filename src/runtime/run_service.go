@@ -16,14 +16,17 @@ import (
 )
 
 var (
-	ErrInvalidInput            = errors.New("input is required")
-	ErrRunNotFound             = errors.New("run not found")
-	ErrApprovalNotFound        = errors.New("approval not found")
-	ErrRunTerminal             = errors.New("run is already finished")
-	ErrRunCancelling           = errors.New("run is being cancelled")
-	ErrThreadNotFound          = errors.New("thread not found")
-	ErrThreadWorkspaceMismatch = errors.New("thread workspace mismatch")
-	ErrThreadBusy              = errors.New("thread already has an active run")
+	ErrInvalidInput              = errors.New("input is required")
+	ErrRunNotFound               = errors.New("run not found")
+	ErrApprovalNotFound          = errors.New("approval not found")
+	ErrRunTerminal               = errors.New("run is already finished")
+	ErrRunCancelling             = errors.New("run is being cancelled")
+	ErrThreadNotFound            = errors.New("thread not found")
+	ErrThreadWorkspaceMismatch   = errors.New("thread workspace mismatch")
+	ErrThreadBusy                = errors.New("thread already has an active run")
+	ErrInvalidRunAt              = errors.New("run_at is required")
+	ErrScheduledRunNotFound      = errors.New("scheduled run not found")
+	ErrScheduledRunNotCancelable = errors.New("scheduled run is not cancelable")
 )
 
 const maxRetainedThreads = 100
@@ -57,11 +60,13 @@ func (f ExecutorFunc) Run(ctx context.Context, input string, sink agentcore.Even
 }
 
 type RunService struct {
-	mu          sync.RWMutex
-	sessions    map[string]*Session
-	threads     map[string]*Thread
-	newAgent    func(workspace WorkspaceConfig, threadID string) *agentcore.Agent
-	newExecutor func(agent *agentcore.Agent) Executor
+	mu            sync.RWMutex
+	sessions      map[string]*Session
+	threads       map[string]*Thread
+	scheduledRuns map[string]*scheduledRunState
+	scheduleClock scheduleClock
+	newAgent      func(workspace WorkspaceConfig, threadID string) *agentcore.Agent
+	newExecutor   func(agent *agentcore.Agent) Executor
 }
 
 // Thread holds the reusable Agent and metadata for a multi-turn conversation.
@@ -103,10 +108,12 @@ func NewRunService(
 	newExecutor func(agent *agentcore.Agent) Executor,
 ) *RunService {
 	return &RunService{
-		sessions:    make(map[string]*Session),
-		threads:     make(map[string]*Thread),
-		newAgent:    newAgent,
-		newExecutor: newExecutor,
+		sessions:      make(map[string]*Session),
+		threads:       make(map[string]*Thread),
+		scheduledRuns: make(map[string]*scheduledRunState),
+		scheduleClock: realScheduleClock{},
+		newAgent:      newAgent,
+		newExecutor:   newExecutor,
 	}
 }
 

@@ -590,6 +590,129 @@ func TestListThreadsEndpointReturnsRuntimeThreads(t *testing.T) {
 	}
 }
 
+func TestScheduledRunsEndpointsCreateListCancel(t *testing.T) {
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			return "done", nil
+		})
+	})
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	runAt := time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano)
+	body := fmt.Sprintf(`{"input":"scheduled hello","workspace":{"workspace_root":"/tmp"},"run_at":%q}`, runAt)
+	createResp, err := http.Post(ts.URL+"/v1/scheduled-runs", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /v1/scheduled-runs failed: %v", err)
+	}
+	defer createResp.Body.Close()
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", createResp.StatusCode)
+	}
+	var created awruntime.ScheduledRun
+	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode scheduled run create response: %v", err)
+	}
+	if created.ID == "" {
+		t.Fatalf("expected scheduled run id")
+	}
+	if created.Status != awruntime.ScheduledRunStatusScheduled {
+		t.Fatalf("expected scheduled status, got %s", created.Status)
+	}
+	if created.RunID != "" {
+		t.Fatalf("expected no run_id before trigger, got %q", created.RunID)
+	}
+
+	listResp, err := http.Get(ts.URL + "/v1/scheduled-runs")
+	if err != nil {
+		t.Fatalf("GET /v1/scheduled-runs failed: %v", err)
+	}
+	defer listResp.Body.Close()
+	if listResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from list, got %d", listResp.StatusCode)
+	}
+	var listed []awruntime.ScheduledRun
+	if err := json.NewDecoder(listResp.Body).Decode(&listed); err != nil {
+		t.Fatalf("failed to decode scheduled run list: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != created.ID {
+		t.Fatalf("expected listed scheduled run %q, got %+v", created.ID, listed)
+	}
+
+	cancelReq, err := http.NewRequest(http.MethodDelete, ts.URL+"/v1/scheduled-runs/"+created.ID, nil)
+	if err != nil {
+		t.Fatalf("failed to build cancel request: %v", err)
+	}
+	cancelResp, err := http.DefaultClient.Do(cancelReq)
+	if err != nil {
+		t.Fatalf("DELETE /v1/scheduled-runs/{id} failed: %v", err)
+	}
+	defer cancelResp.Body.Close()
+	if cancelResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from cancel, got %d", cancelResp.StatusCode)
+	}
+	var cancelled awruntime.ScheduledRun
+	if err := json.NewDecoder(cancelResp.Body).Decode(&cancelled); err != nil {
+		t.Fatalf("failed to decode cancel response: %v", err)
+	}
+	if cancelled.Status != awruntime.ScheduledRunStatusCancelled {
+		t.Fatalf("expected cancelled status, got %s", cancelled.Status)
+	}
+}
+
+func TestScheduledRunsEndpointsValidationAndNotFound(t *testing.T) {
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			return "done", nil
+		})
+	})
+
+	router := NewRouter(runService, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/scheduled-runs", strings.NewReader(`{"input":"   ","workspace":{"workspace_root":"/tmp"},"run_at":"2026-06-28T10:00:00Z"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for empty input, got %d", rec.Code)
+	}
+	var errResp errorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("expected JSON error response, got %q", rec.Body.String())
+	}
+	if errResp.Error != "INVALID_INPUT" {
+		t.Fatalf("expected INVALID_INPUT error, got %q", errResp.Error)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/v1/scheduled-runs", strings.NewReader(`{"input":"hello","workspace":{"workspace_root":"/tmp"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing run_at, got %d", rec.Code)
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("expected JSON error response, got %q", rec.Body.String())
+	}
+	if errResp.Error != "INVALID_RUN_AT" {
+		t.Fatalf("expected INVALID_RUN_AT error, got %q", errResp.Error)
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/v1/scheduled-runs/missing", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for missing scheduled run, got %d", rec.Code)
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("expected JSON error response, got %q", rec.Body.String())
+	}
+	if errResp.Error != "SCHEDULED_RUN_NOT_FOUND" {
+		t.Fatalf("expected SCHEDULED_RUN_NOT_FOUND error, got %q", errResp.Error)
+	}
+}
+
 func TestGetThreadTranscriptEndpointReturnsMappedRuns(t *testing.T) {
 	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
 		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {

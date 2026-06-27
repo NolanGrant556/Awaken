@@ -8,6 +8,7 @@ import (
 
 	"awaken/src/agentcore"
 	"awaken/src/llm"
+	"awaken/src/memory"
 	"awaken/src/runtime"
 	"awaken/src/server"
 	_ "awaken/src/tools"
@@ -22,6 +23,10 @@ func main() {
 	cfg := llm.LoadConfig()
 	defaultWorkspace := resolveDefaultWorkspace()
 	infoProvider := server.NewLLMRuntimeInfoProvider(cfg.Model, cfg.BaseURL, cfg.APIKey, defaultWorkspace, string(llm.ResolveProtocol(cfg)))
+	memoryStore, err := memory.NewDefaultStore()
+	if err != nil {
+		log.Printf("memory store disabled: %v", err)
+	}
 
 	runService := runtime.NewRunService(
 		func(workspace runtime.WorkspaceConfig, threadID string) *agentcore.Agent {
@@ -52,7 +57,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: server.NewRouter(runService, infoProvider),
+		Handler: server.NewRouterWithMemory(runService, infoProvider, memoryStore),
 	}
 
 	log.Printf("awaken-core listening on http://%s", addr)

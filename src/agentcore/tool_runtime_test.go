@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	convcontext "awaken/src/context"
 	"awaken/src/tool"
+	"awaken/src/toolresults"
 )
 
 type runtimeTestTool struct {
@@ -191,14 +194,53 @@ func TestToolRuntimeExecutesMultipleCalls(t *testing.T) {
 	}
 }
 
-func TestToolRuntimeTruncatesLargeToolResult(t *testing.T) {
-	toolName := "runtime_large_output_tool"
+func TestToolRuntimeLeavesSmallToolResultUnstored(t *testing.T) {
+	toolName := "runtime_small_output_tool"
 	mustRegisterRuntimeTool(t, runtimeTestTool{
 		name:   toolName,
-		output: strings.Repeat("x", 25000),
+		output: "small output",
+	})
+	storeDir := filepath.Join(t.TempDir(), "tool-results")
+	runtime := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
+		ToolResultStore:    toolresults.NewStore(toolresults.Config{Dir: storeDir}),
+		ToolResultMaxChars: 20,
 	})
 
-	result := NewToolRuntime(nil).Execute(context.Background(), convcontext.ToolCall{
+	result := runtime.Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_small",
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{}`,
+		},
+	})
+
+	if result.IsError || result.Truncated || result.Content != "small output" || result.ToolResultHandle != nil {
+		t.Fatalf("expected unchanged small result, got %+v", result)
+	}
+	if _, err := os.Stat(storeDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected small result not to create store dir, stat err=%v", err)
+	}
+}
+
+func TestToolRuntimePersistsLargeToolResult(t *testing.T) {
+	toolName := "runtime_large_output_tool"
+	fullOutput := strings.Repeat("x", 25000) + "COMPLETE_TAIL_SHOULD_ONLY_BE_IN_STORE"
+	workspace := t.TempDir()
+	store := toolresults.NewStore(toolresults.Config{
+		Dir:           filepath.Join(t.TempDir(), "tool-results"),
+		WorkspaceRoot: workspace,
+	})
+	mustRegisterRuntimeTool(t, runtimeTestTool{
+		name:   toolName,
+		output: fullOutput,
+	})
+
+	result := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
+		PermissionContext:      tool.NewPermissionContext(workspace, []string{workspace}),
+		ToolResultStore:        store,
+		ToolResultMaxChars:     20000,
+		ToolResultPreviewChars: 128,
+	}).Execute(context.Background(), convcontext.ToolCall{
 		ID: "call_large",
 		Function: convcontext.FunctionCall{
 			Name:      toolName,
@@ -206,11 +248,24 @@ func TestToolRuntimeTruncatesLargeToolResult(t *testing.T) {
 		},
 	})
 
-	if result.IsError || !result.Truncated || !strings.Contains(result.Content, "truncated") {
-		t.Fatalf("expected truncated success result, got %+v", result)
+	if result.IsError || !result.Truncated || result.ToolResultHandle == nil {
+		t.Fatalf("expected persisted success result, got %+v", result)
 	}
-	if len([]rune(result.Content)) >= 25000 {
-		t.Fatalf("expected content to be shortened")
+	if !strings.Contains(result.Content, "<persisted-tool-result>") || !strings.Contains(result.Content, "handle_id: "+result.ToolResultHandle.ID) {
+		t.Fatalf("expected handle metadata in result content, got %q", result.Content)
+	}
+	if strings.Contains(result.Content, "COMPLETE_TAIL_SHOULD_ONLY_BE_IN_STORE") {
+		t.Fatalf("expected inline result content not to contain full tail")
+	}
+	fullStored, err := store.Read(result.ToolResultHandle.ID)
+	if err != nil {
+		t.Fatalf("read persisted result: %v", err)
+	}
+	if fullStored != fullOutput {
+		t.Fatalf("expected full persisted output")
+	}
+	if isPathWithin(result.ToolResultHandle.Path, workspace) {
+		t.Fatalf("expected persisted path outside workspace, got %q in %q", result.ToolResultHandle.Path, workspace)
 	}
 }
 
@@ -356,6 +411,44 @@ func TestToolRuntimeEmitsCommandOutputFromObservableTool(t *testing.T) {
 	}
 	if got[1].Type != CommandOutputEventType || got[1].CommandStream != "stderr" || got[1].Delta != "warn" || !got[1].Truncated {
 		t.Fatalf("unexpected stderr event: %+v", got[1])
+	}
+}
+
+func TestToolRuntimePersistsOnlyFinalResultNotCommandOutputEvents(t *testing.T) {
+	toolName := "runtime_observable_large_result_tool"
+	fullOutput := strings.Repeat("result-line\n", 1000) + "FINAL_RESULT_TAIL"
+	mustRegisterRuntimeTool(t, runtimeTestTool{
+		name:   toolName,
+		output: fullOutput,
+		commandOutputs: []tool.CommandOutput{
+			{Stream: "stdout", Delta: "streamed output tail"},
+		},
+	})
+
+	var got []AwakenEvent
+	runtime := NewToolRuntimeWithConfig(EventSinkFunc(func(event AwakenEvent) {
+		got = append(got, event)
+	}), ToolRuntimeConfig{
+		ToolResultStore:        toolresults.NewStore(toolresults.Config{Dir: filepath.Join(t.TempDir(), "tool-results")}),
+		ToolResultMaxChars:     100,
+		ToolResultPreviewChars: 24,
+	})
+	result := runtime.Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_observable_large",
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{}`,
+		},
+	})
+
+	if result.IsError || !result.Truncated || result.ToolResultHandle == nil {
+		t.Fatalf("expected persisted final result, got %+v", result)
+	}
+	if len(got) != 1 || got[0].Type != CommandOutputEventType || got[0].Delta != "streamed output tail" {
+		t.Fatalf("expected command output event to remain unchanged, got %+v", got)
+	}
+	if strings.Contains(result.Content, "FINAL_RESULT_TAIL") {
+		t.Fatalf("expected final result content to be preview plus handle, got %q", result.Content)
 	}
 }
 
@@ -586,4 +679,12 @@ func mustJSONQuote(t *testing.T, value string) string {
 		t.Fatalf("failed to quote JSON string: %v", err)
 	}
 	return string(data)
+}
+
+func isPathWithin(path string, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)))
 }

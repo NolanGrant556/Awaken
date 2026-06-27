@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"awaken/src/agentcore"
+	"awaken/src/agentdefs"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
 )
@@ -15,6 +16,9 @@ func NewRouter(runService *awruntime.RunService, infoProvider RuntimeInfoProvide
 	mux.HandleFunc("GET /v1/agui/demo", handleAGUIDemo)
 	mux.HandleFunc("GET /v1/runtime/info", func(w http.ResponseWriter, r *http.Request) {
 		handleRuntimeInfo(w, r, infoProvider)
+	})
+	mux.HandleFunc("GET /v1/agent-definitions", func(w http.ResponseWriter, r *http.Request) {
+		handleAgentDefinitions(w, r, agentdefs.Load)
 	})
 	if runService != nil {
 		handlers := runHandlers{runService: runService}

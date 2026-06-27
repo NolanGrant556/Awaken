@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	"awaken/src/agentdefs"
 	"awaken/src/llm"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
@@ -159,6 +161,71 @@ func TestRuntimeInfoEndpointDoesNotLeakSecrets(t *testing.T) {
 	}
 	if info.Protocol != "anthropic_messages" {
 		t.Fatalf("expected protocol anthropic_messages, got %q", info.Protocol)
+	}
+}
+
+func TestAgentDefinitionsEndpoint(t *testing.T) {
+	root := t.TempDir()
+	agentDir := filepath.Join(root, ".awaken", "agents")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("failed to create agent dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "reviewer.md"), []byte(`---
+name: reviewer
+description: Reviews code
+tools: [read_file, grep_search]
+---
+Review carefully.
+`), 0644); err != nil {
+		t.Fatalf("failed to write agent definition: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/agent-definitions?workspace_root="+url.QueryEscape(root), nil)
+	rec := httptest.NewRecorder()
+
+	NewRouter(nil, nil).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "application/json") {
+		t.Fatalf("expected json content type, got %q", got)
+	}
+
+	var result agentdefs.Result
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if result.WorkspaceRoot != root {
+		t.Fatalf("expected workspace root %q, got %q", root, result.WorkspaceRoot)
+	}
+	if len(result.Definitions) != 1 {
+		t.Fatalf("expected one definition, got %+v", result.Definitions)
+	}
+	def := result.Definitions[0]
+	if def.Name != "reviewer" || def.SystemPrompt != "Review carefully." {
+		t.Fatalf("unexpected definition: %+v", def)
+	}
+	if def.Source.RelativePath != ".awaken/agents/reviewer.md" {
+		t.Fatalf("unexpected source path: %+v", def.Source)
+	}
+}
+
+func TestAgentDefinitionsEndpointReturnsStructuredWorkspaceError(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/v1/agent-definitions", nil)
+	rec := httptest.NewRecorder()
+
+	NewRouter(nil, nil).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+	var response errorResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+	if response.Error != "INVALID_WORKSPACE" {
+		t.Fatalf("expected INVALID_WORKSPACE, got %+v", response)
 	}
 }
 

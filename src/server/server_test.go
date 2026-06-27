@@ -666,6 +666,173 @@ func TestGetThreadTranscriptEndpointReturnsMappedRuns(t *testing.T) {
 	}
 }
 
+func TestCreateRunWithoutDelegationOmitsDelegationField(t *testing.T) {
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			return "done", nil
+		})
+	})
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"ordinary","workspace":{"workspace_root":"/tmp"}}`))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	if _, ok := payload["delegation"]; ok {
+		t.Fatalf("expected ordinary create response to omit delegation, got %+v", payload["delegation"])
+	}
+}
+
+func TestCreateDelegatedRunReturnsRelationshipInRunAndTranscript(t *testing.T) {
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: input})
+			return input, nil
+		})
+	})
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	parentResp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"parent task","workspace":{"workspace_root":"/tmp"}}`))
+	if err != nil {
+		t.Fatalf("POST /v1/runs parent failed: %v", err)
+	}
+	defer parentResp.Body.Close()
+	if parentResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 from parent run, got %d", parentResp.StatusCode)
+	}
+	var parentRun awruntime.Run
+	if err := json.NewDecoder(parentResp.Body).Decode(&parentRun); err != nil {
+		t.Fatalf("failed to decode parent run: %v", err)
+	}
+	waitHTTPRunTerminal(t, ts.URL, parentRun.RunID)
+
+	childBody := fmt.Sprintf(`{
+		"input":"inspect runtime delegation",
+		"workspace":{"workspace_root":"/tmp"},
+		"delegation":{
+			"parent_run_id":%q,
+			"delegate_label":"Backend reader",
+			"delegate_role":"runtime audit",
+			"delegation_prompt":"Read runtime/server code and report the minimum path."
+		}
+	}`, parentRun.RunID)
+	childResp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(childBody))
+	if err != nil {
+		t.Fatalf("POST /v1/runs child failed: %v", err)
+	}
+	defer childResp.Body.Close()
+	if childResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 from delegated run, got %d", childResp.StatusCode)
+	}
+	var childRun awruntime.Run
+	if err := json.NewDecoder(childResp.Body).Decode(&childRun); err != nil {
+		t.Fatalf("failed to decode child run: %v", err)
+	}
+	if childRun.ThreadID == parentRun.ThreadID {
+		t.Fatalf("expected delegated run to create a child thread, got parent thread %q", childRun.ThreadID)
+	}
+	assertHTTPDelegation(t, childRun.Delegation, parentRun.RunID, parentRun.ThreadID)
+	waitHTTPRunTerminal(t, ts.URL, childRun.RunID)
+
+	getResp, err := http.Get(ts.URL + "/v1/runs/" + childRun.RunID)
+	if err != nil {
+		t.Fatalf("GET /v1/runs/{run_id} failed: %v", err)
+	}
+	defer getResp.Body.Close()
+	var fetchedRun awruntime.Run
+	if err := json.NewDecoder(getResp.Body).Decode(&fetchedRun); err != nil {
+		t.Fatalf("failed to decode fetched child run: %v", err)
+	}
+	assertHTTPDelegation(t, fetchedRun.Delegation, parentRun.RunID, parentRun.ThreadID)
+
+	transcriptResp, err := http.Get(ts.URL + "/v1/threads/" + childRun.ThreadID + "/transcript")
+	if err != nil {
+		t.Fatalf("GET /v1/threads/{thread_id}/transcript failed: %v", err)
+	}
+	defer transcriptResp.Body.Close()
+	if transcriptResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from transcript endpoint, got %d", transcriptResp.StatusCode)
+	}
+	var transcript threadTranscriptResponse
+	if err := json.NewDecoder(transcriptResp.Body).Decode(&transcript); err != nil {
+		t.Fatalf("failed to decode transcript response: %v", err)
+	}
+	assertHTTPDelegation(t, transcript.Thread.Delegation, parentRun.RunID, parentRun.ThreadID)
+	if len(transcript.Runs) != 1 {
+		t.Fatalf("expected one child transcript run, got %d", len(transcript.Runs))
+	}
+	assertHTTPDelegation(t, transcript.Runs[0].Run.Delegation, parentRun.RunID, parentRun.ThreadID)
+}
+
+func TestCreateDelegatedRunWithUnknownParentReturns404(t *testing.T) {
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			return "done", nil
+		})
+	})
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{
+		"input":"child task",
+		"workspace":{"workspace_root":"/tmp"},
+		"delegation":{"parent_run_id":"run_missing","delegate_label":"Missing parent"}
+	}`))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 for unknown parent run, got %d", resp.StatusCode)
+	}
+
+	var errResp errorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("expected JSON error response, got decode error: %v", err)
+	}
+	if errResp.Error != "PARENT_RUN_NOT_FOUND" {
+		t.Fatalf("expected PARENT_RUN_NOT_FOUND error code, got %q", errResp.Error)
+	}
+}
+
+func assertHTTPDelegation(t *testing.T, delegation *awruntime.DelegationMetadata, parentRunID, parentThreadID string) {
+	t.Helper()
+	if delegation == nil {
+		t.Fatalf("expected delegation metadata")
+	}
+	if delegation.ParentRunID != parentRunID {
+		t.Fatalf("expected parent run id %q, got %q", parentRunID, delegation.ParentRunID)
+	}
+	if delegation.ParentThreadID != parentThreadID {
+		t.Fatalf("expected parent thread id %q, got %q", parentThreadID, delegation.ParentThreadID)
+	}
+	if delegation.DelegateLabel != "Backend reader" {
+		t.Fatalf("expected delegate label to round-trip, got %q", delegation.DelegateLabel)
+	}
+	if delegation.DelegateRole != "runtime audit" {
+		t.Fatalf("expected delegate role to round-trip, got %q", delegation.DelegateRole)
+	}
+	if delegation.DelegationPrompt != "Read runtime/server code and report the minimum path." {
+		t.Fatalf("expected delegation prompt to round-trip, got %q", delegation.DelegationPrompt)
+	}
+}
+
 func waitHTTPRunTerminal(t *testing.T, baseURL, runID string) awruntime.Run {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

@@ -13,7 +13,7 @@ func TestSessionAwaitApprovalTransitionsStatus(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	session := NewSession("run-1", "thread-1", "", cancel)
+	session := NewSession("run-1", "thread-1", "", cancel, nil)
 
 	request := agentcore.ApprovalRequest{
 		ID:          "approval-1",
@@ -92,7 +92,7 @@ func TestSessionAwaitApprovalAtomicWithCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	session := NewSession("run-1", "thread-1", "", cancel)
+	session := NewSession("run-1", "thread-1", "", cancel, nil)
 	request := agentcore.ApprovalRequest{
 		ID:          "approval-1",
 		ToolCallID:  "tool-1",
@@ -161,7 +161,7 @@ func TestSessionResolveApprovalAfterCancelReturnsCancelling(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	session := NewSession("run-1", "thread-1", "", cancel)
+	session := NewSession("run-1", "thread-1", "", cancel, nil)
 	request := agentcore.ApprovalRequest{
 		ID:          "approval-1",
 		ToolCallID:  "tool-1",
@@ -234,7 +234,7 @@ func TestSessionResolveApprovalAfterTerminalReturnsTerminal(t *testing.T) {
 	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	session := NewSession("run-1", "thread-1", "", cancel)
+	session := NewSession("run-1", "thread-1", "", cancel, nil)
 	request := agentcore.ApprovalRequest{
 		ID:          "approval-1",
 		ToolCallID:  "tool-1",

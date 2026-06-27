@@ -32,16 +32,25 @@ const (
 )
 
 type Run struct {
-	RunID           string     `json:"run_id"`
-	ThreadID        string     `json:"thread_id"`
-	Input           string     `json:"input,omitempty"`
-	Status          RunStatus  `json:"status"`
-	Result          string     `json:"result,omitempty"`
-	Error           string     `json:"error,omitempty"`
-	CancelRequested bool       `json:"cancel_requested,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
-	FinishedAt      *time.Time `json:"finished_at,omitempty"`
+	RunID           string              `json:"run_id"`
+	ThreadID        string              `json:"thread_id"`
+	Input           string              `json:"input,omitempty"`
+	Delegation      *DelegationMetadata `json:"delegation,omitempty"`
+	Status          RunStatus           `json:"status"`
+	Result          string              `json:"result,omitempty"`
+	Error           string              `json:"error,omitempty"`
+	CancelRequested bool                `json:"cancel_requested,omitempty"`
+	CreatedAt       time.Time           `json:"created_at"`
+	UpdatedAt       time.Time           `json:"updated_at"`
+	FinishedAt      *time.Time          `json:"finished_at,omitempty"`
+}
+
+type DelegationMetadata struct {
+	ParentRunID      string `json:"parent_run_id,omitempty"`
+	ParentThreadID   string `json:"parent_thread_id,omitempty"`
+	DelegateLabel    string `json:"delegate_label,omitempty"`
+	DelegateRole     string `json:"delegate_role,omitempty"`
+	DelegationPrompt string `json:"delegation_prompt,omitempty"`
 }
 
 type Event struct {
@@ -64,21 +73,30 @@ type Session struct {
 	approvals map[string]*pendingApproval
 }
 
-func NewSession(runID, threadID, input string, cancel context.CancelFunc) *Session {
+func NewSession(runID, threadID, input string, cancel context.CancelFunc, delegation *DelegationMetadata) *Session {
 	now := time.Now().UTC()
 	return &Session{
 		run: Run{
-			RunID:     runID,
-			ThreadID:  threadID,
-			Input:     strings.TrimSpace(input),
-			Status:    RunStatusRunning,
-			CreatedAt: now,
-			UpdatedAt: now,
+			RunID:      runID,
+			ThreadID:   threadID,
+			Input:      strings.TrimSpace(input),
+			Delegation: cloneDelegationMetadata(delegation),
+			Status:     RunStatusRunning,
+			CreatedAt:  now,
+			UpdatedAt:  now,
 		},
 		cancel:    cancel,
 		bus:       NewEventBus(),
 		approvals: make(map[string]*pendingApproval),
 	}
+}
+
+func cloneDelegationMetadata(delegation *DelegationMetadata) *DelegationMetadata {
+	if delegation == nil {
+		return nil
+	}
+	cloned := *delegation
+	return &cloned
 }
 
 type pendingApproval struct {
@@ -89,7 +107,9 @@ type pendingApproval struct {
 func (s *Session) Snapshot() Run {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.run
+	snapshot := s.run
+	snapshot.Delegation = cloneDelegationMetadata(s.run.Delegation)
+	return snapshot
 }
 
 func (s *Session) Subscribe(afterSeq uint64) Subscription {

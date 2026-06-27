@@ -1,18 +1,23 @@
 package server
 
-import "net/url"
+import (
+	"net/url"
+
+	"awaken/src/slashcommands"
+)
 
 const RuntimeVersion = "0.1.0"
 
 // RuntimeInfo 暴露运行时的非敏感元数据。
 type RuntimeInfo struct {
-	RuntimeVersion   string `json:"runtime_version"`
-	APIVersion       string `json:"api_version"`
-	ConfiguredModel  string `json:"configured_model"`
-	Protocol         string `json:"protocol"`
-	HasAPIKey        bool   `json:"has_api_key"`
-	DefaultWorkspace string `json:"default_workspace"`
-	BaseURLHost      string `json:"base_url_host"`
+	RuntimeVersion   string                      `json:"runtime_version"`
+	APIVersion       string                      `json:"api_version"`
+	ConfiguredModel  string                      `json:"configured_model"`
+	Protocol         string                      `json:"protocol"`
+	HasAPIKey        bool                        `json:"has_api_key"`
+	DefaultWorkspace string                      `json:"default_workspace"`
+	BaseURLHost      string                      `json:"base_url_host"`
+	SlashCommands    []slashcommands.CommandInfo `json:"slash_commands"`
 }
 
 // RuntimeInfoProvider 提供运行时的信息，用于构造 /v1/runtime/info 响应。
@@ -46,6 +51,7 @@ func (p *llmRuntimeInfoProvider) GetRuntimeInfo() RuntimeInfo {
 		HasAPIKey:        p.hasAPIKey,
 		DefaultWorkspace: p.defaultWorkspace,
 		BaseURLHost:      extractHost(p.baseURL),
+		SlashCommands:    slashcommands.ListCommands(),
 	}
 }
 

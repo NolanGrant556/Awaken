@@ -84,6 +84,7 @@ export type RuntimeInfoWire = {
   has_api_key: boolean;
   default_workspace: string;
   base_url_host: string;
+  slash_commands?: SlashCommandInfoWire[];
 };
 
 export type RuntimeInfo = {
@@ -94,6 +95,19 @@ export type RuntimeInfo = {
   hasApiKey: boolean;
   defaultWorkspace: string;
   baseUrlHost: string;
+  slashCommands: SlashCommandInfo[];
+};
+
+export type SlashCommandInfoWire = {
+  name: string;
+  description: string;
+  argument_hint?: string;
+};
+
+export type SlashCommandInfo = {
+  name: string;
+  description: string;
+  argumentHint?: string;
 };
 
 export type WorkspaceConfigWire = {
@@ -231,6 +245,11 @@ export function normalizeRuntimeInfo(info: RuntimeInfoWire): RuntimeInfo {
     hasApiKey: info.has_api_key,
     defaultWorkspace: info.default_workspace,
     baseUrlHost: info.base_url_host,
+    slashCommands: (info.slash_commands ?? []).map((command) => ({
+      name: command.name,
+      description: command.description,
+      argumentHint: command.argument_hint,
+    })),
   };
 }
 

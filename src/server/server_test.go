@@ -22,6 +22,7 @@ import (
 	"awaken/src/llm"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
+	"awaken/src/slashcommands"
 	_ "awaken/src/tools"
 )
 
@@ -114,6 +115,12 @@ func TestRuntimeInfoEndpoint(t *testing.T) {
 	if info.BaseURLHost != "api.example.com" {
 		t.Fatalf("expected base_url_host api.example.com, got %q", info.BaseURLHost)
 	}
+	if !hasRuntimeSlashCommand(info.SlashCommands, "plan") ||
+		!hasRuntimeSlashCommand(info.SlashCommands, "review") ||
+		!hasRuntimeSlashCommand(info.SlashCommands, "fix") ||
+		!hasRuntimeSlashCommand(info.SlashCommands, "explain") {
+		t.Fatalf("expected runtime info to expose built-in slash commands, got %+v", info.SlashCommands)
+	}
 
 	body := rec.Body.String()
 	if strings.Contains(body, "secret-api-key") {
@@ -160,6 +167,15 @@ func TestRuntimeInfoEndpointDoesNotLeakSecrets(t *testing.T) {
 	if info.Protocol != "anthropic_messages" {
 		t.Fatalf("expected protocol anthropic_messages, got %q", info.Protocol)
 	}
+}
+
+func hasRuntimeSlashCommand(commands []slashcommands.CommandInfo, name string) bool {
+	for _, command := range commands {
+		if command.Name == name {
+			return command.Description != ""
+		}
+	}
+	return false
 }
 
 func TestRunsEndpointsCreateReplayAndCancel(t *testing.T) {
@@ -354,6 +370,43 @@ func TestCreateRunEmptyInputReturnsInvalidInput(t *testing.T) {
 	}
 	if errResp.Message != "input is required" {
 		t.Fatalf("expected message 'input is required', got %q", errResp.Message)
+	}
+}
+
+func TestCreateRunUnknownSlashCommandReturnsInvalidSlashCommand(t *testing.T) {
+	called := make(chan struct{}, 1)
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			called <- struct{}{}
+			return "", nil
+		})
+	})
+
+	router := NewRouter(runService, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/runs", strings.NewReader(`{"input":"/unknown details","workspace":{"workspace_root":"/tmp"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown slash command, got %d", rec.Code)
+	}
+
+	var errResp errorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("expected JSON error response, got %q", rec.Body.String())
+	}
+	if errResp.Error != "INVALID_SLASH_COMMAND" {
+		t.Fatalf("expected INVALID_SLASH_COMMAND error, got %q", errResp.Error)
+	}
+	if !strings.Contains(errResp.Message, "unknown slash command") {
+		t.Fatalf("expected message to mention unknown slash command, got %q", errResp.Message)
+	}
+	select {
+	case <-called:
+		t.Fatal("executor should not run for invalid slash command")
+	default:
 	}
 }
 

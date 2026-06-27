@@ -9,6 +9,7 @@ import (
 	"awaken/src/agentcore"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
+	"awaken/src/slashcommands"
 )
 
 type runHandlers struct {
@@ -69,6 +70,8 @@ func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 			writeErrorJSON(w, http.StatusBadRequest, "THREAD_WORKSPACE_MISMATCH", err.Error())
 		case errors.Is(err, awruntime.ErrThreadBusy):
 			writeErrorJSON(w, http.StatusConflict, "THREAD_BUSY", err.Error())
+		case errors.Is(err, awruntime.ErrInvalidSlashCommand):
+			writeErrorJSON(w, http.StatusBadRequest, "INVALID_SLASH_COMMAND", err.Error())
 		case errors.Is(err, awruntime.ErrInvalidInput):
 			writeErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 		default:
@@ -265,7 +268,12 @@ func handleRuntimeInfo(w http.ResponseWriter, r *http.Request, provider RuntimeI
 		return
 	}
 
-	data, err := json.Marshal(provider.GetRuntimeInfo())
+	info := provider.GetRuntimeInfo()
+	if info.SlashCommands == nil {
+		info.SlashCommands = slashcommands.ListCommands()
+	}
+
+	data, err := json.Marshal(info)
 	if err != nil {
 		http.Error(w, "failed to serialize runtime info", http.StatusInternalServerError)
 		return

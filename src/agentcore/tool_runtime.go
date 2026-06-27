@@ -18,10 +18,12 @@ const maxPatchPreviewChars = 50000
 type ToolRuntime struct {
 	sink              EventSink
 	permissionContext tool.PermissionContext
+	permissionPolicy  tool.PermissionPolicy
 }
 
 type ToolRuntimeConfig struct {
 	PermissionContext tool.PermissionContext
+	PermissionPolicy  tool.PermissionPolicy
 }
 
 type ToolExecutionResult struct {
@@ -40,6 +42,7 @@ func NewToolRuntimeWithConfig(sink EventSink, config ToolRuntimeConfig) *ToolRun
 	return &ToolRuntime{
 		sink:              normalizeEventSink(sink),
 		permissionContext: config.PermissionContext.Normalize(),
+		permissionPolicy:  config.PermissionPolicy.Normalize(),
 	}
 }
 
@@ -138,19 +141,20 @@ func (rt *ToolRuntime) decideToolPermission(
 	selectedTool tool.Tool,
 	input string,
 ) tool.PermissionDecision {
+	readOnly := isReadOnlyTool(selectedTool)
+	var decision tool.PermissionDecision
 	if checker, ok := selectedTool.(tool.PermissionCheckingTool); ok {
-		decision := checker.CheckPermission(ctx, input, rt.permissionContext)
+		decision = checker.CheckPermission(ctx, input, rt.permissionContext)
 		if decision.Behavior == "" {
 			return tool.DenyPermission("tool returned an empty permission decision")
 		}
-		return decision
+	} else if readOnly {
+		decision = tool.AllowPermission()
+	} else {
+		decision = tool.AskPermission("tool does not declare permission behavior and is not marked read-only", tool.ApprovalRequest{})
 	}
 
-	if readOnlyTool, ok := selectedTool.(tool.ReadOnlyTool); ok && readOnlyTool.IsReadOnly() {
-		return tool.AllowPermission()
-	}
-
-	return tool.AllowPermission()
+	return tool.ApplyPermissionPolicy(decision, rt.permissionPolicy, selectedTool.Name(), readOnly)
 }
 
 func (rt *ToolRuntime) awaitApproval(
@@ -254,6 +258,11 @@ func finalizeToolResult(result ToolExecutionResult) ToolExecutionResult {
 	result.Content = limited.Content
 	result.Truncated = limited.Truncated
 	return result
+}
+
+func isReadOnlyTool(selectedTool tool.Tool) bool {
+	readOnlyTool, ok := selectedTool.(tool.ReadOnlyTool)
+	return ok && readOnlyTool.IsReadOnly()
 }
 
 func approvalDescription(toolName string, input string) string {

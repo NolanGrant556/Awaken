@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	"awaken/src/tool"
 )
 
 func TestRunServiceReplaysHistoryAndStreamsLiveEvents(t *testing.T) {
@@ -1270,6 +1271,75 @@ func TestGetThreadTranscriptReturnsOrderedRunsAndInputs(t *testing.T) {
 	}
 	if len(transcript.Runs[1].Events) == 0 {
 		t.Fatalf("expected transcript history for second run")
+	}
+}
+
+func TestStartRunAppliesRunLevelPermissionPolicyOnReusedThread(t *testing.T) {
+	var captured []agentcore.AgentConfig
+	service := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			captured = append(captured, agent.GetConfig())
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: input})
+				return input, nil
+			})
+		},
+	)
+
+	root := t.TempDir()
+	firstRun, err := service.StartRun(StartRunRequest{
+		Input: "hello",
+		Workspace: WorkspaceConfig{
+			WorkspaceRoot: root,
+			WritableRoots: []string{root},
+		},
+		PermissionPolicy: tool.PermissionPolicy{
+			Mode:       tool.PermissionModeAsk,
+			AllowTools: []string{"read_file"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, firstRun.RunID)
+
+	secondRun, err := service.StartRun(StartRunRequest{
+		Input:    "follow up",
+		ThreadID: firstRun.ThreadID,
+		Workspace: WorkspaceConfig{
+			WorkspaceRoot: root,
+			WritableRoots: []string{root},
+		},
+		PermissionPolicy: tool.PermissionPolicy{
+			Mode:      tool.PermissionModeAllow,
+			DenyTools: []string{"shell"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("second StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, secondRun.RunID)
+
+	if len(captured) != 2 {
+		t.Fatalf("expected two captured agent configs, got %d", len(captured))
+	}
+	if captured[0].PermissionPolicy.Mode != tool.PermissionModeAsk ||
+		len(captured[0].PermissionPolicy.AllowTools) != 1 ||
+		captured[0].PermissionPolicy.AllowTools[0] != "read_file" {
+		t.Fatalf("unexpected first run permission policy: %+v", captured[0].PermissionPolicy)
+	}
+	if captured[1].PermissionPolicy.Mode != tool.PermissionModeAllow ||
+		len(captured[1].PermissionPolicy.DenyTools) != 1 ||
+		captured[1].PermissionPolicy.DenyTools[0] != "shell" {
+		t.Fatalf("unexpected second run permission policy: %+v", captured[1].PermissionPolicy)
 	}
 }
 

@@ -272,3 +272,81 @@ func TestSessionResolveApprovalAfterTerminalReturnsTerminal(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionApprovalTimeoutRejectsAndEmitsResolvedEvent(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	timeoutCh := make(chan time.Time, 1)
+	session := NewSessionWithConfig("run-1", "thread-1", "", cancel, SessionConfig{
+		ApprovalPolicy: agentcore.ApprovalPolicy{TimeoutMs: 1},
+		After: func(time.Duration) <-chan time.Time {
+			return timeoutCh
+		},
+	})
+	request := agentcore.ApprovalRequest{
+		ID:          "approval-1",
+		ToolCallID:  "tool-1",
+		ToolName:    "write_file",
+		Title:       "Approve write_file",
+		Description: "Write README.md",
+		RiskTone:    agentcore.ApprovalRiskWarning,
+	}
+
+	decisionCh := make(chan agentcore.ApprovalDecision, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		decision, err := session.AwaitApproval(ctx, request)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		decisionCh <- decision
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if session.Snapshot().Status == RunStatusAwaitingApproval {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for awaiting_approval status")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	timeoutCh <- time.Now()
+
+	select {
+	case decision := <-decisionCh:
+		if decision != agentcore.ApprovalDecisionRejected {
+			t.Fatalf("expected rejected timeout decision, got %s", decision)
+		}
+	case err := <-errCh:
+		t.Fatalf("AwaitApproval returned error: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for timeout rejection")
+	}
+
+	if session.Snapshot().Status != RunStatusRunning {
+		t.Fatalf("expected running status after timeout resolve, got %s", session.Snapshot().Status)
+	}
+
+	sub := session.Subscribe(0)
+	if sub.Close != nil {
+		defer sub.Close()
+	}
+
+	foundTimeoutResolve := false
+	for _, event := range sub.History {
+		if event.AgentEvent.Type == agentcore.ApprovalResolvedEventType &&
+			event.AgentEvent.ApprovalDecision == agentcore.ApprovalDecisionRejected &&
+			event.AgentEvent.Code == "approval_timeout" {
+			foundTimeoutResolve = true
+			break
+		}
+	}
+	if !foundTimeoutResolve {
+		t.Fatalf("expected timeout approval resolved event, got %+v", sub.History)
+	}
+}

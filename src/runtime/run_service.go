@@ -40,10 +40,12 @@ type ClientInfo struct {
 }
 
 type StartRunRequest struct {
-	Input     string          `json:"input"`
-	Workspace WorkspaceConfig `json:"workspace"`
-	Client    ClientInfo      `json:"client"`
-	ThreadID  string          `json:"thread_id,omitempty"`
+	Input            string                   `json:"input"`
+	Workspace        WorkspaceConfig          `json:"workspace"`
+	Client           ClientInfo               `json:"client"`
+	ThreadID         string                   `json:"thread_id,omitempty"`
+	PermissionPolicy tool.PermissionPolicy    `json:"permission_policy,omitempty"`
+	ApprovalPolicy   agentcore.ApprovalPolicy `json:"approval_policy,omitempty"`
 }
 
 type Executor interface {
@@ -123,6 +125,8 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	if err != nil {
 		return Run{}, err
 	}
+	permissionPolicy := req.PermissionPolicy.Normalize()
+	approvalPolicy := req.ApprovalPolicy.Normalize()
 
 	runID := newRuntimeID("run")
 	threadID := req.ThreadID
@@ -135,7 +139,9 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	session := NewSession(runID, threadID, trimmed, cancel)
+	session := NewSessionWithConfig(runID, threadID, trimmed, cancel, SessionConfig{
+		ApprovalPolicy: approvalPolicy,
+	})
 
 	s.mu.Lock()
 	if req.ThreadID != "" {
@@ -178,7 +184,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	s.sessions[runID] = session
 	s.mu.Unlock()
 
-	executor := s.newExecutor(agent)
+	executor := s.newExecutor(agentForRun(agent, threadID, workspace, permissionPolicy, approvalPolicy))
 	go s.execute(session, executor, trimmed, ctx)
 
 	return session.Snapshot(), nil
@@ -360,6 +366,28 @@ func sameWorkspace(a, b WorkspaceConfig) bool {
 		return false
 	}
 	return sameStringSet(a.WritableRoots, b.WritableRoots)
+}
+
+func agentForRun(
+	agent *agentcore.Agent,
+	threadID string,
+	workspace WorkspaceConfig,
+	permissionPolicy tool.PermissionPolicy,
+	approvalPolicy agentcore.ApprovalPolicy,
+) *agentcore.Agent {
+	if agent == nil {
+		return nil
+	}
+
+	config := agent.GetConfig()
+	config.Workspace = agentcore.WorkspaceConfig{
+		Root:          workspace.WorkspaceRoot,
+		WritableRoots: append([]string(nil), workspace.WritableRoots...),
+	}
+	config.PermissionPolicy = permissionPolicy.Normalize()
+	config.ApprovalPolicy = approvalPolicy.Normalize()
+	agent.SetConfig(config)
+	return agent
 }
 
 func sameStringSet(a, b []string) bool {

@@ -49,6 +49,11 @@ func (a *Agent) GetConfig() AgentConfig {
 	return a.config
 }
 
+func (a *Agent) SetConfig(config AgentConfig) {
+	a.config = config
+	a.reqBuilder = NewRequestBuilder(config)
+}
+
 func (a *Agent) RunStreamWithEvents(ctx stdcontext.Context, userInput string, sink EventSink) (string, error) {
 	a.conversation.UserInput(userInput)
 

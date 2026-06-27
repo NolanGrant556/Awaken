@@ -140,6 +140,7 @@ func (r *Runner) injectSyntheticToolResultsForCancel() {
 func toolRuntimeConfigFromAgentConfig(config AgentConfig) ToolRuntimeConfig {
 	return ToolRuntimeConfig{
 		PermissionContext: tool.NewPermissionContext(config.Workspace.Root, config.Workspace.WritableRoots),
+		PermissionPolicy:  config.PermissionPolicy.Normalize(),
 	}
 }
 

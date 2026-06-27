@@ -9,6 +9,7 @@ import (
 
 	convcontext "awaken/src/context"
 	"awaken/src/tool"
+	_ "awaken/src/tools/todo_write"
 )
 
 type runtimeTestTool struct {
@@ -400,6 +401,47 @@ func TestToolRuntimeEmitsPatchPreviewBeforeApplyPatchApproval(t *testing.T) {
 		if event.Type == ArtifactCreatedEventType || event.Type == ArtifactUpdatedEventType {
 			t.Fatalf("expected rejected patch not to emit changed-file artifact, got %+v", event)
 		}
+	}
+}
+
+func TestToolRuntimeTodoWriteIsReadOnlyAndEmitsArtifact(t *testing.T) {
+	var got []AwakenEvent
+	runtime := NewToolRuntime(testApprovalAwaiter{
+		decision: ApprovalDecisionApproved,
+		events:   &got,
+	})
+	result := runtime.Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_todo_write",
+		Function: convcontext.FunctionCall{
+			Name:      "todo_write",
+			Arguments: `{"items":[{"id":"1","content":"Implement todo tool","status":"in_progress","priority":"high"},{"id":"2","content":"Run tests","status":"pending"}]}`,
+		},
+	})
+
+	if result.IsError {
+		t.Fatalf("expected todo_write to execute without approval, got %+v", result)
+	}
+	if !strings.Contains(result.Content, `"artifact_id":"todo:current"`) {
+		t.Fatalf("expected structured todo summary, got %q", result.Content)
+	}
+
+	var artifactEvent *AwakenEvent
+	for i := range got {
+		if got[i].Type == ApprovalRequestedEventType {
+			t.Fatalf("todo_write should be read-only and not request approval, got events %+v", got)
+		}
+		if got[i].Type == ArtifactUpdatedEventType {
+			artifactEvent = &got[i]
+		}
+	}
+	if artifactEvent == nil {
+		t.Fatalf("expected todo_write artifact event, got %+v", got)
+	}
+	if artifactEvent.ArtifactID != "todo:current" || artifactEvent.ArtifactKind != "todo" || artifactEvent.ArtifactStatus != ArtifactStatusReady {
+		t.Fatalf("unexpected todo artifact event: %+v", artifactEvent)
+	}
+	if !strings.Contains(artifactEvent.ArtifactContent, `"kind": "todo"`) || !strings.Contains(artifactEvent.ArtifactContent, `"status": "in_progress"`) {
+		t.Fatalf("unexpected todo artifact content: %q", artifactEvent.ArtifactContent)
 	}
 }
 

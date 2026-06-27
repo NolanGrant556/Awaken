@@ -394,7 +394,7 @@ func normalizeToolInput(arguments string, params []tool.ToolParameter) (string, 
 		}
 	}
 
-	if len(params) == 1 {
+	if len(params) == 1 && params[0].Type == "string" {
 		value, ok := decoded[params[0].Name]
 		if !ok {
 			return "", nil

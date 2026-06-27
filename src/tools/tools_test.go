@@ -14,6 +14,7 @@ func TestBuiltInToolNamesAreProviderSafe(t *testing.T) {
 		"list_files":  false,
 		"read_file":   false,
 		"shell":       false,
+		"todo_write":  false,
 		"web_search":  false,
 	}
 
@@ -37,5 +38,19 @@ func TestBuiltInToolNamesAreProviderSafe(t *testing.T) {
 		if candidate.Name() == "write_file" {
 			t.Fatal("write_file should not be registered")
 		}
+	}
+}
+
+func TestTodoWriteIsRegisteredReadOnly(t *testing.T) {
+	candidate, err := tool.GetTool("todo_write")
+	if err != nil {
+		t.Fatalf("expected todo_write to be registered: %v", err)
+	}
+	readOnly, ok := candidate.(tool.ReadOnlyTool)
+	if !ok {
+		t.Fatalf("expected todo_write to implement ReadOnlyTool")
+	}
+	if !readOnly.IsReadOnly() {
+		t.Fatalf("expected todo_write to be read-only")
 	}
 }

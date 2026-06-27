@@ -291,6 +291,7 @@ grep_search
 apply_patch
 shell
 web_search
+todo_write
 ```
 
 只读工具不应要求审批。会修改文件或有风险的工具通过 `src/tool/permission.go` 与 `src/agentcore/tool_runtime.go` 走权限模型。

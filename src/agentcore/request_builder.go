@@ -70,6 +70,10 @@ func (rb *RequestBuilder) getTools() []tool.ToolDefinition {
 }
 
 func (rb *RequestBuilder) buildToolParameters(t tool.Tool) tool.ToolParametersSchema {
+	if provider, ok := t.(tool.ParameterSchemaProvider); ok {
+		return provider.ParameterSchema()
+	}
+
 	params := t.Parameters()
 	properties := make(map[string]tool.ToolParam, len(params))
 	required := make([]string, 0)

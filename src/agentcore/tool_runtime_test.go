@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	convcontext "awaken/src/context"
+	"awaken/src/lifecyclehooks"
 	"awaken/src/tool"
 )
 
@@ -463,6 +466,86 @@ func TestToolRuntimePassesPermissionContextToTools(t *testing.T) {
 	}
 }
 
+func TestToolRuntimeExecutesLifecycleHooks(t *testing.T) {
+	root := t.TempDir()
+	outPath := filepath.Join(root, "tool-hooks.log")
+	script := writeToolHookScript(t, root, `#!/bin/sh
+printf '%s:%s:%s:%s:%s:%s\n' "$1" "$AWAKEN_HOOK_EVENT" "$AWAKEN_TOOL_NAME" "$AWAKEN_TOOL_CALL_ID" "$AWAKEN_WORKSPACE_ROOT" "$AWAKEN_TOOL_IS_ERROR" >> "$2"
+`)
+
+	toolName := "runtime_hooked_tool"
+	mustRegisterRuntimeTool(t, runtimeTestTool{
+		name: toolName,
+		params: []tool.ToolParameter{
+			{Name: "value", Type: "string", Required: true},
+		},
+	})
+
+	runtime := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
+		PermissionContext: tool.NewPermissionContext(root, []string{root}),
+		Hooks: lifecyclehooks.Config{Hooks: map[lifecyclehooks.Event][]lifecyclehooks.CommandConfig{
+			lifecyclehooks.EventBeforeTool: {{
+				Command: script,
+				Args:    []string{"before", outPath},
+			}},
+			lifecyclehooks.EventAfterTool: {{
+				Command: script,
+				Args:    []string{"after", outPath},
+			}},
+		}},
+	})
+
+	result := runtime.Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_hooked",
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{"value":"hello"}`,
+		},
+	})
+
+	if result.IsError {
+		t.Fatalf("expected hooked tool to succeed, got %+v", result)
+	}
+	got := readToolHookFile(t, outPath)
+	if !strings.Contains(got, "before:before_tool:"+toolName+":call_hooked:"+root+":") {
+		t.Fatalf("expected before_tool metadata, got %q", got)
+	}
+	if !strings.Contains(got, "after:after_tool:"+toolName+":call_hooked:"+root+":false") {
+		t.Fatalf("expected after_tool metadata, got %q", got)
+	}
+}
+
+func TestToolRuntimeHookFailureDoesNotFailTool(t *testing.T) {
+	toolName := "runtime_hook_failure_tool"
+	mustRegisterRuntimeTool(t, runtimeTestTool{
+		name: toolName,
+		params: []tool.ToolParameter{
+			{Name: "value", Type: "string", Required: true},
+		},
+	})
+
+	runtime := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
+		Hooks: lifecyclehooks.Config{Hooks: map[lifecyclehooks.Event][]lifecyclehooks.CommandConfig{
+			lifecyclehooks.EventBeforeTool: {{
+				Command: "/bin/sh",
+				Args:    []string{"-c", "exit 7"},
+			}},
+		}},
+	})
+
+	result := runtime.Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_hook_failure",
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{"value":"hello"}`,
+		},
+	})
+
+	if result.IsError || result.Content != "ran:hello" {
+		t.Fatalf("expected hook failure not to fail tool, got %+v", result)
+	}
+}
+
 func TestToolRuntimeApproveBeforeExecute(t *testing.T) {
 	var executeCount int
 	toolName := "runtime_approve_before_execute_tool"
@@ -584,6 +667,24 @@ func mustJSONQuote(t *testing.T, value string) string {
 	data, err := json.Marshal(value)
 	if err != nil {
 		t.Fatalf("failed to quote JSON string: %v", err)
+	}
+	return string(data)
+}
+
+func writeToolHookScript(t *testing.T, dir string, content string) string {
+	t.Helper()
+	path := filepath.Join(dir, "tool-hook.sh")
+	if err := os.WriteFile(path, []byte(content), 0755); err != nil {
+		t.Fatalf("failed to write hook script: %v", err)
+	}
+	return path
+}
+
+func readToolHookFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read hook file %s: %v", path, err)
 	}
 	return string(data)
 }

@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"awaken/src/agentcore"
+	"awaken/src/lifecyclehooks"
 	"awaken/src/llm"
 	"awaken/src/runtime"
 	"awaken/src/server"
@@ -20,10 +21,11 @@ func main() {
 	}
 
 	cfg := llm.LoadConfig()
+	hookConfig := lifecyclehooks.LoadConfig()
 	defaultWorkspace := resolveDefaultWorkspace()
 	infoProvider := server.NewLLMRuntimeInfoProvider(cfg.Model, cfg.BaseURL, cfg.APIKey, defaultWorkspace, string(llm.ResolveProtocol(cfg)))
 
-	runService := runtime.NewRunService(
+	runService := runtime.NewRunServiceWithConfig(
 		func(workspace runtime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
 				MaxThoughts: 5,
@@ -40,6 +42,7 @@ func main() {
 					Root:          workspace.WorkspaceRoot,
 					WritableRoots: workspace.WritableRoots,
 				},
+				Hooks: hookConfig,
 			}
 			return agentcore.NewAgentWithThreadID(agentCfg, threadID)
 		},
@@ -48,6 +51,7 @@ func main() {
 				return agent.RunStreamWithEvents(ctx, input, sink)
 			})
 		},
+		runtime.RunServiceConfig{Hooks: hookConfig},
 	)
 
 	srv := &http.Server{

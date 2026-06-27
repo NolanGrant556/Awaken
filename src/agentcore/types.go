@@ -2,6 +2,7 @@ package agentcore
 
 import (
 	"awaken/src/context"
+	"awaken/src/lifecyclehooks"
 	"awaken/src/prompt"
 	"awaken/src/tool"
 )
@@ -12,6 +13,7 @@ type AgentConfig struct {
 	ModelConfig  ModelConfig
 	EntryPoint   string
 	Workspace    WorkspaceConfig
+	Hooks        lifecyclehooks.Config
 }
 
 type WorkspaceConfig struct {

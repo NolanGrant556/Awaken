@@ -10,6 +10,7 @@ import (
 
 	convcontext "awaken/src/context"
 	"awaken/src/internal/outputlimit"
+	"awaken/src/lifecyclehooks"
 	"awaken/src/tool"
 )
 
@@ -18,10 +19,12 @@ const maxPatchPreviewChars = 50000
 type ToolRuntime struct {
 	sink              EventSink
 	permissionContext tool.PermissionContext
+	hooks             *lifecyclehooks.Executor
 }
 
 type ToolRuntimeConfig struct {
 	PermissionContext tool.PermissionContext
+	Hooks             lifecyclehooks.Config
 }
 
 type ToolExecutionResult struct {
@@ -40,6 +43,7 @@ func NewToolRuntimeWithConfig(sink EventSink, config ToolRuntimeConfig) *ToolRun
 	return &ToolRuntime{
 		sink:              normalizeEventSink(sink),
 		permissionContext: config.PermissionContext.Normalize(),
+		hooks:             lifecyclehooks.NewExecutor(config.Hooks),
 	}
 }
 
@@ -95,15 +99,20 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		return finalizeToolResult(result)
 	}
 
+	hookMetadata := rt.toolHookMetadata(result)
+	rt.executeHook(ctx, lifecyclehooks.EventBeforeTool, hookMetadata)
+
 	output, err := rt.executeTool(toolCtx, result, selectedTool, input)
 	if err != nil {
 		result.Content = fmt.Sprintf("工具执行失败: %v", err)
 		result.IsError = true
+		rt.executeAfterToolHook(result, hookMetadata)
 		return finalizeToolResult(result)
 	}
 
 	result.Content = output
 	rt.emitArtifacts(result, selectedTool, input, output)
+	rt.executeAfterToolHook(result, hookMetadata)
 	return finalizeToolResult(result)
 }
 
@@ -119,6 +128,35 @@ func (rt *ToolRuntime) executeTool(
 		}))
 	}
 	return selectedTool.Execute(ctx, input)
+}
+
+func (rt *ToolRuntime) executeHook(ctx stdcontext.Context, event lifecyclehooks.Event, metadata map[string]string) {
+	if rt.hooks == nil || !rt.hooks.HasHooks() {
+		return
+	}
+	rt.hooks.Execute(ctx, event, metadata)
+}
+
+func (rt *ToolRuntime) executeAfterToolHook(result ToolExecutionResult, metadata map[string]string) {
+	afterMetadata := cloneLifecycleHookMetadata(metadata)
+	afterMetadata["tool_is_error"] = fmt.Sprintf("%t", result.IsError)
+	rt.executeHook(stdcontext.Background(), lifecyclehooks.EventAfterTool, afterMetadata)
+}
+
+func (rt *ToolRuntime) toolHookMetadata(result ToolExecutionResult) map[string]string {
+	return map[string]string{
+		"tool_call_id":   result.ToolCallID,
+		"tool_name":      result.Name,
+		"workspace_root": rt.permissionContext.WorkspaceRootOrCWD(),
+	}
+}
+
+func cloneLifecycleHookMetadata(metadata map[string]string) map[string]string {
+	cloned := make(map[string]string, len(metadata)+1)
+	for key, value := range metadata {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func (rt *ToolRuntime) ExecuteToolCalls(ctx stdcontext.Context, calls []convcontext.ToolCall) []ToolExecutionResult {

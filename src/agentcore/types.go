@@ -7,16 +7,21 @@ import (
 )
 
 type AgentConfig struct {
-	SystemPrompt string
-	MaxThoughts  int
-	ModelConfig  ModelConfig
-	EntryPoint   string
-	Workspace    WorkspaceConfig
+	SystemPrompt  string
+	MaxThoughts   int
+	ModelConfig   ModelConfig
+	EntryPoint    string
+	Workspace     WorkspaceConfig
+	ToolExecution ToolExecutionConfig
 }
 
 type WorkspaceConfig struct {
 	Root          string
 	WritableRoots []string
+}
+
+type ToolExecutionConfig struct {
+	Strategy ToolExecutionStrategy
 }
 
 type ModelConfig struct {

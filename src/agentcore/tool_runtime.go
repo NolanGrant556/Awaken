@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	convcontext "awaken/src/context"
@@ -17,6 +18,7 @@ const maxPatchPreviewChars = 50000
 
 type ToolRuntime struct {
 	sink              EventSink
+	sinkMu            sync.Mutex
 	permissionContext tool.PermissionContext
 }
 
@@ -190,7 +192,7 @@ func (rt *ToolRuntime) emitArtifacts(
 		if artifact.Action == tool.ArtifactActionCreated {
 			eventType = ArtifactCreatedEventType
 		}
-		rt.sink.Emit(AwakenEvent{
+		rt.emitEvent(AwakenEvent{
 			Type:                eventType,
 			Timestamp:           timeNowUTC(),
 			ToolCallID:          result.ToolCallID,
@@ -210,7 +212,7 @@ func (rt *ToolRuntime) emitCommandOutput(result ToolExecutionResult, output tool
 	if output.Delta == "" {
 		return
 	}
-	rt.sink.Emit(AwakenEvent{
+	rt.emitEvent(AwakenEvent{
 		Type:          CommandOutputEventType,
 		Timestamp:     timeNowUTC(),
 		ToolCallID:    result.ToolCallID,
@@ -231,7 +233,7 @@ func (rt *ToolRuntime) emitPatchPreview(result ToolExecutionResult, selectedTool
 		return
 	}
 	limited := outputlimit.Limit(preview.Patch, maxPatchPreviewChars)
-	rt.sink.Emit(AwakenEvent{
+	rt.emitEvent(AwakenEvent{
 		Type:                  PatchUpdatedEventType,
 		Timestamp:             timeNowUTC(),
 		ToolCallID:            result.ToolCallID,
@@ -241,6 +243,12 @@ func (rt *ToolRuntime) emitPatchPreview(result ToolExecutionResult, selectedTool
 		ApprovalAffectedPaths: preview.AffectedPaths,
 		Truncated:             preview.Truncated || limited.Truncated,
 	})
+}
+
+func (rt *ToolRuntime) emitEvent(event AwakenEvent) {
+	rt.sinkMu.Lock()
+	defer rt.sinkMu.Unlock()
+	rt.sink.Emit(event)
 }
 
 type toolObserverFunc func(tool.CommandOutput)

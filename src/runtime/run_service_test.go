@@ -1210,6 +1210,18 @@ func TestListThreadsReturnsRuntimeThreads(t *testing.T) {
 	if threads[0].Label != "hello thread" {
 		t.Fatalf("expected thread label from first input, got %q", threads[0].Label)
 	}
+	if threads[0].LatestRun == nil {
+		t.Fatalf("expected latest run summary to be populated")
+	}
+	if threads[0].LatestRun.RunID != run.RunID {
+		t.Fatalf("expected latest run summary id %q, got %q", run.RunID, threads[0].LatestRun.RunID)
+	}
+	if threads[0].LatestRun.Status != RunStatusFinished {
+		t.Fatalf("expected latest run status finished, got %s", threads[0].LatestRun.Status)
+	}
+	if threads[0].LatestRun.UpdatedAt.IsZero() {
+		t.Fatalf("expected latest run updated_at to be populated")
+	}
 }
 
 func TestGetThreadTranscriptReturnsOrderedRunsAndInputs(t *testing.T) {

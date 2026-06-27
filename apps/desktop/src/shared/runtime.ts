@@ -41,9 +41,26 @@ export type RuntimeThreadWire = {
   label: string;
   run_id?: string;
   active_run_id?: string;
+  latest_run?: RuntimeThreadRunSummaryWire;
   workspace: WorkspaceConfigWire;
   created_at: string;
   updated_at: string;
+};
+
+export type RuntimeThreadRunSummaryWire = {
+  run_id: string;
+  status: RuntimeRunStatus;
+  error?: string;
+  updated_at: string;
+  finished_at?: string | null;
+};
+
+export type RuntimeThreadRunSummary = {
+  runId: string;
+  status: RuntimeRunStatus;
+  error?: string;
+  updatedAt: string;
+  finishedAt?: string;
 };
 
 export type RuntimeThread = {
@@ -51,6 +68,7 @@ export type RuntimeThread = {
   label: string;
   runId?: string;
   activeRunId?: string;
+  latestRun?: RuntimeThreadRunSummary;
   workspace: WorkspaceConfig;
   createdAt: string;
   updatedAt: string;
@@ -201,6 +219,15 @@ export function normalizeRuntimeThread(thread: RuntimeThreadWire): RuntimeThread
     label: thread.label,
     runId: thread.run_id || undefined,
     activeRunId: thread.active_run_id || undefined,
+    latestRun: thread.latest_run
+      ? {
+          runId: thread.latest_run.run_id,
+          status: thread.latest_run.status,
+          error: thread.latest_run.error,
+          updatedAt: thread.latest_run.updated_at,
+          finishedAt: thread.latest_run.finished_at ?? undefined,
+        }
+      : undefined,
     workspace: {
       workspaceRoot: thread.workspace.workspace_root,
       writableRoots: thread.workspace.writable_roots ?? [],

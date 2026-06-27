@@ -64,6 +64,8 @@ export type ThreadItem = {
   runId?: string;
   activeRunId?: string;
   runStatus?: RuntimeRunStatus;
+  updatedAt?: string;
+  lastError?: string;
   approvalCount?: number;
   artifactCount?: number;
 };
@@ -129,7 +131,7 @@ export type RuntimeAction =
   | { type: "run/recovered"; run: RuntimeRun; prompt?: string }
   | { type: "run/threadReplayStarted"; threadId: string; runId?: string }
   | { type: "run/threadsLoaded"; threads: RuntimeThread[] }
-  | { type: "run/threadAdded"; threadId: string; label: string; runId: string }
+  | { type: "run/threadAdded"; threadId: string; label: string; runId: string; updatedAt?: string }
   | { type: "run/threadSwitch"; threadId: string }
   | { type: "run/event"; event: AguiEvent; receivedAtMs?: number }
   | { type: "supervisor/status-changed"; info: SupervisorStatusInfo };
@@ -228,7 +230,9 @@ function threadItemFromRuntime(thread: RuntimeThread): ThreadItem {
     label: thread.label || "Untitled thread",
     runId: thread.runId,
     activeRunId: thread.activeRunId,
-    runStatus: thread.activeRunId ? "running" : undefined,
+    runStatus: thread.latestRun?.status ?? (thread.activeRunId ? "running" : undefined),
+    updatedAt: thread.latestRun?.updatedAt ?? thread.updatedAt,
+    lastError: thread.latestRun?.error,
     approvalCount: 0,
     artifactCount: 0,
   };
@@ -238,13 +242,17 @@ function isActiveRunStatus(status?: RuntimeRunStatus): boolean {
   return status === "running" || status === "awaiting_approval" || status === "cancelling";
 }
 
-function syncActiveThreadSummary(state: RuntimeViewState): RuntimeViewState {
+function syncActiveThreadSummary(
+  state: RuntimeViewState,
+  options: { updatedAt?: string; lastError?: string } = {},
+): RuntimeViewState {
   const threadId = state.threadId ?? state.activeThreadId;
   if (!threadId) {
     return state;
   }
 
   const existing = state.threads.find((thread) => thread.threadId === threadId);
+  const runStatus = state.status ?? existing?.runStatus;
   return {
     ...state,
     threads: upsertThread(state.threads, {
@@ -252,7 +260,11 @@ function syncActiveThreadSummary(state: RuntimeViewState): RuntimeViewState {
       label: existing?.label || state.prompt || "Untitled thread",
       runId: state.runId ?? existing?.runId,
       activeRunId: isActiveRunStatus(state.status) ? state.runId : undefined,
-      runStatus: state.status ?? existing?.runStatus,
+      runStatus,
+      updatedAt: options.updatedAt ?? existing?.updatedAt,
+      lastError: options.lastError ?? (
+        runStatus === "error" ? state.errorMessage ?? existing?.lastError : undefined
+      ),
       approvalCount: state.approvals.length,
       artifactCount: state.artifacts.length,
     }),
@@ -298,6 +310,13 @@ function scopeNarrativeEvent(event: AguiEvent, state: RuntimeViewState): AguiEve
 
 function validTimestamp(value?: number): value is number {
   return typeof value === "number" && Number.isFinite(value);
+}
+
+function timestampToISO(value?: number): string | undefined {
+  if (!validTimestamp(value) || value <= 0) {
+    return undefined;
+  }
+  return new Date(value).toISOString();
 }
 
 function isSuccessfulTerminalEvent(event: AguiEvent): boolean {
@@ -666,6 +685,9 @@ export function reduceRuntimeState(
         syncActiveThreadSummary({
           ...syncFromRun(state, action.run),
           activeThreadId: action.run.threadId,
+        }, {
+          updatedAt: action.run.updatedAt,
+          lastError: action.run.error,
         }),
       );
     case "run/createFailed":
@@ -694,7 +716,12 @@ export function reduceRuntimeState(
         }),
       );
     case "run/cancelSync":
-      return saveActiveThreadView(syncActiveThreadSummary(syncFromRun(state, action.run)));
+      return saveActiveThreadView(
+        syncActiveThreadSummary(syncFromRun(state, action.run), {
+          updatedAt: action.run.updatedAt,
+          lastError: action.run.error,
+        }),
+      );
     case "run/streamError":
       return saveActiveThreadView(
         syncActiveThreadSummary({
@@ -789,7 +816,9 @@ export function reduceRuntimeState(
         const existing = state.threads.find((item) => item.threadId === thread.threadId);
         return {
           ...threadItemFromRuntime(thread),
-          runStatus: existing?.runStatus ?? (thread.activeRunId ? "running" : undefined),
+          runStatus: thread.latestRun?.status ?? existing?.runStatus ?? (thread.activeRunId ? "running" : undefined),
+          updatedAt: thread.latestRun?.updatedAt ?? thread.updatedAt ?? existing?.updatedAt,
+          lastError: thread.latestRun ? thread.latestRun.error : existing?.lastError,
           approvalCount: existing?.approvalCount ?? 0,
           artifactCount: existing?.artifactCount ?? 0,
         };
@@ -826,6 +855,7 @@ export function reduceRuntimeState(
           runId: action.runId,
           activeRunId: action.runId,
           runStatus: "running",
+          updatedAt: action.updatedAt,
           approvalCount: 0,
           artifactCount: 0,
         }),
@@ -1225,7 +1255,14 @@ export function reduceRuntimeState(
             nextState.runId,
           )
         : projectedNarrative;
-      return saveActiveThreadView(syncActiveThreadSummary(nextState));
+      return saveActiveThreadView(
+        syncActiveThreadSummary(nextState, {
+          updatedAt: timestampToISO(action.event.timestamp) ?? timestampToISO(action.receivedAtMs),
+          lastError: action.event.type === "RUN_ERROR"
+            ? nextState.errorMessage
+            : undefined,
+        }),
+      );
     }
     case "supervisor/status-changed":
       return {

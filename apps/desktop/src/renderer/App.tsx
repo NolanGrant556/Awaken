@@ -44,19 +44,18 @@ import {
   AwakenWorkbenchSidebarFrame as WorkbenchSidebarFrame,
   AwakenRunStage as RunStage,
   AwakenComposerDock as ComposerDock,
-  type ComponentTone,
   type ComposerBarMetaItem,
   type InspectorTabId,
   type NavItem,
   type PlatformKind,
   type ProjectItem,
 } from "@awaken/design-system";
+import { TaskCenterPanel } from "./TaskCenterPanel";
 import { createRuntimeClient, type SubscribeHandlers } from "./runtime/client";
 import type { RuntimeInfo, RuntimeRunStatus, StartRunRequest } from "../shared/runtime";
 import {
   createInitialRuntimeState,
   reduceRuntimeState,
-  type ThreadItem,
   type RuntimeAction,
 } from "./runtime/reducer";
 import type { ApprovalDecision } from "../shared/runtime";
@@ -85,6 +84,7 @@ import {
   actionsForThreadTranscript,
   afterSeqForTranscriptRun,
 } from "./runtime/thread-transcript";
+import { describeThreadStatus } from "./threadPresentation";
 import {
   DEFAULT_WORKSPACE_PROJECT_ID,
   assignThreadToProject,
@@ -119,38 +119,6 @@ function formatStatusLabel(
       return "Error";
     default:
       return "Idle";
-  }
-}
-
-function sidebarStatusForThread(
-  thread: ThreadItem,
-): { label: string; tone: ComponentTone } {
-  if ((thread.approvalCount ?? 0) > 0 || thread.runStatus === "awaiting_approval") {
-    return { label: "needs input", tone: "permission" };
-  }
-
-  switch (thread.runStatus) {
-    case "cancelling":
-      return { label: "cancelling", tone: "warning" };
-    case "cancelled":
-      return { label: "cancelled", tone: "neutral" };
-    case "error":
-      return { label: "error", tone: "error" };
-    case "finished":
-      return { label: "done", tone: "success" };
-    case "running":
-      if ((thread.artifactCount ?? 0) > 0) {
-        return { label: "ready for review", tone: "warning" };
-      }
-      return { label: "running", tone: "local" };
-    default:
-      if (thread.activeRunId) {
-        return { label: "running", tone: "local" };
-      }
-      if ((thread.artifactCount ?? 0) > 0) {
-        return { label: "ready for review", tone: "warning" };
-      }
-      return { label: "idle", tone: "neutral" };
   }
 }
 
@@ -278,6 +246,8 @@ export function App() {
   const [activeTurnMarkerId, setActiveTurnMarkerId] = useState<string | undefined>();
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
+  const [taskCenterOpen, setTaskCenterOpen] = useState(false);
+  const [threadListError, setThreadListError] = useState<string | null>(null);
   const [latestTurnMinHeightPx, setLatestTurnMinHeightPx] = useState(0);
   const [composerDockHeightPx, setComposerDockHeightPx] = useState(0);
   const [runStageViewportHeightPx, setRunStageViewportHeightPx] = useState(0);
@@ -487,9 +457,9 @@ export function App() {
     try {
       const threads = await runtimeClient.listThreads();
       dispatch({ type: "run/threadsLoaded", threads });
-    } catch {
-      // Thread listing is best-effort; runtime reachability is already surfaced
-      // by the runtime info poll.
+      setThreadListError(null);
+    } catch (error) {
+      setThreadListError(error instanceof Error ? error.message : "Failed to load task list");
     }
   }
 
@@ -607,7 +577,7 @@ export function App() {
     return runtimeState.threads
       .filter((thread) => projectIdForThread(thread.threadId, threadProjectIds) === projectId)
       .map((thread) => {
-        const sidebarStatus = sidebarStatusForThread(thread);
+        const sidebarStatus = describeThreadStatus(thread);
         const timeLabel =
           thread.threadId === runtimeState.activeThreadId || sidebarStatus.label === "idle"
             ? undefined
@@ -1269,6 +1239,7 @@ export function App() {
         threadId: run.threadId,
         label: prompt,
         runId: run.runId,
+        updatedAt: run.updatedAt,
       });
       void refreshThreads();
       localStorage.setItem("awaken:runId", run.runId);
@@ -1989,6 +1960,26 @@ export function App() {
               onNewTask={handleNewTask}
               right={
                 <div className="workbench-chrome-status">
+                  <TaskCenterPanel
+                    open={taskCenterOpen}
+                    activeThreadId={runtimeState.activeThreadId}
+                    errorMessage={threadListError}
+                    threads={runtimeState.threads}
+                    onRefresh={() => {
+                      void refreshThreads();
+                    }}
+                    onSelectThread={(threadId) => {
+                      setTaskCenterOpen(false);
+                      void handleSelectConversation(threadId);
+                    }}
+                    onToggle={() => {
+                      const nextOpen = !taskCenterOpen;
+                      setTaskCenterOpen(nextOpen);
+                      if (nextOpen) {
+                        void refreshThreads();
+                      }
+                    }}
+                  />
                   {topbarStatusLabel ? (
                     <span className="workbench-chrome-state">{topbarStatusLabel}</span>
                   ) : null}

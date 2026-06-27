@@ -83,9 +83,18 @@ type ThreadSnapshot struct {
 	Label       string          `json:"label"`
 	RunID       string          `json:"run_id,omitempty"`
 	ActiveRunID string          `json:"active_run_id,omitempty"`
+	LatestRun   *ThreadRunBrief `json:"latest_run,omitempty"`
 	Workspace   WorkspaceConfig `json:"workspace"`
 	CreatedAt   time.Time       `json:"created_at"`
 	UpdatedAt   time.Time       `json:"updated_at"`
+}
+
+type ThreadRunBrief struct {
+	RunID      string     `json:"run_id"`
+	Status     RunStatus  `json:"status"`
+	Error      string     `json:"error,omitempty"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
 }
 
 type ThreadTranscriptRun struct {
@@ -190,7 +199,7 @@ func (s *RunService) ListThreads() []ThreadSnapshot {
 
 	threads := make([]ThreadSnapshot, 0, len(s.threads))
 	for _, thread := range s.threads {
-		threads = append(threads, thread.snapshot())
+		threads = append(threads, thread.snapshot(s.latestRunBriefLocked(thread)))
 	}
 	sort.Slice(threads, func(i, j int) bool {
 		return threads[i].CreatedAt.Before(threads[j].CreatedAt)
@@ -221,7 +230,7 @@ func (s *RunService) GetThreadTranscript(threadID string) (ThreadTranscript, err
 		s.mu.RUnlock()
 		return ThreadTranscript{}, ErrThreadNotFound
 	}
-	snapshot := thread.snapshot()
+	snapshot := thread.snapshot(s.latestRunBriefLocked(thread))
 	runIDs := append([]string(nil), thread.runIDs...)
 	sessions := make([]*Session, 0, len(runIDs))
 	for _, runID := range runIDs {
@@ -322,12 +331,31 @@ func newRuntimeID(prefix string) string {
 	return fmt.Sprintf("%s_%d_%d", prefix, time.Now().UnixNano(), seq)
 }
 
-func (t *Thread) snapshot() ThreadSnapshot {
+func (s *RunService) latestRunBriefLocked(thread *Thread) *ThreadRunBrief {
+	if thread == nil || thread.latestRunID == "" {
+		return nil
+	}
+	session, ok := s.sessions[thread.latestRunID]
+	if !ok {
+		return nil
+	}
+	run := session.Snapshot()
+	return &ThreadRunBrief{
+		RunID:      run.RunID,
+		Status:     run.Status,
+		Error:      run.Error,
+		UpdatedAt:  run.UpdatedAt,
+		FinishedAt: run.FinishedAt,
+	}
+}
+
+func (t *Thread) snapshot(latestRun *ThreadRunBrief) ThreadSnapshot {
 	return ThreadSnapshot{
 		ThreadID:    t.threadID,
 		Label:       t.label,
 		RunID:       t.latestRunID,
 		ActiveRunID: t.activeRunID,
+		LatestRun:   latestRun,
 		Workspace:   t.workspace,
 		CreatedAt:   t.createdAt,
 		UpdatedAt:   t.updatedAt,

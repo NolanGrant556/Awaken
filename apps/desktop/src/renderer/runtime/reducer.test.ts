@@ -1291,6 +1291,93 @@ describe("runtime reducer thread snapshots", () => {
     expect(state.threads).toHaveLength(1);
   });
 
+  it("prefers latest run summary from the runtime thread list", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "first prompt" },
+      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
+      { type: "run/threadAdded", threadId: "thread-1", label: "first prompt", runId: "run-1" },
+      {
+        type: "run/threadsLoaded",
+        threads: [
+          {
+            threadId: "thread-1",
+            label: "first prompt",
+            runId: "run-1",
+            activeRunId: undefined,
+            latestRun: {
+              runId: "run-1",
+              status: "error",
+              error: "provider failed",
+              updatedAt: "2026-01-01T00:05:00Z",
+              finishedAt: "2026-01-01T00:05:00Z",
+            },
+            workspace: { workspaceRoot: "/tmp", writableRoots: ["/tmp"] },
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:05:00Z",
+          },
+        ],
+      },
+    ]);
+
+    expect(state.threads[0]).toMatchObject({
+      runStatus: "error",
+      lastError: "provider failed",
+      updatedAt: "2026-01-01T00:05:00Z",
+    });
+  });
+
+  it("clears stale lastError when latest run summary becomes finished", () => {
+    const state = dispatch([
+      {
+        type: "run/threadsLoaded",
+        threads: [
+          {
+            threadId: "thread-1",
+            label: "first prompt",
+            runId: "run-1",
+            activeRunId: undefined,
+            latestRun: {
+              runId: "run-1",
+              status: "error",
+              error: "provider failed",
+              updatedAt: "2026-01-01T00:05:00Z",
+              finishedAt: "2026-01-01T00:05:00Z",
+            },
+            workspace: { workspaceRoot: "/tmp", writableRoots: ["/tmp"] },
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:05:00Z",
+          },
+        ],
+      },
+      {
+        type: "run/threadsLoaded",
+        threads: [
+          {
+            threadId: "thread-1",
+            label: "first prompt",
+            runId: "run-1",
+            activeRunId: undefined,
+            latestRun: {
+              runId: "run-1",
+              status: "finished",
+              updatedAt: "2026-01-01T00:06:00Z",
+              finishedAt: "2026-01-01T00:06:00Z",
+            },
+            workspace: { workspaceRoot: "/tmp", writableRoots: ["/tmp"] },
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:06:00Z",
+          },
+        ],
+      },
+    ]);
+
+    expect(state.threads[0]).toMatchObject({
+      runStatus: "finished",
+      lastError: undefined,
+      updatedAt: "2026-01-01T00:06:00Z",
+    });
+  });
+
   it("clears stale active thread when runtime no longer lists it", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "first prompt" },

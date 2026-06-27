@@ -56,11 +56,16 @@ func LoadConfig() Config {
 	loadEnvFile(envPath)
 	fileCfg := loadConfigFile(configPath)
 
-	apiKey := os.Getenv("LLM_API_KEY")
-	baseURL := firstNonEmpty(fileCfg.LLM.BaseURL, os.Getenv("LLM_BASE_URL"))
-	model := firstNonEmpty(fileCfg.LLM.ModelID, os.Getenv("LLM_MODEL_ID"))
-	protocol := firstNonEmpty(fileCfg.LLM.Protocol, os.Getenv("LLM_PROTOCOL"))
-	authScheme := firstNonEmpty(fileCfg.LLM.AuthScheme, os.Getenv("LLM_AUTH_SCHEME"))
+	profiles := resolveProfiles(fileCfg)
+	requestedActiveProfile := firstNonEmpty(os.Getenv("LLM_ACTIVE_PROFILE"), fileCfg.LLM.ActiveProfile)
+	activeProfile := resolveActiveProfileName(profiles, requestedActiveProfile)
+	selectedProfile := profileByName(profiles, activeProfile)
+
+	apiKey := resolveProfileAPIKey(selectedProfile)
+	baseURL := firstNonEmpty(selectedProfile.BaseURL, fileCfg.LLM.BaseURL, os.Getenv("LLM_BASE_URL"))
+	model := firstNonEmpty(selectedProfile.Model, fileCfg.LLM.ModelID, os.Getenv("LLM_MODEL_ID"))
+	protocol := firstNonEmpty(string(selectedProfile.Protocol), fileCfg.LLM.Protocol, os.Getenv("LLM_PROTOCOL"))
+	authScheme := firstNonEmpty(selectedProfile.AuthScheme, fileCfg.LLM.AuthScheme, os.Getenv("LLM_AUTH_SCHEME"))
 	temperature := fileCfg.Model.Temperature
 	maxTokens := fileCfg.Model.MaxOutputTokens
 
@@ -68,14 +73,26 @@ func LoadConfig() Config {
 		baseURL = "https://api.openai.com/v1"
 	}
 
+	protocolValue := Protocol(protocol)
+	resolvedProfiles := materializeProfiles(
+		profiles,
+		activeProfile,
+		baseURL,
+		model,
+		protocolValue,
+		authScheme,
+	)
+
 	return Config{
-		APIKey:      apiKey,
-		BaseURL:     strings.TrimSuffix(baseURL, "/"),
-		Model:       model,
-		Protocol:    Protocol(protocol),
-		Temperature: temperature,
-		MaxTokens:   maxTokens,
-		AuthScheme:  authScheme,
+		APIKey:        apiKey,
+		BaseURL:       normalizeBaseURL(baseURL),
+		Model:         model,
+		Protocol:      protocolValue,
+		Temperature:   temperature,
+		MaxTokens:     maxTokens,
+		AuthScheme:    authScheme,
+		ActiveProfile: activeProfile,
+		Profiles:      resolvedProfiles,
 	}
 }
 

@@ -21,7 +21,7 @@ func main() {
 
 	cfg := llm.LoadConfig()
 	defaultWorkspace := resolveDefaultWorkspace()
-	infoProvider := server.NewLLMRuntimeInfoProvider(cfg.Model, cfg.BaseURL, cfg.APIKey, defaultWorkspace, string(llm.ResolveProtocol(cfg)))
+	infoProvider := server.NewLLMRuntimeInfoProvider(cfg, defaultWorkspace)
 
 	runService := runtime.NewRunService(
 		func(workspace runtime.WorkspaceConfig, threadID string) *agentcore.Agent {

@@ -81,9 +81,12 @@ export type RuntimeInfoWire = {
   api_version: string;
   configured_model: string;
   protocol: string;
+  auth_scheme: string;
   has_api_key: boolean;
   default_workspace: string;
   base_url_host: string;
+  active_profile: string;
+  profiles: RuntimeProfileWire[];
 };
 
 export type RuntimeInfo = {
@@ -91,9 +94,32 @@ export type RuntimeInfo = {
   apiVersion: string;
   configuredModel: string;
   protocol: string;
+  authScheme: string;
   hasApiKey: boolean;
   defaultWorkspace: string;
   baseUrlHost: string;
+  activeProfile: string;
+  profiles: RuntimeProfile[];
+};
+
+export type RuntimeProfileWire = {
+  name: string;
+  model: string;
+  protocol: string;
+  auth_scheme: string;
+  has_api_key: boolean;
+  base_url_host: string;
+  is_active: boolean;
+};
+
+export type RuntimeProfile = {
+  name: string;
+  model: string;
+  protocol: string;
+  authScheme: string;
+  hasApiKey: boolean;
+  baseUrlHost: string;
+  isActive: boolean;
 };
 
 export type WorkspaceConfigWire = {
@@ -228,9 +254,20 @@ export function normalizeRuntimeInfo(info: RuntimeInfoWire): RuntimeInfo {
     apiVersion: info.api_version,
     configuredModel: info.configured_model,
     protocol: info.protocol,
+    authScheme: info.auth_scheme,
     hasApiKey: info.has_api_key,
     defaultWorkspace: info.default_workspace,
     baseUrlHost: info.base_url_host,
+    activeProfile: info.active_profile,
+    profiles: (info.profiles ?? []).map((profile) => ({
+      name: profile.name,
+      model: profile.model,
+      protocol: profile.protocol,
+      authScheme: profile.auth_scheme,
+      hasApiKey: profile.has_api_key,
+      baseUrlHost: profile.base_url_host,
+      isActive: profile.is_active,
+    })),
   };
 }
 

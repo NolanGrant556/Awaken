@@ -19,13 +19,25 @@ const (
 
 // Config 是 LLM 配置
 type Config struct {
-	APIKey      string
-	BaseURL     string
-	Model       string
-	Protocol    Protocol
-	Temperature float64
-	MaxTokens   int
-	AuthScheme  string
+	APIKey        string
+	BaseURL       string
+	Model         string
+	Protocol      Protocol
+	Temperature   float64
+	MaxTokens     int
+	AuthScheme    string
+	ActiveProfile string
+	Profiles      []Profile
+}
+
+type Profile struct {
+	Name       string
+	BaseURL    string
+	Model      string
+	Protocol   Protocol
+	AuthScheme string
+	APIKeyEnv  string
+	HasAPIKey  bool
 }
 
 // Request 是统一请求结构

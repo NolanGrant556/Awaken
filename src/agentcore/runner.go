@@ -14,6 +14,7 @@ import (
 	"awaken/src/internal/outputlimit"
 	"awaken/src/llm"
 	"awaken/src/tool"
+	"awaken/src/usage"
 )
 
 const maxTurnDiffChars = 50000
@@ -148,6 +149,12 @@ func (r *Runner) buildLLMRequest() (LLMRequest, error) {
 	if err := context.ValidateToolResultPairing(llmReq.Messages); err != nil {
 		return LLMRequest{}, fmt.Errorf("invalid tool result pairing: %w", err)
 	}
+	if r.config.UsageLimits.Enabled() {
+		estimate := usage.EstimateInput(llmReq.SystemPrompt, "", llmReq.Messages, llmReq.Tools)
+		if err := usage.NewBudgetGuard(r.config.UsageLimits).Check(estimate); err != nil {
+			return LLMRequest{}, err
+		}
+	}
 	return llmReq, nil
 }
 
@@ -161,7 +168,7 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*ll
 		observer.OnContent = llm.StreamCallback(events.onLLMDelta)
 		observer.OnToolCallDelta = events.onToolCallArgsDelta
 	}
-	return llm.StreamInvokeWithObserver(ctx, llm.Config{
+	response, err := llm.StreamInvokeWithObserver(ctx, llm.Config{
 		APIKey:      r.config.ModelConfig.APIKey,
 		BaseURL:     r.config.ModelConfig.BaseURL,
 		Model:       llmReq.Model,
@@ -173,6 +180,18 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*ll
 		Messages:     llmReq.Messages,
 		Tools:        llmReq.Tools,
 	}, observer)
+	if err != nil {
+		return nil, err
+	}
+	r.recordUsage(response)
+	return response, nil
+}
+
+func (r *Runner) recordUsage(response *llm.Response) {
+	if r.config.UsageLedger == nil || response == nil || response.Usage == nil {
+		return
+	}
+	r.config.UsageLedger.RecordUsage(*response.Usage)
 }
 
 func (r *Runner) handleXMLFallback(ctx stdcontext.Context, response string, events *runEventEmitter) (bool, string) {

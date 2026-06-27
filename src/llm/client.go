@@ -13,6 +13,7 @@ import (
 	"time"
 
 	ctx "awaken/src/context"
+	"awaken/src/usage"
 )
 
 var (
@@ -241,7 +242,11 @@ func Invoke(ctx stdctx.Context, cfg Config, req Request) (*Response, error) {
 	}
 
 	transport := getTransport(cfg)
-	return transport.Invoke(ctx, cfg, req)
+	resp, err := transport.Invoke(ctx, cfg, req)
+	if err != nil {
+		return nil, err
+	}
+	return attachUsageMetadata(cfg, req, resp), nil
 }
 
 // StreamCall 流式调用（兼容旧 API）
@@ -267,9 +272,49 @@ func StreamInvokeWithObserver(ctx stdctx.Context, cfg Config, req Request, obser
 
 	transport := getTransport(cfg)
 	if observerTransport, ok := transport.(observerTransport); ok {
-		return observerTransport.StreamInvokeWithObserver(ctx, cfg, req, observer)
+		resp, err := observerTransport.StreamInvokeWithObserver(ctx, cfg, req, observer)
+		if err != nil {
+			return nil, err
+		}
+		return attachUsageMetadata(cfg, req, resp), nil
 	}
-	return transport.StreamInvoke(ctx, cfg, req, observer.OnContent)
+	resp, err := transport.StreamInvoke(ctx, cfg, req, observer.OnContent)
+	if err != nil {
+		return nil, err
+	}
+	return attachUsageMetadata(cfg, req, resp), nil
+}
+
+func attachUsageMetadata(cfg Config, req Request, resp *Response) *Response {
+	if resp == nil {
+		return nil
+	}
+
+	metadata := usage.Metadata{
+		Provider: usage.ProviderFromBaseURL(cfg.BaseURL),
+		Protocol: string(resolveProtocol(cfg)),
+		Model:    resolveModel(cfg, req),
+	}
+
+	if resp.Usage == nil {
+		estimate := usage.EstimateInput(req.SystemPrompt, req.UserPrompt, req.Messages, req.Tools)
+		record := usage.NewEstimatedRecord(metadata, estimate)
+		resp.Usage = &record
+		return resp
+	}
+
+	record := usage.NormalizeRecord(*resp.Usage)
+	if record.Provider == "" {
+		record.Provider = metadata.Provider
+	}
+	if record.Protocol == "" {
+		record.Protocol = metadata.Protocol
+	}
+	if record.Model == "" {
+		record.Model = metadata.Model
+	}
+	resp.Usage = &record
+	return resp
 }
 
 // CallWithContext 使用 Conversation Context 调用

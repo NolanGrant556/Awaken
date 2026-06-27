@@ -11,6 +11,7 @@ import (
 
 	"awaken/src/context"
 	"awaken/src/tool"
+	"awaken/src/usage"
 )
 
 // anthropicTransport 实现 Anthropic Messages 协议
@@ -47,6 +48,12 @@ type anthropicTool struct {
 type anthropicResponse struct {
 	Content    []anthropicContentBlock `json:"content"`
 	StopReason string                  `json:"stop_reason"`
+	Usage      *anthropicUsage         `json:"usage,omitempty"`
+}
+
+type anthropicUsage struct {
+	InputTokens  int `json:"input_tokens,omitempty"`
+	OutputTokens int `json:"output_tokens,omitempty"`
 }
 
 type anthropicContentBlock struct {
@@ -64,6 +71,10 @@ type anthropicStreamEvent struct {
 	Index        int                    `json:"index,omitempty"`
 	ContentBlock *anthropicContentBlock `json:"content_block,omitempty"`
 	Delta        *anthropicStreamDelta  `json:"delta,omitempty"`
+	Message      *struct {
+		Usage *anthropicUsage `json:"usage,omitempty"`
+	} `json:"message,omitempty"`
+	Usage *anthropicUsage `json:"usage,omitempty"`
 }
 
 type anthropicStreamDelta struct {
@@ -345,6 +356,9 @@ func responseFromAnthropic(resp anthropicResponse) (*Response, error) {
 	result := &Response{
 		IsFinished: resp.StopReason != "tool_use",
 	}
+	if resp.Usage != nil {
+		result.Usage = usageRecordFromAnthropic(resp.Usage)
+	}
 
 	for _, block := range resp.Content {
 		switch block.Type {
@@ -375,6 +389,8 @@ type anthropicStreamState struct {
 	content     strings.Builder
 	toolCalls   []ToolCall
 	currentTool *anthropicToolAccumulator
+	usage       anthropicUsage
+	hasUsage    bool
 }
 
 type anthropicToolAccumulator struct {
@@ -395,6 +411,12 @@ func (s *anthropicStreamState) consume(data string, event string) {
 	var streamEvent anthropicStreamEvent
 	if err := json.Unmarshal([]byte(data), &streamEvent); err != nil {
 		return
+	}
+	if streamEvent.Message != nil && streamEvent.Message.Usage != nil {
+		s.mergeUsage(streamEvent.Message.Usage)
+	}
+	if streamEvent.Usage != nil {
+		s.mergeUsage(streamEvent.Usage)
 	}
 
 	switch streamEvent.Type {
@@ -467,8 +489,37 @@ func (s *anthropicStreamState) response() (*Response, error) {
 		ToolCalls:  s.toolCalls,
 		IsFinished: len(s.toolCalls) == 0,
 	}
+	if s.hasUsage {
+		result.Usage = usageRecordFromAnthropic(&s.usage)
+	}
 	if result.Content == "" && len(result.ToolCalls) == 0 {
 		return nil, ErrEmptyResponse
 	}
 	return result, nil
+}
+
+func (s *anthropicStreamState) mergeUsage(next *anthropicUsage) {
+	if next == nil {
+		return
+	}
+	if next.InputTokens > 0 {
+		s.usage.InputTokens = next.InputTokens
+	}
+	if next.OutputTokens > 0 {
+		s.usage.OutputTokens = next.OutputTokens
+	}
+	s.hasUsage = true
+}
+
+func usageRecordFromAnthropic(anthropicUsage *anthropicUsage) *usage.Record {
+	if anthropicUsage == nil {
+		return nil
+	}
+	record := usage.NormalizeRecord(usage.Record{
+		PromptTokens:     anthropicUsage.InputTokens,
+		CompletionTokens: anthropicUsage.OutputTokens,
+		TotalTokens:      anthropicUsage.InputTokens + anthropicUsage.OutputTokens,
+		RequestCount:     1,
+	})
+	return &record
 }

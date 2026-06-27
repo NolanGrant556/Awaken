@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"awaken/src/checkpoints"
 	"awaken/src/tool"
 )
 
@@ -51,11 +52,28 @@ func (t *ApplyPatchTool) Execute(ctx context.Context, input string) (string, err
 		}
 	}
 
+	var checkpoint checkpoints.Checkpoint
+	var hasCheckpoint bool
+	if tool.HasPermissionContext(ctx) {
+		checkpoint, err = checkpoints.Create(ctx, permissionContext, checkpointAffectedPaths(patch))
+		if err != nil {
+			return "", err
+		}
+		hasCheckpoint = true
+	}
+
 	summary, err := applyPatch(ctx, patch)
 	if err != nil {
+		if hasCheckpoint {
+			return "", fmt.Errorf("patch failed after checkpoint %s (%s): %w", checkpoint.ID, checkpoint.SummaryString(), err)
+		}
 		return "", err
 	}
-	return summary.String(), nil
+	output := summary.String()
+	if hasCheckpoint {
+		output += fmt.Sprintf("Checkpoint: %s (%s)\n", checkpoint.ID, checkpoint.SummaryString())
+	}
+	return output, nil
 }
 
 func (t *ApplyPatchTool) Artifacts(input string, output string, permissionContext tool.PermissionContext) []tool.ArtifactDescriptor {
@@ -149,6 +167,33 @@ func resolvePatchPaths(patch *patchDocument, permissionContext tool.PermissionCo
 		}
 	}
 	return patch
+}
+
+func checkpointAffectedPaths(patch *patchDocument) []string {
+	if patch == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	paths := make([]string, 0, len(patch.operations)*2)
+	for _, op := range patch.operations {
+		addCheckpointPath(seen, &paths, op.path)
+		if strings.TrimSpace(op.movePath) != "" {
+			addCheckpointPath(seen, &paths, op.movePath)
+		}
+	}
+	return paths
+}
+
+func addCheckpointPath(seen map[string]struct{}, paths *[]string, path string) {
+	path = filepath.Clean(strings.TrimSpace(path))
+	if path == "." || path == "" {
+		return
+	}
+	if _, ok := seen[path]; ok {
+		return
+	}
+	seen[path] = struct{}{}
+	*paths = append(*paths, path)
 }
 
 func (t *ApplyPatchTool) CheckPermission(ctx context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {

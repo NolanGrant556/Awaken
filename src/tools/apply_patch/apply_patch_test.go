@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"awaken/src/checkpoints"
 	"awaken/src/tool"
 )
 
@@ -380,6 +381,62 @@ func TestApplyPatchRelativePathResolvesToWorkspace(t *testing.T) {
 	assertFileContent(t, target, "hello\n")
 }
 
+func TestApplyPatchCreatesCheckpointBeforeMutation(t *testing.T) {
+	workspace := t.TempDir()
+	writeSeedFile(t, filepath.Join(workspace, "note.md"), "before\n")
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(workspace, nil))
+
+	out, err := (&ApplyPatchTool{}).Execute(ctx, "*** Begin Patch\n"+
+		"*** Update File: note.md\n"+
+		"@@\n"+
+		"-before\n"+
+		"+after\n"+
+		"*** Add File: new.md\n"+
+		"+created\n"+
+		"*** End Patch")
+	if err != nil {
+		t.Fatalf("patch failed: %v", err)
+	}
+
+	checkpointID := checkpointIDFromOutput(t, out)
+	checkpoint, ok := checkpoints.DefaultStore().Get(checkpointID)
+	if !ok {
+		t.Fatalf("expected checkpoint %q to be stored", checkpointID)
+	}
+	if checkpoint.WorkspaceRoot != workspace {
+		t.Fatalf("expected checkpoint root %q, got %q", workspace, checkpoint.WorkspaceRoot)
+	}
+	if len(checkpoint.Snapshots) != 2 {
+		t.Fatalf("expected 2 snapshots, got %+v", checkpoint.Snapshots)
+	}
+	if checkpoint.Snapshots[0].Path != "note.md" || checkpoint.Snapshots[0].State != checkpoints.FileStateExisting {
+		t.Fatalf("unexpected existing snapshot: %+v", checkpoint.Snapshots[0])
+	}
+	if string(checkpoint.Snapshots[0].Content) != "before\n" {
+		t.Fatalf("expected before content, got %q", string(checkpoint.Snapshots[0].Content))
+	}
+	if checkpoint.Snapshots[1].Path != "new.md" || checkpoint.Snapshots[1].State != checkpoints.FileStateMissing {
+		t.Fatalf("unexpected missing snapshot: %+v", checkpoint.Snapshots[1])
+	}
+	if !strings.Contains(out, "Checkpoint: "+checkpointID+" (1 existing, 1 missing)") {
+		t.Fatalf("expected checkpoint summary in output, got %q", out)
+	}
+	assertFileContent(t, filepath.Join(workspace, "note.md"), "after\n")
+	assertFileContent(t, filepath.Join(workspace, "new.md"), "created\n")
+}
+
+func TestApplyPatchSkipsCheckpointWithoutPermissionContext(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "note.md")
+
+	out := applyPatchText(t, "*** Begin Patch\n"+
+		"*** Add File: "+target+"\n"+
+		"+hello\n"+
+		"*** End Patch")
+	if strings.Contains(out, "Checkpoint:") {
+		t.Fatalf("expected direct execution without permission context to skip checkpoint, got %q", out)
+	}
+}
+
 func TestApplyPatchCheckPermissionSymlinkEscapeMarkedDanger(t *testing.T) {
 	workspace := t.TempDir()
 	outside := t.TempDir()
@@ -555,4 +612,18 @@ func assertPathMissing(t *testing.T, path string) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("expected %s to be missing, stat err=%v", path, err)
 	}
+}
+
+func checkpointIDFromOutput(t *testing.T, output string) string {
+	t.Helper()
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, "Checkpoint: ") {
+			fields := strings.Fields(strings.TrimPrefix(line, "Checkpoint: "))
+			if len(fields) > 0 {
+				return fields[0]
+			}
+		}
+	}
+	t.Fatalf("checkpoint id not found in output %q", output)
+	return ""
 }

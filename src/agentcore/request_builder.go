@@ -3,6 +3,7 @@ package agentcore
 import (
 	"strings"
 
+	"awaken/src/llm"
 	"awaken/src/prompt"
 	"awaken/src/tool"
 )
@@ -39,6 +40,22 @@ func (rb *RequestBuilder) Build(ctx ContextProvider, tools []tool.ToolDefinition
 		Model:        rb.config.ModelConfig.Model,
 		Temperature:  rb.config.ModelConfig.Temperature,
 		MaxTokens:    rb.config.ModelConfig.MaxTokens,
+		Cache:        rb.buildRequestCacheMetadata(systemPrompt),
+	}
+}
+
+func (rb *RequestBuilder) buildRequestCacheMetadata(systemPrompt string) llm.RequestCacheMetadata {
+	if !rb.config.PromptCache.SystemPrompt {
+		return llm.RequestCacheMetadata{}
+	}
+	if strings.TrimSpace(systemPrompt) == "" {
+		return llm.RequestCacheMetadata{}
+	}
+	if min := rb.config.PromptCache.MinSystemPromptBytes; min > 0 && len(systemPrompt) < min {
+		return llm.RequestCacheMetadata{}
+	}
+	return llm.RequestCacheMetadata{
+		SystemPromptCacheControl: llm.CacheControl{Type: llm.CacheControlTypeEphemeral},
 	}
 }
 

@@ -2,6 +2,7 @@ package agentcore
 
 import (
 	"awaken/src/context"
+	"awaken/src/llm"
 	"awaken/src/prompt"
 	"awaken/src/tool"
 )
@@ -12,6 +13,7 @@ type AgentConfig struct {
 	ModelConfig  ModelConfig
 	EntryPoint   string
 	Workspace    WorkspaceConfig
+	PromptCache  PromptCacheConfig
 }
 
 type WorkspaceConfig struct {
@@ -28,6 +30,11 @@ type ModelConfig struct {
 	AuthScheme  string
 }
 
+type PromptCacheConfig struct {
+	SystemPrompt         bool
+	MinSystemPromptBytes int
+}
+
 type LLMRequest struct {
 	SystemPrompt string
 	Messages     []context.Message
@@ -35,6 +42,7 @@ type LLMRequest struct {
 	Model        string
 	Temperature  float64
 	MaxTokens    int
+	Cache        llm.RequestCacheMetadata
 }
 
 type RuntimeInfoProvider interface {

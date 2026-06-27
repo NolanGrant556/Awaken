@@ -24,7 +24,7 @@ func newAnthropicTransport() *anthropicTransport {
 
 type anthropicRequest struct {
 	Model     string             `json:"model"`
-	System    string             `json:"system,omitempty"`
+	System    interface{}        `json:"system,omitempty"`
 	Messages  []anthropicMessage `json:"messages"`
 	Tools     []anthropicTool    `json:"tools,omitempty"`
 	MaxTokens int                `json:"max_tokens"`
@@ -40,6 +40,16 @@ type anthropicTool struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description,omitempty"`
 	InputSchema map[string]interface{} `json:"input_schema"`
+}
+
+type anthropicSystemTextBlock struct {
+	Type         string                 `json:"type"`
+	Text         string                 `json:"text"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+}
+
+type anthropicCacheControl struct {
+	Type string `json:"type"`
 }
 
 // --- 响应结构 ---
@@ -92,7 +102,7 @@ func (t *anthropicTransport) Invoke(ctx stdctx.Context, cfg Config, req Request)
 
 	anthropicReq := anthropicRequest{
 		Model:     resolveModel(cfg, req),
-		System:    req.SystemPrompt,
+		System:    buildAnthropicSystem(req),
 		Messages:  messages,
 		Tools:     convertToolsToAnthropic(req.Tools),
 		MaxTokens: resolveMaxTokens(cfg, req),
@@ -141,7 +151,7 @@ func (t *anthropicTransport) StreamInvokeWithObserver(ctx stdctx.Context, cfg Co
 
 	anthropicReq := anthropicRequest{
 		Model:     resolveModel(cfg, req),
-		System:    req.SystemPrompt,
+		System:    buildAnthropicSystem(req),
 		Messages:  messages,
 		Tools:     convertToolsToAnthropic(req.Tools),
 		MaxTokens: resolveMaxTokens(cfg, req),
@@ -202,6 +212,24 @@ func (t *anthropicTransport) StreamInvokeWithObserver(ctx stdctx.Context, cfg Co
 }
 
 // --- 消息转换 ---
+
+func buildAnthropicSystem(req Request) interface{} {
+	if req.SystemPrompt == "" {
+		return nil
+	}
+	if req.Cache.SystemPromptCacheControl.Type != CacheControlTypeEphemeral {
+		return req.SystemPrompt
+	}
+	return []anthropicSystemTextBlock{
+		{
+			Type: "text",
+			Text: req.SystemPrompt,
+			CacheControl: &anthropicCacheControl{
+				Type: string(CacheControlTypeEphemeral),
+			},
+		},
+	}
+}
 
 func buildAnthropicMessages(req Request) ([]anthropicMessage, error) {
 	var messages []anthropicMessage

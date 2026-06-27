@@ -265,9 +265,26 @@ func handleRuntimeInfo(w http.ResponseWriter, r *http.Request, provider RuntimeI
 		return
 	}
 
-	data, err := json.Marshal(provider.GetRuntimeInfo())
+	data, err := json.Marshal(sanitizeRuntimeInfo(provider.GetRuntimeInfo()))
 	if err != nil {
 		http.Error(w, "failed to serialize runtime info", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
+func handleCapabilities(w http.ResponseWriter, r *http.Request, provider RuntimeInfoProvider) {
+	if provider == nil {
+		http.Error(w, "capabilities unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	data, err := json.Marshal(sanitizeCapabilitiesSnapshot(provider.GetRuntimeInfo().Capabilities))
+	if err != nil {
+		http.Error(w, "failed to serialize capabilities", http.StatusInternalServerError)
 		return
 	}
 

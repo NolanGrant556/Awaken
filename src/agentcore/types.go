@@ -2,7 +2,9 @@ package agentcore
 
 import (
 	"awaken/src/context"
+	"awaken/src/mcp"
 	"awaken/src/prompt"
+	"awaken/src/skills"
 	"awaken/src/tool"
 )
 
@@ -12,6 +14,8 @@ type AgentConfig struct {
 	ModelConfig  ModelConfig
 	EntryPoint   string
 	Workspace    WorkspaceConfig
+	MCPRegistry  mcp.Registry
+	Skills       skills.Registry
 }
 
 type WorkspaceConfig struct {

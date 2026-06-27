@@ -8,8 +8,10 @@ import (
 
 	"awaken/src/agentcore"
 	"awaken/src/llm"
+	"awaken/src/mcp"
 	"awaken/src/runtime"
 	"awaken/src/server"
+	"awaken/src/skills"
 	_ "awaken/src/tools"
 )
 
@@ -21,7 +23,24 @@ func main() {
 
 	cfg := llm.LoadConfig()
 	defaultWorkspace := resolveDefaultWorkspace()
-	infoProvider := server.NewLLMRuntimeInfoProvider(cfg.Model, cfg.BaseURL, cfg.APIKey, defaultWorkspace, string(llm.ResolveProtocol(cfg)))
+	mcpRegistry, err := mcp.NewStaticRegistry(nil)
+	if err != nil {
+		log.Fatalf("failed to build MCP registry: %v", err)
+	}
+	skillsRegistry, err := skills.NewStaticRegistry(nil)
+	if err != nil {
+		log.Fatalf("failed to build skills registry: %v", err)
+	}
+
+	infoProvider := server.NewLLMRuntimeInfoProvider(
+		cfg.Model,
+		cfg.BaseURL,
+		cfg.APIKey,
+		defaultWorkspace,
+		string(llm.ResolveProtocol(cfg)),
+		server.WithMCPRegistry(mcpRegistry),
+		server.WithSkillsRegistry(skillsRegistry),
+	)
 
 	runService := runtime.NewRunService(
 		func(workspace runtime.WorkspaceConfig, threadID string) *agentcore.Agent {
@@ -40,6 +59,8 @@ func main() {
 					Root:          workspace.WorkspaceRoot,
 					WritableRoots: workspace.WritableRoots,
 				},
+				MCPRegistry: mcpRegistry,
+				Skills:      skillsRegistry,
 			}
 			return agentcore.NewAgentWithThreadID(agentCfg, threadID)
 		},

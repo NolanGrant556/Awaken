@@ -4,6 +4,7 @@ import (
 	stdctx "context"
 	"os"
 	"strings"
+	"time"
 
 	"awaken/src/context"
 	"awaken/src/tool"
@@ -26,6 +27,14 @@ type Config struct {
 	Temperature float64
 	MaxTokens   int
 	AuthScheme  string
+	Retry       RetryPolicy
+}
+
+type RetryPolicy struct {
+	Disabled   bool
+	MaxRetries int
+	BaseDelay  time.Duration
+	MaxDelay   time.Duration
 }
 
 // Request 是统一请求结构
@@ -38,6 +47,7 @@ type Request struct {
 	Stream       bool
 	Messages     []context.Message
 	Tools        []tool.ToolDefinition
+	Retry        *RetryPolicy
 }
 
 // Response 是统一响应结构

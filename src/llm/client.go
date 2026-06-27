@@ -185,8 +185,20 @@ func applyAuthHeaders(httpReq *http.Request, cfg Config, protocol Protocol) {
 func requestFailedError(resp *http.Response) error {
 	// Drain body to allow connection reuse, but do not include body in error
 	// message to avoid leaking provider-internal details or secrets.
-	io.Copy(io.Discard, resp.Body)
-	return fmt.Errorf("%w: status %d", ErrRequestFailed, resp.StatusCode)
+	body := readErrorBody(resp.Body)
+	return &RequestError{
+		StatusCode: resp.StatusCode,
+		Kind:       ClassifyHTTPError(resp.StatusCode, body),
+	}
+}
+
+func readErrorBody(body io.Reader) []byte {
+	if body == nil {
+		return nil
+	}
+	data, _ := io.ReadAll(io.LimitReader(body, 64*1024))
+	io.Copy(io.Discard, body)
+	return data
 }
 
 // transportError 返回脱敏的 transport 错误，不暴露完整 URL 或 url.Error 细节。
@@ -241,7 +253,9 @@ func Invoke(ctx stdctx.Context, cfg Config, req Request) (*Response, error) {
 	}
 
 	transport := getTransport(cfg)
-	return transport.Invoke(ctx, cfg, req)
+	return withLLMRetry(ctx, cfg, req, func() (*Response, error) {
+		return transport.Invoke(ctx, cfg, req)
+	})
 }
 
 // StreamCall 流式调用（兼容旧 API）
@@ -266,10 +280,12 @@ func StreamInvokeWithObserver(ctx stdctx.Context, cfg Config, req Request, obser
 	}
 
 	transport := getTransport(cfg)
-	if observerTransport, ok := transport.(observerTransport); ok {
-		return observerTransport.StreamInvokeWithObserver(ctx, cfg, req, observer)
-	}
-	return transport.StreamInvoke(ctx, cfg, req, observer.OnContent)
+	return withLLMRetry(ctx, cfg, req, func() (*Response, error) {
+		if observerTransport, ok := transport.(observerTransport); ok {
+			return observerTransport.StreamInvokeWithObserver(ctx, cfg, req, observer)
+		}
+		return transport.StreamInvoke(ctx, cfg, req, observer.OnContent)
+	})
 }
 
 // CallWithContext 使用 Conversation Context 调用

@@ -69,13 +69,15 @@ func LoadConfig() Config {
 	}
 
 	return Config{
-		APIKey:      apiKey,
-		BaseURL:     strings.TrimSuffix(baseURL, "/"),
-		Model:       model,
-		Protocol:    Protocol(protocol),
-		Temperature: temperature,
-		MaxTokens:   maxTokens,
-		AuthScheme:  authScheme,
+		APIKey:                apiKey,
+		BaseURL:               strings.TrimSuffix(baseURL, "/"),
+		Model:                 model,
+		Protocol:              Protocol(protocol),
+		Temperature:           temperature,
+		MaxTokens:             maxTokens,
+		ContextWindow:         fileCfg.Model.ContextWindow,
+		AutoCompactTokenLimit: fileCfg.Model.AutoCompactTokenLimit,
+		AuthScheme:            authScheme,
 	}
 }
 

@@ -690,6 +690,74 @@ func waitHTTPRunTerminal(t *testing.T, baseURL, runID string) awruntime.Run {
 	return awruntime.Run{}
 }
 
+func TestPersistentTranscriptEndpointsRecoverAfterRestart(t *testing.T) {
+	persistenceDir := filepath.Join(t.TempDir(), "transcripts")
+	service := newPersistentServerRunService(persistenceDir)
+	firstServer := httptest.NewServer(NewRouter(service, nil))
+
+	createResp, err := http.Post(firstServer.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello","workspace":{"workspace_root":"/tmp"}}`))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer createResp.Body.Close()
+
+	var created awruntime.Run
+	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode created run: %v", err)
+	}
+	waitHTTPRunTerminal(t, firstServer.URL, created.RunID)
+	firstServer.Close()
+
+	restoredService := newPersistentServerRunService(persistenceDir)
+	restoredServer := httptest.NewServer(NewRouter(restoredService, nil))
+	defer restoredServer.Close()
+
+	threadsResp, err := http.Get(restoredServer.URL + "/v1/threads")
+	if err != nil {
+		t.Fatalf("GET /v1/threads failed: %v", err)
+	}
+	defer threadsResp.Body.Close()
+
+	var threads []awruntime.ThreadSnapshot
+	if err := json.NewDecoder(threadsResp.Body).Decode(&threads); err != nil {
+		t.Fatalf("failed to decode restored thread list: %v", err)
+	}
+	if len(threads) != 1 || threads[0].ThreadID != created.ThreadID {
+		t.Fatalf("unexpected restored thread list: %+v", threads)
+	}
+
+	runResp, err := http.Get(restoredServer.URL + "/v1/runs/" + created.RunID)
+	if err != nil {
+		t.Fatalf("GET /v1/runs/{run_id} failed: %v", err)
+	}
+	defer runResp.Body.Close()
+
+	var restoredRun awruntime.Run
+	if err := json.NewDecoder(runResp.Body).Decode(&restoredRun); err != nil {
+		t.Fatalf("failed to decode restored run: %v", err)
+	}
+	if restoredRun.Status != awruntime.RunStatusFinished || restoredRun.Result != "reply:hello" {
+		t.Fatalf("unexpected restored run payload: %+v", restoredRun)
+	}
+
+	transcriptResp, err := http.Get(restoredServer.URL + "/v1/threads/" + created.ThreadID + "/transcript")
+	if err != nil {
+		t.Fatalf("GET /v1/threads/{thread_id}/transcript failed after restart: %v", err)
+	}
+	defer transcriptResp.Body.Close()
+
+	var transcript threadTranscriptResponse
+	if err := json.NewDecoder(transcriptResp.Body).Decode(&transcript); err != nil {
+		t.Fatalf("failed to decode restored transcript: %v", err)
+	}
+	if len(transcript.Runs) != 1 || transcript.Runs[0].Run.RunID != created.RunID {
+		t.Fatalf("unexpected restored transcript payload: %+v", transcript)
+	}
+	if len(transcript.Runs[0].Events) == 0 {
+		t.Fatal("expected restored transcript events after restart")
+	}
+}
+
 func TestMapRuntimeCancelledUsesAGUIRunErrorWithCancelCode(t *testing.T) {
 	events := mapRuntimeEvent(awruntime.Event{
 		Kind:     awruntime.EventKindRunCancelled,
@@ -3294,4 +3362,25 @@ func TestRunWithProviderBodySecretEmitsSanitizedMessage(t *testing.T) {
 	if !strings.Contains(errorMessage, "status 502") {
 		t.Fatalf("error message should contain status code, got %q", errorMessage)
 	}
+}
+
+func newPersistentServerRunService(persistenceDir string) *awruntime.RunService {
+	return awruntime.NewRunServiceWithOptions(
+		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+		},
+		func(agent *agentcore.Agent) awruntime.Executor {
+			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				agent.GetConversation().UserInput(input)
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+				answer := "reply:" + input
+				agent.GetConversation().AssistantOutput(answer, nil)
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextMessageStartedEventType, MessageID: "msg-1", Role: "assistant"})
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextDeltaEventType, MessageID: "msg-1", Role: "assistant", Delta: answer})
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: answer})
+				return answer, nil
+			})
+		},
+		awruntime.WithPersistenceDir(persistenceDir),
+	)
 }

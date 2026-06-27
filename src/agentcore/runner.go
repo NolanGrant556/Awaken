@@ -144,11 +144,38 @@ func toolRuntimeConfigFromAgentConfig(config AgentConfig) ToolRuntimeConfig {
 }
 
 func (r *Runner) buildLLMRequest() (LLMRequest, error) {
+	if tokenLimit, charLimit := compactionBudget(r.config.ModelConfig); tokenLimit > 0 || charLimit > 0 {
+		r.conversation.Context.CompactToFit(0, tokenLimit, charLimit)
+	}
 	llmReq := r.reqBuilder.Build(r.conversation.Context, nil)
 	if err := context.ValidateToolResultPairing(llmReq.Messages); err != nil {
 		return LLMRequest{}, fmt.Errorf("invalid tool result pairing: %w", err)
 	}
 	return llmReq, nil
+}
+
+func compactionBudget(cfg ModelConfig) (int, int) {
+	hardLimit := 0
+	if cfg.ContextWindow > 0 {
+		hardLimit = cfg.ContextWindow
+		if cfg.MaxTokens > 0 && hardLimit > cfg.MaxTokens {
+			hardLimit -= cfg.MaxTokens
+		}
+	}
+
+	tokenLimit := cfg.AutoCompactTokenLimit
+	switch {
+	case tokenLimit > 0 && hardLimit > 0 && tokenLimit > hardLimit:
+		tokenLimit = hardLimit
+	case tokenLimit <= 0:
+		tokenLimit = hardLimit
+	}
+
+	if tokenLimit <= 0 {
+		return 0, 0
+	}
+
+	return tokenLimit, tokenLimit * 4
 }
 
 func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*llm.Response, error) {

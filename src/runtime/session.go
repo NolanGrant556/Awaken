@@ -62,6 +62,12 @@ type Session struct {
 	cancel    context.CancelFunc
 	bus       *EventBus
 	approvals map[string]*pendingApproval
+	observer  sessionObserver
+}
+
+type sessionObserver interface {
+	OnRunUpdated(run Run)
+	OnEvent(event Event)
 }
 
 func NewSession(runID, threadID, input string, cancel context.CancelFunc) *Session {
@@ -79,6 +85,20 @@ func NewSession(runID, threadID, input string, cancel context.CancelFunc) *Sessi
 		bus:       NewEventBus(),
 		approvals: make(map[string]*pendingApproval),
 	}
+}
+
+func NewSessionFromSnapshot(run Run, events []Event) *Session {
+	return &Session{
+		run:       run,
+		bus:       NewEventBusWithHistory(events, isTerminalStatus(run.Status)),
+		approvals: make(map[string]*pendingApproval),
+	}
+}
+
+func (s *Session) SetObserver(observer sessionObserver) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.observer = observer
 }
 
 type pendingApproval struct {
@@ -141,10 +161,14 @@ func (s *Session) RequestCancel() Run {
 	cancel := s.cancel
 	snapshot := s.run
 	bus := s.bus
+	observer := s.observer
 	s.mu.Unlock()
 
 	if statusChanged {
-		bus.Append(statusEvent, false)
+		appended := bus.Append(statusEvent, false)
+		notifySessionObserver(observer, snapshot, &appended)
+	} else {
+		notifySessionObserver(observer, snapshot, nil)
 	}
 
 	if cancel != nil {
@@ -199,9 +223,12 @@ func (s *Session) RecordAgentEvent(event agentcore.AwakenEvent) {
 		AgentEvent: event,
 	}
 	bus := s.bus
+	snapshot := s.run
+	observer := s.observer
 	s.mu.Unlock()
 
-	bus.Append(wrapped, terminal)
+	appended := bus.Append(wrapped, terminal)
+	notifySessionObserver(observer, snapshot, &appended)
 }
 
 func (s *Session) AwaitApproval(ctx context.Context, request agentcore.ApprovalRequest) (agentcore.ApprovalDecision, error) {
@@ -228,9 +255,12 @@ func (s *Session) AwaitApproval(ctx context.Context, request agentcore.ApprovalR
 		Status:    string(RunStatusAwaitingApproval),
 	}
 	bus := s.bus
+	snapshot := s.run
+	observer := s.observer
 	s.mu.Unlock()
 
-	bus.Append(statusEvent, false)
+	appended := bus.Append(statusEvent, false)
+	notifySessionObserver(observer, snapshot, &appended)
 
 	s.RecordAgentEvent(agentcore.AwakenEvent{
 		Type:                  agentcore.ApprovalRequestedEventType,
@@ -321,9 +351,12 @@ func (s *Session) ResolveApproval(approvalID string, decision agentcore.Approval
 		Status:    string(RunStatusRunning),
 	}
 	bus := s.bus
+	snapshot := s.run
+	observer := s.observer
 	s.mu.Unlock()
 
-	bus.Append(statusEvent, false)
+	appended := bus.Append(statusEvent, false)
+	notifySessionObserver(observer, snapshot, &appended)
 
 	s.RecordAgentEvent(agentcore.AwakenEvent{
 		Type:                agentcore.ApprovalResolvedEventType,
@@ -374,10 +407,14 @@ func (s *Session) CompleteCancelled(message string) {
 		Message:   message,
 	}
 	bus := s.bus
+	snapshot := s.run
+	observer := s.observer
 	s.mu.Unlock()
 
-	bus.Append(statusEvent, false)
-	bus.Append(event, true)
+	appendedStatus := bus.Append(statusEvent, false)
+	notifySessionObserver(observer, snapshot, &appendedStatus)
+	appendedEvent := bus.Append(event, true)
+	notifySessionObserver(observer, snapshot, &appendedEvent)
 }
 
 func (s *Session) CompleteFinished(result string) {
@@ -409,9 +446,12 @@ func (s *Session) CompleteFinished(result string) {
 		AgentEvent: event,
 	}
 	bus := s.bus
+	snapshot := s.run
+	observer := s.observer
 	s.mu.Unlock()
 
-	bus.Append(wrapped, true)
+	appended := bus.Append(wrapped, true)
+	notifySessionObserver(observer, snapshot, &appended)
 }
 
 func (s *Session) CompleteError(message, code string) {
@@ -440,9 +480,12 @@ func (s *Session) CompleteError(message, code string) {
 		Code:      code,
 	}
 	bus := s.bus
+	snapshot := s.run
+	observer := s.observer
 	s.mu.Unlock()
 
-	bus.Append(event, true)
+	appended := bus.Append(event, true)
+	notifySessionObserver(observer, snapshot, &appended)
 }
 
 func normalizeApprovalRequest(request agentcore.ApprovalRequest) agentcore.ApprovalRequest {
@@ -497,4 +540,14 @@ func trimStrings(values []string) []string {
 		}
 	}
 	return trimmed
+}
+
+func notifySessionObserver(observer sessionObserver, run Run, event *Event) {
+	if observer == nil {
+		return
+	}
+	observer.OnRunUpdated(run)
+	if event != nil {
+		observer.OnEvent(*event)
+	}
 }

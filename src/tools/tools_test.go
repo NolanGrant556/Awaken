@@ -8,13 +8,16 @@ import (
 
 func TestBuiltInToolNamesAreProviderSafe(t *testing.T) {
 	expected := map[string]bool{
-		"apply_patch": false,
-		"calculator":  false,
-		"grep_search": false,
-		"list_files":  false,
-		"read_file":   false,
-		"shell":       false,
-		"web_search":  false,
+		"apply_patch":          false,
+		"browser_navigate":     false,
+		"browser_open":         false,
+		"browser_page_summary": false,
+		"calculator":           false,
+		"grep_search":          false,
+		"list_files":           false,
+		"read_file":            false,
+		"shell":                false,
+		"web_search":           false,
 	}
 
 	for _, candidate := range tool.ListTools() {

@@ -9,6 +9,8 @@ import (
 
 	convcontext "awaken/src/context"
 	"awaken/src/tool"
+	_ "awaken/src/tools/apply_patch"
+	_ "awaken/src/tools/shell"
 )
 
 type runtimeTestTool struct {
@@ -359,6 +361,107 @@ func TestToolRuntimeEmitsCommandOutputFromObservableTool(t *testing.T) {
 	}
 }
 
+func TestToolRuntimeRedactsShellDisplayEventsWithoutChangingRawResult(t *testing.T) {
+	stdoutSecret := "sk-proj-abcdefghijklmnopqrstuvwxyz123456"
+	stderrSecret := "abcdefghijklmnopqrstuvwxyz987654"
+	command := "printf 'stdout " + stdoutSecret + "'; printf 'stderr Authorization: Bearer " + stderrSecret + "' >&2"
+	input, err := json.Marshal(map[string]interface{}{
+		"command": command,
+	})
+	if err != nil {
+		t.Fatalf("failed to encode shell input: %v", err)
+	}
+
+	var got []AwakenEvent
+	var requests []ApprovalRequest
+	runtime := NewToolRuntime(testApprovalAwaiter{
+		decision: ApprovalDecisionApproved,
+		events:   &got,
+		requests: &requests,
+	})
+	result := runtime.Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_shell_redaction",
+		Function: convcontext.FunctionCall{
+			Name:      "shell",
+			Arguments: string(input),
+		},
+	})
+
+	if result.IsError {
+		t.Fatalf("expected shell command to succeed, got %+v", result)
+	}
+	if !strings.Contains(result.Content, stdoutSecret) || !strings.Contains(result.Content, stderrSecret) {
+		t.Fatalf("expected raw tool result to remain available for agent feedback, got %q", result.Content)
+	}
+	if len(requests) != 1 {
+		t.Fatalf("expected one approval request, got %+v", requests)
+	}
+	assertNoDisplaySecret(t, requests[0].Description, stdoutSecret, stderrSecret)
+
+	var stdoutDelta, stderrDelta string
+	for _, event := range got {
+		if event.Type != CommandOutputEventType {
+			continue
+		}
+		switch event.CommandStream {
+		case "stdout":
+			stdoutDelta += event.Delta
+		case "stderr":
+			stderrDelta += event.Delta
+		}
+	}
+	if stdoutDelta == "" || stderrDelta == "" {
+		t.Fatalf("expected stdout and stderr command output events, got %+v", got)
+	}
+	assertNoDisplaySecret(t, stdoutDelta, stdoutSecret, stderrSecret)
+	assertNoDisplaySecret(t, stderrDelta, stdoutSecret, stderrSecret)
+
+	var toolResultEvents []AwakenEvent
+	emitter := newRunEventEmitter("thread-redaction", EventSinkFunc(func(event AwakenEvent) {
+		toolResultEvents = append(toolResultEvents, event)
+	}))
+	emitter.emitToolResult(result)
+	if len(toolResultEvents) != 1 || toolResultEvents[0].Type != ToolResultEventType {
+		t.Fatalf("expected one tool result event, got %+v", toolResultEvents)
+	}
+	assertNoDisplaySecret(t, toolResultEvents[0].Content, stdoutSecret, stderrSecret)
+}
+
+func TestToolRuntimeRedactsPatchPreviewDisplayEvent(t *testing.T) {
+	root := t.TempDir()
+	patchSecret := "sk-proj-abcdefghijklmnopqrstuvwxyz654321"
+	patch := "*** Begin Patch\n" +
+		"*** Add File: config.txt\n" +
+		"+LLM_API_KEY=" + patchSecret + "\n" +
+		"*** End Patch"
+
+	var got []AwakenEvent
+	runtime := NewToolRuntimeWithConfig(testApprovalAwaiter{
+		decision: ApprovalDecisionRejected,
+		events:   &got,
+	}, ToolRuntimeConfig{
+		PermissionContext: tool.NewPermissionContext(root, []string{root}),
+	})
+	result := runtime.Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_patch_redaction",
+		Function: convcontext.FunctionCall{
+			Name:      "apply_patch",
+			Arguments: `{"patch":` + mustJSONQuote(t, patch) + `}`,
+		},
+	})
+
+	if !result.IsError || !strings.Contains(result.Content, "审批拒绝") {
+		t.Fatalf("expected rejected apply_patch result, got %+v", result)
+	}
+	if len(got) == 0 || got[0].Type != PatchUpdatedEventType {
+		t.Fatalf("expected first event to be patch preview, got %+v", got)
+	}
+	assertNoDisplaySecret(t, got[0].Patch, patchSecret)
+	if !strings.Contains(got[0].Patch, "[REDACTED]") {
+		t.Fatalf("expected patch preview to include redaction marker, got %q", got[0].Patch)
+	}
+}
+
 func TestToolRuntimeEmitsPatchPreviewBeforeApplyPatchApproval(t *testing.T) {
 	root := t.TempDir()
 	patch := "*** Begin Patch\n" +
@@ -557,6 +660,7 @@ func TestToolRuntimeRejectResultFedBack(t *testing.T) {
 type testApprovalAwaiter struct {
 	decision ApprovalDecision
 	events   *[]AwakenEvent
+	requests *[]ApprovalRequest
 }
 
 func (t testApprovalAwaiter) Emit(event AwakenEvent) {
@@ -565,7 +669,10 @@ func (t testApprovalAwaiter) Emit(event AwakenEvent) {
 	}
 }
 
-func (t testApprovalAwaiter) AwaitApproval(context.Context, ApprovalRequest) (ApprovalDecision, error) {
+func (t testApprovalAwaiter) AwaitApproval(_ context.Context, request ApprovalRequest) (ApprovalDecision, error) {
+	if t.requests != nil {
+		*t.requests = append(*t.requests, request)
+	}
 	if t.events != nil {
 		*t.events = append(*t.events, AwakenEvent{Type: ApprovalRequestedEventType})
 	}
@@ -586,4 +693,16 @@ func mustJSONQuote(t *testing.T, value string) string {
 		t.Fatalf("failed to quote JSON string: %v", err)
 	}
 	return string(data)
+}
+
+func assertNoDisplaySecret(t *testing.T, value string, secrets ...string) {
+	t.Helper()
+	for _, secret := range secrets {
+		if secret == "" {
+			continue
+		}
+		if strings.Contains(value, secret) {
+			t.Fatalf("display output leaked secret %q in %q", secret, value)
+		}
+	}
 }

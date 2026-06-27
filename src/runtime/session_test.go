@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -85,6 +86,31 @@ func TestSessionAwaitApprovalTransitionsStatus(t *testing.T) {
 	}
 	if statusChanges[1].Status != string(RunStatusRunning) {
 		t.Fatalf("expected second status running, got %s", statusChanges[1].Status)
+	}
+}
+
+func TestSessionRecordAgentEventRedactsDisplayText(t *testing.T) {
+	session := NewSession("run-redaction", "thread-redaction", "", nil)
+	secret := "sk-proj-abcdefghijklmnopqrstuvwxyz123456"
+
+	session.RecordAgentEvent(agentcore.AwakenEvent{
+		Type:    agentcore.ToolResultEventType,
+		Content: "tool output " + secret,
+	})
+
+	sub := session.Subscribe(0)
+	if sub.Close != nil {
+		defer sub.Close()
+	}
+	if len(sub.History) != 1 {
+		t.Fatalf("expected one history event, got %+v", sub.History)
+	}
+	got := sub.History[0].AgentEvent.Content
+	if strings.Contains(got, secret) {
+		t.Fatalf("session history leaked secret in agent event: %q", got)
+	}
+	if !strings.Contains(got, "[REDACTED]") {
+		t.Fatalf("expected redacted session history event, got %q", got)
 	}
 }
 

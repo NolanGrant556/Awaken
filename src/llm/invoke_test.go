@@ -223,6 +223,29 @@ func TestInvokeOpenAINonOKDoesNotLeakResponseBody(t *testing.T) {
 	}
 }
 
+func TestInvokeOpenAINonOKDoesNotLeakHeaderLikeSecrets(t *testing.T) {
+	secret := "abcdefghijklmnopqrstuvwxyz123456"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"Authorization: Bearer ` + secret + `","x-api-key":"provider-key-value"}`))
+	}))
+	defer server.Close()
+
+	_, err := Invoke(context.Background(), testConfig(server.URL), Request{UserPrompt: "hi"})
+	if !errors.Is(err, ErrRequestFailed) {
+		t.Fatalf("expected ErrRequestFailed, got %v", err)
+	}
+	msg := err.Error()
+	for _, leaked := range []string{secret, "provider-key-value", "Authorization", "x-api-key"} {
+		if strings.Contains(msg, leaked) {
+			t.Fatalf("error message must not contain provider body detail %q: %q", leaked, msg)
+		}
+	}
+	if !strings.Contains(msg, "status 401") {
+		t.Fatalf("error message should contain status code, got %q", msg)
+	}
+}
+
 func TestInvokeOpenAITransportErrorDoesNotLeakURL(t *testing.T) {
 	cfg := testConfig("http://127.0.0.1:1/invalid")
 	_, err := Invoke(context.Background(), cfg, Request{UserPrompt: "hi"})

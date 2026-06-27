@@ -6,11 +6,12 @@ import (
 )
 
 type RuntimeInfo struct {
-	WorkingDir  string
-	CurrentDate string
-	ModelName   string
-	EntryPoint  string
-	ToolSummary string
+	WorkingDir               string
+	CurrentDate              string
+	ModelName                string
+	EntryPoint               string
+	ToolSummary              string
+	ProjectOnboardingSummary string
 }
 
 func NewRuntimeInfo() RuntimeInfo {
@@ -57,4 +58,8 @@ func (r *RuntimeInfo) SetEntryPoint(entry string) {
 
 func (r *RuntimeInfo) SetToolSummary(summary string) {
 	r.ToolSummary = summary
+}
+
+func (r *RuntimeInfo) SetProjectOnboardingSummary(summary string) {
+	r.ProjectOnboardingSummary = summary
 }

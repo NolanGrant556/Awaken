@@ -42,6 +42,9 @@ func (p *SystemPrompt) buildEffectivePrompt() string {
 		p.runtimeInfo.EntryPoint,
 		p.runtimeInfo.ToolSummary,
 	)
+	if p.runtimeInfo.ProjectOnboardingSummary != "" {
+		runtimeInfoStr += fmt.Sprintf("\n- **项目上下文提示**: %s", p.runtimeInfo.ProjectOnboardingSummary)
+	}
 
 	return replaceTemplateVar(p.staticContent, runtimeInfoStr)
 }

@@ -61,6 +61,7 @@ type Session struct {
 	run       Run
 	cancel    context.CancelFunc
 	bus       *EventBus
+	audit     agentcore.SecurityAuditRecorder
 	approvals map[string]*pendingApproval
 }
 
@@ -79,6 +80,27 @@ func NewSession(runID, threadID, input string, cancel context.CancelFunc) *Sessi
 		bus:       NewEventBus(),
 		approvals: make(map[string]*pendingApproval),
 	}
+}
+
+func (s *Session) SetSecurityAuditRecorder(recorder agentcore.SecurityAuditRecorder) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.audit = recorder
+}
+
+func (s *Session) RecordSecurityAuditEvent(event agentcore.SecurityAuditEvent) {
+	s.mu.RLock()
+	audit := s.audit
+	runID := s.run.RunID
+	threadID := s.run.ThreadID
+	s.mu.RUnlock()
+
+	if audit == nil {
+		return
+	}
+	event.RunID = firstNonEmpty(event.RunID, runID)
+	event.ThreadID = firstNonEmpty(event.ThreadID, threadID)
+	audit.RecordSecurityAuditEvent(event)
 }
 
 type pendingApproval struct {
@@ -172,6 +194,8 @@ func (s *Session) RecordAgentEvent(event agentcore.AwakenEvent) {
 	s.run.UpdatedAt = timestamp
 
 	terminal := false
+	var auditEvent agentcore.SecurityAuditEvent
+	shouldAudit := false
 	switch event.Type {
 	case agentcore.RunStartedEventType:
 		if !s.run.CancelRequested {
@@ -183,12 +207,63 @@ func (s *Session) RecordAgentEvent(event agentcore.AwakenEvent) {
 		finishedAt := timestamp
 		s.run.FinishedAt = &finishedAt
 		terminal = true
+		auditEvent = agentcore.SecurityAuditEvent{
+			Type:      agentcore.SecurityAuditRunFinished,
+			Timestamp: timestamp,
+			Action:    agentcore.SecurityAuditActionRun,
+			Outcome:   agentcore.SecurityAuditOutcomeFinished,
+			Summary:   "run finished",
+		}
+		shouldAudit = true
 	case agentcore.RunErrorEventType:
 		s.run.Status = RunStatusError
 		s.run.Error = firstNonEmpty(strings.TrimSpace(event.Error), "run failed")
 		finishedAt := timestamp
 		s.run.FinishedAt = &finishedAt
 		terminal = true
+		auditEvent = agentcore.SecurityAuditEvent{
+			Type:      agentcore.SecurityAuditRunError,
+			Timestamp: timestamp,
+			Action:    agentcore.SecurityAuditActionRun,
+			Outcome:   agentcore.SecurityAuditOutcomeError,
+			Summary:   "run error",
+			Error:     event.Error,
+		}
+		shouldAudit = true
+	case agentcore.ApprovalRequestedEventType:
+		auditEvent = agentcore.SecurityAuditEvent{
+			Type:          agentcore.SecurityAuditApprovalRequested,
+			Timestamp:     timestamp,
+			ToolCallID:    event.ToolCallID,
+			ToolName:      event.ToolName,
+			ApprovalID:    event.ApprovalID,
+			Action:        agentcore.SecurityAuditActionApproval,
+			Outcome:       agentcore.SecurityAuditOutcomeStarted,
+			RiskTone:      event.ApprovalRiskTone,
+			Summary:       event.ApprovalTitle,
+			InputPreview:  event.ApprovalDescription,
+			AffectedPaths: event.ApprovalAffectedPaths,
+		}
+		shouldAudit = true
+	case agentcore.ApprovalResolvedEventType:
+		outcome := agentcore.SecurityAuditOutcomeApproved
+		if event.ApprovalDecision == agentcore.ApprovalDecisionRejected {
+			outcome = agentcore.SecurityAuditOutcomeRejected
+		}
+		auditEvent = agentcore.SecurityAuditEvent{
+			Type:             agentcore.SecurityAuditApprovalResolved,
+			Timestamp:        timestamp,
+			ToolCallID:       event.ToolCallID,
+			ToolName:         event.ToolName,
+			ApprovalID:       event.ApprovalID,
+			Action:           agentcore.SecurityAuditActionApproval,
+			Outcome:          outcome,
+			ApprovalDecision: event.ApprovalDecision,
+			RiskTone:         event.ApprovalRiskTone,
+			Summary:          event.ApprovalTitle,
+			AffectedPaths:    event.ApprovalAffectedPaths,
+		}
+		shouldAudit = true
 	}
 
 	wrapped := Event{
@@ -199,8 +274,16 @@ func (s *Session) RecordAgentEvent(event agentcore.AwakenEvent) {
 		AgentEvent: event,
 	}
 	bus := s.bus
+	audit := s.audit
+	if shouldAudit {
+		auditEvent.ThreadID = firstNonEmpty(auditEvent.ThreadID, s.run.ThreadID)
+		auditEvent.RunID = firstNonEmpty(auditEvent.RunID, s.run.RunID)
+	}
 	s.mu.Unlock()
 
+	if shouldAudit && audit != nil {
+		audit.RecordSecurityAuditEvent(auditEvent)
+	}
 	bus.Append(wrapped, terminal)
 }
 
@@ -374,8 +457,22 @@ func (s *Session) CompleteCancelled(message string) {
 		Message:   message,
 	}
 	bus := s.bus
+	audit := s.audit
+	auditEvent := agentcore.SecurityAuditEvent{
+		Type:      agentcore.SecurityAuditRunCancelled,
+		Timestamp: now,
+		ThreadID:  s.run.ThreadID,
+		RunID:     s.run.RunID,
+		Action:    agentcore.SecurityAuditActionRun,
+		Outcome:   agentcore.SecurityAuditOutcomeCancelled,
+		Summary:   "run cancelled",
+		Error:     message,
+	}
 	s.mu.Unlock()
 
+	if audit != nil {
+		audit.RecordSecurityAuditEvent(auditEvent)
+	}
 	bus.Append(statusEvent, false)
 	bus.Append(event, true)
 }
@@ -409,8 +506,21 @@ func (s *Session) CompleteFinished(result string) {
 		AgentEvent: event,
 	}
 	bus := s.bus
+	audit := s.audit
+	auditEvent := agentcore.SecurityAuditEvent{
+		Type:      agentcore.SecurityAuditRunFinished,
+		Timestamp: now,
+		ThreadID:  s.run.ThreadID,
+		RunID:     s.run.RunID,
+		Action:    agentcore.SecurityAuditActionRun,
+		Outcome:   agentcore.SecurityAuditOutcomeFinished,
+		Summary:   "run finished",
+	}
 	s.mu.Unlock()
 
+	if audit != nil {
+		audit.RecordSecurityAuditEvent(auditEvent)
+	}
 	bus.Append(wrapped, true)
 }
 
@@ -440,8 +550,22 @@ func (s *Session) CompleteError(message, code string) {
 		Code:      code,
 	}
 	bus := s.bus
+	audit := s.audit
+	auditEvent := agentcore.SecurityAuditEvent{
+		Type:      agentcore.SecurityAuditRunError,
+		Timestamp: now,
+		ThreadID:  s.run.ThreadID,
+		RunID:     s.run.RunID,
+		Action:    agentcore.SecurityAuditActionRun,
+		Outcome:   agentcore.SecurityAuditOutcomeError,
+		Summary:   "run error",
+		Error:     message,
+	}
 	s.mu.Unlock()
 
+	if audit != nil {
+		audit.RecordSecurityAuditEvent(auditEvent)
+	}
 	bus.Append(event, true)
 }
 

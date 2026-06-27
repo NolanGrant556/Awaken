@@ -9,6 +9,8 @@ import (
 
 	convcontext "awaken/src/context"
 	"awaken/src/tool"
+	_ "awaken/src/tools/apply_patch"
+	_ "awaken/src/tools/shell"
 )
 
 type runtimeTestTool struct {
@@ -403,6 +405,111 @@ func TestToolRuntimeEmitsPatchPreviewBeforeApplyPatchApproval(t *testing.T) {
 	}
 }
 
+func TestToolRuntimeRecordsSecurityAuditForTools(t *testing.T) {
+	var got []SecurityAuditEvent
+	toolName := "runtime_audit_tool"
+	mustRegisterRuntimeTool(t, runtimeTestTool{
+		name: toolName,
+		params: []tool.ToolParameter{
+			{Name: "value", Type: "string", Required: true},
+		},
+	})
+
+	runtime := NewToolRuntime(testApprovalAwaiter{auditEvents: &got})
+	result := runtime.Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_audit",
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{"value":"Authorization: Bearer token-secret-123456 OPENAI_API_KEY=sk-secret123456"}`,
+		},
+	})
+
+	if result.IsError {
+		t.Fatalf("expected audited tool to succeed, got %+v", result)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected tool start and finish audit events, got %+v", got)
+	}
+	if got[0].Type != SecurityAuditToolExecutionStarted || got[1].Type != SecurityAuditToolExecutionFinished {
+		t.Fatalf("unexpected audit event types: %+v", got)
+	}
+	if got[0].Action != SecurityAuditActionTool || got[1].Outcome != SecurityAuditOutcomeFinished {
+		t.Fatalf("unexpected audit action/outcome: %+v", got)
+	}
+	for _, event := range got {
+		if strings.Contains(event.InputPreview, "token-secret-123456") || strings.Contains(event.InputPreview, "sk-secret123456") {
+			t.Fatalf("audit input preview leaked secret: %+v", event)
+		}
+	}
+}
+
+func TestToolRuntimeAuditDistinguishesShellAndFileMutation(t *testing.T) {
+	root := t.TempDir()
+	patch := "*** Begin Patch\n" +
+		"*** Add File: note.md\n" +
+		"+OPENAI_API_KEY=sk-secret123456\n" +
+		"*** End Patch"
+
+	var patchAudit []SecurityAuditEvent
+	patchRuntime := NewToolRuntimeWithConfig(testApprovalAwaiter{
+		decision:    ApprovalDecisionRejected,
+		auditEvents: &patchAudit,
+	}, ToolRuntimeConfig{
+		PermissionContext: tool.NewPermissionContext(root, []string{root}),
+	})
+	patchResult := patchRuntime.Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_patch_audit",
+		Function: convcontext.FunctionCall{
+			Name:      "apply_patch",
+			Arguments: `{"patch":` + mustJSONQuote(t, patch) + `}`,
+		},
+	})
+
+	if !patchResult.IsError {
+		t.Fatalf("expected rejected patch result, got %+v", patchResult)
+	}
+	if len(patchAudit) != 2 {
+		t.Fatalf("expected patch start and finish audit events, got %+v", patchAudit)
+	}
+	if patchAudit[0].Action != SecurityAuditActionFileMutation || patchAudit[0].Summary != "新增 1 个文件" {
+		t.Fatalf("unexpected patch audit event: %+v", patchAudit[0])
+	}
+	if len(patchAudit[0].AffectedPaths) != 1 || patchAudit[0].AffectedPaths[0] != "note.md" {
+		t.Fatalf("unexpected patch affected paths: %+v", patchAudit[0].AffectedPaths)
+	}
+	if strings.Contains(patchAudit[0].InputPreview, "sk-secret123456") || strings.Contains(patchAudit[1].InputPreview, "sk-secret123456") {
+		t.Fatalf("patch audit should not include patch content: %+v", patchAudit)
+	}
+
+	var shellAudit []SecurityAuditEvent
+	shellRuntime := NewToolRuntimeWithConfig(testApprovalAwaiter{auditEvents: &shellAudit}, ToolRuntimeConfig{
+		PermissionContext: tool.NewPermissionContext(root, []string{root}),
+	})
+	shellResult := shellRuntime.Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_shell_audit",
+		Function: convcontext.FunctionCall{
+			Name:      "shell",
+			Arguments: `{"command":"echo Authorization: Bearer token-secret-123456"}`,
+		},
+	})
+
+	if shellResult.IsError {
+		t.Fatalf("expected shell audit command to succeed, got %+v", shellResult)
+	}
+	if len(shellAudit) != 2 {
+		t.Fatalf("expected shell start and finish audit events, got %+v", shellAudit)
+	}
+	if shellAudit[0].Action != SecurityAuditActionShellCommand {
+		t.Fatalf("expected shell command audit action, got %+v", shellAudit[0])
+	}
+	if !strings.Contains(shellAudit[0].InputPreview, "echo") {
+		t.Fatalf("expected shell input preview to include command shape, got %+v", shellAudit[0])
+	}
+	if strings.Contains(shellAudit[0].InputPreview, "token-secret-123456") {
+		t.Fatalf("shell audit preview leaked token: %+v", shellAudit[0])
+	}
+}
+
 func TestToolRuntimeDeniesBeforeExecution(t *testing.T) {
 	var observed string
 	toolName := "runtime_denied_tool"
@@ -555,8 +662,9 @@ func TestToolRuntimeRejectResultFedBack(t *testing.T) {
 }
 
 type testApprovalAwaiter struct {
-	decision ApprovalDecision
-	events   *[]AwakenEvent
+	decision    ApprovalDecision
+	events      *[]AwakenEvent
+	auditEvents *[]SecurityAuditEvent
 }
 
 func (t testApprovalAwaiter) Emit(event AwakenEvent) {
@@ -570,6 +678,12 @@ func (t testApprovalAwaiter) AwaitApproval(context.Context, ApprovalRequest) (Ap
 		*t.events = append(*t.events, AwakenEvent{Type: ApprovalRequestedEventType})
 	}
 	return t.decision, nil
+}
+
+func (t testApprovalAwaiter) RecordSecurityAuditEvent(event SecurityAuditEvent) {
+	if t.auditEvents != nil {
+		*t.auditEvents = append(*t.auditEvents, SanitizeSecurityAuditEvent(event))
+	}
 }
 
 func mustRegisterRuntimeTool(t *testing.T, candidate tool.Tool) {

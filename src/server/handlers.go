@@ -47,6 +47,10 @@ type threadTranscriptResponse struct {
 	Runs   []threadTranscriptRunResponse `json:"runs"`
 }
 
+type auditEventsResponse struct {
+	Events []agentcore.SecurityAuditEvent `json:"events"`
+}
+
 func writeErrorJSON(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
@@ -193,6 +197,25 @@ func (h runHandlers) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+func (h runHandlers) handleAuditEvents(w http.ResponseWriter, r *http.Request) {
+	limit := 0
+	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
+		parsed, err := strconv.Atoi(rawLimit)
+		if err != nil || parsed < 0 {
+			writeErrorJSON(w, http.StatusBadRequest, "INVALID_LIMIT", "limit must be a non-negative integer")
+			return
+		}
+		limit = parsed
+	}
+
+	writeJSON(w, http.StatusOK, auditEventsResponse{
+		Events: h.runService.AuditEvents(awruntime.AuditEventFilter{
+			RunID: r.URL.Query().Get("run_id"),
+			Limit: limit,
+		}),
+	})
 }
 
 func (h runHandlers) handleCancelRun(w http.ResponseWriter, r *http.Request) {

@@ -60,6 +60,7 @@ type RunService struct {
 	mu          sync.RWMutex
 	sessions    map[string]*Session
 	threads     map[string]*Thread
+	auditLog    *AuditLog
 	newAgent    func(workspace WorkspaceConfig, threadID string) *agentcore.Agent
 	newExecutor func(agent *agentcore.Agent) Executor
 }
@@ -105,6 +106,7 @@ func NewRunService(
 	return &RunService{
 		sessions:    make(map[string]*Session),
 		threads:     make(map[string]*Thread),
+		auditLog:    NewAuditLog(defaultAuditLogCapacity),
 		newAgent:    newAgent,
 		newExecutor: newExecutor,
 	}
@@ -136,6 +138,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	session := NewSession(runID, threadID, trimmed, cancel)
+	session.SetSecurityAuditRecorder(s.auditLog)
 
 	s.mu.Lock()
 	if req.ThreadID != "" {
@@ -179,9 +182,22 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	s.mu.Unlock()
 
 	executor := s.newExecutor(agent)
+	s.recordRunAudit(session.Snapshot(), agentcore.SecurityAuditEvent{
+		Type:    agentcore.SecurityAuditRunStarted,
+		Action:  agentcore.SecurityAuditActionRun,
+		Outcome: agentcore.SecurityAuditOutcomeStarted,
+		Summary: "run started",
+	})
 	go s.execute(session, executor, trimmed, ctx)
 
 	return session.Snapshot(), nil
+}
+
+func (s *RunService) AuditEvents(filter AuditEventFilter) []agentcore.SecurityAuditEvent {
+	if s == nil || s.auditLog == nil {
+		return nil
+	}
+	return s.auditLog.Events(filter)
 }
 
 func (s *RunService) ListThreads() []ThreadSnapshot {
@@ -290,6 +306,15 @@ func (s *RunService) execute(session *Session, executor Executor, input string, 
 	session.CompleteError(err.Error(), "")
 }
 
+func (s *RunService) recordRunAudit(run Run, event agentcore.SecurityAuditEvent) {
+	if s == nil || s.auditLog == nil {
+		return
+	}
+	event.RunID = firstNonEmpty(event.RunID, run.RunID)
+	event.ThreadID = firstNonEmpty(event.ThreadID, run.ThreadID)
+	s.auditLog.RecordSecurityAuditEvent(event)
+}
+
 func (s *RunService) clearActiveRun(threadID, runID string) {
 	if threadID == "" || runID == "" {
 		return
@@ -395,6 +420,16 @@ func (s sessionEventSink) AwaitApproval(ctx context.Context, request agentcore.A
 		return "", context.Canceled
 	}
 	return s.session.AwaitApproval(ctx, request)
+}
+
+func (s sessionEventSink) RecordSecurityAuditEvent(event agentcore.SecurityAuditEvent) {
+	if s.session == nil {
+		return
+	}
+	snapshot := s.session.Snapshot()
+	event.ThreadID = firstNonEmpty(event.ThreadID, snapshot.ThreadID)
+	event.RunID = firstNonEmpty(event.RunID, snapshot.RunID)
+	s.session.RecordSecurityAuditEvent(event)
 }
 
 func normalizeWorkspace(ws WorkspaceConfig) (WorkspaceConfig, error) {

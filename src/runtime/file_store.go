@@ -277,7 +277,7 @@ func readJSONFile(path string, value interface{}) error {
 func newPersistedThread(thread *Thread) persistedThread {
 	record := persistedThread{
 		Version: persistenceVersion,
-		Thread:  thread.snapshot(),
+		Thread:  thread.snapshot(nil),
 		RunIDs:  append([]string(nil), thread.runIDs...),
 	}
 	if thread.conversation != nil {

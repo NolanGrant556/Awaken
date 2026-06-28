@@ -922,6 +922,15 @@ func TestListThreadsEndpointReturnsRuntimeThreads(t *testing.T) {
 	if threads[0].Label != "hello list" {
 		t.Fatalf("expected label from first input, got %q", threads[0].Label)
 	}
+	if threads[0].LatestRun == nil {
+		t.Fatalf("expected latest_run summary in thread list response")
+	}
+	if threads[0].LatestRun.RunID != created.RunID {
+		t.Fatalf("expected latest_run id %q, got %q", created.RunID, threads[0].LatestRun.RunID)
+	}
+	if threads[0].LatestRun.Status != awruntime.RunStatusFinished {
+		t.Fatalf("expected latest_run status finished, got %s", threads[0].LatestRun.Status)
+	}
 }
 
 func TestGetThreadTranscriptEndpointReturnsMappedRuns(t *testing.T) {

@@ -178,6 +178,9 @@ func sanitizeServer(server MCPServer) MCPServer {
 	server = cloneServer(server)
 	server.Transport.Env = redactStringMap(server.Transport.Env)
 	server.Transport.Headers = redactStringMap(server.Transport.Headers)
+	if server.OriginalJSON != "" {
+		server.OriginalJSON = RedactedValue
+	}
 	return server
 }
 

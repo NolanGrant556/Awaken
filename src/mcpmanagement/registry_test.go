@@ -150,6 +150,7 @@ func TestNormalizeRedactsSecretsAndTestPlanStaysRedacted(t *testing.T) {
 		"API_TOKEN": "secret-token",
 		"PATH":      "/usr/bin",
 	}
+	stdio.OriginalJSON = `{"command":"npx","env":{"API_TOKEN":"secret-token"}}`
 	registry, err := NewRegistry(stdio)
 	if err != nil {
 		t.Fatalf("expected registry, got %v", err)
@@ -167,6 +168,9 @@ func TestNormalizeRedactsSecretsAndTestPlanStaysRedacted(t *testing.T) {
 	}
 	if got.Transport.Env["PATH"] != "/usr/bin" {
 		t.Fatalf("expected PATH to remain visible, got %q", got.Transport.Env["PATH"])
+	}
+	if got.OriginalJSON != RedactedValue {
+		t.Fatalf("expected OriginalJSON to be redacted, got %q", got.OriginalJSON)
 	}
 
 	plan, err := registry.TestPlan("env-server")

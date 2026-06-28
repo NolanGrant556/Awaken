@@ -290,6 +290,23 @@ func TestManagerModes(t *testing.T) {
 	}
 }
 
+func TestManagerStartAutoIDSkipsExistingGeneratedIDs(t *testing.T) {
+	manager := newTestManager()
+
+	startTask(t, manager, "agenttask-1", TaskModeBackground)
+
+	task, err := manager.Start(StartOptions{
+		Agent:     TaskAgent{Type: "general-purpose"},
+		Workspace: "/tmp/awaken",
+	})
+	if err != nil {
+		t.Fatalf("Start auto id returned error: %v", err)
+	}
+	if task.ID != "agenttask-2" {
+		t.Fatalf("expected auto-generated id to skip existing generated name, got %q", task.ID)
+	}
+}
+
 func startTask(t *testing.T, manager *Manager, id string, mode TaskMode) Task {
 	t.Helper()
 

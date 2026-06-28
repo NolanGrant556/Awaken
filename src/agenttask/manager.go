@@ -67,8 +67,13 @@ func (m *Manager) Start(options StartOptions) (Task, error) {
 	defer m.mu.Unlock()
 
 	if options.ID == "" {
-		m.nextID++
-		options.ID = "agenttask-" + strconv.FormatUint(m.nextID, 10)
+		for {
+			m.nextID++
+			options.ID = "agenttask-" + strconv.FormatUint(m.nextID, 10)
+			if _, exists := m.tasks[options.ID]; !exists {
+				break
+			}
+		}
 	}
 	if err := validateTaskID(options.ID); err != nil {
 		return Task{}, err

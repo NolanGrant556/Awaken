@@ -3,6 +3,7 @@ package slashcommands
 import (
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"unicode"
@@ -165,6 +166,9 @@ func Parse(input string) Invocation {
 
 	def, found := registry[name]
 	if !found {
+		if existingAbsolutePathToken(name) {
+			return inv
+		}
 		inv.Kind = ParseUnknown
 		return inv
 	}
@@ -273,4 +277,13 @@ func isCommandRune(r rune, first bool) bool {
 		return r >= 'a' && r <= 'z'
 	}
 	return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_'
+}
+
+func existingAbsolutePathToken(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" || strings.Contains(name, "/") {
+		return false
+	}
+	_, err := os.Stat("/" + name)
+	return err == nil
 }

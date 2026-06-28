@@ -55,6 +55,8 @@ func TestParsePlainInputAndAbsolutePath(t *testing.T) {
 	for _, input := range []string{
 		"please make a plan",
 		"/tmp/project README",
+		"/tmp foo",
+		"/var log",
 		"/Users/nolangrant/Awaken",
 	} {
 		inv := Parse(input)

@@ -630,6 +630,30 @@ func TestRunServicePlainInputPassesExecutorUnchanged(t *testing.T) {
 	}
 }
 
+func TestRunServiceAbsolutePathPromptPassesExecutorUnchanged(t *testing.T) {
+	received := make(chan string, 1)
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			received <- input
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+			return "done", nil
+		})
+	})
+
+	for _, input := range []string{"/tmp foo", "/var log"} {
+		run, err := service.StartRun(StartRunRequest{Input: input, Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()}})
+		if err != nil {
+			t.Fatalf("StartRun(%q) returned error: %v", input, err)
+		}
+		if run.Input != input {
+			t.Fatalf("expected run input %q, got %q", input, run.Input)
+		}
+		if got := <-received; got != input {
+			t.Fatalf("expected executor to receive %q, got %q", input, got)
+		}
+	}
+}
+
 func TestRunServiceSlashCommandExpandsExecutorInputAndPreservesRunInput(t *testing.T) {
 	received := make(chan string, 1)
 	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {

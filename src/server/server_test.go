@@ -410,6 +410,31 @@ func TestCreateRunUnknownSlashCommandReturnsInvalidSlashCommand(t *testing.T) {
 	}
 }
 
+func TestCreateRunAbsolutePathPromptIsPlainInput(t *testing.T) {
+	received := make(chan string, 1)
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			received <- input
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+			return "done", nil
+		})
+	})
+
+	router := NewRouter(runService, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/runs", strings.NewReader(`{"input":"/tmp foo","workspace":{"workspace_root":"/tmp"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for absolute path prompt, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := <-received; got != "/tmp foo" {
+		t.Fatalf("expected executor to receive plain input, got %q", got)
+	}
+}
+
 func TestCreateRunWithUnknownThreadIDReturns404(t *testing.T) {
 	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
 		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {

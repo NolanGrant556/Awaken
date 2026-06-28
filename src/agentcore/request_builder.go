@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"awaken/src/llm"
+	"awaken/src/onboarding"
 	"awaken/src/prompt"
 	"awaken/src/tool"
 )
@@ -94,8 +95,14 @@ func (rb *RequestBuilder) getTools() []tool.ToolDefinition {
 
 func (rb *RequestBuilder) updateRuntimeInfoFromConfig(tools []tool.ToolDefinition) {
 	rb.runtimeInfo.UpdateCurrentDate()
+	rb.runtimeInfo.SetProjectOnboardingSummary("")
 	if strings.TrimSpace(rb.config.Workspace.Root) != "" {
-		rb.runtimeInfo.SetWorkingDir(tool.NewPermissionContext(rb.config.Workspace.Root, rb.config.Workspace.WritableRoots).WorkspaceRootOrCWD())
+		workspaceRoot := tool.NewPermissionContext(rb.config.Workspace.Root, rb.config.Workspace.WritableRoots).WorkspaceRootOrCWD()
+		rb.runtimeInfo.SetWorkingDir(workspaceRoot)
+		onboardingState := onboarding.InspectWorkspace(workspaceRoot)
+		if !onboardingState.Complete {
+			rb.runtimeInfo.SetProjectOnboardingSummary(onboardingState.Summary())
+		}
 	} else {
 		rb.runtimeInfo.UpdateWorkingDir()
 	}

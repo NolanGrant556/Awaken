@@ -2,6 +2,7 @@ package agentcore
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -358,5 +359,52 @@ func TestRequestBuilderDenyModeOnlyExposesReadOnlyRegisteredTools(t *testing.T) 
 	}
 	if !strings.Contains(req.SystemPrompt, readOnlyName) || strings.Contains(req.SystemPrompt, mutatingName) {
 		t.Fatalf("expected tool summary to exclude mutating tool, got %s", req.SystemPrompt)
+	}
+}
+
+func TestRequestBuilderAddsProjectOnboardingForConfiguredWorkspaceRoot(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspaceRoot, "README.md"), []byte("test"), 0o644); err != nil {
+		t.Fatalf("failed to write README.md: %v", err)
+	}
+
+	builder := NewRequestBuilder(AgentConfig{
+		Workspace: WorkspaceConfig{Root: workspaceRoot},
+	})
+
+	req := builder.Build(convcontext.New(), nil)
+	if !strings.Contains(req.SystemPrompt, "项目上下文提示") {
+		t.Fatalf("expected onboarding hint in system prompt: %s", req.SystemPrompt)
+	}
+	if !strings.Contains(req.SystemPrompt, "missing AGENTS.md/CLAUDE.md") {
+		t.Fatalf("expected missing instructions hint in system prompt: %s", req.SystemPrompt)
+	}
+}
+
+func TestRequestBuilderSkipsProjectOnboardingWithoutConfiguredWorkspaceRoot(t *testing.T) {
+	builder := NewRequestBuilder(AgentConfig{})
+
+	req := builder.Build(convcontext.New(), nil)
+	if strings.Contains(req.SystemPrompt, "项目上下文提示") {
+		t.Fatalf("expected no onboarding hint without explicit workspace root: %s", req.SystemPrompt)
+	}
+}
+
+func TestRequestBuilderSkipsProjectOnboardingForCompleteWorkspace(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspaceRoot, "README.md"), []byte("test"), 0o644); err != nil {
+		t.Fatalf("failed to write README.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceRoot, "AGENTS.md"), []byte("test"), 0o644); err != nil {
+		t.Fatalf("failed to write AGENTS.md: %v", err)
+	}
+
+	builder := NewRequestBuilder(AgentConfig{
+		Workspace: WorkspaceConfig{Root: workspaceRoot},
+	})
+
+	req := builder.Build(convcontext.New(), nil)
+	if strings.Contains(req.SystemPrompt, "项目上下文提示") {
+		t.Fatalf("expected no onboarding hint for complete workspace: %s", req.SystemPrompt)
 	}
 }

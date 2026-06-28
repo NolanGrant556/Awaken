@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	convcontext "awaken/src/context"
 	"awaken/src/tool"
 	"awaken/src/workspaceguard"
 )
@@ -66,20 +68,22 @@ type RunService struct {
 	threads     map[string]*Thread
 	newAgent    func(workspace WorkspaceConfig, threadID string) *agentcore.Agent
 	newExecutor func(agent *agentcore.Agent) Executor
+	store       *fileStore
 }
 
 // Thread holds the reusable Agent and metadata for a multi-turn conversation.
 // Runs with the same thread_id reuse the same Agent and Conversation.
 type Thread struct {
-	threadID    string
-	agent       *agentcore.Agent
-	workspace   WorkspaceConfig
-	label       string
-	latestRunID string
-	activeRunID string
-	runIDs      []string
-	createdAt   time.Time
-	updatedAt   time.Time
+	threadID     string
+	agent        *agentcore.Agent
+	conversation *convcontext.Conversation
+	workspace    WorkspaceConfig
+	label        string
+	latestRunID  string
+	activeRunID  string
+	runIDs       []string
+	createdAt    time.Time
+	updatedAt    time.Time
 }
 
 type ThreadSnapshot struct {
@@ -102,16 +106,39 @@ type ThreadTranscript struct {
 	Runs   []ThreadTranscriptRun
 }
 
+type RunServiceOption func(*RunService)
+
+func WithPersistenceDir(dir string) RunServiceOption {
+	return func(service *RunService) {
+		service.store = newFileStore(dir)
+	}
+}
+
 func NewRunService(
 	newAgent func(workspace WorkspaceConfig, threadID string) *agentcore.Agent,
 	newExecutor func(agent *agentcore.Agent) Executor,
 ) *RunService {
-	return &RunService{
+	return NewRunServiceWithOptions(newAgent, newExecutor)
+}
+
+func NewRunServiceWithOptions(
+	newAgent func(workspace WorkspaceConfig, threadID string) *agentcore.Agent,
+	newExecutor func(agent *agentcore.Agent) Executor,
+	opts ...RunServiceOption,
+) *RunService {
+	service := &RunService{
 		sessions:    make(map[string]*Session),
 		threads:     make(map[string]*Thread),
 		newAgent:    newAgent,
 		newExecutor: newExecutor,
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(service)
+		}
+	}
+	service.restorePersistedState()
+	return service
 }
 
 func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
@@ -146,6 +173,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	session := NewSessionWithConfig(runID, threadID, trimmed, cancel, SessionConfig{
 		ApprovalPolicy: approvalPolicy,
+		Observer:       persistenceObserver{store: s.store},
 	})
 
 	s.mu.Lock()
@@ -164,6 +192,9 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			return Run{}, ErrThreadBusy
 		}
 		agent = thread.agent
+		if thread.conversation == nil {
+			thread.conversation = conversationForAgent(agent)
+		}
 		thread.activeRunID = runID
 		thread.latestRunID = runID
 		thread.runIDs = append(thread.runIDs, runID)
@@ -174,20 +205,26 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			label = label[:50]
 		}
 		s.threads[threadID] = &Thread{
-			threadID:    threadID,
-			agent:       agent,
-			workspace:   workspace,
-			label:       label,
-			latestRunID: runID,
-			activeRunID: runID,
-			runIDs:      []string{runID},
-			createdAt:   now,
-			updatedAt:   now,
+			threadID:     threadID,
+			agent:        agent,
+			conversation: conversationForAgent(agent),
+			workspace:    workspace,
+			label:        label,
+			latestRunID:  runID,
+			activeRunID:  runID,
+			runIDs:       []string{runID},
+			createdAt:    now,
+			updatedAt:    now,
 		}
 		s.pruneInactiveThreadsLocked()
 	}
 	s.sessions[runID] = session
 	s.mu.Unlock()
+
+	if s.store != nil {
+		persistenceObserver{store: s.store}.OnRunUpdated(session.Snapshot())
+		s.persistThread(threadID)
+	}
 
 	executor := s.newExecutor(agentForRun(agent, threadID, workspace, permissionPolicy, approvalPolicy))
 	go s.execute(session, executor, trimmed, ctx)
@@ -317,13 +354,104 @@ func (s *RunService) clearActiveRun(threadID, runID string) {
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	thread, ok := s.threads[threadID]
 	if !ok || thread.activeRunID != runID {
+		s.mu.Unlock()
 		return
 	}
 	thread.activeRunID = ""
 	thread.updatedAt = time.Now().UTC()
+	thread.conversation = conversationForAgent(thread.agent)
+	s.mu.Unlock()
+
+	s.persistThread(threadID)
+}
+
+func (s *RunService) restorePersistedState() {
+	if s.store == nil {
+		return
+	}
+
+	threads, err := s.store.loadThreads()
+	if err != nil {
+		log.Printf("runtime persistence: failed to load threads: %v", err)
+		return
+	}
+
+	for _, record := range threads {
+		thread := &Thread{
+			threadID:     record.Thread.ThreadID,
+			conversation: restoreConversation(record),
+			workspace:    record.Thread.Workspace,
+			label:        record.Thread.Label,
+			latestRunID:  record.Thread.RunID,
+			activeRunID:  "",
+			runIDs:       append([]string(nil), record.RunIDs...),
+			createdAt:    record.Thread.CreatedAt,
+			updatedAt:    record.Thread.UpdatedAt,
+		}
+
+		if s.newAgent != nil {
+			thread.agent = s.newAgent(thread.workspace, thread.threadID)
+			if thread.agent != nil {
+				thread.conversation = thread.agent.GetConversation()
+				if thread.conversation != nil {
+					thread.conversation.Context.SetMessages(append([]convcontext.Message(nil), record.ConversationMessages...))
+					if createdAt, ok := parsePersistedTime(record.ConversationCreatedAt); ok {
+						thread.conversation.CreatedAt = createdAt
+					}
+					if updatedAt, ok := parsePersistedTime(record.ConversationUpdatedAt); ok {
+						thread.conversation.UpdatedAt = updatedAt
+					}
+				}
+			}
+		}
+
+		s.threads[thread.threadID] = thread
+		for _, runID := range record.RunIDs {
+			runRecord, err := s.store.loadRun(runID)
+			if err != nil {
+				log.Printf("runtime persistence: failed to load run %s: %v", runID, err)
+				continue
+			}
+			events, err := s.store.loadEvents(runID)
+			if err != nil {
+				log.Printf("runtime persistence: failed to load events for run %s: %v", runID, err)
+				continue
+			}
+			restoredRun, restoredEvents, dirty := normalizeRestoredRun(runRecord.Run, events)
+			if dirty {
+				if err := s.store.saveRun(restoredRun); err != nil {
+					log.Printf("runtime persistence: failed to repair interrupted run %s: %v", runID, err)
+				}
+				for _, event := range restoredEvents[len(events):] {
+					if err := s.store.appendEvent(event); err != nil {
+						log.Printf("runtime persistence: failed to append recovery event for run %s: %v", runID, err)
+					}
+				}
+			}
+			s.sessions[runID] = NewSessionFromSnapshot(restoredRun, restoredEvents)
+		}
+	}
+}
+
+func (s *RunService) persistThread(threadID string) {
+	if s.store == nil || strings.TrimSpace(threadID) == "" {
+		return
+	}
+
+	s.mu.RLock()
+	thread, ok := s.threads[threadID]
+	if !ok {
+		s.mu.RUnlock()
+		return
+	}
+	record := newPersistedThread(thread)
+	s.mu.RUnlock()
+
+	if err := s.store.saveThread(record); err != nil {
+		log.Printf("runtime persistence: failed to save thread %s: %v", threadID, err)
+	}
 }
 
 func (s *RunService) session(runID string) (*Session, error) {
@@ -479,4 +607,46 @@ func normalizeWorkspace(ws WorkspaceConfig) (WorkspaceConfig, error) {
 		WorkspaceRoot: root,
 		WritableRoots: writableRoots,
 	}, nil
+}
+
+func conversationForAgent(agent *agentcore.Agent) *convcontext.Conversation {
+	if agent == nil {
+		return nil
+	}
+	return agent.GetConversation()
+}
+
+func normalizeRestoredRun(run Run, events []Event) (Run, []Event, bool) {
+	if isTerminalStatus(run.Status) {
+		return run, events, false
+	}
+
+	now := time.Now().UTC()
+	run.Status = RunStatusError
+	run.Error = "run interrupted by process restart"
+	run.UpdatedAt = now
+	run.CancelRequested = false
+	run.FinishedAt = &now
+
+	restoredEvents := append([]Event(nil), events...)
+	restoredEvents = append(restoredEvents, Event{
+		Kind:      EventKindRunError,
+		Seq:       maxEventSeq(restoredEvents) + 1,
+		Timestamp: now,
+		ThreadID:  run.ThreadID,
+		RunID:     run.RunID,
+		Message:   run.Error,
+		Code:      "RUN_INTERRUPTED",
+	})
+	return run, restoredEvents, true
+}
+
+func maxEventSeq(events []Event) uint64 {
+	var maxSeq uint64
+	for _, event := range events {
+		if event.Seq > maxSeq {
+			maxSeq = event.Seq
+		}
+	}
+	return maxSeq
 }

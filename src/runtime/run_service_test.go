@@ -1407,6 +1407,88 @@ func TestStartRunAppliesRunLevelPermissionPolicyOnReusedThread(t *testing.T) {
 	}
 }
 
+func TestRunServicePersistsAndRestoresAcrossRestart(t *testing.T) {
+	persistenceDir := filepath.Join(t.TempDir(), "transcripts")
+	workspaceRoot := t.TempDir()
+
+	service := newPersistentTestRunService(persistenceDir, nil)
+	firstRun, err := service.StartRun(StartRunRequest{
+		Input:     "hello",
+		Workspace: WorkspaceConfig{WorkspaceRoot: workspaceRoot},
+	})
+	if err != nil {
+		t.Fatalf("first StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, firstRun.RunID)
+
+	if _, err := os.Stat(filepath.Join(persistenceDir, "threads", firstRun.ThreadID+".json")); err != nil {
+		t.Fatalf("expected persisted thread file, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(persistenceDir, "runs", firstRun.RunID+".json")); err != nil {
+		t.Fatalf("expected persisted run file, got %v", err)
+	}
+	eventsPath := filepath.Join(persistenceDir, "events", firstRun.RunID+".jsonl")
+	eventData, err := os.ReadFile(eventsPath)
+	if err != nil {
+		t.Fatalf("expected persisted events file, got %v", err)
+	}
+	if !strings.Contains(string(eventData), `"type":"RunFinished"`) {
+		t.Fatalf("expected persisted events to include run finished frame, got %s", string(eventData))
+	}
+
+	restoredMessages := make(chan []string, 1)
+	restarted := newPersistentTestRunService(persistenceDir, restoredMessages)
+
+	threads := restarted.ListThreads()
+	if len(threads) != 1 {
+		t.Fatalf("expected 1 restored thread, got %d", len(threads))
+	}
+	if threads[0].ThreadID != firstRun.ThreadID {
+		t.Fatalf("expected restored thread id %q, got %q", firstRun.ThreadID, threads[0].ThreadID)
+	}
+
+	restoredRun, err := restarted.GetRun(firstRun.RunID)
+	if err != nil {
+		t.Fatalf("GetRun on restored service returned error: %v", err)
+	}
+	if restoredRun.Status != RunStatusFinished || restoredRun.Result != "reply:hello" {
+		t.Fatalf("unexpected restored run snapshot: %+v", restoredRun)
+	}
+
+	transcript, err := restarted.GetThreadTranscript(firstRun.ThreadID)
+	if err != nil {
+		t.Fatalf("GetThreadTranscript on restored service returned error: %v", err)
+	}
+	if len(transcript.Runs) != 1 || transcript.Runs[0].Run.RunID != firstRun.RunID {
+		t.Fatalf("unexpected restored transcript: %+v", transcript)
+	}
+	if len(transcript.Runs[0].Events) == 0 {
+		t.Fatal("expected restored transcript events")
+	}
+
+	secondRun, err := restarted.StartRun(StartRunRequest{
+		Input:     "follow up",
+		ThreadID:  firstRun.ThreadID,
+		Workspace: WorkspaceConfig{WorkspaceRoot: workspaceRoot},
+	})
+	if err != nil {
+		t.Fatalf("second StartRun after restart returned error: %v", err)
+	}
+	waitForRunTerminal(t, restarted, secondRun.RunID)
+
+	select {
+	case messages := <-restoredMessages:
+		if len(messages) < 2 {
+			t.Fatalf("expected resumed conversation to include prior messages, got %v", messages)
+		}
+		if messages[0] != "hello" || messages[1] != "reply:hello" {
+			t.Fatalf("unexpected restored conversation tail before resume: %v", messages)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for restored conversation observation")
+	}
+}
+
 func waitForRunTerminal(t *testing.T, service *RunService, runID string) Run {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -1452,4 +1534,39 @@ func writeRuntimeFile(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatalf("failed to write %s: %v", path, err)
 	}
+}
+
+func newPersistentTestRunService(persistenceDir string, observed chan<- []string) *RunService {
+	return NewRunServiceWithOptions(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				if observed != nil {
+					messages := agent.GetConversation().Context.GetMessages()
+					snapshot := make([]string, 0, len(messages))
+					for _, msg := range messages {
+						if strings.TrimSpace(msg.Content) != "" {
+							snapshot = append(snapshot, msg.Content)
+						}
+					}
+					select {
+					case observed <- snapshot:
+					default:
+					}
+				}
+
+				agent.GetConversation().UserInput(input)
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+				answer := "reply:" + input
+				agent.GetConversation().AssistantOutput(answer, nil)
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextMessageStartedEventType, MessageID: "msg-1", Role: "assistant"})
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextDeltaEventType, MessageID: "msg-1", Role: "assistant", Delta: answer})
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: answer})
+				return answer, nil
+			})
+		},
+		WithPersistenceDir(persistenceDir),
+	)
 }

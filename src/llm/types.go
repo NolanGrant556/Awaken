@@ -21,16 +21,18 @@ const (
 
 // Config 是 LLM 配置
 type Config struct {
-	APIKey        string
-	BaseURL       string
-	Model         string
-	Protocol      Protocol
-	Temperature   float64
-	MaxTokens     int
-	AuthScheme    string
-	ActiveProfile string
-	Profiles      []Profile
-	Retry         RetryPolicy
+	APIKey                string
+	BaseURL               string
+	Model                 string
+	Protocol              Protocol
+	Temperature           float64
+	MaxTokens             int
+	ContextWindow         int
+	AutoCompactTokenLimit int
+	AuthScheme            string
+	ActiveProfile         string
+	Profiles              []Profile
+	Retry                 RetryPolicy
 }
 
 type Profile struct {

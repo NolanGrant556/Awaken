@@ -175,9 +175,7 @@ func (c *Context) Trim() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.maxMessages > 0 && len(c.messages) > c.maxMessages {
-		c.messages = c.messages[len(c.messages)-c.maxMessages:]
-	}
+	c.messages, _ = compactMessages(c.messages, c.maxMessages, c.maxTokens, 0)
 }
 
 func (c *Context) ToLLMFormat() map[string]interface{} {
@@ -232,15 +230,36 @@ func (c *Context) EstimateTotalTokens() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	total := 0
-	for _, msg := range c.messages {
-		total += EstimateTokens(msg.Content)
-		for _, tc := range msg.ToolCalls {
-			total += EstimateTokens(tc.Function.Arguments)
-			total += EstimateTokens(tc.Function.Name)
-		}
-	}
+	total, _ := estimateMessages(c.messages)
 	return total
+}
+
+func (c *Context) EstimateTotalChars() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	_, total := estimateMessages(c.messages)
+	return total
+}
+
+type CompactResult struct {
+	OriginalMessages  int  `json:"original_messages"`
+	RemainingMessages int  `json:"remaining_messages"`
+	DroppedMessages   int  `json:"dropped_messages"`
+	OriginalTokens    int  `json:"original_tokens"`
+	RemainingTokens   int  `json:"remaining_tokens"`
+	OriginalChars     int  `json:"original_chars"`
+	RemainingChars    int  `json:"remaining_chars"`
+	Compacted         bool `json:"compacted"`
+}
+
+func (c *Context) CompactToFit(maxMessages, maxTokens, maxChars int) CompactResult {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	compacted, result := compactMessages(c.messages, maxMessages, maxTokens, maxChars)
+	c.messages = compacted
+	return result
 }
 
 type Conversation struct {
@@ -296,4 +315,119 @@ func (conv *Conversation) ToolExchange(content string, toolCalls []ToolCall, res
 func (conv *Conversation) Reset() {
 	conv.Context.Clear()
 	conv.UpdatedAt = time.Now()
+}
+
+func CompactMessages(messages []Message, maxMessages, maxTokens, maxChars int) ([]Message, CompactResult) {
+	compacted, result := compactMessages(messages, maxMessages, maxTokens, maxChars)
+	return compacted, result
+}
+
+func compactMessages(messages []Message, maxMessages, maxTokens, maxChars int) ([]Message, CompactResult) {
+	original := append([]Message(nil), messages...)
+	originalTokens, originalChars := estimateMessages(original)
+	result := CompactResult{
+		OriginalMessages:  len(original),
+		RemainingMessages: len(original),
+		OriginalTokens:    originalTokens,
+		RemainingTokens:   originalTokens,
+		OriginalChars:     originalChars,
+		RemainingChars:    originalChars,
+	}
+
+	if len(original) == 0 || !messagesExceedLimits(original, maxMessages, maxTokens, maxChars) {
+		return original, result
+	}
+
+	spans := messageSpans(original)
+	if len(spans) == 0 {
+		return original, result
+	}
+
+	keepIdx := 0
+	compacted := original
+	for keepIdx < len(spans)-1 && messagesExceedLimits(compacted, maxMessages, maxTokens, maxChars) {
+		keepIdx++
+		compacted = append([]Message(nil), original[spans[keepIdx].start:]...)
+	}
+
+	if messagesExceedLimits(compacted, maxMessages, maxTokens, maxChars) {
+		last := spans[len(spans)-1]
+		compacted = append([]Message(nil), original[last.start:last.end]...)
+	}
+
+	if err := ValidateToolResultPairing(compacted); err != nil {
+		return original, result
+	}
+
+	remainingTokens, remainingChars := estimateMessages(compacted)
+	result.RemainingMessages = len(compacted)
+	result.DroppedMessages = len(original) - len(compacted)
+	result.RemainingTokens = remainingTokens
+	result.RemainingChars = remainingChars
+	result.Compacted = result.DroppedMessages > 0
+	return compacted, result
+}
+
+type messageSpan struct {
+	start int
+	end   int
+}
+
+func messageSpans(messages []Message) []messageSpan {
+	spans := make([]messageSpan, 0, len(messages))
+	for i := 0; i < len(messages); {
+		start := i
+		i++
+
+		if messages[start].Role == RoleAssistant && len(messages[start].ToolCalls) > 0 {
+			pending := make(map[string]struct{}, len(messages[start].ToolCalls))
+			for _, tc := range messages[start].ToolCalls {
+				if tc.ID != "" {
+					pending[tc.ID] = struct{}{}
+				}
+			}
+			for i < len(messages) && len(pending) > 0 {
+				if messages[i].Role != RoleTool {
+					break
+				}
+				delete(pending, messages[i].ToolCallID)
+				i++
+			}
+		}
+
+		spans = append(spans, messageSpan{start: start, end: i})
+	}
+	return spans
+}
+
+func messagesExceedLimits(messages []Message, maxMessages, maxTokens, maxChars int) bool {
+	if maxMessages > 0 && len(messages) > maxMessages {
+		return true
+	}
+	tokens, chars := estimateMessages(messages)
+	if maxTokens > 0 && tokens > maxTokens {
+		return true
+	}
+	if maxChars > 0 && chars > maxChars {
+		return true
+	}
+	return false
+}
+
+func estimateMessages(messages []Message) (tokens int, chars int) {
+	for _, msg := range messages {
+		tokens += EstimateTokens(msg.Content)
+		chars += len(msg.Content)
+		if msg.Name != "" {
+			tokens += EstimateTokens(msg.Name)
+			chars += len(msg.Name)
+		}
+		for _, tc := range msg.ToolCalls {
+			tokens += EstimateTokens(tc.Function.Arguments)
+			tokens += EstimateTokens(tc.Function.Name)
+			chars += len(tc.Function.Arguments)
+			chars += len(tc.Function.Name)
+		}
+	}
+	return tokens, chars
 }

@@ -1642,6 +1642,43 @@ func writeRunnerAnthropicTextStream(t *testing.T, w http.ResponseWriter, text st
 	})
 }
 
+func TestBuildLLMRequestCompactsBeforeSending(t *testing.T) {
+	conv := convcontext.NewConversation(nil)
+	conv.UserInput(strings.Repeat("old ", 24))
+	conv.ToolExchange("", []convcontext.ToolCall{
+		{ID: "call_old", Type: "function", Function: convcontext.FunctionCall{Name: "lookup", Arguments: `{"path":"old"}`}},
+	}, []convcontext.ToolResult{
+		{ToolCallID: "call_old", Name: "lookup", Content: strings.Repeat("result ", 24)},
+	})
+	conv.UserInput("keep latest question")
+
+	cfg := AgentConfig{
+		ModelConfig: ModelConfig{
+			ContextWindow:         64,
+			MaxTokens:             16,
+			AutoCompactTokenLimit: 12,
+		},
+	}
+
+	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
+	req, err := runner.buildLLMRequest()
+	if err != nil {
+		t.Fatalf("buildLLMRequest returned error: %v", err)
+	}
+	if len(req.Messages) != 1 {
+		t.Fatalf("expected only the latest user turn to remain, got %+v", req.Messages)
+	}
+	if req.Messages[0].Role != convcontext.RoleUser || req.Messages[0].Content != "keep latest question" {
+		t.Fatalf("unexpected compacted message tail: %+v", req.Messages)
+	}
+	if err := convcontext.ValidateToolResultPairing(req.Messages); err != nil {
+		t.Fatalf("expected compacted request to remain pair-safe, got %v", err)
+	}
+	if got := conv.Context.GetMessages(); len(got) != 1 || got[0].Content != "keep latest question" {
+		t.Fatalf("expected in-memory context to be compacted too, got %+v", got)
+	}
+}
+
 func writeRunnerAnthropicStreamEvent(t *testing.T, w http.ResponseWriter, name string, value interface{}) {
 	t.Helper()
 	data, err := json.Marshal(value)

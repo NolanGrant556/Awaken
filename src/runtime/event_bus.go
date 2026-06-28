@@ -25,11 +25,30 @@ func NewEventBus() *EventBus {
 	}
 }
 
-func (b *EventBus) Append(event Event, terminal bool) {
+func NewEventBusWithHistory(events []Event, closed bool) *EventBus {
+	bus := NewEventBus()
+	if len(events) == 0 {
+		bus.closed = closed
+		return bus
+	}
+
+	maxSeq := uint64(0)
+	bus.events = append([]Event(nil), events...)
+	for _, event := range events {
+		if event.Seq > maxSeq {
+			maxSeq = event.Seq
+		}
+	}
+	bus.nextSeq = maxSeq
+	bus.closed = closed
+	return bus
+}
+
+func (b *EventBus) Append(event Event, terminal bool) Event {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.closed {
-		return
+		return event
 	}
 
 	b.nextSeq++
@@ -63,6 +82,7 @@ func (b *EventBus) Append(event Event, terminal bool) {
 	if terminal {
 		b.subscribers = nil
 	}
+	return event
 }
 
 func (b *EventBus) Subscribe(afterSeq uint64) Subscription {

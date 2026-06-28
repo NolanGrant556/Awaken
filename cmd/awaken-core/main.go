@@ -38,19 +38,22 @@ func main() {
 		server.WithMCPRegistry(mcpRegistry),
 		server.WithSkillsRegistry(skillsRegistry),
 	)
+	persistenceDir := os.Getenv("AWAKEN_TRANSCRIPT_DIR")
 
-	runService := runtime.NewRunService(
+	runService := runtime.NewRunServiceWithOptions(
 		func(workspace runtime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
 				MaxThoughts: 5,
 				EntryPoint:  "awaken-core",
 				ModelConfig: agentcore.ModelConfig{
-					APIKey:      cfg.APIKey,
-					BaseURL:     cfg.BaseURL,
-					Model:       cfg.Model,
-					Temperature: cfg.Temperature,
-					MaxTokens:   cfg.MaxTokens,
-					AuthScheme:  cfg.AuthScheme,
+					APIKey:                cfg.APIKey,
+					BaseURL:               cfg.BaseURL,
+					Model:                 cfg.Model,
+					Temperature:           cfg.Temperature,
+					MaxTokens:             cfg.MaxTokens,
+					ContextWindow:         cfg.ContextWindow,
+					AutoCompactTokenLimit: cfg.AutoCompactTokenLimit,
+					AuthScheme:            cfg.AuthScheme,
 				},
 				Workspace: agentcore.WorkspaceConfig{
 					Root:          workspace.WorkspaceRoot,
@@ -66,6 +69,7 @@ func main() {
 				return agent.RunStreamWithEvents(ctx, input, sink)
 			})
 		},
+		runtime.WithPersistenceDir(persistenceDir),
 	)
 
 	srv := &http.Server{

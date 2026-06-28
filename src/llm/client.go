@@ -85,15 +85,17 @@ func LoadConfig() Config {
 	)
 
 	return Config{
-		APIKey:        apiKey,
-		BaseURL:       normalizeBaseURL(baseURL),
-		Model:         model,
-		Protocol:      protocolValue,
-		Temperature:   temperature,
-		MaxTokens:     maxTokens,
-		AuthScheme:    authScheme,
-		ActiveProfile: activeProfile,
-		Profiles:      resolvedProfiles,
+		APIKey:                apiKey,
+		BaseURL:               normalizeBaseURL(baseURL),
+		Model:                 model,
+		Protocol:              protocolValue,
+		Temperature:           temperature,
+		MaxTokens:             maxTokens,
+		ContextWindow:         fileCfg.Model.ContextWindow,
+		AutoCompactTokenLimit: fileCfg.Model.AutoCompactTokenLimit,
+		AuthScheme:            authScheme,
+		ActiveProfile:         activeProfile,
+		Profiles:              resolvedProfiles,
 	}
 }
 

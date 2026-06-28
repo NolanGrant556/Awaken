@@ -115,6 +115,21 @@ func (t *BrowserPageSummaryTool) IsReadOnly() bool {
 	return true
 }
 
+func (t *BrowserPageSummaryTool) CheckPermission(ctx context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {
+	if !CurrentRuntime().Status().Available {
+		return tool.AllowPermission()
+	}
+
+	return tool.AskPermission(
+		"reading the active browser page may expose page content from the user's current browsing session",
+		tool.ApprovalRequest{
+			Title:       "Approve browser page summary",
+			Description: "Read the active browser page URL, title, and summary.",
+			RiskTone:    "warning",
+		},
+	)
+}
+
 func (t *BrowserPageSummaryTool) Execute(ctx context.Context, input string) (string, error) {
 	runtime := CurrentRuntime()
 	status := runtime.Status()

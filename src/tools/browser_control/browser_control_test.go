@@ -40,7 +40,10 @@ func TestBrowserOpenAndNavigateAskPermissionWhenRuntimeAvailable(t *testing.T) {
 	}
 }
 
-func TestBrowserPageSummaryIsReadOnlyAndAllowed(t *testing.T) {
+func TestBrowserPageSummaryIsReadOnlyAndAsksPermissionWhenRuntimeAvailable(t *testing.T) {
+	restore := swapBrowserRuntime(NewMockRuntime())
+	defer restore()
+
 	summaryTool := &BrowserPageSummaryTool{}
 	if !summaryTool.IsReadOnly() {
 		t.Fatal("expected browser_page_summary to be read-only")
@@ -51,8 +54,8 @@ func TestBrowserPageSummaryIsReadOnlyAndAllowed(t *testing.T) {
 	if checker, ok := interface{}(summaryTool).(tool.PermissionCheckingTool); ok {
 		decision = checker.CheckPermission(context.Background(), "", permissionContext)
 	}
-	if decision.Behavior != tool.PermissionAllow {
-		t.Fatalf("expected read-only summary tool to be allowed, got %+v", decision)
+	if decision.Behavior != tool.PermissionAsk || decision.ApprovalRequest.RiskTone != "warning" {
+		t.Fatalf("expected browser_page_summary to ask permission, got %+v", decision)
 	}
 }
 

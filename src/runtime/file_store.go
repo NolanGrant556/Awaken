@@ -2,8 +2,11 @@ package runtime
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -142,21 +145,31 @@ func (s *fileStore) loadEvents(runID string) ([]Event, error) {
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
+	reader := bufio.NewReader(file)
 	events := make([]Event, 0)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
+	for {
+		line, err := reader.ReadBytes('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return nil, err
+		}
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			if errors.Is(err, io.EOF) {
+				break
+			}
 			continue
 		}
 		var raw persistedEvent
-		if err := json.Unmarshal([]byte(line), &raw); err != nil {
-			return nil, err
+		if unmarshalErr := json.Unmarshal(line, &raw); unmarshalErr != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, unmarshalErr
 		}
 		events = append(events, raw.toRuntimeEvent())
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
+		if errors.Is(err, io.EOF) {
+			break
+		}
 	}
 	return events, nil
 }

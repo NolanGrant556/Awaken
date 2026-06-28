@@ -268,6 +268,47 @@ func TestRunServiceHookTimeoutAndErrorDoNotFailRun(t *testing.T) {
 	}
 }
 
+func TestRunServiceAfterHookDoesNotDelayTerminalState(t *testing.T) {
+	root := t.TempDir()
+	outPath := filepath.Join(root, "run-hooks.log")
+	script := writeRuntimeHookScript(t, root, `#!/bin/sh
+sleep 0.2
+printf '%s:%s:%s\n' "$1" "$AWAKEN_HOOK_EVENT" "$AWAKEN_RUN_STATUS" >> "$2"
+`)
+
+	service := NewRunServiceWithConfig(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			return "done", nil
+		})
+	}, RunServiceConfig{
+		Hooks: lifecyclehooks.Config{Hooks: map[lifecyclehooks.Event][]lifecyclehooks.CommandConfig{
+			lifecyclehooks.EventAfterRun: {{
+				Command: script,
+				Args:    []string{"after", outPath},
+			}},
+		}},
+	})
+
+	run, err := service.StartRun(StartRunRequest{Input: "hello", Workspace: WorkspaceConfig{WorkspaceRoot: root}})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+
+	started := time.Now()
+	final := waitForRunTerminal(t, service, run.RunID)
+	elapsed := time.Since(started)
+	if final.Status != RunStatusFinished || final.Result != "done" {
+		t.Fatalf("expected finished run, got %+v", final)
+	}
+	if elapsed >= 150*time.Millisecond {
+		t.Fatalf("expected async after_run hook, terminal state took %s", elapsed)
+	}
+	if got := waitForFileText(t, outPath, "after:after_run:finished"); !strings.Contains(got, "after:after_run:finished") {
+		t.Fatalf("expected after_run hook output, got %q", got)
+	}
+}
+
 func TestRunServiceCancelWinsOverLateSuccessfulReturn(t *testing.T) {
 	started := make(chan struct{})
 	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {

@@ -289,7 +289,7 @@ func (s *RunService) execute(session *Session, executor Executor, input string, 
 	defer func() {
 		afterMetadata := cloneHookMetadata(metadata)
 		afterMetadata["run_status"] = runStatus
-		s.executeHook(context.Background(), lifecyclehooks.EventAfterRun, afterMetadata)
+		go s.executeHook(context.Background(), lifecyclehooks.EventAfterRun, afterMetadata)
 	}()
 
 	if executor == nil {

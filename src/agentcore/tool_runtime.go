@@ -140,7 +140,7 @@ func (rt *ToolRuntime) executeHook(ctx stdcontext.Context, event lifecyclehooks.
 func (rt *ToolRuntime) executeAfterToolHook(result ToolExecutionResult, metadata map[string]string) {
 	afterMetadata := cloneLifecycleHookMetadata(metadata)
 	afterMetadata["tool_is_error"] = fmt.Sprintf("%t", result.IsError)
-	rt.executeHook(stdcontext.Background(), lifecyclehooks.EventAfterTool, afterMetadata)
+	go rt.executeHook(stdcontext.Background(), lifecyclehooks.EventAfterTool, afterMetadata)
 }
 
 func (rt *ToolRuntime) toolHookMetadata(result ToolExecutionResult) map[string]string {

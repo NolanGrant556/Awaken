@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	convcontext "awaken/src/context"
 	"awaken/src/lifecyclehooks"
@@ -506,7 +507,7 @@ printf '%s:%s:%s:%s:%s:%s\n' "$1" "$AWAKEN_HOOK_EVENT" "$AWAKEN_TOOL_NAME" "$AWA
 	if result.IsError {
 		t.Fatalf("expected hooked tool to succeed, got %+v", result)
 	}
-	got := readToolHookFile(t, outPath)
+	got := waitForToolHookFileText(t, outPath, "after:after_tool")
 	if !strings.Contains(got, "before:before_tool:"+toolName+":call_hooked:"+root+":") {
 		t.Fatalf("expected before_tool metadata, got %q", got)
 	}
@@ -543,6 +544,53 @@ func TestToolRuntimeHookFailureDoesNotFailTool(t *testing.T) {
 
 	if result.IsError || result.Content != "ran:hello" {
 		t.Fatalf("expected hook failure not to fail tool, got %+v", result)
+	}
+}
+
+func TestToolRuntimeAfterHookDoesNotDelayToolResult(t *testing.T) {
+	root := t.TempDir()
+	outPath := filepath.Join(root, "tool-hooks.log")
+	script := writeToolHookScript(t, root, `#!/bin/sh
+sleep 0.2
+printf '%s:%s\n' "$1" "$AWAKEN_HOOK_EVENT" >> "$2"
+`)
+
+	toolName := "runtime_slow_after_hook_tool"
+	mustRegisterRuntimeTool(t, runtimeTestTool{
+		name: toolName,
+		params: []tool.ToolParameter{
+			{Name: "value", Type: "string", Required: true},
+		},
+	})
+
+	runtime := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
+		PermissionContext: tool.NewPermissionContext(root, []string{root}),
+		Hooks: lifecyclehooks.Config{Hooks: map[lifecyclehooks.Event][]lifecyclehooks.CommandConfig{
+			lifecyclehooks.EventAfterTool: {{
+				Command: script,
+				Args:    []string{"after", outPath},
+			}},
+		}},
+	})
+
+	started := time.Now()
+	result := runtime.Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_slow_after_hook",
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{"value":"hello"}`,
+		},
+	})
+	elapsed := time.Since(started)
+
+	if result.IsError || result.Content != "ran:hello" {
+		t.Fatalf("expected tool success, got %+v", result)
+	}
+	if elapsed >= 150*time.Millisecond {
+		t.Fatalf("expected async after_tool hook, Execute took %s", elapsed)
+	}
+	if got := waitForToolHookFileText(t, outPath, "after:after_tool"); !strings.Contains(got, "after:after_tool") {
+		t.Fatalf("expected after_tool hook output, got %q", got)
 	}
 }
 
@@ -680,11 +728,20 @@ func writeToolHookScript(t *testing.T, dir string, content string) string {
 	return path
 }
 
-func readToolHookFile(t *testing.T, path string) string {
+func waitForToolHookFileText(t *testing.T, path string, marker string) string {
 	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("failed to read hook file %s: %v", path, err)
+	deadline := time.Now().Add(2 * time.Second)
+	var last string
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			last = string(data)
+			if strings.Contains(last, marker) {
+				return last
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	return string(data)
+	t.Fatalf("hook file %s did not contain %q; last content %q", path, marker, last)
+	return ""
 }

@@ -32,16 +32,25 @@ const (
 )
 
 type Run struct {
-	RunID           string     `json:"run_id"`
-	ThreadID        string     `json:"thread_id"`
-	Input           string     `json:"input,omitempty"`
-	Status          RunStatus  `json:"status"`
-	Result          string     `json:"result,omitempty"`
-	Error           string     `json:"error,omitempty"`
-	CancelRequested bool       `json:"cancel_requested,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
-	FinishedAt      *time.Time `json:"finished_at,omitempty"`
+	RunID           string              `json:"run_id"`
+	ThreadID        string              `json:"thread_id"`
+	Input           string              `json:"input,omitempty"`
+	Delegation      *DelegationMetadata `json:"delegation,omitempty"`
+	Status          RunStatus           `json:"status"`
+	Result          string              `json:"result,omitempty"`
+	Error           string              `json:"error,omitempty"`
+	CancelRequested bool                `json:"cancel_requested,omitempty"`
+	CreatedAt       time.Time           `json:"created_at"`
+	UpdatedAt       time.Time           `json:"updated_at"`
+	FinishedAt      *time.Time          `json:"finished_at,omitempty"`
+}
+
+type DelegationMetadata struct {
+	ParentRunID      string `json:"parent_run_id,omitempty"`
+	ParentThreadID   string `json:"parent_thread_id,omitempty"`
+	DelegateLabel    string `json:"delegate_label,omitempty"`
+	DelegateRole     string `json:"delegate_role,omitempty"`
+	DelegationPrompt string `json:"delegation_prompt,omitempty"`
 }
 
 type Event struct {
@@ -71,6 +80,7 @@ type SessionConfig struct {
 	ApprovalPolicy agentcore.ApprovalPolicy
 	After          func(time.Duration) <-chan time.Time
 	Observer       sessionObserver
+	Delegation     *DelegationMetadata
 }
 
 type sessionObserver interface {
@@ -78,8 +88,8 @@ type sessionObserver interface {
 	OnEvent(event Event)
 }
 
-func NewSession(runID, threadID, input string, cancel context.CancelFunc) *Session {
-	return NewSessionWithConfig(runID, threadID, input, cancel, SessionConfig{})
+func NewSession(runID, threadID, input string, cancel context.CancelFunc, delegation *DelegationMetadata) *Session {
+	return NewSessionWithConfig(runID, threadID, input, cancel, SessionConfig{Delegation: delegation})
 }
 
 func NewSessionWithConfig(runID, threadID, input string, cancel context.CancelFunc, config SessionConfig) *Session {
@@ -87,12 +97,13 @@ func NewSessionWithConfig(runID, threadID, input string, cancel context.CancelFu
 	config = normalizeSessionConfig(config)
 	return &Session{
 		run: Run{
-			RunID:     runID,
-			ThreadID:  threadID,
-			Input:     strings.TrimSpace(input),
-			Status:    RunStatusRunning,
-			CreatedAt: now,
-			UpdatedAt: now,
+			RunID:      runID,
+			ThreadID:   threadID,
+			Input:      strings.TrimSpace(input),
+			Delegation: cloneDelegationMetadata(config.Delegation),
+			Status:     RunStatusRunning,
+			CreatedAt:  now,
+			UpdatedAt:  now,
 		},
 		cancel:         cancel,
 		bus:            NewEventBus(),
@@ -118,6 +129,14 @@ func (s *Session) SetObserver(observer sessionObserver) {
 	s.observer = observer
 }
 
+func cloneDelegationMetadata(delegation *DelegationMetadata) *DelegationMetadata {
+	if delegation == nil {
+		return nil
+	}
+	cloned := *delegation
+	return &cloned
+}
+
 type pendingApproval struct {
 	request  agentcore.ApprovalRequest
 	decision chan agentcore.ApprovalDecision
@@ -126,7 +145,9 @@ type pendingApproval struct {
 func (s *Session) Snapshot() Run {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.run
+	snapshot := s.run
+	snapshot.Delegation = cloneDelegationMetadata(s.run.Delegation)
+	return snapshot
 }
 
 func (s *Session) Subscribe(afterSeq uint64) Subscription {

@@ -19,14 +19,18 @@ import (
 )
 
 var (
-	ErrInvalidInput            = errors.New("input is required")
-	ErrRunNotFound             = errors.New("run not found")
-	ErrApprovalNotFound        = errors.New("approval not found")
-	ErrRunTerminal             = errors.New("run is already finished")
-	ErrRunCancelling           = errors.New("run is being cancelled")
-	ErrThreadNotFound          = errors.New("thread not found")
-	ErrThreadWorkspaceMismatch = errors.New("thread workspace mismatch")
-	ErrThreadBusy              = errors.New("thread already has an active run")
+	ErrInvalidInput             = errors.New("input is required")
+	ErrRunNotFound              = errors.New("run not found")
+	ErrApprovalNotFound         = errors.New("approval not found")
+	ErrRunTerminal              = errors.New("run is already finished")
+	ErrRunCancelling            = errors.New("run is being cancelled")
+	ErrThreadNotFound           = errors.New("thread not found")
+	ErrThreadWorkspaceMismatch  = errors.New("thread workspace mismatch")
+	ErrThreadBusy               = errors.New("thread already has an active run")
+	ErrParentRunNotFound        = errors.New("parent run not found")
+	ErrParentThreadNotFound     = errors.New("parent thread not found")
+	ErrDelegationParentMismatch = errors.New("delegation parent run does not belong to parent thread")
+	ErrDelegationParentRequired = errors.New("delegation parent_run_id or parent_thread_id is required")
 )
 
 const maxRetainedThreads = 100
@@ -51,6 +55,7 @@ type StartRunRequest struct {
 	ApprovalPolicy   agentcore.ApprovalPolicy `json:"approval_policy,omitempty"`
 	WorkspacePolicy  workspaceguard.Policy    `json:"workspace_policy,omitempty"`
 	Profile          *agentcore.RunProfile    `json:"profile,omitempty"`
+	Delegation       *DelegationMetadata      `json:"delegation,omitempty"`
 }
 
 type Executor interface {
@@ -82,19 +87,21 @@ type Thread struct {
 	label        string
 	latestRunID  string
 	activeRunID  string
+	delegation   *DelegationMetadata
 	runIDs       []string
 	createdAt    time.Time
 	updatedAt    time.Time
 }
 
 type ThreadSnapshot struct {
-	ThreadID    string          `json:"thread_id"`
-	Label       string          `json:"label"`
-	RunID       string          `json:"run_id,omitempty"`
-	ActiveRunID string          `json:"active_run_id,omitempty"`
-	Workspace   WorkspaceConfig `json:"workspace"`
-	CreatedAt   time.Time       `json:"created_at"`
-	UpdatedAt   time.Time       `json:"updated_at"`
+	ThreadID    string              `json:"thread_id"`
+	Label       string              `json:"label"`
+	RunID       string              `json:"run_id,omitempty"`
+	ActiveRunID string              `json:"active_run_id,omitempty"`
+	Delegation  *DelegationMetadata `json:"delegation,omitempty"`
+	Workspace   WorkspaceConfig     `json:"workspace"`
+	CreatedAt   time.Time           `json:"created_at"`
+	UpdatedAt   time.Time           `json:"updated_at"`
 }
 
 type ThreadTranscriptRun struct {
@@ -169,7 +176,8 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	}
 
 	runID := newRuntimeID("run")
-	threadID := req.ThreadID
+	reuseThreadID := strings.TrimSpace(req.ThreadID)
+	threadID := reuseThreadID
 	now := time.Now().UTC()
 	var agent *agentcore.Agent
 	if threadID == "" {
@@ -179,25 +187,33 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	session := NewSessionWithConfig(runID, threadID, trimmed, cancel, SessionConfig{
-		ApprovalPolicy: approvalPolicy,
-		Observer:       persistenceObserver{store: s.store},
-	})
 
 	s.mu.Lock()
-	if req.ThreadID != "" {
-		thread, ok := s.threads[req.ThreadID]
+	delegation, err := s.resolveDelegationLocked(req.Delegation, trimmed)
+	if err != nil {
+		s.mu.Unlock()
+		cancel()
+		return Run{}, err
+	}
+	if reuseThreadID != "" {
+		thread, ok := s.threads[threadID]
 		if !ok {
 			s.mu.Unlock()
+			cancel()
 			return Run{}, ErrThreadNotFound
 		}
 		if !sameWorkspace(thread.workspace, workspace) {
 			s.mu.Unlock()
+			cancel()
 			return Run{}, ErrThreadWorkspaceMismatch
 		}
 		if thread.activeRunID != "" {
 			s.mu.Unlock()
+			cancel()
 			return Run{}, ErrThreadBusy
+		}
+		if delegation == nil && thread.delegation != nil {
+			delegation = cloneDelegationMetadata(thread.delegation)
 		}
 		agent = thread.agent
 		if thread.conversation == nil {
@@ -205,6 +221,9 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		}
 		thread.activeRunID = runID
 		thread.latestRunID = runID
+		if thread.delegation == nil && delegation != nil {
+			thread.delegation = cloneDelegationMetadata(delegation)
+		}
 		thread.runIDs = append(thread.runIDs, runID)
 		thread.updatedAt = now
 	} else {
@@ -220,12 +239,18 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			label:        label,
 			latestRunID:  runID,
 			activeRunID:  runID,
+			delegation:   cloneDelegationMetadata(delegation),
 			runIDs:       []string{runID},
 			createdAt:    now,
 			updatedAt:    now,
 		}
 		s.pruneInactiveThreadsLocked()
 	}
+	session := NewSessionWithConfig(runID, threadID, trimmed, cancel, SessionConfig{
+		ApprovalPolicy: approvalPolicy,
+		Observer:       persistenceObserver{store: s.store},
+		Delegation:     delegation,
+	})
 	s.sessions[runID] = session
 	s.mu.Unlock()
 
@@ -398,6 +423,7 @@ func (s *RunService) restorePersistedState() {
 			label:        record.Thread.Label,
 			latestRunID:  record.Thread.RunID,
 			activeRunID:  "",
+			delegation:   cloneDelegationMetadata(record.Thread.Delegation),
 			runIDs:       append([]string(nil), record.RunIDs...),
 			createdAt:    record.Thread.CreatedAt,
 			updatedAt:    record.Thread.UpdatedAt,
@@ -466,6 +492,57 @@ func (s *RunService) persistThread(threadID string) {
 	}
 }
 
+func (s *RunService) resolveDelegationLocked(delegation *DelegationMetadata, input string) (*DelegationMetadata, error) {
+	if delegation == nil {
+		return nil, nil
+	}
+
+	normalized := DelegationMetadata{
+		ParentRunID:      strings.TrimSpace(delegation.ParentRunID),
+		ParentThreadID:   strings.TrimSpace(delegation.ParentThreadID),
+		DelegateLabel:    strings.TrimSpace(delegation.DelegateLabel),
+		DelegateRole:     strings.TrimSpace(delegation.DelegateRole),
+		DelegationPrompt: strings.TrimSpace(delegation.DelegationPrompt),
+	}
+	if !hasDelegationFields(normalized) {
+		return nil, nil
+	}
+	if normalized.ParentRunID == "" && normalized.ParentThreadID == "" {
+		return nil, ErrDelegationParentRequired
+	}
+
+	if normalized.ParentRunID != "" {
+		parentSession, ok := s.sessions[normalized.ParentRunID]
+		if !ok {
+			return nil, ErrParentRunNotFound
+		}
+		parentRun := parentSession.Snapshot()
+		if normalized.ParentThreadID == "" {
+			normalized.ParentThreadID = parentRun.ThreadID
+		} else if normalized.ParentThreadID != parentRun.ThreadID {
+			return nil, ErrDelegationParentMismatch
+		}
+	}
+	if normalized.ParentThreadID != "" && normalized.ParentRunID == "" {
+		if _, ok := s.threads[normalized.ParentThreadID]; !ok {
+			return nil, ErrParentThreadNotFound
+		}
+	}
+	if normalized.DelegationPrompt == "" {
+		normalized.DelegationPrompt = input
+	}
+
+	return &normalized, nil
+}
+
+func hasDelegationFields(delegation DelegationMetadata) bool {
+	return delegation.ParentRunID != "" ||
+		delegation.ParentThreadID != "" ||
+		delegation.DelegateLabel != "" ||
+		delegation.DelegateRole != "" ||
+		delegation.DelegationPrompt != ""
+}
+
 func (s *RunService) session(runID string) (*Session, error) {
 	s.mu.RLock()
 	session, ok := s.sessions[runID]
@@ -489,6 +566,7 @@ func (t *Thread) snapshot() ThreadSnapshot {
 		Label:       t.label,
 		RunID:       t.latestRunID,
 		ActiveRunID: t.activeRunID,
+		Delegation:  cloneDelegationMetadata(t.delegation),
 		Workspace:   t.workspace,
 		CreatedAt:   t.createdAt,
 		UpdatedAt:   t.updatedAt,

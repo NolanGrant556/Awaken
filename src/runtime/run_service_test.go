@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1681,6 +1682,246 @@ func TestRunServicePersistsAndRestoresAcrossRestart(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for restored conversation observation")
+	}
+}
+
+func TestStartRunWithoutDelegationKeepsOrdinaryRunCompatible(t *testing.T) {
+	root := t.TempDir()
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			return "done", nil
+		})
+	})
+
+	run, err := service.StartRun(StartRunRequest{
+		Input:     "ordinary run",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, run.RunID)
+
+	snapshot, err := service.GetRun(run.RunID)
+	if err != nil {
+		t.Fatalf("GetRun returned error: %v", err)
+	}
+	if snapshot.Delegation != nil {
+		t.Fatalf("expected ordinary run delegation to be nil, got %+v", snapshot.Delegation)
+	}
+
+	threads := service.ListThreads()
+	if len(threads) != 1 {
+		t.Fatalf("expected one thread, got %d", len(threads))
+	}
+	if threads[0].Delegation != nil {
+		t.Fatalf("expected ordinary thread delegation to be nil, got %+v", threads[0].Delegation)
+	}
+}
+
+func TestStartDelegatedRunRecordsRelationshipAndTranscript(t *testing.T) {
+	root := t.TempDir()
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: input})
+			return input, nil
+		})
+	})
+
+	parentRun, err := service.StartRun(StartRunRequest{
+		Input:     "parent task",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("parent StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, parentRun.RunID)
+
+	childRun, err := service.StartRun(StartRunRequest{
+		Input:     "inspect the backend path",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		Delegation: &DelegationMetadata{
+			ParentRunID:      parentRun.RunID,
+			DelegateLabel:    "Backend reader",
+			DelegateRole:     "runtime audit",
+			DelegationPrompt: "Read runtime/server code and report the minimum path.",
+		},
+	})
+	if err != nil {
+		t.Fatalf("delegated StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, childRun.RunID)
+
+	childSnapshot, err := service.GetRun(childRun.RunID)
+	if err != nil {
+		t.Fatalf("GetRun returned error: %v", err)
+	}
+	if childSnapshot.ThreadID == parentRun.ThreadID {
+		t.Fatalf("expected delegated run to create a child thread, got parent thread %q", childSnapshot.ThreadID)
+	}
+	assertDelegation(t, childSnapshot.Delegation, parentRun.RunID, parentRun.ThreadID)
+
+	transcript, err := service.GetThreadTranscript(childSnapshot.ThreadID)
+	if err != nil {
+		t.Fatalf("GetThreadTranscript returned error: %v", err)
+	}
+	assertDelegation(t, transcript.Thread.Delegation, parentRun.RunID, parentRun.ThreadID)
+	if len(transcript.Runs) != 1 {
+		t.Fatalf("expected child transcript to contain one run, got %d", len(transcript.Runs))
+	}
+	assertDelegation(t, transcript.Runs[0].Run.Delegation, parentRun.RunID, parentRun.ThreadID)
+}
+
+func TestDelegatedThreadFollowUpInheritsDelegation(t *testing.T) {
+	root := t.TempDir()
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			return "done", nil
+		})
+	})
+
+	parentRun, err := service.StartRun(StartRunRequest{
+		Input:     "parent task",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("parent StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, parentRun.RunID)
+
+	childRun, err := service.StartRun(StartRunRequest{
+		Input:     "inspect the backend path",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		Delegation: &DelegationMetadata{
+			ParentRunID:      parentRun.RunID,
+			DelegateLabel:    "Backend reader",
+			DelegateRole:     "runtime audit",
+			DelegationPrompt: "Read runtime/server code and report the minimum path.",
+		},
+	})
+	if err != nil {
+		t.Fatalf("delegated StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, childRun.RunID)
+
+	followUp, err := service.StartRun(StartRunRequest{
+		Input:     "continue",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		ThreadID:  childRun.ThreadID,
+	})
+	if err != nil {
+		t.Fatalf("delegated follow-up StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, followUp.RunID)
+
+	followUpSnapshot, err := service.GetRun(followUp.RunID)
+	if err != nil {
+		t.Fatalf("GetRun returned error: %v", err)
+	}
+	assertDelegation(t, followUpSnapshot.Delegation, parentRun.RunID, parentRun.ThreadID)
+}
+
+func TestStartDelegatedRunWithUnknownParentRunReturnsErrParentRunNotFound(t *testing.T) {
+	root := t.TempDir()
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			return "done", nil
+		})
+	})
+
+	_, err := service.StartRun(StartRunRequest{
+		Input:     "child task",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		Delegation: &DelegationMetadata{
+			ParentRunID:   "run_missing",
+			DelegateLabel: "Missing parent",
+			DelegateRole:  "runtime audit",
+		},
+	})
+	if !errors.Is(err, ErrParentRunNotFound) {
+		t.Fatalf("expected ErrParentRunNotFound, got %v", err)
+	}
+}
+
+func TestStartDelegatedRunWithParentRunAfterParentThreadPruned(t *testing.T) {
+	root := t.TempDir()
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			return "done", nil
+		})
+	})
+
+	parentRun, err := service.StartRun(StartRunRequest{
+		Input:     "parent task",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("parent StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, parentRun.RunID)
+
+	for i := 0; i < maxRetainedThreads+10; i++ {
+		run, err := service.StartRun(StartRunRequest{
+			Input:     fmt.Sprintf("ordinary-%03d", i),
+			Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		})
+		if err != nil {
+			t.Fatalf("ordinary StartRun %d returned error: %v", i, err)
+		}
+		waitForRunTerminal(t, service, run.RunID)
+	}
+
+	for _, thread := range service.ListThreads() {
+		if thread.ThreadID == parentRun.ThreadID {
+			t.Fatalf("expected parent thread %q to be pruned before delegated child test", parentRun.ThreadID)
+		}
+	}
+
+	childRun, err := service.StartRun(StartRunRequest{
+		Input:     "inspect the backend path",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		Delegation: &DelegationMetadata{
+			ParentRunID:      parentRun.RunID,
+			DelegateLabel:    "Backend reader",
+			DelegateRole:     "runtime audit",
+			DelegationPrompt: "Read runtime/server code and report the minimum path.",
+		},
+	})
+	if err != nil {
+		t.Fatalf("delegated StartRun after parent prune returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, childRun.RunID)
+
+	childSnapshot, err := service.GetRun(childRun.RunID)
+	if err != nil {
+		t.Fatalf("GetRun returned error: %v", err)
+	}
+	assertDelegation(t, childSnapshot.Delegation, parentRun.RunID, parentRun.ThreadID)
+}
+
+func assertDelegation(t *testing.T, delegation *DelegationMetadata, parentRunID, parentThreadID string) {
+	t.Helper()
+	if delegation == nil {
+		t.Fatalf("expected delegation metadata")
+	}
+	if delegation.ParentRunID != parentRunID {
+		t.Fatalf("expected parent run id %q, got %q", parentRunID, delegation.ParentRunID)
+	}
+	if delegation.ParentThreadID != parentThreadID {
+		t.Fatalf("expected parent thread id %q, got %q", parentThreadID, delegation.ParentThreadID)
+	}
+	if delegation.DelegateLabel != "Backend reader" {
+		t.Fatalf("expected delegate label to round-trip, got %q", delegation.DelegateLabel)
+	}
+	if delegation.DelegateRole != "runtime audit" {
+		t.Fatalf("expected delegate role to round-trip, got %q", delegation.DelegateRole)
+	}
+	if delegation.DelegationPrompt != "Read runtime/server code and report the minimum path." {
+		t.Fatalf("expected delegation prompt to round-trip, got %q", delegation.DelegationPrompt)
 	}
 }
 

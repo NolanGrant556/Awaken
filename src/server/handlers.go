@@ -97,6 +97,14 @@ func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 			writeErrorJSON(w, http.StatusBadRequest, "THREAD_WORKSPACE_MISMATCH", err.Error())
 		case errors.Is(err, awruntime.ErrThreadBusy):
 			writeErrorJSON(w, http.StatusConflict, "THREAD_BUSY", err.Error())
+		case errors.Is(err, awruntime.ErrParentRunNotFound):
+			writeErrorJSON(w, http.StatusNotFound, "PARENT_RUN_NOT_FOUND", err.Error())
+		case errors.Is(err, awruntime.ErrParentThreadNotFound):
+			writeErrorJSON(w, http.StatusNotFound, "PARENT_THREAD_NOT_FOUND", err.Error())
+		case errors.Is(err, awruntime.ErrDelegationParentMismatch):
+			writeErrorJSON(w, http.StatusBadRequest, "DELEGATION_PARENT_MISMATCH", err.Error())
+		case errors.Is(err, awruntime.ErrDelegationParentRequired):
+			writeErrorJSON(w, http.StatusBadRequest, "DELEGATION_PARENT_REQUIRED", err.Error())
 		case errors.Is(err, awruntime.ErrInvalidInput):
 			writeErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 		default:

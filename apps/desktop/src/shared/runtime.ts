@@ -14,6 +14,7 @@ export type RuntimeRunWire = {
   run_id: string;
   thread_id: string;
   input?: string;
+  delegation?: DelegationMetadataWire;
   status: RuntimeRunStatus;
   result?: string;
   error?: string;
@@ -27,6 +28,7 @@ export type RuntimeRun = {
   runId: string;
   threadId: string;
   input?: string;
+  delegation?: DelegationMetadata;
   status: RuntimeRunStatus;
   result?: string;
   error?: string;
@@ -41,6 +43,7 @@ export type RuntimeThreadWire = {
   label: string;
   run_id?: string;
   active_run_id?: string;
+  delegation?: DelegationMetadataWire;
   workspace: WorkspaceConfigWire;
   created_at: string;
   updated_at: string;
@@ -51,6 +54,7 @@ export type RuntimeThread = {
   label: string;
   runId?: string;
   activeRunId?: string;
+  delegation?: DelegationMetadata;
   workspace: WorkspaceConfig;
   createdAt: string;
   updatedAt: string;
@@ -168,9 +172,26 @@ export type RunProfile = {
   permissionMode?: string;
 };
 
+export type DelegationMetadataWire = {
+  parent_run_id?: string;
+  parent_thread_id?: string;
+  delegate_label?: string;
+  delegate_role?: string;
+  delegation_prompt?: string;
+};
+
+export type DelegationMetadata = {
+  parentRunId?: string;
+  parentThreadId?: string;
+  delegateLabel?: string;
+  delegateRole?: string;
+  delegationPrompt?: string;
+};
+
 export type StartRunRequestWire = {
   input: string;
   thread_id?: string;
+  delegation?: DelegationMetadataWire;
   workspace: WorkspaceConfigWire;
   client: ClientInfoWire;
   profile?: RunProfileWire;
@@ -179,6 +200,7 @@ export type StartRunRequestWire = {
 export type StartRunRequest = {
   input: string;
   threadId?: string;
+  delegation?: DelegationMetadata;
   workspace: WorkspaceConfig;
   client: ClientInfo;
   profile?: RunProfile;
@@ -237,6 +259,7 @@ export function normalizeRuntimeRun(run: RuntimeRunWire): RuntimeRun {
     runId: run.run_id,
     threadId: run.thread_id,
     input: run.input?.trim() || undefined,
+    delegation: normalizeDelegationMetadata(run.delegation),
     status: run.status,
     result: run.result,
     error: run.error,
@@ -253,12 +276,45 @@ export function normalizeRuntimeThread(thread: RuntimeThreadWire): RuntimeThread
     label: thread.label,
     runId: thread.run_id || undefined,
     activeRunId: thread.active_run_id || undefined,
+    delegation: normalizeDelegationMetadata(thread.delegation),
     workspace: {
       workspaceRoot: thread.workspace.workspace_root,
       writableRoots: thread.workspace.writable_roots ?? [],
     },
     createdAt: thread.created_at,
     updatedAt: thread.updated_at,
+  };
+}
+
+export function normalizeDelegationMetadata(
+  delegation?: DelegationMetadataWire,
+): DelegationMetadata | undefined {
+  if (!delegation) {
+    return undefined;
+  }
+
+  return {
+    parentRunId: delegation.parent_run_id || undefined,
+    parentThreadId: delegation.parent_thread_id || undefined,
+    delegateLabel: delegation.delegate_label || undefined,
+    delegateRole: delegation.delegate_role || undefined,
+    delegationPrompt: delegation.delegation_prompt || undefined,
+  };
+}
+
+function toDelegationMetadataWire(
+  delegation?: DelegationMetadata,
+): DelegationMetadataWire | undefined {
+  if (!delegation) {
+    return undefined;
+  }
+
+  return {
+    parent_run_id: delegation.parentRunId,
+    parent_thread_id: delegation.parentThreadId,
+    delegate_label: delegation.delegateLabel,
+    delegate_role: delegation.delegateRole,
+    delegation_prompt: delegation.delegationPrompt,
   };
 }
 
@@ -321,6 +377,7 @@ export function normalizeStartRunRequest(request: StartRunRequest): StartRunRequ
   return {
     input: request.input,
     thread_id: request.threadId,
+    delegation: toDelegationMetadataWire(request.delegation),
     workspace: {
       workspace_root: request.workspace.workspaceRoot,
       writable_roots: request.workspace.writableRoots,

@@ -49,6 +49,10 @@ func (t *BrowserOpenTool) Description() string {
 	return "打开指定 http/https URL 到附加的浏览器 runtime；如果未接入真实 browser runtime，会返回 disabled 状态。该操作会改变当前浏览器页面，默认需要审批。"
 }
 
+func (t *BrowserOpenTool) IsAvailable() bool {
+	return CurrentRuntime().Status().Available
+}
+
 func (t *BrowserOpenTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
 		{Name: "url", Description: "要打开的 http/https URL", Type: "string", Required: true},
@@ -107,6 +111,10 @@ func (t *BrowserPageSummaryTool) Description() string {
 	return "读取当前浏览器页面的 URL、标题和摘要；这是只读工具。如果未接入真实 browser runtime，会返回 disabled 状态。"
 }
 
+func (t *BrowserPageSummaryTool) IsAvailable() bool {
+	return CurrentRuntime().Status().Available
+}
+
 func (t *BrowserPageSummaryTool) Parameters() []tool.ToolParameter {
 	return nil
 }
@@ -155,6 +163,10 @@ func (t *BrowserNavigateTool) Name() string {
 
 func (t *BrowserNavigateTool) Description() string {
 	return "执行浏览器基础导航动作 back、forward、reload；如果未接入真实 browser runtime，会返回 disabled 状态。该操作会改变活动页面，默认需要审批。"
+}
+
+func (t *BrowserNavigateTool) IsAvailable() bool {
+	return CurrentRuntime().Status().Available
 }
 
 func (t *BrowserNavigateTool) Parameters() []tool.ToolParameter {

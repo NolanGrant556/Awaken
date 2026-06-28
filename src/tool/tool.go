@@ -13,6 +13,10 @@ type ReadOnlyTool interface {
 	IsReadOnly() bool
 }
 
+type AvailabilityAwareTool interface {
+	IsAvailable() bool
+}
+
 type ApprovalRequest struct {
 	Title         string
 	Description   string

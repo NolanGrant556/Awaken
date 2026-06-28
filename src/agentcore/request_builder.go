@@ -57,6 +57,9 @@ func (rb *RequestBuilder) getTools() []tool.ToolDefinition {
 	definitions := make([]tool.ToolDefinition, 0, len(tools))
 
 	for _, t := range tools {
+		if availabilityAwareTool, ok := t.(tool.AvailabilityAwareTool); ok && !availabilityAwareTool.IsAvailable() {
+			continue
+		}
 		definitions = append(definitions, tool.ToolDefinition{
 			Type: "function",
 			Function: tool.ToolFunctionSchema{

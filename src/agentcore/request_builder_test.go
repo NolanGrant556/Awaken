@@ -7,6 +7,7 @@ import (
 
 	convcontext "awaken/src/context"
 	"awaken/src/tool"
+	browsercontrol "awaken/src/tools/browser_control"
 )
 
 func TestRequestBuilderBuildsCompleteRequest(t *testing.T) {
@@ -72,6 +73,47 @@ func TestRequestBuilderUsesRegisteredTools(t *testing.T) {
 		}
 	}
 	t.Fatalf("expected registered tool %s in request tools", toolName)
+}
+
+func TestRequestBuilderSkipsUnavailableAvailabilityAwareTools(t *testing.T) {
+	previous := browsercontrol.CurrentRuntime()
+	browsercontrol.SetRuntime(browsercontrol.NewDisabledRuntime("not attached"))
+	defer browsercontrol.SetRuntime(previous)
+
+	builder := NewRequestBuilder(AgentConfig{})
+	req := builder.Build(convcontext.New(), nil)
+
+	for _, definition := range req.Tools {
+		switch definition.Function.Name {
+		case "browser_open", "browser_page_summary", "browser_navigate":
+			t.Fatalf("expected unavailable browser tool %s to be omitted from request tools", definition.Function.Name)
+		}
+	}
+}
+
+func TestRequestBuilderIncludesAvailableAvailabilityAwareTools(t *testing.T) {
+	previous := browsercontrol.CurrentRuntime()
+	browsercontrol.SetRuntime(browsercontrol.NewMockRuntime())
+	defer browsercontrol.SetRuntime(previous)
+
+	builder := NewRequestBuilder(AgentConfig{})
+	req := builder.Build(convcontext.New(), nil)
+
+	expected := map[string]bool{
+		"browser_open":         false,
+		"browser_page_summary": false,
+		"browser_navigate":     false,
+	}
+	for _, definition := range req.Tools {
+		if _, ok := expected[definition.Function.Name]; ok {
+			expected[definition.Function.Name] = true
+		}
+	}
+	for name, found := range expected {
+		if !found {
+			t.Fatalf("expected available browser tool %s in request tools", name)
+		}
+	}
 }
 
 func TestRequestBuilderRefreshesRuntimeInfo(t *testing.T) {

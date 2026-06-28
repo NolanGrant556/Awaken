@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	convcontext "awaken/src/context"
+	"awaken/src/mcp"
 	"awaken/src/tool"
 )
 
@@ -103,4 +104,47 @@ func TestRequestBuilderUsesConfiguredWorkspaceRoot(t *testing.T) {
 	if !strings.Contains(req.SystemPrompt, workspaceRoot) {
 		t.Fatalf("expected system prompt to include workspace root %q, got %s", workspaceRoot, req.SystemPrompt)
 	}
+}
+
+func TestRequestBuilderIncludesExposedMCPTools(t *testing.T) {
+	registry, err := mcp.NewStaticRegistry([]mcp.Server{{
+		Config: mcp.ServerConfig{
+			ID:        "docs",
+			Name:      "Docs",
+			Transport: mcp.TransportHTTP,
+			Enabled:   true,
+			URL:       "https://example.invalid/mcp",
+		},
+		State: mcp.ServerRuntime{
+			Mode:   mcp.RuntimeModeStatic,
+			Status: mcp.ServerStatusReady,
+		},
+		Tools: []mcp.ToolDescriptor{{
+			Name:          "search",
+			Description:   "Search docs",
+			ExposeToModel: true,
+			InputSchema: tool.ToolParametersSchema{
+				Type: "object",
+				Properties: map[string]tool.ToolParam{
+					"query": {Type: "string", Description: "Search query"},
+				},
+				Required: []string{"query"},
+			},
+		}},
+	}})
+	if err != nil {
+		t.Fatalf("failed to build MCP registry: %v", err)
+	}
+
+	req := NewRequestBuilder(AgentConfig{MCPRegistry: registry}).Build(convcontext.New(), nil)
+	for _, definition := range req.Tools {
+		if definition.Function.Name == "mcp__docs__search" {
+			if !strings.Contains(req.SystemPrompt, "mcp__docs__search") {
+				t.Fatalf("expected system prompt summary to mention MCP tool, got %s", req.SystemPrompt)
+			}
+			return
+		}
+	}
+
+	t.Fatalf("expected MCP tool definition in %+v", req.Tools)
 }

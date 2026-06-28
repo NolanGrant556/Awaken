@@ -71,6 +71,26 @@ func TestListToolsIsStableSorted(t *testing.T) {
 	}
 }
 
+func TestDefinitionsFromToolsBuildSortedSchemas(t *testing.T) {
+	definitions := DefinitionsFromTools([]Tool{
+		catalogTestTool{name: "z_tool", paramName: "flag", paramType: "boolean"},
+		catalogTestTool{name: "a_tool", paramName: "path", paramType: "string"},
+	})
+
+	if len(definitions) != 2 {
+		t.Fatalf("expected 2 definitions, got %d", len(definitions))
+	}
+	if definitions[0].Function.Name != "a_tool" || definitions[1].Function.Name != "z_tool" {
+		t.Fatalf("expected sorted definitions, got %+v", definitions)
+	}
+	if definitions[0].Function.Parameters.Properties["path"].Type != "string" {
+		t.Fatalf("expected string parameter schema, got %+v", definitions[0].Function.Parameters)
+	}
+	if !reflect.DeepEqual(definitions[0].Function.Parameters.Required, []string{"path"}) {
+		t.Fatalf("expected required parameter, got %+v", definitions[0].Function.Parameters.Required)
+	}
+}
+
 func toolNames(tools []Tool) []string {
 	names := make([]string, 0, len(tools))
 	for _, tool := range tools {

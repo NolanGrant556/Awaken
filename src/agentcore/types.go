@@ -2,7 +2,9 @@ package agentcore
 
 import (
 	"awaken/src/context"
+	"awaken/src/mcp"
 	"awaken/src/prompt"
+	"awaken/src/skills"
 	"awaken/src/tool"
 	"awaken/src/usage"
 )
@@ -17,6 +19,8 @@ type AgentConfig struct {
 	ApprovalPolicy   ApprovalPolicy
 	UsageLimits      usage.BudgetLimits
 	UsageLedger      usage.Recorder
+	MCPRegistry      mcp.Registry
+	Skills           skills.Registry
 }
 
 type WorkspaceConfig struct {

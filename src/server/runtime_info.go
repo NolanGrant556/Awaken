@@ -5,11 +5,13 @@ import (
 	"strings"
 
 	"awaken/src/llm"
+	"awaken/src/mcp"
+	"awaken/src/skills"
 )
 
 const RuntimeVersion = "0.1.0"
 
-// RuntimeInfo 暴露运行时的非敏感元数据。
+// RuntimeInfo exposes non-sensitive runtime metadata.
 type RuntimeInfo struct {
 	RuntimeVersion   string               `json:"runtime_version"`
 	APIVersion       string               `json:"api_version"`
@@ -21,6 +23,7 @@ type RuntimeInfo struct {
 	BaseURLHost      string               `json:"base_url_host"`
 	ActiveProfile    string               `json:"active_profile"`
 	Profiles         []RuntimeProfileInfo `json:"profiles"`
+	Capabilities     CapabilitiesSnapshot `json:"capabilities"`
 }
 
 type RuntimeProfileInfo struct {
@@ -33,12 +36,17 @@ type RuntimeProfileInfo struct {
 	IsActive    bool   `json:"is_active"`
 }
 
-// RuntimeInfoProvider 提供运行时的信息，用于构造 /v1/runtime/info 响应。
+type CapabilitiesSnapshot struct {
+	MCP    mcp.Snapshot    `json:"mcp"`
+	Skills skills.Snapshot `json:"skills"`
+}
+
+// RuntimeInfoProvider provides runtime information for /v1/runtime/info.
 type RuntimeInfoProvider interface {
 	GetRuntimeInfo() RuntimeInfo
 }
 
-// StaticRuntimeInfoProvider 返回固定的 RuntimeInfo，适用于测试。
+// StaticRuntimeInfoProvider returns fixed RuntimeInfo for tests.
 type StaticRuntimeInfoProvider struct {
 	Info RuntimeInfo
 }
@@ -50,6 +58,8 @@ func (s *StaticRuntimeInfoProvider) GetRuntimeInfo() RuntimeInfo {
 type llmRuntimeInfoProvider struct {
 	cfg              llm.Config
 	defaultWorkspace string
+	mcpRegistry      mcp.Registry
+	skillsRegistry   skills.Registry
 }
 
 func (p *llmRuntimeInfoProvider) GetRuntimeInfo() RuntimeInfo {
@@ -64,16 +74,40 @@ func (p *llmRuntimeInfoProvider) GetRuntimeInfo() RuntimeInfo {
 		BaseURLHost:      extractHost(p.cfg.BaseURL),
 		ActiveProfile:    p.cfg.ActiveProfile,
 		Profiles:         runtimeProfiles(p.cfg),
+		Capabilities: CapabilitiesSnapshot{
+			MCP:    snapshotMCP(p.mcpRegistry),
+			Skills: snapshotSkills(p.skillsRegistry),
+		},
 	}
 }
 
-// NewLLMRuntimeInfoProvider 根据 LLM 配置构造一个 RuntimeInfoProvider。
-// 响应只暴露非敏感字段，避免泄漏 API key 或完整 base URL。
-func NewLLMRuntimeInfoProvider(cfg llm.Config, workspace string) RuntimeInfoProvider {
-	return &llmRuntimeInfoProvider{
+type RuntimeInfoOption func(*llmRuntimeInfoProvider)
+
+func WithMCPRegistry(registry mcp.Registry) RuntimeInfoOption {
+	return func(provider *llmRuntimeInfoProvider) {
+		provider.mcpRegistry = registry
+	}
+}
+
+func WithSkillsRegistry(registry skills.Registry) RuntimeInfoOption {
+	return func(provider *llmRuntimeInfoProvider) {
+		provider.skillsRegistry = registry
+	}
+}
+
+// NewLLMRuntimeInfoProvider builds runtime info from LLM config.
+// Responses expose only non-sensitive metadata; API keys and full base URLs are omitted.
+func NewLLMRuntimeInfoProvider(cfg llm.Config, workspace string, options ...RuntimeInfoOption) RuntimeInfoProvider {
+	provider := &llmRuntimeInfoProvider{
 		cfg:              cfg,
 		defaultWorkspace: workspace,
 	}
+	for _, option := range options {
+		if option != nil {
+			option(provider)
+		}
+	}
+	return provider
 }
 
 func runtimeProfiles(cfg llm.Config) []RuntimeProfileInfo {
@@ -121,4 +155,28 @@ func extractHost(baseURL string) string {
 		return ""
 	}
 	return u.Host
+}
+
+func snapshotMCP(registry mcp.Registry) mcp.Snapshot {
+	if registry == nil {
+		return mcp.Snapshot{Servers: []mcp.Server{}, Summary: mcp.SnapshotSummary{}}
+	}
+	return mcp.RedactedSnapshot(registry.Snapshot())
+}
+
+func snapshotSkills(registry skills.Registry) skills.Snapshot {
+	if registry == nil {
+		return skills.Snapshot{Skills: []skills.Definition{}, Summary: skills.Summary{}}
+	}
+	return registry.Snapshot()
+}
+
+func sanitizeRuntimeInfo(info RuntimeInfo) RuntimeInfo {
+	info.Capabilities = sanitizeCapabilitiesSnapshot(info.Capabilities)
+	return info
+}
+
+func sanitizeCapabilitiesSnapshot(snapshot CapabilitiesSnapshot) CapabilitiesSnapshot {
+	snapshot.MCP = mcp.RedactedSnapshot(snapshot.MCP)
+	return snapshot
 }

@@ -20,8 +20,11 @@ import (
 
 	"awaken/src/agentcore"
 	"awaken/src/llm"
+	"awaken/src/mcp"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
+	"awaken/src/skills"
+	"awaken/src/tool"
 	_ "awaken/src/tools"
 )
 
@@ -150,6 +153,48 @@ func TestRuntimeInfoEndpoint(t *testing.T) {
 }
 
 func TestRuntimeInfoEndpointDoesNotLeakSecrets(t *testing.T) {
+	mcpRegistry, err := mcp.NewStaticRegistry([]mcp.Server{{
+		Config: mcp.ServerConfig{
+			ID:        "docs",
+			Name:      "Docs",
+			Transport: mcp.TransportHTTP,
+			Enabled:   true,
+			URL:       "https://example.invalid/mcp",
+			Headers: map[string]string{
+				"Authorization": "Bearer runtime-secret",
+				"x-api-key":     "runtime-api-key",
+			},
+		},
+		State: mcp.ServerRuntime{
+			Mode:   mcp.RuntimeModeStatic,
+			Status: mcp.ServerStatusReady,
+		},
+		Tools: []mcp.ToolDescriptor{{
+			Name:          "search",
+			Description:   "Search docs",
+			ExposeToModel: true,
+			InputSchema: tool.ToolParametersSchema{
+				Type: "object",
+				Properties: map[string]tool.ToolParam{
+					"query": {Type: "string", Description: "Search query"},
+				},
+				Required: []string{"query"},
+			},
+		}},
+	}})
+	if err != nil {
+		t.Fatalf("failed to build MCP registry: %v", err)
+	}
+	skillsRegistry, err := skills.NewStaticRegistry([]skills.Definition{{
+		ID:          "review",
+		Name:        "Review",
+		Description: "Review code changes",
+		Enabled:     true,
+	}})
+	if err != nil {
+		t.Fatalf("failed to build skills registry: %v", err)
+	}
+
 	provider := NewLLMRuntimeInfoProvider(llm.Config{
 		APIKey:        "sk-secret-key-must-not-appear",
 		BaseURL:       "https://api.anthropic.com/v1",
@@ -167,7 +212,7 @@ func TestRuntimeInfoEndpointDoesNotLeakSecrets(t *testing.T) {
 				HasAPIKey:  true,
 			},
 		},
-	}, "/workspace/secret")
+	}, "/workspace/secret", WithMCPRegistry(mcpRegistry), WithSkillsRegistry(skillsRegistry))
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/runtime/info", nil)
 	rec := httptest.NewRecorder()
@@ -179,11 +224,15 @@ func TestRuntimeInfoEndpointDoesNotLeakSecrets(t *testing.T) {
 	}
 
 	body := rec.Body.String()
-	if strings.Contains(body, "sk-secret-key-must-not-appear") {
-		t.Fatalf("response body leaked api key")
-	}
-	if strings.Contains(body, "https://api.anthropic.com/v1") {
-		t.Fatalf("response body leaked full base url")
+	for _, secret := range []string{
+		"sk-secret-key-must-not-appear",
+		"https://api.anthropic.com/v1",
+		"Bearer runtime-secret",
+		"runtime-api-key",
+	} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("response body leaked secret %q", secret)
+		}
 	}
 
 	var info RuntimeInfo
@@ -204,6 +253,18 @@ func TestRuntimeInfoEndpointDoesNotLeakSecrets(t *testing.T) {
 	}
 	if len(info.Profiles) != 1 || info.Profiles[0].Name != "anthropic-prod" {
 		t.Fatalf("expected anthropic profile metadata, got %+v", info.Profiles)
+	}
+	if info.Capabilities.MCP.Summary.ExposedToolCount != 1 {
+		t.Fatalf("expected 1 exposed MCP tool, got %+v", info.Capabilities.MCP.Summary)
+	}
+	if info.Capabilities.MCP.Servers[0].Config.Headers["Authorization"] != mcp.RedactedHeaderValue {
+		t.Fatalf("expected Authorization header to be redacted, got %+v", info.Capabilities.MCP.Servers[0].Config.Headers)
+	}
+	if info.Capabilities.MCP.Servers[0].Config.Headers["x-api-key"] != mcp.RedactedHeaderValue {
+		t.Fatalf("expected x-api-key header to be redacted, got %+v", info.Capabilities.MCP.Servers[0].Config.Headers)
+	}
+	if info.Capabilities.Skills.Summary.EnabledSkillCount != 1 {
+		t.Fatalf("expected 1 enabled skill, got %+v", info.Capabilities.Skills.Summary)
 	}
 }
 
@@ -242,6 +303,77 @@ func TestRuntimeInfoProfilesInferProtocolWithoutGlobalEnvLeakage(t *testing.T) {
 	}
 	if info.Profiles[1].Protocol != "anthropic_messages" {
 		t.Fatalf("expected anthropic profile protocol anthropic_messages, got %q", info.Profiles[1].Protocol)
+	}
+}
+
+func TestCapabilitiesEndpoint(t *testing.T) {
+	provider := &StaticRuntimeInfoProvider{
+		Info: RuntimeInfo{
+			RuntimeVersion: RuntimeVersion,
+			APIVersion:     "v1",
+			Capabilities: CapabilitiesSnapshot{
+				MCP: mcp.Snapshot{
+					Servers: []mcp.Server{{
+						Config: mcp.ServerConfig{
+							ID:        "fs",
+							Name:      "Filesystem",
+							Transport: mcp.TransportStdio,
+							Enabled:   false,
+							Command:   "npx",
+							Headers: map[string]string{
+								"Authorization": "Bearer hidden-cap-secret",
+								"x-api-key":     "cap-api-key",
+							},
+						},
+						State: mcp.ServerRuntime{
+							Mode:   mcp.RuntimeModeTestDouble,
+							Status: mcp.ServerStatusDisabled,
+						},
+					}},
+					Summary: mcp.SnapshotSummary{ServerCount: 1},
+				},
+				Skills: skills.Snapshot{
+					Skills: []skills.Definition{{
+						ID:          "review",
+						Name:        "Review",
+						Description: "Review code",
+						Enabled:     true,
+					}},
+					Summary: skills.Summary{SkillCount: 1, EnabledSkillCount: 1},
+				},
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/capabilities", nil)
+	rec := httptest.NewRecorder()
+	NewRouter(nil, provider).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, secret := range []string{"Bearer hidden-cap-secret", "cap-api-key"} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("capabilities payload leaked MCP header secret %q", secret)
+		}
+	}
+
+	var payload CapabilitiesSnapshot
+	if err := json.NewDecoder(strings.NewReader(body)).Decode(&payload); err != nil {
+		t.Fatalf("failed to decode capabilities: %v", err)
+	}
+	if payload.MCP.Summary.ServerCount != 1 {
+		t.Fatalf("expected MCP summary in payload, got %+v", payload.MCP.Summary)
+	}
+	if payload.MCP.Servers[0].Config.Headers["Authorization"] != mcp.RedactedHeaderValue {
+		t.Fatalf("expected Authorization header to be redacted, got %+v", payload.MCP.Servers[0].Config.Headers)
+	}
+	if payload.MCP.Servers[0].Config.Headers["x-api-key"] != mcp.RedactedHeaderValue {
+		t.Fatalf("expected x-api-key header to be redacted, got %+v", payload.MCP.Servers[0].Config.Headers)
+	}
+	if payload.Skills.Summary.EnabledSkillCount != 1 {
+		t.Fatalf("expected skills summary in payload, got %+v", payload.Skills.Summary)
 	}
 }
 

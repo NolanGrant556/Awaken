@@ -1,6 +1,7 @@
 package agentcore
 
 import (
+	"sort"
 	"strings"
 
 	"awaken/src/prompt"
@@ -53,42 +54,15 @@ func (rb *RequestBuilder) buildSystemPrompt() string {
 }
 
 func (rb *RequestBuilder) getTools() []tool.ToolDefinition {
-	tools := tool.ListTools()
-	definitions := make([]tool.ToolDefinition, 0, len(tools))
-
-	for _, t := range tools {
-		definitions = append(definitions, tool.ToolDefinition{
-			Type: "function",
-			Function: tool.ToolFunctionSchema{
-				Name:        t.Name(),
-				Description: t.Description(),
-				Parameters:  rb.buildToolParameters(t),
-			},
-		})
+	definitions := tool.DefinitionsFromTools(tool.ListTools())
+	if rb.config.MCPRegistry != nil {
+		definitions = append(definitions, rb.config.MCPRegistry.ToolDefinitions()...)
 	}
+
+	sort.Slice(definitions, func(i, j int) bool {
+		return definitions[i].Function.Name < definitions[j].Function.Name
+	})
 	return definitions
-}
-
-func (rb *RequestBuilder) buildToolParameters(t tool.Tool) tool.ToolParametersSchema {
-	params := t.Parameters()
-	properties := make(map[string]tool.ToolParam, len(params))
-	required := make([]string, 0)
-
-	for _, p := range params {
-		properties[p.Name] = tool.ToolParam{
-			Type:        p.Type,
-			Description: p.Description,
-		}
-		if p.Required {
-			required = append(required, p.Name)
-		}
-	}
-
-	return tool.ToolParametersSchema{
-		Type:       "object",
-		Properties: properties,
-		Required:   required,
-	}
 }
 
 func (rb *RequestBuilder) updateRuntimeInfoFromConfig(tools []tool.ToolDefinition) {

@@ -55,8 +55,9 @@ func (r *Registry) Add(server MCPServer) (MCPServer, error) {
 		normalized.CreatedAt = now
 	}
 	normalized.UpdatedAt = now
-	r.servers[normalized.ID] = cloneServer(normalized)
-	return cloneServer(normalized), nil
+	stored := cloneServer(normalized)
+	r.servers[normalized.ID] = stored
+	return sanitizeServer(stored), nil
 }
 
 func (r *Registry) Update(server MCPServer) (MCPServer, error) {
@@ -83,8 +84,9 @@ func (r *Registry) Update(server MCPServer) (MCPServer, error) {
 		normalized.CreatedAt = existing.CreatedAt
 	}
 	normalized.UpdatedAt = r.now().UTC()
-	r.servers[normalized.ID] = cloneServer(normalized)
-	return cloneServer(normalized), nil
+	stored := cloneServer(normalized)
+	r.servers[normalized.ID] = stored
+	return sanitizeServer(stored), nil
 }
 
 func (r *Registry) Delete(id string) error {
@@ -109,7 +111,7 @@ func (r *Registry) List() []MCPServer {
 
 	servers := make([]MCPServer, 0, len(r.servers))
 	for _, server := range r.servers {
-		servers = append(servers, cloneServer(server))
+		servers = append(servers, sanitizeServer(server))
 	}
 	sortServers(servers)
 	return servers
@@ -124,7 +126,7 @@ func (r *Registry) Get(id string) (MCPServer, error) {
 	if !exists {
 		return MCPServer{}, fmt.Errorf("%w: %s", ErrServerNotFound, id)
 	}
-	return cloneServer(server), nil
+	return sanitizeServer(server), nil
 }
 
 func (r *Registry) Enable(id string, enabled bool) (MCPServer, error) {
@@ -138,8 +140,9 @@ func (r *Registry) Enable(id string, enabled bool) (MCPServer, error) {
 	}
 	server.Enabled = enabled
 	server.UpdatedAt = r.now().UTC()
-	r.servers[id] = cloneServer(server)
-	return cloneServer(server), nil
+	stored := cloneServer(server)
+	r.servers[id] = stored
+	return sanitizeServer(stored), nil
 }
 
 func (r *Registry) TestPlan(id string) (ConnectionTestPlan, error) {
@@ -158,10 +161,10 @@ func (r *Registry) TestPlan(id string) (ConnectionTestPlan, error) {
 	case TransportStdio:
 		plan.Command = server.Transport.Command
 		plan.Args = append([]string(nil), server.Transport.Args...)
-		plan.Env = cloneStringMap(server.Transport.Env)
+		plan.Env = redactStringMap(server.Transport.Env)
 	case TransportHTTP, TransportSSE, TransportStreamableHTTP:
 		plan.URL = server.Transport.URL
-		plan.Headers = cloneStringMap(server.Transport.Headers)
+		plan.Headers = redactStringMap(server.Transport.Headers)
 	}
 	return plan, nil
 }
@@ -182,8 +185,9 @@ func (r *Registry) SetConnectionStatus(id string, status ConnectionStatus) (MCPS
 	}
 	server.Connection = normalized
 	server.UpdatedAt = r.now().UTC()
-	r.servers[id] = cloneServer(server)
-	return cloneServer(server), nil
+	stored := cloneServer(server)
+	r.servers[id] = stored
+	return sanitizeServer(stored), nil
 }
 
 func (r *Registry) SetOAuthState(id string, state OAuthState) (MCPServer, error) {
@@ -202,8 +206,9 @@ func (r *Registry) SetOAuthState(id string, state OAuthState) (MCPServer, error)
 	}
 	server.OAuth = normalized
 	server.UpdatedAt = r.now().UTC()
-	r.servers[id] = cloneServer(server)
-	return cloneServer(server), nil
+	stored := cloneServer(server)
+	r.servers[id] = stored
+	return sanitizeServer(stored), nil
 }
 
 func (r *Registry) ImportCandidates(source ImportSource, inputs []ImportCandidate) (ImportPlan, error) {
@@ -230,7 +235,7 @@ func (r *Registry) ImportCandidates(source ImportSource, inputs []ImportCandidat
 	for _, input := range inputs {
 		candidate := ImportCandidate{
 			Source: source,
-			Server: cloneServer(input.Server),
+			Server: sanitizeServer(input.Server),
 		}
 		normalized, err := NormalizeServer(input.Server)
 		if err != nil {
@@ -240,7 +245,7 @@ func (r *Registry) ImportCandidates(source ImportSource, inputs []ImportCandidat
 			plan.Candidates = append(plan.Candidates, candidate)
 			continue
 		}
-		candidate.Server = normalized
+		candidate.Server = sanitizeServer(normalized)
 
 		idKey := strings.ToLower(normalized.ID)
 		nameKey := strings.ToLower(normalized.Name)
@@ -334,15 +339,40 @@ func cloneTools(tools []ToolInfo) []ToolInfo {
 	}
 	cloned := make([]ToolInfo, len(tools))
 	for i, tool := range tools {
-		cloned[i] = tool
-		if len(tool.Meta) > 0 {
-			cloned[i].Meta = make(map[string]any, len(tool.Meta))
-			for key, value := range tool.Meta {
-				cloned[i].Meta[key] = value
-			}
+		cloned[i] = cloneToolInfo(tool)
+	}
+	return cloned
+}
+
+func cloneToolInfo(tool ToolInfo) ToolInfo {
+	cloned := tool
+	cloned.InputSchema = cloneAny(tool.InputSchema)
+	if len(tool.Meta) > 0 {
+		cloned.Meta = make(map[string]any, len(tool.Meta))
+		for key, value := range tool.Meta {
+			cloned.Meta[key] = cloneAny(value)
 		}
 	}
 	return cloned
+}
+
+func cloneAny(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		cloned := make(map[string]any, len(typed))
+		for key, child := range typed {
+			cloned[key] = cloneAny(child)
+		}
+		return cloned
+	case []any:
+		cloned := make([]any, len(typed))
+		for i, child := range typed {
+			cloned[i] = cloneAny(child)
+		}
+		return cloned
+	default:
+		return value
+	}
 }
 
 func cloneStringMap(values map[string]string) map[string]string {

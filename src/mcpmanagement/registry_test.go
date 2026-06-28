@@ -154,6 +154,9 @@ func TestNormalizeRedactsSecretsAndTestPlanStaysRedacted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected registry, got %v", err)
 	}
+	if raw := registry.servers["env-server"].Transport.Env["API_TOKEN"]; raw != "secret-token" {
+		t.Fatalf("expected registry to preserve secret internally, got %q", raw)
+	}
 
 	got, err := registry.Get("env-server")
 	if err != nil {
@@ -196,6 +199,9 @@ func TestNormalizeRedactsSecretsAndTestPlanStaysRedacted(t *testing.T) {
 	}
 	if added.Transport.Headers["Accept"] != "application/json" {
 		t.Fatalf("expected Accept header to remain visible, got %q", added.Transport.Headers["Accept"])
+	}
+	if raw := registry.servers["http-server"].Transport.Headers["Authorization"]; raw != "Bearer token" {
+		t.Fatalf("expected registry to preserve Authorization internally, got %q", raw)
 	}
 }
 
@@ -316,6 +322,54 @@ func TestNormalizeDedupesDuplicateTools(t *testing.T) {
 	}
 	if normalized.Tools[0].Name != "read" || normalized.Tools[0].Description != "first" {
 		t.Fatalf("expected first duplicate to win, got %+v", normalized.Tools[0])
+	}
+}
+
+func TestRegistryClonesToolSchemasOnWriteAndRead(t *testing.T) {
+	server := testStdioServer("schema-server", "Schema Server")
+	server.Tools = []ToolInfo{
+		{
+			Name: "read",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path": map[string]any{"type": "string"},
+				},
+			},
+		},
+	}
+
+	registry, err := NewRegistry(server)
+	if err != nil {
+		t.Fatalf("expected registry, got %v", err)
+	}
+
+	added, err := registry.Get("schema-server")
+	if err != nil {
+		t.Fatalf("expected get to succeed, got %v", err)
+	}
+
+	addedSchema := added.Tools[0].InputSchema.(map[string]any)
+	addedSchema["type"] = "array"
+	addedProperties := addedSchema["properties"].(map[string]any)
+	addedProperties["path"] = map[string]any{"type": "number"}
+
+	storedSchema := registry.servers["schema-server"].Tools[0].InputSchema.(map[string]any)
+	if storedSchema["type"] != "object" {
+		t.Fatalf("expected stored schema type to remain object, got %#v", storedSchema["type"])
+	}
+	storedProperties := storedSchema["properties"].(map[string]any)
+	if storedProperties["path"].(map[string]any)["type"] != "string" {
+		t.Fatalf("expected stored nested schema to remain string, got %#v", storedProperties["path"])
+	}
+
+	fetchedAgain, err := registry.Get("schema-server")
+	if err != nil {
+		t.Fatalf("expected second get to succeed, got %v", err)
+	}
+	refetchedSchema := fetchedAgain.Tools[0].InputSchema.(map[string]any)
+	if refetchedSchema["type"] != "object" {
+		t.Fatalf("expected refetched schema type to remain object, got %#v", refetchedSchema["type"])
 	}
 }
 

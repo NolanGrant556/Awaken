@@ -78,7 +78,7 @@ func normalizeStdioTransport(transport TransportConfig) (TransportConfig, error)
 	}
 
 	args := append([]string(nil), transport.Args...)
-	env, err := normalizeStringMap(transport.Env, true)
+	env, err := normalizeStringMap(transport.Env)
 	if err != nil {
 		return TransportConfig{}, fmt.Errorf("%w: %v", ErrInvalidTransport, err)
 	}
@@ -108,7 +108,7 @@ func normalizeURLTransport(transport TransportConfig) (TransportConfig, error) {
 		return TransportConfig{}, fmt.Errorf("%w: %s url must use http or https", ErrInvalidTransport, transport.Type)
 	}
 
-	headers, err := normalizeStringMap(transport.Headers, true)
+	headers, err := normalizeStringMap(transport.Headers)
 	if err != nil {
 		return TransportConfig{}, fmt.Errorf("%w: %v", ErrInvalidTransport, err)
 	}
@@ -120,7 +120,7 @@ func normalizeURLTransport(transport TransportConfig) (TransportConfig, error) {
 	}, nil
 }
 
-func normalizeStringMap(values map[string]string, redactSecrets bool) (map[string]string, error) {
+func normalizeStringMap(values map[string]string) (map[string]string, error) {
 	if len(values) == 0 {
 		return nil, nil
 	}
@@ -130,9 +130,6 @@ func normalizeStringMap(values map[string]string, redactSecrets bool) (map[strin
 		key = strings.TrimSpace(key)
 		if key == "" {
 			return nil, errors.New("map key is required")
-		}
-		if redactSecrets && isSensitiveKey(key) && value != "" {
-			value = RedactedValue
 		}
 		normalized[key] = value
 	}
@@ -157,16 +154,31 @@ func dedupeTools(tools []ToolInfo) []ToolInfo {
 			continue
 		}
 		seen[key] = struct{}{}
-		if len(tool.Meta) > 0 {
-			meta := make(map[string]any, len(tool.Meta))
-			for key, value := range tool.Meta {
-				meta[key] = value
-			}
-			tool.Meta = meta
-		}
-		deduped = append(deduped, tool)
+		deduped = append(deduped, cloneToolInfo(tool))
 	}
 	return deduped
+}
+
+func redactStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	redacted := make(map[string]string, len(values))
+	for key, value := range values {
+		if isSensitiveKey(key) && value != "" {
+			value = RedactedValue
+		}
+		redacted[key] = value
+	}
+	return redacted
+}
+
+func sanitizeServer(server MCPServer) MCPServer {
+	server = cloneServer(server)
+	server.Transport.Env = redactStringMap(server.Transport.Env)
+	server.Transport.Headers = redactStringMap(server.Transport.Headers)
+	return server
 }
 
 func isSensitiveKey(key string) bool {

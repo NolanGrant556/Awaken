@@ -47,10 +47,6 @@ func NewToolRuntime(sink EventSink) *ToolRuntime {
 
 func NewToolRuntimeWithConfig(sink EventSink, config ToolRuntimeConfig) *ToolRuntime {
 	permissionContext := config.PermissionContext.Normalize()
-	store := config.ToolResultStore
-	if store == nil {
-		store = toolresults.NewStore(toolresults.Config{WorkspaceRoot: permissionContext.WorkspaceRoot})
-	}
 	maxChars := config.ToolResultMaxChars
 	if maxChars <= 0 {
 		maxChars = outputlimit.DefaultToolResultMaxChars
@@ -62,7 +58,7 @@ func NewToolRuntimeWithConfig(sink EventSink, config ToolRuntimeConfig) *ToolRun
 	return &ToolRuntime{
 		sink:                   normalizeEventSink(sink),
 		permissionContext:      permissionContext,
-		toolResultStore:        store,
+		toolResultStore:        config.ToolResultStore,
 		toolResultMaxChars:     maxChars,
 		toolResultPreviewChars: previewChars,
 	}

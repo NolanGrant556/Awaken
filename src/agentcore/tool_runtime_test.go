@@ -269,6 +269,33 @@ func TestToolRuntimePersistsLargeToolResult(t *testing.T) {
 	}
 }
 
+func TestToolRuntimeDefaultRuntimeStillTruncatesLargeToolResult(t *testing.T) {
+	toolName := "runtime_large_output_default_truncation_tool"
+	fullOutput := strings.Repeat("x", 25000) + "COMPLETE_TAIL_SHOULD_STAY_INLINE"
+	mustRegisterRuntimeTool(t, runtimeTestTool{
+		name:   toolName,
+		output: fullOutput,
+	})
+
+	result := NewToolRuntime(nil).Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_large_default",
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{}`,
+		},
+	})
+
+	if result.IsError || !result.Truncated || result.ToolResultHandle != nil {
+		t.Fatalf("expected default runtime to truncate inline, got %+v", result)
+	}
+	if !strings.Contains(result.Content, "truncated") || !strings.Contains(result.Content, "COMPLETE_TAIL_SHOULD_STAY_INLINE") {
+		t.Fatalf("expected inline truncated content with preserved tail, got %q", result.Content)
+	}
+	if strings.Contains(result.Content, "<persisted-tool-result>") {
+		t.Fatalf("expected default runtime not to emit persisted handle content, got %q", result.Content)
+	}
+}
+
 func TestArgumentsForXMLFallbackUsesSingleRequiredStringParam(t *testing.T) {
 	toolName := "runtime_xml_read_like_tool"
 	mustRegisterRuntimeTool(t, runtimeTestTool{

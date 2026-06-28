@@ -100,6 +100,7 @@ Runtime / server 只作为内部工程层测试与验证，不形成第三个使
 GET  /health
 GET  /v1/agui/demo
 GET  /v1/runtime/info
+GET  /v1/agent-definitions?workspace_root=...
 GET  /v1/threads
 POST /v1/runs
 GET  /v1/runs/{run_id}

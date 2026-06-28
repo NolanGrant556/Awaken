@@ -5,8 +5,10 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"awaken/src/agentcore"
+	"awaken/src/agentdefs"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
 	"awaken/src/workspaceguard"
@@ -53,6 +55,8 @@ type threadTranscriptResponse struct {
 	Thread awruntime.ThreadSnapshot      `json:"thread"`
 	Runs   []threadTranscriptRunResponse `json:"runs"`
 }
+
+type agentDefinitionsLoader func(workspaceRoot string) (agentdefs.Result, error)
 
 func writeErrorJSON(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -315,6 +319,30 @@ func handleCapabilities(w http.ResponseWriter, r *http.Request, provider Runtime
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
+}
+
+func handleAgentDefinitions(w http.ResponseWriter, r *http.Request, load agentDefinitionsLoader) {
+	workspaceRoot := strings.TrimSpace(r.URL.Query().Get("workspace_root"))
+	if workspaceRoot == "" {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_WORKSPACE", "workspace_root query parameter is required")
+		return
+	}
+	if load == nil {
+		writeErrorJSON(w, http.StatusServiceUnavailable, "AGENT_DEFINITIONS_UNAVAILABLE", "agent definition loader unavailable")
+		return
+	}
+
+	result, err := load(workspaceRoot)
+	if err != nil {
+		if errors.Is(err, agentdefs.ErrInvalidWorkspace) {
+			writeErrorJSON(w, http.StatusBadRequest, "INVALID_WORKSPACE", err.Error())
+			return
+		}
+		writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load agent definitions")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

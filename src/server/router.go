@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"awaken/src/agentcore"
+	"awaken/src/agentdefs"
 	"awaken/src/memory"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
@@ -28,6 +29,9 @@ func NewRouterWithMemory(runService *awruntime.RunService, infoProvider RuntimeI
 		handlers := memoryHandlers{store: memoryStore}
 		mux.HandleFunc("GET /v1/memory", handlers.handleListOrSearch)
 	}
+	mux.HandleFunc("GET /v1/agent-definitions", func(w http.ResponseWriter, r *http.Request) {
+		handleAgentDefinitions(w, r, agentdefs.Load)
+	})
 	if runService != nil {
 		handlers := runHandlers{runService: runService}
 		mux.HandleFunc("GET /v1/threads", handlers.handleListThreads)

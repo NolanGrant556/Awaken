@@ -22,10 +22,11 @@ func TestRegistryCRUDNormalizesAndSnapshots(t *testing.T) {
 			Name:    "OPENAI_API_KEY",
 			Present: true,
 		},
+		Enabled: true,
 		Models: []Model{
-			{ID: "gpt-4.1", Capabilities: []ModelCapability{ModelCapabilityText, ModelCapabilityText, ModelCapabilityToolCalling}},
+			{ID: "gpt-4.1", Enabled: true, Capabilities: []ModelCapability{ModelCapabilityText, ModelCapabilityText, ModelCapabilityToolCalling}},
 			{ID: "gpt-4.1"},
-			{ID: " gpt-4o "},
+			{ID: " gpt-4o ", Enabled: true},
 		},
 		Annotations: map[string]string{"source": "test"},
 	})
@@ -46,7 +47,7 @@ func TestRegistryCRUDNormalizesAndSnapshots(t *testing.T) {
 		t.Fatalf("expected default openai protocol, got %q", created.Protocol)
 	}
 	if !created.Enabled {
-		t.Fatalf("expected provider to default enabled")
+		t.Fatalf("expected provider enabled flag to be preserved")
 	}
 	if len(created.Models) != 2 {
 		t.Fatalf("expected duplicate models to be removed, got %d", len(created.Models))
@@ -55,7 +56,7 @@ func TestRegistryCRUDNormalizesAndSnapshots(t *testing.T) {
 		t.Fatalf("unexpected model order: %#v", created.Models)
 	}
 	if !created.Models[0].Enabled || !created.Models[1].Enabled {
-		t.Fatalf("expected models to default enabled: %#v", created.Models)
+		t.Fatalf("expected model enabled flags to be preserved: %#v", created.Models)
 	}
 	if len(created.Models[0].Capabilities) != 2 {
 		t.Fatalf("expected duplicate capabilities to be removed, got %#v", created.Models[0].Capabilities)
@@ -158,7 +159,8 @@ func TestEnableProviderAndModel(t *testing.T) {
 		Name:    "Gemini",
 		Kind:    ProviderKindGemini,
 		BaseURL: "https://generativelanguage.googleapis.com",
-		Models:  []Model{{ID: "gemini-2.5-pro"}, {ID: "gemini-2.5-flash"}},
+		Enabled: true,
+		Models:  []Model{{ID: "gemini-2.5-pro", Enabled: true}, {ID: "gemini-2.5-flash", Enabled: true}},
 	}); err != nil {
 		t.Fatalf("Add returned error: %v", err)
 	}
@@ -180,6 +182,32 @@ func TestEnableProviderAndModel(t *testing.T) {
 	}
 	if _, err := registry.EnableModel("gemini", "missing", false); !errors.Is(err, ErrModelNotFound) {
 		t.Fatalf("expected ErrModelNotFound, got %v", err)
+	}
+}
+
+func TestNormalizeProviderPreservesDisabledState(t *testing.T) {
+	normalized, err := NormalizeProvider(Provider{
+		ID:      " custom ",
+		Name:    " Custom ",
+		Kind:    ProviderKindCustom,
+		BaseURL: "https://custom.example.com/",
+		Models: []Model{
+			{ID: "primary", Enabled: false},
+			{ID: "secondary", Enabled: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NormalizeProvider returned error: %v", err)
+	}
+
+	if normalized.Enabled {
+		t.Fatalf("expected disabled provider state to be preserved")
+	}
+	if normalized.Models[0].Enabled {
+		t.Fatalf("expected disabled model state to be preserved")
+	}
+	if !normalized.Models[1].Enabled {
+		t.Fatalf("expected enabled model state to be preserved")
 	}
 }
 

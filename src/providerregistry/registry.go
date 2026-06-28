@@ -30,7 +30,7 @@ func NewRegistry() *Registry {
 }
 
 func (r *Registry) Add(provider Provider) (ProviderSnapshot, error) {
-	normalized, err := normalizeProvider(provider, true)
+	normalized, err := normalizeProvider(provider)
 	if err != nil {
 		return ProviderSnapshot{}, err
 	}
@@ -48,7 +48,7 @@ func (r *Registry) Add(provider Provider) (ProviderSnapshot, error) {
 }
 
 func (r *Registry) Update(provider Provider) (ProviderSnapshot, error) {
-	normalized, err := normalizeProvider(provider, false)
+	normalized, err := normalizeProvider(provider)
 	if err != nil {
 		return ProviderSnapshot{}, err
 	}
@@ -210,15 +210,15 @@ func (r *Registry) DiscoveryPlan(providerID string) (DiscoveryPlan, error) {
 }
 
 func NormalizeProvider(provider Provider) (Provider, error) {
-	return normalizeProvider(provider, true)
+	return normalizeProvider(provider)
 }
 
 func ValidateProvider(provider Provider) error {
-	_, err := normalizeProvider(provider, false)
+	_, err := normalizeProvider(provider)
 	return err
 }
 
-func normalizeProvider(provider Provider, defaultEnabled bool) (Provider, error) {
+func normalizeProvider(provider Provider) (Provider, error) {
 	provider.ID = strings.TrimSpace(provider.ID)
 	provider.Name = strings.TrimSpace(provider.Name)
 	if provider.ID == "" {
@@ -257,21 +257,18 @@ func normalizeProvider(provider Provider, defaultEnabled bool) (Provider, error)
 
 	provider.Credential = normalizeCredentialRef(provider.Credential, provider.AuthScheme)
 
-	models, err := normalizeModels(provider.Models, provider.Protocol, defaultEnabled)
+	models, err := normalizeModels(provider.Models, provider.Protocol)
 	if err != nil {
 		return Provider{}, err
 	}
 	provider.Models = models
 
-	if defaultEnabled {
-		provider.Enabled = true
-	}
 	provider.Health = normalizeHealthMap(provider.Health)
 	provider.Annotations = cloneStringMap(provider.Annotations)
 	return provider, nil
 }
 
-func normalizeModels(models []Model, providerProtocol Protocol, defaultEnabled bool) ([]Model, error) {
+func normalizeModels(models []Model, providerProtocol Protocol) ([]Model, error) {
 	if len(models) == 0 {
 		return nil, errors.New("at least one model is required")
 	}
@@ -296,9 +293,6 @@ func normalizeModels(models []Model, providerProtocol Protocol, defaultEnabled b
 			return nil, fmt.Errorf("invalid model protocol for %s: %s", model.ID, model.Protocol)
 		}
 		model.Capabilities = normalizeCapabilities(model.Capabilities)
-		if defaultEnabled {
-			model.Enabled = true
-		}
 		normalized = append(normalized, model)
 	}
 	return normalized, nil

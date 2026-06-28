@@ -33,4 +33,6 @@ type updateChunk struct {
 	oldLines      []string
 	newLines      []string
 	endOfFile     bool
+	addedLines    int
+	deletedLines  int
 }

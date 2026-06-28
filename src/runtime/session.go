@@ -310,6 +310,7 @@ func (s *Session) AwaitApproval(ctx context.Context, request agentcore.ApprovalR
 		ApprovalRiskTone:      request.RiskTone,
 		ApprovalAffectedPaths: request.AffectedPaths,
 		ApprovalPatchSummary:  request.PatchSummary,
+		DiffReview:            request.DiffReview,
 	})
 	s.RecordAgentEvent(approvalSurfaceArtifactEvent(request))
 
@@ -343,6 +344,7 @@ func approvalSurfaceArtifactEvent(request agentcore.ApprovalRequest) agentcore.A
 		ToolCallID:    request.ToolCallID,
 		AffectedPaths: request.AffectedPaths,
 		PatchSummary:  request.PatchSummary,
+		DiffReview:    request.DiffReview,
 	})
 	if err != nil {
 		content = ""
@@ -359,6 +361,7 @@ func approvalSurfaceArtifactEvent(request agentcore.ApprovalRequest) agentcore.A
 		ArtifactKind:        a2ui.ArtifactKind,
 		ArtifactContent:     content,
 		ArtifactStatus:      agentcore.ArtifactStatusReady,
+		DiffReview:          request.DiffReview,
 	}
 }
 
@@ -411,15 +414,18 @@ func (s *Session) resolveApproval(code string, approvalID string, decision agent
 	notifySessionObserver(observer, snapshot, &appended)
 
 	s.RecordAgentEvent(agentcore.AwakenEvent{
-		Type:                agentcore.ApprovalResolvedEventType,
-		ApprovalID:          approvalID,
-		ToolCallID:          request.ToolCallID,
-		ToolName:            request.ToolName,
-		ApprovalTitle:       request.Title,
-		ApprovalDescription: request.Description,
-		ApprovalRiskTone:    request.RiskTone,
-		ApprovalDecision:    decision,
-		Code:                code,
+		Type:                  agentcore.ApprovalResolvedEventType,
+		ApprovalID:            approvalID,
+		ToolCallID:            request.ToolCallID,
+		ToolName:              request.ToolName,
+		ApprovalTitle:         request.Title,
+		ApprovalDescription:   request.Description,
+		ApprovalRiskTone:      request.RiskTone,
+		ApprovalDecision:      decision,
+		ApprovalAffectedPaths: request.AffectedPaths,
+		ApprovalPatchSummary:  request.PatchSummary,
+		DiffReview:            request.DiffReview,
+		Code:                  code,
 	})
 
 	pending.decision <- decision

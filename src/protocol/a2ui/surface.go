@@ -2,7 +2,10 @@ package a2ui
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
+
+	"awaken/src/tool"
 )
 
 const (
@@ -61,6 +64,7 @@ type ApprovalSurfaceRequest struct {
 	RejectLabel   string
 	AffectedPaths []string
 	PatchSummary  string
+	DiffReview    *tool.DiffReviewMetadata
 }
 
 func ApprovalSurfaceJSON(request ApprovalSurfaceRequest) (string, error) {
@@ -95,7 +99,7 @@ func ApprovalSurface(request ApprovalSurfaceRequest) Surface {
 				{
 					ID:        "root",
 					Component: "Card",
-					Children:  []string{"title", "risk", "description", "patch-summary", "affected-paths", "tool", "tool-call", "approval", "actions-note", "actions"},
+					Children:  []string{"title", "risk", "description", "patch-summary", "affected-paths", "line-counts", "risk-summary", "tool", "tool-call", "approval", "actions-note", "actions"},
 				},
 				{
 					ID:        "title",
@@ -126,6 +130,18 @@ func ApprovalSurface(request ApprovalSurfaceRequest) Surface {
 					Component: "KeyValue",
 					Label:     "Affected paths",
 					Value:     strings.Join(request.AffectedPaths, "\n"),
+				},
+				{
+					ID:        "line-counts",
+					Component: "KeyValue",
+					Label:     "Line counts",
+					Value:     diffReviewLineCounts(request.DiffReview),
+				},
+				{
+					ID:        "risk-summary",
+					Component: "KeyValue",
+					Label:     "Risk summary",
+					Value:     diffReviewRiskSummary(request.DiffReview),
 				},
 				{
 					ID:        "tool",
@@ -201,4 +217,18 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func diffReviewLineCounts(metadata *tool.DiffReviewMetadata) string {
+	if metadata == nil {
+		return ""
+	}
+	return fmt.Sprintf("+%d / -%d", metadata.LineCounts.Added, metadata.LineCounts.Deleted)
+}
+
+func diffReviewRiskSummary(metadata *tool.DiffReviewMetadata) string {
+	if metadata == nil {
+		return ""
+	}
+	return strings.TrimSpace(metadata.Risk.Summary)
 }

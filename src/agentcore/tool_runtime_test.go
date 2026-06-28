@@ -804,6 +804,7 @@ func TestToolRuntimePersistsOnlyFinalResultNotCommandOutputEvents(t *testing.T) 
 
 func TestToolRuntimeEmitsPatchPreviewBeforeApplyPatchApproval(t *testing.T) {
 	root := t.TempDir()
+	target := filepath.Join(root, "note.md")
 	patch := "*** Begin Patch\n" +
 		"*** Add File: note.md\n" +
 		"+hello\n" +
@@ -839,10 +840,16 @@ func TestToolRuntimeEmitsPatchPreviewBeforeApplyPatchApproval(t *testing.T) {
 	if len(got[0].ApprovalAffectedPaths) != 1 || got[0].ApprovalAffectedPaths[0] != "note.md" {
 		t.Fatalf("unexpected affected paths: %+v", got[0].ApprovalAffectedPaths)
 	}
+	if got[0].DiffReview == nil || got[0].DiffReview.FileCounts.Added != 1 || got[0].DiffReview.LineCounts.Added != 1 {
+		t.Fatalf("unexpected diff review metadata: %+v", got[0].DiffReview)
+	}
 	for _, event := range got {
 		if event.Type == ArtifactCreatedEventType || event.Type == ArtifactUpdatedEventType {
 			t.Fatalf("expected rejected patch not to emit changed-file artifact, got %+v", event)
 		}
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("expected rejected approval not to write %s, stat err=%v", target, err)
 	}
 }
 

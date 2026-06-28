@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	"awaken/src/tool"
 )
 
 func TestMapEventReasoningLifecycle(t *testing.T) {
@@ -157,6 +158,12 @@ func TestMapEventPatchUpdated(t *testing.T) {
 		Patch:                 "*** Begin Patch\n*** End Patch",
 		PatchSummary:          "新增 1 个文件",
 		ApprovalAffectedPaths: []string{"note.md"},
+		DiffReview: &tool.DiffReviewMetadata{
+			AffectedPaths: []string{"note.md"},
+			FileCounts:    tool.DiffReviewFileCounts{Added: 1},
+			LineCounts:    tool.DiffReviewLineCounts{Added: 1},
+			Risk:          tool.DiffReviewRiskSummary{Level: "warning", Summary: "1 file changes, +1/-0 lines. Stays within writable roots."},
+		},
 	})
 
 	if len(events) != 1 {
@@ -170,6 +177,9 @@ func TestMapEventPatchUpdated(t *testing.T) {
 	}
 	if events[0].Patch == "" || len(events[0].ApprovalAffectedPaths) != 1 || events[0].ApprovalAffectedPaths[0] != "note.md" {
 		t.Fatalf("unexpected patch payload: %+v", events[0])
+	}
+	if events[0].DiffReview == nil || events[0].DiffReview.LineCounts.Added != 1 {
+		t.Fatalf("expected diff review metadata, got %+v", events[0].DiffReview)
 	}
 }
 
@@ -204,6 +214,12 @@ func TestMapEventApprovalRequested(t *testing.T) {
 		ApprovalTitle:       "Approve write_file",
 		ApprovalDescription: "Write README.md",
 		ApprovalRiskTone:    agentcore.ApprovalRiskDanger,
+		DiffReview: &tool.DiffReviewMetadata{
+			AffectedPaths: []string{"README.md"},
+			FileCounts:    tool.DiffReviewFileCounts{Modified: 1},
+			LineCounts:    tool.DiffReviewLineCounts{Added: 1, Deleted: 1},
+			Risk:          tool.DiffReviewRiskSummary{Level: "danger", Summary: "1 file changes, +1/-1 lines. Includes file deletions."},
+		},
 	})
 
 	if len(events) != 1 {
@@ -214,6 +230,9 @@ func TestMapEventApprovalRequested(t *testing.T) {
 	}
 	if events[0].ApprovalID != "approval-1" || events[0].ApprovalRiskTone != "danger" {
 		t.Fatalf("unexpected approval payload: %+v", events[0])
+	}
+	if events[0].DiffReview == nil || events[0].DiffReview.Risk.Level != "danger" {
+		t.Fatalf("expected diff review metadata, got %+v", events[0].DiffReview)
 	}
 }
 

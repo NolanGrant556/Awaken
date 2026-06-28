@@ -8,6 +8,8 @@ const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const screenName = "awaken-dev-desktop";
 const rendererUrl = "http://127.0.0.1:5174/";
 const readyTimeoutMs = 60_000;
+const statusReadyTimeoutMs = 30_000;
+const statusActivateIntervalMs = 2_000;
 const pollIntervalMs = 500;
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const electronAppPath = join(rootDir, "node_modules/electron/dist/Electron.app");
@@ -64,39 +66,71 @@ function screenInfo() {
 }
 
 function processInfo() {
-  const result = run("ps", ["-axo", "pid=,args="]);
+  const result = run("ps", ["-axo", "pid=,ppid=,args="]);
   if (!result.ok) {
-    return { vite: [], electron: [], core: [] };
+    return { vite: [], electron: [], core: [], managed: [] };
   }
 
   const rows = result.stdout
     .split("\n")
-    .map((line) => line.trim().match(/^(\d+)\s+(.*)$/))
+    .map((line) => line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/))
     .filter(Boolean)
-    .map((match) => ({ pid: Number(match[1]), args: match[2] }));
+    .map((match) => ({ pid: Number(match[1]), ppid: Number(match[2]), args: match[3] }));
+
+  const vite = rows.filter(
+    (row) =>
+      row.args.includes(`${rootDir}/node_modules/.bin/vite`) &&
+      row.args.includes("--host 127.0.0.1") &&
+      row.args.includes("--port 5174"),
+  );
+  const electron = rows.filter(
+    (row) =>
+      row.args.includes(electronExecutable) &&
+      row.args.includes(". --dev"),
+  );
+  const core = rows.filter(
+    (row) =>
+      row.args.includes("/awaken-core") &&
+      row.args.includes(`${rootDir}/apps/desktop/resources/bin/`),
+  );
+  const explicitlyManaged = rows.filter(
+    (row) =>
+      vite.some((process) => process.pid === row.pid) ||
+      electron.some((process) => process.pid === row.pid) ||
+      core.some((process) => process.pid === row.pid) ||
+      row.args.includes(`cd ${shellQuote(rootDir)} && npm run dev:desktop`) ||
+      row.args.includes(`${rootDir}/node_modules/.bin/concurrently`) ||
+      (row.args.includes(`${rootDir}/node_modules/.bin/tsc`) &&
+        row.args.includes("tsconfig.node.json")) ||
+      row.args.includes(`${rootDir}/node_modules/.bin/electron`),
+  );
+  const managedPids = new Set(explicitlyManaged.map((row) => row.pid));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const row of rows) {
+      if (!managedPids.has(row.pid) && managedPids.has(row.ppid)) {
+        managedPids.add(row.pid);
+        changed = true;
+      }
+    }
+  }
 
   return {
-    vite: rows.filter(
-      (row) =>
-        row.args.includes(`${rootDir}/node_modules/.bin/vite`) &&
-        row.args.includes("--host 127.0.0.1") &&
-        row.args.includes("--port 5174"),
-    ),
-    electron: rows.filter(
-      (row) =>
-        row.args.includes(electronExecutable) &&
-        row.args.includes(". --dev"),
-    ),
-    core: rows.filter(
-      (row) =>
-        row.args.includes("/awaken-core") &&
-        row.args.includes(`${rootDir}/apps/desktop/resources/bin/`),
-    ),
+    vite,
+    electron,
+    core,
+    managed: rows.filter((row) => managedPids.has(row.pid)),
   };
 }
 
 function startDesktopScreen() {
-  const command = `cd ${shellQuote(rootDir)} && npm run dev:desktop`;
+  const command = [
+    "unset ELECTRON_FORCE_IS_PACKAGED",
+    'export NO_PROXY="${NO_PROXY:+$NO_PROXY,}localhost,127.0.0.1,::1"',
+    'export no_proxy="${no_proxy:+$no_proxy,}localhost,127.0.0.1,::1"',
+    `cd ${shellQuote(rootDir)} && npm run dev:desktop`,
+  ].join("; ");
   const result = run("screen", ["-dmS", screenName, "bash", "-lc", command]);
   if (!result.ok) {
     throw new Error(
@@ -107,6 +141,53 @@ function startDesktopScreen() {
         .filter(Boolean)
         .join("\n"),
     );
+  }
+}
+
+function hasDesktopProcess(status) {
+  return (
+    status.processes.vite.length > 0 ||
+    status.processes.electron.length > 0 ||
+    status.processes.core.length > 0
+  );
+}
+
+function hasReadyProcesses(status) {
+  return (
+    status.rendererReachable &&
+    status.processes.electron.length > 0 &&
+    status.processes.core.length > 0
+  );
+}
+
+function shouldCleanStart(status) {
+  if (!hasDesktopProcess(status)) {
+    return false;
+  }
+
+  const missingCore =
+    (status.processes.vite.length > 0 || status.processes.electron.length > 0) &&
+    status.processes.core.length === 0;
+  return !status.screen.running || missingCore;
+}
+
+async function stopManagedDesktopProcesses(reason) {
+  console.log(reason);
+  run("screen", ["-S", screenName, "-X", "quit"]);
+  await delay(1000);
+
+  let processes = processInfo();
+  let pids = processes.managed.map((row) => row.pid);
+  if (pids.length > 0) {
+    run("kill", pids.map(String));
+    await delay(1500);
+  }
+
+  processes = processInfo();
+  pids = processes.managed.map((row) => row.pid);
+  if (pids.length > 0) {
+    run("kill", ["-9", ...pids.map(String)]);
+    await delay(500);
   }
 }
 
@@ -251,11 +332,36 @@ async function waitUntilReady() {
   return lastStatus;
 }
 
+async function settleStatus(initialStatus) {
+  if (!hasReadyProcesses(initialStatus) || !initialStatus.windows.checked || initialStatus.usableWindow) {
+    return initialStatus;
+  }
+
+  activateDarwinApp();
+
+  const deadline = Date.now() + statusReadyTimeoutMs;
+  let lastStatus = initialStatus;
+  let lastActivateAt = Date.now();
+  while (Date.now() < deadline) {
+    await delay(pollIntervalMs);
+    lastStatus = await collectStatus();
+    if (lastStatus.ready || !hasReadyProcesses(lastStatus)) {
+      return lastStatus;
+    }
+    if (Date.now() - lastActivateAt >= statusActivateIntervalMs) {
+      activateDarwinApp();
+      lastActivateAt = Date.now();
+    }
+  }
+  return lastStatus;
+}
+
 const initialStatus = await collectStatus();
 
 if (statusOnly) {
-  printStatus(initialStatus);
-  process.exit(initialStatus.ready ? 0 : 1);
+  const status = await settleStatus(initialStatus);
+  printStatus(status);
+  process.exit(status.ready ? 0 : 1);
 }
 
 if (initialStatus.ready) {
@@ -269,21 +375,34 @@ if (!initialStatus.screen.available) {
   process.exit(1);
 }
 
-const hasDesktopProcess =
-  initialStatus.processes.vite.length > 0 ||
-  initialStatus.processes.electron.length > 0 ||
-  initialStatus.processes.core.length > 0;
+let startupStatus = initialStatus;
 
-if (!initialStatus.screen.running && !hasDesktopProcess) {
+if (shouldCleanStart(startupStatus)) {
+  await stopManagedDesktopProcesses(
+    "Found stale Awaken Desktop dev processes; cleaning them before restart...",
+  );
+  startupStatus = await collectStatus();
+}
+
+if (!startupStatus.screen.running && !hasDesktopProcess(startupStatus)) {
   console.log(`Starting Awaken Desktop in screen session ${screenName}...`);
   startDesktopScreen();
-} else if (initialStatus.screen.running) {
+} else if (startupStatus.screen.running) {
   console.log(`Reusing screen session ${screenName}...`);
 } else {
   console.log("Found existing Awaken Desktop dev processes outside the managed screen session...");
 }
 
-const finalStatus = await waitUntilReady();
+let finalStatus = await waitUntilReady();
+
+if (!finalStatus.ready && hasDesktopProcess(finalStatus)) {
+  await stopManagedDesktopProcesses(
+    "Awaken Desktop did not become ready; retrying once from a clean dev process set...",
+  );
+  console.log(`Starting Awaken Desktop in screen session ${screenName}...`);
+  startDesktopScreen();
+  finalStatus = await waitUntilReady();
+}
 printStatus(finalStatus);
 
 if (!finalStatus.ready) {

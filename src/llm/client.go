@@ -203,7 +203,10 @@ func readErrorBody(body io.Reader) []byte {
 
 // transportError 返回脱敏的 transport 错误，不暴露完整 URL 或 url.Error 细节。
 func transportError(err error) error {
-	return fmt.Errorf("%w: transport error", ErrRequestFailed)
+	return &RequestError{
+		Kind:    ErrorKindTransport,
+		Message: "transport error",
+	}
 }
 
 // requestBuildError 返回脱敏的请求构造错误，不暴露完整 URL（例如 malformed base URL）。

@@ -23,11 +23,13 @@ const (
 	ErrorKindServerOverload  ErrorKind = "server_overload"
 	ErrorKindAuthentication  ErrorKind = "authentication"
 	ErrorKindContextOverflow ErrorKind = "context_overflow"
+	ErrorKindTransport       ErrorKind = "transport"
 )
 
 type RequestError struct {
 	StatusCode int
 	Kind       ErrorKind
+	Message    string
 }
 
 func (e *RequestError) Error() string {
@@ -43,6 +45,9 @@ func (e *RequestError) Error() string {
 			return fmt.Sprintf("%v: status %d (%s)", ErrRequestFailed, e.StatusCode, kind)
 		}
 		return fmt.Sprintf("%v: status %d", ErrRequestFailed, e.StatusCode)
+	}
+	if e.Message != "" {
+		return fmt.Sprintf("%v: %s", ErrRequestFailed, e.Message)
 	}
 	if kind != ErrorKindUnknown {
 		return fmt.Sprintf("%v: %s", ErrRequestFailed, kind)

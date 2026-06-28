@@ -69,7 +69,8 @@ func shouldRetryLLMError(err error) bool {
 func isRetryableErrorKind(kind ErrorKind) bool {
 	return kind == ErrorKindRateLimit ||
 		kind == ErrorKindServerError ||
-		kind == ErrorKindServerOverload
+		kind == ErrorKindServerOverload ||
+		kind == ErrorKindTransport
 }
 
 func retryDelay(policy RetryPolicy, attempt int) time.Duration {

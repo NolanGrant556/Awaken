@@ -28,6 +28,14 @@ type runtimeTestTool struct {
 	commandOutputs  []tool.CommandOutput
 }
 
+type runtimePlainTool struct {
+	name         string
+	params       []tool.ToolParameter
+	output       string
+	readOnly     bool
+	executeCount *int
+}
+
 func (t runtimeTestTool) Name() string {
 	return t.name
 }
@@ -79,6 +87,32 @@ func (t runtimeTestTool) ApprovalRequest(input string) tool.ApprovalRequest {
 
 func (t runtimeTestTool) Artifacts(input string, output string, permissionContext tool.PermissionContext) []tool.ArtifactDescriptor {
 	return t.artifacts
+}
+
+func (t runtimePlainTool) Name() string {
+	return t.name
+}
+
+func (t runtimePlainTool) Description() string {
+	return "runtime plain tool"
+}
+
+func (t runtimePlainTool) Parameters() []tool.ToolParameter {
+	return t.params
+}
+
+func (t runtimePlainTool) Execute(context.Context, string) (string, error) {
+	if t.executeCount != nil {
+		*t.executeCount++
+	}
+	if t.output != "" {
+		return t.output, nil
+	}
+	return "plain", nil
+}
+
+func (t runtimePlainTool) IsReadOnly() bool {
+	return t.readOnly
 }
 
 func TestToolRuntimeExecutesKnownTool(t *testing.T) {
@@ -333,6 +367,116 @@ func TestToolRuntimeFailsClosedWhenNoApprovalAwaiterIsWired(t *testing.T) {
 
 	if !result.IsError || !strings.Contains(result.Content, "no approval awaiter") {
 		t.Fatalf("expected missing approval awaiter to fail closed, got %+v", result)
+	}
+}
+
+func TestToolRuntimeUndeclaredNonReadOnlyToolDefaultsToApproval(t *testing.T) {
+	toolName := "runtime_plain_mutating_tool"
+	mustRegisterRuntimeTool(t, runtimePlainTool{
+		name: toolName,
+		params: []tool.ToolParameter{
+			{Name: "value", Type: "string", Required: true},
+		},
+	})
+
+	result := NewToolRuntime(nil).Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_plain_missing_awaiter",
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{"value":"hello"}`,
+		},
+	})
+
+	if !result.IsError || !strings.Contains(result.Content, "no approval awaiter") {
+		t.Fatalf("expected undeclared non-read-only tool to require approval, got %+v", result)
+	}
+}
+
+func TestToolRuntimeUndeclaredReadOnlyToolRemainsAllowed(t *testing.T) {
+	var executeCount int
+	toolName := "runtime_plain_read_only_tool"
+	mustRegisterRuntimeTool(t, runtimePlainTool{
+		name:         toolName,
+		readOnly:     true,
+		executeCount: &executeCount,
+		params: []tool.ToolParameter{
+			{Name: "value", Type: "string", Required: true},
+		},
+	})
+
+	result := NewToolRuntime(nil).Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_plain_read_only",
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{"value":"hello"}`,
+		},
+	})
+
+	if result.IsError {
+		t.Fatalf("expected undeclared read-only tool to succeed, got %+v", result)
+	}
+	if executeCount != 1 {
+		t.Fatalf("expected read-only tool to execute once, got %d", executeCount)
+	}
+}
+
+func TestToolRuntimePermissionPolicyAllowListBypassesApproval(t *testing.T) {
+	var executeCount int
+	toolName := "runtime_allowlisted_plain_tool"
+	mustRegisterRuntimeTool(t, runtimePlainTool{
+		name:         toolName,
+		executeCount: &executeCount,
+		params: []tool.ToolParameter{
+			{Name: "value", Type: "string", Required: true},
+		},
+	})
+
+	runtime := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
+		PermissionPolicy: tool.PermissionPolicy{
+			AllowTools: []string{toolName},
+		},
+	})
+	result := runtime.Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_allowlisted",
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{"value":"hello"}`,
+		},
+	})
+
+	if result.IsError {
+		t.Fatalf("expected allowlisted tool to succeed, got %+v", result)
+	}
+	if executeCount != 1 {
+		t.Fatalf("expected allowlisted tool to execute once, got %d", executeCount)
+	}
+}
+
+func TestToolRuntimePermissionPolicyDenyListOverridesReadOnly(t *testing.T) {
+	toolName := "runtime_denylisted_read_only_tool"
+	mustRegisterRuntimeTool(t, runtimePlainTool{
+		name:     toolName,
+		readOnly: true,
+		params: []tool.ToolParameter{
+			{Name: "value", Type: "string", Required: true},
+		},
+	})
+
+	runtime := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
+		PermissionPolicy: tool.PermissionPolicy{
+			DenyTools: []string{toolName},
+		},
+	})
+	result := runtime.Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_denylisted",
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{"value":"hello"}`,
+		},
+	})
+
+	if !result.IsError || !strings.Contains(result.Content, "权限拒绝") {
+		t.Fatalf("expected denylisted tool to be rejected, got %+v", result)
 	}
 }
 

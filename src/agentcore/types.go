@@ -7,11 +7,13 @@ import (
 )
 
 type AgentConfig struct {
-	SystemPrompt string
-	MaxThoughts  int
-	ModelConfig  ModelConfig
-	EntryPoint   string
-	Workspace    WorkspaceConfig
+	SystemPrompt     string
+	MaxThoughts      int
+	ModelConfig      ModelConfig
+	EntryPoint       string
+	Workspace        WorkspaceConfig
+	PermissionPolicy tool.PermissionPolicy
+	ApprovalPolicy   ApprovalPolicy
 }
 
 type WorkspaceConfig struct {

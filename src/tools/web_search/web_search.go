@@ -32,6 +32,10 @@ func (t *WebSearchTool) Parameters() []tool.ToolParameter {
 	}
 }
 
+func (t *WebSearchTool) IsReadOnly() bool {
+	return true
+}
+
 func (t *WebSearchTool) Execute(ctx context.Context, input string) (string, error) {
 	query := strings.TrimSpace(input)
 	if query == "" {

@@ -57,15 +57,27 @@ type Event struct {
 }
 
 type Session struct {
-	mu        sync.RWMutex
-	run       Run
-	cancel    context.CancelFunc
-	bus       *EventBus
-	approvals map[string]*pendingApproval
+	mu             sync.RWMutex
+	run            Run
+	cancel         context.CancelFunc
+	bus            *EventBus
+	approvals      map[string]*pendingApproval
+	approvalPolicy agentcore.ApprovalPolicy
+	after          func(time.Duration) <-chan time.Time
+}
+
+type SessionConfig struct {
+	ApprovalPolicy agentcore.ApprovalPolicy
+	After          func(time.Duration) <-chan time.Time
 }
 
 func NewSession(runID, threadID, input string, cancel context.CancelFunc) *Session {
+	return NewSessionWithConfig(runID, threadID, input, cancel, SessionConfig{})
+}
+
+func NewSessionWithConfig(runID, threadID, input string, cancel context.CancelFunc, config SessionConfig) *Session {
 	now := time.Now().UTC()
+	config = normalizeSessionConfig(config)
 	return &Session{
 		run: Run{
 			RunID:     runID,
@@ -75,9 +87,11 @@ func NewSession(runID, threadID, input string, cancel context.CancelFunc) *Sessi
 			CreatedAt: now,
 			UpdatedAt: now,
 		},
-		cancel:    cancel,
-		bus:       NewEventBus(),
-		approvals: make(map[string]*pendingApproval),
+		cancel:         cancel,
+		bus:            NewEventBus(),
+		approvals:      make(map[string]*pendingApproval),
+		approvalPolicy: config.ApprovalPolicy,
+		after:          config.After,
 	}
 }
 
@@ -245,14 +259,23 @@ func (s *Session) AwaitApproval(ctx context.Context, request agentcore.ApprovalR
 	})
 	s.RecordAgentEvent(approvalSurfaceArtifactEvent(request))
 
-	select {
-	case decision := <-pending.decision:
-		return decision, nil
-	case <-ctx.Done():
-		s.mu.Lock()
-		delete(s.approvals, request.ID)
-		s.mu.Unlock()
-		return "", ctx.Err()
+	timeoutCh := s.approvalTimeout()
+	for {
+		select {
+		case decision := <-pending.decision:
+			return decision, nil
+		case <-timeoutCh:
+			resolved, err := s.resolveApproval("approval_timeout", request.ID, agentcore.ApprovalDecisionRejected)
+			if err == nil && resolved {
+				return agentcore.ApprovalDecisionRejected, nil
+			}
+			timeoutCh = nil
+		case <-ctx.Done():
+			s.mu.Lock()
+			delete(s.approvals, request.ID)
+			s.mu.Unlock()
+			return "", ctx.Err()
+		}
 	}
 }
 
@@ -286,9 +309,14 @@ func approvalSurfaceArtifactEvent(request agentcore.ApprovalRequest) agentcore.A
 }
 
 func (s *Session) ResolveApproval(approvalID string, decision agentcore.ApprovalDecision) error {
+	_, err := s.resolveApproval("", approvalID, decision)
+	return err
+}
+
+func (s *Session) resolveApproval(code string, approvalID string, decision agentcore.ApprovalDecision) (bool, error) {
 	approvalID = strings.TrimSpace(approvalID)
 	if approvalID == "" {
-		return ErrApprovalNotFound
+		return false, ErrApprovalNotFound
 	}
 
 	now := time.Now().UTC()
@@ -296,16 +324,16 @@ func (s *Session) ResolveApproval(approvalID string, decision agentcore.Approval
 	pending, ok := s.approvals[approvalID]
 	if !ok {
 		s.mu.Unlock()
-		return ErrApprovalNotFound
+		return false, ErrApprovalNotFound
 	}
 
 	switch {
 	case isTerminalStatus(s.run.Status):
 		s.mu.Unlock()
-		return ErrRunTerminal
+		return false, ErrRunTerminal
 	case s.run.Status == RunStatusCancelling:
 		s.mu.Unlock()
-		return ErrRunCancelling
+		return false, ErrRunCancelling
 	}
 
 	delete(s.approvals, approvalID)
@@ -334,11 +362,12 @@ func (s *Session) ResolveApproval(approvalID string, decision agentcore.Approval
 		ApprovalDescription: request.Description,
 		ApprovalRiskTone:    request.RiskTone,
 		ApprovalDecision:    decision,
+		Code:                code,
 	})
 
 	pending.decision <- decision
 	close(pending.decision)
-	return nil
+	return true, nil
 }
 
 func (s *Session) CompleteCancelled(message string) {
@@ -378,6 +407,22 @@ func (s *Session) CompleteCancelled(message string) {
 
 	bus.Append(statusEvent, false)
 	bus.Append(event, true)
+}
+
+func (s *Session) approvalTimeout() <-chan time.Time {
+	timeout := s.approvalPolicy.Timeout()
+	if timeout <= 0 {
+		return nil
+	}
+	return s.after(timeout)
+}
+
+func normalizeSessionConfig(config SessionConfig) SessionConfig {
+	config.ApprovalPolicy = config.ApprovalPolicy.Normalize()
+	if config.After == nil {
+		config.After = time.After
+	}
+	return config
 }
 
 func (s *Session) CompleteFinished(result string) {

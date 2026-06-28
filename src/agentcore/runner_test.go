@@ -48,6 +48,10 @@ func (t runnerTestTool) Execute(ctx context.Context, input string) (string, erro
 	return "echo:" + input, nil
 }
 
+func (t runnerTestTool) IsReadOnly() bool {
+	return true
+}
+
 func TestRunnerNativeToolCallLoop(t *testing.T) {
 	toolName := "runner_echo_native"
 	mustRegisterRunnerTool(t, runnerTestTool{name: toolName})
@@ -968,6 +972,10 @@ func (t cancelOnExecuteTool) Execute(ctx context.Context, input string) (string,
 	return "cancelled", nil
 }
 
+func (t cancelOnExecuteTool) IsReadOnly() bool {
+	return true
+}
+
 func TestRunnerCancelBetweenTurnsExitsEarly(t *testing.T) {
 	toolName := "runner_cancel_between_turns"
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1037,6 +1045,10 @@ func (t failIfExecutedTool) Parameters() []tool.ToolParameter {
 
 func (t failIfExecutedTool) Execute(ctx context.Context, input string) (string, error) {
 	panic("failIfExecutedTool should never be executed when run is cancelled")
+}
+
+func (t failIfExecutedTool) IsReadOnly() bool {
+	return true
 }
 
 func TestRunnerCancelStopsSubsequentToolsInBatch(t *testing.T) {

@@ -63,6 +63,28 @@ func TestResolveWarnsAndCutsMissingRequiredMCP(t *testing.T) {
 	}
 }
 
+func TestResolveMatchesMCPServerWidePatterns(t *testing.T) {
+	result := Resolve(ResolutionRequest{
+		WorkspaceTrusted: true,
+		AvailableTools: []ToolRef{
+			mcpTool("github", "create_issue", ToolCapabilityWrite),
+			mcpTool("github", "search", ToolCapabilityRead),
+			mcpTool("slack", "post_message", ToolCapabilityWrite),
+			builtinTool("read_file", ToolCapabilityRead),
+		},
+		Policy: AgentToolPolicy{
+			AllowedTools: []string{"mcp__github"},
+		},
+	})
+
+	assertToolNames(t, result.Tools, []string{
+		"mcp:github:create_issue",
+		"mcp:github:search",
+	})
+	assertExcluded(t, result.Exclusions, "builtin:read_file", ExclusionNotAllowlisted)
+	assertExcluded(t, result.Exclusions, "mcp:slack:post_message", ExclusionNotAllowlisted)
+}
+
 func TestResolveTrimsByPermissionMode(t *testing.T) {
 	result := Resolve(ResolutionRequest{
 		WorkspaceTrusted: true,

@@ -148,6 +148,8 @@ func matchCandidates(tool ToolRef) []string {
 		server := strings.TrimSpace(tool.MCPServer)
 		if server != "" {
 			candidates = append(candidates,
+				"mcp:"+server,
+				"mcp__"+server,
 				"mcp:"+server+":"+name,
 				"mcp__"+server+"__"+name,
 				server+":"+name,

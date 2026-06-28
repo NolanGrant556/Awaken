@@ -13,6 +13,8 @@ type PipelineOptions struct {
 	SecretScanner      SecretScanner
 	MemoryPathPrefixes []string
 	WriteToolNames     []string
+	MinConfidence      float64
+	MaxCandidateBytes  int
 }
 
 type Pipeline struct {
@@ -21,6 +23,8 @@ type Pipeline struct {
 	secretScanner      SecretScanner
 	memoryPathPrefixes []string
 	writeToolNames     map[string]struct{}
+	minConfidence      float64
+	maxCandidateBytes  int
 }
 
 func NewPipeline(options PipelineOptions) *Pipeline {
@@ -43,12 +47,24 @@ func NewPipeline(options PipelineOptions) *Pipeline {
 		writeToolNames[strings.ToLower(name)] = struct{}{}
 	}
 
+	minConfidence := options.MinConfidence
+	if minConfidence == 0 {
+		minConfidence = 0.75
+	}
+
+	maxCandidateBytes := options.MaxCandidateBytes
+	if maxCandidateBytes == 0 {
+		maxCandidateBytes = 1024
+	}
+
 	return &Pipeline{
 		extractor:          extractor,
 		sink:               options.Sink,
 		secretScanner:      scanner,
 		memoryPathPrefixes: append([]string(nil), options.MemoryPathPrefixes...),
 		writeToolNames:     writeToolNames,
+		minConfidence:      minConfidence,
+		maxCandidateBytes:  maxCandidateBytes,
 	}
 }
 
@@ -182,6 +198,30 @@ func (p *Pipeline) filterCandidates(candidates []CandidateMemory, state CursorSt
 			}
 		}
 
+		if p.minConfidence > 0 && candidate.Confidence < p.minConfidence {
+			filtered = append(filtered, FilteredCandidate{
+				Candidate: candidate,
+				Reason:    "low_confidence",
+			})
+			continue
+		}
+
+		if p.maxCandidateBytes > 0 && len(candidate.Text) > p.maxCandidateBytes {
+			filtered = append(filtered, FilteredCandidate{
+				Candidate: candidate,
+				Reason:    "too_large",
+			})
+			continue
+		}
+
+		if looksLikePromptInjection(candidate.Text) {
+			filtered = append(filtered, FilteredCandidate{
+				Candidate: candidate,
+				Reason:    "prompt_injection",
+			})
+			continue
+		}
+
 		fingerprint := FingerprintCandidate(candidate)
 		if _, ok := seen[fingerprint]; ok {
 			filtered = append(filtered, FilteredCandidate{
@@ -208,6 +248,25 @@ func FingerprintCandidate(candidate CandidateMemory) string {
 func normalizeForFingerprint(text string) string {
 	fields := strings.Fields(strings.ToLower(strings.TrimSpace(text)))
 	return strings.Trim(strings.Join(fields, " "), " \t\n\r.!,;:")
+}
+
+func looksLikePromptInjection(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	return containsAny(lower, []string{
+		"ignore previous instructions",
+		"ignore all previous instructions",
+		"disregard previous instructions",
+		"ignore the system prompt",
+		"ignore the developer message",
+		"override the system prompt",
+		"reveal the system prompt",
+		"store this in memory",
+		"save this to memory",
+		"write this to memory",
+		"persist this in memory",
+		"remember this forever",
+		"remember this for future conversations",
+	})
 }
 
 func modelVisibleMessages(messages []TranscriptMessage) []TranscriptMessage {

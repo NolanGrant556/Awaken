@@ -13,6 +13,7 @@ import (
 
 	"awaken/src/agentcore"
 	"awaken/src/tool"
+	"awaken/src/workspaceguard"
 )
 
 var (
@@ -46,6 +47,7 @@ type StartRunRequest struct {
 	ThreadID         string                   `json:"thread_id,omitempty"`
 	PermissionPolicy tool.PermissionPolicy    `json:"permission_policy,omitempty"`
 	ApprovalPolicy   agentcore.ApprovalPolicy `json:"approval_policy,omitempty"`
+	WorkspacePolicy  workspaceguard.Policy    `json:"workspace_policy,omitempty"`
 }
 
 type Executor interface {
@@ -127,6 +129,9 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	}
 	permissionPolicy := req.PermissionPolicy.Normalize()
 	approvalPolicy := req.ApprovalPolicy.Normalize()
+	if err := evaluateWorkspacePolicy(workspace.WorkspaceRoot, req.WorkspacePolicy); err != nil {
+		return Run{}, err
+	}
 
 	runID := newRuntimeID("run")
 	threadID := req.ThreadID
@@ -188,6 +193,16 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	go s.execute(session, executor, trimmed, ctx)
 
 	return session.Snapshot(), nil
+}
+
+func evaluateWorkspacePolicy(workspaceRoot string, policy workspaceguard.Policy) error {
+	if policy.IsZero() {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, err := workspaceguard.Evaluate(ctx, workspaceRoot, policy)
+	return err
 }
 
 func (s *RunService) ListThreads() []ThreadSnapshot {

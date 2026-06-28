@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	convcontext "awaken/src/context"
@@ -18,6 +19,7 @@ const maxPatchPreviewChars = 50000
 
 type ToolRuntime struct {
 	sink                   EventSink
+	sinkMu                 sync.Mutex
 	permissionContext      tool.PermissionContext
 	permissionPolicy       tool.PermissionPolicy
 	toolAccessPolicy       ToolAccessPolicy
@@ -335,7 +337,7 @@ func (rt *ToolRuntime) emitPatchPreview(result ToolExecutionResult, selectedTool
 }
 
 func (rt *ToolRuntime) emitDisplayEvent(event AwakenEvent) {
-	rt.sink.Emit(DisplaySafeEvent(event))
+	rt.emitEvent(DisplaySafeEvent(event))
 }
 
 func (rt *ToolRuntime) toolAuditDetails(selectedTool tool.Tool, input string) toolAuditDetails {
@@ -420,11 +422,19 @@ func (rt *ToolRuntime) recordToolAuditFinished(result ToolExecutionResult, detai
 }
 
 func (rt *ToolRuntime) recordSecurityAudit(event SecurityAuditEvent) {
+	rt.sinkMu.Lock()
+	defer rt.sinkMu.Unlock()
 	recorder, ok := rt.sink.(SecurityAuditRecorder)
 	if !ok {
 		return
 	}
 	recorder.RecordSecurityAuditEvent(event)
+}
+
+func (rt *ToolRuntime) emitEvent(event AwakenEvent) {
+	rt.sinkMu.Lock()
+	defer rt.sinkMu.Unlock()
+	rt.sink.Emit(event)
 }
 
 type toolObserverFunc func(tool.CommandOutput)

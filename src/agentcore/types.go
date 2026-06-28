@@ -18,6 +18,7 @@ type AgentConfig struct {
 	Workspace        WorkspaceConfig
 	PromptCache      PromptCacheConfig
 	RunProfile       RunProfile
+	ToolExecution    ToolExecutionConfig
 	PermissionPolicy tool.PermissionPolicy
 	ApprovalPolicy   ApprovalPolicy
 	UsageLimits      usage.BudgetLimits
@@ -29,6 +30,10 @@ type AgentConfig struct {
 type WorkspaceConfig struct {
 	Root          string
 	WritableRoots []string
+}
+
+type ToolExecutionConfig struct {
+	Strategy ToolExecutionStrategy
 }
 
 type ModelConfig struct {

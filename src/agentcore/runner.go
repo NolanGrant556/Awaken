@@ -20,25 +20,29 @@ import (
 const maxTurnDiffChars = 50000
 
 type Runner struct {
-	config       AgentConfig
-	conversation *context.Conversation
-	reqBuilder   *RequestBuilder
-	toolRuntime  *ToolRuntime
-	threadID     string
+	config           AgentConfig
+	conversation     *context.Conversation
+	reqBuilder       *RequestBuilder
+	toolRuntime      *ToolRuntime
+	toolOrchestrator *ToolOrchestrator
+	threadID         string
 }
 
 func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *RequestBuilder) *Runner {
+	toolRuntime := NewToolRuntimeWithConfig(nil, toolRuntimeConfigFromAgentConfig(config))
 	return &Runner{
-		config:       config,
-		conversation: conv,
-		reqBuilder:   reqBuilder,
-		toolRuntime:  NewToolRuntimeWithConfig(nil, toolRuntimeConfigFromAgentConfig(config)),
+		config:           config,
+		conversation:     conv,
+		reqBuilder:       reqBuilder,
+		toolRuntime:      toolRuntime,
+		toolOrchestrator: NewToolOrchestrator(toolRuntime, toolOrchestratorConfigFromAgentConfig(config)),
 	}
 }
 
 func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (string, error) {
 	events := newRunEventEmitter(r.threadID, sink)
 	r.toolRuntime = NewToolRuntimeWithConfig(sink, toolRuntimeConfigFromAgentConfig(r.config))
+	r.toolOrchestrator = NewToolOrchestrator(r.toolRuntime, toolOrchestratorConfigFromAgentConfig(r.config))
 	events.runStarted()
 
 	for i := 0; i < r.config.MaxThoughts; i++ {
@@ -253,27 +257,10 @@ func (r *Runner) handleXMLFallback(ctx stdcontext.Context, response string, even
 }
 
 func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.ToolCall, events *runEventEmitter) []ToolExecutionResult {
-	results := make([]ToolExecutionResult, 0, len(toolCalls))
-	for _, call := range toolCalls {
-		if ctx.Err() != nil {
-			results = append(results, syntheticCancelledToolResult(call))
-			continue
-		}
-		if events != nil {
-			events.emitToolCall(call)
-			events.emitToolProgress(call, "Executing tool")
-		}
-		result := r.toolRuntime.Execute(ctx, call)
-		results = append(results, result)
-		if events != nil && call.Function.Name == "apply_patch" && !result.IsError {
-			events.markMutation()
-		}
-		if events != nil {
-			events.emitToolProgress(call, toolProgressForResult(result))
-			events.emitToolResult(result)
-		}
+	if r.toolOrchestrator == nil {
+		r.toolOrchestrator = NewToolOrchestrator(r.toolRuntime, toolOrchestratorConfigFromAgentConfig(r.config))
 	}
-	return results
+	return r.toolOrchestrator.Execute(ctx, toolCalls, events)
 }
 
 func toolProgressForResult(result ToolExecutionResult) string {

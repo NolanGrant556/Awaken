@@ -82,7 +82,39 @@ func parseFrontmatter(raw string) (metadata, []string) {
 }
 
 func normalizeKey(value string) string {
-	return strings.ToLower(strings.TrimSpace(value))
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	b.Grow(len(value) + 4)
+	lastUnderscore := false
+	for i, r := range value {
+		switch {
+		case r == '-' || r == ' ':
+			if !lastUnderscore {
+				b.WriteByte('_')
+				lastUnderscore = true
+			}
+		case r == '_':
+			if !lastUnderscore {
+				b.WriteRune(r)
+				lastUnderscore = true
+			}
+		case 'A' <= r && r <= 'Z':
+			if i > 0 && !lastUnderscore {
+				b.WriteByte('_')
+			}
+			b.WriteRune(r + ('a' - 'A'))
+			lastUnderscore = false
+		default:
+			b.WriteRune(r)
+			lastUnderscore = false
+		}
+	}
+
+	return strings.Trim(strings.ToLower(b.String()), "_")
 }
 
 func parseScalar(value string) string {

@@ -152,39 +152,62 @@ func loadSourceDir(root, realRoot string, source sourceDir, opts Options) ([]Def
 		}}
 	}
 
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, []SkippedFile{{
-			RelativePath: filepath.ToSlash(source.relativeDir),
-			Reason:       "read_error",
-			Message:      "agent directory could not be read",
-		}}
-	}
-
-	definitions := make([]Definition, 0, len(entries))
+	definitions := []Definition{}
 	skipped := []SkippedFile{}
-	for _, entry := range entries {
-		name := entry.Name()
-		if !isCandidateMarkdownFile(name) {
-			continue
+	if err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			relativePath, relErr := filepath.Rel(root, path)
+			if relErr != nil {
+				relativePath = source.relativeDir
+			}
+			skipped = append(skipped, SkippedFile{
+				RelativePath: filepath.ToSlash(relativePath),
+				Reason:       "read_error",
+				Message:      "agent directory entry could not be read",
+			})
+			return nil
+		}
+		if path == dir || entry.IsDir() {
+			return nil
 		}
 
-		relativePath := filepath.ToSlash(filepath.Join(source.relativeDir, name))
+		name := entry.Name()
+		if !isCandidateMarkdownFile(name) {
+			return nil
+		}
+
+		relativePath, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			skipped = append(skipped, SkippedFile{
+				RelativePath: filepath.ToSlash(source.relativeDir),
+				Reason:       "read_error",
+				Message:      "agent definition path could not be resolved",
+			})
+			return nil
+		}
+		relativePath = filepath.ToSlash(relativePath)
 		if isSecretLikeFilename(name) {
 			skipped = append(skipped, SkippedFile{
 				RelativePath: relativePath,
 				Reason:       "secret_like_path",
 				Message:      "secret-like agent definition filename was ignored",
 			})
-			continue
+			return nil
 		}
 
-		definition, skip, ok := loadDefinitionFile(root, realRoot, source, name, relativePath, opts)
+		definition, skip, ok := loadDefinitionFile(realRoot, source, path, relativePath, opts)
 		if !ok {
 			skipped = append(skipped, skip)
-			continue
+			return nil
 		}
 		definitions = append(definitions, definition)
+		return nil
+	}); err != nil {
+		return nil, []SkippedFile{{
+			RelativePath: filepath.ToSlash(source.relativeDir),
+			Reason:       "read_error",
+			Message:      "agent directory could not be read",
+		}}
 	}
 
 	return definitions, skipped
@@ -219,8 +242,7 @@ func isSecretLikeFilename(name string) bool {
 	return false
 }
 
-func loadDefinitionFile(root, realRoot string, source sourceDir, name, relativePath string, opts Options) (Definition, SkippedFile, bool) {
-	fullPath := filepath.Join(root, filepath.FromSlash(source.relativeDir), name)
+func loadDefinitionFile(realRoot string, source sourceDir, fullPath, relativePath string, opts Options) (Definition, SkippedFile, bool) {
 	realPath, err := filepath.EvalSymlinks(fullPath)
 	if err != nil {
 		return Definition{}, SkippedFile{

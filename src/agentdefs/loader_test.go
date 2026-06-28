@@ -50,6 +50,30 @@ Review the code carefully.
 	}
 }
 
+func TestParseMarkdownCamelCaseFrontmatter(t *testing.T) {
+	meta, body, warnings := parseMarkdown(`---
+name: reviewer
+description: Reviews code
+disallowedTools: [shell, apply_patch]
+permissionMode: plan
+---
+Review the code carefully.
+`)
+
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warnings, got %v", warnings)
+	}
+	if !reflect.DeepEqual(meta.DisallowedTools, []string{"shell", "apply_patch"}) {
+		t.Fatalf("unexpected disallowed tools: %v", meta.DisallowedTools)
+	}
+	if meta.PermissionMode != "plan" {
+		t.Fatalf("expected permission mode plan, got %q", meta.PermissionMode)
+	}
+	if strings.TrimSpace(body) != "Review the code carefully." {
+		t.Fatalf("unexpected body: %q", body)
+	}
+}
+
 func TestLoadDiscoversAwakenAndClaudeAgentDirs(t *testing.T) {
 	root := t.TempDir()
 	writeAgent(t, root, ".awaken/agents/architect.md", `---
@@ -82,6 +106,31 @@ Review with care.
 	}
 	if defsByID["claude_compat:reviewer"].Source.RelativePath != ".claude/agents/reviewer.md" {
 		t.Fatalf("expected claude compatibility source path, got %+v", defsByID["claude_compat:reviewer"].Source)
+	}
+}
+
+func TestLoadDiscoversNestedAgentDefinitionFiles(t *testing.T) {
+	root := t.TempDir()
+	writeAgent(t, root, ".claude/agents/review/reviewer.md", `---
+name: reviewer
+permissionMode: plan
+---
+Review with care.
+`)
+
+	result, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if len(result.Definitions) != 1 {
+		t.Fatalf("expected 1 definition, got %+v", result.Definitions)
+	}
+	def := result.Definitions[0]
+	if def.Source.RelativePath != ".claude/agents/review/reviewer.md" {
+		t.Fatalf("unexpected source path: %+v", def.Source)
+	}
+	if def.PermissionMode != "plan" {
+		t.Fatalf("expected permission mode plan, got %+v", def)
 	}
 }
 

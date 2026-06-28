@@ -94,8 +94,8 @@ func TestClassifyOpenRouterPrivacyPolicyBlock(t *testing.T) {
 	})
 
 	assertClassification(t, got, ReasonProviderPolicyBlocked, false, false, false, false)
-	if got.Message == "" {
-		t.Fatal("expected message extracted from body")
+	if got.Message != "Provider blocked the request because of account or policy restrictions." {
+		t.Fatalf("expected sanitized policy message, got %q", got.Message)
 	}
 }
 
@@ -243,6 +243,42 @@ func TestClassifyWrappedOpenRouterProviderError(t *testing.T) {
 	})
 
 	assertClassification(t, got, ReasonContextOverflow, true, true, false, false)
+}
+
+func TestClassifyDoesNotEchoProviderSecrets(t *testing.T) {
+	got := Classify(ClassificationInput{
+		StatusCode: 401,
+		Message:    "invalid api key sk-test-secret-value for https://provider.example/v1/messages",
+		Body:       `{"error":{"message":"token sk-test-secret-value is invalid","detail":"/etc/secrets/provider"}}`,
+	})
+
+	assertClassification(t, got, ReasonAuth, false, false, true, true)
+	if got.Message != "Provider authentication failed. Check the configured API key or token." {
+		t.Fatalf("expected sanitized auth message, got %q", got.Message)
+	}
+}
+
+func TestClassifyUnknownIsConservative(t *testing.T) {
+	got := Classify(ClassificationInput{
+		Message: "unexpected provider wrapper failure",
+	})
+
+	assertClassification(t, got, ReasonUnknown, false, false, false, false)
+	if got.Message != "Provider request failed for an unknown reason." {
+		t.Fatalf("expected generic unknown message, got %q", got.Message)
+	}
+}
+
+func TestClassifyGeneric404IsNotRetryable(t *testing.T) {
+	got := Classify(ClassificationInput{
+		StatusCode: 404,
+		Message:    "deployment endpoint missing",
+	})
+
+	assertClassification(t, got, ReasonUnknown, false, false, false, false)
+	if got.Message != "Provider request failed with status 404." {
+		t.Fatalf("expected generic 404 message, got %q", got.Message)
+	}
 }
 
 func TestClassifyTransportType(t *testing.T) {

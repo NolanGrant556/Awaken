@@ -104,7 +104,7 @@ func Classify(input ClassificationInput) ClassifiedError {
 		return ctx.result(ReasonTimeout, true, false, false, false, "transport_type")
 	}
 
-	return ctx.result(ReasonUnknown, true, false, false, false, "unknown")
+	return ctx.result(ReasonUnknown, false, false, false, false, "unknown")
 }
 
 type classificationContext struct {
@@ -166,7 +166,7 @@ func (ctx classificationContext) classifyByStatus() (ClassifiedError, bool) {
 		if hasAny(ctx.searchText, modelNotFoundPatterns) {
 			return ctx.result(ReasonModelNotFound, false, false, false, true, "http_status"), true
 		}
-		return ctx.result(ReasonUnknown, true, false, false, false, "http_status"), true
+		return ctx.result(ReasonUnknown, false, false, false, false, "http_status"), true
 	case 413:
 		return ctx.result(ReasonPayloadTooLarge, true, true, false, false, "http_status"), true
 	case 429:
@@ -311,8 +311,48 @@ func (ctx classificationContext) result(reason Reason, retryable bool, compress 
 		ShouldCompress:         compress,
 		ShouldRotateCredential: rotate,
 		ShouldFallback:         fallback,
-		Message:                ctx.message,
+		Message:                userMessage(reason, ctx.input.StatusCode),
 		Metadata:               metadata,
+	}
+}
+
+func userMessage(reason Reason, statusCode int) string {
+	switch reason {
+	case ReasonAuth:
+		return "Provider authentication failed. Check the configured API key or token."
+	case ReasonAuthPermanent:
+		return "Provider credentials were revoked or permanently disabled."
+	case ReasonBilling:
+		return "Provider quota or billing limit has been reached."
+	case ReasonRateLimit:
+		return "Provider rate limit reached. Retry later."
+	case ReasonOverloaded:
+		return "Provider is temporarily overloaded. Retry later."
+	case ReasonServerError:
+		return "Provider request failed with a server error."
+	case ReasonTimeout:
+		return "Provider request timed out or the network connection was interrupted."
+	case ReasonContextOverflow:
+		return "Prompt exceeds the model context window. Compress or shorten the conversation."
+	case ReasonPayloadTooLarge:
+		return "Provider request payload is too large. Compress or reduce the request size."
+	case ReasonImageTooLarge:
+		return "An attached image exceeds the provider size limit."
+	case ReasonModelNotFound:
+		return "Selected model is unavailable for this provider."
+	case ReasonProviderPolicyBlocked:
+		return "Provider blocked the request because of account or policy restrictions."
+	case ReasonFormatError:
+		return "Provider rejected the request as invalid."
+	case ReasonThinkingSignature:
+		return "Provider rejected stale thinking or signature blocks. Retry after rebuilding the request."
+	case ReasonLongContextTier:
+		return "Long-context usage is unavailable for this account. Retry with a shorter context or enable the required tier."
+	default:
+		if statusCode > 0 {
+			return fmt.Sprintf("Provider request failed with status %d.", statusCode)
+		}
+		return "Provider request failed for an unknown reason."
 	}
 }
 

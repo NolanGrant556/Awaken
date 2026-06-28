@@ -89,6 +89,25 @@ func TestManualSwitchIsNotAutomaticFallback(t *testing.T) {
 	}
 }
 
+func TestEmptyManualSwitchStaysOnCurrentActiveModel(t *testing.T) {
+	primary := ModelRef{Provider: "anthropic", Model: "claude-sonnet"}
+	state := NewRunState(NewChain(primary))
+
+	next, decision := state.SwitchManually(ModelRef{})
+	if decision.Kind != DecisionStayOnActive {
+		t.Fatalf("expected stay_on_active, got %s", decision.Kind)
+	}
+	if got := next.ActiveSource(); got != ActivePrimary {
+		t.Fatalf("expected primary source after empty manual switch, got %s", got)
+	}
+	if got := next.ActiveModel(); got != primary {
+		t.Fatalf("expected primary to remain active, got %+v", got)
+	}
+	if len(next.Events()) != 0 {
+		t.Fatalf("expected empty manual switch to avoid recording an event, got %+v", next.Events())
+	}
+}
+
 func TestSuccessfulFallbackRetriesPrimaryNextTurn(t *testing.T) {
 	primary := ModelRef{Provider: "anthropic", Model: "claude-sonnet"}
 	fallback := ModelRef{Provider: "openrouter", Model: "anthropic/claude-sonnet"}
@@ -167,5 +186,27 @@ func TestDisplayExplainsConfiguredDefaultAndActiveFallback(t *testing.T) {
 		if !strings.Contains(display.Explanation, want) {
 			t.Fatalf("expected display explanation to contain %q, got %q", want, display.Explanation)
 		}
+	}
+}
+
+func TestEventsRemainStableAcrossBranchedStates(t *testing.T) {
+	primary := ModelRef{Provider: "anthropic", Model: "claude-sonnet"}
+	state := NewRunState(NewChain(primary))
+	state.events = make([]Event, 1, 2)
+	state.events[0] = Event{Kind: EventFallbackActivated, To: primary}
+
+	successBranch := state
+	failureBranch := state
+
+	successBranch, _ = successBranch.FinishRun(RunSucceeded)
+	failureBranch, _ = failureBranch.FinishRun(RunFailed)
+
+	successEvents := successBranch.Events()
+	failureEvents := failureBranch.Events()
+	if got := successEvents[1].Kind; got != EventRunSucceeded {
+		t.Fatalf("expected success branch to keep its own appended event, got %s", got)
+	}
+	if got := failureEvents[1].Kind; got != EventRunFailed {
+		t.Fatalf("expected failure branch to keep its own appended event, got %s", got)
 	}
 }

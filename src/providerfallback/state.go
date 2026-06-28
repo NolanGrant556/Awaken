@@ -14,6 +14,11 @@ type RunState struct {
 	lastRunFailed       bool
 }
 
+func (s RunState) withAppendedEvent(event Event) RunState {
+	s.events = append(append([]Event(nil), s.events...), event)
+	return s
+}
+
 func NewRunState(chain Chain) RunState {
 	return RunState{
 		chain:         chain.Normalize(),
@@ -92,7 +97,7 @@ func (s RunState) ActivateNextFallback(reason ActivationReason) (RunState, Decis
 	s.automaticFallback = true
 	s.pendingPrimaryRetry = false
 	s.lastRunFailed = false
-	s.events = append(s.events, Event{
+	s = s.withAppendedEvent(Event{
 		Kind:          EventFallbackActivated,
 		From:          from,
 		To:            next,
@@ -111,6 +116,13 @@ func (s RunState) ActivateNextFallback(reason ActivationReason) (RunState, Decis
 func (s RunState) SwitchManually(target ModelRef) (RunState, Decision) {
 	target = target.Normalize()
 	from := s.ActiveModel()
+	if target.IsZero() {
+		return s, Decision{
+			Kind:   DecisionStayOnActive,
+			Active: from,
+			Reason: fmt.Sprintf("manual switch target is empty; staying on %s", from.String()),
+		}
+	}
 
 	s.source = ActiveManual
 	s.fallbackIndex = -1
@@ -119,7 +131,7 @@ func (s RunState) SwitchManually(target ModelRef) (RunState, Decision) {
 	s.automaticFallback = false
 	s.pendingPrimaryRetry = false
 	s.lastRunFailed = false
-	s.events = append(s.events, Event{
+	s = s.withAppendedEvent(Event{
 		Kind:          EventManualSwitch,
 		From:          from,
 		To:            target,
@@ -140,7 +152,7 @@ func (s RunState) FinishRun(outcome RunOutcome) (RunState, Decision) {
 	switch outcome {
 	case RunSucceeded:
 		s.lastRunFailed = false
-		s.events = append(s.events, Event{
+		s = s.withAppendedEvent(Event{
 			Kind:          EventRunSucceeded,
 			To:            active,
 			Reason:        s.activationReason,
@@ -165,7 +177,7 @@ func (s RunState) FinishRun(outcome RunOutcome) (RunState, Decision) {
 	case RunFailed:
 		s.lastRunFailed = true
 		s.pendingPrimaryRetry = false
-		s.events = append(s.events, Event{
+		s = s.withAppendedEvent(Event{
 			Kind:          EventRunFailed,
 			To:            active,
 			Reason:        s.activationReason,
@@ -212,7 +224,7 @@ func (s RunState) StartNextTurn() (RunState, Decision) {
 	s.automaticFallback = false
 	s.pendingPrimaryRetry = false
 	s.lastRunFailed = false
-	s.events = append(s.events, Event{
+	s = s.withAppendedEvent(Event{
 		Kind:          EventPrimaryRetried,
 		From:          from,
 		To:            primary,

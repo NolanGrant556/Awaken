@@ -102,6 +102,9 @@ GET  /v1/agui/demo
 GET  /v1/runtime/info
 GET  /v1/agent-definitions?workspace_root=...
 GET  /v1/threads
+POST /v1/scheduled-runs
+GET  /v1/scheduled-runs
+DELETE /v1/scheduled-runs/{id}
 POST /v1/runs
 GET  /v1/runs/{run_id}
 GET  /v1/runs/{run_id}/events

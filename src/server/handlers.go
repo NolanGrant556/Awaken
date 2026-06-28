@@ -128,6 +128,51 @@ func (h runHandlers) handleListThreads(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.runService.ListThreads())
 }
 
+func (h runHandlers) handleCreateScheduledRun(w http.ResponseWriter, r *http.Request) {
+	var req awruntime.CreateScheduledRunRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+
+	run, err := h.runService.CreateScheduledRun(req)
+	if err != nil {
+		switch {
+		case errors.Is(err, awruntime.ErrInvalidRunAt):
+			writeErrorJSON(w, http.StatusBadRequest, "INVALID_RUN_AT", err.Error())
+		case errors.Is(err, awruntime.ErrInvalidInput):
+			writeErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+		default:
+			writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create scheduled run")
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, run)
+}
+
+func (h runHandlers) handleListScheduledRuns(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.runService.ListScheduledRuns())
+}
+
+func (h runHandlers) handleCancelScheduledRun(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	run, err := h.runService.CancelScheduledRun(id)
+	if err != nil {
+		switch {
+		case errors.Is(err, awruntime.ErrScheduledRunNotFound):
+			writeErrorJSON(w, http.StatusNotFound, "SCHEDULED_RUN_NOT_FOUND", err.Error())
+		case errors.Is(err, awruntime.ErrScheduledRunNotCancelable):
+			writeErrorJSON(w, http.StatusConflict, "SCHEDULED_RUN_NOT_CANCELABLE", err.Error())
+		default:
+			writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to cancel scheduled run")
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, run)
+}
+
 func (h runHandlers) handleGetThreadTranscript(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	transcript, err := h.runService.GetThreadTranscript(threadID)

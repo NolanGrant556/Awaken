@@ -21,19 +21,22 @@ import (
 )
 
 var (
-	ErrInvalidInput             = errors.New("input is required")
-	ErrInvalidSlashCommand      = errors.New("invalid slash command")
-	ErrRunNotFound              = errors.New("run not found")
-	ErrApprovalNotFound         = errors.New("approval not found")
-	ErrRunTerminal              = errors.New("run is already finished")
-	ErrRunCancelling            = errors.New("run is being cancelled")
-	ErrThreadNotFound           = errors.New("thread not found")
-	ErrThreadWorkspaceMismatch  = errors.New("thread workspace mismatch")
-	ErrThreadBusy               = errors.New("thread already has an active run")
-	ErrParentRunNotFound        = errors.New("parent run not found")
-	ErrParentThreadNotFound     = errors.New("parent thread not found")
-	ErrDelegationParentMismatch = errors.New("delegation parent run does not belong to parent thread")
-	ErrDelegationParentRequired = errors.New("delegation parent_run_id or parent_thread_id is required")
+	ErrInvalidInput              = errors.New("input is required")
+	ErrInvalidSlashCommand       = errors.New("invalid slash command")
+	ErrRunNotFound               = errors.New("run not found")
+	ErrApprovalNotFound          = errors.New("approval not found")
+	ErrRunTerminal               = errors.New("run is already finished")
+	ErrRunCancelling             = errors.New("run is being cancelled")
+	ErrThreadNotFound            = errors.New("thread not found")
+	ErrThreadWorkspaceMismatch   = errors.New("thread workspace mismatch")
+	ErrThreadBusy                = errors.New("thread already has an active run")
+	ErrParentRunNotFound         = errors.New("parent run not found")
+	ErrParentThreadNotFound      = errors.New("parent thread not found")
+	ErrDelegationParentMismatch  = errors.New("delegation parent run does not belong to parent thread")
+	ErrDelegationParentRequired  = errors.New("delegation parent_run_id or parent_thread_id is required")
+	ErrInvalidRunAt              = errors.New("run_at is required")
+	ErrScheduledRunNotFound      = errors.New("scheduled run not found")
+	ErrScheduledRunNotCancelable = errors.New("scheduled run is not cancelable")
 )
 
 const maxRetainedThreads = 100
@@ -72,14 +75,16 @@ func (f ExecutorFunc) Run(ctx context.Context, input string, sink agentcore.Even
 }
 
 type RunService struct {
-	mu          sync.RWMutex
-	sessions    map[string]*Session
-	threads     map[string]*Thread
-	auditLog    *AuditLog
-	newAgent    func(workspace WorkspaceConfig, threadID string) *agentcore.Agent
-	newExecutor func(agent *agentcore.Agent) Executor
-	store       *fileStore
-	hooks       *lifecyclehooks.Executor
+	mu            sync.RWMutex
+	sessions      map[string]*Session
+	threads       map[string]*Thread
+	scheduledRuns map[string]*scheduledRunState
+	scheduleClock scheduleClock
+	auditLog      *AuditLog
+	newAgent      func(workspace WorkspaceConfig, threadID string) *agentcore.Agent
+	newExecutor   func(agent *agentcore.Agent) Executor
+	store         *fileStore
+	hooks         *lifecyclehooks.Executor
 }
 
 type RunServiceConfig struct {
@@ -162,12 +167,14 @@ func NewRunServiceWithConfig(
 	opts ...RunServiceOption,
 ) *RunService {
 	service := &RunService{
-		sessions:    make(map[string]*Session),
-		threads:     make(map[string]*Thread),
-		auditLog:    NewAuditLog(defaultAuditLogCapacity),
-		newAgent:    newAgent,
-		newExecutor: newExecutor,
-		hooks:       lifecyclehooks.NewExecutor(config.Hooks),
+		sessions:      make(map[string]*Session),
+		threads:       make(map[string]*Thread),
+		scheduledRuns: make(map[string]*scheduledRunState),
+		scheduleClock: realScheduleClock{},
+		auditLog:      NewAuditLog(defaultAuditLogCapacity),
+		newAgent:      newAgent,
+		newExecutor:   newExecutor,
+		hooks:         lifecyclehooks.NewExecutor(config.Hooks),
 	}
 	for _, opt := range opts {
 		if opt != nil {

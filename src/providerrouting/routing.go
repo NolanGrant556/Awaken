@@ -6,12 +6,24 @@ import (
 )
 
 const (
-	ReasonDenied     = "denied"
-	ReasonNotAllowed = "not_allowed"
+	ReasonDenied          = "denied"
+	ReasonNotAllowed      = "not_allowed"
+	ReasonUnavailable     = "unavailable"
+	ReasonDisabled        = "disabled"
+	ReasonUnknownProvider = "unknown_provider"
+)
+
+type ProviderStatus string
+
+const (
+	ProviderStatusAvailable   ProviderStatus = "available"
+	ProviderStatusUnavailable ProviderStatus = "unavailable"
+	ProviderStatusDisabled    ProviderStatus = "disabled"
 )
 
 type Provider struct {
-	Name string
+	Name   string
+	Status ProviderStatus
 }
 
 type Preferences struct {
@@ -59,7 +71,7 @@ func PlanProviders(providers []Provider, prefs Preferences) Plan {
 
 	for index, provider := range providers {
 		key := normalizeName(provider.Name)
-		reasons := exclusionReasons(key, allowSet, denySet, normalized.RequireOnlyAllowed)
+		reasons := exclusionReasons(provider, key, allowSet, denySet, normalized.RequireOnlyAllowed)
 		decision := ProviderDecision{
 			Provider: provider,
 			Included: len(reasons) == 0,
@@ -104,8 +116,12 @@ type plannedProvider struct {
 	originalIndex int
 }
 
-func exclusionReasons(key string, allowSet, denySet map[string]struct{}, requireOnlyAllowed bool) []string {
+func exclusionReasons(provider Provider, key string, allowSet, denySet map[string]struct{}, requireOnlyAllowed bool) []string {
 	var reasons []string
+	if key == "" {
+		return []string{ReasonUnknownProvider}
+	}
+	reasons = append(reasons, providerStateReasons(provider.Status)...)
 	if _, denied := denySet[key]; denied {
 		reasons = append(reasons, ReasonDenied)
 	}
@@ -115,6 +131,17 @@ func exclusionReasons(key string, allowSet, denySet map[string]struct{}, require
 		}
 	}
 	return reasons
+}
+
+func providerStateReasons(status ProviderStatus) []string {
+	switch status {
+	case ProviderStatusUnavailable:
+		return []string{ReasonUnavailable}
+	case ProviderStatusDisabled:
+		return []string{ReasonDisabled}
+	default:
+		return nil
+	}
 }
 
 func priorityMap(names []string) map[string]int {

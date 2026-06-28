@@ -106,6 +106,48 @@ func TestPlanExplainsExcludedProviders(t *testing.T) {
 	assertDecisionReasons(t, plan.Excluded[1], []string{ReasonNotAllowed})
 }
 
+func TestPlanLayersProviderStateBeforeUserPreferences(t *testing.T) {
+	providers := []Provider{
+		{Name: "deepinfra", Status: ProviderStatusDisabled},
+	}
+	prefs := Preferences{
+		AllowList:          []string{"anthropic"},
+		DenyList:           []string{"deepinfra"},
+		RequireOnlyAllowed: true,
+	}
+
+	plan := PlanProviders(providers, prefs)
+
+	assertDecisionNames(t, plan.Excluded, []string{"deepinfra"})
+	assertDecisionReasons(t, plan.Excluded[0], []string{ReasonDisabled, ReasonDenied, ReasonNotAllowed})
+}
+
+func TestPlanExcludesUnavailableProviders(t *testing.T) {
+	providers := []Provider{
+		{Name: "anthropic"},
+		{Name: "google", Status: ProviderStatusUnavailable},
+	}
+
+	plan := PlanProviders(providers, Preferences{})
+
+	assertProviderNames(t, plan.Providers, []string{"anthropic"})
+	assertDecisionNames(t, plan.Excluded, []string{"google"})
+	assertDecisionReasons(t, plan.Excluded[0], []string{ReasonUnavailable})
+}
+
+func TestPlanRejectsBlankProviderNames(t *testing.T) {
+	providers := []Provider{
+		{Name: " "},
+		{Name: "openai"},
+	}
+
+	plan := PlanProviders(providers, Preferences{})
+
+	assertProviderNames(t, plan.Providers, []string{"openai"})
+	assertDecisionNames(t, plan.Excluded, []string{" "})
+	assertDecisionReasons(t, plan.Excluded[0], []string{ReasonUnknownProvider})
+}
+
 func TestNormalizePreferencesReturnsDefensiveCopies(t *testing.T) {
 	prefs := Preferences{
 		AllowList:     []string{" OpenAI ", "openai", "Anthropic"},

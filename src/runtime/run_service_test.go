@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -1432,6 +1433,63 @@ func TestStartDelegatedRunWithUnknownParentRunReturnsErrParentRunNotFound(t *tes
 	if !errors.Is(err, ErrParentRunNotFound) {
 		t.Fatalf("expected ErrParentRunNotFound, got %v", err)
 	}
+}
+
+func TestStartDelegatedRunWithParentRunAfterParentThreadPruned(t *testing.T) {
+	root := t.TempDir()
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			return "done", nil
+		})
+	})
+
+	parentRun, err := service.StartRun(StartRunRequest{
+		Input:     "parent task",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("parent StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, parentRun.RunID)
+
+	for i := 0; i < maxRetainedThreads+10; i++ {
+		run, err := service.StartRun(StartRunRequest{
+			Input:     fmt.Sprintf("ordinary-%03d", i),
+			Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		})
+		if err != nil {
+			t.Fatalf("ordinary StartRun %d returned error: %v", i, err)
+		}
+		waitForRunTerminal(t, service, run.RunID)
+	}
+
+	for _, thread := range service.ListThreads() {
+		if thread.ThreadID == parentRun.ThreadID {
+			t.Fatalf("expected parent thread %q to be pruned before delegated child test", parentRun.ThreadID)
+		}
+	}
+
+	childRun, err := service.StartRun(StartRunRequest{
+		Input:     "inspect the backend path",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		Delegation: &DelegationMetadata{
+			ParentRunID:      parentRun.RunID,
+			DelegateLabel:    "Backend reader",
+			DelegateRole:     "runtime audit",
+			DelegationPrompt: "Read runtime/server code and report the minimum path.",
+		},
+	})
+	if err != nil {
+		t.Fatalf("delegated StartRun after parent prune returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, childRun.RunID)
+
+	childSnapshot, err := service.GetRun(childRun.RunID)
+	if err != nil {
+		t.Fatalf("GetRun returned error: %v", err)
+	}
+	assertDelegation(t, childSnapshot.Delegation, parentRun.RunID, parentRun.ThreadID)
 }
 
 func assertDelegation(t *testing.T, delegation *DelegationMetadata, parentRunID, parentThreadID string) {

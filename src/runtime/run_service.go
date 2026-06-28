@@ -360,7 +360,7 @@ func (s *RunService) resolveDelegationLocked(delegation *DelegationMetadata, inp
 			return nil, ErrDelegationParentMismatch
 		}
 	}
-	if normalized.ParentThreadID != "" {
+	if normalized.ParentThreadID != "" && normalized.ParentRunID == "" {
 		if _, ok := s.threads[normalized.ParentThreadID]; !ok {
 			return nil, ErrParentThreadNotFound
 		}

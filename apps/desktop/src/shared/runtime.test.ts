@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeRunProfile, normalizeStartRunRequest } from "./runtime";
+import { normalizeRunProfile, normalizeStartRunRequest } from "./runtime.js";
 
 describe("normalizeRunProfile", () => {
   it("serializes camelCase profile fields into wire format", () => {

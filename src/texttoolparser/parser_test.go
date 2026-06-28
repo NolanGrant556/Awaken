@@ -123,6 +123,32 @@ func TestParseHermesMissingArgumentsDefaultsToEmptyObject(t *testing.T) {
 	}
 }
 
+func TestParseHermesCodeFenceIgnored(t *testing.T) {
+	text := "```xml\n<tool_call>{\"name\":\"shell\",\"arguments\":{\"cmd\":\"pwd\"}}</tool_call>\n```"
+
+	result := Parse("hermes", text)
+
+	if result.Found {
+		t.Fatalf("expected fenced code block to be ignored, got %+v", result)
+	}
+	if result.Content != text {
+		t.Fatalf("expected original content %q, got %q", text, result.Content)
+	}
+}
+
+func TestParseHermesArgumentsMustBeJSONObject(t *testing.T) {
+	text := `<tool_call>{"name":"lookup","arguments":["awaken"]}</tool_call>`
+
+	result := Parse("hermes", text)
+
+	if result.Found {
+		t.Fatalf("expected non-object arguments to fallback, got %+v", result)
+	}
+	if result.Content != text {
+		t.Fatalf("expected original content %q, got %q", text, result.Content)
+	}
+}
+
 func TestParseKimiFunctionNameExtraction(t *testing.T) {
 	text := `Plan<|tool_calls_section_begin|><|tool_call_begin|>functions.search_files:0<|tool_call_argument_begin|>{"query":"parser"}<|tool_call_end|><|tool_calls_section_end|>Done`
 
@@ -156,6 +182,32 @@ func TestParseKimiSingularSectionToken(t *testing.T) {
 	}
 	if result.ToolCalls[0].Arguments != `{"path":"go.mod"}` {
 		t.Fatalf("unexpected compact arguments: %q", result.ToolCalls[0].Arguments)
+	}
+}
+
+func TestParseKimiCodeFenceIgnored(t *testing.T) {
+	text := "```\n<|tool_calls_section_begin|><|tool_call_begin|>read_file:0<|tool_call_argument_begin|>{\"path\":\"go.mod\"}<|tool_call_end|><|tool_calls_section_end|>\n```"
+
+	result := Parse("kimi", text)
+
+	if result.Found {
+		t.Fatalf("expected fenced code block to be ignored, got %+v", result)
+	}
+	if result.Content != text {
+		t.Fatalf("expected original content %q, got %q", text, result.Content)
+	}
+}
+
+func TestParseKimiArgumentsMustBeJSONObject(t *testing.T) {
+	text := `Plan<|tool_calls_section_begin|><|tool_call_begin|>read_file:0<|tool_call_argument_begin|>["go.mod"]<|tool_call_end|><|tool_calls_section_end|>Done`
+
+	result := Parse("kimi", text)
+
+	if result.Found {
+		t.Fatalf("expected non-object arguments to fallback, got %+v", result)
+	}
+	if result.Content != text {
+		t.Fatalf("expected original content %q, got %q", text, result.Content)
 	}
 }
 

@@ -97,9 +97,13 @@ func parseHermes(text string) Result {
 		return notFound(text)
 	}
 
+	fencedRanges := fencedCodeRanges(text)
 	toolCalls := make([]ToolCall, 0, len(matches))
 	stripRanges := make([]textRange, 0, len(matches))
 	for _, match := range matches {
+		if overlapsAnyRange(match[0], match[1], fencedRanges) {
+			continue
+		}
 		rawJSON := submatch(text, match, 2)
 		if rawJSON == "" {
 			rawJSON = submatch(text, match, 4)
@@ -142,7 +146,7 @@ func decodeHermesPayload(rawJSON string) (ToolCall, bool) {
 
 	arguments := "{}"
 	if len(payload.Arguments) > 0 {
-		compact, ok := compactJSON(payload.Arguments)
+		compact, ok := compactJSONObject(payload.Arguments)
 		if !ok {
 			return ToolCall{}, false
 		}
@@ -177,15 +181,19 @@ func parseKimiK2(text string) Result {
 		return notFound(text)
 	}
 
+	fencedRanges := fencedCodeRanges(text)
 	toolCalls := make([]ToolCall, 0, len(matches))
 	for _, match := range matches {
+		if overlapsAnyRange(match[0], match[1], fencedRanges) {
+			continue
+		}
 		functionID := strings.TrimSpace(submatch(text, match, 2))
 		name := kimiFunctionName(functionID)
 		if name == "" {
 			continue
 		}
 
-		arguments, ok := compactJSONString(submatch(text, match, 4))
+		arguments, ok := compactJSONObjectString(submatch(text, match, 4))
 		if !ok {
 			return notFound(text)
 		}
@@ -223,12 +231,32 @@ func compactJSONString(raw string) (string, bool) {
 	return compactJSON(json.RawMessage(strings.TrimSpace(raw)))
 }
 
+func compactJSONObjectString(raw string) (string, bool) {
+	return compactJSONObject(json.RawMessage(strings.TrimSpace(raw)))
+}
+
 func compactJSON(raw json.RawMessage) (string, bool) {
 	var buf bytes.Buffer
 	if err := json.Compact(&buf, raw); err != nil {
 		return "", false
 	}
 	return buf.String(), true
+}
+
+func compactJSONObject(raw json.RawMessage) (string, bool) {
+	compact, ok := compactJSON(raw)
+	if !ok {
+		return "", false
+	}
+	if !isJSONObject(compact) {
+		return "", false
+	}
+	return compact, true
+}
+
+func isJSONObject(raw string) bool {
+	trimmed := strings.TrimSpace(raw)
+	return len(trimmed) > 0 && trimmed[0] == '{'
 }
 
 type textRange struct {
@@ -285,6 +313,36 @@ func stripKimiSections(text string) string {
 		cursor = rangeEnd
 	}
 	return stripTextRanges(text, ranges)
+}
+
+func fencedCodeRanges(text string) []textRange {
+	ranges := make([]textRange, 0)
+	cursor := 0
+	for {
+		start := strings.Index(text[cursor:], "```")
+		if start < 0 {
+			break
+		}
+		start += cursor
+		end := strings.Index(text[start+3:], "```")
+		if end < 0 {
+			ranges = append(ranges, textRange{start: start, end: len(text)})
+			break
+		}
+		end += start + 6
+		ranges = append(ranges, textRange{start: start, end: end})
+		cursor = end
+	}
+	return ranges
+}
+
+func overlapsAnyRange(start, end int, ranges []textRange) bool {
+	for _, r := range ranges {
+		if start < r.end && end > r.start {
+			return true
+		}
+	}
+	return false
 }
 
 func findEarliestToken(text string, tokens []string) int {

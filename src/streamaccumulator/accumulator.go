@@ -14,19 +14,26 @@ type StreamEvent struct {
 }
 
 type Event struct {
-	Type    string   `json:"type"`
-	Message *Message `json:"message,omitempty"`
-	Index   int      `json:"index,omitempty"`
-	Delta   *Delta   `json:"delta,omitempty"`
+	Type         string                 `json:"type"`
+	Message      *Message               `json:"message,omitempty"`
+	ContentBlock map[string]interface{} `json:"content_block,omitempty"`
+	Index        int                    `json:"index,omitempty"`
+	Delta        *Delta                 `json:"delta,omitempty"`
+	Usage        map[string]int         `json:"usage,omitempty"`
+	Error        map[string]interface{} `json:"error,omitempty"`
 }
 
 type Message struct {
-	ID string `json:"id"`
+	ID    string         `json:"id"`
+	Usage map[string]int `json:"usage,omitempty"`
 }
 
 type Delta struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type        string `json:"type,omitempty"`
+	Text        string `json:"text,omitempty"`
+	Thinking    string `json:"thinking,omitempty"`
+	PartialJSON string `json:"partial_json,omitempty"`
+	StopReason  string `json:"stop_reason,omitempty"`
 }
 
 type Accumulator struct {

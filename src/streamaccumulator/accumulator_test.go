@@ -155,7 +155,25 @@ func TestNonTextDeltaAndUnknownEventsPassThrough(t *testing.T) {
 		Event: Event{
 			Type:  EventContentBlockDelta,
 			Index: 0,
-			Delta: &Delta{Type: "input_json_delta", Text: `{"a":`},
+			Delta: &Delta{Type: "input_json_delta", PartialJSON: `{"a":`},
+		},
+	}
+	startToolUse := StreamEvent{
+		UUID:      "start-tool-1",
+		SessionID: "session-1",
+		Event: Event{
+			Type:         "content_block_start",
+			Index:        0,
+			ContentBlock: map[string]interface{}{"type": "tool_use", "id": "toolu_1", "name": "read_file"},
+		},
+	}
+	messageDelta := StreamEvent{
+		UUID:      "message-delta-1",
+		SessionID: "session-1",
+		Event: Event{
+			Type:  "message_delta",
+			Usage: map[string]int{"output_tokens": 3},
+			Delta: &Delta{StopReason: "tool_use"},
 		},
 	}
 	unknown := StreamEvent{
@@ -163,18 +181,32 @@ func TestNonTextDeltaAndUnknownEventsPassThrough(t *testing.T) {
 		SessionID: "session-1",
 		Event:     Event{Type: "content_block_stop"},
 	}
+	errEvent := StreamEvent{
+		UUID:      "error-1",
+		SessionID: "session-1",
+		Event: Event{
+			Type:  "error",
+			Error: map[string]interface{}{"type": "api_error", "message": "boom"},
+		},
+	}
 
 	got := acc.Accumulate([]StreamEvent{
 		start,
+		startToolUse,
 		nonText,
+		messageDelta,
 		unknown,
+		errEvent,
 		textDelta("delta-2", "session-1", "", 0, "text"),
 	})
 
 	want := []StreamEvent{
 		start,
+		startToolUse,
 		nonText,
+		messageDelta,
 		unknown,
+		errEvent,
 		textSnapshot("delta-2", "session-1", "", 0, "text"),
 	}
 	assertEvents(t, got, want)

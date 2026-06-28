@@ -51,6 +51,11 @@ type ToolAccessPolicy struct {
 var runProfileToolNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 func (p RunProfile) Normalize() RunProfile {
+	permissionMode := PermissionMode(strings.ToLower(strings.TrimSpace(string(p.PermissionMode))))
+	if permissionMode == "default" {
+		permissionMode = PermissionModeDefault
+	}
+
 	return RunProfile{
 		ID:              strings.TrimSpace(p.ID),
 		Name:            strings.TrimSpace(p.Name),
@@ -60,7 +65,7 @@ func (p RunProfile) Normalize() RunProfile {
 		MaxTurns:        p.MaxTurns,
 		Tools:           normalizeToolNames(p.Tools),
 		DisallowedTools: normalizeToolNames(p.DisallowedTools),
-		PermissionMode:  PermissionMode(strings.ToLower(strings.TrimSpace(string(p.PermissionMode)))),
+		PermissionMode:  permissionMode,
 	}
 }
 

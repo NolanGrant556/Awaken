@@ -9,6 +9,7 @@ import (
 	"awaken/src/agentcore"
 	"awaken/src/llm"
 	"awaken/src/mcp"
+	"awaken/src/memory"
 	"awaken/src/runtime"
 	"awaken/src/server"
 	"awaken/src/skills"
@@ -30,6 +31,10 @@ func main() {
 	skillsRegistry, err := skills.NewStaticRegistry(nil)
 	if err != nil {
 		log.Fatalf("failed to build skills registry: %v", err)
+	}
+	memoryStore, err := memory.NewDefaultStore()
+	if err != nil {
+		log.Printf("memory store disabled: %v", err)
 	}
 
 	infoProvider := server.NewLLMRuntimeInfoProvider(
@@ -74,7 +79,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: server.NewRouter(runService, infoProvider),
+		Handler: server.NewRouterWithMemory(runService, infoProvider, memoryStore),
 	}
 
 	log.Printf("awaken-core listening on http://%s", addr)

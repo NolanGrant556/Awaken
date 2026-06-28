@@ -5,11 +5,16 @@ import (
 	"net/http"
 
 	"awaken/src/agentcore"
+	"awaken/src/memory"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
 )
 
 func NewRouter(runService *awruntime.RunService, infoProvider RuntimeInfoProvider) http.Handler {
+	return NewRouterWithMemory(runService, infoProvider, nil)
+}
+
+func NewRouterWithMemory(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, memoryStore *memory.JSONLStore) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handleHealth)
 	mux.HandleFunc("GET /v1/agui/demo", handleAGUIDemo)
@@ -19,6 +24,10 @@ func NewRouter(runService *awruntime.RunService, infoProvider RuntimeInfoProvide
 	mux.HandleFunc("GET /v1/capabilities", func(w http.ResponseWriter, r *http.Request) {
 		handleCapabilities(w, r, infoProvider)
 	})
+	if memoryStore != nil {
+		handlers := memoryHandlers{store: memoryStore}
+		mux.HandleFunc("GET /v1/memory", handlers.handleListOrSearch)
+	}
 	if runService != nil {
 		handlers := runHandlers{runService: runService}
 		mux.HandleFunc("GET /v1/threads", handlers.handleListThreads)

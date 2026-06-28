@@ -8,6 +8,7 @@ import (
 
 	"awaken/src/context"
 	"awaken/src/tool"
+	"awaken/src/usage"
 )
 
 // Protocol 定义 LLM 协议类型
@@ -67,6 +68,7 @@ type Response struct {
 	Content    string
 	ToolCalls  []ToolCall
 	IsFinished bool
+	Usage      *usage.Record
 }
 
 // ToolCall 是统一工具调用结构

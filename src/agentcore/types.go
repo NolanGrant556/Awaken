@@ -4,6 +4,7 @@ import (
 	"awaken/src/context"
 	"awaken/src/prompt"
 	"awaken/src/tool"
+	"awaken/src/usage"
 )
 
 type AgentConfig struct {
@@ -14,6 +15,8 @@ type AgentConfig struct {
 	Workspace        WorkspaceConfig
 	PermissionPolicy tool.PermissionPolicy
 	ApprovalPolicy   ApprovalPolicy
+	UsageLimits      usage.BudgetLimits
+	UsageLedger      usage.Recorder
 }
 
 type WorkspaceConfig struct {

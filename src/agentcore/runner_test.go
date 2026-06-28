@@ -20,6 +20,7 @@ import (
 	"awaken/src/tool"
 	_ "awaken/src/tools/apply_patch"
 	_ "awaken/src/tools/file_read"
+	"awaken/src/usage"
 )
 
 type runnerTestTool struct {
@@ -291,6 +292,58 @@ func TestRunnerMaxThoughts(t *testing.T) {
 	_, err := agent.RunStreamWithEvents(context.Background(), "loop", nil)
 	if err == nil || !strings.Contains(err.Error(), "达到最大思考次数") {
 		t.Fatalf("expected max thoughts error, got %v", err)
+	}
+}
+
+func TestRunnerBudgetGuardBlocksBeforeLLM(t *testing.T) {
+	var calls int
+	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		writeRunnerStreamText(t, w, "should not be called")
+	})
+	defer server.Close()
+
+	cfg := testAgentConfig(server.URL, 1)
+	cfg.UsageLimits = usage.BudgetLimits{MaxInputBytes: 1}
+
+	agent := NewAgent(cfg)
+	_, err := agent.RunStreamWithEvents(context.Background(), "this should exceed the byte budget", nil)
+	if !errors.Is(err, usage.ErrBudgetExceeded) {
+		t.Fatalf("expected ErrBudgetExceeded, got %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("expected budget guard to block before LLM call, got %d calls", calls)
+	}
+}
+
+func TestRunnerRecordsUsageInConfiguredLedger(t *testing.T) {
+	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeRunnerStreamText(t, w, "final answer")
+	})
+	defer server.Close()
+
+	ledger := usage.NewLedger()
+	cfg := testAgentConfig(server.URL, 1)
+	cfg.UsageLedger = ledger
+
+	agent := NewAgent(cfg)
+	if _, err := agent.RunStreamWithEvents(context.Background(), "record usage", nil); err != nil {
+		t.Fatalf("RunStreamWithEvents returned error: %v", err)
+	}
+
+	records := ledger.Records()
+	if len(records) != 1 {
+		t.Fatalf("expected one usage record, got %d: %+v", len(records), records)
+	}
+	record := records[0]
+	if !record.Estimated {
+		t.Fatalf("expected stream response without provider usage to be estimated, got %+v", record)
+	}
+	if record.Protocol != string(llm.ProtocolOpenAIChat) || record.Model != "test-model" {
+		t.Fatalf("unexpected usage metadata: %+v", record)
+	}
+	if record.RequestCount != 1 || record.PromptTokens == 0 || record.InputBytes == 0 {
+		t.Fatalf("unexpected usage counts: %+v", record)
 	}
 }
 

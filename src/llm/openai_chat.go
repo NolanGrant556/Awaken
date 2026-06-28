@@ -12,6 +12,7 @@ import (
 
 	"awaken/src/context"
 	"awaken/src/tool"
+	"awaken/src/usage"
 )
 
 // openaiTransport 实现 OpenAI Chat Completions 协议
@@ -60,6 +61,7 @@ type openaiChatResponse struct {
 			ToolCalls []openaiToolCall `json:"tool_calls,omitempty"`
 		} `json:"message"`
 	} `json:"choices"`
+	Usage *openaiUsage `json:"usage,omitempty"`
 }
 
 type openaiStreamResponse struct {
@@ -69,6 +71,13 @@ type openaiStreamResponse struct {
 			ToolCalls []openaiStreamToolCall `json:"tool_calls,omitempty"`
 		} `json:"delta"`
 	} `json:"choices"`
+	Usage *openaiUsage `json:"usage,omitempty"`
+}
+
+type openaiUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
 }
 
 type openaiStreamToolCall struct {
@@ -128,7 +137,7 @@ func (t *openaiTransport) Invoke(ctx stdctx.Context, cfg Config, req Request) (*
 		return nil, ErrEmptyResponse
 	}
 
-	return responseFromOpenAIMessage(chatResp.Choices[0].Message.Content, chatResp.Choices[0].Message.ToolCalls)
+	return responseFromOpenAIMessage(chatResp.Choices[0].Message.Content, chatResp.Choices[0].Message.ToolCalls, chatResp.Usage)
 }
 
 func (t *openaiTransport) StreamInvoke(ctx stdctx.Context, cfg Config, req Request, callback StreamCallback) (*Response, error) {
@@ -240,11 +249,14 @@ func contextToolCallsToOpenAI(toolCalls []context.ToolCall) []openaiToolCall {
 	return result
 }
 
-func responseFromOpenAIMessage(content string, toolCalls []openaiToolCall) (*Response, error) {
+func responseFromOpenAIMessage(content string, toolCalls []openaiToolCall, openAIUsage *openaiUsage) (*Response, error) {
 	result := &Response{
 		Content:    content,
 		ToolCalls:  make([]ToolCall, 0, len(toolCalls)),
 		IsFinished: len(toolCalls) == 0,
+	}
+	if openAIUsage != nil {
+		result.Usage = usageRecordFromOpenAI(openAIUsage)
 	}
 
 	for _, tc := range toolCalls {
@@ -282,6 +294,7 @@ type openAIStreamState struct {
 	observer  StreamObserver
 	content   strings.Builder
 	toolCalls map[int]*openaiStreamToolAccumulator
+	usage     *openaiUsage
 }
 
 type openaiStreamToolAccumulator struct {
@@ -302,6 +315,9 @@ func (s *openAIStreamState) consume(data string) {
 	var chunk openaiStreamResponse
 	if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 		return
+	}
+	if chunk.Usage != nil {
+		s.usage = chunk.Usage
 	}
 
 	for _, choice := range chunk.Choices {
@@ -357,10 +373,26 @@ func (s *openAIStreamState) response() (*Response, error) {
 		ToolCalls:  toolCalls,
 		IsFinished: len(toolCalls) == 0,
 	}
+	if s.usage != nil {
+		result.Usage = usageRecordFromOpenAI(s.usage)
+	}
 	if result.Content == "" && len(result.ToolCalls) == 0 {
 		return nil, ErrEmptyResponse
 	}
 	return result, nil
+}
+
+func usageRecordFromOpenAI(openAIUsage *openaiUsage) *usage.Record {
+	if openAIUsage == nil {
+		return nil
+	}
+	record := usage.NormalizeRecord(usage.Record{
+		PromptTokens:     openAIUsage.PromptTokens,
+		CompletionTokens: openAIUsage.CompletionTokens,
+		TotalTokens:      openAIUsage.TotalTokens,
+		RequestCount:     1,
+	})
+	return &record
 }
 
 func (s *openAIStreamState) sortedToolCalls() []ToolCall {

@@ -2,6 +2,7 @@ package memory
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -124,6 +125,70 @@ func TestPersistenceReload(t *testing.T) {
 	}
 	if listed[0].ID != record.ID || listed[0].Text != record.Text {
 		t.Fatalf("unexpected reloaded record: %+v", listed[0])
+	}
+}
+
+func TestAddRedactsHighConfidenceSecrets(t *testing.T) {
+	store := newTestStore(t)
+	scope := filepath.Join(t.TempDir(), "workspace")
+
+	record, err := store.Add(AddRequest{
+		Scope:  scope,
+		Text:   "keep provider status, never persist sk-secret-key-must-not-appear",
+		Tags:   []string{"sk-secret-key-must-not-appear", "runtime"},
+		Source: "AKIA1234567890ABCDEF",
+	})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+	if record.Text == "" || record.Source == "" {
+		t.Fatalf("expected redacted record fields to remain populated: %+v", record)
+	}
+	for _, value := range []string{record.Text, record.Source, record.Tags[0]} {
+		if value == "sk-secret-key-must-not-appear" || value == "AKIA1234567890ABCDEF" {
+			t.Fatalf("expected secret to be redacted, got %q", value)
+		}
+	}
+}
+
+func TestLoadSkipsCorruptLines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "memory.jsonl")
+	scope := filepath.Join(t.TempDir(), "workspace")
+	if err := os.WriteFile(path, []byte("{bad json}\n"+`{"id":"mem_1","scope":"`+scope+`","text":"kept"}`+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	store, err := NewJSONLStore(path)
+	if err != nil {
+		t.Fatalf("NewJSONLStore failed: %v", err)
+	}
+	listed, err := store.List(scope, 10)
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	if len(listed) != 1 || listed[0].Text != "kept" {
+		t.Fatalf("expected valid lines to survive corruption, got %+v", listed)
+	}
+}
+
+func TestNewDefaultStoreRequiresAbsoluteEnvPath(t *testing.T) {
+	t.Setenv(EnvStorePath, "relative/memory.jsonl")
+
+	store, err := NewDefaultStore()
+	if err == nil {
+		t.Fatalf("expected error for relative memory path, got store %+v", store)
+	}
+}
+
+func TestNewDefaultStoreDisabledWithoutEnv(t *testing.T) {
+	t.Setenv(EnvStorePath, "")
+
+	store, err := NewDefaultStore()
+	if err != nil {
+		t.Fatalf("NewDefaultStore failed: %v", err)
+	}
+	if store != nil {
+		t.Fatalf("expected nil store when %s is unset, got %+v", EnvStorePath, store)
 	}
 }
 

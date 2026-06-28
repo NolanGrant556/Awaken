@@ -80,6 +80,49 @@ func TestMemoryEndpointRequiresWorkspaceScope(t *testing.T) {
 	}
 }
 
+func TestMemoryEndpointRejectsRelativeWorkspaceAndInvalidLimit(t *testing.T) {
+	store := newServerMemoryStore(t)
+	router := NewRouterWithMemory(nil, nil, store)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/memory?workspace=relative/path", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for relative workspace, got %d", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/v1/memory?workspace="+filepath.Join(t.TempDir(), "workspace")+"&limit=0", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid limit, got %d", rec.Code)
+	}
+}
+
+func TestMemoryEndpointUnavailableWithoutConfiguredStore(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/v1/memory?workspace="+filepath.Join(t.TempDir(), "workspace"), nil)
+	rec := httptest.NewRecorder()
+
+	NewRouter(nil, nil).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 when memory route is disabled, got %d", rec.Code)
+	}
+}
+
+func TestMemoryEndpointRejectsWrongMethod(t *testing.T) {
+	store := newServerMemoryStore(t)
+	router := NewRouterWithMemory(nil, nil, store)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/memory?workspace="+filepath.Join(t.TempDir(), "workspace"), nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", rec.Code)
+	}
+}
+
 func newServerMemoryStore(t *testing.T) *memory.JSONLStore {
 	t.Helper()
 	store, err := memory.NewJSONLStore(filepath.Join(t.TempDir(), "memory.jsonl"))

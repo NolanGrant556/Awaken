@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -21,6 +22,13 @@ var (
 	ErrEmptyText    = errors.New("memory text is required")
 	ErrEmptyScope   = errors.New("memory scope is required")
 	ErrInvalidLimit = errors.New("memory limit must be positive")
+
+	// Only redact formats with a low false-positive rate. Broader filtering
+	// should live closer to the eventual write API and prompt/runtime boundary.
+	highConfidenceSecretPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{12,}\b`),
+		regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`),
+	}
 )
 
 type MemoryRecord struct {
@@ -52,25 +60,24 @@ type JSONLStore struct {
 }
 
 func DefaultStorePath() (string, error) {
-	if path := strings.TrimSpace(os.Getenv(EnvStorePath)); path != "" {
-		return filepath.Clean(path), nil
+	path := strings.TrimSpace(os.Getenv(EnvStorePath))
+	if path == "" {
+		return "", nil
 	}
-
-	configDir, err := os.UserConfigDir()
-	if err != nil {
-		cacheDir, cacheErr := os.UserCacheDir()
-		if cacheErr != nil {
-			return "", fmt.Errorf("resolve memory store path: %w", err)
-		}
-		configDir = cacheDir
+	path = filepath.Clean(path)
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("%s must be an absolute path", EnvStorePath)
 	}
-	return filepath.Join(configDir, "awaken", "memory.jsonl"), nil
+	return path, nil
 }
 
 func NewDefaultStore() (*JSONLStore, error) {
 	path, err := DefaultStorePath()
 	if err != nil {
 		return nil, err
+	}
+	if path == "" {
+		return nil, nil
 	}
 	return NewJSONLStore(path)
 }
@@ -113,11 +120,11 @@ func (s *JSONLStore) Add(req AddRequest) (MemoryRecord, error) {
 	record := MemoryRecord{
 		ID:        newMemoryID(now),
 		Scope:     scope,
-		Text:      text,
-		Tags:      normalizeTags(req.Tags),
+		Text:      redactHighConfidenceSecrets(text),
+		Tags:      normalizeTags(redactHighConfidenceSecretTags(req.Tags)),
 		CreatedAt: now,
 		UpdatedAt: now,
-		Source:    strings.TrimSpace(req.Source),
+		Source:    redactHighConfidenceSecrets(strings.TrimSpace(req.Source)),
 	}
 
 	s.mu.Lock()
@@ -236,7 +243,7 @@ func (s *JSONLStore) load() error {
 		}
 		var record MemoryRecord
 		if err := json.Unmarshal([]byte(line), &record); err != nil {
-			return err
+			continue
 		}
 		if record.ID == "" || strings.TrimSpace(record.Text) == "" || strings.TrimSpace(record.Scope) == "" {
 			continue
@@ -278,7 +285,7 @@ func normalizeTags(tags []string) []string {
 	seen := make(map[string]bool, len(tags))
 	normalized := make([]string, 0, len(tags))
 	for _, tag := range tags {
-		tag = strings.TrimSpace(tag)
+		tag = redactHighConfidenceSecrets(strings.TrimSpace(tag))
 		if tag == "" || seen[tag] {
 			continue
 		}
@@ -332,4 +339,20 @@ func newMemoryID(now time.Time) string {
 		return fmt.Sprintf("mem_%d", now.UnixNano())
 	}
 	return fmt.Sprintf("mem_%d_%s", now.UnixNano(), hex.EncodeToString(b[:]))
+}
+
+func redactHighConfidenceSecretTags(tags []string) []string {
+	redacted := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		redacted = append(redacted, redactHighConfidenceSecrets(tag))
+	}
+	return redacted
+}
+
+func redactHighConfidenceSecrets(value string) string {
+	redacted := value
+	for _, pattern := range highConfidenceSecretPatterns {
+		redacted = pattern.ReplaceAllString(redacted, "[REDACTED_SECRET]")
+	}
+	return redacted
 }

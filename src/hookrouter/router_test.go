@@ -9,7 +9,7 @@ import (
 func TestRouterRoutesMatcherModes(t *testing.T) {
 	tests := []struct {
 		name        string
-		matcher     string
+		hook        Hook
 		toolName    string
 		wantIDs     []string
 		wantMode    MatcherMode
@@ -17,21 +17,37 @@ func TestRouterRoutesMatcherModes(t *testing.T) {
 	}{
 		{
 			name:     "empty matcher matches all",
+			hook:     Hook{ID: "hook", Event: "pre_tool_call"},
+			toolName: "Bash",
+			wantIDs:  []string{"hook"},
+			wantMode: MatcherModeAll,
+		},
+		{
+			name:     "star matcher matches all",
+			hook:     Hook{ID: "hook", Event: "pre_tool_call", Matcher: "*"},
 			toolName: "Bash",
 			wantIDs:  []string{"hook"},
 			wantMode: MatcherModeAll,
 		},
 		{
 			name:        "regex requires full match",
-			matcher:     "Bash|Read",
+			hook:        Hook{ID: "hook", Event: "pre_tool_call", Matcher: "Bash|Read"},
 			toolName:    "Bash",
 			wantIDs:     []string{"hook"},
 			wantMode:    MatcherModeRegex,
 			notToolName: "BashTool",
 		},
 		{
-			name:        "bad regex falls back to literal equality",
-			matcher:     "[bad",
+			name:        "simple matcher is literal by default",
+			hook:        Hook{ID: "hook", Event: "pre_tool_call", Matcher: "Bash"},
+			toolName:    "Bash",
+			wantIDs:     []string{"hook"},
+			wantMode:    MatcherModeLiteral,
+			notToolName: "BashTool",
+		},
+		{
+			name:        "explicit literal matcher is honored",
+			hook:        Hook{ID: "hook", Event: "pre_tool_call", Matcher: "[bad", MatcherMode: MatcherModeLiteral},
 			toolName:    "[bad",
 			wantIDs:     []string{"hook"},
 			wantMode:    MatcherModeLiteral,
@@ -42,7 +58,7 @@ func TestRouterRoutesMatcherModes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			router := NewRouter()
-			if err := router.Add(Hook{ID: "hook", Event: "pre_tool_call", Matcher: tt.matcher}); err != nil {
+			if err := router.Add(tt.hook); err != nil {
 				t.Fatalf("Add returned error: %v", err)
 			}
 
@@ -66,6 +82,15 @@ func TestRouterRoutesMatcherModes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRouterAddRejectsInvalidRegexMatcher(t *testing.T) {
+	router := NewRouter()
+
+	err := router.Add(Hook{ID: "hook", Event: "pre_tool_call", Matcher: "[bad"})
+	if !errors.Is(err, ErrInvalidHook) {
+		t.Fatalf("expected ErrInvalidHook, got %v", err)
 	}
 }
 

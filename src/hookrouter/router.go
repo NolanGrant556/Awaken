@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"sync"
 )
 
@@ -18,6 +19,8 @@ const (
 var (
 	ErrInvalidHook   = errors.New("invalid hook")
 	ErrDuplicateHook = errors.New("hook already registered")
+
+	simpleMatcherPattern = regexp.MustCompile(`^[a-zA-Z0-9_|]+$`)
 )
 
 type Hook struct {
@@ -63,17 +66,9 @@ func (r *Router) Add(hook Hook) error {
 		return fmt.Errorf("%w: event is required", ErrInvalidHook)
 	}
 
-	route := routeHook{hook: hook}
-	route.hook.MatcherMode = MatcherModeAll
-	if hook.Matcher != "" {
-		matcher, err := regexp.Compile(hook.Matcher)
-		if err != nil {
-			route.hook.MatcherMode = MatcherModeLiteral
-		} else {
-			matcher.Longest()
-			route.matcher = matcher
-			route.hook.MatcherMode = MatcherModeRegex
-		}
+	route, err := newRouteHook(hook)
+	if err != nil {
+		return err
 	}
 
 	r.mu.Lock()
@@ -142,6 +137,43 @@ func (r *Router) Snapshot() []Hook {
 		hooks = append(hooks, route.hook)
 	}
 	return hooks
+}
+
+func newRouteHook(hook Hook) (routeHook, error) {
+	route := routeHook{hook: hook}
+
+	switch inferMatcherMode(hook) {
+	case MatcherModeAll:
+		route.hook.MatcherMode = MatcherModeAll
+		return route, nil
+	case MatcherModeLiteral:
+		route.hook.MatcherMode = MatcherModeLiteral
+		return route, nil
+	case MatcherModeRegex:
+		matcher, err := regexp.Compile(hook.Matcher)
+		if err != nil {
+			return routeHook{}, fmt.Errorf("%w: invalid matcher regex: %v", ErrInvalidHook, err)
+		}
+		matcher.Longest()
+		route.matcher = matcher
+		route.hook.MatcherMode = MatcherModeRegex
+		return route, nil
+	default:
+		return routeHook{}, fmt.Errorf("%w: unknown matcher mode %q", ErrInvalidHook, hook.MatcherMode)
+	}
+}
+
+func inferMatcherMode(hook Hook) MatcherMode {
+	if hook.MatcherMode != "" {
+		return hook.MatcherMode
+	}
+	if hook.Matcher == "" || hook.Matcher == "*" {
+		return MatcherModeAll
+	}
+	if simpleMatcherPattern.MatchString(hook.Matcher) && !strings.Contains(hook.Matcher, "|") {
+		return MatcherModeLiteral
+	}
+	return MatcherModeRegex
 }
 
 func (r routeHook) matchesTool(toolName string) bool {

@@ -195,6 +195,30 @@ func TestOAuthServerMetadataValidation(t *testing.T) {
 	if err := unsupportedPKCE.Validate(); !errors.Is(err, ErrInvalidMetadata) {
 		t.Fatalf("unsupported PKCE Validate() error = %v, want ErrInvalidMetadata", err)
 	}
+
+	insecureEndpoint := valid
+	insecureEndpoint.AuthorizationEndpoint = "http://mcp.example.com/oauth/authorize"
+	if err := insecureEndpoint.Validate(); !errors.Is(err, ErrInvalidMetadata) {
+		t.Fatalf("insecure auth endpoint Validate() error = %v, want ErrInvalidMetadata", err)
+	}
+}
+
+func TestClientValidationRequiresLoopbackForHTTPRedirect(t *testing.T) {
+	validLoopback := Client{
+		ClientID:    "client-id",
+		RedirectURI: "http://127.0.0.1:49152/callback",
+	}
+	if err := validLoopback.Validate(); err != nil {
+		t.Fatalf("loopback redirect Validate() error = %v", err)
+	}
+
+	invalidHTTP := Client{
+		ClientID:    "client-id",
+		RedirectURI: "http://example.com/callback",
+	}
+	if err := invalidHTTP.Validate(); !errors.Is(err, ErrInvalidClient) {
+		t.Fatalf("non-loopback http redirect Validate() error = %v, want ErrInvalidClient", err)
+	}
 }
 
 const validSessionVerifier = "verifier-secret"

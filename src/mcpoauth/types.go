@@ -3,6 +3,7 @@ package mcpoauth
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -20,16 +21,16 @@ type OAuthServerMetadata struct {
 }
 
 func (m OAuthServerMetadata) Validate() error {
-	if err := validateHTTPURL(m.AuthorizationEndpoint, "authorization_endpoint", true, ErrInvalidMetadata); err != nil {
+	if err := validateHTTPSURL(m.AuthorizationEndpoint, "authorization_endpoint", true, ErrInvalidMetadata); err != nil {
 		return err
 	}
-	if err := validateHTTPURL(m.TokenEndpoint, "token_endpoint", true, ErrInvalidMetadata); err != nil {
+	if err := validateHTTPSURL(m.TokenEndpoint, "token_endpoint", true, ErrInvalidMetadata); err != nil {
 		return err
 	}
-	if err := validateHTTPURL(m.Issuer, "issuer", false, ErrInvalidMetadata); err != nil {
+	if err := validateHTTPSURL(m.Issuer, "issuer", false, ErrInvalidMetadata); err != nil {
 		return err
 	}
-	if err := validateHTTPURL(m.RegistrationEndpoint, "registration_endpoint", false, ErrInvalidMetadata); err != nil {
+	if err := validateHTTPSURL(m.RegistrationEndpoint, "registration_endpoint", false, ErrInvalidMetadata); err != nil {
 		return err
 	}
 	if len(m.ResponseTypesSupported) > 0 && !containsString(m.ResponseTypesSupported, "code") {
@@ -63,7 +64,7 @@ func (c Client) Validate() error {
 	if strings.TrimSpace(c.ClientID) == "" {
 		return wrapInvalid(ErrInvalidClient, "client_id is required")
 	}
-	if err := validateHTTPURL(c.RedirectURI, "redirect_uri", true, ErrInvalidClient); err != nil {
+	if err := validateRedirectURL(c.RedirectURI, "redirect_uri", true, ErrInvalidClient); err != nil {
 		return err
 	}
 	return nil
@@ -109,7 +110,7 @@ func (s AuthSession) Validate() error {
 	if strings.TrimSpace(s.ClientID) == "" {
 		return wrapInvalid(ErrInvalidAuthSession, "client_id is required")
 	}
-	if err := validateHTTPURL(s.RedirectURI, "redirect_uri", true, ErrInvalidAuthSession); err != nil {
+	if err := validateRedirectURL(s.RedirectURI, "redirect_uri", true, ErrInvalidAuthSession); err != nil {
 		return err
 	}
 	return nil
@@ -177,7 +178,7 @@ func (c Clock) Now() time.Time {
 	return c().UTC()
 }
 
-func validateHTTPURL(raw, field string, required bool, base error) error {
+func validateHTTPSURL(raw, field string, required bool, base error) error {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		if required {
@@ -189,8 +190,37 @@ func validateHTTPURL(raw, field string, required bool, base error) error {
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return wrapInvalid(base, field+" must be an absolute URL")
 	}
-	if u.Scheme != "https" && u.Scheme != "http" {
-		return wrapInvalid(base, field+" must use http or https")
+	if u.Scheme != "https" {
+		return wrapInvalid(base, field+" must use https")
+	}
+	return nil
+}
+
+func validateRedirectURL(raw, field string, required bool, base error) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		if required {
+			return wrapInvalid(base, field+" is required")
+		}
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return wrapInvalid(base, field+" must be an absolute URL")
+	}
+	if u.Scheme == "https" {
+		return nil
+	}
+	if u.Scheme != "http" {
+		return wrapInvalid(base, field+" must use https or loopback http")
+	}
+	host := strings.TrimSpace(u.Hostname())
+	if host == "localhost" {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return wrapInvalid(base, field+" must use https or loopback http")
 	}
 	return nil
 }

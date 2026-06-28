@@ -73,9 +73,22 @@ func TestRuntimeInfoEndpoint(t *testing.T) {
 			APIVersion:       "v1",
 			ConfiguredModel:  "gpt-4-test",
 			Protocol:         "openai_chat",
+			AuthScheme:       "bearer",
 			HasAPIKey:        true,
 			DefaultWorkspace: "/tmp/awaken-test",
 			BaseURLHost:      "api.example.com",
+			ActiveProfile:    "openai-default",
+			Profiles: []RuntimeProfileInfo{
+				{
+					Name:        "openai-default",
+					Model:       "gpt-4-test",
+					Protocol:    "openai_chat",
+					AuthScheme:  "bearer",
+					HasAPIKey:   true,
+					BaseURLHost: "api.example.com",
+					IsActive:    true,
+				},
+			},
 		},
 	}
 
@@ -105,6 +118,9 @@ func TestRuntimeInfoEndpoint(t *testing.T) {
 	if info.ConfiguredModel != "gpt-4-test" {
 		t.Fatalf("expected configured_model gpt-4-test, got %q", info.ConfiguredModel)
 	}
+	if info.AuthScheme != "bearer" {
+		t.Fatalf("expected auth_scheme bearer, got %q", info.AuthScheme)
+	}
 	if !info.HasAPIKey {
 		t.Fatalf("expected has_api_key true")
 	}
@@ -113,6 +129,15 @@ func TestRuntimeInfoEndpoint(t *testing.T) {
 	}
 	if info.BaseURLHost != "api.example.com" {
 		t.Fatalf("expected base_url_host api.example.com, got %q", info.BaseURLHost)
+	}
+	if info.ActiveProfile != "openai-default" {
+		t.Fatalf("expected active_profile openai-default, got %q", info.ActiveProfile)
+	}
+	if len(info.Profiles) != 1 {
+		t.Fatalf("expected 1 profile, got %d", len(info.Profiles))
+	}
+	if !info.Profiles[0].IsActive {
+		t.Fatalf("expected first profile to be active")
 	}
 
 	body := rec.Body.String()
@@ -125,13 +150,24 @@ func TestRuntimeInfoEndpoint(t *testing.T) {
 }
 
 func TestRuntimeInfoEndpointDoesNotLeakSecrets(t *testing.T) {
-	provider := NewLLMRuntimeInfoProvider(
-		"claude-test",
-		"https://api.anthropic.com/v1",
-		"sk-secret-key-must-not-appear",
-		"/workspace/secret",
-		"anthropic_messages",
-	)
+	provider := NewLLMRuntimeInfoProvider(llm.Config{
+		APIKey:        "sk-secret-key-must-not-appear",
+		BaseURL:       "https://api.anthropic.com/v1",
+		Model:         "claude-test",
+		Protocol:      llm.ProtocolAnthropicMessages,
+		AuthScheme:    "x-api-key",
+		ActiveProfile: "anthropic-prod",
+		Profiles: []llm.Profile{
+			{
+				Name:       "anthropic-prod",
+				BaseURL:    "https://api.anthropic.com/v1",
+				Model:      "claude-test",
+				Protocol:   llm.ProtocolAnthropicMessages,
+				AuthScheme: "x-api-key",
+				HasAPIKey:  true,
+			},
+		},
+	}, "/workspace/secret")
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/runtime/info", nil)
 	rec := httptest.NewRecorder()
@@ -159,6 +195,53 @@ func TestRuntimeInfoEndpointDoesNotLeakSecrets(t *testing.T) {
 	}
 	if info.Protocol != "anthropic_messages" {
 		t.Fatalf("expected protocol anthropic_messages, got %q", info.Protocol)
+	}
+	if info.AuthScheme != "x-api-key" {
+		t.Fatalf("expected auth_scheme x-api-key, got %q", info.AuthScheme)
+	}
+	if info.ActiveProfile != "anthropic-prod" {
+		t.Fatalf("expected active_profile anthropic-prod, got %q", info.ActiveProfile)
+	}
+	if len(info.Profiles) != 1 || info.Profiles[0].Name != "anthropic-prod" {
+		t.Fatalf("expected anthropic profile metadata, got %+v", info.Profiles)
+	}
+}
+
+func TestRuntimeInfoProfilesInferProtocolWithoutGlobalEnvLeakage(t *testing.T) {
+	t.Setenv("LLM_PROTOCOL", "openai_chat")
+
+	provider := NewLLMRuntimeInfoProvider(llm.Config{
+		APIKey:        "test-key",
+		BaseURL:       "https://api.openai.com/v1",
+		Model:         "gpt-4-test",
+		Protocol:      llm.ProtocolOpenAIChat,
+		AuthScheme:    "bearer",
+		ActiveProfile: "openai-default",
+		Profiles: []llm.Profile{
+			{
+				Name:       "openai-default",
+				BaseURL:    "https://api.openai.com/v1",
+				Model:      "gpt-4-test",
+				Protocol:   llm.ProtocolOpenAIChat,
+				AuthScheme: "bearer",
+				HasAPIKey:  true,
+			},
+			{
+				Name:      "anthropic-prod",
+				BaseURL:   "https://api.anthropic.com/v1",
+				Model:     "claude-sonnet-4-5",
+				HasAPIKey: true,
+			},
+		},
+	}, "/workspace/test")
+
+	info := provider.GetRuntimeInfo()
+
+	if len(info.Profiles) != 2 {
+		t.Fatalf("expected 2 profiles, got %d", len(info.Profiles))
+	}
+	if info.Profiles[1].Protocol != "anthropic_messages" {
+		t.Fatalf("expected anthropic profile protocol anthropic_messages, got %q", info.Profiles[1].Protocol)
 	}
 }
 
@@ -2850,7 +2933,7 @@ func TestModelStatusSmoke(t *testing.T) {
 		t.Skip("LLM_API_KEY not set")
 	}
 
-	provider := NewLLMRuntimeInfoProvider(cfg.Model, cfg.BaseURL, cfg.APIKey, workspaceRoot, string(llm.ResolveProtocol(cfg)))
+	provider := NewLLMRuntimeInfoProvider(cfg, workspaceRoot)
 
 	runService := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
@@ -2913,8 +2996,17 @@ func TestModelStatusSmoke(t *testing.T) {
 	if info.Protocol != "openai_chat" && info.Protocol != "anthropic_messages" {
 		t.Fatalf("expected protocol openai_chat or anthropic_messages, got %q", info.Protocol)
 	}
+	if info.AuthScheme != cfg.AuthScheme {
+		t.Fatalf("expected auth_scheme %q, got %q", cfg.AuthScheme, info.AuthScheme)
+	}
 	if !info.HasAPIKey {
 		t.Fatalf("expected has_api_key true")
+	}
+	if info.ActiveProfile != cfg.ActiveProfile {
+		t.Fatalf("expected active_profile %q, got %q", cfg.ActiveProfile, info.ActiveProfile)
+	}
+	if len(info.Profiles) == 0 {
+		t.Fatalf("expected profile metadata in runtime info")
 	}
 
 	// 2. 发起一次真实 run，验证运行时可用。

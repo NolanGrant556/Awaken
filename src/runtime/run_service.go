@@ -14,6 +14,7 @@ import (
 
 	"awaken/src/agentcore"
 	convcontext "awaken/src/context"
+	"awaken/src/lifecyclehooks"
 	"awaken/src/slashcommands"
 	"awaken/src/tool"
 	"awaken/src/workspaceguard"
@@ -78,6 +79,11 @@ type RunService struct {
 	newAgent    func(workspace WorkspaceConfig, threadID string) *agentcore.Agent
 	newExecutor func(agent *agentcore.Agent) Executor
 	store       *fileStore
+	hooks       *lifecyclehooks.Executor
+}
+
+type RunServiceConfig struct {
+	Hooks lifecyclehooks.Config
 }
 
 // Thread holds the reusable Agent and metadata for a multi-turn conversation.
@@ -146,12 +152,22 @@ func NewRunServiceWithOptions(
 	newExecutor func(agent *agentcore.Agent) Executor,
 	opts ...RunServiceOption,
 ) *RunService {
+	return NewRunServiceWithConfig(newAgent, newExecutor, RunServiceConfig{}, opts...)
+}
+
+func NewRunServiceWithConfig(
+	newAgent func(workspace WorkspaceConfig, threadID string) *agentcore.Agent,
+	newExecutor func(agent *agentcore.Agent) Executor,
+	config RunServiceConfig,
+	opts ...RunServiceOption,
+) *RunService {
 	service := &RunService{
 		sessions:    make(map[string]*Session),
 		threads:     make(map[string]*Thread),
 		auditLog:    NewAuditLog(defaultAuditLogCapacity),
 		newAgent:    newAgent,
 		newExecutor: newExecutor,
+		hooks:       lifecyclehooks.NewExecutor(config.Hooks),
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -292,7 +308,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		Outcome: agentcore.SecurityAuditOutcomeStarted,
 		Summary: "run started",
 	})
-	go s.execute(session, executor, executorInput, ctx)
+	go s.execute(session, executor, executorInput, workspace, ctx)
 
 	return session.Snapshot(), nil
 }
@@ -393,9 +409,19 @@ func (s *RunService) ResolveApproval(runID, approvalID string, decision agentcor
 	return session.ResolveApproval(approvalID, decision)
 }
 
-func (s *RunService) execute(session *Session, executor Executor, input string, ctx context.Context) {
+func (s *RunService) execute(session *Session, executor Executor, input string, workspace WorkspaceConfig, ctx context.Context) {
 	snapshot := session.Snapshot()
 	defer s.clearActiveRun(snapshot.ThreadID, snapshot.RunID)
+
+	metadata := runHookMetadata(snapshot, workspace)
+	s.executeHook(ctx, lifecyclehooks.EventBeforeRun, metadata)
+
+	runStatus := string(RunStatusError)
+	defer func() {
+		afterMetadata := cloneHookMetadata(metadata)
+		afterMetadata["run_status"] = runStatus
+		go s.executeHook(context.Background(), lifecyclehooks.EventAfterRun, afterMetadata)
+	}()
 
 	if executor == nil {
 		session.CompleteError("run executor is not configured", "executor_missing")
@@ -405,18 +431,22 @@ func (s *RunService) execute(session *Session, executor Executor, input string, 
 	result, err := executor.Run(ctx, input, sessionEventSink{session: session})
 	if err == nil {
 		if session.CancelRequested() {
+			runStatus = string(RunStatusCancelled)
 			session.CompleteCancelled("run cancelled")
 			return
 		}
+		runStatus = string(RunStatusFinished)
 		session.CompleteFinished(result)
 		return
 	}
 
 	if errors.Is(ctx.Err(), context.Canceled) || session.CancelRequested() {
+		runStatus = string(RunStatusCancelled)
 		session.CompleteCancelled("run cancelled")
 		return
 	}
 
+	runStatus = string(RunStatusError)
 	session.CompleteError(err.Error(), "")
 }
 
@@ -427,6 +457,29 @@ func (s *RunService) recordRunAudit(run Run, event agentcore.SecurityAuditEvent)
 	event.RunID = firstNonEmpty(event.RunID, run.RunID)
 	event.ThreadID = firstNonEmpty(event.ThreadID, run.ThreadID)
 	s.auditLog.RecordSecurityAuditEvent(event)
+}
+
+func (s *RunService) executeHook(ctx context.Context, event lifecyclehooks.Event, metadata map[string]string) {
+	if s.hooks == nil || !s.hooks.HasHooks() {
+		return
+	}
+	s.hooks.Execute(ctx, event, metadata)
+}
+
+func runHookMetadata(run Run, workspace WorkspaceConfig) map[string]string {
+	return map[string]string{
+		"run_id":         run.RunID,
+		"thread_id":      run.ThreadID,
+		"workspace_root": workspace.WorkspaceRoot,
+	}
+}
+
+func cloneHookMetadata(metadata map[string]string) map[string]string {
+	cloned := make(map[string]string, len(metadata)+1)
+	for key, value := range metadata {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func (s *RunService) clearActiveRun(threadID, runID string) {

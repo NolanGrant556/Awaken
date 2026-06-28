@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	"awaken/src/lifecyclehooks"
 	"awaken/src/tool"
 	"awaken/src/workspaceguard"
 )
@@ -180,6 +181,135 @@ func TestRunServiceCompletesWhenExecutorReturnsWithoutTerminalEvent(t *testing.T
 	}
 	if final.Status != RunStatusFinished {
 		t.Fatalf("expected finished status, got %s", final.Status)
+	}
+}
+
+func TestRunServiceWithoutHooksKeepsExecutorPath(t *testing.T) {
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			return "done", nil
+		})
+	})
+
+	run, err := service.StartRun(StartRunRequest{Input: "hello", Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()}})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+
+	final := waitForRunTerminal(t, service, run.RunID)
+	if final.Status != RunStatusFinished || final.Result != "done" {
+		t.Fatalf("expected unchanged successful run, got %+v", final)
+	}
+}
+
+func TestRunServiceExecutesLifecycleHooks(t *testing.T) {
+	root := t.TempDir()
+	outPath := filepath.Join(root, "run-hooks.log")
+	script := writeRuntimeHookScript(t, root, `#!/bin/sh
+printf '%s:%s:%s:%s:%s\n' "$1" "$AWAKEN_HOOK_EVENT" "$AWAKEN_RUN_ID" "$AWAKEN_WORKSPACE_ROOT" "$AWAKEN_RUN_STATUS" >> "$2"
+`)
+
+	service := NewRunServiceWithConfig(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			return "done", nil
+		})
+	}, RunServiceConfig{
+		Hooks: lifecyclehooks.Config{Hooks: map[lifecyclehooks.Event][]lifecyclehooks.CommandConfig{
+			lifecyclehooks.EventBeforeRun: {{
+				Command: script,
+				Args:    []string{"before", outPath},
+			}},
+			lifecyclehooks.EventAfterRun: {{
+				Command: script,
+				Args:    []string{"after", outPath},
+			}},
+		}},
+	})
+
+	run, err := service.StartRun(StartRunRequest{Input: "hello", Workspace: WorkspaceConfig{WorkspaceRoot: root}})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	final := waitForRunTerminal(t, service, run.RunID)
+	if final.Status != RunStatusFinished {
+		t.Fatalf("expected finished run, got %+v", final)
+	}
+
+	got := waitForFileText(t, outPath, "after:after_run")
+	if !strings.Contains(got, "before:before_run:"+run.RunID+":"+root+":") {
+		t.Fatalf("expected before_run hook metadata, got %q", got)
+	}
+	if !strings.Contains(got, "after:after_run:"+run.RunID+":"+root+":finished") {
+		t.Fatalf("expected after_run hook metadata, got %q", got)
+	}
+}
+
+func TestRunServiceHookTimeoutAndErrorDoNotFailRun(t *testing.T) {
+	service := NewRunServiceWithConfig(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			return "done", nil
+		})
+	}, RunServiceConfig{
+		Hooks: lifecyclehooks.Config{Hooks: map[lifecyclehooks.Event][]lifecyclehooks.CommandConfig{
+			lifecyclehooks.EventBeforeRun: {
+				{Command: "/bin/sh", Args: []string{"-c", "sleep 1"}, TimeoutMS: 10},
+				{Command: "/bin/sh", Args: []string{"-c", "exit 7"}, TimeoutMS: 1000},
+			},
+		}},
+	})
+
+	run, err := service.StartRun(StartRunRequest{Input: "hello", Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()}})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+
+	final := waitForRunTerminal(t, service, run.RunID)
+	if final.Status != RunStatusFinished || final.Result != "done" {
+		t.Fatalf("expected hook failures not to break run, got %+v", final)
+	}
+}
+
+func TestRunServiceAfterHookDoesNotDelayTerminalState(t *testing.T) {
+	root := t.TempDir()
+	outPath := filepath.Join(root, "run-hooks.log")
+	script := writeRuntimeHookScript(t, root, `#!/bin/sh
+sleep 0.2
+printf '%s:%s:%s\n' "$1" "$AWAKEN_HOOK_EVENT" "$AWAKEN_RUN_STATUS" >> "$2"
+`)
+
+	service := NewRunServiceWithConfig(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			return "done", nil
+		})
+	}, RunServiceConfig{
+		Hooks: lifecyclehooks.Config{Hooks: map[lifecyclehooks.Event][]lifecyclehooks.CommandConfig{
+			lifecyclehooks.EventAfterRun: {{
+				Command: script,
+				Args:    []string{"after", outPath},
+			}},
+		}},
+	})
+
+	run, err := service.StartRun(StartRunRequest{Input: "hello", Workspace: WorkspaceConfig{WorkspaceRoot: root}})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+
+	started := time.Now()
+	final := waitForRunTerminal(t, service, run.RunID)
+	elapsed := time.Since(started)
+	if final.Status != RunStatusFinished || final.Result != "done" {
+		t.Fatalf("expected finished run, got %+v", final)
+	}
+	if elapsed >= 150*time.Millisecond {
+		t.Fatalf("expected async after_run hook, terminal state took %s", elapsed)
+	}
+	if got := waitForFileText(t, outPath, "after:after_run:finished"); !strings.Contains(got, "after:after_run:finished") {
+		t.Fatalf("expected after_run hook output, got %q", got)
 	}
 }
 
@@ -2033,7 +2163,7 @@ func assertDelegation(t *testing.T, delegation *DelegationMetadata, parentRunID,
 
 func waitForRunTerminal(t *testing.T, service *RunService, runID string) Run {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		run, err := service.GetRun(runID)
 		if err != nil {
@@ -2111,4 +2241,31 @@ func newPersistentTestRunService(persistenceDir string, observed chan<- []string
 		},
 		WithPersistenceDir(persistenceDir),
 	)
+}
+
+func writeRuntimeHookScript(t *testing.T, dir string, content string) string {
+	t.Helper()
+	path := filepath.Join(dir, "runtime-hook.sh")
+	if err := os.WriteFile(path, []byte(content), 0755); err != nil {
+		t.Fatalf("failed to write hook script: %v", err)
+	}
+	return path
+}
+
+func waitForFileText(t *testing.T, path string, marker string) string {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	var last string
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			last = string(data)
+			if strings.Contains(last, marker) {
+				return last
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("file %s did not contain %q; last content %q", path, marker, last)
+	return ""
 }

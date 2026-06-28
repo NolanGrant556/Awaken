@@ -148,6 +148,7 @@ func toolRuntimeConfigFromAgentConfig(config AgentConfig) ToolRuntimeConfig {
 		PermissionPolicy:  config.PermissionPolicy.Normalize(),
 		ToolAccessPolicy:  config.ToolAccessPolicy(),
 		PermissionMode:    config.PermissionMode(),
+		Hooks:             config.Hooks,
 	}
 }
 

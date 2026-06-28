@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"awaken/src/agentcore"
+	"awaken/src/lifecyclehooks"
 	"awaken/src/llm"
 	"awaken/src/mcp"
 	"awaken/src/memory"
@@ -23,6 +24,7 @@ func main() {
 	}
 
 	cfg := llm.LoadConfig()
+	hookConfig := lifecyclehooks.LoadConfig()
 	defaultWorkspace := resolveDefaultWorkspace()
 	mcpRegistry, err := mcp.NewStaticRegistry(nil)
 	if err != nil {
@@ -45,7 +47,7 @@ func main() {
 	)
 	persistenceDir := os.Getenv("AWAKEN_TRANSCRIPT_DIR")
 
-	runService := runtime.NewRunServiceWithOptions(
+	runService := runtime.NewRunServiceWithConfig(
 		func(workspace runtime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
 				MaxThoughts: 5,
@@ -66,6 +68,7 @@ func main() {
 				},
 				MCPRegistry: mcpRegistry,
 				Skills:      skillsRegistry,
+				Hooks:       hookConfig,
 			}
 			return agentcore.NewAgentWithThreadID(agentCfg, threadID)
 		},
@@ -74,6 +77,7 @@ func main() {
 				return agent.RunStreamWithEvents(ctx, input, sink)
 			})
 		},
+		runtime.RunServiceConfig{Hooks: hookConfig},
 		runtime.WithPersistenceDir(persistenceDir),
 	)
 

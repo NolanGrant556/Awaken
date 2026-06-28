@@ -200,6 +200,22 @@ max_output_tokens = 8192
 auto_compact_token_limit = 360000
 ```
 
+Lifecycle hooks 默认关闭；只有在 `config.toml` 显式配置时才执行。Hook 命令使用 `command + args` 直接执行，不经过 shell 拼接；失败和超时只写日志，不会让 run 或 tool 失败。
+
+```toml
+[runtime.hooks.before_run]
+command = "/path/to/hook"
+args = ["before-run"]
+timeout_ms = 5000
+
+[[runtime.hooks.after_tool]]
+command = "/path/to/hook"
+args = ["after-tool"]
+enabled = true
+```
+
+支持的事件为 `before_run`、`after_run`、`before_tool`、`after_tool`。
+
 `.env` 已被 git ignore，不能提交。
 
 ## 开发命令

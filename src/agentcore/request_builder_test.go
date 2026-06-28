@@ -3,6 +3,7 @@ package agentcore
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -10,6 +11,7 @@ import (
 	"awaken/src/llm"
 	"awaken/src/mcp"
 	"awaken/src/tool"
+	_ "awaken/src/tools/todo_write"
 )
 
 type requestBuilderReadOnlyTool struct {
@@ -103,6 +105,27 @@ func TestRequestBuilderUsesRegisteredTools(t *testing.T) {
 		}
 	}
 	t.Fatalf("expected registered tool %s in request tools", toolName)
+}
+
+func TestRequestBuilderUsesRegisteredToolParameterSchema(t *testing.T) {
+	candidate, err := tool.GetTool("todo_write")
+	if err != nil {
+		t.Fatalf("expected todo_write to be registered: %v", err)
+	}
+
+	schema := tool.DefinitionFromTool(candidate).Function.Parameters
+	items, ok := schema.Properties["items"]
+	if !ok {
+		t.Fatalf("expected todo_write schema to expose items property: %+v", schema)
+	}
+	if items.Type != "array" || items.Items == nil {
+		t.Fatalf("expected items to be an array with item schema, got %+v", items)
+	}
+	status := items.Items.Properties["status"]
+	wantStatuses := []string{"pending", "in_progress", "completed", "cancelled"}
+	if !reflect.DeepEqual(status.Enum, wantStatuses) {
+		t.Fatalf("expected status enum %+v, got %+v", wantStatuses, status.Enum)
+	}
 }
 
 func TestRequestBuilderRefreshesRuntimeInfo(t *testing.T) {

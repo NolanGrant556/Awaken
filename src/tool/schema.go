@@ -20,8 +20,16 @@ type ToolParametersSchema struct {
 }
 
 type ToolParam struct {
-	Type        string `json:"type"`
-	Description string `json:"description"`
+	Type        string               `json:"type"`
+	Description string               `json:"description"`
+	Items       *ToolParam           `json:"items,omitempty"`
+	Properties  map[string]ToolParam `json:"properties,omitempty"`
+	Required    []string             `json:"required,omitempty"`
+	Enum        []string             `json:"enum,omitempty"`
+}
+
+type ParameterSchemaProvider interface {
+	ParameterSchema() ToolParametersSchema
 }
 
 func DefinitionFromTool(candidate Tool) ToolDefinition {
@@ -52,6 +60,10 @@ func DefinitionsFromTools(candidates []Tool) []ToolDefinition {
 }
 
 func ParametersSchemaFromTool(candidate Tool) ToolParametersSchema {
+	if provider, ok := candidate.(ParameterSchemaProvider); ok {
+		return provider.ParameterSchema()
+	}
+
 	params := candidate.Parameters()
 	properties := make(map[string]ToolParam, len(params))
 	required := make([]string, 0)

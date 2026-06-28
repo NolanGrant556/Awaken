@@ -15,6 +15,7 @@ func TestBuiltInToolNamesAreProviderSafe(t *testing.T) {
 		"calculator":           false,
 		"grep_search":          false,
 		"list_files":           false,
+		"process_control":      false,
 		"read_file":            false,
 		"shell":                false,
 		"todo_write":           false,

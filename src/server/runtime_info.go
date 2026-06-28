@@ -7,23 +7,25 @@ import (
 	"awaken/src/llm"
 	"awaken/src/mcp"
 	"awaken/src/skills"
+	"awaken/src/slashcommands"
 )
 
 const RuntimeVersion = "0.1.0"
 
 // RuntimeInfo exposes non-sensitive runtime metadata.
 type RuntimeInfo struct {
-	RuntimeVersion   string               `json:"runtime_version"`
-	APIVersion       string               `json:"api_version"`
-	ConfiguredModel  string               `json:"configured_model"`
-	Protocol         string               `json:"protocol"`
-	AuthScheme       string               `json:"auth_scheme"`
-	HasAPIKey        bool                 `json:"has_api_key"`
-	DefaultWorkspace string               `json:"default_workspace"`
-	BaseURLHost      string               `json:"base_url_host"`
-	ActiveProfile    string               `json:"active_profile"`
-	Profiles         []RuntimeProfileInfo `json:"profiles"`
-	Capabilities     CapabilitiesSnapshot `json:"capabilities"`
+	RuntimeVersion   string                      `json:"runtime_version"`
+	APIVersion       string                      `json:"api_version"`
+	ConfiguredModel  string                      `json:"configured_model"`
+	Protocol         string                      `json:"protocol"`
+	AuthScheme       string                      `json:"auth_scheme"`
+	HasAPIKey        bool                        `json:"has_api_key"`
+	DefaultWorkspace string                      `json:"default_workspace"`
+	BaseURLHost      string                      `json:"base_url_host"`
+	ActiveProfile    string                      `json:"active_profile"`
+	Profiles         []RuntimeProfileInfo        `json:"profiles"`
+	Capabilities     CapabilitiesSnapshot        `json:"capabilities"`
+	SlashCommands    []slashcommands.CommandInfo `json:"slash_commands"`
 }
 
 type RuntimeProfileInfo struct {
@@ -78,6 +80,7 @@ func (p *llmRuntimeInfoProvider) GetRuntimeInfo() RuntimeInfo {
 			MCP:    snapshotMCP(p.mcpRegistry),
 			Skills: snapshotSkills(p.skillsRegistry),
 		},
+		SlashCommands: slashcommands.ListCommands(),
 	}
 }
 

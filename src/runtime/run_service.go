@@ -14,12 +14,14 @@ import (
 
 	"awaken/src/agentcore"
 	convcontext "awaken/src/context"
+	"awaken/src/slashcommands"
 	"awaken/src/tool"
 	"awaken/src/workspaceguard"
 )
 
 var (
 	ErrInvalidInput             = errors.New("input is required")
+	ErrInvalidSlashCommand      = errors.New("invalid slash command")
 	ErrRunNotFound              = errors.New("run not found")
 	ErrApprovalNotFound         = errors.New("approval not found")
 	ErrRunTerminal              = errors.New("run is already finished")
@@ -165,6 +167,14 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	if trimmed == "" {
 		return Run{}, ErrInvalidInput
 	}
+	expansion, err := slashcommands.ExpandInput(req.Input)
+	if err != nil {
+		return Run{}, fmt.Errorf("%w: %v", ErrInvalidSlashCommand, err)
+	}
+	executorInput := trimmed
+	if expansion.Applied {
+		executorInput = expansion.AgentInput
+	}
 	if s.newExecutor == nil {
 		return Run{}, fmt.Errorf("run executor is not configured")
 	}
@@ -282,7 +292,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		Outcome: agentcore.SecurityAuditOutcomeStarted,
 		Summary: "run started",
 	})
-	go s.execute(session, executor, trimmed, ctx)
+	go s.execute(session, executor, executorInput, ctx)
 
 	return session.Snapshot(), nil
 }

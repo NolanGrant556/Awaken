@@ -12,6 +12,7 @@ import (
 	"awaken/src/protocol/agui"
 	"awaken/src/redaction"
 	awruntime "awaken/src/runtime"
+	"awaken/src/slashcommands"
 	"awaken/src/workspaceguard"
 )
 
@@ -110,6 +111,8 @@ func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 			writeErrorJSON(w, http.StatusBadRequest, "DELEGATION_PARENT_MISMATCH", err.Error())
 		case errors.Is(err, awruntime.ErrDelegationParentRequired):
 			writeErrorJSON(w, http.StatusBadRequest, "DELEGATION_PARENT_REQUIRED", err.Error())
+		case errors.Is(err, awruntime.ErrInvalidSlashCommand):
+			writeErrorJSON(w, http.StatusBadRequest, "INVALID_SLASH_COMMAND", err.Error())
 		case errors.Is(err, awruntime.ErrInvalidInput):
 			writeErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 		default:
@@ -325,7 +328,12 @@ func handleRuntimeInfo(w http.ResponseWriter, r *http.Request, provider RuntimeI
 		return
 	}
 
-	data, err := json.Marshal(sanitizeRuntimeInfo(provider.GetRuntimeInfo()))
+	info := provider.GetRuntimeInfo()
+	if info.SlashCommands == nil {
+		info.SlashCommands = slashcommands.ListCommands()
+	}
+
+	data, err := json.Marshal(sanitizeRuntimeInfo(info))
 	if err != nil {
 		http.Error(w, "failed to serialize runtime info", http.StatusInternalServerError)
 		return

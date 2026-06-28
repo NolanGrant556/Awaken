@@ -806,6 +806,100 @@ func TestRunServiceRunProfileDoesNotPersistAcrossThreadRuns(t *testing.T) {
 	}
 }
 
+func TestRunServicePlainInputPassesExecutorUnchanged(t *testing.T) {
+	received := make(chan string, 1)
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			received <- input
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+			return "done", nil
+		})
+	})
+
+	run, err := service.StartRun(StartRunRequest{Input: "  hello  ", Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()}})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+
+	if run.Input != "hello" {
+		t.Fatalf("expected run input to keep existing trimmed behavior, got %q", run.Input)
+	}
+	if got := <-received; got != "hello" {
+		t.Fatalf("expected executor to receive trimmed plain input, got %q", got)
+	}
+}
+
+func TestRunServiceAbsolutePathPromptPassesExecutorUnchanged(t *testing.T) {
+	received := make(chan string, 1)
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			received <- input
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+			return "done", nil
+		})
+	})
+
+	for _, input := range []string{"/tmp foo", "/var log"} {
+		run, err := service.StartRun(StartRunRequest{Input: input, Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()}})
+		if err != nil {
+			t.Fatalf("StartRun(%q) returned error: %v", input, err)
+		}
+		if run.Input != input {
+			t.Fatalf("expected run input %q, got %q", input, run.Input)
+		}
+		if got := <-received; got != input {
+			t.Fatalf("expected executor to receive %q, got %q", input, got)
+		}
+	}
+}
+
+func TestRunServiceSlashCommandExpandsExecutorInputAndPreservesRunInput(t *testing.T) {
+	received := make(chan string, 1)
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			received <- input
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+			return "done", nil
+		})
+	})
+
+	run, err := service.StartRun(StartRunRequest{Input: "/plan add slash commands", Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()}})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+
+	if run.Input != "/plan add slash commands" {
+		t.Fatalf("expected run input to preserve user slash input, got %q", run.Input)
+	}
+
+	got := <-received
+	for _, want := range []string{
+		"Awaken slash command instruction",
+		"Slash command:\n/plan",
+		"Original user input:\n/plan add slash commands",
+		"Command arguments:\nadd slash commands",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected executor input to contain %q, got:\n%s", want, got)
+		}
+	}
+}
+
+func TestRunServiceRejectsInvalidSlashCommands(t *testing.T) {
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			return "should not run", nil
+		})
+	})
+
+	if _, err := service.StartRun(StartRunRequest{Input: "/", Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()}}); !errors.Is(err, ErrInvalidSlashCommand) {
+		t.Fatalf("expected ErrInvalidSlashCommand for slash only, got %v", err)
+	}
+	if _, err := service.StartRun(StartRunRequest{Input: "/unknown details", Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()}}); !errors.Is(err, ErrInvalidSlashCommand) {
+		t.Fatalf("expected ErrInvalidSlashCommand for unknown command, got %v", err)
+	}
+}
+
 func TestStartRunValidWorkspaceStartsRun(t *testing.T) {
 	root := t.TempDir()
 	service := NewRunService(

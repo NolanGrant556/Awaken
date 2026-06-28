@@ -109,6 +109,7 @@ export type RuntimeInfoWire = {
   base_url_host: string;
   active_profile: string;
   profiles: RuntimeProfileWire[];
+  slash_commands?: SlashCommandInfoWire[];
 };
 
 export type RuntimeInfo = {
@@ -122,6 +123,7 @@ export type RuntimeInfo = {
   baseUrlHost: string;
   activeProfile: string;
   profiles: RuntimeProfile[];
+  slashCommands: SlashCommandInfo[];
 };
 
 export type RuntimeProfileWire = {
@@ -142,6 +144,18 @@ export type RuntimeProfile = {
   hasApiKey: boolean;
   baseUrlHost: string;
   isActive: boolean;
+};
+
+export type SlashCommandInfoWire = {
+  name: string;
+  description: string;
+  argument_hint?: string;
+};
+
+export type SlashCommandInfo = {
+  name: string;
+  description: string;
+  argumentHint?: string;
 };
 
 export type WorkspaceConfigWire = {
@@ -376,6 +390,11 @@ export function normalizeRuntimeInfo(info: RuntimeInfoWire): RuntimeInfo {
       hasApiKey: profile.has_api_key,
       baseUrlHost: profile.base_url_host,
       isActive: profile.is_active,
+    })),
+    slashCommands: (info.slash_commands ?? []).map((command) => ({
+      name: command.name,
+      description: command.description,
+      argumentHint: command.argument_hint,
     })),
   };
 }

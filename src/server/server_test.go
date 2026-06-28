@@ -26,6 +26,7 @@ import (
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
 	"awaken/src/skills"
+	"awaken/src/slashcommands"
 	"awaken/src/tool"
 	_ "awaken/src/tools"
 )
@@ -143,6 +144,12 @@ func TestRuntimeInfoEndpoint(t *testing.T) {
 	}
 	if !info.Profiles[0].IsActive {
 		t.Fatalf("expected first profile to be active")
+	}
+	if !hasRuntimeSlashCommand(info.SlashCommands, "plan") ||
+		!hasRuntimeSlashCommand(info.SlashCommands, "review") ||
+		!hasRuntimeSlashCommand(info.SlashCommands, "fix") ||
+		!hasRuntimeSlashCommand(info.SlashCommands, "explain") {
+		t.Fatalf("expected runtime info to expose built-in slash commands, got %+v", info.SlashCommands)
 	}
 
 	body := rec.Body.String()
@@ -442,6 +449,15 @@ func TestAgentDefinitionsEndpointReturnsStructuredWorkspaceError(t *testing.T) {
 	if response.Error != "INVALID_WORKSPACE" {
 		t.Fatalf("expected INVALID_WORKSPACE, got %+v", response)
 	}
+}
+
+func hasRuntimeSlashCommand(commands []slashcommands.CommandInfo, name string) bool {
+	for _, command := range commands {
+		if command.Name == name {
+			return command.Description != ""
+		}
+	}
+	return false
 }
 
 func TestRunsEndpointsCreateReplayAndCancel(t *testing.T) {
@@ -754,6 +770,68 @@ func TestCreateRunProfileOverridesFlowIntoAgentConfig(t *testing.T) {
 	}
 	if cfg.RunProfile.ID != "analysis" || len(cfg.RunProfile.Tools) != 1 || cfg.RunProfile.Tools[0] != "list_files" {
 		t.Fatalf("expected normalized run profile on agent config, got %+v", cfg.RunProfile)
+	}
+}
+
+func TestCreateRunUnknownSlashCommandReturnsInvalidSlashCommand(t *testing.T) {
+	called := make(chan struct{}, 1)
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			called <- struct{}{}
+			return "", nil
+		})
+	})
+
+	router := NewRouter(runService, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/runs", strings.NewReader(`{"input":"/unknown details","workspace":{"workspace_root":"/tmp"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown slash command, got %d", rec.Code)
+	}
+
+	var errResp errorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("expected JSON error response, got %q", rec.Body.String())
+	}
+	if errResp.Error != "INVALID_SLASH_COMMAND" {
+		t.Fatalf("expected INVALID_SLASH_COMMAND error, got %q", errResp.Error)
+	}
+	if !strings.Contains(errResp.Message, "unknown slash command") {
+		t.Fatalf("expected message to mention unknown slash command, got %q", errResp.Message)
+	}
+	select {
+	case <-called:
+		t.Fatal("executor should not run for invalid slash command")
+	default:
+	}
+}
+
+func TestCreateRunAbsolutePathPromptIsPlainInput(t *testing.T) {
+	received := make(chan string, 1)
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			received <- input
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+			return "done", nil
+		})
+	})
+
+	router := NewRouter(runService, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/runs", strings.NewReader(`{"input":"/tmp foo","workspace":{"workspace_root":"/tmp"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for absolute path prompt, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := <-received; got != "/tmp foo" {
+		t.Fatalf("expected executor to receive plain input, got %q", got)
 	}
 }
 

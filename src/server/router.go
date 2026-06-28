@@ -39,6 +39,7 @@ func NewRouterWithMemory(runService *awruntime.RunService, infoProvider RuntimeI
 		mux.HandleFunc("POST /v1/runs", handlers.handleCreateRun)
 		mux.HandleFunc("GET /v1/runs/{run_id}", handlers.handleGetRun)
 		mux.HandleFunc("GET /v1/runs/{run_id}/events", handlers.handleRunEvents)
+		mux.HandleFunc("GET /v1/audit/events", handlers.handleAuditEvents)
 		mux.HandleFunc("POST /v1/runs/{run_id}/cancel", handlers.handleCancelRun)
 		mux.HandleFunc("POST /v1/runs/{run_id}/approvals/{approval_id}/resolve", handlers.handleResolveApproval)
 	}

@@ -70,6 +70,7 @@ type Session struct {
 	run            Run
 	cancel         context.CancelFunc
 	bus            *EventBus
+	audit          agentcore.SecurityAuditRecorder
 	approvals      map[string]*pendingApproval
 	approvalPolicy agentcore.ApprovalPolicy
 	after          func(time.Duration) <-chan time.Time
@@ -127,6 +128,27 @@ func (s *Session) SetObserver(observer sessionObserver) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.observer = observer
+}
+
+func (s *Session) SetSecurityAuditRecorder(recorder agentcore.SecurityAuditRecorder) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.audit = recorder
+}
+
+func (s *Session) RecordSecurityAuditEvent(event agentcore.SecurityAuditEvent) {
+	s.mu.RLock()
+	audit := s.audit
+	runID := s.run.RunID
+	threadID := s.run.ThreadID
+	s.mu.RUnlock()
+
+	if audit == nil {
+		return
+	}
+	event.RunID = firstNonEmpty(event.RunID, runID)
+	event.ThreadID = firstNonEmpty(event.ThreadID, threadID)
+	audit.RecordSecurityAuditEvent(event)
 }
 
 func cloneDelegationMetadata(delegation *DelegationMetadata) *DelegationMetadata {
@@ -235,6 +257,8 @@ func (s *Session) RecordAgentEvent(event agentcore.AwakenEvent) {
 	s.run.UpdatedAt = timestamp
 
 	terminal := false
+	var auditEvent agentcore.SecurityAuditEvent
+	shouldAudit := false
 	switch event.Type {
 	case agentcore.RunStartedEventType:
 		if !s.run.CancelRequested {
@@ -246,12 +270,63 @@ func (s *Session) RecordAgentEvent(event agentcore.AwakenEvent) {
 		finishedAt := timestamp
 		s.run.FinishedAt = &finishedAt
 		terminal = true
+		auditEvent = agentcore.SecurityAuditEvent{
+			Type:      agentcore.SecurityAuditRunFinished,
+			Timestamp: timestamp,
+			Action:    agentcore.SecurityAuditActionRun,
+			Outcome:   agentcore.SecurityAuditOutcomeFinished,
+			Summary:   "run finished",
+		}
+		shouldAudit = true
 	case agentcore.RunErrorEventType:
 		s.run.Status = RunStatusError
 		s.run.Error = firstNonEmpty(strings.TrimSpace(event.Error), "run failed")
 		finishedAt := timestamp
 		s.run.FinishedAt = &finishedAt
 		terminal = true
+		auditEvent = agentcore.SecurityAuditEvent{
+			Type:      agentcore.SecurityAuditRunError,
+			Timestamp: timestamp,
+			Action:    agentcore.SecurityAuditActionRun,
+			Outcome:   agentcore.SecurityAuditOutcomeError,
+			Summary:   "run error",
+			Error:     event.Error,
+		}
+		shouldAudit = true
+	case agentcore.ApprovalRequestedEventType:
+		auditEvent = agentcore.SecurityAuditEvent{
+			Type:          agentcore.SecurityAuditApprovalRequested,
+			Timestamp:     timestamp,
+			ToolCallID:    event.ToolCallID,
+			ToolName:      event.ToolName,
+			ApprovalID:    event.ApprovalID,
+			Action:        agentcore.SecurityAuditActionApproval,
+			Outcome:       agentcore.SecurityAuditOutcomeStarted,
+			RiskTone:      event.ApprovalRiskTone,
+			Summary:       event.ApprovalTitle,
+			InputPreview:  event.ApprovalDescription,
+			AffectedPaths: event.ApprovalAffectedPaths,
+		}
+		shouldAudit = true
+	case agentcore.ApprovalResolvedEventType:
+		outcome := agentcore.SecurityAuditOutcomeApproved
+		if event.ApprovalDecision == agentcore.ApprovalDecisionRejected {
+			outcome = agentcore.SecurityAuditOutcomeRejected
+		}
+		auditEvent = agentcore.SecurityAuditEvent{
+			Type:             agentcore.SecurityAuditApprovalResolved,
+			Timestamp:        timestamp,
+			ToolCallID:       event.ToolCallID,
+			ToolName:         event.ToolName,
+			ApprovalID:       event.ApprovalID,
+			Action:           agentcore.SecurityAuditActionApproval,
+			Outcome:          outcome,
+			ApprovalDecision: event.ApprovalDecision,
+			RiskTone:         event.ApprovalRiskTone,
+			Summary:          event.ApprovalTitle,
+			AffectedPaths:    event.ApprovalAffectedPaths,
+		}
+		shouldAudit = true
 	}
 
 	wrapped := Event{
@@ -264,8 +339,16 @@ func (s *Session) RecordAgentEvent(event agentcore.AwakenEvent) {
 	bus := s.bus
 	snapshot := s.run
 	observer := s.observer
+	audit := s.audit
+	if shouldAudit {
+		auditEvent.ThreadID = firstNonEmpty(auditEvent.ThreadID, s.run.ThreadID)
+		auditEvent.RunID = firstNonEmpty(auditEvent.RunID, s.run.RunID)
+	}
 	s.mu.Unlock()
 
+	if shouldAudit && audit != nil {
+		audit.RecordSecurityAuditEvent(auditEvent)
+	}
 	appended := bus.Append(wrapped, terminal)
 	notifySessionObserver(observer, snapshot, &appended)
 }
@@ -469,28 +552,26 @@ func (s *Session) CompleteCancelled(message string) {
 	bus := s.bus
 	snapshot := s.run
 	observer := s.observer
+	audit := s.audit
+	auditEvent := agentcore.SecurityAuditEvent{
+		Type:      agentcore.SecurityAuditRunCancelled,
+		Timestamp: now,
+		ThreadID:  s.run.ThreadID,
+		RunID:     s.run.RunID,
+		Action:    agentcore.SecurityAuditActionRun,
+		Outcome:   agentcore.SecurityAuditOutcomeCancelled,
+		Summary:   "run cancelled",
+		Error:     message,
+	}
 	s.mu.Unlock()
 
+	if audit != nil {
+		audit.RecordSecurityAuditEvent(auditEvent)
+	}
 	appendedStatus := bus.Append(statusEvent, false)
 	notifySessionObserver(observer, snapshot, &appendedStatus)
 	appendedEvent := bus.Append(event, true)
 	notifySessionObserver(observer, snapshot, &appendedEvent)
-}
-
-func (s *Session) approvalTimeout() <-chan time.Time {
-	timeout := s.approvalPolicy.Timeout()
-	if timeout <= 0 {
-		return nil
-	}
-	return s.after(timeout)
-}
-
-func normalizeSessionConfig(config SessionConfig) SessionConfig {
-	config.ApprovalPolicy = config.ApprovalPolicy.Normalize()
-	if config.After == nil {
-		config.After = time.After
-	}
-	return config
 }
 
 func (s *Session) CompleteFinished(result string) {
@@ -524,8 +605,21 @@ func (s *Session) CompleteFinished(result string) {
 	bus := s.bus
 	snapshot := s.run
 	observer := s.observer
+	audit := s.audit
+	auditEvent := agentcore.SecurityAuditEvent{
+		Type:      agentcore.SecurityAuditRunFinished,
+		Timestamp: now,
+		ThreadID:  s.run.ThreadID,
+		RunID:     s.run.RunID,
+		Action:    agentcore.SecurityAuditActionRun,
+		Outcome:   agentcore.SecurityAuditOutcomeFinished,
+		Summary:   "run finished",
+	}
 	s.mu.Unlock()
 
+	if audit != nil {
+		audit.RecordSecurityAuditEvent(auditEvent)
+	}
 	appended := bus.Append(wrapped, true)
 	notifySessionObserver(observer, snapshot, &appended)
 }
@@ -558,10 +652,40 @@ func (s *Session) CompleteError(message, code string) {
 	bus := s.bus
 	snapshot := s.run
 	observer := s.observer
+	audit := s.audit
+	auditEvent := agentcore.SecurityAuditEvent{
+		Type:      agentcore.SecurityAuditRunError,
+		Timestamp: now,
+		ThreadID:  s.run.ThreadID,
+		RunID:     s.run.RunID,
+		Action:    agentcore.SecurityAuditActionRun,
+		Outcome:   agentcore.SecurityAuditOutcomeError,
+		Summary:   "run error",
+		Error:     message,
+	}
 	s.mu.Unlock()
 
+	if audit != nil {
+		audit.RecordSecurityAuditEvent(auditEvent)
+	}
 	appended := bus.Append(event, true)
 	notifySessionObserver(observer, snapshot, &appended)
+}
+
+func (s *Session) approvalTimeout() <-chan time.Time {
+	timeout := s.approvalPolicy.Timeout()
+	if timeout <= 0 {
+		return nil
+	}
+	return s.after(timeout)
+}
+
+func normalizeSessionConfig(config SessionConfig) SessionConfig {
+	config.ApprovalPolicy = config.ApprovalPolicy.Normalize()
+	if config.After == nil {
+		config.After = time.After
+	}
+	return config
 }
 
 func normalizeApprovalRequest(request agentcore.ApprovalRequest) agentcore.ApprovalRequest {

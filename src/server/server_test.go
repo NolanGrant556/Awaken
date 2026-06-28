@@ -532,6 +532,72 @@ func TestRunsEndpointsCreateReplayAndCancel(t *testing.T) {
 	}
 }
 
+func TestAuditEventsEndpointIsReadOnlyAndDoesNotChangeRunEvents(t *testing.T) {
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextMessageStartedEventType, MessageID: "msg-1", Role: "assistant"})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextDeltaEventType, MessageID: "msg-1", Role: "assistant", Delta: "hello"})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextMessageFinishedEventType, MessageID: "msg-1"})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+			return "done", nil
+		})
+	})
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello","workspace":{"workspace_root":"/tmp/awaken-test-workspace"}}`))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+	var created awruntime.Run
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	waitHTTPRunTerminal(t, ts.URL, created.RunID)
+
+	auditResp, err := http.Get(ts.URL + "/v1/audit/events?run_id=" + created.RunID)
+	if err != nil {
+		t.Fatalf("GET /v1/audit/events failed: %v", err)
+	}
+	defer auditResp.Body.Close()
+	if auditResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected audit endpoint 200, got %d", auditResp.StatusCode)
+	}
+	var auditBody auditEventsResponse
+	if err := json.NewDecoder(auditResp.Body).Decode(&auditBody); err != nil {
+		t.Fatalf("failed to decode audit response: %v", err)
+	}
+	if len(auditBody.Events) != 2 {
+		t.Fatalf("expected run started and finished audit events, got %+v", auditBody.Events)
+	}
+	if auditBody.Events[0].Type != agentcore.SecurityAuditRunStarted || auditBody.Events[1].Type != agentcore.SecurityAuditRunFinished {
+		t.Fatalf("unexpected audit events: %+v", auditBody.Events)
+	}
+
+	streamResp, err := http.Get(ts.URL + "/v1/runs/" + created.RunID + "/events")
+	if err != nil {
+		t.Fatalf("GET run events failed: %v", err)
+	}
+	defer streamResp.Body.Close()
+	streamBody, err := io.ReadAll(streamResp.Body)
+	if err != nil {
+		t.Fatalf("failed to read run event stream: %v", err)
+	}
+	for _, token := range []string{"RUN_STARTED", "TEXT_MESSAGE_CONTENT", "RUN_FINISHED"} {
+		if !strings.Contains(string(streamBody), token) {
+			t.Fatalf("expected SSE body to contain %q, got %s", token, streamBody)
+		}
+	}
+	if strings.Contains(string(streamBody), "tool_execution") || strings.Contains(string(streamBody), "approval_requested") {
+		t.Fatalf("SSE body should not contain audit event types, got %s", streamBody)
+	}
+}
+
 func TestRunsEndpointsValidationAndNotFound(t *testing.T) {
 	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
 		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {

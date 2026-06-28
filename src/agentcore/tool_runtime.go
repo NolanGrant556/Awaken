@@ -47,6 +47,14 @@ type ToolExecutionResult struct {
 	ToolResultHandle *toolresults.Handle
 }
 
+type toolAuditDetails struct {
+	Action        SecurityAuditAction
+	Summary       string
+	InputPreview  string
+	AffectedPaths []string
+	Truncated     bool
+}
+
 func NewToolRuntime(sink EventSink) *ToolRuntime {
 	return NewToolRuntimeWithConfig(sink, ToolRuntimeConfig{})
 }
@@ -83,26 +91,38 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		ToolCallID: id,
 		Name:       call.Function.Name,
 	}
+	var auditDetails toolAuditDetails
+	auditStarted := false
+	finish := func(result ToolExecutionResult) ToolExecutionResult {
+		if auditStarted {
+			rt.recordToolAuditFinished(result, auditDetails)
+		}
+		return rt.finalizeToolResult(result)
+	}
 
 	if !rt.toolAccessPolicy.Allows(call.Function.Name) {
 		result.Content = fmt.Sprintf("工具权限拒绝: tool %q is not allowed for this run profile", call.Function.Name)
 		result.IsError = true
-		return rt.finalizeToolResult(result)
+		return finish(result)
 	}
 
 	selectedTool, err := tool.GetTool(call.Function.Name)
 	if err != nil {
 		result.Content = fmt.Sprintf("工具执行失败: %v: %s", err, call.Function.Name)
 		result.IsError = true
-		return rt.finalizeToolResult(result)
+		return finish(result)
 	}
 
 	input, err := normalizeToolInput(call.Function.Arguments, selectedTool.Parameters())
 	if err != nil {
 		result.Content = fmt.Sprintf("工具参数错误: %v", err)
 		result.IsError = true
-		return rt.finalizeToolResult(result)
+		return finish(result)
 	}
+
+	auditDetails = rt.toolAuditDetails(selectedTool, input)
+	rt.recordToolAuditStarted(result, auditDetails)
+	auditStarted = true
 
 	toolCtx := tool.ContextWithPermissionContext(ctx, rt.permissionContext)
 	permission := rt.decideToolPermission(toolCtx, selectedTool, input)
@@ -112,35 +132,35 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	case tool.PermissionDeny:
 		result.Content = fmt.Sprintf("工具权限拒绝: %s", firstNonEmpty(permission.Reason, "permission policy denied execution"))
 		result.IsError = true
-		return rt.finalizeToolResult(result)
+		return finish(result)
 	case tool.PermissionAsk:
 		decision, err := rt.awaitApproval(ctx, selectedTool, result, input, permission)
 		if err != nil {
 			result.Content = fmt.Sprintf("工具审批失败: %v", err)
 			result.IsError = true
-			return rt.finalizeToolResult(result)
+			return finish(result)
 		}
 		if decision == ApprovalDecisionRejected {
 			result.Content = "工具执行已被审批拒绝"
 			result.IsError = true
-			return rt.finalizeToolResult(result)
+			return finish(result)
 		}
 	default:
 		result.Content = fmt.Sprintf("工具权限拒绝: invalid permission decision %q", permission.Behavior)
 		result.IsError = true
-		return rt.finalizeToolResult(result)
+		return finish(result)
 	}
 
 	output, err := rt.executeTool(toolCtx, result, selectedTool, input)
 	if err != nil {
 		result.Content = fmt.Sprintf("工具执行失败: %v", err)
 		result.IsError = true
-		return rt.finalizeToolResult(result)
+		return finish(result)
 	}
 
 	result.Content = output
 	rt.emitArtifacts(result, selectedTool, input, output)
-	return rt.finalizeToolResult(result)
+	return finish(result)
 }
 
 func (rt *ToolRuntime) executeTool(
@@ -316,6 +336,95 @@ func (rt *ToolRuntime) emitPatchPreview(result ToolExecutionResult, selectedTool
 
 func (rt *ToolRuntime) emitDisplayEvent(event AwakenEvent) {
 	rt.sink.Emit(DisplaySafeEvent(event))
+}
+
+func (rt *ToolRuntime) toolAuditDetails(selectedTool tool.Tool, input string) toolAuditDetails {
+	details := toolAuditDetails{
+		Action: SecurityAuditActionTool,
+	}
+	toolName := selectedTool.Name()
+	switch toolName {
+	case "apply_patch":
+		details.Action = SecurityAuditActionFileMutation
+	case "shell":
+		details.Action = SecurityAuditActionShellCommand
+	}
+
+	if details.Action == SecurityAuditActionFileMutation {
+		details.Summary = "file mutation requested"
+		if previewingTool, ok := selectedTool.(tool.PatchPreviewingTool); ok {
+			if preview, ok := previewingTool.PatchPreview(input, rt.permissionContext); ok {
+				details.Summary = strings.TrimSpace(preview.Summary)
+				details.AffectedPaths = append([]string(nil), preview.AffectedPaths...)
+				details.Truncated = preview.Truncated
+			}
+		}
+		return details
+	}
+
+	if details.Action == SecurityAuditActionShellCommand {
+		details.Summary = "shell command requested"
+		details.InputPreview, details.Truncated = shellCommandAuditPreview(input)
+		return details
+	}
+
+	if strings.TrimSpace(input) != "" {
+		details.InputPreview, details.Truncated = RedactAuditText(input, defaultAuditPreviewMaxRunes)
+	}
+	return details
+}
+
+func shellCommandAuditPreview(input string) (string, bool) {
+	var decoded map[string]interface{}
+	if err := json.Unmarshal([]byte(input), &decoded); err == nil {
+		if command, ok := decoded["command"].(string); ok {
+			return RedactAuditText(command, defaultAuditPreviewMaxRunes)
+		}
+	}
+	return RedactAuditText(input, defaultAuditPreviewMaxRunes)
+}
+
+func (rt *ToolRuntime) recordToolAuditStarted(result ToolExecutionResult, details toolAuditDetails) {
+	rt.recordSecurityAudit(SecurityAuditEvent{
+		Type:          SecurityAuditToolExecutionStarted,
+		ToolCallID:    result.ToolCallID,
+		ToolName:      result.Name,
+		Action:        details.Action,
+		Outcome:       SecurityAuditOutcomeStarted,
+		Summary:       details.Summary,
+		InputPreview:  details.InputPreview,
+		AffectedPaths: details.AffectedPaths,
+		Truncated:     details.Truncated,
+	})
+}
+
+func (rt *ToolRuntime) recordToolAuditFinished(result ToolExecutionResult, details toolAuditDetails) {
+	outcome := SecurityAuditOutcomeFinished
+	errorMessage := ""
+	if result.IsError {
+		outcome = SecurityAuditOutcomeError
+		errorMessage = result.Content
+	}
+	rt.recordSecurityAudit(SecurityAuditEvent{
+		Type:          SecurityAuditToolExecutionFinished,
+		ToolCallID:    result.ToolCallID,
+		ToolName:      result.Name,
+		Action:        details.Action,
+		Outcome:       outcome,
+		Summary:       details.Summary,
+		InputPreview:  details.InputPreview,
+		AffectedPaths: details.AffectedPaths,
+		Error:         errorMessage,
+		Truncated:     details.Truncated || result.Truncated,
+	})
+}
+
+func (rt *ToolRuntime) recordSecurityAudit(event SecurityAuditEvent) {
+	recorder, ok := rt.sink.(SecurityAuditRecorder)
+	if !ok {
+		return
+	}
+	recorder.RecordSecurityAuditEvent(event)
 }
 
 type toolObserverFunc func(tool.CommandOutput)

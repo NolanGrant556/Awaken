@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	convcontext "awaken/src/context"
+	"awaken/src/llm"
 	"awaken/src/mcp"
 	"awaken/src/tool"
 )
@@ -49,6 +50,9 @@ func TestRequestBuilderBuildsCompleteRequest(t *testing.T) {
 	}
 	if req.Model != "test-model" || req.Temperature != 0.2 || req.MaxTokens != 777 {
 		t.Fatalf("unexpected model config: %+v", req)
+	}
+	if req.Cache.SystemPromptCacheControl.Type != "" {
+		t.Fatalf("expected cache metadata to be empty by default, got %+v", req.Cache)
 	}
 	if !strings.Contains(req.SystemPrompt, "test-model") || !strings.Contains(req.SystemPrompt, "test-entry") {
 		t.Fatalf("expected runtime info in system prompt: %s", req.SystemPrompt)
@@ -147,4 +151,33 @@ func TestRequestBuilderIncludesExposedMCPTools(t *testing.T) {
 	}
 
 	t.Fatalf("expected MCP tool definition in %+v", req.Tools)
+}
+
+func TestRequestBuilderAddsSystemPromptCacheMetadataWhenEnabled(t *testing.T) {
+	builder := NewRequestBuilder(AgentConfig{
+		SystemPrompt: "stable system prompt",
+		PromptCache: PromptCacheConfig{
+			SystemPrompt: true,
+		},
+	})
+
+	req := builder.Build(convcontext.New(), []tool.ToolDefinition{})
+	if req.Cache.SystemPromptCacheControl.Type != llm.CacheControlTypeEphemeral {
+		t.Fatalf("expected ephemeral system prompt cache metadata, got %+v", req.Cache)
+	}
+}
+
+func TestRequestBuilderHonorsSystemPromptCacheMinimumSize(t *testing.T) {
+	builder := NewRequestBuilder(AgentConfig{
+		SystemPrompt: "short",
+		PromptCache: PromptCacheConfig{
+			SystemPrompt:         true,
+			MinSystemPromptBytes: 10000,
+		},
+	})
+
+	req := builder.Build(convcontext.New(), []tool.ToolDefinition{})
+	if req.Cache.SystemPromptCacheControl.Type != "" {
+		t.Fatalf("expected cache metadata to stay empty below threshold, got %+v", req.Cache)
+	}
 }

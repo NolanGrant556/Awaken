@@ -541,6 +541,58 @@ data: {"type":"message_stop"}`,
 	}
 }
 
+func TestRunnerPropagatesPromptCacheMetadataToAnthropic(t *testing.T) {
+	server := newRunnerAnthropicStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			System []struct {
+				Type         string `json:"type"`
+				Text         string `json:"text"`
+				CacheControl *struct {
+					Type string `json:"type"`
+				} `json:"cache_control,omitempty"`
+			} `json:"system"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode anthropic request: %v", err)
+		}
+		if len(body.System) != 1 {
+			t.Fatalf("expected one cached system block, got %+v", body.System)
+		}
+		if body.System[0].Type != "text" || body.System[0].Text == "" {
+			t.Fatalf("unexpected cached system block: %+v", body.System[0])
+		}
+		if body.System[0].CacheControl == nil || body.System[0].CacheControl.Type != "ephemeral" {
+			t.Fatalf("expected ephemeral cache_control, got %+v", body.System[0].CacheControl)
+		}
+
+		writeRunnerAnthropicStreamEvents(t, w, []string{
+			`event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text"}}`,
+			`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"done"}}`,
+			`event: content_block_stop
+data: {"type":"content_block_stop","index":0}`,
+			`event: message_stop
+data: {"type":"message_stop"}`,
+		})
+	})
+	defer server.Close()
+
+	cfg := testAgentConfig(server.URL+"/anthropic", 1)
+	cfg.PromptCache.SystemPrompt = true
+	conv := convcontext.NewConversation(nil)
+	conv.UserInput("hello")
+	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
+
+	resp, err := runner.streamLLM(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("streamLLM returned error: %v", err)
+	}
+	if resp.Content != "done" {
+		t.Fatalf("expected done, got %q", resp.Content)
+	}
+}
+
 func TestRunnerRunStreamWithEventsFeedsToolResultsBack(t *testing.T) {
 	toolName := "runner_event_feedback_tool"
 	mustRegisterRunnerTool(t, runnerTestTool{name: toolName})

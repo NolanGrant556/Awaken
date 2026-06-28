@@ -2,6 +2,7 @@ package agentcore
 
 import (
 	"awaken/src/context"
+	"awaken/src/llm"
 	"awaken/src/mcp"
 	"awaken/src/prompt"
 	"awaken/src/skills"
@@ -15,6 +16,7 @@ type AgentConfig struct {
 	ModelConfig      ModelConfig
 	EntryPoint       string
 	Workspace        WorkspaceConfig
+	PromptCache      PromptCacheConfig
 	PermissionPolicy tool.PermissionPolicy
 	ApprovalPolicy   ApprovalPolicy
 	UsageLimits      usage.BudgetLimits
@@ -39,6 +41,11 @@ type ModelConfig struct {
 	AuthScheme            string
 }
 
+type PromptCacheConfig struct {
+	SystemPrompt         bool
+	MinSystemPromptBytes int
+}
+
 type LLMRequest struct {
 	SystemPrompt string
 	Messages     []context.Message
@@ -46,6 +53,7 @@ type LLMRequest struct {
 	Model        string
 	Temperature  float64
 	MaxTokens    int
+	Cache        llm.RequestCacheMetadata
 }
 
 type RuntimeInfoProvider interface {

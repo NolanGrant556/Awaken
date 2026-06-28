@@ -217,6 +217,41 @@ func TestInvokeOpenAISendsConfigMaxTokens(t *testing.T) {
 	}
 }
 
+func TestInvokeOpenAIIgnoresRequestCacheMetadata(t *testing.T) {
+	server := newChatServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+		if _, ok := body["cache"]; ok {
+			t.Fatalf("OpenAI request must not serialize request cache metadata: %s", body["cache"])
+		}
+		messagesJSON := string(body["messages"])
+		if strings.Contains(messagesJSON, "cache_control") {
+			t.Fatalf("OpenAI messages must not include Anthropic cache_control: %s", messagesJSON)
+		}
+		writeJSON(t, w, map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{"message": map[string]interface{}{"content": "ok"}},
+			},
+		})
+	})
+	defer server.Close()
+
+	_, err := Invoke(context.Background(), testConfig(server.URL), Request{
+		SystemPrompt: "you are a test",
+		UserPrompt:   "hi",
+		Cache: RequestCacheMetadata{
+			SystemPromptCacheControl: CacheControl{Type: CacheControlTypeEphemeral},
+			CacheKey:                 "request-cache-key",
+			Hints:                    []string{"stable-system"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke returned error: %v", err)
+	}
+}
+
 func TestInvokeOpenAIEmptyChoices(t *testing.T) {
 	server := newChatServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(t, w, map[string]interface{}{"choices": []interface{}{}})

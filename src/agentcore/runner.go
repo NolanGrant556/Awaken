@@ -207,6 +207,7 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*ll
 		SystemPrompt: llmReq.SystemPrompt,
 		Messages:     llmReq.Messages,
 		Tools:        llmReq.Tools,
+		Cache:        llmReq.Cache,
 	}, observer)
 	if err != nil {
 		return nil, err

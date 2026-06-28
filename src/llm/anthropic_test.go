@@ -102,6 +102,79 @@ func TestInvokeAnthropicTopLevelSystem(t *testing.T) {
 	}
 }
 
+func TestInvokeAnthropicSystemCacheControlDefaultOmitted(t *testing.T) {
+	server := newAnthropicServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+		systemJSON, ok := body["system"]
+		if !ok {
+			t.Fatal("expected system prompt to be present")
+		}
+		if strings.Contains(string(systemJSON), "cache_control") {
+			t.Fatalf("cache_control must be omitted by default, got %s", systemJSON)
+		}
+		var system string
+		if err := json.Unmarshal(systemJSON, &system); err != nil {
+			t.Fatalf("expected default system prompt to remain a string: %v", err)
+		}
+		if system != "you are a test" {
+			t.Fatalf("expected system prompt 'you are a test', got %q", system)
+		}
+		writeJSON(t, w, map[string]interface{}{
+			"content":     []map[string]interface{}{{"type": "text", "text": "ok"}},
+			"stop_reason": "end_turn",
+		})
+	})
+	defer server.Close()
+
+	_, err := Invoke(context.Background(), anthropicConfig(server.URL), Request{
+		SystemPrompt: "you are a test",
+		UserPrompt:   "hi",
+	})
+	if err != nil {
+		t.Fatalf("Invoke returned error: %v", err)
+	}
+}
+
+func TestInvokeAnthropicSystemCacheControlWhenEnabled(t *testing.T) {
+	server := newAnthropicServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			System []anthropicSystemTextBlock `json:"system"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+		if len(body.System) != 1 {
+			t.Fatalf("expected 1 system block, got %d", len(body.System))
+		}
+		block := body.System[0]
+		if block.Type != "text" || block.Text != "you are a test" {
+			t.Fatalf("unexpected system block: %+v", block)
+		}
+		if block.CacheControl == nil || block.CacheControl.Type != "ephemeral" {
+			t.Fatalf("expected ephemeral cache_control, got %+v", block.CacheControl)
+		}
+		writeJSON(t, w, map[string]interface{}{
+			"content":     []map[string]interface{}{{"type": "text", "text": "ok"}},
+			"stop_reason": "end_turn",
+		})
+	})
+	defer server.Close()
+
+	_, err := Invoke(context.Background(), anthropicConfig(server.URL), Request{
+		SystemPrompt: "you are a test",
+		UserPrompt:   "hi",
+		Cache: RequestCacheMetadata{
+			SystemPromptCacheControl: CacheControl{Type: CacheControlTypeEphemeral},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke returned error: %v", err)
+	}
+}
+
 func TestInvokeAnthropicToolsSchema(t *testing.T) {
 	server := newAnthropicServer(t, func(w http.ResponseWriter, r *http.Request) {
 		var body struct {

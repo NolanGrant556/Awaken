@@ -63,6 +63,27 @@ type Request struct {
 	Messages     []context.Message
 	Tools        []tool.ToolDefinition
 	Retry        *RetryPolicy
+	Cache        RequestCacheMetadata
+}
+
+type CacheControlType string
+
+const (
+	CacheControlTypeEphemeral CacheControlType = "ephemeral"
+)
+
+// CacheControl describes provider prompt-cache controls that may be serialized
+// by compatible transports. Unsupported providers should ignore it.
+type CacheControl struct {
+	Type CacheControlType
+}
+
+// RequestCacheMetadata carries request-level cache hints without owning cache
+// storage or logging prompt content.
+type RequestCacheMetadata struct {
+	SystemPromptCacheControl CacheControl
+	CacheKey                 string
+	Hints                    []string
 }
 
 // Response 是统一响应结构

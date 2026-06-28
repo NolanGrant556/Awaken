@@ -42,6 +42,16 @@ func TestParseOutputValidCases(t *testing.T) {
 			},
 		},
 		{
+			name:  "user prompt submit additional context",
+			input: `{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"before submit"}}`,
+			assert: func(t *testing.T, output Output) {
+				hook := requireHookOutput(t, output)
+				if hook["hookEventName"] != string(HookEventUserPromptSubmit) || hook["additionalContext"] != "before submit" {
+					t.Fatalf("unexpected user prompt submit hook: %+v", hook)
+				}
+			},
+		},
+		{
 			name:  "pre tool use updated input",
 			input: `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","reason":"sanitized","updatedInput":{"command":"ls -la"},"additionalContext":"safe command"}}`,
 			assert: func(t *testing.T, output Output) {
@@ -70,6 +80,17 @@ func TestParseOutputValidCases(t *testing.T) {
 			},
 		},
 		{
+			name:  "permission request add rules update",
+			input: `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","updatedPermissions":[{"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"git status"}],"behavior":"allow","destination":"session"}]}}}`,
+			assert: func(t *testing.T, output Output) {
+				decision := requireMap(t, requireHookOutput(t, output)["decision"])
+				updates, ok := decision["updatedPermissions"].([]any)
+				if !ok || len(updates) != 1 {
+					t.Fatalf("unexpected updated permissions: %+v", decision["updatedPermissions"])
+				}
+			},
+		},
+		{
 			name:  "permission request deny",
 			input: `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"nope","interrupt":true}}}`,
 			assert: func(t *testing.T, output Output) {
@@ -94,6 +115,16 @@ func TestParseOutputValidCases(t *testing.T) {
 			},
 		},
 		{
+			name:  "elicitation result action",
+			input: `{"hookSpecificOutput":{"hookEventName":"ElicitationResult","action":"decline","content":{"value":"later"}}}`,
+			assert: func(t *testing.T, output Output) {
+				hook := requireHookOutput(t, output)
+				if hook["action"] != "decline" {
+					t.Fatalf("unexpected elicitation result action: %+v", hook)
+				}
+			},
+		},
+		{
 			name:  "post tool use updated output",
 			input: `{"hookSpecificOutput":{"hookEventName":"PostToolUse","updatedMCPToolOutput":{"text":"patched"},"additionalContext":"tool context"}}`,
 			assert: func(t *testing.T, output Output) {
@@ -105,11 +136,36 @@ func TestParseOutputValidCases(t *testing.T) {
 		},
 		{
 			name:  "session start watch paths",
-			input: `{"hookSpecificOutput":{"hookEventName":"SessionStart","watchPaths":["/tmp/project"],"additionalContext":"session context"}}`,
+			input: `{"hookSpecificOutput":{"hookEventName":"SessionStart","watchPaths":["/tmp/project"],"initialUserMessage":"hello","additionalContext":"session context"}}`,
 			assert: func(t *testing.T, output Output) {
-				watchPaths, ok := requireHookOutput(t, output)["watchPaths"].([]any)
+				hook := requireHookOutput(t, output)
+				watchPaths, ok := hook["watchPaths"].([]any)
 				if !ok || len(watchPaths) != 1 || watchPaths[0] != "/tmp/project" {
 					t.Fatalf("unexpected watch paths: %+v", watchPaths)
+				}
+				if hook["initialUserMessage"] != "hello" {
+					t.Fatalf("unexpected initial user message: %+v", hook)
+				}
+			},
+		},
+		{
+			name:  "permission denied retry",
+			input: `{"hookSpecificOutput":{"hookEventName":"PermissionDenied","retry":true}}`,
+			assert: func(t *testing.T, output Output) {
+				hook := requireHookOutput(t, output)
+				if hook["retry"] != true {
+					t.Fatalf("unexpected permission denied hook: %+v", hook)
+				}
+			},
+		},
+		{
+			name:  "cwd changed watch paths",
+			input: `{"hookSpecificOutput":{"hookEventName":"CwdChanged","watchPaths":["/tmp/.env"]}}`,
+			assert: func(t *testing.T, output Output) {
+				hook := requireHookOutput(t, output)
+				watchPaths, ok := hook["watchPaths"].([]any)
+				if !ok || len(watchPaths) != 1 || watchPaths[0] != "/tmp/.env" {
+					t.Fatalf("unexpected cwd changed watch paths: %+v", hook)
 				}
 			},
 		},
@@ -177,14 +233,34 @@ func TestParseOutputRejectsInvalidCases(t *testing.T) {
 			wantErr: `hookSpecificOutput.decision.behavior must be one of allow, deny`,
 		},
 		{
+			name:    "permission request invalid destination",
+			input:   `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","updatedPermissions":[{"type":"addDirectories","directories":["/tmp"],"destination":"workspace"}]}}}`,
+			wantErr: `hookSpecificOutput.decision.updatedPermissions[0].destination must be one of userSettings, projectSettings, localSettings, session, cliArg`,
+		},
+		{
+			name:    "permission request invalid mode",
+			input:   `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","updatedPermissions":[{"type":"setMode","mode":"auto","destination":"session"}]}}}`,
+			wantErr: `hookSpecificOutput.decision.updatedPermissions[0].mode must be one of acceptEdits, bypassPermissions, default, dontAsk, plan`,
+		},
+		{
 			name:    "elicitation illegal action",
 			input:   `{"hookSpecificOutput":{"hookEventName":"Elicitation","action":"maybe"}}`,
 			wantErr: `hookSpecificOutput.action must be one of accept, decline, cancel`,
 		},
 		{
+			name:    "unknown supported event with wrong field type",
+			input:   `{"hookSpecificOutput":{"hookEventName":"PermissionDenied","retry":"yes"}}`,
+			wantErr: `hookSpecificOutput.retry must be a boolean`,
+		},
+		{
 			name:    "worktree create missing path",
 			input:   `{"hookSpecificOutput":{"hookEventName":"WorktreeCreate"}}`,
 			wantErr: `hookSpecificOutput.worktreePath is required`,
+		},
+		{
+			name:    "malformed json",
+			input:   `{"hookSpecificOutput":`,
+			wantErr: `hook output must be a JSON object`,
 		},
 	}
 

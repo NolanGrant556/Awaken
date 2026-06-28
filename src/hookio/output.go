@@ -23,12 +23,27 @@ const (
 type HookEventName string
 
 const (
-	HookEventPreToolUse        HookEventName = "PreToolUse"
-	HookEventPermissionRequest HookEventName = "PermissionRequest"
-	HookEventElicitation       HookEventName = "Elicitation"
-	HookEventPostToolUse       HookEventName = "PostToolUse"
-	HookEventSessionStart      HookEventName = "SessionStart"
-	HookEventWorktreeCreate    HookEventName = "WorktreeCreate"
+	HookEventPreToolUse         HookEventName = "PreToolUse"
+	HookEventUserPromptSubmit   HookEventName = "UserPromptSubmit"
+	HookEventPermissionRequest  HookEventName = "PermissionRequest"
+	HookEventElicitation        HookEventName = "Elicitation"
+	HookEventElicitationResult  HookEventName = "ElicitationResult"
+	HookEventPostToolUse        HookEventName = "PostToolUse"
+	HookEventPostToolUseFailure HookEventName = "PostToolUseFailure"
+	HookEventPermissionDenied   HookEventName = "PermissionDenied"
+	HookEventNotification       HookEventName = "Notification"
+	HookEventSessionStart       HookEventName = "SessionStart"
+	HookEventSetup              HookEventName = "Setup"
+	HookEventSubagentStart      HookEventName = "SubagentStart"
+	HookEventWorktreeCreate     HookEventName = "WorktreeCreate"
+	HookEventCwdChanged         HookEventName = "CwdChanged"
+	HookEventFileChanged        HookEventName = "FileChanged"
+)
+
+const (
+	permissionBehaviorAllow = "allow"
+	permissionBehaviorDeny  = "deny"
+	permissionBehaviorAsk   = "ask"
 )
 
 type Output struct {
@@ -159,23 +174,41 @@ func validateHookSpecificOutput(raw map[string]any) error {
 	switch HookEventName(eventName) {
 	case HookEventPreToolUse:
 		return validatePreToolUse(raw)
+	case HookEventUserPromptSubmit:
+		return validateAdditionalContextOnly(raw)
 	case HookEventPermissionRequest:
 		return validatePermissionRequest(raw)
 	case HookEventElicitation:
 		return validateElicitation(raw)
+	case HookEventElicitationResult:
+		return validateElicitation(raw)
 	case HookEventPostToolUse:
 		return validatePostToolUse(raw)
+	case HookEventPostToolUseFailure:
+		return validateAdditionalContextOnly(raw)
+	case HookEventPermissionDenied:
+		return validatePermissionDenied(raw)
+	case HookEventNotification:
+		return validateAdditionalContextOnly(raw)
 	case HookEventSessionStart:
 		return validateSessionStart(raw)
+	case HookEventSetup:
+		return validateAdditionalContextOnly(raw)
+	case HookEventSubagentStart:
+		return validateAdditionalContextOnly(raw)
 	case HookEventWorktreeCreate:
 		return validateWorktreeCreate(raw)
+	case HookEventCwdChanged:
+		return validateWatchPathsOnly(raw)
+	case HookEventFileChanged:
+		return validateWatchPathsOnly(raw)
 	default:
 		return fmt.Errorf("unknown hookEventName %q", eventName)
 	}
 }
 
 func validatePreToolUse(raw map[string]any) error {
-	if _, _, err := optionalEnum(raw, "hookSpecificOutput.permissionDecision", "allow", "deny", "ask"); err != nil {
+	if _, _, err := optionalEnum(raw, "hookSpecificOutput.permissionDecision", permissionBehaviorAllow, permissionBehaviorDeny, permissionBehaviorAsk); err != nil {
 		return err
 	}
 	if _, _, err := optionalString(raw, "hookSpecificOutput.reason"); err != nil {
@@ -211,14 +244,14 @@ func validatePermissionRequest(raw map[string]any) error {
 	}
 
 	switch behavior {
-	case "allow":
+	case permissionBehaviorAllow:
 		if _, _, err := optionalObject(decision, "hookSpecificOutput.decision.updatedInput"); err != nil {
 			return err
 		}
-		if _, _, err := optionalObjectArray(decision, "hookSpecificOutput.decision.updatedPermissions"); err != nil {
+		if err := validateUpdatedPermissions(decision); err != nil {
 			return err
 		}
-	case "deny":
+	case permissionBehaviorDeny:
 		if _, _, err := optionalString(decision, "hookSpecificOutput.decision.message"); err != nil {
 			return err
 		}
@@ -242,6 +275,13 @@ func validateElicitation(raw map[string]any) error {
 	return nil
 }
 
+func validatePermissionDenied(raw map[string]any) error {
+	if _, _, err := optionalBool(raw, "hookSpecificOutput.retry"); err != nil {
+		return err
+	}
+	return nil
+}
+
 func validatePostToolUse(raw map[string]any) error {
 	if _, _, err := optionalString(raw, "hookSpecificOutput.additionalContext"); err != nil {
 		return err
@@ -256,6 +296,9 @@ func validateSessionStart(raw map[string]any) error {
 	if _, _, err := optionalString(raw, "hookSpecificOutput.additionalContext"); err != nil {
 		return err
 	}
+	if _, _, err := optionalString(raw, "hookSpecificOutput.initialUserMessage"); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -266,6 +309,120 @@ func validateWorktreeCreate(raw map[string]any) error {
 	}
 	if !ok {
 		return fmt.Errorf("hookSpecificOutput.worktreePath is required for WorktreeCreate")
+	}
+	return nil
+}
+
+func validateAdditionalContextOnly(raw map[string]any) error {
+	if _, _, err := optionalString(raw, "hookSpecificOutput.additionalContext"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateWatchPathsOnly(raw map[string]any) error {
+	if _, _, err := optionalStringArray(raw, "hookSpecificOutput.watchPaths"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateUpdatedPermissions(raw map[string]any) error {
+	value, ok := raw["updatedPermissions"]
+	if !ok {
+		return nil
+	}
+	items, ok := value.([]any)
+	if !ok {
+		return fmt.Errorf("hookSpecificOutput.decision.updatedPermissions must be an array")
+	}
+	for i, item := range items {
+		typed, ok := item.(map[string]any)
+		if !ok {
+			return fmt.Errorf("hookSpecificOutput.decision.updatedPermissions[%d] must be an object", i)
+		}
+		if err := validatePermissionUpdate(typed, i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validatePermissionUpdate(raw map[string]any, index int) error {
+	path := fmt.Sprintf("hookSpecificOutput.decision.updatedPermissions[%d]", index)
+	typeValue, ok, err := requiredString(raw, path+".type")
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("%s.type is required", path)
+	}
+	if err := validatePermissionDestination(raw, path); err != nil {
+		return err
+	}
+
+	switch typeValue {
+	case "addRules", "replaceRules", "removeRules":
+		if _, _, err := requiredEnum(raw, path+".behavior", permissionBehaviorAllow, permissionBehaviorDeny, permissionBehaviorAsk); err != nil {
+			return err
+		}
+		return validatePermissionRules(raw, path)
+	case "setMode":
+		if _, _, err := requiredEnum(raw, path+".mode", "acceptEdits", "bypassPermissions", "default", "dontAsk", "plan"); err != nil {
+			return err
+		}
+		return nil
+	case "addDirectories", "removeDirectories":
+		return validatePermissionDirectories(raw, path)
+	default:
+		return enumError(path+".type", typeValue, "addRules", "replaceRules", "removeRules", "setMode", "addDirectories", "removeDirectories")
+	}
+}
+
+func validatePermissionDestination(raw map[string]any, path string) error {
+	if _, _, err := requiredEnum(raw, path+".destination", "userSettings", "projectSettings", "localSettings", "session", "cliArg"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validatePermissionRules(raw map[string]any, path string) error {
+	value, ok := fieldValue(raw, path+".rules")
+	if !ok {
+		return fmt.Errorf("%s.rules is required", path)
+	}
+	items, ok := value.([]any)
+	if !ok {
+		return fmt.Errorf("%s.rules must be an array", path)
+	}
+	for i, item := range items {
+		rule, ok := item.(map[string]any)
+		if !ok {
+			return fmt.Errorf("%s.rules[%d] must be an object", path, i)
+		}
+		if _, _, err := requiredString(rule, path+".rules["+fmt.Sprint(i)+"].toolName"); err != nil {
+			return err
+		}
+		if _, _, err := optionalString(rule, path+".rules["+fmt.Sprint(i)+"].ruleContent"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validatePermissionDirectories(raw map[string]any, path string) error {
+	value, ok := fieldValue(raw, path+".directories")
+	if !ok {
+		return fmt.Errorf("%s.directories is required", path)
+	}
+	items, ok := value.([]any)
+	if !ok {
+		return fmt.Errorf("%s.directories must be an array", path)
+	}
+	for i, item := range items {
+		if _, ok := item.(string); !ok {
+			return fmt.Errorf("%s.directories[%d] must be a string", path, i)
+		}
 	}
 	return nil
 }
@@ -308,6 +465,17 @@ func optionalString(raw map[string]any, path string) (string, bool, error) {
 
 func requiredString(raw map[string]any, path string) (string, bool, error) {
 	return optionalString(raw, path)
+}
+
+func requiredEnum(raw map[string]any, path string, allowed ...string) (string, bool, error) {
+	value, ok, err := optionalEnum(raw, path, allowed...)
+	if err != nil {
+		return value, ok, err
+	}
+	if !ok {
+		return "", false, fmt.Errorf("%s is required", path)
+	}
+	return value, true, nil
 }
 
 func optionalEnum(raw map[string]any, path string, allowed ...string) (string, bool, error) {

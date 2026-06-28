@@ -224,6 +224,26 @@ func TestResolveHardTokenLimitBlocksInjection(t *testing.T) {
 	}
 }
 
+func TestResolveDeduplicatesRepeatedReferences(t *testing.T) {
+	cwd := t.TempDir()
+	writeFile(t, filepath.Join(cwd, "README.md"), "hello\n")
+
+	result, err := Resolve(context.Background(), "check @file:README.md and again @file:README.md", Options{CWD: cwd})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+
+	if len(result.References) != 2 {
+		t.Fatalf("expected both mentions to parse, got %d references", len(result.References))
+	}
+	if len(result.Blocks) != 1 {
+		t.Fatalf("expected duplicate mentions to expand once, got %d blocks", len(result.Blocks))
+	}
+	if result.EstimatedTokens != result.Blocks[0].EstimatedTokens {
+		t.Fatalf("expected token count to match one block, got total=%d block=%d", result.EstimatedTokens, result.Blocks[0].EstimatedTokens)
+	}
+}
+
 type recordingGitRunner struct {
 	calls [][]string
 }

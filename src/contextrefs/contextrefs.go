@@ -130,7 +130,13 @@ func Resolve(ctx context.Context, message string, opts Options) (Result, error) 
 	}
 
 	blocks := []Block{}
+	seen := make(map[string]struct{}, len(refs))
 	for _, ref := range refs {
+		key := expansionKey(ref)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
 		block, warnings := expandReference(ctx, ref, settings)
 		result.Warnings = append(result.Warnings, warnings...)
 		if block != nil {
@@ -925,6 +931,15 @@ func parseGitCount(target string) (int, error) {
 		count = 10
 	}
 	return count, nil
+}
+
+func expansionKey(ref Reference) string {
+	return strings.Join([]string{
+		ref.Kind,
+		ref.Target,
+		strconv.Itoa(ref.LineStart),
+		strconv.Itoa(ref.LineEnd),
+	}, "\x00")
 }
 
 type commandGitRunner struct{}

@@ -109,6 +109,7 @@ func TestRouteAllowlistAndScopes(t *testing.T) {
 
 	plan, err := svc.BuildProxyPlan(ProxyPlanRequest{
 		ClientID: readWrite.ID,
+		Token:    "rw-token",
 		Method:   "GET",
 		Path:     "/v1/runtime/info?verbose=1",
 		Origin:   "http://localhost:5174",
@@ -121,10 +122,10 @@ func TestRouteAllowlistAndScopes(t *testing.T) {
 		t.Fatalf("plan = %+v, want runtime-info with query preserved", plan)
 	}
 
-	if _, err := svc.BuildProxyPlan(ProxyPlanRequest{ClientID: readWrite.ID, Method: "GET", Path: "/api/fs/read"}); !errors.Is(err, ErrRouteDenied) {
+	if _, err := svc.BuildProxyPlan(ProxyPlanRequest{ClientID: readWrite.ID, Token: "rw-token", Method: "GET", Path: "/api/fs/read"}); !errors.Is(err, ErrRouteDenied) {
 		t.Fatalf("BuildProxyPlan(/api/fs/read) error = %v, want %v", err, ErrRouteDenied)
 	}
-	if _, err := svc.BuildProxyPlan(ProxyPlanRequest{ClientID: readWrite.ID, Method: "GET", Path: "/v1/runs/abc/../../secrets"}); !errors.Is(err, ErrRouteDenied) {
+	if _, err := svc.BuildProxyPlan(ProxyPlanRequest{ClientID: readWrite.ID, Token: "rw-token", Method: "GET", Path: "/v1/runs/abc/../../secrets"}); !errors.Is(err, ErrRouteDenied) {
 		t.Fatalf("BuildProxyPlan(path traversal) error = %v, want %v", err, ErrRouteDenied)
 	}
 
@@ -136,7 +137,7 @@ func TestRouteAllowlistAndScopes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterClient(readOnly) error = %v", err)
 	}
-	if _, err := svc.BuildProxyPlan(ProxyPlanRequest{ClientID: readOnly.ID, Method: "POST", Path: "/v1/runs"}); !errors.Is(err, ErrScopeDenied) {
+	if _, err := svc.BuildProxyPlan(ProxyPlanRequest{ClientID: readOnly.ID, Token: "ro-token", Method: "POST", Path: "/v1/runs"}); !errors.Is(err, ErrScopeDenied) {
 		t.Fatalf("BuildProxyPlan(POST /v1/runs) error = %v, want %v", err, ErrScopeDenied)
 	}
 }
@@ -157,6 +158,7 @@ func TestSubscriptionLifecycle(t *testing.T) {
 
 	sub, err := svc.Subscribe(SubscriptionRequest{
 		ClientID: client.ID,
+		Token:    "events-token",
 		Topics:   []string{"runtime"},
 		AfterSeq: 0,
 	})
@@ -199,10 +201,10 @@ func TestClientRevocationClosesAccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterClient() error = %v", err)
 	}
-	if _, err := svc.BuildWebSocketPlan(WebSocketPlanRequest{ClientID: client.ID, Path: "/ws"}); err != nil {
+	if _, err := svc.BuildWebSocketPlan(WebSocketPlanRequest{ClientID: client.ID, Token: "revoke-token", Path: "/ws"}); err != nil {
 		t.Fatalf("BuildWebSocketPlan() before revoke error = %v", err)
 	}
-	sub, err := svc.Subscribe(SubscriptionRequest{ClientID: client.ID})
+	sub, err := svc.Subscribe(SubscriptionRequest{ClientID: client.ID, Token: "revoke-token"})
 	if err != nil {
 		t.Fatalf("Subscribe() error = %v", err)
 	}
@@ -214,10 +216,10 @@ func TestClientRevocationClosesAccess(t *testing.T) {
 	if revoked.RevokedAt == nil {
 		t.Fatal("RevokedAt is nil")
 	}
-	if _, err := svc.BuildProxyPlan(ProxyPlanRequest{ClientID: client.ID, Method: "GET", Path: "/v1/runtime/info"}); !errors.Is(err, ErrClientRevoked) {
+	if _, err := svc.BuildProxyPlan(ProxyPlanRequest{ClientID: client.ID, Token: "revoke-token", Method: "GET", Path: "/v1/runtime/info"}); !errors.Is(err, ErrClientRevoked) {
 		t.Fatalf("BuildProxyPlan() after revoke error = %v, want %v", err, ErrClientRevoked)
 	}
-	if _, err := svc.BuildWebSocketPlan(WebSocketPlanRequest{ClientID: client.ID, Path: "/ws"}); !errors.Is(err, ErrClientRevoked) {
+	if _, err := svc.BuildWebSocketPlan(WebSocketPlanRequest{ClientID: client.ID, Token: "revoke-token", Path: "/ws"}); !errors.Is(err, ErrClientRevoked) {
 		t.Fatalf("BuildWebSocketPlan() after revoke error = %v, want %v", err, ErrClientRevoked)
 	}
 	if _, ok := <-sub.Events; ok {
@@ -250,7 +252,7 @@ func TestEventOrderingAndReplayAfterSeq(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterClient() error = %v", err)
 	}
-	sub, err := svc.Subscribe(SubscriptionRequest{ClientID: client.ID, Topics: []string{"runtime"}, AfterSeq: one.Seq})
+	sub, err := svc.Subscribe(SubscriptionRequest{ClientID: client.ID, Token: "replay-token", Topics: []string{"runtime"}, AfterSeq: one.Seq})
 	if err != nil {
 		t.Fatalf("Subscribe() error = %v", err)
 	}
@@ -290,6 +292,7 @@ func TestOriginAndHostPolicy(t *testing.T) {
 
 	if _, err := svc.BuildProxyPlan(ProxyPlanRequest{
 		ClientID: client.ID,
+		Token:    "trusted-token",
 		Method:   "GET",
 		Path:     "/v1/runtime/info",
 		Origin:   "https://evil.example",
@@ -299,6 +302,7 @@ func TestOriginAndHostPolicy(t *testing.T) {
 	}
 	if _, err := svc.BuildProxyPlan(ProxyPlanRequest{
 		ClientID: client.ID,
+		Token:    "trusted-token",
 		Method:   "GET",
 		Path:     "/v1/runtime/info",
 		Origin:   "https://trusted.example",
@@ -308,11 +312,135 @@ func TestOriginAndHostPolicy(t *testing.T) {
 	}
 	if _, err := svc.BuildProxyPlan(ProxyPlanRequest{
 		ClientID: client.ID,
+		Token:    "trusted-token",
 		Method:   "GET",
 		Path:     "/v1/runtime/info",
 		Origin:   "https://trusted.example",
 		Host:     "bridge.example",
 	}); err != nil {
 		t.Fatalf("BuildProxyPlan(trusted) error = %v", err)
+	}
+}
+
+func TestAuthenticatedAccessRequiresTokenAndClientBinding(t *testing.T) {
+	svc := NewService(BridgeConfig{})
+	client, err := svc.RegisterClient(ClientRegistration{
+		ClientID: "bound-client",
+		Token:    "bound-token",
+		Origin:   "http://localhost:5174",
+		Host:     "localhost:5174",
+		Scopes:   []ClientScope{ScopeRuntimeRead, ScopeEventsSubscribe},
+	})
+	if err != nil {
+		t.Fatalf("RegisterClient() error = %v", err)
+	}
+
+	if _, err := svc.BuildProxyPlan(ProxyPlanRequest{
+		ClientID: client.ID,
+		Token:    "wrong-token",
+		Method:   "GET",
+		Path:     "/v1/runtime/info",
+		Origin:   "http://localhost:5174",
+		Host:     "localhost:5174",
+	}); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("BuildProxyPlan(wrong token) error = %v, want %v", err, ErrInvalidToken)
+	}
+
+	if _, err := svc.BuildWebSocketPlan(WebSocketPlanRequest{
+		ClientID: client.ID,
+		Token:    "bound-token",
+		Path:     "/ws",
+		Origin:   "http://127.0.0.1:5174",
+		Host:     "127.0.0.1:5174",
+	}); !errors.Is(err, ErrOriginDenied) {
+		t.Fatalf("BuildWebSocketPlan(wrong origin) error = %v, want %v", err, ErrOriginDenied)
+	}
+
+	if _, err := svc.Subscribe(SubscriptionRequest{
+		ClientID: client.ID,
+		Token:    "bound-token",
+		Origin:   "http://localhost:5174",
+		Host:     "127.0.0.1:5174",
+	}); !errors.Is(err, ErrHostDenied) {
+		t.Fatalf("Subscribe(wrong host) error = %v, want %v", err, ErrHostDenied)
+	}
+
+	plan, err := svc.BuildProxyPlan(ProxyPlanRequest{
+		ClientID: client.ID,
+		Token:    "bound-token",
+		Method:   "GET",
+		Path:     "/v1/runtime/info",
+		Origin:   "http://localhost:5174",
+		Host:     "localhost:5174",
+	})
+	if err != nil {
+		t.Fatalf("BuildProxyPlan(bound) error = %v", err)
+	}
+	if plan.TokenDigest == "" {
+		t.Fatal("BuildProxyPlan(bound) returned empty TokenDigest")
+	}
+}
+
+func TestUnknownClientRejectedAcrossPlansAndSubscriptions(t *testing.T) {
+	svc := NewService(BridgeConfig{})
+
+	if _, err := svc.BuildProxyPlan(ProxyPlanRequest{
+		ClientID: "missing",
+		Token:    "missing-token",
+		Method:   "GET",
+		Path:     "/v1/runtime/info",
+	}); !errors.Is(err, ErrInvalidClient) {
+		t.Fatalf("BuildProxyPlan(missing) error = %v, want %v", err, ErrInvalidClient)
+	}
+
+	if _, err := svc.BuildWebSocketPlan(WebSocketPlanRequest{
+		ClientID: "missing",
+		Token:    "missing-token",
+		Path:     "/ws",
+	}); !errors.Is(err, ErrInvalidClient) {
+		t.Fatalf("BuildWebSocketPlan(missing) error = %v, want %v", err, ErrInvalidClient)
+	}
+
+	if _, err := svc.Subscribe(SubscriptionRequest{
+		ClientID: "missing",
+		Token:    "missing-token",
+	}); !errors.Is(err, ErrInvalidClient) {
+		t.Fatalf("Subscribe(missing) error = %v, want %v", err, ErrInvalidClient)
+	}
+}
+
+func TestSlowSubscriptionIsClosedOnBackpressure(t *testing.T) {
+	svc := NewService(BridgeConfig{})
+	client, err := svc.RegisterClient(ClientRegistration{
+		ClientID: "slow-client",
+		Token:    "slow-token",
+		Scopes:   []ClientScope{ScopeEventsSubscribe},
+	})
+	if err != nil {
+		t.Fatalf("RegisterClient() error = %v", err)
+	}
+
+	sub, err := svc.Subscribe(SubscriptionRequest{
+		ClientID: client.ID,
+		Token:    "slow-token",
+		Topics:   []string{"runtime"},
+	})
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+
+	for i := 0; i < subscriptionBufferSize+1; i++ {
+		svc.RecordEvent(ConnectionEvent{Type: EventProxyPlanBuilt, Topic: "runtime"})
+	}
+
+	received := 0
+	for range sub.Events {
+		received++
+	}
+	if received != subscriptionBufferSize {
+		t.Fatalf("received %d buffered events, want %d", received, subscriptionBufferSize)
+	}
+	if _, err := svc.Unsubscribe(sub.ID); !errors.Is(err, ErrSubscriptionClosed) {
+		t.Fatalf("Unsubscribe(closed by backpressure) error = %v, want %v", err, ErrSubscriptionClosed)
 	}
 }

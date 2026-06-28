@@ -155,6 +155,7 @@ type ClientRegistration struct {
 
 type ProxyPlanRequest struct {
 	ClientID string `json:"clientId"`
+	Token    string `json:"-"`
 	Method   string `json:"method"`
 	Path     string `json:"path"`
 	Origin   string `json:"origin,omitempty"`
@@ -163,6 +164,7 @@ type ProxyPlanRequest struct {
 
 type WebSocketPlanRequest struct {
 	ClientID string   `json:"clientId"`
+	Token    string   `json:"-"`
 	Path     string   `json:"path"`
 	Origin   string   `json:"origin,omitempty"`
 	Host     string   `json:"host,omitempty"`
@@ -172,6 +174,9 @@ type WebSocketPlanRequest struct {
 
 type SubscriptionRequest struct {
 	ClientID string   `json:"clientId"`
+	Token    string   `json:"-"`
+	Origin   string   `json:"origin,omitempty"`
+	Host     string   `json:"host,omitempty"`
 	Topics   []string `json:"topics,omitempty"`
 	AfterSeq uint64   `json:"afterSeq,omitempty"`
 }

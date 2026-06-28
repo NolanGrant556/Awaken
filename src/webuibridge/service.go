@@ -249,11 +249,8 @@ func (s *Service) BuildProxyPlan(req ProxyPlanRequest) (RouteProxyPlan, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	client, err := s.requireClientLocked(req.ClientID, now)
+	client, err := s.authorizeClientLocked(req.ClientID, req.Token, req.Origin, req.Host, now)
 	if err != nil {
-		return RouteProxyPlan{}, err
-	}
-	if err := s.config.Security.validateOriginHost(req.Origin, req.Host); err != nil {
 		return RouteProxyPlan{}, err
 	}
 	rule, ok := s.config.Security.matchRoute(method, requestPath)
@@ -263,9 +260,6 @@ func (s *Service) BuildProxyPlan(req ProxyPlanRequest) (RouteProxyPlan, error) {
 	if !hasScopes(client.Scopes, rule.RequiredScopes) {
 		return RouteProxyPlan{}, ErrScopeDenied
 	}
-
-	client.LastSeenAt = now
-	s.clients[client.ID] = client
 
 	return RouteProxyPlan{
 		ClientID:       client.ID,
@@ -288,11 +282,8 @@ func (s *Service) BuildWebSocketPlan(req WebSocketPlanRequest) (WebSocketPlan, e
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	client, err := s.requireClientLocked(req.ClientID, now)
+	client, err := s.authorizeClientLocked(req.ClientID, req.Token, req.Origin, req.Host, now)
 	if err != nil {
-		return WebSocketPlan{}, err
-	}
-	if err := s.config.Security.validateOriginHost(req.Origin, req.Host); err != nil {
 		return WebSocketPlan{}, err
 	}
 	if !s.config.Security.allowsWebSocketPath(requestPath) {
@@ -302,13 +293,6 @@ func (s *Service) BuildWebSocketPlan(req WebSocketPlanRequest) (WebSocketPlan, e
 	if !hasScopes(client.Scopes, requiredScopes) {
 		return WebSocketPlan{}, ErrScopeDenied
 	}
-
-	client.LastSeenAt = now
-	token := client.Token
-	lastUsedAt := now
-	token.LastUsedAt = &lastUsedAt
-	client.Token = token
-	s.clients[client.ID] = client
 
 	return WebSocketPlan{
 		ClientID:          client.ID,
@@ -329,7 +313,7 @@ func (s *Service) Subscribe(req SubscriptionRequest) (Subscription, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	client, err := s.requireClientLocked(req.ClientID, now)
+	client, err := s.authorizeClientLocked(req.ClientID, req.Token, req.Origin, req.Host, now)
 	if err != nil {
 		return Subscription{}, err
 	}
@@ -438,6 +422,31 @@ func (s *Service) requireClientLocked(clientID string, now time.Time) (ClientSes
 		return ClientSession{}, ErrClientRevoked
 	}
 	client.LastSeenAt = now
+	s.clients[client.ID] = client
+	return client, nil
+}
+
+func (s *Service) authorizeClientLocked(clientID, token, origin, host string, now time.Time) (ClientSession, error) {
+	client, ok := s.clients[strings.TrimSpace(clientID)]
+	if !ok {
+		return ClientSession{}, ErrInvalidClient
+	}
+	if client.RevokedAt != nil {
+		return ClientSession{}, ErrClientRevoked
+	}
+	if !client.Token.Matches(token) {
+		return ClientSession{}, ErrInvalidToken
+	}
+	if err := s.config.Security.validateOriginHost(origin, host); err != nil {
+		return ClientSession{}, err
+	}
+	if err := validateClientBinding(client, origin, host); err != nil {
+		return ClientSession{}, err
+	}
+
+	client.LastSeenAt = now
+	lastUsedAt := now
+	client.Token.LastUsedAt = &lastUsedAt
 	s.clients[client.ID] = client
 	return client, nil
 }
@@ -664,6 +673,16 @@ func wildcardMatch(pattern, value string) bool {
 		return strings.HasPrefix(value, strings.TrimSuffix(pattern, "*"))
 	}
 	return pattern == value
+}
+
+func validateClientBinding(client ClientSession, origin, host string) error {
+	if client.Origin != "" && strings.TrimSpace(origin) != client.Origin {
+		return ErrOriginDenied
+	}
+	if client.Host != "" && strings.TrimSpace(host) != client.Host {
+		return ErrHostDenied
+	}
+	return nil
 }
 
 func hasScopes(clientScopes, requiredScopes []ClientScope) bool {

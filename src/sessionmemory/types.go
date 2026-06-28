@@ -25,6 +25,13 @@ const (
 	UpdatePolicyKeepExisting UpdatePolicy = "keep_existing"
 )
 
+const (
+	MaxMemoryContentChars    = 2000
+	MaxMemoryMetadataEntries = 16
+	MaxMemoryMetadataChars   = 256
+	redactedPlaceholder      = "[redacted]"
+)
+
 var (
 	ErrInvalidScope        = errors.New("invalid memory scope")
 	ErrInvalidUpdatePolicy = errors.New("invalid update policy")
@@ -149,6 +156,12 @@ func NormalizeEntry(entry MemoryEntry) (MemoryEntry, error) {
 	if normalized.Content == "" {
 		return MemoryEntry{}, errors.Join(ErrInvalidMemoryEntry, errors.New("memory content is required"))
 	}
+	if runeLen(normalized.Content) > MaxMemoryContentChars {
+		return MemoryEntry{}, errors.Join(ErrInvalidMemoryEntry, errors.New("memory content exceeds size limit"))
+	}
+	if normalized.Sensitive {
+		return MemoryEntry{}, errors.Join(ErrInvalidMemoryEntry, errors.New("sensitive memories must be redacted before storage"))
+	}
 
 	normalized.Source = normalizeLabel(normalized.Source)
 	normalized.SessionID = strings.TrimSpace(normalized.SessionID)
@@ -169,8 +182,7 @@ func NormalizeEntry(entry MemoryEntry) (MemoryEntry, error) {
 	}
 
 	normalized.Tags = normalizeTags(normalized.Tags)
-	normalized.Metadata = normalizeMap(normalized.Metadata)
-	normalized.SensitiveFields = normalizeMap(normalized.SensitiveFields)
+	normalized.Metadata, normalized.SensitiveFields, _ = normalizeMetadata(normalized.Metadata, normalized.SensitiveFields)
 	return normalized, nil
 }
 
@@ -270,6 +282,78 @@ func normalizeMap(values map[string]string) map[string]string {
 		return nil
 	}
 	return result
+}
+
+func normalizeMetadata(metadata, sensitiveFields map[string]string) (map[string]string, map[string]string, bool) {
+	var normalizedMetadata map[string]string
+	var normalizedSensitive map[string]string
+	redacted := false
+	for key, value := range metadata {
+		normalizedKey := strings.TrimSpace(key)
+		normalizedValue := strings.TrimSpace(value)
+		if normalizedKey == "" || normalizedValue == "" {
+			continue
+		}
+		if runeLen(normalizedValue) > MaxMemoryMetadataChars {
+			normalizedValue = truncateRunes(normalizedValue, MaxMemoryMetadataChars, "...")
+		}
+		if isSensitiveMetadataKey(normalizedKey) {
+			if normalizedSensitive == nil {
+				normalizedSensitive = make(map[string]string)
+			}
+			normalizedSensitive[normalizedKey] = redactedPlaceholder
+			redacted = true
+			continue
+		}
+		if normalizedMetadata == nil {
+			normalizedMetadata = make(map[string]string)
+		}
+		if len(normalizedMetadata) >= MaxMemoryMetadataEntries {
+			break
+		}
+		normalizedMetadata[normalizedKey] = normalizedValue
+	}
+	for key := range sensitiveFields {
+		normalizedKey := strings.TrimSpace(key)
+		if normalizedKey == "" {
+			continue
+		}
+		if normalizedSensitive == nil {
+			normalizedSensitive = make(map[string]string)
+		}
+		normalizedSensitive[normalizedKey] = redactedPlaceholder
+		redacted = true
+	}
+	if len(normalizedMetadata) == 0 {
+		normalizedMetadata = nil
+	}
+	if len(normalizedSensitive) == 0 {
+		normalizedSensitive = nil
+	}
+	return normalizedMetadata, normalizedSensitive, redacted
+}
+
+func isSensitiveMetadataKey(key string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	for _, marker := range []string{
+		"api_key",
+		"apikey",
+		"token",
+		"secret",
+		"password",
+		"passwd",
+		"authorization",
+		"bearer",
+		"cookie",
+		"credential",
+		"private_key",
+		"access_key",
+	} {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func copyEntry(entry MemoryEntry) MemoryEntry {

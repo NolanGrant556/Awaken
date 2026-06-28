@@ -153,12 +153,12 @@ func applyUpdatePolicy(existing, next MemoryEntry, policy UpdatePolicy, now time
 		return existing
 	case UpdatePolicyMerge:
 		merged := existing
-		merged.Content = mergeContent(existing.Content, next.Content)
+		merged.Content = fitContentLimit(mergeContent(existing.Content, next.Content))
 		merged.Source = mergeLabels(existing.Source, next.Source)
 		merged.Tags = mergeTags(existing.Tags, next.Tags)
 		merged.Metadata = mergeStringMaps(existing.Metadata, next.Metadata)
 		merged.SensitiveFields = mergeStringMaps(existing.SensitiveFields, next.SensitiveFields)
-		merged.Sensitive = existing.Sensitive || next.Sensitive
+		merged.Sensitive = false
 		merged.UpdatedAt = now
 		return merged
 	default:
@@ -297,12 +297,12 @@ func mergeContent(existing, next string) string {
 	existing = strings.TrimSpace(existing)
 	next = strings.TrimSpace(next)
 	if existing == "" {
-		return next
+		return fitContentLimit(next)
 	}
 	if next == "" || existing == next {
-		return existing
+		return fitContentLimit(existing)
 	}
-	return existing + "\n\n" + next
+	return fitContentLimit(existing + "\n\n" + next)
 }
 
 func mergeLabels(existing, next string) string {
@@ -343,4 +343,12 @@ func mergeStringMaps(left, right map[string]string) map[string]string {
 
 func IsMemoryNotFound(err error) bool {
 	return errors.Is(err, ErrMemoryNotFound)
+}
+
+func fitContentLimit(content string) string {
+	content = strings.TrimSpace(content)
+	if runeLen(content) <= MaxMemoryContentChars {
+		return content
+	}
+	return truncateRunes(content, MaxMemoryContentChars, "\n[truncated]")
 }

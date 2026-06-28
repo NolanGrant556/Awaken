@@ -2,6 +2,7 @@ package sessionmemory
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -64,7 +65,7 @@ func (builder PromptBuilder) promptLine(entry MemoryEntry) (string, string) {
 	if !builder.OmitSourceLabels && source != "" {
 		prefix += fmt.Sprintf(" (source: %s)", source)
 	}
-	return prefix + " " + promptSafeText(entry.Content), source
+	return prefix + " " + strconv.Quote(promptSafeText(entry.Content)), source
 }
 
 func promptSafeEntries(entries []MemoryEntry) []MemoryEntry {
@@ -74,7 +75,8 @@ func promptSafeEntries(entries []MemoryEntry) []MemoryEntry {
 		if err != nil || normalized.Sensitive {
 			continue
 		}
-		if promptSafeText(normalized.Content) == "" {
+		content := promptSafeText(normalized.Content)
+		if content == "" || looksInstructionLike(content) {
 			continue
 		}
 		result = append(result, normalized)
@@ -84,6 +86,26 @@ func promptSafeEntries(entries []MemoryEntry) []MemoryEntry {
 
 func promptSafeText(value string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+}
+
+func looksInstructionLike(value string) bool {
+	normalized := strings.ToLower(value)
+	for _, marker := range []string{
+		"ignore previous",
+		"ignore all previous",
+		"disregard previous",
+		"follow these instructions",
+		"system prompt",
+		"developer message",
+		"override instruction",
+		"<system>",
+		"</system>",
+	} {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func sourceLabel(entry MemoryEntry) string {

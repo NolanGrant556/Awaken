@@ -97,6 +97,13 @@ func (q *PendingQueue) ensure() {
 func (q *PendingQueue) remove(requestID string, dedupe string) {
 	delete(q.entriesByID, requestID)
 	delete(q.idByDedupe, dedupe)
+	for index, id := range q.order {
+		if id != requestID {
+			continue
+		}
+		q.order = append(q.order[:index], q.order[index+1:]...)
+		break
+	}
 }
 
 func (r PermissionRequest) dedupeString() string {

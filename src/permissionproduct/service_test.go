@@ -1,6 +1,7 @@
 package permissionproduct
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
@@ -301,5 +302,83 @@ func TestDuplicateRequestReturnsExistingPending(t *testing.T) {
 	}
 	if history := service.History(); len(history) != 1 {
 		t.Fatalf("expected duplicate submit not to append history, got %d entries", len(history))
+	}
+}
+
+func TestResolveUnknownOrAlreadyResolvedRequest(t *testing.T) {
+	service, _ := newTestService()
+	request := baseRequest()
+
+	if _, ok := service.Resolve("missing-request", Resolution{Outcome: DecisionOutcomeAllow}); ok {
+		t.Fatalf("expected missing request resolution to fail")
+	}
+
+	service.SubmitRequest(request)
+	if _, ok := service.Resolve(request.ID, Resolution{Outcome: DecisionOutcomeDeny}); !ok {
+		t.Fatalf("expected first resolve to succeed")
+	}
+	if _, ok := service.Resolve(request.ID, Resolution{Outcome: DecisionOutcomeAllow}); ok {
+		t.Fatalf("expected already resolved request to stay terminal")
+	}
+	if history := service.History(); len(history) != 2 {
+		t.Fatalf("expected pending + resolved history only, got %d entries", len(history))
+	}
+}
+
+func TestConcurrentDuplicateSubmitKeepsSinglePendingRequest(t *testing.T) {
+	service, _ := newTestService()
+	request := baseRequest()
+
+	const workers = 16
+	decisions := make([]PermissionDecision, workers)
+
+	var start sync.WaitGroup
+	start.Add(1)
+
+	var done sync.WaitGroup
+	done.Add(workers)
+
+	for index := 0; index < workers; index++ {
+		go func(index int) {
+			defer done.Done()
+			start.Wait()
+			duplicate := request
+			duplicate.ID = "request-" + string(rune('a'+index))
+			decisions[index] = service.SubmitRequest(duplicate)
+		}(index)
+	}
+
+	start.Done()
+	done.Wait()
+
+	first := decisions[0]
+	for index, decision := range decisions {
+		if decision.ID != first.ID {
+			t.Fatalf("expected worker %d to receive decision %q, got %q", index, first.ID, decision.ID)
+		}
+		if decision.RequestID != first.RequestID {
+			t.Fatalf("expected worker %d to receive request %q, got %q", index, first.RequestID, decision.RequestID)
+		}
+	}
+
+	if pending := service.ListPending(); len(pending) != 1 {
+		t.Fatalf("expected one pending request after concurrent duplicates, got %d", len(pending))
+	}
+	if history := service.History(); len(history) != 1 {
+		t.Fatalf("expected one history entry after concurrent duplicates, got %d", len(history))
+	}
+}
+
+func TestResolveCompactsPendingQueueOrder(t *testing.T) {
+	service, _ := newTestService()
+	request := baseRequest()
+
+	service.SubmitRequest(request)
+	if _, ok := service.Resolve(request.ID, Resolution{Outcome: DecisionOutcomeAllow}); !ok {
+		t.Fatalf("expected resolve to succeed")
+	}
+
+	if len(service.pending.order) != 0 {
+		t.Fatalf("expected resolved request to be removed from queue order, got %d entries", len(service.pending.order))
 	}
 }

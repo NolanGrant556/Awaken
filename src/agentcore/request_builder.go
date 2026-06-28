@@ -73,7 +73,15 @@ func (rb *RequestBuilder) buildSystemPrompt() string {
 }
 
 func (rb *RequestBuilder) getTools() []tool.ToolDefinition {
-	definitions := tool.DefinitionsFromTools(tool.ListTools())
+	tools := tool.ListTools()
+	definitions := make([]tool.ToolDefinition, 0, len(tools))
+
+	for _, t := range tools {
+		if availabilityAwareTool, ok := t.(tool.AvailabilityAwareTool); ok && !availabilityAwareTool.IsAvailable() {
+			continue
+		}
+		definitions = append(definitions, tool.DefinitionFromTool(t))
+	}
 	if rb.config.MCPRegistry != nil {
 		definitions = append(definitions, rb.config.MCPRegistry.ToolDefinitions()...)
 	}

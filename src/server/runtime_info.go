@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/url"
+	"strings"
 
 	"awaken/src/llm"
 )
@@ -78,17 +79,10 @@ func NewLLMRuntimeInfoProvider(cfg llm.Config, workspace string) RuntimeInfoProv
 func runtimeProfiles(cfg llm.Config) []RuntimeProfileInfo {
 	profiles := make([]RuntimeProfileInfo, 0, len(cfg.Profiles))
 	for _, profile := range cfg.Profiles {
-		protocol := profile.Protocol
-		if protocol == "" {
-			protocol = llm.ResolveProtocol(llm.Config{
-				BaseURL:  profile.BaseURL,
-				Protocol: profile.Protocol,
-			})
-		}
 		profiles = append(profiles, RuntimeProfileInfo{
 			Name:        profile.Name,
 			Model:       profile.Model,
-			Protocol:    string(protocol),
+			Protocol:    string(runtimeProfileProtocol(profile)),
 			AuthScheme:  profile.AuthScheme,
 			HasAPIKey:   profile.HasAPIKey,
 			BaseURLHost: extractHost(profile.BaseURL),
@@ -96,6 +90,26 @@ func runtimeProfiles(cfg llm.Config) []RuntimeProfileInfo {
 		})
 	}
 	return profiles
+}
+
+func runtimeProfileProtocol(profile llm.Profile) llm.Protocol {
+	switch profile.Protocol {
+	case llm.ProtocolOpenAIChat, llm.ProtocolAnthropicMessages:
+		return profile.Protocol
+	}
+
+	baseURL := strings.ToLower(profile.BaseURL)
+	if strings.Contains(baseURL, "api.anthropic.com") {
+		return llm.ProtocolAnthropicMessages
+	}
+	if strings.HasSuffix(baseURL, "/anthropic") {
+		return llm.ProtocolAnthropicMessages
+	}
+	if strings.Contains(baseURL, "/anthropic/") {
+		return llm.ProtocolAnthropicMessages
+	}
+
+	return llm.ProtocolOpenAIChat
 }
 
 func extractHost(baseURL string) string {

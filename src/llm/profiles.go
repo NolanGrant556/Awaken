@@ -95,14 +95,11 @@ func materializeProfiles(
 }
 
 func resolveProfileAPIKey(profile Profile) string {
-	envName := firstNonEmpty(profile.APIKeyEnv, defaultAPIKeyEnv)
-	if envName == defaultAPIKeyEnv {
+	envName := strings.TrimSpace(profile.APIKeyEnv)
+	if envName == "" {
 		return os.Getenv(defaultAPIKeyEnv)
 	}
-	if value := os.Getenv(envName); value != "" {
-		return value
-	}
-	return os.Getenv(defaultAPIKeyEnv)
+	return os.Getenv(envName)
 }
 
 func profileHasAPIKey(profile Profile) bool {

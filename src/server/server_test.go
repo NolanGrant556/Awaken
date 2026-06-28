@@ -207,6 +207,44 @@ func TestRuntimeInfoEndpointDoesNotLeakSecrets(t *testing.T) {
 	}
 }
 
+func TestRuntimeInfoProfilesInferProtocolWithoutGlobalEnvLeakage(t *testing.T) {
+	t.Setenv("LLM_PROTOCOL", "openai_chat")
+
+	provider := NewLLMRuntimeInfoProvider(llm.Config{
+		APIKey:        "test-key",
+		BaseURL:       "https://api.openai.com/v1",
+		Model:         "gpt-4-test",
+		Protocol:      llm.ProtocolOpenAIChat,
+		AuthScheme:    "bearer",
+		ActiveProfile: "openai-default",
+		Profiles: []llm.Profile{
+			{
+				Name:       "openai-default",
+				BaseURL:    "https://api.openai.com/v1",
+				Model:      "gpt-4-test",
+				Protocol:   llm.ProtocolOpenAIChat,
+				AuthScheme: "bearer",
+				HasAPIKey:  true,
+			},
+			{
+				Name:      "anthropic-prod",
+				BaseURL:   "https://api.anthropic.com/v1",
+				Model:     "claude-sonnet-4-5",
+				HasAPIKey: true,
+			},
+		},
+	}, "/workspace/test")
+
+	info := provider.GetRuntimeInfo()
+
+	if len(info.Profiles) != 2 {
+		t.Fatalf("expected 2 profiles, got %d", len(info.Profiles))
+	}
+	if info.Profiles[1].Protocol != "anthropic_messages" {
+		t.Fatalf("expected anthropic profile protocol anthropic_messages, got %q", info.Profiles[1].Protocol)
+	}
+}
+
 func TestRunsEndpointsCreateReplayAndCancel(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{})

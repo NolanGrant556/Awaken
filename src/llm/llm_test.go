@@ -286,6 +286,42 @@ protocol = "anthropic_messages"
 	}
 }
 
+func TestLoadConfigDoesNotFallbackToGlobalKeyWhenProfileRequiresDedicatedEnv(t *testing.T) {
+	t.Setenv("LLM_API_KEY", "global-key")
+	t.Setenv("DEEPSEEK_API_KEY", "")
+	t.Setenv("LLM_ACTIVE_PROFILE", "deepseek")
+	t.Setenv("LLM_BASE_URL", "")
+	t.Setenv("LLM_MODEL_ID", "")
+	t.Setenv("LLM_PROTOCOL", "")
+	t.Setenv("LLM_AUTH_SCHEME", "")
+
+	tmpDir := t.TempDir()
+	t.Setenv("AWAKEN_CONFIG_DIR", tmpDir)
+
+	if err := os.WriteFile(filepath.Join(tmpDir, "config.toml"), []byte(`
+[[llm.profiles]]
+name = "deepseek"
+base_url = "https://api.deepseek.com/anthropic"
+model_id = "deepseek-v4-pro"
+protocol = "anthropic_messages"
+api_key_env = "DEEPSEEK_API_KEY"
+`), 0644); err != nil {
+		t.Fatalf("failed to write config.toml: %v", err)
+	}
+
+	cfg := LoadConfig()
+
+	if cfg.APIKey != "" {
+		t.Fatalf("expected missing dedicated env to keep API key empty, got %q", cfg.APIKey)
+	}
+	if len(cfg.Profiles) != 1 {
+		t.Fatalf("expected 1 profile, got %d", len(cfg.Profiles))
+	}
+	if cfg.Profiles[0].HasAPIKey {
+		t.Fatalf("expected profile to report missing API key when dedicated env is unset")
+	}
+}
+
 func TestCallMissingAPIKey(t *testing.T) {
 	cfg := Config{
 		APIKey:  "",

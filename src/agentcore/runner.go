@@ -358,7 +358,7 @@ func (e *runEventEmitter) emit(event AwakenEvent) {
 	if event.RunID == "" {
 		event.RunID = e.runID
 	}
-	e.sink.Emit(event)
+	e.sink.Emit(DisplaySafeEvent(event))
 }
 
 func (e *runEventEmitter) runStarted() {

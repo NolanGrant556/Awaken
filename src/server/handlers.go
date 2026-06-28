@@ -10,6 +10,7 @@ import (
 	"awaken/src/agentcore"
 	"awaken/src/agentdefs"
 	"awaken/src/protocol/agui"
+	"awaken/src/redaction"
 	awruntime "awaken/src/runtime"
 	"awaken/src/workspaceguard"
 )
@@ -383,7 +384,7 @@ func mapRuntimeEvent(event awruntime.Event) []agui.Event {
 			Timestamp: event.Timestamp.UnixMilli(),
 			ThreadID:  event.ThreadID,
 			RunID:     event.RunID,
-			Message:   event.Message,
+			Message:   redaction.RedactString(event.Message),
 			Code:      "RUN_CANCELLED",
 		}}
 	case awruntime.EventKindRunError:
@@ -393,7 +394,7 @@ func mapRuntimeEvent(event awruntime.Event) []agui.Event {
 			Timestamp: event.Timestamp.UnixMilli(),
 			ThreadID:  event.ThreadID,
 			RunID:     event.RunID,
-			Message:   event.Message,
+			Message:   redaction.RedactString(event.Message),
 			Code:      event.Code,
 		}}
 	case awruntime.EventKindRunStatusChanged:

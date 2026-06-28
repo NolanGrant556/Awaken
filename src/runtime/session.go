@@ -231,6 +231,7 @@ func (s *Session) RecordAgentEvent(event agentcore.AwakenEvent) {
 
 	event.ThreadID = s.run.ThreadID
 	event.RunID = s.run.RunID
+	event = agentcore.DisplaySafeEvent(event)
 	s.run.UpdatedAt = timestamp
 
 	terminal := false

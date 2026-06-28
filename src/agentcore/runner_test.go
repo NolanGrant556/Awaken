@@ -1446,6 +1446,31 @@ func TestRunEventEmitterRunErroredTransportErrorDoesNotLeakURL(t *testing.T) {
 	}
 }
 
+func TestRunEventEmitterRunErroredRedactsProviderSecretText(t *testing.T) {
+	var gotEvents []AwakenEvent
+	emitter := newRunEventEmitter("thread-test", EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+
+	secret := "abcdefghijklmnopqrstuvwxyz123456"
+	wrapped := fmt.Errorf("LLM stream call failed: %w", fmt.Errorf("%w: Authorization: Bearer %s", llm.ErrRequestFailed, secret))
+	emitter.runErrored(wrapped)
+
+	if len(gotEvents) != 1 {
+		t.Fatalf("expected 1 event, got %d: %+v", len(gotEvents), gotEvents)
+	}
+	if gotEvents[0].Type != RunErrorEventType {
+		t.Fatalf("expected RunError event, got %s", gotEvents[0].Type)
+	}
+	if gotEvents[0].Code != "PROVIDER_REQUEST_FAILED" {
+		t.Fatalf("expected Code PROVIDER_REQUEST_FAILED, got %q", gotEvents[0].Code)
+	}
+	assertNoDisplaySecret(t, gotEvents[0].Error, secret)
+	if !strings.Contains(gotEvents[0].Error, "[REDACTED]") {
+		t.Fatalf("expected provider error display text to include redaction marker, got %q", gotEvents[0].Error)
+	}
+}
+
 func mustRegisterRunnerTool(t *testing.T, candidate tool.Tool) {
 	t.Helper()
 	if err := tool.RegisterTool(candidate); err != nil {

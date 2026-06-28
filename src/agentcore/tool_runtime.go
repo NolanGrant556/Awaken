@@ -235,6 +235,7 @@ func (rt *ToolRuntime) awaitApproval(
 	}
 
 	request := approvalRequestForPermission(selectedTool, result, input, permission)
+	request = DisplaySafeApprovalRequest(request)
 
 	decision, err := awaiter.AwaitApproval(ctx, request)
 	if err != nil {
@@ -259,7 +260,7 @@ func (rt *ToolRuntime) emitArtifacts(
 		if artifact.Action == tool.ArtifactActionCreated {
 			eventType = ArtifactCreatedEventType
 		}
-		rt.sink.Emit(AwakenEvent{
+		rt.emitDisplayEvent(AwakenEvent{
 			Type:                eventType,
 			Timestamp:           timeNowUTC(),
 			ToolCallID:          result.ToolCallID,
@@ -279,7 +280,7 @@ func (rt *ToolRuntime) emitCommandOutput(result ToolExecutionResult, output tool
 	if output.Delta == "" {
 		return
 	}
-	rt.sink.Emit(AwakenEvent{
+	rt.emitDisplayEvent(AwakenEvent{
 		Type:          CommandOutputEventType,
 		Timestamp:     timeNowUTC(),
 		ToolCallID:    result.ToolCallID,
@@ -300,7 +301,7 @@ func (rt *ToolRuntime) emitPatchPreview(result ToolExecutionResult, selectedTool
 		return
 	}
 	limited := outputlimit.Limit(preview.Patch, maxPatchPreviewChars)
-	rt.sink.Emit(AwakenEvent{
+	rt.emitDisplayEvent(AwakenEvent{
 		Type:                  PatchUpdatedEventType,
 		Timestamp:             timeNowUTC(),
 		ToolCallID:            result.ToolCallID,
@@ -311,6 +312,10 @@ func (rt *ToolRuntime) emitPatchPreview(result ToolExecutionResult, selectedTool
 		DiffReview:            preview.DiffReview,
 		Truncated:             preview.Truncated || limited.Truncated,
 	})
+}
+
+func (rt *ToolRuntime) emitDisplayEvent(event AwakenEvent) {
+	rt.sink.Emit(DisplaySafeEvent(event))
 }
 
 type toolObserverFunc func(tool.CommandOutput)

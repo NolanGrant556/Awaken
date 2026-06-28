@@ -1106,6 +1106,46 @@ func TestToolRuntimeTodoWriteIsReadOnlyAndEmitsArtifact(t *testing.T) {
 	}
 }
 
+func TestToolRuntimeApplyPatchResultIncludesCheckpoint(t *testing.T) {
+	root := t.TempDir()
+	patch := "*** Begin Patch\n" +
+		"*** Add File: note.md\n" +
+		"+hello\n" +
+		"*** End Patch"
+
+	var got []AwakenEvent
+	runtime := NewToolRuntimeWithConfig(testApprovalAwaiter{
+		decision: ApprovalDecisionApproved,
+		events:   &got,
+	}, ToolRuntimeConfig{
+		PermissionContext: tool.NewPermissionContext(root, []string{root}),
+	})
+	result := runtime.Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_patch_checkpoint",
+		Function: convcontext.FunctionCall{
+			Name:      "apply_patch",
+			Arguments: `{"patch":` + mustJSONQuote(t, patch) + `}`,
+		},
+	})
+
+	if result.IsError {
+		t.Fatalf("expected apply_patch to succeed, got %+v", result)
+	}
+	if !strings.Contains(result.Content, "Checkpoint: checkpoint_") || !strings.Contains(result.Content, "(0 existing, 1 missing)") {
+		t.Fatalf("expected checkpoint summary in tool result, got %q", result.Content)
+	}
+
+	var sawFileArtifact bool
+	for _, event := range got {
+		if event.Type == ArtifactCreatedEventType && event.ArtifactPath == "note.md" && event.ArtifactKind == "added" {
+			sawFileArtifact = true
+		}
+	}
+	if !sawFileArtifact {
+		t.Fatalf("expected added file artifact, got %+v", got)
+	}
+}
+
 func TestToolRuntimeDeniesBeforeExecution(t *testing.T) {
 	var observed string
 	toolName := "runtime_denied_tool"

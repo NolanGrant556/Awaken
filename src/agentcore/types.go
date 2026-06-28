@@ -17,6 +17,7 @@ type AgentConfig struct {
 	EntryPoint       string
 	Workspace        WorkspaceConfig
 	PromptCache      PromptCacheConfig
+	RunProfile       RunProfile
 	PermissionPolicy tool.PermissionPolicy
 	ApprovalPolicy   ApprovalPolicy
 	UsageLimits      usage.BudgetLimits

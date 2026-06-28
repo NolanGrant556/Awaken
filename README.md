@@ -109,6 +109,15 @@ POST /v1/runs/{run_id}/cancel
 POST /v1/runs/{run_id}/approvals/{approval_id}/resolve
 ```
 
+`POST /v1/runs` 现已支持可选 `profile` 字段，用于第一版 per-run AgentDefinition / RunProfile 底座贯通。当前支持的 profile 字段有：
+
+```text
+id, name, description, system_prompt, model, max_turns,
+tools, disallowed_tools, permission_mode
+```
+
+默认行为保持不变：不传 `profile` 时，仍使用当前 runtime 的默认 model / max thoughts / tool policy。
+
 `/v1/runs/{run_id}/events` 输出 AG-UI-compatible SSE events。Awaken 目前有这些 extension events：
 
 ```text

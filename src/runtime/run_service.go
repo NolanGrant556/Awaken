@@ -50,6 +50,7 @@ type StartRunRequest struct {
 	PermissionPolicy tool.PermissionPolicy    `json:"permission_policy,omitempty"`
 	ApprovalPolicy   agentcore.ApprovalPolicy `json:"approval_policy,omitempty"`
 	WorkspacePolicy  workspaceguard.Policy    `json:"workspace_policy,omitempty"`
+	Profile          *agentcore.RunProfile    `json:"profile,omitempty"`
 }
 
 type Executor interface {
@@ -159,6 +160,13 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	if err := evaluateWorkspacePolicy(workspace.WorkspaceRoot, req.WorkspacePolicy); err != nil {
 		return Run{}, err
 	}
+	if req.Profile != nil {
+		normalized := req.Profile.Normalize()
+		if err := normalized.Validate(); err != nil {
+			return Run{}, fmt.Errorf("%w: invalid profile: %v", ErrInvalidInput, err)
+		}
+		req.Profile = &normalized
+	}
 
 	runID := newRuntimeID("run")
 	threadID := req.ThreadID
@@ -226,7 +234,11 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		s.persistThread(threadID)
 	}
 
-	executor := s.newExecutor(agentForRun(agent, threadID, workspace, permissionPolicy, approvalPolicy))
+	effectiveAgent, err := effectiveAgentForRun(agent, workspace, permissionPolicy, approvalPolicy, req.Profile)
+	if err != nil {
+		return Run{}, fmt.Errorf("%w: invalid profile: %v", ErrInvalidInput, err)
+	}
+	executor := s.newExecutor(effectiveAgent)
 	go s.execute(session, executor, trimmed, ctx)
 
 	return session.Snapshot(), nil
@@ -531,6 +543,20 @@ func agentForRun(
 	config.ApprovalPolicy = approvalPolicy.Normalize()
 	agent.SetConfig(config)
 	return agent
+}
+
+func effectiveAgentForRun(
+	agent *agentcore.Agent,
+	workspace WorkspaceConfig,
+	permissionPolicy tool.PermissionPolicy,
+	approvalPolicy agentcore.ApprovalPolicy,
+	profile *agentcore.RunProfile,
+) (*agentcore.Agent, error) {
+	configured := agentForRun(agent, "", workspace, permissionPolicy, approvalPolicy)
+	if configured == nil || profile == nil {
+		return configured, nil
+	}
+	return configured.WithRunProfile(profile)
 }
 
 func sameStringSet(a, b []string) bool {

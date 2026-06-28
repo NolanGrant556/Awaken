@@ -610,6 +610,201 @@ func TestRunServiceValidatesInputAndMissingRun(t *testing.T) {
 	}
 }
 
+func TestRunServiceKeepsDefaultAgentConfigWithoutProfile(t *testing.T) {
+	root := t.TempDir()
+	captured := make(chan agentcore.AgentConfig, 1)
+	service := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				SystemPrompt: "default prompt",
+				MaxThoughts:  5,
+				ModelConfig: agentcore.ModelConfig{
+					Model: "default-model",
+				},
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			cfg := agent.GetConfig()
+			captured <- cfg
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+				return "done", nil
+			})
+		},
+	)
+
+	run, err := service.StartRun(StartRunRequest{
+		Input:     "hello",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+
+	cfg := <-captured
+	if cfg.ModelConfig.Model != "default-model" {
+		t.Fatalf("expected default model, got %q", cfg.ModelConfig.Model)
+	}
+	if cfg.MaxThoughts != 5 {
+		t.Fatalf("expected default max thoughts 5, got %d", cfg.MaxThoughts)
+	}
+	if cfg.RunProfile.Model != "" || cfg.RunProfile.MaxTurns != 0 {
+		t.Fatalf("expected empty run profile, got %+v", cfg.RunProfile)
+	}
+
+	waitForRunTerminal(t, service, run.RunID)
+}
+
+func TestRunServiceAppliesRunProfileOverridesToAgentConfig(t *testing.T) {
+	root := t.TempDir()
+	captured := make(chan agentcore.AgentConfig, 1)
+	service := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				SystemPrompt: "default prompt",
+				MaxThoughts:  5,
+				ModelConfig: agentcore.ModelConfig{
+					Model: "default-model",
+				},
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			cfg := agent.GetConfig()
+			captured <- cfg
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+				return "done", nil
+			})
+		},
+	)
+
+	run, err := service.StartRun(StartRunRequest{
+		Input:     "hello",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		Profile: &agentcore.RunProfile{
+			ID:              "debug-profile",
+			Name:            "Debug Profile",
+			Model:           "override-model",
+			MaxTurns:        2,
+			Tools:           []string{"list_files"},
+			DisallowedTools: []string{"shell"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+
+	cfg := <-captured
+	if cfg.ModelConfig.Model != "override-model" {
+		t.Fatalf("expected overridden model, got %q", cfg.ModelConfig.Model)
+	}
+	if cfg.MaxThoughts != 2 {
+		t.Fatalf("expected overridden max thoughts 2, got %d", cfg.MaxThoughts)
+	}
+	if cfg.RunProfile.ID != "debug-profile" || len(cfg.RunProfile.Tools) != 1 || cfg.RunProfile.Tools[0] != "list_files" {
+		t.Fatalf("expected normalized run profile on agent config, got %+v", cfg.RunProfile)
+	}
+
+	waitForRunTerminal(t, service, run.RunID)
+}
+
+func TestRunServiceRejectsInvalidProfilePermissionMode(t *testing.T) {
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			return "done", nil
+		})
+	})
+
+	_, err := service.StartRun(StartRunRequest{
+		Input:     "hello",
+		Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()},
+		Profile: &agentcore.RunProfile{
+			PermissionMode: "maybe",
+		},
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput for invalid permission mode, got %v", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "invalid permission_mode") {
+		t.Fatalf("expected invalid permission_mode error, got %v", err)
+	}
+}
+
+func TestRunServiceRunProfileDoesNotPersistAcrossThreadRuns(t *testing.T) {
+	root := t.TempDir()
+	var (
+		mu       sync.Mutex
+		captured []agentcore.AgentConfig
+	)
+	service := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				SystemPrompt: "default prompt",
+				MaxThoughts:  5,
+				ModelConfig: agentcore.ModelConfig{
+					Model: "default-model",
+				},
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			mu.Lock()
+			captured = append(captured, agent.GetConfig())
+			mu.Unlock()
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+				return "done", nil
+			})
+		},
+	)
+
+	firstRun, err := service.StartRun(StartRunRequest{
+		Input:     "hello",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		Profile: &agentcore.RunProfile{
+			Model:    "override-model",
+			MaxTurns: 2,
+		},
+	})
+	if err != nil {
+		t.Fatalf("first StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, firstRun.RunID)
+
+	secondRun, err := service.StartRun(StartRunRequest{
+		Input:     "hello again",
+		ThreadID:  firstRun.ThreadID,
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("second StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, secondRun.RunID)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(captured) != 2 {
+		t.Fatalf("expected two captured configs, got %d", len(captured))
+	}
+	if captured[0].ModelConfig.Model != "override-model" || captured[0].MaxThoughts != 2 {
+		t.Fatalf("expected first run override config, got %+v", captured[0])
+	}
+	if captured[1].ModelConfig.Model != "default-model" || captured[1].MaxThoughts != 5 {
+		t.Fatalf("expected second run to fall back to default config, got %+v", captured[1])
+	}
+}
+
 func TestStartRunValidWorkspaceStartsRun(t *testing.T) {
 	root := t.TempDir()
 	service := NewRunService(

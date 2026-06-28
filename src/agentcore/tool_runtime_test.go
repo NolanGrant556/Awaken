@@ -36,6 +36,13 @@ type runtimePlainTool struct {
 	executeCount *int
 }
 
+type runtimeBasicTool struct {
+	name         string
+	params       []tool.ToolParameter
+	readOnly     bool
+	executeCount *int
+}
+
 func (t runtimeTestTool) Name() string {
 	return t.name
 }
@@ -115,6 +122,29 @@ func (t runtimePlainTool) IsReadOnly() bool {
 	return t.readOnly
 }
 
+func (t runtimeBasicTool) Name() string {
+	return t.name
+}
+
+func (t runtimeBasicTool) Description() string {
+	return "runtime basic tool"
+}
+
+func (t runtimeBasicTool) Parameters() []tool.ToolParameter {
+	return t.params
+}
+
+func (t runtimeBasicTool) Execute(ctx context.Context, input string) (string, error) {
+	if t.executeCount != nil {
+		*t.executeCount++
+	}
+	return "ran:" + input, nil
+}
+
+func (t runtimeBasicTool) IsReadOnly() bool {
+	return t.readOnly
+}
+
 func TestToolRuntimeExecutesKnownTool(t *testing.T) {
 	var observed string
 	toolName := "runtime_known_tool"
@@ -157,6 +187,155 @@ func TestToolRuntimeUnknownToolReturnsErrorResult(t *testing.T) {
 
 	if !result.IsError || result.ToolCallID != "call_unknown" || !strings.Contains(result.Content, "工具执行失败") {
 		t.Fatalf("expected unknown tool error result, got %+v", result)
+	}
+}
+
+func TestToolRuntimeRejectsToolBlockedByRunProfile(t *testing.T) {
+	toolName := "runtime_blocked_tool"
+	executions := 0
+	mustRegisterRuntimeTool(t, runtimeTestTool{
+		name:         toolName,
+		executeCount: &executions,
+		params: []tool.ToolParameter{
+			{Name: "value", Type: "string", Required: true},
+		},
+	})
+
+	result := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
+		ToolAccessPolicy: RunProfile{
+			DisallowedTools: []string{toolName},
+		}.ToolAccessPolicy(),
+	}).Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_blocked",
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{"value":"hello"}`,
+		},
+	})
+
+	if !result.IsError || !strings.Contains(result.Content, "not allowed for this run profile") {
+		t.Fatalf("expected blocked tool error, got %+v", result)
+	}
+	if executions != 0 {
+		t.Fatalf("expected blocked tool not to execute, got %d executions", executions)
+	}
+}
+
+func TestToolRuntimeAskModeRequiresApprovalForNonReadOnlyToolWithoutChecker(t *testing.T) {
+	toolName := "runtime_ask_mode_tool"
+	executeCount := 0
+	mustRegisterRuntimeTool(t, runtimeBasicTool{
+		name:         toolName,
+		executeCount: &executeCount,
+		params: []tool.ToolParameter{
+			{Name: "value", Type: "string", Required: true},
+		},
+	})
+
+	result := NewToolRuntimeWithConfig(testApprovalAwaiter{decision: ApprovalDecisionApproved}, ToolRuntimeConfig{
+		PermissionMode: PermissionModeAsk,
+	}).Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_ask_mode",
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{"value":"hello"}`,
+		},
+	})
+
+	if result.IsError {
+		t.Fatalf("expected approved ask-mode tool to succeed, got %+v", result)
+	}
+	if executeCount != 1 {
+		t.Fatalf("expected ask-mode tool to execute after approval, got %d executions", executeCount)
+	}
+}
+
+func TestToolRuntimeAllowModeBypassesApprovalButStillExecutes(t *testing.T) {
+	toolName := "runtime_allow_mode_tool"
+	executeCount := 0
+	mustRegisterRuntimeTool(t, runtimeTestTool{
+		name:         toolName,
+		permission:   tool.AskPermission("tool would normally ask", tool.ApprovalRequest{}),
+		executeCount: &executeCount,
+		params: []tool.ToolParameter{
+			{Name: "value", Type: "string", Required: true},
+		},
+	})
+
+	result := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
+		PermissionMode: PermissionModeAllow,
+	}).Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_allow_mode",
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{"value":"hello"}`,
+		},
+	})
+
+	if result.IsError {
+		t.Fatalf("expected allow-mode tool to succeed without approval, got %+v", result)
+	}
+	if executeCount != 1 {
+		t.Fatalf("expected allow-mode tool to execute exactly once, got %d", executeCount)
+	}
+}
+
+func TestToolRuntimeDenyModeBlocksNonReadOnlyToolWithoutChecker(t *testing.T) {
+	toolName := "runtime_deny_mode_tool"
+	executeCount := 0
+	mustRegisterRuntimeTool(t, runtimeBasicTool{
+		name:         toolName,
+		executeCount: &executeCount,
+		params: []tool.ToolParameter{
+			{Name: "value", Type: "string", Required: true},
+		},
+	})
+
+	result := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
+		PermissionMode: PermissionModeDeny,
+	}).Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_deny_mode",
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{"value":"hello"}`,
+		},
+	})
+
+	if !result.IsError || !strings.Contains(result.Content, "permission_mode=deny") {
+		t.Fatalf("expected deny-mode tool to be blocked, got %+v", result)
+	}
+	if executeCount != 0 {
+		t.Fatalf("expected deny-mode tool not to execute, got %d executions", executeCount)
+	}
+}
+
+func TestToolRuntimeAllowModeDoesNotOverrideExplicitToolDeny(t *testing.T) {
+	toolName := "runtime_allow_mode_respects_deny_tool"
+	executeCount := 0
+	mustRegisterRuntimeTool(t, runtimeTestTool{
+		name:         toolName,
+		permission:   tool.DenyPermission("tool-specific deny"),
+		executeCount: &executeCount,
+		params: []tool.ToolParameter{
+			{Name: "value", Type: "string", Required: true},
+		},
+	})
+
+	result := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
+		PermissionMode: PermissionModeAllow,
+	}).Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_allow_mode_respects_deny",
+		Function: convcontext.FunctionCall{
+			Name:      toolName,
+			Arguments: `{"value":"hello"}`,
+		},
+	})
+
+	if !result.IsError || !strings.Contains(result.Content, "tool-specific deny") {
+		t.Fatalf("expected allow-mode to preserve tool deny, got %+v", result)
+	}
+	if executeCount != 0 {
+		t.Fatalf("expected denied tool not to execute, got %d executions", executeCount)
 	}
 }
 

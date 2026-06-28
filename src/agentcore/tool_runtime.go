@@ -11,25 +11,34 @@ import (
 	convcontext "awaken/src/context"
 	"awaken/src/internal/outputlimit"
 	"awaken/src/tool"
+	"awaken/src/toolresults"
 )
 
 const maxPatchPreviewChars = 50000
 
 type ToolRuntime struct {
-	sink              EventSink
-	permissionContext tool.PermissionContext
+	sink                   EventSink
+	permissionContext      tool.PermissionContext
+	toolResultStore        *toolresults.Store
+	toolResultMaxChars     int
+	toolResultPreviewChars int
 }
 
 type ToolRuntimeConfig struct {
 	PermissionContext tool.PermissionContext
+	ToolResultStore   *toolresults.Store
+
+	ToolResultMaxChars     int
+	ToolResultPreviewChars int
 }
 
 type ToolExecutionResult struct {
-	ToolCallID string
-	Name       string
-	Content    string
-	IsError    bool
-	Truncated  bool
+	ToolCallID       string
+	Name             string
+	Content          string
+	IsError          bool
+	Truncated        bool
+	ToolResultHandle *toolresults.Handle
 }
 
 func NewToolRuntime(sink EventSink) *ToolRuntime {
@@ -37,9 +46,21 @@ func NewToolRuntime(sink EventSink) *ToolRuntime {
 }
 
 func NewToolRuntimeWithConfig(sink EventSink, config ToolRuntimeConfig) *ToolRuntime {
+	permissionContext := config.PermissionContext.Normalize()
+	maxChars := config.ToolResultMaxChars
+	if maxChars <= 0 {
+		maxChars = outputlimit.DefaultToolResultMaxChars
+	}
+	previewChars := config.ToolResultPreviewChars
+	if previewChars <= 0 {
+		previewChars = toolresults.DefaultPreviewChars
+	}
 	return &ToolRuntime{
-		sink:              normalizeEventSink(sink),
-		permissionContext: config.PermissionContext.Normalize(),
+		sink:                   normalizeEventSink(sink),
+		permissionContext:      permissionContext,
+		toolResultStore:        config.ToolResultStore,
+		toolResultMaxChars:     maxChars,
+		toolResultPreviewChars: previewChars,
 	}
 }
 
@@ -58,14 +79,14 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	if err != nil {
 		result.Content = fmt.Sprintf("工具执行失败: %v: %s", err, call.Function.Name)
 		result.IsError = true
-		return finalizeToolResult(result)
+		return rt.finalizeToolResult(result)
 	}
 
 	input, err := normalizeToolInput(call.Function.Arguments, selectedTool.Parameters())
 	if err != nil {
 		result.Content = fmt.Sprintf("工具参数错误: %v", err)
 		result.IsError = true
-		return finalizeToolResult(result)
+		return rt.finalizeToolResult(result)
 	}
 
 	toolCtx := tool.ContextWithPermissionContext(ctx, rt.permissionContext)
@@ -76,35 +97,35 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	case tool.PermissionDeny:
 		result.Content = fmt.Sprintf("工具权限拒绝: %s", firstNonEmpty(permission.Reason, "permission policy denied execution"))
 		result.IsError = true
-		return finalizeToolResult(result)
+		return rt.finalizeToolResult(result)
 	case tool.PermissionAsk:
 		decision, err := rt.awaitApproval(ctx, selectedTool, result, input, permission)
 		if err != nil {
 			result.Content = fmt.Sprintf("工具审批失败: %v", err)
 			result.IsError = true
-			return finalizeToolResult(result)
+			return rt.finalizeToolResult(result)
 		}
 		if decision == ApprovalDecisionRejected {
 			result.Content = "工具执行已被审批拒绝"
 			result.IsError = true
-			return finalizeToolResult(result)
+			return rt.finalizeToolResult(result)
 		}
 	default:
 		result.Content = fmt.Sprintf("工具权限拒绝: invalid permission decision %q", permission.Behavior)
 		result.IsError = true
-		return finalizeToolResult(result)
+		return rt.finalizeToolResult(result)
 	}
 
 	output, err := rt.executeTool(toolCtx, result, selectedTool, input)
 	if err != nil {
 		result.Content = fmt.Sprintf("工具执行失败: %v", err)
 		result.IsError = true
-		return finalizeToolResult(result)
+		return rt.finalizeToolResult(result)
 	}
 
 	result.Content = output
 	rt.emitArtifacts(result, selectedTool, input, output)
-	return finalizeToolResult(result)
+	return rt.finalizeToolResult(result)
 }
 
 func (rt *ToolRuntime) executeTool(
@@ -249,8 +270,22 @@ func (fn toolObserverFunc) OnCommandOutput(output tool.CommandOutput) {
 	fn(output)
 }
 
-func finalizeToolResult(result ToolExecutionResult) ToolExecutionResult {
-	limited := outputlimit.Limit(result.Content, outputlimit.DefaultToolResultMaxChars)
+func (rt *ToolRuntime) finalizeToolResult(result ToolExecutionResult) ToolExecutionResult {
+	limited := outputlimit.Limit(result.Content, rt.toolResultMaxChars)
+	if !limited.Truncated {
+		result.Content = limited.Content
+		result.Truncated = false
+		return result
+	}
+	if rt.toolResultStore != nil {
+		handle, err := rt.toolResultStore.Persist(result.Content, rt.toolResultPreviewChars)
+		if err == nil {
+			result.Content = toolresults.FormatModelContent(handle)
+			result.Truncated = true
+			result.ToolResultHandle = &handle
+			return result
+		}
+	}
 	result.Content = limited.Content
 	result.Truncated = limited.Truncated
 	return result

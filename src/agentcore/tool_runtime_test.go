@@ -15,6 +15,7 @@ import (
 	_ "awaken/src/tools/apply_patch"
 	_ "awaken/src/tools/shell"
 	_ "awaken/src/tools/todo_write"
+	_ "awaken/src/tools/web_fetch"
 )
 
 type runtimeTestTool struct {
@@ -1128,6 +1129,29 @@ func TestToolRuntimeDeniesBeforeExecution(t *testing.T) {
 	}
 	if observed != "" {
 		t.Fatalf("expected denied tool not to execute, observed %q", observed)
+	}
+}
+
+func TestToolRuntimeDoesNotRequestApprovalForWebFetch(t *testing.T) {
+	var got []AwakenEvent
+	result := NewToolRuntime(testApprovalAwaiter{
+		decision: ApprovalDecisionRejected,
+		events:   &got,
+	}).Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_web_fetch",
+		Function: convcontext.FunctionCall{
+			Name:      "web_fetch",
+			Arguments: `{"url":"http://127.0.0.1/"}`,
+		},
+	})
+
+	if !result.IsError || !strings.Contains(result.Content, "拒绝访问") {
+		t.Fatalf("expected private URL denial to be returned as tool error, got %+v", result)
+	}
+	for _, event := range got {
+		if event.Type == ApprovalRequestedEventType {
+			t.Fatalf("unexpected approval request for read-only web_fetch: %+v", got)
+		}
 	}
 }
 

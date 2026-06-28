@@ -3,6 +3,8 @@ package shellhooks
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -14,6 +16,17 @@ type fakeRunner struct {
 	mu       sync.Mutex
 	requests []RunRequest
 	run      func(context.Context, RunRequest) (RunOutput, error)
+}
+
+func TestShellhooksHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_SHELLHOOKS_HELPER") != "1" {
+		return
+	}
+	if os.Getenv("GO_SHELLHOOKS_MODE") == "large-output" {
+		fmt.Print(strings.Repeat("x", DefaultMaxOutputChars+256))
+		os.Exit(0)
+	}
+	os.Exit(0)
 }
 
 func (f *fakeRunner) Run(ctx context.Context, request RunRequest) (RunOutput, error) {
@@ -272,5 +285,59 @@ func TestRedactionCoversOutputAndErrors(t *testing.T) {
 	}
 	if !strings.Contains(result.Stderr, redactedMarker) {
 		t.Fatalf("stderr = %q, want redaction marker", result.Stderr)
+	}
+}
+
+func TestApprovalKeyIncludesExplicitExecutionContext(t *testing.T) {
+	store := NewMemoryApprovalStore()
+	spec := Spec{
+		Event: EventSessionStart,
+		Argv:  []string{"hook"},
+		CWD:   "/tmp/one",
+		Env:   []string{"B=2", "A=1"},
+	}
+	store.Set(spec, ApprovalApproved)
+
+	if got := store.State(spec); got != ApprovalApproved {
+		t.Fatalf("approval = %s, want %s", got, ApprovalApproved)
+	}
+	if got := store.State(Spec{
+		Event: EventSessionStart,
+		Argv:  []string{"hook"},
+		CWD:   "/tmp/two",
+		Env:   []string{"A=1", "B=2"},
+	}); got != ApprovalUnknown {
+		t.Fatalf("approval with different cwd = %s, want %s", got, ApprovalUnknown)
+	}
+	if got := store.State(Spec{
+		Event: EventSessionStart,
+		Argv:  []string{"hook"},
+		CWD:   "/tmp/one",
+		Env:   []string{"A=1", "B=3"},
+	}); got != ApprovalUnknown {
+		t.Fatalf("approval with different env = %s, want %s", got, ApprovalUnknown)
+	}
+}
+
+func TestOSRunnerTruncatesLargeOutput(t *testing.T) {
+	runner := OSRunner{}
+	output, err := runner.Run(context.Background(), RunRequest{
+		Argv: []string{os.Args[0], "-test.run=TestShellhooksHelperProcess"},
+		Env: []string{
+			"GO_WANT_SHELLHOOKS_HELPER=1",
+			"GO_SHELLHOOKS_MODE=large-output",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if output.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0", output.ExitCode)
+	}
+	if !strings.Contains(output.Stdout, "[... truncated: omitted ") {
+		t.Fatalf("stdout = %q, want truncation notice", output.Stdout)
+	}
+	if strings.Count(output.Stdout, "[... truncated: omitted ") != 1 {
+		t.Fatalf("stdout = %q, want exactly one truncation notice", output.Stdout)
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"time"
+
+	"awaken/src/internal/outputlimit"
 )
 
 type CommandRunner interface {
@@ -15,15 +17,17 @@ type CommandRunner interface {
 
 type OSRunner struct{}
 
+const DefaultMaxOutputChars = outputlimit.DefaultToolResultMaxChars
+
 func (OSRunner) Run(ctx context.Context, request RunRequest) (RunOutput, error) {
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
+	stdout := outputlimit.NewCappedBuffer(DefaultMaxOutputChars)
+	stderr := outputlimit.NewCappedBuffer(DefaultMaxOutputChars)
 
 	started := time.Now()
 	cmd := exec.CommandContext(ctx, request.Argv[0], request.Argv[1:]...)
 	cmd.Stdin = bytes.NewReader(request.Stdin)
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	if request.CWD != "" {
 		cmd.Dir = request.CWD
 	}
@@ -32,9 +36,11 @@ func (OSRunner) Run(ctx context.Context, request RunRequest) (RunOutput, error) 
 	}
 
 	err := cmd.Run()
+	stdoutResult := stdout.Result()
+	stderrResult := stderr.Result()
 	output := RunOutput{
-		Stdout:   stdout.String(),
-		Stderr:   stderr.String(),
+		Stdout:   stdoutResult.Content,
+		Stderr:   stderrResult.Content,
 		Duration: time.Since(started),
 	}
 

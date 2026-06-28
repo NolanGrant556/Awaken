@@ -1,6 +1,7 @@
 package shellhooks
 
 import (
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,8 @@ type HookKey struct {
 	Event   Event  `json:"event"`
 	Matcher string `json:"matcher,omitempty"`
 	Command string `json:"command"`
+	CWD     string `json:"cwd,omitempty"`
+	Env     string `json:"env,omitempty"`
 }
 
 type ApprovalRecord struct {
@@ -79,6 +82,8 @@ func KeyForSpec(spec Spec) HookKey {
 		Event:   spec.Event,
 		Matcher: strings.TrimSpace(spec.Matcher),
 		Command: commandIdentity(spec),
+		CWD:     strings.TrimSpace(spec.CWD),
+		Env:     normalizeEnv(spec.Env),
 	}
 }
 
@@ -87,4 +92,19 @@ func commandIdentity(spec Spec) string {
 		return "argv:" + strings.Join(spec.Argv, "\x00")
 	}
 	return "command:" + strings.TrimSpace(spec.Command)
+}
+
+func normalizeEnv(env []string) string {
+	if len(env) == 0 {
+		return ""
+	}
+	normalized := make([]string, 0, len(env))
+	for _, entry := range env {
+		entry = strings.TrimSpace(entry)
+		if entry != "" {
+			normalized = append(normalized, entry)
+		}
+	}
+	sort.Strings(normalized)
+	return strings.Join(normalized, "\x00")
 }

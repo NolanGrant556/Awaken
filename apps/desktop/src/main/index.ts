@@ -577,8 +577,16 @@ app.whenReady().then(async () => {
   });
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
+    if (windows.length === 0) {
       createMainWindow();
+      return;
+    }
+
+    for (const window of windows) {
+      ensureWindowVisible(window);
+      window.show();
+      window.focus();
     }
   });
 });

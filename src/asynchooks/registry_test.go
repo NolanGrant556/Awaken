@@ -49,8 +49,9 @@ func TestCheckResponsesCompletedCases(t *testing.T) {
 			name:          "async JSON ignored",
 			stdout:        "{\"async\":true,\"timeout\":1000}\n",
 			exitCode:      0,
-			wantResponses: 0,
-			wantRemoved:   true,
+			wantResponses: 1,
+			wantSync:      nil,
+			wantOutcome:   OutcomeSuccess,
 		},
 		{
 			name:          "empty stdout removed without response",
@@ -136,6 +137,19 @@ func TestKillRemovesHook(t *testing.T) {
 	}
 }
 
+func TestKillDoesNotRemoveCompletedHook(t *testing.T) {
+	registry := NewRegistry()
+	registry.Register(testHook("process-1"))
+	registry.Complete("process-1", "{\"decision\":\"allow\"}\n", "", 0)
+
+	registry.Kill("process-1")
+
+	responses := registry.CheckResponses()
+	if len(responses) != 1 {
+		t.Fatalf("expected completed hook to remain readable, got %d responses", len(responses))
+	}
+}
+
 func TestRemoveDelivered(t *testing.T) {
 	registry := NewRegistry()
 	registry.Register(testHook("process-1"))
@@ -195,6 +209,27 @@ func TestSessionStartResponseInvalidatesSessionEnv(t *testing.T) {
 	}
 	if !responses[0].InvalidateSessionEnv {
 		t.Fatal("expected SessionStart completion to invalidate session env")
+	}
+}
+
+func TestCompleteIgnoresTerminalHooks(t *testing.T) {
+	registry := NewRegistry()
+	registry.Register(testHook("process-1"))
+	registry.Complete("process-1", "{\"decision\":\"allow\"}\n", "first", 0)
+	registry.Complete("process-1", "{\"decision\":\"block\"}\n", "second", 2)
+
+	responses := registry.CheckResponses()
+	if len(responses) != 1 {
+		t.Fatalf("expected one response, got %d", len(responses))
+	}
+	if responses[0].Outcome != OutcomeSuccess {
+		t.Fatalf("expected first completion to win, got %q", responses[0].Outcome)
+	}
+	if responses[0].Stderr != "first" {
+		t.Fatalf("expected stderr from first completion, got %q", responses[0].Stderr)
+	}
+	if !reflect.DeepEqual(responses[0].SyncResponse, map[string]any{"decision": "allow"}) {
+		t.Fatalf("expected sync response from first completion, got %#v", responses[0].SyncResponse)
 	}
 }
 

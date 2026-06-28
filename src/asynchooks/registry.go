@@ -86,6 +86,9 @@ func (r *Registry) Complete(processID, stdout, stderr string, exitCode int) {
 	if !ok {
 		return
 	}
+	if state.hook.Status != StatusRunning {
+		return
+	}
 	state.hook.Status = StatusCompleted
 	state.stdout = stdout
 	state.stderr = stderr
@@ -98,6 +101,10 @@ func (r *Registry) Kill(processID string) {
 	defer r.mu.Unlock()
 
 	if r.hooks == nil {
+		return
+	}
+	state, ok := r.hooks[processID]
+	if !ok || state.hook.Status != StatusRunning {
 		return
 	}
 	delete(r.hooks, processID)
@@ -135,12 +142,7 @@ func (r *Registry) CheckResponses() []Response {
 			continue
 		}
 
-		syncResponse, ok := firstSyncResponse(state.stdout)
-		if !ok {
-			delete(r.hooks, processID)
-			continue
-		}
-
+		syncResponse, _ := firstSyncResponse(state.stdout)
 		state.delivered = true
 		responses = append(responses, state.response(syncResponse, outcomeForExitCode(state.exitCode)))
 	}

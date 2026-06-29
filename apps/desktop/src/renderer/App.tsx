@@ -2240,48 +2240,6 @@ export function App() {
     );
   }
 
-  function renderPolicyDecisionPanel() {
-    if (runtimeState.policyDecisions.length === 0) {
-      return null;
-    }
-    return (
-      <div className="runtime-panel wave3-policy-panel">
-        <strong>Policy decisions</strong>
-        <div className="wave3-policy-list">
-          {runtimeState.policyDecisions.slice(-4).map((decision) => (
-            <div key={decision.id} className="wave3-policy-item">
-              <span>{decision.category}</span>
-              <strong>{decision.decision}</strong>
-              {decision.status ? <p>{decision.status}</p> : null}
-              {policyDecisionRoutes(decision.payload).map((route) => (
-                <p key={`${route.path}:${route.route}`}>
-                  {route.route} · {route.path}
-                </p>
-              ))}
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  function policyDecisionRoutes(payload?: Record<string, unknown>): Array<{ path: string; route: string }> {
-    const routes = payload?.routes;
-    if (!Array.isArray(routes)) {
-      return [];
-    }
-    return routes.flatMap((route) => {
-      if (!route || typeof route !== "object") {
-        return [];
-      }
-      const record = route as { path?: unknown; route?: unknown };
-      if (typeof record.path !== "string" || typeof record.route !== "string") {
-        return [];
-      }
-      return [{ path: record.path, route: record.route }];
-    });
-  }
-
   function handleSidebarResizeStart(event: ReactPointerEvent<HTMLDivElement>): void {
     event.preventDefault();
     const target = event.currentTarget;
@@ -3146,8 +3104,6 @@ export function App() {
                     ) : null}
 
                     {renderWaveSettingsPanel()}
-                    {renderPolicyDecisionPanel()}
-
                     {showCenterComposer ? (
                       <div className="run-stage-center-composer">
                         <TaskWelcome />

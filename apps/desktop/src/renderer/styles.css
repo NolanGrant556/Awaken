@@ -1404,6 +1404,18 @@ pre {
   width: 100%;
 }
 
+.aw-composer-dock > .wave3-composer-stack {
+  width: min(760px, 100%);
+}
+
+.aw-composer-dock > .wave3-composer-stack > .composer-bar-dock {
+  width: 100%;
+}
+
+.run-stage-center-composer > .wave3-composer-stack {
+  justify-items: center;
+}
+
 .wave3-busy-controls,
 .wave3-rate-limit-actions {
   display: flex;
@@ -1430,8 +1442,7 @@ pre {
   background: var(--aw-status-running-bg);
 }
 
-.wave3-settings-panel,
-.wave3-policy-panel {
+.wave3-settings-panel {
   display: grid;
   gap: 12px;
 }
@@ -1482,27 +1493,6 @@ pre {
 .wave3-model-meta code {
   max-width: 100%;
   overflow-wrap: anywhere;
-}
-
-.wave3-policy-list {
-  display: grid;
-  gap: 8px;
-}
-
-.wave3-policy-item {
-  display: grid;
-  gap: 3px;
-  padding: 8px;
-  border: 1px solid var(--aw-border-main);
-  border-radius: 6px;
-}
-
-.wave3-policy-item span,
-.wave3-policy-item p {
-  margin: 0;
-  color: var(--aw-text-subtle);
-  font-size: 11px;
-  line-height: 1.35;
 }
 
 @media (max-width: 1320px) {

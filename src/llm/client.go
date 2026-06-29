@@ -13,6 +13,7 @@ import (
 	"time"
 
 	ctx "awaken/src/context"
+	"awaken/src/providererrors"
 	"awaken/src/usage"
 )
 
@@ -206,9 +207,16 @@ func requestFailedError(resp *http.Response) error {
 	// Drain body to allow connection reuse, but do not include body in error
 	// message to avoid leaking provider-internal details or secrets.
 	body := readErrorBody(resp.Body)
-	return &RequestError{
+	classified := providererrors.Classify(providererrors.ClassificationInput{
 		StatusCode: resp.StatusCode,
-		Kind:       ClassifyHTTPError(resp.StatusCode, body),
+		Body:       string(body),
+	})
+	return &RequestError{
+		StatusCode:     resp.StatusCode,
+		Kind:           errorKindFromProviderReason(classified.Reason, resp.StatusCode, string(body)),
+		ProviderReason: string(classified.Reason),
+		RetryableHint:  classified.Retryable,
+		Message:        classified.Message,
 	}
 }
 

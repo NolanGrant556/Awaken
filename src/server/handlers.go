@@ -10,6 +10,7 @@ import (
 
 	"awaken/src/agentcore"
 	"awaken/src/agentdefs"
+	"awaken/src/draintimeout"
 	"awaken/src/protocol/agui"
 	"awaken/src/redaction"
 	awruntime "awaken/src/runtime"
@@ -66,6 +67,10 @@ type agentDefinitionsLoader func(workspaceRoot string) (agentdefs.Result, error)
 
 type auditEventsResponse struct {
 	Events []agentcore.SecurityAuditEvent `json:"events"`
+}
+
+type runtimeDrainRequest struct {
+	TimeoutMS *int64 `json:"timeout_ms"`
 }
 
 func writeErrorJSON(w http.ResponseWriter, status int, code, message string) {
@@ -135,6 +140,25 @@ func (h runHandlers) handleListThreads(w http.ResponseWriter, r *http.Request) {
 func (h runHandlers) handleSearchThreads(w http.ResponseWriter, r *http.Request) {
 	limit := parsePositiveInt(r.URL.Query().Get("limit"), 20)
 	writeJSON(w, http.StatusOK, h.runService.SearchThreads(r.URL.Query().Get("q"), limit))
+}
+
+func (h runHandlers) handleRuntimeDrain(w http.ResponseWriter, r *http.Request) {
+	var req runtimeDrainRequest
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := decodeJSON(r, &req); err != nil {
+			writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+			return
+		}
+	} else if r.Body != nil {
+		_ = r.Body.Close()
+	}
+
+	timeout := draintimeout.DefaultTimeout
+	if req.TimeoutMS != nil && *req.TimeoutMS >= 0 {
+		timeout = time.Duration(*req.TimeoutMS) * time.Millisecond
+	}
+	result := h.runService.Drain(r.Context(), timeout)
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (h runHandlers) handleGetThreadLite(w http.ResponseWriter, r *http.Request) {
@@ -613,13 +637,16 @@ func mapRuntimeEvent(event awruntime.Event) []agui.Event {
 		}}
 	case awruntime.EventKindRunError:
 		return []agui.Event{{
-			Type:      agui.EventRunError,
-			Seq:       frameSeq(event.Seq, 0),
-			Timestamp: event.Timestamp.UnixMilli(),
-			ThreadID:  event.ThreadID,
-			RunID:     event.RunID,
-			Message:   redaction.RedactString(event.Message),
-			Code:      event.Code,
+			Type:             agui.EventRunError,
+			Seq:              frameSeq(event.Seq, 0),
+			Timestamp:        event.Timestamp.UnixMilli(),
+			ThreadID:         event.ThreadID,
+			RunID:            event.RunID,
+			Message:          redaction.RedactString(event.Message),
+			Code:             event.Code,
+			ProviderReason:   event.ProviderReason,
+			Retryable:        event.Retryable,
+			RateLimitOptions: mapRuntimeRateLimitOptions(event.RateLimitOptions),
 		}}
 	case awruntime.EventKindRunStatusChanged:
 		return []agui.Event{{
@@ -633,4 +660,18 @@ func mapRuntimeEvent(event awruntime.Event) []agui.Event {
 	default:
 		return nil
 	}
+}
+
+func mapRuntimeRateLimitOptions(options []agentcore.RateLimitOption) []agui.RateLimitOption {
+	if len(options) == 0 {
+		return nil
+	}
+	mapped := make([]agui.RateLimitOption, 0, len(options))
+	for _, option := range options {
+		mapped = append(mapped, agui.RateLimitOption{
+			Label: option.Label,
+			Value: option.Value,
+		})
+	}
+	return mapped
 }

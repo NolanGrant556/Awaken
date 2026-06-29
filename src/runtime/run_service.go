@@ -13,8 +13,13 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	"awaken/src/backgroundnotify"
+	"awaken/src/busyinput"
 	convcontext "awaken/src/context"
+	"awaken/src/imagerouting"
 	"awaken/src/lifecyclehooks"
+	"awaken/src/llm"
+	"awaken/src/ratelimitoptions"
 	"awaken/src/sessionstate"
 	"awaken/src/sessiontags"
 	"awaken/src/slashcommands"
@@ -66,6 +71,19 @@ type StartRunRequest struct {
 	WorkspacePolicy  workspaceguard.Policy    `json:"workspace_policy,omitempty"`
 	Profile          *agentcore.RunProfile    `json:"profile,omitempty"`
 	Delegation       *DelegationMetadata      `json:"delegation,omitempty"`
+	PolicyOptions    RunPolicyOptions         `json:"policy_options,omitempty"`
+	Attachments      []RunAttachment          `json:"attachments,omitempty"`
+}
+
+type RunPolicyOptions struct {
+	BusyInputMode              string `json:"busy_input_mode,omitempty"`
+	BackgroundNotificationMode string `json:"background_notification_mode,omitempty"`
+	ImageInputMode             string `json:"image_input_mode,omitempty"`
+}
+
+type RunAttachment struct {
+	Path string `json:"path"`
+	Type string `json:"type,omitempty"`
 }
 
 type Executor interface {
@@ -83,6 +101,7 @@ type RunService struct {
 	sessions       map[string]*Session
 	threads        map[string]*Thread
 	scheduledRuns  map[string]*scheduledRunState
+	queuedRuns     map[string]queuedRunExecution
 	scheduleClock  scheduleClock
 	auditLog       *AuditLog
 	newAgent       func(workspace WorkspaceConfig, threadID string) *agentcore.Agent
@@ -111,8 +130,20 @@ type Thread struct {
 	activeRunID  string
 	delegation   *DelegationMetadata
 	runIDs       []string
+	queuedRunIDs []string
 	createdAt    time.Time
 	updatedAt    time.Time
+}
+
+type queuedRunExecution struct {
+	executorInput    string
+	workspace        WorkspaceConfig
+	ctx              context.Context
+	permissionPolicy tool.PermissionPolicy
+	approvalPolicy   agentcore.ApprovalPolicy
+	profile          *agentcore.RunProfile
+	policyOptions    RunPolicyOptions
+	attachments      []RunAttachment
 }
 
 type ThreadSnapshot struct {
@@ -181,6 +212,7 @@ func NewRunServiceWithConfig(
 		sessions:       make(map[string]*Session),
 		threads:        make(map[string]*Thread),
 		scheduledRuns:  make(map[string]*scheduledRunState),
+		queuedRuns:     make(map[string]queuedRunExecution),
 		scheduleClock:  realScheduleClock{},
 		auditLog:       NewAuditLog(defaultAuditLogCapacity),
 		newAgent:       newAgent,
@@ -264,9 +296,65 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			return Run{}, ErrThreadWorkspaceMismatch
 		}
 		if thread.activeRunID != "" {
+			if strings.TrimSpace(req.PolicyOptions.BusyInputMode) == "" {
+				s.mu.Unlock()
+				cancel()
+				return Run{}, ErrThreadBusy
+			}
+			activeSession := s.sessions[thread.activeRunID]
+			decision := busyinput.Decide(busyinput.Request{
+				Mode:     busyinput.NormalizeMode(req.PolicyOptions.BusyInputMode),
+				State:    busyinput.StateBusy,
+				CanSteer: false,
+				Now:      now,
+			})
+			if !decision.Accept || !decision.QueuePending {
+				s.mu.Unlock()
+				cancel()
+				return Run{}, ErrThreadBusy
+			}
+			if delegation == nil && thread.delegation != nil {
+				delegation = cloneDelegationMetadata(thread.delegation)
+			}
+			session := NewSessionWithConfig(runID, threadID, trimmed, cancel, SessionConfig{
+				ApprovalPolicy: approvalPolicy,
+				Observer:       persistenceObserver{store: s.store},
+				Delegation:     delegation,
+				InitialStatus:  RunStatusQueued,
+			})
+			session.SetSecurityAuditRecorder(s.auditLog)
+			s.sessions[runID] = session
+			s.queuedRuns[runID] = queuedRunExecution{
+				executorInput:    executorInput,
+				workspace:        workspace,
+				ctx:              ctx,
+				permissionPolicy: permissionPolicy,
+				approvalPolicy:   approvalPolicy,
+				profile:          req.Profile,
+				policyOptions:    req.PolicyOptions,
+				attachments:      append([]RunAttachment(nil), req.Attachments...),
+			}
+			thread.latestRunID = runID
+			thread.queuedRunIDs = append(thread.queuedRunIDs, runID)
+			thread.runIDs = append(thread.runIDs, runID)
+			thread.updatedAt = now
 			s.mu.Unlock()
-			cancel()
-			return Run{}, ErrThreadBusy
+
+			if s.store != nil {
+				persistenceObserver{store: s.store}.OnRunUpdated(session.Snapshot())
+				s.persistThread(threadID)
+			}
+			session.RecordAgentEvent(policyDecisionEvent(
+				"busy_input",
+				string(decision.Action),
+				decision.Reason,
+				decision.Status,
+				map[string]interface{}{"busy_input": decision},
+			))
+			if decision.InterruptRequested && activeSession != nil {
+				activeSession.RequestCancel()
+			}
+			return session.Snapshot(), nil
 		}
 		if delegation == nil && thread.delegation != nil {
 			delegation = cloneDelegationMetadata(thread.delegation)
@@ -323,6 +411,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		return Run{}, fmt.Errorf("%w: invalid profile: %v", ErrInvalidInput, err)
 	}
 	executor := s.newExecutor(effectiveAgent)
+	ctx, executorInput = s.prepareRunExecution(session, effectiveAgent, executorInput, req.PolicyOptions, req.Attachments, ctx)
 	s.recordRunAudit(session.Snapshot(), agentcore.SecurityAuditEvent{
 		Type:    agentcore.SecurityAuditRunStarted,
 		Action:  agentcore.SecurityAuditActionRun,
@@ -332,6 +421,218 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	go s.execute(session, executor, executorInput, workspace, ctx)
 
 	return session.Snapshot(), nil
+}
+
+func (s *RunService) prepareRunExecution(
+	session *Session,
+	agent *agentcore.Agent,
+	input string,
+	options RunPolicyOptions,
+	attachments []RunAttachment,
+	ctx context.Context,
+) (context.Context, string) {
+	if strings.TrimSpace(options.BackgroundNotificationMode) != "" {
+		bgMode, _ := backgroundnotify.NormalizeMode(options.BackgroundNotificationMode)
+		if bgMode == "" {
+			bgMode = backgroundnotify.ModeAll
+		}
+		session.RecordAgentEvent(policyDecisionEvent(
+			"background_notification",
+			string(bgMode),
+			"run notification policy resolved",
+			"notification mode: "+string(bgMode),
+			map[string]interface{}{"mode": string(bgMode)},
+		))
+	}
+
+	imagePaths := imageAttachmentPaths(attachments)
+	if len(imagePaths) == 0 || agent == nil {
+		return ctx, input
+	}
+
+	config := agent.GetConfig()
+	protocol := llm.ResolveProtocol(llm.Config{
+		BaseURL: config.ModelConfig.BaseURL,
+		Model:   config.ModelConfig.Model,
+	})
+	decision := imagerouting.Decide(string(protocol), config.ModelConfig.Model, imagerouting.Config{
+		ImageInputMode: imagerouting.Mode(options.ImageInputMode),
+	}, modelVisionCapabilities)
+
+	nativeSupported := protocol == llm.ProtocolOpenAIChat && decision.Mode == imagerouting.ModeNative
+	route := "text_fallback"
+	status := "image paths added as text references"
+	reason := decision.Reason
+	if nativeSupported {
+		partsResult := imagerouting.BuildContentParts(input, imagePaths)
+		parts := make([]convcontext.ContentPart, 0, len(partsResult.Parts))
+		for _, part := range partsResult.Parts {
+			converted := convcontext.ContentPart{Type: part.Type, Text: part.Text}
+			if part.ImageURL != nil {
+				converted.ImageURL = &convcontext.ImageURL{URL: part.ImageURL.URL}
+			}
+			parts = append(parts, converted)
+		}
+		if len(partsResult.Images) > 0 {
+			ctx = agentcore.ContextWithUserContentParts(ctx, parts)
+			route = "native"
+			status = "images routed as OpenAI-compatible image parts"
+		}
+		if len(partsResult.Skipped) > 0 {
+			route = "partial_native"
+			status = "some images could not be read"
+		}
+		session.RecordAgentEvent(policyDecisionEvent(
+			"image_routing",
+			route,
+			reason,
+			status,
+			map[string]interface{}{
+				"mode":    string(decision.Mode),
+				"routes":  imageRoutes(imagePaths, route, reason),
+				"skipped": partsResult.Skipped,
+			},
+		))
+		return ctx, input
+	}
+
+	if decision.Mode == imagerouting.ModeNative {
+		route = "unsupported"
+		status = "native image routing unavailable for this provider; image paths added as text references"
+		reason = "native image routing requires OpenAI-compatible chat vision"
+	}
+	input = prependImagePathRefs(input, imagePaths)
+	session.RecordAgentEvent(policyDecisionEvent(
+		"image_routing",
+		route,
+		reason,
+		status,
+		map[string]interface{}{
+			"mode":   string(decision.Mode),
+			"routes": imageRoutes(imagePaths, route, reason),
+		},
+	))
+	return ctx, input
+}
+
+func (s *RunService) startNextQueuedRun(threadID string) {
+	s.mu.Lock()
+	thread, ok := s.threads[threadID]
+	if !ok || thread.activeRunID != "" || len(thread.queuedRunIDs) == 0 {
+		s.mu.Unlock()
+		return
+	}
+
+	var runID string
+	var queued queuedRunExecution
+	var session *Session
+	for len(thread.queuedRunIDs) > 0 {
+		runID = thread.queuedRunIDs[0]
+		thread.queuedRunIDs = thread.queuedRunIDs[1:]
+		var found bool
+		queued, found = s.queuedRuns[runID]
+		if !found {
+			continue
+		}
+		session = s.sessions[runID]
+		if session == nil {
+			delete(s.queuedRuns, runID)
+			continue
+		}
+		if isTerminalStatus(session.Snapshot().Status) {
+			delete(s.queuedRuns, runID)
+			continue
+		}
+		break
+	}
+	if session == nil {
+		s.mu.Unlock()
+		return
+	}
+	delete(s.queuedRuns, runID)
+	thread.activeRunID = runID
+	thread.latestRunID = runID
+	thread.updatedAt = time.Now().UTC()
+	agent := thread.agent
+	s.mu.Unlock()
+
+	session.StartQueuedRun()
+	effectiveAgent, err := effectiveAgentForRun(agent, queued.workspace, queued.permissionPolicy, queued.approvalPolicy, queued.profile)
+	if err != nil {
+		session.CompleteError(fmt.Sprintf("%v: invalid profile: %v", ErrInvalidInput, err), "INVALID_PROFILE")
+		return
+	}
+	executor := s.newExecutor(effectiveAgent)
+	ctx, input := s.prepareRunExecution(session, effectiveAgent, queued.executorInput, queued.policyOptions, queued.attachments, queued.ctx)
+	s.recordRunAudit(session.Snapshot(), agentcore.SecurityAuditEvent{
+		Type:    agentcore.SecurityAuditRunStarted,
+		Action:  agentcore.SecurityAuditActionRun,
+		Outcome: agentcore.SecurityAuditOutcomeStarted,
+		Summary: "queued run started",
+	})
+	go s.execute(session, executor, input, queued.workspace, ctx)
+}
+
+func imageAttachmentPaths(attachments []RunAttachment) []string {
+	paths := make([]string, 0, len(attachments))
+	for _, attachment := range attachments {
+		if strings.TrimSpace(attachment.Path) == "" {
+			continue
+		}
+		kind := strings.ToLower(strings.TrimSpace(attachment.Type))
+		if kind != "" && kind != "image" {
+			continue
+		}
+		paths = append(paths, strings.TrimSpace(attachment.Path))
+	}
+	return paths
+}
+
+func prependImagePathRefs(input string, imagePaths []string) string {
+	if len(imagePaths) == 0 {
+		return input
+	}
+	refs := make([]string, 0, len(imagePaths))
+	for _, path := range imagePaths {
+		refs = append(refs, fmt.Sprintf("@%q", path))
+	}
+	return strings.TrimSpace(strings.Join(refs, " ") + " " + input)
+}
+
+func imageRoutes(paths []string, route, reason string) []map[string]string {
+	routes := make([]map[string]string, 0, len(paths))
+	for _, path := range paths {
+		routes = append(routes, map[string]string{
+			"path":   path,
+			"route":  route,
+			"reason": reason,
+		})
+	}
+	return routes
+}
+
+func modelVisionCapabilities(provider, model string) (imagerouting.ModelCapabilities, bool) {
+	if provider != string(llm.ProtocolOpenAIChat) {
+		return imagerouting.ModelCapabilities{SupportsVision: false}, true
+	}
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	for _, token := range []string{"gpt-4o", "gpt-4.1", "gpt-4.5", "o3", "o4", "vision", "gemini"} {
+		if strings.Contains(normalized, token) {
+			return imagerouting.ModelCapabilities{SupportsVision: true}, true
+		}
+	}
+	return imagerouting.ModelCapabilities{SupportsVision: false}, true
+}
+
+func policyDecisionEvent(category, decision, reason, status string, payload map[string]interface{}) agentcore.AwakenEvent {
+	return agentcore.AwakenEvent{
+		Type:           agentcore.PolicyDecisionEventType,
+		PolicyCategory: category,
+		PolicyDecision: decision,
+		PolicyReason:   reason,
+		PolicyStatus:   status,
+		PolicyPayload:  payload,
+	}
 }
 
 func evaluateWorkspacePolicy(workspaceRoot string, policy workspaceguard.Policy) error {
@@ -422,6 +723,65 @@ func (s *RunService) CancelRun(runID string) (Run, error) {
 	return session.RequestCancel(), nil
 }
 
+type DrainResult struct {
+	ActiveRuns int           `json:"active_runs"`
+	QueuedRuns int           `json:"queued_runs"`
+	TimedOut   bool          `json:"timed_out"`
+	Timeout    time.Duration `json:"-"`
+	TimeoutMS  int64         `json:"timeout_ms"`
+}
+
+func (s *RunService) Drain(ctx context.Context, timeout time.Duration) DrainResult {
+	if s == nil {
+		return DrainResult{}
+	}
+	if timeout < 0 {
+		timeout = 0
+	}
+	if timeout == 0 {
+		active, queued := s.activeAndQueuedCounts()
+		return DrainResult{ActiveRuns: active, QueuedRuns: queued, TimedOut: active+queued > 0, Timeout: timeout, TimeoutMS: 0}
+	}
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		active, queued := s.activeAndQueuedCounts()
+		if active+queued == 0 {
+			return DrainResult{Timeout: timeout, TimeoutMS: timeout.Milliseconds()}
+		}
+		select {
+		case <-ctx.Done():
+			return DrainResult{ActiveRuns: active, QueuedRuns: queued, TimedOut: true, Timeout: timeout, TimeoutMS: timeout.Milliseconds()}
+		case <-deadline.C:
+			active, queued = s.activeAndQueuedCounts()
+			return DrainResult{ActiveRuns: active, QueuedRuns: queued, TimedOut: active+queued > 0, Timeout: timeout, TimeoutMS: timeout.Milliseconds()}
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *RunService) activeAndQueuedCounts() (int, int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	active := 0
+	queued := 0
+	for _, thread := range s.threads {
+		if thread.activeRunID != "" {
+			active++
+		}
+		for _, runID := range thread.queuedRunIDs {
+			session := s.sessions[runID]
+			if session != nil && session.Snapshot().Status == RunStatusQueued {
+				queued++
+			}
+		}
+	}
+	return active, queued
+}
+
 func (s *RunService) ResolveApproval(runID, approvalID string, decision agentcore.ApprovalDecision) error {
 	session, err := s.session(runID)
 	if err != nil {
@@ -468,7 +828,37 @@ func (s *RunService) execute(session *Session, executor Executor, input string, 
 	}
 
 	runStatus = string(RunStatusError)
-	session.CompleteError(err.Error(), "")
+	session.CompleteErrorWithInfo(err.Error(), "", providerErrorInfo(err))
+}
+
+func providerErrorInfo(err error) ProviderErrorInfo {
+	var requestErr *llm.RequestError
+	if !errors.As(err, &requestErr) {
+		return ProviderErrorInfo{}
+	}
+	reason := strings.TrimSpace(requestErr.ProviderReason)
+	if reason == "" {
+		reason = string(requestErr.Kind)
+	}
+	info := ProviderErrorInfo{
+		ProviderReason: reason,
+		Retryable:      requestErr.Retryable(),
+	}
+	if requestErr.Kind == llm.ErrorKindRateLimit || reason == "rate_limit" {
+		for _, option := range ratelimitoptions.BuildOptions(ratelimitoptions.MenuInput{
+			SubscriptionType:            ratelimitoptions.SubscriptionPro,
+			ExtraUsageFeatureEnabled:    true,
+			AccountHasExtraUsageEnabled: false,
+			HasBillingAccess:            true,
+			UpgradeEnabled:              true,
+		}) {
+			info.RateLimitOptions = append(info.RateLimitOptions, agentcore.RateLimitOption{
+				Label: option.Label,
+				Value: string(option.Value),
+			})
+		}
+	}
+	return info
 }
 
 func (s *RunService) recordRunAudit(run Run, event agentcore.SecurityAuditEvent) {
@@ -537,6 +927,7 @@ func (s *RunService) clearActiveRun(threadID, runID string) {
 	if titleInputs != nil {
 		go s.generateThreadTitleAsync(*titleInputs)
 	}
+	s.startNextQueuedRun(threadID)
 }
 
 func (s *RunService) restorePersistedState() {

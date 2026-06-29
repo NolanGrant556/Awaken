@@ -41,6 +41,7 @@ function createElectronBridge(
       statusCallbacks.push(callback);
       return () => {};
     }),
+    setPolicySettings: vi.fn(async () => {}),
     notifyRendererReady: vi.fn(),
   } as unknown as AwakenBridge;
 
@@ -85,6 +86,16 @@ describe("electron runtime client", () => {
 
     const client = createRuntimeClient();
     await expect(client.getSupervisorStatus()).resolves.toEqual({ status: "running" });
+  });
+
+  it("forwards policy settings through the bridge", async () => {
+    const { bridge } = createElectronBridge({ status: "running" });
+    installBridge(bridge);
+
+    const client = createRuntimeClient();
+    await client.setPolicySettings({ restartDrainTimeoutMs: 30000 });
+
+    expect(bridge.setPolicySettings).toHaveBeenCalledWith({ restartDrainTimeoutMs: 30000 });
   });
 
   it("forwards sanitized supervisor status events", () => {

@@ -51,7 +51,17 @@ import {
 } from "@awaken/design-system";
 import { TaskCenterPanel } from "./TaskCenterPanel";
 import { createRuntimeClient, type SubscribeHandlers } from "./runtime/client";
-import type { RuntimeInfo, RuntimeRunStatus, RuntimeThreadBranchMetadata, StartRunRequest } from "../shared/runtime";
+import type {
+  BackgroundNotificationMode,
+  BusyInputMode,
+  ImageInputMode,
+  RunAttachment,
+  RunPolicyOptions,
+  RuntimeInfo,
+  RuntimeRunStatus,
+  RuntimeThreadBranchMetadata,
+  StartRunRequest,
+} from "../shared/runtime";
 import {
   createInitialRuntimeState,
   reduceRuntimeState,
@@ -487,6 +497,13 @@ const LAYOUT_STEP = 12;
 const DEFAULT_PROMPT_ANCHOR_OFFSET = 0;
 const RUN_STAGE_COMPOSER_SAFE_GAP = 24;
 const LATEST_OUTPUT_FOLLOW_THRESHOLD = 48;
+const POLICY_SETTINGS_KEY = "awaken:wave3:policySettings";
+const DEFAULT_POLICY_SETTINGS: Required<RunPolicyOptions> = {
+  busyInputMode: "queue",
+  backgroundNotificationMode: "all",
+  imageInputMode: "auto",
+  restartDrainTimeoutMs: 60000,
+};
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -527,6 +544,45 @@ function readStoredBoolean(key: string, fallback: boolean): boolean {
   }
 }
 
+function readStoredPolicySettings(): Required<RunPolicyOptions> {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return DEFAULT_POLICY_SETTINGS;
+  }
+  try {
+    const raw = window.localStorage.getItem(POLICY_SETTINGS_KEY);
+    if (!raw) {
+      return DEFAULT_POLICY_SETTINGS;
+    }
+    const parsed = JSON.parse(raw) as Partial<RunPolicyOptions>;
+    return {
+      busyInputMode: normalizeBusyInputMode(parsed.busyInputMode),
+      backgroundNotificationMode: normalizeBackgroundMode(parsed.backgroundNotificationMode),
+      imageInputMode: normalizeImageInputMode(parsed.imageInputMode),
+      restartDrainTimeoutMs: clampNumber(
+        Number(parsed.restartDrainTimeoutMs),
+        0,
+        300000,
+      ) || DEFAULT_POLICY_SETTINGS.restartDrainTimeoutMs,
+    };
+  } catch {
+    return DEFAULT_POLICY_SETTINGS;
+  }
+}
+
+function normalizeBusyInputMode(value?: string): BusyInputMode {
+  return value === "steer" || value === "interrupt" || value === "queue" ? value : "queue";
+}
+
+function normalizeBackgroundMode(value?: string): BackgroundNotificationMode {
+  return value === "result" || value === "error" || value === "off" || value === "all"
+    ? value
+    : "all";
+}
+
+function normalizeImageInputMode(value?: string): ImageInputMode {
+  return value === "native" || value === "text" || value === "auto" ? value : "auto";
+}
+
 function writeStoredValue(key: string, value: string): void {
   if (typeof window === "undefined" || !window.localStorage) {
     return;
@@ -564,6 +620,8 @@ export function App() {
     createInitialRuntimeState,
   );
   const [composerValue, setComposerValue] = useState("");
+  const [policySettings, setPolicySettings] = useState(readStoredPolicySettings);
+  const [imageAttachmentPaths, setImageAttachmentPaths] = useState("");
   const [composerFocusRequest, setComposerFocusRequest] = useState(0);
   const [activeTurnMarkerId, setActiveTurnMarkerId] = useState<string | undefined>();
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
@@ -666,6 +724,13 @@ export function App() {
   useEffect(() => {
     writeStoredValue("awaken:layout:inspectorCollapsed", String(inspectorCollapsed));
   }, [inspectorCollapsed]);
+
+  useEffect(() => {
+    writeStoredValue(POLICY_SETTINGS_KEY, JSON.stringify(policySettings));
+    void runtimeClient.setPolicySettings(policySettings).catch(() => {
+      // Settings sync is best-effort; startRun still carries per-run policy options.
+    });
+  }, [policySettings, runtimeClient]);
 
   useEffect(() => {
     let cancelled = false;
@@ -939,6 +1004,8 @@ export function App() {
   ];
   const topbarStatusLabel = desktopNeedsRestart
     ? "Needs restart"
+    : runtimeState.supervisorStatus === "draining"
+      ? "Draining"
     : desktopStarting
       ? "Starting"
       : undefined;
@@ -957,9 +1024,13 @@ export function App() {
   const activeProjectLabel =
     projectLabelById.get(selectedProjectId) ??
     (pathForSelectedProject ? workspaceLabelForPath(pathForSelectedProject) : "awaken");
+  const modelDisplayLabel =
+    runtimeInfo?.configuredModelDisplayName ||
+    runtimeInfo?.configuredModel ||
+    "Model";
   const composerMetaItems: ComposerBarMetaItem[] = [
     { id: "workspace", label: activeProjectLabel },
-    { id: "runtime", label: "Local" },
+    { id: "runtime", label: modelDisplayLabel },
     { id: "branch", label: "main" },
   ];
 
@@ -1141,6 +1212,7 @@ export function App() {
         if (event.type === "RUN_FINISHED" || event.type === "RUN_ERROR") {
           terminalSeenRef.current = true;
           localStorage.removeItem("awaken:runId");
+          maybeSendRunNotification(event);
         }
         if (event.type === "RUN_STATUS_CHANGED" && event.status === "cancelled") {
           localStorage.removeItem("awaken:runId");
@@ -1172,6 +1244,56 @@ export function App() {
         unsubscribeRef.current = null;
       },
     };
+  }
+
+  function maybeSendRunNotification(event: Parameters<SubscribeHandlers["onEvent"]>[0]): void {
+    const mode = policySettings.backgroundNotificationMode;
+    if (mode === "off") {
+      return;
+    }
+    const isErrorEvent = event.type === "RUN_ERROR" && event.code !== "RUN_CANCELLED";
+    const isResultEvent = event.type === "RUN_FINISHED";
+    if (mode === "error" && !isErrorEvent) {
+      return;
+    }
+    if (mode === "result" && !isResultEvent) {
+      return;
+    }
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      return;
+    }
+    const title = isErrorEvent ? "Awaken run failed" : "Awaken run finished";
+    const body = isErrorEvent
+      ? providerErrorMessageFromRuntime(event.message, event.providerReason)
+      : "Run completed.";
+    const show = () => {
+      try {
+        new Notification(title, { body });
+      } catch {
+        // Desktop notification support is best-effort.
+      }
+    };
+    if (Notification.permission === "granted") {
+      show();
+      return;
+    }
+    if (Notification.permission === "default") {
+      void Notification.requestPermission().then((permission) => {
+        if (permission === "granted") {
+          show();
+        }
+      });
+    }
+  }
+
+  function providerErrorMessageFromRuntime(message?: string, reason?: string): string {
+    if (reason === "rate_limit") {
+      return `Provider 限流：${message || "rate limit"}`;
+    }
+    if (reason === "auth" || reason === "auth_permanent" || reason === "billing") {
+      return `Provider 认证或额度异常：${message || "provider error"}`;
+    }
+    return message || "Runtime returned an error.";
   }
 
   const setRunStageScrollElement = useCallback((element: HTMLDivElement | null) => {
@@ -1636,7 +1758,15 @@ export function App() {
   }
 
   function shouldResumeSubscription(status: RuntimeRunStatus): boolean {
-    return status === "running" || status === "awaiting_approval" || status === "cancelling";
+    return status === "queued" || status === "running" || status === "awaiting_approval" || status === "cancelling";
+  }
+
+  function currentImageAttachments(): RunAttachment[] {
+    return imageAttachmentPaths
+      .split("\n")
+      .map((path) => path.trim())
+      .filter(Boolean)
+      .map((path) => ({ path, type: "image" as const }));
   }
 
   async function replayThreadTranscript(
@@ -1690,9 +1820,6 @@ export function App() {
       setNotice("Input is required");
       return;
     }
-    if (isBusy) {
-      return;
-    }
     if (!isWorkspaceValid) {
       setNotice("Please enter a valid absolute workspace path.");
       return;
@@ -1734,6 +1861,8 @@ export function App() {
           requestId: window.crypto.randomUUID(),
           entrypoint: "desktop",
         },
+        policyOptions: policySettings,
+        attachments: currentImageAttachments(),
       };
       const run = await runtimeClient.startRun(startRunRequest);
       setThreadProjectIds((current) => assignThreadToProject(current, run.threadId, runProjectId));
@@ -1760,11 +1889,6 @@ export function App() {
   }
 
   async function handleComposerSubmit(): Promise<void> {
-    if (isBusy) {
-      await handleCancel();
-      setComposerFocusRequest((request) => request + 1);
-      return;
-    }
     await handleSubmit();
     setComposerFocusRequest((request) => request + 1);
   }
@@ -1997,7 +2121,165 @@ export function App() {
   }
 
   function handleAddContext(): void {
-    setNotice("Context picker is not wired yet.");
+    setActiveNavId("customize");
+    setNotice("Add local image paths in Customize.");
+  }
+
+  function updatePolicySettings(next: Partial<RunPolicyOptions>): void {
+    setPolicySettings((current) => ({
+      ...current,
+      ...next,
+      busyInputMode: next.busyInputMode
+        ? normalizeBusyInputMode(next.busyInputMode)
+        : current.busyInputMode,
+      backgroundNotificationMode: next.backgroundNotificationMode
+        ? normalizeBackgroundMode(next.backgroundNotificationMode)
+        : current.backgroundNotificationMode,
+      imageInputMode: next.imageInputMode
+        ? normalizeImageInputMode(next.imageInputMode)
+        : current.imageInputMode,
+      restartDrainTimeoutMs:
+        next.restartDrainTimeoutMs === undefined
+          ? current.restartDrainTimeoutMs
+          : clampNumber(Number(next.restartDrainTimeoutMs), 0, 300000),
+    }));
+  }
+
+  function renderBusyModeControls() {
+    if (!isBusy) {
+      return null;
+    }
+    const modes: Array<{ id: BusyInputMode; label: string }> = [
+      { id: "queue", label: "Queue" },
+      { id: "steer", label: "Steer" },
+      { id: "interrupt", label: "Interrupt" },
+    ];
+    return (
+      <div className="wave3-busy-controls">
+        {modes.map((mode) => (
+          <button
+            key={mode.id}
+            type="button"
+            className={`wave3-segment${policySettings.busyInputMode === mode.id ? " wave3-segment-active" : ""}`}
+            onClick={() => updatePolicySettings({ busyInputMode: mode.id })}
+          >
+            {mode.label}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  function renderWaveSettingsPanel() {
+    if (activeNavId !== "customize") {
+      return null;
+    }
+    return (
+      <div className="runtime-panel wave3-settings-panel">
+        <strong>Wave 3</strong>
+        <div className="wave3-settings-grid">
+          <label>
+            <span>Busy input</span>
+            <select
+              value={policySettings.busyInputMode}
+              onChange={(event) => updatePolicySettings({ busyInputMode: event.target.value as BusyInputMode })}
+            >
+              <option value="queue">Queue</option>
+              <option value="steer">Steer</option>
+              <option value="interrupt">Interrupt</option>
+            </select>
+          </label>
+          <label>
+            <span>Notifications</span>
+            <select
+              value={policySettings.backgroundNotificationMode}
+              onChange={(event) => updatePolicySettings({ backgroundNotificationMode: event.target.value as BackgroundNotificationMode })}
+            >
+              <option value="all">All</option>
+              <option value="result">Result</option>
+              <option value="error">Error</option>
+              <option value="off">Off</option>
+            </select>
+          </label>
+          <label>
+            <span>Images</span>
+            <select
+              value={policySettings.imageInputMode}
+              onChange={(event) => updatePolicySettings({ imageInputMode: event.target.value as ImageInputMode })}
+            >
+              <option value="auto">Auto</option>
+              <option value="native">Native</option>
+              <option value="text">Text</option>
+            </select>
+          </label>
+          <label>
+            <span>Drain timeout</span>
+            <input
+              type="number"
+              min={0}
+              max={300000}
+              step={1000}
+              value={policySettings.restartDrainTimeoutMs}
+              onChange={(event) => updatePolicySettings({ restartDrainTimeoutMs: Number(event.target.value) })}
+            />
+          </label>
+        </div>
+        <label className="wave3-image-paths">
+          <span>Image paths</span>
+          <textarea
+            value={imageAttachmentPaths}
+            onChange={(event) => setImageAttachmentPaths(event.target.value)}
+            rows={3}
+          />
+        </label>
+        <div className="wave3-model-meta">
+          <span>{runtimeInfo?.configuredModelDisplayName || runtimeInfo?.configuredModel || "No model"}</span>
+          {runtimeInfo?.configuredModel ? <code>{runtimeInfo.configuredModel}</code> : null}
+        </div>
+      </div>
+    );
+  }
+
+  function renderPolicyDecisionPanel() {
+    if (runtimeState.policyDecisions.length === 0) {
+      return null;
+    }
+    return (
+      <div className="runtime-panel wave3-policy-panel">
+        <strong>Policy decisions</strong>
+        <div className="wave3-policy-list">
+          {runtimeState.policyDecisions.slice(-4).map((decision) => (
+            <div key={decision.id} className="wave3-policy-item">
+              <span>{decision.category}</span>
+              <strong>{decision.decision}</strong>
+              {decision.status ? <p>{decision.status}</p> : null}
+              {policyDecisionRoutes(decision.payload).map((route) => (
+                <p key={`${route.path}:${route.route}`}>
+                  {route.route} · {route.path}
+                </p>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  function policyDecisionRoutes(payload?: Record<string, unknown>): Array<{ path: string; route: string }> {
+    const routes = payload?.routes;
+    if (!Array.isArray(routes)) {
+      return [];
+    }
+    return routes.flatMap((route) => {
+      if (!route || typeof route !== "object") {
+        return [];
+      }
+      const record = route as { path?: unknown; route?: unknown };
+      if (typeof record.path !== "string" || typeof record.route !== "string") {
+        return [];
+      }
+      return [{ path: record.path, route: record.route }];
+    });
   }
 
   function handleSidebarResizeStart(event: ReactPointerEvent<HTMLDivElement>): void {
@@ -2746,24 +3028,26 @@ export function App() {
                     composer={
                       showCenterComposer ? undefined : (
                         <ComposerDock ref={composerDockRef}>
-                          <ComposerBar
-                            value={composerValue}
-                            onChange={setComposerValue}
-                            onSubmit={() => {
-                              void handleComposerSubmit();
-                            }}
-                            onAddContext={handleAddContext}
-                            placeholder=""
-                            disabled={!desktopReady || isBusy || !isWorkspaceValid}
-                            isReady={
-                              isBusy ||
-                              (desktopReady && composerValue.trim().length > 0 && isWorkspaceValid)
-                            }
-                            submitMode={isBusy ? "stop" : "send"}
-                            variant="dock"
-                            metaItems={composerMetaItems}
-                            focusRequest={composerFocusRequest}
-                          />
+                          <div className="wave3-composer-stack">
+                            {renderBusyModeControls()}
+                            <ComposerBar
+                              value={composerValue}
+                              onChange={setComposerValue}
+                              onSubmit={() => {
+                                void handleComposerSubmit();
+                              }}
+                              onAddContext={handleAddContext}
+                              placeholder=""
+                              disabled={!desktopReady || !isWorkspaceValid}
+                              isReady={
+                                desktopReady && composerValue.trim().length > 0 && isWorkspaceValid
+                              }
+                              submitMode={isBusy && policySettings.busyInputMode === "interrupt" ? "stop" : "send"}
+                              variant="dock"
+                              metaItems={composerMetaItems}
+                              focusRequest={composerFocusRequest}
+                            />
+                          </div>
                         </ComposerDock>
                       )
                     }
@@ -2782,10 +3066,41 @@ export function App() {
                       </div>
                     ) : null}
 
+                    {runtimeState.supervisorStatus === "draining" ? (
+                      <div className="runtime-panel">
+                        <strong>Draining runs</strong>
+                        <p>
+                          {runtimeState.supervisorInfo?.drain
+                            ? `${runtimeState.supervisorInfo.drain.activeRuns} active · ${runtimeState.supervisorInfo.drain.queuedRuns} queued · ${runtimeState.supervisorInfo.drain.timeoutMs}ms`
+                            : "Waiting for active and queued runs before restart or quit."}
+                        </p>
+                      </div>
+                    ) : null}
+
                     {runtimeState.errorMessage ? (
                       <div className="runtime-panel runtime-panel-error">
                         <strong>Run error</strong>
                         <p>{runtimeState.errorMessage}</p>
+                        {runtimeState.providerReason ? (
+                          <span className="wave3-error-meta">
+                            {runtimeState.providerReason}
+                            {runtimeState.retryable ? " · retryable" : ""}
+                          </span>
+                        ) : null}
+                        {runtimeState.rateLimitOptions.length > 0 ? (
+                          <div className="wave3-rate-limit-actions">
+                            {runtimeState.rateLimitOptions.map((option) => (
+                              <Button
+                                key={option.value}
+                                size="sm"
+                                variant={option.value === "cancel" ? "default" : "primary"}
+                                onClick={() => setNotice(`Rate limit action: ${option.label}`)}
+                              >
+                                {option.label}
+                              </Button>
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
 
@@ -2830,27 +3145,32 @@ export function App() {
                       </div>
                     ) : null}
 
+                    {renderWaveSettingsPanel()}
+                    {renderPolicyDecisionPanel()}
+
                     {showCenterComposer ? (
                       <div className="run-stage-center-composer">
                         <TaskWelcome />
-                        <ComposerBar
-                          value={composerValue}
-                          onChange={setComposerValue}
-                          onSubmit={() => {
-                            void handleComposerSubmit();
-                          }}
-                          onAddContext={handleAddContext}
-                          placeholder=""
-                          disabled={!desktopReady || isBusy || !isWorkspaceValid}
-                          isReady={
-                            isBusy ||
-                            (desktopReady && composerValue.trim().length > 0 && isWorkspaceValid)
-                          }
-                          submitMode={isBusy ? "stop" : "send"}
-                          variant="center"
-                          metaItems={composerMetaItems}
-                          focusRequest={composerFocusRequest}
-                        />
+                        <div className="wave3-composer-stack">
+                          {renderBusyModeControls()}
+                          <ComposerBar
+                            value={composerValue}
+                            onChange={setComposerValue}
+                            onSubmit={() => {
+                              void handleComposerSubmit();
+                            }}
+                            onAddContext={handleAddContext}
+                            placeholder=""
+                            disabled={!desktopReady || !isWorkspaceValid}
+                            isReady={
+                              desktopReady && composerValue.trim().length > 0 && isWorkspaceValid
+                            }
+                            submitMode={isBusy && policySettings.busyInputMode === "interrupt" ? "stop" : "send"}
+                            variant="center"
+                            metaItems={composerMetaItems}
+                            focusRequest={composerFocusRequest}
+                          />
+                        </div>
                       </div>
                     ) : null}
 

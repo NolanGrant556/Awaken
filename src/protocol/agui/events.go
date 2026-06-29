@@ -30,6 +30,7 @@ const (
 	EventAwakenApprovalResolved  EventType = "AWAKEN_APPROVAL_RESOLVED"
 	EventAwakenArtifactCreated   EventType = "AWAKEN_ARTIFACT_CREATED"
 	EventAwakenArtifactUpdated   EventType = "AWAKEN_ARTIFACT_UPDATED"
+	EventAwakenPolicyDecision    EventType = "AWAKEN_POLICY_DECISION"
 )
 
 type RunOutcome struct {
@@ -61,6 +62,14 @@ type Event struct {
 	Truncated             bool                     `json:"truncated,omitempty"`
 	Message               string                   `json:"message,omitempty"`
 	Code                  string                   `json:"code,omitempty"`
+	ProviderReason        string                   `json:"providerReason,omitempty"`
+	Retryable             bool                     `json:"retryable,omitempty"`
+	RateLimitOptions      []RateLimitOption        `json:"rateLimitOptions,omitempty"`
+	PolicyCategory        string                   `json:"policyCategory,omitempty"`
+	PolicyDecision        string                   `json:"policyDecision,omitempty"`
+	PolicyReason          string                   `json:"policyReason,omitempty"`
+	PolicyStatus          string                   `json:"policyStatus,omitempty"`
+	PolicyPayload         map[string]interface{}   `json:"policyPayload,omitempty"`
 	ApprovalID            string                   `json:"approvalId,omitempty"`
 	ApprovalTitle         string                   `json:"approvalTitle,omitempty"`
 	ApprovalDescription   string                   `json:"approvalDescription,omitempty"`
@@ -77,4 +86,9 @@ type Event struct {
 	ArtifactContent       string                   `json:"artifactContent,omitempty"`
 	ArtifactStatus        string                   `json:"artifactStatus,omitempty"`
 	Outcome               *RunOutcome              `json:"outcome,omitempty"`
+}
+
+type RateLimitOption struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
 }

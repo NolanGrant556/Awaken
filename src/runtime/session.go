@@ -14,6 +14,7 @@ import (
 type RunStatus string
 
 const (
+	RunStatusQueued           RunStatus = "queued"
 	RunStatusRunning          RunStatus = "running"
 	RunStatusAwaitingApproval RunStatus = "awaiting_approval"
 	RunStatusCancelling       RunStatus = "cancelling"
@@ -54,15 +55,18 @@ type DelegationMetadata struct {
 }
 
 type Event struct {
-	Kind       EventKind
-	Seq        uint64 // monotonically increasing sequence number assigned by EventBus
-	Timestamp  time.Time
-	ThreadID   string
-	RunID      string
-	Status     string
-	AgentEvent agentcore.AwakenEvent
-	Message    string
-	Code       string
+	Kind             EventKind
+	Seq              uint64 // monotonically increasing sequence number assigned by EventBus
+	Timestamp        time.Time
+	ThreadID         string
+	RunID            string
+	Status           string
+	AgentEvent       agentcore.AwakenEvent
+	Message          string
+	Code             string
+	ProviderReason   string
+	Retryable        bool
+	RateLimitOptions []agentcore.RateLimitOption
 }
 
 type Session struct {
@@ -82,6 +86,7 @@ type SessionConfig struct {
 	After          func(time.Duration) <-chan time.Time
 	Observer       sessionObserver
 	Delegation     *DelegationMetadata
+	InitialStatus  RunStatus
 }
 
 type sessionObserver interface {
@@ -102,7 +107,7 @@ func NewSessionWithConfig(runID, threadID, input string, cancel context.CancelFu
 			ThreadID:   threadID,
 			Input:      strings.TrimSpace(input),
 			Delegation: cloneDelegationMetadata(config.Delegation),
-			Status:     RunStatusRunning,
+			Status:     initialRunStatus(config.InitialStatus),
 			CreatedAt:  now,
 			UpdatedAt:  now,
 		},
@@ -113,6 +118,13 @@ func NewSessionWithConfig(runID, threadID, input string, cancel context.CancelFu
 		after:          config.After,
 		observer:       config.Observer,
 	}
+}
+
+func initialRunStatus(status RunStatus) RunStatus {
+	if status == RunStatusQueued {
+		return RunStatusQueued
+	}
+	return RunStatusRunning
 }
 
 func NewSessionFromSnapshot(run Run, events []Event) *Session {
@@ -203,7 +215,10 @@ func (s *Session) RequestCancel() Run {
 
 	s.run.CancelRequested = true
 	statusChanged := false
-	if s.run.Status == RunStatusRunning || s.run.Status == RunStatusAwaitingApproval {
+	if s.run.Status == RunStatusQueued {
+		s.run.Status = RunStatusCancelled
+		statusChanged = true
+	} else if s.run.Status == RunStatusRunning || s.run.Status == RunStatusAwaitingApproval {
 		s.run.Status = RunStatusCancelling
 		statusChanged = true
 	}
@@ -215,7 +230,7 @@ func (s *Session) RequestCancel() Run {
 			Timestamp: now,
 			ThreadID:  s.run.ThreadID,
 			RunID:     s.run.RunID,
-			Status:    string(RunStatusCancelling),
+			Status:    string(s.run.Status),
 		}
 	}
 	cancel := s.cancel
@@ -225,7 +240,7 @@ func (s *Session) RequestCancel() Run {
 	s.mu.Unlock()
 
 	if statusChanged {
-		appended := bus.Append(statusEvent, false)
+		appended := bus.Append(statusEvent, snapshot.Status == RunStatusCancelled)
 		notifySessionObserver(observer, snapshot, &appended)
 	} else {
 		notifySessionObserver(observer, snapshot, nil)
@@ -238,6 +253,33 @@ func (s *Session) RequestCancel() Run {
 	return snapshot
 }
 
+func (s *Session) StartQueuedRun() Run {
+	now := time.Now().UTC()
+	s.mu.Lock()
+	if s.run.Status != RunStatusQueued {
+		snapshot := s.run
+		s.mu.Unlock()
+		return snapshot
+	}
+	s.run.Status = RunStatusRunning
+	s.run.UpdatedAt = now
+	statusEvent := Event{
+		Kind:      EventKindRunStatusChanged,
+		Timestamp: now,
+		ThreadID:  s.run.ThreadID,
+		RunID:     s.run.RunID,
+		Status:    string(RunStatusRunning),
+	}
+	bus := s.bus
+	snapshot := s.run
+	observer := s.observer
+	s.mu.Unlock()
+
+	appended := bus.Append(statusEvent, false)
+	notifySessionObserver(observer, snapshot, &appended)
+	return snapshot
+}
+
 func (s *Session) RecordAgentEvent(event agentcore.AwakenEvent) {
 	timestamp := event.Timestamp.UTC()
 	if event.Timestamp.IsZero() {
@@ -246,7 +288,7 @@ func (s *Session) RecordAgentEvent(event agentcore.AwakenEvent) {
 	event.Timestamp = timestamp
 
 	s.mu.Lock()
-	if isTerminalStatus(s.run.Status) {
+	if isTerminalStatus(s.run.Status) || (s.run.Status == RunStatusQueued && event.Type != agentcore.PolicyDecisionEventType) {
 		s.mu.Unlock()
 		return
 	}
@@ -625,6 +667,16 @@ func (s *Session) CompleteFinished(result string) {
 }
 
 func (s *Session) CompleteError(message, code string) {
+	s.CompleteErrorWithInfo(message, code, ProviderErrorInfo{})
+}
+
+type ProviderErrorInfo struct {
+	ProviderReason   string
+	Retryable        bool
+	RateLimitOptions []agentcore.RateLimitOption
+}
+
+func (s *Session) CompleteErrorWithInfo(message, code string, info ProviderErrorInfo) {
 	now := time.Now().UTC()
 	if strings.TrimSpace(message) == "" {
 		message = "run failed"
@@ -642,12 +694,15 @@ func (s *Session) CompleteError(message, code string) {
 	finishedAt := now
 	s.run.FinishedAt = &finishedAt
 	event := Event{
-		Kind:      EventKindRunError,
-		Timestamp: now,
-		ThreadID:  s.run.ThreadID,
-		RunID:     s.run.RunID,
-		Message:   message,
-		Code:      code,
+		Kind:             EventKindRunError,
+		Timestamp:        now,
+		ThreadID:         s.run.ThreadID,
+		RunID:            s.run.RunID,
+		Message:          message,
+		Code:             code,
+		ProviderReason:   info.ProviderReason,
+		Retryable:        info.Retryable,
+		RateLimitOptions: append([]agentcore.RateLimitOption(nil), info.RateLimitOptions...),
 	}
 	bus := s.bus
 	snapshot := s.run

@@ -133,6 +133,73 @@ describe("runtime reducer cancel handling", () => {
     expect(errorStep?.description).toContain("Provider 请求失败：");
     expect(errorStep?.tag).toBe("PROVIDER_REQUEST_FAILED");
   });
+
+  it("RUN_STATUS_CHANGED queued keeps the run visible as active", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "queue me" },
+      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1", status: "queued" }) },
+      runEvent({ type: "RUN_STATUS_CHANGED", status: "queued" }),
+    ]);
+
+    expect(state.phase).toBe("running");
+    expect(state.status).toBe("queued");
+    expect(state.timelineStatus).toBe("running");
+    expect(state.threads[0]).toMatchObject({
+      activeRunId: "run-1",
+      runStatus: "queued",
+    });
+    expect(state.steps.some((step) => step.title === "Run queued")).toBe(true);
+  });
+
+  it("AWAKEN_POLICY_DECISION stores a displayable policy decision", () => {
+    const state = dispatch([
+      runEvent({
+        type: "AWAKEN_POLICY_DECISION",
+        seq: 7,
+        policyCategory: "image_routing",
+        policyDecision: "native",
+        policyReason: "Model supports image parts",
+        policyStatus: "a.png -> native",
+        policyPayload: { routes: [{ path: "/tmp/a.png", route: "native" }] },
+      }),
+    ]);
+
+    expect(state.policyDecisions).toContainEqual({
+      id: "7:image_routing",
+      category: "image_routing",
+      decision: "native",
+      reason: "Model supports image parts",
+      status: "a.png -> native",
+      payload: { routes: [{ path: "/tmp/a.png", route: "native" }] },
+    });
+    expect(state.steps.find((step) => step.title === "Image routing decided")?.tag).toBe("native");
+  });
+
+  it("RUN_ERROR with provider rate limit exposes retry metadata and CTA options", () => {
+    const state = dispatch([
+      runEvent({
+        type: "RUN_ERROR",
+        code: "PROVIDER_REQUEST_FAILED",
+        message: "requests per minute exceeded",
+        providerReason: "rate_limit",
+        retryable: true,
+        rateLimitOptions: [
+          { label: "Retry later", value: "retry_later" },
+          { label: "Switch model", value: "switch_model" },
+        ],
+      }),
+    ]);
+
+    expect(state.phase).toBe("error");
+    expect(state.errorMessage).toBe("Provider 限流：requests per minute exceeded");
+    expect(state.providerReason).toBe("rate_limit");
+    expect(state.retryable).toBe(true);
+    expect(state.rateLimitOptions).toEqual([
+      { label: "Retry later", value: "retry_later" },
+      { label: "Switch model", value: "switch_model" },
+    ]);
+    expect(state.steps.find((step) => step.id === "run-error")?.tag).toBe("rate_limit");
+  });
 });
 
 describe("runtime reducer replay idempotency", () => {

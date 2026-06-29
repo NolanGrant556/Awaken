@@ -15,6 +15,7 @@ import (
 	convcontext "awaken/src/context"
 	"awaken/src/contextfiles"
 	"awaken/src/contextviz"
+	"awaken/src/modeldisplay"
 	"awaken/src/sessionbranch"
 	"awaken/src/sessioninsights"
 	"awaken/src/sessionlite"
@@ -71,12 +72,13 @@ type ThreadContextFile struct {
 }
 
 type ThreadContextUsage struct {
-	Markdown     string `json:"markdown"`
-	Model        string `json:"model"`
-	TotalTokens  int    `json:"total_tokens"`
-	MaxTokens    int    `json:"max_tokens"`
-	Percentage   int    `json:"percentage"`
-	MessageCount int    `json:"message_count"`
+	Markdown         string `json:"markdown"`
+	Model            string `json:"model"`
+	ModelDisplayName string `json:"model_display_name,omitempty"`
+	TotalTokens      int    `json:"total_tokens"`
+	MaxTokens        int    `json:"max_tokens"`
+	Percentage       int    `json:"percentage"`
+	MessageCount     int    `json:"message_count"`
 }
 
 type BranchThreadRequest struct {
@@ -383,7 +385,7 @@ func threadState(latest *ThreadRunBrief) sessionstate.State {
 		switch latest.Status {
 		case RunStatusAwaitingApproval:
 			state = sessionstate.StateRequiresAction
-		case RunStatusRunning, RunStatusCancelling:
+		case RunStatusQueued, RunStatusRunning, RunStatusCancelling:
 			state = sessionstate.StateRunning
 		default:
 			state = sessionstate.StateIdle
@@ -484,12 +486,13 @@ func (s *RunService) GetThreadContext(threadID string) (ThreadContextSnapshot, e
 			Files:    threadContextFiles(files),
 		},
 		Usage: ThreadContextUsage{
-			Markdown:     contextviz.FormatMarkdownTable(usageData, contextviz.Options{AntOnly: true}),
-			Model:        model,
-			TotalTokens:  totalTokens,
-			MaxTokens:    maxTokens,
-			Percentage:   usageData.Percentage(),
-			MessageCount: len(messages),
+			Markdown:         contextviz.FormatMarkdownTable(usageData, contextviz.Options{AntOnly: true}),
+			Model:            model,
+			ModelDisplayName: modeldisplay.RenderModelName(model),
+			TotalTokens:      totalTokens,
+			MaxTokens:        maxTokens,
+			Percentage:       usageData.Percentage(),
+			MessageCount:     len(messages),
 		},
 	}, nil
 }

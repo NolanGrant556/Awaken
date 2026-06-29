@@ -5,6 +5,30 @@ import (
 	stdcontext "context"
 )
 
+type userContentPartsContextKey struct{}
+
+func ContextWithUserContentParts(ctx stdcontext.Context, parts []context.ContentPart) stdcontext.Context {
+	if ctx == nil {
+		ctx = stdcontext.Background()
+	}
+	if len(parts) == 0 {
+		return ctx
+	}
+	cloned := append([]context.ContentPart(nil), parts...)
+	return stdcontext.WithValue(ctx, userContentPartsContextKey{}, cloned)
+}
+
+func userContentPartsFromContext(ctx stdcontext.Context) []context.ContentPart {
+	if ctx == nil {
+		return nil
+	}
+	parts, ok := ctx.Value(userContentPartsContextKey{}).([]context.ContentPart)
+	if !ok || len(parts) == 0 {
+		return nil
+	}
+	return append([]context.ContentPart(nil), parts...)
+}
+
 type Agent struct {
 	config       AgentConfig
 	conversation *context.Conversation
@@ -78,7 +102,11 @@ func (a *Agent) WithRunProfile(profile *RunProfile) (*Agent, error) {
 }
 
 func (a *Agent) RunStreamWithEvents(ctx stdcontext.Context, userInput string, sink EventSink) (string, error) {
-	a.conversation.UserInput(userInput)
+	if parts := userContentPartsFromContext(ctx); len(parts) > 0 {
+		a.conversation.Context.AddUserMessageParts(userInput, parts)
+	} else {
+		a.conversation.UserInput(userInput)
+	}
 
 	runner := NewRunner(a.config, a.conversation, a.reqBuilder)
 	runner.threadID = a.threadID

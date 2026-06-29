@@ -13,6 +13,7 @@ import (
 	"awaken/src/context"
 	"awaken/src/internal/outputlimit"
 	"awaken/src/llm"
+	"awaken/src/ratelimitoptions"
 	"awaken/src/tool"
 	"awaken/src/usage"
 )
@@ -401,7 +402,48 @@ func (e *runEventEmitter) runErrored(err error) {
 	case errors.Is(err, llm.ErrRequestFailed):
 		event.Code = "PROVIDER_REQUEST_FAILED"
 	}
+	if info := classifyProviderRunError(err); info.ProviderReason != "" {
+		event.ProviderReason = info.ProviderReason
+		event.Retryable = info.Retryable
+		event.RateLimitOptions = info.RateLimitOptions
+	}
 	e.emit(event)
+}
+
+type providerRunErrorInfo struct {
+	ProviderReason   string
+	Retryable        bool
+	RateLimitOptions []RateLimitOption
+}
+
+func classifyProviderRunError(err error) providerRunErrorInfo {
+	var requestErr *llm.RequestError
+	if !errors.As(err, &requestErr) {
+		return providerRunErrorInfo{}
+	}
+	reason := strings.TrimSpace(requestErr.ProviderReason)
+	if reason == "" {
+		reason = string(requestErr.Kind)
+	}
+	info := providerRunErrorInfo{
+		ProviderReason: reason,
+		Retryable:      requestErr.Retryable(),
+	}
+	if requestErr.Kind == llm.ErrorKindRateLimit || reason == "rate_limit" {
+		for _, option := range ratelimitoptions.BuildOptions(ratelimitoptions.MenuInput{
+			SubscriptionType:            ratelimitoptions.SubscriptionPro,
+			ExtraUsageFeatureEnabled:    true,
+			AccountHasExtraUsageEnabled: false,
+			HasBillingAccess:            true,
+			UpgradeEnabled:              true,
+		}) {
+			info.RateLimitOptions = append(info.RateLimitOptions, RateLimitOption{
+				Label: option.Label,
+				Value: string(option.Value),
+			})
+		}
+	}
+	return info
 }
 
 func (e *runEventEmitter) onLLMDelta(content string, isThinking bool) {

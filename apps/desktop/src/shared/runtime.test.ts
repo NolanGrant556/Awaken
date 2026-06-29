@@ -82,6 +82,38 @@ describe("normalizeStartRunRequest", () => {
         disallowed_tools: ["shell"],
         permission_mode: "ask",
       },
+      policy_options: undefined,
+      attachments: undefined,
+    });
+  });
+
+  it("serializes Wave 3 policy options and local image attachments", () => {
+    expect(
+      normalizeStartRunRequest({
+        input: "look",
+        workspace: {
+          workspaceRoot: "/tmp/workspace",
+          writableRoots: ["/tmp/workspace"],
+        },
+        client: {
+          sessionId: "session-1",
+          requestId: "request-1",
+          entrypoint: "desktop",
+        },
+        policyOptions: {
+          busyInputMode: "queue",
+          backgroundNotificationMode: "error",
+          imageInputMode: "native",
+        },
+        attachments: [{ path: "/tmp/workspace/a.png", type: "image" }],
+      }),
+    ).toMatchObject({
+      policy_options: {
+        busy_input_mode: "queue",
+        background_notification_mode: "error",
+        image_input_mode: "native",
+      },
+      attachments: [{ path: "/tmp/workspace/a.png", type: "image" }],
     });
   });
 
@@ -112,6 +144,8 @@ describe("normalizeStartRunRequest", () => {
         entrypoint: "desktop",
       },
       profile: undefined,
+      policy_options: undefined,
+      attachments: undefined,
     });
   });
 });
@@ -192,6 +226,7 @@ describe("Wave 1 runtime normalizers", () => {
         usage: {
           markdown: "Context Usage",
           model: "test-model",
+          model_display_name: "Test Model",
           total_tokens: 10,
           max_tokens: 100,
           percentage: 10,
@@ -202,6 +237,7 @@ describe("Wave 1 runtime normalizers", () => {
       threadId: "thread-1",
       usage: {
         totalTokens: 10,
+        modelDisplayName: "Test Model",
         maxTokens: 100,
         messageCount: 2,
       },

@@ -20,12 +20,23 @@ const (
 )
 
 type Message struct {
-	Role       Role       `json:"role"`
-	Content    string     `json:"content"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	Name       string     `json:"name,omitempty"`
-	IsError    bool       `json:"is_error,omitempty"`
+	Role         Role          `json:"role"`
+	Content      string        `json:"content"`
+	ContentParts []ContentPart `json:"content_parts,omitempty"`
+	ToolCalls    []ToolCall    `json:"tool_calls,omitempty"`
+	ToolCallID   string        `json:"tool_call_id,omitempty"`
+	Name         string        `json:"name,omitempty"`
+	IsError      bool          `json:"is_error,omitempty"`
+}
+
+type ContentPart struct {
+	Type     string    `json:"type"`
+	Text     string    `json:"text,omitempty"`
+	ImageURL *ImageURL `json:"image_url,omitempty"`
+}
+
+type ImageURL struct {
+	URL string `json:"url"`
 }
 
 type ToolCall struct {
@@ -88,6 +99,16 @@ func (c *Context) AddUserMessage(content string) {
 	c.messages = append(c.messages, Message{
 		Role:    RoleUser,
 		Content: content,
+	})
+}
+
+func (c *Context) AddUserMessageParts(content string, parts []ContentPart) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.messages = append(c.messages, Message{
+		Role:         RoleUser,
+		Content:      content,
+		ContentParts: append([]ContentPart(nil), parts...),
 	})
 }
 

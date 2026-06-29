@@ -7,7 +7,14 @@ import { app } from "electron";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-export type SupervisorStatus = "stopped" | "starting" | "running" | "crashed" | "stopping";
+export type SupervisorStatus = "stopped" | "starting" | "running" | "crashed" | "stopping" | "draining";
+
+export interface DrainSnapshot {
+  activeRuns: number;
+  queuedRuns: number;
+  timedOut: boolean;
+  timeoutMs: number;
+}
 
 export interface RuntimeLogEntry {
   id: number;
@@ -21,12 +28,14 @@ export interface SupervisorStatusInfo {
   runtimeBaseUrl?: string;
   exitCode?: number;
   errorMessage?: string;
+  drain?: DrainSnapshot;
 }
 
 export interface SupervisorOptions {
   configDir: string;
   defaultWorkspace?: string;
   maxStartAttempts?: number;
+  drainTimeoutMs?: number;
 }
 
 type StatusChangeCallback = (info: SupervisorStatusInfo) => void;
@@ -219,7 +228,13 @@ export class RuntimeSupervisor {
       this.setStatus("stopped");
       return;
     }
-    this.setStatus("stopping");
+    const drain = await this.drainRuntime();
+    this.setStatus("stopping", {
+      errorMessage: drain?.timedOut
+        ? `runtime drain timed out with ${drain.activeRuns} active and ${drain.queuedRuns} queued run(s)`
+        : undefined,
+      drain,
+    });
     const child = this.child;
     this.child = null;
     this.runtimeBaseUrl = undefined;
@@ -235,6 +250,10 @@ export class RuntimeSupervisor {
 
   getStatus(): SupervisorStatusInfo {
     return { ...this.statusInfo };
+  }
+
+  updateOptions(options: Partial<SupervisorOptions>): void {
+    this.options = { ...this.options, ...options };
   }
 
   getLogs(): RuntimeLogEntry[] {
@@ -257,7 +276,7 @@ export class RuntimeSupervisor {
 
   private setStatus(
     status: SupervisorStatus,
-    extra?: { exitCode?: number; errorMessage?: string },
+    extra?: { exitCode?: number; errorMessage?: string; drain?: DrainSnapshot },
   ): void {
     this.status = status;
     if (status === "running") {
@@ -283,6 +302,57 @@ export class RuntimeSupervisor {
 
   private clearLogs(): void {
     this.logs = [];
+  }
+
+  private async drainRuntime(): Promise<DrainSnapshot | undefined> {
+    if (this.status !== "running" || !this.runtimeBaseUrl) {
+      return undefined;
+    }
+    const timeoutMs = Math.max(0, this.options.drainTimeoutMs ?? 60000);
+    this.setStatus("draining", {
+      drain: {
+        activeRuns: 0,
+        queuedRuns: 0,
+        timedOut: false,
+        timeoutMs,
+      },
+    });
+    try {
+      const response = await fetch(`${this.runtimeBaseUrl}/v1/runtime/drain`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ timeout_ms: timeoutMs }),
+      });
+      if (!response.ok) {
+        return {
+          activeRuns: 0,
+          queuedRuns: 0,
+          timedOut: true,
+          timeoutMs,
+        };
+      }
+      const payload = await response.json() as {
+        active_runs?: number;
+        queued_runs?: number;
+        timed_out?: boolean;
+        timeout_ms?: number;
+      };
+      return {
+        activeRuns: payload.active_runs ?? 0,
+        queuedRuns: payload.queued_runs ?? 0,
+        timedOut: Boolean(payload.timed_out),
+        timeoutMs: payload.timeout_ms ?? timeoutMs,
+      };
+    } catch {
+      return {
+        activeRuns: 0,
+        queuedRuns: 0,
+        timedOut: true,
+        timeoutMs,
+      };
+    }
   }
 
   private attachChildHandlers(child: ChildProcess): void {

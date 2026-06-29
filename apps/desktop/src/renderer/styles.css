@@ -1398,6 +1398,113 @@ pre {
   overflow-wrap: anywhere;
 }
 
+.wave3-composer-stack {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+
+.wave3-busy-controls,
+.wave3-rate-limit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.wave3-segment {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: 6px;
+  background: var(--aw-surface-panel);
+  color: var(--aw-text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.wave3-segment-active {
+  border-color: var(--aw-status-running-border);
+  color: var(--aw-text-main);
+  background: var(--aw-status-running-bg);
+}
+
+.wave3-settings-panel,
+.wave3-policy-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.wave3-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.wave3-settings-grid label,
+.wave3-image-paths {
+  display: grid;
+  gap: 5px;
+  color: var(--aw-text-muted);
+  font-size: 12px;
+}
+
+.wave3-settings-grid select,
+.wave3-settings-grid input,
+.wave3-image-paths textarea {
+  width: 100%;
+  min-height: 30px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: 6px;
+  background: var(--aw-surface-panel);
+  color: var(--aw-text-main);
+  font: inherit;
+  font-size: 12px;
+}
+
+.wave3-image-paths textarea {
+  resize: vertical;
+  min-height: 72px;
+  padding: 8px;
+}
+
+.wave3-model-meta,
+.wave3-error-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  color: var(--aw-text-subtle);
+  font-size: 11px;
+}
+
+.wave3-model-meta code {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.wave3-policy-list {
+  display: grid;
+  gap: 8px;
+}
+
+.wave3-policy-item {
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: 6px;
+}
+
+.wave3-policy-item span,
+.wave3-policy-item p {
+  margin: 0;
+  color: var(--aw-text-subtle);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 @media (max-width: 1320px) {
   .topbar-title {
     display: none;
@@ -1469,6 +1576,9 @@ pre {
     width: min(100%, 220px);
   }
 
+  .wave3-settings-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* Branch button in workbench chrome */

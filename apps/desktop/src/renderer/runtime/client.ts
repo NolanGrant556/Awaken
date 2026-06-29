@@ -18,6 +18,7 @@ import {
   type RuntimeThreadShareBundleResult,
   type RuntimeThreadTranscript,
   type RuntimeThread,
+  type RunPolicyOptions,
   type StartRunRequest,
   type SupervisorStatusInfo,
   type WorkspacePickResult,
@@ -68,6 +69,7 @@ export type RuntimeClient = {
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
   getSupervisorStatus: () => Promise<SupervisorStatusInfo>;
   onSupervisorStatusChange: (callback: (info: SupervisorStatusInfo) => void) => () => void;
+  setPolicySettings: (settings: RunPolicyOptions) => Promise<void>;
   notifyRendererReady: () => void;
 };
 
@@ -206,6 +208,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     validateWorkspace: (path) => bridge.validateWorkspace(path),
     getSupervisorStatus: () => bridge.getSupervisorStatus(),
     onSupervisorStatusChange: (callback) => bridge.onSupervisorStatusChange(callback),
+    setPolicySettings: (settings) => bridge.setPolicySettings(settings),
     notifyRendererReady: () => bridge.notifyRendererReady(),
   };
 }

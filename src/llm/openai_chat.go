@@ -35,10 +35,20 @@ type openaiChatRequest struct {
 
 type openaiChatMessage struct {
 	Role       string           `json:"role"`
-	Content    string           `json:"content,omitempty"`
+	Content    interface{}      `json:"content,omitempty"`
 	ToolCalls  []openaiToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string           `json:"tool_call_id,omitempty"`
 	Name       string           `json:"name,omitempty"`
+}
+
+type openaiContentPart struct {
+	Type     string          `json:"type"`
+	Text     string          `json:"text,omitempty"`
+	ImageURL *openaiImageURL `json:"image_url,omitempty"`
+}
+
+type openaiImageURL struct {
+	URL string `json:"url"`
 }
 
 type openaiToolCall struct {
@@ -218,7 +228,7 @@ func buildOpenAIMessages(req Request) []openaiChatMessage {
 		for _, msg := range req.Messages {
 			messages = append(messages, openaiChatMessage{
 				Role:       string(msg.Role),
-				Content:    msg.Content,
+				Content:    openAIMessageContent(msg),
 				ToolCalls:  contextToolCallsToOpenAI(msg.ToolCalls),
 				ToolCallID: msg.ToolCallID,
 				Name:       msg.Name,
@@ -228,6 +238,25 @@ func buildOpenAIMessages(req Request) []openaiChatMessage {
 		messages = append(messages, openaiChatMessage{Role: "user", Content: req.UserPrompt})
 	}
 	return messages
+}
+
+func openAIMessageContent(msg context.Message) interface{} {
+	if len(msg.ContentParts) == 0 {
+		return msg.Content
+	}
+
+	parts := make([]openaiContentPart, 0, len(msg.ContentParts))
+	for _, part := range msg.ContentParts {
+		converted := openaiContentPart{
+			Type: part.Type,
+			Text: part.Text,
+		}
+		if part.ImageURL != nil {
+			converted.ImageURL = &openaiImageURL{URL: part.ImageURL.URL}
+		}
+		parts = append(parts, converted)
+	}
+	return parts
 }
 
 func contextToolCallsToOpenAI(toolCalls []context.ToolCall) []openaiToolCall {

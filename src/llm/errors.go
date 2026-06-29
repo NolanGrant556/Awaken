@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"awaken/src/providererrors"
 )
 
 var (
@@ -27,9 +29,11 @@ const (
 )
 
 type RequestError struct {
-	StatusCode int
-	Kind       ErrorKind
-	Message    string
+	StatusCode     int
+	Kind           ErrorKind
+	ProviderReason string
+	RetryableHint  bool
+	Message        string
 }
 
 func (e *RequestError) Error() string {
@@ -63,28 +67,55 @@ func (e *RequestError) Retryable() bool {
 	if e == nil {
 		return false
 	}
+	if e.RetryableHint {
+		return true
+	}
 	return isRetryableErrorKind(e.Kind)
 }
 
 func ClassifyHTTPError(statusCode int, responseBody []byte) ErrorKind {
-	body := strings.ToLower(string(responseBody))
+	classified := providererrors.Classify(providererrors.ClassificationInput{
+		StatusCode: statusCode,
+		Body:       string(responseBody),
+	})
+	return errorKindFromProviderReason(classified.Reason, statusCode, string(responseBody))
+}
+
+func errorKindFromProviderReason(reason providererrors.Reason, statusCode int, body string) ErrorKind {
+	body = strings.ToLower(body)
 	if isContextOverflowBody(body) {
 		return ErrorKindContextOverflow
 	}
-	if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
-		return ErrorKindAuthentication
-	}
-	if statusCode == 529 || strings.Contains(body, "overloaded_error") {
-		return ErrorKindServerOverload
-	}
-	if statusCode == http.StatusTooManyRequests {
+	switch reason {
+	case providererrors.ReasonRateLimit, providererrors.ReasonLongContextTier:
 		return ErrorKindRateLimit
-	}
-	switch statusCode {
-	case http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+	case providererrors.ReasonOverloaded:
+		if statusCode == http.StatusServiceUnavailable {
+			return ErrorKindServerError
+		}
+		return ErrorKindServerOverload
+	case providererrors.ReasonServerError, providererrors.ReasonTimeout:
 		return ErrorKindServerError
+	case providererrors.ReasonAuth, providererrors.ReasonAuthPermanent, providererrors.ReasonBilling:
+		return ErrorKindAuthentication
+	case providererrors.ReasonContextOverflow, providererrors.ReasonPayloadTooLarge:
+		return ErrorKindContextOverflow
 	default:
-		return ErrorKindUnknown
+		if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
+			return ErrorKindAuthentication
+		}
+		if statusCode == 529 || strings.Contains(body, "overloaded_error") {
+			return ErrorKindServerOverload
+		}
+		if statusCode == http.StatusTooManyRequests {
+			return ErrorKindRateLimit
+		}
+		switch statusCode {
+		case http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+			return ErrorKindServerError
+		default:
+			return ErrorKindUnknown
+		}
 	}
 }
 

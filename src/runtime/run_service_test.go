@@ -14,6 +14,7 @@ import (
 
 	"awaken/src/agentcore"
 	"awaken/src/lifecyclehooks"
+	"awaken/src/llm"
 	"awaken/src/sessioninsights"
 	"awaken/src/titlegen"
 	"awaken/src/tool"
@@ -1621,6 +1622,269 @@ func TestStartRunWithActiveThreadReturnsErrThreadBusy(t *testing.T) {
 	}
 }
 
+func TestStartRunWithActiveThreadQueuesWhenBusyModeQueue(t *testing.T) {
+	root := t.TempDir()
+	firstStarted := make(chan struct{})
+	secondStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	releaseSecond := make(chan struct{})
+	var firstOnce sync.Once
+	var secondOnce sync.Once
+
+	service := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+				switch input {
+				case "first":
+					firstOnce.Do(func() { close(firstStarted) })
+					<-releaseFirst
+				case "second":
+					secondOnce.Do(func() { close(secondStarted) })
+					<-releaseSecond
+				}
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done:" + input})
+				return "done:" + input, nil
+			})
+		},
+	)
+
+	firstRun, err := service.StartRun(StartRunRequest{Input: "first", Workspace: WorkspaceConfig{WorkspaceRoot: root}})
+	if err != nil {
+		t.Fatalf("first StartRun returned error: %v", err)
+	}
+	<-firstStarted
+
+	secondRun, err := service.StartRun(StartRunRequest{
+		Input:     "second",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		ThreadID:  firstRun.ThreadID,
+		PolicyOptions: RunPolicyOptions{
+			BusyInputMode: "queue",
+		},
+	})
+	if err != nil {
+		t.Fatalf("second StartRun returned error: %v", err)
+	}
+	if secondRun.Status != RunStatusQueued {
+		t.Fatalf("expected second run to be queued, got %s", secondRun.Status)
+	}
+	sub, err := service.Subscribe(secondRun.RunID, 0)
+	if err != nil {
+		t.Fatalf("Subscribe returned error: %v", err)
+	}
+	if sub.Close != nil {
+		defer sub.Close()
+	}
+	if !historyHasPolicyDecision(sub.History, "busy_input") {
+		t.Fatalf("expected queued run history to include busy_input policy decision, got %+v", sub.History)
+	}
+	select {
+	case <-secondStarted:
+		t.Fatalf("queued run started before active run finished")
+	default:
+	}
+
+	close(releaseFirst)
+	if final := waitForRunTerminal(t, service, firstRun.RunID); final.Status != RunStatusFinished {
+		t.Fatalf("expected first run to finish, got %+v", final)
+	}
+	select {
+	case <-secondStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("queued run did not start after first run finished")
+	}
+	close(releaseSecond)
+	if final := waitForRunTerminal(t, service, secondRun.RunID); final.Status != RunStatusFinished || final.Result != "done:second" {
+		t.Fatalf("expected queued run to finish, got %+v", final)
+	}
+}
+
+func TestStartRunWithActiveThreadInterruptCancelsThenQueues(t *testing.T) {
+	root := t.TempDir()
+	firstStarted := make(chan struct{})
+	secondStarted := make(chan struct{})
+	releaseSecond := make(chan struct{})
+	var firstOnce sync.Once
+	var secondOnce sync.Once
+
+	service := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+				switch input {
+				case "first":
+					firstOnce.Do(func() { close(firstStarted) })
+					<-ctx.Done()
+					return "", ctx.Err()
+				case "second":
+					secondOnce.Do(func() { close(secondStarted) })
+					<-releaseSecond
+				}
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done:" + input})
+				return "done:" + input, nil
+			})
+		},
+	)
+
+	firstRun, err := service.StartRun(StartRunRequest{Input: "first", Workspace: WorkspaceConfig{WorkspaceRoot: root}})
+	if err != nil {
+		t.Fatalf("first StartRun returned error: %v", err)
+	}
+	<-firstStarted
+
+	secondRun, err := service.StartRun(StartRunRequest{
+		Input:     "second",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		ThreadID:  firstRun.ThreadID,
+		PolicyOptions: RunPolicyOptions{
+			BusyInputMode: "interrupt",
+		},
+	})
+	if err != nil {
+		t.Fatalf("second StartRun returned error: %v", err)
+	}
+	if secondRun.Status != RunStatusQueued {
+		t.Fatalf("expected interrupt follow-up to queue, got %s", secondRun.Status)
+	}
+
+	if final := waitForRunTerminal(t, service, firstRun.RunID); final.Status != RunStatusCancelled {
+		t.Fatalf("expected first run to be cancelled, got %+v", final)
+	}
+	select {
+	case <-secondStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("queued interrupt follow-up did not start")
+	}
+	close(releaseSecond)
+	if final := waitForRunTerminal(t, service, secondRun.RunID); final.Status != RunStatusFinished {
+		t.Fatalf("expected second run to finish, got %+v", final)
+	}
+}
+
+func TestRunServiceDrainReportsActiveAndQueuedRuns(t *testing.T) {
+	root := t.TempDir()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var startedOnce sync.Once
+
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			startedOnce.Do(func() { close(started) })
+			<-release
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+			return "done", nil
+		})
+	})
+
+	firstRun, err := service.StartRun(StartRunRequest{Input: "first", Workspace: WorkspaceConfig{WorkspaceRoot: root}})
+	if err != nil {
+		t.Fatalf("first StartRun returned error: %v", err)
+	}
+	<-started
+	_, err = service.StartRun(StartRunRequest{
+		Input:     "second",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		ThreadID:  firstRun.ThreadID,
+		PolicyOptions: RunPolicyOptions{
+			BusyInputMode: "queue",
+		},
+	})
+	if err != nil {
+		t.Fatalf("queued StartRun returned error: %v", err)
+	}
+
+	result := service.Drain(context.Background(), 10*time.Millisecond)
+	if !result.TimedOut || result.ActiveRuns != 1 || result.QueuedRuns != 1 {
+		t.Fatalf("expected drain timeout with 1 active and 1 queued, got %+v", result)
+	}
+	close(release)
+}
+
+func TestRunServiceImageAttachmentFallbackPrependsPathAndEmitsDecision(t *testing.T) {
+	root := t.TempDir()
+	imagePath := filepath.Join(root, "image.png")
+	writeRuntimeFile(t, imagePath, "not actually a png")
+	inputs := make(chan string, 1)
+	service := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				ModelConfig: agentcore.ModelConfig{Model: "text-only-model"},
+			}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				inputs <- input
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+				return "done", nil
+			})
+		},
+	)
+
+	run, err := service.StartRun(StartRunRequest{
+		Input:     "describe it",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		PolicyOptions: RunPolicyOptions{
+			ImageInputMode: "auto",
+		},
+		Attachments: []RunAttachment{{Path: imagePath, Type: "image"}},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	gotInput := <-inputs
+	if !strings.Contains(gotInput, "@"+fmt.Sprintf("%q", imagePath)) || !strings.Contains(gotInput, "describe it") {
+		t.Fatalf("expected image path reference to be prepended, got %q", gotInput)
+	}
+	final := waitForRunTerminal(t, service, run.RunID)
+	if final.Status != RunStatusFinished {
+		t.Fatalf("expected run to finish, got %+v", final)
+	}
+	history := runHistory(t, service, run.RunID)
+	if !historyHasPolicyDecision(history, "image_routing") {
+		t.Fatalf("expected image_routing policy decision, got %+v", history)
+	}
+}
+
+func TestRunServiceProviderRateLimitErrorAddsOptions(t *testing.T) {
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			return "", &llm.RequestError{Kind: llm.ErrorKindRateLimit, Message: "rate limit"}
+		})
+	})
+
+	run, err := service.StartRun(StartRunRequest{Input: "hello", Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()}})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	final := waitForRunTerminal(t, service, run.RunID)
+	if final.Status != RunStatusError {
+		t.Fatalf("expected error run, got %+v", final)
+	}
+	var runError *Event
+	for _, event := range runHistory(t, service, run.RunID) {
+		if event.Kind == EventKindRunError {
+			copy := event
+			runError = &copy
+			break
+		}
+	}
+	if runError == nil {
+		t.Fatalf("expected run_error event")
+	}
+	if runError.ProviderReason != "rate_limit" || !runError.Retryable || len(runError.RateLimitOptions) == 0 {
+		t.Fatalf("expected rate-limit provider metadata, got %+v", runError)
+	}
+}
+
 func TestStartRunWithSameRootDifferentWritableRootsReturnsWorkspaceMismatch(t *testing.T) {
 	root := t.TempDir()
 	child := filepath.Join(root, "child")
@@ -2345,6 +2609,29 @@ func waitForRunTerminal(t *testing.T, service *RunService, runID string) Run {
 	}
 	t.Fatalf("run %s did not reach terminal status", runID)
 	return Run{}
+}
+
+func runHistory(t *testing.T, service *RunService, runID string) []Event {
+	t.Helper()
+	sub, err := service.Subscribe(runID, 0)
+	if err != nil {
+		t.Fatalf("Subscribe returned error: %v", err)
+	}
+	if sub.Close != nil {
+		sub.Close()
+	}
+	return sub.History
+}
+
+func historyHasPolicyDecision(events []Event, category string) bool {
+	for _, event := range events {
+		if event.Kind == EventKindAgent &&
+			event.AgentEvent.Type == agentcore.PolicyDecisionEventType &&
+			event.AgentEvent.PolicyCategory == category {
+			return true
+		}
+	}
+	return false
 }
 
 func initRuntimeCleanRepo(t *testing.T) string {

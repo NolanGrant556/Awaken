@@ -34,6 +34,7 @@ func NewRouterWithMemory(runService *awruntime.RunService, infoProvider RuntimeI
 	})
 	if runService != nil {
 		handlers := runHandlers{runService: runService}
+		mux.HandleFunc("POST /v1/runtime/drain", handlers.handleRuntimeDrain)
 		mux.HandleFunc("GET /v1/threads", handlers.handleListThreads)
 		mux.HandleFunc("GET /v1/threads/search", handlers.handleSearchThreads)
 		mux.HandleFunc("GET /v1/threads/{thread_id}/lite", handlers.handleGetThreadLite)

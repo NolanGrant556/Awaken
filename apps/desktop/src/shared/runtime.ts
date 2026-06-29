@@ -3,6 +3,7 @@ import type { AguiEvent } from "./agui.js";
 export type DesktopPlatform = "macos" | "windows" | "linux";
 
 export type RuntimeRunStatus =
+  | "queued"
   | "running"
   | "awaiting_approval"
   | "cancelling"
@@ -176,6 +177,7 @@ export type RuntimeThreadContextWire = {
   usage: {
     markdown: string;
     model: string;
+    model_display_name?: string;
     total_tokens: number;
     max_tokens: number;
     percentage: number;
@@ -192,6 +194,7 @@ export type RuntimeThreadContext = {
   usage: {
     markdown: string;
     model: string;
+    modelDisplayName?: string;
     totalTokens: number;
     maxTokens: number;
     percentage: number;
@@ -326,6 +329,7 @@ export type RuntimeInfoWire = {
   runtime_version: string;
   api_version: string;
   configured_model: string;
+  configured_model_display_name?: string;
   protocol: string;
   auth_scheme: string;
   has_api_key: boolean;
@@ -340,6 +344,7 @@ export type RuntimeInfo = {
   runtimeVersion: string;
   apiVersion: string;
   configuredModel: string;
+  configuredModelDisplayName?: string;
   protocol: string;
   authScheme: string;
   hasApiKey: boolean;
@@ -353,6 +358,7 @@ export type RuntimeInfo = {
 export type RuntimeProfileWire = {
   name: string;
   model: string;
+  model_display_name?: string;
   protocol: string;
   auth_scheme: string;
   has_api_key: boolean;
@@ -363,6 +369,7 @@ export type RuntimeProfileWire = {
 export type RuntimeProfile = {
   name: string;
   model: string;
+  modelDisplayName?: string;
   protocol: string;
   authScheme: string;
   hasApiKey: boolean;
@@ -444,6 +451,33 @@ export type DelegationMetadata = {
   delegationPrompt?: string;
 };
 
+export type BusyInputMode = "queue" | "steer" | "interrupt";
+export type BackgroundNotificationMode = "all" | "result" | "error" | "off";
+export type ImageInputMode = "auto" | "native" | "text";
+
+export type RunPolicyOptionsWire = {
+  busy_input_mode?: BusyInputMode;
+  background_notification_mode?: BackgroundNotificationMode;
+  image_input_mode?: ImageInputMode;
+};
+
+export type RunPolicyOptions = {
+  busyInputMode?: BusyInputMode;
+  backgroundNotificationMode?: BackgroundNotificationMode;
+  imageInputMode?: ImageInputMode;
+  restartDrainTimeoutMs?: number;
+};
+
+export type RunAttachmentWire = {
+  path: string;
+  type?: "image";
+};
+
+export type RunAttachment = {
+  path: string;
+  type?: "image";
+};
+
 export type StartRunRequestWire = {
   input: string;
   thread_id?: string;
@@ -451,6 +485,8 @@ export type StartRunRequestWire = {
   workspace: WorkspaceConfigWire;
   client: ClientInfoWire;
   profile?: RunProfileWire;
+  policy_options?: RunPolicyOptionsWire;
+  attachments?: RunAttachmentWire[];
 };
 
 export type StartRunRequest = {
@@ -460,6 +496,8 @@ export type StartRunRequest = {
   workspace: WorkspaceConfig;
   client: ClientInfo;
   profile?: RunProfile;
+  policyOptions?: RunPolicyOptions;
+  attachments?: RunAttachment[];
 };
 
 export type ApprovalDecision = "approved" | "rejected";
@@ -478,10 +516,17 @@ export type RunStreamHandlers = {
   onClose?: () => void;
 };
 
-export type SupervisorStatus = "stopped" | "starting" | "running" | "crashed" | "stopping";
+export type SupervisorStatus = "stopped" | "starting" | "running" | "crashed" | "stopping" | "draining";
 
 export type SupervisorStatusInfo = {
   status: SupervisorStatus;
+  errorMessage?: string;
+  drain?: {
+    activeRuns: number;
+    queuedRuns: number;
+    timedOut: boolean;
+    timeoutMs: number;
+  };
 };
 
 export type AwakenBridge = {
@@ -521,6 +566,7 @@ export type AwakenBridge = {
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
   getSupervisorStatus: () => Promise<SupervisorStatusInfo>;
   onSupervisorStatusChange: (callback: (info: SupervisorStatusInfo) => void) => () => void;
+  setPolicySettings: (settings: RunPolicyOptions) => Promise<void>;
   notifyRendererReady: () => void;
 };
 
@@ -633,6 +679,7 @@ export function normalizeRuntimeThreadContext(
     usage: {
       markdown: context.usage.markdown,
       model: context.usage.model,
+      modelDisplayName: context.usage.model_display_name || undefined,
       totalTokens: context.usage.total_tokens,
       maxTokens: context.usage.max_tokens,
       percentage: context.usage.percentage,
@@ -764,6 +811,7 @@ export function normalizeRuntimeInfo(info: RuntimeInfoWire): RuntimeInfo {
     runtimeVersion: info.runtime_version,
     apiVersion: info.api_version,
     configuredModel: info.configured_model,
+    configuredModelDisplayName: info.configured_model_display_name || undefined,
     protocol: info.protocol,
     authScheme: info.auth_scheme,
     hasApiKey: info.has_api_key,
@@ -773,6 +821,7 @@ export function normalizeRuntimeInfo(info: RuntimeInfoWire): RuntimeInfo {
     profiles: (info.profiles ?? []).map((profile) => ({
       name: profile.name,
       model: profile.model,
+      modelDisplayName: profile.model_display_name || undefined,
       protocol: profile.protocol,
       authScheme: profile.auth_scheme,
       hasApiKey: profile.has_api_key,
@@ -822,5 +871,24 @@ export function normalizeStartRunRequest(request: StartRunRequest): StartRunRequ
       entrypoint: request.client.entrypoint,
     },
     profile: normalizeRunProfile(request.profile),
+    policy_options: normalizeRunPolicyOptions(request.policyOptions),
+    attachments: request.attachments?.map((attachment) => ({
+      path: attachment.path,
+      type: attachment.type,
+    })),
   };
+}
+
+export function normalizeRunPolicyOptions(
+  options?: RunPolicyOptions,
+): RunPolicyOptionsWire | undefined {
+  if (!options) {
+    return undefined;
+  }
+  const wire: RunPolicyOptionsWire = {
+    busy_input_mode: options.busyInputMode,
+    background_notification_mode: options.backgroundNotificationMode,
+    image_input_mode: options.imageInputMode,
+  };
+  return Object.values(wire).some((value) => value !== undefined) ? wire : undefined;
 }

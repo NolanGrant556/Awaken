@@ -49,6 +49,7 @@ import {
   type RuntimeThreadShareBundleResultWire,
   type RuntimeThreadTranscriptWire,
   type RuntimeThreadWire,
+  type RunPolicyOptions,
   type StartRunRequest,
 } from "../shared/runtime.js";
 import { RuntimeSupervisor, type SupervisorStatusInfo } from "./runtime-supervisor.js";
@@ -130,8 +131,12 @@ function runtimeUrl(pathname: string): string {
   return new URL(pathname, runtimeBaseUrl.endsWith("/") ? runtimeBaseUrl : `${runtimeBaseUrl}/`).toString();
 }
 
-function toRendererSupervisorStatus(info: SupervisorStatusInfo): { status: SupervisorStatusInfo["status"] } {
-  return { status: info.status };
+function toRendererSupervisorStatus(info: SupervisorStatusInfo): SupervisorStatusInfo {
+  return {
+    status: info.status,
+    errorMessage: info.errorMessage,
+    drain: info.drain,
+  };
 }
 
 async function readErrorMessage(response: Response): Promise<string> {
@@ -424,7 +429,7 @@ ipcMain.handle("awaken:get-run", async (_event, runId: string) => {
     method: "GET",
   });
 
-	return normalizeRuntimeRun(run);
+  return normalizeRuntimeRun(run);
 });
 
 ipcMain.handle("awaken:get-thread-lite", async (_event, threadId: string) => {
@@ -652,6 +657,13 @@ ipcMain.handle("awaken:validate-workspace", async (_event, candidate: string) =>
 
 ipcMain.handle("awaken:runtime-supervisor-status", async () => {
   return toRendererSupervisorStatus(supervisor?.getStatus() ?? { status: "stopped" });
+});
+
+ipcMain.handle("awaken:set-policy-settings", async (_event, settings: RunPolicyOptions) => {
+  const timeoutMs = Number(settings?.restartDrainTimeoutMs);
+  if (supervisor && Number.isFinite(timeoutMs) && timeoutMs >= 0) {
+    supervisor.updateOptions({ drainTimeoutMs: timeoutMs });
+  }
 });
 
 // Persist the last user-selected workspace so the supervisor can default to it

@@ -20,6 +20,7 @@ import {
   type RuntimeThreadShareBundleResult,
   type RuntimeThreadTranscript,
   type RuntimeThread,
+  type RunPolicyOptions,
   type StartRunRequest,
   type SupervisorStatusInfo,
   type WorkspacePickResult,
@@ -137,6 +138,8 @@ const bridge: AwakenBridge = {
     ipcRenderer.on("awaken:supervisor-status-changed", handler);
     return () => ipcRenderer.removeListener("awaken:supervisor-status-changed", handler);
   },
+  setPolicySettings: (settings: RunPolicyOptions) =>
+    ipcRenderer.invoke("awaken:set-policy-settings", settings) as Promise<void>,
   notifyRendererReady: () => {
     ipcRenderer.send("awaken:renderer-ready");
   },

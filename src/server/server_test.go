@@ -4223,6 +4223,81 @@ func TestRunWithBadBaseURLEmitsProviderRequestFailed(t *testing.T) {
 	}
 }
 
+func TestRuntimeDrainEndpointReportsActiveAndQueuedRuns(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var startedOnce sync.Once
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			startedOnce.Do(func() { close(started) })
+			<-release
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+			return "done", nil
+		})
+	})
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	workspaceRoot := t.TempDir()
+	firstBody := fmt.Sprintf(`{
+		"input": "first",
+		"workspace": { "workspace_root": %q, "writable_roots": [%q] },
+		"client": { "session_id": "drain-1", "request_id": "drain-req-1", "entrypoint": "test" }
+	}`, workspaceRoot, workspaceRoot)
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(firstBody))
+	if err != nil {
+		t.Fatalf("POST first run failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected first run 201, got %d", resp.StatusCode)
+	}
+	var first awruntime.Run
+	if err := json.NewDecoder(resp.Body).Decode(&first); err != nil {
+		t.Fatalf("failed to decode first run: %v", err)
+	}
+	<-started
+
+	secondBody := fmt.Sprintf(`{
+		"input": "second",
+		"thread_id": %q,
+		"workspace": { "workspace_root": %q, "writable_roots": [%q] },
+		"client": { "session_id": "drain-2", "request_id": "drain-req-2", "entrypoint": "test" },
+		"policy_options": { "busy_input_mode": "queue" }
+	}`, first.ThreadID, workspaceRoot, workspaceRoot)
+	resp, err = http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(secondBody))
+	if err != nil {
+		t.Fatalf("POST queued run failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected queued run 201, got %d", resp.StatusCode)
+	}
+
+	drainResp, err := http.Post(ts.URL+"/v1/runtime/drain", "application/json", strings.NewReader(`{"timeout_ms":10}`))
+	if err != nil {
+		t.Fatalf("POST runtime drain failed: %v", err)
+	}
+	defer drainResp.Body.Close()
+	if drainResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected drain 200, got %d", drainResp.StatusCode)
+	}
+	var drain struct {
+		ActiveRuns int   `json:"active_runs"`
+		QueuedRuns int   `json:"queued_runs"`
+		TimedOut   bool  `json:"timed_out"`
+		TimeoutMS  int64 `json:"timeout_ms"`
+	}
+	if err := json.NewDecoder(drainResp.Body).Decode(&drain); err != nil {
+		t.Fatalf("failed to decode drain response: %v", err)
+	}
+	if !drain.TimedOut || drain.ActiveRuns != 1 || drain.QueuedRuns != 1 || drain.TimeoutMS != 10 {
+		t.Fatalf("unexpected drain response: %+v", drain)
+	}
+	close(release)
+}
+
 // TestRunWithProviderBodySecretEmitsSanitizedMessage 验证 provider 返回非 2xx 且 body
 // 含敏感信息时，RunError 事件 message 不泄漏 body 内容，仅保留 status code。
 func TestRunWithProviderBodySecretEmitsSanitizedMessage(t *testing.T) {

@@ -11,6 +11,8 @@ func DisplaySafeEvent(event AwakenEvent) AwakenEvent {
 	event.PatchSummary = redaction.RedactString(event.PatchSummary)
 	event.Diff = redaction.RedactString(event.Diff)
 	event.Error = redaction.RedactString(event.Error)
+	event.PolicyReason = redaction.RedactString(event.PolicyReason)
+	event.PolicyStatus = redaction.RedactString(event.PolicyStatus)
 	event.ApprovalTitle = redaction.RedactString(event.ApprovalTitle)
 	event.ApprovalDescription = redaction.RedactString(event.ApprovalDescription)
 	event.ApprovalPatchSummary = redaction.RedactString(event.ApprovalPatchSummary)

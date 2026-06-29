@@ -63,6 +63,20 @@ export type TurnDiffRecord = {
   truncated?: boolean;
 };
 
+export type PolicyDecisionRecord = {
+  id: string;
+  category: string;
+  decision: string;
+  reason?: string;
+  status?: string;
+  payload?: Record<string, unknown>;
+};
+
+export type RateLimitOptionRecord = {
+  label: string;
+  value: string;
+};
+
 export type ThreadItem = {
   threadId: string;
   label: string;
@@ -93,6 +107,10 @@ type ThreadViewState = {
   approvals: ApprovalItem[];
   artifacts: ArtifactRecord[];
   turnDiff?: TurnDiffRecord;
+  policyDecisions: PolicyDecisionRecord[];
+  providerReason?: string;
+  retryable?: boolean;
+  rateLimitOptions: RateLimitOptionRecord[];
   narrative: RunNarrativeState;
   errorMessage?: string;
   runStartedAtMs?: number;
@@ -121,6 +139,10 @@ export type RuntimeViewState = {
   approvals: ApprovalItem[];
   artifacts: ArtifactRecord[];
   turnDiff?: TurnDiffRecord;
+  policyDecisions: PolicyDecisionRecord[];
+  providerReason?: string;
+  retryable?: boolean;
+  rateLimitOptions: RateLimitOptionRecord[];
   narrative: RunNarrativeState;
   errorMessage?: string;
   runStartedAtMs?: number;
@@ -134,6 +156,7 @@ export type RuntimeViewState = {
   threadContextLoading?: boolean;
   threadContextError?: string | null;
   branchSourceView?: BranchSourceView | null;
+  supervisorInfo?: SupervisorStatusInfo;
 };
 
 export type RuntimeAction =
@@ -173,6 +196,8 @@ const initialState: RuntimeViewState = {
   patchPreviews: [],
   approvals: [],
   artifacts: [],
+  policyDecisions: [],
+  rateLimitOptions: [],
   narrative: createInitialRunNarrativeState(),
   threads: [],
   threadViews: {},
@@ -196,6 +221,10 @@ function viewFromState(state: RuntimeViewState): ThreadViewState {
     approvals: state.approvals,
     artifacts: state.artifacts,
     turnDiff: state.turnDiff,
+    policyDecisions: state.policyDecisions,
+    providerReason: state.providerReason,
+    retryable: state.retryable,
+    rateLimitOptions: state.rateLimitOptions,
     narrative: state.narrative,
     errorMessage: state.errorMessage,
     runStartedAtMs: state.runStartedAtMs,
@@ -266,7 +295,7 @@ function threadItemFromRuntime(thread: RuntimeThread): ThreadItem {
 }
 
 function isActiveRunStatus(status?: RuntimeRunStatus): boolean {
-  return status === "running" || status === "awaiting_approval" || status === "cancelling";
+  return status === "queued" || status === "running" || status === "awaiting_approval" || status === "cancelling";
 }
 
 function syncActiveThreadSummary(
@@ -538,6 +567,44 @@ function normalizeArtifactStatus(value?: string): AguiArtifactStatus {
   }
 }
 
+function providerErrorMessage(event: AguiEvent): string {
+  const rawMessage = event.message || "Runtime returned an error";
+  const reason = event.providerReason;
+  if (event.code === "PROVIDER_AUTH_MISSING") {
+    return "API key 缺失，请在 .env 中配置 LLM_API_KEY";
+  }
+  if (reason === "rate_limit") {
+    return `Provider 限流：${rawMessage}`;
+  }
+  if (reason === "auth" || reason === "auth_permanent" || reason === "billing") {
+    return `Provider 认证或额度异常：${rawMessage}`;
+  }
+  if (reason === "context_overflow" || reason === "payload_too_large") {
+    return `上下文过长：${rawMessage}`;
+  }
+  if (event.code === "PROVIDER_REQUEST_FAILED") {
+    return `Provider 请求失败：${rawMessage}`;
+  }
+  return rawMessage;
+}
+
+function upsertPolicyDecision(
+  records: PolicyDecisionRecord[],
+  event: AguiEvent,
+): PolicyDecisionRecord[] {
+  const category = event.policyCategory || "policy";
+  const id = `${event.seq ?? records.length + 1}:${category}`;
+  const next: PolicyDecisionRecord = {
+    id,
+    category,
+    decision: event.policyDecision || "decision",
+    reason: event.policyReason,
+    status: event.policyStatus,
+    payload: event.policyPayload,
+  };
+  return [...records, next];
+}
+
 function buildArtifactDescription(artifact: ArtifactRecord): string {
   const details: string[] = [];
   if (artifact.description) {
@@ -597,6 +664,29 @@ function upsertArtifact(artifacts: ArtifactRecord[], event: AguiEvent): Artifact
 }
 
 function syncFromRun(state: RuntimeViewState, run: RuntimeRun): RuntimeViewState {
+  if (run.status === "queued") {
+    return {
+      ...state,
+      runId: run.runId,
+      threadId: run.threadId,
+      phase: "running",
+      status: run.status,
+      timelineStatus: "running",
+      steps: toSteps(
+        upsertStep(
+          state.steps.map((step, index) => ({ ...step, key: step.id, index: index + 1 })),
+          "run-queued",
+          {
+            title: "Run queued",
+            description: "Waiting for the active run to finish",
+            status: "active",
+            tag: "queued",
+          },
+        ),
+      ),
+    };
+  }
+
   if (run.status === "cancelling") {
     return {
       ...state,
@@ -682,6 +772,7 @@ export function reduceRuntimeState(
         ...initialState,
         narrative: createInitialRunNarrativeState(),
         supervisorStatus: state.supervisorStatus,
+        supervisorInfo: state.supervisorInfo,
         threads: state.threads,
         threadViews: saveActiveThreadView(state).threadViews,
       };
@@ -699,6 +790,10 @@ export function reduceRuntimeState(
         approvals: [],
         artifacts: [],
         turnDiff: undefined,
+        policyDecisions: [],
+        providerReason: undefined,
+        retryable: undefined,
+        rateLimitOptions: [],
         narrative: shouldAppendNarrative(state)
           ? appendRunRequestedNarrative(
               state.narrative,
@@ -707,6 +802,7 @@ export function reduceRuntimeState(
             )
           : createRunRequestedNarrative(action.prompt, nextNarrativeScope(state)),
         supervisorStatus: state.supervisorStatus,
+        supervisorInfo: state.supervisorInfo,
         threads: state.threads,
         activeThreadId: state.activeThreadId,
         threadViews: state.threadViews,
@@ -824,6 +920,7 @@ export function reduceRuntimeState(
             ? createRunRequestedNarrative(prompt, recoveredNarrativeScope(action.run))
             : createInitialRunNarrativeState(),
           supervisorStatus: state.supervisorStatus,
+          supervisorInfo: state.supervisorInfo,
           timelineTitle: "恢复运行",
           threads: state.threads,
           threadViews: state.threadViews,
@@ -838,6 +935,7 @@ export function reduceRuntimeState(
         ...view,
         activeThreadId: action.threadId,
         supervisorStatus: state.supervisorStatus,
+        supervisorInfo: state.supervisorInfo,
         threads: state.threads,
         threadViews: {
           ...state.threadViews,
@@ -873,6 +971,7 @@ export function reduceRuntimeState(
           ...initialState,
           narrative: createInitialRunNarrativeState(),
           supervisorStatus: state.supervisorStatus,
+          supervisorInfo: state.supervisorInfo,
           threads: loaded,
           threadViews,
         };
@@ -1001,7 +1100,10 @@ export function reduceRuntimeState(
         case "RUN_STATUS_CHANGED": {
           const status = action.event.status;
           nextState.status = status as RuntimeRunStatus | undefined;
-          if (status === "running") {
+          if (status === "queued") {
+            nextState.phase = "running";
+            nextState.timelineStatus = "running";
+          } else if (status === "running") {
             nextState.phase = "running";
             nextState.timelineStatus = "running";
           } else if (status === "awaiting_approval") {
@@ -1027,6 +1129,8 @@ export function reduceRuntimeState(
           records = upsertStep(records, status === "cancelled" ? "run-cancelled" : `status:${status ?? "unknown"}`, {
             title: status === "awaiting_approval"
               ? "Awaiting approval"
+              : status === "queued"
+                ? "Run queued"
               : status === "cancelling"
                 ? "Cancelling run"
                 : status === "cancelled"
@@ -1297,6 +1401,22 @@ export function reduceRuntimeState(
           });
           break;
         }
+        case "AWAKEN_POLICY_DECISION": {
+          nextState.policyDecisions = upsertPolicyDecision(nextState.policyDecisions, action.event);
+          records = upsertStep(records, `policy:${action.event.policyCategory ?? "policy"}:${action.event.seq ?? records.length}`, {
+            title: action.event.policyCategory === "image_routing"
+              ? "Image routing decided"
+              : action.event.policyCategory === "busy_input"
+                ? "Busy input policy"
+                : action.event.policyCategory === "background_notification"
+                  ? "Notification policy"
+                  : "Policy decision",
+            description: action.event.policyStatus || action.event.policyReason || action.event.policyDecision || "Policy decision recorded",
+            status: "done",
+            tag: action.event.policyDecision || "policy",
+          });
+          break;
+        }
         case "RUN_ERROR":
           if (action.event.code === "RUN_CANCELLED") {
             nextState.phase = "cancelled";
@@ -1313,23 +1433,17 @@ export function reduceRuntimeState(
             nextState.phase = "error";
             nextState.status = "error";
             nextState.timelineStatus = "error";
-            const rawMessage = action.event.message || "Runtime returned an error";
-            let errorMessage = rawMessage;
-            let errorDescription = rawMessage;
-            if (action.event.code === "PROVIDER_AUTH_MISSING") {
-              errorMessage = "API key 缺失，请在 .env 中配置 LLM_API_KEY";
-              errorDescription = "API key 缺失，请在 .env 中配置 LLM_API_KEY";
-            } else if (action.event.code === "PROVIDER_REQUEST_FAILED") {
-              errorMessage = `Provider 请求失败：${rawMessage}`;
-              errorDescription = `Provider 请求失败：${rawMessage}`;
-            }
+            const errorMessage = providerErrorMessage(action.event);
             nextState.errorMessage = errorMessage;
+            nextState.providerReason = action.event.providerReason;
+            nextState.retryable = action.event.retryable;
+            nextState.rateLimitOptions = action.event.rateLimitOptions ?? [];
             nextState.approvals = [];
             records = upsertStep(records, "run-error", {
               title: "Run failed",
-              description: errorDescription,
+              description: errorMessage,
               status: "error",
-              tag: action.event.code || "error",
+              tag: action.event.providerReason || action.event.code || "error",
             });
           }
           break;
@@ -1383,6 +1497,7 @@ export function reduceRuntimeState(
       return {
         ...state,
         supervisorStatus: action.info.status,
+        supervisorInfo: action.info,
       };
     default:
       return state;

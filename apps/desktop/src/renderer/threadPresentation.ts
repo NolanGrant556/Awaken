@@ -8,7 +8,7 @@ export type ThreadStatusPresentation = {
 };
 
 function isRunningLikeStatus(status?: ThreadItem["runStatus"]): boolean {
-  return status === "running" || status === "awaiting_approval" || status === "cancelling";
+  return status === "queued" || status === "running" || status === "awaiting_approval" || status === "cancelling";
 }
 
 export function describeThreadStatus(thread: ThreadItem): ThreadStatusPresentation {
@@ -17,6 +17,8 @@ export function describeThreadStatus(thread: ThreadItem): ThreadStatusPresentati
   }
 
   switch (thread.runStatus) {
+    case "queued":
+      return { label: "queued", tone: "local", active: true };
     case "cancelling":
       return { label: "取消中", tone: "warning", active: true };
     case "cancelled":

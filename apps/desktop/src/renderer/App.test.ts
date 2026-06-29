@@ -58,6 +58,7 @@ function stubElectronBridge(): void {
       validateWorkspace: vi.fn(async () => ({ valid: true as const })),
       getSupervisorStatus: vi.fn(async () => ({ status: "running" as const })),
       onSupervisorStatusChange: vi.fn(() => () => {}),
+      setPolicySettings: vi.fn(async () => {}),
       notifyRendererReady: vi.fn(),
     } satisfies AwakenBridge,
   });

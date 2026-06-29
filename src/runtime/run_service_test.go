@@ -749,7 +749,6 @@ func TestRunServiceKeepsDefaultAgentConfigWithoutProfile(t *testing.T) {
 		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
 			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
 				SystemPrompt: "default prompt",
-				MaxThoughts:  5,
 				ModelConfig: agentcore.ModelConfig{
 					Model: "default-model",
 				},
@@ -781,8 +780,8 @@ func TestRunServiceKeepsDefaultAgentConfigWithoutProfile(t *testing.T) {
 	if cfg.ModelConfig.Model != "default-model" {
 		t.Fatalf("expected default model, got %q", cfg.ModelConfig.Model)
 	}
-	if cfg.MaxThoughts != 5 {
-		t.Fatalf("expected default max thoughts 5, got %d", cfg.MaxThoughts)
+	if cfg.MaxTurns != 0 {
+		t.Fatalf("expected no default max turns limit, got %d", cfg.MaxTurns)
 	}
 	if cfg.RunProfile.Model != "" || cfg.RunProfile.MaxTurns != 0 {
 		t.Fatalf("expected empty run profile, got %+v", cfg.RunProfile)
@@ -798,7 +797,6 @@ func TestRunServiceAppliesRunProfileOverridesToAgentConfig(t *testing.T) {
 		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
 			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
 				SystemPrompt: "default prompt",
-				MaxThoughts:  5,
 				ModelConfig: agentcore.ModelConfig{
 					Model: "default-model",
 				},
@@ -838,8 +836,8 @@ func TestRunServiceAppliesRunProfileOverridesToAgentConfig(t *testing.T) {
 	if cfg.ModelConfig.Model != "override-model" {
 		t.Fatalf("expected overridden model, got %q", cfg.ModelConfig.Model)
 	}
-	if cfg.MaxThoughts != 2 {
-		t.Fatalf("expected overridden max thoughts 2, got %d", cfg.MaxThoughts)
+	if cfg.MaxTurns != 2 {
+		t.Fatalf("expected overridden max turns 2, got %d", cfg.MaxTurns)
 	}
 	if cfg.RunProfile.ID != "debug-profile" || len(cfg.RunProfile.Tools) != 1 || cfg.RunProfile.Tools[0] != "list_files" {
 		t.Fatalf("expected normalized run profile on agent config, got %+v", cfg.RunProfile)
@@ -880,7 +878,6 @@ func TestRunServiceRunProfileDoesNotPersistAcrossThreadRuns(t *testing.T) {
 		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
 			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
 				SystemPrompt: "default prompt",
-				MaxThoughts:  5,
 				ModelConfig: agentcore.ModelConfig{
 					Model: "default-model",
 				},
@@ -929,10 +926,10 @@ func TestRunServiceRunProfileDoesNotPersistAcrossThreadRuns(t *testing.T) {
 	if len(captured) != 2 {
 		t.Fatalf("expected two captured configs, got %d", len(captured))
 	}
-	if captured[0].ModelConfig.Model != "override-model" || captured[0].MaxThoughts != 2 {
+	if captured[0].ModelConfig.Model != "override-model" || captured[0].MaxTurns != 2 {
 		t.Fatalf("expected first run override config, got %+v", captured[0])
 	}
-	if captured[1].ModelConfig.Model != "default-model" || captured[1].MaxThoughts != 5 {
+	if captured[1].ModelConfig.Model != "default-model" || captured[1].MaxTurns != 0 {
 		t.Fatalf("expected second run to fall back to default config, got %+v", captured[1])
 	}
 }

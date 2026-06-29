@@ -119,7 +119,7 @@ id, name, description, system_prompt, model, max_turns,
 tools, disallowed_tools, permission_mode
 ```
 
-默认行为保持不变：不传 `profile` 时，仍使用当前 runtime 的默认 model / max thoughts / tool policy。
+默认行为保持不变：不传 `profile` 时，仍使用当前 runtime 的默认 model / tool policy；`max_turns` 只在 profile 显式传入时限制执行轮数。
 
 `/v1/runs/{run_id}/events` 输出 AG-UI-compatible SSE events。Awaken 目前有这些 extension events：
 

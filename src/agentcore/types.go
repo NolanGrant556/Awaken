@@ -13,7 +13,7 @@ import (
 
 type AgentConfig struct {
 	SystemPrompt     string
-	MaxThoughts      int
+	MaxTurns         int
 	ModelConfig      ModelConfig
 	EntryPoint       string
 	Workspace        WorkspaceConfig

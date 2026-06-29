@@ -19,6 +19,20 @@ import (
 
 const maxTurnDiffChars = 50000
 
+var ErrMaxTurnsReached = errors.New("max turns reached")
+
+type MaxTurnsReachedError struct {
+	MaxTurns int
+}
+
+func (e MaxTurnsReachedError) Error() string {
+	return fmt.Sprintf("达到最大执行轮数 %d，未能完成任务", e.MaxTurns)
+}
+
+func (e MaxTurnsReachedError) Unwrap() error {
+	return ErrMaxTurnsReached
+}
+
 type Runner struct {
 	config           AgentConfig
 	conversation     *context.Conversation
@@ -45,7 +59,8 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 	r.toolOrchestrator = NewToolOrchestrator(r.toolRuntime, toolOrchestratorConfigFromAgentConfig(r.config))
 	events.runStarted()
 
-	for i := 0; i < r.config.MaxThoughts; i++ {
+	turn := 1
+	for {
 		select {
 		case <-ctx.Done():
 			r.injectSyntheticToolResultsForCancel()
@@ -74,6 +89,12 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 			results := r.executeToolCalls(ctx, toolCalls, events)
 			r.conversation.ToolExchange(response.Content, toolCalls, toolExecutionResultsToContext(results))
 			events.resetTurn()
+			var err error
+			turn, err = r.nextTurnOrMaxTurnsError(turn)
+			if err != nil {
+				events.runErrored(err)
+				return "", err
+			}
 			continue
 		}
 
@@ -84,6 +105,12 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 				return finalAnswer, nil
 			}
 			events.resetTurn()
+			var err error
+			turn, err = r.nextTurnOrMaxTurnsError(turn)
+			if err != nil {
+				events.runErrored(err)
+				return "", err
+			}
 			continue
 		}
 
@@ -97,10 +124,14 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 		events.runFinished(response.Content)
 		return response.Content, nil
 	}
+}
 
-	err := fmt.Errorf("达到最大思考次数 %d，未能完成任务", r.config.MaxThoughts)
-	events.runErrored(err)
-	return "", err
+func (r *Runner) nextTurnOrMaxTurnsError(currentTurn int) (int, error) {
+	nextTurn := currentTurn + 1
+	if r.config.MaxTurns > 0 && nextTurn > r.config.MaxTurns {
+		return currentTurn, MaxTurnsReachedError{MaxTurns: r.config.MaxTurns}
+	}
+	return nextTurn, nil
 }
 
 func (r *Runner) injectSyntheticToolResultsForCancel() {
@@ -363,6 +394,8 @@ func (e *runEventEmitter) runErrored(err error) {
 	}
 	event := AwakenEvent{Type: RunErrorEventType, Error: err.Error()}
 	switch {
+	case errors.Is(err, ErrMaxTurnsReached):
+		event.Code = "MAX_TURNS_REACHED"
 	case errors.Is(err, llm.ErrMissingAPIKey):
 		event.Code = "PROVIDER_AUTH_MISSING"
 	case errors.Is(err, llm.ErrRequestFailed):

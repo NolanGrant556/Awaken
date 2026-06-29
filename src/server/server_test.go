@@ -728,7 +728,7 @@ func TestCreateRunProfileOverridesFlowIntoAgentConfig(t *testing.T) {
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
 				SystemPrompt: "default prompt",
-				MaxThoughts:  5,
+				MaxTurns:     5,
 				ModelConfig: agentcore.ModelConfig{
 					Model: "default-model",
 				},
@@ -765,8 +765,8 @@ func TestCreateRunProfileOverridesFlowIntoAgentConfig(t *testing.T) {
 	if cfg.ModelConfig.Model != "override-model" {
 		t.Fatalf("expected overridden model, got %q", cfg.ModelConfig.Model)
 	}
-	if cfg.MaxThoughts != 2 {
-		t.Fatalf("expected overridden max thoughts, got %d", cfg.MaxThoughts)
+	if cfg.MaxTurns != 2 {
+		t.Fatalf("expected overridden max turns, got %d", cfg.MaxTurns)
 	}
 	if cfg.RunProfile.ID != "analysis" || len(cfg.RunProfile.Tools) != 1 || cfg.RunProfile.Tools[0] != "list_files" {
 		t.Fatalf("expected normalized run profile on agent config, got %+v", cfg.RunProfile)
@@ -2363,8 +2363,8 @@ func TestPlainQASmoke(t *testing.T) {
 	runService := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
-				MaxThoughts: 5,
-				EntryPoint:  "awaken-core-smoke",
+				MaxTurns:   5,
+				EntryPoint: "awaken-core-smoke",
 				ModelConfig: agentcore.ModelConfig{
 					APIKey:      cfg.APIKey,
 					BaseURL:     cfg.BaseURL,
@@ -2506,8 +2506,8 @@ func TestReadOnlyFileSmoke(t *testing.T) {
 	runService := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
-				MaxThoughts: 10,
-				EntryPoint:  "awaken-core-smoke",
+				MaxTurns:   10,
+				EntryPoint: "awaken-core-smoke",
 				ModelConfig: agentcore.ModelConfig{
 					APIKey:      cfg.APIKey,
 					BaseURL:     cfg.BaseURL,
@@ -2681,8 +2681,8 @@ func TestFileMutationApprovalSmoke(t *testing.T) {
 	runService := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
-				MaxThoughts: 10,
-				EntryPoint:  "awaken-core-smoke",
+				MaxTurns:   10,
+				EntryPoint: "awaken-core-smoke",
 				ModelConfig: agentcore.ModelConfig{
 					APIKey:      cfg.APIKey,
 					BaseURL:     cfg.BaseURL,
@@ -2856,8 +2856,8 @@ func TestFileMutationRejectSmoke(t *testing.T) {
 	runService := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
-				MaxThoughts: 10,
-				EntryPoint:  "awaken-core-smoke",
+				MaxTurns:   10,
+				EntryPoint: "awaken-core-smoke",
 				ModelConfig: agentcore.ModelConfig{
 					APIKey:      cfg.APIKey,
 					BaseURL:     cfg.BaseURL,
@@ -3071,8 +3071,8 @@ func TestFileMutationArtifactSmoke(t *testing.T) {
 	runService := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
-				MaxThoughts: 10,
-				EntryPoint:  "awaken-core-smoke",
+				MaxTurns:   10,
+				EntryPoint: "awaken-core-smoke",
 				ModelConfig: agentcore.ModelConfig{
 					APIKey:      cfg.APIKey,
 					BaseURL:     cfg.BaseURL,
@@ -3259,8 +3259,8 @@ func TestFileMutationPatchAndTurnDiffSmoke(t *testing.T) {
 	runService := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
-				MaxThoughts: 10,
-				EntryPoint:  "awaken-core-smoke",
+				MaxTurns:   10,
+				EntryPoint: "awaken-core-smoke",
 				ModelConfig: agentcore.ModelConfig{
 					APIKey:      cfg.APIKey,
 					BaseURL:     cfg.BaseURL,
@@ -3421,8 +3421,8 @@ func TestMultiTurnThreadSmoke(t *testing.T) {
 	runService := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
-				MaxThoughts: 10,
-				EntryPoint:  "awaken-core-smoke",
+				MaxTurns:   10,
+				EntryPoint: "awaken-core-smoke",
 				ModelConfig: agentcore.ModelConfig{
 					APIKey:      cfg.APIKey,
 					BaseURL:     cfg.BaseURL,
@@ -3788,8 +3788,8 @@ func TestModelStatusSmoke(t *testing.T) {
 	runService := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
-				MaxThoughts: 5,
-				EntryPoint:  "awaken-core-smoke",
+				MaxTurns:   5,
+				EntryPoint: "awaken-core-smoke",
 				ModelConfig: agentcore.ModelConfig{
 					APIKey:      cfg.APIKey,
 					BaseURL:     cfg.BaseURL,
@@ -3925,8 +3925,8 @@ func TestRunWithoutAPIKeyEmitsProviderAuthMissing(t *testing.T) {
 	runService := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
-				MaxThoughts: 5,
-				EntryPoint:  "awaken-core-smoke",
+				MaxTurns:   5,
+				EntryPoint: "awaken-core-smoke",
 				ModelConfig: agentcore.ModelConfig{
 					APIKey:  "",
 					BaseURL: "https://api.anthropic.com/v1",
@@ -4027,8 +4027,8 @@ func TestRunWithBadBaseURLEmitsProviderRequestFailed(t *testing.T) {
 	runService := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
-				MaxThoughts: 5,
-				EntryPoint:  "awaken-core-smoke",
+				MaxTurns:   5,
+				EntryPoint: "awaken-core-smoke",
 				ModelConfig: agentcore.ModelConfig{
 					APIKey:  "dummy-key-not-real",
 					BaseURL: "http://127.0.0.1:1/invalid",
@@ -4141,8 +4141,8 @@ func TestRunWithProviderBodySecretEmitsSanitizedMessage(t *testing.T) {
 	runService := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
-				MaxThoughts: 5,
-				EntryPoint:  "awaken-core-smoke",
+				MaxTurns:   5,
+				EntryPoint: "awaken-core-smoke",
 				ModelConfig: agentcore.ModelConfig{
 					APIKey:  "dummy-key-not-real",
 					BaseURL: providerServer.URL,

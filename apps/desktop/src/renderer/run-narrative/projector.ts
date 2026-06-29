@@ -5,6 +5,7 @@ import type {
   RunNarrativeItem,
   RunNarrativeState,
 } from "./types";
+import { shellStatusFromContent } from "../runtime/shellToolResult";
 
 const MAX_SEEN_EVENTS = 1000;
 const READ_ONLY_TOOL_NAMES = new Set(["read_file", "list_files", "grep_search"]);
@@ -147,7 +148,8 @@ export function projectAguiEventToNarrative(
       return commitTool(
         base,
         event,
-        event.content ? "done" : "error",
+        shellStatusFromContent(event.toolCallName, event.content) ??
+          (event.content ? "done" : "error"),
         event.content || "Tool returned empty content",
       );
     case "AWAKEN_APPROVAL_REQUESTED":

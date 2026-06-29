@@ -85,6 +85,14 @@ import {
   actionsForThreadTranscript,
   afterSeqForTranscriptRun,
 } from "./runtime/thread-transcript";
+import {
+  formatShellSummary,
+  parseShellCommand,
+  parseShellResult,
+  shellActionTitle,
+  shellPreview,
+  type ShellResult,
+} from "./runtime/shellToolResult";
 import { describeThreadStatus } from "./threadPresentation";
 import {
   DEFAULT_WORKSPACE_PROJECT_ID,
@@ -172,6 +180,199 @@ function formatToolOutput(tool: ToolResultRecord): string {
   ]
     .filter((line, index, lines) => line !== "" || lines[index - 1] !== "")
     .join("\n");
+}
+
+function InlineShellDetail({ tool, result }: { tool: ToolResultRecord; result: ShellResult }) {
+  const command = parseShellCommand(tool.args);
+  const stdout = result.stdout;
+  const stderr = result.stderr;
+  const fullOutput = [
+    command ? `Command:\n${command}` : "",
+    stdout ? `stdout:\n${stdout}` : "",
+    stderr ? `stderr:\n${stderr}` : "",
+    `exit ${result.exitCode} · ${result.durationMs}ms${result.truncated ? " · truncated" : ""}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  return (
+    <div className="inline-tool-detail inline-shell-detail">
+      <div className="inline-tool-detail-head">
+        <span>Shell output</span>
+        <CopyButton text={fullOutput} label="Copy all" />
+      </div>
+      <div className="inline-tool-detail-body">
+        {command ? (
+          <div className="inline-tool-detail-section">
+            <div className="inline-tool-detail-section-head">
+              <strong>Command</strong>
+              <CopyButton text={command} label="Copy command" />
+            </div>
+            <div className="inline-tool-detail-scroll">
+              <pre>{command}</pre>
+            </div>
+          </div>
+        ) : null}
+        <div className="inline-tool-detail-section">
+          <div className="inline-tool-detail-section-head">
+            <strong>stdout</strong>
+            <CopyButton text={stdout} label="Copy stdout" />
+          </div>
+          <div className="inline-tool-detail-scroll">
+            <pre>{stdout || "empty"}</pre>
+          </div>
+        </div>
+        {stderr ? (
+          <div className="inline-tool-detail-section inline-shell-detail-stderr">
+            <div className="inline-tool-detail-section-head">
+              <strong>stderr</strong>
+              <CopyButton text={stderr} label="Copy stderr" />
+            </div>
+            <div className="inline-tool-detail-scroll">
+              <pre>{stderr}</pre>
+            </div>
+          </div>
+        ) : null}
+        <div className="inline-tool-detail-section inline-shell-detail-meta">
+          <strong>Metadata</strong>
+          <div className="inline-shell-detail-meta-row">
+            <span>exit {result.exitCode}</span>
+            <span>{result.durationMs}ms</span>
+            {result.timedOut ? <span className="inline-shell-detail-timeout">timed out</span> : null}
+            {result.truncated ? <span>truncated</span> : null}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InspectorCopyButton({ text, label }: { text: string; label: string }) {
+  if (!text) {
+    return null;
+  }
+  return (
+    <div className="inspector-copy-row">
+      <CopyButton text={text} label={label} />
+    </div>
+  );
+}
+
+function InspectorShellDetail({ tool, result }: { tool: ToolResultRecord; result: ShellResult }) {
+  const command = parseShellCommand(tool.args);
+  const stdout = result.stdout;
+  const stderr = result.stderr;
+  const fullOutput = [
+    command ? `Command:\n${command}` : "",
+    stdout ? `stdout:\n${stdout}` : "",
+    stderr ? `stderr:\n${stderr}` : "",
+    `exit ${result.exitCode} · ${result.durationMs}ms${result.truncated ? " · truncated" : ""}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  return (
+    <article className="inspector-item inspector-item-selected inspector-shell-item">
+      <Disclosure title={command || "Shell command"} meta={`exit ${result.exitCode}`} defaultOpen>
+        <InspectorCopyButton text={command || ""} label="Copy command" />
+        <div className="inspector-shell-sections">
+          {command ? (
+            <div className="inspector-shell-section">
+              <strong>Command</strong>
+              <pre>{command}</pre>
+            </div>
+          ) : null}
+          <div className="inspector-shell-section">
+            <div className="inspector-shell-section-head">
+              <strong>stdout</strong>
+              <InspectorCopyButton text={stdout} label="Copy stdout" />
+            </div>
+            <pre>{stdout || "empty"}</pre>
+          </div>
+          {stderr ? (
+            <div className="inspector-shell-section inspector-shell-section-stderr">
+              <div className="inspector-shell-section-head">
+                <strong>stderr</strong>
+                <InspectorCopyButton text={stderr} label="Copy stderr" />
+              </div>
+              <pre>{stderr}</pre>
+            </div>
+          ) : null}
+          <div className="inspector-shell-section">
+            <strong>Metadata</strong>
+            <div className="inspector-shell-meta-row">
+              <span>exit {result.exitCode}</span>
+              <span>{result.durationMs}ms</span>
+              {result.timedOut ? <span className="inspector-shell-timeout">timed out</span> : null}
+              {result.truncated ? <span>truncated</span> : null}
+            </div>
+          </div>
+        </div>
+        <InspectorCopyButton text={fullOutput} label="Copy all" />
+        <details className="inspector-shell-raw">
+          <summary>Raw JSON</summary>
+          <pre>{tool.content}</pre>
+        </details>
+      </Disclosure>
+    </article>
+  );
+}
+
+function InlineShellCall({
+  item,
+  toolResults,
+  onLayoutChange,
+}: {
+  item: Extract<RunNarrativeItem, { kind: "tool" }>;
+  toolResults: ToolResultRecord[];
+  onLayoutChange?: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const tool = toolResults.find((toolResult) => toolResult.id === rawToolId(item.id));
+  const result = tool ? parseShellResult(tool.content) : undefined;
+  const onLayoutChangeRef = useRef(onLayoutChange);
+  const didMountRef = useRef(false);
+
+  useLayoutEffect(() => {
+    onLayoutChangeRef.current = onLayoutChange;
+  }, [onLayoutChange]);
+
+  useLayoutEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
+    onLayoutChangeRef.current?.();
+  }, [expanded]);
+
+  if (!tool || !result) {
+    // Fall back to the generic tool renderer if the result does not look like a shell result.
+    return (
+      <InlineToolCall item={item} toolResults={toolResults} onLayoutChange={onLayoutChange} />
+    );
+  }
+
+  const command = parseShellCommand(tool.args);
+  const title = shellActionTitle(command);
+  const summary = formatShellSummary(result);
+  const preview = shellPreview(result.stdout);
+
+  return (
+    <div className="inline-tool-call inline-shell-call">
+      <ToolTraceLine
+        title={title}
+        detail={summary}
+        status={item.status}
+        onSelect={() => setExpanded((prev) => !prev)}
+      />
+      {preview && !expanded ? (
+        <div className="inline-shell-preview">
+          <pre>{preview}</pre>
+        </div>
+      ) : null}
+      {expanded ? <InlineShellDetail tool={tool} result={result} /> : null}
+    </div>
+  );
 }
 
 function InlineToolDetail({ tool }: { tool: ToolResultRecord }) {
@@ -1797,6 +1998,24 @@ export function App() {
       );
     }
     if (item.kind === "tool") {
+      const tool = runtimeState.toolResults.find(
+        (toolResult) => toolResult.id === rawToolId(item.id),
+      );
+      const isShell = tool?.toolCallName === "shell" && parseShellResult(tool.content) !== undefined;
+      if (isShell) {
+        return (
+          <InlineShellCall
+            key={key}
+            item={item}
+            toolResults={runtimeState.toolResults}
+            onLayoutChange={() => {
+              if (latestPromptIdRef.current) {
+                scrollLatestTurnOutputToTailIfObscured(latestPromptIdRef.current);
+              }
+            }}
+          />
+        );
+      }
       return (
         <InlineToolCall
           key={key}
@@ -1910,6 +2129,10 @@ export function App() {
   }
 
   function renderToolDetail(tool: ToolResultRecord) {
+    const shellResult = tool.toolCallName === "shell" ? parseShellResult(tool.content) : undefined;
+    if (shellResult) {
+      return <InspectorShellDetail tool={tool} result={shellResult} />;
+    }
     const toolOutput = formatToolOutput(tool);
     return (
       <article className="inspector-item inspector-item-selected">

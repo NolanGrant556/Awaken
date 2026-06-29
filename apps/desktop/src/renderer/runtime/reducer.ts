@@ -17,6 +17,7 @@ import {
   projectAguiEventToNarrative,
   type RunNarrativeState,
 } from "../run-narrative";
+import { shellStatusFromContent } from "./shellToolResult";
 
 type RuntimePhase = "idle" | "starting" | "running" | "reconnecting" | "cancelling" | "done" | "error" | "cancelled";
 
@@ -29,6 +30,7 @@ type StepRecord = RunStepItem & {
 export type ToolResultRecord = {
   id: string;
   title: string;
+  toolCallName?: string;
   content: string;
   args?: string;
   commandOutput?: string;
@@ -477,7 +479,11 @@ function upsertPatchPreview(
   return updated;
 }
 
-function toolRecordStatus(content?: string): "done" | "error" {
+function toolRecordStatus(content?: string, toolCallName?: string): "done" | "error" {
+  const shellStatus = shellStatusFromContent(toolCallName, content);
+  if (shellStatus) {
+    return shellStatus;
+  }
   const normalized = (content ?? "").trim();
   if (!normalized) {
     return "error";
@@ -1036,6 +1042,7 @@ export function reduceRuntimeState(
           nextState.toolResults = upsertToolResult(nextState.toolResults, {
             id,
             title: action.event.toolCallName || existing?.title || "Tool call",
+            toolCallName: action.event.toolCallName || existing?.toolCallName,
             args,
             content: existing?.content ?? "",
             status: "active",
@@ -1060,6 +1067,7 @@ export function reduceRuntimeState(
           nextState.toolResults = upsertToolResult(nextState.toolResults, {
             id,
             title: action.event.toolCallName || existing?.title || "Tool call",
+            toolCallName: action.event.toolCallName || existing?.toolCallName,
             args: existing?.args,
             content: existing?.content ?? "",
             status: "active",
@@ -1080,6 +1088,7 @@ export function reduceRuntimeState(
           nextState.toolResults = upsertToolResult(nextState.toolResults, {
             id,
             title: action.event.toolCallName || existing?.title || "Command",
+            toolCallName: action.event.toolCallName || existing?.toolCallName,
             args: existing?.args,
             content: existing?.content ?? "",
             commandOutput: `${existing?.commandOutput ?? ""}${delta}`,
@@ -1101,9 +1110,10 @@ export function reduceRuntimeState(
           nextState.toolResults = upsertToolResult(nextState.toolResults, {
             id,
             title: action.event.toolCallName || existing?.title || "Tool result",
+            toolCallName: action.event.toolCallName || existing?.toolCallName,
             content,
             args: existing?.args,
-            status: toolRecordStatus(action.event.content),
+            status: toolRecordStatus(action.event.content, action.event.toolCallName),
           });
 
           const stepKey = action.event.toolCallId

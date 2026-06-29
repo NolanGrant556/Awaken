@@ -478,6 +478,7 @@ describe("runtime reducer run narrative projection", () => {
     expect(state.toolResults).toContainEqual({
       id: "read-1",
       title: "read_file",
+      toolCallName: "read_file",
       args: "{\"path\":\"README.md\"}",
       content: "# Awaken\nfull result",
       status: "done",
@@ -496,6 +497,7 @@ describe("runtime reducer run narrative projection", () => {
     expect(state.toolResults).toContainEqual({
       id: "read-1",
       title: "read_file",
+      toolCallName: "read_file",
       args: "{\"path\":\"README.md\"}",
       content: "",
       status: "active",
@@ -570,6 +572,7 @@ describe("runtime reducer run narrative projection", () => {
     expect(state.toolResults).toContainEqual({
       id: "shell-1",
       title: "shell",
+      toolCallName: "shell",
       args: undefined,
       content: "",
       commandOutput: "hello",
@@ -582,6 +585,82 @@ describe("runtime reducer run narrative projection", () => {
       status: "active",
       tag: "stdout",
     });
+  });
+
+  it("derives shell result status from exit code and timeout", () => {
+    const cases: Array<{
+      name: string;
+      content: string;
+      expectedStatus: "done" | "error";
+    }> = [
+      {
+        name: "success",
+        content: JSON.stringify({
+          exit_code: 0,
+          timed_out: false,
+          duration_ms: 12,
+          stdout: "ok",
+          stderr: "",
+          truncated: false,
+        }),
+        expectedStatus: "done",
+      },
+      {
+        name: "nonzero exit",
+        content: JSON.stringify({
+          exit_code: 7,
+          timed_out: false,
+          duration_ms: 14,
+          stdout: "",
+          stderr: "boom",
+          truncated: false,
+        }),
+        expectedStatus: "error",
+      },
+      {
+        name: "timeout",
+        content: JSON.stringify({
+          exit_code: 0,
+          timed_out: true,
+          duration_ms: 1000,
+          stdout: "",
+          stderr: "timeout",
+          truncated: false,
+        }),
+        expectedStatus: "error",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const state = dispatch([
+        { type: "run/requested", prompt: `Run shell ${testCase.name}` },
+        runEvent({
+          type: "TOOL_CALL_ARGS",
+          seq: 1,
+          toolCallId: "shell-1",
+          toolCallName: "shell",
+          delta: "{\"command\":\"printf ok\"}",
+        }),
+        runEvent({
+          type: "TOOL_CALL_RESULT",
+          seq: 2,
+          toolCallId: "shell-1",
+          toolCallName: "shell",
+          content: testCase.content,
+        }),
+      ]);
+
+      expect(state.toolResults[0]).toMatchObject({
+        id: "shell-1",
+        toolCallName: "shell",
+        status: testCase.expectedStatus,
+      });
+      expect(state.narrative.committedItems.find((item) => item.id === "tool:shell-1")).toMatchObject({
+        kind: "tool",
+        id: "tool:shell-1",
+        status: testCase.expectedStatus,
+      });
+    }
   });
 
   it("stores patch previews and turn diff for the changes inspector", () => {

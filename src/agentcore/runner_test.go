@@ -279,7 +279,7 @@ func runAgentWithApprovalSink(ctx context.Context, cfg AgentConfig, userInput st
 	return runner.RunStreamWithEvents(ctx, sink)
 }
 
-func TestRunnerMaxThoughts(t *testing.T) {
+func TestRunnerMaxTurns(t *testing.T) {
 	toolName := "runner_max_tool"
 	mustRegisterRunnerTool(t, runnerTestTool{name: toolName})
 
@@ -289,9 +289,54 @@ func TestRunnerMaxThoughts(t *testing.T) {
 	defer server.Close()
 
 	agent := NewAgent(testAgentConfig(server.URL, 1))
-	_, err := agent.RunStreamWithEvents(context.Background(), "loop", nil)
-	if err == nil || !strings.Contains(err.Error(), "达到最大思考次数") {
-		t.Fatalf("expected max thoughts error, got %v", err)
+	var gotEvents []AwakenEvent
+	_, err := agent.RunStreamWithEvents(context.Background(), "loop", EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+	if !errors.Is(err, ErrMaxTurnsReached) || !strings.Contains(err.Error(), "达到最大执行轮数 1") {
+		t.Fatalf("expected max turns error, got %v", err)
+	}
+
+	var runErrorEvent *AwakenEvent
+	for i := range gotEvents {
+		if gotEvents[i].Type == RunErrorEventType {
+			runErrorEvent = &gotEvents[i]
+			break
+		}
+	}
+	if runErrorEvent == nil {
+		t.Fatalf("expected RunError event, got events: %+v", gotEvents)
+	}
+	if runErrorEvent.Code != "MAX_TURNS_REACHED" {
+		t.Fatalf("expected Code MAX_TURNS_REACHED, got %q", runErrorEvent.Code)
+	}
+}
+
+func TestRunnerUnlimitedMaxTurnsAllowsToolThenFinalAnswer(t *testing.T) {
+	toolName := "runner_unlimited_tool"
+	mustRegisterRunnerTool(t, runnerTestTool{name: toolName})
+
+	var calls int
+	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			writeRunnerStreamToolCall(t, w, "call_unlimited", toolName, map[string]string{"value": "again"})
+			return
+		}
+		writeRunnerStreamText(t, w, "finished")
+	})
+	defer server.Close()
+
+	agent := NewAgent(testAgentConfig(server.URL, 0))
+	answer, err := agent.RunStreamWithEvents(context.Background(), "loop", nil)
+	if err != nil {
+		t.Fatalf("expected unlimited max turns run to finish, got %v", err)
+	}
+	if answer != "finished" {
+		t.Fatalf("expected final answer, got %q", answer)
+	}
+	if calls != 2 {
+		t.Fatalf("expected two LLM calls, got %d", calls)
 	}
 }
 
@@ -1542,10 +1587,10 @@ func containsToolResultSubstring(messages []struct {
 	return false
 }
 
-func testAgentConfig(baseURL string, maxThoughts int) AgentConfig {
+func testAgentConfig(baseURL string, maxTurns int) AgentConfig {
 	return AgentConfig{
-		MaxThoughts: maxThoughts,
-		EntryPoint:  "test",
+		MaxTurns:   maxTurns,
+		EntryPoint: "test",
 		ModelConfig: ModelConfig{
 			APIKey:  "test-key",
 			BaseURL: baseURL,
@@ -1554,8 +1599,8 @@ func testAgentConfig(baseURL string, maxThoughts int) AgentConfig {
 	}
 }
 
-func testAgentConfigWithWorkspace(baseURL string, maxThoughts int, root string) AgentConfig {
-	cfg := testAgentConfig(baseURL, maxThoughts)
+func testAgentConfigWithWorkspace(baseURL string, maxTurns int, root string) AgentConfig {
+	cfg := testAgentConfig(baseURL, maxTurns)
 	if root != "" {
 		cfg.Workspace.Root = root
 		cfg.Workspace.WritableRoots = []string{root}

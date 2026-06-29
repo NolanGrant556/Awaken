@@ -162,7 +162,7 @@ func (c AgentConfig) WithRunProfile(profile *RunProfile) (AgentConfig, error) {
 		cfg.ModelConfig.Model = normalized.Model
 	}
 	if normalized.MaxTurns > 0 {
-		cfg.MaxThoughts = normalized.MaxTurns
+		cfg.MaxTurns = normalized.MaxTurns
 	}
 	return cfg, nil
 }

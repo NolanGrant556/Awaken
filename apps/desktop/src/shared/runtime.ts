@@ -38,9 +38,70 @@ export type RuntimeRun = {
   finishedAt?: string;
 };
 
+export type RuntimeThreadState = "idle" | "running" | "requires_action";
+
+export type RuntimePendingActionWire = {
+  ToolName?: string;
+  ActionDescription?: string;
+  ToolUseID?: string;
+  RequestID?: string;
+  Input?: Record<string, unknown>;
+};
+
+export type RuntimePendingAction = {
+  toolName?: string;
+  actionDescription?: string;
+  toolUseId?: string;
+  requestId?: string;
+  input?: Record<string, unknown>;
+};
+
+export type RuntimeThreadBranchMetadataWire = {
+  original_thread_id?: string;
+  original_session_id?: string;
+  forked_from_message_uuid?: string;
+  title?: string;
+};
+
+export type RuntimeThreadBranchMetadata = {
+  originalThreadId?: string;
+  originalSessionId?: string;
+  forkedFromMessageUuid?: string;
+  title?: string;
+};
+
+export type RuntimeThreadMetadataWire = {
+  session_id?: string;
+  custom_title?: string;
+  ai_title?: string;
+  display_title?: string;
+  tag?: string;
+  last_prompt?: string;
+  task_summary?: string;
+  task_summary_timestamp?: string;
+  mode?: string;
+  branch?: RuntimeThreadBranchMetadataWire;
+};
+
+export type RuntimeThreadMetadata = {
+  sessionId?: string;
+  customTitle?: string;
+  aiTitle?: string;
+  displayTitle?: string;
+  tag?: string;
+  lastPrompt?: string;
+  taskSummary?: string;
+  taskSummaryTimestamp?: string;
+  mode?: string;
+  branch?: RuntimeThreadBranchMetadata;
+};
+
 export type RuntimeThreadWire = {
   thread_id: string;
   label: string;
+  state?: RuntimeThreadState;
+  pending_action?: RuntimePendingActionWire;
+  metadata?: RuntimeThreadMetadataWire;
   run_id?: string;
   active_run_id?: string;
   delegation?: DelegationMetadataWire;
@@ -69,6 +130,9 @@ export type RuntimeThreadRunSummary = {
 export type RuntimeThread = {
   threadId: string;
   label: string;
+  state?: RuntimeThreadState;
+  pendingAction?: RuntimePendingAction;
+  metadata?: RuntimeThreadMetadata;
   runId?: string;
   activeRunId?: string;
   delegation?: DelegationMetadata;
@@ -77,6 +141,85 @@ export type RuntimeThread = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type RuntimeThreadLiteWire = {
+  thread_id: string;
+  label: string;
+  state: RuntimeThreadState;
+  head: string;
+  tail: string;
+  size: number;
+};
+
+export type RuntimeThreadLite = {
+  threadId: string;
+  label: string;
+  state: RuntimeThreadState;
+  head: string;
+  tail: string;
+  size: number;
+};
+
+export type RuntimeContextFileWire = {
+  path: string;
+  source?: string;
+  tokens?: number;
+  last_read_time?: string;
+};
+
+export type RuntimeThreadContextWire = {
+  thread_id: string;
+  files: {
+    markdown: string;
+    files: RuntimeContextFileWire[];
+  };
+  usage: {
+    markdown: string;
+    model: string;
+    total_tokens: number;
+    max_tokens: number;
+    percentage: number;
+    message_count: number;
+  };
+};
+
+export type RuntimeThreadContext = {
+  threadId: string;
+  files: {
+    markdown: string;
+    files: RuntimeContextFileWire[];
+  };
+  usage: {
+    markdown: string;
+    model: string;
+    totalTokens: number;
+    maxTokens: number;
+    percentage: number;
+    messageCount: number;
+  };
+};
+
+export type BranchThreadRequestWire = {
+  fork_session_id?: string;
+  custom_title?: string;
+};
+
+export type BranchThreadRequest = {
+  forkSessionId?: string;
+  customTitle?: string;
+};
+
+export type BranchThreadResultWire = {
+  thread: RuntimeThreadWire;
+  fork: unknown;
+};
+
+export type BranchThreadResult = {
+  thread: RuntimeThread;
+  fork: unknown;
+};
+
+export type RuntimeSessionInsightsReport = Record<string, unknown>;
 
 export type RuntimeThreadTranscriptRunWire = {
   run: RuntimeRunWire;
@@ -263,8 +406,12 @@ export type SupervisorStatusInfo = {
 export type AwakenBridge = {
   platform: DesktopPlatform;
   getRun: (runId: string) => Promise<RuntimeRun>;
+  getThreadLite: (threadId: string) => Promise<RuntimeThreadLite>;
+  getThreadContext: (threadId: string) => Promise<RuntimeThreadContext>;
   getThreadTranscript: (threadId: string) => Promise<RuntimeThreadTranscript>;
+  getSessionInsights: () => Promise<RuntimeSessionInsightsReport>;
   listThreads: () => Promise<RuntimeThread[]>;
+  branchThread: (threadId: string, request?: BranchThreadRequest) => Promise<BranchThreadResult>;
   startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
   resolveApproval: (
@@ -306,6 +453,9 @@ export function normalizeRuntimeThread(thread: RuntimeThreadWire): RuntimeThread
   return {
     threadId: thread.thread_id,
     label: thread.label,
+    state: thread.state ?? "idle",
+    pendingAction: normalizePendingAction(thread.pending_action),
+    metadata: normalizeThreadMetadata(thread.metadata),
     runId: thread.run_id || undefined,
     activeRunId: thread.active_run_id || undefined,
     delegation: normalizeDelegationMetadata(thread.delegation),
@@ -324,6 +474,97 @@ export function normalizeRuntimeThread(thread: RuntimeThreadWire): RuntimeThread
     },
     createdAt: thread.created_at,
     updatedAt: thread.updated_at,
+  };
+}
+
+export function normalizeThreadMetadata(
+  metadata?: RuntimeThreadMetadataWire,
+): RuntimeThreadMetadata {
+  if (!metadata) {
+    return {};
+  }
+  return {
+    sessionId: metadata.session_id || undefined,
+    customTitle: metadata.custom_title || undefined,
+    aiTitle: metadata.ai_title || undefined,
+    displayTitle: metadata.display_title || undefined,
+    tag: metadata.tag || undefined,
+    lastPrompt: metadata.last_prompt || undefined,
+    taskSummary: metadata.task_summary || undefined,
+    taskSummaryTimestamp: metadata.task_summary_timestamp || undefined,
+    mode: metadata.mode || undefined,
+    branch: metadata.branch
+      ? {
+          originalThreadId: metadata.branch.original_thread_id || undefined,
+          originalSessionId: metadata.branch.original_session_id || undefined,
+          forkedFromMessageUuid: metadata.branch.forked_from_message_uuid || undefined,
+          title: metadata.branch.title || undefined,
+        }
+      : undefined,
+  };
+}
+
+export function normalizePendingAction(
+  action?: RuntimePendingActionWire,
+): RuntimePendingAction | undefined {
+  if (!action) {
+    return undefined;
+  }
+  return {
+    toolName: action.ToolName || undefined,
+    actionDescription: action.ActionDescription || undefined,
+    toolUseId: action.ToolUseID || undefined,
+    requestId: action.RequestID || undefined,
+    input: action.Input,
+  };
+}
+
+export function normalizeRuntimeThreadLite(lite: RuntimeThreadLiteWire): RuntimeThreadLite {
+  return {
+    threadId: lite.thread_id,
+    label: lite.label,
+    state: lite.state,
+    head: lite.head,
+    tail: lite.tail,
+    size: lite.size,
+  };
+}
+
+export function normalizeRuntimeThreadContext(
+  context: RuntimeThreadContextWire,
+): RuntimeThreadContext {
+  return {
+    threadId: context.thread_id,
+    files: {
+      markdown: context.files.markdown,
+      files: context.files.files ?? [],
+    },
+    usage: {
+      markdown: context.usage.markdown,
+      model: context.usage.model,
+      totalTokens: context.usage.total_tokens,
+      maxTokens: context.usage.max_tokens,
+      percentage: context.usage.percentage,
+      messageCount: context.usage.message_count,
+    },
+  };
+}
+
+export function normalizeBranchThreadResult(
+  result: BranchThreadResultWire,
+): BranchThreadResult {
+  return {
+    thread: normalizeRuntimeThread(result.thread),
+    fork: result.fork,
+  };
+}
+
+export function normalizeBranchThreadRequest(
+  request?: BranchThreadRequest,
+): BranchThreadRequestWire {
+  return {
+    fork_session_id: request?.forkSessionId,
+    custom_title: request?.customTitle,
   };
 }
 

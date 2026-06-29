@@ -1077,6 +1077,94 @@ func TestListThreadsEndpointReturnsRuntimeThreads(t *testing.T) {
 	}
 }
 
+func TestWave1ThreadEndpointsExposeLiteContextInsightsAndBranch(t *testing.T) {
+	runService := awruntime.NewRunService(
+		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				ModelConfig: agentcore.ModelConfig{
+					Model:         "test-model",
+					ContextWindow: 2000,
+				},
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}, threadID)
+		},
+		func(agent *agentcore.Agent) awruntime.Executor {
+			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				agent.GetConversation().UserInput(input)
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.ToolCallStartedEventType, ToolCallID: "tool-1", ToolName: "read_file"})
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.ToolCallArgsEventType, ToolCallID: "tool-1", ToolName: "read_file", Arguments: `{"path":"README.md"}`})
+				answer := "README.md is available."
+				agent.GetConversation().AssistantOutput(answer, nil)
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextMessageFinishedEventType, MessageID: "msg-1", Role: "assistant"})
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: answer})
+				return answer, nil
+			})
+		},
+	)
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"Summarize README","workspace":{"workspace_root":"/tmp"}}`))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer resp.Body.Close()
+	var created awruntime.Run
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode run response: %v", err)
+	}
+	waitHTTPRunTerminal(t, ts.URL, created.RunID)
+
+	var threads []awruntime.ThreadSnapshot
+	getJSON(t, ts.URL+"/v1/threads", &threads)
+	if len(threads) != 1 || threads[0].Metadata.AITitle == "" || threads[0].State != "idle" {
+		t.Fatalf("expected thread list metadata/state, got %+v", threads)
+	}
+
+	var lite awruntime.ThreadLiteSnapshot
+	getJSON(t, ts.URL+"/v1/threads/"+created.ThreadID+"/lite", &lite)
+	if lite.Size == 0 || !strings.Contains(lite.Head, created.ThreadID) {
+		t.Fatalf("expected lite snapshot to include thread id, got %+v", lite)
+	}
+
+	var threadContext awruntime.ThreadContextSnapshot
+	getJSON(t, ts.URL+"/v1/threads/"+created.ThreadID+"/context", &threadContext)
+	if !strings.Contains(threadContext.Files.Markdown, "README.md") {
+		t.Fatalf("expected context endpoint to expose README.md, got %q", threadContext.Files.Markdown)
+	}
+	if threadContext.Usage.TotalTokens == 0 {
+		t.Fatalf("expected context usage tokens, got %+v", threadContext.Usage)
+	}
+
+	var insights map[string]any
+	getJSON(t, ts.URL+"/v1/session-insights", &insights)
+	overview, _ := insights["overview"].(map[string]any)
+	if overview["total_sessions"] == nil {
+		t.Fatalf("expected session insights overview, got %+v", insights)
+	}
+
+	branchResp, err := http.Post(ts.URL+"/v1/threads/"+created.ThreadID+"/branches", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("POST branch failed: %v", err)
+	}
+	defer branchResp.Body.Close()
+	if branchResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 from branch endpoint, got %d", branchResp.StatusCode)
+	}
+	var branch awruntime.BranchThreadResult
+	if err := json.NewDecoder(branchResp.Body).Decode(&branch); err != nil {
+		t.Fatalf("failed to decode branch response: %v", err)
+	}
+	if branch.Thread.Metadata.Branch == nil || branch.Thread.Metadata.Branch.OriginalThreadID != created.ThreadID {
+		t.Fatalf("expected branch metadata, got %+v", branch.Thread.Metadata.Branch)
+	}
+}
+
 func TestScheduledRunsEndpointsCreateListCancel(t *testing.T) {
 	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
 		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
@@ -4169,4 +4257,19 @@ func newPersistentServerRunService(persistenceDir string) *awruntime.RunService 
 		},
 		awruntime.WithPersistenceDir(persistenceDir),
 	)
+}
+
+func getJSON(t *testing.T, url string, dst any) {
+	t.Helper()
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("GET %s failed: %v", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from %s, got %d", url, resp.StatusCode)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {
+		t.Fatalf("failed to decode JSON from %s: %v", url, err)
+	}
 }

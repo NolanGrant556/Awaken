@@ -41,6 +41,17 @@ pre {
   height: 100%;
 }
 
+.desktop-root-electron .aw-workbench-shell-inspector-collapsed .aw-workbench-inspector {
+  display: none;
+}
+
+/* When the inspector is collapsed, the right chrome area shrinks to ~42px.
+   Hide the task center and status label so the expand button remains fully
+   visible and clickable. */
+.desktop-root-inspector-collapsed .workbench-chrome-status > *:not(.workbench-chrome-panel-toggle) {
+  display: none;
+}
+
 .desktop-main {
   display: grid;
   grid-template-rows: minmax(0, 1fr);
@@ -1144,6 +1155,33 @@ pre {
 @media (max-width: 1320px) {
   .topbar-title {
     display: none;
+  }
+}
+
+@media (max-width: 1180px) {
+  .desktop-root-electron .aw-workbench-shell {
+    grid-template-columns: minmax(0, 1fr) var(--aw-inspector-width, 300px);
+    height: 100%;
+    min-height: 0;
+  }
+
+  .desktop-root-electron .aw-workbench-shell-inspector-collapsed {
+    grid-template-columns: minmax(0, 1fr) 0px;
+  }
+
+  .desktop-root-electron .aw-run-stage {
+    min-height: 0;
+    border-right: 1px solid var(--aw-border-main);
+    border-bottom: 0;
+  }
+
+  .desktop-root-electron .aw-workbench-shell-inspector-collapsed .aw-run-stage {
+    border-right: 0;
+  }
+
+  .desktop-root-electron .aw-workbench-inspector {
+    max-height: none;
+    overflow: auto;
   }
 }
 

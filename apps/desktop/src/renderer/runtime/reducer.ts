@@ -4,6 +4,8 @@ import type {
   RuntimeRun,
   RuntimeRunStatus,
   RuntimeThread,
+  RuntimeThreadMetadata,
+  RuntimeThreadState,
   SupervisorStatus,
   SupervisorStatusInfo,
 } from "../../shared/runtime";
@@ -61,6 +63,8 @@ export type TurnDiffRecord = {
 export type ThreadItem = {
   threadId: string;
   label: string;
+  state?: RuntimeThreadState;
+  metadata?: RuntimeThreadMetadata;
   runId?: string;
   activeRunId?: string;
   runStatus?: RuntimeRunStatus;
@@ -228,6 +232,8 @@ function threadItemFromRuntime(thread: RuntimeThread): ThreadItem {
   return {
     threadId: thread.threadId,
     label: thread.label || "Untitled thread",
+    state: thread.state,
+    metadata: thread.metadata,
     runId: thread.runId,
     activeRunId: thread.activeRunId,
     runStatus: thread.latestRun?.status ?? (thread.activeRunId ? "running" : undefined),
@@ -258,6 +264,8 @@ function syncActiveThreadSummary(
     threads: upsertThread(state.threads, {
       threadId,
       label: existing?.label || state.prompt || "Untitled thread",
+      state: existing?.state,
+      metadata: existing?.metadata,
       runId: state.runId ?? existing?.runId,
       activeRunId: isActiveRunStatus(state.status) ? state.runId : undefined,
       runStatus,
@@ -819,6 +827,8 @@ export function reduceRuntimeState(
           runStatus: thread.latestRun?.status ?? existing?.runStatus ?? (thread.activeRunId ? "running" : undefined),
           updatedAt: thread.latestRun?.updatedAt ?? thread.updatedAt ?? existing?.updatedAt,
           lastError: thread.latestRun ? thread.latestRun.error : existing?.lastError,
+          state: thread.state ?? existing?.state,
+          metadata: thread.metadata ?? existing?.metadata,
           approvalCount: existing?.approvalCount ?? 0,
           artifactCount: existing?.artifactCount ?? 0,
         };
@@ -852,6 +862,8 @@ export function reduceRuntimeState(
         threads: upsertThread(state.threads, {
           threadId: action.threadId,
           label: action.label,
+          state: "running",
+          metadata: { lastPrompt: action.label },
           runId: action.runId,
           activeRunId: action.runId,
           runStatus: "running",
@@ -884,6 +896,8 @@ export function reduceRuntimeState(
             nextState.threads = upsertThread(state.threads, {
               threadId: action.event.threadId,
               label: state.prompt || "Untitled thread",
+              state: "running",
+              metadata: { lastPrompt: state.prompt },
               runId: action.event.runId,
               activeRunId: action.event.runId,
             });

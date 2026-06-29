@@ -14,6 +14,7 @@ import (
 
 	"awaken/src/agentcore"
 	"awaken/src/lifecyclehooks"
+	"awaken/src/sessioninsights"
 	"awaken/src/tool"
 	"awaken/src/workspaceguard"
 )
@@ -1767,6 +1768,97 @@ func TestGetThreadTranscriptReturnsOrderedRunsAndInputs(t *testing.T) {
 	}
 	if len(transcript.Runs[1].Events) == 0 {
 		t.Fatalf("expected transcript history for second run")
+	}
+}
+
+func TestRunServiceWave1SurfacesThreadMetadataContextInsightsAndBranch(t *testing.T) {
+	root := t.TempDir()
+	service := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				ModelConfig: agentcore.ModelConfig{
+					Model:         "test-model",
+					ContextWindow: 1000,
+				},
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				agent.GetConversation().UserInput(input)
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.ToolCallStartedEventType, ToolCallID: "tool-1", ToolName: "read_file"})
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.ToolCallArgsEventType, ToolCallID: "tool-1", ToolName: "read_file", Arguments: `{"path":"README.md"}`})
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.ArtifactCreatedEventType, ArtifactID: "artifact-1", ArtifactTitle: "README", ArtifactPath: "README.md"})
+				answer := "The README is in context."
+				agent.GetConversation().AssistantOutput(answer, nil)
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextMessageFinishedEventType, MessageID: "msg-1", Role: "assistant"})
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: answer})
+				return answer, nil
+			})
+		},
+	)
+
+	run, err := service.StartRun(StartRunRequest{Input: "Summarize README", Workspace: WorkspaceConfig{WorkspaceRoot: root}})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, run.RunID)
+
+	threads := service.ListThreads()
+	if len(threads) != 1 {
+		t.Fatalf("expected one thread, got %d", len(threads))
+	}
+	thread := threads[0]
+	if thread.State != "idle" {
+		t.Fatalf("expected idle thread state, got %q", thread.State)
+	}
+	if thread.Metadata.LastPrompt != "Summarize README" {
+		t.Fatalf("expected last prompt metadata, got %+v", thread.Metadata)
+	}
+	if thread.Metadata.AITitle == "" || thread.Label != thread.Metadata.DisplayTitle {
+		t.Fatalf("expected generated title to drive label, got label=%q metadata=%+v", thread.Label, thread.Metadata)
+	}
+	if !strings.Contains(thread.Metadata.TaskSummary, "README") {
+		t.Fatalf("expected task summary from run result, got %q", thread.Metadata.TaskSummary)
+	}
+
+	lite, err := service.GetThreadLite(run.ThreadID)
+	if err != nil {
+		t.Fatalf("GetThreadLite returned error: %v", err)
+	}
+	if lite.ThreadID != run.ThreadID || lite.Size == 0 || !strings.Contains(lite.Head, run.ThreadID) {
+		t.Fatalf("unexpected lite snapshot: %+v", lite)
+	}
+
+	threadContext, err := service.GetThreadContext(run.ThreadID)
+	if err != nil {
+		t.Fatalf("GetThreadContext returned error: %v", err)
+	}
+	if !strings.Contains(threadContext.Files.Markdown, "README.md") {
+		t.Fatalf("expected context files markdown to mention README.md, got %q", threadContext.Files.Markdown)
+	}
+	if threadContext.Usage.TotalTokens == 0 || !strings.Contains(threadContext.Usage.Markdown, "Context Usage") {
+		t.Fatalf("expected context usage summary, got %+v", threadContext.Usage)
+	}
+
+	insights := service.SessionInsights(sessioninsights.Options{})
+	if insights.Overview.TotalSessions != 1 || insights.Overview.TotalToolCalls != 1 {
+		t.Fatalf("expected one session with one tool call, got %+v", insights.Overview)
+	}
+
+	branch, err := service.BranchThread(run.ThreadID, BranchThreadRequest{})
+	if err != nil {
+		t.Fatalf("BranchThread returned error: %v", err)
+	}
+	if branch.Thread.Metadata.Branch == nil || branch.Thread.Metadata.Branch.OriginalThreadID != run.ThreadID {
+		t.Fatalf("expected branch metadata to point at original thread, got %+v", branch.Thread.Metadata.Branch)
+	}
+	if branch.Thread.Metadata.Tag != "branch" {
+		t.Fatalf("expected branch tag metadata, got %+v", branch.Thread.Metadata)
 	}
 }
 

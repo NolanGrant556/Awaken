@@ -15,7 +15,10 @@ import (
 	"awaken/src/agentcore"
 	convcontext "awaken/src/context"
 	"awaken/src/lifecyclehooks"
+	"awaken/src/sessionstate"
+	"awaken/src/sessiontags"
 	"awaken/src/slashcommands"
+	"awaken/src/titlegen"
 	"awaken/src/tool"
 	"awaken/src/workspaceguard"
 )
@@ -28,6 +31,7 @@ var (
 	ErrRunTerminal               = errors.New("run is already finished")
 	ErrRunCancelling             = errors.New("run is being cancelled")
 	ErrThreadNotFound            = errors.New("thread not found")
+	ErrThreadAlreadyExists       = errors.New("thread already exists")
 	ErrThreadWorkspaceMismatch   = errors.New("thread workspace mismatch")
 	ErrThreadBusy                = errors.New("thread already has an active run")
 	ErrParentRunNotFound         = errors.New("parent run not found")
@@ -75,20 +79,22 @@ func (f ExecutorFunc) Run(ctx context.Context, input string, sink agentcore.Even
 }
 
 type RunService struct {
-	mu            sync.RWMutex
-	sessions      map[string]*Session
-	threads       map[string]*Thread
-	scheduledRuns map[string]*scheduledRunState
-	scheduleClock scheduleClock
-	auditLog      *AuditLog
-	newAgent      func(workspace WorkspaceConfig, threadID string) *agentcore.Agent
-	newExecutor   func(agent *agentcore.Agent) Executor
-	store         *fileStore
-	hooks         *lifecyclehooks.Executor
+	mu             sync.RWMutex
+	sessions       map[string]*Session
+	threads        map[string]*Thread
+	scheduledRuns  map[string]*scheduledRunState
+	scheduleClock  scheduleClock
+	auditLog       *AuditLog
+	newAgent       func(workspace WorkspaceConfig, threadID string) *agentcore.Agent
+	newExecutor    func(agent *agentcore.Agent) Executor
+	store          *fileStore
+	hooks          *lifecyclehooks.Executor
+	titleGenerator titlegen.Generator
 }
 
 type RunServiceConfig struct {
-	Hooks lifecyclehooks.Config
+	Hooks          lifecyclehooks.Config
+	TitleGenerator titlegen.Generator
 }
 
 // Thread holds the reusable Agent and metadata for a multi-turn conversation.
@@ -99,6 +105,8 @@ type Thread struct {
 	conversation *convcontext.Conversation
 	workspace    WorkspaceConfig
 	label        string
+	metadata     sessiontags.Metadata
+	branch       *ThreadBranchMetadata
 	latestRunID  string
 	activeRunID  string
 	delegation   *DelegationMetadata
@@ -108,15 +116,18 @@ type Thread struct {
 }
 
 type ThreadSnapshot struct {
-	ThreadID    string              `json:"thread_id"`
-	Label       string              `json:"label"`
-	RunID       string              `json:"run_id,omitempty"`
-	ActiveRunID string              `json:"active_run_id,omitempty"`
-	Delegation  *DelegationMetadata `json:"delegation,omitempty"`
-	LatestRun   *ThreadRunBrief     `json:"latest_run,omitempty"`
-	Workspace   WorkspaceConfig     `json:"workspace"`
-	CreatedAt   time.Time           `json:"created_at"`
-	UpdatedAt   time.Time           `json:"updated_at"`
+	ThreadID      string                              `json:"thread_id"`
+	Label         string                              `json:"label"`
+	State         sessionstate.State                  `json:"state"`
+	PendingAction *sessionstate.RequiresActionDetails `json:"pending_action,omitempty"`
+	Metadata      ThreadMetadata                      `json:"metadata"`
+	RunID         string                              `json:"run_id,omitempty"`
+	ActiveRunID   string                              `json:"active_run_id,omitempty"`
+	Delegation    *DelegationMetadata                 `json:"delegation,omitempty"`
+	LatestRun     *ThreadRunBrief                     `json:"latest_run,omitempty"`
+	Workspace     WorkspaceConfig                     `json:"workspace"`
+	CreatedAt     time.Time                           `json:"created_at"`
+	UpdatedAt     time.Time                           `json:"updated_at"`
 }
 
 type ThreadRunBrief struct {
@@ -167,14 +178,15 @@ func NewRunServiceWithConfig(
 	opts ...RunServiceOption,
 ) *RunService {
 	service := &RunService{
-		sessions:      make(map[string]*Session),
-		threads:       make(map[string]*Thread),
-		scheduledRuns: make(map[string]*scheduledRunState),
-		scheduleClock: realScheduleClock{},
-		auditLog:      NewAuditLog(defaultAuditLogCapacity),
-		newAgent:      newAgent,
-		newExecutor:   newExecutor,
-		hooks:         lifecyclehooks.NewExecutor(config.Hooks),
+		sessions:       make(map[string]*Session),
+		threads:        make(map[string]*Thread),
+		scheduledRuns:  make(map[string]*scheduledRunState),
+		scheduleClock:  realScheduleClock{},
+		auditLog:       NewAuditLog(defaultAuditLogCapacity),
+		newAgent:       newAgent,
+		newExecutor:    newExecutor,
+		hooks:          lifecyclehooks.NewExecutor(config.Hooks),
+		titleGenerator: normalizeTitleGenerator(config.TitleGenerator),
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -268,6 +280,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		if thread.delegation == nil && delegation != nil {
 			thread.delegation = cloneDelegationMetadata(delegation)
 		}
+		thread.metadata = applyThreadPromptMetadata(thread.metadata, threadID, trimmed, now)
 		thread.runIDs = append(thread.runIDs, runID)
 		thread.updatedAt = now
 	} else {
@@ -281,6 +294,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			conversation: conversationForAgent(agent),
 			workspace:    workspace,
 			label:        label,
+			metadata:     applyThreadPromptMetadata(sessiontags.Metadata{SessionID: threadID, Mode: sessiontags.ModeNormal}, threadID, trimmed, now),
 			latestRunID:  runID,
 			activeRunID:  runID,
 			delegation:   cloneDelegationMetadata(delegation),
@@ -343,7 +357,7 @@ func (s *RunService) ListThreads() []ThreadSnapshot {
 
 	threads := make([]ThreadSnapshot, 0, len(s.threads))
 	for _, thread := range s.threads {
-		threads = append(threads, thread.snapshot(s.latestRunBriefLocked(thread)))
+		threads = append(threads, s.snapshotThreadLocked(thread))
 	}
 	sort.Slice(threads, func(i, j int) bool {
 		return threads[i].CreatedAt.Before(threads[j].CreatedAt)
@@ -374,7 +388,7 @@ func (s *RunService) GetThreadTranscript(threadID string) (ThreadTranscript, err
 		s.mu.RUnlock()
 		return ThreadTranscript{}, ErrThreadNotFound
 	}
-	snapshot := thread.snapshot(s.latestRunBriefLocked(thread))
+	snapshot := s.snapshotThreadLocked(thread)
 	runIDs := append([]string(nil), thread.runIDs...)
 	sessions := make([]*Session, 0, len(runIDs))
 	for _, runID := range runIDs {
@@ -494,6 +508,15 @@ func (s *RunService) clearActiveRun(threadID, runID string) {
 		return
 	}
 
+	s.mu.RLock()
+	session := s.sessions[runID]
+	s.mu.RUnlock()
+
+	var run Run
+	if session != nil {
+		run = session.Snapshot()
+	}
+
 	s.mu.Lock()
 	thread, ok := s.threads[threadID]
 	if !ok || thread.activeRunID != runID {
@@ -503,6 +526,7 @@ func (s *RunService) clearActiveRun(threadID, runID string) {
 	thread.activeRunID = ""
 	thread.updatedAt = time.Now().UTC()
 	thread.conversation = conversationForAgent(thread.agent)
+	s.updateThreadAfterRunLocked(thread, run)
 	s.mu.Unlock()
 
 	s.persistThread(threadID)
@@ -525,6 +549,8 @@ func (s *RunService) restorePersistedState() {
 			conversation: restoreConversation(record),
 			workspace:    record.Thread.Workspace,
 			label:        record.Thread.Label,
+			metadata:     metadataFromSnapshot(record.Thread),
+			branch:       cloneThreadBranchMetadata(record.Thread.Metadata.Branch),
 			latestRunID:  record.Thread.RunID,
 			activeRunID:  "",
 			delegation:   cloneDelegationMetadata(record.Thread.Delegation),
@@ -683,9 +709,13 @@ func (s *RunService) latestRunBriefLocked(thread *Thread) *ThreadRunBrief {
 }
 
 func (t *Thread) snapshot(latestRun *ThreadRunBrief) ThreadSnapshot {
+	metadata := t.metadataSnapshot()
+	label := firstNonEmpty(metadata.DisplayTitle, t.label, "Untitled thread")
 	return ThreadSnapshot{
 		ThreadID:    t.threadID,
-		Label:       t.label,
+		Label:       label,
+		State:       threadState(latestRun),
+		Metadata:    metadata,
 		RunID:       t.latestRunID,
 		ActiveRunID: t.activeRunID,
 		Delegation:  cloneDelegationMetadata(t.delegation),

@@ -6,12 +6,15 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"awaken/src/agentcore"
 	"awaken/src/agentdefs"
 	"awaken/src/protocol/agui"
 	"awaken/src/redaction"
 	awruntime "awaken/src/runtime"
+	"awaken/src/sessionbranch"
+	"awaken/src/sessioninsights"
 	"awaken/src/slashcommands"
 	"awaken/src/workspaceguard"
 )
@@ -126,6 +129,80 @@ func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 
 func (h runHandlers) handleListThreads(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.runService.ListThreads())
+}
+
+func (h runHandlers) handleGetThreadLite(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	lite, err := h.runService.GetThreadLite(threadID)
+	if err != nil {
+		if errors.Is(err, awruntime.ErrThreadNotFound) {
+			writeErrorJSON(w, http.StatusNotFound, "THREAD_NOT_FOUND", err.Error())
+			return
+		}
+		writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get thread lite snapshot")
+		return
+	}
+	writeJSON(w, http.StatusOK, lite)
+}
+
+func (h runHandlers) handleGetThreadContext(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	snapshot, err := h.runService.GetThreadContext(threadID)
+	if err != nil {
+		if errors.Is(err, awruntime.ErrThreadNotFound) {
+			writeErrorJSON(w, http.StatusNotFound, "THREAD_NOT_FOUND", err.Error())
+			return
+		}
+		writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get thread context")
+		return
+	}
+	writeJSON(w, http.StatusOK, snapshot)
+}
+
+func (h runHandlers) handleBranchThread(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	var req awruntime.BranchThreadRequest
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := decodeJSON(r, &req); err != nil {
+			writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+			return
+		}
+	} else if r.Body != nil {
+		_ = r.Body.Close()
+	}
+	result, err := h.runService.BranchThread(threadID, req)
+	if err != nil {
+		switch {
+		case errors.Is(err, awruntime.ErrThreadNotFound):
+			writeErrorJSON(w, http.StatusNotFound, "THREAD_NOT_FOUND", err.Error())
+		case errors.Is(err, awruntime.ErrThreadAlreadyExists):
+			writeErrorJSON(w, http.StatusConflict, "THREAD_ALREADY_EXISTS", err.Error())
+		case errors.Is(err, sessionbranch.ErrNoTranscript),
+			errors.Is(err, sessionbranch.ErrNoMessages),
+			errors.Is(err, sessionbranch.ErrMissingForkSession):
+			writeErrorJSON(w, http.StatusBadRequest, "INVALID_BRANCH", err.Error())
+		default:
+			writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to branch thread")
+		}
+		return
+	}
+	writeJSON(w, http.StatusCreated, result)
+}
+
+func (h runHandlers) handleSessionInsights(w http.ResponseWriter, r *http.Request) {
+	opts := sessioninsights.Options{
+		Source:   strings.TrimSpace(r.URL.Query().Get("source")),
+		Platform: strings.TrimSpace(r.URL.Query().Get("platform")),
+	}
+	if lookback := strings.TrimSpace(r.URL.Query().Get("lookback")); lookback != "" {
+		duration, err := time.ParseDuration(lookback)
+		if err != nil {
+			writeErrorJSON(w, http.StatusBadRequest, "INVALID_LOOKBACK", err.Error())
+			return
+		}
+		opts.Lookback = duration
+	}
+	writeJSON(w, http.StatusOK, h.runService.SessionInsights(opts))
 }
 
 func (h runHandlers) handleCreateScheduledRun(w http.ResponseWriter, r *http.Request) {

@@ -19,14 +19,23 @@ import path from "node:path";
 import type { AguiEvent } from "../shared/agui.js";
 import {
   normalizeRuntimeInfo,
+  normalizeBranchThreadRequest,
+  normalizeBranchThreadResult,
   normalizeRuntimeRun,
+  normalizeRuntimeThreadContext,
+  normalizeRuntimeThreadLite,
   normalizeRuntimeThreadTranscript,
   normalizeRuntimeThread,
   normalizeStartRunRequest,
   type ApprovalDecision,
+  type BranchThreadRequest,
+  type BranchThreadResultWire,
   type DesktopPlatform,
   type RuntimeInfoWire,
   type RuntimeRunWire,
+  type RuntimeSessionInsightsReport,
+  type RuntimeThreadContextWire,
+  type RuntimeThreadLiteWire,
   type RuntimeThreadTranscriptWire,
   type RuntimeThreadWire,
   type StartRunRequest,
@@ -407,6 +416,22 @@ ipcMain.handle("awaken:get-run", async (_event, runId: string) => {
 	return normalizeRuntimeRun(run);
 });
 
+ipcMain.handle("awaken:get-thread-lite", async (_event, threadId: string) => {
+  const lite = await requestRuntime<RuntimeThreadLiteWire>(`/v1/threads/${threadId}/lite`, {
+    method: "GET",
+  });
+
+  return normalizeRuntimeThreadLite(lite);
+});
+
+ipcMain.handle("awaken:get-thread-context", async (_event, threadId: string) => {
+  const context = await requestRuntime<RuntimeThreadContextWire>(`/v1/threads/${threadId}/context`, {
+    method: "GET",
+  });
+
+  return normalizeRuntimeThreadContext(context);
+});
+
 ipcMain.handle("awaken:get-thread-transcript", async (_event, threadId: string) => {
   const transcript = await requestRuntime<RuntimeThreadTranscriptWire>(
     `/v1/threads/${threadId}/transcript`,
@@ -418,6 +443,12 @@ ipcMain.handle("awaken:get-thread-transcript", async (_event, threadId: string) 
   return normalizeRuntimeThreadTranscript(transcript);
 });
 
+ipcMain.handle("awaken:get-session-insights", async () => {
+  return requestRuntime<RuntimeSessionInsightsReport>("/v1/session-insights", {
+    method: "GET",
+  });
+});
+
 ipcMain.handle("awaken:list-threads", async () => {
 	const threads = await requestRuntime<RuntimeThreadWire[]>("/v1/threads", {
 		method: "GET",
@@ -425,6 +456,24 @@ ipcMain.handle("awaken:list-threads", async () => {
 
 	return threads.map(normalizeRuntimeThread);
 });
+
+ipcMain.handle(
+  "awaken:branch-thread",
+  async (_event, payload: { threadId: string; request?: BranchThreadRequest }) => {
+    const result = await requestRuntime<BranchThreadResultWire>(
+      `/v1/threads/${payload.threadId}/branches`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(normalizeBranchThreadRequest(payload.request)),
+      },
+    );
+
+    return normalizeBranchThreadResult(result);
+  },
+);
 
 ipcMain.handle("awaken:start-run", async (_event, request: StartRunRequest) => {
   const run = await requestRuntime("/v1/runs", {

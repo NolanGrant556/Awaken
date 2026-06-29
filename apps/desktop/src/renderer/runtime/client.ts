@@ -2,9 +2,14 @@ import type { AguiEvent } from "./agui";
 import {
   type ApprovalDecision,
   type AwakenBridge,
+  type BranchThreadRequest,
+  type BranchThreadResult,
   type DesktopPlatform,
   type RuntimeInfo,
   type RuntimeRun,
+  type RuntimeSessionInsightsReport,
+  type RuntimeThreadContext,
+  type RuntimeThreadLite,
   type RuntimeThreadTranscript,
   type RuntimeThread,
   type StartRunRequest,
@@ -25,8 +30,12 @@ export type RuntimeClient = {
   platform: DesktopPlatform;
   getRuntimeInfo: () => Promise<RuntimeInfo>;
   getRun: (runId: string) => Promise<RuntimeRun>;
+  getThreadLite: (threadId: string) => Promise<RuntimeThreadLite>;
+  getThreadContext: (threadId: string) => Promise<RuntimeThreadContext>;
   getThreadTranscript: (threadId: string) => Promise<RuntimeThreadTranscript>;
+  getSessionInsights: () => Promise<RuntimeSessionInsightsReport>;
   listThreads: () => Promise<RuntimeThread[]>;
+  branchThread: (threadId: string, request?: BranchThreadRequest) => Promise<BranchThreadResult>;
   startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
   resolveApproval: (
@@ -62,8 +71,12 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     platform: bridge.platform,
     getRuntimeInfo: () => bridge.getRuntimeInfo(),
     getRun: (runId) => bridge.getRun(runId),
+    getThreadLite: (threadId) => bridge.getThreadLite(threadId),
+    getThreadContext: (threadId) => bridge.getThreadContext(threadId),
     getThreadTranscript: (threadId) => bridge.getThreadTranscript(threadId),
+    getSessionInsights: () => bridge.getSessionInsights(),
     listThreads: () => bridge.listThreads(),
+    branchThread: (threadId, request) => bridge.branchThread(threadId, request),
     startRun: (request) => bridge.startRun(request),
     cancelRun: bridge.cancelRun,
     resolveApproval: bridge.resolveApproval,

@@ -37,8 +37,12 @@ function stubElectronBridge(): void {
     awaken: {
       platform: "macos",
       getRun: vi.fn(),
+      getThreadLite: vi.fn(),
+      getThreadContext: vi.fn(),
       getThreadTranscript: vi.fn(),
+      getSessionInsights: vi.fn(),
       listThreads: vi.fn(async () => []),
+      branchThread: vi.fn(),
       startRun: vi.fn(),
       cancelRun: vi.fn(),
       resolveApproval: vi.fn(),

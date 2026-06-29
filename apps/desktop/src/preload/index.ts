@@ -3,10 +3,15 @@ import type { AguiEvent } from "../shared/agui.js";
 import {
   type ApprovalDecision,
   type AwakenBridge,
+  type BranchThreadRequest,
+  type BranchThreadResult,
   type DesktopPlatform,
   type RunStreamHandlers,
   type RuntimeInfo,
   type RuntimeRun,
+  type RuntimeSessionInsightsReport,
+  type RuntimeThreadContext,
+  type RuntimeThreadLite,
   type RuntimeThreadTranscript,
   type RuntimeThread,
   type StartRunRequest,
@@ -55,10 +60,18 @@ const bridge: AwakenBridge = {
   platform: toDesktopPlatform(process.platform),
   getRun: (runId: string) =>
     ipcRenderer.invoke("awaken:get-run", runId) as Promise<RuntimeRun>,
+  getThreadLite: (threadId: string) =>
+    ipcRenderer.invoke("awaken:get-thread-lite", threadId) as Promise<RuntimeThreadLite>,
+  getThreadContext: (threadId: string) =>
+    ipcRenderer.invoke("awaken:get-thread-context", threadId) as Promise<RuntimeThreadContext>,
   getThreadTranscript: (threadId: string) =>
     ipcRenderer.invoke("awaken:get-thread-transcript", threadId) as Promise<RuntimeThreadTranscript>,
+  getSessionInsights: () =>
+    ipcRenderer.invoke("awaken:get-session-insights") as Promise<RuntimeSessionInsightsReport>,
   listThreads: () =>
     ipcRenderer.invoke("awaken:list-threads") as Promise<RuntimeThread[]>,
+  branchThread: (threadId: string, request?: BranchThreadRequest) =>
+    ipcRenderer.invoke("awaken:branch-thread", { threadId, request }) as Promise<BranchThreadResult>,
   startRun: (request: StartRunRequest) =>
     ipcRenderer.invoke("awaken:start-run", request) as Promise<RuntimeRun>,
   cancelRun: (runId: string) =>

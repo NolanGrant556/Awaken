@@ -122,6 +122,32 @@ func TestRouteAllowlistAndScopes(t *testing.T) {
 		t.Fatalf("plan = %+v, want runtime-info with query preserved", plan)
 	}
 
+	for _, tt := range []struct {
+		method string
+		path   string
+		route  string
+	}{
+		{method: "GET", path: "/v1/threads/search?q=README", route: "search-threads"},
+		{method: "GET", path: "/v1/threads/thread_123/export?format=jsonl", route: "thread-export"},
+		{method: "POST", path: "/v1/threads/thread_123/share-bundle", route: "thread-share-bundle"},
+		{method: "POST", path: "/v1/threads/thread_123/clear-plan", route: "thread-clear-plan"},
+	} {
+		plan, err := svc.BuildProxyPlan(ProxyPlanRequest{
+			ClientID: readWrite.ID,
+			Token:    "rw-token",
+			Method:   tt.method,
+			Path:     tt.path,
+			Origin:   "http://localhost:5174",
+			Host:     "localhost:5174",
+		})
+		if err != nil {
+			t.Fatalf("BuildProxyPlan(%s %s) error = %v", tt.method, tt.path, err)
+		}
+		if plan.RouteName != tt.route || plan.TargetPath != tt.path {
+			t.Fatalf("plan = %+v, want route %s with target %s", plan, tt.route, tt.path)
+		}
+	}
+
 	if _, err := svc.BuildProxyPlan(ProxyPlanRequest{ClientID: readWrite.ID, Token: "rw-token", Method: "GET", Path: "/api/fs/read"}); !errors.Is(err, ErrRouteDenied) {
 		t.Fatalf("BuildProxyPlan(/api/fs/read) error = %v, want %v", err, ErrRouteDenied)
 	}

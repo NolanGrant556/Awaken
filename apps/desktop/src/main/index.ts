@@ -23,7 +23,12 @@ import {
   normalizeBranchThreadResult,
   normalizeRuntimeRun,
   normalizeRuntimeThreadContext,
+  normalizeRuntimeThreadClearPlanResult,
+  normalizeRuntimeThreadExportResult,
   normalizeRuntimeThreadLite,
+  normalizeRuntimeThreadSearchResult,
+  normalizeRuntimeThreadShareBundleRequest,
+  normalizeRuntimeThreadShareBundleResult,
   normalizeRuntimeThreadTranscript,
   normalizeRuntimeThread,
   normalizeStartRunRequest,
@@ -34,8 +39,14 @@ import {
   type RuntimeInfoWire,
   type RuntimeRunWire,
   type RuntimeSessionInsightsReport,
+  type RuntimeThreadClearPlanResultWire,
   type RuntimeThreadContextWire,
+  type RuntimeThreadExportFormat,
+  type RuntimeThreadExportResultWire,
   type RuntimeThreadLiteWire,
+  type RuntimeThreadSearchResultWire,
+  type RuntimeThreadShareBundleRequest,
+  type RuntimeThreadShareBundleResultWire,
   type RuntimeThreadTranscriptWire,
   type RuntimeThreadWire,
   type StartRunRequest,
@@ -441,6 +452,76 @@ ipcMain.handle("awaken:get-thread-transcript", async (_event, threadId: string) 
   );
 
   return normalizeRuntimeThreadTranscript(transcript);
+});
+
+ipcMain.handle(
+  "awaken:search-threads",
+  async (_event, payload: { query: string; limit?: number }) => {
+    const params = new URLSearchParams();
+    params.set("q", payload.query);
+    if (payload.limit && payload.limit > 0) {
+      params.set("limit", String(payload.limit));
+    }
+    const results = await requestRuntime<RuntimeThreadSearchResultWire[]>(
+      `/v1/threads/search?${params.toString()}`,
+      { method: "GET" },
+    );
+
+    return results.map(normalizeRuntimeThreadSearchResult);
+  },
+);
+
+ipcMain.handle(
+  "awaken:export-thread",
+  async (_event, payload: { threadId: string; format?: RuntimeThreadExportFormat }) => {
+    const params = new URLSearchParams();
+    if (payload.format) {
+      params.set("format", payload.format);
+    }
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    const result = await requestRuntime<RuntimeThreadExportResultWire>(
+      `/v1/threads/${payload.threadId}/export${suffix}`,
+      { method: "GET" },
+    );
+
+    return normalizeRuntimeThreadExportResult(result);
+  },
+);
+
+ipcMain.handle(
+  "awaken:build-thread-share-bundle",
+  async (
+    _event,
+    payload: { threadId: string; request?: RuntimeThreadShareBundleRequest },
+  ) => {
+    const result = await requestRuntime<RuntimeThreadShareBundleResultWire>(
+      `/v1/threads/${payload.threadId}/share-bundle`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(normalizeRuntimeThreadShareBundleRequest(payload.request)),
+      },
+    );
+
+    return normalizeRuntimeThreadShareBundleResult(result);
+  },
+);
+
+ipcMain.handle("awaken:build-thread-clear-plan", async (_event, threadId: string) => {
+  const result = await requestRuntime<RuntimeThreadClearPlanResultWire>(
+    `/v1/threads/${threadId}/clear-plan`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: "{}",
+    },
+  );
+
+  return normalizeRuntimeThreadClearPlanResult(result);
 });
 
 ipcMain.handle("awaken:get-session-insights", async () => {

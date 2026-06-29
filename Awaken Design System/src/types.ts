@@ -52,6 +52,7 @@ export type ProjectItem = {
   action?: React.ReactNode;      // 行内操作，如在项目下创建新会话
   isLoading?: boolean;          // 展开时显示 loading ring
   disabled?: boolean;
+  description?: string;         // 标签下方的静音单行描述（如任务摘要）
   // 注意：展开状态由 ProjectTree 组件通过 expandedIds / defaultExpandedIds 管理，
   // 不在节点数据中保存，避免 controlled/uncontrolled 状态重复。
 };

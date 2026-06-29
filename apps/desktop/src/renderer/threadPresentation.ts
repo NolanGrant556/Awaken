@@ -13,32 +13,42 @@ function isRunningLikeStatus(status?: ThreadItem["runStatus"]): boolean {
 
 export function describeThreadStatus(thread: ThreadItem): ThreadStatusPresentation {
   if ((thread.approvalCount ?? 0) > 0 || thread.runStatus === "awaiting_approval") {
-    return { label: "needs input", tone: "permission", active: true };
+    return { label: "待输入", tone: "permission", active: true };
   }
 
   switch (thread.runStatus) {
     case "cancelling":
-      return { label: "cancelling", tone: "warning", active: true };
+      return { label: "取消中", tone: "warning", active: true };
     case "cancelled":
-      return { label: "cancelled", tone: "neutral", active: false };
+      return { label: "已取消", tone: "neutral", active: false };
     case "error":
-      return { label: "error", tone: "error", active: false };
+      return { label: "出错", tone: "error", active: false };
     case "finished":
-      return { label: "done", tone: "success", active: false };
+      return { label: "已完成", tone: "success", active: false };
     case "running":
       if ((thread.artifactCount ?? 0) > 0) {
-        return { label: "ready for review", tone: "warning", active: true };
+        return { label: "待复核", tone: "warning", active: true };
       }
-      return { label: "running", tone: "local", active: true };
+      return { label: "运行中", tone: "local", active: true };
     default:
       if (thread.activeRunId || isRunningLikeStatus(thread.runStatus)) {
-        return { label: "running", tone: "local", active: true };
+        return { label: "运行中", tone: "local", active: true };
       }
       if ((thread.artifactCount ?? 0) > 0) {
-        return { label: "ready for review", tone: "warning", active: false };
+        return { label: "待复核", tone: "warning", active: false };
       }
-      return { label: "idle", tone: "neutral", active: false };
+      return { label: "空闲", tone: "neutral", active: false };
   }
+}
+
+export function threadDisplayTitle(thread: ThreadItem): string {
+  return (
+    thread.metadata?.displayTitle ||
+    thread.metadata?.aiTitle ||
+    thread.metadata?.customTitle ||
+    thread.label ||
+    "Untitled thread"
+  );
 }
 
 function threadUpdatedAtMs(thread: ThreadItem): number {

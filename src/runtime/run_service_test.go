@@ -15,6 +15,7 @@ import (
 	"awaken/src/agentcore"
 	"awaken/src/lifecyclehooks"
 	"awaken/src/sessioninsights"
+	"awaken/src/titlegen"
 	"awaken/src/tool"
 	"awaken/src/workspaceguard"
 )
@@ -1859,6 +1860,65 @@ func TestRunServiceWave1SurfacesThreadMetadataContextInsightsAndBranch(t *testin
 	}
 }
 
+func TestRunServiceUpgradesWeakAITitleAfterSubstantiveFollowUp(t *testing.T) {
+	root := t.TempDir()
+	service := NewRunServiceWithConfig(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				agent.GetConversation().UserInput(input)
+				answer := "你好"
+				if strings.Contains(input, "Deep research") {
+					answer = "Detailed Agent architecture report"
+				}
+				agent.GetConversation().AssistantOutput(answer, nil)
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: answer})
+				return answer, nil
+			})
+		},
+		RunServiceConfig{
+			TitleGenerator: titlegen.GeneratorFunc(func(ctx context.Context, prompt titlegen.Prompt) (string, error) {
+				if strings.Contains(prompt.UserPrompt, "Deep research") {
+					return "Agent Architecture Research", nil
+				}
+				return "你好", nil
+			}),
+		},
+	)
+
+	firstRun, err := service.StartRun(StartRunRequest{
+		Input:     "你好",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("first StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, firstRun.RunID)
+	waitForThreadAITitle(t, service, firstRun.ThreadID, "你好")
+
+	secondRun, err := service.StartRun(StartRunRequest{
+		Input:     "Deep research Agent implementation",
+		ThreadID:  firstRun.ThreadID,
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("second StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, secondRun.RunID)
+	thread := waitForThreadAITitle(t, service, firstRun.ThreadID, "Agent Architecture Research")
+	if thread.Label != "Agent Architecture Research" || thread.Metadata.DisplayTitle != "Agent Architecture Research" {
+		t.Fatalf("expected upgraded AI title to drive display label, got label=%q metadata=%+v", thread.Label, thread.Metadata)
+	}
+}
+
 func TestStartRunAppliesRunLevelPermissionPolicyOnReusedThread(t *testing.T) {
 	var captured []agentcore.AgentConfig
 	service := NewRunService(
@@ -1926,6 +1986,26 @@ func TestStartRunAppliesRunLevelPermissionPolicyOnReusedThread(t *testing.T) {
 		captured[1].PermissionPolicy.DenyTools[0] != "shell" {
 		t.Fatalf("unexpected second run permission policy: %+v", captured[1].PermissionPolicy)
 	}
+}
+
+func waitForThreadAITitle(t *testing.T, service *RunService, threadID, want string) ThreadSnapshot {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	var last ThreadSnapshot
+	for time.Now().Before(deadline) {
+		for _, thread := range service.ListThreads() {
+			if thread.ThreadID != threadID {
+				continue
+			}
+			last = thread
+			if thread.Metadata.AITitle == want {
+				return thread
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for thread %s AI title %q; last snapshot: %+v", threadID, want, last)
+	return ThreadSnapshot{}
 }
 
 func TestRunServicePersistsAndRestoresAcrossRestart(t *testing.T) {

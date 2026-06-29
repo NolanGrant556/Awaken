@@ -51,7 +51,7 @@ import {
 } from "@awaken/design-system";
 import { TaskCenterPanel } from "./TaskCenterPanel";
 import { createRuntimeClient, type SubscribeHandlers } from "./runtime/client";
-import type { RuntimeInfo, RuntimeRunStatus, StartRunRequest } from "../shared/runtime";
+import type { RuntimeInfo, RuntimeRunStatus, RuntimeThreadBranchMetadata, StartRunRequest } from "../shared/runtime";
 import {
   createInitialRuntimeState,
   reduceRuntimeState,
@@ -93,7 +93,7 @@ import {
   shellPreview,
   type ShellResult,
 } from "./runtime/shellToolResult";
-import { describeThreadStatus } from "./threadPresentation";
+import { describeThreadStatus, formatThreadUpdatedAt, threadDisplayTitle } from "./threadPresentation";
 import {
   DEFAULT_WORKSPACE_PROJECT_ID,
   assignThreadToProject,
@@ -570,6 +570,7 @@ export function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [taskCenterOpen, setTaskCenterOpen] = useState(false);
   const [threadListError, setThreadListError] = useState<string | null>(null);
+  const [branching, setBranching] = useState(false);
   const [latestTurnMinHeightPx, setLatestTurnMinHeightPx] = useState(0);
   const [composerDockHeightPx, setComposerDockHeightPx] = useState(0);
   const [runStageViewportHeightPx, setRunStageViewportHeightPx] = useState(0);
@@ -635,6 +636,24 @@ export function App() {
     runtimeState.supervisorStatus === "stopping" ||
     runtimeState.supervisorStatus === "stopped";
   const desktopNeedsRestart = runtimeState.supervisorStatus === "crashed";
+  const activeThread = runtimeState.activeThreadId
+    ? runtimeState.threads.find((thread) => thread.threadId === runtimeState.activeThreadId)
+    : undefined;
+  const activeBranchMeta = activeThread?.metadata?.branch;
+  const activeBranchParent = activeBranchMeta?.originalThreadId
+    ? runtimeState.threads.find((thread) => thread.threadId === activeBranchMeta.originalThreadId)
+    : undefined;
+  const activeBranchParentLabel = activeBranchParent
+    ? threadDisplayTitle(activeBranchParent)
+    : activeBranchMeta?.title ?? "来源会话";
+  const canBranch = Boolean(
+    activeThread &&
+      !isBusy &&
+      !branching &&
+      (activeThread.runId ||
+        activeThread.metadata?.lastPrompt ||
+        activeThread.metadata?.branch?.originalThreadId),
+  );
 
   useEffect(() => {
     writeStoredValue("awaken:layout:sidebarWidth", String(sidebarWidth));
@@ -773,16 +792,35 @@ export function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  async function refreshThreads(): Promise<void> {
+  async function refreshThreads(): Promise<boolean> {
     if (!desktopReady) {
-      return;
+      return false;
     }
     try {
       const threads = await runtimeClient.listThreads();
       dispatch({ type: "run/threadsLoaded", threads });
       setThreadListError(null);
+      return true;
     } catch (error) {
       setThreadListError(error instanceof Error ? error.message : "Failed to load task list");
+      return false;
+    }
+  }
+
+  async function refreshThreadContext(threadId: string): Promise<void> {
+    if (!desktopReady || !threadId) {
+      return;
+    }
+    dispatch({ type: "run/threadContextLoading", threadId });
+    try {
+      const context = await runtimeClient.getThreadContext(threadId);
+      dispatch({ type: "run/threadContextLoaded", threadId, context });
+    } catch (error) {
+      dispatch({
+        type: "run/threadContextError",
+        threadId,
+        message: error instanceof Error ? error.message : "Failed to load thread context",
+      });
     }
   }
 
@@ -793,6 +831,48 @@ export function App() {
     void refreshThreads();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [desktopReady, runtimeClient]);
+
+  useEffect(() => {
+    if (!desktopReady || !runtimeState.activeThreadId) {
+      return;
+    }
+    void refreshThreadContext(runtimeState.activeThreadId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [desktopReady, runtimeState.activeThreadId]);
+
+  useEffect(() => {
+    if (!runtimeState.needsThreadsRefresh || !desktopReady) {
+      return;
+    }
+    let cancelled = false;
+    // Clear the refresh flag only after refreshThreads succeeds so a transient
+    // runtime failure doesn't leave the sidebar stuck on stale AI title /
+    // task summary. On failure, retry with capped exponential backoff.
+    const attempt = async (retry: number): Promise<void> => {
+      const ok = await refreshThreads();
+      if (cancelled) {
+        return;
+      }
+      if (ok) {
+        dispatch({ type: "run/threadsRefreshed" });
+        if (runtimeState.activeThreadId) {
+          void refreshThreadContext(runtimeState.activeThreadId);
+        }
+        return;
+      }
+      const delay = Math.min(1000 * Math.pow(2, retry), 8000);
+      setTimeout(() => {
+        if (!cancelled) {
+          void attempt(retry + 1);
+        }
+      }, delay);
+    };
+    void attempt(0);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runtimeState.needsThreadsRefresh, desktopReady]);
 
   useEffect(() => {
     if (!desktopReady) {
@@ -903,13 +983,14 @@ export function App() {
       .map((thread) => {
         const sidebarStatus = describeThreadStatus(thread);
         const timeLabel =
-          thread.threadId === runtimeState.activeThreadId || sidebarStatus.label === "idle"
+          thread.threadId === runtimeState.activeThreadId || sidebarStatus.label === "空闲"
             ? undefined
             : sidebarStatus.label;
         return {
           id: `thread:${thread.threadId}`,
           kind: "thread",
-          label: thread.label,
+          label: threadDisplayTitle(thread),
+          description: thread.metadata?.taskSummary,
           timeLabel,
         };
       });
@@ -1004,18 +1085,24 @@ export function App() {
     },
     {
       id: "files" as const,
-      label: "Files",
-      badge: runtimeState.artifacts.length || undefined,
+      label: "Context",
+      badge:
+        runtimeState.threadContext?.files.files.length ||
+        runtimeState.artifacts.length ||
+        undefined,
       icon: <Files size={16} strokeWidth={1.85} />,
     },
   ];
+  const showBranchSourceCard = Boolean(
+    runtimeState.branchSourceView && !hasPromptNarrative,
+  );
   const showCenterComposer = shouldUseCenterComposer({
     hasNarrative: visibleNarrativeItems.length > 0,
     hasRun: Boolean(runtimeState.runId),
     hasNotice: Boolean(notice),
     hasError: Boolean(runtimeState.errorMessage),
     needsRestart: desktopNeedsRestart,
-  });
+  }) && !showBranchSourceCard;
   const markerActiveTurnId =
     activeTurnMarkerId &&
     narrativeSections.turns.some((turn) => turn.id === activeTurnMarkerId)
@@ -1566,6 +1653,10 @@ export function App() {
     const latestRun = transcript.runs[transcript.runs.length - 1]?.run;
     if (!latestRun) {
       localStorage.removeItem("awaken:runId");
+      const branch = transcript.thread.metadata?.branch;
+      if (branch) {
+        dispatchBranchSourceView(threadId, branch);
+      }
       return undefined;
     }
 
@@ -1678,7 +1769,49 @@ export function App() {
     setComposerFocusRequest((request) => request + 1);
   }
 
-  async function handleSelectConversation(threadId: string): Promise<void> {
+  function dispatchBranchSourceView(
+    threadId: string,
+    branch: RuntimeThreadBranchMetadata,
+  ): void {
+    const parentThread = branch.originalThreadId
+      ? runtimeState.threads.find((item) => item.threadId === branch.originalThreadId)
+      : undefined;
+    const parentLabel = parentThread
+      ? threadDisplayTitle(parentThread)
+      : branch.title ?? "来源会话";
+    const forkedFromPreview = branch.title ?? parentThread?.metadata?.lastPrompt ?? "";
+    dispatch({
+      type: "run/branchSourceViewSet",
+      parentThreadId: branch.originalThreadId ?? "",
+      parentLabel,
+      forkedFromPreview,
+    });
+  }
+
+  async function handleBranchThread(): Promise<void> {
+    if (!desktopReady || !runtimeState.activeThreadId || !canBranch || branching) {
+      return;
+    }
+    const sourceThreadId = runtimeState.activeThreadId;
+    setBranching(true);
+    setNotice(null);
+    try {
+      const result = await runtimeClient.branchThread(sourceThreadId);
+      dispatch({ type: "run/threadBranched", thread: result.thread });
+      void refreshThreads();
+      await handleSelectConversation(result.thread.threadId, result.thread.metadata?.branch);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to branch thread";
+      dispatch({ type: "run/createFailed", message });
+    } finally {
+      setBranching(false);
+    }
+  }
+
+  async function handleSelectConversation(
+    threadId: string,
+    branchHint?: RuntimeThreadBranchMetadata,
+  ): Promise<void> {
     if (!desktopReady) {
       return;
     }
@@ -1705,6 +1838,10 @@ export function App() {
     const thread = runtimeState.threads.find((item) => item.threadId === threadId);
     if (!thread?.runId) {
       localStorage.removeItem("awaken:runId");
+      const branch = thread?.metadata?.branch ?? branchHint;
+      if (branch) {
+        dispatchBranchSourceView(threadId, branch);
+      }
       return;
     }
 
@@ -2292,7 +2429,7 @@ export function App() {
       return (
         <section className="inspector-section">
           <div className="inspector-section-head">
-            <h2>Tool File Output</h2>
+            <h2>Tool Output</h2>
             <span>{selectedToolResult.status || "done"}</span>
           </div>
           {renderToolDetail(selectedToolResult)}
@@ -2317,7 +2454,104 @@ export function App() {
       );
     }
 
-    return null;
+    return renderContextOverview();
+  }
+
+  function renderContextOverview() {
+    if (runtimeState.threadContextLoading) {
+      return renderInspectorEmpty("Loading context…", "Fetching thread context files and usage.");
+    }
+    if (runtimeState.threadContextError) {
+      return renderInspectorEmpty("Context error", runtimeState.threadContextError);
+    }
+    if (!runtimeState.threadContext) {
+      return renderInspectorEmpty("No context loaded", "Select a thread to load its context files and usage.");
+    }
+
+    const { files, usage } = runtimeState.threadContext;
+    const usageEmpty = usage.totalTokens === 0 && usage.messageCount === 0;
+    const usagePct = Math.max(0, Math.min(100, usage.percentage));
+
+    return (
+      <>
+        <section className="inspector-section">
+          <div className="inspector-section-head">
+            <h2>Context Files</h2>
+            <span>{files.files.length}</span>
+          </div>
+          {files.files.length === 0 ? (
+            <p className="inspector-empty-state inspector-empty-state-quiet">
+              No context files yet.
+            </p>
+          ) : (
+            <div className="inspector-list">
+              {files.files.map((file, index) => (
+                <article
+                  key={`${file.path ?? "file"}-${index}`}
+                  className="inspector-item inspector-context-file"
+                >
+                  <strong>{file.path || "Unknown path"}</strong>
+                  <span>{file.source || "unknown source"}</span>
+                  <div className="inspector-context-file-meta">
+                    {file.last_read_time ? (
+                      <span>{formatThreadUpdatedAt(file.last_read_time)}</span>
+                    ) : null}
+                    {typeof file.tokens === "number" ? (
+                      <span className="inspector-context-file-tokens">
+                        {file.tokens.toLocaleString()} tokens
+                      </span>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+        <section className="inspector-section">
+          <div className="inspector-section-head">
+            <h2>Context Usage</h2>
+            <span>{usage.model || "—"}</span>
+          </div>
+          {usageEmpty ? (
+            <p className="inspector-empty-state inspector-empty-state-quiet">
+              No usage captured yet.
+            </p>
+          ) : (
+            <dl className="inspector-kv">
+              <div>
+                <dt>Model</dt>
+                <dd>{usage.model || "—"}</dd>
+              </div>
+              <div>
+                <dt>Tokens</dt>
+                <dd>
+                  {usage.totalTokens.toLocaleString()} / {usage.maxTokens.toLocaleString()}
+                </dd>
+              </div>
+              <div>
+                <dt>Messages</dt>
+                <dd>{usage.messageCount}</dd>
+              </div>
+            </dl>
+          )}
+          {!usageEmpty ? (
+            <div
+              className="inspector-context-usage-bar"
+              role="progressbar"
+              aria-valuenow={usagePct}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            >
+              <div
+                className="inspector-context-usage-bar-fill"
+                style={{ width: `${usagePct}%` }}
+              />
+              <span className="inspector-context-usage-bar-label">{usagePct.toFixed(1)}%</span>
+            </div>
+          ) : null}
+        </section>
+      </>
+    );
   }
 
   function renderInspectorTabPanel() {
@@ -2381,6 +2615,19 @@ export function App() {
               onNewTask={handleNewTask}
               right={
                 <div className="workbench-chrome-status">
+                  <button
+                    type="button"
+                    className="workbench-chrome-branch-button"
+                    onClick={() => {
+                      void handleBranchThread();
+                    }}
+                    disabled={!canBranch}
+                    aria-label="分支当前会话"
+                    title={canBranch ? "分支当前会话" : "当前会话无可分支内容"}
+                  >
+                    <GitBranch size={13} strokeWidth={1.85} />
+                    <span>分支</span>
+                  </button>
                   <TaskCenterPanel
                     open={taskCenterOpen}
                     activeThreadId={runtimeState.activeThreadId}
@@ -2549,6 +2796,40 @@ export function App() {
                       </div>
                     ) : null}
 
+                    {showBranchSourceCard && runtimeState.branchSourceView ? (
+                      <div className="branch-source-card">
+                        <div className="branch-source-card-head">
+                          <GitBranch size={16} strokeWidth={1.85} />
+                          <span className="branch-source-card-title">
+                            从 {runtimeState.branchSourceView.parentLabel} 分支
+                          </span>
+                        </div>
+                        {runtimeState.branchSourceView.forkedFromPreview ? (
+                          <p className="branch-source-card-preview">
+                            {runtimeState.branchSourceView.forkedFromPreview}
+                          </p>
+                        ) : null}
+                        <div className="branch-source-card-actions">
+                          <button
+                            type="button"
+                            className="branch-source-card-link"
+                            onClick={() => {
+                              if (runtimeState.branchSourceView?.parentThreadId) {
+                                void handleSelectConversation(
+                                  runtimeState.branchSourceView.parentThreadId,
+                                );
+                              }
+                            }}
+                          >
+                            查看来源会话
+                          </button>
+                        </div>
+                        <p className="branch-source-card-hint">
+                          发送新消息将开始此分支的首个 run
+                        </p>
+                      </div>
+                    ) : null}
+
                     {showCenterComposer ? (
                       <div className="run-stage-center-composer">
                         <TaskWelcome />
@@ -2573,7 +2854,7 @@ export function App() {
                       </div>
                     ) : null}
 
-                    {showCenterComposer ? null : (
+                    {showCenterComposer || showBranchSourceCard ? null : (
                       <ExecutionFeed>
                         {narrativeSections.leadItems.map((item, index) =>
                           renderNarrativeItem(item, `lead:${item.id}:${index}`),
@@ -2625,6 +2906,15 @@ export function App() {
                     activeId={inspectorTab}
                     onSelect={(id) => setInspectorTab(id as InspectorTabId)}
                   >
+                    {activeBranchMeta ? (
+                      <section className="inspector-section inspector-branch-lineage">
+                        <div className="inspector-branch-lineage-head">
+                          <GitBranch size={13} strokeWidth={1.85} />
+                          <span>从 {activeBranchParentLabel} 分支</span>
+                        </div>
+                      </section>
+                    ) : null}
+
                     {renderInspectorTabPanel()}
 
                     {a2uiArtifacts.length > 0 ? (

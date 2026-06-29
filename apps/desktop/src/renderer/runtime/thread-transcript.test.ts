@@ -60,12 +60,18 @@ describe("thread transcript replay helpers", () => {
       threadId: "thread-1",
       runId: "run-2",
     });
-    expect(actions).toContainEqual({ type: "run/requested", prompt: "你好" });
-    expect(actions).toContainEqual({ type: "run/requested", prompt: "再次告诉我" });
-    expect(actions).toContainEqual({
-      type: "run/created",
-      run: expect.objectContaining({ runId: "run-2", input: "再次告诉我" }),
-    });
+    expect(actions).toContainEqual(
+      expect.objectContaining({ type: "run/requested", prompt: "你好" }),
+    );
+    expect(actions).toContainEqual(
+      expect.objectContaining({ type: "run/requested", prompt: "再次告诉我" }),
+    );
+    expect(actions).toContainEqual(
+      expect.objectContaining({
+        type: "run/created",
+        run: expect.objectContaining({ runId: "run-2", input: "再次告诉我" }),
+      }),
+    );
     expect(actions.filter((action) => action.type === "run/event")).toHaveLength(5);
   });
 

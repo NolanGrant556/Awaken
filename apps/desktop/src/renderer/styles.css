@@ -856,6 +856,54 @@ pre {
   overflow-wrap: anywhere;
 }
 
+.inspector-context-file-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 2px;
+  color: var(--aw-text-muted);
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.inspector-context-file-tokens {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: var(--aw-radius-control);
+  background: var(--aw-surface-muted-fill);
+  color: var(--aw-text-subtle);
+  font-weight: 600;
+}
+
+.inspector-context-usage-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 18px;
+  margin-top: 10px;
+  border-radius: var(--aw-radius-control);
+  background: var(--aw-surface-muted-fill);
+  overflow: hidden;
+}
+
+.inspector-context-usage-bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--aw-status-success-bg);
+  transition: width 120ms ease-out;
+}
+
+.inspector-context-usage-bar-label {
+  position: relative;
+  z-index: 1;
+  padding: 0 8px;
+  color: var(--aw-text-primary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
 .runtime-pills {
   display: flex;
   align-items: center;
@@ -1421,4 +1469,139 @@ pre {
     width: min(100%, 220px);
   }
 
+}
+
+/* Branch button in workbench chrome */
+.workbench-chrome-branch-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-pill, 999px);
+  background: transparent;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-xs);
+  line-height: 1;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease,
+    border-color 140ms ease,
+    opacity 140ms ease;
+}
+
+.workbench-chrome-branch-button:hover:not(:disabled),
+.workbench-chrome-branch-button:focus-visible:not(:disabled) {
+  background: var(--aw-bg-fill-main);
+  color: var(--aw-text-primary);
+  border-color: var(--aw-border-main);
+}
+
+.workbench-chrome-branch-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.workbench-chrome-branch-button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+/* Branch source card in run stage */
+.branch-source-card {
+  display: grid;
+  gap: 12px;
+  max-width: 560px;
+  margin: 24px auto 0;
+  padding: 20px 22px;
+  border: 1px solid var(--aw-border-light);
+  border-radius: 12px;
+  background: var(--aw-bg-white);
+}
+
+.branch-source-card-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-sm);
+  font-weight: 600;
+}
+
+.branch-source-card-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch-source-card-preview {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 2px solid var(--aw-border-light);
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.branch-source-card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.branch-source-card-link {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-pill, 999px);
+  background: var(--aw-bg-fill-main);
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-xs);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease;
+}
+
+.branch-source-card-link:hover,
+.branch-source-card-link:focus-visible {
+  background: var(--aw-bg-fill-strong, var(--aw-bg-fill-main));
+  border-color: var(--aw-border-active);
+}
+
+.branch-source-card-hint {
+  margin: 0;
+  color: var(--aw-text-subtle);
+  font-size: var(--aw-font-size-xs);
+  line-height: 1.5;
+}
+
+/* Branch lineage indicator in inspector */
+.inspector-branch-lineage {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--aw-border-light);
+  margin-bottom: 12px;
+}
+
+.inspector-branch-lineage-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-xs);
+  line-height: 16px;
+}
+
+.inspector-branch-lineage-head span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

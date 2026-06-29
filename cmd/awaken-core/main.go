@@ -14,6 +14,7 @@ import (
 	"awaken/src/runtime"
 	"awaken/src/server"
 	"awaken/src/skills"
+	"awaken/src/titlegen"
 	_ "awaken/src/tools"
 )
 
@@ -76,7 +77,10 @@ func main() {
 				return agent.RunStreamWithEvents(ctx, input, sink)
 			})
 		},
-		runtime.RunServiceConfig{Hooks: hookConfig},
+		runtime.RunServiceConfig{
+			Hooks:          hookConfig,
+			TitleGenerator: titlegen.NewLLMGenerator(titlegen.LLMGeneratorOptions{Config: cfg}),
+		},
 		runtime.WithPersistenceDir(persistenceDir),
 	)
 

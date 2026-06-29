@@ -526,10 +526,17 @@ func (s *RunService) clearActiveRun(threadID, runID string) {
 	thread.activeRunID = ""
 	thread.updatedAt = time.Now().UTC()
 	thread.conversation = conversationForAgent(thread.agent)
-	s.updateThreadAfterRunLocked(thread, run)
+	titleInputs := s.updateThreadAfterRunLocked(thread, run)
 	s.mu.Unlock()
 
 	s.persistThread(threadID)
+
+	// Run the (potentially slow) LLM title generator without holding s.mu so
+	// that thread listing, context reads, branching, and the next StartRun
+	// are not blocked while the LLM responds.
+	if titleInputs != nil {
+		go s.generateThreadTitleAsync(*titleInputs)
+	}
 }
 
 func (s *RunService) restorePersistedState() {

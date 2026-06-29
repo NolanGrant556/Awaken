@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"awaken/src/agentcore"
 	convcontext "awaken/src/context"
@@ -177,9 +178,83 @@ func applyThreadPromptMetadata(metadata sessiontags.Metadata, threadID, prompt s
 	})
 }
 
-func (s *RunService) updateThreadAfterRunLocked(thread *Thread, run Run) {
-	if thread == nil || strings.TrimSpace(run.RunID) == "" {
+// titleGenInputs is the lock-free snapshot needed to run title generation
+// outside the RunService mutex. The LLM call inside titlegen.MaybeGenerate can
+// take seconds to tens of seconds; holding s.mu during that call blocks
+// thread listing, context reads, branching, and the next StartRun.
+type titleGenInputs struct {
+	threadID      string
+	sessionID     string
+	messages      []convcontext.Message
+	existingTitle string // non-empty only when MaybeGenerate should respect skip-existing-title
+}
+
+// generateThreadTitleAsync runs the (potentially slow) LLM title generator
+// without holding s.mu, then takes a short lock to write the result back.
+// It is safe to run as a goroutine: it re-validates state under the lock and
+// only writes when the title is still missing or still weak.
+func (s *RunService) generateThreadTitleAsync(inputs titleGenInputs) {
+	result := titlegen.MaybeGenerate(context.Background(), titlegen.MaybeGenerateRequest{
+		SessionID:     inputs.sessionID,
+		ExistingTitle: inputs.existingTitle,
+		Messages:      inputs.messages,
+		Generator:     s.titleGenerator,
+	})
+	if !result.Generated {
 		return
+	}
+
+	s.mu.Lock()
+	thread, ok := s.threads[inputs.threadID]
+	if !ok {
+		s.mu.Unlock()
+		return
+	}
+	// Don't clobber a user-set custom title, or an AI title that has already
+	// been upgraded to something substantive. Allow overwrite only when the
+	// current AI title is still weak (or empty) and no custom title exists.
+	if thread.metadata.CustomTitle != "" {
+		s.mu.Unlock()
+		return
+	}
+	current := thread.metadata.AITitle
+	if current != "" && !isWeakAITitle(current) {
+		s.mu.Unlock()
+		return
+	}
+	thread.metadata = sessiontags.Apply(thread.metadata, sessiontags.AITitleEntry{
+		SessionID: inputs.sessionID,
+		AITitle:   result.Title,
+	})
+	thread.updatedAt = time.Now().UTC()
+	s.mu.Unlock()
+
+	s.persistThread(inputs.threadID)
+}
+
+// isWeakAITitle reports whether an existing AI-generated title is too thin to
+// represent the thread's real topic (e.g. it came from a greeting first
+// exchange). Weak titles may be overwritten by a later, more substantive run.
+func isWeakAITitle(title string) bool {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return true
+	}
+	if utf8.RuneCountInString(title) < 4 {
+		return true
+	}
+	lower := strings.ToLower(title)
+	for _, greeting := range []string{"hello", "hi", "hey", "greeting", "你好", "嗨", "测试", "test", "untitled", "新会话", "new chat", "new task"} {
+		if lower == greeting {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *RunService) updateThreadAfterRunLocked(thread *Thread, run Run) *titleGenInputs {
+	if thread == nil || strings.TrimSpace(run.RunID) == "" {
+		return nil
 	}
 	metadata := thread.metadata
 	if metadata.SessionID == "" {
@@ -202,25 +277,49 @@ func (s *RunService) updateThreadAfterRunLocked(thread *Thread, run Run) {
 		})
 	}
 
-	if metadata.AITitle == "" && metadata.CustomTitle == "" {
+	thread.metadata = metadata
+
+	// Capture titlegen inputs while we hold the lock (cheap: slice reads +
+	// a skip-rule check). The actual LLM call runs async after unlock.
+	if metadata.CustomTitle != "" {
+		return nil
+	}
+	// Allow (re)titling when there is no AI title yet, or the existing one is
+	// weak. For a fresh title prefer the conversation's first exchange; when
+	// upgrading a weak title use the latest run's exchange so the title tracks
+	// the current topic.
+	inputs := titleGenInputs{
+		threadID:      thread.threadID,
+		sessionID:     metadata.SessionID,
+		existingTitle: metadata.AITitle,
+	}
+	if metadata.AITitle == "" {
 		messages := threadMessages(thread)
-		if !titlegen.ShouldAutoTitle(titlegen.AutoTitleRequest{SessionID: metadata.SessionID, Messages: messages}) {
+		if !titlegen.ShouldAutoTitle(titlegen.AutoTitleRequest{
+			SessionID:     metadata.SessionID,
+			ExistingTitle: metadata.AITitle,
+			Messages:      messages,
+		}) {
 			messages = syntheticTitleMessages(run)
 		}
-		result := titlegen.MaybeGenerate(context.Background(), titlegen.MaybeGenerateRequest{
-			SessionID: metadata.SessionID,
-			Messages:  messages,
-			Generator: s.titleGenerator,
-		})
-		if result.Generated {
-			metadata = sessiontags.Apply(metadata, sessiontags.AITitleEntry{
-				SessionID: metadata.SessionID,
-				AITitle:   result.Title,
-			})
+		inputs.messages = append([]convcontext.Message(nil), messages...)
+	} else if isWeakAITitle(metadata.AITitle) {
+		// Upgrade path: re-title from the latest run exchange.
+		// Leave inputs.existingTitle empty so MaybeGenerate does not skip before
+		// the later re-lock validation decides whether it is still safe to write.
+		inputs.existingTitle = ""
+		messages := syntheticTitleMessages(run)
+		if len(messages) == 0 {
+			return nil
 		}
+		inputs.messages = append([]convcontext.Message(nil), messages...)
+	} else {
+		return nil
 	}
-
-	thread.metadata = metadata
+	if len(inputs.messages) == 0 {
+		return nil
+	}
+	return &inputs
 }
 
 func threadMessages(thread *Thread) []convcontext.Message {

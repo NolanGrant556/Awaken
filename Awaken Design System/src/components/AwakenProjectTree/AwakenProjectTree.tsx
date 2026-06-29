@@ -107,6 +107,7 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
   const idleColor =
     depth === 0 ? "var(--aw-text-secondary)" : "var(--aw-text-tertiary)";
   const baseColor = isActive ? "var(--aw-text-primary)" : idleColor;
+  const showDescription = !isProject && item.description;
 
   const nodeClassName = [
     "aw-project-node",
@@ -118,7 +119,7 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
   ].filter(Boolean).join(" ");
 
   const rowStyle = {
-    "--aw-project-row-height": `${rowHeight}px`,
+    "--aw-project-row-height": showDescription ? "auto" : `${rowHeight}px`,
     "--aw-project-row-font-size": fontSize,
     "--aw-project-row-line-height": lineHeight,
     "--aw-project-row-color": baseColor,
@@ -129,6 +130,8 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
     lineHeight,
     cursor: isDisabled ? "not-allowed" : "pointer",
     opacity: isDisabled ? 0.6 : 1,
+    alignItems: showDescription ? "flex-start" : "center",
+    padding: showDescription ? "3px 0 3px 10px" : undefined,
   };
 
   const handleClick = () => {
@@ -171,7 +174,12 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
               </AwakenIcon>
             ) : null}
           </span>
-          <span className="aw-project-row-label">{item.label}</span>
+          <span className="aw-project-row-text">
+            <span className="aw-project-row-label">{item.label}</span>
+            {showDescription ? (
+              <span className="aw-project-row-description">{item.description}</span>
+            ) : null}
+          </span>
           {showInlineChevron ? (
             <span className="aw-project-inline-chevron" aria-hidden="true">
               <AwakenIcon size={14}>

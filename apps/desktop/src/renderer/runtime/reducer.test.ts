@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AguiEvent } from "../../shared/agui";
-import type { RuntimeRun, SupervisorStatusInfo } from "../../shared/runtime";
+import type { RuntimeRun, RuntimeThread, SupervisorStatusInfo } from "../../shared/runtime";
 import {
   createInitialRuntimeState,
   reduceRuntimeState,
@@ -1571,5 +1571,185 @@ describe("runtime reducer supervisor state", () => {
       { type: "run/recovered", run: makeRun({ status: "running" }) },
     ]);
     expect(state.supervisorStatus).toBe("running");
+  });
+});
+
+describe("runtime reducer thread context", () => {
+  function makeContext(threadId = "thread-1") {
+    return {
+      threadId,
+      files: {
+        markdown: "Files in context",
+        files: [
+          { path: "README.md", source: "read_file", tokens: 120, last_read_time: "2026-01-01T00:00:00Z" },
+        ],
+      },
+      usage: {
+        markdown: "Context Usage",
+        model: "test-model",
+        totalTokens: 120,
+        maxTokens: 8000,
+        percentage: 1.5,
+        messageCount: 3,
+      },
+    };
+  }
+
+  it("run/threadContextLoading sets loading and clears error", () => {
+    const state = dispatch([
+      { type: "run/threadAdded", threadId: "thread-1", label: "ctx", runId: "run-1" },
+      { type: "run/threadContextError", threadId: "thread-1", message: "boom" },
+      { type: "run/threadContextLoading", threadId: "thread-1" },
+    ]);
+    expect(state.threadContextLoading).toBe(true);
+    expect(state.threadContextError).toBeNull();
+  });
+
+  it("run/threadContextLoaded stores context and clears loading", () => {
+    const state = dispatch([
+      { type: "run/threadAdded", threadId: "thread-1", label: "ctx", runId: "run-1" },
+      { type: "run/threadContextLoading", threadId: "thread-1" },
+      { type: "run/threadContextLoaded", threadId: "thread-1", context: makeContext() },
+    ]);
+    expect(state.threadContextLoading).toBe(false);
+    expect(state.threadContextError).toBeNull();
+    expect(state.threadContext?.threadId).toBe("thread-1");
+    expect(state.threadContext?.files.files).toHaveLength(1);
+    expect(state.threadContext?.usage.model).toBe("test-model");
+  });
+
+  it("run/threadContextError clears loading and stores message", () => {
+    const state = dispatch([
+      { type: "run/threadAdded", threadId: "thread-1", label: "ctx", runId: "run-1" },
+      { type: "run/threadContextLoading", threadId: "thread-1" },
+      { type: "run/threadContextError", threadId: "thread-1", message: "failed" },
+    ]);
+    expect(state.threadContextLoading).toBe(false);
+    expect(state.threadContextError).toBe("failed");
+  });
+
+  it("run/threadContextCleared resets all context fields", () => {
+    const state = dispatch([
+      { type: "run/threadAdded", threadId: "thread-1", label: "ctx", runId: "run-1" },
+      { type: "run/threadContextLoaded", threadId: "thread-1", context: makeContext() },
+      { type: "run/threadContextCleared" },
+    ]);
+    expect(state.threadContext).toBeNull();
+    expect(state.threadContextLoading).toBe(false);
+    expect(state.threadContextError).toBeNull();
+  });
+
+  it("run/threadSwitch clears context for the new thread", () => {
+    const state = dispatch([
+      { type: "run/threadAdded", threadId: "thread-1", label: "ctx", runId: "run-1" },
+      { type: "run/threadContextLoaded", threadId: "thread-1", context: makeContext() },
+      { type: "run/threadSwitch", threadId: "thread-2" },
+    ]);
+    expect(state.activeThreadId).toBe("thread-2");
+    expect(state.threadContext).toBeNull();
+    expect(state.threadContextLoading).toBe(false);
+    expect(state.threadContextError).toBeNull();
+  });
+
+  it("ignores context events for a thread that is no longer active", () => {
+    const state = dispatch([
+      { type: "run/threadAdded", threadId: "thread-1", label: "ctx", runId: "run-1" },
+      { type: "run/threadSwitch", threadId: "thread-2" },
+      { type: "run/threadContextLoaded", threadId: "thread-1", context: makeContext("thread-1") },
+    ]);
+    expect(state.threadContext).toBeNull();
+  });
+});
+
+describe("runtime reducer branch handling", () => {
+  function makeBranchedThread(overrides: Partial<RuntimeThread> = {}): RuntimeThread {
+    return {
+      threadId: "branch-1",
+      label: "branched thread",
+      metadata: {
+        lastPrompt: "fork me",
+        branch: {
+          originalThreadId: "thread-1",
+          title: "fork me",
+        },
+      },
+      workspace: { workspaceRoot: "/tmp", writableRoots: ["/tmp"] },
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  it("run/threadBranched upserts the branched thread into threads", () => {
+    const branched = makeBranchedThread();
+    const state = dispatch([
+      { type: "run/threadAdded", threadId: "thread-1", label: "parent", runId: "run-1" },
+      { type: "run/threadBranched", thread: branched },
+    ]);
+    const found = state.threads.find((thread) => thread.threadId === "branch-1");
+    expect(found).toBeDefined();
+    expect(found?.label).toBe("branched thread");
+    expect(found?.metadata?.branch?.originalThreadId).toBe("thread-1");
+  });
+
+  it("run/threadBranched updates an existing branched thread in place", () => {
+    const first = makeBranchedThread({ label: "first label" });
+    const second = makeBranchedThread({ label: "updated label" });
+    const state = dispatch([
+      { type: "run/threadBranched", thread: first },
+      { type: "run/threadBranched", thread: second },
+    ]);
+    const found = state.threads.find((thread) => thread.threadId === "branch-1");
+    expect(found).toBeDefined();
+    expect(found?.label).toBe("updated label");
+    expect(state.threads).toHaveLength(1);
+  });
+
+  it("run/branchSourceViewSet stores parent thread id, label, and preview", () => {
+    const state = dispatch([
+      { type: "run/branchSourceViewSet", parentThreadId: "thread-1", parentLabel: "parent thread", forkedFromPreview: "fork me" },
+    ]);
+    expect(state.branchSourceView).toEqual({
+      parentThreadId: "thread-1",
+      parentLabel: "parent thread",
+      forkedFromPreview: "fork me",
+    });
+  });
+
+  it("run/threadSwitch clears branchSourceView", () => {
+    const state = dispatch([
+      { type: "run/branchSourceViewSet", parentThreadId: "thread-1", parentLabel: "parent thread", forkedFromPreview: "fork me" },
+      { type: "run/threadSwitch", threadId: "thread-2" },
+    ]);
+    expect(state.branchSourceView).toBeNull();
+  });
+
+  it("run/threadReplayStarted clears branchSourceView", () => {
+    const state = dispatch([
+      { type: "run/branchSourceViewSet", parentThreadId: "thread-1", parentLabel: "parent thread", forkedFromPreview: "fork me" },
+      { type: "run/threadReplayStarted", threadId: "thread-2", runId: "run-2" },
+    ]);
+    expect(state.branchSourceView).toBeNull();
+  });
+
+  it("run/requested clears branchSourceView when a new run starts", () => {
+    const state = dispatch([
+      { type: "run/branchSourceViewSet", parentThreadId: "thread-1", parentLabel: "parent thread", forkedFromPreview: "fork me" },
+      { type: "run/requested", prompt: "first message on branch" },
+    ]);
+    expect(state.branchSourceView).toBeNull();
+  });
+
+  it("run/created clears branchSourceView when the run is created", () => {
+    const state = dispatch([
+      { type: "run/branchSourceViewSet", parentThreadId: "thread-1", parentLabel: "parent thread", forkedFromPreview: "fork me" },
+      { type: "run/created", run: makeRun({ runId: "run-branch", threadId: "branch-1" }) },
+    ]);
+    expect(state.branchSourceView).toBeNull();
+  });
+
+  it("branchSourceView defaults to undefined in initial state", () => {
+    const state = createInitialRuntimeState();
+    expect(state.branchSourceView).toBeUndefined();
   });
 });

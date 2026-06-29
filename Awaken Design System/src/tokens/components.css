@@ -715,6 +715,13 @@ button.tool-trace-line:focus-visible {
 
 .assistant-message-footer-copy {
   flex: 0 0 auto;
+}
+
+/* Only push the copy button to the far right when a meta span precedes it.
+   Without this rule, a footer with only the copy button would right-align it
+   via margin-left: auto, which looks misplaced when there is no elapsed-time
+   meta to balance it. */
+.assistant-message-footer-meta + .assistant-message-footer-copy {
   margin-left: auto;
 }
 

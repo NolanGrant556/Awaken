@@ -4,6 +4,7 @@ import type {
   RuntimeRun,
   RuntimeRunStatus,
   RuntimeThread,
+  RuntimeThreadContext,
   RuntimeThreadMetadata,
   RuntimeThreadState,
   SupervisorStatus,
@@ -98,6 +99,12 @@ type ThreadViewState = {
   runCompletedAtMs?: number;
 };
 
+export type BranchSourceView = {
+  parentThreadId: string;
+  parentLabel: string;
+  forkedFromPreview: string;
+};
+
 export type RuntimeViewState = {
   prompt: string;
   runId?: string;
@@ -122,12 +129,17 @@ export type RuntimeViewState = {
   activeThreadId?: string;
   threadViews: Record<string, ThreadViewState>;
   supervisorStatus: SupervisorStatus | null;
+  needsThreadsRefresh?: boolean;
+  threadContext?: RuntimeThreadContext | null;
+  threadContextLoading?: boolean;
+  threadContextError?: string | null;
+  branchSourceView?: BranchSourceView | null;
 };
 
 export type RuntimeAction =
   | { type: "run/reset" }
   | { type: "run/requested"; prompt: string; startedAtMs?: number }
-  | { type: "run/created"; run: RuntimeRun }
+  | { type: "run/created"; run: RuntimeRun; startedAtMs?: number }
   | { type: "run/createFailed"; message: string }
   | { type: "run/cancelRequested" }
   | { type: "run/cancelSync"; run: RuntimeRun }
@@ -137,8 +149,15 @@ export type RuntimeAction =
   | { type: "run/recovered"; run: RuntimeRun; prompt?: string }
   | { type: "run/threadReplayStarted"; threadId: string; runId?: string }
   | { type: "run/threadsLoaded"; threads: RuntimeThread[] }
+  | { type: "run/threadsRefreshed" }
   | { type: "run/threadAdded"; threadId: string; label: string; runId: string; updatedAt?: string }
+  | { type: "run/threadBranched"; thread: RuntimeThread }
   | { type: "run/threadSwitch"; threadId: string }
+  | { type: "run/branchSourceViewSet"; parentThreadId: string; parentLabel: string; forkedFromPreview: string }
+  | { type: "run/threadContextLoading"; threadId: string }
+  | { type: "run/threadContextLoaded"; threadId: string; context: RuntimeThreadContext }
+  | { type: "run/threadContextError"; threadId: string; message: string }
+  | { type: "run/threadContextCleared" }
   | { type: "run/event"; event: AguiEvent; receivedAtMs?: number }
   | { type: "supervisor/status-changed"; info: SupervisorStatusInfo };
 
@@ -693,12 +712,14 @@ export function reduceRuntimeState(
         threadViews: state.threadViews,
         runStartedAtMs: action.startedAtMs,
         runCompletedAtMs: undefined,
+        branchSourceView: null,
       };
     case "run/created":
       return saveActiveThreadView(
         syncActiveThreadSummary({
           ...syncFromRun(state, action.run),
           activeThreadId: action.run.threadId,
+          branchSourceView: null,
         }, {
           updatedAt: action.run.updatedAt,
           lastError: action.run.error,
@@ -822,6 +843,7 @@ export function reduceRuntimeState(
           ...state.threadViews,
           [action.threadId]: view,
         },
+        branchSourceView: null,
       };
     }
     case "run/threadsLoaded": {
@@ -880,8 +902,69 @@ export function reduceRuntimeState(
       };
       return saveActiveThreadView(next);
     }
+    case "run/threadBranched": {
+      const branched = threadItemFromRuntime(action.thread);
+      return {
+        ...state,
+        threads: upsertThread(state.threads, branched),
+      };
+    }
     case "run/threadSwitch":
-      return restoreThreadView(saveActiveThreadView(state), action.threadId);
+      return {
+        ...restoreThreadView(saveActiveThreadView(state), action.threadId),
+        threadContext: null,
+        threadContextLoading: false,
+        threadContextError: null,
+        branchSourceView: null,
+      };
+    case "run/branchSourceViewSet":
+      return {
+        ...state,
+        branchSourceView: {
+          parentThreadId: action.parentThreadId,
+          parentLabel: action.parentLabel,
+          forkedFromPreview: action.forkedFromPreview,
+        },
+      };
+    case "run/threadContextLoading":
+      // Strict equality: reject when activeThreadId is empty (e.g. user just
+      // clicked "New Task" and the active thread was cleared) so a stale
+      // in-flight response for the previous thread cannot pollute the blank
+      // composer view.
+      if (state.activeThreadId !== action.threadId) {
+        return state;
+      }
+      return {
+        ...state,
+        threadContextLoading: true,
+        threadContextError: null,
+      };
+    case "run/threadContextLoaded":
+      if (state.activeThreadId !== action.threadId) {
+        return state;
+      }
+      return {
+        ...state,
+        threadContext: action.context,
+        threadContextLoading: false,
+        threadContextError: null,
+      };
+    case "run/threadContextError":
+      if (state.activeThreadId !== action.threadId) {
+        return state;
+      }
+      return {
+        ...state,
+        threadContextLoading: false,
+        threadContextError: action.message,
+      };
+    case "run/threadContextCleared":
+      return {
+        ...state,
+        threadContext: null,
+        threadContextLoading: false,
+        threadContextError: null,
+      };
     case "run/event": {
       const nextState = { ...state };
       const narrativeEvent = scopeNarrativeEvent(action.event, nextState);
@@ -1258,7 +1341,10 @@ export function reduceRuntimeState(
         nextState.threadId &&
         (action.event.type === "RUN_FINISHED" ||
           action.event.type === "RUN_ERROR" ||
-          (action.event.type === "RUN_STATUS_CHANGED" && action.event.status === "cancelled"))
+          (action.event.type === "RUN_STATUS_CHANGED" &&
+            (action.event.status === "cancelled" ||
+              action.event.status === "finished" ||
+              action.event.status === "error")))
       ) {
         nextState.threads = upsertThread(nextState.threads, {
           threadId: nextState.threadId,
@@ -1268,6 +1354,7 @@ export function reduceRuntimeState(
           runId: nextState.runId,
           activeRunId: undefined,
         });
+        nextState.needsThreadsRefresh = true;
       }
 
       nextState.steps = toSteps(records);
@@ -1288,6 +1375,10 @@ export function reduceRuntimeState(
         }),
       );
     }
+    case "run/threadsRefreshed":
+      return state.needsThreadsRefresh
+        ? { ...state, needsThreadsRefresh: false }
+        : state;
     case "supervisor/status-changed":
       return {
         ...state,

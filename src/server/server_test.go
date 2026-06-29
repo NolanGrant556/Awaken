@@ -21,6 +21,7 @@ import (
 
 	"awaken/src/agentcore"
 	"awaken/src/agentdefs"
+	convcontext "awaken/src/context"
 	"awaken/src/llm"
 	"awaken/src/mcp"
 	"awaken/src/protocol/agui"
@@ -1361,6 +1362,99 @@ func TestGetThreadTranscriptEndpointReturnsMappedRuns(t *testing.T) {
 	}
 	if transcript.Runs[1].Events[0].Type != "RUN_STARTED" {
 		t.Fatalf("expected transcript event to be mapped as AG-UI frame, got %s", transcript.Runs[1].Events[0].Type)
+	}
+}
+
+func TestWave2ThreadCapabilityEndpoints(t *testing.T) {
+	runService := newWave2HTTPRunService()
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	createResp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{
+		"input":"Summarize README endpoint wave2 with api_key=sk-proj-wave2endpoint",
+		"workspace":{"workspace_root":"/tmp/awaken-wave2-endpoint"}
+	}`))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer createResp.Body.Close()
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 from create run, got %d", createResp.StatusCode)
+	}
+	var created awruntime.Run
+	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode created run: %v", err)
+	}
+	waitHTTPRunTerminal(t, ts.URL, created.RunID)
+
+	var searchResults []awruntime.ThreadSearchResult
+	searchURL := ts.URL + "/v1/threads/search?q=" + url.QueryEscape("README endpoint wave2") + "&limit=5"
+	getJSON(t, searchURL, &searchResults)
+	if len(searchResults) != 1 || searchResults[0].Thread.ThreadID != created.ThreadID {
+		t.Fatalf("unexpected search response: %+v", searchResults)
+	}
+
+	var textExport awruntime.ThreadExportResult
+	getJSON(t, ts.URL+"/v1/threads/"+created.ThreadID+"/export?format=plain_text", &textExport)
+	if textExport.Format != awruntime.ThreadExportPlainText ||
+		textExport.ContentType != "text/plain; charset=utf-8" ||
+		!strings.Contains(textExport.Content, "read_file") ||
+		!strings.Contains(textExport.Content, "README endpoint wave2") {
+		t.Fatalf("unexpected text export response: %+v", textExport)
+	}
+
+	var jsonlExport awruntime.ThreadExportResult
+	getJSON(t, ts.URL+"/v1/threads/"+created.ThreadID+"/export?format=jsonl", &jsonlExport)
+	if jsonlExport.Format != awruntime.ThreadExportJSONL ||
+		jsonlExport.ContentType != "application/x-ndjson; charset=utf-8" ||
+		!strings.Contains(jsonlExport.Content, `"role":"tool"`) {
+		t.Fatalf("unexpected JSONL export response: %+v", jsonlExport)
+	}
+
+	shareResp, err := http.Post(
+		ts.URL+"/v1/threads/"+created.ThreadID+"/share-bundle",
+		"application/json",
+		strings.NewReader(`{"visibility":"public","action":"share","redact_secrets":false}`),
+	)
+	if err != nil {
+		t.Fatalf("POST /v1/threads/{thread_id}/share-bundle failed: %v", err)
+	}
+	defer shareResp.Body.Close()
+	shareBody, err := io.ReadAll(shareResp.Body)
+	if err != nil {
+		t.Fatalf("failed to read share bundle error response: %v", err)
+	}
+	if shareResp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409 from unsafe share bundle endpoint, got %d body=%s", shareResp.StatusCode, shareBody)
+	}
+	if strings.Contains(string(shareBody), "sk-proj-wave2endpoint") {
+		t.Fatalf("unsafe share bundle response leaked secret: %s", shareBody)
+	}
+	var shareError errorResponse
+	if err := json.Unmarshal(shareBody, &shareError); err != nil {
+		t.Fatalf("failed to decode share bundle error response: %v", err)
+	}
+	if shareError.Error != "UNSAFE_PUBLIC_BUNDLE" {
+		t.Fatalf("expected UNSAFE_PUBLIC_BUNDLE error, got %+v", shareError)
+	}
+
+	clearResp, err := http.Post(ts.URL+"/v1/threads/"+created.ThreadID+"/clear-plan", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("POST /v1/threads/{thread_id}/clear-plan failed: %v", err)
+	}
+	defer clearResp.Body.Close()
+	if clearResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from clear plan endpoint, got %d", clearResp.StatusCode)
+	}
+	var clearPlan awruntime.ThreadClearPlanResult
+	if err := json.NewDecoder(clearResp.Body).Decode(&clearPlan); err != nil {
+		t.Fatalf("failed to decode clear plan response: %v", err)
+	}
+	if !clearPlan.Plan.ClearMessages ||
+		clearPlan.Plan.Session.PreviousID != created.ThreadID ||
+		clearPlan.Plan.CacheEvictionHint == nil ||
+		clearPlan.Plan.CacheEvictionHint.LastRequestID != created.RunID {
+		t.Fatalf("unexpected clear plan response: %+v", clearPlan.Plan)
 	}
 }
 
@@ -4256,6 +4350,61 @@ func newPersistentServerRunService(persistenceDir string) *awruntime.RunService 
 			})
 		},
 		awruntime.WithPersistenceDir(persistenceDir),
+	)
+}
+
+func newWave2HTTPRunService() *awruntime.RunService {
+	return awruntime.NewRunService(
+		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+		},
+		func(agent *agentcore.Agent) awruntime.Executor {
+			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				workspaceRoot := agent.GetConfig().Workspace.Root
+				toolCallID := "call_readme_endpoint"
+				toolInput := `{"path":"` + workspaceRoot + `/README.md","api_key":"sk-proj-wave2endpoint"}`
+				toolOutput := "README endpoint wave2 output from " + workspaceRoot + "/README.md with sk-proj-wave2endpoint"
+
+				conversation := agent.GetConversation()
+				conversation.UserInput(input)
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+				conversation.AssistantOutput("I'll inspect README.", []convcontext.ToolCall{{
+					ID:   toolCallID,
+					Type: "function",
+					Function: convcontext.FunctionCall{
+						Name:      "read_file",
+						Arguments: toolInput,
+					},
+				}})
+				sink.Emit(agentcore.AwakenEvent{
+					Type:       agentcore.ToolCallStartedEventType,
+					ToolCallID: toolCallID,
+					ToolName:   "read_file",
+				})
+				sink.Emit(agentcore.AwakenEvent{
+					Type:       agentcore.ToolCallArgsEventType,
+					ToolCallID: toolCallID,
+					ToolName:   "read_file",
+					Arguments:  toolInput,
+				})
+				sink.Emit(agentcore.AwakenEvent{
+					Type:       agentcore.ToolCallFinishedEventType,
+					ToolCallID: toolCallID,
+					ToolName:   "read_file",
+				})
+				conversation.ToolResult(toolCallID, "read_file", toolOutput)
+				sink.Emit(agentcore.AwakenEvent{
+					Type:       agentcore.ToolResultEventType,
+					ToolCallID: toolCallID,
+					ToolName:   "read_file",
+					Content:    toolOutput,
+				})
+				answer := "final answer for README endpoint wave2"
+				conversation.AssistantOutput(answer, nil)
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: answer})
+				return answer, nil
+			})
+		},
 	)
 }
 

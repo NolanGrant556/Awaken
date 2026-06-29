@@ -35,9 +35,13 @@ func NewRouterWithMemory(runService *awruntime.RunService, infoProvider RuntimeI
 	if runService != nil {
 		handlers := runHandlers{runService: runService}
 		mux.HandleFunc("GET /v1/threads", handlers.handleListThreads)
+		mux.HandleFunc("GET /v1/threads/search", handlers.handleSearchThreads)
 		mux.HandleFunc("GET /v1/threads/{thread_id}/lite", handlers.handleGetThreadLite)
 		mux.HandleFunc("GET /v1/threads/{thread_id}/context", handlers.handleGetThreadContext)
 		mux.HandleFunc("GET /v1/threads/{thread_id}/transcript", handlers.handleGetThreadTranscript)
+		mux.HandleFunc("GET /v1/threads/{thread_id}/export", handlers.handleExportThread)
+		mux.HandleFunc("POST /v1/threads/{thread_id}/share-bundle", handlers.handleBuildThreadShareBundle)
+		mux.HandleFunc("POST /v1/threads/{thread_id}/clear-plan", handlers.handleBuildThreadClearPlan)
 		mux.HandleFunc("POST /v1/threads/{thread_id}/branches", handlers.handleBranchThread)
 		mux.HandleFunc("GET /v1/session-insights", handlers.handleSessionInsights)
 		mux.HandleFunc("POST /v1/scheduled-runs", handlers.handleCreateScheduledRun)

@@ -10,8 +10,14 @@ import {
   type RuntimeInfo,
   type RuntimeRun,
   type RuntimeSessionInsightsReport,
+  type RuntimeThreadClearPlanResult,
   type RuntimeThreadContext,
+  type RuntimeThreadExportFormat,
+  type RuntimeThreadExportResult,
   type RuntimeThreadLite,
+  type RuntimeThreadSearchResult,
+  type RuntimeThreadShareBundleRequest,
+  type RuntimeThreadShareBundleResult,
   type RuntimeThreadTranscript,
   type RuntimeThread,
   type StartRunRequest,
@@ -66,6 +72,22 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:get-thread-context", threadId) as Promise<RuntimeThreadContext>,
   getThreadTranscript: (threadId: string) =>
     ipcRenderer.invoke("awaken:get-thread-transcript", threadId) as Promise<RuntimeThreadTranscript>,
+  searchThreads: (query: string, limit?: number) =>
+    ipcRenderer.invoke("awaken:search-threads", { query, limit }) as Promise<
+      RuntimeThreadSearchResult[]
+    >,
+  exportThread: (threadId: string, format?: RuntimeThreadExportFormat) =>
+    ipcRenderer.invoke("awaken:export-thread", { threadId, format }) as Promise<
+      RuntimeThreadExportResult
+    >,
+  buildThreadShareBundle: (threadId: string, request?: RuntimeThreadShareBundleRequest) =>
+    ipcRenderer.invoke("awaken:build-thread-share-bundle", { threadId, request }) as Promise<
+      RuntimeThreadShareBundleResult
+    >,
+  buildThreadClearPlan: (threadId: string) =>
+    ipcRenderer.invoke("awaken:build-thread-clear-plan", threadId) as Promise<
+      RuntimeThreadClearPlanResult
+    >,
   getSessionInsights: () =>
     ipcRenderer.invoke("awaken:get-session-insights") as Promise<RuntimeSessionInsightsReport>,
   listThreads: () =>

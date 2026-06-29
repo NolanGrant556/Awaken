@@ -544,9 +544,10 @@ func (s *RunService) restorePersistedState() {
 	}
 
 	for _, record := range threads {
+		restoredConversation := restoreConversation(record)
 		thread := &Thread{
 			threadID:     record.Thread.ThreadID,
-			conversation: restoreConversation(record),
+			conversation: restoredConversation,
 			workspace:    record.Thread.Workspace,
 			label:        record.Thread.Label,
 			metadata:     metadataFromSnapshot(record.Thread),
@@ -564,13 +565,9 @@ func (s *RunService) restorePersistedState() {
 			if thread.agent != nil {
 				thread.conversation = thread.agent.GetConversation()
 				if thread.conversation != nil {
-					thread.conversation.Context.SetMessages(append([]convcontext.Message(nil), record.ConversationMessages...))
-					if createdAt, ok := parsePersistedTime(record.ConversationCreatedAt); ok {
-						thread.conversation.CreatedAt = createdAt
-					}
-					if updatedAt, ok := parsePersistedTime(record.ConversationUpdatedAt); ok {
-						thread.conversation.UpdatedAt = updatedAt
-					}
+					thread.conversation.Context.SetMessages(restoredConversation.Context.GetMessages())
+					thread.conversation.CreatedAt = restoredConversation.CreatedAt
+					thread.conversation.UpdatedAt = restoredConversation.UpdatedAt
 				}
 			}
 		}

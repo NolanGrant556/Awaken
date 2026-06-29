@@ -241,6 +241,87 @@ export type RuntimeThreadTranscript = {
   runs: RuntimeThreadTranscriptRun[];
 };
 
+export type RuntimeThreadSearchResultWire = {
+  thread: RuntimeThreadWire;
+  score: number;
+  match: string;
+  message_index?: number;
+  snippet?: string;
+};
+
+export type RuntimeThreadSearchResult = {
+  thread: RuntimeThread;
+  score: number;
+  match: string;
+  messageIndex?: number;
+  snippet?: string;
+};
+
+export type RuntimeThreadExportFormat = "plain_text" | "jsonl";
+
+export type RuntimeThreadExportResultWire = {
+  thread: RuntimeThreadWire;
+  format: RuntimeThreadExportFormat;
+  filename: string;
+  content_type: string;
+  content: string;
+};
+
+export type RuntimeThreadExportResult = {
+  thread: RuntimeThread;
+  format: RuntimeThreadExportFormat;
+  filename: string;
+  contentType: string;
+  content: string;
+};
+
+export type RuntimeThreadShareVisibility = "private" | "org" | "public";
+export type RuntimeThreadShareAction = "copy" | "export" | "share";
+
+export type RuntimeThreadShareBundleRequestWire = {
+  visibility?: RuntimeThreadShareVisibility;
+  action?: RuntimeThreadShareAction;
+  include_tool_outputs?: boolean;
+  redact_secrets?: boolean;
+  redact_paths?: boolean;
+  max_tool_output_chars?: number;
+  summary_chars?: number;
+};
+
+export type RuntimeThreadShareBundleRequest = {
+  visibility?: RuntimeThreadShareVisibility;
+  action?: RuntimeThreadShareAction;
+  includeToolOutputs?: boolean;
+  redactSecrets?: boolean;
+  redactPaths?: boolean;
+  maxToolOutputChars?: number;
+  summaryChars?: number;
+};
+
+export type RuntimeThreadShareBundle = Record<string, unknown>;
+
+export type RuntimeThreadShareBundleResultWire = {
+  thread: RuntimeThreadWire;
+  bundle: RuntimeThreadShareBundle;
+};
+
+export type RuntimeThreadShareBundleResult = {
+  thread: RuntimeThread;
+  bundle: RuntimeThreadShareBundle;
+};
+
+export type RuntimeThreadClearPlan = Record<string, unknown>;
+
+export type RuntimeThreadClearPlanResultWire = {
+  thread: RuntimeThreadWire;
+  plan: RuntimeThreadClearPlan;
+};
+
+export type RuntimeThreadClearPlanResult = {
+  thread: RuntimeThread;
+  plan: RuntimeThreadClearPlan;
+};
+
 export type RuntimeInfoWire = {
   runtime_version: string;
   api_version: string;
@@ -409,6 +490,16 @@ export type AwakenBridge = {
   getThreadLite: (threadId: string) => Promise<RuntimeThreadLite>;
   getThreadContext: (threadId: string) => Promise<RuntimeThreadContext>;
   getThreadTranscript: (threadId: string) => Promise<RuntimeThreadTranscript>;
+  searchThreads: (query: string, limit?: number) => Promise<RuntimeThreadSearchResult[]>;
+  exportThread: (
+    threadId: string,
+    format?: RuntimeThreadExportFormat,
+  ) => Promise<RuntimeThreadExportResult>;
+  buildThreadShareBundle: (
+    threadId: string,
+    request?: RuntimeThreadShareBundleRequest,
+  ) => Promise<RuntimeThreadShareBundleResult>;
+  buildThreadClearPlan: (threadId: string) => Promise<RuntimeThreadClearPlanResult>;
   getSessionInsights: () => Promise<RuntimeSessionInsightsReport>;
   listThreads: () => Promise<RuntimeThread[]>;
   branchThread: (threadId: string, request?: BranchThreadRequest) => Promise<BranchThreadResult>;
@@ -609,6 +700,62 @@ export function normalizeRuntimeThreadTranscript(
       run: normalizeRuntimeRun(entry.run),
       events: entry.events,
     })),
+  };
+}
+
+export function normalizeRuntimeThreadSearchResult(
+  result: RuntimeThreadSearchResultWire,
+): RuntimeThreadSearchResult {
+  return {
+    thread: normalizeRuntimeThread(result.thread),
+    score: result.score,
+    match: result.match,
+    messageIndex: result.message_index,
+    snippet: result.snippet,
+  };
+}
+
+export function normalizeRuntimeThreadExportResult(
+  result: RuntimeThreadExportResultWire,
+): RuntimeThreadExportResult {
+  return {
+    thread: normalizeRuntimeThread(result.thread),
+    format: result.format,
+    filename: result.filename,
+    contentType: result.content_type,
+    content: result.content,
+  };
+}
+
+export function normalizeRuntimeThreadShareBundleRequest(
+  request?: RuntimeThreadShareBundleRequest,
+): RuntimeThreadShareBundleRequestWire {
+  return {
+    visibility: request?.visibility,
+    action: request?.action,
+    include_tool_outputs: request?.includeToolOutputs,
+    redact_secrets: request?.redactSecrets,
+    redact_paths: request?.redactPaths,
+    max_tool_output_chars: request?.maxToolOutputChars,
+    summary_chars: request?.summaryChars,
+  };
+}
+
+export function normalizeRuntimeThreadShareBundleResult(
+  result: RuntimeThreadShareBundleResultWire,
+): RuntimeThreadShareBundleResult {
+  return {
+    thread: normalizeRuntimeThread(result.thread),
+    bundle: result.bundle,
+  };
+}
+
+export function normalizeRuntimeThreadClearPlanResult(
+  result: RuntimeThreadClearPlanResultWire,
+): RuntimeThreadClearPlanResult {
+  return {
+    thread: normalizeRuntimeThread(result.thread),
+    plan: result.plan,
   };
 }
 

@@ -8,8 +8,14 @@ import {
   type RuntimeInfo,
   type RuntimeRun,
   type RuntimeSessionInsightsReport,
+  type RuntimeThreadClearPlanResult,
   type RuntimeThreadContext,
+  type RuntimeThreadExportFormat,
+  type RuntimeThreadExportResult,
   type RuntimeThreadLite,
+  type RuntimeThreadSearchResult,
+  type RuntimeThreadShareBundleRequest,
+  type RuntimeThreadShareBundleResult,
   type RuntimeThreadTranscript,
   type RuntimeThread,
   type StartRunRequest,
@@ -33,6 +39,16 @@ export type RuntimeClient = {
   getThreadLite: (threadId: string) => Promise<RuntimeThreadLite>;
   getThreadContext: (threadId: string) => Promise<RuntimeThreadContext>;
   getThreadTranscript: (threadId: string) => Promise<RuntimeThreadTranscript>;
+  searchThreads: (query: string, limit?: number) => Promise<RuntimeThreadSearchResult[]>;
+  exportThread: (
+    threadId: string,
+    format?: RuntimeThreadExportFormat,
+  ) => Promise<RuntimeThreadExportResult>;
+  buildThreadShareBundle: (
+    threadId: string,
+    request?: RuntimeThreadShareBundleRequest,
+  ) => Promise<RuntimeThreadShareBundleResult>;
+  buildThreadClearPlan: (threadId: string) => Promise<RuntimeThreadClearPlanResult>;
   getSessionInsights: () => Promise<RuntimeSessionInsightsReport>;
   listThreads: () => Promise<RuntimeThread[]>;
   branchThread: (threadId: string, request?: BranchThreadRequest) => Promise<BranchThreadResult>;
@@ -74,6 +90,11 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     getThreadLite: (threadId) => bridge.getThreadLite(threadId),
     getThreadContext: (threadId) => bridge.getThreadContext(threadId),
     getThreadTranscript: (threadId) => bridge.getThreadTranscript(threadId),
+    searchThreads: (query, limit) => bridge.searchThreads(query, limit),
+    exportThread: (threadId, format) => bridge.exportThread(threadId, format),
+    buildThreadShareBundle: (threadId, request) =>
+      bridge.buildThreadShareBundle(threadId, request),
+    buildThreadClearPlan: (threadId) => bridge.buildThreadClearPlan(threadId),
     getSessionInsights: () => bridge.getSessionInsights(),
     listThreads: () => bridge.listThreads(),
     branchThread: (threadId, request) => bridge.branchThread(threadId, request),

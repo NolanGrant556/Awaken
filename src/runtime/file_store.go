@@ -290,7 +290,10 @@ func newPersistedThread(thread *Thread) persistedThread {
 
 func restoreConversation(thread persistedThread) *convcontext.Conversation {
 	conv := convcontext.NewConversation(nil)
-	conv.Context.SetMessages(append([]convcontext.Message(nil), thread.ConversationMessages...))
+	conv.Context.SetMessages(repairConversationForRecovery(
+		append([]convcontext.Message(nil), thread.ConversationMessages...),
+		thread.Thread.Workspace.WorkspaceRoot,
+	))
 	if createdAt, ok := parsePersistedTime(thread.ConversationCreatedAt); ok {
 		conv.CreatedAt = createdAt
 	}

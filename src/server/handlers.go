@@ -15,6 +15,7 @@ import (
 	awruntime "awaken/src/runtime"
 	"awaken/src/sessionbranch"
 	"awaken/src/sessioninsights"
+	"awaken/src/sessionshare"
 	"awaken/src/slashcommands"
 	"awaken/src/workspaceguard"
 )
@@ -129,6 +130,11 @@ func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 
 func (h runHandlers) handleListThreads(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.runService.ListThreads())
+}
+
+func (h runHandlers) handleSearchThreads(w http.ResponseWriter, r *http.Request) {
+	limit := parsePositiveInt(r.URL.Query().Get("limit"), 20)
+	writeJSON(w, http.StatusOK, h.runService.SearchThreads(r.URL.Query().Get("q"), limit))
 }
 
 func (h runHandlers) handleGetThreadLite(w http.ResponseWriter, r *http.Request) {
@@ -278,6 +284,63 @@ func (h runHandlers) handleGetThreadTranscript(w http.ResponseWriter, r *http.Re
 	}
 
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (h runHandlers) handleExportThread(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	format := awruntime.ThreadExportFormat(strings.TrimSpace(r.URL.Query().Get("format")))
+	result, err := h.runService.ExportThread(threadID, format)
+	if err != nil {
+		if errors.Is(err, awruntime.ErrThreadNotFound) {
+			writeErrorJSON(w, http.StatusNotFound, "THREAD_NOT_FOUND", err.Error())
+			return
+		}
+		writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to export thread")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h runHandlers) handleBuildThreadShareBundle(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	var req awruntime.ThreadShareBundleRequest
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := decodeJSON(r, &req); err != nil {
+			writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+			return
+		}
+	} else if r.Body != nil {
+		_ = r.Body.Close()
+	}
+
+	result, err := h.runService.BuildThreadShareBundle(threadID, req)
+	if err != nil {
+		if errors.Is(err, awruntime.ErrThreadNotFound) {
+			writeErrorJSON(w, http.StatusNotFound, "THREAD_NOT_FOUND", err.Error())
+			return
+		}
+		if errors.Is(err, sessionshare.ErrUnsafePublicBundle) {
+			writeErrorJSON(w, http.StatusConflict, "UNSAFE_PUBLIC_BUNDLE", err.Error())
+			return
+		}
+		writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to build thread share bundle")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h runHandlers) handleBuildThreadClearPlan(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	result, err := h.runService.BuildThreadClearPlan(threadID)
+	if err != nil {
+		if errors.Is(err, awruntime.ErrThreadNotFound) {
+			writeErrorJSON(w, http.StatusNotFound, "THREAD_NOT_FOUND", err.Error())
+			return
+		}
+		writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to build thread clear plan")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (h runHandlers) handleGetRun(w http.ResponseWriter, r *http.Request) {
@@ -442,6 +505,14 @@ func decodeJSON(r *http.Request, dst any) error {
 		return err
 	}
 	return nil
+}
+
+func parsePositiveInt(value string, fallback int) int {
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
 }
 
 func handleRuntimeInfo(w http.ResponseWriter, r *http.Request, provider RuntimeInfoProvider) {

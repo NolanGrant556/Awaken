@@ -44,6 +44,7 @@ type Block struct {
 	ID        string
 	Name      string
 	ToolUseID string
+	IsError   bool
 }
 
 type Options struct {

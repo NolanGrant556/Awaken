@@ -314,6 +314,24 @@ export function composerBottomSafeArea({
   return Math.max(0, composerHeight) + Math.max(0, safeGap);
 }
 
+export function measuredComposerDockHeight({
+  dockHeight,
+  contentHeight,
+  paddingTop,
+  paddingBottom,
+}: {
+  dockHeight: number;
+  contentHeight: number;
+  paddingTop: number;
+  paddingBottom: number;
+}): number {
+  const contentBoxHeight =
+    Math.max(0, contentHeight) +
+    Math.max(0, paddingTop) +
+    Math.max(0, paddingBottom);
+  return Math.ceil(Math.max(0, dockHeight, contentBoxHeight));
+}
+
 export function anchoredTurnMinHeight({
   containerHeight,
   anchorOffset,

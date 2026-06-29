@@ -284,6 +284,7 @@ describe("runtime reducer replay idempotency", () => {
       id: "answer:run-1:msg-1",
       markdown: "done",
       status: "done",
+      isFinal: true,
     });
   });
 
@@ -928,7 +929,66 @@ describe("runtime reducer run narrative projection", () => {
       id: "answer:m1",
       markdown: "done",
       status: "done",
+      isFinal: true,
     });
+  });
+
+  it("does not mark intermediate completed answers as final before run completion", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "Read the README" },
+      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        seq: 1,
+        messageId: "mid",
+        delta: "I will read it",
+      }),
+      runEvent({ type: "TEXT_MESSAGE_END", seq: 2, messageId: "mid" }),
+      runEvent({
+        type: "TOOL_CALL_START",
+        seq: 3,
+        toolCallId: "read-1",
+        toolCallName: "read_file",
+      }),
+      runEvent({
+        type: "TOOL_CALL_RESULT",
+        seq: 4,
+        toolCallId: "read-1",
+        toolCallName: "read_file",
+        content: "# Awaken",
+      }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        seq: 5,
+        messageId: "final",
+        delta: "Final answer",
+      }),
+      runEvent({ type: "TEXT_MESSAGE_END", seq: 6, messageId: "final" }),
+      runEvent({
+        type: "RUN_FINISHED",
+        seq: 7,
+        runId: "run-1",
+        threadId: "thread-1",
+        result: "done",
+      }),
+    ]);
+
+    const answers = state.narrative.committedItems.filter((item) => item.kind === "answer");
+    expect(answers).toEqual([
+      {
+        kind: "answer",
+        id: "answer:run-1:mid",
+        markdown: "I will read it",
+        status: "done",
+      },
+      {
+        kind: "answer",
+        id: "answer:run-1:final",
+        markdown: "Final answer",
+        status: "done",
+        isFinal: true,
+      },
+    ]);
   });
 
   it("annotates the successful final answer with elapsed runtime", () => {
@@ -950,6 +1010,7 @@ describe("runtime reducer run narrative projection", () => {
       markdown: "done",
       status: "done",
       elapsedMs: 65000,
+      isFinal: true,
     });
   });
 
@@ -973,6 +1034,7 @@ describe("runtime reducer run narrative projection", () => {
       markdown: "done",
       status: "done",
       elapsedMs: 45000,
+      isFinal: true,
     });
   });
 
@@ -995,6 +1057,7 @@ describe("runtime reducer run narrative projection", () => {
       markdown: "streamed done",
       status: "done",
       elapsedMs: 45000,
+      isFinal: true,
     });
   });
 
@@ -1037,6 +1100,7 @@ describe("runtime reducer run narrative projection", () => {
       id: "answer:error:1",
       markdown: "API key 缺失，请在 .env 中配置 LLM_API_KEY",
       status: "error",
+      isFinal: true,
     });
     expect(
       state.narrative.committedItems.some(
@@ -1235,6 +1299,7 @@ describe("runtime reducer thread snapshots", () => {
       id: "answer:run-1:msg-1",
       markdown: "first answer",
       status: "done",
+      isFinal: true,
     });
     expect(state.narrative.activeItem).toEqual({
       kind: "planning",
@@ -1260,8 +1325,8 @@ describe("runtime reducer thread snapshots", () => {
 
     const answers = state.narrative.committedItems.filter((item) => item.kind === "answer");
     expect(answers).toEqual([
-      { kind: "answer", id: "answer:run-1", markdown: "first answer", status: "done" },
-      { kind: "answer", id: "answer:run-2", markdown: "second answer", status: "done" },
+      { kind: "answer", id: "answer:run-1", markdown: "first answer", status: "done", isFinal: true },
+      { kind: "answer", id: "answer:run-2", markdown: "second answer", status: "done", isFinal: true },
     ]);
   });
 

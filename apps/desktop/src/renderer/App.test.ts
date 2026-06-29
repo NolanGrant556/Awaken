@@ -18,6 +18,7 @@ import {
   diffLineStats,
   groupNarrativeByTurns,
   isNearLatestTurnOutputTail,
+  measuredComposerDockHeight,
   resolvedDecisionForApproval,
   scrollTopForLatestTurnOutputTail,
   scrollTopForPromptAnchor,
@@ -342,6 +343,33 @@ describe("App workbench presentation", () => {
         safeGap: 24,
       }),
     ).toBe(24);
+  });
+
+  it("measures the full floating composer dock reserve", () => {
+    expect(
+      measuredComposerDockHeight({
+        dockHeight: 132,
+        contentHeight: 82,
+        paddingTop: 32,
+        paddingBottom: 18,
+      }),
+    ).toBe(132);
+    expect(
+      measuredComposerDockHeight({
+        dockHeight: 0,
+        contentHeight: 82,
+        paddingTop: 32,
+        paddingBottom: 18,
+      }),
+    ).toBe(132);
+    expect(
+      measuredComposerDockHeight({
+        dockHeight: -1,
+        contentHeight: -1,
+        paddingTop: 0,
+        paddingBottom: 0,
+      }),
+    ).toBe(0);
   });
 
   it("keeps the latest turn tall enough for sticky prompt reading", () => {

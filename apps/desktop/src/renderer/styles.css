@@ -1152,6 +1152,67 @@ pre {
   line-height: 1.5;
 }
 
+.inline-tool-call {
+  display: grid;
+  gap: 8px;
+}
+
+.inline-tool-detail {
+  display: grid;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-panel);
+  background: var(--aw-surface-work);
+}
+
+.inline-tool-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.inline-tool-detail-head > span {
+  color: var(--aw-text-secondary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.inline-tool-detail-body {
+  display: grid;
+  gap: 12px;
+}
+
+.inline-tool-detail-section {
+  display: grid;
+  gap: 6px;
+}
+
+.inline-tool-detail-section > strong {
+  color: var(--aw-text-primary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.inline-tool-detail-scroll {
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-control);
+  background: var(--aw-surface-panel);
+}
+
+.inline-tool-detail-scroll pre {
+  margin: 0;
+  color: var(--aw-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre;
+  word-break: normal;
+}
+
 @media (max-width: 1320px) {
   .topbar-title {
     display: none;

@@ -26,7 +26,7 @@ type StepRecord = RunStepItem & {
   key: string;
 };
 
-type ToolResultRecord = {
+export type ToolResultRecord = {
   id: string;
   title: string;
   content: string;

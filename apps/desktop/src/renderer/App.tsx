@@ -14,10 +14,9 @@ import {
   ListFilter,
   MessageCirclePlus,
   Monitor,
-  PanelRightClose,
   PanelRightOpen,
+  PanelRightClose,
   SlidersHorizontal,
-  Terminal,
 } from "lucide-react";
 import {
   AwakenAppShell as AppShell,
@@ -57,6 +56,7 @@ import {
   createInitialRuntimeState,
   reduceRuntimeState,
   type RuntimeAction,
+  type ToolResultRecord,
 } from "./runtime/reducer";
 import type { ApprovalDecision } from "../shared/runtime";
 import { A2UISurfaceView } from "./a2ui/A2UISurfaceView";
@@ -68,6 +68,7 @@ import {
   diffLineStats,
   groupNarrativeByTurns,
   isNearLatestTurnOutputTail,
+  measuredComposerDockHeight,
   resolvedDecisionForApproval,
   scrollTopForLatestTurnOutputTail,
   scrollTopForPromptAnchor,
@@ -157,6 +158,124 @@ function rawFileChangeId(selectionId: string): string {
     : selectionId;
 }
 
+function formatToolOutput(tool: ToolResultRecord): string {
+  return [
+    "args:",
+    tool.args || "No tool args captured.",
+    "",
+    "command output:",
+    tool.commandOutput || "No command output captured.",
+    tool.commandOutputTruncated ? "[command output truncated]" : "",
+    "",
+    "result:",
+    tool.content || "No tool result captured.",
+  ]
+    .filter((line, index, lines) => line !== "" || lines[index - 1] !== "")
+    .join("\n");
+}
+
+function InlineToolDetail({ tool }: { tool: ToolResultRecord }) {
+  const toolOutput = formatToolOutput(tool);
+  return (
+    <div className="inline-tool-detail">
+      <div className="inline-tool-detail-head">
+        <span>Tool output</span>
+        <CopyButton text={toolOutput} label="Copy tool output" />
+      </div>
+      <div className="inline-tool-detail-body">
+        <div className="inline-tool-detail-section">
+          <strong>args</strong>
+          <div className="inline-tool-detail-scroll">
+            <pre>{tool.args || "No tool args captured."}</pre>
+          </div>
+        </div>
+        <div className="inline-tool-detail-section">
+          <strong>command output</strong>
+          <div className="inline-tool-detail-scroll">
+            <pre>
+              {tool.commandOutput || "No command output captured."}
+              {tool.commandOutputTruncated ? "\n[command output truncated]" : ""}
+            </pre>
+          </div>
+        </div>
+        <div className="inline-tool-detail-section">
+          <strong>result</strong>
+          <div className="inline-tool-detail-scroll">
+            <pre>{tool.content || "No tool result captured."}</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InlineToolCall({
+  item,
+  toolResults,
+  onLayoutChange,
+}: {
+  item: Extract<RunNarrativeItem, { kind: "tool" }>;
+  toolResults: ToolResultRecord[];
+  onLayoutChange?: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const tool = toolResults.find((toolResult) => toolResult.id === rawToolId(item.id));
+  const onLayoutChangeRef = useRef(onLayoutChange);
+  const didMountRef = useRef(false);
+
+  useLayoutEffect(() => {
+    onLayoutChangeRef.current = onLayoutChange;
+  }, [onLayoutChange]);
+
+  useLayoutEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
+    onLayoutChangeRef.current?.();
+  }, [expanded]);
+
+  return (
+    <div className="inline-tool-call">
+      <ToolTraceLine
+        title={item.title}
+        detail={item.detail}
+        status={item.status}
+        onSelect={() => setExpanded((prev) => !prev)}
+      />
+      {expanded && tool ? <InlineToolDetail tool={tool} /> : null}
+    </div>
+  );
+}
+
+function AnswerNarrativeItem({
+  item,
+  showFooter,
+  onFooterShown,
+}: {
+  item: Extract<RunNarrativeItem, { kind: "answer" }>;
+  showFooter: boolean;
+  onFooterShown?: () => void;
+}) {
+  const footerShownRef = useRef(false);
+
+  useLayoutEffect(() => {
+    if (showFooter && !footerShownRef.current) {
+      footerShownRef.current = true;
+      onFooterShown?.();
+    }
+  }, [showFooter, onFooterShown]);
+
+  return (
+    <AssistantMessage
+      markdown={item.markdown}
+      status={item.status}
+      elapsedMs={item.elapsedMs}
+      showFooter={showFooter}
+    />
+  );
+}
+
 const DEFAULT_SIDEBAR_WIDTH = 300;
 const MIN_SIDEBAR_WIDTH = 228;
 const MAX_SIDEBAR_WIDTH = 420;
@@ -230,6 +349,8 @@ export function App() {
   const runStageTouchStartYRef = useRef<number | null>(null);
   const runStageInputIntentCleanupRef = useRef<(() => void) | null>(null);
   const runStageResizeObserverRef = useRef<ResizeObserver | null>(null);
+  const latestTurnResizeFrameRef = useRef<number | null>(null);
+  const latestPromptIdRef = useRef<string | undefined>(undefined);
   const rendererReadyNotifiedRef = useRef(false);
   const threadLoadSeqRef = useRef(0);
   const runStageScrollRef = useRef<HTMLDivElement | null>(null);
@@ -294,6 +415,7 @@ export function App() {
   const narrativeSections = groupNarrativeByTurns(visibleNarrativeItems);
   const latestTurn = narrativeSections.turns[narrativeSections.turns.length - 1];
   const latestPromptId = latestTurn ? latestTurn.id : undefined;
+  latestPromptIdRef.current = latestPromptId;
   const hasPromptNarrative = narrativeSections.turns.length > 0;
   const composerSafeAreaPx = composerBottomSafeArea({
     composerHeight: hasPromptNarrative ? composerDockHeightPx : 0,
@@ -495,6 +617,11 @@ export function App() {
         const loadSeq = threadLoadSeqRef.current + 1;
         threadLoadSeqRef.current = loadSeq;
         await replayThreadTranscript(run.threadId, loadSeq);
+        requestAnimationFrame(() => {
+          if (latestPromptIdRef.current) {
+            scrollLatestTurnOutputToTailIfObscured(latestPromptIdRef.current);
+          }
+        });
       } catch {
         if (!cancelled) {
           localStorage.removeItem("awaken:runId");
@@ -529,10 +656,6 @@ export function App() {
       icon: <SlidersHorizontal size={16} strokeWidth={1.9} />,
     },
   ];
-  const latestToolResult =
-    runtimeState.toolResults.length > 0
-      ? runtimeState.toolResults[runtimeState.toolResults.length - 1]
-      : undefined;
   const topbarStatusLabel = desktopNeedsRestart
     ? "Needs restart"
     : desktopStarting
@@ -677,12 +800,6 @@ export function App() {
       id: "browser" as const,
       label: "Browser",
       icon: <Globe size={16} strokeWidth={1.85} />,
-    },
-    {
-      id: "terminal" as const,
-      label: "Terminal",
-      badge: runtimeState.toolResults.length || undefined,
-      icon: <Terminal size={16} strokeWidth={1.85} />,
     },
     {
       id: "files" as const,
@@ -908,6 +1025,25 @@ export function App() {
     );
   }
 
+  function cancelLatestTurnLayoutSync(): void {
+    if (latestTurnResizeFrameRef.current === null) {
+      return;
+    }
+    window.cancelAnimationFrame(latestTurnResizeFrameRef.current);
+    latestTurnResizeFrameRef.current = null;
+  }
+
+  function queueLatestTurnLayoutSync(promptId: string): void {
+    cancelLatestTurnLayoutSync();
+    latestTurnResizeFrameRef.current = window.requestAnimationFrame(() => {
+      latestTurnResizeFrameRef.current = null;
+      measureLatestTurnMinHeight(promptId);
+      if (followLatestOutputRef.current && !latestOutputFollowPausedByUserRef.current) {
+        scrollLatestTurnOutputToTail(promptId);
+      }
+    });
+  }
+
   function scrollPromptToAnchor(promptId: string): void {
     const element = runStageScrollRef.current;
     if (!element) {
@@ -959,6 +1095,56 @@ export function App() {
       bottomReserve: composerSafeAreaPx,
       anchorScrollTop,
     });
+
+    if (Math.abs(nextScrollTop - element.scrollTop) < 1) {
+      return;
+    }
+
+    element.scrollTo({
+      top: nextScrollTop,
+      behavior: "auto",
+    });
+  }
+
+  function scrollLatestTurnOutputToTailIfObscured(promptId: string): void {
+    const element = runStageScrollRef.current;
+    if (!element) {
+      return;
+    }
+
+    const turn = findTurnElement(element, promptId);
+    if (!turn) {
+      return;
+    }
+
+    const elementRect = element.getBoundingClientRect();
+    const turnRect = turn.getBoundingClientRect();
+    const outputBottom = latestTurnOutputBottom(turn);
+    const visibleBottom = elementRect.top + element.clientHeight - composerSafeAreaPx;
+    const viewportBottom = elementRect.top + element.clientHeight;
+
+    if (outputBottom <= visibleBottom + 4) {
+      return;
+    }
+    if (outputBottom > viewportBottom + 4) {
+      return;
+    }
+
+    const anchorScrollTop = scrollTopForPromptAnchor({
+      currentScrollTop: element.scrollTop,
+      containerTop: elementRect.top,
+      promptTop: turnRect.top,
+      anchorOffset: promptAnchorOffset(element),
+    });
+    const targetScrollTop = scrollTopForLatestTurnOutputTail({
+      currentScrollTop: element.scrollTop,
+      containerTop: elementRect.top,
+      outputBottom,
+      containerHeight: element.clientHeight,
+      bottomReserve: composerSafeAreaPx,
+      anchorScrollTop,
+    });
+    const nextScrollTop = Math.max(element.scrollTop, targetScrollTop);
 
     if (Math.abs(nextScrollTop - element.scrollTop) < 1) {
       return;
@@ -1040,18 +1226,28 @@ export function App() {
       const content = measuredDockElement.firstElementChild instanceof HTMLElement
         ? measuredDockElement.firstElementChild
         : measuredDockElement;
+      const dockRect = measuredDockElement.getBoundingClientRect();
+      const dockStyles = window.getComputedStyle(measuredDockElement);
+      const paddingTop = Number.parseFloat(dockStyles.paddingTop);
       const paddingBottom = Number.parseFloat(
-        window.getComputedStyle(measuredDockElement).paddingBottom,
+        dockStyles.paddingBottom,
       );
-      const measuredHeight =
-        content.getBoundingClientRect().height +
-        (Number.isFinite(paddingBottom) ? paddingBottom : 0);
+      const measuredHeight = measuredComposerDockHeight({
+        dockHeight: dockRect.height,
+        contentHeight: content.getBoundingClientRect().height,
+        paddingTop: Number.isFinite(paddingTop) ? paddingTop : 0,
+        paddingBottom: Number.isFinite(paddingBottom) ? paddingBottom : 0,
+      });
       setComposerDockHeightPx(Math.ceil(measuredHeight));
     }
 
     syncComposerHeight();
     const resizeObserver = new ResizeObserver(syncComposerHeight);
     resizeObserver.observe(measuredDockElement);
+    const content = measuredDockElement.firstElementChild;
+    if (content instanceof HTMLElement) {
+      resizeObserver.observe(content);
+    }
 
     return () => {
       resizeObserver.disconnect();
@@ -1110,13 +1306,28 @@ export function App() {
       return;
     }
 
+    const latestTurnElement = findTurnElement(element, latestPromptId);
+    if (!latestTurnElement) {
+      return;
+    }
+
     const resizeObserver = new ResizeObserver(() => {
-      measureLatestTurnMinHeight(latestPromptId);
+      queueLatestTurnLayoutSync(latestPromptId);
     });
-    resizeObserver.observe(element);
+    resizeObserver.observe(latestTurnElement);
+    const latestTurnBody = latestTurnElement.querySelector<HTMLElement>(".execution-turn-body");
+    if (latestTurnBody) {
+      resizeObserver.observe(latestTurnBody);
+      const latestBodyItem = latestTurnBody.lastElementChild;
+      if (latestBodyItem instanceof HTMLElement) {
+        resizeObserver.observe(latestBodyItem);
+      }
+    }
+    queueLatestTurnLayoutSync(latestPromptId);
 
     return () => {
       resizeObserver.disconnect();
+      cancelLatestTurnLayoutSync();
     };
   }, [composerSafeAreaPx, latestPromptId]);
 
@@ -1126,6 +1337,7 @@ export function App() {
       runStageInputIntentCleanupRef.current = null;
       runStageResizeObserverRef.current?.disconnect();
       runStageResizeObserverRef.current = null;
+      cancelLatestTurnLayoutSync();
     };
   }, []);
 
@@ -1297,6 +1509,11 @@ export function App() {
 
     try {
       await replayThreadTranscript(threadId, loadSeq);
+      requestAnimationFrame(() => {
+        if (latestPromptIdRef.current) {
+          scrollLatestTurnOutputToTailIfObscured(latestPromptIdRef.current);
+        }
+      });
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Failed to load thread");
     }
@@ -1548,13 +1765,17 @@ export function App() {
       );
     }
     if (item.kind === "answer") {
+      const showFooter = item.status === "done" && Boolean(item.isFinal);
       return (
-        <AssistantMessage
+        <AnswerNarrativeItem
           key={key}
-          markdown={item.markdown}
-          status={item.status}
-          elapsedMs={item.elapsedMs}
-          showFooter={item.status === "done"}
+          item={item}
+          showFooter={showFooter}
+          onFooterShown={() => {
+            if (latestPromptIdRef.current) {
+              scrollLatestTurnOutputToTailIfObscured(latestPromptIdRef.current);
+            }
+          }}
         />
       );
     }
@@ -1576,14 +1797,16 @@ export function App() {
       );
     }
     if (item.kind === "tool") {
-      const selection: InspectorSelection = { kind: "tool", id: item.id };
       return (
-        <ToolTraceLine
+        <InlineToolCall
           key={key}
-          title={item.title}
-          detail={item.detail}
-          status={item.status}
-          onSelect={() => selectInspector(selection, "terminal")}
+          item={item}
+          toolResults={runtimeState.toolResults}
+          onLayoutChange={() => {
+            if (latestPromptIdRef.current) {
+              scrollLatestTurnOutputToTailIfObscured(latestPromptIdRef.current);
+            }
+          }}
         />
       );
     }
@@ -1686,23 +1909,8 @@ export function App() {
     );
   }
 
-  function renderToolDetail(tool = selectedToolResult ?? latestToolResult) {
-    if (!tool) {
-      return null;
-    }
-    const toolOutput = [
-      "args:",
-      tool.args || "No tool args captured.",
-      "",
-      "command output:",
-      tool.commandOutput || "No command output captured.",
-      tool.commandOutputTruncated ? "[command output truncated]" : "",
-      "",
-      "result:",
-      tool.content || "No tool result captured.",
-    ]
-      .filter((line, index, lines) => line !== "" || lines[index - 1] !== "")
-      .join("\n");
+  function renderToolDetail(tool: ToolResultRecord) {
+    const toolOutput = formatToolOutput(tool);
     return (
       <article className="inspector-item inspector-item-selected">
         <Disclosure title={tool.title} meta={tool.status || "done"} defaultOpen>
@@ -1893,16 +2101,6 @@ export function App() {
     switch (inspectorTab) {
       case "browser":
         return renderBrowserPane();
-      case "terminal":
-        return (
-          <section className="inspector-section">
-            <div className="inspector-section-head">
-              <h2>Terminal</h2>
-              <span>{selectedToolResult ? "selected" : "latest"}</span>
-            </div>
-            {renderToolDetail()}
-          </section>
-        );
       case "files":
         return renderFilesPane();
       case "changes":

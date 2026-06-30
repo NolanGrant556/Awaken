@@ -34,26 +34,6 @@ func TestBuildEffectiveSystemPrompt(t *testing.T) {
 	if strings.Contains(effectivePrompt, "{{.RuntimeInfo}}") {
 		t.Fatal("expected template variable to be replaced")
 	}
-
-	if strings.Contains(effectivePrompt, "项目上下文提示") {
-		t.Fatal("expected project onboarding summary to be omitted when empty")
-	}
-}
-
-func TestBuildEffectiveSystemPromptIncludesProjectOnboardingSummary(t *testing.T) {
-	staticContent := "# Test Agent\n\n{{.RuntimeInfo}}"
-
-	runtimeInfo := NewRuntimeInfo()
-	runtimeInfo.SetProjectOnboardingSummary("incomplete; missing AGENTS.md/CLAUDE.md")
-
-	effectivePrompt := BuildEffectiveSystemPrompt(staticContent, runtimeInfo)
-
-	if !strings.Contains(effectivePrompt, "项目上下文提示") {
-		t.Fatalf("expected onboarding label in system prompt: %s", effectivePrompt)
-	}
-	if !strings.Contains(effectivePrompt, "missing AGENTS.md/CLAUDE.md") {
-		t.Fatalf("expected onboarding summary in system prompt: %s", effectivePrompt)
-	}
 }
 
 func TestRuntimeInfoUpdates(t *testing.T) {
@@ -77,11 +57,6 @@ func TestRuntimeInfoUpdates(t *testing.T) {
 	runtimeInfo.SetToolSummary("tool1")
 	if runtimeInfo.ToolSummary != "tool1" {
 		t.Fatal("expected tool summary to be updated")
-	}
-
-	runtimeInfo.SetProjectOnboardingSummary("complete")
-	if runtimeInfo.ProjectOnboardingSummary != "complete" {
-		t.Fatal("expected project onboarding summary to be updated")
 	}
 }
 

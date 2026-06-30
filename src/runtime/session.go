@@ -14,7 +14,6 @@ import (
 type RunStatus string
 
 const (
-	RunStatusQueued           RunStatus = "queued"
 	RunStatusRunning          RunStatus = "running"
 	RunStatusAwaitingApproval RunStatus = "awaiting_approval"
 	RunStatusCancelling       RunStatus = "cancelling"
@@ -33,142 +32,53 @@ const (
 )
 
 type Run struct {
-	RunID           string              `json:"run_id"`
-	ThreadID        string              `json:"thread_id"`
-	Input           string              `json:"input,omitempty"`
-	Delegation      *DelegationMetadata `json:"delegation,omitempty"`
-	Status          RunStatus           `json:"status"`
-	Result          string              `json:"result,omitempty"`
-	Error           string              `json:"error,omitempty"`
-	CancelRequested bool                `json:"cancel_requested,omitempty"`
-	CreatedAt       time.Time           `json:"created_at"`
-	UpdatedAt       time.Time           `json:"updated_at"`
-	FinishedAt      *time.Time          `json:"finished_at,omitempty"`
-}
-
-type DelegationMetadata struct {
-	ParentRunID      string `json:"parent_run_id,omitempty"`
-	ParentThreadID   string `json:"parent_thread_id,omitempty"`
-	DelegateLabel    string `json:"delegate_label,omitempty"`
-	DelegateRole     string `json:"delegate_role,omitempty"`
-	DelegationPrompt string `json:"delegation_prompt,omitempty"`
+	RunID           string     `json:"run_id"`
+	ThreadID        string     `json:"thread_id"`
+	Input           string     `json:"input,omitempty"`
+	Status          RunStatus  `json:"status"`
+	Result          string     `json:"result,omitempty"`
+	Error           string     `json:"error,omitempty"`
+	CancelRequested bool       `json:"cancel_requested,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	FinishedAt      *time.Time `json:"finished_at,omitempty"`
 }
 
 type Event struct {
-	Kind             EventKind
-	Seq              uint64 // monotonically increasing sequence number assigned by EventBus
-	Timestamp        time.Time
-	ThreadID         string
-	RunID            string
-	Status           string
-	AgentEvent       agentcore.AwakenEvent
-	Message          string
-	Code             string
-	ProviderReason   string
-	Retryable        bool
-	RateLimitOptions []agentcore.RateLimitOption
+	Kind       EventKind
+	Seq        uint64 // monotonically increasing sequence number assigned by EventBus
+	Timestamp  time.Time
+	ThreadID   string
+	RunID      string
+	Status     string
+	AgentEvent agentcore.AwakenEvent
+	Message    string
+	Code       string
 }
 
 type Session struct {
-	mu             sync.RWMutex
-	run            Run
-	cancel         context.CancelFunc
-	bus            *EventBus
-	audit          agentcore.SecurityAuditRecorder
-	approvals      map[string]*pendingApproval
-	approvalPolicy agentcore.ApprovalPolicy
-	after          func(time.Duration) <-chan time.Time
-	observer       sessionObserver
+	mu        sync.RWMutex
+	run       Run
+	cancel    context.CancelFunc
+	bus       *EventBus
+	approvals map[string]*pendingApproval
 }
 
-type SessionConfig struct {
-	ApprovalPolicy agentcore.ApprovalPolicy
-	After          func(time.Duration) <-chan time.Time
-	Observer       sessionObserver
-	Delegation     *DelegationMetadata
-	InitialStatus  RunStatus
-}
-
-type sessionObserver interface {
-	OnRunUpdated(run Run)
-	OnEvent(event Event)
-}
-
-func NewSession(runID, threadID, input string, cancel context.CancelFunc, delegation *DelegationMetadata) *Session {
-	return NewSessionWithConfig(runID, threadID, input, cancel, SessionConfig{Delegation: delegation})
-}
-
-func NewSessionWithConfig(runID, threadID, input string, cancel context.CancelFunc, config SessionConfig) *Session {
+func NewSession(runID, threadID, input string, cancel context.CancelFunc) *Session {
 	now := time.Now().UTC()
-	config = normalizeSessionConfig(config)
 	return &Session{
 		run: Run{
-			RunID:      runID,
-			ThreadID:   threadID,
-			Input:      strings.TrimSpace(input),
-			Delegation: cloneDelegationMetadata(config.Delegation),
-			Status:     initialRunStatus(config.InitialStatus),
-			CreatedAt:  now,
-			UpdatedAt:  now,
+			RunID:     runID,
+			ThreadID:  threadID,
+			Input:     strings.TrimSpace(input),
+			Status:    RunStatusRunning,
+			CreatedAt: now,
+			UpdatedAt: now,
 		},
-		cancel:         cancel,
-		bus:            NewEventBus(),
-		approvals:      make(map[string]*pendingApproval),
-		approvalPolicy: config.ApprovalPolicy,
-		after:          config.After,
-		observer:       config.Observer,
-	}
-}
-
-func initialRunStatus(status RunStatus) RunStatus {
-	if status == RunStatusQueued {
-		return RunStatusQueued
-	}
-	return RunStatusRunning
-}
-
-func NewSessionFromSnapshot(run Run, events []Event) *Session {
-	return &Session{
-		run:       run,
-		bus:       NewEventBusWithHistory(events, isTerminalStatus(run.Status)),
+		cancel:    cancel,
+		bus:       NewEventBus(),
 		approvals: make(map[string]*pendingApproval),
-		after:     time.After,
 	}
-}
-
-func (s *Session) SetObserver(observer sessionObserver) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.observer = observer
-}
-
-func (s *Session) SetSecurityAuditRecorder(recorder agentcore.SecurityAuditRecorder) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.audit = recorder
-}
-
-func (s *Session) RecordSecurityAuditEvent(event agentcore.SecurityAuditEvent) {
-	s.mu.RLock()
-	audit := s.audit
-	runID := s.run.RunID
-	threadID := s.run.ThreadID
-	s.mu.RUnlock()
-
-	if audit == nil {
-		return
-	}
-	event.RunID = firstNonEmpty(event.RunID, runID)
-	event.ThreadID = firstNonEmpty(event.ThreadID, threadID)
-	audit.RecordSecurityAuditEvent(event)
-}
-
-func cloneDelegationMetadata(delegation *DelegationMetadata) *DelegationMetadata {
-	if delegation == nil {
-		return nil
-	}
-	cloned := *delegation
-	return &cloned
 }
 
 type pendingApproval struct {
@@ -179,9 +89,7 @@ type pendingApproval struct {
 func (s *Session) Snapshot() Run {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	snapshot := s.run
-	snapshot.Delegation = cloneDelegationMetadata(s.run.Delegation)
-	return snapshot
+	return s.run
 }
 
 func (s *Session) Subscribe(afterSeq uint64) Subscription {
@@ -215,10 +123,7 @@ func (s *Session) RequestCancel() Run {
 
 	s.run.CancelRequested = true
 	statusChanged := false
-	if s.run.Status == RunStatusQueued {
-		s.run.Status = RunStatusCancelled
-		statusChanged = true
-	} else if s.run.Status == RunStatusRunning || s.run.Status == RunStatusAwaitingApproval {
+	if s.run.Status == RunStatusRunning || s.run.Status == RunStatusAwaitingApproval {
 		s.run.Status = RunStatusCancelling
 		statusChanged = true
 	}
@@ -230,53 +135,22 @@ func (s *Session) RequestCancel() Run {
 			Timestamp: now,
 			ThreadID:  s.run.ThreadID,
 			RunID:     s.run.RunID,
-			Status:    string(s.run.Status),
+			Status:    string(RunStatusCancelling),
 		}
 	}
 	cancel := s.cancel
 	snapshot := s.run
 	bus := s.bus
-	observer := s.observer
 	s.mu.Unlock()
 
 	if statusChanged {
-		appended := bus.Append(statusEvent, snapshot.Status == RunStatusCancelled)
-		notifySessionObserver(observer, snapshot, &appended)
-	} else {
-		notifySessionObserver(observer, snapshot, nil)
+		bus.Append(statusEvent, false)
 	}
 
 	if cancel != nil {
 		cancel()
 	}
 
-	return snapshot
-}
-
-func (s *Session) StartQueuedRun() Run {
-	now := time.Now().UTC()
-	s.mu.Lock()
-	if s.run.Status != RunStatusQueued {
-		snapshot := s.run
-		s.mu.Unlock()
-		return snapshot
-	}
-	s.run.Status = RunStatusRunning
-	s.run.UpdatedAt = now
-	statusEvent := Event{
-		Kind:      EventKindRunStatusChanged,
-		Timestamp: now,
-		ThreadID:  s.run.ThreadID,
-		RunID:     s.run.RunID,
-		Status:    string(RunStatusRunning),
-	}
-	bus := s.bus
-	snapshot := s.run
-	observer := s.observer
-	s.mu.Unlock()
-
-	appended := bus.Append(statusEvent, false)
-	notifySessionObserver(observer, snapshot, &appended)
 	return snapshot
 }
 
@@ -288,19 +162,16 @@ func (s *Session) RecordAgentEvent(event agentcore.AwakenEvent) {
 	event.Timestamp = timestamp
 
 	s.mu.Lock()
-	if isTerminalStatus(s.run.Status) || (s.run.Status == RunStatusQueued && event.Type != agentcore.PolicyDecisionEventType) {
+	if isTerminalStatus(s.run.Status) {
 		s.mu.Unlock()
 		return
 	}
 
 	event.ThreadID = s.run.ThreadID
 	event.RunID = s.run.RunID
-	event = agentcore.DisplaySafeEvent(event)
 	s.run.UpdatedAt = timestamp
 
 	terminal := false
-	var auditEvent agentcore.SecurityAuditEvent
-	shouldAudit := false
 	switch event.Type {
 	case agentcore.RunStartedEventType:
 		if !s.run.CancelRequested {
@@ -312,63 +183,12 @@ func (s *Session) RecordAgentEvent(event agentcore.AwakenEvent) {
 		finishedAt := timestamp
 		s.run.FinishedAt = &finishedAt
 		terminal = true
-		auditEvent = agentcore.SecurityAuditEvent{
-			Type:      agentcore.SecurityAuditRunFinished,
-			Timestamp: timestamp,
-			Action:    agentcore.SecurityAuditActionRun,
-			Outcome:   agentcore.SecurityAuditOutcomeFinished,
-			Summary:   "run finished",
-		}
-		shouldAudit = true
 	case agentcore.RunErrorEventType:
 		s.run.Status = RunStatusError
 		s.run.Error = firstNonEmpty(strings.TrimSpace(event.Error), "run failed")
 		finishedAt := timestamp
 		s.run.FinishedAt = &finishedAt
 		terminal = true
-		auditEvent = agentcore.SecurityAuditEvent{
-			Type:      agentcore.SecurityAuditRunError,
-			Timestamp: timestamp,
-			Action:    agentcore.SecurityAuditActionRun,
-			Outcome:   agentcore.SecurityAuditOutcomeError,
-			Summary:   "run error",
-			Error:     event.Error,
-		}
-		shouldAudit = true
-	case agentcore.ApprovalRequestedEventType:
-		auditEvent = agentcore.SecurityAuditEvent{
-			Type:          agentcore.SecurityAuditApprovalRequested,
-			Timestamp:     timestamp,
-			ToolCallID:    event.ToolCallID,
-			ToolName:      event.ToolName,
-			ApprovalID:    event.ApprovalID,
-			Action:        agentcore.SecurityAuditActionApproval,
-			Outcome:       agentcore.SecurityAuditOutcomeStarted,
-			RiskTone:      event.ApprovalRiskTone,
-			Summary:       event.ApprovalTitle,
-			InputPreview:  event.ApprovalDescription,
-			AffectedPaths: event.ApprovalAffectedPaths,
-		}
-		shouldAudit = true
-	case agentcore.ApprovalResolvedEventType:
-		outcome := agentcore.SecurityAuditOutcomeApproved
-		if event.ApprovalDecision == agentcore.ApprovalDecisionRejected {
-			outcome = agentcore.SecurityAuditOutcomeRejected
-		}
-		auditEvent = agentcore.SecurityAuditEvent{
-			Type:             agentcore.SecurityAuditApprovalResolved,
-			Timestamp:        timestamp,
-			ToolCallID:       event.ToolCallID,
-			ToolName:         event.ToolName,
-			ApprovalID:       event.ApprovalID,
-			Action:           agentcore.SecurityAuditActionApproval,
-			Outcome:          outcome,
-			ApprovalDecision: event.ApprovalDecision,
-			RiskTone:         event.ApprovalRiskTone,
-			Summary:          event.ApprovalTitle,
-			AffectedPaths:    event.ApprovalAffectedPaths,
-		}
-		shouldAudit = true
 	}
 
 	wrapped := Event{
@@ -379,20 +199,9 @@ func (s *Session) RecordAgentEvent(event agentcore.AwakenEvent) {
 		AgentEvent: event,
 	}
 	bus := s.bus
-	snapshot := s.run
-	observer := s.observer
-	audit := s.audit
-	if shouldAudit {
-		auditEvent.ThreadID = firstNonEmpty(auditEvent.ThreadID, s.run.ThreadID)
-		auditEvent.RunID = firstNonEmpty(auditEvent.RunID, s.run.RunID)
-	}
 	s.mu.Unlock()
 
-	if shouldAudit && audit != nil {
-		audit.RecordSecurityAuditEvent(auditEvent)
-	}
-	appended := bus.Append(wrapped, terminal)
-	notifySessionObserver(observer, snapshot, &appended)
+	bus.Append(wrapped, terminal)
 }
 
 func (s *Session) AwaitApproval(ctx context.Context, request agentcore.ApprovalRequest) (agentcore.ApprovalDecision, error) {
@@ -419,12 +228,9 @@ func (s *Session) AwaitApproval(ctx context.Context, request agentcore.ApprovalR
 		Status:    string(RunStatusAwaitingApproval),
 	}
 	bus := s.bus
-	snapshot := s.run
-	observer := s.observer
 	s.mu.Unlock()
 
-	appended := bus.Append(statusEvent, false)
-	notifySessionObserver(observer, snapshot, &appended)
+	bus.Append(statusEvent, false)
 
 	s.RecordAgentEvent(agentcore.AwakenEvent{
 		Type:                  agentcore.ApprovalRequestedEventType,
@@ -436,27 +242,17 @@ func (s *Session) AwaitApproval(ctx context.Context, request agentcore.ApprovalR
 		ApprovalRiskTone:      request.RiskTone,
 		ApprovalAffectedPaths: request.AffectedPaths,
 		ApprovalPatchSummary:  request.PatchSummary,
-		DiffReview:            request.DiffReview,
 	})
 	s.RecordAgentEvent(approvalSurfaceArtifactEvent(request))
 
-	timeoutCh := s.approvalTimeout()
-	for {
-		select {
-		case decision := <-pending.decision:
-			return decision, nil
-		case <-timeoutCh:
-			resolved, err := s.resolveApproval("approval_timeout", request.ID, agentcore.ApprovalDecisionRejected)
-			if err == nil && resolved {
-				return agentcore.ApprovalDecisionRejected, nil
-			}
-			timeoutCh = nil
-		case <-ctx.Done():
-			s.mu.Lock()
-			delete(s.approvals, request.ID)
-			s.mu.Unlock()
-			return "", ctx.Err()
-		}
+	select {
+	case decision := <-pending.decision:
+		return decision, nil
+	case <-ctx.Done():
+		s.mu.Lock()
+		delete(s.approvals, request.ID)
+		s.mu.Unlock()
+		return "", ctx.Err()
 	}
 }
 
@@ -470,7 +266,6 @@ func approvalSurfaceArtifactEvent(request agentcore.ApprovalRequest) agentcore.A
 		ToolCallID:    request.ToolCallID,
 		AffectedPaths: request.AffectedPaths,
 		PatchSummary:  request.PatchSummary,
-		DiffReview:    request.DiffReview,
 	})
 	if err != nil {
 		content = ""
@@ -487,19 +282,13 @@ func approvalSurfaceArtifactEvent(request agentcore.ApprovalRequest) agentcore.A
 		ArtifactKind:        a2ui.ArtifactKind,
 		ArtifactContent:     content,
 		ArtifactStatus:      agentcore.ArtifactStatusReady,
-		DiffReview:          request.DiffReview,
 	}
 }
 
 func (s *Session) ResolveApproval(approvalID string, decision agentcore.ApprovalDecision) error {
-	_, err := s.resolveApproval("", approvalID, decision)
-	return err
-}
-
-func (s *Session) resolveApproval(code string, approvalID string, decision agentcore.ApprovalDecision) (bool, error) {
 	approvalID = strings.TrimSpace(approvalID)
 	if approvalID == "" {
-		return false, ErrApprovalNotFound
+		return ErrApprovalNotFound
 	}
 
 	now := time.Now().UTC()
@@ -507,16 +296,16 @@ func (s *Session) resolveApproval(code string, approvalID string, decision agent
 	pending, ok := s.approvals[approvalID]
 	if !ok {
 		s.mu.Unlock()
-		return false, ErrApprovalNotFound
+		return ErrApprovalNotFound
 	}
 
 	switch {
 	case isTerminalStatus(s.run.Status):
 		s.mu.Unlock()
-		return false, ErrRunTerminal
+		return ErrRunTerminal
 	case s.run.Status == RunStatusCancelling:
 		s.mu.Unlock()
-		return false, ErrRunCancelling
+		return ErrRunCancelling
 	}
 
 	delete(s.approvals, approvalID)
@@ -532,31 +321,24 @@ func (s *Session) resolveApproval(code string, approvalID string, decision agent
 		Status:    string(RunStatusRunning),
 	}
 	bus := s.bus
-	snapshot := s.run
-	observer := s.observer
 	s.mu.Unlock()
 
-	appended := bus.Append(statusEvent, false)
-	notifySessionObserver(observer, snapshot, &appended)
+	bus.Append(statusEvent, false)
 
 	s.RecordAgentEvent(agentcore.AwakenEvent{
-		Type:                  agentcore.ApprovalResolvedEventType,
-		ApprovalID:            approvalID,
-		ToolCallID:            request.ToolCallID,
-		ToolName:              request.ToolName,
-		ApprovalTitle:         request.Title,
-		ApprovalDescription:   request.Description,
-		ApprovalRiskTone:      request.RiskTone,
-		ApprovalDecision:      decision,
-		ApprovalAffectedPaths: request.AffectedPaths,
-		ApprovalPatchSummary:  request.PatchSummary,
-		DiffReview:            request.DiffReview,
-		Code:                  code,
+		Type:                agentcore.ApprovalResolvedEventType,
+		ApprovalID:          approvalID,
+		ToolCallID:          request.ToolCallID,
+		ToolName:            request.ToolName,
+		ApprovalTitle:       request.Title,
+		ApprovalDescription: request.Description,
+		ApprovalRiskTone:    request.RiskTone,
+		ApprovalDecision:    decision,
 	})
 
 	pending.decision <- decision
 	close(pending.decision)
-	return true, nil
+	return nil
 }
 
 func (s *Session) CompleteCancelled(message string) {
@@ -592,28 +374,10 @@ func (s *Session) CompleteCancelled(message string) {
 		Message:   message,
 	}
 	bus := s.bus
-	snapshot := s.run
-	observer := s.observer
-	audit := s.audit
-	auditEvent := agentcore.SecurityAuditEvent{
-		Type:      agentcore.SecurityAuditRunCancelled,
-		Timestamp: now,
-		ThreadID:  s.run.ThreadID,
-		RunID:     s.run.RunID,
-		Action:    agentcore.SecurityAuditActionRun,
-		Outcome:   agentcore.SecurityAuditOutcomeCancelled,
-		Summary:   "run cancelled",
-		Error:     message,
-	}
 	s.mu.Unlock()
 
-	if audit != nil {
-		audit.RecordSecurityAuditEvent(auditEvent)
-	}
-	appendedStatus := bus.Append(statusEvent, false)
-	notifySessionObserver(observer, snapshot, &appendedStatus)
-	appendedEvent := bus.Append(event, true)
-	notifySessionObserver(observer, snapshot, &appendedEvent)
+	bus.Append(statusEvent, false)
+	bus.Append(event, true)
 }
 
 func (s *Session) CompleteFinished(result string) {
@@ -645,38 +409,12 @@ func (s *Session) CompleteFinished(result string) {
 		AgentEvent: event,
 	}
 	bus := s.bus
-	snapshot := s.run
-	observer := s.observer
-	audit := s.audit
-	auditEvent := agentcore.SecurityAuditEvent{
-		Type:      agentcore.SecurityAuditRunFinished,
-		Timestamp: now,
-		ThreadID:  s.run.ThreadID,
-		RunID:     s.run.RunID,
-		Action:    agentcore.SecurityAuditActionRun,
-		Outcome:   agentcore.SecurityAuditOutcomeFinished,
-		Summary:   "run finished",
-	}
 	s.mu.Unlock()
 
-	if audit != nil {
-		audit.RecordSecurityAuditEvent(auditEvent)
-	}
-	appended := bus.Append(wrapped, true)
-	notifySessionObserver(observer, snapshot, &appended)
+	bus.Append(wrapped, true)
 }
 
 func (s *Session) CompleteError(message, code string) {
-	s.CompleteErrorWithInfo(message, code, ProviderErrorInfo{})
-}
-
-type ProviderErrorInfo struct {
-	ProviderReason   string
-	Retryable        bool
-	RateLimitOptions []agentcore.RateLimitOption
-}
-
-func (s *Session) CompleteErrorWithInfo(message, code string, info ProviderErrorInfo) {
 	now := time.Now().UTC()
 	if strings.TrimSpace(message) == "" {
 		message = "run failed"
@@ -694,53 +432,17 @@ func (s *Session) CompleteErrorWithInfo(message, code string, info ProviderError
 	finishedAt := now
 	s.run.FinishedAt = &finishedAt
 	event := Event{
-		Kind:             EventKindRunError,
-		Timestamp:        now,
-		ThreadID:         s.run.ThreadID,
-		RunID:            s.run.RunID,
-		Message:          message,
-		Code:             code,
-		ProviderReason:   info.ProviderReason,
-		Retryable:        info.Retryable,
-		RateLimitOptions: append([]agentcore.RateLimitOption(nil), info.RateLimitOptions...),
-	}
-	bus := s.bus
-	snapshot := s.run
-	observer := s.observer
-	audit := s.audit
-	auditEvent := agentcore.SecurityAuditEvent{
-		Type:      agentcore.SecurityAuditRunError,
+		Kind:      EventKindRunError,
 		Timestamp: now,
 		ThreadID:  s.run.ThreadID,
 		RunID:     s.run.RunID,
-		Action:    agentcore.SecurityAuditActionRun,
-		Outcome:   agentcore.SecurityAuditOutcomeError,
-		Summary:   "run error",
-		Error:     message,
+		Message:   message,
+		Code:      code,
 	}
+	bus := s.bus
 	s.mu.Unlock()
 
-	if audit != nil {
-		audit.RecordSecurityAuditEvent(auditEvent)
-	}
-	appended := bus.Append(event, true)
-	notifySessionObserver(observer, snapshot, &appended)
-}
-
-func (s *Session) approvalTimeout() <-chan time.Time {
-	timeout := s.approvalPolicy.Timeout()
-	if timeout <= 0 {
-		return nil
-	}
-	return s.after(timeout)
-}
-
-func normalizeSessionConfig(config SessionConfig) SessionConfig {
-	config.ApprovalPolicy = config.ApprovalPolicy.Normalize()
-	if config.After == nil {
-		config.After = time.After
-	}
-	return config
+	bus.Append(event, true)
 }
 
 func normalizeApprovalRequest(request agentcore.ApprovalRequest) agentcore.ApprovalRequest {
@@ -795,14 +497,4 @@ func trimStrings(values []string) []string {
 		}
 	}
 	return trimmed
-}
-
-func notifySessionObserver(observer sessionObserver, run Run, event *Event) {
-	if observer == nil {
-		return
-	}
-	observer.OnRunUpdated(run)
-	if event != nil {
-		observer.OnEvent(*event)
-	}
 }

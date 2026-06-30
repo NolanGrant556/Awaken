@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"awaken/src/checkpoints"
 	"awaken/src/tool"
 )
 
@@ -244,15 +243,6 @@ func TestApplyPatchPermissionAsksWithPatchSummary(t *testing.T) {
 	if decision.ApprovalRequest.RiskTone != "warning" || !strings.Contains(decision.ApprovalRequest.Description, "A note.md") {
 		t.Fatalf("unexpected approval request: %+v", decision.ApprovalRequest)
 	}
-	if decision.ApprovalRequest.DiffReview == nil {
-		t.Fatal("expected diff review metadata on approval request")
-	}
-	if decision.ApprovalRequest.DiffReview.FileCounts.Added != 1 || decision.ApprovalRequest.DiffReview.LineCounts.Added != 1 {
-		t.Fatalf("unexpected diff review metadata %+v", decision.ApprovalRequest.DiffReview)
-	}
-	if decision.ApprovalRequest.DiffReview.Risk.Level != "warning" {
-		t.Fatalf("unexpected risk metadata %+v", decision.ApprovalRequest.DiffReview.Risk)
-	}
 }
 
 func TestApplyPatchPermissionMarksDeleteAsDanger(t *testing.T) {
@@ -266,12 +256,6 @@ func TestApplyPatchPermissionMarksDeleteAsDanger(t *testing.T) {
 
 	if decision.Behavior != tool.PermissionAsk || decision.ApprovalRequest.RiskTone != "danger" {
 		t.Fatalf("expected delete patch to ask with danger risk, got %+v", decision)
-	}
-	if decision.ApprovalRequest.DiffReview == nil || decision.ApprovalRequest.DiffReview.FileCounts.Deleted != 1 {
-		t.Fatalf("expected delete metadata, got %+v", decision.ApprovalRequest.DiffReview)
-	}
-	if !strings.Contains(decision.ApprovalRequest.DiffReview.Risk.Summary, "Includes file deletions") {
-		t.Fatalf("unexpected delete risk summary %q", decision.ApprovalRequest.DiffReview.Risk.Summary)
 	}
 }
 
@@ -394,62 +378,6 @@ func TestApplyPatchRelativePathResolvesToWorkspace(t *testing.T) {
 		t.Fatalf("expected resolved path in summary, got %q", out)
 	}
 	assertFileContent(t, target, "hello\n")
-}
-
-func TestApplyPatchCreatesCheckpointBeforeMutation(t *testing.T) {
-	workspace := t.TempDir()
-	writeSeedFile(t, filepath.Join(workspace, "note.md"), "before\n")
-	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(workspace, nil))
-
-	out, err := (&ApplyPatchTool{}).Execute(ctx, "*** Begin Patch\n"+
-		"*** Update File: note.md\n"+
-		"@@\n"+
-		"-before\n"+
-		"+after\n"+
-		"*** Add File: new.md\n"+
-		"+created\n"+
-		"*** End Patch")
-	if err != nil {
-		t.Fatalf("patch failed: %v", err)
-	}
-
-	checkpointID := checkpointIDFromOutput(t, out)
-	checkpoint, ok := checkpoints.DefaultStore().Get(checkpointID)
-	if !ok {
-		t.Fatalf("expected checkpoint %q to be stored", checkpointID)
-	}
-	if checkpoint.WorkspaceRoot != workspace {
-		t.Fatalf("expected checkpoint root %q, got %q", workspace, checkpoint.WorkspaceRoot)
-	}
-	if len(checkpoint.Snapshots) != 2 {
-		t.Fatalf("expected 2 snapshots, got %+v", checkpoint.Snapshots)
-	}
-	if checkpoint.Snapshots[0].Path != "note.md" || checkpoint.Snapshots[0].State != checkpoints.FileStateExisting {
-		t.Fatalf("unexpected existing snapshot: %+v", checkpoint.Snapshots[0])
-	}
-	if string(checkpoint.Snapshots[0].Content) != "before\n" {
-		t.Fatalf("expected before content, got %q", string(checkpoint.Snapshots[0].Content))
-	}
-	if checkpoint.Snapshots[1].Path != "new.md" || checkpoint.Snapshots[1].State != checkpoints.FileStateMissing {
-		t.Fatalf("unexpected missing snapshot: %+v", checkpoint.Snapshots[1])
-	}
-	if !strings.Contains(out, "Checkpoint: "+checkpointID+" (1 existing, 1 missing)") {
-		t.Fatalf("expected checkpoint summary in output, got %q", out)
-	}
-	assertFileContent(t, filepath.Join(workspace, "note.md"), "after\n")
-	assertFileContent(t, filepath.Join(workspace, "new.md"), "created\n")
-}
-
-func TestApplyPatchSkipsCheckpointWithoutPermissionContext(t *testing.T) {
-	target := filepath.Join(t.TempDir(), "note.md")
-
-	out := applyPatchText(t, "*** Begin Patch\n"+
-		"*** Add File: "+target+"\n"+
-		"+hello\n"+
-		"*** End Patch")
-	if strings.Contains(out, "Checkpoint:") {
-		t.Fatalf("expected direct execution without permission context to skip checkpoint, got %q", out)
-	}
 }
 
 func TestApplyPatchCheckPermissionSymlinkEscapeMarkedDanger(t *testing.T) {
@@ -627,18 +555,4 @@ func assertPathMissing(t *testing.T, path string) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("expected %s to be missing, stat err=%v", path, err)
 	}
-}
-
-func checkpointIDFromOutput(t *testing.T, output string) string {
-	t.Helper()
-	for _, line := range strings.Split(output, "\n") {
-		if strings.HasPrefix(line, "Checkpoint: ") {
-			fields := strings.Fields(strings.TrimPrefix(line, "Checkpoint: "))
-			if len(fields) > 0 {
-				return fields[0]
-			}
-		}
-	}
-	t.Fatalf("checkpoint id not found in output %q", output)
-	return ""
 }

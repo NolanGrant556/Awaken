@@ -5,53 +5,24 @@ import (
 	"net/http"
 
 	"awaken/src/agentcore"
-	"awaken/src/agentdefs"
-	"awaken/src/memory"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
 )
 
 func NewRouter(runService *awruntime.RunService, infoProvider RuntimeInfoProvider) http.Handler {
-	return NewRouterWithMemory(runService, infoProvider, nil)
-}
-
-func NewRouterWithMemory(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, memoryStore *memory.JSONLStore) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handleHealth)
 	mux.HandleFunc("GET /v1/agui/demo", handleAGUIDemo)
 	mux.HandleFunc("GET /v1/runtime/info", func(w http.ResponseWriter, r *http.Request) {
 		handleRuntimeInfo(w, r, infoProvider)
 	})
-	mux.HandleFunc("GET /v1/capabilities", func(w http.ResponseWriter, r *http.Request) {
-		handleCapabilities(w, r, infoProvider)
-	})
-	if memoryStore != nil {
-		handlers := memoryHandlers{store: memoryStore}
-		mux.HandleFunc("GET /v1/memory", handlers.handleListOrSearch)
-	}
-	mux.HandleFunc("GET /v1/agent-definitions", func(w http.ResponseWriter, r *http.Request) {
-		handleAgentDefinitions(w, r, agentdefs.Load)
-	})
 	if runService != nil {
 		handlers := runHandlers{runService: runService}
-		mux.HandleFunc("POST /v1/runtime/drain", handlers.handleRuntimeDrain)
 		mux.HandleFunc("GET /v1/threads", handlers.handleListThreads)
-		mux.HandleFunc("GET /v1/threads/search", handlers.handleSearchThreads)
-		mux.HandleFunc("GET /v1/threads/{thread_id}/lite", handlers.handleGetThreadLite)
-		mux.HandleFunc("GET /v1/threads/{thread_id}/context", handlers.handleGetThreadContext)
 		mux.HandleFunc("GET /v1/threads/{thread_id}/transcript", handlers.handleGetThreadTranscript)
-		mux.HandleFunc("GET /v1/threads/{thread_id}/export", handlers.handleExportThread)
-		mux.HandleFunc("POST /v1/threads/{thread_id}/share-bundle", handlers.handleBuildThreadShareBundle)
-		mux.HandleFunc("POST /v1/threads/{thread_id}/clear-plan", handlers.handleBuildThreadClearPlan)
-		mux.HandleFunc("POST /v1/threads/{thread_id}/branches", handlers.handleBranchThread)
-		mux.HandleFunc("GET /v1/session-insights", handlers.handleSessionInsights)
-		mux.HandleFunc("POST /v1/scheduled-runs", handlers.handleCreateScheduledRun)
-		mux.HandleFunc("GET /v1/scheduled-runs", handlers.handleListScheduledRuns)
-		mux.HandleFunc("DELETE /v1/scheduled-runs/{id}", handlers.handleCancelScheduledRun)
 		mux.HandleFunc("POST /v1/runs", handlers.handleCreateRun)
 		mux.HandleFunc("GET /v1/runs/{run_id}", handlers.handleGetRun)
 		mux.HandleFunc("GET /v1/runs/{run_id}/events", handlers.handleRunEvents)
-		mux.HandleFunc("GET /v1/audit/events", handlers.handleAuditEvents)
 		mux.HandleFunc("POST /v1/runs/{run_id}/cancel", handlers.handleCancelRun)
 		mux.HandleFunc("POST /v1/runs/{run_id}/approvals/{approval_id}/resolve", handlers.handleResolveApproval)
 	}

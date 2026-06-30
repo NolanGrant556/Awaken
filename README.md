@@ -100,26 +100,13 @@ Runtime / server 只作为内部工程层测试与验证，不形成第三个使
 GET  /health
 GET  /v1/agui/demo
 GET  /v1/runtime/info
-GET  /v1/agent-definitions?workspace_root=...
 GET  /v1/threads
-POST /v1/scheduled-runs
-GET  /v1/scheduled-runs
-DELETE /v1/scheduled-runs/{id}
 POST /v1/runs
 GET  /v1/runs/{run_id}
 GET  /v1/runs/{run_id}/events
 POST /v1/runs/{run_id}/cancel
 POST /v1/runs/{run_id}/approvals/{approval_id}/resolve
 ```
-
-`POST /v1/runs` 现已支持可选 `profile` 字段，用于第一版 per-run AgentDefinition / RunProfile 底座贯通。当前支持的 profile 字段有：
-
-```text
-id, name, description, system_prompt, model, max_turns,
-tools, disallowed_tools, permission_mode
-```
-
-默认行为保持不变：不传 `profile` 时，仍使用当前 runtime 的默认 model / tool policy；`max_turns` 只在 profile 显式传入时限制执行轮数。
 
 `/v1/runs/{run_id}/events` 输出 AG-UI-compatible SSE events。Awaken 目前有这些 extension events：
 
@@ -202,22 +189,6 @@ temperature = 0.7
 max_output_tokens = 8192
 auto_compact_token_limit = 360000
 ```
-
-Lifecycle hooks 默认关闭；只有在 `config.toml` 显式配置时才执行。Hook 命令使用 `command + args` 直接执行，不经过 shell 拼接；失败和超时只写日志，不会让 run 或 tool 失败。
-
-```toml
-[runtime.hooks.before_run]
-command = "/path/to/hook"
-args = ["before-run"]
-timeout_ms = 5000
-
-[[runtime.hooks.after_tool]]
-command = "/path/to/hook"
-args = ["after-tool"]
-enabled = true
-```
-
-支持的事件为 `before_run`、`after_run`、`before_tool`、`after_tool`。
 
 `.env` 已被 git ignore，不能提交。
 
@@ -320,7 +291,6 @@ grep_search
 apply_patch
 shell
 web_search
-todo_write
 ```
 
 只读工具不应要求审批。会修改文件或有风险的工具通过 `src/tool/permission.go` 与 `src/agentcore/tool_runtime.go` 走权限模型。

@@ -6,58 +6,30 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	convcontext "awaken/src/context"
 	"awaken/src/internal/outputlimit"
-	"awaken/src/lifecyclehooks"
 	"awaken/src/tool"
-	"awaken/src/toolresults"
 )
 
 const maxPatchPreviewChars = 50000
 
 type ToolRuntime struct {
-	sink                   EventSink
-	sinkMu                 sync.Mutex
-	permissionContext      tool.PermissionContext
-	permissionPolicy       tool.PermissionPolicy
-	toolAccessPolicy       ToolAccessPolicy
-	permissionMode         PermissionMode
-	toolResultStore        *toolresults.Store
-	toolResultMaxChars     int
-	toolResultPreviewChars int
-	hooks                  *lifecyclehooks.Executor
+	sink              EventSink
+	permissionContext tool.PermissionContext
 }
 
 type ToolRuntimeConfig struct {
 	PermissionContext tool.PermissionContext
-	PermissionPolicy  tool.PermissionPolicy
-	ToolResultStore   *toolresults.Store
-	ToolAccessPolicy  ToolAccessPolicy
-	PermissionMode    PermissionMode
-
-	ToolResultMaxChars     int
-	ToolResultPreviewChars int
-	Hooks                  lifecyclehooks.Config
 }
 
 type ToolExecutionResult struct {
-	ToolCallID       string
-	Name             string
-	Content          string
-	IsError          bool
-	Truncated        bool
-	ToolResultHandle *toolresults.Handle
-}
-
-type toolAuditDetails struct {
-	Action        SecurityAuditAction
-	Summary       string
-	InputPreview  string
-	AffectedPaths []string
-	Truncated     bool
+	ToolCallID string
+	Name       string
+	Content    string
+	IsError    bool
+	Truncated  bool
 }
 
 func NewToolRuntime(sink EventSink) *ToolRuntime {
@@ -65,25 +37,9 @@ func NewToolRuntime(sink EventSink) *ToolRuntime {
 }
 
 func NewToolRuntimeWithConfig(sink EventSink, config ToolRuntimeConfig) *ToolRuntime {
-	permissionContext := config.PermissionContext.Normalize()
-	maxChars := config.ToolResultMaxChars
-	if maxChars <= 0 {
-		maxChars = outputlimit.DefaultToolResultMaxChars
-	}
-	previewChars := config.ToolResultPreviewChars
-	if previewChars <= 0 {
-		previewChars = toolresults.DefaultPreviewChars
-	}
 	return &ToolRuntime{
-		sink:                   normalizeEventSink(sink),
-		permissionContext:      permissionContext,
-		permissionPolicy:       config.PermissionPolicy.Normalize(),
-		toolAccessPolicy:       config.ToolAccessPolicy,
-		permissionMode:         config.PermissionMode,
-		toolResultStore:        config.ToolResultStore,
-		toolResultMaxChars:     maxChars,
-		toolResultPreviewChars: previewChars,
-		hooks:                  lifecyclehooks.NewExecutor(config.Hooks),
+		sink:              normalizeEventSink(sink),
+		permissionContext: config.PermissionContext.Normalize(),
 	}
 }
 
@@ -97,38 +53,20 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		ToolCallID: id,
 		Name:       call.Function.Name,
 	}
-	var auditDetails toolAuditDetails
-	auditStarted := false
-	finish := func(result ToolExecutionResult) ToolExecutionResult {
-		if auditStarted {
-			rt.recordToolAuditFinished(result, auditDetails)
-		}
-		return rt.finalizeToolResult(result)
-	}
-
-	if !rt.toolAccessPolicy.Allows(call.Function.Name) {
-		result.Content = fmt.Sprintf("工具权限拒绝: tool %q is not allowed for this run profile", call.Function.Name)
-		result.IsError = true
-		return finish(result)
-	}
 
 	selectedTool, err := tool.GetTool(call.Function.Name)
 	if err != nil {
 		result.Content = fmt.Sprintf("工具执行失败: %v: %s", err, call.Function.Name)
 		result.IsError = true
-		return finish(result)
+		return finalizeToolResult(result)
 	}
 
 	input, err := normalizeToolInput(call.Function.Arguments, selectedTool.Parameters())
 	if err != nil {
 		result.Content = fmt.Sprintf("工具参数错误: %v", err)
 		result.IsError = true
-		return finish(result)
+		return finalizeToolResult(result)
 	}
-
-	auditDetails = rt.toolAuditDetails(selectedTool, input)
-	rt.recordToolAuditStarted(result, auditDetails)
-	auditStarted = true
 
 	toolCtx := tool.ContextWithPermissionContext(ctx, rt.permissionContext)
 	permission := rt.decideToolPermission(toolCtx, selectedTool, input)
@@ -138,40 +76,35 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	case tool.PermissionDeny:
 		result.Content = fmt.Sprintf("工具权限拒绝: %s", firstNonEmpty(permission.Reason, "permission policy denied execution"))
 		result.IsError = true
-		return finish(result)
+		return finalizeToolResult(result)
 	case tool.PermissionAsk:
 		decision, err := rt.awaitApproval(ctx, selectedTool, result, input, permission)
 		if err != nil {
 			result.Content = fmt.Sprintf("工具审批失败: %v", err)
 			result.IsError = true
-			return finish(result)
+			return finalizeToolResult(result)
 		}
 		if decision == ApprovalDecisionRejected {
 			result.Content = "工具执行已被审批拒绝"
 			result.IsError = true
-			return finish(result)
+			return finalizeToolResult(result)
 		}
 	default:
 		result.Content = fmt.Sprintf("工具权限拒绝: invalid permission decision %q", permission.Behavior)
 		result.IsError = true
-		return finish(result)
+		return finalizeToolResult(result)
 	}
-
-	hookMetadata := rt.toolHookMetadata(result)
-	rt.executeHook(ctx, lifecyclehooks.EventBeforeTool, hookMetadata)
 
 	output, err := rt.executeTool(toolCtx, result, selectedTool, input)
 	if err != nil {
 		result.Content = fmt.Sprintf("工具执行失败: %v", err)
 		result.IsError = true
-		rt.executeAfterToolHook(result, hookMetadata)
-		return finish(result)
+		return finalizeToolResult(result)
 	}
 
 	result.Content = output
 	rt.emitArtifacts(result, selectedTool, input, output)
-	rt.executeAfterToolHook(result, hookMetadata)
-	return finish(result)
+	return finalizeToolResult(result)
 }
 
 func (rt *ToolRuntime) executeTool(
@@ -186,35 +119,6 @@ func (rt *ToolRuntime) executeTool(
 		}))
 	}
 	return selectedTool.Execute(ctx, input)
-}
-
-func (rt *ToolRuntime) executeHook(ctx stdcontext.Context, event lifecyclehooks.Event, metadata map[string]string) {
-	if rt.hooks == nil || !rt.hooks.HasHooks() {
-		return
-	}
-	rt.hooks.Execute(ctx, event, metadata)
-}
-
-func (rt *ToolRuntime) executeAfterToolHook(result ToolExecutionResult, metadata map[string]string) {
-	afterMetadata := cloneLifecycleHookMetadata(metadata)
-	afterMetadata["tool_is_error"] = fmt.Sprintf("%t", result.IsError)
-	go rt.executeHook(stdcontext.Background(), lifecyclehooks.EventAfterTool, afterMetadata)
-}
-
-func (rt *ToolRuntime) toolHookMetadata(result ToolExecutionResult) map[string]string {
-	return map[string]string{
-		"tool_call_id":   result.ToolCallID,
-		"tool_name":      result.Name,
-		"workspace_root": rt.permissionContext.WorkspaceRootOrCWD(),
-	}
-}
-
-func cloneLifecycleHookMetadata(metadata map[string]string) map[string]string {
-	cloned := make(map[string]string, len(metadata)+1)
-	for key, value := range metadata {
-		cloned[key] = value
-	}
-	return cloned
 }
 
 func (rt *ToolRuntime) ExecuteToolCalls(ctx stdcontext.Context, calls []convcontext.ToolCall) []ToolExecutionResult {
@@ -234,52 +138,19 @@ func (rt *ToolRuntime) decideToolPermission(
 	selectedTool tool.Tool,
 	input string,
 ) tool.PermissionDecision {
-	readOnly := isReadOnlyTool(selectedTool)
-	var (
-		toolDecision tool.PermissionDecision
-		hasDecision  bool
-	)
 	if checker, ok := selectedTool.(tool.PermissionCheckingTool); ok {
-		toolDecision = checker.CheckPermission(ctx, input, rt.permissionContext)
-		hasDecision = true
-		if toolDecision.Behavior == "" {
+		decision := checker.CheckPermission(ctx, input, rt.permissionContext)
+		if decision.Behavior == "" {
 			return tool.DenyPermission("tool returned an empty permission decision")
 		}
+		return decision
 	}
 
-	decision := toolDecision
-	if !hasDecision {
-		if readOnly {
-			decision = tool.AllowPermission()
-		} else {
-			decision = tool.AskPermission("tool does not declare permission behavior and is not marked read-only", tool.ApprovalRequest{})
-		}
+	if readOnlyTool, ok := selectedTool.(tool.ReadOnlyTool); ok && readOnlyTool.IsReadOnly() {
+		return tool.AllowPermission()
 	}
 
-	switch rt.permissionMode {
-	case PermissionModeDeny:
-		if hasDecision && toolDecision.Behavior == tool.PermissionDeny {
-			return toolDecision
-		}
-		if readOnly && (!hasDecision || toolDecision.Behavior == tool.PermissionAllow) {
-			decision = tool.AllowPermission()
-			break
-		}
-		return tool.DenyPermission("run profile permission_mode=deny blocked tool execution")
-	case PermissionModeAsk:
-		if !hasDecision && !readOnly {
-			decision = tool.AskPermission("run profile permission_mode=ask requires approval for non-read-only tool", tool.ApprovalRequest{})
-		}
-	case PermissionModeAllow:
-		if hasDecision {
-			if toolDecision.Behavior == tool.PermissionDeny {
-				return toolDecision
-			}
-		}
-		decision = tool.AllowPermission()
-	}
-
-	return tool.ApplyPermissionPolicy(decision, rt.permissionPolicy, selectedTool.Name(), readOnly)
+	return tool.AllowPermission()
 }
 
 func (rt *ToolRuntime) awaitApproval(
@@ -295,7 +166,6 @@ func (rt *ToolRuntime) awaitApproval(
 	}
 
 	request := approvalRequestForPermission(selectedTool, result, input, permission)
-	request = DisplaySafeApprovalRequest(request)
 
 	decision, err := awaiter.AwaitApproval(ctx, request)
 	if err != nil {
@@ -320,7 +190,7 @@ func (rt *ToolRuntime) emitArtifacts(
 		if artifact.Action == tool.ArtifactActionCreated {
 			eventType = ArtifactCreatedEventType
 		}
-		rt.emitDisplayEvent(AwakenEvent{
+		rt.sink.Emit(AwakenEvent{
 			Type:                eventType,
 			Timestamp:           timeNowUTC(),
 			ToolCallID:          result.ToolCallID,
@@ -340,7 +210,7 @@ func (rt *ToolRuntime) emitCommandOutput(result ToolExecutionResult, output tool
 	if output.Delta == "" {
 		return
 	}
-	rt.emitDisplayEvent(AwakenEvent{
+	rt.sink.Emit(AwakenEvent{
 		Type:          CommandOutputEventType,
 		Timestamp:     timeNowUTC(),
 		ToolCallID:    result.ToolCallID,
@@ -361,7 +231,7 @@ func (rt *ToolRuntime) emitPatchPreview(result ToolExecutionResult, selectedTool
 		return
 	}
 	limited := outputlimit.Limit(preview.Patch, maxPatchPreviewChars)
-	rt.emitDisplayEvent(AwakenEvent{
+	rt.sink.Emit(AwakenEvent{
 		Type:                  PatchUpdatedEventType,
 		Timestamp:             timeNowUTC(),
 		ToolCallID:            result.ToolCallID,
@@ -369,110 +239,8 @@ func (rt *ToolRuntime) emitPatchPreview(result ToolExecutionResult, selectedTool
 		Patch:                 limited.Content,
 		PatchSummary:          strings.TrimSpace(preview.Summary),
 		ApprovalAffectedPaths: preview.AffectedPaths,
-		DiffReview:            preview.DiffReview,
 		Truncated:             preview.Truncated || limited.Truncated,
 	})
-}
-
-func (rt *ToolRuntime) emitDisplayEvent(event AwakenEvent) {
-	rt.emitEvent(DisplaySafeEvent(event))
-}
-
-func (rt *ToolRuntime) toolAuditDetails(selectedTool tool.Tool, input string) toolAuditDetails {
-	details := toolAuditDetails{
-		Action: SecurityAuditActionTool,
-	}
-	toolName := selectedTool.Name()
-	switch toolName {
-	case "apply_patch":
-		details.Action = SecurityAuditActionFileMutation
-	case "shell":
-		details.Action = SecurityAuditActionShellCommand
-	}
-
-	if details.Action == SecurityAuditActionFileMutation {
-		details.Summary = "file mutation requested"
-		if previewingTool, ok := selectedTool.(tool.PatchPreviewingTool); ok {
-			if preview, ok := previewingTool.PatchPreview(input, rt.permissionContext); ok {
-				details.Summary = strings.TrimSpace(preview.Summary)
-				details.AffectedPaths = append([]string(nil), preview.AffectedPaths...)
-				details.Truncated = preview.Truncated
-			}
-		}
-		return details
-	}
-
-	if details.Action == SecurityAuditActionShellCommand {
-		details.Summary = "shell command requested"
-		details.InputPreview, details.Truncated = shellCommandAuditPreview(input)
-		return details
-	}
-
-	if strings.TrimSpace(input) != "" {
-		details.InputPreview, details.Truncated = RedactAuditText(input, defaultAuditPreviewMaxRunes)
-	}
-	return details
-}
-
-func shellCommandAuditPreview(input string) (string, bool) {
-	var decoded map[string]interface{}
-	if err := json.Unmarshal([]byte(input), &decoded); err == nil {
-		if command, ok := decoded["command"].(string); ok {
-			return RedactAuditText(command, defaultAuditPreviewMaxRunes)
-		}
-	}
-	return RedactAuditText(input, defaultAuditPreviewMaxRunes)
-}
-
-func (rt *ToolRuntime) recordToolAuditStarted(result ToolExecutionResult, details toolAuditDetails) {
-	rt.recordSecurityAudit(SecurityAuditEvent{
-		Type:          SecurityAuditToolExecutionStarted,
-		ToolCallID:    result.ToolCallID,
-		ToolName:      result.Name,
-		Action:        details.Action,
-		Outcome:       SecurityAuditOutcomeStarted,
-		Summary:       details.Summary,
-		InputPreview:  details.InputPreview,
-		AffectedPaths: details.AffectedPaths,
-		Truncated:     details.Truncated,
-	})
-}
-
-func (rt *ToolRuntime) recordToolAuditFinished(result ToolExecutionResult, details toolAuditDetails) {
-	outcome := SecurityAuditOutcomeFinished
-	errorMessage := ""
-	if result.IsError {
-		outcome = SecurityAuditOutcomeError
-		errorMessage = result.Content
-	}
-	rt.recordSecurityAudit(SecurityAuditEvent{
-		Type:          SecurityAuditToolExecutionFinished,
-		ToolCallID:    result.ToolCallID,
-		ToolName:      result.Name,
-		Action:        details.Action,
-		Outcome:       outcome,
-		Summary:       details.Summary,
-		InputPreview:  details.InputPreview,
-		AffectedPaths: details.AffectedPaths,
-		Error:         errorMessage,
-		Truncated:     details.Truncated || result.Truncated,
-	})
-}
-
-func (rt *ToolRuntime) recordSecurityAudit(event SecurityAuditEvent) {
-	rt.sinkMu.Lock()
-	defer rt.sinkMu.Unlock()
-	recorder, ok := rt.sink.(SecurityAuditRecorder)
-	if !ok {
-		return
-	}
-	recorder.RecordSecurityAuditEvent(event)
-}
-
-func (rt *ToolRuntime) emitEvent(event AwakenEvent) {
-	rt.sinkMu.Lock()
-	defer rt.sinkMu.Unlock()
-	rt.sink.Emit(event)
 }
 
 type toolObserverFunc func(tool.CommandOutput)
@@ -481,30 +249,11 @@ func (fn toolObserverFunc) OnCommandOutput(output tool.CommandOutput) {
 	fn(output)
 }
 
-func (rt *ToolRuntime) finalizeToolResult(result ToolExecutionResult) ToolExecutionResult {
-	limited := outputlimit.Limit(result.Content, rt.toolResultMaxChars)
-	if !limited.Truncated {
-		result.Content = limited.Content
-		result.Truncated = false
-		return result
-	}
-	if rt.toolResultStore != nil {
-		handle, err := rt.toolResultStore.Persist(result.Content, rt.toolResultPreviewChars)
-		if err == nil {
-			result.Content = toolresults.FormatModelContent(handle)
-			result.Truncated = true
-			result.ToolResultHandle = &handle
-			return result
-		}
-	}
+func finalizeToolResult(result ToolExecutionResult) ToolExecutionResult {
+	limited := outputlimit.Limit(result.Content, outputlimit.DefaultToolResultMaxChars)
 	result.Content = limited.Content
 	result.Truncated = limited.Truncated
 	return result
-}
-
-func isReadOnlyTool(selectedTool tool.Tool) bool {
-	readOnlyTool, ok := selectedTool.(tool.ReadOnlyTool)
-	return ok && readOnlyTool.IsReadOnly()
 }
 
 func approvalDescription(toolName string, input string) string {
@@ -556,9 +305,6 @@ func mergeApprovalRequest(request *ApprovalRequest, metadata tool.ApprovalReques
 	}
 	if strings.TrimSpace(metadata.PatchSummary) != "" {
 		request.PatchSummary = strings.TrimSpace(metadata.PatchSummary)
-	}
-	if metadata.DiffReview != nil {
-		request.DiffReview = metadata.DiffReview
 	}
 }
 
@@ -648,7 +394,7 @@ func normalizeToolInput(arguments string, params []tool.ToolParameter) (string, 
 		}
 	}
 
-	if len(params) == 1 && params[0].Type == "string" {
+	if len(params) == 1 {
 		value, ok := decoded[params[0].Name]
 		if !ok {
 			return "", nil

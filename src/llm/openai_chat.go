@@ -12,7 +12,6 @@ import (
 
 	"awaken/src/context"
 	"awaken/src/tool"
-	"awaken/src/usage"
 )
 
 // openaiTransport 实现 OpenAI Chat Completions 协议
@@ -35,20 +34,10 @@ type openaiChatRequest struct {
 
 type openaiChatMessage struct {
 	Role       string           `json:"role"`
-	Content    interface{}      `json:"content,omitempty"`
+	Content    string           `json:"content,omitempty"`
 	ToolCalls  []openaiToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string           `json:"tool_call_id,omitempty"`
 	Name       string           `json:"name,omitempty"`
-}
-
-type openaiContentPart struct {
-	Type     string          `json:"type"`
-	Text     string          `json:"text,omitempty"`
-	ImageURL *openaiImageURL `json:"image_url,omitempty"`
-}
-
-type openaiImageURL struct {
-	URL string `json:"url"`
 }
 
 type openaiToolCall struct {
@@ -71,7 +60,6 @@ type openaiChatResponse struct {
 			ToolCalls []openaiToolCall `json:"tool_calls,omitempty"`
 		} `json:"message"`
 	} `json:"choices"`
-	Usage *openaiUsage `json:"usage,omitempty"`
 }
 
 type openaiStreamResponse struct {
@@ -81,13 +69,6 @@ type openaiStreamResponse struct {
 			ToolCalls []openaiStreamToolCall `json:"tool_calls,omitempty"`
 		} `json:"delta"`
 	} `json:"choices"`
-	Usage *openaiUsage `json:"usage,omitempty"`
-}
-
-type openaiUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
 }
 
 type openaiStreamToolCall struct {
@@ -147,7 +128,7 @@ func (t *openaiTransport) Invoke(ctx stdctx.Context, cfg Config, req Request) (*
 		return nil, ErrEmptyResponse
 	}
 
-	return responseFromOpenAIMessage(chatResp.Choices[0].Message.Content, chatResp.Choices[0].Message.ToolCalls, chatResp.Usage)
+	return responseFromOpenAIMessage(chatResp.Choices[0].Message.Content, chatResp.Choices[0].Message.ToolCalls)
 }
 
 func (t *openaiTransport) StreamInvoke(ctx stdctx.Context, cfg Config, req Request, callback StreamCallback) (*Response, error) {
@@ -228,7 +209,7 @@ func buildOpenAIMessages(req Request) []openaiChatMessage {
 		for _, msg := range req.Messages {
 			messages = append(messages, openaiChatMessage{
 				Role:       string(msg.Role),
-				Content:    openAIMessageContent(msg),
+				Content:    msg.Content,
 				ToolCalls:  contextToolCallsToOpenAI(msg.ToolCalls),
 				ToolCallID: msg.ToolCallID,
 				Name:       msg.Name,
@@ -238,25 +219,6 @@ func buildOpenAIMessages(req Request) []openaiChatMessage {
 		messages = append(messages, openaiChatMessage{Role: "user", Content: req.UserPrompt})
 	}
 	return messages
-}
-
-func openAIMessageContent(msg context.Message) interface{} {
-	if len(msg.ContentParts) == 0 {
-		return msg.Content
-	}
-
-	parts := make([]openaiContentPart, 0, len(msg.ContentParts))
-	for _, part := range msg.ContentParts {
-		converted := openaiContentPart{
-			Type: part.Type,
-			Text: part.Text,
-		}
-		if part.ImageURL != nil {
-			converted.ImageURL = &openaiImageURL{URL: part.ImageURL.URL}
-		}
-		parts = append(parts, converted)
-	}
-	return parts
 }
 
 func contextToolCallsToOpenAI(toolCalls []context.ToolCall) []openaiToolCall {
@@ -278,14 +240,11 @@ func contextToolCallsToOpenAI(toolCalls []context.ToolCall) []openaiToolCall {
 	return result
 }
 
-func responseFromOpenAIMessage(content string, toolCalls []openaiToolCall, openAIUsage *openaiUsage) (*Response, error) {
+func responseFromOpenAIMessage(content string, toolCalls []openaiToolCall) (*Response, error) {
 	result := &Response{
 		Content:    content,
 		ToolCalls:  make([]ToolCall, 0, len(toolCalls)),
 		IsFinished: len(toolCalls) == 0,
-	}
-	if openAIUsage != nil {
-		result.Usage = usageRecordFromOpenAI(openAIUsage)
 	}
 
 	for _, tc := range toolCalls {
@@ -323,7 +282,6 @@ type openAIStreamState struct {
 	observer  StreamObserver
 	content   strings.Builder
 	toolCalls map[int]*openaiStreamToolAccumulator
-	usage     *openaiUsage
 }
 
 type openaiStreamToolAccumulator struct {
@@ -344,9 +302,6 @@ func (s *openAIStreamState) consume(data string) {
 	var chunk openaiStreamResponse
 	if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 		return
-	}
-	if chunk.Usage != nil {
-		s.usage = chunk.Usage
 	}
 
 	for _, choice := range chunk.Choices {
@@ -402,26 +357,10 @@ func (s *openAIStreamState) response() (*Response, error) {
 		ToolCalls:  toolCalls,
 		IsFinished: len(toolCalls) == 0,
 	}
-	if s.usage != nil {
-		result.Usage = usageRecordFromOpenAI(s.usage)
-	}
 	if result.Content == "" && len(result.ToolCalls) == 0 {
 		return nil, ErrEmptyResponse
 	}
 	return result, nil
-}
-
-func usageRecordFromOpenAI(openAIUsage *openaiUsage) *usage.Record {
-	if openAIUsage == nil {
-		return nil
-	}
-	record := usage.NormalizeRecord(usage.Record{
-		PromptTokens:     openAIUsage.PromptTokens,
-		CompletionTokens: openAIUsage.CompletionTokens,
-		TotalTokens:      openAIUsage.TotalTokens,
-		RequestCount:     1,
-	})
-	return &record
 }
 
 func (s *openAIStreamState) sortedToolCalls() []ToolCall {

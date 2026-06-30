@@ -203,10 +203,8 @@ func parseUpdateFile(lines []string, start int) (patchOperation, int, error) {
 			chunk.newLines = append(chunk.newLines, text)
 		case strings.HasPrefix(line, "+"):
 			chunk.newLines = append(chunk.newLines, strings.TrimPrefix(line, "+"))
-			chunk.addedLines++
 		case strings.HasPrefix(line, "-"):
 			chunk.oldLines = append(chunk.oldLines, strings.TrimPrefix(line, "-"))
-			chunk.deletedLines++
 		default:
 			return patchOperation{}, start, fmt.Errorf("invalid update hunk at line %d: update lines must start with space, +, -, @@, Move to, or End of File", i+1)
 		}

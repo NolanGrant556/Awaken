@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"sync/atomic"
 	"time"
-
-	"awaken/src/tool"
 )
 
 type AwakenEventType string
@@ -33,7 +31,6 @@ const (
 	ApprovalResolvedEventType    AwakenEventType = "ApprovalResolved"
 	ArtifactCreatedEventType     AwakenEventType = "ArtifactCreated"
 	ArtifactUpdatedEventType     AwakenEventType = "ArtifactUpdated"
-	PolicyDecisionEventType      AwakenEventType = "PolicyDecision"
 )
 
 type ApprovalRiskTone string
@@ -80,14 +77,6 @@ type AwakenEvent struct {
 	Truncated             bool
 	Error                 string
 	Code                  string
-	ProviderReason        string
-	Retryable             bool
-	RateLimitOptions      []RateLimitOption
-	PolicyCategory        string
-	PolicyDecision        string
-	PolicyReason          string
-	PolicyStatus          string
-	PolicyPayload         map[string]interface{}
 	ApprovalID            string
 	ApprovalTitle         string
 	ApprovalDescription   string
@@ -95,7 +84,6 @@ type AwakenEvent struct {
 	ApprovalDecision      ApprovalDecision
 	ApprovalAffectedPaths []string
 	ApprovalPatchSummary  string
-	DiffReview            *tool.DiffReviewMetadata
 	ArtifactID            string
 	ArtifactTitle         string
 	ArtifactDescription   string
@@ -103,11 +91,6 @@ type AwakenEvent struct {
 	ArtifactPath          string
 	ArtifactContent       string
 	ArtifactStatus        ArtifactStatus
-}
-
-type RateLimitOption struct {
-	Label string `json:"label"`
-	Value string `json:"value"`
 }
 
 var awakenIDCounter uint64

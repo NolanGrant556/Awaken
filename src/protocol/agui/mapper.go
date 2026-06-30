@@ -28,9 +28,6 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.Type = EventRunError
 		base.Message = event.Error
 		base.Code = event.Code
-		base.ProviderReason = event.ProviderReason
-		base.Retryable = event.Retryable
-		base.RateLimitOptions = mapRateLimitOptions(event.RateLimitOptions)
 		return []Event{base}
 	case agentcore.TextMessageStartedEventType:
 		base.Type = EventTextMessageStart
@@ -116,7 +113,6 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.Patch = event.Patch
 		base.PatchSummary = event.PatchSummary
 		base.ApprovalAffectedPaths = event.ApprovalAffectedPaths
-		base.DiffReview = event.DiffReview
 		base.Truncated = event.Truncated
 		return []Event{base}
 	case agentcore.TurnDiffEventType:
@@ -134,7 +130,6 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.ApprovalRiskTone = string(event.ApprovalRiskTone)
 		base.ApprovalAffectedPaths = event.ApprovalAffectedPaths
 		base.ApprovalPatchSummary = event.ApprovalPatchSummary
-		base.DiffReview = event.DiffReview
 		return []Event{base}
 	case agentcore.ApprovalResolvedEventType:
 		base.Type = EventAwakenApprovalResolved
@@ -147,7 +142,6 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.ApprovalDecision = string(event.ApprovalDecision)
 		base.ApprovalAffectedPaths = event.ApprovalAffectedPaths
 		base.ApprovalPatchSummary = event.ApprovalPatchSummary
-		base.DiffReview = event.DiffReview
 		return []Event{base}
 	case agentcore.ArtifactCreatedEventType:
 		base.Type = EventAwakenArtifactCreated
@@ -160,7 +154,6 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.ArtifactPath = event.ArtifactPath
 		base.ArtifactContent = event.ArtifactContent
 		base.ArtifactStatus = string(event.ArtifactStatus)
-		base.DiffReview = event.DiffReview
 		return []Event{base}
 	case agentcore.ArtifactUpdatedEventType:
 		base.Type = EventAwakenArtifactUpdated
@@ -174,32 +167,9 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.ArtifactContent = event.ArtifactContent
 		base.ArtifactStatus = string(event.ArtifactStatus)
 		return []Event{base}
-	case agentcore.PolicyDecisionEventType:
-		base.Type = EventAwakenPolicyDecision
-		base.PolicyCategory = event.PolicyCategory
-		base.PolicyDecision = event.PolicyDecision
-		base.PolicyReason = event.PolicyReason
-		base.PolicyStatus = event.PolicyStatus
-		base.PolicyPayload = event.PolicyPayload
-		base.RateLimitOptions = mapRateLimitOptions(event.RateLimitOptions)
-		return []Event{base}
 	default:
 		return nil
 	}
-}
-
-func mapRateLimitOptions(options []agentcore.RateLimitOption) []RateLimitOption {
-	if len(options) == 0 {
-		return nil
-	}
-	mapped := make([]RateLimitOption, 0, len(options))
-	for _, option := range options {
-		mapped = append(mapped, RateLimitOption{
-			Label: option.Label,
-			Value: option.Value,
-		})
-	}
-	return mapped
 }
 
 func toUnixMillis(ts time.Time) int64 {

@@ -18,7 +18,6 @@ import {
   diffLineStats,
   groupNarrativeByTurns,
   isNearLatestTurnOutputTail,
-  measuredComposerDockHeight,
   resolvedDecisionForApproval,
   scrollTopForLatestTurnOutputTail,
   scrollTopForPromptAnchor,
@@ -38,16 +37,8 @@ function stubElectronBridge(): void {
     awaken: {
       platform: "macos",
       getRun: vi.fn(),
-      getThreadLite: vi.fn(),
-      getThreadContext: vi.fn(),
       getThreadTranscript: vi.fn(),
-      searchThreads: vi.fn(async () => []),
-      exportThread: vi.fn(),
-      buildThreadShareBundle: vi.fn(),
-      buildThreadClearPlan: vi.fn(),
-      getSessionInsights: vi.fn(),
       listThreads: vi.fn(async () => []),
-      branchThread: vi.fn(),
       startRun: vi.fn(),
       cancelRun: vi.fn(),
       resolveApproval: vi.fn(),
@@ -58,7 +49,6 @@ function stubElectronBridge(): void {
       validateWorkspace: vi.fn(async () => ({ valid: true as const })),
       getSupervisorStatus: vi.fn(async () => ({ status: "running" as const })),
       onSupervisorStatusChange: vi.fn(() => () => {}),
-      setPolicySettings: vi.fn(async () => {}),
       notifyRendererReady: vi.fn(),
     } satisfies AwakenBridge,
   });
@@ -348,33 +338,6 @@ describe("App workbench presentation", () => {
         safeGap: 24,
       }),
     ).toBe(24);
-  });
-
-  it("measures the full floating composer dock reserve", () => {
-    expect(
-      measuredComposerDockHeight({
-        dockHeight: 132,
-        contentHeight: 82,
-        paddingTop: 32,
-        paddingBottom: 18,
-      }),
-    ).toBe(132);
-    expect(
-      measuredComposerDockHeight({
-        dockHeight: 0,
-        contentHeight: 82,
-        paddingTop: 32,
-        paddingBottom: 18,
-      }),
-    ).toBe(132);
-    expect(
-      measuredComposerDockHeight({
-        dockHeight: -1,
-        contentHeight: -1,
-        paddingTop: 0,
-        paddingBottom: 0,
-      }),
-    ).toBe(0);
   });
 
   it("keeps the latest turn tall enough for sticky prompt reading", () => {

@@ -23,8 +23,7 @@ export type AguiEventType =
   | "AWAKEN_APPROVAL_REQUESTED"
   | "AWAKEN_APPROVAL_RESOLVED"
   | "AWAKEN_ARTIFACT_CREATED"
-  | "AWAKEN_ARTIFACT_UPDATED"
-  | "AWAKEN_POLICY_DECISION";
+  | "AWAKEN_ARTIFACT_UPDATED";
 
 export type AguiApprovalRiskTone = "safe" | "warning" | "danger";
 
@@ -34,11 +33,6 @@ export type AguiArtifactStatus = "ready" | "pending" | "error";
 
 export type AguiRunOutcome = {
   type: string;
-};
-
-export type AguiRateLimitOption = {
-  label: string;
-  value: string;
 };
 
 export type AguiEvent = {
@@ -66,14 +60,6 @@ export type AguiEvent = {
   truncated?: boolean;
   message?: string;
   code?: string;
-  providerReason?: string;
-  retryable?: boolean;
-  rateLimitOptions?: AguiRateLimitOption[];
-  policyCategory?: string;
-  policyDecision?: string;
-  policyReason?: string;
-  policyStatus?: string;
-  policyPayload?: Record<string, unknown>;
   approvalId?: string;
   approvalTitle?: string;
   approvalDescription?: string;

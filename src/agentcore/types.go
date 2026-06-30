@@ -2,31 +2,16 @@ package agentcore
 
 import (
 	"awaken/src/context"
-	"awaken/src/lifecyclehooks"
-	"awaken/src/llm"
-	"awaken/src/mcp"
 	"awaken/src/prompt"
-	"awaken/src/skills"
 	"awaken/src/tool"
-	"awaken/src/usage"
 )
 
 type AgentConfig struct {
-	SystemPrompt     string
-	MaxTurns         int
-	ModelConfig      ModelConfig
-	EntryPoint       string
-	Workspace        WorkspaceConfig
-	Hooks            lifecyclehooks.Config
-	PromptCache      PromptCacheConfig
-	RunProfile       RunProfile
-	ToolExecution    ToolExecutionConfig
-	PermissionPolicy tool.PermissionPolicy
-	ApprovalPolicy   ApprovalPolicy
-	UsageLimits      usage.BudgetLimits
-	UsageLedger      usage.Recorder
-	MCPRegistry      mcp.Registry
-	Skills           skills.Registry
+	SystemPrompt string
+	MaxThoughts  int
+	ModelConfig  ModelConfig
+	EntryPoint   string
+	Workspace    WorkspaceConfig
 }
 
 type WorkspaceConfig struct {
@@ -34,24 +19,13 @@ type WorkspaceConfig struct {
 	WritableRoots []string
 }
 
-type ToolExecutionConfig struct {
-	Strategy ToolExecutionStrategy
-}
-
 type ModelConfig struct {
-	APIKey                string
-	BaseURL               string
-	Model                 string
-	Temperature           float64
-	MaxTokens             int
-	ContextWindow         int
-	AutoCompactTokenLimit int
-	AuthScheme            string
-}
-
-type PromptCacheConfig struct {
-	SystemPrompt         bool
-	MinSystemPromptBytes int
+	APIKey      string
+	BaseURL     string
+	Model       string
+	Temperature float64
+	MaxTokens   int
+	AuthScheme  string
 }
 
 type LLMRequest struct {
@@ -61,7 +35,6 @@ type LLMRequest struct {
 	Model        string
 	Temperature  float64
 	MaxTokens    int
-	Cache        llm.RequestCacheMetadata
 }
 
 type RuntimeInfoProvider interface {

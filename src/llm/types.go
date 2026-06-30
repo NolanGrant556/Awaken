@@ -4,11 +4,9 @@ import (
 	stdctx "context"
 	"os"
 	"strings"
-	"time"
 
 	"awaken/src/context"
 	"awaken/src/tool"
-	"awaken/src/usage"
 )
 
 // Protocol 定义 LLM 协议类型
@@ -21,35 +19,13 @@ const (
 
 // Config 是 LLM 配置
 type Config struct {
-	APIKey                string
-	BaseURL               string
-	Model                 string
-	Protocol              Protocol
-	Temperature           float64
-	MaxTokens             int
-	ContextWindow         int
-	AutoCompactTokenLimit int
-	AuthScheme            string
-	ActiveProfile         string
-	Profiles              []Profile
-	Retry                 RetryPolicy
-}
-
-type Profile struct {
-	Name       string
-	BaseURL    string
-	Model      string
-	Protocol   Protocol
-	AuthScheme string
-	APIKeyEnv  string
-	HasAPIKey  bool
-}
-
-type RetryPolicy struct {
-	Disabled   bool
-	MaxRetries int
-	BaseDelay  time.Duration
-	MaxDelay   time.Duration
+	APIKey      string
+	BaseURL     string
+	Model       string
+	Protocol    Protocol
+	Temperature float64
+	MaxTokens   int
+	AuthScheme  string
 }
 
 // Request 是统一请求结构
@@ -62,28 +38,6 @@ type Request struct {
 	Stream       bool
 	Messages     []context.Message
 	Tools        []tool.ToolDefinition
-	Retry        *RetryPolicy
-	Cache        RequestCacheMetadata
-}
-
-type CacheControlType string
-
-const (
-	CacheControlTypeEphemeral CacheControlType = "ephemeral"
-)
-
-// CacheControl describes provider prompt-cache controls that may be serialized
-// by compatible transports. Unsupported providers should ignore it.
-type CacheControl struct {
-	Type CacheControlType
-}
-
-// RequestCacheMetadata carries request-level cache hints without owning cache
-// storage or logging prompt content.
-type RequestCacheMetadata struct {
-	SystemPromptCacheControl CacheControl
-	CacheKey                 string
-	Hints                    []string
 }
 
 // Response 是统一响应结构
@@ -91,7 +45,6 @@ type Response struct {
 	Content    string
 	ToolCalls  []ToolCall
 	IsFinished bool
-	Usage      *usage.Record
 }
 
 // ToolCall 是统一工具调用结构

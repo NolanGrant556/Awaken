@@ -13,8 +13,6 @@ import (
 	"time"
 
 	ctx "awaken/src/context"
-	"awaken/src/providererrors"
-	"awaken/src/usage"
 )
 
 var (
@@ -58,16 +56,11 @@ func LoadConfig() Config {
 	loadEnvFile(envPath)
 	fileCfg := loadConfigFile(configPath)
 
-	profiles := resolveProfiles(fileCfg)
-	requestedActiveProfile := firstNonEmpty(os.Getenv("LLM_ACTIVE_PROFILE"), fileCfg.LLM.ActiveProfile)
-	activeProfile := resolveActiveProfileName(profiles, requestedActiveProfile)
-	selectedProfile := profileByName(profiles, activeProfile)
-
-	apiKey := resolveProfileAPIKey(selectedProfile)
-	baseURL := firstNonEmpty(selectedProfile.BaseURL, fileCfg.LLM.BaseURL, os.Getenv("LLM_BASE_URL"))
-	model := firstNonEmpty(selectedProfile.Model, fileCfg.LLM.ModelID, os.Getenv("LLM_MODEL_ID"))
-	protocol := firstNonEmpty(string(selectedProfile.Protocol), fileCfg.LLM.Protocol, os.Getenv("LLM_PROTOCOL"))
-	authScheme := firstNonEmpty(selectedProfile.AuthScheme, fileCfg.LLM.AuthScheme, os.Getenv("LLM_AUTH_SCHEME"))
+	apiKey := os.Getenv("LLM_API_KEY")
+	baseURL := firstNonEmpty(fileCfg.LLM.BaseURL, os.Getenv("LLM_BASE_URL"))
+	model := firstNonEmpty(fileCfg.LLM.ModelID, os.Getenv("LLM_MODEL_ID"))
+	protocol := firstNonEmpty(fileCfg.LLM.Protocol, os.Getenv("LLM_PROTOCOL"))
+	authScheme := firstNonEmpty(fileCfg.LLM.AuthScheme, os.Getenv("LLM_AUTH_SCHEME"))
 	temperature := fileCfg.Model.Temperature
 	maxTokens := fileCfg.Model.MaxOutputTokens
 
@@ -75,28 +68,14 @@ func LoadConfig() Config {
 		baseURL = "https://api.openai.com/v1"
 	}
 
-	protocolValue := Protocol(protocol)
-	resolvedProfiles := materializeProfiles(
-		profiles,
-		activeProfile,
-		baseURL,
-		model,
-		protocolValue,
-		authScheme,
-	)
-
 	return Config{
-		APIKey:                apiKey,
-		BaseURL:               normalizeBaseURL(baseURL),
-		Model:                 model,
-		Protocol:              protocolValue,
-		Temperature:           temperature,
-		MaxTokens:             maxTokens,
-		ContextWindow:         fileCfg.Model.ContextWindow,
-		AutoCompactTokenLimit: fileCfg.Model.AutoCompactTokenLimit,
-		AuthScheme:            authScheme,
-		ActiveProfile:         activeProfile,
-		Profiles:              resolvedProfiles,
+		APIKey:      apiKey,
+		BaseURL:     strings.TrimSuffix(baseURL, "/"),
+		Model:       model,
+		Protocol:    Protocol(protocol),
+		Temperature: temperature,
+		MaxTokens:   maxTokens,
+		AuthScheme:  authScheme,
 	}
 }
 
@@ -206,35 +185,13 @@ func applyAuthHeaders(httpReq *http.Request, cfg Config, protocol Protocol) {
 func requestFailedError(resp *http.Response) error {
 	// Drain body to allow connection reuse, but do not include body in error
 	// message to avoid leaking provider-internal details or secrets.
-	body := readErrorBody(resp.Body)
-	classified := providererrors.Classify(providererrors.ClassificationInput{
-		StatusCode: resp.StatusCode,
-		Body:       string(body),
-	})
-	return &RequestError{
-		StatusCode:     resp.StatusCode,
-		Kind:           errorKindFromProviderReason(classified.Reason, resp.StatusCode, string(body)),
-		ProviderReason: string(classified.Reason),
-		RetryableHint:  classified.Retryable,
-		Message:        classified.Message,
-	}
-}
-
-func readErrorBody(body io.Reader) []byte {
-	if body == nil {
-		return nil
-	}
-	data, _ := io.ReadAll(io.LimitReader(body, 64*1024))
-	io.Copy(io.Discard, body)
-	return data
+	io.Copy(io.Discard, resp.Body)
+	return fmt.Errorf("%w: status %d", ErrRequestFailed, resp.StatusCode)
 }
 
 // transportError 返回脱敏的 transport 错误，不暴露完整 URL 或 url.Error 细节。
 func transportError(err error) error {
-	return &RequestError{
-		Kind:    ErrorKindTransport,
-		Message: "transport error",
-	}
+	return fmt.Errorf("%w: transport error", ErrRequestFailed)
 }
 
 // requestBuildError 返回脱敏的请求构造错误，不暴露完整 URL（例如 malformed base URL）。
@@ -284,13 +241,7 @@ func Invoke(ctx stdctx.Context, cfg Config, req Request) (*Response, error) {
 	}
 
 	transport := getTransport(cfg)
-	resp, err := withLLMRetry(ctx, cfg, req, func() (*Response, error) {
-		return transport.Invoke(ctx, cfg, req)
-	})
-	if err != nil {
-		return nil, err
-	}
-	return attachUsageMetadata(cfg, req, resp), nil
+	return transport.Invoke(ctx, cfg, req)
 }
 
 // StreamCall 流式调用（兼容旧 API）
@@ -315,48 +266,10 @@ func StreamInvokeWithObserver(ctx stdctx.Context, cfg Config, req Request, obser
 	}
 
 	transport := getTransport(cfg)
-	resp, err := withLLMRetry(ctx, cfg, req, func() (*Response, error) {
-		if observerTransport, ok := transport.(observerTransport); ok {
-			return observerTransport.StreamInvokeWithObserver(ctx, cfg, req, observer)
-		}
-		return transport.StreamInvoke(ctx, cfg, req, observer.OnContent)
-	})
-	if err != nil {
-		return nil, err
+	if observerTransport, ok := transport.(observerTransport); ok {
+		return observerTransport.StreamInvokeWithObserver(ctx, cfg, req, observer)
 	}
-	return attachUsageMetadata(cfg, req, resp), nil
-}
-
-func attachUsageMetadata(cfg Config, req Request, resp *Response) *Response {
-	if resp == nil {
-		return nil
-	}
-
-	metadata := usage.Metadata{
-		Provider: usage.ProviderFromBaseURL(cfg.BaseURL),
-		Protocol: string(resolveProtocol(cfg)),
-		Model:    resolveModel(cfg, req),
-	}
-
-	if resp.Usage == nil {
-		estimate := usage.EstimateInput(req.SystemPrompt, req.UserPrompt, req.Messages, req.Tools)
-		record := usage.NewEstimatedRecord(metadata, estimate)
-		resp.Usage = &record
-		return resp
-	}
-
-	record := usage.NormalizeRecord(*resp.Usage)
-	if record.Provider == "" {
-		record.Provider = metadata.Provider
-	}
-	if record.Protocol == "" {
-		record.Protocol = metadata.Protocol
-	}
-	if record.Model == "" {
-		record.Model = metadata.Model
-	}
-	resp.Usage = &record
-	return resp
+	return transport.StreamInvoke(ctx, cfg, req, observer.OnContent)
 }
 
 // CallWithContext 使用 Conversation Context 调用

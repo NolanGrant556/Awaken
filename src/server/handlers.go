@@ -5,20 +5,10 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"strings"
-	"time"
 
 	"awaken/src/agentcore"
-	"awaken/src/agentdefs"
-	"awaken/src/draintimeout"
 	"awaken/src/protocol/agui"
-	"awaken/src/redaction"
 	awruntime "awaken/src/runtime"
-	"awaken/src/sessionbranch"
-	"awaken/src/sessioninsights"
-	"awaken/src/sessionshare"
-	"awaken/src/slashcommands"
-	"awaken/src/workspaceguard"
 )
 
 type runHandlers struct {
@@ -47,12 +37,6 @@ type errorResponse struct {
 	Message string `json:"message"`
 }
 
-type workspaceGuardErrorResponse struct {
-	Error    string                  `json:"error"`
-	Message  string                  `json:"message"`
-	Decision workspaceguard.Decision `json:"decision"`
-}
-
 type threadTranscriptRunResponse struct {
 	Run    awruntime.Run `json:"run"`
 	Events []agui.Event  `json:"events"`
@@ -63,34 +47,10 @@ type threadTranscriptResponse struct {
 	Runs   []threadTranscriptRunResponse `json:"runs"`
 }
 
-type agentDefinitionsLoader func(workspaceRoot string) (agentdefs.Result, error)
-
-type auditEventsResponse struct {
-	Events []agentcore.SecurityAuditEvent `json:"events"`
-}
-
-type runtimeDrainRequest struct {
-	TimeoutMS *int64 `json:"timeout_ms"`
-}
-
 func writeErrorJSON(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(errorResponse{Error: code, Message: message})
-}
-
-func writeWorkspaceGuardErrorJSON(w http.ResponseWriter, status int, policyErr *workspaceguard.PolicyError) {
-	code := policyErr.Decision.ErrorCode
-	if code == "" {
-		code = "WORKSPACE_GUARD_DENIED"
-	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(workspaceGuardErrorResponse{
-		Error:    code,
-		Message:  policyErr.Error(),
-		Decision: policyErr.Decision,
-	})
 }
 
 func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
@@ -102,26 +62,13 @@ func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 
 	run, err := h.runService.StartRun(req)
 	if err != nil {
-		var policyErr *workspaceguard.PolicyError
 		switch {
-		case errors.As(err, &policyErr):
-			writeWorkspaceGuardErrorJSON(w, http.StatusConflict, policyErr)
 		case errors.Is(err, awruntime.ErrThreadNotFound):
 			writeErrorJSON(w, http.StatusNotFound, "THREAD_NOT_FOUND", err.Error())
 		case errors.Is(err, awruntime.ErrThreadWorkspaceMismatch):
 			writeErrorJSON(w, http.StatusBadRequest, "THREAD_WORKSPACE_MISMATCH", err.Error())
 		case errors.Is(err, awruntime.ErrThreadBusy):
 			writeErrorJSON(w, http.StatusConflict, "THREAD_BUSY", err.Error())
-		case errors.Is(err, awruntime.ErrParentRunNotFound):
-			writeErrorJSON(w, http.StatusNotFound, "PARENT_RUN_NOT_FOUND", err.Error())
-		case errors.Is(err, awruntime.ErrParentThreadNotFound):
-			writeErrorJSON(w, http.StatusNotFound, "PARENT_THREAD_NOT_FOUND", err.Error())
-		case errors.Is(err, awruntime.ErrDelegationParentMismatch):
-			writeErrorJSON(w, http.StatusBadRequest, "DELEGATION_PARENT_MISMATCH", err.Error())
-		case errors.Is(err, awruntime.ErrDelegationParentRequired):
-			writeErrorJSON(w, http.StatusBadRequest, "DELEGATION_PARENT_REQUIRED", err.Error())
-		case errors.Is(err, awruntime.ErrInvalidSlashCommand):
-			writeErrorJSON(w, http.StatusBadRequest, "INVALID_SLASH_COMMAND", err.Error())
 		case errors.Is(err, awruntime.ErrInvalidInput):
 			writeErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 		default:
@@ -135,149 +82,6 @@ func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 
 func (h runHandlers) handleListThreads(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.runService.ListThreads())
-}
-
-func (h runHandlers) handleSearchThreads(w http.ResponseWriter, r *http.Request) {
-	limit := parsePositiveInt(r.URL.Query().Get("limit"), 20)
-	writeJSON(w, http.StatusOK, h.runService.SearchThreads(r.URL.Query().Get("q"), limit))
-}
-
-func (h runHandlers) handleRuntimeDrain(w http.ResponseWriter, r *http.Request) {
-	var req runtimeDrainRequest
-	if r.Body != nil && r.ContentLength != 0 {
-		if err := decodeJSON(r, &req); err != nil {
-			writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
-			return
-		}
-	} else if r.Body != nil {
-		_ = r.Body.Close()
-	}
-
-	timeout := draintimeout.DefaultTimeout
-	if req.TimeoutMS != nil && *req.TimeoutMS >= 0 {
-		timeout = time.Duration(*req.TimeoutMS) * time.Millisecond
-	}
-	result := h.runService.Drain(r.Context(), timeout)
-	writeJSON(w, http.StatusOK, result)
-}
-
-func (h runHandlers) handleGetThreadLite(w http.ResponseWriter, r *http.Request) {
-	threadID := r.PathValue("thread_id")
-	lite, err := h.runService.GetThreadLite(threadID)
-	if err != nil {
-		if errors.Is(err, awruntime.ErrThreadNotFound) {
-			writeErrorJSON(w, http.StatusNotFound, "THREAD_NOT_FOUND", err.Error())
-			return
-		}
-		writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get thread lite snapshot")
-		return
-	}
-	writeJSON(w, http.StatusOK, lite)
-}
-
-func (h runHandlers) handleGetThreadContext(w http.ResponseWriter, r *http.Request) {
-	threadID := r.PathValue("thread_id")
-	snapshot, err := h.runService.GetThreadContext(threadID)
-	if err != nil {
-		if errors.Is(err, awruntime.ErrThreadNotFound) {
-			writeErrorJSON(w, http.StatusNotFound, "THREAD_NOT_FOUND", err.Error())
-			return
-		}
-		writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get thread context")
-		return
-	}
-	writeJSON(w, http.StatusOK, snapshot)
-}
-
-func (h runHandlers) handleBranchThread(w http.ResponseWriter, r *http.Request) {
-	threadID := r.PathValue("thread_id")
-	var req awruntime.BranchThreadRequest
-	if r.Body != nil && r.ContentLength != 0 {
-		if err := decodeJSON(r, &req); err != nil {
-			writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
-			return
-		}
-	} else if r.Body != nil {
-		_ = r.Body.Close()
-	}
-	result, err := h.runService.BranchThread(threadID, req)
-	if err != nil {
-		switch {
-		case errors.Is(err, awruntime.ErrThreadNotFound):
-			writeErrorJSON(w, http.StatusNotFound, "THREAD_NOT_FOUND", err.Error())
-		case errors.Is(err, awruntime.ErrThreadAlreadyExists):
-			writeErrorJSON(w, http.StatusConflict, "THREAD_ALREADY_EXISTS", err.Error())
-		case errors.Is(err, sessionbranch.ErrNoTranscript),
-			errors.Is(err, sessionbranch.ErrNoMessages),
-			errors.Is(err, sessionbranch.ErrMissingForkSession):
-			writeErrorJSON(w, http.StatusBadRequest, "INVALID_BRANCH", err.Error())
-		default:
-			writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to branch thread")
-		}
-		return
-	}
-	writeJSON(w, http.StatusCreated, result)
-}
-
-func (h runHandlers) handleSessionInsights(w http.ResponseWriter, r *http.Request) {
-	opts := sessioninsights.Options{
-		Source:   strings.TrimSpace(r.URL.Query().Get("source")),
-		Platform: strings.TrimSpace(r.URL.Query().Get("platform")),
-	}
-	if lookback := strings.TrimSpace(r.URL.Query().Get("lookback")); lookback != "" {
-		duration, err := time.ParseDuration(lookback)
-		if err != nil {
-			writeErrorJSON(w, http.StatusBadRequest, "INVALID_LOOKBACK", err.Error())
-			return
-		}
-		opts.Lookback = duration
-	}
-	writeJSON(w, http.StatusOK, h.runService.SessionInsights(opts))
-}
-
-func (h runHandlers) handleCreateScheduledRun(w http.ResponseWriter, r *http.Request) {
-	var req awruntime.CreateScheduledRunRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
-		return
-	}
-
-	run, err := h.runService.CreateScheduledRun(req)
-	if err != nil {
-		switch {
-		case errors.Is(err, awruntime.ErrInvalidRunAt):
-			writeErrorJSON(w, http.StatusBadRequest, "INVALID_RUN_AT", err.Error())
-		case errors.Is(err, awruntime.ErrInvalidInput):
-			writeErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
-		default:
-			writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create scheduled run")
-		}
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, run)
-}
-
-func (h runHandlers) handleListScheduledRuns(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.runService.ListScheduledRuns())
-}
-
-func (h runHandlers) handleCancelScheduledRun(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	run, err := h.runService.CancelScheduledRun(id)
-	if err != nil {
-		switch {
-		case errors.Is(err, awruntime.ErrScheduledRunNotFound):
-			writeErrorJSON(w, http.StatusNotFound, "SCHEDULED_RUN_NOT_FOUND", err.Error())
-		case errors.Is(err, awruntime.ErrScheduledRunNotCancelable):
-			writeErrorJSON(w, http.StatusConflict, "SCHEDULED_RUN_NOT_CANCELABLE", err.Error())
-		default:
-			writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to cancel scheduled run")
-		}
-		return
-	}
-
-	writeJSON(w, http.StatusOK, run)
 }
 
 func (h runHandlers) handleGetThreadTranscript(w http.ResponseWriter, r *http.Request) {
@@ -308,63 +112,6 @@ func (h runHandlers) handleGetThreadTranscript(w http.ResponseWriter, r *http.Re
 	}
 
 	writeJSON(w, http.StatusOK, response)
-}
-
-func (h runHandlers) handleExportThread(w http.ResponseWriter, r *http.Request) {
-	threadID := r.PathValue("thread_id")
-	format := awruntime.ThreadExportFormat(strings.TrimSpace(r.URL.Query().Get("format")))
-	result, err := h.runService.ExportThread(threadID, format)
-	if err != nil {
-		if errors.Is(err, awruntime.ErrThreadNotFound) {
-			writeErrorJSON(w, http.StatusNotFound, "THREAD_NOT_FOUND", err.Error())
-			return
-		}
-		writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to export thread")
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
-}
-
-func (h runHandlers) handleBuildThreadShareBundle(w http.ResponseWriter, r *http.Request) {
-	threadID := r.PathValue("thread_id")
-	var req awruntime.ThreadShareBundleRequest
-	if r.Body != nil && r.ContentLength != 0 {
-		if err := decodeJSON(r, &req); err != nil {
-			writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
-			return
-		}
-	} else if r.Body != nil {
-		_ = r.Body.Close()
-	}
-
-	result, err := h.runService.BuildThreadShareBundle(threadID, req)
-	if err != nil {
-		if errors.Is(err, awruntime.ErrThreadNotFound) {
-			writeErrorJSON(w, http.StatusNotFound, "THREAD_NOT_FOUND", err.Error())
-			return
-		}
-		if errors.Is(err, sessionshare.ErrUnsafePublicBundle) {
-			writeErrorJSON(w, http.StatusConflict, "UNSAFE_PUBLIC_BUNDLE", err.Error())
-			return
-		}
-		writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to build thread share bundle")
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
-}
-
-func (h runHandlers) handleBuildThreadClearPlan(w http.ResponseWriter, r *http.Request) {
-	threadID := r.PathValue("thread_id")
-	result, err := h.runService.BuildThreadClearPlan(threadID)
-	if err != nil {
-		if errors.Is(err, awruntime.ErrThreadNotFound) {
-			writeErrorJSON(w, http.StatusNotFound, "THREAD_NOT_FOUND", err.Error())
-			return
-		}
-		writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to build thread clear plan")
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
 }
 
 func (h runHandlers) handleGetRun(w http.ResponseWriter, r *http.Request) {
@@ -448,25 +195,6 @@ func (h runHandlers) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h runHandlers) handleAuditEvents(w http.ResponseWriter, r *http.Request) {
-	limit := 0
-	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
-		parsed, err := strconv.Atoi(rawLimit)
-		if err != nil || parsed < 0 {
-			writeErrorJSON(w, http.StatusBadRequest, "INVALID_LIMIT", "limit must be a non-negative integer")
-			return
-		}
-		limit = parsed
-	}
-
-	writeJSON(w, http.StatusOK, auditEventsResponse{
-		Events: h.runService.AuditEvents(awruntime.AuditEventFilter{
-			RunID: r.URL.Query().Get("run_id"),
-			Limit: limit,
-		}),
-	})
-}
-
 func (h runHandlers) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("run_id")
 	run, err := h.runService.CancelRun(runID)
@@ -531,26 +259,13 @@ func decodeJSON(r *http.Request, dst any) error {
 	return nil
 }
 
-func parsePositiveInt(value string, fallback int) int {
-	parsed, err := strconv.Atoi(strings.TrimSpace(value))
-	if err != nil || parsed <= 0 {
-		return fallback
-	}
-	return parsed
-}
-
 func handleRuntimeInfo(w http.ResponseWriter, r *http.Request, provider RuntimeInfoProvider) {
 	if provider == nil {
 		http.Error(w, "runtime info unavailable", http.StatusServiceUnavailable)
 		return
 	}
 
-	info := provider.GetRuntimeInfo()
-	if info.SlashCommands == nil {
-		info.SlashCommands = slashcommands.ListCommands()
-	}
-
-	data, err := json.Marshal(sanitizeRuntimeInfo(info))
+	data, err := json.Marshal(provider.GetRuntimeInfo())
 	if err != nil {
 		http.Error(w, "failed to serialize runtime info", http.StatusInternalServerError)
 		return
@@ -559,47 +274,6 @@ func handleRuntimeInfo(w http.ResponseWriter, r *http.Request, provider RuntimeI
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
-}
-
-func handleCapabilities(w http.ResponseWriter, r *http.Request, provider RuntimeInfoProvider) {
-	if provider == nil {
-		http.Error(w, "capabilities unavailable", http.StatusServiceUnavailable)
-		return
-	}
-
-	data, err := json.Marshal(sanitizeCapabilitiesSnapshot(provider.GetRuntimeInfo().Capabilities))
-	if err != nil {
-		http.Error(w, "failed to serialize capabilities", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
-}
-
-func handleAgentDefinitions(w http.ResponseWriter, r *http.Request, load agentDefinitionsLoader) {
-	workspaceRoot := strings.TrimSpace(r.URL.Query().Get("workspace_root"))
-	if workspaceRoot == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "INVALID_WORKSPACE", "workspace_root query parameter is required")
-		return
-	}
-	if load == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "AGENT_DEFINITIONS_UNAVAILABLE", "agent definition loader unavailable")
-		return
-	}
-
-	result, err := load(workspaceRoot)
-	if err != nil {
-		if errors.Is(err, agentdefs.ErrInvalidWorkspace) {
-			writeErrorJSON(w, http.StatusBadRequest, "INVALID_WORKSPACE", err.Error())
-			return
-		}
-		writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load agent definitions")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, result)
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
@@ -632,21 +306,18 @@ func mapRuntimeEvent(event awruntime.Event) []agui.Event {
 			Timestamp: event.Timestamp.UnixMilli(),
 			ThreadID:  event.ThreadID,
 			RunID:     event.RunID,
-			Message:   redaction.RedactString(event.Message),
+			Message:   event.Message,
 			Code:      "RUN_CANCELLED",
 		}}
 	case awruntime.EventKindRunError:
 		return []agui.Event{{
-			Type:             agui.EventRunError,
-			Seq:              frameSeq(event.Seq, 0),
-			Timestamp:        event.Timestamp.UnixMilli(),
-			ThreadID:         event.ThreadID,
-			RunID:            event.RunID,
-			Message:          redaction.RedactString(event.Message),
-			Code:             event.Code,
-			ProviderReason:   event.ProviderReason,
-			Retryable:        event.Retryable,
-			RateLimitOptions: mapRuntimeRateLimitOptions(event.RateLimitOptions),
+			Type:      agui.EventRunError,
+			Seq:       frameSeq(event.Seq, 0),
+			Timestamp: event.Timestamp.UnixMilli(),
+			ThreadID:  event.ThreadID,
+			RunID:     event.RunID,
+			Message:   event.Message,
+			Code:      event.Code,
 		}}
 	case awruntime.EventKindRunStatusChanged:
 		return []agui.Event{{
@@ -660,18 +331,4 @@ func mapRuntimeEvent(event awruntime.Event) []agui.Event {
 	default:
 		return nil
 	}
-}
-
-func mapRuntimeRateLimitOptions(options []agentcore.RateLimitOption) []agui.RateLimitOption {
-	if len(options) == 0 {
-		return nil
-	}
-	mapped := make([]agui.RateLimitOption, 0, len(options))
-	for _, option := range options {
-		mapped = append(mapped, agui.RateLimitOption{
-			Label: option.Label,
-			Value: option.Value,
-		})
-	}
-	return mapped
 }

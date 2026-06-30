@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"awaken/src/internal/outputlimit"
-	"awaken/src/powershellpolicy"
 	"awaken/src/tool"
 )
 
@@ -219,9 +218,6 @@ func (w *shellOutputWriter) emitDelta(delta string) {
 func shellPermissionReason(params shellParams, permissionContext tool.PermissionContext) (string, string) {
 	if workdirOutsideWorkspace(params.Workdir, permissionContext) {
 		return "shell command uses a working directory outside the workspace root", "danger"
-	}
-	if decision := powershellpolicy.Analyze(params.Command); decision.Behavior == powershellpolicy.BehaviorAsk {
-		return "PowerShell policy: " + decision.Message, "danger"
 	}
 	if isDangerousShellCommand(params.Command) {
 		return "shell command may mutate files, change repository state, or access external systems", "danger"

@@ -19,37 +19,16 @@ import path from "node:path";
 import type { AguiEvent } from "../shared/agui.js";
 import {
   normalizeRuntimeInfo,
-  normalizeBranchThreadRequest,
-  normalizeBranchThreadResult,
   normalizeRuntimeRun,
-  normalizeRuntimeThreadContext,
-  normalizeRuntimeThreadClearPlanResult,
-  normalizeRuntimeThreadExportResult,
-  normalizeRuntimeThreadLite,
-  normalizeRuntimeThreadSearchResult,
-  normalizeRuntimeThreadShareBundleRequest,
-  normalizeRuntimeThreadShareBundleResult,
   normalizeRuntimeThreadTranscript,
   normalizeRuntimeThread,
   normalizeStartRunRequest,
   type ApprovalDecision,
-  type BranchThreadRequest,
-  type BranchThreadResultWire,
   type DesktopPlatform,
   type RuntimeInfoWire,
   type RuntimeRunWire,
-  type RuntimeSessionInsightsReport,
-  type RuntimeThreadClearPlanResultWire,
-  type RuntimeThreadContextWire,
-  type RuntimeThreadExportFormat,
-  type RuntimeThreadExportResultWire,
-  type RuntimeThreadLiteWire,
-  type RuntimeThreadSearchResultWire,
-  type RuntimeThreadShareBundleRequest,
-  type RuntimeThreadShareBundleResultWire,
   type RuntimeThreadTranscriptWire,
   type RuntimeThreadWire,
-  type RunPolicyOptions,
   type StartRunRequest,
 } from "../shared/runtime.js";
 import { RuntimeSupervisor, type SupervisorStatusInfo } from "./runtime-supervisor.js";
@@ -131,12 +110,8 @@ function runtimeUrl(pathname: string): string {
   return new URL(pathname, runtimeBaseUrl.endsWith("/") ? runtimeBaseUrl : `${runtimeBaseUrl}/`).toString();
 }
 
-function toRendererSupervisorStatus(info: SupervisorStatusInfo): SupervisorStatusInfo {
-  return {
-    status: info.status,
-    errorMessage: info.errorMessage,
-    drain: info.drain,
-  };
+function toRendererSupervisorStatus(info: SupervisorStatusInfo): { status: SupervisorStatusInfo["status"] } {
+  return { status: info.status };
 }
 
 async function readErrorMessage(response: Response): Promise<string> {
@@ -429,23 +404,7 @@ ipcMain.handle("awaken:get-run", async (_event, runId: string) => {
     method: "GET",
   });
 
-  return normalizeRuntimeRun(run);
-});
-
-ipcMain.handle("awaken:get-thread-lite", async (_event, threadId: string) => {
-  const lite = await requestRuntime<RuntimeThreadLiteWire>(`/v1/threads/${threadId}/lite`, {
-    method: "GET",
-  });
-
-  return normalizeRuntimeThreadLite(lite);
-});
-
-ipcMain.handle("awaken:get-thread-context", async (_event, threadId: string) => {
-  const context = await requestRuntime<RuntimeThreadContextWire>(`/v1/threads/${threadId}/context`, {
-    method: "GET",
-  });
-
-  return normalizeRuntimeThreadContext(context);
+	return normalizeRuntimeRun(run);
 });
 
 ipcMain.handle("awaken:get-thread-transcript", async (_event, threadId: string) => {
@@ -459,82 +418,6 @@ ipcMain.handle("awaken:get-thread-transcript", async (_event, threadId: string) 
   return normalizeRuntimeThreadTranscript(transcript);
 });
 
-ipcMain.handle(
-  "awaken:search-threads",
-  async (_event, payload: { query: string; limit?: number }) => {
-    const params = new URLSearchParams();
-    params.set("q", payload.query);
-    if (payload.limit && payload.limit > 0) {
-      params.set("limit", String(payload.limit));
-    }
-    const results = await requestRuntime<RuntimeThreadSearchResultWire[]>(
-      `/v1/threads/search?${params.toString()}`,
-      { method: "GET" },
-    );
-
-    return results.map(normalizeRuntimeThreadSearchResult);
-  },
-);
-
-ipcMain.handle(
-  "awaken:export-thread",
-  async (_event, payload: { threadId: string; format?: RuntimeThreadExportFormat }) => {
-    const params = new URLSearchParams();
-    if (payload.format) {
-      params.set("format", payload.format);
-    }
-    const suffix = params.toString() ? `?${params.toString()}` : "";
-    const result = await requestRuntime<RuntimeThreadExportResultWire>(
-      `/v1/threads/${payload.threadId}/export${suffix}`,
-      { method: "GET" },
-    );
-
-    return normalizeRuntimeThreadExportResult(result);
-  },
-);
-
-ipcMain.handle(
-  "awaken:build-thread-share-bundle",
-  async (
-    _event,
-    payload: { threadId: string; request?: RuntimeThreadShareBundleRequest },
-  ) => {
-    const result = await requestRuntime<RuntimeThreadShareBundleResultWire>(
-      `/v1/threads/${payload.threadId}/share-bundle`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(normalizeRuntimeThreadShareBundleRequest(payload.request)),
-      },
-    );
-
-    return normalizeRuntimeThreadShareBundleResult(result);
-  },
-);
-
-ipcMain.handle("awaken:build-thread-clear-plan", async (_event, threadId: string) => {
-  const result = await requestRuntime<RuntimeThreadClearPlanResultWire>(
-    `/v1/threads/${threadId}/clear-plan`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: "{}",
-    },
-  );
-
-  return normalizeRuntimeThreadClearPlanResult(result);
-});
-
-ipcMain.handle("awaken:get-session-insights", async () => {
-  return requestRuntime<RuntimeSessionInsightsReport>("/v1/session-insights", {
-    method: "GET",
-  });
-});
-
 ipcMain.handle("awaken:list-threads", async () => {
 	const threads = await requestRuntime<RuntimeThreadWire[]>("/v1/threads", {
 		method: "GET",
@@ -542,24 +425,6 @@ ipcMain.handle("awaken:list-threads", async () => {
 
 	return threads.map(normalizeRuntimeThread);
 });
-
-ipcMain.handle(
-  "awaken:branch-thread",
-  async (_event, payload: { threadId: string; request?: BranchThreadRequest }) => {
-    const result = await requestRuntime<BranchThreadResultWire>(
-      `/v1/threads/${payload.threadId}/branches`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(normalizeBranchThreadRequest(payload.request)),
-      },
-    );
-
-    return normalizeBranchThreadResult(result);
-  },
-);
 
 ipcMain.handle("awaken:start-run", async (_event, request: StartRunRequest) => {
   const run = await requestRuntime("/v1/runs", {
@@ -659,13 +524,6 @@ ipcMain.handle("awaken:runtime-supervisor-status", async () => {
   return toRendererSupervisorStatus(supervisor?.getStatus() ?? { status: "stopped" });
 });
 
-ipcMain.handle("awaken:set-policy-settings", async (_event, settings: RunPolicyOptions) => {
-  const timeoutMs = Number(settings?.restartDrainTimeoutMs);
-  if (supervisor && Number.isFinite(timeoutMs) && timeoutMs >= 0) {
-    supervisor.updateOptions({ drainTimeoutMs: timeoutMs });
-  }
-});
-
 // Persist the last user-selected workspace so the supervisor can default to it
 // on the next launch instead of always falling back to the home directory.
 async function readLastWorkspace(): Promise<string | undefined> {
@@ -719,16 +577,8 @@ app.whenReady().then(async () => {
   });
 
   app.on("activate", () => {
-    const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
-    if (windows.length === 0) {
+    if (BrowserWindow.getAllWindows().length === 0) {
       createMainWindow();
-      return;
-    }
-
-    for (const window of windows) {
-      ensureWindowVisible(window);
-      window.show();
-      window.focus();
     }
   });
 });

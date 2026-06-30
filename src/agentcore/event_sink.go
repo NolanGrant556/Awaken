@@ -2,8 +2,6 @@ package agentcore
 
 import stdcontext "context"
 
-import "awaken/src/tool"
-
 type EventSink interface {
 	Emit(AwakenEvent)
 }
@@ -36,7 +34,6 @@ type ApprovalRequest struct {
 	RiskTone      ApprovalRiskTone
 	AffectedPaths []string
 	PatchSummary  string
-	DiffReview    *tool.DiffReviewMetadata
 }
 
 type ApprovalAwaiter interface {

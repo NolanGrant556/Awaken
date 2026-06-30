@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AguiEvent } from "../../shared/agui";
-import type { RuntimeRun, RuntimeThread, SupervisorStatusInfo } from "../../shared/runtime";
+import type { RuntimeRun, SupervisorStatusInfo } from "../../shared/runtime";
 import {
   createInitialRuntimeState,
   reduceRuntimeState,
@@ -132,73 +132,6 @@ describe("runtime reducer cancel handling", () => {
     const errorStep = state.steps.find((step) => step.id === "run-error");
     expect(errorStep?.description).toContain("Provider 请求失败：");
     expect(errorStep?.tag).toBe("PROVIDER_REQUEST_FAILED");
-  });
-
-  it("RUN_STATUS_CHANGED queued keeps the run visible as active", () => {
-    const state = dispatch([
-      { type: "run/requested", prompt: "queue me" },
-      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1", status: "queued" }) },
-      runEvent({ type: "RUN_STATUS_CHANGED", status: "queued" }),
-    ]);
-
-    expect(state.phase).toBe("running");
-    expect(state.status).toBe("queued");
-    expect(state.timelineStatus).toBe("running");
-    expect(state.threads[0]).toMatchObject({
-      activeRunId: "run-1",
-      runStatus: "queued",
-    });
-    expect(state.steps.some((step) => step.title === "Run queued")).toBe(true);
-  });
-
-  it("AWAKEN_POLICY_DECISION stores a displayable policy decision", () => {
-    const state = dispatch([
-      runEvent({
-        type: "AWAKEN_POLICY_DECISION",
-        seq: 7,
-        policyCategory: "image_routing",
-        policyDecision: "native",
-        policyReason: "Model supports image parts",
-        policyStatus: "a.png -> native",
-        policyPayload: { routes: [{ path: "/tmp/a.png", route: "native" }] },
-      }),
-    ]);
-
-    expect(state.policyDecisions).toContainEqual({
-      id: "7:image_routing",
-      category: "image_routing",
-      decision: "native",
-      reason: "Model supports image parts",
-      status: "a.png -> native",
-      payload: { routes: [{ path: "/tmp/a.png", route: "native" }] },
-    });
-    expect(state.steps.find((step) => step.title === "Image routing decided")?.tag).toBe("native");
-  });
-
-  it("RUN_ERROR with provider rate limit exposes retry metadata and CTA options", () => {
-    const state = dispatch([
-      runEvent({
-        type: "RUN_ERROR",
-        code: "PROVIDER_REQUEST_FAILED",
-        message: "requests per minute exceeded",
-        providerReason: "rate_limit",
-        retryable: true,
-        rateLimitOptions: [
-          { label: "Retry later", value: "retry_later" },
-          { label: "Switch model", value: "switch_model" },
-        ],
-      }),
-    ]);
-
-    expect(state.phase).toBe("error");
-    expect(state.errorMessage).toBe("Provider 限流：requests per minute exceeded");
-    expect(state.providerReason).toBe("rate_limit");
-    expect(state.retryable).toBe(true);
-    expect(state.rateLimitOptions).toEqual([
-      { label: "Retry later", value: "retry_later" },
-      { label: "Switch model", value: "switch_model" },
-    ]);
-    expect(state.steps.find((step) => step.id === "run-error")?.tag).toBe("rate_limit");
   });
 });
 
@@ -351,7 +284,6 @@ describe("runtime reducer replay idempotency", () => {
       id: "answer:run-1:msg-1",
       markdown: "done",
       status: "done",
-      isFinal: true,
     });
   });
 
@@ -545,7 +477,6 @@ describe("runtime reducer run narrative projection", () => {
     expect(state.toolResults).toContainEqual({
       id: "read-1",
       title: "read_file",
-      toolCallName: "read_file",
       args: "{\"path\":\"README.md\"}",
       content: "# Awaken\nfull result",
       status: "done",
@@ -564,7 +495,6 @@ describe("runtime reducer run narrative projection", () => {
     expect(state.toolResults).toContainEqual({
       id: "read-1",
       title: "read_file",
-      toolCallName: "read_file",
       args: "{\"path\":\"README.md\"}",
       content: "",
       status: "active",
@@ -639,7 +569,6 @@ describe("runtime reducer run narrative projection", () => {
     expect(state.toolResults).toContainEqual({
       id: "shell-1",
       title: "shell",
-      toolCallName: "shell",
       args: undefined,
       content: "",
       commandOutput: "hello",
@@ -652,82 +581,6 @@ describe("runtime reducer run narrative projection", () => {
       status: "active",
       tag: "stdout",
     });
-  });
-
-  it("derives shell result status from exit code and timeout", () => {
-    const cases: Array<{
-      name: string;
-      content: string;
-      expectedStatus: "done" | "error";
-    }> = [
-      {
-        name: "success",
-        content: JSON.stringify({
-          exit_code: 0,
-          timed_out: false,
-          duration_ms: 12,
-          stdout: "ok",
-          stderr: "",
-          truncated: false,
-        }),
-        expectedStatus: "done",
-      },
-      {
-        name: "nonzero exit",
-        content: JSON.stringify({
-          exit_code: 7,
-          timed_out: false,
-          duration_ms: 14,
-          stdout: "",
-          stderr: "boom",
-          truncated: false,
-        }),
-        expectedStatus: "error",
-      },
-      {
-        name: "timeout",
-        content: JSON.stringify({
-          exit_code: 0,
-          timed_out: true,
-          duration_ms: 1000,
-          stdout: "",
-          stderr: "timeout",
-          truncated: false,
-        }),
-        expectedStatus: "error",
-      },
-    ];
-
-    for (const testCase of cases) {
-      const state = dispatch([
-        { type: "run/requested", prompt: `Run shell ${testCase.name}` },
-        runEvent({
-          type: "TOOL_CALL_ARGS",
-          seq: 1,
-          toolCallId: "shell-1",
-          toolCallName: "shell",
-          delta: "{\"command\":\"printf ok\"}",
-        }),
-        runEvent({
-          type: "TOOL_CALL_RESULT",
-          seq: 2,
-          toolCallId: "shell-1",
-          toolCallName: "shell",
-          content: testCase.content,
-        }),
-      ]);
-
-      expect(state.toolResults[0]).toMatchObject({
-        id: "shell-1",
-        toolCallName: "shell",
-        status: testCase.expectedStatus,
-      });
-      expect(state.narrative.committedItems.find((item) => item.id === "tool:shell-1")).toMatchObject({
-        kind: "tool",
-        id: "tool:shell-1",
-        status: testCase.expectedStatus,
-      });
-    }
   });
 
   it("stores patch previews and turn diff for the changes inspector", () => {
@@ -1075,66 +928,7 @@ describe("runtime reducer run narrative projection", () => {
       id: "answer:m1",
       markdown: "done",
       status: "done",
-      isFinal: true,
     });
-  });
-
-  it("does not mark intermediate completed answers as final before run completion", () => {
-    const state = dispatch([
-      { type: "run/requested", prompt: "Read the README" },
-      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
-      runEvent({
-        type: "TEXT_MESSAGE_CONTENT",
-        seq: 1,
-        messageId: "mid",
-        delta: "I will read it",
-      }),
-      runEvent({ type: "TEXT_MESSAGE_END", seq: 2, messageId: "mid" }),
-      runEvent({
-        type: "TOOL_CALL_START",
-        seq: 3,
-        toolCallId: "read-1",
-        toolCallName: "read_file",
-      }),
-      runEvent({
-        type: "TOOL_CALL_RESULT",
-        seq: 4,
-        toolCallId: "read-1",
-        toolCallName: "read_file",
-        content: "# Awaken",
-      }),
-      runEvent({
-        type: "TEXT_MESSAGE_CONTENT",
-        seq: 5,
-        messageId: "final",
-        delta: "Final answer",
-      }),
-      runEvent({ type: "TEXT_MESSAGE_END", seq: 6, messageId: "final" }),
-      runEvent({
-        type: "RUN_FINISHED",
-        seq: 7,
-        runId: "run-1",
-        threadId: "thread-1",
-        result: "done",
-      }),
-    ]);
-
-    const answers = state.narrative.committedItems.filter((item) => item.kind === "answer");
-    expect(answers).toEqual([
-      {
-        kind: "answer",
-        id: "answer:run-1:mid",
-        markdown: "I will read it",
-        status: "done",
-      },
-      {
-        kind: "answer",
-        id: "answer:run-1:final",
-        markdown: "Final answer",
-        status: "done",
-        isFinal: true,
-      },
-    ]);
   });
 
   it("annotates the successful final answer with elapsed runtime", () => {
@@ -1156,7 +950,6 @@ describe("runtime reducer run narrative projection", () => {
       markdown: "done",
       status: "done",
       elapsedMs: 65000,
-      isFinal: true,
     });
   });
 
@@ -1180,7 +973,6 @@ describe("runtime reducer run narrative projection", () => {
       markdown: "done",
       status: "done",
       elapsedMs: 45000,
-      isFinal: true,
     });
   });
 
@@ -1203,7 +995,6 @@ describe("runtime reducer run narrative projection", () => {
       markdown: "streamed done",
       status: "done",
       elapsedMs: 45000,
-      isFinal: true,
     });
   });
 
@@ -1246,7 +1037,6 @@ describe("runtime reducer run narrative projection", () => {
       id: "answer:error:1",
       markdown: "API key 缺失，请在 .env 中配置 LLM_API_KEY",
       status: "error",
-      isFinal: true,
     });
     expect(
       state.narrative.committedItems.some(
@@ -1445,7 +1235,6 @@ describe("runtime reducer thread snapshots", () => {
       id: "answer:run-1:msg-1",
       markdown: "first answer",
       status: "done",
-      isFinal: true,
     });
     expect(state.narrative.activeItem).toEqual({
       kind: "planning",
@@ -1471,8 +1260,8 @@ describe("runtime reducer thread snapshots", () => {
 
     const answers = state.narrative.committedItems.filter((item) => item.kind === "answer");
     expect(answers).toEqual([
-      { kind: "answer", id: "answer:run-1", markdown: "first answer", status: "done", isFinal: true },
-      { kind: "answer", id: "answer:run-2", markdown: "second answer", status: "done", isFinal: true },
+      { kind: "answer", id: "answer:run-1", markdown: "first answer", status: "done" },
+      { kind: "answer", id: "answer:run-2", markdown: "second answer", status: "done" },
     ]);
   });
 
@@ -1500,93 +1289,6 @@ describe("runtime reducer thread snapshots", () => {
 
     expect(state.assistantText).toBe("first answer");
     expect(state.threads).toHaveLength(1);
-  });
-
-  it("prefers latest run summary from the runtime thread list", () => {
-    const state = dispatch([
-      { type: "run/requested", prompt: "first prompt" },
-      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
-      { type: "run/threadAdded", threadId: "thread-1", label: "first prompt", runId: "run-1" },
-      {
-        type: "run/threadsLoaded",
-        threads: [
-          {
-            threadId: "thread-1",
-            label: "first prompt",
-            runId: "run-1",
-            activeRunId: undefined,
-            latestRun: {
-              runId: "run-1",
-              status: "error",
-              error: "provider failed",
-              updatedAt: "2026-01-01T00:05:00Z",
-              finishedAt: "2026-01-01T00:05:00Z",
-            },
-            workspace: { workspaceRoot: "/tmp", writableRoots: ["/tmp"] },
-            createdAt: "2026-01-01T00:00:00Z",
-            updatedAt: "2026-01-01T00:05:00Z",
-          },
-        ],
-      },
-    ]);
-
-    expect(state.threads[0]).toMatchObject({
-      runStatus: "error",
-      lastError: "provider failed",
-      updatedAt: "2026-01-01T00:05:00Z",
-    });
-  });
-
-  it("clears stale lastError when latest run summary becomes finished", () => {
-    const state = dispatch([
-      {
-        type: "run/threadsLoaded",
-        threads: [
-          {
-            threadId: "thread-1",
-            label: "first prompt",
-            runId: "run-1",
-            activeRunId: undefined,
-            latestRun: {
-              runId: "run-1",
-              status: "error",
-              error: "provider failed",
-              updatedAt: "2026-01-01T00:05:00Z",
-              finishedAt: "2026-01-01T00:05:00Z",
-            },
-            workspace: { workspaceRoot: "/tmp", writableRoots: ["/tmp"] },
-            createdAt: "2026-01-01T00:00:00Z",
-            updatedAt: "2026-01-01T00:05:00Z",
-          },
-        ],
-      },
-      {
-        type: "run/threadsLoaded",
-        threads: [
-          {
-            threadId: "thread-1",
-            label: "first prompt",
-            runId: "run-1",
-            activeRunId: undefined,
-            latestRun: {
-              runId: "run-1",
-              status: "finished",
-              updatedAt: "2026-01-01T00:06:00Z",
-              finishedAt: "2026-01-01T00:06:00Z",
-            },
-            workspace: { workspaceRoot: "/tmp", writableRoots: ["/tmp"] },
-            createdAt: "2026-01-01T00:00:00Z",
-            updatedAt: "2026-01-01T00:06:00Z",
-          },
-        ],
-      },
-    ]);
-
-    expect(state.threads[0]).toMatchObject({
-      runStatus: "finished",
-      lastError: undefined,
-      updatedAt: "2026-01-01T00:06:00Z",
-    });
   });
 
   it("clears stale active thread when runtime no longer lists it", () => {
@@ -1638,185 +1340,5 @@ describe("runtime reducer supervisor state", () => {
       { type: "run/recovered", run: makeRun({ status: "running" }) },
     ]);
     expect(state.supervisorStatus).toBe("running");
-  });
-});
-
-describe("runtime reducer thread context", () => {
-  function makeContext(threadId = "thread-1") {
-    return {
-      threadId,
-      files: {
-        markdown: "Files in context",
-        files: [
-          { path: "README.md", source: "read_file", tokens: 120, last_read_time: "2026-01-01T00:00:00Z" },
-        ],
-      },
-      usage: {
-        markdown: "Context Usage",
-        model: "test-model",
-        totalTokens: 120,
-        maxTokens: 8000,
-        percentage: 1.5,
-        messageCount: 3,
-      },
-    };
-  }
-
-  it("run/threadContextLoading sets loading and clears error", () => {
-    const state = dispatch([
-      { type: "run/threadAdded", threadId: "thread-1", label: "ctx", runId: "run-1" },
-      { type: "run/threadContextError", threadId: "thread-1", message: "boom" },
-      { type: "run/threadContextLoading", threadId: "thread-1" },
-    ]);
-    expect(state.threadContextLoading).toBe(true);
-    expect(state.threadContextError).toBeNull();
-  });
-
-  it("run/threadContextLoaded stores context and clears loading", () => {
-    const state = dispatch([
-      { type: "run/threadAdded", threadId: "thread-1", label: "ctx", runId: "run-1" },
-      { type: "run/threadContextLoading", threadId: "thread-1" },
-      { type: "run/threadContextLoaded", threadId: "thread-1", context: makeContext() },
-    ]);
-    expect(state.threadContextLoading).toBe(false);
-    expect(state.threadContextError).toBeNull();
-    expect(state.threadContext?.threadId).toBe("thread-1");
-    expect(state.threadContext?.files.files).toHaveLength(1);
-    expect(state.threadContext?.usage.model).toBe("test-model");
-  });
-
-  it("run/threadContextError clears loading and stores message", () => {
-    const state = dispatch([
-      { type: "run/threadAdded", threadId: "thread-1", label: "ctx", runId: "run-1" },
-      { type: "run/threadContextLoading", threadId: "thread-1" },
-      { type: "run/threadContextError", threadId: "thread-1", message: "failed" },
-    ]);
-    expect(state.threadContextLoading).toBe(false);
-    expect(state.threadContextError).toBe("failed");
-  });
-
-  it("run/threadContextCleared resets all context fields", () => {
-    const state = dispatch([
-      { type: "run/threadAdded", threadId: "thread-1", label: "ctx", runId: "run-1" },
-      { type: "run/threadContextLoaded", threadId: "thread-1", context: makeContext() },
-      { type: "run/threadContextCleared" },
-    ]);
-    expect(state.threadContext).toBeNull();
-    expect(state.threadContextLoading).toBe(false);
-    expect(state.threadContextError).toBeNull();
-  });
-
-  it("run/threadSwitch clears context for the new thread", () => {
-    const state = dispatch([
-      { type: "run/threadAdded", threadId: "thread-1", label: "ctx", runId: "run-1" },
-      { type: "run/threadContextLoaded", threadId: "thread-1", context: makeContext() },
-      { type: "run/threadSwitch", threadId: "thread-2" },
-    ]);
-    expect(state.activeThreadId).toBe("thread-2");
-    expect(state.threadContext).toBeNull();
-    expect(state.threadContextLoading).toBe(false);
-    expect(state.threadContextError).toBeNull();
-  });
-
-  it("ignores context events for a thread that is no longer active", () => {
-    const state = dispatch([
-      { type: "run/threadAdded", threadId: "thread-1", label: "ctx", runId: "run-1" },
-      { type: "run/threadSwitch", threadId: "thread-2" },
-      { type: "run/threadContextLoaded", threadId: "thread-1", context: makeContext("thread-1") },
-    ]);
-    expect(state.threadContext).toBeNull();
-  });
-});
-
-describe("runtime reducer branch handling", () => {
-  function makeBranchedThread(overrides: Partial<RuntimeThread> = {}): RuntimeThread {
-    return {
-      threadId: "branch-1",
-      label: "branched thread",
-      metadata: {
-        lastPrompt: "fork me",
-        branch: {
-          originalThreadId: "thread-1",
-          title: "fork me",
-        },
-      },
-      workspace: { workspaceRoot: "/tmp", writableRoots: ["/tmp"] },
-      createdAt: "2026-01-01T00:00:00Z",
-      updatedAt: "2026-01-01T00:00:00Z",
-      ...overrides,
-    };
-  }
-
-  it("run/threadBranched upserts the branched thread into threads", () => {
-    const branched = makeBranchedThread();
-    const state = dispatch([
-      { type: "run/threadAdded", threadId: "thread-1", label: "parent", runId: "run-1" },
-      { type: "run/threadBranched", thread: branched },
-    ]);
-    const found = state.threads.find((thread) => thread.threadId === "branch-1");
-    expect(found).toBeDefined();
-    expect(found?.label).toBe("branched thread");
-    expect(found?.metadata?.branch?.originalThreadId).toBe("thread-1");
-  });
-
-  it("run/threadBranched updates an existing branched thread in place", () => {
-    const first = makeBranchedThread({ label: "first label" });
-    const second = makeBranchedThread({ label: "updated label" });
-    const state = dispatch([
-      { type: "run/threadBranched", thread: first },
-      { type: "run/threadBranched", thread: second },
-    ]);
-    const found = state.threads.find((thread) => thread.threadId === "branch-1");
-    expect(found).toBeDefined();
-    expect(found?.label).toBe("updated label");
-    expect(state.threads).toHaveLength(1);
-  });
-
-  it("run/branchSourceViewSet stores parent thread id, label, and preview", () => {
-    const state = dispatch([
-      { type: "run/branchSourceViewSet", parentThreadId: "thread-1", parentLabel: "parent thread", forkedFromPreview: "fork me" },
-    ]);
-    expect(state.branchSourceView).toEqual({
-      parentThreadId: "thread-1",
-      parentLabel: "parent thread",
-      forkedFromPreview: "fork me",
-    });
-  });
-
-  it("run/threadSwitch clears branchSourceView", () => {
-    const state = dispatch([
-      { type: "run/branchSourceViewSet", parentThreadId: "thread-1", parentLabel: "parent thread", forkedFromPreview: "fork me" },
-      { type: "run/threadSwitch", threadId: "thread-2" },
-    ]);
-    expect(state.branchSourceView).toBeNull();
-  });
-
-  it("run/threadReplayStarted clears branchSourceView", () => {
-    const state = dispatch([
-      { type: "run/branchSourceViewSet", parentThreadId: "thread-1", parentLabel: "parent thread", forkedFromPreview: "fork me" },
-      { type: "run/threadReplayStarted", threadId: "thread-2", runId: "run-2" },
-    ]);
-    expect(state.branchSourceView).toBeNull();
-  });
-
-  it("run/requested clears branchSourceView when a new run starts", () => {
-    const state = dispatch([
-      { type: "run/branchSourceViewSet", parentThreadId: "thread-1", parentLabel: "parent thread", forkedFromPreview: "fork me" },
-      { type: "run/requested", prompt: "first message on branch" },
-    ]);
-    expect(state.branchSourceView).toBeNull();
-  });
-
-  it("run/created clears branchSourceView when the run is created", () => {
-    const state = dispatch([
-      { type: "run/branchSourceViewSet", parentThreadId: "thread-1", parentLabel: "parent thread", forkedFromPreview: "fork me" },
-      { type: "run/created", run: makeRun({ runId: "run-branch", threadId: "branch-1" }) },
-    ]);
-    expect(state.branchSourceView).toBeNull();
-  });
-
-  it("branchSourceView defaults to undefined in initial state", () => {
-    const state = createInitialRuntimeState();
-    expect(state.branchSourceView).toBeUndefined();
   });
 });

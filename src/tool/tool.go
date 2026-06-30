@@ -13,17 +13,12 @@ type ReadOnlyTool interface {
 	IsReadOnly() bool
 }
 
-type AvailabilityAwareTool interface {
-	IsAvailable() bool
-}
-
 type ApprovalRequest struct {
 	Title         string
 	Description   string
 	RiskTone      string
 	AffectedPaths []string
 	PatchSummary  string
-	DiffReview    *DiffReviewMetadata
 }
 
 type ApprovalDescribingTool interface {
@@ -63,7 +58,6 @@ type PatchPreview struct {
 	Summary       string
 	AffectedPaths []string
 	Truncated     bool
-	DiffReview    *DiffReviewMetadata
 }
 
 type ToolObserver interface {

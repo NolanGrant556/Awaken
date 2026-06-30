@@ -2,23 +2,11 @@ import type { AguiEvent } from "./agui";
 import {
   type ApprovalDecision,
   type AwakenBridge,
-  type BranchThreadRequest,
-  type BranchThreadResult,
   type DesktopPlatform,
   type RuntimeInfo,
   type RuntimeRun,
-  type RuntimeSessionInsightsReport,
-  type RuntimeThreadClearPlanResult,
-  type RuntimeThreadContext,
-  type RuntimeThreadExportFormat,
-  type RuntimeThreadExportResult,
-  type RuntimeThreadLite,
-  type RuntimeThreadSearchResult,
-  type RuntimeThreadShareBundleRequest,
-  type RuntimeThreadShareBundleResult,
   type RuntimeThreadTranscript,
   type RuntimeThread,
-  type RunPolicyOptions,
   type StartRunRequest,
   type SupervisorStatusInfo,
   type WorkspacePickResult,
@@ -37,22 +25,8 @@ export type RuntimeClient = {
   platform: DesktopPlatform;
   getRuntimeInfo: () => Promise<RuntimeInfo>;
   getRun: (runId: string) => Promise<RuntimeRun>;
-  getThreadLite: (threadId: string) => Promise<RuntimeThreadLite>;
-  getThreadContext: (threadId: string) => Promise<RuntimeThreadContext>;
   getThreadTranscript: (threadId: string) => Promise<RuntimeThreadTranscript>;
-  searchThreads: (query: string, limit?: number) => Promise<RuntimeThreadSearchResult[]>;
-  exportThread: (
-    threadId: string,
-    format?: RuntimeThreadExportFormat,
-  ) => Promise<RuntimeThreadExportResult>;
-  buildThreadShareBundle: (
-    threadId: string,
-    request?: RuntimeThreadShareBundleRequest,
-  ) => Promise<RuntimeThreadShareBundleResult>;
-  buildThreadClearPlan: (threadId: string) => Promise<RuntimeThreadClearPlanResult>;
-  getSessionInsights: () => Promise<RuntimeSessionInsightsReport>;
   listThreads: () => Promise<RuntimeThread[]>;
-  branchThread: (threadId: string, request?: BranchThreadRequest) => Promise<BranchThreadResult>;
   startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
   resolveApproval: (
@@ -69,7 +43,6 @@ export type RuntimeClient = {
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
   getSupervisorStatus: () => Promise<SupervisorStatusInfo>;
   onSupervisorStatusChange: (callback: (info: SupervisorStatusInfo) => void) => () => void;
-  setPolicySettings: (settings: RunPolicyOptions) => Promise<void>;
   notifyRendererReady: () => void;
 };
 
@@ -89,17 +62,8 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     platform: bridge.platform,
     getRuntimeInfo: () => bridge.getRuntimeInfo(),
     getRun: (runId) => bridge.getRun(runId),
-    getThreadLite: (threadId) => bridge.getThreadLite(threadId),
-    getThreadContext: (threadId) => bridge.getThreadContext(threadId),
     getThreadTranscript: (threadId) => bridge.getThreadTranscript(threadId),
-    searchThreads: (query, limit) => bridge.searchThreads(query, limit),
-    exportThread: (threadId, format) => bridge.exportThread(threadId, format),
-    buildThreadShareBundle: (threadId, request) =>
-      bridge.buildThreadShareBundle(threadId, request),
-    buildThreadClearPlan: (threadId) => bridge.buildThreadClearPlan(threadId),
-    getSessionInsights: () => bridge.getSessionInsights(),
     listThreads: () => bridge.listThreads(),
-    branchThread: (threadId, request) => bridge.branchThread(threadId, request),
     startRun: (request) => bridge.startRun(request),
     cancelRun: bridge.cancelRun,
     resolveApproval: bridge.resolveApproval,
@@ -208,7 +172,6 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     validateWorkspace: (path) => bridge.validateWorkspace(path),
     getSupervisorStatus: () => bridge.getSupervisorStatus(),
     onSupervisorStatusChange: (callback) => bridge.onSupervisorStatusChange(callback),
-    setPolicySettings: (settings) => bridge.setPolicySettings(settings),
     notifyRendererReady: () => bridge.notifyRendererReady(),
   };
 }

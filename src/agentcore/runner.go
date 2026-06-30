@@ -13,55 +13,34 @@ import (
 	"awaken/src/context"
 	"awaken/src/internal/outputlimit"
 	"awaken/src/llm"
-	"awaken/src/ratelimitoptions"
 	"awaken/src/tool"
-	"awaken/src/usage"
 )
 
 const maxTurnDiffChars = 50000
 
-var ErrMaxTurnsReached = errors.New("max turns reached")
-
-type MaxTurnsReachedError struct {
-	MaxTurns int
-}
-
-func (e MaxTurnsReachedError) Error() string {
-	return fmt.Sprintf("达到最大执行轮数 %d，未能完成任务", e.MaxTurns)
-}
-
-func (e MaxTurnsReachedError) Unwrap() error {
-	return ErrMaxTurnsReached
-}
-
 type Runner struct {
-	config           AgentConfig
-	conversation     *context.Conversation
-	reqBuilder       *RequestBuilder
-	toolRuntime      *ToolRuntime
-	toolOrchestrator *ToolOrchestrator
-	threadID         string
+	config       AgentConfig
+	conversation *context.Conversation
+	reqBuilder   *RequestBuilder
+	toolRuntime  *ToolRuntime
+	threadID     string
 }
 
 func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *RequestBuilder) *Runner {
-	toolRuntime := NewToolRuntimeWithConfig(nil, toolRuntimeConfigFromAgentConfig(config))
 	return &Runner{
-		config:           config,
-		conversation:     conv,
-		reqBuilder:       reqBuilder,
-		toolRuntime:      toolRuntime,
-		toolOrchestrator: NewToolOrchestrator(toolRuntime, toolOrchestratorConfigFromAgentConfig(config)),
+		config:       config,
+		conversation: conv,
+		reqBuilder:   reqBuilder,
+		toolRuntime:  NewToolRuntimeWithConfig(nil, toolRuntimeConfigFromAgentConfig(config)),
 	}
 }
 
 func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (string, error) {
 	events := newRunEventEmitter(r.threadID, sink)
 	r.toolRuntime = NewToolRuntimeWithConfig(sink, toolRuntimeConfigFromAgentConfig(r.config))
-	r.toolOrchestrator = NewToolOrchestrator(r.toolRuntime, toolOrchestratorConfigFromAgentConfig(r.config))
 	events.runStarted()
 
-	turn := 1
-	for {
+	for i := 0; i < r.config.MaxThoughts; i++ {
 		select {
 		case <-ctx.Done():
 			r.injectSyntheticToolResultsForCancel()
@@ -90,12 +69,6 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 			results := r.executeToolCalls(ctx, toolCalls, events)
 			r.conversation.ToolExchange(response.Content, toolCalls, toolExecutionResultsToContext(results))
 			events.resetTurn()
-			var err error
-			turn, err = r.nextTurnOrMaxTurnsError(turn)
-			if err != nil {
-				events.runErrored(err)
-				return "", err
-			}
 			continue
 		}
 
@@ -106,12 +79,6 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 				return finalAnswer, nil
 			}
 			events.resetTurn()
-			var err error
-			turn, err = r.nextTurnOrMaxTurnsError(turn)
-			if err != nil {
-				events.runErrored(err)
-				return "", err
-			}
 			continue
 		}
 
@@ -125,14 +92,10 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 		events.runFinished(response.Content)
 		return response.Content, nil
 	}
-}
 
-func (r *Runner) nextTurnOrMaxTurnsError(currentTurn int) (int, error) {
-	nextTurn := currentTurn + 1
-	if r.config.MaxTurns > 0 && nextTurn > r.config.MaxTurns {
-		return currentTurn, MaxTurnsReachedError{MaxTurns: r.config.MaxTurns}
-	}
-	return nextTurn, nil
+	err := fmt.Errorf("达到最大思考次数 %d，未能完成任务", r.config.MaxThoughts)
+	events.runErrored(err)
+	return "", err
 }
 
 func (r *Runner) injectSyntheticToolResultsForCancel() {
@@ -177,52 +140,15 @@ func (r *Runner) injectSyntheticToolResultsForCancel() {
 func toolRuntimeConfigFromAgentConfig(config AgentConfig) ToolRuntimeConfig {
 	return ToolRuntimeConfig{
 		PermissionContext: tool.NewPermissionContext(config.Workspace.Root, config.Workspace.WritableRoots),
-		PermissionPolicy:  config.PermissionPolicy.Normalize(),
-		ToolAccessPolicy:  config.ToolAccessPolicy(),
-		PermissionMode:    config.PermissionMode(),
-		Hooks:             config.Hooks,
 	}
 }
 
 func (r *Runner) buildLLMRequest() (LLMRequest, error) {
-	if tokenLimit, charLimit := compactionBudget(r.config.ModelConfig); tokenLimit > 0 || charLimit > 0 {
-		r.conversation.Context.CompactToFit(0, tokenLimit, charLimit)
-	}
 	llmReq := r.reqBuilder.Build(r.conversation.Context, nil)
 	if err := context.ValidateToolResultPairing(llmReq.Messages); err != nil {
 		return LLMRequest{}, fmt.Errorf("invalid tool result pairing: %w", err)
 	}
-	if r.config.UsageLimits.Enabled() {
-		estimate := usage.EstimateInput(llmReq.SystemPrompt, "", llmReq.Messages, llmReq.Tools)
-		if err := usage.NewBudgetGuard(r.config.UsageLimits).Check(estimate); err != nil {
-			return LLMRequest{}, err
-		}
-	}
 	return llmReq, nil
-}
-
-func compactionBudget(cfg ModelConfig) (int, int) {
-	hardLimit := 0
-	if cfg.ContextWindow > 0 {
-		hardLimit = cfg.ContextWindow
-		if cfg.MaxTokens > 0 && hardLimit > cfg.MaxTokens {
-			hardLimit -= cfg.MaxTokens
-		}
-	}
-
-	tokenLimit := cfg.AutoCompactTokenLimit
-	switch {
-	case tokenLimit > 0 && hardLimit > 0 && tokenLimit > hardLimit:
-		tokenLimit = hardLimit
-	case tokenLimit <= 0:
-		tokenLimit = hardLimit
-	}
-
-	if tokenLimit <= 0 {
-		return 0, 0
-	}
-
-	return tokenLimit, tokenLimit * 4
 }
 
 func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*llm.Response, error) {
@@ -235,7 +161,7 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*ll
 		observer.OnContent = llm.StreamCallback(events.onLLMDelta)
 		observer.OnToolCallDelta = events.onToolCallArgsDelta
 	}
-	response, err := llm.StreamInvokeWithObserver(ctx, llm.Config{
+	return llm.StreamInvokeWithObserver(ctx, llm.Config{
 		APIKey:      r.config.ModelConfig.APIKey,
 		BaseURL:     r.config.ModelConfig.BaseURL,
 		Model:       llmReq.Model,
@@ -246,20 +172,7 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*ll
 		SystemPrompt: llmReq.SystemPrompt,
 		Messages:     llmReq.Messages,
 		Tools:        llmReq.Tools,
-		Cache:        llmReq.Cache,
 	}, observer)
-	if err != nil {
-		return nil, err
-	}
-	r.recordUsage(response)
-	return response, nil
-}
-
-func (r *Runner) recordUsage(response *llm.Response) {
-	if r.config.UsageLedger == nil || response == nil || response.Usage == nil {
-		return
-	}
-	r.config.UsageLedger.RecordUsage(*response.Usage)
 }
 
 func (r *Runner) handleXMLFallback(ctx stdcontext.Context, response string, events *runEventEmitter) (bool, string) {
@@ -290,10 +203,27 @@ func (r *Runner) handleXMLFallback(ctx stdcontext.Context, response string, even
 }
 
 func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.ToolCall, events *runEventEmitter) []ToolExecutionResult {
-	if r.toolOrchestrator == nil {
-		r.toolOrchestrator = NewToolOrchestrator(r.toolRuntime, toolOrchestratorConfigFromAgentConfig(r.config))
+	results := make([]ToolExecutionResult, 0, len(toolCalls))
+	for _, call := range toolCalls {
+		if ctx.Err() != nil {
+			results = append(results, syntheticCancelledToolResult(call))
+			continue
+		}
+		if events != nil {
+			events.emitToolCall(call)
+			events.emitToolProgress(call, "Executing tool")
+		}
+		result := r.toolRuntime.Execute(ctx, call)
+		results = append(results, result)
+		if events != nil && call.Function.Name == "apply_patch" && !result.IsError {
+			events.markMutation()
+		}
+		if events != nil {
+			events.emitToolProgress(call, toolProgressForResult(result))
+			events.emitToolResult(result)
+		}
 	}
-	return r.toolOrchestrator.Execute(ctx, toolCalls, events)
+	return results
 }
 
 func toolProgressForResult(result ToolExecutionResult) string {
@@ -378,7 +308,7 @@ func (e *runEventEmitter) emit(event AwakenEvent) {
 	if event.RunID == "" {
 		event.RunID = e.runID
 	}
-	e.sink.Emit(DisplaySafeEvent(event))
+	e.sink.Emit(event)
 }
 
 func (e *runEventEmitter) runStarted() {
@@ -395,55 +325,12 @@ func (e *runEventEmitter) runErrored(err error) {
 	}
 	event := AwakenEvent{Type: RunErrorEventType, Error: err.Error()}
 	switch {
-	case errors.Is(err, ErrMaxTurnsReached):
-		event.Code = "MAX_TURNS_REACHED"
 	case errors.Is(err, llm.ErrMissingAPIKey):
 		event.Code = "PROVIDER_AUTH_MISSING"
 	case errors.Is(err, llm.ErrRequestFailed):
 		event.Code = "PROVIDER_REQUEST_FAILED"
 	}
-	if info := classifyProviderRunError(err); info.ProviderReason != "" {
-		event.ProviderReason = info.ProviderReason
-		event.Retryable = info.Retryable
-		event.RateLimitOptions = info.RateLimitOptions
-	}
 	e.emit(event)
-}
-
-type providerRunErrorInfo struct {
-	ProviderReason   string
-	Retryable        bool
-	RateLimitOptions []RateLimitOption
-}
-
-func classifyProviderRunError(err error) providerRunErrorInfo {
-	var requestErr *llm.RequestError
-	if !errors.As(err, &requestErr) {
-		return providerRunErrorInfo{}
-	}
-	reason := strings.TrimSpace(requestErr.ProviderReason)
-	if reason == "" {
-		reason = string(requestErr.Kind)
-	}
-	info := providerRunErrorInfo{
-		ProviderReason: reason,
-		Retryable:      requestErr.Retryable(),
-	}
-	if requestErr.Kind == llm.ErrorKindRateLimit || reason == "rate_limit" {
-		for _, option := range ratelimitoptions.BuildOptions(ratelimitoptions.MenuInput{
-			SubscriptionType:            ratelimitoptions.SubscriptionPro,
-			ExtraUsageFeatureEnabled:    true,
-			AccountHasExtraUsageEnabled: false,
-			HasBillingAccess:            true,
-			UpgradeEnabled:              true,
-		}) {
-			info.RateLimitOptions = append(info.RateLimitOptions, RateLimitOption{
-				Label: option.Label,
-				Value: string(option.Value),
-			})
-		}
-	}
-	return info
 }
 
 func (e *runEventEmitter) onLLMDelta(content string, isThinking bool) {

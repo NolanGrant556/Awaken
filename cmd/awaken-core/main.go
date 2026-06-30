@@ -7,14 +7,9 @@ import (
 	"os"
 
 	"awaken/src/agentcore"
-	"awaken/src/lifecyclehooks"
 	"awaken/src/llm"
-	"awaken/src/mcp"
-	"awaken/src/memory"
 	"awaken/src/runtime"
 	"awaken/src/server"
-	"awaken/src/skills"
-	"awaken/src/titlegen"
 	_ "awaken/src/tools"
 )
 
@@ -25,50 +20,26 @@ func main() {
 	}
 
 	cfg := llm.LoadConfig()
-	hookConfig := lifecyclehooks.LoadConfig()
 	defaultWorkspace := resolveDefaultWorkspace()
-	mcpRegistry, err := mcp.NewStaticRegistry(nil)
-	if err != nil {
-		log.Fatalf("failed to build MCP registry: %v", err)
-	}
-	skillsRegistry, err := skills.NewStaticRegistry(nil)
-	if err != nil {
-		log.Fatalf("failed to build skills registry: %v", err)
-	}
-	memoryStore, err := memory.NewDefaultStore()
-	if err != nil {
-		log.Printf("memory store disabled: %v", err)
-	}
+	infoProvider := server.NewLLMRuntimeInfoProvider(cfg.Model, cfg.BaseURL, cfg.APIKey, defaultWorkspace, string(llm.ResolveProtocol(cfg)))
 
-	infoProvider := server.NewLLMRuntimeInfoProvider(
-		cfg,
-		defaultWorkspace,
-		server.WithMCPRegistry(mcpRegistry),
-		server.WithSkillsRegistry(skillsRegistry),
-	)
-	persistenceDir := os.Getenv("AWAKEN_TRANSCRIPT_DIR")
-
-	runService := runtime.NewRunServiceWithConfig(
+	runService := runtime.NewRunService(
 		func(workspace runtime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
-				EntryPoint: "awaken-core",
+				MaxThoughts: 5,
+				EntryPoint:  "awaken-core",
 				ModelConfig: agentcore.ModelConfig{
-					APIKey:                cfg.APIKey,
-					BaseURL:               cfg.BaseURL,
-					Model:                 cfg.Model,
-					Temperature:           cfg.Temperature,
-					MaxTokens:             cfg.MaxTokens,
-					ContextWindow:         cfg.ContextWindow,
-					AutoCompactTokenLimit: cfg.AutoCompactTokenLimit,
-					AuthScheme:            cfg.AuthScheme,
+					APIKey:      cfg.APIKey,
+					BaseURL:     cfg.BaseURL,
+					Model:       cfg.Model,
+					Temperature: cfg.Temperature,
+					MaxTokens:   cfg.MaxTokens,
+					AuthScheme:  cfg.AuthScheme,
 				},
 				Workspace: agentcore.WorkspaceConfig{
 					Root:          workspace.WorkspaceRoot,
 					WritableRoots: workspace.WritableRoots,
 				},
-				MCPRegistry: mcpRegistry,
-				Skills:      skillsRegistry,
-				Hooks:       hookConfig,
 			}
 			return agentcore.NewAgentWithThreadID(agentCfg, threadID)
 		},
@@ -77,16 +48,11 @@ func main() {
 				return agent.RunStreamWithEvents(ctx, input, sink)
 			})
 		},
-		runtime.RunServiceConfig{
-			Hooks:          hookConfig,
-			TitleGenerator: titlegen.NewLLMGenerator(titlegen.LLMGeneratorOptions{Config: cfg}),
-		},
-		runtime.WithPersistenceDir(persistenceDir),
 	)
 
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: server.NewRouterWithMemory(runService, infoProvider, memoryStore),
+		Handler: server.NewRouter(runService, infoProvider),
 	}
 
 	log.Printf("awaken-core listening on http://%s", addr)

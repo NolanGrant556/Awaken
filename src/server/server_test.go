@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,15 +19,9 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
-	"awaken/src/agentdefs"
-	convcontext "awaken/src/context"
 	"awaken/src/llm"
-	"awaken/src/mcp"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
-	"awaken/src/skills"
-	"awaken/src/slashcommands"
-	"awaken/src/tool"
 	_ "awaken/src/tools"
 )
 
@@ -80,22 +73,9 @@ func TestRuntimeInfoEndpoint(t *testing.T) {
 			APIVersion:       "v1",
 			ConfiguredModel:  "gpt-4-test",
 			Protocol:         "openai_chat",
-			AuthScheme:       "bearer",
 			HasAPIKey:        true,
 			DefaultWorkspace: "/tmp/awaken-test",
 			BaseURLHost:      "api.example.com",
-			ActiveProfile:    "openai-default",
-			Profiles: []RuntimeProfileInfo{
-				{
-					Name:        "openai-default",
-					Model:       "gpt-4-test",
-					Protocol:    "openai_chat",
-					AuthScheme:  "bearer",
-					HasAPIKey:   true,
-					BaseURLHost: "api.example.com",
-					IsActive:    true,
-				},
-			},
 		},
 	}
 
@@ -125,9 +105,6 @@ func TestRuntimeInfoEndpoint(t *testing.T) {
 	if info.ConfiguredModel != "gpt-4-test" {
 		t.Fatalf("expected configured_model gpt-4-test, got %q", info.ConfiguredModel)
 	}
-	if info.AuthScheme != "bearer" {
-		t.Fatalf("expected auth_scheme bearer, got %q", info.AuthScheme)
-	}
 	if !info.HasAPIKey {
 		t.Fatalf("expected has_api_key true")
 	}
@@ -136,21 +113,6 @@ func TestRuntimeInfoEndpoint(t *testing.T) {
 	}
 	if info.BaseURLHost != "api.example.com" {
 		t.Fatalf("expected base_url_host api.example.com, got %q", info.BaseURLHost)
-	}
-	if info.ActiveProfile != "openai-default" {
-		t.Fatalf("expected active_profile openai-default, got %q", info.ActiveProfile)
-	}
-	if len(info.Profiles) != 1 {
-		t.Fatalf("expected 1 profile, got %d", len(info.Profiles))
-	}
-	if !info.Profiles[0].IsActive {
-		t.Fatalf("expected first profile to be active")
-	}
-	if !hasRuntimeSlashCommand(info.SlashCommands, "plan") ||
-		!hasRuntimeSlashCommand(info.SlashCommands, "review") ||
-		!hasRuntimeSlashCommand(info.SlashCommands, "fix") ||
-		!hasRuntimeSlashCommand(info.SlashCommands, "explain") {
-		t.Fatalf("expected runtime info to expose built-in slash commands, got %+v", info.SlashCommands)
 	}
 
 	body := rec.Body.String()
@@ -163,66 +125,13 @@ func TestRuntimeInfoEndpoint(t *testing.T) {
 }
 
 func TestRuntimeInfoEndpointDoesNotLeakSecrets(t *testing.T) {
-	mcpRegistry, err := mcp.NewStaticRegistry([]mcp.Server{{
-		Config: mcp.ServerConfig{
-			ID:        "docs",
-			Name:      "Docs",
-			Transport: mcp.TransportHTTP,
-			Enabled:   true,
-			URL:       "https://example.invalid/mcp",
-			Headers: map[string]string{
-				"Authorization": "Bearer runtime-secret",
-				"x-api-key":     "runtime-api-key",
-			},
-		},
-		State: mcp.ServerRuntime{
-			Mode:   mcp.RuntimeModeStatic,
-			Status: mcp.ServerStatusReady,
-		},
-		Tools: []mcp.ToolDescriptor{{
-			Name:          "search",
-			Description:   "Search docs",
-			ExposeToModel: true,
-			InputSchema: tool.ToolParametersSchema{
-				Type: "object",
-				Properties: map[string]tool.ToolParam{
-					"query": {Type: "string", Description: "Search query"},
-				},
-				Required: []string{"query"},
-			},
-		}},
-	}})
-	if err != nil {
-		t.Fatalf("failed to build MCP registry: %v", err)
-	}
-	skillsRegistry, err := skills.NewStaticRegistry([]skills.Definition{{
-		ID:          "review",
-		Name:        "Review",
-		Description: "Review code changes",
-		Enabled:     true,
-	}})
-	if err != nil {
-		t.Fatalf("failed to build skills registry: %v", err)
-	}
-
-	provider := NewLLMRuntimeInfoProvider(llm.Config{
-		APIKey:        "sk-secret-key-must-not-appear",
-		BaseURL:       "https://api.anthropic.com/v1",
-		Model:         "claude-test",
-		Protocol:      llm.ProtocolAnthropicMessages,
-		AuthScheme:    "x-api-key",
-		ActiveProfile: "anthropic-prod",
-		Profiles: []llm.Profile{
-			{
-				Name:       "anthropic-prod",
-				BaseURL:    "https://api.anthropic.com/v1",
-				Model:      "claude-test",
-				Protocol:   llm.ProtocolAnthropicMessages,
-				AuthScheme: "x-api-key",
-				HasAPIKey:  true,
-			},
-		},
-	}, "/workspace/secret", WithMCPRegistry(mcpRegistry), WithSkillsRegistry(skillsRegistry))
+	provider := NewLLMRuntimeInfoProvider(
+		"claude-test",
+		"https://api.anthropic.com/v1",
+		"sk-secret-key-must-not-appear",
+		"/workspace/secret",
+		"anthropic_messages",
+	)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/runtime/info", nil)
 	rec := httptest.NewRecorder()
@@ -234,15 +143,11 @@ func TestRuntimeInfoEndpointDoesNotLeakSecrets(t *testing.T) {
 	}
 
 	body := rec.Body.String()
-	for _, secret := range []string{
-		"sk-secret-key-must-not-appear",
-		"https://api.anthropic.com/v1",
-		"Bearer runtime-secret",
-		"runtime-api-key",
-	} {
-		if strings.Contains(body, secret) {
-			t.Fatalf("response body leaked secret %q", secret)
-		}
+	if strings.Contains(body, "sk-secret-key-must-not-appear") {
+		t.Fatalf("response body leaked api key")
+	}
+	if strings.Contains(body, "https://api.anthropic.com/v1") {
+		t.Fatalf("response body leaked full base url")
 	}
 
 	var info RuntimeInfo
@@ -255,210 +160,6 @@ func TestRuntimeInfoEndpointDoesNotLeakSecrets(t *testing.T) {
 	if info.Protocol != "anthropic_messages" {
 		t.Fatalf("expected protocol anthropic_messages, got %q", info.Protocol)
 	}
-	if info.AuthScheme != "x-api-key" {
-		t.Fatalf("expected auth_scheme x-api-key, got %q", info.AuthScheme)
-	}
-	if info.ActiveProfile != "anthropic-prod" {
-		t.Fatalf("expected active_profile anthropic-prod, got %q", info.ActiveProfile)
-	}
-	if len(info.Profiles) != 1 || info.Profiles[0].Name != "anthropic-prod" {
-		t.Fatalf("expected anthropic profile metadata, got %+v", info.Profiles)
-	}
-	if info.Capabilities.MCP.Summary.ExposedToolCount != 1 {
-		t.Fatalf("expected 1 exposed MCP tool, got %+v", info.Capabilities.MCP.Summary)
-	}
-	if info.Capabilities.MCP.Servers[0].Config.Headers["Authorization"] != mcp.RedactedHeaderValue {
-		t.Fatalf("expected Authorization header to be redacted, got %+v", info.Capabilities.MCP.Servers[0].Config.Headers)
-	}
-	if info.Capabilities.MCP.Servers[0].Config.Headers["x-api-key"] != mcp.RedactedHeaderValue {
-		t.Fatalf("expected x-api-key header to be redacted, got %+v", info.Capabilities.MCP.Servers[0].Config.Headers)
-	}
-	if info.Capabilities.Skills.Summary.EnabledSkillCount != 1 {
-		t.Fatalf("expected 1 enabled skill, got %+v", info.Capabilities.Skills.Summary)
-	}
-}
-
-func TestRuntimeInfoProfilesInferProtocolWithoutGlobalEnvLeakage(t *testing.T) {
-	t.Setenv("LLM_PROTOCOL", "openai_chat")
-
-	provider := NewLLMRuntimeInfoProvider(llm.Config{
-		APIKey:        "test-key",
-		BaseURL:       "https://api.openai.com/v1",
-		Model:         "gpt-4-test",
-		Protocol:      llm.ProtocolOpenAIChat,
-		AuthScheme:    "bearer",
-		ActiveProfile: "openai-default",
-		Profiles: []llm.Profile{
-			{
-				Name:       "openai-default",
-				BaseURL:    "https://api.openai.com/v1",
-				Model:      "gpt-4-test",
-				Protocol:   llm.ProtocolOpenAIChat,
-				AuthScheme: "bearer",
-				HasAPIKey:  true,
-			},
-			{
-				Name:      "anthropic-prod",
-				BaseURL:   "https://api.anthropic.com/v1",
-				Model:     "claude-sonnet-4-5",
-				HasAPIKey: true,
-			},
-		},
-	}, "/workspace/test")
-
-	info := provider.GetRuntimeInfo()
-
-	if len(info.Profiles) != 2 {
-		t.Fatalf("expected 2 profiles, got %d", len(info.Profiles))
-	}
-	if info.Profiles[1].Protocol != "anthropic_messages" {
-		t.Fatalf("expected anthropic profile protocol anthropic_messages, got %q", info.Profiles[1].Protocol)
-	}
-}
-
-func TestCapabilitiesEndpoint(t *testing.T) {
-	provider := &StaticRuntimeInfoProvider{
-		Info: RuntimeInfo{
-			RuntimeVersion: RuntimeVersion,
-			APIVersion:     "v1",
-			Capabilities: CapabilitiesSnapshot{
-				MCP: mcp.Snapshot{
-					Servers: []mcp.Server{{
-						Config: mcp.ServerConfig{
-							ID:        "fs",
-							Name:      "Filesystem",
-							Transport: mcp.TransportStdio,
-							Enabled:   false,
-							Command:   "npx",
-							Headers: map[string]string{
-								"Authorization": "Bearer hidden-cap-secret",
-								"x-api-key":     "cap-api-key",
-							},
-						},
-						State: mcp.ServerRuntime{
-							Mode:   mcp.RuntimeModeTestDouble,
-							Status: mcp.ServerStatusDisabled,
-						},
-					}},
-					Summary: mcp.SnapshotSummary{ServerCount: 1},
-				},
-				Skills: skills.Snapshot{
-					Skills: []skills.Definition{{
-						ID:          "review",
-						Name:        "Review",
-						Description: "Review code",
-						Enabled:     true,
-					}},
-					Summary: skills.Summary{SkillCount: 1, EnabledSkillCount: 1},
-				},
-			},
-		},
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/capabilities", nil)
-	rec := httptest.NewRecorder()
-	NewRouter(nil, provider).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-	body := rec.Body.String()
-	for _, secret := range []string{"Bearer hidden-cap-secret", "cap-api-key"} {
-		if strings.Contains(body, secret) {
-			t.Fatalf("capabilities payload leaked MCP header secret %q", secret)
-		}
-	}
-
-	var payload CapabilitiesSnapshot
-	if err := json.NewDecoder(strings.NewReader(body)).Decode(&payload); err != nil {
-		t.Fatalf("failed to decode capabilities: %v", err)
-	}
-	if payload.MCP.Summary.ServerCount != 1 {
-		t.Fatalf("expected MCP summary in payload, got %+v", payload.MCP.Summary)
-	}
-	if payload.MCP.Servers[0].Config.Headers["Authorization"] != mcp.RedactedHeaderValue {
-		t.Fatalf("expected Authorization header to be redacted, got %+v", payload.MCP.Servers[0].Config.Headers)
-	}
-	if payload.MCP.Servers[0].Config.Headers["x-api-key"] != mcp.RedactedHeaderValue {
-		t.Fatalf("expected x-api-key header to be redacted, got %+v", payload.MCP.Servers[0].Config.Headers)
-	}
-	if payload.Skills.Summary.EnabledSkillCount != 1 {
-		t.Fatalf("expected skills summary in payload, got %+v", payload.Skills.Summary)
-	}
-}
-
-func TestAgentDefinitionsEndpoint(t *testing.T) {
-	root := t.TempDir()
-	agentDir := filepath.Join(root, ".awaken", "agents")
-	if err := os.MkdirAll(agentDir, 0755); err != nil {
-		t.Fatalf("failed to create agent dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(agentDir, "reviewer.md"), []byte(`---
-name: reviewer
-description: Reviews code
-tools: [read_file, grep_search]
----
-Review carefully.
-`), 0644); err != nil {
-		t.Fatalf("failed to write agent definition: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/agent-definitions?workspace_root="+url.QueryEscape(root), nil)
-	rec := httptest.NewRecorder()
-
-	NewRouter(nil, nil).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d body %s", rec.Code, rec.Body.String())
-	}
-	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "application/json") {
-		t.Fatalf("expected json content type, got %q", got)
-	}
-
-	var result agentdefs.Result
-	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-	if result.WorkspaceRoot != root {
-		t.Fatalf("expected workspace root %q, got %q", root, result.WorkspaceRoot)
-	}
-	if len(result.Definitions) != 1 {
-		t.Fatalf("expected one definition, got %+v", result.Definitions)
-	}
-	def := result.Definitions[0]
-	if def.Name != "reviewer" || def.SystemPrompt != "Review carefully." {
-		t.Fatalf("unexpected definition: %+v", def)
-	}
-	if def.Source.RelativePath != ".awaken/agents/reviewer.md" {
-		t.Fatalf("unexpected source path: %+v", def.Source)
-	}
-}
-
-func TestAgentDefinitionsEndpointReturnsStructuredWorkspaceError(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/v1/agent-definitions", nil)
-	rec := httptest.NewRecorder()
-
-	NewRouter(nil, nil).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", rec.Code)
-	}
-	var response errorResponse
-	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
-		t.Fatalf("failed to decode error response: %v", err)
-	}
-	if response.Error != "INVALID_WORKSPACE" {
-		t.Fatalf("expected INVALID_WORKSPACE, got %+v", response)
-	}
-}
-
-func hasRuntimeSlashCommand(commands []slashcommands.CommandInfo, name string) bool {
-	for _, command := range commands {
-		if command.Name == name {
-			return command.Description != ""
-		}
-	}
-	return false
 }
 
 func TestRunsEndpointsCreateReplayAndCancel(t *testing.T) {
@@ -546,72 +247,6 @@ func TestRunsEndpointsCreateReplayAndCancel(t *testing.T) {
 	defer cancelResp.Body.Close()
 	if cancelResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 from cancel terminal run, got %d", cancelResp.StatusCode)
-	}
-}
-
-func TestAuditEventsEndpointIsReadOnlyAndDoesNotChangeRunEvents(t *testing.T) {
-	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
-		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
-			sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextMessageStartedEventType, MessageID: "msg-1", Role: "assistant"})
-			sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextDeltaEventType, MessageID: "msg-1", Role: "assistant", Delta: "hello"})
-			sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextMessageFinishedEventType, MessageID: "msg-1"})
-			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
-			return "done", nil
-		})
-	})
-	ts := httptest.NewServer(NewRouter(runService, nil))
-	defer ts.Close()
-
-	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello","workspace":{"workspace_root":"/tmp/awaken-test-workspace"}}`))
-	if err != nil {
-		t.Fatalf("POST /v1/runs failed: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("expected 201, got %d", resp.StatusCode)
-	}
-	var created awruntime.Run
-	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
-		t.Fatalf("failed to decode create response: %v", err)
-	}
-	waitHTTPRunTerminal(t, ts.URL, created.RunID)
-
-	auditResp, err := http.Get(ts.URL + "/v1/audit/events?run_id=" + created.RunID)
-	if err != nil {
-		t.Fatalf("GET /v1/audit/events failed: %v", err)
-	}
-	defer auditResp.Body.Close()
-	if auditResp.StatusCode != http.StatusOK {
-		t.Fatalf("expected audit endpoint 200, got %d", auditResp.StatusCode)
-	}
-	var auditBody auditEventsResponse
-	if err := json.NewDecoder(auditResp.Body).Decode(&auditBody); err != nil {
-		t.Fatalf("failed to decode audit response: %v", err)
-	}
-	if len(auditBody.Events) != 2 {
-		t.Fatalf("expected run started and finished audit events, got %+v", auditBody.Events)
-	}
-	if auditBody.Events[0].Type != agentcore.SecurityAuditRunStarted || auditBody.Events[1].Type != agentcore.SecurityAuditRunFinished {
-		t.Fatalf("unexpected audit events: %+v", auditBody.Events)
-	}
-
-	streamResp, err := http.Get(ts.URL + "/v1/runs/" + created.RunID + "/events")
-	if err != nil {
-		t.Fatalf("GET run events failed: %v", err)
-	}
-	defer streamResp.Body.Close()
-	streamBody, err := io.ReadAll(streamResp.Body)
-	if err != nil {
-		t.Fatalf("failed to read run event stream: %v", err)
-	}
-	for _, token := range []string{"RUN_STARTED", "TEXT_MESSAGE_CONTENT", "RUN_FINISHED"} {
-		if !strings.Contains(string(streamBody), token) {
-			t.Fatalf("expected SSE body to contain %q, got %s", token, streamBody)
-		}
-	}
-	if strings.Contains(string(streamBody), "tool_execution") || strings.Contains(string(streamBody), "approval_requested") {
-		t.Fatalf("SSE body should not contain audit event types, got %s", streamBody)
 	}
 }
 
@@ -719,120 +354,6 @@ func TestCreateRunEmptyInputReturnsInvalidInput(t *testing.T) {
 	}
 	if errResp.Message != "input is required" {
 		t.Fatalf("expected message 'input is required', got %q", errResp.Message)
-	}
-}
-
-func TestCreateRunProfileOverridesFlowIntoAgentConfig(t *testing.T) {
-	root := t.TempDir()
-	captured := make(chan agentcore.AgentConfig, 1)
-	runService := awruntime.NewRunService(
-		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
-			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
-				SystemPrompt: "default prompt",
-				MaxTurns:     5,
-				ModelConfig: agentcore.ModelConfig{
-					Model: "default-model",
-				},
-				Workspace: agentcore.WorkspaceConfig{
-					Root:          workspace.WorkspaceRoot,
-					WritableRoots: workspace.WritableRoots,
-				},
-			}, threadID)
-		},
-		func(agent *agentcore.Agent) awruntime.Executor {
-			captured <- agent.GetConfig()
-			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
-				return "done", nil
-			})
-		},
-	)
-
-	ts := httptest.NewServer(NewRouter(runService, nil))
-	defer ts.Close()
-
-	body := fmt.Sprintf(`{"input":"hello","workspace":{"workspace_root":%q},"profile":{"id":"analysis","model":"override-model","max_turns":2,"tools":["list_files"],"disallowed_tools":["shell"]}}`, root)
-	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(body))
-	if err != nil {
-		t.Fatalf("POST /v1/runs failed: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("expected 201, got %d", resp.StatusCode)
-	}
-
-	cfg := <-captured
-	if cfg.ModelConfig.Model != "override-model" {
-		t.Fatalf("expected overridden model, got %q", cfg.ModelConfig.Model)
-	}
-	if cfg.MaxTurns != 2 {
-		t.Fatalf("expected overridden max turns, got %d", cfg.MaxTurns)
-	}
-	if cfg.RunProfile.ID != "analysis" || len(cfg.RunProfile.Tools) != 1 || cfg.RunProfile.Tools[0] != "list_files" {
-		t.Fatalf("expected normalized run profile on agent config, got %+v", cfg.RunProfile)
-	}
-}
-
-func TestCreateRunUnknownSlashCommandReturnsInvalidSlashCommand(t *testing.T) {
-	called := make(chan struct{}, 1)
-	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
-		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-			called <- struct{}{}
-			return "", nil
-		})
-	})
-
-	router := NewRouter(runService, nil)
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/runs", strings.NewReader(`{"input":"/unknown details","workspace":{"workspace_root":"/tmp"}}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for unknown slash command, got %d", rec.Code)
-	}
-
-	var errResp errorResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
-		t.Fatalf("expected JSON error response, got %q", rec.Body.String())
-	}
-	if errResp.Error != "INVALID_SLASH_COMMAND" {
-		t.Fatalf("expected INVALID_SLASH_COMMAND error, got %q", errResp.Error)
-	}
-	if !strings.Contains(errResp.Message, "unknown slash command") {
-		t.Fatalf("expected message to mention unknown slash command, got %q", errResp.Message)
-	}
-	select {
-	case <-called:
-		t.Fatal("executor should not run for invalid slash command")
-	default:
-	}
-}
-
-func TestCreateRunAbsolutePathPromptIsPlainInput(t *testing.T) {
-	received := make(chan string, 1)
-	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
-		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-			received <- input
-			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
-			return "done", nil
-		})
-	})
-
-	router := NewRouter(runService, nil)
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/runs", strings.NewReader(`{"input":"/tmp foo","workspace":{"workspace_root":"/tmp"}}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected 201 for absolute path prompt, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	if got := <-received; got != "/tmp foo" {
-		t.Fatalf("expected executor to receive plain input, got %q", got)
 	}
 }
 
@@ -1067,226 +588,6 @@ func TestListThreadsEndpointReturnsRuntimeThreads(t *testing.T) {
 	if threads[0].Label != "hello list" {
 		t.Fatalf("expected label from first input, got %q", threads[0].Label)
 	}
-	if threads[0].LatestRun == nil {
-		t.Fatalf("expected latest_run summary in thread list response")
-	}
-	if threads[0].LatestRun.RunID != created.RunID {
-		t.Fatalf("expected latest_run id %q, got %q", created.RunID, threads[0].LatestRun.RunID)
-	}
-	if threads[0].LatestRun.Status != awruntime.RunStatusFinished {
-		t.Fatalf("expected latest_run status finished, got %s", threads[0].LatestRun.Status)
-	}
-}
-
-func TestWave1ThreadEndpointsExposeLiteContextInsightsAndBranch(t *testing.T) {
-	runService := awruntime.NewRunService(
-		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
-			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
-				ModelConfig: agentcore.ModelConfig{
-					Model:         "test-model",
-					ContextWindow: 2000,
-				},
-				Workspace: agentcore.WorkspaceConfig{
-					Root:          workspace.WorkspaceRoot,
-					WritableRoots: workspace.WritableRoots,
-				},
-			}, threadID)
-		},
-		func(agent *agentcore.Agent) awruntime.Executor {
-			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-				agent.GetConversation().UserInput(input)
-				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
-				sink.Emit(agentcore.AwakenEvent{Type: agentcore.ToolCallStartedEventType, ToolCallID: "tool-1", ToolName: "read_file"})
-				sink.Emit(agentcore.AwakenEvent{Type: agentcore.ToolCallArgsEventType, ToolCallID: "tool-1", ToolName: "read_file", Arguments: `{"path":"README.md"}`})
-				answer := "README.md is available."
-				agent.GetConversation().AssistantOutput(answer, nil)
-				sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextMessageFinishedEventType, MessageID: "msg-1", Role: "assistant"})
-				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: answer})
-				return answer, nil
-			})
-		},
-	)
-
-	ts := httptest.NewServer(NewRouter(runService, nil))
-	defer ts.Close()
-
-	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"Summarize README","workspace":{"workspace_root":"/tmp"}}`))
-	if err != nil {
-		t.Fatalf("POST /v1/runs failed: %v", err)
-	}
-	defer resp.Body.Close()
-	var created awruntime.Run
-	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
-		t.Fatalf("failed to decode run response: %v", err)
-	}
-	waitHTTPRunTerminal(t, ts.URL, created.RunID)
-
-	var threads []awruntime.ThreadSnapshot
-	getJSON(t, ts.URL+"/v1/threads", &threads)
-	if len(threads) != 1 || threads[0].Metadata.AITitle == "" || threads[0].State != "idle" {
-		t.Fatalf("expected thread list metadata/state, got %+v", threads)
-	}
-
-	var lite awruntime.ThreadLiteSnapshot
-	getJSON(t, ts.URL+"/v1/threads/"+created.ThreadID+"/lite", &lite)
-	if lite.Size == 0 || !strings.Contains(lite.Head, created.ThreadID) {
-		t.Fatalf("expected lite snapshot to include thread id, got %+v", lite)
-	}
-
-	var threadContext awruntime.ThreadContextSnapshot
-	getJSON(t, ts.URL+"/v1/threads/"+created.ThreadID+"/context", &threadContext)
-	if !strings.Contains(threadContext.Files.Markdown, "README.md") {
-		t.Fatalf("expected context endpoint to expose README.md, got %q", threadContext.Files.Markdown)
-	}
-	if threadContext.Usage.TotalTokens == 0 {
-		t.Fatalf("expected context usage tokens, got %+v", threadContext.Usage)
-	}
-
-	var insights map[string]any
-	getJSON(t, ts.URL+"/v1/session-insights", &insights)
-	overview, _ := insights["overview"].(map[string]any)
-	if overview["total_sessions"] == nil {
-		t.Fatalf("expected session insights overview, got %+v", insights)
-	}
-
-	branchResp, err := http.Post(ts.URL+"/v1/threads/"+created.ThreadID+"/branches", "application/json", strings.NewReader(`{}`))
-	if err != nil {
-		t.Fatalf("POST branch failed: %v", err)
-	}
-	defer branchResp.Body.Close()
-	if branchResp.StatusCode != http.StatusCreated {
-		t.Fatalf("expected 201 from branch endpoint, got %d", branchResp.StatusCode)
-	}
-	var branch awruntime.BranchThreadResult
-	if err := json.NewDecoder(branchResp.Body).Decode(&branch); err != nil {
-		t.Fatalf("failed to decode branch response: %v", err)
-	}
-	if branch.Thread.Metadata.Branch == nil || branch.Thread.Metadata.Branch.OriginalThreadID != created.ThreadID {
-		t.Fatalf("expected branch metadata, got %+v", branch.Thread.Metadata.Branch)
-	}
-}
-
-func TestScheduledRunsEndpointsCreateListCancel(t *testing.T) {
-	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
-		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-			return "done", nil
-		})
-	})
-
-	ts := httptest.NewServer(NewRouter(runService, nil))
-	defer ts.Close()
-
-	runAt := time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano)
-	body := fmt.Sprintf(`{"input":"scheduled hello","workspace":{"workspace_root":"/tmp"},"run_at":%q}`, runAt)
-	createResp, err := http.Post(ts.URL+"/v1/scheduled-runs", "application/json", strings.NewReader(body))
-	if err != nil {
-		t.Fatalf("POST /v1/scheduled-runs failed: %v", err)
-	}
-	defer createResp.Body.Close()
-	if createResp.StatusCode != http.StatusCreated {
-		t.Fatalf("expected 201, got %d", createResp.StatusCode)
-	}
-	var created awruntime.ScheduledRun
-	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
-		t.Fatalf("failed to decode scheduled run create response: %v", err)
-	}
-	if created.ID == "" {
-		t.Fatalf("expected scheduled run id")
-	}
-	if created.Status != awruntime.ScheduledRunStatusScheduled {
-		t.Fatalf("expected scheduled status, got %s", created.Status)
-	}
-	if created.RunID != "" {
-		t.Fatalf("expected no run_id before trigger, got %q", created.RunID)
-	}
-
-	listResp, err := http.Get(ts.URL + "/v1/scheduled-runs")
-	if err != nil {
-		t.Fatalf("GET /v1/scheduled-runs failed: %v", err)
-	}
-	defer listResp.Body.Close()
-	if listResp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 from list, got %d", listResp.StatusCode)
-	}
-	var listed []awruntime.ScheduledRun
-	if err := json.NewDecoder(listResp.Body).Decode(&listed); err != nil {
-		t.Fatalf("failed to decode scheduled run list: %v", err)
-	}
-	if len(listed) != 1 || listed[0].ID != created.ID {
-		t.Fatalf("expected listed scheduled run %q, got %+v", created.ID, listed)
-	}
-
-	cancelReq, err := http.NewRequest(http.MethodDelete, ts.URL+"/v1/scheduled-runs/"+created.ID, nil)
-	if err != nil {
-		t.Fatalf("failed to build cancel request: %v", err)
-	}
-	cancelResp, err := http.DefaultClient.Do(cancelReq)
-	if err != nil {
-		t.Fatalf("DELETE /v1/scheduled-runs/{id} failed: %v", err)
-	}
-	defer cancelResp.Body.Close()
-	if cancelResp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 from cancel, got %d", cancelResp.StatusCode)
-	}
-	var cancelled awruntime.ScheduledRun
-	if err := json.NewDecoder(cancelResp.Body).Decode(&cancelled); err != nil {
-		t.Fatalf("failed to decode cancel response: %v", err)
-	}
-	if cancelled.Status != awruntime.ScheduledRunStatusCancelled {
-		t.Fatalf("expected cancelled status, got %s", cancelled.Status)
-	}
-}
-
-func TestScheduledRunsEndpointsValidationAndNotFound(t *testing.T) {
-	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
-		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-			return "done", nil
-		})
-	})
-
-	router := NewRouter(runService, nil)
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/scheduled-runs", strings.NewReader(`{"input":"   ","workspace":{"workspace_root":"/tmp"},"run_at":"2026-06-28T10:00:00Z"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for empty input, got %d", rec.Code)
-	}
-	var errResp errorResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
-		t.Fatalf("expected JSON error response, got %q", rec.Body.String())
-	}
-	if errResp.Error != "INVALID_INPUT" {
-		t.Fatalf("expected INVALID_INPUT error, got %q", errResp.Error)
-	}
-
-	req = httptest.NewRequest(http.MethodPost, "/v1/scheduled-runs", strings.NewReader(`{"input":"hello","workspace":{"workspace_root":"/tmp"}}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for missing run_at, got %d", rec.Code)
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
-		t.Fatalf("expected JSON error response, got %q", rec.Body.String())
-	}
-	if errResp.Error != "INVALID_RUN_AT" {
-		t.Fatalf("expected INVALID_RUN_AT error, got %q", errResp.Error)
-	}
-
-	req = httptest.NewRequest(http.MethodDelete, "/v1/scheduled-runs/missing", nil)
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 for missing scheduled run, got %d", rec.Code)
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
-		t.Fatalf("expected JSON error response, got %q", rec.Body.String())
-	}
-	if errResp.Error != "SCHEDULED_RUN_NOT_FOUND" {
-		t.Fatalf("expected SCHEDULED_RUN_NOT_FOUND error, got %q", errResp.Error)
-	}
 }
 
 func TestGetThreadTranscriptEndpointReturnsMappedRuns(t *testing.T) {
@@ -1365,266 +666,6 @@ func TestGetThreadTranscriptEndpointReturnsMappedRuns(t *testing.T) {
 	}
 }
 
-func TestWave2ThreadCapabilityEndpoints(t *testing.T) {
-	runService := newWave2HTTPRunService()
-	ts := httptest.NewServer(NewRouter(runService, nil))
-	defer ts.Close()
-
-	createResp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{
-		"input":"Summarize README endpoint wave2 with api_key=sk-proj-wave2endpoint",
-		"workspace":{"workspace_root":"/tmp/awaken-wave2-endpoint"}
-	}`))
-	if err != nil {
-		t.Fatalf("POST /v1/runs failed: %v", err)
-	}
-	defer createResp.Body.Close()
-	if createResp.StatusCode != http.StatusCreated {
-		t.Fatalf("expected 201 from create run, got %d", createResp.StatusCode)
-	}
-	var created awruntime.Run
-	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
-		t.Fatalf("failed to decode created run: %v", err)
-	}
-	waitHTTPRunTerminal(t, ts.URL, created.RunID)
-
-	var searchResults []awruntime.ThreadSearchResult
-	searchURL := ts.URL + "/v1/threads/search?q=" + url.QueryEscape("README endpoint wave2") + "&limit=5"
-	getJSON(t, searchURL, &searchResults)
-	if len(searchResults) != 1 || searchResults[0].Thread.ThreadID != created.ThreadID {
-		t.Fatalf("unexpected search response: %+v", searchResults)
-	}
-
-	var textExport awruntime.ThreadExportResult
-	getJSON(t, ts.URL+"/v1/threads/"+created.ThreadID+"/export?format=plain_text", &textExport)
-	if textExport.Format != awruntime.ThreadExportPlainText ||
-		textExport.ContentType != "text/plain; charset=utf-8" ||
-		!strings.Contains(textExport.Content, "read_file") ||
-		!strings.Contains(textExport.Content, "README endpoint wave2") {
-		t.Fatalf("unexpected text export response: %+v", textExport)
-	}
-
-	var jsonlExport awruntime.ThreadExportResult
-	getJSON(t, ts.URL+"/v1/threads/"+created.ThreadID+"/export?format=jsonl", &jsonlExport)
-	if jsonlExport.Format != awruntime.ThreadExportJSONL ||
-		jsonlExport.ContentType != "application/x-ndjson; charset=utf-8" ||
-		!strings.Contains(jsonlExport.Content, `"role":"tool"`) {
-		t.Fatalf("unexpected JSONL export response: %+v", jsonlExport)
-	}
-
-	shareResp, err := http.Post(
-		ts.URL+"/v1/threads/"+created.ThreadID+"/share-bundle",
-		"application/json",
-		strings.NewReader(`{"visibility":"public","action":"share","redact_secrets":false}`),
-	)
-	if err != nil {
-		t.Fatalf("POST /v1/threads/{thread_id}/share-bundle failed: %v", err)
-	}
-	defer shareResp.Body.Close()
-	shareBody, err := io.ReadAll(shareResp.Body)
-	if err != nil {
-		t.Fatalf("failed to read share bundle error response: %v", err)
-	}
-	if shareResp.StatusCode != http.StatusConflict {
-		t.Fatalf("expected 409 from unsafe share bundle endpoint, got %d body=%s", shareResp.StatusCode, shareBody)
-	}
-	if strings.Contains(string(shareBody), "sk-proj-wave2endpoint") {
-		t.Fatalf("unsafe share bundle response leaked secret: %s", shareBody)
-	}
-	var shareError errorResponse
-	if err := json.Unmarshal(shareBody, &shareError); err != nil {
-		t.Fatalf("failed to decode share bundle error response: %v", err)
-	}
-	if shareError.Error != "UNSAFE_PUBLIC_BUNDLE" {
-		t.Fatalf("expected UNSAFE_PUBLIC_BUNDLE error, got %+v", shareError)
-	}
-
-	clearResp, err := http.Post(ts.URL+"/v1/threads/"+created.ThreadID+"/clear-plan", "application/json", strings.NewReader(`{}`))
-	if err != nil {
-		t.Fatalf("POST /v1/threads/{thread_id}/clear-plan failed: %v", err)
-	}
-	defer clearResp.Body.Close()
-	if clearResp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 from clear plan endpoint, got %d", clearResp.StatusCode)
-	}
-	var clearPlan awruntime.ThreadClearPlanResult
-	if err := json.NewDecoder(clearResp.Body).Decode(&clearPlan); err != nil {
-		t.Fatalf("failed to decode clear plan response: %v", err)
-	}
-	if !clearPlan.Plan.ClearMessages ||
-		clearPlan.Plan.Session.PreviousID != created.ThreadID ||
-		clearPlan.Plan.CacheEvictionHint == nil ||
-		clearPlan.Plan.CacheEvictionHint.LastRequestID != created.RunID {
-		t.Fatalf("unexpected clear plan response: %+v", clearPlan.Plan)
-	}
-}
-
-func TestCreateRunWithoutDelegationOmitsDelegationField(t *testing.T) {
-	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
-		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
-			return "done", nil
-		})
-	})
-
-	ts := httptest.NewServer(NewRouter(runService, nil))
-	defer ts.Close()
-
-	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"ordinary","workspace":{"workspace_root":"/tmp"}}`))
-	if err != nil {
-		t.Fatalf("POST /v1/runs failed: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("expected 201, got %d", resp.StatusCode)
-	}
-
-	var payload map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		t.Fatalf("failed to decode create response: %v", err)
-	}
-	if _, ok := payload["delegation"]; ok {
-		t.Fatalf("expected ordinary create response to omit delegation, got %+v", payload["delegation"])
-	}
-}
-
-func TestCreateDelegatedRunReturnsRelationshipInRunAndTranscript(t *testing.T) {
-	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
-		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
-			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: input})
-			return input, nil
-		})
-	})
-
-	ts := httptest.NewServer(NewRouter(runService, nil))
-	defer ts.Close()
-
-	parentResp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"parent task","workspace":{"workspace_root":"/tmp"}}`))
-	if err != nil {
-		t.Fatalf("POST /v1/runs parent failed: %v", err)
-	}
-	defer parentResp.Body.Close()
-	if parentResp.StatusCode != http.StatusCreated {
-		t.Fatalf("expected 201 from parent run, got %d", parentResp.StatusCode)
-	}
-	var parentRun awruntime.Run
-	if err := json.NewDecoder(parentResp.Body).Decode(&parentRun); err != nil {
-		t.Fatalf("failed to decode parent run: %v", err)
-	}
-	waitHTTPRunTerminal(t, ts.URL, parentRun.RunID)
-
-	childBody := fmt.Sprintf(`{
-		"input":"inspect runtime delegation",
-		"workspace":{"workspace_root":"/tmp"},
-		"delegation":{
-			"parent_run_id":%q,
-			"delegate_label":"Backend reader",
-			"delegate_role":"runtime audit",
-			"delegation_prompt":"Read runtime/server code and report the minimum path."
-		}
-	}`, parentRun.RunID)
-	childResp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(childBody))
-	if err != nil {
-		t.Fatalf("POST /v1/runs child failed: %v", err)
-	}
-	defer childResp.Body.Close()
-	if childResp.StatusCode != http.StatusCreated {
-		t.Fatalf("expected 201 from delegated run, got %d", childResp.StatusCode)
-	}
-	var childRun awruntime.Run
-	if err := json.NewDecoder(childResp.Body).Decode(&childRun); err != nil {
-		t.Fatalf("failed to decode child run: %v", err)
-	}
-	if childRun.ThreadID == parentRun.ThreadID {
-		t.Fatalf("expected delegated run to create a child thread, got parent thread %q", childRun.ThreadID)
-	}
-	assertHTTPDelegation(t, childRun.Delegation, parentRun.RunID, parentRun.ThreadID)
-	waitHTTPRunTerminal(t, ts.URL, childRun.RunID)
-
-	getResp, err := http.Get(ts.URL + "/v1/runs/" + childRun.RunID)
-	if err != nil {
-		t.Fatalf("GET /v1/runs/{run_id} failed: %v", err)
-	}
-	defer getResp.Body.Close()
-	var fetchedRun awruntime.Run
-	if err := json.NewDecoder(getResp.Body).Decode(&fetchedRun); err != nil {
-		t.Fatalf("failed to decode fetched child run: %v", err)
-	}
-	assertHTTPDelegation(t, fetchedRun.Delegation, parentRun.RunID, parentRun.ThreadID)
-
-	transcriptResp, err := http.Get(ts.URL + "/v1/threads/" + childRun.ThreadID + "/transcript")
-	if err != nil {
-		t.Fatalf("GET /v1/threads/{thread_id}/transcript failed: %v", err)
-	}
-	defer transcriptResp.Body.Close()
-	if transcriptResp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 from transcript endpoint, got %d", transcriptResp.StatusCode)
-	}
-	var transcript threadTranscriptResponse
-	if err := json.NewDecoder(transcriptResp.Body).Decode(&transcript); err != nil {
-		t.Fatalf("failed to decode transcript response: %v", err)
-	}
-	assertHTTPDelegation(t, transcript.Thread.Delegation, parentRun.RunID, parentRun.ThreadID)
-	if len(transcript.Runs) != 1 {
-		t.Fatalf("expected one child transcript run, got %d", len(transcript.Runs))
-	}
-	assertHTTPDelegation(t, transcript.Runs[0].Run.Delegation, parentRun.RunID, parentRun.ThreadID)
-}
-
-func TestCreateDelegatedRunWithUnknownParentReturns404(t *testing.T) {
-	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
-		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-			return "done", nil
-		})
-	})
-
-	ts := httptest.NewServer(NewRouter(runService, nil))
-	defer ts.Close()
-
-	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{
-		"input":"child task",
-		"workspace":{"workspace_root":"/tmp"},
-		"delegation":{"parent_run_id":"run_missing","delegate_label":"Missing parent"}
-	}`))
-	if err != nil {
-		t.Fatalf("POST /v1/runs failed: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("expected 404 for unknown parent run, got %d", resp.StatusCode)
-	}
-
-	var errResp errorResponse
-	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
-		t.Fatalf("expected JSON error response, got decode error: %v", err)
-	}
-	if errResp.Error != "PARENT_RUN_NOT_FOUND" {
-		t.Fatalf("expected PARENT_RUN_NOT_FOUND error code, got %q", errResp.Error)
-	}
-}
-
-func assertHTTPDelegation(t *testing.T, delegation *awruntime.DelegationMetadata, parentRunID, parentThreadID string) {
-	t.Helper()
-	if delegation == nil {
-		t.Fatalf("expected delegation metadata")
-	}
-	if delegation.ParentRunID != parentRunID {
-		t.Fatalf("expected parent run id %q, got %q", parentRunID, delegation.ParentRunID)
-	}
-	if delegation.ParentThreadID != parentThreadID {
-		t.Fatalf("expected parent thread id %q, got %q", parentThreadID, delegation.ParentThreadID)
-	}
-	if delegation.DelegateLabel != "Backend reader" {
-		t.Fatalf("expected delegate label to round-trip, got %q", delegation.DelegateLabel)
-	}
-	if delegation.DelegateRole != "runtime audit" {
-		t.Fatalf("expected delegate role to round-trip, got %q", delegation.DelegateRole)
-	}
-	if delegation.DelegationPrompt != "Read runtime/server code and report the minimum path." {
-		t.Fatalf("expected delegation prompt to round-trip, got %q", delegation.DelegationPrompt)
-	}
-}
-
 func waitHTTPRunTerminal(t *testing.T, baseURL, runID string) awruntime.Run {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -1647,74 +688,6 @@ func waitHTTPRunTerminal(t *testing.T, baseURL, runID string) awruntime.Run {
 	}
 	t.Fatalf("run %s did not reach terminal status", runID)
 	return awruntime.Run{}
-}
-
-func TestPersistentTranscriptEndpointsRecoverAfterRestart(t *testing.T) {
-	persistenceDir := filepath.Join(t.TempDir(), "transcripts")
-	service := newPersistentServerRunService(persistenceDir)
-	firstServer := httptest.NewServer(NewRouter(service, nil))
-
-	createResp, err := http.Post(firstServer.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello","workspace":{"workspace_root":"/tmp"}}`))
-	if err != nil {
-		t.Fatalf("POST /v1/runs failed: %v", err)
-	}
-	defer createResp.Body.Close()
-
-	var created awruntime.Run
-	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
-		t.Fatalf("failed to decode created run: %v", err)
-	}
-	waitHTTPRunTerminal(t, firstServer.URL, created.RunID)
-	firstServer.Close()
-
-	restoredService := newPersistentServerRunService(persistenceDir)
-	restoredServer := httptest.NewServer(NewRouter(restoredService, nil))
-	defer restoredServer.Close()
-
-	threadsResp, err := http.Get(restoredServer.URL + "/v1/threads")
-	if err != nil {
-		t.Fatalf("GET /v1/threads failed: %v", err)
-	}
-	defer threadsResp.Body.Close()
-
-	var threads []awruntime.ThreadSnapshot
-	if err := json.NewDecoder(threadsResp.Body).Decode(&threads); err != nil {
-		t.Fatalf("failed to decode restored thread list: %v", err)
-	}
-	if len(threads) != 1 || threads[0].ThreadID != created.ThreadID {
-		t.Fatalf("unexpected restored thread list: %+v", threads)
-	}
-
-	runResp, err := http.Get(restoredServer.URL + "/v1/runs/" + created.RunID)
-	if err != nil {
-		t.Fatalf("GET /v1/runs/{run_id} failed: %v", err)
-	}
-	defer runResp.Body.Close()
-
-	var restoredRun awruntime.Run
-	if err := json.NewDecoder(runResp.Body).Decode(&restoredRun); err != nil {
-		t.Fatalf("failed to decode restored run: %v", err)
-	}
-	if restoredRun.Status != awruntime.RunStatusFinished || restoredRun.Result != "reply:hello" {
-		t.Fatalf("unexpected restored run payload: %+v", restoredRun)
-	}
-
-	transcriptResp, err := http.Get(restoredServer.URL + "/v1/threads/" + created.ThreadID + "/transcript")
-	if err != nil {
-		t.Fatalf("GET /v1/threads/{thread_id}/transcript failed after restart: %v", err)
-	}
-	defer transcriptResp.Body.Close()
-
-	var transcript threadTranscriptResponse
-	if err := json.NewDecoder(transcriptResp.Body).Decode(&transcript); err != nil {
-		t.Fatalf("failed to decode restored transcript: %v", err)
-	}
-	if len(transcript.Runs) != 1 || transcript.Runs[0].Run.RunID != created.RunID {
-		t.Fatalf("unexpected restored transcript payload: %+v", transcript)
-	}
-	if len(transcript.Runs[0].Events) == 0 {
-		t.Fatal("expected restored transcript events after restart")
-	}
 }
 
 func TestMapRuntimeCancelledUsesAGUIRunErrorWithCancelCode(t *testing.T) {
@@ -2457,8 +1430,8 @@ func TestPlainQASmoke(t *testing.T) {
 	runService := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
-				MaxTurns:   5,
-				EntryPoint: "awaken-core-smoke",
+				MaxThoughts: 5,
+				EntryPoint:  "awaken-core-smoke",
 				ModelConfig: agentcore.ModelConfig{
 					APIKey:      cfg.APIKey,
 					BaseURL:     cfg.BaseURL,
@@ -2600,8 +1573,8 @@ func TestReadOnlyFileSmoke(t *testing.T) {
 	runService := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
-				MaxTurns:   10,
-				EntryPoint: "awaken-core-smoke",
+				MaxThoughts: 10,
+				EntryPoint:  "awaken-core-smoke",
 				ModelConfig: agentcore.ModelConfig{
 					APIKey:      cfg.APIKey,
 					BaseURL:     cfg.BaseURL,
@@ -2775,8 +1748,8 @@ func TestFileMutationApprovalSmoke(t *testing.T) {
 	runService := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
-				MaxTurns:   10,
-				EntryPoint: "awaken-core-smoke",
+				MaxThoughts: 10,
+				EntryPoint:  "awaken-core-smoke",
 				ModelConfig: agentcore.ModelConfig{
 					APIKey:      cfg.APIKey,
 					BaseURL:     cfg.BaseURL,
@@ -2950,8 +1923,8 @@ func TestFileMutationRejectSmoke(t *testing.T) {
 	runService := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
-				MaxTurns:   10,
-				EntryPoint: "awaken-core-smoke",
+				MaxThoughts: 10,
+				EntryPoint:  "awaken-core-smoke",
 				ModelConfig: agentcore.ModelConfig{
 					APIKey:      cfg.APIKey,
 					BaseURL:     cfg.BaseURL,
@@ -3165,8 +2138,8 @@ func TestFileMutationArtifactSmoke(t *testing.T) {
 	runService := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
-				MaxTurns:   10,
-				EntryPoint: "awaken-core-smoke",
+				MaxThoughts: 10,
+				EntryPoint:  "awaken-core-smoke",
 				ModelConfig: agentcore.ModelConfig{
 					APIKey:      cfg.APIKey,
 					BaseURL:     cfg.BaseURL,
@@ -3353,8 +2326,8 @@ func TestFileMutationPatchAndTurnDiffSmoke(t *testing.T) {
 	runService := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
-				MaxTurns:   10,
-				EntryPoint: "awaken-core-smoke",
+				MaxThoughts: 10,
+				EntryPoint:  "awaken-core-smoke",
 				ModelConfig: agentcore.ModelConfig{
 					APIKey:      cfg.APIKey,
 					BaseURL:     cfg.BaseURL,
@@ -3515,8 +2488,8 @@ func TestMultiTurnThreadSmoke(t *testing.T) {
 	runService := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
-				MaxTurns:   10,
-				EntryPoint: "awaken-core-smoke",
+				MaxThoughts: 10,
+				EntryPoint:  "awaken-core-smoke",
 				ModelConfig: agentcore.ModelConfig{
 					APIKey:      cfg.APIKey,
 					BaseURL:     cfg.BaseURL,
@@ -3877,13 +2850,13 @@ func TestModelStatusSmoke(t *testing.T) {
 		t.Skip("LLM_API_KEY not set")
 	}
 
-	provider := NewLLMRuntimeInfoProvider(cfg, workspaceRoot)
+	provider := NewLLMRuntimeInfoProvider(cfg.Model, cfg.BaseURL, cfg.APIKey, workspaceRoot, string(llm.ResolveProtocol(cfg)))
 
 	runService := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
-				MaxTurns:   5,
-				EntryPoint: "awaken-core-smoke",
+				MaxThoughts: 5,
+				EntryPoint:  "awaken-core-smoke",
 				ModelConfig: agentcore.ModelConfig{
 					APIKey:      cfg.APIKey,
 					BaseURL:     cfg.BaseURL,
@@ -3940,17 +2913,8 @@ func TestModelStatusSmoke(t *testing.T) {
 	if info.Protocol != "openai_chat" && info.Protocol != "anthropic_messages" {
 		t.Fatalf("expected protocol openai_chat or anthropic_messages, got %q", info.Protocol)
 	}
-	if info.AuthScheme != cfg.AuthScheme {
-		t.Fatalf("expected auth_scheme %q, got %q", cfg.AuthScheme, info.AuthScheme)
-	}
 	if !info.HasAPIKey {
 		t.Fatalf("expected has_api_key true")
-	}
-	if info.ActiveProfile != cfg.ActiveProfile {
-		t.Fatalf("expected active_profile %q, got %q", cfg.ActiveProfile, info.ActiveProfile)
-	}
-	if len(info.Profiles) == 0 {
-		t.Fatalf("expected profile metadata in runtime info")
 	}
 
 	// 2. 发起一次真实 run，验证运行时可用。
@@ -4019,8 +2983,8 @@ func TestRunWithoutAPIKeyEmitsProviderAuthMissing(t *testing.T) {
 	runService := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
-				MaxTurns:   5,
-				EntryPoint: "awaken-core-smoke",
+				MaxThoughts: 5,
+				EntryPoint:  "awaken-core-smoke",
 				ModelConfig: agentcore.ModelConfig{
 					APIKey:  "",
 					BaseURL: "https://api.anthropic.com/v1",
@@ -4121,8 +3085,8 @@ func TestRunWithBadBaseURLEmitsProviderRequestFailed(t *testing.T) {
 	runService := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
-				MaxTurns:   5,
-				EntryPoint: "awaken-core-smoke",
+				MaxThoughts: 5,
+				EntryPoint:  "awaken-core-smoke",
 				ModelConfig: agentcore.ModelConfig{
 					APIKey:  "dummy-key-not-real",
 					BaseURL: "http://127.0.0.1:1/invalid",
@@ -4223,81 +3187,6 @@ func TestRunWithBadBaseURLEmitsProviderRequestFailed(t *testing.T) {
 	}
 }
 
-func TestRuntimeDrainEndpointReportsActiveAndQueuedRuns(t *testing.T) {
-	started := make(chan struct{})
-	release := make(chan struct{})
-	var startedOnce sync.Once
-	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
-		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
-			startedOnce.Do(func() { close(started) })
-			<-release
-			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
-			return "done", nil
-		})
-	})
-	ts := httptest.NewServer(NewRouter(runService, nil))
-	defer ts.Close()
-
-	workspaceRoot := t.TempDir()
-	firstBody := fmt.Sprintf(`{
-		"input": "first",
-		"workspace": { "workspace_root": %q, "writable_roots": [%q] },
-		"client": { "session_id": "drain-1", "request_id": "drain-req-1", "entrypoint": "test" }
-	}`, workspaceRoot, workspaceRoot)
-	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(firstBody))
-	if err != nil {
-		t.Fatalf("POST first run failed: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("expected first run 201, got %d", resp.StatusCode)
-	}
-	var first awruntime.Run
-	if err := json.NewDecoder(resp.Body).Decode(&first); err != nil {
-		t.Fatalf("failed to decode first run: %v", err)
-	}
-	<-started
-
-	secondBody := fmt.Sprintf(`{
-		"input": "second",
-		"thread_id": %q,
-		"workspace": { "workspace_root": %q, "writable_roots": [%q] },
-		"client": { "session_id": "drain-2", "request_id": "drain-req-2", "entrypoint": "test" },
-		"policy_options": { "busy_input_mode": "queue" }
-	}`, first.ThreadID, workspaceRoot, workspaceRoot)
-	resp, err = http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(secondBody))
-	if err != nil {
-		t.Fatalf("POST queued run failed: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("expected queued run 201, got %d", resp.StatusCode)
-	}
-
-	drainResp, err := http.Post(ts.URL+"/v1/runtime/drain", "application/json", strings.NewReader(`{"timeout_ms":10}`))
-	if err != nil {
-		t.Fatalf("POST runtime drain failed: %v", err)
-	}
-	defer drainResp.Body.Close()
-	if drainResp.StatusCode != http.StatusOK {
-		t.Fatalf("expected drain 200, got %d", drainResp.StatusCode)
-	}
-	var drain struct {
-		ActiveRuns int   `json:"active_runs"`
-		QueuedRuns int   `json:"queued_runs"`
-		TimedOut   bool  `json:"timed_out"`
-		TimeoutMS  int64 `json:"timeout_ms"`
-	}
-	if err := json.NewDecoder(drainResp.Body).Decode(&drain); err != nil {
-		t.Fatalf("failed to decode drain response: %v", err)
-	}
-	if !drain.TimedOut || drain.ActiveRuns != 1 || drain.QueuedRuns != 1 || drain.TimeoutMS != 10 {
-		t.Fatalf("unexpected drain response: %+v", drain)
-	}
-	close(release)
-}
-
 // TestRunWithProviderBodySecretEmitsSanitizedMessage 验证 provider 返回非 2xx 且 body
 // 含敏感信息时，RunError 事件 message 不泄漏 body 内容，仅保留 status code。
 func TestRunWithProviderBodySecretEmitsSanitizedMessage(t *testing.T) {
@@ -4310,8 +3199,8 @@ func TestRunWithProviderBodySecretEmitsSanitizedMessage(t *testing.T) {
 	runService := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
-				MaxTurns:   5,
-				EntryPoint: "awaken-core-smoke",
+				MaxThoughts: 5,
+				EntryPoint:  "awaken-core-smoke",
 				ModelConfig: agentcore.ModelConfig{
 					APIKey:  "dummy-key-not-real",
 					BaseURL: providerServer.URL,
@@ -4404,96 +3293,5 @@ func TestRunWithProviderBodySecretEmitsSanitizedMessage(t *testing.T) {
 	}
 	if !strings.Contains(errorMessage, "status 502") {
 		t.Fatalf("error message should contain status code, got %q", errorMessage)
-	}
-}
-
-func newPersistentServerRunService(persistenceDir string) *awruntime.RunService {
-	return awruntime.NewRunServiceWithOptions(
-		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
-			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
-		},
-		func(agent *agentcore.Agent) awruntime.Executor {
-			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-				agent.GetConversation().UserInput(input)
-				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
-				answer := "reply:" + input
-				agent.GetConversation().AssistantOutput(answer, nil)
-				sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextMessageStartedEventType, MessageID: "msg-1", Role: "assistant"})
-				sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextDeltaEventType, MessageID: "msg-1", Role: "assistant", Delta: answer})
-				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: answer})
-				return answer, nil
-			})
-		},
-		awruntime.WithPersistenceDir(persistenceDir),
-	)
-}
-
-func newWave2HTTPRunService() *awruntime.RunService {
-	return awruntime.NewRunService(
-		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
-			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
-		},
-		func(agent *agentcore.Agent) awruntime.Executor {
-			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-				workspaceRoot := agent.GetConfig().Workspace.Root
-				toolCallID := "call_readme_endpoint"
-				toolInput := `{"path":"` + workspaceRoot + `/README.md","api_key":"sk-proj-wave2endpoint"}`
-				toolOutput := "README endpoint wave2 output from " + workspaceRoot + "/README.md with sk-proj-wave2endpoint"
-
-				conversation := agent.GetConversation()
-				conversation.UserInput(input)
-				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
-				conversation.AssistantOutput("I'll inspect README.", []convcontext.ToolCall{{
-					ID:   toolCallID,
-					Type: "function",
-					Function: convcontext.FunctionCall{
-						Name:      "read_file",
-						Arguments: toolInput,
-					},
-				}})
-				sink.Emit(agentcore.AwakenEvent{
-					Type:       agentcore.ToolCallStartedEventType,
-					ToolCallID: toolCallID,
-					ToolName:   "read_file",
-				})
-				sink.Emit(agentcore.AwakenEvent{
-					Type:       agentcore.ToolCallArgsEventType,
-					ToolCallID: toolCallID,
-					ToolName:   "read_file",
-					Arguments:  toolInput,
-				})
-				sink.Emit(agentcore.AwakenEvent{
-					Type:       agentcore.ToolCallFinishedEventType,
-					ToolCallID: toolCallID,
-					ToolName:   "read_file",
-				})
-				conversation.ToolResult(toolCallID, "read_file", toolOutput)
-				sink.Emit(agentcore.AwakenEvent{
-					Type:       agentcore.ToolResultEventType,
-					ToolCallID: toolCallID,
-					ToolName:   "read_file",
-					Content:    toolOutput,
-				})
-				answer := "final answer for README endpoint wave2"
-				conversation.AssistantOutput(answer, nil)
-				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: answer})
-				return answer, nil
-			})
-		},
-	)
-}
-
-func getJSON(t *testing.T, url string, dst any) {
-	t.Helper()
-	resp, err := http.Get(url)
-	if err != nil {
-		t.Fatalf("GET %s failed: %v", url, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 from %s, got %d", url, resp.StatusCode)
-	}
-	if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {
-		t.Fatalf("failed to decode JSON from %s: %v", url, err)
 	}
 }

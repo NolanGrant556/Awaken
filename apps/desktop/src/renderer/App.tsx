@@ -14,9 +14,10 @@ import {
   ListFilter,
   MessageCirclePlus,
   Monitor,
-  PanelRightOpen,
   PanelRightClose,
+  PanelRightOpen,
   SlidersHorizontal,
+  Terminal,
 } from "lucide-react";
 import {
   AwakenAppShell as AppShell,
@@ -43,30 +44,20 @@ import {
   AwakenWorkbenchSidebarFrame as WorkbenchSidebarFrame,
   AwakenRunStage as RunStage,
   AwakenComposerDock as ComposerDock,
+  type ComponentTone,
   type ComposerBarMetaItem,
   type InspectorTabId,
   type NavItem,
   type PlatformKind,
   type ProjectItem,
 } from "@awaken/design-system";
-import { TaskCenterPanel } from "./TaskCenterPanel";
 import { createRuntimeClient, type SubscribeHandlers } from "./runtime/client";
-import type {
-  BackgroundNotificationMode,
-  BusyInputMode,
-  ImageInputMode,
-  RunAttachment,
-  RunPolicyOptions,
-  RuntimeInfo,
-  RuntimeRunStatus,
-  RuntimeThreadBranchMetadata,
-  StartRunRequest,
-} from "../shared/runtime";
+import type { RuntimeInfo, RuntimeRunStatus, StartRunRequest } from "../shared/runtime";
 import {
   createInitialRuntimeState,
   reduceRuntimeState,
+  type ThreadItem,
   type RuntimeAction,
-  type ToolResultRecord,
 } from "./runtime/reducer";
 import type { ApprovalDecision } from "../shared/runtime";
 import { A2UISurfaceView } from "./a2ui/A2UISurfaceView";
@@ -78,7 +69,6 @@ import {
   diffLineStats,
   groupNarrativeByTurns,
   isNearLatestTurnOutputTail,
-  measuredComposerDockHeight,
   resolvedDecisionForApproval,
   scrollTopForLatestTurnOutputTail,
   scrollTopForPromptAnchor,
@@ -95,15 +85,6 @@ import {
   actionsForThreadTranscript,
   afterSeqForTranscriptRun,
 } from "./runtime/thread-transcript";
-import {
-  formatShellSummary,
-  parseShellCommand,
-  parseShellResult,
-  shellActionTitle,
-  shellPreview,
-  type ShellResult,
-} from "./runtime/shellToolResult";
-import { describeThreadStatus, formatThreadUpdatedAt, threadDisplayTitle } from "./threadPresentation";
 import {
   DEFAULT_WORKSPACE_PROJECT_ID,
   assignThreadToProject,
@@ -138,6 +119,38 @@ function formatStatusLabel(
       return "Error";
     default:
       return "Idle";
+  }
+}
+
+function sidebarStatusForThread(
+  thread: ThreadItem,
+): { label: string; tone: ComponentTone } {
+  if ((thread.approvalCount ?? 0) > 0 || thread.runStatus === "awaiting_approval") {
+    return { label: "needs input", tone: "permission" };
+  }
+
+  switch (thread.runStatus) {
+    case "cancelling":
+      return { label: "cancelling", tone: "warning" };
+    case "cancelled":
+      return { label: "cancelled", tone: "neutral" };
+    case "error":
+      return { label: "error", tone: "error" };
+    case "finished":
+      return { label: "done", tone: "success" };
+    case "running":
+      if ((thread.artifactCount ?? 0) > 0) {
+        return { label: "ready for review", tone: "warning" };
+      }
+      return { label: "running", tone: "local" };
+    default:
+      if (thread.activeRunId) {
+        return { label: "running", tone: "local" };
+      }
+      if ((thread.artifactCount ?? 0) > 0) {
+        return { label: "ready for review", tone: "warning" };
+      }
+      return { label: "idle", tone: "neutral" };
   }
 }
 
@@ -176,317 +189,6 @@ function rawFileChangeId(selectionId: string): string {
     : selectionId;
 }
 
-function formatToolOutput(tool: ToolResultRecord): string {
-  return [
-    "args:",
-    tool.args || "No tool args captured.",
-    "",
-    "command output:",
-    tool.commandOutput || "No command output captured.",
-    tool.commandOutputTruncated ? "[command output truncated]" : "",
-    "",
-    "result:",
-    tool.content || "No tool result captured.",
-  ]
-    .filter((line, index, lines) => line !== "" || lines[index - 1] !== "")
-    .join("\n");
-}
-
-function InlineShellDetail({ tool, result }: { tool: ToolResultRecord; result: ShellResult }) {
-  const command = parseShellCommand(tool.args);
-  const stdout = result.stdout;
-  const stderr = result.stderr;
-  const fullOutput = [
-    command ? `Command:\n${command}` : "",
-    stdout ? `stdout:\n${stdout}` : "",
-    stderr ? `stderr:\n${stderr}` : "",
-    `exit ${result.exitCode} · ${result.durationMs}ms${result.truncated ? " · truncated" : ""}`,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-
-  return (
-    <div className="inline-tool-detail inline-shell-detail">
-      <div className="inline-tool-detail-head">
-        <span>Shell output</span>
-        <CopyButton text={fullOutput} label="Copy all" />
-      </div>
-      <div className="inline-tool-detail-body">
-        {command ? (
-          <div className="inline-tool-detail-section">
-            <div className="inline-tool-detail-section-head">
-              <strong>Command</strong>
-              <CopyButton text={command} label="Copy command" />
-            </div>
-            <div className="inline-tool-detail-scroll">
-              <pre>{command}</pre>
-            </div>
-          </div>
-        ) : null}
-        <div className="inline-tool-detail-section">
-          <div className="inline-tool-detail-section-head">
-            <strong>stdout</strong>
-            <CopyButton text={stdout} label="Copy stdout" />
-          </div>
-          <div className="inline-tool-detail-scroll">
-            <pre>{stdout || "empty"}</pre>
-          </div>
-        </div>
-        {stderr ? (
-          <div className="inline-tool-detail-section inline-shell-detail-stderr">
-            <div className="inline-tool-detail-section-head">
-              <strong>stderr</strong>
-              <CopyButton text={stderr} label="Copy stderr" />
-            </div>
-            <div className="inline-tool-detail-scroll">
-              <pre>{stderr}</pre>
-            </div>
-          </div>
-        ) : null}
-        <div className="inline-tool-detail-section inline-shell-detail-meta">
-          <strong>Metadata</strong>
-          <div className="inline-shell-detail-meta-row">
-            <span>exit {result.exitCode}</span>
-            <span>{result.durationMs}ms</span>
-            {result.timedOut ? <span className="inline-shell-detail-timeout">timed out</span> : null}
-            {result.truncated ? <span>truncated</span> : null}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function InspectorCopyButton({ text, label }: { text: string; label: string }) {
-  if (!text) {
-    return null;
-  }
-  return (
-    <div className="inspector-copy-row">
-      <CopyButton text={text} label={label} />
-    </div>
-  );
-}
-
-function InspectorShellDetail({ tool, result }: { tool: ToolResultRecord; result: ShellResult }) {
-  const command = parseShellCommand(tool.args);
-  const stdout = result.stdout;
-  const stderr = result.stderr;
-  const fullOutput = [
-    command ? `Command:\n${command}` : "",
-    stdout ? `stdout:\n${stdout}` : "",
-    stderr ? `stderr:\n${stderr}` : "",
-    `exit ${result.exitCode} · ${result.durationMs}ms${result.truncated ? " · truncated" : ""}`,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-
-  return (
-    <article className="inspector-item inspector-item-selected inspector-shell-item">
-      <Disclosure title={command || "Shell command"} meta={`exit ${result.exitCode}`} defaultOpen>
-        <InspectorCopyButton text={command || ""} label="Copy command" />
-        <div className="inspector-shell-sections">
-          {command ? (
-            <div className="inspector-shell-section">
-              <strong>Command</strong>
-              <pre>{command}</pre>
-            </div>
-          ) : null}
-          <div className="inspector-shell-section">
-            <div className="inspector-shell-section-head">
-              <strong>stdout</strong>
-              <InspectorCopyButton text={stdout} label="Copy stdout" />
-            </div>
-            <pre>{stdout || "empty"}</pre>
-          </div>
-          {stderr ? (
-            <div className="inspector-shell-section inspector-shell-section-stderr">
-              <div className="inspector-shell-section-head">
-                <strong>stderr</strong>
-                <InspectorCopyButton text={stderr} label="Copy stderr" />
-              </div>
-              <pre>{stderr}</pre>
-            </div>
-          ) : null}
-          <div className="inspector-shell-section">
-            <strong>Metadata</strong>
-            <div className="inspector-shell-meta-row">
-              <span>exit {result.exitCode}</span>
-              <span>{result.durationMs}ms</span>
-              {result.timedOut ? <span className="inspector-shell-timeout">timed out</span> : null}
-              {result.truncated ? <span>truncated</span> : null}
-            </div>
-          </div>
-        </div>
-        <InspectorCopyButton text={fullOutput} label="Copy all" />
-        <details className="inspector-shell-raw">
-          <summary>Raw JSON</summary>
-          <pre>{tool.content}</pre>
-        </details>
-      </Disclosure>
-    </article>
-  );
-}
-
-function InlineShellCall({
-  item,
-  toolResults,
-  onLayoutChange,
-}: {
-  item: Extract<RunNarrativeItem, { kind: "tool" }>;
-  toolResults: ToolResultRecord[];
-  onLayoutChange?: () => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const tool = toolResults.find((toolResult) => toolResult.id === rawToolId(item.id));
-  const result = tool ? parseShellResult(tool.content) : undefined;
-  const onLayoutChangeRef = useRef(onLayoutChange);
-  const didMountRef = useRef(false);
-
-  useLayoutEffect(() => {
-    onLayoutChangeRef.current = onLayoutChange;
-  }, [onLayoutChange]);
-
-  useLayoutEffect(() => {
-    if (!didMountRef.current) {
-      didMountRef.current = true;
-      return;
-    }
-    onLayoutChangeRef.current?.();
-  }, [expanded]);
-
-  if (!tool || !result) {
-    // Fall back to the generic tool renderer if the result does not look like a shell result.
-    return (
-      <InlineToolCall item={item} toolResults={toolResults} onLayoutChange={onLayoutChange} />
-    );
-  }
-
-  const command = parseShellCommand(tool.args);
-  const title = shellActionTitle(command);
-  const summary = formatShellSummary(result);
-  const preview = shellPreview(result.stdout);
-
-  return (
-    <div className="inline-tool-call inline-shell-call">
-      <ToolTraceLine
-        title={title}
-        detail={summary}
-        status={item.status}
-        onSelect={() => setExpanded((prev) => !prev)}
-      />
-      {preview && !expanded ? (
-        <div className="inline-shell-preview">
-          <pre>{preview}</pre>
-        </div>
-      ) : null}
-      {expanded ? <InlineShellDetail tool={tool} result={result} /> : null}
-    </div>
-  );
-}
-
-function InlineToolDetail({ tool }: { tool: ToolResultRecord }) {
-  const toolOutput = formatToolOutput(tool);
-  return (
-    <div className="inline-tool-detail">
-      <div className="inline-tool-detail-head">
-        <span>Tool output</span>
-        <CopyButton text={toolOutput} label="Copy tool output" />
-      </div>
-      <div className="inline-tool-detail-body">
-        <div className="inline-tool-detail-section">
-          <strong>args</strong>
-          <div className="inline-tool-detail-scroll">
-            <pre>{tool.args || "No tool args captured."}</pre>
-          </div>
-        </div>
-        <div className="inline-tool-detail-section">
-          <strong>command output</strong>
-          <div className="inline-tool-detail-scroll">
-            <pre>
-              {tool.commandOutput || "No command output captured."}
-              {tool.commandOutputTruncated ? "\n[command output truncated]" : ""}
-            </pre>
-          </div>
-        </div>
-        <div className="inline-tool-detail-section">
-          <strong>result</strong>
-          <div className="inline-tool-detail-scroll">
-            <pre>{tool.content || "No tool result captured."}</pre>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function InlineToolCall({
-  item,
-  toolResults,
-  onLayoutChange,
-}: {
-  item: Extract<RunNarrativeItem, { kind: "tool" }>;
-  toolResults: ToolResultRecord[];
-  onLayoutChange?: () => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const tool = toolResults.find((toolResult) => toolResult.id === rawToolId(item.id));
-  const onLayoutChangeRef = useRef(onLayoutChange);
-  const didMountRef = useRef(false);
-
-  useLayoutEffect(() => {
-    onLayoutChangeRef.current = onLayoutChange;
-  }, [onLayoutChange]);
-
-  useLayoutEffect(() => {
-    if (!didMountRef.current) {
-      didMountRef.current = true;
-      return;
-    }
-    onLayoutChangeRef.current?.();
-  }, [expanded]);
-
-  return (
-    <div className="inline-tool-call">
-      <ToolTraceLine
-        title={item.title}
-        detail={item.detail}
-        status={item.status}
-        onSelect={() => setExpanded((prev) => !prev)}
-      />
-      {expanded && tool ? <InlineToolDetail tool={tool} /> : null}
-    </div>
-  );
-}
-
-function AnswerNarrativeItem({
-  item,
-  showFooter,
-  onFooterShown,
-}: {
-  item: Extract<RunNarrativeItem, { kind: "answer" }>;
-  showFooter: boolean;
-  onFooterShown?: () => void;
-}) {
-  const footerShownRef = useRef(false);
-
-  useLayoutEffect(() => {
-    if (showFooter && !footerShownRef.current) {
-      footerShownRef.current = true;
-      onFooterShown?.();
-    }
-  }, [showFooter, onFooterShown]);
-
-  return (
-    <AssistantMessage
-      markdown={item.markdown}
-      status={item.status}
-      elapsedMs={item.elapsedMs}
-      showFooter={showFooter}
-    />
-  );
-}
-
 const DEFAULT_SIDEBAR_WIDTH = 300;
 const MIN_SIDEBAR_WIDTH = 228;
 const MAX_SIDEBAR_WIDTH = 420;
@@ -497,13 +199,6 @@ const LAYOUT_STEP = 12;
 const DEFAULT_PROMPT_ANCHOR_OFFSET = 0;
 const RUN_STAGE_COMPOSER_SAFE_GAP = 24;
 const LATEST_OUTPUT_FOLLOW_THRESHOLD = 48;
-const POLICY_SETTINGS_KEY = "awaken:wave3:policySettings";
-const DEFAULT_POLICY_SETTINGS: Required<RunPolicyOptions> = {
-  busyInputMode: "queue",
-  backgroundNotificationMode: "all",
-  imageInputMode: "auto",
-  restartDrainTimeoutMs: 60000,
-};
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -544,45 +239,6 @@ function readStoredBoolean(key: string, fallback: boolean): boolean {
   }
 }
 
-function readStoredPolicySettings(): Required<RunPolicyOptions> {
-  if (typeof window === "undefined" || !window.localStorage) {
-    return DEFAULT_POLICY_SETTINGS;
-  }
-  try {
-    const raw = window.localStorage.getItem(POLICY_SETTINGS_KEY);
-    if (!raw) {
-      return DEFAULT_POLICY_SETTINGS;
-    }
-    const parsed = JSON.parse(raw) as Partial<RunPolicyOptions>;
-    return {
-      busyInputMode: normalizeBusyInputMode(parsed.busyInputMode),
-      backgroundNotificationMode: normalizeBackgroundMode(parsed.backgroundNotificationMode),
-      imageInputMode: normalizeImageInputMode(parsed.imageInputMode),
-      restartDrainTimeoutMs: clampNumber(
-        Number(parsed.restartDrainTimeoutMs),
-        0,
-        300000,
-      ) || DEFAULT_POLICY_SETTINGS.restartDrainTimeoutMs,
-    };
-  } catch {
-    return DEFAULT_POLICY_SETTINGS;
-  }
-}
-
-function normalizeBusyInputMode(value?: string): BusyInputMode {
-  return value === "steer" || value === "interrupt" || value === "queue" ? value : "queue";
-}
-
-function normalizeBackgroundMode(value?: string): BackgroundNotificationMode {
-  return value === "result" || value === "error" || value === "off" || value === "all"
-    ? value
-    : "all";
-}
-
-function normalizeImageInputMode(value?: string): ImageInputMode {
-  return value === "native" || value === "text" || value === "auto" ? value : "auto";
-}
-
 function writeStoredValue(key: string, value: string): void {
   if (typeof window === "undefined" || !window.localStorage) {
     return;
@@ -606,8 +262,6 @@ export function App() {
   const runStageTouchStartYRef = useRef<number | null>(null);
   const runStageInputIntentCleanupRef = useRef<(() => void) | null>(null);
   const runStageResizeObserverRef = useRef<ResizeObserver | null>(null);
-  const latestTurnResizeFrameRef = useRef<number | null>(null);
-  const latestPromptIdRef = useRef<string | undefined>(undefined);
   const rendererReadyNotifiedRef = useRef(false);
   const threadLoadSeqRef = useRef(0);
   const runStageScrollRef = useRef<HTMLDivElement | null>(null);
@@ -620,15 +274,10 @@ export function App() {
     createInitialRuntimeState,
   );
   const [composerValue, setComposerValue] = useState("");
-  const [policySettings, setPolicySettings] = useState(readStoredPolicySettings);
-  const [imageAttachmentPaths, setImageAttachmentPaths] = useState("");
   const [composerFocusRequest, setComposerFocusRequest] = useState(0);
   const [activeTurnMarkerId, setActiveTurnMarkerId] = useState<string | undefined>();
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
-  const [taskCenterOpen, setTaskCenterOpen] = useState(false);
-  const [threadListError, setThreadListError] = useState<string | null>(null);
-  const [branching, setBranching] = useState(false);
   const [latestTurnMinHeightPx, setLatestTurnMinHeightPx] = useState(0);
   const [composerDockHeightPx, setComposerDockHeightPx] = useState(0);
   const [runStageViewportHeightPx, setRunStageViewportHeightPx] = useState(0);
@@ -675,7 +324,6 @@ export function App() {
   const narrativeSections = groupNarrativeByTurns(visibleNarrativeItems);
   const latestTurn = narrativeSections.turns[narrativeSections.turns.length - 1];
   const latestPromptId = latestTurn ? latestTurn.id : undefined;
-  latestPromptIdRef.current = latestPromptId;
   const hasPromptNarrative = narrativeSections.turns.length > 0;
   const composerSafeAreaPx = composerBottomSafeArea({
     composerHeight: hasPromptNarrative ? composerDockHeightPx : 0,
@@ -694,24 +342,6 @@ export function App() {
     runtimeState.supervisorStatus === "stopping" ||
     runtimeState.supervisorStatus === "stopped";
   const desktopNeedsRestart = runtimeState.supervisorStatus === "crashed";
-  const activeThread = runtimeState.activeThreadId
-    ? runtimeState.threads.find((thread) => thread.threadId === runtimeState.activeThreadId)
-    : undefined;
-  const activeBranchMeta = activeThread?.metadata?.branch;
-  const activeBranchParent = activeBranchMeta?.originalThreadId
-    ? runtimeState.threads.find((thread) => thread.threadId === activeBranchMeta.originalThreadId)
-    : undefined;
-  const activeBranchParentLabel = activeBranchParent
-    ? threadDisplayTitle(activeBranchParent)
-    : activeBranchMeta?.title ?? "来源会话";
-  const canBranch = Boolean(
-    activeThread &&
-      !isBusy &&
-      !branching &&
-      (activeThread.runId ||
-        activeThread.metadata?.lastPrompt ||
-        activeThread.metadata?.branch?.originalThreadId),
-  );
 
   useEffect(() => {
     writeStoredValue("awaken:layout:sidebarWidth", String(sidebarWidth));
@@ -724,13 +354,6 @@ export function App() {
   useEffect(() => {
     writeStoredValue("awaken:layout:inspectorCollapsed", String(inspectorCollapsed));
   }, [inspectorCollapsed]);
-
-  useEffect(() => {
-    writeStoredValue(POLICY_SETTINGS_KEY, JSON.stringify(policySettings));
-    void runtimeClient.setPolicySettings(policySettings).catch(() => {
-      // Settings sync is best-effort; startRun still carries per-run policy options.
-    });
-  }, [policySettings, runtimeClient]);
 
   useEffect(() => {
     let cancelled = false;
@@ -857,35 +480,16 @@ export function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  async function refreshThreads(): Promise<boolean> {
+  async function refreshThreads(): Promise<void> {
     if (!desktopReady) {
-      return false;
+      return;
     }
     try {
       const threads = await runtimeClient.listThreads();
       dispatch({ type: "run/threadsLoaded", threads });
-      setThreadListError(null);
-      return true;
-    } catch (error) {
-      setThreadListError(error instanceof Error ? error.message : "Failed to load task list");
-      return false;
-    }
-  }
-
-  async function refreshThreadContext(threadId: string): Promise<void> {
-    if (!desktopReady || !threadId) {
-      return;
-    }
-    dispatch({ type: "run/threadContextLoading", threadId });
-    try {
-      const context = await runtimeClient.getThreadContext(threadId);
-      dispatch({ type: "run/threadContextLoaded", threadId, context });
-    } catch (error) {
-      dispatch({
-        type: "run/threadContextError",
-        threadId,
-        message: error instanceof Error ? error.message : "Failed to load thread context",
-      });
+    } catch {
+      // Thread listing is best-effort; runtime reachability is already surfaced
+      // by the runtime info poll.
     }
   }
 
@@ -896,48 +500,6 @@ export function App() {
     void refreshThreads();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [desktopReady, runtimeClient]);
-
-  useEffect(() => {
-    if (!desktopReady || !runtimeState.activeThreadId) {
-      return;
-    }
-    void refreshThreadContext(runtimeState.activeThreadId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [desktopReady, runtimeState.activeThreadId]);
-
-  useEffect(() => {
-    if (!runtimeState.needsThreadsRefresh || !desktopReady) {
-      return;
-    }
-    let cancelled = false;
-    // Clear the refresh flag only after refreshThreads succeeds so a transient
-    // runtime failure doesn't leave the sidebar stuck on stale AI title /
-    // task summary. On failure, retry with capped exponential backoff.
-    const attempt = async (retry: number): Promise<void> => {
-      const ok = await refreshThreads();
-      if (cancelled) {
-        return;
-      }
-      if (ok) {
-        dispatch({ type: "run/threadsRefreshed" });
-        if (runtimeState.activeThreadId) {
-          void refreshThreadContext(runtimeState.activeThreadId);
-        }
-        return;
-      }
-      const delay = Math.min(1000 * Math.pow(2, retry), 8000);
-      setTimeout(() => {
-        if (!cancelled) {
-          void attempt(retry + 1);
-        }
-      }, delay);
-    };
-    void attempt(0);
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runtimeState.needsThreadsRefresh, desktopReady]);
 
   useEffect(() => {
     if (!desktopReady) {
@@ -963,11 +525,6 @@ export function App() {
         const loadSeq = threadLoadSeqRef.current + 1;
         threadLoadSeqRef.current = loadSeq;
         await replayThreadTranscript(run.threadId, loadSeq);
-        requestAnimationFrame(() => {
-          if (latestPromptIdRef.current) {
-            scrollLatestTurnOutputToTailIfObscured(latestPromptIdRef.current);
-          }
-        });
       } catch {
         if (!cancelled) {
           localStorage.removeItem("awaken:runId");
@@ -1002,10 +559,12 @@ export function App() {
       icon: <SlidersHorizontal size={16} strokeWidth={1.9} />,
     },
   ];
+  const latestToolResult =
+    runtimeState.toolResults.length > 0
+      ? runtimeState.toolResults[runtimeState.toolResults.length - 1]
+      : undefined;
   const topbarStatusLabel = desktopNeedsRestart
     ? "Needs restart"
-    : runtimeState.supervisorStatus === "draining"
-      ? "Draining"
     : desktopStarting
       ? "Starting"
       : undefined;
@@ -1024,13 +583,9 @@ export function App() {
   const activeProjectLabel =
     projectLabelById.get(selectedProjectId) ??
     (pathForSelectedProject ? workspaceLabelForPath(pathForSelectedProject) : "awaken");
-  const modelDisplayLabel =
-    runtimeInfo?.configuredModelDisplayName ||
-    runtimeInfo?.configuredModel ||
-    "Model";
   const composerMetaItems: ComposerBarMetaItem[] = [
     { id: "workspace", label: activeProjectLabel },
-    { id: "runtime", label: modelDisplayLabel },
+    { id: "runtime", label: "Local" },
     { id: "branch", label: "main" },
   ];
 
@@ -1052,16 +607,15 @@ export function App() {
     return runtimeState.threads
       .filter((thread) => projectIdForThread(thread.threadId, threadProjectIds) === projectId)
       .map((thread) => {
-        const sidebarStatus = describeThreadStatus(thread);
+        const sidebarStatus = sidebarStatusForThread(thread);
         const timeLabel =
-          thread.threadId === runtimeState.activeThreadId || sidebarStatus.label === "空闲"
+          thread.threadId === runtimeState.activeThreadId || sidebarStatus.label === "idle"
             ? undefined
             : sidebarStatus.label;
         return {
           id: `thread:${thread.threadId}`,
           kind: "thread",
-          label: threadDisplayTitle(thread),
-          description: thread.metadata?.taskSummary,
+          label: thread.label,
           timeLabel,
         };
       });
@@ -1155,25 +709,25 @@ export function App() {
       icon: <Globe size={16} strokeWidth={1.85} />,
     },
     {
+      id: "terminal" as const,
+      label: "Terminal",
+      badge: runtimeState.toolResults.length || undefined,
+      icon: <Terminal size={16} strokeWidth={1.85} />,
+    },
+    {
       id: "files" as const,
-      label: "Context",
-      badge:
-        runtimeState.threadContext?.files.files.length ||
-        runtimeState.artifacts.length ||
-        undefined,
+      label: "Files",
+      badge: runtimeState.artifacts.length || undefined,
       icon: <Files size={16} strokeWidth={1.85} />,
     },
   ];
-  const showBranchSourceCard = Boolean(
-    runtimeState.branchSourceView && !hasPromptNarrative,
-  );
   const showCenterComposer = shouldUseCenterComposer({
     hasNarrative: visibleNarrativeItems.length > 0,
     hasRun: Boolean(runtimeState.runId),
     hasNotice: Boolean(notice),
     hasError: Boolean(runtimeState.errorMessage),
     needsRestart: desktopNeedsRestart,
-  }) && !showBranchSourceCard;
+  });
   const markerActiveTurnId =
     activeTurnMarkerId &&
     narrativeSections.turns.some((turn) => turn.id === activeTurnMarkerId)
@@ -1212,7 +766,6 @@ export function App() {
         if (event.type === "RUN_FINISHED" || event.type === "RUN_ERROR") {
           terminalSeenRef.current = true;
           localStorage.removeItem("awaken:runId");
-          maybeSendRunNotification(event);
         }
         if (event.type === "RUN_STATUS_CHANGED" && event.status === "cancelled") {
           localStorage.removeItem("awaken:runId");
@@ -1244,56 +797,6 @@ export function App() {
         unsubscribeRef.current = null;
       },
     };
-  }
-
-  function maybeSendRunNotification(event: Parameters<SubscribeHandlers["onEvent"]>[0]): void {
-    const mode = policySettings.backgroundNotificationMode;
-    if (mode === "off") {
-      return;
-    }
-    const isErrorEvent = event.type === "RUN_ERROR" && event.code !== "RUN_CANCELLED";
-    const isResultEvent = event.type === "RUN_FINISHED";
-    if (mode === "error" && !isErrorEvent) {
-      return;
-    }
-    if (mode === "result" && !isResultEvent) {
-      return;
-    }
-    if (typeof window === "undefined" || !("Notification" in window)) {
-      return;
-    }
-    const title = isErrorEvent ? "Awaken run failed" : "Awaken run finished";
-    const body = isErrorEvent
-      ? providerErrorMessageFromRuntime(event.message, event.providerReason)
-      : "Run completed.";
-    const show = () => {
-      try {
-        new Notification(title, { body });
-      } catch {
-        // Desktop notification support is best-effort.
-      }
-    };
-    if (Notification.permission === "granted") {
-      show();
-      return;
-    }
-    if (Notification.permission === "default") {
-      void Notification.requestPermission().then((permission) => {
-        if (permission === "granted") {
-          show();
-        }
-      });
-    }
-  }
-
-  function providerErrorMessageFromRuntime(message?: string, reason?: string): string {
-    if (reason === "rate_limit") {
-      return `Provider 限流：${message || "rate limit"}`;
-    }
-    if (reason === "auth" || reason === "auth_permanent" || reason === "billing") {
-      return `Provider 认证或额度异常：${message || "provider error"}`;
-    }
-    return message || "Runtime returned an error.";
   }
 
   const setRunStageScrollElement = useCallback((element: HTMLDivElement | null) => {
@@ -1435,25 +938,6 @@ export function App() {
     );
   }
 
-  function cancelLatestTurnLayoutSync(): void {
-    if (latestTurnResizeFrameRef.current === null) {
-      return;
-    }
-    window.cancelAnimationFrame(latestTurnResizeFrameRef.current);
-    latestTurnResizeFrameRef.current = null;
-  }
-
-  function queueLatestTurnLayoutSync(promptId: string): void {
-    cancelLatestTurnLayoutSync();
-    latestTurnResizeFrameRef.current = window.requestAnimationFrame(() => {
-      latestTurnResizeFrameRef.current = null;
-      measureLatestTurnMinHeight(promptId);
-      if (followLatestOutputRef.current && !latestOutputFollowPausedByUserRef.current) {
-        scrollLatestTurnOutputToTail(promptId);
-      }
-    });
-  }
-
   function scrollPromptToAnchor(promptId: string): void {
     const element = runStageScrollRef.current;
     if (!element) {
@@ -1505,56 +989,6 @@ export function App() {
       bottomReserve: composerSafeAreaPx,
       anchorScrollTop,
     });
-
-    if (Math.abs(nextScrollTop - element.scrollTop) < 1) {
-      return;
-    }
-
-    element.scrollTo({
-      top: nextScrollTop,
-      behavior: "auto",
-    });
-  }
-
-  function scrollLatestTurnOutputToTailIfObscured(promptId: string): void {
-    const element = runStageScrollRef.current;
-    if (!element) {
-      return;
-    }
-
-    const turn = findTurnElement(element, promptId);
-    if (!turn) {
-      return;
-    }
-
-    const elementRect = element.getBoundingClientRect();
-    const turnRect = turn.getBoundingClientRect();
-    const outputBottom = latestTurnOutputBottom(turn);
-    const visibleBottom = elementRect.top + element.clientHeight - composerSafeAreaPx;
-    const viewportBottom = elementRect.top + element.clientHeight;
-
-    if (outputBottom <= visibleBottom + 4) {
-      return;
-    }
-    if (outputBottom > viewportBottom + 4) {
-      return;
-    }
-
-    const anchorScrollTop = scrollTopForPromptAnchor({
-      currentScrollTop: element.scrollTop,
-      containerTop: elementRect.top,
-      promptTop: turnRect.top,
-      anchorOffset: promptAnchorOffset(element),
-    });
-    const targetScrollTop = scrollTopForLatestTurnOutputTail({
-      currentScrollTop: element.scrollTop,
-      containerTop: elementRect.top,
-      outputBottom,
-      containerHeight: element.clientHeight,
-      bottomReserve: composerSafeAreaPx,
-      anchorScrollTop,
-    });
-    const nextScrollTop = Math.max(element.scrollTop, targetScrollTop);
 
     if (Math.abs(nextScrollTop - element.scrollTop) < 1) {
       return;
@@ -1636,28 +1070,18 @@ export function App() {
       const content = measuredDockElement.firstElementChild instanceof HTMLElement
         ? measuredDockElement.firstElementChild
         : measuredDockElement;
-      const dockRect = measuredDockElement.getBoundingClientRect();
-      const dockStyles = window.getComputedStyle(measuredDockElement);
-      const paddingTop = Number.parseFloat(dockStyles.paddingTop);
       const paddingBottom = Number.parseFloat(
-        dockStyles.paddingBottom,
+        window.getComputedStyle(measuredDockElement).paddingBottom,
       );
-      const measuredHeight = measuredComposerDockHeight({
-        dockHeight: dockRect.height,
-        contentHeight: content.getBoundingClientRect().height,
-        paddingTop: Number.isFinite(paddingTop) ? paddingTop : 0,
-        paddingBottom: Number.isFinite(paddingBottom) ? paddingBottom : 0,
-      });
+      const measuredHeight =
+        content.getBoundingClientRect().height +
+        (Number.isFinite(paddingBottom) ? paddingBottom : 0);
       setComposerDockHeightPx(Math.ceil(measuredHeight));
     }
 
     syncComposerHeight();
     const resizeObserver = new ResizeObserver(syncComposerHeight);
     resizeObserver.observe(measuredDockElement);
-    const content = measuredDockElement.firstElementChild;
-    if (content instanceof HTMLElement) {
-      resizeObserver.observe(content);
-    }
 
     return () => {
       resizeObserver.disconnect();
@@ -1716,28 +1140,13 @@ export function App() {
       return;
     }
 
-    const latestTurnElement = findTurnElement(element, latestPromptId);
-    if (!latestTurnElement) {
-      return;
-    }
-
     const resizeObserver = new ResizeObserver(() => {
-      queueLatestTurnLayoutSync(latestPromptId);
+      measureLatestTurnMinHeight(latestPromptId);
     });
-    resizeObserver.observe(latestTurnElement);
-    const latestTurnBody = latestTurnElement.querySelector<HTMLElement>(".execution-turn-body");
-    if (latestTurnBody) {
-      resizeObserver.observe(latestTurnBody);
-      const latestBodyItem = latestTurnBody.lastElementChild;
-      if (latestBodyItem instanceof HTMLElement) {
-        resizeObserver.observe(latestBodyItem);
-      }
-    }
-    queueLatestTurnLayoutSync(latestPromptId);
+    resizeObserver.observe(element);
 
     return () => {
       resizeObserver.disconnect();
-      cancelLatestTurnLayoutSync();
     };
   }, [composerSafeAreaPx, latestPromptId]);
 
@@ -1747,7 +1156,6 @@ export function App() {
       runStageInputIntentCleanupRef.current = null;
       runStageResizeObserverRef.current?.disconnect();
       runStageResizeObserverRef.current = null;
-      cancelLatestTurnLayoutSync();
     };
   }, []);
 
@@ -1758,15 +1166,7 @@ export function App() {
   }
 
   function shouldResumeSubscription(status: RuntimeRunStatus): boolean {
-    return status === "queued" || status === "running" || status === "awaiting_approval" || status === "cancelling";
-  }
-
-  function currentImageAttachments(): RunAttachment[] {
-    return imageAttachmentPaths
-      .split("\n")
-      .map((path) => path.trim())
-      .filter(Boolean)
-      .map((path) => ({ path, type: "image" as const }));
+    return status === "running" || status === "awaiting_approval" || status === "cancelling";
   }
 
   async function replayThreadTranscript(
@@ -1783,10 +1183,6 @@ export function App() {
     const latestRun = transcript.runs[transcript.runs.length - 1]?.run;
     if (!latestRun) {
       localStorage.removeItem("awaken:runId");
-      const branch = transcript.thread.metadata?.branch;
-      if (branch) {
-        dispatchBranchSourceView(threadId, branch);
-      }
       return undefined;
     }
 
@@ -1818,6 +1214,9 @@ export function App() {
     const prompt = composerValue.trim();
     if (!prompt) {
       setNotice("Input is required");
+      return;
+    }
+    if (isBusy) {
       return;
     }
     if (!isWorkspaceValid) {
@@ -1861,8 +1260,6 @@ export function App() {
           requestId: window.crypto.randomUUID(),
           entrypoint: "desktop",
         },
-        policyOptions: policySettings,
-        attachments: currentImageAttachments(),
       };
       const run = await runtimeClient.startRun(startRunRequest);
       setThreadProjectIds((current) => assignThreadToProject(current, run.threadId, runProjectId));
@@ -1872,7 +1269,6 @@ export function App() {
         threadId: run.threadId,
         label: prompt,
         runId: run.runId,
-        updatedAt: run.updatedAt,
       });
       void refreshThreads();
       localStorage.setItem("awaken:runId", run.runId);
@@ -1889,53 +1285,16 @@ export function App() {
   }
 
   async function handleComposerSubmit(): Promise<void> {
+    if (isBusy) {
+      await handleCancel();
+      setComposerFocusRequest((request) => request + 1);
+      return;
+    }
     await handleSubmit();
     setComposerFocusRequest((request) => request + 1);
   }
 
-  function dispatchBranchSourceView(
-    threadId: string,
-    branch: RuntimeThreadBranchMetadata,
-  ): void {
-    const parentThread = branch.originalThreadId
-      ? runtimeState.threads.find((item) => item.threadId === branch.originalThreadId)
-      : undefined;
-    const parentLabel = parentThread
-      ? threadDisplayTitle(parentThread)
-      : branch.title ?? "来源会话";
-    const forkedFromPreview = branch.title ?? parentThread?.metadata?.lastPrompt ?? "";
-    dispatch({
-      type: "run/branchSourceViewSet",
-      parentThreadId: branch.originalThreadId ?? "",
-      parentLabel,
-      forkedFromPreview,
-    });
-  }
-
-  async function handleBranchThread(): Promise<void> {
-    if (!desktopReady || !runtimeState.activeThreadId || !canBranch || branching) {
-      return;
-    }
-    const sourceThreadId = runtimeState.activeThreadId;
-    setBranching(true);
-    setNotice(null);
-    try {
-      const result = await runtimeClient.branchThread(sourceThreadId);
-      dispatch({ type: "run/threadBranched", thread: result.thread });
-      void refreshThreads();
-      await handleSelectConversation(result.thread.threadId, result.thread.metadata?.branch);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to branch thread";
-      dispatch({ type: "run/createFailed", message });
-    } finally {
-      setBranching(false);
-    }
-  }
-
-  async function handleSelectConversation(
-    threadId: string,
-    branchHint?: RuntimeThreadBranchMetadata,
-  ): Promise<void> {
+  async function handleSelectConversation(threadId: string): Promise<void> {
     if (!desktopReady) {
       return;
     }
@@ -1962,20 +1321,11 @@ export function App() {
     const thread = runtimeState.threads.find((item) => item.threadId === threadId);
     if (!thread?.runId) {
       localStorage.removeItem("awaken:runId");
-      const branch = thread?.metadata?.branch ?? branchHint;
-      if (branch) {
-        dispatchBranchSourceView(threadId, branch);
-      }
       return;
     }
 
     try {
       await replayThreadTranscript(threadId, loadSeq);
-      requestAnimationFrame(() => {
-        if (latestPromptIdRef.current) {
-          scrollLatestTurnOutputToTailIfObscured(latestPromptIdRef.current);
-        }
-      });
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Failed to load thread");
     }
@@ -2121,123 +1471,7 @@ export function App() {
   }
 
   function handleAddContext(): void {
-    setActiveNavId("customize");
-    setNotice("Add local image paths in Customize.");
-  }
-
-  function updatePolicySettings(next: Partial<RunPolicyOptions>): void {
-    setPolicySettings((current) => ({
-      ...current,
-      ...next,
-      busyInputMode: next.busyInputMode
-        ? normalizeBusyInputMode(next.busyInputMode)
-        : current.busyInputMode,
-      backgroundNotificationMode: next.backgroundNotificationMode
-        ? normalizeBackgroundMode(next.backgroundNotificationMode)
-        : current.backgroundNotificationMode,
-      imageInputMode: next.imageInputMode
-        ? normalizeImageInputMode(next.imageInputMode)
-        : current.imageInputMode,
-      restartDrainTimeoutMs:
-        next.restartDrainTimeoutMs === undefined
-          ? current.restartDrainTimeoutMs
-          : clampNumber(Number(next.restartDrainTimeoutMs), 0, 300000),
-    }));
-  }
-
-  function renderBusyModeControls() {
-    if (!isBusy) {
-      return null;
-    }
-    const modes: Array<{ id: BusyInputMode; label: string }> = [
-      { id: "queue", label: "Queue" },
-      { id: "steer", label: "Steer" },
-      { id: "interrupt", label: "Interrupt" },
-    ];
-    return (
-      <div className="wave3-busy-controls">
-        {modes.map((mode) => (
-          <button
-            key={mode.id}
-            type="button"
-            className={`wave3-segment${policySettings.busyInputMode === mode.id ? " wave3-segment-active" : ""}`}
-            onClick={() => updatePolicySettings({ busyInputMode: mode.id })}
-          >
-            {mode.label}
-          </button>
-        ))}
-      </div>
-    );
-  }
-
-  function renderWaveSettingsPanel() {
-    if (activeNavId !== "customize") {
-      return null;
-    }
-    return (
-      <div className="runtime-panel wave3-settings-panel">
-        <strong>Wave 3</strong>
-        <div className="wave3-settings-grid">
-          <label>
-            <span>Busy input</span>
-            <select
-              value={policySettings.busyInputMode}
-              onChange={(event) => updatePolicySettings({ busyInputMode: event.target.value as BusyInputMode })}
-            >
-              <option value="queue">Queue</option>
-              <option value="steer">Steer</option>
-              <option value="interrupt">Interrupt</option>
-            </select>
-          </label>
-          <label>
-            <span>Notifications</span>
-            <select
-              value={policySettings.backgroundNotificationMode}
-              onChange={(event) => updatePolicySettings({ backgroundNotificationMode: event.target.value as BackgroundNotificationMode })}
-            >
-              <option value="all">All</option>
-              <option value="result">Result</option>
-              <option value="error">Error</option>
-              <option value="off">Off</option>
-            </select>
-          </label>
-          <label>
-            <span>Images</span>
-            <select
-              value={policySettings.imageInputMode}
-              onChange={(event) => updatePolicySettings({ imageInputMode: event.target.value as ImageInputMode })}
-            >
-              <option value="auto">Auto</option>
-              <option value="native">Native</option>
-              <option value="text">Text</option>
-            </select>
-          </label>
-          <label>
-            <span>Drain timeout</span>
-            <input
-              type="number"
-              min={0}
-              max={300000}
-              step={1000}
-              value={policySettings.restartDrainTimeoutMs}
-              onChange={(event) => updatePolicySettings({ restartDrainTimeoutMs: Number(event.target.value) })}
-            />
-          </label>
-        </div>
-        <label className="wave3-image-paths">
-          <span>Image paths</span>
-          <textarea
-            value={imageAttachmentPaths}
-            onChange={(event) => setImageAttachmentPaths(event.target.value)}
-            rows={3}
-          />
-        </label>
-        <div className="wave3-model-meta">
-          <span>{runtimeInfo?.configuredModelDisplayName || runtimeInfo?.configuredModel || "No model"}</span>
-          {runtimeInfo?.configuredModel ? <code>{runtimeInfo.configuredModel}</code> : null}
-        </div>
-      </div>
-    );
+    setNotice("Context picker is not wired yet.");
   }
 
   function handleSidebarResizeStart(event: ReactPointerEvent<HTMLDivElement>): void {
@@ -2343,17 +1577,13 @@ export function App() {
       );
     }
     if (item.kind === "answer") {
-      const showFooter = item.status === "done" && Boolean(item.isFinal);
       return (
-        <AnswerNarrativeItem
+        <AssistantMessage
           key={key}
-          item={item}
-          showFooter={showFooter}
-          onFooterShown={() => {
-            if (latestPromptIdRef.current) {
-              scrollLatestTurnOutputToTailIfObscured(latestPromptIdRef.current);
-            }
-          }}
+          markdown={item.markdown}
+          status={item.status}
+          elapsedMs={item.elapsedMs}
+          showFooter={item.status === "done"}
         />
       );
     }
@@ -2375,34 +1605,14 @@ export function App() {
       );
     }
     if (item.kind === "tool") {
-      const tool = runtimeState.toolResults.find(
-        (toolResult) => toolResult.id === rawToolId(item.id),
-      );
-      const isShell = tool?.toolCallName === "shell" && parseShellResult(tool.content) !== undefined;
-      if (isShell) {
-        return (
-          <InlineShellCall
-            key={key}
-            item={item}
-            toolResults={runtimeState.toolResults}
-            onLayoutChange={() => {
-              if (latestPromptIdRef.current) {
-                scrollLatestTurnOutputToTailIfObscured(latestPromptIdRef.current);
-              }
-            }}
-          />
-        );
-      }
+      const selection: InspectorSelection = { kind: "tool", id: item.id };
       return (
-        <InlineToolCall
+        <ToolTraceLine
           key={key}
-          item={item}
-          toolResults={runtimeState.toolResults}
-          onLayoutChange={() => {
-            if (latestPromptIdRef.current) {
-              scrollLatestTurnOutputToTailIfObscured(latestPromptIdRef.current);
-            }
-          }}
+          title={item.title}
+          detail={item.detail}
+          status={item.status}
+          onSelect={() => selectInspector(selection, "terminal")}
         />
       );
     }
@@ -2505,12 +1715,23 @@ export function App() {
     );
   }
 
-  function renderToolDetail(tool: ToolResultRecord) {
-    const shellResult = tool.toolCallName === "shell" ? parseShellResult(tool.content) : undefined;
-    if (shellResult) {
-      return <InspectorShellDetail tool={tool} result={shellResult} />;
+  function renderToolDetail(tool = selectedToolResult ?? latestToolResult) {
+    if (!tool) {
+      return null;
     }
-    const toolOutput = formatToolOutput(tool);
+    const toolOutput = [
+      "args:",
+      tool.args || "No tool args captured.",
+      "",
+      "command output:",
+      tool.commandOutput || "No command output captured.",
+      tool.commandOutputTruncated ? "[command output truncated]" : "",
+      "",
+      "result:",
+      tool.content || "No tool result captured.",
+    ]
+      .filter((line, index, lines) => line !== "" || lines[index - 1] !== "")
+      .join("\n");
     return (
       <article className="inspector-item inspector-item-selected">
         <Disclosure title={tool.title} meta={tool.status || "done"} defaultOpen>
@@ -2669,7 +1890,7 @@ export function App() {
       return (
         <section className="inspector-section">
           <div className="inspector-section-head">
-            <h2>Tool Output</h2>
+            <h2>Tool File Output</h2>
             <span>{selectedToolResult.status || "done"}</span>
           </div>
           {renderToolDetail(selectedToolResult)}
@@ -2694,110 +1915,23 @@ export function App() {
       );
     }
 
-    return renderContextOverview();
-  }
-
-  function renderContextOverview() {
-    if (runtimeState.threadContextLoading) {
-      return renderInspectorEmpty("Loading context…", "Fetching thread context files and usage.");
-    }
-    if (runtimeState.threadContextError) {
-      return renderInspectorEmpty("Context error", runtimeState.threadContextError);
-    }
-    if (!runtimeState.threadContext) {
-      return renderInspectorEmpty("No context loaded", "Select a thread to load its context files and usage.");
-    }
-
-    const { files, usage } = runtimeState.threadContext;
-    const usageEmpty = usage.totalTokens === 0 && usage.messageCount === 0;
-    const usagePct = Math.max(0, Math.min(100, usage.percentage));
-
-    return (
-      <>
-        <section className="inspector-section">
-          <div className="inspector-section-head">
-            <h2>Context Files</h2>
-            <span>{files.files.length}</span>
-          </div>
-          {files.files.length === 0 ? (
-            <p className="inspector-empty-state inspector-empty-state-quiet">
-              No context files yet.
-            </p>
-          ) : (
-            <div className="inspector-list">
-              {files.files.map((file, index) => (
-                <article
-                  key={`${file.path ?? "file"}-${index}`}
-                  className="inspector-item inspector-context-file"
-                >
-                  <strong>{file.path || "Unknown path"}</strong>
-                  <span>{file.source || "unknown source"}</span>
-                  <div className="inspector-context-file-meta">
-                    {file.last_read_time ? (
-                      <span>{formatThreadUpdatedAt(file.last_read_time)}</span>
-                    ) : null}
-                    {typeof file.tokens === "number" ? (
-                      <span className="inspector-context-file-tokens">
-                        {file.tokens.toLocaleString()} tokens
-                      </span>
-                    ) : null}
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
-        <section className="inspector-section">
-          <div className="inspector-section-head">
-            <h2>Context Usage</h2>
-            <span>{usage.model || "—"}</span>
-          </div>
-          {usageEmpty ? (
-            <p className="inspector-empty-state inspector-empty-state-quiet">
-              No usage captured yet.
-            </p>
-          ) : (
-            <dl className="inspector-kv">
-              <div>
-                <dt>Model</dt>
-                <dd>{usage.model || "—"}</dd>
-              </div>
-              <div>
-                <dt>Tokens</dt>
-                <dd>
-                  {usage.totalTokens.toLocaleString()} / {usage.maxTokens.toLocaleString()}
-                </dd>
-              </div>
-              <div>
-                <dt>Messages</dt>
-                <dd>{usage.messageCount}</dd>
-              </div>
-            </dl>
-          )}
-          {!usageEmpty ? (
-            <div
-              className="inspector-context-usage-bar"
-              role="progressbar"
-              aria-valuenow={usagePct}
-              aria-valuemin={0}
-              aria-valuemax={100}
-            >
-              <div
-                className="inspector-context-usage-bar-fill"
-                style={{ width: `${usagePct}%` }}
-              />
-              <span className="inspector-context-usage-bar-label">{usagePct.toFixed(1)}%</span>
-            </div>
-          ) : null}
-        </section>
-      </>
-    );
+    return null;
   }
 
   function renderInspectorTabPanel() {
     switch (inspectorTab) {
       case "browser":
         return renderBrowserPane();
+      case "terminal":
+        return (
+          <section className="inspector-section">
+            <div className="inspector-section-head">
+              <h2>Terminal</h2>
+              <span>{selectedToolResult ? "selected" : "latest"}</span>
+            </div>
+            {renderToolDetail()}
+          </section>
+        );
       case "files":
         return renderFilesPane();
       case "changes":
@@ -2855,39 +1989,6 @@ export function App() {
               onNewTask={handleNewTask}
               right={
                 <div className="workbench-chrome-status">
-                  <button
-                    type="button"
-                    className="workbench-chrome-branch-button"
-                    onClick={() => {
-                      void handleBranchThread();
-                    }}
-                    disabled={!canBranch}
-                    aria-label="分支当前会话"
-                    title={canBranch ? "分支当前会话" : "当前会话无可分支内容"}
-                  >
-                    <GitBranch size={13} strokeWidth={1.85} />
-                    <span>分支</span>
-                  </button>
-                  <TaskCenterPanel
-                    open={taskCenterOpen}
-                    activeThreadId={runtimeState.activeThreadId}
-                    errorMessage={threadListError}
-                    threads={runtimeState.threads}
-                    onRefresh={() => {
-                      void refreshThreads();
-                    }}
-                    onSelectThread={(threadId) => {
-                      setTaskCenterOpen(false);
-                      void handleSelectConversation(threadId);
-                    }}
-                    onToggle={() => {
-                      const nextOpen = !taskCenterOpen;
-                      setTaskCenterOpen(nextOpen);
-                      if (nextOpen) {
-                        void refreshThreads();
-                      }
-                    }}
-                  />
                   {topbarStatusLabel ? (
                     <span className="workbench-chrome-state">{topbarStatusLabel}</span>
                   ) : null}
@@ -2986,26 +2087,24 @@ export function App() {
                     composer={
                       showCenterComposer ? undefined : (
                         <ComposerDock ref={composerDockRef}>
-                          <div className="wave3-composer-stack">
-                            {renderBusyModeControls()}
-                            <ComposerBar
-                              value={composerValue}
-                              onChange={setComposerValue}
-                              onSubmit={() => {
-                                void handleComposerSubmit();
-                              }}
-                              onAddContext={handleAddContext}
-                              placeholder=""
-                              disabled={!desktopReady || !isWorkspaceValid}
-                              isReady={
-                                desktopReady && composerValue.trim().length > 0 && isWorkspaceValid
-                              }
-                              submitMode={isBusy && policySettings.busyInputMode === "interrupt" ? "stop" : "send"}
-                              variant="dock"
-                              metaItems={composerMetaItems}
-                              focusRequest={composerFocusRequest}
-                            />
-                          </div>
+                          <ComposerBar
+                            value={composerValue}
+                            onChange={setComposerValue}
+                            onSubmit={() => {
+                              void handleComposerSubmit();
+                            }}
+                            onAddContext={handleAddContext}
+                            placeholder=""
+                            disabled={!desktopReady || isBusy || !isWorkspaceValid}
+                            isReady={
+                              isBusy ||
+                              (desktopReady && composerValue.trim().length > 0 && isWorkspaceValid)
+                            }
+                            submitMode={isBusy ? "stop" : "send"}
+                            variant="dock"
+                            metaItems={composerMetaItems}
+                            focusRequest={composerFocusRequest}
+                          />
                         </ComposerDock>
                       )
                     }
@@ -3024,41 +2123,10 @@ export function App() {
                       </div>
                     ) : null}
 
-                    {runtimeState.supervisorStatus === "draining" ? (
-                      <div className="runtime-panel">
-                        <strong>Draining runs</strong>
-                        <p>
-                          {runtimeState.supervisorInfo?.drain
-                            ? `${runtimeState.supervisorInfo.drain.activeRuns} active · ${runtimeState.supervisorInfo.drain.queuedRuns} queued · ${runtimeState.supervisorInfo.drain.timeoutMs}ms`
-                            : "Waiting for active and queued runs before restart or quit."}
-                        </p>
-                      </div>
-                    ) : null}
-
                     {runtimeState.errorMessage ? (
                       <div className="runtime-panel runtime-panel-error">
                         <strong>Run error</strong>
                         <p>{runtimeState.errorMessage}</p>
-                        {runtimeState.providerReason ? (
-                          <span className="wave3-error-meta">
-                            {runtimeState.providerReason}
-                            {runtimeState.retryable ? " · retryable" : ""}
-                          </span>
-                        ) : null}
-                        {runtimeState.rateLimitOptions.length > 0 ? (
-                          <div className="wave3-rate-limit-actions">
-                            {runtimeState.rateLimitOptions.map((option) => (
-                              <Button
-                                key={option.value}
-                                size="sm"
-                                variant={option.value === "cancel" ? "default" : "primary"}
-                                onClick={() => setNotice(`Rate limit action: ${option.label}`)}
-                              >
-                                {option.label}
-                              </Button>
-                            ))}
-                          </div>
-                        ) : null}
                       </div>
                     ) : null}
 
@@ -3069,68 +2137,31 @@ export function App() {
                       </div>
                     ) : null}
 
-                    {showBranchSourceCard && runtimeState.branchSourceView ? (
-                      <div className="branch-source-card">
-                        <div className="branch-source-card-head">
-                          <GitBranch size={16} strokeWidth={1.85} />
-                          <span className="branch-source-card-title">
-                            从 {runtimeState.branchSourceView.parentLabel} 分支
-                          </span>
-                        </div>
-                        {runtimeState.branchSourceView.forkedFromPreview ? (
-                          <p className="branch-source-card-preview">
-                            {runtimeState.branchSourceView.forkedFromPreview}
-                          </p>
-                        ) : null}
-                        <div className="branch-source-card-actions">
-                          <button
-                            type="button"
-                            className="branch-source-card-link"
-                            onClick={() => {
-                              if (runtimeState.branchSourceView?.parentThreadId) {
-                                void handleSelectConversation(
-                                  runtimeState.branchSourceView.parentThreadId,
-                                );
-                              }
-                            }}
-                          >
-                            查看来源会话
-                          </button>
-                        </div>
-                        <p className="branch-source-card-hint">
-                          发送新消息将开始此分支的首个 run
-                        </p>
-                      </div>
-                    ) : null}
-
-                    {renderWaveSettingsPanel()}
                     {showCenterComposer ? (
                       <div className="run-stage-center-composer">
                         <TaskWelcome />
-                        <div className="wave3-composer-stack">
-                          {renderBusyModeControls()}
-                          <ComposerBar
-                            value={composerValue}
-                            onChange={setComposerValue}
-                            onSubmit={() => {
-                              void handleComposerSubmit();
-                            }}
-                            onAddContext={handleAddContext}
-                            placeholder=""
-                            disabled={!desktopReady || !isWorkspaceValid}
-                            isReady={
-                              desktopReady && composerValue.trim().length > 0 && isWorkspaceValid
-                            }
-                            submitMode={isBusy && policySettings.busyInputMode === "interrupt" ? "stop" : "send"}
-                            variant="center"
-                            metaItems={composerMetaItems}
-                            focusRequest={composerFocusRequest}
-                          />
-                        </div>
+                        <ComposerBar
+                          value={composerValue}
+                          onChange={setComposerValue}
+                          onSubmit={() => {
+                            void handleComposerSubmit();
+                          }}
+                          onAddContext={handleAddContext}
+                          placeholder=""
+                          disabled={!desktopReady || isBusy || !isWorkspaceValid}
+                          isReady={
+                            isBusy ||
+                            (desktopReady && composerValue.trim().length > 0 && isWorkspaceValid)
+                          }
+                          submitMode={isBusy ? "stop" : "send"}
+                          variant="center"
+                          metaItems={composerMetaItems}
+                          focusRequest={composerFocusRequest}
+                        />
                       </div>
                     ) : null}
 
-                    {showCenterComposer || showBranchSourceCard ? null : (
+                    {showCenterComposer ? null : (
                       <ExecutionFeed>
                         {narrativeSections.leadItems.map((item, index) =>
                           renderNarrativeItem(item, `lead:${item.id}:${index}`),
@@ -3182,15 +2213,6 @@ export function App() {
                     activeId={inspectorTab}
                     onSelect={(id) => setInspectorTab(id as InspectorTabId)}
                   >
-                    {activeBranchMeta ? (
-                      <section className="inspector-section inspector-branch-lineage">
-                        <div className="inspector-branch-lineage-head">
-                          <GitBranch size={13} strokeWidth={1.85} />
-                          <span>从 {activeBranchParentLabel} 分支</span>
-                        </div>
-                      </section>
-                    ) : null}
-
                     {renderInspectorTabPanel()}
 
                     {a2uiArtifacts.length > 0 ? (

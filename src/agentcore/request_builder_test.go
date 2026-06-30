@@ -1,45 +1,13 @@
 package agentcore
 
 import (
-	"context"
-	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
 	convcontext "awaken/src/context"
-	"awaken/src/llm"
-	"awaken/src/mcp"
 	"awaken/src/tool"
-	browsercontrol "awaken/src/tools/browser_control"
-	_ "awaken/src/tools/todo_write"
 )
-
-type requestBuilderReadOnlyTool struct {
-	name     string
-	readOnly bool
-}
-
-func (t requestBuilderReadOnlyTool) Name() string {
-	return t.name
-}
-
-func (t requestBuilderReadOnlyTool) Description() string {
-	return "request builder test tool"
-}
-
-func (t requestBuilderReadOnlyTool) Parameters() []tool.ToolParameter {
-	return nil
-}
-
-func (t requestBuilderReadOnlyTool) Execute(context.Context, string) (string, error) {
-	return "ok", nil
-}
-
-func (t requestBuilderReadOnlyTool) IsReadOnly() bool {
-	return t.readOnly
-}
 
 func TestRequestBuilderBuildsCompleteRequest(t *testing.T) {
 	ctx := convcontext.New()
@@ -81,9 +49,6 @@ func TestRequestBuilderBuildsCompleteRequest(t *testing.T) {
 	if req.Model != "test-model" || req.Temperature != 0.2 || req.MaxTokens != 777 {
 		t.Fatalf("unexpected model config: %+v", req)
 	}
-	if req.Cache.SystemPromptCacheControl.Type != "" {
-		t.Fatalf("expected cache metadata to be empty by default, got %+v", req.Cache)
-	}
 	if !strings.Contains(req.SystemPrompt, "test-model") || !strings.Contains(req.SystemPrompt, "test-entry") {
 		t.Fatalf("expected runtime info in system prompt: %s", req.SystemPrompt)
 	}
@@ -107,68 +72,6 @@ func TestRequestBuilderUsesRegisteredTools(t *testing.T) {
 		}
 	}
 	t.Fatalf("expected registered tool %s in request tools", toolName)
-}
-
-func TestRequestBuilderUsesRegisteredToolParameterSchema(t *testing.T) {
-	candidate, err := tool.GetTool("todo_write")
-	if err != nil {
-		t.Fatalf("expected todo_write to be registered: %v", err)
-	}
-
-	schema := tool.DefinitionFromTool(candidate).Function.Parameters
-	items, ok := schema.Properties["items"]
-	if !ok {
-		t.Fatalf("expected todo_write schema to expose items property: %+v", schema)
-	}
-	if items.Type != "array" || items.Items == nil {
-		t.Fatalf("expected items to be an array with item schema, got %+v", items)
-	}
-	status := items.Items.Properties["status"]
-	wantStatuses := []string{"pending", "in_progress", "completed", "cancelled"}
-	if !reflect.DeepEqual(status.Enum, wantStatuses) {
-		t.Fatalf("expected status enum %+v, got %+v", wantStatuses, status.Enum)
-	}
-}
-
-func TestRequestBuilderSkipsUnavailableAvailabilityAwareTools(t *testing.T) {
-	previous := browsercontrol.CurrentRuntime()
-	browsercontrol.SetRuntime(browsercontrol.NewDisabledRuntime("not attached"))
-	defer browsercontrol.SetRuntime(previous)
-
-	builder := NewRequestBuilder(AgentConfig{})
-	req := builder.Build(convcontext.New(), nil)
-
-	for _, definition := range req.Tools {
-		switch definition.Function.Name {
-		case "browser_open", "browser_page_summary", "browser_navigate":
-			t.Fatalf("expected unavailable browser tool %s to be omitted from request tools", definition.Function.Name)
-		}
-	}
-}
-
-func TestRequestBuilderIncludesAvailableAvailabilityAwareTools(t *testing.T) {
-	previous := browsercontrol.CurrentRuntime()
-	browsercontrol.SetRuntime(browsercontrol.NewMockRuntime())
-	defer browsercontrol.SetRuntime(previous)
-
-	builder := NewRequestBuilder(AgentConfig{})
-	req := builder.Build(convcontext.New(), nil)
-
-	expected := map[string]bool{
-		"browser_open":         false,
-		"browser_page_summary": false,
-		"browser_navigate":     false,
-	}
-	for _, definition := range req.Tools {
-		if _, ok := expected[definition.Function.Name]; ok {
-			expected[definition.Function.Name] = true
-		}
-	}
-	for name, found := range expected {
-		if !found {
-			t.Fatalf("expected available browser tool %s in request tools", name)
-		}
-	}
 }
 
 func TestRequestBuilderRefreshesRuntimeInfo(t *testing.T) {
@@ -199,212 +102,5 @@ func TestRequestBuilderUsesConfiguredWorkspaceRoot(t *testing.T) {
 	req := builder.Build(convcontext.New(), nil)
 	if !strings.Contains(req.SystemPrompt, workspaceRoot) {
 		t.Fatalf("expected system prompt to include workspace root %q, got %s", workspaceRoot, req.SystemPrompt)
-	}
-}
-
-func TestRequestBuilderIncludesExposedMCPTools(t *testing.T) {
-	registry, err := mcp.NewStaticRegistry([]mcp.Server{{
-		Config: mcp.ServerConfig{
-			ID:        "docs",
-			Name:      "Docs",
-			Transport: mcp.TransportHTTP,
-			Enabled:   true,
-			URL:       "https://example.invalid/mcp",
-		},
-		State: mcp.ServerRuntime{
-			Mode:   mcp.RuntimeModeStatic,
-			Status: mcp.ServerStatusReady,
-		},
-		Tools: []mcp.ToolDescriptor{{
-			Name:          "search",
-			Description:   "Search docs",
-			ExposeToModel: true,
-			InputSchema: tool.ToolParametersSchema{
-				Type: "object",
-				Properties: map[string]tool.ToolParam{
-					"query": {Type: "string", Description: "Search query"},
-				},
-				Required: []string{"query"},
-			},
-		}},
-	}})
-	if err != nil {
-		t.Fatalf("failed to build MCP registry: %v", err)
-	}
-
-	req := NewRequestBuilder(AgentConfig{MCPRegistry: registry}).Build(convcontext.New(), nil)
-	for _, definition := range req.Tools {
-		if definition.Function.Name == "mcp__docs__search" {
-			if !strings.Contains(req.SystemPrompt, "mcp__docs__search") {
-				t.Fatalf("expected system prompt summary to mention MCP tool, got %s", req.SystemPrompt)
-			}
-			return
-		}
-	}
-
-	t.Fatalf("expected MCP tool definition in %+v", req.Tools)
-}
-
-func TestRequestBuilderAddsSystemPromptCacheMetadataWhenEnabled(t *testing.T) {
-	builder := NewRequestBuilder(AgentConfig{
-		SystemPrompt: "stable system prompt",
-		PromptCache: PromptCacheConfig{
-			SystemPrompt: true,
-		},
-	})
-
-	req := builder.Build(convcontext.New(), []tool.ToolDefinition{})
-	if req.Cache.SystemPromptCacheControl.Type != llm.CacheControlTypeEphemeral {
-		t.Fatalf("expected ephemeral system prompt cache metadata, got %+v", req.Cache)
-	}
-}
-
-func TestRequestBuilderHonorsSystemPromptCacheMinimumSize(t *testing.T) {
-	builder := NewRequestBuilder(AgentConfig{
-		SystemPrompt: "short",
-		PromptCache: PromptCacheConfig{
-			SystemPrompt:         true,
-			MinSystemPromptBytes: 10000,
-		},
-	})
-
-	req := builder.Build(convcontext.New(), []tool.ToolDefinition{})
-	if req.Cache.SystemPromptCacheControl.Type != "" {
-		t.Fatalf("expected cache metadata to stay empty below threshold, got %+v", req.Cache)
-	}
-}
-
-func TestRequestBuilderFiltersToolsFromRunProfile(t *testing.T) {
-	builder := NewRequestBuilder(AgentConfig{
-		RunProfile: RunProfile{
-			Tools:           []string{"allowed_tool"},
-			DisallowedTools: []string{"blocked_tool"},
-		},
-	})
-
-	req := builder.Build(convcontext.New(), []tool.ToolDefinition{
-		{
-			Type: "function",
-			Function: tool.ToolFunctionSchema{
-				Name:        "allowed_tool",
-				Description: "allowed",
-				Parameters:  tool.ToolParametersSchema{Type: "object", Properties: map[string]tool.ToolParam{}},
-			},
-		},
-		{
-			Type: "function",
-			Function: tool.ToolFunctionSchema{
-				Name:        "blocked_tool",
-				Description: "blocked",
-				Parameters:  tool.ToolParametersSchema{Type: "object", Properties: map[string]tool.ToolParam{}},
-			},
-		},
-		{
-			Type: "function",
-			Function: tool.ToolFunctionSchema{
-				Name:        "other_tool",
-				Description: "other",
-				Parameters:  tool.ToolParametersSchema{Type: "object", Properties: map[string]tool.ToolParam{}},
-			},
-		},
-	})
-
-	if len(req.Tools) != 1 || req.Tools[0].Function.Name != "allowed_tool" {
-		t.Fatalf("expected only allowed_tool after filtering, got %+v", req.Tools)
-	}
-	if !strings.Contains(req.SystemPrompt, "allowed_tool") || strings.Contains(req.SystemPrompt, "blocked_tool") {
-		t.Fatalf("expected runtime tool summary to reflect filtered tools, got %s", req.SystemPrompt)
-	}
-}
-
-func TestRequestBuilderDenyModeOnlyExposesReadOnlyRegisteredTools(t *testing.T) {
-	readOnlyName := "request_builder_read_only_tool"
-	mutatingName := "request_builder_mutating_tool"
-	for _, candidate := range []tool.Tool{
-		requestBuilderReadOnlyTool{name: readOnlyName, readOnly: true},
-		requestBuilderReadOnlyTool{name: mutatingName, readOnly: false},
-	} {
-		if err := tool.RegisterTool(candidate); err != nil {
-			t.Fatalf("failed to register test tool %s: %v", candidate.Name(), err)
-		}
-	}
-
-	builder := NewRequestBuilder(AgentConfig{
-		RunProfile: RunProfile{
-			PermissionMode: PermissionModeDeny,
-		},
-	})
-
-	req := builder.Build(convcontext.New(), []tool.ToolDefinition{
-		{
-			Type: "function",
-			Function: tool.ToolFunctionSchema{
-				Name:        readOnlyName,
-				Description: "read only",
-				Parameters:  tool.ToolParametersSchema{Type: "object", Properties: map[string]tool.ToolParam{}},
-			},
-		},
-		{
-			Type: "function",
-			Function: tool.ToolFunctionSchema{
-				Name:        mutatingName,
-				Description: "mutating",
-				Parameters:  tool.ToolParametersSchema{Type: "object", Properties: map[string]tool.ToolParam{}},
-			},
-		},
-	})
-
-	if len(req.Tools) != 1 || req.Tools[0].Function.Name != readOnlyName {
-		t.Fatalf("expected deny mode to expose only read-only tool, got %+v", req.Tools)
-	}
-	if !strings.Contains(req.SystemPrompt, readOnlyName) || strings.Contains(req.SystemPrompt, mutatingName) {
-		t.Fatalf("expected tool summary to exclude mutating tool, got %s", req.SystemPrompt)
-	}
-}
-
-func TestRequestBuilderAddsProjectOnboardingForConfiguredWorkspaceRoot(t *testing.T) {
-	workspaceRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workspaceRoot, "README.md"), []byte("test"), 0o644); err != nil {
-		t.Fatalf("failed to write README.md: %v", err)
-	}
-
-	builder := NewRequestBuilder(AgentConfig{
-		Workspace: WorkspaceConfig{Root: workspaceRoot},
-	})
-
-	req := builder.Build(convcontext.New(), nil)
-	if !strings.Contains(req.SystemPrompt, "项目上下文提示") {
-		t.Fatalf("expected onboarding hint in system prompt: %s", req.SystemPrompt)
-	}
-	if !strings.Contains(req.SystemPrompt, "missing AGENTS.md/CLAUDE.md") {
-		t.Fatalf("expected missing instructions hint in system prompt: %s", req.SystemPrompt)
-	}
-}
-
-func TestRequestBuilderSkipsProjectOnboardingWithoutConfiguredWorkspaceRoot(t *testing.T) {
-	builder := NewRequestBuilder(AgentConfig{})
-
-	req := builder.Build(convcontext.New(), nil)
-	if strings.Contains(req.SystemPrompt, "项目上下文提示") {
-		t.Fatalf("expected no onboarding hint without explicit workspace root: %s", req.SystemPrompt)
-	}
-}
-
-func TestRequestBuilderSkipsProjectOnboardingForCompleteWorkspace(t *testing.T) {
-	workspaceRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workspaceRoot, "README.md"), []byte("test"), 0o644); err != nil {
-		t.Fatalf("failed to write README.md: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workspaceRoot, "AGENTS.md"), []byte("test"), 0o644); err != nil {
-		t.Fatalf("failed to write AGENTS.md: %v", err)
-	}
-
-	builder := NewRequestBuilder(AgentConfig{
-		Workspace: WorkspaceConfig{Root: workspaceRoot},
-	})
-
-	req := builder.Build(convcontext.New(), nil)
-	if strings.Contains(req.SystemPrompt, "项目上下文提示") {
-		t.Fatalf("expected no onboarding hint for complete workspace: %s", req.SystemPrompt)
 	}
 }

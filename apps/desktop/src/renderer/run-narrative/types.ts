@@ -42,7 +42,6 @@ export type RunNarrativeItem =
       markdown: string;
       status: "active" | "done" | "error";
       elapsedMs?: number;
-      isFinal?: boolean;
     };
 
 export type RunNarrativeState = {

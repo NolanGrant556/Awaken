@@ -140,17 +140,6 @@ func TestShellPermissionAsksForComplexOrDangerousCommands(t *testing.T) {
 	}
 }
 
-func TestShellPermissionIncludesPowerShellPolicyReason(t *testing.T) {
-	permissionContext := tool.NewPermissionContext(t.TempDir(), nil)
-	decision := (&ShellTool{}).CheckPermission(context.Background(), `{"command":"powershell -NoProfile -EncodedCommand SQBFAFgA"}`, permissionContext)
-	if decision.Behavior != tool.PermissionAsk || decision.ApprovalRequest.RiskTone != "danger" {
-		t.Fatalf("expected encoded PowerShell command to ask with danger risk, got %+v", decision)
-	}
-	if !strings.Contains(decision.ApprovalRequest.Description, "PowerShell policy:") {
-		t.Fatalf("expected PowerShell policy reason in approval description, got %q", decision.ApprovalRequest.Description)
-	}
-}
-
 func TestShellPermissionUsesWorkspaceRootForWorkdir(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()

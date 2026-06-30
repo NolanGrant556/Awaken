@@ -20,7 +20,6 @@ import (
 	"awaken/src/tool"
 	_ "awaken/src/tools/apply_patch"
 	_ "awaken/src/tools/file_read"
-	"awaken/src/usage"
 )
 
 type runnerTestTool struct {
@@ -47,10 +46,6 @@ func (t runnerTestTool) Execute(ctx context.Context, input string) (string, erro
 		return "", errors.New("boom")
 	}
 	return "echo:" + input, nil
-}
-
-func (t runnerTestTool) IsReadOnly() bool {
-	return true
 }
 
 func TestRunnerNativeToolCallLoop(t *testing.T) {
@@ -279,7 +274,7 @@ func runAgentWithApprovalSink(ctx context.Context, cfg AgentConfig, userInput st
 	return runner.RunStreamWithEvents(ctx, sink)
 }
 
-func TestRunnerMaxTurns(t *testing.T) {
+func TestRunnerMaxThoughts(t *testing.T) {
 	toolName := "runner_max_tool"
 	mustRegisterRunnerTool(t, runnerTestTool{name: toolName})
 
@@ -289,106 +284,9 @@ func TestRunnerMaxTurns(t *testing.T) {
 	defer server.Close()
 
 	agent := NewAgent(testAgentConfig(server.URL, 1))
-	var gotEvents []AwakenEvent
-	_, err := agent.RunStreamWithEvents(context.Background(), "loop", EventSinkFunc(func(event AwakenEvent) {
-		gotEvents = append(gotEvents, event)
-	}))
-	if !errors.Is(err, ErrMaxTurnsReached) || !strings.Contains(err.Error(), "达到最大执行轮数 1") {
-		t.Fatalf("expected max turns error, got %v", err)
-	}
-
-	var runErrorEvent *AwakenEvent
-	for i := range gotEvents {
-		if gotEvents[i].Type == RunErrorEventType {
-			runErrorEvent = &gotEvents[i]
-			break
-		}
-	}
-	if runErrorEvent == nil {
-		t.Fatalf("expected RunError event, got events: %+v", gotEvents)
-	}
-	if runErrorEvent.Code != "MAX_TURNS_REACHED" {
-		t.Fatalf("expected Code MAX_TURNS_REACHED, got %q", runErrorEvent.Code)
-	}
-}
-
-func TestRunnerUnlimitedMaxTurnsAllowsToolThenFinalAnswer(t *testing.T) {
-	toolName := "runner_unlimited_tool"
-	mustRegisterRunnerTool(t, runnerTestTool{name: toolName})
-
-	var calls int
-	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		if calls == 1 {
-			writeRunnerStreamToolCall(t, w, "call_unlimited", toolName, map[string]string{"value": "again"})
-			return
-		}
-		writeRunnerStreamText(t, w, "finished")
-	})
-	defer server.Close()
-
-	agent := NewAgent(testAgentConfig(server.URL, 0))
-	answer, err := agent.RunStreamWithEvents(context.Background(), "loop", nil)
-	if err != nil {
-		t.Fatalf("expected unlimited max turns run to finish, got %v", err)
-	}
-	if answer != "finished" {
-		t.Fatalf("expected final answer, got %q", answer)
-	}
-	if calls != 2 {
-		t.Fatalf("expected two LLM calls, got %d", calls)
-	}
-}
-
-func TestRunnerBudgetGuardBlocksBeforeLLM(t *testing.T) {
-	var calls int
-	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		writeRunnerStreamText(t, w, "should not be called")
-	})
-	defer server.Close()
-
-	cfg := testAgentConfig(server.URL, 1)
-	cfg.UsageLimits = usage.BudgetLimits{MaxInputBytes: 1}
-
-	agent := NewAgent(cfg)
-	_, err := agent.RunStreamWithEvents(context.Background(), "this should exceed the byte budget", nil)
-	if !errors.Is(err, usage.ErrBudgetExceeded) {
-		t.Fatalf("expected ErrBudgetExceeded, got %v", err)
-	}
-	if calls != 0 {
-		t.Fatalf("expected budget guard to block before LLM call, got %d calls", calls)
-	}
-}
-
-func TestRunnerRecordsUsageInConfiguredLedger(t *testing.T) {
-	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
-		writeRunnerStreamText(t, w, "final answer")
-	})
-	defer server.Close()
-
-	ledger := usage.NewLedger()
-	cfg := testAgentConfig(server.URL, 1)
-	cfg.UsageLedger = ledger
-
-	agent := NewAgent(cfg)
-	if _, err := agent.RunStreamWithEvents(context.Background(), "record usage", nil); err != nil {
-		t.Fatalf("RunStreamWithEvents returned error: %v", err)
-	}
-
-	records := ledger.Records()
-	if len(records) != 1 {
-		t.Fatalf("expected one usage record, got %d: %+v", len(records), records)
-	}
-	record := records[0]
-	if !record.Estimated {
-		t.Fatalf("expected stream response without provider usage to be estimated, got %+v", record)
-	}
-	if record.Protocol != string(llm.ProtocolOpenAIChat) || record.Model != "test-model" {
-		t.Fatalf("unexpected usage metadata: %+v", record)
-	}
-	if record.RequestCount != 1 || record.PromptTokens == 0 || record.InputBytes == 0 {
-		t.Fatalf("unexpected usage counts: %+v", record)
+	_, err := agent.RunStreamWithEvents(context.Background(), "loop", nil)
+	if err == nil || !strings.Contains(err.Error(), "达到最大思考次数") {
+		t.Fatalf("expected max thoughts error, got %v", err)
 	}
 }
 
@@ -583,58 +481,6 @@ data: {"type":"message_stop"}`,
 	}
 	if gotEvents[14].Delta != "done" {
 		t.Fatalf("expected final text delta done, got %q", gotEvents[14].Delta)
-	}
-}
-
-func TestRunnerPropagatesPromptCacheMetadataToAnthropic(t *testing.T) {
-	server := newRunnerAnthropicStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			System []struct {
-				Type         string `json:"type"`
-				Text         string `json:"text"`
-				CacheControl *struct {
-					Type string `json:"type"`
-				} `json:"cache_control,omitempty"`
-			} `json:"system"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatalf("failed to decode anthropic request: %v", err)
-		}
-		if len(body.System) != 1 {
-			t.Fatalf("expected one cached system block, got %+v", body.System)
-		}
-		if body.System[0].Type != "text" || body.System[0].Text == "" {
-			t.Fatalf("unexpected cached system block: %+v", body.System[0])
-		}
-		if body.System[0].CacheControl == nil || body.System[0].CacheControl.Type != "ephemeral" {
-			t.Fatalf("expected ephemeral cache_control, got %+v", body.System[0].CacheControl)
-		}
-
-		writeRunnerAnthropicStreamEvents(t, w, []string{
-			`event: content_block_start
-data: {"type":"content_block_start","index":0,"content_block":{"type":"text"}}`,
-			`event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"done"}}`,
-			`event: content_block_stop
-data: {"type":"content_block_stop","index":0}`,
-			`event: message_stop
-data: {"type":"message_stop"}`,
-		})
-	})
-	defer server.Close()
-
-	cfg := testAgentConfig(server.URL+"/anthropic", 1)
-	cfg.PromptCache.SystemPrompt = true
-	conv := convcontext.NewConversation(nil)
-	conv.UserInput("hello")
-	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
-
-	resp, err := runner.streamLLM(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("streamLLM returned error: %v", err)
-	}
-	if resp.Content != "done" {
-		t.Fatalf("expected done, got %q", resp.Content)
 	}
 }
 
@@ -1122,10 +968,6 @@ func (t cancelOnExecuteTool) Execute(ctx context.Context, input string) (string,
 	return "cancelled", nil
 }
 
-func (t cancelOnExecuteTool) IsReadOnly() bool {
-	return true
-}
-
 func TestRunnerCancelBetweenTurnsExitsEarly(t *testing.T) {
 	toolName := "runner_cancel_between_turns"
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1195,10 +1037,6 @@ func (t failIfExecutedTool) Parameters() []tool.ToolParameter {
 
 func (t failIfExecutedTool) Execute(ctx context.Context, input string) (string, error) {
 	panic("failIfExecutedTool should never be executed when run is cancelled")
-}
-
-func (t failIfExecutedTool) IsReadOnly() bool {
-	return true
 }
 
 func TestRunnerCancelStopsSubsequentToolsInBatch(t *testing.T) {
@@ -1491,31 +1329,6 @@ func TestRunEventEmitterRunErroredTransportErrorDoesNotLeakURL(t *testing.T) {
 	}
 }
 
-func TestRunEventEmitterRunErroredRedactsProviderSecretText(t *testing.T) {
-	var gotEvents []AwakenEvent
-	emitter := newRunEventEmitter("thread-test", EventSinkFunc(func(event AwakenEvent) {
-		gotEvents = append(gotEvents, event)
-	}))
-
-	secret := "abcdefghijklmnopqrstuvwxyz123456"
-	wrapped := fmt.Errorf("LLM stream call failed: %w", fmt.Errorf("%w: Authorization: Bearer %s", llm.ErrRequestFailed, secret))
-	emitter.runErrored(wrapped)
-
-	if len(gotEvents) != 1 {
-		t.Fatalf("expected 1 event, got %d: %+v", len(gotEvents), gotEvents)
-	}
-	if gotEvents[0].Type != RunErrorEventType {
-		t.Fatalf("expected RunError event, got %s", gotEvents[0].Type)
-	}
-	if gotEvents[0].Code != "PROVIDER_REQUEST_FAILED" {
-		t.Fatalf("expected Code PROVIDER_REQUEST_FAILED, got %q", gotEvents[0].Code)
-	}
-	assertNoDisplaySecret(t, gotEvents[0].Error, secret)
-	if !strings.Contains(gotEvents[0].Error, "[REDACTED]") {
-		t.Fatalf("expected provider error display text to include redaction marker, got %q", gotEvents[0].Error)
-	}
-}
-
 func mustRegisterRunnerTool(t *testing.T, candidate tool.Tool) {
 	t.Helper()
 	if err := tool.RegisterTool(candidate); err != nil {
@@ -1587,10 +1400,10 @@ func containsToolResultSubstring(messages []struct {
 	return false
 }
 
-func testAgentConfig(baseURL string, maxTurns int) AgentConfig {
+func testAgentConfig(baseURL string, maxThoughts int) AgentConfig {
 	return AgentConfig{
-		MaxTurns:   maxTurns,
-		EntryPoint: "test",
+		MaxThoughts: maxThoughts,
+		EntryPoint:  "test",
 		ModelConfig: ModelConfig{
 			APIKey:  "test-key",
 			BaseURL: baseURL,
@@ -1599,8 +1412,8 @@ func testAgentConfig(baseURL string, maxTurns int) AgentConfig {
 	}
 }
 
-func testAgentConfigWithWorkspace(baseURL string, maxTurns int, root string) AgentConfig {
-	cfg := testAgentConfig(baseURL, maxTurns)
+func testAgentConfigWithWorkspace(baseURL string, maxThoughts int, root string) AgentConfig {
+	cfg := testAgentConfig(baseURL, maxThoughts)
 	if root != "" {
 		cfg.Workspace.Root = root
 		cfg.Workspace.WritableRoots = []string{root}
@@ -1762,43 +1575,6 @@ func writeRunnerAnthropicTextStream(t *testing.T, w http.ResponseWriter, text st
 	writeRunnerAnthropicStreamEvent(t, w, "message_stop", map[string]interface{}{
 		"type": "message_stop",
 	})
-}
-
-func TestBuildLLMRequestCompactsBeforeSending(t *testing.T) {
-	conv := convcontext.NewConversation(nil)
-	conv.UserInput(strings.Repeat("old ", 24))
-	conv.ToolExchange("", []convcontext.ToolCall{
-		{ID: "call_old", Type: "function", Function: convcontext.FunctionCall{Name: "lookup", Arguments: `{"path":"old"}`}},
-	}, []convcontext.ToolResult{
-		{ToolCallID: "call_old", Name: "lookup", Content: strings.Repeat("result ", 24)},
-	})
-	conv.UserInput("keep latest question")
-
-	cfg := AgentConfig{
-		ModelConfig: ModelConfig{
-			ContextWindow:         64,
-			MaxTokens:             16,
-			AutoCompactTokenLimit: 12,
-		},
-	}
-
-	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
-	req, err := runner.buildLLMRequest()
-	if err != nil {
-		t.Fatalf("buildLLMRequest returned error: %v", err)
-	}
-	if len(req.Messages) != 1 {
-		t.Fatalf("expected only the latest user turn to remain, got %+v", req.Messages)
-	}
-	if req.Messages[0].Role != convcontext.RoleUser || req.Messages[0].Content != "keep latest question" {
-		t.Fatalf("unexpected compacted message tail: %+v", req.Messages)
-	}
-	if err := convcontext.ValidateToolResultPairing(req.Messages); err != nil {
-		t.Fatalf("expected compacted request to remain pair-safe, got %v", err)
-	}
-	if got := conv.Context.GetMessages(); len(got) != 1 || got[0].Content != "keep latest question" {
-		t.Fatalf("expected in-memory context to be compacted too, got %+v", got)
-	}
 }
 
 func writeRunnerAnthropicStreamEvent(t *testing.T, w http.ResponseWriter, name string, value interface{}) {

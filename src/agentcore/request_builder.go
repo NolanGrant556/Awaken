@@ -1,11 +1,8 @@
 package agentcore
 
 import (
-	"sort"
 	"strings"
 
-	"awaken/src/llm"
-	"awaken/src/onboarding"
 	"awaken/src/prompt"
 	"awaken/src/tool"
 )
@@ -30,8 +27,6 @@ func (rb *RequestBuilder) Build(ctx ContextProvider, tools []tool.ToolDefinition
 	if tools == nil {
 		tools = rb.getTools()
 	}
-	tools = rb.config.ToolAccessPolicy().FilterDefinitions(tools)
-	tools = rb.filterToolsForPermissionMode(tools)
 	rb.updateRuntimeInfoFromConfig(tools)
 
 	systemPrompt := rb.buildSystemPrompt()
@@ -44,22 +39,6 @@ func (rb *RequestBuilder) Build(ctx ContextProvider, tools []tool.ToolDefinition
 		Model:        rb.config.ModelConfig.Model,
 		Temperature:  rb.config.ModelConfig.Temperature,
 		MaxTokens:    rb.config.ModelConfig.MaxTokens,
-		Cache:        rb.buildRequestCacheMetadata(systemPrompt),
-	}
-}
-
-func (rb *RequestBuilder) buildRequestCacheMetadata(systemPrompt string) llm.RequestCacheMetadata {
-	if !rb.config.PromptCache.SystemPrompt {
-		return llm.RequestCacheMetadata{}
-	}
-	if strings.TrimSpace(systemPrompt) == "" {
-		return llm.RequestCacheMetadata{}
-	}
-	if min := rb.config.PromptCache.MinSystemPromptBytes; min > 0 && len(systemPrompt) < min {
-		return llm.RequestCacheMetadata{}
-	}
-	return llm.RequestCacheMetadata{
-		SystemPromptCacheControl: llm.CacheControl{Type: llm.CacheControlTypeEphemeral},
 	}
 }
 
@@ -78,31 +57,44 @@ func (rb *RequestBuilder) getTools() []tool.ToolDefinition {
 	definitions := make([]tool.ToolDefinition, 0, len(tools))
 
 	for _, t := range tools {
-		if availabilityAwareTool, ok := t.(tool.AvailabilityAwareTool); ok && !availabilityAwareTool.IsAvailable() {
-			continue
-		}
-		definitions = append(definitions, tool.DefinitionFromTool(t))
+		definitions = append(definitions, tool.ToolDefinition{
+			Type: "function",
+			Function: tool.ToolFunctionSchema{
+				Name:        t.Name(),
+				Description: t.Description(),
+				Parameters:  rb.buildToolParameters(t),
+			},
+		})
 	}
-	if rb.config.MCPRegistry != nil {
-		definitions = append(definitions, rb.config.MCPRegistry.ToolDefinitions()...)
+	return definitions
+}
+
+func (rb *RequestBuilder) buildToolParameters(t tool.Tool) tool.ToolParametersSchema {
+	params := t.Parameters()
+	properties := make(map[string]tool.ToolParam, len(params))
+	required := make([]string, 0)
+
+	for _, p := range params {
+		properties[p.Name] = tool.ToolParam{
+			Type:        p.Type,
+			Description: p.Description,
+		}
+		if p.Required {
+			required = append(required, p.Name)
+		}
 	}
 
-	sort.Slice(definitions, func(i, j int) bool {
-		return definitions[i].Function.Name < definitions[j].Function.Name
-	})
-	return definitions
+	return tool.ToolParametersSchema{
+		Type:       "object",
+		Properties: properties,
+		Required:   required,
+	}
 }
 
 func (rb *RequestBuilder) updateRuntimeInfoFromConfig(tools []tool.ToolDefinition) {
 	rb.runtimeInfo.UpdateCurrentDate()
-	rb.runtimeInfo.SetProjectOnboardingSummary("")
 	if strings.TrimSpace(rb.config.Workspace.Root) != "" {
-		workspaceRoot := tool.NewPermissionContext(rb.config.Workspace.Root, rb.config.Workspace.WritableRoots).WorkspaceRootOrCWD()
-		rb.runtimeInfo.SetWorkingDir(workspaceRoot)
-		onboardingState := onboarding.InspectWorkspace(workspaceRoot)
-		if !onboardingState.Complete {
-			rb.runtimeInfo.SetProjectOnboardingSummary(onboardingState.Summary())
-		}
+		rb.runtimeInfo.SetWorkingDir(tool.NewPermissionContext(rb.config.Workspace.Root, rb.config.Workspace.WritableRoots).WorkspaceRootOrCWD())
 	} else {
 		rb.runtimeInfo.UpdateWorkingDir()
 	}
@@ -124,25 +116,6 @@ func (rb *RequestBuilder) buildToolSummary(tools []tool.ToolDefinition) string {
 		summary += t.Function.Name
 	}
 	return summary
-}
-
-func (rb *RequestBuilder) filterToolsForPermissionMode(definitions []tool.ToolDefinition) []tool.ToolDefinition {
-	if rb.config.PermissionMode() != PermissionModeDeny || len(definitions) == 0 {
-		return definitions
-	}
-
-	filtered := make([]tool.ToolDefinition, 0, len(definitions))
-	for _, definition := range definitions {
-		registeredTool, err := tool.GetTool(definition.Function.Name)
-		if err != nil {
-			continue
-		}
-		readOnlyTool, ok := registeredTool.(tool.ReadOnlyTool)
-		if ok && readOnlyTool.IsReadOnly() {
-			filtered = append(filtered, definition)
-		}
-	}
-	return filtered
 }
 
 func BuildRequest(config AgentConfig, ctx ContextProvider) LLMRequest {

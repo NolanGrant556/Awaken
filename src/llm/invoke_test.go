@@ -37,73 +37,6 @@ func TestInvokeOpenAITextResponse(t *testing.T) {
 	}
 }
 
-func TestInvokeOpenAIProviderUsage(t *testing.T) {
-	server := newChatServer(t, func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(t, w, map[string]interface{}{
-			"choices": []map[string]interface{}{
-				{"message": map[string]interface{}{"content": "hello"}},
-			},
-			"usage": map[string]interface{}{
-				"prompt_tokens":     11,
-				"completion_tokens": 7,
-				"total_tokens":      18,
-			},
-		})
-	})
-	defer server.Close()
-
-	resp, err := Invoke(context.Background(), testConfig(server.URL), Request{UserPrompt: "hi"})
-	if err != nil {
-		t.Fatalf("Invoke returned error: %v", err)
-	}
-	if resp.Usage == nil {
-		t.Fatal("expected usage metadata")
-	}
-	if resp.Usage.PromptTokens != 11 || resp.Usage.CompletionTokens != 7 || resp.Usage.TotalTokens != 18 {
-		t.Fatalf("unexpected usage: %+v", resp.Usage)
-	}
-	if resp.Usage.Estimated {
-		t.Fatalf("provider usage should not be marked estimated: %+v", resp.Usage)
-	}
-	if resp.Usage.Protocol != string(ProtocolOpenAIChat) || resp.Usage.Model != "test-model" {
-		t.Fatalf("expected protocol/model metadata, got %+v", resp.Usage)
-	}
-	if resp.Usage.Provider != "127.0.0.1" {
-		t.Fatalf("expected provider from test server host, got %+v", resp.Usage)
-	}
-}
-
-func TestInvokeEstimatesUsageWhenProviderOmitsUsage(t *testing.T) {
-	server := newChatServer(t, func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(t, w, map[string]interface{}{
-			"choices": []map[string]interface{}{
-				{"message": map[string]interface{}{"content": "hello"}},
-			},
-		})
-	})
-	defer server.Close()
-
-	resp, err := Invoke(context.Background(), testConfig(server.URL), Request{
-		SystemPrompt: "system prompt",
-		UserPrompt:   "hello world",
-	})
-	if err != nil {
-		t.Fatalf("Invoke returned error: %v", err)
-	}
-	if resp.Usage == nil {
-		t.Fatal("expected estimated usage")
-	}
-	if !resp.Usage.Estimated {
-		t.Fatalf("expected estimated usage, got %+v", resp.Usage)
-	}
-	if resp.Usage.InputBytes != len("system prompt")+len("hello world") {
-		t.Fatalf("unexpected input bytes: %+v", resp.Usage)
-	}
-	if resp.Usage.PromptTokens == 0 || resp.Usage.CompletionTokens != 0 {
-		t.Fatalf("unexpected estimated tokens: %+v", resp.Usage)
-	}
-}
-
 func TestInvokeOpenAIToolCallsWithoutContent(t *testing.T) {
 	server := newChatServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(t, w, map[string]interface{}{
@@ -217,41 +150,6 @@ func TestInvokeOpenAISendsConfigMaxTokens(t *testing.T) {
 	}
 }
 
-func TestInvokeOpenAIIgnoresRequestCacheMetadata(t *testing.T) {
-	server := newChatServer(t, func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]json.RawMessage
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatalf("failed to decode request: %v", err)
-		}
-		if _, ok := body["cache"]; ok {
-			t.Fatalf("OpenAI request must not serialize request cache metadata: %s", body["cache"])
-		}
-		messagesJSON := string(body["messages"])
-		if strings.Contains(messagesJSON, "cache_control") {
-			t.Fatalf("OpenAI messages must not include Anthropic cache_control: %s", messagesJSON)
-		}
-		writeJSON(t, w, map[string]interface{}{
-			"choices": []map[string]interface{}{
-				{"message": map[string]interface{}{"content": "ok"}},
-			},
-		})
-	})
-	defer server.Close()
-
-	_, err := Invoke(context.Background(), testConfig(server.URL), Request{
-		SystemPrompt: "you are a test",
-		UserPrompt:   "hi",
-		Cache: RequestCacheMetadata{
-			SystemPromptCacheControl: CacheControl{Type: CacheControlTypeEphemeral},
-			CacheKey:                 "request-cache-key",
-			Hints:                    []string{"stable-system"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("Invoke returned error: %v", err)
-	}
-}
-
 func TestInvokeOpenAIEmptyChoices(t *testing.T) {
 	server := newChatServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(t, w, map[string]interface{}{"choices": []interface{}{}})
@@ -321,29 +219,6 @@ func TestInvokeOpenAINonOKDoesNotLeakResponseBody(t *testing.T) {
 		t.Fatalf("error message must not contain response body detail: %q", msg)
 	}
 	if !strings.Contains(msg, "status 502") {
-		t.Fatalf("error message should contain status code, got %q", msg)
-	}
-}
-
-func TestInvokeOpenAINonOKDoesNotLeakHeaderLikeSecrets(t *testing.T) {
-	secret := "abcdefghijklmnopqrstuvwxyz123456"
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"error":"Authorization: Bearer ` + secret + `","x-api-key":"provider-key-value"}`))
-	}))
-	defer server.Close()
-
-	_, err := Invoke(context.Background(), testConfig(server.URL), Request{UserPrompt: "hi"})
-	if !errors.Is(err, ErrRequestFailed) {
-		t.Fatalf("expected ErrRequestFailed, got %v", err)
-	}
-	msg := err.Error()
-	for _, leaked := range []string{secret, "provider-key-value", "Authorization", "x-api-key"} {
-		if strings.Contains(msg, leaked) {
-			t.Fatalf("error message must not contain provider body detail %q: %q", leaked, msg)
-		}
-	}
-	if !strings.Contains(msg, "status 401") {
 		t.Fatalf("error message should contain status code, got %q", msg)
 	}
 }

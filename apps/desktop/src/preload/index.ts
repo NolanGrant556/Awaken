@@ -3,24 +3,12 @@ import type { AguiEvent } from "../shared/agui.js";
 import {
   type ApprovalDecision,
   type AwakenBridge,
-  type BranchThreadRequest,
-  type BranchThreadResult,
   type DesktopPlatform,
   type RunStreamHandlers,
   type RuntimeInfo,
   type RuntimeRun,
-  type RuntimeSessionInsightsReport,
-  type RuntimeThreadClearPlanResult,
-  type RuntimeThreadContext,
-  type RuntimeThreadExportFormat,
-  type RuntimeThreadExportResult,
-  type RuntimeThreadLite,
-  type RuntimeThreadSearchResult,
-  type RuntimeThreadShareBundleRequest,
-  type RuntimeThreadShareBundleResult,
   type RuntimeThreadTranscript,
   type RuntimeThread,
-  type RunPolicyOptions,
   type StartRunRequest,
   type SupervisorStatusInfo,
   type WorkspacePickResult,
@@ -67,34 +55,10 @@ const bridge: AwakenBridge = {
   platform: toDesktopPlatform(process.platform),
   getRun: (runId: string) =>
     ipcRenderer.invoke("awaken:get-run", runId) as Promise<RuntimeRun>,
-  getThreadLite: (threadId: string) =>
-    ipcRenderer.invoke("awaken:get-thread-lite", threadId) as Promise<RuntimeThreadLite>,
-  getThreadContext: (threadId: string) =>
-    ipcRenderer.invoke("awaken:get-thread-context", threadId) as Promise<RuntimeThreadContext>,
   getThreadTranscript: (threadId: string) =>
     ipcRenderer.invoke("awaken:get-thread-transcript", threadId) as Promise<RuntimeThreadTranscript>,
-  searchThreads: (query: string, limit?: number) =>
-    ipcRenderer.invoke("awaken:search-threads", { query, limit }) as Promise<
-      RuntimeThreadSearchResult[]
-    >,
-  exportThread: (threadId: string, format?: RuntimeThreadExportFormat) =>
-    ipcRenderer.invoke("awaken:export-thread", { threadId, format }) as Promise<
-      RuntimeThreadExportResult
-    >,
-  buildThreadShareBundle: (threadId: string, request?: RuntimeThreadShareBundleRequest) =>
-    ipcRenderer.invoke("awaken:build-thread-share-bundle", { threadId, request }) as Promise<
-      RuntimeThreadShareBundleResult
-    >,
-  buildThreadClearPlan: (threadId: string) =>
-    ipcRenderer.invoke("awaken:build-thread-clear-plan", threadId) as Promise<
-      RuntimeThreadClearPlanResult
-    >,
-  getSessionInsights: () =>
-    ipcRenderer.invoke("awaken:get-session-insights") as Promise<RuntimeSessionInsightsReport>,
   listThreads: () =>
     ipcRenderer.invoke("awaken:list-threads") as Promise<RuntimeThread[]>,
-  branchThread: (threadId: string, request?: BranchThreadRequest) =>
-    ipcRenderer.invoke("awaken:branch-thread", { threadId, request }) as Promise<BranchThreadResult>,
   startRun: (request: StartRunRequest) =>
     ipcRenderer.invoke("awaken:start-run", request) as Promise<RuntimeRun>,
   cancelRun: (runId: string) =>
@@ -138,8 +102,6 @@ const bridge: AwakenBridge = {
     ipcRenderer.on("awaken:supervisor-status-changed", handler);
     return () => ipcRenderer.removeListener("awaken:supervisor-status-changed", handler);
   },
-  setPolicySettings: (settings: RunPolicyOptions) =>
-    ipcRenderer.invoke("awaken:set-policy-settings", settings) as Promise<void>,
   notifyRendererReady: () => {
     ipcRenderer.send("awaken:renderer-ready");
   },

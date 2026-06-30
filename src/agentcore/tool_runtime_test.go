@@ -4,20 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	convcontext "awaken/src/context"
-	"awaken/src/lifecyclehooks"
 	"awaken/src/tool"
-	"awaken/src/toolresults"
-	_ "awaken/src/tools/apply_patch"
-	_ "awaken/src/tools/shell"
-	_ "awaken/src/tools/todo_write"
-	_ "awaken/src/tools/web_fetch"
 )
 
 type runtimeTestTool struct {
@@ -32,21 +23,6 @@ type runtimeTestTool struct {
 	artifacts       []tool.ArtifactDescriptor
 	executeCount    *int
 	commandOutputs  []tool.CommandOutput
-}
-
-type runtimePlainTool struct {
-	name         string
-	params       []tool.ToolParameter
-	output       string
-	readOnly     bool
-	executeCount *int
-}
-
-type runtimeBasicTool struct {
-	name         string
-	params       []tool.ToolParameter
-	readOnly     bool
-	executeCount *int
 }
 
 func (t runtimeTestTool) Name() string {
@@ -102,55 +78,6 @@ func (t runtimeTestTool) Artifacts(input string, output string, permissionContex
 	return t.artifacts
 }
 
-func (t runtimePlainTool) Name() string {
-	return t.name
-}
-
-func (t runtimePlainTool) Description() string {
-	return "runtime plain tool"
-}
-
-func (t runtimePlainTool) Parameters() []tool.ToolParameter {
-	return t.params
-}
-
-func (t runtimePlainTool) Execute(context.Context, string) (string, error) {
-	if t.executeCount != nil {
-		*t.executeCount++
-	}
-	if t.output != "" {
-		return t.output, nil
-	}
-	return "plain", nil
-}
-
-func (t runtimePlainTool) IsReadOnly() bool {
-	return t.readOnly
-}
-
-func (t runtimeBasicTool) Name() string {
-	return t.name
-}
-
-func (t runtimeBasicTool) Description() string {
-	return "runtime basic tool"
-}
-
-func (t runtimeBasicTool) Parameters() []tool.ToolParameter {
-	return t.params
-}
-
-func (t runtimeBasicTool) Execute(ctx context.Context, input string) (string, error) {
-	if t.executeCount != nil {
-		*t.executeCount++
-	}
-	return "ran:" + input, nil
-}
-
-func (t runtimeBasicTool) IsReadOnly() bool {
-	return t.readOnly
-}
-
 func TestToolRuntimeExecutesKnownTool(t *testing.T) {
 	var observed string
 	toolName := "runtime_known_tool"
@@ -193,155 +120,6 @@ func TestToolRuntimeUnknownToolReturnsErrorResult(t *testing.T) {
 
 	if !result.IsError || result.ToolCallID != "call_unknown" || !strings.Contains(result.Content, "工具执行失败") {
 		t.Fatalf("expected unknown tool error result, got %+v", result)
-	}
-}
-
-func TestToolRuntimeRejectsToolBlockedByRunProfile(t *testing.T) {
-	toolName := "runtime_blocked_tool"
-	executions := 0
-	mustRegisterRuntimeTool(t, runtimeTestTool{
-		name:         toolName,
-		executeCount: &executions,
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-
-	result := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
-		ToolAccessPolicy: RunProfile{
-			DisallowedTools: []string{toolName},
-		}.ToolAccessPolicy(),
-	}).Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_blocked",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"hello"}`,
-		},
-	})
-
-	if !result.IsError || !strings.Contains(result.Content, "not allowed for this run profile") {
-		t.Fatalf("expected blocked tool error, got %+v", result)
-	}
-	if executions != 0 {
-		t.Fatalf("expected blocked tool not to execute, got %d executions", executions)
-	}
-}
-
-func TestToolRuntimeAskModeRequiresApprovalForNonReadOnlyToolWithoutChecker(t *testing.T) {
-	toolName := "runtime_ask_mode_tool"
-	executeCount := 0
-	mustRegisterRuntimeTool(t, runtimeBasicTool{
-		name:         toolName,
-		executeCount: &executeCount,
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-
-	result := NewToolRuntimeWithConfig(testApprovalAwaiter{decision: ApprovalDecisionApproved}, ToolRuntimeConfig{
-		PermissionMode: PermissionModeAsk,
-	}).Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_ask_mode",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"hello"}`,
-		},
-	})
-
-	if result.IsError {
-		t.Fatalf("expected approved ask-mode tool to succeed, got %+v", result)
-	}
-	if executeCount != 1 {
-		t.Fatalf("expected ask-mode tool to execute after approval, got %d executions", executeCount)
-	}
-}
-
-func TestToolRuntimeAllowModeBypassesApprovalButStillExecutes(t *testing.T) {
-	toolName := "runtime_allow_mode_tool"
-	executeCount := 0
-	mustRegisterRuntimeTool(t, runtimeTestTool{
-		name:         toolName,
-		permission:   tool.AskPermission("tool would normally ask", tool.ApprovalRequest{}),
-		executeCount: &executeCount,
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-
-	result := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
-		PermissionMode: PermissionModeAllow,
-	}).Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_allow_mode",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"hello"}`,
-		},
-	})
-
-	if result.IsError {
-		t.Fatalf("expected allow-mode tool to succeed without approval, got %+v", result)
-	}
-	if executeCount != 1 {
-		t.Fatalf("expected allow-mode tool to execute exactly once, got %d", executeCount)
-	}
-}
-
-func TestToolRuntimeDenyModeBlocksNonReadOnlyToolWithoutChecker(t *testing.T) {
-	toolName := "runtime_deny_mode_tool"
-	executeCount := 0
-	mustRegisterRuntimeTool(t, runtimeBasicTool{
-		name:         toolName,
-		executeCount: &executeCount,
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-
-	result := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
-		PermissionMode: PermissionModeDeny,
-	}).Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_deny_mode",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"hello"}`,
-		},
-	})
-
-	if !result.IsError || !strings.Contains(result.Content, "permission_mode=deny") {
-		t.Fatalf("expected deny-mode tool to be blocked, got %+v", result)
-	}
-	if executeCount != 0 {
-		t.Fatalf("expected deny-mode tool not to execute, got %d executions", executeCount)
-	}
-}
-
-func TestToolRuntimeAllowModeDoesNotOverrideExplicitToolDeny(t *testing.T) {
-	toolName := "runtime_allow_mode_respects_deny_tool"
-	executeCount := 0
-	mustRegisterRuntimeTool(t, runtimeTestTool{
-		name:         toolName,
-		permission:   tool.DenyPermission("tool-specific deny"),
-		executeCount: &executeCount,
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-
-	result := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
-		PermissionMode: PermissionModeAllow,
-	}).Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_allow_mode_respects_deny",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"hello"}`,
-		},
-	})
-
-	if !result.IsError || !strings.Contains(result.Content, "tool-specific deny") {
-		t.Fatalf("expected allow-mode to preserve tool deny, got %+v", result)
-	}
-	if executeCount != 0 {
-		t.Fatalf("expected denied tool not to execute, got %d executions", executeCount)
 	}
 }
 
@@ -413,53 +191,14 @@ func TestToolRuntimeExecutesMultipleCalls(t *testing.T) {
 	}
 }
 
-func TestToolRuntimeLeavesSmallToolResultUnstored(t *testing.T) {
-	toolName := "runtime_small_output_tool"
-	mustRegisterRuntimeTool(t, runtimeTestTool{
-		name:   toolName,
-		output: "small output",
-	})
-	storeDir := filepath.Join(t.TempDir(), "tool-results")
-	runtime := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
-		ToolResultStore:    toolresults.NewStore(toolresults.Config{Dir: storeDir}),
-		ToolResultMaxChars: 20,
-	})
-
-	result := runtime.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_small",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{}`,
-		},
-	})
-
-	if result.IsError || result.Truncated || result.Content != "small output" || result.ToolResultHandle != nil {
-		t.Fatalf("expected unchanged small result, got %+v", result)
-	}
-	if _, err := os.Stat(storeDir); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("expected small result not to create store dir, stat err=%v", err)
-	}
-}
-
-func TestToolRuntimePersistsLargeToolResult(t *testing.T) {
+func TestToolRuntimeTruncatesLargeToolResult(t *testing.T) {
 	toolName := "runtime_large_output_tool"
-	fullOutput := strings.Repeat("x", 25000) + "COMPLETE_TAIL_SHOULD_ONLY_BE_IN_STORE"
-	workspace := t.TempDir()
-	store := toolresults.NewStore(toolresults.Config{
-		Dir:           filepath.Join(t.TempDir(), "tool-results"),
-		WorkspaceRoot: workspace,
-	})
 	mustRegisterRuntimeTool(t, runtimeTestTool{
 		name:   toolName,
-		output: fullOutput,
+		output: strings.Repeat("x", 25000),
 	})
 
-	result := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
-		PermissionContext:      tool.NewPermissionContext(workspace, []string{workspace}),
-		ToolResultStore:        store,
-		ToolResultMaxChars:     20000,
-		ToolResultPreviewChars: 128,
-	}).Execute(context.Background(), convcontext.ToolCall{
+	result := NewToolRuntime(nil).Execute(context.Background(), convcontext.ToolCall{
 		ID: "call_large",
 		Function: convcontext.FunctionCall{
 			Name:      toolName,
@@ -467,51 +206,11 @@ func TestToolRuntimePersistsLargeToolResult(t *testing.T) {
 		},
 	})
 
-	if result.IsError || !result.Truncated || result.ToolResultHandle == nil {
-		t.Fatalf("expected persisted success result, got %+v", result)
+	if result.IsError || !result.Truncated || !strings.Contains(result.Content, "truncated") {
+		t.Fatalf("expected truncated success result, got %+v", result)
 	}
-	if !strings.Contains(result.Content, "<persisted-tool-result>") || !strings.Contains(result.Content, "handle_id: "+result.ToolResultHandle.ID) {
-		t.Fatalf("expected handle metadata in result content, got %q", result.Content)
-	}
-	if strings.Contains(result.Content, "COMPLETE_TAIL_SHOULD_ONLY_BE_IN_STORE") {
-		t.Fatalf("expected inline result content not to contain full tail")
-	}
-	fullStored, err := store.Read(result.ToolResultHandle.ID)
-	if err != nil {
-		t.Fatalf("read persisted result: %v", err)
-	}
-	if fullStored != fullOutput {
-		t.Fatalf("expected full persisted output")
-	}
-	if isPathWithin(result.ToolResultHandle.Path, workspace) {
-		t.Fatalf("expected persisted path outside workspace, got %q in %q", result.ToolResultHandle.Path, workspace)
-	}
-}
-
-func TestToolRuntimeDefaultRuntimeStillTruncatesLargeToolResult(t *testing.T) {
-	toolName := "runtime_large_output_default_truncation_tool"
-	fullOutput := strings.Repeat("x", 25000) + "COMPLETE_TAIL_SHOULD_STAY_INLINE"
-	mustRegisterRuntimeTool(t, runtimeTestTool{
-		name:   toolName,
-		output: fullOutput,
-	})
-
-	result := NewToolRuntime(nil).Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_large_default",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{}`,
-		},
-	})
-
-	if result.IsError || !result.Truncated || result.ToolResultHandle != nil {
-		t.Fatalf("expected default runtime to truncate inline, got %+v", result)
-	}
-	if !strings.Contains(result.Content, "truncated") || !strings.Contains(result.Content, "COMPLETE_TAIL_SHOULD_STAY_INLINE") {
-		t.Fatalf("expected inline truncated content with preserved tail, got %q", result.Content)
-	}
-	if strings.Contains(result.Content, "<persisted-tool-result>") {
-		t.Fatalf("expected default runtime not to emit persisted handle content, got %q", result.Content)
+	if len([]rune(result.Content)) >= 25000 {
+		t.Fatalf("expected content to be shortened")
 	}
 }
 
@@ -552,116 +251,6 @@ func TestToolRuntimeFailsClosedWhenNoApprovalAwaiterIsWired(t *testing.T) {
 
 	if !result.IsError || !strings.Contains(result.Content, "no approval awaiter") {
 		t.Fatalf("expected missing approval awaiter to fail closed, got %+v", result)
-	}
-}
-
-func TestToolRuntimeUndeclaredNonReadOnlyToolDefaultsToApproval(t *testing.T) {
-	toolName := "runtime_plain_mutating_tool"
-	mustRegisterRuntimeTool(t, runtimePlainTool{
-		name: toolName,
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-
-	result := NewToolRuntime(nil).Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_plain_missing_awaiter",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"hello"}`,
-		},
-	})
-
-	if !result.IsError || !strings.Contains(result.Content, "no approval awaiter") {
-		t.Fatalf("expected undeclared non-read-only tool to require approval, got %+v", result)
-	}
-}
-
-func TestToolRuntimeUndeclaredReadOnlyToolRemainsAllowed(t *testing.T) {
-	var executeCount int
-	toolName := "runtime_plain_read_only_tool"
-	mustRegisterRuntimeTool(t, runtimePlainTool{
-		name:         toolName,
-		readOnly:     true,
-		executeCount: &executeCount,
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-
-	result := NewToolRuntime(nil).Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_plain_read_only",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"hello"}`,
-		},
-	})
-
-	if result.IsError {
-		t.Fatalf("expected undeclared read-only tool to succeed, got %+v", result)
-	}
-	if executeCount != 1 {
-		t.Fatalf("expected read-only tool to execute once, got %d", executeCount)
-	}
-}
-
-func TestToolRuntimePermissionPolicyAllowListBypassesApproval(t *testing.T) {
-	var executeCount int
-	toolName := "runtime_allowlisted_plain_tool"
-	mustRegisterRuntimeTool(t, runtimePlainTool{
-		name:         toolName,
-		executeCount: &executeCount,
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-
-	runtime := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
-		PermissionPolicy: tool.PermissionPolicy{
-			AllowTools: []string{toolName},
-		},
-	})
-	result := runtime.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_allowlisted",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"hello"}`,
-		},
-	})
-
-	if result.IsError {
-		t.Fatalf("expected allowlisted tool to succeed, got %+v", result)
-	}
-	if executeCount != 1 {
-		t.Fatalf("expected allowlisted tool to execute once, got %d", executeCount)
-	}
-}
-
-func TestToolRuntimePermissionPolicyDenyListOverridesReadOnly(t *testing.T) {
-	toolName := "runtime_denylisted_read_only_tool"
-	mustRegisterRuntimeTool(t, runtimePlainTool{
-		name:     toolName,
-		readOnly: true,
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-
-	runtime := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
-		PermissionPolicy: tool.PermissionPolicy{
-			DenyTools: []string{toolName},
-		},
-	})
-	result := runtime.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_denylisted",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"hello"}`,
-		},
-	})
-
-	if !result.IsError || !strings.Contains(result.Content, "权限拒绝") {
-		t.Fatalf("expected denylisted tool to be rejected, got %+v", result)
 	}
 }
 
@@ -770,148 +359,8 @@ func TestToolRuntimeEmitsCommandOutputFromObservableTool(t *testing.T) {
 	}
 }
 
-func TestToolRuntimePersistsOnlyFinalResultNotCommandOutputEvents(t *testing.T) {
-	toolName := "runtime_observable_large_result_tool"
-	fullOutput := strings.Repeat("result-line\n", 1000) + "FINAL_RESULT_TAIL"
-	mustRegisterRuntimeTool(t, runtimeTestTool{
-		name:   toolName,
-		output: fullOutput,
-		commandOutputs: []tool.CommandOutput{
-			{Stream: "stdout", Delta: "streamed output tail"},
-		},
-	})
-
-	var got []AwakenEvent
-	runtime := NewToolRuntimeWithConfig(EventSinkFunc(func(event AwakenEvent) {
-		got = append(got, event)
-	}), ToolRuntimeConfig{
-		ToolResultStore:        toolresults.NewStore(toolresults.Config{Dir: filepath.Join(t.TempDir(), "tool-results")}),
-		ToolResultMaxChars:     100,
-		ToolResultPreviewChars: 24,
-	})
-	result := runtime.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_observable_large",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{}`,
-		},
-	})
-
-	if result.IsError || !result.Truncated || result.ToolResultHandle == nil {
-		t.Fatalf("expected persisted final result, got %+v", result)
-	}
-	if len(got) != 1 || got[0].Type != CommandOutputEventType || got[0].Delta != "streamed output tail" {
-		t.Fatalf("expected command output event to remain unchanged, got %+v", got)
-	}
-	if strings.Contains(result.Content, "FINAL_RESULT_TAIL") {
-		t.Fatalf("expected final result content to be preview plus handle, got %q", result.Content)
-	}
-}
-
-func TestToolRuntimeRedactsShellDisplayEventsWithoutChangingRawResult(t *testing.T) {
-	stdoutSecret := "sk-proj-abcdefghijklmnopqrstuvwxyz123456"
-	stderrSecret := "abcdefghijklmnopqrstuvwxyz987654"
-	command := "printf 'stdout " + stdoutSecret + "'; printf 'stderr Authorization: Bearer " + stderrSecret + "' >&2"
-	input, err := json.Marshal(map[string]interface{}{
-		"command": command,
-	})
-	if err != nil {
-		t.Fatalf("failed to encode shell input: %v", err)
-	}
-
-	var got []AwakenEvent
-	var requests []ApprovalRequest
-	runtime := NewToolRuntime(testApprovalAwaiter{
-		decision: ApprovalDecisionApproved,
-		events:   &got,
-		requests: &requests,
-	})
-	result := runtime.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_shell_redaction",
-		Function: convcontext.FunctionCall{
-			Name:      "shell",
-			Arguments: string(input),
-		},
-	})
-
-	if result.IsError {
-		t.Fatalf("expected shell command to succeed, got %+v", result)
-	}
-	if !strings.Contains(result.Content, stdoutSecret) || !strings.Contains(result.Content, stderrSecret) {
-		t.Fatalf("expected raw tool result to remain available for agent feedback, got %q", result.Content)
-	}
-	if len(requests) != 1 {
-		t.Fatalf("expected one approval request, got %+v", requests)
-	}
-	assertNoDisplaySecret(t, requests[0].Description, stdoutSecret, stderrSecret)
-
-	var stdoutDelta, stderrDelta string
-	for _, event := range got {
-		if event.Type != CommandOutputEventType {
-			continue
-		}
-		switch event.CommandStream {
-		case "stdout":
-			stdoutDelta += event.Delta
-		case "stderr":
-			stderrDelta += event.Delta
-		}
-	}
-	if stdoutDelta == "" || stderrDelta == "" {
-		t.Fatalf("expected stdout and stderr command output events, got %+v", got)
-	}
-	assertNoDisplaySecret(t, stdoutDelta, stdoutSecret, stderrSecret)
-	assertNoDisplaySecret(t, stderrDelta, stdoutSecret, stderrSecret)
-
-	var toolResultEvents []AwakenEvent
-	emitter := newRunEventEmitter("thread-redaction", EventSinkFunc(func(event AwakenEvent) {
-		toolResultEvents = append(toolResultEvents, event)
-	}))
-	emitter.emitToolResult(result)
-	if len(toolResultEvents) != 1 || toolResultEvents[0].Type != ToolResultEventType {
-		t.Fatalf("expected one tool result event, got %+v", toolResultEvents)
-	}
-	assertNoDisplaySecret(t, toolResultEvents[0].Content, stdoutSecret, stderrSecret)
-}
-
-func TestToolRuntimeRedactsPatchPreviewDisplayEvent(t *testing.T) {
-	root := t.TempDir()
-	patchSecret := "sk-proj-abcdefghijklmnopqrstuvwxyz654321"
-	patch := "*** Begin Patch\n" +
-		"*** Add File: config.txt\n" +
-		"+LLM_API_KEY=" + patchSecret + "\n" +
-		"*** End Patch"
-
-	var got []AwakenEvent
-	runtime := NewToolRuntimeWithConfig(testApprovalAwaiter{
-		decision: ApprovalDecisionRejected,
-		events:   &got,
-	}, ToolRuntimeConfig{
-		PermissionContext: tool.NewPermissionContext(root, []string{root}),
-	})
-	result := runtime.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_patch_redaction",
-		Function: convcontext.FunctionCall{
-			Name:      "apply_patch",
-			Arguments: `{"patch":` + mustJSONQuote(t, patch) + `}`,
-		},
-	})
-
-	if !result.IsError || !strings.Contains(result.Content, "审批拒绝") {
-		t.Fatalf("expected rejected apply_patch result, got %+v", result)
-	}
-	if len(got) == 0 || got[0].Type != PatchUpdatedEventType {
-		t.Fatalf("expected first event to be patch preview, got %+v", got)
-	}
-	assertNoDisplaySecret(t, got[0].Patch, patchSecret)
-	if !strings.Contains(got[0].Patch, "[REDACTED]") {
-		t.Fatalf("expected patch preview to include redaction marker, got %q", got[0].Patch)
-	}
-}
-
 func TestToolRuntimeEmitsPatchPreviewBeforeApplyPatchApproval(t *testing.T) {
 	root := t.TempDir()
-	target := filepath.Join(root, "note.md")
 	patch := "*** Begin Patch\n" +
 		"*** Add File: note.md\n" +
 		"+hello\n" +
@@ -947,202 +396,10 @@ func TestToolRuntimeEmitsPatchPreviewBeforeApplyPatchApproval(t *testing.T) {
 	if len(got[0].ApprovalAffectedPaths) != 1 || got[0].ApprovalAffectedPaths[0] != "note.md" {
 		t.Fatalf("unexpected affected paths: %+v", got[0].ApprovalAffectedPaths)
 	}
-	if got[0].DiffReview == nil || got[0].DiffReview.FileCounts.Added != 1 || got[0].DiffReview.LineCounts.Added != 1 {
-		t.Fatalf("unexpected diff review metadata: %+v", got[0].DiffReview)
-	}
 	for _, event := range got {
 		if event.Type == ArtifactCreatedEventType || event.Type == ArtifactUpdatedEventType {
 			t.Fatalf("expected rejected patch not to emit changed-file artifact, got %+v", event)
 		}
-	}
-	if _, err := os.Stat(target); !os.IsNotExist(err) {
-		t.Fatalf("expected rejected approval not to write %s, stat err=%v", target, err)
-	}
-}
-
-func TestToolRuntimeRecordsSecurityAuditForTools(t *testing.T) {
-	var got []SecurityAuditEvent
-	toolName := "runtime_audit_tool"
-	mustRegisterRuntimeTool(t, runtimeTestTool{
-		name: toolName,
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-
-	runtime := NewToolRuntime(testApprovalAwaiter{auditEvents: &got})
-	result := runtime.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_audit",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"Authorization: Bearer token-secret-123456 OPENAI_API_KEY=sk-secret123456"}`,
-		},
-	})
-
-	if result.IsError {
-		t.Fatalf("expected audited tool to succeed, got %+v", result)
-	}
-	if len(got) != 2 {
-		t.Fatalf("expected tool start and finish audit events, got %+v", got)
-	}
-	if got[0].Type != SecurityAuditToolExecutionStarted || got[1].Type != SecurityAuditToolExecutionFinished {
-		t.Fatalf("unexpected audit event types: %+v", got)
-	}
-	if got[0].Action != SecurityAuditActionTool || got[1].Outcome != SecurityAuditOutcomeFinished {
-		t.Fatalf("unexpected audit action/outcome: %+v", got)
-	}
-	for _, event := range got {
-		if strings.Contains(event.InputPreview, "token-secret-123456") || strings.Contains(event.InputPreview, "sk-secret123456") {
-			t.Fatalf("audit input preview leaked secret: %+v", event)
-		}
-	}
-}
-
-func TestToolRuntimeAuditDistinguishesShellAndFileMutation(t *testing.T) {
-	root := t.TempDir()
-	patch := "*** Begin Patch\n" +
-		"*** Add File: note.md\n" +
-		"+OPENAI_API_KEY=sk-secret123456\n" +
-		"*** End Patch"
-
-	var patchAudit []SecurityAuditEvent
-	patchRuntime := NewToolRuntimeWithConfig(testApprovalAwaiter{
-		decision:    ApprovalDecisionRejected,
-		auditEvents: &patchAudit,
-	}, ToolRuntimeConfig{
-		PermissionContext: tool.NewPermissionContext(root, []string{root}),
-	})
-	patchResult := patchRuntime.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_patch_audit",
-		Function: convcontext.FunctionCall{
-			Name:      "apply_patch",
-			Arguments: `{"patch":` + mustJSONQuote(t, patch) + `}`,
-		},
-	})
-
-	if !patchResult.IsError {
-		t.Fatalf("expected rejected patch result, got %+v", patchResult)
-	}
-	if len(patchAudit) != 2 {
-		t.Fatalf("expected patch start and finish audit events, got %+v", patchAudit)
-	}
-	if patchAudit[0].Action != SecurityAuditActionFileMutation || patchAudit[0].Summary != "新增 1 个文件" {
-		t.Fatalf("unexpected patch audit event: %+v", patchAudit[0])
-	}
-	if len(patchAudit[0].AffectedPaths) != 1 || patchAudit[0].AffectedPaths[0] != "note.md" {
-		t.Fatalf("unexpected patch affected paths: %+v", patchAudit[0].AffectedPaths)
-	}
-	if strings.Contains(patchAudit[0].InputPreview, "sk-secret123456") || strings.Contains(patchAudit[1].InputPreview, "sk-secret123456") {
-		t.Fatalf("patch audit should not include patch content: %+v", patchAudit)
-	}
-
-	var shellAudit []SecurityAuditEvent
-	shellRuntime := NewToolRuntimeWithConfig(testApprovalAwaiter{auditEvents: &shellAudit}, ToolRuntimeConfig{
-		PermissionContext: tool.NewPermissionContext(root, []string{root}),
-	})
-	shellResult := shellRuntime.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_shell_audit",
-		Function: convcontext.FunctionCall{
-			Name:      "shell",
-			Arguments: `{"command":"echo Authorization: Bearer token-secret-123456"}`,
-		},
-	})
-
-	if shellResult.IsError {
-		t.Fatalf("expected shell audit command to succeed, got %+v", shellResult)
-	}
-	if len(shellAudit) != 2 {
-		t.Fatalf("expected shell start and finish audit events, got %+v", shellAudit)
-	}
-	if shellAudit[0].Action != SecurityAuditActionShellCommand {
-		t.Fatalf("expected shell command audit action, got %+v", shellAudit[0])
-	}
-	if !strings.Contains(shellAudit[0].InputPreview, "echo") {
-		t.Fatalf("expected shell input preview to include command shape, got %+v", shellAudit[0])
-	}
-	if strings.Contains(shellAudit[0].InputPreview, "token-secret-123456") {
-		t.Fatalf("shell audit preview leaked token: %+v", shellAudit[0])
-	}
-}
-
-func TestToolRuntimeTodoWriteIsReadOnlyAndEmitsArtifact(t *testing.T) {
-	var got []AwakenEvent
-	runtime := NewToolRuntime(testApprovalAwaiter{
-		decision: ApprovalDecisionApproved,
-		events:   &got,
-	})
-	result := runtime.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_todo_write",
-		Function: convcontext.FunctionCall{
-			Name:      "todo_write",
-			Arguments: `{"items":[{"id":"1","content":"Implement todo tool","status":"in_progress","priority":"high"},{"id":"2","content":"Run tests","status":"pending"}]}`,
-		},
-	})
-
-	if result.IsError {
-		t.Fatalf("expected todo_write to execute without approval, got %+v", result)
-	}
-	if !strings.Contains(result.Content, `"artifact_id":"todo:current"`) {
-		t.Fatalf("expected structured todo summary, got %q", result.Content)
-	}
-
-	var artifactEvent *AwakenEvent
-	for i := range got {
-		if got[i].Type == ApprovalRequestedEventType {
-			t.Fatalf("todo_write should be read-only and not request approval, got events %+v", got)
-		}
-		if got[i].Type == ArtifactUpdatedEventType {
-			artifactEvent = &got[i]
-		}
-	}
-	if artifactEvent == nil {
-		t.Fatalf("expected todo_write artifact event, got %+v", got)
-	}
-	if artifactEvent.ArtifactID != "todo:current" || artifactEvent.ArtifactKind != "todo" || artifactEvent.ArtifactStatus != ArtifactStatusReady {
-		t.Fatalf("unexpected todo artifact event: %+v", artifactEvent)
-	}
-	if !strings.Contains(artifactEvent.ArtifactContent, `"kind": "todo"`) || !strings.Contains(artifactEvent.ArtifactContent, `"status": "in_progress"`) {
-		t.Fatalf("unexpected todo artifact content: %q", artifactEvent.ArtifactContent)
-	}
-}
-
-func TestToolRuntimeApplyPatchResultIncludesCheckpoint(t *testing.T) {
-	root := t.TempDir()
-	patch := "*** Begin Patch\n" +
-		"*** Add File: note.md\n" +
-		"+hello\n" +
-		"*** End Patch"
-
-	var got []AwakenEvent
-	runtime := NewToolRuntimeWithConfig(testApprovalAwaiter{
-		decision: ApprovalDecisionApproved,
-		events:   &got,
-	}, ToolRuntimeConfig{
-		PermissionContext: tool.NewPermissionContext(root, []string{root}),
-	})
-	result := runtime.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_patch_checkpoint",
-		Function: convcontext.FunctionCall{
-			Name:      "apply_patch",
-			Arguments: `{"patch":` + mustJSONQuote(t, patch) + `}`,
-		},
-	})
-
-	if result.IsError {
-		t.Fatalf("expected apply_patch to succeed, got %+v", result)
-	}
-	if !strings.Contains(result.Content, "Checkpoint: checkpoint_") || !strings.Contains(result.Content, "(0 existing, 1 missing)") {
-		t.Fatalf("expected checkpoint summary in tool result, got %q", result.Content)
-	}
-
-	var sawFileArtifact bool
-	for _, event := range got {
-		if event.Type == ArtifactCreatedEventType && event.ArtifactPath == "note.md" && event.ArtifactKind == "added" {
-			sawFileArtifact = true
-		}
-	}
-	if !sawFileArtifact {
-		t.Fatalf("expected added file artifact, got %+v", got)
 	}
 }
 
@@ -1171,29 +428,6 @@ func TestToolRuntimeDeniesBeforeExecution(t *testing.T) {
 	}
 	if observed != "" {
 		t.Fatalf("expected denied tool not to execute, observed %q", observed)
-	}
-}
-
-func TestToolRuntimeDoesNotRequestApprovalForWebFetch(t *testing.T) {
-	var got []AwakenEvent
-	result := NewToolRuntime(testApprovalAwaiter{
-		decision: ApprovalDecisionRejected,
-		events:   &got,
-	}).Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_web_fetch",
-		Function: convcontext.FunctionCall{
-			Name:      "web_fetch",
-			Arguments: `{"url":"http://127.0.0.1/"}`,
-		},
-	})
-
-	if !result.IsError || !strings.Contains(result.Content, "拒绝访问") {
-		t.Fatalf("expected private URL denial to be returned as tool error, got %+v", result)
-	}
-	for _, event := range got {
-		if event.Type == ApprovalRequestedEventType {
-			t.Fatalf("unexpected approval request for read-only web_fetch: %+v", got)
-		}
 	}
 }
 
@@ -1226,133 +460,6 @@ func TestToolRuntimePassesPermissionContextToTools(t *testing.T) {
 	}
 	if observed.WorkspaceRoot != root || len(observed.WritableRoots) != 1 || observed.WritableRoots[0] != writable {
 		t.Fatalf("unexpected permission context: %+v", observed)
-	}
-}
-
-func TestToolRuntimeExecutesLifecycleHooks(t *testing.T) {
-	root := t.TempDir()
-	outPath := filepath.Join(root, "tool-hooks.log")
-	script := writeToolHookScript(t, root, `#!/bin/sh
-printf '%s:%s:%s:%s:%s:%s\n' "$1" "$AWAKEN_HOOK_EVENT" "$AWAKEN_TOOL_NAME" "$AWAKEN_TOOL_CALL_ID" "$AWAKEN_WORKSPACE_ROOT" "$AWAKEN_TOOL_IS_ERROR" >> "$2"
-`)
-
-	toolName := "runtime_hooked_tool"
-	mustRegisterRuntimeTool(t, runtimeTestTool{
-		name: toolName,
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-
-	runtime := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
-		PermissionContext: tool.NewPermissionContext(root, []string{root}),
-		Hooks: lifecyclehooks.Config{Hooks: map[lifecyclehooks.Event][]lifecyclehooks.CommandConfig{
-			lifecyclehooks.EventBeforeTool: {{
-				Command: script,
-				Args:    []string{"before", outPath},
-			}},
-			lifecyclehooks.EventAfterTool: {{
-				Command: script,
-				Args:    []string{"after", outPath},
-			}},
-		}},
-	})
-
-	result := runtime.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_hooked",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"hello"}`,
-		},
-	})
-
-	if result.IsError {
-		t.Fatalf("expected hooked tool to succeed, got %+v", result)
-	}
-	got := waitForToolHookFileText(t, outPath, "after:after_tool")
-	if !strings.Contains(got, "before:before_tool:"+toolName+":call_hooked:"+root+":") {
-		t.Fatalf("expected before_tool metadata, got %q", got)
-	}
-	if !strings.Contains(got, "after:after_tool:"+toolName+":call_hooked:"+root+":false") {
-		t.Fatalf("expected after_tool metadata, got %q", got)
-	}
-}
-
-func TestToolRuntimeHookFailureDoesNotFailTool(t *testing.T) {
-	toolName := "runtime_hook_failure_tool"
-	mustRegisterRuntimeTool(t, runtimeTestTool{
-		name: toolName,
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-
-	runtime := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
-		Hooks: lifecyclehooks.Config{Hooks: map[lifecyclehooks.Event][]lifecyclehooks.CommandConfig{
-			lifecyclehooks.EventBeforeTool: {{
-				Command: "/bin/sh",
-				Args:    []string{"-c", "exit 7"},
-			}},
-		}},
-	})
-
-	result := runtime.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_hook_failure",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"hello"}`,
-		},
-	})
-
-	if result.IsError || result.Content != "ran:hello" {
-		t.Fatalf("expected hook failure not to fail tool, got %+v", result)
-	}
-}
-
-func TestToolRuntimeAfterHookDoesNotDelayToolResult(t *testing.T) {
-	root := t.TempDir()
-	outPath := filepath.Join(root, "tool-hooks.log")
-	script := writeToolHookScript(t, root, `#!/bin/sh
-sleep 0.2
-printf '%s:%s\n' "$1" "$AWAKEN_HOOK_EVENT" >> "$2"
-`)
-
-	toolName := "runtime_slow_after_hook_tool"
-	mustRegisterRuntimeTool(t, runtimeTestTool{
-		name: toolName,
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-
-	runtime := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
-		PermissionContext: tool.NewPermissionContext(root, []string{root}),
-		Hooks: lifecyclehooks.Config{Hooks: map[lifecyclehooks.Event][]lifecyclehooks.CommandConfig{
-			lifecyclehooks.EventAfterTool: {{
-				Command: script,
-				Args:    []string{"after", outPath},
-			}},
-		}},
-	})
-
-	started := time.Now()
-	result := runtime.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_slow_after_hook",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"hello"}`,
-		},
-	})
-	elapsed := time.Since(started)
-
-	if result.IsError || result.Content != "ran:hello" {
-		t.Fatalf("expected tool success, got %+v", result)
-	}
-	if elapsed >= 150*time.Millisecond {
-		t.Fatalf("expected async after_tool hook, Execute took %s", elapsed)
-	}
-	if got := waitForToolHookFileText(t, outPath, "after:after_tool"); !strings.Contains(got, "after:after_tool") {
-		t.Fatalf("expected after_tool hook output, got %q", got)
 	}
 }
 
@@ -1448,10 +555,8 @@ func TestToolRuntimeRejectResultFedBack(t *testing.T) {
 }
 
 type testApprovalAwaiter struct {
-	decision    ApprovalDecision
-	events      *[]AwakenEvent
-	requests    *[]ApprovalRequest
-	auditEvents *[]SecurityAuditEvent
+	decision ApprovalDecision
+	events   *[]AwakenEvent
 }
 
 func (t testApprovalAwaiter) Emit(event AwakenEvent) {
@@ -1460,20 +565,11 @@ func (t testApprovalAwaiter) Emit(event AwakenEvent) {
 	}
 }
 
-func (t testApprovalAwaiter) AwaitApproval(_ context.Context, request ApprovalRequest) (ApprovalDecision, error) {
-	if t.requests != nil {
-		*t.requests = append(*t.requests, request)
-	}
+func (t testApprovalAwaiter) AwaitApproval(context.Context, ApprovalRequest) (ApprovalDecision, error) {
 	if t.events != nil {
 		*t.events = append(*t.events, AwakenEvent{Type: ApprovalRequestedEventType})
 	}
 	return t.decision, nil
-}
-
-func (t testApprovalAwaiter) RecordSecurityAuditEvent(event SecurityAuditEvent) {
-	if t.auditEvents != nil {
-		*t.auditEvents = append(*t.auditEvents, SanitizeSecurityAuditEvent(event))
-	}
 }
 
 func mustRegisterRuntimeTool(t *testing.T, candidate tool.Tool) {
@@ -1490,51 +586,4 @@ func mustJSONQuote(t *testing.T, value string) string {
 		t.Fatalf("failed to quote JSON string: %v", err)
 	}
 	return string(data)
-}
-
-func isPathWithin(path string, root string) bool {
-	rel, err := filepath.Rel(root, path)
-	if err != nil {
-		return false
-	}
-	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)))
-}
-
-func assertNoDisplaySecret(t *testing.T, value string, secrets ...string) {
-	t.Helper()
-	for _, secret := range secrets {
-		if secret == "" {
-			continue
-		}
-		if strings.Contains(value, secret) {
-			t.Fatalf("display output leaked secret %q in %q", secret, value)
-		}
-	}
-}
-
-func writeToolHookScript(t *testing.T, dir string, content string) string {
-	t.Helper()
-	path := filepath.Join(dir, "tool-hook.sh")
-	if err := os.WriteFile(path, []byte(content), 0755); err != nil {
-		t.Fatalf("failed to write hook script: %v", err)
-	}
-	return path
-}
-
-func waitForToolHookFileText(t *testing.T, path string, marker string) string {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	var last string
-	for time.Now().Before(deadline) {
-		data, err := os.ReadFile(path)
-		if err == nil {
-			last = string(data)
-			if strings.Contains(last, marker) {
-				return last
-			}
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("hook file %s did not contain %q; last content %q", path, marker, last)
-	return ""
 }

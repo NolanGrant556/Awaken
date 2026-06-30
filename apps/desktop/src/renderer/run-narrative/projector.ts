@@ -5,7 +5,6 @@ import type {
   RunNarrativeItem,
   RunNarrativeState,
 } from "./types";
-import { shellStatusFromContent } from "../runtime/shellToolResult";
 
 const MAX_SEEN_EVENTS = 1000;
 const READ_ONLY_TOOL_NAMES = new Set(["read_file", "list_files", "grep_search"]);
@@ -148,8 +147,7 @@ export function projectAguiEventToNarrative(
       return commitTool(
         base,
         event,
-        shellStatusFromContent(event.toolCallName, event.content) ??
-          (event.content ? "done" : "error"),
+        event.content ? "done" : "error",
         event.content || "Tool returned empty content",
       );
     case "AWAKEN_APPROVAL_REQUESTED":
@@ -160,18 +158,18 @@ export function projectAguiEventToNarrative(
     case "AWAKEN_ARTIFACT_UPDATED":
       return activateFileChange(base, event);
     case "RUN_FINISHED":
-      return markFinalAnswerForEvent(commitActive(base, "done"), event);
+      return commitActive(base, "done");
     case "RUN_ERROR":
       if (event.code === "RUN_CANCELLED") {
         return commitActive(base, "done");
       }
-      return markLatestAnswerFinal(commitErrorAnswer(base, event));
+      return commitErrorAnswer(base, event);
     case "RUN_STATUS_CHANGED":
       if (event.status === "cancelled") {
         return commitActive(base, "done");
       }
       if (event.status === "finished") {
-        return markFinalAnswerForEvent(commitActive(base, "done"), event);
+        return commitActive(base, "done");
       }
       return base;
     default:
@@ -257,55 +255,6 @@ function commitErrorAnswer(state: RunNarrativeState, event: AguiEvent): RunNarra
     narrativeErrorMessage(event),
     `${event.seq ?? event.code ?? "runtime"}`,
   );
-}
-
-function markFinalAnswerForEvent(
-  state: RunNarrativeState,
-  event: AguiEvent,
-): RunNarrativeState {
-  return markAnswerFinal(state, (item) => answerBelongsToEvent(item, event));
-}
-
-function markLatestAnswerFinal(state: RunNarrativeState): RunNarrativeState {
-  return markAnswerFinal(state, () => true);
-}
-
-function markAnswerFinal(
-  state: RunNarrativeState,
-  shouldMark: (item: Extract<RunNarrativeItem, { kind: "answer" }>) => boolean,
-): RunNarrativeState {
-  const items = state.activeItem
-    ? [...state.committedItems, state.activeItem]
-    : state.committedItems;
-  for (let i = items.length - 1; i >= 0; i--) {
-    const item = items[i];
-    if (item.kind === "answer" && shouldMark(item)) {
-      if (item.isFinal) {
-        return state;
-      }
-      const finalItem: RunNarrativeItem = { ...item, isFinal: true };
-      if (i < state.committedItems.length) {
-        return {
-          ...state,
-          committedItems: upsertCommitted(state.committedItems, finalItem),
-        };
-      }
-      return { ...state, activeItem: finalItem };
-    }
-  }
-  return state;
-}
-
-function answerBelongsToEvent(
-  item: Extract<RunNarrativeItem, { kind: "answer" }>,
-  event: AguiEvent,
-): boolean {
-  if (!event.runId && !event.threadId) {
-    return true;
-  }
-  const scope = eventScope(event);
-  const scopedAnswerId = `answer:${scope}`;
-  return item.id === scopedAnswerId || item.id.startsWith(`${scopedAnswerId}:`);
 }
 
 function setActive(state: RunNarrativeState, item: RunNarrativeItem): RunNarrativeState {

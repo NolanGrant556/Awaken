@@ -4,9 +4,6 @@ import type {
   RuntimeRun,
   RuntimeRunStatus,
   RuntimeThread,
-  RuntimeThreadContext,
-  RuntimeThreadMetadata,
-  RuntimeThreadState,
   SupervisorStatus,
   SupervisorStatusInfo,
 } from "../../shared/runtime";
@@ -18,7 +15,6 @@ import {
   projectAguiEventToNarrative,
   type RunNarrativeState,
 } from "../run-narrative";
-import { shellStatusFromContent } from "./shellToolResult";
 
 type RuntimePhase = "idle" | "starting" | "running" | "reconnecting" | "cancelling" | "done" | "error" | "cancelled";
 
@@ -28,10 +24,9 @@ type StepRecord = RunStepItem & {
   key: string;
 };
 
-export type ToolResultRecord = {
+type ToolResultRecord = {
   id: string;
   title: string;
-  toolCallName?: string;
   content: string;
   args?: string;
   commandOutput?: string;
@@ -63,30 +58,12 @@ export type TurnDiffRecord = {
   truncated?: boolean;
 };
 
-export type PolicyDecisionRecord = {
-  id: string;
-  category: string;
-  decision: string;
-  reason?: string;
-  status?: string;
-  payload?: Record<string, unknown>;
-};
-
-export type RateLimitOptionRecord = {
-  label: string;
-  value: string;
-};
-
 export type ThreadItem = {
   threadId: string;
   label: string;
-  state?: RuntimeThreadState;
-  metadata?: RuntimeThreadMetadata;
   runId?: string;
   activeRunId?: string;
   runStatus?: RuntimeRunStatus;
-  updatedAt?: string;
-  lastError?: string;
   approvalCount?: number;
   artifactCount?: number;
 };
@@ -107,20 +84,10 @@ type ThreadViewState = {
   approvals: ApprovalItem[];
   artifacts: ArtifactRecord[];
   turnDiff?: TurnDiffRecord;
-  policyDecisions: PolicyDecisionRecord[];
-  providerReason?: string;
-  retryable?: boolean;
-  rateLimitOptions: RateLimitOptionRecord[];
   narrative: RunNarrativeState;
   errorMessage?: string;
   runStartedAtMs?: number;
   runCompletedAtMs?: number;
-};
-
-export type BranchSourceView = {
-  parentThreadId: string;
-  parentLabel: string;
-  forkedFromPreview: string;
 };
 
 export type RuntimeViewState = {
@@ -139,10 +106,6 @@ export type RuntimeViewState = {
   approvals: ApprovalItem[];
   artifacts: ArtifactRecord[];
   turnDiff?: TurnDiffRecord;
-  policyDecisions: PolicyDecisionRecord[];
-  providerReason?: string;
-  retryable?: boolean;
-  rateLimitOptions: RateLimitOptionRecord[];
   narrative: RunNarrativeState;
   errorMessage?: string;
   runStartedAtMs?: number;
@@ -151,18 +114,12 @@ export type RuntimeViewState = {
   activeThreadId?: string;
   threadViews: Record<string, ThreadViewState>;
   supervisorStatus: SupervisorStatus | null;
-  needsThreadsRefresh?: boolean;
-  threadContext?: RuntimeThreadContext | null;
-  threadContextLoading?: boolean;
-  threadContextError?: string | null;
-  branchSourceView?: BranchSourceView | null;
-  supervisorInfo?: SupervisorStatusInfo;
 };
 
 export type RuntimeAction =
   | { type: "run/reset" }
   | { type: "run/requested"; prompt: string; startedAtMs?: number }
-  | { type: "run/created"; run: RuntimeRun; startedAtMs?: number }
+  | { type: "run/created"; run: RuntimeRun }
   | { type: "run/createFailed"; message: string }
   | { type: "run/cancelRequested" }
   | { type: "run/cancelSync"; run: RuntimeRun }
@@ -172,15 +129,8 @@ export type RuntimeAction =
   | { type: "run/recovered"; run: RuntimeRun; prompt?: string }
   | { type: "run/threadReplayStarted"; threadId: string; runId?: string }
   | { type: "run/threadsLoaded"; threads: RuntimeThread[] }
-  | { type: "run/threadsRefreshed" }
-  | { type: "run/threadAdded"; threadId: string; label: string; runId: string; updatedAt?: string }
-  | { type: "run/threadBranched"; thread: RuntimeThread }
+  | { type: "run/threadAdded"; threadId: string; label: string; runId: string }
   | { type: "run/threadSwitch"; threadId: string }
-  | { type: "run/branchSourceViewSet"; parentThreadId: string; parentLabel: string; forkedFromPreview: string }
-  | { type: "run/threadContextLoading"; threadId: string }
-  | { type: "run/threadContextLoaded"; threadId: string; context: RuntimeThreadContext }
-  | { type: "run/threadContextError"; threadId: string; message: string }
-  | { type: "run/threadContextCleared" }
   | { type: "run/event"; event: AguiEvent; receivedAtMs?: number }
   | { type: "supervisor/status-changed"; info: SupervisorStatusInfo };
 
@@ -196,8 +146,6 @@ const initialState: RuntimeViewState = {
   patchPreviews: [],
   approvals: [],
   artifacts: [],
-  policyDecisions: [],
-  rateLimitOptions: [],
   narrative: createInitialRunNarrativeState(),
   threads: [],
   threadViews: {},
@@ -221,10 +169,6 @@ function viewFromState(state: RuntimeViewState): ThreadViewState {
     approvals: state.approvals,
     artifacts: state.artifacts,
     turnDiff: state.turnDiff,
-    policyDecisions: state.policyDecisions,
-    providerReason: state.providerReason,
-    retryable: state.retryable,
-    rateLimitOptions: state.rateLimitOptions,
     narrative: state.narrative,
     errorMessage: state.errorMessage,
     runStartedAtMs: state.runStartedAtMs,
@@ -282,47 +226,33 @@ function threadItemFromRuntime(thread: RuntimeThread): ThreadItem {
   return {
     threadId: thread.threadId,
     label: thread.label || "Untitled thread",
-    state: thread.state,
-    metadata: thread.metadata,
     runId: thread.runId,
     activeRunId: thread.activeRunId,
-    runStatus: thread.latestRun?.status ?? (thread.activeRunId ? "running" : undefined),
-    updatedAt: thread.latestRun?.updatedAt ?? thread.updatedAt,
-    lastError: thread.latestRun?.error,
+    runStatus: thread.activeRunId ? "running" : undefined,
     approvalCount: 0,
     artifactCount: 0,
   };
 }
 
 function isActiveRunStatus(status?: RuntimeRunStatus): boolean {
-  return status === "queued" || status === "running" || status === "awaiting_approval" || status === "cancelling";
+  return status === "running" || status === "awaiting_approval" || status === "cancelling";
 }
 
-function syncActiveThreadSummary(
-  state: RuntimeViewState,
-  options: { updatedAt?: string; lastError?: string } = {},
-): RuntimeViewState {
+function syncActiveThreadSummary(state: RuntimeViewState): RuntimeViewState {
   const threadId = state.threadId ?? state.activeThreadId;
   if (!threadId) {
     return state;
   }
 
   const existing = state.threads.find((thread) => thread.threadId === threadId);
-  const runStatus = state.status ?? existing?.runStatus;
   return {
     ...state,
     threads: upsertThread(state.threads, {
       threadId,
       label: existing?.label || state.prompt || "Untitled thread",
-      state: existing?.state,
-      metadata: existing?.metadata,
       runId: state.runId ?? existing?.runId,
       activeRunId: isActiveRunStatus(state.status) ? state.runId : undefined,
-      runStatus,
-      updatedAt: options.updatedAt ?? existing?.updatedAt,
-      lastError: options.lastError ?? (
-        runStatus === "error" ? state.errorMessage ?? existing?.lastError : undefined
-      ),
+      runStatus: state.status ?? existing?.runStatus,
       approvalCount: state.approvals.length,
       artifactCount: state.artifacts.length,
     }),
@@ -368,13 +298,6 @@ function scopeNarrativeEvent(event: AguiEvent, state: RuntimeViewState): AguiEve
 
 function validTimestamp(value?: number): value is number {
   return typeof value === "number" && Number.isFinite(value);
-}
-
-function timestampToISO(value?: number): string | undefined {
-  if (!validTimestamp(value) || value <= 0) {
-    return undefined;
-  }
-  return new Date(value).toISOString();
 }
 
 function isSuccessfulTerminalEvent(event: AguiEvent): boolean {
@@ -527,11 +450,7 @@ function upsertPatchPreview(
   return updated;
 }
 
-function toolRecordStatus(content?: string, toolCallName?: string): "done" | "error" {
-  const shellStatus = shellStatusFromContent(toolCallName, content);
-  if (shellStatus) {
-    return shellStatus;
-  }
+function toolRecordStatus(content?: string): "done" | "error" {
   const normalized = (content ?? "").trim();
   if (!normalized) {
     return "error";
@@ -565,44 +484,6 @@ function normalizeArtifactStatus(value?: string): AguiArtifactStatus {
     default:
       return "ready";
   }
-}
-
-function providerErrorMessage(event: AguiEvent): string {
-  const rawMessage = event.message || "Runtime returned an error";
-  const reason = event.providerReason;
-  if (event.code === "PROVIDER_AUTH_MISSING") {
-    return "API key 缺失，请在 .env 中配置 LLM_API_KEY";
-  }
-  if (reason === "rate_limit") {
-    return `Provider 限流：${rawMessage}`;
-  }
-  if (reason === "auth" || reason === "auth_permanent" || reason === "billing") {
-    return `Provider 认证或额度异常：${rawMessage}`;
-  }
-  if (reason === "context_overflow" || reason === "payload_too_large") {
-    return `上下文过长：${rawMessage}`;
-  }
-  if (event.code === "PROVIDER_REQUEST_FAILED") {
-    return `Provider 请求失败：${rawMessage}`;
-  }
-  return rawMessage;
-}
-
-function upsertPolicyDecision(
-  records: PolicyDecisionRecord[],
-  event: AguiEvent,
-): PolicyDecisionRecord[] {
-  const category = event.policyCategory || "policy";
-  const id = `${event.seq ?? records.length + 1}:${category}`;
-  const next: PolicyDecisionRecord = {
-    id,
-    category,
-    decision: event.policyDecision || "decision",
-    reason: event.policyReason,
-    status: event.policyStatus,
-    payload: event.policyPayload,
-  };
-  return [...records, next];
 }
 
 function buildArtifactDescription(artifact: ArtifactRecord): string {
@@ -664,29 +545,6 @@ function upsertArtifact(artifacts: ArtifactRecord[], event: AguiEvent): Artifact
 }
 
 function syncFromRun(state: RuntimeViewState, run: RuntimeRun): RuntimeViewState {
-  if (run.status === "queued") {
-    return {
-      ...state,
-      runId: run.runId,
-      threadId: run.threadId,
-      phase: "running",
-      status: run.status,
-      timelineStatus: "running",
-      steps: toSteps(
-        upsertStep(
-          state.steps.map((step, index) => ({ ...step, key: step.id, index: index + 1 })),
-          "run-queued",
-          {
-            title: "Run queued",
-            description: "Waiting for the active run to finish",
-            status: "active",
-            tag: "queued",
-          },
-        ),
-      ),
-    };
-  }
-
   if (run.status === "cancelling") {
     return {
       ...state,
@@ -772,7 +630,6 @@ export function reduceRuntimeState(
         ...initialState,
         narrative: createInitialRunNarrativeState(),
         supervisorStatus: state.supervisorStatus,
-        supervisorInfo: state.supervisorInfo,
         threads: state.threads,
         threadViews: saveActiveThreadView(state).threadViews,
       };
@@ -790,10 +647,6 @@ export function reduceRuntimeState(
         approvals: [],
         artifacts: [],
         turnDiff: undefined,
-        policyDecisions: [],
-        providerReason: undefined,
-        retryable: undefined,
-        rateLimitOptions: [],
         narrative: shouldAppendNarrative(state)
           ? appendRunRequestedNarrative(
               state.narrative,
@@ -802,23 +655,17 @@ export function reduceRuntimeState(
             )
           : createRunRequestedNarrative(action.prompt, nextNarrativeScope(state)),
         supervisorStatus: state.supervisorStatus,
-        supervisorInfo: state.supervisorInfo,
         threads: state.threads,
         activeThreadId: state.activeThreadId,
         threadViews: state.threadViews,
         runStartedAtMs: action.startedAtMs,
         runCompletedAtMs: undefined,
-        branchSourceView: null,
       };
     case "run/created":
       return saveActiveThreadView(
         syncActiveThreadSummary({
           ...syncFromRun(state, action.run),
           activeThreadId: action.run.threadId,
-          branchSourceView: null,
-        }, {
-          updatedAt: action.run.updatedAt,
-          lastError: action.run.error,
         }),
       );
     case "run/createFailed":
@@ -847,12 +694,7 @@ export function reduceRuntimeState(
         }),
       );
     case "run/cancelSync":
-      return saveActiveThreadView(
-        syncActiveThreadSummary(syncFromRun(state, action.run), {
-          updatedAt: action.run.updatedAt,
-          lastError: action.run.error,
-        }),
-      );
+      return saveActiveThreadView(syncActiveThreadSummary(syncFromRun(state, action.run)));
     case "run/streamError":
       return saveActiveThreadView(
         syncActiveThreadSummary({
@@ -920,7 +762,6 @@ export function reduceRuntimeState(
             ? createRunRequestedNarrative(prompt, recoveredNarrativeScope(action.run))
             : createInitialRunNarrativeState(),
           supervisorStatus: state.supervisorStatus,
-          supervisorInfo: state.supervisorInfo,
           timelineTitle: "恢复运行",
           threads: state.threads,
           threadViews: state.threadViews,
@@ -935,13 +776,11 @@ export function reduceRuntimeState(
         ...view,
         activeThreadId: action.threadId,
         supervisorStatus: state.supervisorStatus,
-        supervisorInfo: state.supervisorInfo,
         threads: state.threads,
         threadViews: {
           ...state.threadViews,
           [action.threadId]: view,
         },
-        branchSourceView: null,
       };
     }
     case "run/threadsLoaded": {
@@ -950,11 +789,7 @@ export function reduceRuntimeState(
         const existing = state.threads.find((item) => item.threadId === thread.threadId);
         return {
           ...threadItemFromRuntime(thread),
-          runStatus: thread.latestRun?.status ?? existing?.runStatus ?? (thread.activeRunId ? "running" : undefined),
-          updatedAt: thread.latestRun?.updatedAt ?? thread.updatedAt ?? existing?.updatedAt,
-          lastError: thread.latestRun ? thread.latestRun.error : existing?.lastError,
-          state: thread.state ?? existing?.state,
-          metadata: thread.metadata ?? existing?.metadata,
+          runStatus: existing?.runStatus ?? (thread.activeRunId ? "running" : undefined),
           approvalCount: existing?.approvalCount ?? 0,
           artifactCount: existing?.artifactCount ?? 0,
         };
@@ -971,7 +806,6 @@ export function reduceRuntimeState(
           ...initialState,
           narrative: createInitialRunNarrativeState(),
           supervisorStatus: state.supervisorStatus,
-          supervisorInfo: state.supervisorInfo,
           threads: loaded,
           threadViews,
         };
@@ -989,81 +823,17 @@ export function reduceRuntimeState(
         threads: upsertThread(state.threads, {
           threadId: action.threadId,
           label: action.label,
-          state: "running",
-          metadata: { lastPrompt: action.label },
           runId: action.runId,
           activeRunId: action.runId,
           runStatus: "running",
-          updatedAt: action.updatedAt,
           approvalCount: 0,
           artifactCount: 0,
         }),
       };
       return saveActiveThreadView(next);
     }
-    case "run/threadBranched": {
-      const branched = threadItemFromRuntime(action.thread);
-      return {
-        ...state,
-        threads: upsertThread(state.threads, branched),
-      };
-    }
     case "run/threadSwitch":
-      return {
-        ...restoreThreadView(saveActiveThreadView(state), action.threadId),
-        threadContext: null,
-        threadContextLoading: false,
-        threadContextError: null,
-        branchSourceView: null,
-      };
-    case "run/branchSourceViewSet":
-      return {
-        ...state,
-        branchSourceView: {
-          parentThreadId: action.parentThreadId,
-          parentLabel: action.parentLabel,
-          forkedFromPreview: action.forkedFromPreview,
-        },
-      };
-    case "run/threadContextLoading":
-      // Strict equality: reject when activeThreadId is empty (e.g. user just
-      // clicked "New Task" and the active thread was cleared) so a stale
-      // in-flight response for the previous thread cannot pollute the blank
-      // composer view.
-      if (state.activeThreadId !== action.threadId) {
-        return state;
-      }
-      return {
-        ...state,
-        threadContextLoading: true,
-        threadContextError: null,
-      };
-    case "run/threadContextLoaded":
-      if (state.activeThreadId !== action.threadId) {
-        return state;
-      }
-      return {
-        ...state,
-        threadContext: action.context,
-        threadContextLoading: false,
-        threadContextError: null,
-      };
-    case "run/threadContextError":
-      if (state.activeThreadId !== action.threadId) {
-        return state;
-      }
-      return {
-        ...state,
-        threadContextLoading: false,
-        threadContextError: action.message,
-      };
-    case "run/threadContextCleared":
-      return {
-        ...state,
-        threadContext: null,
-        threadContextLoading: false,
-        threadContextError: null,
-      };
+      return restoreThreadView(saveActiveThreadView(state), action.threadId);
     case "run/event": {
       const nextState = { ...state };
       const narrativeEvent = scopeNarrativeEvent(action.event, nextState);
@@ -1084,8 +854,6 @@ export function reduceRuntimeState(
             nextState.threads = upsertThread(state.threads, {
               threadId: action.event.threadId,
               label: state.prompt || "Untitled thread",
-              state: "running",
-              metadata: { lastPrompt: state.prompt },
               runId: action.event.runId,
               activeRunId: action.event.runId,
             });
@@ -1100,10 +868,7 @@ export function reduceRuntimeState(
         case "RUN_STATUS_CHANGED": {
           const status = action.event.status;
           nextState.status = status as RuntimeRunStatus | undefined;
-          if (status === "queued") {
-            nextState.phase = "running";
-            nextState.timelineStatus = "running";
-          } else if (status === "running") {
+          if (status === "running") {
             nextState.phase = "running";
             nextState.timelineStatus = "running";
           } else if (status === "awaiting_approval") {
@@ -1129,8 +894,6 @@ export function reduceRuntimeState(
           records = upsertStep(records, status === "cancelled" ? "run-cancelled" : `status:${status ?? "unknown"}`, {
             title: status === "awaiting_approval"
               ? "Awaiting approval"
-              : status === "queued"
-                ? "Run queued"
               : status === "cancelling"
                 ? "Cancelling run"
                 : status === "cancelled"
@@ -1229,7 +992,6 @@ export function reduceRuntimeState(
           nextState.toolResults = upsertToolResult(nextState.toolResults, {
             id,
             title: action.event.toolCallName || existing?.title || "Tool call",
-            toolCallName: action.event.toolCallName || existing?.toolCallName,
             args,
             content: existing?.content ?? "",
             status: "active",
@@ -1254,7 +1016,6 @@ export function reduceRuntimeState(
           nextState.toolResults = upsertToolResult(nextState.toolResults, {
             id,
             title: action.event.toolCallName || existing?.title || "Tool call",
-            toolCallName: action.event.toolCallName || existing?.toolCallName,
             args: existing?.args,
             content: existing?.content ?? "",
             status: "active",
@@ -1275,7 +1036,6 @@ export function reduceRuntimeState(
           nextState.toolResults = upsertToolResult(nextState.toolResults, {
             id,
             title: action.event.toolCallName || existing?.title || "Command",
-            toolCallName: action.event.toolCallName || existing?.toolCallName,
             args: existing?.args,
             content: existing?.content ?? "",
             commandOutput: `${existing?.commandOutput ?? ""}${delta}`,
@@ -1297,10 +1057,9 @@ export function reduceRuntimeState(
           nextState.toolResults = upsertToolResult(nextState.toolResults, {
             id,
             title: action.event.toolCallName || existing?.title || "Tool result",
-            toolCallName: action.event.toolCallName || existing?.toolCallName,
             content,
             args: existing?.args,
-            status: toolRecordStatus(action.event.content, action.event.toolCallName),
+            status: toolRecordStatus(action.event.content),
           });
 
           const stepKey = action.event.toolCallId
@@ -1401,22 +1160,6 @@ export function reduceRuntimeState(
           });
           break;
         }
-        case "AWAKEN_POLICY_DECISION": {
-          nextState.policyDecisions = upsertPolicyDecision(nextState.policyDecisions, action.event);
-          records = upsertStep(records, `policy:${action.event.policyCategory ?? "policy"}:${action.event.seq ?? records.length}`, {
-            title: action.event.policyCategory === "image_routing"
-              ? "Image routing decided"
-              : action.event.policyCategory === "busy_input"
-                ? "Busy input policy"
-                : action.event.policyCategory === "background_notification"
-                  ? "Notification policy"
-                  : "Policy decision",
-            description: action.event.policyStatus || action.event.policyReason || action.event.policyDecision || "Policy decision recorded",
-            status: "done",
-            tag: action.event.policyDecision || "policy",
-          });
-          break;
-        }
         case "RUN_ERROR":
           if (action.event.code === "RUN_CANCELLED") {
             nextState.phase = "cancelled";
@@ -1433,17 +1176,23 @@ export function reduceRuntimeState(
             nextState.phase = "error";
             nextState.status = "error";
             nextState.timelineStatus = "error";
-            const errorMessage = providerErrorMessage(action.event);
+            const rawMessage = action.event.message || "Runtime returned an error";
+            let errorMessage = rawMessage;
+            let errorDescription = rawMessage;
+            if (action.event.code === "PROVIDER_AUTH_MISSING") {
+              errorMessage = "API key 缺失，请在 .env 中配置 LLM_API_KEY";
+              errorDescription = "API key 缺失，请在 .env 中配置 LLM_API_KEY";
+            } else if (action.event.code === "PROVIDER_REQUEST_FAILED") {
+              errorMessage = `Provider 请求失败：${rawMessage}`;
+              errorDescription = `Provider 请求失败：${rawMessage}`;
+            }
             nextState.errorMessage = errorMessage;
-            nextState.providerReason = action.event.providerReason;
-            nextState.retryable = action.event.retryable;
-            nextState.rateLimitOptions = action.event.rateLimitOptions ?? [];
             nextState.approvals = [];
             records = upsertStep(records, "run-error", {
               title: "Run failed",
-              description: errorMessage,
+              description: errorDescription,
               status: "error",
-              tag: action.event.providerReason || action.event.code || "error",
+              tag: action.event.code || "error",
             });
           }
           break;
@@ -1455,10 +1204,7 @@ export function reduceRuntimeState(
         nextState.threadId &&
         (action.event.type === "RUN_FINISHED" ||
           action.event.type === "RUN_ERROR" ||
-          (action.event.type === "RUN_STATUS_CHANGED" &&
-            (action.event.status === "cancelled" ||
-              action.event.status === "finished" ||
-              action.event.status === "error")))
+          (action.event.type === "RUN_STATUS_CHANGED" && action.event.status === "cancelled"))
       ) {
         nextState.threads = upsertThread(nextState.threads, {
           threadId: nextState.threadId,
@@ -1468,7 +1214,6 @@ export function reduceRuntimeState(
           runId: nextState.runId,
           activeRunId: undefined,
         });
-        nextState.needsThreadsRefresh = true;
       }
 
       nextState.steps = toSteps(records);
@@ -1480,24 +1225,12 @@ export function reduceRuntimeState(
             nextState.runId,
           )
         : projectedNarrative;
-      return saveActiveThreadView(
-        syncActiveThreadSummary(nextState, {
-          updatedAt: timestampToISO(action.event.timestamp) ?? timestampToISO(action.receivedAtMs),
-          lastError: action.event.type === "RUN_ERROR"
-            ? nextState.errorMessage
-            : undefined,
-        }),
-      );
+      return saveActiveThreadView(syncActiveThreadSummary(nextState));
     }
-    case "run/threadsRefreshed":
-      return state.needsThreadsRefresh
-        ? { ...state, needsThreadsRefresh: false }
-        : state;
     case "supervisor/status-changed":
       return {
         ...state,
         supervisorStatus: action.info.status,
-        supervisorInfo: action.info,
       };
     default:
       return state;

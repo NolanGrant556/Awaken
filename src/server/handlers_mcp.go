@@ -16,13 +16,15 @@ type mcpHandlers struct {
 
 // mcpServerInfo is the wire shape for entries returned by GET /v1/mcp/servers.
 type mcpServerInfo struct {
-	Name            string                     `json:"name"`
-	State           mcpclient.ServerState      `json:"state"`
-	Transport       mcpclient.TransportKind    `json:"transport"`
-	Scope           mcpclient.Scope            `json:"scope"`
-	ErrorReason     string                     `json:"errorReason,omitempty"`
-	LastConnectedAt *int64                     `json:"lastConnectedAt,omitempty"`
-	Capabilities    *mcpclient.ServerCapability `json:"capabilities,omitempty"`
+	Name              string                      `json:"name"`
+	State             mcpclient.ServerState       `json:"state"`
+	Transport         mcpclient.TransportKind     `json:"transport"`
+	Scope             mcpclient.Scope             `json:"scope"`
+	ErrorReason       string                      `json:"errorReason,omitempty"`
+	LastConnectedAt   *int64                      `json:"lastConnectedAt,omitempty"`
+	Capabilities      *mcpclient.ServerCapability `json:"capabilities,omitempty"`
+	SourceConnectorID *string                     `json:"sourceConnectorId,omitempty"`
+	ShadowedBy        string                      `json:"shadowedBy,omitempty"`
 }
 
 // mcpToolInfo is the wire shape for entries returned by GET /v1/mcp/tools.
@@ -48,12 +50,14 @@ func (h mcpHandlers) handleListServers(w http.ResponseWriter, r *http.Request) {
 	out := make([]mcpServerInfo, 0, len(snapshots))
 	for _, snap := range snapshots {
 		info := mcpServerInfo{
-			Name:        snap.Name,
-			State:       snap.State,
-			Transport:   snap.Transport,
-			Scope:       snap.Scope,
-			ErrorReason: snap.ErrorReason,
-			Capabilities: snap.Capabilities,
+			Name:              snap.Name,
+			State:             snap.State,
+			Transport:         snap.Transport,
+			Scope:             snap.Scope,
+			ErrorReason:       snap.ErrorReason,
+			Capabilities:      snap.Capabilities,
+			SourceConnectorID: snap.SourceConnectorID,
+			ShadowedBy:        snap.ShadowedBy,
 		}
 		if snap.LastConnectedAt != nil {
 			ts := snap.LastConnectedAt.UnixMilli()
@@ -145,7 +149,6 @@ func (h mcpHandlers) handleListTools(w http.ResponseWriter, r *http.Request) {
 		if readOnly, ok := t.(tool.ReadOnlyTool); ok && readOnly.IsReadOnly() {
 			info.ReadOnly = true
 		}
-		// Surface MCP-sourced tool metadata when available.
 		if adapter, ok := t.(*mcpclient.McpToolAdapter); ok {
 			annotations := adapter.Annotations()
 			info.Source = "mcp"

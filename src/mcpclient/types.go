@@ -47,6 +47,16 @@ type ServerSnapshot struct {
 	ErrorReason     string            `json:"errorReason,omitempty"`
 	LastConnectedAt *time.Time        `json:"lastConnectedAt,omitempty"`
 	Capabilities    *ServerCapability `json:"capabilities,omitempty"`
+
+	// SourceConnectorID is set when this server was injected by a connector.
+	// It holds the connector's ID (e.g. "notion", "slack"). Empty/nil means
+	// the server was not injected by a connector.
+	SourceConnectorID *string `json:"sourceConnectorId,omitempty"`
+
+	// ShadowedBy is set when a connector has claimed this server name but a
+	// higher-priority connector later took it. Holds the winning connector ID.
+	// Empty means this server is not shadowed.
+	ShadowedBy string `json:"shadowedBy,omitempty"`
 }
 
 // ServerCapability is the trimmed-down result of the MCP initialize handshake.

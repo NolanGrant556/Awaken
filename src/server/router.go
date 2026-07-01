@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"awaken/src/agentcore"
+	"awaken/src/connectors"
 	"awaken/src/mcpclient"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
@@ -19,6 +20,16 @@ func NewRouter(runService *awruntime.RunService, infoProvider RuntimeInfoProvide
 // NewRouter; the MCP-aware variant is consumed by cmd/awaken-core once it
 // constructs the manager.
 func NewRouterWithMCP(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager) http.Handler {
+	return newRouterInternal(runService, infoProvider, manager, nil)
+}
+
+// NewRouterWithMCPAndConnectors builds a router that also exposes the
+// /v1/connectors/* surface when a non-nil connector registry is supplied.
+func NewRouterWithMCPAndConnectors(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry) http.Handler {
+	return newRouterInternal(runService, infoProvider, manager, connectorRegistry)
+}
+
+func newRouterInternal(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handleHealth)
 	mux.HandleFunc("GET /v1/agui/demo", handleAGUIDemo)
@@ -42,6 +53,12 @@ func NewRouterWithMCP(runService *awruntime.RunService, infoProvider RuntimeInfo
 		mux.HandleFunc("POST /v1/mcp/servers/{name}/auth", mcpH.handleServerAuth)
 		mux.HandleFunc("POST /v1/mcp/servers/{name}/disable", mcpH.handleServerDisable)
 		mux.HandleFunc("POST /v1/mcp/servers/{name}/enable", mcpH.handleServerEnable)
+	}
+	connH := connectorHandlers{registry: connectorRegistry}
+	if connectorRegistry != nil {
+		mux.HandleFunc("GET /v1/connectors", connH.handleListConnectors)
+		mux.HandleFunc("POST /v1/connectors/{id}/connect", connH.handleConnect)
+		mux.HandleFunc("POST /v1/connectors/{id}/disconnect", connH.handleDisconnect)
 	}
 	return mux
 }

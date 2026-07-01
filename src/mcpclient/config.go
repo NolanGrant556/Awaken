@@ -151,9 +151,9 @@ func ToScoped(cfg ConfigFile, scope Scope) []ScopedMcpServerConfig {
 	return out
 }
 
-// transportKind returns the transport variant declared by this config, or
+// TransportKind returns the transport variant declared by this config, or
 // an empty string if the config is invalid (zero or multiple variants set).
-func (c McpServerConfig) transportKind() TransportKind {
+func (c McpServerConfig) TransportKind() TransportKind {
 	count := 0
 	var kind TransportKind
 	if c.Stdio != nil {
@@ -183,7 +183,7 @@ func (c McpServerConfig) transportKind() TransportKind {
 }
 
 func (c McpServerConfig) Valid() bool {
-	kind := c.transportKind()
+	kind := c.TransportKind()
 	if kind == "" {
 		return false
 	}

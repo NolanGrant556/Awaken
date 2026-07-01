@@ -55,6 +55,14 @@ type managedServer struct {
 	errorReason string
 	lastConn    *time.Time
 
+	// sourceConnectorID is set when this server was injected by a connector
+	// via InjectDynamic. It holds the connector's ID.
+	sourceConnectorID string
+
+	// shadowedBy is set when another server with higher priority covers the
+	// same name. Holds the winning connector ID.
+	shadowedBy string
+
 	session     Session
 	cancelCtx   context.CancelFunc
 	authHandler auth.OAuthHandler
@@ -135,7 +143,7 @@ func (m *Manager) Start(ctx context.Context, servers []ScopedMcpServerConfig) {
 // connect goroutine. The function returns once the initial state has been
 // recorded (pending, or failed if the config is unusable).
 func (m *Manager) startOne(ctx context.Context, scoped ScopedMcpServerConfig) {
-	kind := scoped.Config.transportKind()
+	kind := scoped.Config.TransportKind()
 	if kind == "" {
 		m.mu.Lock()
 		m.servers[scoped.Name] = &managedServer{
@@ -405,6 +413,11 @@ func (m *Manager) snapshotServerLocked(server *managedServer) ServerSnapshot {
 		Transport:   server.transport,
 		Scope:       server.scope,
 		ErrorReason: server.errorReason,
+		ShadowedBy:  server.shadowedBy,
+	}
+	if server.sourceConnectorID != "" {
+		cid := server.sourceConnectorID
+		snap.SourceConnectorID = &cid
 	}
 	if server.lastConn != nil {
 		t := *server.lastConn
@@ -482,6 +495,84 @@ func splitMcpToolName(prefixed string) (server, tool string, ok bool) {
 		return "", "", false
 	}
 	return rest[:idx], rest[idx+2:], true
+}
+
+// InjectDynamic creates or replaces a server entry in the manager from a
+// connector. The server is tagged with scope dynamic and records the connector
+// ID. If a server with the same name already exists that was injected by a
+// different connector, the existing entry is shadowed (its shadowedBy field is
+// set) and the new one takes its place.
+//
+// InjectDynamic is called by the connector registry after a user chooses to
+// connect a connector. Unlike Start, it starts the connect loop inside a
+// goroutine so the server appears in snapshots after the first state change.
+func (m *Manager) InjectDynamic(connectorID string, config ScopedMcpServerConfig) {
+	m.mu.Lock()
+	existing, exists := m.servers[config.Name]
+	if exists {
+		// If the existing entry was injected by a connector with different ID,
+		// shadow it.
+		if existing.sourceConnectorID != "" && existing.sourceConnectorID != connectorID {
+			existing.shadowedBy = connectorID
+			m.logger.Warnf("mcp server %q (connector %s) shadowed by connector %s", config.Name, existing.sourceConnectorID, connectorID)
+		}
+		// Shut down the existing server before replacing.
+		if existing.cancelCtx != nil {
+			existing.cancelCtx()
+		}
+		if existing.session != nil {
+			_ = existing.session.Close()
+		}
+	}
+	// Unregister any existing tools for this server name before replacing.
+	if exists {
+		m.unregisterTools(config.Name)
+	}
+	server := &managedServer{
+		name:              config.Name,
+		scope:             ScopeDynamic,
+		config:            config.Config,
+		transport:         config.Config.TransportKind(),
+		state:             StatePending,
+		sourceConnectorID: connectorID,
+	}
+	m.servers[config.Name] = server
+	m.mu.Unlock()
+
+	m.logger.Debugf("mcp server %q injected from connector %s", config.Name, connectorID)
+	go m.connectLoop(context.Background(), server)
+}
+
+// RemoveDynamic removes a server entry added via InjectDynamic. It closes
+// the session, unregisters any tools, and removes the entry from the manager.
+// The connectorID parameter ensures only the owning connector can remove its
+// servers.
+func (m *Manager) RemoveDynamic(connectorID, serverName string) {
+	m.mu.Lock()
+	server, ok := m.servers[serverName]
+	if !ok {
+		m.mu.Unlock()
+		return
+	}
+	if server.sourceConnectorID != connectorID {
+		m.mu.Unlock()
+		m.logger.Warnf("refusing to remove server %q: owned by connector %s, not %s", serverName, server.sourceConnectorID, connectorID)
+		return
+	}
+	if server.cancelCtx != nil {
+		server.cancelCtx()
+	}
+	if server.session != nil {
+		_ = server.session.Close()
+	}
+	delete(m.servers, serverName)
+	m.mu.Unlock()
+
+	m.unregisterTools(serverName)
+	if m.onToolsChanged != nil {
+		m.onToolsChanged(serverName)
+	}
+	m.logger.Debugf("mcp server %q removed (connector %s)", serverName, connectorID)
 }
 
 // Shutdown closes every connection. Used by tests and on graceful host

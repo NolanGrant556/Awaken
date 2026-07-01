@@ -2,6 +2,7 @@ package skills
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -21,24 +22,44 @@ const maxSkillsPerServer = 100
 // SkillRegistry to match the current set of MCP prompts and prompt-typed
 // resources. It is safe for concurrent use.
 type Bridge struct {
+	mcpManager McpBridgeManager
+
 	// debounceMu protects the debounce map.
 	debounceMu   sync.Mutex
 	debounce     map[string]*time.Timer
-	debounceDone map[string]chan struct{}
+	debounceCancel map[string]context.CancelFunc
 
 	logger Logger
 }
 
-// NewBridge creates a Bridge with the given logger.
-func NewBridge(logger Logger) *Bridge {
+// NewBridge creates a Bridge with the given logger and MCP manager.
+func NewBridge(logger Logger, mcpManager McpBridgeManager) *Bridge {
 	if logger == nil {
 		logger = noopLogger{}
 	}
 	return &Bridge{
-		debounce:     make(map[string]*time.Timer),
-		debounceDone: make(map[string]chan struct{}),
-		logger:       logger,
+		mcpManager:     mcpManager,
+		debounce:       make(map[string]*time.Timer),
+		debounceCancel: make(map[string]context.CancelFunc),
+		logger:         logger,
 	}
+}
+
+// FetchPromptBody implements McpBodyFetcher. It fetches the prompt template
+// body from the MCP server at execution time.
+func (b *Bridge) FetchPromptBody(ctx context.Context, serverName, promptName string) (string, error) {
+	session, err := b.mcpManager.Session(serverName)
+	if err != nil {
+		return "", fmt.Errorf("mcp_fetch_failed: server=%s prompt=%s: %w", serverName, promptName, err)
+	}
+	result, err := session.GetPrompt(ctx, &mcp.GetPromptParams{
+		Name:      promptName,
+		Arguments: nil,
+	})
+	if err != nil {
+		return "", fmt.Errorf("mcp_fetch_failed: server=%s prompt=%s: %w", serverName, promptName, err)
+	}
+	return result.Description, nil
 }
 
 // McpBridgeManager is the subset of mcpclient.Manager that the bridge needs.
@@ -88,15 +109,15 @@ func (b *Bridge) debounceSync(ctx context.Context, mcpManager McpBridgeManager, 
 	if t, ok := b.debounce[serverName]; ok {
 		t.Stop()
 	}
-	if done, ok := b.debounceDone[serverName]; ok {
-		close(done)
+	if cancel, ok := b.debounceCancel[serverName]; ok {
+		cancel() // idempotent — context.WithCancel is safe to call multiple times
 	}
 
-	done := make(chan struct{})
-	b.debounceDone[serverName] = done
+	debounceCtx, cancel := context.WithCancel(ctx)
+	b.debounceCancel[serverName] = cancel
 	timer := time.AfterFunc(300*time.Millisecond, func() {
-		defer close(done)
-		b.syncForServer(ctx, mcpManager, registry, serverName)
+		defer cancel()
+		b.syncForServer(debounceCtx, mcpManager, registry, serverName)
 	})
 	b.debounce[serverName] = timer
 	b.debounceMu.Unlock()
@@ -136,7 +157,7 @@ func (b *Bridge) syncForServer(ctx context.Context, mcpManager McpBridgeManager,
 				b.logger.Warnf("bridge: server %q has more than %d prompts; truncating", serverName, maxSkillsPerServer)
 				break
 			}
-			skill := promptToSkill(serverName, prompt, sourceConnectorID)
+			skill := b.promptToSkill(serverName, prompt, sourceConnectorID)
 			bridged = append(bridged, skill)
 		}
 	}
@@ -155,7 +176,7 @@ func (b *Bridge) syncForServer(ctx context.Context, mcpManager McpBridgeManager,
 				b.logger.Warnf("bridge: server %q has more than %d skills (prompts+resources); truncating", serverName, maxSkillsPerServer)
 				break
 			}
-			skill := resourceToSkill(serverName, res, sourceConnectorID)
+			skill := b.resourceToSkill(serverName, res, sourceConnectorID)
 			bridged = append(bridged, skill)
 		}
 	}
@@ -180,7 +201,7 @@ func (b *Bridge) syncForServer(ctx context.Context, mcpManager McpBridgeManager,
 }
 
 // promptToSkill converts an MCP Prompt to a SkillDefinition.
-func promptToSkill(serverName string, prompt *mcp.Prompt, sourceConnectorID string) *SkillDefinition {
+func (b *Bridge) promptToSkill(serverName string, prompt *mcp.Prompt, sourceConnectorID string) *SkillDefinition {
 	name := toKebab(prompt.Name)
 	skillID := "mcp__" + serverName + "__" + name
 
@@ -217,6 +238,7 @@ func promptToSkill(serverName string, prompt *mcp.Prompt, sourceConnectorID stri
 		RequiredConnectors: connectors,
 		Source:             SourceMcp,
 		State:              StateAvailable,
+				BodyFetcher:        b,
 		McpBinding: &McpBinding{
 			ServerName: serverName,
 			PromptName: prompt.Name,
@@ -226,7 +248,7 @@ func promptToSkill(serverName string, prompt *mcp.Prompt, sourceConnectorID stri
 }
 
 // resourceToSkill converts an MCP Resource with mimeType "text/x-prompt" to a SkillDefinition.
-func resourceToSkill(serverName string, res *mcp.Resource, sourceConnectorID string) *SkillDefinition {
+func (b *Bridge) resourceToSkill(serverName string, res *mcp.Resource, sourceConnectorID string) *SkillDefinition {
 	slug := resourceSlug(res.URI)
 	name := toKebab(slug)
 	skillID := "mcp__" + serverName + "__" + name
@@ -256,6 +278,7 @@ func resourceToSkill(serverName string, res *mcp.Resource, sourceConnectorID str
 		RequiredConnectors: connectors,
 		Source:             SourceMcp,
 		State:              StateAvailable,
+				BodyFetcher:        b,
 		McpBinding: &McpBinding{
 			ServerName: serverName,
 			PromptName: slug,

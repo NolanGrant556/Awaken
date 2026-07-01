@@ -42,6 +42,8 @@ type ApprovalRequest struct {
 	ToolDefinition tool.ToolDefinition
 	// RiskHints carries the risk profile for the approval UI.
 	RiskHints *tool.RiskHints
+	// AllowedActions are the actions the user can take on this approval.
+	AllowedActions []string
 }
 
 type ApprovalAwaiter interface {

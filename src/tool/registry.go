@@ -117,6 +117,17 @@ func ValidateTool(tool Tool) error {
 			return fmt.Errorf("%w: parameter %q has invalid JSON Schema type %q", ErrInvalidTool, param.Name, param.Type)
 		}
 	}
+	// Validate ToolDefinition has required fields.
+	def := tool.Definition()
+	if def.Name == "" {
+		return fmt.Errorf("%w: ToolDefinition.Name is required", ErrInvalidTool)
+	}
+	if def.Source == "" {
+		return fmt.Errorf("%w: ToolDefinition.Source is required", ErrInvalidTool)
+	}
+	if def.Description == "" {
+		return fmt.Errorf("%w: ToolDefinition.Description is required", ErrInvalidTool)
+	}
 	return nil
 }
 

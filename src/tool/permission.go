@@ -44,7 +44,7 @@ func DecideWithOverride(ctx context.Context, def ToolDefinition, overrides map[s
 
 	// Default rules based on annotations
 	if def.Annotations.ReadOnly {
-		return AllowPermission()
+			return AllowPermission()
 	}
 
 	if def.Annotations.RequiresAuth {
@@ -65,17 +65,30 @@ func DecideWithOverride(ctx context.Context, def ToolDefinition, overrides map[s
 	})
 }
 
+// DecideWithServerCheck is like Decide but accepts a server state callback.
+// When the decision is "deny" with reason "needs_auth" and the server is
+// actually connected, the decision is overridden to allow.
+func DecideWithServerCheck(ctx context.Context, def ToolDefinition, serverConnected func(serverName string) bool) PermissionDecision {
+	decision := DecideWithOverride(ctx, def, nil)
+	if decision.Behavior == PermissionDeny && decision.Reason == "needs_auth" {
+		if serverConnected != nil && def.Annotations.ServerName != "" && serverConnected(def.Annotations.ServerName) {
+				return AllowPermission()
+		}
+	}
+	return decision
+}
+
 func policyToDecision(policy PermissionPolicy) PermissionDecision {
 	switch policy {
 	case PolicyAlwaysAllow:
-		return AllowPermission()
+			return AllowPermission()
 	case PolicyAlwaysAsk:
 		return AskPermission("user policy requires approval", ApprovalRequest{
 			Title:    "User policy override",
 			RiskTone: "warning",
 		})
 	default:
-		return AllowPermission()
+		return AskPermission("unimplemented policy: "+string(policy), ApprovalRequest{Title: "Policy not yet supported", RiskTone: "warning"})
 	}
 }
 

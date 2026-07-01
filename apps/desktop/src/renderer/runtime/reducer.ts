@@ -438,8 +438,7 @@ function appendFinalFileChangeSummary(
   artifacts: ArtifactRecord[],
   runId?: string,
 ): RunNarrativeState {
-  const fileArtifacts = artifacts.filter((artifact) => artifact.kind !== "a2ui_surface");
-  if (fileArtifacts.length === 0) {
+  if (artifacts.length === 0) {
     return narrative;
   }
 
@@ -447,7 +446,7 @@ function appendFinalFileChangeSummary(
   const item: RunNarrativeItem = {
     kind: "fileChange",
     id,
-    files: fileArtifacts.map((artifact) => ({
+    files: artifacts.map((artifact) => ({
       id: artifact.id,
       path: artifact.path,
       title: artifact.title || artifact.path || "File change",

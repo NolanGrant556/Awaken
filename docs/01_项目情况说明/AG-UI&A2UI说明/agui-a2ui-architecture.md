@@ -9,7 +9,7 @@
 - AG-UI 是 Awaken 对客户端输出的事件格式，不是本项目要运行的服务。
 - Awaken 不 vendor AG-UI 外部参考仓库，也不让 Agent Core 直接依赖 AG-UI structs。
 - 内部协议是 `AwakenEvent`；外部协议是 `src/protocol/agui` 输出的 AG-UI-compatible JSON events。
-- A2UI 当前只作为窄范围只读 generated surface payload。
+- A2UI 目前只作为外部参考，不存在 Awaken 运行时 payload、renderer 或 SDK 集成。
 - Awaken 保留自己的内部事件模型，位于 `src/agentcore`。
 - 协议 adapter 位于 `src/protocol`。
 - `Awaken Design System` 里的组件不知道 AG-UI、A2UI、SSE、Electron 或 Agent runtime。
@@ -170,7 +170,6 @@ src/agentcore/tool_runtime.go
 ToolRuntime decides ask
   -> ApprovalAwaiter.AwaitApproval
   -> runtime emits ApprovalRequested
-  -> runtime emits read-only a2ui_surface artifact
   -> desktop shows ApprovalCard
   -> user resolves approval
   -> POST /v1/runs/{run_id}/approvals/{approval_id}/resolve
@@ -180,43 +179,16 @@ ToolRuntime decides ask
 
 Artifact event 是 runtime 可见记录，不等于自动写文件，也不能当作可信可执行内容。
 
-## A2UI Evaluation Boundary
+## A2UI Reference Boundary
 
-当前 A2UI Go 代码：
+当前 Awaken 没有 A2UI runtime 实现：
 
-```text
-src/protocol/a2ui/surface.go
-```
+- 不生成 `a2ui_surface` artifact。
+- 不保留 Desktop A2UI parser 或 renderer。
+- 不执行 generated A2UI action。
+- 真正的 approval decision 只走 `ApprovalCard` 和 runtime resolve API。
 
-当前 desktop A2UI 代码：
-
-```text
-apps/desktop/src/renderer/a2ui/surface.ts
-apps/desktop/src/renderer/a2ui/A2UISurfaceView.tsx
-```
-
-当前 A2UI 行为：
-
-- Runtime 生成只读 approval surface artifact。
-- Artifact kind 是 `a2ui_surface`。
-- Payload 使用窄范围 v0.9-style JSON shape。
-- Desktop 只校验和渲染小白名单。
-- Generated surface action 不执行。
-- 真正的 approval decision 仍走 `ApprovalCard` 和 runtime resolve API。
-
-支持的 renderer 白名单：
-
-```text
-Card
-Column
-Row
-Text
-Badge
-KeyValue
-Button
-```
-
-没有明确产品需求前，不要把它扩成通用 renderer。
+没有明确产品需求前，不要重新引入 generated surface。
 
 ## Desktop Consumer Boundary
 

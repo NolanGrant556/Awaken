@@ -257,13 +257,6 @@ apps/desktop/
 | `projector.ts` | 把 AG-UI event 投影成 prompt、thinking、tool、approval、file、answer。 |
 | `index.ts` | run-narrative 出口。 |
 
-### 4.8 `src/renderer/a2ui/`
-
-| 文件 | 功能 |
-| --- | --- |
-| `surface.ts` | 解析只读 A2UI surface payload。 |
-| `A2UISurfaceView.tsx` | 渲染 A2UI surface 预览。 |
-
 ## 5. Go Runtime
 
 路径：
@@ -274,7 +267,7 @@ src/
 
 职责：
 
-Agent 执行核心、LLM provider、工具系统、runtime session、HTTP/SSE server、AG-UI/A2UI 协议适配。
+Agent 执行核心、LLM provider、工具系统、runtime session、HTTP/SSE server、AG-UI 协议适配。
 
 ### 5.1 `src/agentcore/`
 
@@ -348,7 +341,6 @@ Agent 执行核心、LLM provider、工具系统、runtime session、HTTP/SSE se
 | `agui/events.go` | AG-UI-compatible event 类型。 |
 | `agui/mapper.go` | AwakenEvent -> AG-UI event。 |
 | `agui/encoder.go` | JSON/SSE 编码。 |
-| `a2ui/surface.go` | approval 的只读 A2UI surface。 |
 
 ### 5.8 `src/tool/`
 

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
-	"awaken/src/protocol/a2ui"
 )
 
 type RunStatus string
@@ -244,7 +243,6 @@ func (s *Session) AwaitApproval(ctx context.Context, request agentcore.ApprovalR
 		ApprovalAffectedPaths: request.AffectedPaths,
 		ApprovalPatchSummary:  request.PatchSummary,
 	})
-	s.RecordAgentEvent(approvalSurfaceArtifactEvent(request))
 
 	select {
 	case decision := <-pending.decision:
@@ -254,35 +252,6 @@ func (s *Session) AwaitApproval(ctx context.Context, request agentcore.ApprovalR
 		delete(s.approvals, request.ID)
 		s.mu.Unlock()
 		return "", ctx.Err()
-	}
-}
-
-func approvalSurfaceArtifactEvent(request agentcore.ApprovalRequest) agentcore.AwakenEvent {
-	content, err := a2ui.ApprovalSurfaceJSON(a2ui.ApprovalSurfaceRequest{
-		ApprovalID:    request.ID,
-		Title:         request.Title,
-		Description:   request.Description,
-		RiskTone:      string(request.RiskTone),
-		ToolName:      request.ToolName,
-		ToolCallID:    request.ToolCallID,
-		AffectedPaths: request.AffectedPaths,
-		PatchSummary:  request.PatchSummary,
-	})
-	if err != nil {
-		content = ""
-	}
-
-	return agentcore.AwakenEvent{
-		Type:                agentcore.ArtifactCreatedEventType,
-		ApprovalID:          request.ID,
-		ToolCallID:          request.ToolCallID,
-		ToolName:            request.ToolName,
-		ArtifactID:          fmt.Sprintf("%s-a2ui-surface", request.ID),
-		ArtifactTitle:       "Generated approval surface",
-		ArtifactDescription: "Phase 5 read-only A2UI evaluation payload generated from the approval request.",
-		ArtifactKind:        a2ui.ArtifactKind,
-		ArtifactContent:     content,
-		ArtifactStatus:      agentcore.ArtifactStatusReady,
 	}
 }
 

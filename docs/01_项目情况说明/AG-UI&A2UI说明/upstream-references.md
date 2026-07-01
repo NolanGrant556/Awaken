@@ -97,8 +97,7 @@ Awaken 参考 A2UI 的目的：
 
 - 理解 generated UI surface 的概念。
 - 对照 component / catalog / data-binding 这类术语。
-- 参考只读 renderer boundary 的设计思路。
-- 理解 action handling 的风险，并解释为什么 Awaken 当前仍保留原生 approval 控制。
+- 理解 action handling 的风险，并解释为什么 Awaken 当前只保留原生 approval 控制。
 
 建议优先阅读的上游位置：
 
@@ -116,17 +115,9 @@ a2ui/renderers/web_core
 a2ui/specification/v0_9_1/README.md
 ```
 
-Awaken 内部对应实现位置：
-
-```text
-src/protocol/a2ui/surface.go                  # 窄范围只读 surface payload builder
-apps/desktop/src/renderer/a2ui/surface.ts     # desktop 侧 payload parser
-apps/desktop/src/renderer/a2ui/A2UISurfaceView.tsx
-```
-
 关键边界：
 
-- 当前 Awaken 的 A2UI 工作只是有限范围的只读 `a2ui_surface` artifact。
+- 当前 Awaken 没有 A2UI runtime payload、Desktop renderer 或 SDK 集成。
 - 不要用 generated A2UI actions 替代原生 approval 控制。
 - 除非项目边界被明确调整，否则不要添加 `@a2ui/*` 作为运行时依赖。
 - 不要把上游 renderer 源码复制进 Awaken。

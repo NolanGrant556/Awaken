@@ -35,7 +35,7 @@ Awaken 是一个本地优先的 Agent runtime 与桌面应用原型。当前仓�
 - 内部事件模型是 Awaken 自己的 `AwakenEvent`，位于 `src/agentcore`。
 - 对外 SSE 输出是 AG-UI-compatible JSON events，映射层位于 `src/protocol/agui`。
 - Desktop 可以消费 AG-UI-compatible events，但 `Awaken Design System` 组件不知道 AG-UI、SSE、Electron 或 runtime。
-- A2UI 当前只用于窄范围只读 `a2ui_surface` payload 评估，不是完整 A2UI SDK 集成，也不 vendor A2UI 项目。
+- A2UI 目前只作为外部参考，不存在运行时 payload、renderer 或 SDK 集成，也不 vendor A2UI 项目。
 
 ## 先读这里
 
@@ -48,7 +48,7 @@ README.md
 然后按任务继续读：
 
 - 需要项目文件职责总览：读 `docs/01_项目情况说明/项目文件清单/README.md`。
-- 改 runtime / protocol / AG-UI / A2UI：读 `docs/01_项目情况说明/AG-UI&A2UI说明/agui-a2ui-architecture.md`。
+- 改 runtime / protocol / AG-UI 边界：读 `docs/01_项目情况说明/AG-UI&A2UI说明/agui-a2ui-architecture.md`。
 - 需要对照 AG-UI / A2UI 上游：读 `docs/01_项目情况说明/AG-UI&A2UI说明/upstream-references.md`。
 - 改 desktop：以本 README 的入口契约、验收命令和 `apps/desktop/src` 下真实实现为准。
 - 改 Awaken Design System / UI 组件库：读 `Awaken Design System/README.md`。
@@ -79,8 +79,7 @@ git status --short
 │   ├── llm/                     # provider transport、streaming、native tool_calls
 │   ├── prompt/                  # system prompt 模板与 runtime metadata
 │   ├── protocol/
-│   │   ├── agui/                # AwakenEvent -> AG-UI-compatible events
-│   │   └── a2ui/                # 窄范围只读 generated surface payload
+│   │   └── agui/                # AwakenEvent -> AG-UI-compatible events
 │   ├── runtime/                 # run/session/event bus/cancel/approval
 │   ├── server/                  # 本地 HTTP routes 与 SSE
 │   ├── tool/                    # tool interface、registry、schema、permission model
@@ -121,7 +120,7 @@ AWAKEN_PATCH_UPDATED
 AWAKEN_TURN_DIFF
 ```
 
-approval request 还会生成一个只读的 `artifactKind: "a2ui_surface"` payload，用于 desktop generated surface 评估。
+approval request 只通过 `AWAKEN_APPROVAL_REQUESTED` / `AWAKEN_APPROVAL_RESOLVED` 和 Desktop 原生 `ApprovalCard` 完成，不再生成 generated surface payload。
 
 ## Coding Agent 接手规则
 
@@ -143,7 +142,6 @@ Awaken Desktop
 - `src/agentcore`：agent 执行循环、LLM request 组装、工具执行、内部 `AwakenEvent` 发射、workspace config、permission-aware `ToolRuntime`。
 - `src/runtime`：run/session 生命周期、事件历史与回放、取消、approval wait/resolve、runtime event dispatch。
 - `src/protocol/agui`：把内部 Awaken events 映射为 AG-UI-compatible JSON events。
-- `src/protocol/a2ui`：生成窄范围只读 approval surface payload；不是完整 A2UI renderer 或 SDK 集成。
 - `src/server`：本地 HTTP endpoints 与 SSE streams。
 - `src/tool` 和 `src/tools`：工具接口、schema generation、registry、permission decisions、内置工具实现。
 - `apps/desktop`：Electron + React Desktop consumer，通过 `window.awaken` bridge 消费 runtime。
@@ -162,7 +160,7 @@ Awaken Desktop
 - 不要 vendor AG-UI / A2UI 外部参考仓库，也不要把本机参考路径写进代码或配置。
 - 不要让 `apps/desktop` 拥有后端 policy。
 - 不要让 `Awaken Design System` 依赖 Electron 或 runtime API。
-- 不要用 generated A2UI surface 替代当前 approval UI。
+- 不要重新引入 generated A2UI approval surface 替代当前 approval UI。
 - 不要把 Gallery/mock state 当成真实 run 验收。
 - 不要提交 secrets、依赖目录或构建产物。
 - 不要清理无关 dirty files，不要回滚用户未提交改动。

@@ -7,10 +7,8 @@ import type {
 } from "react";
 import {
   CalendarClock,
-  Files,
   FolderPlus,
   GitBranch,
-  Globe,
   ListFilter,
   MessageCirclePlus,
   Monitor,
@@ -24,9 +22,7 @@ import {
   AwakenAssistantMessage as AssistantMessage,
   AwakenButton as Button,
   AwakenComposerBar as ComposerBar,
-  AwakenCopyButton as CopyButton,
   AwakenDialog as Dialog,
-  AwakenDisclosure as Disclosure,
   AwakenExecutionFeed as ExecutionFeed,
   AwakenFileChangeSummary as FileChangeSummary,
   AwakenLightInspectorRail as LightInspectorRail,
@@ -45,7 +41,6 @@ import {
   AwakenComposerDock as ComposerDock,
   type ComponentTone,
   type ComposerBarMetaItem,
-  type InspectorTabId,
   type NavItem,
   type PlatformKind,
   type ProjectItem,
@@ -59,8 +54,7 @@ import {
   type RuntimeAction,
 } from "./runtime/reducer";
 import type { ApprovalDecision } from "../shared/runtime";
-import { A2UISurfaceView } from "./a2ui/A2UISurfaceView";
-import type { InspectorSelection, RunNarrativeItem } from "./run-narrative";
+import type { RunNarrativeItem } from "./run-narrative";
 import {
   anchoredTurnMinHeight,
   activeTurnIdForAnchor,
@@ -93,6 +87,8 @@ import {
   workspaceLabelForPath,
   type WorkspaceProject,
 } from "./projectWorkspace";
+
+type InspectorTabId = "changes";
 
 function formatStatusLabel(
   phase: ReturnType<typeof createInitialRuntimeState>["phase"],
@@ -153,17 +149,15 @@ function sidebarStatusForThread(
   }
 }
 
-function defaultInspectorTab(selection?: InspectorSelection): InspectorTabId {
-  switch (selection?.kind) {
-    case "tool":
-      return "files";
-    case "artifact":
-    case "fileChange":
-    case "approval":
-      return "changes";
-    default:
-      return "changes";
+function formatTokenCount(value?: number): string | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
   }
+  if (value >= 1000) {
+    const amount = value / 1000;
+    return `${amount >= 10 ? amount.toFixed(0) : amount.toFixed(1)}k`;
+  }
+  return String(value);
 }
 
 function rawToolId(selectionId: string): string {
@@ -174,23 +168,6 @@ function rawToolId(selectionId: string): string {
     return selectionId.slice("explore:".length);
   }
   return selectionId;
-}
-
-function rawFileChangeId(selectionId: string): string {
-  return selectionId.startsWith("fileChange:")
-    ? selectionId.slice("fileChange:".length)
-    : selectionId;
-}
-
-function formatTokenCount(value?: number): string | undefined {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return undefined;
-  }
-  if (value >= 1000) {
-    const amount = value / 1000;
-    return `${amount >= 10 ? amount.toFixed(0) : amount.toFixed(1)}k`;
-  }
-  return String(value);
 }
 
 function contextUsageMeta(
@@ -340,7 +317,6 @@ export function App() {
   ]);
   const [threadProjectIds, setThreadProjectIds] = useState<Record<string, string>>({});
   const [inspectorTab, setInspectorTab] = useState<InspectorTabId>("changes");
-  const [inspectorSelection, setInspectorSelection] = useState<InspectorSelection | undefined>();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() =>
     readStoredNumber(
@@ -502,17 +478,8 @@ export function App() {
   }, [runtimeInfo, workspacePath]);
 
   useEffect(() => {
-    setInspectorSelection(undefined);
     setInspectorTab("changes");
   }, [runtimeState.runId, runtimeState.activeThreadId]);
-
-  useEffect(() => {
-    if (!runtimeState.narrative.inspectorSelection) {
-      return;
-    }
-    setInspectorSelection(runtimeState.narrative.inspectorSelection);
-    setInspectorTab(defaultInspectorTab(runtimeState.narrative.inspectorSelection));
-  }, [runtimeState.narrative.inspectorSelection]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent): void {
@@ -590,9 +557,6 @@ export function App() {
     workspacePath.trim() !== "" && /^([A-Za-z]:[\\/]|\/)/.test(workspacePath.trim());
 
   const activeApproval = runtimeState.approvals[0];
-  const a2uiArtifacts = runtimeState.artifacts.filter(
-    (artifact) => artifact.kind === "a2ui_surface",
-  );
   const navItems: NavItem[] = [
     {
       id: "automations",
@@ -693,36 +657,12 @@ export function App() {
   const activeProjectId = runtimeState.activeThreadId
     ? `thread:${runtimeState.activeThreadId}`
     : selectedProjectId;
-  const selectedToolResult =
-    inspectorSelection?.kind === "tool"
-      ? runtimeState.toolResults.find((tool) => tool.id === rawToolId(inspectorSelection.id))
-      : undefined;
-  const selectedArtifactId =
-    inspectorSelection?.kind === "artifact"
-      ? inspectorSelection.id
-      : inspectorSelection?.kind === "fileChange"
-        ? rawFileChangeId(inspectorSelection.id)
-        : undefined;
-  const selectedArtifact = selectedArtifactId
-    ? runtimeState.artifacts.find((artifact) => artifact.id === selectedArtifactId)
-    : undefined;
   const inspectorTabs = [
     {
       id: "changes" as const,
       label: "Changes",
       icon: <GitBranch size={16} strokeWidth={1.85} />,
       tone: "neutral" as const,
-    },
-    {
-      id: "browser" as const,
-      label: "Browser",
-      icon: <Globe size={16} strokeWidth={1.85} />,
-    },
-    {
-      id: "files" as const,
-      label: "Files",
-      badge: runtimeState.artifacts.length || undefined,
-      icon: <Files size={16} strokeWidth={1.85} />,
     },
   ];
   const showCenterComposer = shouldUseCenterComposer({
@@ -745,11 +685,6 @@ export function App() {
     railHeight: Math.max(0, runStageViewportHeightPx - 28 - Math.max(28, composerSafeAreaPx)),
   });
   const showTurnMarkerRail = turnMarkerDisplay.mode !== "hidden";
-
-  function selectInspector(selection: InspectorSelection, tabId = defaultInspectorTab(selection)): void {
-    setInspectorSelection(selection);
-    setInspectorTab(tabId);
-  }
 
   function createSubscribeHandlers(): SubscribeHandlers {
     return {
@@ -1694,103 +1629,12 @@ export function App() {
     return output || fallback || result;
   }
 
-  function renderInspectorEmpty(title: string, detail: string) {
-    return (
-      <div className="inspector-empty-state inspector-empty-state-quiet">
-        <strong>{title}</strong>
-        <p>{detail}</p>
-      </div>
-    );
-  }
-
-  function renderInspectorCopy(text: string, label: string) {
-    if (!text) {
-      return null;
-    }
-    return (
-      <div className="inspector-copy-row">
-        <CopyButton text={text} label={label} />
-      </div>
-    );
-  }
-
-  function renderToolDetail(tool = selectedToolResult) {
-    if (!tool) {
-      return null;
-    }
-    const toolOutput = [
-      "args:",
-      tool.args || "No tool args captured.",
-      "",
-      "command output:",
-      tool.commandOutput || "No command output captured.",
-      tool.commandOutputTruncated ? "[command output truncated]" : "",
-      "",
-      "result:",
-      tool.content || "No tool result captured.",
-    ]
-      .filter((line, index, lines) => line !== "" || lines[index - 1] !== "")
-      .join("\n");
-    return (
-      <article className="inspector-item inspector-item-selected">
-        <Disclosure title={tool.title} meta={tool.status || "done"} defaultOpen>
-          {renderInspectorCopy(toolOutput, "Copy tool output")}
-          <pre>{toolOutput}</pre>
-        </Disclosure>
-      </article>
-    );
-  }
-
   function renderChangesPane() {
-    return null;
-  }
-
-  function renderBrowserPane() {
-    return renderInspectorEmpty(
-      "Browser unavailable",
-      "No browser runtime is attached to this run yet.",
-    );
-  }
-
-  function renderFilesPane() {
-    if (selectedToolResult) {
-      return (
-        <section className="inspector-section">
-          <div className="inspector-section-head">
-            <h2>Tool File Output</h2>
-            <span>{selectedToolResult.status || "done"}</span>
-          </div>
-          {renderToolDetail(selectedToolResult)}
-        </section>
-      );
-    }
-
-    if (selectedArtifact) {
-      return (
-        <section className="inspector-section">
-          <div className="inspector-section-head">
-            <h2>File</h2>
-            <span>{selectedArtifact.status}</span>
-          </div>
-          <article className="inspector-item inspector-item-selected">
-            <strong>{selectedArtifact.title}</strong>
-            <span>{selectedArtifact.path || selectedArtifact.kind}</span>
-            {renderInspectorCopy(selectedArtifact.path || "", "Copy path")}
-            <pre>{selectedArtifact.content || "No file content captured."}</pre>
-          </article>
-        </section>
-      );
-    }
-
     return null;
   }
 
   function renderInspectorTabPanel() {
     switch (inspectorTab) {
-      case "browser":
-        return renderBrowserPane();
-      case "files":
-        return renderFilesPane();
       case "changes":
       default:
         return renderChangesPane();
@@ -2108,24 +1952,6 @@ export function App() {
                     onSelect={(id) => setInspectorTab(id as InspectorTabId)}
                   >
                     {renderInspectorTabPanel()}
-
-                    {a2uiArtifacts.length > 0 ? (
-                      <section className="inspector-section">
-                        <div className="inspector-section-head">
-                          <h2>A2UI</h2>
-                          <span>{a2uiArtifacts.length}</span>
-                        </div>
-                        <div className="a2ui-stack">
-                          {a2uiArtifacts.map((artifact) => (
-                            <A2UISurfaceView
-                              key={artifact.id}
-                              title={artifact.title}
-                              content={artifact.content}
-                            />
-                          ))}
-                        </div>
-                      </section>
-                    ) : null}
                   </LightInspectorRail>
                 }
               />

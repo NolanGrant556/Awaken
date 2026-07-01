@@ -1331,7 +1331,6 @@ func TestResolveApprovalEndpointPublishesExtensionEvents(t *testing.T) {
 		"AWAKEN_APPROVAL_REQUESTED",
 		"AWAKEN_APPROVAL_RESOLVED",
 		"AWAKEN_ARTIFACT_CREATED",
-		`"artifactKind":"a2ui_surface"`,
 		`"approvalId":"approval-1"`,
 		`"artifactId":"artifact-1"`,
 		"RUN_FINISHED",

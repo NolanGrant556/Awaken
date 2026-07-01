@@ -1,5 +1,9 @@
 import React from "react";
-import { AwakenComposerBar, shouldSubmitComposerInputKey } from "@awaken/design-system";
+import {
+  AwakenComposerBar,
+  AwakenUserPromptBlock,
+  shouldSubmitComposerInputKey,
+} from "@awaken/design-system";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
@@ -20,15 +24,20 @@ import {
   groupNarrativeByTurns,
   isNearLatestTurnOutputTail,
   isNearScrollBottom,
+  latestTurnMinHeightBottomReserve,
+  latestTurnPromptAnchorSlack,
   resolvedDecisionForApproval,
   scrollTopForLatestTurnScrollTail,
   scrollTopForPromptAnchor,
+  shouldCancelPendingPromptAnchorForScrollIntent,
+  shouldFollowLatestTurnScrollTail,
   shouldPauseLatestOutputFollowForScroll,
   shouldPauseLatestOutputFollowForTouchMove,
   shouldPauseLatestOutputFollowForWheel,
   shouldRequestLatestOutputFollowResumeForTouchMove,
   shouldRequestLatestOutputFollowResumeForWheel,
   shouldResumeLatestOutputFollow,
+  shouldShowAssistantAnswerFooter,
   shouldShowTurnMarkerRail,
   shouldUseCenterComposer,
   turnMarkerRailDisplay,
@@ -96,6 +105,15 @@ describe("AwakenComposerInput keyboard behavior", () => {
   });
 });
 
+describe("assistant answer footer contract", () => {
+  it("shows final answer actions only for completed final answers", () => {
+    expect(shouldShowAssistantAnswerFooter({ status: "done", isFinal: true })).toBe(true);
+    expect(shouldShowAssistantAnswerFooter({ status: "done" })).toBe(false);
+    expect(shouldShowAssistantAnswerFooter({ status: "active", isFinal: true })).toBe(false);
+    expect(shouldShowAssistantAnswerFooter({ status: "error", isFinal: true })).toBe(false);
+  });
+});
+
 describe("AwakenComposerBar layout contract", () => {
   it("keeps dock input at one row while center keeps the homepage row budget", () => {
     const baseProps = {
@@ -115,6 +133,39 @@ describe("AwakenComposerBar layout contract", () => {
     expect(dockHtml).toContain('rows="1"');
     expect(centerHtml).toContain("composer-bar-center");
     expect(centerHtml).toContain('rows="3"');
+  });
+});
+
+describe("AwakenUserPromptBlock layout contract", () => {
+  it("renders the prompt bubble as a collapsed expandable surface", () => {
+    const html = renderToString(
+      React.createElement(AwakenUserPromptBlock, {
+        text: "1. First line\n2. Second line\n3. Third line\n4. Fourth line",
+      }),
+    );
+
+    expect(html).toContain("execution-prompt-block-limited");
+    expect(html).toContain("execution-prompt-bubble");
+    expect(html).toContain("execution-prompt-bubble-text");
+    expect(html).toContain("<p");
+    expect(html).toContain('role="button"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain("4. Fourth line");
+  });
+
+  it("keeps short prompt bubbles non-expandable", () => {
+    const html = renderToString(
+      React.createElement(AwakenUserPromptBlock, {
+        text: "One short prompt",
+      }),
+    );
+
+    expect(html).toContain("execution-prompt-bubble");
+    expect(html).toContain("execution-prompt-bubble-text");
+    expect(html).toContain("<p");
+    expect(html).not.toContain("execution-prompt-block-limited");
+    expect(html).not.toContain('role="button"');
+    expect(html).not.toContain("aria-expanded");
   });
 });
 
@@ -410,6 +461,75 @@ describe("App workbench presentation", () => {
         bottomReserve: 124,
       }),
     ).toBe(516);
+    expect(
+      anchoredTurnMinHeight({
+        containerHeight: 640,
+        anchorOffset: 0,
+        bottomReserve: 72,
+      }),
+    ).toBe(568);
+  });
+
+  it("keeps prompt-only latest turns fully anchorable before output tail follow starts", () => {
+    expect(
+      latestTurnMinHeightBottomReserve({
+        hasBodyItems: false,
+        isPromptAnchorPending: true,
+        outputGap: 72,
+      }),
+    ).toBe(0);
+    expect(
+      latestTurnMinHeightBottomReserve({
+        hasBodyItems: true,
+        isPromptAnchorPending: true,
+        outputGap: 72,
+      }),
+    ).toBe(0);
+    expect(
+      latestTurnMinHeightBottomReserve({
+        hasBodyItems: false,
+        isPromptAnchorPending: false,
+        outputGap: 72,
+      }),
+    ).toBe(0);
+    expect(
+      latestTurnMinHeightBottomReserve({
+        hasBodyItems: true,
+        isPromptAnchorPending: false,
+        outputGap: 72,
+      }),
+    ).toBe(72);
+  });
+
+  it("adds temporary anchor slack only before latest output body exists", () => {
+    expect(
+      latestTurnPromptAnchorSlack({
+        hasBodyItems: false,
+        isPromptAnchorPending: true,
+        outputGap: 72,
+      }),
+    ).toBe(72);
+    expect(
+      latestTurnPromptAnchorSlack({
+        hasBodyItems: true,
+        isPromptAnchorPending: true,
+        outputGap: 72,
+      }),
+    ).toBe(72);
+    expect(
+      latestTurnPromptAnchorSlack({
+        hasBodyItems: false,
+        isPromptAnchorPending: false,
+        outputGap: 72,
+      }),
+    ).toBe(72);
+    expect(
+      latestTurnPromptAnchorSlack({
+        hasBodyItems: true,
+        isPromptAnchorPending: false,
+        outputGap: 72,
+      }),
+    ).toBe(0);
   });
 
   it("uses the same native bottom target for programmatic follow and manual scroll bottom", () => {
@@ -427,6 +547,40 @@ describe("App workbench presentation", () => {
         maxScrollTop: 320,
       }),
     ).toBe(320);
+  });
+
+  it("follows the latest turn tail after prompt anchoring and body output exist", () => {
+    expect(
+      shouldFollowLatestTurnScrollTail({
+        hasBodyItems: false,
+        isPromptAnchorPending: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldFollowLatestTurnScrollTail({
+        hasBodyItems: true,
+        isPromptAnchorPending: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldFollowLatestTurnScrollTail({
+        hasBodyItems: true,
+        isPromptAnchorPending: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps layout scroll from cancelling the pending prompt anchor", () => {
+    expect(
+      shouldCancelPendingPromptAnchorForScrollIntent({
+        hasDirectUserInput: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldCancelPendingPromptAnchorForScrollIntent({
+        hasDirectUserInput: true,
+      }),
+    ).toBe(true);
   });
 
   it("detects whether the user is still following the latest output", () => {
@@ -523,6 +677,7 @@ describe("App workbench presentation", () => {
       shouldResumeLatestOutputFollow({
         isPausedByUser: true,
         isNearTail: true,
+        isAtScrollBottom: true,
         hasResumeIntent: false,
       }),
     ).toBe(false);
@@ -530,6 +685,15 @@ describe("App workbench presentation", () => {
       shouldResumeLatestOutputFollow({
         isPausedByUser: true,
         isNearTail: true,
+        isAtScrollBottom: false,
+        hasResumeIntent: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldResumeLatestOutputFollow({
+        isPausedByUser: true,
+        isNearTail: true,
+        isAtScrollBottom: true,
         hasResumeIntent: true,
       }),
     ).toBe(true);
@@ -537,6 +701,7 @@ describe("App workbench presentation", () => {
       shouldResumeLatestOutputFollow({
         isPausedByUser: false,
         isNearTail: true,
+        isAtScrollBottom: false,
         hasResumeIntent: false,
       }),
     ).toBe(true);

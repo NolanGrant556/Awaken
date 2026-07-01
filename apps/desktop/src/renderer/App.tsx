@@ -68,15 +68,20 @@ import {
   groupNarrativeByTurns,
   isNearLatestTurnOutputTail,
   isNearScrollBottom,
+  latestTurnMinHeightBottomReserve,
+  latestTurnPromptAnchorSlack,
   resolvedDecisionForApproval,
   scrollTopForLatestTurnScrollTail,
   scrollTopForPromptAnchor,
+  shouldCancelPendingPromptAnchorForScrollIntent,
+  shouldFollowLatestTurnScrollTail,
   shouldPauseLatestOutputFollowForScroll,
   shouldPauseLatestOutputFollowForTouchMove,
   shouldPauseLatestOutputFollowForWheel,
   shouldRequestLatestOutputFollowResumeForTouchMove,
   shouldRequestLatestOutputFollowResumeForWheel,
   shouldResumeLatestOutputFollow,
+  shouldShowAssistantAnswerFooter,
   shouldUseCenterComposer,
   turnMarkerRailDisplay,
   type ResolvedApprovalState,
@@ -211,16 +216,6 @@ function modelProfileLabel(profile: RuntimeModelProfileSummary): string {
 
 function modelProfileIcon(profile: RuntimeModelProfileSummary): string {
   return profile.displayName.trim().slice(0, 1) || "M";
-}
-
-function latestDoneAnswerId(items: RunNarrativeItem[]): string | undefined {
-  for (let index = items.length - 1; index >= 0; index -= 1) {
-    const item = items[index];
-    if (item.kind === "answer" && item.status === "done") {
-      return item.id;
-    }
-  }
-  return undefined;
 }
 
 function firstContentLine(value?: string): string | undefined {
@@ -366,7 +361,6 @@ export function App() {
   const latestTurn = narrativeSections.turns[narrativeSections.turns.length - 1];
   const latestPromptId = latestTurn ? latestTurn.id : undefined;
   const hasPromptNarrative = narrativeSections.turns.length > 0;
-  const fallbackFooterAnswerId = latestDoneAnswerId(visibleNarrativeItems);
   const composerContentInsetPx = hasPromptNarrative ? composerContentBottomInsetPx : 0;
   const composerOutputGapPx = hasPromptNarrative ? RUN_STAGE_COMPOSER_SAFE_GAP : 0;
   const composerSafeAreaPx = composerBottomSafeArea({
@@ -853,9 +847,7 @@ export function App() {
 
     const handleWheel = (event: WheelEvent) => {
       if (shouldPauseLatestOutputFollowForWheel({ deltaY: event.deltaY })) {
-        latestOutputFollowPausedByUserRef.current = true;
-        latestOutputFollowResumeIntentRef.current = false;
-        followLatestOutputRef.current = false;
+        pauseLatestOutputFollowForUser();
         return;
       }
       if (shouldRequestLatestOutputFollowResumeForWheel({ deltaY: event.deltaY })) {
@@ -863,9 +855,7 @@ export function App() {
       }
     };
     const handlePointerDown = () => {
-      latestOutputFollowPausedByUserRef.current = true;
-      latestOutputFollowResumeIntentRef.current = false;
-      followLatestOutputRef.current = false;
+      pauseLatestOutputFollowForUser();
     };
     const handleTouchStart = (event: TouchEvent) => {
       runStageTouchStartYRef.current = event.touches[0]?.clientY ?? null;
@@ -878,9 +868,7 @@ export function App() {
         currentY !== undefined &&
         shouldPauseLatestOutputFollowForTouchMove({ startY, currentY })
       ) {
-        latestOutputFollowPausedByUserRef.current = true;
-        latestOutputFollowResumeIntentRef.current = false;
-        followLatestOutputRef.current = false;
+        pauseLatestOutputFollowForUser();
         return;
       }
       if (
@@ -923,6 +911,10 @@ export function App() {
     return turnElements(element).find((turn) => turn.dataset.executionTurnId === turnId);
   }
 
+  function turnPromptAnchorElement(turn: HTMLElement): HTMLElement {
+    return turn.querySelector<HTMLElement>(".execution-turn-header") ?? turn;
+  }
+
   function activeTurnMarkerFromScroll(element: HTMLElement): string | undefined {
     const containerTop = element.getBoundingClientRect().top;
     const anchorY = containerTop + promptAnchorOffset(element) + 1;
@@ -945,6 +937,24 @@ export function App() {
     setActiveTurnMarkerId((current) => current === nextActiveId ? current : nextActiveId);
   }
 
+  function pauseLatestOutputFollowForUser(): void {
+    if (shouldCancelPendingPromptAnchorForScrollIntent({ hasDirectUserInput: true })) {
+      pendingPromptAnchorRef.current = false;
+    }
+    latestOutputFollowPausedByUserRef.current = true;
+    latestOutputFollowResumeIntentRef.current = false;
+    followLatestOutputRef.current = false;
+  }
+
+  function pauseLatestOutputFollowForScroll(): void {
+    if (shouldCancelPendingPromptAnchorForScrollIntent({ hasDirectUserInput: false })) {
+      pendingPromptAnchorRef.current = false;
+    }
+    latestOutputFollowPausedByUserRef.current = true;
+    latestOutputFollowResumeIntentRef.current = false;
+    followLatestOutputRef.current = false;
+  }
+
   function latestTurnOutputBottom(turn: HTMLElement): number {
     const body = turn.querySelector<HTMLElement>(".execution-turn-body");
     const latestBodyItem = body?.lastElementChild;
@@ -960,19 +970,37 @@ export function App() {
     return (header ?? turn).getBoundingClientRect().bottom;
   }
 
+  function turnHasBodyItems(turn: HTMLElement): boolean {
+    const body = turn.querySelector<HTMLElement>(".execution-turn-body");
+    return Boolean(body?.firstElementChild);
+  }
+
   function measureLatestTurnMinHeight(promptId: string): void {
     const element = runStageScrollRef.current;
-    if (!element || !findTurnElement(element, promptId)) {
+    const turn = element ? findTurnElement(element, promptId) : null;
+    if (!element || !turn) {
       setLatestTurnMinHeightPx(0);
       return;
     }
+
+    const bottomReserve = latestTurnMinHeightBottomReserve({
+      hasBodyItems: turnHasBodyItems(turn),
+      isPromptAnchorPending: pendingPromptAnchorRef.current,
+      outputGap: composerOutputGapPx,
+    });
+    const promptAnchorSlack = latestTurnPromptAnchorSlack({
+      hasBodyItems: turnHasBodyItems(turn),
+      isPromptAnchorPending: pendingPromptAnchorRef.current,
+      outputGap: composerOutputGapPx,
+    });
 
     setLatestTurnMinHeightPx(
       Math.ceil(
         anchoredTurnMinHeight({
           containerHeight: element.clientHeight,
           anchorOffset: promptAnchorOffset(element),
-        }),
+          bottomReserve,
+        }) + promptAnchorSlack,
       ),
     );
   }
@@ -1005,7 +1033,7 @@ export function App() {
     }
 
     const elementRect = element.getBoundingClientRect();
-    const turnRect = turn.getBoundingClientRect();
+    const turnRect = turnPromptAnchorElement(turn).getBoundingClientRect();
     scrollRunStageTo(
       element,
       scrollTopForPromptAnchor({
@@ -1023,7 +1051,17 @@ export function App() {
       return;
     }
 
-    if (!findTurnElement(element, promptId)) {
+    const turn = findTurnElement(element, promptId);
+    if (!turn) {
+      return;
+    }
+
+    if (
+      !shouldFollowLatestTurnScrollTail({
+        hasBodyItems: turnHasBodyItems(turn),
+        isPromptAnchorPending: pendingPromptAnchorRef.current,
+      })
+    ) {
       return;
     }
 
@@ -1039,9 +1077,7 @@ export function App() {
   }
 
   function handleTurnMarkerClick(turnId: string): void {
-    latestOutputFollowPausedByUserRef.current = true;
-    latestOutputFollowResumeIntentRef.current = false;
-    followLatestOutputRef.current = false;
+    pauseLatestOutputFollowForUser();
     setActiveTurnMarkerId(turnId);
     scrollPromptToAnchor(turnId);
   }
@@ -1084,9 +1120,7 @@ export function App() {
         nextScrollTop,
       })
     ) {
-      latestOutputFollowPausedByUserRef.current = true;
-      latestOutputFollowResumeIntentRef.current = false;
-      followLatestOutputRef.current = false;
+      pauseLatestOutputFollowForScroll();
       return;
     }
 
@@ -1106,11 +1140,14 @@ export function App() {
     });
     const wasFollowingLatestOutput = followLatestOutputRef.current;
     const hadResumeIntent = latestOutputFollowResumeIntentRef.current;
-    const canFollowLatestOutput = wasFollowingLatestOutput || hadResumeIntent || isAtScrollBottom;
+    const isPausedByUser = latestOutputFollowPausedByUserRef.current;
+    const canFollowLatestOutput =
+      wasFollowingLatestOutput || hadResumeIntent || (!isPausedByUser && isAtScrollBottom);
     const shouldResume = shouldResumeLatestOutputFollow({
-      isPausedByUser: latestOutputFollowPausedByUserRef.current,
+      isPausedByUser,
       isNearTail,
-      hasResumeIntent: hadResumeIntent || isAtScrollBottom,
+      isAtScrollBottom,
+      hasResumeIntent: hadResumeIntent,
     });
 
     if (shouldResume) {
@@ -1183,18 +1220,30 @@ export function App() {
       return;
     }
 
+    const shouldAnchorPrompt = pendingPromptAnchorRef.current;
+    const bottomReserve = latestTurnMinHeightBottomReserve({
+      hasBodyItems: turnHasBodyItems(turn),
+      isPromptAnchorPending: shouldAnchorPrompt,
+      outputGap: composerOutputGapPx,
+    });
+    const promptAnchorSlack = latestTurnPromptAnchorSlack({
+      hasBodyItems: turnHasBodyItems(turn),
+      isPromptAnchorPending: shouldAnchorPrompt,
+      outputGap: composerOutputGapPx,
+    });
     const nextMinHeight = Math.ceil(
       anchoredTurnMinHeight({
         containerHeight: element.clientHeight,
         anchorOffset: promptAnchorOffset(element),
-      }),
+        bottomReserve,
+      }) + promptAnchorSlack,
     );
     if (nextMinHeight !== latestTurnMinHeightPx) {
       setLatestTurnMinHeightPx(nextMinHeight);
       return;
     }
 
-    if (pendingPromptAnchorRef.current) {
+    if (shouldAnchorPrompt) {
       pendingPromptAnchorRef.current = false;
       scrollPromptToAnchor(latestPromptId);
       return;
@@ -1204,6 +1253,7 @@ export function App() {
       scrollLatestTurnToScrollTail(latestPromptId);
     }
   }, [
+    composerOutputGapPx,
     latestPromptId,
     latestTurnMinHeightPx,
     runtimeState.narrative,
@@ -1219,15 +1269,21 @@ export function App() {
       return;
     }
 
+    const turn = findTurnElement(element, latestPromptId);
+    if (!turn) {
+      return;
+    }
+
     const resizeObserver = new ResizeObserver(() => {
       measureLatestTurnMinHeight(latestPromptId);
     });
     resizeObserver.observe(element);
+    resizeObserver.observe(turn);
 
     return () => {
       resizeObserver.disconnect();
     };
-  }, [latestPromptId]);
+  }, [composerOutputGapPx, latestPromptId]);
 
   useEffect(() => {
     return () => {
@@ -1324,6 +1380,7 @@ export function App() {
     latestOutputFollowResumeIntentRef.current = false;
     setLatestTurnMinHeightPx(0);
     dispatch({ type: "run/requested", prompt, startedAtMs: Date.now() });
+    setComposerValue("");
 
     try {
       const runProjectId = selectedProjectId;
@@ -1356,9 +1413,9 @@ export function App() {
         createSubscribeHandlers(),
       );
       unsubscribeRef.current = unsubscribe;
-      setComposerValue("");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to create run";
+      setComposerValue(prompt);
       dispatch({ type: "run/createFailed", message });
     }
   }
@@ -1660,9 +1717,10 @@ export function App() {
       );
     }
     if (item.kind === "answer") {
-      const showAnswerFooter =
-        item.status === "done" &&
-        (item.isFinal === true || (!isBusy && item.id === fallbackFooterAnswerId));
+      const showAnswerFooter = shouldShowAssistantAnswerFooter({
+        status: item.status,
+        isFinal: item.isFinal,
+      });
       return (
         <AssistantMessage
           key={key}

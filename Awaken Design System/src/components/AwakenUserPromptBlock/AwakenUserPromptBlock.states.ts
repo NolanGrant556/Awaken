@@ -27,7 +27,7 @@ export const AwakenUserPromptBlockStates: AwakenUserPromptBlockState[] = [
     label: "长提示",
     props: {
       text:
-        "请基于真实组件实现写清楚用途、使用场景和父子责任边界，不要只根据组件名猜测，也不要改组件实现文件或 Gallery 框架。",
+        "1. 读取当前组件实现\n2. 对照运行叙事结构\n3. 保留中间区域布局\n4. 检查气泡默认高度\n5. 点击后展开更多内容\n6. 滚动条只出现在气泡内部\n7. 不增加额外说明文字\n8. 不改 runtime 逻辑\n9. 继续观察边界\n10. 验证最终视觉效果\n11. 确认不会遮挡输入框\n12. 输出简短结论",
     } as unknown as Partial<ComponentProps<typeof AwakenUserPromptBlock>>,
   },
 ];

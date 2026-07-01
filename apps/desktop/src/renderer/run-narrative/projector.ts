@@ -97,7 +97,7 @@ export function projectAguiEventToNarrative(
     case "TEXT_MESSAGE_CONTENT":
       return appendAnswer(base, event.delta ?? "", event);
     case "TEXT_MESSAGE_END":
-      return commitMatchingActive(base, answerId(event), "done");
+      return commitMatchingActiveAnswer(base, event, "done");
     case "TOOL_CALL_START":
       if (isReadOnlyToolEvent(event)) {
         return updateExploringAction(base, event, "active", "Tool invocation started");
@@ -248,6 +248,20 @@ function commitMatchingActive(
   return commitActive(state, status);
 }
 
+function commitMatchingActiveAnswer(
+  state: RunNarrativeState,
+  event: AguiEvent,
+  status: "done" | "error",
+): RunNarrativeState {
+  if (
+    state.activeItem?.kind !== "answer" ||
+    !isAnswerSegmentId(state.activeItem.id, answerBaseId(event))
+  ) {
+    return state;
+  }
+  return commitActive(state, status);
+}
+
 function commitErrorAnswer(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
   return addRunErrorToNarrative(
     state,
@@ -321,8 +335,37 @@ function thinkingId(event: AguiEvent): string {
   return `thinking:${eventScopedId(event, event.messageId)}`;
 }
 
-function answerId(event: AguiEvent): string {
+function answerBaseId(event: AguiEvent): string {
   return `answer:${eventScopedId(event, event.messageId)}`;
+}
+
+function isAnswerSegmentId(id: string, baseId: string): boolean {
+  return id === baseId || id.startsWith(`${baseId}:segment:`);
+}
+
+function answerId(state: RunNarrativeState, event: AguiEvent): string {
+  const baseId = answerBaseId(event);
+  if (state.activeItem?.kind === "answer" && isAnswerSegmentId(state.activeItem.id, baseId)) {
+    return state.activeItem.id;
+  }
+
+  const usedIds = state.committedItems
+    .filter((item) => item.kind === "answer")
+    .map((item) => item.id)
+    .filter((id) => isAnswerSegmentId(id, baseId));
+
+  if (usedIds.length === 0) {
+    return baseId;
+  }
+
+  const usedIdSet = new Set(usedIds);
+  let segmentIndex = usedIds.length + 1;
+  let segmentId = `${baseId}:segment:${segmentIndex}`;
+  while (usedIdSet.has(segmentId)) {
+    segmentIndex += 1;
+    segmentId = `${baseId}:segment:${segmentIndex}`;
+  }
+  return segmentId;
 }
 
 function narrativeErrorMessage(event: AguiEvent): string {
@@ -546,11 +589,12 @@ function appendThinking(
 }
 
 function activateAnswer(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
+  const id = answerId(state, event);
   const item: RunNarrativeItem = {
     kind: "answer",
-    id: answerId(event),
+    id,
     markdown:
-      state.activeItem?.id === answerId(event) && state.activeItem.kind === "answer"
+      state.activeItem?.id === id && state.activeItem.kind === "answer"
         ? state.activeItem.markdown
         : "",
     status: "active",
@@ -563,7 +607,7 @@ function appendAnswer(
   delta: string,
   event: AguiEvent,
 ): RunNarrativeState {
-  const id = answerId(event);
+  const id = answerId(state, event);
   const current =
     state.activeItem?.id === id && state.activeItem.kind === "answer"
       ? state.activeItem.markdown

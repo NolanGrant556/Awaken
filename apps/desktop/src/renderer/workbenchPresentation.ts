@@ -89,6 +89,16 @@ export function shouldUseCenterComposer({
   return !hasNarrative && !hasRun && !hasNotice && !hasError && !needsRestart;
 }
 
+export function shouldShowAssistantAnswerFooter({
+  status,
+  isFinal,
+}: {
+  status: Extract<RunNarrativeItem, { kind: "answer" }>["status"];
+  isFinal?: boolean;
+}): boolean {
+  return status === "done" && isFinal === true;
+}
+
 export function shouldShowTurnMarkerRail({
   showCenterComposer,
   turnCount,
@@ -341,12 +351,60 @@ export function anchoredTurnMinHeight({
   return Math.max(0, containerHeight - anchorOffset - Math.max(0, bottomReserve));
 }
 
+export function latestTurnMinHeightBottomReserve({
+  hasBodyItems,
+  isPromptAnchorPending,
+  outputGap,
+}: {
+  hasBodyItems: boolean;
+  isPromptAnchorPending: boolean;
+  outputGap: number;
+}): number {
+  if (isPromptAnchorPending || !hasBodyItems) {
+    return 0;
+  }
+  return Math.max(0, outputGap);
+}
+
+export function latestTurnPromptAnchorSlack({
+  hasBodyItems,
+  isPromptAnchorPending,
+  outputGap,
+}: {
+  hasBodyItems: boolean;
+  isPromptAnchorPending: boolean;
+  outputGap: number;
+}): number {
+  if (isPromptAnchorPending || !hasBodyItems) {
+    return Math.max(0, outputGap);
+  }
+  return 0;
+}
+
 export function scrollTopForLatestTurnScrollTail({
   maxScrollTop,
 }: {
   maxScrollTop: number;
 }): number {
   return Math.max(0, maxScrollTop);
+}
+
+export function shouldFollowLatestTurnScrollTail({
+  hasBodyItems,
+  isPromptAnchorPending,
+}: {
+  hasBodyItems: boolean;
+  isPromptAnchorPending: boolean;
+}): boolean {
+  return hasBodyItems && !isPromptAnchorPending;
+}
+
+export function shouldCancelPendingPromptAnchorForScrollIntent({
+  hasDirectUserInput,
+}: {
+  hasDirectUserInput: boolean;
+}): boolean {
+  return hasDirectUserInput;
 }
 
 export function isNearLatestTurnOutputTail({
@@ -438,10 +496,12 @@ export function shouldRequestLatestOutputFollowResumeForTouchMove({
 export function shouldResumeLatestOutputFollow({
   isPausedByUser,
   isNearTail,
+  isAtScrollBottom,
   hasResumeIntent,
 }: {
   isPausedByUser: boolean;
   isNearTail: boolean;
+  isAtScrollBottom: boolean;
   hasResumeIntent: boolean;
 }): boolean {
   if (!isNearTail) {
@@ -450,5 +510,5 @@ export function shouldResumeLatestOutputFollow({
   if (!isPausedByUser) {
     return true;
   }
-  return hasResumeIntent;
+  return hasResumeIntent && isAtScrollBottom;
 }

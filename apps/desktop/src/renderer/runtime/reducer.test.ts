@@ -368,6 +368,69 @@ describe("runtime reducer run narrative projection", () => {
     expect(state.narrative.activeItem).toBeUndefined();
   });
 
+  it("keeps assistant text segments when a reused message id is interrupted by tools", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "Investigate" },
+      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
+      runEvent({ type: "RUN_STARTED", seq: 1, runId: "run-1" }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        seq: 2,
+        runId: "run-1",
+        messageId: "m1",
+        delta: "我先看文件。",
+      }),
+      runEvent({
+        type: "TOOL_CALL_START",
+        seq: 3,
+        runId: "run-1",
+        toolCallId: "read-1",
+        toolCallName: "read_file",
+      }),
+      runEvent({
+        type: "TOOL_CALL_RESULT",
+        seq: 4,
+        runId: "run-1",
+        toolCallId: "read-1",
+        toolCallName: "read_file",
+        content: "package main",
+      }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        seq: 5,
+        runId: "run-1",
+        messageId: "m1",
+        delta: "最终总结。",
+      }),
+      runEvent({ type: "RUN_FINISHED", seq: 6, runId: "run-1", result: "done" }),
+    ]);
+
+    const answers = state.narrative.committedItems.filter((item) => item.kind === "answer");
+
+    expect(answers).toEqual([
+      {
+        kind: "answer",
+        id: "answer:run-1:m1",
+        markdown: "我先看文件。",
+        status: "done",
+      },
+      {
+        kind: "answer",
+        id: "answer:run-1:m1:segment:2",
+        markdown: "最终总结。",
+        status: "done",
+        isFinal: true,
+      },
+    ]);
+    expect(state.narrative.committedItems.map((item) => item.kind)).toEqual([
+      "prompt",
+      "planning",
+      "answer",
+      "exploring",
+      "answer",
+    ]);
+  });
+
   it("projects tool and approval events while deferring artifact summaries", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Patch a file" },

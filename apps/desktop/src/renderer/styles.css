@@ -159,6 +159,7 @@ pre {
   --aw-turn-content-width: 760px;
   padding-top: 0;
   scroll-padding-top: var(--aw-prompt-anchor-offset);
+  overflow-anchor: none;
 }
 
 .aw-run-stage-scroll:has(.run-stage-center-composer) {
@@ -1098,6 +1099,7 @@ pre {
   max-width: 100%;
   min-width: 0;
   scroll-margin-top: var(--aw-prompt-anchor-offset, 0px);
+  overflow-anchor: none;
 }
 
 .turn-marker-rail {
@@ -1219,9 +1221,8 @@ pre {
 }
 
 .execution-turn-header {
-  position: sticky;
-  top: var(--aw-prompt-anchor-offset, 0px);
-  z-index: 3;
+  position: relative;
+  z-index: 1;
   box-sizing: border-box;
   width: 100%;
   padding-top: 0;
@@ -1235,11 +1236,19 @@ pre {
     );
 }
 
+.execution-turn-section-latest .execution-turn-header {
+  position: sticky;
+  top: var(--aw-prompt-anchor-offset, 0px);
+  z-index: 3;
+}
+
 .execution-turn-header .execution-prompt-block {
   padding: 0;
 }
 
-.execution-turn-header .execution-prompt-block p {
+.execution-turn-header .execution-prompt-bubble {
+  --execution-prompt-collapsed-content-height: 54px;
+  --execution-prompt-expanded-content-height: 162px;
   width: 100%;
   max-width: 100%;
   padding: 10px 16px;

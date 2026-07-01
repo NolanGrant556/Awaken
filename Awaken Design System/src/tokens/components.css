@@ -523,7 +523,9 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   padding: 0 0 6px;
 }
 
-.execution-prompt-block p {
+.execution-prompt-bubble {
+  --execution-prompt-collapsed-content-height: 54px;
+  --execution-prompt-expanded-content-height: 162px;
   width: 100%;
   box-sizing: border-box;
   max-width: 100%;
@@ -535,7 +537,84 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   color: var(--aw-text-primary);
   font-size: var(--aw-font-size-sm);
   line-height: var(--aw-line-height-sm);
+  cursor: text;
+  overflow: hidden;
+}
+
+.execution-prompt-bubble-text {
+  box-sizing: border-box;
+  max-width: 100%;
+  margin: 0;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
+  scrollbar-color: rgba(115, 115, 115, 0.36) transparent;
+  scrollbar-width: thin;
+}
+
+.execution-prompt-bubble:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--aw-accent) 52%, transparent);
+  outline-offset: 2px;
+}
+
+.execution-prompt-block-limited .execution-prompt-bubble {
+  cursor: pointer;
+}
+
+.execution-prompt-block-limited:not(.execution-prompt-block-expanded) .execution-prompt-bubble-text {
+  display: -webkit-box;
+  max-height: var(--execution-prompt-collapsed-content-height);
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.execution-prompt-block-expanded .execution-prompt-bubble {
+  display: grid;
+  gap: 6px;
+  cursor: text;
+}
+
+.execution-prompt-block-expanded .execution-prompt-bubble-text {
+  max-height: var(--execution-prompt-expanded-content-height);
+  overscroll-behavior: contain;
+  overflow-y: auto;
+}
+
+.execution-prompt-bubble-toolbar {
+  box-sizing: border-box;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-height: 24px;
+}
+
+.execution-prompt-bubble-toolbar button {
+  flex: none;
+}
+
+.execution-prompt-bubble-text::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+.execution-prompt-bubble-text::-webkit-scrollbar-track,
+.execution-prompt-bubble-text::-webkit-scrollbar-track-piece,
+.execution-prompt-bubble-text::-webkit-scrollbar-corner {
+  background: transparent;
+  border: 0;
+}
+
+.execution-prompt-bubble-text::-webkit-scrollbar-thumb {
+  min-height: 28px;
+  border: 0;
+  border-radius: var(--aw-radius-pill);
+  background: rgba(115, 115, 115, 0.36);
+}
+
+.execution-prompt-bubble-text::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .thought-trace {

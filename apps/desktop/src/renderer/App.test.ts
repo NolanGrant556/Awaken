@@ -21,6 +21,7 @@ import {
   isNearLatestTurnOutputTail,
   resolvedDecisionForApproval,
   scrollTopForLatestTurnOutputTail,
+  scrollTopForLatestTurnScrollTail,
   scrollTopForPromptAnchor,
   shouldPauseLatestOutputFollowForTouchMove,
   shouldPauseLatestOutputFollowForWheel,
@@ -403,6 +404,21 @@ describe("App workbench presentation", () => {
         anchorScrollTop: 480,
       }),
     ).toBe(620);
+  });
+
+  it("uses the native scroll bottom when following the latest turn tail", () => {
+    expect(
+      scrollTopForLatestTurnScrollTail({
+        anchorScrollTop: 480,
+        maxScrollTop: 620,
+      }),
+    ).toBe(620);
+    expect(
+      scrollTopForLatestTurnScrollTail({
+        anchorScrollTop: 480,
+        maxScrollTop: 320,
+      }),
+    ).toBe(480);
   });
 
   it("detects whether the user is still following the latest output", () => {

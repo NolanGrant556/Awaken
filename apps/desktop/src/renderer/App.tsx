@@ -69,7 +69,7 @@ import {
   groupNarrativeByTurns,
   isNearLatestTurnOutputTail,
   resolvedDecisionForApproval,
-  scrollTopForLatestTurnOutputTail,
+  scrollTopForLatestTurnScrollTail,
   scrollTopForPromptAnchor,
   shouldPauseLatestOutputFollowForTouchMove,
   shouldPauseLatestOutputFollowForWheel,
@@ -973,13 +973,9 @@ export function App() {
       promptTop: turnRect.top,
       anchorOffset: promptAnchorOffset(element),
     });
-    const nextScrollTop = scrollTopForLatestTurnOutputTail({
-      currentScrollTop: element.scrollTop,
-      containerTop: elementRect.top,
-      outputBottom: latestTurnOutputBottom(turn),
-      containerHeight: element.clientHeight,
-      bottomReserve: composerSafeAreaPx,
+    const nextScrollTop = scrollTopForLatestTurnScrollTail({
       anchorScrollTop,
+      maxScrollTop: element.scrollHeight - element.clientHeight,
     });
 
     if (Math.abs(nextScrollTop - element.scrollTop) < 1) {
@@ -1034,6 +1030,7 @@ export function App() {
     if (shouldResume) {
       latestOutputFollowPausedByUserRef.current = false;
       latestOutputFollowResumeIntentRef.current = false;
+      scrollLatestTurnOutputToTail(latestPromptId);
     }
     followLatestOutputRef.current = shouldResume;
   }

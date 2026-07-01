@@ -362,6 +362,16 @@ export function scrollTopForLatestTurnOutputTail({
   return Math.max(0, anchorScrollTop, scrollTopForTail);
 }
 
+export function scrollTopForLatestTurnScrollTail({
+  anchorScrollTop,
+  maxScrollTop,
+}: {
+  anchorScrollTop: number;
+  maxScrollTop: number;
+}): number {
+  return Math.max(0, anchorScrollTop, maxScrollTop);
+}
+
 export function isNearLatestTurnOutputTail({
   containerTop,
   outputBottom,

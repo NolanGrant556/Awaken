@@ -341,35 +341,12 @@ export function anchoredTurnMinHeight({
   return Math.max(0, containerHeight - anchorOffset - Math.max(0, bottomReserve));
 }
 
-export function scrollTopForLatestTurnOutputTail({
-  currentScrollTop,
-  containerTop,
-  outputBottom,
-  containerHeight,
-  bottomReserve,
-  anchorScrollTop,
-}: {
-  currentScrollTop: number;
-  containerTop: number;
-  outputBottom: number;
-  containerHeight: number;
-  bottomReserve: number;
-  anchorScrollTop: number;
-}): number {
-  const visibleHeight = Math.max(1, containerHeight - Math.max(0, bottomReserve));
-  const scrollTopForTail =
-    currentScrollTop + outputBottom - containerTop - visibleHeight;
-  return Math.max(0, anchorScrollTop, scrollTopForTail);
-}
-
 export function scrollTopForLatestTurnScrollTail({
-  anchorScrollTop,
   maxScrollTop,
 }: {
-  anchorScrollTop: number;
   maxScrollTop: number;
 }): number {
-  return Math.max(0, anchorScrollTop, maxScrollTop);
+  return Math.max(0, maxScrollTop);
 }
 
 export function isNearLatestTurnOutputTail({
@@ -389,12 +366,41 @@ export function isNearLatestTurnOutputTail({
   return outputBottom - containerTop <= visibleHeight + Math.max(0, threshold);
 }
 
+export function isNearScrollBottom({
+  scrollTop,
+  scrollHeight,
+  clientHeight,
+  threshold,
+}: {
+  scrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
+  threshold: number;
+}): boolean {
+  return scrollHeight - scrollTop - clientHeight <= Math.max(0, threshold);
+}
+
 export function shouldPauseLatestOutputFollowForWheel({
   deltaY,
 }: {
   deltaY: number;
 }): boolean {
   return deltaY < -1;
+}
+
+export function shouldPauseLatestOutputFollowForScroll({
+  previousScrollTop,
+  nextScrollTop,
+  threshold = 1,
+}: {
+  previousScrollTop: number | null;
+  nextScrollTop: number;
+  threshold?: number;
+}): boolean {
+  if (previousScrollTop === null || !Number.isFinite(previousScrollTop)) {
+    return false;
+  }
+  return nextScrollTop < previousScrollTop - Math.max(0, threshold);
 }
 
 export function shouldRequestLatestOutputFollowResumeForWheel({

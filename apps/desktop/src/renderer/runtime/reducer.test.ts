@@ -417,7 +417,7 @@ describe("runtime reducer run narrative projection", () => {
 
     expect(state.narrative.activeItem).toMatchObject({
       kind: "exploring",
-      id: "exploring:current:readonly",
+      id: "exploring:current:read-1",
       status: "active",
     });
     if (state.narrative.activeItem?.kind !== "exploring") {
@@ -444,6 +444,41 @@ describe("runtime reducer run narrative projection", () => {
     expect(JSON.stringify(state.narrative.activeItem.actions)).not.toContain("long content that should stay out");
   });
 
+  it("keeps later read-only tools after intervening thinking instead of backfilling older exploring", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "Inspect ordering" },
+      runEvent({ type: "RUN_STARTED", seq: 1 }),
+      runEvent({ type: "TOOL_CALL_START", seq: 2, toolCallId: "read-1", toolCallName: "read_file" }),
+      runEvent({ type: "TOOL_CALL_ARGS", seq: 3, toolCallId: "read-1", toolCallName: "read_file", delta: "{\"path\":\"README.md\"}" }),
+      runEvent({ type: "TOOL_CALL_RESULT", seq: 4, toolCallId: "read-1", toolCallName: "read_file", content: "# Awaken" }),
+      runEvent({ type: "REASONING_MESSAGE_START", seq: 5, messageId: "reason-1" }),
+      runEvent({ type: "REASONING_MESSAGE_CONTENT", seq: 6, messageId: "reason-1", delta: "Now inspect source." }),
+      runEvent({ type: "REASONING_MESSAGE_END", seq: 7, messageId: "reason-1" }),
+      runEvent({ type: "TOOL_CALL_START", seq: 8, toolCallId: "list-1", toolCallName: "list_files" }),
+      runEvent({ type: "TOOL_CALL_ARGS", seq: 9, toolCallId: "list-1", toolCallName: "list_files", delta: "{\"pattern\":\"src/**/*.go\"}" }),
+      runEvent({ type: "TOOL_CALL_RESULT", seq: 10, toolCallId: "list-1", toolCallName: "list_files", content: "src/main.go" }),
+      runEvent({ type: "RUN_FINISHED", seq: 11 }),
+    ]);
+
+    const visibleItems = state.narrative.committedItems.filter(
+      (item) => item.kind !== "prompt" && item.kind !== "planning",
+    );
+
+    expect(visibleItems.map((item) => item.id)).toEqual([
+      "exploring:current:read-1",
+      "thinking:reason-1",
+      "exploring:current:list-1",
+    ]);
+    expect(visibleItems[0]).toMatchObject({
+      kind: "exploring",
+      actions: [expect.objectContaining({ id: "explore:read-1" })],
+    });
+    expect(visibleItems[2]).toMatchObject({
+      kind: "exploring",
+      actions: [expect.objectContaining({ id: "explore:list-1" })],
+    });
+  });
+
   it("does not duplicate read-only exploring actions when sequenced events replay", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Replay exploring" },
@@ -457,7 +492,7 @@ describe("runtime reducer run narrative projection", () => {
 
     expect(state.narrative.activeItem).toMatchObject({
       kind: "exploring",
-      id: "exploring:current:readonly",
+      id: "exploring:current:read-1",
     });
     if (state.narrative.activeItem?.kind !== "exploring") {
       throw new Error("expected exploring item");
@@ -505,7 +540,7 @@ describe("runtime reducer run narrative projection", () => {
     });
     expect(state.narrative.activeItem).toMatchObject({
       kind: "exploring",
-      id: "exploring:current:readonly",
+      id: "exploring:current:read-1",
       status: "active",
     });
     if (state.narrative.activeItem?.kind !== "exploring") {
@@ -774,7 +809,7 @@ describe("runtime reducer run narrative projection", () => {
 
     expect(state.narrative.activeItem).toMatchObject({
       kind: "exploring",
-      id: "exploring:current:readonly",
+      id: "exploring:current:read-1",
     });
     if (state.narrative.activeItem?.kind !== "exploring") {
       throw new Error("expected exploring item");

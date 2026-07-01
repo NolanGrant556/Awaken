@@ -349,7 +349,7 @@ function exploringActionId(event: AguiEvent): string {
 }
 
 function exploringId(event: AguiEvent): string {
-  return `exploring:${eventScope(event)}:readonly`;
+  return `exploring:${eventScope(event)}:${event.toolCallId ?? event.toolCallName ?? "readonly"}`;
 }
 
 function eventScope(event: AguiEvent): string {
@@ -488,11 +488,11 @@ function updateExploringAction(
   status: "active" | "done" | "error",
   detail?: string,
 ): RunNarrativeState {
-  const id = exploringId(event);
   const existing =
-    state.activeItem?.id === id && state.activeItem.kind === "exploring"
+    state.activeItem?.kind === "exploring"
       ? state.activeItem
       : undefined;
+  const id = existing?.id ?? exploringId(event);
   const action: RunAction = {
     id: exploringActionId(event),
     title: readOnlyActionTitle(event),

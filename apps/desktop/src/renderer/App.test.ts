@@ -1,5 +1,5 @@
 import React from "react";
-import { shouldSubmitComposerInputKey } from "@awaken/design-system";
+import { AwakenComposerBar, shouldSubmitComposerInputKey } from "@awaken/design-system";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
@@ -19,10 +19,11 @@ import {
   diffLineStats,
   groupNarrativeByTurns,
   isNearLatestTurnOutputTail,
+  isNearScrollBottom,
   resolvedDecisionForApproval,
-  scrollTopForLatestTurnOutputTail,
   scrollTopForLatestTurnScrollTail,
   scrollTopForPromptAnchor,
+  shouldPauseLatestOutputFollowForScroll,
   shouldPauseLatestOutputFollowForTouchMove,
   shouldPauseLatestOutputFollowForWheel,
   shouldRequestLatestOutputFollowResumeForTouchMove,
@@ -95,6 +96,28 @@ describe("AwakenComposerInput keyboard behavior", () => {
   });
 });
 
+describe("AwakenComposerBar layout contract", () => {
+  it("keeps dock input at one row while center keeps the homepage row budget", () => {
+    const baseProps = {
+      value: "",
+      onChange: vi.fn(),
+      onSubmit: vi.fn(),
+    };
+
+    const dockHtml = renderToString(
+      React.createElement(AwakenComposerBar, { ...baseProps, variant: "dock" }),
+    );
+    const centerHtml = renderToString(
+      React.createElement(AwakenComposerBar, { ...baseProps, variant: "center" }),
+    );
+
+    expect(dockHtml).toContain("composer-bar-dock");
+    expect(dockHtml).toContain('rows="1"');
+    expect(centerHtml).toContain("composer-bar-center");
+    expect(centerHtml).toContain('rows="3"');
+  });
+});
+
 describe("project workspace helpers", () => {
   it("normalizes workspace paths and labels them by folder name", () => {
     expect(normalizeWorkspacePath("/Users/nolangrant/Awaken/")).toBe("/Users/nolangrant/Awaken");
@@ -142,7 +165,7 @@ describe("App workbench presentation", () => {
     expect(html).toContain("aw-task-welcome__logo");
     expect(html).toContain("把任务交给 Awaken，自主执行，唤醒自由。");
     expect(html).toContain('placeholder=""');
-    expect(html).toContain('rows="2"');
+    expect(html).toContain('rows="3"');
     expect(html).toContain("New Agent");
     expect(html).toContain("Add folder");
     expect(html).toContain("Automations");
@@ -389,45 +412,21 @@ describe("App workbench presentation", () => {
     ).toBe(516);
   });
 
-  it("keeps latest output visible without scrolling past the prompt anchor for short output", () => {
-    expect(
-      scrollTopForLatestTurnOutputTail({
-        currentScrollTop: 260,
-        containerTop: 100,
-        outputBottom: 360,
-        containerHeight: 640,
-        bottomReserve: 120,
-        anchorScrollTop: 480,
-      }),
-    ).toBe(480);
-  });
-
-  it("scrolls the latest turn tail above the composer when output overflows", () => {
-    expect(
-      scrollTopForLatestTurnOutputTail({
-        currentScrollTop: 260,
-        containerTop: 100,
-        outputBottom: 980,
-        containerHeight: 640,
-        bottomReserve: 120,
-        anchorScrollTop: 480,
-      }),
-    ).toBe(620);
-  });
-
-  it("uses the native scroll bottom when following the latest turn tail", () => {
+  it("uses the same native bottom target for programmatic follow and manual scroll bottom", () => {
+    const manualScrollBottom = 620;
     expect(
       scrollTopForLatestTurnScrollTail({
-        anchorScrollTop: 480,
-        maxScrollTop: 620,
+        maxScrollTop: manualScrollBottom,
       }),
-    ).toBe(620);
+    ).toBe(manualScrollBottom);
+  });
+
+  it("clamps the latest turn follow target to the native bottom instead of a prompt anchor", () => {
     expect(
       scrollTopForLatestTurnScrollTail({
-        anchorScrollTop: 480,
         maxScrollTop: 320,
       }),
-    ).toBe(480);
+    ).toBe(320);
   });
 
   it("detects whether the user is still following the latest output", () => {
@@ -451,9 +450,46 @@ describe("App workbench presentation", () => {
     ).toBe(false);
   });
 
+  it("detects whether the native scroll position is at the bottom", () => {
+    expect(
+      isNearScrollBottom({
+        scrollTop: 620,
+        scrollHeight: 1260,
+        clientHeight: 640,
+        threshold: 2,
+      }),
+    ).toBe(true);
+    expect(
+      isNearScrollBottom({
+        scrollTop: 600,
+        scrollHeight: 1260,
+        clientHeight: 640,
+        threshold: 2,
+      }),
+    ).toBe(false);
+  });
+
   it("pauses latest output follow as soon as the user scrolls toward history", () => {
     expect(shouldPauseLatestOutputFollowForWheel({ deltaY: -12 })).toBe(true);
     expect(shouldPauseLatestOutputFollowForWheel({ deltaY: 12 })).toBe(false);
+    expect(
+      shouldPauseLatestOutputFollowForScroll({
+        previousScrollTop: 240,
+        nextScrollTop: 220,
+      }),
+    ).toBe(true);
+    expect(
+      shouldPauseLatestOutputFollowForScroll({
+        previousScrollTop: 240,
+        nextScrollTop: 260,
+      }),
+    ).toBe(false);
+    expect(
+      shouldPauseLatestOutputFollowForScroll({
+        previousScrollTop: null,
+        nextScrollTop: 220,
+      }),
+    ).toBe(false);
     expect(shouldRequestLatestOutputFollowResumeForWheel({ deltaY: 12 })).toBe(true);
     expect(shouldRequestLatestOutputFollowResumeForWheel({ deltaY: -12 })).toBe(false);
     expect(

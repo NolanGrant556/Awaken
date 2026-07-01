@@ -347,6 +347,9 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
 }
 
 .aw-run-stage {
+  --aw-composer-content-inset: 0px;
+  --aw-composer-output-gap: 72px;
+  --aw-composer-safe-area: 28px;
   position: relative;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
@@ -360,8 +363,6 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
 .aw-run-stage-scroll {
   --aw-prompt-anchor-offset: 0px;
   --aw-turn-content-width: 760px;
-  --aw-composer-safe-area: 28px;
-  --aw-composer-fade-height: 32px;
   display: grid;
   align-content: start;
   gap: 16px;
@@ -396,11 +397,14 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
 }
 
 .aw-run-stage:has(> .aw-composer-dock) .aw-run-stage-scroll {
-  padding-bottom: var(--aw-composer-safe-area, 112px);
-  scroll-padding-bottom: var(--aw-composer-safe-area, 112px);
+  position: absolute;
+  inset: 0 0 var(--aw-composer-content-inset, 0px);
+  padding-bottom: var(--aw-output-gap, var(--aw-composer-output-gap, 72px));
+  scroll-padding-bottom: var(--aw-output-gap, var(--aw-composer-output-gap, 72px));
 }
 
 .aw-run-stage > .aw-composer-dock {
+  --aw-composer-fade-height: var(--aw-output-gap, var(--aw-composer-output-gap, 72px));
   position: absolute;
   right: 0;
   bottom: 0;
@@ -417,12 +421,17 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
   content: "";
   position: absolute;
   z-index: 0;
-  inset: 0;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: min(760px, calc(100% - 64px));
+  transform: translateX(-50%);
   background:
     linear-gradient(
       180deg,
       rgba(255, 255, 255, 0) 0%,
-      rgba(255, 255, 255, 0.82) 54%,
+      rgba(255, 255, 255, 0.84) 34%,
+      rgba(255, 255, 255, 0.98) 62%,
       var(--aw-surface-work) 100%
     );
   pointer-events: none;
@@ -701,10 +710,6 @@ button.tool-trace-line:focus-visible {
   color: var(--aw-text-muted);
   font-size: var(--aw-font-size-xs);
   line-height: var(--aw-line-height-xs);
-}
-
-.assistant-message-has-footer {
-  padding-bottom: 64px;
 }
 
 .assistant-message-footer-meta {
@@ -1427,7 +1432,12 @@ button.tool-trace-line:focus-visible {
 
 .composer-bar-surface {
   display: grid;
+  grid-template-rows: minmax(20px, auto) auto;
+  align-content: end;
+  gap: 10px;
   min-width: 0;
+  min-height: 94px;
+  padding: 18px 18px 14px 22px;
   border: 1px solid rgba(0, 0, 0, 0.18);
   border-radius: 18px;
   background: var(--aw-bg-white);
@@ -1441,16 +1451,10 @@ button.tool-trace-line:focus-visible {
 }
 
 .composer-bar-input-row {
-  display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) 34px;
-  align-items: center;
-  gap: 8px;
+  display: block;
   min-width: 0;
-  padding: 8px;
-}
-
-.composer-bar-has-model .composer-bar-input-row {
-  grid-template-columns: 32px minmax(0, 1fr) minmax(0, auto) 34px;
+  min-height: 20px;
+  padding: 0;
 }
 
 .composer-bar-input-wrap {
@@ -1460,26 +1464,22 @@ button.tool-trace-line:focus-visible {
 .composer-bar-center {
   position: relative;
   width: min(780px, calc(100% - 64px));
-  min-height: 124px;
+  min-height: 148px;
 }
 
 .composer-bar-center .composer-bar-surface {
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  min-height: 124px;
+  grid-template-rows: minmax(60px, 1fr) auto;
+  align-content: stretch;
+  min-height: 148px;
   border-radius: 18px;
 }
 
 .composer-bar-center .composer-bar-input-row {
-  display: block;
-  min-height: 124px;
-  padding: 18px 22px 52px;
+  min-height: 60px;
 }
 
-.composer-bar-center textarea {
-  width: calc(100% + 14px) !important;
+.composer-bar textarea {
+  width: 100% !important;
   padding-right: 14px !important;
   color: var(--aw-text-primary) !important;
   font-size: 14px !important;
@@ -1490,30 +1490,30 @@ button.tool-trace-line:focus-visible {
   scrollbar-width: thin;
 }
 
-.composer-bar-center textarea::placeholder {
+.composer-bar textarea::placeholder {
   color: var(--aw-text-disabled);
 }
 
-.composer-bar-center textarea::-webkit-scrollbar {
+.composer-bar textarea::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
-.composer-bar-center textarea::-webkit-scrollbar-track,
-.composer-bar-center textarea::-webkit-scrollbar-track-piece,
-.composer-bar-center textarea::-webkit-scrollbar-corner {
+.composer-bar textarea::-webkit-scrollbar-track,
+.composer-bar textarea::-webkit-scrollbar-track-piece,
+.composer-bar textarea::-webkit-scrollbar-corner {
   background: transparent;
   border: 0;
 }
 
-.composer-bar-center textarea::-webkit-scrollbar-thumb {
+.composer-bar textarea::-webkit-scrollbar-thumb {
   min-height: 44px;
   border: 0;
   border-radius: var(--aw-radius-pill);
   background: rgba(115, 115, 115, 0.28);
 }
 
-.composer-bar-center textarea::-webkit-scrollbar-button {
+.composer-bar textarea::-webkit-scrollbar-button {
   display: none;
   width: 0;
   height: 0;
@@ -1524,8 +1524,10 @@ button.tool-trace-line:focus-visible {
 }
 
 .composer-bar-dock .composer-bar-surface {
-  min-height: 48px;
-  border-radius: 12px;
+  gap: 8px;
+  min-height: 86px;
+  padding: 16px 16px 12px 20px;
+  border-radius: 18px;
 }
 
 .composer-bar-meta {
@@ -1618,7 +1620,7 @@ button.tool-trace-line:focus-visible {
   align-items: center;
   gap: 12px;
   min-width: 0;
-  padding: 0 16px 10px;
+  padding: 0;
 }
 
 .composer-bar-has-model .composer-bar-toolbar {
@@ -1626,11 +1628,11 @@ button.tool-trace-line:focus-visible {
 }
 
 .composer-bar-center .composer-bar-toolbar {
-  position: absolute;
-  right: 18px;
-  bottom: 14px;
-  left: 18px;
   padding: 0;
+}
+
+.composer-bar-dock .composer-bar-toolbar {
+  gap: 8px;
 }
 
 .composer-bar-toolbar .composer-bar-context {
@@ -1642,8 +1644,7 @@ button.tool-trace-line:focus-visible {
   justify-self: end;
 }
 
-.composer-bar-has-model .composer-bar-toolbar .composer-bar-submit,
-.composer-bar-has-model .composer-bar-input-row .composer-bar-submit {
+.composer-bar-has-model .composer-bar-toolbar .composer-bar-submit {
   grid-column: 4;
 }
 
@@ -1684,6 +1685,14 @@ button.tool-trace-line:focus-visible {
     color var(--aw-transition-fast);
 }
 
+.composer-bar-dock .composer-bar-model-trigger {
+  gap: 5px;
+  height: 27px;
+  padding: 0 10px;
+  font-size: 12px;
+  line-height: 16px;
+}
+
 .composer-bar-model-trigger:hover,
 .composer-bar-model-trigger:focus-visible,
 .composer-bar-model-trigger-open {
@@ -1721,6 +1730,11 @@ button.tool-trace-line:focus-visible {
 .composer-bar-model-trigger-chevron {
   flex: 0 0 auto;
   color: var(--aw-text-tertiary);
+}
+
+.composer-bar-dock .composer-bar-model-trigger-chevron {
+  width: 12px;
+  height: 12px;
 }
 
 .composer-bar-model-menu {
@@ -1864,6 +1878,18 @@ button.tool-trace-line:focus-visible {
   height: 16px;
 }
 
+.composer-bar-dock .composer-bar-context button {
+  width: 24px !important;
+  height: 24px !important;
+  padding: 0 !important;
+}
+
+.composer-bar-dock .composer-bar-context svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
 .composer-bar-center .composer-bar-submit button {
   width: 32px !important;
   height: 32px !important;
@@ -1873,6 +1899,22 @@ button.tool-trace-line:focus-visible {
 .composer-bar-center .composer-bar-submit svg {
   width: 17px;
   height: 17px;
+}
+
+.composer-bar-dock .composer-bar-submit button {
+  width: 27px !important;
+  height: 27px !important;
+  padding: 0 !important;
+}
+
+.composer-bar-dock .composer-bar-submit svg {
+  width: 15px;
+  height: 15px;
+}
+
+.composer-bar-dock .composer-bar-submit svg[fill="currentColor"] {
+  width: 12px;
+  height: 12px;
 }
 
 @media (max-width: 720px) {

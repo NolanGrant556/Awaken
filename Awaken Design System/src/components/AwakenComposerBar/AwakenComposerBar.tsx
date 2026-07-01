@@ -64,8 +64,7 @@ export function AwakenComposerBar({
   const [openMetaMenuId, setOpenMetaMenuId] = useState<string | null>(null);
   const modelMetaRef = useRef<HTMLDivElement | null>(null);
   const modelMetaItem = metaItems.find((item) => item.id === "model");
-  const topMetaItems =
-    variant === "center" ? metaItems.filter((item) => item.id !== "model") : [];
+  const topMetaItems: ComposerBarMetaItem[] = [];
   const bottomMetaItems =
     variant === "dock" ? metaItems.filter((item) => item.id !== "model") : [];
   const handleSubmit = useCallback(() => {
@@ -261,11 +260,6 @@ export function AwakenComposerBar({
       ) : null}
       <div className="composer-bar-surface">
         <div className="composer-bar-input-row">
-          {variant === "dock" ? (
-            <div className="composer-bar-context">
-              <AwakenContextButton onClick={onAddContext} disabled={disabled} />
-            </div>
-          ) : null}
           <div className="composer-bar-input-wrap">
             <AwakenComposerInput
               value={value}
@@ -274,38 +268,25 @@ export function AwakenComposerBar({
               placeholder={placeholder}
               disabled={disabled}
               focusRequest={focusRequest}
-              minRows={variant === "center" ? 2 : 1}
-              maxRows={variant === "center" ? 8 : 5}
+              minRows={variant === "dock" ? 1 : 3}
+              maxRows={variant === "dock" ? 8 : 6}
             />
           </div>
-          {variant === "dock" && modelMetaItem ? renderModelMetaItem(modelMetaItem) : null}
-          {variant === "dock" ? (
-            <div className="composer-bar-submit">
-              <AwakenSendButton
-                ready={isReady || submitMode === "stop"}
-                onClick={handleSubmit}
-                disabled={submitMode === "stop" ? false : disabled}
-                mode={submitMode}
-              />
-            </div>
-          ) : null}
         </div>
-        {variant === "center" ? (
-          <div className="composer-bar-toolbar">
-            <div className="composer-bar-context">
-              <AwakenContextButton onClick={onAddContext} disabled={disabled} />
-            </div>
-            {modelMetaItem ? renderModelMetaItem(modelMetaItem) : null}
-            <div className="composer-bar-submit">
-              <AwakenSendButton
-                ready={isReady || submitMode === "stop"}
-                onClick={handleSubmit}
-                disabled={submitMode === "stop" ? false : disabled}
-                mode={submitMode}
-              />
-            </div>
+        <div className="composer-bar-toolbar">
+          <div className="composer-bar-context">
+            <AwakenContextButton onClick={onAddContext} disabled={disabled} />
           </div>
-        ) : null}
+          {modelMetaItem ? renderModelMetaItem(modelMetaItem) : null}
+          <div className="composer-bar-submit">
+            <AwakenSendButton
+              ready={isReady || submitMode === "stop"}
+              onClick={handleSubmit}
+              disabled={submitMode === "stop" ? false : disabled}
+              mode={submitMode}
+            />
+          </div>
+        </div>
       </div>
       {bottomMetaItems.length > 0 ? (
         <div

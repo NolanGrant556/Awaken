@@ -65,6 +65,7 @@ import {
   anchoredTurnMinHeight,
   activeTurnIdForAnchor,
   composerBottomSafeArea,
+  composerContentBottomInset,
   groupNarrativeByTurns,
   isNearLatestTurnOutputTail,
   resolvedDecisionForApproval,
@@ -323,7 +324,7 @@ export function App() {
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
   const [latestTurnMinHeightPx, setLatestTurnMinHeightPx] = useState(0);
-  const [composerDockHeightPx, setComposerDockHeightPx] = useState(0);
+  const [composerContentBottomInsetPx, setComposerContentBottomInsetPx] = useState(0);
   const [runStageViewportHeightPx, setRunStageViewportHeightPx] = useState(0);
   const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
   const [resolvedApproval, setResolvedApproval] = useState<ResolvedApprovalState>(null);
@@ -371,7 +372,7 @@ export function App() {
   const hasPromptNarrative = narrativeSections.turns.length > 0;
   const fallbackFooterAnswerId = latestDoneAnswerId(visibleNarrativeItems);
   const composerSafeAreaPx = composerBottomSafeArea({
-    composerHeight: hasPromptNarrative ? composerDockHeightPx : 0,
+    composerHeight: hasPromptNarrative ? composerContentBottomInsetPx : 0,
     safeGap: hasPromptNarrative ? RUN_STAGE_COMPOSER_SAFE_GAP : 0,
   });
 
@@ -1047,7 +1048,7 @@ export function App() {
 
   useLayoutEffect(() => {
     if (showCenterComposer) {
-      setComposerDockHeightPx(0);
+      setComposerContentBottomInsetPx(0);
       return;
     }
 
@@ -1057,12 +1058,28 @@ export function App() {
     }
     const measuredDockElement: HTMLDivElement = dockElement;
 
-    function syncComposerHeight(): void {
-      setComposerDockHeightPx(Math.ceil(measuredDockElement.getBoundingClientRect().height));
+    function syncComposerBottomInset(): void {
+      const dockRect = measuredDockElement.getBoundingClientRect();
+      const contentElement =
+        measuredDockElement.querySelector<HTMLElement>(".composer-dock-stack") ??
+        measuredDockElement.firstElementChild;
+      const contentTop =
+        contentElement instanceof HTMLElement
+          ? contentElement.getBoundingClientRect().top
+          : undefined;
+      setComposerContentBottomInsetPx(
+        Math.ceil(
+          composerContentBottomInset({
+            dockBottom: dockRect.bottom,
+            contentTop,
+            fallbackInset: dockRect.height,
+          }),
+        ),
+      );
     }
 
-    syncComposerHeight();
-    const resizeObserver = new ResizeObserver(syncComposerHeight);
+    syncComposerBottomInset();
+    const resizeObserver = new ResizeObserver(syncComposerBottomInset);
     resizeObserver.observe(measuredDockElement);
 
     return () => {

@@ -314,6 +314,21 @@ export function composerBottomSafeArea({
   return Math.max(0, composerHeight) + Math.max(0, safeGap);
 }
 
+export function composerContentBottomInset({
+  dockBottom,
+  contentTop,
+  fallbackInset = 0,
+}: {
+  dockBottom: number;
+  contentTop?: number;
+  fallbackInset?: number;
+}): number {
+  if (typeof contentTop !== "number" || !Number.isFinite(contentTop)) {
+    return Math.max(0, fallbackInset);
+  }
+  return Math.max(0, dockBottom - contentTop);
+}
+
 export function anchoredTurnMinHeight({
   containerHeight,
   anchorOffset,

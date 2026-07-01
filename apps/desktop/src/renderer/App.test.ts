@@ -15,6 +15,7 @@ import {
   anchoredTurnMinHeight,
   activeTurnIdForAnchor,
   composerBottomSafeArea,
+  composerContentBottomInset,
   diffLineStats,
   groupNarrativeByTurns,
   isNearLatestTurnOutputTail,
@@ -338,6 +339,22 @@ describe("App workbench presentation", () => {
         safeGap: 24,
       }),
     ).toBe(24);
+  });
+
+  it("measures composer reserve from real dock content instead of the fade", () => {
+    expect(
+      composerContentBottomInset({
+        dockBottom: 720,
+        contentTop: 590,
+        fallbackInset: 162,
+      }),
+    ).toBe(130);
+    expect(
+      composerContentBottomInset({
+        dockBottom: 720,
+        fallbackInset: 162,
+      }),
+    ).toBe(162);
   });
 
   it("keeps the latest turn tall enough for sticky prompt reading", () => {

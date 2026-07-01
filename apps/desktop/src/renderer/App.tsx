@@ -68,7 +68,6 @@ import {
   groupNarrativeByTurns,
   isNearLatestTurnOutputTail,
   resolvedDecisionForApproval,
-  scrollTopForFinalOutputGap,
   scrollTopForLatestTurnOutputTail,
   scrollTopForPromptAnchor,
   shouldPauseLatestOutputFollowForTouchMove,
@@ -243,19 +242,7 @@ const MAX_INSPECTOR_WIDTH = 520;
 const LAYOUT_STEP = 12;
 const DEFAULT_PROMPT_ANCHOR_OFFSET = 0;
 const RUN_STAGE_COMPOSER_SAFE_GAP = 72;
-const FINAL_OUTPUT_TO_COMPOSER_GAP = 32;
-const FINAL_OUTPUT_ALIGNMENT_MAX_MS = 1200;
-const FINAL_OUTPUT_ALIGNMENT_SETTLE_FRAMES = 3;
 const LATEST_OUTPUT_FOLLOW_THRESHOLD = 48;
-
-type FinalOutputAlignmentResult = "missing" | "adjusted" | "settled";
-type FinalOutputAlignmentState = {
-  promptId: string;
-  frameId: number | null;
-  resizeObserver: ResizeObserver | null;
-  deadlineMs: number;
-  settledFrames: number;
-};
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -313,8 +300,6 @@ export function App() {
   const terminalSeenRef = useRef(false);
   const resolvingApprovalIdRef = useRef<string | null>(null);
   const pendingPromptAnchorRef = useRef(false);
-  const pendingFinalOutputAlignmentRef = useRef(false);
-  const finalOutputAlignmentRef = useRef<FinalOutputAlignmentState | null>(null);
   const followLatestOutputRef = useRef(false);
   const latestOutputFollowPausedByUserRef = useRef(false);
   const latestOutputFollowResumeIntentRef = useRef(false);
@@ -765,25 +750,15 @@ export function App() {
     setInspectorTab(tabId);
   }
 
-  function requestFinalOutputAlignment(): void {
-    if (latestOutputFollowPausedByUserRef.current) {
-      cancelFinalOutputAlignment();
-      return;
-    }
-    pendingFinalOutputAlignmentRef.current = true;
-  }
-
   function createSubscribeHandlers(): SubscribeHandlers {
     return {
       onEvent: (event) => {
         const receivedAtMs = Date.now();
         if (event.type === "RUN_FINISHED" || event.type === "RUN_ERROR") {
           terminalSeenRef.current = true;
-          requestFinalOutputAlignment();
           localStorage.removeItem("awaken:runId");
         }
         if (event.type === "RUN_STATUS_CHANGED" && event.status === "cancelled") {
-          requestFinalOutputAlignment();
           localStorage.removeItem("awaken:runId");
         }
         if (event.type === "AWAKEN_APPROVAL_REQUESTED" && event.approvalId) {
@@ -839,9 +814,6 @@ export function App() {
     }
 
     const handleWheel = (event: WheelEvent) => {
-      if (event.deltaY !== 0) {
-        cancelFinalOutputAlignment();
-      }
       if (shouldPauseLatestOutputFollowForWheel({ deltaY: event.deltaY })) {
         latestOutputFollowPausedByUserRef.current = true;
         latestOutputFollowResumeIntentRef.current = false;
@@ -856,7 +828,6 @@ export function App() {
       runStageTouchStartYRef.current = event.touches[0]?.clientY ?? null;
     };
     const handleTouchMove = (event: TouchEvent) => {
-      cancelFinalOutputAlignment();
       const startY = runStageTouchStartYRef.current;
       const currentY = event.touches[0]?.clientY;
       if (
@@ -1020,135 +991,7 @@ export function App() {
     });
   }
 
-  function composerSurfaceTop(): number | undefined {
-    const dockElement = composerDockRef.current;
-    const surface = dockElement?.querySelector<HTMLElement>(".composer-bar-surface");
-    const target = surface ?? dockElement;
-    return target?.getBoundingClientRect().top;
-  }
-
-  function scrollFinalOutputToComposerGap(promptId: string): FinalOutputAlignmentResult {
-    const element = runStageScrollRef.current;
-    const composerTop = composerSurfaceTop();
-    if (!element || composerTop === undefined) {
-      return "missing";
-    }
-
-    const turn = findTurnElement(element, promptId);
-    if (!turn) {
-      return "missing";
-    }
-
-    const nextScrollTop = scrollTopForFinalOutputGap({
-      currentScrollTop: element.scrollTop,
-      outputBottom: latestTurnOutputBottom(turn),
-      composerTop,
-      gap: FINAL_OUTPUT_TO_COMPOSER_GAP,
-      maxScrollTop: Math.max(0, element.scrollHeight - element.clientHeight),
-    });
-
-    if (Math.abs(nextScrollTop - element.scrollTop) < 1) {
-      return "settled";
-    }
-
-    element.scrollTo({
-      top: nextScrollTop,
-      behavior: "auto",
-    });
-    return "adjusted";
-  }
-
-  function cancelFinalOutputAlignment(): void {
-    pendingFinalOutputAlignmentRef.current = false;
-    const alignment = finalOutputAlignmentRef.current;
-    if (!alignment) {
-      return;
-    }
-    if (alignment.frameId !== null) {
-      window.cancelAnimationFrame(alignment.frameId);
-    }
-    alignment.resizeObserver?.disconnect();
-    finalOutputAlignmentRef.current = null;
-  }
-
-  function queueFinalOutputAlignmentFrame(promptId: string): void {
-    const alignment = finalOutputAlignmentRef.current;
-    if (!alignment || alignment.promptId !== promptId || alignment.frameId !== null) {
-      return;
-    }
-
-    alignment.frameId = window.requestAnimationFrame(() => {
-      const activeAlignment = finalOutputAlignmentRef.current;
-      if (!activeAlignment || activeAlignment !== alignment) {
-        return;
-      }
-      activeAlignment.frameId = null;
-
-      if (latestOutputFollowPausedByUserRef.current) {
-        cancelFinalOutputAlignment();
-        return;
-      }
-
-      const result = scrollFinalOutputToComposerGap(promptId);
-      activeAlignment.settledFrames =
-        result === "settled" ? activeAlignment.settledFrames + 1 : 0;
-
-      if (
-        activeAlignment.settledFrames >= FINAL_OUTPUT_ALIGNMENT_SETTLE_FRAMES ||
-        performance.now() >= activeAlignment.deadlineMs
-      ) {
-        cancelFinalOutputAlignment();
-        return;
-      }
-
-      queueFinalOutputAlignmentFrame(promptId);
-    });
-  }
-
-  function startFinalOutputAlignment(promptId: string): void {
-    cancelFinalOutputAlignment();
-    if (latestOutputFollowPausedByUserRef.current) {
-      return;
-    }
-
-    const alignment: FinalOutputAlignmentState = {
-      promptId,
-      frameId: null,
-      resizeObserver: null,
-      deadlineMs: performance.now() + FINAL_OUTPUT_ALIGNMENT_MAX_MS,
-      settledFrames: 0,
-    };
-    finalOutputAlignmentRef.current = alignment;
-
-    if (typeof ResizeObserver !== "undefined") {
-      const resizeObserver = new ResizeObserver(() => {
-        queueFinalOutputAlignmentFrame(promptId);
-      });
-      const element = runStageScrollRef.current;
-      const turn = element ? findTurnElement(element, promptId) : null;
-      const dockElement = composerDockRef.current;
-      const surface = dockElement?.querySelector<HTMLElement>(".composer-bar-surface");
-
-      if (element) {
-        resizeObserver.observe(element);
-      }
-      if (turn) {
-        resizeObserver.observe(turn);
-      }
-      if (dockElement) {
-        resizeObserver.observe(dockElement);
-      }
-      if (surface) {
-        resizeObserver.observe(surface);
-      }
-      alignment.resizeObserver = resizeObserver;
-    }
-
-    queueFinalOutputAlignmentFrame(promptId);
-  }
-
   function handleTurnMarkerClick(turnId: string): void {
-    cancelFinalOutputAlignment();
     latestOutputFollowPausedByUserRef.current = true;
     latestOutputFollowResumeIntentRef.current = false;
     followLatestOutputRef.current = false;
@@ -1262,14 +1105,6 @@ export function App() {
     if (followLatestOutputRef.current && !latestOutputFollowPausedByUserRef.current) {
       scrollLatestTurnOutputToTail(latestPromptId);
     }
-
-    if (pendingFinalOutputAlignmentRef.current) {
-      if (latestOutputFollowPausedByUserRef.current) {
-        cancelFinalOutputAlignment();
-        return;
-      }
-      startFinalOutputAlignment(latestPromptId);
-    }
   }, [
     composerSafeAreaPx,
     latestPromptId,
@@ -1299,7 +1134,6 @@ export function App() {
 
   useEffect(() => {
     return () => {
-      cancelFinalOutputAlignment();
       runStageInputIntentCleanupRef.current?.();
       runStageInputIntentCleanupRef.current = null;
       runStageResizeObserverRef.current?.disconnect();
@@ -1391,7 +1225,6 @@ export function App() {
     followLatestOutputRef.current = true;
     latestOutputFollowPausedByUserRef.current = false;
     latestOutputFollowResumeIntentRef.current = false;
-    cancelFinalOutputAlignment();
     setLatestTurnMinHeightPx(0);
     dispatch({ type: "run/requested", prompt, startedAtMs: Date.now() });
 
@@ -1464,7 +1297,6 @@ export function App() {
     followLatestOutputRef.current = false;
     latestOutputFollowPausedByUserRef.current = false;
     latestOutputFollowResumeIntentRef.current = false;
-    cancelFinalOutputAlignment();
     setLatestTurnMinHeightPx(0);
     dispatch({ type: "run/threadSwitch", threadId });
 
@@ -1614,7 +1446,6 @@ export function App() {
     followLatestOutputRef.current = false;
     latestOutputFollowPausedByUserRef.current = false;
     latestOutputFollowResumeIntentRef.current = false;
-    cancelFinalOutputAlignment();
     setLatestTurnMinHeightPx(0);
     terminalSeenRef.current = false;
     localStorage.removeItem("awaken:runId");

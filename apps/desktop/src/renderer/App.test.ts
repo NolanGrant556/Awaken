@@ -19,7 +19,6 @@ import {
   groupNarrativeByTurns,
   isNearLatestTurnOutputTail,
   resolvedDecisionForApproval,
-  scrollTopForFinalOutputGap,
   scrollTopForLatestTurnOutputTail,
   scrollTopForPromptAnchor,
   shouldPauseLatestOutputFollowForTouchMove,
@@ -387,48 +386,6 @@ describe("App workbench presentation", () => {
         anchorScrollTop: 480,
       }),
     ).toBe(620);
-  });
-
-  it("stabilizes the final output gap against the visible composer surface", () => {
-    expect(
-      scrollTopForFinalOutputGap({
-        currentScrollTop: 260,
-        outputBottom: 620,
-        composerTop: 640,
-        gap: 32,
-        maxScrollTop: 1000,
-      }),
-    ).toBe(272);
-    expect(
-      scrollTopForFinalOutputGap({
-        currentScrollTop: 260,
-        outputBottom: 500,
-        composerTop: 640,
-        gap: 32,
-        maxScrollTop: 1000,
-      }),
-    ).toBe(152);
-  });
-
-  it("clamps the final output gap scroll target to available scroll range", () => {
-    expect(
-      scrollTopForFinalOutputGap({
-        currentScrollTop: 260,
-        outputBottom: 800,
-        composerTop: 640,
-        gap: 32,
-        maxScrollTop: 300,
-      }),
-    ).toBe(300);
-    expect(
-      scrollTopForFinalOutputGap({
-        currentScrollTop: 20,
-        outputBottom: 400,
-        composerTop: 640,
-        gap: 32,
-        maxScrollTop: 1000,
-      }),
-    ).toBe(0);
   });
 
   it("detects whether the user is still following the latest output", () => {

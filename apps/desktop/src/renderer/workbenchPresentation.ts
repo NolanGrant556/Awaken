@@ -347,23 +347,6 @@ export function scrollTopForLatestTurnOutputTail({
   return Math.max(0, anchorScrollTop, scrollTopForTail);
 }
 
-export function scrollTopForFinalOutputGap({
-  currentScrollTop,
-  outputBottom,
-  composerTop,
-  gap,
-  maxScrollTop,
-}: {
-  currentScrollTop: number;
-  outputBottom: number;
-  composerTop: number;
-  gap: number;
-  maxScrollTop: number;
-}): number {
-  const nextScrollTop = currentScrollTop + outputBottom + Math.max(0, gap) - composerTop;
-  return Math.min(Math.max(0, maxScrollTop), Math.max(0, nextScrollTop));
-}
-
 export function isNearLatestTurnOutputTail({
   containerTop,
   outputBottom,

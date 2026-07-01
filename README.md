@@ -11,9 +11,10 @@ Awaken 是一个本地优先的 Agent runtime 与桌面应用原型。当前仓�
 
 本项目只允许两套本地入口：
 
-1. Awaken 使用入口：`npm run open:desktop`
-   - 用户和开发者都从这里打开同一个 Awaken Desktop。
+1. Awaken 使用入口：启动 `npm run open:desktop`，关闭 `npm run close:desktop`
+   - 用户和开发者都从这里打开和关闭同一个 Awaken Desktop。
    - 这个命令会复用或启动 `awaken-dev-desktop` screen 会话，并检查 renderer、Electron、`awaken-core` 和真实窗口。
+   - 关闭命令会停止 `awaken-dev-desktop` screen 会话，并清理同一入口留下的 renderer、Electron、`awaken-core` 进程。
    - Desktop 自己启动并管理 `awaken-core`。
    - 底层开发服务命令仍是 `npm run dev:desktop`，但只作为 `open:desktop` 使用的长期进程，不作为日常打开入口。
    - 不要把 `cmd/awaken-core`、Vite renderer 或 Electron 子脚本当成独立使用入口。
@@ -260,9 +261,10 @@ git diff --check
 
 ```bash
 npm run open:desktop
+npm run close:desktop
 ```
 
-`npm run open:desktop` 会复用或启动 `awaken-dev-desktop` screen 会话，并确认 renderer、Electron、`awaken-core` 和真实 Desktop 窗口都已就绪。底层的 `npm run dev:desktop` 会构建 `@awaken/design-system`，确保 `awaken-core` binary 存在，启动 Vite renderer（`127.0.0.1:5174`），编译 Electron main/preload，并启动 Electron；日常不要直接用它打开 Awaken。
+`npm run open:desktop` 会复用或启动 `awaken-dev-desktop` screen 会话，并确认 renderer、Electron、`awaken-core` 和真实 Desktop 窗口都已就绪。`npm run close:desktop` 会停止这个正式入口管理的 screen 会话，并清理遗留的 renderer、Electron、`awaken-core` 进程。底层的 `npm run dev:desktop` 会构建 `@awaken/design-system`，确保 `awaken-core` binary 存在，启动 Vite renderer（`127.0.0.1:5174`），编译 Electron main/preload，并启动 Electron；日常不要直接用它打开 Awaken。
 
 ### 组件独立观测入口
 

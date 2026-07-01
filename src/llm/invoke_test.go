@@ -150,6 +150,26 @@ func TestInvokeOpenAISendsConfigMaxTokens(t *testing.T) {
 	}
 }
 
+func TestInvokeOpenAIRequestDoesNotExposeInternalMetadataNames(t *testing.T) {
+	server := newChatServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+		assertNoInternalMetadataKeys(t, body)
+		writeJSON(t, w, map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{"message": map[string]interface{}{"content": "ok"}},
+			},
+		})
+	})
+	defer server.Close()
+
+	if _, err := Invoke(context.Background(), testConfig(server.URL), Request{UserPrompt: "hi"}); err != nil {
+		t.Fatalf("Invoke returned error: %v", err)
+	}
+}
+
 func TestInvokeOpenAIEmptyChoices(t *testing.T) {
 	server := newChatServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(t, w, map[string]interface{}{"choices": []interface{}{}})
@@ -197,6 +217,22 @@ func writeJSON(t *testing.T, w http.ResponseWriter, value interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(value); err != nil {
 		t.Fatalf("failed to encode response: %v", err)
+	}
+}
+
+func assertNoInternalMetadataKeys(t *testing.T, body map[string]json.RawMessage) {
+	t.Helper()
+	for _, key := range []string{
+		"ContextWindowState",
+		"contextWindowState",
+		"context_window_state",
+		"EnvelopeDebug",
+		"envelopeDebug",
+		"envelope_debug",
+	} {
+		if _, ok := body[key]; ok {
+			t.Fatalf("provider request exposed internal metadata key %q", key)
+		}
 	}
 }
 

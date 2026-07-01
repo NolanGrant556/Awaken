@@ -42,9 +42,11 @@ type Request struct {
 
 // Response 是统一响应结构
 type Response struct {
-	Content    string
-	ToolCalls  []ToolCall
-	IsFinished bool
+	Content          string
+	ToolCalls        []ToolCall
+	IsFinished       bool
+	StopReason       string
+	MaxOutputReached bool
 }
 
 // ToolCall 是统一工具调用结构
@@ -77,6 +79,15 @@ type Transport interface {
 
 type observerTransport interface {
 	StreamInvokeWithObserver(ctx stdctx.Context, cfg Config, req Request, observer StreamObserver) (*Response, error)
+}
+
+func isMaxOutputStopReason(stopReason string) bool {
+	switch strings.ToLower(strings.TrimSpace(stopReason)) {
+	case "length", "max_tokens", "max_output", "max_output_tokens":
+		return true
+	default:
+		return false
+	}
 }
 
 // resolveProtocol 解析协议类型

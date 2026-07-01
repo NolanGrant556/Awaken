@@ -146,6 +146,14 @@ pre {
   transform: translateY(-118px);
 }
 
+.composer-dock-stack,
+.composer-approval-card {
+  display: grid;
+  gap: 10px;
+  width: min(760px, 100%);
+  min-width: 0;
+}
+
 .aw-run-stage-scroll {
   --aw-prompt-anchor-offset: 0px;
   --aw-turn-content-width: 760px;
@@ -236,11 +244,6 @@ pre {
   line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-
-.narrative-click-target {
-  cursor: pointer;
-  outline: none;
 }
 
 .execution-turn-section {
@@ -430,22 +433,6 @@ pre {
   max-width: var(--aw-turn-content-width);
   min-width: 0;
   justify-self: center;
-}
-
-.narrative-click-target {
-  box-sizing: border-box;
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-}
-
-.narrative-click-target:hover,
-.narrative-click-target:focus-visible {
-  filter: brightness(0.99);
-}
-
-.narrative-click-target:focus-visible {
-  box-shadow: var(--aw-shadow-focus);
 }
 
 .narrative-kind-planning,

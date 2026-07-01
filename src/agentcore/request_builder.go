@@ -1,8 +1,10 @@
 package agentcore
 
 import (
+	"fmt"
 	"strings"
 
+	convcontext "awaken/src/context"
 	"awaken/src/prompt"
 	"awaken/src/tool"
 )
@@ -24,32 +26,74 @@ func (rb *RequestBuilder) UpdateRuntimeInfo(info prompt.RuntimeInfo) {
 }
 
 func (rb *RequestBuilder) Build(ctx ContextProvider, tools []tool.ToolDefinition) LLMRequest {
+	envelope := rb.BuildContextEnvelope(ctx, tools)
+	return rb.BuildLLMRequestFromEnvelope(envelope)
+}
+
+func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool.ToolDefinition) ContextEnvelope {
 	if tools == nil {
 		tools = rb.getTools()
 	}
-	rb.updateRuntimeInfoFromConfig(tools)
 
-	systemPrompt := rb.buildSystemPrompt()
+	staticContent := rb.buildStaticSystemPrompt()
+	snapshot := rb.buildRuntimeSnapshot(tools)
 	messages := ctx.GetMessages()
+	if modelProvider, ok := ctx.(interface {
+		GetMessagesForModel() []convcontext.Message
+	}); ok {
+		messages = modelProvider.GetMessagesForModel()
+	}
 
+	envelope := ContextEnvelope{
+		SystemBlocks: []ContextBlock{
+			{ID: "system_prompt", Content: staticContent},
+		},
+		SystemContextItems: []ContextItem{
+			runtimeSnapshotSystemItem(snapshot),
+		},
+		ToolSchemas:     cloneToolDefinitions(tools),
+		RuntimeSnapshot: snapshot,
+		CacheKeys:       rb.buildCacheKeys(staticContent, tools, snapshot),
+		Deltas:          rb.buildContextDeltas(snapshot, tools),
+		Messages:        cloneContextMessages(messages),
+		Model:           rb.config.ModelConfig.Model,
+		Temperature:     rb.config.ModelConfig.Temperature,
+		MaxTokens:       rb.config.ModelConfig.MaxTokens,
+	}
+	envelope.ContextWindowState = NewContextWindowState(envelope)
+	return envelope
+}
+
+func (rb *RequestBuilder) BuildLLMRequestFromEnvelope(envelope ContextEnvelope) LLMRequest {
+	envelopeCopy := envelope
 	return LLMRequest{
-		SystemPrompt: systemPrompt,
-		Messages:     messages,
-		Tools:        tools,
-		Model:        rb.config.ModelConfig.Model,
-		Temperature:  rb.config.ModelConfig.Temperature,
-		MaxTokens:    rb.config.ModelConfig.MaxTokens,
+		SystemPrompt:       rb.buildSystemPromptFromEnvelope(envelope),
+		Messages:           cloneContextMessages(envelope.Messages),
+		Tools:              cloneToolDefinitions(envelope.ToolSchemas),
+		Model:              envelope.Model,
+		Temperature:        envelope.Temperature,
+		MaxTokens:          envelope.MaxTokens,
+		ContextWindowState: envelope.ContextWindowState,
+		EnvelopeDebug:      &envelopeCopy,
 	}
 }
 
-func (rb *RequestBuilder) buildSystemPrompt() string {
+func (rb *RequestBuilder) buildStaticSystemPrompt() string {
 	var staticContent string
 	if rb.config.SystemPrompt != "" {
 		staticContent = rb.config.SystemPrompt
 	} else {
 		staticContent, _ = prompt.LoadDefaultPrompt()
 	}
-	return prompt.BuildEffectiveSystemPrompt(staticContent, rb.runtimeInfo)
+	return staticContent
+}
+
+func (rb *RequestBuilder) buildSystemPromptFromEnvelope(envelope ContextEnvelope) string {
+	staticContent := ""
+	if len(envelope.SystemBlocks) > 0 {
+		staticContent = envelope.SystemBlocks[0].Content
+	}
+	return prompt.BuildEffectiveSystemPrompt(staticContent, envelope.RuntimeSnapshot.ToRuntimeInfo())
 }
 
 func (rb *RequestBuilder) getTools() []tool.ToolDefinition {
@@ -103,6 +147,22 @@ func (rb *RequestBuilder) updateRuntimeInfoFromConfig(tools []tool.ToolDefinitio
 	rb.runtimeInfo.SetToolSummary(rb.buildToolSummary(tools))
 }
 
+func (rb *RequestBuilder) buildRuntimeSnapshot(tools []tool.ToolDefinition) RuntimeSnapshot {
+	rb.updateRuntimeInfoFromConfig(tools)
+	permissionContext := tool.NewPermissionContext(rb.config.Workspace.Root, rb.config.Workspace.WritableRoots)
+	snapshot := RuntimeSnapshot{
+		CurrentDate:      rb.runtimeInfo.CurrentDate,
+		WorkingDirectory: rb.runtimeInfo.WorkingDir,
+		ModelName:        rb.runtimeInfo.ModelName,
+		EntryPoint:       rb.runtimeInfo.EntryPoint,
+		ToolSummary:      rb.runtimeInfo.ToolSummary,
+		WorkspaceRoot:    permissionContext.WorkspaceRoot,
+		WritableRoots:    append([]string(nil), permissionContext.WritableRoots...),
+	}
+	rb.runtimeInfo = snapshot.ToRuntimeInfo()
+	return snapshot
+}
+
 func (rb *RequestBuilder) buildToolSummary(tools []tool.ToolDefinition) string {
 	if len(tools) == 0 {
 		return "无可用工具"
@@ -116,6 +176,42 @@ func (rb *RequestBuilder) buildToolSummary(tools []tool.ToolDefinition) string {
 		summary += t.Function.Name
 	}
 	return summary
+}
+
+func (rb *RequestBuilder) buildCacheKeys(staticContent string, tools []tool.ToolDefinition, snapshot RuntimeSnapshot) []ContextCacheKey {
+	return []ContextCacheKey{
+		{Name: "system_prompt", Value: fmt.Sprintf("len:%d", len(staticContent))},
+		{Name: "tool_pool", Value: rb.buildToolSummary(tools)},
+		{Name: "runtime_snapshot", Value: snapshot.WorkingDirectory + "|" + snapshot.ModelName + "|" + snapshot.EntryPoint},
+	}
+}
+
+func (rb *RequestBuilder) buildContextDeltas(snapshot RuntimeSnapshot, tools []tool.ToolDefinition) []ContextDelta {
+	return []ContextDelta{
+		{
+			Type:    ContextDeltaRuntimeSnapshot,
+			Summary: snapshot.WorkingDirectory + "|" + snapshot.ModelName + "|" + snapshot.EntryPoint,
+		},
+		{
+			Type:    ContextDeltaToolPool,
+			Summary: rb.buildToolSummary(tools),
+		},
+	}
+}
+
+func cloneContextMessages(messages []convcontext.Message) []convcontext.Message {
+	result := make([]convcontext.Message, len(messages))
+	for i, message := range messages {
+		result[i] = message
+		result[i].ToolCalls = append([]convcontext.ToolCall(nil), message.ToolCalls...)
+	}
+	return result
+}
+
+func cloneToolDefinitions(tools []tool.ToolDefinition) []tool.ToolDefinition {
+	result := make([]tool.ToolDefinition, len(tools))
+	copy(result, tools)
+	return result
 }
 
 func BuildRequest(config AgentConfig, ctx ContextProvider) LLMRequest {

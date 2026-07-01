@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { accessSync, constants } from "node:fs";
-import { dirname, join } from "node:path";
+import { accessSync, constants, readdirSync, statSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -8,6 +8,7 @@ const root = join(__dirname, "..");
 const target = `${process.platform}-${process.arch}`;
 const binName = process.platform === "win32" ? "awaken-core.exe" : "awaken-core";
 const binaryPath = join(root, "apps", "desktop", "resources", "bin", target, binName);
+const sourceRoots = [join(root, "go.mod"), join(root, "cmd"), join(root, "src")];
 
 function hasExecutableBinary() {
   try {
@@ -18,12 +19,62 @@ function hasExecutableBinary() {
   }
 }
 
-if (hasExecutableBinary()) {
-  console.log(`[ensure-desktop-runtime] found ${binaryPath}`);
+function isRuntimeSource(filePath) {
+  return filePath === join(root, "go.mod") || (filePath.endsWith(".go") && !filePath.endsWith("_test.go"));
+}
+
+function newestRuntimeSource() {
+  let newest = { path: "", mtimeMs: 0 };
+
+  function visit(filePath) {
+    let stat;
+    try {
+      stat = statSync(filePath);
+    } catch {
+      return;
+    }
+
+    if (stat.isDirectory()) {
+      for (const entry of readdirSync(filePath, { withFileTypes: true })) {
+        visit(join(filePath, entry.name));
+      }
+      return;
+    }
+
+    if (stat.isFile() && isRuntimeSource(filePath) && stat.mtimeMs > newest.mtimeMs) {
+      newest = { path: filePath, mtimeMs: stat.mtimeMs };
+    }
+  }
+
+  for (const sourceRoot of sourceRoots) {
+    visit(sourceRoot);
+  }
+
+  return newest;
+}
+
+function buildReason() {
+  if (!hasExecutableBinary()) {
+    return `missing ${binaryPath}`;
+  }
+
+  const binaryStat = statSync(binaryPath);
+  const newestSource = newestRuntimeSource();
+  if (newestSource.path && newestSource.mtimeMs > binaryStat.mtimeMs + 1) {
+    return `${relative(root, newestSource.path)} is newer than ${relative(root, binaryPath)}`;
+  }
+
+  return "";
+}
+
+const reason = buildReason();
+
+if (!reason) {
+  console.log(`[ensure-desktop-runtime] found current ${binaryPath}`);
   process.exit(0);
 }
 
-console.log(`[ensure-desktop-runtime] missing ${binaryPath}; building awaken-core for ${target}`);
+console.log(`[ensure-desktop-runtime] ${reason}; building awaken-core for ${target}`);
 
 try {
   execFileSync("node", ["scripts/build-binary.mjs"], {

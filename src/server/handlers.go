@@ -301,32 +301,35 @@ func mapRuntimeEvent(event awruntime.Event) []agui.Event {
 		return mapped
 	case awruntime.EventKindRunCancelled:
 		return []agui.Event{{
-			Type:      agui.EventRunError,
-			Seq:       frameSeq(event.Seq, 0),
-			Timestamp: event.Timestamp.UnixMilli(),
-			ThreadID:  event.ThreadID,
-			RunID:     event.RunID,
-			Message:   event.Message,
-			Code:      "RUN_CANCELLED",
+			Type:           agui.EventRunError,
+			Seq:            frameSeq(event.Seq, 0),
+			Timestamp:      event.Timestamp.UnixMilli(),
+			ThreadID:       event.ThreadID,
+			RunID:          event.RunID,
+			Message:        event.Message,
+			Code:           "RUN_CANCELLED",
+			TerminalReason: string(event.TerminalReason),
 		}}
 	case awruntime.EventKindRunError:
 		return []agui.Event{{
-			Type:      agui.EventRunError,
-			Seq:       frameSeq(event.Seq, 0),
-			Timestamp: event.Timestamp.UnixMilli(),
-			ThreadID:  event.ThreadID,
-			RunID:     event.RunID,
-			Message:   event.Message,
-			Code:      event.Code,
+			Type:           agui.EventRunError,
+			Seq:            frameSeq(event.Seq, 0),
+			Timestamp:      event.Timestamp.UnixMilli(),
+			ThreadID:       event.ThreadID,
+			RunID:          event.RunID,
+			Message:        event.Message,
+			Code:           event.Code,
+			TerminalReason: string(event.TerminalReason),
 		}}
 	case awruntime.EventKindRunStatusChanged:
 		return []agui.Event{{
-			Type:      agui.EventRunStatusChanged,
-			Seq:       frameSeq(event.Seq, 0),
-			Timestamp: event.Timestamp.UnixMilli(),
-			ThreadID:  event.ThreadID,
-			RunID:     event.RunID,
-			Status:    event.Status,
+			Type:           agui.EventRunStatusChanged,
+			Seq:            frameSeq(event.Seq, 0),
+			Timestamp:      event.Timestamp.UnixMilli(),
+			ThreadID:       event.ThreadID,
+			RunID:          event.RunID,
+			Status:         event.Status,
+			TerminalReason: string(event.TerminalReason),
 		}}
 	default:
 		return nil

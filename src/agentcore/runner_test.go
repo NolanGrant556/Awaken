@@ -154,15 +154,12 @@ func TestRunnerToolErrorObservation(t *testing.T) {
 	}
 }
 
-func TestRunnerOpenAIApplyPatchCreateAndDelete(t *testing.T) {
+func TestRunnerOpenAIApplyPatchAutoDenyFeedsBack(t *testing.T) {
 	root := t.TempDir()
 	target := root + "/runner_patch.txt"
 	createPatch := "*** Begin Patch\n" +
 		"*** Add File: " + target + "\n" +
 		"+created by runner\n" +
-		"*** End Patch"
-	deletePatch := "*** Begin Patch\n" +
-		"*** Delete File: " + target + "\n" +
 		"*** End Patch"
 
 	var calls int
@@ -177,45 +174,47 @@ func TestRunnerOpenAIApplyPatchCreateAndDelete(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatalf("failed to decode request: %v", err)
 			}
-			if !containsToolResultSubstring(body.Messages, "call_create_patch", "Success. Updated the following files") {
-				t.Fatalf("expected create patch result, got %+v", body.Messages)
-			}
-			if content, err := os.ReadFile(target); err != nil || string(content) != "created by runner\n" {
-				t.Fatalf("expected created file, content=%q err=%v", string(content), err)
-			}
-			writeRunnerStreamToolCall(t, w, "call_delete_patch", "apply_patch", map[string]string{"patch": deletePatch})
-			return
-		}
-		if calls == 3 {
-			var body chatRequestSnapshot
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Fatalf("failed to decode request: %v", err)
-			}
-			if !containsToolResultSubstring(body.Messages, "call_delete_patch", "Success. Updated the following files") {
-				t.Fatalf("expected delete patch result, got %+v", body.Messages)
-			}
 			if _, err := os.Stat(target); !os.IsNotExist(err) {
-				t.Fatalf("expected deleted file, stat err=%v", err)
+				t.Fatalf("expected AUTO-denied patch not to create file, stat err=%v", err)
 			}
-			writeRunnerStreamText(t, w, "patch complete")
+			if !containsToolResultSubstring(body.Messages, "call_create_patch", "工具执行被 AUTO policy 拒绝") {
+				t.Fatalf("expected AUTO deny tool result, got %+v", body.Messages)
+			}
+			writeRunnerStreamText(t, w, "patch denied")
 			return
 		}
 		t.Fatalf("unexpected call %d", calls)
 	})
 	defer server.Close()
 
-	answer, err := runAgentWithApprovalSink(context.Background(), testAgentConfigWithWorkspace(server.URL, 5, root), "create then delete via apply_patch", testApprovalAwaiter{
-		decision: ApprovalDecisionApproved,
-	})
+	var sawApproval bool
+	var gotEvents []AwakenEvent
+	agent := NewAgent(testAgentConfigWithWorkspace(server.URL, 3, root))
+	answer, err := agent.RunStreamWithEvents(context.Background(), "create via apply_patch", EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+		if event.Type == ApprovalRequestedEventType {
+			sawApproval = true
+		}
+	}))
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if answer != "patch complete" {
+	if answer != "patch denied" {
 		t.Fatalf("expected final answer, got %q", answer)
+	}
+	if sawApproval {
+		t.Fatalf("expected AUTO deny path not to request approval")
+	}
+	startIndex := firstEventIndex(gotEvents, ToolCallStartedEventType)
+	decisionIndex := firstEventIndex(gotEvents, ToolPermissionDecidedEventType)
+	resultIndex := firstEventIndex(gotEvents, ToolResultEventType)
+	if startIndex < 0 || decisionIndex < 0 || resultIndex < 0 || !(startIndex < decisionIndex && decisionIndex < resultIndex) {
+		t.Fatalf("expected ToolPermissionDecided between ToolCallStarted and ToolResult, got start=%d decision=%d result=%d events=%+v",
+			startIndex, decisionIndex, resultIndex, eventTypes(gotEvents))
 	}
 }
 
-func TestRunnerAnthropicApplyPatchToolUse(t *testing.T) {
+func TestRunnerAnthropicApplyPatchAutoDenyFeedsBack(t *testing.T) {
 	root := t.TempDir()
 	target := root + "/anthropic_patch.txt"
 	patch := "*** Begin Patch\n" +
@@ -248,30 +247,30 @@ func TestRunnerAnthropicApplyPatchToolUse(t *testing.T) {
 		if !anthropicRequestContainsToolResult(body.Messages, "toolu_patch") {
 			t.Fatalf("expected anthropic tool_result, got %+v", body.Messages)
 		}
-		if content, err := os.ReadFile(target); err != nil || string(content) != "created by anthropic\n" {
-			t.Fatalf("expected created file, content=%q err=%v", string(content), err)
+		if _, err := os.Stat(target); !os.IsNotExist(err) {
+			t.Fatalf("expected AUTO-denied patch not to create file, stat err=%v", err)
 		}
-		writeRunnerAnthropicTextStream(t, w, "anthropic patch complete")
+		writeRunnerAnthropicTextStream(t, w, "anthropic patch denied")
 	}))
 	defer server.Close()
 
 	cfg := testAgentConfigWithWorkspace(server.URL+"/anthropic", 3, root)
-	answer, err := runAgentWithApprovalSink(context.Background(), cfg, "create via anthropic apply_patch", testApprovalAwaiter{
-		decision: ApprovalDecisionApproved,
-	})
+	var sawApproval bool
+	agent := NewAgent(cfg)
+	answer, err := agent.RunStreamWithEvents(context.Background(), "create via anthropic apply_patch", EventSinkFunc(func(event AwakenEvent) {
+		if event.Type == ApprovalRequestedEventType {
+			sawApproval = true
+		}
+	}))
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if answer != "anthropic patch complete" {
+	if answer != "anthropic patch denied" {
 		t.Fatalf("expected final answer, got %q", answer)
 	}
-}
-
-func runAgentWithApprovalSink(ctx context.Context, cfg AgentConfig, userInput string, sink EventSink) (string, error) {
-	conv := convcontext.NewConversation(nil)
-	conv.UserInput(userInput)
-	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
-	return runner.RunStreamWithEvents(ctx, sink)
+	if sawApproval {
+		t.Fatalf("expected AUTO deny path not to request approval")
+	}
 }
 
 func TestRunnerMaxThoughts(t *testing.T) {
@@ -284,9 +283,134 @@ func TestRunnerMaxThoughts(t *testing.T) {
 	defer server.Close()
 
 	agent := NewAgent(testAgentConfig(server.URL, 1))
-	_, err := agent.RunStreamWithEvents(context.Background(), "loop", nil)
+	var gotEvents []AwakenEvent
+	_, err := agent.RunStreamWithEvents(context.Background(), "loop", EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
 	if err == nil || !strings.Contains(err.Error(), "达到最大思考次数") {
 		t.Fatalf("expected max thoughts error, got %v", err)
+	}
+	messages := agent.GetConversation().Context.GetMessages()
+	if !conversationHasToolResult(messages, "call_max", "echo:again") {
+		t.Fatalf("expected final tool result to be retained before max_turns, got %+v", messages)
+	}
+	turnFinishedIndex := firstEventIndex(gotEvents, TurnFinishedEventType)
+	if turnFinishedIndex < 0 || gotEvents[turnFinishedIndex].TerminalReason != TerminalReasonMaxTurns {
+		t.Fatalf("expected TurnFinished max_turns, got %+v", gotEvents)
+	}
+	runErrorIndex := firstEventIndex(gotEvents, RunErrorEventType)
+	if runErrorIndex < 0 || gotEvents[runErrorIndex].TerminalReason != TerminalReasonMaxTurns {
+		t.Fatalf("expected RunError max_turns, got %+v", gotEvents)
+	}
+}
+
+func TestRunnerHundredToolLoopStopsAtMaxTurns(t *testing.T) {
+	toolName := "runner_hundred_loop_tool"
+	mustRegisterRunnerTool(t, runnerTestTool{name: toolName})
+
+	var calls int
+	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		writeRunnerStreamToolCall(t, w,
+			fmt.Sprintf("call_loop_%03d", calls),
+			toolName,
+			map[string]string{"value": fmt.Sprintf("again-%03d", calls)},
+		)
+	})
+	defer server.Close()
+
+	agent := NewAgent(testAgentConfig(server.URL, 100))
+	var gotEvents []AwakenEvent
+	_, err := agent.RunStreamWithEvents(context.Background(), "loop", EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+	if err == nil || !strings.Contains(err.Error(), "达到最大思考次数") {
+		t.Fatalf("expected max thoughts error, got %v", err)
+	}
+	if calls != 100 {
+		t.Fatalf("expected 100 LLM calls, got %d", calls)
+	}
+
+	messages := agent.GetConversation().Context.GetMessages()
+	if err := convcontext.ValidateToolResultPairing(messages); err != nil {
+		t.Fatalf("expected valid tool result pairing after 100-turn loop, got %v", err)
+	}
+	var toolResultCount int
+	for _, msg := range messages {
+		if msg.Role == convcontext.RoleTool {
+			toolResultCount++
+		}
+	}
+	if toolResultCount != 100 {
+		t.Fatalf("expected 100 tool results, got %d", toolResultCount)
+	}
+
+	var approvalCount, decisionCount int
+	for _, event := range gotEvents {
+		switch event.Type {
+		case ApprovalRequestedEventType:
+			approvalCount++
+		case ToolPermissionDecidedEventType:
+			decisionCount++
+			if event.ToolDecisionAction != string(ToolDecisionAllow) {
+				t.Fatalf("expected allow decision in 100-turn loop, got %+v", event)
+			}
+		}
+	}
+	if approvalCount != 0 {
+		t.Fatalf("expected no approval requests, got %d", approvalCount)
+	}
+	if decisionCount != 100 {
+		t.Fatalf("expected 100 tool permission decisions, got %d", decisionCount)
+	}
+	if len(gotEvents) > 1200 {
+		t.Fatalf("expected event count to remain bounded, got %d", len(gotEvents))
+	}
+	runErrorIndex := firstEventIndex(gotEvents, RunErrorEventType)
+	if runErrorIndex < 0 || gotEvents[runErrorIndex].TerminalReason != TerminalReasonMaxTurns {
+		t.Fatalf("expected RunError max_turns, got %+v", gotEvents)
+	}
+}
+
+func TestRunnerZeroMaxThoughtsAllowsMoreThanDefaultLimit(t *testing.T) {
+	toolName := "runner_unlimited_loop_tool"
+	mustRegisterRunnerTool(t, runnerTestTool{name: toolName})
+
+	var calls int
+	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls <= 7 {
+			writeRunnerStreamToolCall(t, w,
+				fmt.Sprintf("call_unlimited_%03d", calls),
+				toolName,
+				map[string]string{"value": fmt.Sprintf("again-%03d", calls)},
+			)
+			return
+		}
+		writeRunnerStreamText(t, w, "unlimited final")
+	})
+	defer server.Close()
+
+	agent := NewAgent(testAgentConfig(server.URL, 0))
+	answer, err := agent.RunStreamWithEvents(context.Background(), "loop without max", nil)
+	if err != nil {
+		t.Fatalf("RunStreamWithEvents returned error: %v", err)
+	}
+	if answer != "unlimited final" {
+		t.Fatalf("expected final answer, got %q", answer)
+	}
+	if calls != 8 {
+		t.Fatalf("expected 8 LLM calls, got %d", calls)
+	}
+
+	var toolResultCount int
+	for _, msg := range agent.GetConversation().Context.GetMessages() {
+		if msg.Role == convcontext.RoleTool {
+			toolResultCount++
+		}
+	}
+	if toolResultCount != 7 {
+		t.Fatalf("expected 7 tool results, got %d", toolResultCount)
 	}
 }
 
@@ -439,6 +563,8 @@ data: {"type":"message_stop"}`,
 
 	wantTypes := []AwakenEventType{
 		RunStartedEventType,
+		TurnStartedEventType,
+		ContextEstimatedEventType,
 		ReasoningStartedEventType,
 		ReasoningDeltaEventType,
 		ToolCallArgsDeltaEventType,
@@ -449,11 +575,16 @@ data: {"type":"message_stop"}`,
 		ToolCallArgsEventType,
 		ToolCallFinishedEventType,
 		ToolProgressEventType,
+		ToolPermissionDecidedEventType,
 		ToolProgressEventType,
 		ToolResultEventType,
+		TurnFinishedEventType,
+		TurnStartedEventType,
+		ContextEstimatedEventType,
 		TextMessageStartedEventType,
 		TextDeltaEventType,
 		TextMessageFinishedEventType,
+		TurnFinishedEventType,
 		RunFinishedEventType,
 	}
 	if len(gotTypes) != len(wantTypes) {
@@ -464,23 +595,79 @@ data: {"type":"message_stop"}`,
 			t.Fatalf("unexpected event type at %d: want %s got %s (%v)", i, want, gotTypes[i], gotTypes)
 		}
 	}
-	if gotEvents[3].Delta != "{" || gotEvents[4].Delta != "\"value\":\"hello\"" || gotEvents[5].Delta != "}" {
-		t.Fatalf("unexpected tool args deltas: %q %q %q", gotEvents[3].Delta, gotEvents[4].Delta, gotEvents[5].Delta)
+	if gotEvents[5].Delta != "{" || gotEvents[6].Delta != "\"value\":\"hello\"" || gotEvents[7].Delta != "}" {
+		t.Fatalf("unexpected tool args deltas: %q %q %q", gotEvents[5].Delta, gotEvents[6].Delta, gotEvents[7].Delta)
 	}
-	if gotEvents[7].ToolName != toolName || gotEvents[8].ToolName != toolName || gotEvents[9].ToolName != toolName {
-		t.Fatalf("expected tool identity on start/args/end events, got %q %q %q", gotEvents[7].ToolName, gotEvents[8].ToolName, gotEvents[9].ToolName)
+	if gotEvents[9].ToolName != toolName || gotEvents[10].ToolName != toolName || gotEvents[11].ToolName != toolName {
+		t.Fatalf("expected tool identity on start/args/end events, got %q %q %q", gotEvents[9].ToolName, gotEvents[10].ToolName, gotEvents[11].ToolName)
 	}
-	if gotEvents[8].Arguments != `{"value":"hello"}` {
-		t.Fatalf("expected complete tool args fallback, got %q", gotEvents[8].Arguments)
+	if gotEvents[10].Arguments != `{"value":"hello"}` {
+		t.Fatalf("expected complete tool args fallback, got %q", gotEvents[10].Arguments)
 	}
-	if gotEvents[10].Progress != "Executing tool" || gotEvents[11].Progress != "Tool execution complete" {
-		t.Fatalf("unexpected tool progress events: %q %q", gotEvents[10].Progress, gotEvents[11].Progress)
+	if gotEvents[12].Progress != "Executing tool" || gotEvents[14].Progress != "Tool execution complete" {
+		t.Fatalf("unexpected tool progress events: %q %q", gotEvents[12].Progress, gotEvents[14].Progress)
 	}
-	if gotEvents[12].Content != "echo:hello" {
-		t.Fatalf("expected tool result content echo:hello, got %q", gotEvents[12].Content)
+	if gotEvents[15].Content != "echo:hello" {
+		t.Fatalf("expected tool result content echo:hello, got %q", gotEvents[15].Content)
 	}
-	if gotEvents[14].Delta != "done" {
-		t.Fatalf("expected final text delta done, got %q", gotEvents[14].Delta)
+	if gotEvents[20].Delta != "done" {
+		t.Fatalf("expected final text delta done, got %q", gotEvents[20].Delta)
+	}
+}
+
+func TestRunnerRunStreamWithEventsEmitsTurnState(t *testing.T) {
+	toolName := "runner_turn_state_tool"
+	mustRegisterRunnerTool(t, runnerTestTool{name: toolName})
+
+	var calls int
+	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			writeRunnerStreamToolCall(t, w, "call_turn_state", toolName, map[string]string{"value": "hello"})
+			return
+		}
+		writeRunnerStreamText(t, w, "done")
+	})
+	defer server.Close()
+
+	agent := NewAgent(testAgentConfig(server.URL, 3))
+	var gotEvents []AwakenEvent
+	answer, err := agent.RunStreamWithEvents(context.Background(), "turn state", EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+	if err != nil {
+		t.Fatalf("RunStreamWithEvents returned error: %v", err)
+	}
+	if answer != "done" {
+		t.Fatalf("expected done, got %q", answer)
+	}
+
+	var starts, finishes []AwakenEvent
+	for _, event := range gotEvents {
+		switch event.Type {
+		case TurnStartedEventType:
+			starts = append(starts, event)
+		case TurnFinishedEventType:
+			finishes = append(finishes, event)
+		}
+	}
+	if len(starts) != 2 || len(finishes) != 2 {
+		t.Fatalf("expected two turn starts and finishes, got starts=%+v finishes=%+v", starts, finishes)
+	}
+	if starts[0].TurnCount != 1 || starts[1].TurnCount != 2 {
+		t.Fatalf("expected turn count to grow 1,2, got %d,%d", starts[0].TurnCount, starts[1].TurnCount)
+	}
+	if starts[0].TurnID == "" || starts[1].TurnID == "" || starts[0].TurnID == starts[1].TurnID {
+		t.Fatalf("expected stable unique turn ids, got %q and %q", starts[0].TurnID, starts[1].TurnID)
+	}
+	if starts[0].QueryChainID == "" || starts[0].QueryChainID != starts[1].QueryChainID {
+		t.Fatalf("expected shared query chain id, got %q and %q", starts[0].QueryChainID, starts[1].QueryChainID)
+	}
+	if finishes[0].TransitionReason != TransitionToolResultContinuation {
+		t.Fatalf("expected first turn to continue after tool result, got %q", finishes[0].TransitionReason)
+	}
+	if finishes[1].TerminalReason != TerminalReasonCompleted {
+		t.Fatalf("expected final turn terminal reason completed, got %q", finishes[1].TerminalReason)
 	}
 }
 
@@ -671,9 +858,12 @@ func TestRunnerRunStreamWithEventsPlainQA(t *testing.T) {
 
 	wantTypes := []AwakenEventType{
 		RunStartedEventType,
+		TurnStartedEventType,
+		ContextEstimatedEventType,
 		TextMessageStartedEventType,
 		TextDeltaEventType,
 		TextMessageFinishedEventType,
+		TurnFinishedEventType,
 		RunFinishedEventType,
 	}
 	var gotTypes []AwakenEventType
@@ -694,6 +884,174 @@ func TestRunnerRunStreamWithEventsPlainQA(t *testing.T) {
 		case ToolCallStartedEventType, ToolCallArgsEventType, ToolCallFinishedEventType, ToolResultEventType, ApprovalRequestedEventType:
 			t.Fatalf("unexpected event type in plain Q&A: %s", event.Type)
 		}
+	}
+}
+
+func TestRunnerReactiveCompactRetrySuccess(t *testing.T) {
+	conv := convcontext.NewConversation(nil)
+	runner := NewRunner(AgentConfig{
+		MaxThoughts: 3,
+		ModelConfig: ModelConfig{
+			Model: "test-model",
+		},
+	}, conv, NewRequestBuilder(AgentConfig{
+		SystemPrompt: "{{.RuntimeInfo}}",
+		ModelConfig:  ModelConfig{Model: "test-model"},
+	}))
+	calls := 0
+	runner.streamLLMFunc = func(context.Context, *runEventEmitter) (*llm.Response, error) {
+		calls++
+		if calls == 1 {
+			return nil, errors.New("prompt too long")
+		}
+		return &llm.Response{Content: "done"}, nil
+	}
+
+	var gotEvents []AwakenEvent
+	conv.UserInput("remember this before compact")
+	answer, err := runner.RunStreamWithEvents(context.Background(), EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+	if err != nil {
+		t.Fatalf("RunStreamWithEvents returned error: %v", err)
+	}
+	if answer != "done" || calls != 2 {
+		t.Fatalf("expected retry to succeed after 2 calls, answer=%q calls=%d", answer, calls)
+	}
+	if firstEventIndex(gotEvents, CompactStartedEventType) < 0 || firstEventIndex(gotEvents, CompactFinishedEventType) < 0 {
+		t.Fatalf("expected compact lifecycle events, got %v", eventTypes(gotEvents))
+	}
+	retryTurnIndex := firstEventIndex(gotEvents, TurnFinishedEventType)
+	if retryTurnIndex < 0 || gotEvents[retryTurnIndex].TransitionReason != TransitionReactiveCompactRetry {
+		t.Fatalf("expected first turn to finish with reactive compact transition, got %+v", gotEvents)
+	}
+}
+
+func TestRunnerReactiveCompactSecondPromptTooLongTerminates(t *testing.T) {
+	conv := convcontext.NewConversation(nil)
+	runner := NewRunner(AgentConfig{
+		MaxThoughts: 3,
+		ModelConfig: ModelConfig{
+			Model: "test-model",
+		},
+	}, conv, NewRequestBuilder(AgentConfig{
+		SystemPrompt: "{{.RuntimeInfo}}",
+		ModelConfig:  ModelConfig{Model: "test-model"},
+	}))
+	calls := 0
+	runner.streamLLMFunc = func(context.Context, *runEventEmitter) (*llm.Response, error) {
+		calls++
+		return nil, errors.New("maximum context length exceeded")
+	}
+
+	var gotEvents []AwakenEvent
+	conv.UserInput("remember this before compact")
+	_, err := runner.RunStreamWithEvents(context.Background(), EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+	if err == nil || !strings.Contains(err.Error(), "maximum context length") {
+		t.Fatalf("expected prompt too long error, got %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected exactly one retry after reactive compact, got %d calls", calls)
+	}
+	runErrorIndex := firstEventIndex(gotEvents, RunErrorEventType)
+	if runErrorIndex < 0 {
+		t.Fatalf("expected RunError event, got %v", eventTypes(gotEvents))
+	}
+	if gotEvents[runErrorIndex].TerminalReason != TerminalReasonPromptTooLong {
+		t.Fatalf("expected prompt_too_long terminal reason, got %+v", gotEvents[runErrorIndex])
+	}
+}
+
+func TestRunnerContinuesOnceAfterMaxOutput(t *testing.T) {
+	conv := convcontext.NewConversation(nil)
+	runner := NewRunner(AgentConfig{
+		MaxThoughts: 3,
+		ModelConfig: ModelConfig{
+			Model: "test-model",
+		},
+	}, conv, NewRequestBuilder(AgentConfig{
+		SystemPrompt: "{{.RuntimeInfo}}",
+		ModelConfig:  ModelConfig{Model: "test-model"},
+	}))
+	calls := 0
+	runner.streamLLMFunc = func(context.Context, *runEventEmitter) (*llm.Response, error) {
+		calls++
+		if calls == 1 {
+			return &llm.Response{
+				Content:          "partial ",
+				IsFinished:       true,
+				StopReason:       "max_tokens",
+				MaxOutputReached: true,
+			}, nil
+		}
+		return &llm.Response{Content: "done", IsFinished: true}, nil
+	}
+
+	var gotEvents []AwakenEvent
+	conv.UserInput("write a long answer")
+	answer, err := runner.RunStreamWithEvents(context.Background(), EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+	if err != nil {
+		t.Fatalf("RunStreamWithEvents returned error: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected one continuation request, got %d calls", calls)
+	}
+	if answer != "partial done" {
+		t.Fatalf("expected combined answer, got %q", answer)
+	}
+	firstFinish := firstEventIndex(gotEvents, TurnFinishedEventType)
+	if firstFinish < 0 || gotEvents[firstFinish].TransitionReason != TransitionMaxOutputContinuation {
+		t.Fatalf("expected first turn to finish with max output continuation, got %+v", gotEvents)
+	}
+	messages := conv.Context.GetMessages()
+	if len(messages) < 3 || !strings.Contains(messages[2].Content, "stop_reason=max_tokens") {
+		t.Fatalf("expected continuation prompt to record stop reason, got %+v", messages)
+	}
+}
+
+func TestRunnerStopsAfterMaxOutputContinuationLimit(t *testing.T) {
+	conv := convcontext.NewConversation(nil)
+	runner := NewRunner(AgentConfig{
+		MaxThoughts: 3,
+		ModelConfig: ModelConfig{
+			Model: "test-model",
+		},
+	}, conv, NewRequestBuilder(AgentConfig{
+		SystemPrompt: "{{.RuntimeInfo}}",
+		ModelConfig:  ModelConfig{Model: "test-model"},
+	}))
+	calls := 0
+	runner.streamLLMFunc = func(context.Context, *runEventEmitter) (*llm.Response, error) {
+		calls++
+		return &llm.Response{
+			Content:          fmt.Sprintf("partial-%d ", calls),
+			IsFinished:       true,
+			StopReason:       "max_tokens",
+			MaxOutputReached: true,
+		}, nil
+	}
+
+	var gotEvents []AwakenEvent
+	conv.UserInput("write a long answer")
+	answer, err := runner.RunStreamWithEvents(context.Background(), EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+	if err == nil || !strings.Contains(err.Error(), "max output limit") {
+		t.Fatalf("expected max output error, answer=%q err=%v", answer, err)
+	}
+	if calls != maxOutputContinuationAttempts+1 {
+		t.Fatalf("expected exactly one continuation attempt, got %d calls", calls)
+	}
+	runErrorIndex := firstEventIndex(gotEvents, RunErrorEventType)
+	if runErrorIndex < 0 {
+		t.Fatalf("expected RunError event, got %v", eventTypes(gotEvents))
+	}
+	if gotEvents[runErrorIndex].TerminalReason != TerminalReasonMaxOutputReached {
+		t.Fatalf("expected max_output_reached terminal reason, got %+v", gotEvents[runErrorIndex])
 	}
 }
 
@@ -944,6 +1302,43 @@ func TestRunnerCancelInjectsSyntheticToolResults(t *testing.T) {
 	}
 }
 
+func TestRunnerStreamingCancelUsesAbortedStreamingTerminalReason(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	conv := convcontext.NewConversation(nil)
+	conv.UserInput("stream then cancel")
+	runner := NewRunner(AgentConfig{
+		MaxThoughts: 2,
+		ModelConfig: ModelConfig{
+			Model: "test-model",
+		},
+	}, conv, NewRequestBuilder(AgentConfig{
+		SystemPrompt: "{{.RuntimeInfo}}",
+		ModelConfig:  ModelConfig{Model: "test-model"},
+	}))
+	runner.streamLLMFunc = func(context.Context, *runEventEmitter) (*llm.Response, error) {
+		cancel()
+		return nil, ctx.Err()
+	}
+
+	var gotEvents []AwakenEvent
+	_, err := runner.RunStreamWithEvents(ctx, EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+	if err == nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled error, got %v", err)
+	}
+	turnFinishedIndex := firstEventIndex(gotEvents, TurnFinishedEventType)
+	if turnFinishedIndex < 0 || gotEvents[turnFinishedIndex].TerminalReason != TerminalReasonAbortedStreaming {
+		t.Fatalf("expected TurnFinished aborted_streaming, got %+v", gotEvents)
+	}
+	runErrorIndex := firstEventIndex(gotEvents, RunErrorEventType)
+	if runErrorIndex < 0 || gotEvents[runErrorIndex].TerminalReason != TerminalReasonAbortedStreaming {
+		t.Fatalf("expected RunError aborted_streaming, got %+v", gotEvents)
+	}
+}
+
 type cancelOnExecuteTool struct {
 	name   string
 	cancel context.CancelFunc
@@ -1003,7 +1398,10 @@ data: {"type":"message_stop"}`,
 	conv.UserInput("use cancel tool")
 	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
 
-	_, err := runner.RunStreamWithEvents(ctx, nil)
+	var gotEvents []AwakenEvent
+	_, err := runner.RunStreamWithEvents(ctx, EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
 	if err == nil || !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled error, got %v", err)
 	}
@@ -1014,6 +1412,14 @@ data: {"type":"message_stop"}`,
 	messages := conv.Context.GetMessages()
 	if err := convcontext.ValidateToolResultPairing(messages); err != nil {
 		t.Fatalf("expected valid tool result pairing after cancel, got %v", err)
+	}
+	turnFinishedIndex := firstEventIndex(gotEvents, TurnFinishedEventType)
+	if turnFinishedIndex < 0 || gotEvents[turnFinishedIndex].TerminalReason != TerminalReasonAbortedTools {
+		t.Fatalf("expected TurnFinished aborted_tools, got %+v", gotEvents)
+	}
+	runErrorIndex := firstEventIndex(gotEvents, RunErrorEventType)
+	if runErrorIndex < 0 || gotEvents[runErrorIndex].TerminalReason != TerminalReasonAbortedTools {
+		t.Fatalf("expected RunError aborted_tools, got %+v", gotEvents)
 	}
 }
 
@@ -1128,6 +1534,14 @@ data: {"type":"message_stop"}`,
 	}
 	if cancel2Result.Content != "工具执行已被取消" {
 		t.Fatalf("expected synthetic result content '工具执行已被取消', got %q", cancel2Result.Content)
+	}
+	turnFinishedIndex := firstEventIndex(gotEvents, TurnFinishedEventType)
+	if turnFinishedIndex < 0 || gotEvents[turnFinishedIndex].TerminalReason != TerminalReasonAbortedTools {
+		t.Fatalf("expected TurnFinished aborted_tools, got %+v", gotEvents)
+	}
+	runErrorIndex := firstEventIndex(gotEvents, RunErrorEventType)
+	if runErrorIndex < 0 || gotEvents[runErrorIndex].TerminalReason != TerminalReasonAbortedTools {
+		t.Fatalf("expected RunError aborted_tools, got %+v", gotEvents)
 	}
 }
 
@@ -1398,6 +1812,32 @@ func containsToolResultSubstring(messages []struct {
 		}
 	}
 	return false
+}
+
+func conversationHasToolResult(messages []convcontext.Message, id, content string) bool {
+	for _, msg := range messages {
+		if msg.Role == convcontext.RoleTool && msg.ToolCallID == id && msg.Content == content {
+			return true
+		}
+	}
+	return false
+}
+
+func firstEventIndex(events []AwakenEvent, eventType AwakenEventType) int {
+	for i, event := range events {
+		if event.Type == eventType {
+			return i
+		}
+	}
+	return -1
+}
+
+func eventTypes(events []AwakenEvent) []AwakenEventType {
+	out := make([]AwakenEventType, 0, len(events))
+	for _, event := range events {
+		out = append(out, event.Type)
+	}
+	return out
 }
 
 func testAgentConfig(baseURL string, maxThoughts int) AgentConfig {

@@ -49,3 +49,6 @@ apps/desktop/resources/bin/
 
 # Local reference recordings
 视频/
+
+# Local Awaken runtime transcripts
+.awaken/

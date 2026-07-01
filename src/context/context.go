@@ -20,12 +20,13 @@ const (
 )
 
 type Message struct {
-	Role       Role       `json:"role"`
-	Content    string     `json:"content"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	Name       string     `json:"name,omitempty"`
-	IsError    bool       `json:"is_error,omitempty"`
+	Role              Role       `json:"role"`
+	Content           string     `json:"content"`
+	ToolCalls         []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID        string     `json:"tool_call_id,omitempty"`
+	Name              string     `json:"name,omitempty"`
+	IsError           bool       `json:"is_error,omitempty"`
+	CompactBoundaryID string     `json:"compact_boundary_id,omitempty"`
 }
 
 type ToolCall struct {
@@ -137,9 +138,20 @@ func (c *Context) AddToolResultWithError(toolCallID, name, content string) {
 func (c *Context) GetMessages() []Message {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	result := make([]Message, len(c.messages))
-	copy(result, c.messages)
-	return result
+	return cloneMessages(c.messages)
+}
+
+func (c *Context) GetMessagesForModel() []Message {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	start := 0
+	for i, msg := range c.messages {
+		if strings.TrimSpace(msg.CompactBoundaryID) != "" {
+			start = i
+		}
+	}
+	return cloneMessages(c.messages[start:])
 }
 
 func (c *Context) GetTools() []tool.ToolDefinition {
@@ -151,7 +163,7 @@ func (c *Context) GetTools() []tool.ToolDefinition {
 func (c *Context) SetMessages(messages []Message) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.messages = messages
+	c.messages = cloneMessages(messages)
 }
 
 func (c *Context) GetLastUserMessage() string {
@@ -225,7 +237,19 @@ func BuildToolArguments(params map[string]interface{}) string {
 }
 
 func EstimateTokens(text string) int {
-	return len(strings.Fields(text)) * 4 / 3
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return 0
+	}
+	wordEstimate := len(strings.Fields(text)) * 4 / 3
+	charEstimate := len([]rune(text)) / 4
+	if charEstimate == 0 {
+		charEstimate = 1
+	}
+	if wordEstimate > charEstimate {
+		return wordEstimate
+	}
+	return charEstimate
 }
 
 func (c *Context) EstimateTotalTokens() int {
@@ -241,6 +265,15 @@ func (c *Context) EstimateTotalTokens() int {
 		}
 	}
 	return total
+}
+
+func cloneMessages(messages []Message) []Message {
+	result := make([]Message, len(messages))
+	for i, message := range messages {
+		result[i] = message
+		result[i].ToolCalls = append([]ToolCall(nil), message.ToolCalls...)
+	}
+	return result
 }
 
 type Conversation struct {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	convcontext "awaken/src/context"
 )
 
 func TestRunServiceReplaysHistoryAndStreamsLiveEvents(t *testing.T) {
@@ -633,6 +634,7 @@ func TestStartRunValidWorkspaceStartsRun(t *testing.T) {
 	if run.Status != RunStatusRunning {
 		t.Fatalf("expected running status, got %s", run.Status)
 	}
+	waitForRunTerminal(t, service, run.RunID)
 }
 
 func TestStartRunEmptyWorkspaceReturnsInvalidInput(t *testing.T) {
@@ -674,6 +676,7 @@ func TestStartRunOmittedWritableRootsDefaultsToWorkspaceRoot(t *testing.T) {
 	if run.RunID == "" {
 		t.Fatalf("expected run to be created")
 	}
+	waitForRunTerminal(t, service, run.RunID)
 }
 
 // TestRunServiceGetRunReturnsSnapshot verifies that GetRun returns the current
@@ -996,6 +999,55 @@ func TestStartRunWithValidThreadIDReusesAgent(t *testing.T) {
 	}
 }
 
+func TestStartRunWithInMemoryThreadDoesNotRequireTranscriptLoad(t *testing.T) {
+	root := t.TempDir()
+	service := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+				return "done", nil
+			})
+		},
+	)
+
+	firstRun, err := service.StartRun(StartRunRequest{
+		Input:     "hello",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("first StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, firstRun.RunID)
+
+	badRecord := TranscriptRecord{
+		RecordType:      transcriptRecordTypeMessage,
+		ThreadID:        firstRun.ThreadID,
+		RunID:           firstRun.RunID,
+		MessageID:       "bad-child",
+		ParentMessageID: "missing-parent",
+		Role:            string(convcontext.RoleUser),
+		Content:         "corrupt transcript tail",
+		Timestamp:       time.Now().UTC(),
+	}
+	if err := appendTranscriptRecords(transcriptPath(root, firstRun.ThreadID), []TranscriptRecord{badRecord}); err != nil {
+		t.Fatalf("failed to append corrupt transcript record: %v", err)
+	}
+
+	secondRun, err := service.StartRun(StartRunRequest{
+		Input:     "follow up",
+		ThreadID:  firstRun.ThreadID,
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("expected in-memory thread reuse to ignore corrupt transcript, got %v", err)
+	}
+	waitForRunTerminal(t, service, secondRun.RunID)
+}
+
 // TestStartRunWithUnknownThreadIDReturnsErrThreadNotFound verifies that
 // StartRun with an unknown thread_id returns ErrThreadNotFound.
 func TestStartRunWithUnknownThreadIDReturnsErrThreadNotFound(t *testing.T) {
@@ -1060,6 +1112,7 @@ func TestStartRunWithMismatchedWorkspaceReturnsErrThreadWorkspaceMismatch(t *tes
 	if !errors.Is(err, ErrThreadWorkspaceMismatch) {
 		t.Fatalf("expected ErrThreadWorkspaceMismatch, got %v", err)
 	}
+	waitForRunTerminal(t, service, firstRun.RunID)
 }
 
 func TestStartRunPassesRuntimeThreadIDToNewAgent(t *testing.T) {
@@ -1085,6 +1138,7 @@ func TestStartRunPassesRuntimeThreadIDToNewAgent(t *testing.T) {
 	if capturedThreadID != run.ThreadID {
 		t.Fatalf("expected newAgent to receive runtime thread_id %q, got %q", run.ThreadID, capturedThreadID)
 	}
+	waitForRunTerminal(t, service, run.RunID)
 }
 
 func TestStartRunWithActiveThreadReturnsErrThreadBusy(t *testing.T) {
@@ -1135,6 +1189,7 @@ func TestStartRunWithActiveThreadReturnsErrThreadBusy(t *testing.T) {
 	if thirdRun.ThreadID != firstRun.ThreadID {
 		t.Fatalf("expected third run to reuse thread %q, got %q", firstRun.ThreadID, thirdRun.ThreadID)
 	}
+	waitForRunTerminal(t, service, thirdRun.RunID)
 }
 
 func TestStartRunWithSameRootDifferentWritableRootsReturnsWorkspaceMismatch(t *testing.T) {
@@ -1273,6 +1328,171 @@ func TestGetThreadTranscriptReturnsOrderedRunsAndInputs(t *testing.T) {
 	}
 }
 
+func TestRunServiceRestoresThreadConversationFromTranscript(t *testing.T) {
+	root := t.TempDir()
+	restoredHistory := make(chan []convcontext.Message, 1)
+
+	newService := func(captureRestored bool) *RunService {
+		return NewRunService(
+			func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+				return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+					Workspace: agentcore.WorkspaceConfig{
+						Root:          workspace.WorkspaceRoot,
+						WritableRoots: workspace.WritableRoots,
+					},
+				}, threadID)
+			},
+			func(agent *agentcore.Agent) Executor {
+				return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+					if captureRestored {
+						restoredHistory <- agent.GetConversation().Context.GetMessages()
+					}
+					agent.GetConversation().UserInput(input)
+					agent.GetConversation().AssistantOutput("answer: "+input, nil)
+					sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+					sink.Emit(agentcore.AwakenEvent{
+						Type:           agentcore.RunFinishedEventType,
+						Content:        "answer: " + input,
+						TerminalReason: agentcore.TerminalReasonCompleted,
+					})
+					return "answer: " + input, nil
+				})
+			},
+		)
+	}
+
+	firstService := newService(false)
+	firstRun, err := firstService.StartRun(StartRunRequest{
+		Input:     "hello",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("first StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, firstService, firstRun.RunID)
+	waitForTranscriptMessageCount(t, root, firstRun.ThreadID, 2)
+
+	secondService := newService(true)
+	secondRun, err := secondService.StartRun(StartRunRequest{
+		Input:     "follow up",
+		ThreadID:  firstRun.ThreadID,
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("second StartRun after restart returned error: %v", err)
+	}
+
+	var history []convcontext.Message
+	select {
+	case history = <-restoredHistory:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for restored conversation capture")
+	}
+	if len(history) != 2 {
+		t.Fatalf("expected restored conversation to contain 2 messages, got %+v", history)
+	}
+	if history[0].Role != convcontext.RoleUser || history[0].Content != "hello" {
+		t.Fatalf("unexpected restored first message: %+v", history[0])
+	}
+	if history[1].Role != convcontext.RoleAssistant || history[1].Content != "answer: hello" {
+		t.Fatalf("unexpected restored assistant message: %+v", history[1])
+	}
+	waitForRunTerminal(t, secondService, secondRun.RunID)
+
+	transcript, err := secondService.GetThreadTranscript(firstRun.ThreadID)
+	if err != nil {
+		t.Fatalf("GetThreadTranscript after restart returned error: %v", err)
+	}
+	if len(transcript.Runs) != 2 {
+		t.Fatalf("expected durable first run plus current run, got %+v", transcript.Runs)
+	}
+	if transcript.Runs[0].Run.RunID != firstRun.RunID || transcript.Runs[0].Run.Input != "hello" {
+		t.Fatalf("unexpected durable first transcript run: %+v", transcript.Runs[0].Run)
+	}
+	if transcript.Runs[1].Run.RunID != secondRun.RunID || transcript.Runs[1].Run.Input != "follow up" {
+		t.Fatalf("unexpected current transcript run: %+v", transcript.Runs[1].Run)
+	}
+}
+
+func TestRunServiceRestoresCancelledThreadUserTranscript(t *testing.T) {
+	root := t.TempDir()
+	started := make(chan struct{})
+	restoredHistory := make(chan []convcontext.Message, 1)
+
+	newService := func(captureRestored bool) *RunService {
+		return NewRunService(
+			func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+				return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+					Workspace: agentcore.WorkspaceConfig{
+						Root:          workspace.WorkspaceRoot,
+						WritableRoots: workspace.WritableRoots,
+					},
+				}, threadID)
+			},
+			func(agent *agentcore.Agent) Executor {
+				return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+					if captureRestored {
+						restoredHistory <- agent.GetConversation().Context.GetMessages()
+						agent.GetConversation().UserInput(input)
+						agent.GetConversation().AssistantOutput("answer: "+input, nil)
+						sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+						sink.Emit(agentcore.AwakenEvent{
+							Type:           agentcore.RunFinishedEventType,
+							Content:        "answer: " + input,
+							TerminalReason: agentcore.TerminalReasonCompleted,
+						})
+						return "answer: " + input, nil
+					}
+
+					sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+					close(started)
+					<-ctx.Done()
+					return "", ctx.Err()
+				})
+			},
+		)
+	}
+
+	firstService := newService(false)
+	firstRun, err := firstService.StartRun(StartRunRequest{
+		Input:     "cancel me",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("first StartRun returned error: %v", err)
+	}
+	<-started
+	if _, err := firstService.CancelRun(firstRun.RunID); err != nil {
+		t.Fatalf("CancelRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, firstService, firstRun.RunID)
+	waitForTranscriptMessageCount(t, root, firstRun.ThreadID, 1)
+
+	secondService := newService(true)
+	secondRun, err := secondService.StartRun(StartRunRequest{
+		Input:     "follow up",
+		ThreadID:  firstRun.ThreadID,
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("second StartRun after cancelled restart returned error: %v", err)
+	}
+
+	var history []convcontext.Message
+	select {
+	case history = <-restoredHistory:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for restored cancelled conversation capture")
+	}
+	if len(history) != 1 {
+		t.Fatalf("expected restored cancelled conversation to contain accepted user message, got %+v", history)
+	}
+	if history[0].Role != convcontext.RoleUser || history[0].Content != "cancel me" {
+		t.Fatalf("unexpected restored cancelled user message: %+v", history[0])
+	}
+	waitForRunTerminal(t, secondService, secondRun.RunID)
+}
+
 func waitForRunTerminal(t *testing.T, service *RunService, runID string) Run {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -1281,11 +1501,34 @@ func waitForRunTerminal(t *testing.T, service *RunService, runID string) Run {
 		if err != nil {
 			t.Fatalf("GetRun returned error: %v", err)
 		}
-		if isTerminalStatus(run.Status) {
+		if isTerminalStatus(run.Status) && !threadHasActiveRun(service, run.ThreadID, run.RunID) {
 			return run
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("run %s did not reach terminal status", runID)
 	return Run{}
+}
+
+func threadHasActiveRun(service *RunService, threadID, runID string) bool {
+	for _, thread := range service.ListThreads() {
+		if thread.ThreadID == threadID {
+			return thread.ActiveRunID == runID
+		}
+	}
+	return false
+}
+
+func waitForTranscriptMessageCount(t *testing.T, workspaceRoot, threadID string, want int) []TranscriptRecord {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		records, err := readTranscriptRecords(transcriptPath(workspaceRoot, threadID))
+		if err == nil && transcriptMessageCount(records) >= want {
+			return records
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("transcript for thread %s did not reach %d message records", threadID, want)
+	return nil
 }

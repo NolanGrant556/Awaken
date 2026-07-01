@@ -13,6 +13,7 @@ import {
   createInitialRunNarrativeState,
   createRunRequestedNarrative,
   projectAguiEventToNarrative,
+  type RunNarrativeItem,
   type RunNarrativeState,
 } from "../run-narrative";
 
@@ -58,6 +59,63 @@ export type TurnDiffRecord = {
   truncated?: boolean;
 };
 
+export type ContextWindowRecord = {
+  eventType: AguiEvent["type"];
+  message?: string;
+  modelWindow?: number;
+  outputReserve?: number;
+  effectiveWindow?: number;
+  estimatedTokens?: number;
+  warningThreshold?: number;
+  autoCompactThreshold?: number;
+  compactTarget?: number;
+  estimatedDeltaTokens?: number;
+};
+
+export type CompactRecord = ContextWindowRecord & {
+  status: "started" | "finished" | "failed";
+  boundaryId?: string;
+};
+
+export type ToolDecisionRecord = {
+  toolCallId: string;
+  toolName: string;
+  action?: string;
+  source?: string;
+  reason?: string;
+  staticPermissionBehavior?: string;
+  staticPermissionReason?: string;
+  affectedPaths: string[];
+  patchSummary?: string;
+};
+
+export type TurnRecord = {
+  turnId?: string;
+  turnCount?: number;
+  status: "active" | "done";
+  transitionReason?: string;
+  terminalReason?: string;
+};
+
+export type UnknownEventRecord = {
+  rawType?: string;
+  message?: string;
+};
+
+export type InspectorSummary = {
+  currentTurn?: TurnRecord;
+  lastToolDecision?: ToolDecisionRecord;
+  contextWindow?: ContextWindowRecord;
+  compact?: CompactRecord;
+  terminalReason?: string;
+  terminalMessage?: string;
+  unknownEvents: UnknownEventRecord[];
+};
+
+function createInspectorSummary(): InspectorSummary {
+  return { unknownEvents: [] };
+}
+
 export type ThreadItem = {
   threadId: string;
   label: string;
@@ -84,6 +142,7 @@ type ThreadViewState = {
   approvals: ApprovalItem[];
   artifacts: ArtifactRecord[];
   turnDiff?: TurnDiffRecord;
+  inspectorSummary: InspectorSummary;
   narrative: RunNarrativeState;
   errorMessage?: string;
   runStartedAtMs?: number;
@@ -106,6 +165,7 @@ export type RuntimeViewState = {
   approvals: ApprovalItem[];
   artifacts: ArtifactRecord[];
   turnDiff?: TurnDiffRecord;
+  inspectorSummary: InspectorSummary;
   narrative: RunNarrativeState;
   errorMessage?: string;
   runStartedAtMs?: number;
@@ -147,6 +207,7 @@ const initialState: RuntimeViewState = {
   approvals: [],
   artifacts: [],
   narrative: createInitialRunNarrativeState(),
+  inspectorSummary: createInspectorSummary(),
   threads: [],
   threadViews: {},
   supervisorStatus: null,
@@ -169,6 +230,7 @@ function viewFromState(state: RuntimeViewState): ThreadViewState {
     approvals: state.approvals,
     artifacts: state.artifacts,
     turnDiff: state.turnDiff,
+    inspectorSummary: state.inspectorSummary,
     narrative: state.narrative,
     errorMessage: state.errorMessage,
     runStartedAtMs: state.runStartedAtMs,
@@ -371,6 +433,42 @@ function attachElapsedMsToLatestAnswer(
   };
 }
 
+function appendFinalFileChangeSummary(
+  narrative: RunNarrativeState,
+  artifacts: ArtifactRecord[],
+  runId?: string,
+): RunNarrativeState {
+  const fileArtifacts = artifacts.filter((artifact) => artifact.kind !== "a2ui_surface");
+  if (fileArtifacts.length === 0) {
+    return narrative;
+  }
+
+  const id = `fileChange:${runId ?? "current"}:summary`;
+  const item: RunNarrativeItem = {
+    kind: "fileChange",
+    id,
+    files: fileArtifacts.map((artifact) => ({
+      id: artifact.id,
+      path: artifact.path,
+      title: artifact.title || artifact.path || "File change",
+      description: artifact.description,
+      status: artifact.status === "error" ? "error" : "done",
+    })),
+    status: "done",
+  };
+
+  return {
+    ...narrative,
+    committedItems: [
+      ...narrative.committedItems.filter(
+        (candidate) => !(candidate.kind === "fileChange" && candidate.id === id),
+      ),
+      item,
+    ],
+    activeItem: narrative.activeItem?.id === id ? undefined : narrative.activeItem,
+  };
+}
+
 function toSteps(records: StepRecord[]): RunStepItem[] {
   return records.map(({ key: _key, ...step }) => step);
 }
@@ -458,6 +556,8 @@ function toolRecordStatus(content?: string): "done" | "error" {
   if (
     normalized.includes("工具执行失败") ||
     normalized.includes("工具权限拒绝") ||
+    normalized.includes("AUTO policy 拒绝") ||
+    normalized.includes("工具执行已被取消") ||
     normalized.includes("工具参数错误") ||
     normalized.includes("审批拒绝")
   ) {
@@ -484,6 +584,86 @@ function normalizeArtifactStatus(value?: string): AguiArtifactStatus {
     default:
       return "ready";
   }
+}
+
+function contextWindowRecord(event: AguiEvent): ContextWindowRecord {
+  return {
+    eventType: event.type,
+    message: event.message,
+    modelWindow: event.contextModelWindow,
+    outputReserve: event.contextOutputReserve,
+    effectiveWindow: event.contextEffectiveWindow,
+    estimatedTokens: event.contextEstimatedTokens,
+    warningThreshold: event.contextWarningThreshold,
+    autoCompactThreshold: event.contextAutoCompactThreshold,
+    compactTarget: event.contextCompactTarget,
+    estimatedDeltaTokens: event.contextEstimatedDeltaTokens,
+  };
+}
+
+function compactBoundaryFromMessage(message?: string): string | undefined {
+  const match = message?.match(/\bboundary=([^\s]+)/);
+  return match?.[1];
+}
+
+function compactStatus(event: AguiEvent): CompactRecord["status"] {
+  if (event.type === "AWAKEN_COMPACT_FAILED") {
+    return "failed";
+  }
+  if (event.type === "AWAKEN_COMPACT_FINISHED") {
+    return "finished";
+  }
+  return "started";
+}
+
+function toolDecisionRecord(event: AguiEvent): ToolDecisionRecord {
+  return {
+    toolCallId: event.toolCallId || "tool-decision",
+    toolName: event.toolCallName || "Tool",
+    action: event.toolDecisionAction,
+    source: event.toolDecisionSource,
+    reason: event.toolDecisionReason || event.message,
+    staticPermissionBehavior: event.staticPermissionBehavior,
+    staticPermissionReason: event.staticPermissionReason,
+    affectedPaths: event.approvalAffectedPaths ?? [],
+    patchSummary: event.approvalPatchSummary,
+  };
+}
+
+function terminalReasonForEvent(event: AguiEvent): string | undefined {
+  if (event.terminalReason) {
+    return event.terminalReason;
+  }
+  if (event.type === "RUN_FINISHED") {
+    return "completed";
+  }
+  if (event.type === "RUN_STATUS_CHANGED" && event.status === "cancelled") {
+    return "cancelled";
+  }
+  return undefined;
+}
+
+function toolDecisionStatus(decision: ToolDecisionRecord): "active" | "done" | "error" {
+  if (decision.action === "deny" || decision.action === "abort") {
+    return "error";
+  }
+  if (decision.action === "allow") {
+    return "done";
+  }
+  return "active";
+}
+
+function appendUnknownEvent(
+  records: UnknownEventRecord[],
+  event: AguiEvent,
+): UnknownEventRecord[] {
+  return [
+    ...records,
+    {
+      rawType: event.rawType,
+      message: event.message,
+    },
+  ].slice(-10);
 }
 
 function buildArtifactDescription(artifact: ArtifactRecord): string {
@@ -647,6 +827,7 @@ export function reduceRuntimeState(
         approvals: [],
         artifacts: [],
         turnDiff: undefined,
+        inspectorSummary: createInspectorSummary(),
         narrative: shouldAppendNarrative(state)
           ? appendRunRequestedNarrative(
               state.narrative,
@@ -725,6 +906,11 @@ export function reduceRuntimeState(
           timelineStatus: "error",
           errorMessage: action.message,
           approvals: [],
+          inspectorSummary: {
+            ...state.inspectorSummary,
+            terminalReason: "stream_failed",
+            terminalMessage: action.message,
+          },
           steps: toSteps(
             upsertStep(
               state.steps.map((step, index) => ({ ...step, key: step.id, index: index + 1 })),
@@ -865,6 +1051,47 @@ export function reduceRuntimeState(
             tag: "runtime",
           });
           break;
+        case "AWAKEN_TURN_STARTED": {
+          const turnKey = action.event.turnId ?? String(action.event.turnCount ?? "current");
+          nextState.inspectorSummary = {
+            ...nextState.inspectorSummary,
+            currentTurn: {
+              turnId: action.event.turnId,
+              turnCount: action.event.turnCount,
+              status: "active",
+              transitionReason: action.event.transitionReason,
+            },
+          };
+          records = upsertStep(records, `turn:${turnKey}`, {
+            title: "Agent turn started",
+            description: action.event.transitionReason || `Turn ${action.event.turnCount ?? turnKey}`,
+            status: "active",
+            tag: "turn",
+          });
+          break;
+        }
+        case "AWAKEN_TURN_FINISHED": {
+          const turnKey = action.event.turnId ?? String(action.event.turnCount ?? "current");
+          nextState.inspectorSummary = {
+            ...nextState.inspectorSummary,
+            currentTurn: {
+              turnId: action.event.turnId ?? nextState.inspectorSummary.currentTurn?.turnId,
+              turnCount: action.event.turnCount ?? nextState.inspectorSummary.currentTurn?.turnCount,
+              status: "done",
+              transitionReason:
+                action.event.transitionReason ??
+                nextState.inspectorSummary.currentTurn?.transitionReason,
+              terminalReason: action.event.terminalReason,
+            },
+          };
+          records = upsertStep(records, `turn:${turnKey}`, {
+            title: "Agent turn finished",
+            description: action.event.terminalReason || action.event.transitionReason || "Turn complete",
+            status: "done",
+            tag: action.event.terminalReason || "turn",
+          });
+          break;
+        }
         case "RUN_STATUS_CHANGED": {
           const status = action.event.status;
           nextState.status = status as RuntimeRunStatus | undefined;
@@ -891,6 +1118,13 @@ export function reduceRuntimeState(
             nextState.timelineStatus = "error";
             nextState.approvals = [];
           }
+          if (status === "cancelled" || status === "finished" || status === "error") {
+            nextState.inspectorSummary = {
+              ...nextState.inspectorSummary,
+              terminalReason: terminalReasonForEvent(action.event) ?? status,
+              terminalMessage: action.event.message,
+            };
+          }
           records = upsertStep(records, status === "cancelled" ? "run-cancelled" : `status:${status ?? "unknown"}`, {
             title: status === "awaiting_approval"
               ? "Awaiting approval"
@@ -911,6 +1145,11 @@ export function reduceRuntimeState(
           nextState.timelineStatus = "done";
           nextState.approvals = [];
           nextState.runCompletedAtMs = nextState.runCompletedAtMs ?? action.receivedAtMs;
+          nextState.inspectorSummary = {
+            ...nextState.inspectorSummary,
+            terminalReason: terminalReasonForEvent(action.event),
+            terminalMessage: action.event.result || action.event.message,
+          };
           records = upsertStep(records, "run-finished", {
             title: "Run finished",
             description: excerpt(action.event.result || nextState.assistantText || "Runtime completed"),
@@ -1050,6 +1289,38 @@ export function reduceRuntimeState(
           });
           break;
         }
+        case "AWAKEN_TOOL_PERMISSION_DECIDED": {
+          const decision = toolDecisionRecord(action.event);
+          const existing = nextState.toolResults.find((tool) => tool.id === decision.toolCallId);
+          const status = toolDecisionStatus(decision);
+          const decisionLine = [
+            decision.action ? `decision: ${decision.action}` : "",
+            decision.source ? `source: ${decision.source}` : "",
+            decision.reason ? `reason: ${decision.reason}` : "",
+            decision.patchSummary ? `patch: ${decision.patchSummary}` : "",
+          ].filter(Boolean).join("\n");
+
+          nextState.inspectorSummary = {
+            ...nextState.inspectorSummary,
+            lastToolDecision: decision,
+          };
+          nextState.toolResults = upsertToolResult(nextState.toolResults, {
+            id: decision.toolCallId,
+            title: decision.toolName || existing?.title || "Tool decision",
+            args: existing?.args,
+            content: existing?.content || decisionLine,
+            commandOutput: existing?.commandOutput,
+            commandOutputTruncated: existing?.commandOutputTruncated,
+            status,
+          });
+          records = upsertStep(records, `tool-decision:${decision.toolCallId}`, {
+            title: `${decision.toolName} ${decision.action || "decision"}`,
+            description: excerpt(decision.reason || decision.source || decision.patchSummary || "AUTO decision"),
+            status,
+            tag: decision.source || "auto",
+          });
+          break;
+        }
         case "TOOL_CALL_RESULT": {
           const content = action.event.content || "Tool returned empty content";
           const id = action.event.toolCallId || `tool-result-${nextState.toolResults.length + 1}`;
@@ -1081,6 +1352,51 @@ export function reduceRuntimeState(
             tag: "tool",
           });
           break;
+        case "AWAKEN_CONTEXT_ESTIMATED":
+        case "AWAKEN_CONTEXT_WARNING":
+        case "AWAKEN_CONTEXT_BLOCKED": {
+          const contextWindow = contextWindowRecord(action.event);
+          nextState.inspectorSummary = {
+            ...nextState.inspectorSummary,
+            contextWindow,
+          };
+          records = upsertStep(records, "context-window", {
+            title: action.event.type === "AWAKEN_CONTEXT_BLOCKED"
+              ? "Context window blocked"
+              : action.event.type === "AWAKEN_CONTEXT_WARNING"
+                ? "Context window warning"
+                : "Context window estimated",
+            description: excerpt(action.event.message || `${action.event.contextEstimatedTokens ?? 0} tokens`),
+            status: action.event.type === "AWAKEN_CONTEXT_BLOCKED" ? "error" : "done",
+            tag: "context",
+          });
+          break;
+        }
+        case "AWAKEN_COMPACT_STARTED":
+        case "AWAKEN_COMPACT_FINISHED":
+        case "AWAKEN_COMPACT_FAILED": {
+          const compact = {
+            ...contextWindowRecord(action.event),
+            status: compactStatus(action.event),
+            boundaryId: compactBoundaryFromMessage(action.event.message),
+          };
+          nextState.inspectorSummary = {
+            ...nextState.inspectorSummary,
+            contextWindow: compact,
+            compact,
+          };
+          records = upsertStep(records, "compact", {
+            title: action.event.type === "AWAKEN_COMPACT_FAILED"
+              ? "Compact failed"
+              : action.event.type === "AWAKEN_COMPACT_FINISHED"
+                ? "Compact finished"
+                : "Compact started",
+            description: excerpt(action.event.message || compact.boundaryId || "Context compact"),
+            status: compact.status === "failed" ? "error" : compact.status === "started" ? "active" : "done",
+            tag: compact.boundaryId || "compact",
+          });
+          break;
+        }
         case "AWAKEN_PATCH_UPDATED": {
           const id = action.event.toolCallId || `patch-${nextState.patchPreviews.length + 1}`;
           nextState.patchPreviews = upsertPatchPreview(nextState.patchPreviews, {
@@ -1195,7 +1511,25 @@ export function reduceRuntimeState(
               tag: action.event.code || "error",
             });
           }
+          nextState.inspectorSummary = {
+            ...nextState.inspectorSummary,
+            terminalReason: terminalReasonForEvent(action.event) ?? action.event.code ?? "error",
+            terminalMessage: nextState.errorMessage || action.event.message,
+          };
           break;
+        case "AWAKEN_UNKNOWN_EVENT": {
+          nextState.inspectorSummary = {
+            ...nextState.inspectorSummary,
+            unknownEvents: appendUnknownEvent(nextState.inspectorSummary.unknownEvents, action.event),
+          };
+          records = upsertStep(records, `unknown:${action.event.seq ?? action.event.rawType ?? "event"}`, {
+            title: action.event.rawType || "Unknown runtime event",
+            description: excerpt(action.event.message || "Runtime sent an unknown event"),
+            status: "done",
+            tag: "unknown",
+          });
+          break;
+        }
         default:
           break;
       }
@@ -1219,9 +1553,13 @@ export function reduceRuntimeState(
       nextState.steps = toSteps(records);
       const projectedNarrative = projectAguiEventToNarrative(state.narrative, narrativeEvent);
       nextState.narrative = isSuccessfulTerminalEvent(action.event)
-        ? attachElapsedMsToLatestAnswer(
-            projectedNarrative,
-            elapsedMsForTerminalRun(nextState, action.receivedAtMs),
+        ? appendFinalFileChangeSummary(
+            attachElapsedMsToLatestAnswer(
+              projectedNarrative,
+              elapsedMsForTerminalRun(nextState, action.receivedAtMs),
+              nextState.runId,
+            ),
+            nextState.artifacts,
             nextState.runId,
           )
         : projectedNarrative;

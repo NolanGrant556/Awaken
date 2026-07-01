@@ -28,8 +28,34 @@ func TestStreamInvokeOpenAITextDeltas(t *testing.T) {
 	if resp.Content != "Hello" {
 		t.Fatalf("expected Hello, got %q", resp.Content)
 	}
+	if !resp.IsFinished {
+		t.Fatal("expected text-only stream to be finished")
+	}
 	if len(chunks) != 2 || chunks[0] != "Hel" || chunks[1] != "lo" {
 		t.Fatalf("expected two streamed chunks, got %+v", chunks)
+	}
+}
+
+func TestStreamInvokeOpenAIMaxOutputStopReason(t *testing.T) {
+	server := newStreamServer(t, "/chat/completions", []string{
+		`data: {"choices":[{"delta":{"content":"partial"}}]}`,
+		`data: {"choices":[{"delta":{},"finish_reason":"length"}]}`,
+		`data: [DONE]`,
+	})
+	defer server.Close()
+
+	resp, err := StreamInvoke(context.Background(), testConfig(server.URL), Request{UserPrompt: "hi"}, nil)
+	if err != nil {
+		t.Fatalf("StreamInvoke returned error: %v", err)
+	}
+	if resp.Content != "partial" {
+		t.Fatalf("expected partial content, got %q", resp.Content)
+	}
+	if resp.StopReason != "length" {
+		t.Fatalf("expected stop reason length, got %q", resp.StopReason)
+	}
+	if !resp.MaxOutputReached {
+		t.Fatal("expected max output marker")
 	}
 }
 

@@ -1,6 +1,7 @@
 package agui
 
 import (
+	"encoding/json"
 	"time"
 
 	"awaken/src/agentcore"
@@ -8,11 +9,25 @@ import (
 
 func MapEvent(event agentcore.AwakenEvent) []Event {
 	base := Event{
-		Timestamp: toUnixMillis(event.Timestamp),
-		ThreadID:  event.ThreadID,
-		RunID:     event.RunID,
-		MessageID: event.MessageID,
-		Role:      event.Role,
+		Timestamp:                   toUnixMillis(event.Timestamp),
+		ThreadID:                    event.ThreadID,
+		RunID:                       event.RunID,
+		TurnID:                      event.TurnID,
+		QueryChainID:                event.QueryChainID,
+		Depth:                       event.Depth,
+		TurnCount:                   event.TurnCount,
+		MessageID:                   event.MessageID,
+		Role:                        event.Role,
+		TerminalReason:              string(event.TerminalReason),
+		TransitionReason:            string(event.TransitionReason),
+		ContextModelWindow:          event.ContextModelWindow,
+		ContextOutputReserve:        event.ContextOutputReserve,
+		ContextEffectiveWindow:      event.ContextEffectiveWindow,
+		ContextEstimatedTokens:      event.ContextEstimatedTokens,
+		ContextWarningThreshold:     event.ContextWarningThreshold,
+		ContextAutoCompactThreshold: event.ContextAutoCompactThreshold,
+		ContextCompactTarget:        event.ContextCompactTarget,
+		ContextEstimatedDeltaTokens: event.ContextEstimatedDeltaTokens,
 	}
 
 	switch event.Type {
@@ -28,6 +43,12 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.Type = EventRunError
 		base.Message = event.Error
 		base.Code = event.Code
+		return []Event{base}
+	case agentcore.TurnStartedEventType:
+		base.Type = EventAwakenTurnStarted
+		return []Event{base}
+	case agentcore.TurnFinishedEventType:
+		base.Type = EventAwakenTurnFinished
 		return []Event{base}
 	case agentcore.TextMessageStartedEventType:
 		base.Type = EventTextMessageStart
@@ -89,6 +110,19 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.Progress = event.Progress
 		base.Message = event.Progress
 		return []Event{base}
+	case agentcore.ToolPermissionDecidedEventType:
+		base.Type = EventAwakenToolPermissionDecided
+		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
+		base.Message = event.Content
+		base.StaticPermissionBehavior = event.StaticPermissionBehavior
+		base.StaticPermissionReason = event.StaticPermissionReason
+		base.ToolDecisionAction = event.ToolDecisionAction
+		base.ToolDecisionSource = event.ToolDecisionSource
+		base.ToolDecisionReason = event.ToolDecisionReason
+		base.ApprovalAffectedPaths = event.ApprovalAffectedPaths
+		base.ApprovalPatchSummary = event.ApprovalPatchSummary
+		return []Event{base}
 	case agentcore.ToolResultEventType:
 		base.Type = EventToolCallResult
 		base.ToolCallID = event.ToolCallID
@@ -119,6 +153,34 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.Type = EventAwakenTurnDiff
 		base.Diff = event.Diff
 		base.Truncated = event.Truncated
+		return []Event{base}
+	case agentcore.ContextEstimatedEventType:
+		base.Type = EventAwakenContextEstimated
+		base.Message = event.Content
+		return []Event{base}
+	case agentcore.ContextWarningEventType:
+		base.Type = EventAwakenContextWarning
+		base.Message = event.Content
+		return []Event{base}
+	case agentcore.ContextBlockedEventType:
+		base.Type = EventAwakenContextBlocked
+		base.Message = event.Content
+		return []Event{base}
+	case agentcore.CompactStartedEventType:
+		base.Type = EventAwakenCompactStarted
+		base.Message = event.Content
+		return []Event{base}
+	case agentcore.CompactFinishedEventType:
+		base.Type = EventAwakenCompactFinished
+		base.Message = event.Content
+		return []Event{base}
+	case agentcore.CompactFailedEventType:
+		base.Type = EventAwakenCompactFailed
+		base.Message = event.Content
+		return []Event{base}
+	case agentcore.ToolPairingRepairedEventType:
+		base.Type = EventAwakenToolPairingRepaired
+		base.Message = event.Content
 		return []Event{base}
 	case agentcore.ApprovalRequestedEventType:
 		base.Type = EventAwakenApprovalRequested
@@ -168,7 +230,11 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.ArtifactStatus = string(event.ArtifactStatus)
 		return []Event{base}
 	default:
-		return nil
+		base.Type = EventAwakenUnknown
+		base.RawType = string(event.Type)
+		base.Message = event.Content
+		base.RawEvent = rawAwakenEvent(event)
+		return []Event{base}
 	}
 }
 
@@ -177,4 +243,16 @@ func toUnixMillis(ts time.Time) int64 {
 		return 0
 	}
 	return ts.UnixMilli()
+}
+
+func rawAwakenEvent(event agentcore.AwakenEvent) map[string]any {
+	data, err := json.Marshal(event)
+	if err != nil {
+		return map[string]any{"Type": string(event.Type)}
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return map[string]any{"Type": string(event.Type)}
+	}
+	return payload
 }

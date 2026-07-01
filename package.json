@@ -7,6 +7,7 @@
   ],
   "scripts": {
     "open:desktop": "node scripts/open-desktop.mjs",
+    "close:desktop": "node scripts/close-desktop.mjs",
     "open:ui": "node scripts/open-ui.mjs",
     "dev:ui": "npm --workspace @awaken/design-system run dev",
     "build:ui": "npm --workspace @awaken/design-system run build",

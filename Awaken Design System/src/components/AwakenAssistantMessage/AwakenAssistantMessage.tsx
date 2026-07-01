@@ -53,7 +53,7 @@ export function AwakenAssistantMessage({
         <footer className="assistant-message-footer" aria-label="Assistant response actions">
           {hasElapsedMs ? (
             <span className="assistant-message-footer-meta">
-              Agent ran {formatElapsedMs(elapsedMs)}
+              执行时间 {formatElapsedMs(elapsedMs)}
             </span>
           ) : null}
           <AwakenCopyButton

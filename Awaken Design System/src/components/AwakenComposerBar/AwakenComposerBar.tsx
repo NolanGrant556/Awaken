@@ -1,6 +1,6 @@
 import "./AwakenComposerBar.css";
 import { useCallback } from "react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import { AwakenComposerInput } from "../AwakenComposerInput";
 import { AwakenContextButton } from "../AwakenContextButton";
@@ -9,6 +9,8 @@ import { AwakenSendButton } from "../AwakenSendButton";
 export type ComposerBarMetaItem = {
   id: string;
   label: string;
+  value?: string;
+  progress?: number;
   icon?: ReactNode;
 };
 
@@ -45,23 +47,57 @@ export function AwakenComposerBar({
   const topMetaItems =
     variant === "center" && toolbarMetaItem
       ? metaItems.filter((item) => item.id !== toolbarMetaItem.id)
-      : metaItems;
+      : variant === "center"
+        ? metaItems
+        : [];
+  const bottomMetaItems = variant === "dock" ? metaItems : [];
   const handleSubmit = useCallback(() => {
     if (canSubmit) {
       onSubmit?.();
     }
   }, [canSubmit, onSubmit]);
 
+  function renderMetaItem(item: ComposerBarMetaItem) {
+    const hasProgress = typeof item.progress === "number" && Number.isFinite(item.progress);
+    const progressPercent = hasProgress
+      ? Math.max(0, Math.min(100, Math.round((item.progress ?? 0) * 100)))
+      : undefined;
+
+    return (
+      <span
+        key={item.id}
+        className={`composer-bar-meta-item${
+          hasProgress ? " composer-bar-meta-item-meter" : ""
+        }`}
+      >
+        {item.icon ? <span className="composer-bar-meta-icon">{item.icon}</span> : null}
+        <span className="composer-bar-meta-label">{item.label}</span>
+        {hasProgress ? (
+          <span
+            className="composer-bar-context-meter"
+            role="meter"
+            aria-label={item.label}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={progressPercent}
+            aria-valuetext={item.value}
+          >
+            <span
+              className="composer-bar-context-meter-fill"
+              style={{ "--composer-bar-context-progress": `${progressPercent}%` } as CSSProperties}
+            />
+          </span>
+        ) : null}
+        {item.value ? <span className="composer-bar-meta-value">{item.value}</span> : null}
+      </span>
+    );
+  }
+
   return (
     <div className={`composer-bar composer-bar-${variant}`}>
       {topMetaItems.length > 0 ? (
         <div className="composer-bar-meta" aria-label="AwakenComposer context">
-          {topMetaItems.map((item) => (
-            <span key={item.id} className="composer-bar-meta-item">
-              {item.icon ? <span className="composer-bar-meta-icon">{item.icon}</span> : null}
-              <span>{item.label}</span>
-            </span>
-          ))}
+          {topMetaItems.map((item) => renderMetaItem(item))}
         </div>
       ) : null}
       <div className="composer-bar-surface">
@@ -119,6 +155,14 @@ export function AwakenComposerBar({
           </div>
         ) : null}
       </div>
+      {bottomMetaItems.length > 0 ? (
+        <div
+          className="composer-bar-meta composer-bar-meta-bottom"
+          aria-label="AwakenComposer context"
+        >
+          {bottomMetaItems.map((item) => renderMetaItem(item))}
+        </div>
+      ) : null}
     </div>
   );
 }

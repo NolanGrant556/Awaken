@@ -66,7 +66,6 @@ import {
   anchoredTurnMinHeight,
   activeTurnIdForAnchor,
   composerBottomSafeArea,
-  diffLineStats,
   groupNarrativeByTurns,
   isNearLatestTurnOutputTail,
   resolvedDecisionForApproval,
@@ -177,16 +176,95 @@ function rawToolId(selectionId: string): string {
   return selectionId;
 }
 
-function rawApprovalId(selectionId: string): string {
-  return selectionId.startsWith("approval:")
-    ? selectionId.slice("approval:".length)
-    : selectionId;
-}
-
 function rawFileChangeId(selectionId: string): string {
   return selectionId.startsWith("fileChange:")
     ? selectionId.slice("fileChange:".length)
     : selectionId;
+}
+
+const terminalReasonLabels: Record<string, string> = {
+  max_turns: "达到最大思考次数，未能完成任务",
+  completed: "任务已完成",
+  cancelled: "运行已取消",
+  aborted_streaming: "模型输出中断，运行已停止",
+  aborted_tools: "工具执行中断，运行已停止",
+  context_blocked: "上下文已超过可处理范围",
+  prompt_too_long: "提示词过长，模型未能继续",
+  model_error: "模型请求失败",
+  tool_pairing_error: "工具结果配对异常，运行已停止",
+  empty_response: "模型没有返回内容",
+  tool_policy_abort: "工具权限策略终止了执行",
+  max_output_reached: "模型输出达到上限，未能继续",
+  error: "运行失败",
+};
+
+function hasChineseText(value?: string): boolean {
+  return /[\u4e00-\u9fff]/.test(value ?? "");
+}
+
+function terminalReasonText(reason?: string, message?: string): string | undefined {
+  if (reason === "max_turns" || message?.includes("达到最大思考次数")) {
+    return terminalReasonLabels.max_turns;
+  }
+  if (reason && terminalReasonLabels[reason]) {
+    return terminalReasonLabels[reason];
+  }
+  if (hasChineseText(message)) {
+    return message;
+  }
+  return reason || message ? "运行已停止" : undefined;
+}
+
+function formatTokenCount(value?: number): string | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+  if (value >= 1000) {
+    const amount = value / 1000;
+    return `${amount >= 10 ? amount.toFixed(0) : amount.toFixed(1)}k`;
+  }
+  return String(value);
+}
+
+function contextUsageMeta(
+  contextWindow: ReturnType<typeof createInitialRuntimeState>["inspectorSummary"]["contextWindow"],
+): Pick<ComposerBarMetaItem, "label" | "value" | "progress"> | undefined {
+  const estimated = formatTokenCount(contextWindow?.estimatedTokens);
+  const effective = formatTokenCount(contextWindow?.effectiveWindow);
+  if (estimated && effective) {
+    const progress =
+      typeof contextWindow?.estimatedTokens === "number" &&
+      typeof contextWindow?.effectiveWindow === "number" &&
+      contextWindow.effectiveWindow > 0
+        ? contextWindow.estimatedTokens / contextWindow.effectiveWindow
+        : undefined;
+    return {
+      label: "context windows",
+      value: `${estimated} / ${effective}`,
+      progress,
+    };
+  }
+  if (estimated) {
+    return {
+      label: "context windows",
+      value: estimated,
+    };
+  }
+  return undefined;
+}
+
+function latestDoneAnswerId(items: RunNarrativeItem[]): string | undefined {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item.kind === "answer" && item.status === "done") {
+      return item.id;
+    }
+  }
+  return undefined;
+}
+
+function firstContentLine(value?: string): string | undefined {
+  return value?.split("\n").map((line) => line.trim()).find(Boolean);
 }
 
 const DEFAULT_SIDEBAR_WIDTH = 300;
@@ -197,7 +275,7 @@ const MIN_INSPECTOR_WIDTH = 260;
 const MAX_INSPECTOR_WIDTH = 520;
 const LAYOUT_STEP = 12;
 const DEFAULT_PROMPT_ANCHOR_OFFSET = 0;
-const RUN_STAGE_COMPOSER_SAFE_GAP = 24;
+const RUN_STAGE_COMPOSER_SAFE_GAP = 72;
 const LATEST_OUTPUT_FOLLOW_THRESHOLD = 48;
 
 function clampNumber(value: number, min: number, max: number): number {
@@ -325,6 +403,7 @@ export function App() {
   const latestTurn = narrativeSections.turns[narrativeSections.turns.length - 1];
   const latestPromptId = latestTurn ? latestTurn.id : undefined;
   const hasPromptNarrative = narrativeSections.turns.length > 0;
+  const fallbackFooterAnswerId = latestDoneAnswerId(visibleNarrativeItems);
   const composerSafeAreaPx = composerBottomSafeArea({
     composerHeight: hasPromptNarrative ? composerDockHeightPx : 0,
     safeGap: hasPromptNarrative ? RUN_STAGE_COMPOSER_SAFE_GAP : 0,
@@ -559,10 +638,6 @@ export function App() {
       icon: <SlidersHorizontal size={16} strokeWidth={1.9} />,
     },
   ];
-  const latestToolResult =
-    runtimeState.toolResults.length > 0
-      ? runtimeState.toolResults[runtimeState.toolResults.length - 1]
-      : undefined;
   const topbarStatusLabel = desktopNeedsRestart
     ? "Needs restart"
     : desktopStarting
@@ -583,10 +658,10 @@ export function App() {
   const activeProjectLabel =
     projectLabelById.get(selectedProjectId) ??
     (pathForSelectedProject ? workspaceLabelForPath(pathForSelectedProject) : "awaken");
+  const contextMeta = contextUsageMeta(runtimeState.inspectorSummary.contextWindow);
   const composerMetaItems: ComposerBarMetaItem[] = [
     { id: "workspace", label: activeProjectLabel },
-    { id: "runtime", label: "Local" },
-    { id: "branch", label: "main" },
+    ...(contextMeta ? [{ id: "context", ...contextMeta }] : []),
   ];
 
   function projectAction(projectId: string, label: string) {
@@ -664,44 +739,12 @@ export function App() {
   const selectedArtifact = selectedArtifactId
     ? runtimeState.artifacts.find((artifact) => artifact.id === selectedArtifactId)
     : undefined;
-  const selectedFileChange =
-    inspectorSelection?.kind === "fileChange"
-      ? narrativeItems.find(
-          (item): item is Extract<RunNarrativeItem, { kind: "fileChange" }> =>
-            item.kind === "fileChange" &&
-            (item.id === inspectorSelection.id ||
-              item.files.some((file) => file.id === selectedArtifactId)),
-        )
-      : undefined;
-  const selectedApprovalId =
-    inspectorSelection?.kind === "approval"
-      ? rawApprovalId(inspectorSelection.id)
-      : undefined;
-  const selectedApproval = selectedApprovalId
-    ? runtimeState.approvals.find((approval) => approval.id === selectedApprovalId)
-    : undefined;
-  const selectedApprovalItem =
-    inspectorSelection?.kind === "approval"
-      ? narrativeItems.find(
-          (item): item is Extract<RunNarrativeItem, { kind: "approval" }> =>
-            item.kind === "approval" && item.id === inspectorSelection.id,
-        )
-      : undefined;
-  const latestPatchPreview = runtimeState.patchPreviews[runtimeState.patchPreviews.length - 1];
-  const changeStats = diffLineStats(runtimeState.turnDiff?.diff || latestPatchPreview?.patch);
-  const changesBadge =
-    runtimeState.artifacts.length +
-    runtimeState.patchPreviews.length +
-    (runtimeState.turnDiff?.diff ? 1 : 0);
   const inspectorTabs = [
     {
       id: "changes" as const,
       label: "Changes",
-      badge: changesBadge || undefined,
       icon: <GitBranch size={16} strokeWidth={1.85} />,
-      deltaAdded: changeStats.added || undefined,
-      deltaRemoved: changeStats.removed || undefined,
-      tone: changesBadge ? "success" as const : "neutral" as const,
+      tone: "neutral" as const,
     },
     {
       id: "browser" as const,
@@ -711,7 +754,6 @@ export function App() {
     {
       id: "terminal" as const,
       label: "Terminal",
-      badge: runtimeState.toolResults.length || undefined,
       icon: <Terminal size={16} strokeWidth={1.85} />,
     },
     {
@@ -745,18 +787,6 @@ export function App() {
   function selectInspector(selection: InspectorSelection, tabId = defaultInspectorTab(selection)): void {
     setInspectorSelection(selection);
     setInspectorTab(tabId);
-  }
-
-  function handleInspectorTargetKeyDown(
-    event: ReactKeyboardEvent,
-    selection: InspectorSelection,
-    tabId?: InspectorTabId,
-  ): void {
-    if (event.key !== "Enter" && event.key !== " ") {
-      return;
-    }
-    event.preventDefault();
-    selectInspector(selection, tabId);
   }
 
   function createSubscribeHandlers(): SubscribeHandlers {
@@ -1067,16 +1097,7 @@ export function App() {
     const measuredDockElement: HTMLDivElement = dockElement;
 
     function syncComposerHeight(): void {
-      const content = measuredDockElement.firstElementChild instanceof HTMLElement
-        ? measuredDockElement.firstElementChild
-        : measuredDockElement;
-      const paddingBottom = Number.parseFloat(
-        window.getComputedStyle(measuredDockElement).paddingBottom,
-      );
-      const measuredHeight =
-        content.getBoundingClientRect().height +
-        (Number.isFinite(paddingBottom) ? paddingBottom : 0);
-      setComposerDockHeightPx(Math.ceil(measuredHeight));
+      setComposerDockHeightPx(Math.ceil(measuredDockElement.getBoundingClientRect().height));
     }
 
     syncComposerHeight();
@@ -1577,42 +1598,45 @@ export function App() {
       );
     }
     if (item.kind === "answer") {
+      const showAnswerFooter =
+        item.status === "done" &&
+        (item.isFinal === true || (!isBusy && item.id === fallbackFooterAnswerId));
       return (
         <AssistantMessage
           key={key}
           markdown={item.markdown}
           status={item.status}
           elapsedMs={item.elapsedMs}
-          showFooter={item.status === "done"}
+          showFooter={showAnswerFooter}
         />
       );
     }
     if (item.kind === "exploring") {
+      const actions = item.actions.map((action) => {
+        const id = action.id.startsWith("explore:")
+          ? action.id.slice("explore:".length)
+          : rawToolId(action.id);
+        const tool = runtimeState.toolResults.find((record) => record.id === id);
+        return {
+          ...action,
+          detail: toolTraceDetail(tool, action.detail),
+        };
+      });
       return (
         <ToolTraceGroup
           key={key}
-          actions={item.actions}
-          onSelectAction={(action) => {
-            const selection: InspectorSelection = {
-              kind: "tool",
-              id: action.id.startsWith("explore:")
-                ? `tool:${action.id.slice("explore:".length)}`
-                : action.id,
-            };
-            selectInspector(selection, "files");
-          }}
+          actions={actions}
         />
       );
     }
     if (item.kind === "tool") {
-      const selection: InspectorSelection = { kind: "tool", id: item.id };
+      const tool = runtimeState.toolResults.find((record) => record.id === rawToolId(item.id));
       return (
         <ToolTraceLine
           key={key}
           title={item.title}
-          detail={item.detail}
+          detail={toolTraceDetail(tool, item.detail)}
           status={item.status}
-          onSelect={() => selectInspector(selection, "terminal")}
         />
       );
     }
@@ -1621,8 +1645,11 @@ export function App() {
         ? item.id.slice("approval:".length)
         : item.id;
       const itemApproval = runtimeState.approvals.find(
-        (approval) => approval.id === approvalId,
+        (approval) => approval.id === approvalId || approvalId.endsWith(`:${approval.id}`),
       );
+      if (item.status === "waiting" && itemApproval?.id === activeApproval?.id) {
+        return null;
+      }
       const canResolve =
         item.status === "waiting" &&
         activeApproval?.id === itemApproval?.id;
@@ -1630,69 +1657,66 @@ export function App() {
         item.status === "approved" || item.status === "rejected"
           ? item.status
           : resolvedDecisionForApproval(itemApproval, resolvedApproval);
-      const selection: InspectorSelection = { kind: "approval", id: item.id };
-
       return (
-        <div
+        <ApprovalCard
           key={key}
-          className="narrative-click-target"
-          onClick={() => selectInspector(selection, "changes")}
-        >
-          <ApprovalCard
-            inline
-            open
-            title={itemApproval?.title || item.title}
-            description={itemApproval?.description}
-            affectedPaths={itemApproval?.affectedPaths}
-            patchSummary={itemApproval?.patchSummary}
-            riskTone={itemApproval?.riskTone}
-            approveLabel={
-              resolvingApprovalId === itemApproval?.id ? "Resolving..." : "Approve"
-            }
-            rejectLabel={
-              resolvingApprovalId === itemApproval?.id ? "Resolving..." : "Reject"
-            }
-            resolving={resolvingApprovalId === itemApproval?.id}
-            resolvedDecision={resolvedDecision}
-            onApprove={
-              canResolve
-                ? () => {
-                    void handleResolveApproval("approved");
-                  }
-                : undefined
-            }
-            onReject={
-              canResolve
-                ? () => {
-                    void handleResolveApproval("rejected");
-                  }
-                : undefined
-            }
-          />
-        </div>
+          inline
+          open
+          title={itemApproval?.title || item.title}
+          description={itemApproval?.description}
+          affectedPaths={itemApproval?.affectedPaths}
+          patchSummary={itemApproval?.patchSummary}
+          riskTone={itemApproval?.riskTone}
+          approveLabel={
+            resolvingApprovalId === itemApproval?.id ? "Resolving..." : "Approve"
+          }
+          rejectLabel={
+            resolvingApprovalId === itemApproval?.id ? "Resolving..." : "Reject"
+          }
+          resolving={resolvingApprovalId === itemApproval?.id}
+          resolvedDecision={resolvedDecision}
+          onApprove={
+            canResolve
+              ? () => {
+                  void handleResolveApproval("approved");
+                }
+              : undefined
+          }
+          onReject={
+            canResolve
+              ? () => {
+                  void handleResolveApproval("rejected");
+                }
+              : undefined
+          }
+        />
       );
     }
     if (item.kind === "fileChange") {
-      const selection: InspectorSelection = { kind: "fileChange", id: item.id };
       return (
-        <div
+        <FileChangeSummary
           key={key}
-          className="narrative-click-target"
-          role="button"
-          tabIndex={0}
-          onClick={() => selectInspector(selection, "changes")}
-          onKeyDown={(event) =>
-            handleInspectorTargetKeyDown(event, selection, "changes")
-          }
-        >
-          <FileChangeSummary
-            files={item.files}
-            status={item.status}
-          />
-        </div>
+          files={item.files}
+          status={item.status}
+        />
       );
     }
     return null;
+  }
+
+  function toolTraceDetail(
+    tool: (typeof runtimeState.toolResults)[number] | undefined,
+    fallback?: string,
+  ): string | undefined {
+    if (!tool) {
+      return fallback;
+    }
+    const output = firstContentLine(tool.commandOutput);
+    const result = firstContentLine(tool.content);
+    if (tool.status === "done" || tool.status === "error") {
+      return result || output || fallback;
+    }
+    return output || fallback || result;
   }
 
   function renderInspectorEmpty(title: string, detail: string) {
@@ -1715,7 +1739,7 @@ export function App() {
     );
   }
 
-  function renderToolDetail(tool = selectedToolResult ?? latestToolResult) {
+  function renderToolDetail(tool = selectedToolResult) {
     if (!tool) {
       return null;
     }
@@ -1742,140 +1766,24 @@ export function App() {
     );
   }
 
-  function renderPatchPreviewArticle() {
-    if (!latestPatchPreview) {
+  function renderRunStateArticle() {
+    const summary = runtimeState.inspectorSummary;
+    const reason = terminalReasonText(summary.terminalReason, summary.terminalMessage);
+    if (!reason) {
       return null;
     }
-    return (
-      <article className="inspector-item inspector-item-selected">
-        <strong>{latestPatchPreview.summary || latestPatchPreview.title}</strong>
-        <span>{latestPatchPreview.affectedPaths.join(", ") || "No paths"}</span>
-        {renderInspectorCopy(latestPatchPreview.patch, "Copy patch")}
-        <pre>{latestPatchPreview.patch || "No patch captured."}</pre>
-      </article>
-    );
-  }
 
-  function renderTurnDiffArticle() {
-    if (!runtimeState.turnDiff?.diff) {
-      return null;
-    }
     return (
       <article className="inspector-item inspector-item-selected">
-        <strong>Turn diff</strong>
-        <span>{runtimeState.turnDiff.truncated ? "truncated" : "ready"}</span>
-        {renderInspectorCopy(runtimeState.turnDiff.diff, "Copy diff")}
-        <pre>{runtimeState.turnDiff.diff}</pre>
+        <strong>运行状态</strong>
+        <span>已停止</span>
+        <p>{reason}</p>
       </article>
     );
   }
 
   function renderChangesPane() {
-    const fileChangeFiles = selectedFileChange?.kind === "fileChange"
-      ? selectedFileChange.files
-      : [];
-    const selectedChangePath = selectedArtifact?.path || fileChangeFiles[0]?.path || "";
-    if (selectedApproval || selectedApprovalItem?.kind === "approval") {
-      const affectedPaths = selectedApproval?.affectedPaths?.join("\n") || "";
-      return (
-        <section className="inspector-section">
-          <div className="inspector-section-head">
-            <h2>Approval</h2>
-            <span>{selectedApprovalItem?.kind === "approval" ? selectedApprovalItem.status : "pending"}</span>
-          </div>
-          <article className="inspector-item inspector-item-selected">
-            <strong>{selectedApproval?.title || selectedApprovalItem?.title || "Approval"}</strong>
-            <span>{selectedApproval?.riskTone || "decision"}</span>
-            {selectedApproval?.patchSummary || latestPatchPreview?.summary ? (
-              <p>{selectedApproval?.patchSummary || latestPatchPreview?.summary}</p>
-            ) : null}
-            {affectedPaths ? (
-              <>
-                {renderInspectorCopy(affectedPaths, "Copy affected paths")}
-                <pre>{affectedPaths}</pre>
-              </>
-            ) : (
-              <p className="placeholder-copy">No affected paths captured.</p>
-            )}
-            {latestPatchPreview?.patch ? (
-              <>
-                {renderInspectorCopy(latestPatchPreview.patch, "Copy patch")}
-                <pre>{latestPatchPreview.patch}</pre>
-              </>
-            ) : null}
-          </article>
-        </section>
-      );
-    }
-
-    if (selectedArtifact || fileChangeFiles.length > 0) {
-      return (
-        <section className="inspector-section">
-          <div className="inspector-section-head">
-            <h2>Selected Change</h2>
-            <span>{selectedArtifact?.status || fileChangeFiles[0]?.status || "ready"}</span>
-          </div>
-          <article className="inspector-item inspector-item-selected">
-            <strong>{selectedArtifact?.title || fileChangeFiles[0]?.title || "File change"}</strong>
-            <span>{selectedChangePath || "No path"}</span>
-            {renderInspectorCopy(selectedChangePath, "Copy path")}
-            <pre>
-              {[
-                selectedArtifact?.path ? `path: ${selectedArtifact.path}` : "",
-                selectedArtifact?.kind ? `change: ${selectedArtifact.kind}` : "",
-                selectedArtifact?.status ? `status: ${selectedArtifact.status}` : "",
-                selectedArtifact?.description || fileChangeFiles[0]?.description || "",
-                selectedArtifact?.content || "",
-              ]
-                .filter(Boolean)
-                .join("\n") || "No change summary captured."}
-            </pre>
-          </article>
-          {renderPatchPreviewArticle()}
-          {renderTurnDiffArticle()}
-        </section>
-      );
-    }
-
-    if (latestPatchPreview || runtimeState.turnDiff?.diff) {
-      return (
-        <section className="inspector-section">
-          <div className="inspector-section-head">
-            <h2>Changes</h2>
-            <span>
-              {runtimeState.turnDiff?.diff
-                ? runtimeState.turnDiff.truncated
-                  ? "diff truncated"
-                  : "diff ready"
-                : "patch preview"}
-            </span>
-          </div>
-          {renderPatchPreviewArticle()}
-          {renderTurnDiffArticle()}
-        </section>
-      );
-    }
-
-    if (runtimeState.artifacts.length === 0) {
-      return null;
-    }
-
-    return (
-      <section className="inspector-section">
-        <div className="inspector-section-head">
-          <h2>Changes</h2>
-          <span>{runtimeState.artifacts.length}</span>
-        </div>
-        <div className="inspector-list">
-          {runtimeState.artifacts.map((artifact) => (
-            <article key={artifact.id} className="inspector-item">
-              <strong>{artifact.title}</strong>
-              <span>{artifact.path || artifact.kind}</span>
-            </article>
-          ))}
-        </div>
-      </section>
-    );
+    return null;
   }
 
   function renderBrowserPane() {
@@ -1927,9 +1835,9 @@ export function App() {
           <section className="inspector-section">
             <div className="inspector-section-head">
               <h2>Terminal</h2>
-              <span>{selectedToolResult ? "selected" : "latest"}</span>
+              <span>state</span>
             </div>
-            {renderToolDetail()}
+            {renderRunStateArticle()}
           </section>
         );
       case "files":
@@ -1945,6 +1853,39 @@ export function App() {
     "--aw-sidebar-width": `${sidebarWidth}px`,
     "--aw-inspector-width": `${inspectorWidth}px`,
   } as CSSProperties;
+
+  function renderActiveApprovalPrompt() {
+    if (!activeApproval) {
+      return null;
+    }
+    return (
+      <div className="composer-approval-card">
+        <ApprovalCard
+          inline
+          open
+          title={activeApproval.title}
+          description={activeApproval.description}
+          affectedPaths={activeApproval.affectedPaths}
+          patchSummary={activeApproval.patchSummary}
+          riskTone={activeApproval.riskTone}
+          approveLabel={
+            resolvingApprovalId === activeApproval.id ? "Resolving..." : "Approve"
+          }
+          rejectLabel={
+            resolvingApprovalId === activeApproval.id ? "Resolving..." : "Reject"
+          }
+          resolving={resolvingApprovalId === activeApproval.id}
+          resolvedDecision={resolvedDecisionForApproval(activeApproval, resolvedApproval)}
+          onApprove={() => {
+            void handleResolveApproval("approved");
+          }}
+          onReject={() => {
+            void handleResolveApproval("rejected");
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <>
@@ -2087,24 +2028,27 @@ export function App() {
                     composer={
                       showCenterComposer ? undefined : (
                         <ComposerDock ref={composerDockRef}>
-                          <ComposerBar
-                            value={composerValue}
-                            onChange={setComposerValue}
-                            onSubmit={() => {
-                              void handleComposerSubmit();
-                            }}
-                            onAddContext={handleAddContext}
-                            placeholder=""
-                            disabled={!desktopReady || isBusy || !isWorkspaceValid}
-                            isReady={
-                              isBusy ||
-                              (desktopReady && composerValue.trim().length > 0 && isWorkspaceValid)
-                            }
-                            submitMode={isBusy ? "stop" : "send"}
-                            variant="dock"
-                            metaItems={composerMetaItems}
-                            focusRequest={composerFocusRequest}
-                          />
+                          <div className="composer-dock-stack">
+                            {renderActiveApprovalPrompt()}
+                            <ComposerBar
+                              value={composerValue}
+                              onChange={setComposerValue}
+                              onSubmit={() => {
+                                void handleComposerSubmit();
+                              }}
+                              onAddContext={handleAddContext}
+                              placeholder=""
+                              disabled={!desktopReady || isBusy || !isWorkspaceValid}
+                              isReady={
+                                isBusy ||
+                                (desktopReady && composerValue.trim().length > 0 && isWorkspaceValid)
+                              }
+                              submitMode={isBusy ? "stop" : "send"}
+                              variant="dock"
+                              metaItems={composerMetaItems}
+                              focusRequest={composerFocusRequest}
+                            />
+                          </div>
                         </ComposerDock>
                       )
                     }
@@ -2140,6 +2084,7 @@ export function App() {
                     {showCenterComposer ? (
                       <div className="run-stage-center-composer">
                         <TaskWelcome />
+                        {renderActiveApprovalPrompt()}
                         <ComposerBar
                           value={composerValue}
                           onChange={setComposerValue}

@@ -400,12 +400,15 @@ scripts/
 | --- | --- |
 | `build-binary.mjs` | 构建 `awaken-core` binary。 |
 | `ensure-desktop-runtime.mjs` | 确保 Desktop runtime binary 存在。 |
+| `open-desktop.mjs` | Awaken Desktop 正式启动入口，复用或启动受管 screen 会话并检查真实窗口。 |
+| `close-desktop.mjs` | Awaken Desktop 正式关闭入口，停止受管 screen 会话并清理入口进程。 |
 | `accept-desktop-hardening.mjs` | Desktop 发布前硬化验收。 |
 
 ## 8. 常用命令
 
 ```bash
-npm run dev:desktop
+npm run open:desktop
+npm run close:desktop
 npm run dev:ui
 
 npm run typecheck:ui

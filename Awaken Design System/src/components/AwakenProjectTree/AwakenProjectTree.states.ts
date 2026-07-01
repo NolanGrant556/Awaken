@@ -40,6 +40,30 @@ export const AwakenProjectTreeStates: AwakenProjectTreeState[] = [
     } as unknown as Partial<ComponentProps<typeof AwakenProjectTree>>,
   },
   {
+    id: "empty-project-expanded",
+    label: "空项目已展开",
+    props: {
+      items: [
+        {
+          id: "empty-awaken",
+          label: "Awaken",
+          kind: "project",
+          path: "/Users/nolangrant/Awaken",
+          action: createElement(
+            AwakenSidebarSectionAction,
+            {
+              label: "新建会话",
+              children: createElement(MessageCirclePlus, { size: 13, strokeWidth: 1.85 }),
+            },
+          ),
+        },
+      ],
+      activeId: "empty-awaken",
+      defaultExpandedIds: ["empty-awaken"],
+      onSelect: noop,
+    } as unknown as Partial<ComponentProps<typeof AwakenProjectTree>>,
+  },
+  {
     id: "loading-node",
     label: "节点加载中",
     props: {

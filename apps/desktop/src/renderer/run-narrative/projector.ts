@@ -1,6 +1,5 @@
 import type { AguiEvent } from "../../shared/agui";
 import type {
-  ChangedFile,
   RunAction,
   RunNarrativeItem,
   RunNarrativeState,
@@ -156,9 +155,9 @@ export function projectAguiEventToNarrative(
       return resolveApproval(base, event);
     case "AWAKEN_ARTIFACT_CREATED":
     case "AWAKEN_ARTIFACT_UPDATED":
-      return activateFileChange(base, event);
+      return base;
     case "RUN_FINISHED":
-      return commitActive(base, "done");
+      return markLatestAnswerFinal(commitActive(base, "done"), event);
     case "RUN_ERROR":
       if (event.code === "RUN_CANCELLED") {
         return commitActive(base, "done");
@@ -169,7 +168,7 @@ export function projectAguiEventToNarrative(
         return commitActive(base, "done");
       }
       if (event.status === "finished") {
-        return commitActive(base, "done");
+        return markLatestAnswerFinal(commitActive(base, "done"), event);
       }
       return base;
     default:
@@ -257,6 +256,25 @@ function commitErrorAnswer(state: RunNarrativeState, event: AguiEvent): RunNarra
   );
 }
 
+function markLatestAnswerFinal(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
+  for (let index = state.committedItems.length - 1; index >= 0; index -= 1) {
+    const item = state.committedItems[index];
+    if (item.kind === "answer" && item.status === "done" && isAnswerForEvent(item.id, event)) {
+      const committedItems = state.committedItems.slice();
+      committedItems[index] = { ...item, isFinal: true };
+      return { ...state, committedItems };
+    }
+  }
+  return state;
+}
+
+function isAnswerForEvent(itemId: string, event: AguiEvent): boolean {
+  if (!event.runId) {
+    return true;
+  }
+  return itemId === `answer:${event.runId}` || itemId.startsWith(`answer:${event.runId}:`);
+}
+
 function setActive(state: RunNarrativeState, item: RunNarrativeItem): RunNarrativeState {
   if (state.activeItem?.id === item.id) {
     return {
@@ -326,10 +344,6 @@ function approvalId(event: AguiEvent): string {
   return `approval:${eventScopedId(event, event.approvalId)}`;
 }
 
-function artifactId(event: AguiEvent): string {
-  return `fileChange:${eventScopedId(event, event.artifactId)}`;
-}
-
 function exploringActionId(event: AguiEvent): string {
   return `explore:${eventScopedId(event, event.toolCallId ?? event.toolCallName)}`;
 }
@@ -364,6 +378,8 @@ function toolResultStatus(content?: string): "done" | "error" {
   if (
     normalized.includes("工具执行失败") ||
     normalized.includes("工具权限拒绝") ||
+    normalized.includes("AUTO policy 拒绝") ||
+    normalized.includes("工具执行已被取消") ||
     normalized.includes("工具参数错误") ||
     normalized.includes("审批拒绝")
   ) {
@@ -658,27 +674,4 @@ function resolveApproval(state: RunNarrativeState, event: AguiEvent): RunNarrati
     committedItems: upsertCommitted(state.committedItems, item),
     inspectorSelection: { kind: "approval", id },
   };
-}
-
-function activateFileChange(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
-  const id = artifactId(event);
-  const file: ChangedFile = {
-    id: event.artifactId ?? "artifact",
-    path: event.artifactPath,
-    title: event.artifactTitle || "Artifact",
-    description: event.artifactDescription,
-    status: event.artifactStatus === "error" ? "error" : "done",
-  };
-  return setActive(
-    {
-      ...state,
-      inspectorSelection: { kind: "artifact", id: event.artifactId ?? id },
-    },
-    {
-      kind: "fileChange",
-      id,
-      files: [file],
-      status: "done",
-    },
-  );
 }

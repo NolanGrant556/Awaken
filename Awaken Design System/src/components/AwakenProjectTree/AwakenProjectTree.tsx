@@ -89,15 +89,17 @@ type NodeProps = {
 };
 
 function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: NodeProps) {
-  const hasChildren = !!item.children && item.children.length > 0;
+  const childItems = item.children ?? [];
+  const hasChildren = childItems.length > 0;
   const isExpanded = expanded.includes(item.id);
   const isActive = item.id === activeId;
   const isDisabled = item.disabled;
   const isLoading = item.isLoading;
   const kind = item.kind ?? (depth === 0 || hasChildren ? "project" : "thread");
   const isProject = kind === "project";
+  const isExpandable = isProject || hasChildren;
   const showTimeLabel = !isProject && item.timeLabel;
-  const showInlineChevron = isProject && hasChildren;
+  const showInlineChevron = isExpandable;
 
   const rowHeight = depth === 0 ? 32 : 28;
   const fontSize =
@@ -133,7 +135,7 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
 
   const handleClick = () => {
     if (isDisabled) return;
-    if (isProject && hasChildren) {
+    if (isExpandable) {
       onToggle(item.id);
     }
     onSelect?.(item.id);
@@ -155,7 +157,7 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
           onClick={handleClick}
           title={item.path ?? item.label}
           aria-current={isActive ? "true" : undefined}
-          aria-expanded={hasChildren ? isExpanded : undefined}
+          aria-expanded={isExpandable ? isExpanded : undefined}
           style={rowButtonStyle}
         >
           <span className="aw-project-row-icon">
@@ -189,9 +191,9 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
         ) : null}
       </div>
 
-      {hasChildren && isExpanded ? (
+      {isExpandable && isExpanded ? (
         <div style={childrenContainerStyle}>
-          {item.children!.map((child) => (
+          {hasChildren ? childItems.map((child) => (
             <ProjectNode
               key={child.id}
               item={child}
@@ -201,7 +203,9 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
               onToggle={onToggle}
               onSelect={onSelect}
             />
-          ))}
+          )) : (
+            <div className="aw-project-empty-children">暂无会话</div>
+          )}
         </div>
       ) : null}
     </div>

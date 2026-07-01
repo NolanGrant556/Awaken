@@ -16,14 +16,19 @@ import (
 	"awaken/src/tool"
 )
 
-const maxTurnDiffChars = 50000
+const (
+	maxTurnDiffChars                  = 50000
+	maxOutputContinuationAttempts     = 1
+	maxOutputContinuationPromptPrefix = "请继续上一条回答，从中断处继续，不要重复已经输出的内容。"
+)
 
 type Runner struct {
-	config       AgentConfig
-	conversation *context.Conversation
-	reqBuilder   *RequestBuilder
-	toolRuntime  *ToolRuntime
-	threadID     string
+	config        AgentConfig
+	conversation  *context.Conversation
+	reqBuilder    *RequestBuilder
+	toolRuntime   *ToolRuntime
+	threadID      string
+	streamLLMFunc func(stdcontext.Context, *runEventEmitter) (*llm.Response, error)
 }
 
 func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *RequestBuilder) *Runner {
@@ -39,25 +44,55 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 	events := newRunEventEmitter(r.threadID, sink)
 	r.toolRuntime = NewToolRuntimeWithConfig(sink, toolRuntimeConfigFromAgentConfig(r.config))
 	events.runStarted()
+	turnState := newTurnState(events.threadID, events.runID, r.config.MaxThoughts, r.config.ModelConfig.Model)
+	transition := TransitionInitial
+	reactiveCompactAttempted := false
+	maxOutputContinuations := 0
+	var continuedOutput strings.Builder
 
-	for i := 0; i < r.config.MaxThoughts; i++ {
+	for i := 0; !hasMaxThoughtsLimit(r.config.MaxThoughts) || i < r.config.MaxThoughts; i++ {
 		select {
 		case <-ctx.Done():
 			r.injectSyntheticToolResultsForCancel()
-			events.runErrored(ctx.Err())
+			events.runErrored(ctx.Err(), TerminalReasonCancelled)
 			return "", ctx.Err()
 		default:
 		}
 
-		response, err := r.streamLLM(ctx, events)
+		turnState = turnState.nextTurn(r.conversation.Context.GetMessages(), transition)
+		events.turnStarted(turnState)
+
+		streamLLM := r.streamLLM
+		if r.streamLLMFunc != nil {
+			streamLLM = r.streamLLMFunc
+		}
+		response, err := streamLLM(ctx, events)
 		if err != nil {
 			if ctx.Err() != nil {
 				r.injectSyntheticToolResultsForCancel()
-				events.runErrored(ctx.Err())
+				events.turnFinished(TerminalReasonAbortedStreaming, "")
+				events.runErrored(ctx.Err(), TerminalReasonAbortedStreaming)
 				return "", ctx.Err()
 			}
+			if isPromptTooLongError(err) {
+				if !reactiveCompactAttempted {
+					reactiveCompactAttempted = true
+					if compactErr := r.compactConversationForRetry(events); compactErr == nil {
+						events.turnFinished("", TransitionReactiveCompactRetry)
+						events.resetTurn()
+						transition = TransitionReactiveCompactRetry
+						continue
+					}
+				}
+				runErr := fmt.Errorf("LLM stream call failed: %w", err)
+				events.turnFinished(TerminalReasonPromptTooLong, "")
+				events.runErrored(runErr, TerminalReasonPromptTooLong)
+				return "", runErr
+			}
 			runErr := fmt.Errorf("LLM stream call failed: %w", err)
-			events.runErrored(runErr)
+			reason := terminalReasonForError(err)
+			events.turnFinished(reason, "")
+			events.runErrored(runErr, reason)
 			return "", runErr
 		}
 
@@ -68,33 +103,67 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 			toolCalls := llmToolCallsToContext(response.ToolCalls)
 			results := r.executeToolCalls(ctx, toolCalls, events)
 			r.conversation.ToolExchange(response.Content, toolCalls, toolExecutionResultsToContext(results))
+			if stop, stopErr := r.stopAfterToolExchangeIfNeeded(ctx, events, i); stop {
+				return "", stopErr
+			}
+			events.turnFinished("", TransitionToolResultContinuation)
 			events.resetTurn()
+			transition = TransitionToolResultContinuation
 			continue
+		}
+
+		if response.MaxOutputReached {
+			if response.Content != "" {
+				continuedOutput.WriteString(response.Content)
+				r.conversation.AssistantOutput(response.Content, nil)
+			}
+			if maxOutputContinuations < maxOutputContinuationAttempts {
+				maxOutputContinuations++
+				r.conversation.UserInput(maxOutputContinuationPrompt(response.StopReason))
+				events.turnFinished("", TransitionMaxOutputContinuation)
+				events.resetTurn()
+				transition = TransitionMaxOutputContinuation
+				continue
+			}
+			err := maxOutputReachedError(maxOutputContinuations, response.StopReason)
+			events.turnFinished(TerminalReasonMaxOutputReached, "")
+			events.runErrored(err, TerminalReasonMaxOutputReached)
+			return continuedOutput.String(), err
 		}
 
 		if handled, finalAnswer := r.handleXMLFallback(ctx, response.Content, events); handled {
 			if finalAnswer != "" {
+				finalAnswer = continuedOutput.String() + finalAnswer
 				events.emitTurnDiff(ctx, r.config.Workspace.Root)
-				events.runFinished(finalAnswer)
+				events.turnFinished(TerminalReasonCompleted, "")
+				events.runFinished(finalAnswer, TerminalReasonCompleted)
 				return finalAnswer, nil
 			}
+			if stop, stopErr := r.stopAfterToolExchangeIfNeeded(ctx, events, i); stop {
+				return "", stopErr
+			}
+			events.turnFinished("", TransitionXMLFallbackContinuation)
 			events.resetTurn()
+			transition = TransitionXMLFallbackContinuation
 			continue
 		}
 
 		if response.Content == "" {
-			events.runErrored(llm.ErrEmptyResponse)
+			events.turnFinished(TerminalReasonEmptyResponse, "")
+			events.runErrored(llm.ErrEmptyResponse, TerminalReasonEmptyResponse)
 			return "", llm.ErrEmptyResponse
 		}
+		finalContent := continuedOutput.String() + response.Content
 		r.conversation.AssistantOutput(response.Content, nil)
 		events.finishTextIfOpen()
 		events.emitTurnDiff(ctx, r.config.Workspace.Root)
-		events.runFinished(response.Content)
-		return response.Content, nil
+		events.turnFinished(TerminalReasonCompleted, "")
+		events.runFinished(finalContent, TerminalReasonCompleted)
+		return finalContent, nil
 	}
 
-	err := fmt.Errorf("达到最大思考次数 %d，未能完成任务", r.config.MaxThoughts)
-	events.runErrored(err)
+	err := maxThoughtsError(r.config.MaxThoughts)
+	events.runErrored(err, TerminalReasonMaxTurns)
 	return "", err
 }
 
@@ -140,6 +209,7 @@ func (r *Runner) injectSyntheticToolResultsForCancel() {
 func toolRuntimeConfigFromAgentConfig(config AgentConfig) ToolRuntimeConfig {
 	return ToolRuntimeConfig{
 		PermissionContext: tool.NewPermissionContext(config.Workspace.Root, config.Workspace.WritableRoots),
+		AutoToolPolicy:    config.AutoToolPolicy,
 	}
 }
 
@@ -152,7 +222,7 @@ func (r *Runner) buildLLMRequest() (LLMRequest, error) {
 }
 
 func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*llm.Response, error) {
-	llmReq, err := r.buildLLMRequest()
+	llmReq, err := r.prepareLLMRequest(ctx, events)
 	if err != nil {
 		return nil, err
 	}
@@ -173,6 +243,78 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*ll
 		Messages:     llmReq.Messages,
 		Tools:        llmReq.Tools,
 	}, observer)
+}
+
+func (r *Runner) prepareLLMRequest(ctx stdcontext.Context, events *runEventEmitter) (LLMRequest, error) {
+	llmReq, err := r.buildLLMRequest()
+	if err != nil {
+		return LLMRequest{}, err
+	}
+	if events != nil {
+		events.emitContextWindow(llmReq.ContextWindowState)
+	}
+	if llmReq.ContextWindowState.ShouldAutoCompact() {
+		llmReq, err = r.compactConversationForRequest(events, llmReq, false)
+		if err != nil {
+			if llmReq.ContextWindowState.ShouldBlock() {
+				if events != nil {
+					events.emitContextBlocked(llmReq.ContextWindowState, err.Error())
+				}
+				return LLMRequest{}, err
+			}
+			return llmReq, nil
+		}
+		if events != nil {
+			events.emitContextWindow(llmReq.ContextWindowState)
+		}
+	}
+	if llmReq.ContextWindowState.ShouldBlock() {
+		err := fmt.Errorf("%w: estimated %d tokens exceeds blocking threshold %d",
+			errContextWindowBlocked,
+			llmReq.ContextWindowState.EstimatedTokens,
+			llmReq.ContextWindowState.blockingThreshold(),
+		)
+		if events != nil {
+			events.emitContextBlocked(llmReq.ContextWindowState, err.Error())
+		}
+		return LLMRequest{}, err
+	}
+	return llmReq, nil
+}
+
+func (r *Runner) compactConversationForRetry(events *runEventEmitter) error {
+	llmReq, err := r.buildLLMRequest()
+	if err != nil {
+		return err
+	}
+	llmReq.ContextWindowState.HasAttemptedReactiveCompact = true
+	_, err = r.compactConversationForRequest(events, llmReq, true)
+	return err
+}
+
+func (r *Runner) compactConversationForRequest(events *runEventEmitter, llmReq LLMRequest, reactive bool) (LLMRequest, error) {
+	if llmReq.EnvelopeDebug == nil {
+		return LLMRequest{}, errors.New("missing context envelope for compact")
+	}
+	if events != nil {
+		events.emitCompactStarted(llmReq.ContextWindowState, reactive)
+	}
+	result, err := CompactConversation(llmReq.Messages, *llmReq.EnvelopeDebug, llmReq.ContextWindowState.CompactTarget)
+	if err != nil {
+		if events != nil {
+			events.emitCompactFailed(llmReq.ContextWindowState, err.Error())
+		}
+		return llmReq, err
+	}
+	r.conversation.Context.SetMessages(result.Messages)
+	if events != nil {
+		events.emitCompactFinished(llmReq.ContextWindowState, result, reactive)
+	}
+	rebuilt, err := r.buildLLMRequest()
+	if err != nil {
+		return LLMRequest{}, err
+	}
+	return rebuilt, nil
 }
 
 func (r *Runner) handleXMLFallback(ctx stdcontext.Context, response string, events *runEventEmitter) (bool, string) {
@@ -226,11 +368,88 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 	return results
 }
 
+func (r *Runner) stopAfterToolExchangeIfNeeded(ctx stdcontext.Context, events *runEventEmitter, turnIndex int) (bool, error) {
+	if err := context.ValidateToolResultPairing(r.conversation.Context.GetMessages()); err != nil {
+		runErr := fmt.Errorf("invalid tool result pairing after tool exchange: %w", err)
+		if events != nil {
+			events.turnFinished(TerminalReasonToolPairingError, "")
+			events.runErrored(runErr, TerminalReasonToolPairingError)
+		}
+		return true, runErr
+	}
+	if ctx.Err() != nil {
+		if events != nil {
+			events.turnFinished(TerminalReasonAbortedTools, "")
+			events.runErrored(ctx.Err(), TerminalReasonAbortedTools)
+		}
+		return true, ctx.Err()
+	}
+	if hasMaxThoughtsLimit(r.config.MaxThoughts) && turnIndex+1 >= r.config.MaxThoughts {
+		err := maxThoughtsError(r.config.MaxThoughts)
+		if events != nil {
+			events.turnFinished(TerminalReasonMaxTurns, "")
+			events.runErrored(err, TerminalReasonMaxTurns)
+		}
+		return true, err
+	}
+	return false, nil
+}
+
 func toolProgressForResult(result ToolExecutionResult) string {
 	if result.IsError {
 		return "Tool execution failed"
 	}
 	return "Tool execution complete"
+}
+
+func firstTerminalReason(reasons []TerminalReason, fallback TerminalReason) TerminalReason {
+	for _, reason := range reasons {
+		if reason != "" {
+			return reason
+		}
+	}
+	return fallback
+}
+
+func terminalReasonForError(err error) TerminalReason {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, errContextWindowBlocked):
+		return TerminalReasonContextBlocked
+	case errors.Is(err, stdcontext.Canceled):
+		return TerminalReasonCancelled
+	case errors.Is(err, llm.ErrEmptyResponse):
+		return TerminalReasonEmptyResponse
+	case strings.Contains(err.Error(), "invalid tool result pairing"):
+		return TerminalReasonToolPairingError
+	default:
+		return TerminalReasonModelError
+	}
+}
+
+func maxOutputContinuationPrompt(stopReason string) string {
+	stopReason = strings.TrimSpace(stopReason)
+	if stopReason == "" {
+		return maxOutputContinuationPromptPrefix
+	}
+	return fmt.Sprintf("%s 上一轮 stop_reason=%s。", maxOutputContinuationPromptPrefix, stopReason)
+}
+
+func maxOutputReachedError(attempts int, stopReason string) error {
+	stopReason = strings.TrimSpace(stopReason)
+	if stopReason == "" {
+		return fmt.Errorf("model reached max output limit after %d continuation attempt(s)", attempts)
+	}
+	return fmt.Errorf("model reached max output limit after %d continuation attempt(s): stop_reason=%s", attempts, stopReason)
+}
+
+func maxThoughtsError(maxThoughts int) error {
+	return fmt.Errorf("达到最大思考次数 %d，未能完成任务", maxThoughts)
+}
+
+func hasMaxThoughtsLimit(maxThoughts int) bool {
+	return maxThoughts > 0
 }
 
 func syntheticCancelledToolResult(call context.ToolCall) ToolExecutionResult {
@@ -278,6 +497,7 @@ type runEventEmitter struct {
 	sink                EventSink
 	threadID            string
 	runID               string
+	turnState           TurnState
 	currentAssistantID  string
 	textMessageID       string
 	reasoningMessageID  string
@@ -308,6 +528,23 @@ func (e *runEventEmitter) emit(event AwakenEvent) {
 	if event.RunID == "" {
 		event.RunID = e.runID
 	}
+	if e.turnState.TurnID != "" {
+		if event.TurnID == "" {
+			event.TurnID = string(e.turnState.TurnID)
+		}
+		if event.QueryChainID == "" {
+			event.QueryChainID = string(e.turnState.QueryChainID)
+		}
+		if event.Depth == 0 {
+			event.Depth = int(e.turnState.Depth)
+		}
+		if event.TurnCount == 0 {
+			event.TurnCount = e.turnState.TurnCount
+		}
+		if event.TransitionReason == "" {
+			event.TransitionReason = e.turnState.TransitionReason
+		}
+	}
 	e.sink.Emit(event)
 }
 
@@ -315,16 +552,48 @@ func (e *runEventEmitter) runStarted() {
 	e.emit(AwakenEvent{Type: RunStartedEventType})
 }
 
-func (e *runEventEmitter) runFinished(content string) {
-	e.emit(AwakenEvent{Type: RunFinishedEventType, Content: content})
+func (e *runEventEmitter) turnStarted(state TurnState) {
+	e.turnState = state
+	e.emit(AwakenEvent{
+		Type:             TurnStartedEventType,
+		TransitionReason: state.TransitionReason,
+	})
 }
 
-func (e *runEventEmitter) runErrored(err error) {
+func (e *runEventEmitter) turnFinished(reason TerminalReason, transition TransitionReason) {
+	if transition == "" {
+		transition = e.turnState.TransitionReason
+	}
+	e.turnState.TerminalReason = reason
+	e.turnState.TransitionReason = transition
+	e.emit(AwakenEvent{
+		Type:             TurnFinishedEventType,
+		TerminalReason:   reason,
+		TransitionReason: transition,
+	})
+}
+
+func (e *runEventEmitter) runFinished(content string, reasons ...TerminalReason) {
+	reason := firstTerminalReason(reasons, TerminalReasonCompleted)
+	e.emit(AwakenEvent{
+		Type:           RunFinishedEventType,
+		Content:        content,
+		TerminalReason: reason,
+	})
+}
+
+func (e *runEventEmitter) runErrored(err error, reasons ...TerminalReason) {
 	if err == nil {
 		return
 	}
-	event := AwakenEvent{Type: RunErrorEventType, Error: err.Error()}
+	event := AwakenEvent{
+		Type:           RunErrorEventType,
+		Error:          err.Error(),
+		TerminalReason: firstTerminalReason(reasons, terminalReasonForError(err)),
+	}
 	switch {
+	case errors.Is(err, errContextWindowBlocked):
+		event.Code = "CONTEXT_BLOCKED"
 	case errors.Is(err, llm.ErrMissingAPIKey):
 		event.Code = "PROVIDER_AUTH_MISSING"
 	case errors.Is(err, llm.ErrRequestFailed):
@@ -435,6 +704,60 @@ func (e *runEventEmitter) emitToolResult(result ToolExecutionResult) {
 
 func (e *runEventEmitter) markMutation() {
 	e.mutationOccurred = true
+}
+
+func (e *runEventEmitter) emitContextWindow(state ContextWindowState) {
+	e.emit(contextWindowEvent(ContextEstimatedEventType, state, state.Summary()))
+	if state.ShouldWarn() {
+		e.emit(contextWindowEvent(ContextWarningEventType, state, "context window warning: "+state.Summary()))
+	}
+}
+
+func (e *runEventEmitter) emitContextBlocked(state ContextWindowState, message string) {
+	e.emit(contextWindowEvent(ContextBlockedEventType, state, message))
+}
+
+func (e *runEventEmitter) emitCompactStarted(state ContextWindowState, reactive bool) {
+	mode := "auto"
+	if reactive {
+		mode = "reactive"
+	}
+	e.emit(contextWindowEvent(CompactStartedEventType, state, "compact started: "+mode))
+}
+
+func (e *runEventEmitter) emitCompactFinished(state ContextWindowState, result CompactResult, reactive bool) {
+	mode := "auto"
+	if reactive {
+		mode = "reactive"
+	}
+	event := contextWindowEvent(CompactFinishedEventType, state, fmt.Sprintf(
+		"compact finished: %s boundary=%s estimated_tokens=%d",
+		mode,
+		result.BoundaryID,
+		result.EstimatedTokens,
+	))
+	event.ContextEstimatedTokens = result.EstimatedTokens
+	event.ContextCompactTarget = state.CompactTarget
+	e.emit(event)
+}
+
+func (e *runEventEmitter) emitCompactFailed(state ContextWindowState, message string) {
+	e.emit(contextWindowEvent(CompactFailedEventType, state, message))
+}
+
+func contextWindowEvent(eventType AwakenEventType, state ContextWindowState, content string) AwakenEvent {
+	return AwakenEvent{
+		Type:                        eventType,
+		Content:                     content,
+		ContextModelWindow:          state.ModelWindow,
+		ContextOutputReserve:        state.OutputReserve,
+		ContextEffectiveWindow:      state.EffectiveWindow,
+		ContextEstimatedTokens:      state.EstimatedTokens,
+		ContextWarningThreshold:     state.WarningThreshold,
+		ContextAutoCompactThreshold: state.AutoCompactThreshold,
+		ContextCompactTarget:        state.CompactTarget,
+		ContextEstimatedDeltaTokens: state.EstimatedDeltaTokens,
+	}
 }
 
 func (e *runEventEmitter) emitTurnDiff(ctx stdcontext.Context, workspaceRoot string) {

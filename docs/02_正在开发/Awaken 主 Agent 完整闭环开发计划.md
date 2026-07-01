@@ -157,7 +157,7 @@ blocking_reserved: 3000 到 5000
 
 ### Phase 0：基线锁定
 
-- [ ] 0.1 记录当前主链路基线
+- [x] 0.1 记录当前主链路基线
   - 进入条件：当前 `main` 或工作分支能跑 Go 测试。
   - 执行项：
     - 跑 `go test ./src/agentcore ./src/context ./src/runtime ./src/server ./src/llm ./src/tool ./src/tools/...`。
@@ -168,7 +168,7 @@ blocking_reserved: 3000 到 5000
     - 失败项被标记为既有失败或本轮必须修复。
   - 解锁下一步：可以开始改核心类型。
 
-- [ ] 0.2 标记保留路径和废弃路径
+- [x] 0.2 标记保留路径和废弃路径
   - 进入条件：0.1 完成。
   - 执行项：
     - 保留 `Runner.RunStreamWithEvents()` 作为主 loop 入口。
@@ -180,6 +180,24 @@ blocking_reserved: 3000 到 5000
     - 文档或代码注释明确这些边界。
   - 解锁下一步：核心类型可以围绕现有入口扩展。
 
+#### Phase 0 执行记录
+
+- 日期：2026-06-30。
+- 上下文与上一轮 diff：
+  - 当前分支：`main...origin/main`。
+  - 当前工作区：Phase 0 开始时无未提交 diff。
+  - 上一轮提交：`66d514f6 docs: remove obsolete development docs`，仅删除旧开发文档。
+- 基线测试：
+  - `go test ./src/agentcore ./src/context ./src/runtime ./src/server ./src/llm ./src/tool ./src/tools/...` 通过。
+  - `npm --workspace @awaken/desktop test -- apps/desktop/src/renderer/runtime/reducer.test.ts` 失败，原因是 Vitest workspace cwd 为 `apps/desktop`，过滤路径写成 repo 根路径，未找到测试文件；该失败不是产品测试失败。
+  - `npm --workspace @awaken/desktop test -- src/renderer/runtime/reducer.test.ts` 通过，1 个测试文件、59 个测试通过。
+- Phase 0 边界声明：
+  - `Runner.RunStreamWithEvents()` 保持主 Agent loop 生命周期入口。
+  - `RequestBuilder.Build()` 保持 LLM request 入口，后续 `ContextEnvelope` 在该入口内等价迁移。
+  - `ToolRuntime.Execute()` 保持单工具执行入口，后续 `AutoToolPolicy` 在该入口内扩展。
+  - Runtime/SSE/Desktop 现有事件链保留，新增事件只做向后兼容扩展。
+  - approval path 保留为兼容能力；AUTO 主路径不得依赖用户审批。
+
 #### Claude Code 参考设计
 
 - Claude Code 文件：/Users/nolangrant/claudecode源代码/src/QueryEngine.ts:175-183；设计要点：`QueryEngine` 明确拥有 query lifecycle 和 conversation/session state，一个 conversation 复用一份消息、文件缓存、usage 等状态；Awaken 对应启发：Phase 0 锁定 `Agent -> Runner -> RequestBuilder -> ToolRuntime` 时，应把 `Runner.RunStreamWithEvents()` 视为主闭环生命周期入口，而不是在 Runtime/SSE/Desktop 旁边再造一套状态入口。
@@ -190,7 +208,7 @@ blocking_reserved: 3000 到 5000
 
 ### Phase 1：核心状态与事件
 
-- [ ] 1.1 新增 `TurnState`
+- [x] 1.1 新增 `TurnState`
   - 进入条件：Phase 0 完成。
   - 执行项：
     - 在 `src/agentcore` 新增或扩展类型：
@@ -211,7 +229,7 @@ blocking_reserved: 3000 到 5000
     - 测试能断言多轮工具调用时 `TurnCount` 增长。
   - 解锁下一步：事件可以带 turn/query 信息。
 
-- [ ] 1.2 新增 terminal reason 事件字段
+- [x] 1.2 新增 terminal reason 事件字段
   - 进入条件：1.1 完成。
   - 执行项：
     - 扩展 `agentcore.AwakenEvent`：
@@ -226,7 +244,7 @@ blocking_reserved: 3000 到 5000
     - Desktop reducer 可以忽略未知字段且不崩。
   - 解锁下一步：stream event 和 transcript 可共享同一 envelope。
 
-- [ ] 1.3 明确事件清单
+- [x] 1.3 明确事件清单
   - 进入条件：1.2 完成。
   - 执行项：
     - 保留现有事件：
@@ -263,6 +281,25 @@ blocking_reserved: 3000 到 5000
     - 现有前端不因新增事件报错。
   - 解锁下一步：AUTO 工具和 context window 可以发事件。
 
+#### Phase 1 执行记录
+
+- 日期：2026-06-30。
+- 上下文与上一轮 diff：
+  - Phase 1 开始前已复读 Phase 0 文档 diff，确认上一轮只新增基线测试记录与入口边界声明。
+  - 读取当前 `Runner`、事件发射器、Runtime session、server SSE mapper、AG-UI mapper、Desktop shared type 与 reducer 上下文。
+- 实现结果：
+  - 新增 `src/agentcore/turn_state.go`，定义 `TurnState`、`SessionID`、`ThreadID`、`RunID`、`TurnID`、`QueryChainID`、`Depth`、`TransitionReason`、`TerminalReason`。
+  - `Runner.RunStreamWithEvents()` 每轮生成稳定 `TurnID`，发送 `TurnStarted` / `TurnFinished`，多轮工具调用时 `TurnCount` 递增。
+  - `AwakenEvent`、runtime wrapper event、AG-UI event 和 Desktop shared type 增加 turn/query/terminal/transition 字段。
+  - `RunFinished`、`RunError`、runtime `run_cancelled` 映射携带 terminal reason。
+  - Phase 1 新事件已在 Go 和 TS shared 类型中定义；Desktop reducer 当前默认忽略新增事件。
+- 验证：
+  - `go test ./src/agentcore ./src/protocol/agui ./src/runtime ./src/server` 通过。
+  - `go test ./src/agentcore ./src/context ./src/runtime ./src/server ./src/llm ./src/tool ./src/tools/...` 通过。
+  - `npm --workspace @awaken/desktop test -- src/renderer/runtime/reducer.test.ts` 通过，1 个测试文件、59 个测试通过。
+  - `npm run typecheck:desktop` 通过。
+  - `git diff --check` 通过。
+
 #### Claude Code 参考设计
 
 - Claude Code 文件：/Users/nolangrant/claudecode源代码/src/query.ts:203-217；设计要点：Claude Code 在 query loop 内维护显式 `State`，包含 `messages`、`toolUseContext`、`turnCount`、`transition` 等跨轮字段；Awaken 对应启发：`TurnState` 应承担跨轮状态载体，而不是只在事件里临时拼 `TurnID/TurnCount`。
@@ -274,7 +311,7 @@ blocking_reserved: 3000 到 5000
 
 ### Phase 2：AUTO 工具运行时
 
-- [ ] 2.1 扩展 `ToolExecutionResult`
+- [x] 2.1 扩展 `ToolExecutionResult`
   - 进入条件：Phase 1 完成。
   - 执行项：
     - 在 `src/agentcore/tool_runtime.go` 扩展字段：
@@ -292,7 +329,7 @@ blocking_reserved: 3000 到 5000
     - tool error 测试能读取 `Status=failed`。
   - 解锁下一步：AUTO policy 可以留下可观测决策。
 
-- [ ] 2.2 定义 `AutoToolPolicy`
+- [x] 2.2 定义 `AutoToolPolicy`
   - 进入条件：2.1 完成。
   - 执行项：
     - 新增接口：
@@ -324,7 +361,7 @@ blocking_reserved: 3000 到 5000
     - 单测覆盖 allow、deny、abort。
   - 解锁下一步：ToolRuntime 可以去掉主路径 approval。
 
-- [ ] 2.3 改写 `PermissionAsk` 主路径
+- [x] 2.3 改写 `PermissionAsk` 主路径
   - 进入条件：2.2 完成。
   - 执行项：
     - 在 `ToolRuntime.Execute()` 中：
@@ -339,7 +376,7 @@ blocking_reserved: 3000 到 5000
     - Runtime 不进入 `awaiting_approval`。
   - 解锁下一步：主 Agent loop 可无审批执行。
 
-- [ ] 2.4 发出 `ToolPermissionDecided`
+- [x] 2.4 发出 `ToolPermissionDecided`
   - 进入条件：2.3 完成。
   - 执行项：
     - 在 static permission 和 auto policy 后发事件。
@@ -349,7 +386,7 @@ blocking_reserved: 3000 到 5000
     - 单测能捕获 `ToolPermissionDecided` 在 `ToolCallStarted` 和 `ToolResult` 之间。
   - 解锁下一步：工具执行链具备可观测性。
 
-- [ ] 2.5 标准化 deny / abort tool result
+- [x] 2.5 标准化 deny / abort tool result
   - 进入条件：2.4 完成。
   - 执行项：
     - 新增 helper：
@@ -365,6 +402,26 @@ blocking_reserved: 3000 到 5000
     - 都可以通过 `ValidateToolResultPairing()`。
   - 解锁下一步：LLM 可以从失败工具结果继续收束。
 
+#### Phase 2 执行记录
+
+- 日期：2026-06-30。
+- 上下文与上一轮 diff：
+  - 进入 Phase 2 前已复读 Phase 1 diff，确认已有 `TurnState`、`TerminalReason`、`TurnStarted/TurnFinished`、Runtime/SSE/Desktop metadata 扩展。
+  - 继续沿用 `ToolRuntime.Execute()` 作为唯一工具执行入口，保留 `selectedTool.CheckPermission()` 静态权限层。
+  - 旧 approval path 只作为显式兼容配置保留，默认主路径不再等待用户审批。
+- 实现：
+  - 新增 `AutoToolPolicy`、`ToolDecisionRequest`、`ToolDecision`、`DefaultAutoToolPolicy`，覆盖 allow / deny / abort 与 fail-closed。
+  - 扩展 `ToolExecutionResult` 的状态、错误码、决策来源、耗时、affected paths、patch summary。
+  - `PermissionAsk` 默认改走 AUTO policy；deny / abort / validation 都合成合法 error tool result。
+  - 新增 `ToolPermissionDecided` 事件并映射到 AG-UI / Desktop 类型；Desktop error phrase detection 识别 AUTO deny / cancelled。
+  - server 真实 LLM smoke 改为验证默认 AUTO deny：不进入 `awaiting_approval`、不发 approval request、不落盘、不产生 artifact，但 patch preview 与 denied tool result 可观测。
+- 验证：
+  - `go test ./src/server` 通过，84.101s。
+  - `go test ./src/agentcore ./src/context ./src/runtime ./src/server ./src/llm ./src/tool ./src/tools/...` 通过。
+  - `npm --workspace @awaken/desktop test -- src/renderer/runtime/reducer.test.ts` 通过，1 个测试文件、59 个测试通过。
+  - `npm run typecheck:desktop` 通过。
+  - `git diff --check` 通过。
+
 #### Claude Code 参考设计
 
 - Claude Code 文件：/Users/nolangrant/claudecode源代码/src/Tool.ts:483-503；设计要点：每个 Tool 先暴露 `validateInput()`，再暴露 tool-specific `checkPermissions()`，通用权限逻辑放在 `permissions.ts`；Awaken 对应启发：`ToolRuntime.Execute()` 中应保留当前静态权限检查，再把 `PermissionAsk` 接到 `AutoToolPolicy.Decide()`，避免把工具私有校验和全局 AUTO policy 混在一起。
@@ -376,7 +433,7 @@ blocking_reserved: 3000 到 5000
 
 ### Phase 3：ContextEnvelope 分层上下文
 
-- [ ] 3.1 定义 `ContextEnvelope`
+- [x] 3.1 定义 `ContextEnvelope`
   - 进入条件：Phase 2 完成。
   - 执行项：
     - 在 `src/agentcore` 或 `src/prompt` 定义：
@@ -391,7 +448,7 @@ blocking_reserved: 3000 到 5000
     - 类型能表达当前 `RequestBuilder` 已有 system prompt、runtime info、tools。
   - 解锁下一步：RequestBuilder 可逐步迁移。
 
-- [ ] 3.2 将 `RequestBuilder` 改为先构建 envelope
+- [x] 3.2 将 `RequestBuilder` 改为先构建 envelope
   - 进入条件：3.1 完成。
   - 执行项：
     - `RequestBuilder.Build()` 内先调用 `BuildContextEnvelope()`。
@@ -402,7 +459,7 @@ blocking_reserved: 3000 到 5000
     - LLM request 内容和迁移前等价。
   - 解锁下一步：可以加入 runtime delta 和 context window。
 
-- [ ] 3.3 拆出 runtime snapshot
+- [x] 3.3 拆出 runtime snapshot
   - 进入条件：3.2 完成。
   - 执行项：
     - 从 `prompt.RuntimeInfo` 中明确拆出：
@@ -419,7 +476,7 @@ blocking_reserved: 3000 到 5000
     - tool summary 跟实际 ToolPool 一致。
   - 解锁下一步：上下文窗口估算可以看到完整请求体。
 
-- [ ] 3.4 定义 M1 context delta
+- [x] 3.4 定义 M1 context delta
   - 进入条件：3.3 完成。
   - 执行项：
     - 只做 4 类 delta：
@@ -432,6 +489,25 @@ blocking_reserved: 3000 到 5000
     - delta 能被记录和注入，但不改变现有行为。
   - 解锁下一步：compact/resume 可以避免重复注入。
 
+#### Phase 3 执行记录
+
+- 日期：2026-06-30。
+- 上下文与上一轮 diff：
+  - 进入 Phase 3 前已复读 Phase 2 diff，确认默认 AUTO 工具路径已经可观测且不再依赖 approval。
+  - 复读 `RequestBuilder`、`Context`、`prompt.RuntimeInfo`、`LLMRequest`、现有 request builder tests，确认 Phase 3 只做中间结构迁移，不改 provider request 行为。
+- 实现：
+  - 新增 `ContextEnvelope`，包含 `SystemBlocks`、`UserContextItems`、`SystemContextItems`、`Attachments`、`ToolSchemas`、`RuntimeSnapshot`、`CacheKeys`、`Deltas`、messages 和模型参数。
+  - `RequestBuilder.Build()` 改为先 `BuildContextEnvelope()`，再 `BuildLLMRequestFromEnvelope()`；外部签名保持不变。
+  - `RuntimeSnapshot` 从 `prompt.RuntimeInfo` 中拆出 current date、working directory、model name、entry point、tool summary、workspace root、writable roots，并在每次构建前刷新。
+  - 定义 M1 delta 类型：`runtime_snapshot_delta`、`tool_pool_delta`、`memory_hit`、`mcp_instruction_delta`；当前先记录 runtime snapshot / tool pool delta，memory 和 MCP 保留空。
+  - 新增 request builder tests 覆盖 envelope 内容和 envelope 到 `LLMRequest` 的等价输出。
+- 验证：
+  - `go test ./src/agentcore` 通过。
+  - `go test ./src/agentcore ./src/context ./src/runtime ./src/server ./src/llm ./src/tool ./src/tools/...` 通过，server 真实 smoke 77.515s。
+  - `npm --workspace @awaken/desktop test -- src/renderer/runtime/reducer.test.ts` 通过，1 个测试文件、59 个测试通过。
+  - `npm run typecheck:desktop` 通过。
+  - `git diff --check` 通过。
+
 #### Claude Code 参考设计
 
 - `/Users/nolangrant/claudecode源代码/src/query.ts:181-197`：未找到直接等价设计。Claude Code 没有单一 `ContextEnvelope` 类型，最接近的是 `QueryParams` 同时携带 `messages`、`systemPrompt`、`userContext`、`systemContext`、`toolUseContext`、`fallbackModel`、`taskBudget`。Awaken 对应启发：保留这些分层输入，但用显式 `ContextEnvelope` 把它们收束成可测试、可 debug 的中间结构。
@@ -442,7 +518,7 @@ blocking_reserved: 3000 到 5000
 
 ### Phase 4：上下文窗口与 compact
 
-- [ ] 4.1 新增 `ContextWindowState`
+- [x] 4.1 新增 `ContextWindowState`
   - 进入条件：Phase 3 完成。
   - 执行项：
     - 定义字段：
@@ -462,7 +538,7 @@ blocking_reserved: 3000 到 5000
     - 每次 `Build()` 能返回估算结果。
   - 解锁下一步：请求前可以发 warning/blocking。
 
-- [ ] 4.2 扩展 token estimator
+- [x] 4.2 扩展 token estimator
   - 进入条件：4.1 完成。
   - 执行项：
     - 基于 `context.EstimateTotalTokens()` 扩展：
@@ -477,7 +553,7 @@ blocking_reserved: 3000 到 5000
     - 单测覆盖纯文本、tool call、长 tool result、tool schema。
   - 解锁下一步：warning 和 compact 有数据依据。
 
-- [ ] 4.3 发出 context window 事件
+- [x] 4.3 发出 context window 事件
   - 进入条件：4.2 完成。
   - 执行项：
     - 每轮请求前发 `ContextEstimated`。
@@ -488,7 +564,7 @@ blocking_reserved: 3000 到 5000
     - Desktop 可先只记录，不必立即设计复杂 UI。
   - 解锁下一步：compact 可由阈值触发。
 
-- [ ] 4.4 实现 durable compact
+- [x] 4.4 实现 durable compact
   - 进入条件：4.3 完成。
   - 执行项：
     - 新增 `CompactConversation()`：
@@ -501,7 +577,7 @@ blocking_reserved: 3000 到 5000
     - compact boundary 不破坏 tool_result pairing。
   - 解锁下一步：长会话可持续。
 
-- [ ] 4.5 实现 reactive compact retry
+- [x] 4.5 实现 reactive compact retry
   - 进入条件：4.4 完成。
   - 执行项：
     - 当 LLM 返回 prompt too long：
@@ -511,6 +587,26 @@ blocking_reserved: 3000 到 5000
   - 完成条件：
     - 单测覆盖一次 retry 成功和二次失败终止。
   - 解锁下一步：主 loop 可以处理估算失误。
+
+#### Phase 4 执行记录
+
+- 日期：2026-06-30。
+- 上下文与上一轮 diff：
+  - 进入 Phase 4 前已复读 Phase 3 diff，确认 `RequestBuilder` 已经通过 `ContextEnvelope -> LLMRequest` 输出且 provider request 内容保持等价。
+  - 复读 `context.EstimateTotalTokens()`、`Runner.buildLLMRequest()` / `streamLLM()`、AG-UI context/compact 事件映射和 runner lifecycle tests，确认本 Phase 需要同步精确事件序列。
+- 实现：
+  - 新增 `ContextWindowState`，记录 model window、output reserve、effective window、estimated tokens、warning/autocompact/compact target、delta tokens、compact boundary 和 reactive compact 状态。
+  - 扩展估算器，覆盖 system blocks、messages content、tool call args、tool result、tool schema JSON、ContextEnvelope attachments、context delta；`context.EstimateTokens()` 增加 char-based 估算，避免长无空格 tool result 被低估。
+  - 每轮 LLM request 前发 `ContextEstimated`；超过 warning 时发 `ContextWarning`；超过 autocompact 阈值时执行 deterministic compact；仍超过 blocking 时发 `ContextBlocked` 并终止。
+  - 新增 `CompactConversation()`，输出 summary message、tail messages、compact boundary，并通过 `ValidateToolResultPairing()` 确保 tool_use / tool_result 不被切坏。
+  - `Context.GetMessagesForModel()` 从最近 compact boundary 开始取模型消息；`RequestBuilder` 优先使用该视图构建 request。
+  - prompt-too-long 错误触发一次 reactive compact retry；第二次仍 prompt-too-long 时 terminal reason 为 `prompt_too_long`。
+- 验证：
+  - `go test ./src/agentcore` 通过，覆盖估算、compact pairing/boundary、reactive compact retry 成功与二次失败。
+  - `go test ./src/agentcore ./src/context ./src/runtime ./src/server ./src/llm ./src/tool ./src/tools/...` 通过，server 真实 smoke 75.338s。
+  - `npm --workspace @awaken/desktop test -- src/renderer/runtime/reducer.test.ts` 通过，1 个测试文件、59 个测试通过；pretest 的 design-system copy step 打出一次 `cp: dist/tokens/components.css: No such file or directory`，但命令退出码为 0。
+  - `npm run typecheck:desktop` 通过。
+  - `git diff --check` 通过。
 
 #### Claude Code 参考设计
 
@@ -523,7 +619,7 @@ blocking_reserved: 3000 到 5000
 
 ### Phase 5：LLM request 与 stream hardening
 
-- [ ] 5.1 Request 前统一 pairing check
+- [x] 5.1 Request 前统一 pairing check
   - 进入条件：Phase 4 完成。
   - 执行项：
     - 保留现有 `ValidateToolResultPairing()`。
@@ -533,7 +629,7 @@ blocking_reserved: 3000 到 5000
     - 现有 `TestRunnerRejectsInvalidToolResultPairingBeforeLLM` 仍通过。
   - 解锁下一步：stream tool_use 可以放心进入工具执行。
 
-- [ ] 5.2 统一 `LLMRequest` 中的上下文来源
+- [x] 5.2 统一 `LLMRequest` 中的上下文来源
   - 进入条件：5.1 完成。
   - 执行项：
     - `LLMRequest` 保持：
@@ -551,7 +647,7 @@ blocking_reserved: 3000 到 5000
     - OpenAI 和 Anthropic request 输出保持兼容。
   - 解锁下一步：stream reducer 可记录 usage 和 context。
 
-- [ ] 5.3 完善 stream tool_use 收集
+- [x] 5.3 完善 stream tool_use 收集
   - 进入条件：5.2 完成。
   - 执行项：
     - OpenAI stream 和 Anthropic stream 都必须：
@@ -564,7 +660,7 @@ blocking_reserved: 3000 到 5000
     - OpenAI tool_call 流测试通过。
   - 解锁下一步：Runner loop 可稳定执行工具。
 
-- [ ] 5.4 实现 max output recovery
+- [x] 5.4 实现 max output recovery
   - 进入条件：5.3 完成。
   - 执行项：
     - Provider 暴露 stop reason 或截断信号后：
@@ -574,6 +670,24 @@ blocking_reserved: 3000 到 5000
   - 完成条件：
     - 不会无限续写。
   - 解锁下一步：长输出不会半截结束。
+
+#### Phase 5 执行记录
+
+- 日期：2026-06-30。
+- 上下文与上一轮 diff：
+  - 进入 Phase 5 前复读 Phase 4 文档记录与当前 diff，确认 `RequestBuilder` 已通过 `ContextEnvelope -> LLMRequest` 统一上下文来源，`Runner.prepareLLMRequest()` 已在 compact 后重建 request，并在 `buildLLMRequest()` 统一执行 `ValidateToolResultPairing()`。
+  - 复读 `src/llm/openai_chat.go`、`src/llm/anthropic_messages.go`、`src/llm/stream_invoke_test.go`、`src/llm/anthropic_test.go` 和 `src/agentcore/runner_test.go`，确认 OpenAI/Anthropic stream 已累积 tool args delta，Phase 5 主要剩余点是 provider stop reason 暴露与 max output 有界续写。
+- 实现：
+  - `llm.Response` 新增 `StopReason` 与 `MaxOutputReached`，OpenAI 非流式/流式解析 `finish_reason`，Anthropic 非流式/流式解析 `stop_reason`，并将 `length` / `max_tokens` 等映射为 max output 截断信号。
+  - Runner 遇到 `MaxOutputReached` 且无 tool call 时，将 partial assistant 内容写回 conversation，最多追加 1 次 continuation user message；再次截断时以 terminal reason `max_output_reached` 结束，避免无限续写。
+  - 增加 `TransitionMaxOutputContinuation` 与 `TerminalReasonMaxOutputReached`，保持现有 tool loop、XML fallback、empty response 行为不变。
+  - 增加 provider request JSON 断言，确保 `ContextWindowState` / `EnvelopeDebug` 等 agentcore metadata 不暴露给 OpenAI/Anthropic API request。
+- 验证：
+  - `go test ./src/llm ./src/agentcore -run 'Test(StreamInvoke(OpenAI|Anthropic)|Invoke(OpenAI|Anthropic).*Metadata|Runner(ContinuesOnceAfterMaxOutput|StopsAfterMaxOutputContinuationLimit|RejectsInvalidToolResultPairingBeforeLLM)|RequestBuilderBuildsLLMRequestFromEnvelope)'` 通过。
+  - `go test ./src/agentcore ./src/context ./src/runtime ./src/server ./src/llm ./src/tool ./src/tools/...` 通过，server 真实 smoke 82.072s。
+  - `npm --workspace @awaken/desktop test -- src/renderer/runtime/reducer.test.ts` 通过，1 个测试文件、59 个测试通过。
+  - `npm run typecheck:desktop` 通过；design-system copy step 仍打印一次 `cp: dist/tokens/components.css: No such file or directory`，但命令退出码为 0。
+  - `git diff --check` 通过。
 
 #### Claude Code 参考设计
 
@@ -586,7 +700,7 @@ blocking_reserved: 3000 到 5000
 
 ### Phase 6：Runner 主 loop 显式化
 
-- [ ] 6.1 将 for loop 改为 `TurnState` 驱动
+- [x] 6.1 将 for loop 改为 `TurnState` 驱动
   - 进入条件：Phase 5 完成。
   - 执行项：
     - 保留 `for i := 0; i < MaxThoughts; i++` 行为。
@@ -597,7 +711,7 @@ blocking_reserved: 3000 到 5000
     - 多轮工具 loop 测试能看到 turn 事件。
   - 解锁下一步：terminal reason 可以准确落点。
 
-- [ ] 6.2 收敛工具执行后的继续条件
+- [x] 6.2 收敛工具执行后的继续条件
   - 进入条件：6.1 完成。
   - 执行项：
     - `len(response.ToolCalls) > 0` 后：
@@ -611,7 +725,7 @@ blocking_reserved: 3000 到 5000
     - cancel in batch 不再发第二次 LLM。
   - 解锁下一步：cancel 和 max turns 可统一。
 
-- [ ] 6.3 统一 cancel 两阶段
+- [x] 6.3 统一 cancel 两阶段
   - 进入条件：6.2 完成。
   - 执行项：
     - 流式阶段 cancel：
@@ -626,7 +740,7 @@ blocking_reserved: 3000 到 5000
     - 事件 terminal reason 正确。
   - 解锁下一步：Runtime status 可准确表达 cancelled。
 
-- [ ] 6.4 统一 max turns
+- [x] 6.4 统一 max turns
   - 进入条件：6.3 完成。
   - 执行项：
     - 每次工具批次结束后检查下一轮是否超过 `MaxThoughts`。
@@ -638,7 +752,7 @@ blocking_reserved: 3000 到 5000
     - 不丢最后一批 tool result。
   - 解锁下一步：主 loop 所有终止路径可枚举。
 
-- [ ] 6.5 保留 XML fallback 但降级为兼容路径
+- [x] 6.5 保留 XML fallback 但降级为兼容路径
   - 进入条件：6.4 完成。
   - 执行项：
     - `handleXMLFallback()` 保留。
@@ -647,6 +761,27 @@ blocking_reserved: 3000 到 5000
   - 完成条件：
     - XML fallback 现有测试通过。
   - 解锁下一步：可以做 transcript/resume。
+
+#### Phase 6 执行记录
+
+- 日期：2026-06-30。
+- 上下文与上一轮 diff：
+  - 进入 Phase 6 前复读 Phase 5 文档记录与 runner/provider diff，确认 `TurnStarted` / `TurnFinished`、`TransitionReason`、`TerminalReason`、max output continuation 已经接入主 loop。
+  - 复读 `src/agentcore/runner.go`、runner cancel/max-turn/XML fallback tests、runtime session cancel 映射和 AG-UI turn event mapper，确认 Runtime 用户取消仍由 `run_cancelled` 事件表达，runner 内部需要补齐 streaming/tool 两阶段 terminal reason。
+- 实现：
+  - 保留 `for i := 0; i < MaxThoughts; i++`，用 `TurnState` 驱动每轮 turn start/finish；每个 tool、XML、compact、max-output continue 都写明确 transition reason。
+  - 新增 `stopAfterToolExchangeIfNeeded()`，在 native tool_use 和 XML fallback 工具路径写入 `Conversation.ToolExchange()` 后统一做 pairing check、ctx cancel 检查和 max turns 检查。
+  - 流式阶段 cancel 现在以 terminal `aborted_streaming` 结束；工具阶段 cancel 保留已完成 tool result、为未执行工具合成 cancelled result，并以 terminal `aborted_tools` 结束。
+  - 工具批次结束后如果下一轮会超过 `MaxThoughts`，保留最后一批 tool result，并以 terminal `max_turns` 返回可读错误。
+  - XML fallback 保留为兼容路径，继续通过 `executeToolCalls()` 产出 tool call / permission / result 事件，并复用同一套工具后置检查。
+  - 回归验证暴露出真实 LLM smoke 中 malformed/alternate `apply_patch` 可能落到 static allow；补充 AUTO policy 防线：`apply_patch` 等写入身份工具即使 static allow，也在 headless AUTO 默认 deny，不影响 read-only allow。
+- 验证：
+  - `go test ./src/agentcore -run 'Test(DefaultAutoToolPolicyDecisions|RunnerRunStreamWithEventsEmitsTurnState|RunnerToolErrorObservation|RunnerCancelInjectsSyntheticToolResults|RunnerStreamingCancelUsesAbortedStreamingTerminalReason|RunnerCancelBetweenTurnsExitsEarly|RunnerCancelStopsSubsequentToolsInBatch|RunnerMaxThoughts)'` 通过。
+  - `go test ./src/server -run TestFileMutationAutoDenySmoke` 通过。
+  - `go test ./src/agentcore ./src/context ./src/runtime ./src/server ./src/llm ./src/tool ./src/tools/...` 通过，server 真实 smoke 107.591s。
+  - `npm --workspace @awaken/desktop test -- src/renderer/runtime/reducer.test.ts` 通过，1 个测试文件、59 个测试通过。
+  - `npm run typecheck:desktop` 通过。
+  - `git diff --check` 通过。
 
 #### Claude Code 参考设计
 
@@ -659,7 +794,7 @@ blocking_reserved: 3000 到 5000
 
 ### Phase 7：Transcript 与 resume
 
-- [ ] 7.1 定义 durable transcript record
+- [x] 7.1 定义 durable transcript record
   - 进入条件：Phase 6 完成。
   - 执行项：
     - 新增 JSONL record：
@@ -684,7 +819,7 @@ blocking_reserved: 3000 到 5000
     - 每个 user/assistant/tool message 都能落盘。
   - 解锁下一步：跨进程 resume。
 
-- [ ] 7.2 实现 transcript writer
+- [x] 7.2 实现 transcript writer
   - 进入条件：7.1 完成。
   - 执行项：
     - 在 `Conversation` append message 时，或者 `Runner` turn 完成后写增量。
@@ -693,7 +828,7 @@ blocking_reserved: 3000 到 5000
     - 单测覆盖增量追加和重复写入幂等。
   - 解锁下一步：resume loader 可读。
 
-- [ ] 7.3 实现 resume loader
+- [x] 7.3 实现 resume loader
   - 进入条件：7.2 完成。
   - 执行项：
     - 从 transcript 还原：
@@ -709,7 +844,7 @@ blocking_reserved: 3000 到 5000
     - 还原后 `ValidateToolResultPairing()` 通过。
   - 解锁下一步：Runtime thread transcript 可跨重启。
 
-- [ ] 7.4 接入 RunService thread reuse
+- [x] 7.4 接入 RunService thread reuse
   - 进入条件：7.3 完成。
   - 执行项：
     - 新 thread 创建时建立 transcript path。
@@ -718,6 +853,27 @@ blocking_reserved: 3000 到 5000
   - 完成条件：
     - 重启后继续同一 thread，不丢上下文。
   - 解锁下一步：Desktop resume 行为可稳定。
+
+#### Phase 7 执行记录
+
+- 日期：2026-06-30。
+- 上下文与上一轮 diff：
+  - 进入 Phase 7 前复读 Phase 6 文档记录与 runner/runtime diff，确认主 loop、工具后置检查、terminal reason 和 AUTO deny 已稳定。
+  - 复读 `Agent` / `Conversation` / `RunService` / `Session` / server thread transcript 测试上下文，确认 durable transcript 先并行于 Runtime in-memory history，不替换现有事件总线。
+- 实现：
+  - 新增 `src/runtime/transcript_store.go`，以 `.awaken/transcripts/<thread_id>.jsonl` 记录 durable transcript record，覆盖 `record_type`、`session_id`、`thread_id`、`run_id`、`turn_id`、`message_id`、`parent_message_id`、`role`、`content`、`tool_calls`、`tool_call_id`、`tool_name`、`is_error`、`event`、`terminal_reason`、`timestamp`、`compact_boundary_id`。
+  - `RunService` 接收用户输入后立即写 user message，run 结束后从 Agent conversation 幂等补齐 assistant/tool message，并写入可恢复的 context/compact/terminal event。
+  - resume loader 通过 parent chain 还原有序消息，恢复 compact boundary、最近 context window state 和 terminal reason；dangling tool_use、orphan / duplicate tool_result 等非法 pairing 会被拒绝。
+  - thread 复用保持内存 Agent 优先；进程重启后如果内存没有 thread，则从 JSONL 恢复 Agent conversation、thread runIDs 和可展示的 durable run 摘要。
+  - `GetThreadTranscript()` 在 session history 缺失时从 durable transcript 合成历史 run，保证重启后 thread transcript 仍可读。
+  - server/runtime 测试等待条件补齐 transcript flush 尾声；真实 LLM patch smoke 的 patch preview / decision 断言改为按 `toolCallId` 配对，避免多工具调用时误判。
+- 验证：
+  - `go test ./src/runtime -count=1` 通过。
+  - `go test ./src/server -run 'Test(FileMutationPatchAndTurnDiffSmoke|MultiTurnThreadSmoke)' -count=1` 通过。
+  - `go test ./src/agentcore ./src/context ./src/runtime ./src/server ./src/llm ./src/tool ./src/tools/...` 通过，server 真实 smoke 72.713s。
+  - `npm --workspace @awaken/desktop test -- src/renderer/runtime/reducer.test.ts` 通过，1 个测试文件、59 个测试通过。
+  - `npm run typecheck:desktop` 通过。
+  - `git diff --check` 通过。
 
 #### Claude Code 参考设计
 
@@ -730,7 +886,7 @@ blocking_reserved: 3000 到 5000
 
 ### Phase 8：Runtime / Server / Desktop 集成
 
-- [ ] 8.1 Runtime 状态去 approval 主路径
+- [x] 8.1 Runtime 状态去 approval 主路径
   - 进入条件：Phase 2 至 Phase 6 完成。
   - 执行项：
     - AUTO 模式下不得进入 `RunStatusAwaitingApproval`。
@@ -740,7 +896,7 @@ blocking_reserved: 3000 到 5000
     - AUTO 工具 ask 不触发 `ApprovalRequested`。
   - 解锁下一步：Desktop 不出现审批卡片阻塞。
 
-- [ ] 8.2 Server SSE 支持新增事件
+- [x] 8.2 Server SSE 支持新增事件
   - 进入条件：8.1 完成。
   - 执行项：
     - `mapRuntimeEvent()` 映射新增事件到 AG-UI frame。
@@ -750,7 +906,7 @@ blocking_reserved: 3000 到 5000
     - SSE replay 测试覆盖新增事件。
   - 解锁下一步：Desktop reducer 可消费。
 
-- [ ] 8.3 Desktop shared type 更新
+- [x] 8.3 Desktop shared type 更新
   - 进入条件：8.2 完成。
   - 执行项：
     - 更新 `apps/desktop/src/shared/agui.ts` 和 runtime 类型：
@@ -762,7 +918,7 @@ blocking_reserved: 3000 到 5000
     - TypeScript 编译通过。
   - 解锁下一步：reducer 可投影。
 
-- [ ] 8.4 Desktop reducer 投影
+- [x] 8.4 Desktop reducer 投影
   - 进入条件：8.3 完成。
   - 执行项：
     - context events 投影到 Inspector。
@@ -774,7 +930,7 @@ blocking_reserved: 3000 到 5000
     - reducer tests 覆盖 AUTO allow、AUTO deny、compact、terminal reason。
   - 解锁下一步：UI 可验收。
 
-- [ ] 8.5 Inspector 展示
+- [x] 8.5 Inspector 展示
   - 进入条件：8.4 完成。
   - 执行项：
     - 展示：
@@ -789,6 +945,25 @@ blocking_reserved: 3000 到 5000
     - 用户能看懂 run 为什么继续、为什么结束、工具为什么执行或拒绝。
   - 解锁下一步：端到端 smoke。
 
+#### Phase 8 执行记录
+
+- 日期：2026-06-30。
+- 上下文与上一轮 diff：
+  - Phase 8 开始前已复读 Phase 7 diff，确认 durable transcript 已接入 RunService、SSE replay、thread transcript restore 与 Desktop replay。
+  - 读取 Phase 8 文档上下文、AG-UI mapper/server SSE、Desktop shared type、runtime reducer、Inspector 面板和 reducer 测试上下文。
+- 实现：
+  - Runtime 主路径继续保持 AUTO 工具决策，不进入 `awaiting_approval`；approval API/事件仍作为兼容路径保留。
+  - AG-UI mapper 增加新增事件字段与 `AWAKEN_UNKNOWN_EVENT` fallback，unknown frame 保留 `rawType` 与原始 payload；server replay 新增 `after_seq` 覆盖。
+  - Desktop `agui.ts` 增加 turn/context/compact/tool decision/terminal/unknown 字段。
+  - Desktop reducer 新增 `inspectorSummary`，投影 current turn、AUTO decision、context window、compact boundary、terminal reason 和 unknown events；AUTO decision 不增长 `approvals`。
+  - Inspector terminal 面板复用现有 article/pre 展示 run state、工具详情、context tokens、compact boundary、terminal reason。
+- 验证：
+  - `go test ./src/protocol/agui ./src/server -run 'TestMapEventUnknownFallsBackWithRawPayload|TestRunEventsUnknownFallbackReplayAfterSeq'` 通过。
+  - `go test ./src/agentcore ./src/context ./src/runtime ./src/server ./src/llm ./src/tool ./src/tools/...` 通过，server 包 61.599s。
+  - `npm --workspace @awaken/desktop test -- src/renderer/runtime/reducer.test.ts` 通过，62 个测试通过。
+  - `npm run typecheck:desktop` 通过。
+  - `git diff --check` 通过。
+
 #### Claude Code 参考设计
 
 - `/Users/nolangrant/claudecode源代码/src/QueryEngine.ts:175-183`：设计要点：`QueryEngine` 是 conversation lifecycle 和 session state 的拥有者，一个 conversation 一个 engine，messages/file cache/usage 跨 turn 持续。Awaken 对应启发：Phase 8 的 Runtime/RunService 应明确谁拥有 run state，Server/Desktop 只消费投影。
@@ -800,7 +975,7 @@ blocking_reserved: 3000 到 5000
 
 ### Phase 9：验收 smoke
 
-- [ ] 9.1 Smoke：纯聊天
+- [x] 9.1 Smoke：纯聊天
   - 进入条件：Phase 8 完成。
   - 执行项：
     - 输入普通问题。
@@ -810,7 +985,7 @@ blocking_reserved: 3000 到 5000
     - terminal `completed`。
     - transcript 有 user/assistant。
 
-- [ ] 9.2 Smoke：读工具 AUTO allow
+- [x] 9.2 Smoke：读工具 AUTO allow
   - 进入条件：9.1 完成。
   - 执行项：
     - 模型调用 `file_read` 或 read-only 测试工具。
@@ -820,7 +995,7 @@ blocking_reserved: 3000 到 5000
     - tool_result 回写。
     - 第二轮 LLM 输出最终回答。
 
-- [ ] 9.3 Smoke：写工具 AUTO deny
+- [x] 9.3 Smoke：写工具 AUTO deny
   - 进入条件：9.2 完成。
   - 执行项：
     - 构造越界 path 或 destructive 工具调用。
@@ -830,7 +1005,7 @@ blocking_reserved: 3000 到 5000
     - 生成 error tool_result。
     - 模型能继续收束或解释失败。
 
-- [ ] 9.4 Smoke：写工具 allowlist allow
+- [x] 9.4 Smoke：写工具 allowlist allow
   - 进入条件：9.3 完成。
   - 执行项：
     - 对 workspace 内安全写工具配置 allowlist。
@@ -840,7 +1015,7 @@ blocking_reserved: 3000 到 5000
     - 工具成功。
     - artifact / turn diff 保留。
 
-- [ ] 9.5 Smoke：长上下文 compact
+- [x] 9.5 Smoke：长上下文 compact
   - 进入条件：9.4 完成。
   - 执行项：
     - 构造超过 autocompact 阈值的消息历史。
@@ -850,7 +1025,7 @@ blocking_reserved: 3000 到 5000
     - 产生 compact boundary。
     - 下一轮 request 只使用 boundary 后 summary + tail。
 
-- [ ] 9.6 Smoke：prompt too long reactive compact
+- [x] 9.6 Smoke：prompt too long reactive compact
   - 进入条件：9.5 完成。
   - 执行项：
     - 模拟 provider 返回 prompt too long。
@@ -859,7 +1034,7 @@ blocking_reserved: 3000 到 5000
     - 第二次失败 terminal `prompt_too_long`。
     - 不死循环。
 
-- [ ] 9.7 Smoke：cancel during streaming
+- [x] 9.7 Smoke：cancel during streaming
   - 进入条件：9.6 完成。
   - 执行项：
     - 流式输出中 cancel。
@@ -867,7 +1042,7 @@ blocking_reserved: 3000 到 5000
     - terminal `aborted_streaming` 或 `cancelled`。
     - transcript 可恢复。
 
-- [ ] 9.8 Smoke：cancel during tool batch
+- [x] 9.8 Smoke：cancel during tool batch
   - 进入条件：9.7 完成。
   - 执行项：
     - 第一个工具触发 cancel，后续工具不执行。
@@ -876,7 +1051,7 @@ blocking_reserved: 3000 到 5000
     - 未执行工具有 synthetic cancelled tool_result。
     - pairing 校验通过。
 
-- [ ] 9.9 Smoke：100 轮工具 loop
+- [x] 9.9 Smoke：100 轮工具 loop
   - 进入条件：9.8 完成。
   - 执行项：
     - 用测试 LLM 连续返回工具调用。
@@ -886,7 +1061,7 @@ blocking_reserved: 3000 到 5000
     - max turns 能按预期终止。
     - 内存和事件数量可控。
 
-- [ ] 9.10 Smoke：restart resume
+- [x] 9.10 Smoke：restart resume
   - 进入条件：9.9 完成。
   - 执行项：
     - 跑一段工具会话。
@@ -897,6 +1072,32 @@ blocking_reserved: 3000 到 5000
     - 不重复注入 memory/context delta。
     - pairing 校验通过。
     - 上下文延续。
+
+#### Phase 9 执行记录
+
+- 日期：2026-06-30。
+- 上下文与上一轮 diff：
+  - Phase 9 开始前已复读 Phase 8 文档记录与 diff，确认新增事件已完整落到 Runtime/SSE/Desktop/Inspector。
+  - 读取 Phase 9 smoke 清单、server 真实 LLM smoke、runner cancel/compact/max-turns 测试、runtime transcript restore 测试和 tool policy 代码上下文。
+- 实现：
+  - `AgentConfig` 增加可选 `AutoToolPolicy` 注入点，并接入 Runner -> ToolRuntime；默认仍为 fail-closed `DefaultAutoToolPolicy{}`。
+  - 强化真实 LLM smoke：纯聊天断言 terminal `completed`；read-only 工具断言 `ToolPermissionDecided: allow` 且工具结果后有最终回答；AUTO deny 断言 denied tool_result 后模型继续输出。
+  - 新增真实 LLM allowlist smoke：临时 git workspace 中 allowlist `apply_patch`，验证 patch preview、`auto_allowlist` allow、工具成功、artifact、turn diff 与磁盘内容。
+  - 新增 compact summary/tail 测试，验证 compact 后模型消息只使用 boundary summary + tail，不直接携带 pre-boundary 历史。
+  - 新增 100 轮工具 loop 测试，验证 max_turns、无 approval、100 个 tool_result、pairing 通过、事件数量受控。
+  - 新增 cancelled run transcript restore 测试，验证取消后已接受的 user transcript 可跨 RunService 重启恢复。
+- 验证：
+  - `go test ./src/agentcore -run 'TestCompactConversationModelMessagesUseSummaryAndTail|TestRunnerHundredToolLoopStopsAtMaxTurns|TestRunnerReactiveCompactRetrySuccess|TestRunnerReactiveCompactSecondPromptTooLongTerminates|TestRunnerStreamingCancelUsesAbortedStreamingTerminalReason|TestRunnerCancelStopsSubsequentToolsInBatch'` 通过。
+  - `go test ./src/runtime -run 'TestRunServiceRestoresCancelledThreadUserTranscript|TestRunServiceRestoresThreadConversationFromTranscript'` 通过。
+  - `go test ./src/server -run 'TestPlainQASmoke|TestReadOnlyFileSmoke|TestFileMutationAutoDenySmoke|TestFileMutationAllowlistAllowSmoke'` 通过，真实 LLM server smoke 36.191s。
+  - 当前 configured provider 为 `anthropic_messages`；完整后端包测试中的真实 smoke 通过。
+  - 使用临时 `AWAKEN_CONFIG_DIR` 覆盖 `protocol=openai_chat`、`base_url=https://api.deepseek.com`、`model_id=deepseek-chat` 后，`go test ./src/server -run TestPlainQASmoke -count=1` 通过。
+  - `go test ./src/agentcore ./src/context ./src/runtime ./src/server ./src/llm ./src/tool ./src/tools/...` 通过，server 包 71.357s。
+  - `npm --workspace @awaken/desktop test -- src/renderer/runtime/reducer.test.ts` 通过，62 个测试通过。
+  - `npm run typecheck:desktop` 通过；构建脚本输出一次非致命 `cp: dist/tokens/components.css: No such file or directory`，命令 exit 0。
+  - `git diff --check` 通过。
+- 说明：
+  - 长上下文 compact 采用 deterministic runner/context 测试覆盖，未用真实 provider 烧超大上下文 token；真实 provider 覆盖了 chat、read tool、AUTO deny、allowlist write、SSE terminal 路径。
 
 #### Claude Code 参考设计
 
@@ -926,9 +1127,9 @@ blocking_reserved: 3000 到 5000
 
 ### Go 单测
 
-- [ ] `go test ./src/context`
+- [x] `go test ./src/context`
   - pairing pass / missing / orphan / name mismatch。
-- [ ] `go test ./src/agentcore`
+- [x] `go test ./src/agentcore`
   - native tool loop。
   - Anthropic tool_use loop。
   - XML fallback loop。
@@ -937,19 +1138,19 @@ blocking_reserved: 3000 到 5000
   - cancel synthetic result。
   - max turns。
   - context warning / compact。
-- [ ] `go test ./src/runtime`
+- [x] `go test ./src/runtime`
   - thread busy。
   - cancel。
   - SSE history。
   - AUTO path 不进入 awaiting approval。
-- [ ] `go test ./src/server`
+- [x] `go test ./src/server`
   - SSE frame seq。
   - new event mapping。
-- [ ] `go test ./src/llm`
+- [x] `go test ./src/llm`
   - OpenAI stream tool call。
   - Anthropic stream tool_use。
   - provider error mapping。
-- [ ] `go test ./src/tool ./src/tools/...`
+- [x] `go test ./src/tool ./src/tools/...`
   - permission context。
   - workspace boundary。
   - read-only allow。
@@ -957,17 +1158,17 @@ blocking_reserved: 3000 到 5000
 
 ### Desktop 测试
 
-- [ ] Runtime reducer：
+- [x] Runtime reducer：
   - tool permission decided。
   - AUTO deny tool result。
   - compact events。
   - terminal reason。
   - thread switch keeps view.
-- [ ] Thread transcript replay：
+- [x] Thread transcript replay：
   - multiple runs。
   - after_seq。
   - resumed terminal state。
-- [ ] App smoke：
+- [x] App smoke：
   - pure chat。
   - tool loop。
   - cancel。
@@ -977,31 +1178,32 @@ blocking_reserved: 3000 到 5000
 
 按照项目 `AGENTS.md`，runtime / agent loop / tool execution / SSE 验收需要真实 LLM。
 
-- [ ] Anthropic Messages 协议真实 smoke。
-- [ ] OpenAI-compatible 协议真实 smoke。
-- [ ] read-only tool AUTO allow。
-- [ ] denied tool 生成 tool_result 后模型能继续回答。
-- [ ] 长上下文触发 compact 后继续回答。
+- [x] Anthropic Messages 协议真实 smoke。
+- [x] OpenAI-compatible 协议真实 smoke。
+- [x] read-only tool AUTO allow。
+- [x] denied tool 生成 tool_result 后模型能继续回答。
+- [x] 长上下文触发 compact 后继续回答。
+  - 说明：compact 用 deterministic runner/context smoke 覆盖，真实 provider 未烧超大上下文 token。
 
 ## 完成定义
 
 主 Agent 完整闭环完成时，必须同时满足：
 
-- [ ] 用户输入能创建 run 并启动主 Agent loop。
-- [ ] 主 Agent 能多轮调用 LLM。
-- [ ] 主 Agent 能收集原生 provider tool_use / tool_call。
-- [ ] 工具执行完全 AUTO，不等待用户审批。
-- [ ] allow / deny / abort 都有 `ToolPermissionDecided`。
-- [ ] 所有工具结果都合法回写为 tool_result。
-- [ ] 每次 LLM 请求前 pairing 校验通过。
-- [ ] 上下文窗口可估算、可 warning、可 compact、可 blocked。
-- [ ] compact 产生 durable boundary。
-- [ ] prompt too long 最多 reactive retry 一次，不死循环。
-- [ ] cancel 在 streaming 和 tool batch 阶段都能收束。
-- [ ] terminal reason 完整落到 Runtime/SSE/Desktop。
-- [ ] transcript 可以跨进程恢复。
-- [ ] Desktop 能显示 stream、tool、AUTO decision、compact、terminal 状态。
-- [ ] 所有 smoke 通过。
+- [x] 用户输入能创建 run 并启动主 Agent loop。
+- [x] 主 Agent 能多轮调用 LLM。
+- [x] 主 Agent 能收集原生 provider tool_use / tool_call。
+- [x] 工具执行完全 AUTO，不等待用户审批。
+- [x] allow / deny / abort 都有 `ToolPermissionDecided`。
+- [x] 所有工具结果都合法回写为 tool_result。
+- [x] 每次 LLM 请求前 pairing 校验通过。
+- [x] 上下文窗口可估算、可 warning、可 compact、可 blocked。
+- [x] compact 产生 durable boundary。
+- [x] prompt too long 最多 reactive retry 一次，不死循环。
+- [x] cancel 在 streaming 和 tool batch 阶段都能收束。
+- [x] terminal reason 完整落到 Runtime/SSE/Desktop。
+- [x] transcript 可以跨进程恢复。
+- [x] Desktop 能显示 stream、tool、AUTO decision、compact、terminal 状态。
+- [x] 所有 smoke 通过。
 
 ## 风险和处理
 

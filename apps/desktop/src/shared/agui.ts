@@ -3,6 +3,8 @@ export type AguiEventType =
   | "RUN_FINISHED"
   | "RUN_ERROR"
   | "RUN_STATUS_CHANGED"
+  | "AWAKEN_TURN_STARTED"
+  | "AWAKEN_TURN_FINISHED"
   | "TEXT_MESSAGE_START"
   | "TEXT_MESSAGE_CONTENT"
   | "TEXT_MESSAGE_END"
@@ -17,13 +19,22 @@ export type AguiEventType =
   | "TOOL_CALL_END"
   | "TOOL_PROGRESS"
   | "TOOL_CALL_RESULT"
+  | "AWAKEN_TOOL_PERMISSION_DECIDED"
   | "AWAKEN_COMMAND_OUTPUT"
   | "AWAKEN_PATCH_UPDATED"
   | "AWAKEN_TURN_DIFF"
+  | "AWAKEN_CONTEXT_ESTIMATED"
+  | "AWAKEN_CONTEXT_WARNING"
+  | "AWAKEN_CONTEXT_BLOCKED"
+  | "AWAKEN_COMPACT_STARTED"
+  | "AWAKEN_COMPACT_FINISHED"
+  | "AWAKEN_COMPACT_FAILED"
+  | "AWAKEN_TOOL_PAIRING_REPAIRED"
   | "AWAKEN_APPROVAL_REQUESTED"
   | "AWAKEN_APPROVAL_RESOLVED"
   | "AWAKEN_ARTIFACT_CREATED"
-  | "AWAKEN_ARTIFACT_UPDATED";
+  | "AWAKEN_ARTIFACT_UPDATED"
+  | "AWAKEN_UNKNOWN_EVENT";
 
 export type AguiApprovalRiskTone = "safe" | "warning" | "danger";
 
@@ -41,6 +52,10 @@ export type AguiEvent = {
   seq?: number;
   threadId?: string;
   runId?: string;
+  turnId?: string;
+  queryChainId?: string;
+  depth?: number;
+  turnCount?: number;
   status?: string;
   messageId?: string;
   parentRunId?: string;
@@ -60,6 +75,21 @@ export type AguiEvent = {
   truncated?: boolean;
   message?: string;
   code?: string;
+  terminalReason?: string;
+  transitionReason?: string;
+  contextModelWindow?: number;
+  contextOutputReserve?: number;
+  contextEffectiveWindow?: number;
+  contextEstimatedTokens?: number;
+  contextWarningThreshold?: number;
+  contextAutoCompactThreshold?: number;
+  contextCompactTarget?: number;
+  contextEstimatedDeltaTokens?: number;
+  staticPermissionBehavior?: string;
+  staticPermissionReason?: string;
+  toolDecisionAction?: string;
+  toolDecisionSource?: string;
+  toolDecisionReason?: string;
   approvalId?: string;
   approvalTitle?: string;
   approvalDescription?: string;
@@ -75,4 +105,6 @@ export type AguiEvent = {
   artifactContent?: string;
   artifactStatus?: AguiArtifactStatus;
   outcome?: AguiRunOutcome;
+  rawType?: string;
+  rawEvent?: Record<string, unknown>;
 };

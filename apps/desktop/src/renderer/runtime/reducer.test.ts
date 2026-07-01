@@ -284,6 +284,7 @@ describe("runtime reducer replay idempotency", () => {
       id: "answer:run-1:msg-1",
       markdown: "done",
       status: "done",
+      isFinal: true,
     });
   });
 
@@ -367,7 +368,7 @@ describe("runtime reducer run narrative projection", () => {
     expect(state.narrative.activeItem).toBeUndefined();
   });
 
-  it("projects tool, approval, and artifact events into narrative items", () => {
+  it("projects tool and approval events while deferring artifact summaries", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Patch a file" },
       runEvent({ type: "RUN_STARTED", seq: 1 }),
@@ -378,7 +379,6 @@ describe("runtime reducer run narrative projection", () => {
     ]);
 
     const tool = state.narrative.committedItems.find((item) => item.id === "tool:tool-1");
-    const approval = state.narrative.committedItems.find((item) => item.id === "approval:approval-1");
 
     expect(tool).toMatchObject({
       kind: "tool",
@@ -386,19 +386,17 @@ describe("runtime reducer run narrative projection", () => {
       detail: "pending approval",
       status: "done",
     });
-    expect(approval).toMatchObject({
+    expect(state.narrative.activeItem).toMatchObject({
       kind: "approval",
+      id: "approval:approval-1",
       title: "Approve patch",
       status: "waiting",
     });
-    expect(state.narrative.activeItem).toMatchObject({
-      kind: "fileChange",
-      id: "fileChange:artifact-1",
-      status: "done",
-    });
+    expect(state.artifacts).toContainEqual(expect.objectContaining({ id: "artifact-1" }));
+    expect(state.narrative.committedItems.some((item) => item.kind === "fileChange")).toBe(false);
     expect(state.narrative.inspectorSelection).toEqual({
-      kind: "artifact",
-      id: "artifact-1",
+      kind: "approval",
+      id: "approval:approval-1",
     });
   });
 
@@ -620,6 +618,150 @@ describe("runtime reducer run narrative projection", () => {
       title: "Turn diff captured",
       status: "done",
       tag: "truncated",
+    });
+  });
+
+  it("projects AUTO tool decisions without pending approval controls", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "Inspect auto decisions" },
+      runEvent({
+        type: "AWAKEN_TOOL_PERMISSION_DECIDED",
+        seq: 1,
+        toolCallId: "read-1",
+        toolCallName: "read_file",
+        toolDecisionAction: "allow",
+        toolDecisionSource: "static_permission",
+        toolDecisionReason: "read-only tool",
+      }),
+      runEvent({
+        type: "AWAKEN_TOOL_PERMISSION_DECIDED",
+        seq: 2,
+        toolCallId: "patch-1",
+        toolCallName: "apply_patch",
+        toolDecisionAction: "deny",
+        toolDecisionSource: "headless_default",
+        toolDecisionReason: "writes require allowlist",
+        approvalAffectedPaths: ["note.md"],
+        approvalPatchSummary: "modify note.md",
+      }),
+    ]);
+
+    expect(state.approvals).toHaveLength(0);
+    expect(state.inspectorSummary.lastToolDecision).toMatchObject({
+      toolCallId: "patch-1",
+      toolName: "apply_patch",
+      action: "deny",
+      source: "headless_default",
+      affectedPaths: ["note.md"],
+      patchSummary: "modify note.md",
+    });
+    expect(state.toolResults.find((tool) => tool.id === "read-1")).toMatchObject({
+      title: "read_file",
+      status: "done",
+    });
+    expect(state.toolResults.find((tool) => tool.id === "patch-1")).toMatchObject({
+      title: "apply_patch",
+      status: "error",
+      content: expect.stringContaining("writes require allowlist"),
+    });
+    expect(state.steps.find((step) => step.id === "tool-decision:patch-1")).toMatchObject({
+      title: "apply_patch deny",
+      status: "error",
+      tag: "headless_default",
+    });
+  });
+
+  it("projects turn, context, compact, and terminal state for the inspector", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "Compact context" },
+      runEvent({
+        type: "AWAKEN_TURN_STARTED",
+        seq: 1,
+        turnId: "turn-1",
+        turnCount: 1,
+        transitionReason: "user_input",
+      }),
+      runEvent({
+        type: "AWAKEN_CONTEXT_WARNING",
+        seq: 2,
+        message: "context warning",
+        contextEffectiveWindow: 12000,
+        contextEstimatedTokens: 9600,
+        contextWarningThreshold: 9000,
+      }),
+      runEvent({
+        type: "AWAKEN_COMPACT_FINISHED",
+        seq: 3,
+        message: "compact finished: boundary=compact_1",
+        contextEffectiveWindow: 12000,
+        contextEstimatedTokens: 4800,
+        contextEstimatedDeltaTokens: -4800,
+      }),
+      runEvent({
+        type: "AWAKEN_TURN_FINISHED",
+        seq: 4,
+        turnId: "turn-1",
+        turnCount: 1,
+        terminalReason: "final_response",
+      }),
+      runEvent({
+        type: "RUN_FINISHED",
+        seq: 5,
+        result: "done",
+        terminalReason: "completed",
+      }),
+    ]);
+
+    expect(state.inspectorSummary.currentTurn).toMatchObject({
+      turnId: "turn-1",
+      turnCount: 1,
+      status: "done",
+      terminalReason: "final_response",
+    });
+    expect(state.inspectorSummary.contextWindow).toMatchObject({
+      eventType: "AWAKEN_COMPACT_FINISHED",
+      estimatedTokens: 4800,
+      effectiveWindow: 12000,
+      estimatedDeltaTokens: -4800,
+    });
+    expect(state.inspectorSummary.compact).toMatchObject({
+      status: "finished",
+      boundaryId: "compact_1",
+    });
+    expect(state.inspectorSummary.terminalReason).toBe("completed");
+    expect(state.inspectorSummary.terminalMessage).toBe("done");
+    expect(state.steps.find((step) => step.id === "context-window")).toMatchObject({
+      title: "Context window warning",
+      status: "done",
+    });
+    expect(state.steps.find((step) => step.id === "compact")).toMatchObject({
+      title: "Compact finished",
+      status: "done",
+      tag: "compact_1",
+    });
+  });
+
+  it("keeps unknown runtime events visible without failing projection", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "Future event" },
+      runEvent({
+        type: "AWAKEN_UNKNOWN_EVENT",
+        seq: 1,
+        rawType: "FutureEvent",
+        message: "future payload",
+        rawEvent: { type: "FutureEvent", futureField: "value" },
+      }),
+    ]);
+
+    expect(state.phase).toBe("starting");
+    expect(state.inspectorSummary.unknownEvents).toEqual([
+      { rawType: "FutureEvent", message: "future payload" },
+    ]);
+    expect(state.steps.find((step) => step.id === "unknown:1")).toMatchObject({
+      title: "FutureEvent",
+      description: "future payload",
+      status: "done",
+      tag: "unknown",
     });
   });
 
@@ -847,6 +989,8 @@ describe("runtime reducer run narrative projection", () => {
         artifactDescription: "Updated file",
         artifactStatus: "ready",
       }),
+      runEvent({ type: "TEXT_MESSAGE_CONTENT", seq: 2, messageId: "m1", delta: "done" }),
+      runEvent({ type: "RUN_FINISHED", seq: 3, result: "done" }),
     ]);
 
     expect(state.artifacts).toContainEqual({
@@ -858,9 +1002,13 @@ describe("runtime reducer run narrative projection", () => {
       content: undefined,
       status: "ready",
     });
-    expect(state.narrative.activeItem).toMatchObject({
+    const answerIndex = state.narrative.committedItems.findIndex((item) => item.kind === "answer");
+    const fileChangeIndex = state.narrative.committedItems.findIndex((item) => item.kind === "fileChange");
+    expect(answerIndex).toBeGreaterThanOrEqual(0);
+    expect(fileChangeIndex).toBeGreaterThan(answerIndex);
+    expect(state.narrative.committedItems[fileChangeIndex]).toMatchObject({
       kind: "fileChange",
-      id: "fileChange:artifact-1",
+      id: "fileChange:current:summary",
       status: "done",
       files: [
         {
@@ -871,10 +1019,6 @@ describe("runtime reducer run narrative projection", () => {
           status: "done",
         },
       ],
-    });
-    expect(state.narrative.inspectorSelection).toEqual({
-      kind: "artifact",
-      id: "artifact-1",
     });
   });
 
@@ -928,6 +1072,7 @@ describe("runtime reducer run narrative projection", () => {
       id: "answer:m1",
       markdown: "done",
       status: "done",
+      isFinal: true,
     });
   });
 
@@ -949,6 +1094,7 @@ describe("runtime reducer run narrative projection", () => {
       id: "answer:run-1:m1",
       markdown: "done",
       status: "done",
+      isFinal: true,
       elapsedMs: 65000,
     });
   });
@@ -972,6 +1118,7 @@ describe("runtime reducer run narrative projection", () => {
       id: "answer:run-1:m1",
       markdown: "done",
       status: "done",
+      isFinal: true,
       elapsedMs: 45000,
     });
   });
@@ -994,6 +1141,7 @@ describe("runtime reducer run narrative projection", () => {
       id: "answer:run-1:m1",
       markdown: "streamed done",
       status: "done",
+      isFinal: true,
       elapsedMs: 45000,
     });
   });
@@ -1193,7 +1341,7 @@ describe("runtime reducer thread snapshots", () => {
     expect(state.approvals).toHaveLength(1);
     expect(state.artifacts).toHaveLength(1);
     expect(narrativeItems.some((item) => item.kind === "approval")).toBe(true);
-    expect(narrativeItems.some((item) => item.kind === "fileChange")).toBe(true);
+    expect(narrativeItems.some((item) => item.kind === "fileChange")).toBe(false);
   });
 
   it("starts a follow-up run in the same active thread after completion", () => {
@@ -1235,6 +1383,7 @@ describe("runtime reducer thread snapshots", () => {
       id: "answer:run-1:msg-1",
       markdown: "first answer",
       status: "done",
+      isFinal: true,
     });
     expect(state.narrative.activeItem).toEqual({
       kind: "planning",
@@ -1260,8 +1409,8 @@ describe("runtime reducer thread snapshots", () => {
 
     const answers = state.narrative.committedItems.filter((item) => item.kind === "answer");
     expect(answers).toEqual([
-      { kind: "answer", id: "answer:run-1", markdown: "first answer", status: "done" },
-      { kind: "answer", id: "answer:run-2", markdown: "second answer", status: "done" },
+      { kind: "answer", id: "answer:run-1", markdown: "first answer", status: "done", isFinal: true },
+      { kind: "answer", id: "answer:run-2", markdown: "second answer", status: "done", isFinal: true },
     ]);
   });
 

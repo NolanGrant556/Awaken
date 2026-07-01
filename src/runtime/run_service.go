@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -128,10 +129,23 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	threadID := req.ThreadID
 	now := time.Now().UTC()
 	var agent *agentcore.Agent
+	var restored *restoredTranscript
 	if threadID == "" {
 		threadID = newRuntimeID("thread")
 		if s.newAgent != nil {
 			agent = s.newAgent(workspace, threadID)
+		}
+	} else {
+		s.mu.RLock()
+		_, threadInMemory := s.threads[threadID]
+		s.mu.RUnlock()
+		if !threadInMemory {
+			loaded, err := loadRestoredTranscript(workspace, threadID)
+			if err == nil {
+				restored = &loaded
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return Run{}, err
+			}
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -141,8 +155,35 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	if req.ThreadID != "" {
 		thread, ok := s.threads[req.ThreadID]
 		if !ok {
+			if restored == nil {
+				s.mu.Unlock()
+				return Run{}, ErrThreadNotFound
+			}
+			if s.newAgent != nil {
+				agent = s.newAgent(workspace, threadID)
+				if agent != nil {
+					agent.GetConversation().Context.SetMessages(restored.Messages)
+				}
+			}
+			runIDs := append([]string(nil), restored.RunIDs...)
+			runIDs = append(runIDs, runID)
+			s.threads[threadID] = &Thread{
+				threadID:    threadID,
+				agent:       agent,
+				workspace:   workspace,
+				label:       restored.Label,
+				latestRunID: runID,
+				activeRunID: runID,
+				runIDs:      runIDs,
+				createdAt:   restored.CreatedAt,
+				updatedAt:   now,
+			}
+			s.sessions[runID] = session
 			s.mu.Unlock()
-			return Run{}, ErrThreadNotFound
+			_ = appendUserTranscriptRecord(workspace, session.Snapshot(), req.Client.SessionID, trimmed)
+			executor := s.newExecutor(agent)
+			go s.execute(session, executor, agent, trimmed, ctx, workspace)
+			return session.Snapshot(), nil
 		}
 		if !sameWorkspace(thread.workspace, workspace) {
 			s.mu.Unlock()
@@ -158,10 +199,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		thread.runIDs = append(thread.runIDs, runID)
 		thread.updatedAt = now
 	} else {
-		label := trimmed
-		if len(label) > 50 {
-			label = label[:50]
-		}
+		label := trimThreadLabel(trimmed)
 		s.threads[threadID] = &Thread{
 			threadID:    threadID,
 			agent:       agent,
@@ -178,8 +216,9 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	s.sessions[runID] = session
 	s.mu.Unlock()
 
+	_ = appendUserTranscriptRecord(workspace, session.Snapshot(), req.Client.SessionID, trimmed)
 	executor := s.newExecutor(agent)
-	go s.execute(session, executor, trimmed, ctx)
+	go s.execute(session, executor, agent, trimmed, ctx, workspace)
 
 	return session.Snapshot(), nil
 }
@@ -222,23 +261,41 @@ func (s *RunService) GetThreadTranscript(threadID string) (ThreadTranscript, err
 		return ThreadTranscript{}, ErrThreadNotFound
 	}
 	snapshot := thread.snapshot()
+	workspace := thread.workspace
 	runIDs := append([]string(nil), thread.runIDs...)
-	sessions := make([]*Session, 0, len(runIDs))
+	sessionByRunID := make(map[string]*Session, len(runIDs))
 	for _, runID := range runIDs {
 		session, ok := s.sessions[runID]
 		if !ok {
 			continue
 		}
-		sessions = append(sessions, session)
+		sessionByRunID[runID] = session
 	}
 	s.mu.RUnlock()
 
-	runs := make([]ThreadTranscriptRun, 0, len(sessions))
-	for _, session := range sessions {
-		runs = append(runs, ThreadTranscriptRun{
-			Run:    session.Snapshot(),
-			Events: session.History(0),
-		})
+	durableRuns := map[string]ThreadTranscriptRun{}
+	if len(sessionByRunID) < len(runIDs) {
+		loaded, err := loadDurableTranscriptRuns(workspace, threadID)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return ThreadTranscript{}, err
+		}
+		if err == nil {
+			durableRuns = loaded
+		}
+	}
+
+	runs := make([]ThreadTranscriptRun, 0, len(runIDs))
+	for _, runID := range runIDs {
+		if session, ok := sessionByRunID[runID]; ok {
+			runs = append(runs, ThreadTranscriptRun{
+				Run:    session.Snapshot(),
+				Events: session.History(0),
+			})
+			continue
+		}
+		if durable, ok := durableRuns[runID]; ok {
+			runs = append(runs, durable)
+		}
 	}
 
 	return ThreadTranscript{
@@ -263,9 +320,12 @@ func (s *RunService) ResolveApproval(runID, approvalID string, decision agentcor
 	return session.ResolveApproval(approvalID, decision)
 }
 
-func (s *RunService) execute(session *Session, executor Executor, input string, ctx context.Context) {
+func (s *RunService) execute(session *Session, executor Executor, agent *agentcore.Agent, input string, ctx context.Context, workspace WorkspaceConfig) {
 	snapshot := session.Snapshot()
-	defer s.clearActiveRun(snapshot.ThreadID, snapshot.RunID)
+	defer func() {
+		s.flushAgentTranscript(session, agent, workspace)
+		s.clearActiveRun(snapshot.ThreadID, snapshot.RunID)
+	}()
 
 	if executor == nil {
 		session.CompleteError("run executor is not configured", "executor_missing")
@@ -288,6 +348,15 @@ func (s *RunService) execute(session *Session, executor Executor, input string, 
 	}
 
 	session.CompleteError(err.Error(), "")
+}
+
+func (s *RunService) flushAgentTranscript(session *Session, agent *agentcore.Agent, workspace WorkspaceConfig) {
+	if session == nil || agent == nil {
+		return
+	}
+	run := session.Snapshot()
+	_ = appendConversationTranscript(workspace, run, agent.GetConversation().Context.GetMessages())
+	_ = appendRunEventTranscript(workspace, run, session.History(0))
 }
 
 func (s *RunService) clearActiveRun(threadID, runID string) {

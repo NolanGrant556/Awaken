@@ -8,10 +8,12 @@ import (
 
 type AgentConfig struct {
 	SystemPrompt string
-	MaxThoughts  int
-	ModelConfig  ModelConfig
-	EntryPoint   string
-	Workspace    WorkspaceConfig
+	// MaxThoughts <= 0 means the runner has no turn-count limit.
+	MaxThoughts    int
+	ModelConfig    ModelConfig
+	EntryPoint     string
+	Workspace      WorkspaceConfig
+	AutoToolPolicy AutoToolPolicy
 }
 
 type WorkspaceConfig struct {
@@ -29,12 +31,14 @@ type ModelConfig struct {
 }
 
 type LLMRequest struct {
-	SystemPrompt string
-	Messages     []context.Message
-	Tools        []tool.ToolDefinition
-	Model        string
-	Temperature  float64
-	MaxTokens    int
+	SystemPrompt       string
+	Messages           []context.Message
+	Tools              []tool.ToolDefinition
+	Model              string
+	Temperature        float64
+	MaxTokens          int
+	ContextWindowState ContextWindowState
+	EnvelopeDebug      *ContextEnvelope
 }
 
 type RuntimeInfoProvider interface {

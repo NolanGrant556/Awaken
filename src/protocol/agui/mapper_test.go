@@ -31,6 +31,61 @@ func TestMapEventReasoningLifecycle(t *testing.T) {
 	}
 }
 
+func TestMapEventCarriesTurnMetadata(t *testing.T) {
+	events := MapEvent(agentcore.AwakenEvent{
+		Type:             agentcore.RunFinishedEventType,
+		ThreadID:         "thread-1",
+		RunID:            "run-1",
+		TurnID:           "turn-1",
+		QueryChainID:     "chain-1",
+		Depth:            2,
+		TurnCount:        2,
+		Content:          "done",
+		TerminalReason:   agentcore.TerminalReasonCompleted,
+		TransitionReason: agentcore.TransitionToolResultContinuation,
+	})
+
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	got := events[0]
+	if got.TurnID != "turn-1" || got.QueryChainID != "chain-1" || got.Depth != 2 || got.TurnCount != 2 {
+		t.Fatalf("expected turn metadata to be preserved, got %+v", got)
+	}
+	if got.TerminalReason != "completed" || got.TransitionReason != "tool_result_continuation" {
+		t.Fatalf("expected reason metadata to be preserved, got %+v", got)
+	}
+}
+
+func TestMapEventTurnLifecycle(t *testing.T) {
+	started := MapEvent(agentcore.AwakenEvent{
+		Type:             agentcore.TurnStartedEventType,
+		TurnID:           "turn-1",
+		QueryChainID:     "chain-1",
+		Depth:            1,
+		TurnCount:        1,
+		TransitionReason: agentcore.TransitionInitial,
+	})
+	finished := MapEvent(agentcore.AwakenEvent{
+		Type:           agentcore.TurnFinishedEventType,
+		TurnID:         "turn-1",
+		QueryChainID:   "chain-1",
+		Depth:          1,
+		TurnCount:      1,
+		TerminalReason: agentcore.TerminalReasonCompleted,
+	})
+
+	if len(started) != 1 || started[0].Type != EventAwakenTurnStarted {
+		t.Fatalf("expected AWAKEN_TURN_STARTED, got %+v", started)
+	}
+	if len(finished) != 1 || finished[0].Type != EventAwakenTurnFinished {
+		t.Fatalf("expected AWAKEN_TURN_FINISHED, got %+v", finished)
+	}
+	if finished[0].TerminalReason != "completed" {
+		t.Fatalf("expected terminal reason completed, got %+v", finished[0])
+	}
+}
+
 func TestMapEventToolResult(t *testing.T) {
 	events := MapEvent(agentcore.AwakenEvent{
 		Type:       agentcore.ToolResultEventType,
@@ -124,6 +179,38 @@ func TestMapEventToolProgress(t *testing.T) {
 	}
 }
 
+func TestMapEventToolPermissionDecided(t *testing.T) {
+	events := MapEvent(agentcore.AwakenEvent{
+		Type:                     agentcore.ToolPermissionDecidedEventType,
+		ThreadID:                 "thread-1",
+		RunID:                    "run-1",
+		ToolCallID:               "tool-1",
+		ToolName:                 "apply_patch",
+		Content:                  "apply_patch will modify files",
+		StaticPermissionBehavior: "ask",
+		StaticPermissionReason:   "apply_patch will modify files",
+		ToolDecisionAction:       "deny",
+		ToolDecisionSource:       "headless_default",
+		ToolDecisionReason:       "apply_patch will modify files",
+		ApprovalAffectedPaths:    []string{"note.md"},
+		ApprovalPatchSummary:     "新增 1 个文件",
+	})
+
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	got := events[0]
+	if got.Type != EventAwakenToolPermissionDecided {
+		t.Fatalf("expected AWAKEN_TOOL_PERMISSION_DECIDED, got %s", got.Type)
+	}
+	if got.ToolDecisionAction != "deny" || got.ToolDecisionSource != "headless_default" {
+		t.Fatalf("unexpected decision fields: %+v", got)
+	}
+	if len(got.ApprovalAffectedPaths) != 1 || got.ApprovalAffectedPaths[0] != "note.md" {
+		t.Fatalf("unexpected affected paths: %+v", got.ApprovalAffectedPaths)
+	}
+}
+
 func TestMapEventCommandOutput(t *testing.T) {
 	events := MapEvent(agentcore.AwakenEvent{
 		Type:          agentcore.CommandOutputEventType,
@@ -193,6 +280,41 @@ func TestMapEventTurnDiff(t *testing.T) {
 	}
 }
 
+func TestMapEventContextEstimated(t *testing.T) {
+	events := MapEvent(agentcore.AwakenEvent{
+		Type:                        agentcore.ContextEstimatedEventType,
+		ThreadID:                    "thread-1",
+		RunID:                       "run-1",
+		Content:                     "context tokens estimated=10",
+		ContextModelWindow:          128000,
+		ContextOutputReserve:        16000,
+		ContextEffectiveWindow:      112000,
+		ContextEstimatedTokens:      10,
+		ContextWarningThreshold:     95200,
+		ContextAutoCompactThreshold: 100800,
+		ContextCompactTarget:        33600,
+		ContextEstimatedDeltaTokens: 3,
+	})
+
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	got := events[0]
+	if got.Type != EventAwakenContextEstimated {
+		t.Fatalf("expected AWAKEN_CONTEXT_ESTIMATED, got %s", got.Type)
+	}
+	if got.ContextEstimatedTokens != 10 ||
+		got.ContextModelWindow != 128000 ||
+		got.ContextOutputReserve != 16000 ||
+		got.ContextEffectiveWindow != 112000 ||
+		got.ContextWarningThreshold != 95200 ||
+		got.ContextAutoCompactThreshold != 100800 ||
+		got.ContextCompactTarget != 33600 ||
+		got.ContextEstimatedDeltaTokens != 3 {
+		t.Fatalf("unexpected context window payload: %+v", got)
+	}
+}
+
 func TestMapEventApprovalRequested(t *testing.T) {
 	events := MapEvent(agentcore.AwakenEvent{
 		Type:                agentcore.ApprovalRequestedEventType,
@@ -241,5 +363,35 @@ func TestMapEventArtifactUpdated(t *testing.T) {
 	}
 	if events[0].ArtifactPath != "/tmp/README.md" || events[0].ArtifactStatus != "ready" {
 		t.Fatalf("unexpected artifact payload: %+v", events[0])
+	}
+}
+
+func TestMapEventUnknownFallsBackWithRawPayload(t *testing.T) {
+	events := MapEvent(agentcore.AwakenEvent{
+		Type:      agentcore.AwakenEventType("FutureEvent"),
+		ThreadID:  "thread-1",
+		RunID:     "run-1",
+		Content:   "future payload",
+		ToolName:  "future_tool",
+		TurnID:    "turn-1",
+		TurnCount: 3,
+	})
+
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	got := events[0]
+	if got.Type != EventAwakenUnknown {
+		t.Fatalf("expected AWAKEN_UNKNOWN_EVENT, got %s", got.Type)
+	}
+	if got.RawType != "FutureEvent" || got.Message != "future payload" {
+		t.Fatalf("expected raw type and message to be preserved, got %+v", got)
+	}
+	raw, ok := got.RawEvent.(map[string]any)
+	if !ok {
+		t.Fatalf("expected raw event map, got %T", got.RawEvent)
+	}
+	if raw["Type"] != "FutureEvent" || raw["ToolName"] != "future_tool" {
+		t.Fatalf("expected raw payload to include original fields, got %+v", raw)
 	}
 }

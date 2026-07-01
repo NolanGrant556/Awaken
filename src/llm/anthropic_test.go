@@ -177,6 +177,25 @@ func TestInvokeAnthropicSendsConfigMaxTokens(t *testing.T) {
 	}
 }
 
+func TestInvokeAnthropicRequestDoesNotExposeInternalMetadataNames(t *testing.T) {
+	server := newAnthropicServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+		assertNoInternalMetadataKeys(t, body)
+		writeJSON(t, w, map[string]interface{}{
+			"content":     []map[string]interface{}{{"type": "text", "text": "ok"}},
+			"stop_reason": "end_turn",
+		})
+	})
+	defer server.Close()
+
+	if _, err := Invoke(context.Background(), anthropicConfig(server.URL), Request{UserPrompt: "hi"}); err != nil {
+		t.Fatalf("Invoke returned error: %v", err)
+	}
+}
+
 func TestInvokeAnthropicToolCallsConversion(t *testing.T) {
 	server := newAnthropicServer(t, func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -382,6 +401,49 @@ data: {"type":"message_stop"}`,
 	}
 	if thinkingContent != "Let me think" {
 		t.Fatalf("expected thinking 'Let me think', got %q", thinkingContent)
+	}
+}
+
+func TestStreamInvokeAnthropicMaxOutputStopReason(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/anthropic/v1/messages" {
+			t.Fatalf("expected /anthropic/v1/messages, got %s", r.URL.Path)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		events := []string{
+			`event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text"}}`,
+			`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}`,
+			`event: content_block_stop
+data: {"type":"content_block_stop","index":0}`,
+			`event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"max_tokens"}}`,
+			`event: message_stop
+data: {"type":"message_stop"}`,
+		}
+
+		for _, event := range events {
+			io.WriteString(w, event+"\n\n")
+		}
+	}))
+	defer server.Close()
+
+	resp, err := StreamInvoke(context.Background(), anthropicConfig(server.URL), Request{UserPrompt: "hi"}, nil)
+	if err != nil {
+		t.Fatalf("StreamInvoke returned error: %v", err)
+	}
+	if resp.Content != "partial" {
+		t.Fatalf("expected partial content, got %q", resp.Content)
+	}
+	if resp.StopReason != "max_tokens" {
+		t.Fatalf("expected stop reason max_tokens, got %q", resp.StopReason)
+	}
+	if !resp.MaxOutputReached {
+		t.Fatal("expected max output marker")
 	}
 }
 

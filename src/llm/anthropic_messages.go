@@ -71,6 +71,7 @@ type anthropicStreamDelta struct {
 	Text        string `json:"text,omitempty"`
 	Thinking    string `json:"thinking,omitempty"`
 	PartialJSON string `json:"partial_json,omitempty"`
+	StopReason  string `json:"stop_reason,omitempty"`
 }
 
 // --- 实现 Transport 接口 ---
@@ -342,8 +343,11 @@ func convertToolsToAnthropic(tools []tool.ToolDefinition) []anthropicTool {
 // --- 响应解析 ---
 
 func responseFromAnthropic(resp anthropicResponse) (*Response, error) {
+	stopReason := strings.TrimSpace(resp.StopReason)
 	result := &Response{
-		IsFinished: resp.StopReason != "tool_use",
+		IsFinished:       stopReason != "tool_use",
+		StopReason:       stopReason,
+		MaxOutputReached: isMaxOutputStopReason(stopReason),
 	}
 
 	for _, block := range resp.Content {
@@ -375,6 +379,7 @@ type anthropicStreamState struct {
 	content     strings.Builder
 	toolCalls   []ToolCall
 	currentTool *anthropicToolAccumulator
+	stopReason  string
 }
 
 type anthropicToolAccumulator struct {
@@ -398,6 +403,11 @@ func (s *anthropicStreamState) consume(data string, event string) {
 	}
 
 	switch streamEvent.Type {
+	case "message_delta":
+		if streamEvent.Delta != nil && streamEvent.Delta.StopReason != "" {
+			s.stopReason = strings.TrimSpace(streamEvent.Delta.StopReason)
+		}
+
 	case "content_block_start":
 		if streamEvent.ContentBlock != nil && streamEvent.ContentBlock.Type == "tool_use" {
 			s.currentTool = &anthropicToolAccumulator{
@@ -463,9 +473,11 @@ func (s *anthropicStreamState) emitToolCallDelta(delta ToolCallDelta) {
 
 func (s *anthropicStreamState) response() (*Response, error) {
 	result := &Response{
-		Content:    s.content.String(),
-		ToolCalls:  s.toolCalls,
-		IsFinished: len(s.toolCalls) == 0,
+		Content:          s.content.String(),
+		ToolCalls:        s.toolCalls,
+		IsFinished:       len(s.toolCalls) == 0,
+		StopReason:       s.stopReason,
+		MaxOutputReached: isMaxOutputStopReason(s.stopReason),
 	}
 	if result.Content == "" && len(result.ToolCalls) == 0 {
 		return nil, ErrEmptyResponse

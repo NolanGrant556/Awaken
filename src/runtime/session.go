@@ -45,15 +45,16 @@ type Run struct {
 }
 
 type Event struct {
-	Kind       EventKind
-	Seq        uint64 // monotonically increasing sequence number assigned by EventBus
-	Timestamp  time.Time
-	ThreadID   string
-	RunID      string
-	Status     string
-	AgentEvent agentcore.AwakenEvent
-	Message    string
-	Code       string
+	Kind           EventKind
+	Seq            uint64 // monotonically increasing sequence number assigned by EventBus
+	Timestamp      time.Time
+	ThreadID       string
+	RunID          string
+	Status         string
+	AgentEvent     agentcore.AwakenEvent
+	Message        string
+	Code           string
+	TerminalReason agentcore.TerminalReason
 }
 
 type Session struct {
@@ -360,18 +361,20 @@ func (s *Session) CompleteCancelled(message string) {
 	finishedAt := now
 	s.run.FinishedAt = &finishedAt
 	statusEvent := Event{
-		Kind:      EventKindRunStatusChanged,
-		Timestamp: now,
-		ThreadID:  s.run.ThreadID,
-		RunID:     s.run.RunID,
-		Status:    string(RunStatusCancelled),
+		Kind:           EventKindRunStatusChanged,
+		Timestamp:      now,
+		ThreadID:       s.run.ThreadID,
+		RunID:          s.run.RunID,
+		Status:         string(RunStatusCancelled),
+		TerminalReason: agentcore.TerminalReasonCancelled,
 	}
 	event := Event{
-		Kind:      EventKindRunCancelled,
-		Timestamp: now,
-		ThreadID:  s.run.ThreadID,
-		RunID:     s.run.RunID,
-		Message:   message,
+		Kind:           EventKindRunCancelled,
+		Timestamp:      now,
+		ThreadID:       s.run.ThreadID,
+		RunID:          s.run.RunID,
+		Message:        message,
+		TerminalReason: agentcore.TerminalReasonCancelled,
 	}
 	bus := s.bus
 	s.mu.Unlock()
@@ -395,11 +398,12 @@ func (s *Session) CompleteFinished(result string) {
 	finishedAt := now
 	s.run.FinishedAt = &finishedAt
 	event := agentcore.AwakenEvent{
-		Type:      agentcore.RunFinishedEventType,
-		Timestamp: now,
-		ThreadID:  s.run.ThreadID,
-		RunID:     s.run.RunID,
-		Content:   result,
+		Type:           agentcore.RunFinishedEventType,
+		Timestamp:      now,
+		ThreadID:       s.run.ThreadID,
+		RunID:          s.run.RunID,
+		Content:        result,
+		TerminalReason: agentcore.TerminalReasonCompleted,
 	}
 	wrapped := Event{
 		Kind:       EventKindAgent,
@@ -432,12 +436,13 @@ func (s *Session) CompleteError(message, code string) {
 	finishedAt := now
 	s.run.FinishedAt = &finishedAt
 	event := Event{
-		Kind:      EventKindRunError,
-		Timestamp: now,
-		ThreadID:  s.run.ThreadID,
-		RunID:     s.run.RunID,
-		Message:   message,
-		Code:      code,
+		Kind:           EventKindRunError,
+		Timestamp:      now,
+		ThreadID:       s.run.ThreadID,
+		RunID:          s.run.RunID,
+		Message:        message,
+		Code:           code,
+		TerminalReason: agentcore.TerminalReasonModelError,
 	}
 	bus := s.bus
 	s.mu.Unlock()

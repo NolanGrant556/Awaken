@@ -59,6 +59,7 @@ type openaiChatResponse struct {
 			Content   string           `json:"content"`
 			ToolCalls []openaiToolCall `json:"tool_calls,omitempty"`
 		} `json:"message"`
+		FinishReason string `json:"finish_reason,omitempty"`
 	} `json:"choices"`
 }
 
@@ -68,6 +69,7 @@ type openaiStreamResponse struct {
 			Content   string                 `json:"content,omitempty"`
 			ToolCalls []openaiStreamToolCall `json:"tool_calls,omitempty"`
 		} `json:"delta"`
+		FinishReason string `json:"finish_reason,omitempty"`
 	} `json:"choices"`
 }
 
@@ -128,7 +130,8 @@ func (t *openaiTransport) Invoke(ctx stdctx.Context, cfg Config, req Request) (*
 		return nil, ErrEmptyResponse
 	}
 
-	return responseFromOpenAIMessage(chatResp.Choices[0].Message.Content, chatResp.Choices[0].Message.ToolCalls)
+	choice := chatResp.Choices[0]
+	return responseFromOpenAIMessage(choice.Message.Content, choice.Message.ToolCalls, choice.FinishReason)
 }
 
 func (t *openaiTransport) StreamInvoke(ctx stdctx.Context, cfg Config, req Request, callback StreamCallback) (*Response, error) {
@@ -240,11 +243,14 @@ func contextToolCallsToOpenAI(toolCalls []context.ToolCall) []openaiToolCall {
 	return result
 }
 
-func responseFromOpenAIMessage(content string, toolCalls []openaiToolCall) (*Response, error) {
+func responseFromOpenAIMessage(content string, toolCalls []openaiToolCall, stopReason string) (*Response, error) {
+	stopReason = strings.TrimSpace(stopReason)
 	result := &Response{
-		Content:    content,
-		ToolCalls:  make([]ToolCall, 0, len(toolCalls)),
-		IsFinished: len(toolCalls) == 0,
+		Content:          content,
+		ToolCalls:        make([]ToolCall, 0, len(toolCalls)),
+		IsFinished:       len(toolCalls) == 0,
+		StopReason:       stopReason,
+		MaxOutputReached: isMaxOutputStopReason(stopReason),
 	}
 
 	for _, tc := range toolCalls {
@@ -279,9 +285,10 @@ func convertToolsToOpenAI(tools []tool.ToolDefinition) []map[string]interface{} 
 // --- OpenAI Stream State ---
 
 type openAIStreamState struct {
-	observer  StreamObserver
-	content   strings.Builder
-	toolCalls map[int]*openaiStreamToolAccumulator
+	observer   StreamObserver
+	content    strings.Builder
+	toolCalls  map[int]*openaiStreamToolAccumulator
+	stopReason string
 }
 
 type openaiStreamToolAccumulator struct {
@@ -305,6 +312,9 @@ func (s *openAIStreamState) consume(data string) {
 	}
 
 	for _, choice := range chunk.Choices {
+		if choice.FinishReason != "" {
+			s.stopReason = strings.TrimSpace(choice.FinishReason)
+		}
 		if choice.Delta.Content != "" {
 			s.content.WriteString(choice.Delta.Content)
 			s.emit(choice.Delta.Content, false)
@@ -353,9 +363,11 @@ func (s *openAIStreamState) emitToolCallDelta(delta ToolCallDelta) {
 func (s *openAIStreamState) response() (*Response, error) {
 	toolCalls := s.sortedToolCalls()
 	result := &Response{
-		Content:    s.content.String(),
-		ToolCalls:  toolCalls,
-		IsFinished: len(toolCalls) == 0,
+		Content:          s.content.String(),
+		ToolCalls:        toolCalls,
+		IsFinished:       len(toolCalls) == 0,
+		StopReason:       s.stopReason,
+		MaxOutputReached: isMaxOutputStopReason(s.stopReason),
 	}
 	if result.Content == "" && len(result.ToolCalls) == 0 {
 		return nil, ErrEmptyResponse

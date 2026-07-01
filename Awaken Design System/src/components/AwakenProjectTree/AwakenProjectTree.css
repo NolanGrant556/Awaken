@@ -168,3 +168,11 @@
 .aw-project-folder-icon[data-expanded="true"] .aw-project-folder-icon__lid {
   transform: translateY(-1px) rotate(-7deg);
 }
+
+.aw-project-empty-children {
+  min-width: 0;
+  padding: 4px 10px 5px;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+  line-height: var(--aw-line-height-xs);
+}

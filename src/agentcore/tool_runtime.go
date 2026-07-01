@@ -18,18 +18,31 @@ const maxPatchPreviewChars = 50000
 type ToolRuntime struct {
 	sink              EventSink
 	permissionContext tool.PermissionContext
+	autoPolicy        AutoToolPolicy
+	useApprovalForAsk bool
 }
 
 type ToolRuntimeConfig struct {
 	PermissionContext tool.PermissionContext
+	AutoToolPolicy    AutoToolPolicy
+	UseApprovalForAsk bool
 }
 
 type ToolExecutionResult struct {
-	ToolCallID string
-	Name       string
-	Content    string
-	IsError    bool
-	Truncated  bool
+	ToolCallID     string
+	Name           string
+	Content        string
+	IsError        bool
+	Truncated      bool
+	Status         ToolExecutionStatus
+	ErrorCode      string
+	DecisionSource ToolDecisionSource
+	DecisionReason string
+	StartedAt      time.Time
+	FinishedAt     time.Time
+	DurationMs     int64
+	AffectedPaths  []string
+	PatchSummary   string
 }
 
 func NewToolRuntime(sink EventSink) *ToolRuntime {
@@ -37,9 +50,15 @@ func NewToolRuntime(sink EventSink) *ToolRuntime {
 }
 
 func NewToolRuntimeWithConfig(sink EventSink, config ToolRuntimeConfig) *ToolRuntime {
+	policy := config.AutoToolPolicy
+	if policy == nil {
+		policy = DefaultAutoToolPolicy{}
+	}
 	return &ToolRuntime{
 		sink:              normalizeEventSink(sink),
 		permissionContext: config.PermissionContext.Normalize(),
+		autoPolicy:        policy,
+		useApprovalForAsk: config.UseApprovalForAsk,
 	}
 }
 
@@ -52,54 +71,84 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	result := ToolExecutionResult{
 		ToolCallID: id,
 		Name:       call.Function.Name,
+		StartedAt:  timeNowUTC(),
 	}
 
 	selectedTool, err := tool.GetTool(call.Function.Name)
 	if err != nil {
-		result.Content = fmt.Sprintf("工具执行失败: %v: %s", err, call.Function.Name)
-		result.IsError = true
-		return finalizeToolResult(result)
+		return finalizeToolResult(synthesizeFailedToolResult(result, "unknown_tool", fmt.Sprintf("工具执行失败: %v: %s", err, call.Function.Name)))
 	}
 
 	input, err := normalizeToolInput(call.Function.Arguments, selectedTool.Parameters())
 	if err != nil {
-		result.Content = fmt.Sprintf("工具参数错误: %v", err)
-		result.IsError = true
-		return finalizeToolResult(result)
+		return finalizeToolResult(synthesizeValidationToolResult(result, err.Error()))
 	}
 
 	toolCtx := tool.ContextWithPermissionContext(ctx, rt.permissionContext)
 	permission := rt.decideToolPermission(toolCtx, selectedTool, input)
+	result.AffectedPaths = append([]string(nil), permission.ApprovalRequest.AffectedPaths...)
+	result.PatchSummary = strings.TrimSpace(permission.ApprovalRequest.PatchSummary)
 	rt.emitPatchPreview(result, selectedTool, input)
+
+	decisionRequest := inferToolDecisionRequest(
+		id,
+		call.Function.Name,
+		selectedTool,
+		call.Function.Arguments,
+		input,
+		permission,
+		rt.permissionContext,
+	)
+	decision := ToolDecision{}
 	switch permission.Behavior {
 	case tool.PermissionAllow:
+		decision = rt.autoPolicy.Decide(toolCtx, decisionRequest)
 	case tool.PermissionDeny:
-		result.Content = fmt.Sprintf("工具权限拒绝: %s", firstNonEmpty(permission.Reason, "permission policy denied execution"))
-		result.IsError = true
-		return finalizeToolResult(result)
+		decision = DefaultAutoToolPolicy{}.Decide(toolCtx, decisionRequest)
 	case tool.PermissionAsk:
-		decision, err := rt.awaitApproval(ctx, selectedTool, result, input, permission)
-		if err != nil {
-			result.Content = fmt.Sprintf("工具审批失败: %v", err)
-			result.IsError = true
-			return finalizeToolResult(result)
+		if rt.useApprovalForAsk {
+			decision = ToolDecision{
+				Action:       ToolDecisionAllow,
+				Source:       ToolDecisionSourceToolRule,
+				Reason:       "compatibility approval path",
+				UpdatedInput: input,
+			}
+			approvalDecision, err := rt.awaitApproval(ctx, selectedTool, result, input, permission)
+			if err != nil {
+				return finalizeToolResult(synthesizeFailedToolResult(result, "approval_failed", fmt.Sprintf("工具审批失败: %v", err)))
+			}
+			if approvalDecision == ApprovalDecisionRejected {
+				return finalizeToolResult(synthesizeApprovalRejectedToolResult(result))
+			}
+			break
 		}
-		if decision == ApprovalDecisionRejected {
-			result.Content = "工具执行已被审批拒绝"
-			result.IsError = true
-			return finalizeToolResult(result)
-		}
+		decision = rt.autoPolicy.Decide(toolCtx, decisionRequest)
 	default:
-		result.Content = fmt.Sprintf("工具权限拒绝: invalid permission decision %q", permission.Behavior)
-		result.IsError = true
-		return finalizeToolResult(result)
+		decision = ToolDecision{
+			Action: ToolDecisionDeny,
+			Source: ToolDecisionSourcePolicyError,
+			Reason: fmt.Sprintf("invalid permission decision %q", permission.Behavior),
+		}
+	}
+
+	decision = normalizeToolDecision(decision, firstNonEmpty(permission.Reason, "AUTO policy denied tool execution"))
+	rt.emitToolPermissionDecided(result, permission, decision)
+	result.DecisionSource = decision.Source
+	result.DecisionReason = decision.Reason
+	if strings.TrimSpace(decision.UpdatedInput) != "" {
+		input = decision.UpdatedInput
+	}
+	switch decision.Action {
+	case ToolDecisionAllow:
+	case ToolDecisionDeny:
+		return finalizeToolResult(synthesizeDeniedToolResult(result, decision))
+	case ToolDecisionAbort:
+		return finalizeToolResult(synthesizeAbortedToolResult(result, decision))
 	}
 
 	output, err := rt.executeTool(toolCtx, result, selectedTool, input)
 	if err != nil {
-		result.Content = fmt.Sprintf("工具执行失败: %v", err)
-		result.IsError = true
-		return finalizeToolResult(result)
+		return finalizeToolResult(synthesizeFailedToolResult(result, "tool_execution_failed", fmt.Sprintf("工具执行失败: %v", err)))
 	}
 
 	result.Content = output
@@ -243,6 +292,27 @@ func (rt *ToolRuntime) emitPatchPreview(result ToolExecutionResult, selectedTool
 	})
 }
 
+func (rt *ToolRuntime) emitToolPermissionDecided(
+	result ToolExecutionResult,
+	permission tool.PermissionDecision,
+	decision ToolDecision,
+) {
+	rt.sink.Emit(AwakenEvent{
+		Type:                     ToolPermissionDecidedEventType,
+		Timestamp:                timeNowUTC(),
+		ToolCallID:               result.ToolCallID,
+		ToolName:                 result.Name,
+		Content:                  decision.Reason,
+		StaticPermissionBehavior: string(permission.Behavior),
+		StaticPermissionReason:   strings.TrimSpace(permission.Reason),
+		ToolDecisionAction:       string(decision.Action),
+		ToolDecisionSource:       string(decision.Source),
+		ToolDecisionReason:       strings.TrimSpace(decision.Reason),
+		ApprovalAffectedPaths:    result.AffectedPaths,
+		ApprovalPatchSummary:     result.PatchSummary,
+	})
+}
+
 type toolObserverFunc func(tool.CommandOutput)
 
 func (fn toolObserverFunc) OnCommandOutput(output tool.CommandOutput) {
@@ -250,9 +320,71 @@ func (fn toolObserverFunc) OnCommandOutput(output tool.CommandOutput) {
 }
 
 func finalizeToolResult(result ToolExecutionResult) ToolExecutionResult {
+	if result.FinishedAt.IsZero() {
+		result.FinishedAt = timeNowUTC()
+	}
+	if !result.StartedAt.IsZero() {
+		result.DurationMs = result.FinishedAt.Sub(result.StartedAt).Milliseconds()
+	}
+	if result.Status == "" {
+		if result.IsError {
+			result.Status = ToolExecutionFailed
+		} else {
+			result.Status = ToolExecutionSucceeded
+		}
+	}
 	limited := outputlimit.Limit(result.Content, outputlimit.DefaultToolResultMaxChars)
 	result.Content = limited.Content
 	result.Truncated = limited.Truncated
+	return result
+}
+
+func synthesizeDeniedToolResult(result ToolExecutionResult, decision ToolDecision) ToolExecutionResult {
+	result.Content = fmt.Sprintf("工具执行被 AUTO policy 拒绝: %s", firstNonEmpty(decision.Reason, "permission policy denied execution"))
+	result.IsError = true
+	result.Status = ToolExecutionDenied
+	result.ErrorCode = "tool_denied"
+	result.DecisionSource = decision.Source
+	result.DecisionReason = decision.Reason
+	return result
+}
+
+func synthesizeAbortedToolResult(result ToolExecutionResult, decision ToolDecision) ToolExecutionResult {
+	result.Content = firstNonEmpty(decision.Reason, "工具执行已被取消")
+	if !strings.Contains(result.Content, "工具执行已被取消") {
+		result.Content = "工具执行已被取消: " + result.Content
+	}
+	result.IsError = true
+	result.Status = ToolExecutionCancelled
+	result.ErrorCode = "tool_policy_abort"
+	result.DecisionSource = decision.Source
+	result.DecisionReason = decision.Reason
+	return result
+}
+
+func synthesizeValidationToolResult(result ToolExecutionResult, reason string) ToolExecutionResult {
+	result.Content = fmt.Sprintf("工具参数错误: %s", firstNonEmpty(reason, "invalid tool arguments"))
+	result.IsError = true
+	result.Status = ToolExecutionDenied
+	result.ErrorCode = "validation_error"
+	return result
+}
+
+func synthesizeFailedToolResult(result ToolExecutionResult, code string, content string) ToolExecutionResult {
+	result.Content = content
+	result.IsError = true
+	result.Status = ToolExecutionFailed
+	result.ErrorCode = code
+	return result
+}
+
+func synthesizeApprovalRejectedToolResult(result ToolExecutionResult) ToolExecutionResult {
+	result.Content = "工具执行已被审批拒绝"
+	result.IsError = true
+	result.Status = ToolExecutionDenied
+	result.ErrorCode = "approval_rejected"
+	result.DecisionSource = ToolDecisionSourceToolRule
+	result.DecisionReason = "审批拒绝"
 	return result
 }
 

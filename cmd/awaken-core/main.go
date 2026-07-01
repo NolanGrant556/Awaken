@@ -26,7 +26,7 @@ func main() {
 	runService := runtime.NewRunService(
 		func(workspace runtime.WorkspaceConfig, threadID string) *agentcore.Agent {
 			agentCfg := agentcore.AgentConfig{
-				MaxThoughts: 5,
+				MaxThoughts: 0,
 				EntryPoint:  "awaken-core",
 				ModelConfig: agentcore.ModelConfig{
 					APIKey:      cfg.APIKey,

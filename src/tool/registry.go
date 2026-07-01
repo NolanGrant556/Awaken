@@ -19,6 +19,11 @@ var (
 
 var safeNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
+// mcpSafeNamePattern extends the builtin safe-name pattern to allow the
+// double-underscore separator used by MCP-sourced tools
+// (mcp__{server}__{tool}) and the skill__ prefix used by skill tools.
+var mcpSafeNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_]+(?:__[a-zA-Z0-9_]+)*$`)
+
 func RegisterTool(tool Tool) error {
 	if err := ValidateTool(tool); err != nil {
 		return err
@@ -33,18 +38,76 @@ func RegisterTool(tool Tool) error {
 	return nil
 }
 
+// RegisterToolForce registers a tool, replacing any existing registration
+// with the same name. Used by the MCP manager when refreshing a server's
+// tool list and by tests that re-create tool instances.
+func RegisterToolForce(t Tool) error {
+	if err := ValidateTool(t); err != nil {
+		return err
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	toolRegistry[t.Name()] = t
+	return nil
+}
+
 func MustRegisterTool(tool Tool) {
 	if err := RegisterTool(tool); err != nil {
 		panic(err)
 	}
 }
 
+// UnregisterTool removes a tool from the registry by name. It is a no-op
+// when the tool does not exist. Used by the MCP manager when a server
+// disconnects or is disabled.
+func UnregisterTool(name string) {
+	mu.Lock()
+	defer mu.Unlock()
+	delete(toolRegistry, name)
+}
+
+// UnregisterToolsByPrefix removes every tool whose name starts with the
+// given prefix. Returns the count of removed tools. Used by the MCP
+// manager to clear all tools from a single server in one call.
+func UnregisterToolsByPrefix(prefix string) int {
+	mu.Lock()
+	defer mu.Unlock()
+	removed := 0
+	for name := range toolRegistry {
+		if startsWith(name, prefix) {
+			delete(toolRegistry, name)
+			removed++
+		}
+	}
+	return removed
+}
+
+// ListToolNames returns the names of all currently registered tools, sorted.
+// Used by tests and by the /v1/tools endpoint.
+func ListToolNames() []string {
+	mu.RLock()
+	defer mu.RUnlock()
+	names := make([]string, 0, len(toolRegistry))
+	for name := range toolRegistry {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func startsWith(name, prefix string) bool {
+	if len(prefix) > len(name) {
+		return false
+	}
+	return name[:len(prefix)] == prefix
+}
+
 func ValidateTool(tool Tool) error {
 	if tool == nil {
 		return fmt.Errorf("%w: nil tool", ErrInvalidTool)
 	}
-	if !safeNamePattern.MatchString(tool.Name()) {
-		return fmt.Errorf("%w: tool name %q must match %s", ErrInvalidTool, tool.Name(), safeNamePattern.String())
+	if !isValidToolName(tool.Name()) {
+		return fmt.Errorf("%w: tool name %q must match %s", ErrInvalidTool, tool.Name(), mcpSafeNamePattern.String())
 	}
 	for _, param := range tool.Parameters() {
 		if !safeNamePattern.MatchString(param.Name) {
@@ -55,6 +118,15 @@ func ValidateTool(tool Tool) error {
 		}
 	}
 	return nil
+}
+
+// isValidToolName accepts both builtin-style names and the namespaced
+// mcp__{server}__{tool} / skill__{id} forms.
+func isValidToolName(name string) bool {
+	if name == "" {
+		return false
+	}
+	return mcpSafeNamePattern.MatchString(name)
 }
 
 func GetTool(name string) (Tool, error) {

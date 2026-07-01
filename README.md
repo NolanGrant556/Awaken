@@ -302,6 +302,63 @@ web_search
 - `web_search` 不需要审批。
 - 相对路径按配置的 workspace root 解析。
 
+### MCP runtime
+
+Awaken 自带一个 MCP（Model Context Protocol）客户端 runtime，启动 `awaken-core` 时会自动加载 MCP server 配置并把每个 server 暴露的工具注入到工具池中。MCP 工具的命名格式固定为 `mcp__{server}__{tool}`，agent 调用时按这个前缀路由。
+
+配置加载顺序：
+
+1. 项目级：`<workspace>/awaken.mcp.json`
+2. 用户级：`~/.awaken/mcp.json`
+3. 动态注入：预留给 connector 层（后续 change）
+
+合并规则：`project` 覆盖 `user`；同名 server 配置以 project 为准。配置错误打 warning 但不阻塞 runtime 启动。
+
+支持的 transport：
+
+| Transport | 字段 | 说明 |
+|---|---|---|
+| stdio | `stdio` | spawn 子进程，stdin/stdout 通信；最常见 |
+| streamable HTTP | `http` | MCP 规范的 streamable HTTP，含 SSE 升级 |
+| SSE | `sse` | 兼容旧版非 streamable HTTP server |
+| in-process | `inProcess` | 本地 Go 包实现的 MCP server，通过 `mcp.NewInMemoryTransports` 通信 |
+| WebSocket | `ws` | v1 不支持，配置后直接转 `failed`，后续版本可能补 |
+
+接入第一个 MCP server（以 stdio filesystem server 为例）：
+
+1. 在项目根目录创建 `awaken.mcp.json`：
+
+   ```json
+   {
+     "servers": {
+       "filesystem": {
+         "stdio": {
+           "command": "npx",
+           "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/me/Documents"]
+         }
+       }
+     }
+   }
+   ```
+
+2. 启动 `awaken-core`（或 `npm run open:desktop` 由 Desktop 拉起）。日志会打印每个 server 的握手结果。
+
+3. 通过 `GET http://127.0.0.1:8787/v1/mcp/servers` 查看 server 状态。`state` 字段含义：
+
+   - `pending`：握手进行中
+   - `connected`：已连接，工具已注册
+   - `failed`：重试 5 次后仍失败（指数退避 1/2/4/8/16s）
+   - `needs-auth`：server 返回 401，需要走 OAuth 流程
+   - `disabled`：用户主动 disable
+
+4. 通过 `GET /v1/mcp/tools` 查看当前工具池，MCP 工具会以 `mcp__filesystem__read_file` 这样的名字出现。
+
+5. agent 在对话中可以直接调用这些工具；只读 MCP 工具（server 声明 `readOnlyHint: true`）不需要审批，destructive 工具走和内置工具一样的审批流程。
+
+完整配置示例见 `docs/awaken.mcp.json.example`。
+
+OAuth-protected server：如果 server 返回 401，runtime 把状态转成 `needs-auth` 并保留配置。前端通过 `POST /v1/mcp/servers/{name}/auth` 触发 OAuth 流程，拿到 authorize URL 后在浏览器完成授权，runtime 把 token 存入内存 `CredentialStore`，下次调用自动带上。
+
 ## Runtime 内部验证配置
 
 这部分只面向 `awaken-core` / Go runtime 的内部测试与验证，不是 Awaken 使用流程，也不是独立启动入口。

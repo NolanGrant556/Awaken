@@ -84,6 +84,7 @@ export type RuntimeInfoWire = {
   has_api_key: boolean;
   default_workspace: string;
   base_url_host: string;
+  model_profile?: RuntimeModelProfileSummaryWire;
 };
 
 export type RuntimeInfo = {
@@ -94,6 +95,104 @@ export type RuntimeInfo = {
   hasApiKey: boolean;
   defaultWorkspace: string;
   baseUrlHost: string;
+  modelProfile?: RuntimeModelProfileSummary;
+};
+
+export type ModelProviderWire = {
+  id: string;
+  display_name: string;
+  base_url: string;
+  protocol: string;
+  auth_scheme: string;
+  key_env_name: string;
+  default_model: string;
+  models: string[];
+  docs_url: string;
+  api_docs_url: string;
+  coding_preset?: boolean;
+  endpoint_model?: boolean;
+};
+
+export type ModelProvider = {
+  id: string;
+  displayName: string;
+  baseURL: string;
+  protocol: string;
+  authScheme: string;
+  keyEnvName: string;
+  defaultModel: string;
+  models: string[];
+  docsURL: string;
+  apiDocsURL: string;
+  codingPreset: boolean;
+  endpointModel: boolean;
+};
+
+export type ModelProfileAdvancedWire = {
+  temperature?: number;
+  max_tokens?: number;
+  endpoint_id?: string;
+  prompt_cache_key?: string;
+  context_window?: number;
+};
+
+export type ModelProfileAdvanced = {
+  temperature?: number;
+  maxTokens?: number;
+  endpointId?: string;
+  promptCacheKey?: string;
+  contextWindow?: number;
+};
+
+export type RuntimeModelProfileSummaryWire = {
+  id: string;
+  provider_id: string;
+  display_name: string;
+  model_id: string;
+  base_url: string;
+  protocol: string;
+  auth_scheme: string;
+  has_key: boolean;
+  masked_key?: string;
+  enabled: boolean;
+  is_default: boolean;
+  profile_status: "ready" | "missing_key" | "disabled";
+  advanced?: ModelProfileAdvancedWire;
+};
+
+export type RuntimeModelProfileSummary = {
+  id: string;
+  providerId: string;
+  displayName: string;
+  modelId: string;
+  baseURL: string;
+  protocol: string;
+  authScheme: string;
+  hasKey: boolean;
+  maskedKey?: string;
+  enabled: boolean;
+  isDefault: boolean;
+  profileStatus: "ready" | "missing_key" | "disabled";
+  advanced?: ModelProfileAdvanced;
+};
+
+export type ModelProfileSaveRequest = {
+  id?: string;
+  providerId: string;
+  displayName?: string;
+  modelId: string;
+  baseURL?: string;
+  protocol?: string;
+  authScheme?: string;
+  apiKey?: string;
+  enabled?: boolean;
+  isDefault?: boolean;
+  advanced?: ModelProfileAdvanced;
+};
+
+export type ModelProfileTestResult = {
+  ok: boolean;
+  message: string;
 };
 
 export type WorkspaceConfigWire = {
@@ -123,6 +222,7 @@ export type StartRunRequestWire = {
   thread_id?: string;
   workspace: WorkspaceConfigWire;
   client: ClientInfoWire;
+  model_profile?: ModelProfileRunConfigWire;
 };
 
 export type StartRunRequest = {
@@ -130,6 +230,33 @@ export type StartRunRequest = {
   threadId?: string;
   workspace: WorkspaceConfig;
   client: ClientInfo;
+  modelProfile?: ModelProfileRunConfig;
+};
+
+export type ModelProfileRunConfigWire = {
+  profile_id?: string;
+  provider_id?: string;
+  display_name?: string;
+  model_id?: string;
+  base_url?: string;
+  protocol?: string;
+  auth_scheme?: string;
+  api_key?: string;
+  temperature?: number;
+  max_tokens?: number;
+};
+
+export type ModelProfileRunConfig = {
+  profileId?: string;
+  providerId?: string;
+  displayName?: string;
+  modelId?: string;
+  baseURL?: string;
+  protocol?: string;
+  authScheme?: string;
+  apiKey?: string;
+  temperature?: number;
+  maxTokens?: number;
 };
 
 export type ApprovalDecision = "approved" | "rejected";
@@ -173,6 +300,12 @@ export type AwakenBridge = {
   ) => Promise<string>;
   unsubscribeRun: (subscriptionId: string) => void;
   getRuntimeInfo: () => Promise<RuntimeInfo>;
+  listModelProviders: () => Promise<ModelProvider[]>;
+  listModelProfiles: () => Promise<RuntimeModelProfileSummary[]>;
+  saveModelProfile: (request: ModelProfileSaveRequest) => Promise<RuntimeModelProfileSummary>;
+  deleteModelProfile: (profileId: string) => Promise<void>;
+  setDefaultModelProfile: (profileId: string) => Promise<RuntimeModelProfileSummary>;
+  testModelProfile: (request: ModelProfileSaveRequest) => Promise<ModelProfileTestResult>;
   pickWorkspace: (defaultPath?: string) => Promise<WorkspacePickResult>;
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
   getSupervisorStatus: () => Promise<SupervisorStatusInfo>;
@@ -231,6 +364,7 @@ export function normalizeRuntimeInfo(info: RuntimeInfoWire): RuntimeInfo {
     hasApiKey: info.has_api_key,
     defaultWorkspace: info.default_workspace,
     baseUrlHost: info.base_url_host,
+    modelProfile: info.model_profile ? normalizeModelProfileSummary(info.model_profile) : undefined,
   };
 }
 
@@ -247,5 +381,86 @@ export function normalizeStartRunRequest(request: StartRunRequest): StartRunRequ
       request_id: request.client.requestId,
       entrypoint: request.client.entrypoint,
     },
+    model_profile: request.modelProfile ? normalizeModelProfileRunConfig(request.modelProfile) : undefined,
+  };
+}
+
+export function normalizeModelProvider(provider: ModelProviderWire): ModelProvider {
+  return {
+    id: provider.id,
+    displayName: provider.display_name,
+    baseURL: provider.base_url,
+    protocol: provider.protocol,
+    authScheme: provider.auth_scheme,
+    keyEnvName: provider.key_env_name,
+    defaultModel: provider.default_model,
+    models: provider.models,
+    docsURL: provider.docs_url,
+    apiDocsURL: provider.api_docs_url,
+    codingPreset: Boolean(provider.coding_preset),
+    endpointModel: Boolean(provider.endpoint_model),
+  };
+}
+
+export function normalizeModelProfileAdvanced(
+  advanced?: ModelProfileAdvancedWire,
+): ModelProfileAdvanced | undefined {
+  if (!advanced) return undefined;
+  return {
+    temperature: advanced.temperature,
+    maxTokens: advanced.max_tokens,
+    endpointId: advanced.endpoint_id,
+    promptCacheKey: advanced.prompt_cache_key,
+    contextWindow: advanced.context_window,
+  };
+}
+
+export function toModelProfileAdvancedWire(
+  advanced?: ModelProfileAdvanced,
+): ModelProfileAdvancedWire | undefined {
+  if (!advanced) return undefined;
+  return {
+    temperature: advanced.temperature,
+    max_tokens: advanced.maxTokens,
+    endpoint_id: advanced.endpointId,
+    prompt_cache_key: advanced.promptCacheKey,
+    context_window: advanced.contextWindow,
+  };
+}
+
+export function normalizeModelProfileSummary(
+  profile: RuntimeModelProfileSummaryWire,
+): RuntimeModelProfileSummary {
+  return {
+    id: profile.id,
+    providerId: profile.provider_id,
+    displayName: profile.display_name,
+    modelId: profile.model_id,
+    baseURL: profile.base_url,
+    protocol: profile.protocol,
+    authScheme: profile.auth_scheme,
+    hasKey: profile.has_key,
+    maskedKey: profile.masked_key,
+    enabled: profile.enabled,
+    isDefault: profile.is_default,
+    profileStatus: profile.profile_status,
+    advanced: normalizeModelProfileAdvanced(profile.advanced),
+  };
+}
+
+export function normalizeModelProfileRunConfig(
+  profile: ModelProfileRunConfig,
+): ModelProfileRunConfigWire {
+  return {
+    profile_id: profile.profileId,
+    provider_id: profile.providerId,
+    display_name: profile.displayName,
+    model_id: profile.modelId,
+    base_url: profile.baseURL,
+    protocol: profile.protocol,
+    auth_scheme: profile.authScheme,
+    api_key: profile.apiKey,
+    temperature: profile.temperature,
+    max_tokens: profile.maxTokens,
   };
 }

@@ -4,8 +4,12 @@ import {
   type ApprovalDecision,
   type AwakenBridge,
   type DesktopPlatform,
+  type ModelProfileSaveRequest,
+  type ModelProfileTestResult,
+  type ModelProvider,
   type RunStreamHandlers,
   type RuntimeInfo,
+  type RuntimeModelProfileSummary,
   type RuntimeRun,
   type RuntimeThreadTranscript,
   type RuntimeThread,
@@ -91,6 +95,18 @@ const bridge: AwakenBridge = {
   },
   getRuntimeInfo: () =>
     ipcRenderer.invoke("awaken:get-runtime-info") as Promise<RuntimeInfo>,
+  listModelProviders: () =>
+    ipcRenderer.invoke("awaken:list-model-providers") as Promise<ModelProvider[]>,
+  listModelProfiles: () =>
+    ipcRenderer.invoke("awaken:list-model-profiles") as Promise<RuntimeModelProfileSummary[]>,
+  saveModelProfile: (request: ModelProfileSaveRequest) =>
+    ipcRenderer.invoke("awaken:save-model-profile", request) as Promise<RuntimeModelProfileSummary>,
+  deleteModelProfile: (profileId: string) =>
+    ipcRenderer.invoke("awaken:delete-model-profile", profileId) as Promise<void>,
+  setDefaultModelProfile: (profileId: string) =>
+    ipcRenderer.invoke("awaken:set-default-model-profile", profileId) as Promise<RuntimeModelProfileSummary>,
+  testModelProfile: (request: ModelProfileSaveRequest) =>
+    ipcRenderer.invoke("awaken:test-model-profile", request) as Promise<ModelProfileTestResult>,
   pickWorkspace: (defaultPath?: string) =>
     ipcRenderer.invoke("awaken:pick-workspace", defaultPath) as Promise<WorkspacePickResult>,
   validateWorkspace: (path: string) =>

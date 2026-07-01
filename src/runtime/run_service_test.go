@@ -75,6 +75,121 @@ func TestRunServiceReplaysHistoryAndStreamsLiveEvents(t *testing.T) {
 	t.Fatalf("run did not reach finished state")
 }
 
+func TestRunServiceUsesModelProfileForNewAndExistingThreads(t *testing.T) {
+	observed := make(chan agentcore.ModelConfig, 2)
+	service := NewRunServiceWithModelProfiles(
+		func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent {
+			modelCfg := agentcore.ModelConfig{Model: "legacy-model"}
+			if profile != nil {
+				modelCfg = agentcore.ModelConfig{
+					APIKey:      profile.APIKey,
+					BaseURL:     profile.BaseURL,
+					Model:       profile.ModelID,
+					Protocol:    profile.Protocol,
+					AuthScheme:  profile.AuthScheme,
+					Temperature: profile.Temperature,
+					MaxTokens:   profile.MaxTokens,
+				}
+			}
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				ModelConfig: modelCfg,
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				observed <- agent.GetConfig().ModelConfig
+				return "ok", nil
+			})
+		},
+	)
+
+	workspace := t.TempDir()
+	first, err := service.StartRun(StartRunRequest{
+		Input:     "first",
+		Workspace: WorkspaceConfig{WorkspaceRoot: workspace},
+		ModelProfile: &ModelProfileConfig{
+			ProfileID:  "profile-a",
+			ProviderID: "deepseek",
+			ModelID:    "deepseek-v4-pro",
+			BaseURL:    "https://api.deepseek.com",
+			Protocol:   "openai_chat",
+			AuthScheme: "bearer",
+			APIKey:     "secret-a",
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	firstCfg := <-observed
+	if firstCfg.Model != "deepseek-v4-pro" || firstCfg.APIKey != "secret-a" {
+		t.Fatalf("unexpected first model config: %+v", firstCfg)
+	}
+	waitForRunStatus(t, service, first.RunID, "finished")
+	waitForThreadIdle(t, service, first.ThreadID)
+
+	_, err = service.StartRun(StartRunRequest{
+		Input:     "second",
+		ThreadID:  first.ThreadID,
+		Workspace: WorkspaceConfig{WorkspaceRoot: workspace},
+		ModelProfile: &ModelProfileConfig{
+			ProfileID:  "profile-b",
+			ProviderID: "kimi-cn",
+			ModelID:    "kimi-k2.6",
+			BaseURL:    "https://api.moonshot.cn/v1",
+			Protocol:   "openai_chat",
+			AuthScheme: "bearer",
+			APIKey:     "secret-b",
+		},
+	})
+	if err != nil {
+		t.Fatalf("second StartRun returned error: %v", err)
+	}
+	secondCfg := <-observed
+	if secondCfg.Model != "kimi-k2.6" || secondCfg.APIKey != "secret-b" {
+		t.Fatalf("expected reconfigured model config, got %+v", secondCfg)
+	}
+}
+
+func waitForRunStatus(t *testing.T, service *RunService, runID string, status RunStatus) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		run, err := service.GetRun(runID)
+		if err == nil && run.Status == status {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	run, err := service.GetRun(runID)
+	if err != nil {
+		t.Fatalf("GetRun(%s) returned error: %v", runID, err)
+	}
+	t.Fatalf("run %s status = %s, want %s", runID, run.Status, status)
+}
+
+func waitForThreadIdle(t *testing.T, service *RunService, threadID string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		service.mu.RLock()
+		thread, ok := service.threads[threadID]
+		activeRunID := ""
+		if ok {
+			activeRunID = thread.activeRunID
+		}
+		service.mu.RUnlock()
+		if ok && activeRunID == "" {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("thread %s did not become idle", threadID)
+}
+
 func TestRunServiceCancelSuppressesRunErrorAndEmitsCancelled(t *testing.T) {
 	started := make(chan struct{})
 	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {

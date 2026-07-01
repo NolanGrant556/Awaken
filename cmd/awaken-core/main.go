@@ -23,19 +23,34 @@ func main() {
 	defaultWorkspace := resolveDefaultWorkspace()
 	infoProvider := server.NewLLMRuntimeInfoProvider(cfg.Model, cfg.BaseURL, cfg.APIKey, defaultWorkspace, string(llm.ResolveProtocol(cfg)))
 
-	runService := runtime.NewRunService(
-		func(workspace runtime.WorkspaceConfig, threadID string) *agentcore.Agent {
+	runService := runtime.NewRunServiceWithModelProfiles(
+		func(workspace runtime.WorkspaceConfig, threadID string, profile *runtime.ModelProfileConfig) *agentcore.Agent {
+			modelCfg := agentcore.ModelConfig{
+				APIKey:      cfg.APIKey,
+				BaseURL:     cfg.BaseURL,
+				Model:       cfg.Model,
+				Protocol:    string(llm.ResolveProtocol(cfg)),
+				Temperature: cfg.Temperature,
+				MaxTokens:   cfg.MaxTokens,
+				AuthScheme:  cfg.AuthScheme,
+			}
+			if profile != nil {
+				modelCfg.APIKey = profile.APIKey
+				modelCfg.BaseURL = profile.BaseURL
+				modelCfg.Model = profile.ModelID
+				modelCfg.Protocol = profile.Protocol
+				modelCfg.AuthScheme = profile.AuthScheme
+				if profile.Temperature != 0 {
+					modelCfg.Temperature = profile.Temperature
+				}
+				if profile.MaxTokens != 0 {
+					modelCfg.MaxTokens = profile.MaxTokens
+				}
+			}
 			agentCfg := agentcore.AgentConfig{
 				MaxThoughts: 0,
 				EntryPoint:  "awaken-core",
-				ModelConfig: agentcore.ModelConfig{
-					APIKey:      cfg.APIKey,
-					BaseURL:     cfg.BaseURL,
-					Model:       cfg.Model,
-					Temperature: cfg.Temperature,
-					MaxTokens:   cfg.MaxTokens,
-					AuthScheme:  cfg.AuthScheme,
-				},
+				ModelConfig: modelCfg,
 				Workspace: agentcore.WorkspaceConfig{
 					Root:          workspace.WorkspaceRoot,
 					WritableRoots: workspace.WritableRoots,

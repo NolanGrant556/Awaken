@@ -1550,6 +1550,19 @@ button.tool-trace-line:focus-visible {
   white-space: nowrap;
 }
 
+.composer-bar-meta-item-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.composer-bar-meta-item-button:hover,
+.composer-bar-meta-item-button:focus-visible {
+  color: var(--aw-text-primary);
+}
+
 .composer-bar-meta-item-meter {
   margin-left: auto;
   gap: 8px;

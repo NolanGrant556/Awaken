@@ -16,6 +16,7 @@ func NewRouter(runService *awruntime.RunService, infoProvider RuntimeInfoProvide
 	mux.HandleFunc("GET /v1/runtime/info", func(w http.ResponseWriter, r *http.Request) {
 		handleRuntimeInfo(w, r, infoProvider)
 	})
+	mux.HandleFunc("GET /v1/model-providers", handleModelProviders)
 	if runService != nil {
 		handlers := runHandlers{runService: runService}
 		mux.HandleFunc("GET /v1/threads", handlers.handleListThreads)

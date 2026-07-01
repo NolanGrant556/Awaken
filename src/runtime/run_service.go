@@ -41,10 +41,24 @@ type ClientInfo struct {
 }
 
 type StartRunRequest struct {
-	Input     string          `json:"input"`
-	Workspace WorkspaceConfig `json:"workspace"`
-	Client    ClientInfo      `json:"client"`
-	ThreadID  string          `json:"thread_id,omitempty"`
+	Input        string              `json:"input"`
+	Workspace    WorkspaceConfig     `json:"workspace"`
+	Client       ClientInfo          `json:"client"`
+	ThreadID     string              `json:"thread_id,omitempty"`
+	ModelProfile *ModelProfileConfig `json:"model_profile,omitempty"`
+}
+
+type ModelProfileConfig struct {
+	ProfileID   string  `json:"profile_id,omitempty"`
+	ProviderID  string  `json:"provider_id,omitempty"`
+	DisplayName string  `json:"display_name,omitempty"`
+	ModelID     string  `json:"model_id,omitempty"`
+	BaseURL     string  `json:"base_url,omitempty"`
+	Protocol    string  `json:"protocol,omitempty"`
+	AuthScheme  string  `json:"auth_scheme,omitempty"`
+	APIKey      string  `json:"api_key,omitempty"`
+	Temperature float64 `json:"temperature,omitempty"`
+	MaxTokens   int     `json:"max_tokens,omitempty"`
 }
 
 type Executor interface {
@@ -58,25 +72,27 @@ func (f ExecutorFunc) Run(ctx context.Context, input string, sink agentcore.Even
 }
 
 type RunService struct {
-	mu          sync.RWMutex
-	sessions    map[string]*Session
-	threads     map[string]*Thread
-	newAgent    func(workspace WorkspaceConfig, threadID string) *agentcore.Agent
-	newExecutor func(agent *agentcore.Agent) Executor
+	mu              sync.RWMutex
+	sessions        map[string]*Session
+	threads         map[string]*Thread
+	newAgent        func(workspace WorkspaceConfig, threadID string) *agentcore.Agent
+	newProfileAgent func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent
+	newExecutor     func(agent *agentcore.Agent) Executor
 }
 
 // Thread holds the reusable Agent and metadata for a multi-turn conversation.
 // Runs with the same thread_id reuse the same Agent and Conversation.
 type Thread struct {
-	threadID    string
-	agent       *agentcore.Agent
-	workspace   WorkspaceConfig
-	label       string
-	latestRunID string
-	activeRunID string
-	runIDs      []string
-	createdAt   time.Time
-	updatedAt   time.Time
+	threadID        string
+	agent           *agentcore.Agent
+	workspace       WorkspaceConfig
+	label           string
+	latestRunID     string
+	activeRunID     string
+	runIDs          []string
+	modelProfileKey string
+	createdAt       time.Time
+	updatedAt       time.Time
 }
 
 type ThreadSnapshot struct {
@@ -111,6 +127,18 @@ func NewRunService(
 	}
 }
 
+func NewRunServiceWithModelProfiles(
+	newAgent func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent,
+	newExecutor func(agent *agentcore.Agent) Executor,
+) *RunService {
+	service := NewRunService(nil, newExecutor)
+	service.newProfileAgent = newAgent
+	service.newAgent = func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+		return newAgent(workspace, threadID, nil)
+	}
+	return service
+}
+
 func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	trimmed := strings.TrimSpace(req.Input)
 	if trimmed == "" {
@@ -129,12 +157,11 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	threadID := req.ThreadID
 	now := time.Now().UTC()
 	var agent *agentcore.Agent
+	modelProfileKey := modelProfileCacheKey(req.ModelProfile)
 	var restored *restoredTranscript
 	if threadID == "" {
 		threadID = newRuntimeID("thread")
-		if s.newAgent != nil {
-			agent = s.newAgent(workspace, threadID)
-		}
+		agent = s.createAgent(workspace, threadID, req.ModelProfile)
 	} else {
 		s.mu.RLock()
 		_, threadInMemory := s.threads[threadID]
@@ -159,24 +186,23 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 				s.mu.Unlock()
 				return Run{}, ErrThreadNotFound
 			}
-			if s.newAgent != nil {
-				agent = s.newAgent(workspace, threadID)
-				if agent != nil {
-					agent.GetConversation().Context.SetMessages(restored.Messages)
-				}
+			agent = s.createAgent(workspace, threadID, req.ModelProfile)
+			if agent != nil {
+				agent.GetConversation().Context.SetMessages(restored.Messages)
 			}
 			runIDs := append([]string(nil), restored.RunIDs...)
 			runIDs = append(runIDs, runID)
 			s.threads[threadID] = &Thread{
-				threadID:    threadID,
-				agent:       agent,
-				workspace:   workspace,
-				label:       restored.Label,
-				latestRunID: runID,
-				activeRunID: runID,
-				runIDs:      runIDs,
-				createdAt:   restored.CreatedAt,
-				updatedAt:   now,
+				threadID:        threadID,
+				agent:           agent,
+				workspace:       workspace,
+				label:           restored.Label,
+				latestRunID:     runID,
+				activeRunID:     runID,
+				runIDs:          runIDs,
+				modelProfileKey: modelProfileKey,
+				createdAt:       restored.CreatedAt,
+				updatedAt:       now,
 			}
 			s.sessions[runID] = session
 			s.mu.Unlock()
@@ -194,6 +220,14 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			return Run{}, ErrThreadBusy
 		}
 		agent = thread.agent
+		if modelProfileKey != thread.modelProfileKey {
+			agent = s.createAgent(workspace, threadID, req.ModelProfile)
+			if agent != nil && thread.agent != nil {
+				agent.GetConversation().Context.SetMessages(thread.agent.GetConversation().Context.GetMessages())
+			}
+			thread.agent = agent
+			thread.modelProfileKey = modelProfileKey
+		}
 		thread.activeRunID = runID
 		thread.latestRunID = runID
 		thread.runIDs = append(thread.runIDs, runID)
@@ -201,15 +235,16 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	} else {
 		label := trimThreadLabel(trimmed)
 		s.threads[threadID] = &Thread{
-			threadID:    threadID,
-			agent:       agent,
-			workspace:   workspace,
-			label:       label,
-			latestRunID: runID,
-			activeRunID: runID,
-			runIDs:      []string{runID},
-			createdAt:   now,
-			updatedAt:   now,
+			threadID:        threadID,
+			agent:           agent,
+			workspace:       workspace,
+			label:           label,
+			latestRunID:     runID,
+			activeRunID:     runID,
+			runIDs:          []string{runID},
+			modelProfileKey: modelProfileKey,
+			createdAt:       now,
+			updatedAt:       now,
 		}
 		s.pruneInactiveThreadsLocked()
 	}
@@ -221,6 +256,31 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	go s.execute(session, executor, agent, trimmed, ctx, workspace)
 
 	return session.Snapshot(), nil
+}
+
+func (s *RunService) createAgent(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent {
+	if s.newProfileAgent != nil {
+		return s.newProfileAgent(workspace, threadID, profile)
+	}
+	if s.newAgent != nil {
+		return s.newAgent(workspace, threadID)
+	}
+	return nil
+}
+
+func modelProfileCacheKey(profile *ModelProfileConfig) string {
+	if profile == nil {
+		return ""
+	}
+	parts := []string{
+		profile.ProfileID,
+		profile.ProviderID,
+		profile.ModelID,
+		profile.BaseURL,
+		profile.Protocol,
+		profile.AuthScheme,
+	}
+	return strings.Join(parts, "\x00")
 }
 
 func (s *RunService) ListThreads() []ThreadSnapshot {

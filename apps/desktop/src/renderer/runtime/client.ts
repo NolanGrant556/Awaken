@@ -3,7 +3,11 @@ import {
   type ApprovalDecision,
   type AwakenBridge,
   type DesktopPlatform,
+  type ModelProfileSaveRequest,
+  type ModelProfileTestResult,
+  type ModelProvider,
   type RuntimeInfo,
+  type RuntimeModelProfileSummary,
   type RuntimeRun,
   type RuntimeThreadTranscript,
   type RuntimeThread,
@@ -24,6 +28,12 @@ export type RuntimeClient = {
   source: "electron";
   platform: DesktopPlatform;
   getRuntimeInfo: () => Promise<RuntimeInfo>;
+  listModelProviders: () => Promise<ModelProvider[]>;
+  listModelProfiles: () => Promise<RuntimeModelProfileSummary[]>;
+  saveModelProfile: (request: ModelProfileSaveRequest) => Promise<RuntimeModelProfileSummary>;
+  deleteModelProfile: (profileId: string) => Promise<void>;
+  setDefaultModelProfile: (profileId: string) => Promise<RuntimeModelProfileSummary>;
+  testModelProfile: (request: ModelProfileSaveRequest) => Promise<ModelProfileTestResult>;
   getRun: (runId: string) => Promise<RuntimeRun>;
   getThreadTranscript: (threadId: string) => Promise<RuntimeThreadTranscript>;
   listThreads: () => Promise<RuntimeThread[]>;
@@ -61,6 +71,12 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     source: "electron",
     platform: bridge.platform,
     getRuntimeInfo: () => bridge.getRuntimeInfo(),
+    listModelProviders: () => bridge.listModelProviders(),
+    listModelProfiles: () => bridge.listModelProfiles(),
+    saveModelProfile: (request) => bridge.saveModelProfile(request),
+    deleteModelProfile: (profileId) => bridge.deleteModelProfile(profileId),
+    setDefaultModelProfile: (profileId) => bridge.setDefaultModelProfile(profileId),
+    testModelProfile: (request) => bridge.testModelProfile(request),
     getRun: (runId) => bridge.getRun(runId),
     getThreadTranscript: (threadId) => bridge.getThreadTranscript(threadId),
     listThreads: () => bridge.listThreads(),

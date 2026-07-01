@@ -12,6 +12,7 @@ export type ComposerBarMetaItem = {
   value?: string;
   progress?: number;
   icon?: ReactNode;
+  onClick?: () => void;
 };
 
 export type AwakenComposerBarProps = {
@@ -63,13 +64,8 @@ export function AwakenComposerBar({
       ? Math.max(0, Math.min(100, Math.round((item.progress ?? 0) * 100)))
       : undefined;
 
-    return (
-      <span
-        key={item.id}
-        className={`composer-bar-meta-item${
-          hasProgress ? " composer-bar-meta-item-meter" : ""
-        }`}
-      >
+    const content = (
+      <>
         {item.icon ? <span className="composer-bar-meta-icon">{item.icon}</span> : null}
         <span className="composer-bar-meta-label">{item.label}</span>
         {hasProgress ? (
@@ -89,6 +85,26 @@ export function AwakenComposerBar({
           </span>
         ) : null}
         {item.value ? <span className="composer-bar-meta-value">{item.value}</span> : null}
+      </>
+    );
+    const className = `composer-bar-meta-item${
+      hasProgress ? " composer-bar-meta-item-meter" : ""
+    }${item.onClick ? " composer-bar-meta-item-button" : ""}`;
+
+    if (item.onClick) {
+      return (
+        <button key={item.id} type="button" className={className} onClick={item.onClick}>
+          {content}
+        </button>
+      );
+    }
+
+    return (
+      <span
+        key={item.id}
+        className={className}
+      >
+        {content}
       </span>
     );
   }

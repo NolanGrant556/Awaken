@@ -47,6 +47,12 @@ function stubElectronBridge(): void {
       subscribeRun: vi.fn(),
       unsubscribeRun: vi.fn(),
       getRuntimeInfo: vi.fn(),
+      listModelProviders: vi.fn(async () => []),
+      listModelProfiles: vi.fn(async () => []),
+      saveModelProfile: vi.fn(),
+      deleteModelProfile: vi.fn(),
+      setDefaultModelProfile: vi.fn(),
+      testModelProfile: vi.fn(async () => ({ ok: true, message: "ok" })),
       pickWorkspace: vi.fn(async () => ({ canceled: true as const })),
       validateWorkspace: vi.fn(async () => ({ valid: true as const })),
       getSupervisorStatus: vi.fn(async () => ({ status: "running" as const })),
@@ -139,6 +145,9 @@ describe("App workbench presentation", () => {
     expect(html).toContain('rows="2"');
     expect(html).toContain("New Agent");
     expect(html).toContain("Add folder");
+    expect(html).toContain("Automations");
+    expect(html).toContain("Configure model");
+    expect(html).not.toContain(">Models<");
     expect(html).toContain("composer-bar-center");
     expect(html).not.toContain("Plan, Build, / for skills, @ for context");
     expect(html).not.toContain("composer-bar-dock");

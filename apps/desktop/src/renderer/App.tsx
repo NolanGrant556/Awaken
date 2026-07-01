@@ -14,7 +14,6 @@ import {
   Monitor,
   PanelRightClose,
   PanelRightOpen,
-  SlidersHorizontal,
 } from "lucide-react";
 import {
   AwakenAppShell as AppShell,
@@ -87,6 +86,7 @@ import {
   workspaceLabelForPath,
   type WorkspaceProject,
 } from "./projectWorkspace";
+import { ModelSettingsDialog } from "./ModelSettingsDialog";
 
 type InspectorTabId = "changes";
 
@@ -306,6 +306,7 @@ export function App() {
   const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
   const [resolvedApproval, setResolvedApproval] = useState<ResolvedApprovalState>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
+  const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
   const [workspacePath, setWorkspacePath] = useState<string>("");
   const [createProjectDialogOpen, setCreateProjectDialogOpen] = useState(false);
   const [pendingProjectMode, setPendingProjectMode] = useState<"local">("local");
@@ -506,6 +507,18 @@ export function App() {
     }
   }
 
+  async function refreshRuntimeInfoNow(): Promise<void> {
+    if (runtimeState.supervisorStatus !== "running") {
+      setRuntimeInfo(null);
+      return;
+    }
+    try {
+      setRuntimeInfo(await runtimeClient.getRuntimeInfo());
+    } catch {
+      setRuntimeInfo(null);
+    }
+  }
+
   useEffect(() => {
     if (!desktopReady) {
       return;
@@ -563,11 +576,6 @@ export function App() {
       label: "Automations",
       icon: <CalendarClock size={16} strokeWidth={1.9} />,
     },
-    {
-      id: "customize",
-      label: "Customize",
-      icon: <SlidersHorizontal size={16} strokeWidth={1.9} />,
-    },
   ];
   const topbarStatusLabel = desktopNeedsRestart
     ? "Needs restart"
@@ -591,6 +599,12 @@ export function App() {
     (pathForSelectedProject ? workspaceLabelForPath(pathForSelectedProject) : "awaken");
   const contextMeta = contextUsageMeta(runtimeState.inspectorSummary.contextWindow);
   const composerMetaItems: ComposerBarMetaItem[] = [
+    {
+      id: "model",
+      label: runtimeInfo?.configuredModel || "Configure model",
+      value: runtimeInfo?.modelProfile?.displayName,
+      onClick: () => setModelSettingsOpen(true),
+    },
     { id: "workspace", label: activeProjectLabel },
     ...(contextMeta ? [{ id: "context", ...contextMeta }] : []),
   ];
@@ -1401,6 +1415,10 @@ export function App() {
     dispatch({ type: "run/reset" });
   }
 
+  function handleSelectNav(id: string): void {
+    setActiveNavId(id);
+  }
+
   function handleAddContext(): void {
     setNotice("Context picker is not wired yet.");
   }
@@ -1778,10 +1796,11 @@ export function App() {
                 }
                 showProjectCount={false}
                 platform={platform}
-                onSelectNav={setActiveNavId}
+                onSelectNav={handleSelectNav}
                 onSelectProject={handleSelectProject}
                 onExpandedChange={setExpandedProjectIds}
                 onNewTask={handleNewTask}
+                onProfileClick={() => setModelSettingsOpen(true)}
               />
             </WorkbenchSidebarFrame>
           }
@@ -1998,6 +2017,14 @@ export function App() {
           />
         </div>
       </Dialog>
+      <ModelSettingsDialog
+        open={modelSettingsOpen}
+        runtimeClient={runtimeClient}
+        onOpenChange={setModelSettingsOpen}
+        onProfilesChanged={() => {
+          void refreshRuntimeInfoNow();
+        }}
+      />
     </>
   );
 }

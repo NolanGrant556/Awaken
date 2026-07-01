@@ -235,6 +235,7 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*ll
 		APIKey:      r.config.ModelConfig.APIKey,
 		BaseURL:     r.config.ModelConfig.BaseURL,
 		Model:       llmReq.Model,
+		Protocol:    llm.Protocol(r.config.ModelConfig.Protocol),
 		Temperature: llmReq.Temperature,
 		MaxTokens:   llmReq.MaxTokens,
 		AuthScheme:  r.config.ModelConfig.AuthScheme,

@@ -18,6 +18,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { AguiEvent } from "../shared/agui.js";
 import {
+  normalizeModelProvider,
+  normalizeModelProfileRunConfig,
+  normalizeModelProfileSummary,
   normalizeRuntimeInfo,
   normalizeRuntimeRun,
   normalizeRuntimeThreadTranscript,
@@ -25,20 +28,25 @@ import {
   normalizeStartRunRequest,
   type ApprovalDecision,
   type DesktopPlatform,
+  type ModelProfileSaveRequest,
+  type ModelProviderWire,
   type RuntimeInfoWire,
   type RuntimeRunWire,
+  type RuntimeModelProfileSummaryWire,
   type RuntimeThreadTranscriptWire,
   type RuntimeThreadWire,
   type StartRunRequest,
 } from "../shared/runtime.js";
 import { RuntimeSupervisor, type SupervisorStatusInfo } from "./runtime-supervisor.js";
 import { ensureConfigDir } from "./config-bootstrap.js";
+import { ModelProfileStore } from "./model-profile-store.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let runtimeBaseUrl: string | null = null;
 const isDevServer = process.argv.includes("--dev");
 
 let supervisor: RuntimeSupervisor | null = null;
+let modelProfileStore: ModelProfileStore | null = null;
 let isQuitting = false;
 
 type StreamSubscription = {
@@ -112,6 +120,14 @@ function runtimeUrl(pathname: string): string {
 
 function toRendererSupervisorStatus(info: SupervisorStatusInfo): { status: SupervisorStatusInfo["status"] } {
   return { status: info.status };
+}
+
+function hostFromBaseURL(baseURL: string): string {
+  try {
+    return new URL(baseURL).host;
+  } catch {
+    return "";
+  }
 }
 
 async function readErrorMessage(response: Response): Promise<string> {
@@ -391,12 +407,64 @@ ipcMain.handle("awaken:get-runtime-info", async () => {
     const info = await requestRuntime<RuntimeInfoWire>("/v1/runtime/info", {
       method: "GET",
     });
+    const defaultProfile = await modelProfileStore?.defaultProfileSummary();
+    if (defaultProfile) {
+      info.configured_model = defaultProfile.model_id;
+      info.protocol = defaultProfile.protocol;
+      info.has_api_key = defaultProfile.has_key;
+      info.base_url_host = hostFromBaseURL(defaultProfile.base_url);
+      info.model_profile = defaultProfile;
+    }
 
     return normalizeRuntimeInfo(info);
   } catch {
     console.error("[awaken-desktop] failed to get runtime info");
     throw new Error("Runtime unavailable");
   }
+});
+
+ipcMain.handle("awaken:list-model-providers", async () => {
+  if (!modelProfileStore) {
+    throw new Error("Model profile store unavailable");
+  }
+  const providers = modelProfileStore.listProviders() satisfies ModelProviderWire[];
+  return providers.map(normalizeModelProvider);
+});
+
+ipcMain.handle("awaken:list-model-profiles", async () => {
+  if (!modelProfileStore) {
+    throw new Error("Model profile store unavailable");
+  }
+  const profiles = (await modelProfileStore.listProfiles()) satisfies RuntimeModelProfileSummaryWire[];
+  return profiles.map(normalizeModelProfileSummary);
+});
+
+ipcMain.handle("awaken:save-model-profile", async (_event, request: ModelProfileSaveRequest) => {
+  if (!modelProfileStore) {
+    throw new Error("Model profile store unavailable");
+  }
+  return normalizeModelProfileSummary(await modelProfileStore.saveProfile(request));
+});
+
+ipcMain.handle("awaken:delete-model-profile", async (_event, profileId: string) => {
+  if (!modelProfileStore) {
+    throw new Error("Model profile store unavailable");
+  }
+  await modelProfileStore.deleteProfile(profileId);
+});
+
+ipcMain.handle("awaken:set-default-model-profile", async (_event, profileId: string) => {
+  if (!modelProfileStore) {
+    throw new Error("Model profile store unavailable");
+  }
+  return normalizeModelProfileSummary(await modelProfileStore.setDefaultProfile(profileId));
+});
+
+ipcMain.handle("awaken:test-model-profile", async (_event, request: ModelProfileSaveRequest) => {
+  if (!modelProfileStore) {
+    throw new Error("Model profile store unavailable");
+  }
+  return modelProfileStore.testProfile(request);
 });
 
 ipcMain.handle("awaken:get-run", async (_event, runId: string) => {
@@ -427,12 +495,17 @@ ipcMain.handle("awaken:list-threads", async () => {
 });
 
 ipcMain.handle("awaken:start-run", async (_event, request: StartRunRequest) => {
+  const body = normalizeStartRunRequest(request);
+  const defaultProfile = await modelProfileStore?.resolveDefaultRunProfile();
+  if (defaultProfile) {
+    body.model_profile = normalizeModelProfileRunConfig(defaultProfile);
+  }
   const run = await requestRuntime("/v1/runs", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(normalizeStartRunRequest(request)),
+    body: JSON.stringify(body),
   });
 
   return normalizeRuntimeRun(run);
@@ -552,6 +625,7 @@ async function writeLastWorkspace(workspacePath: string): Promise<void> {
 
 app.whenReady().then(async () => {
   const configDir = await ensureConfigDir();
+  modelProfileStore = new ModelProfileStore(configDir);
   const lastWorkspace = await readLastWorkspace();
   supervisor = new RuntimeSupervisor({
     configDir,

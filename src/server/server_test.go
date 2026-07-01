@@ -124,6 +124,38 @@ func TestRuntimeInfoEndpoint(t *testing.T) {
 	}
 }
 
+func TestModelProvidersEndpoint(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/v1/model-providers", nil)
+	rec := httptest.NewRecorder()
+
+	NewRouter(nil, &StaticRuntimeInfoProvider{}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var providers []struct {
+		ID          string `json:"id"`
+		DisplayName string `json:"display_name"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&providers); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	seen := map[string]bool{}
+	for _, provider := range providers {
+		seen[provider.ID] = true
+		if provider.ID == "doubao" || provider.DisplayName == "Doubao" {
+			t.Fatal("doubao must not be exposed as a separate provider")
+		}
+	}
+	for _, id := range []string{"deepseek", "kimi-cn", "kimi-coding-plan", "volcengine"} {
+		if !seen[id] {
+			t.Fatalf("missing provider %q", id)
+		}
+	}
+}
+
 func TestRuntimeInfoEndpointDoesNotLeakSecrets(t *testing.T) {
 	provider := NewLLMRuntimeInfoProvider(
 		"claude-test",

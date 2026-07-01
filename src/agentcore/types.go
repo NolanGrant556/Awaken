@@ -25,6 +25,7 @@ type ModelConfig struct {
 	APIKey      string
 	BaseURL     string
 	Model       string
+	Protocol    string
 	Temperature float64
 	MaxTokens   int
 	AuthScheme  string

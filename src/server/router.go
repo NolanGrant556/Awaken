@@ -5,11 +5,20 @@ import (
 	"net/http"
 
 	"awaken/src/agentcore"
+	"awaken/src/mcpclient"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
 )
 
 func NewRouter(runService *awruntime.RunService, infoProvider RuntimeInfoProvider) http.Handler {
+	return NewRouterWithMCP(runService, infoProvider, nil)
+}
+
+// NewRouterWithMCP builds a router that also exposes the /v1/mcp/* surface
+// when a non-nil manager is supplied. Existing callers continue to use
+// NewRouter; the MCP-aware variant is consumed by cmd/awaken-core once it
+// constructs the manager.
+func NewRouterWithMCP(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handleHealth)
 	mux.HandleFunc("GET /v1/agui/demo", handleAGUIDemo)
@@ -25,6 +34,14 @@ func NewRouter(runService *awruntime.RunService, infoProvider RuntimeInfoProvide
 		mux.HandleFunc("GET /v1/runs/{run_id}/events", handlers.handleRunEvents)
 		mux.HandleFunc("POST /v1/runs/{run_id}/cancel", handlers.handleCancelRun)
 		mux.HandleFunc("POST /v1/runs/{run_id}/approvals/{approval_id}/resolve", handlers.handleResolveApproval)
+	}
+	mcpH := mcpHandlers{manager: manager}
+	mux.HandleFunc("GET /v1/mcp/tools", mcpH.handleListTools)
+	if manager != nil {
+		mux.HandleFunc("GET /v1/mcp/servers", mcpH.handleListServers)
+		mux.HandleFunc("POST /v1/mcp/servers/{name}/auth", mcpH.handleServerAuth)
+		mux.HandleFunc("POST /v1/mcp/servers/{name}/disable", mcpH.handleServerDisable)
+		mux.HandleFunc("POST /v1/mcp/servers/{name}/enable", mcpH.handleServerEnable)
 	}
 	return mux
 }

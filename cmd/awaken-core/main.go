@@ -8,6 +8,7 @@ import (
 
 	"awaken/src/agentcore"
 	"awaken/src/llm"
+	"awaken/src/mcpclient"
 	"awaken/src/runtime"
 	"awaken/src/server"
 	_ "awaken/src/tools"
@@ -22,6 +23,8 @@ func main() {
 	cfg := llm.LoadConfig()
 	defaultWorkspace := resolveDefaultWorkspace()
 	infoProvider := server.NewLLMRuntimeInfoProvider(cfg.Model, cfg.BaseURL, cfg.APIKey, defaultWorkspace, string(llm.ResolveProtocol(cfg)))
+
+	manager := buildMCPManager(defaultWorkspace)
 
 	runService := runtime.NewRunService(
 		func(workspace runtime.WorkspaceConfig, threadID string) *agentcore.Agent {
@@ -52,11 +55,37 @@ func main() {
 
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: server.NewRouter(runService, infoProvider),
+		Handler: server.NewRouterWithMCP(runService, infoProvider, manager),
 	}
 
 	log.Printf("awaken-core listening on http://%s", addr)
 	log.Fatal(srv.ListenAndServe())
+}
+
+// buildMCPManager loads project and user MCP configs, merges them, and
+// starts the manager. Failures are logged but never fatal — the runtime
+// stays up even if no MCP server is configured.
+func buildMCPManager(workspace string) *mcpclient.Manager {
+	userCfg, err := mcpclient.LoadUserConfig()
+	if err != nil {
+		log.Printf("[mcp] user config load failed: %v", err)
+	}
+	projectCfg, err := mcpclient.LoadProjectConfig(workspace)
+	if err != nil {
+		log.Printf("[mcp] project config load failed: %v", err)
+	}
+	merged := mcpclient.MergeScoped(
+		mcpclient.ToScoped(userCfg, mcpclient.ScopeUser),
+		mcpclient.ToScoped(projectCfg, mcpclient.ScopeProject),
+		nil,
+		mcpclient.StdLogger{},
+	)
+	if len(merged) == 0 {
+		return nil
+	}
+	manager := mcpclient.NewManager(mcpclient.WithLogger(mcpclient.StdLogger{}))
+	go manager.Start(context.Background(), merged)
+	return manager
 }
 
 func resolveDefaultWorkspace() string {

@@ -260,12 +260,6 @@ func (r *SkillRegistry) UnregisterSkillsByPrefix(prefix string) {
 			delete(r.skills, id)
 		}
 	}
-	// Also clean shadowed entries.
-	for id := range r.skills {
-		if strings.HasPrefix(id, prefix) {
-			delete(r.skills, id)
-		}
-	}
 	r.fireOnChangeLocked()
 }
 

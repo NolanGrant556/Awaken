@@ -54,6 +54,7 @@ func newRouterInternal(runService *awruntime.RunService, infoProvider RuntimeInf
 		mux.HandleFunc("GET /v1/runs/{run_id}/events", handlers.handleRunEvents)
 		mux.HandleFunc("POST /v1/runs/{run_id}/cancel", handlers.handleCancelRun)
 		mux.HandleFunc("POST /v1/runs/{run_id}/approvals/{approval_id}/resolve", handlers.handleResolveApproval)
+			mux.HandleFunc("GET /v1/runs/{run_id}/audit", handlers.handleGetRunAudit)
 	}
 	mcpH := mcpHandlers{manager: manager}
 	mux.HandleFunc("GET /v1/mcp/tools", mcpH.handleListTools)
@@ -72,7 +73,7 @@ func newRouterInternal(runService *awruntime.RunService, infoProvider RuntimeInf
 	}
 	skillH := skillHandlers{registry: skillRegistry}
 	mux.HandleFunc("GET /v1/skills", skillH.handleListSkills)
-	mux.HandleFunc("POST /v1/skills/{id}/execute", skillH.handleExecuteSkill)
+	// POST /v1/skills/{id}/execute reserved for follow-up
 	return mux
 }
 

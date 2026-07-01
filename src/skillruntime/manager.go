@@ -1,6 +1,8 @@
 package skillruntime
 
 import (
+	"context"
+
 	"awaken/src/skills"
 	"awaken/src/tool"
 )
@@ -83,6 +85,14 @@ func (m *Manager) refreshTools() {
 			Executor:  executor,
 			AllowFork: def.Context == skills.ContextFork,
 		}
+			if def.BodyFetcher != nil && def.McpBinding != nil {
+				fetcher := def.BodyFetcher
+				serverName := def.McpBinding.ServerName
+				promptName := def.McpBinding.PromptName
+				st.FetchBody = func(ctx context.Context) (string, error) {
+					return fetcher.FetchPromptBody(ctx, serverName, promptName)
+				}
+			}
 
 		if err := tool.RegisterToolForce(st); err != nil {
 			m.logger.Warnf("failed to register skill tool %q: %v", toolName, err)

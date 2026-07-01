@@ -37,7 +37,7 @@ type Request struct {
 	MaxTokens    int
 	Stream       bool
 	Messages     []context.Message
-	Tools        []tool.ToolDefinition
+	Tools        []tool.ToolSchema
 }
 
 // Response 是统一响应结构

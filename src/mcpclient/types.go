@@ -106,3 +106,22 @@ type ToolNotFoundError struct {
 func (e *ToolNotFoundError) Error() string {
 	return "tool not found: " + e.ToolName
 }
+
+// ServerEventType labels the kind of lifecycle event emitted by the manager.
+type ServerEventType string
+
+const (
+	EventConnected          ServerEventType = "Connected"
+	EventDisconnected       ServerEventType = "Disconnected"
+	EventDisabled           ServerEventType = "Disabled"
+	EventPromptsListChanged ServerEventType = "PromptsListChanged"
+	EventResourcesListChanged ServerEventType = "ResourcesListChanged"
+)
+
+// ServerEvent is emitted by Manager.Subscribe to notify subscribers of
+// server state changes. The channel is non-blocking-buffered; slow
+// subscribers may miss events.
+type ServerEvent struct {
+	Type       ServerEventType
+	ServerName string
+}

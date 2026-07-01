@@ -25,6 +25,19 @@ func ParseFrontmatter(raw string) (*SkillDefinition, error) {
 	return &def, nil
 }
 
+// reservedMcpPrefix is the namespace reserved for MCP-bridged skills.
+// Local SKILL.md files must not declare a name starting with this prefix.
+const reservedMcpPrefix = "mcp__"
+
+// ValidateNameReserved checks whether the given name starts with the
+// reserved mcp__ prefix. Returns an error message if it does.
+func ValidateNameReserved(name string) error {
+	if strings.HasPrefix(name, reservedMcpPrefix) {
+		return fmt.Errorf("skill name %q starts with reserved prefix %q", name, reservedMcpPrefix)
+	}
+	return nil
+}
+
 // ValidateSchema checks required fields and type constraints on a parsed
 // SkillDefinition. Returns nil when the definition is usable.
 func ValidateSchema(def *SkillDefinition) error {

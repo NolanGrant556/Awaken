@@ -44,7 +44,7 @@ type Context struct {
 	messages    []Message
 	maxMessages int
 	maxTokens   int
-	tools       []tool.ToolDefinition
+	tools       []tool.ToolSchema
 }
 
 type Option func(*Context)
@@ -61,7 +61,7 @@ func WithMaxTokens(max int) Option {
 	}
 }
 
-func WithTools(tools []tool.ToolDefinition) Option {
+func WithTools(tools []tool.ToolSchema) Option {
 	return func(c *Context) {
 		c.tools = tools
 	}
@@ -72,7 +72,7 @@ func New(opts ...Option) *Context {
 		messages:    []Message{},
 		maxMessages: 100,
 		maxTokens:   32000,
-		tools:       []tool.ToolDefinition{},
+		tools:       []tool.ToolSchema{},
 	}
 
 	for _, opt := range opts {
@@ -142,7 +142,7 @@ func (c *Context) GetMessages() []Message {
 	return result
 }
 
-func (c *Context) GetTools() []tool.ToolDefinition {
+func (c *Context) GetTools() []tool.ToolSchema {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.tools
@@ -250,7 +250,7 @@ type Conversation struct {
 	Metadata  map[string]interface{}
 }
 
-func NewConversation(tools []tool.ToolDefinition) *Conversation {
+func NewConversation(tools []tool.ToolSchema) *Conversation {
 	return &Conversation{
 		Context:   New(WithTools(tools)),
 		CreatedAt: time.Now(),

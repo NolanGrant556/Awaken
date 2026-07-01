@@ -2,10 +2,61 @@ package tool
 
 import "context"
 
+// ToolSource identifies the origin of a tool.
+type ToolSource string
+
+const (
+	SourceBuiltin   ToolSource = "builtin"
+	SourceMCP       ToolSource = "mcp"
+	SourceConnector ToolSource = "connector"
+	SourceSkill     ToolSource = "skill"
+	SourcePlugin    ToolSource = "plugin"
+)
+
+// ToolAnnotations carries the behavioural hints every tool must declare.
+type ToolAnnotations struct {
+	ReadOnly     bool
+	Destructive  bool
+	OpenWorld    bool
+	RequiresAuth bool
+	ServerName   string
+	ToolName     string
+}
+
+// RiskHints summarises the risk profile of a tool invocation.
+type RiskHints struct {
+	Destructive     bool
+	OpenWorld       bool
+	RequiresAuth    bool
+	AffectedSystems []string
+}
+
+// PermissionPolicy defines the default permission posture for a tool.
+type PermissionPolicy string
+
+const (
+	PolicyAlwaysAllow PermissionPolicy = "always_allow"
+	PolicyAlwaysAsk   PermissionPolicy = "always_ask"
+	PolicyPerSession  PermissionPolicy = "per_session"
+	PolicyOneTime     PermissionPolicy = "one_time"
+)
+
+// ToolDefinition is the canonical metadata block for any registered tool.
+type ToolDefinition struct {
+	Name        string
+	DisplayName string
+	Source      ToolSource
+	Description string
+	Annotations ToolAnnotations
+	// Policy is the default permission posture; empty means "use global default".
+	Policy PermissionPolicy
+}
+
 type Tool interface {
 	Name() string
 	Description() string
 	Parameters() []ToolParameter
+	Definition() ToolDefinition
 	Execute(ctx context.Context, input string) (string, error)
 }
 

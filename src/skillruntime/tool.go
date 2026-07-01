@@ -96,6 +96,17 @@ func (st *SkillTool) IsReadOnly() bool { return true }
 // can identify skill-derived tools in the unified tool list.
 func (st *SkillTool) IsSkillTool() bool { return true }
 
+// Definition implements tool.Tool.
+func (st *SkillTool) Definition() tool.ToolDefinition {
+	return tool.ToolDefinition{
+		Name:        st.NameStr,
+		DisplayName: st.SkillID,
+		Source:      tool.SourceSkill,
+		Description: st.Description(),
+		Annotations: tool.ToolAnnotations{ReadOnly: true, Destructive: false, OpenWorld: false},
+	}
+}
+
 // SkillToolName builds the namespaced tool name for a skill ID.
 // Hyphens in the skill ID are converted to underscores so the result
 // satisfies the tool registry's name pattern.

@@ -8,23 +8,27 @@ import (
 
 // SkillRegistry manages the lifecycle of all discovered skills. It merges
 // skills from bundled, user, and project sources, tracks availability
-// based on connector presence, and exposes a stable snapshot for consumers.
+// based on connector presence and MCP server state, and exposes a stable
+// snapshot for consumers.
 type SkillRegistry struct {
 	mu         sync.RWMutex
 	skills     map[string]*SkillDefinition
 	logger     Logger
 	onChange   func()
 	connectors map[string]bool // available connector names
+	mcpServers map[string]bool // available MCP server names
 }
 
 // Logger is the minimal logging surface consumed by the skills package.
 type Logger interface {
+	Debugf(format string, args ...any)
 	Warnf(format string, args ...any)
 }
 
 type noopLogger struct{}
 
-func (noopLogger) Warnf(string, ...any) {}
+func (noopLogger) Debugf(string, ...any) {}
+func (noopLogger) Warnf(string, ...any)  {}
 
 // NewSkillRegistry creates a registry with the given logger. If logger is
 // nil, warnings are silently discarded.
@@ -36,6 +40,7 @@ func NewSkillRegistry(logger Logger) *SkillRegistry {
 		skills:     make(map[string]*SkillDefinition),
 		logger:     logger,
 		connectors: make(map[string]bool),
+		mcpServers: make(map[string]bool),
 	}
 }
 
@@ -98,8 +103,24 @@ func (r *SkillRegistry) SetConnectorAvailable(name string, available bool) {
 	r.fireOnChangeLocked()
 }
 
+// SetMcpServerAvailable updates the availability status of a single MCP
+// server and re-evaluates all skills that depend on it. Called by the MCP
+// bridge when a server transitions between connected and other states.
+func (r *SkillRegistry) SetMcpServerAvailable(name string, available bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if available {
+		r.mcpServers[name] = true
+	} else {
+		delete(r.mcpServers, name)
+	}
+	r.reevaluateAvailabilityLocked()
+	r.fireOnChangeLocked()
+}
+
 // reevaluateAvailabilityLocked recalculates State for every skill based on
-// current connector availability. Must be called with mu held.
+// current connector and MCP server availability. Must be called with mu held.
 func (r *SkillRegistry) reevaluateAvailabilityLocked() {
 	for id, def := range r.skills {
 		// Don't touch shadowed entries.
@@ -109,15 +130,23 @@ func (r *SkillRegistry) reevaluateAvailabilityLocked() {
 		if strings.HasSuffix(id, "__shadowed") {
 			continue
 		}
-		if len(def.RequiredConnectors) == 0 {
+		if len(def.RequiredConnectors) == 0 && len(def.RequiredMcpServers) == 0 {
 			def.State = StateAvailable
 			def.UnavailableReason = ""
 			continue
 		}
-		missing := r.missingConnectorsLocked(def.RequiredConnectors)
-		if len(missing) > 0 {
+		var reasons []string
+		missingConn := r.missingConnectorsLocked(def.RequiredConnectors)
+		if len(missingConn) > 0 {
+			reasons = append(reasons, "missing connectors: "+stringsJoin(missingConn, ", "))
+		}
+		missingMcp := r.missingMcpServersLocked(def.RequiredMcpServers)
+		if len(missingMcp) > 0 {
+			reasons = append(reasons, "missing mcp servers: "+stringsJoin(missingMcp, ", "))
+		}
+		if len(reasons) > 0 {
 			def.State = StateUnavailable
-			def.UnavailableReason = "missing connectors: " + stringsJoin(missing, ", ")
+			def.UnavailableReason = stringsJoin(reasons, "; ")
 		} else {
 			def.State = StateAvailable
 			def.UnavailableReason = ""
@@ -129,6 +158,16 @@ func (r *SkillRegistry) missingConnectorsLocked(required []string) []string {
 	var missing []string
 	for _, name := range required {
 		if !r.connectors[name] {
+			missing = append(missing, name)
+		}
+	}
+	return missing
+}
+
+func (r *SkillRegistry) missingMcpServersLocked(required []string) []string {
+	var missing []string
+	for _, name := range required {
+		if !r.mcpServers[name] {
 			missing = append(missing, name)
 		}
 	}
@@ -177,6 +216,57 @@ func (r *SkillRegistry) Get(id string) *SkillDefinition {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.skills[id]
+}
+
+// RegisterSkill adds or replaces a single skill in the registry. Used by
+// the MCP bridge to idempotently reconcile bridged skills.
+func (r *SkillRegistry) RegisterSkill(def *SkillDefinition) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if def == nil || def.ID == "" {
+		return
+	}
+
+	// Clear shadowed marker for this ID before inserting.
+	delete(r.skills, def.ID)
+	delete(r.skills, def.ID+"__shadowed")
+
+	r.skills[def.ID] = shallowCopy(def)
+	r.reevaluateAvailabilityLocked()
+	r.fireOnChangeLocked()
+}
+
+// UnregisterSkill removes a single skill by ID. Used by the MCP bridge
+// when a server disconnects or is disabled.
+func (r *SkillRegistry) UnregisterSkill(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	delete(r.skills, id)
+	delete(r.skills, id+"__shadowed")
+	r.fireOnChangeLocked()
+}
+
+// UnregisterSkillsByPrefix removes all skills whose ID starts with the
+// given prefix. Used by the MCP bridge to clean up mcp__{server}__* skills
+// in a single call.
+func (r *SkillRegistry) UnregisterSkillsByPrefix(prefix string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for id := range r.skills {
+		if strings.HasPrefix(id, prefix) {
+			delete(r.skills, id)
+		}
+	}
+	// Also clean shadowed entries.
+	for id := range r.skills {
+		if strings.HasPrefix(id, prefix) {
+			delete(r.skills, id)
+		}
+	}
+	r.fireOnChangeLocked()
 }
 
 // FireOnChange manually triggers the registered onChange callback.

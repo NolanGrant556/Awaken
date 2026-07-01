@@ -13,16 +13,25 @@ type skillHandlers struct {
 
 // skillInfo is the wire shape for entries returned by GET /v1/skills.
 type skillInfo struct {
-	ID                string `json:"id"`
-	Name              string `json:"name"`
-	DisplayName       string `json:"displayName,omitempty"`
-	Description       string `json:"description"`
-	WhenToUse         string `json:"whenToUse,omitempty"`
-	State             string `json:"state"`
-	UnavailableReason string `json:"unavailableReason,omitempty"`
-	SourceOrigin      string `json:"sourceOrigin"`
-	Context           string `json:"context"`
-	ShadowedBy        string `json:"shadowedBy,omitempty"`
+	ID                 string                 `json:"id"`
+	Name               string                 `json:"name"`
+	DisplayName        string                 `json:"displayName,omitempty"`
+	Description        string                 `json:"description"`
+	WhenToUse          string                 `json:"whenToUse,omitempty"`
+	State              string                 `json:"state"`
+	UnavailableReason  string                 `json:"unavailableReason,omitempty"`
+	SourceOrigin       string                 `json:"sourceOrigin"`
+	Context            string                 `json:"context"`
+	ShadowedBy         string                 `json:"shadowedBy,omitempty"`
+	McpBinding         *mcpBindingInfo        `json:"mcpBinding,omitempty"`
+	RequiredMcpServers []string               `json:"requiredMcpServers,omitempty"`
+}
+
+// mcpBindingInfo is the wire shape for the MCP binding field.
+type mcpBindingInfo struct {
+	ServerName string `json:"serverName"`
+	PromptName string `json:"promptName"`
+	Kind       string `json:"kind"`
 }
 
 func (h skillHandlers) handleListSkills(w http.ResponseWriter, r *http.Request) {
@@ -33,18 +42,27 @@ func (h skillHandlers) handleListSkills(w http.ResponseWriter, r *http.Request) 
 	all := h.registry.ListAll()
 	out := make([]skillInfo, 0, len(all))
 	for _, def := range all {
-		out = append(out, skillInfo{
-			ID:                def.ID,
-			Name:              def.Name,
-			DisplayName:       def.DisplayName,
-			Description:       def.Description,
-			WhenToUse:         def.WhenToUse,
-			State:             string(def.State),
-			UnavailableReason: def.UnavailableReason,
-			SourceOrigin:      string(def.Source),
-			Context:           string(def.Context),
-			ShadowedBy:        def.ShadowedBy,
-		})
+		info := skillInfo{
+			ID:                 def.ID,
+			Name:               def.Name,
+			DisplayName:        def.DisplayName,
+			Description:        def.Description,
+			WhenToUse:          def.WhenToUse,
+			State:              string(def.State),
+			UnavailableReason:  def.UnavailableReason,
+			SourceOrigin:       string(def.Source),
+			Context:            string(def.Context),
+			ShadowedBy:         def.ShadowedBy,
+			RequiredMcpServers: def.RequiredMcpServers,
+		}
+		if def.McpBinding != nil {
+			info.McpBinding = &mcpBindingInfo{
+				ServerName: def.McpBinding.ServerName,
+				PromptName: def.McpBinding.PromptName,
+				Kind:       def.McpBinding.Kind,
+			}
+		}
+		out = append(out, info)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -76,15 +94,24 @@ func (h skillHandlers) handleExecuteSkill(w http.ResponseWriter, r *http.Request
 
 	// For now, return the skill definition as a preview. Full execution
 	// integration with the runtime will come in a follow-up change.
-	writeJSON(w, http.StatusOK, skillInfo{
-		ID:                def.ID,
-		Name:              def.Name,
-		DisplayName:       def.DisplayName,
-		Description:       def.Description,
-		WhenToUse:         def.WhenToUse,
-		State:             string(def.State),
-		UnavailableReason: def.UnavailableReason,
-		SourceOrigin:      string(def.Source),
-		Context:           string(def.Context),
-	})
+	info := skillInfo{
+		ID:                 def.ID,
+		Name:               def.Name,
+		DisplayName:        def.DisplayName,
+		Description:        def.Description,
+		WhenToUse:          def.WhenToUse,
+		State:              string(def.State),
+		UnavailableReason:  def.UnavailableReason,
+		SourceOrigin:       string(def.Source),
+		Context:            string(def.Context),
+		RequiredMcpServers: def.RequiredMcpServers,
+	}
+	if def.McpBinding != nil {
+		info.McpBinding = &mcpBindingInfo{
+			ServerName: def.McpBinding.ServerName,
+			PromptName: def.McpBinding.PromptName,
+			Kind:       def.McpBinding.Kind,
+		}
+	}
+	writeJSON(w, http.StatusOK, info)
 }

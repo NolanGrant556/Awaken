@@ -57,6 +57,7 @@ func newRouterInternal(runService *awruntime.RunService, infoProvider RuntimeInf
 	}
 	mcpH := mcpHandlers{manager: manager}
 	mux.HandleFunc("GET /v1/mcp/tools", mcpH.handleListTools)
+	mux.HandleFunc("GET /v1/tools", handleListTools)
 	if manager != nil {
 		mux.HandleFunc("GET /v1/mcp/servers", mcpH.handleListServers)
 		mux.HandleFunc("POST /v1/mcp/servers/{name}/auth", mcpH.handleServerAuth)

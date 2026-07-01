@@ -13,7 +13,7 @@ func TestRequestBuilderBuildsCompleteRequest(t *testing.T) {
 	ctx := convcontext.New()
 	ctx.AddUserMessage("hello")
 
-	tools := []tool.ToolDefinition{
+	tools := []tool.ToolSchema{
 		{
 			Type: "function",
 			Function: tool.ToolFunctionSchema{

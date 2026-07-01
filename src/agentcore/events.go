@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sync/atomic"
 	"time"
+
+	"awaken/src/tool"
 )
 
 type AwakenEventType string
@@ -91,6 +93,14 @@ type AwakenEvent struct {
 	ArtifactPath          string
 	ArtifactContent       string
 	ArtifactStatus        ArtifactStatus
+	// ToolProgress fields
+	ToolProgressStage      string
+	ToolProgressMessage    string
+	ToolProgressPercentage int
+	// ToolDefinition carried on approval events
+	ToolDefinition tool.ToolDefinition
+	// Risk hints carried on approval events
+	RiskHints *tool.RiskHints
 }
 
 var awakenIDCounter uint64

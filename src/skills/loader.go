@@ -65,6 +65,13 @@ func LoadDir(dir string, source SourceOrigin) map[string]*SkillDefinition {
 		def.FilePath = path
 		def.State = StateAvailable
 
+		if err := ValidateNameReserved(def.Name); err != nil {
+			def.State = StateUnavailable
+			def.UnavailableReason = err.Error()
+			result[id] = def
+			continue
+		}
+
 		if err := ValidateSchema(def); err != nil {
 			def.State = StateUnavailable
 			def.UnavailableReason = err.Error()
@@ -124,5 +131,10 @@ func shallowCopy(def *SkillDefinition) *SkillDefinition {
 	c.Arguments = append([]SkillArgument(nil), def.Arguments...)
 	c.AllowedTools = append([]string(nil), def.AllowedTools...)
 	c.RequiredConnectors = append([]string(nil), def.RequiredConnectors...)
+	c.RequiredMcpServers = append([]string(nil), def.RequiredMcpServers...)
+	if def.McpBinding != nil {
+		mb := *def.McpBinding
+		c.McpBinding = &mb
+	}
 	return &c
 }

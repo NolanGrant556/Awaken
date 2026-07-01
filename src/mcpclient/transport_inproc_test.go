@@ -56,7 +56,7 @@ func TestInProcTransportHandshake(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	session, capability, err := connectAndInitialize(ctx, transport, &mcp.Implementation{Name: "test", Version: "v0"}, nil)
+	session, capability, err := connectAndInitialize(ctx, transport, &mcp.Implementation{Name: "test", Version: "v0"}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestInProcTransportCallTool(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	session, _, err := connectAndInitialize(ctx, transport, &mcp.Implementation{Name: "test", Version: "v0"}, nil)
+	session, _, err := connectAndInitialize(ctx, transport, &mcp.Implementation{Name: "test", Version: "v0"}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestInProcTransportPanicRecovery(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_, _, err = connectAndInitialize(ctx, transport, &mcp.Implementation{Name: "test", Version: "v0"}, nil)
+	_, _, err = connectAndInitialize(ctx, transport, &mcp.Implementation{Name: "test", Version: "v0"}, nil, nil, nil)
 	// The connect should fail or the session should terminate; either way
 	// the test process must survive.
 	_ = err

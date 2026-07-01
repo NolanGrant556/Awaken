@@ -23,6 +23,16 @@ func (t catalogTestTool) Description() string {
 	return "test tool"
 }
 
+func (t catalogTestTool) Definition() ToolDefinition {
+	return ToolDefinition{
+		Name:        t.name,
+		DisplayName: t.name,
+		Source:      SourceBuiltin,
+		Description: "test tool",
+		Annotations: ToolAnnotations{ReadOnly: false, Destructive: false, OpenWorld: false},
+	}
+}
+
 func (t catalogTestTool) Parameters() []ToolParameter {
 	if t.paramName == "" {
 		return nil

@@ -50,6 +50,16 @@ func (t *FileReadTool) IsReadOnly() bool {
 	return true
 }
 
+func (t *FileReadTool) Definition() tool.ToolDefinition {
+	return tool.ToolDefinition{
+		Name:        "read_file",
+		DisplayName: "Read File",
+		Source:      tool.SourceBuiltin,
+		Description: "用于读取指定文件的内容",
+		Annotations: tool.ToolAnnotations{ReadOnly: true, Destructive: false, OpenWorld: false},
+	}
+}
+
 func (t *FileReadTool) CheckPermission(ctx context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {
 	params, err := parseParams(input)
 	if err != nil {

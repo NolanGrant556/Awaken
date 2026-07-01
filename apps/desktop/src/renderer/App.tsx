@@ -17,7 +17,6 @@ import {
   PanelRightClose,
   PanelRightOpen,
   SlidersHorizontal,
-  Terminal,
 } from "lucide-react";
 import {
   AwakenAppShell as AppShell,
@@ -156,7 +155,7 @@ function sidebarStatusForThread(
 function defaultInspectorTab(selection?: InspectorSelection): InspectorTabId {
   switch (selection?.kind) {
     case "tool":
-      return "terminal";
+      return "files";
     case "artifact":
     case "fileChange":
     case "approval":
@@ -180,39 +179,6 @@ function rawFileChangeId(selectionId: string): string {
   return selectionId.startsWith("fileChange:")
     ? selectionId.slice("fileChange:".length)
     : selectionId;
-}
-
-const terminalReasonLabels: Record<string, string> = {
-  max_turns: "达到最大思考次数，未能完成任务",
-  completed: "任务已完成",
-  cancelled: "运行已取消",
-  aborted_streaming: "模型输出中断，运行已停止",
-  aborted_tools: "工具执行中断，运行已停止",
-  context_blocked: "上下文已超过可处理范围",
-  prompt_too_long: "提示词过长，模型未能继续",
-  model_error: "模型请求失败",
-  tool_pairing_error: "工具结果配对异常，运行已停止",
-  empty_response: "模型没有返回内容",
-  tool_policy_abort: "工具权限策略终止了执行",
-  max_output_reached: "模型输出达到上限，未能继续",
-  error: "运行失败",
-};
-
-function hasChineseText(value?: string): boolean {
-  return /[\u4e00-\u9fff]/.test(value ?? "");
-}
-
-function terminalReasonText(reason?: string, message?: string): string | undefined {
-  if (reason === "max_turns" || message?.includes("达到最大思考次数")) {
-    return terminalReasonLabels.max_turns;
-  }
-  if (reason && terminalReasonLabels[reason]) {
-    return terminalReasonLabels[reason];
-  }
-  if (hasChineseText(message)) {
-    return message;
-  }
-  return reason || message ? "运行已停止" : undefined;
 }
 
 function formatTokenCount(value?: number): string | undefined {
@@ -750,11 +716,6 @@ export function App() {
       id: "browser" as const,
       label: "Browser",
       icon: <Globe size={16} strokeWidth={1.85} />,
-    },
-    {
-      id: "terminal" as const,
-      label: "Terminal",
-      icon: <Terminal size={16} strokeWidth={1.85} />,
     },
     {
       id: "files" as const,
@@ -1766,22 +1727,6 @@ export function App() {
     );
   }
 
-  function renderRunStateArticle() {
-    const summary = runtimeState.inspectorSummary;
-    const reason = terminalReasonText(summary.terminalReason, summary.terminalMessage);
-    if (!reason) {
-      return null;
-    }
-
-    return (
-      <article className="inspector-item inspector-item-selected">
-        <strong>运行状态</strong>
-        <span>已停止</span>
-        <p>{reason}</p>
-      </article>
-    );
-  }
-
   function renderChangesPane() {
     return null;
   }
@@ -1830,16 +1775,6 @@ export function App() {
     switch (inspectorTab) {
       case "browser":
         return renderBrowserPane();
-      case "terminal":
-        return (
-          <section className="inspector-section">
-            <div className="inspector-section-head">
-              <h2>Terminal</h2>
-              <span>state</span>
-            </div>
-            {renderRunStateArticle()}
-          </section>
-        );
       case "files":
         return renderFilesPane();
       case "changes":

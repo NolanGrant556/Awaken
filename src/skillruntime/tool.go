@@ -24,6 +24,10 @@ type SkillTool struct {
 	ArgDefs     []SkillArgDef
 	Executor    SkillExecutor
 	AllowFork   bool
+	// FetchBody is called to obtain the prompt template body at execution
+	// time. Set for MCP-bridged skills whose Body is empty at registration
+	// time (prompts/list only returns metadata, not the template).
+	FetchBody func(ctx context.Context) (string, error)
 }
 
 // SkillExecutor executes a skill body (after argument substitution) and
@@ -68,15 +72,24 @@ func (st *SkillTool) Parameters() []tool.ToolParameter {
 	return params
 }
 
-// Execute implements tool.Tool. Parses JSON input, substitutes arguments
-// into the skill body, and delegates to the executor.
+// Execute implements tool.Tool. Parses JSON input, fetches the prompt body
+// for MCP-bridged skills, substitutes arguments, and delegates to the executor.
 func (st *SkillTool) Execute(ctx context.Context, input string) (string, error) {
 	args, err := parseSkillArgs(input, st.ArgDefs)
 	if err != nil {
 		return "", fmt.Errorf("skill %q parse args: %w", st.SkillID, err)
 	}
 
-	body, err := SubstituteArgs(st.Body, st.SkillID, st.ArgDefs, args)
+	body := st.Body
+	if st.FetchBody != nil {
+		var err error
+		body, err = st.FetchBody(ctx)
+		if err != nil {
+			return "", err
+		}
+	}
+
+	body, err = SubstituteArgs(body, st.SkillID, st.ArgDefs, args)
 	if err != nil {
 		return "", err
 	}
@@ -98,12 +111,18 @@ func (st *SkillTool) IsSkillTool() bool { return true }
 
 // Definition implements tool.Tool.
 func (st *SkillTool) Definition() tool.ToolDefinition {
+	requiresAuth := st.FetchBody != nil
 	return tool.ToolDefinition{
 		Name:        st.NameStr,
 		DisplayName: st.SkillID,
 		Source:      tool.SourceSkill,
 		Description: st.Description(),
-		Annotations: tool.ToolAnnotations{ReadOnly: true, Destructive: false, OpenWorld: false},
+		Annotations: tool.ToolAnnotations{
+			ReadOnly:     true,
+			Destructive:  false,
+			OpenWorld:    false,
+			RequiresAuth: requiresAuth,
+		},
 	}
 }
 

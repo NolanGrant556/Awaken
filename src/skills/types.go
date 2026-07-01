@@ -1,5 +1,7 @@
 package skills
 
+import "context"
+
 // SourceOrigin labels where a skill definition came from.
 type SourceOrigin string
 
@@ -99,6 +101,11 @@ type SkillDefinition struct {
 	// purely local Skills.
 	McpBinding *McpBinding `yaml:"mcpBinding,omitempty"`
 
+	// BodyFetcher is set by the bridge for MCP-sourced skills. When
+	// non-nil, the skill executor calls it at execution time to fetch
+	// the actual prompt body from the MCP server.
+	BodyFetcher McpBodyFetcher `yaml:"-"`
+
 	// Body is the Markdown content after the frontmatter.
 	Body string `yaml:"-"`
 
@@ -134,6 +141,13 @@ type SkillArgument struct {
 // SkillHooks holds optional lifecycle callbacks.
 type SkillHooks struct {
 	PostExecute string `yaml:"postExecute,omitempty"`
+}
+
+// McpBodyFetcher is implemented by the bridge to fetch prompt body at
+// execution time. MCP prompts/list only returns names and descriptions;
+// the actual prompt template must be fetched via prompts/get.
+type McpBodyFetcher interface {
+	FetchPromptBody(ctx context.Context, serverName, promptName string) (string, error)
 }
 
 // McpBinding identifies the MCP prompt or resource that was bridged into

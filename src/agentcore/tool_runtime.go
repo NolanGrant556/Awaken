@@ -18,10 +18,16 @@ const maxPatchPreviewChars = 50000
 type ToolRuntime struct {
 	sink              EventSink
 	permissionContext tool.PermissionContext
+	serverConnected   func(serverName string) bool
+	auditSink         tool.AuditSink
+	runID             string
 }
 
 type ToolRuntimeConfig struct {
 	PermissionContext tool.PermissionContext
+	ServerConnected   func(serverName string) bool
+	AuditSink         tool.AuditSink
+	RunID             string
 }
 
 type ToolExecutionResult struct {
@@ -38,9 +44,16 @@ func NewToolRuntime(sink EventSink) *ToolRuntime {
 }
 
 func NewToolRuntimeWithConfig(sink EventSink, config ToolRuntimeConfig) *ToolRuntime {
+	auditSink := config.AuditSink
+	if auditSink == nil {
+		auditSink = &tool.NoopSink{}
+	}
 	return &ToolRuntime{
 		sink:              normalizeEventSink(sink),
 		permissionContext: config.PermissionContext.Normalize(),
+		serverConnected:   config.ServerConnected,
+		auditSink:         auditSink,
+		runID:             config.RunID,
 	}
 }
 
@@ -71,6 +84,7 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 
 	toolCtx := tool.ContextWithPermissionContext(ctx, rt.permissionContext)
 	permission := rt.decideToolPermission(toolCtx, selectedTool, input)
+	def := selectedTool.Definition()
 	rt.emitPatchPreview(result, selectedTool, input)
 	switch permission.Behavior {
 	case tool.PermissionAllow:
@@ -79,26 +93,31 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		// a regular error; the tool is never invoked.
 		if permission.Reason == "needs_auth" {
 			rt.emitToolProgress(result, "needs_auth", "tool requires authentication", 0)
+			rt.writeAudit(def, result, permission, "deny", "needs_auth", "")
 			result.Content = "工具需要认证: " + firstNonEmpty(permission.Reason, "needs_auth")
 			result.IsError = true
 			return finalizeToolResult(result)
 		}
+		rt.writeAudit(def, result, permission, "deny", "denied", "")
 		result.Content = fmt.Sprintf("工具权限拒绝: %s", firstNonEmpty(permission.Reason, "permission policy denied execution"))
 		result.IsError = true
 		return finalizeToolResult(result)
 	case tool.PermissionAsk:
 		decision, err := rt.awaitApproval(ctx, selectedTool, result, input, permission)
 		if err != nil {
+			rt.writeAudit(def, result, permission, "ask", "failed", err.Error())
 			result.Content = fmt.Sprintf("工具审批失败: %v", err)
 			result.IsError = true
 			return finalizeToolResult(result)
 		}
 		if decision == ApprovalDecisionRejected {
+			rt.writeAudit(def, result, permission, "ask", "denied", "")
 			result.Content = "工具执行已被审批拒绝"
 			result.IsError = true
 			return finalizeToolResult(result)
 		}
 	default:
+		rt.writeAudit(def, result, permission, "deny", "denied", "")
 		result.Content = fmt.Sprintf("工具权限拒绝: invalid permission decision %q", permission.Behavior)
 		result.IsError = true
 		return finalizeToolResult(result)
@@ -109,12 +128,14 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	output, err := rt.executeTool(toolCtx, result, selectedTool, input)
 	if err != nil {
 		rt.emitToolProgress(result, "failed", err.Error(), 0)
+		rt.writeAudit(def, result, permission, string(permission.Behavior), "failed", err.Error())
 		result.Content = fmt.Sprintf("工具执行失败: %v", err)
 		result.IsError = true
 		return finalizeToolResult(result)
 	}
 
 	rt.emitToolProgress(result, "completed", "", 100)
+	rt.writeAudit(def, result, permission, string(permission.Behavior), "success", "")
 	result.Content = output
 	result.ResultSummary = excerptString(strings.TrimSpace(output), 200)
 	rt.emitArtifacts(result, selectedTool, input, output)
@@ -162,7 +183,7 @@ func (rt *ToolRuntime) decideToolPermission(
 
 	// Fall back to annotations-based decision
 	def := selectedTool.Definition()
-	return tool.Decide(ctx, def)
+	return tool.DecideWithServerCheck(ctx, def, rt.serverConnected)
 }
 
 func (rt *ToolRuntime) awaitApproval(
@@ -245,6 +266,31 @@ func (rt *ToolRuntime) emitToolProgress(result ToolExecutionResult, stage, messa
 	})
 }
 
+func (rt *ToolRuntime) writeAudit(def tool.ToolDefinition, result ToolExecutionResult, permission tool.PermissionDecision, decision, outcome, errReason string) {
+	now := timeNowUTC()
+	origin := "system_policy"
+	if permission.Behavior == tool.PermissionAsk {
+		origin = "local_ui"
+	} else if permission.Behavior == tool.PermissionAllow {
+		origin = "auto_allow"
+	}
+	rt.auditSink.Write(tool.ToolAuditRecord{
+		ToolCallID:     result.ToolCallID,
+		RunID:          rt.runID,
+		ToolName:       result.Name,
+		Source:         def.Source,
+		Annotations:    def.Annotations,
+		Decision:       decision,
+		DecisionReason: permission.Reason,
+		ApprovalOrigin: origin,
+		StartedAt:      now,
+		CompletedAt:    now,
+		Outcome:        outcome,
+		ResultSummary:  result.ResultSummary,
+		ErrorReason:    errReason,
+	})
+}
+
 func (rt *ToolRuntime) emitPatchPreview(result ToolExecutionResult, selectedTool tool.Tool, input string) {
 	previewingTool, ok := selectedTool.(tool.PatchPreviewingTool)
 	if !ok {
@@ -295,6 +341,10 @@ func approvalRequestForPermission(
 	permission tool.PermissionDecision,
 ) ApprovalRequest {
 	def := selectedTool.Definition()
+	affectedSystems := []string{}
+	if def.Annotations.ServerName != "" {
+		affectedSystems = append(affectedSystems, def.Annotations.ServerName)
+	}
 	request := ApprovalRequest{
 		ID:             newAwakenID("approval"),
 		ToolCallID:     result.ToolCallID,
@@ -304,10 +354,12 @@ func approvalRequestForPermission(
 		RiskTone:       ApprovalRiskWarning,
 		ToolDefinition: def,
 		RiskHints: &tool.RiskHints{
-			Destructive:  def.Annotations.Destructive,
-			OpenWorld:    def.Annotations.OpenWorld,
-			RequiresAuth: def.Annotations.RequiresAuth,
+			Destructive:     def.Annotations.Destructive,
+			OpenWorld:       def.Annotations.OpenWorld,
+			RequiresAuth:    def.Annotations.RequiresAuth,
+			AffectedSystems: affectedSystems,
 		},
+		AllowedActions: []string{"approve", "reject", "edit_plan", "request_more_info"},
 	}
 
 	if describingTool, ok := selectedTool.(tool.ApprovalDescribingTool); ok {

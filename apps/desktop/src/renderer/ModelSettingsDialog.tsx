@@ -158,6 +158,7 @@ export function ModelSettingsDialog({
   const [draft, setDraft] = useState<DraftState | null>(null);
   const [saving, setSaving] = useState(false);
   const [savingConfigured, setSavingConfigured] = useState(false);
+  const [deletingProfileId, setDeletingProfileId] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -192,6 +193,7 @@ export function ModelSettingsDialog({
       setDraft(null);
       setActiveSection("configure");
       setShowApiKey(false);
+      setDeletingProfileId(null);
       return;
     }
     void loadModelSettings();
@@ -355,6 +357,34 @@ export function ModelSettingsDialog({
       setMessage(error instanceof Error ? error.message : "Failed to save configured models");
     } finally {
       setSavingConfigured(false);
+    }
+  }
+
+  async function deleteConfiguredProfile(profile: RuntimeModelProfileSummary): Promise<void> {
+    if (!window.confirm(`删除 ${profile.modelId} 的模型配置？`)) {
+      return;
+    }
+
+    setDeletingProfileId(profile.id);
+    setMessage(null);
+    try {
+      await runtimeClient.deleteModelProfile(profile.id);
+      setConfiguredDrafts((current) => {
+        const next = { ...current };
+        delete next[profile.id];
+        return next;
+      });
+      if (draft?.profileId === profile.id) {
+        setDraft(null);
+        setExpandedProviderId(null);
+      }
+      await loadModelSettings();
+      onProfilesChanged();
+      setMessage("模型配置已删除");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to delete model profile");
+    } finally {
+      setDeletingProfileId(null);
     }
   }
 
@@ -674,24 +704,38 @@ export function ModelSettingsDialog({
                           {contextCompressionValue(profileDraft.contextWindow)}
                         </span>
                         <div className="configured-models-actions">
+                          <div className="configured-models-save-actions">
+                            <Button
+                              variant="default"
+                              size="md"
+                              disabled={!configuredHasChanges || savingConfigured || Boolean(deletingProfileId)}
+                              onClick={resetConfiguredDrafts}
+                            >
+                              取消
+                            </Button>
+                            <Button
+                              variant="primary"
+                              size="md"
+                              loading={savingConfigured}
+                              disabled={!configuredHasChanges || Boolean(deletingProfileId)}
+                              onClick={() => {
+                                void saveConfiguredDrafts();
+                              }}
+                            >
+                              保存
+                            </Button>
+                          </div>
                           <Button
+                            className="configured-models-delete"
                             variant="default"
                             size="md"
-                            disabled={!configuredHasChanges || savingConfigured}
-                            onClick={resetConfiguredDrafts}
-                          >
-                            取消
-                          </Button>
-                          <Button
-                            variant="primary"
-                            size="md"
-                            loading={savingConfigured}
-                            disabled={!configuredHasChanges}
+                            loading={deletingProfileId === profile.id}
+                            disabled={savingConfigured || Boolean(deletingProfileId)}
                             onClick={() => {
-                              void saveConfiguredDrafts();
+                              void deleteConfiguredProfile(profile);
                             }}
                           >
-                            保存
+                            删除
                           </Button>
                         </div>
                       </div>

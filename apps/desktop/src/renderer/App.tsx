@@ -14,6 +14,7 @@ import {
   Monitor,
   PanelRightClose,
   PanelRightOpen,
+  Settings,
 } from "lucide-react";
 import {
   AwakenAppShell as AppShell,
@@ -45,7 +46,12 @@ import {
   type ProjectItem,
 } from "@awaken/design-system";
 import { createRuntimeClient, type SubscribeHandlers } from "./runtime/client";
-import type { RuntimeInfo, RuntimeRunStatus, StartRunRequest } from "../shared/runtime";
+import type {
+  RuntimeInfo,
+  RuntimeModelProfileSummary,
+  RuntimeRunStatus,
+  StartRunRequest,
+} from "../shared/runtime";
 import {
   createInitialRuntimeState,
   reduceRuntimeState,
@@ -197,6 +203,14 @@ function contextUsageMeta(
   return undefined;
 }
 
+function modelProfileLabel(profile: RuntimeModelProfileSummary): string {
+  return profile.modelId || profile.displayName;
+}
+
+function modelProfileIcon(profile: RuntimeModelProfileSummary): string {
+  return profile.displayName.trim().slice(0, 1) || "M";
+}
+
 function latestDoneAnswerId(items: RunNarrativeItem[]): string | undefined {
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const item = items[index];
@@ -306,6 +320,7 @@ export function App() {
   const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
   const [resolvedApproval, setResolvedApproval] = useState<ResolvedApprovalState>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
+  const [modelProfiles, setModelProfiles] = useState<RuntimeModelProfileSummary[]>([]);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
   const [workspacePath, setWorkspacePath] = useState<string>("");
   const [createProjectDialogOpen, setCreateProjectDialogOpen] = useState(false);
@@ -384,16 +399,22 @@ export function App() {
     async function poll(): Promise<void> {
       if (runtimeState.supervisorStatus !== "running") {
         setRuntimeInfo(null);
+        setModelProfiles([]);
         return;
       }
       try {
-        const info = await runtimeClient.getRuntimeInfo();
+        const [info, profiles] = await Promise.all([
+          runtimeClient.getRuntimeInfo(),
+          runtimeClient.listModelProfiles().catch(() => []),
+        ]);
         if (!cancelled) {
           setRuntimeInfo(info);
+          setModelProfiles(profiles);
         }
       } catch {
         if (!cancelled) {
           setRuntimeInfo(null);
+          setModelProfiles([]);
         }
       }
     }
@@ -510,12 +531,29 @@ export function App() {
   async function refreshRuntimeInfoNow(): Promise<void> {
     if (runtimeState.supervisorStatus !== "running") {
       setRuntimeInfo(null);
+      setModelProfiles([]);
       return;
     }
     try {
-      setRuntimeInfo(await runtimeClient.getRuntimeInfo());
+      const [info, profiles] = await Promise.all([
+        runtimeClient.getRuntimeInfo(),
+        runtimeClient.listModelProfiles().catch(() => []),
+      ]);
+      setRuntimeInfo(info);
+      setModelProfiles(profiles);
     } catch {
       setRuntimeInfo(null);
+      setModelProfiles([]);
+    }
+  }
+
+  async function handleSelectModelProfile(profileId: string): Promise<void> {
+    try {
+      setNotice(null);
+      await runtimeClient.setDefaultModelProfile(profileId);
+      await refreshRuntimeInfoNow();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to switch model");
     }
   }
 
@@ -598,13 +636,40 @@ export function App() {
     projectLabelById.get(selectedProjectId) ??
     (pathForSelectedProject ? workspaceLabelForPath(pathForSelectedProject) : "awaken");
   const contextMeta = contextUsageMeta(runtimeState.inspectorSummary.contextWindow);
+  const enabledModelProfiles = modelProfiles.filter((profile) => profile.enabled);
+  const selectedModelProfile =
+    enabledModelProfiles.find((profile) => profile.id === runtimeInfo?.modelProfile?.id) ??
+    enabledModelProfiles.find((profile) => profile.isDefault) ??
+    enabledModelProfiles[0];
+  const modelMetaItem: ComposerBarMetaItem =
+    enabledModelProfiles.length > 0 && selectedModelProfile
+      ? {
+          id: "model",
+          label: modelProfileLabel(selectedModelProfile),
+          menuItems: enabledModelProfiles.map((profile) => ({
+            id: profile.id,
+            label: modelProfileLabel(profile),
+            icon: modelProfileIcon(profile),
+            selected: profile.id === selectedModelProfile.id,
+            onSelect: () => {
+              if (profile.id !== selectedModelProfile.id) {
+                void handleSelectModelProfile(profile.id);
+              }
+            },
+          })),
+          menuFooterAction: {
+            label: "添加模型",
+            icon: <Settings size={16} strokeWidth={1.9} />,
+            onClick: () => setModelSettingsOpen(true),
+          },
+        }
+      : {
+          id: "model",
+          label: "请点击头像配置模型",
+          disabled: true,
+        };
   const composerMetaItems: ComposerBarMetaItem[] = [
-    {
-      id: "model",
-      label: runtimeInfo?.configuredModel || "Configure model",
-      value: runtimeInfo?.modelProfile?.displayName,
-      onClick: () => setModelSettingsOpen(true),
-    },
+    modelMetaItem,
     { id: "workspace", label: activeProjectLabel },
     ...(contextMeta ? [{ id: "context", ...contextMeta }] : []),
   ];

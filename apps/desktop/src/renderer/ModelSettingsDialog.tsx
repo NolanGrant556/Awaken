@@ -1,4 +1,4 @@
-import { type CSSProperties, useCallback, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   Eye,
@@ -162,6 +162,8 @@ export function ModelSettingsDialog({
   const [testing, setTesting] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
 
   const providerById = useMemo(() => {
     return new Map(providers.map((provider) => [provider.id, provider]));
@@ -186,6 +188,17 @@ export function ModelSettingsDialog({
     }
   }, [runtimeClient]);
 
+  function showToast(message: string): void {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    setToastMessage(message);
+    toastTimerRef.current = window.setTimeout(() => {
+      setToastMessage(null);
+      toastTimerRef.current = null;
+    }, 1000);
+  }
+
   useEffect(() => {
     if (!open) {
       setExpandedProviderId(null);
@@ -194,10 +207,23 @@ export function ModelSettingsDialog({
       setActiveSection("configure");
       setShowApiKey(false);
       setDeletingProfileId(null);
+      setToastMessage(null);
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+        toastTimerRef.current = null;
+      }
       return;
     }
     void loadModelSettings();
   }, [loadModelSettings, open]);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
 
   function selectProvider(provider: ModelProvider): void {
     const existingProfile = profileByProviderId.get(provider.id);
@@ -220,7 +246,7 @@ export function ModelSettingsDialog({
       await runtimeClient.saveModelProfile(toSaveRequest(draft, provider));
       await loadModelSettings();
       onProfilesChanged();
-      setMessage("模型配置已保存");
+      showToast("模型配置已保存");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to save model profile");
     } finally {
@@ -352,7 +378,7 @@ export function ModelSettingsDialog({
       }
       await loadModelSettings();
       onProfilesChanged();
-      setMessage("已配置模型已保存");
+      showToast("已配置模型已保存");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to save configured models");
     } finally {
@@ -380,7 +406,7 @@ export function ModelSettingsDialog({
       }
       await loadModelSettings();
       onProfilesChanged();
-      setMessage("模型配置已删除");
+      showToast("模型配置已删除");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to delete model profile");
     } finally {
@@ -400,6 +426,11 @@ export function ModelSettingsDialog({
       }
     >
       <div className="settings-dialog-shell">
+        {toastMessage ? (
+          <div className="model-settings-toast" role="status">
+            {toastMessage}
+          </div>
+        ) : null}
         <nav className="settings-dialog-nav" aria-label="Settings sections">
           <button type="button" className="settings-dialog-nav-item settings-dialog-nav-item-active">
             Models

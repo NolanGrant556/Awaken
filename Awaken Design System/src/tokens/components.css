@@ -1449,6 +1449,10 @@ button.tool-trace-line:focus-visible {
   padding: 8px;
 }
 
+.composer-bar-has-model .composer-bar-input-row {
+  grid-template-columns: 32px minmax(0, 1fr) minmax(0, auto) 34px;
+}
+
 .composer-bar-input-wrap {
   min-width: 0;
 }
@@ -1617,6 +1621,10 @@ button.tool-trace-line:focus-visible {
   padding: 0 16px 10px;
 }
 
+.composer-bar-has-model .composer-bar-toolbar {
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, auto) auto;
+}
+
 .composer-bar-center .composer-bar-toolbar {
   position: absolute;
   right: 18px;
@@ -1634,17 +1642,200 @@ button.tool-trace-line:focus-visible {
   justify-self: end;
 }
 
-.composer-bar-toolbar-meta {
-  grid-column: 2;
+.composer-bar-has-model .composer-bar-toolbar .composer-bar-submit,
+.composer-bar-has-model .composer-bar-input-row .composer-bar-submit {
+  grid-column: 4;
+}
+
+.composer-bar-toolbar-model {
+  position: relative;
+  grid-column: 3;
   display: inline-flex;
   align-items: center;
   justify-self: start;
-  gap: 8px;
   min-width: 0;
+  max-width: min(280px, 38vw);
+}
+
+.composer-bar-center .composer-bar-toolbar-model,
+.composer-bar-dock .composer-bar-toolbar-model {
+  justify-self: end;
+}
+
+.composer-bar-model-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 100%;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-bg-fill-main);
   color: var(--aw-text-secondary);
   font-size: var(--aw-font-size-sm);
+  font-weight: var(--aw-font-weight-medium);
   line-height: var(--aw-line-height-sm);
   white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--aw-transition-fast),
+    color var(--aw-transition-fast);
+}
+
+.composer-bar-model-trigger:hover,
+.composer-bar-model-trigger:focus-visible,
+.composer-bar-model-trigger-open {
+  background: var(--aw-bg-fill-dark);
+  color: var(--aw-text-primary);
+}
+
+.composer-bar-model-trigger:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--aw-accent) 42%, transparent);
+  outline-offset: 2px;
+}
+
+.composer-bar-model-trigger-disabled {
+  color: var(--aw-text-disabled);
+  cursor: default;
+}
+
+.composer-bar-model-trigger-disabled:hover {
+  background: var(--aw-bg-fill-main);
+  color: var(--aw-text-disabled);
+}
+
+.composer-bar-model-trigger-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.composer-bar-model-trigger-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-bar-model-trigger-chevron {
+  flex: 0 0 auto;
+  color: var(--aw-text-tertiary);
+}
+
+.composer-bar-model-menu {
+  position: absolute;
+  right: 0;
+  z-index: 50;
+  width: min(260px, calc(100vw - 48px));
+  overflow: hidden;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-panel);
+  background: var(--aw-bg-white);
+  box-shadow: 0 18px 48px rgba(15, 18, 25, 0.14), 0 2px 8px rgba(15, 18, 25, 0.06);
+}
+
+.composer-bar-center .composer-bar-model-menu {
+  top: calc(100% + 8px);
+}
+
+.composer-bar-dock .composer-bar-model-menu {
+  bottom: calc(100% + 8px);
+}
+
+.composer-bar-model-menu-scroll {
+  display: grid;
+  gap: 4px;
+  max-height: 278px;
+  padding: 8px;
+  overflow-y: auto;
+  scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 38%, transparent) transparent;
+  scrollbar-width: thin;
+}
+
+.composer-bar-model-menu-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.composer-bar-model-menu-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.composer-bar-model-menu-scroll::-webkit-scrollbar-thumb {
+  border-radius: var(--aw-radius-pill);
+  background: color-mix(in srgb, var(--aw-text-tertiary) 38%, transparent);
+}
+
+.composer-bar-model-option,
+.composer-bar-model-menu-action {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-base);
+  text-align: left;
+  cursor: pointer;
+}
+
+.composer-bar-model-option:hover,
+.composer-bar-model-option:focus-visible,
+.composer-bar-model-menu-action:hover,
+.composer-bar-model-menu-action:focus-visible,
+.composer-bar-model-option-selected {
+  background: var(--aw-bg-fill-main);
+}
+
+.composer-bar-model-option:focus-visible,
+.composer-bar-model-menu-action:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--aw-accent) 36%, transparent);
+  outline-offset: 1px;
+}
+
+.composer-bar-model-option:disabled {
+  color: var(--aw-text-disabled);
+  cursor: not-allowed;
+}
+
+.composer-bar-model-option-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-secondary);
+  font-size: 12px;
+  font-weight: var(--aw-font-weight-semibold);
+}
+
+.composer-bar-model-option-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-bar-model-option-check {
+  justify-self: end;
+  color: var(--aw-accent);
+}
+
+.composer-bar-model-menu-action {
+  grid-template-columns: 24px minmax(0, 1fr);
+  min-height: 42px;
+  padding: 0 18px;
+  border-top: 1px solid var(--aw-border-light);
+  border-radius: 0;
+  font-weight: var(--aw-font-weight-semibold);
 }
 
 .composer-bar-center .composer-bar-context button {

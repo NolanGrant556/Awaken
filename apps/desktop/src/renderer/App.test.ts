@@ -146,7 +146,7 @@ describe("App workbench presentation", () => {
     expect(html).toContain("New Agent");
     expect(html).toContain("Add folder");
     expect(html).toContain("Automations");
-    expect(html).toContain("Configure model");
+    expect(html).toContain("请点击头像配置模型");
     expect(html).not.toContain(">Models<");
     expect(html).toContain("composer-bar-center");
     expect(html).not.toContain("Plan, Build, / for skills, @ for context");

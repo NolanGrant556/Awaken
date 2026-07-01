@@ -32,7 +32,7 @@ type Session interface {
 // is an optional callback invoked when an in-proc server factory panics;
 // it receives the formatted panic message.
 func buildTransport(cfg McpServerConfig, registry *InProcRegistry, authHandler auth.OAuthHandler, onInProcPanic func(string)) (mcp.Transport, TransportKind, error) {
-	kind := cfg.transportKind()
+	kind := cfg.TransportKind()
 	switch kind {
 	case TransportStdio:
 		if strings.TrimSpace(cfg.Stdio.Command) == "" {

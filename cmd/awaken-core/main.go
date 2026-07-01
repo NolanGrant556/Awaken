@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"awaken/src/agentcore"
+	"awaken/src/connectors"
 	"awaken/src/llm"
 	"awaken/src/mcpclient"
 	"awaken/src/runtime"
@@ -25,6 +26,7 @@ func main() {
 	infoProvider := server.NewLLMRuntimeInfoProvider(cfg.Model, cfg.BaseURL, cfg.APIKey, defaultWorkspace, string(llm.ResolveProtocol(cfg)))
 
 	manager := buildMCPManager(defaultWorkspace)
+	connRegistry := buildConnectorRegistry(manager, defaultWorkspace)
 
 	runService := runtime.NewRunService(
 		func(workspace runtime.WorkspaceConfig, threadID string) *agentcore.Agent {
@@ -55,7 +57,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: server.NewRouterWithMCP(runService, infoProvider, manager),
+		Handler: server.NewRouterWithMCPAndConnectors(runService, infoProvider, manager, connRegistry),
 	}
 
 	log.Printf("awaken-core listening on http://%s", addr)
@@ -86,6 +88,37 @@ func buildMCPManager(workspace string) *mcpclient.Manager {
 	manager := mcpclient.NewManager(mcpclient.WithLogger(mcpclient.StdLogger{}))
 	go manager.Start(context.Background(), merged)
 	return manager
+}
+
+// buildConnectorRegistry loads the connector sources (builtin + local) and
+// returns a connector registry backed by the MCP manager. Returns nil when
+// no MCP manager is available, since connector lifecycle depends on it.
+func buildConnectorRegistry(manager *mcpclient.Manager, _ string) *connectors.Registry {
+	if manager == nil {
+		return nil
+	}
+	ctx := context.Background()
+
+	localSource, err := connectors.NewLocalSource(connectors.StdLogger{})
+	if err != nil {
+		log.Printf("[connectors] local source load failed: %v", err)
+	}
+
+	var sources []connectors.ConnectorSource
+	sources = append(sources, connectors.NewBuiltinSource())
+	if localSource != nil {
+		sources = append(sources, localSource)
+	}
+	sources = append(sources, connectors.NewNoopTeamSource())
+
+	logger := connectors.StdLogger{}
+	registry := connectors.NewRegistry(manager, logger)
+	if err := registry.LoadSources(ctx, sources); err != nil {
+		log.Printf("[connectors] load sources failed: %v", err)
+	}
+
+	log.Printf("[connectors] loaded %d connector definitions", len(registry.List()))
+	return registry
 }
 
 func resolveDefaultWorkspace() string {

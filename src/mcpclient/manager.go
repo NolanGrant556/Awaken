@@ -42,6 +42,11 @@ type Manager struct {
 	// in-memory store; persistent stores can be installed via
 	// Manager.SetCredentialStore.
 	credentials CredentialStore
+	// subscribers is the set of active ServerEvent subscribers. Each
+	// subscriber has a buffered channel that receives ServerEvent values.
+	// The channel is closed when the subscriber's context is cancelled.
+	subscribers   map[chan ServerEvent]context.Context
+	subscribersMu sync.Mutex
 }
 
 // managedServer holds the per-server mutable state under the manager's lock.
@@ -234,7 +239,15 @@ func (m *Manager) connectLoop(parentCtx context.Context, server *managedServer) 
 				m.onToolsChanged(server.name)
 			}
 		}
-		session, capability, err := connectAndInitialize(ctx, transport, m.clientImpl, onToolListChanged)
+		onPromptListChanged := func() {
+			m.logger.Debugf("mcp server %q signalled prompts/list_changed", server.name)
+			m.emitEvent(ServerEvent{Type: EventPromptsListChanged, ServerName: server.name})
+		}
+		onResourceListChanged := func() {
+			m.logger.Debugf("mcp server %q signalled resources/list_changed", server.name)
+			m.emitEvent(ServerEvent{Type: EventResourcesListChanged, ServerName: server.name})
+		}
+		session, capability, err := connectAndInitialize(ctx, transport, m.clientImpl, onToolListChanged, onPromptListChanged, onResourceListChanged)
 		if err == nil {
 			m.mu.Lock()
 			server.session = session
@@ -251,6 +264,7 @@ func (m *Manager) connectLoop(parentCtx context.Context, server *managedServer) 
 			if m.onToolsChanged != nil {
 				m.onToolsChanged(server.name)
 			}
+			m.emitEvent(ServerEvent{Type: EventConnected, ServerName: server.name})
 			// Block until the session terminates.
 			_ = session.Wait()
 			m.mu.Lock()
@@ -264,6 +278,7 @@ func (m *Manager) connectLoop(parentCtx context.Context, server *managedServer) 
 			if m.onToolsChanged != nil {
 				m.onToolsChanged(server.name)
 			}
+			m.emitEvent(ServerEvent{Type: EventDisconnected, ServerName: server.name})
 			return
 		}
 		if isAuthError(err) {
@@ -276,6 +291,7 @@ func (m *Manager) connectLoop(parentCtx context.Context, server *managedServer) 
 			if m.onToolsChanged != nil {
 				m.onToolsChanged(server.name)
 			}
+			m.emitEvent(ServerEvent{Type: EventDisconnected, ServerName: server.name})
 			return
 		}
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -307,6 +323,7 @@ func (m *Manager) recordFailure(server *managedServer, err error) {
 	if m.onToolsChanged != nil {
 		m.onToolsChanged(server.name)
 	}
+	m.emitEvent(ServerEvent{Type: EventDisconnected, ServerName: server.name})
 }
 
 // Disable moves a server to the disabled state and closes its session.
@@ -336,6 +353,7 @@ func (m *Manager) Disable(name string) error {
 	if m.onToolsChanged != nil {
 		m.onToolsChanged(name)
 	}
+	m.emitEvent(ServerEvent{Type: EventDisabled, ServerName: name})
 	return nil
 }
 
@@ -576,7 +594,7 @@ func (m *Manager) RemoveDynamic(connectorID, serverName string) {
 }
 
 // Shutdown closes every connection. Used by tests and on graceful host
-// shutdown.
+// shutdown. It also closes all subscriber channels.
 func (m *Manager) Shutdown(ctx context.Context) {
 	m.mu.Lock()
 	for _, server := range m.servers {
@@ -588,6 +606,58 @@ func (m *Manager) Shutdown(ctx context.Context) {
 		}
 	}
 	m.mu.Unlock()
+
+	m.subscribersMu.Lock()
+	for ch := range m.subscribers {
+		close(ch)
+	}
+	m.subscribers = nil
+	m.subscribersMu.Unlock()
+}
+
+// Subscribe returns a buffered channel that receives ServerEvent values for
+// every server lifecycle transition. The channel is closed when ctx is
+// cancelled. Slow subscribers may miss events — the channel is non-blocking
+// with a buffer of 64 events per subscriber.
+func (m *Manager) Subscribe(ctx context.Context) <-chan ServerEvent {
+	ch := make(chan ServerEvent, 64)
+	m.subscribersMu.Lock()
+	if m.subscribers == nil {
+		m.subscribers = make(map[chan ServerEvent]context.Context)
+	}
+	m.subscribers[ch] = ctx
+	m.subscribersMu.Unlock()
+
+	// Start a goroutine that closes the channel when ctx is done.
+	go func() {
+		<-ctx.Done()
+		m.subscribersMu.Lock()
+		delete(m.subscribers, ch)
+		m.subscribersMu.Unlock()
+		close(ch)
+	}()
+
+	return ch
+}
+
+// emitEvent sends a ServerEvent to all active subscribers. Non-blocking:
+// if a subscriber's buffer is full, the event is dropped.
+func (m *Manager) emitEvent(evt ServerEvent) {
+	m.subscribersMu.Lock()
+	defer m.subscribersMu.Unlock()
+
+	for ch, ctx := range m.subscribers {
+		select {
+		case <-ctx.Done():
+			// Subscriber context cancelled; skip.
+		default:
+			select {
+			case ch <- evt:
+			default:
+				// Buffer full, drop event.
+			}
+		}
+	}
 }
 
 // registerTools queries the server's current tool list and registers each

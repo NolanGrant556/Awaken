@@ -102,6 +102,24 @@ func (a *McpToolAdapter) Parameters() []tool.ToolParameter { return a.parameters
 // auto-allows read-only MCP tools.
 func (a *McpToolAdapter) IsReadOnly() bool { return a.readOnly }
 
+// Definition implements tool.Tool.
+func (a *McpToolAdapter) Definition() tool.ToolDefinition {
+	return tool.ToolDefinition{
+		Name:        a.prefixedName,
+		DisplayName: a.prefixedName,
+		Source:      tool.SourceMCP,
+		Description: a.Description(),
+		Annotations: tool.ToolAnnotations{
+			ReadOnly:     a.readOnly,
+			Destructive:  a.destructive,
+			OpenWorld:    a.openWorld,
+			RequiresAuth: a.requiresAuth,
+			ServerName:   a.serverName,
+			ToolName:     a.toolName,
+		},
+	}
+}
+
 // CheckPermission implements tool.PermissionCheckingTool. The adapter
 // surfaces a deny + NeedsAuthError when the owning server is in the
 // needs-auth state; otherwise it delegates to the standard read-only /

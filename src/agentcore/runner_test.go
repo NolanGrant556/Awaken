@@ -41,6 +41,16 @@ func (t runnerTestTool) Parameters() []tool.ToolParameter {
 	}
 }
 
+func (t runnerTestTool) Definition() tool.ToolDefinition {
+	return tool.ToolDefinition{
+		Name:        t.name,
+		DisplayName: t.name,
+		Source:      tool.SourceBuiltin,
+		Description: "test tool",
+		Annotations: tool.ToolAnnotations{ReadOnly: false, Destructive: false, OpenWorld: false},
+	}
+}
+
 func (t runnerTestTool) Execute(ctx context.Context, input string) (string, error) {
 	if t.fail {
 		return "", errors.New("boom")
@@ -963,6 +973,14 @@ func (t cancelOnExecuteTool) Parameters() []tool.ToolParameter {
 	}
 }
 
+func (t cancelOnExecuteTool) Definition() tool.ToolDefinition {
+	return tool.ToolDefinition{
+		Name: t.name, DisplayName: t.name, Source: tool.SourceBuiltin,
+		Description: "cancels the run context on execute",
+		Annotations: tool.ToolAnnotations{ReadOnly: false, Destructive: false, OpenWorld: false},
+	}
+}
+
 func (t cancelOnExecuteTool) Execute(ctx context.Context, input string) (string, error) {
 	t.cancel()
 	return "cancelled", nil
@@ -1032,6 +1050,14 @@ func (t failIfExecutedTool) Description() string {
 func (t failIfExecutedTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
 		{Name: "value", Description: "value", Type: "string", Required: true},
+	}
+}
+
+func (t failIfExecutedTool) Definition() tool.ToolDefinition {
+	return tool.ToolDefinition{
+		Name: t.name, DisplayName: t.name, Source: tool.SourceBuiltin,
+		Description: "fails the test if executed",
+		Annotations: tool.ToolAnnotations{ReadOnly: false, Destructive: false, OpenWorld: false},
 	}
 }
 

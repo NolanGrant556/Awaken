@@ -99,19 +99,31 @@ func buildHTTPClient(insecure bool) *http.Client {
 }
 
 // connectAndInitialize performs the MCP handshake and returns the live
-// session plus the negotiated capabilities. The ToolListChangedHandler is
-// attached at the Client level per SDK design; the onToolListChanged
-// callback is invoked whenever the server signals a tool list refresh.
+// session plus the negotiated capabilities. The ToolListChangedHandler,
+// PromptListChangedHandler, and ResourceListChangedHandler are attached at
+// the Client level per SDK design.
 func connectAndInitialize(
 	ctx context.Context,
 	transport mcp.Transport,
 	clientImpl *mcp.Implementation,
 	onToolListChanged func(),
+	onPromptListChanged func(),
+	onResourceListChanged func(),
 ) (Session, *ServerCapability, error) {
 	clientOpts := &mcp.ClientOptions{}
 	if onToolListChanged != nil {
 		clientOpts.ToolListChangedHandler = func(ctx context.Context, req *mcp.ToolListChangedRequest) {
 			onToolListChanged()
+		}
+	}
+	if onPromptListChanged != nil {
+		clientOpts.PromptListChangedHandler = func(ctx context.Context, req *mcp.PromptListChangedRequest) {
+			onPromptListChanged()
+		}
+	}
+	if onResourceListChanged != nil {
+		clientOpts.ResourceListChangedHandler = func(ctx context.Context, req *mcp.ResourceListChangedRequest) {
+			onResourceListChanged()
 		}
 	}
 	client := mcp.NewClient(clientImpl, clientOpts)

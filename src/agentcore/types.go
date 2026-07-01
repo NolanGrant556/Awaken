@@ -31,7 +31,7 @@ type ModelConfig struct {
 type LLMRequest struct {
 	SystemPrompt string
 	Messages     []context.Message
-	Tools        []tool.ToolDefinition
+	Tools        []tool.ToolSchema
 	Model        string
 	Temperature  float64
 	MaxTokens    int

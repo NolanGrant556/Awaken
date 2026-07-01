@@ -261,7 +261,7 @@ func responseFromOpenAIMessage(content string, toolCalls []openaiToolCall) (*Res
 	return result, nil
 }
 
-func convertToolsToOpenAI(tools []tool.ToolDefinition) []map[string]interface{} {
+func convertToolsToOpenAI(tools []tool.ToolSchema) []map[string]interface{} {
 	result := make([]map[string]interface{}, len(tools))
 	for i, t := range tools {
 		result[i] = map[string]interface{}{

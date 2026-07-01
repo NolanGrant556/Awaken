@@ -25,11 +25,12 @@ type ToolRuntimeConfig struct {
 }
 
 type ToolExecutionResult struct {
-	ToolCallID string
-	Name       string
-	Content    string
-	IsError    bool
-	Truncated  bool
+	ToolCallID    string
+	Name          string
+	Content       string
+	IsError       bool
+	Truncated     bool
+	ResultSummary string
 }
 
 func NewToolRuntime(sink EventSink) *ToolRuntime {
@@ -74,6 +75,14 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	switch permission.Behavior {
 	case tool.PermissionAllow:
 	case tool.PermissionDeny:
+		// needs_auth is a special deny that emits a progress event instead of
+		// a regular error; the tool is never invoked.
+		if permission.Reason == "needs_auth" {
+			rt.emitToolProgress(result, "needs_auth", "tool requires authentication", 0)
+			result.Content = "工具需要认证: " + firstNonEmpty(permission.Reason, "needs_auth")
+			result.IsError = true
+			return finalizeToolResult(result)
+		}
 		result.Content = fmt.Sprintf("工具权限拒绝: %s", firstNonEmpty(permission.Reason, "permission policy denied execution"))
 		result.IsError = true
 		return finalizeToolResult(result)
@@ -95,14 +104,19 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		return finalizeToolResult(result)
 	}
 
+	rt.emitToolProgress(result, "started", "", 0)
+
 	output, err := rt.executeTool(toolCtx, result, selectedTool, input)
 	if err != nil {
+		rt.emitToolProgress(result, "failed", err.Error(), 0)
 		result.Content = fmt.Sprintf("工具执行失败: %v", err)
 		result.IsError = true
 		return finalizeToolResult(result)
 	}
 
+	rt.emitToolProgress(result, "completed", "", 100)
 	result.Content = output
+	result.ResultSummary = excerptString(strings.TrimSpace(output), 200)
 	rt.emitArtifacts(result, selectedTool, input, output)
 	return finalizeToolResult(result)
 }
@@ -146,11 +160,9 @@ func (rt *ToolRuntime) decideToolPermission(
 		return decision
 	}
 
-	if readOnlyTool, ok := selectedTool.(tool.ReadOnlyTool); ok && readOnlyTool.IsReadOnly() {
-		return tool.AllowPermission()
-	}
-
-	return tool.AllowPermission()
+	// Fall back to annotations-based decision
+	def := selectedTool.Definition()
+	return tool.Decide(ctx, def)
 }
 
 func (rt *ToolRuntime) awaitApproval(
@@ -221,6 +233,18 @@ func (rt *ToolRuntime) emitCommandOutput(result ToolExecutionResult, output tool
 	})
 }
 
+func (rt *ToolRuntime) emitToolProgress(result ToolExecutionResult, stage, message string, percentage int) {
+	rt.sink.Emit(AwakenEvent{
+		Type:                  ToolProgressEventType,
+		Timestamp:             timeNowUTC(),
+		ToolCallID:            result.ToolCallID,
+		ToolName:              result.Name,
+		ToolProgressStage:     stage,
+		ToolProgressMessage:   message,
+		ToolProgressPercentage: percentage,
+	})
+}
+
 func (rt *ToolRuntime) emitPatchPreview(result ToolExecutionResult, selectedTool tool.Tool, input string) {
 	previewingTool, ok := selectedTool.(tool.PatchPreviewingTool)
 	if !ok {
@@ -270,13 +294,20 @@ func approvalRequestForPermission(
 	input string,
 	permission tool.PermissionDecision,
 ) ApprovalRequest {
+	def := selectedTool.Definition()
 	request := ApprovalRequest{
-		ID:          newAwakenID("approval"),
-		ToolCallID:  result.ToolCallID,
-		ToolName:    result.Name,
-		Title:       fmt.Sprintf("Approve %s", result.Name),
-		Description: approvalDescription(result.Name, input),
-		RiskTone:    ApprovalRiskWarning,
+		ID:             newAwakenID("approval"),
+		ToolCallID:     result.ToolCallID,
+		ToolName:       result.Name,
+		Title:          fmt.Sprintf("Approve %s", result.Name),
+		Description:    approvalDescription(result.Name, input),
+		RiskTone:       ApprovalRiskWarning,
+		ToolDefinition: def,
+		RiskHints: &tool.RiskHints{
+			Destructive:  def.Annotations.Destructive,
+			OpenWorld:    def.Annotations.OpenWorld,
+			RequiresAuth: def.Annotations.RequiresAuth,
+		},
 	}
 
 	if describingTool, ok := selectedTool.(tool.ApprovalDescribingTool); ok {

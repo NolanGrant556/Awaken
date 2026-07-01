@@ -32,6 +32,16 @@ func (t *WebSearchTool) Parameters() []tool.ToolParameter {
 	}
 }
 
+func (t *WebSearchTool) Definition() tool.ToolDefinition {
+	return tool.ToolDefinition{
+		Name:        "web_search",
+		DisplayName: "Web Search",
+		Source:      tool.SourceBuiltin,
+		Description: "用于在互联网上搜索信息",
+		Annotations: tool.ToolAnnotations{ReadOnly: true, Destructive: false, OpenWorld: true},
+	}
+}
+
 func (t *WebSearchTool) Execute(ctx context.Context, input string) (string, error) {
 	query := strings.TrimSpace(input)
 	if query == "" {

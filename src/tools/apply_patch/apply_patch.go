@@ -151,6 +151,16 @@ func resolvePatchPaths(patch *patchDocument, permissionContext tool.PermissionCo
 	return patch
 }
 
+func (t *ApplyPatchTool) Definition() tool.ToolDefinition {
+	return tool.ToolDefinition{
+		Name:        "apply_patch",
+		DisplayName: "Apply Patch",
+		Source:      tool.SourceBuiltin,
+		Description: "使用 Codex 风格 patch 新增、修改、移动或删除文件",
+		Annotations: tool.ToolAnnotations{ReadOnly: false, Destructive: true, OpenWorld: false},
+	}
+}
+
 func (t *ApplyPatchTool) CheckPermission(ctx context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {
 	if err := ctx.Err(); err != nil {
 		return tool.DenyPermission(err.Error())

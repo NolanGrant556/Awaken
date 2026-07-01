@@ -57,6 +57,16 @@ func (t *ShellTool) Parameters() []tool.ToolParameter {
 	}
 }
 
+func (t *ShellTool) Definition() tool.ToolDefinition {
+	return tool.ToolDefinition{
+		Name:        "shell",
+		DisplayName: "Shell",
+		Source:      tool.SourceBuiltin,
+		Description: "执行 shell 命令",
+		Annotations: tool.ToolAnnotations{ReadOnly: false, Destructive: true, OpenWorld: true},
+	}
+}
+
 func (t *ShellTool) CheckPermission(ctx context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {
 	if err := ctx.Err(); err != nil {
 		return tool.DenyPermission(err.Error())

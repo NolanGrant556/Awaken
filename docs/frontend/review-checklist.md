@@ -81,6 +81,8 @@
 
 - [ ] 是否附真实运行截图 / 录屏？
   - 至少包含：空态 center composer、运行态 dock composer + `ExecutionFeed`、涉及改动场景的特写。
+  - 可用命令：`npm run capture:workbench -- --state center` / `--state dock` / `--state marker`。
+  - 截图默认输出到系统临时目录；作为 PR 验收证据时，需要把图片贴到 PR 描述或评论里。
 
 - [ ] 是否修改或新增 `App.test.ts` 中的测试？
   - 如果改动了 `workbenchPresentation.ts`：必须更新。

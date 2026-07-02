@@ -234,7 +234,7 @@
     );
 }
 
-.execution-turn-section-latest .execution-turn-header {
+.execution-turn-section-active .execution-turn-header {
   position: sticky;
   top: var(--aw-prompt-anchor-offset, 0px);
   z-index: 3;

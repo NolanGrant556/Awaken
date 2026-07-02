@@ -318,7 +318,7 @@ export function App() {
   );
   const [composerValue, setComposerValue] = useState("");
   const [composerFocusRequest, setComposerFocusRequest] = useState(0);
-  const [activeTurnMarkerId, setActiveTurnMarkerId] = useState<string | undefined>();
+  const [activeTurnId, setActiveTurnId] = useState<string | undefined>();
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
   const [latestTurnMinHeightPx, setLatestTurnMinHeightPx] = useState(0);
@@ -797,15 +797,15 @@ export function App() {
     hasError: Boolean(runtimeState.errorMessage),
     needsRestart: desktopNeedsRestart,
   });
-  const markerActiveTurnId =
-    activeTurnMarkerId &&
-    narrativeSections.turns.some((turn) => turn.id === activeTurnMarkerId)
-      ? activeTurnMarkerId
+  const activeWorkbenchTurnId =
+    activeTurnId &&
+    narrativeSections.turns.some((turn) => turn.id === activeTurnId)
+      ? activeTurnId
       : latestPromptId;
   const turnMarkerDisplay = turnMarkerRailDisplay({
     showCenterComposer,
     turnIds: narrativeSections.turns.map((turn) => turn.id),
-    activeTurnId: markerActiveTurnId,
+    activeTurnId: activeWorkbenchTurnId,
     latestTurnId: latestPromptId,
     railHeight: Math.max(
       0,
@@ -975,12 +975,12 @@ export function App() {
     });
   }
 
-  function syncActiveTurnMarker(element: HTMLElement): void {
+  function syncActiveTurnFromScroll(element: HTMLElement): void {
     const nextActiveId = activeTurnMarkerFromScroll(element);
     if (!nextActiveId) {
       return;
     }
-    setActiveTurnMarkerId((current) => current === nextActiveId ? current : nextActiveId);
+    setActiveTurnId((current) => current === nextActiveId ? current : nextActiveId);
   }
 
   function pauseLatestOutputFollowForUser(): void {
@@ -1124,7 +1124,7 @@ export function App() {
 
   function handleTurnMarkerClick(turnId: string): void {
     pauseLatestOutputFollowForUser();
-    setActiveTurnMarkerId(turnId);
+    setActiveTurnId(turnId);
     scrollPromptToAnchor(turnId);
   }
 
@@ -1141,9 +1141,7 @@ export function App() {
       programmaticRunStageScrollTopRef.current = null;
     }
 
-    if (showTurnMarkerRail) {
-      syncActiveTurnMarker(element);
-    }
+    syncActiveTurnFromScroll(element);
 
     if (isProgrammaticScroll) {
       return;
@@ -2133,9 +2131,9 @@ export function App() {
                               key={`${marker.id}:${marker.index}`}
                               type="button"
                               className={`turn-marker-button${
-                                marker.id === markerActiveTurnId ? " turn-marker-button-active" : ""
+                                marker.id === activeWorkbenchTurnId ? " turn-marker-button-active" : ""
                               }`}
-                              aria-current={marker.id === markerActiveTurnId ? "true" : undefined}
+                              aria-current={marker.id === activeWorkbenchTurnId ? "true" : undefined}
                               aria-label={`跳转到第 ${marker.index + 1} 条消息`}
                               title={`第 ${marker.index + 1} 条消息`}
                               onClick={() => handleTurnMarkerClick(marker.id)}
@@ -2208,6 +2206,7 @@ export function App() {
                         )}
                         {narrativeSections.turns.map((turn, index) => {
                           const isLatestPrompt = turn.id === latestPromptId;
+                          const isActiveTurn = turn.id === activeWorkbenchTurnId;
                           const turnStyle =
                             isLatestPrompt && latestTurnMinHeightPx > 0
                               ? ({
@@ -2221,6 +2220,8 @@ export function App() {
                               data-execution-turn-id={turn.id}
                               className={`execution-turn-section${
                                 isLatestPrompt ? " execution-turn-section-latest" : ""
+                              }${
+                                isActiveTurn ? " execution-turn-section-active" : ""
                               }`}
                               style={turnStyle}
                               aria-label={`Turn ${index + 1}`}

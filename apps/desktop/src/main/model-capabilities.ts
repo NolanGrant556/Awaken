@@ -6,6 +6,9 @@ import type {
 
 const DEFAULT_CONTEXT_WINDOW = 1_000_000;
 const DEFAULT_MAX_TOKENS = 8192;
+const VOLCENGINE_CODING_PLAN_CONTEXT_WINDOW = 256_000;
+const VOLCENGINE_CODING_PLAN_HIGH_OUTPUT = 128_000;
+const VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT = 32_000;
 
 const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = {
   deepseek: {
@@ -58,20 +61,98 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
     },
   },
   "kimi-coding-plan": {
-    "kimi-k2.7-code": {
+    "kimi-for-coding": {
       context_window: 256 * 1024,
-      max_output_tokens: 256 * 1024,
+      max_output_tokens: 32 * 1024,
       default_max_tokens: 32 * 1024,
+      default_temperature: 1,
     },
-    "kimi-k2.7-code-highspeed": {
-      context_window: 256 * 1024,
-      max_output_tokens: 256 * 1024,
-      default_max_tokens: 32 * 1024,
+  },
+  volcengine: {
+    "ark-code-latest": {
+      context_window: VOLCENGINE_CODING_PLAN_CONTEXT_WINDOW,
+      max_output_tokens: VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT,
+      default_max_tokens: VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT,
+    },
+    "doubao-seed-code": {
+      context_window: VOLCENGINE_CODING_PLAN_CONTEXT_WINDOW,
+      max_output_tokens: VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT,
+      default_max_tokens: VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT,
+    },
+    "doubao-seed-2.0-code": {
+      context_window: VOLCENGINE_CODING_PLAN_CONTEXT_WINDOW,
+      max_output_tokens: VOLCENGINE_CODING_PLAN_HIGH_OUTPUT,
+      default_max_tokens: VOLCENGINE_CODING_PLAN_HIGH_OUTPUT,
+    },
+    "doubao-seed-2.0-pro": {
+      context_window: VOLCENGINE_CODING_PLAN_CONTEXT_WINDOW,
+      max_output_tokens: VOLCENGINE_CODING_PLAN_HIGH_OUTPUT,
+      default_max_tokens: VOLCENGINE_CODING_PLAN_HIGH_OUTPUT,
+    },
+    "doubao-seed-2.0-lite": {
+      context_window: VOLCENGINE_CODING_PLAN_CONTEXT_WINDOW,
+      max_output_tokens: VOLCENGINE_CODING_PLAN_HIGH_OUTPUT,
+      default_max_tokens: VOLCENGINE_CODING_PLAN_HIGH_OUTPUT,
+    },
+    "minimax-m2.5": {
+      context_window: 200_000,
+      max_output_tokens: VOLCENGINE_CODING_PLAN_HIGH_OUTPUT,
+      default_max_tokens: VOLCENGINE_CODING_PLAN_HIGH_OUTPUT,
+    },
+    "minimax-m2.7": {
+      context_window: 256_000,
+      max_output_tokens: VOLCENGINE_CODING_PLAN_HIGH_OUTPUT,
+      default_max_tokens: VOLCENGINE_CODING_PLAN_HIGH_OUTPUT,
+    },
+    "minimax-m3": {
+      context_window: 256_000,
+      max_output_tokens: VOLCENGINE_CODING_PLAN_HIGH_OUTPUT,
+      default_max_tokens: VOLCENGINE_CODING_PLAN_HIGH_OUTPUT,
+    },
+    "glm-4.7": {
+      context_window: 200_000,
+      max_output_tokens: VOLCENGINE_CODING_PLAN_HIGH_OUTPUT,
+      default_max_tokens: VOLCENGINE_CODING_PLAN_HIGH_OUTPUT,
+    },
+    "glm-5.2": {
+      context_window: VOLCENGINE_CODING_PLAN_CONTEXT_WINDOW,
+      max_output_tokens: VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT,
+      default_max_tokens: VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT,
+    },
+    "glm-latest": {
+      context_window: VOLCENGINE_CODING_PLAN_CONTEXT_WINDOW,
+      max_output_tokens: VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT,
+      default_max_tokens: VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT,
+    },
+    "deepseek-v3.2": {
+      context_window: 128_000,
+      max_output_tokens: VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT,
+      default_max_tokens: VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT,
+    },
+    "deepseek-v4-flash": {
+      context_window: 128_000,
+      max_output_tokens: VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT,
+      default_max_tokens: VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT,
+    },
+    "deepseek-v4-pro": {
+      context_window: 128_000,
+      max_output_tokens: VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT,
+      default_max_tokens: VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT,
+    },
+    "kimi-k2.5": {
+      context_window: VOLCENGINE_CODING_PLAN_CONTEXT_WINDOW,
+      max_output_tokens: VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT,
+      default_max_tokens: VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT,
     },
     "kimi-k2.6": {
-      context_window: 256 * 1024,
-      max_output_tokens: 256 * 1024,
-      default_max_tokens: 32 * 1024,
+      context_window: VOLCENGINE_CODING_PLAN_CONTEXT_WINDOW,
+      max_output_tokens: VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT,
+      default_max_tokens: VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT,
+    },
+    "kimi-k2.7-code": {
+      context_window: VOLCENGINE_CODING_PLAN_CONTEXT_WINDOW,
+      max_output_tokens: VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT,
+      default_max_tokens: VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT,
     },
   },
 };
@@ -93,16 +174,32 @@ export function normalizeAdvancedWithModelCapability(
   modelId: string,
 ): ModelProfileAdvanced {
   const capability = capabilityForModel(providerId, modelId);
-  const maxTokens =
-    capability?.max_output_tokens !== undefined &&
-    advanced?.maxTokens === capability.default_max_tokens
-      ? capability.max_output_tokens
-      : advanced?.maxTokens ?? capability?.max_output_tokens ?? capability?.default_max_tokens;
-
+  const providerDefault =
+    providerId === "volcengine"
+      ? {
+          contextWindow: VOLCENGINE_CODING_PLAN_CONTEXT_WINDOW,
+          maxTokens: VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT,
+        }
+      : {
+          contextWindow: DEFAULT_CONTEXT_WINDOW,
+          maxTokens: DEFAULT_MAX_TOKENS,
+        };
+  const inferredMaxTokens =
+    capability?.max_output_tokens ?? capability?.default_max_tokens ?? providerDefault.maxTokens;
+  const requestedMaxTokens = advanced?.maxTokens ?? inferredMaxTokens;
+  const requestedContextWindow =
+    advanced?.contextWindow ?? capability?.context_window ?? providerDefault.contextWindow;
   return {
     ...advanced,
-    maxTokens: maxTokens ?? DEFAULT_MAX_TOKENS,
-    contextWindow: advanced?.contextWindow ?? capability?.context_window ?? DEFAULT_CONTEXT_WINDOW,
+    temperature: advanced?.temperature ?? capability?.default_temperature,
+    maxTokens:
+      capability?.max_output_tokens !== undefined
+        ? Math.min(requestedMaxTokens, capability.max_output_tokens)
+        : requestedMaxTokens,
+    contextWindow:
+      capability?.context_window !== undefined
+        ? Math.min(requestedContextWindow, capability.context_window)
+        : requestedContextWindow,
   };
 }
 

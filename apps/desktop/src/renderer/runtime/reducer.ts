@@ -1495,8 +1495,8 @@ export function reduceRuntimeState(
             let errorMessage = rawMessage;
             let errorDescription = rawMessage;
             if (action.event.code === "PROVIDER_AUTH_MISSING") {
-              errorMessage = "API key 缺失，请在 .env 中配置 LLM_API_KEY";
-              errorDescription = "API key 缺失，请在 .env 中配置 LLM_API_KEY";
+              errorMessage = "API key 缺失，请在 Settings > Models 配置模型 API key";
+              errorDescription = "API key 缺失，请在 Settings > Models 配置模型 API key";
             } else if (action.event.code === "PROVIDER_REQUEST_FAILED") {
               errorMessage = `Provider 请求失败：${rawMessage}`;
               errorDescription = `Provider 请求失败：${rawMessage}`;

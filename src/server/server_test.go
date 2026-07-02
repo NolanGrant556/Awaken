@@ -460,6 +460,37 @@ func TestCreateRunEmptyInputReturnsInvalidInput(t *testing.T) {
 	}
 }
 
+func TestCreateRunRequiresModelProfileForProfileAwareRuntime(t *testing.T) {
+	runService := awruntime.NewRunServiceWithModelProfiles(
+		func(workspace awruntime.WorkspaceConfig, threadID string, profile *awruntime.ModelProfileConfig) *agentcore.Agent {
+			t.Fatalf("agent should not be created without a model profile")
+			return nil
+		},
+		func(agent *agentcore.Agent) awruntime.Executor {
+			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return "ok", nil
+			})
+		},
+	)
+
+	router := NewRouter(runService, nil)
+	req := httptest.NewRequest(http.MethodPost, "/v1/runs", strings.NewReader(`{"input":"hello","workspace":{"workspace_root":"/tmp"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing model profile, got %d", rec.Code)
+	}
+	var errResp errorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("expected JSON error response, got %q", rec.Body.String())
+	}
+	if errResp.Error != "MISSING_MODEL_PROFILE" {
+		t.Fatalf("expected MISSING_MODEL_PROFILE error, got %q", errResp.Error)
+	}
+}
+
 func TestCreateRunWithUnknownThreadIDReturns404(t *testing.T) {
 	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
 		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {

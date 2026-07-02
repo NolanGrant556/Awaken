@@ -28,6 +28,7 @@ var (
 	ErrThreadNotFound          = errors.New("thread not found")
 	ErrThreadWorkspaceMismatch = errors.New("thread workspace mismatch")
 	ErrThreadBusy              = errors.New("thread already has an active run")
+	ErrMissingModelProfile     = errors.New("model profile is required")
 )
 
 const maxRetainedThreads = 100
@@ -151,6 +152,9 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	}
 	if s.newExecutor == nil {
 		return Run{}, fmt.Errorf("run executor is not configured")
+	}
+	if s.newProfileAgent != nil && req.ModelProfile == nil {
+		return Run{}, ErrMissingModelProfile
 	}
 
 	workspace, err := normalizeWorkspace(req.Workspace)

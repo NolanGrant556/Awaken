@@ -111,6 +111,7 @@ export type ModelProviderWire = {
   api_docs_url: string;
   coding_preset?: boolean;
   endpoint_model?: boolean;
+  allow_custom_model?: boolean;
   model_capabilities?: Record<string, ModelCapabilityWire>;
 };
 
@@ -118,6 +119,7 @@ export type ModelCapabilityWire = {
   context_window?: number;
   max_output_tokens?: number;
   default_max_tokens?: number;
+  default_temperature?: number;
 };
 
 export type ModelProvider = {
@@ -133,6 +135,7 @@ export type ModelProvider = {
   apiDocsURL: string;
   codingPreset: boolean;
   endpointModel: boolean;
+  allowCustomModel: boolean;
   modelCapabilities: Record<string, ModelCapability>;
 };
 
@@ -140,6 +143,7 @@ export type ModelCapability = {
   contextWindow?: number;
   maxOutputTokens?: number;
   defaultMaxTokens?: number;
+  defaultTemperature?: number;
 };
 
 export type ModelProfileAdvancedWire = {
@@ -417,6 +421,7 @@ export function normalizeModelProvider(provider: ModelProviderWire): ModelProvid
     apiDocsURL: provider.api_docs_url,
     codingPreset: Boolean(provider.coding_preset),
     endpointModel: Boolean(provider.endpoint_model),
+    allowCustomModel: Boolean(provider.allow_custom_model),
     modelCapabilities: normalizeModelCapabilities(provider.model_capabilities),
   };
 }
@@ -432,6 +437,7 @@ export function normalizeModelCapabilities(
         contextWindow: capability.context_window,
         maxOutputTokens: capability.max_output_tokens,
         defaultMaxTokens: capability.default_max_tokens,
+        defaultTemperature: capability.default_temperature,
       },
     ]),
   );

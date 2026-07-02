@@ -84,14 +84,13 @@ function advancedWithModelCapability(
   advanced: RuntimeModelProfileSummary["advanced"],
   overwrite: boolean,
 ): RuntimeModelProfileSummary["advanced"] {
-  const capability = modelCapabilityFor(provider, modelId);
+  const capability =
+    modelCapabilityFor(provider, modelId) ??
+    (provider.allowCustomModel ? modelCapabilityFor(provider, provider.defaultModel) : undefined);
   if (!capability) return advanced;
   const inferredMaxTokens = capability.maxOutputTokens ?? capability.defaultMaxTokens;
   const shouldUseInferredMaxTokens =
-    overwrite ||
-    advanced?.maxTokens === undefined ||
-    (capability.maxOutputTokens !== undefined &&
-      advanced?.maxTokens === capability.defaultMaxTokens);
+    overwrite || advanced?.maxTokens === undefined;
 
   return {
     ...advanced,
@@ -267,7 +266,7 @@ export function ModelSettingsDialog({
     toastTimerRef.current = window.setTimeout(() => {
       setToastMessage(null);
       toastTimerRef.current = null;
-    }, 1000);
+    }, 2000);
   }
 
   useEffect(() => {
@@ -333,9 +332,9 @@ export function ModelSettingsDialog({
     setMessage(null);
     try {
       const result = await runtimeClient.testModelProfile(toSaveRequest(draft, provider));
-      setMessage(result.message);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to test provider");
+      showToast(result.message);
+    } catch {
+      showToast("连接测试失败：测试请求未完成。");
     } finally {
       setTesting(false);
     }
@@ -551,7 +550,7 @@ export function ModelSettingsDialog({
     >
       <div className="settings-dialog-shell">
         {toastMessage ? (
-          <div className="model-settings-toast" role="status">
+          <div className="model-settings-toast" role="status" aria-live="polite">
             {toastMessage}
           </div>
         ) : null}
@@ -623,25 +622,122 @@ export function ModelSettingsDialog({
                   </button>
                   {isExpanded ? (
                     <div className="model-provider-form">
-                      {provider.endpointModel ? (
+                      {provider.allowCustomModel ? (
+                        <div className="model-provider-field">
+                          <label id={`${provider.id}-model-label`} htmlFor={`${provider.id}-model-input`}>
+                            模型
+                          </label>
+                          <div className="model-custom-picker">
+                            <input
+                              id={`${provider.id}-model-input`}
+                              value={providerDraft.modelId}
+                              aria-expanded={isModelPickerOpen}
+                              aria-controls={`${provider.id}-model-suggestions`}
+                              onClick={() =>
+                                setOpenModelPickerProviderId((current) =>
+                                  current === provider.id ? null : provider.id,
+                                )
+                              }
+                              onChange={(event) => {
+                                const nextModelId = event.target.value;
+                                setDraft({
+                                  ...providerDraft,
+                                  modelId: nextModelId,
+                                  advanced: advancedWithModelCapability(
+                                    provider,
+                                    nextModelId,
+                                    providerDraft.advanced,
+                                    true,
+                                  ),
+                                });
+                              }}
+                              onKeyDown={(event) => {
+                                if (event.key === "Escape") {
+                                  setOpenModelPickerProviderId(null);
+                                }
+                              }}
+                            />
+                            <button
+                              type="button"
+                              className="model-custom-picker-trigger"
+                              aria-haspopup="listbox"
+                              aria-expanded={isModelPickerOpen}
+                              aria-label="展开模型建议"
+                              onClick={() =>
+                                setOpenModelPickerProviderId((current) =>
+                                  current === provider.id ? null : provider.id,
+                                )
+                              }
+                            >
+                              <ChevronDown
+                                className="model-picker-chevron"
+                                size={16}
+                                strokeWidth={1.9}
+                              />
+                            </button>
+                            {isModelPickerOpen ? (
+                              <div
+                                id={`${provider.id}-model-suggestions`}
+                                className="model-picker-menu"
+                                role="listbox"
+                                aria-labelledby={`${provider.id}-model-label`}
+                              >
+                                {provider.models.map((model) => (
+                                  <button
+                                    key={model}
+                                    type="button"
+                                    className={`model-picker-option${
+                                      providerDraft.modelId === model
+                                        ? " model-picker-option-selected"
+                                        : ""
+                                    }`}
+                                    role="option"
+                                    aria-selected={providerDraft.modelId === model}
+                                    onClick={() => {
+                                      setDraft({
+                                        ...providerDraft,
+                                        modelId: model,
+                                        advanced: advancedWithModelCapability(
+                                          provider,
+                                          model,
+                                          providerDraft.advanced,
+                                          true,
+                                        ),
+                                      });
+                                      setOpenModelPickerProviderId(null);
+                                    }}
+                                  >
+                                    <span>{model}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : provider.endpointModel ? (
                         <label>
                           <span>模型</span>
                           <input
                             list={`${provider.id}-models`}
-                            value={providerDraft.endpointId || providerDraft.modelId}
-                            onChange={(event) =>
+                            value={
+                              provider.endpointModel
+                                ? providerDraft.endpointId || providerDraft.modelId
+                                : providerDraft.modelId
+                            }
+                            onChange={(event) => {
+                              const nextModelId = event.target.value;
                               setDraft({
                                 ...providerDraft,
-                                endpointId: event.target.value,
-                                modelId: event.target.value,
+                                endpointId: provider.endpointModel ? nextModelId : providerDraft.endpointId,
+                                modelId: nextModelId,
                                 advanced: advancedWithModelCapability(
                                   provider,
-                                  event.target.value,
+                                  nextModelId,
                                   providerDraft.advanced,
                                   true,
                                 ),
-                              })
-                            }
+                              });
+                            }}
                           />
                           <datalist id={`${provider.id}-models`}>
                             {provider.models.map((model) => (

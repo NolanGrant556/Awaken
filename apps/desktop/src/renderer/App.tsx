@@ -6,7 +6,6 @@ import type {
   UIEvent as ReactUIEvent,
 } from "react";
 import {
-  CalendarClock,
   FolderPlus,
   GitBranch,
   ListFilter,
@@ -14,7 +13,9 @@ import {
   Monitor,
   PanelRightClose,
   PanelRightOpen,
+  Plug,
   Settings,
+  Wrench,
 } from "lucide-react";
 import {
   AwakenAppShell as AppShell,
@@ -650,9 +651,14 @@ export function App() {
   const activeApproval = runtimeState.approvals[0];
   const navItems: NavItem[] = [
     {
-      id: "automations",
-      label: "Automations",
-      icon: <CalendarClock size={16} strokeWidth={1.9} />,
+      id: "connectors",
+      label: "连接器",
+      icon: <Plug size={16} strokeWidth={1.9} />,
+    },
+    {
+      id: "skills",
+      label: "技能",
+      icon: <Wrench size={16} strokeWidth={1.9} />,
     },
   ];
   const topbarStatusLabel = desktopNeedsRestart

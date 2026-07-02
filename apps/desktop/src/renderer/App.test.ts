@@ -219,7 +219,8 @@ describe("App workbench presentation", () => {
     expect(html).toContain('rows="3"');
     expect(html).toContain("New Agent");
     expect(html).toContain("Add folder");
-    expect(html).toContain("Automations");
+    expect(html).toContain("连接器");
+    expect(html).toContain("技能");
     expect(html).toContain("请点击头像配置模型");
     expect(html).not.toContain(">Models<");
     expect(html).toContain("composer-bar-center");

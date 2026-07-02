@@ -194,6 +194,45 @@ func TestInvokeOpenAINonOK(t *testing.T) {
 	}
 }
 
+func TestInvokeOpenAINonOKIncludesSanitizedProviderDetail(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"Your request exceeded model token limit: 262144","api_key":"sk-secretvalue"}}`))
+	}))
+	defer server.Close()
+
+	_, err := Invoke(context.Background(), testConfig(server.URL), Request{UserPrompt: "hi"})
+	if !errors.Is(err, ErrRequestFailed) {
+		t.Fatalf("expected ErrRequestFailed, got %v", err)
+	}
+	text := err.Error()
+	if !strings.Contains(text, "status 400") || !strings.Contains(text, "Your request exceeded model token limit: 262144") {
+		t.Fatalf("expected provider detail in error, got %q", text)
+	}
+	if strings.Contains(text, "sk-secretvalue") {
+		t.Fatalf("expected provider detail to be redacted, got %q", text)
+	}
+}
+
+func TestRequestFailedErrorTruncatesProviderDetail(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(strings.Repeat("x", maxProviderErrorBodyBytes+128)))
+	}))
+	defer server.Close()
+
+	_, err := Invoke(context.Background(), testConfig(server.URL), Request{UserPrompt: "hi"})
+	if !errors.Is(err, ErrRequestFailed) {
+		t.Fatalf("expected ErrRequestFailed, got %v", err)
+	}
+	if got := len(err.Error()); got > maxProviderErrorBodyBytes+128 {
+		t.Fatalf("expected truncated provider detail, got length %d", got)
+	}
+	if !strings.HasSuffix(err.Error(), "...") {
+		t.Fatalf("expected truncation marker, got %q", err.Error())
+	}
+}
+
 func newChatServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

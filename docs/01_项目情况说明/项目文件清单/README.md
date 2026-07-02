@@ -27,7 +27,6 @@ Awaken/
 ├── src/                       # Go Agent Core / runtime / tools / server
 ├── docs/                      # 当前文档与历史归档
 ├── scripts/                   # 构建与验收脚本
-├── config.toml                # 非敏感 LLM/model 配置
 ├── package.json               # npm workspace 入口
 ├── package-lock.json
 ├── go.mod
@@ -212,9 +211,9 @@ apps/desktop/
 | --- | --- |
 | `index.ts` | Electron main 入口；创建窗口、注册 IPC、转发 SSE。 |
 | `runtime-supervisor.ts` | 启动、停止、重启 `awaken-core` binary。 |
-| `config-bootstrap.ts` | 初始化本地 `config.toml` 和 `.env`。 |
+| `config-bootstrap.ts` | 创建 Desktop profile 配置目录。 |
 | `runtime-supervisor.test.ts` | 测 runtime supervisor。 |
-| `config-bootstrap.test.ts` | 测配置初始化。 |
+| `config-bootstrap.test.ts` | 测 profile 配置目录初始化。 |
 
 ### 4.3 `src/preload/`
 
@@ -299,7 +298,7 @@ Agent 执行核心、LLM provider、工具系统、runtime session、HTTP/SSE se
 | `types.go` | LLM 请求、响应、tool call、stream 类型。 |
 | `openai_chat.go` | OpenAI Chat 协议实现。 |
 | `anthropic_messages.go` | Anthropic Messages 协议实现。 |
-| `config_file.go` | 解析 `config.toml`。 |
+| `config_file.go` | 解析底层 LLM 测试/兼容配置文件；不是 Desktop 用户入口。 |
 | `errors.go` | LLM 错误。 |
 | `test-llm.go` | 手动 LLM 连通性测试。 |
 | `*_test.go` | LLM 协议测试。 |

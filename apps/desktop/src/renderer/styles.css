@@ -238,20 +238,21 @@ pre {
 
 .model-settings-toast {
   position: absolute;
-  top: 14px;
+  top: 50%;
   left: 50%;
   z-index: 8;
-  max-width: min(320px, calc(100% - 68px));
-  padding: 8px 13px;
+  max-width: min(520px, calc(100% - 80px));
+  padding: 12px 16px;
   border-radius: var(--aw-radius-pill);
   background: var(--aw-button-black);
   color: var(--aw-text-onblack);
   box-shadow: 0 12px 30px rgba(15, 18, 25, 0.18), 0 2px 6px rgba(15, 18, 25, 0.08);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
-  line-height: 1.35;
+  line-height: 1.45;
   pointer-events: none;
-  transform: translateX(-50%);
+  text-align: center;
+  transform: translate(-50%, -50%);
   animation: model-settings-toast-in 120ms ease-out;
 }
 
@@ -387,12 +388,12 @@ pre {
 @keyframes model-settings-toast-in {
   from {
     opacity: 0;
-    transform: translate(-50%, -4px);
+    transform: translate(-50%, calc(-50% - 6px));
   }
 
   to {
     opacity: 1;
-    transform: translate(-50%, 0);
+    transform: translate(-50%, -50%);
   }
 }
 
@@ -515,6 +516,46 @@ pre {
 .model-picker {
   position: relative;
   min-width: 0;
+}
+
+.model-custom-picker {
+  position: relative;
+  min-width: 0;
+}
+
+.model-custom-picker input {
+  padding-right: 42px;
+}
+
+.model-custom-picker-trigger {
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--aw-text-secondary);
+  cursor: pointer;
+}
+
+.model-custom-picker-trigger:hover,
+.model-custom-picker-trigger:focus-visible,
+.model-custom-picker-trigger[aria-expanded="true"] {
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-primary);
+}
+
+.model-custom-picker-trigger:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--aw-accent) 36%, transparent);
+  outline-offset: 1px;
+}
+
+.model-custom-picker-trigger[aria-expanded="true"] .model-picker-chevron {
+  transform: rotate(180deg);
 }
 
 .model-picker-trigger {

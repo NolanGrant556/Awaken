@@ -3,17 +3,29 @@ package llm
 import (
 	"bufio"
 	stdctx "context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	ctx "awaken/src/context"
 )
+
+const maxProviderErrorBodyBytes = 4096
+
+var providerErrorSecretPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)(authorization\s*[:=]\s*)(bearer\s+)?[^"',}\s]+`),
+	regexp.MustCompile(`(?i)(api[_-]?key\s*[:=]\s*)[^"',}\s]+`),
+	regexp.MustCompile(`(?i)(token\s*[:=]\s*)[^"',}\s]+`),
+	regexp.MustCompile(`(?i)(secret\s*[:=]\s*)[^"',}\s]+`),
+	regexp.MustCompile(`sk-[A-Za-z0-9_-]{8,}`),
+}
 
 var (
 	httpClient = &http.Client{
@@ -187,10 +199,69 @@ func applyAuthHeaders(httpReq *http.Request, cfg Config, protocol Protocol) {
 }
 
 func requestFailedError(resp *http.Response) error {
-	// Drain body to allow connection reuse, but do not include body in error
-	// message to avoid leaking provider-internal details or secrets.
-	io.Copy(io.Discard, resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxProviderErrorBodyBytes+1))
+	detail := sanitizeProviderErrorDetail(body)
+	if detail != "" {
+		return fmt.Errorf("%w: status %d: %s", ErrRequestFailed, resp.StatusCode, detail)
+	}
 	return fmt.Errorf("%w: status %d", ErrRequestFailed, resp.StatusCode)
+}
+
+func sanitizeProviderErrorDetail(body []byte) string {
+	truncated := len(body) > maxProviderErrorBodyBytes
+	if truncated {
+		body = body[:maxProviderErrorBodyBytes]
+	}
+
+	detail := strings.TrimSpace(string(body))
+	if detail == "" {
+		return ""
+	}
+	detail = extractProviderErrorMessage(detail)
+	if detail == "" {
+		return ""
+	}
+	detail = strings.ReplaceAll(detail, "\r", " ")
+	detail = strings.ReplaceAll(detail, "\n", " ")
+	detail = redactProviderErrorSecrets(detail)
+	if truncated {
+		detail += "..."
+	}
+	return detail
+}
+
+func extractProviderErrorMessage(detail string) string {
+	var payload interface{}
+	if err := json.Unmarshal([]byte(detail), &payload); err != nil {
+		return detail
+	}
+	return findProviderErrorMessage(payload)
+}
+
+func findProviderErrorMessage(value interface{}) string {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		if errValue, ok := typed["error"]; ok {
+			if message := findProviderErrorMessage(errValue); message != "" {
+				return message
+			}
+		}
+		for _, key := range []string{"message", "error_description"} {
+			if message, ok := typed[key].(string); ok {
+				return strings.TrimSpace(message)
+			}
+		}
+	case string:
+		return strings.TrimSpace(typed)
+	}
+	return ""
+}
+
+func redactProviderErrorSecrets(detail string) string {
+	for _, pattern := range providerErrorSecretPatterns {
+		detail = pattern.ReplaceAllString(detail, "$1[redacted]")
+	}
+	return detail
 }
 
 // transportError 返回脱敏的 transport 错误，不暴露完整 URL 或 url.Error 细节。

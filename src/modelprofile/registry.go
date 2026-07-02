@@ -15,13 +15,15 @@ type Provider struct {
 	APIDocsURL        string                     `json:"api_docs_url"`
 	CodingPreset      bool                       `json:"coding_preset"`
 	EndpointModel     bool                       `json:"endpoint_model"`
+	AllowCustomModel  bool                       `json:"allow_custom_model"`
 	ModelCapabilities map[string]ModelCapability `json:"model_capabilities,omitempty"`
 }
 
 type ModelCapability struct {
-	ContextWindow    int `json:"context_window,omitempty"`
-	MaxOutputTokens  int `json:"max_output_tokens,omitempty"`
-	DefaultMaxTokens int `json:"default_max_tokens,omitempty"`
+	ContextWindow      int     `json:"context_window,omitempty"`
+	MaxOutputTokens    int     `json:"max_output_tokens,omitempty"`
+	DefaultMaxTokens   int     `json:"default_max_tokens,omitempty"`
+	DefaultTemperature float64 `json:"default_temperature,omitempty"`
 }
 
 func BuiltinProviders() []Provider {
@@ -113,51 +115,144 @@ func BuiltinProviders() []Provider {
 		{
 			ID:           "kimi-coding-plan",
 			DisplayName:  "Kimi Coding Plan",
-			BaseURL:      "https://api.moonshot.cn/v1",
+			BaseURL:      "https://api.kimi.com/coding/v1",
 			Protocol:     "openai_chat",
 			AuthScheme:   "bearer",
-			KeyEnvName:   "MOONSHOT_API_KEY",
-			DefaultModel: "kimi-k2.7-code",
+			KeyEnvName:   "KIMI_CODE_API_KEY",
+			DefaultModel: "kimi-for-coding",
 			Models: []string{
-				"kimi-k2.7-code",
-				"kimi-k2.7-code-highspeed",
-				"kimi-k2.6",
+				"kimi-for-coding",
 			},
-			DocsURL:      "https://platform.kimi.com/docs/guide/kimi-k2-7-code-quickstart",
-			APIDocsURL:   "https://platform.kimi.com/console/api-keys",
+			DocsURL:      "https://www.kimi.com/code/docs/en/third-party-tools/other-coding-agents.html",
+			APIDocsURL:   "https://www.kimi.com/code/console",
 			CodingPreset: true,
 			ModelCapabilities: map[string]ModelCapability{
-				"kimi-k2.7-code": {
-					ContextWindow:    256 * 1024,
-					MaxOutputTokens:  256 * 1024,
-					DefaultMaxTokens: 32 * 1024,
-				},
-				"kimi-k2.7-code-highspeed": {
-					ContextWindow:    256 * 1024,
-					MaxOutputTokens:  256 * 1024,
-					DefaultMaxTokens: 32 * 1024,
-				},
-				"kimi-k2.6": {
-					ContextWindow:    256 * 1024,
-					MaxOutputTokens:  256 * 1024,
-					DefaultMaxTokens: 32 * 1024,
+				"kimi-for-coding": {
+					ContextWindow:      256 * 1024,
+					MaxOutputTokens:    32 * 1024,
+					DefaultMaxTokens:   32 * 1024,
+					DefaultTemperature: 1,
 				},
 			},
 		},
 		{
 			ID:           "volcengine",
-			DisplayName:  "火山引擎",
-			BaseURL:      "https://ark.cn-beijing.volces.com/api/v3",
+			DisplayName:  "火山 Coding Plan",
+			BaseURL:      "https://ark.cn-beijing.volces.com/api/coding/v3",
 			Protocol:     "openai_chat",
 			AuthScheme:   "bearer",
 			KeyEnvName:   "ARK_API_KEY",
-			DefaultModel: "ep-your-ark-endpoint-id",
+			DefaultModel: "ark-code-latest",
 			Models: []string{
-				"ep-your-ark-endpoint-id",
+				"ark-code-latest",
+				"doubao-seed-code",
+				"doubao-seed-2.0-code",
+				"doubao-seed-2.0-pro",
+				"doubao-seed-2.0-lite",
+				"minimax-m2.5",
+				"minimax-m2.7",
+				"minimax-m3",
+				"glm-4.7",
+				"glm-5.2",
+				"glm-latest",
+				"deepseek-v3.2",
+				"deepseek-v4-flash",
+				"deepseek-v4-pro",
+				"kimi-k2.5",
+				"kimi-k2.6",
+				"kimi-k2.7-code",
 			},
-			DocsURL:       "https://www.volcengine.com/docs/82379/1330626",
-			APIDocsURL:    "https://www.volcengine.com/docs/82379/1541594",
-			EndpointModel: true,
+			DocsURL:          "https://www.volcengine.com/docs/82379/2188958",
+			APIDocsURL:       "https://www.volcengine.com/docs/82379/1541594",
+			CodingPreset:     true,
+			AllowCustomModel: true,
+			ModelCapabilities: map[string]ModelCapability{
+				"ark-code-latest": {
+					ContextWindow:    256000,
+					MaxOutputTokens:  32000,
+					DefaultMaxTokens: 32000,
+				},
+				"doubao-seed-code": {
+					ContextWindow:    256000,
+					MaxOutputTokens:  32000,
+					DefaultMaxTokens: 32000,
+				},
+				"doubao-seed-2.0-code": {
+					ContextWindow:    256000,
+					MaxOutputTokens:  128000,
+					DefaultMaxTokens: 128000,
+				},
+				"doubao-seed-2.0-pro": {
+					ContextWindow:    256000,
+					MaxOutputTokens:  128000,
+					DefaultMaxTokens: 128000,
+				},
+				"doubao-seed-2.0-lite": {
+					ContextWindow:    256000,
+					MaxOutputTokens:  128000,
+					DefaultMaxTokens: 128000,
+				},
+				"minimax-m2.5": {
+					ContextWindow:    200000,
+					MaxOutputTokens:  128000,
+					DefaultMaxTokens: 128000,
+				},
+				"minimax-m2.7": {
+					ContextWindow:    256000,
+					MaxOutputTokens:  128000,
+					DefaultMaxTokens: 128000,
+				},
+				"minimax-m3": {
+					ContextWindow:    256000,
+					MaxOutputTokens:  128000,
+					DefaultMaxTokens: 128000,
+				},
+				"glm-4.7": {
+					ContextWindow:    200000,
+					MaxOutputTokens:  128000,
+					DefaultMaxTokens: 128000,
+				},
+				"glm-5.2": {
+					ContextWindow:    256000,
+					MaxOutputTokens:  32000,
+					DefaultMaxTokens: 32000,
+				},
+				"glm-latest": {
+					ContextWindow:    256000,
+					MaxOutputTokens:  32000,
+					DefaultMaxTokens: 32000,
+				},
+				"deepseek-v3.2": {
+					ContextWindow:    128000,
+					MaxOutputTokens:  32000,
+					DefaultMaxTokens: 32000,
+				},
+				"deepseek-v4-flash": {
+					ContextWindow:    128000,
+					MaxOutputTokens:  32000,
+					DefaultMaxTokens: 32000,
+				},
+				"deepseek-v4-pro": {
+					ContextWindow:    128000,
+					MaxOutputTokens:  32000,
+					DefaultMaxTokens: 32000,
+				},
+				"kimi-k2.5": {
+					ContextWindow:    256000,
+					MaxOutputTokens:  32000,
+					DefaultMaxTokens: 32000,
+				},
+				"kimi-k2.6": {
+					ContextWindow:    256000,
+					MaxOutputTokens:  32000,
+					DefaultMaxTokens: 32000,
+				},
+				"kimi-k2.7-code": {
+					ContextWindow:    256000,
+					MaxOutputTokens:  32000,
+					DefaultMaxTokens: 32000,
+				},
+			},
 		},
 	}
 }

@@ -39,9 +39,12 @@ function tick(): Promise<void> {
 describe("RuntimeSupervisor", () => {
   it("passes runtime env and reports running after health succeeds", async () => {
     let spawnOptions: SpawnOptions | undefined;
+    const previousConfigDir = process.env.AWAKEN_CONFIG_DIR;
+    const previousAPIKey = process.env.LLM_API_KEY;
+    process.env.AWAKEN_CONFIG_DIR = "/tmp/legacy-config";
+    process.env.LLM_API_KEY = "legacy-key";
     const supervisor = new RuntimeSupervisor(
       {
-        configDir: "/tmp/awaken-config",
         defaultWorkspace: "/tmp/workspace",
       },
       {
@@ -55,7 +58,21 @@ describe("RuntimeSupervisor", () => {
       },
     );
 
-    const info = await supervisor.start();
+    let info: Awaited<ReturnType<RuntimeSupervisor["start"]>>;
+    try {
+      info = await supervisor.start();
+    } finally {
+      if (previousConfigDir === undefined) {
+        delete process.env.AWAKEN_CONFIG_DIR;
+      } else {
+        process.env.AWAKEN_CONFIG_DIR = previousConfigDir;
+      }
+      if (previousAPIKey === undefined) {
+        delete process.env.LLM_API_KEY;
+      } else {
+        process.env.LLM_API_KEY = previousAPIKey;
+      }
+    }
 
     expect(info).toEqual({
       status: "running",
@@ -63,9 +80,10 @@ describe("RuntimeSupervisor", () => {
     });
     expect(spawnOptions?.env).toMatchObject({
       AWAKEN_CORE_ADDR: "127.0.0.1:19001",
-      AWAKEN_CONFIG_DIR: "/tmp/awaken-config",
       AWAKEN_DEFAULT_WORKSPACE: "/tmp/workspace",
     });
+    expect(spawnOptions?.env).not.toHaveProperty("AWAKEN_CONFIG_DIR");
+    expect(spawnOptions?.env).not.toHaveProperty("LLM_API_KEY");
   });
 
   it("retries with a new port when startup health fails", async () => {
@@ -80,7 +98,6 @@ describe("RuntimeSupervisor", () => {
       .mockResolvedValueOnce(19002);
     const supervisor = new RuntimeSupervisor(
       {
-        configDir: "/tmp/awaken-config",
         maxStartAttempts: 2,
       },
       {
@@ -118,7 +135,6 @@ describe("RuntimeSupervisor", () => {
   it("reports crashed when the child cannot spawn", async () => {
     const supervisor = new RuntimeSupervisor(
       {
-        configDir: "/tmp/awaken-config",
         maxStartAttempts: 1,
       },
       {
@@ -144,7 +160,6 @@ describe("RuntimeSupervisor", () => {
     const children: FakeChild[] = [];
     const supervisor = new RuntimeSupervisor(
       {
-        configDir: "/tmp/awaken-config",
       },
       {
         allocatePort: vi
@@ -182,7 +197,6 @@ describe("RuntimeSupervisor", () => {
     const children: FakeChild[] = [];
     const supervisor = new RuntimeSupervisor(
       {
-        configDir: "/tmp/awaken-config",
       },
       {
         allocatePort: vi
@@ -225,7 +239,6 @@ describe("RuntimeSupervisor", () => {
     const pendingHealth = () => new Promise<void>(() => {});
     const supervisor = new RuntimeSupervisor(
       {
-        configDir: "/tmp/awaken-config",
         maxStartAttempts: 3,
       },
       {
@@ -265,7 +278,6 @@ describe("RuntimeSupervisor", () => {
       .mockResolvedValueOnce(19002);
     const supervisor = new RuntimeSupervisor(
       {
-        configDir: "/tmp/awaken-config",
       },
       {
         allocatePort,
@@ -305,7 +317,6 @@ describe("RuntimeSupervisor", () => {
     );
     const supervisor = new RuntimeSupervisor(
       {
-        configDir: "/tmp/awaken-config",
       },
       {
         allocatePort: async () => 19001,
@@ -340,7 +351,6 @@ describe("RuntimeSupervisor", () => {
     const spawnProcess = vi.fn(() => asChild(new FakeChild()));
     const supervisor = new RuntimeSupervisor(
       {
-        configDir: "/tmp/awaken-config",
         maxStartAttempts: 3,
       },
       {

@@ -634,7 +634,6 @@ app.whenReady().then(async () => {
   modelProfileStore = new ModelProfileStore(configDir);
   const lastWorkspace = await readLastWorkspace();
   supervisor = new RuntimeSupervisor({
-    configDir,
     defaultWorkspace: lastWorkspace ?? app.getPath("home"),
   });
   supervisor.onStatusChange((info) => {

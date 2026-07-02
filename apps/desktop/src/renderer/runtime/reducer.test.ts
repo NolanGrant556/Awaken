@@ -109,11 +109,11 @@ describe("runtime reducer cancel handling", () => {
       }),
     ]);
     expect(state.phase).toBe("error");
-    expect(state.errorMessage).toBe("API key 缺失，请在 .env 中配置 LLM_API_KEY");
+    expect(state.errorMessage).toBe("API key 缺失，请在 Settings > Models 配置模型 API key");
     expect(state.errorMessage).not.toContain("sk-");
     expect(state.errorMessage).not.toContain("LLM_API_KEY=");
     const errorStep = state.steps.find((step) => step.id === "run-error");
-    expect(errorStep?.description).toBe("API key 缺失，请在 .env 中配置 LLM_API_KEY");
+    expect(errorStep?.description).toBe("API key 缺失，请在 Settings > Models 配置模型 API key");
     expect(errorStep?.tag).toBe("PROVIDER_AUTH_MISSING");
   });
 
@@ -1281,7 +1281,7 @@ describe("runtime reducer run narrative projection", () => {
     expect(state.narrative.committedItems).toContainEqual({
       kind: "answer",
       id: "answer:error:1",
-      markdown: "API key 缺失，请在 .env 中配置 LLM_API_KEY",
+      markdown: "API key 缺失，请在 Settings > Models 配置模型 API key",
       status: "error",
     });
     expect(

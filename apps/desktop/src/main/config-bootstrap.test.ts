@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -25,24 +25,22 @@ afterEach(async () => {
 });
 
 describe("ensureConfigDir", () => {
-  it("creates config.toml and .env templates on first launch", async () => {
+  it("creates only the config directory on first launch", async () => {
     const configDir = await ensureConfigDir();
 
     expect(configDir).toBe(join(userDataDir, "config"));
-    expect(await readFile(join(configDir, "config.toml"), "utf8")).toContain("[llm]");
-    expect(await readFile(join(configDir, "config.toml"), "utf8")).toContain("model_id");
-    expect(await readFile(join(configDir, ".env"), "utf8")).toContain("LLM_API_KEY=");
+    expect(await readdir(configDir)).toEqual([]);
   });
 
-  it("preserves existing config.toml and .env files", async () => {
+  it("preserves existing files in the config directory", async () => {
     const configDir = join(userDataDir, "config");
     await mkdir(configDir, { recursive: true });
-    await writeFile(join(configDir, "config.toml"), "sentinel config", "utf8");
-    await writeFile(join(configDir, ".env"), "sentinel env", "utf8");
+    await writeFile(join(configDir, "model-profiles.json"), "sentinel profiles", "utf8");
+    await writeFile(join(configDir, "notes.txt"), "sentinel notes", "utf8");
 
     await ensureConfigDir();
 
-    expect(await readFile(join(configDir, "config.toml"), "utf8")).toBe("sentinel config");
-    expect(await readFile(join(configDir, ".env"), "utf8")).toBe("sentinel env");
+    expect(await readFile(join(configDir, "model-profiles.json"), "utf8")).toBe("sentinel profiles");
+    expect(await readFile(join(configDir, "notes.txt"), "utf8")).toBe("sentinel notes");
   });
 });

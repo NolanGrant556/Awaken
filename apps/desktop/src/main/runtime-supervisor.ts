@@ -24,7 +24,6 @@ export interface SupervisorStatusInfo {
 }
 
 export interface SupervisorOptions {
-  configDir: string;
   defaultWorkspace?: string;
   maxStartAttempts?: number;
 }
@@ -69,6 +68,17 @@ function allocatePort(): Promise<number> {
       }
     });
   });
+}
+
+function sanitizedRuntimeEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.AWAKEN_CONFIG_DIR;
+  delete env.LLM_API_KEY;
+  delete env.LLM_BASE_URL;
+  delete env.LLM_MODEL_ID;
+  delete env.LLM_PROTOCOL;
+  delete env.LLM_AUTH_SCHEME;
+  return env;
 }
 
 async function waitForHealth(baseUrl: string, timeoutMs = 10000, intervalMs = 200): Promise<void> {
@@ -145,9 +155,8 @@ export class RuntimeSupervisor {
 
         child = this.deps.spawnProcess(binaryPath, [], {
           env: {
-            ...process.env,
+            ...sanitizedRuntimeEnv(),
             AWAKEN_CORE_ADDR: `127.0.0.1:${port}`,
-            AWAKEN_CONFIG_DIR: this.options.configDir,
             ...(this.options.defaultWorkspace
               ? { AWAKEN_DEFAULT_WORKSPACE: this.options.defaultWorkspace }
               : {}),

@@ -183,6 +183,28 @@ func TestRunServiceUsesModelProfileForNewAndExistingThreads(t *testing.T) {
 	}
 }
 
+func TestRunServiceWithModelProfilesRequiresProfile(t *testing.T) {
+	service := NewRunServiceWithModelProfiles(
+		func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent {
+			t.Fatalf("agent should not be created without a model profile")
+			return nil
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return "ok", nil
+			})
+		},
+	)
+
+	_, err := service.StartRun(StartRunRequest{
+		Input:     "hello",
+		Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()},
+	})
+	if !errors.Is(err, ErrMissingModelProfile) {
+		t.Fatalf("expected ErrMissingModelProfile, got %v", err)
+	}
+}
+
 func waitForRunStatus(t *testing.T, service *RunService, runID string, status RunStatus) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

@@ -53,28 +53,46 @@ export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
   {
     id: "kimi-coding-plan",
     display_name: "Kimi Coding Plan",
-    base_url: "https://api.moonshot.cn/v1",
+    base_url: "https://api.kimi.com/coding/v1",
     protocol: "openai_chat",
     auth_scheme: "bearer",
-    key_env_name: "MOONSHOT_API_KEY",
-    default_model: "kimi-k2.7-code",
-    models: ["kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6"],
-    docs_url: "https://platform.kimi.com/docs/guide/kimi-k2-7-code-quickstart",
-    api_docs_url: "https://platform.kimi.com/console/api-keys",
+    key_env_name: "KIMI_CODE_API_KEY",
+    default_model: "kimi-for-coding",
+    models: ["kimi-for-coding"],
+    docs_url: "https://www.kimi.com/code/docs/en/third-party-tools/other-coding-agents.html",
+    api_docs_url: "https://www.kimi.com/code/console",
     coding_preset: true,
   },
   {
     id: "volcengine",
-    display_name: "火山引擎",
-    base_url: "https://ark.cn-beijing.volces.com/api/v3",
+    display_name: "火山 Coding Plan",
+    base_url: "https://ark.cn-beijing.volces.com/api/coding/v3",
     protocol: "openai_chat",
     auth_scheme: "bearer",
     key_env_name: "ARK_API_KEY",
-    default_model: "ep-your-ark-endpoint-id",
-    models: ["ep-your-ark-endpoint-id"],
-    docs_url: "https://www.volcengine.com/docs/82379/1330626",
+    default_model: "ark-code-latest",
+    models: [
+      "ark-code-latest",
+      "doubao-seed-code",
+      "doubao-seed-2.0-code",
+      "doubao-seed-2.0-pro",
+      "doubao-seed-2.0-lite",
+      "minimax-m2.5",
+      "minimax-m2.7",
+      "minimax-m3",
+      "glm-4.7",
+      "glm-5.2",
+      "glm-latest",
+      "deepseek-v3.2",
+      "deepseek-v4-flash",
+      "deepseek-v4-pro",
+      "kimi-k2.5",
+      "kimi-k2.6",
+      "kimi-k2.7-code",
+    ],
+    docs_url: "https://www.volcengine.com/docs/82379/2188958",
     api_docs_url: "https://www.volcengine.com/docs/82379/1541594",
-    endpoint_model: true,
+    allow_custom_model: true,
   },
 ];
 
@@ -110,6 +128,29 @@ function trimTrailingSlash(value: string): string {
   return value.trim().replace(/\/+$/, "");
 }
 
+function normalizeProviderModelId(provider: ModelProviderWire | undefined, modelId: string): string {
+  const trimmed = modelId.trim();
+  if (!provider) return trimmed;
+  if (provider.endpoint_model) return trimmed || provider.default_model;
+  if (provider.allow_custom_model) return trimmed || provider.default_model;
+  if (trimmed && provider.models.includes(trimmed)) return trimmed;
+  return provider.default_model;
+}
+
+function normalizeProviderBaseURL(
+  provider: ModelProviderWire | undefined,
+  baseURL: string | undefined,
+): string {
+  const normalized = trimTrailingSlash(baseURL || provider?.base_url || "");
+  if (provider?.id === "kimi-coding-plan" && normalized === "https://api.kimi.com/coding") {
+    return "https://api.kimi.com/coding/v1";
+  }
+  if (provider?.id === "volcengine" && normalized === "https://ark.cn-beijing.volces.com/api/v3") {
+    return "https://ark.cn-beijing.volces.com/api/coding/v3";
+  }
+  return normalized;
+}
+
 function maskKey(credential?: StoredCredential): string | undefined {
   if (!credential?.last4) {
     return undefined;
@@ -123,18 +164,98 @@ function profileStatus(profile: StoredModelProfile): RuntimeModelProfileSummaryW
   return "ready";
 }
 
+function providerTestStatusMessage(status: number, provider?: ModelProviderWire): string {
+  if (provider?.id === "kimi-coding-plan") {
+    switch (status) {
+      case 402:
+        return "连接测试失败：Kimi Code 会员权益无法验证，请确认会员状态。";
+      case 403:
+        return "连接测试失败：Kimi Code 拒绝当前客户端或账号权限，请确认会员权益、额度和客户端支持状态。";
+      case 404:
+        return "连接测试失败：未找到 kimi-for-coding 或账号无权访问该模型。";
+    }
+  }
+  if (provider?.id === "volcengine") {
+    switch (status) {
+      case 404:
+        return "连接测试失败：火山 Coding Plan 未找到该模型，或当前 API key 无权访问该模型。";
+    }
+  }
+  switch (status) {
+    case 401:
+      return "连接测试失败：API key 无效或未授权。";
+    case 403:
+      return "连接测试失败：API key 无权访问该服务。";
+    case 404:
+      return "连接测试失败：Base URL 不支持 /models，请检查服务地址。";
+    case 429:
+      return "连接测试失败：请求被限流，请稍后重试。";
+    default:
+      if (status >= 500) {
+        return `连接测试失败：服务端返回 HTTP ${status}。`;
+      }
+      return `连接测试失败：服务返回 HTTP ${status}。`;
+  }
+}
+
+async function testModelEndpoint(
+  provider: ModelProviderWire,
+  baseURL: string,
+  modelId: string,
+  apiKey: string,
+  signal: AbortSignal,
+): Promise<Response> {
+  if (provider.id === "kimi-coding-plan" || provider.id === "volcengine") {
+    return fetch(`${baseURL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: modelId || provider.default_model,
+        messages: [{ role: "user", content: "ping" }],
+        ...(provider.id === "kimi-coding-plan" ? { temperature: 1 } : {}),
+        max_tokens: 1,
+        stream: false,
+      }),
+      signal,
+    });
+  }
+  return fetch(`${baseURL}/models`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+    },
+    signal,
+  });
+}
+
+function providerTestSuccessMessage(provider: ModelProviderWire): string {
+  if (provider.id === "kimi-coding-plan") {
+    return "连接测试通过：Kimi Code 已响应 chat/completions。";
+  }
+  if (provider.id === "volcengine") {
+    return "连接测试通过：火山 Coding Plan 已响应 chat/completions。";
+  }
+  return "连接测试通过：服务已响应 /models。";
+}
+
 function toSummary(profile: StoredModelProfile): RuntimeModelProfileSummaryWire {
+  const provider = providerById(profile.providerId);
+  const modelId = normalizeProviderModelId(provider, profile.modelId);
+  const baseURL = normalizeProviderBaseURL(provider, profile.baseURL);
   const advanced = normalizeAdvancedWithModelCapability(
     profile.advanced,
     profile.providerId,
-    profile.advanced?.endpointId?.trim() || profile.modelId,
+    provider?.endpoint_model ? profile.advanced?.endpointId?.trim() || modelId : modelId,
   );
   return {
     id: profile.id,
     provider_id: profile.providerId,
     display_name: profile.displayName,
-    model_id: profile.modelId,
-    base_url: profile.baseURL,
+    model_id: modelId,
+    base_url: baseURL,
     protocol: profile.protocol,
     auth_scheme: profile.authScheme,
     has_key: Boolean(profile.credential),
@@ -198,7 +319,7 @@ export class ModelProfileStore {
   async saveProfile(request: ModelProfileSaveRequest): Promise<RuntimeModelProfileSummaryWire> {
     const provider = providerById(request.providerId);
     if (!provider) {
-      throw new Error("Unknown model provider");
+      throw new Error("未知模型供应商");
     }
 
     const store = await this.readStore();
@@ -206,18 +327,19 @@ export class ModelProfileStore {
       ? store.profiles.findIndex((profile) => profile.id === request.id)
       : -1;
     const existing = existingIndex >= 0 ? store.profiles[existingIndex] : undefined;
-    const modelId = request.modelId.trim() || provider.default_model;
+    const modelId = normalizeProviderModelId(provider, request.modelId);
+    const baseURL = normalizeProviderBaseURL(provider, request.baseURL);
     const advanced = normalizeAdvancedWithModelCapability(
       request.advanced ?? existing?.advanced,
       provider.id,
-      request.advanced?.endpointId?.trim() || modelId,
+      provider.endpoint_model ? request.advanced?.endpointId?.trim() || modelId : modelId,
     );
     const profile: StoredModelProfile = {
       id: existing?.id ?? randomUUID(),
       providerId: provider.id,
       displayName: request.displayName?.trim() || provider.display_name,
       modelId,
-      baseURL: trimTrailingSlash(request.baseURL || provider.base_url),
+      baseURL,
       protocol: request.protocol?.trim() || provider.protocol,
       authScheme: request.authScheme?.trim() || provider.auth_scheme,
       enabled: request.enabled ?? existing?.enabled ?? true,
@@ -278,17 +400,20 @@ export class ModelProfileStore {
       throw new Error("Configure an API key in Settings > Models before running Awaken");
     }
 
+    const provider = providerById(profile.providerId);
+    const modelId = normalizeProviderModelId(provider, profile.modelId);
+    const baseURL = normalizeProviderBaseURL(provider, profile.baseURL);
     const advanced = normalizeAdvancedWithModelCapability(
       profile.advanced,
       profile.providerId,
-      profile.advanced?.endpointId?.trim() || profile.modelId,
+      provider?.endpoint_model ? profile.advanced?.endpointId?.trim() || modelId : modelId,
     );
     return {
       profileId: profile.id,
       providerId: profile.providerId,
       displayName: profile.displayName,
-      modelId: advanced.endpointId?.trim() || profile.modelId,
-      baseURL: profile.baseURL,
+      modelId: provider?.endpoint_model ? advanced.endpointId?.trim() || modelId : modelId,
+      baseURL,
       protocol: profile.protocol,
       authScheme: profile.authScheme,
       apiKey: decryptCredential(profile.credential),
@@ -310,29 +435,27 @@ export class ModelProfileStore {
   async testProfile(request: ModelProfileSaveRequest): Promise<ModelProfileTestResult> {
     const provider = providerById(request.providerId);
     if (!provider) {
-      return { ok: false, message: "Unknown model provider" };
+      return { ok: false, message: "连接测试失败：未知模型供应商。" };
     }
     const apiKey = request.apiKey?.trim() || (request.id ? await this.apiKeyForProfile(request.id) : "");
     if (!apiKey) {
-      return { ok: false, message: "API key is required before testing" };
+      return { ok: false, message: "连接测试失败：请先填写 API key。" };
     }
-    const baseURL = trimTrailingSlash(request.baseURL || provider.base_url);
+    const baseURL = normalizeProviderBaseURL(provider, request.baseURL);
+    const modelId = normalizeProviderModelId(provider, request.modelId);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
     try {
-      const response = await fetch(`${baseURL}/models`, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-        },
-        signal: controller.signal,
-      });
+      const response = await testModelEndpoint(provider, baseURL, modelId, apiKey, controller.signal);
       if (response.ok) {
-        return { ok: true, message: "Provider responded successfully" };
+        return { ok: true, message: providerTestSuccessMessage(provider) };
       }
-      return { ok: false, message: `Provider test failed with status ${response.status}` };
-    } catch {
-      return { ok: false, message: "Provider test failed before a successful response" };
+      return { ok: false, message: providerTestStatusMessage(response.status, provider) };
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        return { ok: false, message: "连接测试超时：8 秒内未收到服务响应。" };
+      }
+      return { ok: false, message: "连接测试失败：无法连接到服务，请检查 Base URL 或网络。" };
     } finally {
       clearTimeout(timeout);
     }

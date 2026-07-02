@@ -4,7 +4,6 @@ import (
 	"os"
 	"testing"
 
-	"awaken/src/llm"
 	"awaken/src/runtime"
 )
 
@@ -28,16 +27,7 @@ func TestResolveDefaultWorkspaceFallsBackToCwd(t *testing.T) {
 	}
 }
 
-func TestModelConfigFromProfileDoesNotInheritFileConfig(t *testing.T) {
-	fileCfg := llm.Config{
-		APIKey:                "file-key",
-		BaseURL:               "https://file.example",
-		Model:                 "file-model",
-		Temperature:           0.7,
-		MaxTokens:             8192,
-		ContextWindow:         400000,
-		AutoCompactTokenLimit: 300000,
-	}
+func TestModelConfigFromProfileUsesOnlyProfile(t *testing.T) {
 	profile := &runtime.ModelProfileConfig{
 		APIKey:        "profile-key",
 		BaseURL:       "https://profile.example",
@@ -47,19 +37,14 @@ func TestModelConfigFromProfileDoesNotInheritFileConfig(t *testing.T) {
 		ContextWindow: 1000000,
 	}
 
-	fromFile := modelConfigFromLLMConfig(fileCfg)
-	fromProfile := modelConfigFromProfile(profile)
-
-	if fromFile.ContextWindow != 400000 {
-		t.Fatalf("expected file fallback context window, got %+v", fromFile)
+	got := modelConfigFromProfile(profile)
+	if got.APIKey != "profile-key" || got.Model != "profile-model" {
+		t.Fatalf("expected profile model config, got %+v", got)
 	}
-	if fromProfile.APIKey != "profile-key" || fromProfile.Model != "profile-model" {
-		t.Fatalf("expected profile model config, got %+v", fromProfile)
+	if got.ContextWindow != 1000000 {
+		t.Fatalf("expected profile context window, got %+v", got)
 	}
-	if fromProfile.ContextWindow != 1000000 {
-		t.Fatalf("expected profile context window, got %+v", fromProfile)
-	}
-	if fromProfile.AutoCompactTokenLimit != 0 || fromProfile.Temperature != 0 || fromProfile.MaxTokens != 0 {
-		t.Fatalf("profile config inherited file-only values: %+v", fromProfile)
+	if got.AutoCompactTokenLimit != 0 || got.Temperature != 0 || got.MaxTokens != 0 {
+		t.Fatalf("profile config inherited non-profile values: %+v", got)
 	}
 }

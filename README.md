@@ -84,7 +84,6 @@ git status --short
 │   ├── server/                  # 本地 HTTP routes 与 SSE
 │   ├── tool/                    # tool interface、registry、schema、permission model
 │   └── tools/                   # 内置工具实现
-├── config.toml                  # 非敏感本地 LLM/runtime 配置
 └── package.json                 # npm workspaces：Awaken Design System 与 desktop
 ```
 
@@ -167,29 +166,11 @@ Awaken Desktop
 
 ## 配置
 
-敏感信息放 `.env`：
+模型配置的唯一用户入口是 Awaken Desktop 的 `Settings > Models`。
 
-```bash
-LLM_API_KEY=your_api_key
-```
+用户在这里配置 provider、model、API key、上下文窗口和输出上限；Desktop 会把 profile 注入每次 run。正式 Desktop 路径不读取项目根目录的 `.env` 或 `config.toml`，也不会要求用户编辑本地配置文件。
 
-非敏感配置放 `config.toml`：
-
-```toml
-[llm]
-base_url = "https://api.deepseek.com/anthropic"
-model_id = "deepseek-v4-pro"
-protocol = "anthropic_messages"
-auth_scheme = "auto"
-
-[model]
-context_window = 400000
-temperature = 0.7
-max_output_tokens = 8192
-auto_compact_token_limit = 360000
-```
-
-`.env` 已被 git ignore，不能提交。
+API key 由 Electron `safeStorage` 保存；非敏感 profile 字段保存到 Desktop user data 目录下的 `config/model-profiles.json`。
 
 ## 开发命令
 
@@ -306,7 +287,6 @@ web_search
 
 这部分只面向 `awaken-core` / Go runtime 的内部测试与验证，不是 Awaken 使用流程，也不是独立启动入口。
 
-- `AWAKEN_CONFIG_DIR`：指定 `.env` 与 `config.toml` 所在目录。
 - `AWAKEN_DEFAULT_WORKSPACE`：指定 `/v1/runtime/info` 返回的默认 workspace。
 - 未设置这些环境变量时，runtime 保持 Go 侧默认行为。
 - Runtime smoke 会在测试进程内启动本地 server，不形成 Awaken 的第三个使用入口。

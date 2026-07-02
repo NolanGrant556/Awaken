@@ -7,7 +7,6 @@ import (
 	"os"
 
 	"awaken/src/agentcore"
-	"awaken/src/llm"
 	"awaken/src/runtime"
 	"awaken/src/server"
 	_ "awaken/src/tools"
@@ -19,16 +18,12 @@ func main() {
 		addr = "127.0.0.1:8787"
 	}
 
-	cfg := llm.LoadConfig()
 	defaultWorkspace := resolveDefaultWorkspace()
-	infoProvider := server.NewLLMRuntimeInfoProvider(cfg.Model, cfg.BaseURL, cfg.APIKey, defaultWorkspace, string(llm.ResolveProtocol(cfg)))
+	infoProvider := server.NewLLMRuntimeInfoProvider("", "", "", defaultWorkspace, "")
 
 	runService := runtime.NewRunServiceWithModelProfiles(
 		func(workspace runtime.WorkspaceConfig, threadID string, profile *runtime.ModelProfileConfig) *agentcore.Agent {
-			modelCfg := modelConfigFromLLMConfig(cfg)
-			if profile != nil {
-				modelCfg = modelConfigFromProfile(profile)
-			}
+			modelCfg := modelConfigFromProfile(profile)
 			agentCfg := agentcore.AgentConfig{
 				MaxThoughts: 0,
 				EntryPoint:  "awaken-core",
@@ -54,20 +49,6 @@ func main() {
 
 	log.Printf("awaken-core listening on http://%s", addr)
 	log.Fatal(srv.ListenAndServe())
-}
-
-func modelConfigFromLLMConfig(cfg llm.Config) agentcore.ModelConfig {
-	return agentcore.ModelConfig{
-		APIKey:                cfg.APIKey,
-		BaseURL:               cfg.BaseURL,
-		Model:                 cfg.Model,
-		Protocol:              string(llm.ResolveProtocol(cfg)),
-		Temperature:           cfg.Temperature,
-		MaxTokens:             cfg.MaxTokens,
-		AuthScheme:            cfg.AuthScheme,
-		ContextWindow:         cfg.ContextWindow,
-		AutoCompactTokenLimit: cfg.AutoCompactTokenLimit,
-	}
 }
 
 func modelConfigFromProfile(profile *runtime.ModelProfileConfig) agentcore.ModelConfig {

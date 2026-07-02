@@ -14,6 +14,7 @@ describe("runtime shared model provider normalization", () => {
       models: ["deepseek-v4-pro"],
       docs_url: "https://api-docs.deepseek.com/",
       api_docs_url: "https://platform.deepseek.com/api_keys",
+      allow_custom_model: true,
       model_capabilities: {
         "deepseek-v4-pro": {
           context_window: 1_000_000,
@@ -27,6 +28,8 @@ describe("runtime shared model provider normalization", () => {
       contextWindow: 1_000_000,
       maxOutputTokens: 384_000,
       defaultMaxTokens: 8192,
+      defaultTemperature: undefined,
     });
+    expect(provider.allowCustomModel).toBe(true);
   });
 });

@@ -371,7 +371,7 @@ function answerId(state: RunNarrativeState, event: AguiEvent): string {
 function narrativeErrorMessage(event: AguiEvent): string {
   const rawMessage = event.message || "Runtime returned an error";
   if (event.code === "PROVIDER_AUTH_MISSING") {
-    return "API key 缺失，请在 .env 中配置 LLM_API_KEY";
+    return "API key 缺失，请在 Settings > Models 配置模型 API key";
   }
   if (event.code === "PROVIDER_REQUEST_FAILED") {
     return `Provider 请求失败：${rawMessage}`;

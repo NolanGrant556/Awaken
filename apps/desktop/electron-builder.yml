@@ -13,13 +13,20 @@ extraResources:
   - from: resources/bin
     to: bin
     filter: ["**/*"]
+  - from: build/icon.png
+    to: icon.png
 mac:
+  icon: build/icon.icns
   category: public.app-category.developer-tools
   target:
     - target: dmg
       arch:
         - arm64
         - x64
+win:
+  icon: build/icon.ico
+linux:
+  icon: build/icon.png
 dmg:
   contents:
     - x: 130

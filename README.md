@@ -293,10 +293,16 @@ web_search
 
 ## Desktop 打包状态
 
-`electron-builder` 当前可以完成本地 Desktop 打包，但正式分发前还有 release packaging readiness 项：
+`electron-builder` 当前可以完成本地 Desktop 打包；Awaken 自己的 app icon 已配置在 `apps/desktop/build/`：
+
+- `icon-source.png`：原始输入图。
+- `icon.png`：运行期 Dock/window 图标和 Linux 图标。
+- `icon.icns`：macOS 打包图标。
+- `icon.ico`：Windows 图标预留。
+
+正式分发前还有 release packaging readiness 项：
 
 - `apps/desktop/package.json` 还没有完整的 `description` / `author`。
-- 还没有配置 Awaken 自己的 `.icns` / app icon，当前可能使用默认 Electron 图标。
 - 本机没有有效的 `Developer ID Application` 证书时，macOS code signing 会跳过，打包产物未签名、未公证。
 
 这些提醒不影响本机开发测试、统一启动流程、真实 LLM run 或 runtime supervisor 验收。正式分发给其他 macOS 用户前，需要补齐 app icon、Developer ID signing 和 notarization，否则可能触发 Gatekeeper 的“无法验证开发者”等提示。

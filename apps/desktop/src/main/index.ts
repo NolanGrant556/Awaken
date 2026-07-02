@@ -5,6 +5,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  nativeImage,
   screen as electronScreen,
   shell,
   webContents,
@@ -44,6 +45,10 @@ import { ModelProfileStore } from "./model-profile-store.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let runtimeBaseUrl: string | null = null;
 const isDevServer = process.argv.includes("--dev");
+const appName = "Awaken";
+
+app.setName(appName);
+app.setPath("userData", join(app.getPath("appData"), "@awaken", "desktop"));
 
 let supervisor: RuntimeSupervisor | null = null;
 let modelProfileStore: ModelProfileStore | null = null;
@@ -60,6 +65,28 @@ const defaultWindowWidth = 1440;
 const defaultWindowHeight = 960;
 const minimumWindowWidth = 1120;
 const minimumWindowHeight = 760;
+
+function desktopIconPath(): string {
+  if (app.isPackaged) {
+    return join(process.resourcesPath, "icon.png");
+  }
+  return join(__dirname, "../../build/icon.png");
+}
+
+function loadDesktopIcon() {
+  const icon = nativeImage.createFromPath(desktopIconPath());
+  return icon.isEmpty() ? undefined : icon;
+}
+
+function setMacDockIcon(): void {
+  if (process.platform !== "darwin") {
+    return;
+  }
+  const icon = loadDesktopIcon();
+  if (icon) {
+    app.dock?.setIcon(icon);
+  }
+}
 
 function centeredBounds(width: number, height: number, workArea: Rectangle): Rectangle {
   return {
@@ -306,6 +333,7 @@ function cleanupWindowSubscriptions(targetId: number): void {
 }
 
 function createMainWindow(): BrowserWindow {
+  const icon = loadDesktopIcon();
   const mainWindow = new BrowserWindow({
     width: defaultWindowWidth,
     height: defaultWindowHeight,
@@ -315,6 +343,7 @@ function createMainWindow(): BrowserWindow {
     autoHideMenuBar: true,
     show: false,
     title: "Awaken Desktop",
+    ...(icon ? { icon } : {}),
     ...(process.platform === "darwin"
       ? {
           titleBarStyle: "hiddenInset" as const,
@@ -630,6 +659,7 @@ async function writeLastWorkspace(workspacePath: string): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  setMacDockIcon();
   const configDir = await ensureConfigDir();
   modelProfileStore = new ModelProfileStore(configDir);
   const lastWorkspace = await readLastWorkspace();

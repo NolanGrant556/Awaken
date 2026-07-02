@@ -1,5 +1,6 @@
 {
   "name": "@awaken/desktop",
+  "productName": "Awaken",
   "version": "0.0.0",
   "private": true,
   "type": "module",

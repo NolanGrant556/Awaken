@@ -26,7 +26,7 @@
 
 ## 样式边界
 
-- [ ] 是否修改 `styles.css` 中的 Workbench 中间区域样式边界？
+- [ ] 是否修改 `styles/workbench.css`，或在其他 Desktop renderer 样式文件中修改 Workbench 中间区域样式边界？
   - 触发前缀：`.aw-run-stage-*`、`.run-stage-*`、`.execution-feed`、`.execution-turn-*`、`.execution-prompt-*`、`.composer-*`、`.turn-marker-*`、`.narrative-*`。
   - 如果“是”：是否确认改动没有破坏空态 center composer、运行态 dock composer、turn 分组、prompt header、marker rail 或 narrative item 的布局？
 
@@ -104,7 +104,7 @@
 
 ## 快速判断流程
 
-如果 PR 完全不涉及 `App.tsx`、`workbenchPresentation.ts`、中间区域组件、或 `styles.css` 中 `.aw-run-stage-*` / `.run-stage-*` / `.execution-feed` / `.execution-turn-*` / `.execution-prompt-*` / `.composer-*` / `.turn-marker-*` / `.narrative-*` 等样式，可以只勾选：
+如果 PR 完全不涉及 `App.tsx`、`workbenchPresentation.ts`、中间区域组件、`styles/workbench.css`，或其他 Desktop renderer 样式文件中的 `.aw-run-stage-*` / `.run-stage-*` / `.execution-feed` / `.execution-turn-*` / `.execution-prompt-*` / `.composer-*` / `.turn-marker-*` / `.narrative-*` 等样式，可以只勾选：
 
 - [ ] 本 PR 不涉及中间区域改动，跳过以上检查。
 

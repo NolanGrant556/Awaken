@@ -4,6 +4,7 @@ import "@awaken/design-system/tokens/tokens.css";
 import "@awaken/design-system/tokens/components.css";
 import "@awaken/design-system/index.css";
 import "./styles.css";
+import "./styles/workbench.css";
 import { App } from "./App";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

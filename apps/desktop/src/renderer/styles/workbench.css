@@ -1,0 +1,309 @@
+.run-stage-center-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  align-self: stretch;
+  width: 100%;
+  min-height: 100%;
+  padding-bottom: 0;
+  transform: translateY(-118px);
+}
+
+.composer-dock-stack,
+.composer-approval-card,
+.composer-runtime-panels {
+  display: grid;
+  gap: 10px;
+  width: min(760px, 100%);
+  min-width: 0;
+}
+
+.composer-runtime-panels {
+  gap: 8px;
+}
+
+.aw-run-stage-scroll {
+  --aw-prompt-anchor-offset: 0px;
+  --aw-turn-content-width: 760px;
+  padding-top: 0;
+  scroll-padding-top: var(--aw-prompt-anchor-offset);
+  overflow-anchor: none;
+}
+
+.aw-run-stage-scroll:has(.run-stage-center-composer) {
+  align-content: stretch;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.narrative-list {
+  display: grid;
+  gap: 12px;
+  max-width: 860px;
+}
+
+.narrative-item {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-panel);
+  background: var(--aw-surface-panel);
+}
+
+.narrative-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.narrative-item-header h2 {
+  min-width: 0;
+  margin: 0;
+  color: var(--aw-text-primary);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.narrative-item-header span {
+  flex: 0 0 auto;
+  color: var(--aw-text-subtle);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 16px;
+}
+
+.narrative-item p {
+  max-height: 280px;
+  margin: 0;
+  overflow: auto;
+  color: var(--aw-text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.execution-turn-section {
+  display: grid;
+  align-content: start;
+  justify-items: center;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  scroll-margin-top: var(--aw-prompt-anchor-offset, 0px);
+  overflow-anchor: none;
+}
+
+.turn-marker-rail {
+  position: absolute;
+  top: 28px;
+  right: 12px;
+  bottom: 112px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  width: 18px;
+  gap: 14px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.turn-marker-button {
+  display: grid;
+  place-items: center end;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.turn-marker-button:focus-visible {
+  outline: 2px solid rgba(31, 31, 31, 0.18);
+  outline-offset: 1px;
+}
+
+.turn-marker-bar {
+  display: block;
+  width: 12px;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(31, 31, 31, 0.14);
+  transition:
+    width 140ms ease,
+    background-color 140ms ease;
+}
+
+.turn-marker-button:hover .turn-marker-bar,
+.turn-marker-button:focus-visible .turn-marker-bar {
+  width: 14px;
+  background: rgba(31, 31, 31, 0.28);
+}
+
+.turn-marker-button-active .turn-marker-bar {
+  width: 16px;
+  background: rgba(31, 31, 31, 0.46);
+}
+
+.turn-marker-rail-compact {
+  gap: 8px;
+}
+
+.turn-marker-rail-compact .turn-marker-button {
+  height: 12px;
+}
+
+.turn-marker-rail-compact .turn-marker-bar {
+  width: 10px;
+}
+
+.turn-marker-rail-compact .turn-marker-button:hover .turn-marker-bar,
+.turn-marker-rail-compact .turn-marker-button:focus-visible .turn-marker-bar {
+  width: 12px;
+}
+
+.turn-marker-rail-compact .turn-marker-button-active .turn-marker-bar {
+  width: 14px;
+}
+
+.turn-marker-rail-summary {
+  gap: 5px;
+}
+
+.turn-marker-rail-summary .turn-marker-button {
+  width: 16px;
+  height: 8px;
+}
+
+.turn-marker-rail-summary .turn-marker-bar {
+  width: 8px;
+  height: 2px;
+  background: rgba(31, 31, 31, 0.12);
+}
+
+.turn-marker-rail-summary .turn-marker-button:hover .turn-marker-bar,
+.turn-marker-rail-summary .turn-marker-button:focus-visible .turn-marker-bar {
+  width: 10px;
+}
+
+.turn-marker-rail-summary .turn-marker-button-active .turn-marker-bar {
+  width: 12px;
+  height: 3px;
+  background: rgba(31, 31, 31, 0.44);
+}
+
+.execution-turn-section-latest {
+  min-height: var(--aw-latest-turn-min-height, auto);
+  overflow-anchor: none;
+}
+
+.execution-turn-column {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  box-sizing: border-box;
+  width: min(var(--aw-turn-content-width), 100%);
+  max-width: var(--aw-turn-content-width);
+  min-width: 0;
+}
+
+.execution-turn-header {
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  width: 100%;
+  padding-top: 0;
+  padding-bottom: 4px;
+  background:
+    linear-gradient(
+      180deg,
+      var(--aw-surface-work) 0%,
+      var(--aw-surface-work) 78%,
+      rgba(248, 248, 247, 0) 100%
+    );
+}
+
+.execution-turn-section-latest .execution-turn-header {
+  position: sticky;
+  top: var(--aw-prompt-anchor-offset, 0px);
+  z-index: 3;
+}
+
+.execution-turn-header .execution-prompt-block {
+  padding: 0;
+}
+
+.execution-turn-header .execution-prompt-bubble {
+  --execution-prompt-collapsed-content-height: 54px;
+  --execution-prompt-expanded-content-height: 162px;
+  width: 100%;
+  max-width: 100%;
+  padding: 10px 16px;
+  border-color: rgba(31, 31, 31, 0.08);
+  border-radius: 12px;
+  background: #fbfbf8;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+}
+
+.execution-turn-body {
+  display: grid;
+  gap: 14px;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 0 16px;
+}
+
+.execution-turn-body > * {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.execution-feed {
+  width: 100%;
+  max-width: 100%;
+  justify-self: stretch;
+}
+
+.execution-feed > :not(.execution-turn-section) {
+  box-sizing: border-box;
+  width: min(var(--aw-turn-content-width), 100%);
+  max-width: var(--aw-turn-content-width);
+  min-width: 0;
+  justify-self: center;
+}
+
+.narrative-kind-planning,
+.narrative-kind-thinking,
+.narrative-kind-answer {
+  background: var(--aw-surface-detail);
+}
+
+.narrative-kind-approval {
+  border-color: var(--aw-warning-soft-border);
+  background: var(--aw-warning-soft-bg);
+}
+
+.narrative-kind-fileChange {
+  border-color: var(--aw-success-soft-border);
+  background: var(--aw-success-soft-bg);
+}
+
+.composer-runtime-panel {
+  width: 100%;
+  padding: 12px 14px;
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.08);
+}

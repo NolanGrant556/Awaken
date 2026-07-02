@@ -82,7 +82,7 @@ AppShell -> WorkbenchShell -> RunStage -> ComposerDock / ExecutionFeed
 
 ## 样式边界
 
-`apps/desktop/src/renderer/styles.css` 中以下类名前缀属于 Workbench 中间区域边界。修改这些选择器时，默认触发本契约与 `docs/frontend/review-checklist.md`：
+`apps/desktop/src/renderer/styles/workbench.css` 承载 Workbench 中间区域样式边界。以下类名前缀属于该边界；无论它们出现在 `workbench.css` 还是其他 Desktop renderer 样式文件中，修改这些选择器时都默认触发本契约与 `docs/frontend/review-checklist.md`：
 
 - `.aw-run-stage-*`
 - `.run-stage-*`
@@ -129,7 +129,8 @@ AppShell -> WorkbenchShell -> RunStage -> ComposerDock / ExecutionFeed
 - `apps/desktop/src/renderer/App.tsx`：页面编排与交互实现
 - `apps/desktop/src/renderer/workbenchPresentation.ts`：可测试的纯决策函数
 - `apps/desktop/src/renderer/App.test.ts`：现有 workbench presentation 单测
-- `apps/desktop/src/renderer/styles.css`：当前样式（后续迁移时以本契约为边界）
+- `apps/desktop/src/renderer/styles.css`：Desktop renderer 基础样式入口
+- `apps/desktop/src/renderer/styles/workbench.css`：Workbench 中间区域样式边界
 - `docs/frontend/review-checklist.md`：PR 用检查清单
 
 ---

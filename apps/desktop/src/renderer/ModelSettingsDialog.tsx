@@ -27,6 +27,7 @@ type DraftState = {
   enabled: boolean;
   isDefault: boolean;
   endpointId: string;
+  advanced?: RuntimeModelProfileSummary["advanced"];
 };
 
 type ModelSettingsSection = "configure" | "configured";
@@ -35,11 +36,18 @@ type ConfiguredProfileDraft = {
   enabled: boolean;
   contextWindow: number;
   contextWindowInput: string;
+  maxTokens: number;
+  maxTokensInput: string;
 };
 
-const CONTEXT_WINDOW_MIN = 200_000;
+const CONTEXT_WINDOW_MIN = 8_000;
 const CONTEXT_WINDOW_MAX = 1_000_000;
 const CONTEXT_WINDOW_SLIDER_STEP = 1;
+const CONTEXT_WINDOW_ANCHOR = 400_000;
+const CONTEXT_WINDOW_ANCHOR_SNAP_TOLERANCE = 10_000;
+const MAX_TOKENS_DEFAULT = 8192;
+const MAX_TOKENS_MIN = 256;
+const MAX_TOKENS_MAX = 1_000_000;
 
 type ModelSettingsDialogProps = {
   open: boolean;
@@ -57,10 +65,54 @@ function contextWindowForProfile(profile: RuntimeModelProfileSummary): number {
   return clampContextWindow(profile.advanced?.contextWindow);
 }
 
+function clampMaxTokens(value: number | undefined): number {
+  if (!Number.isFinite(value)) return MAX_TOKENS_DEFAULT;
+  return Math.min(MAX_TOKENS_MAX, Math.max(MAX_TOKENS_MIN, Math.round(value ?? MAX_TOKENS_DEFAULT)));
+}
+
+function maxTokensForProfile(profile: RuntimeModelProfileSummary): number {
+  return clampMaxTokens(profile.advanced?.maxTokens);
+}
+
+function modelCapabilityFor(provider: ModelProvider, modelId: string) {
+  return provider.modelCapabilities[modelId];
+}
+
+function advancedWithModelCapability(
+  provider: ModelProvider,
+  modelId: string,
+  advanced: RuntimeModelProfileSummary["advanced"],
+  overwrite: boolean,
+): RuntimeModelProfileSummary["advanced"] {
+  const capability = modelCapabilityFor(provider, modelId);
+  if (!capability) return advanced;
+  const inferredMaxTokens = capability.maxOutputTokens ?? capability.defaultMaxTokens;
+  const shouldUseInferredMaxTokens =
+    overwrite ||
+    advanced?.maxTokens === undefined ||
+    (capability.maxOutputTokens !== undefined &&
+      advanced?.maxTokens === capability.defaultMaxTokens);
+
+  return {
+    ...advanced,
+    contextWindow:
+      overwrite || advanced?.contextWindow === undefined
+        ? capability.contextWindow
+        : advanced.contextWindow,
+    maxTokens: shouldUseInferredMaxTokens ? inferredMaxTokens : advanced.maxTokens,
+  };
+}
+
 function parseContextWindowInput(value: string): number | undefined {
   if (value.trim() === "") return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? clampContextWindow(parsed) : undefined;
+}
+
+function parseMaxTokensInput(value: string): number | undefined {
+  if (value.trim() === "") return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? clampMaxTokens(parsed) : undefined;
 }
 
 function contextWindowFill(value: number): number {
@@ -69,6 +121,12 @@ function contextWindowFill(value: number): number {
       (CONTEXT_WINDOW_MAX - CONTEXT_WINDOW_MIN)) *
     100
   );
+}
+
+function snapContextWindowAnchor(value: number): number {
+  return Math.abs(value - CONTEXT_WINDOW_ANCHOR) <= CONTEXT_WINDOW_ANCHOR_SNAP_TOLERANCE
+    ? CONTEXT_WINDOW_ANCHOR
+    : value;
 }
 
 function contextCompressionValue(contextWindow: number): number {
@@ -85,12 +143,15 @@ function configuredDraftsFromProfiles(
         enabled: profile.enabled,
         contextWindow: contextWindowForProfile(profile),
         contextWindowInput: contextWindowForProfile(profile).toString(),
+        maxTokens: maxTokensForProfile(profile),
+        maxTokensInput: maxTokensForProfile(profile).toString(),
       },
     ]),
   );
 }
 
 function draftFromProvider(provider: ModelProvider): DraftState {
+  const advanced = advancedWithModelCapability(provider, provider.defaultModel, undefined, true);
   return {
     providerId: provider.id,
     modelId: provider.defaultModel,
@@ -101,6 +162,7 @@ function draftFromProvider(provider: ModelProvider): DraftState {
     enabled: true,
     isDefault: true,
     endpointId: provider.endpointModel ? provider.defaultModel : "",
+    advanced,
   };
 }
 
@@ -119,25 +181,34 @@ function draftFromProfile(
     enabled: profile.enabled,
     isDefault: profile.isDefault,
     endpointId: profile.advanced?.endpointId ?? (provider.endpointModel ? profile.modelId : ""),
+    advanced: profile.advanced,
   };
 }
 
 function toSaveRequest(draft: DraftState, provider: ModelProvider): ModelProfileSaveRequest {
   const endpointId = draft.endpointId.trim();
+  const modelId = provider.endpointModel ? endpointId || draft.modelId : draft.modelId;
+  const advanced = advancedWithModelCapability(
+    provider,
+    modelId,
+    {
+      ...draft.advanced,
+      endpointId: provider.endpointModel ? endpointId || undefined : undefined,
+    },
+    false,
+  );
   return {
     id: draft.profileId,
     providerId: provider.id,
     displayName: provider.displayName,
-    modelId: provider.endpointModel ? endpointId || draft.modelId : draft.modelId,
+    modelId,
     baseURL: draft.baseURL,
     protocol: draft.protocol,
     authScheme: draft.authScheme,
     apiKey: draft.apiKey.trim() || undefined,
     enabled: draft.enabled,
     isDefault: draft.isDefault,
-    advanced: {
-      endpointId: provider.endpointModel ? endpointId || undefined : undefined,
-    },
+    advanced,
   };
 }
 
@@ -275,7 +346,8 @@ export function ModelSettingsDialog({
     if (!next) return false;
     return (
       next.enabled !== profile.enabled ||
-      next.contextWindow !== contextWindowForProfile(profile)
+      next.contextWindow !== contextWindowForProfile(profile) ||
+      next.maxTokens !== maxTokensForProfile(profile)
     );
   });
 
@@ -307,6 +379,23 @@ export function ModelSettingsDialog({
     updateConfiguredDraft(profileId, {
       contextWindow: nextValue,
       contextWindowInput: nextValue.toString(),
+    });
+  }
+
+  function snapConfiguredContextWindow(profileId: string): void {
+    setConfiguredDrafts((current) => {
+      const existing = current[profileId];
+      if (!existing) return current;
+      const nextValue = snapContextWindowAnchor(existing.contextWindow);
+      if (nextValue === existing.contextWindow) return current;
+      return {
+        ...current,
+        [profileId]: {
+          ...existing,
+          contextWindow: nextValue,
+          contextWindowInput: nextValue.toString(),
+        },
+      };
     });
   }
 
@@ -343,13 +432,47 @@ export function ModelSettingsDialog({
     });
   }
 
+  function updateConfiguredMaxTokensInput(profileId: string, value: string): void {
+    const parsed = parseMaxTokensInput(value);
+    setConfiguredDrafts((current) => {
+      const existing = current[profileId];
+      if (!existing) return current;
+      return {
+        ...current,
+        [profileId]: {
+          ...existing,
+          maxTokens: parsed ?? existing.maxTokens,
+          maxTokensInput: value,
+        },
+      };
+    });
+    setMessage(null);
+  }
+
+  function commitConfiguredMaxTokensInput(profileId: string): void {
+    setConfiguredDrafts((current) => {
+      const existing = current[profileId];
+      if (!existing) return current;
+      const nextValue = parseMaxTokensInput(existing.maxTokensInput) ?? existing.maxTokens;
+      return {
+        ...current,
+        [profileId]: {
+          ...existing,
+          maxTokens: nextValue,
+          maxTokensInput: nextValue.toString(),
+        },
+      };
+    });
+  }
+
   async function saveConfiguredDrafts(): Promise<void> {
     const changedProfiles = profiles.filter((profile) => {
       const next = configuredDrafts[profile.id];
       if (!next) return false;
       return (
         next.enabled !== profile.enabled ||
-        next.contextWindow !== contextWindowForProfile(profile)
+        next.contextWindow !== contextWindowForProfile(profile) ||
+        next.maxTokens !== maxTokensForProfile(profile)
       );
     });
     if (changedProfiles.length === 0) return;
@@ -373,6 +496,7 @@ export function ModelSettingsDialog({
           advanced: {
             ...profile.advanced,
             contextWindow: next.contextWindow,
+            maxTokens: next.maxTokens,
           },
         });
       }
@@ -510,6 +634,12 @@ export function ModelSettingsDialog({
                                 ...providerDraft,
                                 endpointId: event.target.value,
                                 modelId: event.target.value,
+                                advanced: advancedWithModelCapability(
+                                  provider,
+                                  event.target.value,
+                                  providerDraft.advanced,
+                                  true,
+                                ),
                               })
                             }
                           />
@@ -565,7 +695,16 @@ export function ModelSettingsDialog({
                                     role="option"
                                     aria-selected={providerDraft.modelId === model}
                                     onClick={() => {
-                                      setDraft({ ...providerDraft, modelId: model });
+                                      setDraft({
+                                        ...providerDraft,
+                                        modelId: model,
+                                        advanced: advancedWithModelCapability(
+                                          provider,
+                                          model,
+                                          providerDraft.advanced,
+                                          true,
+                                        ),
+                                      });
                                       setOpenModelPickerProviderId(null);
                                     }}
                                   >
@@ -659,6 +798,7 @@ export function ModelSettingsDialog({
                   <span>启用状态</span>
                   <span>上下文长度</span>
                   <span>上下文压缩值</span>
+                  <span>输出上限</span>
                   <span aria-hidden="true" />
                 </div>
                 {profiles.length === 0 ? (
@@ -670,9 +810,12 @@ export function ModelSettingsDialog({
                         enabled: profile.enabled,
                         contextWindow: contextWindowForProfile(profile),
                         contextWindowInput: contextWindowForProfile(profile).toString(),
+                        maxTokens: maxTokensForProfile(profile),
+                        maxTokensInput: maxTokensForProfile(profile).toString(),
                       };
-                    const sliderStyle = {
+                    const contextStyle = {
                       "--context-fill": `${contextWindowFill(profileDraft.contextWindow)}%`,
+                      "--context-anchor": `${contextWindowFill(CONTEXT_WINDOW_ANCHOR)}%`,
                     } as CSSProperties;
                     return (
                       <div className="configured-models-row" key={profile.id}>
@@ -697,7 +840,7 @@ export function ModelSettingsDialog({
                           />
                           <span />
                         </label>
-                        <div className="configured-context">
+                        <div className="configured-context" style={contextStyle}>
                           <div className="configured-context-main">
                             <input
                               className="configured-context-range"
@@ -706,10 +849,12 @@ export function ModelSettingsDialog({
                               max={CONTEXT_WINDOW_MAX}
                               step={CONTEXT_WINDOW_SLIDER_STEP}
                               value={profileDraft.contextWindow}
-                              style={sliderStyle}
                               onChange={(event) =>
                                 updateConfiguredContextWindow(profile.id, Number(event.target.value))
                               }
+                              onPointerUp={() => snapConfiguredContextWindow(profile.id)}
+                              onKeyUp={() => snapConfiguredContextWindow(profile.id)}
+                              onBlur={() => snapConfiguredContextWindow(profile.id)}
                               aria-label={`${profile.modelId} 上下文长度`}
                             />
                             <input
@@ -725,15 +870,40 @@ export function ModelSettingsDialog({
                               aria-label={`${profile.modelId} 精确上下文长度`}
                             />
                           </div>
-                          <div className="configured-context-scale" aria-hidden="true">
-                            <span>200K</span>
-                            <span>400K</span>
-                            <span>1M</span>
+                          <div className="configured-context-scale">
+                            <span className="configured-context-scale-label configured-context-scale-start">
+                              8K
+                            </span>
+                            <button
+                              type="button"
+                              className="configured-context-anchor"
+                              onClick={() =>
+                                updateConfiguredContextWindow(profile.id, CONTEXT_WINDOW_ANCHOR)
+                              }
+                              aria-label={`${profile.modelId} 设置上下文长度为 400K`}
+                            >
+                              400K
+                            </button>
+                            <span className="configured-context-scale-label configured-context-scale-end">
+                              1M
+                            </span>
                           </div>
                         </div>
                         <span className="configured-compression-value">
                           {contextCompressionValue(profileDraft.contextWindow)}
                         </span>
+                        <input
+                          className="configured-token-input"
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          value={profileDraft.maxTokensInput}
+                          onChange={(event) =>
+                            updateConfiguredMaxTokensInput(profile.id, event.target.value)
+                          }
+                          onBlur={() => commitConfiguredMaxTokensInput(profile.id)}
+                          aria-label={`${profile.modelId} 输出 token 上限`}
+                        />
                         <div className="configured-models-actions">
                           <div className="configured-models-save-actions">
                             <Button

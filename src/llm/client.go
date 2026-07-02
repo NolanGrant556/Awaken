@@ -63,19 +63,23 @@ func LoadConfig() Config {
 	authScheme := firstNonEmpty(fileCfg.LLM.AuthScheme, os.Getenv("LLM_AUTH_SCHEME"))
 	temperature := fileCfg.Model.Temperature
 	maxTokens := fileCfg.Model.MaxOutputTokens
+	contextWindow := fileCfg.Model.ContextWindow
+	autoCompactTokenLimit := fileCfg.Model.AutoCompactTokenLimit
 
 	if baseURL == "" {
 		baseURL = "https://api.openai.com/v1"
 	}
 
 	return Config{
-		APIKey:      apiKey,
-		BaseURL:     strings.TrimSuffix(baseURL, "/"),
-		Model:       model,
-		Protocol:    Protocol(protocol),
-		Temperature: temperature,
-		MaxTokens:   maxTokens,
-		AuthScheme:  authScheme,
+		APIKey:                apiKey,
+		BaseURL:               strings.TrimSuffix(baseURL, "/"),
+		Model:                 model,
+		Protocol:              Protocol(protocol),
+		Temperature:           temperature,
+		MaxTokens:             maxTokens,
+		AuthScheme:            authScheme,
+		ContextWindow:         contextWindow,
+		AutoCompactTokenLimit: autoCompactTokenLimit,
 	}
 }
 

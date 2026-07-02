@@ -166,6 +166,10 @@ function formatTokenCount(value?: number): string | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return undefined;
   }
+  if (value >= 1_000_000) {
+    const amount = value / 1_000_000;
+    return `${Number.isInteger(amount) ? amount.toFixed(0) : amount.toFixed(1)}M`;
+  }
   if (value >= 1000) {
     const amount = value / 1000;
     return `${amount >= 10 ? amount.toFixed(0) : amount.toFixed(1)}k`;
@@ -187,17 +191,17 @@ function contextUsageMeta(
   contextWindow: ReturnType<typeof createInitialRuntimeState>["inspectorSummary"]["contextWindow"],
 ): Pick<ComposerBarMetaItem, "label" | "value" | "progress"> | undefined {
   const estimated = formatTokenCount(contextWindow?.estimatedTokens);
-  const effective = formatTokenCount(contextWindow?.effectiveWindow);
-  if (estimated && effective) {
+  const modelWindow = formatTokenCount(contextWindow?.modelWindow);
+  if (estimated && modelWindow) {
     const progress =
       typeof contextWindow?.estimatedTokens === "number" &&
-      typeof contextWindow?.effectiveWindow === "number" &&
-      contextWindow.effectiveWindow > 0
-        ? contextWindow.estimatedTokens / contextWindow.effectiveWindow
+      typeof contextWindow?.modelWindow === "number" &&
+      contextWindow.modelWindow > 0
+        ? contextWindow.estimatedTokens / contextWindow.modelWindow
         : undefined;
     return {
       label: "context windows",
-      value: `${estimated} / ${effective}`,
+      value: `${estimated} / ${modelWindow}`,
       progress,
     };
   }
@@ -229,6 +233,7 @@ const DEFAULT_INSPECTOR_WIDTH = 300;
 const MIN_INSPECTOR_WIDTH = 260;
 const MAX_INSPECTOR_WIDTH = 520;
 const LAYOUT_STEP = 12;
+const INSPECTOR_RESPONSIVE_COLLAPSE_QUERY = "(max-width: 1180px)";
 const DEFAULT_PROMPT_ANCHOR_OFFSET = 0;
 const RUN_STAGE_COMPOSER_SAFE_GAP = 72;
 const LATEST_OUTPUT_FOLLOW_THRESHOLD = 48;
@@ -301,6 +306,8 @@ export function App() {
   const threadLoadSeqRef = useRef(0);
   const runStageScrollRef = useRef<HTMLDivElement | null>(null);
   const composerDockRef = useRef<HTMLDivElement | null>(null);
+  const inspectorCollapsedValueRef = useRef(false);
+  const inspectorCollapsedBeforeResponsiveRef = useRef<boolean | null>(null);
   const runtimeClient = runtimeClientRef.current;
 
   const [runtimeState, dispatch] = useReducer(
@@ -391,7 +398,40 @@ export function App() {
 
   useEffect(() => {
     writeStoredValue("awaken:layout:inspectorCollapsed", String(inspectorCollapsed));
+    inspectorCollapsedValueRef.current = inspectorCollapsed;
   }, [inspectorCollapsed]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+
+    const media = window.matchMedia(INSPECTOR_RESPONSIVE_COLLAPSE_QUERY);
+    const handleResponsiveInspector = (matches: boolean) => {
+      if (matches) {
+        if (inspectorCollapsedBeforeResponsiveRef.current === null) {
+          inspectorCollapsedBeforeResponsiveRef.current = inspectorCollapsedValueRef.current;
+          setInspectorCollapsed(true);
+        }
+        return;
+      }
+
+      const previousCollapsed = inspectorCollapsedBeforeResponsiveRef.current;
+      inspectorCollapsedBeforeResponsiveRef.current = null;
+      if (previousCollapsed !== null) {
+        setInspectorCollapsed(previousCollapsed);
+      }
+    };
+    const handleChange = (event: MediaQueryListEvent) => {
+      handleResponsiveInspector(event.matches);
+    };
+
+    handleResponsiveInspector(media.matches);
+    media.addEventListener("change", handleChange);
+    return () => {
+      media.removeEventListener("change", handleChange);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1610,6 +1650,16 @@ export function App() {
     setActiveNavId(id);
   }
 
+  function handleToggleInspectorCollapsed(): void {
+    setInspectorCollapsed((collapsed) => {
+      const nextCollapsed = !collapsed;
+      if (inspectorCollapsedBeforeResponsiveRef.current !== null) {
+        inspectorCollapsedBeforeResponsiveRef.current = nextCollapsed;
+      }
+      return nextCollapsed;
+    });
+  }
+
   function handleAddContext(): void {
     setNotice("Context picker is not wired yet.");
   }
@@ -1890,6 +1940,67 @@ export function App() {
     );
   }
 
+  function renderComposerRuntimePanels() {
+    const panels: Array<{
+      id: string;
+      title: string;
+      message: string;
+      tone?: "error";
+    }> = [];
+
+    if (desktopNeedsRestart) {
+      panels.push({
+        id: "restart",
+        title: "Awaken needs restart",
+        message: "Quit Awaken and open it again.",
+        tone: "error",
+      });
+    }
+    if (desktopStarting) {
+      panels.push({
+        id: "starting",
+        title: "Starting Awaken",
+        message: "Preparing the desktop app.",
+      });
+    }
+    if (runtimeState.errorMessage) {
+      panels.push({
+        id: "run-error",
+        title: "Run error",
+        message: runtimeState.errorMessage,
+        tone: "error",
+      });
+    }
+    if (notice) {
+      panels.push({
+        id: "notice",
+        title: "Notice",
+        message: notice,
+      });
+    }
+
+    if (panels.length === 0) {
+      return null;
+    }
+
+    return (
+      <div className="composer-runtime-panels">
+        {panels.map((panel) => (
+          <div
+            key={panel.id}
+            className={`runtime-panel composer-runtime-panel${
+              panel.tone === "error" ? " runtime-panel-error" : ""
+            }`}
+            role={panel.tone === "error" ? "alert" : "status"}
+          >
+            <strong>{panel.title}</strong>
+            <p>{panel.message}</p>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <>
       <div
@@ -1940,7 +2051,7 @@ export function App() {
                     type="button"
                     className="workbench-chrome-icon workbench-chrome-panel-toggle"
                     aria-label={inspectorCollapsed ? "Expand inspector" : "Collapse inspector"}
-                    onClick={() => setInspectorCollapsed((collapsed) => !collapsed)}
+                    onClick={handleToggleInspectorCollapsed}
                   >
                     {inspectorCollapsed ? (
                       <PanelRightOpen size={14} strokeWidth={1.9} />
@@ -2033,6 +2144,7 @@ export function App() {
                       showCenterComposer ? undefined : (
                         <ComposerDock ref={composerDockRef}>
                           <div className="composer-dock-stack">
+                            {renderComposerRuntimePanels()}
                             {renderActiveApprovalPrompt()}
                             <ComposerBar
                               value={composerValue}
@@ -2057,37 +2169,10 @@ export function App() {
                       )
                     }
                   >
-                    {desktopNeedsRestart ? (
-                      <div className="runtime-panel runtime-panel-error">
-                        <strong>Awaken needs restart</strong>
-                        <p>Quit Awaken and open it again.</p>
-                      </div>
-                    ) : null}
-
-                    {desktopStarting ? (
-                      <div className="runtime-panel">
-                        <strong>Starting Awaken</strong>
-                        <p>Preparing the desktop app.</p>
-                      </div>
-                    ) : null}
-
-                    {runtimeState.errorMessage ? (
-                      <div className="runtime-panel runtime-panel-error">
-                        <strong>Run error</strong>
-                        <p>{runtimeState.errorMessage}</p>
-                      </div>
-                    ) : null}
-
-                    {notice ? (
-                      <div className="runtime-panel">
-                        <strong>Notice</strong>
-                        <p>{notice}</p>
-                      </div>
-                    ) : null}
-
                     {showCenterComposer ? (
                       <div className="run-stage-center-composer">
                         <TaskWelcome />
+                        {renderComposerRuntimePanels()}
                         {renderActiveApprovalPrompt()}
                         <ComposerBar
                           value={composerValue}

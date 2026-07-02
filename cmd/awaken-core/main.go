@@ -25,27 +25,9 @@ func main() {
 
 	runService := runtime.NewRunServiceWithModelProfiles(
 		func(workspace runtime.WorkspaceConfig, threadID string, profile *runtime.ModelProfileConfig) *agentcore.Agent {
-			modelCfg := agentcore.ModelConfig{
-				APIKey:      cfg.APIKey,
-				BaseURL:     cfg.BaseURL,
-				Model:       cfg.Model,
-				Protocol:    string(llm.ResolveProtocol(cfg)),
-				Temperature: cfg.Temperature,
-				MaxTokens:   cfg.MaxTokens,
-				AuthScheme:  cfg.AuthScheme,
-			}
+			modelCfg := modelConfigFromLLMConfig(cfg)
 			if profile != nil {
-				modelCfg.APIKey = profile.APIKey
-				modelCfg.BaseURL = profile.BaseURL
-				modelCfg.Model = profile.ModelID
-				modelCfg.Protocol = profile.Protocol
-				modelCfg.AuthScheme = profile.AuthScheme
-				if profile.Temperature != 0 {
-					modelCfg.Temperature = profile.Temperature
-				}
-				if profile.MaxTokens != 0 {
-					modelCfg.MaxTokens = profile.MaxTokens
-				}
+				modelCfg = modelConfigFromProfile(profile)
 			}
 			agentCfg := agentcore.AgentConfig{
 				MaxThoughts: 0,
@@ -72,6 +54,36 @@ func main() {
 
 	log.Printf("awaken-core listening on http://%s", addr)
 	log.Fatal(srv.ListenAndServe())
+}
+
+func modelConfigFromLLMConfig(cfg llm.Config) agentcore.ModelConfig {
+	return agentcore.ModelConfig{
+		APIKey:                cfg.APIKey,
+		BaseURL:               cfg.BaseURL,
+		Model:                 cfg.Model,
+		Protocol:              string(llm.ResolveProtocol(cfg)),
+		Temperature:           cfg.Temperature,
+		MaxTokens:             cfg.MaxTokens,
+		AuthScheme:            cfg.AuthScheme,
+		ContextWindow:         cfg.ContextWindow,
+		AutoCompactTokenLimit: cfg.AutoCompactTokenLimit,
+	}
+}
+
+func modelConfigFromProfile(profile *runtime.ModelProfileConfig) agentcore.ModelConfig {
+	if profile == nil {
+		return agentcore.ModelConfig{}
+	}
+	return agentcore.ModelConfig{
+		APIKey:        profile.APIKey,
+		BaseURL:       profile.BaseURL,
+		Model:         profile.ModelID,
+		Protocol:      profile.Protocol,
+		Temperature:   profile.Temperature,
+		MaxTokens:     profile.MaxTokens,
+		AuthScheme:    profile.AuthScheme,
+		ContextWindow: profile.ContextWindow,
+	}
 }
 
 func resolveDefaultWorkspace() string {

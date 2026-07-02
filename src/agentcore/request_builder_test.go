@@ -30,9 +30,10 @@ func TestRequestBuilderBuildsCompleteRequest(t *testing.T) {
 	builder := NewRequestBuilder(AgentConfig{
 		EntryPoint: "test-entry",
 		ModelConfig: ModelConfig{
-			Model:       "test-model",
-			Temperature: 0.2,
-			MaxTokens:   777,
+			Model:         "test-model",
+			Temperature:   0.2,
+			MaxTokens:     777,
+			ContextWindow: 400000,
 		},
 	})
 
@@ -51,6 +52,9 @@ func TestRequestBuilderBuildsCompleteRequest(t *testing.T) {
 	}
 	if req.ContextWindowState.EstimatedTokens == 0 {
 		t.Fatalf("expected context window estimate on request")
+	}
+	if req.ContextWindowState.ModelWindow != 400000 {
+		t.Fatalf("expected configured context window, got %+v", req.ContextWindowState)
 	}
 	if !strings.Contains(req.SystemPrompt, "test-model") || !strings.Contains(req.SystemPrompt, "test-entry") {
 		t.Fatalf("expected runtime info in system prompt: %s", req.SystemPrompt)

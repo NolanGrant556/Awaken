@@ -10,6 +10,10 @@ import type {
   RuntimeModelProfileSummaryWire,
   ModelProfileRunConfig,
 } from "../shared/runtime.js";
+import {
+  normalizeAdvancedWithModelCapability,
+  withModelCapabilities,
+} from "./model-capabilities.js";
 
 const MODEL_PROFILES_FILE = "model-profiles.json";
 
@@ -120,6 +124,11 @@ function profileStatus(profile: StoredModelProfile): RuntimeModelProfileSummaryW
 }
 
 function toSummary(profile: StoredModelProfile): RuntimeModelProfileSummaryWire {
+  const advanced = normalizeAdvancedWithModelCapability(
+    profile.advanced,
+    profile.providerId,
+    profile.advanced?.endpointId?.trim() || profile.modelId,
+  );
   return {
     id: profile.id,
     provider_id: profile.providerId,
@@ -133,15 +142,13 @@ function toSummary(profile: StoredModelProfile): RuntimeModelProfileSummaryWire 
     enabled: profile.enabled,
     is_default: profile.isDefault,
     profile_status: profileStatus(profile),
-    advanced: profile.advanced
-      ? {
-          temperature: profile.advanced.temperature,
-          max_tokens: profile.advanced.maxTokens,
-          endpoint_id: profile.advanced.endpointId,
-          prompt_cache_key: profile.advanced.promptCacheKey,
-          context_window: profile.advanced.contextWindow,
-        }
-      : undefined,
+    advanced: {
+      temperature: advanced.temperature,
+      max_tokens: advanced.maxTokens,
+      endpoint_id: advanced.endpointId,
+      prompt_cache_key: advanced.promptCacheKey,
+      context_window: advanced.contextWindow,
+    },
   };
 }
 
@@ -175,10 +182,12 @@ export class ModelProfileStore {
   }
 
   listProviders(): ModelProviderWire[] {
-    return BUILTIN_MODEL_PROVIDERS.map((provider) => ({
-      ...provider,
-      models: [...provider.models],
-    }));
+    return BUILTIN_MODEL_PROVIDERS.map((provider) =>
+      withModelCapabilities({
+        ...provider,
+        models: [...provider.models],
+      }),
+    );
   }
 
   async listProfiles(): Promise<RuntimeModelProfileSummaryWire[]> {
@@ -197,17 +206,23 @@ export class ModelProfileStore {
       ? store.profiles.findIndex((profile) => profile.id === request.id)
       : -1;
     const existing = existingIndex >= 0 ? store.profiles[existingIndex] : undefined;
+    const modelId = request.modelId.trim() || provider.default_model;
+    const advanced = normalizeAdvancedWithModelCapability(
+      request.advanced ?? existing?.advanced,
+      provider.id,
+      request.advanced?.endpointId?.trim() || modelId,
+    );
     const profile: StoredModelProfile = {
       id: existing?.id ?? randomUUID(),
       providerId: provider.id,
       displayName: request.displayName?.trim() || provider.display_name,
-      modelId: request.modelId.trim() || provider.default_model,
+      modelId,
       baseURL: trimTrailingSlash(request.baseURL || provider.base_url),
       protocol: request.protocol?.trim() || provider.protocol,
       authScheme: request.authScheme?.trim() || provider.auth_scheme,
       enabled: request.enabled ?? existing?.enabled ?? true,
       isDefault: request.isDefault ?? existing?.isDefault ?? store.profiles.length === 0,
-      advanced: request.advanced,
+      advanced,
       credential: existing?.credential,
     };
 
@@ -259,18 +274,28 @@ export class ModelProfileStore {
       store.profiles.find((entry) => entry.isDefault && entry.enabled) ??
       store.profiles.find((entry) => entry.enabled);
     if (!profile) return undefined;
+    if (!profile.credential) {
+      throw new Error("Configure an API key in Settings > Models before running Awaken");
+    }
 
+    const advanced = normalizeAdvancedWithModelCapability(
+      profile.advanced,
+      profile.providerId,
+      profile.advanced?.endpointId?.trim() || profile.modelId,
+    );
     return {
       profileId: profile.id,
       providerId: profile.providerId,
       displayName: profile.displayName,
-      modelId: profile.advanced?.endpointId?.trim() || profile.modelId,
+      modelId: advanced.endpointId?.trim() || profile.modelId,
       baseURL: profile.baseURL,
       protocol: profile.protocol,
       authScheme: profile.authScheme,
       apiKey: decryptCredential(profile.credential),
-      temperature: profile.advanced?.temperature,
-      maxTokens: profile.advanced?.maxTokens,
+      temperature: advanced.temperature,
+      maxTokens: advanced.maxTokens,
+      contextWindow: advanced.contextWindow,
+      promptCacheKey: advanced.promptCacheKey,
     };
   }
 

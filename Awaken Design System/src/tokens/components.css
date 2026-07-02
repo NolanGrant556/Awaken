@@ -2024,19 +2024,38 @@ button.tool-trace-line:focus-visible {
 @media (max-width: 1180px) {
   .aw-workbench-shell {
     grid-template-columns: minmax(0, 1fr);
-    height: auto;
-    min-height: 100%;
+    height: 100%;
+    min-height: 0;
   }
 
   .aw-run-stage {
-    min-height: 720px;
+    min-height: 0;
     border-right: 0;
-    border-bottom: 1px solid var(--aw-border-light);
+    border-bottom: 0;
   }
 
   .aw-workbench-inspector {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 7;
+    box-sizing: border-box;
+    width: min(var(--aw-inspector-width, 300px), calc(100% - var(--aw-inspector-collapsed-width, 42px)));
     max-height: none;
-    overflow: visible;
+    overflow: auto;
+    border-left: 1px solid var(--aw-border-light);
+    box-shadow: -18px 0 42px rgba(15, 23, 42, 0.1);
+  }
+
+  .aw-workbench-shell-inspector-collapsed .aw-workbench-inspector {
+    width: var(--aw-inspector-collapsed-width, 42px);
+    border-left: 0;
+    box-shadow: none;
+  }
+
+  .aw-workbench-inspector-resize-handle {
+    display: none;
   }
 }
 

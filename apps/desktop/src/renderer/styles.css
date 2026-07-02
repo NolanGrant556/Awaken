@@ -147,11 +147,16 @@ pre {
 }
 
 .composer-dock-stack,
-.composer-approval-card {
+.composer-approval-card,
+.composer-runtime-panels {
   display: grid;
   gap: 10px;
   width: min(760px, 100%);
   min-width: 0;
+}
+
+.composer-runtime-panels {
+  gap: 8px;
 }
 
 .aw-run-stage-scroll {
@@ -285,7 +290,7 @@ pre {
 }
 
 .model-settings {
-  --model-settings-content-width: min(100%, 980px);
+  --model-settings-content-width: 1160px;
   display: grid;
   align-content: start;
   gap: 14px;
@@ -323,7 +328,9 @@ pre {
   justify-items: start;
   gap: 28px;
   min-width: 0;
-  width: var(--model-settings-content-width);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--model-settings-content-width);
   padding: 20px 0 14px;
   border-bottom: 1px solid var(--aw-border-light);
   background: var(--aw-bg-white);
@@ -395,7 +402,9 @@ pre {
   justify-self: start;
   gap: 8px;
   min-width: 0;
-  width: var(--model-settings-content-width);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--model-settings-content-width);
 }
 
 .model-provider-card {
@@ -678,11 +687,13 @@ pre {
 }
 
 .configured-models-table {
-  --configured-model-columns: minmax(136px, 0.9fr) 58px minmax(220px, 1.25fr) 82px 132px;
+  --configured-model-columns: minmax(150px, 0.9fr) 60px minmax(280px, 1.5fr) minmax(88px, 0.45fr) minmax(88px, 0.45fr) 132px;
   justify-self: start;
+  box-sizing: border-box;
   min-width: 0;
-  width: var(--model-settings-content-width);
-  overflow-x: auto;
+  width: 100%;
+  max-width: var(--model-settings-content-width);
+  overflow-x: hidden;
   overflow-y: hidden;
   border: 1px solid var(--aw-border-main);
   border-radius: var(--aw-radius-panel);
@@ -695,7 +706,7 @@ pre {
   justify-content: start;
   align-items: center;
   gap: 8px;
-  min-width: 700px;
+  min-width: 0;
   min-height: 68px;
   padding: 0 10px;
   border-top: 1px solid var(--aw-border-light);
@@ -714,7 +725,8 @@ pre {
 }
 
 .configured-models-head span:nth-child(2),
-.configured-models-head span:nth-child(4) {
+.configured-models-head span:nth-child(4),
+.configured-models-head span:nth-child(5) {
   text-align: center;
 }
 
@@ -820,6 +832,8 @@ pre {
 }
 
 .configured-context {
+  --context-anchor: 25%;
+  --context-fill: 100%;
   position: relative;
   display: block;
   height: 26px;
@@ -836,7 +850,6 @@ pre {
 }
 
 .configured-context-range {
-  --context-fill: 100%;
   width: 100%;
   min-width: 0;
   height: 24px;
@@ -916,23 +929,69 @@ pre {
 .configured-context-scale {
   position: absolute;
   top: calc(100% + 6px);
-  right: 0;
+  right: 92px;
   left: 0;
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  padding-right: 92px;
+  display: block;
+  height: 14px;
   color: var(--aw-text-tertiary);
   font-size: 11px;
   line-height: 1;
   pointer-events: none;
 }
 
-.configured-context-scale span:nth-child(2) {
-  text-align: center;
+.configured-context-scale-label,
+.configured-context-anchor {
+  position: absolute;
+  top: 0;
+  white-space: nowrap;
 }
 
-.configured-context-scale span:last-child {
-  text-align: right;
+.configured-context-scale-start {
+  left: 0;
+}
+
+.configured-context-scale-end {
+  right: 0;
+}
+
+.configured-context-anchor {
+  left: var(--context-anchor);
+  height: 17px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--aw-text-secondary);
+  font: inherit;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  pointer-events: auto;
+  transform: translateX(-50%);
+}
+
+.configured-context-anchor::before {
+  content: "";
+  position: absolute;
+  bottom: calc(100% + 1px);
+  left: 50%;
+  width: 2px;
+  height: 8px;
+  border-radius: 999px;
+  background: #168fd2;
+  opacity: 0.86;
+  transform: translateX(-50%);
+}
+
+.configured-context-anchor:hover,
+.configured-context-anchor:focus-visible {
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-primary);
+}
+
+.configured-context-anchor:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--aw-accent) 32%, transparent);
+  outline-offset: 1px;
 }
 
 .configured-compression-value {
@@ -946,21 +1005,46 @@ pre {
   font-weight: 800;
 }
 
+.configured-token-input {
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  padding: 0 7px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-raised);
+  color: var(--aw-text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: right;
+}
+
+.configured-token-input:focus {
+  border-color: color-mix(in srgb, var(--aw-accent) 48%, var(--aw-border-main));
+  outline: 2px solid color-mix(in srgb, var(--aw-accent) 18%, transparent);
+  outline-offset: 1px;
+}
+
+.configured-token-input::-webkit-outer-spin-button,
+.configured-token-input::-webkit-inner-spin-button {
+  margin: 0;
+}
+
 .configured-models-actions {
   display: grid;
-  grid-template-columns: 62px 58px;
+  grid-template-columns: 60px 54px;
   align-items: center;
   justify-self: end;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
-  width: 132px;
+  width: 122px;
 }
 
 .configured-models-save-actions {
   display: grid;
   gap: 5px;
   min-width: 0;
-  width: 62px;
+  width: 60px;
 }
 
 .configured-models-actions button,
@@ -976,6 +1060,58 @@ pre {
 .configured-models-actions .configured-models-delete {
   align-self: center;
   color: #b34343 !important;
+}
+
+@media (max-width: 1180px) {
+  .configured-models-table {
+    --configured-model-columns: minmax(128px, 0.8fr) 48px minmax(190px, 1.15fr) minmax(74px, 0.45fr) minmax(72px, 0.45fr) 108px;
+  }
+
+  .configured-models-row {
+    gap: 6px;
+    padding: 0 8px;
+  }
+
+  .configured-model-name {
+    grid-template-columns: 26px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .configured-model-icon {
+    width: 26px;
+    height: 26px;
+  }
+
+  .configured-context-main {
+    grid-template-columns: minmax(92px, 1fr) 68px;
+    gap: 6px;
+  }
+
+  .configured-context-scale {
+    right: 74px;
+  }
+
+  .configured-context-input,
+  .configured-token-input {
+    padding: 0 6px;
+    font-size: 11px;
+  }
+
+  .configured-models-actions {
+    grid-template-columns: 52px 48px;
+    gap: 6px;
+    width: 106px;
+  }
+
+  .configured-models-save-actions {
+    width: 52px;
+  }
+
+  .configured-models-actions button,
+  .configured-models-save-actions button {
+    padding: 0 5px !important;
+    font-size: 10px !important;
+  }
 }
 
 @keyframes model-provider-form-in {
@@ -1570,6 +1706,12 @@ pre {
   border: 1px solid var(--aw-border-main);
   border-radius: var(--aw-radius-panel);
   background: var(--aw-surface-panel);
+}
+
+.composer-runtime-panel {
+  width: 100%;
+  padding: 12px 14px;
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.08);
 }
 
 .runtime-panel-error {

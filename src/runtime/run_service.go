@@ -2,11 +2,14 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -49,16 +52,18 @@ type StartRunRequest struct {
 }
 
 type ModelProfileConfig struct {
-	ProfileID   string  `json:"profile_id,omitempty"`
-	ProviderID  string  `json:"provider_id,omitempty"`
-	DisplayName string  `json:"display_name,omitempty"`
-	ModelID     string  `json:"model_id,omitempty"`
-	BaseURL     string  `json:"base_url,omitempty"`
-	Protocol    string  `json:"protocol,omitempty"`
-	AuthScheme  string  `json:"auth_scheme,omitempty"`
-	APIKey      string  `json:"api_key,omitempty"`
-	Temperature float64 `json:"temperature,omitempty"`
-	MaxTokens   int     `json:"max_tokens,omitempty"`
+	ProfileID      string  `json:"profile_id,omitempty"`
+	ProviderID     string  `json:"provider_id,omitempty"`
+	DisplayName    string  `json:"display_name,omitempty"`
+	ModelID        string  `json:"model_id,omitempty"`
+	BaseURL        string  `json:"base_url,omitempty"`
+	Protocol       string  `json:"protocol,omitempty"`
+	AuthScheme     string  `json:"auth_scheme,omitempty"`
+	APIKey         string  `json:"api_key,omitempty"`
+	Temperature    float64 `json:"temperature,omitempty"`
+	MaxTokens      int     `json:"max_tokens,omitempty"`
+	ContextWindow  int     `json:"context_window,omitempty"`
+	PromptCacheKey string  `json:"prompt_cache_key,omitempty"`
 }
 
 type Executor interface {
@@ -279,8 +284,21 @@ func modelProfileCacheKey(profile *ModelProfileConfig) string {
 		profile.BaseURL,
 		profile.Protocol,
 		profile.AuthScheme,
+		hashSecret(profile.APIKey),
+		strconv.FormatFloat(profile.Temperature, 'g', -1, 64),
+		strconv.Itoa(profile.MaxTokens),
+		strconv.Itoa(profile.ContextWindow),
+		profile.PromptCacheKey,
 	}
 	return strings.Join(parts, "\x00")
+}
+
+func hashSecret(value string) string {
+	if value == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
 }
 
 func (s *RunService) ListThreads() []ThreadSnapshot {

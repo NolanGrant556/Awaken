@@ -414,6 +414,11 @@ ipcMain.handle("awaken:get-runtime-info", async () => {
       info.has_api_key = defaultProfile.has_key;
       info.base_url_host = hostFromBaseURL(defaultProfile.base_url);
       info.model_profile = defaultProfile;
+    } else if (modelProfileStore) {
+      info.configured_model = "";
+      info.has_api_key = false;
+      info.base_url_host = "";
+      info.model_profile = undefined;
     }
 
     return normalizeRuntimeInfo(info);
@@ -497,9 +502,10 @@ ipcMain.handle("awaken:list-threads", async () => {
 ipcMain.handle("awaken:start-run", async (_event, request: StartRunRequest) => {
   const body = normalizeStartRunRequest(request);
   const defaultProfile = await modelProfileStore?.resolveDefaultRunProfile();
-  if (defaultProfile) {
-    body.model_profile = normalizeModelProfileRunConfig(defaultProfile);
+  if (!defaultProfile) {
+    throw new Error("Configure a model in Settings > Models before running Awaken");
   }
+  body.model_profile = normalizeModelProfileRunConfig(defaultProfile);
   const run = await requestRuntime("/v1/runs", {
     method: "POST",
     headers: {

@@ -60,7 +60,10 @@ func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool
 		Temperature:     rb.config.ModelConfig.Temperature,
 		MaxTokens:       rb.config.ModelConfig.MaxTokens,
 	}
-	envelope.ContextWindowState = NewContextWindowState(envelope)
+	envelope.ContextWindowState = NewContextWindowStateWithConfig(envelope, ContextWindowConfig{
+		ModelWindow:           rb.config.ModelConfig.ContextWindow,
+		AutoCompactTokenLimit: rb.config.ModelConfig.AutoCompactTokenLimit,
+	})
 	return envelope
 }
 

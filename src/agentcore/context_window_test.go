@@ -94,6 +94,24 @@ func TestNewContextWindowStateDefaults(t *testing.T) {
 	}
 }
 
+func TestNewContextWindowStateUsesConfiguredWindow(t *testing.T) {
+	state := NewContextWindowStateWithConfig(ContextEnvelope{
+		Messages: []convcontext.Message{{Role: convcontext.RoleUser, Content: "hello"}},
+	}, ContextWindowConfig{
+		ModelWindow:           400000,
+		AutoCompactTokenLimit: 300000,
+	})
+	if state.ModelWindow != 400000 {
+		t.Fatalf("expected configured model window, got %+v", state)
+	}
+	if state.EffectiveWindow != 400000-defaultOutputReserve {
+		t.Fatalf("unexpected effective window: %+v", state)
+	}
+	if state.AutoCompactThreshold != 300000 {
+		t.Fatalf("expected configured auto compact threshold, got %+v", state)
+	}
+}
+
 func TestCompactConversationKeepsPairingAndBoundary(t *testing.T) {
 	messages := []convcontext.Message{
 		{Role: convcontext.RoleUser, Content: "please use tool"},

@@ -17,6 +17,12 @@ const (
 
 var errContextWindowBlocked = errors.New("context window blocked")
 
+type ContextWindowConfig struct {
+	ModelWindow           int
+	OutputReserve         int
+	AutoCompactTokenLimit int
+}
+
 type ContextWindowState struct {
 	ModelWindow                 int
 	OutputReserve               int
@@ -41,11 +47,28 @@ type CompactResult struct {
 }
 
 func NewContextWindowState(envelope ContextEnvelope) ContextWindowState {
+	return NewContextWindowStateWithConfig(envelope, ContextWindowConfig{})
+}
+
+func NewContextWindowStateWithConfig(envelope ContextEnvelope, config ContextWindowConfig) ContextWindowState {
 	modelWindow := defaultModelWindow
+	if config.ModelWindow > 0 {
+		modelWindow = config.ModelWindow
+	}
 	outputReserve := defaultOutputReserve
+	if config.OutputReserve > 0 {
+		outputReserve = config.OutputReserve
+	}
 	effectiveWindow := modelWindow - outputReserve
 	if effectiveWindow < 0 {
 		effectiveWindow = 0
+	}
+	autoCompactThreshold := int(float64(effectiveWindow) * 0.90)
+	if config.AutoCompactTokenLimit > 0 {
+		autoCompactThreshold = config.AutoCompactTokenLimit
+		if autoCompactThreshold > effectiveWindow {
+			autoCompactThreshold = effectiveWindow
+		}
 	}
 
 	state := ContextWindowState{
@@ -53,7 +76,7 @@ func NewContextWindowState(envelope ContextEnvelope) ContextWindowState {
 		OutputReserve:         outputReserve,
 		EffectiveWindow:       effectiveWindow,
 		WarningThreshold:      int(float64(effectiveWindow) * 0.85),
-		AutoCompactThreshold:  int(float64(effectiveWindow) * 0.90),
+		AutoCompactThreshold:  autoCompactThreshold,
 		CompactTarget:         int(float64(effectiveWindow) * 0.30),
 		EstimatedTokens:       EstimateContextEnvelopeTokens(envelope),
 		EstimatedDeltaTokens:  estimateContextDeltaTokens(envelope),

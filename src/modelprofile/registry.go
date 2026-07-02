@@ -3,18 +3,25 @@ package modelprofile
 // Provider describes a built-in model provider that can be configured from the
 // desktop model settings UI. It intentionally contains no secrets.
 type Provider struct {
-	ID            string   `json:"id"`
-	DisplayName   string   `json:"display_name"`
-	BaseURL       string   `json:"base_url"`
-	Protocol      string   `json:"protocol"`
-	AuthScheme    string   `json:"auth_scheme"`
-	KeyEnvName    string   `json:"key_env_name"`
-	DefaultModel  string   `json:"default_model"`
-	Models        []string `json:"models"`
-	DocsURL       string   `json:"docs_url"`
-	APIDocsURL    string   `json:"api_docs_url"`
-	CodingPreset  bool     `json:"coding_preset"`
-	EndpointModel bool     `json:"endpoint_model"`
+	ID                string                     `json:"id"`
+	DisplayName       string                     `json:"display_name"`
+	BaseURL           string                     `json:"base_url"`
+	Protocol          string                     `json:"protocol"`
+	AuthScheme        string                     `json:"auth_scheme"`
+	KeyEnvName        string                     `json:"key_env_name"`
+	DefaultModel      string                     `json:"default_model"`
+	Models            []string                   `json:"models"`
+	DocsURL           string                     `json:"docs_url"`
+	APIDocsURL        string                     `json:"api_docs_url"`
+	CodingPreset      bool                       `json:"coding_preset"`
+	EndpointModel     bool                       `json:"endpoint_model"`
+	ModelCapabilities map[string]ModelCapability `json:"model_capabilities,omitempty"`
+}
+
+type ModelCapability struct {
+	ContextWindow    int `json:"context_window,omitempty"`
+	MaxOutputTokens  int `json:"max_output_tokens,omitempty"`
+	DefaultMaxTokens int `json:"default_max_tokens,omitempty"`
 }
 
 func BuiltinProviders() []Provider {
@@ -33,6 +40,18 @@ func BuiltinProviders() []Provider {
 			},
 			DocsURL:    "https://api-docs.deepseek.com/",
 			APIDocsURL: "https://platform.deepseek.com/api_keys",
+			ModelCapabilities: map[string]ModelCapability{
+				"deepseek-v4-pro": {
+					ContextWindow:    1000000,
+					MaxOutputTokens:  384000,
+					DefaultMaxTokens: 8192,
+				},
+				"deepseek-v4-flash": {
+					ContextWindow:    1000000,
+					MaxOutputTokens:  384000,
+					DefaultMaxTokens: 8192,
+				},
+			},
 		},
 		{
 			ID:           "kimi-cn",
@@ -53,6 +72,43 @@ func BuiltinProviders() []Provider {
 			},
 			DocsURL:    "https://platform.kimi.com/docs",
 			APIDocsURL: "https://platform.kimi.com/console/api-keys",
+			ModelCapabilities: map[string]ModelCapability{
+				"kimi-k2.7-code": {
+					ContextWindow:    256 * 1024,
+					MaxOutputTokens:  256 * 1024,
+					DefaultMaxTokens: 32 * 1024,
+				},
+				"kimi-k2.7-code-highspeed": {
+					ContextWindow:    256 * 1024,
+					MaxOutputTokens:  256 * 1024,
+					DefaultMaxTokens: 32 * 1024,
+				},
+				"kimi-k2.6": {
+					ContextWindow:    256 * 1024,
+					MaxOutputTokens:  256 * 1024,
+					DefaultMaxTokens: 32 * 1024,
+				},
+				"kimi-k2.5": {
+					ContextWindow:    256 * 1024,
+					MaxOutputTokens:  256 * 1024,
+					DefaultMaxTokens: 32 * 1024,
+				},
+				"moonshot-v1-128k": {
+					ContextWindow:    128 * 1024,
+					MaxOutputTokens:  128 * 1024,
+					DefaultMaxTokens: 8192,
+				},
+				"moonshot-v1-32k": {
+					ContextWindow:    32 * 1024,
+					MaxOutputTokens:  32 * 1024,
+					DefaultMaxTokens: 8192,
+				},
+				"moonshot-v1-8k": {
+					ContextWindow:    8 * 1024,
+					MaxOutputTokens:  8 * 1024,
+					DefaultMaxTokens: 4096,
+				},
+			},
 		},
 		{
 			ID:           "kimi-coding-plan",
@@ -70,6 +126,23 @@ func BuiltinProviders() []Provider {
 			DocsURL:      "https://platform.kimi.com/docs/guide/kimi-k2-7-code-quickstart",
 			APIDocsURL:   "https://platform.kimi.com/console/api-keys",
 			CodingPreset: true,
+			ModelCapabilities: map[string]ModelCapability{
+				"kimi-k2.7-code": {
+					ContextWindow:    256 * 1024,
+					MaxOutputTokens:  256 * 1024,
+					DefaultMaxTokens: 32 * 1024,
+				},
+				"kimi-k2.7-code-highspeed": {
+					ContextWindow:    256 * 1024,
+					MaxOutputTokens:  256 * 1024,
+					DefaultMaxTokens: 32 * 1024,
+				},
+				"kimi-k2.6": {
+					ContextWindow:    256 * 1024,
+					MaxOutputTokens:  256 * 1024,
+					DefaultMaxTokens: 32 * 1024,
+				},
+			},
 		},
 		{
 			ID:           "volcengine",

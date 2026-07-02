@@ -76,9 +76,6 @@ export function diffLineStats(diff?: string): { added: number; removed: number }
 export function shouldUseCenterComposer({
   hasNarrative,
   hasRun,
-  hasNotice,
-  hasError,
-  needsRestart,
 }: {
   hasNarrative: boolean;
   hasRun: boolean;
@@ -86,7 +83,7 @@ export function shouldUseCenterComposer({
   hasError: boolean;
   needsRestart: boolean;
 }): boolean {
-  return !hasNarrative && !hasRun && !hasNotice && !hasError && !needsRestart;
+  return !hasNarrative && !hasRun;
 }
 
 export function shouldShowAssistantAnswerFooter({
@@ -352,32 +349,26 @@ export function anchoredTurnMinHeight({
 }
 
 export function latestTurnMinHeightBottomReserve({
-  hasBodyItems,
-  isPromptAnchorPending,
+  hasBodyItems: _hasBodyItems,
+  isPromptAnchorPending: _isPromptAnchorPending,
   outputGap,
 }: {
   hasBodyItems: boolean;
   isPromptAnchorPending: boolean;
   outputGap: number;
 }): number {
-  if (isPromptAnchorPending || !hasBodyItems) {
-    return 0;
-  }
   return Math.max(0, outputGap);
 }
 
 export function latestTurnPromptAnchorSlack({
-  hasBodyItems,
-  isPromptAnchorPending,
-  outputGap,
+  hasBodyItems: _hasBodyItems,
+  isPromptAnchorPending: _isPromptAnchorPending,
+  outputGap: _outputGap,
 }: {
   hasBodyItems: boolean;
   isPromptAnchorPending: boolean;
   outputGap: number;
 }): number {
-  if (isPromptAnchorPending || !hasBodyItems) {
-    return Math.max(0, outputGap);
-  }
   return 0;
 }
 

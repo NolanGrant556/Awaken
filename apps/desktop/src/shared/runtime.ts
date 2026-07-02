@@ -111,6 +111,13 @@ export type ModelProviderWire = {
   api_docs_url: string;
   coding_preset?: boolean;
   endpoint_model?: boolean;
+  model_capabilities?: Record<string, ModelCapabilityWire>;
+};
+
+export type ModelCapabilityWire = {
+  context_window?: number;
+  max_output_tokens?: number;
+  default_max_tokens?: number;
 };
 
 export type ModelProvider = {
@@ -126,6 +133,13 @@ export type ModelProvider = {
   apiDocsURL: string;
   codingPreset: boolean;
   endpointModel: boolean;
+  modelCapabilities: Record<string, ModelCapability>;
+};
+
+export type ModelCapability = {
+  contextWindow?: number;
+  maxOutputTokens?: number;
+  defaultMaxTokens?: number;
 };
 
 export type ModelProfileAdvancedWire = {
@@ -244,6 +258,8 @@ export type ModelProfileRunConfigWire = {
   api_key?: string;
   temperature?: number;
   max_tokens?: number;
+  context_window?: number;
+  prompt_cache_key?: string;
 };
 
 export type ModelProfileRunConfig = {
@@ -257,6 +273,8 @@ export type ModelProfileRunConfig = {
   apiKey?: string;
   temperature?: number;
   maxTokens?: number;
+  contextWindow?: number;
+  promptCacheKey?: string;
 };
 
 export type ApprovalDecision = "approved" | "rejected";
@@ -399,7 +417,24 @@ export function normalizeModelProvider(provider: ModelProviderWire): ModelProvid
     apiDocsURL: provider.api_docs_url,
     codingPreset: Boolean(provider.coding_preset),
     endpointModel: Boolean(provider.endpoint_model),
+    modelCapabilities: normalizeModelCapabilities(provider.model_capabilities),
   };
+}
+
+export function normalizeModelCapabilities(
+  capabilities?: Record<string, ModelCapabilityWire>,
+): Record<string, ModelCapability> {
+  if (!capabilities) return {};
+  return Object.fromEntries(
+    Object.entries(capabilities).map(([modelId, capability]) => [
+      modelId,
+      {
+        contextWindow: capability.context_window,
+        maxOutputTokens: capability.max_output_tokens,
+        defaultMaxTokens: capability.default_max_tokens,
+      },
+    ]),
+  );
 }
 
 export function normalizeModelProfileAdvanced(
@@ -462,5 +497,7 @@ export function normalizeModelProfileRunConfig(
     api_key: profile.apiKey,
     temperature: profile.temperature,
     max_tokens: profile.maxTokens,
+    context_window: profile.contextWindow,
+    prompt_cache_key: profile.promptCacheKey,
   };
 }

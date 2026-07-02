@@ -22,13 +22,15 @@ type WorkspaceConfig struct {
 }
 
 type ModelConfig struct {
-	APIKey      string
-	BaseURL     string
-	Model       string
-	Protocol    string
-	Temperature float64
-	MaxTokens   int
-	AuthScheme  string
+	APIKey                string
+	BaseURL               string
+	Model                 string
+	Protocol              string
+	Temperature           float64
+	MaxTokens             int
+	AuthScheme            string
+	ContextWindow         int
+	AutoCompactTokenLimit int
 }
 
 type LLMRequest struct {

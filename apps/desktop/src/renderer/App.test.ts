@@ -231,9 +231,11 @@ describe("App workbench presentation", () => {
     expect(html).not.toContain("等待运行");
     expect(html).not.toContain("run-stage-header");
     expect(html).not.toContain("run-timeline-shell");
+    expect(html).toContain("composer-runtime-panels");
+    expect(html).toContain("Starting Awaken");
   });
 
-  it("uses the dock composer after a run exists or narrative appears", () => {
+  it("uses the dock composer only after a run exists or narrative appears", () => {
     expect(
       shouldUseCenterComposer({
         hasNarrative: false,
@@ -263,6 +265,16 @@ describe("App workbench presentation", () => {
         needsRestart: false,
       }),
     ).toBe(false);
+
+    expect(
+      shouldUseCenterComposer({
+        hasNarrative: false,
+        hasRun: false,
+        hasNotice: true,
+        hasError: true,
+        needsRestart: true,
+      }),
+    ).toBe(true);
   });
 
   it("shows turn markers once the run stage has at least three turns", () => {
@@ -470,28 +482,28 @@ describe("App workbench presentation", () => {
     ).toBe(568);
   });
 
-  it("keeps prompt-only latest turns fully anchorable before output tail follow starts", () => {
+  it("reserves the composer gap for every latest turn height state", () => {
     expect(
       latestTurnMinHeightBottomReserve({
         hasBodyItems: false,
         isPromptAnchorPending: true,
         outputGap: 72,
       }),
-    ).toBe(0);
+    ).toBe(72);
     expect(
       latestTurnMinHeightBottomReserve({
         hasBodyItems: true,
         isPromptAnchorPending: true,
         outputGap: 72,
       }),
-    ).toBe(0);
+    ).toBe(72);
     expect(
       latestTurnMinHeightBottomReserve({
         hasBodyItems: false,
         isPromptAnchorPending: false,
         outputGap: 72,
       }),
-    ).toBe(0);
+    ).toBe(72);
     expect(
       latestTurnMinHeightBottomReserve({
         hasBodyItems: true,
@@ -501,28 +513,28 @@ describe("App workbench presentation", () => {
     ).toBe(72);
   });
 
-  it("adds temporary anchor slack only before latest output body exists", () => {
+  it("does not add temporary prompt slack that creates a second bottom target", () => {
     expect(
       latestTurnPromptAnchorSlack({
         hasBodyItems: false,
         isPromptAnchorPending: true,
         outputGap: 72,
       }),
-    ).toBe(72);
+    ).toBe(0);
     expect(
       latestTurnPromptAnchorSlack({
         hasBodyItems: true,
         isPromptAnchorPending: true,
         outputGap: 72,
       }),
-    ).toBe(72);
+    ).toBe(0);
     expect(
       latestTurnPromptAnchorSlack({
         hasBodyItems: false,
         isPromptAnchorPending: false,
         outputGap: 72,
       }),
-    ).toBe(72);
+    ).toBe(0);
     expect(
       latestTurnPromptAnchorSlack({
         hasBodyItems: true,
@@ -530,6 +542,28 @@ describe("App workbench presentation", () => {
         outputGap: 72,
       }),
     ).toBe(0);
+  });
+
+  it("keeps prompt-only latest turns from creating blank scroll bottom", () => {
+    const containerHeight = 640;
+    const outputGap = 72;
+    const latestTurnHeight =
+      anchoredTurnMinHeight({
+        containerHeight,
+        anchorOffset: 0,
+        bottomReserve: latestTurnMinHeightBottomReserve({
+          hasBodyItems: false,
+          isPromptAnchorPending: true,
+          outputGap,
+        }),
+      }) +
+      latestTurnPromptAnchorSlack({
+        hasBodyItems: false,
+        isPromptAnchorPending: true,
+        outputGap,
+      });
+
+    expect(latestTurnHeight + outputGap).toBe(containerHeight);
   });
 
   it("uses the same native bottom target for programmatic follow and manual scroll bottom", () => {

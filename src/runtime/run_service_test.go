@@ -76,19 +76,20 @@ func TestRunServiceReplaysHistoryAndStreamsLiveEvents(t *testing.T) {
 }
 
 func TestRunServiceUsesModelProfileForNewAndExistingThreads(t *testing.T) {
-	observed := make(chan agentcore.ModelConfig, 2)
+	observed := make(chan agentcore.ModelConfig, 3)
 	service := NewRunServiceWithModelProfiles(
 		func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent {
 			modelCfg := agentcore.ModelConfig{Model: "legacy-model"}
 			if profile != nil {
 				modelCfg = agentcore.ModelConfig{
-					APIKey:      profile.APIKey,
-					BaseURL:     profile.BaseURL,
-					Model:       profile.ModelID,
-					Protocol:    profile.Protocol,
-					AuthScheme:  profile.AuthScheme,
-					Temperature: profile.Temperature,
-					MaxTokens:   profile.MaxTokens,
+					APIKey:        profile.APIKey,
+					BaseURL:       profile.BaseURL,
+					Model:         profile.ModelID,
+					Protocol:      profile.Protocol,
+					AuthScheme:    profile.AuthScheme,
+					Temperature:   profile.Temperature,
+					MaxTokens:     profile.MaxTokens,
+					ContextWindow: profile.ContextWindow,
 				}
 			}
 			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
@@ -112,20 +113,21 @@ func TestRunServiceUsesModelProfileForNewAndExistingThreads(t *testing.T) {
 		Input:     "first",
 		Workspace: WorkspaceConfig{WorkspaceRoot: workspace},
 		ModelProfile: &ModelProfileConfig{
-			ProfileID:  "profile-a",
-			ProviderID: "deepseek",
-			ModelID:    "deepseek-v4-pro",
-			BaseURL:    "https://api.deepseek.com",
-			Protocol:   "openai_chat",
-			AuthScheme: "bearer",
-			APIKey:     "secret-a",
+			ProfileID:     "profile-a",
+			ProviderID:    "deepseek",
+			ModelID:       "deepseek-v4-pro",
+			BaseURL:       "https://api.deepseek.com",
+			Protocol:      "openai_chat",
+			AuthScheme:    "bearer",
+			APIKey:        "secret-a",
+			ContextWindow: 400000,
 		},
 	})
 	if err != nil {
 		t.Fatalf("StartRun returned error: %v", err)
 	}
 	firstCfg := <-observed
-	if firstCfg.Model != "deepseek-v4-pro" || firstCfg.APIKey != "secret-a" {
+	if firstCfg.Model != "deepseek-v4-pro" || firstCfg.APIKey != "secret-a" || firstCfg.ContextWindow != 400000 {
 		t.Fatalf("unexpected first model config: %+v", firstCfg)
 	}
 	waitForRunStatus(t, service, first.RunID, "finished")
@@ -136,21 +138,48 @@ func TestRunServiceUsesModelProfileForNewAndExistingThreads(t *testing.T) {
 		ThreadID:  first.ThreadID,
 		Workspace: WorkspaceConfig{WorkspaceRoot: workspace},
 		ModelProfile: &ModelProfileConfig{
-			ProfileID:  "profile-b",
-			ProviderID: "kimi-cn",
-			ModelID:    "kimi-k2.6",
-			BaseURL:    "https://api.moonshot.cn/v1",
-			Protocol:   "openai_chat",
-			AuthScheme: "bearer",
-			APIKey:     "secret-b",
+			ProfileID:     "profile-b",
+			ProviderID:    "kimi-cn",
+			ModelID:       "kimi-k2.6",
+			BaseURL:       "https://api.moonshot.cn/v1",
+			Protocol:      "openai_chat",
+			AuthScheme:    "bearer",
+			APIKey:        "secret-b",
+			ContextWindow: 500000,
 		},
 	})
 	if err != nil {
 		t.Fatalf("second StartRun returned error: %v", err)
 	}
 	secondCfg := <-observed
-	if secondCfg.Model != "kimi-k2.6" || secondCfg.APIKey != "secret-b" {
+	if secondCfg.Model != "kimi-k2.6" || secondCfg.APIKey != "secret-b" || secondCfg.ContextWindow != 500000 {
 		t.Fatalf("expected reconfigured model config, got %+v", secondCfg)
+	}
+	waitForThreadIdle(t, service, first.ThreadID)
+
+	_, err = service.StartRun(StartRunRequest{
+		Input:     "third",
+		ThreadID:  first.ThreadID,
+		Workspace: WorkspaceConfig{WorkspaceRoot: workspace},
+		ModelProfile: &ModelProfileConfig{
+			ProfileID:     "profile-b",
+			ProviderID:    "kimi-cn",
+			ModelID:       "kimi-k2.6",
+			BaseURL:       "https://api.moonshot.cn/v1",
+			Protocol:      "openai_chat",
+			AuthScheme:    "bearer",
+			APIKey:        "secret-c",
+			ContextWindow: 700000,
+			Temperature:   0.3,
+			MaxTokens:     4096,
+		},
+	})
+	if err != nil {
+		t.Fatalf("third StartRun returned error: %v", err)
+	}
+	thirdCfg := <-observed
+	if thirdCfg.APIKey != "secret-c" || thirdCfg.ContextWindow != 700000 || thirdCfg.Temperature != 0.3 || thirdCfg.MaxTokens != 4096 {
+		t.Fatalf("expected updated same-profile config, got %+v", thirdCfg)
 	}
 }
 

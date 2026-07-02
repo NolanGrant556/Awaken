@@ -135,8 +135,13 @@ func TestModelProvidersEndpoint(t *testing.T) {
 	}
 
 	var providers []struct {
-		ID          string `json:"id"`
-		DisplayName string `json:"display_name"`
+		ID                string `json:"id"`
+		DisplayName       string `json:"display_name"`
+		ModelCapabilities map[string]struct {
+			ContextWindow    int `json:"context_window"`
+			MaxOutputTokens  int `json:"max_output_tokens"`
+			DefaultMaxTokens int `json:"default_max_tokens"`
+		} `json:"model_capabilities"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&providers); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
@@ -147,6 +152,22 @@ func TestModelProvidersEndpoint(t *testing.T) {
 		seen[provider.ID] = true
 		if provider.ID == "doubao" || provider.DisplayName == "Doubao" {
 			t.Fatal("doubao must not be exposed as a separate provider")
+		}
+		if provider.ID == "deepseek" {
+			if got := provider.ModelCapabilities["deepseek-v4-pro"].ContextWindow; got != 1000000 {
+				t.Fatalf("expected deepseek-v4-pro context window metadata, got %d", got)
+			}
+			if got := provider.ModelCapabilities["deepseek-v4-pro"].MaxOutputTokens; got != 384000 {
+				t.Fatalf("expected deepseek-v4-pro max output metadata, got %d", got)
+			}
+		}
+		if provider.ID == "kimi-cn" {
+			if got := provider.ModelCapabilities["kimi-k2.6"].ContextWindow; got != 256*1024 {
+				t.Fatalf("expected kimi-k2.6 context window metadata, got %d", got)
+			}
+			if got := provider.ModelCapabilities["kimi-k2.6"].DefaultMaxTokens; got != 32*1024 {
+				t.Fatalf("expected kimi-k2.6 default output metadata, got %d", got)
+			}
 		}
 	}
 	for _, id := range []string{"deepseek", "kimi-cn", "kimi-coding-plan", "volcengine"} {

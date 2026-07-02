@@ -80,6 +80,21 @@ AppShell -> WorkbenchShell -> RunStage -> ComposerDock / ExecutionFeed
 - 新增或修改第三种 composer 形态而不更新本契约；
 - 修改 `workbenchPresentation.ts` 中的纯决策函数而不更新或补充单测。
 
+## 样式边界
+
+`apps/desktop/src/renderer/styles.css` 中以下类名前缀属于 Workbench 中间区域边界。修改这些选择器时，默认触发本契约与 `docs/frontend/review-checklist.md`：
+
+- `.aw-run-stage-*`
+- `.run-stage-*`
+- `.execution-feed`
+- `.execution-turn-*`
+- `.execution-prompt-*`
+- `.composer-*`
+- `.turn-marker-*`
+- `.narrative-*`
+
+这些样式覆盖 RunStage 滚动容器、空态 composer、底部 composer dock、turn 分组、prompt header、turn marker rail 以及 narrative item 的视觉边界。若改动涉及 `@awaken/design-system` 已拥有的结构类或 token，先确认 ownership：通用结构和 token 优先在设计系统内演进，Desktop renderer 只保留产品编排和场景级覆写。
+
 ## 测试策略
 
 中间区域已有以下测试层次，后续应保持并强化：

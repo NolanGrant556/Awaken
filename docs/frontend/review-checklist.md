@@ -24,6 +24,17 @@
 
 ---
 
+## 样式边界
+
+- [ ] 是否修改 `styles.css` 中的 Workbench 中间区域样式边界？
+  - 触发前缀：`.aw-run-stage-*`、`.run-stage-*`、`.execution-feed`、`.execution-turn-*`、`.execution-prompt-*`、`.composer-*`、`.turn-marker-*`、`.narrative-*`。
+  - 如果“是”：是否确认改动没有破坏空态 center composer、运行态 dock composer、turn 分组、prompt header、marker rail 或 narrative item 的布局？
+
+- [ ] 是否通过 Desktop renderer 覆写了本应由 `@awaken/design-system` 拥有的结构类或 token？
+  - 如果“是”：是否说明为什么这是场景级覆写，而不是设计系统层的通用改动？
+
+---
+
 ## Composer 形态
 
 - [ ] 是否新增或修改 `center` / `dock` 之外的 composer 形态？
@@ -93,7 +104,7 @@
 
 ## 快速判断流程
 
-如果 PR 完全不涉及 `App.tsx`、`workbenchPresentation.ts`、中间区域组件、或 `styles.css` 中 `.execution-turn-*` / `.composer-*` / `.turn-marker-*` 等样式，可以只勾选：
+如果 PR 完全不涉及 `App.tsx`、`workbenchPresentation.ts`、中间区域组件、或 `styles.css` 中 `.aw-run-stage-*` / `.run-stage-*` / `.execution-feed` / `.execution-turn-*` / `.execution-prompt-*` / `.composer-*` / `.turn-marker-*` / `.narrative-*` 等样式，可以只勾选：
 
 - [ ] 本 PR 不涉及中间区域改动，跳过以上检查。
 

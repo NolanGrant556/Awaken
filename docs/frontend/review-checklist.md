@@ -82,6 +82,7 @@
 - [ ] 是否附真实运行截图 / 录屏？
   - 至少包含：空态 center composer、运行态 dock composer + `ExecutionFeed`、涉及改动场景的特写。
   - 推荐命令：`npm run capture:workbench:vrt`，按提示依次捕获 center / dock / marker，并生成汇总 manifest。
+  - baseline 位于 `docs/acceptance/workbench-vrt-baselines/`；PR 涉及中间区域视觉改动时，应对比新截图与 baseline 的差异。
   - 单状态补拍命令：`npm run capture:workbench -- --state center` / `--state dock` / `--state marker`。
   - 截图默认输出到系统临时目录；作为 PR 验收证据时，需要把图片贴到 PR 描述或评论里，并附 `workbench-vrt-manifest.json` 或单状态 `manifest.json` 路径。
 

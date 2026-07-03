@@ -1,6 +1,8 @@
 import "./AwakenProjectTree.css";
 import { useState, type CSSProperties } from "react";
+import { MoreHorizontal } from "lucide-react";
 import type { ProjectItem } from "../../types";
+import { AwakenDropdown } from "../AwakenDropdown";
 import { AwakenIcon } from "../AwakenIcon";
 
 export type AwakenProjectTreeProps = {
@@ -89,6 +91,7 @@ type NodeProps = {
 };
 
 function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: NodeProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
   const childItems = item.children ?? [];
   const hasChildren = childItems.length > 0;
   const isExpanded = expanded.includes(item.id);
@@ -117,6 +120,7 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
     isExpanded ? "aw-project-node--expanded" : "",
     isActive ? "aw-project-node--active" : "",
     isDisabled ? "aw-project-node--disabled" : "",
+    menuOpen ? "aw-project-node--menu-open" : "",
   ].filter(Boolean).join(" ");
 
   const rowStyle = {
@@ -144,7 +148,7 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
   const childrenContainerStyle: CSSProperties = {
     display: "grid",
     gap: 1,
-    padding: "3px 0 4px 24px",
+    padding: "3px 0 4px 8px",
   };
 
   return (
@@ -173,20 +177,63 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
               </AwakenIcon>
             ) : null}
           </span>
-          <span className="aw-project-row-label">{item.label}</span>
-          {showInlineChevron ? (
-            <span className="aw-project-inline-chevron" aria-hidden="true">
-              <AwakenIcon size={14}>
-                <path d="M9 6l6 6-6 6" />
-              </AwakenIcon>
-            </span>
-          ) : null}
+          <span className="aw-project-row-label-wrap">
+            <span className="aw-project-row-label">{item.label}</span>
+            {showInlineChevron ? (
+              <span className="aw-project-inline-chevron" aria-hidden="true">
+                <AwakenIcon size={14}>
+                  <path d="M9 6l6 6-6 6" />
+                </AwakenIcon>
+              </span>
+            ) : null}
+          </span>
           {isLoading ? <span style={spinnerStyle} aria-label="加载中" /> : null}
           {showTimeLabel ? <span className="aw-project-row-meta">{item.timeLabel}</span> : null}
         </button>
-        {item.action ? (
+        {item.action || item.menuItems?.length ? (
           <span className="aw-project-row-actions">
             {item.action}
+            {item.menuItems?.length ? (
+              <AwakenDropdown
+                open={menuOpen}
+                onOpenChange={setMenuOpen}
+                placement="bottom-end"
+                offset={4}
+                trigger={
+                  <button
+                    type="button"
+                    className="aw-project-row-menu-trigger"
+                    aria-label={`${item.label} 更多操作`}
+                    title={`${item.label} 更多操作`}
+                    disabled={isDisabled}
+                  >
+                    <MoreHorizontal size={14} strokeWidth={1.9} />
+                  </button>
+                }
+              >
+                <div className="aw-project-row-menu" role="menu">
+                  {item.menuItems.map((menuItem) => (
+                    <button
+                      key={menuItem.id}
+                      type="button"
+                      className={[
+                        "aw-project-row-menu-item",
+                        menuItem.tone === "danger" ? "aw-project-row-menu-item--danger" : "",
+                      ].filter(Boolean).join(" ")}
+                      role="menuitem"
+                      disabled={menuItem.disabled}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setMenuOpen(false);
+                        menuItem.onSelect?.();
+                      }}
+                    >
+                      {menuItem.label}
+                    </button>
+                  ))}
+                </div>
+              </AwakenDropdown>
+            ) : null}
           </span>
         ) : null}
       </div>

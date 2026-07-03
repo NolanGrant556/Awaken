@@ -100,6 +100,9 @@ GET  /health
 GET  /v1/agui/demo
 GET  /v1/runtime/info
 GET  /v1/threads
+PATCH /v1/threads/{thread_id}
+DELETE /v1/threads/{thread_id}
+GET  /v1/threads/{thread_id}/transcript
 POST /v1/runs
 GET  /v1/runs/{run_id}
 GET  /v1/runs/{run_id}/events

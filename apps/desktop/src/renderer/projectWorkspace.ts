@@ -75,3 +75,20 @@ export function assignThreadToProject(
     [threadId]: projectId,
   };
 }
+
+export function removeWorkspaceProject(
+  projects: WorkspaceProject[],
+  projectId: string,
+): WorkspaceProject[] {
+  return projects.filter((project) => project.id !== projectId);
+}
+
+export function removeThreadProjectAssignments(
+  threadProjectIds: Record<string, string>,
+  threadIds: string[],
+): Record<string, string> {
+  const toRemove = new Set(threadIds);
+  return Object.fromEntries(
+    Object.entries(threadProjectIds).filter(([threadId]) => !toRemove.has(threadId)),
+  );
+}

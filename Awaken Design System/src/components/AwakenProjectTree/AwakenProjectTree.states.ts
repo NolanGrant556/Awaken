@@ -28,8 +28,21 @@ export const AwakenProjectTreeStates: AwakenProjectTreeState[] = [
               children: createElement(MessageCirclePlus, { size: 13, strokeWidth: 1.85 }),
             },
           ),
+          menuItems: [
+            { id: "remove-folder", label: "移除文件夹" },
+            { id: "delete-folder-history", label: "全量删除历史会话", tone: "danger" },
+          ],
           children: [
-            { id: "design-system", kind: "thread", label: "Awaken Design System", timeLabel: "16" },
+            {
+              id: "design-system",
+              kind: "thread",
+              label: "Awaken Design System",
+              timeLabel: "16",
+              menuItems: [
+                { id: "rename-thread", label: "重命名" },
+                { id: "delete-thread", label: "删除会话", tone: "danger" },
+              ],
+            },
             { id: "desktop", kind: "thread", label: "apps/desktop", timeLabel: "8" },
           ],
         },
@@ -117,6 +130,30 @@ export const AwakenProjectTreeStates: AwakenProjectTreeState[] = [
       ],
       activeId: "long-child",
       defaultExpandedIds: ["long-project"],
+      onSelect: noop,
+    } as unknown as Partial<ComponentProps<typeof AwakenProjectTree>>,
+  },
+  {
+    id: "sdk-folder-name",
+    label: "SDK 项目名",
+    props: {
+      items: [
+        {
+          id: "sdk-folder",
+          label: "OpenAI_Agents_SDK_TS",
+          kind: "project",
+          path: "/Users/nolangrant/Documents/OpenAI_Agents_SDK_TS",
+          action: createElement(
+            AwakenSidebarSectionAction,
+            {
+              label: "新建会话",
+              children: createElement(MessageCirclePlus, { size: 13, strokeWidth: 1.85 }),
+            },
+          ),
+        },
+      ],
+      activeId: "sdk-folder",
+      defaultExpandedIds: ["sdk-folder"],
       onSelect: noop,
     } as unknown as Partial<ComponentProps<typeof AwakenProjectTree>>,
   },

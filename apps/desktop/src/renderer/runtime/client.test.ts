@@ -20,6 +20,8 @@ function createElectronBridge(
     getRun: vi.fn(),
     getThreadTranscript: vi.fn(),
     listThreads: vi.fn(async () => []),
+    renameThread: vi.fn(),
+    deleteThread: vi.fn(),
     startRun: vi.fn(),
     cancelRun: vi.fn(),
     resolveApproval: vi.fn(),

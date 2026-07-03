@@ -63,6 +63,10 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:get-thread-transcript", threadId) as Promise<RuntimeThreadTranscript>,
   listThreads: () =>
     ipcRenderer.invoke("awaken:list-threads") as Promise<RuntimeThread[]>,
+  renameThread: (threadId: string, label: string) =>
+    ipcRenderer.invoke("awaken:rename-thread", threadId, label) as Promise<RuntimeThread>,
+  deleteThread: (threadId: string) =>
+    ipcRenderer.invoke("awaken:delete-thread", threadId) as Promise<void>,
   startRun: (request: StartRunRequest) =>
     ipcRenderer.invoke("awaken:start-run", request) as Promise<RuntimeRun>,
   cancelRun: (runId: string) =>

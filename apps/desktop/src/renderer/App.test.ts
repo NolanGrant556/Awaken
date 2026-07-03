@@ -12,6 +12,8 @@ import {
   assignThreadToProject,
   normalizeWorkspacePath,
   projectIdForThread,
+  removeThreadProjectAssignments,
+  removeWorkspaceProject,
   upsertWorkspaceProject,
   workspaceLabelForPath,
 } from "./projectWorkspace";
@@ -51,6 +53,8 @@ function stubElectronBridge(): void {
       getRun: vi.fn(),
       getThreadTranscript: vi.fn(),
       listThreads: vi.fn(async () => []),
+      renameThread: vi.fn(),
+      deleteThread: vi.fn(),
       startRun: vi.fn(),
       cancelRun: vi.fn(),
       resolveApproval: vi.fn(),
@@ -199,6 +203,24 @@ describe("project workspace helpers", () => {
 
     expect(projectIdForThread("thread-1", mapping)).toBe("workspace:%2Ftmp%2Fdemo");
     expect(projectIdForThread("thread-2", mapping)).toBe(DEFAULT_WORKSPACE_PROJECT_ID);
+  });
+
+  it("removes folder projects and thread assignments", () => {
+    const projects = [
+      { id: "workspace:%2Ftmp%2Fdemo", label: "demo", path: "/tmp/demo" },
+      { id: "workspace:%2Ftmp%2Fkeep", label: "keep", path: "/tmp/keep" },
+    ];
+    const mapping = {
+      "thread-1": "workspace:%2Ftmp%2Fdemo",
+      "thread-2": "workspace:%2Ftmp%2Fkeep",
+    };
+
+    expect(removeWorkspaceProject(projects, "workspace:%2Ftmp%2Fdemo")).toEqual([
+      { id: "workspace:%2Ftmp%2Fkeep", label: "keep", path: "/tmp/keep" },
+    ]);
+    expect(removeThreadProjectAssignments(mapping, ["thread-1"])).toEqual({
+      "thread-2": "workspace:%2Ftmp%2Fkeep",
+    });
   });
 });
 

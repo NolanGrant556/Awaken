@@ -34,6 +34,7 @@ import {
   type RuntimeInfoWire,
   type RuntimeRunWire,
   type RuntimeModelProfileSummaryWire,
+  type RenameThreadRequest,
   type RuntimeThreadTranscriptWire,
   type RuntimeThreadWire,
   type StartRunRequest,
@@ -526,6 +527,25 @@ ipcMain.handle("awaken:list-threads", async () => {
 	});
 
 	return threads.map(normalizeRuntimeThread);
+});
+
+ipcMain.handle("awaken:rename-thread", async (_event, threadId: string, label: string) => {
+  const body: RenameThreadRequest = { label };
+  const thread = await requestRuntime<RuntimeThreadWire>(`/v1/threads/${threadId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return normalizeRuntimeThread(thread);
+});
+
+ipcMain.handle("awaken:delete-thread", async (_event, threadId: string) => {
+  await requestRuntimeOK(`/v1/threads/${threadId}`, {
+    method: "DELETE",
+  });
 });
 
 ipcMain.handle("awaken:start-run", async (_event, request: StartRunRequest) => {

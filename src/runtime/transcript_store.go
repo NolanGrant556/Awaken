@@ -15,6 +15,7 @@ import (
 )
 
 const (
+	transcriptRecordTypeThread  = "thread"
 	transcriptRecordTypeEvent   = "event"
 	transcriptRecordTypeMessage = "message"
 )
@@ -161,6 +162,19 @@ func appendRunEventTranscript(workspace WorkspaceConfig, run Run, events []Event
 	return appendTranscriptRecords(path, pending)
 }
 
+func appendThreadLabelTranscriptRecord(workspace WorkspaceConfig, threadID, label string, timestamp time.Time) error {
+	path := transcriptPath(workspace.WorkspaceRoot, threadID)
+	if timestamp.IsZero() {
+		timestamp = time.Now().UTC()
+	}
+	return appendTranscriptRecords(path, []TranscriptRecord{{
+		RecordType: transcriptRecordTypeThread,
+		ThreadID:   threadID,
+		Content:    trimThreadLabel(strings.TrimSpace(label)),
+		Timestamp:  timestamp.UTC(),
+	}})
+}
+
 func loadRestoredTranscript(workspace WorkspaceConfig, threadID string) (restoredTranscript, error) {
 	path := transcriptPath(workspace.WorkspaceRoot, threadID)
 	records, err := readTranscriptRecords(path)
@@ -188,6 +202,9 @@ func loadRestoredTranscript(workspace WorkspaceConfig, threadID string) (restore
 		if record.RunID != "" && !seenRuns[record.RunID] {
 			seenRuns[record.RunID] = true
 			restored.RunIDs = append(restored.RunIDs, record.RunID)
+		}
+		if record.RecordType == transcriptRecordTypeThread && strings.TrimSpace(record.Content) != "" {
+			restored.Label = trimThreadLabel(record.Content)
 		}
 		if record.RecordType == transcriptRecordTypeEvent && record.Event != nil {
 			updateRestoredTranscriptState(&restored, record)
@@ -364,6 +381,10 @@ func appendTranscriptRecords(path string, records []TranscriptRecord) error {
 		}
 	}
 	return nil
+}
+
+func removeThreadTranscript(workspace WorkspaceConfig, threadID string) error {
+	return os.Remove(transcriptPath(workspace.WorkspaceRoot, threadID))
 }
 
 func transcriptRecordForMessage(threadID, runID, sessionID string, index int, message convcontext.Message, timestamp time.Time) TranscriptRecord {

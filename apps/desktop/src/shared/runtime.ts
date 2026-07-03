@@ -56,6 +56,10 @@ export type RuntimeThread = {
   updatedAt: string;
 };
 
+export type RenameThreadRequest = {
+  label: string;
+};
+
 export type RuntimeThreadTranscriptRunWire = {
   run: RuntimeRunWire;
   events: AguiEvent[];
@@ -332,6 +336,8 @@ export type AwakenBridge = {
   getRun: (runId: string) => Promise<RuntimeRun>;
   getThreadTranscript: (threadId: string) => Promise<RuntimeThreadTranscript>;
   listThreads: () => Promise<RuntimeThread[]>;
+  renameThread: (threadId: string, label: string) => Promise<RuntimeThread>;
+  deleteThread: (threadId: string) => Promise<void>;
   startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
   resolveApproval: (

@@ -50,10 +50,19 @@ export type ProjectItem = {
   timeLabel?: string;           // 如 "当前", "3"
   children?: ProjectItem[];     // 子项目/会话
   action?: React.ReactNode;      // 行内操作，如在项目下创建新会话
+  menuItems?: ProjectMenuItem[];  // 行内更多菜单项，由业务层提供行为
   isLoading?: boolean;          // 展开时显示 loading ring
   disabled?: boolean;
   // 注意：展开状态由 ProjectTree 组件通过 expandedIds / defaultExpandedIds 管理，
   // 不在节点数据中保存，避免 controlled/uncontrolled 状态重复。
+};
+
+export type ProjectMenuItem = {
+  id: string;
+  label: string;
+  tone?: "neutral" | "danger";
+  disabled?: boolean;
+  onSelect?: () => void;
 };
 
 // === 快捷任务 ===

@@ -32,6 +32,10 @@ type resolveApprovalRequest struct {
 	Decision string `json:"decision"`
 }
 
+type renameThreadRequest struct {
+	Label string `json:"label"`
+}
+
 type errorResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
@@ -84,6 +88,47 @@ func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 
 func (h runHandlers) handleListThreads(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.runService.ListThreads())
+}
+
+func (h runHandlers) handleRenameThread(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	var req renameThreadRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+
+	thread, err := h.runService.RenameThread(threadID, req.Label)
+	if err != nil {
+		switch {
+		case errors.Is(err, awruntime.ErrThreadNotFound):
+			writeErrorJSON(w, http.StatusNotFound, "THREAD_NOT_FOUND", err.Error())
+		case errors.Is(err, awruntime.ErrThreadLabelInvalid):
+			writeErrorJSON(w, http.StatusBadRequest, "INVALID_THREAD_LABEL", err.Error())
+		default:
+			writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to rename thread")
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, thread)
+}
+
+func (h runHandlers) handleDeleteThread(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	if err := h.runService.DeleteThread(threadID); err != nil {
+		switch {
+		case errors.Is(err, awruntime.ErrThreadNotFound):
+			writeErrorJSON(w, http.StatusNotFound, "THREAD_NOT_FOUND", err.Error())
+		case errors.Is(err, awruntime.ErrThreadBusy):
+			writeErrorJSON(w, http.StatusConflict, "THREAD_BUSY", err.Error())
+		default:
+			writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to delete thread")
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h runHandlers) handleGetThreadTranscript(w http.ResponseWriter, r *http.Request) {

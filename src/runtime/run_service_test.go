@@ -1501,6 +1501,72 @@ func TestListThreadsRestoresDurableThreadsAfterRestart(t *testing.T) {
 	}
 }
 
+func TestRenameThreadPersistsDurableLabel(t *testing.T) {
+	root := t.TempDir()
+	service := newDurableThreadTestService()
+	run, err := service.StartRun(StartRunRequest{
+		Input:     "original thread label",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, run.RunID)
+	waitForTranscriptMessageCount(t, root, run.ThreadID, 2)
+
+	renamed, err := service.RenameThread(run.ThreadID, "renamed session")
+	if err != nil {
+		t.Fatalf("RenameThread returned error: %v", err)
+	}
+	if renamed.Label != "renamed session" {
+		t.Fatalf("expected renamed label, got %q", renamed.Label)
+	}
+
+	restartedService := newDurableThreadTestService()
+	if err := restartedService.SetDefaultWorkspace(WorkspaceConfig{WorkspaceRoot: root}); err != nil {
+		t.Fatalf("SetDefaultWorkspace returned error: %v", err)
+	}
+	threads := restartedService.ListThreads()
+	if len(threads) != 1 {
+		t.Fatalf("expected one durable thread, got %d", len(threads))
+	}
+	if threads[0].Label != "renamed session" {
+		t.Fatalf("expected durable renamed label, got %q", threads[0].Label)
+	}
+}
+
+func TestDeleteThreadRemovesMemoryAndDurableTranscript(t *testing.T) {
+	root := t.TempDir()
+	service := newDurableThreadTestService()
+	run, err := service.StartRun(StartRunRequest{
+		Input:     "delete me",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, run.RunID)
+	waitForTranscriptMessageCount(t, root, run.ThreadID, 2)
+
+	if err := service.DeleteThread(run.ThreadID); err != nil {
+		t.Fatalf("DeleteThread returned error: %v", err)
+	}
+	if got := service.ListThreads(); len(got) != 0 {
+		t.Fatalf("expected no in-memory threads after delete, got %+v", got)
+	}
+	if _, err := os.Stat(transcriptPath(root, run.ThreadID)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected transcript to be removed, got %v", err)
+	}
+
+	restartedService := newDurableThreadTestService()
+	if err := restartedService.SetDefaultWorkspace(WorkspaceConfig{WorkspaceRoot: root}); err != nil {
+		t.Fatalf("SetDefaultWorkspace returned error: %v", err)
+	}
+	if got := restartedService.ListThreads(); len(got) != 0 {
+		t.Fatalf("expected no durable threads after restart, got %+v", got)
+	}
+}
+
 func TestGetThreadTranscriptReturnsOrderedRunsAndInputs(t *testing.T) {
 	root := t.TempDir()
 	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {

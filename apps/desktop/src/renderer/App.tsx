@@ -50,6 +50,7 @@ import type {
   RuntimeInfo,
   RuntimeModelProfileSummary,
   RuntimeRunStatus,
+  RuntimeThread,
   StartRunRequest,
 } from "../shared/runtime";
 import {
@@ -77,6 +78,8 @@ import {
   assignThreadToProject,
   isSameWorkspacePath,
   projectIdForThread,
+  removeThreadProjectAssignments,
+  removeWorkspaceProject,
   upsertWorkspaceProject,
   workspaceLabelForPath,
   type WorkspaceProject,
@@ -142,6 +145,15 @@ function sidebarStatusForThread(
       }
       return { label: "idle", tone: "neutral" };
   }
+}
+
+function isThreadBusyForDelete(thread: ThreadItem): boolean {
+  return Boolean(
+    thread.activeRunId ||
+      thread.runStatus === "running" ||
+      thread.runStatus === "awaiting_approval" ||
+      thread.runStatus === "cancelling",
+  );
 }
 
 function formatTokenCount(value?: number): string | undefined {
@@ -500,6 +512,17 @@ export function App() {
   }, [runtimeState.runId, runtimeState.activeThreadId]);
 
   useEffect(() => {
+    if (!notice) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setNotice(null);
+    }, 2000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
+  useEffect(() => {
     function handleKeyDown(event: KeyboardEvent): void {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
         event.preventDefault();
@@ -522,6 +545,12 @@ export function App() {
       // Thread listing is best-effort; runtime reachability is already surfaced
       // by the runtime info poll.
     }
+  }
+
+  async function loadThreadsIntoState(): Promise<RuntimeThread[]> {
+    const threads = await runtimeClient.listThreads();
+    dispatch({ type: "run/threadsLoaded", threads });
+    return threads;
   }
 
   async function refreshRuntimeInfoNow(): Promise<void> {
@@ -689,9 +718,29 @@ export function App() {
     );
   }
 
+  function projectMenuItems(projectId: string) {
+    return [
+      {
+        id: "remove-folder",
+        label: "移除文件夹",
+        tone: "danger" as const,
+        onSelect: () => {
+          void deleteThreadsForProject(projectId, { removeProject: true });
+        },
+      },
+      {
+        id: "delete-folder-history",
+        label: "全量删除历史会话",
+        tone: "danger" as const,
+        onSelect: () => {
+          void deleteThreadsForProject(projectId, { removeProject: false });
+        },
+      },
+    ];
+  }
+
   function threadItemsForProject(projectId: string): ProjectItem[] {
-    return runtimeState.threads
-      .filter((thread) => projectIdForThread(thread.threadId, threadProjectIds) === projectId)
+    return threadsForProject(projectId)
       .map((thread) => {
         const sidebarStatus = sidebarStatusForThread(thread);
         const timeLabel =
@@ -703,6 +752,24 @@ export function App() {
           kind: "thread",
           label: thread.label,
           timeLabel,
+          menuItems: [
+            {
+              id: "rename-thread",
+              label: "重命名",
+              onSelect: () => {
+                void handleRenameThread(thread.threadId);
+              },
+            },
+            {
+              id: "delete-thread",
+              label: "删除会话",
+              tone: "danger",
+              disabled: isThreadBusyForDelete(thread),
+              onSelect: () => {
+                void handleDeleteThread(thread.threadId);
+              },
+            },
+          ],
         };
       });
   }
@@ -718,6 +785,7 @@ export function App() {
         DEFAULT_WORKSPACE_PROJECT_ID,
         projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ?? "awaken",
       ),
+      menuItems: projectMenuItems(DEFAULT_WORKSPACE_PROJECT_ID),
       children: defaultProjectThreads.length > 0 ? defaultProjectThreads : undefined,
     },
     ...projectsFromWorkspace
@@ -730,6 +798,7 @@ export function App() {
           label: project.label,
           path: project.path,
           action: projectAction(project.id, project.label),
+          menuItems: projectMenuItems(project.id),
           children: threads.length > 0 ? threads : undefined,
         };
       }),
@@ -985,6 +1054,139 @@ export function App() {
       await replayThreadTranscript(threadId, loadSeq);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Failed to load thread");
+    }
+  }
+
+  function threadsForProject(projectId: string): ThreadItem[] {
+    return runtimeState.threads.filter(
+      (thread) => projectIdForThread(thread.threadId, threadProjectIds) === projectId,
+    );
+  }
+
+  async function refreshAfterThreadMutation(
+    removedThreadIds: string[] = [],
+  ): Promise<void> {
+    if (removedThreadIds.includes(runtimeState.activeThreadId ?? "")) {
+      unsubscribeRef.current?.();
+      unsubscribeRef.current = null;
+      threadLoadSeqRef.current += 1;
+      terminalSeenRef.current = false;
+      localStorage.removeItem("awaken:runId");
+    }
+
+    if (removedThreadIds.length > 0) {
+      setThreadProjectIds((current) => removeThreadProjectAssignments(current, removedThreadIds));
+    }
+
+    await loadThreadsIntoState();
+  }
+
+  async function deleteThreadsForProject(
+    projectId: string,
+    options: { removeProject: boolean },
+  ): Promise<void> {
+    if (!desktopReady) {
+      return;
+    }
+
+    const projectLabel = projectLabelById.get(projectId) ?? "项目";
+    const threads = threadsForProject(projectId);
+    const shouldRemoveProject = options.removeProject && projectId !== DEFAULT_WORKSPACE_PROJECT_ID;
+    const busyThread = threads.find(isThreadBusyForDelete);
+    if (busyThread) {
+      setNotice(`"${busyThread.label}" 正在运行，先停止后再删除。`);
+      return;
+    }
+
+    const hasThreads = threads.length > 0;
+    const shouldProceed = window.confirm(
+      hasThreads
+        ? `确认删除 "${projectLabel}" 下的 ${threads.length} 条历史会话？`
+        : shouldRemoveProject
+          ? `确认移除 "${projectLabel}"？`
+          : `"${projectLabel}" 暂无历史会话。`,
+    );
+    if (!shouldProceed || (!hasThreads && !shouldRemoveProject)) {
+      return;
+    }
+
+    const removedThreadIds = threads.map((thread) => thread.threadId);
+    try {
+      await Promise.all(removedThreadIds.map((threadId) => runtimeClient.deleteThread(threadId)));
+      await refreshAfterThreadMutation(removedThreadIds);
+      if (shouldRemoveProject) {
+        setProjectsFromWorkspace((current) => removeWorkspaceProject(current, projectId));
+        setExpandedProjectIds((current) => current.filter((id) => id !== projectId));
+        if (selectedProjectId === projectId) {
+          setSelectedProjectId(DEFAULT_WORKSPACE_PROJECT_ID);
+          if (defaultWorkspacePath) {
+            setWorkspacePath(defaultWorkspacePath);
+          }
+        }
+      }
+      setNotice(
+        shouldRemoveProject
+          ? hasThreads
+            ? `已移除 "${projectLabel}" 并删除历史会话`
+            : `已移除 "${projectLabel}"`
+          : `已删除 "${projectLabel}" 下的历史会话`,
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "删除历史会话失败");
+      await refreshThreads();
+    }
+  }
+
+  async function handleRenameThread(threadId: string): Promise<void> {
+    if (!desktopReady) {
+      return;
+    }
+
+    const thread = runtimeState.threads.find((item) => item.threadId === threadId);
+    if (!thread) {
+      setNotice("会话不存在");
+      return;
+    }
+
+    const nextLabel = window.prompt("重命名会话", thread.label)?.trim();
+    if (!nextLabel || nextLabel === thread.label) {
+      return;
+    }
+
+    try {
+      await runtimeClient.renameThread(threadId, nextLabel);
+      await loadThreadsIntoState();
+      setNotice("已重命名会话");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "重命名会话失败");
+    }
+  }
+
+  async function handleDeleteThread(threadId: string): Promise<void> {
+    if (!desktopReady) {
+      return;
+    }
+
+    const thread = runtimeState.threads.find((item) => item.threadId === threadId);
+    if (!thread) {
+      setNotice("会话不存在");
+      return;
+    }
+    if (isThreadBusyForDelete(thread)) {
+      setNotice(`"${thread.label}" 正在运行，先停止后再删除。`);
+      return;
+    }
+    if (!window.confirm(`确认删除会话 "${thread.label}"？`)) {
+      return;
+    }
+
+    try {
+      await runtimeClient.deleteThread(threadId);
+      await refreshAfterThreadMutation([threadId]);
+      setNotice("已删除会话");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "删除会话失败");
+      await refreshThreads();
     }
   }
 
@@ -1465,13 +1667,6 @@ export function App() {
         tone: "error",
       });
     }
-    if (notice) {
-      panels.push({
-        id: "notice",
-        title: "Notice",
-        message: notice,
-      });
-    }
 
     if (panels.length === 0) {
       return null;
@@ -1491,6 +1686,18 @@ export function App() {
             <p>{panel.message}</p>
           </div>
         ))}
+      </div>
+    );
+  }
+
+  function renderNoticeToast() {
+    if (!notice) {
+      return null;
+    }
+
+    return (
+      <div className="desktop-toast" role="status" aria-live="polite">
+        {notice}
       </div>
     );
   }
@@ -1610,29 +1817,32 @@ export function App() {
                     scrollRef={showCenterComposer ? undefined : setRunStageScrollElement}
                     onScroll={showCenterComposer ? undefined : handleRunStageScroll}
                     overlay={
-                      showTurnMarkerRail ? (
-                        <nav
-                          className={`turn-marker-rail turn-marker-rail-${turnMarkerDisplay.mode}`}
-                          aria-label="Message shortcuts"
-                          style={{ bottom: Math.max(28, composerSafeAreaPx) }}
-                        >
-                          {turnMarkerDisplay.items.map((marker) => (
-                            <button
-                              key={`${marker.id}:${marker.index}`}
-                              type="button"
-                              className={`turn-marker-button${
-                                marker.id === activeWorkbenchTurnId ? " turn-marker-button-active" : ""
-                              }`}
-                              aria-current={marker.id === activeWorkbenchTurnId ? "true" : undefined}
-                              aria-label={`跳转到第 ${marker.index + 1} 条消息`}
-                              title={`第 ${marker.index + 1} 条消息`}
-                              onClick={() => handleTurnMarkerClick(marker.id)}
-                            >
-                              <span className="turn-marker-bar" aria-hidden="true" />
-                            </button>
-                          ))}
-                        </nav>
-                      ) : undefined
+                      <>
+                        {renderNoticeToast()}
+                        {showTurnMarkerRail ? (
+                          <nav
+                            className={`turn-marker-rail turn-marker-rail-${turnMarkerDisplay.mode}`}
+                            aria-label="Message shortcuts"
+                            style={{ bottom: Math.max(28, composerSafeAreaPx) }}
+                          >
+                            {turnMarkerDisplay.items.map((marker) => (
+                              <button
+                                key={`${marker.id}:${marker.index}`}
+                                type="button"
+                                className={`turn-marker-button${
+                                  marker.id === activeWorkbenchTurnId ? " turn-marker-button-active" : ""
+                                }`}
+                                aria-current={marker.id === activeWorkbenchTurnId ? "true" : undefined}
+                                aria-label={`跳转到第 ${marker.index + 1} 条消息`}
+                                title={`第 ${marker.index + 1} 条消息`}
+                                onClick={() => handleTurnMarkerClick(marker.id)}
+                              >
+                                <span className="turn-marker-bar" aria-hidden="true" />
+                              </button>
+                            ))}
+                          </nav>
+                        ) : null}
+                      </>
                     }
                     composer={
                       showCenterComposer ? undefined : (

@@ -10,6 +10,7 @@ export type {
   NavItem,
   ConversationItem,
   ProjectItem,
+  ProjectMenuItem,
   QuickActionItem,
   ModelOption,
   RunStepItem,

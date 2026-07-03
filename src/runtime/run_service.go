@@ -28,6 +28,7 @@ var (
 	ErrThreadNotFound          = errors.New("thread not found")
 	ErrThreadWorkspaceMismatch = errors.New("thread workspace mismatch")
 	ErrThreadBusy              = errors.New("thread already has an active run")
+	ErrThreadLabelInvalid      = errors.New("thread label is required")
 	ErrMissingModelProfile     = errors.New("model profile is required")
 )
 
@@ -348,6 +349,94 @@ func (s *RunService) ListThreads() []ThreadSnapshot {
 		return threads[i].CreatedAt.After(threads[j].CreatedAt)
 	})
 	return threads
+}
+
+func (s *RunService) RenameThread(threadID, label string) (ThreadSnapshot, error) {
+	threadID = strings.TrimSpace(threadID)
+	normalizedLabel := trimThreadLabel(strings.TrimSpace(label))
+	if threadID == "" {
+		return ThreadSnapshot{}, ErrThreadNotFound
+	}
+	if normalizedLabel == "" {
+		return ThreadSnapshot{}, ErrThreadLabelInvalid
+	}
+
+	now := time.Now().UTC()
+
+	s.mu.Lock()
+	if thread, ok := s.threads[threadID]; ok {
+		thread.label = normalizedLabel
+		thread.updatedAt = now
+		snapshot := thread.snapshot()
+		workspace := thread.workspace
+		s.mu.Unlock()
+
+		if err := appendThreadLabelTranscriptRecord(workspace, threadID, normalizedLabel, now); err != nil {
+			return ThreadSnapshot{}, err
+		}
+		return snapshot, nil
+	}
+	defaultWorkspace := s.defaultWorkspace
+	s.mu.Unlock()
+
+	if defaultWorkspace.WorkspaceRoot == "" {
+		return ThreadSnapshot{}, ErrThreadNotFound
+	}
+	restored, err := loadRestoredTranscript(defaultWorkspace, threadID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ThreadSnapshot{}, ErrThreadNotFound
+		}
+		return ThreadSnapshot{}, err
+	}
+	if err := appendThreadLabelTranscriptRecord(defaultWorkspace, threadID, normalizedLabel, now); err != nil {
+		return ThreadSnapshot{}, err
+	}
+
+	snapshot := threadSnapshotFromRestored(threadID, defaultWorkspace, restored)
+	snapshot.Label = normalizedLabel
+	snapshot.UpdatedAt = now
+	return snapshot, nil
+}
+
+func (s *RunService) DeleteThread(threadID string) error {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return ErrThreadNotFound
+	}
+
+	s.mu.Lock()
+	if thread, ok := s.threads[threadID]; ok {
+		if thread.activeRunID != "" {
+			s.mu.Unlock()
+			return ErrThreadBusy
+		}
+		workspace := thread.workspace
+		runIDs := append([]string(nil), thread.runIDs...)
+		delete(s.threads, threadID)
+		for _, runID := range runIDs {
+			delete(s.sessions, runID)
+		}
+		s.mu.Unlock()
+
+		if err := removeThreadTranscript(workspace, threadID); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	defaultWorkspace := s.defaultWorkspace
+	s.mu.Unlock()
+
+	if defaultWorkspace.WorkspaceRoot == "" {
+		return ErrThreadNotFound
+	}
+	if err := removeThreadTranscript(defaultWorkspace, threadID); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ErrThreadNotFound
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *RunService) Subscribe(runID string, afterSeq uint64) (Subscription, error) {

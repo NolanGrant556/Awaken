@@ -724,6 +724,86 @@ func TestListThreadsEndpointReturnsRuntimeThreads(t *testing.T) {
 	}
 }
 
+func TestRenameAndDeleteThreadEndpoints(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+			return "done", nil
+		})
+	})
+
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	createBody := fmt.Sprintf(`{"input":"thread to rename","workspace":{"workspace_root":%q}}`, workspaceRoot)
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(createBody))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+	var created awruntime.Run
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode run response: %v", err)
+	}
+	waitHTTPRunTerminal(t, ts.URL, created.RunID)
+
+	renameReq, err := http.NewRequest(
+		http.MethodPatch,
+		ts.URL+"/v1/threads/"+created.ThreadID,
+		strings.NewReader(`{"label":"Renamed from API"}`),
+	)
+	if err != nil {
+		t.Fatalf("failed to build rename request: %v", err)
+	}
+	renameReq.Header.Set("Content-Type", "application/json")
+	renameResp, err := http.DefaultClient.Do(renameReq)
+	if err != nil {
+		t.Fatalf("PATCH /v1/threads/{id} failed: %v", err)
+	}
+	defer renameResp.Body.Close()
+	if renameResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from rename, got %d", renameResp.StatusCode)
+	}
+	var renamed awruntime.ThreadSnapshot
+	if err := json.NewDecoder(renameResp.Body).Decode(&renamed); err != nil {
+		t.Fatalf("failed to decode rename response: %v", err)
+	}
+	if renamed.Label != "Renamed from API" {
+		t.Fatalf("expected renamed label, got %q", renamed.Label)
+	}
+
+	deleteReq, err := http.NewRequest(http.MethodDelete, ts.URL+"/v1/threads/"+created.ThreadID, nil)
+	if err != nil {
+		t.Fatalf("failed to build delete request: %v", err)
+	}
+	deleteResp, err := http.DefaultClient.Do(deleteReq)
+	if err != nil {
+		t.Fatalf("DELETE /v1/threads/{id} failed: %v", err)
+	}
+	defer deleteResp.Body.Close()
+	if deleteResp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204 from delete, got %d", deleteResp.StatusCode)
+	}
+
+	listResp, err := http.Get(ts.URL + "/v1/threads")
+	if err != nil {
+		t.Fatalf("GET /v1/threads failed: %v", err)
+	}
+	defer listResp.Body.Close()
+	var threads []awruntime.ThreadSnapshot
+	if err := json.NewDecoder(listResp.Body).Decode(&threads); err != nil {
+		t.Fatalf("failed to decode thread list: %v", err)
+	}
+	if len(threads) != 0 {
+		t.Fatalf("expected no threads after delete, got %+v", threads)
+	}
+}
+
 func TestGetThreadTranscriptEndpointReturnsMappedRuns(t *testing.T) {
 	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
 		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {

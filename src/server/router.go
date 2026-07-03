@@ -20,6 +20,8 @@ func NewRouter(runService *awruntime.RunService, infoProvider RuntimeInfoProvide
 	if runService != nil {
 		handlers := runHandlers{runService: runService}
 		mux.HandleFunc("GET /v1/threads", handlers.handleListThreads)
+		mux.HandleFunc("PATCH /v1/threads/{thread_id}", handlers.handleRenameThread)
+		mux.HandleFunc("DELETE /v1/threads/{thread_id}", handlers.handleDeleteThread)
 		mux.HandleFunc("GET /v1/threads/{thread_id}/transcript", handlers.handleGetThreadTranscript)
 		mux.HandleFunc("POST /v1/runs", handlers.handleCreateRun)
 		mux.HandleFunc("GET /v1/runs/{run_id}", handlers.handleGetRun)

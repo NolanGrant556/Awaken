@@ -37,6 +37,8 @@ export type RuntimeClient = {
   getRun: (runId: string) => Promise<RuntimeRun>;
   getThreadTranscript: (threadId: string) => Promise<RuntimeThreadTranscript>;
   listThreads: () => Promise<RuntimeThread[]>;
+  renameThread: (threadId: string, label: string) => Promise<RuntimeThread>;
+  deleteThread: (threadId: string) => Promise<void>;
   startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
   resolveApproval: (
@@ -80,6 +82,8 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     getRun: (runId) => bridge.getRun(runId),
     getThreadTranscript: (threadId) => bridge.getThreadTranscript(threadId),
     listThreads: () => bridge.listThreads(),
+    renameThread: (threadId, label) => bridge.renameThread(threadId, label),
+    deleteThread: (threadId) => bridge.deleteThread(threadId),
     startRun: (request) => bridge.startRun(request),
     cancelRun: bridge.cancelRun,
     resolveApproval: bridge.resolveApproval,

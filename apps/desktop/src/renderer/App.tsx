@@ -268,6 +268,21 @@ function readStoredBoolean(key: string, fallback: boolean): boolean {
   }
 }
 
+function readStoredStringArray(key: string): string[] {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(key) ?? "[]");
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 function writeStoredValue(key: string, value: string): void {
   if (typeof window === "undefined" || !window.localStorage) {
     return;
@@ -313,6 +328,9 @@ export function App() {
   const [expandedProjectIds, setExpandedProjectIds] = useState<string[]>([
     DEFAULT_WORKSPACE_PROJECT_ID,
   ]);
+  const [removedProjectIds, setRemovedProjectIds] = useState<string[]>(() =>
+    readStoredStringArray("awaken:projects:removed"),
+  );
   const [threadProjectIds, setThreadProjectIds] = useState<Record<string, string>>({});
   const [inspectorTab, setInspectorTab] = useState<InspectorTabId>("changes");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -368,6 +386,10 @@ export function App() {
     writeStoredValue("awaken:layout:inspectorCollapsed", String(inspectorCollapsed));
     inspectorCollapsedValueRef.current = inspectorCollapsed;
   }, [inspectorCollapsed]);
+
+  useEffect(() => {
+    writeStoredValue("awaken:projects:removed", JSON.stringify(removedProjectIds));
+  }, [removedProjectIds]);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
@@ -658,6 +680,7 @@ export function App() {
     ],
     ...projectsFromWorkspace.map((project) => [project.id, project.label] as const),
   ]);
+  const removedProjectIdSet = new Set(removedProjectIds);
   const pathForSelectedProject =
     selectedProjectId === DEFAULT_WORKSPACE_PROJECT_ID
       ? defaultWorkspacePath
@@ -776,18 +799,22 @@ export function App() {
 
   const defaultProjectThreads = threadItemsForProject(DEFAULT_WORKSPACE_PROJECT_ID);
   const repositoryProjects: ProjectItem[] = [
-    {
-      id: DEFAULT_WORKSPACE_PROJECT_ID,
-      kind: "project",
-      label: projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ?? "awaken",
-      path: defaultWorkspacePath,
-      action: projectAction(
-        DEFAULT_WORKSPACE_PROJECT_ID,
-        projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ?? "awaken",
-      ),
-      menuItems: projectMenuItems(DEFAULT_WORKSPACE_PROJECT_ID),
-      children: defaultProjectThreads.length > 0 ? defaultProjectThreads : undefined,
-    },
+    ...(removedProjectIdSet.has(DEFAULT_WORKSPACE_PROJECT_ID)
+      ? []
+      : [
+          {
+            id: DEFAULT_WORKSPACE_PROJECT_ID,
+            kind: "project" as const,
+            label: projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ?? "awaken",
+            path: defaultWorkspacePath,
+            action: projectAction(
+              DEFAULT_WORKSPACE_PROJECT_ID,
+              projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ?? "awaken",
+            ),
+            menuItems: projectMenuItems(DEFAULT_WORKSPACE_PROJECT_ID),
+            children: defaultProjectThreads.length > 0 ? defaultProjectThreads : undefined,
+          },
+        ]),
     ...projectsFromWorkspace
       .filter((project) => !isSameWorkspacePath(project.path, defaultWorkspacePath))
       .map((project) => {
@@ -993,6 +1020,11 @@ export function App() {
       };
       const run = await runtimeClient.startRun(startRunRequest);
       setThreadProjectIds((current) => assignThreadToProject(current, run.threadId, runProjectId));
+      if (runProjectId === DEFAULT_WORKSPACE_PROJECT_ID) {
+        setRemovedProjectIds((current) =>
+          current.filter((projectId) => projectId !== DEFAULT_WORKSPACE_PROJECT_ID),
+        );
+      }
       dispatch({ type: "run/created", run });
       dispatch({
         type: "run/threadAdded",
@@ -1091,7 +1123,7 @@ export function App() {
 
     const projectLabel = projectLabelById.get(projectId) ?? "项目";
     const threads = threadsForProject(projectId);
-    const shouldRemoveProject = options.removeProject && projectId !== DEFAULT_WORKSPACE_PROJECT_ID;
+    const shouldRemoveProject = options.removeProject;
     const busyThread = threads.find(isThreadBusyForDelete);
     if (busyThread) {
       setNotice(`"${busyThread.label}" 正在运行，先停止后再删除。`);
@@ -1115,12 +1147,27 @@ export function App() {
       await Promise.all(removedThreadIds.map((threadId) => runtimeClient.deleteThread(threadId)));
       await refreshAfterThreadMutation(removedThreadIds);
       if (shouldRemoveProject) {
-        setProjectsFromWorkspace((current) => removeWorkspaceProject(current, projectId));
+        if (projectId === DEFAULT_WORKSPACE_PROJECT_ID) {
+          setRemovedProjectIds((current) => (
+            current.includes(projectId) ? current : [...current, projectId]
+          ));
+        } else {
+          setProjectsFromWorkspace((current) => removeWorkspaceProject(current, projectId));
+        }
         setExpandedProjectIds((current) => current.filter((id) => id !== projectId));
         if (selectedProjectId === projectId) {
-          setSelectedProjectId(DEFAULT_WORKSPACE_PROJECT_ID);
-          if (defaultWorkspacePath) {
-            setWorkspacePath(defaultWorkspacePath);
+          const fallbackProject = projectsFromWorkspace.find(
+            (project) =>
+              project.id !== projectId && !isSameWorkspacePath(project.path, defaultWorkspacePath),
+          );
+          if (fallbackProject) {
+            setSelectedProjectId(fallbackProject.id);
+            setWorkspacePath(fallbackProject.path);
+          } else {
+            setSelectedProjectId(DEFAULT_WORKSPACE_PROJECT_ID);
+            if (defaultWorkspacePath) {
+              setWorkspacePath(defaultWorkspacePath);
+            }
           }
         }
       }
@@ -1240,6 +1287,11 @@ export function App() {
         defaultWorkspacePath,
       );
       setProjectsFromWorkspace(next.projects);
+      if (next.projectId === DEFAULT_WORKSPACE_PROJECT_ID) {
+        setRemovedProjectIds((current) =>
+          current.filter((projectId) => projectId !== DEFAULT_WORKSPACE_PROJECT_ID),
+        );
+      }
       setWorkspacePath(result.path);
       setSelectedProjectId(next.projectId);
       setExpandedProjectIds((current) => (

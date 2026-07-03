@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
-  UIEvent as ReactUIEvent,
 } from "react";
 import {
   FolderPlus,
@@ -62,31 +61,13 @@ import {
 import type { ApprovalDecision } from "../shared/runtime";
 import type { RunNarrativeItem } from "./run-narrative";
 import {
-  anchoredTurnMinHeight,
-  activeTurnIdForAnchor,
-  composerBottomSafeArea,
-  composerContentBottomInset,
-  groupNarrativeByTurns,
-  isNearLatestTurnOutputTail,
-  isNearScrollBottom,
-  latestTurnMinHeightBottomReserve,
-  latestTurnPromptAnchorSlack,
   resolvedDecisionForApproval,
-  scrollTopForLatestTurnScrollTail,
-  scrollTopForPromptAnchor,
-  shouldCancelPendingPromptAnchorForScrollIntent,
-  shouldFollowLatestTurnScrollTail,
-  shouldPauseLatestOutputFollowForScroll,
-  shouldPauseLatestOutputFollowForTouchMove,
-  shouldPauseLatestOutputFollowForWheel,
-  shouldRequestLatestOutputFollowResumeForTouchMove,
-  shouldRequestLatestOutputFollowResumeForWheel,
-  shouldResumeLatestOutputFollow,
   shouldShowAssistantAnswerFooter,
   shouldUseCenterComposer,
   turnMarkerRailDisplay,
   type ResolvedApprovalState,
 } from "./workbenchPresentation";
+import { useRunStageScrollController } from "./useRunStageScrollController";
 import {
   actionsForThreadTranscript,
   afterSeqForTranscriptRun,
@@ -235,9 +216,6 @@ const MIN_INSPECTOR_WIDTH = 260;
 const MAX_INSPECTOR_WIDTH = 520;
 const LAYOUT_STEP = 12;
 const INSPECTOR_RESPONSIVE_COLLAPSE_QUERY = "(max-width: 1180px)";
-const DEFAULT_PROMPT_ANCHOR_OFFSET = 0;
-const RUN_STAGE_COMPOSER_SAFE_GAP = 72;
-const LATEST_OUTPUT_FOLLOW_THRESHOLD = 48;
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -294,19 +272,8 @@ export function App() {
   const unsubscribeRef = useRef<null | (() => void)>(null);
   const terminalSeenRef = useRef(false);
   const resolvingApprovalIdRef = useRef<string | null>(null);
-  const pendingPromptAnchorRef = useRef(false);
-  const followLatestOutputRef = useRef(false);
-  const latestOutputFollowPausedByUserRef = useRef(false);
-  const latestOutputFollowResumeIntentRef = useRef(false);
-  const programmaticRunStageScrollTopRef = useRef<number | null>(null);
-  const runStageLastScrollTopRef = useRef<number | null>(null);
-  const runStageTouchStartYRef = useRef<number | null>(null);
-  const runStageInputIntentCleanupRef = useRef<(() => void) | null>(null);
-  const runStageResizeObserverRef = useRef<ResizeObserver | null>(null);
   const rendererReadyNotifiedRef = useRef(false);
   const threadLoadSeqRef = useRef(0);
-  const runStageScrollRef = useRef<HTMLDivElement | null>(null);
-  const composerDockRef = useRef<HTMLDivElement | null>(null);
   const inspectorCollapsedValueRef = useRef(false);
   const inspectorCollapsedBeforeResponsiveRef = useRef<boolean | null>(null);
   const runtimeClient = runtimeClientRef.current;
@@ -318,12 +285,8 @@ export function App() {
   );
   const [composerValue, setComposerValue] = useState("");
   const [composerFocusRequest, setComposerFocusRequest] = useState(0);
-  const [activeTurnId, setActiveTurnId] = useState<string | undefined>();
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
-  const [latestTurnMinHeightPx, setLatestTurnMinHeightPx] = useState(0);
-  const [composerContentBottomInsetPx, setComposerContentBottomInsetPx] = useState(0);
-  const [runStageViewportHeightPx, setRunStageViewportHeightPx] = useState(0);
   const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
   const [resolvedApproval, setResolvedApproval] = useState<ResolvedApprovalState>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
@@ -360,21 +323,13 @@ export function App() {
   const [inspectorCollapsed, setInspectorCollapsed] = useState(() =>
     readStoredBoolean("awaken:layout:inspectorCollapsed", false),
   );
-  const narrativeItems: RunNarrativeItem[] = [
-    ...runtimeState.narrative.committedItems,
-    ...(runtimeState.narrative.activeItem ? [runtimeState.narrative.activeItem] : []),
-  ];
-  const visibleNarrativeItems = narrativeItems.filter((item) => item.kind !== "planning");
-  const narrativeSections = groupNarrativeByTurns(visibleNarrativeItems);
-  const latestTurn = narrativeSections.turns[narrativeSections.turns.length - 1];
-  const latestPromptId = latestTurn ? latestTurn.id : undefined;
-  const hasPromptNarrative = narrativeSections.turns.length > 0;
-  const composerContentInsetPx = hasPromptNarrative ? composerContentBottomInsetPx : 0;
-  const composerOutputGapPx = hasPromptNarrative ? RUN_STAGE_COMPOSER_SAFE_GAP : 0;
-  const composerSafeAreaPx = composerBottomSafeArea({
-    composerHeight: composerContentInsetPx,
-    safeGap: composerOutputGapPx,
-  });
+  const visibleNarrativeItems = useMemo<RunNarrativeItem[]>(() => {
+    const narrativeItems: RunNarrativeItem[] = [
+      ...runtimeState.narrative.committedItems,
+      ...(runtimeState.narrative.activeItem ? [runtimeState.narrative.activeItem] : []),
+    ];
+    return narrativeItems.filter((item) => item.kind !== "planning");
+  }, [runtimeState.narrative]);
 
   const isBusy =
     runtimeState.phase === "starting" ||
@@ -797,11 +752,25 @@ export function App() {
     hasError: Boolean(runtimeState.errorMessage),
     needsRestart: desktopNeedsRestart,
   });
-  const activeWorkbenchTurnId =
-    activeTurnId &&
-    narrativeSections.turns.some((turn) => turn.id === activeTurnId)
-      ? activeTurnId
-      : latestPromptId;
+  const {
+    activeWorkbenchTurnId,
+    composerContentInsetPx,
+    composerDockRef,
+    composerSafeAreaPx,
+    handleRunStageScroll,
+    handleTurnMarkerClick,
+    latestPromptId,
+    latestTurnMinHeightPx,
+    narrativeSections,
+    prepareForNewTask,
+    prepareForRunStart,
+    prepareForThreadSwitch,
+    runStageViewportHeightPx,
+    setRunStageScrollElement,
+  } = useRunStageScrollController({
+    showCenterComposer,
+    narrativeItems: visibleNarrativeItems,
+  });
   const turnMarkerDisplay = turnMarkerRailDisplay({
     showCenterComposer,
     turnIds: narrativeSections.turns.map((turn) => turn.id),
@@ -813,17 +782,6 @@ export function App() {
     ),
   });
   const showTurnMarkerRail = turnMarkerDisplay.mode !== "hidden";
-
-  const applyRunStageComposerVars = useCallback((element: HTMLElement): void => {
-    const targets = [element, element.parentElement].filter(
-      (target): target is HTMLElement => target instanceof HTMLElement,
-    );
-    for (const target of targets) {
-      target.style.setProperty("--aw-composer-safe-area", `${composerSafeAreaPx}px`);
-      target.style.setProperty("--aw-composer-content-inset", `${composerContentInsetPx}px`);
-      target.style.setProperty("--aw-output-gap", `${composerOutputGapPx}px`);
-    }
-  }, [composerContentInsetPx, composerOutputGapPx, composerSafeAreaPx]);
 
   function createSubscribeHandlers(): SubscribeHandlers {
     return {
@@ -864,479 +822,6 @@ export function App() {
       },
     };
   }
-
-  const setRunStageScrollElement = useCallback((element: HTMLDivElement | null) => {
-    runStageInputIntentCleanupRef.current?.();
-    runStageInputIntentCleanupRef.current = null;
-    runStageResizeObserverRef.current?.disconnect();
-    runStageResizeObserverRef.current = null;
-    runStageScrollRef.current = element;
-    if (!element) {
-      programmaticRunStageScrollTopRef.current = null;
-      runStageLastScrollTopRef.current = null;
-      setRunStageViewportHeightPx((current) => current === 0 ? current : 0);
-      return;
-    }
-    runStageLastScrollTopRef.current = element.scrollTop;
-    applyRunStageComposerVars(element);
-
-    const syncRunStageViewportHeight = () => {
-      const nextHeight = element.clientHeight;
-      setRunStageViewportHeightPx((current) => current === nextHeight ? current : nextHeight);
-    };
-    syncRunStageViewportHeight();
-    if (typeof ResizeObserver !== "undefined") {
-      const resizeObserver = new ResizeObserver(syncRunStageViewportHeight);
-      resizeObserver.observe(element);
-      runStageResizeObserverRef.current = resizeObserver;
-    }
-
-    const handleWheel = (event: WheelEvent) => {
-      if (shouldPauseLatestOutputFollowForWheel({ deltaY: event.deltaY })) {
-        pauseLatestOutputFollowForUser();
-        return;
-      }
-      if (shouldRequestLatestOutputFollowResumeForWheel({ deltaY: event.deltaY })) {
-        latestOutputFollowResumeIntentRef.current = true;
-      }
-    };
-    const handlePointerDown = () => {
-      pauseLatestOutputFollowForUser();
-    };
-    const handleTouchStart = (event: TouchEvent) => {
-      runStageTouchStartYRef.current = event.touches[0]?.clientY ?? null;
-    };
-    const handleTouchMove = (event: TouchEvent) => {
-      const startY = runStageTouchStartYRef.current;
-      const currentY = event.touches[0]?.clientY;
-      if (
-        startY !== null &&
-        currentY !== undefined &&
-        shouldPauseLatestOutputFollowForTouchMove({ startY, currentY })
-      ) {
-        pauseLatestOutputFollowForUser();
-        return;
-      }
-      if (
-        startY !== null &&
-        currentY !== undefined &&
-        shouldRequestLatestOutputFollowResumeForTouchMove({ startY, currentY })
-      ) {
-        latestOutputFollowResumeIntentRef.current = true;
-      }
-    };
-
-    element.addEventListener("wheel", handleWheel, { passive: true });
-    element.addEventListener("pointerdown", handlePointerDown, { passive: true });
-    element.addEventListener("touchstart", handleTouchStart, { passive: true });
-    element.addEventListener("touchmove", handleTouchMove, { passive: true });
-    runStageInputIntentCleanupRef.current = () => {
-      element.removeEventListener("wheel", handleWheel);
-      element.removeEventListener("pointerdown", handlePointerDown);
-      element.removeEventListener("touchstart", handleTouchStart);
-      element.removeEventListener("touchmove", handleTouchMove);
-    };
-  }, [applyRunStageComposerVars]);
-
-  function promptAnchorOffset(element: HTMLElement): number {
-    const value = window
-      .getComputedStyle(element)
-      .getPropertyValue("--aw-prompt-anchor-offset")
-      .trim();
-    const parsed = Number.parseFloat(value);
-    return Number.isFinite(parsed) ? parsed : DEFAULT_PROMPT_ANCHOR_OFFSET;
-  }
-
-  function turnElements(element: HTMLElement): HTMLElement[] {
-    return Array.from(
-      element.querySelectorAll<HTMLElement>("[data-execution-turn-id]"),
-    );
-  }
-
-  function findTurnElement(element: HTMLElement, turnId: string): HTMLElement | undefined {
-    return turnElements(element).find((turn) => turn.dataset.executionTurnId === turnId);
-  }
-
-  function turnPromptAnchorElement(turn: HTMLElement): HTMLElement {
-    return turn.querySelector<HTMLElement>(".execution-turn-header") ?? turn;
-  }
-
-  function activeTurnMarkerFromScroll(element: HTMLElement): string | undefined {
-    const containerTop = element.getBoundingClientRect().top;
-    const anchorY = containerTop + promptAnchorOffset(element) + 1;
-    return activeTurnIdForAnchor({
-      anchorY,
-      turns: turnElements(element)
-        .map((turn) => ({
-          id: turn.dataset.executionTurnId ?? "",
-          top: turn.getBoundingClientRect().top,
-        }))
-        .filter((turn) => turn.id.length > 0),
-    });
-  }
-
-  function syncActiveTurnFromScroll(element: HTMLElement): void {
-    const nextActiveId = activeTurnMarkerFromScroll(element);
-    if (!nextActiveId) {
-      return;
-    }
-    setActiveTurnId((current) => current === nextActiveId ? current : nextActiveId);
-  }
-
-  function pauseLatestOutputFollowForUser(): void {
-    if (shouldCancelPendingPromptAnchorForScrollIntent({ hasDirectUserInput: true })) {
-      pendingPromptAnchorRef.current = false;
-    }
-    latestOutputFollowPausedByUserRef.current = true;
-    latestOutputFollowResumeIntentRef.current = false;
-    followLatestOutputRef.current = false;
-  }
-
-  function pauseLatestOutputFollowForScroll(): void {
-    if (shouldCancelPendingPromptAnchorForScrollIntent({ hasDirectUserInput: false })) {
-      pendingPromptAnchorRef.current = false;
-    }
-    latestOutputFollowPausedByUserRef.current = true;
-    latestOutputFollowResumeIntentRef.current = false;
-    followLatestOutputRef.current = false;
-  }
-
-  function latestTurnOutputBottom(turn: HTMLElement): number {
-    const body = turn.querySelector<HTMLElement>(".execution-turn-body");
-    const latestBodyItem = body?.lastElementChild;
-    if (latestBodyItem instanceof HTMLElement) {
-      const footer = latestBodyItem.querySelector<HTMLElement>(".assistant-message-footer");
-      if (footer) {
-        return footer.getBoundingClientRect().bottom;
-      }
-      return latestBodyItem.getBoundingClientRect().bottom;
-    }
-
-    const header = turn.querySelector<HTMLElement>(".execution-turn-header");
-    return (header ?? turn).getBoundingClientRect().bottom;
-  }
-
-  function turnHasBodyItems(turn: HTMLElement): boolean {
-    const body = turn.querySelector<HTMLElement>(".execution-turn-body");
-    return Boolean(body?.firstElementChild);
-  }
-
-  function measureLatestTurnMinHeight(promptId: string): void {
-    const element = runStageScrollRef.current;
-    const turn = element ? findTurnElement(element, promptId) : null;
-    if (!element || !turn) {
-      setLatestTurnMinHeightPx(0);
-      return;
-    }
-
-    const bottomReserve = latestTurnMinHeightBottomReserve({
-      hasBodyItems: turnHasBodyItems(turn),
-      isPromptAnchorPending: pendingPromptAnchorRef.current,
-      outputGap: composerOutputGapPx,
-    });
-    const promptAnchorSlack = latestTurnPromptAnchorSlack({
-      hasBodyItems: turnHasBodyItems(turn),
-      isPromptAnchorPending: pendingPromptAnchorRef.current,
-      outputGap: composerOutputGapPx,
-    });
-
-    setLatestTurnMinHeightPx(
-      Math.ceil(
-        anchoredTurnMinHeight({
-          containerHeight: element.clientHeight,
-          anchorOffset: promptAnchorOffset(element),
-          bottomReserve,
-        }) + promptAnchorSlack,
-      ),
-    );
-  }
-
-  function scrollRunStageTo(element: HTMLElement, scrollTop: number): void {
-    const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
-    const nextScrollTop = Math.min(maxScrollTop, Math.max(0, scrollTop));
-    programmaticRunStageScrollTopRef.current = nextScrollTop;
-    runStageLastScrollTopRef.current = nextScrollTop;
-    element.scrollTo({
-      top: nextScrollTop,
-      behavior: "auto",
-    });
-    window.requestAnimationFrame(() => {
-      if (programmaticRunStageScrollTopRef.current === nextScrollTop) {
-        programmaticRunStageScrollTopRef.current = null;
-      }
-    });
-  }
-
-  function scrollPromptToAnchor(promptId: string): void {
-    const element = runStageScrollRef.current;
-    if (!element) {
-      return;
-    }
-
-    const turn = findTurnElement(element, promptId);
-    if (!turn) {
-      return;
-    }
-
-    const elementRect = element.getBoundingClientRect();
-    const turnRect = turnPromptAnchorElement(turn).getBoundingClientRect();
-    scrollRunStageTo(
-      element,
-      scrollTopForPromptAnchor({
-        currentScrollTop: element.scrollTop,
-        containerTop: elementRect.top,
-        promptTop: turnRect.top,
-        anchorOffset: promptAnchorOffset(element),
-      }),
-    );
-  }
-
-  function scrollLatestTurnToScrollTail(promptId: string): void {
-    const element = runStageScrollRef.current;
-    if (!element) {
-      return;
-    }
-
-    const turn = findTurnElement(element, promptId);
-    if (!turn) {
-      return;
-    }
-
-    if (
-      !shouldFollowLatestTurnScrollTail({
-        hasBodyItems: turnHasBodyItems(turn),
-        isPromptAnchorPending: pendingPromptAnchorRef.current,
-      })
-    ) {
-      return;
-    }
-
-    const nextScrollTop = scrollTopForLatestTurnScrollTail({
-      maxScrollTop: Math.max(0, element.scrollHeight - element.clientHeight),
-    });
-
-    if (Math.abs(nextScrollTop - element.scrollTop) < 1) {
-      return;
-    }
-
-    scrollRunStageTo(element, nextScrollTop);
-  }
-
-  function handleTurnMarkerClick(turnId: string): void {
-    pauseLatestOutputFollowForUser();
-    setActiveTurnId(turnId);
-    scrollPromptToAnchor(turnId);
-  }
-
-  function handleRunStageScroll(event: ReactUIEvent<HTMLDivElement>): void {
-    const element = event.currentTarget;
-    const previousScrollTop = runStageLastScrollTopRef.current;
-    const nextScrollTop = element.scrollTop;
-    runStageLastScrollTopRef.current = nextScrollTop;
-    const programmaticScrollTop = programmaticRunStageScrollTopRef.current;
-    const isProgrammaticScroll =
-      programmaticScrollTop !== null &&
-      Math.abs(nextScrollTop - programmaticScrollTop) < 2;
-    if (isProgrammaticScroll) {
-      programmaticRunStageScrollTopRef.current = null;
-    }
-
-    syncActiveTurnFromScroll(element);
-
-    if (isProgrammaticScroll) {
-      return;
-    }
-
-    if (!latestPromptId) {
-      followLatestOutputRef.current = false;
-      return;
-    }
-
-    const turn = findTurnElement(element, latestPromptId);
-    if (!turn) {
-      followLatestOutputRef.current = false;
-      return;
-    }
-
-    if (
-      shouldPauseLatestOutputFollowForScroll({
-        previousScrollTop,
-        nextScrollTop,
-      })
-    ) {
-      pauseLatestOutputFollowForScroll();
-      return;
-    }
-
-    const elementRect = element.getBoundingClientRect();
-    const isNearTail = isNearLatestTurnOutputTail({
-      containerTop: elementRect.top,
-      outputBottom: latestTurnOutputBottom(turn),
-      containerHeight: element.clientHeight,
-      bottomReserve: composerOutputGapPx,
-      threshold: LATEST_OUTPUT_FOLLOW_THRESHOLD,
-    });
-    const isAtScrollBottom = isNearScrollBottom({
-      scrollTop: nextScrollTop,
-      scrollHeight: element.scrollHeight,
-      clientHeight: element.clientHeight,
-      threshold: 2,
-    });
-    const wasFollowingLatestOutput = followLatestOutputRef.current;
-    const hadResumeIntent = latestOutputFollowResumeIntentRef.current;
-    const isPausedByUser = latestOutputFollowPausedByUserRef.current;
-    const canFollowLatestOutput =
-      wasFollowingLatestOutput || hadResumeIntent || (!isPausedByUser && isAtScrollBottom);
-    const shouldResume = shouldResumeLatestOutputFollow({
-      isPausedByUser,
-      isNearTail,
-      isAtScrollBottom,
-      hasResumeIntent: hadResumeIntent,
-    });
-
-    if (shouldResume) {
-      latestOutputFollowPausedByUserRef.current = false;
-      latestOutputFollowResumeIntentRef.current = false;
-    }
-    followLatestOutputRef.current = canFollowLatestOutput ? shouldResume : false;
-  }
-
-  useLayoutEffect(() => {
-    const element = runStageScrollRef.current;
-    if (!element) {
-      return;
-    }
-    applyRunStageComposerVars(element);
-  }, [applyRunStageComposerVars]);
-
-  useLayoutEffect(() => {
-    if (showCenterComposer) {
-      setComposerContentBottomInsetPx(0);
-      return;
-    }
-
-    const dockElement = composerDockRef.current;
-    if (!dockElement) {
-      return;
-    }
-    const measuredDockElement: HTMLDivElement = dockElement;
-
-    function syncComposerBottomInset(): void {
-      const dockRect = measuredDockElement.getBoundingClientRect();
-      const contentElement =
-        measuredDockElement.querySelector<HTMLElement>(".composer-dock-stack") ??
-        measuredDockElement.firstElementChild;
-      const contentTop =
-        contentElement instanceof HTMLElement
-          ? contentElement.getBoundingClientRect().top
-          : undefined;
-      setComposerContentBottomInsetPx(
-        Math.ceil(
-          composerContentBottomInset({
-            dockBottom: dockRect.bottom,
-            contentTop,
-            fallbackInset: dockRect.height,
-          }),
-        ),
-      );
-    }
-
-    syncComposerBottomInset();
-    const resizeObserver = new ResizeObserver(syncComposerBottomInset);
-    resizeObserver.observe(measuredDockElement);
-
-    return () => {
-      resizeObserver.disconnect();
-    };
-  }, [showCenterComposer]);
-
-  useLayoutEffect(() => {
-    const element = runStageScrollRef.current;
-    if (!latestPromptId || !element) {
-      pendingPromptAnchorRef.current = false;
-      setLatestTurnMinHeightPx((current) => current === 0 ? current : 0);
-      return;
-    }
-
-    const turn = findTurnElement(element, latestPromptId);
-    if (!turn) {
-      setLatestTurnMinHeightPx((current) => current === 0 ? current : 0);
-      return;
-    }
-
-    const shouldAnchorPrompt = pendingPromptAnchorRef.current;
-    const bottomReserve = latestTurnMinHeightBottomReserve({
-      hasBodyItems: turnHasBodyItems(turn),
-      isPromptAnchorPending: shouldAnchorPrompt,
-      outputGap: composerOutputGapPx,
-    });
-    const promptAnchorSlack = latestTurnPromptAnchorSlack({
-      hasBodyItems: turnHasBodyItems(turn),
-      isPromptAnchorPending: shouldAnchorPrompt,
-      outputGap: composerOutputGapPx,
-    });
-    const nextMinHeight = Math.ceil(
-      anchoredTurnMinHeight({
-        containerHeight: element.clientHeight,
-        anchorOffset: promptAnchorOffset(element),
-        bottomReserve,
-      }) + promptAnchorSlack,
-    );
-    if (nextMinHeight !== latestTurnMinHeightPx) {
-      setLatestTurnMinHeightPx(nextMinHeight);
-      return;
-    }
-
-    if (shouldAnchorPrompt) {
-      pendingPromptAnchorRef.current = false;
-      scrollPromptToAnchor(latestPromptId);
-      return;
-    }
-
-    if (followLatestOutputRef.current && !latestOutputFollowPausedByUserRef.current) {
-      scrollLatestTurnToScrollTail(latestPromptId);
-    }
-  }, [
-    composerOutputGapPx,
-    latestPromptId,
-    latestTurnMinHeightPx,
-    runtimeState.narrative,
-  ]);
-
-  useLayoutEffect(() => {
-    if (!latestPromptId) {
-      return;
-    }
-
-    const element = runStageScrollRef.current;
-    if (!element) {
-      return;
-    }
-
-    const turn = findTurnElement(element, latestPromptId);
-    if (!turn) {
-      return;
-    }
-
-    const resizeObserver = new ResizeObserver(() => {
-      measureLatestTurnMinHeight(latestPromptId);
-    });
-    resizeObserver.observe(element);
-    resizeObserver.observe(turn);
-
-    return () => {
-      resizeObserver.disconnect();
-    };
-  }, [composerOutputGapPx, latestPromptId]);
-
-  useEffect(() => {
-    return () => {
-      runStageInputIntentCleanupRef.current?.();
-      runStageInputIntentCleanupRef.current = null;
-      runStageResizeObserverRef.current?.disconnect();
-      runStageResizeObserverRef.current = null;
-    };
-  }, []);
 
   function applyRuntimeActions(actions: RuntimeAction[]): void {
     for (const action of actions) {
@@ -1418,11 +903,7 @@ export function App() {
     setResolvingApprovalId(null);
     setResolvedApproval(null);
     resolvingApprovalIdRef.current = null;
-    pendingPromptAnchorRef.current = true;
-    followLatestOutputRef.current = true;
-    latestOutputFollowPausedByUserRef.current = false;
-    latestOutputFollowResumeIntentRef.current = false;
-    setLatestTurnMinHeightPx(0);
+    prepareForRunStart();
     dispatch({ type: "run/requested", prompt, startedAtMs: Date.now() });
     setComposerValue("");
 
@@ -1491,11 +972,7 @@ export function App() {
     setResolvingApprovalId(null);
     setResolvedApproval(null);
     resolvingApprovalIdRef.current = null;
-    pendingPromptAnchorRef.current = false;
-    followLatestOutputRef.current = false;
-    latestOutputFollowPausedByUserRef.current = false;
-    latestOutputFollowResumeIntentRef.current = false;
-    setLatestTurnMinHeightPx(0);
+    prepareForThreadSwitch();
     dispatch({ type: "run/threadSwitch", threadId });
 
     const thread = runtimeState.threads.find((item) => item.threadId === threadId);
@@ -1640,11 +1117,7 @@ export function App() {
     setResolvingApprovalId(null);
     setResolvedApproval(null);
     resolvingApprovalIdRef.current = null;
-    pendingPromptAnchorRef.current = false;
-    followLatestOutputRef.current = false;
-    latestOutputFollowPausedByUserRef.current = false;
-    latestOutputFollowResumeIntentRef.current = false;
-    setLatestTurnMinHeightPx(0);
+    prepareForNewTask();
     terminalSeenRef.current = false;
     localStorage.removeItem("awaken:runId");
     dispatch({ type: "run/reset" });

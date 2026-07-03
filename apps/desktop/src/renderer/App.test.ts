@@ -741,4 +741,29 @@ describe("App workbench presentation", () => {
       }),
     ).toBe(true);
   });
+
+  it("requires explicit resume intent after an upward wheel pause", () => {
+    const pausedByWheel = shouldPauseLatestOutputFollowForWheel({ deltaY: -18 });
+    expect(pausedByWheel).toBe(true);
+
+    expect(
+      shouldResumeLatestOutputFollow({
+        isPausedByUser: pausedByWheel,
+        isNearTail: true,
+        isAtScrollBottom: true,
+        hasResumeIntent: false,
+      }),
+    ).toBe(false);
+
+    const resumeIntent = shouldRequestLatestOutputFollowResumeForWheel({ deltaY: 18 });
+    expect(resumeIntent).toBe(true);
+    expect(
+      shouldResumeLatestOutputFollow({
+        isPausedByUser: pausedByWheel,
+        isNearTail: true,
+        isAtScrollBottom: true,
+        hasResumeIntent: resumeIntent,
+      }),
+    ).toBe(true);
+  });
 });

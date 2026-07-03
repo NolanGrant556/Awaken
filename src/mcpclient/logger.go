@@ -24,4 +24,3 @@ type noopLogger struct{}
 func (noopLogger) Debugf(string, ...any) {}
 func (noopLogger) Warnf(string, ...any)  {}
 func (noopLogger) Errorf(string, ...any) {}
-

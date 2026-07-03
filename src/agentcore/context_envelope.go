@@ -20,6 +20,7 @@ type ContextEnvelope struct {
 	CacheKeys          []ContextCacheKey
 	Deltas             []ContextDelta
 	Messages           []convcontext.Message
+	CompactModelConfig ModelConfig
 	Model              string
 	Temperature        float64
 	MaxTokens          int

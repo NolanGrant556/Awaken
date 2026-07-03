@@ -51,19 +51,17 @@ func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool
 		SystemContextItems: []ContextItem{
 			runtimeSnapshotSystemItem(snapshot),
 		},
-		ToolSchemas:     cloneToolDefinitions(tools),
-		RuntimeSnapshot: snapshot,
-		CacheKeys:       rb.buildCacheKeys(staticContent, tools, snapshot),
-		Deltas:          rb.buildContextDeltas(snapshot, tools),
-		Messages:        cloneContextMessages(messages),
-		Model:           rb.config.ModelConfig.Model,
-		Temperature:     rb.config.ModelConfig.Temperature,
-		MaxTokens:       rb.config.ModelConfig.MaxTokens,
+		ToolSchemas:        cloneToolDefinitions(tools),
+		RuntimeSnapshot:    snapshot,
+		CacheKeys:          rb.buildCacheKeys(staticContent, tools, snapshot),
+		Deltas:             rb.buildContextDeltas(snapshot, tools),
+		Messages:           cloneContextMessages(messages),
+		CompactModelConfig: rb.config.ModelConfig,
+		Model:              rb.config.ModelConfig.Model,
+		Temperature:        rb.config.ModelConfig.Temperature,
+		MaxTokens:          rb.config.ModelConfig.MaxTokens,
 	}
-	envelope.ContextWindowState = NewContextWindowStateWithConfig(envelope, ContextWindowConfig{
-		ModelWindow:           rb.config.ModelConfig.ContextWindow,
-		AutoCompactTokenLimit: rb.config.ModelConfig.AutoCompactTokenLimit,
-	})
+	envelope.ContextWindowState = NewContextEngine(contextWindowConfigFromModelConfig(rb.config.ModelConfig)).Evaluate(envelope)
 	return envelope
 }
 

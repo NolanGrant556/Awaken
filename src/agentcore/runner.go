@@ -23,21 +23,30 @@ const (
 )
 
 type Runner struct {
-	config        AgentConfig
-	conversation  *context.Conversation
-	reqBuilder    *RequestBuilder
-	toolRuntime   *ToolRuntime
-	threadID      string
-	streamLLMFunc func(stdcontext.Context, *runEventEmitter) (*llm.Response, error)
+	config          AgentConfig
+	conversation    *context.Conversation
+	reqBuilder      *RequestBuilder
+	toolRuntime     *ToolRuntime
+	threadID        string
+	contextGovernor *contextGovernor
+	streamLLMFunc   func(stdcontext.Context, *runEventEmitter) (*llm.Response, error)
 }
 
 func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *RequestBuilder) *Runner {
-	return &Runner{
+	runner := &Runner{
 		config:       config,
 		conversation: conv,
 		reqBuilder:   reqBuilder,
 		toolRuntime:  NewToolRuntimeWithConfig(nil, toolRuntimeConfigFromAgentConfig(config)),
 	}
+	runner.contextGovernor = newContextGovernor(
+		NewContextEngine(contextWindowConfigFromModelConfig(config.ModelConfig)),
+		runner.buildLLMRequest,
+		func(result CompactResult) {
+			runner.conversation.Context.SetMessages(result.Messages)
+		},
+	)
+	return runner
 }
 
 func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (string, error) {
@@ -46,7 +55,6 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 	events.runStarted()
 	turnState := newTurnState(events.threadID, events.runID, r.config.MaxThoughts, r.config.ModelConfig.Model)
 	transition := TransitionInitial
-	reactiveCompactAttempted := false
 	maxOutputContinuations := 0
 	var continuedOutput strings.Builder
 
@@ -75,14 +83,11 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 				return "", ctx.Err()
 			}
 			if isPromptTooLongError(err) {
-				if !reactiveCompactAttempted {
-					reactiveCompactAttempted = true
-					if compactErr := r.compactConversationForRetry(events); compactErr == nil {
-						events.turnFinished("", TransitionReactiveCompactRetry)
-						events.resetTurn()
-						transition = TransitionReactiveCompactRetry
-						continue
-					}
+				if retried, compactErr := r.compactConversationForRetry(ctx, events); compactErr == nil && retried {
+					events.turnFinished("", TransitionReactiveCompactRetry)
+					events.resetTurn()
+					transition = TransitionReactiveCompactRetry
+					continue
 				}
 				runErr := fmt.Errorf("LLM stream call failed: %w", err)
 				events.turnFinished(TerminalReasonPromptTooLong, "")
@@ -95,6 +100,7 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 			events.runErrored(runErr, reason)
 			return "", runErr
 		}
+		r.contextGovernor.RecordResponseUsage(lastAPIUsageTokens(response))
 
 		events.finishReasoningIfOpen()
 		events.finishTextIfOpen()
@@ -148,7 +154,7 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 			continue
 		}
 
-		if response.Content == "" {
+		if !responseHasSignal(response) {
 			events.turnFinished(TerminalReasonEmptyResponse, "")
 			events.runErrored(llm.ErrEmptyResponse, TerminalReasonEmptyResponse)
 			return "", llm.ErrEmptyResponse
@@ -252,70 +258,13 @@ func (r *Runner) prepareLLMRequest(ctx stdcontext.Context, events *runEventEmitt
 		return LLMRequest{}, err
 	}
 	if events != nil {
-		events.emitContextWindow(llmReq.ContextWindowState)
+		return r.contextGovernor.PrepareRequest(ctx, llmReq, events)
 	}
-	if llmReq.ContextWindowState.ShouldAutoCompact() {
-		llmReq, err = r.compactConversationForRequest(events, llmReq, false)
-		if err != nil {
-			if llmReq.ContextWindowState.ShouldBlock() {
-				if events != nil {
-					events.emitContextBlocked(llmReq.ContextWindowState, err.Error())
-				}
-				return LLMRequest{}, err
-			}
-			return llmReq, nil
-		}
-		if events != nil {
-			events.emitContextWindow(llmReq.ContextWindowState)
-		}
-	}
-	if llmReq.ContextWindowState.ShouldBlock() {
-		err := fmt.Errorf("%w: estimated %d tokens exceeds blocking threshold %d",
-			errContextWindowBlocked,
-			llmReq.ContextWindowState.EstimatedTokens,
-			llmReq.ContextWindowState.blockingThreshold(),
-		)
-		if events != nil {
-			events.emitContextBlocked(llmReq.ContextWindowState, err.Error())
-		}
-		return LLMRequest{}, err
-	}
-	return llmReq, nil
+	return r.contextGovernor.PrepareRequest(ctx, llmReq, nil)
 }
 
-func (r *Runner) compactConversationForRetry(events *runEventEmitter) error {
-	llmReq, err := r.buildLLMRequest()
-	if err != nil {
-		return err
-	}
-	llmReq.ContextWindowState.HasAttemptedReactiveCompact = true
-	_, err = r.compactConversationForRequest(events, llmReq, true)
-	return err
-}
-
-func (r *Runner) compactConversationForRequest(events *runEventEmitter, llmReq LLMRequest, reactive bool) (LLMRequest, error) {
-	if llmReq.EnvelopeDebug == nil {
-		return LLMRequest{}, errors.New("missing context envelope for compact")
-	}
-	if events != nil {
-		events.emitCompactStarted(llmReq.ContextWindowState, reactive)
-	}
-	result, err := CompactConversation(llmReq.Messages, *llmReq.EnvelopeDebug, llmReq.ContextWindowState.CompactTarget)
-	if err != nil {
-		if events != nil {
-			events.emitCompactFailed(llmReq.ContextWindowState, err.Error())
-		}
-		return llmReq, err
-	}
-	r.conversation.Context.SetMessages(result.Messages)
-	if events != nil {
-		events.emitCompactFinished(llmReq.ContextWindowState, result, reactive)
-	}
-	rebuilt, err := r.buildLLMRequest()
-	if err != nil {
-		return LLMRequest{}, err
-	}
-	return rebuilt, nil
+func (r *Runner) compactConversationForRetry(ctx stdcontext.Context, events *runEventEmitter) (bool, error) {
+	return r.contextGovernor.TryReactiveCompact(ctx, events)
 }
 
 func (r *Runner) handleXMLFallback(ctx stdcontext.Context, response string, events *runEventEmitter) (bool, string) {
@@ -443,6 +392,26 @@ func maxOutputReachedError(attempts int, stopReason string) error {
 		return fmt.Errorf("model reached max output limit after %d continuation attempt(s)", attempts)
 	}
 	return fmt.Errorf("model reached max output limit after %d continuation attempt(s): stop_reason=%s", attempts, stopReason)
+}
+
+func responseHasSignal(response *llm.Response) bool {
+	if response == nil {
+		return false
+	}
+	return strings.TrimSpace(response.Content) != "" || strings.TrimSpace(response.Thinking) != "" || len(response.ToolCalls) > 0
+}
+
+func lastAPIUsageTokens(response *llm.Response) int {
+	if response == nil || response.Usage == nil {
+		return 0
+	}
+	if response.Usage.TotalTokens > 0 {
+		return response.Usage.TotalTokens
+	}
+	if response.Usage.InputTokens > 0 {
+		return response.Usage.InputTokens
+	}
+	return 0
 }
 
 func maxThoughtsError(maxThoughts int) error {
@@ -718,18 +687,17 @@ func (e *runEventEmitter) emitContextBlocked(state ContextWindowState, message s
 	e.emit(contextWindowEvent(ContextBlockedEventType, state, message))
 }
 
-func (e *runEventEmitter) emitCompactStarted(state ContextWindowState, reactive bool) {
-	mode := "auto"
-	if reactive {
-		mode = "reactive"
-	}
-	e.emit(contextWindowEvent(CompactStartedEventType, state, "compact started: "+mode))
+func (e *runEventEmitter) emitCompactStarted(state ContextWindowState, mode CompactMode) {
+	event := contextWindowEvent(CompactStartedEventType, state, "compact started: "+string(mode))
+	event.CompactMode = mode
+	event.CompactPreEstimate = intPointer(state.EstimatedTokens)
+	e.emit(event)
 }
 
-func (e *runEventEmitter) emitCompactFinished(state ContextWindowState, result CompactResult, reactive bool) {
-	mode := "auto"
-	if reactive {
-		mode = "reactive"
+func (e *runEventEmitter) emitCompactFinished(state ContextWindowState, result CompactResult, summaryModel string) {
+	mode := result.Mode
+	if mode == "" {
+		mode = CompactModeAuto
 	}
 	event := contextWindowEvent(CompactFinishedEventType, state, fmt.Sprintf(
 		"compact finished: %s boundary=%s estimated_tokens=%d",
@@ -737,13 +705,28 @@ func (e *runEventEmitter) emitCompactFinished(state ContextWindowState, result C
 		result.BoundaryID,
 		result.EstimatedTokens,
 	))
-	event.ContextEstimatedTokens = result.EstimatedTokens
+	postEstimate := result.PostEstimateTokens
+	if postEstimate <= 0 {
+		postEstimate = result.EstimatedTokens
+	}
+	toolResultsPruned := result.ToolResultsPruned > 0
+	event.ContextEstimatedTokens = postEstimate
 	event.ContextCompactTarget = state.CompactTarget
+	event.CompactMode = mode
+	event.CompactBoundaryID = result.BoundaryID
+	event.CompactPreEstimate = intPointer(state.EstimatedTokens)
+	event.CompactPostEstimate = intPointer(postEstimate)
+	event.CompactSummaryModel = summaryModel
+	event.CompactFallbackUsed = boolPointer(result.Fallback.Used)
+	event.CompactToolResultsPruned = boolPointer(toolResultsPruned)
 	e.emit(event)
 }
 
-func (e *runEventEmitter) emitCompactFailed(state ContextWindowState, message string) {
-	e.emit(contextWindowEvent(CompactFailedEventType, state, message))
+func (e *runEventEmitter) emitCompactFailed(state ContextWindowState, mode CompactMode, message string, failureReason string) {
+	event := contextWindowEvent(CompactFailedEventType, state, message)
+	event.CompactMode = mode
+	event.CompactFailureReason = failureReason
+	e.emit(event)
 }
 
 func contextWindowEvent(eventType AwakenEventType, state ContextWindowState, content string) AwakenEvent {
@@ -759,6 +742,16 @@ func contextWindowEvent(eventType AwakenEventType, state ContextWindowState, con
 		ContextCompactTarget:        state.CompactTarget,
 		ContextEstimatedDeltaTokens: state.EstimatedDeltaTokens,
 	}
+}
+
+func intPointer(value int) *int {
+	v := value
+	return &v
+}
+
+func boolPointer(value bool) *bool {
+	v := value
+	return &v
 }
 
 func (e *runEventEmitter) emitTurnDiff(ctx stdcontext.Context, workspaceRoot string) {

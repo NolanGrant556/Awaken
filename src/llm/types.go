@@ -45,10 +45,19 @@ type Request struct {
 // Response 是统一响应结构
 type Response struct {
 	Content          string
+	Thinking         string
 	ToolCalls        []ToolCall
+	Usage            *Usage
 	IsFinished       bool
 	StopReason       string
 	MaxOutputReached bool
+}
+
+// Usage 是 provider 返回的可选 token 用量信息。
+type Usage struct {
+	InputTokens  int
+	OutputTokens int
+	TotalTokens  int
 }
 
 // ToolCall 是统一工具调用结构
@@ -90,6 +99,13 @@ func isMaxOutputStopReason(stopReason string) bool {
 	default:
 		return false
 	}
+}
+
+func responseHasSignal(resp *Response) bool {
+	if resp == nil {
+		return false
+	}
+	return resp.Content != "" || resp.Thinking != "" || len(resp.ToolCalls) > 0
 }
 
 // resolveProtocol 解析协议类型

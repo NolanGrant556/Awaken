@@ -315,6 +315,60 @@ func TestMapEventContextEstimated(t *testing.T) {
 	}
 }
 
+func TestMapEventCompactMetadataOptionalFields(t *testing.T) {
+	preEstimate := 120
+	postEstimate := 48
+	fallbackUsed := false
+	toolResultsPruned := true
+
+	events := MapEvent(agentcore.AwakenEvent{
+		Type:                     agentcore.CompactFailedEventType,
+		ThreadID:                 "thread-1",
+		RunID:                    "run-1",
+		Content:                  "compact failed",
+		CompactMode:              agentcore.CompactModeReactive,
+		CompactBoundaryID:        "compact_1",
+		CompactPreEstimate:       &preEstimate,
+		CompactPostEstimate:      &postEstimate,
+		CompactSummaryModel:      "gpt-5-mini",
+		CompactFallbackUsed:      &fallbackUsed,
+		CompactToolResultsPruned: &toolResultsPruned,
+		CompactFailureReason:     "provider_timeout",
+	})
+
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	got := events[0]
+	if got.Type != EventAwakenCompactFailed {
+		t.Fatalf("expected AWAKEN_COMPACT_FAILED, got %s", got.Type)
+	}
+	if got.CompactMode != "reactive" ||
+		got.ContextCompactMode != "reactive" ||
+		got.CompactBoundaryID != "compact_1" ||
+		got.ContextCompactBoundaryID != "compact_1" ||
+		got.CompactSummaryModel != "gpt-5-mini" ||
+		got.CompactFailureReason != "provider_timeout" {
+		t.Fatalf("unexpected compact string metadata: %+v", got)
+	}
+	if got.CompactPreEstimate == nil ||
+		*got.CompactPreEstimate != 120 ||
+		got.ContextCompactPreEstimate == nil ||
+		*got.ContextCompactPreEstimate != 120 ||
+		got.CompactPostEstimate == nil ||
+		*got.CompactPostEstimate != 48 ||
+		got.ContextCompactPostEstimate == nil ||
+		*got.ContextCompactPostEstimate != 48 {
+		t.Fatalf("unexpected compact estimate metadata: %+v", got)
+	}
+	if got.CompactFallbackUsed == nil ||
+		*got.CompactFallbackUsed ||
+		got.CompactToolResultsPruned == nil ||
+		!*got.CompactToolResultsPruned {
+		t.Fatalf("unexpected compact boolean metadata: %+v", got)
+	}
+}
+
 func TestMapEventApprovalRequested(t *testing.T) {
 	events := MapEvent(agentcore.AwakenEvent{
 		Type:                agentcore.ApprovalRequestedEventType,

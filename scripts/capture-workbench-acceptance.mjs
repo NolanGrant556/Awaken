@@ -15,13 +15,16 @@ Usage:
   npm run capture:workbench -- --state center
   npm run capture:workbench -- --state dock --out /tmp/awaken-acceptance
   npm run capture:workbench -- --fresh --state center
+  npm run capture:workbench -- --state marker --capture-mode region
 
 Options:
-  --state <name>  Label for the screenshot, e.g. center, dock, marker.
-  --out <dir>     Output directory. Defaults to ${defaultOutDir}
-  --fresh         Close and reopen Awaken Desktop before capturing.
-  --no-open       Do not run open:desktop before capturing.
-  --help          Show this help.
+  --state <name>          Label for the screenshot, e.g. center, dock, marker.
+  --out <dir>             Output directory. Defaults to ${defaultOutDir}
+  --capture-mode <mode>   Capture mode: window or region. Defaults to window, with region fallback.
+  --settle-ms <ms>        Wait before capture. Defaults to 500.
+  --fresh                 Close and reopen Awaken Desktop before capturing.
+  --no-open               Do not run open:desktop before capturing.
+  --help                  Show this help.
 `);
 }
 
@@ -32,6 +35,8 @@ function parseArgs(argv) {
     fresh: false,
     open: true,
     help: false,
+    captureMode: "window",
+    settleMs: 500,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -58,6 +63,16 @@ function parseArgs(argv) {
       index += 1;
       continue;
     }
+    if (arg === "--capture-mode") {
+      args.captureMode = argv[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--settle-ms") {
+      args.settleMs = Number(argv[index + 1] ?? Number.NaN);
+      index += 1;
+      continue;
+    }
     throw new Error(`Unknown argument: ${arg}`);
   }
 
@@ -66,6 +81,12 @@ function parseArgs(argv) {
   }
   if (!args.outDir.trim()) {
     throw new Error("--out must not be empty.");
+  }
+  if (!["window", "region"].includes(args.captureMode)) {
+    throw new Error("--capture-mode must be one of: window, region.");
+  }
+  if (!Number.isFinite(args.settleMs) || args.settleMs < 0) {
+    throw new Error("--settle-ms must be a non-negative number.");
   }
 
   return args;
@@ -187,7 +208,86 @@ CGAssociateMouseAndMouseCursorPosition(boolean_t(1))
   run("sleep", ["0.2"]);
 }
 
-function captureWindow({ state, outDir }) {
+function waitForSettle(settleMs) {
+  if (settleMs > 0) {
+    run("sleep", [String(settleMs / 1000)]);
+  }
+}
+
+function captureArgsForWindow({ window, captureMode, screenshotPath }) {
+  const region = `${window.x},${window.y},${window.width},${window.height}`;
+  if (captureMode === "region") {
+    return {
+      args: ["-x", "-R", region, screenshotPath],
+      region,
+    };
+  }
+
+  if (!Number.isFinite(window.windowNumber) || window.windowNumber <= 0) {
+    throw new Error("Awaken Desktop window number is unavailable; retry with --capture-mode region.");
+  }
+
+  return {
+    args: ["-x", "-l", String(window.windowNumber), screenshotPath],
+    region,
+  };
+}
+
+function captureScreenshot({ capture, requestedCaptureMode }) {
+  const result = run("screencapture", capture.args);
+  if (result.ok) {
+    return {
+      actualCaptureMode: requestedCaptureMode,
+      fallbackReason: null,
+      capture,
+    };
+  }
+
+  if (requestedCaptureMode !== "window") {
+    throw new Error(
+      [
+        `Command failed: screencapture ${capture.args.join(" ")}`,
+        result.stderr,
+        result.stdout,
+        result.error?.message,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+  }
+
+  const fallbackCapture = captureArgsForWindow({
+    window: capture.window,
+    captureMode: "region",
+    screenshotPath: capture.screenshotPath,
+  });
+  const fallbackResult = run("screencapture", fallbackCapture.args);
+  if (!fallbackResult.ok) {
+    throw new Error(
+      [
+        `Command failed: screencapture ${capture.args.join(" ")}`,
+        result.stderr,
+        result.stdout,
+        result.error?.message,
+        `Fallback failed: screencapture ${fallbackCapture.args.join(" ")}`,
+        fallbackResult.stderr,
+        fallbackResult.stdout,
+        fallbackResult.error?.message,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+  }
+
+  return {
+    actualCaptureMode: "region",
+    fallbackReason: [result.stderr, result.stdout, result.error?.message].filter(Boolean).join("\n"),
+    capture: fallbackCapture,
+  };
+}
+
+function captureWindow({ state, outDir, captureMode, settleMs }) {
+  waitForSettle(settleMs);
   const window = findAwakenWindow();
   movePointerAway(window);
 
@@ -195,21 +295,33 @@ function captureWindow({ state, outDir }) {
   mkdirSync(captureDir, { recursive: true });
 
   const screenshotPath = join(captureDir, `${slug(state)}.png`);
-  const region = `${window.x},${window.y},${window.width},${window.height}`;
-  runRequired("screencapture", ["-x", "-R", region, screenshotPath]);
+  const requestedCapture = captureArgsForWindow({ window, captureMode, screenshotPath });
+  const result = captureScreenshot({
+    capture: { ...requestedCapture, window, screenshotPath },
+    requestedCaptureMode: captureMode,
+  });
 
   const manifest = {
     state,
     capturedAt: new Date().toISOString(),
     screenshotPath,
     window,
-    region,
+    region: result.capture.region,
+    captureMode: result.actualCaptureMode,
+    requestedCaptureMode: captureMode,
+    settleMs,
+    fallbackReason: result.fallbackReason,
   };
   const manifestPath = join(captureDir, "manifest.json");
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
   console.log("Workbench acceptance capture complete");
   console.log(`- state: ${state}`);
+  console.log(`- capture mode: ${result.actualCaptureMode}`);
+  console.log(`- settle ms: ${settleMs}`);
+  if (result.fallbackReason) {
+    console.log(`- fallback: ${result.fallbackReason}`);
+  }
   console.log(`- screenshot: ${screenshotPath}`);
   console.log(`- manifest: ${manifestPath}`);
   console.log(`- window: ${window.name} ${window.width}x${window.height} at ${window.x},${window.y}`);
@@ -229,7 +341,12 @@ try {
     runRequired("node", ["scripts/open-desktop.mjs"]);
   }
 
-  captureWindow({ state: args.state, outDir: args.outDir });
+  captureWindow({
+    state: args.state,
+    outDir: args.outDir,
+    captureMode: args.captureMode,
+    settleMs: args.settleMs,
+  });
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);

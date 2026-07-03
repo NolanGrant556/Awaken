@@ -1,6 +1,7 @@
 package agentcore
 
 import (
+	stdcontext "context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,14 @@ const (
 )
 
 var errContextWindowBlocked = errors.New("context window blocked")
+
+type CompactMode string
+
+const (
+	CompactModeAuto     CompactMode = "auto"
+	CompactModeReactive CompactMode = "reactive"
+	CompactModeManual   CompactMode = "manual"
+)
 
 type ContextWindowConfig struct {
 	ModelWindow           int
@@ -36,14 +45,37 @@ type ContextWindowState struct {
 	LastCompactBoundaryID       string
 	ConsecutiveCompactFailures  int
 	HasAttemptedReactiveCompact bool
+	CompactCircuitOpen          bool
 }
 
 type CompactResult struct {
-	BoundaryID      string
-	SummaryMessage  convcontext.Message
-	TailMessages    []convcontext.Message
-	Messages        []convcontext.Message
-	EstimatedTokens int
+	Mode                 CompactMode
+	BoundaryID           string
+	SummaryMessage       convcontext.Message
+	TailMessages         []convcontext.Message
+	Messages             []convcontext.Message
+	EstimatedTokens      int
+	PreEstimateTokens    int
+	PostEstimateTokens   int
+	ToolResultsPruned    int
+	PrunedMessageCount   int
+	PrunedSafeGroupCount int
+	Fallback             CompactFallback
+}
+
+type CompactFallback struct {
+	Used   bool
+	Marker string
+	Reason string
+}
+
+type CompactRequest struct {
+	Mode         CompactMode
+	Messages     []convcontext.Message
+	Envelope     ContextEnvelope
+	TargetTokens int
+
+	summaryInvoker compactSummaryInvoker
 }
 
 func NewContextWindowState(envelope ContextEnvelope) ContextWindowState {
@@ -166,33 +198,12 @@ func estimateMessageTokens(message convcontext.Message) int {
 }
 
 func CompactConversation(messages []convcontext.Message, envelope ContextEnvelope, targetTokens int) (CompactResult, error) {
-	if len(messages) == 0 {
-		return CompactResult{}, nil
-	}
-	if targetTokens <= 0 {
-		targetTokens = defaultModelWindow / 3
-	}
-
-	boundaryID := newAwakenID("compact")
-	tailMessages := selectCompactTail(messages, targetTokens)
-	summary := convcontext.Message{
-		Role:              convcontext.RoleUser,
-		Content:           buildCompactSummary(boundaryID, messages, envelope),
-		CompactBoundaryID: boundaryID,
-	}
-	compacted := append([]convcontext.Message{summary}, tailMessages...)
-	if err := convcontext.ValidateToolResultPairing(compacted); err != nil {
-		return CompactResult{}, fmt.Errorf("compact would break tool pairing: %w", err)
-	}
-	compactedEnvelope := envelope
-	compactedEnvelope.Messages = compacted
-	return CompactResult{
-		BoundaryID:      boundaryID,
-		SummaryMessage:  summary,
-		TailMessages:    cloneContextMessages(tailMessages),
-		Messages:        cloneContextMessages(compacted),
-		EstimatedTokens: EstimateContextEnvelopeTokens(compactedEnvelope),
-	}, nil
+	return CompactConversationWithRequest(stdcontext.Background(), CompactRequest{
+		Mode:         CompactModeAuto,
+		Messages:     messages,
+		Envelope:     envelope,
+		TargetTokens: targetTokens,
+	})
 }
 
 func selectCompactTail(messages []convcontext.Message, targetTokens int) []convcontext.Message {

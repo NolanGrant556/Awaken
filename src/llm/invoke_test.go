@@ -75,6 +75,58 @@ func TestInvokeOpenAIToolCallsWithoutContent(t *testing.T) {
 	}
 }
 
+func TestInvokeOpenAIReasoningOnlyResponse(t *testing.T) {
+	server := newChatServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{"message": map[string]interface{}{"reasoning_content": "Let me think"}},
+			},
+		})
+	})
+	defer server.Close()
+
+	resp, err := Invoke(context.Background(), testConfig(server.URL), Request{UserPrompt: "hi"})
+	if err != nil {
+		t.Fatalf("Invoke returned error: %v", err)
+	}
+	if resp.Content != "" {
+		t.Fatalf("expected empty content, got %q", resp.Content)
+	}
+	if resp.Thinking != "Let me think" {
+		t.Fatalf("expected thinking content, got %q", resp.Thinking)
+	}
+	if !resp.IsFinished {
+		t.Fatal("expected reasoning-only response to be finished")
+	}
+}
+
+func TestInvokeOpenAIUsageResponse(t *testing.T) {
+	server := newChatServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{"message": map[string]interface{}{"content": "hello"}},
+			},
+			"usage": map[string]interface{}{
+				"prompt_tokens":     11,
+				"completion_tokens": 7,
+				"total_tokens":      18,
+			},
+		})
+	})
+	defer server.Close()
+
+	resp, err := Invoke(context.Background(), testConfig(server.URL), Request{UserPrompt: "hi"})
+	if err != nil {
+		t.Fatalf("Invoke returned error: %v", err)
+	}
+	if resp.Usage == nil {
+		t.Fatal("expected usage to be populated")
+	}
+	if resp.Usage.InputTokens != 11 || resp.Usage.OutputTokens != 7 || resp.Usage.TotalTokens != 18 {
+		t.Fatalf("unexpected usage: %+v", resp.Usage)
+	}
+}
+
 func TestInvokeSendsToolCallMessages(t *testing.T) {
 	server := newChatServer(t, func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -211,6 +263,22 @@ func TestInvokeOpenAINonOKIncludesSanitizedProviderDetail(t *testing.T) {
 	}
 	if strings.Contains(text, "sk-secretvalue") {
 		t.Fatalf("expected provider detail to be redacted, got %q", text)
+	}
+}
+
+func TestRedactProviderErrorSecretsCoversBearerAndAKTokens(t *testing.T) {
+	detail := `Authorization: Bearer ak-secretvalue123456 x-api-key=ak-anothersecret123456 token=sk-secretvalue123456`
+
+	redacted := redactProviderErrorSecrets(detail)
+
+	if strings.Contains(redacted, "ak-secretvalue123456") || strings.Contains(redacted, "ak-anothersecret123456") || strings.Contains(redacted, "sk-secretvalue123456") {
+		t.Fatalf("expected tokens to be redacted, got %q", redacted)
+	}
+	if !strings.Contains(redacted, "Authorization: Bearer [redacted]") {
+		t.Fatalf("expected bearer auth marker to remain recognizable, got %q", redacted)
+	}
+	if !strings.Contains(redacted, "x-api-key=[redacted]") {
+		t.Fatalf("expected x-api-key marker to remain recognizable, got %q", redacted)
 	}
 }
 

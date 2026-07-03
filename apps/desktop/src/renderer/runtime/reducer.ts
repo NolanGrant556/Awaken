@@ -72,9 +72,15 @@ export type ContextWindowRecord = {
   estimatedDeltaTokens?: number;
 };
 
+type CompactFallbackState = "structured" | "legacy";
+
 export type CompactRecord = ContextWindowRecord & {
   status: "started" | "finished" | "failed";
+  mode?: string;
   boundaryId?: string;
+  preCompactEstimatedTokens?: number;
+  postCompactEstimatedTokens?: number;
+  fallbackState?: CompactFallbackState;
 };
 
 export type ToolDecisionRecord = {
@@ -600,9 +606,27 @@ function contextWindowRecord(event: AguiEvent): ContextWindowRecord {
   };
 }
 
+function isFiniteNumber(value: number | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 function compactBoundaryFromMessage(message?: string): string | undefined {
   const match = message?.match(/\bboundary=([^\s]+)/);
   return match?.[1];
+}
+
+function compactModeFromMessage(message?: string): string | undefined {
+  const match = message?.match(/\bcompact (?:started|finished|failed):\s*([a-z_]+)(?=\s|$)/i);
+  return match?.[1]?.toLowerCase();
+}
+
+function compactEstimatedTokensFromMessage(message?: string): number | undefined {
+  const match = message?.match(/\bestimated_tokens=(\d+)\b/i);
+  if (!match) {
+    return undefined;
+  }
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function compactStatus(event: AguiEvent): CompactRecord["status"] {
@@ -613,6 +637,53 @@ function compactStatus(event: AguiEvent): CompactRecord["status"] {
     return "finished";
   }
   return "started";
+}
+
+function compactRecord(
+  event: AguiEvent,
+  previousContextWindow?: ContextWindowRecord,
+): CompactRecord {
+  const structuredMode = event.contextCompactMode?.trim();
+  const fallbackMode = compactModeFromMessage(event.message);
+  const mode = structuredMode || fallbackMode;
+
+  const structuredBoundaryId = event.contextCompactBoundaryId?.trim();
+  const fallbackBoundaryId = compactBoundaryFromMessage(event.message);
+  const boundaryId = structuredBoundaryId || fallbackBoundaryId;
+
+  const structuredPreEstimate = event.contextCompactPreEstimateTokens;
+  const fallbackPreEstimate =
+    event.type === "AWAKEN_COMPACT_STARTED"
+      ? event.contextEstimatedTokens
+      : previousContextWindow?.estimatedTokens;
+  const preCompactEstimatedTokens = isFiniteNumber(structuredPreEstimate)
+    ? structuredPreEstimate
+    : fallbackPreEstimate;
+
+  const structuredPostEstimate = event.contextCompactPostEstimateTokens;
+  const fallbackPostEstimate =
+    event.type === "AWAKEN_COMPACT_FINISHED"
+      ? event.contextEstimatedTokens ?? compactEstimatedTokensFromMessage(event.message)
+      : undefined;
+  const postCompactEstimatedTokens = isFiniteNumber(structuredPostEstimate)
+    ? structuredPostEstimate
+    : fallbackPostEstimate;
+
+  const usedFallback =
+    (!structuredMode && Boolean(fallbackMode)) ||
+    (!structuredBoundaryId && Boolean(fallbackBoundaryId)) ||
+    (!isFiniteNumber(structuredPreEstimate) && isFiniteNumber(preCompactEstimatedTokens)) ||
+    (!isFiniteNumber(structuredPostEstimate) && isFiniteNumber(postCompactEstimatedTokens));
+
+  return {
+    ...contextWindowRecord(event),
+    status: compactStatus(event),
+    mode,
+    boundaryId,
+    preCompactEstimatedTokens,
+    postCompactEstimatedTokens,
+    fallbackState: usedFallback ? "legacy" : "structured",
+  };
 }
 
 function toolDecisionRecord(event: AguiEvent): ToolDecisionRecord {
@@ -1374,11 +1445,7 @@ export function reduceRuntimeState(
         case "AWAKEN_COMPACT_STARTED":
         case "AWAKEN_COMPACT_FINISHED":
         case "AWAKEN_COMPACT_FAILED": {
-          const compact = {
-            ...contextWindowRecord(action.event),
-            status: compactStatus(action.event),
-            boundaryId: compactBoundaryFromMessage(action.event.message),
-          };
+          const compact = compactRecord(action.event, nextState.inspectorSummary.contextWindow);
           nextState.inspectorSummary = {
             ...nextState.inspectorSummary,
             contextWindow: compact,

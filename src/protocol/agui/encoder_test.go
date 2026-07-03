@@ -36,3 +36,23 @@ func TestEncoderEncodeSSEWithSeq(t *testing.T) {
 		t.Fatalf("unexpected SSE frame:\nwant %q\ngot  %q", want, got)
 	}
 }
+
+func TestEncoderEncodeSSEIncludesOptionalCompactFalseFlags(t *testing.T) {
+	fallbackUsed := false
+
+	frame, err := (Encoder{}).EncodeSSE(Event{
+		Type:                     EventAwakenCompactFinished,
+		ContextCompactBoundaryID: "compact_1",
+		CompactBoundaryID:        "compact_1",
+		CompactFallbackUsed:      &fallbackUsed,
+	})
+	if err != nil {
+		t.Fatalf("EncodeSSE returned error: %v", err)
+	}
+
+	got := string(frame)
+	want := "data: {\"type\":\"AWAKEN_COMPACT_FINISHED\",\"contextCompactBoundaryId\":\"compact_1\",\"compactBoundaryId\":\"compact_1\",\"compactFallbackUsed\":false}\n\n"
+	if got != want {
+		t.Fatalf("unexpected SSE frame:\nwant %q\ngot  %q", want, got)
+	}
+}

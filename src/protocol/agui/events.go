@@ -84,6 +84,18 @@ type Event struct {
 	ContextAutoCompactThreshold int         `json:"contextAutoCompactThreshold,omitempty"`
 	ContextCompactTarget        int         `json:"contextCompactTarget,omitempty"`
 	ContextEstimatedDeltaTokens int         `json:"contextEstimatedDeltaTokens,omitempty"`
+	ContextCompactMode          string      `json:"contextCompactMode,omitempty"`
+	ContextCompactBoundaryID    string      `json:"contextCompactBoundaryId,omitempty"`
+	ContextCompactPreEstimate   *int        `json:"contextCompactPreEstimateTokens,omitempty"`
+	ContextCompactPostEstimate  *int        `json:"contextCompactPostEstimateTokens,omitempty"`
+	CompactMode                 string      `json:"compactMode,omitempty"`
+	CompactBoundaryID           string      `json:"compactBoundaryId,omitempty"`
+	CompactPreEstimate          *int        `json:"compactPreEstimate,omitempty"`
+	CompactPostEstimate         *int        `json:"compactPostEstimate,omitempty"`
+	CompactSummaryModel         string      `json:"compactSummaryModel,omitempty"`
+	CompactFallbackUsed         *bool       `json:"compactFallbackUsed,omitempty"`
+	CompactToolResultsPruned    *bool       `json:"compactToolResultsPruned,omitempty"`
+	CompactFailureReason        string      `json:"compactFailureReason,omitempty"`
 	StaticPermissionBehavior    string      `json:"staticPermissionBehavior,omitempty"`
 	StaticPermissionReason      string      `json:"staticPermissionReason,omitempty"`
 	ToolDecisionAction          string      `json:"toolDecisionAction,omitempty"`

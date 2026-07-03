@@ -110,9 +110,10 @@ AppShell -> WorkbenchShell -> RunStage -> ComposerDock / ExecutionFeed
      - 运行态（dock composer + `ExecutionFeed` + turn marker rail）截图；
      - 如有滚动/锚定相关改动，必须附录屏或关键帧截图。
 
-3. **视觉回归测试（VRT，中期目标）**
-   - 长期应引入自动化 VRT，覆盖 center/dock 两种状态；
-   - 在引入自动化之前，以人工截图/录屏作为验收替代。
+3. **轻量视觉回归护栏（VRT）**
+   - 当前提供 `npm run capture:workbench:vrt`，复用真实 Desktop 窗口截图，按 center / dock / marker 产出截图和汇总 manifest；
+   - 该脚本先作为 PR 级对比截图护栏，不做复杂像素级平台化；
+   - 后续如升级为自动化像素比对，必须继续覆盖 center / dock / marker 状态，并保留真实运行验收证据。
 
 ## 变更流程
 

@@ -790,7 +790,11 @@ describe("runtime reducer run narrative projection", () => {
       runEvent({
         type: "AWAKEN_COMPACT_FINISHED",
         seq: 3,
-        message: "compact finished: boundary=compact_1",
+        message: "compact finished: auto boundary=compact_1 estimated_tokens=4800",
+        contextCompactMode: "auto",
+        contextCompactBoundaryId: "compact_1",
+        contextCompactPreEstimateTokens: 9600,
+        contextCompactPostEstimateTokens: 4800,
         contextEffectiveWindow: 12000,
         contextEstimatedTokens: 4800,
         contextEstimatedDeltaTokens: -4800,
@@ -824,7 +828,11 @@ describe("runtime reducer run narrative projection", () => {
     });
     expect(state.inspectorSummary.compact).toMatchObject({
       status: "finished",
+      mode: "auto",
       boundaryId: "compact_1",
+      preCompactEstimatedTokens: 9600,
+      postCompactEstimatedTokens: 4800,
+      fallbackState: "structured",
     });
     expect(state.inspectorSummary.terminalReason).toBe("completed");
     expect(state.inspectorSummary.terminalMessage).toBe("done");
@@ -836,6 +844,43 @@ describe("runtime reducer run narrative projection", () => {
       title: "Compact finished",
       status: "done",
       tag: "compact_1",
+    });
+  });
+
+  it("keeps compact observability working from legacy fallback fields", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "Compact fallback" },
+      runEvent({
+        type: "AWAKEN_CONTEXT_WARNING",
+        seq: 1,
+        message: "context warning",
+        contextEffectiveWindow: 12000,
+        contextEstimatedTokens: 9600,
+        contextWarningThreshold: 9000,
+      }),
+      runEvent({
+        type: "AWAKEN_COMPACT_FINISHED",
+        seq: 2,
+        message: "compact finished: reactive boundary=compact_legacy estimated_tokens=4800",
+        contextEffectiveWindow: 12000,
+        contextEstimatedTokens: 4800,
+        contextEstimatedDeltaTokens: -4800,
+      }),
+    ]);
+
+    expect(state.inspectorSummary.compact).toMatchObject({
+      status: "finished",
+      mode: "reactive",
+      boundaryId: "compact_legacy",
+      preCompactEstimatedTokens: 9600,
+      postCompactEstimatedTokens: 4800,
+      fallbackState: "legacy",
+    });
+    expect(state.inspectorSummary.contextWindow).toMatchObject({
+      eventType: "AWAKEN_COMPACT_FINISHED",
+      estimatedTokens: 4800,
+      effectiveWindow: 12000,
+      estimatedDeltaTokens: -4800,
     });
   });
 

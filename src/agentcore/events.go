@@ -101,6 +101,14 @@ type AwakenEvent struct {
 	ContextAutoCompactThreshold int
 	ContextCompactTarget        int
 	ContextEstimatedDeltaTokens int
+	CompactMode                 CompactMode
+	CompactBoundaryID           string
+	CompactPreEstimate          *int
+	CompactPostEstimate         *int
+	CompactSummaryModel         string
+	CompactFallbackUsed         *bool
+	CompactToolResultsPruned    *bool
+	CompactFailureReason        string
 	StaticPermissionBehavior    string
 	StaticPermissionReason      string
 	ToolDecisionAction          string

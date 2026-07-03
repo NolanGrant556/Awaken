@@ -12,6 +12,10 @@ import (
 func TestTranscriptStoreAppendsMessagesEventsIdempotentlyAndLoads(t *testing.T) {
 	workspace := WorkspaceConfig{WorkspaceRoot: t.TempDir()}
 	run := Run{RunID: "run_1", ThreadID: "thread_1"}
+	preEstimate := 120
+	postEstimate := 80
+	fallbackUsed := true
+	toolResultsPruned := false
 	messages := []convcontext.Message{
 		{Role: convcontext.RoleUser, Content: "hello"},
 		{
@@ -66,10 +70,16 @@ func TestTranscriptStoreAppendsMessagesEventsIdempotentlyAndLoads(t *testing.T) 
 			Seq:       2,
 			Timestamp: now.Add(time.Millisecond),
 			AgentEvent: agentcore.AwakenEvent{
-				Type:                   agentcore.CompactFinishedEventType,
-				Content:                "compact finished: auto boundary=compact_1 estimated_tokens=80",
-				ContextEstimatedTokens: 80,
-				ContextCompactTarget:   33000,
+				Type:                     agentcore.CompactFinishedEventType,
+				Content:                  "compact finished: auto boundary=compact_legacy estimated_tokens=80",
+				ContextCompactTarget:     33000,
+				CompactMode:              agentcore.CompactModeAuto,
+				CompactBoundaryID:        "compact_1",
+				CompactPreEstimate:       &preEstimate,
+				CompactPostEstimate:      &postEstimate,
+				CompactSummaryModel:      "gpt-5-mini",
+				CompactFallbackUsed:      &fallbackUsed,
+				CompactToolResultsPruned: &toolResultsPruned,
 			},
 		},
 		{
@@ -129,6 +139,9 @@ func TestTranscriptStoreAppendsMessagesEventsIdempotentlyAndLoads(t *testing.T) 
 	if restored.LastContextWindowState == nil || restored.LastContextWindowState.LastCompactBoundaryID != "compact_1" {
 		t.Fatalf("expected restored context window compact boundary, got %+v", restored.LastContextWindowState)
 	}
+	if restored.LastContextWindowState.EstimatedTokens != 80 {
+		t.Fatalf("expected restored context estimate to use compact post estimate, got %+v", restored.LastContextWindowState)
+	}
 	if restored.TerminalReason != agentcore.TerminalReasonCompleted ||
 		restored.TerminalEvent == nil ||
 		restored.TerminalEvent.Type != agentcore.RunFinishedEventType {
@@ -145,6 +158,19 @@ func TestTranscriptStoreAppendsMessagesEventsIdempotentlyAndLoads(t *testing.T) 
 	}
 	if len(durable.Events) != len(events) {
 		t.Fatalf("expected %d durable events, got %+v", len(events), durable.Events)
+	}
+	gotCompact := durable.Events[1].AgentEvent
+	if gotCompact.CompactBoundaryID != "compact_1" ||
+		gotCompact.CompactSummaryModel != "gpt-5-mini" ||
+		gotCompact.CompactPreEstimate == nil ||
+		*gotCompact.CompactPreEstimate != 120 ||
+		gotCompact.CompactPostEstimate == nil ||
+		*gotCompact.CompactPostEstimate != 80 ||
+		gotCompact.CompactFallbackUsed == nil ||
+		!*gotCompact.CompactFallbackUsed ||
+		gotCompact.CompactToolResultsPruned == nil ||
+		*gotCompact.CompactToolResultsPruned {
+		t.Fatalf("expected durable compact metadata to round-trip, got %+v", gotCompact)
 	}
 }
 
@@ -170,4 +196,105 @@ func TestTranscriptLoaderRejectsInvalidToolPairing(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "invalid transcript tool result pairing") {
 		t.Fatalf("expected invalid pairing error, got %v", err)
 	}
+}
+
+func TestTranscriptStorePreservesRawHistoryAndRestoresCompactRuntimeView(t *testing.T) {
+	workspace := WorkspaceConfig{WorkspaceRoot: t.TempDir()}
+	run := Run{RunID: "run_compact", ThreadID: "thread_compact"}
+
+	rawMessages := []convcontext.Message{
+		{Role: convcontext.RoleUser, Content: "first"},
+		{Role: convcontext.RoleAssistant, Content: "alpha"},
+		{Role: convcontext.RoleUser, Content: "second"},
+		{Role: convcontext.RoleAssistant, Content: "beta"},
+	}
+	if err := appendConversationTranscript(workspace, run, rawMessages); err != nil {
+		t.Fatalf("appendConversationTranscript raw returned error: %v", err)
+	}
+
+	compactedMessages := []convcontext.Message{
+		{Role: convcontext.RoleUser, Content: "summary", CompactBoundaryID: "compact_2"},
+		{Role: convcontext.RoleUser, Content: "second"},
+		{Role: convcontext.RoleAssistant, Content: "beta"},
+	}
+	if err := appendConversationTranscript(workspace, run, compactedMessages); err != nil {
+		t.Fatalf("appendConversationTranscript compacted returned error: %v", err)
+	}
+	if err := appendConversationTranscript(workspace, run, compactedMessages); err != nil {
+		t.Fatalf("second appendConversationTranscript compacted returned error: %v", err)
+	}
+
+	records, err := readTranscriptRecords(transcriptPath(workspace.WorkspaceRoot, run.ThreadID))
+	if err != nil {
+		t.Fatalf("readTranscriptRecords returned error: %v", err)
+	}
+	if got := transcriptMessageCount(records); got != 7 {
+		t.Fatalf("expected raw history plus compacted runtime view to total 7 messages, got %d", got)
+	}
+
+	restored, err := loadRestoredTranscript(workspace, run.ThreadID)
+	if err != nil {
+		t.Fatalf("loadRestoredTranscript returned error: %v", err)
+	}
+	if len(restored.Messages) != 7 {
+		t.Fatalf("expected restored raw history to keep 7 messages, got %+v", restored.Messages)
+	}
+
+	ctx := convcontext.New()
+	ctx.SetMessages(restored.Messages)
+	modelMessages := ctx.GetMessagesForModel()
+	if len(modelMessages) != len(compactedMessages) {
+		t.Fatalf("expected model view to restore compacted runtime slice, got %+v", modelMessages)
+	}
+	for i := range compactedMessages {
+		if modelMessages[i].Role != compactedMessages[i].Role ||
+			modelMessages[i].Content != compactedMessages[i].Content ||
+			modelMessages[i].CompactBoundaryID != compactedMessages[i].CompactBoundaryID {
+			t.Fatalf("expected compacted runtime view at %d, got %+v want %+v", i, modelMessages[i], compactedMessages[i])
+		}
+	}
+}
+
+func TestTranscriptLoaderRecoversLegacyCompactBoundaryAndReactiveMode(t *testing.T) {
+	workspace := WorkspaceConfig{WorkspaceRoot: t.TempDir()}
+	threadID := "thread_legacy"
+	record := TranscriptRecord{
+		RecordType: transcriptRecordTypeEvent,
+		ThreadID:   threadID,
+		RunID:      "run_legacy",
+		MessageID:  transcriptEventID(threadID, "run_legacy", 1),
+		Event: &agentcore.AwakenEvent{
+			Type:                   agentcore.CompactFailedEventType,
+			Content:                "reactive compact failed boundary=legacy_boundary",
+			CompactFailureReason:   "provider_timeout",
+			CompactPreEstimate:     intPtr(210),
+			ContextCompactTarget:   33000,
+			ContextEffectiveWindow: 112000,
+		},
+		Timestamp: time.Now().UTC(),
+	}
+	if err := appendTranscriptRecords(transcriptPath(workspace.WorkspaceRoot, threadID), []TranscriptRecord{record}); err != nil {
+		t.Fatalf("appendTranscriptRecords returned error: %v", err)
+	}
+
+	restored, err := loadRestoredTranscript(workspace, threadID)
+	if err != nil {
+		t.Fatalf("loadRestoredTranscript returned error: %v", err)
+	}
+	if restored.LastContextWindowState == nil {
+		t.Fatalf("expected context window state to restore")
+	}
+	if restored.LastContextWindowState.LastCompactBoundaryID != "legacy_boundary" {
+		t.Fatalf("expected legacy boundary fallback to restore, got %+v", restored.LastContextWindowState)
+	}
+	if !restored.LastContextWindowState.HasAttemptedReactiveCompact {
+		t.Fatalf("expected reactive compact fallback to restore, got %+v", restored.LastContextWindowState)
+	}
+	if restored.LastContextWindowState.EstimatedTokens != 210 {
+		t.Fatalf("expected legacy pre estimate to restore, got %+v", restored.LastContextWindowState)
+	}
+}
+
+func intPtr(value int) *int {
+	return &value
 }

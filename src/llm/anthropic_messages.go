@@ -47,14 +47,16 @@ type anthropicTool struct {
 type anthropicResponse struct {
 	Content    []anthropicContentBlock `json:"content"`
 	StopReason string                  `json:"stop_reason"`
+	Usage      *anthropicUsage         `json:"usage,omitempty"`
 }
 
 type anthropicContentBlock struct {
-	Type  string          `json:"type"`
-	Text  string          `json:"text,omitempty"`
-	ID    string          `json:"id,omitempty"`
-	Name  string          `json:"name,omitempty"`
-	Input json.RawMessage `json:"input,omitempty"`
+	Type     string          `json:"type"`
+	Text     string          `json:"text,omitempty"`
+	Thinking string          `json:"thinking,omitempty"`
+	ID       string          `json:"id,omitempty"`
+	Name     string          `json:"name,omitempty"`
+	Input    json.RawMessage `json:"input,omitempty"`
 }
 
 // --- Stream 结构 ---
@@ -72,6 +74,11 @@ type anthropicStreamDelta struct {
 	Thinking    string `json:"thinking,omitempty"`
 	PartialJSON string `json:"partial_json,omitempty"`
 	StopReason  string `json:"stop_reason,omitempty"`
+}
+
+type anthropicUsage struct {
+	InputTokens  int `json:"input_tokens,omitempty"`
+	OutputTokens int `json:"output_tokens,omitempty"`
 }
 
 // --- 实现 Transport 接口 ---
@@ -154,14 +161,17 @@ func (t *anthropicTransport) StreamInvokeWithObserver(ctx stdctx.Context, cfg Co
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	streamCtx, cancel := stdctx.WithCancel(ctx)
+	defer cancel()
+
+	httpReq, err := http.NewRequestWithContext(streamCtx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, requestBuildError(err)
 	}
 
 	applyAuthHeaders(httpReq, cfg, ProtocolAnthropicMessages)
 
-	resp, err := httpClient.Do(httpReq)
+	resp, err := streamHTTPClient.Do(httpReq)
 	if err != nil {
 		return nil, transportError(err)
 	}
@@ -174,8 +184,11 @@ func (t *anthropicTransport) StreamInvokeWithObserver(ctx stdctx.Context, cfg Co
 	state := newAnthropicStreamState(observer)
 	scanner := bufio.NewScanner(resp.Body)
 	currentEvent := ""
+	watchdog := newStreamIdleWatchdog(cancel)
+	defer watchdog.Stop()
 
 	for scanner.Scan() {
+		watchdog.Reset()
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
@@ -196,6 +209,9 @@ func (t *anthropicTransport) StreamInvokeWithObserver(ctx stdctx.Context, cfg Co
 	}
 
 	if err := scanner.Err(); err != nil {
+		if watchdog.TimedOut() {
+			return nil, streamIdleTimeoutError(watchdog.Timeout())
+		}
 		return nil, fmt.Errorf("failed to read stream: %w", err)
 	}
 
@@ -348,12 +364,15 @@ func responseFromAnthropic(resp anthropicResponse) (*Response, error) {
 		IsFinished:       stopReason != "tool_use",
 		StopReason:       stopReason,
 		MaxOutputReached: isMaxOutputStopReason(stopReason),
+		Usage:            anthropicResponseUsage(resp.Usage),
 	}
 
 	for _, block := range resp.Content {
 		switch block.Type {
 		case "text":
 			result.Content += block.Text
+		case "thinking":
+			result.Thinking += block.Thinking
 		case "tool_use":
 			inputJSON, _ := json.Marshal(block.Input)
 			result.ToolCalls = append(result.ToolCalls, ToolCall{
@@ -365,7 +384,7 @@ func responseFromAnthropic(resp anthropicResponse) (*Response, error) {
 		}
 	}
 
-	if result.Content == "" && len(result.ToolCalls) == 0 {
+	if !responseHasSignal(result) {
 		return nil, ErrEmptyResponse
 	}
 
@@ -377,8 +396,10 @@ func responseFromAnthropic(resp anthropicResponse) (*Response, error) {
 type anthropicStreamState struct {
 	observer    StreamObserver
 	content     strings.Builder
+	thinking    strings.Builder
 	toolCalls   []ToolCall
 	currentTool *anthropicToolAccumulator
+	usage       *Usage
 	stopReason  string
 }
 
@@ -403,6 +424,18 @@ func (s *anthropicStreamState) consume(data string, event string) {
 	}
 
 	switch streamEvent.Type {
+	case "message_start":
+		if streamEvent.ContentBlock == nil {
+			var envelope struct {
+				Message struct {
+					Usage *anthropicUsage `json:"usage,omitempty"`
+				} `json:"message"`
+			}
+			if err := json.Unmarshal([]byte(data), &envelope); err == nil {
+				s.usage = anthropicResponseUsage(envelope.Message.Usage)
+			}
+		}
+
 	case "message_delta":
 		if streamEvent.Delta != nil && streamEvent.Delta.StopReason != "" {
 			s.stopReason = strings.TrimSpace(streamEvent.Delta.StopReason)
@@ -424,6 +457,7 @@ func (s *anthropicStreamState) consume(data string, event string) {
 		switch streamEvent.Delta.Type {
 		case "thinking_delta":
 			if streamEvent.Delta.Thinking != "" {
+				s.thinking.WriteString(streamEvent.Delta.Thinking)
 				s.emit(streamEvent.Delta.Thinking, true)
 			}
 		case "text_delta":
@@ -474,13 +508,30 @@ func (s *anthropicStreamState) emitToolCallDelta(delta ToolCallDelta) {
 func (s *anthropicStreamState) response() (*Response, error) {
 	result := &Response{
 		Content:          s.content.String(),
+		Thinking:         s.thinking.String(),
 		ToolCalls:        s.toolCalls,
+		Usage:            s.usage,
 		IsFinished:       len(s.toolCalls) == 0,
 		StopReason:       s.stopReason,
 		MaxOutputReached: isMaxOutputStopReason(s.stopReason),
 	}
-	if result.Content == "" && len(result.ToolCalls) == 0 {
+	if !responseHasSignal(result) {
 		return nil, ErrEmptyResponse
 	}
 	return result, nil
+}
+
+func anthropicResponseUsage(raw *anthropicUsage) *Usage {
+	if raw == nil {
+		return nil
+	}
+	total := raw.InputTokens + raw.OutputTokens
+	if raw.InputTokens == 0 && raw.OutputTokens == 0 {
+		return nil
+	}
+	return &Usage{
+		InputTokens:  raw.InputTokens,
+		OutputTokens: raw.OutputTokens,
+		TotalTokens:  total,
+	}
 }

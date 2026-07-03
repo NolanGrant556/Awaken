@@ -81,26 +81,27 @@ func appendConversationTranscript(workspace WorkspaceConfig, run Run, messages [
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	seen := map[string]bool{}
-	for _, record := range records {
-		if record.RecordType == transcriptRecordTypeMessage && record.MessageID != "" {
-			seen[record.MessageID] = true
-		}
-	}
 
-	now := time.Now().UTC()
-	pending := make([]TranscriptRecord, 0, len(messages))
-	for i, message := range messages {
-		id := transcriptMessageID(run.ThreadID, i)
-		if seen[id] {
-			continue
-		}
-		pending = append(pending, transcriptRecordForMessage(run.ThreadID, run.RunID, "", i, message, now))
+	messageRecords, err := orderedTranscriptMessageRecords(records)
+	if err != nil {
+		return err
 	}
-	if len(pending) == 0 {
+	fullView := transcriptMessagesFromRecords(messageRecords)
+	if transcriptMessagesEqual(fullView, messages) {
 		return nil
 	}
-	return appendTranscriptRecords(path, pending)
+	if transcriptMessagesHavePrefix(messages, fullView) {
+		return appendTranscriptMessageSuffix(path, run, records, messages, len(fullView))
+	}
+
+	activeView := transcriptActiveViewMessages(messageRecords)
+	if transcriptMessagesEqual(activeView, messages) {
+		return nil
+	}
+	if transcriptMessagesHavePrefix(messages, activeView) {
+		return appendTranscriptMessageSuffix(path, run, records, messages, len(activeView))
+	}
+	return appendTranscriptMessageSuffix(path, run, records, messages, 0)
 }
 
 func appendRunEventTranscript(workspace WorkspaceConfig, run Run, events []Event) error {
@@ -532,17 +533,20 @@ func contextWindowStateFromTranscriptEvent(event agentcore.AwakenEvent) agentcor
 		ModelWindow:                 event.ContextModelWindow,
 		OutputReserve:               event.ContextOutputReserve,
 		EffectiveWindow:             event.ContextEffectiveWindow,
-		EstimatedTokens:             event.ContextEstimatedTokens,
+		EstimatedTokens:             compactEstimatedTokensFromEvent(event),
 		WarningThreshold:            event.ContextWarningThreshold,
 		AutoCompactThreshold:        event.ContextAutoCompactThreshold,
 		CompactTarget:               event.ContextCompactTarget,
 		EstimatedDeltaTokens:        event.ContextEstimatedDeltaTokens,
 		LastCompactBoundaryID:       compactBoundaryIDFromEvent(event),
-		HasAttemptedReactiveCompact: strings.Contains(event.Content, "reactive"),
+		HasAttemptedReactiveCompact: compactModeFromEvent(event) == agentcore.CompactModeReactive,
 	}
 }
 
 func compactBoundaryIDFromEvent(event agentcore.AwakenEvent) string {
+	if value := strings.TrimSpace(event.CompactBoundaryID); value != "" {
+		return value
+	}
 	const marker = "boundary="
 	start := strings.Index(event.Content, marker)
 	if start < 0 {
@@ -553,4 +557,128 @@ func compactBoundaryIDFromEvent(event agentcore.AwakenEvent) string {
 		value = value[:end]
 	}
 	return strings.TrimSpace(value)
+}
+
+func compactModeFromEvent(event agentcore.AwakenEvent) agentcore.CompactMode {
+	if event.CompactMode != "" {
+		return event.CompactMode
+	}
+	if strings.Contains(strings.ToLower(event.Content), "reactive") {
+		return agentcore.CompactModeReactive
+	}
+	return ""
+}
+
+func compactEstimatedTokensFromEvent(event agentcore.AwakenEvent) int {
+	if event.Type == agentcore.CompactFinishedEventType {
+		if event.CompactPostEstimate != nil {
+			return *event.CompactPostEstimate
+		}
+		if event.ContextEstimatedTokens > 0 {
+			return event.ContextEstimatedTokens
+		}
+		if event.CompactPreEstimate != nil {
+			return *event.CompactPreEstimate
+		}
+		return 0
+	}
+	if event.CompactPreEstimate != nil {
+		return *event.CompactPreEstimate
+	}
+	if event.ContextEstimatedTokens > 0 {
+		return event.ContextEstimatedTokens
+	}
+	if event.CompactPostEstimate != nil {
+		return *event.CompactPostEstimate
+	}
+	return 0
+}
+
+func transcriptActiveViewMessages(records []TranscriptRecord) []convcontext.Message {
+	if len(records) == 0 {
+		return nil
+	}
+	start := 0
+	for i, record := range records {
+		if strings.TrimSpace(record.CompactBoundaryID) != "" {
+			start = i
+		}
+	}
+	return transcriptMessagesFromRecords(records[start:])
+}
+
+func transcriptMessagesFromRecords(records []TranscriptRecord) []convcontext.Message {
+	messages := make([]convcontext.Message, 0, len(records))
+	for _, record := range records {
+		messages = append(messages, convcontext.Message{
+			Role:              convcontext.Role(record.Role),
+			Content:           record.Content,
+			ToolCalls:         append([]convcontext.ToolCall(nil), record.ToolCalls...),
+			ToolCallID:        record.ToolCallID,
+			Name:              record.ToolName,
+			IsError:           record.IsError,
+			CompactBoundaryID: record.CompactBoundaryID,
+		})
+	}
+	return messages
+}
+
+func transcriptMessagesHavePrefix(messages []convcontext.Message, prefix []convcontext.Message) bool {
+	if len(prefix) > len(messages) {
+		return false
+	}
+	for i := range prefix {
+		if !transcriptMessageEqual(messages[i], prefix[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func transcriptMessagesEqual(left []convcontext.Message, right []convcontext.Message) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	return transcriptMessagesHavePrefix(left, right)
+}
+
+func transcriptMessageEqual(left convcontext.Message, right convcontext.Message) bool {
+	if left.Role != right.Role ||
+		left.Content != right.Content ||
+		left.ToolCallID != right.ToolCallID ||
+		transcriptMessageToolName(left) != transcriptMessageToolName(right) ||
+		left.IsError != right.IsError ||
+		left.CompactBoundaryID != right.CompactBoundaryID ||
+		len(left.ToolCalls) != len(right.ToolCalls) {
+		return false
+	}
+	for i := range left.ToolCalls {
+		if left.ToolCalls[i] != right.ToolCalls[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func transcriptMessageToolName(message convcontext.Message) string {
+	if strings.TrimSpace(message.Name) != "" {
+		return message.Name
+	}
+	if len(message.ToolCalls) > 0 {
+		return message.ToolCalls[0].Function.Name
+	}
+	return ""
+}
+
+func appendTranscriptMessageSuffix(path string, run Run, records []TranscriptRecord, messages []convcontext.Message, start int) error {
+	if start >= len(messages) {
+		return nil
+	}
+	baseIndex := transcriptMessageCount(records)
+	now := time.Now().UTC()
+	pending := make([]TranscriptRecord, 0, len(messages)-start)
+	for i := start; i < len(messages); i++ {
+		pending = append(pending, transcriptRecordForMessage(run.ThreadID, run.RunID, "", baseIndex+len(pending), messages[i], now))
+	}
+	return appendTranscriptRecords(path, pending)
 }

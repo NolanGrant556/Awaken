@@ -28,6 +28,18 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		ContextAutoCompactThreshold: event.ContextAutoCompactThreshold,
 		ContextCompactTarget:        event.ContextCompactTarget,
 		ContextEstimatedDeltaTokens: event.ContextEstimatedDeltaTokens,
+		ContextCompactMode:          string(event.CompactMode),
+		ContextCompactBoundaryID:    event.CompactBoundaryID,
+		ContextCompactPreEstimate:   cloneIntPointer(event.CompactPreEstimate),
+		ContextCompactPostEstimate:  cloneIntPointer(event.CompactPostEstimate),
+		CompactMode:                 string(event.CompactMode),
+		CompactBoundaryID:           event.CompactBoundaryID,
+		CompactPreEstimate:          cloneIntPointer(event.CompactPreEstimate),
+		CompactPostEstimate:         cloneIntPointer(event.CompactPostEstimate),
+		CompactSummaryModel:         event.CompactSummaryModel,
+		CompactFallbackUsed:         cloneBoolPointer(event.CompactFallbackUsed),
+		CompactToolResultsPruned:    cloneBoolPointer(event.CompactToolResultsPruned),
+		CompactFailureReason:        event.CompactFailureReason,
 	}
 
 	switch event.Type {
@@ -236,6 +248,22 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.RawEvent = rawAwakenEvent(event)
 		return []Event{base}
 	}
+}
+
+func cloneIntPointer(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func cloneBoolPointer(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func toUnixMillis(ts time.Time) int64 {

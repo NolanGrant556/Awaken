@@ -964,6 +964,112 @@ func TestRunnerReactiveCompactSecondPromptTooLongTerminates(t *testing.T) {
 	}
 }
 
+func TestRunnerThinkingOnlyResponseIsNotEmpty(t *testing.T) {
+	conv := convcontext.NewConversation(nil)
+	cfg := AgentConfig{
+		MaxThoughts: 1,
+		ModelConfig: ModelConfig{
+			Model: "test-model",
+		},
+	}
+	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
+	runner.streamLLMFunc = func(context.Context, *runEventEmitter) (*llm.Response, error) {
+		return &llm.Response{Thinking: "reasoning only", Usage: &llm.Usage{InputTokens: 7}}, nil
+	}
+
+	answer, err := runner.RunStreamWithEvents(context.Background(), EventSinkFunc(func(event AwakenEvent) {}))
+	if err != nil {
+		t.Fatalf("RunStreamWithEvents returned error: %v", err)
+	}
+	if answer != "" {
+		t.Fatalf("expected empty final answer for thinking-only response, got %q", answer)
+	}
+	if runner.contextGovernor.lastAPIUsageTokens != 7 {
+		t.Fatalf("expected runner to retain usage from thinking-only response, got %d", runner.contextGovernor.lastAPIUsageTokens)
+	}
+}
+
+func TestRunEventEmitterCompactStructuredFields(t *testing.T) {
+	var gotEvents []AwakenEvent
+	emitter := newRunEventEmitter("thread-1", EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+	state := ContextWindowState{
+		EstimatedTokens:  120,
+		CompactTarget:    36,
+		WarningThreshold: 100,
+	}
+	result := CompactResult{
+		Mode:               CompactModeReactive,
+		BoundaryID:         "compact_1",
+		EstimatedTokens:    48,
+		PostEstimateTokens: 48,
+		ToolResultsPruned:  1,
+		Fallback: CompactFallback{
+			Used: true,
+		},
+	}
+
+	emitter.emitCompactStarted(state, CompactModeReactive)
+	emitter.emitCompactFinished(state, result, "gpt-5-mini")
+	emitter.emitCompactFailed(state, CompactModeReactive, "compact failed", "provider_timeout")
+
+	if len(gotEvents) != 3 {
+		t.Fatalf("expected 3 events, got %d", len(gotEvents))
+	}
+	started := gotEvents[0]
+	if started.Type != CompactStartedEventType ||
+		started.CompactMode != CompactModeReactive ||
+		started.CompactPreEstimate == nil ||
+		*started.CompactPreEstimate != 120 {
+		t.Fatalf("unexpected compact started event: %+v", started)
+	}
+
+	finished := gotEvents[1]
+	if finished.Type != CompactFinishedEventType ||
+		finished.CompactMode != CompactModeReactive ||
+		finished.CompactBoundaryID != "compact_1" ||
+		finished.CompactPreEstimate == nil ||
+		*finished.CompactPreEstimate != 120 ||
+		finished.CompactPostEstimate == nil ||
+		*finished.CompactPostEstimate != 48 ||
+		finished.ContextEstimatedTokens != 48 ||
+		finished.CompactSummaryModel != "gpt-5-mini" ||
+		finished.CompactFallbackUsed == nil ||
+		!*finished.CompactFallbackUsed ||
+		finished.CompactToolResultsPruned == nil ||
+		!*finished.CompactToolResultsPruned {
+		t.Fatalf("unexpected compact finished event: %+v", finished)
+	}
+
+	fallbackOnly := CompactResult{
+		Mode:               CompactModeReactive,
+		BoundaryID:         "compact_2",
+		EstimatedTokens:    64,
+		PostEstimateTokens: 64,
+		Fallback: CompactFallback{
+			Used: true,
+		},
+	}
+	emitter.emitCompactFinished(state, fallbackOnly, "gpt-5-mini")
+	if len(gotEvents) != 4 {
+		t.Fatalf("expected 4 events after fallback-only compact, got %d", len(gotEvents))
+	}
+	fallbackFinished := gotEvents[3]
+	if fallbackFinished.Type != CompactFinishedEventType ||
+		fallbackFinished.CompactToolResultsPruned == nil ||
+		*fallbackFinished.CompactToolResultsPruned {
+		t.Fatalf("expected fallback-only compact not to report tool results pruned: %+v", fallbackFinished)
+	}
+
+	failed := gotEvents[2]
+	if failed.Type != CompactFailedEventType ||
+		failed.CompactMode != CompactModeReactive ||
+		failed.CompactFailureReason != "provider_timeout" {
+		t.Fatalf("unexpected compact failed event: %+v", failed)
+	}
+}
+
 func TestRunnerContinuesOnceAfterMaxOutput(t *testing.T) {
 	conv := convcontext.NewConversation(nil)
 	runner := NewRunner(AgentConfig{

@@ -54,23 +54,35 @@ type openaiFunctionCall struct {
 // --- 响应结构 ---
 
 type openaiChatResponse struct {
+	Usage   *openAIUsage `json:"usage,omitempty"`
 	Choices []struct {
 		Message struct {
-			Content   string           `json:"content"`
-			ToolCalls []openaiToolCall `json:"tool_calls,omitempty"`
+			Content          string           `json:"content"`
+			ReasoningContent string           `json:"reasoning_content,omitempty"`
+			ToolCalls        []openaiToolCall `json:"tool_calls,omitempty"`
 		} `json:"message"`
 		FinishReason string `json:"finish_reason,omitempty"`
 	} `json:"choices"`
 }
 
 type openaiStreamResponse struct {
+	Usage   *openAIUsage `json:"usage,omitempty"`
 	Choices []struct {
 		Delta struct {
-			Content   string                 `json:"content,omitempty"`
-			ToolCalls []openaiStreamToolCall `json:"tool_calls,omitempty"`
+			Content          string                 `json:"content,omitempty"`
+			ReasoningContent string                 `json:"reasoning_content,omitempty"`
+			ToolCalls        []openaiStreamToolCall `json:"tool_calls,omitempty"`
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason,omitempty"`
 	} `json:"choices"`
+}
+
+type openAIUsage struct {
+	PromptTokens     int `json:"prompt_tokens,omitempty"`
+	CompletionTokens int `json:"completion_tokens,omitempty"`
+	TotalTokens      int `json:"total_tokens,omitempty"`
+	InputTokens      int `json:"input_tokens,omitempty"`
+	OutputTokens     int `json:"output_tokens,omitempty"`
 }
 
 type openaiStreamToolCall struct {
@@ -131,7 +143,7 @@ func (t *openaiTransport) Invoke(ctx stdctx.Context, cfg Config, req Request) (*
 	}
 
 	choice := chatResp.Choices[0]
-	return responseFromOpenAIMessage(choice.Message.Content, choice.Message.ToolCalls, choice.FinishReason)
+	return responseFromOpenAIMessage(choice.Message.Content, choice.Message.ReasoningContent, choice.Message.ToolCalls, choice.FinishReason, choiceUsage(chatResp.Usage))
 }
 
 func (t *openaiTransport) StreamInvoke(ctx stdctx.Context, cfg Config, req Request, callback StreamCallback) (*Response, error) {
@@ -158,14 +170,17 @@ func (t *openaiTransport) StreamInvokeWithObserver(ctx stdctx.Context, cfg Confi
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	streamCtx, cancel := stdctx.WithCancel(ctx)
+	defer cancel()
+
+	httpReq, err := http.NewRequestWithContext(streamCtx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, requestBuildError(err)
 	}
 
 	applyAuthHeaders(httpReq, cfg, ProtocolOpenAIChat)
 
-	resp, err := httpClient.Do(httpReq)
+	resp, err := streamHTTPClient.Do(httpReq)
 	if err != nil {
 		return nil, transportError(err)
 	}
@@ -177,8 +192,11 @@ func (t *openaiTransport) StreamInvokeWithObserver(ctx stdctx.Context, cfg Confi
 
 	state := newOpenAIStreamState(observer)
 	scanner := bufio.NewScanner(resp.Body)
+	watchdog := newStreamIdleWatchdog(cancel)
+	defer watchdog.Stop()
 
 	for scanner.Scan() {
+		watchdog.Reset()
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
@@ -194,6 +212,9 @@ func (t *openaiTransport) StreamInvokeWithObserver(ctx stdctx.Context, cfg Confi
 	}
 
 	if err := scanner.Err(); err != nil {
+		if watchdog.TimedOut() {
+			return nil, streamIdleTimeoutError(watchdog.Timeout())
+		}
 		return nil, fmt.Errorf("failed to read stream: %w", err)
 	}
 
@@ -243,11 +264,13 @@ func contextToolCallsToOpenAI(toolCalls []context.ToolCall) []openaiToolCall {
 	return result
 }
 
-func responseFromOpenAIMessage(content string, toolCalls []openaiToolCall, stopReason string) (*Response, error) {
+func responseFromOpenAIMessage(content string, thinking string, toolCalls []openaiToolCall, stopReason string, usage *Usage) (*Response, error) {
 	stopReason = strings.TrimSpace(stopReason)
 	result := &Response{
 		Content:          content,
+		Thinking:         thinking,
 		ToolCalls:        make([]ToolCall, 0, len(toolCalls)),
+		Usage:            usage,
 		IsFinished:       len(toolCalls) == 0,
 		StopReason:       stopReason,
 		MaxOutputReached: isMaxOutputStopReason(stopReason),
@@ -261,7 +284,7 @@ func responseFromOpenAIMessage(content string, toolCalls []openaiToolCall, stopR
 		})
 	}
 
-	if result.Content == "" && len(result.ToolCalls) == 0 {
+	if !responseHasSignal(result) {
 		return nil, ErrEmptyResponse
 	}
 	return result, nil
@@ -287,7 +310,9 @@ func convertToolsToOpenAI(tools []tool.ToolDefinition) []map[string]interface{} 
 type openAIStreamState struct {
 	observer   StreamObserver
 	content    strings.Builder
+	thinking   strings.Builder
 	toolCalls  map[int]*openaiStreamToolAccumulator
+	usage      *Usage
 	stopReason string
 }
 
@@ -310,10 +335,17 @@ func (s *openAIStreamState) consume(data string) {
 	if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 		return
 	}
+	if usage := choiceUsage(chunk.Usage); usage != nil {
+		s.usage = usage
+	}
 
 	for _, choice := range chunk.Choices {
 		if choice.FinishReason != "" {
 			s.stopReason = strings.TrimSpace(choice.FinishReason)
+		}
+		if choice.Delta.ReasoningContent != "" {
+			s.thinking.WriteString(choice.Delta.ReasoningContent)
+			s.emit(choice.Delta.ReasoningContent, true)
 		}
 		if choice.Delta.Content != "" {
 			s.content.WriteString(choice.Delta.Content)
@@ -364,15 +396,43 @@ func (s *openAIStreamState) response() (*Response, error) {
 	toolCalls := s.sortedToolCalls()
 	result := &Response{
 		Content:          s.content.String(),
+		Thinking:         s.thinking.String(),
 		ToolCalls:        toolCalls,
+		Usage:            s.usage,
 		IsFinished:       len(toolCalls) == 0,
 		StopReason:       s.stopReason,
 		MaxOutputReached: isMaxOutputStopReason(s.stopReason),
 	}
-	if result.Content == "" && len(result.ToolCalls) == 0 {
+	if !responseHasSignal(result) {
 		return nil, ErrEmptyResponse
 	}
 	return result, nil
+}
+
+func choiceUsage(raw *openAIUsage) *Usage {
+	if raw == nil {
+		return nil
+	}
+	input := raw.PromptTokens
+	if input == 0 {
+		input = raw.InputTokens
+	}
+	output := raw.CompletionTokens
+	if output == 0 {
+		output = raw.OutputTokens
+	}
+	total := raw.TotalTokens
+	if total == 0 && (input > 0 || output > 0) {
+		total = input + output
+	}
+	if input == 0 && output == 0 && total == 0 {
+		return nil
+	}
+	return &Usage{
+		InputTokens:  input,
+		OutputTokens: output,
+		TotalTokens:  total,
+	}
 }
 
 func (s *openAIStreamState) sortedToolCalls() []ToolCall {

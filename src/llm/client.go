@@ -11,35 +11,136 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	ctx "awaken/src/context"
 )
 
-const maxProviderErrorBodyBytes = 4096
+const (
+	maxProviderErrorBodyBytes     = 4096
+	defaultProviderRequestTimeout = 120 * time.Second
+	defaultStreamHeaderTimeout    = 120 * time.Second
+	defaultStreamIdleTimeout      = 90 * time.Second
+)
 
-var providerErrorSecretPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)(authorization\s*[:=]\s*)(bearer\s+)?[^"',}\s]+`),
-	regexp.MustCompile(`(?i)(api[_-]?key\s*[:=]\s*)[^"',}\s]+`),
-	regexp.MustCompile(`(?i)(token\s*[:=]\s*)[^"',}\s]+`),
-	regexp.MustCompile(`(?i)(secret\s*[:=]\s*)[^"',}\s]+`),
-	regexp.MustCompile(`sk-[A-Za-z0-9_-]{8,}`),
+type providerSecretPattern struct {
+	replacement string
+	regex       *regexp.Regexp
+}
+
+var providerErrorSecretPatterns = []providerSecretPattern{
+	{
+		regex:       regexp.MustCompile(`(?i)(authorization\s*[:=]\s*"?)(bearer\s+)?([^"',}\s]+)`),
+		replacement: `$1$2[redacted]`,
+	},
+	{
+		regex:       regexp.MustCompile(`(?i)(bearer\s+)(sk-[A-Za-z0-9_-]{8,}|ak-[A-Za-z0-9_-]{8,}|[A-Za-z0-9._-]{20,})`),
+		replacement: `$1[redacted]`,
+	},
+	{
+		regex:       regexp.MustCompile(`(?i)((?:api[_-]?key|x-api-key|access[_-]?token|refresh[_-]?token|session[_-]?token|id[_-]?token|token|secret)\s*[:=]\s*"?)([^"',}\s]+)`),
+		replacement: `$1[redacted]`,
+	},
+	{
+		regex:       regexp.MustCompile(`(?:sk|ak)-[A-Za-z0-9_-]{8,}`),
+		replacement: `[redacted]`,
+	},
 }
 
 var (
 	httpClient = &http.Client{
-		Timeout: 120 * time.Second,
-		Transport: &http.Transport{
-			Proxy:                 smartProxy,
-			MaxIdleConns:          100,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
-			MaxIdleConnsPerHost:   10,
-		},
+		Timeout:   defaultProviderRequestTimeout,
+		Transport: newProviderTransport(0),
+	}
+	streamHTTPClient = &http.Client{
+		Transport: newProviderTransport(defaultStreamHeaderTimeout),
 	}
 )
+
+func newProviderTransport(responseHeaderTimeout time.Duration) *http.Transport {
+	return &http.Transport{
+		Proxy:                 smartProxy,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		MaxIdleConnsPerHost:   10,
+		ResponseHeaderTimeout: responseHeaderTimeout,
+	}
+}
+
+type streamIdleWatchdog struct {
+	timer    *time.Timer
+	timeout  time.Duration
+	timedOut atomic.Bool
+}
+
+func newStreamIdleWatchdog(cancel stdctx.CancelFunc) *streamIdleWatchdog {
+	timeout := streamIdleTimeout()
+	if timeout <= 0 {
+		return &streamIdleWatchdog{}
+	}
+	watchdog := &streamIdleWatchdog{timeout: timeout}
+	watchdog.timer = time.AfterFunc(timeout, func() {
+		watchdog.timedOut.Store(true)
+		cancel()
+	})
+	return watchdog
+}
+
+func (w *streamIdleWatchdog) Reset() {
+	if w == nil || w.timer == nil || w.timedOut.Load() {
+		return
+	}
+	w.timer.Reset(w.timeout)
+}
+
+func (w *streamIdleWatchdog) Stop() {
+	if w == nil || w.timer == nil {
+		return
+	}
+	w.timer.Stop()
+}
+
+func (w *streamIdleWatchdog) TimedOut() bool {
+	return w != nil && w.timedOut.Load()
+}
+
+func (w *streamIdleWatchdog) Timeout() time.Duration {
+	if w == nil {
+		return 0
+	}
+	return w.timeout
+}
+
+func streamIdleTimeout() time.Duration {
+	return durationFromEnvMS("AWAKEN_LLM_STREAM_IDLE_TIMEOUT_MS", defaultStreamIdleTimeout)
+}
+
+func durationFromEnvMS(name string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	ms, err := strconv.Atoi(raw)
+	if err != nil || ms < 0 {
+		return fallback
+	}
+	if ms == 0 {
+		return 0
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
+func streamIdleTimeoutError(timeout time.Duration) error {
+	if timeout <= 0 {
+		return fmt.Errorf("%w: stream idle timeout while reading body", ErrRequestFailed)
+	}
+	return fmt.Errorf("%w: stream idle timeout after %s while reading body", ErrRequestFailed, timeout)
+}
 
 // smartProxy 先尝试代理，失败则直连
 func smartProxy(req *http.Request) (*url.URL, error) {
@@ -259,7 +360,7 @@ func findProviderErrorMessage(value interface{}) string {
 
 func redactProviderErrorSecrets(detail string) string {
 	for _, pattern := range providerErrorSecretPatterns {
-		detail = pattern.ReplaceAllString(detail, "$1[redacted]")
+		detail = pattern.regex.ReplaceAllString(detail, pattern.replacement)
 	}
 	return detail
 }

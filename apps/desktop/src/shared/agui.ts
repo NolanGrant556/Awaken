@@ -85,6 +85,10 @@ export type AguiEvent = {
   contextAutoCompactThreshold?: number;
   contextCompactTarget?: number;
   contextEstimatedDeltaTokens?: number;
+  contextCompactMode?: string;
+  contextCompactBoundaryId?: string;
+  contextCompactPreEstimateTokens?: number;
+  contextCompactPostEstimateTokens?: number;
   staticPermissionBehavior?: string;
   staticPermissionReason?: string;
   toolDecisionAction?: string;

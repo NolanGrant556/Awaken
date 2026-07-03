@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { normalizeModelProvider } from "./runtime.js";
+import {
+  calculateAutoCompactThreshold,
+  effectiveContextWindow,
+  normalizeModelProvider,
+} from "./runtime.js";
 
 describe("runtime shared model provider normalization", () => {
   it("normalizes model capability metadata", () => {
@@ -31,5 +35,12 @@ describe("runtime shared model provider normalization", () => {
       defaultTemperature: undefined,
     });
     expect(provider.allowCustomModel).toBe(true);
+  });
+
+  it("calculates the auto compact threshold from effective context window", () => {
+    expect(effectiveContextWindow(1_000_000)).toBe(984_000);
+    expect(calculateAutoCompactThreshold(1_000_000)).toBe(885_600);
+    expect(calculateAutoCompactThreshold(8_000)).toBe(0);
+    expect(calculateAutoCompactThreshold(12_000, 20_000)).toBe(0);
   });
 });

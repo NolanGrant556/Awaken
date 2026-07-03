@@ -9,6 +9,7 @@ import {
   AwakenButton as Button,
   AwakenDialog as Dialog,
 } from "@awaken/design-system";
+import { calculateAutoCompactThreshold } from "../shared/runtime";
 import type {
   ModelProfileSaveRequest,
   ModelProvider,
@@ -126,10 +127,6 @@ function snapContextWindowAnchor(value: number): number {
   return Math.abs(value - CONTEXT_WINDOW_ANCHOR) <= CONTEXT_WINDOW_ANCHOR_SNAP_TOLERANCE
     ? CONTEXT_WINDOW_ANCHOR
     : value;
-}
-
-function contextCompressionValue(contextWindow: number): number {
-  return Math.round(clampContextWindow(contextWindow) * 0.9);
 }
 
 function configuredDraftsFromProfiles(
@@ -893,7 +890,7 @@ export function ModelSettingsDialog({
                   <span>模型名称</span>
                   <span>启用状态</span>
                   <span>上下文长度</span>
-                  <span>上下文压缩值</span>
+                  <span>自动压缩阈值</span>
                   <span>输出上限</span>
                   <span aria-hidden="true" />
                 </div>
@@ -986,7 +983,7 @@ export function ModelSettingsDialog({
                           </div>
                         </div>
                         <span className="configured-compression-value">
-                          {contextCompressionValue(profileDraft.contextWindow)}
+                          {calculateAutoCompactThreshold(profileDraft.contextWindow)}
                         </span>
                         <input
                           className="configured-token-input"

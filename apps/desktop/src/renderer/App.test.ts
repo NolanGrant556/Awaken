@@ -491,6 +491,13 @@ describe("App workbench presentation", () => {
         fallbackInset: 162,
       }),
     ).toBe(162);
+    expect(
+      composerContentBottomInset({
+        dockBottom: 720,
+        contentTop: 760,
+        fallbackInset: 162,
+      }),
+    ).toBe(0);
   });
 
   it("keeps the latest turn tall enough for sticky prompt reading", () => {

@@ -459,29 +459,35 @@ export function useRunStageScrollController({
     }
     const measuredDockElement: HTMLDivElement = dockElement;
 
-    function syncComposerBottomInset(): void {
-      const dockRect = measuredDockElement.getBoundingClientRect();
+    function currentDockContentElement(): HTMLElement | undefined {
       const contentElement =
         measuredDockElement.querySelector<HTMLElement>(".composer-dock-stack") ??
         measuredDockElement.firstElementChild;
-      const contentTop =
-        contentElement instanceof HTMLElement
-          ? contentElement.getBoundingClientRect().top
-          : undefined;
-      setComposerContentBottomInsetPx(
-        Math.ceil(
-          composerContentBottomInset({
-            dockBottom: dockRect.bottom,
-            contentTop,
-            fallbackInset: dockRect.height,
-          }),
-        ),
+      return contentElement instanceof HTMLElement ? contentElement : undefined;
+    }
+
+    function syncComposerBottomInset(): void {
+      const dockRect = measuredDockElement.getBoundingClientRect();
+      const contentTop = currentDockContentElement()?.getBoundingClientRect().top;
+      const nextInset = Math.ceil(
+        composerContentBottomInset({
+          dockBottom: dockRect.bottom,
+          contentTop,
+          fallbackInset: dockRect.height,
+        }),
+      );
+      setComposerContentBottomInsetPx((current) =>
+        current === nextInset ? current : nextInset,
       );
     }
 
     syncComposerBottomInset();
     const resizeObserver = new ResizeObserver(syncComposerBottomInset);
     resizeObserver.observe(measuredDockElement);
+    const contentElement = currentDockContentElement();
+    if (contentElement && contentElement !== measuredDockElement) {
+      resizeObserver.observe(contentElement);
+    }
 
     return () => {
       resizeObserver.disconnect();

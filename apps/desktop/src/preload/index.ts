@@ -3,14 +3,22 @@ import type { AguiEvent } from "../shared/agui.js";
 import {
   type ApprovalDecision,
   type AwakenBridge,
+  type ConfigureMcpServersRequest,
+  type ConfigureMcpServersResponse,
   type DesktopPlatform,
+  type InstallSkillRequest,
+  type InstallSkillResponse,
   type ModelProfileSaveRequest,
   type ModelProfileTestResult,
   type ModelProvider,
+  type RuntimeConnector,
+  type RuntimeConnectorActionResponse,
   type RunStreamHandlers,
   type RuntimeInfo,
+  type RuntimeMcpServer,
   type RuntimeModelProfileSummary,
   type RuntimeRun,
+  type RuntimeSkill,
   type RuntimeThreadTranscript,
   type RuntimeThread,
   type StartRunRequest,
@@ -99,6 +107,20 @@ const bridge: AwakenBridge = {
   },
   getRuntimeInfo: () =>
     ipcRenderer.invoke("awaken:get-runtime-info") as Promise<RuntimeInfo>,
+  listConnectors: () =>
+    ipcRenderer.invoke("awaken:list-connectors") as Promise<RuntimeConnector[]>,
+  connectConnector: (connectorId: string) =>
+    ipcRenderer.invoke("awaken:connect-connector", connectorId) as Promise<RuntimeConnectorActionResponse>,
+  disconnectConnector: (connectorId: string) =>
+    ipcRenderer.invoke("awaken:disconnect-connector", connectorId) as Promise<RuntimeConnectorActionResponse>,
+  listMcpServers: () =>
+    ipcRenderer.invoke("awaken:list-mcp-servers") as Promise<RuntimeMcpServer[]>,
+  configureMcpServers: (request: ConfigureMcpServersRequest) =>
+    ipcRenderer.invoke("awaken:configure-mcp-servers", request) as Promise<ConfigureMcpServersResponse>,
+  listSkills: () =>
+    ipcRenderer.invoke("awaken:list-skills") as Promise<RuntimeSkill[]>,
+  installSkill: (request: InstallSkillRequest) =>
+    ipcRenderer.invoke("awaken:install-skill", request) as Promise<InstallSkillResponse>,
   listModelProviders: () =>
     ipcRenderer.invoke("awaken:list-model-providers") as Promise<ModelProvider[]>,
   listModelProfiles: () =>

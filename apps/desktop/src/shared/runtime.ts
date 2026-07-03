@@ -102,6 +102,86 @@ export type RuntimeInfo = {
   modelProfile?: RuntimeModelProfileSummary;
 };
 
+export type RuntimeConnectorState =
+  | "disconnected"
+  | "pending"
+  | "connected"
+  | "needs-auth"
+  | "failed";
+
+export type RuntimeConnector = {
+  id: string;
+  displayName: string;
+  category: string;
+  provider?: string;
+  state: RuntimeConnectorState;
+  sourceOrigin: string;
+  authType: string;
+  lastError?: string;
+  serverNames?: string[];
+  shadowedBy?: string;
+};
+
+export type RuntimeConnectorActionResponse = {
+  connectorId: string;
+  connectorState: RuntimeConnectorState | string;
+  message?: string;
+};
+
+export type RuntimeMcpServerState =
+  | "pending"
+  | "connected"
+  | "failed"
+  | "needs-auth"
+  | "disabled";
+
+export type RuntimeMcpServer = {
+  name: string;
+  state: RuntimeMcpServerState;
+  transport: string;
+  scope: string;
+  errorReason?: string;
+  lastConnectedAt?: number;
+  sourceConnectorId?: string;
+  shadowedBy?: string;
+};
+
+export type ConfigureMcpServersRequest = {
+  configText: string;
+};
+
+export type ConfigureMcpServersResponse = {
+  serverNames: string[];
+  configPath?: string;
+  message: string;
+};
+
+export type RuntimeSkill = {
+  id: string;
+  name: string;
+  displayName?: string;
+  description: string;
+  whenToUse?: string;
+  state: "available" | "unavailable" | "shadowed" | string;
+  unavailableReason?: string;
+  sourceOrigin: string;
+  context: "inline" | "fork" | string;
+  shadowedBy?: string;
+  requiredMcpServers?: string[];
+};
+
+export type InstallSkillRequest = {
+  fileName: string;
+  content?: string;
+  contentBase64?: string;
+};
+
+export type InstallSkillResponse = {
+  skill: RuntimeSkill;
+  path: string;
+  message: string;
+};
+
 export type ModelProviderWire = {
   id: string;
   display_name: string;
@@ -352,6 +432,13 @@ export type AwakenBridge = {
   ) => Promise<string>;
   unsubscribeRun: (subscriptionId: string) => void;
   getRuntimeInfo: () => Promise<RuntimeInfo>;
+  listConnectors: () => Promise<RuntimeConnector[]>;
+  connectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
+  disconnectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
+  listMcpServers: () => Promise<RuntimeMcpServer[]>;
+  configureMcpServers: (request: ConfigureMcpServersRequest) => Promise<ConfigureMcpServersResponse>;
+  listSkills: () => Promise<RuntimeSkill[]>;
+  installSkill: (request: InstallSkillRequest) => Promise<InstallSkillResponse>;
   listModelProviders: () => Promise<ModelProvider[]>;
   listModelProfiles: () => Promise<RuntimeModelProfileSummary[]>;
   saveModelProfile: (request: ModelProfileSaveRequest) => Promise<RuntimeModelProfileSummary>;

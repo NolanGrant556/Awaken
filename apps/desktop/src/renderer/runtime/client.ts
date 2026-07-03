@@ -2,13 +2,21 @@ import type { AguiEvent } from "./agui";
 import {
   type ApprovalDecision,
   type AwakenBridge,
+  type ConfigureMcpServersRequest,
+  type ConfigureMcpServersResponse,
   type DesktopPlatform,
+  type InstallSkillRequest,
+  type InstallSkillResponse,
   type ModelProfileSaveRequest,
   type ModelProfileTestResult,
   type ModelProvider,
+  type RuntimeConnector,
+  type RuntimeConnectorActionResponse,
   type RuntimeInfo,
+  type RuntimeMcpServer,
   type RuntimeModelProfileSummary,
   type RuntimeRun,
+  type RuntimeSkill,
   type RuntimeThreadTranscript,
   type RuntimeThread,
   type StartRunRequest,
@@ -28,6 +36,13 @@ export type RuntimeClient = {
   source: "electron";
   platform: DesktopPlatform;
   getRuntimeInfo: () => Promise<RuntimeInfo>;
+  listConnectors: () => Promise<RuntimeConnector[]>;
+  connectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
+  disconnectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
+  listMcpServers: () => Promise<RuntimeMcpServer[]>;
+  configureMcpServers: (request: ConfigureMcpServersRequest) => Promise<ConfigureMcpServersResponse>;
+  listSkills: () => Promise<RuntimeSkill[]>;
+  installSkill: (request: InstallSkillRequest) => Promise<InstallSkillResponse>;
   listModelProviders: () => Promise<ModelProvider[]>;
   listModelProfiles: () => Promise<RuntimeModelProfileSummary[]>;
   saveModelProfile: (request: ModelProfileSaveRequest) => Promise<RuntimeModelProfileSummary>;
@@ -73,6 +88,13 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     source: "electron",
     platform: bridge.platform,
     getRuntimeInfo: () => bridge.getRuntimeInfo(),
+    listConnectors: () => bridge.listConnectors(),
+    connectConnector: (connectorId) => bridge.connectConnector(connectorId),
+    disconnectConnector: (connectorId) => bridge.disconnectConnector(connectorId),
+    listMcpServers: () => bridge.listMcpServers(),
+    configureMcpServers: (request) => bridge.configureMcpServers(request),
+    listSkills: () => bridge.listSkills(),
+    installSkill: (request) => bridge.installSkill(request),
     listModelProviders: () => bridge.listModelProviders(),
     listModelProfiles: () => bridge.listModelProfiles(),
     saveModelProfile: (request) => bridge.saveModelProfile(request),

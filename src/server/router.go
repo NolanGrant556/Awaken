@@ -13,7 +13,7 @@ import (
 )
 
 func NewRouter(runService *awruntime.RunService, infoProvider RuntimeInfoProvider) http.Handler {
-	return NewRouterWithMCP(runService, infoProvider, nil)
+	return newRouterInternal(routerConfig{runService: runService, infoProvider: infoProvider})
 }
 
 // NewRouterWithMCP builds a router that also exposes the /v1/mcp/* surface
@@ -21,7 +21,7 @@ func NewRouter(runService *awruntime.RunService, infoProvider RuntimeInfoProvide
 // NewRouter; the MCP-aware variant is consumed by cmd/awaken-core once it
 // constructs the manager.
 func NewRouterWithMCP(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager) http.Handler {
-	return newRouterInternal(runService, infoProvider, manager, nil, nil)
+	return newRouterInternal(routerConfig{runService: runService, infoProvider: infoProvider, manager: manager})
 }
 
 // NewRouterWithMCPAndConnectors builds a router that also exposes the
@@ -29,25 +29,47 @@ func NewRouterWithMCP(runService *awruntime.RunService, infoProvider RuntimeInfo
 // /v1/skills/* routes are always registered (returning 503 when no skill
 // registry is configured).
 func NewRouterWithMCPAndConnectors(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry) http.Handler {
-	return newRouterInternal(runService, infoProvider, manager, connectorRegistry, nil)
+	return newRouterInternal(routerConfig{runService: runService, infoProvider: infoProvider, manager: manager, connectorRegistry: connectorRegistry})
 }
 
 // NewRouterWithMCPConnectorsAndSkills builds a fully-wired router with MCP,
 // connector, and skill surfaces. Nil registries gracefully degrade to 503.
 func NewRouterWithMCPConnectorsAndSkills(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry, skillRegistry *skills.SkillRegistry) http.Handler {
-	return newRouterInternal(runService, infoProvider, manager, connectorRegistry, skillRegistry)
+	return newRouterInternal(routerConfig{runService: runService, infoProvider: infoProvider, manager: manager, connectorRegistry: connectorRegistry, skillRegistry: skillRegistry})
 }
 
-func newRouterInternal(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry, skillRegistry *skills.SkillRegistry) http.Handler {
+// NewRouterWithWorkspace builds a fully-wired router and enables project-scoped
+// extension writes such as MCP config and skill installation.
+func NewRouterWithWorkspace(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry, skillRegistry *skills.SkillRegistry, workspaceRoot string) http.Handler {
+	return newRouterInternal(routerConfig{
+		runService:        runService,
+		infoProvider:      infoProvider,
+		manager:           manager,
+		connectorRegistry: connectorRegistry,
+		skillRegistry:     skillRegistry,
+		workspaceRoot:     workspaceRoot,
+	})
+}
+
+type routerConfig struct {
+	runService        *awruntime.RunService
+	infoProvider      RuntimeInfoProvider
+	manager           *mcpclient.Manager
+	connectorRegistry *connectors.Registry
+	skillRegistry     *skills.SkillRegistry
+	workspaceRoot     string
+}
+
+func newRouterInternal(cfg routerConfig) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handleHealth)
 	mux.HandleFunc("GET /v1/agui/demo", handleAGUIDemo)
 	mux.HandleFunc("GET /v1/runtime/info", func(w http.ResponseWriter, r *http.Request) {
-		handleRuntimeInfo(w, r, infoProvider)
+		handleRuntimeInfo(w, r, cfg.infoProvider)
 	})
 	mux.HandleFunc("GET /v1/model-providers", handleModelProviders)
-	if runService != nil {
-		handlers := runHandlers{runService: runService}
+	if cfg.runService != nil {
+		handlers := runHandlers{runService: cfg.runService}
 		mux.HandleFunc("GET /v1/threads", handlers.handleListThreads)
 		mux.HandleFunc("PATCH /v1/threads/{thread_id}", handlers.handleRenameThread)
 		mux.HandleFunc("DELETE /v1/threads/{thread_id}", handlers.handleDeleteThread)
@@ -59,23 +81,25 @@ func newRouterInternal(runService *awruntime.RunService, infoProvider RuntimeInf
 		mux.HandleFunc("POST /v1/runs/{run_id}/approvals/{approval_id}/resolve", handlers.handleResolveApproval)
 		mux.HandleFunc("GET /v1/runs/{run_id}/audit", handlers.handleGetRunAudit)
 	}
-	mcpH := mcpHandlers{manager: manager}
+	mcpH := mcpHandlers{manager: cfg.manager, workspaceRoot: cfg.workspaceRoot}
 	mux.HandleFunc("GET /v1/mcp/tools", mcpH.handleListTools)
 	mux.HandleFunc("GET /v1/tools", handleListTools)
-	if manager != nil {
+	if cfg.manager != nil {
 		mux.HandleFunc("GET /v1/mcp/servers", mcpH.handleListServers)
+		mux.HandleFunc("POST /v1/mcp/servers", mcpH.handleConfigureServers)
 		mux.HandleFunc("POST /v1/mcp/servers/{name}/auth", mcpH.handleServerAuth)
 		mux.HandleFunc("POST /v1/mcp/servers/{name}/disable", mcpH.handleServerDisable)
 		mux.HandleFunc("POST /v1/mcp/servers/{name}/enable", mcpH.handleServerEnable)
 	}
-	connH := connectorHandlers{registry: connectorRegistry}
-	if connectorRegistry != nil {
+	connH := connectorHandlers{registry: cfg.connectorRegistry}
+	if cfg.connectorRegistry != nil {
 		mux.HandleFunc("GET /v1/connectors", connH.handleListConnectors)
 		mux.HandleFunc("POST /v1/connectors/{id}/connect", connH.handleConnect)
 		mux.HandleFunc("POST /v1/connectors/{id}/disconnect", connH.handleDisconnect)
 	}
-	skillH := skillHandlers{registry: skillRegistry}
+	skillH := skillHandlers{registry: cfg.skillRegistry, workspaceRoot: cfg.workspaceRoot}
 	mux.HandleFunc("GET /v1/skills", skillH.handleListSkills)
+	mux.HandleFunc("POST /v1/skills/install", skillH.handleInstallSkill)
 	// POST /v1/skills/{id}/execute reserved for follow-up
 	return mux
 }

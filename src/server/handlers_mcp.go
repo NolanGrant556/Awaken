@@ -3,7 +3,10 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"path/filepath"
+	"strings"
 
 	"awaken/src/mcpclient"
 	"awaken/src/tool"
@@ -11,7 +14,8 @@ import (
 
 // mcpHandlers wires the /v1/mcp/* HTTP surface to an mcpclient.Manager.
 type mcpHandlers struct {
-	manager *mcpclient.Manager
+	manager       *mcpclient.Manager
+	workspaceRoot string
 }
 
 // mcpServerInfo is the wire shape for entries returned by GET /v1/mcp/servers.
@@ -41,6 +45,36 @@ type mcpToolInfo struct {
 	Annotations *mcpclient.MCPToolAnnotations `json:"annotations,omitempty"`
 }
 
+type configureMCPServersRequest struct {
+	ConfigText string `json:"configText"`
+}
+
+type configureMCPServersResponse struct {
+	ServerNames []string `json:"serverNames"`
+	ConfigPath  string   `json:"configPath,omitempty"`
+	Message     string   `json:"message"`
+}
+
+type mcpConfigPayload struct {
+	Servers    map[string]json.RawMessage `json:"servers"`
+	McpServers map[string]json.RawMessage `json:"mcpServers"`
+}
+
+type mcpServerShorthand struct {
+	Command            string            `json:"command,omitempty"`
+	Args               []string          `json:"args,omitempty"`
+	Env                map[string]string `json:"env,omitempty"`
+	Cwd                string            `json:"cwd,omitempty"`
+	URL                string            `json:"url,omitempty"`
+	Type               string            `json:"type,omitempty"`
+	Transport          string            `json:"transport,omitempty"`
+	Headers            map[string]string `json:"headers,omitempty"`
+	Enabled            *bool             `json:"enabled,omitempty"`
+	DisplayName        string            `json:"displayName,omitempty"`
+	HeadersHelper      string            `json:"headersHelper,omitempty"`
+	InsecureSkipVerify bool              `json:"insecureSkipVerify,omitempty"`
+}
+
 func (h mcpHandlers) handleListServers(w http.ResponseWriter, r *http.Request) {
 	if h.manager == nil {
 		writeErrorJSON(w, http.StatusServiceUnavailable, "MCP_UNAVAILABLE", "mcp manager not configured")
@@ -68,6 +102,59 @@ func (h mcpHandlers) handleListServers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+func (h mcpHandlers) handleConfigureServers(w http.ResponseWriter, r *http.Request) {
+	if h.manager == nil {
+		writeErrorJSON(w, http.StatusServiceUnavailable, "MCP_UNAVAILABLE", "mcp manager not configured")
+		return
+	}
+	if strings.TrimSpace(h.workspaceRoot) == "" {
+		writeErrorJSON(w, http.StatusServiceUnavailable, "WORKSPACE_UNAVAILABLE", "workspace root not configured")
+		return
+	}
+
+	var req configureMCPServersRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+	servers, err := parseMCPServersConfig(req.ConfigText)
+	if err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_MCP_CONFIG", err.Error())
+		return
+	}
+
+	projectCfg, err := mcpclient.LoadProjectConfig(h.workspaceRoot)
+	if err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "PROJECT_CONFIG_INVALID", err.Error())
+		return
+	}
+	if projectCfg.Servers == nil {
+		projectCfg.Servers = map[string]mcpclient.McpServerConfig{}
+	}
+	for name, cfg := range servers {
+		projectCfg.Servers[name] = cfg
+	}
+	if err := mcpclient.SaveProjectConfig(h.workspaceRoot, projectCfg); err != nil {
+		writeErrorJSON(w, http.StatusInternalServerError, "PROJECT_CONFIG_WRITE_FAILED", err.Error())
+		return
+	}
+
+	serverNames := make([]string, 0, len(servers))
+	for name, cfg := range servers {
+		serverNames = append(serverNames, name)
+		h.manager.Start(r.Context(), []mcpclient.ScopedMcpServerConfig{{
+			Name:   name,
+			Scope:  mcpclient.ScopeProject,
+			Config: cfg,
+		}})
+	}
+	writeJSON(w, http.StatusOK, configureMCPServersResponse{
+		ServerNames: serverNames,
+		ConfigPath:  filepath.Join(h.workspaceRoot, "awaken.mcp.json"),
+		Message:     fmt.Sprintf("configured %d MCP server(s)", len(serverNames)),
+	})
+}
+
 func (h mcpHandlers) handleServerAuth(w http.ResponseWriter, r *http.Request) {
 	if h.manager == nil {
 		writeErrorJSON(w, http.StatusServiceUnavailable, "MCP_UNAVAILABLE", "mcp manager not configured")
@@ -93,6 +180,124 @@ func (h mcpHandlers) handleServerAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func parseMCPServersConfig(configText string) (map[string]mcpclient.McpServerConfig, error) {
+	trimmed := strings.TrimSpace(configText)
+	if trimmed == "" {
+		return nil, fmt.Errorf("config JSON is required")
+	}
+	var payload mcpConfigPayload
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+		return nil, fmt.Errorf("parse JSON: %w", err)
+	}
+
+	servers := make(map[string]mcpclient.McpServerConfig)
+	addEntries := func(entries map[string]json.RawMessage) error {
+		for rawName, raw := range entries {
+			name := safeMCPServerName(rawName)
+			if name == "" {
+				return fmt.Errorf("server name %q is invalid", rawName)
+			}
+			if _, exists := servers[name]; exists {
+				return fmt.Errorf("server name %q collides after normalization", rawName)
+			}
+			cfg, err := parseMCPServerEntry(raw)
+			if err != nil {
+				return fmt.Errorf("server %q: %w", rawName, err)
+			}
+			if name != rawName && cfg.DisplayName == "" {
+				cfg.DisplayName = rawName
+			}
+			servers[name] = cfg
+		}
+		return nil
+	}
+	if err := addEntries(payload.Servers); err != nil {
+		return nil, err
+	}
+	if err := addEntries(payload.McpServers); err != nil {
+		return nil, err
+	}
+	if len(servers) == 0 {
+		return nil, fmt.Errorf("expected top-level servers or mcpServers")
+	}
+	return servers, nil
+}
+
+func parseMCPServerEntry(raw json.RawMessage) (mcpclient.McpServerConfig, error) {
+	var native mcpclient.McpServerConfig
+	if err := json.Unmarshal(raw, &native); err == nil && native.Valid() {
+		return native, nil
+	}
+
+	var shorthand mcpServerShorthand
+	if err := json.Unmarshal(raw, &shorthand); err != nil {
+		return mcpclient.McpServerConfig{}, err
+	}
+	cfg := mcpclient.McpServerConfig{
+		Enabled:            shorthand.Enabled,
+		DisplayName:        shorthand.DisplayName,
+		HeadersHelper:      shorthand.HeadersHelper,
+		InsecureSkipVerify: shorthand.InsecureSkipVerify,
+	}
+	if strings.TrimSpace(shorthand.Command) != "" {
+		cfg.Stdio = &mcpclient.StdioTransportConfig{
+			Command: strings.TrimSpace(shorthand.Command),
+			Args:    shorthand.Args,
+			Env:     shorthand.Env,
+			Cwd:     shorthand.Cwd,
+		}
+	} else if strings.TrimSpace(shorthand.URL) != "" {
+		transport := strings.ToLower(strings.TrimSpace(shorthand.Transport))
+		if transport == "" {
+			transport = strings.ToLower(strings.TrimSpace(shorthand.Type))
+		}
+		if transport == "" {
+			transport = string(mcpclient.TransportHTTP)
+		}
+		httpCfg := &mcpclient.HTTPTransportConfig{
+			URL:     strings.TrimSpace(shorthand.URL),
+			Headers: shorthand.Headers,
+		}
+		switch mcpclient.TransportKind(transport) {
+		case mcpclient.TransportHTTP:
+			cfg.HTTP = httpCfg
+		case mcpclient.TransportSSE:
+			cfg.SSE = httpCfg
+		case mcpclient.TransportWS:
+			cfg.WS = httpCfg
+		default:
+			return mcpclient.McpServerConfig{}, fmt.Errorf("unsupported transport %q", transport)
+		}
+	}
+	if !cfg.Valid() {
+		return mcpclient.McpServerConfig{}, fmt.Errorf("invalid config; use native servers.* transport blocks or mcpServers.* command/url shorthand")
+	}
+	return cfg, nil
+}
+
+func safeMCPServerName(name string) string {
+	var b strings.Builder
+	for _, r := range strings.TrimSpace(name) {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r + ('a' - 'A'))
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '_' || r == '-':
+			if b.Len() > 0 {
+				b.WriteByte('_')
+			}
+		default:
+			if b.Len() > 0 {
+				b.WriteByte('_')
+			}
+		}
+	}
+	return strings.Trim(b.String(), "_")
 }
 
 func (h mcpHandlers) handleServerDisable(w http.ResponseWriter, r *http.Request) {

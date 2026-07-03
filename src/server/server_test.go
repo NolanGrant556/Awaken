@@ -23,6 +23,7 @@ import (
 	"awaken/src/mcpclient"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
+	"awaken/src/skills"
 	_ "awaken/src/tools"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -4008,6 +4009,97 @@ func TestMCPListToolsWithoutManager(t *testing.T) {
 		if tool.Source != "builtin" {
 			t.Errorf("expected builtin source for tool %q, got %s", tool.Name, tool.Source)
 		}
+	}
+}
+
+func TestMCPConfigureServersAcceptsShorthandAndPersists(t *testing.T) {
+	workspace := t.TempDir()
+	mgr := mcpclient.NewManager(mcpclient.WithLogger(testLogger{}))
+	router := NewRouterWithWorkspace(nil, nil, mgr, nil, nil, workspace)
+
+	configText := `{"mcpServers":{"example-server":{"command":"awaken-missing-mcp-test-command","args":["--version"]}}}`
+	body, err := json.Marshal(configureMCPServersRequest{ConfigText: configText})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/mcp/servers", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp configureMCPServersResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.ServerNames) != 1 || resp.ServerNames[0] != "example_server" {
+		t.Fatalf("expected normalized example_server, got %#v", resp.ServerNames)
+	}
+	projectCfg, err := mcpclient.LoadProjectConfig(workspace)
+	if err != nil {
+		t.Fatalf("load project config: %v", err)
+	}
+	stored := projectCfg.Servers["example_server"]
+	if stored.Stdio == nil || stored.Stdio.Command != "awaken-missing-mcp-test-command" {
+		t.Fatalf("expected persisted stdio config, got %+v", stored)
+	}
+	if _, err := mgr.SnapshotServer("example_server"); err != nil {
+		t.Fatalf("expected manager snapshot for configured server: %v", err)
+	}
+}
+
+func TestInstallSkillWritesProjectSkillAndRegisters(t *testing.T) {
+	workspace := t.TempDir()
+	registry := skills.NewSkillRegistry(testLogger{})
+	router := NewRouterWithWorkspace(nil, nil, nil, nil, registry, workspace)
+
+	rawSkill := `---
+name: daily-followup
+description: Generate a daily follow-up plan.
+whenToUse: Use when a user asks for daily customer follow-up.
+context: inline
+---
+
+Create a short follow-up checklist.`
+	body, err := json.Marshal(installSkillRequest{
+		FileName: "SKILL.md",
+		Content:  rawSkill,
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/skills/install", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp installSkillResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Skill.ID != "daily-followup" || resp.Skill.SourceOrigin != "project" {
+		t.Fatalf("unexpected installed skill response: %+v", resp.Skill)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, ".awaken", "skills", "daily-followup.md")); err != nil {
+		t.Fatalf("expected installed skill file: %v", err)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/v1/skills", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected list 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var listed []skillInfo
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != "daily-followup" {
+		t.Fatalf("expected installed skill in list, got %+v", listed)
 	}
 }
 

@@ -68,6 +68,7 @@ import {
   turnMarkerRailDisplay,
   type ResolvedApprovalState,
 } from "./workbenchPresentation";
+import { useComposerLifecycle } from "./useComposerLifecycle";
 import { useRunStageScrollController } from "./useRunStageScrollController";
 import {
   actionsForThreadTranscript,
@@ -310,8 +311,6 @@ export function App() {
     undefined,
     createInitialRuntimeState,
   );
-  const [composerValue, setComposerValue] = useState("");
-  const [composerFocusRequest, setComposerFocusRequest] = useState(0);
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
   const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
@@ -653,6 +652,24 @@ export function App() {
 
   const isWorkspaceValid =
     workspacePath.trim() !== "" && /^([A-Za-z]:[\\/]|\/)/.test(workspacePath.trim());
+  const {
+    composerValue,
+    setComposerValue,
+    clearComposerValue,
+    restoreComposerValue,
+    trimmedComposerValue,
+    composerFocusRequest,
+    requestComposerFocus,
+    composerBarState,
+    composerRuntimePanels,
+  } = useComposerLifecycle({
+    desktopReady,
+    desktopStarting,
+    desktopNeedsRestart,
+    isBusy,
+    isWorkspaceValid,
+    runtimeErrorMessage: runtimeState.errorMessage,
+  });
 
   const activeApproval = runtimeState.approvals[0];
   const navItems: NavItem[] = [
@@ -971,7 +988,7 @@ export function App() {
       setNotice(desktopNeedsRestart ? "Awaken needs restart" : "Awaken is starting");
       return;
     }
-    const prompt = composerValue.trim();
+    const prompt = trimmedComposerValue;
     if (!prompt) {
       setNotice("Input is required");
       return;
@@ -1001,7 +1018,7 @@ export function App() {
     resolvingApprovalIdRef.current = null;
     prepareForRunStart();
     dispatch({ type: "run/requested", prompt, startedAtMs: Date.now() });
-    setComposerValue("");
+    clearComposerValue();
 
     try {
       const runProjectId = selectedProjectId;
@@ -1041,7 +1058,7 @@ export function App() {
       unsubscribeRef.current = unsubscribe;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to create run";
-      setComposerValue(prompt);
+      restoreComposerValue(prompt);
       dispatch({ type: "run/createFailed", message });
     }
   }
@@ -1049,11 +1066,11 @@ export function App() {
   async function handleComposerSubmit(): Promise<void> {
     if (isBusy) {
       await handleCancel();
-      setComposerFocusRequest((request) => request + 1);
+      requestComposerFocus();
       return;
     }
     await handleSubmit();
-    setComposerFocusRequest((request) => request + 1);
+    requestComposerFocus();
   }
 
   async function handleSelectConversation(threadId: string): Promise<void> {
@@ -1311,7 +1328,7 @@ export function App() {
       current.includes(projectId) ? current : [...current, projectId]
     ));
     handleNewTask();
-    setComposerFocusRequest((request) => request + 1);
+    requestComposerFocus();
   }
 
   async function handleCancel(): Promise<void> {
@@ -1366,7 +1383,7 @@ export function App() {
     unsubscribeRef.current?.();
     unsubscribeRef.current = null;
     threadLoadSeqRef.current += 1;
-    setComposerValue("");
+    clearComposerValue();
     setNotice(null);
     setResolvingApprovalId(null);
     setResolvedApproval(null);
@@ -1689,44 +1706,13 @@ export function App() {
   }
 
   function renderComposerRuntimePanels() {
-    const panels: Array<{
-      id: string;
-      title: string;
-      message: string;
-      tone?: "error";
-    }> = [];
-
-    if (desktopNeedsRestart) {
-      panels.push({
-        id: "restart",
-        title: "Awaken needs restart",
-        message: "Quit Awaken and open it again.",
-        tone: "error",
-      });
-    }
-    if (desktopStarting) {
-      panels.push({
-        id: "starting",
-        title: "Starting Awaken",
-        message: "Preparing the desktop app.",
-      });
-    }
-    if (runtimeState.errorMessage) {
-      panels.push({
-        id: "run-error",
-        title: "Run error",
-        message: runtimeState.errorMessage,
-        tone: "error",
-      });
-    }
-
-    if (panels.length === 0) {
+    if (composerRuntimePanels.length === 0) {
       return null;
     }
 
     return (
       <div className="composer-runtime-panels">
-        {panels.map((panel) => (
+        {composerRuntimePanels.map((panel) => (
           <div
             key={panel.id}
             className={`runtime-panel composer-runtime-panel${
@@ -1910,12 +1896,9 @@ export function App() {
                               }}
                               onAddContext={handleAddContext}
                               placeholder=""
-                              disabled={!desktopReady || isBusy || !isWorkspaceValid}
-                              isReady={
-                                isBusy ||
-                                (desktopReady && composerValue.trim().length > 0 && isWorkspaceValid)
-                              }
-                              submitMode={isBusy ? "stop" : "send"}
+                              disabled={composerBarState.disabled}
+                              isReady={composerBarState.isReady}
+                              submitMode={composerBarState.submitMode}
                               variant="dock"
                               metaItems={composerMetaItems}
                               focusRequest={composerFocusRequest}
@@ -1938,12 +1921,9 @@ export function App() {
                           }}
                           onAddContext={handleAddContext}
                           placeholder=""
-                          disabled={!desktopReady || isBusy || !isWorkspaceValid}
-                          isReady={
-                            isBusy ||
-                            (desktopReady && composerValue.trim().length > 0 && isWorkspaceValid)
-                          }
-                          submitMode={isBusy ? "stop" : "send"}
+                          disabled={composerBarState.disabled}
+                          isReady={composerBarState.isReady}
+                          submitMode={composerBarState.submitMode}
                           variant="center"
                           metaItems={composerMetaItems}
                           focusRequest={composerFocusRequest}

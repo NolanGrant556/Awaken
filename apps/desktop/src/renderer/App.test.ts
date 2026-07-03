@@ -7,6 +7,7 @@ import {
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import { composerRuntimePanelsForStatus } from "./useComposerLifecycle";
 import {
   DEFAULT_WORKSPACE_PROJECT_ID,
   assignThreadToProject,
@@ -106,6 +107,36 @@ describe("AwakenComposerInput keyboard behavior", () => {
     expect(shouldSubmitComposerInputKey({ key: "Enter", shiftKey: true })).toBe(false);
     expect(shouldSubmitComposerInputKey({ key: "Enter", isComposing: true })).toBe(false);
     expect(shouldSubmitComposerInputKey({ key: "a" })).toBe(false);
+  });
+});
+
+describe("composer lifecycle presentation", () => {
+  it("builds runtime panels without changing their placement order", () => {
+    expect(
+      composerRuntimePanelsForStatus({
+        desktopNeedsRestart: true,
+        desktopStarting: true,
+        runtimeErrorMessage: "boom",
+      }),
+    ).toEqual([
+      {
+        id: "restart",
+        title: "Awaken needs restart",
+        message: "Quit Awaken and open it again.",
+        tone: "error",
+      },
+      {
+        id: "starting",
+        title: "Starting Awaken",
+        message: "Preparing the desktop app.",
+      },
+      {
+        id: "run-error",
+        title: "Run error",
+        message: "boom",
+        tone: "error",
+      },
+    ]);
   });
 });
 

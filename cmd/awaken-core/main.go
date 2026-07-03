@@ -81,7 +81,8 @@ func modelConfigFromProfile(profile *runtime.ModelProfileConfig) agentcore.Model
 
 // buildMCPManager loads project and user MCP configs, merges them, and
 // starts the manager. Failures are logged but never fatal: the runtime
-// stays up even if no MCP server is configured.
+// stays up even if no MCP server is configured. The manager is still returned
+// with an empty server set so connectors can inject MCP configs dynamically.
 func buildMCPManager(workspace string) *mcpclient.Manager {
 	userCfg, err := mcpclient.LoadUserConfig()
 	if err != nil {
@@ -97,11 +98,10 @@ func buildMCPManager(workspace string) *mcpclient.Manager {
 		nil,
 		mcpclient.StdLogger{},
 	)
-	if len(merged) == 0 {
-		return nil
-	}
 	manager := mcpclient.NewManager(mcpclient.WithLogger(mcpclient.StdLogger{}))
-	go manager.Start(context.Background(), merged)
+	if len(merged) > 0 {
+		go manager.Start(context.Background(), merged)
+	}
 	return manager
 }
 

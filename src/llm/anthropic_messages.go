@@ -332,7 +332,7 @@ func convertContextMessageToAnthropic(msg context.Message) (anthropicMessage, er
 
 // --- 工具转换 ---
 
-func convertToolsToAnthropic(tools []tool.ToolDefinition) []anthropicTool {
+func convertToolsToAnthropic(tools []tool.ToolSchema) []anthropicTool {
 	if len(tools) == 0 {
 		return nil
 	}

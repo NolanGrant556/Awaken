@@ -83,6 +83,16 @@ func (t *GrepSearchTool) IsReadOnly() bool {
 	return true
 }
 
+func (t *GrepSearchTool) Definition() tool.ToolDefinition {
+	return tool.ToolDefinition{
+		Name:        "grep_search",
+		DisplayName: "Grep Search",
+		Source:      tool.SourceBuiltin,
+		Description: t.Description(),
+		Annotations: tool.ToolAnnotations{ReadOnly: true, Destructive: false, OpenWorld: false},
+	}
+}
+
 func (t *GrepSearchTool) Execute(ctx context.Context, input string) (string, error) {
 	params, err := parseParams(input)
 	if err != nil {

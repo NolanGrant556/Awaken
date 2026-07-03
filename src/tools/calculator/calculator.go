@@ -31,6 +31,16 @@ func (t *CalculatorTool) Parameters() []tool.ToolParameter {
 	}
 }
 
+func (t *CalculatorTool) Definition() tool.ToolDefinition {
+	return tool.ToolDefinition{
+		Name:        "calculator",
+		DisplayName: "Calculator",
+		Source:      tool.SourceBuiltin,
+		Description: "用于执行数学计算，支持加减乘除、幂运算、平方根等基本数学运算",
+		Annotations: tool.ToolAnnotations{ReadOnly: true, Destructive: false, OpenWorld: false},
+	}
+}
+
 func (t *CalculatorTool) IsReadOnly() bool {
 	return true
 }

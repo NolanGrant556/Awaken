@@ -48,6 +48,16 @@ func (t *ListFilesTool) IsReadOnly() bool {
 	return true
 }
 
+func (t *ListFilesTool) Definition() tool.ToolDefinition {
+	return tool.ToolDefinition{
+		Name:        "list_files",
+		DisplayName: "List Files",
+		Source:      tool.SourceBuiltin,
+		Description: t.Description(),
+		Annotations: tool.ToolAnnotations{ReadOnly: true, Destructive: false, OpenWorld: false},
+	}
+}
+
 func (t *ListFilesTool) Execute(ctx context.Context, input string) (string, error) {
 	params, err := parseParams(input)
 	if err != nil {

@@ -48,7 +48,7 @@ func TestEstimateContextEnvelopeTokensIncludesRequestParts(t *testing.T) {
 	}
 
 	withToolSchema := base
-	withToolSchema.ToolSchemas = []tool.ToolDefinition{{
+	withToolSchema.ToolSchemas = []tool.ToolSchema{{
 		Type: "function",
 		Function: tool.ToolFunctionSchema{
 			Name:        "test_tool",

@@ -13,7 +13,7 @@ func TestRequestBuilderBuildsCompleteRequest(t *testing.T) {
 	ctx := convcontext.New()
 	ctx.AddUserMessage("hello")
 
-	tools := []tool.ToolDefinition{
+	tools := []tool.ToolSchema{
 		{
 			Type: "function",
 			Function: tool.ToolFunctionSchema{
@@ -117,7 +117,7 @@ func TestRequestBuilderBuildsContextEnvelope(t *testing.T) {
 	ctx.AddUserMessage("hello")
 	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
 	writableRoot := filepath.Join(workspaceRoot, "safe")
-	tools := []tool.ToolDefinition{
+	tools := []tool.ToolSchema{
 		{
 			Type: "function",
 			Function: tool.ToolFunctionSchema{
@@ -181,7 +181,7 @@ func TestRequestBuilderBuildsContextEnvelope(t *testing.T) {
 func TestRequestBuilderBuildsLLMRequestFromEnvelope(t *testing.T) {
 	ctx := convcontext.New()
 	ctx.AddUserMessage("hello")
-	tools := []tool.ToolDefinition{
+	tools := []tool.ToolSchema{
 		{
 			Type: "function",
 			Function: tool.ToolFunctionSchema{

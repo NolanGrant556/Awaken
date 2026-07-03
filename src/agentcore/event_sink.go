@@ -1,6 +1,10 @@
 package agentcore
 
-import stdcontext "context"
+import (
+	stdcontext "context"
+
+	"awaken/src/tool"
+)
 
 type EventSink interface {
 	Emit(AwakenEvent)
@@ -34,6 +38,12 @@ type ApprovalRequest struct {
 	RiskTone      ApprovalRiskTone
 	AffectedPaths []string
 	PatchSummary  string
+	// ToolDefinition carries the full metadata of the tool being approved.
+	ToolDefinition tool.ToolDefinition
+	// RiskHints carries the risk profile for the approval UI.
+	RiskHints *tool.RiskHints
+	// AllowedActions are the actions the user can take on this approval.
+	AllowedActions []string
 }
 
 type ApprovalAwaiter interface {

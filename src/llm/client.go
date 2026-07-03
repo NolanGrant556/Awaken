@@ -50,6 +50,11 @@ var providerErrorSecretPatterns = []providerSecretPattern{
 	},
 }
 
+var providerRequiredTemperaturePatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)temperature.*only\s+([0-9]+(?:\.[0-9]+)?)\s+is\s+allowed`),
+	regexp.MustCompile(`(?i)temperature.*(?:must\s+be|should\s+be|fixed\s+(?:value\s+)?(?:to|is)|requires?)\s+([0-9]+(?:\.[0-9]+)?)`),
+}
+
 var (
 	httpClient = &http.Client{
 		Timeout:   defaultProviderRequestTimeout,
@@ -78,8 +83,7 @@ type streamIdleWatchdog struct {
 	timedOut atomic.Bool
 }
 
-func newStreamIdleWatchdog(cancel stdctx.CancelFunc) *streamIdleWatchdog {
-	timeout := streamIdleTimeout()
+func newStreamIdleWatchdog(cancel stdctx.CancelFunc, timeout time.Duration) *streamIdleWatchdog {
 	if timeout <= 0 {
 		return &streamIdleWatchdog{}
 	}
@@ -118,6 +122,13 @@ func (w *streamIdleWatchdog) Timeout() time.Duration {
 
 func streamIdleTimeout() time.Duration {
 	return durationFromEnvMS("AWAKEN_LLM_STREAM_IDLE_TIMEOUT_MS", defaultStreamIdleTimeout)
+}
+
+func streamIdleTimeoutForRequest(req Request) time.Duration {
+	if req.StreamIdleTimeout != 0 {
+		return req.StreamIdleTimeout
+	}
+	return streamIdleTimeout()
 }
 
 func durationFromEnvMS(name string, fallback time.Duration) time.Duration {
@@ -247,7 +258,13 @@ func resolveModel(cfg Config, req Request) string {
 	return model
 }
 
-func resolveTemperature(cfg Config, req Request) float64 {
+func resolveTemperature(cfg Config, req Request) *float64 {
+	if req.TemperatureOverride != nil {
+		return req.TemperatureOverride
+	}
+	if req.OmitTemperature {
+		return nil
+	}
 	temperature := req.Temperature
 	if temperature == 0 {
 		temperature = cfg.Temperature
@@ -255,7 +272,29 @@ func resolveTemperature(cfg Config, req Request) float64 {
 			temperature = 0.7
 		}
 	}
-	return temperature
+	return float64Pointer(temperature)
+}
+
+func float64Pointer(value float64) *float64 {
+	return &value
+}
+
+func RequiredTemperatureFromError(err error) (float64, bool) {
+	if err == nil {
+		return 0, false
+	}
+	text := err.Error()
+	for _, pattern := range providerRequiredTemperaturePatterns {
+		match := pattern.FindStringSubmatch(text)
+		if len(match) < 2 {
+			continue
+		}
+		value, parseErr := strconv.ParseFloat(match[1], 64)
+		if parseErr == nil {
+			return value, true
+		}
+	}
+	return 0, false
 }
 
 func resolveMaxTokens(cfg Config, req Request) int {

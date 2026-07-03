@@ -374,6 +374,13 @@ describe("App workbench presentation", () => {
       { kind: "thinking", id: "intro", text: "warmup", status: "done" },
       { kind: "prompt", id: "prompt:thread-1:1", text: "你好" },
       { kind: "thinking", id: "thinking:1", text: "first thought", status: "done" },
+      {
+        kind: "compactBoundary",
+        id: "compact:thread-1:compact_1",
+        status: "finished",
+        title: "已自动压缩上下文",
+        boundaryId: "compact_1",
+      },
       { kind: "answer", id: "answer:1", markdown: "first answer", status: "done" },
       { kind: "prompt", id: "prompt:thread-1:2", text: "再次告诉我" },
       { kind: "answer", id: "answer:2", markdown: "second answer", status: "active" },
@@ -384,7 +391,17 @@ describe("App workbench presentation", () => {
     ]);
     expect(grouped.turns).toHaveLength(2);
     expect(grouped.turns[0].prompt.text).toBe("你好");
-    expect(grouped.turns[0].items).toHaveLength(2);
+    expect(grouped.turns[0].items).toEqual([
+      { kind: "thinking", id: "thinking:1", text: "first thought", status: "done" },
+      {
+        kind: "compactBoundary",
+        id: "compact:thread-1:compact_1",
+        status: "finished",
+        title: "已自动压缩上下文",
+        boundaryId: "compact_1",
+      },
+      { kind: "answer", id: "answer:1", markdown: "first answer", status: "done" },
+    ]);
     expect(grouped.turns[1].prompt.text).toBe("再次告诉我");
     expect(grouped.turns[1].items).toEqual([
       { kind: "answer", id: "answer:2", markdown: "second answer", status: "active" },

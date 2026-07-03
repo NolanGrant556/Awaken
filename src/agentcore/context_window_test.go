@@ -176,9 +176,8 @@ func TestCompactConversationModelMessagesUseSummaryAndTail(t *testing.T) {
 	if len(modelMessages) != 2 {
 		t.Fatalf("expected model messages to contain summary plus tail, got %+v", modelMessages)
 	}
-	combined := modelMessages[0].Content + "\n" + modelMessages[1].Content
-	if strings.Contains(combined, "ancient context") || strings.Contains(combined, "old answer") {
-		t.Fatalf("expected compacted model messages to omit pre-boundary history, got %q", combined)
+	if modelMessages[0].CompactBoundaryID == "" || modelMessages[1].CompactBoundaryID != "" {
+		t.Fatalf("expected model messages to contain boundary summary followed by raw tail only, got %+v", modelMessages)
 	}
 }
 

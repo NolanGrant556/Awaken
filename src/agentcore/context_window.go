@@ -49,18 +49,29 @@ type ContextWindowState struct {
 }
 
 type CompactResult struct {
-	Mode                 CompactMode
-	BoundaryID           string
-	SummaryMessage       convcontext.Message
-	TailMessages         []convcontext.Message
-	Messages             []convcontext.Message
-	EstimatedTokens      int
-	PreEstimateTokens    int
-	PostEstimateTokens   int
-	ToolResultsPruned    int
-	PrunedMessageCount   int
-	PrunedSafeGroupCount int
-	Fallback             CompactFallback
+	Mode                      CompactMode
+	BoundaryID                string
+	SummaryMessage            convcontext.Message
+	TailMessages              []convcontext.Message
+	Messages                  []convcontext.Message
+	EstimatedTokens           int
+	PreEstimateTokens         int
+	PostEstimateTokens        int
+	ToolResultsPruned         int
+	ToolResultsPrunedCount    int
+	PrunedMessageCount        int
+	PrunedSafeGroupCount      int
+	PrunedDigestMessageCount  int
+	SummaryMaxTokens          int
+	SummaryRetryCount         int
+	SummaryRawChars           int
+	SummaryParsedSections     int
+	SummaryMeaningfulSections int
+	SummaryQualityIssue       string
+	SummarySourceHadUser      bool
+	SummaryLatestUserPinned   bool
+	FallbackMarker            string
+	Fallback                  CompactFallback
 }
 
 type CompactFallback struct {
@@ -70,10 +81,11 @@ type CompactFallback struct {
 }
 
 type CompactRequest struct {
-	Mode         CompactMode
-	Messages     []convcontext.Message
-	Envelope     ContextEnvelope
-	TargetTokens int
+	Mode             CompactMode
+	Messages         []convcontext.Message
+	Envelope         ContextEnvelope
+	TargetTokens     int
+	SummaryMaxTokens int
 
 	summaryInvoker compactSummaryInvoker
 }

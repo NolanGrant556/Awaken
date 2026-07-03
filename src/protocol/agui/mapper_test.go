@@ -320,20 +320,34 @@ func TestMapEventCompactMetadataOptionalFields(t *testing.T) {
 	postEstimate := 48
 	fallbackUsed := false
 	toolResultsPruned := true
+	sourceHadUser := true
+	latestUserPinned := true
 
 	events := MapEvent(agentcore.AwakenEvent{
-		Type:                     agentcore.CompactFailedEventType,
-		ThreadID:                 "thread-1",
-		RunID:                    "run-1",
-		Content:                  "compact failed",
-		CompactMode:              agentcore.CompactModeReactive,
-		CompactBoundaryID:        "compact_1",
-		CompactPreEstimate:       &preEstimate,
-		CompactPostEstimate:      &postEstimate,
-		CompactSummaryModel:      "gpt-5-mini",
-		CompactFallbackUsed:      &fallbackUsed,
-		CompactToolResultsPruned: &toolResultsPruned,
-		CompactFailureReason:     "provider_timeout",
+		Type:                             agentcore.CompactFailedEventType,
+		ThreadID:                         "thread-1",
+		RunID:                            "run-1",
+		Content:                          "compact failed",
+		CompactMode:                      agentcore.CompactModeReactive,
+		CompactBoundaryID:                "compact_1",
+		CompactPreEstimate:               &preEstimate,
+		CompactPostEstimate:              &postEstimate,
+		CompactSummaryModel:              "gpt-5-mini",
+		CompactFallbackUsed:              &fallbackUsed,
+		CompactToolResultsPruned:         &toolResultsPruned,
+		CompactToolResultsPrunedCount:    3,
+		CompactPrunedSafeGroupCount:      2,
+		CompactPrunedMessageCount:        7,
+		CompactSummaryMaxTokens:          8192,
+		CompactSummaryRetryCount:         1,
+		CompactSummaryRawChars:           321,
+		CompactSummaryParsedSections:     13,
+		CompactSummaryMeaningfulSections: 4,
+		CompactSummaryQualityIssue:       "semantic compact summary omitted compacted tool findings",
+		CompactSummarySourceHadUser:      &sourceHadUser,
+		CompactSummaryLatestUserPinned:   &latestUserPinned,
+		CompactFallbackMarker:            "[COMPACT_FALLBACK:llm_summary_failed]",
+		CompactFailureReason:             "provider_timeout",
 	})
 
 	if len(events) != 1 {
@@ -348,6 +362,20 @@ func TestMapEventCompactMetadataOptionalFields(t *testing.T) {
 		got.CompactBoundaryID != "compact_1" ||
 		got.ContextCompactBoundaryID != "compact_1" ||
 		got.CompactSummaryModel != "gpt-5-mini" ||
+		got.CompactToolResultsPrunedCount != 3 ||
+		got.CompactPrunedSafeGroupCount != 2 ||
+		got.CompactPrunedMessageCount != 7 ||
+		got.CompactSummaryMaxTokens != 8192 ||
+		got.CompactSummaryRetryCount != 1 ||
+		got.CompactSummaryRawChars != 321 ||
+		got.CompactSummaryParsedSections != 13 ||
+		got.CompactSummaryMeaningfulSections != 4 ||
+		got.CompactSummaryQualityIssue != "semantic compact summary omitted compacted tool findings" ||
+		got.CompactSummarySourceHadUser == nil ||
+		!*got.CompactSummarySourceHadUser ||
+		got.CompactSummaryLatestUserPinned == nil ||
+		!*got.CompactSummaryLatestUserPinned ||
+		got.CompactFallbackMarker != "[COMPACT_FALLBACK:llm_summary_failed]" ||
 		got.CompactFailureReason != "provider_timeout" {
 		t.Fatalf("unexpected compact string metadata: %+v", got)
 	}

@@ -798,6 +798,19 @@ describe("runtime reducer run narrative projection", () => {
         contextEffectiveWindow: 12000,
         contextEstimatedTokens: 4800,
         contextEstimatedDeltaTokens: -4800,
+        compactToolResultsPrunedCount: 2,
+        compactPrunedSafeGroupCount: 1,
+        compactPrunedMessageCount: 3,
+        compactSummaryMaxTokens: 8192,
+        compactSummaryRetryCount: 1,
+        compactSummaryRawChars: 321,
+        compactSummaryParsedSections: 13,
+        compactSummaryMeaningfulSections: 0,
+        compactSummaryQualityIssue:
+          "semantic compact summary contained no meaningful section content despite non-empty source history",
+        compactSummarySourceHadUser: true,
+        compactSummaryLatestUserPinned: true,
+        compactFallbackMarker: "[COMPACT_FALLBACK:llm_summary_failed]",
       }),
       runEvent({
         type: "AWAKEN_TURN_FINISHED",
@@ -833,6 +846,19 @@ describe("runtime reducer run narrative projection", () => {
       preCompactEstimatedTokens: 9600,
       postCompactEstimatedTokens: 4800,
       fallbackState: "structured",
+      toolResultsPrunedCount: 2,
+      prunedSafeGroupCount: 1,
+      prunedMessageCount: 3,
+      summaryMaxTokens: 8192,
+      summaryRetryCount: 1,
+      summaryRawChars: 321,
+      summaryParsedSections: 13,
+      summaryMeaningfulSections: 0,
+      summaryQualityIssue:
+        "semantic compact summary contained no meaningful section content despite non-empty source history",
+      summarySourceHadUser: true,
+      summaryLatestUserPinned: true,
+      fallbackMarker: "[COMPACT_FALLBACK:llm_summary_failed]",
     });
     expect(state.inspectorSummary.terminalReason).toBe("completed");
     expect(state.inspectorSummary.terminalMessage).toBe("done");
@@ -844,6 +870,15 @@ describe("runtime reducer run narrative projection", () => {
       title: "Compact finished",
       status: "done",
       tag: "compact_1",
+    });
+    expect(state.narrative.committedItems.find((item) => item.kind === "compactBoundary")).toMatchObject({
+      kind: "compactBoundary",
+      status: "finished",
+      title: "已自动压缩上下文",
+      detail: expect.stringContaining("9.6k -> 4.8k"),
+      boundaryId: "compact_1",
+      preEstimate: 9600,
+      postEstimate: 4800,
     });
   });
 
@@ -881,6 +916,14 @@ describe("runtime reducer run narrative projection", () => {
       estimatedTokens: 4800,
       effectiveWindow: 12000,
       estimatedDeltaTokens: -4800,
+    });
+    expect(state.narrative.committedItems.find((item) => item.kind === "compactBoundary")).toMatchObject({
+      kind: "compactBoundary",
+      status: "finished",
+      title: "已压缩上下文",
+      detail: expect.stringContaining("compact_legacy"),
+      boundaryId: "compact_legacy",
+      postEstimate: 4800,
     });
   });
 

@@ -184,7 +184,7 @@ func (t *anthropicTransport) StreamInvokeWithObserver(ctx stdctx.Context, cfg Co
 	state := newAnthropicStreamState(observer)
 	scanner := bufio.NewScanner(resp.Body)
 	currentEvent := ""
-	watchdog := newStreamIdleWatchdog(cancel)
+	watchdog := newStreamIdleWatchdog(cancel, streamIdleTimeoutForRequest(req))
 	defer watchdog.Stop()
 
 	for scanner.Scan() {

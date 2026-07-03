@@ -24,12 +24,15 @@ func newOpenAITransport() *openaiTransport {
 // --- 请求结构 ---
 
 type openaiChatRequest struct {
-	Model       string                   `json:"model"`
-	Messages    []openaiChatMessage      `json:"messages"`
-	Temperature float64                  `json:"temperature,omitempty"`
-	MaxTokens   int                      `json:"max_tokens,omitempty"`
-	Stream      bool                     `json:"stream,omitempty"`
-	Tools       []map[string]interface{} `json:"tools,omitempty"`
+	Model          string                   `json:"model"`
+	Messages       []openaiChatMessage      `json:"messages"`
+	Temperature    *float64                 `json:"temperature,omitempty"`
+	MaxTokens      int                      `json:"max_tokens,omitempty"`
+	Stream         bool                     `json:"stream,omitempty"`
+	Thinking       *openaiThinkingConfig    `json:"thinking,omitempty"`
+	EnableThinking *bool                    `json:"enable_thinking,omitempty"`
+	Reasoning      *openaiReasoningConfig   `json:"reasoning,omitempty"`
+	Tools          []map[string]interface{} `json:"tools,omitempty"`
 }
 
 type openaiChatMessage struct {
@@ -49,6 +52,14 @@ type openaiToolCall struct {
 type openaiFunctionCall struct {
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
+}
+
+type openaiThinkingConfig struct {
+	Type string `json:"type"`
+}
+
+type openaiReasoningConfig struct {
+	Enabled bool `json:"enabled"`
 }
 
 // --- 响应结构 ---
@@ -99,6 +110,7 @@ type openaiStreamToolCall struct {
 
 func (t *openaiTransport) Invoke(ctx stdctx.Context, cfg Config, req Request) (*Response, error) {
 	url := cfg.BaseURL + "/chat/completions"
+	req = applyRequestPolicy(cfg, req)
 
 	chatReq := openaiChatRequest{
 		Model:       resolveModel(cfg, req),
@@ -106,6 +118,7 @@ func (t *openaiTransport) Invoke(ctx stdctx.Context, cfg Config, req Request) (*
 		Temperature: resolveTemperature(cfg, req),
 		MaxTokens:   resolveMaxTokens(cfg, req),
 	}
+	applyOpenAIReasoningControls(&chatReq, cfg, req)
 
 	if len(req.Tools) > 0 {
 		chatReq.Tools = convertToolsToOpenAI(req.Tools)
@@ -152,6 +165,7 @@ func (t *openaiTransport) StreamInvoke(ctx stdctx.Context, cfg Config, req Reque
 
 func (t *openaiTransport) StreamInvokeWithObserver(ctx stdctx.Context, cfg Config, req Request, observer StreamObserver) (*Response, error) {
 	url := cfg.BaseURL + "/chat/completions"
+	req = applyRequestPolicy(cfg, req)
 
 	chatReq := openaiChatRequest{
 		Model:       resolveModel(cfg, req),
@@ -160,6 +174,7 @@ func (t *openaiTransport) StreamInvokeWithObserver(ctx stdctx.Context, cfg Confi
 		MaxTokens:   resolveMaxTokens(cfg, req),
 		Stream:      true,
 	}
+	applyOpenAIReasoningControls(&chatReq, cfg, req)
 
 	if len(req.Tools) > 0 {
 		chatReq.Tools = convertToolsToOpenAI(req.Tools)
@@ -192,7 +207,7 @@ func (t *openaiTransport) StreamInvokeWithObserver(ctx stdctx.Context, cfg Confi
 
 	state := newOpenAIStreamState(observer)
 	scanner := bufio.NewScanner(resp.Body)
-	watchdog := newStreamIdleWatchdog(cancel)
+	watchdog := newStreamIdleWatchdog(cancel, streamIdleTimeoutForRequest(req))
 	defer watchdog.Stop()
 
 	for scanner.Scan() {
@@ -243,6 +258,37 @@ func buildOpenAIMessages(req Request) []openaiChatMessage {
 		messages = append(messages, openaiChatMessage{Role: "user", Content: req.UserPrompt})
 	}
 	return messages
+}
+
+func applyOpenAIReasoningControls(chatReq *openaiChatRequest, cfg Config, req Request) {
+	if !req.DisableReasoning {
+		return
+	}
+	if isKimiK27Code(strings.ToLower(resolveModel(cfg, req))) {
+		return
+	}
+	providerKey := strings.ToLower(strings.Join([]string{
+		cfg.BaseURL,
+		cfg.Model,
+		req.Model,
+	}, " "))
+	switch {
+	case strings.Contains(providerKey, "deepseek") ||
+		strings.Contains(providerKey, "kimi") ||
+		strings.Contains(providerKey, "moonshot") ||
+		strings.Contains(providerKey, "volces") ||
+		strings.Contains(providerKey, "volcengine") ||
+		strings.Contains(providerKey, "byteplus") ||
+		strings.Contains(providerKey, "ark"):
+		chatReq.Thinking = &openaiThinkingConfig{Type: "disabled"}
+	case strings.Contains(providerKey, "dashscope") ||
+		strings.Contains(providerKey, "aliyuncs") ||
+		strings.Contains(providerKey, "qwen"):
+		disabled := false
+		chatReq.EnableThinking = &disabled
+	case strings.Contains(providerKey, "openrouter"):
+		chatReq.Reasoning = &openaiReasoningConfig{Enabled: false}
+	}
 }
 
 func contextToolCallsToOpenAI(toolCalls []context.ToolCall) []openaiToolCall {

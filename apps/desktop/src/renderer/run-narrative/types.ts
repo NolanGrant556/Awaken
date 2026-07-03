@@ -21,6 +21,21 @@ export type ChangedFile = {
   status: "active" | "done" | "error";
 };
 
+export type CompactBoundaryStatus = "started" | "finished" | "failed";
+
+export type CompactBoundaryItem = {
+  kind: "compactBoundary";
+  id: string;
+  status: CompactBoundaryStatus;
+  title: string;
+  detail?: string;
+  mode?: string;
+  boundaryId?: string;
+  preEstimate?: number;
+  postEstimate?: number;
+  fallbackUsed?: boolean;
+};
+
 export type InspectorSelection =
   | { kind: "runtime"; id?: string }
   | { kind: "tool"; id: string }
@@ -36,6 +51,7 @@ export type RunNarrativeItem =
   | { kind: "tool"; id: string; title: string; detail?: string; status: "active" | "done" | "error" }
   | { kind: "approval"; id: string; title: string; status: "waiting" | "approved" | "rejected" }
   | { kind: "fileChange"; id: string; files: ChangedFile[]; status: "active" | "done" }
+  | CompactBoundaryItem
   | {
       kind: "answer";
       id: string;

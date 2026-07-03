@@ -100,6 +100,71 @@ describe("thread transcript replay helpers", () => {
     });
   });
 
+  it("synthesizes a replay answer from finished run result when text events are missing", () => {
+    const transcript: RuntimeThreadTranscript = {
+      thread: {
+        threadId: "thread-result",
+        label: "恢复历史",
+        runId: "run-result",
+        workspace: {
+          workspaceRoot: "/tmp/awaken",
+          writableRoots: ["/tmp/awaken"],
+        },
+        createdAt: "2026-06-24T00:00:00Z",
+        updatedAt: "2026-06-24T00:00:10Z",
+      },
+      runs: [
+        {
+          run: {
+            runId: "run-result",
+            threadId: "thread-result",
+            input: "恢复历史",
+            status: "finished",
+            result: "这是历史最终回答",
+            cancelRequested: false,
+            createdAt: "2026-06-24T00:00:00Z",
+            updatedAt: "2026-06-24T00:00:10Z",
+            finishedAt: "2026-06-24T00:00:10Z",
+          },
+          events: [
+            { type: "RUN_STARTED", seq: 16, runId: "run-result", threadId: "thread-result" },
+            { type: "RUN_FINISHED", seq: 32, runId: "run-result", threadId: "thread-result", result: "这是历史最终回答" },
+          ],
+        },
+      ],
+    };
+
+    const actions = actionsForThreadTranscript(transcript);
+    expect(actions).toContainEqual({
+      type: "run/event",
+      event: expect.objectContaining({
+        type: "TEXT_MESSAGE_CONTENT",
+        runId: "run-result",
+        delta: "这是历史最终回答",
+      }),
+      receivedAtMs: undefined,
+    });
+
+    const state = actions.reduce(reduceRuntimeState, createInitialRuntimeState());
+    expect(state.narrative.committedItems).toContainEqual({
+      kind: "answer",
+      id: "answer:run-result:transcript:run-result:result",
+      markdown: "这是历史最终回答",
+      status: "done",
+      isFinal: true,
+      elapsedMs: 10000,
+    });
+  });
+
+  it("does not synthesize a duplicate answer when text events already exist", () => {
+    const actions = actionsForThreadTranscript(makeTranscript());
+    const textContentActions = actions.filter(
+      (action) => action.type === "run/event" && action.event.type === "TEXT_MESSAGE_CONTENT",
+    );
+
+    expect(textContentActions).toHaveLength(1);
+  });
+
   it("returns the last replayed frame seq for the resumed run", () => {
     expect(afterSeqForTranscriptRun(makeTranscript(), "run-2")).toBe(80);
     expect(afterSeqForTranscriptRun(makeTranscript(), "missing")).toBe(0);

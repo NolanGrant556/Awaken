@@ -224,6 +224,28 @@ func loadRestoredTranscript(workspace WorkspaceConfig, threadID string) (restore
 	return restored, nil
 }
 
+func loadDurableThreadSnapshots(workspace WorkspaceConfig) ([]ThreadSnapshot, error) {
+	dir := filepath.Join(filepath.Clean(workspace.WorkspaceRoot), ".awaken", "transcripts")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	snapshots := make([]ThreadSnapshot, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
+			continue
+		}
+		threadID := strings.TrimSuffix(entry.Name(), ".jsonl")
+		restored, err := loadRestoredTranscript(workspace, threadID)
+		if err != nil {
+			continue
+		}
+		snapshots = append(snapshots, threadSnapshotFromRestored(threadID, workspace, restored))
+	}
+	return snapshots, nil
+}
+
 func loadDurableTranscriptRuns(workspace WorkspaceConfig, threadID string) (map[string]ThreadTranscriptRun, error) {
 	path := transcriptPath(workspace.WorkspaceRoot, threadID)
 	records, err := readTranscriptRecords(path)

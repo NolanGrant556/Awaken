@@ -16,6 +16,8 @@ func TestTranscriptStoreAppendsMessagesEventsIdempotentlyAndLoads(t *testing.T) 
 	postEstimate := 80
 	fallbackUsed := true
 	toolResultsPruned := false
+	sourceHadUser := true
+	latestUserPinned := true
 	messages := []convcontext.Message{
 		{Role: convcontext.RoleUser, Content: "hello"},
 		{
@@ -70,16 +72,28 @@ func TestTranscriptStoreAppendsMessagesEventsIdempotentlyAndLoads(t *testing.T) 
 			Seq:       2,
 			Timestamp: now.Add(time.Millisecond),
 			AgentEvent: agentcore.AwakenEvent{
-				Type:                     agentcore.CompactFinishedEventType,
-				Content:                  "compact finished: auto boundary=compact_legacy estimated_tokens=80",
-				ContextCompactTarget:     33000,
-				CompactMode:              agentcore.CompactModeAuto,
-				CompactBoundaryID:        "compact_1",
-				CompactPreEstimate:       &preEstimate,
-				CompactPostEstimate:      &postEstimate,
-				CompactSummaryModel:      "gpt-5-mini",
-				CompactFallbackUsed:      &fallbackUsed,
-				CompactToolResultsPruned: &toolResultsPruned,
+				Type:                             agentcore.CompactFinishedEventType,
+				Content:                          "compact finished: auto boundary=compact_legacy estimated_tokens=80",
+				ContextCompactTarget:             33000,
+				CompactMode:                      agentcore.CompactModeAuto,
+				CompactBoundaryID:                "compact_1",
+				CompactPreEstimate:               &preEstimate,
+				CompactPostEstimate:              &postEstimate,
+				CompactSummaryModel:              "gpt-5-mini",
+				CompactFallbackUsed:              &fallbackUsed,
+				CompactToolResultsPruned:         &toolResultsPruned,
+				CompactToolResultsPrunedCount:    2,
+				CompactPrunedSafeGroupCount:      1,
+				CompactPrunedMessageCount:        3,
+				CompactSummaryMaxTokens:          8192,
+				CompactSummaryRetryCount:         1,
+				CompactSummaryRawChars:           321,
+				CompactSummaryParsedSections:     13,
+				CompactSummaryMeaningfulSections: 4,
+				CompactSummaryQualityIssue:       "semantic compact summary contained no meaningful section content despite non-empty source history",
+				CompactSummarySourceHadUser:      &sourceHadUser,
+				CompactSummaryLatestUserPinned:   &latestUserPinned,
+				CompactFallbackMarker:            "[COMPACT_FALLBACK:llm_summary_failed]",
 			},
 		},
 		{
@@ -169,7 +183,21 @@ func TestTranscriptStoreAppendsMessagesEventsIdempotentlyAndLoads(t *testing.T) 
 		gotCompact.CompactFallbackUsed == nil ||
 		!*gotCompact.CompactFallbackUsed ||
 		gotCompact.CompactToolResultsPruned == nil ||
-		*gotCompact.CompactToolResultsPruned {
+		*gotCompact.CompactToolResultsPruned ||
+		gotCompact.CompactToolResultsPrunedCount != 2 ||
+		gotCompact.CompactPrunedSafeGroupCount != 1 ||
+		gotCompact.CompactPrunedMessageCount != 3 ||
+		gotCompact.CompactSummaryMaxTokens != 8192 ||
+		gotCompact.CompactSummaryRetryCount != 1 ||
+		gotCompact.CompactSummaryRawChars != 321 ||
+		gotCompact.CompactSummaryParsedSections != 13 ||
+		gotCompact.CompactSummaryMeaningfulSections != 4 ||
+		gotCompact.CompactSummaryQualityIssue != "semantic compact summary contained no meaningful section content despite non-empty source history" ||
+		gotCompact.CompactSummarySourceHadUser == nil ||
+		!*gotCompact.CompactSummarySourceHadUser ||
+		gotCompact.CompactSummaryLatestUserPinned == nil ||
+		!*gotCompact.CompactSummaryLatestUserPinned ||
+		gotCompact.CompactFallbackMarker != "[COMPACT_FALLBACK:llm_summary_failed]" {
 		t.Fatalf("expected durable compact metadata to round-trip, got %+v", gotCompact)
 	}
 }

@@ -1258,6 +1258,23 @@ export function App() {
         />
       );
     }
+    if (item.kind === "compactBoundary") {
+      return (
+        <div
+          key={key}
+          className={`compact-boundary compact-boundary-${item.status}`}
+          role="separator"
+          aria-label={item.detail ? `${item.title}: ${item.detail}` : item.title}
+        >
+          <span className="compact-boundary-line" aria-hidden="true" />
+          <span className="compact-boundary-copy">
+            <span className="compact-boundary-title">{item.title}</span>
+            {item.detail ? <span className="compact-boundary-detail">{item.detail}</span> : null}
+          </span>
+          <span className="compact-boundary-line" aria-hidden="true" />
+        </div>
+      );
+    }
     if (item.kind === "exploring") {
       const actions = item.actions.map((action) => {
         const id = action.id.startsWith("explore:")

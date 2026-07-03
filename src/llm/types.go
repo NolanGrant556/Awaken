@@ -4,6 +4,7 @@ import (
 	stdctx "context"
 	"os"
 	"strings"
+	"time"
 
 	"awaken/src/context"
 	"awaken/src/tool"
@@ -30,16 +31,27 @@ type Config struct {
 	AutoCompactTokenLimit int
 }
 
+type RequestPurpose string
+
+const (
+	RequestPurposeCompactSummary RequestPurpose = "compact_summary"
+)
+
 // Request 是统一请求结构
 type Request struct {
-	SystemPrompt string
-	UserPrompt   string
-	Model        string
-	Temperature  float64
-	MaxTokens    int
-	Stream       bool
-	Messages     []context.Message
-	Tools        []tool.ToolDefinition
+	SystemPrompt        string
+	UserPrompt          string
+	Model               string
+	Temperature         float64
+	TemperatureOverride *float64
+	OmitTemperature     bool
+	MaxTokens           int
+	Stream              bool
+	StreamIdleTimeout   time.Duration
+	DisableReasoning    bool
+	Purpose             RequestPurpose
+	Messages            []context.Message
+	Tools               []tool.ToolDefinition
 }
 
 // Response 是统一响应结构

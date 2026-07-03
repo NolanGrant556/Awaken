@@ -24,23 +24,32 @@ var compactSummarySections = []string{
 	"Critical Context",
 }
 
-var compactSummaryHeadingPattern = regexp.MustCompile(`^(#{1,6}\s*)?(.+?)(:)?$`)
+var compactSummaryHeadingPattern = regexp.MustCompile(`^(?:\d+[\.)]\s*)?(#{1,6}\s*)?(.+?)(:)?$`)
+var compactSummaryBlockPattern = regexp.MustCompile(`(?is)<summary>(.*?)</summary>`)
+var compactAnalysisBlockPattern = regexp.MustCompile(`(?is)<analysis>.*?</analysis>`)
 
 func compactSummarySystemPrompt() string {
 	return strings.Join([]string{
 		"You are compacting older Awaken conversation history into a handoff summary.",
-		"Return concise factual bullets only.",
+		"The compressed conversation will replace the older raw messages, so fidelity matters more than brevity.",
+		"You may first write an <analysis> block to audit the source history, then write the final <summary> block.",
+		"Only the final summary will be retained.",
 		"Use exactly these section headings, in this exact order, once each:",
 		strings.Join(compactSummarySections, " | "),
 		"Rules:",
-		"- Keep each section to 1-4 bullet lines beginning with '- '.",
-		"- Preserve concrete user goals, constraints, decisions, unresolved asks, important tool outcomes, and file paths.",
+		"- Every explicit user fact, preference, constraint, correction, and pending request from the shown history must appear in the summary or be marked unknown.",
+		"- Preserve important tool findings, file paths, errors, key values, decisions, unresolved asks, and current working state.",
+		"- Preserve enough detail for another agent to continue the task without reading the raw history.",
+		"- Prefer factual bullets beginning with '- '; use as many bullets as needed for fidelity.",
+		"- If an item appears in [STRUCTURAL_COMPACTION] or [PRUNED_SAFE_GROUP_DIGEST], treat it as source evidence, not metadata to ignore.",
+		"- If the shown older history contains any user request, Active Task or Pending User Asks must preserve that request; do not write '- None.' for both.",
+		"- If tool results or file paths appear in the shown older history, Critical Context, Completed Actions, or Relevant Files must preserve the important findings.",
 		"- Do not invent missing facts. Use '- None.' when the source history does not provide an item.",
-		"- Do not wrap the answer in code fences, XML, JSON, or commentary.",
+		"- Do not call tools. Do not output JSON or code fences.",
 	}, "\n")
 }
 
-func compactSummaryUserInstruction(boundaryID string, envelope ContextEnvelope, tailMessages []convcontext.Message) string {
+func compactSummaryUserInstruction(boundaryID string, envelope ContextEnvelope, sourceMessages []convcontext.Message, tailMessages []convcontext.Message) string {
 	parts := []string{
 		fmt.Sprintf("Create the compact handoff summary for boundary %s.", boundaryID),
 		"Summarize only the older conversation history already shown in this request.",
@@ -48,6 +57,14 @@ func compactSummaryUserInstruction(boundaryID string, envelope ContextEnvelope, 
 	}
 	if envelope.RuntimeSnapshot.WorkspaceRoot != "" {
 		parts = append(parts, "Workspace root: "+envelope.RuntimeSnapshot.WorkspaceRoot)
+	}
+	if latestUser := latestMessageContent(sourceMessages, convcontext.RoleUser); latestUser != "" {
+		parts = append(parts, "Latest older user request that MUST be preserved:")
+		parts = append(parts, "- "+limitSummaryText(latestUser))
+	}
+	if tools := collectCompactToolNames(sourceMessages); len(tools) > 0 {
+		parts = append(parts, "Older tool activity that MUST be reflected when relevant:")
+		parts = append(parts, "- "+strings.Join(tools, ", "))
 	}
 	if len(tailMessages) > 0 {
 		parts = append(parts, "Protected tail anchor:")
@@ -57,6 +74,7 @@ func compactSummaryUserInstruction(boundaryID string, envelope ContextEnvelope, 
 }
 
 func normalizeCompactSummary(raw string) string {
+	raw = compactSummaryPayload(raw)
 	sections := parseCompactSummarySections(raw)
 	lines := make([]string, 0, len(compactSummarySections)*3)
 	for _, section := range compactSummarySections {
@@ -86,7 +104,7 @@ func parseCompactSummarySections(raw string) map[string][]string {
 			continue
 		}
 		matches := compactSummaryHeadingPattern.FindStringSubmatch(trimmed)
-		if len(matches) > 2 {
+		if len(matches) > 3 {
 			title := strings.TrimSpace(matches[2])
 			if _, ok := valid[strings.ToLower(title)]; ok {
 				current = title
@@ -102,6 +120,17 @@ func parseCompactSummarySections(raw string) map[string][]string {
 		result[current] = append(result[current], trimmed)
 	}
 	return result
+}
+
+func compactSummaryPayload(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if matches := compactSummaryBlockPattern.FindStringSubmatch(raw); len(matches) > 1 {
+		return strings.TrimSpace(matches[1])
+	}
+	raw = compactAnalysisBlockPattern.ReplaceAllString(raw, "")
+	raw = strings.ReplaceAll(raw, "<summary>", "")
+	raw = strings.ReplaceAll(raw, "</summary>", "")
+	return strings.TrimSpace(raw)
 }
 
 func sanitizeCompactSummaryBody(lines []string) []string {
@@ -121,33 +150,105 @@ func sanitizeCompactSummaryBody(lines []string) []string {
 	return sanitized
 }
 
-func compactFallbackSummary(marker string, reason string, compactedMessages []convcontext.Message, tailMessages []convcontext.Message, envelope ContextEnvelope, toolResultsPruned int, prunedGroups int, prunedMessages int) string {
+func compactSummaryQualityIssue(summary string, sourceMessages []convcontext.Message) string {
+	if !compactHistoryHasContinuity(sourceMessages) {
+		return ""
+	}
+	sections := parseCompactSummarySections(summary)
+	meaningfulSections := 0
+	for _, section := range compactSummarySections {
+		if compactSummarySectionHasMeaning(sections[section]) {
+			meaningfulSections++
+		}
+	}
+	if meaningfulSections == 0 {
+		return "semantic compact summary contained no meaningful section content despite non-empty source history"
+	}
+	if latestUser := latestMessageContent(sourceMessages, convcontext.RoleUser); latestUser != "" {
+		if !compactSummarySectionHasMeaning(sections["Active Task"]) &&
+			!compactSummarySectionHasMeaning(sections["Pending User Asks"]) &&
+			!compactSummarySectionHasMeaning(sections["Critical Context"]) {
+			return "semantic compact summary omitted the latest compacted user request"
+		}
+	}
+	if len(collectCompactToolNames(sourceMessages)) > 0 {
+		if !compactSummarySectionHasMeaning(sections["Completed Actions"]) &&
+			!compactSummarySectionHasMeaning(sections["Relevant Files"]) &&
+			!compactSummarySectionHasMeaning(sections["Critical Context"]) {
+			return "semantic compact summary omitted compacted tool findings"
+		}
+	}
+	return ""
+}
+
+func compactHistoryHasContinuity(messages []convcontext.Message) bool {
+	if latestMessageContent(messages, convcontext.RoleUser) != "" {
+		return true
+	}
+	if len(collectCompactToolNames(messages)) > 0 {
+		return true
+	}
+	return len(compactMessagesKeyLines(messages, 1)) > 0
+}
+
+func compactSummarySectionHasMeaning(lines []string) bool {
+	for _, line := range lines {
+		if !compactSummaryLineIsNone(line) {
+			return true
+		}
+	}
+	return false
+}
+
+func compactSummaryLineIsNone(line string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(line))
+	normalized = strings.TrimPrefix(normalized, "-")
+	normalized = strings.TrimSpace(normalized)
+	normalized = strings.Trim(normalized, ".:;! ")
+	if normalized == "" {
+		return true
+	}
+	switch normalized {
+	case "none", "none provided", "none known", "unknown", "n/a", "na", "not applicable", "not provided":
+		return true
+	}
+	return strings.HasPrefix(normalized, "no active task") ||
+		strings.HasPrefix(normalized, "no pending") ||
+		strings.HasPrefix(normalized, "not available") ||
+		strings.HasPrefix(normalized, "nothing")
+}
+
+func compactFallbackSummary(_ string, _ string, compactedMessages []convcontext.Message, tailMessages []convcontext.Message, envelope ContextEnvelope, toolResultsPruned int, prunedGroups int, prunedMessages int) string {
 	latestUser := latestMessageContent(compactedMessages, convcontext.RoleUser)
 	if latestUser == "" {
 		latestUser = latestMessageContent(tailMessages, convcontext.RoleUser)
 	}
 	completed := collectCompactToolNames(compactedMessages)
 	files := extractRelevantFiles(compactedMessages, tailMessages)
+	critical := collectFallbackCriticalContext(compactedMessages, 12)
 
 	sections := map[string][]string{
-		"Active Task":               {"- Fallback summary generated after semantic compact failed.", fallbackUserTaskLine(latestUser)},
+		"Active Task":               {fallbackUserTaskLine(latestUser)},
 		"Goal":                      {"- Preserve continuity across the compact boundary without silently dropping older context."},
-		"Constraints & Preferences": {"- Fallback marker must remain explicit in the compact summary.", "- Protected tail messages remain raw after the boundary."},
-		"Completed Actions":         {"- Structural pre-pass compressed oversized tool results outside the protected tail.", "- Older safe groups prepared for semantic summary."},
+		"Constraints & Preferences": {"- Protected tail messages remain raw after the boundary."},
+		"Completed Actions":         {"- Older safe groups were deterministically digested after semantic summary was unavailable."},
 		"Active State":              {"- Compacted older message count: " + fmt.Sprintf("%d", len(compactedMessages)), "- Protected tail message count: " + fmt.Sprintf("%d", len(tailMessages))},
-		"In Progress":               {"- Semantic handoff summary unavailable; heuristic fallback inserted instead."},
-		"Blocked":                   {"- Summary generation reason: " + summarizeFallbackValue(reason)},
-		"Key Decisions":             {"- Keep explicit fallback marker in-band for downstream turns.", "- Preserve tool-call and tool-result pairing after compaction."},
+		"In Progress":               {"- Semantic handoff summary unavailable; deterministic fallback summary inserted instead."},
+		"Blocked":                   {"- Semantic summary unavailable; fallback marker and reason are recorded in compact metadata/header."},
+		"Key Decisions":             {"- Preserve tool-call and tool-result pairing after compaction."},
 		"Resolved Questions":        {"- None."},
 		"Pending User Asks":         {"- Review the preserved tail and continue from the latest raw turn."},
 		"Remaining Work":            {"- Continue the run using the protected tail plus this fallback summary.", "- Replace fallback with semantic summary in a later compact if needed."},
-		"Critical Context":          {"- " + marker, fmt.Sprintf("- Structural tool results pruned: %d", toolResultsPruned), fmt.Sprintf("- Summary prompt pruning applied: safe_groups=%d messages=%d", prunedGroups, prunedMessages)},
+		"Critical Context":          {fmt.Sprintf("- Structural tool results pruned: %d", toolResultsPruned), fmt.Sprintf("- Summary prompt pruning applied: safe_groups=%d messages=%d", prunedGroups, prunedMessages)},
 	}
 	if len(completed) > 0 {
 		sections["Completed Actions"] = append(sections["Completed Actions"], "- Tool activity seen before compact: "+strings.Join(completed, ", "))
 	}
 	if len(files) > 0 {
 		sections["Relevant Files"] = []string{"- " + strings.Join(files, ", ")}
+	}
+	if len(critical) > 0 {
+		sections["Critical Context"] = append(sections["Critical Context"], critical...)
 	}
 	return normalizeCompactSummary(renderCompactSummarySections(sections))
 }
@@ -224,7 +325,18 @@ func fallbackUserTaskLine(value string) string {
 	if strings.TrimSpace(value) == "" {
 		return "- Latest visible user request before compact is unknown."
 	}
-	return "- Latest visible user request before compact is preserved in this fallback summary without raw transcript replay."
+	return "- Latest visible user request before compact: " + compactFieldText(value, 360)
+}
+
+func collectFallbackCriticalContext(messages []convcontext.Message, limit int) []string {
+	out := make([]string, 0, limit)
+	for _, line := range compactMessagesKeyLines(messages, limit) {
+		out = append(out, "- "+line)
+		if len(out) >= limit {
+			return out
+		}
+	}
+	return out
 }
 
 func extractRelevantFiles(messageSets ...[]convcontext.Message) []string {

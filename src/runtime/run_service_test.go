@@ -1429,6 +1429,78 @@ func TestListThreadsReturnsRuntimeThreads(t *testing.T) {
 	}
 }
 
+func TestListThreadsReturnsRecentThreadsFirst(t *testing.T) {
+	root := t.TempDir()
+	service := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+				return "done", nil
+			})
+		},
+	)
+
+	firstRun, err := service.StartRun(StartRunRequest{Input: "first thread", Workspace: WorkspaceConfig{WorkspaceRoot: root}})
+	if err != nil {
+		t.Fatalf("first StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, firstRun.RunID)
+	time.Sleep(5 * time.Millisecond)
+
+	secondRun, err := service.StartRun(StartRunRequest{Input: "second thread", Workspace: WorkspaceConfig{WorkspaceRoot: root}})
+	if err != nil {
+		t.Fatalf("second StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, secondRun.RunID)
+
+	threads := service.ListThreads()
+	if len(threads) != 2 {
+		t.Fatalf("expected two threads, got %d", len(threads))
+	}
+	if threads[0].ThreadID != secondRun.ThreadID {
+		t.Fatalf("expected most recent thread first, got %q", threads[0].ThreadID)
+	}
+}
+
+func TestListThreadsRestoresDurableThreadsAfterRestart(t *testing.T) {
+	root := t.TempDir()
+	firstService := newDurableThreadTestService()
+	firstRun, err := firstService.StartRun(StartRunRequest{
+		Input:     "hello restart",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, firstService, firstRun.RunID)
+	waitForTranscriptMessageCount(t, root, firstRun.ThreadID, 2)
+
+	restartedService := newDurableThreadTestService()
+	if err := restartedService.SetDefaultWorkspace(WorkspaceConfig{WorkspaceRoot: root}); err != nil {
+		t.Fatalf("SetDefaultWorkspace returned error: %v", err)
+	}
+
+	threads := restartedService.ListThreads()
+	if len(threads) != 1 {
+		t.Fatalf("expected one durable thread after restart, got %d", len(threads))
+	}
+	if threads[0].ThreadID != firstRun.ThreadID {
+		t.Fatalf("expected durable thread id %q, got %q", firstRun.ThreadID, threads[0].ThreadID)
+	}
+	if threads[0].RunID != firstRun.RunID {
+		t.Fatalf("expected durable latest run id %q, got %q", firstRun.RunID, threads[0].RunID)
+	}
+	if threads[0].ActiveRunID != "" {
+		t.Fatalf("expected restored durable thread to be inactive, got active_run_id %q", threads[0].ActiveRunID)
+	}
+	if threads[0].Label != "hello restart" {
+		t.Fatalf("expected restored label from first input, got %q", threads[0].Label)
+	}
+}
+
 func TestGetThreadTranscriptReturnsOrderedRunsAndInputs(t *testing.T) {
 	root := t.TempDir()
 	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
@@ -1487,6 +1559,45 @@ func TestGetThreadTranscriptReturnsOrderedRunsAndInputs(t *testing.T) {
 	}
 	if len(transcript.Runs[1].Events) == 0 {
 		t.Fatalf("expected transcript history for second run")
+	}
+}
+
+func TestGetThreadTranscriptRestoresDurableThreadWithoutMemory(t *testing.T) {
+	root := t.TempDir()
+	firstService := newDurableThreadTestService()
+	firstRun, err := firstService.StartRun(StartRunRequest{
+		Input:     "hello durable transcript",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, firstService, firstRun.RunID)
+	waitForTranscriptMessageCount(t, root, firstRun.ThreadID, 2)
+
+	restartedService := newDurableThreadTestService()
+	if err := restartedService.SetDefaultWorkspace(WorkspaceConfig{WorkspaceRoot: root}); err != nil {
+		t.Fatalf("SetDefaultWorkspace returned error: %v", err)
+	}
+
+	transcript, err := restartedService.GetThreadTranscript(firstRun.ThreadID)
+	if err != nil {
+		t.Fatalf("GetThreadTranscript after restart returned error: %v", err)
+	}
+	if transcript.Thread.ThreadID != firstRun.ThreadID {
+		t.Fatalf("expected thread id %q, got %q", firstRun.ThreadID, transcript.Thread.ThreadID)
+	}
+	if transcript.Thread.RunID != firstRun.RunID {
+		t.Fatalf("expected durable latest run id %q, got %q", firstRun.RunID, transcript.Thread.RunID)
+	}
+	if len(transcript.Runs) != 1 {
+		t.Fatalf("expected one durable transcript run, got %d", len(transcript.Runs))
+	}
+	if transcript.Runs[0].Run.RunID != firstRun.RunID || transcript.Runs[0].Run.Input != "hello durable transcript" {
+		t.Fatalf("unexpected durable transcript run: %+v", transcript.Runs[0].Run)
+	}
+	if len(transcript.Runs[0].Events) == 0 {
+		t.Fatalf("expected durable transcript events")
 	}
 }
 
@@ -1653,6 +1764,32 @@ func TestRunServiceRestoresCancelledThreadUserTranscript(t *testing.T) {
 		t.Fatalf("unexpected restored cancelled user message: %+v", history[0])
 	}
 	waitForRunTerminal(t, secondService, secondRun.RunID)
+}
+
+func newDurableThreadTestService() *RunService {
+	return NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				agent.GetConversation().UserInput(input)
+				agent.GetConversation().AssistantOutput("answer: "+input, nil)
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+				sink.Emit(agentcore.AwakenEvent{
+					Type:           agentcore.RunFinishedEventType,
+					Content:        "answer: " + input,
+					TerminalReason: agentcore.TerminalReasonCompleted,
+				})
+				return "answer: " + input, nil
+			})
+		},
+	)
 }
 
 func waitForRunTerminal(t *testing.T, service *RunService, runID string) Run {

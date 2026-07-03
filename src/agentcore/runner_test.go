@@ -1000,13 +1000,26 @@ func TestRunEventEmitterCompactStructuredFields(t *testing.T) {
 		WarningThreshold: 100,
 	}
 	result := CompactResult{
-		Mode:               CompactModeReactive,
-		BoundaryID:         "compact_1",
-		EstimatedTokens:    48,
-		PostEstimateTokens: 48,
-		ToolResultsPruned:  1,
+		Mode:                      CompactModeReactive,
+		BoundaryID:                "compact_1",
+		EstimatedTokens:           48,
+		PostEstimateTokens:        48,
+		ToolResultsPruned:         1,
+		ToolResultsPrunedCount:    1,
+		PrunedSafeGroupCount:      2,
+		PrunedMessageCount:        5,
+		SummaryMaxTokens:          8192,
+		SummaryRetryCount:         1,
+		SummaryRawChars:           321,
+		SummaryParsedSections:     13,
+		SummaryMeaningfulSections: 4,
+		SummaryQualityIssue:       "semantic compact summary omitted compacted tool findings",
+		SummarySourceHadUser:      true,
+		SummaryLatestUserPinned:   true,
 		Fallback: CompactFallback{
-			Used: true,
+			Used:   true,
+			Marker: "[COMPACT_FALLBACK:llm_summary_failed]",
+			Reason: "provider_timeout",
 		},
 	}
 
@@ -1038,7 +1051,22 @@ func TestRunEventEmitterCompactStructuredFields(t *testing.T) {
 		finished.CompactFallbackUsed == nil ||
 		!*finished.CompactFallbackUsed ||
 		finished.CompactToolResultsPruned == nil ||
-		!*finished.CompactToolResultsPruned {
+		!*finished.CompactToolResultsPruned ||
+		finished.CompactToolResultsPrunedCount != 1 ||
+		finished.CompactPrunedSafeGroupCount != 2 ||
+		finished.CompactPrunedMessageCount != 5 ||
+		finished.CompactSummaryMaxTokens != 8192 ||
+		finished.CompactSummaryRetryCount != 1 ||
+		finished.CompactSummaryRawChars != 321 ||
+		finished.CompactSummaryParsedSections != 13 ||
+		finished.CompactSummaryMeaningfulSections != 4 ||
+		finished.CompactSummaryQualityIssue != "semantic compact summary omitted compacted tool findings" ||
+		finished.CompactSummarySourceHadUser == nil ||
+		!*finished.CompactSummarySourceHadUser ||
+		finished.CompactSummaryLatestUserPinned == nil ||
+		!*finished.CompactSummaryLatestUserPinned ||
+		finished.CompactFallbackMarker != "[COMPACT_FALLBACK:llm_summary_failed]" ||
+		finished.CompactFailureReason != "provider_timeout" {
 		t.Fatalf("unexpected compact finished event: %+v", finished)
 	}
 

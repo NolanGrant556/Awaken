@@ -1,5 +1,6 @@
 import type { AguiEvent } from "../../shared/agui";
 import type {
+  CompactBoundaryItem,
   RunAction,
   RunNarrativeItem,
   RunNarrativeState,
@@ -156,6 +157,10 @@ export function projectAguiEventToNarrative(
     case "AWAKEN_ARTIFACT_CREATED":
     case "AWAKEN_ARTIFACT_UPDATED":
       return base;
+    case "AWAKEN_COMPACT_STARTED":
+    case "AWAKEN_COMPACT_FINISHED":
+    case "AWAKEN_COMPACT_FAILED":
+      return commitCompactBoundary(base, event);
     case "RUN_FINISHED":
       return markLatestAnswerFinal(commitActive(base, "done"), event);
     case "RUN_ERROR":
@@ -196,6 +201,8 @@ function eventKey(event: AguiEvent): string | undefined {
     event.toolCallId ||
     event.approvalId ||
     event.artifactId ||
+    event.contextCompactBoundaryId ||
+    event.compactBoundaryId ||
     event.runId ||
     event.type;
   const content = event.delta || event.content || event.status || event.approvalDecision || "";
@@ -319,6 +326,8 @@ function applyStatus(
     case "exploring":
     case "fileChange":
       return status === "done" ? { ...item, status } : item;
+    case "compactBoundary":
+      return item;
     case "tool":
       return status === "done" || status === "error" ? { ...item, status } : item;
     case "approval":
@@ -395,6 +404,124 @@ function exploringId(event: AguiEvent): string {
   return `exploring:${eventScope(event)}:${event.toolCallId ?? event.toolCallName ?? "readonly"}`;
 }
 
+function compactBoundaryId(event: AguiEvent): string {
+  const boundary =
+    compactString(event.contextCompactBoundaryId) ||
+    compactString(event.compactBoundaryId) ||
+    compactBoundaryFromMessage(event.message);
+  return `compact:${eventScopedId(event, boundary ?? `${event.type}:${event.seq ?? "latest"}`)}`;
+}
+
+function compactString(value?: string): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed || undefined;
+}
+
+function compactStatus(event: AguiEvent): CompactBoundaryItem["status"] {
+  if (event.type === "AWAKEN_COMPACT_FAILED") {
+    return "failed";
+  }
+  if (event.type === "AWAKEN_COMPACT_FINISHED") {
+    return "finished";
+  }
+  return "started";
+}
+
+function compactMode(event: AguiEvent): string | undefined {
+  return compactString(event.contextCompactMode) ||
+    compactString(event.compactMode) ||
+    compactModeFromMessage(event.message);
+}
+
+function compactBoundaryValue(event: AguiEvent): string | undefined {
+  return compactString(event.contextCompactBoundaryId) ||
+    compactString(event.compactBoundaryId) ||
+    compactBoundaryFromMessage(event.message);
+}
+
+function compactPreEstimate(event: AguiEvent): number | undefined {
+  return finiteNumber(event.contextCompactPreEstimateTokens) ??
+    finiteNumber(event.compactPreEstimate) ??
+    (event.type === "AWAKEN_COMPACT_STARTED" ? finiteNumber(event.contextEstimatedTokens) : undefined);
+}
+
+function compactPostEstimate(event: AguiEvent): number | undefined {
+  return finiteNumber(event.contextCompactPostEstimateTokens) ??
+    finiteNumber(event.compactPostEstimate) ??
+    (event.type === "AWAKEN_COMPACT_FINISHED"
+      ? finiteNumber(event.contextEstimatedTokens) ?? compactEstimatedTokensFromMessage(event.message)
+      : undefined);
+}
+
+function finiteNumber(value?: number): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function compactBoundaryFromMessage(message?: string): string | undefined {
+  const match = message?.match(/\bboundary=([^\s]+)/);
+  return match?.[1];
+}
+
+function compactModeFromMessage(message?: string): string | undefined {
+  const match = message?.match(/\bcompact (?:started|finished|failed):\s*([a-z_]+)(?=\s|$)/i);
+  return match?.[1]?.toLowerCase();
+}
+
+function compactEstimatedTokensFromMessage(message?: string): number | undefined {
+  const match = message?.match(/\bestimated_tokens=(\d+)\b/i);
+  if (!match) {
+    return undefined;
+  }
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function compactTitle(status: CompactBoundaryItem["status"], mode?: string): string {
+  const modeLabel = mode === "manual" ? "手动" : mode === "auto" || !mode ? "自动" : "";
+  if (status === "started") {
+    return modeLabel ? `正在${modeLabel}压缩上下文` : "正在压缩上下文";
+  }
+  if (status === "failed") {
+    return modeLabel ? `${modeLabel}压缩上下文失败` : "上下文压缩失败";
+  }
+  return modeLabel ? `已${modeLabel}压缩上下文` : "已压缩上下文";
+}
+
+function formatTokenCount(value: number): string {
+  if (value >= 1000) {
+    const rounded = Math.round(value / 100) / 10;
+    return `${rounded.toLocaleString("en-US")}k`;
+  }
+  return value.toLocaleString("en-US");
+}
+
+function compactDetail(item: {
+  boundaryId?: string;
+  preEstimate?: number;
+  postEstimate?: number;
+  fallbackUsed?: boolean;
+  status: CompactBoundaryItem["status"];
+}): string | undefined {
+  const parts: string[] = [];
+  if (item.preEstimate !== undefined && item.postEstimate !== undefined) {
+    parts.push(`${formatTokenCount(item.preEstimate)} -> ${formatTokenCount(item.postEstimate)}`);
+  } else if (item.preEstimate !== undefined) {
+    parts.push(`${formatTokenCount(item.preEstimate)} 压缩前`);
+  } else if (item.postEstimate !== undefined) {
+    parts.push(`${formatTokenCount(item.postEstimate)} 压缩后`);
+  }
+  if (item.fallbackUsed === true) {
+    parts.push("fallback 摘要");
+  }
+  if (item.status === "failed") {
+    parts.push("需要处理");
+  }
+  if (item.boundaryId) {
+    parts.push(item.boundaryId);
+  }
+  return parts.length > 0 ? parts.join(" · ") : undefined;
+}
+
 function eventScope(event: AguiEvent): string {
   return event.runId ?? event.threadId ?? "current";
 }
@@ -407,6 +534,38 @@ function eventScopedId(event: AguiEvent, value?: string): string {
     return `${event.threadId}:${value}`;
   }
   return value ?? eventScope(event);
+}
+
+function commitCompactBoundary(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
+  const status = compactStatus(event);
+  const mode = compactMode(event);
+  const boundaryId = compactBoundaryValue(event);
+  const preEstimate = compactPreEstimate(event);
+  const postEstimate = compactPostEstimate(event);
+  const fallbackUsed = event.compactFallbackUsed;
+  const item: CompactBoundaryItem = {
+    kind: "compactBoundary",
+    id: compactBoundaryId(event),
+    status,
+    title: compactTitle(status, mode),
+    detail: compactDetail({
+      boundaryId,
+      preEstimate,
+      postEstimate,
+      fallbackUsed,
+      status,
+    }),
+    mode,
+    boundaryId,
+    preEstimate,
+    postEstimate,
+    fallbackUsed,
+  };
+  const settledState = state.activeItem ? commitActive(state, "done") : state;
+  return {
+    ...settledState,
+    committedItems: upsertCommitted(settledState.committedItems, item),
+  };
 }
 
 function isReadOnlyToolEvent(event: AguiEvent): boolean {

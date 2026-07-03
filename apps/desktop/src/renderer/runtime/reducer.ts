@@ -81,6 +81,18 @@ export type CompactRecord = ContextWindowRecord & {
   preCompactEstimatedTokens?: number;
   postCompactEstimatedTokens?: number;
   fallbackState?: CompactFallbackState;
+  toolResultsPrunedCount?: number;
+  prunedSafeGroupCount?: number;
+  prunedMessageCount?: number;
+  summaryMaxTokens?: number;
+  summaryRetryCount?: number;
+  summaryRawChars?: number;
+  summaryParsedSections?: number;
+  summaryMeaningfulSections?: number;
+  summaryQualityIssue?: string;
+  summarySourceHadUser?: boolean;
+  summaryLatestUserPinned?: boolean;
+  fallbackMarker?: string;
 };
 
 export type ToolDecisionRecord = {
@@ -683,6 +695,18 @@ function compactRecord(
     preCompactEstimatedTokens,
     postCompactEstimatedTokens,
     fallbackState: usedFallback ? "legacy" : "structured",
+    toolResultsPrunedCount: event.compactToolResultsPrunedCount,
+    prunedSafeGroupCount: event.compactPrunedSafeGroupCount,
+    prunedMessageCount: event.compactPrunedMessageCount,
+    summaryMaxTokens: event.compactSummaryMaxTokens,
+    summaryRetryCount: event.compactSummaryRetryCount,
+    summaryRawChars: event.compactSummaryRawChars,
+    summaryParsedSections: event.compactSummaryParsedSections,
+    summaryMeaningfulSections: event.compactSummaryMeaningfulSections,
+    summaryQualityIssue: event.compactSummaryQualityIssue,
+    summarySourceHadUser: event.compactSummarySourceHadUser,
+    summaryLatestUserPinned: event.compactSummaryLatestUserPinned,
+    fallbackMarker: event.compactFallbackMarker,
   };
 }
 

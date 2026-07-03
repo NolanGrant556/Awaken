@@ -34,3 +34,30 @@ func TestNormalizeCompactSummaryProducesFixedSectionOrder(t *testing.T) {
 		t.Fatalf("expected missing sections to be filled with None, got %q", normalized)
 	}
 }
+
+func TestNormalizeCompactSummaryStripsAnalysisWrapper(t *testing.T) {
+	raw := strings.Join([]string{
+		"<analysis>",
+		"internal audit should not be retained",
+		"</analysis>",
+		"<summary>",
+		"1. Active Task:",
+		"- Continue low distortion compact.",
+		"2. Goal:",
+		"- Preserve canary facts.",
+		"13. Critical Context:",
+		"- legacy canary survives.",
+		"</summary>",
+	}, "\n")
+
+	normalized := normalizeCompactSummary(raw)
+	if strings.Contains(normalized, "internal audit") ||
+		strings.Contains(normalized, "<summary>") ||
+		strings.Contains(normalized, "</summary>") {
+		t.Fatalf("expected analysis and summary wrappers to be stripped, got %q", normalized)
+	}
+	if !strings.Contains(normalized, "Active Task\n- Continue low distortion compact.") ||
+		!strings.Contains(normalized, "Critical Context\n- legacy canary survives.") {
+		t.Fatalf("expected numbered headings inside summary wrapper to normalize, got %q", normalized)
+	}
+}

@@ -41,6 +41,9 @@ func main() {
 			})
 		},
 	)
+	if err := runService.SetDefaultWorkspace(runtime.WorkspaceConfig{WorkspaceRoot: defaultWorkspace}); err != nil {
+		log.Fatalf("failed to configure default workspace: %v", err)
+	}
 
 	srv := &http.Server{
 		Addr:    addr,

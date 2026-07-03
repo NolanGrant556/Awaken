@@ -286,6 +286,67 @@
   justify-self: center;
 }
 
+.compact-boundary {
+  display: grid;
+  grid-template-columns: minmax(32px, 1fr) auto minmax(32px, 1fr);
+  align-items: center;
+  column-gap: 12px;
+  padding: 8px 0;
+  color: var(--aw-text-subtle);
+}
+
+.compact-boundary-line {
+  display: block;
+  height: 1px;
+  min-width: 0;
+  background: rgba(31, 31, 31, 0.12);
+}
+
+.compact-boundary-copy {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--aw-text-subtle);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.compact-boundary-title,
+.compact-boundary-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compact-boundary-title {
+  max-width: min(280px, 52vw);
+}
+
+.compact-boundary-detail {
+  max-width: min(260px, 34vw);
+  color: var(--aw-text-muted);
+  font-weight: 650;
+}
+
+.compact-boundary-started .compact-boundary-line {
+  background: rgba(31, 31, 31, 0.16);
+}
+
+.compact-boundary-failed {
+  color: var(--aw-status-danger-text);
+}
+
+.compact-boundary-failed .compact-boundary-line {
+  background: color-mix(in srgb, var(--aw-status-danger-text) 32%, transparent);
+}
+
+.compact-boundary-failed .compact-boundary-detail {
+  color: var(--aw-status-danger-text);
+}
+
 .narrative-kind-planning,
 .narrative-kind-thinking,
 .narrative-kind-answer {

@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -148,6 +149,173 @@ func TestStreamingHTTPClientDoesNotUseTotalTimeout(t *testing.T) {
 	}
 	if httpClient.Timeout != defaultProviderRequestTimeout {
 		t.Fatalf("expected non-streaming HTTP client timeout %s, got %s", defaultProviderRequestTimeout, httpClient.Timeout)
+	}
+}
+
+func TestStreamIdleTimeoutForRequestOverride(t *testing.T) {
+	t.Setenv("AWAKEN_LLM_STREAM_IDLE_TIMEOUT_MS", "25")
+	if got := streamIdleTimeoutForRequest(Request{}); got != 25*time.Millisecond {
+		t.Fatalf("expected env stream idle timeout 25ms, got %s", got)
+	}
+	if got := streamIdleTimeoutForRequest(Request{StreamIdleTimeout: 5 * time.Minute}); got != 5*time.Minute {
+		t.Fatalf("expected request stream idle timeout 5m, got %s", got)
+	}
+}
+
+func TestStreamInvokeOpenAIDisableReasoningWithThinkingTypeDisabledProviders(t *testing.T) {
+	cases := []struct {
+		name    string
+		baseURL string
+		model   string
+	}{
+		{name: "deepseek", baseURL: "https://api.deepseek.com", model: "deepseek-v4-pro"},
+		{name: "kimi cn", baseURL: "https://api.moonshot.cn/v1", model: "kimi-k2.6"},
+		{name: "kimi coding", baseURL: "https://api.kimi.com/coding/v1", model: "kimi-for-coding"},
+		{name: "volcengine ark", baseURL: "https://ark.cn-beijing.volces.com/api/coding/v3", model: "ark-code-latest"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			chatReq := openaiChatRequest{Model: tc.model}
+			applyOpenAIReasoningControls(&chatReq, Config{BaseURL: tc.baseURL, Model: tc.model}, Request{DisableReasoning: true})
+			if chatReq.Thinking == nil {
+				t.Fatalf("expected %s to use thinking.type disabled", tc.name)
+			}
+			if chatReq.Thinking.Type != "disabled" {
+				t.Fatalf("expected thinking.type disabled, got %+v", chatReq.Thinking)
+			}
+		})
+	}
+}
+
+func TestStreamInvokeOpenAIDisableReasoningForKimiDoesNotAffectNormalRequest(t *testing.T) {
+	requests := make([]map[string]json.RawMessage, 0, 2)
+	server := newStreamInspectServer(t, "/chat/completions", func(r *http.Request) {
+		var body map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+		requests = append(requests, body)
+	})
+	defer server.Close()
+
+	cfg := testConfig(server.URL)
+	cfg.Model = "kimi-for-coding"
+	if _, err := StreamInvoke(context.Background(), cfg, Request{
+		UserPrompt:       "compact",
+		DisableReasoning: true,
+	}, nil); err != nil {
+		t.Fatalf("StreamInvoke returned error: %v", err)
+	}
+	if len(requests) != 1 {
+		t.Fatalf("expected one request, got %d", len(requests))
+	}
+	var thinking struct {
+		Type string `json:"type"`
+	}
+	if raw := requests[0]["thinking"]; len(raw) == 0 {
+		t.Fatalf("expected Kimi disable reasoning request to include thinking field: %+v", requests[0])
+	} else if err := json.Unmarshal(raw, &thinking); err != nil {
+		t.Fatalf("failed to decode thinking field: %v", err)
+	}
+	if thinking.Type != "disabled" {
+		t.Fatalf("expected thinking.type disabled, got %+v", thinking)
+	}
+
+	if _, err := StreamInvoke(context.Background(), cfg, Request{UserPrompt: "normal"}, nil); err != nil {
+		t.Fatalf("StreamInvoke returned error: %v", err)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("expected two requests, got %d", len(requests))
+	}
+	if _, ok := requests[1]["thinking"]; ok {
+		t.Fatalf("normal request must not include compact-only thinking controls: %+v", requests[1])
+	}
+}
+
+func TestStreamInvokeOpenAICompactSummaryAppliesProviderTemperaturePolicy(t *testing.T) {
+	cases := []struct {
+		name             string
+		model            string
+		wantTemperature  float64
+		wantThinkingType string
+		wantNoThinking   bool
+	}{
+		{name: "kimi coding instant", model: "kimi-for-coding", wantTemperature: 0.6, wantThinkingType: "disabled"},
+		{name: "kimi k2.6 instant", model: "kimi-k2.6", wantTemperature: 0.6, wantThinkingType: "disabled"},
+		{name: "kimi k2.7 always thinking", model: "kimi-k2.7-code", wantTemperature: 1.0, wantNoThinking: true},
+		{name: "deepseek deterministic compact", model: "deepseek-v4-pro", wantTemperature: 0.0, wantThinkingType: "disabled"},
+		{name: "ark deterministic compact", model: "ark-code-latest", wantTemperature: 0.1, wantThinkingType: "disabled"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var body map[string]json.RawMessage
+			server := newStreamInspectServer(t, "/chat/completions", func(r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatalf("failed to decode request: %v", err)
+				}
+			})
+			defer server.Close()
+
+			cfg := testConfig(server.URL)
+			cfg.Model = tc.model
+			_, err := StreamInvoke(context.Background(), cfg, Request{
+				UserPrompt:       "compact",
+				DisableReasoning: true,
+				Purpose:          RequestPurposeCompactSummary,
+			}, nil)
+			if err != nil {
+				t.Fatalf("StreamInvoke returned error: %v", err)
+			}
+
+			gotTemperature := decodeRequiredFloat(t, body, "temperature")
+			if gotTemperature != tc.wantTemperature {
+				t.Fatalf("expected temperature %.1f, got %v in body %+v", tc.wantTemperature, gotTemperature, body)
+			}
+			if tc.wantNoThinking {
+				if _, ok := body["thinking"]; ok {
+					t.Fatalf("expected no thinking field for %s, got %+v", tc.model, body)
+				}
+				return
+			}
+			var thinking struct {
+				Type string `json:"type"`
+			}
+			if raw := body["thinking"]; len(raw) == 0 {
+				t.Fatalf("expected thinking field for %s, got %+v", tc.model, body)
+			} else if err := json.Unmarshal(raw, &thinking); err != nil {
+				t.Fatalf("failed to decode thinking field: %v", err)
+			}
+			if thinking.Type != tc.wantThinkingType {
+				t.Fatalf("expected thinking.type %s, got %+v", tc.wantThinkingType, thinking)
+			}
+		})
+	}
+}
+
+func TestStreamInvokeOpenAIKimiK27DisableReasoningIsSuppressed(t *testing.T) {
+	chatReq := openaiChatRequest{Model: "kimi-k2.7-code"}
+	applyOpenAIReasoningControls(&chatReq, Config{BaseURL: "https://api.moonshot.cn/v1", Model: "kimi-k2.7-code"}, Request{DisableReasoning: true})
+	if chatReq.Thinking != nil {
+		t.Fatalf("Kimi K2.7 Code rejects thinking.disabled, got %+v", chatReq.Thinking)
+	}
+}
+
+func TestResolveTemperatureCanOmitAndUseExplicitZero(t *testing.T) {
+	if got := resolveTemperature(Config{}, Request{OmitTemperature: true}); got != nil {
+		t.Fatalf("expected omitted temperature, got %v", *got)
+	}
+	if got := resolveTemperature(Config{Temperature: 1}, Request{TemperatureOverride: float64Pointer(0)}); got == nil || *got != 0 {
+		t.Fatalf("expected explicit zero temperature, got %v", got)
+	}
+	if got := resolveTemperature(Config{}, Request{}); got == nil || *got != 0.7 {
+		t.Fatalf("expected legacy default temperature 0.7, got %v", got)
+	}
+}
+
+func TestRequiredTemperatureFromError(t *testing.T) {
+	temp, ok := RequiredTemperatureFromError(errors.New("LLM request failed: status 400: invalid temperature: only 0.6 is allowed for this model"))
+	if !ok || temp != 0.6 {
+		t.Fatalf("expected required temperature 0.6, got %v ok=%v", temp, ok)
 	}
 }
 
@@ -358,6 +526,21 @@ func newStreamServer(t *testing.T, expectedPath string, lines []string) *httptes
 	}))
 }
 
+func newStreamInspectServer(t *testing.T, expectedPath string, inspect func(*http.Request)) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != expectedPath {
+			t.Fatalf("expected %s, got %s", expectedPath, r.URL.Path)
+		}
+		if inspect != nil {
+			inspect(r)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(`data: {"choices":[{"delta":{"content":"ok"}}]}` + "\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+}
+
 func newIdleStallStreamServer(t *testing.T, expectedPath string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -371,4 +554,17 @@ func newIdleStallStreamServer(t *testing.T, expectedPath string) *httptest.Serve
 		}
 		<-r.Context().Done()
 	}))
+}
+
+func decodeRequiredFloat(t *testing.T, body map[string]json.RawMessage, key string) float64 {
+	t.Helper()
+	raw, ok := body[key]
+	if !ok {
+		t.Fatalf("expected %q in body %+v", key, body)
+	}
+	var value float64
+	if err := json.Unmarshal(raw, &value); err != nil {
+		t.Fatalf("failed to decode %q as float: %v", key, err)
+	}
+	return value
 }

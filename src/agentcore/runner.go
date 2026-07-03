@@ -719,6 +719,23 @@ func (e *runEventEmitter) emitCompactFinished(state ContextWindowState, result C
 	event.CompactSummaryModel = summaryModel
 	event.CompactFallbackUsed = boolPointer(result.Fallback.Used)
 	event.CompactToolResultsPruned = boolPointer(toolResultsPruned)
+	event.CompactToolResultsPrunedCount = firstPositiveInt(result.ToolResultsPrunedCount, result.ToolResultsPruned)
+	event.CompactPrunedSafeGroupCount = result.PrunedSafeGroupCount
+	event.CompactPrunedMessageCount = result.PrunedMessageCount
+	event.CompactSummaryMaxTokens = result.SummaryMaxTokens
+	event.CompactSummaryRetryCount = result.SummaryRetryCount
+	event.CompactSummaryRawChars = result.SummaryRawChars
+	event.CompactSummaryParsedSections = result.SummaryParsedSections
+	event.CompactSummaryMeaningfulSections = result.SummaryMeaningfulSections
+	event.CompactSummaryQualityIssue = result.SummaryQualityIssue
+	if result.SummarySourceHadUser || result.SummaryLatestUserPinned {
+		event.CompactSummarySourceHadUser = boolPointer(result.SummarySourceHadUser)
+		event.CompactSummaryLatestUserPinned = boolPointer(result.SummaryLatestUserPinned)
+	}
+	event.CompactFallbackMarker = firstNonEmptyCompactValue(result.FallbackMarker, result.Fallback.Marker)
+	if result.Fallback.Used {
+		event.CompactFailureReason = result.Fallback.Reason
+	}
 	e.emit(event)
 }
 
@@ -727,6 +744,15 @@ func (e *runEventEmitter) emitCompactFailed(state ContextWindowState, mode Compa
 	event.CompactMode = mode
 	event.CompactFailureReason = failureReason
 	e.emit(event)
+}
+
+func firstPositiveInt(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 func contextWindowEvent(eventType AwakenEventType, state ContextWindowState, content string) AwakenEvent {

@@ -48,3 +48,23 @@ func TestModelConfigFromProfileUsesOnlyProfile(t *testing.T) {
 		t.Fatalf("profile config inherited non-profile values: %+v", got)
 	}
 }
+
+func TestMCPManagerAndConnectorsExistWithoutStaticConfig(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	manager := buildMCPManager(workspace)
+	if manager == nil {
+		t.Fatal("expected empty MCP manager without static config")
+	}
+
+	registry := buildConnectorRegistry(manager, workspace)
+	if registry == nil {
+		t.Fatal("expected connector registry without static MCP config")
+	}
+	if got := len(registry.List()); got == 0 {
+		t.Fatal("expected builtin connector definitions")
+	}
+}

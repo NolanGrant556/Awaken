@@ -56,7 +56,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: server.NewRouterWithMCPConnectorsAndSkills(runService, infoProvider, manager, connRegistry, skillRegistry),
+		Handler: server.NewRouterWithWorkspace(runService, infoProvider, manager, connRegistry, skillRegistry, defaultWorkspace),
 	}
 
 	log.Printf("awaken-core listening on http://%s", addr)

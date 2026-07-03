@@ -23,6 +23,16 @@ func (t catalogTestTool) Description() string {
 	return "test tool"
 }
 
+func (t catalogTestTool) Definition() ToolDefinition {
+	return ToolDefinition{
+		Name:        t.name,
+		DisplayName: t.name,
+		Source:      SourceBuiltin,
+		Description: "test tool",
+		Annotations: ToolAnnotations{ReadOnly: false, Destructive: false, OpenWorld: false},
+	}
+}
+
 func (t catalogTestTool) Parameters() []ToolParameter {
 	if t.paramName == "" {
 		return nil
@@ -68,6 +78,90 @@ func TestListToolsIsStableSorted(t *testing.T) {
 	}
 	if !sort.StringsAreSorted(first) {
 		t.Fatalf("expected sorted tool names, got %v", first)
+	}
+}
+
+// TestValidateToolAcceptsMcpAndSkillNames verifies the extended
+// mcpSafeNamePattern accepts the namespaced forms used by the MCP runtime
+// and the skill runtime.
+func TestValidateToolAcceptsMcpAndSkillNames(t *testing.T) {
+	cases := []string{
+		"mcp__filesystem__read_file",
+		"mcp__slack__post_message",
+		"skill__planner__draft_outline",
+		"web_search", // builtin-style still accepted
+	}
+	for _, name := range cases {
+		if err := ValidateTool(catalogTestTool{name: name}); err != nil {
+			t.Errorf("expected %q to be valid, got %v", name, err)
+		}
+	}
+}
+
+// TestRegisterToolForceReplacesExisting verifies the Force variant overwrites
+// a prior registration without error. Used by the MCP manager when refreshing
+// a server's tool list.
+func TestRegisterToolForceReplacesExisting(t *testing.T) {
+	first := catalogTestTool{name: "catalog_force_tool"}
+	second := catalogTestTool{name: "catalog_force_tool"}
+
+	if err := RegisterTool(first); err != nil {
+		t.Fatalf("initial register failed: %v", err)
+	}
+	if err := RegisterToolForce(second); err != nil {
+		t.Fatalf("force register failed: %v", err)
+	}
+	// Clean up.
+	UnregisterTool("catalog_force_tool")
+}
+
+// TestUnregisterToolsByPrefix verifies bulk removal by prefix. Used by the
+// MCP manager to clear all tools from a single server in one call.
+func TestUnregisterToolsByPrefix(t *testing.T) {
+	names := []string{
+		"mcp__echo__alpha",
+		"mcp__echo__beta",
+		"mcp__other__gamma",
+	}
+	for _, n := range names {
+		if err := RegisterToolForce(catalogTestTool{name: n}); err != nil {
+			t.Fatalf("register %s: %v", n, err)
+		}
+	}
+	removed := UnregisterToolsByPrefix("mcp__echo__")
+	if removed != 2 {
+		t.Errorf("expected 2 removals, got %d", removed)
+	}
+	all := ListToolNames()
+	for _, n := range all {
+		if n == "mcp__echo__alpha" || n == "mcp__echo__beta" {
+			t.Errorf("expected echo tools removed, found %s", n)
+		}
+	}
+	// Clean up the remaining mcp__other__gamma.
+	UnregisterToolsByPrefix("mcp__other__")
+}
+
+// TestListToolNames verifies the helper returns a sorted snapshot of all
+// currently registered tool names.
+func TestListToolNames(t *testing.T) {
+	RegisterToolForce(catalogTestTool{name: "catalog_list_a"})
+	RegisterToolForce(catalogTestTool{name: "catalog_list_b"})
+	defer func() {
+		UnregisterTool("catalog_list_a")
+		UnregisterTool("catalog_list_b")
+	}()
+
+	names := ListToolNames()
+	found := map[string]bool{}
+	for _, n := range names {
+		found[n] = true
+	}
+	if !found["catalog_list_a"] || !found["catalog_list_b"] {
+		t.Errorf("expected both catalog_list_* in %v", names)
+	}
+	if !sort.StringsAreSorted(names) {
+		t.Errorf("expected sorted names, got %v", names)
 	}
 }
 

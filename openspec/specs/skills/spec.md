@@ -1,0 +1,140 @@
+### Requirement: SKILL.md Schema
+
+Awaken SHALL accept Skill definitions as Markdown files with YAML frontmatter delimited by `---` lines. The frontmatter MUST contain `name` (kebab-case, unique within source) and `description` (one-line summary). It MAY contain: `whenToUse` (free text describing trigger context), `allowedTools` (array of tool name patterns; supports `mcp__server__*` glob), `arguments` (array of `{ name, type, required, default }`), `model` (override model identifier), `effort` (override reasoning effort), `context` (`inline` | `fork`, default `inline`), `agent` (bind to a specific work role: `researcher | planner | operator | reviewer`), `hooks` (`{ postExecute: <shell command> }`), `requiredConnectors` (array of connector ids).
+
+The Markdown body after the frontmatter is the Skill prompt; it MAY contain `${arg_name}` placeholders that are substituted at execution time.
+
+A Skill file that fails frontmatter validation MUST be skipped with a single warning log; other Skill files in the same directory MUST continue to load.
+
+#### Scenario: Minimal valid SKILL.md loads
+
+- **WHEN** a file contains only `name: foo` and `description: bar` in frontmatter plus a body
+- **THEN** the skill is loaded with `context: inline` defaulting and registered into the registry
+
+#### Scenario: Skill with missing required arg returns structured error
+
+- **WHEN** a skill declares `arguments: [{ name: client, required: true }]` and the agent calls the corresponding tool without `client`
+- **THEN** the tool call returns a structured `missing_argument` error (no LLM call is made) and the run continues
+
+#### Scenario: One invalid file does not block the directory
+
+- **WHEN** a user skills directory contains three `.md` files, one with malformed YAML frontmatter
+- **THEN** the runtime loads the two valid skills, logs a single warning for the malformed file, and `GET /v1/skills` lists both valid skills
+
+### Requirement: Skill Source Hierarchy
+
+The runtime SHALL load Skills from three sources in descending priority: `project` (`<workspace>/.awaken/skills/`), `user` (`~/.awaken/skills/`), `bundled` (compiled into the binary via `go:embed`).
+
+When two sources declare a Skill with the same `name`, the higher-priority entry wins. The lower-priority entry MUST remain in the registry as `state: shadowed` with a `shadowedBy` field indicating the winning source, so the UI can surface the conflict.
+
+Bundled Skills MUST include at minimum the four work skills `meeting-notes-distribute`, `customer-followup-daily`, `sheet-anomaly-scan`, `doc-to-actions`. Their prompt bodies MAY be placeholder content pending product copy; their frontmatter MUST be complete and valid.
+
+#### Scenario: Project skill overrides user skill of same name
+
+- **WHEN** both project and user directories contain `meeting-notes-distribute.md`
+- **THEN** the project version is active and the user version's registry entry has `state: shadowed`, `shadowedBy: "project"`
+
+#### Scenario: Bundled skill is shadowed when user provides override
+
+- **WHEN** a user creates `~/.awaken/skills/doc-to-actions.md`
+- **THEN** the user's version is active and the bundled `doc-to-actions` has `state: shadowed`, `shadowedBy: "user"`
+
+### Requirement: Skill Availability Driven by Dependencies
+
+A Skill's `state` MUST be one of `available`, `unavailable`, or `shadowed`. A Skill MUST transition to `unavailable` when any entry in its `requiredConnectors` is not in `connected` state (per the `connectors` capability) OR when any tool in its `allowedTools` (other than `mcp__{server}__*` patterns) is not registered.
+
+When `unavailable`, the Skill MUST NOT be registered into the tool pool exposed to the LLM, but MUST still appear in `GET /v1/skills` with an `unavailableReason` explaining the missing dependency.
+
+When the dependency becomes satisfied (connector connects, tool registered), the Skill MUST automatically transition to `available` and re-register into the tool pool.
+
+#### Scenario: Skill becomes unavailable when connector disconnects
+
+- **WHEN** a skill declares `requiredConnectors: [notion]` and the notion connector transitions away from `connected`
+- **THEN** the skill state becomes `unavailable` with `unavailableReason` mentioning the notion connector, and the tool `skill__<id>` is removed from the LLM's tool list
+
+#### Scenario: Skill recovers when connector reconnects
+
+- **WHEN** the notion connector re-enters `connected` state
+- **THEN** the dependent skill state returns to `available` and the tool re-registers in the tool pool
+
+### Requirement: Skills Exposed as Tools
+
+Each `available` Skill SHALL be registered in `src/tool/registry.go` as a tool named `skill__{skill_name}`. The tool's `description` MUST be derived from the Skill's `whenToUse` (falling back to `description` if absent). The tool's input schema MUST be derived from the Skill's `arguments` declaration.
+
+The agent SHALL invoke a Skill by calling its tool; the runtime then executes the Skill per its `context` mode (see Skill Execution Modes). The agent need not understand the Skill concept — it sees only a tool list.
+
+The runtime MUST emit a `skill_id` field on tool-call events so the audit trail records which Skill was executed (consumed by the `tool-platform` capability for observability).
+
+#### Scenario: Available skill appears as tool
+
+- **WHEN** the skill `meeting-notes-distribute` is `available`
+- **THEN** the LLM-facing tool list includes a tool `skill__meeting-notes-distribute` with description from its `whenToUse`
+
+### Requirement: Skill Execution Modes
+
+The runtime SHALL support two execution modes selected by the Skill's `context` field:
+
+- `inline` (default): the Skill prompt (after argument substitution) is appended as a user-role message to the current run's context; the agent's next turn proceeds with the Skill's `allowedTools` as a constraint that intersects the active run's tool pool. The agent's model and effort settings override are temporary — only for the turn(s) consuming the Skill.
+- `fork`: the runtime starts a child run via the runtime's `StartChild` interface, seeded with the Skill prompt and a tool pool equal to the intersection of `allowedTools` and the parent's tool pool. When the child run completes, a `AWAKEN_SKILL_COMPLETED` event is emitted on the parent run carrying the child run id and a summary.
+
+If the `StartChild` interface is unavailable at runtime (delivered by a separate change), `fork` MUST degrade to `inline` with a warning log; the Skill MUST still execute, not fail.
+
+#### Scenario: Inline skill appends to current run
+
+- **WHEN** the agent calls `skill__doc-to-actions` with valid args and the Skill is `context: inline`
+- **THEN** the Skill's substituted prompt is appended to the current run as a user message and the agent proceeds within the same run
+
+#### Scenario: Fork skill spawns child run
+
+- **WHEN** the agent calls `skill__customer-followup-daily` and the Skill is `context: fork`
+- **THEN** a child run is started with the intersected tool pool, runs to completion, and emits `AWAKEN_SKILL_COMPLETED` on the parent with the child run id and summary
+
+#### Scenario: Fork degrades when child runs are not supported
+
+- **WHEN** a Skill requests `fork` execution but the runtime does not provide `StartChild`
+- **THEN** the runtime logs a warning, executes the Skill in `inline` mode instead, and the tool call still returns a result
+
+### Requirement: Skills HTTP API
+
+The runtime SHALL expose two HTTP endpoints under `/v1/skills/`:
+
+- `GET /v1/skills` — returns an array of `{ id, displayName, description, whenToUse, state, sourceOrigin, shadowedBy?, unavailableReason?, requiredConnectors, allowedTools }`. The list MUST include `shadowed` and `unavailable` entries (not only `available` ones).
+- `POST /v1/skills/{id}/execute` — direct execution endpoint for testing and future UI invocation; accepts JSON body matching the Skill's `arguments` schema; returns the run id and initial event stream URL. MUST refuse with HTTP 409 when the Skill is not `available`.
+
+These endpoints MUST be registered in `src/server/router.go`.
+
+#### Scenario: GET /v1/skills includes shadowed and unavailable entries
+
+- **WHEN** four bundled skills exist, one user skill shadows a bundled one, and one bundled skill is unavailable due to missing connector
+- **THEN** the response contains all entries, the shadowed bundled skill has `state: "shadowed"` and `shadowedBy: "user"`, and the unavailable skill has `state: "unavailable"` with `unavailableReason`
+
+#### Scenario: Execute refuses unavailable skill
+
+- **WHEN** a POST to `/v1/skills/customer-followup-daily/execute` arrives while that skill is `unavailable`
+- **THEN** the runtime responds HTTP 409 with a body containing the `unavailableReason` and does not start a run
+
+### Requirement: MCP-Source Skill Metadata
+
+`SkillDefinition` SHALL include two additional optional fields to represent MCP-sourced skills and MCP-dependent local skills:
+
+- `mcpBinding`: present only when the Skill is bridged from an MCP server; contains at minimum `{ serverName: string, promptName: string, kind: "prompt" | "resource" }`. Absent for purely local Skills.
+- `requiredMcpServers`: a string array of MCP server names whose `connected` state is required for this Skill to be `available`. May be present on bridged Skills (auto-derived) or on hand-authored local SKILL.md files (manually declared).
+
+Skill availability MUST treat `requiredMcpServers` as an independent gate from `requiredConnectors`: a Skill is `available` only when both `requiredConnectors` AND `requiredMcpServers` are satisfied (every connector in `connected`, every server in `connected`).
+
+The SKILL.md loader for `bundled`, `user`, and `project` sources MUST reject any frontmatter declaring a `name` starting with `mcp__`. The `mcp__` namespace is reserved for the bridge.
+
+#### Scenario: Local SKILL.md may declare requiredMcpServers
+
+- **WHEN** a project SKILL.md frontmatter includes `requiredMcpServers: [internal-search]`
+- **THEN** the loaded Skill carries `requiredMcpServers: ["internal-search"]` and becomes `unavailable` whenever the `internal-search` MCP server is not `connected`
+
+#### Scenario: Local SKILL.md with reserved prefix is rejected
+
+- **WHEN** a user creates `~/.awaken/skills/mcp__foo__bar.md` or sets `name: mcp__foo__bar` in frontmatter
+- **THEN** the loader skips the file with a warning explaining that the `mcp__` namespace is reserved
+
+#### Scenario: Bridged Skill is unavailable when its source server disconnects
+
+- **WHEN** the bridged Skill `mcp__crm__client-followup` has `requiredMcpServers: ["crm"]` and server `crm` transitions to `failed`
+- **THEN** the Skill's state becomes `unavailable` with `unavailableReason` naming the `crm` server, and the corresponding LLM-facing tool is removed

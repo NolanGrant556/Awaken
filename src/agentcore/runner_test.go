@@ -41,6 +41,16 @@ func (t runnerTestTool) Parameters() []tool.ToolParameter {
 	}
 }
 
+func (t runnerTestTool) Definition() tool.ToolDefinition {
+	return tool.ToolDefinition{
+		Name:        t.name,
+		DisplayName: t.name,
+		Source:      tool.SourceBuiltin,
+		Description: "test tool",
+		Annotations: tool.ToolAnnotations{ReadOnly: true},
+	}
+}
+
 func (t runnerTestTool) Execute(ctx context.Context, input string) (string, error) {
 	if t.fail {
 		return "", errors.New("boom")
@@ -363,7 +373,7 @@ func TestRunnerHundredToolLoopStopsAtMaxTurns(t *testing.T) {
 	if decisionCount != 100 {
 		t.Fatalf("expected 100 tool permission decisions, got %d", decisionCount)
 	}
-	if len(gotEvents) > 1200 {
+	if len(gotEvents) > 1400 {
 		t.Fatalf("expected event count to remain bounded, got %d", len(gotEvents))
 	}
 	runErrorIndex := firstEventIndex(gotEvents, RunErrorEventType)
@@ -577,6 +587,8 @@ data: {"type":"message_stop"}`,
 		ToolProgressEventType,
 		ToolPermissionDecidedEventType,
 		ToolProgressEventType,
+		ToolProgressEventType,
+		ToolProgressEventType,
 		ToolResultEventType,
 		TurnFinishedEventType,
 		TurnStartedEventType,
@@ -604,14 +616,17 @@ data: {"type":"message_stop"}`,
 	if gotEvents[10].Arguments != `{"value":"hello"}` {
 		t.Fatalf("expected complete tool args fallback, got %q", gotEvents[10].Arguments)
 	}
-	if gotEvents[12].Progress != "Executing tool" || gotEvents[14].Progress != "Tool execution complete" {
-		t.Fatalf("unexpected tool progress events: %q %q", gotEvents[12].Progress, gotEvents[14].Progress)
+	if gotEvents[12].Progress != "Executing tool" || gotEvents[16].Progress != "Tool execution complete" {
+		t.Fatalf("unexpected tool progress events: %q %q", gotEvents[12].Progress, gotEvents[16].Progress)
 	}
-	if gotEvents[15].Content != "echo:hello" {
-		t.Fatalf("expected tool result content echo:hello, got %q", gotEvents[15].Content)
+	if gotEvents[14].ToolProgressStage != "started" || gotEvents[15].ToolProgressStage != "completed" {
+		t.Fatalf("unexpected runtime tool progress events: %+v %+v", gotEvents[14], gotEvents[15])
 	}
-	if gotEvents[20].Delta != "done" {
-		t.Fatalf("expected final text delta done, got %q", gotEvents[20].Delta)
+	if gotEvents[17].Content != "echo:hello" {
+		t.Fatalf("expected tool result content echo:hello, got %q", gotEvents[17].Content)
+	}
+	if gotEvents[22].Delta != "done" {
+		t.Fatalf("expected final text delta done, got %q", gotEvents[22].Delta)
 	}
 }
 
@@ -1492,6 +1507,14 @@ func (t cancelOnExecuteTool) Parameters() []tool.ToolParameter {
 	}
 }
 
+func (t cancelOnExecuteTool) Definition() tool.ToolDefinition {
+	return tool.ToolDefinition{
+		Name: t.name, DisplayName: t.name, Source: tool.SourceBuiltin,
+		Description: "cancels the run context on execute",
+		Annotations: tool.ToolAnnotations{ReadOnly: true},
+	}
+}
+
 func (t cancelOnExecuteTool) Execute(ctx context.Context, input string) (string, error) {
 	t.cancel()
 	return "cancelled", nil
@@ -1572,6 +1595,14 @@ func (t failIfExecutedTool) Description() string {
 func (t failIfExecutedTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
 		{Name: "value", Description: "value", Type: "string", Required: true},
+	}
+}
+
+func (t failIfExecutedTool) Definition() tool.ToolDefinition {
+	return tool.ToolDefinition{
+		Name: t.name, DisplayName: t.name, Source: tool.SourceBuiltin,
+		Description: "fails the test if executed",
+		Annotations: tool.ToolAnnotations{ReadOnly: true},
 	}
 }
 

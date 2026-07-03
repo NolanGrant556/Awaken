@@ -5,11 +5,40 @@ import (
 	"net/http"
 
 	"awaken/src/agentcore"
+	"awaken/src/connectors"
+	"awaken/src/mcpclient"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
+	"awaken/src/skills"
 )
 
 func NewRouter(runService *awruntime.RunService, infoProvider RuntimeInfoProvider) http.Handler {
+	return NewRouterWithMCP(runService, infoProvider, nil)
+}
+
+// NewRouterWithMCP builds a router that also exposes the /v1/mcp/* surface
+// when a non-nil manager is supplied. Existing callers continue to use
+// NewRouter; the MCP-aware variant is consumed by cmd/awaken-core once it
+// constructs the manager.
+func NewRouterWithMCP(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager) http.Handler {
+	return newRouterInternal(runService, infoProvider, manager, nil, nil)
+}
+
+// NewRouterWithMCPAndConnectors builds a router that also exposes the
+// /v1/connectors/* surface when a non-nil connector registry is supplied.
+// /v1/skills/* routes are always registered (returning 503 when no skill
+// registry is configured).
+func NewRouterWithMCPAndConnectors(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry) http.Handler {
+	return newRouterInternal(runService, infoProvider, manager, connectorRegistry, nil)
+}
+
+// NewRouterWithMCPConnectorsAndSkills builds a fully-wired router with MCP,
+// connector, and skill surfaces. Nil registries gracefully degrade to 503.
+func NewRouterWithMCPConnectorsAndSkills(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry, skillRegistry *skills.SkillRegistry) http.Handler {
+	return newRouterInternal(runService, infoProvider, manager, connectorRegistry, skillRegistry)
+}
+
+func newRouterInternal(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry, skillRegistry *skills.SkillRegistry) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handleHealth)
 	mux.HandleFunc("GET /v1/agui/demo", handleAGUIDemo)
@@ -28,7 +57,26 @@ func NewRouter(runService *awruntime.RunService, infoProvider RuntimeInfoProvide
 		mux.HandleFunc("GET /v1/runs/{run_id}/events", handlers.handleRunEvents)
 		mux.HandleFunc("POST /v1/runs/{run_id}/cancel", handlers.handleCancelRun)
 		mux.HandleFunc("POST /v1/runs/{run_id}/approvals/{approval_id}/resolve", handlers.handleResolveApproval)
+		mux.HandleFunc("GET /v1/runs/{run_id}/audit", handlers.handleGetRunAudit)
 	}
+	mcpH := mcpHandlers{manager: manager}
+	mux.HandleFunc("GET /v1/mcp/tools", mcpH.handleListTools)
+	mux.HandleFunc("GET /v1/tools", handleListTools)
+	if manager != nil {
+		mux.HandleFunc("GET /v1/mcp/servers", mcpH.handleListServers)
+		mux.HandleFunc("POST /v1/mcp/servers/{name}/auth", mcpH.handleServerAuth)
+		mux.HandleFunc("POST /v1/mcp/servers/{name}/disable", mcpH.handleServerDisable)
+		mux.HandleFunc("POST /v1/mcp/servers/{name}/enable", mcpH.handleServerEnable)
+	}
+	connH := connectorHandlers{registry: connectorRegistry}
+	if connectorRegistry != nil {
+		mux.HandleFunc("GET /v1/connectors", connH.handleListConnectors)
+		mux.HandleFunc("POST /v1/connectors/{id}/connect", connH.handleConnect)
+		mux.HandleFunc("POST /v1/connectors/{id}/disconnect", connH.handleDisconnect)
+	}
+	skillH := skillHandlers{registry: skillRegistry}
+	mux.HandleFunc("GET /v1/skills", skillH.handleListSkills)
+	// POST /v1/skills/{id}/execute reserved for follow-up
 	return mux
 }
 

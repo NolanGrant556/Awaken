@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sync/atomic"
 	"time"
+
+	"awaken/src/tool"
 )
 
 type AwakenEventType string
@@ -126,6 +128,11 @@ type AwakenEvent struct {
 	ToolDecisionAction               string
 	ToolDecisionSource               string
 	ToolDecisionReason               string
+	ToolProgressStage                string
+	ToolProgressMessage              string
+	ToolProgressPercentage           int
+	ToolDefinition                   tool.ToolDefinition
+	RiskHints                        *tool.RiskHints
 	ApprovalID                       string
 	ApprovalTitle                    string
 	ApprovalDescription              string

@@ -25,12 +25,12 @@ func (rb *RequestBuilder) UpdateRuntimeInfo(info prompt.RuntimeInfo) {
 	rb.runtimeInfo = info
 }
 
-func (rb *RequestBuilder) Build(ctx ContextProvider, tools []tool.ToolDefinition) LLMRequest {
+func (rb *RequestBuilder) Build(ctx ContextProvider, tools []tool.ToolSchema) LLMRequest {
 	envelope := rb.BuildContextEnvelope(ctx, tools)
 	return rb.BuildLLMRequestFromEnvelope(envelope)
 }
 
-func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool.ToolDefinition) ContextEnvelope {
+func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool.ToolSchema) ContextEnvelope {
 	if tools == nil {
 		tools = rb.getTools()
 	}
@@ -97,12 +97,12 @@ func (rb *RequestBuilder) buildSystemPromptFromEnvelope(envelope ContextEnvelope
 	return prompt.BuildEffectiveSystemPrompt(staticContent, envelope.RuntimeSnapshot.ToRuntimeInfo())
 }
 
-func (rb *RequestBuilder) getTools() []tool.ToolDefinition {
+func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 	tools := tool.ListTools()
-	definitions := make([]tool.ToolDefinition, 0, len(tools))
+	definitions := make([]tool.ToolSchema, 0, len(tools))
 
 	for _, t := range tools {
-		definitions = append(definitions, tool.ToolDefinition{
+		definitions = append(definitions, tool.ToolSchema{
 			Type: "function",
 			Function: tool.ToolFunctionSchema{
 				Name:        t.Name(),
@@ -136,7 +136,7 @@ func (rb *RequestBuilder) buildToolParameters(t tool.Tool) tool.ToolParametersSc
 	}
 }
 
-func (rb *RequestBuilder) updateRuntimeInfoFromConfig(tools []tool.ToolDefinition) {
+func (rb *RequestBuilder) updateRuntimeInfoFromConfig(tools []tool.ToolSchema) {
 	rb.runtimeInfo.UpdateCurrentDate()
 	if strings.TrimSpace(rb.config.Workspace.Root) != "" {
 		rb.runtimeInfo.SetWorkingDir(tool.NewPermissionContext(rb.config.Workspace.Root, rb.config.Workspace.WritableRoots).WorkspaceRootOrCWD())
@@ -148,7 +148,7 @@ func (rb *RequestBuilder) updateRuntimeInfoFromConfig(tools []tool.ToolDefinitio
 	rb.runtimeInfo.SetToolSummary(rb.buildToolSummary(tools))
 }
 
-func (rb *RequestBuilder) buildRuntimeSnapshot(tools []tool.ToolDefinition) RuntimeSnapshot {
+func (rb *RequestBuilder) buildRuntimeSnapshot(tools []tool.ToolSchema) RuntimeSnapshot {
 	rb.updateRuntimeInfoFromConfig(tools)
 	permissionContext := tool.NewPermissionContext(rb.config.Workspace.Root, rb.config.Workspace.WritableRoots)
 	snapshot := RuntimeSnapshot{
@@ -164,7 +164,7 @@ func (rb *RequestBuilder) buildRuntimeSnapshot(tools []tool.ToolDefinition) Runt
 	return snapshot
 }
 
-func (rb *RequestBuilder) buildToolSummary(tools []tool.ToolDefinition) string {
+func (rb *RequestBuilder) buildToolSummary(tools []tool.ToolSchema) string {
 	if len(tools) == 0 {
 		return "无可用工具"
 	}
@@ -179,7 +179,7 @@ func (rb *RequestBuilder) buildToolSummary(tools []tool.ToolDefinition) string {
 	return summary
 }
 
-func (rb *RequestBuilder) buildCacheKeys(staticContent string, tools []tool.ToolDefinition, snapshot RuntimeSnapshot) []ContextCacheKey {
+func (rb *RequestBuilder) buildCacheKeys(staticContent string, tools []tool.ToolSchema, snapshot RuntimeSnapshot) []ContextCacheKey {
 	return []ContextCacheKey{
 		{Name: "system_prompt", Value: fmt.Sprintf("len:%d", len(staticContent))},
 		{Name: "tool_pool", Value: rb.buildToolSummary(tools)},
@@ -187,7 +187,7 @@ func (rb *RequestBuilder) buildCacheKeys(staticContent string, tools []tool.Tool
 	}
 }
 
-func (rb *RequestBuilder) buildContextDeltas(snapshot RuntimeSnapshot, tools []tool.ToolDefinition) []ContextDelta {
+func (rb *RequestBuilder) buildContextDeltas(snapshot RuntimeSnapshot, tools []tool.ToolSchema) []ContextDelta {
 	return []ContextDelta{
 		{
 			Type:    ContextDeltaRuntimeSnapshot,
@@ -209,8 +209,8 @@ func cloneContextMessages(messages []convcontext.Message) []convcontext.Message 
 	return result
 }
 
-func cloneToolDefinitions(tools []tool.ToolDefinition) []tool.ToolDefinition {
-	result := make([]tool.ToolDefinition, len(tools))
+func cloneToolDefinitions(tools []tool.ToolSchema) []tool.ToolSchema {
+	result := make([]tool.ToolSchema, len(tools))
 	copy(result, tools)
 	return result
 }

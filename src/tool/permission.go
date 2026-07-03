@@ -8,6 +8,90 @@ import (
 	"strings"
 )
 
+// Decide returns a PermissionDecision based solely on ToolDefinition annotations
+// and user-configured overrides — never on hard-coded tool name matches.
+//
+// Default rules:
+//   - readOnly==true → allow (regardless of openWorld)
+//   - destructive==true → ask
+//   - readOnly==false && destructive==false → ask (conservative)
+//   - requiresAuth==true && server/connector not connected → deny with reason "needs_auth"
+func Decide(ctx context.Context, def ToolDefinition) PermissionDecision {
+	return DecideWithOverride(ctx, def, nil)
+}
+
+// DecideWithOverride applies user-configured overrides on top of the default
+// rules. Overrides are a map of tool name or server prefix to PermissionPolicy.
+// An override key of "*" applies to all tools.
+func DecideWithOverride(ctx context.Context, def ToolDefinition, overrides map[string]PermissionPolicy) PermissionDecision {
+	if overrides != nil {
+		// Check exact name match first
+		if policy, ok := overrides[def.Name]; ok {
+			return policyToDecision(policy)
+		}
+		// Check server prefix match (e.g., "mcp__notion__*")
+		if def.Annotations.ServerName != "" {
+			prefix := "mcp__" + def.Annotations.ServerName + "__*"
+			if policy, ok := overrides[prefix]; ok {
+				return policyToDecision(policy)
+			}
+		}
+		// Check wildcard
+		if policy, ok := overrides["*"]; ok {
+			return policyToDecision(policy)
+		}
+	}
+
+	// Default rules based on annotations
+	if def.Annotations.ReadOnly {
+		return AllowPermission()
+	}
+
+	if def.Annotations.RequiresAuth {
+		return DenyPermission("needs_auth")
+	}
+
+	if def.Annotations.Destructive {
+		return AskPermission("destructive tool requires approval", ApprovalRequest{
+			Title:    fmt.Sprintf("Approve %s", def.Name),
+			RiskTone: "warning",
+		})
+	}
+
+	// readOnly==false && destructive==false → conservative: ask
+	return AskPermission("tool may have unknown side-effects", ApprovalRequest{
+		Title:    fmt.Sprintf("Approve %s", def.Name),
+		RiskTone: "warning",
+	})
+}
+
+// DecideWithServerCheck is like Decide but accepts a server state callback.
+// When the decision is "deny" with reason "needs_auth" and the server is
+// actually connected, the decision is overridden to allow.
+func DecideWithServerCheck(ctx context.Context, def ToolDefinition, serverConnected func(serverName string) bool) PermissionDecision {
+	decision := DecideWithOverride(ctx, def, nil)
+	if decision.Behavior == PermissionDeny && decision.Reason == "needs_auth" {
+		if serverConnected != nil && def.Annotations.ServerName != "" && serverConnected(def.Annotations.ServerName) {
+			return AllowPermission()
+		}
+	}
+	return decision
+}
+
+func policyToDecision(policy PermissionPolicy) PermissionDecision {
+	switch policy {
+	case PolicyAlwaysAllow:
+		return AllowPermission()
+	case PolicyAlwaysAsk:
+		return AskPermission("user policy requires approval", ApprovalRequest{
+			Title:    "User policy override",
+			RiskTone: "warning",
+		})
+	default:
+		return AskPermission("unimplemented policy: "+string(policy), ApprovalRequest{Title: "Policy not yet supported", RiskTone: "warning"})
+	}
+}
+
 type PermissionBehavior string
 
 const (

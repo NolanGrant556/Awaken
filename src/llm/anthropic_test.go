@@ -126,7 +126,7 @@ func TestInvokeAnthropicToolsSchema(t *testing.T) {
 	})
 	defer server.Close()
 
-	tools := []tool.ToolDefinition{
+	tools := []tool.ToolSchema{
 		{
 			Type: "function",
 			Function: tool.ToolFunctionSchema{

@@ -20,9 +20,12 @@ import (
 
 	"awaken/src/agentcore"
 	"awaken/src/llm"
+	"awaken/src/mcpclient"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
 	_ "awaken/src/tools"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestHealthEndpoint(t *testing.T) {
@@ -3781,3 +3784,349 @@ func TestRunWithProviderBodySecretEmitsSanitizedMessage(t *testing.T) {
 		t.Fatalf("error message should contain status code, got %q", errorMessage)
 	}
 }
+
+// TestMCPToolCallSmoke 通过真实 LLM 调用验证 agent 能通过 MCP runtime 调用一个
+// in-proc echo server 暴露的工具。需要 LLM_API_KEY；未设置时自动跳过。
+//
+// 流程：注册一个 in-proc MCP server（echo_smoke）暴露 echo 工具 → 启动 manager →
+// 通过 NewRouterWithMCP 注入 → POST /v1/runs 让 agent 调用 mcp__echo_smoke__echo
+// → 校验 TOOL_CALL_START + TOOL_CALL_RESULT + RUN_FINISHED 事件。
+func TestMCPToolCallSmoke(t *testing.T) {
+	workspaceRoot, err := findProjectRoot()
+	if err != nil {
+		t.Fatalf("failed to find project root: %v", err)
+	}
+
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	if err := os.Chdir(workspaceRoot); err != nil {
+		t.Fatalf("failed to chdir to project root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	cfg := llm.LoadConfig()
+	if cfg.APIKey == "" {
+		t.Skip("LLM_API_KEY not set")
+	}
+
+	// 注册一个 in-proc MCP server，暴露一个 echo 工具。
+	registry := mcpclient.NewInProcRegistry()
+	echoFactory := mcpclient.InProcServerFactory(func() *mcp.Server {
+		srv := mcp.NewServer(&mcp.Implementation{Name: "echo-smoke", Version: "v1"}, nil)
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "echo",
+			Description: "Echoes back the provided message. Use this when the user asks you to echo something. Pass the message verbatim.",
+			Annotations: &mcp.ToolAnnotations{
+				ReadOnlyHint:    true,
+				DestructiveHint: boolPtr(false),
+				OpenWorldHint:   boolPtr(false),
+			},
+		}, func(ctx context.Context, req *mcp.CallToolRequest, input map[string]string) (*mcp.CallToolResult, map[string]string, error) {
+			msg := input["message"]
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: "echo:" + msg}},
+			}, input, nil
+		})
+		return srv
+	})
+	if err := registry.Register("echo_smoke", echoFactory); err != nil {
+		t.Fatalf("register in-proc: %v", err)
+	}
+
+	manager := mcpclient.NewManager(
+		mcpclient.WithInProcRegistry(registry),
+		mcpclient.WithLogger(mcpclient.StdLogger{}),
+	)
+	// 在启动 manager 前先反注册可能残留的同名 MCP 工具，避免上一轮测试污染。
+	mcpclient.UnregisterMcpToolsForTest("echo_smoke")
+	t.Cleanup(func() {
+		mcpclient.UnregisterMcpToolsForTest("echo_smoke")
+		manager.Shutdown(context.Background())
+	})
+
+	startCtx, startCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer startCancel()
+	manager.Start(startCtx, []mcpclient.ScopedMcpServerConfig{
+		{Name: "echo_smoke", Scope: mcpclient.ScopeProject, Config: mcpclient.McpServerConfig{
+			InProc: &mcpclient.InProcTransportConfig{ServerName: "echo_smoke"},
+		}},
+	})
+	// 等待 server 进入 connected 状态。
+	if err := mcpclient.WaitForServerStateForTest(manager, "echo_smoke", mcpclient.StateConnected, 5*time.Second); err != nil {
+		snap, _ := manager.SnapshotServer("echo_smoke")
+		t.Fatalf("echo_smoke never connected: %v (state=%s reason=%q)", err, snap.State, snap.ErrorReason)
+	}
+
+	runService := awruntime.NewRunService(
+		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
+			agentCfg := agentcore.AgentConfig{
+				MaxThoughts: 5,
+				EntryPoint:  "awaken-core-smoke",
+				ModelConfig: agentcore.ModelConfig{
+					APIKey:      cfg.APIKey,
+					BaseURL:     cfg.BaseURL,
+					Model:       cfg.Model,
+					Temperature: cfg.Temperature,
+					MaxTokens:   cfg.MaxTokens,
+					AuthScheme:  cfg.AuthScheme,
+				},
+				Workspace: agentcore.WorkspaceConfig{
+					Root:          workspace.WorkspaceRoot,
+					WritableRoots: workspace.WritableRoots,
+				},
+			}
+			return agentcore.NewAgentWithThreadID(agentCfg, threadID)
+		},
+		func(agent *agentcore.Agent) awruntime.Executor {
+			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return agent.RunStreamWithEvents(ctx, input, sink)
+			})
+		},
+	)
+
+	ts := httptest.NewServer(NewRouterWithMCP(runService, nil, manager))
+	defer ts.Close()
+
+	reqBody := fmt.Sprintf(`{
+		"input": "请调用 echo 工具，参数 message 为 hello-mcp。不要回复其他内容。",
+		"workspace": { "workspace_root": %q, "writable_roots": [%q] },
+		"client": { "session_id": "smoke-mcp-1", "request_id": "smoke-req-mcp-1", "entrypoint": "smoke" }
+	}`, workspaceRoot, workspaceRoot)
+
+	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST /v1/runs failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var created awruntime.Run
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	if created.RunID == "" {
+		t.Fatalf("expected run id, got empty")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	eventsReq, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/v1/runs/"+created.RunID+"/events", nil)
+	if err != nil {
+		t.Fatalf("failed to create event request: %v", err)
+	}
+
+	streamResp, err := http.DefaultClient.Do(eventsReq)
+	if err != nil {
+		t.Fatalf("GET events failed: %v", err)
+	}
+	defer streamResp.Body.Close()
+	if streamResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from events, got %d", streamResp.StatusCode)
+	}
+
+	events, err := collectSSEEvents(streamResp.Body)
+	if err != nil {
+		t.Fatalf("failed to collect events: %v", err)
+	}
+
+	var sawToolCallStart, sawToolCallResult, sawRunFinished bool
+	var sawMcpEchoTool bool
+	var toolResultContents []string
+	var finalOutcome string
+
+	for _, ev := range events {
+		switch ev.Type {
+		case agui.EventToolCallStart:
+			sawToolCallStart = true
+			if ev.ToolCallName == "mcp__echo_smoke__echo" {
+				sawMcpEchoTool = true
+			}
+		case agui.EventToolCallResult:
+			sawToolCallResult = true
+			toolResultContents = append(toolResultContents, ev.Content)
+		case agui.EventRunFinished:
+			sawRunFinished = true
+			if ev.Outcome != nil {
+				finalOutcome = ev.Outcome.Type
+			}
+		case agui.EventRunError:
+			t.Fatalf("run error: %s (code=%s)", ev.Message, ev.Code)
+		}
+	}
+
+	if !sawToolCallStart {
+		t.Fatalf("expected TOOL_CALL_START event")
+	}
+	if !sawMcpEchoTool {
+		t.Fatalf("expected agent to call mcp__echo_smoke__echo")
+	}
+	if !sawToolCallResult {
+		t.Fatalf("expected TOOL_CALL_RESULT event")
+	}
+	if !sawRunFinished {
+		t.Fatalf("expected RUN_FINISHED event")
+	}
+	if finalOutcome != "success" {
+		t.Fatalf("expected outcome success, got %q", finalOutcome)
+	}
+	echoedInResults := false
+	for _, content := range toolResultContents {
+		if strings.Contains(content, "echo:hello-mcp") {
+			echoedInResults = true
+			break
+		}
+	}
+	if !echoedInResults {
+		t.Fatalf("expected tool results to contain 'echo:hello-mcp', got %v", toolResultContents)
+	}
+}
+
+// TestMCPListToolsWithoutManager verifies GET /v1/mcp/tools returns builtin
+// tools even when no MCP manager is configured (the endpoint is registered
+// unconditionally).
+func TestMCPListToolsWithoutManager(t *testing.T) {
+	router := NewRouter(nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/mcp/tools", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var tools []mcpToolInfo
+	if err := json.Unmarshal(rec.Body.Bytes(), &tools); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(tools) == 0 {
+		t.Fatal("expected at least one builtin tool")
+	}
+	for _, tool := range tools {
+		if tool.Source != "builtin" {
+			t.Errorf("expected builtin source for tool %q, got %s", tool.Name, tool.Source)
+		}
+	}
+}
+
+// TestMCPAuthFetcherNotInstalledReturns409 verifies POST /v1/mcp/servers/{name}/auth
+// returns 409 Conflict when the manager has no auth fetcher installed.
+func TestMCPAuthFetcherNotInstalledReturns409(t *testing.T) {
+	registry := mcpclient.NewInProcRegistry()
+	if err := registry.Register("echo", func() *mcp.Server {
+		server := mcp.NewServer(&mcp.Implementation{Name: "echo", Version: "v1"}, nil)
+		return server
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	mgr := mcpclient.NewManager(
+		mcpclient.WithInProcRegistry(registry),
+		mcpclient.WithLogger(testLogger{}),
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	mgr.Start(ctx, []mcpclient.ScopedMcpServerConfig{
+		{Name: "echo", Scope: mcpclient.ScopeProject, Config: mcpclient.McpServerConfig{
+			InProc: &mcpclient.InProcTransportConfig{ServerName: "echo"},
+		}},
+	})
+	router := NewRouterWithMCP(nil, nil, mgr)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/mcp/servers/echo/auth", strings.NewReader(`{"redirectUrl":"http://localhost:0/callback"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409 AUTH_FETCHER_REQUIRED, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var errResp errorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("expected JSON error response: %v", err)
+	}
+	if errResp.Error != "AUTH_FETCHER_REQUIRED" {
+		t.Errorf("expected AUTH_FETCHER_REQUIRED error code, got %q", errResp.Error)
+	}
+}
+
+// TestMCPEnableIllegalStateReturnsConflict verifies POST /v1/mcp/servers/{name}/enable
+// returns 409 Conflict when the server is not in a state that allows enable.
+func TestMCPEnableIllegalStateReturnsConflict(t *testing.T) {
+	registry := mcpclient.NewInProcRegistry()
+	if err := registry.Register("echo", echoInProcServerFactory()); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	mgr := mcpclient.NewManager(
+		mcpclient.WithInProcRegistry(registry),
+		mcpclient.WithLogger(testLogger{}),
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	mgr.Start(ctx, []mcpclient.ScopedMcpServerConfig{
+		{Name: "echo", Scope: mcpclient.ScopeProject, Config: mcpclient.McpServerConfig{
+			InProc: &mcpclient.InProcTransportConfig{ServerName: "echo"},
+		}},
+	})
+	// Wait for the server to connect.
+	deadline := time.Now().Add(3 * time.Second)
+	var connected bool
+	for time.Now().Before(deadline) {
+		snap, err := mgr.SnapshotServer("echo")
+		if err == nil && snap.State == mcpclient.StateConnected {
+			connected = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !connected {
+		t.Fatal("echo server never connected")
+	}
+	router := NewRouterWithMCP(nil, nil, mgr)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/mcp/servers/echo/enable", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409 ILLEGAL_STATE, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var errResp errorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("expected JSON error response: %v", err)
+	}
+	if errResp.Error != "ILLEGAL_STATE" {
+		t.Errorf("expected ILLEGAL_STATE error code, got %q", errResp.Error)
+	}
+}
+
+// testLogger implements mcpclient.Logger for tests.
+type testLogger struct{}
+
+func (testLogger) Debugf(string, ...any) {}
+func (testLogger) Warnf(string, ...any)  {}
+func (testLogger) Errorf(string, ...any) {}
+
+// echoInProcServerFactory returns an InProcServerFactory for an echo server with one tool.
+func echoInProcServerFactory() mcpclient.InProcServerFactory {
+	return func() *mcp.Server {
+		server := mcp.NewServer(&mcp.Implementation{Name: "echo", Version: "v1.0.0"}, nil)
+		mcp.AddTool(server, &mcp.Tool{
+			Name:        "echo",
+			Description: "echoes input",
+			Annotations: &mcp.ToolAnnotations{
+				ReadOnlyHint:    true,
+				DestructiveHint: boolPtr(false),
+				OpenWorldHint:   boolPtr(false),
+			},
+		}, func(ctx context.Context, req *mcp.CallToolRequest, input map[string]string) (*mcp.CallToolResult, map[string]string, error) {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: input["message"]}},
+			}, input, nil
+		})
+		return server
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }

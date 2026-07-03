@@ -14,7 +14,7 @@ type ContextEnvelope struct {
 	UserContextItems   []ContextItem
 	SystemContextItems []ContextItem
 	Attachments        []ContextAttachment
-	ToolSchemas        []tool.ToolDefinition
+	ToolSchemas        []tool.ToolSchema
 	RuntimeSnapshot    RuntimeSnapshot
 	ContextWindowState ContextWindowState
 	CacheKeys          []ContextCacheKey

@@ -382,3 +382,12 @@ func mapRuntimeEvent(event awruntime.Event) []agui.Event {
 		return nil
 	}
 }
+
+// handleGetRunAudit returns audit records for a run.
+// GET /v1/runs/{id}/audit
+func (h runHandlers) handleGetRunAudit(w http.ResponseWriter, _ *http.Request) {
+	// Audit records are written to the AuditSink configured in ToolRuntime.
+	// For now, return an empty array — the full audit pipeline requires
+	// per-run InMemorySink wiring in RunService (follow-up).
+	writeJSON(w, http.StatusOK, []any{})
+}

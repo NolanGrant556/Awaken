@@ -51,7 +51,7 @@ type Request struct {
 	DisableReasoning    bool
 	Purpose             RequestPurpose
 	Messages            []context.Message
-	Tools               []tool.ToolDefinition
+	Tools               []tool.ToolSchema
 }
 
 // Response 是统一响应结构

@@ -34,6 +34,18 @@ func (t runtimeTestTool) Description() string {
 	return "runtime test tool"
 }
 
+func (t runtimeTestTool) Definition() tool.ToolDefinition {
+	return tool.ToolDefinition{
+		Name:        t.name,
+		DisplayName: t.name,
+		Source:      tool.SourceBuiltin,
+		Description: t.Description(),
+		Annotations: tool.ToolAnnotations{
+			ReadOnly: t.readOnly,
+		},
+	}
+}
+
 func (t runtimeTestTool) Parameters() []tool.ToolParameter {
 	return t.params
 }
@@ -420,12 +432,16 @@ func TestToolRuntimeEmitsArtifactsAndRejectsOnApprovalDecision(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("expected approved tool to succeed, got %+v", result)
 	}
-	if len(got) != 3 {
+	if len(got) != 5 {
 		t.Fatalf("expected approval and artifact events, got %+v", got)
 	}
 	if got[0].Type != ApprovalRequestedEventType ||
 		got[1].Type != ToolPermissionDecidedEventType ||
-		got[2].Type != ArtifactCreatedEventType {
+		got[2].Type != ToolProgressEventType ||
+		got[2].ToolProgressStage != "started" ||
+		got[3].Type != ToolProgressEventType ||
+		got[3].ToolProgressStage != "completed" ||
+		got[4].Type != ArtifactCreatedEventType {
 		t.Fatalf("unexpected emitted events: %+v", got)
 	}
 
@@ -479,17 +495,23 @@ func TestToolRuntimeEmitsCommandOutputFromObservableTool(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("expected success, got %+v", result)
 	}
-	if len(got) != 3 {
+	if len(got) != 5 {
 		t.Fatalf("expected permission and two command output events, got %+v", got)
 	}
 	if got[0].Type != ToolPermissionDecidedEventType || got[0].ToolDecisionAction != string(ToolDecisionAllow) {
 		t.Fatalf("unexpected permission event: %+v", got[0])
 	}
-	if got[1].Type != CommandOutputEventType || got[1].ToolCallID != "call_observable" || got[1].CommandStream != "stdout" || got[1].Delta != "hello" {
-		t.Fatalf("unexpected stdout event: %+v", got[1])
+	if got[1].Type != ToolProgressEventType || got[1].ToolProgressStage != "started" {
+		t.Fatalf("unexpected start progress event: %+v", got[1])
 	}
-	if got[2].Type != CommandOutputEventType || got[2].CommandStream != "stderr" || got[2].Delta != "warn" || !got[2].Truncated {
-		t.Fatalf("unexpected stderr event: %+v", got[2])
+	if got[2].Type != CommandOutputEventType || got[2].ToolCallID != "call_observable" || got[2].CommandStream != "stdout" || got[2].Delta != "hello" {
+		t.Fatalf("unexpected stdout event: %+v", got[2])
+	}
+	if got[3].Type != CommandOutputEventType || got[3].CommandStream != "stderr" || got[3].Delta != "warn" || !got[3].Truncated {
+		t.Fatalf("unexpected stderr event: %+v", got[3])
+	}
+	if got[4].Type != ToolProgressEventType || got[4].ToolProgressStage != "completed" {
+		t.Fatalf("unexpected completed progress event: %+v", got[4])
 	}
 }
 

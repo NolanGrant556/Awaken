@@ -26,16 +26,24 @@ import {
   normalizeRuntimeRun,
   normalizeRuntimeThreadTranscript,
   normalizeRuntimeThread,
-  normalizeStartRunRequest,
-  type ApprovalDecision,
-  type DesktopPlatform,
-  type ModelProfileSaveRequest,
-  type ModelProviderWire,
-  type RuntimeInfoWire,
-  type RuntimeRunWire,
-  type RuntimeModelProfileSummaryWire,
-  type RenameThreadRequest,
-  type RuntimeThreadTranscriptWire,
+	  normalizeStartRunRequest,
+	  type ApprovalDecision,
+	  type ConfigureMcpServersRequest,
+	  type ConfigureMcpServersResponse,
+	  type DesktopPlatform,
+	  type InstallSkillRequest,
+	  type InstallSkillResponse,
+	  type ModelProfileSaveRequest,
+	  type ModelProviderWire,
+	  type RuntimeConnector,
+	  type RuntimeConnectorActionResponse,
+	  type RuntimeInfoWire,
+	  type RuntimeMcpServer,
+	  type RuntimeRunWire,
+	  type RuntimeSkill,
+	  type RuntimeModelProfileSummaryWire,
+	  type RenameThreadRequest,
+	  type RuntimeThreadTranscriptWire,
   type RuntimeThreadWire,
   type StartRunRequest,
 } from "../shared/runtime.js";
@@ -455,7 +463,61 @@ ipcMain.handle("awaken:get-runtime-info", async () => {
   } catch {
     console.error("[awaken-desktop] failed to get runtime info");
     throw new Error("Runtime unavailable");
-  }
+	}
+});
+
+ipcMain.handle("awaken:list-connectors", async () => {
+	return requestRuntime<RuntimeConnector[]>("/v1/connectors", {
+		method: "GET",
+	});
+});
+
+ipcMain.handle("awaken:connect-connector", async (_event, connectorId: string) => {
+	return requestRuntime<RuntimeConnectorActionResponse>(`/v1/connectors/${connectorId}/connect`, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+		},
+		body: JSON.stringify({}),
+	});
+});
+
+ipcMain.handle("awaken:disconnect-connector", async (_event, connectorId: string) => {
+	return requestRuntime<RuntimeConnectorActionResponse>(`/v1/connectors/${connectorId}/disconnect`, {
+		method: "POST",
+	});
+});
+
+ipcMain.handle("awaken:list-mcp-servers", async () => {
+	return requestRuntime<RuntimeMcpServer[]>("/v1/mcp/servers", {
+		method: "GET",
+	});
+});
+
+ipcMain.handle("awaken:configure-mcp-servers", async (_event, request: ConfigureMcpServersRequest) => {
+	return requestRuntime<ConfigureMcpServersResponse>("/v1/mcp/servers", {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+		},
+		body: JSON.stringify(request),
+	});
+});
+
+ipcMain.handle("awaken:list-skills", async () => {
+	return requestRuntime<RuntimeSkill[]>("/v1/skills", {
+		method: "GET",
+	});
+});
+
+ipcMain.handle("awaken:install-skill", async (_event, request: InstallSkillRequest) => {
+	return requestRuntime<InstallSkillResponse>("/v1/skills/install", {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+		},
+		body: JSON.stringify(request),
+	});
 });
 
 ipcMain.handle("awaken:list-model-providers", async () => {

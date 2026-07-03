@@ -14,16 +14,16 @@ import (
 // awaken.mcp.json or ~/.awaken/mcp.json. Exactly one transport variant
 // field must be set.
 type McpServerConfig struct {
-	Stdio    *StdioTransportConfig  `json:"stdio,omitempty"`
-	HTTP     *HTTPTransportConfig   `json:"http,omitempty"`
-	SSE      *HTTPTransportConfig   `json:"sse,omitempty"`
-	WS       *HTTPTransportConfig   `json:"ws,omitempty"`
-	InProc   *InProcTransportConfig `json:"inProcess,omitempty"`
+	Stdio  *StdioTransportConfig  `json:"stdio,omitempty"`
+	HTTP   *HTTPTransportConfig   `json:"http,omitempty"`
+	SSE    *HTTPTransportConfig   `json:"sse,omitempty"`
+	WS     *HTTPTransportConfig   `json:"ws,omitempty"`
+	InProc *InProcTransportConfig `json:"inProcess,omitempty"`
 
-	Enabled        *bool  `json:"enabled,omitempty"`
-	DisplayName    string `json:"displayName,omitempty"`
-	HeadersHelper  string `json:"headersHelper,omitempty"`
-	InsecureSkipVerify bool `json:"insecureSkipVerify,omitempty"`
+	Enabled            *bool  `json:"enabled,omitempty"`
+	DisplayName        string `json:"displayName,omitempty"`
+	HeadersHelper      string `json:"headersHelper,omitempty"`
+	InsecureSkipVerify bool   `json:"insecureSkipVerify,omitempty"`
 }
 
 // ScopedMcpServerConfig pairs a server config with the scope it came from.
@@ -62,6 +62,25 @@ type ConfigFile struct {
 func LoadProjectConfig(workspaceRoot string) (ConfigFile, error) {
 	path := filepath.Join(workspaceRoot, "awaken.mcp.json")
 	return loadConfigFile(path)
+}
+
+// SaveProjectConfig writes ./awaken.mcp.json in the given workspace root.
+func SaveProjectConfig(workspaceRoot string, cfg ConfigFile) error {
+	if strings.TrimSpace(workspaceRoot) == "" {
+		return fmt.Errorf("workspace root is required")
+	}
+	if cfg.Servers == nil {
+		cfg.Servers = map[string]McpServerConfig{}
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("serialize project mcp config: %w", err)
+	}
+	path := filepath.Join(workspaceRoot, "awaken.mcp.json")
+	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
 }
 
 // LoadUserConfig reads ~/.awaken/mcp.json. A missing file returns an empty

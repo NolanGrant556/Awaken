@@ -86,6 +86,7 @@ import {
   type WorkspaceProject,
 } from "./projectWorkspace";
 import { ModelSettingsDialog } from "./ModelSettingsDialog";
+import { ExtensionsView, type ExtensionSection } from "./ExtensionsView";
 
 type InspectorTabId = "changes";
 
@@ -895,6 +896,8 @@ export function App() {
     ),
   });
   const showTurnMarkerRail = turnMarkerDisplay.mode !== "hidden";
+  const activeExtensionSection: ExtensionSection | undefined =
+    activeNavId === "connectors" || activeNavId === "skills" ? activeNavId : undefined;
 
   function createSubscribeHandlers(): SubscribeHandlers {
     return {
@@ -1255,6 +1258,7 @@ export function App() {
   }
 
   function handleSelectProject(id: string): void {
+    setActiveNavId(undefined);
     if (id.startsWith("thread:")) {
       void handleSelectConversation(id.slice("thread:".length));
       return;
@@ -1380,6 +1384,7 @@ export function App() {
   }
 
   function handleNewTask(): void {
+    setActiveNavId(undefined);
     unsubscribeRef.current?.();
     unsubscribeRef.current = null;
     threadLoadSeqRef.current += 1;
@@ -1848,148 +1853,160 @@ export function App() {
           }
           main={
             <div className="desktop-main">
-              <WorkbenchShell
-                inspectorCollapsed={inspectorCollapsed}
-                stage={
-                  <RunStage
-                    scrollRef={showCenterComposer ? undefined : setRunStageScrollElement}
-                    onScroll={showCenterComposer ? undefined : handleRunStageScroll}
-                    overlay={
-                      <>
-                        {renderNoticeToast()}
-                        {showTurnMarkerRail ? (
-                          <nav
-                            className={`turn-marker-rail turn-marker-rail-${turnMarkerDisplay.mode}`}
-                            aria-label="Message shortcuts"
-                            style={{ bottom: Math.max(28, composerSafeAreaPx) }}
-                          >
-                            {turnMarkerDisplay.items.map((marker) => (
-                              <button
-                                key={`${marker.id}:${marker.index}`}
-                                type="button"
-                                className={`turn-marker-button${
-                                  marker.id === activeWorkbenchTurnId ? " turn-marker-button-active" : ""
-                                }`}
-                                aria-current={marker.id === activeWorkbenchTurnId ? "true" : undefined}
-                                aria-label={`跳转到第 ${marker.index + 1} 条消息`}
-                                title={`第 ${marker.index + 1} 条消息`}
-                                onClick={() => handleTurnMarkerClick(marker.id)}
-                              >
-                                <span className="turn-marker-bar" aria-hidden="true" />
-                              </button>
-                            ))}
-                          </nav>
-                        ) : null}
-                      </>
-                    }
-                    composer={
-                      showCenterComposer ? undefined : (
-                        <ComposerDock ref={composerDockRef}>
-                          <div className="composer-dock-stack">
-                            {renderComposerRuntimePanels()}
-                            {renderActiveApprovalPrompt()}
-                            <ComposerBar
-                              value={composerValue}
-                              onChange={setComposerValue}
-                              onSubmit={() => {
-                                void handleComposerSubmit();
-                              }}
-                              onAddContext={handleAddContext}
-                              placeholder=""
-                              disabled={composerBarState.disabled}
-                              isReady={composerBarState.isReady}
-                              submitMode={composerBarState.submitMode}
-                              variant="dock"
-                              metaItems={composerMetaItems}
-                              focusRequest={composerFocusRequest}
-                            />
-                          </div>
-                        </ComposerDock>
-                      )
-                    }
-                  >
-                    {showCenterComposer ? (
-                      <div className="run-stage-center-composer">
-                        <TaskWelcome />
-                        {renderComposerRuntimePanels()}
-                        {renderActiveApprovalPrompt()}
-                        <ComposerBar
-                          value={composerValue}
-                          onChange={setComposerValue}
-                          onSubmit={() => {
-                            void handleComposerSubmit();
-                          }}
-                          onAddContext={handleAddContext}
-                          placeholder=""
-                          disabled={composerBarState.disabled}
-                          isReady={composerBarState.isReady}
-                          submitMode={composerBarState.submitMode}
-                          variant="center"
-                          metaItems={composerMetaItems}
-                          focusRequest={composerFocusRequest}
-                        />
-                      </div>
-                    ) : null}
-
-                    {showCenterComposer ? null : (
-                      <ExecutionFeed>
-                        {narrativeSections.leadItems.map((item, index) =>
-                          renderNarrativeItem(item, `lead:${item.id}:${index}`),
-                        )}
-                        {narrativeSections.turns.map((turn, index) => {
-                          const isLatestPrompt = turn.id === latestPromptId;
-                          const isActiveTurn = turn.id === activeWorkbenchTurnId;
-                          const turnStyle =
-                            isLatestPrompt && latestTurnMinHeightPx > 0
-                              ? ({
-                                  "--aw-latest-turn-min-height": `${latestTurnMinHeightPx}px`,
-                                } as CSSProperties)
-                              : undefined;
-
-                          return (
-                            <section
-                              key={`${turn.id}:${index}`}
-                              data-execution-turn-id={turn.id}
-                              className={`execution-turn-section${
-                                isLatestPrompt ? " execution-turn-section-latest" : ""
-                              }${
-                                isActiveTurn ? " execution-turn-section-active" : ""
-                              }`}
-                              style={turnStyle}
-                              aria-label={`Turn ${index + 1}`}
+              {activeExtensionSection ? (
+                <>
+                  {renderNoticeToast()}
+                  <ExtensionsView
+                    section={activeExtensionSection}
+                    desktopReady={desktopReady}
+                    runtimeClient={runtimeClient}
+                    onNotice={setNotice}
+                  />
+                </>
+              ) : (
+                <WorkbenchShell
+                  inspectorCollapsed={inspectorCollapsed}
+                  stage={
+                    <RunStage
+                      scrollRef={showCenterComposer ? undefined : setRunStageScrollElement}
+                      onScroll={showCenterComposer ? undefined : handleRunStageScroll}
+                      overlay={
+                        <>
+                          {renderNoticeToast()}
+                          {showTurnMarkerRail ? (
+                            <nav
+                              className={`turn-marker-rail turn-marker-rail-${turnMarkerDisplay.mode}`}
+                              aria-label="Message shortcuts"
+                              style={{ bottom: Math.max(28, composerSafeAreaPx) }}
                             >
-                              <div className="execution-turn-column">
-                                <div className="execution-turn-header">
-                                  <UserPromptBlock text={turn.prompt.text} />
+                              {turnMarkerDisplay.items.map((marker) => (
+                                <button
+                                  key={`${marker.id}:${marker.index}`}
+                                  type="button"
+                                  className={`turn-marker-button${
+                                    marker.id === activeWorkbenchTurnId ? " turn-marker-button-active" : ""
+                                  }`}
+                                  aria-current={marker.id === activeWorkbenchTurnId ? "true" : undefined}
+                                  aria-label={`跳转到第 ${marker.index + 1} 条消息`}
+                                  title={`第 ${marker.index + 1} 条消息`}
+                                  onClick={() => handleTurnMarkerClick(marker.id)}
+                                >
+                                  <span className="turn-marker-bar" aria-hidden="true" />
+                                </button>
+                              ))}
+                            </nav>
+                          ) : null}
+                        </>
+                      }
+                      composer={
+                        showCenterComposer ? undefined : (
+                          <ComposerDock ref={composerDockRef}>
+                            <div className="composer-dock-stack">
+                              {renderComposerRuntimePanels()}
+                              {renderActiveApprovalPrompt()}
+                              <ComposerBar
+                                value={composerValue}
+                                onChange={setComposerValue}
+                                onSubmit={() => {
+                                  void handleComposerSubmit();
+                                }}
+                                onAddContext={handleAddContext}
+                                placeholder=""
+                                disabled={composerBarState.disabled}
+                                isReady={composerBarState.isReady}
+                                submitMode={composerBarState.submitMode}
+                                variant="dock"
+                                metaItems={composerMetaItems}
+                                focusRequest={composerFocusRequest}
+                              />
+                            </div>
+                          </ComposerDock>
+                        )
+                      }
+                    >
+                      {showCenterComposer ? (
+                        <div className="run-stage-center-composer">
+                          <TaskWelcome />
+                          {renderComposerRuntimePanels()}
+                          {renderActiveApprovalPrompt()}
+                          <ComposerBar
+                            value={composerValue}
+                            onChange={setComposerValue}
+                            onSubmit={() => {
+                              void handleComposerSubmit();
+                            }}
+                            onAddContext={handleAddContext}
+                            placeholder=""
+                            disabled={composerBarState.disabled}
+                            isReady={composerBarState.isReady}
+                            submitMode={composerBarState.submitMode}
+                            variant="center"
+                            metaItems={composerMetaItems}
+                            focusRequest={composerFocusRequest}
+                          />
+                        </div>
+                      ) : null}
+
+                      {showCenterComposer ? null : (
+                        <ExecutionFeed>
+                          {narrativeSections.leadItems.map((item, index) =>
+                            renderNarrativeItem(item, `lead:${item.id}:${index}`),
+                          )}
+                          {narrativeSections.turns.map((turn, index) => {
+                            const isLatestPrompt = turn.id === latestPromptId;
+                            const isActiveTurn = turn.id === activeWorkbenchTurnId;
+                            const turnStyle =
+                              isLatestPrompt && latestTurnMinHeightPx > 0
+                                ? ({
+                                    "--aw-latest-turn-min-height": `${latestTurnMinHeightPx}px`,
+                                  } as CSSProperties)
+                                : undefined;
+
+                            return (
+                              <section
+                                key={`${turn.id}:${index}`}
+                                data-execution-turn-id={turn.id}
+                                className={`execution-turn-section${
+                                  isLatestPrompt ? " execution-turn-section-latest" : ""
+                                }${
+                                  isActiveTurn ? " execution-turn-section-active" : ""
+                                }`}
+                                style={turnStyle}
+                                aria-label={`Turn ${index + 1}`}
+                              >
+                                <div className="execution-turn-column">
+                                  <div className="execution-turn-header">
+                                    <UserPromptBlock text={turn.prompt.text} />
+                                  </div>
+                                  <div className="execution-turn-body">
+                                    {turn.items.map((item, itemIndex) =>
+                                      renderNarrativeItem(
+                                        item,
+                                        `${turn.id}:${item.id}:${itemIndex}`,
+                                      ),
+                                    )}
+                                  </div>
                                 </div>
-                                <div className="execution-turn-body">
-                                  {turn.items.map((item, itemIndex) =>
-                                    renderNarrativeItem(
-                                      item,
-                                      `${turn.id}:${item.id}:${itemIndex}`,
-                                    ),
-                                  )}
-                                </div>
-                              </div>
-                            </section>
-                          );
-                        })}
-                      </ExecutionFeed>
-                    )}
-                  </RunStage>
-                }
-                inspector={
-                  <LightInspectorRail
-                    title="On Awaken"
-                    status={desktopReady ? "Local" : "Offline"}
-                    items={inspectorTabs}
-                    activeId={inspectorTab}
-                    onSelect={(id) => setInspectorTab(id as InspectorTabId)}
-                  >
-                    {renderInspectorTabPanel()}
-                  </LightInspectorRail>
-                }
-              />
+                              </section>
+                            );
+                          })}
+                        </ExecutionFeed>
+                      )}
+                    </RunStage>
+                  }
+                  inspector={
+                    <LightInspectorRail
+                      title="On Awaken"
+                      status={desktopReady ? "Local" : "Offline"}
+                      items={inspectorTabs}
+                      activeId={inspectorTab}
+                      onSelect={(id) => setInspectorTab(id as InspectorTabId)}
+                    >
+                      {renderInspectorTabPanel()}
+                    </LightInspectorRail>
+                  }
+                />
+              )}
             </div>
           }
         />

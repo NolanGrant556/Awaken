@@ -161,6 +161,386 @@ pre {
   gap: 10px;
 }
 
+.extension-view {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--aw-bg-white);
+}
+
+.extension-view-inner {
+  display: grid;
+  align-content: start;
+  gap: 22px;
+  min-width: 0;
+  min-height: 0;
+  width: min(1280px, calc(100% - 72px));
+  margin: 0 auto;
+  padding: 54px 0 72px;
+  overflow: auto;
+  scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 46%, transparent) transparent;
+  scrollbar-width: thin;
+}
+
+.extension-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  min-width: 0;
+}
+
+.extension-header h1 {
+  margin: 0;
+  color: var(--aw-text-primary);
+  font-size: 30px;
+  font-weight: 850;
+  line-height: 1.1;
+}
+
+.extension-header p {
+  margin: 8px 0 0;
+  color: var(--aw-text-secondary);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.extension-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.extension-icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-raised);
+  color: var(--aw-text-secondary);
+  cursor: pointer;
+}
+
+.extension-icon-button:hover:enabled,
+.extension-icon-button:focus-visible {
+  border-color: color-mix(in srgb, var(--aw-text-secondary) 52%, var(--aw-border-main));
+  color: var(--aw-text-primary);
+}
+
+.extension-icon-button:disabled {
+  opacity: 0.48;
+  cursor: default;
+}
+
+.extension-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.extension-toolbar input {
+  width: min(360px, 100%);
+  height: 38px;
+  padding: 0 13px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-surface-raised);
+  color: var(--aw-text-primary);
+}
+
+.extension-toolbar input:focus {
+  border-color: color-mix(in srgb, var(--aw-text-secondary) 64%, var(--aw-border-main));
+  outline: 2px solid color-mix(in srgb, var(--aw-accent) 16%, transparent);
+  outline-offset: 1px;
+}
+
+.extension-message {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--aw-error) 36%, var(--aw-border-main));
+  border-radius: var(--aw-radius-panel);
+  background: color-mix(in srgb, var(--aw-error) 7%, var(--aw-bg-white));
+  color: var(--aw-text-primary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.extension-sections,
+.extension-section {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.extension-section h2 {
+  margin: 0;
+  color: var(--aw-text-secondary);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.extension-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  gap: 12px 14px;
+  min-width: 0;
+}
+
+.extension-card {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 88px;
+  padding: 14px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-panel);
+  transition:
+    border-color var(--aw-transition-fast),
+    box-shadow var(--aw-transition-fast),
+    background-color var(--aw-transition-fast);
+}
+
+.extension-card:hover {
+  border-color: color-mix(in srgb, var(--aw-border-main) 62%, var(--aw-text-secondary));
+  box-shadow: 0 8px 22px rgba(20, 24, 31, 0.06);
+}
+
+.extension-card-compact {
+  min-height: 78px;
+}
+
+.extension-card-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-raised);
+  color: var(--aw-text-secondary);
+}
+
+.extension-card-copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.extension-card-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.extension-card h3 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--aw-text-primary);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.extension-card p {
+  display: -webkit-box;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--aw-text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.extension-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.extension-card-meta span,
+.extension-state {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 20px;
+  padding: 0 7px;
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-tertiary);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1;
+}
+
+.extension-state {
+  flex: 0 0 auto;
+}
+
+.extension-state-connected,
+.extension-state-available {
+  background: color-mix(in srgb, var(--aw-success) 13%, var(--aw-bg-white));
+  color: color-mix(in srgb, var(--aw-success) 72%, var(--aw-text-primary));
+}
+
+.extension-state-failed,
+.extension-state-unavailable {
+  background: color-mix(in srgb, var(--aw-error) 10%, var(--aw-bg-white));
+  color: color-mix(in srgb, var(--aw-error) 72%, var(--aw-text-primary));
+}
+
+.extension-state-pending,
+.extension-state-needs-auth {
+  background: color-mix(in srgb, var(--aw-warning) 18%, var(--aw-bg-white));
+  color: color-mix(in srgb, var(--aw-warning) 74%, var(--aw-text-primary));
+}
+
+.extension-card-action {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: var(--aw-radius-md);
+  background: transparent;
+  color: var(--aw-text-secondary);
+  cursor: pointer;
+}
+
+.extension-card-action:hover:enabled,
+.extension-card-action:focus-visible {
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-primary);
+}
+
+.extension-card-action:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.extension-empty {
+  display: grid;
+  place-items: center;
+  min-height: 96px;
+  border: 1px dashed var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  color: var(--aw-text-tertiary);
+  font-size: 13px;
+}
+
+.aw-dialog:has(.extension-dialog-body) {
+  width: min(720px, calc(100vw - 48px));
+}
+
+.extension-dialog-body {
+  display: grid;
+  gap: 14px;
+}
+
+.extension-dialog-body p {
+  margin: 0;
+  color: var(--aw-text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.extension-code-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 300px;
+  box-sizing: border-box;
+  padding: 14px 16px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-primary);
+  font-family: var(--aw-font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.extension-code-input:focus {
+  border-color: color-mix(in srgb, var(--aw-text-secondary) 64%, var(--aw-border-main));
+  outline: 2px solid color-mix(in srgb, var(--aw-accent) 16%, transparent);
+  outline-offset: 1px;
+}
+
+.extension-dialog-note {
+  color: color-mix(in srgb, var(--aw-warning) 72%, var(--aw-text-secondary));
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.extension-dropzone {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  min-height: 154px;
+  border: 1px dashed var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-secondary);
+  cursor: pointer;
+}
+
+.extension-dropzone input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.extension-dropzone strong {
+  color: var(--aw-text-primary);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.extension-dropzone-active,
+.extension-dropzone:hover,
+.extension-dropzone:focus-within {
+  border-color: color-mix(in srgb, var(--aw-accent) 48%, var(--aw-border-main));
+  background: color-mix(in srgb, var(--aw-accent) 6%, var(--aw-bg-white));
+}
+
+@media (max-width: 900px) {
+  .extension-view-inner {
+    width: min(100% - 32px, 1280px);
+    padding-top: 34px;
+  }
+
+  .extension-header {
+    display: grid;
+  }
+
+  .extension-header-actions,
+  .extension-toolbar {
+    justify-content: flex-start;
+  }
+
+  .extension-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .aw-dialog:has(.settings-dialog-shell) {
   width: min(1760px, calc(100vw - 48px));
   height: min(1080px, calc(100vh - 88px));

@@ -9,6 +9,9 @@
 ```text
 docs/
 ├── 01_桌面工作台/
+│   ├── 左侧栏/
+│   ├── 中间交互区域/
+│   └── 右侧栏/
 ├── 02_主智能体闭环/
 ├── 03_运行时与本地服务/
 ├── 04_工具权限与审批/
@@ -36,7 +39,7 @@ Awaken 的 runtime、agent loop、工具执行、approval、SSE、模型配置�
 
 ## 前端 Workbench 契约
 
-涉及 Awaken Desktop 中间工作区（`AppShell -> WorkbenchShell -> RunStage -> ComposerDock / ExecutionFeed`）的布局、滚动、turn marker、composer、narrative/turn 渲染或相关样式改动时，先读 `/Users/nolangrant/Awaken/docs/01_桌面工作台/架构契约.md`，并按 `/Users/nolangrant/Awaken/docs/01_桌面工作台/复核清单.md` 复核。
+涉及 Awaken Desktop 中间工作区（`AppShell -> WorkbenchShell -> RunStage -> ComposerDock / ExecutionFeed`）的布局、滚动、turn marker、composer、narrative/turn 渲染或相关样式改动时，先读 `/Users/nolangrant/Awaken/docs/01_桌面工作台/中间交互区域/架构契约.md`，并按 `/Users/nolangrant/Awaken/docs/01_桌面工作台/中间交互区域/复核清单.md` 复核。
 
 中间区域现有设计与交互是产品契约：`RunStage` 是唯一滚动/定位/overlay/composer 容器，`ExecutionFeed` 只承载 narrative/turn，composer 形态目前只承认 `center` 与 `dock`。不要为了单个功能绕过这些边界；如确实需要改变契约，必须同步更新契约文档、补充相应测试，并提供真实运行截图或录屏作为验收证据。
 

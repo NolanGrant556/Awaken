@@ -47,10 +47,12 @@ README.md
 
 然后按任务继续读：
 
-- 需要项目文件职责总览：读 `docs/01_项目情况说明/项目文件清单/README.md`。
-- 改 runtime / protocol / AG-UI 边界：读 `docs/01_项目情况说明/AG-UI&A2UI说明/agui-a2ui-architecture.md`。
-- 需要对照 AG-UI / A2UI 上游：读 `docs/01_项目情况说明/AG-UI&A2UI说明/upstream-references.md`。
-- 改 desktop：以本 README 的入口契约、验收命令和 `apps/desktop/src` 下真实实现为准。
+- 需要 Coding Agent 行为约束与文档上下文管理规则：读 `AGENTS.md`。
+- 改 Awaken Desktop / Workbench：读 `docs/01_桌面工作台/架构契约.md`，并按 `docs/01_桌面工作台/复核清单.md` 复核。
+- 改主智能体闭环：读 `docs/02_主智能体闭环/实施计划.md`。
+- 改 runtime / protocol / AG-UI 边界：读 `docs/09_AGUI与A2UI协议/架构说明.md`。
+- 需要对照 AG-UI / A2UI 上游：读 `docs/09_AGUI与A2UI协议/上游参考.md`。
+- 需要历史项目文件职责总览：读 `docs/10_历史资料/项目文件清单.md`。
 - 改 Awaken Design System / UI 组件库：读 `Awaken Design System/README.md`。
 
 开始改代码前先看真实工作区：
@@ -70,7 +72,7 @@ git status --short
 │   └── awaken-core/             # 本地 HTTP/SSE runtime 进程
 ├── apps/
 │   └── desktop/                 # Electron main/preload/renderer consumer
-├── docs/                        # 当前架构与接手指引
+├── docs/                        # 按功能域组织的上下文档案
 ├── scripts/                     # 构建、验收、runtime binary 自动化脚本；不是使用入口
 ├── Awaken Design System/         # @awaken/design-system，组件源码、tokens、Gallery
 ├── src/

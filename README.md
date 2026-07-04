@@ -48,7 +48,7 @@ README.md
 然后按任务继续读：
 
 - 需要 Coding Agent 行为约束与文档上下文管理规则：读 `AGENTS.md`。
-- 改 Awaken Desktop / Workbench：读 `docs/01_桌面工作台/架构契约.md`，并按 `docs/01_桌面工作台/复核清单.md` 复核。
+- 改 Awaken Desktop / Workbench：读 `docs/01_桌面工作台/中间交互区域/架构契约.md`，并按 `docs/01_桌面工作台/中间交互区域/复核清单.md` 复核。
 - 改主智能体闭环：读 `docs/02_主智能体闭环/实施计划.md`。
 - 改 runtime / protocol / AG-UI 边界：读 `docs/09_AGUI与A2UI协议/架构说明.md`。
 - 需要对照 AG-UI / A2UI 上游：读 `docs/09_AGUI与A2UI协议/上游参考.md`。

@@ -33,16 +33,19 @@ func TestMapEventReasoningLifecycle(t *testing.T) {
 
 func TestMapEventCarriesTurnMetadata(t *testing.T) {
 	events := MapEvent(agentcore.AwakenEvent{
-		Type:             agentcore.RunFinishedEventType,
-		ThreadID:         "thread-1",
-		RunID:            "run-1",
-		TurnID:           "turn-1",
-		QueryChainID:     "chain-1",
-		Depth:            2,
-		TurnCount:        2,
-		Content:          "done",
-		TerminalReason:   agentcore.TerminalReasonCompleted,
-		TransitionReason: agentcore.TransitionToolResultContinuation,
+		Type:                   agentcore.RunFinishedEventType,
+		ThreadID:               "thread-1",
+		RunID:                  "run-1",
+		TurnID:                 "turn-1",
+		QueryChainID:           "chain-1",
+		Depth:                  2,
+		TurnCount:              2,
+		Content:                "done",
+		TerminalReason:         agentcore.TerminalReasonCompleted,
+		TransitionReason:       agentcore.TransitionToolResultContinuation,
+		ContextModelWindow:     128000,
+		ContextEstimatedTokens: 6400,
+		ContextActualTokens:    6123,
 	})
 
 	if len(events) != 1 {
@@ -54,6 +57,9 @@ func TestMapEventCarriesTurnMetadata(t *testing.T) {
 	}
 	if got.TerminalReason != "completed" || got.TransitionReason != "tool_result_continuation" {
 		t.Fatalf("expected reason metadata to be preserved, got %+v", got)
+	}
+	if got.ContextModelWindow != 128000 || got.ContextEstimatedTokens != 6400 || got.ContextActualTokens != 6123 {
+		t.Fatalf("expected context metadata to be preserved, got %+v", got)
 	}
 }
 

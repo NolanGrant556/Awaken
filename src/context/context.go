@@ -20,14 +20,14 @@ const (
 )
 
 type Message struct {
-	Role              Role       `json:"role"`
-	Content           string     `json:"content"`
+	Role              Role                `json:"role"`
+	Content           string              `json:"content"`
 	Attachments       []MessageAttachment `json:"attachments,omitempty"`
-	ToolCalls         []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID        string     `json:"tool_call_id,omitempty"`
-	Name              string     `json:"name,omitempty"`
-	IsError           bool       `json:"is_error,omitempty"`
-	CompactBoundaryID string     `json:"compact_boundary_id,omitempty"`
+	ToolCalls         []ToolCall          `json:"tool_calls,omitempty"`
+	ToolCallID        string              `json:"tool_call_id,omitempty"`
+	Name              string              `json:"name,omitempty"`
+	IsError           bool                `json:"is_error,omitempty"`
+	CompactBoundaryID string              `json:"compact_boundary_id,omitempty"`
 }
 
 type MessageAttachment struct {
@@ -60,6 +60,8 @@ type Context struct {
 	maxTokens   int
 	tools       []tool.ToolSchema
 }
+
+const roughImageAttachmentTokenEstimate = 2000
 
 type Option func(*Context)
 
@@ -270,6 +272,22 @@ func EstimateTokens(text string) int {
 	return charEstimate
 }
 
+func EstimateAttachmentPayloadTokens(kind string, content string) int {
+	if strings.EqualFold(strings.TrimSpace(kind), "image") {
+		return roughImageAttachmentTokenEstimate
+	}
+	return EstimateTokens(content)
+}
+
+func EstimateMessageAttachmentTokens(attachment MessageAttachment) int {
+	total := 0
+	total += EstimateTokens(attachment.Kind)
+	total += EstimateTokens(attachment.MimeType)
+	total += EstimateTokens(attachment.DisplayName)
+	total += EstimateAttachmentPayloadTokens(attachment.Kind, attachment.DataBase64)
+	return total
+}
+
 func (c *Context) EstimateTotalTokens() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -278,10 +296,7 @@ func (c *Context) EstimateTotalTokens() int {
 	for _, msg := range c.messages {
 		total += EstimateTokens(msg.Content)
 		for _, attachment := range msg.Attachments {
-			total += EstimateTokens(attachment.Kind)
-			total += EstimateTokens(attachment.MimeType)
-			total += EstimateTokens(attachment.DisplayName)
-			total += EstimateTokens(attachment.DataBase64)
+			total += EstimateMessageAttachmentTokens(attachment)
 		}
 		for _, tc := range msg.ToolCalls {
 			total += EstimateTokens(tc.Function.Arguments)

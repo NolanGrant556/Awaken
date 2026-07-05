@@ -74,6 +74,21 @@ func TestEstimateContextEnvelopeTokensIncludesRequestParts(t *testing.T) {
 	if EstimateContextEnvelopeTokens(withAttachment) <= baseTokens {
 		t.Fatalf("expected attachment content to increase token estimate")
 	}
+
+	withImageAttachment := base
+	withImageAttachment.Attachments = []ContextAttachment{{
+		ID:      "att-2",
+		Kind:    "image",
+		Path:    "image.png",
+		Content: strings.Repeat("A", 400000),
+	}}
+	imageTokens := EstimateContextEnvelopeTokens(withImageAttachment)
+	if imageTokens <= baseTokens {
+		t.Fatalf("expected image attachment to increase token estimate")
+	}
+	if imageTokens > baseTokens+2500 {
+		t.Fatalf("expected image attachment estimate to stay bounded, got %d (base %d)", imageTokens, baseTokens)
+	}
 }
 
 func TestNewContextWindowStateDefaults(t *testing.T) {

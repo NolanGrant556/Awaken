@@ -824,6 +824,9 @@ describe("runtime reducer run narrative projection", () => {
         seq: 5,
         result: "done",
         terminalReason: "completed",
+        contextModelWindow: 12000,
+        contextEstimatedTokens: 5200,
+        contextActualTokens: 4310,
       }),
     ]);
 
@@ -835,7 +838,8 @@ describe("runtime reducer run narrative projection", () => {
     });
     expect(state.inspectorSummary.contextWindow).toMatchObject({
       eventType: "AWAKEN_COMPACT_FINISHED",
-      estimatedTokens: 4800,
+      estimatedTokens: 5200,
+      actualTokens: 4310,
       effectiveWindow: 12000,
       estimatedDeltaTokens: -4800,
     });

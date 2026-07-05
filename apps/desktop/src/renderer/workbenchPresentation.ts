@@ -35,6 +35,26 @@ export type TurnMarkerRailDisplay = {
   items: TurnMarkerRailItem[];
 };
 
+export type LatestOutputFollowMode =
+  | "idle"
+  | "anchoring"
+  | "following_latest"
+  | "paused_by_user";
+
+export type LatestOutputResumeIntent =
+  | "none"
+  | "wheel_down"
+  | "touch_to_latest"
+  | "scroll_to_tail"
+  | "return_button";
+
+export type ProgrammaticRunStageScrollReason =
+  | "none"
+  | "anchor_prompt"
+  | "follow_latest"
+  | "marker_jump"
+  | "thread_restore";
+
 const TURN_MARKER_MIN_TURN_COUNT = 3;
 const TURN_MARKER_REGULAR_LIMIT = 12;
 const TURN_MARKER_COMPACT_LIMIT = 24;
@@ -502,4 +522,16 @@ export function shouldResumeLatestOutputFollow({
     return true;
   }
   return hasResumeIntent && isAtScrollBottom;
+}
+
+export function shouldShowReturnToLatestAffordance({
+  followMode,
+  hasLatestTurn,
+  isBusy,
+}: {
+  followMode: LatestOutputFollowMode;
+  hasLatestTurn: boolean;
+  isBusy: boolean;
+}): boolean {
+  return followMode === "paused_by_user" && hasLatestTurn && isBusy;
 }

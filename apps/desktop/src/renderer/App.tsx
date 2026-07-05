@@ -5,6 +5,7 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from "react";
 import {
+  ChevronDown,
   FolderPlus,
   GitBranch,
   ListFilter,
@@ -353,6 +354,9 @@ export function App() {
   const [inspectorCollapsed, setInspectorCollapsed] = useState(() =>
     readStoredBoolean("awaken:layout:inspectorCollapsed", false),
   );
+  const [promptBubbleModeByTurnId, setPromptBubbleModeByTurnId] = useState<
+    Record<string, "collapsed" | "expanded">
+  >({});
   const visibleNarrativeItems = useMemo<RunNarrativeItem[]>(() => {
     const narrativeItems: RunNarrativeItem[] = [
       ...runtimeState.narrative.committedItems,
@@ -871,6 +875,7 @@ export function App() {
     composerContentInsetPx,
     composerDockRef,
     composerSafeAreaPx,
+    handleReturnToLatestClick,
     handleRunStageScroll,
     handleTurnMarkerClick,
     latestPromptId,
@@ -879,11 +884,14 @@ export function App() {
     prepareForNewTask,
     prepareForRunStart,
     prepareForThreadSwitch,
+    returnToLatestBottomPx,
+    returnToLatestVisible,
     runStageViewportHeightPx,
     setRunStageScrollElement,
   } = useRunStageScrollController({
     showCenterComposer,
     narrativeItems: visibleNarrativeItems,
+    isBusy,
   });
   const turnMarkerDisplay = turnMarkerRailDisplay({
     showCenterComposer,
@@ -1896,6 +1904,22 @@ export function App() {
                               ))}
                             </nav>
                           ) : null}
+                          {returnToLatestVisible ? (
+                            <div
+                              className="return-to-latest-overlay"
+                              style={{ bottom: returnToLatestBottomPx }}
+                            >
+                              <button
+                                type="button"
+                                className="return-to-latest-button"
+                                aria-label="回到最新输出"
+                                title="回到最新输出"
+                                onClick={handleReturnToLatestClick}
+                              >
+                                <ChevronDown size={16} strokeWidth={2.1} aria-hidden="true" />
+                              </button>
+                            </div>
+                          ) : null}
                         </>
                       }
                       composer={
@@ -1976,7 +2000,16 @@ export function App() {
                               >
                                 <div className="execution-turn-column">
                                   <div className="execution-turn-header">
-                                    <UserPromptBlock text={turn.prompt.text} />
+                                    <UserPromptBlock
+                                      text={turn.prompt.text}
+                                      expanded={promptBubbleModeByTurnId[turn.id] === "expanded"}
+                                      onExpandedChange={(expanded) => {
+                                        setPromptBubbleModeByTurnId((current) => ({
+                                          ...current,
+                                          [turn.id]: expanded ? "expanded" : "collapsed",
+                                        }));
+                                      }}
+                                    />
                                   </div>
                                   <div className="execution-turn-body">
                                     {turn.items.map((item, itemIndex) =>

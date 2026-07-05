@@ -236,6 +236,49 @@
   background: rgba(31, 31, 31, 0.44);
 }
 
+.return-to-latest-overlay {
+  position: absolute;
+  left: 50%;
+  z-index: 5;
+  display: flex;
+  justify-content: center;
+  width: 0;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.return-to-latest-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid rgba(31, 31, 31, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 8px 20px rgba(15, 18, 25, 0.12), 0 2px 6px rgba(15, 18, 25, 0.06);
+  color: rgba(15, 18, 25, 0.92);
+  cursor: pointer;
+  pointer-events: auto;
+  transition:
+    transform 140ms ease,
+    box-shadow 140ms ease,
+    border-color 140ms ease;
+}
+
+.return-to-latest-button:hover,
+.return-to-latest-button:focus-visible {
+  border-color: rgba(31, 31, 31, 0.2);
+  box-shadow: 0 10px 24px rgba(15, 18, 25, 0.16), 0 2px 8px rgba(15, 18, 25, 0.08);
+  transform: translateY(-1px);
+}
+
+.return-to-latest-button:focus-visible {
+  outline: 2px solid rgba(31, 31, 31, 0.16);
+  outline-offset: 2px;
+}
+
 .execution-turn-section-latest {
   min-height: var(--aw-latest-turn-min-height, auto);
   overflow-anchor: none;

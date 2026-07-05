@@ -1,13 +1,14 @@
 import React from "react";
 import {
   AwakenComposerBar,
+  AwakenProjectTree,
   AwakenUserPromptBlock,
   pastedImageFilesFromClipboardData,
   shouldSubmitComposerInputKey,
 } from "@awaken/design-system";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { App } from "./App";
+import { App, shouldShowSidebarThreadSpinner } from "./App";
 import { composerRuntimePanelsForStatus } from "./useComposerLifecycle";
 import type { RunNarrativeItem } from "./run-narrative";
 import {
@@ -381,6 +382,71 @@ describe("project workspace helpers", () => {
     expect(removeThreadProjectAssignments(mapping, ["thread-1"])).toEqual({
       "thread-2": "workspace:%2Ftmp%2Fkeep",
     });
+  });
+});
+
+describe("sidebar thread status presentation", () => {
+  it("shows a spinner only while the thread still has an active run", () => {
+    expect(
+      shouldShowSidebarThreadSpinner({
+        threadId: "thread-running",
+        label: "Running",
+        runStatus: "running",
+        activeRunId: "run-1",
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowSidebarThreadSpinner({
+        threadId: "thread-awaiting",
+        label: "Awaiting approval",
+        runStatus: "awaiting_approval",
+        activeRunId: "run-2",
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowSidebarThreadSpinner({
+        threadId: "thread-recovering",
+        label: "Recovering",
+        activeRunId: "run-3",
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowSidebarThreadSpinner({
+        threadId: "thread-done",
+        label: "Done",
+        runStatus: "finished",
+        activeRunId: undefined,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps the loading spinner visible even for the selected thread row", () => {
+    const html = renderToString(
+      React.createElement(AwakenProjectTree, {
+        items: [
+          {
+            id: "project:awaken",
+            label: "Awaken",
+            kind: "project",
+            children: [
+              {
+                id: "thread:active",
+                kind: "thread",
+                label: "正在执行的会话",
+                isLoading: true,
+              },
+            ],
+          },
+        ],
+        activeId: "thread:active",
+        defaultExpandedIds: ["project:awaken"],
+        onSelect: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("正在执行的会话");
+    expect(html).toContain('aria-current="true"');
+    expect(html).toContain('aria-label="加载中"');
   });
 });
 

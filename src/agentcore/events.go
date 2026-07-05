@@ -99,6 +99,7 @@ type AwakenEvent struct {
 	ContextOutputReserve             int
 	ContextEffectiveWindow           int
 	ContextEstimatedTokens           int
+	ContextActualTokens              int
 	ContextWarningThreshold          int
 	ContextAutoCompactThreshold      int
 	ContextCompactTarget             int

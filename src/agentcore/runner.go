@@ -140,9 +140,10 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 		if handled, finalAnswer := r.handleXMLFallback(ctx, response.Content, events); handled {
 			if finalAnswer != "" {
 				finalAnswer = continuedOutput.String() + finalAnswer
+				finalState := r.latestContextWindowState()
 				events.emitTurnDiff(ctx, r.config.Workspace.Root)
 				events.turnFinished(TerminalReasonCompleted, "")
-				events.runFinished(finalAnswer, TerminalReasonCompleted)
+				events.runFinished(finalAnswer, finalState, TerminalReasonCompleted)
 				return finalAnswer, nil
 			}
 			if stop, stopErr := r.stopAfterToolExchangeIfNeeded(ctx, events, i); stop {
@@ -161,10 +162,11 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 		}
 		finalContent := continuedOutput.String() + response.Content
 		r.conversation.AssistantOutput(response.Content, nil)
+		finalState := r.latestContextWindowState()
 		events.finishTextIfOpen()
 		events.emitTurnDiff(ctx, r.config.Workspace.Root)
 		events.turnFinished(TerminalReasonCompleted, "")
-		events.runFinished(finalContent, TerminalReasonCompleted)
+		events.runFinished(finalContent, finalState, TerminalReasonCompleted)
 		return finalContent, nil
 	}
 
@@ -225,6 +227,16 @@ func (r *Runner) buildLLMRequest() (LLMRequest, error) {
 		return LLMRequest{}, fmt.Errorf("invalid tool result pairing: %w", err)
 	}
 	return llmReq, nil
+}
+
+func (r *Runner) latestContextWindowState() *ContextWindowState {
+	llmReq, err := r.buildLLMRequest()
+	if err != nil {
+		return nil
+	}
+	evaluated := r.contextGovernor.evaluateRequest(llmReq)
+	state := evaluated.ContextWindowState
+	return &state
 }
 
 func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*llm.Response, error) {
@@ -543,13 +555,18 @@ func (e *runEventEmitter) turnFinished(reason TerminalReason, transition Transit
 	})
 }
 
-func (e *runEventEmitter) runFinished(content string, reasons ...TerminalReason) {
+func (e *runEventEmitter) runFinished(content string, state *ContextWindowState, reasons ...TerminalReason) {
 	reason := firstTerminalReason(reasons, TerminalReasonCompleted)
-	e.emit(AwakenEvent{
+	event := AwakenEvent{
 		Type:           RunFinishedEventType,
 		Content:        content,
 		TerminalReason: reason,
-	})
+	}
+	if state != nil {
+		applyContextWindowEstimate(&event, *state)
+		event.ContextActualTokens = state.LastAPIUsageTokens
+	}
+	e.emit(event)
 }
 
 func (e *runEventEmitter) runErrored(err error, reasons ...TerminalReason) {
@@ -756,18 +773,26 @@ func firstPositiveInt(values ...int) int {
 }
 
 func contextWindowEvent(eventType AwakenEventType, state ContextWindowState, content string) AwakenEvent {
-	return AwakenEvent{
-		Type:                        eventType,
-		Content:                     content,
-		ContextModelWindow:          state.ModelWindow,
-		ContextOutputReserve:        state.OutputReserve,
-		ContextEffectiveWindow:      state.EffectiveWindow,
-		ContextEstimatedTokens:      state.EstimatedTokens,
-		ContextWarningThreshold:     state.WarningThreshold,
-		ContextAutoCompactThreshold: state.AutoCompactThreshold,
-		ContextCompactTarget:        state.CompactTarget,
-		ContextEstimatedDeltaTokens: state.EstimatedDeltaTokens,
+	event := AwakenEvent{
+		Type:    eventType,
+		Content: content,
 	}
+	applyContextWindowEstimate(&event, state)
+	return event
+}
+
+func applyContextWindowEstimate(event *AwakenEvent, state ContextWindowState) {
+	if event == nil {
+		return
+	}
+	event.ContextModelWindow = state.ModelWindow
+	event.ContextOutputReserve = state.OutputReserve
+	event.ContextEffectiveWindow = state.EffectiveWindow
+	event.ContextEstimatedTokens = state.EstimatedTokens
+	event.ContextWarningThreshold = state.WarningThreshold
+	event.ContextAutoCompactThreshold = state.AutoCompactThreshold
+	event.ContextCompactTarget = state.CompactTarget
+	event.ContextEstimatedDeltaTokens = state.EstimatedDeltaTokens
 }
 
 func intPointer(value int) *int {

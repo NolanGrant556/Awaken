@@ -24,6 +24,7 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		ContextOutputReserve:             event.ContextOutputReserve,
 		ContextEffectiveWindow:           event.ContextEffectiveWindow,
 		ContextEstimatedTokens:           event.ContextEstimatedTokens,
+		ContextActualTokens:              event.ContextActualTokens,
 		ContextWarningThreshold:          event.ContextWarningThreshold,
 		ContextAutoCompactThreshold:      event.ContextAutoCompactThreshold,
 		ContextCompactTarget:             event.ContextCompactTarget,

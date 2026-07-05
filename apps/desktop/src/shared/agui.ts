@@ -81,6 +81,7 @@ export type AguiEvent = {
   contextOutputReserve?: number;
   contextEffectiveWindow?: number;
   contextEstimatedTokens?: number;
+  contextActualTokens?: number;
   contextWarningThreshold?: number;
   contextAutoCompactThreshold?: number;
   contextCompactTarget?: number;

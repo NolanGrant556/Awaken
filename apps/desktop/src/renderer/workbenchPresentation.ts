@@ -18,6 +18,20 @@ export type NarrativeTurnSections = {
   turns: NarrativeTurnSection[];
 };
 
+export type NarrativeTurnBodySegment =
+  | {
+      kind: "items";
+      id: string;
+      items: RunNarrativeItem[];
+    }
+  | {
+      kind: "executionProcess";
+      id: string;
+      title: string;
+      items: RunNarrativeItem[];
+      open: boolean;
+    };
+
 export type TurnAnchorPosition = {
   id: string;
   top: number;
@@ -59,6 +73,7 @@ const TURN_MARKER_MIN_TURN_COUNT = 3;
 const TURN_MARKER_REGULAR_LIMIT = 12;
 const TURN_MARKER_COMPACT_LIMIT = 24;
 const TURN_MARKER_SUMMARY_LIMIT = 24;
+const EXECUTION_PROCESS_SUMMARY_TITLE = "执行过程";
 
 const TURN_MARKER_REGULAR_SIZE = { itemHeight: 18, gap: 14 };
 const TURN_MARKER_COMPACT_SIZE = { itemHeight: 12, gap: 8 };
@@ -298,6 +313,53 @@ export function groupNarrativeByTurns(
   }
 
   return { leadItems, turns };
+}
+
+export function projectNarrativeTurnBodySegments({
+  turnId,
+  items,
+  executionProcessOpen,
+}: {
+  turnId: string;
+  items: RunNarrativeItem[];
+  executionProcessOpen: boolean;
+}): NarrativeTurnBodySegment[] {
+  if (items.length === 0) {
+    return [];
+  }
+
+  const firstAnswerIndex = items.findIndex((item) => item.kind === "answer");
+  if (firstAnswerIndex <= 0) {
+    return [
+      {
+        kind: "items",
+        id: `turn-items:${turnId}`,
+        items,
+      },
+    ];
+  }
+
+  const executionProcessItems = items.slice(0, firstAnswerIndex);
+  const answerAndAfterItems = items.slice(firstAnswerIndex);
+  const segments: NarrativeTurnBodySegment[] = [
+    {
+      kind: "executionProcess",
+      id: `execution-process:${turnId}`,
+      title: EXECUTION_PROCESS_SUMMARY_TITLE,
+      items: executionProcessItems,
+      open: executionProcessOpen,
+    },
+  ];
+
+  if (answerAndAfterItems.length > 0) {
+    segments.push({
+      kind: "items",
+      id: `answer-and-after:${turnId}`,
+      items: answerAndAfterItems,
+    });
+  }
+
+  return segments;
 }
 
 export function scrollTopForPromptAnchor({

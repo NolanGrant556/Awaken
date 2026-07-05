@@ -1,3 +1,5 @@
+import type { RunInputAttachment } from "../../shared/runtime";
+
 export type RunNarrativeStatus =
   | "active"
   | "done"
@@ -44,7 +46,7 @@ export type InspectorSelection =
   | { kind: "fileChange"; id: string };
 
 export type RunNarrativeItem =
-  | { kind: "prompt"; id: string; text: string }
+  | { kind: "prompt"; id: string; text: string; attachments?: RunInputAttachment[] }
   | { kind: "planning"; id: string; text: string; status: "active" | "done" }
   | { kind: "thinking"; id: string; text: string; status: "active" | "done" }
   | { kind: "exploring"; id: string; actions: RunAction[]; status: "active" | "done" }

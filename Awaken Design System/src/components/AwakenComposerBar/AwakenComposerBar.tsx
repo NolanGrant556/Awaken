@@ -1,7 +1,7 @@
 import "./AwakenComposerBar.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, X } from "lucide-react";
 import { AwakenComposerInput } from "../AwakenComposerInput";
 import { AwakenContextButton } from "../AwakenContextButton";
 import { AwakenSendButton } from "../AwakenSendButton";
@@ -33,6 +33,14 @@ export type ComposerBarMetaItem = {
   menuFooterAction?: ComposerBarMetaAction;
 };
 
+export type ComposerBarAttachment = {
+  id: string;
+  kind: "image";
+  src: string;
+  alt: string;
+  mimeType: string;
+};
+
 export type AwakenComposerBarProps = {
   value: string;
   onChange: (value: string) => void;
@@ -45,6 +53,11 @@ export type AwakenComposerBarProps = {
   variant?: "center" | "dock";
   metaItems?: ComposerBarMetaItem[];
   focusRequest?: number;
+  submitDisabled?: boolean;
+  attachments?: ComposerBarAttachment[];
+  attachmentWarning?: ReactNode;
+  onRemoveAttachment?: (attachmentId: string) => void;
+  onPasteImages?: (files: File[]) => void;
 };
 
 export function AwakenComposerBar({
@@ -59,8 +72,13 @@ export function AwakenComposerBar({
   variant = "dock",
   metaItems = [],
   focusRequest = 0,
+  submitDisabled = false,
+  attachments = [],
+  attachmentWarning,
+  onRemoveAttachment,
+  onPasteImages,
 }: AwakenComposerBarProps) {
-  const canSubmit = submitMode === "stop" || !disabled;
+  const canSubmit = submitMode === "stop" || (!disabled && !submitDisabled);
   const [openMetaMenuId, setOpenMetaMenuId] = useState<string | null>(null);
   const modelMetaRef = useRef<HTMLDivElement | null>(null);
   const modelMetaItem = metaItems.find((item) => item.id === "model");
@@ -97,14 +115,17 @@ export function AwakenComposerBar({
   }, [openMetaMenuId]);
 
   function renderMetaItem(item: ComposerBarMetaItem) {
-    const hasProgress = typeof item.progress === "number" && Number.isFinite(item.progress);
+    const hasProgress =
+      typeof item.progress === "number" && Number.isFinite(item.progress);
     const progressPercent = hasProgress
       ? Math.max(0, Math.min(100, Math.round((item.progress ?? 0) * 100)))
       : undefined;
 
     const content = (
       <>
-        {item.icon ? <span className="composer-bar-meta-icon">{item.icon}</span> : null}
+        {item.icon ? (
+          <span className="composer-bar-meta-icon">{item.icon}</span>
+        ) : null}
         <span className="composer-bar-meta-label">{item.label}</span>
         {hasProgress ? (
           <span
@@ -118,11 +139,17 @@ export function AwakenComposerBar({
           >
             <span
               className="composer-bar-context-meter-fill"
-              style={{ "--composer-bar-context-progress": `${progressPercent}%` } as CSSProperties}
+              style={
+                {
+                  "--composer-bar-context-progress": `${progressPercent}%`,
+                } as CSSProperties
+              }
             />
           </span>
         ) : null}
-        {item.value ? <span className="composer-bar-meta-value">{item.value}</span> : null}
+        {item.value ? (
+          <span className="composer-bar-meta-value">{item.value}</span>
+        ) : null}
       </>
     );
     const className = `composer-bar-meta-item${
@@ -131,17 +158,19 @@ export function AwakenComposerBar({
 
     if (item.onClick) {
       return (
-        <button key={item.id} type="button" className={className} onClick={item.onClick}>
+        <button
+          key={item.id}
+          type="button"
+          className={className}
+          onClick={item.onClick}
+        >
           {content}
         </button>
       );
     }
 
     return (
-      <span
-        key={item.id}
-        className={className}
-      >
+      <span key={item.id} className={className}>
         {content}
       </span>
     );
@@ -153,7 +182,9 @@ export function AwakenComposerBar({
     const isInteractive = !item.disabled && (hasMenu || item.onClick);
     const triggerContent = (
       <>
-        {item.icon ? <span className="composer-bar-model-trigger-icon">{item.icon}</span> : null}
+        {item.icon ? (
+          <span className="composer-bar-model-trigger-icon">{item.icon}</span>
+        ) : null}
         <span className="composer-bar-model-trigger-label">{item.label}</span>
         {hasMenu ? (
           <ChevronDown
@@ -178,7 +209,9 @@ export function AwakenComposerBar({
             aria-expanded={hasMenu ? isMenuOpen : undefined}
             onClick={() => {
               if (hasMenu) {
-                setOpenMetaMenuId((current) => (current === item.id ? null : item.id));
+                setOpenMetaMenuId((current) =>
+                  current === item.id ? null : item.id,
+                );
                 return;
               }
               item.onClick?.();
@@ -192,7 +225,11 @@ export function AwakenComposerBar({
           </span>
         )}
         {hasMenu && isMenuOpen ? (
-          <div className="composer-bar-model-menu" role="listbox" aria-label="选择模型">
+          <div
+            className="composer-bar-model-menu"
+            role="listbox"
+            aria-label="选择模型"
+          >
             <div className="composer-bar-model-menu-scroll">
               {item.menuItems?.map((option) => (
                 <button
@@ -210,9 +247,13 @@ export function AwakenComposerBar({
                   }}
                 >
                   {option.icon ? (
-                    <span className="composer-bar-model-option-icon">{option.icon}</span>
+                    <span className="composer-bar-model-option-icon">
+                      {option.icon}
+                    </span>
                   ) : null}
-                  <span className="composer-bar-model-option-label">{option.label}</span>
+                  <span className="composer-bar-model-option-label">
+                    {option.label}
+                  </span>
                   {option.selected ? (
                     <Check
                       className="composer-bar-model-option-check"
@@ -260,6 +301,28 @@ export function AwakenComposerBar({
       ) : null}
       <div className="composer-bar-surface">
         <div className="composer-bar-input-row">
+          {attachments.length > 0 ? (
+            <div
+              className="composer-bar-attachments"
+              aria-label="Pasted images"
+            >
+              {attachments.map((attachment) => (
+                <div key={attachment.id} className="composer-bar-attachment">
+                  <img src={attachment.src} alt={attachment.alt} />
+                  {onRemoveAttachment ? (
+                    <button
+                      type="button"
+                      className="composer-bar-attachment-remove"
+                      aria-label={`移除 ${attachment.alt}`}
+                      onClick={() => onRemoveAttachment(attachment.id)}
+                    >
+                      <X size={12} strokeWidth={2.2} />
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
           <div className="composer-bar-input-wrap">
             <AwakenComposerInput
               value={value}
@@ -270,8 +333,14 @@ export function AwakenComposerBar({
               focusRequest={focusRequest}
               minRows={variant === "dock" ? 1 : 3}
               maxRows={variant === "dock" ? 8 : 6}
+              onPasteImages={onPasteImages}
             />
           </div>
+          {attachmentWarning ? (
+            <div className="composer-bar-attachment-warning" role="status">
+              {attachmentWarning}
+            </div>
+          ) : null}
         </div>
         <div className="composer-bar-toolbar">
           <div className="composer-bar-context">
@@ -282,7 +351,7 @@ export function AwakenComposerBar({
             <AwakenSendButton
               ready={isReady || submitMode === "stop"}
               onClick={handleSubmit}
-              disabled={submitMode === "stop" ? false : disabled}
+              disabled={submitMode === "stop" ? false : submitDisabled}
               mode={submitMode}
             />
           </div>

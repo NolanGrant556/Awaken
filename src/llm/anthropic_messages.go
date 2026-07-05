@@ -307,7 +307,7 @@ func convertContextMessageToAnthropic(msg context.Message) (anthropicMessage, er
 	case context.RoleUser:
 		return anthropicMessage{
 			Role:    "user",
-			Content: msg.Content,
+			Content: anthropicUserContent(msg),
 		}, nil
 
 	case context.RoleAssistant:
@@ -328,6 +328,39 @@ func convertContextMessageToAnthropic(msg context.Message) (anthropicMessage, er
 			Content: msg.Content,
 		}, nil
 	}
+}
+
+func anthropicUserContent(msg context.Message) interface{} {
+	if len(msg.Attachments) == 0 {
+		return msg.Content
+	}
+
+	blocks := make([]map[string]interface{}, 0, len(msg.Attachments)+1)
+	if strings.TrimSpace(msg.Content) != "" {
+		blocks = append(blocks, map[string]interface{}{
+			"type": "text",
+			"text": msg.Content,
+		})
+	}
+	for _, attachment := range msg.Attachments {
+		if attachment.Kind != "image" ||
+			strings.TrimSpace(attachment.MimeType) == "" ||
+			strings.TrimSpace(attachment.DataBase64) == "" {
+			continue
+		}
+		blocks = append(blocks, map[string]interface{}{
+			"type": "image",
+			"source": map[string]interface{}{
+				"type":       "base64",
+				"media_type": attachment.MimeType,
+				"data":       attachment.DataBase64,
+			},
+		})
+	}
+	if len(blocks) == 0 {
+		return msg.Content
+	}
+	return blocks
 }
 
 // --- 工具转换 ---

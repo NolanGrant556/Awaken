@@ -36,10 +36,10 @@ func TestTranscriptStoreAppendsMessagesEventsIdempotentlyAndLoads(t *testing.T) 
 		{Role: convcontext.RoleAssistant, Content: "done", CompactBoundaryID: "compact_1"},
 	}
 
-	if err := appendUserTranscriptRecord(workspace, run, "session_1", "hello"); err != nil {
+	if err := appendUserTranscriptRecord(workspace, run, "session_1", "hello", nil); err != nil {
 		t.Fatalf("appendUserTranscriptRecord returned error: %v", err)
 	}
-	if err := appendUserTranscriptRecord(workspace, run, "session_1", "hello"); err != nil {
+	if err := appendUserTranscriptRecord(workspace, run, "session_1", "hello", nil); err != nil {
 		t.Fatalf("second appendUserTranscriptRecord returned error: %v", err)
 	}
 	if err := appendConversationTranscript(workspace, run, messages); err != nil {

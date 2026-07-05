@@ -22,11 +22,24 @@ const (
 type Message struct {
 	Role              Role       `json:"role"`
 	Content           string     `json:"content"`
+	Attachments       []MessageAttachment `json:"attachments,omitempty"`
 	ToolCalls         []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID        string     `json:"tool_call_id,omitempty"`
 	Name              string     `json:"name,omitempty"`
 	IsError           bool       `json:"is_error,omitempty"`
 	CompactBoundaryID string     `json:"compact_boundary_id,omitempty"`
+}
+
+type MessageAttachment struct {
+	ID          string `json:"id"`
+	Kind        string `json:"kind"`
+	MimeType    string `json:"mime_type"`
+	DataBase64  string `json:"data_base64,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
+	Width       int    `json:"width,omitempty"`
+	Height      int    `json:"height,omitempty"`
+	ByteSize    int    `json:"byte_size,omitempty"`
+	StorageKey  string `json:"storage_key,omitempty"`
 }
 
 type ToolCall struct {
@@ -84,11 +97,16 @@ func New(opts ...Option) *Context {
 }
 
 func (c *Context) AddUserMessage(content string) {
+	c.AddUserMessageWithAttachments(content, nil)
+}
+
+func (c *Context) AddUserMessageWithAttachments(content string, attachments []MessageAttachment) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.messages = append(c.messages, Message{
-		Role:    RoleUser,
-		Content: content,
+		Role:        RoleUser,
+		Content:     content,
+		Attachments: cloneAttachments(attachments),
 	})
 }
 
@@ -259,6 +277,12 @@ func (c *Context) EstimateTotalTokens() int {
 	total := 0
 	for _, msg := range c.messages {
 		total += EstimateTokens(msg.Content)
+		for _, attachment := range msg.Attachments {
+			total += EstimateTokens(attachment.Kind)
+			total += EstimateTokens(attachment.MimeType)
+			total += EstimateTokens(attachment.DisplayName)
+			total += EstimateTokens(attachment.DataBase64)
+		}
 		for _, tc := range msg.ToolCalls {
 			total += EstimateTokens(tc.Function.Arguments)
 			total += EstimateTokens(tc.Function.Name)
@@ -271,8 +295,18 @@ func cloneMessages(messages []Message) []Message {
 	result := make([]Message, len(messages))
 	for i, message := range messages {
 		result[i] = message
+		result[i].Attachments = cloneAttachments(message.Attachments)
 		result[i].ToolCalls = append([]ToolCall(nil), message.ToolCalls...)
 	}
+	return result
+}
+
+func cloneAttachments(attachments []MessageAttachment) []MessageAttachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	result := make([]MessageAttachment, len(attachments))
+	copy(result, attachments)
 	return result
 }
 
@@ -293,7 +327,11 @@ func NewConversation(tools []tool.ToolSchema) *Conversation {
 }
 
 func (conv *Conversation) UserInput(input string) {
-	conv.Context.AddUserMessage(input)
+	conv.UserInputWithAttachments(input, nil)
+}
+
+func (conv *Conversation) UserInputWithAttachments(input string, attachments []MessageAttachment) {
+	conv.Context.AddUserMessageWithAttachments(input, attachments)
 	conv.UpdatedAt = time.Now()
 }
 

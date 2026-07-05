@@ -176,6 +176,65 @@ func TestInvokeSendsToolCallMessages(t *testing.T) {
 	}
 }
 
+func TestInvokeOpenAISendsMultimodalUserBlocks(t *testing.T) {
+	server := newChatServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []openaiChatMessage `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+		if len(body.Messages) != 1 {
+			t.Fatalf("expected 1 message, got %d", len(body.Messages))
+		}
+		blocks, ok := body.Messages[0].Content.([]interface{})
+		if !ok {
+			t.Fatalf("expected multimodal content blocks, got %T", body.Messages[0].Content)
+		}
+		if len(blocks) != 2 {
+			t.Fatalf("expected 2 multimodal blocks, got %d", len(blocks))
+		}
+		textBlock, ok := blocks[0].(map[string]interface{})
+		if !ok || textBlock["type"] != "text" || textBlock["text"] != "describe this" {
+			t.Fatalf("unexpected text block: %#v", blocks[0])
+		}
+		imageBlock, ok := blocks[1].(map[string]interface{})
+		if !ok || imageBlock["type"] != "image_url" {
+			t.Fatalf("unexpected image block: %#v", blocks[1])
+		}
+		imageURL, ok := imageBlock["image_url"].(map[string]interface{})
+		if !ok || imageURL["url"] != "data:image/png;base64,aGVsbG8=" {
+			t.Fatalf("unexpected image_url payload: %#v", imageBlock["image_url"])
+		}
+		writeJSON(t, w, map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{"message": map[string]interface{}{"content": "done"}},
+			},
+		})
+	})
+	defer server.Close()
+
+	_, err := Invoke(context.Background(), testConfig(server.URL), Request{
+		Messages: []ctx.Message{
+			{
+				Role:    ctx.RoleUser,
+				Content: "describe this",
+				Attachments: []ctx.MessageAttachment{
+					{
+						ID:         "image-1",
+						Kind:       "image",
+						MimeType:   "image/png",
+						DataBase64: "aGVsbG8=",
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke returned error: %v", err)
+	}
+}
+
 func TestInvokeOpenAISendsConfigMaxTokens(t *testing.T) {
 	server := newChatServer(t, func(w http.ResponseWriter, r *http.Request) {
 		var body struct {

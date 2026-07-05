@@ -34,6 +34,7 @@ type Run struct {
 	RunID           string     `json:"run_id"`
 	ThreadID        string     `json:"thread_id"`
 	Input           string     `json:"input,omitempty"`
+	InputAttachments []RunInputAttachment `json:"input_attachments,omitempty"`
 	Status          RunStatus  `json:"status"`
 	Result          string     `json:"result,omitempty"`
 	Error           string     `json:"error,omitempty"`
@@ -64,16 +65,17 @@ type Session struct {
 	approvals map[string]*pendingApproval
 }
 
-func NewSession(runID, threadID, input string, cancel context.CancelFunc) *Session {
+func NewSession(runID, threadID, input string, attachments []RunInputAttachment, cancel context.CancelFunc) *Session {
 	now := time.Now().UTC()
 	return &Session{
 		run: Run{
-			RunID:     runID,
-			ThreadID:  threadID,
-			Input:     strings.TrimSpace(input),
-			Status:    RunStatusRunning,
-			CreatedAt: now,
-			UpdatedAt: now,
+			RunID:            runID,
+			ThreadID:         threadID,
+			Input:            strings.TrimSpace(input),
+			InputAttachments: cloneRunInputAttachments(attachments),
+			Status:           RunStatusRunning,
+			CreatedAt:        now,
+			UpdatedAt:        now,
 		},
 		cancel:    cancel,
 		bus:       NewEventBus(),

@@ -30,6 +30,7 @@ type TranscriptRecord struct {
 	ParentMessageID   string                   `json:"parent_message_id,omitempty"`
 	Role              string                   `json:"role,omitempty"`
 	Content           string                   `json:"content,omitempty"`
+	Attachments       []transcriptMessageAttachment `json:"attachments,omitempty"`
 	ToolCalls         []convcontext.ToolCall   `json:"tool_calls,omitempty"`
 	ToolCallID        string                   `json:"tool_call_id,omitempty"`
 	ToolName          string                   `json:"tool_name,omitempty"`
@@ -51,8 +52,8 @@ type restoredTranscript struct {
 	TerminalEvent          *agentcore.AwakenEvent
 }
 
-func appendUserTranscriptRecord(workspace WorkspaceConfig, run Run, sessionID string, input string) error {
-	if strings.TrimSpace(input) == "" {
+func appendUserTranscriptRecord(workspace WorkspaceConfig, run Run, sessionID string, input string, attachments []RunInputAttachment) error {
+	if strings.TrimSpace(input) == "" && len(attachments) == 0 {
 		return nil
 	}
 	path := transcriptPath(workspace.WorkspaceRoot, run.ThreadID)
@@ -64,14 +65,16 @@ func appendUserTranscriptRecord(workspace WorkspaceConfig, run Run, sessionID st
 		if record.RecordType == transcriptRecordTypeMessage &&
 			record.RunID == run.RunID &&
 			record.Role == string(convcontext.RoleUser) &&
-			record.Content == input {
+			record.Content == input &&
+			transcriptAttachmentsEqual(record.Attachments, contextAttachmentsToTranscriptAttachments(inputAttachmentsToContextAttachments(attachments))) {
 			return nil
 		}
 	}
 	index := transcriptMessageCount(records)
 	record := transcriptRecordForMessage(run.ThreadID, run.RunID, sessionID, index, convcontext.Message{
-		Role:    convcontext.RoleUser,
-		Content: input,
+		Role:        convcontext.RoleUser,
+		Content:     input,
+		Attachments: inputAttachmentsToContextAttachments(attachments),
 	}, time.Now().UTC())
 	return appendTranscriptRecords(path, []TranscriptRecord{record})
 }
@@ -215,6 +218,7 @@ func loadRestoredTranscript(workspace WorkspaceConfig, threadID string) (restore
 		message := convcontext.Message{
 			Role:              convcontext.Role(record.Role),
 			Content:           record.Content,
+			Attachments:       transcriptAttachmentsToContextAttachments(record.Attachments),
 			ToolCalls:         append([]convcontext.ToolCall(nil), record.ToolCalls...),
 			ToolCallID:        record.ToolCallID,
 			Name:              record.ToolName,
@@ -302,6 +306,9 @@ func loadDurableTranscriptRuns(workspace WorkspaceConfig, threadID string) (map[
 			record.Role == string(convcontext.RoleUser) &&
 			current.run.Input == "" {
 			current.run.Input = record.Content
+			current.run.InputAttachments = contextAttachmentsToRunInputAttachments(
+				transcriptAttachmentsToContextAttachments(record.Attachments),
+			)
 		}
 		if record.RecordType == transcriptRecordTypeEvent && record.Event != nil {
 			event := Event{
@@ -396,6 +403,7 @@ func transcriptRecordForMessage(threadID, runID, sessionID string, index int, me
 		MessageID:         transcriptMessageID(threadID, index),
 		Role:              string(message.Role),
 		Content:           message.Content,
+		Attachments:       contextAttachmentsToTranscriptAttachments(message.Attachments),
 		ToolCalls:         append([]convcontext.ToolCall(nil), message.ToolCalls...),
 		ToolCallID:        message.ToolCallID,
 		ToolName:          message.Name,
@@ -656,6 +664,7 @@ func transcriptMessagesFromRecords(records []TranscriptRecord) []convcontext.Mes
 		messages = append(messages, convcontext.Message{
 			Role:              convcontext.Role(record.Role),
 			Content:           record.Content,
+			Attachments:       transcriptAttachmentsToContextAttachments(record.Attachments),
 			ToolCalls:         append([]convcontext.ToolCall(nil), record.ToolCalls...),
 			ToolCallID:        record.ToolCallID,
 			Name:              record.ToolName,
@@ -692,11 +701,29 @@ func transcriptMessageEqual(left convcontext.Message, right convcontext.Message)
 		transcriptMessageToolName(left) != transcriptMessageToolName(right) ||
 		left.IsError != right.IsError ||
 		left.CompactBoundaryID != right.CompactBoundaryID ||
+		len(left.Attachments) != len(right.Attachments) ||
 		len(left.ToolCalls) != len(right.ToolCalls) {
 		return false
 	}
+	for i := range left.Attachments {
+		if left.Attachments[i] != right.Attachments[i] {
+			return false
+		}
+	}
 	for i := range left.ToolCalls {
 		if left.ToolCalls[i] != right.ToolCalls[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func transcriptAttachmentsEqual(left []transcriptMessageAttachment, right []transcriptMessageAttachment) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
 			return false
 		}
 	}

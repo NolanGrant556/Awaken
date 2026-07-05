@@ -111,11 +111,15 @@ export function actionsForThreadTranscript(
   ];
 
   transcript.runs.forEach((entry, index) => {
-    const prompt = entry.run.input?.trim() || (index === 0 ? transcript.thread.label : "");
-    if (prompt) {
+    const hasPromptAttachments = (entry.run.inputAttachments?.length ?? 0) > 0;
+    const prompt =
+      entry.run.input?.trim() ||
+      (!hasPromptAttachments && index === 0 ? transcript.thread.label : "");
+    if (prompt || hasPromptAttachments) {
       actions.push({
         type: "run/requested",
         prompt,
+        promptAttachments: entry.run.inputAttachments,
         startedAtMs: timestampMs(entry.run.createdAt),
       });
     }

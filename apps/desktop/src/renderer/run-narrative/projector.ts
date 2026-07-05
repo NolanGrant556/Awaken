@@ -1,4 +1,5 @@
 import type { AguiEvent } from "../../shared/agui";
+import type { RunInputAttachment } from "../../shared/runtime";
 import type {
   CompactBoundaryItem,
   RunAction,
@@ -18,23 +19,29 @@ export function createInitialRunNarrativeState(): RunNarrativeState {
 
 export function createRunRequestedNarrative(
   prompt: string,
+  attachments?: RunInputAttachment[],
   scopeId = "current",
 ): RunNarrativeState {
-  return appendRunRequestedNarrative(createInitialRunNarrativeState(), prompt, scopeId);
+  return appendRunRequestedNarrative(createInitialRunNarrativeState(), prompt, attachments, scopeId);
 }
 
 export function appendRunRequestedNarrative(
   state: RunNarrativeState,
   prompt: string,
+  attachments?: RunInputAttachment[],
   scopeId = "current",
 ): RunNarrativeState {
   const trimmed = prompt.trim();
   const settledState = state.activeItem ? commitActive(state, "done") : state;
-  const committedItems = trimmed
+  const promptAttachments = attachments && attachments.length > 0
+    ? attachments.map((attachment) => ({ ...attachment }))
+    : undefined;
+  const committedItems = trimmed || promptAttachments
     ? upsertCommitted(settledState.committedItems, {
         kind: "prompt",
         id: `prompt:${scopeId}`,
         text: trimmed,
+        attachments: promptAttachments,
       })
     : settledState.committedItems;
 

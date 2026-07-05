@@ -2,6 +2,7 @@ import React from "react";
 import {
   AwakenComposerBar,
   AwakenUserPromptBlock,
+  pastedImageFilesFromClipboardData,
   shouldSubmitComposerInputKey,
 } from "@awaken/design-system";
 import { renderToString } from "react-dom/server";
@@ -63,16 +64,16 @@ function stubElectronBridge(): void {
       cancelRun: vi.fn(),
       resolveApproval: vi.fn(),
       subscribeRun: vi.fn(),
-	      unsubscribeRun: vi.fn(),
-	      getRuntimeInfo: vi.fn(),
-	      listConnectors: vi.fn(async () => []),
-	      connectConnector: vi.fn(),
-	      disconnectConnector: vi.fn(),
-	      listMcpServers: vi.fn(async () => []),
-	      configureMcpServers: vi.fn(),
-	      listSkills: vi.fn(async () => []),
-	      installSkill: vi.fn(),
-	      listModelProviders: vi.fn(async () => []),
+      unsubscribeRun: vi.fn(),
+      getRuntimeInfo: vi.fn(),
+      listConnectors: vi.fn(async () => []),
+      connectConnector: vi.fn(),
+      disconnectConnector: vi.fn(),
+      listMcpServers: vi.fn(async () => []),
+      configureMcpServers: vi.fn(),
+      listSkills: vi.fn(async () => []),
+      installSkill: vi.fn(),
+      listModelProviders: vi.fn(async () => []),
       listModelProfiles: vi.fn(async () => []),
       saveModelProfile: vi.fn(),
       deleteModelProfile: vi.fn(),
@@ -114,9 +115,26 @@ describe("resolvedDecisionForApproval", () => {
 describe("AwakenComposerInput keyboard behavior", () => {
   it("submits with Enter and keeps Shift+Enter for new lines", () => {
     expect(shouldSubmitComposerInputKey({ key: "Enter" })).toBe(true);
-    expect(shouldSubmitComposerInputKey({ key: "Enter", shiftKey: true })).toBe(false);
-    expect(shouldSubmitComposerInputKey({ key: "Enter", isComposing: true })).toBe(false);
+    expect(shouldSubmitComposerInputKey({ key: "Enter", shiftKey: true })).toBe(
+      false,
+    );
+    expect(
+      shouldSubmitComposerInputKey({ key: "Enter", isComposing: true }),
+    ).toBe(false);
     expect(shouldSubmitComposerInputKey({ key: "a" })).toBe(false);
+  });
+
+  it("collects pasted image files without pulling in non-image clipboard files", () => {
+    const imageFile = new File(["image"], "paste.png", { type: "image/png" });
+    const textFile = new File(["text"], "notes.txt", { type: "text/plain" });
+
+    const files = pastedImageFilesFromClipboardData({
+      items: [] as unknown as DataTransferItemList,
+      files: [imageFile, textFile] as unknown as FileList,
+    });
+
+    expect(files).toHaveLength(1);
+    expect(files[0]?.name).toBe("paste.png");
   });
 });
 
@@ -152,10 +170,16 @@ describe("composer lifecycle presentation", () => {
 
 describe("assistant answer footer contract", () => {
   it("shows final answer actions only for completed final answers", () => {
-    expect(shouldShowAssistantAnswerFooter({ status: "done", isFinal: true })).toBe(true);
+    expect(
+      shouldShowAssistantAnswerFooter({ status: "done", isFinal: true }),
+    ).toBe(true);
     expect(shouldShowAssistantAnswerFooter({ status: "done" })).toBe(false);
-    expect(shouldShowAssistantAnswerFooter({ status: "active", isFinal: true })).toBe(false);
-    expect(shouldShowAssistantAnswerFooter({ status: "error", isFinal: true })).toBe(false);
+    expect(
+      shouldShowAssistantAnswerFooter({ status: "active", isFinal: true }),
+    ).toBe(false);
+    expect(
+      shouldShowAssistantAnswerFooter({ status: "error", isFinal: true }),
+    ).toBe(false);
   });
 });
 
@@ -171,13 +195,42 @@ describe("AwakenComposerBar layout contract", () => {
       React.createElement(AwakenComposerBar, { ...baseProps, variant: "dock" }),
     );
     const centerHtml = renderToString(
-      React.createElement(AwakenComposerBar, { ...baseProps, variant: "center" }),
+      React.createElement(AwakenComposerBar, {
+        ...baseProps,
+        variant: "center",
+      }),
     );
 
     expect(dockHtml).toContain("composer-bar-dock");
     expect(dockHtml).toContain('rows="1"');
     expect(centerHtml).toContain("composer-bar-center");
     expect(centerHtml).toContain('rows="3"');
+  });
+
+  it("renders attachment previews and warning copy inside the composer surface", () => {
+    const html = renderToString(
+      React.createElement(AwakenComposerBar, {
+        value: "",
+        onChange: vi.fn(),
+        onSubmit: vi.fn(),
+        variant: "dock",
+        attachments: [
+          {
+            id: "image-1",
+            kind: "image",
+            src: "data:image/png;base64,aGVsbG8=",
+            alt: "clip.png",
+            mimeType: "image/png",
+          },
+        ],
+        attachmentWarning: "当前模型不支持图片输入，请切换模型或移除图片",
+      }),
+    );
+
+    expect(html).toContain("composer-bar-attachments");
+    expect(html).toContain("clip.png");
+    expect(html).toContain("composer-bar-attachment-warning");
+    expect(html).toContain("当前模型不支持图片输入");
   });
 });
 
@@ -209,8 +262,8 @@ describe("AwakenUserPromptBlock layout contract", () => {
     expect(html).toContain("execution-prompt-bubble-text");
     expect(html).toContain("<p");
     expect(html).not.toContain("execution-prompt-block-limited");
-    expect(html).not.toContain('role="button"');
-    expect(html).not.toContain("aria-expanded");
+    expect(html).toContain('role="button"');
+    expect(html).toContain('aria-expanded="false"');
   });
 
   it("allows the expanded state to be controlled by the parent renderer", () => {
@@ -224,24 +277,70 @@ describe("AwakenUserPromptBlock layout contract", () => {
     expect(html).toContain("execution-prompt-block-expanded");
     expect(html).not.toContain('aria-expanded="false"');
   });
+
+  it("renders prompt attachments above the prompt text", () => {
+    const html = renderToString(
+      React.createElement(AwakenUserPromptBlock, {
+        text: "Look at this image",
+        attachments: [
+          {
+            id: "attachment-1",
+            src: "data:image/png;base64,aGVsbG8=",
+            alt: "Prompt image",
+          },
+        ],
+      }),
+    );
+
+    expect(html).toContain("execution-prompt-bubble-attachments");
+    expect(html).toContain("execution-prompt-bubble-attachment");
+    expect(html).toContain("Prompt image");
+    expect(html).toContain('role="button"');
+  });
+
+  it("shows the prompt toolbar for short prompts once expanded", () => {
+    const html = renderToString(
+      React.createElement(AwakenUserPromptBlock, {
+        text: "One short prompt",
+        expanded: true,
+      }),
+    );
+
+    expect(html).toContain("execution-prompt-bubble-toolbar");
+    expect(html).toContain("Copy prompt");
+  });
 });
 
 describe("project workspace helpers", () => {
   it("normalizes workspace paths and labels them by folder name", () => {
-    expect(normalizeWorkspacePath("/Users/nolangrant/Awaken/")).toBe("/Users/nolangrant/Awaken");
+    expect(normalizeWorkspacePath("/Users/nolangrant/Awaken/")).toBe(
+      "/Users/nolangrant/Awaken",
+    );
     expect(workspaceLabelForPath("/Users/nolangrant/Awaken/")).toBe("Awaken");
   });
 
   it("maps the default workspace to the built-in project", () => {
-    const result = upsertWorkspaceProject([], "/Users/nolangrant/Awaken", "/Users/nolangrant/Awaken/");
+    const result = upsertWorkspaceProject(
+      [],
+      "/Users/nolangrant/Awaken",
+      "/Users/nolangrant/Awaken/",
+    );
 
     expect(result.projectId).toBe(DEFAULT_WORKSPACE_PROJECT_ID);
     expect(result.projects).toEqual([]);
   });
 
   it("adds and deduplicates local folder projects", () => {
-    const first = upsertWorkspaceProject([], "/Users/nolangrant/Other", "/Users/nolangrant/Awaken");
-    const second = upsertWorkspaceProject(first.projects, "/Users/nolangrant/Other/", "/Users/nolangrant/Awaken");
+    const first = upsertWorkspaceProject(
+      [],
+      "/Users/nolangrant/Other",
+      "/Users/nolangrant/Awaken",
+    );
+    const second = upsertWorkspaceProject(
+      first.projects,
+      "/Users/nolangrant/Other/",
+      "/Users/nolangrant/Awaken",
+    );
 
     expect(first.projectId).toBe(second.projectId);
     expect(second.projects).toHaveLength(1);
@@ -252,10 +351,18 @@ describe("project workspace helpers", () => {
   });
 
   it("assigns new threads to the selected project with default fallback", () => {
-    const mapping = assignThreadToProject({}, "thread-1", "workspace:%2Ftmp%2Fdemo");
+    const mapping = assignThreadToProject(
+      {},
+      "thread-1",
+      "workspace:%2Ftmp%2Fdemo",
+    );
 
-    expect(projectIdForThread("thread-1", mapping)).toBe("workspace:%2Ftmp%2Fdemo");
-    expect(projectIdForThread("thread-2", mapping)).toBe(DEFAULT_WORKSPACE_PROJECT_ID);
+    expect(projectIdForThread("thread-1", mapping)).toBe(
+      "workspace:%2Ftmp%2Fdemo",
+    );
+    expect(projectIdForThread("thread-2", mapping)).toBe(
+      DEFAULT_WORKSPACE_PROJECT_ID,
+    );
   });
 
   it("removes folder projects and thread assignments", () => {
@@ -268,9 +375,9 @@ describe("project workspace helpers", () => {
       "thread-2": "workspace:%2Ftmp%2Fkeep",
     };
 
-    expect(removeWorkspaceProject(projects, "workspace:%2Ftmp%2Fdemo")).toEqual([
-      { id: "workspace:%2Ftmp%2Fkeep", label: "keep", path: "/tmp/keep" },
-    ]);
+    expect(removeWorkspaceProject(projects, "workspace:%2Ftmp%2Fdemo")).toEqual(
+      [{ id: "workspace:%2Ftmp%2Fkeep", label: "keep", path: "/tmp/keep" }],
+    );
     expect(removeThreadProjectAssignments(mapping, ["thread-1"])).toEqual({
       "thread-2": "workspace:%2Ftmp%2Fkeep",
     });
@@ -375,7 +482,10 @@ describe("App workbench presentation", () => {
   });
 
   it("adapts turn marker density to the available rail height", () => {
-    const eightTurns = Array.from({ length: 8 }, (_, index) => `turn-${index + 1}`);
+    const eightTurns = Array.from(
+      { length: 8 },
+      (_, index) => `turn-${index + 1}`,
+    );
     expect(
       turnMarkerRailDisplay({
         showCenterComposer: false,
@@ -388,7 +498,10 @@ describe("App workbench presentation", () => {
       items: eightTurns.map((id, index) => ({ id, index })),
     });
 
-    const twentyTurns = Array.from({ length: 20 }, (_, index) => `turn-${index + 1}`);
+    const twentyTurns = Array.from(
+      { length: 20 },
+      (_, index) => `turn-${index + 1}`,
+    );
     const compactDisplay = turnMarkerRailDisplay({
       showCenterComposer: false,
       turnIds: twentyTurns,
@@ -400,7 +513,10 @@ describe("App workbench presentation", () => {
   });
 
   it("samples dense turn markers around the active turn without dropping endpoints", () => {
-    const fortyTurns = Array.from({ length: 40 }, (_, index) => `turn-${index + 1}`);
+    const fortyTurns = Array.from(
+      { length: 40 },
+      (_, index) => `turn-${index + 1}`,
+    );
     const display = turnMarkerRailDisplay({
       showCenterComposer: false,
       turnIds: fortyTurns,
@@ -412,7 +528,13 @@ describe("App workbench presentation", () => {
     expect(display.mode).toBe("summary");
     expect(display.items.length).toBeLessThanOrEqual(8);
     expect(display.items.map((item) => item.id)).toEqual(
-      expect.arrayContaining(["turn-1", "turn-19", "turn-20", "turn-21", "turn-40"]),
+      expect.arrayContaining([
+        "turn-1",
+        "turn-19",
+        "turn-20",
+        "turn-21",
+        "turn-40",
+      ]),
     );
   });
 
@@ -447,8 +569,27 @@ describe("App workbench presentation", () => {
   it("groups prompt-led narrative items into turn sections", () => {
     const grouped = groupNarrativeByTurns([
       { kind: "thinking", id: "intro", text: "warmup", status: "done" },
-      { kind: "prompt", id: "prompt:thread-1:1", text: "你好" },
-      { kind: "thinking", id: "thinking:1", text: "first thought", status: "done" },
+      {
+        kind: "prompt",
+        id: "prompt:thread-1:1",
+        text: "你好",
+        attachments: [
+          {
+            id: "image-1",
+            kind: "image",
+            mimeType: "image/png",
+            dataBase64: "aGVsbG8=",
+            displayName: "clip.png",
+            byteSize: 5,
+          },
+        ],
+      },
+      {
+        kind: "thinking",
+        id: "thinking:1",
+        text: "first thought",
+        status: "done",
+      },
       {
         kind: "compactBoundary",
         id: "compact:thread-1:compact_1",
@@ -456,9 +597,19 @@ describe("App workbench presentation", () => {
         title: "已自动压缩上下文",
         boundaryId: "compact_1",
       },
-      { kind: "answer", id: "answer:1", markdown: "first answer", status: "done" },
+      {
+        kind: "answer",
+        id: "answer:1",
+        markdown: "first answer",
+        status: "done",
+      },
       { kind: "prompt", id: "prompt:thread-1:2", text: "再次告诉我" },
-      { kind: "answer", id: "answer:2", markdown: "second answer", status: "active" },
+      {
+        kind: "answer",
+        id: "answer:2",
+        markdown: "second answer",
+        status: "active",
+      },
     ]);
 
     expect(grouped.leadItems).toEqual([
@@ -466,8 +617,14 @@ describe("App workbench presentation", () => {
     ]);
     expect(grouped.turns).toHaveLength(2);
     expect(grouped.turns[0].prompt.text).toBe("你好");
+    expect(grouped.turns[0].prompt.attachments).toHaveLength(1);
     expect(grouped.turns[0].items).toEqual([
-      { kind: "thinking", id: "thinking:1", text: "first thought", status: "done" },
+      {
+        kind: "thinking",
+        id: "thinking:1",
+        text: "first thought",
+        status: "done",
+      },
       {
         kind: "compactBoundary",
         id: "compact:thread-1:compact_1",
@@ -475,16 +632,31 @@ describe("App workbench presentation", () => {
         title: "已自动压缩上下文",
         boundaryId: "compact_1",
       },
-      { kind: "answer", id: "answer:1", markdown: "first answer", status: "done" },
+      {
+        kind: "answer",
+        id: "answer:1",
+        markdown: "first answer",
+        status: "done",
+      },
     ]);
     expect(grouped.turns[1].prompt.text).toBe("再次告诉我");
     expect(grouped.turns[1].items).toEqual([
-      { kind: "answer", id: "answer:2", markdown: "second answer", status: "active" },
+      {
+        kind: "answer",
+        id: "answer:2",
+        markdown: "second answer",
+        status: "active",
+      },
     ]);
   });
 
   it("collapses pre-answer narrative into an execution-process segment as soon as the answer starts", () => {
-    const thinking = { kind: "thinking", id: "thinking:1", text: "first thought", status: "done" } as const;
+    const thinking = {
+      kind: "thinking",
+      id: "thinking:1",
+      text: "first thought",
+      status: "done",
+    } as const;
     const tool = {
       kind: "tool",
       id: "tool:1",
@@ -522,7 +694,12 @@ describe("App workbench presentation", () => {
   });
 
   it("keeps execution-process items visible when the disclosure is expanded", () => {
-    const thinking = { kind: "thinking", id: "thinking:1", text: "first thought", status: "done" } as const;
+    const thinking = {
+      kind: "thinking",
+      id: "thinking:1",
+      text: "first thought",
+      status: "done",
+    } as const;
     const fileChange: Extract<RunNarrativeItem, { kind: "fileChange" }> = {
       kind: "fileChange",
       id: "file:1",
@@ -565,7 +742,12 @@ describe("App workbench presentation", () => {
   });
 
   it("keeps the turn body flat before any answer item exists", () => {
-    const thinking = { kind: "thinking", id: "thinking:1", text: "first thought", status: "done" } as const;
+    const thinking = {
+      kind: "thinking",
+      id: "thinking:1",
+      text: "first thought",
+      status: "done",
+    } as const;
     const approval = {
       kind: "approval",
       id: "approval:1",
@@ -883,8 +1065,12 @@ describe("App workbench presentation", () => {
         nextScrollTop: 220,
       }),
     ).toBe(false);
-    expect(shouldRequestLatestOutputFollowResumeForWheel({ deltaY: 12 })).toBe(true);
-    expect(shouldRequestLatestOutputFollowResumeForWheel({ deltaY: -12 })).toBe(false);
+    expect(shouldRequestLatestOutputFollowResumeForWheel({ deltaY: 12 })).toBe(
+      true,
+    );
+    expect(shouldRequestLatestOutputFollowResumeForWheel({ deltaY: -12 })).toBe(
+      false,
+    );
     expect(
       shouldPauseLatestOutputFollowForTouchMove({
         startY: 100,
@@ -947,7 +1133,9 @@ describe("App workbench presentation", () => {
   });
 
   it("requires explicit resume intent after an upward wheel pause", () => {
-    const pausedByWheel = shouldPauseLatestOutputFollowForWheel({ deltaY: -18 });
+    const pausedByWheel = shouldPauseLatestOutputFollowForWheel({
+      deltaY: -18,
+    });
     expect(pausedByWheel).toBe(true);
 
     expect(
@@ -959,7 +1147,9 @@ describe("App workbench presentation", () => {
       }),
     ).toBe(false);
 
-    const resumeIntent = shouldRequestLatestOutputFollowResumeForWheel({ deltaY: 18 });
+    const resumeIntent = shouldRequestLatestOutputFollowResumeForWheel({
+      deltaY: 18,
+    });
     expect(resumeIntent).toBe(true);
     expect(
       shouldResumeLatestOutputFollow({

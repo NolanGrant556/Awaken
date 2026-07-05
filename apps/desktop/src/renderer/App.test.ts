@@ -41,6 +41,7 @@ import {
   shouldRequestLatestOutputFollowResumeForWheel,
   shouldResumeLatestOutputFollow,
   shouldShowAssistantAnswerFooter,
+  shouldShowReturnToLatestAffordance,
   shouldShowTurnMarkerRail,
   shouldUseCenterComposer,
   turnMarkerRailDisplay,
@@ -208,6 +209,18 @@ describe("AwakenUserPromptBlock layout contract", () => {
     expect(html).not.toContain("execution-prompt-block-limited");
     expect(html).not.toContain('role="button"');
     expect(html).not.toContain("aria-expanded");
+  });
+
+  it("allows the expanded state to be controlled by the parent renderer", () => {
+    const html = renderToString(
+      React.createElement(AwakenUserPromptBlock, {
+        text: "1. First line\n2. Second line\n3. Third line\n4. Fourth line",
+        expanded: true,
+      }),
+    );
+
+    expect(html).toContain("execution-prompt-block-expanded");
+    expect(html).not.toContain('aria-expanded="false"');
   });
 });
 
@@ -849,5 +862,36 @@ describe("App workbench presentation", () => {
         hasResumeIntent: resumeIntent,
       }),
     ).toBe(true);
+  });
+
+  it("shows return-to-latest only while the user paused a live latest turn", () => {
+    expect(
+      shouldShowReturnToLatestAffordance({
+        followMode: "paused_by_user",
+        hasLatestTurn: true,
+        isBusy: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowReturnToLatestAffordance({
+        followMode: "following_latest",
+        hasLatestTurn: true,
+        isBusy: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowReturnToLatestAffordance({
+        followMode: "paused_by_user",
+        hasLatestTurn: true,
+        isBusy: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowReturnToLatestAffordance({
+        followMode: "paused_by_user",
+        hasLatestTurn: false,
+        isBusy: true,
+      }),
+    ).toBe(false);
   });
 });

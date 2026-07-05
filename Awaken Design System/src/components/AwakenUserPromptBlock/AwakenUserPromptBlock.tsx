@@ -4,12 +4,26 @@ import { AwakenCopyButton } from "../AwakenCopyButton";
 
 export type AwakenUserPromptBlockProps = {
   text: string;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
 };
 
-export function AwakenUserPromptBlock({ text }: AwakenUserPromptBlockProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
+export function AwakenUserPromptBlock({
+  text,
+  expanded,
+  onExpandedChange,
+}: AwakenUserPromptBlockProps) {
+  const [uncontrolledExpanded, setUncontrolledExpanded] = useState(false);
   const blockRef = useRef<HTMLElement | null>(null);
   const isExpandable = text.split(/\r\n|\r|\n/).length > 3 || text.trim().length > 160;
+  const isExpanded = expanded ?? uncontrolledExpanded;
+
+  function updateExpanded(nextExpanded: boolean): void {
+    if (expanded === undefined) {
+      setUncontrolledExpanded(nextExpanded);
+    }
+    onExpandedChange?.(nextExpanded);
+  }
 
   useEffect(() => {
     if (!isExpanded) {
@@ -21,20 +35,20 @@ export function AwakenUserPromptBlock({ text }: AwakenUserPromptBlockProps) {
       if (!(target instanceof Node) || blockRef.current?.contains(target)) {
         return;
       }
-      setIsExpanded(false);
+      updateExpanded(false);
     }
 
     document.addEventListener("pointerdown", handleDocumentPointerDown);
     return () => {
       document.removeEventListener("pointerdown", handleDocumentPointerDown);
     };
-  }, [isExpanded]);
+  }, [isExpanded, expanded, onExpandedChange]);
 
   function expandPrompt(): void {
     if (!isExpandable) {
       return;
     }
-    setIsExpanded(true);
+    updateExpanded(true);
   }
 
   function handlePromptKeyDown(event: KeyboardEvent<HTMLDivElement>): void {

@@ -66,7 +66,7 @@ if (!footerHtml.includes("assistant-message-has-footer")) {
   throw new Error("AwakenAssistantMessage did not expose the completed footer spacing class");
 }
 
-if (!footerHtml.includes("Agent ran") || !footerHtml.includes("1m 05s")) {
+if ((!footerHtml.includes("Agent ran") && !footerHtml.includes("执行时间")) || !footerHtml.includes("1m 05s")) {
   throw new Error("AwakenAssistantMessage did not render the elapsed runtime label");
 }
 

@@ -41,7 +41,6 @@ import {
   AwakenWorkbenchSidebarFrame as WorkbenchSidebarFrame,
   AwakenRunStage as RunStage,
   AwakenComposerDock as ComposerDock,
-  type ComponentTone,
   type ComposerBarMetaItem,
   type NavItem,
   type PlatformKind,
@@ -105,67 +104,17 @@ import {
 
 type InspectorTabId = "changes";
 
-function formatStatusLabel(
-  phase: ReturnType<typeof createInitialRuntimeState>["phase"],
-  status?: ReturnType<typeof createInitialRuntimeState>["status"],
-): string {
-  if (status === "awaiting_approval") {
-    return "Awaiting approval";
-  }
-  switch (phase) {
-    case "starting":
-      return "Creating run";
-    case "running":
-      return "Streaming";
-    case "reconnecting":
-      return "Reconnecting...";
-    case "cancelling":
-      return "Cancelling";
-    case "done":
-      return "Completed";
-    case "cancelled":
-      return "Cancelled";
-    case "error":
-      return "Error";
-    default:
-      return "Idle";
-  }
-}
-
-function sidebarStatusForThread(thread: ThreadItem): {
-  label: string;
-  tone: ComponentTone;
-} {
+export function shouldShowSidebarThreadSpinner(thread: ThreadItem): boolean {
   if (
-    (thread.approvalCount ?? 0) > 0 ||
-    thread.runStatus === "awaiting_approval"
+    thread.runStatus === "running" ||
+    thread.runStatus === "cancelling"
   ) {
-    return { label: "needs input", tone: "permission" };
+    return true;
   }
-
-  switch (thread.runStatus) {
-    case "cancelling":
-      return { label: "cancelling", tone: "warning" };
-    case "cancelled":
-      return { label: "cancelled", tone: "neutral" };
-    case "error":
-      return { label: "error", tone: "error" };
-    case "finished":
-      return { label: "done", tone: "success" };
-    case "running":
-      if ((thread.artifactCount ?? 0) > 0) {
-        return { label: "ready for review", tone: "warning" };
-      }
-      return { label: "running", tone: "local" };
-    default:
-      if (thread.activeRunId) {
-        return { label: "running", tone: "local" };
-      }
-      if ((thread.artifactCount ?? 0) > 0) {
-        return { label: "ready for review", tone: "warning" };
-      }
-      return { label: "idle", tone: "neutral" };
+  if (thread.runStatus) {
+    return false;
   }
+  return Boolean(thread.activeRunId);
 }
 
 function isThreadBusyForDelete(thread: ThreadItem): boolean {
@@ -889,17 +838,11 @@ export function App() {
 
   function threadItemsForProject(projectId: string): ProjectItem[] {
     return threadsForProject(projectId).map((thread) => {
-      const sidebarStatus = sidebarStatusForThread(thread);
-      const timeLabel =
-        thread.threadId === runtimeState.activeThreadId ||
-        sidebarStatus.label === "idle"
-          ? undefined
-          : sidebarStatus.label;
       return {
         id: `thread:${thread.threadId}`,
         kind: "thread",
         label: thread.label,
-        timeLabel,
+        isLoading: shouldShowSidebarThreadSpinner(thread),
         menuItems: [
           {
             id: "rename-thread",

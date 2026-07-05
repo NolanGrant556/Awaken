@@ -1,6 +1,9 @@
 package context
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestContextDoesNotStoreSystemPrompt(t *testing.T) {
 	ctx := New()
@@ -66,5 +69,33 @@ func TestValidateToolResultPairingRejectsNameMismatch(t *testing.T) {
 
 	if err := ValidateToolResultPairing(messages); err == nil {
 		t.Fatal("expected tool result name mismatch error")
+	}
+}
+
+func TestEstimateTotalTokensTreatsImageAttachmentsAsFixedRoughCost(t *testing.T) {
+	ctx := New()
+	ctx.AddUserMessageWithAttachments("look", []MessageAttachment{{
+		ID:          "image-1",
+		Kind:        "image",
+		MimeType:    "image/png",
+		DisplayName: "image.png",
+		DataBase64:  strings.Repeat("A", 400000),
+	}})
+
+	got := ctx.EstimateTotalTokens()
+	if got > 2500 {
+		t.Fatalf("expected image attachment estimate to stay bounded, got %d", got)
+	}
+}
+
+func TestEstimateAttachmentPayloadTokensKeepsImageEstimateSeparateFromBase64Length(t *testing.T) {
+	imageTokens := EstimateAttachmentPayloadTokens("image", strings.Repeat("A", 400000))
+	textTokens := EstimateAttachmentPayloadTokens("text", strings.Repeat("A", 400000))
+
+	if imageTokens != roughImageAttachmentTokenEstimate {
+		t.Fatalf("expected fixed image attachment estimate %d, got %d", roughImageAttachmentTokenEstimate, imageTokens)
+	}
+	if textTokens <= imageTokens {
+		t.Fatalf("expected text payload estimate to exceed image rough estimate, got text=%d image=%d", textTokens, imageTokens)
 	}
 }

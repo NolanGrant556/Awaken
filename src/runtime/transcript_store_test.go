@@ -101,9 +101,17 @@ func TestTranscriptStoreAppendsMessagesEventsIdempotentlyAndLoads(t *testing.T) 
 			Seq:       3,
 			Timestamp: now.Add(2 * time.Millisecond),
 			AgentEvent: agentcore.AwakenEvent{
-				Type:           agentcore.RunFinishedEventType,
-				Content:        "done",
-				TerminalReason: agentcore.TerminalReasonCompleted,
+				Type:                        agentcore.RunFinishedEventType,
+				Content:                     "done",
+				TerminalReason:              agentcore.TerminalReasonCompleted,
+				ContextModelWindow:          128000,
+				ContextOutputReserve:        16000,
+				ContextEffectiveWindow:      112000,
+				ContextEstimatedTokens:      96,
+				ContextActualTokens:         84,
+				ContextWarningThreshold:     95000,
+				ContextAutoCompactThreshold: 100000,
+				ContextCompactTarget:        33000,
 			},
 		},
 	}
@@ -153,8 +161,14 @@ func TestTranscriptStoreAppendsMessagesEventsIdempotentlyAndLoads(t *testing.T) 
 	if restored.LastContextWindowState == nil || restored.LastContextWindowState.LastCompactBoundaryID != "compact_1" {
 		t.Fatalf("expected restored context window compact boundary, got %+v", restored.LastContextWindowState)
 	}
-	if restored.LastContextWindowState.EstimatedTokens != 80 {
-		t.Fatalf("expected restored context estimate to use compact post estimate, got %+v", restored.LastContextWindowState)
+	if restored.LastContextWindowState.EstimatedTokens != 96 {
+		t.Fatalf("expected restored terminal context estimate to win, got %+v", restored.LastContextWindowState)
+	}
+	if restored.LastContextWindowState.LastAPIUsageTokens != 84 {
+		t.Fatalf("expected restored api usage tokens from terminal event, got %+v", restored.LastContextWindowState)
+	}
+	if restored.LastContextWindowState.LastCompactBoundaryID != "compact_1" {
+		t.Fatalf("expected compact boundary to survive terminal context merge, got %+v", restored.LastContextWindowState)
 	}
 	if restored.TerminalReason != agentcore.TerminalReasonCompleted ||
 		restored.TerminalEvent == nil ||

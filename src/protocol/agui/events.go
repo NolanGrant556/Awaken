@@ -80,6 +80,7 @@ type Event struct {
 	ContextOutputReserve             int         `json:"contextOutputReserve,omitempty"`
 	ContextEffectiveWindow           int         `json:"contextEffectiveWindow,omitempty"`
 	ContextEstimatedTokens           int         `json:"contextEstimatedTokens,omitempty"`
+	ContextActualTokens              int         `json:"contextActualTokens,omitempty"`
 	ContextWarningThreshold          int         `json:"contextWarningThreshold,omitempty"`
 	ContextAutoCompactThreshold      int         `json:"contextAutoCompactThreshold,omitempty"`
 	ContextCompactTarget             int         `json:"contextCompactTarget,omitempty"`

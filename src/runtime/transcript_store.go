@@ -21,24 +21,24 @@ const (
 )
 
 type TranscriptRecord struct {
-	RecordType        string                   `json:"record_type"`
-	SessionID         string                   `json:"session_id,omitempty"`
-	ThreadID          string                   `json:"thread_id"`
-	RunID             string                   `json:"run_id,omitempty"`
-	TurnID            string                   `json:"turn_id,omitempty"`
-	MessageID         string                   `json:"message_id,omitempty"`
-	ParentMessageID   string                   `json:"parent_message_id,omitempty"`
-	Role              string                   `json:"role,omitempty"`
-	Content           string                   `json:"content,omitempty"`
+	RecordType        string                        `json:"record_type"`
+	SessionID         string                        `json:"session_id,omitempty"`
+	ThreadID          string                        `json:"thread_id"`
+	RunID             string                        `json:"run_id,omitempty"`
+	TurnID            string                        `json:"turn_id,omitempty"`
+	MessageID         string                        `json:"message_id,omitempty"`
+	ParentMessageID   string                        `json:"parent_message_id,omitempty"`
+	Role              string                        `json:"role,omitempty"`
+	Content           string                        `json:"content,omitempty"`
 	Attachments       []transcriptMessageAttachment `json:"attachments,omitempty"`
-	ToolCalls         []convcontext.ToolCall   `json:"tool_calls,omitempty"`
-	ToolCallID        string                   `json:"tool_call_id,omitempty"`
-	ToolName          string                   `json:"tool_name,omitempty"`
-	IsError           bool                     `json:"is_error,omitempty"`
-	Event             *agentcore.AwakenEvent   `json:"event,omitempty"`
-	TerminalReason    agentcore.TerminalReason `json:"terminal_reason,omitempty"`
-	Timestamp         time.Time                `json:"timestamp"`
-	CompactBoundaryID string                   `json:"compact_boundary_id,omitempty"`
+	ToolCalls         []convcontext.ToolCall        `json:"tool_calls,omitempty"`
+	ToolCallID        string                        `json:"tool_call_id,omitempty"`
+	ToolName          string                        `json:"tool_name,omitempty"`
+	IsError           bool                          `json:"is_error,omitempty"`
+	Event             *agentcore.AwakenEvent        `json:"event,omitempty"`
+	TerminalReason    agentcore.TerminalReason      `json:"terminal_reason,omitempty"`
+	Timestamp         time.Time                     `json:"timestamp"`
+	CompactBoundaryID string                        `json:"compact_boundary_id,omitempty"`
 }
 
 type restoredTranscript struct {
@@ -516,8 +516,8 @@ func updateRestoredTranscriptState(restored *restoredTranscript, record Transcri
 	if restored == nil || record.Event == nil {
 		return
 	}
-	if isContextTranscriptEvent(record.Event.Type) {
-		state := contextWindowStateFromTranscriptEvent(*record.Event)
+	if hasContextWindowPayload(*record.Event) {
+		state := mergeContextWindowState(restored.LastContextWindowState, *record.Event)
 		restored.LastContextWindowState = &state
 	}
 	reason := firstTranscriptTerminalReason(record)
@@ -579,12 +579,31 @@ func isContextTranscriptEvent(eventType agentcore.AwakenEventType) bool {
 	}
 }
 
+func hasContextWindowPayload(event agentcore.AwakenEvent) bool {
+	if isContextTranscriptEvent(event.Type) {
+		return true
+	}
+	return event.ContextModelWindow > 0 ||
+		event.ContextOutputReserve > 0 ||
+		event.ContextEffectiveWindow > 0 ||
+		event.ContextEstimatedTokens > 0 ||
+		event.ContextActualTokens > 0 ||
+		event.ContextWarningThreshold > 0 ||
+		event.ContextAutoCompactThreshold > 0 ||
+		event.ContextCompactTarget > 0 ||
+		event.ContextEstimatedDeltaTokens != 0 ||
+		event.CompactPreEstimate != nil ||
+		event.CompactPostEstimate != nil ||
+		strings.TrimSpace(event.CompactBoundaryID) != ""
+}
+
 func contextWindowStateFromTranscriptEvent(event agentcore.AwakenEvent) agentcore.ContextWindowState {
 	return agentcore.ContextWindowState{
 		ModelWindow:                 event.ContextModelWindow,
 		OutputReserve:               event.ContextOutputReserve,
 		EffectiveWindow:             event.ContextEffectiveWindow,
 		EstimatedTokens:             compactEstimatedTokensFromEvent(event),
+		LastAPIUsageTokens:          event.ContextActualTokens,
 		WarningThreshold:            event.ContextWarningThreshold,
 		AutoCompactThreshold:        event.ContextAutoCompactThreshold,
 		CompactTarget:               event.ContextCompactTarget,
@@ -592,6 +611,48 @@ func contextWindowStateFromTranscriptEvent(event agentcore.AwakenEvent) agentcor
 		LastCompactBoundaryID:       compactBoundaryIDFromEvent(event),
 		HasAttemptedReactiveCompact: compactModeFromEvent(event) == agentcore.CompactModeReactive,
 	}
+}
+
+func mergeContextWindowState(previous *agentcore.ContextWindowState, event agentcore.AwakenEvent) agentcore.ContextWindowState {
+	next := contextWindowStateFromTranscriptEvent(event)
+	if previous == nil {
+		return next
+	}
+	merged := *previous
+	if next.ModelWindow > 0 {
+		merged.ModelWindow = next.ModelWindow
+	}
+	if next.OutputReserve > 0 {
+		merged.OutputReserve = next.OutputReserve
+	}
+	if next.EffectiveWindow > 0 {
+		merged.EffectiveWindow = next.EffectiveWindow
+	}
+	if next.EstimatedTokens > 0 {
+		merged.EstimatedTokens = next.EstimatedTokens
+	}
+	if next.LastAPIUsageTokens > 0 {
+		merged.LastAPIUsageTokens = next.LastAPIUsageTokens
+	}
+	if next.WarningThreshold > 0 {
+		merged.WarningThreshold = next.WarningThreshold
+	}
+	if next.AutoCompactThreshold > 0 {
+		merged.AutoCompactThreshold = next.AutoCompactThreshold
+	}
+	if next.CompactTarget > 0 {
+		merged.CompactTarget = next.CompactTarget
+	}
+	if event.ContextEstimatedDeltaTokens != 0 {
+		merged.EstimatedDeltaTokens = next.EstimatedDeltaTokens
+	}
+	if next.LastCompactBoundaryID != "" {
+		merged.LastCompactBoundaryID = next.LastCompactBoundaryID
+	}
+	if next.HasAttemptedReactiveCompact {
+		merged.HasAttemptedReactiveCompact = true
+	}
+	return merged
 }
 
 func compactBoundaryIDFromEvent(event agentcore.AwakenEvent) string {

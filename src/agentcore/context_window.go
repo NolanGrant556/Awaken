@@ -174,7 +174,7 @@ func EstimateContextEnvelopeTokens(envelope ContextEnvelope) int {
 	for _, attachment := range envelope.Attachments {
 		total += convcontext.EstimateTokens(attachment.Kind)
 		total += convcontext.EstimateTokens(attachment.Path)
-		total += convcontext.EstimateTokens(attachment.Content)
+		total += convcontext.EstimateAttachmentPayloadTokens(attachment.Kind, attachment.Content)
 	}
 	for _, message := range envelope.Messages {
 		total += estimateMessageTokens(message)

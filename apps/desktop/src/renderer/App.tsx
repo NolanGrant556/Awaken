@@ -207,25 +207,29 @@ function contextUsageMeta(
     typeof createInitialRuntimeState
   >["inspectorSummary"]["contextWindow"],
 ): Pick<ComposerBarMetaItem, "label" | "value" | "progress"> | undefined {
-  const estimated = formatTokenCount(contextWindow?.estimatedTokens);
+  const usageValue =
+    typeof contextWindow?.actualTokens === "number"
+      ? contextWindow.actualTokens
+      : contextWindow?.estimatedTokens;
+  const usage = formatTokenCount(usageValue);
   const modelWindow = formatTokenCount(contextWindow?.modelWindow);
-  if (estimated && modelWindow) {
+  if (usage && modelWindow) {
     const progress =
-      typeof contextWindow?.estimatedTokens === "number" &&
+      typeof usageValue === "number" &&
       typeof contextWindow?.modelWindow === "number" &&
       contextWindow.modelWindow > 0
-        ? contextWindow.estimatedTokens / contextWindow.modelWindow
+        ? usageValue / contextWindow.modelWindow
         : undefined;
     return {
       label: "context windows",
-      value: `${estimated} / ${modelWindow}`,
+      value: `${usage} / ${modelWindow}`,
       progress,
     };
   }
-  if (estimated) {
+  if (usage) {
     return {
       label: "context windows",
-      value: estimated,
+      value: usage,
     };
   }
   return undefined;

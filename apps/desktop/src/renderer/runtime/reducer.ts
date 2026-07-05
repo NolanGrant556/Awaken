@@ -79,6 +79,7 @@ export type ContextWindowRecord = {
   outputReserve?: number;
   effectiveWindow?: number;
   estimatedTokens?: number;
+  actualTokens?: number;
   warningThreshold?: number;
   autoCompactThreshold?: number;
   compactTarget?: number;
@@ -669,10 +670,50 @@ function contextWindowRecord(event: AguiEvent): ContextWindowRecord {
     outputReserve: event.contextOutputReserve,
     effectiveWindow: event.contextEffectiveWindow,
     estimatedTokens: event.contextEstimatedTokens,
+    actualTokens: event.contextActualTokens,
     warningThreshold: event.contextWarningThreshold,
     autoCompactThreshold: event.contextAutoCompactThreshold,
     compactTarget: event.contextCompactTarget,
     estimatedDeltaTokens: event.contextEstimatedDeltaTokens,
+  };
+}
+
+function hasContextWindowPayload(event: AguiEvent): boolean {
+  return [
+    event.contextModelWindow,
+    event.contextOutputReserve,
+    event.contextEffectiveWindow,
+    event.contextEstimatedTokens,
+    event.contextActualTokens,
+    event.contextWarningThreshold,
+    event.contextAutoCompactThreshold,
+    event.contextCompactTarget,
+    event.contextEstimatedDeltaTokens,
+  ].some((value) => typeof value === "number" && Number.isFinite(value));
+}
+
+function mergeContextWindowRecord(
+  previous: ContextWindowRecord | undefined,
+  event: AguiEvent,
+): ContextWindowRecord {
+  const next = contextWindowRecord(event);
+  if (!previous) {
+    return next;
+  }
+  return {
+    eventType: previous.eventType,
+    message: next.message ?? previous.message,
+    modelWindow: next.modelWindow ?? previous.modelWindow,
+    outputReserve: next.outputReserve ?? previous.outputReserve,
+    effectiveWindow: next.effectiveWindow ?? previous.effectiveWindow,
+    estimatedTokens: next.estimatedTokens ?? previous.estimatedTokens,
+    actualTokens: next.actualTokens ?? previous.actualTokens,
+    warningThreshold: next.warningThreshold ?? previous.warningThreshold,
+    autoCompactThreshold:
+      next.autoCompactThreshold ?? previous.autoCompactThreshold,
+    compactTarget: next.compactTarget ?? previous.compactTarget,
+    estimatedDeltaTokens:
+      next.estimatedDeltaTokens ?? previous.estimatedDeltaTokens,
   };
 }
 
@@ -1391,6 +1432,12 @@ export function reduceRuntimeState(
             nextState.runCompletedAtMs ?? action.receivedAtMs;
           nextState.inspectorSummary = {
             ...nextState.inspectorSummary,
+            contextWindow: hasContextWindowPayload(action.event)
+              ? mergeContextWindowRecord(
+                  nextState.inspectorSummary.contextWindow,
+                  action.event,
+                )
+              : nextState.inspectorSummary.contextWindow,
             terminalReason: terminalReasonForEvent(action.event),
             terminalMessage: action.event.result || action.event.message,
           };

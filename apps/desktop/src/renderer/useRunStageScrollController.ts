@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { UIEvent as ReactUIEvent } from "react";
 import type { RunNarrativeItem } from "./run-narrative";
 import {
@@ -13,7 +13,6 @@ import {
   latestTurnPromptAnchorSlack,
   scrollTopForLatestTurnScrollTail,
   scrollTopForPromptAnchor,
-  shouldCancelPendingPromptAnchorForScrollIntent,
   shouldFollowLatestTurnScrollTail,
   shouldPauseLatestOutputFollowForScroll,
   shouldPauseLatestOutputFollowForTouchMove,
@@ -21,16 +20,159 @@ import {
   shouldRequestLatestOutputFollowResumeForTouchMove,
   shouldRequestLatestOutputFollowResumeForWheel,
   shouldResumeLatestOutputFollow,
+  shouldShowReturnToLatestAffordance,
+  type LatestOutputFollowMode,
+  type LatestOutputResumeIntent,
+  type ProgrammaticRunStageScrollReason,
 } from "./workbenchPresentation";
 
 const DEFAULT_PROMPT_ANCHOR_OFFSET = 0;
 const RUN_STAGE_COMPOSER_SAFE_GAP = 72;
 const LATEST_OUTPUT_FOLLOW_THRESHOLD = 48;
+const RETURN_TO_LATEST_BUTTON_GAP_PX = 12;
 
 type RunStageScrollControllerOptions = {
   showCenterComposer: boolean;
   narrativeItems: RunNarrativeItem[];
+  isBusy: boolean;
 };
+
+type ScrollInteractionState = {
+  currentTurnId?: string;
+  pendingPromptAnchorTurnId?: string;
+  followMode: LatestOutputFollowMode;
+  resumeIntent: LatestOutputResumeIntent;
+  programmaticScrollReason: ProgrammaticRunStageScrollReason;
+  programmaticScrollTop: number | null;
+};
+
+type ScrollInteractionAction =
+  | { type: "prepare-run-start" }
+  | { type: "prepare-thread-switch" }
+  | { type: "prepare-new-task" }
+  | { type: "bind-latest-turn"; turnId: string }
+  | { type: "sync-current-turn"; turnId?: string }
+  | { type: "pause-by-user"; cancelPendingPromptAnchor: boolean }
+  | { type: "set-resume-intent"; intent: Exclude<LatestOutputResumeIntent, "none"> }
+  | { type: "resume-follow"; turnId?: string }
+  | { type: "prompt-anchored"; turnId: string; hasBodyItems: boolean }
+  | { type: "latest-body-ready" }
+  | { type: "start-programmatic-scroll"; reason: ProgrammaticRunStageScrollReason; scrollTop: number }
+  | { type: "clear-programmatic-scroll"; scrollTop?: number }
+  | { type: "reset-empty" };
+
+const initialScrollInteractionState: ScrollInteractionState = {
+  followMode: "idle",
+  resumeIntent: "none",
+  programmaticScrollReason: "none",
+  programmaticScrollTop: null,
+};
+
+function reduceScrollInteractionState(
+  state: ScrollInteractionState,
+  action: ScrollInteractionAction,
+): ScrollInteractionState {
+  switch (action.type) {
+    case "prepare-run-start":
+      return {
+        ...state,
+        currentTurnId: undefined,
+        pendingPromptAnchorTurnId: undefined,
+        followMode: "anchoring",
+        resumeIntent: "none",
+        programmaticScrollReason: "none",
+        programmaticScrollTop: null,
+      };
+    case "prepare-thread-switch":
+    case "prepare-new-task":
+    case "reset-empty":
+      return initialScrollInteractionState;
+    case "bind-latest-turn":
+      if (!action.turnId || state.pendingPromptAnchorTurnId === action.turnId) {
+        return state;
+      }
+      if (state.followMode !== "anchoring") {
+        return state;
+      }
+      return {
+        ...state,
+        pendingPromptAnchorTurnId: action.turnId,
+      };
+    case "sync-current-turn":
+      if (state.currentTurnId === action.turnId) {
+        return state;
+      }
+      return {
+        ...state,
+        currentTurnId: action.turnId,
+      };
+    case "pause-by-user":
+      return {
+        ...state,
+        pendingPromptAnchorTurnId: action.cancelPendingPromptAnchor
+          ? undefined
+          : state.pendingPromptAnchorTurnId,
+        followMode: "paused_by_user",
+        resumeIntent: "none",
+      };
+    case "set-resume-intent":
+      if (state.resumeIntent === action.intent) {
+        return state;
+      }
+      return {
+        ...state,
+        resumeIntent: action.intent,
+      };
+    case "resume-follow":
+      return {
+        ...state,
+        currentTurnId: action.turnId ?? state.currentTurnId,
+        pendingPromptAnchorTurnId: undefined,
+        followMode: "following_latest",
+        resumeIntent: "none",
+      };
+    case "prompt-anchored":
+      return {
+        ...state,
+        currentTurnId: action.turnId,
+        pendingPromptAnchorTurnId: undefined,
+        followMode: action.hasBodyItems ? "following_latest" : "anchoring",
+        resumeIntent: "none",
+      };
+    case "latest-body-ready":
+      if (state.followMode !== "anchoring" || state.pendingPromptAnchorTurnId) {
+        return state;
+      }
+      return {
+        ...state,
+        followMode: "following_latest",
+      };
+    case "start-programmatic-scroll":
+      return {
+        ...state,
+        programmaticScrollReason: action.reason,
+        programmaticScrollTop: action.scrollTop,
+      };
+    case "clear-programmatic-scroll":
+      if (
+        action.scrollTop !== undefined &&
+        state.programmaticScrollTop !== null &&
+        Math.abs(state.programmaticScrollTop - action.scrollTop) >= 2
+      ) {
+        return state;
+      }
+      if (state.programmaticScrollReason === "none" && state.programmaticScrollTop === null) {
+        return state;
+      }
+      return {
+        ...state,
+        programmaticScrollReason: "none",
+        programmaticScrollTop: null,
+      };
+    default:
+      return state;
+  }
+}
 
 function promptAnchorOffset(element: HTMLElement): number {
   const value = window
@@ -78,12 +220,13 @@ function turnHasBodyItems(turn: HTMLElement): boolean {
 export function useRunStageScrollController({
   showCenterComposer,
   narrativeItems,
+  isBusy,
 }: RunStageScrollControllerOptions) {
-  const pendingPromptAnchorRef = useRef(false);
-  const followLatestOutputRef = useRef(false);
-  const latestOutputFollowPausedByUserRef = useRef(false);
-  const latestOutputFollowResumeIntentRef = useRef(false);
-  const programmaticRunStageScrollTopRef = useRef<number | null>(null);
+  const [interactionState, dispatchInteraction] = useReducer(
+    reduceScrollInteractionState,
+    initialScrollInteractionState,
+  );
+  const interactionStateRef = useRef(interactionState);
   const runStageLastScrollTopRef = useRef<number | null>(null);
   const runStageTouchStartYRef = useRef<number | null>(null);
   const runStageInputIntentCleanupRef = useRef<(() => void) | null>(null);
@@ -91,9 +234,9 @@ export function useRunStageScrollController({
   const runStageScrollRef = useRef<HTMLDivElement | null>(null);
   const composerDockRef = useRef<HTMLDivElement | null>(null);
 
-  const [activeTurnId, setActiveTurnId] = useState<string | undefined>();
   const [latestTurnMinHeightPx, setLatestTurnMinHeightPx] = useState(0);
   const [composerContentBottomInsetPx, setComposerContentBottomInsetPx] = useState(0);
+  const [composerBarBottomInsetPx, setComposerBarBottomInsetPx] = useState(0);
   const [runStageViewportHeightPx, setRunStageViewportHeightPx] = useState(0);
 
   const narrativeSections = useMemo(
@@ -110,10 +253,20 @@ export function useRunStageScrollController({
     safeGap: composerOutputGapPx,
   });
   const activeWorkbenchTurnId =
-    activeTurnId &&
-    narrativeSections.turns.some((turn) => turn.id === activeTurnId)
-      ? activeTurnId
+    interactionState.currentTurnId &&
+    narrativeSections.turns.some((turn) => turn.id === interactionState.currentTurnId)
+      ? interactionState.currentTurnId
       : latestPromptId;
+  const returnToLatestVisible = shouldShowReturnToLatestAffordance({
+    followMode: interactionState.followMode,
+    hasLatestTurn: Boolean(latestPromptId),
+    isBusy,
+  });
+  const returnToLatestBottomPx = Math.max(16, composerBarBottomInsetPx + RETURN_TO_LATEST_BUTTON_GAP_PX);
+
+  useEffect(() => {
+    interactionStateRef.current = interactionState;
+  }, [interactionState]);
 
   const applyRunStageComposerVars = useCallback((element: HTMLElement): void => {
     const targets = [element, element.parentElement].filter(
@@ -126,25 +279,20 @@ export function useRunStageScrollController({
     }
   }, [composerContentInsetPx, composerOutputGapPx, composerSafeAreaPx]);
 
-  const resetScrollFollowState = useCallback((nextPendingPromptAnchor: boolean): void => {
-    pendingPromptAnchorRef.current = nextPendingPromptAnchor;
-    followLatestOutputRef.current = nextPendingPromptAnchor;
-    latestOutputFollowPausedByUserRef.current = false;
-    latestOutputFollowResumeIntentRef.current = false;
+  const prepareForRunStart = useCallback((): void => {
+    dispatchInteraction({ type: "prepare-run-start" });
     setLatestTurnMinHeightPx(0);
   }, []);
 
-  const prepareForRunStart = useCallback((): void => {
-    resetScrollFollowState(true);
-  }, [resetScrollFollowState]);
-
   const prepareForThreadSwitch = useCallback((): void => {
-    resetScrollFollowState(false);
-  }, [resetScrollFollowState]);
+    dispatchInteraction({ type: "prepare-thread-switch" });
+    setLatestTurnMinHeightPx(0);
+  }, []);
 
   const prepareForNewTask = useCallback((): void => {
-    resetScrollFollowState(false);
-  }, [resetScrollFollowState]);
+    dispatchInteraction({ type: "prepare-new-task" });
+    setLatestTurnMinHeightPx(0);
+  }, []);
 
   function activeTurnMarkerFromScroll(element: HTMLElement): string | undefined {
     const containerTop = element.getBoundingClientRect().top;
@@ -162,28 +310,11 @@ export function useRunStageScrollController({
 
   function syncActiveTurnFromScroll(element: HTMLElement): void {
     const nextActiveId = activeTurnMarkerFromScroll(element);
-    if (!nextActiveId) {
-      return;
-    }
-    setActiveTurnId((current) => current === nextActiveId ? current : nextActiveId);
+    dispatchInteraction({ type: "sync-current-turn", turnId: nextActiveId });
   }
 
-  function pauseLatestOutputFollowForUser(): void {
-    if (shouldCancelPendingPromptAnchorForScrollIntent({ hasDirectUserInput: true })) {
-      pendingPromptAnchorRef.current = false;
-    }
-    latestOutputFollowPausedByUserRef.current = true;
-    latestOutputFollowResumeIntentRef.current = false;
-    followLatestOutputRef.current = false;
-  }
-
-  function pauseLatestOutputFollowForScroll(): void {
-    if (shouldCancelPendingPromptAnchorForScrollIntent({ hasDirectUserInput: false })) {
-      pendingPromptAnchorRef.current = false;
-    }
-    latestOutputFollowPausedByUserRef.current = true;
-    latestOutputFollowResumeIntentRef.current = false;
-    followLatestOutputRef.current = false;
+  function pauseLatestOutputFollowForUser(cancelPendingPromptAnchor: boolean): void {
+    dispatchInteraction({ type: "pause-by-user", cancelPendingPromptAnchor });
   }
 
   function measureLatestTurnMinHeight(promptId: string): void {
@@ -194,14 +325,15 @@ export function useRunStageScrollController({
       return;
     }
 
+    const isPromptAnchorPending = interactionStateRef.current.pendingPromptAnchorTurnId === promptId;
     const bottomReserve = latestTurnMinHeightBottomReserve({
       hasBodyItems: turnHasBodyItems(turn),
-      isPromptAnchorPending: pendingPromptAnchorRef.current,
+      isPromptAnchorPending,
       outputGap: composerOutputGapPx,
     });
     const promptAnchorSlack = latestTurnPromptAnchorSlack({
       hasBodyItems: turnHasBodyItems(turn),
-      isPromptAnchorPending: pendingPromptAnchorRef.current,
+      isPromptAnchorPending,
       outputGap: composerOutputGapPx,
     });
 
@@ -216,31 +348,40 @@ export function useRunStageScrollController({
     );
   }
 
-  function scrollRunStageTo(element: HTMLElement, scrollTop: number): void {
+  function scrollRunStageTo(
+    element: HTMLElement,
+    scrollTop: number,
+    reason: ProgrammaticRunStageScrollReason,
+  ): void {
     const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
     const nextScrollTop = Math.min(maxScrollTop, Math.max(0, scrollTop));
-    programmaticRunStageScrollTopRef.current = nextScrollTop;
+    dispatchInteraction({
+      type: "start-programmatic-scroll",
+      reason,
+      scrollTop: nextScrollTop,
+    });
     runStageLastScrollTopRef.current = nextScrollTop;
     element.scrollTo({
       top: nextScrollTop,
       behavior: "auto",
     });
     window.requestAnimationFrame(() => {
-      if (programmaticRunStageScrollTopRef.current === nextScrollTop) {
-        programmaticRunStageScrollTopRef.current = null;
-      }
+      dispatchInteraction({ type: "clear-programmatic-scroll", scrollTop: nextScrollTop });
     });
   }
 
-  function scrollPromptToAnchor(promptId: string): void {
+  function scrollPromptToAnchor(
+    promptId: string,
+    reason: ProgrammaticRunStageScrollReason = "anchor_prompt",
+  ): boolean {
     const element = runStageScrollRef.current;
     if (!element) {
-      return;
+      return false;
     }
 
     const turn = findTurnElement(element, promptId);
     if (!turn) {
-      return;
+      return false;
     }
 
     const elementRect = element.getBoundingClientRect();
@@ -253,27 +394,33 @@ export function useRunStageScrollController({
         promptTop: turnRect.top,
         anchorOffset: promptAnchorOffset(element),
       }),
+      reason,
     );
+    return true;
   }
 
-  function scrollLatestTurnToScrollTail(promptId: string): void {
+  function scrollLatestTurnToScrollTail(
+    promptId: string,
+    reason: ProgrammaticRunStageScrollReason = "follow_latest",
+  ): boolean {
     const element = runStageScrollRef.current;
     if (!element) {
-      return;
+      return false;
     }
 
     const turn = findTurnElement(element, promptId);
     if (!turn) {
-      return;
+      return false;
     }
 
+    const isPromptAnchorPending = interactionStateRef.current.pendingPromptAnchorTurnId === promptId;
     if (
       !shouldFollowLatestTurnScrollTail({
         hasBodyItems: turnHasBodyItems(turn),
-        isPromptAnchorPending: pendingPromptAnchorRef.current,
+        isPromptAnchorPending,
       })
     ) {
-      return;
+      return false;
     }
 
     const nextScrollTop = scrollTopForLatestTurnScrollTail({
@@ -281,10 +428,11 @@ export function useRunStageScrollController({
     });
 
     if (Math.abs(nextScrollTop - element.scrollTop) < 1) {
-      return;
+      return true;
     }
 
-    scrollRunStageTo(element, nextScrollTop);
+    scrollRunStageTo(element, nextScrollTop, reason);
+    return true;
   }
 
   const setRunStageScrollElement = useCallback((element: HTMLDivElement | null) => {
@@ -294,7 +442,6 @@ export function useRunStageScrollController({
     runStageResizeObserverRef.current = null;
     runStageScrollRef.current = element;
     if (!element) {
-      programmaticRunStageScrollTopRef.current = null;
       runStageLastScrollTopRef.current = null;
       setRunStageViewportHeightPx((current) => current === 0 ? current : 0);
       return;
@@ -307,6 +454,7 @@ export function useRunStageScrollController({
       setRunStageViewportHeightPx((current) => current === nextHeight ? current : nextHeight);
     };
     syncRunStageViewportHeight();
+    syncActiveTurnFromScroll(element);
     if (typeof ResizeObserver !== "undefined") {
       const resizeObserver = new ResizeObserver(syncRunStageViewportHeight);
       resizeObserver.observe(element);
@@ -315,15 +463,15 @@ export function useRunStageScrollController({
 
     const handleWheel = (event: WheelEvent) => {
       if (shouldPauseLatestOutputFollowForWheel({ deltaY: event.deltaY })) {
-        pauseLatestOutputFollowForUser();
+        pauseLatestOutputFollowForUser(true);
         return;
       }
       if (shouldRequestLatestOutputFollowResumeForWheel({ deltaY: event.deltaY })) {
-        latestOutputFollowResumeIntentRef.current = true;
+        dispatchInteraction({ type: "set-resume-intent", intent: "wheel_down" });
       }
     };
     const handlePointerDown = () => {
-      pauseLatestOutputFollowForUser();
+      pauseLatestOutputFollowForUser(true);
     };
     const handleTouchStart = (event: TouchEvent) => {
       runStageTouchStartYRef.current = event.touches[0]?.clientY ?? null;
@@ -336,7 +484,7 @@ export function useRunStageScrollController({
         currentY !== undefined &&
         shouldPauseLatestOutputFollowForTouchMove({ startY, currentY })
       ) {
-        pauseLatestOutputFollowForUser();
+        pauseLatestOutputFollowForUser(true);
         return;
       }
       if (
@@ -344,7 +492,7 @@ export function useRunStageScrollController({
         currentY !== undefined &&
         shouldRequestLatestOutputFollowResumeForTouchMove({ startY, currentY })
       ) {
-        latestOutputFollowResumeIntentRef.current = true;
+        dispatchInteraction({ type: "set-resume-intent", intent: "touch_to_latest" });
       }
     };
 
@@ -361,9 +509,45 @@ export function useRunStageScrollController({
   }, [applyRunStageComposerVars]);
 
   function handleTurnMarkerClick(turnId: string): void {
-    pauseLatestOutputFollowForUser();
-    setActiveTurnId(turnId);
-    scrollPromptToAnchor(turnId);
+    pauseLatestOutputFollowForUser(true);
+    dispatchInteraction({ type: "sync-current-turn", turnId });
+    scrollPromptToAnchor(turnId, "marker_jump");
+  }
+
+  function handleReturnToLatestClick(): void {
+    if (!latestPromptId) {
+      return;
+    }
+
+    const element = runStageScrollRef.current;
+    const turn = element ? findTurnElement(element, latestPromptId) : null;
+    if (!element || !turn) {
+      return;
+    }
+
+    dispatchInteraction({ type: "set-resume-intent", intent: "return_button" });
+    if (
+      interactionStateRef.current.pendingPromptAnchorTurnId === latestPromptId ||
+      !turnHasBodyItems(turn)
+    ) {
+      if (scrollPromptToAnchor(latestPromptId, "anchor_prompt")) {
+        dispatchInteraction({
+          type: "prompt-anchored",
+          turnId: latestPromptId,
+          hasBodyItems: turnHasBodyItems(turn),
+        });
+      }
+      return;
+    }
+
+    if (scrollLatestTurnToScrollTail(latestPromptId, "follow_latest")) {
+      dispatchInteraction({ type: "resume-follow", turnId: latestPromptId });
+      return;
+    }
+
+    if (scrollPromptToAnchor(latestPromptId, "anchor_prompt")) {
+      dispatchInteraction({ type: "resume-follow", turnId: latestPromptId });
+    }
   }
 
   function handleRunStageScroll(event: ReactUIEvent<HTMLDivElement>): void {
@@ -371,12 +555,13 @@ export function useRunStageScrollController({
     const previousScrollTop = runStageLastScrollTopRef.current;
     const nextScrollTop = element.scrollTop;
     runStageLastScrollTopRef.current = nextScrollTop;
-    const programmaticScrollTop = programmaticRunStageScrollTopRef.current;
+    const state = interactionStateRef.current;
+    const programmaticScrollTop = state.programmaticScrollTop;
     const isProgrammaticScroll =
       programmaticScrollTop !== null &&
       Math.abs(nextScrollTop - programmaticScrollTop) < 2;
     if (isProgrammaticScroll) {
-      programmaticRunStageScrollTopRef.current = null;
+      dispatchInteraction({ type: "clear-programmatic-scroll", scrollTop: nextScrollTop });
     }
 
     syncActiveTurnFromScroll(element);
@@ -386,13 +571,11 @@ export function useRunStageScrollController({
     }
 
     if (!latestPromptId) {
-      followLatestOutputRef.current = false;
       return;
     }
 
     const turn = findTurnElement(element, latestPromptId);
     if (!turn) {
-      followLatestOutputRef.current = false;
       return;
     }
 
@@ -402,7 +585,7 @@ export function useRunStageScrollController({
         nextScrollTop,
       })
     ) {
-      pauseLatestOutputFollowForScroll();
+      dispatchInteraction({ type: "pause-by-user", cancelPendingPromptAnchor: false });
       return;
     }
 
@@ -420,23 +603,23 @@ export function useRunStageScrollController({
       clientHeight: element.clientHeight,
       threshold: 2,
     });
-    const wasFollowingLatestOutput = followLatestOutputRef.current;
-    const hadResumeIntent = latestOutputFollowResumeIntentRef.current;
-    const isPausedByUser = latestOutputFollowPausedByUserRef.current;
-    const canFollowLatestOutput =
-      wasFollowingLatestOutput || hadResumeIntent || (!isPausedByUser && isAtScrollBottom);
+
+    let hasResumeIntent = state.resumeIntent !== "none";
+    if (state.followMode === "paused_by_user" && isNearTail && isAtScrollBottom && !hasResumeIntent) {
+      dispatchInteraction({ type: "set-resume-intent", intent: "scroll_to_tail" });
+      hasResumeIntent = true;
+    }
+
     const shouldResume = shouldResumeLatestOutputFollow({
-      isPausedByUser,
+      isPausedByUser: state.followMode === "paused_by_user",
       isNearTail,
       isAtScrollBottom,
-      hasResumeIntent: hadResumeIntent,
+      hasResumeIntent,
     });
 
     if (shouldResume) {
-      latestOutputFollowPausedByUserRef.current = false;
-      latestOutputFollowResumeIntentRef.current = false;
+      dispatchInteraction({ type: "resume-follow", turnId: latestPromptId });
     }
-    followLatestOutputRef.current = canFollowLatestOutput ? shouldResume : false;
   }
 
   useLayoutEffect(() => {
@@ -450,6 +633,7 @@ export function useRunStageScrollController({
   useLayoutEffect(() => {
     if (showCenterComposer) {
       setComposerContentBottomInsetPx(0);
+      setComposerBarBottomInsetPx(0);
       return;
     }
 
@@ -466,9 +650,15 @@ export function useRunStageScrollController({
       return contentElement instanceof HTMLElement ? contentElement : undefined;
     }
 
+    function currentComposerBarElement(): HTMLElement | undefined {
+      const composerBarElement = measuredDockElement.querySelector<HTMLElement>(".composer-bar");
+      return composerBarElement instanceof HTMLElement ? composerBarElement : undefined;
+    }
+
     function syncComposerBottomInset(): void {
       const dockRect = measuredDockElement.getBoundingClientRect();
       const contentTop = currentDockContentElement()?.getBoundingClientRect().top;
+      const composerBarTop = currentComposerBarElement()?.getBoundingClientRect().top;
       const nextInset = Math.ceil(
         composerContentBottomInset({
           dockBottom: dockRect.bottom,
@@ -476,8 +666,18 @@ export function useRunStageScrollController({
           fallbackInset: dockRect.height,
         }),
       );
+      const nextComposerBarInset = Math.ceil(
+        composerContentBottomInset({
+          dockBottom: dockRect.bottom,
+          contentTop: composerBarTop,
+          fallbackInset: nextInset,
+        }),
+      );
       setComposerContentBottomInsetPx((current) =>
         current === nextInset ? current : nextInset,
+      );
+      setComposerBarBottomInsetPx((current) =>
+        current === nextComposerBarInset ? current : nextComposerBarInset,
       );
     }
 
@@ -488,6 +688,10 @@ export function useRunStageScrollController({
     if (contentElement && contentElement !== measuredDockElement) {
       resizeObserver.observe(contentElement);
     }
+    const composerBarElement = currentComposerBarElement();
+    if (composerBarElement && composerBarElement !== measuredDockElement) {
+      resizeObserver.observe(composerBarElement);
+    }
 
     return () => {
       resizeObserver.disconnect();
@@ -496,9 +700,18 @@ export function useRunStageScrollController({
 
   useLayoutEffect(() => {
     const element = runStageScrollRef.current;
-    if (!latestPromptId || !element) {
-      pendingPromptAnchorRef.current = false;
+    if (!latestPromptId) {
+      dispatchInteraction({ type: "reset-empty" });
       setLatestTurnMinHeightPx((current) => current === 0 ? current : 0);
+      return;
+    }
+    if (!element) {
+      return;
+    }
+
+    const state = interactionStateRef.current;
+    if (state.followMode === "anchoring" && !state.pendingPromptAnchorTurnId) {
+      dispatchInteraction({ type: "bind-latest-turn", turnId: latestPromptId });
       return;
     }
 
@@ -508,15 +721,15 @@ export function useRunStageScrollController({
       return;
     }
 
-    const shouldAnchorPrompt = pendingPromptAnchorRef.current;
+    const isPromptAnchorPending = state.pendingPromptAnchorTurnId === latestPromptId;
     const bottomReserve = latestTurnMinHeightBottomReserve({
       hasBodyItems: turnHasBodyItems(turn),
-      isPromptAnchorPending: shouldAnchorPrompt,
+      isPromptAnchorPending,
       outputGap: composerOutputGapPx,
     });
     const promptAnchorSlack = latestTurnPromptAnchorSlack({
       hasBodyItems: turnHasBodyItems(turn),
-      isPromptAnchorPending: shouldAnchorPrompt,
+      isPromptAnchorPending,
       outputGap: composerOutputGapPx,
     });
     const nextMinHeight = Math.ceil(
@@ -531,14 +744,24 @@ export function useRunStageScrollController({
       return;
     }
 
-    if (shouldAnchorPrompt) {
-      pendingPromptAnchorRef.current = false;
-      scrollPromptToAnchor(latestPromptId);
+    if (isPromptAnchorPending) {
+      if (scrollPromptToAnchor(latestPromptId, "anchor_prompt")) {
+        dispatchInteraction({
+          type: "prompt-anchored",
+          turnId: latestPromptId,
+          hasBodyItems: turnHasBodyItems(turn),
+        });
+      }
       return;
     }
 
-    if (followLatestOutputRef.current && !latestOutputFollowPausedByUserRef.current) {
-      scrollLatestTurnToScrollTail(latestPromptId);
+    if (state.followMode === "anchoring" && turnHasBodyItems(turn)) {
+      dispatchInteraction({ type: "latest-body-ready" });
+      return;
+    }
+
+    if (state.followMode === "following_latest") {
+      scrollLatestTurnToScrollTail(latestPromptId, "follow_latest");
     }
   }, [
     composerOutputGapPx,
@@ -587,6 +810,7 @@ export function useRunStageScrollController({
     composerContentInsetPx,
     composerDockRef,
     composerSafeAreaPx,
+    handleReturnToLatestClick,
     handleRunStageScroll,
     handleTurnMarkerClick,
     latestPromptId,
@@ -595,6 +819,8 @@ export function useRunStageScrollController({
     prepareForNewTask,
     prepareForRunStart,
     prepareForThreadSwitch,
+    returnToLatestBottomPx,
+    returnToLatestVisible,
     runStageViewportHeightPx,
     setRunStageScrollElement,
   };

@@ -364,6 +364,35 @@
   min-width: 0;
 }
 
+.execution-process-disclosure {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.execution-process-disclosure button {
+  min-height: 18px;
+}
+
+.execution-process-disclosure-title {
+  color: var(--aw-text-subtle);
+  font-size: var(--aw-font-size-sm);
+  font-weight: var(--aw-font-weight-semibold);
+  line-height: var(--aw-line-height-sm);
+}
+
+.execution-process-disclosure-body {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding-top: 0;
+}
+
 .execution-feed {
   width: 100%;
   max-width: 100%;

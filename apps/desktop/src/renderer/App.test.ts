@@ -8,6 +8,7 @@ import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { composerRuntimePanelsForStatus } from "./useComposerLifecycle";
+import type { RunNarrativeItem } from "./run-narrative";
 import {
   DEFAULT_WORKSPACE_PROJECT_ID,
   assignThreadToProject,
@@ -29,6 +30,7 @@ import {
   isNearScrollBottom,
   latestTurnMinHeightBottomReserve,
   latestTurnPromptAnchorSlack,
+  projectNarrativeTurnBodySegments,
   resolvedDecisionForApproval,
   scrollTopForLatestTurnScrollTail,
   scrollTopForPromptAnchor,
@@ -478,6 +480,111 @@ describe("App workbench presentation", () => {
     expect(grouped.turns[1].prompt.text).toBe("再次告诉我");
     expect(grouped.turns[1].items).toEqual([
       { kind: "answer", id: "answer:2", markdown: "second answer", status: "active" },
+    ]);
+  });
+
+  it("collapses pre-answer narrative into an execution-process segment as soon as the answer starts", () => {
+    const thinking = { kind: "thinking", id: "thinking:1", text: "first thought", status: "done" } as const;
+    const tool = {
+      kind: "tool",
+      id: "tool:1",
+      title: "Read file",
+      detail: "docs/README.md",
+      status: "done",
+    } as const;
+    const answer = {
+      kind: "answer",
+      id: "answer:1",
+      markdown: "streaming answer",
+      status: "active",
+    } as const;
+
+    expect(
+      projectNarrativeTurnBodySegments({
+        turnId: "prompt:thread-1:1",
+        items: [thinking, tool, answer],
+        executionProcessOpen: false,
+      }),
+    ).toEqual([
+      {
+        kind: "executionProcess",
+        id: "execution-process:prompt:thread-1:1",
+        title: "执行过程",
+        items: [thinking, tool],
+        open: false,
+      },
+      {
+        kind: "items",
+        id: "answer-and-after:prompt:thread-1:1",
+        items: [answer],
+      },
+    ]);
+  });
+
+  it("keeps execution-process items visible when the disclosure is expanded", () => {
+    const thinking = { kind: "thinking", id: "thinking:1", text: "first thought", status: "done" } as const;
+    const fileChange: Extract<RunNarrativeItem, { kind: "fileChange" }> = {
+      kind: "fileChange",
+      id: "file:1",
+      files: [
+        {
+          id: "file-entry:1",
+          title: "App.tsx",
+          status: "done",
+        },
+      ],
+      status: "done",
+    };
+    const answer = {
+      kind: "answer",
+      id: "answer:1",
+      markdown: "done answer",
+      status: "done",
+    } as const;
+
+    expect(
+      projectNarrativeTurnBodySegments({
+        turnId: "prompt:thread-1:1",
+        items: [thinking, fileChange, answer],
+        executionProcessOpen: true,
+      }),
+    ).toEqual([
+      {
+        kind: "executionProcess",
+        id: "execution-process:prompt:thread-1:1",
+        title: "执行过程",
+        items: [thinking, fileChange],
+        open: true,
+      },
+      {
+        kind: "items",
+        id: "answer-and-after:prompt:thread-1:1",
+        items: [answer],
+      },
+    ]);
+  });
+
+  it("keeps the turn body flat before any answer item exists", () => {
+    const thinking = { kind: "thinking", id: "thinking:1", text: "first thought", status: "done" } as const;
+    const approval = {
+      kind: "approval",
+      id: "approval:1",
+      title: "Need approval",
+      status: "waiting",
+    } as const;
+
+    expect(
+      projectNarrativeTurnBodySegments({
+        turnId: "prompt:thread-1:1",
+        items: [thinking, approval],
+        executionProcessOpen: false,
+      }),
+    ).toEqual([
+      {
+        kind: "items",
+        id: "turn-items:prompt:thread-1:1",
+        items: [thinking, approval],
+      },
     ]);
   });
 

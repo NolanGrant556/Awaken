@@ -73,6 +73,7 @@ function reduceScrollInteractionState(
 ): ScrollInteractionState {
   switch (action.type) {
     case "prepare-run-start":
+    case "prepare-thread-switch":
       return {
         ...state,
         currentTurnId: undefined,
@@ -82,7 +83,6 @@ function reduceScrollInteractionState(
         programmaticScrollReason: "none",
         programmaticScrollTop: null,
       };
-    case "prepare-thread-switch":
     case "prepare-new-task":
     case "reset-empty":
       return initialScrollInteractionState;

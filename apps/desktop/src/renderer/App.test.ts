@@ -716,7 +716,7 @@ describe("App workbench presentation", () => {
     ]);
   });
 
-  it("collapses pre-answer narrative into an execution-process segment as soon as the answer starts", () => {
+  it("keeps the turn body flat until the final answer is marked final", () => {
     const thinking = {
       kind: "thinking",
       id: "thinking:1",
@@ -745,16 +745,59 @@ describe("App workbench presentation", () => {
       }),
     ).toEqual([
       {
+        kind: "items",
+        id: "turn-items:prompt:thread-1:1",
+        items: [thinking, tool, answer],
+      },
+    ]);
+  });
+
+  it("collapses all pre-final narrative into an execution-process segment once the final answer exists", () => {
+    const thinking = {
+      kind: "thinking",
+      id: "thinking:1",
+      text: "first thought",
+      status: "done",
+    } as const;
+    const interimAnswer = {
+      kind: "answer",
+      id: "answer:1",
+      markdown: "我先检查目录结构。",
+      status: "done",
+    } as const;
+    const tool = {
+      kind: "tool",
+      id: "tool:1",
+      title: "Read file",
+      detail: "docs/README.md",
+      status: "done",
+    } as const;
+    const finalAnswer = {
+      kind: "answer",
+      id: "answer:2",
+      markdown: "这是最终回答。",
+      status: "done",
+      isFinal: true,
+    } as const;
+
+    expect(
+      projectNarrativeTurnBodySegments({
+        turnId: "prompt:thread-1:1",
+        items: [thinking, interimAnswer, tool, finalAnswer],
+        executionProcessOpen: false,
+      }),
+    ).toEqual([
+      {
         kind: "executionProcess",
         id: "execution-process:prompt:thread-1:1",
         title: "执行过程",
-        items: [thinking, tool],
+        items: [thinking, interimAnswer, tool],
         open: false,
       },
       {
         kind: "items",
         id: "answer-and-after:prompt:thread-1:1",
-        items: [answer],
+        items: [finalAnswer],
       },
     ]);
   });
@@ -783,6 +826,7 @@ describe("App workbench presentation", () => {
       id: "answer:1",
       markdown: "done answer",
       status: "done",
+      isFinal: true,
     } as const;
 
     expect(

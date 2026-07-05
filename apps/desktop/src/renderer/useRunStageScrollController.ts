@@ -34,7 +34,6 @@ const RETURN_TO_LATEST_BUTTON_GAP_PX = 12;
 type RunStageScrollControllerOptions = {
   showCenterComposer: boolean;
   narrativeItems: RunNarrativeItem[];
-  isBusy: boolean;
 };
 
 type ScrollInteractionState = {
@@ -220,7 +219,6 @@ function turnHasBodyItems(turn: HTMLElement): boolean {
 export function useRunStageScrollController({
   showCenterComposer,
   narrativeItems,
-  isBusy,
 }: RunStageScrollControllerOptions) {
   const [interactionState, dispatchInteraction] = useReducer(
     reduceScrollInteractionState,
@@ -260,7 +258,6 @@ export function useRunStageScrollController({
   const returnToLatestVisible = shouldShowReturnToLatestAffordance({
     followMode: interactionState.followMode,
     hasLatestTurn: Boolean(latestPromptId),
-    isBusy,
   });
   const returnToLatestBottomPx = Math.max(16, composerBarBottomInsetPx + RETURN_TO_LATEST_BUTTON_GAP_PX);
 

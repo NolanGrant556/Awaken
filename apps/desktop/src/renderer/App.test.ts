@@ -864,33 +864,29 @@ describe("App workbench presentation", () => {
     ).toBe(true);
   });
 
-  it("shows return-to-latest only while the user paused a live latest turn", () => {
+  it("shows return-to-latest whenever the user paused away from the latest turn", () => {
     expect(
       shouldShowReturnToLatestAffordance({
         followMode: "paused_by_user",
         hasLatestTurn: true,
-        isBusy: true,
       }),
     ).toBe(true);
     expect(
       shouldShowReturnToLatestAffordance({
         followMode: "following_latest",
         hasLatestTurn: true,
-        isBusy: true,
       }),
     ).toBe(false);
     expect(
       shouldShowReturnToLatestAffordance({
         followMode: "paused_by_user",
         hasLatestTurn: true,
-        isBusy: false,
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       shouldShowReturnToLatestAffordance({
         followMode: "paused_by_user",
         hasLatestTurn: false,
-        isBusy: true,
       }),
     ).toBe(false);
   });

@@ -891,7 +891,6 @@ export function App() {
   } = useRunStageScrollController({
     showCenterComposer,
     narrativeItems: visibleNarrativeItems,
-    isBusy,
   });
   const turnMarkerDisplay = turnMarkerRailDisplay({
     showCenterComposer,

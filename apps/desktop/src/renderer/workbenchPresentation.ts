@@ -527,11 +527,9 @@ export function shouldResumeLatestOutputFollow({
 export function shouldShowReturnToLatestAffordance({
   followMode,
   hasLatestTurn,
-  isBusy,
 }: {
   followMode: LatestOutputFollowMode;
   hasLatestTurn: boolean;
-  isBusy: boolean;
 }): boolean {
-  return followMode === "paused_by_user" && hasLatestTurn && isBusy;
+  return followMode === "paused_by_user" && hasLatestTurn;
 }

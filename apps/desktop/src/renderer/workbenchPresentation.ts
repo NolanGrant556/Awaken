@@ -328,7 +328,9 @@ export function projectNarrativeTurnBodySegments({
     return [];
   }
 
-  const firstAnswerIndex = items.findIndex((item) => item.kind === "answer");
+  const firstAnswerIndex = items.findIndex(
+    (item) => item.kind === "answer" && item.isFinal === true,
+  );
   if (firstAnswerIndex <= 0) {
     return [
       {

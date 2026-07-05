@@ -668,6 +668,7 @@ export function App() {
         }
         const loadSeq = threadLoadSeqRef.current + 1;
         threadLoadSeqRef.current = loadSeq;
+        prepareForThreadSwitch();
         await replayThreadTranscript(run.threadId, loadSeq);
       } catch {
         if (!cancelled) {

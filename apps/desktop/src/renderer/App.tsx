@@ -23,6 +23,7 @@ import {
   AwakenAssistantMessage as AssistantMessage,
   AwakenButton as Button,
   AwakenComposerBar as ComposerBar,
+  AwakenDisclosure as Disclosure,
   AwakenDialog as Dialog,
   AwakenExecutionFeed as ExecutionFeed,
   AwakenFileChangeSummary as FileChangeSummary,
@@ -63,10 +64,12 @@ import {
 import type { ApprovalDecision } from "../shared/runtime";
 import type { RunNarrativeItem } from "./run-narrative";
 import {
+  projectNarrativeTurnBodySegments,
   resolvedDecisionForApproval,
   shouldShowAssistantAnswerFooter,
   shouldUseCenterComposer,
   turnMarkerRailDisplay,
+  type NarrativeTurnBodySegment,
   type ResolvedApprovalState,
 } from "./workbenchPresentation";
 import { useComposerLifecycle } from "./useComposerLifecycle";
@@ -356,6 +359,9 @@ export function App() {
   );
   const [promptBubbleModeByTurnId, setPromptBubbleModeByTurnId] = useState<
     Record<string, "collapsed" | "expanded">
+  >({});
+  const [executionProcessOpenByTurnId, setExecutionProcessOpenByTurnId] = useState<
+    Record<string, boolean>
   >({});
   const visibleNarrativeItems = useMemo<RunNarrativeItem[]>(() => {
     const narrativeItems: RunNarrativeItem[] = [
@@ -1651,6 +1657,50 @@ export function App() {
     return null;
   }
 
+  function renderTurnBodySegment(turnId: string, segment: NarrativeTurnBodySegment) {
+    if (segment.kind === "items") {
+      return segment.items.map((item, itemIndex) =>
+        renderNarrativeItem(
+          item,
+          `${turnId}:${segment.id}:${item.id}:${itemIndex}`,
+        ),
+      );
+    }
+
+    return [
+      <div
+        key={`${turnId}:${segment.id}`}
+        className={`execution-process-disclosure${
+          segment.open ? " execution-process-disclosure-open" : ""
+        }`}
+      >
+        <Disclosure
+          title={
+            <span className="execution-process-disclosure-title">
+              {segment.title}
+            </span>
+          }
+          open={segment.open}
+          onOpenChange={(open) => {
+            setExecutionProcessOpenByTurnId((current) => ({
+              ...current,
+              [turnId]: open,
+            }));
+          }}
+        >
+          <div className="execution-process-disclosure-body">
+            {segment.items.map((item, itemIndex) =>
+              renderNarrativeItem(
+                item,
+                `${turnId}:${segment.id}:${item.id}:${itemIndex}`,
+              ),
+            )}
+          </div>
+        </Disclosure>
+      </div>,
+    ];
+  }
+
   function toolTraceDetail(
     tool: (typeof runtimeState.toolResults)[number] | undefined,
     fallback?: string,
@@ -1978,6 +2028,11 @@ export function App() {
                           {narrativeSections.turns.map((turn, index) => {
                             const isLatestPrompt = turn.id === latestPromptId;
                             const isActiveTurn = turn.id === activeWorkbenchTurnId;
+                            const turnBodySegments = projectNarrativeTurnBodySegments({
+                              turnId: turn.id,
+                              items: turn.items,
+                              executionProcessOpen: executionProcessOpenByTurnId[turn.id] === true,
+                            });
                             const turnStyle =
                               isLatestPrompt && latestTurnMinHeightPx > 0
                                 ? ({
@@ -2011,11 +2066,8 @@ export function App() {
                                     />
                                   </div>
                                   <div className="execution-turn-body">
-                                    {turn.items.map((item, itemIndex) =>
-                                      renderNarrativeItem(
-                                        item,
-                                        `${turn.id}:${item.id}:${itemIndex}`,
-                                      ),
+                                    {turnBodySegments.flatMap((segment) =>
+                                      renderTurnBodySegment(turn.id, segment),
                                     )}
                                   </div>
                                 </div>

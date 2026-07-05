@@ -75,6 +75,8 @@ func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 			writeErrorJSON(w, http.StatusConflict, "THREAD_BUSY", err.Error())
 		case errors.Is(err, awruntime.ErrInvalidInput):
 			writeErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+		case errors.Is(err, awruntime.ErrUnsupportedInputAttachment):
+			writeErrorJSON(w, http.StatusBadRequest, "UNSUPPORTED_INPUT_ATTACHMENT", err.Error())
 		case errors.Is(err, awruntime.ErrMissingModelProfile):
 			writeErrorJSON(w, http.StatusBadRequest, "MISSING_MODEL_PROFILE", err.Error())
 		default:

@@ -1,6 +1,11 @@
 import type { ApprovalItem, RunStepItem } from "@awaken/design-system";
-import type { AguiApprovalRiskTone, AguiArtifactStatus, AguiEvent } from "./agui";
 import type {
+  AguiApprovalRiskTone,
+  AguiArtifactStatus,
+  AguiEvent,
+} from "./agui";
+import type {
+  RunInputAttachment,
   RuntimeRun,
   RuntimeRunStatus,
   RuntimeThread,
@@ -17,7 +22,15 @@ import {
   type RunNarrativeState,
 } from "../run-narrative";
 
-type RuntimePhase = "idle" | "starting" | "running" | "reconnecting" | "cancelling" | "done" | "error" | "cancelled";
+type RuntimePhase =
+  | "idle"
+  | "starting"
+  | "running"
+  | "reconnecting"
+  | "cancelling"
+  | "done"
+  | "error"
+  | "cancelled";
 
 type TimelineStatus = "ready" | "running" | "done" | "error";
 
@@ -146,6 +159,7 @@ export type ThreadItem = {
 
 type ThreadViewState = {
   prompt: string;
+  promptAttachments?: RunInputAttachment[];
   runId?: string;
   threadId?: string;
   phase: RuntimePhase;
@@ -169,6 +183,7 @@ type ThreadViewState = {
 
 export type RuntimeViewState = {
   prompt: string;
+  promptAttachments?: RunInputAttachment[];
   runId?: string;
   threadId?: string;
   phase: RuntimePhase;
@@ -196,7 +211,12 @@ export type RuntimeViewState = {
 
 export type RuntimeAction =
   | { type: "run/reset" }
-  | { type: "run/requested"; prompt: string; startedAtMs?: number }
+  | {
+      type: "run/requested";
+      prompt: string;
+      promptAttachments?: RunInputAttachment[];
+      startedAtMs?: number;
+    }
   | { type: "run/created"; run: RuntimeRun }
   | { type: "run/createFailed"; message: string }
   | { type: "run/cancelRequested" }
@@ -214,6 +234,7 @@ export type RuntimeAction =
 
 const initialState: RuntimeViewState = {
   prompt: "",
+  promptAttachments: undefined,
   phase: "idle",
   timelineTitle: "Run",
   timelineStatus: "ready",
@@ -234,6 +255,7 @@ const initialState: RuntimeViewState = {
 function viewFromState(state: RuntimeViewState): ThreadViewState {
   return {
     prompt: state.prompt,
+    promptAttachments: state.promptAttachments,
     runId: state.runId,
     threadId: state.threadId,
     phase: state.phase,
@@ -278,9 +300,13 @@ function saveActiveThreadView(state: RuntimeViewState): RuntimeViewState {
   };
 }
 
-function restoreThreadView(state: RuntimeViewState, threadId: string): RuntimeViewState {
+function restoreThreadView(
+  state: RuntimeViewState,
+  threadId: string,
+): RuntimeViewState {
   const thread = state.threads.find((item) => item.threadId === threadId);
-  const view = state.threadViews[threadId] ?? emptyThreadView(threadId, thread?.runId);
+  const view =
+    state.threadViews[threadId] ?? emptyThreadView(threadId, thread?.runId);
   return syncActiveThreadSummary({
     ...state,
     ...view,
@@ -289,7 +315,9 @@ function restoreThreadView(state: RuntimeViewState, threadId: string): RuntimeVi
 }
 
 function upsertThread(threads: ThreadItem[], next: ThreadItem): ThreadItem[] {
-  const index = threads.findIndex((thread) => thread.threadId === next.threadId);
+  const index = threads.findIndex(
+    (thread) => thread.threadId === next.threadId,
+  );
   if (index < 0) {
     return [...threads, next];
   }
@@ -315,7 +343,11 @@ function threadItemFromRuntime(thread: RuntimeThread): ThreadItem {
 }
 
 function isActiveRunStatus(status?: RuntimeRunStatus): boolean {
-  return status === "running" || status === "awaiting_approval" || status === "cancelling";
+  return (
+    status === "running" ||
+    status === "awaiting_approval" ||
+    status === "cancelling"
+  );
 }
 
 function syncActiveThreadSummary(state: RuntimeViewState): RuntimeViewState {
@@ -339,12 +371,19 @@ function syncActiveThreadSummary(state: RuntimeViewState): RuntimeViewState {
   };
 }
 
-function recoveryPrompt(state: RuntimeViewState, run: RuntimeRun, prompt?: string): string {
+function recoveryPrompt(
+  state: RuntimeViewState,
+  run: RuntimeRun,
+  prompt?: string,
+): string {
   const explicit = prompt?.trim();
   if (explicit) {
     return explicit;
   }
-  return state.threads.find((thread) => thread.threadId === run.threadId)?.label ?? "";
+  return (
+    state.threads.find((thread) => thread.threadId === run.threadId)?.label ??
+    ""
+  );
 }
 
 function nextNarrativeScope(state: RuntimeViewState): string {
@@ -352,7 +391,8 @@ function nextNarrativeScope(state: RuntimeViewState): string {
   const committedPromptCount = state.narrative.committedItems.filter(
     (item) => item.kind === "prompt",
   ).length;
-  const activePromptCount = state.narrative.activeItem?.kind === "prompt" ? 1 : 0;
+  const activePromptCount =
+    state.narrative.activeItem?.kind === "prompt" ? 1 : 0;
   return `${owner}:${committedPromptCount + activePromptCount + 1}`;
 }
 
@@ -368,7 +408,10 @@ function shouldAppendNarrative(state: RuntimeViewState): boolean {
   return Boolean(state.activeThreadId || state.threadId);
 }
 
-function scopeNarrativeEvent(event: AguiEvent, state: RuntimeViewState): AguiEvent {
+function scopeNarrativeEvent(
+  event: AguiEvent,
+  state: RuntimeViewState,
+): AguiEvent {
   return {
     ...event,
     threadId: event.threadId ?? state.threadId ?? state.activeThreadId,
@@ -381,11 +424,16 @@ function validTimestamp(value?: number): value is number {
 }
 
 function isSuccessfulTerminalEvent(event: AguiEvent): boolean {
-  return event.type === "RUN_FINISHED" ||
-    (event.type === "RUN_STATUS_CHANGED" && event.status === "finished");
+  return (
+    event.type === "RUN_FINISHED" ||
+    (event.type === "RUN_STATUS_CHANGED" && event.status === "finished")
+  );
 }
 
-function elapsedMsForTerminalRun(state: RuntimeViewState, receivedAtMs?: number): number | undefined {
+function elapsedMsForTerminalRun(
+  state: RuntimeViewState,
+  receivedAtMs?: number,
+): number | undefined {
   if (!validTimestamp(state.runStartedAtMs)) {
     return undefined;
   }
@@ -417,7 +465,11 @@ function attachElapsedMsToLatestAnswer(
   }
 
   let answerIndex = -1;
-  for (let index = narrative.committedItems.length - 1; index >= 0; index -= 1) {
+  for (
+    let index = narrative.committedItems.length - 1;
+    index >= 0;
+    index -= 1
+  ) {
     const item = narrative.committedItems[index];
     if (
       item.kind === "answer" &&
@@ -478,11 +530,13 @@ function appendFinalFileChangeSummary(
     ...narrative,
     committedItems: [
       ...narrative.committedItems.filter(
-        (candidate) => !(candidate.kind === "fileChange" && candidate.id === id),
+        (candidate) =>
+          !(candidate.kind === "fileChange" && candidate.id === id),
       ),
       item,
     ],
-    activeItem: narrative.activeItem?.id === id ? undefined : narrative.activeItem,
+    activeItem:
+      narrative.activeItem?.id === id ? undefined : narrative.activeItem,
   };
 }
 
@@ -542,7 +596,8 @@ function upsertToolResult(
     args: next.args ?? updated[index].args,
     content: next.content || updated[index].content,
     commandOutput: next.commandOutput ?? updated[index].commandOutput,
-    commandOutputTruncated: next.commandOutputTruncated ?? updated[index].commandOutputTruncated,
+    commandOutputTruncated:
+      next.commandOutputTruncated ?? updated[index].commandOutputTruncated,
   };
   return updated;
 }
@@ -560,7 +615,10 @@ function upsertPatchPreview(
     ...updated[index],
     ...next,
     patch: next.patch || updated[index].patch,
-    affectedPaths: next.affectedPaths.length > 0 ? next.affectedPaths : updated[index].affectedPaths,
+    affectedPaths:
+      next.affectedPaths.length > 0
+        ? next.affectedPaths
+        : updated[index].affectedPaths,
   };
   return updated;
 }
@@ -628,11 +686,15 @@ function compactBoundaryFromMessage(message?: string): string | undefined {
 }
 
 function compactModeFromMessage(message?: string): string | undefined {
-  const match = message?.match(/\bcompact (?:started|finished|failed):\s*([a-z_]+)(?=\s|$)/i);
+  const match = message?.match(
+    /\bcompact (?:started|finished|failed):\s*([a-z_]+)(?=\s|$)/i,
+  );
   return match?.[1]?.toLowerCase();
 }
 
-function compactEstimatedTokensFromMessage(message?: string): number | undefined {
+function compactEstimatedTokensFromMessage(
+  message?: string,
+): number | undefined {
   const match = message?.match(/\bestimated_tokens=(\d+)\b/i);
   if (!match) {
     return undefined;
@@ -675,7 +737,8 @@ function compactRecord(
   const structuredPostEstimate = event.contextCompactPostEstimateTokens;
   const fallbackPostEstimate =
     event.type === "AWAKEN_COMPACT_FINISHED"
-      ? event.contextEstimatedTokens ?? compactEstimatedTokensFromMessage(event.message)
+      ? (event.contextEstimatedTokens ??
+        compactEstimatedTokensFromMessage(event.message))
       : undefined;
   const postCompactEstimatedTokens = isFiniteNumber(structuredPostEstimate)
     ? structuredPostEstimate
@@ -684,8 +747,10 @@ function compactRecord(
   const usedFallback =
     (!structuredMode && Boolean(fallbackMode)) ||
     (!structuredBoundaryId && Boolean(fallbackBoundaryId)) ||
-    (!isFiniteNumber(structuredPreEstimate) && isFiniteNumber(preCompactEstimatedTokens)) ||
-    (!isFiniteNumber(structuredPostEstimate) && isFiniteNumber(postCompactEstimatedTokens));
+    (!isFiniteNumber(structuredPreEstimate) &&
+      isFiniteNumber(preCompactEstimatedTokens)) ||
+    (!isFiniteNumber(structuredPostEstimate) &&
+      isFiniteNumber(postCompactEstimatedTokens));
 
   return {
     ...contextWindowRecord(event),
@@ -737,7 +802,9 @@ function terminalReasonForEvent(event: AguiEvent): string | undefined {
   return undefined;
 }
 
-function toolDecisionStatus(decision: ToolDecisionRecord): "active" | "done" | "error" {
+function toolDecisionStatus(
+  decision: ToolDecisionRecord,
+): "active" | "done" | "error" {
   if (decision.action === "deny" || decision.action === "abort") {
     return "error";
   }
@@ -777,7 +844,10 @@ function buildArtifactDescription(artifact: ArtifactRecord): string {
   return details.join(" | ");
 }
 
-function upsertApproval(approvals: ApprovalItem[], next: ApprovalItem): ApprovalItem[] {
+function upsertApproval(
+  approvals: ApprovalItem[],
+  next: ApprovalItem,
+): ApprovalItem[] {
   const index = approvals.findIndex((approval) => approval.id === next.id);
   if (index < 0) {
     return [...approvals, next];
@@ -788,14 +858,20 @@ function upsertApproval(approvals: ApprovalItem[], next: ApprovalItem): Approval
   return updated;
 }
 
-function removeApproval(approvals: ApprovalItem[], approvalId?: string): ApprovalItem[] {
+function removeApproval(
+  approvals: ApprovalItem[],
+  approvalId?: string,
+): ApprovalItem[] {
   if (!approvalId) {
     return approvals;
   }
   return approvals.filter((approval) => approval.id !== approvalId);
 }
 
-function upsertArtifact(artifacts: ArtifactRecord[], event: AguiEvent): ArtifactRecord[] {
+function upsertArtifact(
+  artifacts: ArtifactRecord[],
+  event: AguiEvent,
+): ArtifactRecord[] {
   const id = event.artifactId ?? `artifact-${artifacts.length + 1}`;
   const existingIndex = artifacts.findIndex((artifact) => artifact.id === id);
   const existing = existingIndex >= 0 ? artifacts[existingIndex] : undefined;
@@ -818,19 +894,27 @@ function upsertArtifact(artifacts: ArtifactRecord[], event: AguiEvent): Artifact
   return [...artifacts, next];
 }
 
-function syncFromRun(state: RuntimeViewState, run: RuntimeRun): RuntimeViewState {
+function syncFromRun(
+  state: RuntimeViewState,
+  run: RuntimeRun,
+): RuntimeViewState {
   if (run.status === "cancelling") {
     return {
       ...state,
       runId: run.runId,
       threadId: run.threadId,
+      promptAttachments: run.inputAttachments,
       phase: "cancelling",
       status: run.status,
       timelineStatus: "running",
       approvals: [],
       steps: toSteps(
         upsertStep(
-          state.steps.map((step, index) => ({ ...step, key: step.id, index: index + 1 })),
+          state.steps.map((step, index) => ({
+            ...step,
+            key: step.id,
+            index: index + 1,
+          })),
           "run-cancel",
           {
             title: "Cancelling run",
@@ -848,6 +932,7 @@ function syncFromRun(state: RuntimeViewState, run: RuntimeRun): RuntimeViewState
       ...state,
       runId: run.runId,
       threadId: run.threadId,
+      promptAttachments: run.inputAttachments,
       phase: "done",
       status: run.status,
       timelineStatus: "done",
@@ -860,6 +945,7 @@ function syncFromRun(state: RuntimeViewState, run: RuntimeRun): RuntimeViewState
       ...state,
       runId: run.runId,
       threadId: run.threadId,
+      promptAttachments: run.inputAttachments,
       phase: "cancelled",
       status: run.status,
       timelineStatus: "done",
@@ -872,6 +958,7 @@ function syncFromRun(state: RuntimeViewState, run: RuntimeRun): RuntimeViewState
       ...state,
       runId: run.runId,
       threadId: run.threadId,
+      promptAttachments: run.inputAttachments,
       phase: "error",
       status: run.status,
       timelineStatus: "error",
@@ -884,6 +971,7 @@ function syncFromRun(state: RuntimeViewState, run: RuntimeRun): RuntimeViewState
     ...state,
     runId: run.runId,
     threadId: run.threadId,
+    promptAttachments: run.inputAttachments,
     phase: "running",
     status: run.status,
     timelineStatus: "running",
@@ -910,6 +998,7 @@ export function reduceRuntimeState(
     case "run/requested":
       return {
         prompt: action.prompt,
+        promptAttachments: action.promptAttachments,
         phase: "starting",
         timelineTitle: excerpt(action.prompt, 72) || "New run",
         timelineStatus: "running",
@@ -926,9 +1015,14 @@ export function reduceRuntimeState(
           ? appendRunRequestedNarrative(
               state.narrative,
               action.prompt,
+              action.promptAttachments,
               nextNarrativeScope(state),
             )
-          : createRunRequestedNarrative(action.prompt, nextNarrativeScope(state)),
+          : createRunRequestedNarrative(
+              action.prompt,
+              action.promptAttachments,
+              nextNarrativeScope(state),
+            ),
         supervisorStatus: state.supervisorStatus,
         threads: state.threads,
         activeThreadId: state.activeThreadId,
@@ -969,7 +1063,9 @@ export function reduceRuntimeState(
         }),
       );
     case "run/cancelSync":
-      return saveActiveThreadView(syncActiveThreadSummary(syncFromRun(state, action.run)));
+      return saveActiveThreadView(
+        syncActiveThreadSummary(syncFromRun(state, action.run)),
+      );
     case "run/streamError":
       return saveActiveThreadView(
         syncActiveThreadSummary({
@@ -979,7 +1075,11 @@ export function reduceRuntimeState(
           errorMessage: undefined,
           steps: toSteps(
             upsertStep(
-              state.steps.map((step, index) => ({ ...step, key: step.id, index: index + 1 })),
+              state.steps.map((step, index) => ({
+                ...step,
+                key: step.id,
+                index: index + 1,
+              })),
               "stream-interrupted",
               {
                 title: "Stream interrupted",
@@ -1007,7 +1107,11 @@ export function reduceRuntimeState(
           },
           steps: toSteps(
             upsertStep(
-              state.steps.map((step, index) => ({ ...step, key: step.id, index: index + 1 })),
+              state.steps.map((step, index) => ({
+                ...step,
+                key: step.id,
+                index: index + 1,
+              })),
               "stream-failed",
               {
                 title: "Stream failed",
@@ -1034,13 +1138,25 @@ export function reduceRuntimeState(
       );
     case "run/recovered": {
       const prompt = recoveryPrompt(state, action.run, action.prompt);
+      const hasPromptAttachments =
+        (action.run.inputAttachments?.length ?? 0) > 0;
       return saveActiveThreadView(
         syncActiveThreadSummary({
           ...syncFromRun(initialState, action.run),
           prompt,
           narrative: prompt
-            ? createRunRequestedNarrative(prompt, recoveredNarrativeScope(action.run))
-            : createInitialRunNarrativeState(),
+            ? createRunRequestedNarrative(
+                prompt,
+                action.run.inputAttachments,
+                recoveredNarrativeScope(action.run),
+              )
+            : hasPromptAttachments
+              ? createRunRequestedNarrative(
+                  prompt,
+                  action.run.inputAttachments,
+                  recoveredNarrativeScope(action.run),
+                )
+              : createInitialRunNarrativeState(),
           supervisorStatus: state.supervisorStatus,
           timelineTitle: "恢复运行",
           threads: state.threads,
@@ -1066,21 +1182,28 @@ export function reduceRuntimeState(
     case "run/threadsLoaded": {
       const threadViews = { ...state.threadViews };
       const loaded = action.threads.map((thread) => {
-        const existing = state.threads.find((item) => item.threadId === thread.threadId);
+        const existing = state.threads.find(
+          (item) => item.threadId === thread.threadId,
+        );
         return {
           ...threadItemFromRuntime(thread),
-          runStatus: existing?.runStatus ?? (thread.activeRunId ? "running" : undefined),
+          runStatus:
+            existing?.runStatus ?? (thread.activeRunId ? "running" : undefined),
           approvalCount: existing?.approvalCount ?? 0,
           artifactCount: existing?.artifactCount ?? 0,
         };
       });
       for (const thread of loaded) {
         if (!threadViews[thread.threadId]) {
-          threadViews[thread.threadId] = emptyThreadView(thread.threadId, thread.runId);
+          threadViews[thread.threadId] = emptyThreadView(
+            thread.threadId,
+            thread.runId,
+          );
         }
       }
       const activeThreadStillExists =
-        !state.activeThreadId || loaded.some((thread) => thread.threadId === state.activeThreadId);
+        !state.activeThreadId ||
+        loaded.some((thread) => thread.threadId === state.activeThreadId);
       if (!activeThreadStillExists) {
         return {
           ...initialState,
@@ -1129,7 +1252,8 @@ export function reduceRuntimeState(
           nextState.timelineStatus = "running";
           nextState.runId = action.event.runId ?? nextState.runId;
           nextState.threadId = action.event.threadId ?? nextState.threadId;
-          nextState.activeThreadId = nextState.activeThreadId ?? action.event.threadId;
+          nextState.activeThreadId =
+            nextState.activeThreadId ?? action.event.threadId;
           if (action.event.threadId) {
             nextState.threads = upsertThread(state.threads, {
               threadId: action.event.threadId,
@@ -1140,13 +1264,16 @@ export function reduceRuntimeState(
           }
           records = upsertStep(records, "run-started", {
             title: "Runtime accepted run",
-            description: action.event.runId ? `run ${action.event.runId}` : "Awaiting streamed events",
+            description: action.event.runId
+              ? `run ${action.event.runId}`
+              : "Awaiting streamed events",
             status: "done",
             tag: "runtime",
           });
           break;
         case "AWAKEN_TURN_STARTED": {
-          const turnKey = action.event.turnId ?? String(action.event.turnCount ?? "current");
+          const turnKey =
+            action.event.turnId ?? String(action.event.turnCount ?? "current");
           nextState.inspectorSummary = {
             ...nextState.inspectorSummary,
             currentTurn: {
@@ -1158,19 +1285,26 @@ export function reduceRuntimeState(
           };
           records = upsertStep(records, `turn:${turnKey}`, {
             title: "Agent turn started",
-            description: action.event.transitionReason || `Turn ${action.event.turnCount ?? turnKey}`,
+            description:
+              action.event.transitionReason ||
+              `Turn ${action.event.turnCount ?? turnKey}`,
             status: "active",
             tag: "turn",
           });
           break;
         }
         case "AWAKEN_TURN_FINISHED": {
-          const turnKey = action.event.turnId ?? String(action.event.turnCount ?? "current");
+          const turnKey =
+            action.event.turnId ?? String(action.event.turnCount ?? "current");
           nextState.inspectorSummary = {
             ...nextState.inspectorSummary,
             currentTurn: {
-              turnId: action.event.turnId ?? nextState.inspectorSummary.currentTurn?.turnId,
-              turnCount: action.event.turnCount ?? nextState.inspectorSummary.currentTurn?.turnCount,
+              turnId:
+                action.event.turnId ??
+                nextState.inspectorSummary.currentTurn?.turnId,
+              turnCount:
+                action.event.turnCount ??
+                nextState.inspectorSummary.currentTurn?.turnCount,
               status: "done",
               transitionReason:
                 action.event.transitionReason ??
@@ -1180,7 +1314,10 @@ export function reduceRuntimeState(
           };
           records = upsertStep(records, `turn:${turnKey}`, {
             title: "Agent turn finished",
-            description: action.event.terminalReason || action.event.transitionReason || "Turn complete",
+            description:
+              action.event.terminalReason ||
+              action.event.transitionReason ||
+              "Turn complete",
             status: "done",
             tag: action.event.terminalReason || "turn",
           });
@@ -1206,31 +1343,43 @@ export function reduceRuntimeState(
             nextState.phase = "done";
             nextState.timelineStatus = "done";
             nextState.approvals = [];
-            nextState.runCompletedAtMs = nextState.runCompletedAtMs ?? action.receivedAtMs;
+            nextState.runCompletedAtMs =
+              nextState.runCompletedAtMs ?? action.receivedAtMs;
           } else if (status === "error") {
             nextState.phase = "error";
             nextState.timelineStatus = "error";
             nextState.approvals = [];
           }
-          if (status === "cancelled" || status === "finished" || status === "error") {
+          if (
+            status === "cancelled" ||
+            status === "finished" ||
+            status === "error"
+          ) {
             nextState.inspectorSummary = {
               ...nextState.inspectorSummary,
               terminalReason: terminalReasonForEvent(action.event) ?? status,
               terminalMessage: action.event.message,
             };
           }
-          records = upsertStep(records, status === "cancelled" ? "run-cancelled" : `status:${status ?? "unknown"}`, {
-            title: status === "awaiting_approval"
-              ? "Awaiting approval"
-              : status === "cancelling"
-                ? "Cancelling run"
-                : status === "cancelled"
-                  ? "Run cancelled"
-                  : "Run status changed",
-            description: `Status: ${status ?? "unknown"}`,
-            status: "done",
-            tag: "runtime",
-          });
+          records = upsertStep(
+            records,
+            status === "cancelled"
+              ? "run-cancelled"
+              : `status:${status ?? "unknown"}`,
+            {
+              title:
+                status === "awaiting_approval"
+                  ? "Awaiting approval"
+                  : status === "cancelling"
+                    ? "Cancelling run"
+                    : status === "cancelled"
+                      ? "Run cancelled"
+                      : "Run status changed",
+              description: `Status: ${status ?? "unknown"}`,
+              status: "done",
+              tag: "runtime",
+            },
+          );
           break;
         }
         case "RUN_FINISHED":
@@ -1238,7 +1387,8 @@ export function reduceRuntimeState(
           nextState.status = "finished";
           nextState.timelineStatus = "done";
           nextState.approvals = [];
-          nextState.runCompletedAtMs = nextState.runCompletedAtMs ?? action.receivedAtMs;
+          nextState.runCompletedAtMs =
+            nextState.runCompletedAtMs ?? action.receivedAtMs;
           nextState.inspectorSummary = {
             ...nextState.inspectorSummary,
             terminalReason: terminalReasonForEvent(action.event),
@@ -1246,76 +1396,115 @@ export function reduceRuntimeState(
           };
           records = upsertStep(records, "run-finished", {
             title: "Run finished",
-            description: excerpt(action.event.result || nextState.assistantText || "Runtime completed"),
+            description: excerpt(
+              action.event.result ||
+                nextState.assistantText ||
+                "Runtime completed",
+            ),
             status: "done",
             tag: action.event.outcome?.type || "success",
           });
           break;
         case "TEXT_MESSAGE_START":
-          records = upsertStep(records, `assistant:${action.event.messageId ?? "message"}`, {
-            title: "Assistant response",
-            description: "Streaming text output",
-            status: "active",
-            tag: action.event.role || "assistant",
-          });
+          records = upsertStep(
+            records,
+            `assistant:${action.event.messageId ?? "message"}`,
+            {
+              title: "Assistant response",
+              description: "Streaming text output",
+              status: "active",
+              tag: action.event.role || "assistant",
+            },
+          );
           break;
         case "TEXT_MESSAGE_CONTENT": {
           const delta = action.event.delta ?? "";
           nextState.assistantText += delta;
-          records = upsertStep(records, `assistant:${action.event.messageId ?? "message"}`, {
-            title: "Assistant response",
-            description: excerpt(nextState.assistantText) || "Streaming text output",
-            status: "active",
-            tag: action.event.role || "assistant",
-          });
+          records = upsertStep(
+            records,
+            `assistant:${action.event.messageId ?? "message"}`,
+            {
+              title: "Assistant response",
+              description:
+                excerpt(nextState.assistantText) || "Streaming text output",
+              status: "active",
+              tag: action.event.role || "assistant",
+            },
+          );
           break;
         }
         case "TEXT_MESSAGE_END":
-          records = upsertStep(records, `assistant:${action.event.messageId ?? "message"}`, {
-            title: "Assistant response",
-            description: excerpt(nextState.assistantText) || "Completed text output",
-            status: "done",
-            tag: action.event.role || "assistant",
-          });
+          records = upsertStep(
+            records,
+            `assistant:${action.event.messageId ?? "message"}`,
+            {
+              title: "Assistant response",
+              description:
+                excerpt(nextState.assistantText) || "Completed text output",
+              status: "done",
+              tag: action.event.role || "assistant",
+            },
+          );
           break;
         case "REASONING_START":
-          records = upsertStep(records, `reasoning:${action.event.messageId ?? "reasoning"}`, {
-            title: "Reasoning",
-            description: "Streaming internal reasoning summary",
-            status: "active",
-            tag: "thinking",
-          });
+          records = upsertStep(
+            records,
+            `reasoning:${action.event.messageId ?? "reasoning"}`,
+            {
+              title: "Reasoning",
+              description: "Streaming internal reasoning summary",
+              status: "active",
+              tag: "thinking",
+            },
+          );
           break;
         case "REASONING_MESSAGE_CONTENT": {
           const delta = action.event.delta ?? "";
           nextState.reasoningText += delta;
-          records = upsertStep(records, `reasoning:${action.event.messageId ?? "reasoning"}`, {
-            title: "Reasoning",
-            description: excerpt(nextState.reasoningText) || "Streaming internal reasoning summary",
-            status: "active",
-            tag: "thinking",
-          });
+          records = upsertStep(
+            records,
+            `reasoning:${action.event.messageId ?? "reasoning"}`,
+            {
+              title: "Reasoning",
+              description:
+                excerpt(nextState.reasoningText) ||
+                "Streaming internal reasoning summary",
+              status: "active",
+              tag: "thinking",
+            },
+          );
           break;
         }
         case "REASONING_END":
-          records = upsertStep(records, `reasoning:${action.event.messageId ?? "reasoning"}`, {
-            title: "Reasoning",
-            description: excerpt(nextState.reasoningText) || "Reasoning complete",
-            status: "done",
-            tag: "thinking",
-          });
+          records = upsertStep(
+            records,
+            `reasoning:${action.event.messageId ?? "reasoning"}`,
+            {
+              title: "Reasoning",
+              description:
+                excerpt(nextState.reasoningText) || "Reasoning complete",
+              status: "done",
+              tag: "thinking",
+            },
+          );
           break;
         case "TOOL_CALL_START":
-          records = upsertStep(records, `tool:${action.event.toolCallId ?? "tool"}`, {
-            title: action.event.toolCallName || "Tool call",
-            description: "Tool invocation started",
-            status: "active",
-            tag: "tool",
-          });
+          records = upsertStep(
+            records,
+            `tool:${action.event.toolCallId ?? "tool"}`,
+            {
+              title: action.event.toolCallName || "Tool call",
+              description: "Tool invocation started",
+              status: "active",
+              tag: "tool",
+            },
+          );
           break;
         case "TOOL_CALL_ARGS":
         case "TOOL_CALL_ARGS_DELTA": {
-          const id = action.event.toolCallId || `tool-result-${nextState.toolResults.length + 1}`;
+          const id =
+            action.event.toolCallId ||
+            `tool-result-${nextState.toolResults.length + 1}`;
           const existing = nextState.toolResults.find((tool) => tool.id === id);
           const delta = action.event.delta ?? "";
           const args =
@@ -1329,23 +1518,30 @@ export function reduceRuntimeState(
             content: existing?.content ?? "",
             status: "active",
           });
-          records = upsertStep(records, `tool:${action.event.toolCallId ?? "tool"}`, {
-            title: action.event.toolCallName || "Tool call",
-            description: excerpt(
-              delta ||
-                (action.event.type === "TOOL_CALL_ARGS_DELTA"
-                  ? "Preparing tool arguments"
-                  : "Streaming tool arguments"),
-            ),
-            status: "active",
-            tag: "tool",
-          });
+          records = upsertStep(
+            records,
+            `tool:${action.event.toolCallId ?? "tool"}`,
+            {
+              title: action.event.toolCallName || "Tool call",
+              description: excerpt(
+                delta ||
+                  (action.event.type === "TOOL_CALL_ARGS_DELTA"
+                    ? "Preparing tool arguments"
+                    : "Streaming tool arguments"),
+              ),
+              status: "active",
+              tag: "tool",
+            },
+          );
           break;
         }
         case "TOOL_PROGRESS": {
-          const id = action.event.toolCallId || `tool-result-${nextState.toolResults.length + 1}`;
+          const id =
+            action.event.toolCallId ||
+            `tool-result-${nextState.toolResults.length + 1}`;
           const existing = nextState.toolResults.find((tool) => tool.id === id);
-          const progress = action.event.progress || action.event.message || "Tool is running";
+          const progress =
+            action.event.progress || action.event.message || "Tool is running";
           nextState.toolResults = upsertToolResult(nextState.toolResults, {
             id,
             title: action.event.toolCallName || existing?.title || "Tool call",
@@ -1353,16 +1549,23 @@ export function reduceRuntimeState(
             content: existing?.content ?? "",
             status: "active",
           });
-          records = upsertStep(records, `tool:${action.event.toolCallId ?? "tool"}`, {
-            title: action.event.toolCallName || existing?.title || "Tool call",
-            description: excerpt(progress),
-            status: "active",
-            tag: "tool",
-          });
+          records = upsertStep(
+            records,
+            `tool:${action.event.toolCallId ?? "tool"}`,
+            {
+              title:
+                action.event.toolCallName || existing?.title || "Tool call",
+              description: excerpt(progress),
+              status: "active",
+              tag: "tool",
+            },
+          );
           break;
         }
         case "AWAKEN_COMMAND_OUTPUT": {
-          const id = action.event.toolCallId || `tool-result-${nextState.toolResults.length + 1}`;
+          const id =
+            action.event.toolCallId ||
+            `tool-result-${nextState.toolResults.length + 1}`;
           const existing = nextState.toolResults.find((tool) => tool.id === id);
           const delta = action.event.delta ?? "";
           const stream = action.event.commandStream || "output";
@@ -1372,27 +1575,36 @@ export function reduceRuntimeState(
             args: existing?.args,
             content: existing?.content ?? "",
             commandOutput: `${existing?.commandOutput ?? ""}${delta}`,
-            commandOutputTruncated: action.event.truncated || existing?.commandOutputTruncated,
+            commandOutputTruncated:
+              action.event.truncated || existing?.commandOutputTruncated,
             status: "active",
           });
-          records = upsertStep(records, `tool:${action.event.toolCallId ?? "tool"}`, {
-            title: action.event.toolCallName || existing?.title || "Command",
-            description: excerpt(delta || `Streaming ${stream}`),
-            status: "active",
-            tag: stream,
-          });
+          records = upsertStep(
+            records,
+            `tool:${action.event.toolCallId ?? "tool"}`,
+            {
+              title: action.event.toolCallName || existing?.title || "Command",
+              description: excerpt(delta || `Streaming ${stream}`),
+              status: "active",
+              tag: stream,
+            },
+          );
           break;
         }
         case "AWAKEN_TOOL_PERMISSION_DECIDED": {
           const decision = toolDecisionRecord(action.event);
-          const existing = nextState.toolResults.find((tool) => tool.id === decision.toolCallId);
+          const existing = nextState.toolResults.find(
+            (tool) => tool.id === decision.toolCallId,
+          );
           const status = toolDecisionStatus(decision);
           const decisionLine = [
             decision.action ? `decision: ${decision.action}` : "",
             decision.source ? `source: ${decision.source}` : "",
             decision.reason ? `reason: ${decision.reason}` : "",
             decision.patchSummary ? `patch: ${decision.patchSummary}` : "",
-          ].filter(Boolean).join("\n");
+          ]
+            .filter(Boolean)
+            .join("\n");
 
           nextState.inspectorSummary = {
             ...nextState.inspectorSummary,
@@ -1407,21 +1619,33 @@ export function reduceRuntimeState(
             commandOutputTruncated: existing?.commandOutputTruncated,
             status,
           });
-          records = upsertStep(records, `tool-decision:${decision.toolCallId}`, {
-            title: `${decision.toolName} ${decision.action || "decision"}`,
-            description: excerpt(decision.reason || decision.source || decision.patchSummary || "AUTO decision"),
-            status,
-            tag: decision.source || "auto",
-          });
+          records = upsertStep(
+            records,
+            `tool-decision:${decision.toolCallId}`,
+            {
+              title: `${decision.toolName} ${decision.action || "decision"}`,
+              description: excerpt(
+                decision.reason ||
+                  decision.source ||
+                  decision.patchSummary ||
+                  "AUTO decision",
+              ),
+              status,
+              tag: decision.source || "auto",
+            },
+          );
           break;
         }
         case "TOOL_CALL_RESULT": {
           const content = action.event.content || "Tool returned empty content";
-          const id = action.event.toolCallId || `tool-result-${nextState.toolResults.length + 1}`;
+          const id =
+            action.event.toolCallId ||
+            `tool-result-${nextState.toolResults.length + 1}`;
           const existing = nextState.toolResults.find((tool) => tool.id === id);
           nextState.toolResults = upsertToolResult(nextState.toolResults, {
             id,
-            title: action.event.toolCallName || existing?.title || "Tool result",
+            title:
+              action.event.toolCallName || existing?.title || "Tool result",
             content,
             args: existing?.args,
             status: toolRecordStatus(action.event.content),
@@ -1439,12 +1663,16 @@ export function reduceRuntimeState(
           break;
         }
         case "TOOL_CALL_END":
-          records = upsertStep(records, `tool:${action.event.toolCallId ?? "tool"}`, {
-            title: action.event.toolCallName || "Tool call",
-            description: "Tool call complete",
-            status: "done",
-            tag: "tool",
-          });
+          records = upsertStep(
+            records,
+            `tool:${action.event.toolCallId ?? "tool"}`,
+            {
+              title: action.event.toolCallName || "Tool call",
+              description: "Tool call complete",
+              status: "done",
+              tag: "tool",
+            },
+          );
           break;
         case "AWAKEN_CONTEXT_ESTIMATED":
         case "AWAKEN_CONTEXT_WARNING":
@@ -1455,13 +1683,18 @@ export function reduceRuntimeState(
             contextWindow,
           };
           records = upsertStep(records, "context-window", {
-            title: action.event.type === "AWAKEN_CONTEXT_BLOCKED"
-              ? "Context window blocked"
-              : action.event.type === "AWAKEN_CONTEXT_WARNING"
-                ? "Context window warning"
-                : "Context window estimated",
-            description: excerpt(action.event.message || `${action.event.contextEstimatedTokens ?? 0} tokens`),
-            status: action.event.type === "AWAKEN_CONTEXT_BLOCKED" ? "error" : "done",
+            title:
+              action.event.type === "AWAKEN_CONTEXT_BLOCKED"
+                ? "Context window blocked"
+                : action.event.type === "AWAKEN_CONTEXT_WARNING"
+                  ? "Context window warning"
+                  : "Context window estimated",
+            description: excerpt(
+              action.event.message ||
+                `${action.event.contextEstimatedTokens ?? 0} tokens`,
+            ),
+            status:
+              action.event.type === "AWAKEN_CONTEXT_BLOCKED" ? "error" : "done",
             tag: "context",
           });
           break;
@@ -1469,37 +1702,57 @@ export function reduceRuntimeState(
         case "AWAKEN_COMPACT_STARTED":
         case "AWAKEN_COMPACT_FINISHED":
         case "AWAKEN_COMPACT_FAILED": {
-          const compact = compactRecord(action.event, nextState.inspectorSummary.contextWindow);
+          const compact = compactRecord(
+            action.event,
+            nextState.inspectorSummary.contextWindow,
+          );
           nextState.inspectorSummary = {
             ...nextState.inspectorSummary,
             contextWindow: compact,
             compact,
           };
           records = upsertStep(records, "compact", {
-            title: action.event.type === "AWAKEN_COMPACT_FAILED"
-              ? "Compact failed"
-              : action.event.type === "AWAKEN_COMPACT_FINISHED"
-                ? "Compact finished"
-                : "Compact started",
-            description: excerpt(action.event.message || compact.boundaryId || "Context compact"),
-            status: compact.status === "failed" ? "error" : compact.status === "started" ? "active" : "done",
+            title:
+              action.event.type === "AWAKEN_COMPACT_FAILED"
+                ? "Compact failed"
+                : action.event.type === "AWAKEN_COMPACT_FINISHED"
+                  ? "Compact finished"
+                  : "Compact started",
+            description: excerpt(
+              action.event.message || compact.boundaryId || "Context compact",
+            ),
+            status:
+              compact.status === "failed"
+                ? "error"
+                : compact.status === "started"
+                  ? "active"
+                  : "done",
             tag: compact.boundaryId || "compact",
           });
           break;
         }
         case "AWAKEN_PATCH_UPDATED": {
-          const id = action.event.toolCallId || `patch-${nextState.patchPreviews.length + 1}`;
-          nextState.patchPreviews = upsertPatchPreview(nextState.patchPreviews, {
-            id,
-            title: action.event.toolCallName || "Patch preview",
-            patch: action.event.patch || "",
-            summary: action.event.patchSummary,
-            affectedPaths: action.event.approvalAffectedPaths ?? [],
-            truncated: action.event.truncated,
-          });
+          const id =
+            action.event.toolCallId ||
+            `patch-${nextState.patchPreviews.length + 1}`;
+          nextState.patchPreviews = upsertPatchPreview(
+            nextState.patchPreviews,
+            {
+              id,
+              title: action.event.toolCallName || "Patch preview",
+              patch: action.event.patch || "",
+              summary: action.event.patchSummary,
+              affectedPaths: action.event.approvalAffectedPaths ?? [],
+              truncated: action.event.truncated,
+            },
+          );
           records = upsertStep(records, `patch:${id}`, {
             title: "Patch preview updated",
-            description: excerpt(action.event.patchSummary || action.event.patch || "Patch updated"),
+            description: excerpt(
+              action.event.patchSummary ||
+                action.event.patch ||
+                "Patch updated",
+            ),
             status: "active",
             tag: action.event.truncated ? "truncated" : "patch",
           });
@@ -1518,7 +1771,9 @@ export function reduceRuntimeState(
           });
           break;
         case "AWAKEN_APPROVAL_REQUESTED": {
-          const approvalId = action.event.approvalId ?? `approval-${nextState.approvals.length + 1}`;
+          const approvalId =
+            action.event.approvalId ??
+            `approval-${nextState.approvals.length + 1}`;
           const approval: ApprovalItem = {
             id: approvalId,
             title: action.event.approvalTitle || "Approval required",
@@ -1532,7 +1787,8 @@ export function reduceRuntimeState(
           nextState.approvals = upsertApproval(nextState.approvals, approval);
           records = upsertStep(records, `approval:${approvalId}`, {
             title: approval.title,
-            description: approval.description || "Waiting for approval decision",
+            description:
+              approval.description || "Waiting for approval decision",
             status: "active",
             tag: "approval",
           });
@@ -1540,13 +1796,15 @@ export function reduceRuntimeState(
         }
         case "AWAKEN_APPROVAL_RESOLVED": {
           const approvalId = action.event.approvalId ?? "approval";
-          nextState.approvals = removeApproval(nextState.approvals, action.event.approvalId);
+          nextState.approvals = removeApproval(
+            nextState.approvals,
+            action.event.approvalId,
+          );
           const decision = action.event.approvalDecision || "resolved";
           records = upsertStep(records, `approval:${approvalId}`, {
             title: action.event.approvalTitle || "Approval resolved",
             description:
-              action.event.approvalDescription ||
-              `Decision: ${decision}`,
+              action.event.approvalDescription || `Decision: ${decision}`,
             status: decision === "approved" ? "done" : "error",
             tag: decision,
           });
@@ -1554,15 +1812,23 @@ export function reduceRuntimeState(
         }
         case "AWAKEN_ARTIFACT_CREATED":
         case "AWAKEN_ARTIFACT_UPDATED": {
-          nextState.artifacts = upsertArtifact(nextState.artifacts, action.event);
+          nextState.artifacts = upsertArtifact(
+            nextState.artifacts,
+            action.event,
+          );
           const artifact =
-            nextState.artifacts.find((candidate) => candidate.id === action.event.artifactId) ??
-            nextState.artifacts[nextState.artifacts.length - 1];
+            nextState.artifacts.find(
+              (candidate) => candidate.id === action.event.artifactId,
+            ) ?? nextState.artifacts[nextState.artifacts.length - 1];
           records = upsertStep(records, `artifact:${artifact.id}`, {
             title: artifact.title,
-            description: excerpt(buildArtifactDescription(artifact)) || "Artifact updated",
+            description:
+              excerpt(buildArtifactDescription(artifact)) || "Artifact updated",
             status: "done",
-            tag: action.event.type === "AWAKEN_ARTIFACT_CREATED" ? "artifact:new" : "artifact:update",
+            tag:
+              action.event.type === "AWAKEN_ARTIFACT_CREATED"
+                ? "artifact:new"
+                : "artifact:update",
           });
           break;
         }
@@ -1582,12 +1848,15 @@ export function reduceRuntimeState(
             nextState.phase = "error";
             nextState.status = "error";
             nextState.timelineStatus = "error";
-            const rawMessage = action.event.message || "Runtime returned an error";
+            const rawMessage =
+              action.event.message || "Runtime returned an error";
             let errorMessage = rawMessage;
             let errorDescription = rawMessage;
             if (action.event.code === "PROVIDER_AUTH_MISSING") {
-              errorMessage = "API key 缺失，请在 Settings > Models 配置模型 API key";
-              errorDescription = "API key 缺失，请在 Settings > Models 配置模型 API key";
+              errorMessage =
+                "API key 缺失，请在 Settings > Models 配置模型 API key";
+              errorDescription =
+                "API key 缺失，请在 Settings > Models 配置模型 API key";
             } else if (action.event.code === "PROVIDER_REQUEST_FAILED") {
               errorMessage = `Provider 请求失败：${rawMessage}`;
               errorDescription = `Provider 请求失败：${rawMessage}`;
@@ -1603,21 +1872,33 @@ export function reduceRuntimeState(
           }
           nextState.inspectorSummary = {
             ...nextState.inspectorSummary,
-            terminalReason: terminalReasonForEvent(action.event) ?? action.event.code ?? "error",
+            terminalReason:
+              terminalReasonForEvent(action.event) ??
+              action.event.code ??
+              "error",
             terminalMessage: nextState.errorMessage || action.event.message,
           };
           break;
         case "AWAKEN_UNKNOWN_EVENT": {
           nextState.inspectorSummary = {
             ...nextState.inspectorSummary,
-            unknownEvents: appendUnknownEvent(nextState.inspectorSummary.unknownEvents, action.event),
+            unknownEvents: appendUnknownEvent(
+              nextState.inspectorSummary.unknownEvents,
+              action.event,
+            ),
           };
-          records = upsertStep(records, `unknown:${action.event.seq ?? action.event.rawType ?? "event"}`, {
-            title: action.event.rawType || "Unknown runtime event",
-            description: excerpt(action.event.message || "Runtime sent an unknown event"),
-            status: "done",
-            tag: "unknown",
-          });
+          records = upsertStep(
+            records,
+            `unknown:${action.event.seq ?? action.event.rawType ?? "event"}`,
+            {
+              title: action.event.rawType || "Unknown runtime event",
+              description: excerpt(
+                action.event.message || "Runtime sent an unknown event",
+              ),
+              status: "done",
+              tag: "unknown",
+            },
+          );
           break;
         }
         default:
@@ -1628,20 +1909,25 @@ export function reduceRuntimeState(
         nextState.threadId &&
         (action.event.type === "RUN_FINISHED" ||
           action.event.type === "RUN_ERROR" ||
-          (action.event.type === "RUN_STATUS_CHANGED" && action.event.status === "cancelled"))
+          (action.event.type === "RUN_STATUS_CHANGED" &&
+            action.event.status === "cancelled"))
       ) {
         nextState.threads = upsertThread(nextState.threads, {
           threadId: nextState.threadId,
           label:
-            state.threads.find((thread) => thread.threadId === nextState.threadId)?.label ||
-            state.prompt,
+            state.threads.find(
+              (thread) => thread.threadId === nextState.threadId,
+            )?.label || state.prompt,
           runId: nextState.runId,
           activeRunId: undefined,
         });
       }
 
       nextState.steps = toSteps(records);
-      const projectedNarrative = projectAguiEventToNarrative(state.narrative, narrativeEvent);
+      const projectedNarrative = projectAguiEventToNarrative(
+        state.narrative,
+        narrativeEvent,
+      );
       nextState.narrative = isSuccessfulTerminalEvent(action.event)
         ? appendFinalFileChangeSummary(
             attachElapsedMsToLatestAnswer(

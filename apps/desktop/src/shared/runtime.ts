@@ -10,10 +10,35 @@ export type RuntimeRunStatus =
   | "error"
   | "cancelled";
 
+export type RunInputAttachmentKind = "image";
+
+export type RunInputAttachmentWire = {
+  id: string;
+  kind: RunInputAttachmentKind;
+  mime_type: string;
+  data_base64: string;
+  display_name?: string;
+  width?: number;
+  height?: number;
+  byte_size?: number;
+};
+
+export type RunInputAttachment = {
+  id: string;
+  kind: RunInputAttachmentKind;
+  mimeType: string;
+  dataBase64: string;
+  displayName?: string;
+  width?: number;
+  height?: number;
+  byteSize?: number;
+};
+
 export type RuntimeRunWire = {
   run_id: string;
   thread_id: string;
   input?: string;
+  input_attachments?: RunInputAttachmentWire[];
   status: RuntimeRunStatus;
   result?: string;
   error?: string;
@@ -27,6 +52,7 @@ export type RuntimeRun = {
   runId: string;
   threadId: string;
   input?: string;
+  inputAttachments?: RunInputAttachment[];
   status: RuntimeRunStatus;
   result?: string;
   error?: string;
@@ -204,6 +230,8 @@ export type ModelCapabilityWire = {
   max_output_tokens?: number;
   default_max_tokens?: number;
   default_temperature?: number;
+  supports_vision?: boolean;
+  supports_video?: boolean;
 };
 
 export type ModelProvider = {
@@ -228,6 +256,8 @@ export type ModelCapability = {
   maxOutputTokens?: number;
   defaultMaxTokens?: number;
   defaultTemperature?: number;
+  supportsVision?: boolean;
+  supportsVideo?: boolean;
 };
 
 export const DEFAULT_CONTEXT_OUTPUT_RESERVE = 16_000;
@@ -260,6 +290,8 @@ export type ModelProfileAdvancedWire = {
   endpoint_id?: string;
   prompt_cache_key?: string;
   context_window?: number;
+  supports_vision?: boolean;
+  supports_video?: boolean;
 };
 
 export type ModelProfileAdvanced = {
@@ -268,6 +300,8 @@ export type ModelProfileAdvanced = {
   endpointId?: string;
   promptCacheKey?: string;
   contextWindow?: number;
+  supportsVision?: boolean;
+  supportsVideo?: boolean;
 };
 
 export type RuntimeModelProfileSummaryWire = {
@@ -345,6 +379,7 @@ export type ClientInfo = {
 
 export type StartRunRequestWire = {
   input: string;
+  attachments?: RunInputAttachmentWire[];
   thread_id?: string;
   workspace: WorkspaceConfigWire;
   client: ClientInfoWire;
@@ -353,6 +388,7 @@ export type StartRunRequestWire = {
 
 export type StartRunRequest = {
   input: string;
+  attachments?: RunInputAttachment[];
   threadId?: string;
   workspace: WorkspaceConfig;
   client: ClientInfo;
@@ -372,6 +408,8 @@ export type ModelProfileRunConfigWire = {
   max_tokens?: number;
   context_window?: number;
   prompt_cache_key?: string;
+  supports_vision?: boolean;
+  supports_video?: boolean;
 };
 
 export type ModelProfileRunConfig = {
@@ -387,6 +425,8 @@ export type ModelProfileRunConfig = {
   maxTokens?: number;
   contextWindow?: number;
   promptCacheKey?: string;
+  supportsVision?: boolean;
+  supportsVideo?: boolean;
 };
 
 export type ApprovalDecision = "approved" | "rejected";
@@ -457,6 +497,7 @@ export function normalizeRuntimeRun(run: RuntimeRunWire): RuntimeRun {
     runId: run.run_id,
     threadId: run.thread_id,
     input: run.input?.trim() || undefined,
+    inputAttachments: run.input_attachments?.map(normalizeRunInputAttachment),
     status: run.status,
     result: run.result,
     error: run.error,
@@ -510,6 +551,7 @@ export function normalizeRuntimeInfo(info: RuntimeInfoWire): RuntimeInfo {
 export function normalizeStartRunRequest(request: StartRunRequest): StartRunRequestWire {
   return {
     input: request.input,
+    attachments: request.attachments?.map(toRunInputAttachmentWire),
     thread_id: request.threadId,
     workspace: {
       workspace_root: request.workspace.workspaceRoot,
@@ -555,6 +597,8 @@ export function normalizeModelCapabilities(
         maxOutputTokens: capability.max_output_tokens,
         defaultMaxTokens: capability.default_max_tokens,
         defaultTemperature: capability.default_temperature,
+        supportsVision: capability.supports_vision,
+        supportsVideo: capability.supports_video,
       },
     ]),
   );
@@ -570,6 +614,8 @@ export function normalizeModelProfileAdvanced(
     endpointId: advanced.endpoint_id,
     promptCacheKey: advanced.prompt_cache_key,
     contextWindow: advanced.context_window,
+    supportsVision: advanced.supports_vision,
+    supportsVideo: advanced.supports_video,
   };
 }
 
@@ -583,6 +629,8 @@ export function toModelProfileAdvancedWire(
     endpoint_id: advanced.endpointId,
     prompt_cache_key: advanced.promptCacheKey,
     context_window: advanced.contextWindow,
+    supports_vision: advanced.supportsVision,
+    supports_video: advanced.supportsVideo,
   };
 }
 
@@ -622,5 +670,37 @@ export function normalizeModelProfileRunConfig(
     max_tokens: profile.maxTokens,
     context_window: profile.contextWindow,
     prompt_cache_key: profile.promptCacheKey,
+    supports_vision: profile.supportsVision,
+    supports_video: profile.supportsVideo,
+  };
+}
+
+export function normalizeRunInputAttachment(
+  attachment: RunInputAttachmentWire,
+): RunInputAttachment {
+  return {
+    id: attachment.id,
+    kind: attachment.kind,
+    mimeType: attachment.mime_type,
+    dataBase64: attachment.data_base64,
+    displayName: attachment.display_name,
+    width: attachment.width,
+    height: attachment.height,
+    byteSize: attachment.byte_size,
+  };
+}
+
+export function toRunInputAttachmentWire(
+  attachment: RunInputAttachment,
+): RunInputAttachmentWire {
+  return {
+    id: attachment.id,
+    kind: attachment.kind,
+    mime_type: attachment.mimeType,
+    data_base64: attachment.dataBase64,
+    display_name: attachment.displayName,
+    width: attachment.width,
+    height: attachment.height,
+    byte_size: attachment.byteSize,
   };
 }

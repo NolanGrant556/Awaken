@@ -10,6 +10,7 @@ type Agent struct {
 	conversation *context.Conversation
 	reqBuilder   *RequestBuilder
 	threadID     string
+	pendingUserAttachments []context.MessageAttachment
 }
 
 func NewAgent(config AgentConfig) *Agent {
@@ -55,9 +56,22 @@ func (a *Agent) Reconfigure(config AgentConfig) {
 }
 
 func (a *Agent) RunStreamWithEvents(ctx stdcontext.Context, userInput string, sink EventSink) (string, error) {
-	a.conversation.UserInput(userInput)
+	a.conversation.UserInputWithAttachments(userInput, a.consumePendingUserAttachments())
 
 	runner := NewRunner(a.config, a.conversation, a.reqBuilder)
 	runner.threadID = a.threadID
 	return runner.RunStreamWithEvents(ctx, sink)
+}
+
+func (a *Agent) SetPendingUserAttachments(attachments []context.MessageAttachment) {
+	a.pendingUserAttachments = append([]context.MessageAttachment(nil), attachments...)
+}
+
+func (a *Agent) consumePendingUserAttachments() []context.MessageAttachment {
+	if len(a.pendingUserAttachments) == 0 {
+		return nil
+	}
+	attachments := append([]context.MessageAttachment(nil), a.pendingUserAttachments...)
+	a.pendingUserAttachments = nil
+	return attachments
 }

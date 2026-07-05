@@ -4,18 +4,26 @@ import { AwakenCopyButton } from "../AwakenCopyButton";
 
 export type AwakenUserPromptBlockProps = {
   text: string;
+  attachments?: Array<{
+    id: string;
+    src: string;
+    alt: string;
+  }>;
   expanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
 };
 
 export function AwakenUserPromptBlock({
   text,
+  attachments = [],
   expanded,
   onExpandedChange,
 }: AwakenUserPromptBlockProps) {
   const [uncontrolledExpanded, setUncontrolledExpanded] = useState(false);
   const blockRef = useRef<HTMLElement | null>(null);
-  const isExpandable = text.split(/\r\n|\r|\n/).length > 3 || text.trim().length > 160;
+  const canExpandText =
+    text.split(/\r\n|\r|\n/).length > 3 || text.trim().length > 160;
+  const isInteractive = text.trim().length > 0 || attachments.length > 0;
   const isExpanded = expanded ?? uncontrolledExpanded;
 
   function updateExpanded(nextExpanded: boolean): void {
@@ -45,14 +53,14 @@ export function AwakenUserPromptBlock({
   }, [isExpanded, expanded, onExpandedChange]);
 
   function expandPrompt(): void {
-    if (!isExpandable) {
+    if (!isInteractive) {
       return;
     }
     updateExpanded(true);
   }
 
   function handlePromptKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
-    if (!isExpandable) {
+    if (!isInteractive) {
       return;
     }
     if (event.key !== "Enter" && event.key !== " ") {
@@ -66,22 +74,40 @@ export function AwakenUserPromptBlock({
     <article
       ref={blockRef}
       className={`execution-prompt-block${
-        isExpandable ? " execution-prompt-block-limited" : ""
-      }${
-        isExpanded ? " execution-prompt-block-expanded" : ""
-      }`}
+        canExpandText ? " execution-prompt-block-limited" : ""
+      }${isExpanded ? " execution-prompt-block-expanded" : ""}`}
     >
       <div
         className="execution-prompt-bubble"
-        role={isExpandable && !isExpanded ? "button" : undefined}
-        tabIndex={isExpandable && !isExpanded ? 0 : undefined}
-        aria-expanded={isExpandable && !isExpanded ? isExpanded : undefined}
+        role={isInteractive && !isExpanded ? "button" : undefined}
+        tabIndex={isInteractive && !isExpanded ? 0 : undefined}
+        aria-expanded={isInteractive && !isExpanded ? isExpanded : undefined}
         onClick={expandPrompt}
         onKeyDown={handlePromptKeyDown}
       >
-        <p className="execution-prompt-bubble-text">{text}</p>
+        {attachments.length > 0 ? (
+          <div
+            className="execution-prompt-bubble-attachments"
+            aria-label="Prompt images"
+          >
+            {attachments.map((attachment) => (
+              <img
+                key={attachment.id}
+                className="execution-prompt-bubble-attachment"
+                src={attachment.src}
+                alt={attachment.alt}
+              />
+            ))}
+          </div>
+        ) : null}
+        {text.trim().length > 0 ? (
+          <p className="execution-prompt-bubble-text">{text}</p>
+        ) : null}
         {isExpanded ? (
-          <div className="execution-prompt-bubble-toolbar" aria-label="Prompt actions">
+          <div
+            className="execution-prompt-bubble-toolbar"
+            aria-label="Prompt actions"
+          >
             <AwakenCopyButton
               text={text}
               label="Copy prompt"

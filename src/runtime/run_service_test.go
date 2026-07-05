@@ -769,6 +769,90 @@ func TestRunServiceValidatesInputAndMissingRun(t *testing.T) {
 	}
 }
 
+func TestRunServiceAllowsImageOnlyInputWhenModelSupportsVision(t *testing.T) {
+	t.Setenv(runtimeUserDataDirEnv, t.TempDir())
+	service := NewRunServiceWithModelProfiles(
+		func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return "done", nil
+			})
+		},
+	)
+
+	run, err := service.StartRun(StartRunRequest{
+		Input: "",
+		Attachments: []RunInputAttachment{{
+			ID:          "image-1",
+			Kind:        RunInputAttachmentKindImage,
+			MimeType:    "image/png",
+			DataBase64:  "aGVsbG8=",
+			DisplayName: "clip.png",
+		}},
+		Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()},
+		ModelProfile: &ModelProfileConfig{
+			ProfileID:      "profile-1",
+			ProviderID:     "kimi-cn",
+			ModelID:        "kimi-k2.6",
+			BaseURL:        "https://api.moonshot.cn/v1",
+			Protocol:       "openai_chat",
+			AuthScheme:     "bearer",
+			APIKey:         "secret",
+			SupportsVision: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	if len(run.InputAttachments) != 1 {
+		t.Fatalf("expected one input attachment, got %+v", run.InputAttachments)
+	}
+	if run.InputAttachments[0].StorageKey == "" {
+		t.Fatalf("expected persisted attachment storage key, got %+v", run.InputAttachments[0])
+	}
+	waitForRunTerminal(t, service, run.RunID)
+}
+
+func TestRunServiceRejectsImageInputWhenModelDoesNotSupportVision(t *testing.T) {
+	t.Setenv(runtimeUserDataDirEnv, t.TempDir())
+	service := NewRunServiceWithModelProfiles(
+		func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return "done", nil
+			})
+		},
+	)
+
+	_, err := service.StartRun(StartRunRequest{
+		Input: "",
+		Attachments: []RunInputAttachment{{
+			ID:         "image-1",
+			Kind:       RunInputAttachmentKindImage,
+			MimeType:   "image/png",
+			DataBase64: "aGVsbG8=",
+		}},
+		Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()},
+		ModelProfile: &ModelProfileConfig{
+			ProfileID:      "profile-1",
+			ProviderID:     "deepseek",
+			ModelID:        "deepseek-v4-pro",
+			BaseURL:        "https://api.deepseek.com",
+			Protocol:       "openai_chat",
+			AuthScheme:     "bearer",
+			APIKey:         "secret",
+			SupportsVision: false,
+		},
+	})
+	if !errors.Is(err, ErrUnsupportedInputAttachment) {
+		t.Fatalf("expected ErrUnsupportedInputAttachment, got %v", err)
+	}
+}
+
 func TestStartRunValidWorkspaceStartsRun(t *testing.T) {
 	root := t.TempDir()
 	service := NewRunService(

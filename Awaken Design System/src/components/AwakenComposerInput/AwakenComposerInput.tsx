@@ -1,5 +1,7 @@
 import "./AwakenComposerInput.css";
-import { useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect, useCallback, type ClipboardEvent } from "react";
+
+const DEFAULT_ACCEPTED_IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/webp"] as const;
 
 export type AwakenComposerInputProps = {
   value: string;
@@ -10,7 +12,36 @@ export type AwakenComposerInputProps = {
   maxRows?: number;
   disabled?: boolean;
   focusRequest?: number;
+  onPasteImages?: (files: File[]) => void;
 };
+
+export function pastedImageFilesFromClipboardData(
+  clipboardData?: Pick<DataTransfer, "items" | "files"> | null,
+  acceptedMimeTypes: readonly string[] = DEFAULT_ACCEPTED_IMAGE_MIME_TYPES,
+): File[] {
+  if (!clipboardData) {
+    return [];
+  }
+
+  const files: File[] = [];
+  const accepted = new Set(acceptedMimeTypes);
+  const items = Array.from(clipboardData.items ?? []);
+  for (const item of items) {
+    if (item.kind !== "file" || !accepted.has(item.type)) {
+      continue;
+    }
+    const file = item.getAsFile();
+    if (file) {
+      files.push(file);
+    }
+  }
+
+  if (files.length > 0) {
+    return files;
+  }
+
+  return Array.from(clipboardData.files ?? []).filter((file) => accepted.has(file.type));
+}
 
 export type ComposerInputKeyState = {
   key: string;
@@ -35,6 +66,7 @@ export function AwakenComposerInput({
   maxRows = 6,
   disabled,
   focusRequest = 0,
+  onPasteImages,
 }: AwakenComposerInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -61,6 +93,21 @@ export function AwakenComposerInput({
       onSubmit?.();
     },
     [onSubmit]
+  );
+
+  const handlePaste = useCallback(
+    (event: ClipboardEvent<HTMLTextAreaElement>) => {
+      if (!onPasteImages) {
+        return;
+      }
+      const files = pastedImageFilesFromClipboardData(event.clipboardData);
+      if (files.length === 0) {
+        return;
+      }
+      event.preventDefault();
+      onPasteImages(files);
+    },
+    [onPasteImages],
   );
 
   useEffect(() => {
@@ -91,6 +138,7 @@ export function AwakenComposerInput({
       value={value}
       onChange={handleChange}
       onKeyDown={handleKeyDown}
+      onPaste={handlePaste}
       placeholder={placeholder}
       disabled={disabled}
       aria-label="输入任务"

@@ -37,7 +37,7 @@ type openaiChatRequest struct {
 
 type openaiChatMessage struct {
 	Role       string           `json:"role"`
-	Content    string           `json:"content,omitempty"`
+	Content    interface{}      `json:"content,omitempty"`
 	ToolCalls  []openaiToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string           `json:"tool_call_id,omitempty"`
 	Name       string           `json:"name,omitempty"`
@@ -248,7 +248,7 @@ func buildOpenAIMessages(req Request) []openaiChatMessage {
 		for _, msg := range req.Messages {
 			messages = append(messages, openaiChatMessage{
 				Role:       string(msg.Role),
-				Content:    msg.Content,
+				Content:    openAIContentForMessage(msg),
 				ToolCalls:  contextToolCallsToOpenAI(msg.ToolCalls),
 				ToolCallID: msg.ToolCallID,
 				Name:       msg.Name,
@@ -258,6 +258,37 @@ func buildOpenAIMessages(req Request) []openaiChatMessage {
 		messages = append(messages, openaiChatMessage{Role: "user", Content: req.UserPrompt})
 	}
 	return messages
+}
+
+func openAIContentForMessage(msg context.Message) interface{} {
+	if msg.Role != context.RoleUser || len(msg.Attachments) == 0 {
+		return msg.Content
+	}
+
+	blocks := make([]map[string]interface{}, 0, len(msg.Attachments)+1)
+	if strings.TrimSpace(msg.Content) != "" {
+		blocks = append(blocks, map[string]interface{}{
+			"type": "text",
+			"text": msg.Content,
+		})
+	}
+	for _, attachment := range msg.Attachments {
+		if attachment.Kind != "image" ||
+			strings.TrimSpace(attachment.MimeType) == "" ||
+			strings.TrimSpace(attachment.DataBase64) == "" {
+			continue
+		}
+		blocks = append(blocks, map[string]interface{}{
+			"type": "image_url",
+			"image_url": map[string]interface{}{
+				"url": fmt.Sprintf("data:%s;base64,%s", attachment.MimeType, attachment.DataBase64),
+			},
+		})
+	}
+	if len(blocks) == 0 {
+		return msg.Content
+	}
+	return blocks
 }
 
 func applyOpenAIReasoningControls(chatReq *openaiChatRequest, cfg Config, req Request) {

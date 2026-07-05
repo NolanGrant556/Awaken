@@ -269,6 +269,8 @@ function toSummary(profile: StoredModelProfile): RuntimeModelProfileSummaryWire 
       endpoint_id: advanced.endpointId,
       prompt_cache_key: advanced.promptCacheKey,
       context_window: advanced.contextWindow,
+      supports_vision: advanced.supportsVision,
+      supports_video: advanced.supportsVideo,
     },
   };
 }
@@ -421,6 +423,8 @@ export class ModelProfileStore {
       maxTokens: advanced.maxTokens,
       contextWindow: advanced.contextWindow,
       promptCacheKey: advanced.promptCacheKey,
+      supportsVision: advanced.supportsVision,
+      supportsVideo: advanced.supportsVideo,
     };
   }
 

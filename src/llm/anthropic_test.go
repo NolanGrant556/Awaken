@@ -609,6 +609,50 @@ func TestBuildAnthropicMessagesInvalidToolInput(t *testing.T) {
 	}
 }
 
+func TestBuildAnthropicMessagesIncludesImageBlocks(t *testing.T) {
+	req := Request{
+		Messages: []ctx.Message{
+			{
+				Role:    ctx.RoleUser,
+				Content: "describe this",
+				Attachments: []ctx.MessageAttachment{
+					{
+						ID:         "image-1",
+						Kind:       "image",
+						MimeType:   "image/png",
+						DataBase64: "aGVsbG8=",
+					},
+				},
+			},
+		},
+	}
+
+	messages, err := buildAnthropicMessages(req)
+	if err != nil {
+		t.Fatalf("buildAnthropicMessages returned error: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(messages))
+	}
+	blocks, ok := messages[0].Content.([]map[string]interface{})
+	if !ok || len(blocks) != 2 {
+		t.Fatalf("expected 2 multimodal content blocks, got %T %d", messages[0].Content, len(blocks))
+	}
+	if blocks[0]["type"] != "text" || blocks[0]["text"] != "describe this" {
+		t.Fatalf("unexpected text block: %#v", blocks[0])
+	}
+	if blocks[1]["type"] != "image" {
+		t.Fatalf("unexpected image block: %#v", blocks[1])
+	}
+	source, ok := blocks[1]["source"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected image source map, got %T", blocks[1]["source"])
+	}
+	if source["type"] != "base64" || source["media_type"] != "image/png" || source["data"] != "aGVsbG8=" {
+		t.Fatalf("unexpected image source payload: %#v", source)
+	}
+}
+
 func TestInvokeAnthropicRejectsOrphanToolResultBeforeRequest(t *testing.T) {
 	called := false
 	server := newAnthropicServer(t, func(w http.ResponseWriter, r *http.Request) {

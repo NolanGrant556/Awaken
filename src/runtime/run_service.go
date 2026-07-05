@@ -30,6 +30,7 @@ var (
 	ErrThreadBusy              = errors.New("thread already has an active run")
 	ErrThreadLabelInvalid      = errors.New("thread label is required")
 	ErrMissingModelProfile     = errors.New("model profile is required")
+	ErrUnsupportedInputAttachment = errors.New("model does not support image input")
 )
 
 const maxRetainedThreads = 100
@@ -47,6 +48,7 @@ type ClientInfo struct {
 
 type StartRunRequest struct {
 	Input        string              `json:"input"`
+	Attachments  []RunInputAttachment `json:"attachments,omitempty"`
 	Workspace    WorkspaceConfig     `json:"workspace"`
 	Client       ClientInfo          `json:"client"`
 	ThreadID     string              `json:"thread_id,omitempty"`
@@ -66,6 +68,8 @@ type ModelProfileConfig struct {
 	MaxTokens      int     `json:"max_tokens,omitempty"`
 	ContextWindow  int     `json:"context_window,omitempty"`
 	PromptCacheKey string  `json:"prompt_cache_key,omitempty"`
+	SupportsVision bool    `json:"supports_vision,omitempty"`
+	SupportsVideo  bool    `json:"supports_video,omitempty"`
 }
 
 type Executor interface {
@@ -160,7 +164,7 @@ func (s *RunService) SetDefaultWorkspace(workspace WorkspaceConfig) error {
 
 func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	trimmed := strings.TrimSpace(req.Input)
-	if trimmed == "" {
+	if trimmed == "" && len(req.Attachments) == 0 {
 		return Run{}, ErrInvalidInput
 	}
 	if s.newExecutor == nil {
@@ -172,6 +176,12 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 
 	workspace, err := normalizeWorkspace(req.Workspace)
 	if err != nil {
+		return Run{}, err
+	}
+	if err := validateRunInputAttachments(req.Attachments); err != nil {
+		return Run{}, err
+	}
+	if err := validateVisionSupport(req.ModelProfile, req.Attachments); err != nil {
 		return Run{}, err
 	}
 
@@ -197,8 +207,12 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			}
 		}
 	}
+	persistedAttachments, err := persistRunInputAttachments(threadID, req.Attachments)
+	if err != nil {
+		return Run{}, err
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	session := NewSession(runID, threadID, trimmed, cancel)
+	session := NewSession(runID, threadID, trimmed, persistedAttachments, cancel)
 
 	s.mu.Lock()
 	if req.ThreadID != "" {
@@ -228,9 +242,9 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			}
 			s.sessions[runID] = session
 			s.mu.Unlock()
-			_ = appendUserTranscriptRecord(workspace, session.Snapshot(), req.Client.SessionID, trimmed)
+			_ = appendUserTranscriptRecord(workspace, session.Snapshot(), req.Client.SessionID, trimmed, persistedAttachments)
 			executor := s.newExecutor(agent)
-			go s.execute(session, executor, agent, trimmed, ctx, workspace)
+			go s.execute(session, executor, agent, trimmed, persistedAttachments, ctx, workspace)
 			return session.Snapshot(), nil
 		}
 		if !sameWorkspace(thread.workspace, workspace) {
@@ -255,7 +269,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		thread.runIDs = append(thread.runIDs, runID)
 		thread.updatedAt = now
 	} else {
-		label := trimThreadLabel(trimmed)
+		label := threadLabelForInput(trimmed, persistedAttachments)
 		s.threads[threadID] = &Thread{
 			threadID:        threadID,
 			agent:           agent,
@@ -273,9 +287,9 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	s.sessions[runID] = session
 	s.mu.Unlock()
 
-	_ = appendUserTranscriptRecord(workspace, session.Snapshot(), req.Client.SessionID, trimmed)
+	_ = appendUserTranscriptRecord(workspace, session.Snapshot(), req.Client.SessionID, trimmed, persistedAttachments)
 	executor := s.newExecutor(agent)
-	go s.execute(session, executor, agent, trimmed, ctx, workspace)
+	go s.execute(session, executor, agent, trimmed, persistedAttachments, ctx, workspace)
 
 	return session.Snapshot(), nil
 }
@@ -422,6 +436,9 @@ func (s *RunService) DeleteThread(threadID string) error {
 		if err := removeThreadTranscript(workspace, threadID); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
+		if err := deleteThreadInputAttachments(threadID); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 		return nil
 	}
 	defaultWorkspace := s.defaultWorkspace
@@ -434,6 +451,9 @@ func (s *RunService) DeleteThread(threadID string) error {
 		if errors.Is(err, os.ErrNotExist) {
 			return ErrThreadNotFound
 		}
+		return err
+	}
+	if err := deleteThreadInputAttachments(threadID); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	return nil
@@ -569,7 +589,7 @@ func (s *RunService) ResolveApproval(runID, approvalID string, decision agentcor
 	return session.ResolveApproval(approvalID, decision)
 }
 
-func (s *RunService) execute(session *Session, executor Executor, agent *agentcore.Agent, input string, ctx context.Context, workspace WorkspaceConfig) {
+func (s *RunService) execute(session *Session, executor Executor, agent *agentcore.Agent, input string, attachments []RunInputAttachment, ctx context.Context, workspace WorkspaceConfig) {
 	snapshot := session.Snapshot()
 	defer func() {
 		s.flushAgentTranscript(session, agent, workspace)
@@ -579,6 +599,9 @@ func (s *RunService) execute(session *Session, executor Executor, agent *agentco
 	if executor == nil {
 		session.CompleteError("run executor is not configured", "executor_missing")
 		return
+	}
+	if agent != nil {
+		agent.SetPendingUserAttachments(inputAttachmentsToContextAttachments(attachments))
 	}
 
 	result, err := executor.Run(ctx, input, sessionEventSink{session: session})

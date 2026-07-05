@@ -51,6 +51,7 @@ func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool
 		SystemContextItems: []ContextItem{
 			runtimeSnapshotSystemItem(snapshot),
 		},
+		Attachments:        contextAttachmentsFromMessages(messages),
 		ToolSchemas:        cloneToolDefinitions(tools),
 		RuntimeSnapshot:    snapshot,
 		CacheKeys:          rb.buildCacheKeys(staticContent, tools, snapshot),
@@ -112,6 +113,30 @@ func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 		})
 	}
 	return definitions
+}
+
+func contextAttachmentsFromMessages(messages []convcontext.Message) []ContextAttachment {
+	attachments := make([]ContextAttachment, 0)
+	for _, message := range messages {
+		for _, attachment := range message.Attachments {
+			attachments = append(attachments, ContextAttachment{
+				ID:      attachment.ID,
+				Kind:    attachment.Kind,
+				Path:    firstNonEmptyAttachmentValue(strings.TrimSpace(attachment.DisplayName), strings.TrimSpace(attachment.StorageKey)),
+				Content: attachment.DataBase64,
+			})
+		}
+	}
+	return attachments
+}
+
+func firstNonEmptyAttachmentValue(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func (rb *RequestBuilder) buildToolParameters(t tool.Tool) tool.ToolParametersSchema {

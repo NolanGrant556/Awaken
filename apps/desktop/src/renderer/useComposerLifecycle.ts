@@ -20,12 +20,15 @@ type ComposerLifecycleOptions = ComposerRuntimeStatus & {
   desktopReady: boolean;
   isBusy: boolean;
   isWorkspaceValid: boolean;
+  hasAttachments: boolean;
+  inputAttachmentBlocked?: boolean;
 };
 
 type ComposerBarLifecycleState = {
   disabled: boolean;
   isReady: boolean;
   submitMode: ComposerSubmitMode;
+  submitDisabled: boolean;
 };
 
 type ComposerLifecycle = {
@@ -80,6 +83,8 @@ export function useComposerLifecycle({
   desktopNeedsRestart,
   isBusy,
   isWorkspaceValid,
+  hasAttachments,
+  inputAttachmentBlocked = false,
   runtimeErrorMessage,
 }: ComposerLifecycleOptions): ComposerLifecycle {
   const [composerValue, setComposerValue] = useState("");
@@ -99,13 +104,27 @@ export function useComposerLifecycle({
   }, []);
 
   const composerBarState = useMemo<ComposerBarLifecycleState>(() => {
-    const canSend = desktopReady && trimmedComposerValue.length > 0 && isWorkspaceValid;
+    const hasDraftInput = trimmedComposerValue.length > 0 || hasAttachments;
+    const canSend =
+      desktopReady &&
+      hasDraftInput &&
+      isWorkspaceValid &&
+      !inputAttachmentBlocked;
+    const submitMode = isBusy ? "stop" : "send";
     return {
       disabled: !desktopReady || isBusy || !isWorkspaceValid,
       isReady: isBusy || canSend,
-      submitMode: isBusy ? "stop" : "send",
+      submitMode,
+      submitDisabled: submitMode === "stop" ? false : !canSend,
     };
-  }, [desktopReady, isBusy, isWorkspaceValid, trimmedComposerValue]);
+  }, [
+    desktopReady,
+    hasAttachments,
+    inputAttachmentBlocked,
+    isBusy,
+    isWorkspaceValid,
+    trimmedComposerValue,
+  ]);
 
   const composerRuntimePanels = useMemo(
     () =>

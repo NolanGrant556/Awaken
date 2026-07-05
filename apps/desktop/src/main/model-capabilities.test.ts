@@ -10,20 +10,28 @@ describe("model capabilities", () => {
       context_window: 1_000_000,
       max_output_tokens: 384_000,
       default_max_tokens: 8192,
+      supports_vision: false,
+      supports_video: false,
     });
   });
 
   it("knows Kimi Code plan model limits", () => {
-    expect(capabilityForModel("kimi-coding-plan", "kimi-for-coding")).toMatchObject({
+    expect(
+      capabilityForModel("kimi-coding-plan", "kimi-for-coding"),
+    ).toMatchObject({
       context_window: 256 * 1024,
       max_output_tokens: 32 * 1024,
       default_max_tokens: 32 * 1024,
       default_temperature: 1,
+      supports_vision: true,
+      supports_video: true,
     });
   });
 
   it("knows Volcengine Coding Plan model limits", () => {
-    expect(capabilityForModel("volcengine", "doubao-seed-2.0-pro")).toMatchObject({
+    expect(
+      capabilityForModel("volcengine", "doubao-seed-2.0-pro"),
+    ).toMatchObject({
       context_window: 256_000,
       max_output_tokens: 128_000,
       default_max_tokens: 128_000,
@@ -46,6 +54,8 @@ describe("model capabilities", () => {
     ).toMatchObject({
       contextWindow: 256 * 1024,
       maxTokens: 256 * 1024,
+      supportsVision: true,
+      supportsVideo: true,
     });
 
     expect(
@@ -75,7 +85,11 @@ describe("model capabilities", () => {
 
   it("uses conservative Volcengine defaults for custom Coding Plan model names", () => {
     expect(
-      normalizeAdvancedWithModelCapability(undefined, "volcengine", "new-model-from-console"),
+      normalizeAdvancedWithModelCapability(
+        undefined,
+        "volcengine",
+        "new-model-from-console",
+      ),
     ).toMatchObject({
       contextWindow: 256_000,
       maxTokens: 32_000,
@@ -84,11 +98,17 @@ describe("model capabilities", () => {
 
   it("fills Kimi Code temperature from model capability", () => {
     expect(
-      normalizeAdvancedWithModelCapability(undefined, "kimi-coding-plan", "kimi-for-coding"),
+      normalizeAdvancedWithModelCapability(
+        undefined,
+        "kimi-coding-plan",
+        "kimi-for-coding",
+      ),
     ).toMatchObject({
       temperature: 1,
       contextWindow: 256 * 1024,
       maxTokens: 32 * 1024,
+      supportsVision: true,
+      supportsVideo: true,
     });
   });
 });

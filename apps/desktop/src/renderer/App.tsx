@@ -50,6 +50,7 @@ import {
 import { createRuntimeClient, type SubscribeHandlers } from "./runtime/client";
 import type {
   RuntimeInfo,
+  RunInputAttachment,
   RuntimeModelProfileSummary,
   RuntimeRunStatus,
   RuntimeThread,
@@ -91,6 +92,16 @@ import {
 } from "./projectWorkspace";
 import { ModelSettingsDialog } from "./ModelSettingsDialog";
 import { ExtensionsView, type ExtensionSection } from "./ExtensionsView";
+import {
+  MAX_COMPOSER_IMAGE_ATTACHMENTS,
+  MAX_COMPOSER_IMAGE_BYTES,
+  SUPPORTED_COMPOSER_IMAGE_MIME_TYPES,
+  type ComposerDraftAttachment,
+  promptAttachmentViews,
+  readComposerDraftImageAttachment,
+  supportsVisionForProfile,
+  toRunInputAttachment,
+} from "./composerAttachments";
 
 type InspectorTabId = "changes";
 
@@ -121,10 +132,14 @@ function formatStatusLabel(
   }
 }
 
-function sidebarStatusForThread(
-  thread: ThreadItem,
-): { label: string; tone: ComponentTone } {
-  if ((thread.approvalCount ?? 0) > 0 || thread.runStatus === "awaiting_approval") {
+function sidebarStatusForThread(thread: ThreadItem): {
+  label: string;
+  tone: ComponentTone;
+} {
+  if (
+    (thread.approvalCount ?? 0) > 0 ||
+    thread.runStatus === "awaiting_approval"
+  ) {
     return { label: "needs input", tone: "permission" };
   }
 
@@ -156,9 +171,9 @@ function sidebarStatusForThread(
 function isThreadBusyForDelete(thread: ThreadItem): boolean {
   return Boolean(
     thread.activeRunId ||
-      thread.runStatus === "running" ||
-      thread.runStatus === "awaiting_approval" ||
-      thread.runStatus === "cancelling",
+    thread.runStatus === "running" ||
+    thread.runStatus === "awaiting_approval" ||
+    thread.runStatus === "cancelling",
   );
 }
 
@@ -188,7 +203,9 @@ function rawToolId(selectionId: string): string {
 }
 
 function contextUsageMeta(
-  contextWindow: ReturnType<typeof createInitialRuntimeState>["inspectorSummary"]["contextWindow"],
+  contextWindow: ReturnType<
+    typeof createInitialRuntimeState
+  >["inspectorSummary"]["contextWindow"],
 ): Pick<ComposerBarMetaItem, "label" | "value" | "progress"> | undefined {
   const estimated = formatTokenCount(contextWindow?.estimatedTokens);
   const modelWindow = formatTokenCount(contextWindow?.modelWindow);
@@ -223,7 +240,24 @@ function modelProfileIcon(profile: RuntimeModelProfileSummary): string {
 }
 
 function firstContentLine(value?: string): string | undefined {
-  return value?.split("\n").map((line) => line.trim()).find(Boolean);
+  return value
+    ?.split("\n")
+    .map((line) => line.trim())
+    .find(Boolean);
+}
+
+function composerThreadLabel(
+  prompt: string,
+  attachments: Array<{ displayName?: string }>,
+): string {
+  const trimmed = prompt.trim();
+  if (trimmed) {
+    return trimmed;
+  }
+  const attachmentName = attachments
+    .map((attachment) => attachment.displayName?.trim())
+    .find(Boolean);
+  return attachmentName || "Image prompt";
 }
 
 const DEFAULT_SIDEBAR_WIDTH = 300;
@@ -318,24 +352,36 @@ export function App() {
   );
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
-  const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
-  const [resolvedApproval, setResolvedApproval] = useState<ResolvedApprovalState>(null);
+  const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(
+    null,
+  );
+  const [resolvedApproval, setResolvedApproval] =
+    useState<ResolvedApprovalState>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
-  const [modelProfiles, setModelProfiles] = useState<RuntimeModelProfileSummary[]>([]);
+  const [modelProfiles, setModelProfiles] = useState<
+    RuntimeModelProfileSummary[]
+  >([]);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
   const [workspacePath, setWorkspacePath] = useState<string>("");
   const [createProjectDialogOpen, setCreateProjectDialogOpen] = useState(false);
-  const [pendingProjectMode, setPendingProjectMode] = useState<"local">("local");
+  const [pendingProjectMode, setPendingProjectMode] =
+    useState<"local">("local");
   const [pickingWorkspace, setPickingWorkspace] = useState(false);
-  const [projectsFromWorkspace, setProjectsFromWorkspace] = useState<WorkspaceProject[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState(DEFAULT_WORKSPACE_PROJECT_ID);
+  const [projectsFromWorkspace, setProjectsFromWorkspace] = useState<
+    WorkspaceProject[]
+  >([]);
+  const [selectedProjectId, setSelectedProjectId] = useState(
+    DEFAULT_WORKSPACE_PROJECT_ID,
+  );
   const [expandedProjectIds, setExpandedProjectIds] = useState<string[]>([
     DEFAULT_WORKSPACE_PROJECT_ID,
   ]);
   const [removedProjectIds, setRemovedProjectIds] = useState<string[]>(() =>
     readStoredStringArray("awaken:projects:removed"),
   );
-  const [threadProjectIds, setThreadProjectIds] = useState<Record<string, string>>({});
+  const [threadProjectIds, setThreadProjectIds] = useState<
+    Record<string, string>
+  >({});
   const [inspectorTab, setInspectorTab] = useState<InspectorTabId>("changes");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() =>
@@ -360,13 +406,17 @@ export function App() {
   const [promptBubbleModeByTurnId, setPromptBubbleModeByTurnId] = useState<
     Record<string, "collapsed" | "expanded">
   >({});
-  const [executionProcessOpenByTurnId, setExecutionProcessOpenByTurnId] = useState<
-    Record<string, boolean>
-  >({});
+  const [executionProcessOpenByTurnId, setExecutionProcessOpenByTurnId] =
+    useState<Record<string, boolean>>({});
+  const [composerAttachments, setComposerAttachments] = useState<
+    ComposerDraftAttachment[]
+  >([]);
   const visibleNarrativeItems = useMemo<RunNarrativeItem[]>(() => {
     const narrativeItems: RunNarrativeItem[] = [
       ...runtimeState.narrative.committedItems,
-      ...(runtimeState.narrative.activeItem ? [runtimeState.narrative.activeItem] : []),
+      ...(runtimeState.narrative.activeItem
+        ? [runtimeState.narrative.activeItem]
+        : []),
     ];
     return narrativeItems.filter((item) => item.kind !== "planning");
   }, [runtimeState.narrative]);
@@ -376,7 +426,8 @@ export function App() {
     runtimeState.phase === "running" ||
     runtimeState.phase === "reconnecting" ||
     runtimeState.phase === "cancelling";
-  const desktopReady = runtimeState.supervisorStatus === "running" && runtimeInfo !== null;
+  const desktopReady =
+    runtimeState.supervisorStatus === "running" && runtimeInfo !== null;
   const desktopStarting =
     runtimeState.supervisorStatus === null ||
     runtimeState.supervisorStatus === "starting" ||
@@ -393,16 +444,25 @@ export function App() {
   }, [inspectorWidth]);
 
   useEffect(() => {
-    writeStoredValue("awaken:layout:inspectorCollapsed", String(inspectorCollapsed));
+    writeStoredValue(
+      "awaken:layout:inspectorCollapsed",
+      String(inspectorCollapsed),
+    );
     inspectorCollapsedValueRef.current = inspectorCollapsed;
   }, [inspectorCollapsed]);
 
   useEffect(() => {
-    writeStoredValue("awaken:projects:removed", JSON.stringify(removedProjectIds));
+    writeStoredValue(
+      "awaken:projects:removed",
+      JSON.stringify(removedProjectIds),
+    );
   }, [removedProjectIds]);
 
   useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    if (
+      typeof window === "undefined" ||
+      typeof window.matchMedia !== "function"
+    ) {
       return;
     }
 
@@ -410,7 +470,8 @@ export function App() {
     const handleResponsiveInspector = (matches: boolean) => {
       if (matches) {
         if (inspectorCollapsedBeforeResponsiveRef.current === null) {
-          inspectorCollapsedBeforeResponsiveRef.current = inspectorCollapsedValueRef.current;
+          inspectorCollapsedBeforeResponsiveRef.current =
+            inspectorCollapsedValueRef.current;
           setInspectorCollapsed(true);
         }
         return;
@@ -506,7 +567,10 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (rendererReadyNotifiedRef.current || (!desktopReady && !desktopNeedsRestart)) {
+    if (
+      rendererReadyNotifiedRef.current ||
+      (!desktopReady && !desktopNeedsRestart)
+    ) {
       return;
     }
 
@@ -519,8 +583,12 @@ export function App() {
       } catch {
         // Font readiness is a polish signal only; rendering should continue.
       }
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
       if (!cancelled) {
         runtimeClient.notifyRendererReady();
       }
@@ -610,7 +678,9 @@ export function App() {
       await runtimeClient.setDefaultModelProfile(profileId);
       await refreshRuntimeInfoNow();
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Failed to switch model");
+      setNotice(
+        error instanceof Error ? error.message : "Failed to switch model",
+      );
     }
   }
 
@@ -662,7 +732,23 @@ export function App() {
   }, [desktopReady, runtimeClient]);
 
   const isWorkspaceValid =
-    workspacePath.trim() !== "" && /^([A-Za-z]:[\\/]|\/)/.test(workspacePath.trim());
+    workspacePath.trim() !== "" &&
+    /^([A-Za-z]:[\\/]|\/)/.test(workspacePath.trim());
+  const enabledModelProfiles = modelProfiles.filter(
+    (profile) => profile.enabled,
+  );
+  const selectedModelProfile =
+    enabledModelProfiles.find(
+      (profile) => profile.id === runtimeInfo?.modelProfile?.id,
+    ) ??
+    enabledModelProfiles.find((profile) => profile.isDefault) ??
+    enabledModelProfiles[0];
+  const selectedModelSupportsVision =
+    supportsVisionForProfile(selectedModelProfile);
+  const composerAttachmentWarning =
+    composerAttachments.length > 0 && !selectedModelSupportsVision
+      ? "当前模型不支持图片输入，请切换模型或移除图片"
+      : undefined;
   const {
     composerValue,
     setComposerValue,
@@ -679,6 +765,8 @@ export function App() {
     desktopNeedsRestart,
     isBusy,
     isWorkspaceValid,
+    hasAttachments: composerAttachments.length > 0,
+    inputAttachmentBlocked: Boolean(composerAttachmentWarning),
     runtimeErrorMessage: runtimeState.errorMessage,
   });
 
@@ -704,24 +792,29 @@ export function App() {
   const projectLabelById = new Map<string, string>([
     [
       DEFAULT_WORKSPACE_PROJECT_ID,
-      defaultWorkspacePath ? workspaceLabelForPath(defaultWorkspacePath) : "awaken",
+      defaultWorkspacePath
+        ? workspaceLabelForPath(defaultWorkspacePath)
+        : "awaken",
     ],
-    ...projectsFromWorkspace.map((project) => [project.id, project.label] as const),
+    ...projectsFromWorkspace.map(
+      (project) => [project.id, project.label] as const,
+    ),
   ]);
   const removedProjectIdSet = new Set(removedProjectIds);
   const pathForSelectedProject =
     selectedProjectId === DEFAULT_WORKSPACE_PROJECT_ID
       ? defaultWorkspacePath
-      : projectsFromWorkspace.find((project) => project.id === selectedProjectId)?.path;
+      : projectsFromWorkspace.find(
+          (project) => project.id === selectedProjectId,
+        )?.path;
   const activeProjectLabel =
     projectLabelById.get(selectedProjectId) ??
-    (pathForSelectedProject ? workspaceLabelForPath(pathForSelectedProject) : "awaken");
-  const contextMeta = contextUsageMeta(runtimeState.inspectorSummary.contextWindow);
-  const enabledModelProfiles = modelProfiles.filter((profile) => profile.enabled);
-  const selectedModelProfile =
-    enabledModelProfiles.find((profile) => profile.id === runtimeInfo?.modelProfile?.id) ??
-    enabledModelProfiles.find((profile) => profile.isDefault) ??
-    enabledModelProfiles[0];
+    (pathForSelectedProject
+      ? workspaceLabelForPath(pathForSelectedProject)
+      : "awaken");
+  const contextMeta = contextUsageMeta(
+    runtimeState.inspectorSummary.contextWindow,
+  );
   const modelMetaItem: ComposerBarMetaItem =
     enabledModelProfiles.length > 0 && selectedModelProfile
       ? {
@@ -791,41 +884,43 @@ export function App() {
   }
 
   function threadItemsForProject(projectId: string): ProjectItem[] {
-    return threadsForProject(projectId)
-      .map((thread) => {
-        const sidebarStatus = sidebarStatusForThread(thread);
-        const timeLabel =
-          thread.threadId === runtimeState.activeThreadId || sidebarStatus.label === "idle"
-            ? undefined
-            : sidebarStatus.label;
-        return {
-          id: `thread:${thread.threadId}`,
-          kind: "thread",
-          label: thread.label,
-          timeLabel,
-          menuItems: [
-            {
-              id: "rename-thread",
-              label: "重命名",
-              onSelect: () => {
-                void handleRenameThread(thread.threadId);
-              },
+    return threadsForProject(projectId).map((thread) => {
+      const sidebarStatus = sidebarStatusForThread(thread);
+      const timeLabel =
+        thread.threadId === runtimeState.activeThreadId ||
+        sidebarStatus.label === "idle"
+          ? undefined
+          : sidebarStatus.label;
+      return {
+        id: `thread:${thread.threadId}`,
+        kind: "thread",
+        label: thread.label,
+        timeLabel,
+        menuItems: [
+          {
+            id: "rename-thread",
+            label: "重命名",
+            onSelect: () => {
+              void handleRenameThread(thread.threadId);
             },
-            {
-              id: "delete-thread",
-              label: "删除会话",
-              tone: "danger",
-              disabled: isThreadBusyForDelete(thread),
-              onSelect: () => {
-                void handleDeleteThread(thread.threadId);
-              },
+          },
+          {
+            id: "delete-thread",
+            label: "删除会话",
+            tone: "danger",
+            disabled: isThreadBusyForDelete(thread),
+            onSelect: () => {
+              void handleDeleteThread(thread.threadId);
             },
-          ],
-        };
-      });
+          },
+        ],
+      };
+    });
   }
 
-  const defaultProjectThreads = threadItemsForProject(DEFAULT_WORKSPACE_PROJECT_ID);
+  const defaultProjectThreads = threadItemsForProject(
+    DEFAULT_WORKSPACE_PROJECT_ID,
+  );
   const repositoryProjects: ProjectItem[] = [
     ...(removedProjectIdSet.has(DEFAULT_WORKSPACE_PROJECT_ID)
       ? []
@@ -833,18 +928,24 @@ export function App() {
           {
             id: DEFAULT_WORKSPACE_PROJECT_ID,
             kind: "project" as const,
-            label: projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ?? "awaken",
+            label:
+              projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ?? "awaken",
             path: defaultWorkspacePath,
             action: projectAction(
               DEFAULT_WORKSPACE_PROJECT_ID,
               projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ?? "awaken",
             ),
             menuItems: projectMenuItems(DEFAULT_WORKSPACE_PROJECT_ID),
-            children: defaultProjectThreads.length > 0 ? defaultProjectThreads : undefined,
+            children:
+              defaultProjectThreads.length > 0
+                ? defaultProjectThreads
+                : undefined,
           },
         ]),
     ...projectsFromWorkspace
-      .filter((project) => !isSameWorkspacePath(project.path, defaultWorkspacePath))
+      .filter(
+        (project) => !isSameWorkspacePath(project.path, defaultWorkspacePath),
+      )
       .map((project) => {
         const threads = threadItemsForProject(project.id);
         return {
@@ -905,12 +1006,17 @@ export function App() {
     latestTurnId: latestPromptId,
     railHeight: Math.max(
       0,
-      runStageViewportHeightPx + composerContentInsetPx - 28 - Math.max(28, composerSafeAreaPx),
+      runStageViewportHeightPx +
+        composerContentInsetPx -
+        28 -
+        Math.max(28, composerSafeAreaPx),
     ),
   });
   const showTurnMarkerRail = turnMarkerDisplay.mode !== "hidden";
   const activeExtensionSection: ExtensionSection | undefined =
-    activeNavId === "connectors" || activeNavId === "skills" ? activeNavId : undefined;
+    activeNavId === "connectors" || activeNavId === "skills"
+      ? activeNavId
+      : undefined;
 
   function createSubscribeHandlers(): SubscribeHandlers {
     return {
@@ -920,7 +1026,10 @@ export function App() {
           terminalSeenRef.current = true;
           localStorage.removeItem("awaken:runId");
         }
-        if (event.type === "RUN_STATUS_CHANGED" && event.status === "cancelled") {
+        if (
+          event.type === "RUN_STATUS_CHANGED" &&
+          event.status === "cancelled"
+        ) {
           localStorage.removeItem("awaken:runId");
         }
         if (event.type === "AWAKEN_APPROVAL_REQUESTED" && event.approvalId) {
@@ -933,7 +1042,8 @@ export function App() {
         ) {
           setResolvedApproval({
             approvalId: event.approvalId,
-            decision: event.approvalDecision === "rejected" ? "rejected" : "approved",
+            decision:
+              event.approvalDecision === "rejected" ? "rejected" : "approved",
           });
           resolvingApprovalIdRef.current = null;
           setResolvingApprovalId(null);
@@ -959,7 +1069,11 @@ export function App() {
   }
 
   function shouldResumeSubscription(status: RuntimeRunStatus): boolean {
-    return status === "running" || status === "awaiting_approval" || status === "cancelling";
+    return (
+      status === "running" ||
+      status === "awaiting_approval" ||
+      status === "cancelling"
+    );
   }
 
   async function replayThreadTranscript(
@@ -1001,12 +1115,18 @@ export function App() {
 
   async function handleSubmit(): Promise<void> {
     if (!desktopReady) {
-      setNotice(desktopNeedsRestart ? "Awaken needs restart" : "Awaken is starting");
+      setNotice(
+        desktopNeedsRestart ? "Awaken needs restart" : "Awaken is starting",
+      );
       return;
     }
     const prompt = trimmedComposerValue;
-    if (!prompt) {
-      setNotice("Input is required");
+    const draftAttachments = composerAttachments.map((attachment) => ({
+      ...attachment,
+    }));
+    const runInputAttachments = draftAttachments.map(toRunInputAttachment);
+    if (!prompt && runInputAttachments.length === 0) {
+      setNotice("请输入内容或粘贴图片");
       return;
     }
     if (isBusy) {
@@ -1023,6 +1143,10 @@ export function App() {
       setNotice(validation.error);
       return;
     }
+    if (composerAttachmentWarning) {
+      setNotice(composerAttachmentWarning);
+      return;
+    }
 
     unsubscribeRef.current?.();
     unsubscribeRef.current = null;
@@ -1033,13 +1157,21 @@ export function App() {
     setResolvedApproval(null);
     resolvingApprovalIdRef.current = null;
     prepareForRunStart();
-    dispatch({ type: "run/requested", prompt, startedAtMs: Date.now() });
+    dispatch({
+      type: "run/requested",
+      prompt,
+      promptAttachments: runInputAttachments,
+      startedAtMs: Date.now(),
+    });
     clearComposerValue();
+    setComposerAttachments([]);
 
     try {
       const runProjectId = selectedProjectId;
+      const nextThreadLabel = composerThreadLabel(prompt, draftAttachments);
       const startRunRequest: StartRunRequest = {
         input: prompt,
+        attachments: runInputAttachments,
         threadId: runtimeState.activeThreadId || undefined,
         workspace: {
           workspaceRoot,
@@ -1052,17 +1184,21 @@ export function App() {
         },
       };
       const run = await runtimeClient.startRun(startRunRequest);
-      setThreadProjectIds((current) => assignThreadToProject(current, run.threadId, runProjectId));
+      setThreadProjectIds((current) =>
+        assignThreadToProject(current, run.threadId, runProjectId),
+      );
       if (runProjectId === DEFAULT_WORKSPACE_PROJECT_ID) {
         setRemovedProjectIds((current) =>
-          current.filter((projectId) => projectId !== DEFAULT_WORKSPACE_PROJECT_ID),
+          current.filter(
+            (projectId) => projectId !== DEFAULT_WORKSPACE_PROJECT_ID,
+          ),
         );
       }
       dispatch({ type: "run/created", run });
       dispatch({
         type: "run/threadAdded",
         threadId: run.threadId,
-        label: prompt,
+        label: nextThreadLabel,
         runId: run.runId,
       });
       void refreshThreads();
@@ -1073,8 +1209,10 @@ export function App() {
       );
       unsubscribeRef.current = unsubscribe;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to create run";
+      const message =
+        error instanceof Error ? error.message : "Failed to create run";
       restoreComposerValue(prompt);
+      setComposerAttachments(draftAttachments);
       dispatch({ type: "run/createFailed", message });
     }
   }
@@ -1109,7 +1247,9 @@ export function App() {
     prepareForThreadSwitch();
     dispatch({ type: "run/threadSwitch", threadId });
 
-    const thread = runtimeState.threads.find((item) => item.threadId === threadId);
+    const thread = runtimeState.threads.find(
+      (item) => item.threadId === threadId,
+    );
     if (!thread?.runId) {
       localStorage.removeItem("awaken:runId");
       return;
@@ -1118,13 +1258,16 @@ export function App() {
     try {
       await replayThreadTranscript(threadId, loadSeq);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Failed to load thread");
+      setNotice(
+        error instanceof Error ? error.message : "Failed to load thread",
+      );
     }
   }
 
   function threadsForProject(projectId: string): ThreadItem[] {
     return runtimeState.threads.filter(
-      (thread) => projectIdForThread(thread.threadId, threadProjectIds) === projectId,
+      (thread) =>
+        projectIdForThread(thread.threadId, threadProjectIds) === projectId,
     );
   }
 
@@ -1140,7 +1283,9 @@ export function App() {
     }
 
     if (removedThreadIds.length > 0) {
-      setThreadProjectIds((current) => removeThreadProjectAssignments(current, removedThreadIds));
+      setThreadProjectIds((current) =>
+        removeThreadProjectAssignments(current, removedThreadIds),
+      );
     }
 
     await loadThreadsIntoState();
@@ -1177,21 +1322,30 @@ export function App() {
 
     const removedThreadIds = threads.map((thread) => thread.threadId);
     try {
-      await Promise.all(removedThreadIds.map((threadId) => runtimeClient.deleteThread(threadId)));
+      await Promise.all(
+        removedThreadIds.map((threadId) =>
+          runtimeClient.deleteThread(threadId),
+        ),
+      );
       await refreshAfterThreadMutation(removedThreadIds);
       if (shouldRemoveProject) {
         if (projectId === DEFAULT_WORKSPACE_PROJECT_ID) {
-          setRemovedProjectIds((current) => (
-            current.includes(projectId) ? current : [...current, projectId]
-          ));
+          setRemovedProjectIds((current) =>
+            current.includes(projectId) ? current : [...current, projectId],
+          );
         } else {
-          setProjectsFromWorkspace((current) => removeWorkspaceProject(current, projectId));
+          setProjectsFromWorkspace((current) =>
+            removeWorkspaceProject(current, projectId),
+          );
         }
-        setExpandedProjectIds((current) => current.filter((id) => id !== projectId));
+        setExpandedProjectIds((current) =>
+          current.filter((id) => id !== projectId),
+        );
         if (selectedProjectId === projectId) {
           const fallbackProject = projectsFromWorkspace.find(
             (project) =>
-              project.id !== projectId && !isSameWorkspacePath(project.path, defaultWorkspacePath),
+              project.id !== projectId &&
+              !isSameWorkspacePath(project.path, defaultWorkspacePath),
           );
           if (fallbackProject) {
             setSelectedProjectId(fallbackProject.id);
@@ -1222,7 +1376,9 @@ export function App() {
       return;
     }
 
-    const thread = runtimeState.threads.find((item) => item.threadId === threadId);
+    const thread = runtimeState.threads.find(
+      (item) => item.threadId === threadId,
+    );
     if (!thread) {
       setNotice("会话不存在");
       return;
@@ -1247,7 +1403,9 @@ export function App() {
       return;
     }
 
-    const thread = runtimeState.threads.find((item) => item.threadId === threadId);
+    const thread = runtimeState.threads.find(
+      (item) => item.threadId === threadId,
+    );
     if (!thread) {
       setNotice("会话不存在");
       return;
@@ -1301,7 +1459,9 @@ export function App() {
     setNotice(null);
 
     try {
-      const result = await runtimeClient.pickWorkspace(workspacePath || defaultWorkspacePath);
+      const result = await runtimeClient.pickWorkspace(
+        workspacePath || defaultWorkspacePath,
+      );
       if (result.canceled) {
         if (result.error) {
           setNotice(result.error);
@@ -1323,17 +1483,23 @@ export function App() {
       setProjectsFromWorkspace(next.projects);
       if (next.projectId === DEFAULT_WORKSPACE_PROJECT_ID) {
         setRemovedProjectIds((current) =>
-          current.filter((projectId) => projectId !== DEFAULT_WORKSPACE_PROJECT_ID),
+          current.filter(
+            (projectId) => projectId !== DEFAULT_WORKSPACE_PROJECT_ID,
+          ),
         );
       }
       setWorkspacePath(result.path);
       setSelectedProjectId(next.projectId);
-      setExpandedProjectIds((current) => (
-        current.includes(next.projectId) ? current : [...current, next.projectId]
-      ));
+      setExpandedProjectIds((current) =>
+        current.includes(next.projectId)
+          ? current
+          : [...current, next.projectId],
+      );
       setCreateProjectDialogOpen(false);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Failed to select folder");
+      setNotice(
+        error instanceof Error ? error.message : "Failed to select folder",
+      );
     } finally {
       setPickingWorkspace(false);
     }
@@ -1341,9 +1507,9 @@ export function App() {
 
   function handleNewProjectSession(projectId: string): void {
     handleSelectProject(projectId);
-    setExpandedProjectIds((current) => (
-      current.includes(projectId) ? current : [...current, projectId]
-    ));
+    setExpandedProjectIds((current) =>
+      current.includes(projectId) ? current : [...current, projectId],
+    );
     handleNewTask();
     requestComposerFocus();
   }
@@ -1358,19 +1524,26 @@ export function App() {
     try {
       const run = await runtimeClient.cancelRun(runtimeState.runId);
       dispatch({ type: "run/cancelSync", run });
-      const terminalStatuses: RuntimeRunStatus[] = ["finished", "error", "cancelled"];
+      const terminalStatuses: RuntimeRunStatus[] = [
+        "finished",
+        "error",
+        "cancelled",
+      ];
       if (terminalStatuses.includes(run.status)) {
         localStorage.removeItem("awaken:runId");
       }
     } catch (error) {
       dispatch({
         type: "run/streamFailed",
-        message: error instanceof Error ? error.message : "Failed to cancel run",
+        message:
+          error instanceof Error ? error.message : "Failed to cancel run",
       });
     }
   }
 
-  async function handleResolveApproval(decision: ApprovalDecision): Promise<void> {
+  async function handleResolveApproval(
+    decision: ApprovalDecision,
+  ): Promise<void> {
     if (!runtimeState.runId || !activeApproval) {
       return;
     }
@@ -1387,12 +1560,18 @@ export function App() {
     setResolvedApproval(null);
 
     try {
-      await runtimeClient.resolveApproval(runtimeState.runId, activeApproval.id, decision);
+      await runtimeClient.resolveApproval(
+        runtimeState.runId,
+        activeApproval.id,
+        decision,
+      );
     } catch (error) {
       setResolvingApprovalId(null);
       resolvingApprovalIdRef.current = null;
       setResolvedApproval(null);
-      setNotice(error instanceof Error ? error.message : "Failed to resolve approval");
+      setNotice(
+        error instanceof Error ? error.message : "Failed to resolve approval",
+      );
     }
   }
 
@@ -1402,6 +1581,7 @@ export function App() {
     unsubscribeRef.current = null;
     threadLoadSeqRef.current += 1;
     clearComposerValue();
+    setComposerAttachments([]);
     setNotice(null);
     setResolvingApprovalId(null);
     setResolvedApproval(null);
@@ -1430,7 +1610,61 @@ export function App() {
     setNotice("Context picker is not wired yet.");
   }
 
-  function handleSidebarResizeStart(event: ReactPointerEvent<HTMLDivElement>): void {
+  async function handlePasteImages(files: File[]): Promise<void> {
+    if (files.length === 0 || composerBarState.disabled) {
+      return;
+    }
+    setNotice(null);
+    if (
+      composerAttachments.length + files.length >
+      MAX_COMPOSER_IMAGE_ATTACHMENTS
+    ) {
+      setNotice(`最多只能添加 ${MAX_COMPOSER_IMAGE_ATTACHMENTS} 张图片`);
+      return;
+    }
+    const unsupportedFile = files.find(
+      (file) =>
+        !SUPPORTED_COMPOSER_IMAGE_MIME_TYPES.includes(
+          file.type as (typeof SUPPORTED_COMPOSER_IMAGE_MIME_TYPES)[number],
+        ),
+    );
+    if (unsupportedFile) {
+      setNotice("仅支持粘贴 PNG、JPEG 或 WebP 图片");
+      return;
+    }
+    const oversizedFile = files.find(
+      (file) => file.size > MAX_COMPOSER_IMAGE_BYTES,
+    );
+    if (oversizedFile) {
+      setNotice(
+        `单张图片不能超过 ${MAX_COMPOSER_IMAGE_BYTES / (1024 * 1024)} MiB`,
+      );
+      return;
+    }
+
+    try {
+      const startIndex = composerAttachments.length;
+      const nextAttachments = await Promise.all(
+        files.map((file, index) =>
+          readComposerDraftImageAttachment(file, startIndex + index),
+        ),
+      );
+      setComposerAttachments((current) => [...current, ...nextAttachments]);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "粘贴图片失败");
+    }
+  }
+
+  function handleRemoveComposerAttachment(attachmentId: string): void {
+    setComposerAttachments((current) =>
+      current.filter((attachment) => attachment.id !== attachmentId),
+    );
+    setNotice(null);
+  }
+
+  function handleSidebarResizeStart(
+    event: ReactPointerEvent<HTMLDivElement>,
+  ): void {
     event.preventDefault();
     const target = event.currentTarget;
     target.setPointerCapture?.(event.pointerId);
@@ -1456,7 +1690,10 @@ export function App() {
       } catch {
         // Pointer capture may already be released if the drag ends outside the window.
       }
-      document.body.classList.remove("is-layout-resizing", "is-sidebar-resizing");
+      document.body.classList.remove(
+        "is-layout-resizing",
+        "is-sidebar-resizing",
+      );
     }
 
     document.body.classList.add("is-layout-resizing", "is-sidebar-resizing");
@@ -1465,7 +1702,9 @@ export function App() {
     window.addEventListener("pointercancel", handlePointerUp, { once: true });
   }
 
-  function handleInspectorResizeStart(event: ReactPointerEvent<HTMLDivElement>): void {
+  function handleInspectorResizeStart(
+    event: ReactPointerEvent<HTMLDivElement>,
+  ): void {
     event.preventDefault();
     const target = event.currentTarget;
     target.setPointerCapture?.(event.pointerId);
@@ -1491,7 +1730,10 @@ export function App() {
       } catch {
         // Pointer capture may already be released if the drag ends outside the window.
       }
-      document.body.classList.remove("is-layout-resizing", "is-inspector-resizing");
+      document.body.classList.remove(
+        "is-layout-resizing",
+        "is-inspector-resizing",
+      );
     }
 
     document.body.classList.add("is-layout-resizing", "is-inspector-resizing");
@@ -1500,7 +1742,9 @@ export function App() {
     window.addEventListener("pointercancel", handlePointerUp, { once: true });
   }
 
-  function handleSidebarResizeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+  function handleSidebarResizeKeyDown(
+    event: ReactKeyboardEvent<HTMLDivElement>,
+  ): void {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
       return;
     }
@@ -1511,7 +1755,9 @@ export function App() {
     );
   }
 
-  function handleInspectorResizeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+  function handleInspectorResizeKeyDown(
+    event: ReactKeyboardEvent<HTMLDivElement>,
+  ): void {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
       return;
     }
@@ -1524,13 +1770,7 @@ export function App() {
 
   function renderNarrativeItem(item: RunNarrativeItem, key: string) {
     if (item.kind === "thinking") {
-      return (
-        <ThoughtTrace
-          key={key}
-          text={item.text}
-          status={item.status}
-        />
-      );
+      return <ThoughtTrace key={key} text={item.text} status={item.status} />;
     }
     if (item.kind === "answer") {
       const showAnswerFooter = shouldShowAssistantAnswerFooter({
@@ -1553,12 +1793,16 @@ export function App() {
           key={key}
           className={`compact-boundary compact-boundary-${item.status}`}
           role="separator"
-          aria-label={item.detail ? `${item.title}: ${item.detail}` : item.title}
+          aria-label={
+            item.detail ? `${item.title}: ${item.detail}` : item.title
+          }
         >
           <span className="compact-boundary-line" aria-hidden="true" />
           <span className="compact-boundary-copy">
             <span className="compact-boundary-title">{item.title}</span>
-            {item.detail ? <span className="compact-boundary-detail">{item.detail}</span> : null}
+            {item.detail ? (
+              <span className="compact-boundary-detail">{item.detail}</span>
+            ) : null}
           </span>
           <span className="compact-boundary-line" aria-hidden="true" />
         </div>
@@ -1569,21 +1813,20 @@ export function App() {
         const id = action.id.startsWith("explore:")
           ? action.id.slice("explore:".length)
           : rawToolId(action.id);
-        const tool = runtimeState.toolResults.find((record) => record.id === id);
+        const tool = runtimeState.toolResults.find(
+          (record) => record.id === id,
+        );
         return {
           ...action,
           detail: toolTraceDetail(tool, action.detail),
         };
       });
-      return (
-        <ToolTraceGroup
-          key={key}
-          actions={actions}
-        />
-      );
+      return <ToolTraceGroup key={key} actions={actions} />;
     }
     if (item.kind === "tool") {
-      const tool = runtimeState.toolResults.find((record) => record.id === rawToolId(item.id));
+      const tool = runtimeState.toolResults.find(
+        (record) => record.id === rawToolId(item.id),
+      );
       return (
         <ToolTraceLine
           key={key}
@@ -1598,14 +1841,17 @@ export function App() {
         ? item.id.slice("approval:".length)
         : item.id;
       const itemApproval = runtimeState.approvals.find(
-        (approval) => approval.id === approvalId || approvalId.endsWith(`:${approval.id}`),
+        (approval) =>
+          approval.id === approvalId || approvalId.endsWith(`:${approval.id}`),
       );
-      if (item.status === "waiting" && itemApproval?.id === activeApproval?.id) {
+      if (
+        item.status === "waiting" &&
+        itemApproval?.id === activeApproval?.id
+      ) {
         return null;
       }
       const canResolve =
-        item.status === "waiting" &&
-        activeApproval?.id === itemApproval?.id;
+        item.status === "waiting" && activeApproval?.id === itemApproval?.id;
       const resolvedDecision =
         item.status === "approved" || item.status === "rejected"
           ? item.status
@@ -1621,7 +1867,9 @@ export function App() {
           patchSummary={itemApproval?.patchSummary}
           riskTone={itemApproval?.riskTone}
           approveLabel={
-            resolvingApprovalId === itemApproval?.id ? "Resolving..." : "Approve"
+            resolvingApprovalId === itemApproval?.id
+              ? "Resolving..."
+              : "Approve"
           }
           rejectLabel={
             resolvingApprovalId === itemApproval?.id ? "Resolving..." : "Reject"
@@ -1647,17 +1895,16 @@ export function App() {
     }
     if (item.kind === "fileChange") {
       return (
-        <FileChangeSummary
-          key={key}
-          files={item.files}
-          status={item.status}
-        />
+        <FileChangeSummary key={key} files={item.files} status={item.status} />
       );
     }
     return null;
   }
 
-  function renderTurnBodySegment(turnId: string, segment: NarrativeTurnBodySegment) {
+  function renderTurnBodySegment(
+    turnId: string,
+    segment: NarrativeTurnBodySegment,
+  ) {
     if (segment.kind === "items") {
       return segment.items.map((item, itemIndex) =>
         renderNarrativeItem(
@@ -1729,6 +1976,13 @@ export function App() {
   }
 
   const platform = runtimeClient.platform as PlatformKind;
+  const composerBarAttachments = composerAttachments.map((attachment) => ({
+    id: attachment.id,
+    kind: attachment.kind,
+    src: attachment.previewURL,
+    alt: attachment.displayName || "Pasted image",
+    mimeType: attachment.mimeType,
+  }));
   const layoutStyle = {
     "--aw-sidebar-width": `${sidebarWidth}px`,
     "--aw-inspector-width": `${inspectorWidth}px`,
@@ -1749,13 +2003,20 @@ export function App() {
           patchSummary={activeApproval.patchSummary}
           riskTone={activeApproval.riskTone}
           approveLabel={
-            resolvingApprovalId === activeApproval.id ? "Resolving..." : "Approve"
+            resolvingApprovalId === activeApproval.id
+              ? "Resolving..."
+              : "Approve"
           }
           rejectLabel={
-            resolvingApprovalId === activeApproval.id ? "Resolving..." : "Reject"
+            resolvingApprovalId === activeApproval.id
+              ? "Resolving..."
+              : "Reject"
           }
           resolving={resolvingApprovalId === activeApproval.id}
-          resolvedDecision={resolvedDecisionForApproval(activeApproval, resolvedApproval)}
+          resolvedDecision={resolvedDecisionForApproval(
+            activeApproval,
+            resolvedApproval,
+          )}
           onApprove={() => {
             void handleResolveApproval("approved");
           }}
@@ -1841,17 +2102,25 @@ export function App() {
           chrome={
             <WorkbenchChrome
               sidebarCollapsed={sidebarCollapsed}
-              onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)}
+              onToggleSidebar={() =>
+                setSidebarCollapsed((collapsed) => !collapsed)
+              }
               onNewTask={handleNewTask}
               right={
                 <div className="workbench-chrome-status">
                   {topbarStatusLabel ? (
-                    <span className="workbench-chrome-state">{topbarStatusLabel}</span>
+                    <span className="workbench-chrome-state">
+                      {topbarStatusLabel}
+                    </span>
                   ) : null}
                   <button
                     type="button"
                     className="workbench-chrome-icon workbench-chrome-panel-toggle"
-                    aria-label={inspectorCollapsed ? "Expand inspector" : "Collapse inspector"}
+                    aria-label={
+                      inspectorCollapsed
+                        ? "Expand inspector"
+                        : "Collapse inspector"
+                    }
                     onClick={handleToggleInspectorCollapsed}
                   >
                     {inspectorCollapsed ? (
@@ -1886,7 +2155,9 @@ export function App() {
                   <span className="sidebar-section-actions">
                     <SidebarSectionAction
                       label="Filter projects"
-                      onClick={() => setNotice("Project filters are not available yet.")}
+                      onClick={() =>
+                        setNotice("Project filters are not available yet.")
+                      }
                     >
                       <ListFilter size={13} strokeWidth={1.85} />
                     </SidebarSectionAction>
@@ -1925,8 +2196,14 @@ export function App() {
                   inspectorCollapsed={inspectorCollapsed}
                   stage={
                     <RunStage
-                      scrollRef={showCenterComposer ? undefined : setRunStageScrollElement}
-                      onScroll={showCenterComposer ? undefined : handleRunStageScroll}
+                      scrollRef={
+                        showCenterComposer
+                          ? undefined
+                          : setRunStageScrollElement
+                      }
+                      onScroll={
+                        showCenterComposer ? undefined : handleRunStageScroll
+                      }
                       overlay={
                         <>
                           {renderNoticeToast()}
@@ -1934,21 +2211,34 @@ export function App() {
                             <nav
                               className={`turn-marker-rail turn-marker-rail-${turnMarkerDisplay.mode}`}
                               aria-label="Message shortcuts"
-                              style={{ bottom: Math.max(28, composerSafeAreaPx) }}
+                              style={{
+                                bottom: Math.max(28, composerSafeAreaPx),
+                              }}
                             >
                               {turnMarkerDisplay.items.map((marker) => (
                                 <button
                                   key={`${marker.id}:${marker.index}`}
                                   type="button"
                                   className={`turn-marker-button${
-                                    marker.id === activeWorkbenchTurnId ? " turn-marker-button-active" : ""
+                                    marker.id === activeWorkbenchTurnId
+                                      ? " turn-marker-button-active"
+                                      : ""
                                   }`}
-                                  aria-current={marker.id === activeWorkbenchTurnId ? "true" : undefined}
+                                  aria-current={
+                                    marker.id === activeWorkbenchTurnId
+                                      ? "true"
+                                      : undefined
+                                  }
                                   aria-label={`跳转到第 ${marker.index + 1} 条消息`}
                                   title={`第 ${marker.index + 1} 条消息`}
-                                  onClick={() => handleTurnMarkerClick(marker.id)}
+                                  onClick={() =>
+                                    handleTurnMarkerClick(marker.id)
+                                  }
                                 >
-                                  <span className="turn-marker-bar" aria-hidden="true" />
+                                  <span
+                                    className="turn-marker-bar"
+                                    aria-hidden="true"
+                                  />
                                 </button>
                               ))}
                             </nav>
@@ -1965,7 +2255,11 @@ export function App() {
                                 title="回到最新输出"
                                 onClick={handleReturnToLatestClick}
                               >
-                                <ChevronDown size={16} strokeWidth={2.1} aria-hidden="true" />
+                                <ChevronDown
+                                  size={16}
+                                  strokeWidth={2.1}
+                                  aria-hidden="true"
+                                />
                               </button>
                             </div>
                           ) : null}
@@ -1988,9 +2282,18 @@ export function App() {
                                 disabled={composerBarState.disabled}
                                 isReady={composerBarState.isReady}
                                 submitMode={composerBarState.submitMode}
+                                submitDisabled={composerBarState.submitDisabled}
                                 variant="dock"
                                 metaItems={composerMetaItems}
                                 focusRequest={composerFocusRequest}
+                                attachments={composerBarAttachments}
+                                attachmentWarning={composerAttachmentWarning}
+                                onRemoveAttachment={
+                                  handleRemoveComposerAttachment
+                                }
+                                onPasteImages={(files) => {
+                                  void handlePasteImages(files);
+                                }}
                               />
                             </div>
                           </ComposerDock>
@@ -2013,9 +2316,16 @@ export function App() {
                             disabled={composerBarState.disabled}
                             isReady={composerBarState.isReady}
                             submitMode={composerBarState.submitMode}
+                            submitDisabled={composerBarState.submitDisabled}
                             variant="center"
                             metaItems={composerMetaItems}
                             focusRequest={composerFocusRequest}
+                            attachments={composerBarAttachments}
+                            attachmentWarning={composerAttachmentWarning}
+                            onRemoveAttachment={handleRemoveComposerAttachment}
+                            onPasteImages={(files) => {
+                              void handlePasteImages(files);
+                            }}
                           />
                         </div>
                       ) : null}
@@ -2023,16 +2333,23 @@ export function App() {
                       {showCenterComposer ? null : (
                         <ExecutionFeed>
                           {narrativeSections.leadItems.map((item, index) =>
-                            renderNarrativeItem(item, `lead:${item.id}:${index}`),
+                            renderNarrativeItem(
+                              item,
+                              `lead:${item.id}:${index}`,
+                            ),
                           )}
                           {narrativeSections.turns.map((turn, index) => {
                             const isLatestPrompt = turn.id === latestPromptId;
-                            const isActiveTurn = turn.id === activeWorkbenchTurnId;
-                            const turnBodySegments = projectNarrativeTurnBodySegments({
-                              turnId: turn.id,
-                              items: turn.items,
-                              executionProcessOpen: executionProcessOpenByTurnId[turn.id] === true,
-                            });
+                            const isActiveTurn =
+                              turn.id === activeWorkbenchTurnId;
+                            const turnBodySegments =
+                              projectNarrativeTurnBodySegments({
+                                turnId: turn.id,
+                                items: turn.items,
+                                executionProcessOpen:
+                                  executionProcessOpenByTurnId[turn.id] ===
+                                  true,
+                              });
                             const turnStyle =
                               isLatestPrompt && latestTurnMinHeightPx > 0
                                 ? ({
@@ -2045,9 +2362,13 @@ export function App() {
                                 key={`${turn.id}:${index}`}
                                 data-execution-turn-id={turn.id}
                                 className={`execution-turn-section${
-                                  isLatestPrompt ? " execution-turn-section-latest" : ""
+                                  isLatestPrompt
+                                    ? " execution-turn-section-latest"
+                                    : ""
                                 }${
-                                  isActiveTurn ? " execution-turn-section-active" : ""
+                                  isActiveTurn
+                                    ? " execution-turn-section-active"
+                                    : ""
                                 }`}
                                 style={turnStyle}
                                 aria-label={`Turn ${index + 1}`}
@@ -2056,12 +2377,22 @@ export function App() {
                                   <div className="execution-turn-header">
                                     <UserPromptBlock
                                       text={turn.prompt.text}
-                                      expanded={promptBubbleModeByTurnId[turn.id] === "expanded"}
+                                      attachments={promptAttachmentViews(
+                                        turn.prompt.attachments,
+                                      )}
+                                      expanded={
+                                        promptBubbleModeByTurnId[turn.id] ===
+                                        "expanded"
+                                      }
                                       onExpandedChange={(expanded) => {
-                                        setPromptBubbleModeByTurnId((current) => ({
-                                          ...current,
-                                          [turn.id]: expanded ? "expanded" : "collapsed",
-                                        }));
+                                        setPromptBubbleModeByTurnId(
+                                          (current) => ({
+                                            ...current,
+                                            [turn.id]: expanded
+                                              ? "expanded"
+                                              : "collapsed",
+                                          }),
+                                        );
                                       }}
                                     />
                                   </div>

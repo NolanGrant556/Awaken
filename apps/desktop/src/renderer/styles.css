@@ -180,7 +180,8 @@ pre {
   margin: 0 auto;
   padding: 54px 0 72px;
   overflow: auto;
-  scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 46%, transparent) transparent;
+  scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 46%, transparent)
+    transparent;
   scrollbar-width: thin;
 }
 
@@ -229,7 +230,11 @@ pre {
 
 .extension-icon-button:hover:enabled,
 .extension-icon-button:focus-visible {
-  border-color: color-mix(in srgb, var(--aw-text-secondary) 52%, var(--aw-border-main));
+  border-color: color-mix(
+    in srgb,
+    var(--aw-text-secondary) 52%,
+    var(--aw-border-main)
+  );
   color: var(--aw-text-primary);
 }
 
@@ -255,14 +260,19 @@ pre {
 }
 
 .extension-toolbar input:focus {
-  border-color: color-mix(in srgb, var(--aw-text-secondary) 64%, var(--aw-border-main));
+  border-color: color-mix(
+    in srgb,
+    var(--aw-text-secondary) 64%,
+    var(--aw-border-main)
+  );
   outline: 2px solid color-mix(in srgb, var(--aw-accent) 16%, transparent);
   outline-offset: 1px;
 }
 
 .extension-message {
   padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--aw-error) 36%, var(--aw-border-main));
+  border: 1px solid
+    color-mix(in srgb, var(--aw-error) 36%, var(--aw-border-main));
   border-radius: var(--aw-radius-panel);
   background: color-mix(in srgb, var(--aw-error) 7%, var(--aw-bg-white));
   color: var(--aw-text-primary);
@@ -310,7 +320,11 @@ pre {
 }
 
 .extension-card:hover {
-  border-color: color-mix(in srgb, var(--aw-border-main) 62%, var(--aw-text-secondary));
+  border-color: color-mix(
+    in srgb,
+    var(--aw-border-main) 62%,
+    var(--aw-text-secondary)
+  );
   box-shadow: 0 8px 22px rgba(20, 24, 31, 0.06);
 }
 
@@ -477,7 +491,11 @@ pre {
 }
 
 .extension-code-input:focus {
-  border-color: color-mix(in srgb, var(--aw-text-secondary) 64%, var(--aw-border-main));
+  border-color: color-mix(
+    in srgb,
+    var(--aw-text-secondary) 64%,
+    var(--aw-border-main)
+  );
   outline: 2px solid color-mix(in srgb, var(--aw-accent) 16%, transparent);
   outline-offset: 1px;
 }
@@ -586,7 +604,9 @@ pre {
   border-radius: var(--aw-radius-pill);
   background: var(--aw-button-black);
   color: var(--aw-text-onblack);
-  box-shadow: 0 12px 30px rgba(15, 18, 25, 0.18), 0 2px 6px rgba(15, 18, 25, 0.08);
+  box-shadow:
+    0 12px 30px rgba(15, 18, 25, 0.18),
+    0 2px 6px rgba(15, 18, 25, 0.08);
   font-size: 13px;
   font-weight: 700;
   line-height: 1.45;
@@ -640,7 +660,8 @@ pre {
   padding: 0 20px 0 18px;
   overflow-x: hidden;
   overflow-y: auto;
-  scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 46%, transparent) transparent;
+  scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 46%, transparent)
+    transparent;
   scrollbar-width: thin;
 }
 
@@ -761,7 +782,11 @@ pre {
 }
 
 .model-provider-card:has(.model-provider-toggle[aria-expanded="true"]) {
-  border-color: color-mix(in srgb, var(--aw-border-main) 72%, var(--aw-text-secondary));
+  border-color: color-mix(
+    in srgb,
+    var(--aw-border-main) 72%,
+    var(--aw-text-secondary)
+  );
   box-shadow: 0 8px 22px rgba(20, 24, 31, 0.06);
 }
 
@@ -925,7 +950,11 @@ pre {
 .model-picker-trigger:hover,
 .model-picker-trigger:focus-visible,
 .model-picker-trigger[aria-expanded="true"] {
-  border-color: color-mix(in srgb, var(--aw-text-secondary) 62%, var(--aw-border-main));
+  border-color: color-mix(
+    in srgb,
+    var(--aw-text-secondary) 62%,
+    var(--aw-border-main)
+  );
 }
 
 .model-picker-trigger:focus-visible {
@@ -1028,6 +1057,40 @@ pre {
   outline-offset: 1px;
 }
 
+.model-provider-capability-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.model-provider-capability-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-panel);
+  background: color-mix(in srgb, var(--aw-surface-raised) 86%, white 14%);
+}
+
+.model-provider-capability-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.model-provider-capability-copy strong {
+  color: var(--aw-text-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.model-provider-capability-copy span {
+  color: var(--aw-text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .model-provider-form-footer {
   display: flex;
   align-items: center;
@@ -1068,7 +1131,8 @@ pre {
 }
 
 .configured-models-table {
-  --configured-model-columns: minmax(150px, 0.9fr) 60px minmax(280px, 1.5fr) minmax(88px, 0.45fr) minmax(88px, 0.45fr) 132px;
+  --configured-model-columns: minmax(150px, 0.9fr) 60px minmax(280px, 1.5fr)
+    minmax(88px, 0.45fr) minmax(88px, 0.45fr) 132px;
   justify-self: start;
   box-sizing: border-box;
   min-width: 0;
@@ -1174,6 +1238,10 @@ pre {
   cursor: pointer;
 }
 
+.configured-model-switch input:disabled {
+  cursor: not-allowed;
+}
+
 .configured-model-switch span {
   width: 36px;
   height: 20px;
@@ -1210,6 +1278,10 @@ pre {
 .configured-model-switch input:focus-visible + span {
   outline: 2px solid color-mix(in srgb, var(--aw-accent) 55%, transparent);
   outline-offset: 2px;
+}
+
+.configured-model-switch input:disabled + span {
+  opacity: 0.45;
 }
 
 .configured-context {
@@ -1445,7 +1517,8 @@ pre {
 
 @media (max-width: 1180px) {
   .configured-models-table {
-    --configured-model-columns: minmax(128px, 0.8fr) 48px minmax(190px, 1.15fr) minmax(74px, 0.45fr) minmax(72px, 0.45fr) 108px;
+    --configured-model-columns: minmax(128px, 0.8fr) 48px minmax(190px, 1.15fr)
+      minmax(74px, 0.45fr) minmax(72px, 0.45fr) 108px;
   }
 
   .configured-models-row {
@@ -1554,7 +1627,6 @@ pre {
   .configured-models-table {
     width: 100%;
   }
-
 }
 
 .inspector-section {
@@ -1769,7 +1841,10 @@ pre {
   color: var(--aw-text-primary);
   cursor: pointer;
   white-space: nowrap;
-  transition: background-color 160ms ease, border-color 160ms ease, opacity 160ms ease;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    opacity 160ms ease;
 }
 
 .runtime-action:hover:enabled {
@@ -2046,5 +2121,4 @@ pre {
   .workspace-picker-input {
     width: min(100%, 220px);
   }
-
 }

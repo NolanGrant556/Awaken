@@ -1,4 +1,8 @@
-import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import {
+  spawn,
+  type ChildProcess,
+  type SpawnOptions,
+} from "node:child_process";
 import { createServer } from "node:net";
 import { createInterface } from "node:readline";
 import { dirname, join } from "node:path";
@@ -7,7 +11,8 @@ import { app } from "electron";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-export type SupervisorStatus = "stopped" | "starting" | "running" | "crashed" | "stopping";
+export type SupervisorStatus =
+  "stopped" | "starting" | "running" | "crashed" | "stopping";
 
 export interface RuntimeLogEntry {
   id: number;
@@ -30,7 +35,11 @@ export interface SupervisorOptions {
 
 type StatusChangeCallback = (info: SupervisorStatusInfo) => void;
 type LogsCallback = (entry: RuntimeLogEntry) => void;
-type SpawnProcess = (command: string, args: string[], options: SpawnOptions) => ChildProcess;
+type SpawnProcess = (
+  command: string,
+  args: string[],
+  options: SpawnOptions,
+) => ChildProcess;
 
 export interface RuntimeSupervisorDeps {
   allocatePort?: () => Promise<number>;
@@ -81,7 +90,11 @@ function sanitizedRuntimeEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-async function waitForHealth(baseUrl: string, timeoutMs = 10000, intervalMs = 200): Promise<void> {
+async function waitForHealth(
+  baseUrl: string,
+  timeoutMs = 10000,
+  intervalMs = 200,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
@@ -123,7 +136,8 @@ export class RuntimeSupervisor {
       now: deps.now ?? Date.now,
       resolveBinaryPath: deps.resolveBinaryPath ?? resolveBinaryPath,
       spawnProcess: deps.spawnProcess ?? spawn,
-      waitForHealth: deps.waitForHealth ?? ((baseUrl) => waitForHealth(baseUrl)),
+      waitForHealth:
+        deps.waitForHealth ?? ((baseUrl) => waitForHealth(baseUrl)),
     };
   }
 
@@ -157,6 +171,7 @@ export class RuntimeSupervisor {
           env: {
             ...sanitizedRuntimeEnv(),
             AWAKEN_CORE_ADDR: `127.0.0.1:${port}`,
+            AWAKEN_USER_DATA_DIR: app.getPath("userData"),
             ...(this.options.defaultWorkspace
               ? { AWAKEN_DEFAULT_WORKSPACE: this.options.defaultWorkspace }
               : {}),
@@ -222,7 +237,11 @@ export class RuntimeSupervisor {
     // Invalidate any in-flight start() loop so it stops spawning/retrying and
     // does not overwrite the stopped state we are about to set.
     this.startGeneration++;
-    if (!this.child || this.child.exitCode !== null || this.child.signalCode !== null) {
+    if (
+      !this.child ||
+      this.child.exitCode !== null ||
+      this.child.signalCode !== null
+    ) {
       this.child = null;
       this.runtimeBaseUrl = undefined;
       this.setStatus("stopped");
@@ -358,7 +377,10 @@ export class RuntimeSupervisor {
       };
     });
 
-    return Promise.race([this.deps.waitForHealth(baseUrl), startupFailure]).finally(cleanup);
+    return Promise.race([
+      this.deps.waitForHealth(baseUrl),
+      startupFailure,
+    ]).finally(cleanup);
   }
 
   private terminateChild(child: ChildProcess): Promise<void> {

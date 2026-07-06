@@ -13,14 +13,18 @@ import {
   type RuntimeConnector,
   type RuntimeConnectorActionResponse,
   type RuntimeInfo,
+  type RuntimeLogEntry,
   type RuntimeMcpServer,
+  type RuntimeMcpServerConfigResponse,
   type RuntimeModelProfileSummary,
   type RuntimeRun,
   type RuntimeSkill,
   type RuntimeThreadTranscript,
   type RuntimeThread,
+  type RuntimeToolInfo,
   type StartRunRequest,
   type SupervisorStatusInfo,
+  type UpdateMcpServerConfigRequest,
   type WorkspacePickResult,
   type WorkspaceRegistrySyncRequest,
   type WorkspaceValidationResult,
@@ -42,6 +46,12 @@ export type RuntimeClient = {
   disconnectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
   listMcpServers: () => Promise<RuntimeMcpServer[]>;
   configureMcpServers: (request: ConfigureMcpServersRequest) => Promise<ConfigureMcpServersResponse>;
+  getMcpServerConfig: (name: string) => Promise<RuntimeMcpServerConfigResponse>;
+  updateMcpServerConfig: (name: string, request: UpdateMcpServerConfigRequest) => Promise<ConfigureMcpServersResponse>;
+  getRuntimeLogs: () => Promise<RuntimeLogEntry[]>;
+  disableMcpServer: (name: string) => Promise<void>;
+  enableMcpServer: (name: string) => Promise<void>;
+  listMcpTools: () => Promise<RuntimeToolInfo[]>;
   listSkills: () => Promise<RuntimeSkill[]>;
   installSkill: (request: InstallSkillRequest) => Promise<InstallSkillResponse>;
   listModelProviders: () => Promise<ModelProvider[]>;
@@ -95,6 +105,12 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     disconnectConnector: (connectorId) => bridge.disconnectConnector(connectorId),
     listMcpServers: () => bridge.listMcpServers(),
     configureMcpServers: (request) => bridge.configureMcpServers(request),
+    getMcpServerConfig: (name) => bridge.getMcpServerConfig(name),
+    updateMcpServerConfig: (name, request) => bridge.updateMcpServerConfig(name, request),
+    getRuntimeLogs: () => bridge.getRuntimeLogs(),
+    disableMcpServer: (name) => bridge.disableMcpServer(name),
+    enableMcpServer: (name) => bridge.enableMcpServer(name),
+    listMcpTools: () => bridge.listMcpTools(),
     listSkills: () => bridge.listSkills(),
     installSkill: (request) => bridge.installSkill(request),
     listModelProviders: () => bridge.listModelProviders(),

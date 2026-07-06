@@ -182,6 +182,30 @@ export type ConfigureMcpServersResponse = {
   message: string;
 };
 
+export type RuntimeMcpServerConfigResponse = {
+  name: string;
+  configText: string;
+  scope: string;
+};
+
+export type UpdateMcpServerConfigRequest = {
+  configText: string;
+};
+
+export type RuntimeLogEntry = {
+  id: number;
+  timestamp: number;
+  stream: "stdout" | "stderr";
+  line: string;
+};
+
+export type RuntimeToolInfo = {
+  name: string;
+  source: string;
+  description: string;
+  readOnly: boolean;
+};
+
 export type RuntimeSkill = {
   id: string;
   name: string;
@@ -482,6 +506,12 @@ export type AwakenBridge = {
   disconnectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
   listMcpServers: () => Promise<RuntimeMcpServer[]>;
   configureMcpServers: (request: ConfigureMcpServersRequest) => Promise<ConfigureMcpServersResponse>;
+  getMcpServerConfig: (name: string) => Promise<RuntimeMcpServerConfigResponse>;
+  updateMcpServerConfig: (name: string, request: UpdateMcpServerConfigRequest) => Promise<ConfigureMcpServersResponse>;
+  disableMcpServer: (name: string) => Promise<void>;
+  enableMcpServer: (name: string) => Promise<void>;
+  getRuntimeLogs: () => Promise<RuntimeLogEntry[]>;
+  listMcpTools: () => Promise<RuntimeToolInfo[]>;
   listSkills: () => Promise<RuntimeSkill[]>;
   installSkill: (request: InstallSkillRequest) => Promise<InstallSkillResponse>;
   listModelProviders: () => Promise<ModelProvider[]>;

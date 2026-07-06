@@ -77,6 +77,7 @@ function stubElectronBridge(): void {
       updateMcpServerConfig: vi.fn(),
       disableMcpServer: vi.fn(),
       enableMcpServer: vi.fn(),
+      deleteMcpServer: vi.fn(),
       getRuntimeLogs: vi.fn(async () => []),
       listMcpTools: vi.fn(async () => []),
       listSkills: vi.fn(async () => []),

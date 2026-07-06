@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -38,7 +39,7 @@ var ErrSandboxUnavailable = errors.New(
 //  3. If the command is open_world_system and sandbox support is anything
 //     less than SandboxFull, fail-closed with ErrSandboxUnavailable.
 //  4. Apply sandbox constraints to the exec.Cmd (no-op for degraded/none).
-//  5. Execute via /bin/sh -c, capturing stdout/stderr with optional
+//  5. Execute via the platform shell, capturing stdout/stderr with optional
 //     observer streaming.
 type ShellExecutor struct {
 	// adapter is the sandbox adapter to use. When nil, the executor
@@ -124,7 +125,10 @@ func (e *ShellExecutor) Execute(
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(runCtx, "/bin/sh", "-c", command)
+	cmd, err := shellCommand(runCtx, command)
+	if err != nil {
+		return ShellExecResult{}, fmt.Errorf("resolve shell: %w", err)
+	}
 	cmd.Dir = cwd
 
 	// EnvPolicy enforcement: when the execution profile's EnvPolicy is
@@ -201,12 +205,14 @@ func resolveExecutorCwd(workdir string, permissionContext tool.PermissionContext
 
 // minimalEnvAllowlist returns the allowlist of environment variables a
 // shell command may observe when the execution profile's EnvPolicy is
-// EnvMinimal. Only variables needed for basic command execution (PATH,
-// HOME, USER, SHELL, TMPDIR, LANG, LC_ALL) are included; secrets and
-// project-local tokens are stripped. Variables whose value is empty are
-// omitted so the child does not see "VAR=" entries.
+// EnvMinimal. Only variables needed for basic command execution are included;
+// secrets and project-local tokens are stripped. Variables whose value is
+// empty are omitted so the child does not see "VAR=" entries.
 func minimalEnvAllowlist() []string {
 	keys := []string{"PATH", "HOME", "USER", "SHELL", "TMPDIR", "LANG", "LC_ALL"}
+	if runtime.GOOS == "windows" {
+		keys = append(keys, "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "PATHEXT", "SYSTEMROOT")
+	}
 	env := make([]string, 0, len(keys))
 	for _, key := range keys {
 		value := os.Getenv(key)
@@ -216,4 +222,21 @@ func minimalEnvAllowlist() []string {
 		env = append(env, key+"="+value)
 	}
 	return env
+}
+
+// shellCommand builds an exec.Cmd that runs the provided shell script on the
+// current platform. On Windows we prefer a POSIX sh if it is available in PATH
+// and otherwise fall back to cmd.exe /c.
+func shellCommand(ctx context.Context, script string) (*exec.Cmd, error) {
+	if runtime.GOOS != "windows" {
+		return exec.CommandContext(ctx, "/bin/sh", "-c", script), nil
+	}
+	if shPath, err := exec.LookPath("sh"); err == nil {
+		return exec.CommandContext(ctx, shPath, "-c", script), nil
+	}
+	cmdPath, err := exec.LookPath("cmd.exe")
+	if err != nil {
+		return nil, fmt.Errorf("no shell found in PATH")
+	}
+	return exec.CommandContext(ctx, cmdPath, "/c", script), nil
 }

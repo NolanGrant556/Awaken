@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -43,7 +44,7 @@ func buildTransport(cfg McpServerConfig, registry *InProcRegistry, authHandler a
 			cmd.Dir = cfg.Stdio.Cwd
 		}
 		if len(cfg.Stdio.Env) > 0 {
-			cmd.Env = append(cmd.Env, envSlice(cfg.Stdio.Env)...)
+			cmd.Env = append(os.Environ(), envSlice(cfg.Stdio.Env)...)
 		}
 		return &mcp.CommandTransport{Command: cmd}, TransportStdio, nil
 	case TransportHTTP:

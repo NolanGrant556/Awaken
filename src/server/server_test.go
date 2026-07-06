@@ -4096,6 +4096,10 @@ func TestMCPListToolsWithoutManager(t *testing.T) {
 
 func TestMCPConfigureServersAcceptsShorthandAndPersists(t *testing.T) {
 	workspace := t.TempDir()
+	// Redirect user-level MCP config into the temporary workspace so tests
+	// do not write to the real home directory.
+	t.Setenv("HOME", workspace)
+	t.Setenv("USERPROFILE", workspace)
 	mgr := mcpclient.NewManager(mcpclient.WithLogger(testLogger{}))
 	router := NewRouterWithWorkspace(nil, nil, mgr, nil, nil, workspace)
 
@@ -4119,11 +4123,11 @@ func TestMCPConfigureServersAcceptsShorthandAndPersists(t *testing.T) {
 	if len(resp.ServerNames) != 1 || resp.ServerNames[0] != "example_server" {
 		t.Fatalf("expected normalized example_server, got %#v", resp.ServerNames)
 	}
-	projectCfg, err := mcpclient.LoadProjectConfig(workspace)
+	userCfg, err := mcpclient.LoadUserConfig()
 	if err != nil {
-		t.Fatalf("load project config: %v", err)
+		t.Fatalf("load user config: %v", err)
 	}
-	stored := projectCfg.Servers["example_server"]
+	stored := userCfg.Servers["example_server"]
 	if stored.Stdio == nil || stored.Stdio.Command != "awaken-missing-mcp-test-command" {
 		t.Fatalf("expected persisted stdio config, got %+v", stored)
 	}

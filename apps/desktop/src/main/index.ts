@@ -38,14 +38,18 @@ import {
 	  type RuntimeConnector,
 	  type RuntimeConnectorActionResponse,
 	  type RuntimeInfoWire,
+	  type RuntimeLogEntry,
 	  type RuntimeMcpServer,
+	  type RuntimeMcpServerConfigResponse,
 	  type RuntimeRunWire,
 	  type RuntimeSkill,
 	  type RuntimeModelProfileSummaryWire,
 	  type RenameThreadRequest,
   type RuntimeThreadTranscriptWire,
   type RuntimeThreadWire,
+	  type RuntimeToolInfo,
   type StartRunRequest,
+  type UpdateMcpServerConfigRequest,
   type WorkspaceRegistrySyncRequest,
 } from "../shared/runtime.js";
 import { RuntimeSupervisor, type SupervisorStatusInfo } from "./runtime-supervisor.js";
@@ -502,6 +506,44 @@ ipcMain.handle("awaken:configure-mcp-servers", async (_event, request: Configure
 			"Content-Type": "application/json",
 		},
 		body: JSON.stringify(request),
+	});
+});
+
+ipcMain.handle("awaken:get-mcp-server-config", async (_event, name: string) => {
+	return requestRuntime<RuntimeMcpServerConfigResponse>(`/v1/mcp/servers/${encodeURIComponent(name)}/config`, {
+		method: "GET",
+	});
+});
+
+ipcMain.handle("awaken:update-mcp-server-config", async (_event, name: string, request: UpdateMcpServerConfigRequest) => {
+	return requestRuntime<ConfigureMcpServersResponse>(`/v1/mcp/servers/${encodeURIComponent(name)}/config`, {
+		method: "PATCH",
+		headers: {
+			"Content-Type": "application/json",
+		},
+		body: JSON.stringify(request),
+	});
+});
+
+ipcMain.handle("awaken:get-runtime-logs", async () => {
+	return supervisor?.getLogs() ?? [] as RuntimeLogEntry[];
+});
+
+ipcMain.handle("awaken:list-mcp-tools", async () => {
+	return requestRuntime<RuntimeToolInfo[]>("/v1/mcp/tools", {
+		method: "GET",
+	});
+});
+
+ipcMain.handle("awaken:disable-mcp-server", async (_event, name: string) => {
+	return requestRuntimeOK(`/v1/mcp/servers/${encodeURIComponent(name)}/disable`, {
+		method: "POST",
+	});
+});
+
+ipcMain.handle("awaken:enable-mcp-server", async (_event, name: string) => {
+	return requestRuntimeOK(`/v1/mcp/servers/${encodeURIComponent(name)}/enable`, {
+		method: "POST",
 	});
 });
 

@@ -304,7 +304,7 @@ pre {
 
 .extension-card {
   display: grid;
-  grid-template-columns: 46px minmax(0, 1fr) 34px;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   min-width: 0;
@@ -425,6 +425,12 @@ pre {
   color: color-mix(in srgb, var(--aw-warning) 74%, var(--aw-text-primary));
 }
 
+.extension-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .extension-card-action {
   display: inline-grid;
   place-items: center;
@@ -446,6 +452,54 @@ pre {
 .extension-card-action:disabled {
   opacity: 0.42;
   cursor: default;
+}
+
+.mcp-toggle-switch {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--aw-border-main);
+  cursor: pointer;
+  transition:
+    background-color var(--aw-transition-fast),
+    opacity var(--aw-transition-fast);
+}
+
+.mcp-toggle-switch-on {
+  background: var(--aw-success);
+}
+
+.mcp-toggle-switch-off {
+  background: var(--aw-error);
+}
+
+.mcp-toggle-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--aw-bg-white);
+  box-shadow: 0 1px 3px rgba(20, 24, 31, 0.14);
+  transition: transform var(--aw-transition-fast);
+}
+
+.mcp-toggle-switch-on .mcp-toggle-switch-thumb {
+  transform: translateX(18px);
+}
+
+.mcp-toggle-switch:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.mcp-toggle-switch:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--aw-accent) 24%, transparent);
+  outline-offset: 2px;
 }
 
 .extension-empty {
@@ -2127,4 +2181,166 @@ pre {
   .workspace-picker-input {
     width: min(100%, 220px);
   }
+}
+
+.aw-dialog:has(.mcp-settings-dialog-body) {
+  width: min(900px, calc(100vw - 48px));
+}
+
+.mcp-settings-dialog-body {
+  display: grid;
+  gap: 22px;
+  min-width: 0;
+}
+
+.mcp-settings-section {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.mcp-settings-section h3 {
+  margin: 0;
+  color: var(--aw-text-primary);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.mcp-settings-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.mcp-settings-scope {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-tertiary);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.mcp-settings-code {
+  width: 100%;
+  min-width: 0;
+  min-height: 160px;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-primary);
+  font-family: var(--aw-font-mono);
+  font-size: 13px;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.mcp-settings-code:focus {
+  border-color: color-mix(
+    in srgb,
+    var(--aw-text-secondary) 64%,
+    var(--aw-border-main)
+  );
+  outline: 2px solid color-mix(in srgb, var(--aw-accent) 16%, transparent);
+  outline-offset: 1px;
+}
+
+.mcp-tools-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mcp-tools-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-panel);
+}
+
+.mcp-tools-list code {
+  flex: 0 0 auto;
+  min-width: 0;
+  color: var(--aw-text-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.mcp-tools-list li > span:not(.mcp-tool-readonly) {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--aw-text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.mcp-tool-readonly {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 7px;
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-tertiary);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.mcp-logs-panel {
+  display: grid;
+  gap: 4px;
+  max-height: 260px;
+  padding: 12px 14px;
+  overflow: auto;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-bg-fill-light);
+  font-family: var(--aw-font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.mcp-log-line {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.mcp-log-time {
+  flex: 0 0 auto;
+  color: var(--aw-text-tertiary);
+}
+
+.mcp-log-text {
+  min-width: 0;
+  color: var(--aw-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.mcp-log-line-stderr .mcp-log-text {
+  color: color-mix(in srgb, var(--aw-error) 80%, var(--aw-text-secondary));
+}
+
+.mcp-settings-empty {
+  padding: 18px;
+  border: 1px dashed var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  color: var(--aw-text-tertiary);
+  font-size: 13px;
+  text-align: center;
 }

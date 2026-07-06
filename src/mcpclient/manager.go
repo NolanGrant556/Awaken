@@ -401,6 +401,35 @@ func (m *Manager) Reconnect(ctx context.Context, name string) error {
 	return m.Enable(ctx, name)
 }
 
+// RestartWithConfig stops an existing server (if any), unregisters its tools,
+// and starts a fresh connection loop with the provided config. Used when the
+// operator edits a server's configuration from the UI.
+func (m *Manager) RestartWithConfig(ctx context.Context, scoped ScopedMcpServerConfig) error {
+	m.mu.Lock()
+	server, exists := m.servers[scoped.Name]
+	if exists {
+		if server.cancelCtx != nil {
+			server.cancelCtx()
+		}
+		if server.session != nil {
+			_ = server.session.Close()
+		}
+		delete(m.servers, scoped.Name)
+	}
+	m.mu.Unlock()
+
+	if exists {
+		m.unregisterTools(scoped.Name)
+		if m.onToolsChanged != nil {
+			m.onToolsChanged(scoped.Name)
+		}
+		m.emitEvent(ServerEvent{Type: EventDisconnected, ServerName: scoped.Name})
+	}
+
+	m.Start(ctx, []ScopedMcpServerConfig{scoped})
+	return nil
+}
+
 // Snapshot returns the current state of every server, sorted by name.
 func (m *Manager) Snapshot() []ServerSnapshot {
 	m.mu.RLock()

@@ -94,6 +94,31 @@ func LoadUserConfig() (ConfigFile, error) {
 	return loadConfigFile(path)
 }
 
+// SaveUserConfig writes cfg to ~/.awaken/mcp.json, creating the parent
+// directory if necessary.
+func SaveUserConfig(cfg ConfigFile) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("resolve user home: %w", err)
+	}
+	if cfg.Servers == nil {
+		cfg.Servers = map[string]McpServerConfig{}
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("serialize user mcp config: %w", err)
+	}
+	dir := filepath.Join(home, ".awaken")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create %s: %w", dir, err)
+	}
+	path := filepath.Join(dir, "mcp.json")
+	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
 func loadConfigFile(path string) (ConfigFile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

@@ -36,9 +36,10 @@ func main() {
 		func(workspace runtime.WorkspaceConfig, threadID string, profile *runtime.ModelProfileConfig) *agentcore.Agent {
 			modelCfg := modelConfigFromProfile(profile)
 			agentCfg := agentcore.AgentConfig{
-				MaxThoughts: 0,
-				EntryPoint:  "awaken-core",
-				ModelConfig: modelCfg,
+				MaxThoughts:       0,
+				EntryPoint:        "awaken-core",
+				ModelConfig:       modelCfg,
+				UseApprovalForAsk: true,
 				Workspace: agentcore.WorkspaceConfig{
 					Root:          workspace.WorkspaceRoot,
 					WritableRoots: workspace.WritableRoots,

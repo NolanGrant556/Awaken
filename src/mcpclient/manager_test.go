@@ -18,9 +18,9 @@ import (
 // real tool registry. Used by manager-level tests so they don't pollute
 // global state.
 type fakeRegistry struct {
-	mu     sync.Mutex
-	tools  map[string]tool.Tool
-	regCnt  int
+	mu       sync.Mutex
+	tools    map[string]tool.Tool
+	regCnt   int
 	unregCnt int
 }
 
@@ -66,12 +66,12 @@ func (f *fakeRegistry) names() []string {
 
 // stubTool is a minimal tool.Tool used by the registry tests.
 type stubTool struct {
-	name   string
+	name     string
 	readonly bool
 }
 
-func (s *stubTool) Name() string                  { return s.name }
-func (s *stubTool) Description() string           { return "stub" }
+func (s *stubTool) Name() string                     { return s.name }
+func (s *stubTool) Description() string              { return "stub" }
 func (s *stubTool) Parameters() []tool.ToolParameter { return nil }
 func (s *stubTool) Execute(ctx context.Context, input string) (string, error) {
 	return "ok", nil
@@ -232,7 +232,7 @@ func TestManagerDisableEnable(t *testing.T) {
 	if err := waitForState(mgr, "echo", StateConnected, 3*time.Second); err != nil {
 		t.Fatalf("echo never connected: %v", err)
 	}
-	// Two tools should be registered.
+	// Configured MCP tools should register directly into the callable pool.
 	if got := len(fakeReg.names()); got != 2 {
 		t.Fatalf("expected 2 tools registered, got %d", got)
 	}

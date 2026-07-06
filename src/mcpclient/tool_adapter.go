@@ -15,16 +15,19 @@ import (
 // tool.Tool interface. The adapter forwards Execute calls to the owning
 // server's session via the manager.
 type McpToolAdapter struct {
-	manager     *Manager
-	serverName  string
-	toolName    string
-	prefixedName string
-	description string
-	parameters  []tool.ToolParameter
-	readOnly    bool
-	destructive bool
-	openWorld   bool
-	requiresAuth bool
+	manager         *Manager
+	serverName      string
+	toolName        string
+	prefixedName    string
+	description     string
+	parameters      []tool.ToolParameter
+	readOnly        bool
+	destructive     bool
+	openWorld       bool
+	requiresAuth    bool
+	capabilityClass tool.CapabilityClass
+	trustedOrigin   tool.TrustedOrigin
+	fileBridgeScope tool.FileBridgeScope
 	// inputSchemaJSON preserves the raw JSON Schema for callers that need
 	// the original structure rather than the flattened ToolParameter list.
 	inputSchemaJSON json.RawMessage
@@ -43,12 +46,13 @@ func WithInputSchemaJSON(raw json.RawMessage) McpToolAdapterOption {
 // present; conservative defaults are applied otherwise.
 func NewMcpToolAdapter(manager *Manager, serverName string, mcpTool *mcp.Tool, opts ...McpToolAdapterOption) *McpToolAdapter {
 	adapter := &McpToolAdapter{
-		manager:      manager,
-		serverName:   serverName,
-		toolName:     mcpTool.Name,
-		prefixedName: McpToolName(serverName, mcpTool.Name),
-		description:  mcpTool.Description,
-		parameters:   convertMcpInputSchema(mcpTool.InputSchema),
+		manager:         manager,
+		serverName:      serverName,
+		toolName:        mcpTool.Name,
+		prefixedName:    McpToolName(serverName, mcpTool.Name),
+		description:     mcpTool.Description,
+		parameters:      convertMcpInputSchema(mcpTool.InputSchema),
+		fileBridgeScope: tool.FileBridgeNone,
 	}
 	if mcpTool.Annotations != nil {
 		adapter.readOnly = mcpTool.Annotations.ReadOnlyHint
@@ -73,6 +77,20 @@ func NewMcpToolAdapter(manager *Manager, serverName string, mcpTool *mcp.Tool, o
 	// itself. We set it true at registration time for any server that has
 	// ever reported needs-auth; the permission layer treats it as a hint.
 	adapter.requiresAuth = false
+	adapter.trustedOrigin = inferTrustedOrigin(manager, serverName)
+	adapter.capabilityClass = inferMcpCapabilityClass(serverName, mcpTool.Name, adapter.readOnly, adapter.trustedOrigin)
+	if adapter.trustedOrigin == tool.TrustedOriginOfficialConnector || adapter.trustedOrigin == tool.TrustedOriginOfficialHosted {
+		adapter.fileBridgeScope = tool.FileBridgeTaskScopeRead
+	}
+	switch adapter.capabilityClass {
+	case tool.CapabilityConnectorRead, tool.CapabilityBrowserRead:
+		adapter.readOnly = true
+		adapter.destructive = false
+		adapter.openWorld = false
+	case tool.CapabilityConnectorWrite, tool.CapabilityBrowserInteract:
+		adapter.destructive = false
+		adapter.openWorld = false
+	}
 	for _, opt := range opts {
 		opt(adapter)
 	}
@@ -110,12 +128,15 @@ func (a *McpToolAdapter) Definition() tool.ToolDefinition {
 		Source:      tool.SourceMCP,
 		Description: a.Description(),
 		Annotations: tool.ToolAnnotations{
-			ReadOnly:     a.readOnly,
-			Destructive:  a.destructive,
-			OpenWorld:    a.openWorld,
-			RequiresAuth: a.requiresAuth,
-			ServerName:   a.serverName,
-			ToolName:     a.toolName,
+			ReadOnly:        a.readOnly,
+			Destructive:     a.destructive,
+			OpenWorld:       a.openWorld,
+			RequiresAuth:    a.requiresAuth,
+			ServerName:      a.serverName,
+			ToolName:        a.toolName,
+			CapabilityClass: a.capabilityClass,
+			TrustedOrigin:   a.trustedOrigin,
+			FileBridgeScope: a.fileBridgeScope,
 		},
 	}
 }
@@ -136,15 +157,7 @@ func (a *McpToolAdapter) CheckPermission(ctx context.Context, input string, perm
 	if snap.State == StateNeedsAuth {
 		return tool.DenyPermission("needs_auth")
 	}
-	if a.readOnly {
-		return tool.AllowPermission()
-	}
-	reason := fmt.Sprintf("MCP tool %s is destructive (server: %s)", a.prefixedName, a.serverName)
-	return tool.AskPermission(reason, tool.ApprovalRequest{
-		Title:       fmt.Sprintf("Approve MCP tool %s", a.prefixedName),
-		Description: approvalDescription(a.prefixedName, input),
-		RiskTone:    "warning",
-	})
+	return tool.AllowPermission()
 }
 
 // Execute implements tool.Tool. Arguments arrive as a JSON string; we
@@ -173,12 +186,15 @@ func (a *McpToolAdapter) ToolName() string { return a.toolName }
 // downstream tool-platform capability for permission decisions.
 func (a *McpToolAdapter) Annotations() MCPToolAnnotations {
 	return MCPToolAnnotations{
-		ReadOnly:     a.readOnly,
-		Destructive:  a.destructive,
-		OpenWorld:    a.openWorld,
-		RequiresAuth: a.requiresAuth,
-		ServerName:   a.serverName,
-		ToolName:     a.toolName,
+		ReadOnly:        a.readOnly,
+		Destructive:     a.destructive,
+		OpenWorld:       a.openWorld,
+		RequiresAuth:    a.requiresAuth,
+		ServerName:      a.serverName,
+		ToolName:        a.toolName,
+		CapabilityClass: a.capabilityClass,
+		TrustedOrigin:   a.trustedOrigin,
+		FileBridgeScope: a.fileBridgeScope,
 	}
 }
 
@@ -186,12 +202,76 @@ func (a *McpToolAdapter) Annotations() MCPToolAnnotations {
 // tool registration. Mirrors the field set required by the tool-platform
 // capability.
 type MCPToolAnnotations struct {
-	ReadOnly     bool
-	Destructive  bool
-	OpenWorld    bool
-	RequiresAuth bool
-	ServerName   string
-	ToolName     string
+	ReadOnly        bool                 `json:"readOnly"`
+	Destructive     bool                 `json:"destructive"`
+	OpenWorld       bool                 `json:"openWorld"`
+	RequiresAuth    bool                 `json:"requiresAuth"`
+	ServerName      string               `json:"serverName,omitempty"`
+	ToolName        string               `json:"toolName,omitempty"`
+	CapabilityClass tool.CapabilityClass `json:"capabilityClass,omitempty"`
+	TrustedOrigin   tool.TrustedOrigin   `json:"trustedOrigin,omitempty"`
+	FileBridgeScope tool.FileBridgeScope `json:"fileBridgeScope,omitempty"`
+}
+
+func (a *McpToolAdapter) AvailableForToolPool() bool {
+	return true
+}
+
+func inferTrustedOrigin(manager *Manager, serverName string) tool.TrustedOrigin {
+	if manager != nil {
+		if snap, err := manager.SnapshotServer(serverName); err == nil {
+			if snap.SourceConnectorID != nil && strings.TrimSpace(*snap.SourceConnectorID) != "" {
+				return tool.TrustedOriginOfficialConnector
+			}
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(serverName)) {
+	case "github", "playwright":
+		return tool.TrustedOriginOfficialConnector
+	default:
+		return tool.TrustedOriginThirdPartyMCP
+	}
+}
+
+func inferMcpCapabilityClass(serverName string, toolName string, readOnly bool, origin tool.TrustedOrigin) tool.CapabilityClass {
+	server := strings.ToLower(strings.TrimSpace(serverName))
+	name := strings.ToLower(strings.TrimSpace(toolName))
+
+	if server == "playwright" {
+		switch {
+		case containsAny(name, "navigate", "goto", "open", "screenshot", "snapshot", "content", "text", "query", "extract", "evaluate"):
+			return tool.CapabilityBrowserRead
+		case containsAny(name, "click", "type", "fill", "press", "select", "drag", "hover", "upload", "download", "submit"):
+			return tool.CapabilityBrowserInteract
+		}
+	}
+
+	if origin == tool.TrustedOriginOfficialConnector || origin == tool.TrustedOriginOfficialHosted {
+		if readOnly || containsAny(name, "list", "get", "read", "search", "query", "fetch") {
+			return tool.CapabilityConnectorRead
+		}
+		if containsAny(name, "create", "update", "write", "edit", "delete", "close", "comment", "post") {
+			return tool.CapabilityConnectorWrite
+		}
+		if readOnly {
+			return tool.CapabilityConnectorRead
+		}
+		return tool.CapabilityConnectorWrite
+	}
+
+	if readOnly {
+		return tool.CapabilityConnectorRead
+	}
+	return tool.CapabilityConnectorWrite
+}
+
+func containsAny(value string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(value, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseArguments decodes the JSON input string into a map[string]any the

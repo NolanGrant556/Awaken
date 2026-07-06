@@ -132,6 +132,8 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:disable-mcp-server", name) as Promise<void>,
   enableMcpServer: (name: string) =>
     ipcRenderer.invoke("awaken:enable-mcp-server", name) as Promise<void>,
+  deleteMcpServer: (name: string) =>
+    ipcRenderer.invoke("awaken:delete-mcp-server", name) as Promise<void>,
   listMcpTools: () =>
     ipcRenderer.invoke("awaken:list-mcp-tools") as Promise<RuntimeToolInfo[]>,
   listSkills: () =>

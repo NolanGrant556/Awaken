@@ -7,6 +7,7 @@ import {
   RefreshCw,
   Server,
   Settings,
+  Trash2,
   Upload,
   Wrench,
   X,
@@ -381,6 +382,26 @@ export function ExtensionsView({
     }
   }
 
+  async function handleDeleteMcpServer(): Promise<void> {
+    if (!selectedMcpServer) return;
+    if (!window.confirm(`确定要删除 MCP server "${selectedMcpServer.name}" 吗？`)) {
+      return;
+    }
+    setSavingMcpConfig(true);
+    setErrorMessage(null);
+    try {
+      await runtimeClient.deleteMcpServer(selectedMcpServer.name);
+      onNotice(`已删除 ${selectedMcpServer.name}`);
+      setMcpSettingsOpen(false);
+      setSelectedMcpServer(null);
+      await refresh();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "删除 MCP server 失败");
+    } finally {
+      setSavingMcpConfig(false);
+    }
+  }
+
   function filterMcpLogs(logs: RuntimeLogEntry[], serverName: string): RuntimeLogEntry[] {
     const keywords = [serverName.toLowerCase(), "mcp"];
     return logs.filter((entry) =>
@@ -666,28 +687,42 @@ export function ExtensionsView({
           }
         }}
         footer={
-          <>
+          <div className="mcp-settings-footer">
             <Button
               variant="default"
               size="md"
+              className="mcp-settings-delete-btn"
               disabled={savingMcpConfig}
-              onClick={() => setMcpSettingsOpen(false)}
-            >
-              取消
-            </Button>
-            <Button
-              variant="primary"
-              size="md"
-              loading={savingMcpConfig}
-              disabled={mcpSettingsConfigText.trim() === ""}
               onClick={() => {
-                void handleSaveMcpConfig();
+                void handleDeleteMcpServer();
               }}
             >
-              <Check size={15} strokeWidth={1.9} />
-              保存
+              <Trash2 size={15} strokeWidth={1.9} />
+              删除
             </Button>
-          </>
+            <div className="mcp-settings-footer-actions">
+              <Button
+                variant="default"
+                size="md"
+                disabled={savingMcpConfig}
+                onClick={() => setMcpSettingsOpen(false)}
+              >
+                取消
+              </Button>
+              <Button
+                variant="primary"
+                size="md"
+                loading={savingMcpConfig}
+                disabled={mcpSettingsConfigText.trim() === ""}
+                onClick={() => {
+                  void handleSaveMcpConfig();
+                }}
+              >
+                <Check size={15} strokeWidth={1.9} />
+                保存
+              </Button>
+            </div>
+          </div>
         }
       >
         <div className="mcp-settings-dialog-body">

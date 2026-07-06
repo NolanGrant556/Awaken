@@ -430,6 +430,33 @@ func (m *Manager) RestartWithConfig(ctx context.Context, scoped ScopedMcpServerC
 	return nil
 }
 
+// Remove permanently stops a server, closes its session, unregisters its tools,
+// and removes it from the manager. Used when the operator deletes a server's
+// configuration from the UI.
+func (m *Manager) Remove(name string) error {
+	m.mu.Lock()
+	server, exists := m.servers[name]
+	if exists {
+		if server.cancelCtx != nil {
+			server.cancelCtx()
+		}
+		if server.session != nil {
+			_ = server.session.Close()
+		}
+		delete(m.servers, name)
+	}
+	m.mu.Unlock()
+
+	if exists {
+		m.unregisterTools(name)
+		if m.onToolsChanged != nil {
+			m.onToolsChanged(name)
+		}
+		m.emitEvent(ServerEvent{Type: EventDisconnected, ServerName: name})
+	}
+	return nil
+}
+
 // Snapshot returns the current state of every server, sorted by name.
 func (m *Manager) Snapshot() []ServerSnapshot {
 	m.mu.RLock()

@@ -529,6 +529,7 @@ export type AwakenBridge = {
   updateMcpServerConfig: (name: string, request: UpdateMcpServerConfigRequest) => Promise<ConfigureMcpServersResponse>;
   disableMcpServer: (name: string) => Promise<void>;
   enableMcpServer: (name: string) => Promise<void>;
+  deleteMcpServer: (name: string) => Promise<void>;
   getRuntimeLogs: () => Promise<RuntimeLogEntry[]>;
   listMcpTools: () => Promise<RuntimeToolInfo[]>;
   listSkills: () => Promise<RuntimeSkill[]>;

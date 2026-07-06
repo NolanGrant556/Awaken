@@ -547,6 +547,12 @@ ipcMain.handle("awaken:enable-mcp-server", async (_event, name: string) => {
 	});
 });
 
+ipcMain.handle("awaken:delete-mcp-server", async (_event, name: string) => {
+	return requestRuntimeOK(`/v1/mcp/servers/${encodeURIComponent(name)}`, {
+		method: "DELETE",
+	});
+});
+
 ipcMain.handle("awaken:list-skills", async () => {
 	return requestRuntime<RuntimeSkill[]>("/v1/skills", {
 		method: "GET",

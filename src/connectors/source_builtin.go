@@ -2,9 +2,21 @@ package connectors
 
 import (
 	"context"
+	"runtime"
 
 	"awaken/src/mcpclient"
 )
+
+// npxCommand returns the OS-appropriate command and arguments for running an
+// npx package. On Windows, Go cannot reliably execute .cmd scripts as a long-
+// lived stdio server directly, so we run them through cmd /c. On other
+// platforms npx is invoked directly.
+func npxCommand(args ...string) (string, []string) {
+	if runtime.GOOS == "windows" {
+		return "cmd", append([]string{"/c", "npx"}, args...)
+	}
+	return "npx", args
+}
 
 // builtinSource implements ConnectorSource for first-party connectors.
 type builtinSource struct {
@@ -119,14 +131,15 @@ func context7Connector() ConnectorDefinition {
 
 // puppeteerConfigFactory generates MCP server configs for the Puppeteer connector.
 func puppeteerConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclient.ScopedMcpServerConfig {
+	cmd, args := npxCommand("-y", "@modelcontextprotocol/server-puppeteer")
 	return map[string]mcpclient.ScopedMcpServerConfig{
 		"puppeteer": {
 			Name:  "puppeteer",
 			Scope: mcpclient.ScopeUser,
 			Config: mcpclient.McpServerConfig{
 				Stdio: &mcpclient.StdioTransportConfig{
-					Command: "npx",
-					Args:    []string{"-y", "@modelcontextprotocol/server-puppeteer"},
+					Command: cmd,
+					Args:    args,
 					Env:     map[string]string{},
 				},
 				DisplayName: def.DisplayName,
@@ -137,14 +150,15 @@ func puppeteerConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpc
 
 // chromeDevToolsConfigFactory generates MCP server configs for the Chrome DevTools MCP connector.
 func chromeDevToolsConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclient.ScopedMcpServerConfig {
+	cmd, args := npxCommand("-y", "chrome-devtools-mcp@latest")
 	return map[string]mcpclient.ScopedMcpServerConfig{
 		"chrome-devtools-mcp": {
 			Name:  "chrome-devtools-mcp",
 			Scope: mcpclient.ScopeUser,
 			Config: mcpclient.McpServerConfig{
 				Stdio: &mcpclient.StdioTransportConfig{
-					Command: "npx",
-					Args:    []string{"-y", "chrome-devtools-mcp@latest"},
+					Command: cmd,
+					Args:    args,
 					Env:     map[string]string{},
 				},
 				DisplayName: def.DisplayName,
@@ -155,14 +169,15 @@ func chromeDevToolsConfigFactory(def ConnectorDefinition, _ []string) map[string
 
 // playwrightConfigFactory generates MCP server configs for the Playwright connector.
 func playwrightConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclient.ScopedMcpServerConfig {
+	cmd, args := npxCommand("-y", "@executeautomation/playwright-mcp-server")
 	return map[string]mcpclient.ScopedMcpServerConfig{
 		"playwright": {
 			Name:  "playwright",
 			Scope: mcpclient.ScopeUser,
 			Config: mcpclient.McpServerConfig{
 				Stdio: &mcpclient.StdioTransportConfig{
-					Command: "npx",
-					Args:    []string{"-y", "@executeautomation/playwright-mcp-server"},
+					Command: cmd,
+					Args:    args,
 					Env:     map[string]string{},
 				},
 				DisplayName: def.DisplayName,
@@ -173,14 +188,15 @@ func playwrightConfigFactory(def ConnectorDefinition, _ []string) map[string]mcp
 
 // githubConfigFactory generates MCP server configs for the GitHub connector.
 func githubConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclient.ScopedMcpServerConfig {
+	cmd, args := npxCommand("-y", "@modelcontextprotocol/server-github")
 	return map[string]mcpclient.ScopedMcpServerConfig{
 		"github": {
 			Name:  "github",
 			Scope: mcpclient.ScopeUser,
 			Config: mcpclient.McpServerConfig{
 				Stdio: &mcpclient.StdioTransportConfig{
-					Command: "npx",
-					Args:    []string{"-y", "@modelcontextprotocol/server-github"},
+					Command: cmd,
+					Args:    args,
 					Env: map[string]string{
 						"GITHUB_PERSONAL_ACCESS_TOKEN": "",
 					},
@@ -193,14 +209,15 @@ func githubConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclie
 
 // context7ConfigFactory generates MCP server configs for the Context7 connector.
 func context7ConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclient.ScopedMcpServerConfig {
+	cmd, args := npxCommand("-y", "@upstash/context7-mcp@latest")
 	return map[string]mcpclient.ScopedMcpServerConfig{
 		"context7": {
 			Name:  "context7",
 			Scope: mcpclient.ScopeUser,
 			Config: mcpclient.McpServerConfig{
 				Stdio: &mcpclient.StdioTransportConfig{
-					Command: "npx",
-					Args:    []string{"-y", "@upstash/context7-mcp@latest"},
+					Command: cmd,
+					Args:    args,
 					Env: map[string]string{
 						"DEFAULT_MINIMUM_TOKENS": "10000",
 					},

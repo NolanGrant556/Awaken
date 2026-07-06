@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -43,7 +44,11 @@ func buildTransport(cfg McpServerConfig, registry *InProcRegistry, authHandler a
 			cmd.Dir = cfg.Stdio.Cwd
 		}
 		if len(cfg.Stdio.Env) > 0 {
-			cmd.Env = append(cmd.Env, envSlice(cfg.Stdio.Env)...)
+			// Start from the current process environment so PATH, SystemRoot,
+			// APPDATA and other required variables are preserved. Without this,
+			// npx/cmd on Windows fails because it cannot locate Node or system
+			// directories.
+			cmd.Env = append(os.Environ(), envSlice(cfg.Stdio.Env)...)
 		}
 		return &mcp.CommandTransport{Command: cmd}, TransportStdio, nil
 	case TransportHTTP:

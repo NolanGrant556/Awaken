@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { TextDecoder } from "node:util";
 import {
   app,
@@ -50,7 +50,7 @@ import {
 	  type RuntimeToolInfo,
   type StartRunRequest,
   type UpdateMcpServerConfigRequest,
-  type WorkspaceRegistrySyncRequest,
+  type WorkspaceRegistryPersistRequest,
 } from "../shared/runtime.js";
 import { RuntimeSupervisor, type SupervisorStatusInfo } from "./runtime-supervisor.js";
 import { ensureConfigDir } from "./config-bootstrap.js";
@@ -756,8 +756,8 @@ ipcMain.handle("awaken:validate-workspace", async (_event, candidate: string) =>
 });
 
 ipcMain.handle(
-  "awaken:sync-workspace-registry",
-  async (_event, request: WorkspaceRegistrySyncRequest) => {
+  "awaken:persist-workspace-registry",
+  async (_event, request: WorkspaceRegistryPersistRequest) => {
     const defaultWorkspace = normalizeStoredWorkspacePath(
       request.defaultWorkspacePath,
     );
@@ -767,20 +767,11 @@ ipcMain.handle(
     ]);
 
     await writeWorkspaceRegistry(workspaces);
-    if (defaultWorkspace) {
-      await writeLastWorkspace(defaultWorkspace);
-    }
-
-    if (runtimeBaseUrl) {
-      await requestRuntimeOK("/v1/workspaces/registry", {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          workspace_roots: workspaces,
-        }),
-      });
+    const nextLastWorkspace = defaultWorkspace ?? workspaces[0];
+    if (nextLastWorkspace) {
+      await writeLastWorkspace(nextLastWorkspace);
+    } else {
+      await clearLastWorkspace();
     }
   },
 );
@@ -831,6 +822,15 @@ async function writeLastWorkspace(workspacePath: string): Promise<void> {
   }
 }
 
+async function clearLastWorkspace(): Promise<void> {
+  try {
+    const file = path.join(app.getPath("userData"), "last-workspace.json");
+    await fs.rm(file, { force: true });
+  } catch {
+    // Persistence is best-effort; a write failure must not block the picker.
+  }
+}
+
 async function readWorkspaceRegistry(
   seedWorkspace?: string,
 ): Promise<string[]> {
@@ -864,16 +864,86 @@ async function writeWorkspaceRegistry(workspaces: string[]): Promise<void> {
   }
 }
 
+async function ensureDesktopDataDirs(): Promise<void> {
+  await Promise.all([
+    fs.mkdir(path.join(app.getPath("userData"), "config"), { recursive: true }),
+    fs.mkdir(path.join(app.getPath("userData"), "data", "threads"), { recursive: true }),
+    fs.mkdir(path.join(app.getPath("userData"), "data", "auth"), { recursive: true }),
+    fs.mkdir(path.join(app.getPath("userData"), "data", "migrations"), { recursive: true }),
+  ]);
+}
+
+function workspaceMigrationMarkerPath(workspacePath: string): string {
+  const digest = createHash("sha256").update(workspacePath).digest("hex").slice(0, 16);
+  return path.join(
+    app.getPath("userData"),
+    "data",
+    "migrations",
+    `workspace-transcripts-${digest}.json`,
+  );
+}
+
+async function trashLegacyWorkspaceTranscripts(workspaces: Iterable<unknown>): Promise<void> {
+  for (const workspacePath of dedupeWorkspacePaths(workspaces)) {
+    const markerPath = workspaceMigrationMarkerPath(workspacePath);
+    try {
+      await fs.access(markerPath);
+      continue;
+    } catch {
+      // Marker missing; continue.
+    }
+
+    const transcriptsDir = path.join(workspacePath, ".awaken", "transcripts");
+    let exists = false;
+    try {
+      const stat = await fs.stat(transcriptsDir);
+      exists = stat.isDirectory();
+    } catch {
+      exists = false;
+    }
+
+    if (exists) {
+      try {
+        await shell.trashItem(transcriptsDir);
+      } catch (error) {
+        console.warn("[awaken-desktop] failed to trash legacy transcripts", {
+          workspacePath,
+          transcriptsDir,
+          error,
+        });
+        continue;
+      }
+    }
+
+    const marker = {
+      workspacePath,
+      transcriptsDir,
+      trashed: exists,
+      migratedAt: new Date().toISOString(),
+    };
+    try {
+      await fs.writeFile(markerPath, `${JSON.stringify(marker, null, 2)}\n`, "utf8");
+    } catch {
+      // Migration already completed; marker persistence is best-effort.
+    }
+  }
+}
+
 app.whenReady().then(async () => {
   setMacDockIcon();
+  await ensureDesktopDataDirs();
   const configDir = await ensureConfigDir();
   modelProfileStore = new ModelProfileStore(configDir);
   const lastWorkspace = await readLastWorkspace();
   const workspaceRegistry = await readWorkspaceRegistry(lastWorkspace);
+  const defaultWorkspace = lastWorkspace ?? workspaceRegistry[0] ?? app.getPath("home");
+  await trashLegacyWorkspaceTranscripts([
+    defaultWorkspace,
+    lastWorkspace,
+    ...workspaceRegistry,
+  ]);
   supervisor = new RuntimeSupervisor({
-    defaultWorkspace:
-      lastWorkspace ?? workspaceRegistry[0] ?? app.getPath("home"),
-    historyWorkspaces: workspaceRegistry,
+    defaultWorkspace,
   });
   supervisor.onStatusChange((info) => {
     if (info.runtimeBaseUrl) {

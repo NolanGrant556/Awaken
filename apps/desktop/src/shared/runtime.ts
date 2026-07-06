@@ -482,7 +482,7 @@ export type WorkspaceValidationResult =
   | { valid: true }
   | { valid: false; error: string };
 
-export type WorkspaceRegistrySyncRequest = {
+export type WorkspaceRegistryPersistRequest = {
   defaultWorkspacePath: string;
   registeredWorkspacePaths: string[];
 };
@@ -541,7 +541,7 @@ export type AwakenBridge = {
   testModelProfile: (request: ModelProfileSaveRequest) => Promise<ModelProfileTestResult>;
   pickWorkspace: (defaultPath?: string) => Promise<WorkspacePickResult>;
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
-  syncWorkspaceRegistry: (request: WorkspaceRegistrySyncRequest) => Promise<void>;
+  persistWorkspaceRegistry: (request: WorkspaceRegistryPersistRequest) => Promise<void>;
   getSupervisorStatus: () => Promise<SupervisorStatusInfo>;
   onSupervisorStatusChange: (callback: (info: SupervisorStatusInfo) => void) => () => void;
   notifyRendererReady: () => void;

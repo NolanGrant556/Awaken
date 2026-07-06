@@ -30,7 +30,6 @@ export interface SupervisorStatusInfo {
 
 export interface SupervisorOptions {
   defaultWorkspace?: string;
-  historyWorkspaces?: string[];
   maxStartAttempts?: number;
 }
 
@@ -175,14 +174,6 @@ export class RuntimeSupervisor {
             AWAKEN_USER_DATA_DIR: app.getPath("userData"),
             ...(this.options.defaultWorkspace
               ? { AWAKEN_DEFAULT_WORKSPACE: this.options.defaultWorkspace }
-              : {}),
-            ...(this.options.historyWorkspaces &&
-            this.options.historyWorkspaces.length > 0
-              ? {
-                  AWAKEN_HISTORY_WORKSPACES: JSON.stringify(
-                    this.options.historyWorkspaces,
-                  ),
-                }
               : {}),
           },
           stdio: ["ignore", "pipe", "pipe"],

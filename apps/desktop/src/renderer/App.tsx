@@ -119,6 +119,105 @@ export function shouldShowSidebarThreadSpinner(thread: ThreadItem): boolean {
   return Boolean(thread.activeRunId);
 }
 
+export function shouldResetActiveThreadForWorkspaceChange(
+  activeThreadWorkspacePath?: string,
+  nextWorkspacePath?: string,
+): boolean {
+  if (!activeThreadWorkspacePath || !nextWorkspacePath) {
+    return false;
+  }
+  return !isSameWorkspacePath(activeThreadWorkspacePath, nextWorkspacePath);
+}
+
+export function resolveWorkspaceRootForRun(args: {
+  workspacePath?: string;
+  workspaceTargetPath?: string;
+  selectedProjectId?: string;
+  defaultWorkspacePath?: string;
+  defaultProjectRemoved?: boolean;
+  activeThreadWorkspacePath?: string;
+  projectsFromWorkspace: WorkspaceProject[];
+}): string {
+  const {
+    workspacePath,
+    workspaceTargetPath,
+    selectedProjectId,
+    defaultWorkspacePath,
+    defaultProjectRemoved,
+    activeThreadWorkspacePath,
+    projectsFromWorkspace,
+  } = args;
+
+  const explicitTarget = workspaceTargetPath?.trim();
+  if (explicitTarget) {
+    return explicitTarget;
+  }
+
+  const selectedProjectPath =
+    selectedProjectId === undefined
+      ? undefined
+      : selectedProjectId === DEFAULT_WORKSPACE_PROJECT_ID
+        ? defaultProjectRemoved
+          ? undefined
+          : defaultWorkspacePath
+        : projectsFromWorkspace.find(
+            (project) => project.id === selectedProjectId,
+          )?.path;
+
+  return (
+    [
+      selectedProjectPath,
+      activeThreadWorkspacePath,
+      workspacePath,
+      defaultProjectRemoved ? undefined : defaultWorkspacePath,
+    ].find((candidate) => candidate?.trim())?.trim() ?? ""
+  );
+}
+
+export function buildWorkspaceRegistryPersistRequest(args: {
+  defaultWorkspacePath?: string;
+  pathForSelectedProject?: string;
+  activeThreadWorkspacePath?: string;
+  projectsFromWorkspace: WorkspaceProject[];
+  threadWorkspacePaths: string[];
+  defaultProjectRemoved: boolean;
+}): {
+  defaultWorkspacePath: string;
+  registeredWorkspacePaths: string[];
+} {
+  const {
+    defaultWorkspacePath,
+    pathForSelectedProject,
+    activeThreadWorkspacePath,
+    projectsFromWorkspace,
+    threadWorkspacePaths,
+    defaultProjectRemoved,
+  } = args;
+
+  const shouldKeepDefaultWorkspace =
+    !defaultProjectRemoved ||
+    threadWorkspacePaths.some((path) =>
+      isSameWorkspacePath(path, defaultWorkspacePath),
+    );
+
+  const registeredWorkspacePaths = dedupeWorkspacePaths([
+    pathForSelectedProject,
+    ...projectsFromWorkspace.map((project) => project.path),
+    ...threadWorkspacePaths,
+    shouldKeepDefaultWorkspace ? defaultWorkspacePath : undefined,
+  ]);
+
+  return {
+    defaultWorkspacePath:
+      activeThreadWorkspacePath ||
+      pathForSelectedProject ||
+      (shouldKeepDefaultWorkspace ? defaultWorkspacePath : undefined) ||
+      registeredWorkspacePaths[0] ||
+      "",
+    registeredWorkspacePaths,
+  };
+}
+
 function isThreadBusyForDelete(thread: ThreadItem): boolean {
   return Boolean(
     thread.activeRunId ||
@@ -373,7 +472,9 @@ export function App() {
   const inspectorCollapsedValueRef = useRef(false);
   const inspectorCollapsedBeforeResponsiveRef = useRef<boolean | null>(null);
   const persistedWorkspaceRegistryRef = useRef("");
-  const runtimeWorkspaceRegistryRef = useRef("");
+  const workspaceTargetPathRef = useRef<string>(
+    readStoredString("awaken:workspace:path"),
+  );
   const runtimeClient = runtimeClientRef.current;
 
   const [runtimeState, dispatch] = useReducer(
@@ -414,6 +515,9 @@ export function App() {
   });
   const [removedProjectIds, setRemovedProjectIds] = useState<string[]>(() =>
     readStoredStringArray("awaken:projects:removed"),
+  );
+  const defaultProjectRemoved = removedProjectIds.includes(
+    DEFAULT_WORKSPACE_PROJECT_ID,
   );
   const [threadProjectIds, setThreadProjectIds] = useState<
     Record<string, string>
@@ -496,6 +600,7 @@ export function App() {
 
   useEffect(() => {
     writeStoredValue("awaken:workspace:path", workspacePath);
+    workspaceTargetPathRef.current = workspacePath;
   }, [workspacePath]);
 
   useEffect(() => {
@@ -667,10 +772,10 @@ export function App() {
   }, [desktopNeedsRestart, desktopReady, runtimeClient]);
 
   useEffect(() => {
-    if (runtimeInfo && workspacePath === "") {
+    if (runtimeInfo && workspacePath === "" && !defaultProjectRemoved) {
       setWorkspacePath(runtimeInfo.defaultWorkspace);
     }
-  }, [runtimeInfo, workspacePath]);
+  }, [defaultProjectRemoved, runtimeInfo, workspacePath]);
 
   useEffect(() => {
     setInspectorTab("changes");
@@ -797,9 +902,20 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [desktopReady, runtimeClient]);
 
-  const isWorkspaceValid =
-    workspacePath.trim() !== "" &&
-    /^([A-Za-z]:[\\/]|\/)/.test(workspacePath.trim());
+  function resetActiveThreadContext(): void {
+    unsubscribeRef.current?.();
+    unsubscribeRef.current = null;
+    threadLoadSeqRef.current += 1;
+    terminalSeenRef.current = false;
+    setNotice(null);
+    setResolvingApprovalId(null);
+    setResolvedApproval(null);
+    resolvingApprovalIdRef.current = null;
+    localStorage.removeItem("awaken:runId");
+    prepareForNewTask();
+    dispatch({ type: "run/reset" });
+  }
+
   const enabledModelProfiles = modelProfiles.filter(
     (profile) => profile.enabled,
   );
@@ -815,6 +931,41 @@ export function App() {
     composerAttachments.length > 0 && !selectedModelSupportsVision
       ? "当前模型不支持图片输入，请切换模型或移除图片"
       : undefined;
+  const defaultWorkspacePath = runtimeInfo?.defaultWorkspace ?? workspacePath;
+  const activeThread = runtimeState.activeThreadId
+    ? runtimeState.threads.find(
+        (thread) => thread.threadId === runtimeState.activeThreadId,
+      )
+    : undefined;
+  const activeThreadWorkspacePath = activeThread?.workspaceRoot;
+  const activeThreadProjectId = activeThreadWorkspacePath
+    ? projectIdForWorkspacePath(
+        activeThreadWorkspacePath,
+        defaultWorkspacePath,
+      )
+    : undefined;
+  const pathForSelectedProject =
+    selectedProjectId === undefined
+      ? undefined
+      : selectedProjectId === DEFAULT_WORKSPACE_PROJECT_ID
+        ? defaultProjectRemoved
+          ? undefined
+          : defaultWorkspacePath
+        : projectsFromWorkspace.find(
+            (project) => project.id === selectedProjectId,
+          )?.path;
+  const workspaceRootForRun = resolveWorkspaceRootForRun({
+    workspacePath,
+    workspaceTargetPath: workspaceTargetPathRef.current,
+    selectedProjectId,
+    defaultWorkspacePath,
+    defaultProjectRemoved,
+    activeThreadWorkspacePath,
+    projectsFromWorkspace,
+  });
+  const isWorkspaceValid =
+    workspaceRootForRun !== "" &&
+    /^([A-Za-z]:[\\/]|\/)/.test(workspaceRootForRun);
   const {
     composerValue,
     setComposerValue,
@@ -854,65 +1005,35 @@ export function App() {
     : desktopStarting
       ? "Starting"
       : undefined;
-  const defaultWorkspacePath = runtimeInfo?.defaultWorkspace ?? workspacePath;
-  const activeThread = runtimeState.activeThreadId
-    ? runtimeState.threads.find(
-        (thread) => thread.threadId === runtimeState.activeThreadId,
-      )
-    : undefined;
-  const activeThreadWorkspacePath = activeThread?.workspaceRoot;
-  const activeThreadProjectId = activeThreadWorkspacePath
-    ? projectIdForWorkspacePath(
-        activeThreadWorkspacePath,
-        defaultWorkspacePath,
-      )
-    : undefined;
-  const pathForSelectedProject =
-    selectedProjectId === undefined
-      ? undefined
-      : selectedProjectId === DEFAULT_WORKSPACE_PROJECT_ID
-      ? defaultWorkspacePath
-      : projectsFromWorkspace.find(
-          (project) => project.id === selectedProjectId,
-        )?.path;
-  const workspaceRegistryPaths = useMemo(
+  const threadWorkspacePaths = useMemo(
     () =>
-      dedupeWorkspacePaths([
-        defaultWorkspacePath,
-        pathForSelectedProject,
-        ...projectsFromWorkspace.map((project) => project.path),
-        ...runtimeState.threads.map((thread) => thread.workspaceRoot),
-      ]),
-    [
-      defaultWorkspacePath,
-      pathForSelectedProject,
-      projectsFromWorkspace,
-      runtimeState.threads,
-    ],
+      runtimeState.threads
+        .map((thread) => thread.workspaceRoot)
+        .filter((path): path is string => Boolean(path)),
+    [runtimeState.threads],
   );
   const workspaceRegistryRequest = useMemo(
-    () => ({
-      defaultWorkspacePath:
-        activeThreadWorkspacePath ||
-        pathForSelectedProject ||
-        defaultWorkspacePath ||
-        workspaceRegistryPaths[0] ||
-        "",
-      registeredWorkspacePaths: workspaceRegistryPaths,
-    }),
+    () =>
+      buildWorkspaceRegistryPersistRequest({
+        defaultWorkspacePath,
+        pathForSelectedProject,
+        activeThreadWorkspacePath,
+        projectsFromWorkspace,
+        threadWorkspacePaths,
+        defaultProjectRemoved,
+      }),
     [
       activeThreadWorkspacePath,
       defaultWorkspacePath,
+      defaultProjectRemoved,
       pathForSelectedProject,
-      workspaceRegistryPaths,
+      projectsFromWorkspace,
+      threadWorkspacePaths,
     ],
   );
   const workspaceRegistrySignature = JSON.stringify(workspaceRegistryRequest);
 
   useEffect(() => {
-    const threadWorkspacePaths = runtimeState.threads
-      .map((thread) => thread.workspaceRoot)
-      .filter((path): path is string => Boolean(path));
     setProjectsFromWorkspace((current) => {
       const next = mergeWorkspaceProjects(
         current,
@@ -954,55 +1075,21 @@ export function App() {
   }, [projectsFromWorkspace]);
 
   useEffect(() => {
-    if (!workspaceRegistryRequest.defaultWorkspacePath) {
-      return;
-    }
     if (persistedWorkspaceRegistryRef.current === workspaceRegistrySignature) {
       return;
     }
     persistedWorkspaceRegistryRef.current = workspaceRegistrySignature;
-    void runtimeClient.syncWorkspaceRegistry(workspaceRegistryRequest).catch(() => {
+    void runtimeClient.persistWorkspaceRegistry(workspaceRegistryRequest).catch(() => {
       // Workspace registry sync is best-effort.
     });
   }, [runtimeClient, workspaceRegistryRequest, workspaceRegistrySignature]);
-
-  useEffect(() => {
-    if (!desktopReady || !workspaceRegistryRequest.defaultWorkspacePath) {
-      return;
-    }
-    if (runtimeWorkspaceRegistryRef.current === workspaceRegistrySignature) {
-      return;
-    }
-    runtimeWorkspaceRegistryRef.current = workspaceRegistrySignature;
-    let cancelled = false;
-
-    async function syncRuntimeWorkspaceRegistry(): Promise<void> {
-      try {
-        await runtimeClient.syncWorkspaceRegistry(workspaceRegistryRequest);
-        if (!cancelled) {
-          await refreshThreads();
-        }
-      } catch {
-        // Runtime sync is best-effort; local persistence already succeeded.
-      }
-    }
-
-    void syncRuntimeWorkspaceRegistry();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    desktopReady,
-    runtimeClient,
-    workspaceRegistryRequest,
-    workspaceRegistrySignature,
-  ]);
 
   useEffect(() => {
     if (
       pathForSelectedProject &&
       !isSameWorkspacePath(workspacePath, pathForSelectedProject)
     ) {
+      workspaceTargetPathRef.current = pathForSelectedProject;
       setWorkspacePath(pathForSelectedProject);
     }
   }, [pathForSelectedProject, workspacePath]);
@@ -1352,7 +1439,14 @@ export function App() {
       return;
     }
 
-    const workspaceRoot = workspacePath.trim();
+    const workspaceRoot = resolveWorkspaceRootForRun({
+      workspacePath,
+      workspaceTargetPath: workspaceTargetPathRef.current,
+      selectedProjectId,
+      defaultWorkspacePath,
+      activeThreadWorkspacePath,
+      projectsFromWorkspace,
+    });
     const validation = await runtimeClient.validateWorkspace(workspaceRoot);
     if (!validation.valid) {
       setNotice(validation.error);
@@ -1513,6 +1607,7 @@ export function App() {
       ),
     );
     setSelectedProjectId(nextProjectId);
+    workspaceTargetPathRef.current = nextWorkspacePath;
     setWorkspacePath(nextWorkspacePath);
     setExpandedProjectIds((current) =>
       current.includes(nextProjectId)
@@ -1525,11 +1620,7 @@ export function App() {
     removedThreadIds: string[] = [],
   ): Promise<void> {
     if (removedThreadIds.includes(runtimeState.activeThreadId ?? "")) {
-      unsubscribeRef.current?.();
-      unsubscribeRef.current = null;
-      threadLoadSeqRef.current += 1;
-      terminalSeenRef.current = false;
-      localStorage.removeItem("awaken:runId");
+      resetActiveThreadContext();
     }
 
     if (removedThreadIds.length > 0) {
@@ -1599,12 +1690,12 @@ export function App() {
           );
           if (fallbackProject) {
             setSelectedProjectId(fallbackProject.id);
+            workspaceTargetPathRef.current = fallbackProject.path;
             setWorkspacePath(fallbackProject.path);
           } else {
-            setSelectedProjectId(DEFAULT_WORKSPACE_PROJECT_ID);
-            if (defaultWorkspacePath) {
-              setWorkspacePath(defaultWorkspacePath);
-            }
+            setSelectedProjectId(undefined);
+            workspaceTargetPathRef.current = "";
+            setWorkspacePath("");
           }
         }
       }
@@ -1689,8 +1780,17 @@ export function App() {
       id === DEFAULT_WORKSPACE_PROJECT_ID
         ? defaultWorkspacePath
         : projectsFromWorkspace.find((project) => project.id === id)?.path;
+    if (
+      shouldResetActiveThreadForWorkspaceChange(
+        activeThreadWorkspacePath,
+        projectPath,
+      )
+    ) {
+      resetActiveThreadContext();
+    }
     setSelectedProjectId(id);
     if (projectPath) {
+      workspaceTargetPathRef.current = projectPath;
       setWorkspacePath(projectPath);
     }
   }
@@ -1738,6 +1838,15 @@ export function App() {
           ),
         );
       }
+      if (
+        shouldResetActiveThreadForWorkspaceChange(
+          activeThreadWorkspacePath,
+          result.path,
+        )
+      ) {
+        resetActiveThreadContext();
+      }
+      workspaceTargetPathRef.current = result.path;
       setWorkspacePath(result.path);
       setSelectedProjectId(next.projectId);
       setExpandedProjectIds((current) =>
@@ -1827,19 +1936,9 @@ export function App() {
 
   function handleNewTask(): void {
     setActiveNavId(undefined);
-    unsubscribeRef.current?.();
-    unsubscribeRef.current = null;
-    threadLoadSeqRef.current += 1;
     clearComposerValue();
     setComposerAttachments([]);
-    setNotice(null);
-    setResolvingApprovalId(null);
-    setResolvedApproval(null);
-    resolvingApprovalIdRef.current = null;
-    prepareForNewTask();
-    terminalSeenRef.current = false;
-    localStorage.removeItem("awaken:runId");
-    dispatch({ type: "run/reset" });
+    resetActiveThreadContext();
   }
 
   function handleSelectNav(id: string): void {

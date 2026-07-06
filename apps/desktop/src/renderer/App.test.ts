@@ -8,7 +8,13 @@ import {
 } from "@awaken/design-system";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { App, shouldShowSidebarThreadSpinner } from "./App";
+import {
+  App,
+  buildWorkspaceRegistryPersistRequest,
+  resolveWorkspaceRootForRun,
+  shouldResetActiveThreadForWorkspaceChange,
+  shouldShowSidebarThreadSpinner,
+} from "./App";
 import { composerRuntimePanelsForStatus } from "./useComposerLifecycle";
 import type { RunNarrativeItem } from "./run-narrative";
 import {
@@ -89,7 +95,7 @@ function stubElectronBridge(): void {
       testModelProfile: vi.fn(async () => ({ ok: true, message: "ok" })),
       pickWorkspace: vi.fn(async () => ({ canceled: true as const })),
       validateWorkspace: vi.fn(async () => ({ valid: true as const })),
-      syncWorkspaceRegistry: vi.fn(async () => undefined),
+      persistWorkspaceRegistry: vi.fn(async () => undefined),
       getSupervisorStatus: vi.fn(async () => ({ status: "running" as const })),
       onSupervisorStatusChange: vi.fn(() => () => {}),
       notifyRendererReady: vi.fn(),
@@ -118,6 +124,143 @@ describe("resolvedDecisionForApproval", () => {
         { approvalId: "approval-1", decision: "rejected" },
       ),
     ).toBe("rejected");
+  });
+});
+
+describe("shouldResetActiveThreadForWorkspaceChange", () => {
+  it("returns false when no active thread workspace exists", () => {
+    expect(
+      shouldResetActiveThreadForWorkspaceChange(undefined, "/tmp/project"),
+    ).toBe(false);
+  });
+
+  it("returns false when switching within the same workspace", () => {
+    expect(
+      shouldResetActiveThreadForWorkspaceChange(
+        "/tmp/project",
+        "/tmp/project",
+      ),
+    ).toBe(false);
+  });
+
+  it("returns true when switching to a different workspace", () => {
+    expect(
+      shouldResetActiveThreadForWorkspaceChange(
+        "/tmp/project-a",
+        "/tmp/project-b",
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("resolveWorkspaceRootForRun", () => {
+  it("prefers the immediate workspace target over stale workspace state", () => {
+    expect(
+      resolveWorkspaceRootForRun({
+        workspacePath: "/tmp/old",
+        workspaceTargetPath: "/tmp/new",
+        selectedProjectId: "workspace:%2Ftmp%2Fnew",
+        defaultWorkspacePath: "/tmp/default",
+        projectsFromWorkspace: [
+          {
+            id: "workspace:%2Ftmp%2Fnew",
+            label: "new",
+            path: "/tmp/new",
+          },
+        ],
+      }),
+    ).toBe("/tmp/new");
+  });
+
+  it("uses the selected project path before a stale workspace path", () => {
+    expect(
+      resolveWorkspaceRootForRun({
+        workspacePath: "/tmp/old",
+        selectedProjectId: "workspace:%2Ftmp%2Fknowledge",
+        defaultWorkspacePath: "/tmp/default",
+        projectsFromWorkspace: [
+          {
+            id: "workspace:%2Ftmp%2Fknowledge",
+            label: "knowledge",
+            path: "/tmp/knowledge",
+          },
+        ],
+      }),
+    ).toBe("/tmp/knowledge");
+  });
+
+  it("uses the default workspace when the built-in project is selected", () => {
+    expect(
+      resolveWorkspaceRootForRun({
+        workspacePath: "/tmp/old",
+        selectedProjectId: DEFAULT_WORKSPACE_PROJECT_ID,
+        defaultWorkspacePath: "/tmp/default",
+        projectsFromWorkspace: [],
+      }),
+    ).toBe("/tmp/default");
+  });
+
+  it("does not fall back to the hidden default workspace after that project is removed", () => {
+    expect(
+      resolveWorkspaceRootForRun({
+        workspacePath: "",
+        selectedProjectId: undefined,
+        defaultWorkspacePath: "/tmp/default",
+        defaultProjectRemoved: true,
+        projectsFromWorkspace: [],
+      }),
+    ).toBe("");
+  });
+});
+
+describe("buildWorkspaceRegistryPersistRequest", () => {
+  it("omits the default workspace after the default project is removed", () => {
+    expect(
+      buildWorkspaceRegistryPersistRequest({
+        defaultWorkspacePath: "/tmp/default",
+        projectsFromWorkspace: [],
+        threadWorkspacePaths: [],
+        defaultProjectRemoved: true,
+      }),
+    ).toEqual({
+      defaultWorkspacePath: "",
+      registeredWorkspacePaths: [],
+    });
+  });
+
+  it("keeps non-default visible projects and promotes them to default when needed", () => {
+    expect(
+      buildWorkspaceRegistryPersistRequest({
+        defaultWorkspacePath: "/tmp/default",
+        pathForSelectedProject: "/tmp/knowledge",
+        projectsFromWorkspace: [
+          {
+            id: "workspace:%2Ftmp%2Fknowledge",
+            label: "knowledge",
+            path: "/tmp/knowledge",
+          },
+        ],
+        threadWorkspacePaths: [],
+        defaultProjectRemoved: true,
+      }),
+    ).toEqual({
+      defaultWorkspacePath: "/tmp/knowledge",
+      registeredWorkspacePaths: ["/tmp/knowledge"],
+    });
+  });
+
+  it("retains the default workspace while threads still belong to it", () => {
+    expect(
+      buildWorkspaceRegistryPersistRequest({
+        defaultWorkspacePath: "/tmp/default",
+        projectsFromWorkspace: [],
+        threadWorkspacePaths: ["/tmp/default"],
+        defaultProjectRemoved: true,
+      }),
+    ).toEqual({
+      defaultWorkspacePath: "/tmp/default",
+      registeredWorkspacePaths: ["/tmp/default"],
+    });
   });
 });
 

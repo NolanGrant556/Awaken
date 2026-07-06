@@ -230,12 +230,14 @@ export function useRunStageScrollController({
   const runStageInputIntentCleanupRef = useRef<(() => void) | null>(null);
   const runStageResizeObserverRef = useRef<ResizeObserver | null>(null);
   const runStageScrollRef = useRef<HTMLDivElement | null>(null);
-  const composerDockRef = useRef<HTMLDivElement | null>(null);
+  const composerDockElementRef = useRef<HTMLDivElement | null>(null);
 
   const [latestTurnMinHeightPx, setLatestTurnMinHeightPx] = useState(0);
   const [composerContentBottomInsetPx, setComposerContentBottomInsetPx] = useState(0);
   const [composerBarBottomInsetPx, setComposerBarBottomInsetPx] = useState(0);
   const [runStageViewportHeightPx, setRunStageViewportHeightPx] = useState(0);
+  const [runStageAttachVersion, setRunStageAttachVersion] = useState(0);
+  const [composerDockAttachVersion, setComposerDockAttachVersion] = useState(0);
 
   const narrativeSections = useMemo(
     () => groupNarrativeByTurns(narrativeItems),
@@ -264,6 +266,13 @@ export function useRunStageScrollController({
   useEffect(() => {
     interactionStateRef.current = interactionState;
   }, [interactionState]);
+
+  const setComposerDockElement = useCallback((element: HTMLDivElement | null) => {
+    composerDockElementRef.current = element;
+    if (element) {
+      setComposerDockAttachVersion((current) => current + 1);
+    }
+  }, []);
 
   const applyRunStageComposerVars = useCallback((element: HTMLElement): void => {
     const targets = [element, element.parentElement].filter(
@@ -444,6 +453,7 @@ export function useRunStageScrollController({
       return;
     }
     runStageLastScrollTopRef.current = element.scrollTop;
+    setRunStageAttachVersion((current) => current + 1);
     applyRunStageComposerVars(element);
 
     const syncRunStageViewportHeight = () => {
@@ -634,7 +644,7 @@ export function useRunStageScrollController({
       return;
     }
 
-    const dockElement = composerDockRef.current;
+    const dockElement = composerDockElementRef.current;
     if (!dockElement) {
       return;
     }
@@ -693,7 +703,7 @@ export function useRunStageScrollController({
     return () => {
       resizeObserver.disconnect();
     };
-  }, [showCenterComposer]);
+  }, [composerDockAttachVersion, showCenterComposer]);
 
   useLayoutEffect(() => {
     const element = runStageScrollRef.current;
@@ -765,6 +775,7 @@ export function useRunStageScrollController({
     latestPromptId,
     latestTurnMinHeightPx,
     narrativeItems,
+    runStageAttachVersion,
   ]);
 
   useLayoutEffect(() => {
@@ -791,7 +802,7 @@ export function useRunStageScrollController({
     return () => {
       resizeObserver.disconnect();
     };
-  }, [composerOutputGapPx, latestPromptId]);
+  }, [composerOutputGapPx, latestPromptId, runStageAttachVersion]);
 
   useEffect(() => {
     return () => {
@@ -805,7 +816,7 @@ export function useRunStageScrollController({
   return {
     activeWorkbenchTurnId,
     composerContentInsetPx,
-    composerDockRef,
+    setComposerDockElement,
     composerSafeAreaPx,
     handleReturnToLatestClick,
     handleRunStageScroll,

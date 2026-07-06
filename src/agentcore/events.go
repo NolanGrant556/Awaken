@@ -129,6 +129,23 @@ type AwakenEvent struct {
 	ToolDecisionAction               string
 	ToolDecisionSource               string
 	ToolDecisionReason               string
+	// ProfileName is the ExecutionProfile name applied to this call (Task 16
+	// unified observability). Surfaced on ToolPermissionDecided events so the
+	// UI can show "Profile: workspace_write" alongside the decision.
+	ProfileName string
+	// TransformedFrom is the original tool name when the decision was a
+	// transform (e.g. "shell"). Empty for allow/deny.
+	TransformedFrom string
+	// TransformedTo is the rewritten tool name when the decision was a
+	// transform (e.g. "apply_patch"). Empty for allow/deny.
+	TransformedTo string
+	// TrashedPaths lists the absolute paths moved to the OS recycle bin
+	// during this call. Surfaced on ToolPermissionDecided (for the audit
+	// trail) and on ToolResult (for the user-facing trash notification).
+	TrashedPaths []string
+	// GuardianViolation is populated when a guardian constraint was
+	// violated. Empty for non-guardian denials.
+	GuardianViolation string
 	ToolProgressStage                string
 	ToolProgressMessage              string
 	ToolProgressPercentage           int

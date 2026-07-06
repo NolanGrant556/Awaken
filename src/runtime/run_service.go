@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,28 +18,43 @@ import (
 
 	"awaken/src/agentcore"
 	"awaken/src/tool"
+	"awaken/src/tool/profile"
 )
 
 var (
-	ErrInvalidInput            = errors.New("input is required")
-	ErrRunNotFound             = errors.New("run not found")
-	ErrApprovalNotFound        = errors.New("approval not found")
-	ErrRunTerminal             = errors.New("run is already finished")
-	ErrRunCancelling           = errors.New("run is being cancelled")
-	ErrThreadNotFound          = errors.New("thread not found")
-	ErrThreadWorkspaceMismatch = errors.New("thread workspace mismatch")
-	ErrThreadBusy              = errors.New("thread already has an active run")
-	ErrThreadLabelInvalid      = errors.New("thread label is required")
-	ErrMissingModelProfile     = errors.New("model profile is required")
+	ErrInvalidInput               = errors.New("input is required")
+	ErrRunNotFound                = errors.New("run not found")
+	ErrApprovalNotFound           = errors.New("approval not found")
+	ErrRunTerminal                = errors.New("run is already finished")
+	ErrRunCancelling              = errors.New("run is being cancelled")
+	ErrThreadNotFound             = errors.New("thread not found")
+	ErrThreadWorkspaceMismatch    = errors.New("thread workspace mismatch")
+	ErrThreadBusy                 = errors.New("thread already has an active run")
+	ErrThreadLabelInvalid         = errors.New("thread label is required")
+	ErrMissingModelProfile        = errors.New("model profile is required")
 	ErrUnsupportedInputAttachment = errors.New("model does not support image input")
 )
 
 const maxRetainedThreads = 100
 
-type WorkspaceConfig struct {
-	WorkspaceRoot string   `json:"workspace_root"`
-	WritableRoots []string `json:"writable_roots"`
+type TaskScope struct {
+	ScopeID           string            `json:"scope_id,omitempty"`
+	WorkspaceRoot     string            `json:"workspace_root"`
+	ReadableRoots     []string          `json:"readable_roots,omitempty"`
+	WritableRoots     []string          `json:"writable_roots,omitempty"`
+	OutputRoots       []string          `json:"output_roots,omitempty"`
+	AttachedFiles     []tool.ScopedFile `json:"attached_files,omitempty"`
+	ProtectedRoots    []string          `json:"protected_roots,omitempty"`
+	TemporaryWorkRoot string            `json:"temporary_work_root,omitempty"`
+	// ExecutionProfile is the unified policy bundle applied to every tool
+	// call made by agents running under this task scope. When nil, the
+	// agent falls back to profile.DefaultProfile() (WorkspaceWrite).
+	// Callers that want to override the default (e.g. to run a guardian
+	// agent with GuardianReadOnly) set this field on StartRunRequest.Workspace.
+	ExecutionProfile *profile.ExecutionProfile `json:"execution_profile,omitempty"`
 }
+
+type WorkspaceConfig = TaskScope
 
 type ClientInfo struct {
 	SessionID  string `json:"session_id"`
@@ -47,12 +63,12 @@ type ClientInfo struct {
 }
 
 type StartRunRequest struct {
-	Input        string              `json:"input"`
+	Input        string               `json:"input"`
 	Attachments  []RunInputAttachment `json:"attachments,omitempty"`
-	Workspace    WorkspaceConfig     `json:"workspace"`
-	Client       ClientInfo          `json:"client"`
-	ThreadID     string              `json:"thread_id,omitempty"`
-	ModelProfile *ModelProfileConfig `json:"model_profile,omitempty"`
+	Workspace    WorkspaceConfig      `json:"workspace"`
+	Client       ClientInfo           `json:"client"`
+	ThreadID     string               `json:"thread_id,omitempty"`
+	ModelProfile *ModelProfileConfig  `json:"model_profile,omitempty"`
 }
 
 type ModelProfileConfig struct {
@@ -83,14 +99,14 @@ func (f ExecutorFunc) Run(ctx context.Context, input string, sink agentcore.Even
 }
 
 type RunService struct {
-	mu               sync.RWMutex
-	sessions         map[string]*Session
-	threads          map[string]*Thread
-	defaultWorkspace WorkspaceConfig
+	mu                sync.RWMutex
+	sessions          map[string]*Session
+	threads           map[string]*Thread
+	defaultWorkspace  WorkspaceConfig
 	historyWorkspaces []WorkspaceConfig
-	newAgent         func(workspace WorkspaceConfig, threadID string) *agentcore.Agent
-	newProfileAgent  func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent
-	newExecutor      func(agent *agentcore.Agent) Executor
+	newAgent          func(workspace WorkspaceConfig, threadID string) *agentcore.Agent
+	newProfileAgent   func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent
+	newExecutor       func(agent *agentcore.Agent) Executor
 }
 
 // Thread holds the reusable Agent and metadata for a multi-turn conversation.
@@ -215,7 +231,6 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	var restored *restoredTranscript
 	if threadID == "" {
 		threadID = newRuntimeID("thread")
-		agent = s.createAgent(workspace, threadID, req.ModelProfile)
 	} else {
 		s.mu.RLock()
 		_, threadInMemory := s.threads[threadID]
@@ -233,6 +248,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	if err != nil {
 		return Run{}, err
 	}
+	workspace = mergeTaskScopeAttachments(workspace, persistedAttachments)
 	ctx, cancel := context.WithCancel(context.Background())
 	session := NewSession(runID, threadID, trimmed, persistedAttachments, cancel)
 
@@ -269,7 +285,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			go s.execute(session, executor, agent, trimmed, persistedAttachments, ctx, workspace)
 			return session.Snapshot(), nil
 		}
-		if !sameWorkspace(thread.workspace, workspace) {
+		if !sameWorkspaceRoot(thread.workspace, workspace) {
 			s.mu.Unlock()
 			return Run{}, ErrThreadWorkspaceMismatch
 		}
@@ -278,19 +294,21 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			return Run{}, ErrThreadBusy
 		}
 		agent = thread.agent
-		if modelProfileKey != thread.modelProfileKey {
+		if modelProfileKey != thread.modelProfileKey || !sameTaskScope(thread.workspace, workspace) {
 			agent = s.createAgent(workspace, threadID, req.ModelProfile)
 			if agent != nil && thread.agent != nil {
 				agent.GetConversation().Context.SetMessages(thread.agent.GetConversation().Context.GetMessages())
 			}
 			thread.agent = agent
 			thread.modelProfileKey = modelProfileKey
+			thread.workspace = workspace
 		}
 		thread.activeRunID = runID
 		thread.latestRunID = runID
 		thread.runIDs = append(thread.runIDs, runID)
 		thread.updatedAt = now
 	} else {
+		agent = s.createAgent(workspace, threadID, req.ModelProfile)
 		label := threadLabelForInput(trimmed, persistedAttachments)
 		s.threads[threadID] = &Thread{
 			threadID:        threadID,
@@ -748,11 +766,53 @@ func (s *RunService) pruneInactiveThreadsLocked() {
 	}
 }
 
-func sameWorkspace(a, b WorkspaceConfig) bool {
+func sameWorkspaceRoot(a, b WorkspaceConfig) bool {
 	if a.WorkspaceRoot != b.WorkspaceRoot {
 		return false
 	}
-	return sameStringSet(a.WritableRoots, b.WritableRoots)
+	return true
+}
+
+func sameTaskScope(a, b WorkspaceConfig) bool {
+	if !sameWorkspaceRoot(a, b) {
+		return false
+	}
+	if !sameStringSet(a.ReadableRoots, b.ReadableRoots) {
+		return false
+	}
+	if !sameStringSet(a.WritableRoots, b.WritableRoots) {
+		return false
+	}
+	if !sameStringSet(a.OutputRoots, b.OutputRoots) {
+		return false
+	}
+	if !sameStringSet(a.ProtectedRoots, b.ProtectedRoots) {
+		return false
+	}
+	if a.TemporaryWorkRoot != b.TemporaryWorkRoot {
+		return false
+	}
+	if !sameScopedFiles(a.AttachedFiles, b.AttachedFiles) {
+		return false
+	}
+	return reflect.DeepEqual(a.ExecutionProfile, b.ExecutionProfile)
+}
+
+func sameScopedFiles(a, b []tool.ScopedFile) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]int, len(a))
+	for _, value := range a {
+		seen[value.Path]++
+	}
+	for _, value := range b {
+		if seen[value.Path] == 0 {
+			return false
+		}
+		seen[value.Path]--
+	}
+	return true
 }
 
 func sameStringSet(a, b []string) bool {
@@ -800,33 +860,169 @@ func normalizeWorkspace(ws WorkspaceConfig) (WorkspaceConfig, error) {
 	}
 	root = filepath.Clean(root)
 
-	writableRoots := ws.WritableRoots
-	if len(writableRoots) == 0 {
-		writableRoots = []string{root}
-	} else {
-		normalized := make([]string, 0, len(writableRoots))
-		for _, w := range writableRoots {
-			w = strings.TrimSpace(w)
-			if w == "" {
-				continue
-			}
-			if !filepath.IsAbs(w) {
-				w = filepath.Join(root, w)
-			}
-			w = filepath.Clean(w)
-			if !tool.PathWithinRoot(w, root) {
-				w = root
-			}
-			normalized = append(normalized, w)
-		}
-		if len(normalized) == 0 {
-			normalized = []string{root}
-		}
-		writableRoots = normalized
-	}
-
+	// Normalize the client-supplied ExecutionProfile against the server
+	// allowlist. NormalizeClientProfile maps nil, tampered, and
+	// server-only profile requests onto a known built-in profile value
+	// and logs a warning whenever it has to fall back. The pointer we
+	// store always points at a fresh built-in value, never at the
+	// caller-supplied struct, so clients cannot inject tampered fields.
+	normalizedProfile := profile.NormalizeClientProfile(ws.ExecutionProfile)
+	readableRoots := normalizeTaskScopeRoots(ws.ReadableRoots, root)
+	writableRoots := normalizeTaskScopeRoots(ws.WritableRoots, root)
+	outputRoots := normalizeTaskScopeRoots(ws.OutputRoots, root)
+	attachedFiles := normalizeTaskScopeFiles(ws.AttachedFiles, root)
+	scopeID := buildTaskScopeID(root, readableRoots, writableRoots, outputRoots, attachedFiles)
+	protectedRoots := buildProtectedRoots(root)
+	temporaryWorkRoot := filepath.Join(os.TempDir(), "awaken-task-scopes", scopeID)
 	return WorkspaceConfig{
-		WorkspaceRoot: root,
-		WritableRoots: writableRoots,
+		ScopeID:           scopeID,
+		WorkspaceRoot:     root,
+		ReadableRoots:     readableRoots,
+		WritableRoots:     writableRoots,
+		OutputRoots:       outputRoots,
+		AttachedFiles:     attachedFiles,
+		ProtectedRoots:    protectedRoots,
+		TemporaryWorkRoot: temporaryWorkRoot,
+		ExecutionProfile:  &normalizedProfile,
 	}, nil
+}
+
+func normalizeTaskScopeRoots(values []string, workspaceRoot string) []string {
+	if len(values) == 0 {
+		return []string{workspaceRoot}
+	}
+	normalized := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if !filepath.IsAbs(value) {
+			value = filepath.Join(workspaceRoot, value)
+		}
+		value = filepath.Clean(value)
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		normalized = append(normalized, value)
+	}
+	if len(normalized) == 0 {
+		return []string{workspaceRoot}
+	}
+	return normalized
+}
+
+func normalizeTaskScopeFiles(values []tool.ScopedFile, workspaceRoot string) []tool.ScopedFile {
+	if len(values) == 0 {
+		return nil
+	}
+	normalized := make([]tool.ScopedFile, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		path := strings.TrimSpace(value.Path)
+		if path == "" {
+			continue
+		}
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(workspaceRoot, path)
+		}
+		path = filepath.Clean(path)
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		normalized = append(normalized, tool.ScopedFile{
+			Path:        path,
+			DisplayName: strings.TrimSpace(value.DisplayName),
+		})
+	}
+	return normalized
+}
+
+func buildTaskScopeID(
+	workspaceRoot string,
+	readableRoots []string,
+	writableRoots []string,
+	outputRoots []string,
+	attachedFiles []tool.ScopedFile,
+) string {
+	parts := []string{workspaceRoot}
+	parts = append(parts, readableRoots...)
+	parts = append(parts, writableRoots...)
+	parts = append(parts, outputRoots...)
+	for _, file := range attachedFiles {
+		parts = append(parts, file.Path)
+	}
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return "scope_" + hex.EncodeToString(sum[:8])
+}
+
+func buildProtectedRoots(workspaceRoot string) []string {
+	protected := []string{
+		filepath.Join(workspaceRoot, ".git"),
+		filepath.Join(workspaceRoot, ".awaken"),
+		filepath.Join(workspaceRoot, ".vscode"),
+		filepath.Join(workspaceRoot, ".idea"),
+	}
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		protected = append(protected,
+			filepath.Join(home, ".awaken"),
+			filepath.Join(home, ".trae-cn"),
+			filepath.Join(home, ".zshrc"),
+			filepath.Join(home, ".zprofile"),
+			filepath.Join(home, ".zlogin"),
+			filepath.Join(home, ".zlogout"),
+			filepath.Join(home, ".bashrc"),
+			filepath.Join(home, ".bash_profile"),
+			filepath.Join(home, ".bash_logout"),
+			filepath.Join(home, ".profile"),
+			filepath.Join(home, ".config", "fish", "config.fish"),
+			filepath.Join(home, ".vscode"),
+			filepath.Join(home, ".cursor"),
+			filepath.Join(home, ".idea"),
+		)
+	}
+	if configDir, err := os.UserConfigDir(); err == nil && strings.TrimSpace(configDir) != "" {
+		protected = append(protected,
+			filepath.Join(configDir, "awaken"),
+			filepath.Join(configDir, "Awaken"),
+			filepath.Join(configDir, "Code"),
+			filepath.Join(configDir, "Cursor"),
+		)
+	}
+	return normalizeTaskScopeRoots(protected, workspaceRoot)
+}
+
+func mergeTaskScopeAttachments(scope WorkspaceConfig, attachments []RunInputAttachment) WorkspaceConfig {
+	if len(attachments) == 0 {
+		return scope
+	}
+	merged := append([]tool.ScopedFile(nil), scope.AttachedFiles...)
+	seen := make(map[string]struct{}, len(merged))
+	for _, file := range merged {
+		seen[file.Path] = struct{}{}
+	}
+	for _, attachment := range attachments {
+		if attachment.Kind != RunInputAttachmentKindFile {
+			continue
+		}
+		path := strings.TrimSpace(attachment.Path)
+		if path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		merged = append(merged, tool.ScopedFile{
+			Path:        path,
+			DisplayName: strings.TrimSpace(attachment.DisplayName),
+		})
+	}
+	scope.AttachedFiles = normalizeTaskScopeFiles(merged, scope.WorkspaceRoot)
+	scope.ScopeID = buildTaskScopeID(scope.WorkspaceRoot, scope.ReadableRoots, scope.WritableRoots, scope.OutputRoots, scope.AttachedFiles)
+	scope.TemporaryWorkRoot = filepath.Join(os.TempDir(), "awaken-task-scopes", scope.ScopeID)
+	return scope
 }

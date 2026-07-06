@@ -9,8 +9,12 @@ import (
 	"time"
 
 	convcontext "awaken/src/context"
+	"awaken/src/agentcore/executors"
+	"awaken/src/agentcore/guardian"
+	"awaken/src/agentcore/subagent"
 	"awaken/src/internal/outputlimit"
 	"awaken/src/tool"
+	"awaken/src/tool/profile"
 )
 
 const maxPatchPreviewChars = 50000
@@ -23,6 +27,32 @@ type ToolRuntime struct {
 	serverConnected   func(serverName string) bool
 	auditSink         tool.AuditSink
 	runID             string
+	// profile is the unified ExecutionProfile applied to every tool call
+	// this runtime executes. It is populated from ToolRuntimeConfig.Profile
+	// and defaults to profile.DefaultProfile() (WorkspaceWrite) when unset.
+	// The profile is currently surfaced on ToolExecutionResult and logged;
+	// Task 11 (executors) and Task 12/13 (subagent/guardian) consume it
+	// more deeply.
+	profile profile.ExecutionProfile
+	// subagentBoundary, when set, marks this runtime as belonging to a
+	// sub-agent and captures the boundary it inherited from its parent.
+	// Execute uses it as a defense-in-depth check: every tool call must
+	// not exceed this boundary (workspace roots must match, runtime
+	// profile must not escalate the boundary profile). nil for the root
+	// agent.
+	subagentBoundary *subagent.ParentBoundary
+	// subagentOrigin, when set, is propagated into every ExecutionIntent
+	// this runtime issues so the decision layer can attribute the call to
+	// the spawning sub-agent. nil for the root agent.
+	subagentOrigin *profile.SubagentOrigin
+	// router maps an ExecutionIntent + ExecutionProfile to the appropriate
+	// ToolExecutor (FileChainExecutor / ShellExecutor / McpExecutor /
+	// GuardianExecutor). Task 11 of "零审批自动执行策略": the Router sits
+	// between the auto policy decision and the raw tool execution, adding
+	// executor-specific enforcement (boundary checks, sandbox consultation,
+	// risk annotation checks, read-only enforcement). When nil, Execute
+	// falls back to the legacy executeTool path.
+	router *executors.Router
 }
 
 type ToolRuntimeConfig struct {
@@ -32,6 +62,17 @@ type ToolRuntimeConfig struct {
 	ServerConnected   func(serverName string) bool
 	AuditSink         tool.AuditSink
 	RunID             string
+	// Profile is the unified ExecutionProfile applied to every tool call
+	// this runtime executes. When nil, the runtime falls back to
+	// profile.DefaultProfile() (WorkspaceWrite).
+	Profile *profile.ExecutionProfile
+	// SubagentBoundary, when set, marks this runtime as a sub-agent and
+	// captures the inherited boundary. Execute enforces it as a
+	// defense-in-depth check.
+	SubagentBoundary *subagent.ParentBoundary
+	// SubagentOrigin, when set, is propagated into every ExecutionIntent
+	// so the decision layer can attribute the call.
+	SubagentOrigin *profile.SubagentOrigin
 }
 
 type ToolExecutionResult struct {
@@ -50,6 +91,34 @@ type ToolExecutionResult struct {
 	AffectedPaths  []string
 	PatchSummary   string
 	ResultSummary  string
+	// Intent is the unified ExecutionIntent produced from the ToolCall.
+	// Task 8 only populates it; Task 9 will consume it in the decision layer.
+	Intent *profile.ExecutionIntent
+	// Decision is the unified ExecutionDecision produced by the auto tool
+	// policy. It is the primary decision record for this execution.
+	Decision *profile.ExecutionDecision
+	// ProfileName is the name of the ExecutionProfile applied to this
+	// execution. It is the human-readable profile name (e.g.
+	// "workspace_write") surfaced for audit/logging. The full profile is
+	// available on the ToolRuntime via Profile().
+	ProfileName string
+	// TransformedFrom is the original tool name when this execution is the
+	// target of a transform decision (e.g. "shell" when a shell echo-write
+	// was rewritten to apply_patch). Empty for direct (non-transformed)
+	// calls. Task 16: surfaced on the audit record and the
+	// ToolPermissionDecided event so the UI can show "shell → apply_patch".
+	TransformedFrom string
+	// TrashedPaths lists the absolute paths moved to the OS recycle bin
+	// during this call. Populated by parsing the apply_patch output (which
+	// encodes "D path (已移到回收站: trashedPath)" lines). Task 16: surfaced
+	// on the audit record and the ToolPermissionDecided event so the UI can
+	// show "Deleted file moved to recycle bin".
+	TrashedPaths []string
+	// GuardianViolation is populated when a guardian constraint was
+	// violated (i.e. the call was denied because a guardian agent attempted
+	// a non-read-only action). Task 16: surfaced on the audit record and
+	// the ToolPermissionDecided event so the UI can attribute the denial.
+	GuardianViolation string
 }
 
 func NewToolRuntime(sink EventSink) *ToolRuntime {
@@ -65,6 +134,10 @@ func NewToolRuntimeWithConfig(sink EventSink, config ToolRuntimeConfig) *ToolRun
 	if auditSink == nil {
 		auditSink = &tool.NoopSink{}
 	}
+	execProfile := profile.DefaultProfile()
+	if config.Profile != nil {
+		execProfile = *config.Profile
+	}
 	return &ToolRuntime{
 		sink:              normalizeEventSink(sink),
 		permissionContext: config.PermissionContext.Normalize(),
@@ -73,7 +146,82 @@ func NewToolRuntimeWithConfig(sink EventSink, config ToolRuntimeConfig) *ToolRun
 		serverConnected:   config.ServerConnected,
 		auditSink:         auditSink,
 		runID:             config.RunID,
+		profile:           execProfile,
+		subagentBoundary:  config.SubagentBoundary,
+		subagentOrigin:    config.SubagentOrigin,
+		router:            executors.NewRouter(),
 	}
+}
+
+// Profile returns the ExecutionProfile applied to every tool call this
+// runtime executes. The returned value is a copy so callers may freely
+// inspect or mutate it without affecting the runtime.
+func (rt *ToolRuntime) Profile() profile.ExecutionProfile {
+	return rt.profile
+}
+
+// validateSubagentBoundary is the runtime-side defense-in-depth check for
+// sub-agent runs. It verifies that the runtime's permission context and
+// profile have not drifted from the boundary the sub-agent inherited from
+// its parent:
+//
+//   - The runtime's WorkspaceRoot MUST match the boundary's WorkspaceRoot.
+//     A mismatch means the sub-agent was configured with a wider workspace
+//     than its parent, which is an escalation.
+//   - The runtime's WritableRoots MUST be a subset of the boundary's
+//     WritableRoots. Extra writable roots are an escalation.
+//   - The runtime's profile MUST NOT escalate the boundary's profile, as
+//     defined by subagent.ValidateNoEscalation.
+//
+// This is a backstop: the primary enforcement happens at sub-agent
+// creation via subagent.ResolveSubagentBoundary. The runtime re-checks on
+// every Execute so a misconfigured or hostile caller cannot bypass the
+// boundary by mutating the runtime after construction.
+func (rt *ToolRuntime) validateSubagentBoundary() error {
+	boundary := rt.subagentBoundary
+	if boundary == nil {
+		return nil
+	}
+	normalizedPerm := rt.permissionContext.Normalize()
+	if strings.TrimSpace(boundary.WorkspaceRoot) != "" &&
+		normalizedPerm.WorkspaceRoot != boundary.WorkspaceRoot {
+		return fmt.Errorf(
+			"workspace root mismatch: runtime %q does not match inherited boundary %q",
+			normalizedPerm.WorkspaceRoot, boundary.WorkspaceRoot,
+		)
+	}
+	if !subsetStrings(normalizedPerm.WritableRoots, boundary.WritableRoots) {
+		return fmt.Errorf(
+			"writable roots escalation: runtime %v is not a subset of inherited boundary %v",
+			normalizedPerm.WritableRoots, boundary.WritableRoots,
+		)
+	}
+	if boundary.Profile != nil {
+		runtimeProfile := rt.profile
+		if err := subagent.ValidateNoEscalation(&runtimeProfile, boundary.Profile); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// subsetStrings reports whether every value in `needles` is present in
+// `haystack`. An empty `needles` is always a subset (including of an empty
+// haystack). Order is not significant.
+func subsetStrings(needles, haystack []string) bool {
+	if len(needles) == 0 {
+		return true
+	}
+	seen := make(map[string]struct{}, len(haystack))
+	for _, h := range haystack {
+		seen[h] = struct{}{}
+	}
+	for _, n := range needles {
+		if _, ok := seen[n]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall) ToolExecutionResult {
@@ -83,9 +231,31 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	}
 
 	result := ToolExecutionResult{
-		ToolCallID: id,
-		Name:       call.Function.Name,
-		StartedAt:  timeNowUTC(),
+		ToolCallID:  id,
+		Name:        call.Function.Name,
+		StartedAt:   timeNowUTC(),
+		ProfileName: rt.profile.Name,
+	}
+
+	// Defense-in-depth: if this runtime belongs to a sub-agent, validate
+	// that the runtime's permission context and profile have not been
+	// tampered with to exceed the inherited boundary. This catches the
+	// case where a sub-agent's config was constructed with a wider
+	// workspace root or a higher-privileged profile than the parent
+	// allowed. The primary enforcement happens at sub-agent creation
+	// (subagent.ResolveSubagentBoundary); this is the runtime-side
+	// backstop.
+	if rt.subagentBoundary != nil {
+		if err := rt.validateSubagentBoundary(); err != nil {
+			denied := ToolDecision{
+				Action: ToolDecisionDeny,
+				Source: ToolDecisionSourcePolicyError,
+				Reason: fmt.Sprintf("subagent boundary violated: %v", err),
+			}
+			result = synthesizeDeniedToolResult(result, denied)
+			result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
+			return finalizeToolResult(result)
+		}
 	}
 
 	selectedTool, err := tool.GetTool(call.Function.Name)
@@ -96,6 +266,48 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	input, err := normalizeToolInput(call.Function.Arguments, selectedTool.Parameters())
 	if err != nil {
 		return finalizeToolResult(synthesizeValidationToolResult(result, err.Error()))
+	}
+
+	// Build the unified ExecutionIntent. Task 8 only defines the type and
+	// converts to it; Task 9 will consume the intent in the decision layer.
+	// Task 12: propagate the subagent origin so the decision layer can
+	// attribute the call to the spawning sub-agent.
+	intent := profile.BuildExecutionIntent(call, selectedTool, rt.permissionContext, rt.subagentOrigin)
+	result.Intent = &intent
+
+	// Guardian constraint enforcement (Task 13 of "零审批自动执行策略"):
+	// guardian/review agents are forced to read-only. This check runs BEFORE
+	// the normal auto-tool-policy decision flow — guardian constraints are
+	// absolute and cannot be overridden by the policy. This complements any
+	// executor-level enforcement (Task 11) as defense in depth.
+	if guardian.IsGuardianProfile(rt.profile) {
+		if gErr := guardian.EnforceGuardianConstraints(intent, rt.profile); gErr != nil {
+			gReason := gErr.Error()
+			if gViolation, ok := gErr.(*guardian.GuardianViolationError); ok {
+				gReason = gViolation.Reason
+			}
+			gDecision := ToolDecision{
+				Action: ToolDecisionDeny,
+				Source: ToolDecisionSourcePolicyError,
+				Reason: gReason,
+			}
+			gExecDecision := profile.DenyDecision(
+				string(profile.DecisionSourcePolicyError),
+				gReason,
+				false,
+			)
+			result.Decision = &gExecDecision
+			// Task 16: record the guardian violation reason on the result so
+			// the audit record and the ToolPermissionDecided event can
+			// attribute the denial to a guardian constraint.
+			result.GuardianViolation = gReason
+			result = synthesizeDeniedToolResult(result, gDecision)
+			result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
+			gPermission := tool.DenyPermission(gReason)
+			rt.emitToolPermissionDecided(result, gPermission, gDecision)
+			rt.writeAudit(selectedTool.Definition(), result, gPermission, string(gDecision.Source), "denied", "")
+			return finalizeToolResult(result)
+		}
 	}
 
 	toolCtx := tool.ContextWithPermissionContext(ctx, rt.permissionContext)
@@ -115,19 +327,19 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		rt.permissionContext,
 	)
 	decision := ToolDecision{}
+	var execDecision profile.ExecutionDecision
 	switch permission.Behavior {
 	case tool.PermissionAllow:
-		decision = rt.autoPolicy.Decide(toolCtx, decisionRequest)
+		execDecision = rt.autoPolicy.DecideExecution(toolCtx, intent, decisionRequest)
 	case tool.PermissionDeny:
-		decision = DefaultAutoToolPolicy{}.Decide(toolCtx, decisionRequest)
+		execDecision = DefaultAutoToolPolicy{}.DecideExecution(toolCtx, intent, decisionRequest)
 	case tool.PermissionAsk:
 		if rt.useApprovalForAsk {
-			decision = ToolDecision{
-				Action:       ToolDecisionAllow,
-				Source:       ToolDecisionSourceToolRule,
-				Reason:       "compatibility approval path",
-				UpdatedInput: input,
-			}
+			execDecision = profile.AllowDecision(
+				string(profile.DecisionSourceToolRule),
+				"compatibility approval path",
+			)
+			execDecision.UpdatedIntent = &intent
 			approvalDecision, err := rt.awaitApproval(ctx, selectedTool, result, input, permission)
 			if err != nil {
 				return finalizeToolResult(synthesizeFailedToolResult(result, "approval_failed", fmt.Sprintf("工具审批失败: %v", err)))
@@ -137,16 +349,31 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 			}
 			break
 		}
-		decision = rt.autoPolicy.Decide(toolCtx, decisionRequest)
+		execDecision = rt.autoPolicy.DecideExecution(toolCtx, intent, decisionRequest)
 	default:
-		decision = ToolDecision{
-			Action: ToolDecisionDeny,
-			Source: ToolDecisionSourcePolicyError,
-			Reason: fmt.Sprintf("invalid permission decision %q", permission.Behavior),
-		}
+		execDecision = profile.DenyDecision(
+			string(profile.DecisionSourcePolicyError),
+			fmt.Sprintf("invalid permission decision %q", permission.Behavior),
+			false,
+		)
 	}
 
+	decision = executionDecisionToToolDecision(execDecision)
+	// Preserve the normalized input for allow decisions that don't carry
+	// an explicit UpdatedInput (e.g. the compatibility approval path).
+	if decision.Action == ToolDecisionAllow && strings.TrimSpace(decision.UpdatedInput) == "" {
+		decision.UpdatedInput = input
+	}
+	result.Decision = &execDecision
+
 	decision = normalizeToolDecision(decision, firstNonEmpty(permission.Reason, "AUTO policy denied tool execution"))
+	// Task 16: when the decision is a transform, record the original tool
+	// name on the result BEFORE emitting the ToolPermissionDecided event so
+	// the event carries TransformedFrom (e.g. "shell") alongside
+	// TransformedTo (e.g. "apply_patch") and the UI can show the rewrite.
+	if decision.Action == ToolDecisionTransform {
+		result.TransformedFrom = call.Function.Name
+	}
 	rt.emitToolPermissionDecided(result, permission, decision)
 	result.DecisionSource = decision.Source
 	result.DecisionReason = decision.Reason
@@ -168,14 +395,20 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
 		rt.writeAudit(def, result, permission, string(decision.Source), "aborted", result.DecisionReason)
 		return finalizeToolResult(result)
+	case ToolDecisionTransform:
+		return rt.executeTransformedTool(toolCtx, result, call, decision, permission, def, intent)
 	}
 
 	rt.emitToolProgress(result, "started", "", 0)
 
-	output, err := rt.executeTool(toolCtx, result, selectedTool, input)
+	output, trashedPaths, err := rt.routeToExecutor(toolCtx, result, intent, selectedTool, input)
 	if err != nil {
 		rt.emitToolProgress(result, "failed", err.Error(), 0)
-		result = synthesizeFailedToolResult(result, "tool_execution_failed", fmt.Sprintf("工具执行失败: %v", err))
+		failContent := output
+		if strings.TrimSpace(failContent) == "" {
+			failContent = fmt.Sprintf("工具执行失败: %v", err)
+		}
+		result = synthesizeFailedToolResult(result, "tool_execution_failed", failContent)
 		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
 		rt.writeAudit(def, result, permission, string(decision.Source), "failed", err.Error())
 		return finalizeToolResult(result)
@@ -184,6 +417,10 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	rt.emitToolProgress(result, "completed", "", 100)
 	result.Content = output
 	result.ResultSummary = excerptString(strings.TrimSpace(output), 200)
+	// TrashedPaths are sourced from the executor's ToolExecutionOutput when
+	// the executor populates it, falling back to extractTrashedPaths(content)
+	// for backwards compatibility (routeToExecutor handles the fallback).
+	result.TrashedPaths = trashedPaths
 	rt.writeAudit(def, result, permission, string(decision.Source), "success", "")
 	rt.emitArtifacts(result, selectedTool, input, output)
 	return finalizeToolResult(result)
@@ -201,6 +438,189 @@ func (rt *ToolRuntime) executeTool(
 		}))
 	}
 	return selectedTool.Execute(ctx, input)
+}
+
+// routeToExecutor dispatches a tool call through the unified executor layer
+// (Task 11 of "零审批自动执行策略"). The Router selects the appropriate
+// ToolExecutor based on the ExecutionIntent's ToolKind and the runtime's
+// ExecutionProfile. The executor adds kind-specific enforcement (file-chain
+// boundary, sandbox consultation, MCP risk annotations, guardian read-only,
+// profile-driven sandbox/network/env/permission enforcement) before
+// delegating to the tool's own Execute / ExecuteWithObserver.
+//
+// The observer is constructed here (mirroring executeTool) so streamed
+// stdout/stderr deltas continue to flow to the event sink for ObservableTool
+// implementations. The observer is then wrapped by visibilityFilterObserver
+// so the profile's VisibilityPolicy is enforced:
+//   - VisibilityHidden: deltas are dropped entirely.
+//   - VisibilitySummary: real-time deltas are suppressed; after the tool
+//     completes, a single truncated summary event is emitted in their place.
+//   - VisibilityFull: the original observer is used (existing behavior).
+//
+// When the router is not configured (nil), the method falls back to the
+// legacy executeTool path for backwards compatibility.
+//
+// Returns (content, trashedPaths, error) where content may be non-empty
+// even when err is non-nil — this happens when the executor denies the call
+// and surfaces a denial message. trashedPaths is sourced from the
+// ToolExecutionOutput when the executor populates it, falling back to
+// extractTrashedPaths(content) for backwards compatibility. Callers should
+// use content when non-empty, otherwise fall back to formatting err.
+func (rt *ToolRuntime) routeToExecutor(
+	ctx stdcontext.Context,
+	result ToolExecutionResult,
+	intent profile.ExecutionIntent,
+	selectedTool tool.Tool,
+	input string,
+) (string, []string, error) {
+	if rt.router == nil {
+		content, err := rt.executeTool(ctx, result, selectedTool, input)
+		if err != nil {
+			return content, nil, err
+		}
+		return content, extractTrashedPaths(content), nil
+	}
+	executor, err := rt.router.Route(intent, rt.profile)
+	if err != nil {
+		return "", nil, err
+	}
+	var observer tool.ToolObserver
+	if _, ok := selectedTool.(tool.ObservableTool); ok {
+		observer = toolObserverFunc(func(output tool.CommandOutput) {
+			rt.emitCommandOutput(result, output)
+		})
+	}
+	observer = executors.VisibilityFilterObserver(observer, rt.profile.VisibilityPolicy)
+	out, err := executor.Execute(ctx, intent, rt.profile, selectedTool, input, observer)
+	if err != nil {
+		return out.Content, out.TrashedPaths, err
+	}
+	// VisibilitySummary: when real-time deltas were suppressed, emit a
+	// single truncated summary event so the user still sees that the tool
+	// produced output. The summary is a short excerpt of the full content.
+	if executors.SummaryHadOutput(observer) {
+		summary := excerptString(out.Content, 500)
+		if strings.TrimSpace(summary) != "" {
+			rt.emitCommandOutput(result, tool.CommandOutput{
+				Stream: "stdout",
+				Delta:  summary,
+			})
+		}
+	}
+	trashedPaths := out.TrashedPaths
+	if len(trashedPaths) == 0 {
+		trashedPaths = extractTrashedPaths(out.Content)
+	}
+	return out.Content, trashedPaths, nil
+}
+
+// executeTransformedTool handles a ToolDecisionTransform by looking up the
+// rewritten tool (e.g. apply_patch), normalizing its input, and executing it
+// directly. The transform decision authorizes the rewritten call, so the
+// auto policy is not re-evaluated for the transformed tool.
+//
+// One-level guard: if the current context already carries a transform depth
+// (i.e. this call is itself the result of a transform), the nested transform
+// is denied. This prevents transform-of-transform loops.
+//
+// Task 11: the transformed tool is routed through the executor layer
+// (routeToExecutor) so the same executor-specific enforcement applies to
+// transform targets as to direct calls.
+func (rt *ToolRuntime) executeTransformedTool(
+	ctx stdcontext.Context,
+	result ToolExecutionResult,
+	call convcontext.ToolCall,
+	decision ToolDecision,
+	permission tool.PermissionDecision,
+	originalDef tool.ToolDefinition,
+	originalIntent profile.ExecutionIntent,
+) ToolExecutionResult {
+	if transformDepthFromCtx(ctx) >= 1 {
+		guarded := ToolDecision{
+			Action: ToolDecisionDeny,
+			Source: ToolDecisionSourcePolicyError,
+			Reason: "transform chain depth exceeded; nested transform denied",
+		}
+		result = synthesizeDeniedToolResult(result, guarded)
+		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
+		rt.writeAudit(originalDef, result, permission, string(guarded.Source), "denied", "")
+		return finalizeToolResult(result)
+	}
+
+	newToolName := strings.TrimSpace(decision.UpdatedToolName)
+	if newToolName == "" {
+		newToolName = call.Function.Name
+	}
+
+	transformedTool, err := tool.GetTool(newToolName)
+	if err != nil {
+		denied := ToolDecision{
+			Action: ToolDecisionDeny,
+			Source: ToolDecisionSourcePolicyError,
+			Reason: fmt.Sprintf("transform target tool %q not found: %v", newToolName, err),
+		}
+		result = synthesizeDeniedToolResult(result, denied)
+		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
+		rt.writeAudit(originalDef, result, permission, string(denied.Source), "denied", "")
+		return finalizeToolResult(result)
+	}
+
+	transformedInput, err := normalizeToolInput(decision.UpdatedInput, transformedTool.Parameters())
+	if err != nil {
+		denied := ToolDecision{
+			Action: ToolDecisionDeny,
+			Source: ToolDecisionSourcePolicyError,
+			Reason: fmt.Sprintf("transform target input invalid: %v", err),
+		}
+		result = synthesizeDeniedToolResult(result, denied)
+		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
+		rt.writeAudit(originalDef, result, permission, string(denied.Source), "denied", "")
+		return finalizeToolResult(result)
+	}
+
+	// Emit a transform progress event indicating the rewrite.
+	rt.emitToolProgress(result, "transform",
+		fmt.Sprintf("%s → %s: %s", call.Function.Name, newToolName, decision.Reason), 0)
+
+	// Execute the transformed tool with a context flagged with transform depth
+	// so any nested transform decision is denied by the guard above.
+	transformedCtx := ctxWithTransformDepth(ctx, transformDepthFromCtx(ctx)+1)
+	transformedDef := transformedTool.Definition()
+
+	// Build an ExecutionIntent for the transformed tool so the Router can
+	// select the appropriate executor. The transformed tool kind is inferred
+	// from the transformed tool's name and annotations (e.g. apply_patch →
+	// file_chain). Workspace roots and subagent origin are inherited from
+	// the original intent.
+	transformedCall := call
+	transformedCall.Function.Name = newToolName
+	transformedCall.Function.Arguments = decision.UpdatedInput
+	transformedIntent := profile.BuildExecutionIntent(transformedCall, transformedTool, rt.permissionContext, originalIntent.SubagentOrigin)
+
+	rt.emitToolProgress(result, "started", "", 0)
+	output, trashedPaths, err := rt.routeToExecutor(transformedCtx, result, transformedIntent, transformedTool, transformedInput)
+	if err != nil {
+		rt.emitToolProgress(result, "failed", err.Error(), 0)
+		failContent := output
+		if strings.TrimSpace(failContent) == "" {
+			failContent = fmt.Sprintf("工具执行失败: %v", err)
+		}
+		result = synthesizeFailedToolResult(result, "tool_execution_failed", failContent)
+		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
+		rt.writeAudit(transformedDef, result, permission, string(decision.Source), "failed", err.Error())
+		return finalizeToolResult(result)
+	}
+
+	rt.emitToolProgress(result, "completed", "", 100)
+	result.Content = output
+	result.ResultSummary = excerptString(strings.TrimSpace(output), 200)
+	// TrashedPaths are sourced from the executor's ToolExecutionOutput when
+	// the executor populates it, falling back to extractTrashedPaths(content)
+	// for backwards compatibility (routeToExecutor handles the fallback).
+	result.TrashedPaths = trashedPaths
+	rt.writeAudit(transformedDef, result, permission, string(decision.Source), "success", "")
+	rt.emitArtifacts(result, transformedTool, transformedInput, output)
+	return finalizeToolResult(result)
 }
 
 func (rt *ToolRuntime) ExecuteToolCalls(ctx stdcontext.Context, calls []convcontext.ToolCall) []ToolExecutionResult {
@@ -335,7 +755,94 @@ func (rt *ToolRuntime) writeAudit(def tool.ToolDefinition, result ToolExecutionR
 		Outcome:        outcome,
 		ResultSummary:  result.ResultSummary,
 		ErrorReason:    errReason,
+		// Task 16 unified observability: populate the structured fields from
+		// the result so the audit log carries the full profile / intent /
+		// decision / transform / trash / subagent / guardian picture. The
+		// legacy Decision/DecisionReason fields above remain for
+		// backwards-compatible consumers. Note: the `decision` parameter
+		// passed in from call sites is the decision SOURCE string (e.g.
+		// "tool_rule"), NOT the action; DecisionAction must be derived from
+		// the unified ExecutionDecision on the result so it carries
+		// "allow"/"deny"/"transform" as the spec requires.
+		ProfileName:       result.ProfileName,
+		Intent:            result.Intent,
+		DecisionAction:    decisionAction(result),
+		DecisionSource:    string(result.DecisionSource),
+		TransformedFrom:   result.TransformedFrom,
+		TransformedTo:     transformedToName(result),
+		TrashedPaths:      append([]string(nil), result.TrashedPaths...),
+		SubagentOrigin:    rt.subagentOrigin,
+		GuardianViolation: result.GuardianViolation,
 	})
+}
+
+// decisionAction returns the unified decision action ("allow"/"deny"/
+// "transform") from the result's ExecutionDecision. It returns "" when the
+// unified decision is absent (e.g. unknown-tool failures that bypass the
+// decision layer).
+func decisionAction(result ToolExecutionResult) string {
+	if result.Decision == nil {
+		return ""
+	}
+	return string(result.Decision.Action)
+}
+
+// transformedToName returns the rewritten tool name when the result is the
+// target of a transform decision, or "" otherwise. It inspects the
+// ExecutionDecision carried on the result: for transform decisions, the
+// decision's UpdatedToolName is the rewritten tool (e.g. "apply_patch").
+func transformedToName(result ToolExecutionResult) string {
+	if result.Decision == nil {
+		return ""
+	}
+	if result.Decision.Action != profile.DecisionTransform {
+		return ""
+	}
+	return result.Decision.UpdatedToolName
+}
+
+// extractTrashedPaths parses the apply_patch tool's summary output and
+// returns the trashed-path component of every deletion line. The apply_patch
+// tool encodes deletions as either:
+//
+//	D path (已移到回收站: trashedPath)
+//	D path (已移到回收站)
+//
+// In the first form the trashed-path component is returned verbatim. In the
+// second form (no explicit trashed path was surfaced) the line contributes
+// nothing — the file was trashed but the OS did not report a destination.
+// Lines that do not match the deletion pattern are ignored.
+//
+// This is a best-effort parser keyed off the Chinese marker the apply_patch
+// tool emits today. If the marker changes, this parser must be updated in
+// lockstep.
+func extractTrashedPaths(output string) []string {
+	if strings.TrimSpace(output) == "" {
+		return nil
+	}
+	const trashMarker = "已移到回收站"
+	var paths []string
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "D ") {
+			continue
+		}
+		idx := strings.Index(trimmed, trashMarker)
+		if idx < 0 {
+			continue
+		}
+		tail := trimmed[idx+len(trashMarker):]
+		// Expect either ": trashedPath)" or ")".
+		tail = strings.TrimPrefix(tail, ":")
+		tail = strings.TrimSpace(tail)
+		tail = strings.TrimSuffix(tail, ")")
+		tail = strings.TrimSpace(tail)
+		if tail == "" {
+			continue
+		}
+		paths = append(paths, tail)
+	}
+	return paths
 }
 
 func (rt *ToolRuntime) emitPatchPreview(result ToolExecutionResult, selectedTool tool.Tool, input string) {
@@ -378,6 +885,17 @@ func (rt *ToolRuntime) emitToolPermissionDecided(
 		ToolDecisionReason:       strings.TrimSpace(decision.Reason),
 		ApprovalAffectedPaths:    result.AffectedPaths,
 		ApprovalPatchSummary:     result.PatchSummary,
+		// Task 16 unified observability: surface the profile name and the
+		// transform origin (original tool name + rewritten tool name) so the
+		// Desktop UI can render "Profile: workspace_write" and
+		// "shell → apply_patch" alongside the decision. TrashedPaths and
+		// GuardianViolation are populated on the result by the executor /
+		// guardian check and are mirrored here for the audit trail.
+		ProfileName:       result.ProfileName,
+		TransformedFrom:   result.TransformedFrom,
+		TransformedTo:     decision.UpdatedToolName,
+		TrashedPaths:      append([]string(nil), result.TrashedPaths...),
+		GuardianViolation: result.GuardianViolation,
 	})
 }
 
@@ -415,6 +933,38 @@ func synthesizeDeniedToolResult(result ToolExecutionResult, decision ToolDecisio
 	result.DecisionSource = decision.Source
 	result.DecisionReason = decision.Reason
 	return result
+}
+
+// executionDecisionToToolDecision maps the unified ExecutionDecision back to
+// the legacy ToolDecision so the existing runtime switch (allow/deny/abort/
+// transform) continues to work. For transform decisions, the map-typed
+// UpdatedInput is serialised back to a JSON string.
+func executionDecisionToToolDecision(ed profile.ExecutionDecision) ToolDecision {
+	td := ToolDecision{
+		Source:    ToolDecisionSource(ed.Source),
+		Reason:    ed.Reason,
+		Retryable: ed.Retryable,
+	}
+	switch ed.Action {
+	case profile.DecisionAllow:
+		td.Action = ToolDecisionAllow
+	case profile.DecisionDeny:
+		td.Action = ToolDecisionDeny
+	case profile.DecisionTransform:
+		td.Action = ToolDecisionTransform
+		td.UpdatedToolName = ed.UpdatedToolName
+		if ed.UpdatedInput != nil {
+			data, err := json.Marshal(ed.UpdatedInput)
+			if err == nil {
+				td.UpdatedInput = string(data)
+			}
+		}
+	default:
+		td.Action = ToolDecisionDeny
+		td.Source = ToolDecisionSourcePolicyError
+		td.Reason = firstNonEmpty(strings.TrimSpace(ed.Reason), "invalid execution decision action")
+	}
+	return td
 }
 
 func synthesizeAbortedToolResult(result ToolExecutionResult, decision ToolDecision) ToolExecutionResult {

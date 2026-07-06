@@ -15,12 +15,15 @@ const (
 
 // ToolAnnotations carries the behavioural hints every tool must declare.
 type ToolAnnotations struct {
-	ReadOnly     bool
-	Destructive  bool
-	OpenWorld    bool
-	RequiresAuth bool
-	ServerName   string
-	ToolName     string
+	ReadOnly        bool
+	Destructive     bool
+	OpenWorld       bool
+	RequiresAuth    bool
+	ServerName      string
+	ToolName        string
+	CapabilityClass CapabilityClass
+	TrustedOrigin   TrustedOrigin
+	FileBridgeScope FileBridgeScope
 }
 
 // RiskHints summarises the risk profile of a tool invocation.
@@ -93,6 +96,45 @@ type ArtifactDescriptor struct {
 	Content     string
 	Status      string
 }
+
+// ScopedFile describes a user-attached or scope-bridged file path that the
+// runtime may expose to tools as part of the task scope.
+type ScopedFile struct {
+	Path        string `json:"path"`
+	DisplayName string `json:"display_name,omitempty"`
+}
+
+type CapabilityClass string
+
+const (
+	CapabilityArtifactRead    CapabilityClass = "artifact_read"
+	CapabilityArtifactWrite   CapabilityClass = "artifact_write"
+	CapabilityConnectorRead   CapabilityClass = "connector_read"
+	CapabilityConnectorWrite  CapabilityClass = "connector_write"
+	CapabilityBrowserRead     CapabilityClass = "browser_read"
+	CapabilityBrowserInteract CapabilityClass = "browser_interaction"
+	CapabilityLocalTransform  CapabilityClass = "local_transform"
+	CapabilityExternalPublish CapabilityClass = "external_publish"
+	CapabilitySystemOperation CapabilityClass = "system_operation"
+)
+
+type TrustedOrigin string
+
+const (
+	TrustedOriginBuiltin           TrustedOrigin = "builtin"
+	TrustedOriginOfficialHosted    TrustedOrigin = "official_hosted"
+	TrustedOriginOfficialConnector TrustedOrigin = "official_connector"
+	TrustedOriginThirdPartyMCP     TrustedOrigin = "third_party_mcp"
+	TrustedOriginLocalSkill        TrustedOrigin = "local_skill"
+)
+
+type FileBridgeScope string
+
+const (
+	FileBridgeNone           FileBridgeScope = "none"
+	FileBridgeTaskScopeRead  FileBridgeScope = "task_scope_read"
+	FileBridgeTaskScopeWrite FileBridgeScope = "task_scope_write"
+)
 
 type ArtifactProducingTool interface {
 	Artifacts(input string, output string, permissionContext PermissionContext) []ArtifactDescriptor

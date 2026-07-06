@@ -56,7 +56,13 @@ func (t *FileReadTool) Definition() tool.ToolDefinition {
 		DisplayName: "Read File",
 		Source:      tool.SourceBuiltin,
 		Description: "用于读取指定文件的内容",
-		Annotations: tool.ToolAnnotations{ReadOnly: true, Destructive: false, OpenWorld: false},
+		Annotations: tool.ToolAnnotations{
+			ReadOnly:        true,
+			Destructive:     false,
+			OpenWorld:       false,
+			CapabilityClass: tool.CapabilityArtifactRead,
+			TrustedOrigin:   tool.TrustedOriginBuiltin,
+		},
 	}
 }
 
@@ -65,8 +71,8 @@ func (t *FileReadTool) CheckPermission(ctx context.Context, input string, permis
 	if err != nil {
 		return tool.DenyPermission(fmt.Sprintf("invalid parameters: %v", err))
 	}
-	if !permissionContext.IsWithinWorkspaceResolved(params.Path) {
-		return tool.DenyPermission(fmt.Sprintf("path %s is outside workspace or escapes via symlink", params.Path))
+	if !permissionContext.IsWithinReadableRootsResolved(params.Path) {
+		return tool.DenyPermission(fmt.Sprintf("path %s is outside readable roots or escapes via symlink", params.Path))
 	}
 	return tool.AllowPermission()
 }

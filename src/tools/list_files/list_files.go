@@ -54,7 +54,13 @@ func (t *ListFilesTool) Definition() tool.ToolDefinition {
 		DisplayName: "List Files",
 		Source:      tool.SourceBuiltin,
 		Description: t.Description(),
-		Annotations: tool.ToolAnnotations{ReadOnly: true, Destructive: false, OpenWorld: false},
+		Annotations: tool.ToolAnnotations{
+			ReadOnly:        true,
+			Destructive:     false,
+			OpenWorld:       false,
+			CapabilityClass: tool.CapabilityArtifactRead,
+			TrustedOrigin:   tool.TrustedOriginBuiltin,
+		},
 	}
 }
 
@@ -67,7 +73,7 @@ func (t *ListFilesTool) Execute(ctx context.Context, input string) (string, erro
 	permissionContext := tool.PermissionContextFromContext(ctx)
 	root := permissionContext.ResolvePath(params.Root)
 	if tool.HasPermissionContext(ctx) {
-		checkedRoot, err := permissionContext.ResolvePathChecked(params.Root)
+		checkedRoot, err := permissionContext.ResolveReadablePathChecked(params.Root)
 		if err != nil {
 			return "", err
 		}
@@ -98,8 +104,8 @@ func (t *ListFilesTool) CheckPermission(ctx context.Context, input string, permi
 	if err != nil {
 		return tool.DenyPermission(fmt.Sprintf("invalid parameters: %v", err))
 	}
-	if !permissionContext.IsWithinWorkspaceResolved(params.Root) {
-		return tool.DenyPermission(fmt.Sprintf("root %s is outside workspace or escapes via symlink", params.Root))
+	if !permissionContext.IsWithinReadableRootsResolved(params.Root) {
+		return tool.DenyPermission(fmt.Sprintf("root %s is outside readable roots or escapes via symlink", params.Root))
 	}
 	return tool.AllowPermission()
 }
@@ -143,8 +149,8 @@ func listFiles(ctx context.Context, root, workspaceRoot, pattern string, maxResu
 			return nil
 		}
 
-		// Skip files that escape the workspace through symlinks.
-		if !permissionContext.IsWithinWorkspaceResolved(path) {
+		// Skip files that escape readable roots through symlinks.
+		if !permissionContext.IsWithinReadableRootsResolved(path) {
 			return nil
 		}
 

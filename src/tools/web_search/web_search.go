@@ -38,7 +38,13 @@ func (t *WebSearchTool) Definition() tool.ToolDefinition {
 		DisplayName: "Web Search",
 		Source:      tool.SourceBuiltin,
 		Description: "用于在互联网上搜索信息",
-		Annotations: tool.ToolAnnotations{ReadOnly: true, Destructive: false, OpenWorld: true},
+		Annotations: tool.ToolAnnotations{
+			ReadOnly:        true,
+			Destructive:     false,
+			OpenWorld:       true,
+			CapabilityClass: tool.CapabilityBrowserRead,
+			TrustedOrigin:   tool.TrustedOriginBuiltin,
+		},
 	}
 }
 

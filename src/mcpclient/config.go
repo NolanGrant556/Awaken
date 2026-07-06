@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
+
+	"awaken/src/desktopdata"
 )
 
 // McpServerConfig is the wire shape of a single server entry in
@@ -86,21 +89,16 @@ func SaveProjectConfig(workspaceRoot string, cfg ConfigFile) error {
 // LoadUserConfig reads ~/.awaken/mcp.json. A missing file returns an empty
 // result with no error.
 func LoadUserConfig() (ConfigFile, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ConfigFile{}, fmt.Errorf("resolve user home: %w", err)
+	path := UserConfigPath()
+	if err := migrateLegacyUserConfig(path); err != nil {
+		return ConfigFile{}, err
 	}
-	path := filepath.Join(home, ".awaken", "mcp.json")
 	return loadConfigFile(path)
 }
 
 // SaveUserConfig writes cfg to ~/.awaken/mcp.json, creating the parent
 // directory if necessary.
 func SaveUserConfig(cfg ConfigFile) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("resolve user home: %w", err)
-	}
 	if cfg.Servers == nil {
 		cfg.Servers = map[string]McpServerConfig{}
 	}
@@ -108,13 +106,65 @@ func SaveUserConfig(cfg ConfigFile) error {
 	if err != nil {
 		return fmt.Errorf("serialize user mcp config: %w", err)
 	}
-	dir := filepath.Join(home, ".awaken")
+	path := UserConfigPath()
+	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create %s: %w", dir, err)
 	}
-	path := filepath.Join(dir, "mcp.json")
 	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
+func UserConfigPath() string {
+	return desktopdata.Detect().MCPConfigPath()
+}
+
+func LegacyUserConfigPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join("~", ".awaken", "mcp.json")
+	}
+	return filepath.Join(home, ".awaken", "mcp.json")
+}
+
+func migrateLegacyUserConfig(targetPath string) error {
+	if strings.TrimSpace(targetPath) == "" {
+		return fmt.Errorf("desktop mcp config path is required")
+	}
+	if _, err := os.Stat(targetPath); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("stat %s: %w", targetPath, err)
+	}
+	legacyPath := LegacyUserConfigPath()
+	data, err := os.ReadFile(legacyPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("read legacy mcp config %s: %w", legacyPath, err)
+	}
+	if strings.TrimSpace(string(data)) == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o700); err != nil {
+		return fmt.Errorf("create %s: %w", filepath.Dir(targetPath), err)
+	}
+	if err := os.WriteFile(targetPath, data, 0o600); err != nil {
+		return fmt.Errorf("write migrated mcp config %s: %w", targetPath, err)
+	}
+	paths := desktopdata.Detect()
+	if err := paths.Ensure(); err == nil {
+		marker := map[string]string{
+			"migrated_at": time.Now().UTC().Format(time.RFC3339Nano),
+			"source":      legacyPath,
+			"target":      targetPath,
+		}
+		if markerData, marshalErr := json.MarshalIndent(marker, "", "  "); marshalErr == nil {
+			_ = os.WriteFile(paths.MigrationMarkerPath("mcp-servers-legacy-migrated"), append(markerData, '\n'), 0o600)
+		}
 	}
 	return nil
 }

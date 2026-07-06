@@ -2,12 +2,10 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"awaken/src/agentcore"
 	"awaken/src/connectors"
@@ -63,9 +61,6 @@ func main() {
 	if err := runService.SetDefaultWorkspace(runtime.WorkspaceConfig{WorkspaceRoot: defaultWorkspace}); err != nil {
 		log.Fatalf("failed to configure default workspace: %v", err)
 	}
-	if err := runService.SetHistoryWorkspaces(resolveHistoryWorkspaces()); err != nil {
-		log.Printf("failed to configure history workspaces: %v", err)
-	}
 
 	srv := &http.Server{
 		Addr:    addr,
@@ -112,6 +107,7 @@ func buildMCPManager(workspace string) *mcpclient.Manager {
 		mcpclient.StdLogger{},
 	)
 	manager := mcpclient.NewManager(mcpclient.WithLogger(mcpclient.StdLogger{}))
+	manager.SetCredentialStore(mcpclient.NewPersistentCredentialStore())
 	if len(merged) > 0 {
 		go manager.Start(context.Background(), merged)
 	}
@@ -183,38 +179,4 @@ func resolveDefaultWorkspace() string {
 		log.Fatalf("failed to get working directory: %v", err)
 	}
 	return cwd
-}
-
-func resolveHistoryWorkspaces() []runtime.WorkspaceConfig {
-	raw := strings.TrimSpace(os.Getenv("AWAKEN_HISTORY_WORKSPACES"))
-	if raw == "" {
-		return nil
-	}
-
-	var roots []string
-	if err := json.Unmarshal([]byte(raw), &roots); err != nil {
-		log.Printf("invalid AWAKEN_HISTORY_WORKSPACES: %v", err)
-		return nil
-	}
-
-	workspaces := make([]runtime.WorkspaceConfig, 0, len(roots))
-	seen := make(map[string]struct{}, len(roots))
-	for _, root := range roots {
-		root = strings.TrimSpace(root)
-		if root == "" {
-			continue
-		}
-		cleaned := filepath.Clean(root)
-		if !filepath.IsAbs(cleaned) {
-			continue
-		}
-		if _, ok := seen[cleaned]; ok {
-			continue
-		}
-		seen[cleaned] = struct{}{}
-		workspaces = append(workspaces, runtime.WorkspaceConfig{
-			WorkspaceRoot: cleaned,
-		})
-	}
-	return workspaces
 }

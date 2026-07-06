@@ -71,7 +71,6 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 	if cfg.runService != nil {
 		handlers := runHandlers{runService: cfg.runService}
 		mux.HandleFunc("GET /v1/threads", handlers.handleListThreads)
-		mux.HandleFunc("PUT /v1/workspaces/registry", handlers.handleSyncWorkspaceRegistry)
 		mux.HandleFunc("PATCH /v1/threads/{thread_id}", handlers.handleRenameThread)
 		mux.HandleFunc("DELETE /v1/threads/{thread_id}", handlers.handleDeleteThread)
 		mux.HandleFunc("GET /v1/threads/{thread_id}/transcript", handlers.handleGetThreadTranscript)

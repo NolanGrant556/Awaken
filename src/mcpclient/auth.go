@@ -13,61 +13,71 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// CredentialStore persists OAuth tokens (and any future credential shape)
-// keyed by MCP server name. The v1 default is an in-memory store; a
-// persistent implementation will be substituted in a downstream change.
+type StoredTokenSource struct {
+	CredentialRef string        `json:"credentialRef,omitempty"`
+	Token         *oauth2.Token `json:"token,omitempty"`
+	ServerURL     string        `json:"serverUrl,omitempty"`
+	AuthURL       string        `json:"authUrl,omitempty"`
+	TokenURL      string        `json:"tokenUrl,omitempty"`
+	RedirectURL   string        `json:"redirectUrl,omitempty"`
+	ClientID      string        `json:"clientId,omitempty"`
+	ClientSecret  string        `json:"clientSecret,omitempty"`
+	Scopes        []string      `json:"scopes,omitempty"`
+	NeedsReauth   bool          `json:"needsReauth,omitempty"`
+}
+
+var ErrCredentialNotFound = errors.New("credential not found")
+
+// CredentialStore persists OAuth tokens and the metadata required to
+// rebuild a token source after a Desktop restart.
 type CredentialStore interface {
-	// TokenSource returns the token source for the named server, or nil if
-	// no credentials are stored.
-	TokenSource(serverName string) oauth2.TokenSource
-	// SetTokenSource installs a token source for the named server.
-	SetTokenSource(serverName string, ts oauth2.TokenSource)
-	// Clear drops stored credentials for the named server.
-	Clear(serverName string)
-	// HasToken reports whether the store currently holds a token source
-	// for the named server.
-	HasToken(serverName string) bool
+	LoadTokenSource(serverName string) (StoredTokenSource, error)
+	SaveTokenSource(serverName string, source StoredTokenSource) error
+	ClearTokenSource(serverName string) error
+	HasTokenSource(serverName string) (bool, error)
 }
 
 // InMemoryCredentialStore is the default CredentialStore implementation.
 // It is safe for concurrent access.
 type InMemoryCredentialStore struct {
 	mu      sync.RWMutex
-	sources map[string]oauth2.TokenSource
+	sources map[string]StoredTokenSource
 }
 
 // NewInMemoryCredentialStore returns an empty in-memory store.
 func NewInMemoryCredentialStore() *InMemoryCredentialStore {
-	return &InMemoryCredentialStore{sources: make(map[string]oauth2.TokenSource)}
+	return &InMemoryCredentialStore{sources: make(map[string]StoredTokenSource)}
 }
 
-// TokenSource implements CredentialStore.
-func (s *InMemoryCredentialStore) TokenSource(serverName string) oauth2.TokenSource {
+func (s *InMemoryCredentialStore) LoadTokenSource(serverName string) (StoredTokenSource, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.sources[serverName]
+	source, ok := s.sources[serverName]
+	if !ok {
+		return StoredTokenSource{}, ErrCredentialNotFound
+	}
+	return source, nil
 }
 
-// SetTokenSource implements CredentialStore.
-func (s *InMemoryCredentialStore) SetTokenSource(serverName string, ts oauth2.TokenSource) {
+func (s *InMemoryCredentialStore) SaveTokenSource(serverName string, source StoredTokenSource) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.sources[serverName] = ts
+	s.sources[serverName] = source
+	return nil
 }
 
-// Clear implements CredentialStore.
-func (s *InMemoryCredentialStore) Clear(serverName string) {
+func (s *InMemoryCredentialStore) ClearTokenSource(serverName string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.sources, serverName)
+	return nil
 }
 
-// HasToken implements CredentialStore.
-func (s *InMemoryCredentialStore) HasToken(serverName string) bool {
+func (s *InMemoryCredentialStore) HasTokenSource(serverName string) (bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	_, ok := s.sources[serverName]
-	return ok
+	return ok, nil
 }
 
 // AuthFlowConfig captures the per-server OAuth parameters the desktop UI
@@ -93,9 +103,9 @@ type AuthFlowConfig struct {
 
 // AuthResult is the wire payload returned by POST /v1/mcp/servers/{name}/auth.
 type AuthResult struct {
-	AuthorizationURL string    `json:"authorizationUrl"`
-	State            string    `json:"state,omitempty"`
-	ServerName       string    `json:"serverName"`
+	AuthorizationURL string     `json:"authorizationUrl"`
+	State            string     `json:"state,omitempty"`
+	ServerName       string     `json:"serverName"`
 	ExpiresAt        *time.Time `json:"expiresAt,omitempty"`
 }
 
@@ -110,10 +120,9 @@ type AuthRequest struct {
 }
 
 // StartAuth initiates the OAuth flow for the named server. It returns the
-// authorization URL the desktop UI should open in a browser. The flow
-// completes asynchronously; the manager stores the resulting token source
-// in the CredentialStore and the next tool call against the server will
-// succeed.
+// authorization URL the desktop UI should open in a browser. The resulting
+// token source is persisted via the configured CredentialStore so Desktop
+// restarts can rebuild the authenticated transport.
 //
 // In v1, StartAuth requires that InstallAuthFetcher has been called for
 // the server; otherwise it returns an error directing the caller to
@@ -137,23 +146,24 @@ func (m *Manager) StartAuth(ctx context.Context, serverName string, req AuthRequ
 		Scopes:                   req.Scopes,
 		AuthorizationCodeFetcher: fetcher,
 	}
-	handler, err := buildOAuthHandler(cfg)
+	captureHandler, err := buildOAuthHandler(cfg)
 	if err != nil {
 		return AuthResult{}, fmt.Errorf("build oauth handler: %w", err)
 	}
+	// Trigger an Authorize round-trip so we can capture the authorize URL.
+	// The SDK's Authorize is expected to invoke the fetcher, which itself
+	// returns the URL plus the eventual code. We expose the URL via the
+	// fetcher's first call.
+	authURL, err := captureAuthorizeURL(ctx, captureHandler, cfg)
+	if err != nil {
+		return AuthResult{}, err
+	}
+	handler := newPersistentOAuthHandler(serverName, cfg, m.credentials)
 	// Install the handler on the server so the next Connect/CallTool picks
 	// it up. We do not block on the flow here; the desktop UI drives it.
 	m.mu.Lock()
 	server.authHandler = handler
 	m.mu.Unlock()
-	// Trigger an Authorize round-trip so we can capture the authorize URL.
-	// The SDK's Authorize is expected to invoke the fetcher, which itself
-	// returns the URL plus the eventual code. We expose the URL via the
-	// fetcher's first call.
-	authURL, err := captureAuthorizeURL(ctx, handler, cfg)
-	if err != nil {
-		return AuthResult{}, err
-	}
 	return AuthResult{
 		AuthorizationURL: authURL,
 		ServerName:       serverName,

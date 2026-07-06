@@ -24,6 +24,7 @@ import {
   type StartRunRequest,
   type SupervisorStatusInfo,
   type WorkspacePickResult,
+  type WorkspaceRegistrySyncRequest,
   type WorkspaceValidationResult,
 } from "../shared/runtime.js";
 
@@ -137,6 +138,8 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:pick-workspace", defaultPath) as Promise<WorkspacePickResult>,
   validateWorkspace: (path: string) =>
     ipcRenderer.invoke("awaken:validate-workspace", path) as Promise<WorkspaceValidationResult>,
+  syncWorkspaceRegistry: (request: WorkspaceRegistrySyncRequest) =>
+    ipcRenderer.invoke("awaken:sync-workspace-registry", request) as Promise<void>,
   getSupervisorStatus: () =>
     ipcRenderer.invoke("awaken:runtime-supervisor-status") as Promise<SupervisorStatusInfo>,
   onSupervisorStatusChange: (callback: (info: SupervisorStatusInfo) => void) => {

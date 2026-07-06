@@ -1,5 +1,6 @@
 import "./AwakenWorkbenchChrome.css";
 import type { ReactNode } from "react";
+import type { PlatformKind } from "../../types";
 import { MessageCirclePlus, PanelLeft } from "lucide-react";
 
 export type AwakenWorkbenchChromeProps = {
@@ -7,6 +8,7 @@ export type AwakenWorkbenchChromeProps = {
   onToggleSidebar?: () => void;
   onNewTask?: () => void;
   right?: ReactNode;
+  platform?: PlatformKind;
 };
 
 function ChromeIconButton({
@@ -37,16 +39,19 @@ export function AwakenWorkbenchChrome({
   onToggleSidebar,
   onNewTask,
   right,
+  platform,
 }: AwakenWorkbenchChromeProps) {
   return (
     <header
       className={`workbench-chrome${
         sidebarCollapsed ? " workbench-chrome-collapsed" : ""
-      }`}
+      }${platform !== "macos" ? " workbench-chrome-no-spacer" : ""}`}
       aria-label="Workbench controls"
     >
       <div className="workbench-chrome-left">
-        <div className="workbench-chrome-window-spacer" aria-hidden="true" />
+        {platform === "macos" ? (
+          <div className="workbench-chrome-window-spacer" aria-hidden="true" />
+        ) : null}
         <ChromeIconButton
           label={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
           onClick={onToggleSidebar}

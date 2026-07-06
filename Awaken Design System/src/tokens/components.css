@@ -245,6 +245,10 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
   height: 1px;
 }
 
+.workbench-chrome-no-spacer .workbench-chrome-left {
+  padding-left: 12px;
+}
+
 .workbench-chrome-icon {
   position: relative;
   top: 2px;

@@ -338,6 +338,7 @@ export type RuntimeModelProfileSummary = {
 
 export type ModelProfileSaveRequest = {
   id?: string;
+  templateProfileId?: string;
   providerId: string;
   displayName?: string;
   modelId: string;

@@ -219,4 +219,222 @@ describe("ModelProfileStore", () => {
       contextWindow: 256_000,
     });
   });
+
+  it("rejects a duplicate provider-model pair when adding a new profile", async () => {
+    const store = new ModelProfileStore(configDir);
+
+    await store.saveProfile({
+      providerId: "deepseek",
+      displayName: "DeepSeek",
+      modelId: "deepseek-v4-pro",
+      baseURL: "https://api.deepseek.com",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "first-key",
+      enabled: true,
+      isDefault: true,
+    });
+
+    await expect(
+      store.saveProfile({
+        providerId: "deepseek",
+        displayName: "DeepSeek",
+        modelId: "deepseek-v4-pro",
+        baseURL: "https://api.deepseek.com/v2",
+        protocol: "openai_chat",
+        authScheme: "bearer",
+        apiKey: "second-key",
+        enabled: true,
+        isDefault: true,
+      }),
+    ).rejects.toThrow("模型配置重复，添加失败");
+
+    const profiles = await store.listProfiles();
+
+    expect(profiles).toHaveLength(1);
+    expect(profiles[0]).toMatchObject({
+      model_id: "deepseek-v4-pro",
+      base_url: "https://api.deepseek.com",
+    });
+  });
+
+  it("allows updating an existing provider-model pair when the same profile id is provided", async () => {
+    const store = new ModelProfileStore(configDir);
+
+    const firstSave = await store.saveProfile({
+      providerId: "deepseek",
+      displayName: "DeepSeek",
+      modelId: "deepseek-v4-pro",
+      baseURL: "https://api.deepseek.com",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "first-key",
+      enabled: true,
+      isDefault: true,
+    });
+
+    const updatedSave = await store.saveProfile({
+      id: firstSave.id,
+      providerId: "deepseek",
+      displayName: "DeepSeek",
+      modelId: "deepseek-v4-pro",
+      baseURL: "https://api.deepseek.com/v2",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "second-key",
+      enabled: true,
+      isDefault: true,
+    });
+
+    const profiles = await store.listProfiles();
+
+    expect(updatedSave.id).toBe(firstSave.id);
+    expect(profiles).toHaveLength(1);
+    expect(profiles[0]).toMatchObject({
+      id: firstSave.id,
+      model_id: "deepseek-v4-pro",
+      base_url: "https://api.deepseek.com/v2",
+    });
+  });
+
+  it("copies the template profile credential when adding another model for the same provider", async () => {
+    const store = new ModelProfileStore(configDir);
+
+    const templateProfile = await store.saveProfile({
+      providerId: "deepseek",
+      displayName: "DeepSeek",
+      modelId: "deepseek-v4-pro",
+      baseURL: "https://api.deepseek.com",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "shared-key",
+      enabled: true,
+      isDefault: true,
+    });
+
+    const addedProfile = await store.saveProfile({
+      templateProfileId: templateProfile.id,
+      providerId: "deepseek",
+      displayName: "DeepSeek",
+      modelId: "deepseek-v4-flash",
+      baseURL: "https://api.deepseek.com",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      enabled: true,
+      isDefault: false,
+    });
+
+    const profiles = await store.listProfiles();
+
+    expect(addedProfile.id).not.toBe(templateProfile.id);
+    expect(profiles).toHaveLength(2);
+    expect(profiles.find((profile) => profile.id === addedProfile.id)).toMatchObject({
+      model_id: "deepseek-v4-flash",
+      has_key: true,
+      masked_key: "•••• -key",
+      is_default: false,
+    });
+  });
+
+  it("reuses the template profile credential during connection testing", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    electronMock.safeStorage.decryptString.mockReturnValue("shared-key");
+
+    const store = new ModelProfileStore(configDir);
+    const templateProfile = await store.saveProfile({
+      providerId: "deepseek",
+      displayName: "DeepSeek",
+      modelId: "deepseek-v4-pro",
+      baseURL: "https://api.deepseek.com",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "shared-key",
+      enabled: true,
+      isDefault: true,
+    });
+
+    const result = await store.testProfile({
+      templateProfileId: templateProfile.id,
+      providerId: "deepseek",
+      displayName: "DeepSeek",
+      modelId: "deepseek-v4-flash",
+      baseURL: "https://api.deepseek.com",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      enabled: true,
+      isDefault: false,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      message: "连接测试通过：服务已响应 /models。",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.deepseek.com/models",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer shared-key",
+        }),
+      }),
+    );
+  });
+
+  it("hides existing duplicate provider-model entries when listing profiles", async () => {
+    await writeFile(
+      join(configDir, "model-profiles.json"),
+      JSON.stringify({
+        version: 1,
+        profiles: [
+          {
+            id: "deepseek-old",
+            providerId: "deepseek",
+            displayName: "DeepSeek",
+            modelId: "deepseek-v4-pro",
+            baseURL: "https://api.deepseek.com",
+            protocol: "openai_chat",
+            authScheme: "bearer",
+            enabled: true,
+            isDefault: true,
+            advanced: {
+              contextWindow: 128_000,
+              maxTokens: 16_000,
+            },
+            credential: {
+              encryptedApiKey: Buffer.from("old").toString("base64"),
+              last4: "old1",
+            },
+          },
+          {
+            id: "deepseek-new",
+            providerId: "deepseek",
+            displayName: "DeepSeek",
+            modelId: "deepseek-v4-pro",
+            baseURL: "https://api.deepseek.com/v2",
+            protocol: "openai_chat",
+            authScheme: "bearer",
+            enabled: true,
+            isDefault: false,
+            advanced: {
+              contextWindow: 256_000,
+              maxTokens: 32_000,
+            },
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    const store = new ModelProfileStore(configDir);
+    const profiles = await store.listProfiles();
+
+    expect(profiles).toHaveLength(1);
+    expect(profiles[0]).toMatchObject({
+      id: "deepseek-new",
+      model_id: "deepseek-v4-pro",
+      base_url: "https://api.deepseek.com/v2",
+      has_key: true,
+      masked_key: "•••• old1",
+    });
+  });
 });

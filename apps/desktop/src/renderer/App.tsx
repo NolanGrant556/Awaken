@@ -2397,6 +2397,7 @@ export function App() {
                 profileAvatarFallback="AW"
                 profileSubtitle="Local"
                 newTaskLabel="New Agent"
+                newTaskShortcut=""
                 conversationSectionLabel=""
                 projectSectionLabel="Projects"
                 projectSectionActions={

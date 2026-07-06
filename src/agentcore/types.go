@@ -9,11 +9,16 @@ import (
 type AgentConfig struct {
 	SystemPrompt string
 	// MaxThoughts <= 0 means the runner has no turn-count limit.
-	MaxThoughts    int
-	ModelConfig    ModelConfig
-	EntryPoint     string
-	Workspace      WorkspaceConfig
-	AutoToolPolicy AutoToolPolicy
+	MaxThoughts       int
+	ModelConfig       ModelConfig
+	EntryPoint        string
+	Workspace         WorkspaceConfig
+	AutoToolPolicy    AutoToolPolicy
+	// UseApprovalForAsk routes PermissionAsk decisions through the approval
+	// UI (via EventSink/ApprovalAwaiter) instead of the headless AUTO policy.
+	// This should be true when the agent is backed by an interactive client
+	// such as Awaken Desktop.
+	UseApprovalForAsk bool
 }
 
 type WorkspaceConfig struct {

@@ -218,6 +218,7 @@ func toolRuntimeConfigFromAgentConfig(config AgentConfig) ToolRuntimeConfig {
 	return ToolRuntimeConfig{
 		PermissionContext: tool.NewPermissionContext(config.Workspace.Root, config.Workspace.WritableRoots),
 		AutoToolPolicy:    config.AutoToolPolicy,
+		UseApprovalForAsk: config.UseApprovalForAsk,
 	}
 }
 

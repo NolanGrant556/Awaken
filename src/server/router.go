@@ -88,6 +88,8 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 	if cfg.manager != nil {
 		mux.HandleFunc("GET /v1/mcp/servers", mcpH.handleListServers)
 		mux.HandleFunc("POST /v1/mcp/servers", mcpH.handleConfigureServers)
+		mux.HandleFunc("GET /v1/mcp/servers/{name}/config", mcpH.handleGetServerConfig)
+		mux.HandleFunc("PATCH /v1/mcp/servers/{name}/config", mcpH.handleUpdateServerConfig)
 		mux.HandleFunc("POST /v1/mcp/servers/{name}/auth", mcpH.handleServerAuth)
 		mux.HandleFunc("POST /v1/mcp/servers/{name}/disable", mcpH.handleServerDisable)
 		mux.HandleFunc("POST /v1/mcp/servers/{name}/enable", mcpH.handleServerEnable)

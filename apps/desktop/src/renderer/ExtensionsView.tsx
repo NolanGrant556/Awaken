@@ -6,6 +6,7 @@ import {
   Plug,
   RefreshCw,
   Server,
+  Settings,
   Upload,
   Wrench,
   X,
@@ -16,10 +17,18 @@ import {
 } from "@awaken/design-system";
 import type {
   RuntimeConnector,
+  RuntimeLogEntry,
   RuntimeMcpServer,
   RuntimeSkill,
+  RuntimeToolInfo,
 } from "../shared/runtime";
 import type { RuntimeClient } from "./runtime/client";
+
+export type McpToolInfo = {
+  name: string;
+  description: string;
+  readOnly: boolean;
+};
 
 export type ExtensionSection = "connectors" | "skills";
 
@@ -132,6 +141,7 @@ export function ExtensionsView({
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [busyConnectorId, setBusyConnectorId] = useState<string | null>(null);
+  const [busyMcpServerName, setBusyMcpServerName] = useState<string | null>(null);
   const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
   const [mcpConfigText, setMcpConfigText] = useState(MCP_EXAMPLE);
   const [configuringMcp, setConfiguringMcp] = useState(false);
@@ -139,15 +149,25 @@ export function ExtensionsView({
   const [skillFile, setSkillFile] = useState<File | null>(null);
   const [skillDragActive, setSkillDragActive] = useState(false);
   const [installingSkill, setInstallingSkill] = useState(false);
+  const [mcpSettingsOpen, setMcpSettingsOpen] = useState(false);
+  const [selectedMcpServer, setSelectedMcpServer] = useState<RuntimeMcpServer | null>(null);
+  const [mcpSettingsConfigText, setMcpSettingsConfigText] = useState("");
+  const [mcpSettingsScope, setMcpSettingsScope] = useState("");
+  const [mcpTools, setMcpTools] = useState<McpToolInfo[]>([]);
+  const [mcpLogs, setMcpLogs] = useState<RuntimeLogEntry[]>([]);
+  const [savingMcpConfig, setSavingMcpConfig] = useState(false);
+  const [loadingMcpSettings, setLoadingMcpSettings] = useState(false);
 
   const normalizedQuery = query.trim().toLowerCase();
 
-  async function refresh(): Promise<void> {
+  async function refresh(showLoading = true): Promise<void> {
     if (!desktopReady) {
       setErrorMessage("Awaken runtime 未启动");
       return;
     }
-    setLoading(true);
+    if (showLoading) {
+      setLoading(true);
+    }
     setErrorMessage(null);
     try {
       const [nextConnectors, nextMcpServers, nextSkills] = await Promise.all([
@@ -161,7 +181,9 @@ export function ExtensionsView({
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "扩展列表加载失败");
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
     }
   }
 
@@ -169,6 +191,29 @@ export function ExtensionsView({
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [desktopReady]);
+
+  useEffect(() => {
+    if (!desktopReady || section !== "connectors") {
+      return;
+    }
+    const timer = setInterval(() => {
+      void refresh(false);
+    }, 500);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [desktopReady, section]);
+
+  useEffect(() => {
+    if (!mcpSettingsOpen || !selectedMcpServer) {
+      return;
+    }
+    const serverName = selectedMcpServer.name;
+    const timer = setInterval(() => {
+      void refreshMcpSettingsData(serverName);
+    }, 500);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mcpSettingsOpen, selectedMcpServer?.name]);
 
   const visibleConnectors = useMemo(
     () =>
@@ -224,6 +269,25 @@ export function ExtensionsView({
     }
   }
 
+  async function handleToggleMcpServer(server: RuntimeMcpServer): Promise<void> {
+    setBusyMcpServerName(server.name);
+    setErrorMessage(null);
+    try {
+      if (server.state === "disabled") {
+        await runtimeClient.enableMcpServer(server.name);
+        onNotice(`${server.name} 已启用`);
+      } else {
+        await runtimeClient.disableMcpServer(server.name);
+        onNotice(`${server.name} 已停用`);
+      }
+      await refresh(false);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "MCP server 操作失败");
+    } finally {
+      setBusyMcpServerName(null);
+    }
+  }
+
   async function handleConfigureMcp(): Promise<void> {
     if (mcpConfigText.trim() === "") {
       setErrorMessage("请粘贴 MCP 配置 JSON");
@@ -241,6 +305,87 @@ export function ExtensionsView({
     } finally {
       setConfiguringMcp(false);
     }
+  }
+
+  async function loadMcpSettings(server: RuntimeMcpServer): Promise<void> {
+    setSelectedMcpServer(server);
+    setMcpSettingsOpen(true);
+    setLoadingMcpSettings(true);
+    setErrorMessage(null);
+    try {
+      const [config, tools, logs] = await Promise.all([
+        runtimeClient.getMcpServerConfig(server.name),
+        runtimeClient.listMcpTools(),
+        runtimeClient.getRuntimeLogs(),
+      ]);
+      setMcpSettingsConfigText(config.configText);
+      setMcpSettingsScope(config.scope);
+      setMcpTools(extractServerTools(tools, server.name));
+      setMcpLogs(filterMcpLogs(logs, server.name));
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "加载 MCP 设置失败");
+    } finally {
+      setLoadingMcpSettings(false);
+    }
+  }
+
+  async function refreshMcpSettingsData(serverName: string): Promise<void> {
+    try {
+      const [tools, logs] = await Promise.all([
+        runtimeClient.listMcpTools(),
+        runtimeClient.getRuntimeLogs(),
+      ]);
+      setMcpTools(extractServerTools(tools, serverName));
+      setMcpLogs(filterMcpLogs(logs, serverName));
+    } catch {
+      // Ignore silent refresh errors to avoid overwriting user edits or
+      // flashing messages while the dialog stays open.
+    }
+  }
+
+  function extractServerTools(tools: RuntimeToolInfo[], serverName: string): McpToolInfo[] {
+    const prefix = `mcp__${serverName}__`;
+    return tools
+      .filter((tool) => tool.source === "mcp" && tool.name.startsWith(prefix))
+      .map((tool) => ({
+        name: tool.name.slice(prefix.length),
+        description: tool.description,
+        readOnly: tool.readOnly,
+      }));
+  }
+
+  async function handleSaveMcpConfig(): Promise<void> {
+    if (!selectedMcpServer) return;
+    if (mcpSettingsConfigText.trim() === "") {
+      setErrorMessage("MCP 配置不能为空");
+      return;
+    }
+    setSavingMcpConfig(true);
+    setErrorMessage(null);
+    try {
+      await runtimeClient.updateMcpServerConfig(selectedMcpServer.name, {
+        configText: mcpSettingsConfigText,
+      });
+      onNotice(`已更新 ${selectedMcpServer.name} 配置，正在重新连接`);
+      const [config, logs] = await Promise.all([
+        runtimeClient.getMcpServerConfig(selectedMcpServer.name),
+        runtimeClient.getRuntimeLogs(),
+      ]);
+      setMcpSettingsConfigText(config.configText);
+      setMcpLogs(filterMcpLogs(logs, selectedMcpServer.name));
+      await refresh();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "保存 MCP 配置失败");
+    } finally {
+      setSavingMcpConfig(false);
+    }
+  }
+
+  function filterMcpLogs(logs: RuntimeLogEntry[], serverName: string): RuntimeLogEntry[] {
+    const keywords = [serverName.toLowerCase(), "mcp"];
+    return logs.filter((entry) =>
+      keywords.some((keyword) => entry.line.toLowerCase().includes(keyword)),
+    );
   }
 
   async function handleInstallSkill(): Promise<void> {
@@ -304,6 +449,7 @@ export function ExtensionsView({
   }
 
   function renderMcpServerCard(server: RuntimeMcpServer) {
+    const disabled = server.state === "disabled";
     return (
       <article className="extension-card extension-card-compact" key={server.name}>
         <div className="extension-card-icon" aria-hidden="true">
@@ -317,6 +463,29 @@ export function ExtensionsView({
             </span>
           </div>
           <p>{server.errorReason || `${server.transport} · ${server.scope}`}</p>
+        </div>
+        <div className="extension-card-actions">
+          <button
+            type="button"
+            className={`mcp-toggle-switch${disabled ? " mcp-toggle-switch-off" : " mcp-toggle-switch-on"}`}
+            aria-label={disabled ? `启用 ${server.name}` : `停用 ${server.name}`}
+            disabled={busyMcpServerName === server.name}
+            onClick={() => {
+              void handleToggleMcpServer(server);
+            }}
+          >
+            <span className="mcp-toggle-switch-thumb" />
+          </button>
+          <button
+            type="button"
+            className="extension-card-action"
+            aria-label={`设置 ${server.name}`}
+            onClick={() => {
+              void loadMcpSettings(server);
+            }}
+          >
+            <Settings size={18} strokeWidth={1.9} />
+          </button>
         </div>
       </article>
     );
@@ -480,6 +649,96 @@ export function ExtensionsView({
             onChange={(event) => setMcpConfigText(event.target.value)}
           />
           <div className="extension-dialog-note">配置前确认来源和命令参数，避免运行不可信服务。</div>
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={mcpSettingsOpen}
+        title={selectedMcpServer ? `${selectedMcpServer.name} 设置` : "MCP 设置"}
+        onOpenChange={(open) => {
+          setMcpSettingsOpen(open);
+          if (!open) {
+            setSelectedMcpServer(null);
+            setMcpSettingsConfigText("");
+            setMcpSettingsScope("");
+            setMcpTools([]);
+            setMcpLogs([]);
+          }
+        }}
+        footer={
+          <>
+            <Button
+              variant="default"
+              size="md"
+              disabled={savingMcpConfig}
+              onClick={() => setMcpSettingsOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              variant="primary"
+              size="md"
+              loading={savingMcpConfig}
+              disabled={mcpSettingsConfigText.trim() === ""}
+              onClick={() => {
+                void handleSaveMcpConfig();
+              }}
+            >
+              <Check size={15} strokeWidth={1.9} />
+              保存
+            </Button>
+          </>
+        }
+      >
+        <div className="mcp-settings-dialog-body">
+          {errorMessage ? <div className="extension-message" role="alert">{errorMessage}</div> : null}
+
+          <section className="mcp-settings-section">
+            <div className="mcp-settings-section-header">
+              <h3>配置</h3>
+              <span className="mcp-settings-scope">{mcpSettingsScope ? sourceLabel(mcpSettingsScope) : ""}</span>
+            </div>
+            <textarea
+              className="mcp-settings-code"
+              value={mcpSettingsConfigText}
+              spellCheck={false}
+              disabled={loadingMcpSettings}
+              onChange={(event) => setMcpSettingsConfigText(event.target.value)}
+            />
+          </section>
+
+          <section className="mcp-settings-section">
+            <h3>方法</h3>
+            {mcpTools.length > 0 ? (
+              <ul className="mcp-tools-list">
+                {mcpTools.map((tool) => (
+                  <li key={tool.name}>
+                    <code>{tool.name}</code>
+                    <span>{tool.description}</span>
+                    {tool.readOnly ? <span className="mcp-tool-readonly">只读</span> : null}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="mcp-settings-empty">尚未获取到工具</div>
+            )}
+          </section>
+
+          <section className="mcp-settings-section">
+            <h3>日志</h3>
+            {mcpLogs.length > 0 ? (
+              <div className="mcp-logs-panel">
+                {mcpLogs.map((entry) => (
+                  <div key={entry.id} className={`mcp-log-line mcp-log-line-${entry.stream}`}>
+                    <span className="mcp-log-time">{new Date(entry.timestamp).toLocaleTimeString()}</span>
+                    <span className="mcp-log-text">{entry.line}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mcp-settings-empty">暂无相关日志</div>
+            )}
+          </section>
         </div>
       </Dialog>
 

@@ -10,8 +10,10 @@ import (
 )
 
 func TestTranscriptStoreAppendsMessagesEventsIdempotentlyAndLoads(t *testing.T) {
-	workspace := WorkspaceConfig{WorkspaceRoot: t.TempDir()}
+	setRuntimeUserDataDir(t)
+	t.TempDir()
 	run := Run{RunID: "run_1", ThreadID: "thread_1"}
+	path := transcriptPath(run.ThreadID)
 	preEstimate := 120
 	postEstimate := 80
 	fallbackUsed := true
@@ -36,16 +38,16 @@ func TestTranscriptStoreAppendsMessagesEventsIdempotentlyAndLoads(t *testing.T) 
 		{Role: convcontext.RoleAssistant, Content: "done", CompactBoundaryID: "compact_1"},
 	}
 
-	if err := appendUserTranscriptRecord(workspace, run, "session_1", "hello", nil); err != nil {
+	if err := appendUserTranscriptRecordAtPath(path, run, "session_1", "hello", nil); err != nil {
 		t.Fatalf("appendUserTranscriptRecord returned error: %v", err)
 	}
-	if err := appendUserTranscriptRecord(workspace, run, "session_1", "hello", nil); err != nil {
+	if err := appendUserTranscriptRecordAtPath(path, run, "session_1", "hello", nil); err != nil {
 		t.Fatalf("second appendUserTranscriptRecord returned error: %v", err)
 	}
-	if err := appendConversationTranscript(workspace, run, messages); err != nil {
+	if err := appendConversationTranscriptAtPath(path, run, messages); err != nil {
 		t.Fatalf("appendConversationTranscript returned error: %v", err)
 	}
-	if err := appendConversationTranscript(workspace, run, messages); err != nil {
+	if err := appendConversationTranscriptAtPath(path, run, messages); err != nil {
 		t.Fatalf("second appendConversationTranscript returned error: %v", err)
 	}
 
@@ -115,14 +117,14 @@ func TestTranscriptStoreAppendsMessagesEventsIdempotentlyAndLoads(t *testing.T) 
 			},
 		},
 	}
-	if err := appendRunEventTranscript(workspace, run, events); err != nil {
+	if err := appendRunEventTranscriptAtPath(path, run, events); err != nil {
 		t.Fatalf("appendRunEventTranscript returned error: %v", err)
 	}
-	if err := appendRunEventTranscript(workspace, run, events); err != nil {
+	if err := appendRunEventTranscriptAtPath(path, run, events); err != nil {
 		t.Fatalf("second appendRunEventTranscript returned error: %v", err)
 	}
 
-	records, err := readTranscriptRecords(transcriptPath(workspace.WorkspaceRoot, run.ThreadID))
+	records, err := readTranscriptRecords(path)
 	if err != nil {
 		t.Fatalf("readTranscriptRecords returned error: %v", err)
 	}
@@ -148,7 +150,7 @@ func TestTranscriptStoreAppendsMessagesEventsIdempotentlyAndLoads(t *testing.T) 
 		t.Fatalf("unexpected tool transcript record: %+v", records[2])
 	}
 
-	restored, err := loadRestoredTranscript(workspace, run.ThreadID)
+	restored, err := loadRestoredTranscriptAtPath(path)
 	if err != nil {
 		t.Fatalf("loadRestoredTranscript returned error: %v", err)
 	}
@@ -176,7 +178,7 @@ func TestTranscriptStoreAppendsMessagesEventsIdempotentlyAndLoads(t *testing.T) 
 		t.Fatalf("expected restored terminal event, got reason=%q event=%+v", restored.TerminalReason, restored.TerminalEvent)
 	}
 
-	durableRuns, err := loadDurableTranscriptRuns(workspace, run.ThreadID)
+	durableRuns, err := loadDurableTranscriptRunsAtPath(path, run.ThreadID)
 	if err != nil {
 		t.Fatalf("loadDurableTranscriptRuns returned error: %v", err)
 	}
@@ -217,8 +219,10 @@ func TestTranscriptStoreAppendsMessagesEventsIdempotentlyAndLoads(t *testing.T) 
 }
 
 func TestTranscriptLoaderRejectsInvalidToolPairing(t *testing.T) {
-	workspace := WorkspaceConfig{WorkspaceRoot: t.TempDir()}
+	setRuntimeUserDataDir(t)
+	t.TempDir()
 	threadID := "thread_bad"
+	path := transcriptPath(threadID)
 	record := transcriptRecordForMessage(threadID, "run_bad", "", 0, convcontext.Message{
 		Role: convcontext.RoleAssistant,
 		ToolCalls: []convcontext.ToolCall{{
@@ -230,19 +234,21 @@ func TestTranscriptLoaderRejectsInvalidToolPairing(t *testing.T) {
 			},
 		}},
 	}, time.Now().UTC())
-	if err := appendTranscriptRecords(transcriptPath(workspace.WorkspaceRoot, threadID), []TranscriptRecord{record}); err != nil {
+	if err := appendTranscriptRecords(path, []TranscriptRecord{record}); err != nil {
 		t.Fatalf("appendTranscriptRecords returned error: %v", err)
 	}
 
-	_, err := loadRestoredTranscript(workspace, threadID)
+	_, err := loadRestoredTranscriptAtPath(path)
 	if err == nil || !strings.Contains(err.Error(), "invalid transcript tool result pairing") {
 		t.Fatalf("expected invalid pairing error, got %v", err)
 	}
 }
 
 func TestTranscriptStorePreservesRawHistoryAndRestoresCompactRuntimeView(t *testing.T) {
-	workspace := WorkspaceConfig{WorkspaceRoot: t.TempDir()}
+	setRuntimeUserDataDir(t)
+	t.TempDir()
 	run := Run{RunID: "run_compact", ThreadID: "thread_compact"}
+	path := transcriptPath(run.ThreadID)
 
 	rawMessages := []convcontext.Message{
 		{Role: convcontext.RoleUser, Content: "first"},
@@ -250,7 +256,7 @@ func TestTranscriptStorePreservesRawHistoryAndRestoresCompactRuntimeView(t *test
 		{Role: convcontext.RoleUser, Content: "second"},
 		{Role: convcontext.RoleAssistant, Content: "beta"},
 	}
-	if err := appendConversationTranscript(workspace, run, rawMessages); err != nil {
+	if err := appendConversationTranscriptAtPath(path, run, rawMessages); err != nil {
 		t.Fatalf("appendConversationTranscript raw returned error: %v", err)
 	}
 
@@ -259,14 +265,14 @@ func TestTranscriptStorePreservesRawHistoryAndRestoresCompactRuntimeView(t *test
 		{Role: convcontext.RoleUser, Content: "second"},
 		{Role: convcontext.RoleAssistant, Content: "beta"},
 	}
-	if err := appendConversationTranscript(workspace, run, compactedMessages); err != nil {
+	if err := appendConversationTranscriptAtPath(path, run, compactedMessages); err != nil {
 		t.Fatalf("appendConversationTranscript compacted returned error: %v", err)
 	}
-	if err := appendConversationTranscript(workspace, run, compactedMessages); err != nil {
+	if err := appendConversationTranscriptAtPath(path, run, compactedMessages); err != nil {
 		t.Fatalf("second appendConversationTranscript compacted returned error: %v", err)
 	}
 
-	records, err := readTranscriptRecords(transcriptPath(workspace.WorkspaceRoot, run.ThreadID))
+	records, err := readTranscriptRecords(path)
 	if err != nil {
 		t.Fatalf("readTranscriptRecords returned error: %v", err)
 	}
@@ -274,7 +280,7 @@ func TestTranscriptStorePreservesRawHistoryAndRestoresCompactRuntimeView(t *test
 		t.Fatalf("expected raw history plus compacted runtime view to total 7 messages, got %d", got)
 	}
 
-	restored, err := loadRestoredTranscript(workspace, run.ThreadID)
+	restored, err := loadRestoredTranscriptAtPath(path)
 	if err != nil {
 		t.Fatalf("loadRestoredTranscript returned error: %v", err)
 	}
@@ -298,8 +304,10 @@ func TestTranscriptStorePreservesRawHistoryAndRestoresCompactRuntimeView(t *test
 }
 
 func TestTranscriptLoaderRecoversLegacyCompactBoundaryAndReactiveMode(t *testing.T) {
-	workspace := WorkspaceConfig{WorkspaceRoot: t.TempDir()}
+	setRuntimeUserDataDir(t)
+	t.TempDir()
 	threadID := "thread_legacy"
+	path := transcriptPath(threadID)
 	record := TranscriptRecord{
 		RecordType: transcriptRecordTypeEvent,
 		ThreadID:   threadID,
@@ -315,11 +323,11 @@ func TestTranscriptLoaderRecoversLegacyCompactBoundaryAndReactiveMode(t *testing
 		},
 		Timestamp: time.Now().UTC(),
 	}
-	if err := appendTranscriptRecords(transcriptPath(workspace.WorkspaceRoot, threadID), []TranscriptRecord{record}); err != nil {
+	if err := appendTranscriptRecords(path, []TranscriptRecord{record}); err != nil {
 		t.Fatalf("appendTranscriptRecords returned error: %v", err)
 	}
 
-	restored, err := loadRestoredTranscript(workspace, threadID)
+	restored, err := loadRestoredTranscriptAtPath(path)
 	if err != nil {
 		t.Fatalf("loadRestoredTranscript returned error: %v", err)
 	}

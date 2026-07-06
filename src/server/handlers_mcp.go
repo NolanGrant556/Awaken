@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"awaken/src/mcpclient"
@@ -224,11 +222,7 @@ func writeServerConfig(w http.ResponseWriter, name string, scope mcpclient.Scope
 
 // userMcpConfigPath returns the absolute path to ~/.awaken/mcp.json.
 func userMcpConfigPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join("~", ".awaken", "mcp.json")
-	}
-	return filepath.Join(home, ".awaken", "mcp.json")
+	return mcpclient.UserConfigPath()
 }
 
 func (h mcpHandlers) handleUpdateServerConfig(w http.ResponseWriter, r *http.Request) {

@@ -692,6 +692,7 @@ export function ExtensionsView({
               variant="default"
               size="md"
               className="mcp-settings-delete-btn"
+              style={{ color: "var(--aw-error)" }}
               disabled={savingMcpConfig}
               onClick={() => {
                 void handleDeleteMcpServer();

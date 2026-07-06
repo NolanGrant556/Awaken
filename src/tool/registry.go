@@ -22,7 +22,8 @@ var safeNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 // mcpSafeNamePattern extends the builtin safe-name pattern to allow the
 // double-underscore separator used by MCP-sourced tools
 // (mcp__{server}__{tool}) and the skill__ prefix used by skill tools.
-var mcpSafeNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_]+(?:__[a-zA-Z0-9_]+)*$`)
+// Hyphens are allowed because many public MCP server names use them.
+var mcpSafeNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+(?:__[a-zA-Z0-9_-]+)*$`)
 
 func RegisterTool(tool Tool) error {
 	if err := ValidateTool(tool); err != nil {

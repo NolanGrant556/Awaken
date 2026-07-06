@@ -52,3 +52,10 @@ apps/desktop/resources/bin/
 
 # Local Awaken runtime transcripts
 .awaken/
+
+# Local agent/workspace files
+sourcecode/
+.claude/
+CLAUDE.md
+openspec/
+.trae/skills/

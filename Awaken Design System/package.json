@@ -23,7 +23,7 @@
     "build": "vite build && npm run build:types && npm run copy:assets",
     "build:gallery": "vite build --mode gallery",
     "build:types": "tsc -p tsconfig.build.json",
-    "copy:assets": "mkdir -p dist/tokens dist/assets && cp src/tokens/*.css dist/tokens/ && cp src/assets/* dist/assets/ 2>/dev/null || true",
+    "copy:assets": "node ../scripts/copy-design-system-assets.mjs",
     "preview": "npm run build:gallery && vite preview --host 127.0.0.1",
     "smoke:render": "npm run build && node smoke/render-smoke.mjs",
     "typecheck": "tsc --noEmit"

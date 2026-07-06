@@ -245,6 +245,12 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
   height: 1px;
 }
 
+/* On non-macOS platforms the traffic-light spacer is hidden, so we add a
+   small left padding to keep the first icon from touching the window edge. */
+.workbench-chrome-no-spacer .workbench-chrome-left {
+  padding-left: 12px;
+}
+
 .workbench-chrome-icon {
   position: relative;
   top: 2px;

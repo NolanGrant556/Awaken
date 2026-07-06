@@ -510,6 +510,7 @@ describe("App workbench presentation", () => {
     expect(html).toContain('placeholder=""');
     expect(html).toContain('rows="3"');
     expect(html).toContain("New Agent");
+    expect(html).not.toContain("⌘N");
     expect(html).toContain("Add folder");
     expect(html).toContain("连接器");
     expect(html).toContain("技能");

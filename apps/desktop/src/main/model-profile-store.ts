@@ -16,6 +16,7 @@ import {
 } from "./model-capabilities.js";
 
 const MODEL_PROFILES_FILE = "model-profiles.json";
+const DUPLICATE_MODEL_PROFILE_ERROR = "模型配置重复，添加失败";
 
 export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
   {
@@ -297,6 +298,60 @@ function decryptCredential(credential?: StoredCredential): string {
   return safeStorage.decryptString(Buffer.from(credential.encryptedApiKey, "base64"));
 }
 
+function templateProfileForSave(
+  store: StoreFile,
+  providerId: string,
+  templateProfileId: string | undefined,
+): StoredModelProfile | undefined {
+  if (!templateProfileId) return undefined;
+  const templateProfile = store.profiles.find((profile) => profile.id === templateProfileId);
+  if (!templateProfile || templateProfile.providerId !== providerId) {
+    return undefined;
+  }
+  return templateProfile;
+}
+
+function storedProfileIdentityKey(profile: StoredModelProfile): string {
+  const provider = providerById(profile.providerId);
+  const modelId = normalizeProviderModelId(provider, profile.modelId);
+  return `${profile.providerId}::${modelId}`;
+}
+
+function mergeStoredProfiles(
+  preferred: StoredModelProfile,
+  fallback: StoredModelProfile,
+): StoredModelProfile {
+  return {
+    ...preferred,
+    displayName: preferred.displayName || fallback.displayName,
+    baseURL: preferred.baseURL || fallback.baseURL,
+    protocol: preferred.protocol || fallback.protocol,
+    authScheme: preferred.authScheme || fallback.authScheme,
+    advanced: preferred.advanced ?? fallback.advanced,
+    credential: preferred.credential ?? fallback.credential,
+    isDefault: preferred.isDefault || fallback.isDefault,
+  };
+}
+
+function dedupeStoredProfiles(profiles: StoredModelProfile[]): StoredModelProfile[] {
+  const dedupedByIdentity = new Map<string, StoredModelProfile>();
+  const orderedProfiles: StoredModelProfile[] = [];
+
+  for (let index = profiles.length - 1; index >= 0; index -= 1) {
+    const profile = profiles[index];
+    const identityKey = storedProfileIdentityKey(profile);
+    const existing = dedupedByIdentity.get(identityKey);
+    if (existing) {
+      dedupedByIdentity.set(identityKey, mergeStoredProfiles(existing, profile));
+      continue;
+    }
+    dedupedByIdentity.set(identityKey, profile);
+    orderedProfiles.unshift(profile);
+  }
+
+  return orderedProfiles.map((profile) => dedupedByIdentity.get(storedProfileIdentityKey(profile)) ?? profile);
+}
+
 export class ModelProfileStore {
   private filePath: string;
 
@@ -328,11 +383,25 @@ export class ModelProfileStore {
     const existingIndex = request.id
       ? store.profiles.findIndex((profile) => profile.id === request.id)
       : -1;
-    const existing = existingIndex >= 0 ? store.profiles[existingIndex] : undefined;
     const modelId = normalizeProviderModelId(provider, request.modelId);
     const baseURL = normalizeProviderBaseURL(provider, request.baseURL);
+    const existing = existingIndex >= 0 ? store.profiles[existingIndex] : undefined;
+    const templateProfile = templateProfileForSave(
+      store,
+      provider.id,
+      request.templateProfileId,
+    );
+    const duplicateProfile = store.profiles.find(
+      (profile) =>
+        profile.id !== existing?.id &&
+        profile.providerId === provider.id &&
+        normalizeProviderModelId(provider, profile.modelId) === modelId,
+    );
+    if (duplicateProfile) {
+      throw new Error(DUPLICATE_MODEL_PROFILE_ERROR);
+    }
     const advanced = normalizeAdvancedWithModelCapability(
-      request.advanced ?? existing?.advanced,
+      request.advanced ?? existing?.advanced ?? templateProfile?.advanced,
       provider.id,
       provider.endpoint_model ? request.advanced?.endpointId?.trim() || modelId : modelId,
     );
@@ -347,7 +416,7 @@ export class ModelProfileStore {
       enabled: request.enabled ?? existing?.enabled ?? true,
       isDefault: request.isDefault ?? existing?.isDefault ?? store.profiles.length === 0,
       advanced,
-      credential: existing?.credential,
+      credential: existing?.credential ?? templateProfile?.credential,
     };
 
     if (request.apiKey !== undefined && request.apiKey.trim() !== "") {
@@ -356,7 +425,6 @@ export class ModelProfileStore {
     if (!profile.enabled) {
       profile.isDefault = false;
     }
-
     if (existingIndex >= 0) {
       store.profiles[existingIndex] = profile;
     } else {
@@ -441,7 +509,13 @@ export class ModelProfileStore {
     if (!provider) {
       return { ok: false, message: "连接测试失败：未知模型供应商。" };
     }
-    const apiKey = request.apiKey?.trim() || (request.id ? await this.apiKeyForProfile(request.id) : "");
+    const apiKey =
+      request.apiKey?.trim() ||
+      (request.id
+        ? await this.apiKeyForProfile(request.id)
+        : request.templateProfileId
+          ? await this.apiKeyForProfile(request.templateProfileId)
+          : "");
     if (!apiKey) {
       return { ok: false, message: "连接测试失败：请先填写 API key。" };
     }
@@ -495,19 +569,34 @@ export class ModelProfileStore {
     try {
       const raw = await fs.readFile(this.filePath, "utf8");
       const parsed = JSON.parse(raw) as Partial<StoreFile>;
-      return {
+      const store: StoreFile = {
         version: 1,
         profiles: Array.isArray(parsed.profiles) ? parsed.profiles : [],
       };
+      return this.normalizeStore(store);
     } catch {
       return { version: 1, profiles: [] };
     }
   }
 
   private async writeStore(store: StoreFile): Promise<void> {
+    const normalizedStore = this.normalizeStore(store);
     await fs.mkdir(path.dirname(this.filePath), { recursive: true });
     const tempPath = `${this.filePath}.${process.pid}.tmp`;
-    await fs.writeFile(tempPath, `${JSON.stringify(store, null, 2)}\n`, "utf8");
+    await fs.writeFile(tempPath, `${JSON.stringify(normalizedStore, null, 2)}\n`, "utf8");
     await fs.rename(tempPath, this.filePath);
+  }
+
+  private normalizeStore(store: StoreFile): StoreFile {
+    const normalizedStore: StoreFile = {
+      version: 1,
+      profiles: dedupeStoredProfiles(store.profiles),
+    };
+    const preferredProfileId =
+      normalizedStore.profiles.find((profile) => profile.enabled && profile.isDefault)?.id ??
+      normalizedStore.profiles[0]?.id ??
+      "";
+    this.ensureSingleDefault(normalizedStore, preferredProfileId);
+    return normalizedStore;
   }
 }

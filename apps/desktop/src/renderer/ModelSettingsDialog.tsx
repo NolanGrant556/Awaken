@@ -21,6 +21,7 @@ import type { RuntimeClient } from "./runtime/client";
 
 type DraftState = {
   profileId?: string;
+  templateProfileId?: string;
   providerId: string;
   modelId: string;
   apiKey: string;
@@ -51,6 +52,7 @@ const CONTEXT_WINDOW_ANCHOR_SNAP_TOLERANCE = 10_000;
 const MAX_TOKENS_DEFAULT = 8192;
 const MAX_TOKENS_MIN = 256;
 const MAX_TOKENS_MAX = 1_000_000;
+const DUPLICATE_MODEL_PROFILE_ERROR = "模型配置重复，添加失败";
 
 type ModelSettingsDialogProps = {
   open: boolean;
@@ -193,28 +195,36 @@ function draftFromProvider(provider: ModelProvider): DraftState {
   };
 }
 
-function draftFromProfile(
-  profile: RuntimeModelProfileSummary,
+function draftFromTemplate(
+  templateProfile: RuntimeModelProfileSummary | undefined,
   provider: ModelProvider,
+  isDefault: boolean,
 ): DraftState {
-  const modelId = profile.modelId || provider.defaultModel;
+  if (!templateProfile) {
+    return {
+      ...draftFromProvider(provider),
+      isDefault,
+    };
+  }
+
+  const modelId = templateProfile.modelId || provider.defaultModel;
   return {
-    profileId: profile.id,
-    providerId: profile.providerId,
+    templateProfileId: templateProfile.id,
+    providerId: templateProfile.providerId,
     modelId,
     apiKey: "",
-    baseURL: profile.baseURL || provider.baseURL,
-    protocol: profile.protocol || provider.protocol,
-    authScheme: profile.authScheme || provider.authScheme,
-    enabled: profile.enabled,
-    isDefault: profile.isDefault,
+    baseURL: templateProfile.baseURL || provider.baseURL,
+    protocol: templateProfile.protocol || provider.protocol,
+    authScheme: templateProfile.authScheme || provider.authScheme,
+    enabled: true,
+    isDefault,
     endpointId:
-      profile.advanced?.endpointId ??
-      (provider.endpointModel ? profile.modelId : ""),
+      templateProfile.advanced?.endpointId ??
+      (provider.endpointModel ? templateProfile.modelId : ""),
     advanced: advancedWithModelCapability(
       provider,
       modelId,
-      profile.advanced,
+      templateProfile.advanced,
       false,
     ),
   };
@@ -239,6 +249,7 @@ function toSaveRequest(
   );
   return {
     id: draft.profileId,
+    templateProfileId: draft.templateProfileId,
     providerId: provider.id,
     displayName: provider.displayName,
     modelId,
@@ -287,8 +298,14 @@ export function ModelSettingsDialog({
     return new Map(providers.map((provider) => [provider.id, provider]));
   }, [providers]);
 
-  const profileByProviderId = useMemo(() => {
-    return new Map(profiles.map((profile) => [profile.providerId, profile]));
+  const profilesByProviderId = useMemo(() => {
+    const groupedProfiles = new Map<string, RuntimeModelProfileSummary[]>();
+    for (const profile of profiles) {
+      const existingProfiles = groupedProfiles.get(profile.providerId) ?? [];
+      existingProfiles.push(profile);
+      groupedProfiles.set(profile.providerId, existingProfiles);
+    }
+    return groupedProfiles;
   }, [profiles]);
 
   const loadModelSettings = useCallback(async () => {
@@ -321,6 +338,13 @@ export function ModelSettingsDialog({
     }, 2000);
   }
 
+  function collapseProviderEditor(): void {
+    setExpandedProviderId(null);
+    setOpenModelPickerProviderId(null);
+    setDraft(null);
+    setShowApiKey(false);
+  }
+
   useEffect(() => {
     if (!open) {
       setExpandedProviderId(null);
@@ -347,16 +371,35 @@ export function ModelSettingsDialog({
     };
   }, []);
 
+  function providerTemplateProfile(
+    providerId: string,
+  ): RuntimeModelProfileSummary | undefined {
+    const providerProfiles = profilesByProviderId.get(providerId) ?? [];
+    for (let index = providerProfiles.length - 1; index >= 0; index -= 1) {
+      if (providerProfiles[index]?.hasKey) {
+        return providerProfiles[index];
+      }
+    }
+    return providerProfiles[providerProfiles.length - 1];
+  }
+
+  function createDraftForProvider(provider: ModelProvider): DraftState {
+    return draftFromTemplate(
+      providerTemplateProfile(provider.id),
+      provider,
+      profiles.length === 0,
+    );
+  }
+
   function selectProvider(provider: ModelProvider): void {
-    const existingProfile = profileByProviderId.get(provider.id);
-    setExpandedProviderId((current) =>
-      current === provider.id ? null : provider.id,
-    );
-    setDraft(
-      existingProfile
-        ? draftFromProfile(existingProfile, provider)
-        : draftFromProvider(provider),
-    );
+    if (expandedProviderId === provider.id) {
+      collapseProviderEditor();
+      setMessage(null);
+      return;
+    }
+
+    setExpandedProviderId(provider.id);
+    setDraft(createDraftForProvider(provider));
     setOpenModelPickerProviderId(null);
     setShowApiKey(false);
     setMessage(null);
@@ -371,12 +414,18 @@ export function ModelSettingsDialog({
     try {
       await runtimeClient.saveModelProfile(toSaveRequest(draft, provider));
       await loadModelSettings();
+      collapseProviderEditor();
       onProfilesChanged();
       showToast("模型配置已保存");
     } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : "Failed to save model profile",
-      );
+      const errorMessage =
+        error instanceof Error ? error.message : "Failed to save model profile";
+      if (errorMessage.includes(DUPLICATE_MODEL_PROFILE_ERROR)) {
+        showToast(DUPLICATE_MODEL_PROFILE_ERROR);
+        setMessage(null);
+        return;
+      }
+      setMessage(errorMessage);
     } finally {
       setSaving(false);
     }
@@ -695,13 +744,15 @@ export function ModelSettingsDialog({
                 const isExpanded = expandedProviderId === provider.id;
                 const isModelPickerOpen =
                   openModelPickerProviderId === provider.id;
-                const existingProfile = profileByProviderId.get(provider.id);
+                const providerProfiles =
+                  profilesByProviderId.get(provider.id) ?? [];
+                const configuredModelList = providerProfiles
+                  .map((profile) => profile.modelId)
+                  .join(" / ");
                 const providerDraft =
                   draft?.providerId === provider.id
                     ? draft
-                    : existingProfile
-                      ? draftFromProfile(existingProfile, provider)
-                      : draftFromProvider(provider);
+                    : createDraftForProvider(provider);
                 return (
                   <div className="model-provider-card" key={provider.id}>
                     <button
@@ -724,6 +775,12 @@ export function ModelSettingsDialog({
                     </button>
                     {isExpanded ? (
                       <div className="model-provider-form">
+                        {configuredModelList ? (
+                          <div className="model-provider-template-note">
+                            已配置模型：{configuredModelList}。当前提交会新增模型配置；同厂商同模型
+                            ID 会提示失败。
+                          </div>
+                        ) : null}
                         {provider.allowCustomModel ? (
                           <div className="model-provider-field">
                             <label

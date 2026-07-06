@@ -17,7 +17,7 @@ import (
 // indirections over the tool registry so tests can substitute fakes.
 // The default values route to the real registry in awaken/src/tool.
 var (
-	toolRegisterForce = func(t tool.Tool) error { return tool.RegisterToolForce(t) }
+	toolRegisterForce      = func(t tool.Tool) error { return tool.RegisterToolForce(t) }
 	toolUnregisterByPrefix = tool.UnregisterToolsByPrefix
 )
 
@@ -105,8 +105,8 @@ func WithToolsChangedCallback(fn func(serverName string)) ManagerOption {
 // Start is called.
 func NewManager(opts ...ManagerOption) *Manager {
 	m := &Manager{
-		logger:     noopLogger{},
-		servers:    make(map[string]*managedServer),
+		logger:      noopLogger{},
+		servers:     make(map[string]*managedServer),
 		credentials: NewInMemoryCredentialStore(),
 	}
 	for _, opt := range opts {

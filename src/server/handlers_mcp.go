@@ -310,6 +310,64 @@ func (h mcpHandlers) handleServerAuth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (h mcpHandlers) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
+	if h.manager == nil {
+		writeErrorJSON(w, http.StatusServiceUnavailable, "MCP_UNAVAILABLE", "mcp manager not configured")
+		return
+	}
+	if strings.TrimSpace(h.workspaceRoot) == "" {
+		writeErrorJSON(w, http.StatusServiceUnavailable, "WORKSPACE_UNAVAILABLE", "workspace root not configured")
+		return
+	}
+
+	name := r.PathValue("name")
+	if name == "" {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "server name is required")
+		return
+	}
+
+	deleted := false
+	userCfg, err := mcpclient.LoadUserConfig()
+	if err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "USER_CONFIG_INVALID", err.Error())
+		return
+	}
+	if _, ok := userCfg.Servers[name]; ok {
+		delete(userCfg.Servers, name)
+		if err := mcpclient.SaveUserConfig(userCfg); err != nil {
+			writeErrorJSON(w, http.StatusInternalServerError, "USER_CONFIG_WRITE_FAILED", err.Error())
+			return
+		}
+		deleted = true
+	}
+
+	if !deleted {
+		projectCfg, err := mcpclient.LoadProjectConfig(h.workspaceRoot)
+		if err != nil {
+			writeErrorJSON(w, http.StatusBadRequest, "PROJECT_CONFIG_INVALID", err.Error())
+			return
+		}
+		if _, ok := projectCfg.Servers[name]; ok {
+			delete(projectCfg.Servers, name)
+			if err := mcpclient.SaveProjectConfig(h.workspaceRoot, projectCfg); err != nil {
+				writeErrorJSON(w, http.StatusInternalServerError, "PROJECT_CONFIG_WRITE_FAILED", err.Error())
+				return
+			}
+			deleted = true
+		}
+	}
+
+	_, managerErr := h.manager.SnapshotServer(name)
+	managerHas := managerErr == nil
+	if !deleted && !managerHas {
+		writeErrorJSON(w, http.StatusNotFound, "SERVER_NOT_FOUND", fmt.Sprintf("mcp server %q not found", name))
+		return
+	}
+
+	_ = h.manager.Remove(name)
+	writeJSON(w, http.StatusOK, map[string]string{"name": name})
+}
+
 func parseMCPServersConfig(configText string) (map[string]mcpclient.McpServerConfig, error) {
 	trimmed := strings.TrimSpace(configText)
 	if trimmed == "" {

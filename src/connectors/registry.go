@@ -22,11 +22,14 @@ var ErrConnectorAlreadyConnected = errors.New("connector is already connected")
 var ErrConnectorNotConnected = errors.New("connector is not connected")
 
 // RuntimeManager abstracts the MCP manager operations that the connector
-// registry needs: InjectDynamic, RemoveDynamic, and Snapshot.
+// registry needs.
 type RuntimeManager interface {
 	InjectDynamic(connectorID string, config mcpclient.ScopedMcpServerConfig)
 	RemoveDynamic(connectorID, serverName string)
+	Start(ctx context.Context, configs []mcpclient.ScopedMcpServerConfig)
+	Remove(name string) error
 	Snapshot() []mcpclient.ServerSnapshot
+	SnapshotServer(name string) (mcpclient.ServerSnapshot, error)
 }
 
 // Registry is the central connector lifecycle manager. It holds connector
@@ -37,8 +40,8 @@ type Registry struct {
 	manager RuntimeManager
 
 	mu     sync.RWMutex
-	active map[string]*activeEntry            // connectorID -> runtime state
-	defs   map[string]ConnectorDefinition     // resolved+merged definitions
+	active map[string]*activeEntry        // connectorID -> runtime state
+	defs   map[string]ConnectorDefinition // resolved+merged definitions
 }
 
 // activeEntry tracks runtime state for a connector that has been connected.
@@ -56,7 +59,7 @@ func NewRegistry(manager RuntimeManager, logger Logger) *Registry {
 		logger:  logger,
 		manager: manager,
 		active:  make(map[string]*activeEntry),
-		defs:   make(map[string]ConnectorDefinition),
+		defs:    make(map[string]ConnectorDefinition),
 	}
 }
 
@@ -133,7 +136,21 @@ func (r *Registry) Connect(ctx context.Context, connectorID string) error {
 	}
 
 	if entry := r.active[connectorID]; entry != nil && entry.connected {
-		return ErrConnectorAlreadyConnected
+		stale := false
+		if def.SourceOrigin == SourceBuiltin {
+			stale = true
+			for _, key := range entry.serverKeys {
+				if _, err := r.manager.SnapshotServer(key); err == nil {
+					stale = false
+					break
+				}
+			}
+		}
+		if !stale {
+			return ErrConnectorAlreadyConnected
+		}
+		entry.connected = false
+		entry.serverKeys = nil
 	}
 
 	// Generate MCP server configs.
@@ -155,11 +172,28 @@ func (r *Registry) Connect(ctx context.Context, connectorID string) error {
 		return fmt.Errorf("connector %q has neither a config factory nor a raw config", connectorID)
 	}
 
-	// Inject each generated config into the runtime.
 	var serverKeys []string
-	for key, cfg := range scopedConfigs {
-		r.manager.InjectDynamic(connectorID, cfg)
-		serverKeys = append(serverKeys, key)
+	if def.SourceOrigin == SourceBuiltin {
+		userCfg, err := mcpclient.LoadUserConfig()
+		if err != nil {
+			return fmt.Errorf("load user mcp config: %w", err)
+		}
+		if userCfg.Servers == nil {
+			userCfg.Servers = map[string]mcpclient.McpServerConfig{}
+		}
+		for key, cfg := range scopedConfigs {
+			userCfg.Servers[key] = cfg.Config
+			serverKeys = append(serverKeys, key)
+		}
+		if err := mcpclient.SaveUserConfig(userCfg); err != nil {
+			return fmt.Errorf("save user mcp config: %w", err)
+		}
+		r.manager.Start(context.WithoutCancel(ctx), scopedConfigsToSlice(scopedConfigs))
+	} else {
+		for key, cfg := range scopedConfigs {
+			r.manager.InjectDynamic(connectorID, cfg)
+			serverKeys = append(serverKeys, key)
+		}
 	}
 
 	r.active[connectorID] = &activeEntry{
@@ -171,20 +205,49 @@ func (r *Registry) Connect(ctx context.Context, connectorID string) error {
 	return nil
 }
 
+func scopedConfigsToSlice(configs map[string]mcpclient.ScopedMcpServerConfig) []mcpclient.ScopedMcpServerConfig {
+	out := make([]mcpclient.ScopedMcpServerConfig, 0, len(configs))
+	for _, cfg := range configs {
+		out = append(out, cfg)
+	}
+	return out
+}
+
 // Disconnect removes a connector's MCP servers from the runtime and marks
 // the connector as disconnected.
 func (r *Registry) Disconnect(_ context.Context, connectorID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	def, ok := r.defs[connectorID]
+	if !ok {
+		return ErrConnectorNotFound
+	}
+
 	entry, ok := r.active[connectorID]
 	if !ok || !entry.connected {
 		return ErrConnectorNotConnected
 	}
 
-	// Remove each injected server from the runtime.
-	for _, key := range entry.serverKeys {
-		r.manager.RemoveDynamic(connectorID, key)
+	if def.SourceOrigin == SourceBuiltin {
+		userCfg, err := mcpclient.LoadUserConfig()
+		if err != nil {
+			return fmt.Errorf("load user mcp config: %w", err)
+		}
+		if userCfg.Servers == nil {
+			userCfg.Servers = map[string]mcpclient.McpServerConfig{}
+		}
+		for _, key := range entry.serverKeys {
+			delete(userCfg.Servers, key)
+			_ = r.manager.Remove(key)
+		}
+		if err := mcpclient.SaveUserConfig(userCfg); err != nil {
+			return fmt.Errorf("save user mcp config: %w", err)
+		}
+	} else {
+		for _, key := range entry.serverKeys {
+			r.manager.RemoveDynamic(connectorID, key)
+		}
 	}
 
 	entry.connected = false
@@ -221,10 +284,10 @@ func (r *Registry) List() []ConnectorStatus {
 	var out []ConnectorStatus
 	for id, def := range r.defs {
 		status := ConnectorStatus{
-			ID:          def.ID,
-			DisplayName: def.DisplayName,
-			Category:    def.Category,
-			Provider:    def.Provider,
+			ID:           def.ID,
+			DisplayName:  def.DisplayName,
+			Category:     def.Category,
+			Provider:     def.Provider,
 			SourceOrigin: def.SourceOrigin,
 			AuthType:     def.AuthType,
 			State:        StateDisconnected,
@@ -273,10 +336,10 @@ func (r *Registry) Status(connectorID string) (ConnectorStatus, error) {
 	}
 
 	status := ConnectorStatus{
-		ID:          def.ID,
-		DisplayName: def.DisplayName,
-		Category:    def.Category,
-		Provider:    def.Provider,
+		ID:           def.ID,
+		DisplayName:  def.DisplayName,
+		Category:     def.Category,
+		Provider:     def.Provider,
 		SourceOrigin: def.SourceOrigin,
 		AuthType:     def.AuthType,
 		State:        StateDisconnected,

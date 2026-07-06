@@ -88,6 +88,7 @@ func TestValidateToolAcceptsMcpAndSkillNames(t *testing.T) {
 	cases := []string{
 		"mcp__filesystem__read_file",
 		"mcp__slack__post_message",
+		"mcp__chrome-devtools-mcp__close_page",
 		"skill__planner__draft_outline",
 		"web_search", // builtin-style still accepted
 	}

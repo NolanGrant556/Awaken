@@ -31,6 +31,7 @@ function createElectronBridge(
     pickWorkspace: vi.fn(async () => ({ canceled: true as const })),
     validateWorkspace: vi.fn(async () => ({ valid: true as const })),
     persistWorkspaceRegistry: vi.fn(async () => undefined),
+    deleteMcpServer: vi.fn(async () => undefined),
     getSupervisorStatus: vi.fn(() => Promise.resolve(status)),
     onSupervisorStatusChange: vi.fn((callback: (info: SupervisorStatusInfo) => void) => {
       statusCallbacks.push(callback);

@@ -51,6 +51,7 @@ export type RuntimeClient = {
   getRuntimeLogs: () => Promise<RuntimeLogEntry[]>;
   disableMcpServer: (name: string) => Promise<void>;
   enableMcpServer: (name: string) => Promise<void>;
+  deleteMcpServer: (name: string) => Promise<void>;
   listMcpTools: () => Promise<RuntimeToolInfo[]>;
   listSkills: () => Promise<RuntimeSkill[]>;
   installSkill: (request: InstallSkillRequest) => Promise<InstallSkillResponse>;
@@ -110,6 +111,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     getRuntimeLogs: () => bridge.getRuntimeLogs(),
     disableMcpServer: (name) => bridge.disableMcpServer(name),
     enableMcpServer: (name) => bridge.enableMcpServer(name),
+    deleteMcpServer: (name) => bridge.deleteMcpServer(name),
     listMcpTools: () => bridge.listMcpTools(),
     listSkills: () => bridge.listSkills(),
     installSkill: (request) => bridge.installSkill(request),

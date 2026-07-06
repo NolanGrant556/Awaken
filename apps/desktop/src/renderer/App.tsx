@@ -2351,6 +2351,7 @@ export function App() {
           }}
           chrome={
             <WorkbenchChrome
+              platform={platform}
               sidebarCollapsed={sidebarCollapsed}
               onToggleSidebar={() =>
                 setSidebarCollapsed((collapsed) => !collapsed)

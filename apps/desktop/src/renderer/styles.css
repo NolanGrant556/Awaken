@@ -866,6 +866,12 @@ pre {
   font-weight: 700;
 }
 
+.model-provider-template-note {
+  color: var(--aw-text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .model-provider-form input,
 .model-provider-form select {
   width: 100%;

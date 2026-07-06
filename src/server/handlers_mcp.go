@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,6 +54,16 @@ type configureMCPServersResponse struct {
 	ServerNames []string `json:"serverNames"`
 	ConfigPath  string   `json:"configPath,omitempty"`
 	Message     string   `json:"message"`
+}
+
+type mcpServerConfigResponse struct {
+	Name       string `json:"name"`
+	ConfigText string `json:"configText"`
+	Scope      string `json:"scope"`
+}
+
+type updateMcpServerConfigRequest struct {
+	ConfigText string `json:"configText"`
 }
 
 type mcpConfigPayload struct {
@@ -142,7 +153,10 @@ func (h mcpHandlers) handleConfigureServers(w http.ResponseWriter, r *http.Reque
 	serverNames := make([]string, 0, len(servers))
 	for name, cfg := range servers {
 		serverNames = append(serverNames, name)
-		h.manager.Start(r.Context(), []mcpclient.ScopedMcpServerConfig{{
+		// Detach from the request context so the async connect loop keeps
+		// running after the HTTP response is sent. Without this, request
+		// cancellation would mask the real connection failure reason.
+		h.manager.Start(context.WithoutCancel(r.Context()), []mcpclient.ScopedMcpServerConfig{{
 			Name:   name,
 			Scope:  mcpclient.ScopeProject,
 			Config: cfg,
@@ -152,6 +166,116 @@ func (h mcpHandlers) handleConfigureServers(w http.ResponseWriter, r *http.Reque
 		ServerNames: serverNames,
 		ConfigPath:  filepath.Join(h.workspaceRoot, "awaken.mcp.json"),
 		Message:     fmt.Sprintf("configured %d MCP server(s)", len(serverNames)),
+	})
+}
+
+func (h mcpHandlers) handleGetServerConfig(w http.ResponseWriter, r *http.Request) {
+	if h.manager == nil {
+		writeErrorJSON(w, http.StatusServiceUnavailable, "MCP_UNAVAILABLE", "mcp manager not configured")
+		return
+	}
+	if strings.TrimSpace(h.workspaceRoot) == "" {
+		writeErrorJSON(w, http.StatusServiceUnavailable, "WORKSPACE_UNAVAILABLE", "workspace root not configured")
+		return
+	}
+
+	name := r.PathValue("name")
+	if name == "" {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "server name is required")
+		return
+	}
+
+	projectCfg, err := mcpclient.LoadProjectConfig(h.workspaceRoot)
+	if err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "PROJECT_CONFIG_INVALID", err.Error())
+		return
+	}
+	if cfg, ok := projectCfg.Servers[name]; ok {
+		writeServerConfig(w, name, mcpclient.ScopeProject, cfg)
+		return
+	}
+
+	userCfg, err := mcpclient.LoadUserConfig()
+	if err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "USER_CONFIG_INVALID", err.Error())
+		return
+	}
+	if cfg, ok := userCfg.Servers[name]; ok {
+		writeServerConfig(w, name, mcpclient.ScopeUser, cfg)
+		return
+	}
+
+	writeErrorJSON(w, http.StatusNotFound, "SERVER_NOT_FOUND", fmt.Sprintf("mcp server %q not found", name))
+}
+
+func writeServerConfig(w http.ResponseWriter, name string, scope mcpclient.Scope, cfg mcpclient.McpServerConfig) {
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		writeErrorJSON(w, http.StatusInternalServerError, "SERIALIZE_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, mcpServerConfigResponse{
+		Name:       name,
+		ConfigText: string(data),
+		Scope:      string(scope),
+	})
+}
+
+func (h mcpHandlers) handleUpdateServerConfig(w http.ResponseWriter, r *http.Request) {
+	if h.manager == nil {
+		writeErrorJSON(w, http.StatusServiceUnavailable, "MCP_UNAVAILABLE", "mcp manager not configured")
+		return
+	}
+	if strings.TrimSpace(h.workspaceRoot) == "" {
+		writeErrorJSON(w, http.StatusServiceUnavailable, "WORKSPACE_UNAVAILABLE", "workspace root not configured")
+		return
+	}
+
+	name := r.PathValue("name")
+	if name == "" {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "server name is required")
+		return
+	}
+
+	var req updateMcpServerConfigRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+
+	cfg, err := parseMCPServerEntry(json.RawMessage(req.ConfigText))
+	if err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_MCP_CONFIG", err.Error())
+		return
+	}
+
+	projectCfg, err := mcpclient.LoadProjectConfig(h.workspaceRoot)
+	if err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "PROJECT_CONFIG_INVALID", err.Error())
+		return
+	}
+	if projectCfg.Servers == nil {
+		projectCfg.Servers = map[string]mcpclient.McpServerConfig{}
+	}
+	projectCfg.Servers[name] = cfg
+	if err := mcpclient.SaveProjectConfig(h.workspaceRoot, projectCfg); err != nil {
+		writeErrorJSON(w, http.StatusInternalServerError, "PROJECT_CONFIG_WRITE_FAILED", err.Error())
+		return
+	}
+
+	if err := h.manager.RestartWithConfig(context.WithoutCancel(r.Context()), mcpclient.ScopedMcpServerConfig{
+		Name:   name,
+		Scope:  mcpclient.ScopeProject,
+		Config: cfg,
+	}); err != nil {
+		writeErrorJSON(w, http.StatusInternalServerError, "RESTART_FAILED", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, configureMCPServersResponse{
+		ServerNames: []string{name},
+		ConfigPath:  filepath.Join(h.workspaceRoot, "awaken.mcp.json"),
+		Message:     fmt.Sprintf("updated MCP server %q", name),
 	})
 }
 
@@ -331,7 +455,10 @@ func (h mcpHandlers) handleServerEnable(w http.ResponseWriter, r *http.Request) 
 		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "server name is required")
 		return
 	}
-	if err := h.manager.Enable(r.Context(), name); err != nil {
+	// Detach from the request context so the async connect loop keeps
+	// running after the HTTP response is sent. Without this, request
+	// cancellation would mask the real connection failure reason.
+	if err := h.manager.Enable(context.WithoutCancel(r.Context()), name); err != nil {
 		if errors.Is(err, mcpclient.ErrServerNotFound) {
 			writeErrorJSON(w, http.StatusNotFound, "SERVER_NOT_FOUND", err.Error())
 			return

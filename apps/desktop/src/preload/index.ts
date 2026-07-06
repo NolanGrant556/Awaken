@@ -15,14 +15,18 @@ import {
   type RuntimeConnectorActionResponse,
   type RunStreamHandlers,
   type RuntimeInfo,
+  type RuntimeLogEntry,
   type RuntimeMcpServer,
+  type RuntimeMcpServerConfigResponse,
   type RuntimeModelProfileSummary,
   type RuntimeRun,
   type RuntimeSkill,
   type RuntimeThreadTranscript,
   type RuntimeThread,
+  type RuntimeToolInfo,
   type StartRunRequest,
   type SupervisorStatusInfo,
+  type UpdateMcpServerConfigRequest,
   type WorkspacePickResult,
   type WorkspaceRegistrySyncRequest,
   type WorkspaceValidationResult,
@@ -118,6 +122,18 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:list-mcp-servers") as Promise<RuntimeMcpServer[]>,
   configureMcpServers: (request: ConfigureMcpServersRequest) =>
     ipcRenderer.invoke("awaken:configure-mcp-servers", request) as Promise<ConfigureMcpServersResponse>,
+  getMcpServerConfig: (name: string) =>
+    ipcRenderer.invoke("awaken:get-mcp-server-config", name) as Promise<RuntimeMcpServerConfigResponse>,
+  updateMcpServerConfig: (name: string, request: UpdateMcpServerConfigRequest) =>
+    ipcRenderer.invoke("awaken:update-mcp-server-config", name, request) as Promise<ConfigureMcpServersResponse>,
+  getRuntimeLogs: () =>
+    ipcRenderer.invoke("awaken:get-runtime-logs") as Promise<RuntimeLogEntry[]>,
+  disableMcpServer: (name: string) =>
+    ipcRenderer.invoke("awaken:disable-mcp-server", name) as Promise<void>,
+  enableMcpServer: (name: string) =>
+    ipcRenderer.invoke("awaken:enable-mcp-server", name) as Promise<void>,
+  listMcpTools: () =>
+    ipcRenderer.invoke("awaken:list-mcp-tools") as Promise<RuntimeToolInfo[]>,
   listSkills: () =>
     ipcRenderer.invoke("awaken:list-skills") as Promise<RuntimeSkill[]>,
   installSkill: (request: InstallSkillRequest) =>

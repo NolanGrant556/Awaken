@@ -45,7 +45,7 @@ export function AwakenWorkbenchChrome({
     <header
       className={`workbench-chrome${
         sidebarCollapsed ? " workbench-chrome-collapsed" : ""
-      }`}
+      }${platform !== "macos" ? " workbench-chrome-no-spacer" : ""}`}
       aria-label="Workbench controls"
     >
       <div className="workbench-chrome-left">

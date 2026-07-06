@@ -185,6 +185,13 @@ func TestRunServiceUsesModelProfileForNewAndExistingThreads(t *testing.T) {
 	}
 }
 
+func setRuntimeUserDataDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv(runtimeUserDataDirEnv, dir)
+	return dir
+}
+
 func TestRunServiceWithModelProfilesRequiresProfile(t *testing.T) {
 	service := NewRunServiceWithModelProfiles(
 		func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent {
@@ -1248,6 +1255,7 @@ func TestStartRunWithValidThreadIDReusesAgent(t *testing.T) {
 }
 
 func TestStartRunWithInMemoryThreadDoesNotRequireTranscriptLoad(t *testing.T) {
+	setRuntimeUserDataDir(t)
 	root := t.TempDir()
 	service := NewRunService(
 		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
@@ -1281,7 +1289,7 @@ func TestStartRunWithInMemoryThreadDoesNotRequireTranscriptLoad(t *testing.T) {
 		Content:         "corrupt transcript tail",
 		Timestamp:       time.Now().UTC(),
 	}
-	if err := appendTranscriptRecords(transcriptPath(root, firstRun.ThreadID), []TranscriptRecord{badRecord}); err != nil {
+	if err := appendTranscriptRecords(transcriptPath(firstRun.ThreadID), []TranscriptRecord{badRecord}); err != nil {
 		t.Fatalf("failed to append corrupt transcript record: %v", err)
 	}
 
@@ -1553,6 +1561,7 @@ func TestListThreadsReturnsRecentThreadsFirst(t *testing.T) {
 }
 
 func TestListThreadsRestoresDurableThreadsAfterRestart(t *testing.T) {
+	setRuntimeUserDataDir(t)
 	root := t.TempDir()
 	firstService := newDurableThreadTestService()
 	firstRun, err := firstService.StartRun(StartRunRequest{
@@ -1589,6 +1598,7 @@ func TestListThreadsRestoresDurableThreadsAfterRestart(t *testing.T) {
 }
 
 func TestRenameThreadPersistsDurableLabel(t *testing.T) {
+	setRuntimeUserDataDir(t)
 	root := t.TempDir()
 	service := newDurableThreadTestService()
 	run, err := service.StartRun(StartRunRequest{
@@ -1623,6 +1633,7 @@ func TestRenameThreadPersistsDurableLabel(t *testing.T) {
 }
 
 func TestDeleteThreadRemovesMemoryAndDurableTranscript(t *testing.T) {
+	setRuntimeUserDataDir(t)
 	root := t.TempDir()
 	service := newDurableThreadTestService()
 	run, err := service.StartRun(StartRunRequest{
@@ -1641,7 +1652,7 @@ func TestDeleteThreadRemovesMemoryAndDurableTranscript(t *testing.T) {
 	if got := service.ListThreads(); len(got) != 0 {
 		t.Fatalf("expected no in-memory threads after delete, got %+v", got)
 	}
-	if _, err := os.Stat(transcriptPath(root, run.ThreadID)); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(transcriptPath(run.ThreadID)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected transcript to be removed, got %v", err)
 	}
 
@@ -1716,6 +1727,7 @@ func TestGetThreadTranscriptReturnsOrderedRunsAndInputs(t *testing.T) {
 }
 
 func TestGetThreadTranscriptRestoresDurableThreadWithoutMemory(t *testing.T) {
+	setRuntimeUserDataDir(t)
 	root := t.TempDir()
 	firstService := newDurableThreadTestService()
 	firstRun, err := firstService.StartRun(StartRunRequest{
@@ -1754,7 +1766,8 @@ func TestGetThreadTranscriptRestoresDurableThreadWithoutMemory(t *testing.T) {
 	}
 }
 
-func TestListThreadsRestoresDurableThreadsAcrossHistoryWorkspaces(t *testing.T) {
+func TestListThreadsRestoresDurableThreadsAcrossStoredWorkspaces(t *testing.T) {
+	setRuntimeUserDataDir(t)
 	rootA := t.TempDir()
 	rootB := t.TempDir()
 	firstService := newDurableThreadTestService()
@@ -1783,11 +1796,6 @@ func TestListThreadsRestoresDurableThreadsAcrossHistoryWorkspaces(t *testing.T) 
 	if err := restartedService.SetDefaultWorkspace(WorkspaceConfig{WorkspaceRoot: rootA}); err != nil {
 		t.Fatalf("SetDefaultWorkspace returned error: %v", err)
 	}
-	if err := restartedService.SetHistoryWorkspaces([]WorkspaceConfig{
-		{WorkspaceRoot: rootB},
-	}); err != nil {
-		t.Fatalf("SetHistoryWorkspaces returned error: %v", err)
-	}
 
 	threads := restartedService.ListThreads()
 	if len(threads) != 2 {
@@ -1807,12 +1815,13 @@ func TestListThreadsRestoresDurableThreadsAcrossHistoryWorkspaces(t *testing.T) 
 	}
 }
 
-func TestDurableThreadFallbackSearchesHistoryWorkspaces(t *testing.T) {
+func TestDurableThreadOperationsUseStoredWorkspaceMetadata(t *testing.T) {
+	setRuntimeUserDataDir(t)
 	rootA := t.TempDir()
 	rootB := t.TempDir()
 	firstService := newDurableThreadTestService()
 	firstRun, err := firstService.StartRun(StartRunRequest{
-		Input:     "hello history workspace",
+		Input:     "hello stored workspace",
 		Workspace: WorkspaceConfig{WorkspaceRoot: rootB},
 	})
 	if err != nil {
@@ -1824,11 +1833,6 @@ func TestDurableThreadFallbackSearchesHistoryWorkspaces(t *testing.T) {
 	restartedService := newDurableThreadTestService()
 	if err := restartedService.SetDefaultWorkspace(WorkspaceConfig{WorkspaceRoot: rootA}); err != nil {
 		t.Fatalf("SetDefaultWorkspace returned error: %v", err)
-	}
-	if err := restartedService.SetHistoryWorkspaces([]WorkspaceConfig{
-		{WorkspaceRoot: rootB},
-	}); err != nil {
-		t.Fatalf("SetHistoryWorkspaces returned error: %v", err)
 	}
 
 	transcript, err := restartedService.GetThreadTranscript(firstRun.ThreadID)
@@ -1850,12 +1854,13 @@ func TestDurableThreadFallbackSearchesHistoryWorkspaces(t *testing.T) {
 	if err := restartedService.DeleteThread(firstRun.ThreadID); err != nil {
 		t.Fatalf("DeleteThread returned error: %v", err)
 	}
-	if _, err := os.Stat(transcriptPath(rootB, firstRun.ThreadID)); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(transcriptPath(firstRun.ThreadID)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected workspace B transcript to be removed, got %v", err)
 	}
 }
 
 func TestRunServiceRestoresThreadConversationFromTranscript(t *testing.T) {
+	setRuntimeUserDataDir(t)
 	root := t.TempDir()
 	restoredHistory := make(chan []convcontext.Message, 1)
 
@@ -1942,6 +1947,7 @@ func TestRunServiceRestoresThreadConversationFromTranscript(t *testing.T) {
 }
 
 func TestRunServiceRestoresCancelledThreadUserTranscript(t *testing.T) {
+	setRuntimeUserDataDir(t)
 	root := t.TempDir()
 	started := make(chan struct{})
 	restoredHistory := make(chan []convcontext.Message, 1)
@@ -2074,9 +2080,10 @@ func threadHasActiveRun(service *RunService, threadID, runID string) bool {
 
 func waitForTranscriptMessageCount(t *testing.T, workspaceRoot, threadID string, want int) []TranscriptRecord {
 	t.Helper()
+	_ = workspaceRoot
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		records, err := readTranscriptRecords(transcriptPath(workspaceRoot, threadID))
+		records, err := readTranscriptRecords(transcriptPath(threadID))
 		if err == nil && transcriptMessageCount(records) >= want {
 			return records
 		}

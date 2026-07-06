@@ -12,6 +12,7 @@ import (
 
 	"awaken/src/agentcore"
 	convcontext "awaken/src/context"
+	"awaken/src/desktopdata"
 )
 
 const (
@@ -52,11 +53,10 @@ type restoredTranscript struct {
 	TerminalEvent          *agentcore.AwakenEvent
 }
 
-func appendUserTranscriptRecord(workspace WorkspaceConfig, run Run, sessionID string, input string, attachments []RunInputAttachment) error {
+func appendUserTranscriptRecordAtPath(path string, run Run, sessionID string, input string, attachments []RunInputAttachment) error {
 	if strings.TrimSpace(input) == "" && len(attachments) == 0 {
 		return nil
 	}
-	path := transcriptPath(workspace.WorkspaceRoot, run.ThreadID)
 	records, err := readTranscriptRecords(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -79,8 +79,7 @@ func appendUserTranscriptRecord(workspace WorkspaceConfig, run Run, sessionID st
 	return appendTranscriptRecords(path, []TranscriptRecord{record})
 }
 
-func appendConversationTranscript(workspace WorkspaceConfig, run Run, messages []convcontext.Message) error {
-	path := transcriptPath(workspace.WorkspaceRoot, run.ThreadID)
+func appendConversationTranscriptAtPath(path string, run Run, messages []convcontext.Message) error {
 	records, err := readTranscriptRecords(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -108,8 +107,7 @@ func appendConversationTranscript(workspace WorkspaceConfig, run Run, messages [
 	return appendTranscriptMessageSuffix(path, run, records, messages, 0)
 }
 
-func appendRunEventTranscript(workspace WorkspaceConfig, run Run, events []Event) error {
-	path := transcriptPath(workspace.WorkspaceRoot, run.ThreadID)
+func appendRunEventTranscriptAtPath(path string, run Run, events []Event) error {
 	records, err := readTranscriptRecords(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -165,8 +163,7 @@ func appendRunEventTranscript(workspace WorkspaceConfig, run Run, events []Event
 	return appendTranscriptRecords(path, pending)
 }
 
-func appendThreadLabelTranscriptRecord(workspace WorkspaceConfig, threadID, label string, timestamp time.Time) error {
-	path := transcriptPath(workspace.WorkspaceRoot, threadID)
+func appendThreadLabelTranscriptRecordAtPath(path, threadID, label string, timestamp time.Time) error {
 	if timestamp.IsZero() {
 		timestamp = time.Now().UTC()
 	}
@@ -178,8 +175,7 @@ func appendThreadLabelTranscriptRecord(workspace WorkspaceConfig, threadID, labe
 	}})
 }
 
-func loadRestoredTranscript(workspace WorkspaceConfig, threadID string) (restoredTranscript, error) {
-	path := transcriptPath(workspace.WorkspaceRoot, threadID)
+func loadRestoredTranscriptAtPath(path string) (restoredTranscript, error) {
 	records, err := readTranscriptRecords(path)
 	if err != nil {
 		return restoredTranscript{}, err
@@ -231,7 +227,7 @@ func loadRestoredTranscript(workspace WorkspaceConfig, threadID string) (restore
 		}
 	}
 	if restored.Label == "" {
-		restored.Label = threadID
+		restored.Label = strings.TrimPrefix(strings.TrimSuffix(filepath.Base(path), ".jsonl"), "thread_")
 	}
 	if restored.CreatedAt.IsZero() {
 		restored.CreatedAt = time.Now().UTC()
@@ -245,30 +241,7 @@ func loadRestoredTranscript(workspace WorkspaceConfig, threadID string) (restore
 	return restored, nil
 }
 
-func loadDurableThreadSnapshots(workspace WorkspaceConfig) ([]ThreadSnapshot, error) {
-	dir := filepath.Join(filepath.Clean(workspace.WorkspaceRoot), ".awaken", "transcripts")
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-
-	snapshots := make([]ThreadSnapshot, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
-			continue
-		}
-		threadID := strings.TrimSuffix(entry.Name(), ".jsonl")
-		restored, err := loadRestoredTranscript(workspace, threadID)
-		if err != nil {
-			continue
-		}
-		snapshots = append(snapshots, threadSnapshotFromRestored(threadID, workspace, restored))
-	}
-	return snapshots, nil
-}
-
-func loadDurableTranscriptRuns(workspace WorkspaceConfig, threadID string) (map[string]ThreadTranscriptRun, error) {
-	path := transcriptPath(workspace.WorkspaceRoot, threadID)
+func loadDurableTranscriptRunsAtPath(path string, threadID string) (map[string]ThreadTranscriptRun, error) {
 	records, err := readTranscriptRecords(path)
 	if err != nil {
 		return nil, err
@@ -390,8 +363,14 @@ func appendTranscriptRecords(path string, records []TranscriptRecord) error {
 	return nil
 }
 
-func removeThreadTranscript(workspace WorkspaceConfig, threadID string) error {
-	return os.Remove(transcriptPath(workspace.WorkspaceRoot, threadID))
+func deleteThreadTranscriptAtPath(path string) error {
+	if err := os.Remove(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ErrThreadNotFound
+		}
+		return err
+	}
+	return nil
 }
 
 func transcriptRecordForMessage(threadID, runID, sessionID string, index int, message convcontext.Message, timestamp time.Time) TranscriptRecord {
@@ -430,8 +409,8 @@ func transcriptMessageCount(records []TranscriptRecord) int {
 	return count
 }
 
-func transcriptPath(workspaceRoot string, threadID string) string {
-	return filepath.Join(filepath.Clean(workspaceRoot), ".awaken", "transcripts", safeTranscriptFileName(threadID)+".jsonl")
+func transcriptPath(threadID string) string {
+	return desktopdata.Detect().ThreadTranscriptPath(threadID)
 }
 
 func transcriptMessageID(threadID string, index int) string {

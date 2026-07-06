@@ -36,10 +36,6 @@ type renameThreadRequest struct {
 	Label string `json:"label"`
 }
 
-type workspaceRegistryRequest struct {
-	WorkspaceRoots []string `json:"workspace_roots"`
-}
-
 type errorResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
@@ -94,31 +90,6 @@ func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 
 func (h runHandlers) handleListThreads(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.runService.ListThreads())
-}
-
-func (h runHandlers) handleSyncWorkspaceRegistry(w http.ResponseWriter, r *http.Request) {
-	var req workspaceRegistryRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
-		return
-	}
-
-	workspaces := make([]awruntime.WorkspaceConfig, 0, len(req.WorkspaceRoots))
-	for _, root := range req.WorkspaceRoots {
-		workspaces = append(workspaces, awruntime.WorkspaceConfig{
-			WorkspaceRoot: root,
-		})
-	}
-	if err := h.runService.SetHistoryWorkspaces(workspaces); err != nil {
-		if errors.Is(err, awruntime.ErrInvalidInput) {
-			writeErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
-			return
-		}
-		writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to sync workspace registry")
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h runHandlers) handleRenameThread(w http.ResponseWriter, r *http.Request) {

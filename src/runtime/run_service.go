@@ -99,14 +99,14 @@ func (f ExecutorFunc) Run(ctx context.Context, input string, sink agentcore.Even
 }
 
 type RunService struct {
-	mu                sync.RWMutex
-	sessions          map[string]*Session
-	threads           map[string]*Thread
-	defaultWorkspace  WorkspaceConfig
-	historyWorkspaces []WorkspaceConfig
-	newAgent          func(workspace WorkspaceConfig, threadID string) *agentcore.Agent
-	newProfileAgent   func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent
-	newExecutor       func(agent *agentcore.Agent) Executor
+	mu               sync.RWMutex
+	sessions         map[string]*Session
+	threads          map[string]*Thread
+	defaultWorkspace WorkspaceConfig
+	newAgent         func(workspace WorkspaceConfig, threadID string) *agentcore.Agent
+	newProfileAgent  func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent
+	newExecutor      func(agent *agentcore.Agent) Executor
+	threadStore      ThreadStore
 }
 
 // Thread holds the reusable Agent and metadata for a multi-turn conversation.
@@ -153,6 +153,7 @@ func NewRunService(
 		threads:     make(map[string]*Thread),
 		newAgent:    newAgent,
 		newExecutor: newExecutor,
+		threadStore: newThreadStore(),
 	}
 }
 
@@ -175,27 +176,6 @@ func (s *RunService) SetDefaultWorkspace(workspace WorkspaceConfig) error {
 	}
 	s.mu.Lock()
 	s.defaultWorkspace = normalized
-	s.mu.Unlock()
-	return nil
-}
-
-func (s *RunService) SetHistoryWorkspaces(workspaces []WorkspaceConfig) error {
-	normalized := make([]WorkspaceConfig, 0, len(workspaces))
-	seen := make(map[string]struct{}, len(workspaces))
-	for _, workspace := range workspaces {
-		next, err := normalizeWorkspace(workspace)
-		if err != nil {
-			return err
-		}
-		if _, ok := seen[next.WorkspaceRoot]; ok {
-			continue
-		}
-		seen[next.WorkspaceRoot] = struct{}{}
-		normalized = append(normalized, next)
-	}
-
-	s.mu.Lock()
-	s.historyWorkspaces = normalized
 	s.mu.Unlock()
 	return nil
 }
@@ -229,6 +209,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	var agent *agentcore.Agent
 	modelProfileKey := modelProfileCacheKey(req.ModelProfile)
 	var restored *restoredTranscript
+	var restoredMeta *storedThreadRecord
 	if threadID == "" {
 		threadID = newRuntimeID("thread")
 	} else {
@@ -236,10 +217,11 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		_, threadInMemory := s.threads[threadID]
 		s.mu.RUnlock()
 		if !threadInMemory {
-			loaded, err := loadRestoredTranscript(workspace, threadID)
+			meta, loaded, err := s.threadStore.RestoreThread(threadID)
 			if err == nil {
+				restoredMeta = &meta
 				restored = &loaded
-			} else if !errors.Is(err, os.ErrNotExist) {
+			} else if !errors.Is(err, ErrThreadNotFound) {
 				return Run{}, err
 			}
 		}
@@ -251,6 +233,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	workspace = mergeTaskScopeAttachments(workspace, persistedAttachments)
 	ctx, cancel := context.WithCancel(context.Background())
 	session := NewSession(runID, threadID, trimmed, persistedAttachments, cancel)
+	var threadSnapshot ThreadSnapshot
 
 	s.mu.Lock()
 	if req.ThreadID != "" {
@@ -270,19 +253,21 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 				threadID:        threadID,
 				agent:           agent,
 				workspace:       workspace,
-				label:           restored.Label,
+				label:           firstNonEmpty(restored.Label, restoredMeta.Snapshot.Label),
 				latestRunID:     runID,
 				activeRunID:     runID,
 				runIDs:          runIDs,
 				modelProfileKey: modelProfileKey,
-				createdAt:       restored.CreatedAt,
+				createdAt:       firstNonZeroTime(restored.CreatedAt, restoredMeta.Snapshot.CreatedAt, now),
 				updatedAt:       now,
 			}
 			s.sessions[runID] = session
+			threadSnapshot = s.threads[threadID].snapshot()
 			s.mu.Unlock()
-			_ = appendUserTranscriptRecord(workspace, session.Snapshot(), req.Client.SessionID, trimmed, persistedAttachments)
+			_ = s.threadStore.CreateThread(threadSnapshot, modelProfileKey, threadLabelForInput(trimmed, persistedAttachments))
+			_ = s.threadStore.AppendRunInput(threadSnapshot, session.Snapshot(), req.Client.SessionID, trimmed, persistedAttachments)
 			executor := s.newExecutor(agent)
-			go s.execute(session, executor, agent, trimmed, persistedAttachments, ctx, workspace)
+			go s.execute(session, executor, agent, trimmed, persistedAttachments, ctx)
 			return session.Snapshot(), nil
 		}
 		if !sameWorkspaceRoot(thread.workspace, workspace) {
@@ -307,6 +292,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		thread.latestRunID = runID
 		thread.runIDs = append(thread.runIDs, runID)
 		thread.updatedAt = now
+		threadSnapshot = thread.snapshot()
 	} else {
 		agent = s.createAgent(workspace, threadID, req.ModelProfile)
 		label := threadLabelForInput(trimmed, persistedAttachments)
@@ -323,13 +309,15 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			updatedAt:       now,
 		}
 		s.pruneInactiveThreadsLocked()
+		threadSnapshot = s.threads[threadID].snapshot()
 	}
 	s.sessions[runID] = session
 	s.mu.Unlock()
 
-	_ = appendUserTranscriptRecord(workspace, session.Snapshot(), req.Client.SessionID, trimmed, persistedAttachments)
+	_ = s.threadStore.CreateThread(threadSnapshot, modelProfileKey, threadLabelForInput(trimmed, persistedAttachments))
+	_ = s.threadStore.AppendRunInput(threadSnapshot, session.Snapshot(), req.Client.SessionID, trimmed, persistedAttachments)
 	executor := s.newExecutor(agent)
-	go s.execute(session, executor, agent, trimmed, persistedAttachments, ctx, workspace)
+	go s.execute(session, executor, agent, trimmed, persistedAttachments, ctx)
 
 	return session.Snapshot(), nil
 }
@@ -381,19 +369,16 @@ func (s *RunService) ListThreads() []ThreadSnapshot {
 		threads = append(threads, snapshot)
 		seen[snapshot.ThreadID] = true
 	}
-	workspaces := workspaceSearchOrder(s.defaultWorkspace, s.historyWorkspaces)
 	s.mu.RUnlock()
 
-	for _, workspace := range workspaces {
-		durableThreads, err := loadDurableThreadSnapshots(workspace)
-		if err == nil {
-			for _, thread := range durableThreads {
-				if seen[thread.ThreadID] {
-					continue
-				}
-				threads = append(threads, thread)
-				seen[thread.ThreadID] = true
+	durableThreads, err := s.threadStore.ListThreads()
+	if err == nil {
+		for _, thread := range durableThreads {
+			if seen[thread.ThreadID] {
+				continue
 			}
+			threads = append(threads, thread)
+			seen[thread.ThreadID] = true
 		}
 	}
 	sort.Slice(threads, func(i, j int) bool {
@@ -422,29 +407,11 @@ func (s *RunService) RenameThread(threadID, label string) (ThreadSnapshot, error
 		thread.label = normalizedLabel
 		thread.updatedAt = now
 		snapshot := thread.snapshot()
-		workspace := thread.workspace
 		s.mu.Unlock()
-
-		if err := appendThreadLabelTranscriptRecord(workspace, threadID, normalizedLabel, now); err != nil {
-			return ThreadSnapshot{}, err
-		}
-		return snapshot, nil
+		return s.threadStore.RenameThread(threadID, normalizedLabel, snapshot.UpdatedAt)
 	}
-	workspaces := workspaceSearchOrder(s.defaultWorkspace, s.historyWorkspaces)
 	s.mu.Unlock()
-
-	workspace, restored, err := findWorkspaceForThread(workspaces, threadID)
-	if err != nil {
-		return ThreadSnapshot{}, err
-	}
-	if err := appendThreadLabelTranscriptRecord(workspace, threadID, normalizedLabel, now); err != nil {
-		return ThreadSnapshot{}, err
-	}
-
-	snapshot := threadSnapshotFromRestored(threadID, workspace, restored)
-	snapshot.Label = normalizedLabel
-	snapshot.UpdatedAt = now
-	return snapshot, nil
+	return s.threadStore.RenameThread(threadID, normalizedLabel, now)
 }
 
 func (s *RunService) DeleteThread(threadID string) error {
@@ -459,39 +426,16 @@ func (s *RunService) DeleteThread(threadID string) error {
 			s.mu.Unlock()
 			return ErrThreadBusy
 		}
-		workspace := thread.workspace
 		runIDs := append([]string(nil), thread.runIDs...)
 		delete(s.threads, threadID)
 		for _, runID := range runIDs {
 			delete(s.sessions, runID)
 		}
 		s.mu.Unlock()
-
-		if err := removeThreadTranscript(workspace, threadID); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		if err := deleteThreadInputAttachments(threadID); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		return nil
+		return s.threadStore.DeleteThread(threadID)
 	}
-	workspaces := workspaceSearchOrder(s.defaultWorkspace, s.historyWorkspaces)
 	s.mu.Unlock()
-
-	workspace, _, err := findWorkspaceForThread(workspaces, threadID)
-	if err != nil {
-		return err
-	}
-	if err := removeThreadTranscript(workspace, threadID); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return ErrThreadNotFound
-		}
-		return err
-	}
-	if err := deleteThreadInputAttachments(threadID); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return nil
+	return s.threadStore.DeleteThread(threadID)
 }
 
 func (s *RunService) Subscribe(runID string, afterSeq uint64) (Subscription, error) {
@@ -514,16 +458,10 @@ func (s *RunService) GetThreadTranscript(threadID string) (ThreadTranscript, err
 	s.mu.RLock()
 	thread, ok := s.threads[threadID]
 	if !ok {
-		workspaces := workspaceSearchOrder(s.defaultWorkspace, s.historyWorkspaces)
 		s.mu.RUnlock()
-		workspace, _, err := findWorkspaceForThread(workspaces, threadID)
-		if err != nil {
-			return ThreadTranscript{}, err
-		}
-		return loadDurableThreadTranscript(workspace, threadID)
+		return s.threadStore.GetTranscript(threadID)
 	}
 	snapshot := thread.snapshot()
-	workspace := thread.workspace
 	runIDs := append([]string(nil), thread.runIDs...)
 	sessionByRunID := make(map[string]*Session, len(runIDs))
 	for _, runID := range runIDs {
@@ -537,12 +475,13 @@ func (s *RunService) GetThreadTranscript(threadID string) (ThreadTranscript, err
 
 	durableRuns := map[string]ThreadTranscriptRun{}
 	if len(sessionByRunID) < len(runIDs) {
-		loaded, err := loadDurableTranscriptRuns(workspace, threadID)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return ThreadTranscript{}, err
-		}
+		loaded, err := s.threadStore.GetTranscript(threadID)
 		if err == nil {
-			durableRuns = loaded
+			for _, run := range loaded.Runs {
+				durableRuns[run.Run.RunID] = run
+			}
+		} else if !errors.Is(err, ErrThreadNotFound) {
+			return ThreadTranscript{}, err
 		}
 	}
 
@@ -581,68 +520,6 @@ func threadSnapshotFromRestored(threadID string, workspace WorkspaceConfig, rest
 	}
 }
 
-func loadDurableThreadTranscript(workspace WorkspaceConfig, threadID string) (ThreadTranscript, error) {
-	restored, err := loadRestoredTranscript(workspace, threadID)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return ThreadTranscript{}, ErrThreadNotFound
-		}
-		return ThreadTranscript{}, err
-	}
-	durableRuns, err := loadDurableTranscriptRuns(workspace, threadID)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return ThreadTranscript{}, ErrThreadNotFound
-		}
-		return ThreadTranscript{}, err
-	}
-
-	runs := make([]ThreadTranscriptRun, 0, len(restored.RunIDs))
-	for _, runID := range restored.RunIDs {
-		if durable, ok := durableRuns[runID]; ok {
-			runs = append(runs, durable)
-		}
-	}
-	return ThreadTranscript{
-		Thread: threadSnapshotFromRestored(threadID, workspace, restored),
-		Runs:   runs,
-	}, nil
-}
-
-func workspaceSearchOrder(defaultWorkspace WorkspaceConfig, historyWorkspaces []WorkspaceConfig) []WorkspaceConfig {
-	workspaces := make([]WorkspaceConfig, 0, 1+len(historyWorkspaces))
-	seen := make(map[string]struct{}, 1+len(historyWorkspaces))
-	appendWorkspace := func(workspace WorkspaceConfig) {
-		if workspace.WorkspaceRoot == "" {
-			return
-		}
-		if _, ok := seen[workspace.WorkspaceRoot]; ok {
-			return
-		}
-		seen[workspace.WorkspaceRoot] = struct{}{}
-		workspaces = append(workspaces, workspace)
-	}
-	appendWorkspace(defaultWorkspace)
-	for _, workspace := range historyWorkspaces {
-		appendWorkspace(workspace)
-	}
-	return workspaces
-}
-
-func findWorkspaceForThread(workspaces []WorkspaceConfig, threadID string) (WorkspaceConfig, restoredTranscript, error) {
-	for _, workspace := range workspaces {
-		restored, err := loadRestoredTranscript(workspace, threadID)
-		if err == nil {
-			return workspace, restored, nil
-		}
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		return WorkspaceConfig{}, restoredTranscript{}, err
-	}
-	return WorkspaceConfig{}, restoredTranscript{}, ErrThreadNotFound
-}
-
 func (s *RunService) CancelRun(runID string) (Run, error) {
 	session, err := s.session(runID)
 	if err != nil {
@@ -659,10 +536,10 @@ func (s *RunService) ResolveApproval(runID, approvalID string, decision agentcor
 	return session.ResolveApproval(approvalID, decision)
 }
 
-func (s *RunService) execute(session *Session, executor Executor, agent *agentcore.Agent, input string, attachments []RunInputAttachment, ctx context.Context, workspace WorkspaceConfig) {
+func (s *RunService) execute(session *Session, executor Executor, agent *agentcore.Agent, input string, attachments []RunInputAttachment, ctx context.Context) {
 	snapshot := session.Snapshot()
 	defer func() {
-		s.flushAgentTranscript(session, agent, workspace)
+		s.flushAgentTranscript(session, agent)
 		s.clearActiveRun(snapshot.ThreadID, snapshot.RunID)
 	}()
 
@@ -692,13 +569,17 @@ func (s *RunService) execute(session *Session, executor Executor, agent *agentco
 	session.CompleteError(err.Error(), "")
 }
 
-func (s *RunService) flushAgentTranscript(session *Session, agent *agentcore.Agent, workspace WorkspaceConfig) {
+func (s *RunService) flushAgentTranscript(session *Session, agent *agentcore.Agent) {
 	if session == nil || agent == nil {
 		return
 	}
 	run := session.Snapshot()
-	_ = appendConversationTranscript(workspace, run, agent.GetConversation().Context.GetMessages())
-	_ = appendRunEventTranscript(workspace, run, session.History(0))
+	snapshot, ok := s.threadSnapshot(run.ThreadID)
+	if !ok {
+		return
+	}
+	_ = s.threadStore.AppendConversation(snapshot, run, agent.GetConversation().Context.GetMessages())
+	_ = s.threadStore.AppendRunEvents(snapshot, run, session.History(0))
 }
 
 func (s *RunService) clearActiveRun(threadID, runID string) {
@@ -714,6 +595,16 @@ func (s *RunService) clearActiveRun(threadID, runID string) {
 	}
 	thread.activeRunID = ""
 	thread.updatedAt = time.Now().UTC()
+}
+
+func (s *RunService) threadSnapshot(threadID string) (ThreadSnapshot, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	thread, ok := s.threads[threadID]
+	if !ok {
+		return ThreadSnapshot{}, false
+	}
+	return thread.snapshot(), true
 }
 
 func (s *RunService) session(runID string) (*Session, error) {
@@ -771,6 +662,15 @@ func sameWorkspaceRoot(a, b WorkspaceConfig) bool {
 		return false
 	}
 	return true
+}
+
+func firstNonZeroTime(values ...time.Time) time.Time {
+	for _, value := range values {
+		if !value.IsZero() {
+			return value
+		}
+	}
+	return time.Time{}
 }
 
 func sameTaskScope(a, b WorkspaceConfig) bool {

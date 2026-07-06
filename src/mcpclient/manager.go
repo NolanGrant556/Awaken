@@ -221,6 +221,12 @@ func (m *Manager) connectLoop(parentCtx context.Context, server *managedServer) 
 	maxAttempts := 5
 	m.mu.Lock()
 	authHandler := server.authHandler
+	if authHandler == nil && serverAuthURL(server.config) != "" {
+		authHandler = newPersistentOAuthHandler(server.name, AuthFlowConfig{
+			ServerURL: serverAuthURL(server.config),
+		}, m.credentials)
+		server.authHandler = authHandler
+	}
 	m.mu.Unlock()
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		transport, _, err := buildTransport(server.config, m.registry, authHandler, func(panicMsg string) {

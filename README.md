@@ -95,6 +95,8 @@ Desktop 会自己启动并管理 `cmd/awaken-core`。用户和 Desktop 开发者
 
 Runtime / server 只作为内部工程层测试与验证，不形成第三个使用入口。
 
+线程列表、线程 transcript、重启后续问和线程删除都以 Desktop 全局线程库为准，不再依赖扫描 `workspace/.awaken/transcripts` 恢复历史。
+
 当前 HTTP surface：
 
 ```text
@@ -176,6 +178,27 @@ Awaken Desktop
 用户在这里配置 provider、model、API key、上下文窗口和输出上限；Desktop 会把 profile 注入每次 run。正式 Desktop 路径不读取项目根目录的 `.env` 或 `config.toml`，也不会要求用户编辑本地配置文件。
 
 API key 由 Electron `safeStorage` 保存；非敏感 profile 字段保存到 Desktop user data 目录下的 `config/model-profiles.json`。
+
+除模型配置外，Desktop 还会把运行时持久化数据统一收口到 Electron `userData` 目录。当前代码把它固定为 `app.getPath("appData")/@awaken/desktop`。
+
+常见平台路径：
+
+- macOS：`~/Library/Application Support/@awaken/desktop`
+- Windows：`%APPDATA%\\@awaken\\desktop`
+
+当前全局数据布局：
+
+- `config/model-profiles.json`：模型 profile 的非敏感字段
+- `config/mcp-servers.json`：用户级 MCP 配置
+- `data/threads.sqlite`：线程索引
+- `data/threads/thread_<thread_id>.jsonl`：线程 transcript
+- `data/auth/connector-accounts.sqlite`：OAuth / connector 授权元数据
+
+项目级 MCP 配置仍然支持 `<workspace>/awaken.mcp.json`，但它现在是 project override，不再承担 Desktop 全局配置层的职责。
+
+旧的 `workspace/.awaken/transcripts` 不再是正式历史来源。Desktop 发现旧 transcript 目录时，会把它移到系统回收站；新线程统一写入 Desktop 全局线程库。
+
+OAuth token 也不再只放在内存里。当前实现会把授权元数据写入 `data/auth/connector-accounts.sqlite`，敏感 token 则交给系统凭据存储保存，例如 macOS Keychain 或 Windows Credential Manager。
 
 ## 开发命令
 
@@ -283,22 +306,23 @@ web_search
 
 当前权限规则：
 
-- `apply_patch` 修改文件前需要审批。
-- `shell` 允许窄范围只读命令，复杂或危险命令需要审批。
-- `web_search` 不需要审批。
-- 相对路径按配置的 workspace root 解析。
+- `apply_patch` 是默认的文件创建/修改/删除链路。处于当前可写根内的常规文件变更可以自动执行；删除走回收站语义；越界、敏感路径和受保护路径会被拒绝或标记为高风险。
+- `shell` 是更底层的系统操作能力，不再等同于普通文件编辑入口。简单文件写入可能会被重写成 `apply_patch`；open-world 或系统级命令仍受 execution profile、sandbox 和边界规则约束。
+- `web_search` 和只读文件工具通常走低摩擦路径，但仍受当前作用域约束。
+- 路径判断不再只看单一 `workspace root`；runtime 会同时校验 `ReadableRoots`、`WritableRoots`、`OutputRoots`、`ProtectedRoots` 和附件文件范围。
 
 ### MCP runtime
 
 Awaken 自带一个 MCP（Model Context Protocol）客户端 runtime，启动 `awaken-core` 时会自动加载 MCP server 配置并把每个 server 暴露的工具注入到工具池中。MCP 工具的命名格式固定为 `mcp__{server}__{tool}`，agent 调用时按这个前缀路由。
 
-配置加载顺序：
+当前配置来源：
 
 1. 项目级：`<workspace>/awaken.mcp.json`
-2. 用户级：`~/.awaken/mcp.json`
-3. 动态注入：预留给 connector 层（后续 change）
+2. 用户级：`<userData>/config/mcp-servers.json`
+3. 兼容迁移源：旧的 `~/.awaken/mcp.json` 只在新路径缺失时被一次性迁移
+4. connector 层可在运行时补充 server；其中 builtin connector 生成的 server 会持久化到用户级 MCP 配置里，因而能在 Desktop 设置里继续编辑、删除并在重启后保留
 
-合并规则：`project` 覆盖 `user`；同名 server 配置以 project 为准。配置错误打 warning 但不阻塞 runtime 启动。
+合并规则：`project` 覆盖 `user`；配置错误打 warning 但不阻塞 runtime 启动。
 
 支持的 transport：
 
@@ -339,11 +363,11 @@ Awaken 自带一个 MCP（Model Context Protocol）客户端 runtime，启动 `a
 
 4. 通过 `GET /v1/mcp/tools` 查看当前工具池，MCP 工具会以 `mcp__filesystem__read_file` 这样的名字出现。
 
-5. agent 在对话中可以直接调用这些工具；只读 MCP 工具（server 声明 `readOnlyHint: true`）不需要审批，destructive 工具走和内置工具一样的审批流程。
+5. agent 在对话中可以直接调用这些工具；MCP 工具不会走一套独立权限系统，而是复用 Awaken 当前统一的 tool permission / AUTO policy。是否自动执行取决于 server annotations、工具元数据、当前 execution profile 和作用域边界。
 
 完整配置示例见 `docs/awaken.mcp.json.example`。
 
-OAuth-protected server：如果 server 返回 401，runtime 把状态转成 `needs-auth` 并保留配置。前端通过 `POST /v1/mcp/servers/{name}/auth` 触发 OAuth 流程，拿到 authorize URL 后在浏览器完成授权，runtime 把 token 存入内存 `CredentialStore`，下次调用自动带上。
+OAuth-protected server：如果 server 返回 401，runtime 把状态转成 `needs-auth` 并保留配置。前端通过 `POST /v1/mcp/servers/{name}/auth` 触发 OAuth 流程，拿到 authorize URL 后在浏览器完成授权。授权成功后，runtime 会把元数据写入 `data/auth/connector-accounts.sqlite`，并把敏感 token 存入系统凭据存储，这样 Desktop 重启后仍可恢复登录态；恢复失败时状态会回到 `needs-auth` 或 `needs-reauth`。
 
 ## Runtime 内部验证配置
 

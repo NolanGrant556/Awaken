@@ -115,6 +115,16 @@ export type AguiEvent = {
   toolDecisionAction?: string;
   toolDecisionSource?: string;
   toolDecisionReason?: string;
+  /** ExecutionProfile name applied to this call (Task 16 unified observability). */
+  profileName?: string;
+  /** Original tool name when the decision was a transform (e.g. "shell"). */
+  transformedFrom?: string;
+  /** Rewritten tool name when the decision was a transform (e.g. "apply_patch"). */
+  transformedTo?: string;
+  /** Absolute paths moved to the OS recycle bin during this call. */
+  trashedPaths?: string[];
+  /** Populated when a guardian constraint was violated. */
+  guardianViolation?: string;
   approvalId?: string;
   approvalTitle?: string;
   approvalDescription?: string;

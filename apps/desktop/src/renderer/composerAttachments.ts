@@ -44,6 +44,7 @@ export function toRunInputAttachment(
     id: attachment.id,
     kind: attachment.kind,
     mimeType: attachment.mimeType,
+    path: attachment.path,
     dataBase64: attachment.dataBase64,
     displayName: attachment.displayName,
     width: attachment.width,
@@ -55,7 +56,9 @@ export function toRunInputAttachment(
 export function previewURLForRunInputAttachment(
   attachment: Pick<RunInputAttachment, "mimeType" | "dataBase64">,
 ): string {
-  return `data:${attachment.mimeType};base64,${attachment.dataBase64}`;
+  return attachment.dataBase64
+    ? `data:${attachment.mimeType};base64,${attachment.dataBase64}`
+    : "";
 }
 
 export function promptAttachmentViews(
@@ -65,7 +68,7 @@ export function promptAttachmentViews(
     return [];
   }
   return attachments
-    .filter((attachment) => attachment.dataBase64.trim().length > 0)
+    .filter((attachment) => (attachment.dataBase64 ?? "").trim().length > 0)
     .map((attachment) => ({
       id: attachment.id,
       src: previewURLForRunInputAttachment(attachment),

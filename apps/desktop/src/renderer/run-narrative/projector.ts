@@ -137,26 +137,55 @@ export function projectAguiEventToNarrative(
       }
       return activateTool(base, event, progress);
     }
+    case "AWAKEN_TOOL_PERMISSION_DECIDED": {
+      // Task 16 unified observability: surface the profile summary, transform
+      // rewrite, deny reason, trash notification, and guardian violation in
+      // the narrative's tool detail. This event arrives after
+      // TOOL_CALL_START (which activated the tool item) and before
+      // TOOL_PROGRESS started, so we update the active tool's detail in
+      // place. For read-only tools we update the exploring action instead.
+      const detail = toolDecisionDetail(event);
+      if (!detail) {
+        return base;
+      }
+      if (isReadOnlyToolEvent(event)) {
+        return updateExploringAction(base, event, "active", detail);
+      }
+      return activateTool(base, event, detail);
+    }
     case "TOOL_CALL_END":
       if (isReadOnlyToolEvent(event)) {
         return updateExploringAction(base, event, "active", "Tool call ready");
       }
       return activateTool(base, event, "Tool call ready");
-    case "TOOL_CALL_RESULT":
+    case "TOOL_CALL_RESULT": {
+      // TrashedPaths are parsed from the tool output after execution and
+      // now ride on the ToolResult event (post-execution). Surface the
+      // "Deleted file moved to recycle bin" notification in the detail so
+      // the user sees that deleted files are recoverable.
+      const trashNote =
+        event.trashedPaths && event.trashedPaths.length > 0
+          ? "Deleted file moved to recycle bin"
+          : "";
       if (isReadOnlyToolEvent(event)) {
+        const summary = summarizeToolResult(event.content);
+        const detail = trashNote ? `${summary}\n${trashNote}` : summary;
         return updateExploringAction(
           base,
           event,
           toolResultStatus(event.content),
-          summarizeToolResult(event.content),
+          detail,
         );
       }
+      const baseDetail = event.content || "Tool returned empty content";
+      const detail = trashNote ? `${baseDetail}\n${trashNote}` : baseDetail;
       return commitTool(
         base,
         event,
         event.content ? "done" : "error",
-        event.content || "Tool returned empty content",
+        detail,
       );
+    }
     case "AWAKEN_APPROVAL_REQUESTED":
       return activateApproval(base, event);
     case "AWAKEN_APPROVAL_RESOLVED":
@@ -577,6 +606,52 @@ function commitCompactBoundary(state: RunNarrativeState, event: AguiEvent): RunN
 
 function isReadOnlyToolEvent(event: AguiEvent): boolean {
   return READ_ONLY_TOOL_NAMES.has(event.toolCallName ?? "");
+}
+
+// toolDecisionDetail builds a human-readable detail line for the
+// AWAKEN_TOOL_PERMISSION_DECIDED event, surfacing the Task 16 unified
+// observability data:
+//   - transform: "Shell command transformed to apply_patch"
+//   - deny:      "Denied: sensitive path .git/config"
+//   - trash:     "Deleted file moved to recycle bin"
+//   - guardian:  "Guardian: <violation reason>"
+//   - profile:   "Profile: workspace_write"
+//
+// Returns "" when the decision is a plain allow with no observability data to
+// surface (the common case — the tool simply runs). For allow decisions with
+// trashed paths (a delete that went to trash), the trash notification is
+// returned so the user sees that files were recoverable.
+function toolDecisionDetail(event: AguiEvent): string {
+  const action = event.toolDecisionAction;
+  const parts: string[] = [];
+
+  if (event.guardianViolation) {
+    parts.push(`Guardian: ${event.guardianViolation}`);
+  }
+
+  if (action === "transform" && event.transformedFrom && event.transformedTo) {
+    parts.push(`${event.transformedFrom} command transformed to ${event.transformedTo}`);
+  }
+
+  if (action === "deny") {
+    const reason = event.toolDecisionReason || event.message || "denied by policy";
+    parts.push(`Denied: ${reason}`);
+  }
+
+  if (event.trashedPaths && event.trashedPaths.length > 0) {
+    parts.push("Deleted file moved to recycle bin");
+  }
+
+  // For a plain allow with no trash/transform/guardian signal, surface the
+  // profile name only when there is something notable to show (i.e. not the
+  // default workspace_write profile, which would just be noise on every call).
+  // We do surface it for deny/transform/guardian/trash since those are the
+  // cases where the user benefits from knowing which profile governed the call.
+  if (event.profileName && parts.length > 0) {
+    parts.unshift(`Profile: ${event.profileName}`);
+  }
+
+  return parts.join(" · ");
 }
 
 function toolResultStatus(content?: string): "done" | "error" {

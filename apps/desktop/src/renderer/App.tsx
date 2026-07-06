@@ -1390,7 +1390,9 @@ export function App() {
         threadId: runtimeState.activeThreadId || undefined,
         workspace: {
           workspaceRoot,
+          readableRoots: workspaceRoot ? [workspaceRoot] : [],
           writableRoots: workspaceRoot ? [workspaceRoot] : [],
+          outputRoots: workspaceRoot ? [workspaceRoot] : [],
         },
         client: {
           sessionId: window.crypto.randomUUID(),
@@ -2226,7 +2228,7 @@ export function App() {
   const platform = runtimeClient.platform as PlatformKind;
   const composerBarAttachments = composerAttachments.map((attachment) => ({
     id: attachment.id,
-    kind: attachment.kind,
+    kind: "image" as const,
     src: attachment.previewURL,
     alt: attachment.displayName || "Pasted image",
     mimeType: attachment.mimeType,

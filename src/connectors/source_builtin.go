@@ -122,7 +122,7 @@ func puppeteerConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpc
 	return map[string]mcpclient.ScopedMcpServerConfig{
 		"puppeteer": {
 			Name:  "puppeteer",
-			Scope: mcpclient.ScopeDynamic,
+			Scope: mcpclient.ScopeUser,
 			Config: mcpclient.McpServerConfig{
 				Stdio: &mcpclient.StdioTransportConfig{
 					Command: "npx",
@@ -140,7 +140,7 @@ func chromeDevToolsConfigFactory(def ConnectorDefinition, _ []string) map[string
 	return map[string]mcpclient.ScopedMcpServerConfig{
 		"chrome-devtools-mcp": {
 			Name:  "chrome-devtools-mcp",
-			Scope: mcpclient.ScopeDynamic,
+			Scope: mcpclient.ScopeUser,
 			Config: mcpclient.McpServerConfig{
 				Stdio: &mcpclient.StdioTransportConfig{
 					Command: "npx",
@@ -158,7 +158,7 @@ func playwrightConfigFactory(def ConnectorDefinition, _ []string) map[string]mcp
 	return map[string]mcpclient.ScopedMcpServerConfig{
 		"playwright": {
 			Name:  "playwright",
-			Scope: mcpclient.ScopeDynamic,
+			Scope: mcpclient.ScopeUser,
 			Config: mcpclient.McpServerConfig{
 				Stdio: &mcpclient.StdioTransportConfig{
 					Command: "npx",
@@ -176,7 +176,7 @@ func githubConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclie
 	return map[string]mcpclient.ScopedMcpServerConfig{
 		"github": {
 			Name:  "github",
-			Scope: mcpclient.ScopeDynamic,
+			Scope: mcpclient.ScopeUser,
 			Config: mcpclient.McpServerConfig{
 				Stdio: &mcpclient.StdioTransportConfig{
 					Command: "npx",
@@ -196,7 +196,7 @@ func context7ConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpcl
 	return map[string]mcpclient.ScopedMcpServerConfig{
 		"context7": {
 			Name:  "context7",
-			Scope: mcpclient.ScopeDynamic,
+			Scope: mcpclient.ScopeUser,
 			Config: mcpclient.McpServerConfig{
 				Stdio: &mcpclient.StdioTransportConfig{
 					Command: "npx",

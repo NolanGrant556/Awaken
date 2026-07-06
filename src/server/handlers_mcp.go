@@ -364,7 +364,12 @@ func (h mcpHandlers) handleDeleteServer(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	if !deleted {
+	// Determine whether the manager knows this server so we can still allow removal
+	// when the config file has been edited externally or the server was injected.
+	_, managerErr := h.manager.SnapshotServer(name)
+	managerHas := managerErr == nil
+
+	if !deleted && !managerHas {
 		writeErrorJSON(w, http.StatusNotFound, "SERVER_NOT_FOUND", fmt.Sprintf("mcp server %q not found", name))
 		return
 	}

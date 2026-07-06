@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"awaken/src/tool"
@@ -47,6 +49,7 @@ type Manager struct {
 	// The channel is closed when the subscriber's context is cancelled.
 	subscribers   map[chan ServerEvent]context.Context
 	subscribersMu sync.Mutex
+	nextSeq       atomic.Uint64
 }
 
 // managedServer holds the per-server mutable state under the manager's lock.
@@ -59,6 +62,7 @@ type managedServer struct {
 	capability  *ServerCapability
 	errorReason string
 	lastConn    *time.Time
+	seq         uint64
 
 	// sourceConnectorID is set when this server was injected by a connector
 	// via InjectDynamic. It holds the connector's ID.
@@ -129,6 +133,10 @@ func (m *Manager) SetCredentialStore(store CredentialStore) {
 	m.mu.Unlock()
 }
 
+func (m *Manager) nextServerSeq() uint64 {
+	return m.nextSeq.Add(1)
+}
+
 // Start kicks off connection attempts for every loaded server in parallel.
 // Servers that fail to start are recorded in the failed state; the manager
 // continues with the rest.
@@ -157,6 +165,7 @@ func (m *Manager) startOne(ctx context.Context, scoped ScopedMcpServerConfig) {
 			config:      scoped.Config,
 			state:       StateFailed,
 			errorReason: "invalid transport config",
+			seq:         m.nextServerSeq(),
 		}
 		m.mu.Unlock()
 		m.logger.Warnf("mcp server %q has invalid transport, marking failed", scoped.Name)
@@ -171,6 +180,7 @@ func (m *Manager) startOne(ctx context.Context, scoped ScopedMcpServerConfig) {
 			transport:   kind,
 			state:       StateFailed,
 			errorReason: "ws transport not supported in v1",
+			seq:         m.nextServerSeq(),
 		}
 		m.mu.Unlock()
 		m.logger.Warnf("mcp server %q uses unsupported ws transport, marking failed", scoped.Name)
@@ -183,6 +193,7 @@ func (m *Manager) startOne(ctx context.Context, scoped ScopedMcpServerConfig) {
 		config:    scoped.Config,
 		transport: kind,
 		state:     StatePending,
+		seq:       m.nextServerSeq(),
 	}
 	m.mu.Lock()
 	m.servers[scoped.Name] = server
@@ -436,12 +447,18 @@ func (m *Manager) RestartWithConfig(ctx context.Context, scoped ScopedMcpServerC
 	return nil
 }
 
-// Snapshot returns the current state of every server, sorted by name.
+// Snapshot returns the current state of every server, sorted by installation
+// order.
 func (m *Manager) Snapshot() []ServerSnapshot {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	out := make([]ServerSnapshot, 0, len(m.servers))
+	servers := make([]*managedServer, 0, len(m.servers))
 	for _, server := range m.servers {
+		servers = append(servers, server)
+	}
+	sort.Slice(servers, func(i, j int) bool { return servers[i].seq < servers[j].seq })
+	out := make([]ServerSnapshot, 0, len(servers))
+	for _, server := range servers {
 		out = append(out, m.snapshotServerLocked(server))
 	}
 	return out
@@ -587,6 +604,7 @@ func (m *Manager) InjectDynamic(connectorID string, config ScopedMcpServerConfig
 		config:            config.Config,
 		transport:         config.Config.TransportKind(),
 		state:             StatePending,
+		seq:               m.nextServerSeq(),
 		sourceConnectorID: connectorID,
 	}
 	m.servers[config.Name] = server
@@ -626,6 +644,33 @@ func (m *Manager) RemoveDynamic(connectorID, serverName string) {
 		m.onToolsChanged(serverName)
 	}
 	m.logger.Debugf("mcp server %q removed (connector %s)", serverName, connectorID)
+}
+
+// Remove permanently unregisters a server from the manager.
+func (m *Manager) Remove(name string) error {
+	m.mu.Lock()
+	server, ok := m.servers[name]
+	if ok {
+		if server.cancelCtx != nil {
+			server.cancelCtx()
+		}
+		if server.session != nil {
+			_ = server.session.Close()
+		}
+		delete(m.servers, name)
+	}
+	m.mu.Unlock()
+
+	if !ok {
+		return nil
+	}
+
+	m.unregisterTools(name)
+	if m.onToolsChanged != nil {
+		m.onToolsChanged(name)
+	}
+	m.emitEvent(ServerEvent{Type: EventDisconnected, ServerName: name})
+	return nil
 }
 
 // Shutdown closes every connection. Used by tests and on graceful host

@@ -92,6 +92,7 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 		mux.HandleFunc("POST /v1/mcp/servers/{name}/auth", mcpH.handleServerAuth)
 		mux.HandleFunc("POST /v1/mcp/servers/{name}/disable", mcpH.handleServerDisable)
 		mux.HandleFunc("POST /v1/mcp/servers/{name}/enable", mcpH.handleServerEnable)
+		mux.HandleFunc("DELETE /v1/mcp/servers/{name}", mcpH.handleDeleteServer)
 	}
 	connH := connectorHandlers{registry: cfg.connectorRegistry}
 	if cfg.connectorRegistry != nil {

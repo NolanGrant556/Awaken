@@ -50,8 +50,12 @@ type RuntimeSnapshot struct {
 	ModelName        string
 	EntryPoint       string
 	ToolSummary      string
+	ScopeID          string
 	WorkspaceRoot    string
+	ReadableRoots    []string
 	WritableRoots    []string
+	OutputRoots      []string
+	AttachedFiles    []tool.ScopedFile
 }
 
 type ContextCacheKey struct {
@@ -85,14 +89,18 @@ func (snapshot RuntimeSnapshot) ToRuntimeInfo() prompt.RuntimeInfo {
 
 func runtimeSnapshotSystemItem(snapshot RuntimeSnapshot) ContextItem {
 	content := fmt.Sprintf(
-		"current_date=%s\nworking_directory=%s\nmodel_name=%s\nentry_point=%s\ntool_summary=%s\nworkspace_root=%s\nwritable_roots=%s",
+		"current_date=%s\nworking_directory=%s\nmodel_name=%s\nentry_point=%s\ntool_summary=%s\nscope_id=%s\nworkspace_root=%s\nreadable_roots=%s\nwritable_roots=%s\noutput_roots=%s\nattached_files=%d",
 		snapshot.CurrentDate,
 		snapshot.WorkingDirectory,
 		snapshot.ModelName,
 		snapshot.EntryPoint,
 		snapshot.ToolSummary,
+		snapshot.ScopeID,
 		snapshot.WorkspaceRoot,
+		strings.Join(snapshot.ReadableRoots, ","),
 		strings.Join(snapshot.WritableRoots, ","),
+		strings.Join(snapshot.OutputRoots, ","),
+		len(snapshot.AttachedFiles),
 	)
 	return ContextItem{
 		ID:      "runtime_snapshot",

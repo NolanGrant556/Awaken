@@ -130,7 +130,7 @@ func TestGrepSearchDeniesOutsideWorkspace(t *testing.T) {
 	ctx := tool.ContextWithPermissionContext(context.Background(), pc)
 
 	_, err := (&GrepSearchTool{}).Execute(ctx, `{"query":"foo","root":"/etc"}`)
-	if err == nil || !strings.Contains(err.Error(), "outside workspace") {
+	if err == nil || (!strings.Contains(err.Error(), "outside workspace") && !strings.Contains(err.Error(), "outside readable roots")) {
 		t.Fatalf("expected /etc to be denied, got %v", err)
 	}
 }
@@ -146,7 +146,7 @@ func TestGrepSearchBlocksTraversal(t *testing.T) {
 	pc := tool.NewPermissionContext(workspaceRoot, []string{workspaceRoot})
 	ctx := tool.ContextWithPermissionContext(context.Background(), pc)
 	_, err := (&GrepSearchTool{}).Execute(ctx, `{"query":"secret","root":"../outside"}`)
-	if err == nil || !strings.Contains(err.Error(), "outside workspace") {
+	if err == nil || (!strings.Contains(err.Error(), "outside workspace") && !strings.Contains(err.Error(), "outside readable roots")) {
 		t.Fatalf("expected traversal to be denied, got %v", err)
 	}
 }

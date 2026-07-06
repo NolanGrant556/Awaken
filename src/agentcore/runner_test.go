@@ -164,7 +164,7 @@ func TestRunnerToolErrorObservation(t *testing.T) {
 	}
 }
 
-func TestRunnerOpenAIApplyPatchAutoDenyFeedsBack(t *testing.T) {
+func TestRunnerOpenAIApplyPatchAutoAllowFeedsBack(t *testing.T) {
 	root := t.TempDir()
 	target := root + "/runner_patch.txt"
 	createPatch := "*** Begin Patch\n" +
@@ -184,13 +184,19 @@ func TestRunnerOpenAIApplyPatchAutoDenyFeedsBack(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatalf("failed to decode request: %v", err)
 			}
-			if _, err := os.Stat(target); !os.IsNotExist(err) {
-				t.Fatalf("expected AUTO-denied patch not to create file, stat err=%v", err)
+			// Task 4: apply_patch within workspace is now auto-allowed
+			// (boundary + sensitive-path + trash constraints). The file
+			// must exist and the tool result must be a success.
+			if _, err := os.Stat(target); err != nil {
+				t.Fatalf("expected AUTO-allowed patch to create file, stat err=%v", err)
 			}
-			if !containsToolResultSubstring(body.Messages, "call_create_patch", "工具执行被 AUTO policy 拒绝") {
-				t.Fatalf("expected AUTO deny tool result, got %+v", body.Messages)
+			if containsToolResultSubstring(body.Messages, "call_create_patch", "工具执行被 AUTO policy 拒绝") {
+				t.Fatalf("expected AUTO allow tool result, got denial in %+v", body.Messages)
 			}
-			writeRunnerStreamText(t, w, "patch denied")
+			if !containsToolResultSubstring(body.Messages, "call_create_patch", "Success") {
+				t.Fatalf("expected AUTO allow tool result to contain Success, got %+v", body.Messages)
+			}
+			writeRunnerStreamText(t, w, "patch applied")
 			return
 		}
 		t.Fatalf("unexpected call %d", calls)
@@ -209,11 +215,11 @@ func TestRunnerOpenAIApplyPatchAutoDenyFeedsBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if answer != "patch denied" {
+	if answer != "patch applied" {
 		t.Fatalf("expected final answer, got %q", answer)
 	}
 	if sawApproval {
-		t.Fatalf("expected AUTO deny path not to request approval")
+		t.Fatalf("expected AUTO allow path not to request approval")
 	}
 	startIndex := firstEventIndex(gotEvents, ToolCallStartedEventType)
 	decisionIndex := firstEventIndex(gotEvents, ToolPermissionDecidedEventType)
@@ -224,7 +230,7 @@ func TestRunnerOpenAIApplyPatchAutoDenyFeedsBack(t *testing.T) {
 	}
 }
 
-func TestRunnerAnthropicApplyPatchAutoDenyFeedsBack(t *testing.T) {
+func TestRunnerAnthropicApplyPatchAutoAllowFeedsBack(t *testing.T) {
 	root := t.TempDir()
 	target := root + "/anthropic_patch.txt"
 	patch := "*** Begin Patch\n" +
@@ -257,10 +263,12 @@ func TestRunnerAnthropicApplyPatchAutoDenyFeedsBack(t *testing.T) {
 		if !anthropicRequestContainsToolResult(body.Messages, "toolu_patch") {
 			t.Fatalf("expected anthropic tool_result, got %+v", body.Messages)
 		}
-		if _, err := os.Stat(target); !os.IsNotExist(err) {
-			t.Fatalf("expected AUTO-denied patch not to create file, stat err=%v", err)
+		// Task 4: apply_patch within workspace is now auto-allowed.
+		// The file must exist after the call.
+		if _, err := os.Stat(target); err != nil {
+			t.Fatalf("expected AUTO-allowed patch to create file, stat err=%v", err)
 		}
-		writeRunnerAnthropicTextStream(t, w, "anthropic patch denied")
+		writeRunnerAnthropicTextStream(t, w, "anthropic patch applied")
 	}))
 	defer server.Close()
 
@@ -275,11 +283,11 @@ func TestRunnerAnthropicApplyPatchAutoDenyFeedsBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if answer != "anthropic patch denied" {
+	if answer != "anthropic patch applied" {
 		t.Fatalf("expected final answer, got %q", answer)
 	}
 	if sawApproval {
-		t.Fatalf("expected AUTO deny path not to request approval")
+		t.Fatalf("expected AUTO allow path not to request approval")
 	}
 }
 
@@ -830,8 +838,10 @@ data: {"type":"message_stop"}`,
 	if sawApproval {
 		t.Fatalf("unexpected approval request for read-only tool")
 	}
-	if !strings.Contains(toolResultContent, "outside workspace") && !strings.Contains(toolResultContent, "permission") {
-		t.Fatalf("expected tool result to contain workspace denial, got %q", toolResultContent)
+	if !strings.Contains(toolResultContent, "outside workspace") &&
+		!strings.Contains(toolResultContent, "outside readable roots") &&
+		!strings.Contains(toolResultContent, "permission") {
+		t.Fatalf("expected tool result to contain scope denial, got %q", toolResultContent)
 	}
 
 	messages := agent.GetConversation().Context.GetMessages()
@@ -844,7 +854,8 @@ data: {"type":"message_stop"}`,
 	if messages[2].Role != convcontext.RoleTool || messages[2].ToolCallID != "toolu_outside" {
 		t.Fatalf("expected tool result message, got %+v", messages[2])
 	}
-	if !strings.Contains(messages[2].Content, "outside workspace") {
+	if !strings.Contains(messages[2].Content, "outside workspace") &&
+		!strings.Contains(messages[2].Content, "outside readable roots") {
 		t.Fatalf("expected tool result content to contain denial, got %q", messages[2].Content)
 	}
 }

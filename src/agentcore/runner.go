@@ -13,7 +13,6 @@ import (
 	"awaken/src/context"
 	"awaken/src/internal/outputlimit"
 	"awaken/src/llm"
-	"awaken/src/tool"
 )
 
 const (
@@ -216,9 +215,12 @@ func (r *Runner) injectSyntheticToolResultsForCancel() {
 
 func toolRuntimeConfigFromAgentConfig(config AgentConfig) ToolRuntimeConfig {
 	return ToolRuntimeConfig{
-		PermissionContext: tool.NewPermissionContext(config.Workspace.Root, config.Workspace.WritableRoots),
+		PermissionContext: permissionContextFromTaskScope(config.Workspace),
 		AutoToolPolicy:    config.AutoToolPolicy,
 		UseApprovalForAsk: config.UseApprovalForAsk,
+		Profile:           config.ExecutionProfile,
+		SubagentBoundary:  config.SubagentBoundary,
+		SubagentOrigin:    config.SubagentOrigin,
 	}
 }
 
@@ -681,12 +683,13 @@ func (e *runEventEmitter) emitToolProgress(call context.ToolCall, progress strin
 
 func (e *runEventEmitter) emitToolResult(result ToolExecutionResult) {
 	e.emit(AwakenEvent{
-		Type:       ToolResultEventType,
-		MessageID:  newAwakenID("toolmsg"),
-		ToolCallID: result.ToolCallID,
-		ToolName:   result.Name,
-		Content:    result.Content,
-		Role:       "tool",
+		Type:         ToolResultEventType,
+		MessageID:    newAwakenID("toolmsg"),
+		ToolCallID:   result.ToolCallID,
+		ToolName:     result.Name,
+		Content:      result.Content,
+		Role:         "tool",
+		TrashedPaths: result.TrashedPaths,
 	})
 }
 

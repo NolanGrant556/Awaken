@@ -147,12 +147,26 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.ToolDecisionReason = event.ToolDecisionReason
 		base.ApprovalAffectedPaths = event.ApprovalAffectedPaths
 		base.ApprovalPatchSummary = event.ApprovalPatchSummary
+		// Task 16 unified observability: carry the profile name, transform
+		// origin, trashed paths, and guardian violation reason so the
+		// Desktop UI can render them.
+		base.ProfileName = event.ProfileName
+		base.TransformedFrom = event.TransformedFrom
+		base.TransformedTo = event.TransformedTo
+		base.TrashedPaths = event.TrashedPaths
+		base.GuardianViolation = event.GuardianViolation
 		return []Event{base}
 	case agentcore.ToolResultEventType:
 		base.Type = EventToolCallResult
 		base.ToolCallID = event.ToolCallID
 		base.ToolCallName = event.ToolName
 		base.Content = event.Content
+		// TrashedPaths are parsed from the tool output after execution
+		// (see tool_runtime.extractTrashedPaths), so they ride on the
+		// ToolResult event rather than the pre-execution permission-decided
+		// event. Propagate them here so the Desktop UI can surface the
+		// "Deleted file moved to recycle bin" notification.
+		base.TrashedPaths = event.TrashedPaths
 		if base.Role == "" {
 			base.Role = "tool"
 		}

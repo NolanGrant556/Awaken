@@ -522,6 +522,9 @@ func TestApplyPatchRejectsSymlinkEscapeMove(t *testing.T) {
 
 func applyPatchText(t *testing.T, patch string) string {
 	t.Helper()
+	// Install a test trash adapter so delete/move operations don't
+	// pollute the developer's real ~/.Trash during tests.
+	useTestTrashAdapter(t)
 	out, err := (&ApplyPatchTool{}).Execute(context.Background(), patch)
 	if err != nil {
 		t.Fatalf("patch failed: %v", err)
@@ -555,4 +558,141 @@ func assertPathMissing(t *testing.T, path string) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("expected %s to be missing, stat err=%v", path, err)
 	}
+}
+
+// withIsolatedHomeForApplyPatch pins HOME and XDG_CONFIG_HOME to temp dirs so
+// the sensitive-path matcher does not trip over the developer's real
+// ~/.awaken when reasoning about agent-metadata-dir cases.
+func withIsolatedHomeForApplyPatch(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	return home
+}
+
+func TestApplyPatchExecuteRejectsSensitiveGitPath(t *testing.T) {
+	withIsolatedHomeForApplyPatch(t)
+	workspace := t.TempDir()
+	permissionContext := tool.NewPermissionContext(workspace, nil)
+	ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
+
+	_, err := (&ApplyPatchTool{}).Execute(ctx, "*** Begin Patch\n"+
+		"*** Add File: .git/config\n"+
+		"+[core]\n"+
+		"*** End Patch")
+	if err == nil {
+		t.Fatalf("expected error for .git/config mutation")
+	}
+	if !strings.Contains(err.Error(), "sensitive path") {
+		t.Fatalf("expected sensitive path error, got %v", err)
+	}
+
+	// File must not have been written.
+	if _, statErr := os.Stat(filepath.Join(workspace, ".git", "config")); !os.IsNotExist(statErr) {
+		t.Fatalf("expected .git/config to NOT be written")
+	}
+}
+
+func TestApplyPatchExecuteRejectsSensitiveEnvFile(t *testing.T) {
+	withIsolatedHomeForApplyPatch(t)
+	workspace := t.TempDir()
+	permissionContext := tool.NewPermissionContext(workspace, nil)
+	ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
+
+	for _, rel := range []string{".env", ".env.local", ".env.production", ".env.example"} {
+		_, err := (&ApplyPatchTool{}).Execute(ctx, "*** Begin Patch\n"+
+			"*** Add File: "+rel+"\n"+
+			"+SECRET=leaked\n"+
+			"*** End Patch")
+		if err == nil || !strings.Contains(err.Error(), "sensitive path") {
+			t.Fatalf("expected sensitive path error for %q, got %v", rel, err)
+		}
+		if _, statErr := os.Stat(filepath.Join(workspace, rel)); !os.IsNotExist(statErr) {
+			t.Fatalf("expected %s to NOT be written", rel)
+		}
+	}
+}
+
+func TestApplyPatchExecuteRejectsSensitiveKeyFiles(t *testing.T) {
+	withIsolatedHomeForApplyPatch(t)
+	workspace := t.TempDir()
+	permissionContext := tool.NewPermissionContext(workspace, nil)
+	ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
+
+	for _, rel := range []string{"id_rsa", "server.pem", "client.key", "deploy/cert.crt"} {
+		_, err := (&ApplyPatchTool{}).Execute(ctx, "*** Begin Patch\n"+
+			"*** Add File: "+rel+"\n"+
+			"+PRIVATE\n"+
+			"*** End Patch")
+		if err == nil || !strings.Contains(err.Error(), "sensitive path") {
+			t.Fatalf("expected sensitive path error for %q, got %v", rel, err)
+		}
+	}
+}
+
+func TestApplyPatchExecuteRejectsSensitiveMoveDestination(t *testing.T) {
+	withIsolatedHomeForApplyPatch(t)
+	workspace := t.TempDir()
+	permissionContext := tool.NewPermissionContext(workspace, nil)
+	ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
+
+	// Source file is a normal file; destination is sensitive (.env).
+	src := filepath.Join(workspace, "config.txt")
+	writeSeedFile(t, src, "old\n")
+
+	_, err := (&ApplyPatchTool{}).Execute(ctx, "*** Begin Patch\n"+
+		"*** Update File: config.txt\n"+
+		"*** Move to: .env\n"+
+		"@@\n"+
+		"-old\n"+
+		"+new\n"+
+		"*** End Patch")
+	if err == nil || !strings.Contains(err.Error(), "sensitive path") {
+		t.Fatalf("expected sensitive path error for move to .env, got %v", err)
+	}
+
+	// Source file should still exist (move did not happen).
+	assertFileContent(t, src, "old\n")
+}
+
+func TestApplyPatchCheckPermissionMarksSensitivePathAsDanger(t *testing.T) {
+	withIsolatedHomeForApplyPatch(t)
+	workspace := t.TempDir()
+	permissionContext := tool.NewPermissionContext(workspace, nil)
+
+	// CheckPermission must surface sensitive paths as danger risk so the
+	// approval UI can warn even before execution rejects them.
+	decision := (&ApplyPatchTool{}).CheckPermission(context.Background(), "*** Begin Patch\n"+
+		"*** Add File: .git/config\n"+
+		"+[core]\n"+
+		"*** End Patch", permissionContext)
+	if decision.Behavior != tool.PermissionAsk {
+		t.Fatalf("expected ask decision, got %+v", decision)
+	}
+	if decision.ApprovalRequest.RiskTone != "danger" {
+		t.Fatalf("expected danger risk tone for sensitive path, got %v", decision.ApprovalRequest.RiskTone)
+	}
+}
+
+func TestApplyPatchExecuteAllowsNormalFileAlongsideSensitiveChecks(t *testing.T) {
+	withIsolatedHomeForApplyPatch(t)
+	workspace := t.TempDir()
+	permissionContext := tool.NewPermissionContext(workspace, nil)
+	ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
+
+	// A normal file write should still succeed after the sensitive-path
+	// guard is in place.
+	out, err := (&ApplyPatchTool{}).Execute(ctx, "*** Begin Patch\n"+
+		"*** Add File: src/main.go\n"+
+		"+package main\n"+
+		"*** End Patch")
+	if err != nil {
+		t.Fatalf("expected normal file write to succeed, got %v", err)
+	}
+	target := filepath.Join(workspace, "src", "main.go")
+	if !strings.Contains(out, "A "+target) {
+		t.Fatalf("expected add summary, got %q", out)
+	}
+	assertFileContent(t, target, "package main\n")
 }

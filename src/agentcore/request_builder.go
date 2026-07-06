@@ -120,9 +120,13 @@ func contextAttachmentsFromMessages(messages []convcontext.Message) []ContextAtt
 	for _, message := range messages {
 		for _, attachment := range message.Attachments {
 			attachments = append(attachments, ContextAttachment{
-				ID:      attachment.ID,
-				Kind:    attachment.Kind,
-				Path:    firstNonEmptyAttachmentValue(strings.TrimSpace(attachment.DisplayName), strings.TrimSpace(attachment.StorageKey)),
+				ID:   attachment.ID,
+				Kind: attachment.Kind,
+				Path: firstNonEmptyAttachmentValue(
+					strings.TrimSpace(attachment.Path),
+					strings.TrimSpace(attachment.DisplayName),
+					strings.TrimSpace(attachment.StorageKey),
+				),
 				Content: attachment.DataBase64,
 			})
 		}
@@ -164,7 +168,7 @@ func (rb *RequestBuilder) buildToolParameters(t tool.Tool) tool.ToolParametersSc
 func (rb *RequestBuilder) updateRuntimeInfoFromConfig(tools []tool.ToolSchema) {
 	rb.runtimeInfo.UpdateCurrentDate()
 	if strings.TrimSpace(rb.config.Workspace.Root) != "" {
-		rb.runtimeInfo.SetWorkingDir(tool.NewPermissionContext(rb.config.Workspace.Root, rb.config.Workspace.WritableRoots).WorkspaceRootOrCWD())
+		rb.runtimeInfo.SetWorkingDir(permissionContextFromTaskScope(rb.config.Workspace).WorkspaceRootOrCWD())
 	} else {
 		rb.runtimeInfo.UpdateWorkingDir()
 	}
@@ -175,15 +179,19 @@ func (rb *RequestBuilder) updateRuntimeInfoFromConfig(tools []tool.ToolSchema) {
 
 func (rb *RequestBuilder) buildRuntimeSnapshot(tools []tool.ToolSchema) RuntimeSnapshot {
 	rb.updateRuntimeInfoFromConfig(tools)
-	permissionContext := tool.NewPermissionContext(rb.config.Workspace.Root, rb.config.Workspace.WritableRoots)
+	permissionContext := permissionContextFromTaskScope(rb.config.Workspace)
 	snapshot := RuntimeSnapshot{
 		CurrentDate:      rb.runtimeInfo.CurrentDate,
 		WorkingDirectory: rb.runtimeInfo.WorkingDir,
 		ModelName:        rb.runtimeInfo.ModelName,
 		EntryPoint:       rb.runtimeInfo.EntryPoint,
 		ToolSummary:      rb.runtimeInfo.ToolSummary,
+		ScopeID:          permissionContext.ScopeID,
 		WorkspaceRoot:    permissionContext.WorkspaceRoot,
+		ReadableRoots:    append([]string(nil), permissionContext.ReadableRoots...),
 		WritableRoots:    append([]string(nil), permissionContext.WritableRoots...),
+		OutputRoots:      append([]string(nil), permissionContext.OutputRoots...),
+		AttachedFiles:    append([]tool.ScopedFile(nil), permissionContext.AttachedFiles...),
 	}
 	rb.runtimeInfo = snapshot.ToRuntimeInfo()
 	return snapshot
@@ -243,4 +251,17 @@ func cloneToolDefinitions(tools []tool.ToolSchema) []tool.ToolSchema {
 func BuildRequest(config AgentConfig, ctx ContextProvider) LLMRequest {
 	builder := NewRequestBuilder(config)
 	return builder.Build(ctx, nil)
+}
+
+func permissionContextFromTaskScope(scope WorkspaceConfig) tool.PermissionContext {
+	return tool.NewTaskScopePermissionContext(
+		scope.ScopeID,
+		scope.Root,
+		scope.ReadableRoots,
+		scope.WritableRoots,
+		scope.OutputRoots,
+		scope.AttachedFiles,
+		scope.ProtectedRoots,
+		scope.TemporaryWorkRoot,
+	)
 }

@@ -10,6 +10,23 @@ import (
 
 // ToolAuditRecord captures a complete tool invocation lifecycle for
 // observability and compliance.
+//
+// Task 16 of "零审批自动执行策略": the audit record now carries the unified
+// observability fields (profile, intent, decision action/source, transform
+// origin, trashed paths, subagent origin, guardian violation). The legacy
+// Decision/DecisionReason/ApprovalOrigin fields are preserved for
+// backwards-compatible consumers; the new fields provide the structured,
+// machine-readable view that the spec requires.
+//
+// The Intent and SubagentOrigin fields are typed as `any` (rather than
+// `*profile.ExecutionIntent` / `*profile.SubagentOrigin`) to avoid an import
+// cycle: the `tool/profile` package imports `tool` for the Tool /
+// ToolAnnotations / ToolParameter types it needs to build intents, so `tool`
+// cannot import `tool/profile` back. The `agentcore` package, which constructs
+// audit records, has access to both packages and populates these fields with
+// the concrete `*profile.ExecutionIntent` / `*profile.SubagentOrigin` values.
+// JSON serialization is unaffected: the concrete types marshal exactly as
+// declared.
 type ToolAuditRecord struct {
 	ToolCallID     string          `json:"toolCallId"`
 	RunID          string          `json:"runId"`
@@ -24,6 +41,43 @@ type ToolAuditRecord struct {
 	Outcome        string          `json:"outcome"`      // "success", "failed", "needs_auth", "denied"
 	ResultSummary  string          `json:"resultSummary"` // optional, truncated result
 	ErrorReason    string          `json:"errorReason"`   // populated on failure
+	// ProfileName is the name of the ExecutionProfile applied to this call
+	// (e.g. "workspace_write", "guardian_read_only"). It is the human-readable
+	// handle that the UI and audit log surface to identify which profile the
+	// call landed on.
+	ProfileName string `json:"profileName,omitempty"`
+	// Intent is the unified ExecutionIntent that was evaluated. It carries the
+	// tool kind, requested action, paths, network scope, and subagent origin
+	// in a single structured value. nil when the intent was not computed
+	// (e.g. unknown tool). Concrete type is `*profile.ExecutionIntent`; see
+	// the package doc comment for why this is declared as `any`.
+	Intent any `json:"intent,omitempty"`
+	// DecisionAction is the unified decision action: "allow", "deny", or
+	// "transform". It mirrors the legacy Decision field but uses the unified
+	// ExecutionDecisionAction vocabulary.
+	DecisionAction string `json:"decisionAction,omitempty"`
+	// DecisionSource is the unified decision source (e.g.
+	// "workspace_boundary", "sensitive_path", "transform", "policy_error").
+	// It mirrors the legacy DecisionReason with structured source attribution.
+	DecisionSource string `json:"decisionSource,omitempty"`
+	// TransformedFrom is the original tool name when DecisionAction ==
+	// "transform" (e.g. "shell"). Empty for allow/deny.
+	TransformedFrom string `json:"transformedFrom,omitempty"`
+	// TransformedTo is the rewritten tool name when DecisionAction ==
+	// "transform" (e.g. "apply_patch"). Empty for allow/deny.
+	TransformedTo string `json:"transformedTo,omitempty"`
+	// TrashedPaths lists the absolute paths that were moved to the OS recycle
+	// bin during this call (for delete operations). Empty when no files were
+	// trashed.
+	TrashedPaths []string `json:"trashedPaths,omitempty"`
+	// SubagentOrigin, when set, attributes this call to a spawning sub-agent.
+	// nil for the root agent. Concrete type is `*profile.SubagentOrigin`;
+	// see the package doc comment for why this is declared as `any`.
+	SubagentOrigin any `json:"subagentOrigin,omitempty"`
+	// GuardianViolation is populated when a guardian constraint was violated
+	// (i.e. the call was denied because a guardian agent attempted a
+	// non-read-only action). Empty for non-guardian denials.
+	GuardianViolation string `json:"guardianViolation,omitempty"`
 }
 
 // AuditSink receives ToolAuditRecords for persistence.

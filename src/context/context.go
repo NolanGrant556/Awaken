@@ -34,6 +34,7 @@ type MessageAttachment struct {
 	ID          string `json:"id"`
 	Kind        string `json:"kind"`
 	MimeType    string `json:"mime_type"`
+	Path        string `json:"path,omitempty"`
 	DataBase64  string `json:"data_base64,omitempty"`
 	DisplayName string `json:"display_name,omitempty"`
 	Width       int    `json:"width,omitempty"`
@@ -283,6 +284,7 @@ func EstimateMessageAttachmentTokens(attachment MessageAttachment) int {
 	total := 0
 	total += EstimateTokens(attachment.Kind)
 	total += EstimateTokens(attachment.MimeType)
+	total += EstimateTokens(attachment.Path)
 	total += EstimateTokens(attachment.DisplayName)
 	total += EstimateAttachmentPayloadTokens(attachment.Kind, attachment.DataBase64)
 	return total

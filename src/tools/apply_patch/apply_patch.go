@@ -157,7 +157,13 @@ func (t *ApplyPatchTool) Definition() tool.ToolDefinition {
 		DisplayName: "Apply Patch",
 		Source:      tool.SourceBuiltin,
 		Description: "使用 Codex 风格 patch 新增、修改、移动或删除文件",
-		Annotations: tool.ToolAnnotations{ReadOnly: false, Destructive: true, OpenWorld: false},
+		Annotations: tool.ToolAnnotations{
+			ReadOnly:        false,
+			Destructive:     true,
+			OpenWorld:       false,
+			CapabilityClass: tool.CapabilityArtifactWrite,
+			TrustedOrigin:   tool.TrustedOriginBuiltin,
+		},
 	}
 }
 
@@ -269,11 +275,22 @@ func relativeToRoot(path, root string) string {
 // resolves symlinks via filepath.EvalSymlinks, and ensures the real target is
 // within the configured writable roots. This blocks symlink escapes such as a
 // workspace link pointing outside the workspace.
+//
+// Sensitive paths (e.g. .git/, .env, key/certificate files, agent metadata
+// directories, runtime config directories) are denied first, regardless of
+// whether they are inside the workspace or writable roots. Reads are not
+// affected because this function is only invoked for mutation operations.
 func validateMutationPath(path string, permissionContext tool.PermissionContext) error {
 	path = permissionContext.ResolvePath(path)
 	path = filepath.Clean(path)
 	if path == "" {
 		return fmt.Errorf("path is empty")
+	}
+
+	// Sensitive path guard. Applies regardless of workspace membership: a
+	// .git/ inside the workspace is still sensitive.
+	if err := permissionContext.CheckSensitivePath(path); err != nil {
+		return err
 	}
 
 	// Lexical guard first.

@@ -94,7 +94,7 @@ func TestReadFileDeniesEtcHosts(t *testing.T) {
 	ctx := tool.ContextWithPermissionContext(context.Background(), pc)
 
 	_, err := (&FileReadTool{}).Execute(ctx, `{"path":"/etc/hosts"}`)
-	if err == nil || !strings.Contains(err.Error(), "outside workspace") {
+	if err == nil || (!strings.Contains(err.Error(), "outside workspace") && !strings.Contains(err.Error(), "outside readable roots")) {
 		t.Fatalf("expected /etc/hosts to be denied, got %v", err)
 	}
 }
@@ -113,7 +113,7 @@ func TestReadFileBlocksTraversal(t *testing.T) {
 	pc := tool.NewPermissionContext(workspaceRoot, []string{workspaceRoot})
 	ctx := tool.ContextWithPermissionContext(context.Background(), pc)
 	_, err := (&FileReadTool{}).Execute(ctx, `{"path":"../outside.txt"}`)
-	if err == nil || !strings.Contains(err.Error(), "outside workspace") {
+	if err == nil || (!strings.Contains(err.Error(), "outside workspace") && !strings.Contains(err.Error(), "outside readable roots")) {
 		t.Fatalf("expected traversal to be denied, got %v", err)
 	}
 }
@@ -167,7 +167,7 @@ func TestFileReadDeniesSymlinkEscape(t *testing.T) {
 
 	ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
 	_, err := (&FileReadTool{}).Execute(ctx, `{"path":"link"}`)
-	if err == nil || !strings.Contains(err.Error(), "outside workspace") {
+	if err == nil || (!strings.Contains(err.Error(), "outside workspace") && !strings.Contains(err.Error(), "outside readable roots")) {
 		t.Fatalf("expected Execute to fail for symlink escape, got %v", err)
 	}
 }

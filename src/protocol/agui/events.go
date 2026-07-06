@@ -114,6 +114,25 @@ type Event struct {
 	ToolDecisionAction               string      `json:"toolDecisionAction,omitempty"`
 	ToolDecisionSource               string      `json:"toolDecisionSource,omitempty"`
 	ToolDecisionReason               string      `json:"toolDecisionReason,omitempty"`
+	// ProfileName is the ExecutionProfile name applied to this call (Task 16
+	// unified observability). Surfaced on AWAKEN_TOOL_PERMISSION_DECIDED.
+	ProfileName string `json:"profileName,omitempty"`
+	// TransformedFrom is the original tool name when the decision was a
+	// transform (e.g. "shell"). Surfaced on AWAKEN_TOOL_PERMISSION_DECIDED.
+	TransformedFrom string `json:"transformedFrom,omitempty"`
+	// TransformedTo is the rewritten tool name when the decision was a
+	// transform (e.g. "apply_patch"). Surfaced on AWAKEN_TOOL_PERMISSION_DECIDED.
+	TransformedTo string `json:"transformedTo,omitempty"`
+	// TrashedPaths lists the absolute paths moved to the OS recycle bin
+	// during this call. The paths are parsed from the apply_patch output
+	// after execution succeeds (see tool_runtime.extractTrashedPaths), so
+	// they are carried on the ToolResult event (post-execution). The
+	// AWAKEN_TOOL_PERMISSION_DECIDED event still declares the field for
+	// backwards compatibility but it is always nil there.
+	TrashedPaths []string `json:"trashedPaths,omitempty"`
+	// GuardianViolation is populated when a guardian constraint was
+	// violated. Surfaced on AWAKEN_TOOL_PERMISSION_DECIDED.
+	GuardianViolation string `json:"guardianViolation,omitempty"`
 	ApprovalID                       string      `json:"approvalId,omitempty"`
 	ApprovalTitle                    string      `json:"approvalTitle,omitempty"`
 	ApprovalDescription              string      `json:"approvalDescription,omitempty"`

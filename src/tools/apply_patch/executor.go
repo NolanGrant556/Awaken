@@ -6,12 +6,19 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"awaken/src/tool/trash"
 )
+
+type deletedEntry struct {
+	path        string
+	trashedPath string
+}
 
 type patchSummary struct {
 	added    []string
 	modified []string
-	deleted  []string
+	deleted  []deletedEntry
 }
 
 func (summary patchSummary) String() string {
@@ -23,8 +30,12 @@ func (summary patchSummary) String() string {
 	for _, path := range summary.modified {
 		fmt.Fprintf(&builder, "M %s\n", path)
 	}
-	for _, path := range summary.deleted {
-		fmt.Fprintf(&builder, "D %s\n", path)
+	for _, entry := range summary.deleted {
+		if entry.trashedPath != "" {
+			fmt.Fprintf(&builder, "D %s (已移到回收站: %s)\n", entry.path, entry.trashedPath)
+		} else {
+			fmt.Fprintf(&builder, "D %s (已移到回收站)\n", entry.path)
+		}
 	}
 	return builder.String()
 }
@@ -50,10 +61,14 @@ func applyOperation(op patchOperation, summary *patchSummary) error {
 		}
 		summary.added = append(summary.added, op.summaryPath())
 	case patchKindDelete:
-		if err := deleteFile(op.path); err != nil {
+		result, err := deleteFile(op.path)
+		if err != nil {
 			return err
 		}
-		summary.deleted = append(summary.deleted, op.summaryPath())
+		summary.deleted = append(summary.deleted, deletedEntry{
+			path:        op.summaryPath(),
+			trashedPath: result.TrashedPath,
+		})
 	case patchKindUpdate:
 		newContent, err := deriveUpdatedContent(op.path, op.chunks)
 		if err != nil {
@@ -64,7 +79,7 @@ func applyOperation(op patchOperation, summary *patchSummary) error {
 				return fmt.Errorf("failed to write moved file %s: %w", op.movePath, err)
 			}
 			if !sameCleanPath(op.path, op.movePath) {
-				if err := deleteFile(op.path); err != nil {
+				if _, err := deleteFile(op.path); err != nil {
 					return fmt.Errorf("failed to remove original %s: %w", op.path, err)
 				}
 			}
@@ -85,21 +100,30 @@ func writeFileWithParents(path string, content []byte) error {
 	return os.WriteFile(path, content, 0644)
 }
 
-func deleteFile(path string) error {
+// deleteFile moves the file at path to the OS trash via the configured
+// TrashAdapter. It does NOT fall back to os.Remove — if the trash adapter
+// fails, the deletion fails (fail-closed) so the file remains in place and
+// the caller can surface the error.
+//
+// Sensitive-path and symlink-escape checks are enforced upstream by
+// validateMutationPath in apply_patch.go, which runs for every operation
+// (including delete) before applyPatch is invoked.
+func deleteFile(path string) (trash.TrashResult, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("failed to delete file %s: file does not exist", path)
+			return trash.TrashResult{}, fmt.Errorf("failed to delete file %s: file does not exist", path)
 		}
-		return fmt.Errorf("failed to inspect file %s: %w", path, err)
+		return trash.TrashResult{}, fmt.Errorf("failed to inspect file %s: %w", path, err)
 	}
 	if info.IsDir() {
-		return fmt.Errorf("failed to delete file %s: path is a directory", path)
+		return trash.TrashResult{}, fmt.Errorf("failed to delete file %s: path is a directory", path)
 	}
-	if err := os.Remove(path); err != nil {
-		return fmt.Errorf("failed to delete file %s: %w", path, err)
+	result, err := trash.DefaultAdapter().TrashPath(path)
+	if err != nil {
+		return trash.TrashResult{}, fmt.Errorf("failed to delete file %s: %w", path, err)
 	}
-	return nil
+	return result, nil
 }
 
 func sameCleanPath(left, right string) bool {

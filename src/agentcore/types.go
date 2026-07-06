@@ -1,30 +1,67 @@
 package agentcore
 
 import (
+	"awaken/src/agentcore/subagent"
 	"awaken/src/context"
 	"awaken/src/prompt"
 	"awaken/src/tool"
+	"awaken/src/tool/profile"
 )
 
 type AgentConfig struct {
 	SystemPrompt string
 	// MaxThoughts <= 0 means the runner has no turn-count limit.
-	MaxThoughts       int
-	ModelConfig       ModelConfig
-	EntryPoint        string
-	Workspace         WorkspaceConfig
-	AutoToolPolicy    AutoToolPolicy
+	MaxThoughts    int
+	ModelConfig    ModelConfig
+	EntryPoint     string
+	Workspace      WorkspaceConfig
+	AutoToolPolicy AutoToolPolicy
 	// UseApprovalForAsk routes PermissionAsk decisions through the approval
 	// UI (via EventSink/ApprovalAwaiter) instead of the headless AUTO policy.
 	// This should be true when the agent is backed by an interactive client
 	// such as Awaken Desktop.
 	UseApprovalForAsk bool
+	// ExecutionProfile is the unified policy bundle applied to every tool
+	// call this agent makes. When nil, EffectiveProfile falls back to
+	// profile.DefaultProfile() (WorkspaceWrite).
+	ExecutionProfile *profile.ExecutionProfile
+	// SubagentBoundary, when set, marks this agent as a sub-agent and
+	// captures the boundary it inherited from its parent. The runtime
+	// uses it as a defense-in-depth check: tool calls must not exceed
+	// this boundary (workspace roots must match, profile must not
+	// escalate). Set when spawning a sub-agent via
+	// subagent.ResolveSubagentBoundary; nil for the root agent.
+	SubagentBoundary *subagent.ParentBoundary
+	// SubagentOrigin, when set, records the agent's place in the
+	// sub-agent tree (agent ID, parent agent ID, guardian flag, depth).
+	// It is propagated into every ExecutionIntent this agent issues so
+	// the decision layer can attribute the call. nil for the root agent.
+	SubagentOrigin *profile.SubagentOrigin
 }
 
-type WorkspaceConfig struct {
-	Root          string
-	WritableRoots []string
+// EffectiveProfile returns the profile that should be used for tool
+// execution. If ExecutionProfile is set, it is returned directly; otherwise
+// profile.DefaultProfile() (WorkspaceWrite) is returned as the default for
+// normal agent runs.
+func (c AgentConfig) EffectiveProfile() profile.ExecutionProfile {
+	if c.ExecutionProfile != nil {
+		return *c.ExecutionProfile
+	}
+	return profile.DefaultProfile()
 }
+
+type TaskScope struct {
+	ScopeID           string
+	Root              string
+	ReadableRoots     []string
+	WritableRoots     []string
+	OutputRoots       []string
+	AttachedFiles     []tool.ScopedFile
+	ProtectedRoots    []string
+	TemporaryWorkRoot string
+}
+
+type WorkspaceConfig = TaskScope
 
 type ModelConfig struct {
 	APIKey                string

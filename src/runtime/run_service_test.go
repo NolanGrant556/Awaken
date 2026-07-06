@@ -1751,6 +1751,107 @@ func TestGetThreadTranscriptRestoresDurableThreadWithoutMemory(t *testing.T) {
 	}
 }
 
+func TestListThreadsRestoresDurableThreadsAcrossHistoryWorkspaces(t *testing.T) {
+	rootA := t.TempDir()
+	rootB := t.TempDir()
+	firstService := newDurableThreadTestService()
+
+	runA, err := firstService.StartRun(StartRunRequest{
+		Input:     "hello workspace a",
+		Workspace: WorkspaceConfig{WorkspaceRoot: rootA},
+	})
+	if err != nil {
+		t.Fatalf("StartRun for workspace A returned error: %v", err)
+	}
+	waitForRunTerminal(t, firstService, runA.RunID)
+	waitForTranscriptMessageCount(t, rootA, runA.ThreadID, 2)
+
+	runB, err := firstService.StartRun(StartRunRequest{
+		Input:     "hello workspace b",
+		Workspace: WorkspaceConfig{WorkspaceRoot: rootB},
+	})
+	if err != nil {
+		t.Fatalf("StartRun for workspace B returned error: %v", err)
+	}
+	waitForRunTerminal(t, firstService, runB.RunID)
+	waitForTranscriptMessageCount(t, rootB, runB.ThreadID, 2)
+
+	restartedService := newDurableThreadTestService()
+	if err := restartedService.SetDefaultWorkspace(WorkspaceConfig{WorkspaceRoot: rootA}); err != nil {
+		t.Fatalf("SetDefaultWorkspace returned error: %v", err)
+	}
+	if err := restartedService.SetHistoryWorkspaces([]WorkspaceConfig{
+		{WorkspaceRoot: rootB},
+	}); err != nil {
+		t.Fatalf("SetHistoryWorkspaces returned error: %v", err)
+	}
+
+	threads := restartedService.ListThreads()
+	if len(threads) != 2 {
+		t.Fatalf("expected two durable threads across workspaces, got %d", len(threads))
+	}
+
+	threadsByID := make(map[string]ThreadSnapshot, len(threads))
+	for _, thread := range threads {
+		threadsByID[thread.ThreadID] = thread
+	}
+
+	if threadsByID[runA.ThreadID].Workspace.WorkspaceRoot != rootA {
+		t.Fatalf("expected workspace A root %q, got %+v", rootA, threadsByID[runA.ThreadID])
+	}
+	if threadsByID[runB.ThreadID].Workspace.WorkspaceRoot != rootB {
+		t.Fatalf("expected workspace B root %q, got %+v", rootB, threadsByID[runB.ThreadID])
+	}
+}
+
+func TestDurableThreadFallbackSearchesHistoryWorkspaces(t *testing.T) {
+	rootA := t.TempDir()
+	rootB := t.TempDir()
+	firstService := newDurableThreadTestService()
+	firstRun, err := firstService.StartRun(StartRunRequest{
+		Input:     "hello history workspace",
+		Workspace: WorkspaceConfig{WorkspaceRoot: rootB},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, firstService, firstRun.RunID)
+	waitForTranscriptMessageCount(t, rootB, firstRun.ThreadID, 2)
+
+	restartedService := newDurableThreadTestService()
+	if err := restartedService.SetDefaultWorkspace(WorkspaceConfig{WorkspaceRoot: rootA}); err != nil {
+		t.Fatalf("SetDefaultWorkspace returned error: %v", err)
+	}
+	if err := restartedService.SetHistoryWorkspaces([]WorkspaceConfig{
+		{WorkspaceRoot: rootB},
+	}); err != nil {
+		t.Fatalf("SetHistoryWorkspaces returned error: %v", err)
+	}
+
+	transcript, err := restartedService.GetThreadTranscript(firstRun.ThreadID)
+	if err != nil {
+		t.Fatalf("GetThreadTranscript returned error: %v", err)
+	}
+	if transcript.Thread.Workspace.WorkspaceRoot != rootB {
+		t.Fatalf("expected transcript workspace root %q, got %+v", rootB, transcript.Thread)
+	}
+
+	renamed, err := restartedService.RenameThread(firstRun.ThreadID, "renamed from history")
+	if err != nil {
+		t.Fatalf("RenameThread returned error: %v", err)
+	}
+	if renamed.Workspace.WorkspaceRoot != rootB {
+		t.Fatalf("expected renamed thread workspace root %q, got %+v", rootB, renamed)
+	}
+
+	if err := restartedService.DeleteThread(firstRun.ThreadID); err != nil {
+		t.Fatalf("DeleteThread returned error: %v", err)
+	}
+	if _, err := os.Stat(transcriptPath(rootB, firstRun.ThreadID)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected workspace B transcript to be removed, got %v", err)
+	}
+}
+
 func TestRunServiceRestoresThreadConversationFromTranscript(t *testing.T) {
 	root := t.TempDir()
 	restoredHistory := make(chan []convcontext.Message, 1)

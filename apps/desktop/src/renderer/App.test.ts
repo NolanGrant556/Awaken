@@ -14,6 +14,7 @@ import type { RunNarrativeItem } from "./run-narrative";
 import {
   DEFAULT_WORKSPACE_PROJECT_ID,
   assignThreadToProject,
+  mergeWorkspaceProjects,
   normalizeWorkspacePath,
   projectIdForThread,
   removeThreadProjectAssignments,
@@ -82,6 +83,7 @@ function stubElectronBridge(): void {
       testModelProfile: vi.fn(async () => ({ ok: true, message: "ok" })),
       pickWorkspace: vi.fn(async () => ({ canceled: true as const })),
       validateWorkspace: vi.fn(async () => ({ valid: true as const })),
+      syncWorkspaceRegistry: vi.fn(async () => undefined),
       getSupervisorStatus: vi.fn(async () => ({ status: "running" as const })),
       onSupervisorStatusChange: vi.fn(() => () => {}),
       notifyRendererReady: vi.fn(),
@@ -366,6 +368,29 @@ describe("project workspace helpers", () => {
     );
   });
 
+  it("prefers a thread workspace root over the transient project mapping", () => {
+    const mapping = assignThreadToProject(
+      {},
+      "thread-1",
+      "workspace:%2Ftmp%2Fold",
+    );
+
+    expect(
+      projectIdForThread(
+        { threadId: "thread-1", workspaceRoot: "/tmp/demo" },
+        mapping,
+        "/tmp/default",
+      ),
+    ).toBe("workspace:%2Ftmp%2Fdemo");
+    expect(
+      projectIdForThread(
+        { threadId: "thread-1", workspaceRoot: "/tmp/default" },
+        mapping,
+        "/tmp/default",
+      ),
+    ).toBe(DEFAULT_WORKSPACE_PROJECT_ID);
+  });
+
   it("removes folder projects and thread assignments", () => {
     const projects = [
       { id: "workspace:%2Ftmp%2Fdemo", label: "demo", path: "/tmp/demo" },
@@ -382,6 +407,25 @@ describe("project workspace helpers", () => {
     expect(removeThreadProjectAssignments(mapping, ["thread-1"])).toEqual({
       "thread-2": "workspace:%2Ftmp%2Fkeep",
     });
+  });
+
+  it("merges runtime thread workspaces into the persisted project list", () => {
+    expect(
+      mergeWorkspaceProjects(
+        [
+          {
+            id: "workspace:%2Ftmp%2Fold",
+            label: "old",
+            path: "/tmp/old",
+          },
+        ],
+        ["/tmp/old", "/tmp/demo", "/tmp/default"],
+        "/tmp/default",
+      ),
+    ).toEqual([
+      { id: "workspace:%2Ftmp%2Fold", label: "old", path: "/tmp/old" },
+      { id: "workspace:%2Ftmp%2Fdemo", label: "demo", path: "/tmp/demo" },
+    ]);
   });
 });
 

@@ -119,6 +119,16 @@ export type ToolDecisionRecord = {
   staticPermissionReason?: string;
   affectedPaths: string[];
   patchSummary?: string;
+  /** ExecutionProfile name applied to this call (Task 16 unified observability). */
+  profileName?: string;
+  /** Original tool name when the decision was a transform (e.g. "shell"). */
+  transformedFrom?: string;
+  /** Rewritten tool name when the decision was a transform (e.g. "apply_patch"). */
+  transformedTo?: string;
+  /** Absolute paths moved to the OS recycle bin during this call. */
+  trashedPaths?: string[];
+  /** Populated when a guardian constraint was violated. */
+  guardianViolation?: string;
 };
 
 export type TurnRecord = {
@@ -835,6 +845,14 @@ function toolDecisionRecord(event: AguiEvent): ToolDecisionRecord {
     staticPermissionReason: event.staticPermissionReason,
     affectedPaths: event.approvalAffectedPaths ?? [],
     patchSummary: event.approvalPatchSummary,
+    // Task 16 unified observability: carry the profile name, transform
+    // origin, trashed paths, and guardian violation reason so the UI can
+    // render them.
+    profileName: event.profileName,
+    transformedFrom: event.transformedFrom,
+    transformedTo: event.transformedTo,
+    trashedPaths: event.trashedPaths,
+    guardianViolation: event.guardianViolation,
   };
 }
 
@@ -1653,9 +1671,32 @@ export function reduceRuntimeState(
             (tool) => tool.id === decision.toolCallId,
           );
           const status = toolDecisionStatus(decision);
+          // Task 16 unified observability: include the profile name, transform
+          // origin, trashed paths, and guardian violation in the decision
+          // line so the inspector surfaces the full picture. Each piece is
+          // only added when present so the line stays compact for the common
+          // allow case.
+          const transformLine =
+            decision.transformedFrom && decision.transformedTo
+              ? `transform: ${decision.transformedFrom} → ${decision.transformedTo}`
+              : "";
+          const profileLine = decision.profileName
+            ? `profile: ${decision.profileName}`
+            : "";
+          const trashLine =
+            decision.trashedPaths && decision.trashedPaths.length > 0
+              ? `trashed: ${decision.trashedPaths.length} file(s)`
+              : "";
+          const guardianLine = decision.guardianViolation
+            ? `guardian: ${decision.guardianViolation}`
+            : "";
           const decisionLine = [
             decision.action ? `decision: ${decision.action}` : "",
             decision.source ? `source: ${decision.source}` : "",
+            profileLine,
+            transformLine,
+            trashLine,
+            guardianLine,
             decision.reason ? `reason: ${decision.reason}` : "",
             decision.patchSummary ? `patch: ${decision.patchSummary}` : "",
           ]
@@ -1681,7 +1722,8 @@ export function reduceRuntimeState(
             {
               title: `${decision.toolName} ${decision.action || "decision"}`,
               description: excerpt(
-                decision.reason ||
+                transformLine ||
+                  decision.reason ||
                   decision.source ||
                   decision.patchSummary ||
                   "AUTO decision",
@@ -1694,6 +1736,15 @@ export function reduceRuntimeState(
         }
         case "TOOL_CALL_RESULT": {
           const content = action.event.content || "Tool returned empty content";
+          // TrashedPaths are parsed from the tool output after execution and
+          // now ride on the ToolResult event (post-execution). Surface the
+          // "Deleted file moved to recycle bin" notification in the step
+          // description and refresh inspectorSummary.lastToolDecision so the
+          // inspector reflects the actual trashed paths rather than the nil
+          // value carried by the pre-execution permission-decided event.
+          const trashedPaths = action.event.trashedPaths ?? [];
+          const trashNote =
+            trashedPaths.length > 0 ? "Deleted file moved to recycle bin" : "";
           const id =
             action.event.toolCallId ||
             `tool-result-${nextState.toolResults.length + 1}`;
@@ -1710,12 +1761,29 @@ export function reduceRuntimeState(
           const stepKey = action.event.toolCallId
             ? `tool:${action.event.toolCallId}`
             : `tool-result:${id}`;
+          const description = trashNote
+            ? `${excerpt(content)}\n${trashNote}`
+            : excerpt(content);
           records = upsertStep(records, stepKey, {
             title: action.event.toolCallName || "Tool result",
-            description: excerpt(content),
+            description,
             status: "done",
             tag: "tool",
           });
+          if (trashedPaths.length > 0) {
+            const prevDecision = nextState.inspectorSummary.lastToolDecision;
+            nextState.inspectorSummary = {
+              ...nextState.inspectorSummary,
+              lastToolDecision: prevDecision
+                ? { ...prevDecision, trashedPaths }
+                : {
+                    toolCallId: action.event.toolCallId ?? "",
+                    toolName: action.event.toolCallName ?? "Tool",
+                    affectedPaths: [],
+                    trashedPaths,
+                  },
+            };
+          }
           break;
         }
         case "TOOL_CALL_END":

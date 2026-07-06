@@ -10,13 +10,14 @@ export type RuntimeRunStatus =
   | "error"
   | "cancelled";
 
-export type RunInputAttachmentKind = "image";
+export type RunInputAttachmentKind = "image" | "file";
 
 export type RunInputAttachmentWire = {
   id: string;
   kind: RunInputAttachmentKind;
   mime_type: string;
-  data_base64: string;
+  path?: string;
+  data_base64?: string;
   display_name?: string;
   width?: number;
   height?: number;
@@ -27,7 +28,8 @@ export type RunInputAttachment = {
   id: string;
   kind: RunInputAttachmentKind;
   mimeType: string;
-  dataBase64: string;
+  path?: string;
+  dataBase64?: string;
   displayName?: string;
   width?: number;
   height?: number;
@@ -380,14 +382,30 @@ export type ModelProfileTestResult = {
   message: string;
 };
 
+export type TaskScopeFileWire = {
+  path: string;
+  display_name?: string;
+};
+
+export type TaskScopeFile = {
+  path: string;
+  displayName?: string;
+};
+
 export type WorkspaceConfigWire = {
   workspace_root: string;
+  readable_roots?: string[];
   writable_roots?: string[];
+  output_roots?: string[];
+  attached_files?: TaskScopeFileWire[];
 };
 
 export type WorkspaceConfig = {
   workspaceRoot: string;
+  readableRoots?: string[];
   writableRoots: string[];
+  outputRoots?: string[];
+  attachedFiles?: TaskScopeFile[];
 };
 
 export type ClientInfoWire = {
@@ -553,7 +571,13 @@ export function normalizeRuntimeThread(thread: RuntimeThreadWire): RuntimeThread
     activeRunId: thread.active_run_id || undefined,
     workspace: {
       workspaceRoot: thread.workspace.workspace_root,
+      readableRoots: thread.workspace.readable_roots ?? [],
       writableRoots: thread.workspace.writable_roots ?? [],
+      outputRoots: thread.workspace.output_roots ?? [],
+      attachedFiles: (thread.workspace.attached_files ?? []).map((file) => ({
+        path: file.path,
+        displayName: file.display_name,
+      })),
     },
     createdAt: thread.created_at,
     updatedAt: thread.updated_at,
@@ -592,7 +616,13 @@ export function normalizeStartRunRequest(request: StartRunRequest): StartRunRequ
     thread_id: request.threadId,
     workspace: {
       workspace_root: request.workspace.workspaceRoot,
+      readable_roots: request.workspace.readableRoots,
       writable_roots: request.workspace.writableRoots,
+      output_roots: request.workspace.outputRoots,
+      attached_files: request.workspace.attachedFiles?.map((file) => ({
+        path: file.path,
+        display_name: file.displayName,
+      })),
     },
     client: {
       session_id: request.client.sessionId,
@@ -719,6 +749,7 @@ export function normalizeRunInputAttachment(
     id: attachment.id,
     kind: attachment.kind,
     mimeType: attachment.mime_type,
+    path: attachment.path,
     dataBase64: attachment.data_base64,
     displayName: attachment.display_name,
     width: attachment.width,
@@ -734,6 +765,7 @@ export function toRunInputAttachmentWire(
     id: attachment.id,
     kind: attachment.kind,
     mime_type: attachment.mimeType,
+    path: attachment.path,
     data_base64: attachment.dataBase64,
     display_name: attachment.displayName,
     width: attachment.width,

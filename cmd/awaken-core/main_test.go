@@ -27,6 +27,21 @@ func TestResolveDefaultWorkspaceFallsBackToCwd(t *testing.T) {
 	}
 }
 
+func TestResolveHistoryWorkspacesUsesAbsoluteRootsOnly(t *testing.T) {
+	t.Setenv(
+		"AWAKEN_HISTORY_WORKSPACES",
+		`["/tmp/one","relative/path","/tmp/two","/tmp/one",""]`,
+	)
+
+	workspaces := resolveHistoryWorkspaces()
+	if len(workspaces) != 2 {
+		t.Fatalf("expected two unique absolute workspaces, got %+v", workspaces)
+	}
+	if workspaces[0].WorkspaceRoot != "/tmp/one" || workspaces[1].WorkspaceRoot != "/tmp/two" {
+		t.Fatalf("unexpected workspace roots: %+v", workspaces)
+	}
+}
+
 func TestModelConfigFromProfileUsesOnlyProfile(t *testing.T) {
 	profile := &runtime.ModelProfileConfig{
 		APIKey:        "profile-key",

@@ -82,6 +82,8 @@ import {
   DEFAULT_WORKSPACE_PROJECT_ID,
   assignThreadToProject,
   isSameWorkspacePath,
+  mergeWorkspaceProjects,
+  projectIdForWorkspacePath,
   projectIdForThread,
   removeThreadProjectAssignments,
   removeWorkspaceProject,
@@ -276,6 +278,80 @@ function readStoredStringArray(key: string): string[] {
   }
 }
 
+function readStoredString(key: string, fallback = ""): string {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return fallback;
+  }
+  try {
+    const value = window.localStorage.getItem(key);
+    return typeof value === "string" ? value : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function readStoredStringRecord(key: string): Record<string, string> {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(key) ?? "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, string] =>
+          typeof entry[0] === "string" && typeof entry[1] === "string",
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function readStoredWorkspaceProjects(key: string): WorkspaceProject[] {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(key) ?? "[]");
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .filter(
+        (item): item is WorkspaceProject =>
+          Boolean(item) &&
+          typeof item === "object" &&
+          typeof item.id === "string" &&
+          typeof item.label === "string" &&
+          typeof item.path === "string",
+      )
+      .map((project) => ({
+        id: project.id,
+        label: project.label,
+        path: project.path,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function dedupeWorkspacePaths(paths: Array<string | undefined>): string[] {
+  const nextPaths: string[] = [];
+  for (const path of paths) {
+    const trimmed = path?.trim();
+    if (!trimmed || nextPaths.some((current) => isSameWorkspacePath(current, trimmed))) {
+      continue;
+    }
+    nextPaths.push(trimmed);
+  }
+  return nextPaths;
+}
+
 function writeStoredValue(key: string, value: string): void {
   if (typeof window === "undefined" || !window.localStorage) {
     return;
@@ -296,6 +372,8 @@ export function App() {
   const threadLoadSeqRef = useRef(0);
   const inspectorCollapsedValueRef = useRef(false);
   const inspectorCollapsedBeforeResponsiveRef = useRef<boolean | null>(null);
+  const persistedWorkspaceRegistryRef = useRef("");
+  const runtimeWorkspaceRegistryRef = useRef("");
   const runtimeClient = runtimeClientRef.current;
 
   const [runtimeState, dispatch] = useReducer(
@@ -315,26 +393,31 @@ export function App() {
     RuntimeModelProfileSummary[]
   >([]);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
-  const [workspacePath, setWorkspacePath] = useState<string>("");
+  const [workspacePath, setWorkspacePath] = useState<string>(() =>
+    readStoredString("awaken:workspace:path"),
+  );
   const [createProjectDialogOpen, setCreateProjectDialogOpen] = useState(false);
   const [pendingProjectMode, setPendingProjectMode] =
     useState<"local">("local");
   const [pickingWorkspace, setPickingWorkspace] = useState(false);
   const [projectsFromWorkspace, setProjectsFromWorkspace] = useState<
     WorkspaceProject[]
-  >([]);
-  const [selectedProjectId, setSelectedProjectId] = useState(
-    DEFAULT_WORKSPACE_PROJECT_ID,
-  );
-  const [expandedProjectIds, setExpandedProjectIds] = useState<string[]>([
-    DEFAULT_WORKSPACE_PROJECT_ID,
-  ]);
+  >(() => readStoredWorkspaceProjects("awaken:projects:workspace"));
+  const [selectedProjectId, setSelectedProjectId] = useState<
+    string | undefined
+  >(undefined);
+  const [expandedProjectIds, setExpandedProjectIds] = useState<string[]>(() => {
+    const stored = readStoredStringArray("awaken:projects:expanded");
+    return stored.includes(DEFAULT_WORKSPACE_PROJECT_ID)
+      ? stored
+      : [DEFAULT_WORKSPACE_PROJECT_ID, ...stored];
+  });
   const [removedProjectIds, setRemovedProjectIds] = useState<string[]>(() =>
     readStoredStringArray("awaken:projects:removed"),
   );
   const [threadProjectIds, setThreadProjectIds] = useState<
     Record<string, string>
-  >({});
+  >(() => readStoredStringRecord("awaken:threads:projects"));
   const [inspectorTab, setInspectorTab] = useState<InspectorTabId>("changes");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() =>
@@ -410,6 +493,35 @@ export function App() {
       JSON.stringify(removedProjectIds),
     );
   }, [removedProjectIds]);
+
+  useEffect(() => {
+    writeStoredValue("awaken:workspace:path", workspacePath);
+  }, [workspacePath]);
+
+  useEffect(() => {
+    writeStoredValue(
+      "awaken:projects:workspace",
+      JSON.stringify(projectsFromWorkspace),
+    );
+  }, [projectsFromWorkspace]);
+
+  useEffect(() => {
+    writeStoredValue("awaken:projects:selected", selectedProjectId ?? "");
+  }, [selectedProjectId]);
+
+  useEffect(() => {
+    writeStoredValue(
+      "awaken:projects:expanded",
+      JSON.stringify(expandedProjectIds),
+    );
+  }, [expandedProjectIds]);
+
+  useEffect(() => {
+    writeStoredValue(
+      "awaken:threads:projects",
+      JSON.stringify(threadProjectIds),
+    );
+  }, [threadProjectIds]);
 
   useEffect(() => {
     if (
@@ -743,6 +855,158 @@ export function App() {
       ? "Starting"
       : undefined;
   const defaultWorkspacePath = runtimeInfo?.defaultWorkspace ?? workspacePath;
+  const activeThread = runtimeState.activeThreadId
+    ? runtimeState.threads.find(
+        (thread) => thread.threadId === runtimeState.activeThreadId,
+      )
+    : undefined;
+  const activeThreadWorkspacePath = activeThread?.workspaceRoot;
+  const activeThreadProjectId = activeThreadWorkspacePath
+    ? projectIdForWorkspacePath(
+        activeThreadWorkspacePath,
+        defaultWorkspacePath,
+      )
+    : undefined;
+  const pathForSelectedProject =
+    selectedProjectId === undefined
+      ? undefined
+      : selectedProjectId === DEFAULT_WORKSPACE_PROJECT_ID
+      ? defaultWorkspacePath
+      : projectsFromWorkspace.find(
+          (project) => project.id === selectedProjectId,
+        )?.path;
+  const workspaceRegistryPaths = useMemo(
+    () =>
+      dedupeWorkspacePaths([
+        defaultWorkspacePath,
+        pathForSelectedProject,
+        ...projectsFromWorkspace.map((project) => project.path),
+        ...runtimeState.threads.map((thread) => thread.workspaceRoot),
+      ]),
+    [
+      defaultWorkspacePath,
+      pathForSelectedProject,
+      projectsFromWorkspace,
+      runtimeState.threads,
+    ],
+  );
+  const workspaceRegistryRequest = useMemo(
+    () => ({
+      defaultWorkspacePath:
+        activeThreadWorkspacePath ||
+        pathForSelectedProject ||
+        defaultWorkspacePath ||
+        workspaceRegistryPaths[0] ||
+        "",
+      registeredWorkspacePaths: workspaceRegistryPaths,
+    }),
+    [
+      activeThreadWorkspacePath,
+      defaultWorkspacePath,
+      pathForSelectedProject,
+      workspaceRegistryPaths,
+    ],
+  );
+  const workspaceRegistrySignature = JSON.stringify(workspaceRegistryRequest);
+
+  useEffect(() => {
+    const threadWorkspacePaths = runtimeState.threads
+      .map((thread) => thread.workspaceRoot)
+      .filter((path): path is string => Boolean(path));
+    setProjectsFromWorkspace((current) => {
+      const next = mergeWorkspaceProjects(
+        current,
+        threadWorkspacePaths,
+        defaultWorkspacePath,
+      );
+      const isSame =
+        next.length === current.length &&
+        next.every((project, index) => {
+          const existing = current[index];
+          return (
+            existing?.id === project.id &&
+            existing.path === project.path &&
+            existing.label === project.label
+          );
+        });
+      return isSame ? current : next;
+    });
+  }, [defaultWorkspacePath, runtimeState.threads]);
+
+  useEffect(() => {
+    const knownProjectIds = new Set([
+      DEFAULT_WORKSPACE_PROJECT_ID,
+      ...projectsFromWorkspace.map((project) => project.id),
+    ]);
+    setSelectedProjectId((current) =>
+      current === undefined
+        ? undefined
+        : knownProjectIds.has(current)
+          ? current
+          : DEFAULT_WORKSPACE_PROJECT_ID,
+    );
+    setExpandedProjectIds((current) => {
+      const next = current.filter((id) => knownProjectIds.has(id));
+      return next.includes(DEFAULT_WORKSPACE_PROJECT_ID)
+        ? next
+        : [DEFAULT_WORKSPACE_PROJECT_ID, ...next];
+    });
+  }, [projectsFromWorkspace]);
+
+  useEffect(() => {
+    if (!workspaceRegistryRequest.defaultWorkspacePath) {
+      return;
+    }
+    if (persistedWorkspaceRegistryRef.current === workspaceRegistrySignature) {
+      return;
+    }
+    persistedWorkspaceRegistryRef.current = workspaceRegistrySignature;
+    void runtimeClient.syncWorkspaceRegistry(workspaceRegistryRequest).catch(() => {
+      // Workspace registry sync is best-effort.
+    });
+  }, [runtimeClient, workspaceRegistryRequest, workspaceRegistrySignature]);
+
+  useEffect(() => {
+    if (!desktopReady || !workspaceRegistryRequest.defaultWorkspacePath) {
+      return;
+    }
+    if (runtimeWorkspaceRegistryRef.current === workspaceRegistrySignature) {
+      return;
+    }
+    runtimeWorkspaceRegistryRef.current = workspaceRegistrySignature;
+    let cancelled = false;
+
+    async function syncRuntimeWorkspaceRegistry(): Promise<void> {
+      try {
+        await runtimeClient.syncWorkspaceRegistry(workspaceRegistryRequest);
+        if (!cancelled) {
+          await refreshThreads();
+        }
+      } catch {
+        // Runtime sync is best-effort; local persistence already succeeded.
+      }
+    }
+
+    void syncRuntimeWorkspaceRegistry();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    desktopReady,
+    runtimeClient,
+    workspaceRegistryRequest,
+    workspaceRegistrySignature,
+  ]);
+
+  useEffect(() => {
+    if (
+      pathForSelectedProject &&
+      !isSameWorkspacePath(workspacePath, pathForSelectedProject)
+    ) {
+      setWorkspacePath(pathForSelectedProject);
+    }
+  }, [pathForSelectedProject, workspacePath]);
+
   const projectLabelById = new Map<string, string>([
     [
       DEFAULT_WORKSPACE_PROJECT_ID,
@@ -755,16 +1019,15 @@ export function App() {
     ),
   ]);
   const removedProjectIdSet = new Set(removedProjectIds);
-  const pathForSelectedProject =
-    selectedProjectId === DEFAULT_WORKSPACE_PROJECT_ID
-      ? defaultWorkspacePath
-      : projectsFromWorkspace.find(
-          (project) => project.id === selectedProjectId,
-        )?.path;
+  const workspaceLabelProjectId = activeThreadProjectId ?? selectedProjectId;
+  const workspaceLabelPath =
+    activeThreadWorkspacePath ?? pathForSelectedProject;
   const activeProjectLabel =
-    projectLabelById.get(selectedProjectId) ??
-    (pathForSelectedProject
-      ? workspaceLabelForPath(pathForSelectedProject)
+    (workspaceLabelProjectId
+      ? projectLabelById.get(workspaceLabelProjectId)
+      : undefined) ??
+    (workspaceLabelPath
+      ? workspaceLabelForPath(workspaceLabelPath)
       : "awaken");
   const contextMeta = contextUsageMeta(
     runtimeState.inspectorSummary.contextWindow,
@@ -907,9 +1170,10 @@ export function App() {
         };
       }),
   ];
-  const activeProjectId = runtimeState.activeThreadId
-    ? `thread:${runtimeState.activeThreadId}`
-    : selectedProjectId;
+  const activeProjectId =
+    runtimeState.activeThreadId
+      ? `thread:${runtimeState.activeThreadId}`
+      : selectedProjectId;
   const inspectorTabs = [
     {
       id: "changes" as const,
@@ -928,7 +1192,7 @@ export function App() {
   const {
     activeWorkbenchTurnId,
     composerContentInsetPx,
-    composerDockRef,
+    setComposerDockElement,
     composerSafeAreaPx,
     handleReturnToLatestClick,
     handleRunStageScroll,
@@ -1033,6 +1297,9 @@ export function App() {
       return undefined;
     }
 
+    syncProjectSelectionForWorkspace(
+      transcript.thread.workspace.workspaceRoot,
+    );
     applyRuntimeActions(actionsForThreadTranscript(transcript));
 
     const latestRun = transcript.runs[transcript.runs.length - 1]?.run;
@@ -1115,7 +1382,7 @@ export function App() {
     setComposerAttachments([]);
 
     try {
-      const runProjectId = selectedProjectId;
+      const runProjectId = selectedProjectId ?? DEFAULT_WORKSPACE_PROJECT_ID;
       const nextThreadLabel = composerThreadLabel(prompt, draftAttachments);
       const startRunRequest: StartRunRequest = {
         input: prompt,
@@ -1148,6 +1415,7 @@ export function App() {
         threadId: run.threadId,
         label: nextThreadLabel,
         runId: run.runId,
+        workspaceRoot: workspaceRoot,
       });
       void refreshThreads();
       localStorage.setItem("awaken:runId", run.runId);
@@ -1198,6 +1466,7 @@ export function App() {
     const thread = runtimeState.threads.find(
       (item) => item.threadId === threadId,
     );
+    syncProjectSelectionForWorkspace(thread?.workspaceRoot);
     if (!thread?.runId) {
       localStorage.removeItem("awaken:runId");
       return;
@@ -1215,7 +1484,38 @@ export function App() {
   function threadsForProject(projectId: string): ThreadItem[] {
     return runtimeState.threads.filter(
       (thread) =>
-        projectIdForThread(thread.threadId, threadProjectIds) === projectId,
+        projectIdForThread(
+          thread,
+          threadProjectIds,
+          defaultWorkspacePath,
+        ) === projectId,
+    );
+  }
+
+  function syncProjectSelectionForWorkspace(
+    nextWorkspacePath?: string,
+  ): void {
+    if (!nextWorkspacePath) {
+      return;
+    }
+
+    const nextProjectId = projectIdForWorkspacePath(
+      nextWorkspacePath,
+      defaultWorkspacePath,
+    );
+    setProjectsFromWorkspace((current) =>
+      mergeWorkspaceProjects(
+        current,
+        [nextWorkspacePath],
+        defaultWorkspacePath,
+      ),
+    );
+    setSelectedProjectId(nextProjectId);
+    setWorkspacePath(nextWorkspacePath);
+    setExpandedProjectIds((current) =>
+      current.includes(nextProjectId)
+        ? current
+        : [...current, nextProjectId],
     );
   }
 
@@ -2215,7 +2515,7 @@ export function App() {
                       }
                       composer={
                         showCenterComposer ? undefined : (
-                          <ComposerDock ref={composerDockRef}>
+                          <ComposerDock ref={setComposerDockElement}>
                             <div className="composer-dock-stack">
                               {renderComposerRuntimePanels()}
                               {renderActiveApprovalPrompt()}

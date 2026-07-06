@@ -43,9 +43,10 @@ import {
 	  type RuntimeSkill,
 	  type RuntimeModelProfileSummaryWire,
 	  type RenameThreadRequest,
-	  type RuntimeThreadTranscriptWire,
+  type RuntimeThreadTranscriptWire,
   type RuntimeThreadWire,
   type StartRunRequest,
+  type WorkspaceRegistrySyncRequest,
 } from "../shared/runtime.js";
 import { RuntimeSupervisor, type SupervisorStatusInfo } from "./runtime-supervisor.js";
 import { ensureConfigDir } from "./config-bootstrap.js";
@@ -684,6 +685,8 @@ ipcMain.handle(
         return { canceled: true, error: "Selected path is not a directory" };
       }
       await writeLastWorkspace(selected);
+      const registry = await readWorkspaceRegistry(selected);
+      await writeWorkspaceRegistry(registry);
       return { canceled: false, path: selected };
     } catch {
       return { canceled: true, error: "Cannot access selected directory" };
@@ -710,9 +713,59 @@ ipcMain.handle("awaken:validate-workspace", async (_event, candidate: string) =>
   }
 });
 
+ipcMain.handle(
+  "awaken:sync-workspace-registry",
+  async (_event, request: WorkspaceRegistrySyncRequest) => {
+    const defaultWorkspace = normalizeStoredWorkspacePath(
+      request.defaultWorkspacePath,
+    );
+    const workspaces = dedupeWorkspacePaths([
+      defaultWorkspace,
+      ...request.registeredWorkspacePaths,
+    ]);
+
+    await writeWorkspaceRegistry(workspaces);
+    if (defaultWorkspace) {
+      await writeLastWorkspace(defaultWorkspace);
+    }
+
+    if (runtimeBaseUrl) {
+      await requestRuntimeOK("/v1/workspaces/registry", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          workspace_roots: workspaces,
+        }),
+      });
+    }
+  },
+);
+
 ipcMain.handle("awaken:runtime-supervisor-status", async () => {
   return toRendererSupervisorStatus(supervisor?.getStatus() ?? { status: "stopped" });
 });
+
+function normalizeStoredWorkspacePath(candidate: unknown): string | null {
+  const value = typeof candidate === "string" ? candidate.trim() : "";
+  if (!path.isAbsolute(value)) {
+    return null;
+  }
+  return path.normalize(value);
+}
+
+function dedupeWorkspacePaths(paths: Iterable<unknown>): string[] {
+  const nextPaths: string[] = [];
+  for (const value of paths) {
+    const normalized = normalizeStoredWorkspacePath(value);
+    if (!normalized || nextPaths.includes(normalized)) {
+      continue;
+    }
+    nextPaths.push(normalized);
+  }
+  return nextPaths;
+}
 
 // Persist the last user-selected workspace so the supervisor can default to it
 // on the next launch instead of always falling back to the home directory.
@@ -721,11 +774,7 @@ async function readLastWorkspace(): Promise<string | undefined> {
     const file = path.join(app.getPath("userData"), "last-workspace.json");
     const raw = await fs.readFile(file, "utf8");
     const parsed = JSON.parse(raw) as { path?: unknown };
-    const value = typeof parsed.path === "string" ? parsed.path : "";
-    if (!path.isAbsolute(value)) {
-      return undefined;
-    }
-    return value;
+    return normalizeStoredWorkspacePath(parsed.path) ?? undefined;
   } catch {
     return undefined;
   }
@@ -740,13 +789,49 @@ async function writeLastWorkspace(workspacePath: string): Promise<void> {
   }
 }
 
+async function readWorkspaceRegistry(
+  seedWorkspace?: string,
+): Promise<string[]> {
+  try {
+    const file = path.join(app.getPath("userData"), "workspace-registry.json");
+    const raw = await fs.readFile(file, "utf8");
+    const parsed = JSON.parse(raw) as { workspaces?: unknown };
+    const storedWorkspaces = Array.isArray(parsed.workspaces)
+      ? parsed.workspaces
+      : [];
+    return dedupeWorkspacePaths([
+      seedWorkspace,
+      ...storedWorkspaces,
+    ]);
+  } catch {
+    return dedupeWorkspacePaths([seedWorkspace]);
+  }
+}
+
+async function writeWorkspaceRegistry(workspaces: string[]): Promise<void> {
+  try {
+    const file = path.join(app.getPath("userData"), "workspace-registry.json");
+    const normalized = dedupeWorkspacePaths(workspaces);
+    await fs.writeFile(
+      file,
+      JSON.stringify({ workspaces: normalized }),
+      "utf8",
+    );
+  } catch {
+    // Persistence is best-effort; a write failure must not block the UI.
+  }
+}
+
 app.whenReady().then(async () => {
   setMacDockIcon();
   const configDir = await ensureConfigDir();
   modelProfileStore = new ModelProfileStore(configDir);
   const lastWorkspace = await readLastWorkspace();
+  const workspaceRegistry = await readWorkspaceRegistry(lastWorkspace);
   supervisor = new RuntimeSupervisor({
-    defaultWorkspace: lastWorkspace ?? app.getPath("home"),
+    defaultWorkspace:
+      lastWorkspace ?? workspaceRegistry[0] ?? app.getPath("home"),
+    historyWorkspaces: workspaceRegistry,
   });
   supervisor.onStatusChange((info) => {
     if (info.runtimeBaseUrl) {

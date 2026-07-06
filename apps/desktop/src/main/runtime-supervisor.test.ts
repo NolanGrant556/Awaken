@@ -5,7 +5,10 @@ import { describe, expect, it, vi } from "vitest";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
 
 vi.mock("electron", () => ({
-  app: { isPackaged: false },
+  app: {
+    isPackaged: false,
+    getPath: vi.fn(() => "/tmp/awaken-user-data"),
+  },
 }));
 
 class FakeChild extends EventEmitter {

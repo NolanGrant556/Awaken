@@ -153,6 +153,7 @@ export type ThreadItem = {
   label: string;
   runId?: string;
   activeRunId?: string;
+  workspaceRoot?: string;
   runStatus?: RuntimeRunStatus;
   approvalCount?: number;
   artifactCount?: number;
@@ -228,7 +229,13 @@ export type RuntimeAction =
   | { type: "run/recovered"; run: RuntimeRun; prompt?: string }
   | { type: "run/threadReplayStarted"; threadId: string; runId?: string }
   | { type: "run/threadsLoaded"; threads: RuntimeThread[] }
-  | { type: "run/threadAdded"; threadId: string; label: string; runId: string }
+  | {
+      type: "run/threadAdded";
+      threadId: string;
+      label: string;
+      runId: string;
+      workspaceRoot?: string;
+    }
   | { type: "run/threadSwitch"; threadId: string }
   | { type: "run/event"; event: AguiEvent; receivedAtMs?: number }
   | { type: "supervisor/status-changed"; info: SupervisorStatusInfo };
@@ -337,6 +344,7 @@ function threadItemFromRuntime(thread: RuntimeThread): ThreadItem {
     label: thread.label || "Untitled thread",
     runId: thread.runId,
     activeRunId: thread.activeRunId,
+    workspaceRoot: thread.workspace.workspaceRoot,
     runStatus: thread.activeRunId ? "running" : undefined,
     approvalCount: 0,
     artifactCount: 0,
@@ -1269,6 +1277,7 @@ export function reduceRuntimeState(
           label: action.label,
           runId: action.runId,
           activeRunId: action.runId,
+          workspaceRoot: action.workspaceRoot,
           runStatus: "running",
           approvalCount: 0,
           artifactCount: 0,

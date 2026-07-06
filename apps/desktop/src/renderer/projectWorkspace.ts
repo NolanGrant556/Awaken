@@ -27,6 +27,20 @@ export function workspaceProjectIdForPath(path: string): string {
   return `workspace:${encodeURIComponent(normalizeWorkspacePath(path))}`;
 }
 
+export function projectIdForWorkspacePath(
+  path?: string,
+  defaultWorkspacePath?: string,
+): string {
+  if (!path) {
+    return DEFAULT_WORKSPACE_PROJECT_ID;
+  }
+  const normalized = normalizeWorkspacePath(path);
+  if (!normalized || isSameWorkspacePath(normalized, defaultWorkspacePath)) {
+    return DEFAULT_WORKSPACE_PROJECT_ID;
+  }
+  return workspaceProjectIdForPath(normalized);
+}
+
 export function isSameWorkspacePath(a?: string, b?: string): boolean {
   if (!a || !b) {
     return false;
@@ -58,11 +72,69 @@ export function upsertWorkspaceProject(
   return { projects: [...projects, nextProject], projectId: nextProject.id };
 }
 
+export function normalizeWorkspaceProjects(
+  projects: WorkspaceProject[],
+  defaultWorkspacePath?: string,
+): WorkspaceProject[] {
+  const nextProjects: WorkspaceProject[] = [];
+  const seenPaths = new Set<string>();
+
+  for (const project of projects) {
+    const normalized = normalizeWorkspacePath(project.path);
+    if (
+      !normalized ||
+      isSameWorkspacePath(normalized, defaultWorkspacePath) ||
+      seenPaths.has(normalized)
+    ) {
+      continue;
+    }
+    seenPaths.add(normalized);
+    nextProjects.push({
+      id: workspaceProjectIdForPath(normalized),
+      label: workspaceLabelForPath(normalized),
+      path: normalized,
+    });
+  }
+
+  return nextProjects;
+}
+
+export function mergeWorkspaceProjects(
+  projects: WorkspaceProject[],
+  paths: string[],
+  defaultWorkspacePath?: string,
+): WorkspaceProject[] {
+  let nextProjects = normalizeWorkspaceProjects(projects, defaultWorkspacePath);
+  for (const path of paths) {
+    nextProjects = upsertWorkspaceProject(
+      nextProjects,
+      path,
+      defaultWorkspacePath,
+    ).projects;
+  }
+  return normalizeWorkspaceProjects(nextProjects, defaultWorkspacePath);
+}
+
 export function projectIdForThread(
-  threadId: string,
+  thread:
+    | string
+    | {
+        threadId: string;
+        workspaceRoot?: string;
+      },
   threadProjectIds: Record<string, string>,
+  defaultWorkspacePath?: string,
 ): string {
-  return threadProjectIds[threadId] ?? DEFAULT_WORKSPACE_PROJECT_ID;
+  if (typeof thread !== "string") {
+    if (thread.workspaceRoot) {
+      return projectIdForWorkspacePath(
+        thread.workspaceRoot,
+        defaultWorkspacePath,
+      );
+    }
+    return threadProjectIds[thread.threadId] ?? DEFAULT_WORKSPACE_PROJECT_ID;
+  }
+  return threadProjectIds[thread] ?? DEFAULT_WORKSPACE_PROJECT_ID;
 }
 
 export function assignThreadToProject(

@@ -87,6 +87,7 @@ type RunService struct {
 	sessions         map[string]*Session
 	threads          map[string]*Thread
 	defaultWorkspace WorkspaceConfig
+	historyWorkspaces []WorkspaceConfig
 	newAgent         func(workspace WorkspaceConfig, threadID string) *agentcore.Agent
 	newProfileAgent  func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent
 	newExecutor      func(agent *agentcore.Agent) Executor
@@ -158,6 +159,27 @@ func (s *RunService) SetDefaultWorkspace(workspace WorkspaceConfig) error {
 	}
 	s.mu.Lock()
 	s.defaultWorkspace = normalized
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *RunService) SetHistoryWorkspaces(workspaces []WorkspaceConfig) error {
+	normalized := make([]WorkspaceConfig, 0, len(workspaces))
+	seen := make(map[string]struct{}, len(workspaces))
+	for _, workspace := range workspaces {
+		next, err := normalizeWorkspace(workspace)
+		if err != nil {
+			return err
+		}
+		if _, ok := seen[next.WorkspaceRoot]; ok {
+			continue
+		}
+		seen[next.WorkspaceRoot] = struct{}{}
+		normalized = append(normalized, next)
+	}
+
+	s.mu.Lock()
+	s.historyWorkspaces = normalized
 	s.mu.Unlock()
 	return nil
 }
@@ -341,11 +363,11 @@ func (s *RunService) ListThreads() []ThreadSnapshot {
 		threads = append(threads, snapshot)
 		seen[snapshot.ThreadID] = true
 	}
-	defaultWorkspace := s.defaultWorkspace
+	workspaces := workspaceSearchOrder(s.defaultWorkspace, s.historyWorkspaces)
 	s.mu.RUnlock()
 
-	if defaultWorkspace.WorkspaceRoot != "" {
-		durableThreads, err := loadDurableThreadSnapshots(defaultWorkspace)
+	for _, workspace := range workspaces {
+		durableThreads, err := loadDurableThreadSnapshots(workspace)
 		if err == nil {
 			for _, thread := range durableThreads {
 				if seen[thread.ThreadID] {
@@ -390,24 +412,18 @@ func (s *RunService) RenameThread(threadID, label string) (ThreadSnapshot, error
 		}
 		return snapshot, nil
 	}
-	defaultWorkspace := s.defaultWorkspace
+	workspaces := workspaceSearchOrder(s.defaultWorkspace, s.historyWorkspaces)
 	s.mu.Unlock()
 
-	if defaultWorkspace.WorkspaceRoot == "" {
-		return ThreadSnapshot{}, ErrThreadNotFound
-	}
-	restored, err := loadRestoredTranscript(defaultWorkspace, threadID)
+	workspace, restored, err := findWorkspaceForThread(workspaces, threadID)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return ThreadSnapshot{}, ErrThreadNotFound
-		}
 		return ThreadSnapshot{}, err
 	}
-	if err := appendThreadLabelTranscriptRecord(defaultWorkspace, threadID, normalizedLabel, now); err != nil {
+	if err := appendThreadLabelTranscriptRecord(workspace, threadID, normalizedLabel, now); err != nil {
 		return ThreadSnapshot{}, err
 	}
 
-	snapshot := threadSnapshotFromRestored(threadID, defaultWorkspace, restored)
+	snapshot := threadSnapshotFromRestored(threadID, workspace, restored)
 	snapshot.Label = normalizedLabel
 	snapshot.UpdatedAt = now
 	return snapshot, nil
@@ -441,13 +457,14 @@ func (s *RunService) DeleteThread(threadID string) error {
 		}
 		return nil
 	}
-	defaultWorkspace := s.defaultWorkspace
+	workspaces := workspaceSearchOrder(s.defaultWorkspace, s.historyWorkspaces)
 	s.mu.Unlock()
 
-	if defaultWorkspace.WorkspaceRoot == "" {
-		return ErrThreadNotFound
+	workspace, _, err := findWorkspaceForThread(workspaces, threadID)
+	if err != nil {
+		return err
 	}
-	if err := removeThreadTranscript(defaultWorkspace, threadID); err != nil {
+	if err := removeThreadTranscript(workspace, threadID); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return ErrThreadNotFound
 		}
@@ -479,12 +496,13 @@ func (s *RunService) GetThreadTranscript(threadID string) (ThreadTranscript, err
 	s.mu.RLock()
 	thread, ok := s.threads[threadID]
 	if !ok {
-		defaultWorkspace := s.defaultWorkspace
+		workspaces := workspaceSearchOrder(s.defaultWorkspace, s.historyWorkspaces)
 		s.mu.RUnlock()
-		if defaultWorkspace.WorkspaceRoot == "" {
-			return ThreadTranscript{}, ErrThreadNotFound
+		workspace, _, err := findWorkspaceForThread(workspaces, threadID)
+		if err != nil {
+			return ThreadTranscript{}, err
 		}
-		return loadDurableThreadTranscript(defaultWorkspace, threadID)
+		return loadDurableThreadTranscript(workspace, threadID)
 	}
 	snapshot := thread.snapshot()
 	workspace := thread.workspace
@@ -571,6 +589,40 @@ func loadDurableThreadTranscript(workspace WorkspaceConfig, threadID string) (Th
 		Thread: threadSnapshotFromRestored(threadID, workspace, restored),
 		Runs:   runs,
 	}, nil
+}
+
+func workspaceSearchOrder(defaultWorkspace WorkspaceConfig, historyWorkspaces []WorkspaceConfig) []WorkspaceConfig {
+	workspaces := make([]WorkspaceConfig, 0, 1+len(historyWorkspaces))
+	seen := make(map[string]struct{}, 1+len(historyWorkspaces))
+	appendWorkspace := func(workspace WorkspaceConfig) {
+		if workspace.WorkspaceRoot == "" {
+			return
+		}
+		if _, ok := seen[workspace.WorkspaceRoot]; ok {
+			return
+		}
+		seen[workspace.WorkspaceRoot] = struct{}{}
+		workspaces = append(workspaces, workspace)
+	}
+	appendWorkspace(defaultWorkspace)
+	for _, workspace := range historyWorkspaces {
+		appendWorkspace(workspace)
+	}
+	return workspaces
+}
+
+func findWorkspaceForThread(workspaces []WorkspaceConfig, threadID string) (WorkspaceConfig, restoredTranscript, error) {
+	for _, workspace := range workspaces {
+		restored, err := loadRestoredTranscript(workspace, threadID)
+		if err == nil {
+			return workspace, restored, nil
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		return WorkspaceConfig{}, restoredTranscript{}, err
+	}
+	return WorkspaceConfig{}, restoredTranscript{}, ErrThreadNotFound
 }
 
 func (s *RunService) CancelRun(runID string) (Run, error) {

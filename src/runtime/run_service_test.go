@@ -5,12 +5,14 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
 
 	"awaken/src/agentcore"
 	convcontext "awaken/src/context"
+	"awaken/src/tool/profile"
 )
 
 func TestRunServiceReplaysHistoryAndStreamsLiveEvents(t *testing.T) {
@@ -1465,14 +1467,15 @@ func TestStartRunWithSameRootDifferentWritableRootsReturnsWorkspaceMismatch(t *t
 	}
 	waitForRunTerminal(t, service, firstRun.RunID)
 
-	_, err = service.StartRun(StartRunRequest{
+	secondRun, err := service.StartRun(StartRunRequest{
 		Input:     "world",
 		Workspace: WorkspaceConfig{WorkspaceRoot: root, WritableRoots: []string{child}},
 		ThreadID:  firstRun.ThreadID,
 	})
-	if !errors.Is(err, ErrThreadWorkspaceMismatch) {
-		t.Fatalf("expected ErrThreadWorkspaceMismatch, got %v", err)
+	if err != nil {
+		t.Fatalf("expected writable-root scope update to succeed, got %v", err)
 	}
+	waitForRunTerminal(t, service, secondRun.RunID)
 }
 
 func TestListThreadsReturnsRuntimeThreads(t *testing.T) {
@@ -2081,4 +2084,94 @@ func waitForTranscriptMessageCount(t *testing.T, workspaceRoot, threadID string,
 	}
 	t.Fatalf("transcript for thread %s did not reach %d message records", threadID, want)
 	return nil
+}
+
+// --- normalizeWorkspace ExecutionProfile allowlist tests (Part 0) ---
+
+// TestNormalizeWorkspaceNilProfileDefaultsToWorkspaceWrite verifies that
+// a workspace with no ExecutionProfile lands on profile.DefaultProfile()
+// (WorkspaceWrite) after normalization.
+func TestNormalizeWorkspaceNilProfileDefaultsToWorkspaceWrite(t *testing.T) {
+	ws, err := normalizeWorkspace(WorkspaceConfig{WorkspaceRoot: t.TempDir()})
+	if err != nil {
+		t.Fatalf("normalizeWorkspace returned error: %v", err)
+	}
+	if ws.ExecutionProfile == nil {
+		t.Fatalf("expected ExecutionProfile to be non-nil (default applied)")
+	}
+	expected := profile.DefaultProfile()
+	if !reflect.DeepEqual(*ws.ExecutionProfile, expected) {
+		t.Fatalf("expected default profile %+v, got %+v", expected, *ws.ExecutionProfile)
+	}
+}
+
+// TestNormalizeWorkspaceAllowedProfilePassesThrough verifies that a
+// client-supplied profile whose name and fields match a built-in
+// client-allowed profile is preserved (as the built-in value) after
+// normalization.
+func TestNormalizeWorkspaceAllowedProfilePassesThrough(t *testing.T) {
+	requested := profile.WorkspaceWrite()
+	ws, err := normalizeWorkspace(WorkspaceConfig{
+		WorkspaceRoot:    t.TempDir(),
+		ExecutionProfile: &requested,
+	})
+	if err != nil {
+		t.Fatalf("normalizeWorkspace returned error: %v", err)
+	}
+	if ws.ExecutionProfile == nil {
+		t.Fatalf("expected ExecutionProfile to be non-nil")
+	}
+	expected := profile.WorkspaceWrite()
+	if !reflect.DeepEqual(*ws.ExecutionProfile, expected) {
+		t.Fatalf("expected workspace_write profile %+v, got %+v", expected, *ws.ExecutionProfile)
+	}
+}
+
+// TestNormalizeWorkspaceDangerFullAccessFallsBackWhenDisabled verifies
+// that a client request for danger_full_access is normalized back to
+// DefaultProfile when AWAKEN_ALLOW_DANGER_PROFILE is not enabled.
+func TestNormalizeWorkspaceDangerFullAccessFallsBackWhenDisabled(t *testing.T) {
+	t.Setenv("AWAKEN_ALLOW_DANGER_PROFILE", "")
+	requested := profile.DangerFullAccess()
+	ws, err := normalizeWorkspace(WorkspaceConfig{
+		WorkspaceRoot:    t.TempDir(),
+		ExecutionProfile: &requested,
+	})
+	if err != nil {
+		t.Fatalf("normalizeWorkspace returned error: %v", err)
+	}
+	if ws.ExecutionProfile == nil {
+		t.Fatalf("expected ExecutionProfile to be non-nil")
+	}
+	expected := profile.DefaultProfile()
+	if !reflect.DeepEqual(*ws.ExecutionProfile, expected) {
+		t.Fatalf("expected danger request to fall back to default %+v, got %+v", expected, *ws.ExecutionProfile)
+	}
+	if ws.ExecutionProfile.Name == profile.DangerFullAccess().Name {
+		t.Fatalf("danger_full_access leaked through normalizeWorkspace while disabled")
+	}
+}
+
+// TestNormalizeWorkspaceGuardianReadOnlyFallsBackToDefault verifies that
+// a client request for guardian_read_only (a server-only profile) is
+// normalized back to DefaultProfile.
+func TestNormalizeWorkspaceGuardianReadOnlyFallsBackToDefault(t *testing.T) {
+	requested := profile.GuardianReadOnly()
+	ws, err := normalizeWorkspace(WorkspaceConfig{
+		WorkspaceRoot:    t.TempDir(),
+		ExecutionProfile: &requested,
+	})
+	if err != nil {
+		t.Fatalf("normalizeWorkspace returned error: %v", err)
+	}
+	if ws.ExecutionProfile == nil {
+		t.Fatalf("expected ExecutionProfile to be non-nil")
+	}
+	expected := profile.DefaultProfile()
+	if !reflect.DeepEqual(*ws.ExecutionProfile, expected) {
+		t.Fatalf("expected guardian request to fall back to default %+v, got %+v", expected, *ws.ExecutionProfile)
+	}
+	if ws.ExecutionProfile.Name == profile.GuardianReadOnly().Name {
+		t.Fatalf("guardian_read_only leaked through normalizeWorkspace from a client request")
+	}
 }

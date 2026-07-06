@@ -41,9 +41,16 @@ func main() {
 				ModelConfig:       modelCfg,
 				UseApprovalForAsk: true,
 				Workspace: agentcore.WorkspaceConfig{
-					Root:          workspace.WorkspaceRoot,
-					WritableRoots: workspace.WritableRoots,
+					ScopeID:           workspace.ScopeID,
+					Root:              workspace.WorkspaceRoot,
+					ReadableRoots:     workspace.ReadableRoots,
+					WritableRoots:     workspace.WritableRoots,
+					OutputRoots:       workspace.OutputRoots,
+					AttachedFiles:     workspace.AttachedFiles,
+					ProtectedRoots:    workspace.ProtectedRoots,
+					TemporaryWorkRoot: workspace.TemporaryWorkRoot,
 				},
+				ExecutionProfile: workspace.ExecutionProfile,
 			}
 			return agentcore.NewAgentWithThreadID(agentCfg, threadID)
 		},

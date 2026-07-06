@@ -98,7 +98,7 @@ func TestListFilesDeniesHomeDesktop(t *testing.T) {
 	ctx := tool.ContextWithPermissionContext(context.Background(), pc)
 
 	_, err := (&ListFilesTool{}).Execute(ctx, `{"root":"~/Desktop"}`)
-	if err == nil || !strings.Contains(err.Error(), "outside workspace") {
+	if err == nil || (!strings.Contains(err.Error(), "outside workspace") && !strings.Contains(err.Error(), "outside readable roots")) {
 		t.Fatalf("expected ~/Desktop to be denied, got %v", err)
 	}
 }
@@ -117,7 +117,7 @@ func TestListFilesBlocksTraversal(t *testing.T) {
 	pc := tool.NewPermissionContext(workspaceRoot, []string{workspaceRoot})
 	ctx := tool.ContextWithPermissionContext(context.Background(), pc)
 	_, err := (&ListFilesTool{}).Execute(ctx, `{"root":"../outside"}`)
-	if err == nil || !strings.Contains(err.Error(), "outside workspace") {
+	if err == nil || (!strings.Contains(err.Error(), "outside workspace") && !strings.Contains(err.Error(), "outside readable roots")) {
 		t.Fatalf("expected traversal to be denied, got %v", err)
 	}
 }

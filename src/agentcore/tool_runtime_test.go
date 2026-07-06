@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	convcontext "awaken/src/context"
 	"awaken/src/tool"
+	"awaken/src/tool/profile"
 )
 
 type runtimeTestTool struct {
@@ -258,23 +260,28 @@ func TestDefaultAutoToolPolicyDecisions(t *testing.T) {
 		t.Fatalf("expected read-only ask to be allowed, got %+v", allow)
 	}
 
+	// Other destructive tools (not apply_patch) are still hard-denied in
+	// headless mode on the PermissionAsk path.
 	deny := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
-		ToolName:       "apply_patch",
+		ToolName:       "destructive_write_tool",
 		StaticBehavior: tool.PermissionAsk,
-		StaticReason:   "apply_patch will modify files",
+		StaticReason:   "destructive tool requires approval",
 		IsDestructive:  true,
 	})
 	if deny.Action != ToolDecisionDeny || deny.Source != ToolDecisionSourceHeadlessDefault {
 		t.Fatalf("expected destructive ask to be denied, got %+v", deny)
 	}
 
+	// Other destructive tools (not apply_patch) are still hard-denied on
+	// the PermissionAllow path via deniesStaticAllowInHeadless.
 	denyStaticAllowWrite := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
-		ToolName:       "apply_patch",
+		ToolName:       "destructive_write_tool",
 		StaticBehavior: tool.PermissionAllow,
-		StaticReason:   "invalid patch fell through to static allow",
+		StaticReason:   "destructive tool static allow",
+		IsDestructive:  true,
 	})
 	if denyStaticAllowWrite.Action != ToolDecisionDeny || denyStaticAllowWrite.Source != ToolDecisionSourceHeadlessDefault {
-		t.Fatalf("expected write-capable static allow to be denied in headless AUTO, got %+v", denyStaticAllowWrite)
+		t.Fatalf("expected destructive static allow to be denied in headless AUTO, got %+v", denyStaticAllowWrite)
 	}
 
 	allowlistedStaticAllowWrite := DefaultAutoToolPolicy{
@@ -310,6 +317,427 @@ func TestDefaultAutoToolPolicyDecisions(t *testing.T) {
 	})
 	if abort.Action != ToolDecisionAbort || abort.Source != ToolDecisionSourcePolicyError {
 		t.Fatalf("expected cancelled context to abort, got %+v", abort)
+	}
+}
+
+// TestApplyPatchFileChainRelaxation covers the Task 4 relaxation: apply_patch
+// is no longer hard-denied in headless mode. With workspace boundary,
+// sensitive-path, and trash constraints in place, in-workspace mutations
+// auto-execute. Out-of-writable-roots and sensitive paths are still denied.
+func TestApplyPatchFileChainRelaxation(t *testing.T) {
+	workspace := t.TempDir()
+
+	// Normal in-workspace write (Add/Update): warning risk tone → allow.
+	allowWrite := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
+		ToolName:        "apply_patch",
+		StaticBehavior:  tool.PermissionAsk,
+		StaticReason:    "apply_patch will modify files",
+		WorkspaceRoot:   workspace,
+		WritableRoots:   []string{workspace},
+		RiskTone:        "warning",
+		AffectedPaths:   []string{"note.md"},
+		NormalizedInput: "*** Begin Patch\n*** Add File: note.md\n+hello\n*** End Patch",
+	})
+	if allowWrite.Action != ToolDecisionAllow || allowWrite.Source != ToolDecisionSourceWorkspaceBoundary {
+		t.Fatalf("expected in-workspace write to be allowed, got %+v", allowWrite)
+	}
+
+	// apply_patch with PermissionAllow (parse error fall-through): allow.
+	// The executor will surface the parse error.
+	allowStatic := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
+		ToolName:       "apply_patch",
+		StaticBehavior: tool.PermissionAllow,
+		StaticReason:   "invalid patch fell through to static allow",
+	})
+	if allowStatic.Action != ToolDecisionAllow {
+		t.Fatalf("expected apply_patch PermissionAllow to be allowed (parse error surfaces at execution), got %+v", allowStatic)
+	}
+
+	// Delete within workspace: danger risk tone + path within writable roots → allow.
+	// Trash makes the delete recoverable.
+	allowDelete := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
+		ToolName:        "apply_patch",
+		StaticBehavior:  tool.PermissionAsk,
+		StaticReason:    "apply_patch will delete, move, or touch files outside writable roots",
+		WorkspaceRoot:   workspace,
+		WritableRoots:   []string{workspace},
+		RiskTone:        "danger",
+		AffectedPaths:   []string{"note.md"},
+		NormalizedInput: "*** Begin Patch\n*** Delete File: note.md\n*** End Patch",
+		IsDestructive:   true,
+	})
+	if allowDelete.Action != ToolDecisionAllow || allowDelete.Source != ToolDecisionSourceWorkspaceBoundary {
+		t.Fatalf("expected in-workspace delete to be allowed (trash-recoverable), got %+v", allowDelete)
+	}
+
+	// Out-of-writable-roots write: danger risk tone + path outside workspace → deny.
+	outside := t.TempDir()
+	denyOutOfBounds := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
+		ToolName:        "apply_patch",
+		StaticBehavior:  tool.PermissionAsk,
+		StaticReason:    "apply_patch will delete, move, or touch files outside writable roots",
+		WorkspaceRoot:   workspace,
+		WritableRoots:   []string{workspace},
+		RiskTone:        "danger",
+		AffectedPaths:   []string{filepath.Join(outside, "note.md")},
+		NormalizedInput: "*** Begin Patch\n*** Add File: " + filepath.Join(outside, "note.md") + "\n+hello\n*** End Patch",
+		IsDestructive:   true,
+	})
+	if denyOutOfBounds.Action != ToolDecisionDeny || denyOutOfBounds.Source != ToolDecisionSourceHeadlessDefault {
+		t.Fatalf("expected out-of-writable-roots write to be denied, got %+v", denyOutOfBounds)
+	}
+	if !strings.Contains(denyOutOfBounds.Reason, "outside writable roots") {
+		t.Fatalf("expected deny reason to mention outside writable roots, got %q", denyOutOfBounds.Reason)
+	}
+
+	// Sensitive path (.git/config): danger risk tone + sensitive path → deny.
+	// Isolate HOME so the sensitive-path matcher doesn't trip over the
+	// developer's real ~/.awaken.
+	t.Setenv("HOME", workspace)
+	denySensitive := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
+		ToolName:        "apply_patch",
+		StaticBehavior:  tool.PermissionAsk,
+		StaticReason:    "apply_patch will delete, move, or touch files outside writable roots",
+		WorkspaceRoot:   workspace,
+		WritableRoots:   []string{workspace},
+		RiskTone:        "danger",
+		AffectedPaths:   []string{".git/config"},
+		NormalizedInput: "*** Begin Patch\n*** Add File: .git/config\n+[core]\n*** End Patch",
+		IsDestructive:   true,
+	})
+	if denySensitive.Action != ToolDecisionDeny || denySensitive.Source != ToolDecisionSourceHeadlessDefault {
+		t.Fatalf("expected sensitive path to be denied, got %+v", denySensitive)
+	}
+	if !strings.Contains(denySensitive.Reason, "sensitive path") {
+		t.Fatalf("expected deny reason to mention sensitive path, got %q", denySensitive.Reason)
+	}
+}
+
+// SubTask 4.3 — Desktop UI smoke verification (manual):
+//
+// The unit tests above cover the policy layer. To verify end-to-end that no
+// approval UI appears for in-workspace file mutations, follow the root
+// README's "入口契约" to launch Awaken Desktop, then:
+//
+//  1. Start a new run in a workspace that has at least one regular file
+//     (e.g. a temp dir with note.md containing "hello").
+//  2. Ask the agent: "请用 apply_patch 把 note.md 的内容从 hello 改成 world".
+//  3. Confirm:
+//     - No approval dialog / awaiting_approval status appears.
+//     - The AWAKEN_TOOL_PERMISSION_DECIDED event has action=allow,
+//       source=workspace_boundary.
+//     - note.md is actually modified to "world".
+//  4. Ask the agent to create a new file (e.g. "新建 src/new.go"):
+//     confirm it is created without approval.
+//  5. Ask the agent to delete a file (e.g. "删除 src/new.go"):
+//     confirm it is moved to trash (recoverable) without approval.
+//  6. Ask the agent to write outside the workspace (e.g. /etc/foo):
+//     confirm the policy DENIES the call (no approval dialog, just a
+//     denied tool_result).
+//  7. Ask the agent to modify .git/config: confirm the policy DENIES.
+//
+// Do NOT run this from a sub-agent; launch the Desktop app per the root
+// README and drive it from the UI.
+
+func TestDefaultAutoToolPolicyTransformsShellEchoWrite(t *testing.T) {
+	workspace := t.TempDir()
+	normalizedInput := `{"command":"echo \"hello\" > ./file.txt"}`
+
+	decision := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
+		ToolName:        "shell",
+		StaticBehavior:  tool.PermissionAsk,
+		StaticReason:    "shell command contains operators, redirections, substitutions, or multiple operations",
+		NormalizedInput: normalizedInput,
+		WorkspaceRoot:   workspace,
+		WritableRoots:   []string{workspace},
+		IsOpenWorld:     true,
+	})
+
+	if decision.Action != ToolDecisionTransform {
+		t.Fatalf("expected transform action, got %+v", decision)
+	}
+	if decision.Source != ToolDecisionSourceTransform {
+		t.Fatalf("expected transform source, got %q", decision.Source)
+	}
+	if decision.UpdatedToolName != "apply_patch" {
+		t.Fatalf("expected UpdatedToolName=apply_patch, got %q", decision.UpdatedToolName)
+	}
+	if !strings.Contains(decision.UpdatedInput, "*** Add File: file.txt") {
+		t.Fatalf("expected UpdatedInput to contain Add File for file.txt, got %q", decision.UpdatedInput)
+	}
+	if !strings.Contains(decision.UpdatedInput, "+hello") {
+		t.Fatalf("expected UpdatedInput to contain +hello, got %q", decision.UpdatedInput)
+	}
+}
+
+func TestDefaultAutoToolPolicyDeniesOpenWorldShellCommand(t *testing.T) {
+	workspace := t.TempDir()
+	normalizedInput := `{"command":"curl http://example.com > file"}`
+
+	decision := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
+		ToolName:        "shell",
+		StaticBehavior:  tool.PermissionAsk,
+		StaticReason:    "shell command may mutate files, change repository state, or access external systems",
+		NormalizedInput: normalizedInput,
+		WorkspaceRoot:   workspace,
+		WritableRoots:   []string{workspace},
+		IsOpenWorld:     true,
+		IsDestructive:   true,
+	})
+
+	if decision.Action != ToolDecisionDeny {
+		t.Fatalf("expected deny action for open-world shell command, got %+v", decision)
+	}
+	if !strings.Contains(decision.Reason, "apply_patch") {
+		t.Fatalf("expected reason to suggest apply_patch, got %q", decision.Reason)
+	}
+}
+
+func TestDefaultAutoToolPolicyDeniesNonTransformableShellMutation(t *testing.T) {
+	workspace := t.TempDir()
+	normalizedInput := `{"command":"sed -i 's/a/b/' file.txt"}`
+
+	decision := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
+		ToolName:        "shell",
+		StaticBehavior:  tool.PermissionAsk,
+		StaticReason:    "shell command is not classified as read-only",
+		NormalizedInput: normalizedInput,
+		WorkspaceRoot:   workspace,
+		WritableRoots:   []string{workspace},
+		IsOpenWorld:     true,
+	})
+
+	if decision.Action != ToolDecisionDeny {
+		t.Fatalf("expected deny action for non-transformable mutation, got %+v", decision)
+	}
+	if !strings.Contains(decision.Reason, "apply_patch") {
+		t.Fatalf("expected reason to suggest apply_patch, got %q", decision.Reason)
+	}
+}
+
+func TestDefaultAutoToolPolicyFallsThroughForReadOnlyShell(t *testing.T) {
+	workspace := t.TempDir()
+	normalizedInput := `{"command":"ls -la"}`
+
+	// `ls -la` is inspect_read_only. The shell tool's CheckPermission
+	// returns PermissionAllow for safe read-only commands, so this request
+	// simulates the Ask path (e.g. if the classifier were conservative).
+	// The transform logic should fall through (not handle it), and the
+	// default deny should apply.
+	decision := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
+		ToolName:        "shell",
+		StaticBehavior:  tool.PermissionAsk,
+		StaticReason:    "shell command is not classified as read-only",
+		NormalizedInput: normalizedInput,
+		WorkspaceRoot:   workspace,
+		WritableRoots:   []string{workspace},
+		IsOpenWorld:     true,
+	})
+
+	if decision.Action != ToolDecisionDeny {
+		t.Fatalf("expected deny (fallthrough) for read-only shell on Ask path, got %+v", decision)
+	}
+	if decision.Source != ToolDecisionSourceHeadlessDefault {
+		t.Fatalf("expected headless_default source for read-only shell fallthrough, got %q", decision.Source)
+	}
+}
+
+func TestDefaultAutoToolPolicyDoesNotTransformInsideTransformChain(t *testing.T) {
+	workspace := t.TempDir()
+	normalizedInput := `{"command":"echo \"hello\" > ./file.txt"}`
+
+	// When the context already carries transform depth (i.e. this call is the
+	// result of a transform), the policy must not transform again.
+	transformedCtx := ctxWithTransformDepth(context.Background(), 1)
+	decision := DefaultAutoToolPolicy{}.Decide(transformedCtx, ToolDecisionRequest{
+		ToolName:        "shell",
+		StaticBehavior:  tool.PermissionAsk,
+		StaticReason:    "shell command contains operators",
+		NormalizedInput: normalizedInput,
+		WorkspaceRoot:   workspace,
+		WritableRoots:   []string{workspace},
+		IsOpenWorld:     true,
+	})
+
+	if decision.Action == ToolDecisionTransform {
+		t.Fatalf("expected nested transform to be suppressed, got %+v", decision)
+	}
+}
+
+// --- DecideExecution tests (Task 9) ---
+//
+// These verify that DefaultAutoToolPolicy.DecideExecution produces correct
+// ExecutionDecision outputs for the four scenarios required by the spec:
+// allow (apply_patch write), deny (sensitive path), transform (shell echo
+// write), and deny (open-world shell).
+
+func TestDecideExecution_AllowsApplyPatchWrite(t *testing.T) {
+	workspace := t.TempDir()
+	intent := profile.ExecutionIntent{
+		ToolName:        "apply_patch",
+		ToolKind:        profile.ToolKindFileChain,
+		RequestedAction: profile.ActionWrite,
+		WorkspaceRoot:   workspace,
+		WritableRoots:   []string{workspace},
+	}
+	request := ToolDecisionRequest{
+		ToolName:        "apply_patch",
+		StaticBehavior:  tool.PermissionAsk,
+		StaticReason:    "apply_patch will modify files",
+		WorkspaceRoot:   workspace,
+		WritableRoots:   []string{workspace},
+		RiskTone:        "warning",
+		AffectedPaths:   []string{"note.md"},
+		NormalizedInput: "*** Begin Patch\n*** Add File: note.md\n+hello\n*** End Patch",
+	}
+
+	decision := DefaultAutoToolPolicy{}.DecideExecution(context.Background(), intent, request)
+
+	if decision.Action != profile.DecisionAllow {
+		t.Fatalf("expected allow, got %s: %+v", decision.Action, decision)
+	}
+	if decision.Source != profile.DecisionSourceWorkspaceBoundary {
+		t.Fatalf("expected workspace_boundary source, got %s", decision.Source)
+	}
+	if decision.UpdatedIntent == nil {
+		t.Fatal("UpdatedIntent should not be nil for allow")
+	}
+	if decision.UpdatedIntent.ToolName != "apply_patch" {
+		t.Errorf("UpdatedIntent.ToolName = %q, want apply_patch", decision.UpdatedIntent.ToolName)
+	}
+}
+
+func TestDecideExecution_DeniesSensitivePath(t *testing.T) {
+	workspace := t.TempDir()
+	t.Setenv("HOME", workspace)
+	intent := profile.ExecutionIntent{
+		ToolName:        "apply_patch",
+		ToolKind:        profile.ToolKindFileChain,
+		RequestedAction: profile.ActionWrite,
+		WorkspaceRoot:   workspace,
+		WritableRoots:   []string{workspace},
+	}
+	request := ToolDecisionRequest{
+		ToolName:        "apply_patch",
+		StaticBehavior:  tool.PermissionAsk,
+		StaticReason:    "apply_patch touches sensitive path",
+		WorkspaceRoot:   workspace,
+		WritableRoots:   []string{workspace},
+		RiskTone:        "danger",
+		AffectedPaths:   []string{".git/config"},
+		NormalizedInput: "*** Begin Patch\n*** Add File: .git/config\n+[core]\n*** End Patch",
+		IsDestructive:   true,
+	}
+
+	decision := DefaultAutoToolPolicy{}.DecideExecution(context.Background(), intent, request)
+
+	if decision.Action != profile.DecisionDeny {
+		t.Fatalf("expected deny, got %s: %+v", decision.Action, decision)
+	}
+	if !strings.Contains(decision.Reason, "sensitive path") {
+		t.Fatalf("expected reason to mention sensitive path, got %q", decision.Reason)
+	}
+}
+
+func TestDecideExecution_TransformsShellEchoWrite(t *testing.T) {
+	workspace := t.TempDir()
+	intent := profile.ExecutionIntent{
+		ToolName:        "shell",
+		ToolKind:        profile.ToolKindShellCommand,
+		RequestedAction: profile.ActionExecute,
+		NetworkScope:    profile.NetworkScopeOpen,
+		WorkspaceRoot:   workspace,
+		WritableRoots:   []string{workspace},
+	}
+	request := ToolDecisionRequest{
+		ToolName:        "shell",
+		StaticBehavior:  tool.PermissionAsk,
+		StaticReason:    "shell command contains operators",
+		NormalizedInput: `{"command":"echo \"hello\" > ./file.txt"}`,
+		WorkspaceRoot:   workspace,
+		WritableRoots:   []string{workspace},
+		IsOpenWorld:     true,
+	}
+
+	decision := DefaultAutoToolPolicy{}.DecideExecution(context.Background(), intent, request)
+
+	if decision.Action != profile.DecisionTransform {
+		t.Fatalf("expected transform, got %s: %+v", decision.Action, decision)
+	}
+	if decision.Source != profile.DecisionSourceTransform {
+		t.Fatalf("expected transform source, got %s", decision.Source)
+	}
+	if decision.UpdatedToolName != "apply_patch" {
+		t.Fatalf("expected UpdatedToolName=apply_patch, got %q", decision.UpdatedToolName)
+	}
+	if decision.UpdatedInput == nil {
+		t.Fatal("UpdatedInput should not be nil for transform")
+	}
+	patch, _ := decision.UpdatedInput["patch"].(string)
+	if !strings.Contains(patch, "*** Add File: file.txt") {
+		t.Fatalf("expected patch to contain Add File for file.txt, got %q", patch)
+	}
+	if !strings.Contains(patch, "+hello") {
+		t.Fatalf("expected patch to contain +hello, got %q", patch)
+	}
+	if decision.UpdatedIntent == nil {
+		t.Fatal("UpdatedIntent should not be nil for transform")
+	}
+}
+
+func TestDecideExecution_DeniesOpenWorldShell(t *testing.T) {
+	workspace := t.TempDir()
+	intent := profile.ExecutionIntent{
+		ToolName:        "shell",
+		ToolKind:        profile.ToolKindShellCommand,
+		RequestedAction: profile.ActionExecute,
+		NetworkScope:    profile.NetworkScopeOpen,
+		WorkspaceRoot:   workspace,
+		WritableRoots:   []string{workspace},
+	}
+	request := ToolDecisionRequest{
+		ToolName:        "shell",
+		StaticBehavior:  tool.PermissionAsk,
+		StaticReason:    "shell command may access external systems",
+		NormalizedInput: `{"command":"curl http://example.com > file"}`,
+		WorkspaceRoot:   workspace,
+		WritableRoots:   []string{workspace},
+		IsOpenWorld:     true,
+		IsDestructive:   true,
+	}
+
+	decision := DefaultAutoToolPolicy{}.DecideExecution(context.Background(), intent, request)
+
+	if decision.Action != profile.DecisionDeny {
+		t.Fatalf("expected deny, got %s: %+v", decision.Action, decision)
+	}
+	if !strings.Contains(decision.Reason, "apply_patch") {
+		t.Fatalf("expected reason to suggest apply_patch, got %q", decision.Reason)
+	}
+}
+
+func TestDecideExecution_DeniesOnCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	intent := profile.ExecutionIntent{
+		ToolName: "read_file",
+		ToolKind: profile.ToolKindFileChain,
+	}
+	request := ToolDecisionRequest{
+		ToolName:       "read_file",
+		StaticBehavior: tool.PermissionAsk,
+		IsReadOnly:     true,
+	}
+
+	decision := DefaultAutoToolPolicy{}.DecideExecution(ctx, intent, request)
+
+	// In the unified model, a cancelled context produces a deny with
+	// policy_error source (not abort, which is a legacy-only action).
+	if decision.Action != profile.DecisionDeny {
+		t.Fatalf("expected deny for cancelled context, got %s", decision.Action)
+	}
+	if decision.Source != profile.DecisionSourcePolicyError {
+		t.Fatalf("expected policy_error source, got %s", decision.Source)
 	}
 }
 
@@ -382,13 +810,16 @@ func TestToolRuntimeAutoPolicyAbortSynthesizesResult(t *testing.T) {
 	})
 
 	if executeCount != 0 {
-		t.Fatalf("expected aborted tool not to execute, got %d executions", executeCount)
+		t.Fatalf("expected denied tool not to execute, got %d executions", executeCount)
 	}
+	// In the unified ExecutionDecision model, abort maps to deny with
+	// policy_error source (context cancellation is handled separately).
 	if !result.IsError ||
-		result.Status != ToolExecutionCancelled ||
-		result.ErrorCode != "tool_policy_abort" ||
-		!strings.Contains(result.Content, "工具执行已被取消") {
-		t.Fatalf("expected aborted tool result, got %+v", result)
+		result.Status != ToolExecutionDenied ||
+		result.ErrorCode != "tool_denied" ||
+		result.DecisionSource != ToolDecisionSourcePolicyError ||
+		!strings.Contains(result.Content, "工具执行被 AUTO policy 拒绝") {
+		t.Fatalf("expected denied tool result (abort→deny), got %+v", result)
 	}
 }
 
@@ -731,6 +1162,10 @@ type staticAutoToolPolicy struct {
 
 func (p staticAutoToolPolicy) Decide(context.Context, ToolDecisionRequest) ToolDecision {
 	return p.decision
+}
+
+func (p staticAutoToolPolicy) DecideExecution(_ context.Context, intent profile.ExecutionIntent, _ ToolDecisionRequest) profile.ExecutionDecision {
+	return toolDecisionToExecutionDecision(p.decision, intent)
 }
 
 func (t testApprovalAwaiter) Emit(event AwakenEvent) {

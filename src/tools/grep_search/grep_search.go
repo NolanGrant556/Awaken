@@ -89,7 +89,13 @@ func (t *GrepSearchTool) Definition() tool.ToolDefinition {
 		DisplayName: "Grep Search",
 		Source:      tool.SourceBuiltin,
 		Description: t.Description(),
-		Annotations: tool.ToolAnnotations{ReadOnly: true, Destructive: false, OpenWorld: false},
+		Annotations: tool.ToolAnnotations{
+			ReadOnly:        true,
+			Destructive:     false,
+			OpenWorld:       false,
+			CapabilityClass: tool.CapabilityArtifactRead,
+			TrustedOrigin:   tool.TrustedOriginBuiltin,
+		},
 	}
 }
 
@@ -105,7 +111,7 @@ func (t *GrepSearchTool) Execute(ctx context.Context, input string) (string, err
 	permissionContext := tool.PermissionContextFromContext(ctx)
 	root := permissionContext.ResolvePath(params.Root)
 	if tool.HasPermissionContext(ctx) {
-		checkedRoot, err := permissionContext.ResolvePathChecked(params.Root)
+		checkedRoot, err := permissionContext.ResolveReadablePathChecked(params.Root)
 		if err != nil {
 			return "", err
 		}
@@ -148,8 +154,8 @@ func (t *GrepSearchTool) CheckPermission(ctx context.Context, input string, perm
 	if err != nil {
 		return tool.DenyPermission(fmt.Sprintf("invalid parameters: %v", err))
 	}
-	if !permissionContext.IsWithinWorkspaceResolved(params.Root) {
-		return tool.DenyPermission(fmt.Sprintf("root %s is outside workspace or escapes via symlink", params.Root))
+	if !permissionContext.IsWithinReadableRootsResolved(params.Root) {
+		return tool.DenyPermission(fmt.Sprintf("root %s is outside readable roots or escapes via symlink", params.Root))
 	}
 	return tool.AllowPermission()
 }
@@ -297,7 +303,7 @@ func matchingFiles(ctx context.Context, root, include string, permissionContext 
 		}
 
 		// Skip files that escape the workspace through symlinks.
-		if !permissionContext.IsWithinWorkspaceResolved(path) {
+		if !permissionContext.IsWithinReadableRootsResolved(path) {
 			return nil
 		}
 

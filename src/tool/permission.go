@@ -12,10 +12,9 @@ import (
 // and user-configured overrides — never on hard-coded tool name matches.
 //
 // Default rules:
-//   - readOnly==true → allow (regardless of openWorld)
-//   - destructive==true → ask
-//   - readOnly==false && destructive==false → ask (conservative)
 //   - requiresAuth==true && server/connector not connected → deny with reason "needs_auth"
+//   - artifact_read / connector_read / browser_read / local_transform / readOnly → allow
+//   - external_publish / system_operation / destructive / unknown side-effects → ask
 func Decide(ctx context.Context, def ToolDefinition) PermissionDecision {
 	return DecideWithOverride(ctx, def, nil)
 }
@@ -42,13 +41,18 @@ func DecideWithOverride(ctx context.Context, def ToolDefinition, overrides map[s
 		}
 	}
 
-	// Default rules based on annotations
-	if def.Annotations.ReadOnly {
+	if def.Annotations.RequiresAuth {
+		return DenyPermission("needs_auth")
+	}
+
+	switch def.Annotations.CapabilityClass {
+	case CapabilityArtifactRead, CapabilityConnectorRead, CapabilityBrowserRead, CapabilityLocalTransform:
 		return AllowPermission()
 	}
 
-	if def.Annotations.RequiresAuth {
-		return DenyPermission("needs_auth")
+	// Default rules based on annotations
+	if def.Annotations.ReadOnly {
+		return AllowPermission()
 	}
 
 	if def.Annotations.Destructive {
@@ -107,8 +111,14 @@ type PermissionDecision struct {
 }
 
 type PermissionContext struct {
-	WorkspaceRoot string
-	WritableRoots []string
+	ScopeID           string
+	WorkspaceRoot     string
+	ReadableRoots     []string
+	WritableRoots     []string
+	OutputRoots       []string
+	AttachedFiles     []ScopedFile
+	ProtectedRoots    []string
+	TemporaryWorkRoot string
 }
 
 type permissionContextKey struct{}
@@ -143,25 +153,97 @@ func NewPermissionContext(workspaceRoot string, writableRoots []string) Permissi
 	}.Normalize()
 }
 
+func NewTaskScopePermissionContext(
+	scopeID string,
+	workspaceRoot string,
+	readableRoots []string,
+	writableRoots []string,
+	outputRoots []string,
+	attachedFiles []ScopedFile,
+	protectedRoots []string,
+	temporaryWorkRoot string,
+) PermissionContext {
+	return PermissionContext{
+		ScopeID:           scopeID,
+		WorkspaceRoot:     workspaceRoot,
+		ReadableRoots:     readableRoots,
+		WritableRoots:     writableRoots,
+		OutputRoots:       outputRoots,
+		AttachedFiles:     attachedFiles,
+		ProtectedRoots:    protectedRoots,
+		TemporaryWorkRoot: temporaryWorkRoot,
+	}.Normalize()
+}
+
 func (c PermissionContext) Normalize() PermissionContext {
 	root, ok := absoluteCleanRoot(c.WorkspaceRoot)
 	if !ok {
 		root, _ = absoluteCleanRoot(".")
 	}
 
+	readableRoots := make([]string, 0, len(c.ReadableRoots)+1)
+	for _, candidate := range c.ReadableRoots {
+		if normalized, ok := AbsoluteCleanPath(candidate, root); ok {
+			readableRoots = append(readableRoots, normalized)
+		}
+	}
+	if len(readableRoots) == 0 && root != "" {
+		readableRoots = append(readableRoots, root)
+	}
+
 	writableRoots := make([]string, 0, len(c.WritableRoots)+1)
 	for _, candidate := range c.WritableRoots {
-		if root, ok := AbsoluteCleanPath(candidate, root); ok {
-			writableRoots = append(writableRoots, root)
+		if normalized, ok := AbsoluteCleanPath(candidate, root); ok {
+			writableRoots = append(writableRoots, normalized)
 		}
 	}
 	if len(writableRoots) == 0 && root != "" {
 		writableRoots = append(writableRoots, root)
 	}
 
+	outputRoots := make([]string, 0, len(c.OutputRoots)+1)
+	for _, candidate := range c.OutputRoots {
+		if normalized, ok := AbsoluteCleanPath(candidate, root); ok {
+			outputRoots = append(outputRoots, normalized)
+		}
+	}
+	if len(outputRoots) == 0 && root != "" {
+		outputRoots = append(outputRoots, root)
+	}
+
+	attachedFiles := make([]ScopedFile, 0, len(c.AttachedFiles))
+	for _, file := range c.AttachedFiles {
+		if normalized, ok := AbsoluteCleanPath(file.Path, root); ok {
+			attachedFiles = append(attachedFiles, ScopedFile{
+				Path:        normalized,
+				DisplayName: strings.TrimSpace(file.DisplayName),
+			})
+		}
+	}
+
+	protectedRoots := make([]string, 0, len(c.ProtectedRoots))
+	for _, candidate := range c.ProtectedRoots {
+		if normalized, ok := AbsoluteCleanPath(candidate, root); ok {
+			protectedRoots = append(protectedRoots, normalized)
+		}
+	}
+
+	temporaryWorkRoot := strings.TrimSpace(c.TemporaryWorkRoot)
+	if normalized, ok := AbsoluteCleanPath(temporaryWorkRoot, root); ok {
+		temporaryWorkRoot = normalized
+	} else {
+		temporaryWorkRoot = filepath.Join(os.TempDir(), "awaken-task-scope")
+	}
+
 	return PermissionContext{
-		WorkspaceRoot: root,
-		WritableRoots: dedupeStrings(writableRoots),
+		ScopeID:           strings.TrimSpace(c.ScopeID),
+		WorkspaceRoot:     root,
+		ReadableRoots:     dedupeStrings(readableRoots),
+		WritableRoots:     dedupeStrings(writableRoots),
+		OutputRoots:       dedupeStrings(outputRoots),
+		AttachedFiles:     dedupeScopedFiles(attachedFiles),
+		ProtectedRoots:    dedupeStrings(protectedRoots),
+		TemporaryWorkRoot: temporaryWorkRoot,
 	}
 }
 
@@ -170,9 +252,30 @@ func (c PermissionContext) IsWithinWorkspace(path string) bool {
 	return PathWithinRoot(normalized.resolvePath(path), normalized.WorkspaceRoot)
 }
 
+func (c PermissionContext) IsWithinReadableRoots(path string) bool {
+	normalized := c.Normalize()
+	resolved := normalized.resolvePath(path)
+	for _, root := range normalized.ReadableRoots {
+		if PathWithinRoot(resolved, root) {
+			return true
+		}
+	}
+	return normalized.matchesAttachedFile(resolved)
+}
+
 func (c PermissionContext) IsWithinWritableRoots(path string) bool {
 	normalized := c.Normalize()
 	for _, root := range normalized.WritableRoots {
+		if PathWithinRoot(normalized.resolvePath(path), root) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c PermissionContext) IsWithinOutputRoots(path string) bool {
+	normalized := c.Normalize()
+	for _, root := range normalized.OutputRoots {
 		if PathWithinRoot(normalized.resolvePath(path), root) {
 			return true
 		}
@@ -202,6 +305,29 @@ func (c PermissionContext) IsWithinWritableRootsResolved(path string) bool {
 	return false
 }
 
+// IsWithinReadableRootsResolved resolves symlinks on both the path and the
+// readable roots before checking boundary. Attached files are allowed when the
+// resolved path matches a declared attached file (or falls under an attached
+// directory).
+func (c PermissionContext) IsWithinReadableRootsResolved(path string) bool {
+	normalized := c.Normalize()
+	resolved := normalized.resolvePath(path)
+	realPath, err := filepath.EvalSymlinks(resolved)
+	if err != nil {
+		return false
+	}
+	for _, root := range normalized.ReadableRoots {
+		realRoot, err := filepath.EvalSymlinks(root)
+		if err != nil {
+			continue
+		}
+		if PathWithinRoot(realPath, realRoot) {
+			return true
+		}
+	}
+	return normalized.matchesResolvedAttachedFile(realPath)
+}
+
 func (c PermissionContext) WorkspaceRootOrCWD() string {
 	normalized := c.Normalize()
 	return normalized.WorkspaceRoot
@@ -211,8 +337,9 @@ func (c PermissionContext) ResolvePath(path string) string {
 	return c.Normalize().resolvePath(path)
 }
 
-// IsWithinWorkspaceResolved resolves symlinks before checking workspace boundary.
-// It returns false if the path cannot be resolved, treating unresolvable paths as unsafe.
+// IsWithinWorkspaceResolved resolves symlinks before checking workspace
+// boundary. It returns false if the path cannot be resolved, treating
+// unresolvable paths as unsafe.
 func (c PermissionContext) IsWithinWorkspaceResolved(path string) bool {
 	normalized := c.Normalize()
 	resolved := normalized.resolvePath(path)
@@ -227,23 +354,255 @@ func (c PermissionContext) IsWithinWorkspaceResolved(path string) bool {
 	return PathWithinRoot(realPath, realRoot)
 }
 
-// ResolvePathChecked returns the cleaned path if its symlink-resolved target is within the workspace,
-// otherwise returns an error describing the boundary violation (including symlink escapes).
-func (c PermissionContext) ResolvePathChecked(path string) (string, error) {
+// ResolveReadablePathChecked returns the cleaned path if its symlink-resolved
+// target is within readable roots (or matches an attached file / attached
+// directory). Otherwise it returns an error describing the boundary violation
+// (including symlink escapes).
+func (c PermissionContext) ResolveReadablePathChecked(path string) (string, error) {
 	normalized := c.Normalize()
 	resolved := normalized.resolvePath(path)
 	realPath, err := filepath.EvalSymlinks(resolved)
 	if err != nil {
 		return "", fmt.Errorf("cannot resolve path %q: %w", path, err)
 	}
-	realRoot, err := filepath.EvalSymlinks(normalized.WorkspaceRoot)
-	if err != nil {
-		return "", fmt.Errorf("cannot resolve workspace root %q: %w", normalized.WorkspaceRoot, err)
+	for _, root := range normalized.ReadableRoots {
+		realRoot, err := filepath.EvalSymlinks(root)
+		if err != nil {
+			continue
+		}
+		if PathWithinRoot(realPath, realRoot) {
+			return resolved, nil
+		}
 	}
-	if !PathWithinRoot(realPath, realRoot) {
-		return "", fmt.Errorf("path %q resolves to %q which is outside workspace", path, realPath)
+	if normalized.matchesResolvedAttachedFile(realPath) {
+		return resolved, nil
 	}
-	return resolved, nil
+	return "", fmt.Errorf("path %q resolves to %q which is outside readable roots", path, realPath)
+}
+
+// ResolvePathChecked preserves the historical API name but now enforces the
+// task scope's readable roots rather than only workspace_root.
+func (c PermissionContext) ResolvePathChecked(path string) (string, error) {
+	return c.ResolveReadablePathChecked(path)
+}
+
+func (c PermissionContext) ResolveWritablePathChecked(path string) (string, error) {
+	normalized := c.Normalize()
+	resolved := normalized.resolvePath(path)
+	for _, root := range normalized.WritableRoots {
+		if PathWithinRoot(resolved, root) {
+			return resolved, nil
+		}
+	}
+	return "", fmt.Errorf("path %q resolves to %q which is outside writable roots", path, resolved)
+}
+
+func (c PermissionContext) ResolveOutputPathChecked(path string) (string, error) {
+	normalized := c.Normalize()
+	resolved := normalized.resolvePath(path)
+	for _, root := range normalized.OutputRoots {
+		if PathWithinRoot(resolved, root) {
+			return resolved, nil
+		}
+	}
+	return "", fmt.Errorf("path %q resolves to %q which is outside output roots", path, resolved)
+}
+
+// ResolveMutationPathChecked is like ResolvePathChecked but additionally
+// rejects paths that the runtime considers sensitive (e.g. .git/, .env, key
+// files, agent metadata directories). Use this for any file-chain mutation
+// (write/delete) path resolution. Reads must continue to use ResolvePathChecked
+// so that sensitive paths remain readable.
+func (c PermissionContext) ResolveMutationPathChecked(path string) (string, error) {
+	if err := c.CheckSensitivePath(path); err != nil {
+		return "", err
+	}
+	return c.ResolveWritablePathChecked(path)
+}
+
+// SensitivePathError describes a mutation attempt against a path that the
+// runtime treats as sensitive and therefore denies by default, regardless of
+// whether the path is inside the workspace or writable roots. Callers can
+// use errors.As to detect it and produce a structured tool_result rejection.
+type SensitivePathError struct {
+	Path   string
+	Reason string
+}
+
+func (e *SensitivePathError) Error() string {
+	return fmt.Sprintf("sensitive path %q denied: %s", e.Path, e.Reason)
+}
+
+func (e *SensitivePathError) Is(target error) bool {
+	other, ok := target.(*SensitivePathError)
+	if !ok {
+		return false
+	}
+	return e.Path == other.Path && e.Reason == other.Reason
+}
+
+// SensitivePathMatcher decides whether a given absolute path is considered
+// sensitive for mutation purposes (write/delete). Reads are NOT affected by
+// this matcher; only file-chain mutations are denied.
+//
+// Categories denied by default:
+//   - .git/ directories (any path component equal to ".git")
+//   - .env files (basename ".env" or starting with ".env.", including
+//     ".env.example" — denying is safer than allowing templates to leak)
+//   - Key/certificate/credential files: extensions .pem, .key, .crt, .p12,
+//     .pfx, .keystore, .jks, and basenames containing id_rsa, id_ed25519,
+//     id_ecdsa, credentials, secrets
+//   - Agent metadata directory: ~/.awaken and ~/.trae-cn
+//   - Desktop/runtime local config: os.UserConfigDir()/awaken and /Awaken
+type SensitivePathMatcher struct {
+	HomeDir   string
+	ConfigDir string
+}
+
+// NewSensitivePathMatcher builds a matcher using the current process home and
+// config directories. If either cannot be resolved, the corresponding checks
+// are skipped rather than failing.
+func NewSensitivePathMatcher() SensitivePathMatcher {
+	home, _ := os.UserHomeDir()
+	configDir, _ := os.UserConfigDir()
+	return SensitivePathMatcher{HomeDir: home, ConfigDir: configDir}
+}
+
+// sensitiveExtensions maps a lowercased file extension to a human-readable
+// reason. Both the bare extension (e.g. "server.pem") and compound names
+// (e.g. "server.pem.bak") are matched via filepath.Ext.
+var sensitiveExtensions = map[string]string{
+	".pem":      "PEM key/certificate file",
+	".key":      "private key file",
+	".crt":      "certificate file",
+	".p12":      "PKCS#12 archive",
+	".pfx":      "PFX archive",
+	".keystore": "Java keystore",
+	".jks":      "Java keystore",
+}
+
+// sensitiveTokens are substrings that, when present in a basename, indicate
+// key/credential material.
+var sensitiveTokens = []string{
+	"id_rsa",
+	"id_ed25519",
+	"id_ecdsa",
+	"credentials",
+	"secrets",
+}
+
+var sensitivePathComponents = map[string]string{
+	".git":    ".git directory is read-only",
+	".awaken": "Awaken project metadata directory",
+	".vscode": "IDE config directory",
+	".idea":   "IDE config directory",
+}
+
+var sensitiveHomeBasenames = map[string]string{
+	".zshrc":                           "shell profile",
+	".zprofile":                        "shell profile",
+	".zlogin":                          "shell profile",
+	".zlogout":                         "shell profile",
+	".bashrc":                          "shell profile",
+	".bash_profile":                    "shell profile",
+	".bash_logout":                     "shell profile",
+	".profile":                         "shell profile",
+	"config.fish":                      "shell profile",
+	"microsoft.powershell_profile.ps1": "shell profile",
+	"profile.ps1":                      "shell profile",
+}
+
+// IsSensitive reports whether path should be denied for mutation, and returns
+// a human-readable reason. The path should be absolute; if it is relative,
+// only the lexical checks (.git component, .env basename, extensions, tokens)
+// are applied.
+func (m SensitivePathMatcher) IsSensitive(path string) (bool, string) {
+	cleaned := filepath.Clean(path)
+	base := filepath.Base(cleaned)
+	lowerBase := strings.ToLower(base)
+
+	// Protected directories anywhere in the path hierarchy.
+	for _, component := range strings.Split(filepath.ToSlash(cleaned), "/") {
+		if reason, ok := sensitivePathComponents[component]; ok {
+			return true, reason
+		}
+	}
+
+	// .env files: basename ".env" or starting with ".env.". This
+	// intentionally covers ".env.example" as well — denying is safer than
+	// allowing, because templates are easy to mistake for real secret files.
+	if base == ".env" || strings.HasPrefix(base, ".env.") {
+		return true, ".env file may contain secrets"
+	}
+
+	// Key/certificate extensions. Check all dot-separated extension
+	// components so that backups like "server.pem.bak" are still flagged.
+	parts := strings.Split(lowerBase, ".")
+	for _, part := range parts[1:] {
+		if reason, ok := sensitiveExtensions["."+part]; ok {
+			return true, reason
+		}
+	}
+
+	// Basenames containing sensitive tokens (id_rsa, credentials, etc.).
+	for _, token := range sensitiveTokens {
+		if strings.Contains(lowerBase, token) {
+			return true, "key/credential file"
+		}
+	}
+
+	// Agent metadata directory: ~/.awaken and ~/.trae-cn.
+	if m.HomeDir != "" {
+		if reason, ok := sensitiveHomeBasenames[lowerBase]; ok && PathWithinRoot(cleaned, m.HomeDir) {
+			return true, reason
+		}
+		for _, name := range []string{".awaken", ".trae-cn"} {
+			metaRoot := filepath.Join(m.HomeDir, name)
+			if PathWithinRoot(cleaned, metaRoot) {
+				return true, "agent metadata directory (~/" + name + ")"
+			}
+		}
+	}
+
+	// Desktop/runtime local config directory: UserConfigDir/awaken or /Awaken.
+	if m.ConfigDir != "" {
+		for _, name := range []string{"awaken", "Awaken"} {
+			configRoot := filepath.Join(m.ConfigDir, name)
+			if PathWithinRoot(cleaned, configRoot) {
+				return true, "runtime local config directory"
+			}
+		}
+	}
+
+	return false, ""
+}
+
+// IsSensitivePath reports whether path is considered sensitive for mutation
+// purposes. The path is resolved against the workspace root before checking.
+// Sensitive paths are denied for writes/deletes regardless of whether they
+// are inside the workspace or writable roots.
+func (c PermissionContext) IsSensitivePath(path string) bool {
+	return c.CheckSensitivePath(path) != nil
+}
+
+// CheckSensitivePath returns a *SensitivePathError if the path is sensitive,
+// otherwise nil. The path is resolved against the workspace root first.
+// Callers handling mutation paths should invoke this before any filesystem
+// write/delete; read paths must NOT be gated by this check.
+func (c PermissionContext) CheckSensitivePath(path string) error {
+	normalized := c.Normalize()
+	resolved := normalized.resolvePath(path)
+	for _, protectedRoot := range normalized.ProtectedRoots {
+		if PathWithinRoot(resolved, protectedRoot) {
+			return &SensitivePathError{Path: resolved, Reason: "protected task-scope root"}
+		}
+	}
+	matcher := NewSensitivePathMatcher()
+	sensitive, reason := matcher.IsSensitive(resolved)
+	if !sensitive {
+		return nil
+	}
+	return &SensitivePathError{Path: resolved, Reason: reason}
 }
 
 func ContextWithPermissionContext(ctx context.Context, permissionContext PermissionContext) context.Context {
@@ -287,6 +646,40 @@ func (c PermissionContext) resolvePath(path string) string {
 		return filepath.Clean(path)
 	}
 	return filepath.Clean(abs)
+}
+
+func (c PermissionContext) matchesAttachedFile(path string) bool {
+	for _, attachment := range c.AttachedFiles {
+		if attachmentPathMatches(path, attachment.Path) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c PermissionContext) matchesResolvedAttachedFile(realPath string) bool {
+	for _, attachment := range c.AttachedFiles {
+		target := attachment.Path
+		realTarget, err := filepath.EvalSymlinks(target)
+		if err != nil {
+			realTarget = target
+		}
+		if attachmentPathMatches(realPath, realTarget) {
+			return true
+		}
+	}
+	return false
+}
+
+func attachmentPathMatches(candidate string, target string) bool {
+	if candidate == target {
+		return true
+	}
+	info, err := os.Stat(target)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	return PathWithinRoot(candidate, target)
 }
 
 func expandTilde(path string) string {
@@ -352,6 +745,24 @@ func dedupeStrings(values []string) []string {
 			continue
 		}
 		seen[value] = struct{}{}
+		deduped = append(deduped, value)
+	}
+	return deduped
+}
+
+func dedupeScopedFiles(values []ScopedFile) []ScopedFile {
+	seen := make(map[string]struct{}, len(values))
+	deduped := make([]ScopedFile, 0, len(values))
+	for _, value := range values {
+		path := strings.TrimSpace(value.Path)
+		if path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		value.Path = path
 		deduped = append(deduped, value)
 	}
 	return deduped

@@ -613,16 +613,14 @@ func TestCreateRunWithWorkspaceMismatchReturns400(t *testing.T) {
 		t.Fatalf("POST /v1/runs (second) failed: %v", err)
 	}
 	defer secondResp.Body.Close()
-	if secondResp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("expected 400 for workspace mismatch, got %d", secondResp.StatusCode)
+	if secondResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 for task-scope update, got %d", secondResp.StatusCode)
 	}
-	var errResp errorResponse
-	if err := json.NewDecoder(secondResp.Body).Decode(&errResp); err != nil {
-		t.Fatalf("expected JSON error response, got decode error: %v", err)
+	var secondRun awruntime.Run
+	if err := json.NewDecoder(secondResp.Body).Decode(&secondRun); err != nil {
+		t.Fatalf("failed to decode second run response: %v", err)
 	}
-	if errResp.Error != "THREAD_WORKSPACE_MISMATCH" {
-		t.Fatalf("expected THREAD_WORKSPACE_MISMATCH error code, got %q", errResp.Error)
-	}
+	waitHTTPRunTerminal(t, ts.URL, secondRun.RunID)
 }
 
 func TestCreateRunWithActiveThreadReturns409(t *testing.T) {
@@ -2071,10 +2069,10 @@ func isReadOnlyTool(name string) bool {
 	return false
 }
 
-// TestFileMutationAutoDenySmoke 通过真实 LLM 调用验证默认 AUTO 策略会拒绝
-// apply_patch 这类写入工具，并把拒绝结果回传给主 Agent loop。
+// TestFileMutationAutoAllowSmoke 通过真实 LLM 调用验证 apply_patch 在工作区
+// 内非敏感路径下默认 AUTO 允许（Task 4 文件链放松），不弹审批，文件被修改。
 // 需要项目根目录的 .env/config.toml 提供 LLM_API_KEY；未设置时自动跳过。
-func TestFileMutationAutoDenySmoke(t *testing.T) {
+func TestFileMutationAutoAllowSmoke(t *testing.T) {
 	workspaceRoot, err := findProjectRoot()
 	if err != nil {
 		t.Fatalf("failed to find project root: %v", err)
@@ -2161,16 +2159,16 @@ func TestFileMutationAutoDenySmoke(t *testing.T) {
 	}
 
 	var (
-		sawRunStarted               bool
-		sawApplyPatchToolCallStart  bool
-		sawToolPermissionDecided    bool
-		sawApprovalRequested        bool
-		sawStatusAwaitingApproval   bool
-		sawApplyPatchToolCallResult bool
-		sawFinalTextAfterDeniedTool bool
-		sawRunFinished              bool
-		deniedToolResultContent     string
-		finalOutcome                string
+		sawRunStarted                bool
+		sawApplyPatchToolCallStart   bool
+		sawToolPermissionDecided     bool
+		sawApprovalRequested         bool
+		sawStatusAwaitingApproval    bool
+		sawApplyPatchToolCallResult  bool
+		sawFinalTextAfterAllowedTool bool
+		sawRunFinished               bool
+		toolResultContent            string
+		finalOutcome                 string
 	)
 
 	for _, ev := range events {
@@ -2186,11 +2184,11 @@ func TestFileMutationAutoDenySmoke(t *testing.T) {
 		case agui.EventAwakenToolPermissionDecided:
 			if ev.ToolCallName == "apply_patch" {
 				sawToolPermissionDecided = true
-				if ev.ToolDecisionAction != "deny" {
-					t.Fatalf("expected apply_patch tool decision action deny, got %q", ev.ToolDecisionAction)
+				if ev.ToolDecisionAction != "allow" {
+					t.Fatalf("expected apply_patch tool decision action allow, got %q", ev.ToolDecisionAction)
 				}
-				if ev.ToolDecisionSource != "headless_default" {
-					t.Fatalf("expected apply_patch tool decision source headless_default, got %q", ev.ToolDecisionSource)
+				if ev.ToolDecisionSource != "workspace_boundary" {
+					t.Fatalf("expected apply_patch tool decision source workspace_boundary, got %q", ev.ToolDecisionSource)
 				}
 				hasNoteMD := false
 				for _, p := range ev.ApprovalAffectedPaths {
@@ -2212,11 +2210,11 @@ func TestFileMutationAutoDenySmoke(t *testing.T) {
 		case agui.EventToolCallResult:
 			if ev.ToolCallName == "apply_patch" {
 				sawApplyPatchToolCallResult = true
-				deniedToolResultContent = ev.Content
+				toolResultContent = ev.Content
 			}
 		case agui.EventTextMessageContent:
 			if sawApplyPatchToolCallResult && strings.TrimSpace(ev.Delta) != "" {
-				sawFinalTextAfterDeniedTool = true
+				sawFinalTextAfterAllowedTool = true
 			}
 		case agui.EventRunFinished:
 			sawRunFinished = true
@@ -2238,19 +2236,19 @@ func TestFileMutationAutoDenySmoke(t *testing.T) {
 		t.Fatalf("expected AWAKEN_TOOL_PERMISSION_DECIDED event for apply_patch")
 	}
 	if sawApprovalRequested {
-		t.Fatalf("did not expect AWAKEN_APPROVAL_REQUESTED event on AUTO deny path")
+		t.Fatalf("did not expect AWAKEN_APPROVAL_REQUESTED event on AUTO allow path")
 	}
 	if sawStatusAwaitingApproval {
-		t.Fatalf("did not expect RUN_STATUS_CHANGED event with awaiting_approval on AUTO deny path")
+		t.Fatalf("did not expect RUN_STATUS_CHANGED event with awaiting_approval on AUTO allow path")
 	}
 	if !sawApplyPatchToolCallResult {
 		t.Fatalf("expected TOOL_CALL_RESULT event for apply_patch")
 	}
-	if !strings.Contains(deniedToolResultContent, "工具执行被 AUTO policy 拒绝") {
-		t.Fatalf("expected denied tool result content to contain AUTO policy denial, got %q", deniedToolResultContent)
+	if strings.Contains(toolResultContent, "AUTO policy 拒绝") {
+		t.Fatalf("expected AUTO-allowed tool result, got denial: %q", toolResultContent)
 	}
-	if !sawFinalTextAfterDeniedTool {
-		t.Fatalf("expected final assistant text after denied tool_result")
+	if !sawFinalTextAfterAllowedTool {
+		t.Fatalf("expected final assistant text after allowed tool_result")
 	}
 	if !sawRunFinished {
 		t.Fatalf("expected RUN_FINISHED event")
@@ -2263,15 +2261,15 @@ func TestFileMutationAutoDenySmoke(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read note.md: %v", err)
 	}
-	if strings.TrimSpace(string(content)) != "hello" {
-		t.Fatalf("expected note.md to remain 'hello' after AUTO deny, got %q", string(content))
+	if strings.TrimSpace(string(content)) != "world" {
+		t.Fatalf("expected note.md to be 'world' after AUTO allow, got %q", string(content))
 	}
 }
 
-// TestFileMutationAutoDenyDoesNotEnterApprovalSmoke 通过真实 LLM 调用验证
-// apply_patch 默认 AUTO 拒绝时不会进入审批状态或产生 approval resolved。
+// TestFileMutationAutoAllowDoesNotEnterApprovalSmoke 通过真实 LLM 调用验证
+// apply_patch 默认 AUTO 允许（Task 4）时不会进入审批状态或产生 approval resolved。
 // 需要项目根目录的 .env/config.toml 提供 LLM_API_KEY；未设置时自动跳过。
-func TestFileMutationAutoDenyDoesNotEnterApprovalSmoke(t *testing.T) {
+func TestFileMutationAutoAllowDoesNotEnterApprovalSmoke(t *testing.T) {
 	workspaceRoot, err := findProjectRoot()
 	if err != nil {
 		t.Fatalf("failed to find project root: %v", err)
@@ -2362,7 +2360,7 @@ func TestFileMutationAutoDenyDoesNotEnterApprovalSmoke(t *testing.T) {
 		sawApprovalRequested       bool
 		sawStatusAwaitingApproval  bool
 		sawRunFinished             bool
-		deniedToolResultContent    string
+		toolResultContent          string
 		approvalRequestedCount     int
 		approvalResolvedCount      int
 		finalOutcome               string
@@ -2381,8 +2379,8 @@ func TestFileMutationAutoDenyDoesNotEnterApprovalSmoke(t *testing.T) {
 		case agui.EventAwakenToolPermissionDecided:
 			if ev.ToolCallName == "apply_patch" {
 				sawToolPermissionDecided = true
-				if ev.ToolDecisionAction != "deny" {
-					t.Fatalf("expected apply_patch tool decision action deny, got %q", ev.ToolDecisionAction)
+				if ev.ToolDecisionAction != "allow" {
+					t.Fatalf("expected apply_patch tool decision action allow, got %q", ev.ToolDecisionAction)
 				}
 			}
 		case agui.EventAwakenApprovalRequested:
@@ -2392,7 +2390,7 @@ func TestFileMutationAutoDenyDoesNotEnterApprovalSmoke(t *testing.T) {
 			approvalResolvedCount++
 		case agui.EventToolCallResult:
 			if ev.ToolCallName == "apply_patch" {
-				deniedToolResultContent = ev.Content
+				toolResultContent = ev.Content
 			}
 		case agui.EventRunStatusChanged:
 			if ev.Status == "awaiting_approval" {
@@ -2418,19 +2416,19 @@ func TestFileMutationAutoDenyDoesNotEnterApprovalSmoke(t *testing.T) {
 		t.Fatalf("expected AWAKEN_TOOL_PERMISSION_DECIDED event for apply_patch")
 	}
 	if sawApprovalRequested {
-		t.Fatalf("did not expect AWAKEN_APPROVAL_REQUESTED event on AUTO deny path")
+		t.Fatalf("did not expect AWAKEN_APPROVAL_REQUESTED event on AUTO allow path")
 	}
 	if sawStatusAwaitingApproval {
-		t.Fatalf("did not expect RUN_STATUS_CHANGED event with awaiting_approval on AUTO deny path")
+		t.Fatalf("did not expect RUN_STATUS_CHANGED event with awaiting_approval on AUTO allow path")
 	}
 	if approvalRequestedCount != 0 {
-		t.Fatalf("expected zero approval requests on AUTO deny path, got %d", approvalRequestedCount)
+		t.Fatalf("expected zero approval requests on AUTO allow path, got %d", approvalRequestedCount)
 	}
 	if approvalResolvedCount != 0 {
-		t.Fatalf("expected zero approval resolved events on AUTO deny path, got %d", approvalResolvedCount)
+		t.Fatalf("expected zero approval resolved events on AUTO allow path, got %d", approvalResolvedCount)
 	}
-	if !strings.Contains(deniedToolResultContent, "工具执行被 AUTO policy 拒绝") {
-		t.Fatalf("expected denied tool result content to contain AUTO policy denial, got %q", deniedToolResultContent)
+	if strings.Contains(toolResultContent, "AUTO policy 拒绝") {
+		t.Fatalf("expected AUTO-allowed tool result, got denial: %q", toolResultContent)
 	}
 	if !sawRunFinished {
 		t.Fatalf("expected RUN_FINISHED event")
@@ -2443,15 +2441,15 @@ func TestFileMutationAutoDenyDoesNotEnterApprovalSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read note.md: %v", err)
 	}
-	if strings.TrimSpace(string(content)) != "hello" {
-		t.Fatalf("expected note.md to remain 'hello' after AUTO deny, got %q", string(content))
+	if strings.TrimSpace(string(content)) != "world" {
+		t.Fatalf("expected note.md to be 'world' after AUTO allow, got %q", string(content))
 	}
 }
 
-// TestFileMutationAutoDenySkipsArtifactSmoke 通过真实 LLM 调用验证 apply_patch
-// 默认 AUTO 拒绝时不会产生文件变更 Artifact。
+// TestFileMutationAutoAllowEmitsArtifactSmoke 通过真实 LLM 调用验证 apply_patch
+// 默认 AUTO 允许（Task 4）后会产生文件变更 Artifact。
 // 需要项目根目录的 .env/config.toml 提供 LLM_API_KEY；未设置时自动跳过。
-func TestFileMutationAutoDenySkipsArtifactSmoke(t *testing.T) {
+func TestFileMutationAutoAllowEmitsArtifactSmoke(t *testing.T) {
 	workspaceRoot, err := findProjectRoot()
 	if err != nil {
 		t.Fatalf("failed to find project root: %v", err)
@@ -2543,8 +2541,9 @@ func TestFileMutationAutoDenySkipsArtifactSmoke(t *testing.T) {
 		finalOutcome             string
 		sawArtifactEvent         bool
 		sawToolPermissionDecided bool
-		artifactEventTypes       []string
-		deniedToolResultContent  string
+		artifactPath             string
+		artifactKind             string
+		toolResultContent        string
 	)
 
 	for _, ev := range events {
@@ -2556,16 +2555,22 @@ func TestFileMutationAutoDenySkipsArtifactSmoke(t *testing.T) {
 		case agui.EventAwakenToolPermissionDecided:
 			if ev.ToolCallName == "apply_patch" {
 				sawToolPermissionDecided = true
-				if ev.ToolDecisionAction != "deny" {
-					t.Fatalf("expected apply_patch tool decision action deny, got %q", ev.ToolDecisionAction)
+				if ev.ToolDecisionAction != "allow" {
+					t.Fatalf("expected apply_patch tool decision action allow, got %q", ev.ToolDecisionAction)
+				}
+				if ev.ToolDecisionSource != "workspace_boundary" {
+					t.Fatalf("expected apply_patch tool decision source workspace_boundary, got %q", ev.ToolDecisionSource)
 				}
 			}
 		case agui.EventAwakenArtifactCreated, agui.EventAwakenArtifactUpdated:
-			sawArtifactEvent = true
-			artifactEventTypes = append(artifactEventTypes, string(ev.Type))
+			if ev.ToolCallName == "apply_patch" {
+				sawArtifactEvent = true
+				artifactPath = ev.ArtifactPath
+				artifactKind = ev.ArtifactKind
+			}
 		case agui.EventToolCallResult:
 			if ev.ToolCallName == "apply_patch" {
-				deniedToolResultContent = ev.Content
+				toolResultContent = ev.Content
 			}
 		case agui.EventRunFinished:
 			sawRunFinished = true
@@ -2583,11 +2588,12 @@ func TestFileMutationAutoDenySkipsArtifactSmoke(t *testing.T) {
 	if !sawToolPermissionDecided {
 		t.Fatalf("expected AWAKEN_TOOL_PERMISSION_DECIDED event for apply_patch")
 	}
-	if sawArtifactEvent {
-		t.Fatalf("did not expect artifact event on AUTO deny path, got event types=%v", artifactEventTypes)
+	// Task 4: AUTO allow path must emit a file-change artifact (modified note.md).
+	if !sawArtifactEvent || artifactPath != "note.md" || artifactKind != "modified" {
+		t.Fatalf("expected modified artifact for note.md on AUTO allow path, got saw=%v kind=%q path=%q", sawArtifactEvent, artifactKind, artifactPath)
 	}
-	if !strings.Contains(deniedToolResultContent, "工具执行被 AUTO policy 拒绝") {
-		t.Fatalf("expected denied tool result content to contain AUTO policy denial, got %q", deniedToolResultContent)
+	if toolResultContent == "" || strings.Contains(toolResultContent, "AUTO policy 拒绝") || strings.Contains(toolResultContent, "工具执行失败") {
+		t.Fatalf("expected successful apply_patch tool result on AUTO allow path, got %q", toolResultContent)
 	}
 	if !sawRunFinished {
 		t.Fatalf("expected RUN_FINISHED event")
@@ -2600,13 +2606,13 @@ func TestFileMutationAutoDenySkipsArtifactSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read note.md: %v", err)
 	}
-	if strings.TrimSpace(string(content)) != "hello" {
-		t.Fatalf("expected note.md to remain 'hello' after AUTO deny, got %q", string(content))
+	if strings.TrimSpace(string(content)) != "world" {
+		t.Fatalf("expected note.md to be 'world' after AUTO allow, got %q", string(content))
 	}
 }
 
 // TestFileMutationPatchAndTurnDiffSmoke 通过真实 LLM 调用验证 apply_patch
-// AUTO decision 前可见 patch preview；默认拒绝后不落盘，也不发 turn diff。
+// 默认 AUTO 允许（Task 4）前可见 patch preview；落盘后 turn diff 与 git diff 一致。
 // 需要项目根目录的 .env/config.toml 提供 LLM_API_KEY；未设置时自动跳过。
 func TestFileMutationPatchAndTurnDiffSmoke(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
@@ -2705,12 +2711,12 @@ func TestFileMutationPatchAndTurnDiffSmoke(t *testing.T) {
 	}
 
 	var (
-		patchUpdatedByCallID    = map[string]int{}
-		decisionByCallID        = map[string]int{}
-		approvalRequestIndex    = -1
-		turnDiff                string
-		sawRunFinished          bool
-		deniedToolResultContent string
+		patchUpdatedByCallID = map[string]int{}
+		decisionByCallID     = map[string]int{}
+		approvalRequestIndex = -1
+		turnDiff             string
+		sawRunFinished       bool
+		toolResultContent    string
 	)
 
 	for i, ev := range events {
@@ -2748,18 +2754,19 @@ func TestFileMutationPatchAndTurnDiffSmoke(t *testing.T) {
 				if _, ok := decisionByCallID[ev.ToolCallID]; !ok {
 					decisionByCallID[ev.ToolCallID] = i
 				}
-				if ev.ToolDecisionAction != "deny" {
-					t.Fatalf("expected apply_patch tool decision action deny, got %q", ev.ToolDecisionAction)
+				// Task 4: apply_patch within workspace is auto-allowed via workspace_boundary.
+				if ev.ToolDecisionAction != "allow" {
+					t.Fatalf("expected apply_patch tool decision action allow, got %q", ev.ToolDecisionAction)
 				}
-				if ev.ToolDecisionSource != "headless_default" {
-					t.Fatalf("expected apply_patch tool decision source headless_default, got %q", ev.ToolDecisionSource)
+				if ev.ToolDecisionSource != "workspace_boundary" {
+					t.Fatalf("expected apply_patch tool decision source workspace_boundary, got %q", ev.ToolDecisionSource)
 				}
 			}
 		case agui.EventAwakenTurnDiff:
 			turnDiff = ev.Diff
 		case agui.EventToolCallResult:
 			if ev.ToolCallName == "apply_patch" {
-				deniedToolResultContent = ev.Content
+				toolResultContent = ev.Content
 			}
 		case agui.EventRunFinished:
 			sawRunFinished = true
@@ -2775,7 +2782,7 @@ func TestFileMutationPatchAndTurnDiffSmoke(t *testing.T) {
 		t.Fatalf("expected AWAKEN_TOOL_PERMISSION_DECIDED event")
 	}
 	if approvalRequestIndex >= 0 {
-		t.Fatalf("did not expect AWAKEN_APPROVAL_REQUESTED event on AUTO deny path")
+		t.Fatalf("did not expect AWAKEN_APPROVAL_REQUESTED event on AUTO allow path")
 	}
 	matchedPreviewAndDecision := false
 	for callID, patchIndex := range patchUpdatedByCallID {
@@ -2791,8 +2798,8 @@ func TestFileMutationPatchAndTurnDiffSmoke(t *testing.T) {
 	if !matchedPreviewAndDecision {
 		t.Fatalf("expected an apply_patch call to have both patch preview and tool decision, previews=%v decisions=%v", patchUpdatedByCallID, decisionByCallID)
 	}
-	if !strings.Contains(deniedToolResultContent, "工具执行被 AUTO policy 拒绝") {
-		t.Fatalf("expected denied tool result content to contain AUTO policy denial, got %q", deniedToolResultContent)
+	if toolResultContent == "" || strings.Contains(toolResultContent, "AUTO policy 拒绝") || strings.Contains(toolResultContent, "工具执行失败") {
+		t.Fatalf("expected successful apply_patch tool result on AUTO allow path, got %q", toolResultContent)
 	}
 	if !sawRunFinished {
 		t.Fatalf("expected RUN_FINISHED event")
@@ -2803,15 +2810,15 @@ func TestFileMutationPatchAndTurnDiffSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read note.md: %v", err)
 	}
-	if string(content) != "hello\n" {
-		t.Fatalf("expected note.md to remain hello after AUTO deny, got %q", string(content))
+	if strings.TrimSpace(string(content)) != "world" {
+		t.Fatalf("expected note.md to be 'world' after AUTO allow, got %q", string(content))
 	}
 	wantDiff := runGitOutputForServerTest(t, tempDir, "diff", "--")
-	if wantDiff != "" {
-		t.Fatalf("expected no git diff after AUTO deny, got:\n%s", wantDiff)
+	if !strings.Contains(wantDiff, "note.md") || !strings.Contains(wantDiff, "world") {
+		t.Fatalf("expected git diff to contain note.md and world after AUTO allow, got:\n%s", wantDiff)
 	}
-	if turnDiff != "" {
-		t.Fatalf("did not expect AWAKEN_TURN_DIFF after AUTO deny, got:\n%s", turnDiff)
+	if turnDiff != wantDiff {
+		t.Fatalf("expected turn diff to match git diff after AUTO allow\nwant:\n%s\ngot:\n%s", wantDiff, turnDiff)
 	}
 }
 

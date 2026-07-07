@@ -38,6 +38,9 @@ func newBuiltinSource() *builtinSource {
 			chromeDevToolsConnector(),
 			playwrightConnector(),
 			githubConnector(),
+			dingTalkConnector(),
+			larkConnector(),
+			outlookConnector(),
 			context7Connector(),
 		},
 	}
@@ -111,6 +114,48 @@ func githubConnector() ConnectorDefinition {
 		TrustLevel:       TrustBuiltin,
 		SourceOrigin:     SourceBuiltin,
 		McpConfigFactory: githubConfigFactory,
+	}
+}
+
+func dingTalkConnector() ConnectorDefinition {
+	return ConnectorDefinition{
+		ID:               "dingtalk-workspace",
+		DisplayName:      "钉钉 Workspace CLI",
+		Description:      "通过 DingTalk-Real-AI/dingtalk-workspace-cli 操作钉钉消息、日程、通讯录等官方连接器能力。",
+		Category:         CategoryChat,
+		Provider:         "DingTalk",
+		AuthType:         AuthOAuth2,
+		TrustLevel:       TrustBuiltin,
+		SourceOrigin:     SourceBuiltin,
+		McpConfigFactory: dingTalkConfigFactory,
+	}
+}
+
+func larkConnector() ConnectorDefinition {
+	return ConnectorDefinition{
+		ID:               "lark-cli",
+		DisplayName:      "飞书/Lark CLI",
+		Description:      "通过 larksuite/cli 操作飞书消息、组织与协作能力。",
+		Category:         CategoryChat,
+		Provider:         "Lark",
+		AuthType:         AuthOAuth2,
+		TrustLevel:       TrustBuiltin,
+		SourceOrigin:     SourceBuiltin,
+		McpConfigFactory: larkConfigFactory,
+	}
+}
+
+func outlookConnector() ConnectorDefinition {
+	return ConnectorDefinition{
+		ID:               "outlook-mcp",
+		DisplayName:      "Outlook MCP",
+		Description:      "默认邮件连接器，用户通过授权链接连接 Outlook 邮箱。",
+		Category:         CategoryOther,
+		Provider:         "Microsoft Outlook",
+		AuthType:         AuthOAuth2,
+		TrustLevel:       TrustBuiltin,
+		SourceOrigin:     SourceBuiltin,
+		McpConfigFactory: outlookConfigFactory,
 	}
 }
 
@@ -197,6 +242,57 @@ func githubConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclie
 				Stdio: &mcpclient.StdioTransportConfig{
 					Command: cmd,
 					Args:    args,
+				},
+				DisplayName: def.DisplayName,
+			},
+		},
+	}
+}
+
+func dingTalkConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclient.ScopedMcpServerConfig {
+	return map[string]mcpclient.ScopedMcpServerConfig{
+		"dingtalk-workspace": {
+			Name:  "dingtalk-workspace",
+			Scope: mcpclient.ScopeUser,
+			Config: mcpclient.McpServerConfig{
+				Stdio: &mcpclient.StdioTransportConfig{
+					Command: "dingtalk-workspace-cli",
+					Args:    []string{"mcp"},
+					Env:     map[string]string{},
+				},
+				DisplayName: def.DisplayName,
+			},
+		},
+	}
+}
+
+func larkConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclient.ScopedMcpServerConfig {
+	return map[string]mcpclient.ScopedMcpServerConfig{
+		"lark": {
+			Name:  "lark",
+			Scope: mcpclient.ScopeUser,
+			Config: mcpclient.McpServerConfig{
+				Stdio: &mcpclient.StdioTransportConfig{
+					Command: "lark",
+					Args:    []string{"mcp"},
+					Env:     map[string]string{},
+				},
+				DisplayName: def.DisplayName,
+			},
+		},
+	}
+}
+
+func outlookConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclient.ScopedMcpServerConfig {
+	return map[string]mcpclient.ScopedMcpServerConfig{
+		"outlook": {
+			Name:  "outlook",
+			Scope: mcpclient.ScopeUser,
+			Config: mcpclient.McpServerConfig{
+				Stdio: &mcpclient.StdioTransportConfig{
+					Command: "outlook-mcp",
+					Args:    []string{"stdio"},
+					Env:     map[string]string{},
 				},
 				DisplayName: def.DisplayName,
 			},

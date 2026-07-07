@@ -52,7 +52,7 @@ var ErrPowerShellWrapperUnsupported = errors.New(
 //     out of scope for the degraded adapter.
 //
 // command and workspaceRoot are trimmed; empty values are rejected.
-// Single quotes inside workspaceRoot are escaped by doubling (' -> '') so
+// Single quotes inside workspaceRoot are escaped by doubling (' -> ”) so
 // the path can be safely embedded in a PowerShell single-quoted literal.
 func GeneratePowerShellWrapper(command, tier, workspaceRoot string) (string, error) {
 	command = strings.TrimSpace(command)
@@ -96,7 +96,7 @@ func GeneratePowerShellWrapper(command, tier, workspaceRoot string) (string, err
 }
 
 // powerShellSingleQuote escapes s for safe embedding inside a PowerShell
-// single-quoted string literal. Single quotes are doubled (' -> '').
+// single-quoted string literal. Single quotes are doubled (' -> ”).
 func powerShellSingleQuote(s string) string {
 	return strings.ReplaceAll(s, "'", "''")
 }

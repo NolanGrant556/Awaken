@@ -1,13 +1,13 @@
 package agentcore
 
-import (
-	stdcontext "context"
-
-	"awaken/src/tool"
-)
+import "context"
 
 type EventSink interface {
 	Emit(AwakenEvent)
+}
+
+type MassMessageReviewAwaiter interface {
+	AwaitMassMessageReview(ctx context.Context, request AwakenEvent) (ReviewDecision, error)
 }
 
 type EventSinkFunc func(AwakenEvent)
@@ -27,25 +27,4 @@ func normalizeEventSink(sink EventSink) EventSink {
 		return noopEventSink{}
 	}
 	return sink
-}
-
-type ApprovalRequest struct {
-	ID            string
-	ToolCallID    string
-	ToolName      string
-	Title         string
-	Description   string
-	RiskTone      ApprovalRiskTone
-	AffectedPaths []string
-	PatchSummary  string
-	// ToolDefinition carries the full metadata of the tool being approved.
-	ToolDefinition tool.ToolDefinition
-	// RiskHints carries the risk profile for the approval UI.
-	RiskHints *tool.RiskHints
-	// AllowedActions are the actions the user can take on this approval.
-	AllowedActions []string
-}
-
-type ApprovalAwaiter interface {
-	AwaitApproval(ctx stdcontext.Context, request ApprovalRequest) (ApprovalDecision, error)
 }

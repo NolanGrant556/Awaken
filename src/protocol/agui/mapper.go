@@ -145,8 +145,8 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.ToolDecisionAction = event.ToolDecisionAction
 		base.ToolDecisionSource = event.ToolDecisionSource
 		base.ToolDecisionReason = event.ToolDecisionReason
-		base.ApprovalAffectedPaths = event.ApprovalAffectedPaths
-		base.ApprovalPatchSummary = event.ApprovalPatchSummary
+		base.AffectedPaths = event.AffectedPaths
+		base.PatchSummary = event.PatchSummary
 		// Task 16 unified observability: carry the profile name, transform
 		// origin, trashed paths, and guardian violation reason so the
 		// Desktop UI can render them.
@@ -185,7 +185,7 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.ToolCallName = event.ToolName
 		base.Patch = event.Patch
 		base.PatchSummary = event.PatchSummary
-		base.ApprovalAffectedPaths = event.ApprovalAffectedPaths
+		base.AffectedPaths = event.AffectedPaths
 		base.Truncated = event.Truncated
 		return []Event{base}
 	case agentcore.TurnDiffEventType:
@@ -221,28 +221,58 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.Type = EventAwakenToolPairingRepaired
 		base.Message = event.Content
 		return []Event{base}
-	case agentcore.ApprovalRequestedEventType:
-		base.Type = EventAwakenApprovalRequested
+	case agentcore.AuthRequiredEventType:
+		base.Type = EventAwakenAuthRequired
 		base.ToolCallID = event.ToolCallID
 		base.ToolCallName = event.ToolName
-		base.ApprovalID = event.ApprovalID
-		base.ApprovalTitle = event.ApprovalTitle
-		base.ApprovalDescription = event.ApprovalDescription
-		base.ApprovalRiskTone = string(event.ApprovalRiskTone)
-		base.ApprovalAffectedPaths = event.ApprovalAffectedPaths
-		base.ApprovalPatchSummary = event.ApprovalPatchSummary
+		base.Message = event.Content
+		base.AuthProvider = event.AuthProvider
+		base.AuthURL = event.AuthURL
 		return []Event{base}
-	case agentcore.ApprovalResolvedEventType:
-		base.Type = EventAwakenApprovalResolved
+	case agentcore.RuntimePrepareEventType:
+		base.Type = EventAwakenRuntimePrepare
 		base.ToolCallID = event.ToolCallID
 		base.ToolCallName = event.ToolName
-		base.ApprovalID = event.ApprovalID
-		base.ApprovalTitle = event.ApprovalTitle
-		base.ApprovalDescription = event.ApprovalDescription
-		base.ApprovalRiskTone = string(event.ApprovalRiskTone)
-		base.ApprovalDecision = string(event.ApprovalDecision)
-		base.ApprovalAffectedPaths = event.ApprovalAffectedPaths
-		base.ApprovalPatchSummary = event.ApprovalPatchSummary
+		base.Message = event.Content
+		base.RuntimeName = event.RuntimeName
+		base.RuntimeVersion = event.RuntimeVersion
+		return []Event{base}
+	case agentcore.RuntimeReadyEventType:
+		base.Type = EventAwakenRuntimeReady
+		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
+		base.Message = event.Content
+		base.RuntimeName = event.RuntimeName
+		base.RuntimeVersion = event.RuntimeVersion
+		return []Event{base}
+	case agentcore.RuntimeMissingEventType:
+		base.Type = EventAwakenRuntimeMissing
+		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
+		base.Message = event.Content
+		base.RuntimeName = event.RuntimeName
+		base.RuntimeVersion = event.RuntimeVersion
+		return []Event{base}
+	case agentcore.MassMessageReviewRequestedType:
+		base.Type = EventAwakenMassReviewRequested
+		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
+		base.ReviewID = event.ReviewID
+		base.MassMessageChannel = event.MassMessageChannel
+		base.MassMessageRecipientScope = event.MassMessageRecipientScope
+		base.MassMessageRecipientCount = event.MassMessageRecipientCount
+		base.MassMessageBodyPreview = event.MassMessageBodyPreview
+		base.MassMessageTemplatePreview = event.MassMessageTemplatePreview
+		base.MassMessageAttachments = append([]string(nil), event.MassMessageAttachments...)
+		base.MassMessageSendingAccount = event.MassMessageSendingAccount
+		base.MassMessageSourceTool = event.MassMessageSourceTool
+		return []Event{base}
+	case agentcore.MassMessageReviewResolvedType:
+		base.Type = EventAwakenMassReviewResolved
+		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
+		base.ReviewID = event.ReviewID
+		base.ReviewDecision = string(event.ReviewDecision)
 		return []Event{base}
 	case agentcore.ArtifactCreatedEventType:
 		base.Type = EventAwakenArtifactCreated

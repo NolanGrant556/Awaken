@@ -310,7 +310,7 @@ func refinePatchAction(arguments string) RequestedAction {
 // extractPaths performs a best-effort extraction of the file paths a tool
 // invocation will touch. For apply_patch (and any PatchPreviewingTool) it
 // uses the PatchPreviewingTool interface so the same path-resolution logic
-// the approval UI uses is reused here. For file_read/read_file,
+// the decision metadata path uses is reused here. For file_read/read_file,
 // list_files, and grep_search it parses the JSON arguments and pulls the
 // path/root parameter. For shell it scans for redirect targets. If paths
 // cannot be extracted, an empty slice is returned.

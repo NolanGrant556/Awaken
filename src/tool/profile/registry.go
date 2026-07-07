@@ -33,8 +33,8 @@ func ClientAllowedProfiles() []ExecutionProfile {
 }
 
 // IsClientAllowed reports whether p exactly matches one of the built-in
-// client-allowed profiles by Name plus the six key policy fields
-// (ApprovalPolicy, PermissionProfile, SandboxPolicy, NetworkPolicy,
+// client-allowed profiles by Name plus the five key policy fields
+// (PermissionProfile, SandboxPolicy, NetworkPolicy,
 // EnvPolicy, VisibilityPolicy). Tampering with any of those fields
 // causes the profile to no longer match.
 //
@@ -103,8 +103,8 @@ func IsDangerFullAccessEnabled() bool {
 }
 
 // profilesKeyEqual reports whether two profiles share the same Name and
-// the six key policy fields used to detect client tampering
-// (ApprovalPolicy, PermissionProfile, SandboxPolicy, NetworkPolicy,
+// the five key policy fields used to detect client tampering
+// (PermissionProfile, SandboxPolicy, NetworkPolicy,
 // EnvPolicy, VisibilityPolicy).
 //
 // SandboxPermissions is intentionally excluded from the comparison: it
@@ -114,9 +114,6 @@ func IsDangerFullAccessEnabled() bool {
 // permission without otherwise escalating trust.
 func profilesKeyEqual(a, b ExecutionProfile) bool {
 	if a.Name != b.Name {
-		return false
-	}
-	if a.ApprovalPolicy != b.ApprovalPolicy {
 		return false
 	}
 	if a.PermissionProfile != b.PermissionProfile {

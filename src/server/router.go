@@ -78,7 +78,7 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 		mux.HandleFunc("GET /v1/runs/{run_id}", handlers.handleGetRun)
 		mux.HandleFunc("GET /v1/runs/{run_id}/events", handlers.handleRunEvents)
 		mux.HandleFunc("POST /v1/runs/{run_id}/cancel", handlers.handleCancelRun)
-		mux.HandleFunc("POST /v1/runs/{run_id}/approvals/{approval_id}/resolve", handlers.handleResolveApproval)
+		mux.HandleFunc("POST /v1/runs/{run_id}/mass-message-reviews/{review_id}/resolve", handlers.handleResolveMassMessageReview)
 		mux.HandleFunc("GET /v1/runs/{run_id}/audit", handlers.handleGetRunAudit)
 	}
 	mcpH := mcpHandlers{manager: cfg.manager, workspaceRoot: cfg.workspaceRoot}

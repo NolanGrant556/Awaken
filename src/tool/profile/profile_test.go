@@ -12,9 +12,6 @@ func TestGuardianReadOnly(t *testing.T) {
 	if p.Name != "guardian_read_only" {
 		t.Errorf("Name = %q, want %q", p.Name, "guardian_read_only")
 	}
-	if p.ApprovalPolicy != ApprovalNever {
-		t.Errorf("ApprovalPolicy = %q, want %q", p.ApprovalPolicy, ApprovalNever)
-	}
 	if p.PermissionProfile != PermissionReadOnly {
 		t.Errorf("PermissionProfile = %q, want %q", p.PermissionProfile, PermissionReadOnly)
 	}
@@ -39,9 +36,6 @@ func TestWorkspaceReadOnly(t *testing.T) {
 	p := WorkspaceReadOnly()
 	if p.Name != "workspace_read_only" {
 		t.Errorf("Name = %q, want %q", p.Name, "workspace_read_only")
-	}
-	if p.ApprovalPolicy != ApprovalNever {
-		t.Errorf("ApprovalPolicy = %q, want %q", p.ApprovalPolicy, ApprovalNever)
 	}
 	if p.PermissionProfile != PermissionReadOnly {
 		t.Errorf("PermissionProfile = %q, want %q", p.PermissionProfile, PermissionReadOnly)
@@ -68,9 +62,6 @@ func TestWorkspaceWrite(t *testing.T) {
 	if p.Name != "workspace_write" {
 		t.Errorf("Name = %q, want %q", p.Name, "workspace_write")
 	}
-	if p.ApprovalPolicy != ApprovalNever {
-		t.Errorf("ApprovalPolicy = %q, want %q", p.ApprovalPolicy, ApprovalNever)
-	}
 	if p.PermissionProfile != PermissionWorkspaceWrite {
 		t.Errorf("PermissionProfile = %q, want %q", p.PermissionProfile, PermissionWorkspaceWrite)
 	}
@@ -96,9 +87,6 @@ func TestOpenWorldRestricted(t *testing.T) {
 	if p.Name != "open_world_restricted" {
 		t.Errorf("Name = %q, want %q", p.Name, "open_world_restricted")
 	}
-	if p.ApprovalPolicy != ApprovalOnDeny {
-		t.Errorf("ApprovalPolicy = %q, want %q", p.ApprovalPolicy, ApprovalOnDeny)
-	}
 	if p.PermissionProfile != PermissionOpenWorld {
 		t.Errorf("PermissionProfile = %q, want %q", p.PermissionProfile, PermissionOpenWorld)
 	}
@@ -123,9 +111,6 @@ func TestDangerFullAccess(t *testing.T) {
 	p := DangerFullAccess()
 	if p.Name != "danger_full_access" {
 		t.Errorf("Name = %q, want %q", p.Name, "danger_full_access")
-	}
-	if p.ApprovalPolicy != ApprovalOnDeny {
-		t.Errorf("ApprovalPolicy = %q, want %q", p.ApprovalPolicy, ApprovalOnDeny)
 	}
 	if p.PermissionProfile != PermissionDangerFullAccess {
 		t.Errorf("PermissionProfile = %q, want %q", p.PermissionProfile, PermissionDangerFullAccess)
@@ -177,9 +162,6 @@ func TestProfileForGuardian(t *testing.T) {
 
 func TestGuardianProfileInvariants(t *testing.T) {
 	p := ProfileForGuardian()
-	if p.ApprovalPolicy != ApprovalNever {
-		t.Errorf("guardian ApprovalPolicy = %q, want %q (never)", p.ApprovalPolicy, ApprovalNever)
-	}
 	if p.PermissionProfile != PermissionReadOnly {
 		t.Errorf("guardian PermissionProfile = %q, want %q (read_only)", p.PermissionProfile, PermissionReadOnly)
 	}
@@ -195,9 +177,6 @@ func TestExecutionProfileString(t *testing.T) {
 	s := p.String()
 	if !strings.Contains(s, "name=workspace_write") {
 		t.Errorf("String() missing name: %q", s)
-	}
-	if !strings.Contains(s, "approval=never") {
-		t.Errorf("String() missing approval: %q", s)
 	}
 	if !strings.Contains(s, "permission=workspace_write") {
 		t.Errorf("String() missing permission: %q", s)
@@ -234,9 +213,6 @@ func equalStringSlices(a, b []string) bool {
 
 func profilesEqual(a, b ExecutionProfile) bool {
 	if a.Name != b.Name {
-		return false
-	}
-	if a.ApprovalPolicy != b.ApprovalPolicy {
 		return false
 	}
 	if a.PermissionProfile != b.PermissionProfile {

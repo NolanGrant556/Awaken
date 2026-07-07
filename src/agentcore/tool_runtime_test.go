@@ -14,18 +14,17 @@ import (
 )
 
 type runtimeTestTool struct {
-	name            string
-	params          []tool.ToolParameter
-	fail            bool
-	output          string
-	readOnly        bool
-	observe         *string
-	permission      tool.PermissionDecision
-	observePolicy   *tool.PermissionContext
-	approvalRequest tool.ApprovalRequest
-	artifacts       []tool.ArtifactDescriptor
-	executeCount    *int
-	commandOutputs  []tool.CommandOutput
+	name           string
+	params         []tool.ToolParameter
+	fail           bool
+	output         string
+	readOnly       bool
+	observe        *string
+	permission     tool.PermissionDecision
+	observePolicy  *tool.PermissionContext
+	artifacts      []tool.ArtifactDescriptor
+	executeCount   *int
+	commandOutputs []tool.CommandOutput
 }
 
 func (t runtimeTestTool) Name() string {
@@ -87,10 +86,6 @@ func (t runtimeTestTool) CheckPermission(ctx context.Context, input string, perm
 		return tool.AllowPermission()
 	}
 	return t.permission
-}
-
-func (t runtimeTestTool) ApprovalRequest(input string) tool.ApprovalRequest {
-	return t.approvalRequest
 }
 
 func (t runtimeTestTool) Artifacts(input string, output string, permissionContext tool.PermissionContext) []tool.ArtifactDescriptor {
@@ -253,18 +248,18 @@ func TestArgumentsForXMLFallbackUsesSingleRequiredStringParam(t *testing.T) {
 func TestDefaultAutoToolPolicyDecisions(t *testing.T) {
 	allow := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
 		ToolName:       "read_file",
-		StaticBehavior: tool.PermissionAsk,
+		StaticBehavior: tool.PermissionAllow,
 		IsReadOnly:     true,
 	})
-	if allow.Action != ToolDecisionAllow || allow.Source != ToolDecisionSourceWorkspaceBoundary {
-		t.Fatalf("expected read-only ask to be allowed, got %+v", allow)
+	if allow.Action != ToolDecisionAllow || allow.Source != ToolDecisionSourceToolRule {
+		t.Fatalf("expected read-only allow to be allowed, got %+v", allow)
 	}
 
 	// Other destructive tools (not apply_patch) are still hard-denied in
-	// headless mode on the PermissionAsk path.
+	// headless mode.
 	deny := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
 		ToolName:       "destructive_write_tool",
-		StaticBehavior: tool.PermissionAsk,
+		StaticBehavior: tool.PermissionAllow,
 		StaticReason:   "destructive tool requires approval",
 		IsDestructive:  true,
 	})
@@ -312,7 +307,7 @@ func TestDefaultAutoToolPolicyDecisions(t *testing.T) {
 	cancel()
 	abort := DefaultAutoToolPolicy{}.Decide(ctx, ToolDecisionRequest{
 		ToolName:       "read_file",
-		StaticBehavior: tool.PermissionAsk,
+		StaticBehavior: tool.PermissionAllow,
 		IsReadOnly:     true,
 	})
 	if abort.Action != ToolDecisionAbort || abort.Source != ToolDecisionSourcePolicyError {
@@ -330,7 +325,7 @@ func TestApplyPatchFileChainRelaxation(t *testing.T) {
 	// Normal in-workspace write (Add/Update): warning risk tone → allow.
 	allowWrite := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
 		ToolName:        "apply_patch",
-		StaticBehavior:  tool.PermissionAsk,
+		StaticBehavior:  tool.PermissionAllow,
 		StaticReason:    "apply_patch will modify files",
 		WorkspaceRoot:   workspace,
 		WritableRoots:   []string{workspace},
@@ -357,7 +352,7 @@ func TestApplyPatchFileChainRelaxation(t *testing.T) {
 	// Trash makes the delete recoverable.
 	allowDelete := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
 		ToolName:        "apply_patch",
-		StaticBehavior:  tool.PermissionAsk,
+		StaticBehavior:  tool.PermissionAllow,
 		StaticReason:    "apply_patch will delete, move, or touch files outside writable roots",
 		WorkspaceRoot:   workspace,
 		WritableRoots:   []string{workspace},
@@ -374,7 +369,7 @@ func TestApplyPatchFileChainRelaxation(t *testing.T) {
 	outside := t.TempDir()
 	denyOutOfBounds := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
 		ToolName:        "apply_patch",
-		StaticBehavior:  tool.PermissionAsk,
+		StaticBehavior:  tool.PermissionAllow,
 		StaticReason:    "apply_patch will delete, move, or touch files outside writable roots",
 		WorkspaceRoot:   workspace,
 		WritableRoots:   []string{workspace},
@@ -396,7 +391,7 @@ func TestApplyPatchFileChainRelaxation(t *testing.T) {
 	t.Setenv("HOME", workspace)
 	denySensitive := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
 		ToolName:        "apply_patch",
-		StaticBehavior:  tool.PermissionAsk,
+		StaticBehavior:  tool.PermissionAllow,
 		StaticReason:    "apply_patch will delete, move, or touch files outside writable roots",
 		WorkspaceRoot:   workspace,
 		WritableRoots:   []string{workspace},
@@ -416,14 +411,14 @@ func TestApplyPatchFileChainRelaxation(t *testing.T) {
 // SubTask 4.3 — Desktop UI smoke verification (manual):
 //
 // The unit tests above cover the policy layer. To verify end-to-end that no
-// approval UI appears for in-workspace file mutations, follow the root
+// manual review UI appears for in-workspace file mutations, follow the root
 // README's "入口契约" to launch Awaken Desktop, then:
 //
 //  1. Start a new run in a workspace that has at least one regular file
 //     (e.g. a temp dir with note.md containing "hello").
 //  2. Ask the agent: "请用 apply_patch 把 note.md 的内容从 hello 改成 world".
 //  3. Confirm:
-//     - No approval dialog / awaiting_approval status appears.
+//     - No generic review dialog or awaiting_approval status appears.
 //     - The AWAKEN_TOOL_PERMISSION_DECIDED event has action=allow,
 //       source=workspace_boundary.
 //     - note.md is actually modified to "world".
@@ -445,7 +440,7 @@ func TestDefaultAutoToolPolicyTransformsShellEchoWrite(t *testing.T) {
 
 	decision := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
 		ToolName:        "shell",
-		StaticBehavior:  tool.PermissionAsk,
+		StaticBehavior:  tool.PermissionAllow,
 		StaticReason:    "shell command contains operators, redirections, substitutions, or multiple operations",
 		NormalizedInput: normalizedInput,
 		WorkspaceRoot:   workspace,
@@ -476,7 +471,7 @@ func TestDefaultAutoToolPolicyDeniesOpenWorldShellCommand(t *testing.T) {
 
 	decision := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
 		ToolName:        "shell",
-		StaticBehavior:  tool.PermissionAsk,
+		StaticBehavior:  tool.PermissionAllow,
 		StaticReason:    "shell command may mutate files, change repository state, or access external systems",
 		NormalizedInput: normalizedInput,
 		WorkspaceRoot:   workspace,
@@ -499,7 +494,7 @@ func TestDefaultAutoToolPolicyDeniesNonTransformableShellMutation(t *testing.T) 
 
 	decision := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
 		ToolName:        "shell",
-		StaticBehavior:  tool.PermissionAsk,
+		StaticBehavior:  tool.PermissionAllow,
 		StaticReason:    "shell command is not classified as read-only",
 		NormalizedInput: normalizedInput,
 		WorkspaceRoot:   workspace,
@@ -519,14 +514,11 @@ func TestDefaultAutoToolPolicyFallsThroughForReadOnlyShell(t *testing.T) {
 	workspace := t.TempDir()
 	normalizedInput := `{"command":"ls -la"}`
 
-	// `ls -la` is inspect_read_only. The shell tool's CheckPermission
-	// returns PermissionAllow for safe read-only commands, so this request
-	// simulates the Ask path (e.g. if the classifier were conservative).
-	// The transform logic should fall through (not handle it), and the
-	// default deny should apply.
+	// `ls -la` is inspect_read_only. The shell policy falls through from
+	// transform handling and auto-allows it as a normal safe shell read.
 	decision := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
 		ToolName:        "shell",
-		StaticBehavior:  tool.PermissionAsk,
+		StaticBehavior:  tool.PermissionAllow,
 		StaticReason:    "shell command is not classified as read-only",
 		NormalizedInput: normalizedInput,
 		WorkspaceRoot:   workspace,
@@ -534,11 +526,11 @@ func TestDefaultAutoToolPolicyFallsThroughForReadOnlyShell(t *testing.T) {
 		IsOpenWorld:     true,
 	})
 
-	if decision.Action != ToolDecisionDeny {
-		t.Fatalf("expected deny (fallthrough) for read-only shell on Ask path, got %+v", decision)
+	if decision.Action != ToolDecisionAllow {
+		t.Fatalf("expected allow for read-only shell fallthrough, got %+v", decision)
 	}
-	if decision.Source != ToolDecisionSourceHeadlessDefault {
-		t.Fatalf("expected headless_default source for read-only shell fallthrough, got %q", decision.Source)
+	if decision.Source != ToolDecisionSourceToolRule {
+		t.Fatalf("expected tool_rule source for read-only shell fallthrough, got %q", decision.Source)
 	}
 }
 
@@ -551,7 +543,7 @@ func TestDefaultAutoToolPolicyDoesNotTransformInsideTransformChain(t *testing.T)
 	transformedCtx := ctxWithTransformDepth(context.Background(), 1)
 	decision := DefaultAutoToolPolicy{}.Decide(transformedCtx, ToolDecisionRequest{
 		ToolName:        "shell",
-		StaticBehavior:  tool.PermissionAsk,
+		StaticBehavior:  tool.PermissionAllow,
 		StaticReason:    "shell command contains operators",
 		NormalizedInput: normalizedInput,
 		WorkspaceRoot:   workspace,
@@ -582,7 +574,7 @@ func TestDecideExecution_AllowsApplyPatchWrite(t *testing.T) {
 	}
 	request := ToolDecisionRequest{
 		ToolName:        "apply_patch",
-		StaticBehavior:  tool.PermissionAsk,
+		StaticBehavior:  tool.PermissionAllow,
 		StaticReason:    "apply_patch will modify files",
 		WorkspaceRoot:   workspace,
 		WritableRoots:   []string{workspace},
@@ -619,7 +611,7 @@ func TestDecideExecution_DeniesSensitivePath(t *testing.T) {
 	}
 	request := ToolDecisionRequest{
 		ToolName:        "apply_patch",
-		StaticBehavior:  tool.PermissionAsk,
+		StaticBehavior:  tool.PermissionAllow,
 		StaticReason:    "apply_patch touches sensitive path",
 		WorkspaceRoot:   workspace,
 		WritableRoots:   []string{workspace},
@@ -651,7 +643,7 @@ func TestDecideExecution_TransformsShellEchoWrite(t *testing.T) {
 	}
 	request := ToolDecisionRequest{
 		ToolName:        "shell",
-		StaticBehavior:  tool.PermissionAsk,
+		StaticBehavior:  tool.PermissionAllow,
 		StaticReason:    "shell command contains operators",
 		NormalizedInput: `{"command":"echo \"hello\" > ./file.txt"}`,
 		WorkspaceRoot:   workspace,
@@ -697,7 +689,7 @@ func TestDecideExecution_DeniesOpenWorldShell(t *testing.T) {
 	}
 	request := ToolDecisionRequest{
 		ToolName:        "shell",
-		StaticBehavior:  tool.PermissionAsk,
+		StaticBehavior:  tool.PermissionAllow,
 		StaticReason:    "shell command may access external systems",
 		NormalizedInput: `{"command":"curl http://example.com > file"}`,
 		WorkspaceRoot:   workspace,
@@ -725,7 +717,7 @@ func TestDecideExecution_DeniesOnCancelledContext(t *testing.T) {
 	}
 	request := ToolDecisionRequest{
 		ToolName:       "read_file",
-		StaticBehavior: tool.PermissionAsk,
+		StaticBehavior: tool.PermissionAllow,
 		IsReadOnly:     true,
 	}
 
@@ -741,12 +733,12 @@ func TestDecideExecution_DeniesOnCancelledContext(t *testing.T) {
 	}
 }
 
-func TestToolRuntimeAutoDeniesAskWithoutApprovalAwaiter(t *testing.T) {
+func TestToolRuntimeDenyDoesNotRequireApprovalAwaiter(t *testing.T) {
 	var executeCount int
 	toolName := "runtime_auto_deny_no_awaiter_tool"
 	mustRegisterRuntimeTool(t, runtimeTestTool{
 		name:         toolName,
-		permission:   tool.AskPermission("test tool requires approval", tool.ApprovalRequest{}),
+		permission:   tool.DenyPermission("test tool is denied"),
 		executeCount: &executeCount,
 		params: []tool.ToolParameter{
 			{Name: "value", Type: "string", Required: true},
@@ -770,12 +762,12 @@ func TestToolRuntimeAutoDeniesAskWithoutApprovalAwaiter(t *testing.T) {
 	if len(got) != 1 ||
 		got[0].Type != ToolPermissionDecidedEventType ||
 		got[0].ToolDecisionAction != string(ToolDecisionDeny) ||
-		got[0].ToolDecisionSource != string(ToolDecisionSourceHeadlessDefault) {
+		got[0].ToolDecisionSource != string(ToolDecisionSourceToolRule) {
 		t.Fatalf("expected one AUTO deny permission event, got %+v", got)
 	}
 	if !result.IsError ||
 		result.Status != ToolExecutionDenied ||
-		result.DecisionSource != ToolDecisionSourceHeadlessDefault ||
+		result.DecisionSource != ToolDecisionSourceToolRule ||
 		!strings.Contains(result.Content, "工具执行被 AUTO policy 拒绝") ||
 		strings.Contains(result.Content, "no approval awaiter") {
 		t.Fatalf("expected AUTO denial without approval awaiter error, got %+v", result)
@@ -787,7 +779,7 @@ func TestToolRuntimeAutoPolicyAbortSynthesizesResult(t *testing.T) {
 	toolName := "runtime_auto_abort_tool"
 	mustRegisterRuntimeTool(t, runtimeTestTool{
 		name:         toolName,
-		permission:   tool.AskPermission("test tool requires approval", tool.ApprovalRequest{}),
+		permission:   tool.AllowPermission(),
 		executeCount: &executeCount,
 		params: []tool.ToolParameter{
 			{Name: "value", Type: "string", Required: true},
@@ -823,15 +815,11 @@ func TestToolRuntimeAutoPolicyAbortSynthesizesResult(t *testing.T) {
 	}
 }
 
-func TestToolRuntimeEmitsArtifactsAndRejectsOnApprovalDecision(t *testing.T) {
-	toolName := "runtime_approval_artifact_tool"
+func TestToolRuntimeEmitsArtifactsForAllowedTool(t *testing.T) {
+	toolName := "runtime_allowed_artifact_tool"
 	mustRegisterRuntimeTool(t, runtimeTestTool{
-		name: toolName,
-		permission: tool.AskPermission("test tool writes files", tool.ApprovalRequest{
-			Title:       "Approve write",
-			Description: "Write README.md",
-			RiskTone:    "danger",
-		}),
+		name:       toolName,
+		permission: tool.AllowPermission(),
 		artifacts: []tool.ArtifactDescriptor{{
 			Action:      tool.ArtifactActionCreated,
 			ID:          "artifact-1",
@@ -848,12 +836,11 @@ func TestToolRuntimeEmitsArtifactsAndRejectsOnApprovalDecision(t *testing.T) {
 	})
 
 	var got []AwakenEvent
-	runtime := NewToolRuntimeWithConfig(testApprovalAwaiter{
-		decision: ApprovalDecisionApproved,
-		events:   &got,
-	}, ToolRuntimeConfig{UseApprovalForAsk: true})
+	runtime := NewToolRuntime(EventSinkFunc(func(event AwakenEvent) {
+		got = append(got, event)
+	}))
 	result := runtime.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_with_approval",
+		ID: "call_allowed_artifact",
 		Function: convcontext.FunctionCall{
 			Name:      toolName,
 			Arguments: `{"value":"hello"}`,
@@ -861,41 +848,18 @@ func TestToolRuntimeEmitsArtifactsAndRejectsOnApprovalDecision(t *testing.T) {
 	})
 
 	if result.IsError {
-		t.Fatalf("expected approved tool to succeed, got %+v", result)
+		t.Fatalf("expected allowed tool to succeed, got %+v", result)
 	}
-	if len(got) != 5 {
-		t.Fatalf("expected approval and artifact events, got %+v", got)
+	if len(got) != 4 {
+		t.Fatalf("expected decision, progress, and artifact events, got %+v", got)
 	}
-	if got[0].Type != ApprovalRequestedEventType ||
-		got[1].Type != ToolPermissionDecidedEventType ||
+	if got[0].Type != ToolPermissionDecidedEventType ||
+		got[1].Type != ToolProgressEventType ||
+		got[1].ToolProgressStage != "started" ||
 		got[2].Type != ToolProgressEventType ||
-		got[2].ToolProgressStage != "started" ||
-		got[3].Type != ToolProgressEventType ||
-		got[3].ToolProgressStage != "completed" ||
-		got[4].Type != ArtifactCreatedEventType {
+		got[2].ToolProgressStage != "completed" ||
+		got[3].Type != ArtifactCreatedEventType {
 		t.Fatalf("unexpected emitted events: %+v", got)
-	}
-
-	var rejectedEvents []AwakenEvent
-	rejected := NewToolRuntimeWithConfig(
-		testApprovalAwaiter{decision: ApprovalDecisionRejected, events: &rejectedEvents},
-		ToolRuntimeConfig{UseApprovalForAsk: true},
-	)
-	rejectedResult := rejected.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_rejected",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"hello"}`,
-		},
-	})
-
-	if !rejectedResult.IsError || !strings.Contains(rejectedResult.Content, "审批拒绝") {
-		t.Fatalf("expected rejected approval to stop tool execution, got %+v", rejectedResult)
-	}
-	for _, event := range rejectedEvents {
-		if event.Type == ArtifactCreatedEventType || event.Type == ArtifactUpdatedEventType {
-			t.Fatalf("expected no artifact events on rejected approval, got %+v", event)
-		}
 	}
 }
 
@@ -946,7 +910,7 @@ func TestToolRuntimeEmitsCommandOutputFromObservableTool(t *testing.T) {
 	}
 }
 
-func TestToolRuntimeEmitsPatchPreviewBeforeApplyPatchApproval(t *testing.T) {
+func TestToolRuntimeEmitsPatchPreviewBeforeApplyPatchExecution(t *testing.T) {
 	root := t.TempDir()
 	patch := "*** Begin Patch\n" +
 		"*** Add File: note.md\n" +
@@ -954,12 +918,10 @@ func TestToolRuntimeEmitsPatchPreviewBeforeApplyPatchApproval(t *testing.T) {
 		"*** End Patch"
 
 	var got []AwakenEvent
-	runtime := NewToolRuntimeWithConfig(testApprovalAwaiter{
-		decision: ApprovalDecisionRejected,
-		events:   &got,
-	}, ToolRuntimeConfig{
+	runtime := NewToolRuntimeWithConfig(EventSinkFunc(func(event AwakenEvent) {
+		got = append(got, event)
+	}), ToolRuntimeConfig{
 		PermissionContext: tool.NewPermissionContext(root, []string{root}),
-		UseApprovalForAsk: true,
 	})
 	result := runtime.Execute(context.Background(), convcontext.ToolCall{
 		ID: "call_patch_preview",
@@ -969,11 +931,11 @@ func TestToolRuntimeEmitsPatchPreviewBeforeApplyPatchApproval(t *testing.T) {
 		},
 	})
 
-	if !result.IsError || !strings.Contains(result.Content, "审批拒绝") {
-		t.Fatalf("expected rejected apply_patch result, got %+v", result)
+	if result.IsError {
+		t.Fatalf("expected apply_patch success, got %+v", result)
 	}
-	if len(got) < 2 {
-		t.Fatalf("expected patch preview and approval events, got %+v", got)
+	if len(got) < 4 {
+		t.Fatalf("expected patch preview and execution events, got %+v", got)
 	}
 	if got[0].Type != PatchUpdatedEventType {
 		t.Fatalf("expected first event to be patch updated, got %+v", got)
@@ -981,12 +943,12 @@ func TestToolRuntimeEmitsPatchPreviewBeforeApplyPatchApproval(t *testing.T) {
 	if got[0].ToolCallID != "call_patch_preview" || got[0].Patch != patch || got[0].PatchSummary != "新增 1 个文件" {
 		t.Fatalf("unexpected patch preview event: %+v", got[0])
 	}
-	if len(got[0].ApprovalAffectedPaths) != 1 || got[0].ApprovalAffectedPaths[0] != "note.md" {
-		t.Fatalf("unexpected affected paths: %+v", got[0].ApprovalAffectedPaths)
+	if len(got[0].AffectedPaths) != 1 || got[0].AffectedPaths[0] != "note.md" {
+		t.Fatalf("unexpected affected paths: %+v", got[0].AffectedPaths)
 	}
 	for _, event := range got {
-		if event.Type == ArtifactCreatedEventType || event.Type == ArtifactUpdatedEventType {
-			t.Fatalf("expected rejected patch not to emit changed-file artifact, got %+v", event)
+		if event.Type == AuthRequiredEventType || event.Type == MassMessageReviewRequestedType {
+			t.Fatalf("expected no auth/review event on apply_patch, got %+v", event)
 		}
 	}
 }
@@ -1051,56 +1013,23 @@ func TestToolRuntimePassesPermissionContextToTools(t *testing.T) {
 	}
 }
 
-func TestToolRuntimeApproveBeforeExecute(t *testing.T) {
+func TestToolRuntimeNeedsAuthEmitsAuthRequiredAndDoesNotExecute(t *testing.T) {
 	var executeCount int
-	toolName := "runtime_approve_before_execute_tool"
+	toolName := "runtime_needs_auth_tool"
 	mustRegisterRuntimeTool(t, runtimeTestTool{
 		name:         toolName,
-		permission:   tool.AskPermission("test tool requires approval", tool.ApprovalRequest{}),
+		permission:   tool.NeedsAuthPermission("outlook account is not connected"),
 		executeCount: &executeCount,
 		params: []tool.ToolParameter{
 			{Name: "value", Type: "string", Required: true},
 		},
 	})
 
-	runtime := NewToolRuntimeWithConfig(
-		testApprovalAwaiter{decision: ApprovalDecisionApproved},
-		ToolRuntimeConfig{UseApprovalForAsk: true},
-	)
-	result := runtime.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_approved",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"hello"}`,
-		},
-	})
-
-	if result.IsError {
-		t.Fatalf("expected approved tool to succeed, got %+v", result)
-	}
-	if executeCount != 1 {
-		t.Fatalf("expected tool to execute exactly once, got %d", executeCount)
-	}
-}
-
-func TestToolRuntimeRejectDoesNotExecute(t *testing.T) {
-	var executeCount int
-	toolName := "runtime_reject_no_execute_tool"
-	mustRegisterRuntimeTool(t, runtimeTestTool{
-		name:         toolName,
-		permission:   tool.AskPermission("test tool requires approval", tool.ApprovalRequest{}),
-		executeCount: &executeCount,
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-
-	runtime := NewToolRuntimeWithConfig(
-		testApprovalAwaiter{decision: ApprovalDecisionRejected},
-		ToolRuntimeConfig{UseApprovalForAsk: true},
-	)
-	result := runtime.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_rejected",
+	var got []AwakenEvent
+	result := NewToolRuntime(EventSinkFunc(func(event AwakenEvent) {
+		got = append(got, event)
+	})).Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_needs_auth",
 		Function: convcontext.FunctionCall{
 			Name:      toolName,
 			Arguments: `{"value":"hello"}`,
@@ -1108,52 +1037,67 @@ func TestToolRuntimeRejectDoesNotExecute(t *testing.T) {
 	})
 
 	if executeCount != 0 {
-		t.Fatalf("expected rejected tool not to execute, got %d executions", executeCount)
+		t.Fatalf("expected needs_auth tool not to execute, got %d executions", executeCount)
 	}
-	if !result.IsError || result.Content != "工具执行已被审批拒绝" {
-		t.Fatalf("expected rejection error result, got %+v", result)
+	if !result.IsError || result.ErrorCode != "needs_auth" {
+		t.Fatalf("expected needs_auth result, got %+v", result)
+	}
+	if len(got) != 3 ||
+		got[0].Type != ToolPermissionDecidedEventType ||
+		got[0].ToolDecisionAction != string(ToolDecisionNeedsAuth) ||
+		got[1].Type != ToolProgressEventType ||
+		got[1].ToolProgressStage != "needs_auth" ||
+		got[2].Type != AuthRequiredEventType {
+		t.Fatalf("unexpected needs_auth events: %+v", got)
 	}
 }
 
-func TestToolRuntimeRejectResultFedBack(t *testing.T) {
-	toolName := "runtime_reject_fed_back_tool"
+func TestToolRuntimeMassMessageReviewBlocksExecution(t *testing.T) {
+	var executeCount int
+	toolName := "runtime_mass_message_tool"
 	mustRegisterRuntimeTool(t, runtimeTestTool{
-		name:       toolName,
-		permission: tool.AskPermission("test tool requires approval", tool.ApprovalRequest{}),
+		name: toolName,
+		permission: tool.NeedsMassMessageReviewPermission("mass message requires review", tool.DecisionMetadata{
+			MassMessage: &tool.MassMessageMetadata{
+				Channel:        "outlook",
+				RecipientScope: "team",
+				RecipientCount: 3,
+				BodyPreview:    "hello",
+				SendingAccount: "me@example.com",
+			},
+		}),
+		executeCount: &executeCount,
 		params: []tool.ToolParameter{
 			{Name: "value", Type: "string", Required: true},
 		},
 	})
 
-	callID := "call_rejected_fed_back"
-	runtime := NewToolRuntimeWithConfig(
-		testApprovalAwaiter{decision: ApprovalDecisionRejected},
-		ToolRuntimeConfig{UseApprovalForAsk: true},
-	)
-	result := runtime.Execute(context.Background(), convcontext.ToolCall{
-		ID: callID,
+	var got []AwakenEvent
+	result := NewToolRuntime(EventSinkFunc(func(event AwakenEvent) {
+		got = append(got, event)
+	})).Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_mass_message",
 		Function: convcontext.FunctionCall{
 			Name:      toolName,
 			Arguments: `{"value":"hello"}`,
 		},
 	})
 
-	if !result.IsError || result.Content != "工具执行已被审批拒绝" {
-		t.Fatalf("expected rejection error result, got %+v", result)
+	if executeCount != 0 {
+		t.Fatalf("expected mass message tool not to execute before review, got %d executions", executeCount)
 	}
-
-	contextResults := toolExecutionResultsToContext([]ToolExecutionResult{result})
-	if len(contextResults) != 1 {
-		t.Fatalf("expected 1 context result, got %d", len(contextResults))
+	if !result.IsError || result.ErrorCode != "needs_mass_message_review" {
+		t.Fatalf("expected needs_mass_message_review result, got %+v", result)
 	}
-	if contextResults[0].ToolCallID != callID || contextResults[0].Name != toolName || contextResults[0].Content != "工具执行已被审批拒绝" {
-		t.Fatalf("expected result to be fed back to conversation, got %+v", contextResults[0])
+	if len(got) != 3 ||
+		got[0].Type != ToolPermissionDecidedEventType ||
+		got[0].ToolDecisionAction != string(ToolDecisionNeedsMassMessageReview) ||
+		got[1].Type != ToolProgressEventType ||
+		got[1].ToolProgressStage != "needs_mass_message_review" ||
+		got[2].Type != MassMessageReviewRequestedType ||
+		got[2].MassMessageRecipientCount != 3 {
+		t.Fatalf("unexpected mass message review events: %+v", got)
 	}
-}
-
-type testApprovalAwaiter struct {
-	decision ApprovalDecision
-	events   *[]AwakenEvent
 }
 
 type staticAutoToolPolicy struct {
@@ -1166,19 +1110,6 @@ func (p staticAutoToolPolicy) Decide(context.Context, ToolDecisionRequest) ToolD
 
 func (p staticAutoToolPolicy) DecideExecution(_ context.Context, intent profile.ExecutionIntent, _ ToolDecisionRequest) profile.ExecutionDecision {
 	return toolDecisionToExecutionDecision(p.decision, intent)
-}
-
-func (t testApprovalAwaiter) Emit(event AwakenEvent) {
-	if t.events != nil {
-		*t.events = append(*t.events, event)
-	}
-}
-
-func (t testApprovalAwaiter) AwaitApproval(context.Context, ApprovalRequest) (ApprovalDecision, error) {
-	if t.events != nil {
-		*t.events = append(*t.events, AwakenEvent{Type: ApprovalRequestedEventType})
-	}
-	return t.decision, nil
 }
 
 func mustRegisterRuntimeTool(t *testing.T, candidate tool.Tool) {

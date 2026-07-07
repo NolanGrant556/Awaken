@@ -193,7 +193,7 @@ func TestResolveSubagentBoundary_NilRequestedInheritsParent(t *testing.T) {
 func TestResolveSubagentBoundary_NonEscalatingRequestedIsUsed(t *testing.T) {
 	// Use DangerFullAccess as the parent so every dimension is at max
 	// rank; WorkspaceReadOnly is a strict downgrade across ALL fields
-	// (permission, sandbox, network, env, approval, perms).
+	// (permission, sandbox, network, env, perms).
 	parentProfile := profile.DangerFullAccess()
 	parent := ParentBoundary{
 		WorkspaceRoot: "/workspace/parent",
@@ -543,34 +543,6 @@ func TestValidateNoEscalation_EnvPolicy(t *testing.T) {
 	child.EnvPolicy = profile.EnvMinimal
 	if err := ValidateNoEscalation(child, parent); err != nil {
 		t.Errorf("inherit → minimal: expected no error, got %v", err)
-	}
-}
-
-func TestValidateNoEscalation_ApprovalPolicy(t *testing.T) {
-	// never → on_deny: escalation error
-	parent := copyProfile(profile.WorkspaceWrite()) // ApprovalNever
-	child := copyProfile(profile.WorkspaceWrite())
-	child.ApprovalPolicy = profile.ApprovalOnDeny
-	if err := ValidateNoEscalation(child, parent); err == nil {
-		t.Error("never → on_deny: expected escalation error, got nil")
-	} else if !strings.Contains(strings.ToLower(err.Error()), "approval") {
-		t.Errorf("never → on_deny: error should mention approval, got %v", err)
-	}
-
-	// on_deny → never: OK (downgrade)
-	parent = copyProfile(profile.DangerFullAccess()) // ApprovalOnDeny
-	child = copyProfile(profile.DangerFullAccess())
-	child.ApprovalPolicy = profile.ApprovalNever
-	if err := ValidateNoEscalation(child, parent); err != nil {
-		t.Errorf("on_deny → never: expected no error, got %v", err)
-	}
-
-	// never → always: escalation error
-	parent = copyProfile(profile.WorkspaceWrite()) // ApprovalNever
-	child = copyProfile(profile.WorkspaceWrite())
-	child.ApprovalPolicy = profile.ApprovalAlways
-	if err := ValidateNoEscalation(child, parent); err == nil {
-		t.Error("never → always: expected escalation error, got nil")
 	}
 }
 

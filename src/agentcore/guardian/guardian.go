@@ -42,12 +42,11 @@ func (e *GuardianViolationError) Error() string {
 
 // IsGuardianProfile reports whether the given ExecutionProfile is the
 // guardian read-only profile. The check is structural: it returns true only
-// when permission is read_only, network is restricted, and approval is never
-// — the three fields that uniquely identify GuardianReadOnly().
+// when permission is read_only, sandbox is required, and network is restricted.
 func IsGuardianProfile(execProfile profile.ExecutionProfile) bool {
 	return execProfile.PermissionProfile == profile.PermissionReadOnly &&
-		execProfile.NetworkPolicy == profile.NetworkRestricted &&
-		execProfile.ApprovalPolicy == profile.ApprovalNever
+		execProfile.SandboxPolicy == profile.SandboxRequired &&
+		execProfile.NetworkPolicy == profile.NetworkRestricted
 }
 
 // EnforceGuardianConstraints checks that a guardian agent's tool call is

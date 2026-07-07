@@ -217,7 +217,6 @@ func toolRuntimeConfigFromAgentConfig(config AgentConfig) ToolRuntimeConfig {
 	return ToolRuntimeConfig{
 		PermissionContext: permissionContextFromTaskScope(config.Workspace),
 		AutoToolPolicy:    config.AutoToolPolicy,
-		UseApprovalForAsk: config.UseApprovalForAsk,
 		Profile:           config.ExecutionProfile,
 		SubagentBoundary:  config.SubagentBoundary,
 		SubagentOrigin:    config.SubagentOrigin,

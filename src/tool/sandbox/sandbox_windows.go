@@ -21,10 +21,10 @@ import (
 //     sensitive-path / writable-roots checks, which are platform-independent.
 //   - open_world_system commands are denied two ways:
 //     1. The ShellExecutor fail-closes before constructing the exec.Cmd
-//        because SupportLevel() != SandboxFull (executor.go line ~112).
+//     because SupportLevel() != SandboxFull (executor.go line ~112).
 //     2. ApplySandbox also returns an error for open_world_system as
-//        defense-in-depth, in case a future caller bypasses the executor's
-//        pre-check.
+//     defense-in-depth, in case a future caller bypasses the executor's
+//     pre-check.
 //
 // ESCALATION PATH: GeneratePowerShellWrapper (in sandbox_windows_logic.go,
 // no build tag) generates the PowerShell command string that a real

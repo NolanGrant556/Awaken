@@ -3,7 +3,7 @@ package trash
 import "sync"
 
 var (
-	adapterMu      sync.RWMutex
+	adapterMu       sync.RWMutex
 	adapterOverride TrashAdapter
 )
 

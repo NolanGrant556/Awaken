@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -403,22 +402,6 @@ func TestRunsEndpointsValidationAndNotFound(t *testing.T) {
 	}
 	if strings.TrimSpace(cancelErrResp.Message) == "" {
 		t.Fatalf("expected non-empty error message for missing cancel, got %+v", cancelErrResp)
-	}
-
-	req = httptest.NewRequest(http.MethodPost, "/v1/runs/missing/approvals/approval-1/resolve", strings.NewReader(`{"decision":"approved"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 for missing approval run, got %d", rec.Code)
-	}
-
-	req = httptest.NewRequest(http.MethodPost, "/v1/runs/missing/approvals/approval-1/resolve", strings.NewReader(`{"decision":"later"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for invalid approval decision, got %d", rec.Code)
 	}
 }
 
@@ -1421,252 +1404,6 @@ func TestRunEventsAfterSeqReconnectMultiFrame(t *testing.T) {
 	}
 }
 
-func TestResolveApprovalEndpointPublishesExtensionEvents(t *testing.T) {
-	approvalReady := make(chan struct{})
-	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
-		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
-			awaiter, ok := sink.(agentcore.ApprovalAwaiter)
-			if !ok {
-				return "", errors.New("expected approval awaiter on runtime sink")
-			}
-			close(approvalReady)
-			decision, err := awaiter.AwaitApproval(ctx, agentcore.ApprovalRequest{
-				ID:          "approval-1",
-				ToolCallID:  "tool-1",
-				ToolName:    "write_file",
-				Title:       "Approve write_file",
-				Description: "Write README.md",
-				RiskTone:    agentcore.ApprovalRiskDanger,
-			})
-			if err != nil {
-				return "", err
-			}
-			sink.Emit(agentcore.AwakenEvent{
-				Type:                agentcore.ArtifactCreatedEventType,
-				ToolCallID:          "tool-1",
-				ToolName:            "write_file",
-				ArtifactID:          "artifact-1",
-				ArtifactTitle:       "README.md",
-				ArtifactDescription: "Generated file",
-				ArtifactKind:        "file",
-				ArtifactPath:        "/tmp/README.md",
-				ArtifactContent:     "# hello",
-				ArtifactStatus:      agentcore.ArtifactStatusReady,
-			})
-			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: string(decision)})
-			return string(decision), nil
-		})
-	})
-
-	ts := httptest.NewServer(NewRouter(runService, nil))
-	defer ts.Close()
-
-	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello","workspace":{"workspace_root":"/tmp/awaken-test-workspace"}}`))
-	if err != nil {
-		t.Fatalf("POST /v1/runs failed: %v", err)
-	}
-	defer resp.Body.Close()
-
-	var created awruntime.Run
-	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
-		t.Fatalf("failed to decode create response: %v", err)
-	}
-
-	<-approvalReady
-
-	done := make(chan string, 1)
-	go func() {
-		streamResp, err := http.Get(ts.URL + "/v1/runs/" + created.RunID + "/events")
-		if err != nil {
-			done <- "request error: " + err.Error()
-			return
-		}
-		defer streamResp.Body.Close()
-		body, err := io.ReadAll(streamResp.Body)
-		if err != nil {
-			done <- "read error: " + err.Error()
-			return
-		}
-		done <- string(body)
-	}()
-
-	resolveURL := ts.URL + "/v1/runs/" + created.RunID + "/approvals/approval-1/resolve"
-	var resolveResp *http.Response
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		resolveResp, err = http.Post(resolveURL, "application/json", strings.NewReader(`{"decision":"approved"}`))
-		if err != nil {
-			t.Fatalf("POST resolve approval failed: %v", err)
-		}
-		if resolveResp.StatusCode == http.StatusNoContent {
-			break
-		}
-		_ = resolveResp.Body.Close()
-		if time.Now().After(deadline) {
-			t.Fatalf("approval resolve never succeeded, last status %d", resolveResp.StatusCode)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	_ = resolveResp.Body.Close()
-
-	body := <-done
-	for _, token := range []string{
-		"AWAKEN_APPROVAL_REQUESTED",
-		"AWAKEN_APPROVAL_RESOLVED",
-		"AWAKEN_ARTIFACT_CREATED",
-		`"approvalId":"approval-1"`,
-		`"artifactId":"artifact-1"`,
-		"RUN_FINISHED",
-	} {
-		if !strings.Contains(body, token) {
-			t.Fatalf("expected stream body to contain %q, got %s", token, body)
-		}
-	}
-}
-
-func TestResolveApprovalDuplicateHTTPReturnsNotFound(t *testing.T) {
-	approvalReady := make(chan struct{})
-	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
-		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
-			awaiter, ok := sink.(agentcore.ApprovalAwaiter)
-			if !ok {
-				return "", errors.New("expected approval awaiter on runtime sink")
-			}
-			close(approvalReady)
-			_, err := awaiter.AwaitApproval(ctx, agentcore.ApprovalRequest{
-				ID:          "approval-1",
-				ToolCallID:  "tool-1",
-				ToolName:    "write_file",
-				Title:       "Approve write_file",
-				Description: "Write README.md",
-				RiskTone:    agentcore.ApprovalRiskDanger,
-			})
-			if err != nil {
-				return "", err
-			}
-			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType})
-			return "", nil
-		})
-	})
-
-	ts := httptest.NewServer(NewRouter(runService, nil))
-	defer ts.Close()
-
-	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello","workspace":{"workspace_root":"/tmp/awaken-test-workspace"}}`))
-	if err != nil {
-		t.Fatalf("POST /v1/runs failed: %v", err)
-	}
-	defer resp.Body.Close()
-
-	var created awruntime.Run
-	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
-		t.Fatalf("failed to decode create response: %v", err)
-	}
-
-	<-approvalReady
-
-	resolveURL := ts.URL + "/v1/runs/" + created.RunID + "/approvals/approval-1/resolve"
-	firstResp, err := http.Post(resolveURL, "application/json", strings.NewReader(`{"decision":"approved"}`))
-	if err != nil {
-		t.Fatalf("POST resolve approval failed: %v", err)
-	}
-	firstResp.Body.Close()
-	if firstResp.StatusCode != http.StatusNoContent {
-		t.Fatalf("expected 204 on first resolve, got %d", firstResp.StatusCode)
-	}
-
-	secondResp, err := http.Post(resolveURL, "application/json", strings.NewReader(`{"decision":"approved"}`))
-	if err != nil {
-		t.Fatalf("POST duplicate resolve approval failed: %v", err)
-	}
-	defer secondResp.Body.Close()
-	if secondResp.StatusCode != http.StatusNotFound {
-		t.Fatalf("expected 404 on duplicate resolve, got %d", secondResp.StatusCode)
-	}
-
-	var errResp errorResponse
-	body, _ := io.ReadAll(secondResp.Body)
-	if err := json.Unmarshal(body, &errResp); err != nil {
-		t.Fatalf("expected JSON error response, got %q", string(body))
-	}
-	if errResp.Error != "APPROVAL_NOT_FOUND" {
-		t.Fatalf("expected APPROVAL_NOT_FOUND error, got %q", errResp.Error)
-	}
-}
-
-func TestResolveApprovalDuplicateRejectedHTTPReturnsNotFound(t *testing.T) {
-	approvalReady := make(chan struct{})
-	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
-		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
-			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
-			awaiter, ok := sink.(agentcore.ApprovalAwaiter)
-			if !ok {
-				return "", errors.New("expected approval awaiter on runtime sink")
-			}
-			close(approvalReady)
-			_, err := awaiter.AwaitApproval(ctx, agentcore.ApprovalRequest{
-				ID:          "approval-1",
-				ToolCallID:  "tool-1",
-				ToolName:    "write_file",
-				Title:       "Approve write_file",
-				Description: "Write README.md",
-				RiskTone:    agentcore.ApprovalRiskDanger,
-			})
-			if err != nil {
-				return "", err
-			}
-			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType})
-			return "", nil
-		})
-	})
-
-	ts := httptest.NewServer(NewRouter(runService, nil))
-	defer ts.Close()
-
-	resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello","workspace":{"workspace_root":"/tmp/awaken-test-workspace"}}`))
-	if err != nil {
-		t.Fatalf("POST /v1/runs failed: %v", err)
-	}
-	defer resp.Body.Close()
-
-	var created awruntime.Run
-	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
-		t.Fatalf("failed to decode create response: %v", err)
-	}
-
-	<-approvalReady
-
-	resolveURL := ts.URL + "/v1/runs/" + created.RunID + "/approvals/approval-1/resolve"
-	firstResp, err := http.Post(resolveURL, "application/json", strings.NewReader(`{"decision":"rejected"}`))
-	if err != nil {
-		t.Fatalf("POST resolve approval failed: %v", err)
-	}
-	firstResp.Body.Close()
-	if firstResp.StatusCode != http.StatusNoContent {
-		t.Fatalf("expected 204 on first reject resolve, got %d", firstResp.StatusCode)
-	}
-
-	secondResp, err := http.Post(resolveURL, "application/json", strings.NewReader(`{"decision":"rejected"}`))
-	if err != nil {
-		t.Fatalf("POST duplicate reject resolve approval failed: %v", err)
-	}
-	defer secondResp.Body.Close()
-	if secondResp.StatusCode != http.StatusNotFound {
-		t.Fatalf("expected 404 on duplicate reject resolve, got %d", secondResp.StatusCode)
-	}
-
-	var errResp errorResponse
-	body, _ := io.ReadAll(secondResp.Body)
-	if err := json.Unmarshal(body, &errResp); err != nil {
-		t.Fatalf("expected JSON error response, got %q", string(body))
-	}
-	if errResp.Error != "APPROVAL_NOT_FOUND" {
-		t.Fatalf("expected APPROVAL_NOT_FOUND error, got %q", errResp.Error)
-	}
-}
-
 // TestPlainQASmoke 通过真实 LLM 调用验证运行时能否完成一次无工具的纯问答 run。
 // 需要项目根目录的 .env/config.toml 提供 LLM_API_KEY；未设置时自动跳过。
 func TestPlainQASmoke(t *testing.T) {
@@ -1786,8 +1523,8 @@ func TestPlainQASmoke(t *testing.T) {
 			finalTerminalReason = ev.TerminalReason
 		case agui.EventToolCallStart:
 			t.Fatalf("unexpected TOOL_CALL_START event")
-		case agui.EventAwakenApprovalRequested:
-			t.Fatalf("unexpected AWAKEN_APPROVAL_REQUESTED event")
+		case agui.EventAwakenMassReviewRequested:
+			t.Fatalf("unexpected AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED event")
 		case agui.EventAwakenArtifactCreated:
 			t.Fatalf("unexpected AWAKEN_ARTIFACT_CREATED event")
 		case agui.EventRunError:
@@ -1950,8 +1687,8 @@ func TestReadOnlyFileSmoke(t *testing.T) {
 		case agui.EventRunFinished:
 			sawRunFinished = true
 			finalResult = ev.Result
-		case agui.EventAwakenApprovalRequested:
-			t.Fatalf("unexpected AWAKEN_APPROVAL_REQUESTED event")
+		case agui.EventAwakenMassReviewRequested:
+			t.Fatalf("unexpected AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED event")
 		case agui.EventAwakenArtifactCreated:
 			t.Fatalf("unexpected AWAKEN_ARTIFACT_CREATED event")
 		case agui.EventAwakenArtifactUpdated:
@@ -2089,16 +1826,16 @@ func TestFileMutationAutoAllowSmoke(t *testing.T) {
 		t.Fatalf("expected run id, got empty")
 	}
 
-	events, resolveErr := streamEventsAndResolveApproval(t, ts.URL, created.RunID)
+	events, resolveErr := streamEvents(t, ts.URL, created.RunID)
 	if resolveErr != nil {
-		t.Fatalf("failed to stream and resolve approval: %v", resolveErr)
+		t.Fatalf("failed to stream events: %v", resolveErr)
 	}
 
 	var (
 		sawRunStarted                bool
 		sawApplyPatchToolCallStart   bool
 		sawToolPermissionDecided     bool
-		sawApprovalRequested         bool
+		sawMassMessageReview         bool
 		sawStatusAwaitingApproval    bool
 		sawApplyPatchToolCallResult  bool
 		sawFinalTextAfterAllowedTool bool
@@ -2108,8 +1845,8 @@ func TestFileMutationAutoAllowSmoke(t *testing.T) {
 	)
 
 	for _, ev := range events {
-		t.Logf("event: type=%s tool=%s status=%s approval=%s paths=%v outcome=%v",
-			ev.Type, ev.ToolCallName, ev.Status, ev.ApprovalID, ev.ApprovalAffectedPaths, ev.Outcome)
+		t.Logf("event: type=%s tool=%s status=%s paths=%v outcome=%v",
+			ev.Type, ev.ToolCallName, ev.Status, ev.AffectedPaths, ev.Outcome)
 		switch ev.Type {
 		case agui.EventRunStarted:
 			sawRunStarted = true
@@ -2127,18 +1864,18 @@ func TestFileMutationAutoAllowSmoke(t *testing.T) {
 					t.Fatalf("expected apply_patch tool decision source workspace_boundary, got %q", ev.ToolDecisionSource)
 				}
 				hasNoteMD := false
-				for _, p := range ev.ApprovalAffectedPaths {
+				for _, p := range ev.AffectedPaths {
 					if strings.Contains(p, "note.md") {
 						hasNoteMD = true
 						break
 					}
 				}
 				if !hasNoteMD {
-					t.Fatalf("expected tool decision affected paths to contain note.md, got %v", ev.ApprovalAffectedPaths)
+					t.Fatalf("expected tool decision affected paths to contain note.md, got %v", ev.AffectedPaths)
 				}
 			}
-		case agui.EventAwakenApprovalRequested:
-			sawApprovalRequested = true
+		case agui.EventAwakenMassReviewRequested:
+			sawMassMessageReview = true
 		case agui.EventRunStatusChanged:
 			if ev.Status == "awaiting_approval" {
 				sawStatusAwaitingApproval = true
@@ -2171,8 +1908,8 @@ func TestFileMutationAutoAllowSmoke(t *testing.T) {
 	if !sawToolPermissionDecided {
 		t.Fatalf("expected AWAKEN_TOOL_PERMISSION_DECIDED event for apply_patch")
 	}
-	if sawApprovalRequested {
-		t.Fatalf("did not expect AWAKEN_APPROVAL_REQUESTED event on AUTO allow path")
+	if sawMassMessageReview {
+		t.Fatalf("did not expect AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED event on AUTO allow path")
 	}
 	if sawStatusAwaitingApproval {
 		t.Fatalf("did not expect RUN_STATUS_CHANGED event with awaiting_approval on AUTO allow path")
@@ -2202,10 +1939,10 @@ func TestFileMutationAutoAllowSmoke(t *testing.T) {
 	}
 }
 
-// TestFileMutationAutoAllowDoesNotEnterApprovalSmoke 通过真实 LLM 调用验证
+// TestFileMutationAutoAllowDoesNotEnterGenericReviewSmoke 通过真实 LLM 调用验证
 // apply_patch 默认 AUTO 允许（Task 4）时不会进入审批状态或产生 approval resolved。
 // 需要项目根目录的 .env/config.toml 提供 LLM_API_KEY；未设置时自动跳过。
-func TestFileMutationAutoAllowDoesNotEnterApprovalSmoke(t *testing.T) {
+func TestFileMutationAutoAllowDoesNotEnterGenericReviewSmoke(t *testing.T) {
 	workspaceRoot, err := findProjectRoot()
 	if err != nil {
 		t.Fatalf("failed to find project root: %v", err)
@@ -2284,27 +2021,27 @@ func TestFileMutationAutoAllowDoesNotEnterApprovalSmoke(t *testing.T) {
 		t.Fatalf("expected run id, got empty")
 	}
 
-	events, resolveErr := streamEventsAndResolveApprovalDecision(t, ts.URL, created.RunID, "rejected")
+	events, resolveErr := streamEvents(t, ts.URL, created.RunID)
 	if resolveErr != nil {
-		t.Fatalf("failed to stream and resolve approval: %v", resolveErr)
+		t.Fatalf("failed to stream events: %v", resolveErr)
 	}
 
 	var (
 		sawRunStarted              bool
 		sawApplyPatchToolCallStart bool
 		sawToolPermissionDecided   bool
-		sawApprovalRequested       bool
+		sawMassMessageReview       bool
 		sawStatusAwaitingApproval  bool
 		sawRunFinished             bool
 		toolResultContent          string
-		approvalRequestedCount     int
-		approvalResolvedCount      int
+		massReviewRequestedCount   int
+		massReviewResolvedCount    int
 		finalOutcome               string
 	)
 
 	for _, ev := range events {
-		t.Logf("event: type=%s tool=%s status=%s approval=%s paths=%v outcome=%v delta=%q",
-			ev.Type, ev.ToolCallName, ev.Status, ev.ApprovalID, ev.ApprovalAffectedPaths, ev.Outcome, ev.Delta)
+		t.Logf("event: type=%s tool=%s status=%s paths=%v outcome=%v delta=%q",
+			ev.Type, ev.ToolCallName, ev.Status, ev.AffectedPaths, ev.Outcome, ev.Delta)
 		switch ev.Type {
 		case agui.EventRunStarted:
 			sawRunStarted = true
@@ -2319,11 +2056,11 @@ func TestFileMutationAutoAllowDoesNotEnterApprovalSmoke(t *testing.T) {
 					t.Fatalf("expected apply_patch tool decision action allow, got %q", ev.ToolDecisionAction)
 				}
 			}
-		case agui.EventAwakenApprovalRequested:
-			sawApprovalRequested = true
-			approvalRequestedCount++
-		case agui.EventAwakenApprovalResolved:
-			approvalResolvedCount++
+		case agui.EventAwakenMassReviewRequested:
+			sawMassMessageReview = true
+			massReviewRequestedCount++
+		case agui.EventAwakenMassReviewResolved:
+			massReviewResolvedCount++
 		case agui.EventToolCallResult:
 			if ev.ToolCallName == "apply_patch" {
 				toolResultContent = ev.Content
@@ -2351,17 +2088,17 @@ func TestFileMutationAutoAllowDoesNotEnterApprovalSmoke(t *testing.T) {
 	if !sawToolPermissionDecided {
 		t.Fatalf("expected AWAKEN_TOOL_PERMISSION_DECIDED event for apply_patch")
 	}
-	if sawApprovalRequested {
-		t.Fatalf("did not expect AWAKEN_APPROVAL_REQUESTED event on AUTO allow path")
+	if sawMassMessageReview {
+		t.Fatalf("did not expect AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED event on AUTO allow path")
 	}
 	if sawStatusAwaitingApproval {
 		t.Fatalf("did not expect RUN_STATUS_CHANGED event with awaiting_approval on AUTO allow path")
 	}
-	if approvalRequestedCount != 0 {
-		t.Fatalf("expected zero approval requests on AUTO allow path, got %d", approvalRequestedCount)
+	if massReviewRequestedCount != 0 {
+		t.Fatalf("expected zero mass message review requests on AUTO allow path, got %d", massReviewRequestedCount)
 	}
-	if approvalResolvedCount != 0 {
-		t.Fatalf("expected zero approval resolved events on AUTO allow path, got %d", approvalResolvedCount)
+	if massReviewResolvedCount != 0 {
+		t.Fatalf("expected zero mass message review resolved events on AUTO allow path, got %d", massReviewResolvedCount)
 	}
 	if strings.Contains(toolResultContent, "AUTO policy 拒绝") {
 		t.Fatalf("expected AUTO-allowed tool result, got denial: %q", toolResultContent)
@@ -2466,9 +2203,9 @@ func TestFileMutationAutoAllowEmitsArtifactSmoke(t *testing.T) {
 		t.Fatalf("expected run id, got empty")
 	}
 
-	events, resolveErr := streamEventsAndResolveApproval(t, ts.URL, created.RunID)
+	events, resolveErr := streamEvents(t, ts.URL, created.RunID)
 	if resolveErr != nil {
-		t.Fatalf("failed to stream and resolve approval: %v", resolveErr)
+		t.Fatalf("failed to stream events: %v", resolveErr)
 	}
 
 	var (
@@ -2641,23 +2378,23 @@ func TestFileMutationPatchAndTurnDiffSmoke(t *testing.T) {
 		t.Fatalf("expected run id, got empty")
 	}
 
-	events, resolveErr := streamEventsAndResolveApproval(t, ts.URL, created.RunID)
+	events, resolveErr := streamEvents(t, ts.URL, created.RunID)
 	if resolveErr != nil {
-		t.Fatalf("failed to stream and resolve approval: %v", resolveErr)
+		t.Fatalf("failed to stream events: %v", resolveErr)
 	}
 
 	var (
 		patchUpdatedByCallID = map[string]int{}
 		decisionByCallID     = map[string]int{}
-		approvalRequestIndex = -1
+		massReviewIndex      = -1
 		turnDiff             string
 		sawRunFinished       bool
 		toolResultContent    string
 	)
 
 	for i, ev := range events {
-		t.Logf("event: type=%s tool=%s approval=%s decision=%s/%s patchSummary=%q diffLen=%d outcome=%v",
-			ev.Type, ev.ToolCallName, ev.ApprovalID, ev.ToolDecisionAction, ev.ToolDecisionSource, ev.PatchSummary, len(ev.Diff), ev.Outcome)
+		t.Logf("event: type=%s tool=%s decision=%s/%s patchSummary=%q diffLen=%d outcome=%v",
+			ev.Type, ev.ToolCallName, ev.ToolDecisionAction, ev.ToolDecisionSource, ev.PatchSummary, len(ev.Diff), ev.Outcome)
 		switch ev.Type {
 		case agui.EventAwakenPatchUpdated:
 			if ev.ToolCallName == "apply_patch" {
@@ -2671,19 +2408,19 @@ func TestFileMutationPatchAndTurnDiffSmoke(t *testing.T) {
 					t.Fatalf("expected non-empty patch summary")
 				}
 				hasNoteMD := false
-				for _, p := range ev.ApprovalAffectedPaths {
+				for _, p := range ev.AffectedPaths {
 					if p == "note.md" {
 						hasNoteMD = true
 						break
 					}
 				}
 				if !hasNoteMD {
-					t.Fatalf("expected patch preview affected paths to contain note.md, got %v", ev.ApprovalAffectedPaths)
+					t.Fatalf("expected patch preview affected paths to contain note.md, got %v", ev.AffectedPaths)
 				}
 			}
-		case agui.EventAwakenApprovalRequested:
-			if ev.ToolCallName == "apply_patch" && approvalRequestIndex < 0 {
-				approvalRequestIndex = i
+		case agui.EventAwakenMassReviewRequested:
+			if ev.ToolCallName == "apply_patch" && massReviewIndex < 0 {
+				massReviewIndex = i
 			}
 		case agui.EventAwakenToolPermissionDecided:
 			if ev.ToolCallName == "apply_patch" {
@@ -2717,8 +2454,8 @@ func TestFileMutationPatchAndTurnDiffSmoke(t *testing.T) {
 	if len(decisionByCallID) == 0 {
 		t.Fatalf("expected AWAKEN_TOOL_PERMISSION_DECIDED event")
 	}
-	if approvalRequestIndex >= 0 {
-		t.Fatalf("did not expect AWAKEN_APPROVAL_REQUESTED event on AUTO allow path")
+	if massReviewIndex >= 0 {
+		t.Fatalf("did not expect AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED event on AUTO allow path")
 	}
 	matchedPreviewAndDecision := false
 	for callID, patchIndex := range patchUpdatedByCallID {
@@ -2855,7 +2592,7 @@ func TestFileMutationAllowlistAllowSmoke(t *testing.T) {
 		t.Fatalf("expected run id, got empty")
 	}
 
-	events, resolveErr := streamEventsAndResolveApproval(t, ts.URL, created.RunID)
+	events, resolveErr := streamEvents(t, ts.URL, created.RunID)
 	if resolveErr != nil {
 		t.Fatalf("failed to stream events: %v", resolveErr)
 	}
@@ -2898,7 +2635,7 @@ func TestFileMutationAllowlistAllowSmoke(t *testing.T) {
 					t.Fatalf("expected apply_patch tool decision source auto_allowlist, got %q", ev.ToolDecisionSource)
 				}
 			}
-		case agui.EventAwakenApprovalRequested:
+		case agui.EventAwakenMassReviewRequested:
 			if ev.ToolCallName == "apply_patch" && approvalRequestIndex < 0 {
 				approvalRequestIndex = i
 			}
@@ -2931,7 +2668,7 @@ func TestFileMutationAllowlistAllowSmoke(t *testing.T) {
 		t.Fatalf("expected AWAKEN_TOOL_PERMISSION_DECIDED event")
 	}
 	if approvalRequestIndex >= 0 {
-		t.Fatalf("did not expect AWAKEN_APPROVAL_REQUESTED event on allowlist AUTO path")
+		t.Fatalf("did not expect AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED event on allowlist AUTO path")
 	}
 	matchedPreviewAndDecision := false
 	for callID, patchIndex := range patchUpdatedByCallID {
@@ -3063,9 +2800,9 @@ func TestMultiTurnThreadSmoke(t *testing.T) {
 	}
 	t.Logf("first run: run_id=%s thread_id=%s", firstRun.RunID, firstRun.ThreadID)
 
-	firstEvents, resolveErr := streamEventsAndResolveApproval(t, ts.URL, firstRun.RunID)
+	firstEvents, resolveErr := streamEvents(t, ts.URL, firstRun.RunID)
 	if resolveErr != nil {
-		t.Fatalf("failed to stream and resolve approval (first run): %v", resolveErr)
+		t.Fatalf("failed to stream events (first run): %v", resolveErr)
 	}
 
 	var firstSawRunFinished bool
@@ -3076,8 +2813,8 @@ func TestMultiTurnThreadSmoke(t *testing.T) {
 		switch ev.Type {
 		case agui.EventToolCallStart:
 			t.Fatalf("did not expect tool call on first memory-only run")
-		case agui.EventAwakenApprovalRequested:
-			t.Fatalf("did not expect approval request on first memory-only run")
+		case agui.EventAwakenMassReviewRequested:
+			t.Fatalf("did not expect mass message review request on first memory-only run")
 		case agui.EventRunFinished:
 			firstSawRunFinished = true
 			if ev.Outcome != nil {
@@ -3127,9 +2864,9 @@ func TestMultiTurnThreadSmoke(t *testing.T) {
 	}
 	t.Logf("second run: run_id=%s thread_id=%s", secondRun.RunID, secondRun.ThreadID)
 
-	secondEvents, resolveErr := streamEventsAndResolveApproval(t, ts.URL, secondRun.RunID)
+	secondEvents, resolveErr := streamEvents(t, ts.URL, secondRun.RunID)
 	if resolveErr != nil {
-		t.Fatalf("failed to stream and resolve approval (second run): %v", resolveErr)
+		t.Fatalf("failed to stream events (second run): %v", resolveErr)
 	}
 
 	var secondSawRunFinished bool
@@ -3141,8 +2878,8 @@ func TestMultiTurnThreadSmoke(t *testing.T) {
 		switch ev.Type {
 		case agui.EventToolCallStart:
 			t.Fatalf("did not expect tool call on second memory-only run")
-		case agui.EventAwakenApprovalRequested:
-			t.Fatalf("did not expect approval request on second memory-only run")
+		case agui.EventAwakenMassReviewRequested:
+			t.Fatalf("did not expect mass message review request on second memory-only run")
 		case agui.EventTextMessageContent:
 			secondAssistantText.WriteString(ev.Delta)
 		case agui.EventRunFinished:
@@ -3188,11 +2925,7 @@ func TestMultiTurnThreadSmoke(t *testing.T) {
 	}
 }
 
-func streamEventsAndResolveApproval(t *testing.T, baseURL, runID string) ([]agui.Event, error) {
-	return streamEventsAndResolveApprovalDecision(t, baseURL, runID, "approved")
-}
-
-func streamEventsAndResolveApprovalDecision(t *testing.T, baseURL, runID, decision string) ([]agui.Event, error) {
+func streamEvents(t *testing.T, baseURL, runID string) ([]agui.Event, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
@@ -3211,10 +2944,6 @@ func streamEventsAndResolveApprovalDecision(t *testing.T, baseURL, runID, decisi
 	}
 
 	var events []agui.Event
-	var resolveErr error
-	var resolveMu sync.Mutex
-	resolvedApprovals := make(map[string]bool)
-
 	scanner := bufio.NewScanner(streamResp.Body)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -3230,58 +2959,11 @@ func streamEventsAndResolveApprovalDecision(t *testing.T, baseURL, runID, decisi
 			return nil, fmt.Errorf("decode event %q: %w", payload, err)
 		}
 		events = append(events, ev)
-
-		if ev.Type == agui.EventAwakenApprovalRequested {
-			resolveMu.Lock()
-			alreadyResolved := resolvedApprovals[ev.ApprovalID]
-			if !alreadyResolved {
-				resolvedApprovals[ev.ApprovalID] = true
-			}
-			resolveMu.Unlock()
-			if !alreadyResolved {
-				go func(approvalID string) {
-					err := resolveApprovalWithRetryDecision(baseURL, runID, approvalID, decision)
-					resolveMu.Lock()
-					if resolveErr == nil && err != nil {
-						resolveErr = err
-					}
-					resolveMu.Unlock()
-				}(ev.ApprovalID)
-			}
-		}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
-	if resolveErr != nil {
-		return nil, resolveErr
-	}
 	return events, nil
-}
-
-func resolveApprovalWithRetry(baseURL, runID, approvalID string) error {
-	return resolveApprovalWithRetryDecision(baseURL, runID, approvalID, "approved")
-}
-
-func resolveApprovalWithRetryDecision(baseURL, runID, approvalID, decision string) error {
-	resolveURL := baseURL + "/v1/runs/" + runID + "/approvals/" + approvalID + "/resolve"
-	body := fmt.Sprintf(`{"decision":"%s"}`, decision)
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		resp, err := http.Post(resolveURL, "application/json", strings.NewReader(body))
-		if err != nil {
-			return fmt.Errorf("POST resolve approval failed: %w", err)
-		}
-		status := resp.StatusCode
-		_ = resp.Body.Close()
-		if status == http.StatusNoContent {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("approval resolve never succeeded, last status %d", status)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
 }
 
 func collectSSEEvents(r io.Reader) ([]agui.Event, error) {

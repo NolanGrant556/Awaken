@@ -92,20 +92,19 @@ func (t *ShellTool) CheckPermission(ctx context.Context, input string, permissio
 		// StaticBehavior==Allow branch and allow without transform.
 		return tool.AllowPermission()
 	case ShellTierWorkspaceMutation:
-		// Internal risk signal: routes to decideShellTransform which
-		// will transform file writes to apply_patch or allow workspace
-		// mutations per the profile. Ask does NOT trigger user approval
-		// under ApprovalNever (the zero-approval default).
-		return tool.AskPermission("shell command may mutate files within the workspace", tool.ApprovalRequest{
-			Title:       "Approve shell command",
+		// Internal risk signal: routes to decideShellTransform, which
+		// rewrites simple file writes to apply_patch or structurally denies
+		// unsupported workspace mutation. This is metadata, not approval.
+		return tool.AllowPermissionWithMetadata(tool.DecisionMetadata{
+			Title:       "Shell workspace mutation",
 			Description: shellApprovalDescription(params, "workspace mutation"),
 			RiskTone:    "warning",
 		})
 	case ShellTierOpenWorldSystem:
-		// Internal risk signal: routes to decideShellTransform which
-		// will deny open-world commands (or transform if applicable).
-		return tool.AskPermission("shell command reaches outside the workspace or affects the system", tool.ApprovalRequest{
-			Title:       "Approve shell command",
+		// Open-world shell is not sent to approval. The policy layer denies
+		// it or transforms a narrow file-write pattern when possible.
+		return tool.AllowPermissionWithMetadata(tool.DecisionMetadata{
+			Title:       "Shell open-world command",
 			Description: shellApprovalDescription(params, "open-world system command"),
 			RiskTone:    "danger",
 		})

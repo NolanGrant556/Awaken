@@ -8,8 +8,9 @@ import (
 )
 
 // npxCommand returns the OS-appropriate command and arguments for running an
-// npx package. On Windows we invoke npx through cmd /c so .cmd wrappers work
-// reliably for long-lived stdio servers.
+// npx package. On Windows, Go cannot reliably execute .cmd scripts as a long-
+// lived stdio server directly, so we run them through cmd /c. On other
+// platforms npx is invoked directly.
 func npxCommand(args ...string) (string, []string) {
 	if runtime.GOOS == "windows" {
 		return "cmd", append([]string{"/c", "npx"}, args...)
@@ -53,6 +54,7 @@ func (s *builtinSource) Origin() SourceOrigin { return SourceBuiltin }
 // Priority implements ConnectorSource. Builtin has the highest priority (0).
 func (s *builtinSource) Priority() int { return 0 }
 
+// puppeteerConnector returns the Puppeteer MCP connector definition.
 func puppeteerConnector() ConnectorDefinition {
 	return ConnectorDefinition{
 		ID:               "puppeteer",
@@ -67,6 +69,7 @@ func puppeteerConnector() ConnectorDefinition {
 	}
 }
 
+// chromeDevToolsConnector returns the Chrome DevTools MCP connector definition.
 func chromeDevToolsConnector() ConnectorDefinition {
 	return ConnectorDefinition{
 		ID:               "chrome-devtools-mcp",
@@ -81,6 +84,7 @@ func chromeDevToolsConnector() ConnectorDefinition {
 	}
 }
 
+// playwrightConnector returns the Playwright MCP connector definition.
 func playwrightConnector() ConnectorDefinition {
 	return ConnectorDefinition{
 		ID:               "playwright",
@@ -95,6 +99,7 @@ func playwrightConnector() ConnectorDefinition {
 	}
 }
 
+// githubConnector returns the GitHub MCP connector definition.
 func githubConnector() ConnectorDefinition {
 	return ConnectorDefinition{
 		ID:               "github",
@@ -109,6 +114,7 @@ func githubConnector() ConnectorDefinition {
 	}
 }
 
+// context7Connector returns the Upstash Context7 MCP connector definition.
 func context7Connector() ConnectorDefinition {
 	return ConnectorDefinition{
 		ID:               "context7",
@@ -123,6 +129,7 @@ func context7Connector() ConnectorDefinition {
 	}
 }
 
+// puppeteerConfigFactory generates MCP server configs for the Puppeteer connector.
 func puppeteerConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclient.ScopedMcpServerConfig {
 	cmd, args := npxCommand("-y", "@modelcontextprotocol/server-puppeteer")
 	return map[string]mcpclient.ScopedMcpServerConfig{
@@ -141,6 +148,7 @@ func puppeteerConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpc
 	}
 }
 
+// chromeDevToolsConfigFactory generates MCP server configs for the Chrome DevTools MCP connector.
 func chromeDevToolsConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclient.ScopedMcpServerConfig {
 	cmd, args := npxCommand("-y", "chrome-devtools-mcp@latest")
 	return map[string]mcpclient.ScopedMcpServerConfig{
@@ -159,6 +167,7 @@ func chromeDevToolsConfigFactory(def ConnectorDefinition, _ []string) map[string
 	}
 }
 
+// playwrightConfigFactory generates MCP server configs for the Playwright connector.
 func playwrightConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclient.ScopedMcpServerConfig {
 	cmd, args := npxCommand("-y", "@executeautomation/playwright-mcp-server")
 	return map[string]mcpclient.ScopedMcpServerConfig{
@@ -177,6 +186,7 @@ func playwrightConfigFactory(def ConnectorDefinition, _ []string) map[string]mcp
 	}
 }
 
+// githubConfigFactory generates MCP server configs for the GitHub connector.
 func githubConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclient.ScopedMcpServerConfig {
 	cmd, args := npxCommand("-y", "@modelcontextprotocol/server-github")
 	return map[string]mcpclient.ScopedMcpServerConfig{
@@ -187,6 +197,9 @@ func githubConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclie
 				Stdio: &mcpclient.StdioTransportConfig{
 					Command: cmd,
 					Args:    args,
+					Env: map[string]string{
+						"GITHUB_PERSONAL_ACCESS_TOKEN": "",
+					},
 				},
 				DisplayName: def.DisplayName,
 			},
@@ -194,6 +207,7 @@ func githubConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclie
 	}
 }
 
+// context7ConfigFactory generates MCP server configs for the Context7 connector.
 func context7ConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclient.ScopedMcpServerConfig {
 	cmd, args := npxCommand("-y", "@upstash/context7-mcp@latest")
 	return map[string]mcpclient.ScopedMcpServerConfig{

@@ -49,7 +49,11 @@ type Manager struct {
 	// The channel is closed when the subscriber's context is cancelled.
 	subscribers   map[chan ServerEvent]context.Context
 	subscribersMu sync.Mutex
-	nextSeq       atomic.Uint64
+
+	// nextSeq is a monotonic counter used to preserve the order in which servers
+	// were added to the manager. It is incremented atomically when a server is
+	// created so Snapshot can return servers in installation order.
+	nextSeq atomic.Uint64
 }
 
 // managedServer holds the per-server mutable state under the manager's lock.
@@ -62,7 +66,9 @@ type managedServer struct {
 	capability  *ServerCapability
 	errorReason string
 	lastConn    *time.Time
-	seq         uint64
+
+	// seq records the order in which this server was added to the manager.
+	seq uint64
 
 	// sourceConnectorID is set when this server was injected by a connector
 	// via InjectDynamic. It holds the connector's ID.
@@ -133,6 +139,8 @@ func (m *Manager) SetCredentialStore(store CredentialStore) {
 	m.mu.Unlock()
 }
 
+// nextServerSeq returns a monotonically increasing sequence number for a newly
+// created server. Callers must still assign the value to the managedServer.
 func (m *Manager) nextServerSeq() uint64 {
 	return m.nextSeq.Add(1)
 }
@@ -448,7 +456,7 @@ func (m *Manager) RestartWithConfig(ctx context.Context, scoped ScopedMcpServerC
 }
 
 // Snapshot returns the current state of every server, sorted by installation
-// order.
+// order (the order in which they were added to the manager).
 func (m *Manager) Snapshot() []ServerSnapshot {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -646,11 +654,13 @@ func (m *Manager) RemoveDynamic(connectorID, serverName string) {
 	m.logger.Debugf("mcp server %q removed (connector %s)", serverName, connectorID)
 }
 
-// Remove permanently unregisters a server from the manager.
+// Remove permanently stops a server, closes its session, unregisters its tools,
+// and removes it from the manager. Used when the operator deletes a server's
+// configuration from the UI.
 func (m *Manager) Remove(name string) error {
 	m.mu.Lock()
-	server, ok := m.servers[name]
-	if ok {
+	server, exists := m.servers[name]
+	if exists {
 		if server.cancelCtx != nil {
 			server.cancelCtx()
 		}
@@ -661,15 +671,13 @@ func (m *Manager) Remove(name string) error {
 	}
 	m.mu.Unlock()
 
-	if !ok {
-		return nil
+	if exists {
+		m.unregisterTools(name)
+		if m.onToolsChanged != nil {
+			m.onToolsChanged(name)
+		}
+		m.emitEvent(ServerEvent{Type: EventDisconnected, ServerName: name})
 	}
-
-	m.unregisterTools(name)
-	if m.onToolsChanged != nil {
-		m.onToolsChanged(name)
-	}
-	m.emitEvent(ServerEvent{Type: EventDisconnected, ServerName: name})
 	return nil
 }
 

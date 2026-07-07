@@ -2282,6 +2282,36 @@ pre {
   outline-offset: 1px;
 }
 
+.mcp-settings-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+}
+
+.mcp-settings-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mcp-settings-delete-btn {
+  color: var(--aw-error);
+  background: color-mix(in srgb, var(--aw-error) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--aw-error) 24%, var(--aw-border-main));
+}
+
+.mcp-settings-delete-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--aw-error) 14%, transparent);
+  border-color: color-mix(in srgb, var(--aw-error) 40%, var(--aw-border-main));
+}
+
+.mcp-settings-delete-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .mcp-tools-list {
   display: grid;
   gap: 8px;

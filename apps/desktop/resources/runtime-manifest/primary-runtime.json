@@ -1,0 +1,43 @@
+{
+  "name": "primary-runtime",
+  "version": "0.1.0",
+  "mode": "hybrid",
+  "components": [
+    {
+      "name": "python",
+      "kind": "executable",
+      "required": true,
+      "path": "../runtime/python/bin/python3"
+    },
+    {
+      "name": "node",
+      "kind": "executable",
+      "required": true,
+      "path": "../runtime/node/bin/node"
+    },
+    {
+      "name": "libreoffice",
+      "kind": "application",
+      "required": true,
+      "path": "../runtime/libreoffice/LibreOffice.app"
+    },
+    {
+      "name": "poppler",
+      "kind": "directory",
+      "required": true,
+      "path": "../runtime/poppler/bin"
+    },
+    {
+      "name": "ffmpeg",
+      "kind": "executable",
+      "required": true,
+      "path": "../runtime/ffmpeg/bin/ffmpeg"
+    },
+    {
+      "name": "helper-packages",
+      "kind": "directory",
+      "required": true,
+      "path": "../runtime/packages"
+    }
+  ]
+}

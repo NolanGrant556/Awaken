@@ -16,16 +16,16 @@ type connectorHandlers struct {
 
 // connectorInfo is the wire shape for entries returned by GET /v1/connectors.
 type connectorInfo struct {
-	ID           string                `json:"id"`
-	DisplayName  string                `json:"displayName"`
-	Category     connectors.Category   `json:"category"`
-	Provider     string                `json:"provider,omitempty"`
+	ID           string                    `json:"id"`
+	DisplayName  string                    `json:"displayName"`
+	Category     connectors.Category       `json:"category"`
+	Provider     string                    `json:"provider,omitempty"`
 	State        connectors.ConnectorState `json:"state"`
-	SourceOrigin connectors.SourceOrigin `json:"sourceOrigin"`
-	AuthType     connectors.AuthType   `json:"authType"`
-	LastError    string                `json:"lastError,omitempty"`
-	ServerNames  []string              `json:"serverNames,omitempty"`
-	ShadowedBy   string                `json:"shadowedBy,omitempty"`
+	SourceOrigin connectors.SourceOrigin   `json:"sourceOrigin"`
+	AuthType     connectors.AuthType       `json:"authType"`
+	LastError    string                    `json:"lastError,omitempty"`
+	ServerNames  []string                  `json:"serverNames,omitempty"`
+	ShadowedBy   string                    `json:"shadowedBy,omitempty"`
 }
 
 // connectRequest is the wire payload for POST /v1/connectors/{id}/connect.

@@ -175,22 +175,26 @@ describe("runtime reducer replay idempotency", () => {
     expect(state.artifacts[0].id).toBe("art-1");
   });
 
-  it("run/recovered resets state so replayed approvals do not duplicate", () => {
+  it("run/recovered keeps mass message review out of generic approvals", () => {
     const state = dispatch([
       runEvent({
-        type: "AWAKEN_APPROVAL_REQUESTED",
-        approvalId: "appr-1",
+        type: "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED",
+        reviewId: "appr-1",
         approvalTitle: "Approve write",
       }),
       { type: "run/recovered", run: makeRun({ status: "running" }) },
       runEvent({
-        type: "AWAKEN_APPROVAL_REQUESTED",
-        approvalId: "appr-1",
+        type: "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED",
+        reviewId: "appr-1",
         approvalTitle: "Approve write",
       }),
     ]);
-    expect(state.approvals.length).toBe(1);
-    expect(state.approvals[0].id).toBe("appr-1");
+    expect(state.approvals).toHaveLength(0);
+    expect(state.narrative.activeItem).toMatchObject({
+      kind: "tool",
+      id: "mass-message-review:run-1:appr-1",
+      status: "active",
+    });
   });
 
   it("run/recovered with terminal status sets correct phase", () => {
@@ -237,31 +241,31 @@ describe("runtime reducer replay idempotency", () => {
     ]);
   });
 
-  it("run/recovered rebuilds pending approval as waiting during replay", () => {
+  it("run/recovered rebuilds pending mass message review as a dedicated notice", () => {
     const state = dispatch([
       {
         type: "run/recovered",
-        run: makeRun({ runId: "run-1", threadId: "thread-1", status: "awaiting_approval" }),
+        run: makeRun({ runId: "run-1", threadId: "thread-1", status: "running" }),
         prompt: "Approve recovered patch",
       },
       runEvent({ type: "RUN_STARTED", seq: 1, runId: "run-1", threadId: "thread-1" }),
       runEvent({
-        type: "AWAKEN_APPROVAL_REQUESTED",
+        type: "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED",
         seq: 2,
-        approvalId: "approval-1",
+        reviewId: "approval-1",
         approvalTitle: "Approve patch",
       }),
     ]);
 
     expect(state.phase).toBe("running");
-    expect(state.status).toBe("awaiting_approval");
-    expect(state.approvals).toHaveLength(1);
-    expect(state.approvals[0].id).toBe("approval-1");
+    expect(state.status).toBe("running");
+    expect(state.approvals).toHaveLength(0);
     expect(state.narrative.activeItem).toEqual({
-      kind: "approval",
-      id: "approval:run-1:approval-1",
-      title: "Approve patch",
-      status: "waiting",
+      kind: "tool",
+      id: "mass-message-review:run-1:approval-1",
+      title: "Mass message review required",
+      detail: "",
+      status: "active",
     });
   });
 
@@ -431,13 +435,13 @@ describe("runtime reducer run narrative projection", () => {
     ]);
   });
 
-  it("projects tool and approval events while deferring artifact summaries", () => {
+  it("projects tool and mass message review events while deferring artifact summaries", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Patch a file" },
       runEvent({ type: "RUN_STARTED", seq: 1 }),
       runEvent({ type: "TOOL_CALL_START", seq: 2, toolCallId: "tool-1", toolCallName: "apply_patch" }),
       runEvent({ type: "TOOL_CALL_RESULT", seq: 3, toolCallId: "tool-1", toolCallName: "apply_patch", content: "pending approval" }),
-      runEvent({ type: "AWAKEN_APPROVAL_REQUESTED", seq: 4, approvalId: "approval-1", approvalTitle: "Approve patch" }),
+      runEvent({ type: "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED", seq: 4, reviewId: "approval-1", approvalTitle: "Approve patch" }),
       runEvent({ type: "AWAKEN_ARTIFACT_CREATED", seq: 5, artifactId: "artifact-1", artifactTitle: "note.md", artifactKind: "added", artifactPath: "note.md" }),
     ]);
 
@@ -450,16 +454,16 @@ describe("runtime reducer run narrative projection", () => {
       status: "done",
     });
     expect(state.narrative.activeItem).toMatchObject({
-      kind: "approval",
-      id: "approval:approval-1",
-      title: "Approve patch",
-      status: "waiting",
+      kind: "tool",
+      id: "mass-message-review:approval-1",
+      title: "Mass message review required",
+      status: "active",
     });
     expect(state.artifacts).toContainEqual(expect.objectContaining({ id: "artifact-1" }));
     expect(state.narrative.committedItems.some((item) => item.kind === "fileChange")).toBe(false);
     expect(state.narrative.inspectorSelection).toEqual({
-      kind: "approval",
-      id: "approval:approval-1",
+      kind: "tool",
+      id: "mass-message-review:approval-1",
     });
   });
 
@@ -691,7 +695,7 @@ describe("runtime reducer run narrative projection", () => {
         toolCallName: "apply_patch",
         patch,
         patchSummary: "新增 1 个文件",
-        approvalAffectedPaths: ["note.md"],
+        affectedPaths: ["note.md"],
       }),
       runEvent({ type: "AWAKEN_TURN_DIFF", seq: 2, diff, truncated: true }),
     ]);
@@ -739,8 +743,8 @@ describe("runtime reducer run narrative projection", () => {
         toolDecisionAction: "deny",
         toolDecisionSource: "headless_default",
         toolDecisionReason: "writes require allowlist",
-        approvalAffectedPaths: ["note.md"],
-        approvalPatchSummary: "modify note.md",
+        affectedPaths: ["note.md"],
+        patchSummary: "modify note.md",
       }),
     ]);
 
@@ -1015,91 +1019,97 @@ describe("runtime reducer run narrative projection", () => {
     });
   });
 
-  it("points inspector selection to approval when approval is requested", () => {
+  it("points inspector selection to mass message review when review is requested", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Patch a file" },
       runEvent({
-        type: "AWAKEN_APPROVAL_REQUESTED",
-        approvalId: "approval-1",
+        type: "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED",
+        reviewId: "approval-1",
         approvalTitle: "Approve patch",
       }),
     ]);
 
     expect(state.narrative.activeItem).toMatchObject({
-      kind: "approval",
-      id: "approval:approval-1",
-      status: "waiting",
+      kind: "tool",
+      id: "mass-message-review:approval-1",
+      status: "active",
     });
     expect(state.narrative.inspectorSelection).toEqual({
-      kind: "approval",
-      id: "approval:approval-1",
+      kind: "tool",
+      id: "mass-message-review:approval-1",
     });
   });
 
-  it("commits approved approval narrative and clears runtime approvals", () => {
+  it("commits approved mass message review narrative without generic approvals", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Patch a file" },
       runEvent({
-        type: "AWAKEN_APPROVAL_REQUESTED",
+        type: "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED",
         seq: 1,
-        approvalId: "approval-1",
-        approvalTitle: "Approve patch",
-        approvalAffectedPaths: ["src/example.ts"],
+        reviewId: "approval-1",
+        massMessageChannel: "email",
+        massMessageRecipientScope: "selected contacts",
+        massMessageRecipientCount: 12,
+        massMessageBodyPreview: "Hello",
       }),
       runEvent({
-        type: "AWAKEN_APPROVAL_RESOLVED",
+        type: "AWAKEN_MASS_MESSAGE_REVIEW_RESOLVED",
         seq: 2,
-        approvalId: "approval-1",
+        reviewId: "approval-1",
         approvalTitle: "Approve patch",
-        approvalDecision: "approved",
+        reviewDecision: "approved",
       }),
     ]);
 
     expect(state.approvals).toHaveLength(0);
     expect(state.narrative.activeItem).toBeUndefined();
-    expect(state.narrative.committedItems).toContainEqual({
-      kind: "approval",
-      id: "approval:approval-1",
-      title: "Approve patch",
-      status: "approved",
-    });
+    expect(state.narrative.committedItems).toContainEqual(
+      expect.objectContaining({
+        kind: "tool",
+        id: "mass-message-review:approval-1",
+        title: "Mass message approved",
+        status: "done",
+      }),
+    );
   });
 
-  it("commits rejected approval narrative and clears runtime approvals", () => {
+  it("commits rejected mass message review narrative without generic approvals", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Patch a file" },
       runEvent({
-        type: "AWAKEN_APPROVAL_REQUESTED",
+        type: "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED",
         seq: 1,
-        approvalId: "approval-1",
+        reviewId: "approval-1",
         approvalTitle: "Approve patch",
       }),
       runEvent({
-        type: "AWAKEN_APPROVAL_RESOLVED",
+        type: "AWAKEN_MASS_MESSAGE_REVIEW_RESOLVED",
         seq: 2,
-        approvalId: "approval-1",
+        reviewId: "approval-1",
         approvalTitle: "Approve patch",
-        approvalDecision: "rejected",
+        reviewDecision: "rejected",
       }),
     ]);
 
     expect(state.approvals).toHaveLength(0);
     expect(state.narrative.activeItem).toBeUndefined();
-    expect(state.narrative.committedItems).toContainEqual({
-      kind: "approval",
-      id: "approval:approval-1",
-      title: "Approve patch",
-      status: "rejected",
-    });
+    expect(state.narrative.committedItems).toContainEqual(
+      expect.objectContaining({
+        kind: "tool",
+        id: "mass-message-review:approval-1",
+        title: "Mass message rejected",
+        status: "error",
+      }),
+    );
   });
 
-  it("clears runtime approvals and removes active approval controls when a pending approval is cancelled", () => {
+  it("does not create generic approval controls when a pending mass message review is cancelled", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Patch a file" },
       runEvent({
-        type: "AWAKEN_APPROVAL_REQUESTED",
+        type: "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED",
         seq: 1,
-        approvalId: "approval-1",
+        reviewId: "approval-1",
         approvalTitle: "Approve patch",
       }),
       runEvent({
@@ -1112,20 +1122,17 @@ describe("runtime reducer run narrative projection", () => {
     expect(state.approvals).toHaveLength(0);
     expect(state.narrative.activeItem).toBeUndefined();
     expect(
-      state.narrative.committedItems.find((item) => item.id === "approval:approval-1"),
-    ).toMatchObject({
-      kind: "approval",
-      status: "waiting",
-    });
+      state.narrative.committedItems.some((item) => item.kind === "approval"),
+    ).toBe(false);
   });
 
-  it("keeps pending approval controls during transport stream interruption", () => {
+  it("keeps pending mass message review notice during transport stream interruption", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Patch a file" },
       runEvent({
-        type: "AWAKEN_APPROVAL_REQUESTED",
+        type: "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED",
         seq: 1,
-        approvalId: "approval-1",
+        reviewId: "approval-1",
         approvalTitle: "Approve patch",
       }),
       { type: "run/streamError", message: "stream disconnected" },
@@ -1133,11 +1140,11 @@ describe("runtime reducer run narrative projection", () => {
 
     expect(state.phase).toBe("reconnecting");
     expect(state.timelineStatus).toBe("running");
-    expect(state.approvals).toHaveLength(1);
+    expect(state.approvals).toHaveLength(0);
     expect(state.narrative.activeItem).toMatchObject({
-      kind: "approval",
-      id: "approval:approval-1",
-      status: "waiting",
+      kind: "tool",
+      id: "mass-message-review:approval-1",
+      status: "active",
     });
     expect(state.narrative.committedItems.some((item) => item.id === "answer:error:stream")).toBe(false);
   });
@@ -1146,9 +1153,9 @@ describe("runtime reducer run narrative projection", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Patch a file" },
       runEvent({
-        type: "AWAKEN_APPROVAL_REQUESTED",
+        type: "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED",
         seq: 1,
-        approvalId: "approval-1",
+        reviewId: "approval-1",
         approvalTitle: "Approve patch",
       }),
       { type: "run/streamFailed", message: "failed after 5 reconnect attempts" },
@@ -1419,22 +1426,22 @@ describe("runtime reducer thread snapshots", () => {
       artifactCount: 0,
     });
 
-    state = reduceRuntimeState(state, runEvent({ type: "RUN_STATUS_CHANGED", status: "awaiting_approval" }));
+    state = reduceRuntimeState(state, runEvent({ type: "RUN_STATUS_CHANGED", status: "running" }));
     state = reduceRuntimeState(state, runEvent({
-      type: "AWAKEN_APPROVAL_REQUESTED",
-      approvalId: "approval-1",
+      type: "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED",
+      reviewId: "approval-1",
       approvalTitle: "Approve patch",
     }));
 
     expect(state.threads[0]).toMatchObject({
-      runStatus: "awaiting_approval",
-      approvalCount: 1,
+      runStatus: "running",
+      approvalCount: 0,
     });
 
     state = reduceRuntimeState(state, runEvent({
-      type: "AWAKEN_APPROVAL_RESOLVED",
-      approvalId: "approval-1",
-      approvalDecision: "approved",
+      type: "AWAKEN_MASS_MESSAGE_REVIEW_RESOLVED",
+      reviewId: "approval-1",
+      reviewDecision: "approved",
     }));
     state = reduceRuntimeState(state, runEvent({
       type: "AWAKEN_ARTIFACT_CREATED",
@@ -1497,14 +1504,14 @@ describe("runtime reducer thread snapshots", () => {
     expect(state.threads.map((thread) => thread.threadId)).toEqual(["thread-1", "thread-2"]);
   });
 
-  it("restores approval and artifact narrative when switching threads", () => {
+  it("restores mass message review and artifact narrative when switching threads", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "first prompt" },
       { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
       { type: "run/threadAdded", threadId: "thread-1", label: "first prompt", runId: "run-1" },
       runEvent({
-        type: "AWAKEN_APPROVAL_REQUESTED",
-        approvalId: "approval-1",
+        type: "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED",
+        reviewId: "approval-1",
         approvalTitle: "Approve patch",
       }),
       runEvent({
@@ -1528,9 +1535,11 @@ describe("runtime reducer thread snapshots", () => {
     ];
 
     expect(state.activeThreadId).toBe("thread-1");
-    expect(state.approvals).toHaveLength(1);
+    expect(state.approvals).toHaveLength(0);
     expect(state.artifacts).toHaveLength(1);
-    expect(narrativeItems.some((item) => item.kind === "approval")).toBe(true);
+    expect(
+      narrativeItems.some((item) => item.id === "mass-message-review:run-1:approval-1"),
+    ).toBe(true);
     expect(narrativeItems.some((item) => item.kind === "fileChange")).toBe(false);
   });
 

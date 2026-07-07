@@ -1,13 +1,13 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type { AguiEvent } from "../shared/agui.js";
 import {
-  type ApprovalDecision,
   type AwakenBridge,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
   type DesktopPlatform,
   type InstallSkillRequest,
   type InstallSkillResponse,
+  type MassMessageReviewDecision,
   type ModelProfileSaveRequest,
   type ModelProfileTestResult,
   type ModelProvider,
@@ -85,10 +85,10 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:start-run", request) as Promise<RuntimeRun>,
   cancelRun: (runId: string) =>
     ipcRenderer.invoke("awaken:cancel-run", runId) as Promise<RuntimeRun>,
-  resolveApproval: (runId: string, approvalId: string, decision: ApprovalDecision) =>
-    ipcRenderer.invoke("awaken:resolve-approval", {
+  resolveMassMessageReview: (runId: string, reviewId: string, decision: MassMessageReviewDecision) =>
+    ipcRenderer.invoke("awaken:resolve-mass-message-review", {
       runId,
-      approvalId,
+      reviewId,
       decision,
     }) as Promise<void>,
   subscribeRun: async (runId: string, handlers: RunStreamHandlers, afterSeq?: number) => {

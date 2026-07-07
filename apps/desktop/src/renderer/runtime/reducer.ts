@@ -184,6 +184,7 @@ type ThreadViewState = {
   toolResults: ToolResultRecord[];
   patchPreviews: PatchPreviewRecord[];
   approvals: ApprovalItem[];
+  massMessageReviews: MassMessageReviewItem[];
   artifacts: ArtifactRecord[];
   turnDiff?: TurnDiffRecord;
   inspectorSummary: InspectorSummary;
@@ -208,6 +209,7 @@ export type RuntimeViewState = {
   toolResults: ToolResultRecord[];
   patchPreviews: PatchPreviewRecord[];
   approvals: ApprovalItem[];
+  massMessageReviews: MassMessageReviewItem[];
   artifacts: ArtifactRecord[];
   turnDiff?: TurnDiffRecord;
   inspectorSummary: InspectorSummary;
@@ -250,6 +252,18 @@ export type RuntimeAction =
   | { type: "run/event"; event: AguiEvent; receivedAtMs?: number }
   | { type: "supervisor/status-changed"; info: SupervisorStatusInfo };
 
+export type MassMessageReviewItem = {
+  id: string;
+  channel?: string;
+  recipientScope?: string;
+  recipientCount?: number;
+  bodyPreview?: string;
+  templateId?: string;
+  attachmentNames: string[];
+  account?: string;
+  sourceTool?: string;
+};
+
 const initialState: RuntimeViewState = {
   prompt: "",
   promptAttachments: undefined,
@@ -262,6 +276,7 @@ const initialState: RuntimeViewState = {
   toolResults: [],
   patchPreviews: [],
   approvals: [],
+  massMessageReviews: [],
   artifacts: [],
   narrative: createInitialRunNarrativeState(),
   inspectorSummary: createInspectorSummary(),
@@ -286,6 +301,7 @@ function viewFromState(state: RuntimeViewState): ThreadViewState {
     toolResults: state.toolResults,
     patchPreviews: state.patchPreviews,
     approvals: state.approvals,
+    massMessageReviews: state.massMessageReviews,
     artifacts: state.artifacts,
     turnDiff: state.turnDiff,
     inspectorSummary: state.inspectorSummary,
@@ -362,11 +378,7 @@ function threadItemFromRuntime(thread: RuntimeThread): ThreadItem {
 }
 
 function isActiveRunStatus(status?: RuntimeRunStatus): boolean {
-  return (
-    status === "running" ||
-    status === "awaiting_approval" ||
-    status === "cancelling"
-  );
+  return status === "running" || status === "cancelling";
 }
 
 function syncActiveThreadSummary(state: RuntimeViewState): RuntimeViewState {
@@ -843,8 +855,8 @@ function toolDecisionRecord(event: AguiEvent): ToolDecisionRecord {
     reason: event.toolDecisionReason || event.message,
     staticPermissionBehavior: event.staticPermissionBehavior,
     staticPermissionReason: event.staticPermissionReason,
-    affectedPaths: event.approvalAffectedPaths ?? [],
-    patchSummary: event.approvalPatchSummary,
+    affectedPaths: event.affectedPaths ?? event.approvalAffectedPaths ?? [],
+    patchSummary: event.patchSummary ?? event.approvalPatchSummary,
     // Task 16 unified observability: carry the profile name, transform
     // origin, trashed paths, and guardian violation reason so the UI can
     // render them.
@@ -935,6 +947,30 @@ function removeApproval(
   return approvals.filter((approval) => approval.id !== approvalId);
 }
 
+function upsertMassMessageReview(
+  reviews: MassMessageReviewItem[],
+  next: MassMessageReviewItem,
+): MassMessageReviewItem[] {
+  const index = reviews.findIndex((review) => review.id === next.id);
+  if (index < 0) {
+    return [...reviews, next];
+  }
+
+  const updated = reviews.slice();
+  updated[index] = next;
+  return updated;
+}
+
+function removeMassMessageReview(
+  reviews: MassMessageReviewItem[],
+  reviewId?: string,
+): MassMessageReviewItem[] {
+  if (!reviewId) {
+    return reviews;
+  }
+  return reviews.filter((review) => review.id !== reviewId);
+}
+
 function upsertArtifact(
   artifacts: ArtifactRecord[],
   event: AguiEvent,
@@ -973,9 +1009,10 @@ function syncFromRun(
       promptAttachments: run.inputAttachments,
       phase: "cancelling",
       status: run.status,
-      timelineStatus: "running",
-      approvals: [],
-      steps: toSteps(
+		timelineStatus: "running",
+		approvals: [],
+		massMessageReviews: [],
+		steps: toSteps(
         upsertStep(
           state.steps.map((step, index) => ({
             ...step,
@@ -1002,9 +1039,10 @@ function syncFromRun(
       promptAttachments: run.inputAttachments,
       phase: "done",
       status: run.status,
-      timelineStatus: "done",
-      approvals: [],
-    };
+		timelineStatus: "done",
+		approvals: [],
+		massMessageReviews: [],
+	};
   }
 
   if (run.status === "cancelled") {
@@ -1015,9 +1053,10 @@ function syncFromRun(
       promptAttachments: run.inputAttachments,
       phase: "cancelled",
       status: run.status,
-      timelineStatus: "done",
-      approvals: [],
-    };
+		timelineStatus: "done",
+		approvals: [],
+		massMessageReviews: [],
+	};
   }
 
   if (run.status === "error") {
@@ -1029,9 +1068,10 @@ function syncFromRun(
       phase: "error",
       status: run.status,
       timelineStatus: "error",
-      errorMessage: run.error || "Run failed",
-      approvals: [],
-    };
+		errorMessage: run.error || "Run failed",
+		approvals: [],
+		massMessageReviews: [],
+	};
   }
 
   return {
@@ -1072,10 +1112,11 @@ export function reduceRuntimeState(
         steps: [],
         assistantText: "",
         reasoningText: "",
-        toolResults: [],
-        patchPreviews: [],
-        approvals: [],
-        artifacts: [],
+		toolResults: [],
+		patchPreviews: [],
+		approvals: [],
+		massMessageReviews: [],
+		artifacts: [],
         turnDiff: undefined,
         inspectorSummary: createInspectorSummary(),
         narrative: shouldAppendNarrative(state)
@@ -1125,9 +1166,10 @@ export function reduceRuntimeState(
           ...state,
           phase: "cancelling",
           status: "cancelling",
-          timelineStatus: "running",
-          approvals: [],
-        }),
+		timelineStatus: "running",
+		approvals: [],
+		massMessageReviews: [],
+	}),
       );
     case "run/cancelSync":
       return saveActiveThreadView(
@@ -1165,9 +1207,10 @@ export function reduceRuntimeState(
           phase: "error",
           status: "error",
           timelineStatus: "error",
-          errorMessage: action.message,
-          approvals: [],
-          inspectorSummary: {
+		errorMessage: action.message,
+		approvals: [],
+		massMessageReviews: [],
+		inspectorSummary: {
             ...state.inspectorSummary,
             terminalReason: "stream_failed",
             terminalMessage: action.message,
@@ -1397,26 +1440,28 @@ export function reduceRuntimeState(
           if (status === "running") {
             nextState.phase = "running";
             nextState.timelineStatus = "running";
-          } else if (status === "awaiting_approval") {
-            nextState.phase = "running";
           } else if (status === "cancelling") {
             nextState.phase = "cancelling";
             nextState.timelineStatus = "running";
             nextState.approvals = [];
+            nextState.massMessageReviews = [];
           } else if (status === "cancelled") {
             nextState.phase = "cancelled";
             nextState.timelineStatus = "done";
             nextState.approvals = [];
+            nextState.massMessageReviews = [];
           } else if (status === "finished") {
             nextState.phase = "done";
             nextState.timelineStatus = "done";
             nextState.approvals = [];
+            nextState.massMessageReviews = [];
             nextState.runCompletedAtMs =
               nextState.runCompletedAtMs ?? action.receivedAtMs;
           } else if (status === "error") {
             nextState.phase = "error";
             nextState.timelineStatus = "error";
             nextState.approvals = [];
+            nextState.massMessageReviews = [];
           }
           if (
             status === "cancelled" ||
@@ -1436,12 +1481,10 @@ export function reduceRuntimeState(
               : `status:${status ?? "unknown"}`,
             {
               title:
-                status === "awaiting_approval"
-                  ? "Awaiting approval"
-                  : status === "cancelling"
-                    ? "Cancelling run"
-                    : status === "cancelled"
-                      ? "Run cancelled"
+                status === "cancelling"
+                  ? "Cancelling run"
+                  : status === "cancelled"
+                    ? "Run cancelled"
                       : "Run status changed",
               description: `Status: ${status ?? "unknown"}`,
               status: "done",
@@ -1455,6 +1498,7 @@ export function reduceRuntimeState(
           nextState.status = "finished";
           nextState.timelineStatus = "done";
           nextState.approvals = [];
+          nextState.massMessageReviews = [];
           nextState.runCompletedAtMs =
             nextState.runCompletedAtMs ?? action.receivedAtMs;
           nextState.inspectorSummary = {
@@ -1866,7 +1910,10 @@ export function reduceRuntimeState(
               title: action.event.toolCallName || "Patch preview",
               patch: action.event.patch || "",
               summary: action.event.patchSummary,
-              affectedPaths: action.event.approvalAffectedPaths ?? [],
+              affectedPaths:
+                action.event.affectedPaths ??
+                action.event.approvalAffectedPaths ??
+                [],
               truncated: action.event.truncated,
             },
           );
@@ -1894,43 +1941,104 @@ export function reduceRuntimeState(
             tag: action.event.truncated ? "truncated" : "diff",
           });
           break;
-        case "AWAKEN_APPROVAL_REQUESTED": {
-          const approvalId =
-            action.event.approvalId ??
-            `approval-${nextState.approvals.length + 1}`;
-          const approval: ApprovalItem = {
-            id: approvalId,
-            title: action.event.approvalTitle || "Approval required",
-            description: action.event.approvalDescription,
-            riskTone: normalizeRiskTone(action.event.approvalRiskTone),
-            approveLabel: "Approve",
-            rejectLabel: "Reject",
-            affectedPaths: action.event.approvalAffectedPaths,
-            patchSummary: action.event.approvalPatchSummary,
-          };
-          nextState.approvals = upsertApproval(nextState.approvals, approval);
-          records = upsertStep(records, `approval:${approvalId}`, {
-            title: approval.title,
-            description:
-              approval.description || "Waiting for approval decision",
+        case "AWAKEN_AUTH_REQUIRED": {
+          const authKey = [
+            action.event.toolCallId,
+            action.event.authProvider,
+            action.event.authScope,
+          ]
+            .filter(Boolean)
+            .join(":");
+          records = upsertStep(records, `auth:${authKey || "required"}`, {
+            title: "Authorization required",
+            description: [
+              action.event.authProvider,
+              action.event.authScope,
+              action.event.authLink,
+            ]
+              .filter(Boolean)
+              .join(" | "),
             status: "active",
-            tag: "approval",
+            tag: "auth",
           });
           break;
         }
-        case "AWAKEN_APPROVAL_RESOLVED": {
-          const approvalId = action.event.approvalId ?? "approval";
-          nextState.approvals = removeApproval(
-            nextState.approvals,
-            action.event.approvalId,
+        case "AWAKEN_RUNTIME_PREPARE":
+        case "AWAKEN_RUNTIME_READY":
+        case "AWAKEN_RUNTIME_MISSING": {
+          const runtimeKey = [
+            action.event.runtimeName,
+            action.event.runtimeComponent,
+          ]
+            .filter(Boolean)
+            .join(":");
+          const missing = action.event.type === "AWAKEN_RUNTIME_MISSING";
+          const ready = action.event.type === "AWAKEN_RUNTIME_READY";
+          records = upsertStep(records, `runtime:${runtimeKey || "tool"}`, {
+            title: ready
+              ? "Runtime ready"
+              : missing
+                ? "Runtime missing"
+                : "Runtime preparing",
+            description: [
+              action.event.runtimeComponent,
+              action.event.runtimePrepareStatus,
+              action.event.runtimeMissingReason,
+              action.event.runtimeRequiredVersion,
+            ]
+              .filter(Boolean)
+              .join(" | "),
+            status: missing ? "error" : ready ? "done" : "active",
+            tag: "runtime",
+          });
+          break;
+        }
+        case "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED": {
+          const reviewId = action.event.reviewId ?? action.event.toolCallId ?? "mass-message";
+          nextState.massMessageReviews = upsertMassMessageReview(
+            nextState.massMessageReviews,
+            {
+              id: reviewId,
+              channel: action.event.massMessageChannel,
+              recipientScope: action.event.massMessageRecipientScope,
+              recipientCount: action.event.massMessageRecipientCount,
+              bodyPreview: action.event.massMessageBodyPreview,
+              templateId: action.event.massMessageTemplateId,
+              attachmentNames: action.event.massMessageAttachmentNames ?? [],
+              account: action.event.massMessageAccount,
+              sourceTool: action.event.massMessageSourceTool ?? action.event.toolCallName,
+            },
           );
-          const decision = action.event.approvalDecision || "resolved";
-          records = upsertStep(records, `approval:${approvalId}`, {
-            title: action.event.approvalTitle || "Approval resolved",
-            description:
-              action.event.approvalDescription || `Decision: ${decision}`,
-            status: decision === "approved" ? "done" : "error",
-            tag: decision,
+          records = upsertStep(records, `mass-message-review:${reviewId}`, {
+            title: "Mass message review required",
+            description: [
+              action.event.massMessageChannel,
+              action.event.massMessageRecipientScope,
+              action.event.massMessageRecipientCount?.toString(),
+              action.event.massMessageAccount,
+              action.event.massMessageBodyPreview,
+            ]
+              .filter(Boolean)
+              .join(" | "),
+            status: "active",
+            tag: "mass-message-review",
+          });
+          break;
+        }
+        case "AWAKEN_MASS_MESSAGE_REVIEW_RESOLVED": {
+          const reviewId = action.event.reviewId ?? action.event.toolCallId ?? "mass-message";
+          const approved = action.event.reviewDecision === "approved";
+          nextState.massMessageReviews = removeMassMessageReview(
+            nextState.massMessageReviews,
+            reviewId,
+          );
+          records = upsertStep(records, `mass-message-review:${reviewId}`, {
+            title: approved
+              ? "Mass message approved"
+              : "Mass message rejected",
+            description: action.event.massMessageSourceTool,
+            status: approved ? "done" : "error",
+            tag: "mass-message-review",
           });
           break;
         }
@@ -1962,6 +2070,7 @@ export function reduceRuntimeState(
             nextState.status = "cancelled";
             nextState.timelineStatus = "done";
             nextState.approvals = [];
+            nextState.massMessageReviews = [];
             records = upsertStep(records, "run-cancelled", {
               title: "Run cancelled",
               description: action.event.message || "Run was cancelled by user",
@@ -1987,6 +2096,7 @@ export function reduceRuntimeState(
             }
             nextState.errorMessage = errorMessage;
             nextState.approvals = [];
+            nextState.massMessageReviews = [];
             records = upsertStep(records, "run-error", {
               title: "Run failed",
               description: errorDescription,

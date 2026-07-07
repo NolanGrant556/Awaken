@@ -4,7 +4,6 @@ export type DesktopPlatform = "macos" | "windows" | "linux";
 
 export type RuntimeRunStatus =
   | "running"
-  | "awaiting_approval"
   | "cancelling"
   | "finished"
   | "error"
@@ -472,8 +471,6 @@ export type ModelProfileRunConfig = {
   supportsVideo?: boolean;
 };
 
-export type ApprovalDecision = "approved" | "rejected";
-
 export type WorkspacePickResult =
   | { canceled: true; error?: string }
   | { canceled: false; path: string };
@@ -481,6 +478,8 @@ export type WorkspacePickResult =
 export type WorkspaceValidationResult =
   | { valid: true }
   | { valid: false; error: string };
+
+export type MassMessageReviewDecision = "approved" | "rejected";
 
 export type WorkspaceRegistryPersistRequest = {
   defaultWorkspacePath: string;
@@ -513,10 +512,10 @@ export type AwakenBridge = {
   deleteThread: (threadId: string) => Promise<void>;
   startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
-  resolveApproval: (
+  resolveMassMessageReview: (
     runId: string,
-    approvalId: string,
-    decision: ApprovalDecision,
+    reviewId: string,
+    decision: MassMessageReviewDecision,
   ) => Promise<void>;
   subscribeRun: (
     runId: string,

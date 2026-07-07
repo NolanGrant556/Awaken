@@ -13,7 +13,7 @@
 }
 
 .composer-dock-stack,
-.composer-approval-card,
+.mass-message-review-card,
 .composer-runtime-panels {
   display: grid;
   gap: 10px;
@@ -23,6 +23,47 @@
 
 .composer-runtime-panels {
   gap: 8px;
+}
+
+.mass-message-review-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: 8px;
+  background: var(--aw-surface-panel);
+}
+
+.mass-message-review-card__body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.mass-message-review-card__title {
+  color: var(--aw-text-primary);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.mass-message-review-card__meta,
+.mass-message-review-card__preview {
+  color: var(--aw-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.mass-message-review-card__preview {
+  color: var(--aw-text-primary);
+}
+
+.mass-message-review-card__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
 }
 
 .aw-run-stage-scroll {

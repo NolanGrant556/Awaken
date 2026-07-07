@@ -1,10 +1,5 @@
 import type { RunNarrativeItem } from "./run-narrative";
 
-export type ResolvedApprovalState = {
-  approvalId: string;
-  decision: "approved" | "rejected";
-} | null;
-
 type PromptNarrativeItem = Extract<RunNarrativeItem, { kind: "prompt" }>;
 
 export type NarrativeTurnSection = {
@@ -78,16 +73,6 @@ const EXECUTION_PROCESS_SUMMARY_TITLE = "执行过程";
 const TURN_MARKER_REGULAR_SIZE = { itemHeight: 18, gap: 14 };
 const TURN_MARKER_COMPACT_SIZE = { itemHeight: 12, gap: 8 };
 const TURN_MARKER_SUMMARY_SIZE = { itemHeight: 8, gap: 5 };
-
-export function resolvedDecisionForApproval(
-  activeApproval: { id: string } | undefined,
-  resolvedApproval: ResolvedApprovalState,
-): "approved" | "rejected" | undefined {
-  if (!activeApproval || !resolvedApproval || resolvedApproval.approvalId !== activeApproval.id) {
-    return undefined;
-  }
-  return resolvedApproval.decision;
-}
 
 export function diffLineStats(diff?: string): { added: number; removed: number } {
   if (!diff) {

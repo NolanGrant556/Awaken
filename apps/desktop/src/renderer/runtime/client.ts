@@ -7,6 +7,7 @@ import {
   type DesktopPlatform,
   type InstallSkillRequest,
   type InstallSkillResponse,
+  type ModelProfileBalancesResult,
   type ModelProfileSaveRequest,
   type ModelProfileTestResult,
   type ModelProvider,
@@ -62,6 +63,7 @@ export type RuntimeClient = {
   setDefaultModelProfile: (profileId: string) => Promise<RuntimeModelProfileSummary>;
   testModelProfile: (request: ModelProfileSaveRequest) => Promise<ModelProfileTestResult>;
   syncModelCapabilities: () => Promise<ModelProvider[]>;
+  getModelProfileBalances: () => Promise<ModelProfileBalancesResult>;
   getRun: (runId: string) => Promise<RuntimeRun>;
   getThreadTranscript: (threadId: string) => Promise<RuntimeThreadTranscript>;
   listThreads: () => Promise<RuntimeThread[]>;
@@ -123,6 +125,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     setDefaultModelProfile: (profileId) => bridge.setDefaultModelProfile(profileId),
     testModelProfile: (request) => bridge.testModelProfile(request),
     syncModelCapabilities: () => bridge.syncModelCapabilities(),
+    getModelProfileBalances: () => bridge.getModelProfileBalances(),
     getRun: (runId) => bridge.getRun(runId),
     getThreadTranscript: (threadId) => bridge.getThreadTranscript(threadId),
     listThreads: () => bridge.listThreads(),

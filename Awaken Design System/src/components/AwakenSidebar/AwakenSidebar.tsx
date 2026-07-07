@@ -41,6 +41,7 @@ export type AwakenSidebarProps = {
   onNewTask?: () => void;
   onExpandedChange?: (ids: string[]) => void;
   onProfileClick?: () => void;
+  profileButtonRef?: React.RefObject<HTMLDivElement | null>;
 };
 
 const sidebarStyle: CSSProperties = {
@@ -121,6 +122,7 @@ export function AwakenSidebar({
   onNewTask,
   onExpandedChange,
   onProfileClick,
+  profileButtonRef,
 }: AwakenSidebarProps) {
   const showConversations = conversationSectionLabel !== "" || conversations.length > 0;
   const showProjects = projectSectionLabel !== "" || projects.length > 0;
@@ -185,7 +187,7 @@ export function AwakenSidebar({
       </div>
 
       {profileName || profileAvatarFallback || profileAvatarSrc || onProfileClick ? (
-        <div style={bottomStyle}>
+        <div ref={profileButtonRef} style={bottomStyle}>
           <AwakenProfileButton
             name={profileName}
             subtitle={profileSubtitle}

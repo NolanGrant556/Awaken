@@ -19,6 +19,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { AguiEvent } from "../shared/agui.js";
 import {
+  normalizeModelProfileBalancesResult,
   normalizeModelProvider,
   normalizeModelProfileRunConfig,
   normalizeModelProfileSummary,
@@ -33,6 +34,7 @@ import {
 	  type DesktopPlatform,
 	  type InstallSkillRequest,
 	  type InstallSkillResponse,
+	  type ModelProfileBalancesResultWire,
 	  type ModelProfileSaveRequest,
 	  type ModelProviderWire,
 	  type RuntimeConnector,
@@ -620,6 +622,15 @@ ipcMain.handle("awaken:sync-model-capabilities", async () => {
   await modelProfileStore.syncCapabilities();
   const providers = modelProfileStore.listProviders() satisfies ModelProviderWire[];
   return providers.map(normalizeModelProvider);
+});
+
+ipcMain.handle("awaken:get-model-profile-balances", async () => {
+  if (!modelProfileStore) {
+    throw new Error("Model profile store unavailable");
+  }
+  const balances = await modelProfileStore.fetchBalances();
+  const result: ModelProfileBalancesResultWire = { balances };
+  return normalizeModelProfileBalancesResult(result);
 });
 
 ipcMain.handle("awaken:get-run", async (_event, runId: string) => {

@@ -109,6 +109,31 @@ The runtime MUST subscribe to `notifications/tools/list_changed` and refresh the
 - **WHEN** server `slack` sends a `notifications/tools/list_changed` notification with a new tool `react_message`
 - **THEN** the registry adds `mcp__slack__react_message` and tools from other servers are unaffected
 
+### Requirement: MCP Tool Policy Integration Uses No-Review Decisions
+
+MCP tools MUST map into the no-review tool decision model: `allow`, `deny`, `transform`, `needs_auth`, `needs_runtime`, `unsupported`, or `needs_mass_message_review`. MCP runtime MUST NOT expose or depend on generic approval events, `ask` decisions, or approval resolve APIs for new runs.
+
+Third-party MCP servers default to `fileBridgeScope: none`. They cannot read or write local files through Awaken unless a connector or explicit TaskScope file bridge grants a bounded path set. File bridge grants MUST be scoped to `TaskScope.readable_roots`, `TaskScope.writable_roots`, `TaskScope.output_roots`, and attached files.
+
+When an MCP server or tool lacks authorization, the tool adapter returns `needs_auth`, server emits `AWAKEN_AUTH_REQUIRED`, and Desktop shows authorization confirmation/link. The runtime refreshes server state and the tool pool after authorization completes; it does not keep retrying the failed call as a hidden approval.
+
+MCP tools that perform group/bulk outbound messaging MUST be tagged as `mass_message_send` and enter `AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED`. No real send API may be called before the dedicated mass-message review is approved.
+
+#### Scenario: Third-party MCP has no file bridge by default
+
+- **WHEN** a manually configured third-party MCP server connects
+- **THEN** its tools register with `fileBridgeScope: none` unless an explicit bounded bridge is configured
+
+#### Scenario: MCP needs auth becomes auth flow
+
+- **WHEN** an MCP tool call returns 401 or the server is `needs-auth`
+- **THEN** the run emits `AWAKEN_AUTH_REQUIRED`, the tool is not executed, and no generic approval prompt appears
+
+#### Scenario: MCP mass message uses dedicated review
+
+- **WHEN** an MCP tool is classified as `mass_message_send`
+- **THEN** the runtime requests dedicated mass-message review and calls the real send tool only after this review is approved
+
 ### Requirement: Authentication Bootstrap
 
 For HTTP and SSE transports, the runtime MUST support OAuth 2.0 authorization code flow with PKCE as the default authentication mechanism. The runtime MUST expose a `POST /v1/mcp/servers/{name}/auth` endpoint that returns an authorization URL for the UI to open; upon callback to the loopback redirect, the runtime exchanges the code for tokens and reconnects the server.

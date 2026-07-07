@@ -409,26 +409,6 @@ export function ExtensionsView({
     );
   }
 
-  async function handleDeleteMcpServer(): Promise<void> {
-    if (!selectedMcpServer) return;
-    if (!window.confirm(`确定要删除 MCP server "${selectedMcpServer.name}" 吗？`)) {
-      return;
-    }
-    setSavingMcpConfig(true);
-    setErrorMessage(null);
-    try {
-      await runtimeClient.deleteMcpServer(selectedMcpServer.name);
-      onNotice(`已删除 ${selectedMcpServer.name}`);
-      setMcpSettingsOpen(false);
-      setSelectedMcpServer(null);
-      await refresh();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "删除 MCP server 失败");
-    } finally {
-      setSavingMcpConfig(false);
-    }
-  }
-
   async function handleInstallSkill(): Promise<void> {
     if (!skillFile) {
       setErrorMessage("请选择 SKILL.md、.skill 或 zip 文件");

@@ -3,6 +3,15 @@ import type {
   ModelProfileAdvanced,
   ModelProviderWire,
 } from "../shared/runtime.js";
+import type { ProviderCapabilityOverrides } from "./model-capability-sync.js";
+
+let dynamicCapabilityOverrides: Record<string, ProviderCapabilityOverrides> = {};
+
+export function setCapabilityOverrides(
+  overrides: Record<string, ProviderCapabilityOverrides>,
+): void {
+  dynamicCapabilityOverrides = overrides;
+}
 
 const DEFAULT_CONTEXT_WINDOW = 1_000_000;
 const DEFAULT_MAX_TOKENS = 8192;
@@ -212,14 +221,17 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
 };
 
 export function capabilitiesForProvider(providerId: string): Record<string, ModelCapabilityWire> {
-  return { ...(MODEL_CAPABILITIES[providerId] ?? {}) };
+  return {
+    ...(MODEL_CAPABILITIES[providerId] ?? {}),
+    ...(dynamicCapabilityOverrides[providerId] ?? {}),
+  };
 }
 
 export function capabilityForModel(
   providerId: string,
   modelId: string,
 ): ModelCapabilityWire | undefined {
-  return MODEL_CAPABILITIES[providerId]?.[modelId];
+  return capabilitiesForProvider(providerId)[modelId];
 }
 
 export function normalizeAdvancedWithModelCapability(

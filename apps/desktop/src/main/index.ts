@@ -613,6 +613,15 @@ ipcMain.handle("awaken:test-model-profile", async (_event, request: ModelProfile
   return modelProfileStore.testProfile(request);
 });
 
+ipcMain.handle("awaken:sync-model-capabilities", async () => {
+  if (!modelProfileStore) {
+    throw new Error("Model profile store unavailable");
+  }
+  await modelProfileStore.syncCapabilities();
+  const providers = modelProfileStore.listProviders() satisfies ModelProviderWire[];
+  return providers.map(normalizeModelProvider);
+});
+
 ipcMain.handle("awaken:get-run", async (_event, runId: string) => {
   const run = await requestRuntime(`/v1/runs/${runId}`, {
     method: "GET",
@@ -940,6 +949,7 @@ app.whenReady().then(async () => {
   await ensureDesktopDataDirs();
   const configDir = await ensureConfigDir();
   modelProfileStore = new ModelProfileStore(configDir);
+  await modelProfileStore.initialize();
   const lastWorkspace = await readLastWorkspace();
   const workspaceRegistry = await readWorkspaceRegistry(lastWorkspace);
   const defaultWorkspace = lastWorkspace ?? workspaceRegistry[0] ?? app.getPath("home");

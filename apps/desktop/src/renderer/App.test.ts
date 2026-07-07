@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   App,
   buildWorkspaceRegistryPersistRequest,
+  restoreWorkspaceProjectsFromRegistry,
   resolveWorkspaceRootForRun,
   shouldResetActiveThreadForWorkspaceChange,
   shouldShowSidebarThreadSpinner,
@@ -96,6 +97,7 @@ function stubElectronBridge(): void {
       testModelProfile: vi.fn(async () => ({ ok: true, message: "ok" })),
       pickWorkspace: vi.fn(async () => ({ canceled: true as const })),
       validateWorkspace: vi.fn(async () => ({ valid: true as const })),
+      readWorkspaceRegistry: vi.fn(async () => ({ registeredWorkspacePaths: [] })),
       persistWorkspaceRegistry: vi.fn(async () => undefined),
       getSupervisorStatus: vi.fn(async () => ({ status: "running" as const })),
       onSupervisorStatusChange: vi.fn(() => () => {}),
@@ -261,6 +263,56 @@ describe("buildWorkspaceRegistryPersistRequest", () => {
     ).toEqual({
       defaultWorkspacePath: "/tmp/default",
       registeredWorkspacePaths: ["/tmp/default"],
+    });
+  });
+});
+
+describe("restoreWorkspaceProjectsFromRegistry", () => {
+  it("rehydrates workspace projects from the desktop-global registry", () => {
+    expect(
+      restoreWorkspaceProjectsFromRegistry({
+        currentProjects: [],
+        snapshot: {
+          lastWorkspacePath: "/tmp/default",
+          registeredWorkspacePaths: ["/tmp/default", "/tmp/knowledge"],
+        },
+        defaultWorkspacePath: "/tmp/default",
+        defaultProjectRemoved: false,
+        currentWorkspacePath: "",
+      }),
+    ).toEqual({
+      projects: [
+        {
+          id: "workspace:%2Ftmp%2Fknowledge",
+          label: "knowledge",
+          path: "/tmp/knowledge",
+        },
+      ],
+      workspacePath: "/tmp/default",
+    });
+  });
+
+  it("keeps the default workspace visible as an explicit project when the default project is hidden", () => {
+    expect(
+      restoreWorkspaceProjectsFromRegistry({
+        currentProjects: [],
+        snapshot: {
+          lastWorkspacePath: "/tmp/default",
+          registeredWorkspacePaths: ["/tmp/default"],
+        },
+        defaultWorkspacePath: "/tmp/default",
+        defaultProjectRemoved: true,
+        currentWorkspacePath: "",
+      }),
+    ).toEqual({
+      projects: [
+        {
+          id: "workspace:%2Ftmp%2Fdefault",
+          label: "default",
+          path: "/tmp/default",
+        },
+      ],
+      workspacePath: "/tmp/default",
     });
   });
 });

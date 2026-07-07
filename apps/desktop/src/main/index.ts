@@ -761,6 +761,15 @@ ipcMain.handle("awaken:validate-workspace", async (_event, candidate: string) =>
   }
 });
 
+ipcMain.handle("awaken:read-workspace-registry", async () => {
+  const lastWorkspacePath = await readLastWorkspace();
+  const registeredWorkspacePaths = await readWorkspaceRegistry(lastWorkspacePath);
+  return {
+    lastWorkspacePath,
+    registeredWorkspacePaths,
+  };
+});
+
 ipcMain.handle(
   "awaken:persist-workspace-registry",
   async (_event, request: WorkspaceRegistryPersistRequest) => {

@@ -28,6 +28,7 @@ type McpToolAdapter struct {
 	capabilityClass tool.CapabilityClass
 	trustedOrigin   tool.TrustedOrigin
 	fileBridgeScope tool.FileBridgeScope
+	networkScope    tool.NetworkScope
 	// inputSchemaJSON preserves the raw JSON Schema for callers that need
 	// the original structure rather than the flattened ToolParameter list.
 	inputSchemaJSON json.RawMessage
@@ -53,6 +54,7 @@ func NewMcpToolAdapter(manager *Manager, serverName string, mcpTool *mcp.Tool, o
 		description:     mcpTool.Description,
 		parameters:      convertMcpInputSchema(mcpTool.InputSchema),
 		fileBridgeScope: tool.FileBridgeNone,
+		networkScope:    tool.NetworkScopeRestricted,
 	}
 	if mcpTool.Annotations != nil {
 		adapter.readOnly = mcpTool.Annotations.ReadOnlyHint
@@ -137,27 +139,26 @@ func (a *McpToolAdapter) Definition() tool.ToolDefinition {
 			CapabilityClass: a.capabilityClass,
 			TrustedOrigin:   a.trustedOrigin,
 			FileBridgeScope: a.fileBridgeScope,
+			NetworkScope:    a.networkScope,
 		},
 	}
 }
 
 // CheckPermission implements tool.PermissionCheckingTool. The adapter
-// surfaces a deny + NeedsAuthError when the owning server is in the
-// needs-auth state; otherwise it delegates to the standard read-only /
-// destructive rules so the agent layer can route through the existing
-// approval flow.
+// surfaces needs_auth when the owning server is in the needs-auth state;
+// otherwise it delegates to the unified no-review policy engine.
 func (a *McpToolAdapter) CheckPermission(ctx context.Context, input string, permCtx tool.PermissionContext) tool.PermissionDecision {
 	if a.manager == nil {
-		return tool.AllowPermission()
+		return tool.Decide(ctx, a.Definition())
 	}
 	snap, err := a.manager.SnapshotServer(a.serverName)
 	if err != nil {
 		return tool.DenyPermission("mcp server " + a.serverName + " not found")
 	}
 	if snap.State == StateNeedsAuth {
-		return tool.DenyPermission("needs_auth")
+		return tool.NeedsAuthPermission("mcp server " + a.serverName + " requires authorization")
 	}
-	return tool.AllowPermission()
+	return tool.Decide(ctx, a.Definition())
 }
 
 // Execute implements tool.Tool. Arguments arrive as a JSON string; we
@@ -195,6 +196,7 @@ func (a *McpToolAdapter) Annotations() MCPToolAnnotations {
 		CapabilityClass: a.capabilityClass,
 		TrustedOrigin:   a.trustedOrigin,
 		FileBridgeScope: a.fileBridgeScope,
+		NetworkScope:    a.networkScope,
 	}
 }
 
@@ -211,6 +213,7 @@ type MCPToolAnnotations struct {
 	CapabilityClass tool.CapabilityClass `json:"capabilityClass,omitempty"`
 	TrustedOrigin   tool.TrustedOrigin   `json:"trustedOrigin,omitempty"`
 	FileBridgeScope tool.FileBridgeScope `json:"fileBridgeScope,omitempty"`
+	NetworkScope    tool.NetworkScope    `json:"networkScope,omitempty"`
 }
 
 func (a *McpToolAdapter) AvailableForToolPool() bool {
@@ -226,7 +229,7 @@ func inferTrustedOrigin(manager *Manager, serverName string) tool.TrustedOrigin 
 		}
 	}
 	switch strings.ToLower(strings.TrimSpace(serverName)) {
-	case "github", "playwright":
+	case "github", "playwright", "dingtalk", "dingtalk-workspace", "lark", "feishu", "outlook":
 		return tool.TrustedOriginOfficialConnector
 	default:
 		return tool.TrustedOriginThirdPartyMCP
@@ -247,6 +250,9 @@ func inferMcpCapabilityClass(serverName string, toolName string, readOnly bool, 
 	}
 
 	if origin == tool.TrustedOriginOfficialConnector || origin == tool.TrustedOriginOfficialHosted {
+		if containsAny(name, "broadcast", "mass", "bulk", "batch_send", "send_group", "send_to_group", "message_all", "ding_group") {
+			return tool.CapabilityMassMessageSend
+		}
 		if readOnly || containsAny(name, "list", "get", "read", "search", "query", "fetch") {
 			return tool.CapabilityConnectorRead
 		}
@@ -373,14 +379,6 @@ func convertMcpInputSchema(schema any) []tool.ToolParameter {
 		})
 	}
 	return params
-}
-
-func approvalDescription(toolName, input string) string {
-	trimmed := excerpt(input, 240)
-	if trimmed == "" {
-		return fmt.Sprintf("%s requires approval before execution.", toolName)
-	}
-	return fmt.Sprintf("%s requires approval before execution.\n\n%s", toolName, trimmed)
 }
 
 func excerpt(value string, max int) string {

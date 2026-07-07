@@ -22,7 +22,8 @@ var ErrConnectorAlreadyConnected = errors.New("connector is already connected")
 var ErrConnectorNotConnected = errors.New("connector is not connected")
 
 // RuntimeManager abstracts the MCP manager operations that the connector
-// registry needs.
+// registry needs: InjectDynamic, RemoveDynamic, Start, Remove, Snapshot, and
+// SnapshotServer.
 type RuntimeManager interface {
 	InjectDynamic(connectorID string, config mcpclient.ScopedMcpServerConfig)
 	RemoveDynamic(connectorID, serverName string)
@@ -136,6 +137,9 @@ func (r *Registry) Connect(ctx context.Context, connectorID string) error {
 	}
 
 	if entry := r.active[connectorID]; entry != nil && entry.connected {
+		// If the connector is marked connected but its servers are no longer in the
+		// runtime (e.g. the user deleted the MCP server from the settings dialog),
+		// reset the entry and allow reconnect.
 		stale := false
 		if def.SourceOrigin == SourceBuiltin {
 			stale = true
@@ -174,6 +178,9 @@ func (r *Registry) Connect(ctx context.Context, connectorID string) error {
 
 	var serverKeys []string
 	if def.SourceOrigin == SourceBuiltin {
+		// Builtin connectors are shortcuts for adding user-level MCP servers.
+		// Persist the generated config and start it normally so it behaves like
+		// any other server added through the MCP settings dialog.
 		userCfg, err := mcpclient.LoadUserConfig()
 		if err != nil {
 			return fmt.Errorf("load user mcp config: %w", err)
@@ -188,8 +195,11 @@ func (r *Registry) Connect(ctx context.Context, connectorID string) error {
 		if err := mcpclient.SaveUserConfig(userCfg); err != nil {
 			return fmt.Errorf("save user mcp config: %w", err)
 		}
+		// Detach from the request context so the async connect loop keeps
+		// running after the HTTP response is sent.
 		r.manager.Start(context.WithoutCancel(ctx), scopedConfigsToSlice(scopedConfigs))
 	} else {
+		// Local connectors remain dynamic/injected.
 		for key, cfg := range scopedConfigs {
 			r.manager.InjectDynamic(connectorID, cfg)
 			serverKeys = append(serverKeys, key)
@@ -215,7 +225,7 @@ func scopedConfigsToSlice(configs map[string]mcpclient.ScopedMcpServerConfig) []
 
 // Disconnect removes a connector's MCP servers from the runtime and marks
 // the connector as disconnected.
-func (r *Registry) Disconnect(_ context.Context, connectorID string) error {
+func (r *Registry) Disconnect(ctx context.Context, connectorID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -230,6 +240,8 @@ func (r *Registry) Disconnect(_ context.Context, connectorID string) error {
 	}
 
 	if def.SourceOrigin == SourceBuiltin {
+		// Builtin connectors are backed by user config; remove from there so the
+		// server disappears from the MCP Servers list permanently.
 		userCfg, err := mcpclient.LoadUserConfig()
 		if err != nil {
 			return fmt.Errorf("load user mcp config: %w", err)
@@ -245,6 +257,7 @@ func (r *Registry) Disconnect(_ context.Context, connectorID string) error {
 			return fmt.Errorf("save user mcp config: %w", err)
 		}
 	} else {
+		// Remove each injected server from the runtime.
 		for _, key := range entry.serverKeys {
 			r.manager.RemoveDynamic(connectorID, key)
 		}

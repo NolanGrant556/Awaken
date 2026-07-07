@@ -39,8 +39,8 @@ var ErrSandboxUnavailable = errors.New(
 //  3. If the command is open_world_system and sandbox support is anything
 //     less than SandboxFull, fail-closed with ErrSandboxUnavailable.
 //  4. Apply sandbox constraints to the exec.Cmd (no-op for degraded/none).
-//  5. Execute via the platform shell, capturing stdout/stderr with optional
-//     observer streaming.
+//  5. Execute via the platform shell (/bin/sh on Unix, sh/cmd.exe on Windows),
+//     capturing stdout/stderr with optional observer streaming.
 type ShellExecutor struct {
 	// adapter is the sandbox adapter to use. When nil, the executor
 	// resolves the platform default at execution time via
@@ -205,9 +205,9 @@ func resolveExecutorCwd(workdir string, permissionContext tool.PermissionContext
 
 // minimalEnvAllowlist returns the allowlist of environment variables a
 // shell command may observe when the execution profile's EnvPolicy is
-// EnvMinimal. Only variables needed for basic command execution are included;
-// secrets and project-local tokens are stripped. Variables whose value is
-// empty are omitted so the child does not see "VAR=" entries.
+// EnvMinimal. Only variables needed for basic command execution are
+// included; secrets and project-local tokens are stripped. Variables whose
+// value is empty are omitted so the child does not see "VAR=" entries.
 func minimalEnvAllowlist() []string {
 	keys := []string{"PATH", "HOME", "USER", "SHELL", "TMPDIR", "LANG", "LC_ALL"}
 	if runtime.GOOS == "windows" {
@@ -224,9 +224,10 @@ func minimalEnvAllowlist() []string {
 	return env
 }
 
-// shellCommand builds an exec.Cmd that runs the provided shell script on the
-// current platform. On Windows we prefer a POSIX sh if it is available in PATH
-// and otherwise fall back to cmd.exe /c.
+// shellCommand builds an *exec.Cmd that runs the given shell script on the
+// current platform. On Unix it uses /bin/sh. On Windows it first tries to
+// find a POSIX sh in PATH (e.g., Git Bash); if none is available it falls
+// back to cmd.exe /c so common commands like "npx ..." still work.
 func shellCommand(ctx context.Context, script string) (*exec.Cmd, error) {
 	if runtime.GOOS != "windows" {
 		return exec.CommandContext(ctx, "/bin/sh", "-c", script), nil

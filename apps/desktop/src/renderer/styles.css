@@ -1222,7 +1222,7 @@ pre {
 
 .configured-models-table {
   --configured-model-columns: minmax(150px, 0.9fr) 60px minmax(280px, 1.5fr)
-    minmax(88px, 0.45fr) minmax(88px, 0.45fr) 132px;
+    minmax(88px, 0.45fr) minmax(88px, 0.45fr) 168px;
   justify-self: start;
   box-sizing: border-box;
   min-width: 0;
@@ -1574,30 +1574,35 @@ pre {
 }
 
 .configured-models-actions {
-  display: grid;
-  grid-template-columns: 60px 54px;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
   align-items: center;
-  justify-self: end;
+  justify-content: flex-end;
   gap: 8px;
   min-width: 0;
-  width: 122px;
+  width: 100%;
 }
 
 .configured-models-save-actions {
-  display: grid;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
   gap: 5px;
   min-width: 0;
-  width: 60px;
+  width: auto;
 }
 
 .configured-models-actions button,
 .configured-models-save-actions button {
-  width: 100%;
-  min-width: 0;
+  width: auto;
+  min-width: 44px;
   height: 22px !important;
-  padding: 0 7px !important;
+  padding: 0 8px !important;
   border-radius: 6px !important;
   font-size: 11px !important;
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 .configured-models-actions .configured-models-delete {
@@ -1608,7 +1613,7 @@ pre {
 @media (max-width: 1180px) {
   .configured-models-table {
     --configured-model-columns: minmax(128px, 0.8fr) 48px minmax(190px, 1.15fr)
-      minmax(74px, 0.45fr) minmax(72px, 0.45fr) 108px;
+      minmax(74px, 0.45fr) minmax(72px, 0.45fr) 132px;
   }
 
   .configured-models-row {
@@ -1642,17 +1647,17 @@ pre {
   }
 
   .configured-models-actions {
-    grid-template-columns: 52px 48px;
     gap: 6px;
-    width: 106px;
+    width: 100%;
   }
 
   .configured-models-save-actions {
-    width: 52px;
+    width: auto;
   }
 
   .configured-models-actions button,
   .configured-models-save-actions button {
+    min-width: 36px;
     padding: 0 5px !important;
     font-size: 10px !important;
   }

@@ -54,6 +54,7 @@ import type {
   RuntimeRunStatus,
   RuntimeThread,
   StartRunRequest,
+  WorkspaceRegistrySnapshot,
 } from "../shared/runtime";
 import {
   createInitialRuntimeState,
@@ -216,6 +217,54 @@ export function buildWorkspaceRegistryPersistRequest(args: {
       "",
     registeredWorkspacePaths,
   };
+}
+
+export function restoreWorkspaceProjectsFromRegistry(args: {
+  currentProjects: WorkspaceProject[];
+  snapshot: WorkspaceRegistrySnapshot;
+  defaultWorkspacePath?: string;
+  defaultProjectRemoved: boolean;
+  currentWorkspacePath?: string;
+}): {
+  projects: WorkspaceProject[];
+  workspacePath: string;
+} {
+  const {
+    currentProjects,
+    snapshot,
+    defaultWorkspacePath,
+    defaultProjectRemoved,
+    currentWorkspacePath,
+  } = args;
+  const normalizationDefaultWorkspacePath = defaultProjectRemoved
+    ? undefined
+    : defaultWorkspacePath ?? snapshot.lastWorkspacePath;
+  return {
+    projects: mergeWorkspaceProjects(
+      currentProjects,
+      snapshot.registeredWorkspacePaths,
+      normalizationDefaultWorkspacePath,
+    ),
+    workspacePath:
+      currentWorkspacePath?.trim() || snapshot.lastWorkspacePath?.trim() || "",
+  };
+}
+
+function sameWorkspaceProjects(
+  current: WorkspaceProject[],
+  next: WorkspaceProject[],
+): boolean {
+  return (
+    next.length === current.length &&
+    next.every((project, index) => {
+      const existing = current[index];
+      return (
+        existing?.id === project.id &&
+        existing.path === project.path &&
+        existing.label === project.label
+      );
+    })
+  );
 }
 
 function isThreadBusyForDelete(thread: ThreadItem): boolean {
@@ -472,6 +521,7 @@ export function App() {
   const inspectorCollapsedValueRef = useRef(false);
   const inspectorCollapsedBeforeResponsiveRef = useRef<boolean | null>(null);
   const persistedWorkspaceRegistryRef = useRef("");
+  const workspaceRegistryRestoredRef = useRef(false);
   const workspaceTargetPathRef = useRef<string>(
     readStoredString("awaken:workspace:path"),
   );
@@ -932,6 +982,9 @@ export function App() {
       ? "当前模型不支持图片输入，请切换模型或移除图片"
       : undefined;
   const defaultWorkspacePath = runtimeInfo?.defaultWorkspace ?? workspacePath;
+  const effectiveDefaultWorkspacePath = defaultProjectRemoved
+    ? undefined
+    : defaultWorkspacePath;
   const activeThread = runtimeState.activeThreadId
     ? runtimeState.threads.find(
         (thread) => thread.threadId === runtimeState.activeThreadId,
@@ -941,7 +994,7 @@ export function App() {
   const activeThreadProjectId = activeThreadWorkspacePath
     ? projectIdForWorkspacePath(
         activeThreadWorkspacePath,
-        defaultWorkspacePath,
+        effectiveDefaultWorkspacePath,
       )
     : undefined;
   const pathForSelectedProject =
@@ -1034,25 +1087,63 @@ export function App() {
   const workspaceRegistrySignature = JSON.stringify(workspaceRegistryRequest);
 
   useEffect(() => {
+    if (workspaceRegistryRestoredRef.current) {
+      return;
+    }
+    workspaceRegistryRestoredRef.current = true;
+    let cancelled = false;
+
+    async function restoreWorkspaceRegistry(): Promise<void> {
+      try {
+        const snapshot = await runtimeClient.readWorkspaceRegistry();
+        if (cancelled) {
+          return;
+        }
+        setProjectsFromWorkspace((current) => {
+          const restored = restoreWorkspaceProjectsFromRegistry({
+            currentProjects: current,
+            snapshot,
+            defaultWorkspacePath,
+            defaultProjectRemoved,
+            currentWorkspacePath: workspacePath,
+          });
+          return sameWorkspaceProjects(current, restored.projects)
+            ? current
+            : restored.projects;
+        });
+        const restoredWorkspacePath =
+          workspacePath.trim() || snapshot.lastWorkspacePath?.trim() || "";
+        if (restoredWorkspacePath && workspacePath.trim() === "") {
+          workspaceTargetPathRef.current = restoredWorkspacePath;
+          setWorkspacePath(restoredWorkspacePath);
+        }
+      } catch {
+        // Workspace registry restoration is best-effort.
+      }
+    }
+
+    void restoreWorkspaceRegistry();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    defaultProjectRemoved,
+    defaultWorkspacePath,
+    runtimeClient,
+    workspacePath,
+  ]);
+
+  useEffect(() => {
     setProjectsFromWorkspace((current) => {
       const next = mergeWorkspaceProjects(
         current,
         threadWorkspacePaths,
-        defaultWorkspacePath,
+        effectiveDefaultWorkspacePath,
       );
-      const isSame =
-        next.length === current.length &&
-        next.every((project, index) => {
-          const existing = current[index];
-          return (
-            existing?.id === project.id &&
-            existing.path === project.path &&
-            existing.label === project.label
-          );
-        });
-      return isSame ? current : next;
+      return sameWorkspaceProjects(current, next) ? current : next;
     });
-  }, [defaultWorkspacePath, runtimeState.threads]);
+  }, [effectiveDefaultWorkspacePath, runtimeState.threads]);
 
   useEffect(() => {
     const knownProjectIds = new Set([
@@ -1242,7 +1333,11 @@ export function App() {
         ]),
     ...projectsFromWorkspace
       .filter(
-        (project) => !isSameWorkspacePath(project.path, defaultWorkspacePath),
+        (project) =>
+          !isSameWorkspacePath(
+            project.path,
+            effectiveDefaultWorkspacePath,
+          ),
       )
       .map((project) => {
         const threads = threadItemsForProject(project.id);
@@ -1583,7 +1678,7 @@ export function App() {
         projectIdForThread(
           thread,
           threadProjectIds,
-          defaultWorkspacePath,
+          effectiveDefaultWorkspacePath,
         ) === projectId,
     );
   }
@@ -1597,13 +1692,13 @@ export function App() {
 
     const nextProjectId = projectIdForWorkspacePath(
       nextWorkspacePath,
-      defaultWorkspacePath,
+      effectiveDefaultWorkspacePath,
     );
     setProjectsFromWorkspace((current) =>
       mergeWorkspaceProjects(
         current,
         [nextWorkspacePath],
-        defaultWorkspacePath,
+        effectiveDefaultWorkspacePath,
       ),
     );
     setSelectedProjectId(nextProjectId);
@@ -1686,7 +1781,10 @@ export function App() {
           const fallbackProject = projectsFromWorkspace.find(
             (project) =>
               project.id !== projectId &&
-              !isSameWorkspacePath(project.path, defaultWorkspacePath),
+              !isSameWorkspacePath(
+                project.path,
+                effectiveDefaultWorkspacePath,
+              ),
           );
           if (fallbackProject) {
             setSelectedProjectId(fallbackProject.id);
@@ -1828,7 +1926,7 @@ export function App() {
       const next = upsertWorkspaceProject(
         projectsFromWorkspace,
         result.path,
-        defaultWorkspacePath,
+        effectiveDefaultWorkspacePath,
       );
       setProjectsFromWorkspace(next.projects);
       if (next.projectId === DEFAULT_WORKSPACE_PROJECT_ID) {

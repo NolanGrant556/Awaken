@@ -28,6 +28,7 @@ import {
   type SupervisorStatusInfo,
   type UpdateMcpServerConfigRequest,
   type WorkspacePickResult,
+  type WorkspaceRegistrySnapshot,
   type WorkspaceRegistryPersistRequest,
   type WorkspaceValidationResult,
 } from "../shared/runtime.js";
@@ -156,6 +157,8 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:pick-workspace", defaultPath) as Promise<WorkspacePickResult>,
   validateWorkspace: (path: string) =>
     ipcRenderer.invoke("awaken:validate-workspace", path) as Promise<WorkspaceValidationResult>,
+  readWorkspaceRegistry: () =>
+    ipcRenderer.invoke("awaken:read-workspace-registry") as Promise<WorkspaceRegistrySnapshot>,
   persistWorkspaceRegistry: (request: WorkspaceRegistryPersistRequest) =>
     ipcRenderer.invoke("awaken:persist-workspace-registry", request) as Promise<void>,
   getSupervisorStatus: () =>

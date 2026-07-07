@@ -487,6 +487,11 @@ export type WorkspaceRegistryPersistRequest = {
   registeredWorkspacePaths: string[];
 };
 
+export type WorkspaceRegistrySnapshot = {
+  lastWorkspacePath?: string;
+  registeredWorkspacePaths: string[];
+};
+
 export type RunStreamHandlers = {
   onEvent: (event: AguiEvent) => void;
   onError?: (message: string) => void;
@@ -542,6 +547,7 @@ export type AwakenBridge = {
   testModelProfile: (request: ModelProfileSaveRequest) => Promise<ModelProfileTestResult>;
   pickWorkspace: (defaultPath?: string) => Promise<WorkspacePickResult>;
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
+  readWorkspaceRegistry: () => Promise<WorkspaceRegistrySnapshot>;
   persistWorkspaceRegistry: (request: WorkspaceRegistryPersistRequest) => Promise<void>;
   getSupervisorStatus: () => Promise<SupervisorStatusInfo>;
   onSupervisorStatusChange: (callback: (info: SupervisorStatusInfo) => void) => () => void;

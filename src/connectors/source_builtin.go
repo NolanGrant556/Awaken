@@ -197,9 +197,6 @@ func githubConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclie
 				Stdio: &mcpclient.StdioTransportConfig{
 					Command: cmd,
 					Args:    args,
-					Env: map[string]string{
-						"GITHUB_PERSONAL_ACCESS_TOKEN": "",
-					},
 				},
 				DisplayName: def.DisplayName,
 			},

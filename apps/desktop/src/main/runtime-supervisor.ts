@@ -417,6 +417,9 @@ export class RuntimeSupervisor {
   private killChild(child: ChildProcess, force: boolean): boolean {
     try {
       if (process.platform === "win32" && child.pid) {
+        // Signal the immediate process first (keeps tests observable and gives
+        // the child a graceful chance before taskkill tears down the tree).
+        child.kill(force ? "SIGKILL" : "SIGTERM");
         const args = ["/pid", String(child.pid), "/t"];
         if (force) {
           args.push("/f");

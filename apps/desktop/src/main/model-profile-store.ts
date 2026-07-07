@@ -12,11 +12,21 @@ import type {
 } from "../shared/runtime.js";
 import {
   normalizeAdvancedWithModelCapability,
+  setCapabilityOverrides,
   withModelCapabilities,
 } from "./model-capabilities.js";
+import {
+  fetchProviderCapabilities,
+  loadCapabilityOverrides,
+  mergeCapabilityOverrides,
+  parseProviderCapabilities,
+  saveCapabilityOverrides,
+  type ProviderCapabilityOverrides,
+} from "./model-capability-sync.js";
 
 const MODEL_PROFILES_FILE = "model-profiles.json";
 const DUPLICATE_MODEL_PROFILE_ERROR = "模型配置重复，添加失败";
+const CAPABILITY_SYNC_TIMEOUT_MS = 8_000;
 
 export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
   {
@@ -354,9 +364,59 @@ function dedupeStoredProfiles(profiles: StoredModelProfile[]): StoredModelProfil
 
 export class ModelProfileStore {
   private filePath: string;
+  private configDir: string;
+  private capabilityOverrides: Record<string, ProviderCapabilityOverrides> = {};
 
   constructor(configDir: string) {
     this.filePath = path.join(configDir, MODEL_PROFILES_FILE);
+    this.configDir = configDir;
+  }
+
+  async initialize(): Promise<void> {
+    this.capabilityOverrides = await loadCapabilityOverrides(this.configDir);
+    setCapabilityOverrides(this.capabilityOverrides);
+  }
+
+  async syncCapabilities(): Promise<Record<string, ProviderCapabilityOverrides>> {
+    const store = await this.readStore();
+    const candidates = new Map<
+      string,
+      { baseURL: string; apiKey: string }
+    >();
+
+    for (const profile of store.profiles) {
+      if (!profile.enabled || !profile.credential) continue;
+      if (candidates.has(profile.providerId)) continue;
+      const provider = providerById(profile.providerId);
+      if (!provider) continue;
+      const apiKey = decryptCredential(profile.credential);
+      if (!apiKey) continue;
+      candidates.set(profile.providerId, {
+        baseURL: normalizeProviderBaseURL(provider, profile.baseURL),
+        apiKey,
+      });
+    }
+
+    const fetched: Record<string, ProviderCapabilityOverrides> = {};
+    await Promise.allSettled(
+      Array.from(candidates.entries()).map(async ([providerId, { baseURL, apiKey }]) => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), CAPABILITY_SYNC_TIMEOUT_MS);
+        try {
+          const overrides = await fetchProviderCapabilities(baseURL, apiKey, controller.signal);
+          fetched[providerId] = overrides;
+        } catch {
+          // Ignore per-provider fetch failures; keep existing overrides.
+        } finally {
+          clearTimeout(timeout);
+        }
+      }),
+    );
+
+    this.capabilityOverrides = mergeCapabilityOverrides(this.capabilityOverrides, fetched);
+    setCapabilityOverrides(this.capabilityOverrides);
+    await saveCapabilityOverrides(this.configDir, this.capabilityOverrides);
+    return this.capabilityOverrides;
   }
 
   listProviders(): ModelProviderWire[] {
@@ -526,6 +586,19 @@ export class ModelProfileStore {
     try {
       const response = await testModelEndpoint(provider, baseURL, modelId, apiKey, controller.signal);
       if (response.ok) {
+        if (provider.id !== "kimi-coding-plan" && provider.id !== "volcengine") {
+          try {
+            const overrides = parseProviderCapabilities(await response.json());
+            this.capabilityOverrides = mergeCapabilityOverrides(
+              this.capabilityOverrides,
+              { [provider.id]: overrides },
+            );
+            setCapabilityOverrides(this.capabilityOverrides);
+            await saveCapabilityOverrides(this.configDir, this.capabilityOverrides);
+          } catch {
+            // Ignore parse failures; the connection test itself succeeded.
+          }
+        }
         return { ok: true, message: providerTestSuccessMessage(provider) };
       }
       return { ok: false, message: providerTestStatusMessage(response.status, provider) };

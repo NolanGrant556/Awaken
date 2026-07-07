@@ -540,6 +540,7 @@ export type AwakenBridge = {
   deleteModelProfile: (profileId: string) => Promise<void>;
   setDefaultModelProfile: (profileId: string) => Promise<RuntimeModelProfileSummary>;
   testModelProfile: (request: ModelProfileSaveRequest) => Promise<ModelProfileTestResult>;
+  syncModelCapabilities: () => Promise<ModelProvider[]>;
   pickWorkspace: (defaultPath?: string) => Promise<WorkspacePickResult>;
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
   persistWorkspaceRegistry: (request: WorkspaceRegistryPersistRequest) => Promise<void>;

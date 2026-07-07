@@ -326,6 +326,7 @@ func (h mcpHandlers) handleDeleteServer(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Remove from user config if present; otherwise remove from project config.
 	deleted := false
 	userCfg, err := mcpclient.LoadUserConfig()
 	if err != nil {
@@ -357,14 +358,19 @@ func (h mcpHandlers) handleDeleteServer(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	// Determine whether the manager knows this server so we can still allow removal
+	// when the config file has been edited externally or the server was injected.
 	_, managerErr := h.manager.SnapshotServer(name)
 	managerHas := managerErr == nil
+
 	if !deleted && !managerHas {
 		writeErrorJSON(w, http.StatusNotFound, "SERVER_NOT_FOUND", fmt.Sprintf("mcp server %q not found", name))
 		return
 	}
 
+	// Stop and unregister the running server (if any) so it disappears from the UI.
 	_ = h.manager.Remove(name)
+
 	writeJSON(w, http.StatusOK, map[string]string{"name": name})
 }
 

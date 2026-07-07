@@ -12,9 +12,10 @@ import (
 // and user-configured overrides — never on hard-coded tool name matches.
 //
 // Default rules:
-//   - requiresAuth==true && server/connector not connected → deny with reason "needs_auth"
+//   - requiresAuth==true && server/connector not connected → needs_auth
 //   - artifact_read / connector_read / browser_read / local_transform / readOnly → allow
-//   - external_publish / system_operation / destructive / unknown side-effects → ask
+//   - mass_message_send → needs_mass_message_review
+//   - external_publish / system_operation / destructive / unknown side-effects → deny
 func Decide(ctx context.Context, def ToolDefinition) PermissionDecision {
 	return DecideWithOverride(ctx, def, nil)
 }
@@ -42,12 +43,23 @@ func DecideWithOverride(ctx context.Context, def ToolDefinition, overrides map[s
 	}
 
 	if def.Annotations.RequiresAuth {
-		return DenyPermission("needs_auth")
+		return NeedsAuthPermission("tool requires authentication")
 	}
 
 	switch def.Annotations.CapabilityClass {
-	case CapabilityArtifactRead, CapabilityConnectorRead, CapabilityBrowserRead, CapabilityLocalTransform:
+	case CapabilityArtifactRead, CapabilityArtifactWrite, CapabilityConnectorRead, CapabilityBrowserRead, CapabilityLocalTransform:
 		return AllowPermission()
+	case CapabilityMassMessageSend:
+		return NeedsMassMessageReviewPermission("mass message send requires human review", DecisionMetadata{
+			MassMessage: def.Annotations.MassMessage,
+		})
+	case CapabilityConnectorWrite, CapabilityBrowserInteract:
+		switch def.Annotations.TrustedOrigin {
+		case TrustedOriginBuiltin, TrustedOriginOfficialConnector, TrustedOriginOfficialHosted:
+			return AllowPermission()
+		default:
+			return DenyPermission("connector/browser write capability requires a trusted origin")
+		}
 	}
 
 	// Default rules based on annotations
@@ -56,25 +68,25 @@ func DecideWithOverride(ctx context.Context, def ToolDefinition, overrides map[s
 	}
 
 	if def.Annotations.Destructive {
-		return AskPermission("destructive tool requires approval", ApprovalRequest{
+		return DenyPermissionWithMetadata("destructive tool is not allowed by the default tool policy", DecisionMetadata{
 			Title:    fmt.Sprintf("Approve %s", def.Name),
 			RiskTone: "warning",
 		})
 	}
 
-	// readOnly==false && destructive==false → conservative: ask
-	return AskPermission("tool may have unknown side-effects", ApprovalRequest{
+	// readOnly==false && destructive==false → conservative structural deny.
+	return DenyPermissionWithMetadata("tool may have unknown side-effects", DecisionMetadata{
 		Title:    fmt.Sprintf("Approve %s", def.Name),
 		RiskTone: "warning",
 	})
 }
 
 // DecideWithServerCheck is like Decide but accepts a server state callback.
-// When the decision is "deny" with reason "needs_auth" and the server is
+// When the decision is "needs_auth" and the server is
 // actually connected, the decision is overridden to allow.
 func DecideWithServerCheck(ctx context.Context, def ToolDefinition, serverConnected func(serverName string) bool) PermissionDecision {
 	decision := DecideWithOverride(ctx, def, nil)
-	if decision.Behavior == PermissionDeny && decision.Reason == "needs_auth" {
+	if decision.Behavior == PermissionNeedsAuth {
 		if serverConnected != nil && def.Annotations.ServerName != "" && serverConnected(def.Annotations.ServerName) {
 			return AllowPermission()
 		}
@@ -86,28 +98,28 @@ func policyToDecision(policy PermissionPolicy) PermissionDecision {
 	switch policy {
 	case PolicyAlwaysAllow:
 		return AllowPermission()
-	case PolicyAlwaysAsk:
-		return AskPermission("user policy requires approval", ApprovalRequest{
-			Title:    "User policy override",
-			RiskTone: "warning",
-		})
+	case PolicyAlwaysDeny:
+		return DenyPermission("user policy denies execution")
 	default:
-		return AskPermission("unimplemented policy: "+string(policy), ApprovalRequest{Title: "Policy not yet supported", RiskTone: "warning"})
+		return DenyPermission("unimplemented policy: " + string(policy))
 	}
 }
 
 type PermissionBehavior string
 
 const (
-	PermissionAllow PermissionBehavior = "allow"
-	PermissionAsk   PermissionBehavior = "ask"
-	PermissionDeny  PermissionBehavior = "deny"
+	PermissionAllow                  PermissionBehavior = "allow"
+	PermissionDeny                   PermissionBehavior = "deny"
+	PermissionNeedsAuth              PermissionBehavior = "needs_auth"
+	PermissionNeedsRuntime           PermissionBehavior = "needs_runtime"
+	PermissionUnsupported            PermissionBehavior = "unsupported"
+	PermissionNeedsMassMessageReview PermissionBehavior = "needs_mass_message_review"
 )
 
 type PermissionDecision struct {
-	Behavior        PermissionBehavior
-	Reason          string
-	ApprovalRequest ApprovalRequest
+	Behavior PermissionBehavior
+	Reason   string
+	Metadata DecisionMetadata
 }
 
 type PermissionContext struct {
@@ -131,11 +143,10 @@ func AllowPermission() PermissionDecision {
 	return PermissionDecision{Behavior: PermissionAllow}
 }
 
-func AskPermission(reason string, request ApprovalRequest) PermissionDecision {
+func AllowPermissionWithMetadata(metadata DecisionMetadata) PermissionDecision {
 	return PermissionDecision{
-		Behavior:        PermissionAsk,
-		Reason:          reason,
-		ApprovalRequest: request,
+		Behavior: PermissionAllow,
+		Metadata: metadata,
 	}
 }
 
@@ -143,6 +154,43 @@ func DenyPermission(reason string) PermissionDecision {
 	return PermissionDecision{
 		Behavior: PermissionDeny,
 		Reason:   reason,
+	}
+}
+
+func DenyPermissionWithMetadata(reason string, metadata DecisionMetadata) PermissionDecision {
+	return PermissionDecision{
+		Behavior: PermissionDeny,
+		Reason:   reason,
+		Metadata: metadata,
+	}
+}
+
+func NeedsAuthPermission(reason string) PermissionDecision {
+	return PermissionDecision{
+		Behavior: PermissionNeedsAuth,
+		Reason:   reason,
+	}
+}
+
+func NeedsRuntimePermission(reason string) PermissionDecision {
+	return PermissionDecision{
+		Behavior: PermissionNeedsRuntime,
+		Reason:   reason,
+	}
+}
+
+func UnsupportedPermission(reason string) PermissionDecision {
+	return PermissionDecision{
+		Behavior: PermissionUnsupported,
+		Reason:   reason,
+	}
+}
+
+func NeedsMassMessageReviewPermission(reason string, metadata DecisionMetadata) PermissionDecision {
+	return PermissionDecision{
+		Behavior: PermissionNeedsMassMessageReview,
+		Reason:   reason,
+		Metadata: metadata,
 	}
 }
 

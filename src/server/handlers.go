@@ -28,12 +28,12 @@ func frameSeq(runtimeSeq uint64, frameIndex int) uint64 {
 	return runtimeSeq*frameSeqStride + uint64(frameIndex)
 }
 
-type resolveApprovalRequest struct {
-	Decision string `json:"decision"`
-}
-
 type renameThreadRequest struct {
 	Label string `json:"label"`
+}
+
+type resolveMassMessageReviewRequest struct {
+	Decision string `json:"decision"`
 }
 
 type errorResponse struct {
@@ -259,37 +259,36 @@ func (h runHandlers) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, run)
 }
 
-func (h runHandlers) handleResolveApproval(w http.ResponseWriter, r *http.Request) {
+func (h runHandlers) handleResolveMassMessageReview(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("run_id")
-	approvalID := r.PathValue("approval_id")
-
-	var req resolveApprovalRequest
+	reviewID := r.PathValue("review_id")
+	var req resolveMassMessageReviewRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
 		return
 	}
 
-	var decision agentcore.ApprovalDecision
+	var decision agentcore.ReviewDecision
 	switch req.Decision {
-	case string(agentcore.ApprovalDecisionApproved):
-		decision = agentcore.ApprovalDecisionApproved
-	case string(agentcore.ApprovalDecisionRejected):
-		decision = agentcore.ApprovalDecisionRejected
+	case string(agentcore.ReviewDecisionApproved):
+		decision = agentcore.ReviewDecisionApproved
+	case string(agentcore.ReviewDecisionRejected):
+		decision = agentcore.ReviewDecisionRejected
 	default:
-		writeErrorJSON(w, http.StatusBadRequest, "INVALID_DECISION", "decision must be approved or rejected")
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REVIEW_DECISION", "decision must be approved or rejected")
 		return
 	}
 
-	if err := h.runService.ResolveApproval(runID, approvalID, decision); err != nil {
+	if err := h.runService.ResolveMassMessageReview(runID, reviewID, decision); err != nil {
 		switch {
-		case errors.Is(err, awruntime.ErrRunNotFound), errors.Is(err, awruntime.ErrApprovalNotFound):
-			writeErrorJSON(w, http.StatusNotFound, "APPROVAL_NOT_FOUND", err.Error())
+		case errors.Is(err, awruntime.ErrRunNotFound), errors.Is(err, awruntime.ErrMassMessageReviewNotFound):
+			writeErrorJSON(w, http.StatusNotFound, "MASS_MESSAGE_REVIEW_NOT_FOUND", err.Error())
 		case errors.Is(err, awruntime.ErrRunTerminal):
 			writeErrorJSON(w, http.StatusConflict, "RUN_TERMINAL", err.Error())
-		case errors.Is(err, awruntime.ErrRunCancelling):
-			writeErrorJSON(w, http.StatusConflict, "RUN_CANCELLING", err.Error())
+		case errors.Is(err, awruntime.ErrInvalidReviewDecision):
+			writeErrorJSON(w, http.StatusBadRequest, "INVALID_REVIEW_DECISION", err.Error())
 		default:
-			writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to resolve approval")
+			writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to resolve mass message review")
 		}
 		return
 	}

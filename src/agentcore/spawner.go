@@ -94,12 +94,12 @@ func CreateSubagent(parent AgentConfig, spawn SpawnConfig) (AgentConfig, error) 
 	child := AgentConfig{
 		// Copy runnable fields from the parent so the child is immediately
 		// usable. The caller may override these.
-		SystemPrompt:    parent.SystemPrompt,
-		MaxThoughts:     parent.MaxThoughts,
-		ModelConfig:     parent.ModelConfig,
-		EntryPoint:      parent.EntryPoint,
-		Workspace:       parent.Workspace,
-		AutoToolPolicy:  parent.AutoToolPolicy,
+		SystemPrompt:     parent.SystemPrompt,
+		MaxThoughts:      parent.MaxThoughts,
+		ModelConfig:      parent.ModelConfig,
+		EntryPoint:       parent.EntryPoint,
+		Workspace:        parent.Workspace,
+		AutoToolPolicy:   parent.AutoToolPolicy,
 		SubagentBoundary: &childBoundary,
 		SubagentOrigin:   childOrigin,
 	}

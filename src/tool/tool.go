@@ -24,6 +24,8 @@ type ToolAnnotations struct {
 	CapabilityClass CapabilityClass
 	TrustedOrigin   TrustedOrigin
 	FileBridgeScope FileBridgeScope
+	NetworkScope    NetworkScope
+	MassMessage     *MassMessageMetadata
 }
 
 // RiskHints summarises the risk profile of a tool invocation.
@@ -39,9 +41,7 @@ type PermissionPolicy string
 
 const (
 	PolicyAlwaysAllow PermissionPolicy = "always_allow"
-	PolicyAlwaysAsk   PermissionPolicy = "always_ask"
-	PolicyPerSession  PermissionPolicy = "per_session"
-	PolicyOneTime     PermissionPolicy = "one_time"
+	PolicyAlwaysDeny  PermissionPolicy = "always_deny"
 )
 
 // ToolDefinition is the canonical metadata block for any registered tool.
@@ -67,16 +67,17 @@ type ReadOnlyTool interface {
 	IsReadOnly() bool
 }
 
-type ApprovalRequest struct {
+type DecisionMetadata struct {
 	Title         string
 	Description   string
 	RiskTone      string
 	AffectedPaths []string
 	PatchSummary  string
+	MassMessage   *MassMessageMetadata
 }
 
-type ApprovalDescribingTool interface {
-	ApprovalRequest(input string) ApprovalRequest
+type DecisionMetadataDescribingTool interface {
+	DecisionMetadata(input string) DecisionMetadata
 }
 
 type ArtifactAction string
@@ -114,6 +115,7 @@ const (
 	CapabilityBrowserRead     CapabilityClass = "browser_read"
 	CapabilityBrowserInteract CapabilityClass = "browser_interaction"
 	CapabilityLocalTransform  CapabilityClass = "local_transform"
+	CapabilityMassMessageSend CapabilityClass = "mass_message_send"
 	CapabilityExternalPublish CapabilityClass = "external_publish"
 	CapabilitySystemOperation CapabilityClass = "system_operation"
 )
@@ -135,6 +137,26 @@ const (
 	FileBridgeTaskScopeRead  FileBridgeScope = "task_scope_read"
 	FileBridgeTaskScopeWrite FileBridgeScope = "task_scope_write"
 )
+
+type NetworkScope string
+
+const (
+	NetworkScopeNone       NetworkScope = "none"
+	NetworkScopeRestricted NetworkScope = "restricted"
+	NetworkScopeOpen       NetworkScope = "open"
+)
+
+type MassMessageMetadata struct {
+	ReviewID        string   `json:"reviewId,omitempty"`
+	Channel         string   `json:"channel,omitempty"`
+	RecipientScope  string   `json:"recipientScope,omitempty"`
+	RecipientCount  int      `json:"recipientCount,omitempty"`
+	BodyPreview     string   `json:"bodyPreview,omitempty"`
+	TemplatePreview string   `json:"templatePreview,omitempty"`
+	Attachments     []string `json:"attachments,omitempty"`
+	SendingAccount  string   `json:"sendingAccount,omitempty"`
+	SourceTool      string   `json:"sourceTool,omitempty"`
+}
 
 type ArtifactProducingTool interface {
 	Artifacts(input string, output string, permissionContext PermissionContext) []ArtifactDescriptor

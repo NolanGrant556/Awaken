@@ -24,7 +24,6 @@ import (
 var (
 	ErrInvalidInput               = errors.New("input is required")
 	ErrRunNotFound                = errors.New("run not found")
-	ErrApprovalNotFound           = errors.New("approval not found")
 	ErrRunTerminal                = errors.New("run is already finished")
 	ErrRunCancelling              = errors.New("run is being cancelled")
 	ErrThreadNotFound             = errors.New("thread not found")
@@ -33,6 +32,8 @@ var (
 	ErrThreadLabelInvalid         = errors.New("thread label is required")
 	ErrMissingModelProfile        = errors.New("model profile is required")
 	ErrUnsupportedInputAttachment = errors.New("model does not support image input")
+	ErrMassMessageReviewNotFound  = errors.New("mass message review not found")
+	ErrInvalidReviewDecision      = errors.New("invalid mass message review decision")
 )
 
 const maxRetainedThreads = 100
@@ -528,12 +529,14 @@ func (s *RunService) CancelRun(runID string) (Run, error) {
 	return session.RequestCancel(), nil
 }
 
-func (s *RunService) ResolveApproval(runID, approvalID string, decision agentcore.ApprovalDecision) error {
-	session, err := s.session(runID)
-	if err != nil {
-		return err
+func (s *RunService) ResolveMassMessageReview(runID, reviewID string, decision agentcore.ReviewDecision) error {
+	s.mu.RLock()
+	session, ok := s.sessions[runID]
+	s.mu.RUnlock()
+	if !ok {
+		return ErrRunNotFound
 	}
-	return session.ResolveApproval(approvalID, decision)
+	return session.ResolveMassMessageReview(reviewID, decision)
 }
 
 func (s *RunService) execute(session *Session, executor Executor, agent *agentcore.Agent, input string, attachments []RunInputAttachment, ctx context.Context) {
@@ -741,13 +744,6 @@ func (s sessionEventSink) Emit(event agentcore.AwakenEvent) {
 		return
 	}
 	s.session.RecordAgentEvent(event)
-}
-
-func (s sessionEventSink) AwaitApproval(ctx context.Context, request agentcore.ApprovalRequest) (agentcore.ApprovalDecision, error) {
-	if s.session == nil {
-		return "", context.Canceled
-	}
-	return s.session.AwaitApproval(ctx, request)
 }
 
 func normalizeWorkspace(ws WorkspaceConfig) (WorkspaceConfig, error) {

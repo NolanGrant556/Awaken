@@ -227,7 +227,7 @@ func TestApplyPatchDeleteDirectoryReturnsError(t *testing.T) {
 	}
 }
 
-func TestApplyPatchPermissionAsksWithPatchSummary(t *testing.T) {
+func TestApplyPatchPermissionAllowsWithPatchSummary(t *testing.T) {
 	root := t.TempDir()
 	t.Chdir(root)
 	permissionContext := tool.NewPermissionContext(root, nil)
@@ -237,11 +237,11 @@ func TestApplyPatchPermissionAsksWithPatchSummary(t *testing.T) {
 		"+hello\n"+
 		"*** End Patch", permissionContext)
 
-	if decision.Behavior != tool.PermissionAsk {
+	if decision.Behavior != tool.PermissionAllow {
 		t.Fatalf("expected apply_patch to ask, got %+v", decision)
 	}
-	if decision.ApprovalRequest.RiskTone != "warning" || !strings.Contains(decision.ApprovalRequest.Description, "A note.md") {
-		t.Fatalf("unexpected approval request: %+v", decision.ApprovalRequest)
+	if decision.Metadata.RiskTone != "warning" || !strings.Contains(decision.Metadata.Description, "A note.md") {
+		t.Fatalf("unexpected decision metadata: %+v", decision.Metadata)
 	}
 }
 
@@ -254,7 +254,7 @@ func TestApplyPatchPermissionMarksDeleteAsDanger(t *testing.T) {
 		"*** Delete File: note.md\n"+
 		"*** End Patch", permissionContext)
 
-	if decision.Behavior != tool.PermissionAsk || decision.ApprovalRequest.RiskTone != "danger" {
+	if decision.Behavior != tool.PermissionAllow || decision.Metadata.RiskTone != "danger" {
 		t.Fatalf("expected delete patch to ask with danger risk, got %+v", decision)
 	}
 }
@@ -269,7 +269,7 @@ func TestApplyPatchPermissionUsesWritableRoots(t *testing.T) {
 		"*** Add File: "+insideWritable+"\n"+
 		"+hello\n"+
 		"*** End Patch", permissionContext)
-	if decision.Behavior != tool.PermissionAsk || decision.ApprovalRequest.RiskTone != "warning" {
+	if decision.Behavior != tool.PermissionAllow || decision.Metadata.RiskTone != "warning" {
 		t.Fatalf("expected writable root patch to ask with warning risk, got %+v", decision)
 	}
 
@@ -278,7 +278,7 @@ func TestApplyPatchPermissionUsesWritableRoots(t *testing.T) {
 		"*** Add File: "+outsideWritable+"\n"+
 		"+hello\n"+
 		"*** End Patch", permissionContext)
-	if decision.Behavior != tool.PermissionAsk || decision.ApprovalRequest.RiskTone != "danger" {
+	if decision.Behavior != tool.PermissionAllow || decision.Metadata.RiskTone != "danger" {
 		t.Fatalf("expected outside writable roots patch to ask with danger risk, got %+v", decision)
 	}
 }
@@ -312,11 +312,11 @@ func TestApplyPatchCheckPermissionOutsideWritableRoot(t *testing.T) {
 		"*** Add File: "+outsidePath+"\n"+
 		"+hello\n"+
 		"*** End Patch", permissionContext)
-	if decision.Behavior != tool.PermissionAsk {
+	if decision.Behavior != tool.PermissionAllow {
 		t.Fatalf("expected ask decision, got %+v", decision)
 	}
-	if decision.ApprovalRequest.RiskTone != "danger" {
-		t.Fatalf("expected danger risk tone, got %+v", decision.ApprovalRequest)
+	if decision.Metadata.RiskTone != "danger" {
+		t.Fatalf("expected danger risk tone, got %+v", decision.Metadata)
 	}
 
 	ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
@@ -342,11 +342,11 @@ func TestApplyPatchCheckPermissionInsideWritableRoot(t *testing.T) {
 		"*** End Patch"
 
 	decision := (&ApplyPatchTool{}).CheckPermission(context.Background(), patch, permissionContext)
-	if decision.Behavior != tool.PermissionAsk {
+	if decision.Behavior != tool.PermissionAllow {
 		t.Fatalf("expected ask decision, got %+v", decision)
 	}
-	if decision.ApprovalRequest.RiskTone != "warning" {
-		t.Fatalf("expected warning risk tone, got %+v", decision.ApprovalRequest)
+	if decision.Metadata.RiskTone != "warning" {
+		t.Fatalf("expected warning risk tone, got %+v", decision.Metadata)
 	}
 
 	ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
@@ -399,11 +399,11 @@ func TestApplyPatchCheckPermissionSymlinkEscapeMarkedDanger(t *testing.T) {
 		"-secret\n"+
 		"+hacked\n"+
 		"*** End Patch", permissionContext)
-	if decision.Behavior != tool.PermissionAsk {
+	if decision.Behavior != tool.PermissionAllow {
 		t.Fatalf("expected ask permission, got %v", decision.Behavior)
 	}
-	if decision.ApprovalRequest.RiskTone != "danger" {
-		t.Fatalf("expected danger risk tone for symlink escape, got %v", decision.ApprovalRequest.RiskTone)
+	if decision.Metadata.RiskTone != "danger" {
+		t.Fatalf("expected danger risk tone for symlink escape, got %v", decision.Metadata.RiskTone)
 	}
 }
 
@@ -667,11 +667,11 @@ func TestApplyPatchCheckPermissionMarksSensitivePathAsDanger(t *testing.T) {
 		"*** Add File: .git/config\n"+
 		"+[core]\n"+
 		"*** End Patch", permissionContext)
-	if decision.Behavior != tool.PermissionAsk {
+	if decision.Behavior != tool.PermissionAllow {
 		t.Fatalf("expected ask decision, got %+v", decision)
 	}
-	if decision.ApprovalRequest.RiskTone != "danger" {
-		t.Fatalf("expected danger risk tone for sensitive path, got %v", decision.ApprovalRequest.RiskTone)
+	if decision.Metadata.RiskTone != "danger" {
+		t.Fatalf("expected danger risk tone for sensitive path, got %v", decision.Metadata.RiskTone)
 	}
 }
 

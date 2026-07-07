@@ -64,12 +64,12 @@ func TestIsClientAllowedForBuiltInProfiles(t *testing.T) {
 }
 
 func TestIsClientAllowedRejectsTamperedFields(t *testing.T) {
-	// A WorkspaceWrite with ApprovalAlways instead of ApprovalNever must
+	// A WorkspaceWrite with SandboxNone instead of SandboxBestEffort must
 	// no longer match the built-in WorkspaceWrite.
 	tampered := WorkspaceWrite()
-	tampered.ApprovalPolicy = ApprovalAlways
+	tampered.SandboxPolicy = SandboxNone
 	if IsClientAllowed(tampered) {
-		t.Fatalf("IsClientAllowed accepted a tampered WorkspaceWrite (ApprovalPolicy changed)")
+		t.Fatalf("IsClientAllowed accepted a tampered WorkspaceWrite (SandboxPolicy changed)")
 	}
 
 	// A WorkspaceWrite with an escalated PermissionProfile must also be rejected.
@@ -113,7 +113,7 @@ func TestNormalizeClientProfileBuiltInReturnsExact(t *testing.T) {
 			// The returned profile must be the built-in value, not the
 			// caller's struct: mutating the caller's struct afterwards
 			// must not affect the returned profile.
-			input.ApprovalPolicy = ApprovalAlways
+			input.SandboxPolicy = SandboxNone
 			if !profilesEqual(got, requested) {
 				t.Fatalf("returned profile aliases caller struct: mutating input changed the result to %+v", got)
 			}
@@ -124,18 +124,18 @@ func TestNormalizeClientProfileBuiltInReturnsExact(t *testing.T) {
 // --- NormalizeClientProfile: tampered fields fall back to built-in ---
 
 func TestNormalizeClientProfileTamperedReturnsBuiltIn(t *testing.T) {
-	// Tamper ApprovalPolicy on a WorkspaceWrite request: the name is
+	// Tamper SandboxPolicy on a WorkspaceWrite request: the name is
 	// allowed but the fields do not match the built-in. The result
 	// must be the built-in WorkspaceWrite (tampered field overwritten).
 	tampered := WorkspaceWrite()
-	tampered.ApprovalPolicy = ApprovalAlways
+	tampered.SandboxPolicy = SandboxNone
 	got := NormalizeClientProfile(&tampered)
 	expected := WorkspaceWrite()
 	if !profilesEqual(got, expected) {
 		t.Fatalf("NormalizeClientProfile(tampered workspace_write) = %+v, want %+v", got, expected)
 	}
-	if got.ApprovalPolicy != ApprovalNever {
-		t.Fatalf("expected ApprovalPolicy overwritten to %q, got %q", ApprovalNever, got.ApprovalPolicy)
+	if got.SandboxPolicy != SandboxBestEffort {
+		t.Fatalf("expected SandboxPolicy overwritten to %q, got %q", SandboxBestEffort, got.SandboxPolicy)
 	}
 
 	// Tamper SandboxPermissions: the 6 key fields still match, so the

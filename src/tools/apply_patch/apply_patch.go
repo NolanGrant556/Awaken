@@ -181,9 +181,9 @@ func (t *ApplyPatchTool) CheckPermission(ctx context.Context, input string, perm
 	if patchHasDangerousChange(patch, permissionContext) {
 		reason = "apply_patch will delete, move, or touch files outside writable roots"
 	}
-	return tool.AskPermission(reason, tool.ApprovalRequest{
-		Title:         "Approve file changes",
-		Description:   patchApprovalDescription(patch),
+	return tool.AllowPermissionWithMetadata(tool.DecisionMetadata{
+		Title:         "File changes",
+		Description:   firstNonEmpty(patchApprovalDescription(patch), reason),
 		RiskTone:      patchRiskTone(patch, permissionContext),
 		AffectedPaths: patchAffectedPaths(patch, permissionContext),
 		PatchSummary:  buildPatchSummary(patch),
@@ -208,6 +208,15 @@ func patchApprovalDescription(patch *patchDocument) string {
 		}
 	}
 	return strings.TrimSpace(builder.String())
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func patchRiskTone(patch *patchDocument, permissionContext tool.PermissionContext) string {

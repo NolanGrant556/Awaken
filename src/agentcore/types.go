@@ -16,11 +16,6 @@ type AgentConfig struct {
 	EntryPoint     string
 	Workspace      WorkspaceConfig
 	AutoToolPolicy AutoToolPolicy
-	// UseApprovalForAsk routes PermissionAsk decisions through the approval
-	// UI (via EventSink/ApprovalAwaiter) instead of the headless AUTO policy.
-	// This should be true when the agent is backed by an interactive client
-	// such as Awaken Desktop.
-	UseApprovalForAsk bool
 	// ExecutionProfile is the unified policy bundle applied to every tool
 	// call this agent makes. When nil, EffectiveProfile falls back to
 	// profile.DefaultProfile() (WorkspaceWrite).

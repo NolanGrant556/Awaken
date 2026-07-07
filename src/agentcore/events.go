@@ -39,25 +39,21 @@ const (
 	CompactFinishedEventType       AwakenEventType = "CompactFinished"
 	CompactFailedEventType         AwakenEventType = "CompactFailed"
 	ToolPairingRepairedEventType   AwakenEventType = "ToolPairingRepaired"
-	ApprovalRequestedEventType     AwakenEventType = "ApprovalRequested"
-	ApprovalResolvedEventType      AwakenEventType = "ApprovalResolved"
+	AuthRequiredEventType          AwakenEventType = "AuthRequired"
+	RuntimePrepareEventType        AwakenEventType = "RuntimePrepare"
+	RuntimeReadyEventType          AwakenEventType = "RuntimeReady"
+	RuntimeMissingEventType        AwakenEventType = "RuntimeMissing"
+	MassMessageReviewRequestedType AwakenEventType = "MassMessageReviewRequested"
+	MassMessageReviewResolvedType  AwakenEventType = "MassMessageReviewResolved"
 	ArtifactCreatedEventType       AwakenEventType = "ArtifactCreated"
 	ArtifactUpdatedEventType       AwakenEventType = "ArtifactUpdated"
 )
 
-type ApprovalRiskTone string
+type ReviewDecision string
 
 const (
-	ApprovalRiskSafe    ApprovalRiskTone = "safe"
-	ApprovalRiskWarning ApprovalRiskTone = "warning"
-	ApprovalRiskDanger  ApprovalRiskTone = "danger"
-)
-
-type ApprovalDecision string
-
-const (
-	ApprovalDecisionApproved ApprovalDecision = "approved"
-	ApprovalDecisionRejected ApprovalDecision = "rejected"
+	ReviewDecisionApproved ReviewDecision = "approved"
+	ReviewDecisionRejected ReviewDecision = "rejected"
 )
 
 type ArtifactStatus string
@@ -145,26 +141,34 @@ type AwakenEvent struct {
 	TrashedPaths []string
 	// GuardianViolation is populated when a guardian constraint was
 	// violated. Empty for non-guardian denials.
-	GuardianViolation string
-	ToolProgressStage                string
-	ToolProgressMessage              string
-	ToolProgressPercentage           int
-	ToolDefinition                   tool.ToolDefinition
-	RiskHints                        *tool.RiskHints
-	ApprovalID                       string
-	ApprovalTitle                    string
-	ApprovalDescription              string
-	ApprovalRiskTone                 ApprovalRiskTone
-	ApprovalDecision                 ApprovalDecision
-	ApprovalAffectedPaths            []string
-	ApprovalPatchSummary             string
-	ArtifactID                       string
-	ArtifactTitle                    string
-	ArtifactDescription              string
-	ArtifactKind                     string
-	ArtifactPath                     string
-	ArtifactContent                  string
-	ArtifactStatus                   ArtifactStatus
+	GuardianViolation          string
+	ToolProgressStage          string
+	ToolProgressMessage        string
+	ToolProgressPercentage     int
+	ToolDefinition             tool.ToolDefinition
+	RiskHints                  *tool.RiskHints
+	AffectedPaths              []string
+	AuthProvider               string
+	AuthURL                    string
+	RuntimeName                string
+	RuntimeVersion             string
+	ReviewID                   string
+	ReviewDecision             ReviewDecision
+	MassMessageChannel         string
+	MassMessageRecipientScope  string
+	MassMessageRecipientCount  int
+	MassMessageBodyPreview     string
+	MassMessageTemplatePreview string
+	MassMessageAttachments     []string
+	MassMessageSendingAccount  string
+	MassMessageSourceTool      string
+	ArtifactID                 string
+	ArtifactTitle              string
+	ArtifactDescription        string
+	ArtifactKind               string
+	ArtifactPath               string
+	ArtifactContent            string
+	ArtifactStatus             ArtifactStatus
 }
 
 var awakenIDCounter uint64

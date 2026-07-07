@@ -15,9 +15,13 @@ import "fmt"
 type ExecutionDecisionAction string
 
 const (
-	DecisionAllow     ExecutionDecisionAction = "allow"
-	DecisionDeny      ExecutionDecisionAction = "deny"
-	DecisionTransform ExecutionDecisionAction = "transform"
+	DecisionAllow                  ExecutionDecisionAction = "allow"
+	DecisionDeny                   ExecutionDecisionAction = "deny"
+	DecisionTransform              ExecutionDecisionAction = "transform"
+	DecisionNeedsAuth              ExecutionDecisionAction = "needs_auth"
+	DecisionNeedsRuntime           ExecutionDecisionAction = "needs_runtime"
+	DecisionUnsupported            ExecutionDecisionAction = "unsupported"
+	DecisionNeedsMassMessageReview ExecutionDecisionAction = "needs_mass_message_review"
 )
 
 // ExecutionDecisionSource records which layer of the policy produced a
@@ -33,6 +37,9 @@ const (
 	DecisionSourcePolicyError       ExecutionDecisionSource = "policy_error"
 	DecisionSourceTransform         ExecutionDecisionSource = "transform"
 	DecisionSourceSensitivePath     ExecutionDecisionSource = "sensitive_path"
+	DecisionSourceAuthRequired      ExecutionDecisionSource = "auth_required"
+	DecisionSourceRuntimeRequired   ExecutionDecisionSource = "runtime_required"
+	DecisionSourceMassMessageReview ExecutionDecisionSource = "mass_message_review"
 )
 
 // ExecutionDecision is the unified decision output of the auto tool policy.
@@ -40,7 +47,8 @@ const (
 // ExecutionDecision, which the runtime consumes to allow, deny, or transform
 // the execution intent.
 type ExecutionDecision struct {
-	// Action is the decision: allow, deny, or transform.
+	// Action is the decision: allow, deny, transform, or a structured
+	// non-executing state such as needs_auth.
 	Action ExecutionDecisionAction
 	// Source records which policy layer produced the decision.
 	Source ExecutionDecisionSource
@@ -100,5 +108,14 @@ func TransformDecision(reason string, updatedToolName string, updatedInput map[s
 		Reason:          reason,
 		UpdatedToolName: updatedToolName,
 		UpdatedInput:    updatedInput,
+	}
+}
+
+func StructuredDecision(action ExecutionDecisionAction, source ExecutionDecisionSource, reason string, retryable bool) ExecutionDecision {
+	return ExecutionDecision{
+		Action:    action,
+		Source:    source,
+		Reason:    reason,
+		Retryable: retryable,
 	}
 }

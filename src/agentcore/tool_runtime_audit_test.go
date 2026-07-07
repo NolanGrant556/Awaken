@@ -142,9 +142,9 @@ func TestWriteAuditPopulatesTransformFieldsForTransformDecision(t *testing.T) {
 	// Use a static policy that returns a transform decision directing the
 	// runtime to execute targetToolName with the given input.
 	transformDecision := ToolDecision{
-		Action:         ToolDecisionTransform,
-		Source:         ToolDecisionSourceTransform,
-		Reason:         "rewrite to file-chain",
+		Action:          ToolDecisionTransform,
+		Source:          ToolDecisionSourceTransform,
+		Reason:          "rewrite to file-chain",
 		UpdatedToolName: targetToolName,
 		UpdatedInput:    `{"patch":"*** Begin Patch\n*** End Patch"}`,
 	}

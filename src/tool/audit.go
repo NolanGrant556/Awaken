@@ -11,13 +11,6 @@ import (
 // ToolAuditRecord captures a complete tool invocation lifecycle for
 // observability and compliance.
 //
-// Task 16 of "零审批自动执行策略": the audit record now carries the unified
-// observability fields (profile, intent, decision action/source, transform
-// origin, trashed paths, subagent origin, guardian violation). The legacy
-// Decision/DecisionReason/ApprovalOrigin fields are preserved for
-// backwards-compatible consumers; the new fields provide the structured,
-// machine-readable view that the spec requires.
-//
 // The Intent and SubagentOrigin fields are typed as `any` (rather than
 // `*profile.ExecutionIntent` / `*profile.SubagentOrigin`) to avoid an import
 // cycle: the `tool/profile` package imports `tool` for the Tool /
@@ -33,12 +26,12 @@ type ToolAuditRecord struct {
 	ToolName       string          `json:"toolName"`
 	Source         ToolSource      `json:"source"`
 	Annotations    ToolAnnotations `json:"annotations"`
-	Decision       string          `json:"decision"`       // "allow", "ask", "deny"
+	Decision       string          `json:"decision"`
 	DecisionReason string          `json:"decisionReason"` // human-readable reason
-	ApprovalOrigin string          `json:"approvalOrigin"` // "local_ui", "system_policy", "auto_allow", "skill_preapproved"
+	DecisionOrigin string          `json:"decisionOrigin"` // "system_policy", "auto_allow", "skill_preapproved"
 	StartedAt      time.Time       `json:"startedAt"`
 	CompletedAt    time.Time       `json:"completedAt"`
-	Outcome        string          `json:"outcome"`      // "success", "failed", "needs_auth", "denied"
+	Outcome        string          `json:"outcome"`       // "success", "failed", "needs_auth", "denied"
 	ResultSummary  string          `json:"resultSummary"` // optional, truncated result
 	ErrorReason    string          `json:"errorReason"`   // populated on failure
 	// ProfileName is the name of the ExecutionProfile applied to this call

@@ -22,10 +22,14 @@ const (
 type ToolDecisionAction string
 
 const (
-	ToolDecisionAllow     ToolDecisionAction = "allow"
-	ToolDecisionDeny      ToolDecisionAction = "deny"
-	ToolDecisionAbort     ToolDecisionAction = "abort"
-	ToolDecisionTransform ToolDecisionAction = "transform"
+	ToolDecisionAllow                  ToolDecisionAction = "allow"
+	ToolDecisionDeny                   ToolDecisionAction = "deny"
+	ToolDecisionAbort                  ToolDecisionAction = "abort"
+	ToolDecisionTransform              ToolDecisionAction = "transform"
+	ToolDecisionNeedsAuth              ToolDecisionAction = "needs_auth"
+	ToolDecisionNeedsRuntime           ToolDecisionAction = "needs_runtime"
+	ToolDecisionUnsupported            ToolDecisionAction = "unsupported"
+	ToolDecisionNeedsMassMessageReview ToolDecisionAction = "needs_mass_message_review"
 )
 
 type ToolDecisionSource string
@@ -37,6 +41,9 @@ const (
 	ToolDecisionSourceHeadlessDefault   ToolDecisionSource = "headless_default"
 	ToolDecisionSourcePolicyError       ToolDecisionSource = "policy_error"
 	ToolDecisionSourceTransform         ToolDecisionSource = "transform"
+	ToolDecisionSourceAuthRequired      ToolDecisionSource = "auth_required"
+	ToolDecisionSourceRuntimeRequired   ToolDecisionSource = "runtime_required"
+	ToolDecisionSourceMassMessageReview ToolDecisionSource = "mass_message_review"
 )
 
 type ToolDecisionRequest struct {
@@ -60,15 +67,14 @@ type ToolDecisionRequest struct {
 	CapabilityClass         tool.CapabilityClass
 	TrustedOrigin           tool.TrustedOrigin
 	FileBridgeScope         tool.FileBridgeScope
-	// RiskTone carries the approval risk tone ("", "safe", "warning", or
-	// "danger") from the tool's CheckPermission ApprovalRequest. The auto
-	// policy uses it to distinguish normal in-workspace mutations from
-	// dangerous ones (delete, out-of-writable-roots, sensitive path).
+	// RiskTone carries the tool-declared risk tone ("", "safe", "warning",
+	// or "danger"). The auto policy uses it to distinguish normal
+	// in-workspace mutations from dangerous ones (delete,
+	// out-of-writable-roots, sensitive path).
 	RiskTone string
 	// AffectedPaths carries the workspace-relative (or absolute if outside)
-	// paths the tool will touch, from the tool's CheckPermission
-	// ApprovalRequest. Used by the auto policy to re-check workspace
-	// boundary and sensitive-path membership for file-chain tools.
+	// paths the tool will touch. Used by the auto policy to re-check
+	// workspace boundary and sensitive-path membership for file-chain tools.
 	AffectedPaths []string
 }
 
@@ -110,6 +116,9 @@ func (p DefaultAutoToolPolicy) Decide(ctx stdcontext.Context, request ToolDecisi
 			Reason: firstNonEmpty(strings.TrimSpace(request.StaticReason), "tool denied execution"),
 		}
 	}
+	if decision, handled := decideStructuredPermissionBehavior(request); handled {
+		return decision
+	}
 
 	if p.Allowlist[strings.TrimSpace(request.ToolName)] {
 		return ToolDecision{
@@ -120,12 +129,28 @@ func (p DefaultAutoToolPolicy) Decide(ctx stdcontext.Context, request ToolDecisi
 		}
 	}
 
+	if request.ToolName == "apply_patch" {
+		if decision, handled := decideApplyPatchFileChain(request); handled {
+			return decision
+		}
+	}
+
+	if request.ToolName == "shell" {
+		if decision, handled := p.decideShellTransform(ctx, request); handled {
+			return decision
+		}
+	}
+
+	if decision, handled := decideByCapabilityClass(request); handled {
+		return decision
+	}
+
 	if request.StaticBehavior == tool.PermissionAllow {
 		if deniesStaticAllowInHeadless(request) {
 			return ToolDecision{
 				Action: ToolDecisionDeny,
 				Source: ToolDecisionSourceHeadlessDefault,
-				Reason: firstNonEmpty(strings.TrimSpace(request.StaticReason), "AUTO headless policy denies write-capable tool by default"),
+				Reason: firstNonEmpty(strings.TrimSpace(request.StaticReason), "AUTO policy denies write-capable tool by default"),
 			}
 		}
 		return ToolDecision{
@@ -145,10 +170,6 @@ func (p DefaultAutoToolPolicy) Decide(ctx stdcontext.Context, request ToolDecisi
 		}
 	}
 
-	if decision, handled := decideByCapabilityClass(request); handled {
-		return decision
-	}
-
 	// File-chain relaxation (Task 4 of "零审批自动执行策略"):
 	// apply_patch is no longer hard-denied in headless mode. With workspace
 	// boundary checks (validateMutationPath), sensitive-path guards
@@ -156,22 +177,7 @@ func (p DefaultAutoToolPolicy) Decide(ctx stdcontext.Context, request ToolDecisi
 	// enforced inside apply_patch itself, in-workspace mutations can
 	// auto-execute without approval. Out-of-writable-roots and sensitive
 	// paths are still denied here so the policy fails fast before execution.
-	if request.ToolName == "apply_patch" {
-		if decision, handled := decideApplyPatchFileChain(request); handled {
-			return decision
-		}
-	}
-
-	// Shell transform: rewrite simple echo-write commands to apply_patch before
-	// falling back to the default deny. Runs after allow checks so allowlisted
-	// shell commands still execute as shell.
-	if request.ToolName == "shell" {
-		if decision, handled := p.decideShellTransform(ctx, request); handled {
-			return decision
-		}
-	}
-
-	reason := firstNonEmpty(strings.TrimSpace(request.StaticReason), "AUTO headless policy denies ask permission by default")
+	reason := firstNonEmpty(strings.TrimSpace(request.StaticReason), "AUTO policy denied tool execution")
 	return ToolDecision{
 		Action: ToolDecisionDeny,
 		Source: ToolDecisionSourceHeadlessDefault,
@@ -191,29 +197,11 @@ func (p DefaultAutoToolPolicy) Decide(ctx stdcontext.Context, request ToolDecisi
 // DecisionSourcePolicyError here, because the unified model has no "abort"
 // action — context cancellation is handled separately by the runtime.
 //
-// ApprovalPolicy interaction (documented for future runtime integration):
-//   - ApprovalNever: DecideExecution always produces a final allow/deny/
-//     transform decision. The runtime never surfaces an ApprovalRequest
-//     event for profiles using this policy (e.g. WorkspaceWrite,
-//     WorkspaceReadOnly, GuardianReadOnly). This is the only ApprovalPolicy
-//     value fully wired through the runtime today.
-//   - ApprovalOnDeny: when DecideExecution returns a deny decision, the
-//     runtime MAY choose to surface an ApprovalRequest event so the user
-//     can override the denial. The override path is NOT implemented in the
-//     current runtime; the deny decision is final today. Used by
-//     OpenWorldRestricted and DangerFullAccess. Future work: thread the
-//     ApprovalRequest through the event sink and re-evaluate on approval.
-//   - ApprovalAlways: every tool call should surface an ApprovalRequest
-//     before execution, regardless of DecideExecution's result. This path
-//     is NOT implemented in the current runtime. Future work: the runtime
-//     should short-circuit DecideExecution (or ignore its result) and
-//     always emit an ApprovalRequest when the profile uses this policy.
-//
-// The ApprovalPolicy is carried on the ExecutionProfile, not on the
-// ExecutionIntent or ToolDecisionRequest, so DecideExecution itself does
-// not branch on it. The runtime is responsible for consulting
-// profile.ApprovalPolicy before/after calling DecideExecution to decide
-// whether an approval event should be surfaced.
+// The runtime no-review contract is final here: DecideExecution may return
+// allow, deny, transform, needs_auth, needs_runtime, unsupported, or
+// needs_mass_message_review. It never returns a generic human review action;
+// mass-message review is the only dedicated gate and is represented by its
+// own action.
 func (p DefaultAutoToolPolicy) DecideExecution(ctx stdcontext.Context, intent profile.ExecutionIntent, request ToolDecisionRequest) profile.ExecutionDecision {
 	if err := ctx.Err(); err != nil {
 		return profile.DenyDecision(string(profile.DecisionSourcePolicyError), err.Error(), false)
@@ -226,6 +214,9 @@ func (p DefaultAutoToolPolicy) DecideExecution(ctx stdcontext.Context, intent pr
 			false,
 		)
 	}
+	if td, handled := decideStructuredPermissionBehavior(request); handled {
+		return toolDecisionToExecutionDecision(td, intent)
+	}
 
 	if p.Allowlist[strings.TrimSpace(request.ToolName)] {
 		decision := profile.AllowDecision(
@@ -236,11 +227,27 @@ func (p DefaultAutoToolPolicy) DecideExecution(ctx stdcontext.Context, intent pr
 		return decision
 	}
 
+	if request.ToolName == "apply_patch" {
+		if td, handled := decideApplyPatchFileChain(request); handled {
+			return toolDecisionToExecutionDecision(td, intent)
+		}
+	}
+
+	if request.ToolName == "shell" {
+		if td, handled := p.decideShellTransform(ctx, request); handled {
+			return toolDecisionToExecutionDecision(td, intent)
+		}
+	}
+
+	if td, handled := decideByCapabilityClass(request); handled {
+		return toolDecisionToExecutionDecision(td, intent)
+	}
+
 	if request.StaticBehavior == tool.PermissionAllow {
 		if deniesStaticAllowInHeadless(request) {
 			return profile.DenyDecision(
 				string(profile.DecisionSourceHeadlessDefault),
-				firstNonEmpty(strings.TrimSpace(request.StaticReason), "AUTO headless policy denies write-capable tool by default"),
+				firstNonEmpty(strings.TrimSpace(request.StaticReason), "AUTO policy denies write-capable tool by default"),
 				false,
 			)
 		}
@@ -261,23 +268,7 @@ func (p DefaultAutoToolPolicy) DecideExecution(ctx stdcontext.Context, intent pr
 		return decision
 	}
 
-	if td, handled := decideByCapabilityClass(request); handled {
-		return toolDecisionToExecutionDecision(td, intent)
-	}
-
-	if request.ToolName == "apply_patch" {
-		if td, handled := decideApplyPatchFileChain(request); handled {
-			return toolDecisionToExecutionDecision(td, intent)
-		}
-	}
-
-	if request.ToolName == "shell" {
-		if td, handled := p.decideShellTransform(ctx, request); handled {
-			return toolDecisionToExecutionDecision(td, intent)
-		}
-	}
-
-	reason := firstNonEmpty(strings.TrimSpace(request.StaticReason), "AUTO headless policy denies ask permission by default")
+	reason := firstNonEmpty(strings.TrimSpace(request.StaticReason), "AUTO policy denied tool execution")
 	return profile.DenyDecision(string(profile.DecisionSourceHeadlessDefault), reason, false)
 }
 
@@ -311,6 +302,17 @@ func toolDecisionToExecutionDecision(td ToolDecision, intent profile.ExecutionIn
 		// policy_error so the runtime surfaces it as a denial.
 		ed.Action = profile.DecisionDeny
 		ed.Source = profile.DecisionSourcePolicyError
+	case ToolDecisionNeedsAuth:
+		ed.Action = profile.DecisionNeedsAuth
+		ed.Source = profile.DecisionSourceAuthRequired
+	case ToolDecisionNeedsRuntime:
+		ed.Action = profile.DecisionNeedsRuntime
+		ed.Source = profile.DecisionSourceRuntimeRequired
+	case ToolDecisionUnsupported:
+		ed.Action = profile.DecisionUnsupported
+	case ToolDecisionNeedsMassMessageReview:
+		ed.Action = profile.DecisionNeedsMassMessageReview
+		ed.Source = profile.DecisionSourceMassMessageReview
 	default:
 		ed.Action = profile.DecisionDeny
 		ed.Source = profile.DecisionSourcePolicyError
@@ -324,12 +326,9 @@ func toolDecisionToExecutionDecision(td ToolDecision, intent profile.ExecutionIn
 // tools are always allowed. Destructive tools (IsDestructive) are denied
 // because they lack the file-chain safety constraints.
 //
-// apply_patch was previously hard-denied here, but is now relaxed (Task 4):
-// its CheckPermission returns PermissionAsk for real patches, and the
-// PermissionAllow fall-through (parse failure) is safe to auto-execute
-// because the executor will surface the parse error. The real apply_patch
-// permission routing happens in decideApplyPatchFileChain, which handles
-// the PermissionAsk path.
+// apply_patch is handled by decideApplyPatchFileChain, which uses
+// workspace boundaries, sensitive-path guards, and trash-backed delete
+// semantics before allowing in-workspace mutation.
 func deniesStaticAllowInHeadless(request ToolDecisionRequest) bool {
 	if strings.HasPrefix(strings.TrimSpace(request.ToolName), "mcp__") {
 		return false
@@ -365,10 +364,10 @@ func deniesStaticAllowInHeadless(request ToolDecisionRequest) bool {
 //   - Trash: deletes go through TrashAdapter, making them recoverable.
 //
 // Decision matrix:
-//   - PermissionAllow (parse failure fall-through): allow — executor will
+//   - PermissionAllow (parse failure fall-through): allow - executor will
 //     surface the parse error.
-//   - PermissionAsk + warning RiskTone: allow — normal in-workspace Add/Update.
-//   - PermissionAsk + danger RiskTone:
+//   - warning RiskTone: allow - normal in-workspace Add/Update.
+//   - danger RiskTone:
 //   - All paths within writable roots and non-sensitive: allow (delete/move
 //     within workspace; trash makes it recoverable).
 //   - Any path outside writable roots: deny.
@@ -431,7 +430,7 @@ func decideApplyPatchFileChain(request ToolDecisionRequest) (ToolDecision, bool)
 
 func decideByCapabilityClass(request ToolDecisionRequest) (ToolDecision, bool) {
 	switch request.CapabilityClass {
-	case tool.CapabilityArtifactRead, tool.CapabilityConnectorRead, tool.CapabilityBrowserRead:
+	case tool.CapabilityArtifactRead, tool.CapabilityArtifactWrite, tool.CapabilityConnectorRead, tool.CapabilityBrowserRead:
 		return ToolDecision{
 			Action:       ToolDecisionAllow,
 			Source:       ToolDecisionSourceWorkspaceBoundary,
@@ -444,6 +443,12 @@ func decideByCapabilityClass(request ToolDecisionRequest) (ToolDecision, bool) {
 			Source:       ToolDecisionSourceWorkspaceBoundary,
 			Reason:       "local transform runs in the restricted local-compute lane",
 			UpdatedInput: request.NormalizedInput,
+		}, true
+	case tool.CapabilityMassMessageSend:
+		return ToolDecision{
+			Action: ToolDecisionNeedsMassMessageReview,
+			Source: ToolDecisionSourceMassMessageReview,
+			Reason: "mass message send requires human review",
 		}, true
 	case tool.CapabilityConnectorWrite, tool.CapabilityBrowserInteract:
 		if request.TrustedOrigin == tool.TrustedOriginOfficialConnector ||
@@ -474,9 +479,43 @@ func decideByCapabilityClass(request ToolDecisionRequest) (ToolDecision, bool) {
 	return ToolDecision{}, false
 }
 
+func decideStructuredPermissionBehavior(request ToolDecisionRequest) (ToolDecision, bool) {
+	switch request.StaticBehavior {
+	case tool.PermissionNeedsAuth:
+		return ToolDecision{
+			Action:    ToolDecisionNeedsAuth,
+			Source:    ToolDecisionSourceAuthRequired,
+			Reason:    firstNonEmpty(strings.TrimSpace(request.StaticReason), "tool requires authentication"),
+			Retryable: true,
+		}, true
+	case tool.PermissionNeedsRuntime:
+		return ToolDecision{
+			Action:    ToolDecisionNeedsRuntime,
+			Source:    ToolDecisionSourceRuntimeRequired,
+			Reason:    firstNonEmpty(strings.TrimSpace(request.StaticReason), "tool requires local runtime"),
+			Retryable: true,
+		}, true
+	case tool.PermissionUnsupported:
+		return ToolDecision{
+			Action: ToolDecisionUnsupported,
+			Source: ToolDecisionSourcePolicyError,
+			Reason: firstNonEmpty(strings.TrimSpace(request.StaticReason), "tool capability is unsupported"),
+		}, true
+	case tool.PermissionNeedsMassMessageReview:
+		return ToolDecision{
+			Action: ToolDecisionNeedsMassMessageReview,
+			Source: ToolDecisionSourceMassMessageReview,
+			Reason: firstNonEmpty(strings.TrimSpace(request.StaticReason), "mass message send requires human review"),
+		}, true
+	default:
+		return ToolDecision{}, false
+	}
+}
+
 func normalizeToolDecision(decision ToolDecision, fallbackReason string) ToolDecision {
 	switch decision.Action {
-	case ToolDecisionAllow, ToolDecisionDeny, ToolDecisionAbort, ToolDecisionTransform:
+	case ToolDecisionAllow, ToolDecisionDeny, ToolDecisionAbort, ToolDecisionTransform,
+		ToolDecisionNeedsAuth, ToolDecisionNeedsRuntime, ToolDecisionUnsupported, ToolDecisionNeedsMassMessageReview:
 	default:
 		decision.Action = ToolDecisionDeny
 		decision.Source = ToolDecisionSourcePolicyError
@@ -517,8 +556,8 @@ func inferToolDecisionRequest(
 		CapabilityClass:         def.Annotations.CapabilityClass,
 		TrustedOrigin:           def.Annotations.TrustedOrigin,
 		FileBridgeScope:         def.Annotations.FileBridgeScope,
-		RiskTone:                permission.ApprovalRequest.RiskTone,
-		AffectedPaths:           append([]string(nil), permission.ApprovalRequest.AffectedPaths...),
+		RiskTone:                permission.Metadata.RiskTone,
+		AffectedPaths:           append([]string(nil), permission.Metadata.AffectedPaths...),
 	}
 }
 
@@ -528,7 +567,7 @@ func isReadOnlyTool(selectedTool tool.Tool) bool {
 }
 
 func isDestructivePermission(permission tool.PermissionDecision) bool {
-	request := permission.ApprovalRequest
+	request := permission.Metadata
 	if strings.EqualFold(strings.TrimSpace(request.RiskTone), "danger") {
 		return true
 	}
@@ -542,6 +581,6 @@ func isDestructivePermission(permission tool.PermissionDecision) bool {
 }
 
 func requiresUserInteraction(permission tool.PermissionDecision) bool {
-	text := strings.ToLower(permission.Reason + " " + permission.ApprovalRequest.Description)
+	text := strings.ToLower(permission.Reason + " " + permission.Metadata.Description)
 	return strings.Contains(text, "requires user interaction") || strings.Contains(text, "user interaction")
 }

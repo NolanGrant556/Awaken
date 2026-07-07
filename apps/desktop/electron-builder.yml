@@ -13,6 +13,12 @@ extraResources:
   - from: resources/bin
     to: bin
     filter: ["**/*"]
+  - from: resources/runtime-manifest
+    to: runtime-manifest
+    filter: ["**/*"]
+  - from: resources/runtime
+    to: runtime
+    filter: ["**/*"]
   - from: build/icon.png
     to: icon.png
 mac:

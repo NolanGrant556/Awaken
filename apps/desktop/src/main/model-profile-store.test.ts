@@ -437,4 +437,152 @@ describe("ModelProfileStore", () => {
       masked_key: "•••• old1",
     });
   });
+
+  describe("fetchBalances", () => {
+    it("returns unsupported status for providers without balance support", async () => {
+      const store = new ModelProfileStore(configDir);
+      await store.saveProfile({
+        providerId: "kimi-cn",
+        displayName: "Kimi CN",
+        modelId: "kimi-k2.6",
+        baseURL: "https://api.moonshot.cn/v1",
+        protocol: "openai_chat",
+        authScheme: "bearer",
+        apiKey: "sk-test",
+        enabled: true,
+        isDefault: true,
+      });
+
+      const result = await store.fetchBalances();
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({
+        provider_id: "kimi-cn",
+        status: "unsupported",
+      });
+    });
+
+    it("returns missing_key status for profiles without a credential", async () => {
+      const store = new ModelProfileStore(configDir);
+      await store.saveProfile({
+        providerId: "deepseek",
+        displayName: "DeepSeek",
+        modelId: "deepseek-v4-pro",
+        baseURL: "https://api.deepseek.com",
+        protocol: "openai_chat",
+        authScheme: "bearer",
+        enabled: true,
+        isDefault: true,
+      });
+
+      const result = await store.fetchBalances();
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({
+        provider_id: "deepseek",
+        status: "missing_key",
+      });
+    });
+
+    it("fetches DeepSeek balance for a ready profile", async () => {
+      electronMock.safeStorage.decryptString.mockReturnValue("sk-test");
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              is_available: true,
+              balance_infos: [
+                {
+                  currency: "USD",
+                  total_balance: "50.00",
+                  granted_balance: "10.00",
+                  topped_up_balance: "40.00",
+                },
+              ],
+            }),
+          } as Response),
+        ),
+      );
+
+      const store = new ModelProfileStore(configDir);
+      await store.saveProfile({
+        providerId: "deepseek",
+        displayName: "DeepSeek",
+        modelId: "deepseek-v4-pro",
+        baseURL: "https://api.deepseek.com",
+        protocol: "openai_chat",
+        authScheme: "bearer",
+        apiKey: "sk-test",
+        enabled: true,
+        isDefault: true,
+      });
+
+      const result = await store.fetchBalances();
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({
+        provider_id: "deepseek",
+        model_id: "deepseek-v4-pro",
+        status: "available",
+      });
+      expect(result[0]?.detail).toEqual({
+        kind: "amount",
+        amounts: [{ currency: "USD", total: 50, granted: 10, topped_up: 40 }],
+      });
+    });
+
+    it("deduplicates provider queries across multiple profiles", async () => {
+      electronMock.safeStorage.decryptString.mockReturnValue("sk-test");
+      const fetchMock = vi.fn(async () =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            is_available: true,
+            balance_infos: [
+              {
+                currency: "USD",
+                total_balance: "30.00",
+                granted_balance: "0.00",
+                topped_up_balance: "30.00",
+              },
+            ],
+          }),
+        } as Response),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const store = new ModelProfileStore(configDir);
+      await store.saveProfile({
+        providerId: "deepseek",
+        displayName: "DeepSeek",
+        modelId: "deepseek-v4-pro",
+        baseURL: "https://api.deepseek.com",
+        protocol: "openai_chat",
+        authScheme: "bearer",
+        apiKey: "sk-test",
+        enabled: true,
+        isDefault: true,
+      });
+      await store.saveProfile({
+        providerId: "deepseek",
+        displayName: "DeepSeek",
+        modelId: "deepseek-v4-flash",
+        baseURL: "https://api.deepseek.com",
+        protocol: "openai_chat",
+        authScheme: "bearer",
+        apiKey: "sk-test",
+        enabled: true,
+        isDefault: false,
+      });
+
+      const result = await store.fetchBalances();
+
+      expect(result).toHaveLength(2);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
 });

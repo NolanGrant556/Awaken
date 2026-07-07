@@ -1,12 +1,12 @@
 import type { AguiEvent } from "./agui";
 import {
-  type ApprovalDecision,
   type AwakenBridge,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
   type DesktopPlatform,
   type InstallSkillRequest,
   type InstallSkillResponse,
+  type MassMessageReviewDecision,
   type ModelProfileSaveRequest,
   type ModelProfileTestResult,
   type ModelProvider,
@@ -69,10 +69,10 @@ export type RuntimeClient = {
   deleteThread: (threadId: string) => Promise<void>;
   startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
-  resolveApproval: (
+  resolveMassMessageReview: (
     runId: string,
-    approvalId: string,
-    decision: ApprovalDecision,
+    reviewId: string,
+    decision: MassMessageReviewDecision,
   ) => Promise<void>;
   subscribeRun: (
     runId: string,
@@ -130,7 +130,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     deleteThread: (threadId) => bridge.deleteThread(threadId),
     startRun: (request) => bridge.startRun(request),
     cancelRun: bridge.cancelRun,
-    resolveApproval: bridge.resolveApproval,
+    resolveMassMessageReview: bridge.resolveMassMessageReview,
     subscribeRun: async (runId, handlers, afterSeq) => {
       let lastSeq = afterSeq ?? 0;
       let terminalSeen = false;

@@ -30,8 +30,12 @@ export type AguiEventType =
   | "AWAKEN_COMPACT_FINISHED"
   | "AWAKEN_COMPACT_FAILED"
   | "AWAKEN_TOOL_PAIRING_REPAIRED"
-  | "AWAKEN_APPROVAL_REQUESTED"
-  | "AWAKEN_APPROVAL_RESOLVED"
+  | "AWAKEN_AUTH_REQUIRED"
+  | "AWAKEN_RUNTIME_PREPARE"
+  | "AWAKEN_RUNTIME_READY"
+  | "AWAKEN_RUNTIME_MISSING"
+  | "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED"
+  | "AWAKEN_MASS_MESSAGE_REVIEW_RESOLVED"
   | "AWAKEN_ARTIFACT_CREATED"
   | "AWAKEN_ARTIFACT_UPDATED"
   | "AWAKEN_UNKNOWN_EVENT";
@@ -71,6 +75,7 @@ export type AguiEvent = {
   commandStream?: string;
   patch?: string;
   patchSummary?: string;
+  affectedPaths?: string[];
   diff?: string;
   truncated?: boolean;
   message?: string;
@@ -125,6 +130,26 @@ export type AguiEvent = {
   trashedPaths?: string[];
   /** Populated when a guardian constraint was violated. */
   guardianViolation?: string;
+  authProvider?: string;
+  authScope?: string;
+  authLink?: string;
+  runtimeName?: string;
+  runtimeComponent?: string;
+  runtimeRequiredVersion?: string;
+  runtimeDetectedVersion?: string;
+  runtimePrepareStatus?: string;
+  runtimeMissingReason?: string;
+  reviewId?: string;
+  reviewDecision?: "approved" | "rejected";
+  massMessageChannel?: string;
+  massMessageRecipientScope?: string;
+  massMessageRecipientCount?: number;
+  massMessageBodyPreview?: string;
+  massMessageTemplateId?: string;
+  massMessageAttachmentNames?: string[];
+  massMessageAccount?: string;
+  massMessageSourceTool?: string;
+  /** Legacy transcript-only fields. New runs must not emit generic approval events. */
   approvalId?: string;
   approvalTitle?: string;
   approvalDescription?: string;

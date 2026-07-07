@@ -19,7 +19,6 @@ import {
 } from "lucide-react";
 import {
   AwakenAppShell as AppShell,
-  AwakenApprovalCard as ApprovalCard,
   AwakenAssistantMessage as AssistantMessage,
   AwakenButton as Button,
   AwakenComposerBar as ComposerBar,
@@ -48,6 +47,7 @@ import {
 } from "@awaken/design-system";
 import { createRuntimeClient, type SubscribeHandlers } from "./runtime/client";
 import type {
+  MassMessageReviewDecision,
   RuntimeInfo,
   RunInputAttachment,
   RuntimeModelProfileSummary,
@@ -62,16 +62,13 @@ import {
   type ThreadItem,
   type RuntimeAction,
 } from "./runtime/reducer";
-import type { ApprovalDecision } from "../shared/runtime";
 import type { RunNarrativeItem } from "./run-narrative";
 import {
   projectNarrativeTurnBodySegments,
-  resolvedDecisionForApproval,
   shouldShowAssistantAnswerFooter,
   shouldUseCenterComposer,
   turnMarkerRailDisplay,
   type NarrativeTurnBodySegment,
-  type ResolvedApprovalState,
 } from "./workbenchPresentation";
 import { useComposerLifecycle } from "./useComposerLifecycle";
 import { useRunStageScrollController } from "./useRunStageScrollController";
@@ -271,7 +268,6 @@ function isThreadBusyForDelete(thread: ThreadItem): boolean {
   return Boolean(
     thread.activeRunId ||
     thread.runStatus === "running" ||
-    thread.runStatus === "awaiting_approval" ||
     thread.runStatus === "cancelling",
   );
 }
@@ -515,7 +511,6 @@ export function App() {
   const runtimeClientRef = useRef(createRuntimeClient());
   const unsubscribeRef = useRef<null | (() => void)>(null);
   const terminalSeenRef = useRef(false);
-  const resolvingApprovalIdRef = useRef<string | null>(null);
   const rendererReadyNotifiedRef = useRef(false);
   const threadLoadSeqRef = useRef(0);
   const inspectorCollapsedValueRef = useRef(false);
@@ -534,11 +529,8 @@ export function App() {
   );
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
-  const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(
-    null,
-  );
-  const [resolvedApproval, setResolvedApproval] =
-    useState<ResolvedApprovalState>(null);
+  const [resolvingMassMessageReviewId, setResolvingMassMessageReviewId] =
+    useState<string | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
   const [modelProfiles, setModelProfiles] = useState<
     RuntimeModelProfileSummary[]
@@ -958,9 +950,6 @@ export function App() {
     threadLoadSeqRef.current += 1;
     terminalSeenRef.current = false;
     setNotice(null);
-    setResolvingApprovalId(null);
-    setResolvedApproval(null);
-    resolvingApprovalIdRef.current = null;
     localStorage.removeItem("awaken:runId");
     prepareForNewTask();
     dispatch({ type: "run/reset" });
@@ -1040,7 +1029,7 @@ export function App() {
     runtimeErrorMessage: runtimeState.errorMessage,
   });
 
-  const activeApproval = runtimeState.approvals[0];
+  const activeMassMessageReview = runtimeState.massMessageReviews[0];
   const navItems: NavItem[] = [
     {
       id: "connectors",
@@ -1426,22 +1415,6 @@ export function App() {
         ) {
           localStorage.removeItem("awaken:runId");
         }
-        if (event.type === "AWAKEN_APPROVAL_REQUESTED" && event.approvalId) {
-          setResolvedApproval(null);
-        }
-        if (
-          event.type === "AWAKEN_APPROVAL_RESOLVED" &&
-          event.approvalId &&
-          event.approvalId === resolvingApprovalIdRef.current
-        ) {
-          setResolvedApproval({
-            approvalId: event.approvalId,
-            decision:
-              event.approvalDecision === "rejected" ? "rejected" : "approved",
-          });
-          resolvingApprovalIdRef.current = null;
-          setResolvingApprovalId(null);
-        }
         dispatch({ type: "run/event", event, receivedAtMs });
       },
       onError: (message) => dispatch({ type: "run/streamFailed", message }),
@@ -1463,11 +1436,7 @@ export function App() {
   }
 
   function shouldResumeSubscription(status: RuntimeRunStatus): boolean {
-    return (
-      status === "running" ||
-      status === "awaiting_approval" ||
-      status === "cancelling"
-    );
+    return status === "running" || status === "cancelling";
   }
 
   async function replayThreadTranscript(
@@ -1557,9 +1526,6 @@ export function App() {
     threadLoadSeqRef.current += 1;
     terminalSeenRef.current = false;
     setNotice(null);
-    setResolvingApprovalId(null);
-    setResolvedApproval(null);
-    resolvingApprovalIdRef.current = null;
     prepareForRunStart();
     dispatch({
       type: "run/requested",
@@ -1648,9 +1614,6 @@ export function App() {
     threadLoadSeqRef.current = loadSeq;
     terminalSeenRef.current = false;
     setNotice(null);
-    setResolvingApprovalId(null);
-    setResolvedApproval(null);
-    resolvingApprovalIdRef.current = null;
     prepareForThreadSwitch();
     dispatch({ type: "run/threadSwitch", threadId });
 
@@ -1998,37 +1961,32 @@ export function App() {
     }
   }
 
-  async function handleResolveApproval(
-    decision: ApprovalDecision,
+  async function handleResolveMassMessageReview(
+    decision: MassMessageReviewDecision,
   ): Promise<void> {
-    if (!runtimeState.runId || !activeApproval) {
+    if (!runtimeState.runId || !activeMassMessageReview) {
       return;
     }
-    if (
-      resolvingApprovalId === activeApproval.id ||
-      resolvingApprovalIdRef.current === activeApproval.id
-    ) {
+    if (resolvingMassMessageReviewId === activeMassMessageReview.id) {
       return;
     }
 
     setNotice(null);
-    setResolvingApprovalId(activeApproval.id);
-    resolvingApprovalIdRef.current = activeApproval.id;
-    setResolvedApproval(null);
-
+    setResolvingMassMessageReviewId(activeMassMessageReview.id);
     try {
-      await runtimeClient.resolveApproval(
+      await runtimeClient.resolveMassMessageReview(
         runtimeState.runId,
-        activeApproval.id,
+        activeMassMessageReview.id,
         decision,
       );
     } catch (error) {
-      setResolvingApprovalId(null);
-      resolvingApprovalIdRef.current = null;
-      setResolvedApproval(null);
       setNotice(
-        error instanceof Error ? error.message : "Failed to resolve approval",
+        error instanceof Error
+          ? error.message
+          : "Failed to resolve mass message review",
       );
+    } finally {
+      setResolvingMassMessageReviewId(null);
     }
   }
 
@@ -2284,59 +2242,12 @@ export function App() {
       );
     }
     if (item.kind === "approval") {
-      const approvalId = item.id.startsWith("approval:")
-        ? item.id.slice("approval:".length)
-        : item.id;
-      const itemApproval = runtimeState.approvals.find(
-        (approval) =>
-          approval.id === approvalId || approvalId.endsWith(`:${approval.id}`),
-      );
-      if (
-        item.status === "waiting" &&
-        itemApproval?.id === activeApproval?.id
-      ) {
-        return null;
-      }
-      const canResolve =
-        item.status === "waiting" && activeApproval?.id === itemApproval?.id;
-      const resolvedDecision =
-        item.status === "approved" || item.status === "rejected"
-          ? item.status
-          : resolvedDecisionForApproval(itemApproval, resolvedApproval);
       return (
-        <ApprovalCard
+        <ToolTraceLine
           key={key}
-          inline
-          open
-          title={itemApproval?.title || item.title}
-          description={itemApproval?.description}
-          affectedPaths={itemApproval?.affectedPaths}
-          patchSummary={itemApproval?.patchSummary}
-          riskTone={itemApproval?.riskTone}
-          approveLabel={
-            resolvingApprovalId === itemApproval?.id
-              ? "Resolving..."
-              : "Approve"
-          }
-          rejectLabel={
-            resolvingApprovalId === itemApproval?.id ? "Resolving..." : "Reject"
-          }
-          resolving={resolvingApprovalId === itemApproval?.id}
-          resolvedDecision={resolvedDecision}
-          onApprove={
-            canResolve
-              ? () => {
-                  void handleResolveApproval("approved");
-                }
-              : undefined
-          }
-          onReject={
-            canResolve
-              ? () => {
-                  void handleResolveApproval("rejected");
-                }
-              : undefined
-          }
+          title={item.title}
+          detail="Legacy approval record"
+          status={item.status === "rejected" ? "error" : item.status === "waiting" ? "active" : "done"}
         />
       );
     }
@@ -2435,42 +2346,62 @@ export function App() {
     "--aw-inspector-width": `${inspectorWidth}px`,
   } as CSSProperties;
 
-  function renderActiveApprovalPrompt() {
-    if (!activeApproval) {
+  function renderMassMessageReviewPrompt() {
+    if (!activeMassMessageReview) {
       return null;
     }
+    const resolving =
+      resolvingMassMessageReviewId === activeMassMessageReview.id;
+    const detail = [
+      activeMassMessageReview.channel,
+      activeMassMessageReview.recipientScope,
+      activeMassMessageReview.recipientCount !== undefined
+        ? `${activeMassMessageReview.recipientCount} recipients`
+        : undefined,
+      activeMassMessageReview.account,
+    ]
+      .filter(Boolean)
+      .join(" | ");
     return (
-      <div className="composer-approval-card">
-        <ApprovalCard
-          inline
-          open
-          title={activeApproval.title}
-          description={activeApproval.description}
-          affectedPaths={activeApproval.affectedPaths}
-          patchSummary={activeApproval.patchSummary}
-          riskTone={activeApproval.riskTone}
-          approveLabel={
-            resolvingApprovalId === activeApproval.id
-              ? "Resolving..."
-              : "Approve"
-          }
-          rejectLabel={
-            resolvingApprovalId === activeApproval.id
-              ? "Resolving..."
-              : "Reject"
-          }
-          resolving={resolvingApprovalId === activeApproval.id}
-          resolvedDecision={resolvedDecisionForApproval(
-            activeApproval,
-            resolvedApproval,
-          )}
-          onApprove={() => {
-            void handleResolveApproval("approved");
-          }}
-          onReject={() => {
-            void handleResolveApproval("rejected");
-          }}
-        />
+      <div className="mass-message-review-card">
+        <div className="mass-message-review-card__body">
+          <div className="mass-message-review-card__title">群发消息审核</div>
+          {detail ? (
+            <div className="mass-message-review-card__meta">{detail}</div>
+          ) : null}
+          {activeMassMessageReview.bodyPreview ? (
+            <div className="mass-message-review-card__preview">
+              {activeMassMessageReview.bodyPreview}
+            </div>
+          ) : null}
+          {activeMassMessageReview.attachmentNames.length > 0 ? (
+            <div className="mass-message-review-card__meta">
+              {activeMassMessageReview.attachmentNames.join(", ")}
+            </div>
+          ) : null}
+        </div>
+        <div className="mass-message-review-card__actions">
+          <Button
+            variant="default"
+            size="sm"
+            disabled={resolving}
+            onClick={() => {
+              void handleResolveMassMessageReview("rejected");
+            }}
+          >
+            拒绝
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            loading={resolving}
+            onClick={() => {
+              void handleResolveMassMessageReview("approved");
+            }}
+          >
+            通过发送
+          </Button>
+        </div>
       </div>
     );
   }
@@ -2719,7 +2650,7 @@ export function App() {
                           <ComposerDock ref={setComposerDockElement}>
                             <div className="composer-dock-stack">
                               {renderComposerRuntimePanels()}
-                              {renderActiveApprovalPrompt()}
+                              {renderMassMessageReviewPrompt()}
                               <ComposerBar
                                 value={composerValue}
                                 onChange={setComposerValue}
@@ -2753,7 +2684,7 @@ export function App() {
                         <div className="run-stage-center-composer">
                           <TaskWelcome />
                           {renderComposerRuntimePanels()}
-                          {renderActiveApprovalPrompt()}
+                          {renderMassMessageReviewPrompt()}
                           <ComposerBar
                             value={composerValue}
                             onChange={setComposerValue}

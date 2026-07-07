@@ -111,14 +111,18 @@ POST /v1/runs
 GET  /v1/runs/{run_id}
 GET  /v1/runs/{run_id}/events
 POST /v1/runs/{run_id}/cancel
-POST /v1/runs/{run_id}/approvals/{approval_id}/resolve
+POST /v1/runs/{run_id}/mass-message-reviews/{review_id}/resolve
 ```
 
 `/v1/runs/{run_id}/events` 输出 AG-UI-compatible SSE events。Awaken 目前有这些 extension events：
 
 ```text
-AWAKEN_APPROVAL_REQUESTED
-AWAKEN_APPROVAL_RESOLVED
+AWAKEN_AUTH_REQUIRED
+AWAKEN_RUNTIME_PREPARE
+AWAKEN_RUNTIME_READY
+AWAKEN_RUNTIME_MISSING
+AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED
+AWAKEN_MASS_MESSAGE_REVIEW_RESOLVED
 AWAKEN_ARTIFACT_CREATED
 AWAKEN_ARTIFACT_UPDATED
 AWAKEN_COMMAND_OUTPUT
@@ -126,7 +130,7 @@ AWAKEN_PATCH_UPDATED
 AWAKEN_TURN_DIFF
 ```
 
-approval request 只通过 `AWAKEN_APPROVAL_REQUESTED` / `AWAKEN_APPROVAL_RESOLVED` 和 Desktop 原生 `ApprovalCard` 完成，不再生成 generated surface payload。
+新 run 不再产生通用工具审批事件，不进入 `awaiting_approval`，也不展示通用 `ApprovalCard`。缺授权走 `AWAKEN_AUTH_REQUIRED`，缺 runtime 走 runtime prepare/missing/ready 事件；只有工具群发消息进入专用 `AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED` / `AWAKEN_MASS_MESSAGE_REVIEW_RESOLVED` 链路。
 
 ## Coding Agent 接手规则
 
@@ -146,7 +150,7 @@ Awaken Desktop
 实现 owner 速查：
 
 - `src/agentcore`：agent 执行循环、LLM request 组装、工具执行、内部 `AwakenEvent` 发射、workspace config、permission-aware `ToolRuntime`。
-- `src/runtime`：run/session 生命周期、事件历史与回放、取消、approval wait/resolve、runtime event dispatch。
+- `src/runtime`：run/session 生命周期、事件历史与回放、取消、群发消息专用 review wait/resolve、runtime event dispatch。
 - `src/protocol/agui`：把内部 Awaken events 映射为 AG-UI-compatible JSON events。
 - `src/server`：本地 HTTP endpoints 与 SSE streams。
 - `src/tool` 和 `src/tools`：工具接口、schema generation、registry、permission decisions、内置工具实现。
@@ -245,7 +249,7 @@ go test ./src/runtime ./src/server ./src/agentcore
 真实 LLM smoke：
 
 ```bash
-go test ./src/server -run 'TestPlainQASmoke|TestReadOnlyFileSmoke|TestFileMutation(Approval|Reject|Artifact|PatchAndTurnDiff)Smoke' -count=1 -v
+go test ./src/server -run 'TestFileMutation(AutoAllow|AutoAllowDoesNotEnterGenericReview|AutoAllowEmitsArtifact|PatchAndTurnDiff)Smoke' -count=1 -v
 ```
 
 常用完整验证：

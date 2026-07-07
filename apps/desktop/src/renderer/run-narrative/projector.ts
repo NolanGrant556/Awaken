@@ -186,10 +186,68 @@ export function projectAguiEventToNarrative(
         detail,
       );
     }
-    case "AWAKEN_APPROVAL_REQUESTED":
-      return activateApproval(base, event);
-    case "AWAKEN_APPROVAL_RESOLVED":
-      return resolveApproval(base, event);
+    case "AWAKEN_AUTH_REQUIRED":
+      return commitRuntimeNotice(
+        base,
+        event,
+        "auth",
+        "Authorization required",
+        [event.authProvider, event.authScope, event.authLink]
+          .filter(Boolean)
+          .join(" | "),
+        "error",
+      );
+    case "AWAKEN_RUNTIME_PREPARE":
+    case "AWAKEN_RUNTIME_READY":
+    case "AWAKEN_RUNTIME_MISSING":
+      return commitRuntimeNotice(
+        base,
+        event,
+        "runtime",
+        event.type === "AWAKEN_RUNTIME_READY"
+          ? "Runtime ready"
+          : event.type === "AWAKEN_RUNTIME_MISSING"
+            ? "Runtime missing"
+            : "Runtime preparing",
+        [
+          event.runtimeName,
+          event.runtimeComponent,
+          event.runtimePrepareStatus,
+          event.runtimeMissingReason,
+        ]
+          .filter(Boolean)
+          .join(" | "),
+        event.type === "AWAKEN_RUNTIME_MISSING"
+          ? "error"
+          : event.type === "AWAKEN_RUNTIME_READY"
+            ? "done"
+            : "active",
+      );
+    case "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED":
+    case "AWAKEN_MASS_MESSAGE_REVIEW_RESOLVED":
+      return commitRuntimeNotice(
+        base,
+        event,
+        "mass-message-review",
+        event.type === "AWAKEN_MASS_MESSAGE_REVIEW_RESOLVED"
+          ? event.reviewDecision === "approved"
+            ? "Mass message approved"
+            : "Mass message rejected"
+          : "Mass message review required",
+        [
+          event.massMessageChannel,
+          event.massMessageRecipientScope,
+          event.massMessageRecipientCount?.toString(),
+          event.massMessageBodyPreview,
+        ]
+          .filter(Boolean)
+          .join(" | "),
+        event.type === "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED"
+          ? "active"
+          : event.reviewDecision === "approved"
+            ? "done"
+            : "error",
+      );
     case "AWAKEN_ARTIFACT_CREATED":
     case "AWAKEN_ARTIFACT_UPDATED":
       return base;
@@ -921,42 +979,52 @@ function commitTool(
   };
 }
 
-function activateApproval(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
-  const id = approvalId(event);
-  return setActive(
-    {
-      ...state,
-      inspectorSelection: { kind: "approval", id },
-    },
-    {
-      kind: "approval",
-      id,
-      title: event.approvalTitle || "Approval required",
-      status: "waiting",
-    },
-  );
-}
-
-function resolveApproval(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
-  const id = approvalId(event);
-  const status = event.approvalDecision === "rejected" ? "rejected" : "approved";
+function commitRuntimeNotice(
+  state: RunNarrativeState,
+  event: AguiEvent,
+  prefix: string,
+  title: string,
+  detail: string,
+  status: "active" | "done" | "error",
+): RunNarrativeState {
+  const id = `${prefix}:${eventScopedId(
+    event,
+    event.reviewId ??
+      event.toolCallId ??
+      event.runtimeComponent ??
+      event.runtimeName ??
+      event.authProvider ??
+      event.type,
+  )}`;
   const item: RunNarrativeItem = {
-    kind: "approval",
+    kind: "tool",
     id,
-    title: event.approvalTitle || "Approval resolved",
+    title,
+    detail,
     status,
   };
+
+  if (status === "active") {
+    return setActive(
+      {
+        ...state,
+        inspectorSelection: { kind: "tool", id },
+      },
+      item,
+    );
+  }
+
   if (state.activeItem?.id === id) {
     return {
       ...state,
       committedItems: upsertCommitted(state.committedItems, item),
       activeItem: undefined,
-      inspectorSelection: { kind: "approval", id },
+      inspectorSelection: { kind: "tool", id },
     };
   }
   return {
     ...state,
     committedItems: upsertCommitted(state.committedItems, item),
-    inspectorSelection: { kind: "approval", id },
+    inspectorSelection: { kind: "tool", id },
   };
 }

@@ -41,7 +41,6 @@ import {
   latestTurnMinHeightBottomReserve,
   latestTurnPromptAnchorSlack,
   projectNarrativeTurnBodySegments,
-  resolvedDecisionForApproval,
   scrollTopForLatestTurnScrollTail,
   scrollTopForPromptAnchor,
   shouldCancelPendingPromptAnchorForScrollIntent,
@@ -71,7 +70,7 @@ function stubElectronBridge(): void {
       deleteThread: vi.fn(),
       startRun: vi.fn(),
       cancelRun: vi.fn(),
-      resolveApproval: vi.fn(),
+      resolveMassMessageReview: vi.fn(),
       subscribeRun: vi.fn(),
       unsubscribeRun: vi.fn(),
       getRuntimeInfo: vi.fn(),
@@ -105,30 +104,6 @@ function stubElectronBridge(): void {
     } satisfies AwakenBridge,
   });
 }
-
-describe("resolvedDecisionForApproval", () => {
-  it("returns undefined when both approval states are empty", () => {
-    expect(resolvedDecisionForApproval(undefined, null)).toBeUndefined();
-  });
-
-  it("returns undefined when the resolved approval belongs to another approval", () => {
-    expect(
-      resolvedDecisionForApproval(
-        { id: "approval-1" },
-        { approvalId: "approval-2", decision: "approved" },
-      ),
-    ).toBeUndefined();
-  });
-
-  it("returns the decision for the active approval", () => {
-    expect(
-      resolvedDecisionForApproval(
-        { id: "approval-1" },
-        { approvalId: "approval-1", decision: "rejected" },
-      ),
-    ).toBe("rejected");
-  });
-});
 
 describe("shouldResetActiveThreadForWorkspaceChange", () => {
   it("returns false when no active thread workspace exists", () => {
@@ -643,10 +618,9 @@ describe("sidebar thread status presentation", () => {
     ).toBe(true);
     expect(
       shouldShowSidebarThreadSpinner({
-        threadId: "thread-awaiting",
-        label: "Awaiting approval",
-        runStatus: "awaiting_approval",
-        activeRunId: "run-2",
+        threadId: "thread-finished",
+        label: "Finished",
+        runStatus: "finished",
       }),
     ).toBe(false);
     expect(

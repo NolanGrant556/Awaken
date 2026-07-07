@@ -6,10 +6,10 @@ import (
 )
 
 type Agent struct {
-	config       AgentConfig
-	conversation *context.Conversation
-	reqBuilder   *RequestBuilder
-	threadID     string
+	config                 AgentConfig
+	conversation           *context.Conversation
+	reqBuilder             *RequestBuilder
+	threadID               string
 	pendingUserAttachments []context.MessageAttachment
 }
 

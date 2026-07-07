@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -13,12 +12,11 @@ import (
 type RunStatus string
 
 const (
-	RunStatusRunning          RunStatus = "running"
-	RunStatusAwaitingApproval RunStatus = "awaiting_approval"
-	RunStatusCancelling       RunStatus = "cancelling"
-	RunStatusFinished         RunStatus = "finished"
-	RunStatusError            RunStatus = "error"
-	RunStatusCancelled        RunStatus = "cancelled"
+	RunStatusRunning    RunStatus = "running"
+	RunStatusCancelling RunStatus = "cancelling"
+	RunStatusFinished   RunStatus = "finished"
+	RunStatusError      RunStatus = "error"
+	RunStatusCancelled  RunStatus = "cancelled"
 )
 
 type EventKind string
@@ -31,17 +29,17 @@ const (
 )
 
 type Run struct {
-	RunID           string     `json:"run_id"`
-	ThreadID        string     `json:"thread_id"`
-	Input           string     `json:"input,omitempty"`
+	RunID            string               `json:"run_id"`
+	ThreadID         string               `json:"thread_id"`
+	Input            string               `json:"input,omitempty"`
 	InputAttachments []RunInputAttachment `json:"input_attachments,omitempty"`
-	Status          RunStatus  `json:"status"`
-	Result          string     `json:"result,omitempty"`
-	Error           string     `json:"error,omitempty"`
-	CancelRequested bool       `json:"cancel_requested,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
-	FinishedAt      *time.Time `json:"finished_at,omitempty"`
+	Status           RunStatus            `json:"status"`
+	Result           string               `json:"result,omitempty"`
+	Error            string               `json:"error,omitempty"`
+	CancelRequested  bool                 `json:"cancel_requested,omitempty"`
+	CreatedAt        time.Time            `json:"created_at"`
+	UpdatedAt        time.Time            `json:"updated_at"`
+	FinishedAt       *time.Time           `json:"finished_at,omitempty"`
 }
 
 type Event struct {
@@ -58,11 +56,16 @@ type Event struct {
 }
 
 type Session struct {
-	mu        sync.RWMutex
-	run       Run
-	cancel    context.CancelFunc
-	bus       *EventBus
-	approvals map[string]*pendingApproval
+	mu                 sync.RWMutex
+	run                Run
+	cancel             context.CancelFunc
+	bus                *EventBus
+	massMessageReviews map[string]*pendingMassMessageReview
+}
+
+type pendingMassMessageReview struct {
+	request  agentcore.AwakenEvent
+	decision chan agentcore.ReviewDecision
 }
 
 func NewSession(runID, threadID, input string, attachments []RunInputAttachment, cancel context.CancelFunc) *Session {
@@ -77,15 +80,10 @@ func NewSession(runID, threadID, input string, attachments []RunInputAttachment,
 			CreatedAt:        now,
 			UpdatedAt:        now,
 		},
-		cancel:    cancel,
-		bus:       NewEventBus(),
-		approvals: make(map[string]*pendingApproval),
+		cancel:             cancel,
+		bus:                NewEventBus(),
+		massMessageReviews: make(map[string]*pendingMassMessageReview),
 	}
-}
-
-type pendingApproval struct {
-	request  agentcore.ApprovalRequest
-	decision chan agentcore.ApprovalDecision
 }
 
 func (s *Session) Snapshot() Run {
@@ -125,7 +123,7 @@ func (s *Session) RequestCancel() Run {
 
 	s.run.CancelRequested = true
 	statusChanged := false
-	if s.run.Status == RunStatusRunning || s.run.Status == RunStatusAwaitingApproval {
+	if s.run.Status == RunStatusRunning {
 		s.run.Status = RunStatusCancelling
 		statusChanged = true
 	}
@@ -206,110 +204,95 @@ func (s *Session) RecordAgentEvent(event agentcore.AwakenEvent) {
 	bus.Append(wrapped, terminal)
 }
 
-func (s *Session) AwaitApproval(ctx context.Context, request agentcore.ApprovalRequest) (agentcore.ApprovalDecision, error) {
-	request = normalizeApprovalRequest(request)
-	pending := &pendingApproval{
-		request:  request,
-		decision: make(chan agentcore.ApprovalDecision, 1),
+func (s *Session) AwaitMassMessageReview(ctx context.Context, request agentcore.AwakenEvent) (agentcore.ReviewDecision, error) {
+	timestamp := request.Timestamp.UTC()
+	if request.Timestamp.IsZero() {
+		timestamp = time.Now().UTC()
+	}
+	request.Timestamp = timestamp
+	request.Type = agentcore.MassMessageReviewRequestedType
+	if strings.TrimSpace(request.ReviewID) == "" {
+		request.ReviewID = "mass_review"
 	}
 
-	now := time.Now().UTC()
-	s.mu.Lock()
-	if isTerminalStatus(s.run.Status) || s.run.Status == RunStatusCancelling {
-		s.mu.Unlock()
-		return "", context.Canceled
+	pending := &pendingMassMessageReview{
+		request:  request,
+		decision: make(chan agentcore.ReviewDecision, 1),
 	}
-	s.approvals[request.ID] = pending
-	s.run.Status = RunStatusAwaitingApproval
-	s.run.UpdatedAt = now
-	statusEvent := Event{
-		Kind:      EventKindRunStatusChanged,
-		Timestamp: now,
-		ThreadID:  s.run.ThreadID,
-		RunID:     s.run.RunID,
-		Status:    string(RunStatusAwaitingApproval),
+
+	s.mu.Lock()
+	if isTerminalStatus(s.run.Status) {
+		s.mu.Unlock()
+		return "", ErrRunTerminal
+	}
+	request.ThreadID = s.run.ThreadID
+	request.RunID = s.run.RunID
+	pending.request = request
+	s.run.UpdatedAt = timestamp
+	s.massMessageReviews[request.ReviewID] = pending
+	wrapped := Event{
+		Kind:       EventKindAgent,
+		Timestamp:  timestamp,
+		ThreadID:   s.run.ThreadID,
+		RunID:      s.run.RunID,
+		AgentEvent: request,
 	}
 	bus := s.bus
 	s.mu.Unlock()
 
-	bus.Append(statusEvent, false)
-
-	s.RecordAgentEvent(agentcore.AwakenEvent{
-		Type:                  agentcore.ApprovalRequestedEventType,
-		ApprovalID:            request.ID,
-		ToolCallID:            request.ToolCallID,
-		ToolName:              request.ToolName,
-		ApprovalTitle:         request.Title,
-		ApprovalDescription:   request.Description,
-		ApprovalRiskTone:      request.RiskTone,
-		ApprovalAffectedPaths: request.AffectedPaths,
-		ApprovalPatchSummary:  request.PatchSummary,
-	})
+	bus.Append(wrapped, false)
 
 	select {
 	case decision := <-pending.decision:
 		return decision, nil
 	case <-ctx.Done():
 		s.mu.Lock()
-		delete(s.approvals, request.ID)
+		delete(s.massMessageReviews, request.ReviewID)
 		s.mu.Unlock()
 		return "", ctx.Err()
 	}
 }
 
-func (s *Session) ResolveApproval(approvalID string, decision agentcore.ApprovalDecision) error {
-	approvalID = strings.TrimSpace(approvalID)
-	if approvalID == "" {
-		return ErrApprovalNotFound
+func (s *Session) ResolveMassMessageReview(reviewID string, decision agentcore.ReviewDecision) error {
+	reviewID = strings.TrimSpace(reviewID)
+	if reviewID == "" {
+		return ErrMassMessageReviewNotFound
+	}
+	if decision != agentcore.ReviewDecisionApproved && decision != agentcore.ReviewDecisionRejected {
+		return ErrInvalidReviewDecision
 	}
 
 	now := time.Now().UTC()
 	s.mu.Lock()
-	pending, ok := s.approvals[approvalID]
-	if !ok {
-		s.mu.Unlock()
-		return ErrApprovalNotFound
-	}
-
-	switch {
-	case isTerminalStatus(s.run.Status):
+	if isTerminalStatus(s.run.Status) {
 		s.mu.Unlock()
 		return ErrRunTerminal
-	case s.run.Status == RunStatusCancelling:
-		s.mu.Unlock()
-		return ErrRunCancelling
 	}
-
-	delete(s.approvals, approvalID)
-	request := pending.request
-
-	s.run.Status = RunStatusRunning
+	pending, ok := s.massMessageReviews[reviewID]
+	if !ok {
+		s.mu.Unlock()
+		return ErrMassMessageReviewNotFound
+	}
+	delete(s.massMessageReviews, reviewID)
+	resolved := pending.request
+	resolved.Type = agentcore.MassMessageReviewResolvedType
+	resolved.Timestamp = now
+	resolved.ReviewDecision = decision
+	resolved.ThreadID = s.run.ThreadID
+	resolved.RunID = s.run.RunID
 	s.run.UpdatedAt = now
-	statusEvent := Event{
-		Kind:      EventKindRunStatusChanged,
-		Timestamp: now,
-		ThreadID:  s.run.ThreadID,
-		RunID:     s.run.RunID,
-		Status:    string(RunStatusRunning),
+	wrapped := Event{
+		Kind:       EventKindAgent,
+		Timestamp:  now,
+		ThreadID:   s.run.ThreadID,
+		RunID:      s.run.RunID,
+		AgentEvent: resolved,
 	}
 	bus := s.bus
 	s.mu.Unlock()
 
-	bus.Append(statusEvent, false)
-
-	s.RecordAgentEvent(agentcore.AwakenEvent{
-		Type:                agentcore.ApprovalResolvedEventType,
-		ApprovalID:          approvalID,
-		ToolCallID:          request.ToolCallID,
-		ToolName:            request.ToolName,
-		ApprovalTitle:       request.Title,
-		ApprovalDescription: request.Description,
-		ApprovalRiskTone:    request.RiskTone,
-		ApprovalDecision:    decision,
-	})
-
+	bus.Append(wrapped, false)
 	pending.decision <- decision
-	close(pending.decision)
 	return nil
 }
 
@@ -421,32 +404,6 @@ func (s *Session) CompleteError(message, code string) {
 	bus.Append(event, true)
 }
 
-func normalizeApprovalRequest(request agentcore.ApprovalRequest) agentcore.ApprovalRequest {
-	request.ID = strings.TrimSpace(request.ID)
-	request.ToolCallID = strings.TrimSpace(request.ToolCallID)
-	request.ToolName = strings.TrimSpace(request.ToolName)
-	request.Title = strings.TrimSpace(request.Title)
-	request.Description = strings.TrimSpace(request.Description)
-	request.PatchSummary = strings.TrimSpace(request.PatchSummary)
-	request.AffectedPaths = trimStrings(request.AffectedPaths)
-
-	if request.ID == "" {
-		request.ID = newRuntimeID("approval")
-	}
-	if request.Title == "" {
-		if request.ToolName != "" {
-			request.Title = fmt.Sprintf("Approve %s", request.ToolName)
-		} else {
-			request.Title = "Approval required"
-		}
-	}
-	if request.RiskTone == "" {
-		request.RiskTone = agentcore.ApprovalRiskWarning
-	}
-
-	return request
-}
-
 func isTerminalStatus(status RunStatus) bool {
 	switch status {
 	case RunStatusFinished, RunStatusError, RunStatusCancelled:
@@ -463,14 +420,4 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func trimStrings(values []string) []string {
-	trimmed := make([]string, 0, len(values))
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			trimmed = append(trimmed, strings.TrimSpace(value))
-		}
-	}
-	return trimmed
 }

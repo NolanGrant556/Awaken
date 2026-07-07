@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	convcontext "awaken/src/context"
 	"awaken/src/agentcore/executors"
 	"awaken/src/agentcore/guardian"
 	"awaken/src/agentcore/subagent"
+	convcontext "awaken/src/context"
 	"awaken/src/internal/outputlimit"
 	"awaken/src/tool"
 	"awaken/src/tool/profile"
@@ -23,7 +23,6 @@ type ToolRuntime struct {
 	sink              EventSink
 	permissionContext tool.PermissionContext
 	autoPolicy        AutoToolPolicy
-	useApprovalForAsk bool
 	serverConnected   func(serverName string) bool
 	auditSink         tool.AuditSink
 	runID             string
@@ -58,7 +57,6 @@ type ToolRuntime struct {
 type ToolRuntimeConfig struct {
 	PermissionContext tool.PermissionContext
 	AutoToolPolicy    AutoToolPolicy
-	UseApprovalForAsk bool
 	ServerConnected   func(serverName string) bool
 	AuditSink         tool.AuditSink
 	RunID             string
@@ -142,7 +140,6 @@ func NewToolRuntimeWithConfig(sink EventSink, config ToolRuntimeConfig) *ToolRun
 		sink:              normalizeEventSink(sink),
 		permissionContext: config.PermissionContext.Normalize(),
 		autoPolicy:        policy,
-		useApprovalForAsk: config.UseApprovalForAsk,
 		serverConnected:   config.ServerConnected,
 		auditSink:         auditSink,
 		runID:             config.RunID,
@@ -313,8 +310,8 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	toolCtx := tool.ContextWithPermissionContext(ctx, rt.permissionContext)
 	permission := rt.decideToolPermission(toolCtx, selectedTool, input)
 	def := selectedTool.Definition()
-	result.AffectedPaths = append([]string(nil), permission.ApprovalRequest.AffectedPaths...)
-	result.PatchSummary = strings.TrimSpace(permission.ApprovalRequest.PatchSummary)
+	result.AffectedPaths = append([]string(nil), permission.Metadata.AffectedPaths...)
+	result.PatchSummary = strings.TrimSpace(permission.Metadata.PatchSummary)
 	rt.emitPatchPreview(result, selectedTool, input)
 
 	decisionRequest := inferToolDecisionRequest(
@@ -331,25 +328,8 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	switch permission.Behavior {
 	case tool.PermissionAllow:
 		execDecision = rt.autoPolicy.DecideExecution(toolCtx, intent, decisionRequest)
-	case tool.PermissionDeny:
+	case tool.PermissionDeny, tool.PermissionNeedsAuth, tool.PermissionNeedsRuntime, tool.PermissionUnsupported, tool.PermissionNeedsMassMessageReview:
 		execDecision = DefaultAutoToolPolicy{}.DecideExecution(toolCtx, intent, decisionRequest)
-	case tool.PermissionAsk:
-		if rt.useApprovalForAsk {
-			execDecision = profile.AllowDecision(
-				string(profile.DecisionSourceToolRule),
-				"compatibility approval path",
-			)
-			execDecision.UpdatedIntent = &intent
-			approvalDecision, err := rt.awaitApproval(ctx, selectedTool, result, input, permission)
-			if err != nil {
-				return finalizeToolResult(synthesizeFailedToolResult(result, "approval_failed", fmt.Sprintf("工具审批失败: %v", err)))
-			}
-			if approvalDecision == ApprovalDecisionRejected {
-				return finalizeToolResult(synthesizeApprovalRejectedToolResult(result))
-			}
-			break
-		}
-		execDecision = rt.autoPolicy.DecideExecution(toolCtx, intent, decisionRequest)
 	default:
 		execDecision = profile.DenyDecision(
 			string(profile.DecisionSourcePolicyError),
@@ -383,13 +363,55 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	switch decision.Action {
 	case ToolDecisionAllow:
 	case ToolDecisionDeny:
-		if permission.Reason == "needs_auth" {
-			rt.emitToolProgress(result, "needs_auth", "tool requires authentication", 0)
-		}
 		result = synthesizeDeniedToolResult(result, decision)
 		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
 		rt.writeAudit(def, result, permission, string(decision.Source), "denied", "")
 		return finalizeToolResult(result)
+	case ToolDecisionNeedsAuth:
+		rt.emitToolProgress(result, "needs_auth", firstNonEmpty(decision.Reason, "tool requires authentication"), 0)
+		rt.emitAuthRequired(result, def, decision)
+		result = synthesizeStructuredToolResult(result, decision, "needs_auth", "需要授权")
+		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
+		rt.writeAudit(def, result, permission, string(decision.Source), "needs_auth", "")
+		return finalizeToolResult(result)
+	case ToolDecisionNeedsRuntime:
+		rt.emitToolProgress(result, "needs_runtime", firstNonEmpty(decision.Reason, "tool requires local runtime"), 0)
+		rt.emitRuntimeMissing(result, decision)
+		result = synthesizeStructuredToolResult(result, decision, "needs_runtime", "缺少本地 runtime")
+		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
+		rt.writeAudit(def, result, permission, string(decision.Source), "needs_runtime", "")
+		return finalizeToolResult(result)
+	case ToolDecisionUnsupported:
+		rt.emitToolProgress(result, "unsupported", firstNonEmpty(decision.Reason, "tool capability is unsupported"), 0)
+		result = synthesizeStructuredToolResult(result, decision, "unsupported", "暂不支持该工具能力")
+		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
+		rt.writeAudit(def, result, permission, string(decision.Source), "unsupported", "")
+		return finalizeToolResult(result)
+	case ToolDecisionNeedsMassMessageReview:
+		rt.emitToolProgress(result, "needs_mass_message_review", firstNonEmpty(decision.Reason, "mass message send requires human review"), 0)
+		reviewRequest := rt.massMessageReviewEvent(result, def, permission)
+		awaiter, ok := rt.sink.(MassMessageReviewAwaiter)
+		if !ok {
+			rt.sink.Emit(reviewRequest)
+			result = synthesizeStructuredToolResult(result, decision, "needs_mass_message_review", "群发消息需要人工审核")
+			result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
+			rt.writeAudit(def, result, permission, string(decision.Source), "needs_mass_message_review", "")
+			return finalizeToolResult(result)
+		}
+		reviewDecision, err := awaiter.AwaitMassMessageReview(ctx, reviewRequest)
+		if err != nil {
+			result = synthesizeStructuredToolResult(result, decision, "needs_mass_message_review", "群发消息审核未完成")
+			result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
+			rt.writeAudit(def, result, permission, string(decision.Source), "needs_mass_message_review", err.Error())
+			return finalizeToolResult(result)
+		}
+		if reviewDecision != ReviewDecisionApproved {
+			result = synthesizeStructuredToolResult(result, decision, "mass_message_review_rejected", "群发消息审核拒绝")
+			result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
+			rt.writeAudit(def, result, permission, string(decision.Source), "mass_message_review_rejected", "")
+			return finalizeToolResult(result)
+		}
+		rt.emitToolProgress(result, "mass_message_review_approved", "mass message review approved", 0)
 	case ToolDecisionAbort:
 		result = synthesizeAbortedToolResult(result, decision)
 		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
@@ -653,27 +675,6 @@ func (rt *ToolRuntime) decideToolPermission(
 	return tool.DecideWithServerCheck(ctx, def, rt.serverConnected)
 }
 
-func (rt *ToolRuntime) awaitApproval(
-	ctx stdcontext.Context,
-	selectedTool tool.Tool,
-	result ToolExecutionResult,
-	input string,
-	permission tool.PermissionDecision,
-) (ApprovalDecision, error) {
-	awaiter, ok := rt.sink.(ApprovalAwaiter)
-	if !ok {
-		return "", fmt.Errorf("approval required for %s but no approval awaiter is configured", result.Name)
-	}
-
-	request := approvalRequestForPermission(selectedTool, result, input, permission)
-
-	decision, err := awaiter.AwaitApproval(ctx, request)
-	if err != nil {
-		return "", err
-	}
-	return decision, nil
-}
-
 func (rt *ToolRuntime) emitArtifacts(
 	result ToolExecutionResult,
 	selectedTool tool.Tool,
@@ -733,12 +734,72 @@ func (rt *ToolRuntime) emitToolProgress(result ToolExecutionResult, stage, messa
 	})
 }
 
+func (rt *ToolRuntime) emitAuthRequired(result ToolExecutionResult, def tool.ToolDefinition, decision ToolDecision) {
+	rt.sink.Emit(AwakenEvent{
+		Type:               AuthRequiredEventType,
+		Timestamp:          timeNowUTC(),
+		ToolCallID:         result.ToolCallID,
+		ToolName:           result.Name,
+		Content:            decision.Reason,
+		ToolDecisionAction: string(decision.Action),
+		ToolDecisionSource: string(decision.Source),
+		ToolDecisionReason: strings.TrimSpace(decision.Reason),
+		ToolDefinition:     def,
+		AuthProvider:       firstNonEmpty(def.Annotations.ServerName, def.Annotations.ToolName, string(def.Source)),
+	})
+}
+
+func (rt *ToolRuntime) emitRuntimeMissing(result ToolExecutionResult, decision ToolDecision) {
+	rt.sink.Emit(AwakenEvent{
+		Type:               RuntimeMissingEventType,
+		Timestamp:          timeNowUTC(),
+		ToolCallID:         result.ToolCallID,
+		ToolName:           result.Name,
+		Content:            decision.Reason,
+		ToolDecisionAction: string(decision.Action),
+		ToolDecisionSource: string(decision.Source),
+		ToolDecisionReason: strings.TrimSpace(decision.Reason),
+		RuntimeName:        "primary-runtime",
+	})
+}
+
+func (rt *ToolRuntime) massMessageReviewEvent(result ToolExecutionResult, def tool.ToolDefinition, permission tool.PermissionDecision) AwakenEvent {
+	metadata := permission.Metadata.MassMessage
+	if metadata == nil {
+		metadata = def.Annotations.MassMessage
+	}
+	msg := tool.MassMessageMetadata{}
+	if metadata != nil {
+		msg = *metadata
+	}
+	if strings.TrimSpace(msg.ReviewID) == "" {
+		msg.ReviewID = newAwakenID("mass_review")
+	}
+	if strings.TrimSpace(msg.SourceTool) == "" {
+		msg.SourceTool = result.Name
+	}
+	return AwakenEvent{
+		Type:                       MassMessageReviewRequestedType,
+		Timestamp:                  timeNowUTC(),
+		ToolCallID:                 result.ToolCallID,
+		ToolName:                   result.Name,
+		ToolDefinition:             def,
+		ReviewID:                   msg.ReviewID,
+		MassMessageChannel:         msg.Channel,
+		MassMessageRecipientScope:  msg.RecipientScope,
+		MassMessageRecipientCount:  msg.RecipientCount,
+		MassMessageBodyPreview:     msg.BodyPreview,
+		MassMessageTemplatePreview: msg.TemplatePreview,
+		MassMessageAttachments:     append([]string(nil), msg.Attachments...),
+		MassMessageSendingAccount:  msg.SendingAccount,
+		MassMessageSourceTool:      msg.SourceTool,
+	}
+}
+
 func (rt *ToolRuntime) writeAudit(def tool.ToolDefinition, result ToolExecutionResult, permission tool.PermissionDecision, decision, outcome, errReason string) {
 	now := timeNowUTC()
 	origin := "system_policy"
-	if permission.Behavior == tool.PermissionAsk {
-		origin = "local_ui"
-	} else if permission.Behavior == tool.PermissionAllow {
+	if permission.Behavior == tool.PermissionAllow {
 		origin = "auto_allow"
 	}
 	rt.auditSink.Write(tool.ToolAuditRecord{
@@ -749,7 +810,7 @@ func (rt *ToolRuntime) writeAudit(def tool.ToolDefinition, result ToolExecutionR
 		Annotations:    def.Annotations,
 		Decision:       decision,
 		DecisionReason: permission.Reason,
-		ApprovalOrigin: origin,
+		DecisionOrigin: origin,
 		StartedAt:      now,
 		CompletedAt:    now,
 		Outcome:        outcome,
@@ -856,14 +917,14 @@ func (rt *ToolRuntime) emitPatchPreview(result ToolExecutionResult, selectedTool
 	}
 	limited := outputlimit.Limit(preview.Patch, maxPatchPreviewChars)
 	rt.sink.Emit(AwakenEvent{
-		Type:                  PatchUpdatedEventType,
-		Timestamp:             timeNowUTC(),
-		ToolCallID:            result.ToolCallID,
-		ToolName:              result.Name,
-		Patch:                 limited.Content,
-		PatchSummary:          strings.TrimSpace(preview.Summary),
-		ApprovalAffectedPaths: preview.AffectedPaths,
-		Truncated:             preview.Truncated || limited.Truncated,
+		Type:          PatchUpdatedEventType,
+		Timestamp:     timeNowUTC(),
+		ToolCallID:    result.ToolCallID,
+		ToolName:      result.Name,
+		Patch:         limited.Content,
+		PatchSummary:  strings.TrimSpace(preview.Summary),
+		AffectedPaths: preview.AffectedPaths,
+		Truncated:     preview.Truncated || limited.Truncated,
 	})
 }
 
@@ -883,8 +944,8 @@ func (rt *ToolRuntime) emitToolPermissionDecided(
 		ToolDecisionAction:       string(decision.Action),
 		ToolDecisionSource:       string(decision.Source),
 		ToolDecisionReason:       strings.TrimSpace(decision.Reason),
-		ApprovalAffectedPaths:    result.AffectedPaths,
-		ApprovalPatchSummary:     result.PatchSummary,
+		AffectedPaths:            result.AffectedPaths,
+		PatchSummary:             result.PatchSummary,
 		// Task 16 unified observability: surface the profile name and the
 		// transform origin (original tool name + rewritten tool name) so the
 		// Desktop UI can render "Profile: workspace_write" and
@@ -959,6 +1020,17 @@ func executionDecisionToToolDecision(ed profile.ExecutionDecision) ToolDecision 
 				td.UpdatedInput = string(data)
 			}
 		}
+	case profile.DecisionNeedsAuth:
+		td.Action = ToolDecisionNeedsAuth
+		td.Source = ToolDecisionSourceAuthRequired
+	case profile.DecisionNeedsRuntime:
+		td.Action = ToolDecisionNeedsRuntime
+		td.Source = ToolDecisionSourceRuntimeRequired
+	case profile.DecisionUnsupported:
+		td.Action = ToolDecisionUnsupported
+	case profile.DecisionNeedsMassMessageReview:
+		td.Action = ToolDecisionNeedsMassMessageReview
+		td.Source = ToolDecisionSourceMassMessageReview
 	default:
 		td.Action = ToolDecisionDeny
 		td.Source = ToolDecisionSourcePolicyError
@@ -996,97 +1068,15 @@ func synthesizeFailedToolResult(result ToolExecutionResult, code string, content
 	return result
 }
 
-func synthesizeApprovalRejectedToolResult(result ToolExecutionResult) ToolExecutionResult {
-	result.Content = "工具执行已被审批拒绝"
+func synthesizeStructuredToolResult(result ToolExecutionResult, decision ToolDecision, code string, prefix string) ToolExecutionResult {
+	reason := firstNonEmpty(strings.TrimSpace(decision.Reason), "tool execution blocked")
+	result.Content = fmt.Sprintf("%s: %s", prefix, reason)
 	result.IsError = true
 	result.Status = ToolExecutionDenied
-	result.ErrorCode = "approval_rejected"
-	result.DecisionSource = ToolDecisionSourceToolRule
-	result.DecisionReason = "审批拒绝"
+	result.ErrorCode = code
+	result.DecisionSource = decision.Source
+	result.DecisionReason = reason
 	return result
-}
-
-func approvalDescription(toolName string, input string) string {
-	trimmed := excerptString(strings.TrimSpace(input), 240)
-	if trimmed == "" {
-		return fmt.Sprintf("%s requires approval before execution.", toolName)
-	}
-	return fmt.Sprintf("%s requires approval before execution.\n\n%s", toolName, trimmed)
-}
-
-func approvalRequestForPermission(
-	selectedTool tool.Tool,
-	result ToolExecutionResult,
-	input string,
-	permission tool.PermissionDecision,
-) ApprovalRequest {
-	def := selectedTool.Definition()
-	affectedSystems := []string{}
-	if def.Annotations.ServerName != "" {
-		affectedSystems = append(affectedSystems, def.Annotations.ServerName)
-	}
-	request := ApprovalRequest{
-		ID:             newAwakenID("approval"),
-		ToolCallID:     result.ToolCallID,
-		ToolName:       result.Name,
-		Title:          fmt.Sprintf("Approve %s", result.Name),
-		Description:    approvalDescription(result.Name, input),
-		RiskTone:       ApprovalRiskWarning,
-		ToolDefinition: def,
-		RiskHints: &tool.RiskHints{
-			Destructive:     def.Annotations.Destructive,
-			OpenWorld:       def.Annotations.OpenWorld,
-			RequiresAuth:    def.Annotations.RequiresAuth,
-			AffectedSystems: affectedSystems,
-		},
-		AllowedActions: []string{"approve", "reject", "edit_plan", "request_more_info"},
-	}
-
-	if describingTool, ok := selectedTool.(tool.ApprovalDescribingTool); ok {
-		mergeApprovalRequest(&request, describingTool.ApprovalRequest(input))
-	}
-	if strings.TrimSpace(permission.Reason) != "" {
-		request.Description = permissionDescription(permission.Reason, input)
-	}
-	mergeApprovalRequest(&request, permission.ApprovalRequest)
-
-	return request
-}
-
-func mergeApprovalRequest(request *ApprovalRequest, metadata tool.ApprovalRequest) {
-	if strings.TrimSpace(metadata.Title) != "" {
-		request.Title = strings.TrimSpace(metadata.Title)
-	}
-	if strings.TrimSpace(metadata.Description) != "" {
-		request.Description = strings.TrimSpace(metadata.Description)
-	}
-	if riskTone, ok := approvalRiskToneFromString(metadata.RiskTone); ok {
-		request.RiskTone = riskTone
-	}
-	if len(metadata.AffectedPaths) > 0 {
-		request.AffectedPaths = metadata.AffectedPaths
-	}
-	if strings.TrimSpace(metadata.PatchSummary) != "" {
-		request.PatchSummary = strings.TrimSpace(metadata.PatchSummary)
-	}
-}
-
-func approvalRiskToneFromString(value string) (ApprovalRiskTone, bool) {
-	switch ApprovalRiskTone(strings.TrimSpace(value)) {
-	case ApprovalRiskSafe, ApprovalRiskWarning, ApprovalRiskDanger:
-		return ApprovalRiskTone(strings.TrimSpace(value)), true
-	default:
-		return "", false
-	}
-}
-
-func permissionDescription(reason string, input string) string {
-	trimmedReason := strings.TrimSpace(reason)
-	trimmedInput := excerptString(strings.TrimSpace(input), 240)
-	if trimmedInput == "" {
-		return trimmedReason
-	}
-	return fmt.Sprintf("%s\n\n%s", trimmedReason, trimmedInput)
 }
 
 func normalizeArtifactStatus(status string) ArtifactStatus {

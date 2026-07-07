@@ -198,8 +198,8 @@ func TestMapEventToolPermissionDecided(t *testing.T) {
 		ToolDecisionAction:       "deny",
 		ToolDecisionSource:       "headless_default",
 		ToolDecisionReason:       "apply_patch will modify files",
-		ApprovalAffectedPaths:    []string{"note.md"},
-		ApprovalPatchSummary:     "新增 1 个文件",
+		AffectedPaths:            []string{"note.md"},
+		PatchSummary:             "新增 1 个文件",
 	})
 
 	if len(events) != 1 {
@@ -212,8 +212,8 @@ func TestMapEventToolPermissionDecided(t *testing.T) {
 	if got.ToolDecisionAction != "deny" || got.ToolDecisionSource != "headless_default" {
 		t.Fatalf("unexpected decision fields: %+v", got)
 	}
-	if len(got.ApprovalAffectedPaths) != 1 || got.ApprovalAffectedPaths[0] != "note.md" {
-		t.Fatalf("unexpected affected paths: %+v", got.ApprovalAffectedPaths)
+	if len(got.AffectedPaths) != 1 || got.AffectedPaths[0] != "note.md" {
+		t.Fatalf("unexpected affected paths: %+v", got.AffectedPaths)
 	}
 }
 
@@ -242,14 +242,14 @@ func TestMapEventCommandOutput(t *testing.T) {
 
 func TestMapEventPatchUpdated(t *testing.T) {
 	events := MapEvent(agentcore.AwakenEvent{
-		Type:                  agentcore.PatchUpdatedEventType,
-		ThreadID:              "thread-1",
-		RunID:                 "run-1",
-		ToolCallID:            "tool-1",
-		ToolName:              "apply_patch",
-		Patch:                 "*** Begin Patch\n*** End Patch",
-		PatchSummary:          "新增 1 个文件",
-		ApprovalAffectedPaths: []string{"note.md"},
+		Type:          agentcore.PatchUpdatedEventType,
+		ThreadID:      "thread-1",
+		RunID:         "run-1",
+		ToolCallID:    "tool-1",
+		ToolName:      "apply_patch",
+		Patch:         "*** Begin Patch\n*** End Patch",
+		PatchSummary:  "新增 1 个文件",
+		AffectedPaths: []string{"note.md"},
 	})
 
 	if len(events) != 1 {
@@ -261,7 +261,7 @@ func TestMapEventPatchUpdated(t *testing.T) {
 	if events[0].ToolCallID != "tool-1" || events[0].ToolCallName != "apply_patch" || events[0].PatchSummary != "新增 1 个文件" {
 		t.Fatalf("unexpected patch identity: %+v", events[0])
 	}
-	if events[0].Patch == "" || len(events[0].ApprovalAffectedPaths) != 1 || events[0].ApprovalAffectedPaths[0] != "note.md" {
+	if events[0].Patch == "" || len(events[0].AffectedPaths) != 1 || events[0].AffectedPaths[0] != "note.md" {
 		t.Fatalf("unexpected patch payload: %+v", events[0])
 	}
 }
@@ -403,27 +403,26 @@ func TestMapEventCompactMetadataOptionalFields(t *testing.T) {
 	}
 }
 
-func TestMapEventApprovalRequested(t *testing.T) {
+func TestMapEventAuthRequired(t *testing.T) {
 	events := MapEvent(agentcore.AwakenEvent{
-		Type:                agentcore.ApprovalRequestedEventType,
-		ThreadID:            "thread-1",
-		RunID:               "run-1",
-		ToolCallID:          "tool-1",
-		ToolName:            "write_file",
-		ApprovalID:          "approval-1",
-		ApprovalTitle:       "Approve write_file",
-		ApprovalDescription: "Write README.md",
-		ApprovalRiskTone:    agentcore.ApprovalRiskDanger,
+		Type:         agentcore.AuthRequiredEventType,
+		ThreadID:     "thread-1",
+		RunID:        "run-1",
+		ToolCallID:   "tool-1",
+		ToolName:     "outlook_send",
+		Content:      "outlook account is not connected",
+		AuthProvider: "outlook",
+		AuthURL:      "https://login.example.test",
 	})
 
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(events))
 	}
-	if events[0].Type != EventAwakenApprovalRequested {
-		t.Fatalf("expected AWAKEN_APPROVAL_REQUESTED, got %s", events[0].Type)
+	if events[0].Type != EventAwakenAuthRequired {
+		t.Fatalf("expected AWAKEN_AUTH_REQUIRED, got %s", events[0].Type)
 	}
-	if events[0].ApprovalID != "approval-1" || events[0].ApprovalRiskTone != "danger" {
-		t.Fatalf("unexpected approval payload: %+v", events[0])
+	if events[0].AuthProvider != "outlook" || events[0].AuthURL == "" {
+		t.Fatalf("unexpected auth payload: %+v", events[0])
 	}
 }
 

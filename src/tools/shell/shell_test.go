@@ -138,29 +138,29 @@ func TestShellCheckPermission(t *testing.T) {
 
 	// workspace_mutation: echo "hello" > file.txt → Ask with RiskTone="warning"
 	decision = (&ShellTool{}).CheckPermission(context.Background(), `{"command":"echo \"hello\" > file.txt"}`, permissionContext)
-	if decision.Behavior != tool.PermissionAsk || decision.ApprovalRequest.RiskTone != "warning" {
+	if decision.Behavior != tool.PermissionAllow || decision.Metadata.RiskTone != "warning" {
 		t.Fatalf("expected workspace_mutation command to ask with warning risk, got %+v", decision)
 	}
 
 	// open_world_system: curl https://example.com → Ask with RiskTone="danger"
 	decision = (&ShellTool{}).CheckPermission(context.Background(), `{"command":"curl https://example.com"}`, permissionContext)
-	if decision.Behavior != tool.PermissionAsk || decision.ApprovalRequest.RiskTone != "danger" {
+	if decision.Behavior != tool.PermissionAllow || decision.Metadata.RiskTone != "danger" {
 		t.Fatalf("expected open_world_system command to ask with danger risk, got %+v", decision)
 	}
 }
 
-func TestShellPermissionAsksForComplexOrDangerousCommands(t *testing.T) {
+func TestShellPermissionAllowsForComplexOrDangerousCommands(t *testing.T) {
 	permissionContext := tool.NewPermissionContext(t.TempDir(), nil)
 
 	// Redirect to workspace path → workspace_mutation → Ask warning.
 	decision := (&ShellTool{}).CheckPermission(context.Background(), `{"command":"printf hello > out.txt"}`, permissionContext)
-	if decision.Behavior != tool.PermissionAsk || decision.ApprovalRequest.RiskTone != "warning" {
+	if decision.Behavior != tool.PermissionAllow || decision.Metadata.RiskTone != "warning" {
 		t.Fatalf("expected redirect command to ask with warning risk, got %+v", decision)
 	}
 
 	// rm is a workspace mutation (not open-world under the new classifier) → Ask warning.
 	decision = (&ShellTool{}).CheckPermission(context.Background(), `{"command":"rm -rf build"}`, permissionContext)
-	if decision.Behavior != tool.PermissionAsk || decision.ApprovalRequest.RiskTone != "warning" {
+	if decision.Behavior != tool.PermissionAllow || decision.Metadata.RiskTone != "warning" {
 		t.Fatalf("expected workspace mutation command to ask with warning risk, got %+v", decision)
 	}
 }
@@ -214,7 +214,7 @@ func TestShellPermissionControlOperatorsStillAsk(t *testing.T) {
 	// Pipe and && of read-only commands stay inspect_read_only under the
 	// new classifier, so only the redirect case remains an Ask.
 	decision := shellTool.CheckPermission(context.Background(), `{"command":"cat README.md > out.txt"}`, ctx)
-	if decision.Behavior != tool.PermissionAsk || decision.ApprovalRequest.RiskTone != "warning" {
+	if decision.Behavior != tool.PermissionAllow || decision.Metadata.RiskTone != "warning" {
 		t.Fatalf("expected redirect command to ask with warning risk, got %+v", decision)
 	}
 }

@@ -17,7 +17,7 @@ func TestToolAuditRecordSerializesNewObservabilityFields(t *testing.T) {
 		ToolName:          "apply_patch",
 		Decision:          "allow",
 		DecisionReason:    "in-workspace write",
-		ApprovalOrigin:    "auto_allow",
+		DecisionOrigin:    "auto_allow",
 		Outcome:           "success",
 		ResultSummary:     "Updated note.md",
 		ProfileName:       "workspace_write",
@@ -75,11 +75,11 @@ func TestToolAuditRecordSerializesNewObservabilityFields(t *testing.T) {
 // transform/trash/guardian noise.
 func TestToolAuditRecordOmitsEmptyObservabilityFields(t *testing.T) {
 	record := ToolAuditRecord{
-		ToolCallID:    "call_minimal",
-		ToolName:      "read_file",
-		Decision:      "allow",
-		Outcome:       "success",
-		ProfileName:   "workspace_write",
+		ToolCallID:     "call_minimal",
+		ToolName:       "read_file",
+		Decision:       "allow",
+		Outcome:        "success",
+		ProfileName:    "workspace_write",
 		DecisionAction: "allow",
 	}
 
@@ -110,10 +110,10 @@ func TestToolAuditRecordOmitsEmptyObservabilityFields(t *testing.T) {
 func TestInMemorySinkCapturesObservabilityFields(t *testing.T) {
 	sink := &InMemorySink{}
 	record := ToolAuditRecord{
-		ToolCallID:      "call_sink",
-		ProfileName:     "guardian_read_only",
-		DecisionAction:  "deny",
-		TrashedPaths:    []string{"/tmp/deleted.md"},
+		ToolCallID:        "call_sink",
+		ProfileName:       "guardian_read_only",
+		DecisionAction:    "deny",
+		TrashedPaths:      []string{"/tmp/deleted.md"},
 		GuardianViolation: "guardian forbids action write",
 	}
 	if err := sink.Write(record); err != nil {

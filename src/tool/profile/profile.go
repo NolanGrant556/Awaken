@@ -1,7 +1,7 @@
 // Package profile defines ExecutionProfile, the unified policy bundle that
 // every tool execution lands on. This is the profile layer of Phase 3 (unified
 // execution profile) of the "零审批自动执行策略" spec: an ExecutionProfile
-// bundles the approval policy, permission profile, sandbox policy, network
+// bundles the permission profile, sandbox policy, network
 // policy, environment policy, and visibility policy that the runtime should
 // apply when executing a tool call.
 //
@@ -14,23 +14,6 @@
 package profile
 
 import "fmt"
-
-// ApprovalPolicy controls when (if ever) the runtime must surface an approval
-// prompt before executing a tool call.
-type ApprovalPolicy string
-
-const (
-	// ApprovalNever means the runtime never asks for approval; the auto
-	// policy's allow/deny decision is final.
-	ApprovalNever ApprovalPolicy = "never"
-	// ApprovalOnDeny means the runtime asks for approval only when the auto
-	// policy denies the call. Used by profiles that allow most operations
-	// but want a human escape hatch for denials.
-	ApprovalOnDeny ApprovalPolicy = "on_deny"
-	// ApprovalAlways means the runtime asks for approval on every call,
-	// regardless of the auto policy's decision.
-	ApprovalAlways ApprovalPolicy = "always"
-)
 
 // PermissionProfile bounds the kind of filesystem access a tool call may
 // perform. It is the profile-level analogue of the per-tool ReadOnly /
@@ -126,8 +109,6 @@ const (
 type ExecutionProfile struct {
 	// Name is the human-readable profile name (e.g. "workspace_write").
 	Name string
-	// ApprovalPolicy controls when approval is surfaced.
-	ApprovalPolicy ApprovalPolicy
 	// PermissionProfile bounds the kind of filesystem access allowed.
 	PermissionProfile PermissionProfile
 	// SandboxPolicy controls whether sandboxing is required.
@@ -146,9 +127,8 @@ type ExecutionProfile struct {
 // String returns a compact one-line representation suitable for logging.
 func (p ExecutionProfile) String() string {
 	return fmt.Sprintf(
-		"profile(name=%s approval=%s permission=%s sandbox=%s perms=%v net=%s env=%s visibility=%s)",
+		"profile(name=%s permission=%s sandbox=%s perms=%v net=%s env=%s visibility=%s)",
 		p.Name,
-		p.ApprovalPolicy,
 		p.PermissionProfile,
 		p.SandboxPolicy,
 		p.SandboxPermissions,
@@ -165,7 +145,6 @@ func (p ExecutionProfile) String() string {
 func GuardianReadOnly() ExecutionProfile {
 	return ExecutionProfile{
 		Name:               "guardian_read_only",
-		ApprovalPolicy:     ApprovalNever,
 		PermissionProfile:  PermissionReadOnly,
 		SandboxPolicy:      SandboxRequired,
 		SandboxPermissions: []string{"read"},
@@ -182,7 +161,6 @@ func GuardianReadOnly() ExecutionProfile {
 func WorkspaceReadOnly() ExecutionProfile {
 	return ExecutionProfile{
 		Name:               "workspace_read_only",
-		ApprovalPolicy:     ApprovalNever,
 		PermissionProfile:  PermissionReadOnly,
 		SandboxPolicy:      SandboxBestEffort,
 		SandboxPermissions: []string{"read"},
@@ -199,7 +177,6 @@ func WorkspaceReadOnly() ExecutionProfile {
 func WorkspaceWrite() ExecutionProfile {
 	return ExecutionProfile{
 		Name:               "workspace_write",
-		ApprovalPolicy:     ApprovalNever,
 		PermissionProfile:  PermissionWorkspaceWrite,
 		SandboxPolicy:      SandboxBestEffort,
 		SandboxPermissions: []string{"read", "write"},
@@ -211,12 +188,10 @@ func WorkspaceWrite() ExecutionProfile {
 
 // OpenWorldRestricted is the profile for agents that need network reach but
 // should still be bounded. It allows read/write within the workspace and
-// restricted network access, requires sandboxing, and surfaces a denial to
-// the user for approval when the auto policy denies a call.
+// restricted network access, and requires sandboxing.
 func OpenWorldRestricted() ExecutionProfile {
 	return ExecutionProfile{
 		Name:               "open_world_restricted",
-		ApprovalPolicy:     ApprovalOnDeny,
 		PermissionProfile:  PermissionOpenWorld,
 		SandboxPolicy:      SandboxRequired,
 		SandboxPermissions: []string{"read", "write"},
@@ -228,15 +203,13 @@ func OpenWorldRestricted() ExecutionProfile {
 
 // DangerFullAccess is the profile for explicit high-trust scenarios. It
 // disables sandboxing, allows read/write/execute, opens network access, and
-// inherits the full environment. Approval is surfaced on denial so a human
-// can intervene when the auto policy rejects a call.
+// inherits the full environment.
 //
 // This profile must only be used when the user has explicitly opted into a
 // high-trust run. The runtime should never default to it.
 func DangerFullAccess() ExecutionProfile {
 	return ExecutionProfile{
 		Name:               "danger_full_access",
-		ApprovalPolicy:     ApprovalOnDeny,
 		PermissionProfile:  PermissionDangerFullAccess,
 		SandboxPolicy:      SandboxNone,
 		SandboxPermissions: []string{"read", "write", "execute"},

@@ -237,10 +237,10 @@ func TestPatchPreviewIncludesPatchSummaryAndAffectedPaths(t *testing.T) {
 	}
 }
 
-// TestArtifactsPathConsistencyWithApprovalAffectedPaths verifies that artifact
-// paths match the corresponding entries in approval affectedPaths, using the
+// TestArtifactsPathConsistencyWithAffectedPaths verifies that artifact paths
+// match the corresponding entries in affectedPaths, using the
 // same normalization (workspace-relative + forward slash).
-func TestArtifactsPathConsistencyWithApprovalAffectedPaths(t *testing.T) {
+func TestArtifactsPathConsistencyWithAffectedPaths(t *testing.T) {
 	permissionContext, root := newTestPermissionContext(t)
 
 	// Create sub dir so we can test nested relative paths.

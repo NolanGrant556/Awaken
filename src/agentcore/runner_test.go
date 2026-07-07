@@ -203,13 +203,13 @@ func TestRunnerOpenAIApplyPatchAutoAllowFeedsBack(t *testing.T) {
 	})
 	defer server.Close()
 
-	var sawApproval bool
+	var sawAuthRequired bool
 	var gotEvents []AwakenEvent
 	agent := NewAgent(testAgentConfigWithWorkspace(server.URL, 3, root))
 	answer, err := agent.RunStreamWithEvents(context.Background(), "create via apply_patch", EventSinkFunc(func(event AwakenEvent) {
 		gotEvents = append(gotEvents, event)
-		if event.Type == ApprovalRequestedEventType {
-			sawApproval = true
+		if event.Type == AuthRequiredEventType {
+			sawAuthRequired = true
 		}
 	}))
 	if err != nil {
@@ -218,8 +218,8 @@ func TestRunnerOpenAIApplyPatchAutoAllowFeedsBack(t *testing.T) {
 	if answer != "patch applied" {
 		t.Fatalf("expected final answer, got %q", answer)
 	}
-	if sawApproval {
-		t.Fatalf("expected AUTO allow path not to request approval")
+	if sawAuthRequired {
+		t.Fatalf("expected AUTO allow path not to require auth")
 	}
 	startIndex := firstEventIndex(gotEvents, ToolCallStartedEventType)
 	decisionIndex := firstEventIndex(gotEvents, ToolPermissionDecidedEventType)
@@ -273,11 +273,11 @@ func TestRunnerAnthropicApplyPatchAutoAllowFeedsBack(t *testing.T) {
 	defer server.Close()
 
 	cfg := testAgentConfigWithWorkspace(server.URL+"/anthropic", 3, root)
-	var sawApproval bool
+	var sawAuthRequired bool
 	agent := NewAgent(cfg)
 	answer, err := agent.RunStreamWithEvents(context.Background(), "create via anthropic apply_patch", EventSinkFunc(func(event AwakenEvent) {
-		if event.Type == ApprovalRequestedEventType {
-			sawApproval = true
+		if event.Type == AuthRequiredEventType {
+			sawAuthRequired = true
 		}
 	}))
 	if err != nil {
@@ -286,8 +286,8 @@ func TestRunnerAnthropicApplyPatchAutoAllowFeedsBack(t *testing.T) {
 	if answer != "anthropic patch applied" {
 		t.Fatalf("expected final answer, got %q", answer)
 	}
-	if sawApproval {
-		t.Fatalf("expected AUTO allow path not to request approval")
+	if sawAuthRequired {
+		t.Fatalf("expected AUTO allow path not to require auth")
 	}
 }
 
@@ -366,7 +366,7 @@ func TestRunnerHundredToolLoopStopsAtMaxTurns(t *testing.T) {
 	var approvalCount, decisionCount int
 	for _, event := range gotEvents {
 		switch event.Type {
-		case ApprovalRequestedEventType:
+		case AuthRequiredEventType:
 			approvalCount++
 		case ToolPermissionDecidedEventType:
 			decisionCount++
@@ -821,22 +821,22 @@ data: {"type":"message_stop"}`,
 		t.Fatalf("expected handled, got %q", answer)
 	}
 
-	var sawToolResult, sawApproval bool
+	var sawToolResult, sawAuthRequired bool
 	var toolResultContent string
 	for _, ev := range gotEvents {
 		switch ev.Type {
 		case ToolResultEventType:
 			sawToolResult = true
 			toolResultContent = ev.Content
-		case ApprovalRequestedEventType:
-			sawApproval = true
+		case AuthRequiredEventType:
+			sawAuthRequired = true
 		}
 	}
 	if !sawToolResult {
 		t.Fatalf("expected ToolResult event, got events: %+v", gotEvents)
 	}
-	if sawApproval {
-		t.Fatalf("unexpected approval request for read-only tool")
+	if sawAuthRequired {
+		t.Fatalf("unexpected auth requirement for read-only tool")
 	}
 	if !strings.Contains(toolResultContent, "outside workspace") &&
 		!strings.Contains(toolResultContent, "outside readable roots") &&
@@ -907,7 +907,7 @@ func TestRunnerRunStreamWithEventsPlainQA(t *testing.T) {
 
 	for _, event := range gotEvents {
 		switch event.Type {
-		case ToolCallStartedEventType, ToolCallArgsEventType, ToolCallFinishedEventType, ToolResultEventType, ApprovalRequestedEventType:
+		case ToolCallStartedEventType, ToolCallArgsEventType, ToolCallFinishedEventType, ToolResultEventType, AuthRequiredEventType:
 			t.Fatalf("unexpected event type in plain Q&A: %s", event.Type)
 		}
 	}

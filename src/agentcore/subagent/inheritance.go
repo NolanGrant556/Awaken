@@ -132,28 +132,10 @@ func envRank(p profile.EnvPolicy) int {
 	return -1
 }
 
-// approvalRank ranks ApprovalPolicy values from least to most permissive.
-// Higher rank means the runtime asks for approval more often, which is
-// MORE permissive from the agent's perspective (more chances to bypass
-// auto-deny). Child rank MUST be <= parent rank.
-//
-// Unknown policies return -1 so they are always rejected.
-func approvalRank(p profile.ApprovalPolicy) int {
-	switch p {
-	case profile.ApprovalNever:
-		return 0
-	case profile.ApprovalOnDeny:
-		return 1
-	case profile.ApprovalAlways:
-		return 2
-	}
-	return -1
-}
-
 // ValidateNoEscalation checks that the child profile does NOT exceed the
 // parent's permissions. Escalation is detected by comparing all
 // security-related fields (PermissionProfile, SandboxPolicy, NetworkPolicy,
-// EnvPolicy, SandboxPermissions, ApprovalPolicy): for each field, the
+// EnvPolicy, SandboxPermissions): for each field, the
 // child's permissiveness MUST be less than or equal to the parent's.
 //
 // Escalation rules (from the spec):
@@ -171,9 +153,6 @@ func approvalRank(p profile.ApprovalPolicy) int {
 //     escalate to open. open → can be anything.
 //   - EnvPolicy: minimal → can stay minimal. Cannot escalate to inherit.
 //     inherit → can be anything.
-//   - ApprovalPolicy: never → can stay never. Cannot escalate to on_deny or
-//     always. on_deny → can stay on_deny or downgrade to never. Cannot
-//     escalate to always. always → can be anything.
 //   - SandboxPermissions: the child's set MUST be a subset of the parent's.
 //     The child cannot hold a capability the parent does not have.
 //
@@ -273,29 +252,6 @@ func ValidateNoEscalation(childProfile, parentProfile *profile.ExecutionProfile)
 			"subagent profile escalation denied: child env %q (rank %d) exceeds parent env %q (rank %d)",
 			childProfile.EnvPolicy, childEnv,
 			parentProfile.EnvPolicy, parentEnv,
-		)
-	}
-
-	// ApprovalPolicy: child must not ask for approval more often than parent.
-	childApproval := approvalRank(childProfile.ApprovalPolicy)
-	parentApproval := approvalRank(parentProfile.ApprovalPolicy)
-	if childApproval < 0 {
-		return fmt.Errorf(
-			"subagent escalation check failed: unknown child approval policy %q",
-			childProfile.ApprovalPolicy,
-		)
-	}
-	if parentApproval < 0 {
-		return fmt.Errorf(
-			"subagent escalation check failed: unknown parent approval policy %q",
-			parentProfile.ApprovalPolicy,
-		)
-	}
-	if childApproval > parentApproval {
-		return fmt.Errorf(
-			"subagent profile escalation denied: child approval %q (rank %d) exceeds parent approval %q (rank %d)",
-			childProfile.ApprovalPolicy, childApproval,
-			parentProfile.ApprovalPolicy, parentApproval,
 		)
 	}
 

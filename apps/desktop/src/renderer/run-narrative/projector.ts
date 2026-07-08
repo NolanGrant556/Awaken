@@ -248,6 +248,35 @@ export function projectAguiEventToNarrative(
             ? "done"
             : "error",
       );
+    case "AWAKEN_USER_QUESTION_REQUESTED":
+    case "AWAKEN_USER_QUESTION_RESOLVED": {
+      let detail = "";
+      if (event.type === "AWAKEN_USER_QUESTION_REQUESTED") {
+        try {
+          const parsed = JSON.parse(event.content ?? "{}");
+          if (Array.isArray(parsed.questions)) {
+            detail = parsed.questions
+              .map((q: { question?: string }) => q.question)
+              .filter(Boolean)
+              .join(" | ");
+          }
+        } catch {
+          detail = event.content ?? "";
+        }
+      } else {
+        detail = event.questionAnswer ?? "";
+      }
+      return commitRuntimeNotice(
+        base,
+        event,
+        "user-question",
+        event.type === "AWAKEN_USER_QUESTION_RESOLVED"
+          ? "Answer received"
+          : "Waiting for your answer",
+        detail,
+        event.type === "AWAKEN_USER_QUESTION_REQUESTED" ? "active" : "done",
+      );
+    }
     case "AWAKEN_ARTIFACT_CREATED":
     case "AWAKEN_ARTIFACT_UPDATED":
       return base;

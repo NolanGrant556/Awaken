@@ -92,6 +92,12 @@ const bridge: AwakenBridge = {
       reviewId,
       decision,
     }) as Promise<void>,
+  answerUserQuestion: (runId: string, questionId: string, answer: string) =>
+    ipcRenderer.invoke("awaken:answer-user-question", {
+      runId,
+      questionId,
+      answer,
+    }) as Promise<void>,
   subscribeRun: async (runId: string, handlers: RunStreamHandlers, afterSeq?: number) => {
     const subscriptionId = crypto.randomUUID();
     subscriptions.set(subscriptionId, handlers);

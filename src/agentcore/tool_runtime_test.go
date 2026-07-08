@@ -11,6 +11,7 @@ import (
 	convcontext "awaken/src/context"
 	"awaken/src/tool"
 	"awaken/src/tool/profile"
+	_ "awaken/src/tools/ask_user"
 )
 
 type runtimeTestTool struct {
@@ -1126,4 +1127,88 @@ func mustJSONQuote(t *testing.T, value string) string {
 		t.Fatalf("failed to quote JSON string: %v", err)
 	}
 	return string(data)
+}
+
+type userQuestionTestSink struct {
+	events []AwakenEvent
+	answer string
+}
+
+func (s *userQuestionTestSink) Emit(event AwakenEvent) {
+	s.events = append(s.events, event)
+}
+
+func (s *userQuestionTestSink) AwaitUserQuestion(ctx context.Context, request AwakenEvent) (string, error) {
+	s.Emit(request)
+	return s.answer, nil
+}
+
+func TestToolRuntimeInterceptsAskUser(t *testing.T) {
+	sink := &userQuestionTestSink{answer: "Dark"}
+	result := NewToolRuntime(sink).Execute(context.Background(), convcontext.ToolCall{
+		ID:   "call_ask_1",
+		Type: "function",
+		Function: convcontext.FunctionCall{
+			Name:      "ask_user",
+			Arguments: `{"questions_json": "[{\"question\":\"Choose a theme\",\"options\":[{\"label\":\"Dark\"},{\"label\":\"Light\"}]}]"}`,
+		},
+	})
+
+	if result.IsError {
+		t.Fatalf("expected success, got %+v", result)
+	}
+	if result.ToolCallID != "call_ask_1" || result.Name != "ask_user" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	expected := `User has answered your questions: "Choose a theme"="Dark"`
+	if result.Content != expected {
+		t.Fatalf("expected %q, got %q", expected, result.Content)
+	}
+	var found bool
+	for _, event := range sink.events {
+		if event.Type == UserQuestionRequestedType {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected UserQuestionRequested event, got %+v", sink.events)
+	}
+}
+
+func TestToolRuntimeAskUserReturnsErrorWhenNoAwaiter(t *testing.T) {
+	result := NewToolRuntime(EventSinkFunc(func(event AwakenEvent) {})).Execute(context.Background(), convcontext.ToolCall{
+		ID:   "call_ask_2",
+		Type: "function",
+		Function: convcontext.FunctionCall{
+			Name:      "ask_user",
+			Arguments: `{"questions_json": "[{\"question\":\"Choose a theme\",\"options\":[{\"label\":\"Dark\"},{\"label\":\"Light\"}]}]"}`,
+		},
+	})
+
+	if !result.IsError {
+		t.Fatalf("expected error result")
+	}
+	if !strings.Contains(result.Content, "不支持用户提问") {
+		t.Fatalf("expected unsupported message, got %q", result.Content)
+	}
+}
+
+func TestToolRuntimeAskUserReturnsErrorForInvalidInput(t *testing.T) {
+	sink := &userQuestionTestSink{answer: "Dark"}
+	result := NewToolRuntime(sink).Execute(context.Background(), convcontext.ToolCall{
+		ID:   "call_ask_3",
+		Type: "function",
+		Function: convcontext.FunctionCall{
+			Name:      "ask_user",
+			Arguments: `{"questions_json": "not-json"}`,
+		},
+	})
+
+	if !result.IsError {
+		t.Fatalf("expected error result")
+	}
+	if !strings.Contains(result.Content, "提问格式错误") {
+		t.Fatalf("expected validation message, got %q", result.Content)
+	}
 }

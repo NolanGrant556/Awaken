@@ -10,6 +10,10 @@ type MassMessageReviewAwaiter interface {
 	AwaitMassMessageReview(ctx context.Context, request AwakenEvent) (ReviewDecision, error)
 }
 
+type UserQuestionAwaiter interface {
+	AwaitUserQuestion(ctx context.Context, request AwakenEvent) (string, error)
+}
+
 type EventSinkFunc func(AwakenEvent)
 
 func (f EventSinkFunc) Emit(event AwakenEvent) {

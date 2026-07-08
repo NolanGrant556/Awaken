@@ -1498,16 +1498,19 @@ export function reduceRuntimeState(
             nextState.timelineStatus = "running";
             nextState.approvals = [];
             nextState.massMessageReviews = [];
+            nextState.userQuestions = [];
           } else if (status === "cancelled") {
             nextState.phase = "cancelled";
             nextState.timelineStatus = "done";
             nextState.approvals = [];
             nextState.massMessageReviews = [];
+            nextState.userQuestions = [];
           } else if (status === "finished") {
             nextState.phase = "done";
             nextState.timelineStatus = "done";
             nextState.approvals = [];
             nextState.massMessageReviews = [];
+            nextState.userQuestions = [];
             nextState.runCompletedAtMs =
               nextState.runCompletedAtMs ?? action.receivedAtMs;
           } else if (status === "error") {
@@ -1515,6 +1518,7 @@ export function reduceRuntimeState(
             nextState.timelineStatus = "error";
             nextState.approvals = [];
             nextState.massMessageReviews = [];
+            nextState.userQuestions = [];
           }
           if (
             status === "cancelled" ||
@@ -1552,6 +1556,7 @@ export function reduceRuntimeState(
           nextState.timelineStatus = "done";
           nextState.approvals = [];
           nextState.massMessageReviews = [];
+          nextState.userQuestions = [];
           nextState.runCompletedAtMs =
             nextState.runCompletedAtMs ?? action.receivedAtMs;
           nextState.inspectorSummary = {
@@ -2165,6 +2170,7 @@ export function reduceRuntimeState(
             nextState.timelineStatus = "done";
             nextState.approvals = [];
             nextState.massMessageReviews = [];
+            nextState.userQuestions = [];
             records = upsertStep(records, "run-cancelled", {
               title: "Run cancelled",
               description: action.event.message || "Run was cancelled by user",
@@ -2191,6 +2197,7 @@ export function reduceRuntimeState(
             nextState.errorMessage = errorMessage;
             nextState.approvals = [];
             nextState.massMessageReviews = [];
+            nextState.userQuestions = [];
             records = upsertStep(records, "run-error", {
               title: "Run failed",
               description: errorDescription,

@@ -288,13 +288,14 @@ export function projectAguiEventToNarrative(
       return markLatestAnswerFinal(commitActive(base, "done"), event);
     case "RUN_ERROR":
       if (event.code === "RUN_CANCELLED") {
-        return commitActiveWithFootnote(base, "你停止了生成本次回答");
+        return commitRunCancelledHint(base, event, "你停止了生成本次回答");
       }
       return commitErrorAnswer(base, event);
     case "RUN_STATUS_CHANGED":
       if (event.status === "cancelled") {
-        return commitActiveWithFootnote(
+        return commitRunCancelledHint(
           base,
+          event,
           event.message || "你停止生成了本次回答",
         );
       }
@@ -370,21 +371,22 @@ function commitActive(
   };
 }
 
-function commitActiveWithFootnote(
+function commitRunCancelledHint(
   state: RunNarrativeState,
-  footnote: string,
-  status: "done" | "error" = "done",
+  event: AguiEvent,
+  text: string,
 ): RunNarrativeState {
-  if (!state.activeItem) {
-    return state;
-  }
-  const item = applyStatus(state.activeItem, status);
-  if (item.kind === "answer") {
-    item.footnote = footnote;
-  }
+  // Settle whatever is currently streaming (answer, tool trace, etc.) so the
+  // cancellation hint can be appended after all committed items.
+  const settledState = state.activeItem ? commitActive(state, "done") : state;
+  const hint: RunNarrativeItem = {
+    kind: "hint",
+    id: `hint:run-cancelled:${eventScope(event)}`,
+    text,
+  };
   return {
-    ...state,
-    committedItems: upsertCommitted(state.committedItems, item),
+    ...settledState,
+    committedItems: upsertCommitted(settledState.committedItems, hint),
     activeItem: undefined,
   };
 }
@@ -482,6 +484,8 @@ function applyStatus(
       return item;
     case "answer":
       return status === "done" || status === "error" ? { ...item, status } : item;
+    case "hint":
+      return item;
   }
 }
 

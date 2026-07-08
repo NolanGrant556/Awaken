@@ -146,6 +146,9 @@ func TestListFilesDeniesOutsideWorkspace(t *testing.T) {
 	if decision.Behavior != tool.PermissionDeny {
 		t.Fatalf("expected deny for outside workspace, got %v", decision.Behavior)
 	}
+	if !strings.Contains(decision.Reason, "workspace_dependencies") || !strings.Contains(decision.Reason, "系统目录") {
+		t.Fatalf("expected routing guidance in deny reason, got %q", decision.Reason)
+	}
 }
 
 func TestListFilesAllowsInsideWorkspace(t *testing.T) {

@@ -135,6 +135,9 @@ func classifySegment(segment string, cwd string) ShellTier {
 	}
 
 	if target, ok := extractRedirectTarget(segment); ok {
+		if isNullDevicePath(target) {
+			return classifyBaseCommand(stripRedirect(segment), cwd)
+		}
 		if isPathOutsideWorkspace(target, cwd) {
 			return ShellTierOpenWorldSystem
 		}
@@ -371,8 +374,11 @@ func isInspectReadOnlyCommand(base string, args []string) bool {
 	switch base {
 	case "pwd", "ls", "cat", "head", "tail", "wc", "stat", "file", "strings",
 		"rg", "grep", "tree", "du", "df", "which", "whereis", "whoami", "id",
-		"uname", "ps", "top", "htop", "date", "echo", "printf":
+		"uname", "ps", "top", "htop", "date", "echo", "printf", "sleep",
+		"exit", "true", "false":
 		return true
+	case "command":
+		return len(args) > 0 && args[0] == "-v"
 	case "env":
 		// `env` without args prints env vars (read-only). With arguments it
 		// may execute a command — fall through to the conservative default.
@@ -383,6 +389,10 @@ func isInspectReadOnlyCommand(base string, args []string) bool {
 		return isInspectReadOnlyGitCommand(args)
 	}
 	return false
+}
+
+func isNullDevicePath(path string) bool {
+	return filepath.Clean(strings.Trim(path, `"'`)) == "/dev/null"
 }
 
 func isInspectReadOnlyGitCommand(args []string) bool {

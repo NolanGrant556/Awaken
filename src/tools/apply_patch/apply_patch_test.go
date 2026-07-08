@@ -199,8 +199,11 @@ func TestApplyPatchSupportsContextHeader(t *testing.T) {
 
 func TestApplyPatchRejectsInvalidPatch(t *testing.T) {
 	_, err := (&ApplyPatchTool{}).Execute(context.Background(), "*** Add File: x\n+bad")
-	if err == nil || !strings.Contains(err.Error(), "Begin Patch") {
+	if err == nil || !strings.Contains(err.Error(), "Begin Patch") || !strings.Contains(err.Error(), "document_create") {
 		t.Fatalf("expected invalid patch error, got %v", err)
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "co"+"dex") {
+		t.Fatalf("apply_patch error should not leak external brand names: %v", err)
 	}
 }
 

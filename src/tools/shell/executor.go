@@ -100,6 +100,12 @@ func (e *ShellExecutor) Execute(
 	cwd := resolveExecutorCwd(params.Workdir, permissionContext)
 	tier := ClassifyShellCommand(command, cwd)
 	workspaceRoot := permissionContext.WorkspaceRootOrCWD()
+	policy := EvaluateShellExecutionPolicy(command, cwd, permissionContext)
+	if strings.TrimSpace(policy.DenyReason) != "" {
+		return ShellExecResult{
+			Tier: tier,
+		}, fmt.Errorf("shell policy denied command: %s", policy.DenyReason)
+	}
 
 	adapter := e.adapter
 	if adapter == nil {

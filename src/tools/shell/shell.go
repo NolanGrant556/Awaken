@@ -85,6 +85,17 @@ func (t *ShellTool) CheckPermission(ctx context.Context, input string, permissio
 	}
 
 	cwd := resolveExecutorCwd(params.Workdir, permissionContext)
+	policy := EvaluateShellPolicy(params.Command, cwd, permissionContext)
+	if policy.DenyReason != "" {
+		return tool.DenyPermission(policy.DenyReason)
+	}
+	if policy.DirectAllow && policy.Lane != ShellLaneInspectReadOnly {
+		return tool.AllowPermissionWithMetadata(tool.DecisionMetadata{
+			Title:       "Shell " + string(policy.Lane),
+			Description: shellApprovalDescription(params, "allowed shell lane: "+string(policy.Lane)),
+			RiskTone:    "warning",
+		})
+	}
 	tier := ClassifyShellCommand(params.Command, cwd)
 	switch tier {
 	case ShellTierInspectReadOnly:

@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,11 +28,12 @@ import (
 const runtimeName = "primary-runtime"
 
 type runtimeComponent struct {
-	Name     string `json:"name"`
-	Kind     string `json:"kind"`
-	Required bool   `json:"required"`
-	Path     string `json:"path,omitempty"`
-	SHA256   string `json:"sha256,omitempty"`
+	Name           string            `json:"name"`
+	Kind           string            `json:"kind"`
+	Required       bool              `json:"required"`
+	Path           string            `json:"path,omitempty"`
+	PathByPlatform map[string]string `json:"pathByPlatform,omitempty"`
+	SHA256         string            `json:"sha256,omitempty"`
 }
 
 type runtimeManifest struct {
@@ -39,6 +41,24 @@ type runtimeManifest struct {
 	Version    string             `json:"version"`
 	Mode       string             `json:"mode"`
 	Components []runtimeComponent `json:"components"`
+}
+
+func runtimeComponentPath(component runtimeComponent) string {
+	for _, key := range runtimePlatformPathKeys() {
+		if path := strings.TrimSpace(component.PathByPlatform[key]); path != "" {
+			return path
+		}
+	}
+	return strings.TrimSpace(component.Path)
+}
+
+func runtimePlatformPathKeys() []string {
+	switch goruntime.GOOS {
+	case "windows":
+		return []string{"windows", "win32", "default"}
+	default:
+		return []string{goruntime.GOOS, "default"}
+	}
 }
 
 type preflightReport struct {
@@ -1548,10 +1568,11 @@ func resolvePresentationPython() (string, error) {
 	}
 	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
 		candidates = append(candidates,
+			filepath.Join(home, ".cache", "awaken-runtimes", "primary-runtime", "dependencies", "python", "Scripts", "python.exe"),
 			filepath.Join(home, ".cache", "awaken-runtimes", "primary-runtime", "dependencies", "python", "bin", "python3"),
 		)
 	}
-	for _, name := range []string{"python3", "python"} {
+	for _, name := range runtimeExecutableNames("python3", "python", "py") {
 		if path, err := exec.LookPath(name); err == nil {
 			candidates = append(candidates, path)
 		}
@@ -1575,9 +1596,16 @@ func resolveSoffice() (string, error) {
 	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
 		candidates = append(candidates,
 			filepath.Join(home, ".cache", "awaken-runtimes", "primary-runtime", "dependencies", "bin", "soffice"),
+			filepath.Join(home, ".cache", "awaken-runtimes", "primary-runtime", "dependencies", "bin", "soffice.exe"),
 		)
 	}
-	for _, name := range []string{"soffice", "libreoffice"} {
+	if goruntime.GOOS == "windows" {
+		candidates = append(candidates,
+			filepath.Join(os.Getenv("ProgramFiles"), "LibreOffice", "program", "soffice.exe"),
+			filepath.Join(os.Getenv("ProgramFiles(x86)"), "LibreOffice", "program", "soffice.exe"),
+		)
+	}
+	for _, name := range runtimeExecutableNames("soffice", "libreoffice") {
 		if path, err := exec.LookPath(name); err == nil {
 			candidates = append(candidates, path)
 		}
@@ -1599,29 +1627,54 @@ func resolvePopplerTool(name string) (string, error) {
 		return "", fmt.Errorf("poppler tool name is required")
 	}
 	candidates := []string{}
-	if path := strings.TrimSpace(os.Getenv("AWAKEN_POPPLER_BIN")); path != "" {
-		candidates = append(candidates, filepath.Join(path, name))
-	}
-	if path, ok := runtimeComponentExistingPath("poppler"); ok {
-		candidates = append(candidates, filepath.Join(path, name))
-	}
-	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+	for _, toolName := range runtimeExecutableNames(name) {
+		if path := strings.TrimSpace(os.Getenv("AWAKEN_POPPLER_BIN")); path != "" {
+			candidates = append(candidates, filepath.Join(path, toolName))
+		}
+		if path, ok := runtimeComponentExistingPath("poppler"); ok {
+			candidates = append(candidates, filepath.Join(path, toolName))
+		}
+		if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+			candidates = append(candidates,
+				filepath.Join(home, ".cache", "awaken-runtimes", "primary-runtime", "dependencies", "poppler", "bin", toolName),
+				filepath.Join(home, ".cache", "awaken-runtimes", "primary-runtime", "dependencies", "bin", toolName),
+			)
+		}
+		if path, err := exec.LookPath(toolName); err == nil {
+			candidates = append(candidates, path)
+		}
 		candidates = append(candidates,
-			filepath.Join(home, ".cache", "awaken-runtimes", "primary-runtime", "dependencies", "poppler", "bin", name),
-			filepath.Join(home, ".cache", "awaken-runtimes", "primary-runtime", "dependencies", "bin", name),
+			filepath.Join("/opt/homebrew/bin", toolName),
+			filepath.Join("/usr/local/bin", toolName),
 		)
 	}
-	if path, err := exec.LookPath(name); err == nil {
-		candidates = append(candidates, path)
-	}
-	candidates = append(candidates,
-		filepath.Join("/opt/homebrew/bin", name),
-		filepath.Join("/usr/local/bin", name),
-	)
 	if path, ok := firstExistingFile(candidates); ok {
 		return path, nil
 	}
 	return "", fmt.Errorf("poppler %s runtime is not available", name)
+}
+
+func runtimeExecutableNames(names ...string) []string {
+	seen := make(map[string]struct{}, len(names)*2)
+	var out []string
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		candidates := []string{name}
+		if goruntime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(name), ".exe") {
+			candidates = []string{name + ".exe", name}
+		}
+		for _, candidate := range candidates {
+			if _, ok := seen[candidate]; ok {
+				continue
+			}
+			seen[candidate] = struct{}{}
+			out = append(out, candidate)
+		}
+	}
+	return out
 }
 
 func runtimeComponentExistingPath(name string) (string, bool) {
@@ -1635,10 +1688,13 @@ func runtimeComponentExistingPath(name string) (string, bool) {
 		return "", false
 	}
 	for _, component := range manifest.Components {
-		if strings.TrimSpace(component.Name) != name || strings.TrimSpace(component.Path) == "" {
+		if strings.TrimSpace(component.Name) != name {
 			continue
 		}
-		path := component.Path
+		path := runtimeComponentPath(component)
+		if strings.TrimSpace(path) == "" {
+			continue
+		}
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(filepath.Dir(manifestPath), path)
 		}
@@ -1658,6 +1714,7 @@ func libreOfficeExecutableCandidates(path string) []string {
 		path,
 		filepath.Join(path, "Contents", "MacOS", "soffice"),
 		filepath.Join(path, "program", "soffice"),
+		filepath.Join(path, "program", "soffice.exe"),
 		filepath.Join(path, "soffice"),
 		filepath.Join(path, "soffice.exe"),
 	}
@@ -1868,16 +1925,18 @@ func runtimePreflight() preflightReport {
 		return report
 	}
 	report.RuntimeName = firstNonEmpty(manifest.Name, runtimeName)
-	report.Components = manifest.Components
 	for _, component := range manifest.Components {
+		component.Path = runtimeComponentPath(component)
+		report.Components = append(report.Components, component)
 		if !component.Required {
 			continue
 		}
-		if strings.TrimSpace(component.Path) == "" {
+		componentPath := component.Path
+		if strings.TrimSpace(componentPath) == "" {
 			report.Missing = append(report.Missing, component.Name)
 			continue
 		}
-		path := component.Path
+		path := componentPath
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(filepath.Dir(manifestPath), path)
 		}

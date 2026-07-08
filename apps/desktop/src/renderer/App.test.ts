@@ -94,6 +94,8 @@ function stubElectronBridge(): void {
       deleteModelProfile: vi.fn(),
       setDefaultModelProfile: vi.fn(),
       testModelProfile: vi.fn(async () => ({ ok: true, message: "ok" })),
+      syncModelCapabilities: vi.fn(async () => []),
+      getModelProfileBalances: vi.fn(async () => ({ balances: [] })),
       pickWorkspace: vi.fn(async () => ({ canceled: true as const })),
       validateWorkspace: vi.fn(async () => ({ valid: true as const })),
       readWorkspaceRegistry: vi.fn(async () => ({ registeredWorkspacePaths: [] })),

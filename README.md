@@ -112,6 +112,8 @@ GET  /v1/runs/{run_id}
 GET  /v1/runs/{run_id}/events
 POST /v1/runs/{run_id}/cancel
 POST /v1/runs/{run_id}/mass-message-reviews/{review_id}/resolve
+POST /v1/runs/{run_id}/user-questions/{question_id}/answer
+POST /v1/shutdown
 ```
 
 `/v1/runs/{run_id}/events` 输出 AG-UI-compatible SSE events。Awaken 目前有这些 extension events：
@@ -123,6 +125,8 @@ AWAKEN_RUNTIME_READY
 AWAKEN_RUNTIME_MISSING
 AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED
 AWAKEN_MASS_MESSAGE_REVIEW_RESOLVED
+AWAKEN_USER_QUESTION_REQUESTED
+AWAKEN_USER_QUESTION_RESOLVED
 AWAKEN_ARTIFACT_CREATED
 AWAKEN_ARTIFACT_UPDATED
 AWAKEN_COMMAND_OUTPUT
@@ -304,6 +308,7 @@ grep_search
 apply_patch
 shell
 web_search
+ask_user
 ```
 
 只读工具不应要求审批。会修改文件或有风险的工具通过 `src/tool/permission.go` 与 `src/agentcore/tool_runtime.go` 走权限模型。

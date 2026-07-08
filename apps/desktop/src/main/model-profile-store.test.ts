@@ -152,6 +152,28 @@ describe("ModelProfileStore", () => {
     });
   });
 
+  it("reports a friendly error when a stored API key cannot be decrypted", async () => {
+    const store = new ModelProfileStore(configDir);
+    await store.saveProfile({
+      providerId: "kimi-coding-plan",
+      displayName: "Kimi Coding Plan",
+      modelId: "kimi-for-coding",
+      baseURL: "https://api.kimi.com/coding/v1",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "test-key",
+      enabled: true,
+      isDefault: true,
+    });
+    electronMock.safeStorage.decryptString.mockImplementationOnce(() => {
+      throw new Error("Error while decrypting the ciphertext provided to safeStorage.decryptString.");
+    });
+
+    await expect(store.resolveDefaultRunProfile()).rejects.toThrow(
+      "模型配置「Kimi Coding Plan」的 API key 无法解密，请在 Settings > Models 重新保存 API key。",
+    );
+  });
+
   it("migrates an existing Volcengine Coding Plan profile to the coding gateway", async () => {
     await writeFile(
       join(configDir, "model-profiles.json"),

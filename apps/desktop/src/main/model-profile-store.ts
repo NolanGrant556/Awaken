@@ -352,10 +352,18 @@ function encryptedCredential(apiKey: string): StoredCredential {
   };
 }
 
-function decryptCredential(credential?: StoredCredential): string {
+function credentialUnavailableMessage(profileName = "当前模型配置"): string {
+  return `模型配置「${profileName}」的 API key 无法解密，请在 Settings > Models 重新保存 API key。`;
+}
+
+function decryptCredential(credential?: StoredCredential, profileName?: string): string {
   if (!credential) return "";
   assertSecureStorageAvailable();
-  return safeStorage.decryptString(Buffer.from(credential.encryptedApiKey, "base64"));
+  try {
+    return safeStorage.decryptString(Buffer.from(credential.encryptedApiKey, "base64"));
+  } catch {
+    throw new Error(credentialUnavailableMessage(profileName));
+  }
 }
 
 function templateProfileForSave(
@@ -439,7 +447,12 @@ export class ModelProfileStore {
       if (candidates.has(profile.providerId)) continue;
       const provider = providerById(profile.providerId);
       if (!provider) continue;
-      const apiKey = decryptCredential(profile.credential);
+      let apiKey = "";
+      try {
+        apiKey = decryptCredential(profile.credential, profile.displayName);
+      } catch {
+        continue;
+      }
       if (!apiKey) continue;
       candidates.set(profile.providerId, {
         baseURL: normalizeProviderBaseURL(provider, profile.baseURL),
@@ -596,7 +609,7 @@ export class ModelProfileStore {
       baseURL,
       protocol: profile.protocol,
       authScheme: profile.authScheme,
-      apiKey: decryptCredential(profile.credential),
+      apiKey: decryptCredential(profile.credential, profile.displayName),
       temperature: advanced.temperature,
       maxTokens: advanced.maxTokens,
       contextWindow: advanced.contextWindow,
@@ -668,6 +681,8 @@ export class ModelProfileStore {
 
     const providerKeys = new Map<string, string>();
     const providerBaseURLs = new Map<string, string>();
+    const fetchedDetails = new Map<string, ModelProfileBalanceWire["detail"] | null>();
+    const fetchErrors = new Map<string, string>();
 
     for (const profile of candidateProfiles) {
       if (!profile.credential) continue;
@@ -675,7 +690,16 @@ export class ModelProfileStore {
       const provider = providerById(profile.providerId);
       if (!provider) continue;
       if (!isBalanceSupportedProvider(profile.providerId)) continue;
-      const apiKey = decryptCredential(profile.credential);
+      let apiKey = "";
+      try {
+        apiKey = decryptCredential(profile.credential, profile.displayName);
+      } catch (error) {
+        fetchErrors.set(
+          profile.providerId,
+          error instanceof Error ? error.message : credentialUnavailableMessage(profile.displayName),
+        );
+        continue;
+      }
       if (!apiKey) continue;
       providerKeys.set(profile.providerId, apiKey);
       providerBaseURLs.set(
@@ -683,9 +707,6 @@ export class ModelProfileStore {
         normalizeProviderBaseURL(provider, profile.baseURL),
       );
     }
-
-    const fetchedDetails = new Map<string, ModelProfileBalanceWire["detail"] | null>();
-    const fetchErrors = new Map<string, string>();
 
     await Promise.allSettled(
       Array.from(providerKeys.entries()).map(async ([providerId, apiKey]) => {
@@ -733,17 +754,6 @@ export class ModelProfileStore {
         };
       }
 
-      if (!profile.credential || !providerKeys.has(profile.providerId)) {
-        return {
-          profile_id: profile.id,
-          provider_id: profile.providerId,
-          model_id: modelId,
-          display_name: displayName,
-          status: "missing_key",
-          error: "请先配置 API key",
-        };
-      }
-
       const error = fetchErrors.get(profile.providerId);
       if (error) {
         return {
@@ -753,6 +763,17 @@ export class ModelProfileStore {
           display_name: displayName,
           status: "error",
           error,
+        };
+      }
+
+      if (!profile.credential || !providerKeys.has(profile.providerId)) {
+        return {
+          profile_id: profile.id,
+          provider_id: profile.providerId,
+          model_id: modelId,
+          display_name: displayName,
+          status: "missing_key",
+          error: "请先配置 API key",
         };
       }
 
@@ -772,7 +793,7 @@ export class ModelProfileStore {
   private async apiKeyForProfile(profileId: string): Promise<string> {
     const store = await this.readStore();
     const profile = store.profiles.find((entry) => entry.id === profileId);
-    return decryptCredential(profile?.credential);
+    return decryptCredential(profile?.credential, profile?.displayName);
   }
 
   private ensureSingleDefault(store: StoreFile, preferredProfileId: string): void {

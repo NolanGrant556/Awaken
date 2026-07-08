@@ -248,6 +248,35 @@ export function projectAguiEventToNarrative(
             ? "done"
             : "error",
       );
+    case "AWAKEN_USER_QUESTION_REQUESTED":
+    case "AWAKEN_USER_QUESTION_RESOLVED": {
+      let detail = "";
+      if (event.type === "AWAKEN_USER_QUESTION_REQUESTED") {
+        try {
+          const parsed = JSON.parse(event.content ?? "{}");
+          if (Array.isArray(parsed.questions)) {
+            detail = parsed.questions
+              .map((q: { question?: string }) => q.question)
+              .filter(Boolean)
+              .join(" | ");
+          }
+        } catch {
+          detail = event.content ?? "";
+        }
+      } else {
+        detail = event.questionAnswer ?? "";
+      }
+      return commitRuntimeNotice(
+        base,
+        event,
+        "user-question",
+        event.type === "AWAKEN_USER_QUESTION_RESOLVED"
+          ? "Answer received"
+          : "Waiting for your answer",
+        detail,
+        event.type === "AWAKEN_USER_QUESTION_REQUESTED" ? "active" : "done",
+      );
+    }
     case "AWAKEN_ARTIFACT_CREATED":
     case "AWAKEN_ARTIFACT_UPDATED":
       return base;
@@ -259,12 +288,16 @@ export function projectAguiEventToNarrative(
       return markLatestAnswerFinal(commitActive(base, "done"), event);
     case "RUN_ERROR":
       if (event.code === "RUN_CANCELLED") {
-        return commitActive(base, "done");
+        return commitRunCancelledHint(base, event, "你停止了生成本次回答");
       }
       return commitErrorAnswer(base, event);
     case "RUN_STATUS_CHANGED":
       if (event.status === "cancelled") {
-        return commitActive(base, "done");
+        return commitRunCancelledHint(
+          base,
+          event,
+          event.message || "你停止生成了本次回答",
+        );
       }
       if (event.status === "finished") {
         return markLatestAnswerFinal(commitActive(base, "done"), event);
@@ -334,6 +367,26 @@ function commitActive(
   return {
     ...state,
     committedItems: upsertCommitted(state.committedItems, item),
+    activeItem: undefined,
+  };
+}
+
+function commitRunCancelledHint(
+  state: RunNarrativeState,
+  event: AguiEvent,
+  text: string,
+): RunNarrativeState {
+  // Settle whatever is currently streaming (answer, tool trace, etc.) so the
+  // cancellation hint can be appended after all committed items.
+  const settledState = state.activeItem ? commitActive(state, "done") : state;
+  const hint: RunNarrativeItem = {
+    kind: "hint",
+    id: `hint:run-cancelled:${eventScope(event)}`,
+    text,
+  };
+  return {
+    ...settledState,
+    committedItems: upsertCommitted(settledState.committedItems, hint),
     activeItem: undefined,
   };
 }
@@ -431,6 +484,8 @@ function applyStatus(
       return item;
     case "answer":
       return status === "done" || status === "error" ? { ...item, status } : item;
+    case "hint":
+      return item;
   }
 }
 

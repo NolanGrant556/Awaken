@@ -274,6 +274,20 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.ReviewID = event.ReviewID
 		base.ReviewDecision = string(event.ReviewDecision)
 		return []Event{base}
+	case agentcore.UserQuestionRequestedType:
+		base.Type = EventAwakenUserQuestionRequested
+		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
+		base.QuestionID = event.QuestionID
+		base.Content = event.Content
+		return []Event{base}
+	case agentcore.UserQuestionResolvedType:
+		base.Type = EventAwakenUserQuestionResolved
+		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
+		base.QuestionID = event.QuestionID
+		base.QuestionAnswer = event.QuestionAnswer
+		return []Event{base}
 	case agentcore.ArtifactCreatedEventType:
 		base.Type = EventAwakenArtifactCreated
 		base.ToolCallID = event.ToolCallID

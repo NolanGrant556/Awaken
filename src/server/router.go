@@ -40,21 +40,25 @@ func NewRouterWithMCPConnectorsAndSkills(runService *awruntime.RunService, infoP
 
 // NewRouterWithWorkspace builds a fully-wired router and enables project-scoped
 // extension writes such as MCP config and skill installation.
-func NewRouterWithWorkspace(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry, skillRegistry *skills.SkillRegistry, workspaceRoot string) http.Handler {
-	return newRouterInternal(routerConfig{
+func NewRouterWithWorkspace(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry, skillRegistry *skills.SkillRegistry, workspaceRoot string, shutdown ...func()) http.Handler {
+	cfg := routerConfig{
 		runService:        runService,
 		infoProvider:      infoProvider,
 		manager:           manager,
 		connectorRegistry: connectorRegistry,
 		skillRegistry:     skillRegistry,
 		workspaceRoot:     workspaceRoot,
-	})
+	}
+	if len(shutdown) > 0 {
+		cfg.shutdown = shutdown[0]
+	}
+	return newRouterInternal(cfg)
 }
 
 // NewRouterWithWorkspaceAndSkillSync additionally lets the runtime synchronize
 // project-scoped skill tools to the workspace that is about to run.
-func NewRouterWithWorkspaceAndSkillSync(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry, skillRegistry *skills.SkillRegistry, workspaceRoot string, syncSkillsForWorkspace func(string)) http.Handler {
-	return newRouterInternal(routerConfig{
+func NewRouterWithWorkspaceAndSkillSync(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry, skillRegistry *skills.SkillRegistry, workspaceRoot string, syncSkillsForWorkspace func(string), shutdown ...func()) http.Handler {
+	cfg := routerConfig{
 		runService:             runService,
 		infoProvider:           infoProvider,
 		manager:                manager,
@@ -62,7 +66,11 @@ func NewRouterWithWorkspaceAndSkillSync(runService *awruntime.RunService, infoPr
 		skillRegistry:          skillRegistry,
 		workspaceRoot:          workspaceRoot,
 		syncSkillsForWorkspace: syncSkillsForWorkspace,
-	})
+	}
+	if len(shutdown) > 0 {
+		cfg.shutdown = shutdown[0]
+	}
+	return newRouterInternal(cfg)
 }
 
 type routerConfig struct {
@@ -73,6 +81,7 @@ type routerConfig struct {
 	skillRegistry          *skills.SkillRegistry
 	workspaceRoot          string
 	syncSkillsForWorkspace func(string)
+	shutdown               func()
 }
 
 func newRouterInternal(cfg routerConfig) http.Handler {
@@ -97,7 +106,15 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 		mux.HandleFunc("GET /v1/runs/{run_id}/events", handlers.handleRunEvents)
 		mux.HandleFunc("POST /v1/runs/{run_id}/cancel", handlers.handleCancelRun)
 		mux.HandleFunc("POST /v1/runs/{run_id}/mass-message-reviews/{review_id}/resolve", handlers.handleResolveMassMessageReview)
+		mux.HandleFunc("POST /v1/runs/{run_id}/user-questions/{question_id}/answer", handlers.handleAnswerUserQuestion)
 		mux.HandleFunc("GET /v1/runs/{run_id}/audit", handlers.handleGetRunAudit)
+		if cfg.shutdown != nil {
+			mux.HandleFunc("POST /v1/shutdown", func(w http.ResponseWriter, r *http.Request) {
+				cfg.runService.FlushTranscripts()
+				writeJSON(w, http.StatusOK, map[string]string{"status": "shutting down"})
+				go cfg.shutdown()
+			})
+		}
 	}
 	mcpH := mcpHandlers{manager: cfg.manager, workspaceRoot: cfg.workspaceRoot}
 	mux.HandleFunc("GET /v1/mcp/tools", mcpH.handleListTools)

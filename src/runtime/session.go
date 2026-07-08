@@ -51,6 +51,7 @@ type Event struct {
 	Status         string
 	AgentEvent     agentcore.AwakenEvent
 	Message        string
+	Content        string
 	Code           string
 	TerminalReason agentcore.TerminalReason
 }
@@ -61,11 +62,17 @@ type Session struct {
 	cancel             context.CancelFunc
 	bus                *EventBus
 	massMessageReviews map[string]*pendingMassMessageReview
+	userQuestions      map[string]*pendingUserQuestion
 }
 
 type pendingMassMessageReview struct {
 	request  agentcore.AwakenEvent
 	decision chan agentcore.ReviewDecision
+}
+
+type pendingUserQuestion struct {
+	request agentcore.AwakenEvent
+	answer  chan string
 }
 
 func NewSession(runID, threadID, input string, attachments []RunInputAttachment, cancel context.CancelFunc) *Session {
@@ -83,6 +90,7 @@ func NewSession(runID, threadID, input string, attachments []RunInputAttachment,
 		cancel:             cancel,
 		bus:                NewEventBus(),
 		massMessageReviews: make(map[string]*pendingMassMessageReview),
+		userQuestions:      make(map[string]*pendingUserQuestion),
 	}
 }
 
@@ -177,9 +185,13 @@ func (s *Session) RecordAgentEvent(event agentcore.AwakenEvent) {
 		if !s.run.CancelRequested {
 			s.run.Status = RunStatusRunning
 		}
+	case agentcore.TextDeltaEventType:
+		s.run.Result += event.Delta
 	case agentcore.RunFinishedEventType:
 		s.run.Status = RunStatusFinished
-		s.run.Result = event.Content
+		if event.Content != "" {
+			s.run.Result = event.Content
+		}
 		finishedAt := timestamp
 		s.run.FinishedAt = &finishedAt
 		terminal = true
@@ -296,10 +308,103 @@ func (s *Session) ResolveMassMessageReview(reviewID string, decision agentcore.R
 	return nil
 }
 
-func (s *Session) CompleteCancelled(message string) {
+func (s *Session) AwaitUserQuestion(ctx context.Context, request agentcore.AwakenEvent) (string, error) {
+	timestamp := request.Timestamp.UTC()
+	if request.Timestamp.IsZero() {
+		timestamp = time.Now().UTC()
+	}
+	request.Timestamp = timestamp
+	request.Type = agentcore.UserQuestionRequestedType
+	if strings.TrimSpace(request.QuestionID) == "" {
+		request.QuestionID = "user_question"
+	}
+
+	pending := &pendingUserQuestion{
+		request: request,
+		answer:  make(chan string, 1),
+	}
+
+	s.mu.Lock()
+	if isTerminalStatus(s.run.Status) {
+		s.mu.Unlock()
+		return "", ErrRunTerminal
+	}
+	request.ThreadID = s.run.ThreadID
+	request.RunID = s.run.RunID
+	pending.request = request
+	s.run.UpdatedAt = timestamp
+	s.userQuestions[request.QuestionID] = pending
+	wrapped := Event{
+		Kind:       EventKindAgent,
+		Timestamp:  timestamp,
+		ThreadID:   s.run.ThreadID,
+		RunID:      s.run.RunID,
+		AgentEvent: request,
+	}
+	bus := s.bus
+	s.mu.Unlock()
+
+	bus.Append(wrapped, false)
+
+	select {
+	case answer := <-pending.answer:
+		return answer, nil
+	case <-ctx.Done():
+		s.mu.Lock()
+		delete(s.userQuestions, request.QuestionID)
+		s.mu.Unlock()
+		return "", ctx.Err()
+	}
+}
+
+func (s *Session) ResolveUserQuestion(questionID string, answer string) error {
+	questionID = strings.TrimSpace(questionID)
+	if questionID == "" {
+		return ErrUserQuestionNotFound
+	}
+	answer = strings.TrimSpace(answer)
+	if answer == "" {
+		return ErrUserQuestionNotFound
+	}
+
+	now := time.Now().UTC()
+	s.mu.Lock()
+	if isTerminalStatus(s.run.Status) {
+		s.mu.Unlock()
+		return ErrRunTerminal
+	}
+	pending, ok := s.userQuestions[questionID]
+	if !ok {
+		s.mu.Unlock()
+		return ErrUserQuestionNotFound
+	}
+	delete(s.userQuestions, questionID)
+	resolved := pending.request
+	resolved.Type = agentcore.UserQuestionResolvedType
+	resolved.Timestamp = now
+	resolved.QuestionAnswer = answer
+	resolved.ThreadID = s.run.ThreadID
+	resolved.RunID = s.run.RunID
+	s.run.UpdatedAt = now
+	wrapped := Event{
+		Kind:       EventKindAgent,
+		Timestamp:  now,
+		ThreadID:   s.run.ThreadID,
+		RunID:      s.run.RunID,
+		AgentEvent: resolved,
+	}
+	bus := s.bus
+	s.mu.Unlock()
+
+	bus.Append(wrapped, false)
+	pending.answer <- answer
+	return nil
+}
+
+func (s *Session) CompleteCancelled(message, result string) {
 	now := time.Now().UTC()
 	if strings.TrimSpace(message) == "" {
-		message = "run cancelled"
+		message = "你停止了生成本次回答"
 	}
 
 	s.mu.Lock()
@@ -308,8 +413,15 @@ func (s *Session) CompleteCancelled(message string) {
 		return
 	}
 
+	if strings.TrimSpace(s.run.Result) != "" {
+		result = strings.TrimSpace(s.run.Result)
+	} else {
+		result = strings.TrimSpace(result)
+	}
+
 	s.run.Status = RunStatusCancelled
 	s.run.Error = message
+	s.run.Result = result
 	s.run.CancelRequested = true
 	s.run.UpdatedAt = now
 	finishedAt := now
@@ -320,6 +432,9 @@ func (s *Session) CompleteCancelled(message string) {
 		ThreadID:       s.run.ThreadID,
 		RunID:          s.run.RunID,
 		Status:         string(RunStatusCancelled),
+		Message:        message,
+		Content:        result,
+		Code:           "RUN_CANCELLED",
 		TerminalReason: agentcore.TerminalReasonCancelled,
 	}
 	event := Event{
@@ -328,6 +443,8 @@ func (s *Session) CompleteCancelled(message string) {
 		ThreadID:       s.run.ThreadID,
 		RunID:          s.run.RunID,
 		Message:        message,
+		Content:        result,
+		Code:           "RUN_CANCELLED",
 		TerminalReason: agentcore.TerminalReasonCancelled,
 	}
 	bus := s.bus

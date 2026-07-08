@@ -185,6 +185,7 @@ type ThreadViewState = {
   patchPreviews: PatchPreviewRecord[];
   approvals: ApprovalItem[];
   massMessageReviews: MassMessageReviewItem[];
+  userQuestions: UserQuestionItem[];
   artifacts: ArtifactRecord[];
   turnDiff?: TurnDiffRecord;
   inspectorSummary: InspectorSummary;
@@ -210,6 +211,7 @@ export type RuntimeViewState = {
   patchPreviews: PatchPreviewRecord[];
   approvals: ApprovalItem[];
   massMessageReviews: MassMessageReviewItem[];
+  userQuestions: UserQuestionItem[];
   artifacts: ArtifactRecord[];
   turnDiff?: TurnDiffRecord;
   inspectorSummary: InspectorSummary;
@@ -264,6 +266,24 @@ export type MassMessageReviewItem = {
   sourceTool?: string;
 };
 
+export type UserQuestionOption = {
+  label: string;
+  description?: string;
+};
+
+export type UserQuestion = {
+  question: string;
+  header?: string;
+  options: UserQuestionOption[];
+  multiSelect?: boolean;
+};
+
+export type UserQuestionItem = {
+  id: string;
+  questions: UserQuestion[];
+  sourceTool?: string;
+};
+
 const initialState: RuntimeViewState = {
   prompt: "",
   promptAttachments: undefined,
@@ -277,6 +297,7 @@ const initialState: RuntimeViewState = {
   patchPreviews: [],
   approvals: [],
   massMessageReviews: [],
+  userQuestions: [],
   artifacts: [],
   narrative: createInitialRunNarrativeState(),
   inspectorSummary: createInspectorSummary(),
@@ -302,6 +323,7 @@ function viewFromState(state: RuntimeViewState): ThreadViewState {
     patchPreviews: state.patchPreviews,
     approvals: state.approvals,
     massMessageReviews: state.massMessageReviews,
+    userQuestions: state.userQuestions,
     artifacts: state.artifacts,
     turnDiff: state.turnDiff,
     inspectorSummary: state.inspectorSummary,
@@ -971,6 +993,30 @@ function removeMassMessageReview(
   return reviews.filter((review) => review.id !== reviewId);
 }
 
+function upsertUserQuestion(
+  questions: UserQuestionItem[],
+  next: UserQuestionItem,
+): UserQuestionItem[] {
+  const index = questions.findIndex((question) => question.id === next.id);
+  if (index < 0) {
+    return [...questions, next];
+  }
+
+  const updated = questions.slice();
+  updated[index] = next;
+  return updated;
+}
+
+function removeUserQuestion(
+  questions: UserQuestionItem[],
+  questionId?: string,
+): UserQuestionItem[] {
+  if (!questionId) {
+    return questions;
+  }
+  return questions.filter((question) => question.id !== questionId);
+}
+
 function upsertArtifact(
   artifacts: ArtifactRecord[],
   event: AguiEvent,
@@ -1012,6 +1058,7 @@ function syncFromRun(
 		timelineStatus: "running",
 		approvals: [],
 		massMessageReviews: [],
+		userQuestions: [],
 		steps: toSteps(
         upsertStep(
           state.steps.map((step, index) => ({
@@ -1042,6 +1089,7 @@ function syncFromRun(
 		timelineStatus: "done",
 		approvals: [],
 		massMessageReviews: [],
+		userQuestions: [],
 	};
   }
 
@@ -1056,6 +1104,7 @@ function syncFromRun(
 		timelineStatus: "done",
 		approvals: [],
 		massMessageReviews: [],
+		userQuestions: [],
 	};
   }
 
@@ -1071,6 +1120,7 @@ function syncFromRun(
 		errorMessage: run.error || "Run failed",
 		approvals: [],
 		massMessageReviews: [],
+		userQuestions: [],
 	};
   }
 
@@ -1116,6 +1166,7 @@ export function reduceRuntimeState(
 		patchPreviews: [],
 		approvals: [],
 		massMessageReviews: [],
+		userQuestions: [],
 		artifacts: [],
         turnDiff: undefined,
         inspectorSummary: createInspectorSummary(),
@@ -1169,6 +1220,7 @@ export function reduceRuntimeState(
 		timelineStatus: "running",
 		approvals: [],
 		massMessageReviews: [],
+		userQuestions: [],
 	}),
       );
     case "run/cancelSync":
@@ -1210,6 +1262,7 @@ export function reduceRuntimeState(
 		errorMessage: action.message,
 		approvals: [],
 		massMessageReviews: [],
+		userQuestions: [],
 		inspectorSummary: {
             ...state.inspectorSummary,
             terminalReason: "stream_failed",
@@ -1445,16 +1498,19 @@ export function reduceRuntimeState(
             nextState.timelineStatus = "running";
             nextState.approvals = [];
             nextState.massMessageReviews = [];
+            nextState.userQuestions = [];
           } else if (status === "cancelled") {
             nextState.phase = "cancelled";
             nextState.timelineStatus = "done";
             nextState.approvals = [];
             nextState.massMessageReviews = [];
+            nextState.userQuestions = [];
           } else if (status === "finished") {
             nextState.phase = "done";
             nextState.timelineStatus = "done";
             nextState.approvals = [];
             nextState.massMessageReviews = [];
+            nextState.userQuestions = [];
             nextState.runCompletedAtMs =
               nextState.runCompletedAtMs ?? action.receivedAtMs;
           } else if (status === "error") {
@@ -1462,6 +1518,7 @@ export function reduceRuntimeState(
             nextState.timelineStatus = "error";
             nextState.approvals = [];
             nextState.massMessageReviews = [];
+            nextState.userQuestions = [];
           }
           if (
             status === "cancelled" ||
@@ -1499,6 +1556,7 @@ export function reduceRuntimeState(
           nextState.timelineStatus = "done";
           nextState.approvals = [];
           nextState.massMessageReviews = [];
+          nextState.userQuestions = [];
           nextState.runCompletedAtMs =
             nextState.runCompletedAtMs ?? action.receivedAtMs;
           nextState.inspectorSummary = {
@@ -2042,6 +2100,47 @@ export function reduceRuntimeState(
           });
           break;
         }
+        case "AWAKEN_USER_QUESTION_REQUESTED": {
+          const questionId = action.event.questionId ?? action.event.toolCallId ?? "user-question";
+          let questions: UserQuestion[] = [];
+          try {
+            const parsed = JSON.parse(action.event.content ?? "{}");
+            if (Array.isArray(parsed.questions)) {
+              questions = parsed.questions as UserQuestion[];
+            }
+          } catch {
+            // ignore parse errors
+          }
+          nextState.userQuestions = upsertUserQuestion(
+            nextState.userQuestions,
+            {
+              id: questionId,
+              questions,
+              sourceTool: action.event.toolCallName,
+            },
+          );
+          records = upsertStep(records, `user-question:${questionId}`, {
+            title: "Waiting for your answer",
+            description: questions.map((q) => q.question).join(" | "),
+            status: "active",
+            tag: "user-question",
+          });
+          break;
+        }
+        case "AWAKEN_USER_QUESTION_RESOLVED": {
+          const questionId = action.event.questionId ?? action.event.toolCallId ?? "user-question";
+          nextState.userQuestions = removeUserQuestion(
+            nextState.userQuestions,
+            questionId,
+          );
+          records = upsertStep(records, `user-question:${questionId}`, {
+            title: "Answer received",
+            description: action.event.questionAnswer,
+            status: "done",
+            tag: "user-question",
+          });
+          break;
+        }
         case "AWAKEN_ARTIFACT_CREATED":
         case "AWAKEN_ARTIFACT_UPDATED": {
           nextState.artifacts = upsertArtifact(
@@ -2071,6 +2170,7 @@ export function reduceRuntimeState(
             nextState.timelineStatus = "done";
             nextState.approvals = [];
             nextState.massMessageReviews = [];
+            nextState.userQuestions = [];
             records = upsertStep(records, "run-cancelled", {
               title: "Run cancelled",
               description: action.event.message || "Run was cancelled by user",
@@ -2097,6 +2197,7 @@ export function reduceRuntimeState(
             nextState.errorMessage = errorMessage;
             nextState.approvals = [];
             nextState.massMessageReviews = [];
+            nextState.userQuestions = [];
             records = upsertStep(records, "run-error", {
               title: "Run failed",
               description: errorDescription,

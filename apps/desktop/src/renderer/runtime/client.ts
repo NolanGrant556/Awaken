@@ -8,6 +8,7 @@ import {
   type InstallSkillResponse,
   type MassMessageReviewDecision,
   type ModelProfileBalancesResult,
+  type UserQuestionAnswer,
   type ModelProfileSaveRequest,
   type ModelProfileTestResult,
   type ModelProvider,
@@ -77,6 +78,11 @@ export type RuntimeClient = {
     reviewId: string,
     decision: MassMessageReviewDecision,
   ) => Promise<void>;
+  answerUserQuestion: (
+    runId: string,
+    questionId: string,
+    answer: string,
+  ) => Promise<void>;
   subscribeRun: (
     runId: string,
     handlers: SubscribeHandlers,
@@ -100,6 +106,15 @@ function reconnectDelay(retryCount: number): number {
 
 function isTerminalEvent(event: AguiEvent): boolean {
   return event.type === "RUN_FINISHED" || event.type === "RUN_ERROR";
+}
+
+function isRunNotFoundError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("run_not_found") ||
+    normalized.includes("404 page not found") ||
+    normalized.includes("404 not found")
+  );
 }
 
 function createElectronClient(bridge: AwakenBridge): RuntimeClient {
@@ -137,6 +152,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     startRun: (request) => bridge.startRun(request),
     cancelRun: bridge.cancelRun,
     resolveMassMessageReview: bridge.resolveMassMessageReview,
+    answerUserQuestion: bridge.answerUserQuestion,
     subscribeRun: async (runId, handlers, afterSeq) => {
       let lastSeq = afterSeq ?? 0;
       let terminalSeen = false;
@@ -174,6 +190,12 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
         // Reentrancy guard: if a reconnect is already pending, ignore
         // additional onError/onClose triggers that fire in the same window.
         if (reconnectTimer) return;
+        if (isRunNotFoundError(reason)) {
+          handlers.onError?.(
+            `Run session was not found on the server (it may have been lost after restart): ${reason}`,
+          );
+          return;
+        }
         if (retryCount >= MAX_RECONNECT_RETRIES) {
           handlers.onError?.(
             `Runtime stream failed after ${MAX_RECONNECT_RETRIES} reconnect attempts: ${reason}`,

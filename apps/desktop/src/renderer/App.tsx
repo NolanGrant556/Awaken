@@ -2529,7 +2529,6 @@ export function App() {
                 defaultExpandedIds={[DEFAULT_WORKSPACE_PROJECT_ID]}
                 profileName="Nolan"
                 profileAvatarFallback="AW"
-                profileSubtitle="Local"
                 newTaskLabel="New Agent"
                 newTaskShortcut=""
                 conversationSectionLabel=""

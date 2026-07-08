@@ -90,8 +90,8 @@ const headCountStyle: CSSProperties = {
 const bottomStyle: CSSProperties = {
   display: "grid",
   gap: 8,
-  padding: "10px 14px 14px",
-  borderTop: "1px solid var(--aw-border-light)",
+  padding: "8px 14px 12px",
+  position: "relative",
 };
 
 export function AwakenSidebar({
@@ -187,7 +187,7 @@ export function AwakenSidebar({
       </div>
 
       {profileName || profileAvatarFallback || profileAvatarSrc || onProfileClick ? (
-        <div ref={profileButtonRef} style={bottomStyle}>
+        <div ref={profileButtonRef} className="aw-sidebar-profile" style={bottomStyle}>
           <AwakenProfileButton
             name={profileName}
             subtitle={profileSubtitle}

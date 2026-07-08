@@ -1,3 +1,12 @@
 @import "../../tokens/components.css";
 
-/* AwakenSidebar currently uses shared Awaken Design System tokens and component classes. */
+.aw-sidebar-profile::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 14px;
+  right: 14px;
+  height: 1px;
+  background: var(--aw-border-light);
+  pointer-events: none;
+}

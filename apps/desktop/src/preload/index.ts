@@ -138,8 +138,8 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:delete-mcp-server", name) as Promise<void>,
   listMcpTools: () =>
     ipcRenderer.invoke("awaken:list-mcp-tools") as Promise<RuntimeToolInfo[]>,
-  listSkills: () =>
-    ipcRenderer.invoke("awaken:list-skills") as Promise<RuntimeSkill[]>,
+  listSkills: (projectRoot?: string) =>
+    ipcRenderer.invoke("awaken:list-skills", projectRoot) as Promise<RuntimeSkill[]>,
   installSkill: (request: InstallSkillRequest) =>
     ipcRenderer.invoke("awaken:install-skill", request) as Promise<InstallSkillResponse>,
   listModelProviders: () =>
@@ -158,6 +158,8 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:sync-model-capabilities") as Promise<ModelProvider[]>,
   getModelProfileBalances: () =>
     ipcRenderer.invoke("awaken:get-model-profile-balances") as Promise<ModelProfileBalancesResult>,
+  pickDirectory: (defaultPath?: string) =>
+    ipcRenderer.invoke("awaken:pick-directory", defaultPath) as Promise<WorkspacePickResult>,
   pickWorkspace: (defaultPath?: string) =>
     ipcRenderer.invoke("awaken:pick-workspace", defaultPath) as Promise<WorkspacePickResult>,
   validateWorkspace: (path: string) =>

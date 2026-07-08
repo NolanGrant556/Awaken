@@ -51,13 +51,28 @@ func NewRouterWithWorkspace(runService *awruntime.RunService, infoProvider Runti
 	})
 }
 
+// NewRouterWithWorkspaceAndSkillSync additionally lets the runtime synchronize
+// project-scoped skill tools to the workspace that is about to run.
+func NewRouterWithWorkspaceAndSkillSync(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry, skillRegistry *skills.SkillRegistry, workspaceRoot string, syncSkillsForWorkspace func(string)) http.Handler {
+	return newRouterInternal(routerConfig{
+		runService:             runService,
+		infoProvider:           infoProvider,
+		manager:                manager,
+		connectorRegistry:      connectorRegistry,
+		skillRegistry:          skillRegistry,
+		workspaceRoot:          workspaceRoot,
+		syncSkillsForWorkspace: syncSkillsForWorkspace,
+	})
+}
+
 type routerConfig struct {
-	runService        *awruntime.RunService
-	infoProvider      RuntimeInfoProvider
-	manager           *mcpclient.Manager
-	connectorRegistry *connectors.Registry
-	skillRegistry     *skills.SkillRegistry
-	workspaceRoot     string
+	runService             *awruntime.RunService
+	infoProvider           RuntimeInfoProvider
+	manager                *mcpclient.Manager
+	connectorRegistry      *connectors.Registry
+	skillRegistry          *skills.SkillRegistry
+	workspaceRoot          string
+	syncSkillsForWorkspace func(string)
 }
 
 func newRouterInternal(cfg routerConfig) http.Handler {
@@ -69,7 +84,10 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 	})
 	mux.HandleFunc("GET /v1/model-providers", handleModelProviders)
 	if cfg.runService != nil {
-		handlers := runHandlers{runService: cfg.runService}
+		handlers := runHandlers{
+			runService:             cfg.runService,
+			syncSkillsForWorkspace: cfg.syncSkillsForWorkspace,
+		}
 		mux.HandleFunc("GET /v1/threads", handlers.handleListThreads)
 		mux.HandleFunc("PATCH /v1/threads/{thread_id}", handlers.handleRenameThread)
 		mux.HandleFunc("DELETE /v1/threads/{thread_id}", handlers.handleDeleteThread)

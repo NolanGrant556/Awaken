@@ -555,8 +555,11 @@ ipcMain.handle("awaken:delete-mcp-server", async (_event, name: string) => {
 	});
 });
 
-ipcMain.handle("awaken:list-skills", async () => {
-	return requestRuntime<RuntimeSkill[]>("/v1/skills", {
+ipcMain.handle("awaken:list-skills", async (_event, projectRoot?: string) => {
+	const path = projectRoot
+		? `/v1/skills?projectRoot=${encodeURIComponent(projectRoot)}`
+		: "/v1/skills";
+	return requestRuntime<RuntimeSkill[]>(path, {
 		method: "GET",
 	});
 });
@@ -735,6 +738,29 @@ ipcMain.on("awaken:unsubscribe-run", (_event, subscriptionId: string) => {
   subscription.controller.abort();
   subscriptions.delete(subscriptionId);
 });
+
+ipcMain.handle(
+  "awaken:pick-directory",
+  async (_event, defaultPath?: string) => {
+    const result = await dialog.showOpenDialog({
+      properties: ["openDirectory"],
+      defaultPath,
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true };
+    }
+    const selected = result.filePaths[0];
+    try {
+      const stat = await fs.stat(selected);
+      if (!stat.isDirectory()) {
+        return { canceled: true, error: "Selected path is not a directory" };
+      }
+      return { canceled: false, path: selected };
+    } catch {
+      return { canceled: true, error: "Cannot access selected directory" };
+    }
+  },
+);
 
 ipcMain.handle(
   "awaken:pick-workspace",

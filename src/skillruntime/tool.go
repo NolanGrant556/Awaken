@@ -16,14 +16,16 @@ const SkillToolPrefix = "skill__"
 // skill__{id} namespaced name. The executor is injected so it can be
 // swapped in tests.
 type SkillTool struct {
-	SkillID     string
-	NameStr     string
-	Desc        string
-	WhenToUse   string
-	Body        string
-	ArgDefs     []SkillArgDef
-	Executor    SkillExecutor
-	AllowFork   bool
+	SkillID      string
+	NameStr      string
+	Desc         string
+	WhenToUse    string
+	Body         string
+	RootDir      string
+	AllowedTools []string
+	ArgDefs      []SkillArgDef
+	Executor     SkillExecutor
+	AllowFork    bool
 	// FetchBody is called to obtain the prompt template body at execution
 	// time. Set for MCP-bridged skills whose Body is empty at registration
 	// time (prompts/list only returns metadata, not the template).
@@ -88,16 +90,18 @@ func (st *SkillTool) Execute(ctx context.Context, input string) (string, error) 
 			return "", err
 		}
 	}
+	body = strings.ReplaceAll(body, "${AWAKEN_SKILL_DIR}", st.RootDir)
 
 	body, err = SubstituteArgs(body, st.SkillID, st.ArgDefs, args)
 	if err != nil {
 		return "", err
 	}
+	body = st.renderBodyWithPackageContext(body)
 
 	if st.Executor == nil {
 		return fmt.Sprintf("[skill %q] body after substitution:\n%s", st.SkillID, body), nil
 	}
-	return st.Executor.Execute(ctx, st.SkillID, body, nil)
+	return st.Executor.Execute(ctx, st.SkillID, body, append([]string(nil), st.AllowedTools...))
 }
 
 // IsReadOnly implements tool.ReadOnlyTool. Skills are considered read-only
@@ -131,6 +135,18 @@ func (st *SkillTool) Definition() tool.ToolDefinition {
 // satisfies the tool registry's name pattern.
 func SkillToolName(skillID string) string {
 	return SkillToolPrefix + strings.ReplaceAll(skillID, "-", "_")
+}
+
+func (st *SkillTool) renderBodyWithPackageContext(body string) string {
+	if strings.TrimSpace(st.RootDir) == "" {
+		return body
+	}
+	return fmt.Sprintf(
+		"Base directory for this skill: %s\nUse skill_resource_read with skill_id %q and a relative path to read bundled references, scripts, or assets from this directory.\n\n%s",
+		st.RootDir,
+		st.SkillID,
+		body,
+	)
 }
 
 func parseSkillArgs(input string, argDefs []SkillArgDef) (map[string]string, error) {

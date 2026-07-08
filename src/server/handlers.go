@@ -12,7 +12,8 @@ import (
 )
 
 type runHandlers struct {
-	runService *awruntime.RunService
+	runService             *awruntime.RunService
+	syncSkillsForWorkspace func(string)
 }
 
 // frameSeqStride reserves seq slots per runtime event so that a single runtime
@@ -62,6 +63,9 @@ func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 	if err := decodeJSON(r, &req); err != nil {
 		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
 		return
+	}
+	if h.syncSkillsForWorkspace != nil {
+		h.syncSkillsForWorkspace(req.Workspace.WorkspaceRoot)
 	}
 
 	run, err := h.runService.StartRun(req)

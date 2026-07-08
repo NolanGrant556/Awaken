@@ -28,6 +28,7 @@ function createElectronBridge(
     subscribeRun: vi.fn(async () => "subscription-1"),
     unsubscribeRun: vi.fn(),
     getRuntimeInfo: vi.fn(),
+    pickDirectory: vi.fn(async () => ({ canceled: true as const })),
     pickWorkspace: vi.fn(async () => ({ canceled: true as const })),
     validateWorkspace: vi.fn(async () => ({ valid: true as const })),
     readWorkspaceRegistry: vi.fn(async () => ({ registeredWorkspacePaths: [] })),

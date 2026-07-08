@@ -382,6 +382,88 @@ export type ModelProfileTestResult = {
   message: string;
 };
 
+export type ModelBalanceStatusWire =
+  | "available"
+  | "unavailable"
+  | "missing_key"
+  | "error"
+  | "unsupported";
+
+export type ModelBalanceAmountWire = {
+  currency: string;
+  total: number;
+  granted?: number;
+  topped_up?: number;
+};
+
+export type ModelBalanceQuotaWire = {
+  name: string;
+  limit: number;
+  used: number;
+  remaining: number;
+  reset_at?: string;
+};
+
+export type ModelBalanceDetailWire =
+  | { kind: "amount"; amounts: ModelBalanceAmountWire[] }
+  | { kind: "quota"; quotas: ModelBalanceQuotaWire[] };
+
+export type ModelProfileBalanceWire = {
+  profile_id: string;
+  provider_id: string;
+  model_id: string;
+  display_name?: string;
+  status: ModelBalanceStatusWire;
+  fetched_at?: string;
+  detail?: ModelBalanceDetailWire;
+  error?: string;
+};
+
+export type ModelProfileBalancesResultWire = {
+  balances: ModelProfileBalanceWire[];
+};
+
+export type ModelBalanceStatus =
+  | "available"
+  | "unavailable"
+  | "missing_key"
+  | "error"
+  | "unsupported";
+
+export type ModelBalanceAmount = {
+  currency: string;
+  total: number;
+  granted?: number;
+  toppedUp?: number;
+};
+
+export type ModelBalanceQuota = {
+  name: string;
+  limit: number;
+  used: number;
+  remaining: number;
+  resetAt?: string;
+};
+
+export type ModelBalanceDetail =
+  | { kind: "amount"; amounts: ModelBalanceAmount[] }
+  | { kind: "quota"; quotas: ModelBalanceQuota[] };
+
+export type ModelProfileBalance = {
+  profileId: string;
+  providerId: string;
+  modelId: string;
+  displayName?: string;
+  status: ModelBalanceStatus;
+  fetchedAt?: string;
+  detail?: ModelBalanceDetail;
+  error?: string;
+};
+
+export type ModelProfileBalancesResult = {
+  balances: ModelProfileBalance[];
+};
+
 export type TaskScopeFileWire = {
   path: string;
   display_name?: string;
@@ -541,6 +623,7 @@ export type AwakenBridge = {
   setDefaultModelProfile: (profileId: string) => Promise<RuntimeModelProfileSummary>;
   testModelProfile: (request: ModelProfileSaveRequest) => Promise<ModelProfileTestResult>;
   syncModelCapabilities: () => Promise<ModelProvider[]>;
+  getModelProfileBalances: () => Promise<ModelProfileBalancesResult>;
   pickWorkspace: (defaultPath?: string) => Promise<WorkspacePickResult>;
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
   persistWorkspaceRegistry: (request: WorkspaceRegistryPersistRequest) => Promise<void>;
@@ -773,5 +856,72 @@ export function toRunInputAttachmentWire(
     width: attachment.width,
     height: attachment.height,
     byte_size: attachment.byteSize,
+  };
+}
+
+export function normalizeModelBalanceStatus(
+  status: ModelBalanceStatusWire,
+): ModelBalanceStatus {
+  return status;
+}
+
+export function normalizeModelBalanceAmount(
+  amount: ModelBalanceAmountWire,
+): ModelBalanceAmount {
+  return {
+    currency: amount.currency,
+    total: amount.total,
+    granted: amount.granted,
+    toppedUp: amount.topped_up,
+  };
+}
+
+export function normalizeModelBalanceQuota(
+  quota: ModelBalanceQuotaWire,
+): ModelBalanceQuota {
+  return {
+    name: quota.name,
+    limit: quota.limit,
+    used: quota.used,
+    remaining: quota.remaining,
+    resetAt: quota.reset_at,
+  };
+}
+
+export function normalizeModelBalanceDetail(
+  detail: ModelBalanceDetailWire,
+): ModelBalanceDetail {
+  if (detail.kind === "amount") {
+    return {
+      kind: "amount",
+      amounts: detail.amounts.map(normalizeModelBalanceAmount),
+    };
+  }
+  return {
+    kind: "quota",
+    quotas: detail.quotas.map(normalizeModelBalanceQuota),
+  };
+}
+
+export function normalizeModelProfileBalance(
+  balance: ModelProfileBalanceWire,
+): ModelProfileBalance {
+  return {
+    profileId: balance.profile_id,
+    providerId: balance.provider_id,
+    modelId: balance.model_id,
+    displayName: balance.display_name,
+    status: normalizeModelBalanceStatus(balance.status),
+    fetchedAt: balance.fetched_at,
+    detail: balance.detail ? normalizeModelBalanceDetail(balance.detail) : undefined,
+    error: balance.error,
+  };
+}
+
+export function normalizeModelProfileBalancesResult(
+  result: ModelProfileBalancesResultWire,
+): ModelProfileBalancesResult {
+  return {
+    balances: result.balances.map(normalizeModelProfileBalance),
   };
 }

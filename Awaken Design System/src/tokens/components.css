@@ -767,12 +767,35 @@ button.tool-trace-line:focus-visible {
   align-items: baseline;
 }
 
+.tool-trace-line-copy-long {
+  display: grid;
+  gap: 4px;
+  align-items: start;
+}
+
 .tool-trace-line-title {
   min-width: 0;
   color: var(--aw-text-secondary);
   font-size: var(--aw-font-size-sm);
   line-height: var(--aw-line-height-sm);
   overflow-wrap: anywhere;
+}
+
+.tool-trace-line-title-button {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tool-trace-line-title-button:hover .tool-trace-line-title,
+.tool-trace-line-title-button:focus-visible .tool-trace-line-title {
+  color: var(--aw-text-primary);
 }
 
 .tool-trace-line-detail {
@@ -782,6 +805,39 @@ button.tool-trace-line:focus-visible {
   font-size: var(--aw-font-size-xs);
   line-height: var(--aw-line-height-xs);
   overflow-wrap: anywhere;
+}
+
+.tool-trace-line-detail-long {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  white-space: pre-wrap;
+}
+
+.tool-trace-line-detail-collapsed {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+.tool-trace-line-detail-toggle {
+  justify-self: start;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+  font-weight: var(--aw-font-weight-semibold);
+  line-height: var(--aw-line-height-xs);
+  cursor: pointer;
+}
+
+.tool-trace-line-detail-toggle:hover,
+.tool-trace-line-detail-toggle:focus-visible {
+  color: var(--aw-text-secondary);
 }
 
 .assistant-message {

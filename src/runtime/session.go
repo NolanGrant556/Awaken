@@ -399,7 +399,7 @@ func (s *Session) ResolveUserQuestion(questionID string, answer string) error {
 func (s *Session) CompleteCancelled(message string) {
 	now := time.Now().UTC()
 	if strings.TrimSpace(message) == "" {
-		message = "run cancelled"
+		message = "你停止了生成本次回答"
 	}
 
 	s.mu.Lock()
@@ -420,6 +420,8 @@ func (s *Session) CompleteCancelled(message string) {
 		ThreadID:       s.run.ThreadID,
 		RunID:          s.run.RunID,
 		Status:         string(RunStatusCancelled),
+		Message:        message,
+		Code:           "RUN_CANCELLED",
 		TerminalReason: agentcore.TerminalReasonCancelled,
 	}
 	event := Event{
@@ -428,6 +430,7 @@ func (s *Session) CompleteCancelled(message string) {
 		ThreadID:       s.run.ThreadID,
 		RunID:          s.run.RunID,
 		Message:        message,
+		Code:           "RUN_CANCELLED",
 		TerminalReason: agentcore.TerminalReasonCancelled,
 	}
 	bus := s.bus

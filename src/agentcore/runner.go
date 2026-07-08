@@ -580,7 +580,7 @@ func (e *runEventEmitter) runErrored(err error, reasons ...TerminalReason) {
 		Error:          err.Error(),
 		TerminalReason: firstTerminalReason(reasons, terminalReasonForError(err)),
 	}
-	if event.TerminalReason == TerminalReasonCancelled {
+	if event.TerminalReason == TerminalReasonCancelled || errors.Is(err, stdcontext.Canceled) {
 		event.Code = "RUN_CANCELLED"
 	}
 	switch {

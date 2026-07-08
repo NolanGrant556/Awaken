@@ -205,7 +205,7 @@ func (t typedArtifactTool) CheckPermission(ctx context.Context, input string, pe
 
 func toolRequiresInputPath(name string) bool {
 	switch name {
-	case "artifact_export", "image_convert", "presentation_render":
+	case "artifact_export", "artifact_render", "image_convert", "presentation_render":
 		return true
 	default:
 		return false
@@ -397,6 +397,56 @@ func artifactExport(ctx context.Context, input string) (string, error) {
 		return "", err
 	}
 	return jsonResult("exported", checkedOutput)
+}
+
+func artifactRender(ctx context.Context, input string) (string, error) {
+	params, err := decodeParams(input)
+	if err != nil {
+		return "", err
+	}
+	source := firstString(params, "path", "input_path", "source_path")
+	if source == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	checkedSource, err := tool.PermissionContextFromContext(ctx).ResolveReadablePathChecked(source)
+	if err != nil {
+		return "", err
+	}
+	outputDir, err := presentationRenderOutputDir(ctx, params, checkedSource)
+	if err != nil {
+		return "", err
+	}
+	switch strings.ToLower(filepath.Ext(checkedSource)) {
+	case ".ppt", ".pptx":
+		report, err := renderPresentation(ctx, checkedSource, outputDir)
+		if err != nil {
+			return "", err
+		}
+		return jsonResultWithFields("artifact_rendered", checkedSource, map[string]any{
+			"kind":           "presentation",
+			"verified":       report.Verified,
+			"render_check":   report.Engine,
+			"pdf_path":       report.PDFPath,
+			"preview_dir":    report.PreviewDir,
+			"preview_images": report.PreviewImages,
+			"warnings":       report.Warnings,
+		})
+	case ".pdf":
+		images, err := renderPDFPagesToPNG(ctx, checkedSource, outputDir)
+		if err != nil {
+			return "", err
+		}
+		return jsonResultWithFields("artifact_rendered", checkedSource, map[string]any{
+			"kind":           "pdf",
+			"verified":       true,
+			"render_check":   "poppler_png",
+			"pdf_path":       checkedSource,
+			"preview_dir":    outputDir,
+			"preview_images": images,
+		})
+	default:
+		return "", fmt.Errorf("artifact_render 暂不支持渲染该文件类型: %s。PPTX 请用 presentation_render，PDF 请用 pdf_render；Office 文档深度渲染仍需补 executor", filepath.Ext(checkedSource))
+	}
 }
 
 func spreadsheetCreateOrEdit(ctx context.Context, input string) (string, error) {
@@ -1892,6 +1942,17 @@ func runtimeManifestPath() string {
 		filepath.Join("resources", "runtime-manifest", "primary-runtime.json"),
 		filepath.Join("runtime-manifest", "primary-runtime.json"),
 	}
+	if wd, err := os.Getwd(); err == nil {
+		for dir := wd; ; dir = filepath.Dir(dir) {
+			candidates = append(candidates,
+				filepath.Join(dir, "apps", "desktop", "resources", "runtime-manifest", "primary-runtime.json"),
+			)
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+		}
+	}
 	if exe, err := os.Executable(); err == nil {
 		dir := filepath.Dir(exe)
 		candidates = append(candidates,
@@ -1925,6 +1986,18 @@ func init() {
 	tool.MustRegisterTool(artifactInspectTool("artifact_read", "Artifact Read", "读取工作区 artifact 的基础文件信息"))
 	tool.MustRegisterTool(artifactInspectTool("artifact_inspect", "Artifact Inspect", "检查工作区 artifact 类型、大小与基础元数据"))
 	tool.MustRegisterTool(artifactExportTool())
+	tool.MustRegisterTool(typedArtifactTool{
+		name:        "artifact_render",
+		displayName: "Artifact Render",
+		description: "将 readable roots/附件内的 artifact 渲染为预览产物；PPTX 自动走 presentation_render，PDF 自动走 Poppler PNG 预览，不要用 shell 调 LibreOffice/Poppler",
+		readOnly:    false,
+		capability:  tool.CapabilityArtifactWrite,
+		parameters: []tool.ToolParameter{
+			{Name: "path", Description: "输入 artifact 路径", Type: "string", Required: true},
+			{Name: "output_dir", Description: "预览输出目录，必须在 writable/output roots 内；不传则使用同名 preview 目录", Type: "string", Required: false},
+		},
+		execute: artifactRender,
+	})
 	tool.MustRegisterTool(typedArtifactTool{
 		name:        "spreadsheet_create",
 		displayName: "Spreadsheet Create",
@@ -2069,7 +2142,6 @@ func init() {
 		description string
 		readOnly    bool
 	}{
-		{"artifact_render", "Artifact Render", "将 artifact 渲染为预览产物", true},
 		{"spreadsheet_chart", "Spreadsheet Chart", "为表格生成图表产物", false},
 		{"document_render", "Document Render", "渲染 docx 文档预览", true},
 		{"pdf_render", "PDF Render", "渲染 PDF 页面预览", true},

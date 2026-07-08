@@ -61,6 +61,13 @@ function resolveBinaryPath(): string {
   return join(__dirname, "../../resources/bin", targetDir, binName);
 }
 
+function resolveRuntimeManifestPath(): string {
+  if (app.isPackaged) {
+    return join(process.resourcesPath, "runtime-manifest", "primary-runtime.json");
+  }
+  return join(__dirname, "../../resources/runtime-manifest/primary-runtime.json");
+}
+
 function allocatePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = createServer();
@@ -171,6 +178,7 @@ export class RuntimeSupervisor {
           env: {
             ...sanitizedRuntimeEnv(),
             AWAKEN_CORE_ADDR: `127.0.0.1:${port}`,
+            AWAKEN_RUNTIME_MANIFEST: resolveRuntimeManifestPath(),
             AWAKEN_USER_DATA_DIR: app.getPath("userData"),
             ...(this.options.defaultWorkspace
               ? { AWAKEN_DEFAULT_WORKSPACE: this.options.defaultWorkspace }

@@ -44,6 +44,12 @@ test-*.go
 # Desktop bundled awaken-core binaries
 apps/desktop/resources/bin/
 
+# Local generated primary runtime dependencies. Keep the directory marker and
+# manifest in git; prepare-primary-runtime.mjs recreates these files locally.
+apps/desktop/resources/runtime/**
+!apps/desktop/resources/runtime/
+!apps/desktop/resources/runtime/.gitkeep
+
 # macOS
 .DS_Store
 

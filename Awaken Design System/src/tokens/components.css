@@ -540,7 +540,7 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 .execution-prompt-bubble {
   --execution-prompt-collapsed-content-height: 54px;
   --execution-prompt-expanded-content-height: 162px;
-  --execution-prompt-attachment-size: 64px;
+  --execution-prompt-attachment-size: 52px;
   width: 100%;
   box-sizing: border-box;
   max-width: 100%;
@@ -567,21 +567,80 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 }
 
 .execution-prompt-bubble-attachments {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 6px;
   max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .execution-prompt-bubble-attachment {
-  display: block;
-  width: var(--execution-prompt-attachment-size);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  max-width: 168px;
   height: var(--execution-prompt-attachment-size);
-  flex: 0 0 var(--execution-prompt-attachment-size);
   border: 1px solid rgba(31, 31, 31, 0.08);
-  border-radius: 10px;
-  object-fit: cover;
+  border-radius: 8px;
+  overflow: hidden;
   background: var(--aw-bg-fill-light);
+}
+
+.execution-prompt-bubble-attachment-image {
+  width: var(--execution-prompt-attachment-size);
+  flex: 0 0 var(--execution-prompt-attachment-size);
+}
+
+.execution-prompt-bubble-attachment-thumbnail {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.execution-prompt-bubble-file-card {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  gap: 6px;
+  padding: 0 8px;
+}
+
+.execution-prompt-bubble-file-icon {
+  color: var(--aw-text-tertiary);
+}
+
+.execution-prompt-bubble-file-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-xs);
+  font-weight: var(--aw-font-weight-medium);
+  line-height: var(--aw-line-height-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.execution-prompt-bubble-file-extension {
+  color: var(--aw-text-tertiary);
+  font-size: 10px;
+  font-weight: var(--aw-font-weight-semibold);
+  line-height: 1;
+}
+
+.execution-prompt-bubble-attachment-more {
+  justify-content: center;
+  max-width: 72px;
+  padding: 0 10px;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-xs);
+  font-weight: var(--aw-font-weight-semibold);
+  line-height: 1;
 }
 
 .execution-prompt-bubble:focus-visible {
@@ -606,6 +665,11 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   display: grid;
   gap: 6px;
   cursor: text;
+}
+
+.execution-prompt-block-expanded .execution-prompt-bubble-attachments {
+  grid-template-columns: repeat(auto-fill, minmax(132px, 168px));
+  max-height: none;
 }
 
 .execution-prompt-block-expanded .execution-prompt-bubble-text {
@@ -1697,19 +1761,32 @@ button.tool-trace-line:focus-visible {
 
 .composer-bar-attachments {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  flex-wrap: nowrap;
+  gap: 6px;
   min-width: 0;
+  max-width: 100%;
+  max-height: 46px;
+  padding-bottom: 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 
 .composer-bar-attachment {
   position: relative;
-  width: 88px;
-  height: 88px;
+  box-sizing: border-box;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
   border: 1px solid rgba(31, 31, 31, 0.08);
-  border-radius: 14px;
+  border-radius: 8px;
   overflow: hidden;
   background: var(--aw-bg-fill-light);
+}
+
+.composer-bar-attachment-file {
+  width: 148px;
+  flex-basis: 148px;
 }
 
 .composer-bar-attachment img {
@@ -1719,14 +1796,47 @@ button.tool-trace-line:focus-visible {
   object-fit: cover;
 }
 
+.composer-bar-file-card {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  gap: 6px;
+  padding: 0 8px;
+}
+
+.composer-bar-file-card-icon {
+  color: var(--aw-text-tertiary);
+}
+
+.composer-bar-file-card-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-xs);
+  font-weight: var(--aw-font-weight-medium);
+  line-height: var(--aw-line-height-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-bar-file-card-extension {
+  color: var(--aw-text-tertiary);
+  font-size: 10px;
+  font-weight: var(--aw-font-weight-semibold);
+  line-height: 1;
+}
+
 .composer-bar-attachment-remove {
   position: absolute;
-  top: 6px;
-  right: 6px;
+  top: 3px;
+  right: 3px;
   display: inline-grid;
   place-items: center;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   padding: 0;
   border: 0;
   border-radius: 999px;

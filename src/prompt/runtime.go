@@ -6,11 +6,17 @@ import (
 )
 
 type RuntimeInfo struct {
-	WorkingDir  string
-	CurrentDate string
-	ModelName   string
-	EntryPoint  string
-	ToolSummary string
+	WorkingDir    string
+	CurrentDate   string
+	ModelName     string
+	EntryPoint    string
+	ToolSummary   string
+	AttachedFiles []RuntimeAttachedFile
+}
+
+type RuntimeAttachedFile struct {
+	Path        string
+	DisplayName string
 }
 
 func NewRuntimeInfo() RuntimeInfo {
@@ -57,4 +63,12 @@ func (r *RuntimeInfo) SetEntryPoint(entry string) {
 
 func (r *RuntimeInfo) SetToolSummary(summary string) {
 	r.ToolSummary = summary
+}
+
+func (r *RuntimeInfo) SetAttachedFiles(files []RuntimeAttachedFile) {
+	if len(files) == 0 {
+		r.AttachedFiles = nil
+		return
+	}
+	r.AttachedFiles = append([]RuntimeAttachedFile(nil), files...)
 }

@@ -1,6 +1,5 @@
-import type { RunInputAttachment, RuntimeModelProfileSummary } from "../shared/runtime";
+import type { PickedAttachmentFile, RunInputAttachment } from "../shared/runtime";
 
-export const MAX_COMPOSER_IMAGE_ATTACHMENTS = 4;
 export const MAX_COMPOSER_IMAGE_BYTES = 8 * 1024 * 1024;
 export const SUPPORTED_COMPOSER_IMAGE_MIME_TYPES = [
   "image/png",
@@ -9,7 +8,21 @@ export const SUPPORTED_COMPOSER_IMAGE_MIME_TYPES = [
 ] as const;
 
 export type ComposerDraftAttachment = RunInputAttachment & {
-  previewURL: string;
+  previewURL?: string;
+};
+
+export type AttachmentView = {
+  id: string;
+  kind: "image" | "file";
+  src?: string;
+  alt: string;
+  label: string;
+  detail: string;
+  mimeType: string;
+  byteSize?: number;
+  path?: string;
+  tooltip: string;
+  extension: string;
 };
 
 export async function readComposerDraftImageAttachment(
@@ -34,6 +47,25 @@ export async function readComposerDraftImageAttachment(
     height: dimensions.height,
     byteSize: file.size,
     previewURL: dataURL,
+  };
+}
+
+export function composerDraftAttachmentFromPickedFile(
+  file: PickedAttachmentFile,
+): ComposerDraftAttachment {
+  return {
+    id: file.id || crypto.randomUUID(),
+    kind: file.kind,
+    path: file.path,
+    mimeType: file.mimeType,
+    dataBase64: file.dataBase64,
+    displayName: file.displayName,
+    width: file.width,
+    height: file.height,
+    byteSize: file.byteSize,
+    previewURL: file.kind === "image" && file.dataBase64
+      ? previewURLForRunInputAttachment(file)
+      : undefined,
   };
 }
 
@@ -63,23 +95,125 @@ export function previewURLForRunInputAttachment(
 
 export function promptAttachmentViews(
   attachments: RunInputAttachment[] | undefined,
-): Array<{ id: string; src: string; alt: string }> {
+): AttachmentView[] {
   if (!attachments || attachments.length === 0) {
     return [];
   }
-  return attachments
-    .filter((attachment) => (attachment.dataBase64 ?? "").trim().length > 0)
-    .map((attachment) => ({
-      id: attachment.id,
-      src: previewURLForRunInputAttachment(attachment),
-      alt: attachment.displayName || "Prompt image",
-    }));
+  return attachments.map((attachment) =>
+    attachmentViewFromRunInputAttachment(attachment),
+  );
 }
 
-export function supportsVisionForProfile(
-  profile: RuntimeModelProfileSummary | undefined,
-): boolean {
-  return profile?.advanced?.supportsVision === true;
+export function composerAttachmentViews(
+  attachments: ComposerDraftAttachment[],
+): AttachmentView[] {
+  return attachments.map((attachment) =>
+    attachmentViewFromRunInputAttachment(attachment, attachment.previewURL),
+  );
+}
+
+function attachmentViewFromRunInputAttachment(
+  attachment: RunInputAttachment,
+  previewURL?: string,
+): AttachmentView {
+  const label = attachment.displayName?.trim() ||
+    lastPathSegment(attachment.path) ||
+    (attachment.kind === "image" ? "Image attachment" : "File attachment");
+  const byteSize = formatAttachmentByteSize(attachment.byteSize);
+  const typeLabel = attachmentTypeLabel(attachment.mimeType, attachment.path);
+  const pathTail = attachmentPathTail(attachment.path);
+  const detail = [typeLabel, byteSize].filter(Boolean).join(" · ");
+  const tooltip = [
+    label,
+    typeLabel ? `类型: ${typeLabel}` : "",
+    byteSize ? `大小: ${byteSize}` : "",
+    pathTail ? `路径: ${pathTail}` : "",
+  ].filter(Boolean).join("\n");
+  return {
+    id: attachment.id,
+    kind: attachment.kind,
+    src: attachment.kind === "image"
+      ? previewURL || previewURLForRunInputAttachment(attachment)
+      : undefined,
+    alt: label,
+    label,
+    detail,
+    mimeType: attachment.mimeType,
+    byteSize: attachment.byteSize,
+    path: attachment.path,
+    tooltip,
+    extension: attachmentExtension(label, attachment.mimeType),
+  };
+}
+
+function attachmentTypeLabel(mimeType?: string, filePath?: string): string {
+  const lowerMime = mimeType?.toLowerCase().trim() ?? "";
+  if (lowerMime === "application/pdf") return "PDF";
+  if (lowerMime.includes("spreadsheet") || lowerMime.includes("excel")) {
+    return "Excel";
+  }
+  if (lowerMime.includes("wordprocessing") || lowerMime.includes("msword")) {
+    return "Word";
+  }
+  if (lowerMime === "text/markdown") return "Markdown";
+  if (lowerMime.startsWith("image/")) {
+    return lowerMime.replace("image/", "").toUpperCase();
+  }
+  if (lowerMime.startsWith("text/")) {
+    return lowerMime.replace("text/", "").toUpperCase();
+  }
+  const ext = attachmentExtension(filePath ?? "", lowerMime);
+  return ext ? ext.toUpperCase() : lowerMime || "File";
+}
+
+function attachmentExtension(name: string, mimeType?: string): string {
+  const basename = lastPathSegment(name) || name;
+  const match = /\.([^.]+)$/.exec(basename);
+  if (match) {
+    return match[1].slice(0, 5).toUpperCase();
+  }
+  const lowerMime = mimeType?.toLowerCase().trim() ?? "";
+  if (lowerMime === "application/pdf") return "PDF";
+  if (lowerMime.includes("spreadsheet") || lowerMime.includes("excel")) return "XLS";
+  if (lowerMime.includes("wordprocessing") || lowerMime.includes("msword")) return "DOC";
+  if (lowerMime.startsWith("image/")) {
+    return lowerMime.replace("image/", "").slice(0, 5).toUpperCase();
+  }
+  return "";
+}
+
+function formatAttachmentByteSize(byteSize?: number): string {
+  if (!byteSize || !Number.isFinite(byteSize) || byteSize <= 0) {
+    return "";
+  }
+  const units = ["B", "KB", "MB", "GB"];
+  let size = byteSize;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  const digits = size >= 10 || unitIndex === 0 ? 0 : 1;
+  return `${size.toFixed(digits)} ${units[unitIndex]}`;
+}
+
+function attachmentPathTail(filePath?: string): string {
+  if (!filePath) {
+    return "";
+  }
+  const parts = filePath.split(/[\\/]/).filter(Boolean);
+  if (parts.length <= 3) {
+    return filePath;
+  }
+  return `.../${parts.slice(-3).join("/")}`;
+}
+
+function lastPathSegment(filePath?: string): string {
+  if (!filePath) {
+    return "";
+  }
+  const parts = filePath.split(/[\\/]/).filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : "";
 }
 
 function readFileAsDataURL(file: File): Promise<string> {

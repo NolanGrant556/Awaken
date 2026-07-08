@@ -135,9 +135,12 @@ func (p DefaultAutoToolPolicy) Decide(ctx stdcontext.Context, request ToolDecisi
 		}
 	}
 
-	if request.ToolName == "shell" {
-		if decision, handled := p.decideShellTransform(ctx, request); handled {
-			return decision
+	if request.ToolName == "shell" && request.StaticBehavior == tool.PermissionAllow {
+		return ToolDecision{
+			Action:       ToolDecisionAllow,
+			Source:       ToolDecisionSourceToolRule,
+			Reason:       firstNonEmpty(strings.TrimSpace(request.StaticReason), "local shell command allowed"),
+			UpdatedInput: request.NormalizedInput,
 		}
 	}
 
@@ -187,10 +190,9 @@ func (p DefaultAutoToolPolicy) Decide(ctx stdcontext.Context, request ToolDecisi
 
 // DecideExecution is the unified decision method. It mirrors the logic of
 // Decide but produces an ExecutionDecision (the unified output that carries
-// the ExecutionIntent and a map-typed UpdatedInput). The existing internal
-// helpers (decideApplyPatchFileChain, decideShellTransform) are reused:
-// their ToolDecision outputs are mapped to ExecutionDecision via
-// toolDecisionToExecutionDecision.
+// the ExecutionIntent and a map-typed UpdatedInput). Existing internal helpers
+// return legacy ToolDecision outputs where useful, and those are mapped to
+// ExecutionDecision via toolDecisionToExecutionDecision.
 //
 // Key mapping difference from Decide: a cancelled context (which would
 // produce ToolDecisionAbort in the legacy path) surfaces as a deny with
@@ -233,10 +235,13 @@ func (p DefaultAutoToolPolicy) DecideExecution(ctx stdcontext.Context, intent pr
 		}
 	}
 
-	if request.ToolName == "shell" {
-		if td, handled := p.decideShellTransform(ctx, request); handled {
-			return toolDecisionToExecutionDecision(td, intent)
-		}
+	if request.ToolName == "shell" && request.StaticBehavior == tool.PermissionAllow {
+		decision := profile.AllowDecision(
+			string(profile.DecisionSourceToolRule),
+			firstNonEmpty(strings.TrimSpace(request.StaticReason), "local shell command allowed"),
+		)
+		decision.UpdatedIntent = &intent
+		return decision
 	}
 
 	if td, handled := decideByCapabilityClass(request); handled {

@@ -78,18 +78,26 @@ type ContextDelta struct {
 }
 
 func (snapshot RuntimeSnapshot) ToRuntimeInfo() prompt.RuntimeInfo {
+	attachedFiles := make([]prompt.RuntimeAttachedFile, 0, len(snapshot.AttachedFiles))
+	for _, file := range snapshot.AttachedFiles {
+		attachedFiles = append(attachedFiles, prompt.RuntimeAttachedFile{
+			Path:        file.Path,
+			DisplayName: file.DisplayName,
+		})
+	}
 	return prompt.RuntimeInfo{
-		WorkingDir:  snapshot.WorkingDirectory,
-		CurrentDate: snapshot.CurrentDate,
-		ModelName:   snapshot.ModelName,
-		EntryPoint:  snapshot.EntryPoint,
-		ToolSummary: snapshot.ToolSummary,
+		WorkingDir:    snapshot.WorkingDirectory,
+		CurrentDate:   snapshot.CurrentDate,
+		ModelName:     snapshot.ModelName,
+		EntryPoint:    snapshot.EntryPoint,
+		ToolSummary:   snapshot.ToolSummary,
+		AttachedFiles: attachedFiles,
 	}
 }
 
 func runtimeSnapshotSystemItem(snapshot RuntimeSnapshot) ContextItem {
 	content := fmt.Sprintf(
-		"current_date=%s\nworking_directory=%s\nmodel_name=%s\nentry_point=%s\ntool_summary=%s\nscope_id=%s\nworkspace_root=%s\nreadable_roots=%s\nwritable_roots=%s\noutput_roots=%s\nattached_files=%d",
+		"current_date=%s\nworking_directory=%s\nmodel_name=%s\nentry_point=%s\ntool_summary=%s\nscope_id=%s\nworkspace_root=%s\nreadable_roots=%s\nwritable_roots=%s\noutput_roots=%s\nattached_files=%s",
 		snapshot.CurrentDate,
 		snapshot.WorkingDirectory,
 		snapshot.ModelName,
@@ -100,11 +108,34 @@ func runtimeSnapshotSystemItem(snapshot RuntimeSnapshot) ContextItem {
 		strings.Join(snapshot.ReadableRoots, ","),
 		strings.Join(snapshot.WritableRoots, ","),
 		strings.Join(snapshot.OutputRoots, ","),
-		len(snapshot.AttachedFiles),
+		formatRuntimeSnapshotAttachedFiles(snapshot.AttachedFiles),
 	)
 	return ContextItem{
 		ID:      "runtime_snapshot",
 		Type:    "runtime_snapshot",
 		Content: content,
 	}
+}
+
+func formatRuntimeSnapshotAttachedFiles(files []tool.ScopedFile) string {
+	if len(files) == 0 {
+		return "none"
+	}
+	parts := make([]string, 0, len(files))
+	for _, file := range files {
+		path := strings.TrimSpace(file.Path)
+		if path == "" {
+			continue
+		}
+		displayName := strings.TrimSpace(file.DisplayName)
+		if displayName == "" {
+			parts = append(parts, path)
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s=%s", displayName, path))
+	}
+	if len(parts) == 0 {
+		return "none"
+	}
+	return strings.Join(parts, ",")
 }

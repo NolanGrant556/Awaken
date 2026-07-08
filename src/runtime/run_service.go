@@ -202,9 +202,6 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	if err := validateRunInputAttachments(req.Attachments); err != nil {
 		return Run{}, err
 	}
-	if err := validateVisionSupport(req.ModelProfile, req.Attachments); err != nil {
-		return Run{}, err
-	}
 
 	runID := newRuntimeID("run")
 	threadID := req.ThreadID

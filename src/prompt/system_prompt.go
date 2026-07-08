@@ -2,6 +2,7 @@ package prompt
 
 import (
 	"fmt"
+	"strings"
 )
 
 type SystemPrompt struct {
@@ -42,8 +43,27 @@ func (p *SystemPrompt) buildEffectivePrompt() string {
 		p.runtimeInfo.EntryPoint,
 		p.runtimeInfo.ToolSummary,
 	)
+	if len(p.runtimeInfo.AttachedFiles) > 0 {
+		runtimeInfoStr += "\n- **已授权附件**:\n" + formatRuntimeAttachedFiles(p.runtimeInfo.AttachedFiles)
+	}
 
 	return replaceTemplateVar(p.staticContent, runtimeInfoStr)
+}
+
+func formatRuntimeAttachedFiles(files []RuntimeAttachedFile) string {
+	var builder strings.Builder
+	for _, file := range files {
+		path := strings.TrimSpace(file.Path)
+		if path == "" {
+			continue
+		}
+		displayName := strings.TrimSpace(file.DisplayName)
+		if displayName == "" {
+			displayName = path
+		}
+		builder.WriteString(fmt.Sprintf("  - %s: %s\n", displayName, path))
+	}
+	return strings.TrimRight(builder.String(), "\n")
 }
 
 func replaceTemplateVar(template, value string) string {

@@ -64,13 +64,13 @@ func (t *GrepSearchTool) Name() string {
 }
 
 func (t *GrepSearchTool) Description() string {
-	return "在当前任务 readable roots/附件范围内搜索文本文件内容，返回匹配文件、行号和匹配行；会跳过二进制文件。这不是系统 PATH/命令发现工具，不用于扫描 /usr/local/bin 等系统目录；本地 runtime/命令依赖请用 workspace_dependencies"
+	return "在本机目录内搜索文本文件内容，返回匹配文件、行号和匹配行；root 可用绝对路径、相对当前工作区路径或已上传附件目录名。会跳过二进制文件，扫描大目录时请设置 include/max_results；本地 runtime/命令依赖优先用 workspace_dependencies"
 }
 
 func (t *GrepSearchTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
 		{Name: "query", Description: "要搜索的 Go 正则表达式", Type: "string", Required: true},
-		{Name: "root", Description: "搜索根目录，必须位于 readable roots 或任务附件内；默认当前工作区", Type: "string", Required: false},
+		{Name: "root", Description: "搜索根目录，可用绝对路径、相对当前工作区路径或已上传附件目录名；默认当前工作区", Type: "string", Required: false},
 		{Name: "include", Description: "文件匹配模式，例如 **/*.go，默认 **/*", Type: "string", Required: false},
 		{Name: "max_results", Description: "最多返回多少条匹配，默认 100，最大 1000", Type: "integer", Required: false},
 		{Name: "offset", Description: "跳过前多少条结果，默认 0", Type: "integer", Required: false},
@@ -150,12 +150,8 @@ func (t *GrepSearchTool) Execute(ctx context.Context, input string) (string, err
 }
 
 func (t *GrepSearchTool) CheckPermission(ctx context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {
-	params, err := parseParams(input)
-	if err != nil {
+	if _, err := parseParams(input); err != nil {
 		return tool.DenyPermission(fmt.Sprintf("invalid parameters: %v", err))
-	}
-	if !permissionContext.IsWithinReadableRootsResolved(params.Root) {
-		return tool.DenyPermission(fmt.Sprintf("grep_search 只能在当前任务 readable roots 或附件范围内搜索文本文件；root %s is outside readable roots or escapes via symlink。不要用它扫描系统目录或 PATH，本地 runtime/命令依赖请用 workspace_dependencies", params.Root))
 	}
 	return tool.AllowPermission()
 }
@@ -212,7 +208,7 @@ func normalizeOutputMode(value string) string {
 }
 
 func searchFiles(ctx context.Context, re *regexp.Regexp, options grepOptions, permissionContext tool.PermissionContext) ([]string, bool, error) {
-	paths, err := matchingFiles(ctx, options.root, options.include, permissionContext)
+	paths, err := matchingFiles(ctx, options.root, options.include)
 	if err != nil {
 		return nil, false, err
 	}
@@ -286,7 +282,7 @@ func appendMatchResults(results *[]string, match fileMatch, options grepOptions,
 	return added, len(*results) >= options.maxResults
 }
 
-func matchingFiles(ctx context.Context, root, include string, permissionContext tool.PermissionContext) ([]string, error) {
+func matchingFiles(ctx context.Context, root, include string) ([]string, error) {
 	var paths []string
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -299,11 +295,6 @@ func matchingFiles(ctx context.Context, root, include string, permissionContext 
 			if path != root && filesafe.ShouldSkipDir(path) {
 				return filepath.SkipDir
 			}
-			return nil
-		}
-
-		// Skip files that escape the workspace through symlinks.
-		if !permissionContext.IsWithinReadableRootsResolved(path) {
 			return nil
 		}
 
@@ -332,11 +323,7 @@ func searchFile(path string, re *regexp.Regexp, options grepOptions) (fileMatch,
 	}
 	defer file.Close()
 
-	rel, err := filepath.Rel(options.workspaceRoot, path)
-	if err != nil {
-		return result, err
-	}
-	result.rel = filepath.ToSlash(rel)
+	result.rel = displayPathForSearchFile(path, options.root, options.workspaceRoot)
 
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -356,6 +343,33 @@ func searchFile(path string, re *regexp.Regexp, options grepOptions) (fileMatch,
 		return result, fmt.Errorf("读取文件失败 %s: %w", path, err)
 	}
 	return result, nil
+}
+
+func displayPathForSearchFile(path string, root string, workspaceRoot string) string {
+	if rel, ok := relativePathWithin(workspaceRoot, path); ok {
+		return filepath.ToSlash(rel)
+	}
+	if rel, err := filepath.Rel(root, path); err == nil {
+		if rel == "." {
+			return filepath.Base(path)
+		}
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(filepath.Clean(path))
+}
+
+func relativePathWithin(root string, path string) (string, bool) {
+	if strings.TrimSpace(root) == "" {
+		return "", false
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", false
+	}
+	if rel == "." {
+		return filepath.Base(path), true
+	}
+	return rel, true
 }
 
 func trimMatchLine(line string, maxChars int) string {

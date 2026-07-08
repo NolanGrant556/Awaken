@@ -42,7 +42,7 @@ func (t *ShellTool) Name() string {
 }
 
 func (t *ShellTool) Description() string {
-	return "执行本机 shell/CLI 命令并返回 exit code、耗时、stdout 和 stderr；可调用本机已安装 CLI（如 dws、gh、feishu、obsidian）。普通文件增删改应优先使用 apply_patch；删除本地文件必须走回收站/Trash 工具，不要用 rm/rmdir；涉及群发、批量通知或机器人广播必须走人工审核能力"
+	return "执行本机 shell/CLI 命令并返回 exit code、耗时、stdout 和 stderr；可读取和操作项目内外本机路径，可调用本机已安装 CLI（如 dws、gh、feishu、obsidian）。删除本地文件必须走 trash_file/Trash 工具，不要用 rm/rmdir/unlink；涉及群发、批量通知或机器人广播必须走人工审核能力"
 }
 
 func (t *ShellTool) Parameters() []tool.ToolParameter {
@@ -59,7 +59,7 @@ func (t *ShellTool) Definition() tool.ToolDefinition {
 		Name:        "shell",
 		DisplayName: "Shell",
 		Source:      tool.SourceBuiltin,
-		Description: "执行本机 shell/CLI 命令；本地文件删除必须走回收站，群发/批量通知必须走人工审核能力",
+		Description: "执行本机 shell/CLI 命令，可操作项目内外本机路径；本地删除必须走回收站，群发/批量通知必须走人工审核能力",
 		Annotations: tool.ToolAnnotations{
 			ReadOnly:        false,
 			Destructive:     true,
@@ -97,42 +97,18 @@ func (t *ShellTool) CheckPermission(ctx context.Context, input string, permissio
 	if policy.DenyReason != "" {
 		return tool.DenyPermission(policy.DenyReason)
 	}
-	if policy.DirectAllow && policy.Lane != ShellLaneInspectReadOnly {
-		return tool.AllowPermissionWithMetadata(tool.DecisionMetadata{
-			Title:       "Shell " + string(policy.Lane),
-			Description: shellApprovalDescription(params, "allowed shell lane: "+string(policy.Lane)),
-			RiskTone:    "warning",
-		})
-	}
-	tier := ClassifyShellCommand(params.Command, cwd)
-	switch tier {
-	case ShellTierInspectReadOnly:
-		// Safe read-only: auto-allow. DecideExecution will hit the
-		// StaticBehavior==Allow branch and allow without transform.
+	if policy.DirectAllow {
+		if policy.Lane == ShellLaneInspectReadOnly {
+			return tool.AllowPermission()
+		}
+		if policy.Lane != ShellLaneUnknown {
+			return tool.AllowPermissionWithMetadata(tool.DecisionMetadata{
+				Title:       "Shell " + string(policy.Lane),
+				Description: shellApprovalDescription(params, "allowed shell lane: "+string(policy.Lane)),
+				RiskTone:    "warning",
+			})
+		}
 		return tool.AllowPermission()
-	case ShellTierLocalCLI:
-		return tool.AllowPermissionWithMetadata(tool.DecisionMetadata{
-			Title:       "Shell local_cli",
-			Description: shellApprovalDescription(params, "local CLI command"),
-			RiskTone:    "warning",
-		})
-	case ShellTierWorkspaceMutation:
-		// Internal risk signal: routes to decideShellTransform, which
-		// rewrites simple file writes to apply_patch or structurally denies
-		// unsupported workspace mutation. This is metadata, not approval.
-		return tool.AllowPermissionWithMetadata(tool.DecisionMetadata{
-			Title:       "Shell workspace mutation",
-			Description: shellApprovalDescription(params, "workspace mutation"),
-			RiskTone:    "warning",
-		})
-	case ShellTierOpenWorldSystem:
-		// Open-world shell is not sent to approval. The policy layer denies
-		// it or transforms a narrow file-write pattern when possible.
-		return tool.AllowPermissionWithMetadata(tool.DecisionMetadata{
-			Title:       "Shell open-world command",
-			Description: shellApprovalDescription(params, "open-world system command"),
-			RiskTone:    "danger",
-		})
 	}
 	return tool.AllowPermission()
 }

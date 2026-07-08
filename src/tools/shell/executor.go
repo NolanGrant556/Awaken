@@ -16,31 +16,24 @@ import (
 	"awaken/src/tool/sandbox"
 )
 
-// ErrSandboxUnavailable is returned when an open-world shell command is
-// refused because the current platform does not provide a trusted sandbox.
-// This is a defense-in-depth check: even if the policy layer allowed the
-// call, the executor refuses to run it without isolation.
-//
-// The permission layer (CheckPermission + AutoToolPolicy) runs BEFORE the
-// executor and may already deny open-world commands. This error is the
-// last line of defense for direct tool execution paths that bypass the
-// policy, and for platforms where the adapter has not yet been upgraded
-// from SandboxDegraded/SandboxNone to SandboxFull.
+// ErrSandboxUnavailable is retained for compatibility with older tests and
+// callers. Local-computer shell no longer fails open-world commands because a
+// platform sandbox is unavailable; the active hard gates are implemented by
+// EvaluateShellExecutionPolicy.
 var ErrSandboxUnavailable = errors.New(
 	"open-world shell command requires a trusted sandbox that is not available on this platform",
 )
 
-// ShellExecutor wraps shell command execution with classification and
-// sandbox-aware fail-closed behavior. The shell tool delegates to it so
-// that all execution goes through a single controlled layer.
+// ShellExecutor wraps shell command execution with classification, local shell
+// gates, environment policy, output limits, and timeout handling. The shell
+// tool delegates to it so that all execution goes through a single controlled
+// layer.
 //
 // Execution flow:
 //  1. Classify the command via ClassifyShellCommand (Task 5).
-//  2. Look up the platform sandbox adapter and its support level.
-//  3. If the command is open_world_system and sandbox support is anything
-//     less than SandboxFull, fail-closed with ErrSandboxUnavailable.
-//  4. Apply sandbox constraints to the exec.Cmd (no-op for degraded/none).
-//  5. Execute via the platform shell (/bin/sh on Unix, sh/cmd.exe on Windows),
+//  2. Evaluate the local-computer shell gates (Trash-only deletes and
+//     mass-message review).
+//  3. Execute via the platform shell (/bin/sh on Unix, sh/cmd.exe on Windows),
 //     capturing stdout/stderr with optional observer streaming.
 type ShellExecutor struct {
 	// adapter is the sandbox adapter to use. When nil, the executor
@@ -100,7 +93,6 @@ func (e *ShellExecutor) Execute(
 
 	cwd := resolveExecutorCwd(params.Workdir, permissionContext)
 	tier := ClassifyShellCommand(command, cwd)
-	workspaceRoot := permissionContext.WorkspaceRootOrCWD()
 	policy := EvaluateShellExecutionPolicy(command, cwd, permissionContext)
 	if strings.TrimSpace(policy.DenyReason) != "" {
 		return ShellExecResult{
@@ -108,23 +100,11 @@ func (e *ShellExecutor) Execute(
 		}, fmt.Errorf("shell policy denied command: %s", policy.DenyReason)
 	}
 
-	adapter := e.adapter
-	if adapter == nil {
-		adapter = sandbox.DefaultAdapter()
-	}
-	support := adapter.SupportLevel()
-
-	// Defense in depth: open_world_system commands require a real
-	// sandbox. If the platform only offers degraded or no isolation,
-	// refuse to execute rather than letting the command run unsandboxed.
-	// The policy layer (AutoToolPolicy.decideShellTransform) already
-	// denies these, but this guard catches direct execution paths and
-	// any future platform where the adapter has not landed.
-	if tier == ShellTierOpenWorldSystem && support != sandbox.SandboxFull {
-		return ShellExecResult{
-			Tier:           tier,
-			SandboxSupport: support,
-		}, ErrSandboxUnavailable
+	support := sandbox.SandboxNone
+	if adapter := e.adapter; adapter != nil {
+		support = adapter.SupportLevel()
+	} else if defaultAdapter := sandbox.DefaultAdapter(); defaultAdapter != nil {
+		support = defaultAdapter.SupportLevel()
 	}
 
 	timeout := normalizeTimeout(params.TimeoutMS)
@@ -152,17 +132,7 @@ func (e *ShellExecutor) Execute(
 		cmd.Env = augmentShellPath(os.Environ())
 	}
 
-	sandboxResult, err := adapter.ApplySandbox(cmd, string(tier), workspaceRoot)
-	if err != nil {
-		return ShellExecResult{
-			Tier:           tier,
-			SandboxSupport: support,
-		}, fmt.Errorf("apply sandbox: %w", err)
-	}
-	effectiveSupport := sandboxResult.Support
-	if effectiveSupport == "" {
-		effectiveSupport = support
-	}
+	effectiveSupport := support
 
 	stdout := newShellOutputWriter("stdout", maxOutputChars, observer)
 	stderr := newShellOutputWriter("stderr", maxOutputChars, observer)

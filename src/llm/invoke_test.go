@@ -235,6 +235,35 @@ func TestInvokeOpenAISendsMultimodalUserBlocks(t *testing.T) {
 	}
 }
 
+func TestOpenAIContentForMessageIncludesFileAttachmentPaths(t *testing.T) {
+	content := openAIContentForMessage(ctx.Message{
+		Role:    ctx.RoleUser,
+		Content: "你看到这个文件吗？",
+		Attachments: []ctx.MessageAttachment{
+			{
+				ID:          "file-1",
+				Kind:        "file",
+				MimeType:    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+				Path:        "/Users/nolangrant/Desktop/Awaken 测试文件/QoderWork下载与使用指南.docx",
+				DisplayName: "QoderWork下载与使用指南.docx",
+			},
+		},
+	})
+
+	blocks, ok := content.([]map[string]interface{})
+	if !ok || len(blocks) != 1 {
+		t.Fatalf("expected one text content block, got %T %#v", content, content)
+	}
+	text, ok := blocks[0]["text"].(string)
+	if !ok {
+		t.Fatalf("expected text block, got %#v", blocks[0])
+	}
+	if !strings.Contains(text, "Files mentioned by the user:") ||
+		!strings.Contains(text, "QoderWork下载与使用指南.docx: /Users/nolangrant/Desktop/Awaken 测试文件/QoderWork下载与使用指南.docx") {
+		t.Fatalf("expected file attachment path in user content, got %q", text)
+	}
+}
+
 func TestInvokeOpenAISendsConfigMaxTokens(t *testing.T) {
 	server := newChatServer(t, func(w http.ResponseWriter, r *http.Request) {
 		var body struct {

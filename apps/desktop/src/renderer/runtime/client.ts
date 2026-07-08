@@ -8,6 +8,7 @@ import {
   type InstallSkillResponse,
   type MassMessageReviewDecision,
   type ModelProfileBalancesResult,
+  type UserQuestionAnswer,
   type ModelProfileSaveRequest,
   type ModelProfileTestResult,
   type ModelProvider,
@@ -77,6 +78,11 @@ export type RuntimeClient = {
     reviewId: string,
     decision: MassMessageReviewDecision,
   ) => Promise<void>;
+  answerUserQuestion: (
+    runId: string,
+    questionId: string,
+    answer: string,
+  ) => Promise<void>;
   subscribeRun: (
     runId: string,
     handlers: SubscribeHandlers,
@@ -136,6 +142,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     startRun: (request) => bridge.startRun(request),
     cancelRun: bridge.cancelRun,
     resolveMassMessageReview: bridge.resolveMassMessageReview,
+    answerUserQuestion: bridge.answerUserQuestion,
     subscribeRun: async (runId, handlers, afterSeq) => {
       let lastSeq = afterSeq ?? 0;
       let terminalSeen = false;

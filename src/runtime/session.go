@@ -61,11 +61,17 @@ type Session struct {
 	cancel             context.CancelFunc
 	bus                *EventBus
 	massMessageReviews map[string]*pendingMassMessageReview
+	userQuestions      map[string]*pendingUserQuestion
 }
 
 type pendingMassMessageReview struct {
 	request  agentcore.AwakenEvent
 	decision chan agentcore.ReviewDecision
+}
+
+type pendingUserQuestion struct {
+	request agentcore.AwakenEvent
+	answer  chan string
 }
 
 func NewSession(runID, threadID, input string, attachments []RunInputAttachment, cancel context.CancelFunc) *Session {
@@ -83,6 +89,7 @@ func NewSession(runID, threadID, input string, attachments []RunInputAttachment,
 		cancel:             cancel,
 		bus:                NewEventBus(),
 		massMessageReviews: make(map[string]*pendingMassMessageReview),
+		userQuestions:      make(map[string]*pendingUserQuestion),
 	}
 }
 
@@ -293,6 +300,99 @@ func (s *Session) ResolveMassMessageReview(reviewID string, decision agentcore.R
 
 	bus.Append(wrapped, false)
 	pending.decision <- decision
+	return nil
+}
+
+func (s *Session) AwaitUserQuestion(ctx context.Context, request agentcore.AwakenEvent) (string, error) {
+	timestamp := request.Timestamp.UTC()
+	if request.Timestamp.IsZero() {
+		timestamp = time.Now().UTC()
+	}
+	request.Timestamp = timestamp
+	request.Type = agentcore.UserQuestionRequestedType
+	if strings.TrimSpace(request.QuestionID) == "" {
+		request.QuestionID = "user_question"
+	}
+
+	pending := &pendingUserQuestion{
+		request: request,
+		answer:  make(chan string, 1),
+	}
+
+	s.mu.Lock()
+	if isTerminalStatus(s.run.Status) {
+		s.mu.Unlock()
+		return "", ErrRunTerminal
+	}
+	request.ThreadID = s.run.ThreadID
+	request.RunID = s.run.RunID
+	pending.request = request
+	s.run.UpdatedAt = timestamp
+	s.userQuestions[request.QuestionID] = pending
+	wrapped := Event{
+		Kind:       EventKindAgent,
+		Timestamp:  timestamp,
+		ThreadID:   s.run.ThreadID,
+		RunID:      s.run.RunID,
+		AgentEvent: request,
+	}
+	bus := s.bus
+	s.mu.Unlock()
+
+	bus.Append(wrapped, false)
+
+	select {
+	case answer := <-pending.answer:
+		return answer, nil
+	case <-ctx.Done():
+		s.mu.Lock()
+		delete(s.userQuestions, request.QuestionID)
+		s.mu.Unlock()
+		return "", ctx.Err()
+	}
+}
+
+func (s *Session) ResolveUserQuestion(questionID string, answer string) error {
+	questionID = strings.TrimSpace(questionID)
+	if questionID == "" {
+		return ErrUserQuestionNotFound
+	}
+	answer = strings.TrimSpace(answer)
+	if answer == "" {
+		return ErrUserQuestionNotFound
+	}
+
+	now := time.Now().UTC()
+	s.mu.Lock()
+	if isTerminalStatus(s.run.Status) {
+		s.mu.Unlock()
+		return ErrRunTerminal
+	}
+	pending, ok := s.userQuestions[questionID]
+	if !ok {
+		s.mu.Unlock()
+		return ErrUserQuestionNotFound
+	}
+	delete(s.userQuestions, questionID)
+	resolved := pending.request
+	resolved.Type = agentcore.UserQuestionResolvedType
+	resolved.Timestamp = now
+	resolved.QuestionAnswer = answer
+	resolved.ThreadID = s.run.ThreadID
+	resolved.RunID = s.run.RunID
+	s.run.UpdatedAt = now
+	wrapped := Event{
+		Kind:       EventKindAgent,
+		Timestamp:  now,
+		ThreadID:   s.run.ThreadID,
+		RunID:      s.run.RunID,
+		AgentEvent: resolved,
+	}
+	bus := s.bus
+	s.mu.Unlock()
+
+	bus.Append(wrapped, false)
+	pending.answer <- answer
 	return nil
 }
 

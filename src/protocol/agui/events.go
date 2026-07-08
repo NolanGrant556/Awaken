@@ -40,6 +40,8 @@ const (
 	EventAwakenRuntimeMissing        EventType = "AWAKEN_RUNTIME_MISSING"
 	EventAwakenMassReviewRequested   EventType = "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED"
 	EventAwakenMassReviewResolved    EventType = "AWAKEN_MASS_MESSAGE_REVIEW_RESOLVED"
+	EventAwakenUserQuestionRequested EventType = "AWAKEN_USER_QUESTION_REQUESTED"
+	EventAwakenUserQuestionResolved  EventType = "AWAKEN_USER_QUESTION_RESOLVED"
 	EventAwakenArtifactCreated       EventType = "AWAKEN_ARTIFACT_CREATED"
 	EventAwakenArtifactUpdated       EventType = "AWAKEN_ARTIFACT_UPDATED"
 	EventAwakenUnknown               EventType = "AWAKEN_UNKNOWN_EVENT"
@@ -144,6 +146,8 @@ type Event struct {
 	RuntimeVersion             string      `json:"runtimeVersion,omitempty"`
 	ReviewID                   string      `json:"reviewId,omitempty"`
 	ReviewDecision             string      `json:"reviewDecision,omitempty"`
+	QuestionID                 string      `json:"questionId,omitempty"`
+	QuestionAnswer             string      `json:"questionAnswer,omitempty"`
 	MassMessageChannel         string      `json:"massMessageChannel,omitempty"`
 	MassMessageRecipientScope  string      `json:"massMessageRecipientScope,omitempty"`
 	MassMessageRecipientCount  int         `json:"massMessageRecipientCount,omitempty"`

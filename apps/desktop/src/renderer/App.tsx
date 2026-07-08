@@ -61,6 +61,7 @@ import {
   reduceRuntimeState,
   type ThreadItem,
   type RuntimeAction,
+  type UserQuestionItem,
 } from "./runtime/reducer";
 import type { RunNarrativeItem } from "./run-narrative";
 import {
@@ -104,6 +105,146 @@ import {
 } from "./composerAttachments";
 
 type InspectorTabId = "changes";
+
+type UserQuestionPromptProps = {
+  question: UserQuestionItem;
+  disabled?: boolean;
+  onSubmit: (answer: string) => void;
+};
+
+function UserQuestionPrompt({
+  question,
+  disabled,
+  onSubmit,
+}: UserQuestionPromptProps) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [otherText, setOtherText] = useState("");
+  const otherInputRef = useRef<HTMLInputElement>(null);
+
+  // Reset selection when the question changes.
+  useEffect(() => {
+    setSelected(new Set());
+    setOtherText("");
+  }, [question.id]);
+
+  const hasOther = selected.has("__other__");
+
+  // Focus the other-input when the other option is selected.
+  useEffect(() => {
+    if (hasOther) {
+      otherInputRef.current?.focus();
+    }
+  }, [hasOther]);
+
+  const firstQuestion = question.questions[0];
+  if (!firstQuestion) {
+    return null;
+  }
+
+  const isMulti = firstQuestion.multiSelect ?? false;
+  const options = firstQuestion.options;
+
+  const toggleOption = (label: string) => {
+    if (isMulti) {
+      const next = new Set(selected);
+      if (next.has(label)) {
+        next.delete(label);
+      } else {
+        next.add(label);
+      }
+      setSelected(next);
+    } else {
+      setSelected(new Set([label]));
+    }
+  };
+
+  const handleSubmit = () => {
+    if (disabled) {
+      return;
+    }
+    const selectedLabels = Array.from(selected).filter((label) => label !== "__other__");
+    if (hasOther && otherText.trim()) {
+      selectedLabels.push(otherText.trim());
+    }
+    if (selectedLabels.length === 0) {
+      return;
+    }
+    onSubmit(selectedLabels.join(", "));
+  };
+
+  return (
+    <div className="user-question-card">
+      <div className="user-question-card__body">
+        <div className="user-question-card__title">{firstQuestion.question}</div>
+        <div className="user-question-card__options">
+          {options.map((option) => (
+            <button
+              key={option.label}
+              type="button"
+              className={`user-question-card__option${
+                selected.has(option.label)
+                  ? " user-question-card__option--selected"
+                  : ""
+              }`}
+              onClick={() => toggleOption(option.label)}
+              disabled={disabled}
+            >
+              <span className="user-question-card__option-label">
+                {option.label}
+              </span>
+              {option.description ? (
+                <span className="user-question-card__option-description">
+                  {option.description}
+                </span>
+              ) : null}
+            </button>
+          ))}
+          <div
+            className={`user-question-card__option user-question-card__option--other${
+              hasOther ? " user-question-card__option--selected" : ""
+            }${disabled ? " user-question-card__option--disabled" : ""}`}
+            onClick={() => {
+              if (!disabled) {
+                toggleOption("__other__");
+              }
+            }}
+            role="button"
+            aria-pressed={hasOther}
+            tabIndex={disabled ? -1 : 0}
+          >
+            <span className="user-question-card__option-label">其他（输入你的答案）</span>
+            {hasOther ? (
+              <input
+                ref={otherInputRef}
+                type="text"
+                className="user-question-card__other-input"
+                placeholder="请输入你的回答..."
+                value={otherText}
+                onChange={(event) => setOtherText(event.target.value)}
+                disabled={disabled}
+                onClick={(event) => event.stopPropagation()}
+                onKeyDown={(event) => event.stopPropagation()}
+              />
+            ) : null}
+          </div>
+        </div>
+      </div>
+      <div className="user-question-card__actions">
+        <Button
+          variant="primary"
+          size="sm"
+          loading={disabled}
+          disabled={disabled || (selected.size === 0 && !otherText.trim())}
+          onClick={() => {
+            void handleSubmit();
+          }}
+        >
+          提交回答
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 export function shouldShowSidebarThreadSpinner(thread: ThreadItem): boolean {
   if (
@@ -531,6 +672,8 @@ export function App() {
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
   const [resolvingMassMessageReviewId, setResolvingMassMessageReviewId] =
+    useState<string | null>(null);
+  const [answeringUserQuestionId, setAnsweringUserQuestionId] =
     useState<string | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
   const [modelProfiles, setModelProfiles] = useState<
@@ -1033,6 +1176,7 @@ export function App() {
   });
 
   const activeMassMessageReview = runtimeState.massMessageReviews[0];
+  const activeUserQuestion = runtimeState.userQuestions[0];
   const navItems: NavItem[] = [
     {
       id: "connectors",
@@ -1956,10 +2100,19 @@ export function App() {
         localStorage.removeItem("awaken:runId");
       }
     } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to cancel run";
+      if (message.includes("RUN_NOT_FOUND")) {
+        // The run no longer exists on the server (e.g. runtime restarted or
+        // the run already terminated). Reset the local runtime state so the
+        // user can start fresh instead of showing a confusing error.
+        localStorage.removeItem("awaken:runId");
+        dispatch({ type: "run/reset" });
+        return;
+      }
       dispatch({
         type: "run/streamFailed",
-        message:
-          error instanceof Error ? error.message : "Failed to cancel run",
+        message,
       });
     }
   }
@@ -1990,6 +2143,38 @@ export function App() {
       );
     } finally {
       setResolvingMassMessageReviewId(null);
+    }
+  }
+
+  async function handleAnswerUserQuestion(answer: string): Promise<void> {
+    if (!runtimeState.runId || !activeUserQuestion) {
+      return;
+    }
+    if (answeringUserQuestionId === activeUserQuestion.id) {
+      return;
+    }
+
+    const trimmed = answer.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    setNotice(null);
+    setAnsweringUserQuestionId(activeUserQuestion.id);
+    try {
+      await runtimeClient.answerUserQuestion(
+        runtimeState.runId,
+        activeUserQuestion.id,
+        trimmed,
+      );
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Failed to answer user question",
+      );
+    } finally {
+      setAnsweringUserQuestionId(null);
     }
   }
 
@@ -2409,6 +2594,22 @@ export function App() {
     );
   }
 
+  function renderUserQuestionPrompt() {
+    if (!activeUserQuestion) {
+      return null;
+    }
+    const answering = answeringUserQuestionId === activeUserQuestion.id;
+    return (
+      <UserQuestionPrompt
+        question={activeUserQuestion}
+        disabled={answering}
+        onSubmit={(answer) => {
+          void handleAnswerUserQuestion(answer);
+        }}
+      />
+    );
+  }
+
   function renderComposerRuntimePanels() {
     if (composerRuntimePanels.length === 0) {
       return null;
@@ -2655,6 +2856,7 @@ export function App() {
                             <div className="composer-dock-stack">
                               {renderComposerRuntimePanels()}
                               {renderMassMessageReviewPrompt()}
+                              {renderUserQuestionPrompt()}
                               <ComposerBar
                                 value={composerValue}
                                 onChange={setComposerValue}
@@ -2689,6 +2891,7 @@ export function App() {
                           <TaskWelcome />
                           {renderComposerRuntimePanels()}
                           {renderMassMessageReviewPrompt()}
+                          {renderUserQuestionPrompt()}
                           <ComposerBar
                             value={composerValue}
                             onChange={setComposerValue}

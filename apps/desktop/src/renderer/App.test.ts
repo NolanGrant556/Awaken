@@ -71,6 +71,7 @@ function stubElectronBridge(): void {
       startRun: vi.fn(),
       cancelRun: vi.fn(),
       resolveMassMessageReview: vi.fn(),
+      answerUserQuestion: vi.fn(),
       subscribeRun: vi.fn(),
       unsubscribeRun: vi.fn(),
       getRuntimeInfo: vi.fn(),

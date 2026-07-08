@@ -45,6 +45,8 @@ const (
 	RuntimeMissingEventType        AwakenEventType = "RuntimeMissing"
 	MassMessageReviewRequestedType AwakenEventType = "MassMessageReviewRequested"
 	MassMessageReviewResolvedType  AwakenEventType = "MassMessageReviewResolved"
+	UserQuestionRequestedType      AwakenEventType = "UserQuestionRequested"
+	UserQuestionResolvedType       AwakenEventType = "UserQuestionResolved"
 	ArtifactCreatedEventType       AwakenEventType = "ArtifactCreated"
 	ArtifactUpdatedEventType       AwakenEventType = "ArtifactUpdated"
 )
@@ -162,6 +164,8 @@ type AwakenEvent struct {
 	MassMessageAttachments     []string
 	MassMessageSendingAccount  string
 	MassMessageSourceTool      string
+	QuestionID                 string
+	QuestionAnswer             string
 	ArtifactID                 string
 	ArtifactTitle              string
 	ArtifactDescription        string

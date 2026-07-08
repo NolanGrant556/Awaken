@@ -4,6 +4,7 @@ import path from "node:path";
 import { safeStorage } from "electron";
 import type {
   ModelProfileAdvanced,
+  ModelProfileBalanceWire,
   ModelProfileSaveRequest,
   ModelProfileTestResult,
   ModelProviderWire,
@@ -12,11 +13,27 @@ import type {
 } from "../shared/runtime.js";
 import {
   normalizeAdvancedWithModelCapability,
+  setCapabilityOverrides,
   withModelCapabilities,
 } from "./model-capabilities.js";
+import {
+  fetchProviderCapabilities,
+  loadCapabilityOverrides,
+  mergeCapabilityOverrides,
+  parseProviderCapabilities,
+  saveCapabilityOverrides,
+  type ProviderCapabilityOverrides,
+} from "./model-capability-sync.js";
+import {
+  fetchDeepSeekBalance,
+  fetchKimiCodingBalance,
+  BalanceFetchError,
+} from "./model-balance-fetchers.js";
 
 const MODEL_PROFILES_FILE = "model-profiles.json";
 const DUPLICATE_MODEL_PROFILE_ERROR = "模型配置重复，添加失败";
+const CAPABILITY_SYNC_TIMEOUT_MS = 8_000;
+const BALANCE_FETCH_TIMEOUT_MS = 8_000;
 
 export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
   {
@@ -150,6 +167,49 @@ function normalizeProviderBaseURL(
     return "https://ark.cn-beijing.volces.com/api/coding/v3";
   }
   return normalized;
+}
+
+const BALANCE_SUPPORTED_PROVIDERS = new Set<string>(["deepseek", "kimi-coding-plan"]);
+
+function isBalanceSupportedProvider(providerId: string): boolean {
+  return BALANCE_SUPPORTED_PROVIDERS.has(providerId);
+}
+
+async function fetchBalanceForProvider(
+  providerId: string,
+  baseURL: string,
+  apiKey: string,
+  signal: AbortSignal,
+): Promise<ModelProfileBalanceWire["detail"]> {
+  switch (providerId) {
+    case "deepseek":
+      return await fetchDeepSeekBalance(baseURL, apiKey, signal);
+    case "kimi-coding-plan":
+      return await fetchKimiCodingBalance(baseURL, apiKey, signal);
+    default:
+      throw new BalanceFetchError("暂不支持查询该供应商余额");
+  }
+}
+
+function combineAbortSignals(...signals: AbortSignal[]): AbortSignal {
+  const controller = new AbortController();
+  const cleanup = (): void => {
+    for (const signal of signals) {
+      signal.removeEventListener("abort", onAbort);
+    }
+  };
+  const onAbort = (): void => {
+    cleanup();
+    controller.abort();
+  };
+  for (const signal of signals) {
+    if (signal.aborted) {
+      controller.abort();
+      return controller.signal;
+    }
+    signal.addEventListener("abort", onAbort);
+  }
+  return controller.signal;
 }
 
 function maskKey(credential?: StoredCredential): string | undefined {
@@ -354,9 +414,59 @@ function dedupeStoredProfiles(profiles: StoredModelProfile[]): StoredModelProfil
 
 export class ModelProfileStore {
   private filePath: string;
+  private configDir: string;
+  private capabilityOverrides: Record<string, ProviderCapabilityOverrides> = {};
 
   constructor(configDir: string) {
     this.filePath = path.join(configDir, MODEL_PROFILES_FILE);
+    this.configDir = configDir;
+  }
+
+  async initialize(): Promise<void> {
+    this.capabilityOverrides = await loadCapabilityOverrides(this.configDir);
+    setCapabilityOverrides(this.capabilityOverrides);
+  }
+
+  async syncCapabilities(): Promise<Record<string, ProviderCapabilityOverrides>> {
+    const store = await this.readStore();
+    const candidates = new Map<
+      string,
+      { baseURL: string; apiKey: string }
+    >();
+
+    for (const profile of store.profiles) {
+      if (!profile.enabled || !profile.credential) continue;
+      if (candidates.has(profile.providerId)) continue;
+      const provider = providerById(profile.providerId);
+      if (!provider) continue;
+      const apiKey = decryptCredential(profile.credential);
+      if (!apiKey) continue;
+      candidates.set(profile.providerId, {
+        baseURL: normalizeProviderBaseURL(provider, profile.baseURL),
+        apiKey,
+      });
+    }
+
+    const fetched: Record<string, ProviderCapabilityOverrides> = {};
+    await Promise.allSettled(
+      Array.from(candidates.entries()).map(async ([providerId, { baseURL, apiKey }]) => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), CAPABILITY_SYNC_TIMEOUT_MS);
+        try {
+          const overrides = await fetchProviderCapabilities(baseURL, apiKey, controller.signal);
+          fetched[providerId] = overrides;
+        } catch {
+          // Ignore per-provider fetch failures; keep existing overrides.
+        } finally {
+          clearTimeout(timeout);
+        }
+      }),
+    );
+
+    this.capabilityOverrides = mergeCapabilityOverrides(this.capabilityOverrides, fetched);
+    setCapabilityOverrides(this.capabilityOverrides);
+    await saveCapabilityOverrides(this.configDir, this.capabilityOverrides);
+    return this.capabilityOverrides;
   }
 
   listProviders(): ModelProviderWire[] {
@@ -526,6 +636,19 @@ export class ModelProfileStore {
     try {
       const response = await testModelEndpoint(provider, baseURL, modelId, apiKey, controller.signal);
       if (response.ok) {
+        if (provider.id !== "kimi-coding-plan" && provider.id !== "volcengine") {
+          try {
+            const overrides = parseProviderCapabilities(await response.json());
+            this.capabilityOverrides = mergeCapabilityOverrides(
+              this.capabilityOverrides,
+              { [provider.id]: overrides },
+            );
+            setCapabilityOverrides(this.capabilityOverrides);
+            await saveCapabilityOverrides(this.configDir, this.capabilityOverrides);
+          } catch {
+            // Ignore parse failures; the connection test itself succeeded.
+          }
+        }
         return { ok: true, message: providerTestSuccessMessage(provider) };
       }
       return { ok: false, message: providerTestStatusMessage(response.status, provider) };
@@ -537,6 +660,113 @@ export class ModelProfileStore {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  async fetchBalances(signal?: AbortSignal): Promise<ModelProfileBalanceWire[]> {
+    const store = await this.readStore();
+    const candidateProfiles = store.profiles.filter((profile) => profile.enabled);
+
+    const providerKeys = new Map<string, string>();
+    const providerBaseURLs = new Map<string, string>();
+
+    for (const profile of candidateProfiles) {
+      if (!profile.credential) continue;
+      if (providerKeys.has(profile.providerId)) continue;
+      const provider = providerById(profile.providerId);
+      if (!provider) continue;
+      if (!isBalanceSupportedProvider(profile.providerId)) continue;
+      const apiKey = decryptCredential(profile.credential);
+      if (!apiKey) continue;
+      providerKeys.set(profile.providerId, apiKey);
+      providerBaseURLs.set(
+        profile.providerId,
+        normalizeProviderBaseURL(provider, profile.baseURL),
+      );
+    }
+
+    const fetchedDetails = new Map<string, ModelProfileBalanceWire["detail"] | null>();
+    const fetchErrors = new Map<string, string>();
+
+    await Promise.allSettled(
+      Array.from(providerKeys.entries()).map(async ([providerId, apiKey]) => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), BALANCE_FETCH_TIMEOUT_MS);
+        const combinedSignal = signal
+          ? combineAbortSignals(signal, controller.signal)
+          : controller.signal;
+        try {
+          const baseURL = providerBaseURLs.get(providerId) ?? "";
+          const detail = await fetchBalanceForProvider(
+            providerId,
+            baseURL,
+            apiKey,
+            combinedSignal,
+          );
+          fetchedDetails.set(providerId, detail);
+        } catch (error) {
+          const message =
+            error instanceof BalanceFetchError
+              ? error.message
+              : error instanceof Error && error.name === "AbortError"
+                ? "查询余额超时"
+                : "查询余额失败";
+          fetchErrors.set(providerId, message);
+        } finally {
+          clearTimeout(timeout);
+        }
+      }),
+    );
+
+    return candidateProfiles.map((profile): ModelProfileBalanceWire => {
+      const provider = providerById(profile.providerId);
+      const modelId = normalizeProviderModelId(provider, profile.modelId);
+      const displayName = profile.displayName;
+
+      if (!isBalanceSupportedProvider(profile.providerId)) {
+        return {
+          profile_id: profile.id,
+          provider_id: profile.providerId,
+          model_id: modelId,
+          display_name: displayName,
+          status: "unsupported",
+          error: "暂不支持查询该供应商余额",
+        };
+      }
+
+      if (!profile.credential || !providerKeys.has(profile.providerId)) {
+        return {
+          profile_id: profile.id,
+          provider_id: profile.providerId,
+          model_id: modelId,
+          display_name: displayName,
+          status: "missing_key",
+          error: "请先配置 API key",
+        };
+      }
+
+      const error = fetchErrors.get(profile.providerId);
+      if (error) {
+        return {
+          profile_id: profile.id,
+          provider_id: profile.providerId,
+          model_id: modelId,
+          display_name: displayName,
+          status: "error",
+          error,
+        };
+      }
+
+      const detail = fetchedDetails.get(profile.providerId);
+      return {
+        profile_id: profile.id,
+        provider_id: profile.providerId,
+        model_id: modelId,
+        display_name: displayName,
+        status: detail ? "available" : "error",
+        fetched_at: new Date().toISOString(),
+        detail: detail ?? undefined,
+      };
+    });
   }
 
   private async apiKeyForProfile(profileId: string): Promise<string> {

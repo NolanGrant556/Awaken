@@ -47,7 +47,7 @@ type ConfiguredProfileDraft = {
 const CONTEXT_WINDOW_MIN = 8_000;
 const CONTEXT_WINDOW_MAX = 1_000_000;
 const CONTEXT_WINDOW_SLIDER_STEP = 1;
-const CONTEXT_WINDOW_ANCHOR = 400_000;
+const CONTEXT_WINDOW_ANCHOR_RATIO = 0.6;
 const CONTEXT_WINDOW_ANCHOR_SNAP_TOLERANCE = 10_000;
 const MAX_TOKENS_DEFAULT = 8192;
 const MAX_TOKENS_MIN = 256;
@@ -61,16 +61,43 @@ type ModelSettingsDialogProps = {
   onProfilesChanged: () => void;
 };
 
-function clampContextWindow(value: number | undefined): number {
-  if (!Number.isFinite(value)) return CONTEXT_WINDOW_MAX;
+function formatContextWindow(value: number): string {
+  if (value >= 1_000_000) return `${value / 1_000_000}M`;
+  return `${Math.round(value / 1_000)}K`;
+}
+
+function clampContextWindow(
+  value: number | undefined,
+  max: number = CONTEXT_WINDOW_MAX,
+): number {
+  if (!Number.isFinite(value)) return max;
   return Math.min(
-    CONTEXT_WINDOW_MAX,
-    Math.max(CONTEXT_WINDOW_MIN, Math.round(value ?? CONTEXT_WINDOW_MAX)),
+    max,
+    Math.max(CONTEXT_WINDOW_MIN, Math.round(value ?? max)),
   );
 }
 
-function contextWindowForProfile(profile: RuntimeModelProfileSummary): number {
-  return clampContextWindow(profile.advanced?.contextWindow);
+function modelCapabilityFor(provider: ModelProvider, modelId: string) {
+  return provider.modelCapabilities[modelId];
+}
+
+function contextWindowMaxForProfile(
+  profile: RuntimeModelProfileSummary,
+  providers: ModelProvider[],
+): number {
+  const provider = providers.find((p) => p.id === profile.providerId);
+  const capability = provider
+    ? modelCapabilityFor(provider, profile.modelId)
+    : undefined;
+  return capability?.contextWindow ?? CONTEXT_WINDOW_MAX;
+}
+
+function contextWindowForProfile(
+  profile: RuntimeModelProfileSummary,
+  providers: ModelProvider[],
+): number {
+  const max = contextWindowMaxForProfile(profile, providers);
+  return clampContextWindow(profile.advanced?.contextWindow, max);
 }
 
 function clampMaxTokens(value: number | undefined): number {
@@ -83,10 +110,6 @@ function clampMaxTokens(value: number | undefined): number {
 
 function maxTokensForProfile(profile: RuntimeModelProfileSummary): number {
   return clampMaxTokens(profile.advanced?.maxTokens);
-}
-
-function modelCapabilityFor(provider: ModelProvider, modelId: string) {
-  return provider.modelCapabilities[modelId];
 }
 
 function providerHasEditableCapabilities(provider: ModelProvider): boolean {
@@ -130,10 +153,13 @@ function advancedWithModelCapability(
   };
 }
 
-function parseContextWindowInput(value: string): number | undefined {
+function parseContextWindowInput(
+  value: string,
+  max: number = CONTEXT_WINDOW_MAX,
+): number | undefined {
   if (value.trim() === "") return undefined;
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? clampContextWindow(parsed) : undefined;
+  return Number.isFinite(parsed) ? clampContextWindow(parsed, max) : undefined;
 }
 
 function parseMaxTokensInput(value: string): number | undefined {
@@ -142,31 +168,39 @@ function parseMaxTokensInput(value: string): number | undefined {
   return Number.isFinite(parsed) ? clampMaxTokens(parsed) : undefined;
 }
 
-function contextWindowFill(value: number): number {
+function contextWindowFill(value: number, max: number): number {
   return (
-    ((clampContextWindow(value) - CONTEXT_WINDOW_MIN) /
-      (CONTEXT_WINDOW_MAX - CONTEXT_WINDOW_MIN)) *
+    ((clampContextWindow(value, max) - CONTEXT_WINDOW_MIN) /
+      (max - CONTEXT_WINDOW_MIN)) *
     100
   );
 }
 
-function snapContextWindowAnchor(value: number): number {
-  return Math.abs(value - CONTEXT_WINDOW_ANCHOR) <=
-    CONTEXT_WINDOW_ANCHOR_SNAP_TOLERANCE
-    ? CONTEXT_WINDOW_ANCHOR
+function contextWindowAnchor(max: number): number {
+  return clampContextWindow(
+    Math.round(max * CONTEXT_WINDOW_ANCHOR_RATIO),
+    max,
+  );
+}
+
+function snapContextWindowAnchor(value: number, max: number): number {
+  const anchor = contextWindowAnchor(max);
+  return Math.abs(value - anchor) <= CONTEXT_WINDOW_ANCHOR_SNAP_TOLERANCE
+    ? anchor
     : value;
 }
 
 function configuredDraftsFromProfiles(
   profiles: RuntimeModelProfileSummary[],
+  providers: ModelProvider[],
 ): Record<string, ConfiguredProfileDraft> {
   return Object.fromEntries(
     profiles.map((profile) => [
       profile.id,
       {
         enabled: profile.enabled,
-        contextWindow: contextWindowForProfile(profile),
-        contextWindowInput: contextWindowForProfile(profile).toString(),
+        contextWindow: contextWindowForProfile(profile, providers),
+        contextWindowInput: contextWindowForProfile(profile, providers).toString(),
         maxTokens: maxTokensForProfile(profile),
         maxTokensInput: maxTokensForProfile(profile).toString(),
       },
@@ -317,7 +351,21 @@ export function ModelSettingsDialog({
       ]);
       setProviders(nextProviders);
       setProfiles(nextProfiles);
-      setConfiguredDrafts(configuredDraftsFromProfiles(nextProfiles));
+      setConfiguredDrafts(
+        configuredDraftsFromProfiles(nextProfiles, nextProviders),
+      );
+
+      try {
+        const syncedProviders = await runtimeClient.syncModelCapabilities();
+        const refreshedProfiles = await runtimeClient.listModelProfiles();
+        setProviders(syncedProviders);
+        setProfiles(refreshedProfiles);
+        setConfiguredDrafts(
+          configuredDraftsFromProfiles(refreshedProfiles, syncedProviders),
+        );
+      } catch {
+        // Background capability sync is best-effort; static values remain usable.
+      }
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -454,7 +502,7 @@ export function ModelSettingsDialog({
     if (!next) return false;
     return (
       next.enabled !== profile.enabled ||
-      next.contextWindow !== contextWindowForProfile(profile) ||
+      next.contextWindow !== contextWindowForProfile(profile, providers) ||
       next.maxTokens !== maxTokensForProfile(profile)
     );
   });
@@ -478,15 +526,22 @@ export function ModelSettingsDialog({
   }
 
   function resetConfiguredDrafts(): void {
-    setConfiguredDrafts(configuredDraftsFromProfiles(profiles));
+    setConfiguredDrafts(configuredDraftsFromProfiles(profiles, providers));
     setMessage(null);
+  }
+
+  function configuredContextWindowMax(profileId: string): number {
+    const profile = profiles.find((p) => p.id === profileId);
+    return profile
+      ? contextWindowMaxForProfile(profile, providers)
+      : CONTEXT_WINDOW_MAX;
   }
 
   function updateConfiguredContextWindow(
     profileId: string,
     value: number,
   ): void {
-    const nextValue = clampContextWindow(value);
+    const nextValue = clampContextWindow(value, configuredContextWindowMax(profileId));
     updateConfiguredDraft(profileId, {
       contextWindow: nextValue,
       contextWindowInput: nextValue.toString(),
@@ -494,10 +549,11 @@ export function ModelSettingsDialog({
   }
 
   function snapConfiguredContextWindow(profileId: string): void {
+    const max = configuredContextWindowMax(profileId);
     setConfiguredDrafts((current) => {
       const existing = current[profileId];
       if (!existing) return current;
-      const nextValue = snapContextWindowAnchor(existing.contextWindow);
+      const nextValue = snapContextWindowAnchor(existing.contextWindow, max);
       if (nextValue === existing.contextWindow) return current;
       return {
         ...current,
@@ -514,7 +570,7 @@ export function ModelSettingsDialog({
     profileId: string,
     value: string,
   ): void {
-    const parsed = parseContextWindowInput(value);
+    const parsed = parseContextWindowInput(value, configuredContextWindowMax(profileId));
     setConfiguredDrafts((current) => {
       const existing = current[profileId];
       if (!existing) return current;
@@ -531,11 +587,12 @@ export function ModelSettingsDialog({
   }
 
   function commitConfiguredContextWindowInput(profileId: string): void {
+    const max = configuredContextWindowMax(profileId);
     setConfiguredDrafts((current) => {
       const existing = current[profileId];
       if (!existing) return current;
       const nextValue =
-        parseContextWindowInput(existing.contextWindowInput) ??
+        parseContextWindowInput(existing.contextWindowInput, max) ??
         existing.contextWindow;
       return {
         ...current,
@@ -591,7 +648,7 @@ export function ModelSettingsDialog({
       if (!next) return false;
       return (
         next.enabled !== profile.enabled ||
-        next.contextWindow !== contextWindowForProfile(profile) ||
+        next.contextWindow !== contextWindowForProfile(profile, providers) ||
         next.maxTokens !== maxTokensForProfile(profile)
       );
     });
@@ -1169,17 +1226,30 @@ export function ModelSettingsDialog({
                   <div className="configured-models-empty">暂无已配置模型</div>
                 ) : (
                   profiles.map((profile) => {
+                    const contextWindowMax = contextWindowMaxForProfile(
+                      profile,
+                      providers,
+                    );
+                    const effectiveAnchor = contextWindowAnchor(contextWindowMax);
                     const profileDraft = configuredDrafts[profile.id] ?? {
                       enabled: profile.enabled,
-                      contextWindow: contextWindowForProfile(profile),
-                      contextWindowInput:
-                        contextWindowForProfile(profile).toString(),
+                      contextWindow: contextWindowForProfile(profile, providers),
+                      contextWindowInput: contextWindowForProfile(
+                        profile,
+                        providers,
+                      ).toString(),
                       maxTokens: maxTokensForProfile(profile),
                       maxTokensInput: maxTokensForProfile(profile).toString(),
                     };
                     const contextStyle = {
-                      "--context-fill": `${contextWindowFill(profileDraft.contextWindow)}%`,
-                      "--context-anchor": `${contextWindowFill(CONTEXT_WINDOW_ANCHOR)}%`,
+                      "--context-fill": `${contextWindowFill(
+                        profileDraft.contextWindow,
+                        contextWindowMax,
+                      )}%`,
+                      "--context-anchor": `${contextWindowFill(
+                        effectiveAnchor,
+                        contextWindowMax,
+                      )}%`,
                     } as CSSProperties;
                     return (
                       <div className="configured-models-row" key={profile.id}>
@@ -1213,7 +1283,7 @@ export function ModelSettingsDialog({
                               className="configured-context-range"
                               type="range"
                               min={CONTEXT_WINDOW_MIN}
-                              max={CONTEXT_WINDOW_MAX}
+                              max={contextWindowMax}
                               step={CONTEXT_WINDOW_SLIDER_STEP}
                               value={profileDraft.contextWindow}
                               onChange={(event) =>
@@ -1261,15 +1331,15 @@ export function ModelSettingsDialog({
                               onClick={() =>
                                 updateConfiguredContextWindow(
                                   profile.id,
-                                  CONTEXT_WINDOW_ANCHOR,
+                                  effectiveAnchor,
                                 )
                               }
-                              aria-label={`${profile.modelId} 设置上下文长度为 400K`}
+                              aria-label={`${profile.modelId} 设置上下文长度为 ${effectiveAnchor}`}
                             >
-                              400K
+                              {formatContextWindow(effectiveAnchor)}
                             </button>
                             <span className="configured-context-scale-label configured-context-scale-end">
-                              1M
+                              {formatContextWindow(contextWindowMax)}
                             </span>
                           </div>
                         </div>

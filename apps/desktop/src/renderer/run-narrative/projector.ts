@@ -288,12 +288,15 @@ export function projectAguiEventToNarrative(
       return markLatestAnswerFinal(commitActive(base, "done"), event);
     case "RUN_ERROR":
       if (event.code === "RUN_CANCELLED") {
-        return commitActive(base, "done");
+        return commitActiveWithFootnote(base, "你停止了生成本次回答");
       }
       return commitErrorAnswer(base, event);
     case "RUN_STATUS_CHANGED":
       if (event.status === "cancelled") {
-        return commitActive(base, "done");
+        return commitActiveWithFootnote(
+          base,
+          event.message || "你停止生成了本次回答",
+        );
       }
       if (event.status === "finished") {
         return markLatestAnswerFinal(commitActive(base, "done"), event);
@@ -360,6 +363,25 @@ function commitActive(
     return state;
   }
   const item = applyStatus(state.activeItem, status);
+  return {
+    ...state,
+    committedItems: upsertCommitted(state.committedItems, item),
+    activeItem: undefined,
+  };
+}
+
+function commitActiveWithFootnote(
+  state: RunNarrativeState,
+  footnote: string,
+  status: "done" | "error" = "done",
+): RunNarrativeState {
+  if (!state.activeItem) {
+    return state;
+  }
+  const item = applyStatus(state.activeItem, status);
+  if (item.kind === "answer") {
+    item.footnote = footnote;
+  }
   return {
     ...state,
     committedItems: upsertCommitted(state.committedItems, item),

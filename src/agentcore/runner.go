@@ -580,6 +580,9 @@ func (e *runEventEmitter) runErrored(err error, reasons ...TerminalReason) {
 		Error:          err.Error(),
 		TerminalReason: firstTerminalReason(reasons, terminalReasonForError(err)),
 	}
+	if event.TerminalReason == TerminalReasonCancelled {
+		event.Code = "RUN_CANCELLED"
+	}
 	switch {
 	case errors.Is(err, errContextWindowBlocked):
 		event.Code = "CONTEXT_BLOCKED"

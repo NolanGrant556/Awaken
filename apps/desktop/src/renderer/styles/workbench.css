@@ -157,6 +157,17 @@
   color: var(--aw-text-muted);
 }
 
+.assistant-message-wrapper {
+  display: grid;
+  gap: 6px;
+}
+
+.assistant-message-footnote {
+  color: var(--aw-text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .user-question-card__actions {
   display: flex;
   gap: 8px;

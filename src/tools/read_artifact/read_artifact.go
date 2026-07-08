@@ -101,12 +101,12 @@ func (t *ReadArtifactTool) Name() string {
 }
 
 func (t *ReadArtifactTool) Description() string {
-	return "读取当前任务 readable roots/附件内的工作文件并返回结构化预览；支持 .xlsx/.xls/.csv/.tsv/.pdf/.docx。普通源码/Markdown/JSON 用 read_file，图片元数据用 image_inspect，PPTX 可用 artifact_inspect 或 presentation_render"
+	return "读取本机工作文件并返回结构化预览；路径可用绝对路径、相对当前工作区路径或已上传附件文件名；支持 .xlsx/.xls/.csv/.tsv/.pdf/.docx。普通源码/Markdown/JSON 用 read_file，图片元数据用 image_inspect，PPTX 可用 artifact_inspect 或 presentation_render"
 }
 
 func (t *ReadArtifactTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
-		{Name: "path", Description: "要读取的工作文件路径，必须位于 readable roots 或任务附件内；支持 xlsx/xls/csv/tsv/pdf/docx", Type: "string", Required: true},
+		{Name: "path", Description: "要读取的工作文件路径，可用绝对路径、相对当前工作区路径或已上传附件文件名；支持 xlsx/xls/csv/tsv/pdf/docx", Type: "string", Required: true},
 		{Name: "sheet", Description: "读取指定工作表（xlsx/xls 可选）", Type: "string", Required: false},
 		{Name: "max_rows", Description: "表格类文件最多预览多少行，默认 40，最大 200", Type: "integer", Required: false},
 		{Name: "max_chars", Description: "最多返回多少字符，默认 12000，最大 50000", Type: "integer", Required: false},
@@ -135,12 +135,8 @@ func (t *ReadArtifactTool) Definition() tool.ToolDefinition {
 }
 
 func (t *ReadArtifactTool) CheckPermission(ctx context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {
-	params, err := parseReadArtifactParams(input)
-	if err != nil {
+	if _, err := parseReadArtifactParams(input); err != nil {
 		return tool.DenyPermission(fmt.Sprintf("invalid parameters: %v", err))
-	}
-	if !permissionContext.IsWithinReadableRootsResolved(params.Path) {
-		return tool.DenyPermission(fmt.Sprintf("read_artifact 只能读取当前任务 readable roots 或附件内的工作文件；path %s is outside readable roots or escapes via symlink。请先把文件放入任务范围或作为附件提供", params.Path))
 	}
 	return tool.AllowPermission()
 }

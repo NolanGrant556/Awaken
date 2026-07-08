@@ -2,30 +2,12 @@ package executors
 
 import (
 	"context"
-	"os/exec"
 	"strings"
 	"testing"
 
 	"awaken/src/tool"
 	"awaken/src/tool/profile"
-	"awaken/src/tool/sandbox"
 )
-
-// --- Mock sandbox adapter for ShellExecutor tests ---
-
-// mockSandboxAdapter lets tests control the SupportLevel reported by the
-// sandbox adapter without depending on platform-specific adapters.
-type mockSandboxAdapter struct {
-	support sandbox.SandboxSupport
-}
-
-func (m *mockSandboxAdapter) SupportLevel() sandbox.SandboxSupport {
-	return m.support
-}
-
-func (m *mockSandboxAdapter) ApplySandbox(cmd *exec.Cmd, tier string, workspaceRoot string) (sandbox.SandboxResult, error) {
-	return sandbox.SandboxResult{Support: m.support, Method: "mock", Applied: m.support == sandbox.SandboxFull}, nil
-}
 
 // --- Mock tools for executor tests ---
 
@@ -84,42 +66,34 @@ func (t *openWorldReadOnlyTool) Execute(ctx context.Context, input string) (stri
 
 // --- ShellExecutor tests ---
 
-// TestShellExecutorDeniesSandboxRequiredWithoutFullSandbox verifies that
-// ShellExecutor denies a call when the profile requires a sandbox
-// (SandboxRequired) but the platform adapter reports anything less than
-// SandboxFull.
-func TestShellExecutorDeniesSandboxRequiredWithoutFullSandbox(t *testing.T) {
-	t.Cleanup(func() { sandbox.SetAdapter(nil) })
-	sandbox.SetAdapter(&mockSandboxAdapter{support: sandbox.SandboxNone})
-
+// TestShellExecutorAllowsSandboxRequiredProfile verifies that ShellExecutor
+// no longer treats SandboxRequired as a hard gate. Shell is a local-computer
+// execution surface; delete and mass-message safety lives inside the shell
+// tool policy.
+func TestShellExecutorAllowsSandboxRequiredProfile(t *testing.T) {
 	executor := NewShellExecutor()
 	intent := profile.ExecutionIntent{
 		ToolName: "shell",
 		ToolKind: profile.ToolKindShellCommand,
 	}
-	shellProfile := profile.GuardianReadOnly() // SandboxRequired
+	shellProfile := profile.GuardianReadOnly()
 	noop := &noopTool{name: "shell"}
 
 	output, err := executor.Execute(context.Background(), intent, shellProfile, noop, "test", nil)
-	if err == nil {
-		t.Fatalf("expected error for SandboxRequired without full sandbox, got nil")
+	if err != nil {
+		t.Fatalf("unexpected error for SandboxRequired shell profile: %v", err)
 	}
-	if !output.IsError {
-		t.Fatalf("expected IsError=true, got false")
+	if output.IsError {
+		t.Fatalf("expected IsError=false, got true (ErrorCode=%q Content=%q)", output.ErrorCode, output.Content)
 	}
-	if output.ErrorCode != "sandbox_required" {
-		t.Fatalf("expected ErrorCode=sandbox_required, got %q", output.ErrorCode)
+	if output.Content != "executed: test" {
+		t.Fatalf("expected content %q, got %q", "executed: test", output.Content)
 	}
 }
 
-// TestShellExecutorAllowsBestEffortWithoutSandbox verifies that
-// ShellExecutor allows a call when the profile is SandboxBestEffort and
-// the platform reports no sandbox support. The tool should execute and
-// return its output.
-func TestShellExecutorAllowsBestEffortWithoutSandbox(t *testing.T) {
-	t.Cleanup(func() { sandbox.SetAdapter(nil) })
-	sandbox.SetAdapter(&mockSandboxAdapter{support: sandbox.SandboxNone})
-
+// TestShellExecutorAllowsBestEffortProfile verifies that the shell wrapper
+// delegates to the shell tool under the normal WorkspaceWrite profile.
+func TestShellExecutorAllowsBestEffortProfile(t *testing.T) {
 	executor := NewShellExecutor()
 	intent := profile.ExecutionIntent{
 		ToolName: "shell",

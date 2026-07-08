@@ -168,28 +168,7 @@ func (t typedArtifactTool) CheckPermission(ctx context.Context, input string, pe
 	}
 	params, _ := decodeParams(input, singleRawParamName(t.parameters))
 	if t.readOnly {
-		if path := firstString(params, "path", "input_path", "source_path"); path != "" {
-			if !permissionContext.IsWithinReadableRootsResolved(path) {
-				return tool.DenyPermission(fmt.Sprintf("%s 只能读取当前任务 readable roots 或附件内的文件；path %s is outside readable roots or escapes via symlink。系统依赖/命令位置请用 workspace_dependencies，不要用 artifact 工具扫描系统目录", t.name, path))
-			}
-		}
 		return tool.AllowPermission()
-	}
-	inputPath := firstString(params, "input_path", "source_path")
-	if inputPath == "" && toolRequiresInputPath(t.name) {
-		inputPath = firstString(params, "path")
-	}
-	if inputPath != "" {
-		if !permissionContext.IsWithinReadableRootsResolved(inputPath) {
-			return tool.DenyPermission(fmt.Sprintf("%s 的输入文件必须位于当前任务 readable roots 或附件内；path %s is outside readable roots or escapes via symlink", t.name, inputPath))
-		}
-	}
-	if t.name == "presentation_create" || t.name == "presentation_edit" {
-		for _, imagePath := range collectPresentationImagePaths(params) {
-			if !permissionContext.IsWithinReadableRootsResolved(imagePath) {
-				return tool.DenyPermission(fmt.Sprintf("%s 的图片素材必须位于当前任务 readable roots 或附件内；path %s is outside readable roots or escapes via symlink", t.name, imagePath))
-			}
-		}
 	}
 	outputPath := firstString(params, "output_path", "target_path", "output_dir", "preview_dir")
 	if outputPath == "" && !toolRequiresInputPath(t.name) {
@@ -266,7 +245,7 @@ func artifactInspectTool(name, displayName, description string) typedArtifactToo
 		readOnly:    true,
 		capability:  tool.CapabilityArtifactRead,
 		parameters: []tool.ToolParameter{
-			{Name: "path", Description: "工作区内或附件中的文件路径", Type: "string", Required: true},
+			{Name: "path", Description: "本机文件路径，可用绝对路径、相对当前工作区路径或已上传附件文件名", Type: "string", Required: true},
 		},
 		execute: artifactReadOrInspect,
 	}
@@ -276,7 +255,7 @@ func artifactExportTool() typedArtifactTool {
 	return typedArtifactTool{
 		name:        "artifact_export",
 		displayName: "Artifact Export",
-		description: "将 readable roots/附件内的 artifact 复制/导出到 writable/output roots 内的指定路径；不解析文件内容，仅复制文件",
+		description: "将本机 artifact 复制/导出到 writable/output roots 内的指定路径；不解析文件内容，仅复制文件",
 		readOnly:    false,
 		capability:  tool.CapabilityArtifactWrite,
 		parameters: []tool.ToolParameter{
@@ -1983,13 +1962,13 @@ func firstNonEmpty(values ...string) string {
 func init() {
 	tool.MustRegisterTool(workspaceDependenciesTool())
 	tool.MustRegisterTool(runtimePreflightTool())
-	tool.MustRegisterTool(artifactInspectTool("artifact_read", "Artifact Read", "读取工作区 artifact 的基础文件信息"))
-	tool.MustRegisterTool(artifactInspectTool("artifact_inspect", "Artifact Inspect", "检查工作区 artifact 类型、大小与基础元数据"))
+	tool.MustRegisterTool(artifactInspectTool("artifact_read", "Artifact Read", "读取本机 artifact 的基础文件信息"))
+	tool.MustRegisterTool(artifactInspectTool("artifact_inspect", "Artifact Inspect", "检查本机 artifact 类型、大小与基础元数据"))
 	tool.MustRegisterTool(artifactExportTool())
 	tool.MustRegisterTool(typedArtifactTool{
 		name:        "artifact_render",
 		displayName: "Artifact Render",
-		description: "将 readable roots/附件内的 artifact 渲染为预览产物；PPTX 自动走 presentation_render，PDF 自动走 Poppler PNG 预览，不要用 shell 调 LibreOffice/Poppler",
+		description: "将本机 artifact 渲染为预览产物；PPTX 自动走 presentation_render，PDF 自动走 Poppler PNG 预览，不要用 shell 调 LibreOffice/Poppler",
 		readOnly:    false,
 		capability:  tool.CapabilityArtifactWrite,
 		parameters: []tool.ToolParameter{
@@ -2081,7 +2060,7 @@ func init() {
 	tool.MustRegisterTool(typedArtifactTool{
 		name:        "presentation_render",
 		displayName: "Presentation Render",
-		description: "将 readable roots/附件内的 pptx 演示文稿渲染成 PDF 与 PNG 页面预览；用于检查 PPT 版式和图片是否可见，不要用 shell 调 LibreOffice/Poppler",
+		description: "将本机 pptx 演示文稿渲染成 PDF 与 PNG 页面预览；用于检查 PPT 版式和图片是否可见，不要用 shell 调 LibreOffice/Poppler",
 		readOnly:    false,
 		capability:  tool.CapabilityArtifactWrite,
 		parameters: []tool.ToolParameter{

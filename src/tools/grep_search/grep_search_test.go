@@ -124,18 +124,23 @@ func TestGrepSearchResolvesRelativePath(t *testing.T) {
 	}
 }
 
-func TestGrepSearchDeniesOutsideWorkspace(t *testing.T) {
+func TestGrepSearchAllowsOutsideWorkspace(t *testing.T) {
 	workspaceRoot := t.TempDir()
+	outside := t.TempDir()
+	writeTestFile(t, outside, "secret.txt", "secret")
 	pc := tool.NewPermissionContext(workspaceRoot, []string{workspaceRoot})
 	ctx := tool.ContextWithPermissionContext(context.Background(), pc)
 
-	_, err := (&GrepSearchTool{}).Execute(ctx, `{"query":"foo","root":"/etc"}`)
-	if err == nil || (!strings.Contains(err.Error(), "outside workspace") && !strings.Contains(err.Error(), "outside readable roots")) {
-		t.Fatalf("expected /etc to be denied, got %v", err)
+	out, err := (&GrepSearchTool{}).Execute(ctx, `{"query":"secret","root":"`+escapePath(outside)+`"}`)
+	if err != nil {
+		t.Fatalf("expected outside workspace to be searchable, got %v", err)
+	}
+	if out != "secret.txt:1:secret" {
+		t.Fatalf("unexpected output: %q", out)
 	}
 }
 
-func TestGrepSearchBlocksTraversal(t *testing.T) {
+func TestGrepSearchAllowsTraversal(t *testing.T) {
 	parent := t.TempDir()
 	workspaceRoot := filepath.Join(parent, "workspace")
 	if err := os.MkdirAll(workspaceRoot, 0755); err != nil {
@@ -145,9 +150,12 @@ func TestGrepSearchBlocksTraversal(t *testing.T) {
 
 	pc := tool.NewPermissionContext(workspaceRoot, []string{workspaceRoot})
 	ctx := tool.ContextWithPermissionContext(context.Background(), pc)
-	_, err := (&GrepSearchTool{}).Execute(ctx, `{"query":"secret","root":"../outside"}`)
-	if err == nil || (!strings.Contains(err.Error(), "outside workspace") && !strings.Contains(err.Error(), "outside readable roots")) {
-		t.Fatalf("expected traversal to be denied, got %v", err)
+	out, err := (&GrepSearchTool{}).Execute(ctx, `{"query":"secret","root":"../outside"}`)
+	if err != nil {
+		t.Fatalf("expected traversal root to be searchable, got %v", err)
+	}
+	if out != "secret.txt:1:secret" {
+		t.Fatalf("unexpected output: %q", out)
 	}
 }
 
@@ -165,18 +173,15 @@ func TestGrepSearchResolvesRelativeRoot(t *testing.T) {
 	}
 }
 
-func TestGrepSearchDeniesArbitraryOutsideWorkspace(t *testing.T) {
+func TestGrepSearchAllowsArbitraryOutsideWorkspacePermission(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
 	writeTestFile(t, outside, "secret.txt", "secret")
 
 	permissionContext := tool.NewPermissionContext(root, []string{root})
 	decision := (&GrepSearchTool{}).CheckPermission(context.Background(), `{"root":"`+escapePath(outside)+`","query":"secret"}`, permissionContext)
-	if decision.Behavior != tool.PermissionDeny {
-		t.Fatalf("expected deny for outside workspace, got %v", decision.Behavior)
-	}
-	if !strings.Contains(decision.Reason, "workspace_dependencies") || !strings.Contains(decision.Reason, "系统目录") {
-		t.Fatalf("expected routing guidance in deny reason, got %q", decision.Reason)
+	if decision.Behavior != tool.PermissionAllow {
+		t.Fatalf("expected allow for outside workspace, got %v", decision.Behavior)
 	}
 }
 
@@ -191,7 +196,7 @@ func TestGrepSearchAllowsInsideWorkspace(t *testing.T) {
 	}
 }
 
-func TestGrepSearchDeniesSymlinkRootEscape(t *testing.T) {
+func TestGrepSearchAllowsSymlinkRootOutsideWorkspace(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
 	writeTestFile(t, outside, "secret.txt", "secret")
@@ -202,12 +207,12 @@ func TestGrepSearchDeniesSymlinkRootEscape(t *testing.T) {
 
 	permissionContext := tool.NewPermissionContext(root, []string{root})
 	decision := (&GrepSearchTool{}).CheckPermission(context.Background(), `{"root":"outside-link","query":"secret"}`, permissionContext)
-	if decision.Behavior != tool.PermissionDeny {
-		t.Fatalf("expected deny for symlink root escape, got %v", decision.Behavior)
+	if decision.Behavior != tool.PermissionAllow {
+		t.Fatalf("expected allow for symlink root outside workspace, got %v", decision.Behavior)
 	}
 }
 
-func TestGrepSearchSkipsSymlinkFileEscape(t *testing.T) {
+func TestGrepSearchIncludesSymlinkFileOutsideWorkspace(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
 	writeTestFile(t, outside, "secret.txt", "secret content")
@@ -222,8 +227,8 @@ func TestGrepSearchSkipsSymlinkFileEscape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
-	if strings.Contains(out, "secret") {
-		t.Fatalf("expected symlink escape to be skipped, got %q", out)
+	if !strings.Contains(out, "secret-link:1:secret content") {
+		t.Fatalf("expected symlink file to be searched, got %q", out)
 	}
 	if !strings.Contains(out, "real.txt") {
 		t.Fatalf("expected real file to be searched, got %q", out)

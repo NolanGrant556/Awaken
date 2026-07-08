@@ -33,13 +33,13 @@ func (t *ListFilesTool) Name() string {
 }
 
 func (t *ListFilesTool) Description() string {
-	return "在当前任务 readable roots/附件范围内按 glob 列出文件，返回稳定排序路径；这是工作区文件发现工具，不用于扫描 /usr/local/bin、系统 PATH 或任意系统目录。本地 runtime/命令依赖请用 workspace_dependencies"
+	return "在本机目录内按 glob 列出文件，返回稳定排序路径；root 可用绝对路径、相对当前工作区路径或已上传附件目录名。扫描大目录时请设置 pattern/max_results，本地 runtime/命令依赖优先用 workspace_dependencies"
 }
 
 func (t *ListFilesTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
 		{Name: "pattern", Description: "文件匹配模式，例如 *.go 或 **/*.md，默认 **/*", Type: "string", Required: false},
-		{Name: "root", Description: "搜索根目录，必须位于 readable roots 或任务附件内；默认当前工作区", Type: "string", Required: false},
+		{Name: "root", Description: "搜索根目录，可用绝对路径、相对当前工作区路径或已上传附件目录名；默认当前工作区", Type: "string", Required: false},
 		{Name: "max_results", Description: "最多返回多少条结果，默认 200，最大 1000", Type: "integer", Required: false},
 	}
 }
@@ -100,12 +100,8 @@ func (t *ListFilesTool) Execute(ctx context.Context, input string) (string, erro
 }
 
 func (t *ListFilesTool) CheckPermission(ctx context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {
-	params, err := parseParams(input)
-	if err != nil {
+	if _, err := parseParams(input); err != nil {
 		return tool.DenyPermission(fmt.Sprintf("invalid parameters: %v", err))
-	}
-	if !permissionContext.IsWithinReadableRootsResolved(params.Root) {
-		return tool.DenyPermission(fmt.Sprintf("list_files 只能在当前任务 readable roots 或附件范围内列文件；root %s is outside readable roots or escapes via symlink。不要用它扫描系统目录或 PATH，本地 runtime/命令依赖请用 workspace_dependencies", params.Root))
 	}
 	return tool.AllowPermission()
 }
@@ -149,11 +145,6 @@ func listFiles(ctx context.Context, root, workspaceRoot, pattern string, maxResu
 			return nil
 		}
 
-		// Skip files that escape readable roots through symlinks.
-		if !permissionContext.IsWithinReadableRootsResolved(path) {
-			return nil
-		}
-
 		relRoot, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
@@ -162,11 +153,7 @@ func listFiles(ctx context.Context, root, workspaceRoot, pattern string, maxResu
 		if !filematch.Match(pattern, relRoot) {
 			return nil
 		}
-		relWorkspace, err := filepath.Rel(workspaceRoot, path)
-		if err != nil {
-			return err
-		}
-		matches = append(matches, filepath.ToSlash(relWorkspace))
+		matches = append(matches, displayPathForListedFile(path, root, workspaceRoot))
 		return nil
 	})
 	if err != nil {
@@ -179,6 +166,33 @@ func listFiles(ctx context.Context, root, workspaceRoot, pattern string, maxResu
 		matches = matches[:maxResults]
 	}
 	return matches, total, nil
+}
+
+func displayPathForListedFile(path string, root string, workspaceRoot string) string {
+	if rel, ok := relativePathWithin(workspaceRoot, path); ok {
+		return filepath.ToSlash(rel)
+	}
+	if rel, err := filepath.Rel(root, path); err == nil {
+		if rel == "." {
+			return filepath.Base(path)
+		}
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(filepath.Clean(path))
+}
+
+func relativePathWithin(root string, path string) (string, bool) {
+	if strings.TrimSpace(root) == "" {
+		return "", false
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", false
+	}
+	if rel == "." {
+		return filepath.Base(path), true
+	}
+	return rel, true
 }
 
 func init() {

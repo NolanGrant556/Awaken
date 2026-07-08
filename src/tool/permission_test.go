@@ -3,6 +3,7 @@ package tool
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -106,7 +107,82 @@ func TestPermissionContextResolvesSymlinksForWorkspaceBoundary(t *testing.T) {
 		t.Fatalf("expected resolved path %q, got %q", insideFile, resolved)
 	}
 
-	if _, err := ctx.ResolvePathChecked("external-link"); err == nil {
-		t.Fatalf("expected ResolvePathChecked to fail for external symlink")
+	resolved, err = ctx.ResolvePathChecked("external-link")
+	if err != nil {
+		t.Fatalf("expected ResolvePathChecked to allow local read symlink: %v", err)
+	}
+	if resolved != externalLink {
+		t.Fatalf("expected readable path %q, got %q", externalLink, resolved)
+	}
+}
+
+func TestPermissionContextReadablePathsAllowOutsideWorkspace(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "report.txt")
+	if err := os.WriteFile(outsideFile, []byte("outside"), 0644); err != nil {
+		t.Fatalf("failed to write outside file: %v", err)
+	}
+
+	ctx := NewPermissionContext(workspace, []string{workspace})
+	if !ctx.IsWithinReadableRootsResolved(outsideFile) {
+		t.Fatalf("expected local read path outside workspace to be allowed")
+	}
+	resolved, err := ctx.ResolveReadablePathChecked(outsideFile)
+	if err != nil {
+		t.Fatalf("expected readable path outside workspace to resolve: %v", err)
+	}
+	if resolved != outsideFile {
+		t.Fatalf("expected %q, got %q", outsideFile, resolved)
+	}
+}
+
+func TestPermissionContextResolvesAttachedFileDisplayName(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	attached := filepath.Join(outside, "客户名单.xlsx")
+	if err := os.WriteFile(attached, []byte("xlsx"), 0644); err != nil {
+		t.Fatalf("failed to write attached file: %v", err)
+	}
+	ctx := NewTaskScopePermissionContext(
+		"scope-test",
+		workspace,
+		[]string{workspace},
+		[]string{workspace},
+		[]string{workspace},
+		[]ScopedFile{{Path: attached, DisplayName: "客户名单.xlsx"}},
+		nil,
+		filepath.Join(t.TempDir(), "tmp"),
+	)
+
+	resolved, err := ctx.ResolveReadablePathChecked("客户名单.xlsx")
+	if err != nil {
+		t.Fatalf("expected display name to resolve: %v", err)
+	}
+	if resolved != attached {
+		t.Fatalf("expected %q, got %q", attached, resolved)
+	}
+}
+
+func TestPermissionContextAttachedFileDisplayNameAmbiguity(t *testing.T) {
+	workspace := t.TempDir()
+	first := filepath.Join(t.TempDir(), "report.csv")
+	second := filepath.Join(t.TempDir(), "report.csv")
+	ctx := NewTaskScopePermissionContext(
+		"scope-test",
+		workspace,
+		[]string{workspace},
+		[]string{workspace},
+		[]string{workspace},
+		[]ScopedFile{
+			{Path: first, DisplayName: "report.csv"},
+			{Path: second, DisplayName: "report.csv"},
+		},
+		nil,
+		filepath.Join(t.TempDir(), "tmp"),
+	)
+
+	if _, err := ctx.ResolveReadablePathChecked("report.csv"); err == nil || !strings.Contains(err.Error(), "多个文件") {
+		t.Fatalf("expected ambiguous attached file error, got %v", err)
 	}
 }

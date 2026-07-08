@@ -104,7 +104,7 @@ func TestPresentationCreateUsesRuntimeAndRenderCheck(t *testing.T) {
 	}
 }
 
-func TestPresentationCreateRejectsImageOutsideReadableRoots(t *testing.T) {
+func TestPresentationCreateAllowsImageOutsideReadableRoots(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
 	imagePath := filepath.Join(outside, "outside.png")
@@ -129,8 +129,8 @@ func TestPresentationCreateRejectsImageOutsideReadableRoots(t *testing.T) {
 		}),
 		tool.NewPermissionContext(root, []string{root}),
 	)
-	if decision.Behavior != tool.PermissionDeny || !strings.Contains(decision.Reason, "图片素材") {
-		t.Fatalf("expected image boundary deny, got %+v", decision)
+	if decision.Behavior != tool.PermissionAllow {
+		t.Fatalf("expected outside image input to be allowed, got %+v", decision)
 	}
 }
 
@@ -170,8 +170,9 @@ func TestPresentationSpecResolvesImagesAndPreviewDefaults(t *testing.T) {
 	}
 }
 
-func TestPresentationRenderChecksInputAndOutputBoundaries(t *testing.T) {
+func TestPresentationRenderChecksOutputBoundaries(t *testing.T) {
 	root := t.TempDir()
+	outside := t.TempDir()
 	render := typedArtifactTool{
 		name:       "presentation_render",
 		readOnly:   false,
@@ -180,11 +181,11 @@ func TestPresentationRenderChecksInputAndOutputBoundaries(t *testing.T) {
 	}
 	decision := render.CheckPermission(
 		context.Background(),
-		`{"path":"missing.pptx","output_dir":"preview"}`,
+		mustJSON(t, map[string]any{"path": "missing.pptx", "output_dir": filepath.Join(outside, "preview")}),
 		tool.NewPermissionContext(root, []string{root}),
 	)
-	if decision.Behavior != tool.PermissionDeny || !strings.Contains(decision.Reason, "输入文件") {
-		t.Fatalf("expected missing readable input deny, got %+v", decision)
+	if decision.Behavior != tool.PermissionDeny || !strings.Contains(decision.Reason, "outside writable/output roots") {
+		t.Fatalf("expected output boundary deny, got %+v", decision)
 	}
 }
 

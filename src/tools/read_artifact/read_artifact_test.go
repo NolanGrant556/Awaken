@@ -55,6 +55,34 @@ func TestReadArtifactAllowsAttachedFileOutsideReadableRoots(t *testing.T) {
 	}
 }
 
+func TestReadArtifactResolvesAttachedDisplayName(t *testing.T) {
+	root := t.TempDir()
+	outsideDir := t.TempDir()
+	path := filepath.Join(outsideDir, "客户名单.csv")
+	if err := os.WriteFile(path, []byte("name,amount\nDana,40\n"), 0o644); err != nil {
+		t.Fatalf("failed to write csv: %v", err)
+	}
+
+	permCtx := tool.NewTaskScopePermissionContext(
+		"scope-test",
+		root,
+		[]string{root},
+		[]string{root},
+		[]string{root},
+		[]tool.ScopedFile{{Path: path, DisplayName: "客户名单.csv"}},
+		nil,
+		filepath.Join(t.TempDir(), "tmp"),
+	)
+	ctx := tool.ContextWithPermissionContext(context.Background(), permCtx)
+	out, err := (&ReadArtifactTool{}).Execute(ctx, `{"path":"客户名单.csv"}`)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if !strings.Contains(out, "Dana") {
+		t.Fatalf("expected attached file content, got %q", out)
+	}
+}
+
 func TestReadArtifactUnsupportedTypeHasRoutingHint(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "image.png")

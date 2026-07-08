@@ -28,6 +28,7 @@ import {
   normalizeRuntimeThreadTranscript,
   normalizeRuntimeThread,
   normalizeStartRunRequest,
+  type AttachmentPickResult,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
   type DesktopPlatform,
@@ -37,6 +38,7 @@ import {
   type ModelProfileBalancesResultWire,
   type ModelProfileSaveRequest,
   type ModelProviderWire,
+  type PickedAttachmentFile,
   type RuntimeConnector,
   type RuntimeConnectorActionResponse,
   type RuntimeInfoWire,
@@ -92,6 +94,142 @@ function desktopIconPath(): string {
 function loadDesktopIcon() {
   const icon = nativeImage.createFromPath(desktopIconPath());
   return icon.isEmpty() ? undefined : icon;
+}
+
+const maxPickedImageBytes = 8 * 1024 * 1024;
+
+const supportedAttachmentExtensions = [
+  "png",
+  "jpg",
+  "jpeg",
+  "webp",
+  "pdf",
+  "xls",
+  "xlsx",
+  "csv",
+  "tsv",
+  "md",
+  "markdown",
+  "doc",
+  "docx",
+  "txt",
+  "json",
+  "jsonl",
+  "js",
+  "jsx",
+  "ts",
+  "tsx",
+  "css",
+  "html",
+  "xml",
+  "yaml",
+  "yml",
+  "go",
+  "py",
+  "rb",
+  "rs",
+  "java",
+  "c",
+  "h",
+  "cpp",
+  "hpp",
+  "swift",
+  "kt",
+  "sql",
+  "sh",
+];
+
+const attachmentMimeTypesByExtension = new Map<string, string>([
+  [".png", "image/png"],
+  [".jpg", "image/jpeg"],
+  [".jpeg", "image/jpeg"],
+  [".webp", "image/webp"],
+  [".pdf", "application/pdf"],
+  [".csv", "text/csv"],
+  [".tsv", "text/tab-separated-values"],
+  [".md", "text/markdown"],
+  [".markdown", "text/markdown"],
+  [".txt", "text/plain"],
+  [".json", "application/json"],
+  [".jsonl", "application/jsonl"],
+  [".doc", "application/msword"],
+  [".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+  [".xls", "application/vnd.ms-excel"],
+  [".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+  [".ppt", "application/vnd.ms-powerpoint"],
+  [".pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"],
+  [".js", "text/javascript"],
+  [".jsx", "text/javascript"],
+  [".ts", "text/typescript"],
+  [".tsx", "text/typescript"],
+  [".css", "text/css"],
+  [".scss", "text/x-scss"],
+  [".html", "text/html"],
+  [".xml", "application/xml"],
+  [".yaml", "application/yaml"],
+  [".yml", "application/yaml"],
+  [".go", "text/x-go"],
+  [".py", "text/x-python"],
+  [".rb", "text/x-ruby"],
+  [".rs", "text/x-rust"],
+  [".java", "text/x-java"],
+  [".c", "text/x-c"],
+  [".h", "text/x-c"],
+  [".cpp", "text/x-c++"],
+  [".hpp", "text/x-c++"],
+  [".swift", "text/x-swift"],
+  [".kt", "text/x-kotlin"],
+  [".sql", "application/sql"],
+  [".sh", "application/x-sh"],
+]);
+
+function mimeTypeForAttachmentPath(filePath: string): string {
+  return attachmentMimeTypesByExtension.get(path.extname(filePath).toLowerCase()) ??
+    "application/octet-stream";
+}
+
+function isInlineImageMimeType(mimeType: string): boolean {
+  return mimeType === "image/png" || mimeType === "image/jpeg" || mimeType === "image/webp";
+}
+
+async function pickedAttachmentForPath(filePath: string): Promise<PickedAttachmentFile> {
+  const stat = await fs.stat(filePath);
+  if (!stat.isFile()) {
+    throw new Error("不是文件");
+  }
+  const mimeType = mimeTypeForAttachmentPath(filePath);
+  const displayName = path.basename(filePath);
+  const byteSize = Number(stat.size);
+
+  if (!isInlineImageMimeType(mimeType)) {
+    return {
+      id: randomUUID(),
+      kind: "file",
+      path: filePath,
+      mimeType,
+      displayName,
+      byteSize,
+    };
+  }
+
+  if (byteSize > maxPickedImageBytes) {
+    throw new Error(`图片超过 ${maxPickedImageBytes / (1024 * 1024)} MiB`);
+  }
+
+  const data = await fs.readFile(filePath);
+  const image = nativeImage.createFromPath(filePath);
+  const size = image.isEmpty() ? { width: 0, height: 0 } : image.getSize();
+  return {
+    id: randomUUID(),
+    kind: "image",
+    path: filePath,
+    mimeType,
+    displayName,
+    byteSize,
+    dataBase64: data.toString("base64"),
+    width: size.width,
+    height: size.height,
+  };
 }
 
 function setMacDockIcon(): void {
@@ -751,6 +889,56 @@ ipcMain.on("awaken:unsubscribe-run", (_event, subscriptionId: string) => {
   subscription.controller.abort();
   subscriptions.delete(subscriptionId);
 });
+
+ipcMain.handle(
+  "awaken:pick-attachments",
+  async (_event, defaultPath?: string): Promise<AttachmentPickResult> => {
+    const result = await dialog.showOpenDialog({
+      properties: ["openFile", "multiSelections"],
+      defaultPath,
+      filters: [
+        {
+          name: "Supported attachments",
+          extensions: supportedAttachmentExtensions,
+        },
+        { name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] },
+        {
+          name: "Documents and code",
+          extensions: supportedAttachmentExtensions.filter(
+            (extension) => !["png", "jpg", "jpeg", "webp"].includes(extension),
+          ),
+        },
+        { name: "All Files", extensions: ["*"] },
+      ],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true };
+    }
+
+    const files: PickedAttachmentFile[] = [];
+    const errors: string[] = [];
+    for (const filePath of result.filePaths) {
+      try {
+        files.push(await pickedAttachmentForPath(filePath));
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "无法读取文件";
+        errors.push(`${path.basename(filePath)}: ${reason}`);
+      }
+    }
+
+    if (files.length === 0) {
+      return {
+        canceled: true,
+        error: errors[0] ?? "没有可用附件",
+      };
+    }
+    return {
+      canceled: false,
+      files,
+      errors: errors.length > 0 ? errors : undefined,
+    };
+  },
+);
 
 ipcMain.handle(
   "awaken:pick-directory",

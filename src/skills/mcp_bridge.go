@@ -237,6 +237,7 @@ func (b *Bridge) promptToSkill(serverName string, prompt *mcp.Prompt, sourceConn
 		RequiredMcpServers: []string{serverName},
 		RequiredConnectors: connectors,
 		Source:             SourceMcp,
+		Scope:              SourceMcp,
 		State:              StateAvailable,
 		BodyFetcher:        b,
 		McpBinding: &McpBinding{
@@ -277,6 +278,7 @@ func (b *Bridge) resourceToSkill(serverName string, res *mcp.Resource, sourceCon
 		RequiredMcpServers: []string{serverName},
 		RequiredConnectors: connectors,
 		Source:             SourceMcp,
+		Scope:              SourceMcp,
 		State:              StateAvailable,
 		BodyFetcher:        b,
 		McpBinding: &McpBinding{

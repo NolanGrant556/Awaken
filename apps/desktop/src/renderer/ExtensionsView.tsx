@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  ChevronDown,
+  ChevronRight,
   Check,
   FileUp,
+  FolderOpen,
   Plus,
   Plug,
   RefreshCw,
@@ -34,6 +37,18 @@ export type McpToolInfo = {
 export type ExtensionSection = "connectors" | "skills";
 
 type ConnectorKind = "mcp" | "cli";
+type SkillView = "project" | "user";
+type SkillInstallScope = "project" | "global";
+
+type SkillProjectGroup = {
+  root: string;
+  label: string;
+  skills: RuntimeSkill[];
+};
+
+type VisibleSkillProjectGroup = SkillProjectGroup & {
+  visibleSkills: RuntimeSkill[];
+};
 
 type ExtensionsViewProps = {
   section: ExtensionSection;
@@ -57,6 +72,11 @@ const MCP_EXAMPLE = `{
 const CONNECTOR_KIND_TABS: Array<{ id: ConnectorKind; label: string }> = [
   { id: "mcp", label: "MCP" },
   { id: "cli", label: "CLI" },
+];
+
+const SKILL_VIEW_TABS: Array<{ id: SkillView; label: string }> = [
+  { id: "project", label: "项目 Skills" },
+  { id: "user", label: "全局 Skills" },
 ];
 
 const CLI_CONNECTOR_KEYWORDS = ["cli", "dingtalk", "钉钉", "lark", "飞书"];
@@ -115,8 +135,6 @@ function stateLabel(state: string): string {
 
 function sourceLabel(source: string): string {
   switch (source) {
-    case "bundled":
-      return "内置";
     case "project":
       return "项目";
     case "user":
@@ -134,9 +152,50 @@ function sourceLabel(source: string): string {
   }
 }
 
+function skillSourceLabel(source: string): string {
+  switch (source) {
+    case "project":
+      return "项目";
+    case "user":
+      return "全局";
+    default:
+      return sourceLabel(source);
+  }
+}
+
 function matchesQuery(value: string | undefined, query: string): boolean {
   if (!query) return true;
   return (value ?? "").toLowerCase().includes(query);
+}
+
+function skillMatchesQuery(skill: RuntimeSkill, query: string): boolean {
+  return (
+    matchesQuery(skill.displayName, query) ||
+    matchesQuery(skill.name, query) ||
+    matchesQuery(skill.description, query) ||
+    matchesQuery(skill.whenToUse, query) ||
+    matchesQuery(skill.id, query)
+  );
+}
+
+function projectLabelFromRoot(root: string): string {
+  const cleaned = root.trim().replace(/[\\/]+$/, "");
+  if (!cleaned) return "未命名项目";
+  return cleaned.split(/[\\/]/).pop() || cleaned;
+}
+
+function dedupePaths(paths: Array<string | undefined>): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const path of paths) {
+    const trimmed = path?.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    result.push(trimmed);
+  }
+  return result;
 }
 
 function fileToBase64(file: File): Promise<string> {
@@ -161,9 +220,14 @@ export function ExtensionsView({
   const [connectors, setConnectors] = useState<RuntimeConnector[]>([]);
   const [mcpServers, setMcpServers] = useState<RuntimeMcpServer[]>([]);
   const [skills, setSkills] = useState<RuntimeSkill[]>([]);
+  const [skillProjectGroups, setSkillProjectGroups] = useState<SkillProjectGroup[]>([]);
   const [query, setQuery] = useState("");
   const [activeConnectorKind, setActiveConnectorKind] =
     useState<ConnectorKind>("mcp");
+  const [activeSkillView, setActiveSkillView] = useState<SkillView>("project");
+  const [expandedProjectRoots, setExpandedProjectRoots] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [busyConnectorId, setBusyConnectorId] = useState<string | null>(null);
@@ -175,6 +239,11 @@ export function ExtensionsView({
   const [skillFile, setSkillFile] = useState<File | null>(null);
   const [skillDragActive, setSkillDragActive] = useState(false);
   const [installingSkill, setInstallingSkill] = useState(false);
+  const [skillProjectRoot, setSkillProjectRoot] = useState("");
+  const [skillInstallScope, setSkillInstallScope] =
+    useState<SkillInstallScope>("project");
+  const [skillInstallProjectRoot, setSkillInstallProjectRoot] = useState("");
+  const [pickingSkillProjectRoot, setPickingSkillProjectRoot] = useState(false);
   const [mcpSettingsOpen, setMcpSettingsOpen] = useState(false);
   const [selectedMcpServer, setSelectedMcpServer] = useState<RuntimeMcpServer | null>(null);
   const [mcpSettingsConfigText, setMcpSettingsConfigText] = useState("");
@@ -186,7 +255,7 @@ export function ExtensionsView({
 
   const normalizedQuery = query.trim().toLowerCase();
 
-  async function refresh(showLoading = true): Promise<void> {
+  async function refresh(showLoading = true, projectRootOverride?: string): Promise<void> {
     if (!desktopReady) {
       setErrorMessage("Awaken runtime 未启动");
       return;
@@ -196,14 +265,50 @@ export function ExtensionsView({
     }
     setErrorMessage(null);
     try {
-      const [nextConnectors, nextMcpServers, nextSkills] = await Promise.all([
+      const runtimeInfo = await runtimeClient.getRuntimeInfo();
+      const workspaceRegistry = await runtimeClient
+        .readWorkspaceRegistry()
+        .catch(() => ({
+          lastWorkspacePath: undefined,
+          registeredWorkspacePaths: [],
+        }));
+      const projectRoots = dedupePaths([
+        projectRootOverride,
+        skillProjectRoot,
+        runtimeInfo?.defaultWorkspace,
+        workspaceRegistry.lastWorkspacePath,
+        ...workspaceRegistry.registeredWorkspacePaths,
+      ]);
+      const skillRoots = projectRoots.length > 0 ? projectRoots : [undefined];
+      const [nextConnectors, nextMcpServers, nextSkillLists] = await Promise.all([
         runtimeClient.listConnectors(),
         runtimeClient.listMcpServers(),
-        runtimeClient.listSkills(),
+        Promise.all(skillRoots.map((root) => runtimeClient.listSkills(root))),
       ]);
+      const nextProjectRoot =
+        projectRootOverride?.trim() ||
+        skillProjectRoot.trim() ||
+        runtimeInfo?.defaultWorkspace ||
+        projectRoots[0] ||
+        "";
+      if ((!skillProjectRoot.trim() || projectRootOverride) && nextProjectRoot) {
+        setSkillProjectRoot(nextProjectRoot);
+      }
+      if ((!skillInstallProjectRoot.trim() || projectRootOverride) && nextProjectRoot) {
+        setSkillInstallProjectRoot(nextProjectRoot);
+      }
       setConnectors(nextConnectors);
       setMcpServers(nextMcpServers);
-      setSkills(nextSkills);
+      setSkills(nextSkillLists[0] ?? []);
+      setSkillProjectGroups(
+        projectRoots.map((root, index) => ({
+          root,
+          label: projectLabelFromRoot(root),
+          skills: (nextSkillLists[index] ?? []).filter(
+            (skill) => skill.sourceOrigin === "project",
+          ),
+        })),
+      );
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "扩展列表加载失败");
     } finally {
@@ -297,24 +402,43 @@ export function ExtensionsView({
 
   const visibleSkills = useMemo(
     () =>
-      skills.filter(
-        (skill) =>
-          matchesQuery(skill.displayName, normalizedQuery) ||
-          matchesQuery(skill.name, normalizedQuery) ||
-          matchesQuery(skill.description, normalizedQuery) ||
-          matchesQuery(skill.whenToUse, normalizedQuery) ||
-          matchesQuery(skill.id, normalizedQuery),
-      ),
+      skills.filter((skill) => skillMatchesQuery(skill, normalizedQuery)),
     [skills, normalizedQuery],
   );
 
-  const visibleAwakenBuiltInSkills = useMemo(
-    () => visibleSkills.filter((skill) => skill.sourceOrigin === "bundled"),
+  const visibleProjectSkillGroups = useMemo<VisibleSkillProjectGroup[]>(
+    () =>
+      skillProjectGroups
+        .map((group) => {
+          const projectMatches =
+            matchesQuery(group.label, normalizedQuery) ||
+            matchesQuery(group.root, normalizedQuery);
+          return {
+            ...group,
+            visibleSkills: projectMatches
+              ? group.skills
+              : group.skills.filter((skill) =>
+                  skillMatchesQuery(skill, normalizedQuery),
+                ),
+          };
+        })
+        .filter(
+          (group) =>
+            !normalizedQuery ||
+            matchesQuery(group.label, normalizedQuery) ||
+            matchesQuery(group.root, normalizedQuery) ||
+            group.visibleSkills.length > 0,
+        ),
+    [skillProjectGroups, normalizedQuery],
+  );
+
+  const visibleUserSkills = useMemo(
+    () => visibleSkills.filter((skill) => skill.sourceOrigin === "user"),
     [visibleSkills],
   );
 
-  const visibleUserInstalledSkills = useMemo(
-    () => visibleSkills.filter((skill) => skill.sourceOrigin !== "bundled"),
+  const visibleMcpSkills = useMemo(
+    () => visibleSkills.filter((skill) => skill.sourceOrigin === "mcp"),
     [visibleSkills],
   );
 
@@ -478,7 +602,12 @@ export function ExtensionsView({
 
   async function handleInstallSkill(): Promise<void> {
     if (!skillFile) {
-      setErrorMessage("请选择 SKILL.md、.skill 或 zip 文件");
+      setErrorMessage("请选择 SKILL.md 文件或 skill 文件夹 zip");
+      return;
+    }
+    const targetProjectRoot = skillInstallProjectRoot.trim();
+    if (skillInstallScope === "project" && !targetProjectRoot) {
+      setErrorMessage("请选择项目文件夹");
       return;
     }
     setInstallingSkill(true);
@@ -488,16 +617,54 @@ export function ExtensionsView({
       const result = await runtimeClient.installSkill({
         fileName: skillFile.name,
         contentBase64,
+        scope: skillInstallScope,
+        projectRoot: targetProjectRoot || undefined,
       });
       setSkillDialogOpen(false);
       setSkillFile(null);
+      if (skillInstallScope === "project") {
+        setSkillProjectRoot(targetProjectRoot);
+      }
       onNotice(`已安装 ${result.skill.displayName || result.skill.name}`);
-      await refresh();
+      await refresh(true, targetProjectRoot || undefined);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Skill 安装失败");
     } finally {
       setInstallingSkill(false);
     }
+  }
+
+  async function handlePickSkillProjectRoot(): Promise<void> {
+    setPickingSkillProjectRoot(true);
+    setErrorMessage(null);
+    try {
+      const result = await runtimeClient.pickDirectory(
+        skillInstallProjectRoot || skillProjectRoot || undefined,
+      );
+      if (result.canceled) {
+        if (result.error) {
+          setErrorMessage(result.error);
+        }
+        return;
+      }
+      setSkillInstallProjectRoot(result.path);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "项目文件夹选择失败");
+    } finally {
+      setPickingSkillProjectRoot(false);
+    }
+  }
+
+  function toggleProjectSkillGroup(root: string): void {
+    setExpandedProjectRoots((current) => {
+      const next = new Set(current);
+      if (next.has(root)) {
+        next.delete(root);
+      } else {
+        next.add(root);
+      }
+      return next;
+    });
   }
 
   function renderConnectorCard(connector: RuntimeConnector) {
@@ -594,7 +761,7 @@ export function ExtensionsView({
           </div>
           <p>{skill.whenToUse || skill.description}</p>
           <div className="extension-card-meta">
-            <span>{sourceLabel(skill.sourceOrigin)}</span>
+            <span>{skillSourceLabel(skill.sourceOrigin)}</span>
             <span>{skill.context}</span>
             {skill.requiredMcpServers?.length ? (
               <span>MCP: {skill.requiredMcpServers.join(", ")}</span>
@@ -605,11 +772,57 @@ export function ExtensionsView({
     );
   }
 
+  function renderProjectSkillGroup(group: VisibleSkillProjectGroup, index: number) {
+    const expanded = expandedProjectRoots.has(group.root);
+    const bodyId = `skill-project-group-${index}`;
+    const countText =
+      normalizedQuery && group.visibleSkills.length !== group.skills.length
+        ? `${group.visibleSkills.length}/${group.skills.length} Skill`
+        : `${group.skills.length} Skill`;
+    return (
+      <section className="skill-project-group" key={group.root}>
+        <button
+          type="button"
+          className="skill-project-toggle"
+          aria-expanded={expanded}
+          aria-controls={bodyId}
+          onClick={() => toggleProjectSkillGroup(group.root)}
+        >
+          <span className="skill-project-chevron" aria-hidden="true">
+            {expanded ? (
+              <ChevronDown size={17} strokeWidth={1.9} />
+            ) : (
+              <ChevronRight size={17} strokeWidth={1.9} />
+            )}
+          </span>
+          <span className="skill-project-copy">
+            <span className="skill-project-name">{group.label}</span>
+            <span className="skill-project-path" title={group.root}>
+              {group.root}
+            </span>
+          </span>
+          <span className="skill-project-count">{countText}</span>
+        </button>
+        {expanded ? (
+          <div className="skill-project-body" id={bodyId}>
+            {group.visibleSkills.length > 0 ? (
+              <div className="extension-grid">
+                {group.visibleSkills.map(renderSkillCard)}
+              </div>
+            ) : (
+              <div className="extension-empty">暂无项目 Skills</div>
+            )}
+          </div>
+        ) : null}
+      </section>
+    );
+  }
+
   const title = section === "connectors" ? "连接器" : "技能";
   const subtitle =
     section === "connectors"
       ? "管理 MCP servers 与 CLI 连接器，连接外部系统和工具。"
-      : "管理 Awaken 内置与用户安装 Skill，扩展 Awaken 的执行能力。";
+      : "管理项目 Skills 与全局 Skills，扩展 Awaken 的执行能力。";
   const primaryAction =
     section === "connectors"
       ? { label: "配置 MCP", icon: <Plus size={16} strokeWidth={1.9} /> }
@@ -645,6 +858,8 @@ export function ExtensionsView({
                   if (section === "connectors") {
                     setMcpDialogOpen(true);
                   } else {
+                    setSkillInstallScope("project");
+                    setSkillInstallProjectRoot(skillProjectRoot);
                     setSkillDialogOpen(true);
                   }
                 }}
@@ -658,27 +873,41 @@ export function ExtensionsView({
 
         <div
           className={`extension-toolbar${
-            section === "connectors" ? " extension-toolbar-with-tabs" : ""
+            section === "connectors" || section === "skills"
+              ? " extension-toolbar-with-tabs"
+              : ""
           }`}
         >
-          {section === "connectors" ? (
+          {section === "connectors" || section === "skills" ? (
             <div
               className="extension-category-tabs"
               role="tablist"
-              aria-label="连接器分类"
+              aria-label={section === "connectors" ? "连接器分类" : "技能视图"}
             >
-              {CONNECTOR_KIND_TABS.map((tab) => (
+              {(section === "connectors" ? CONNECTOR_KIND_TABS : SKILL_VIEW_TABS).map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
                   className={`extension-category-tab${
-                    activeConnectorKind === tab.id
+                    (section === "connectors"
+                      ? activeConnectorKind === tab.id
+                      : activeSkillView === tab.id)
                       ? " extension-category-tab-active"
                       : ""
                   }`}
                   role="tab"
-                  aria-selected={activeConnectorKind === tab.id}
-                  onClick={() => setActiveConnectorKind(tab.id)}
+                  aria-selected={
+                    section === "connectors"
+                      ? activeConnectorKind === tab.id
+                      : activeSkillView === tab.id
+                  }
+                  onClick={() => {
+                    if (section === "connectors") {
+                      setActiveConnectorKind(tab.id as ConnectorKind);
+                    } else {
+                      setActiveSkillView(tab.id as SkillView);
+                    }
+                  }}
                 >
                   {tab.label}
                 </button>
@@ -736,26 +965,37 @@ export function ExtensionsView({
           </div>
         ) : (
           <div className="extension-sections">
-            <section className="extension-section">
-              <h2>Awaken 内置</h2>
-              <div className="extension-grid">
-                {visibleAwakenBuiltInSkills.length > 0 ? (
-                  visibleAwakenBuiltInSkills.map(renderSkillCard)
-                ) : (
-                  <div className="extension-empty">暂无内置 Skill</div>
-                )}
-              </div>
-            </section>
-            <section className="extension-section">
-              <h2>用户安装</h2>
-              <div className="extension-grid">
-                {visibleUserInstalledSkills.length > 0 ? (
-                  visibleUserInstalledSkills.map(renderSkillCard)
-                ) : (
-                  <div className="extension-empty">暂无用户安装 Skill</div>
-                )}
-              </div>
-            </section>
+            {activeSkillView === "project" ? (
+              <section className="extension-section" aria-label="项目 Skills">
+                <div className="skill-project-list">
+                  {visibleProjectSkillGroups.length > 0 ? (
+                    visibleProjectSkillGroups.map(renderProjectSkillGroup)
+                  ) : (
+                    <div className="extension-empty">暂无项目 Skills</div>
+                  )}
+                </div>
+              </section>
+            ) : (
+              <>
+                <section className="extension-section" aria-label="全局 Skills">
+                  <div className="extension-grid">
+                    {visibleUserSkills.length > 0 ? (
+                      visibleUserSkills.map(renderSkillCard)
+                    ) : (
+                      <div className="extension-empty">暂无全局 Skills</div>
+                    )}
+                  </div>
+                </section>
+                {visibleMcpSkills.length > 0 ? (
+                  <section className="extension-section">
+                    <h2>MCP 动态</h2>
+                    <div className="extension-grid">
+                      {visibleMcpSkills.map(renderSkillCard)}
+                    </div>
+                  </section>
+                ) : null}
+              </>
+            )}
           </div>
         )}
       </div>
@@ -941,6 +1181,48 @@ export function ExtensionsView({
         }
       >
         <div className="extension-dialog-body">
+          <div className="skill-install-scope">
+            <span>安装范围</span>
+            <div className="skill-install-segmented" role="tablist" aria-label="安装范围">
+              <button
+                type="button"
+                className={skillInstallScope === "project" ? "skill-install-segment-active" : ""}
+                aria-selected={skillInstallScope === "project"}
+                onClick={() => setSkillInstallScope("project")}
+              >
+                项目 Skills
+              </button>
+              <button
+                type="button"
+                className={skillInstallScope === "global" ? "skill-install-segment-active" : ""}
+                aria-selected={skillInstallScope === "global"}
+                onClick={() => setSkillInstallScope("global")}
+              >
+                全局 Skills
+              </button>
+            </div>
+          </div>
+          {skillInstallScope === "project" ? (
+            <div className="skill-install-project-root">
+              <span>项目文件夹</span>
+              <div className="skill-install-project-row">
+                <code title={skillInstallProjectRoot}>
+                  {skillInstallProjectRoot || "未选择"}
+                </code>
+                <button
+                  type="button"
+                  className="extension-icon-button"
+                  aria-label="选择项目文件夹"
+                  disabled={pickingSkillProjectRoot || installingSkill}
+                  onClick={() => {
+                    void handlePickSkillProjectRoot();
+                  }}
+                >
+                  <FolderOpen size={16} strokeWidth={1.9} />
+                </button>
+              </div>
+            </div>
+          ) : null}
           <label
             className={`extension-dropzone${skillDragActive ? " extension-dropzone-active" : ""}`}
             onDragEnter={(event) => {
@@ -960,13 +1242,16 @@ export function ExtensionsView({
           >
             <input
               type="file"
-              accept=".md,.skill,.zip"
+              accept=".md,.zip"
               onChange={(event) => setSkillFile(event.target.files?.item(0) ?? null)}
             />
             <FileUp size={22} strokeWidth={1.9} />
             <strong>{skillFile ? skillFile.name : "拖放或点击上传"}</strong>
           </label>
-          <p>支持 SKILL.md、.skill，或包含 SKILL.md 的 zip 包。</p>
+          <p>支持 SKILL.md 文件，或包含 SKILL.md 的 skill 文件夹 zip。</p>
+          <p className="extension-dialog-note">
+            安装后请创建新会话或发起新任务使用；正在运行的会话不会中途加载新 Skill。
+          </p>
         </div>
       </Dialog>
     </section>

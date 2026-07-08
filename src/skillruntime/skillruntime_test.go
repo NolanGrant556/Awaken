@@ -2,9 +2,12 @@ package skillruntime
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"awaken/src/skills"
 	"awaken/src/tool"
 )
 
@@ -124,15 +127,19 @@ func TestSkillToolInterface(t *testing.T) {
 }
 
 func TestSkillToolExecute(t *testing.T) {
+	var gotAllowed []string
 	st := &SkillTool{
-		SkillID: "test-skill",
-		NameStr: SkillToolName("test-skill"),
-		Desc:    "Test",
-		Body:    "Hello ${name}!",
+		SkillID:      "test-skill",
+		NameStr:      SkillToolName("test-skill"),
+		Desc:         "Test",
+		Body:         "Root ${AWAKEN_SKILL_DIR}: Hello ${name}!",
+		RootDir:      "/tmp/test-skill",
+		AllowedTools: []string{"shell", "skill_resource_read"},
 		ArgDefs: []SkillArgDef{
 			{Name: "name", Type: "string", Required: true},
 		},
 		Executor: SkillExecutorFunc(func(ctx context.Context, skillID string, body string, allowedTools []string) (string, error) {
+			gotAllowed = append([]string(nil), allowedTools...)
 			return "RESULT: " + body, nil
 		}),
 	}
@@ -143,6 +150,15 @@ func TestSkillToolExecute(t *testing.T) {
 	}
 	if !strings.Contains(result, "Hello World!") {
 		t.Errorf("bad result: %s", result)
+	}
+	if !strings.Contains(result, "Base directory for this skill: /tmp/test-skill") {
+		t.Errorf("base directory missing from result: %s", result)
+	}
+	if !strings.Contains(result, "Root /tmp/test-skill") {
+		t.Errorf("AWAKEN_SKILL_DIR was not substituted: %s", result)
+	}
+	if strings.Join(gotAllowed, ",") != "shell,skill_resource_read" {
+		t.Errorf("allowed tools were not passed through: %v", gotAllowed)
 	}
 }
 
@@ -165,6 +181,56 @@ func TestInlineExecutor(t *testing.T) {
 	}
 	if !strings.Contains(result, "do something") {
 		t.Errorf("body missing from inline result: %s", result)
+	}
+}
+
+func TestResourceReadToolReadsWithinSkillPackage(t *testing.T) {
+	root := t.TempDir()
+	skillRoot := filepath.Join(root, "sample")
+	if err := os.MkdirAll(filepath.Join(skillRoot, "references"), 0755); err != nil {
+		t.Fatalf("mkdir skill refs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillRoot, "references", "guide.md"), []byte("guide body"), 0644); err != nil {
+		t.Fatalf("write guide: %v", err)
+	}
+	reg := skills.NewSkillRegistry(nil)
+	reg.RegisterSkill(&skills.SkillDefinition{
+		ID:          "sample",
+		Name:        "sample",
+		Description: "sample",
+		Source:      skills.SourceProject,
+		Scope:       skills.SourceProject,
+		RootDir:     skillRoot,
+		State:       skills.StateAvailable,
+	})
+
+	reader := &ResourceReadTool{registry: reg}
+	result, err := reader.Execute(context.Background(), `{"skill_id":"sample","path":"references/guide.md"}`)
+	if err != nil {
+		t.Fatalf("read resource: %v", err)
+	}
+	if !strings.Contains(result, "guide body") {
+		t.Fatalf("expected guide body, got %s", result)
+	}
+}
+
+func TestResourceReadToolRejectsTraversal(t *testing.T) {
+	root := t.TempDir()
+	reg := skills.NewSkillRegistry(nil)
+	reg.RegisterSkill(&skills.SkillDefinition{
+		ID:          "sample",
+		Name:        "sample",
+		Description: "sample",
+		Source:      skills.SourceProject,
+		Scope:       skills.SourceProject,
+		RootDir:     filepath.Join(root, "sample"),
+		State:       skills.StateAvailable,
+	})
+
+	reader := &ResourceReadTool{registry: reg}
+	_, err := reader.Execute(context.Background(), `{"skill_id":"sample","path":"../secret.md"}`)
+	if err == nil {
+		t.Fatal("expected traversal to be rejected")
 	}
 }
 

@@ -90,6 +90,7 @@ import {
   type WorkspaceProject,
 } from "./projectWorkspace";
 import { ModelSettingsDialog } from "./ModelSettingsDialog";
+import { ProfileBalancePopover } from "./ProfileBalancePopover";
 import { ExtensionsView, type ExtensionSection } from "./ExtensionsView";
 import {
   MAX_COMPOSER_IMAGE_ATTACHMENTS,
@@ -536,6 +537,8 @@ export function App() {
     RuntimeModelProfileSummary[]
   >([]);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
+  const [profilePopoverOpen, setProfilePopoverOpen] = useState(false);
+  const profileButtonRef = useRef<HTMLDivElement>(null);
   const [workspacePath, setWorkspacePath] = useState<string>(() =>
     readStoredString("awaken:workspace:path"),
   );
@@ -2555,7 +2558,8 @@ export function App() {
                 onSelectProject={handleSelectProject}
                 onExpandedChange={setExpandedProjectIds}
                 onNewTask={handleNewTask}
-                onProfileClick={() => setModelSettingsOpen(true)}
+                onProfileClick={() => setProfilePopoverOpen(true)}
+                profileButtonRef={profileButtonRef}
               />
             </WorkbenchSidebarFrame>
           }
@@ -2852,6 +2856,16 @@ export function App() {
         onProfilesChanged={() => {
           void refreshRuntimeInfoNow();
         }}
+      />
+      <ProfileBalancePopover
+        open={profilePopoverOpen}
+        anchorRef={profileButtonRef}
+        runtimeClient={runtimeClient}
+        onOpenSettings={() => {
+          setProfilePopoverOpen(false);
+          setModelSettingsOpen(true);
+        }}
+        onClose={() => setProfilePopoverOpen(false)}
       />
     </>
   );

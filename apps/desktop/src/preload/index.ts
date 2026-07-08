@@ -8,6 +8,7 @@ import {
   type InstallSkillRequest,
   type InstallSkillResponse,
   type MassMessageReviewDecision,
+  type ModelProfileBalancesResult,
   type ModelProfileSaveRequest,
   type ModelProfileTestResult,
   type ModelProvider,
@@ -153,6 +154,10 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:set-default-model-profile", profileId) as Promise<RuntimeModelProfileSummary>,
   testModelProfile: (request: ModelProfileSaveRequest) =>
     ipcRenderer.invoke("awaken:test-model-profile", request) as Promise<ModelProfileTestResult>,
+  syncModelCapabilities: () =>
+    ipcRenderer.invoke("awaken:sync-model-capabilities") as Promise<ModelProvider[]>,
+  getModelProfileBalances: () =>
+    ipcRenderer.invoke("awaken:get-model-profile-balances") as Promise<ModelProfileBalancesResult>,
   pickWorkspace: (defaultPath?: string) =>
     ipcRenderer.invoke("awaken:pick-workspace", defaultPath) as Promise<WorkspacePickResult>,
   validateWorkspace: (path: string) =>

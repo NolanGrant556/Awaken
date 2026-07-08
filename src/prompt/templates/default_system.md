@@ -28,10 +28,14 @@
 1. **读取文件**：使用 `read_file`。
 2. **查找文件**：使用 `list_files`。
 3. **搜索内容**：使用 `grep_search`。
-4. **新增、修改、移动、删除文件**：使用 `apply_patch`，不要使用文字模拟文件变更。
-5. **高级系统操作**：只有在上述工具不适合时，才使用 `shell`。
+4. **新增、修改、移动、删除代码/配置文件**：使用 `apply_patch`，不要使用文字模拟文件变更。
+5. **新增或覆盖 Markdown/普通文本报告**：使用 `text_file_create`，不要把整篇 Markdown 当作 patch 传给 `apply_patch`。
+6. **读取 PDF/Office/表格等工作文件**：使用 `read_artifact` 或专用 `pdf_extract`，不要用 `read_file` 读取二进制文件。
+7. **生成 Word/Excel/PPT 产物**：使用 `document_create`、`spreadsheet_create`、`presentation_create`；PPT 需要图文排版、图片素材、备注或预览时，把 `theme/slides/images/notes/render_preview` 作为结构化参数传给 `presentation_create`，不要用 shell 或 `apply_patch` 手写 Office 文件。
+8. **渲染检查 PPT/PDF/Office 产物**：使用 `presentation_render`、`pdf_render`、`document_render` 等 artifact render 工具；缺 runtime 时先看 `runtime_preflight` 或 `workspace_dependencies` 的具体缺口。
+9. **高级系统操作**：只有在上述工具不适合时，才使用 `shell`。
 
-`apply_patch` 使用 Codex 风格 patch，支持：
+`apply_patch` 使用 Awaken 结构化 patch，支持：
 
 ```text
 *** Begin Patch

@@ -17,12 +17,12 @@ func (t *ApplyPatchTool) Name() string {
 }
 
 func (t *ApplyPatchTool) Description() string {
-	return "使用 Codex 风格 patch 新增、修改、移动或删除文件"
+	return "使用 Awaken 结构化 patch 新增、修改、移动或删除文本文件；输入必须以 *** Begin Patch 开始并以 *** End Patch 结束。删除会进入系统回收站；不要传脚本、Markdown 或普通文件内容，Markdown/普通文本请用 text_file_create，文档/表格/PPT 产物请用对应 artifact create/edit 工具"
 }
 
 func (t *ApplyPatchTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
-		{Name: "patch", Description: "Codex 风格 patch，支持 Add File、Update File、Move to、Delete File、End of File", Type: "string", Required: true},
+		{Name: "patch", Description: "严格 Awaken 结构化 patch 文本：第一行 *** Begin Patch，最后一行 *** End Patch；支持 Add File、Update File、Move to、Delete File、End of File", Type: "string", Required: true},
 	}
 }
 
@@ -33,7 +33,7 @@ func (t *ApplyPatchTool) Execute(ctx context.Context, input string) (string, err
 
 	patch, err := parsePatch(input)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w。apply_patch 只接受 Awaken 结构化 patch，不接受脚本、Markdown 或普通文件内容；Markdown/普通文本请改用 text_file_create，生成 docx/xlsx/pptx 请改用 document_create、spreadsheet_create 或 presentation_create", err)
 	}
 	permissionContext := tool.PermissionContextFromContext(ctx)
 	patch = resolvePatchPaths(patch, permissionContext)
@@ -156,7 +156,7 @@ func (t *ApplyPatchTool) Definition() tool.ToolDefinition {
 		Name:        "apply_patch",
 		DisplayName: "Apply Patch",
 		Source:      tool.SourceBuiltin,
-		Description: "使用 Codex 风格 patch 新增、修改、移动或删除文件",
+		Description: t.Description(),
 		Annotations: tool.ToolAnnotations{
 			ReadOnly:        false,
 			Destructive:     true,

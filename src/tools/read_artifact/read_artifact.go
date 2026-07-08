@@ -101,12 +101,12 @@ func (t *ReadArtifactTool) Name() string {
 }
 
 func (t *ReadArtifactTool) Description() string {
-	return "读取 xlsx/xls/csv/tsv/pdf/docx 等工作文件，返回结构化预览"
+	return "读取当前任务 readable roots/附件内的工作文件并返回结构化预览；支持 .xlsx/.xls/.csv/.tsv/.pdf/.docx。普通源码/Markdown/JSON 用 read_file，图片元数据用 image_inspect，PPTX 可用 artifact_inspect 或 presentation_render"
 }
 
 func (t *ReadArtifactTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
-		{Name: "path", Description: "要读取的文件绝对路径或相对工作区路径", Type: "string", Required: true},
+		{Name: "path", Description: "要读取的工作文件路径，必须位于 readable roots 或任务附件内；支持 xlsx/xls/csv/tsv/pdf/docx", Type: "string", Required: true},
 		{Name: "sheet", Description: "读取指定工作表（xlsx/xls 可选）", Type: "string", Required: false},
 		{Name: "max_rows", Description: "表格类文件最多预览多少行，默认 40，最大 200", Type: "integer", Required: false},
 		{Name: "max_chars", Description: "最多返回多少字符，默认 12000，最大 50000", Type: "integer", Required: false},
@@ -140,7 +140,7 @@ func (t *ReadArtifactTool) CheckPermission(ctx context.Context, input string, pe
 		return tool.DenyPermission(fmt.Sprintf("invalid parameters: %v", err))
 	}
 	if !permissionContext.IsWithinReadableRootsResolved(params.Path) {
-		return tool.DenyPermission(fmt.Sprintf("path %s is outside readable roots or escapes via symlink", params.Path))
+		return tool.DenyPermission(fmt.Sprintf("read_artifact 只能读取当前任务 readable roots 或附件内的工作文件；path %s is outside readable roots or escapes via symlink。请先把文件放入任务范围或作为附件提供", params.Path))
 	}
 	return tool.AllowPermission()
 }
@@ -209,7 +209,7 @@ func readArtifact(ctx context.Context, permCtx tool.PermissionContext, params re
 	case ".pdf":
 		return readPDFArtifact(ctx, permCtx, params.Path, normalizeArtifactMaxChars(params.MaxChars))
 	default:
-		return artifactPreview{}, fmt.Errorf("暂不支持读取该文件类型: %s", ext)
+		return artifactPreview{}, fmt.Errorf("暂不支持读取该文件类型: %s。read_artifact 支持 .csv/.tsv/.xlsx/.xls/.docx/.pdf；普通文本请用 read_file，图片请用 image_inspect，PPTX 请用 artifact_inspect 或 presentation_render", ext)
 	}
 }
 
@@ -494,6 +494,13 @@ func extractDOCXText(data []byte) (string, error) {
 }
 
 func readPDFArtifact(ctx context.Context, permCtx tool.PermissionContext, path string, maxChars int) (artifactPreview, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return artifactPreview{}, err
+	}
+	if info.Size() == 0 {
+		return artifactPreview{}, fmt.Errorf("read_artifact 无法读取空 PDF 文件: %s。该文件大小为 0 字节，可能下载/复制失败或文件已损坏；请提供有效 PDF", path)
+	}
 	outputPath := filepath.Join(permCtx.TemporaryWorkRoot, strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))+".txt")
 	if _, err := localcompute.Run(ctx, permCtx, localcompute.CommandSpec{
 		Backend:     "pdftotext",
@@ -503,7 +510,7 @@ func readPDFArtifact(ctx context.Context, permCtx tool.PermissionContext, path s
 		Workdir:     permCtx.TemporaryWorkRoot,
 		Timeout:     30 * time.Second,
 	}); err != nil {
-		return artifactPreview{}, err
+		return artifactPreview{}, fmt.Errorf("read_artifact 无法提取 PDF 文本: %w。该 PDF 可能损坏、加密、为空或不是标准 PDF", err)
 	}
 	data, err := os.ReadFile(outputPath)
 	if err != nil {

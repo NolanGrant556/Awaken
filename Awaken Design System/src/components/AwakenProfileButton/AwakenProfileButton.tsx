@@ -17,8 +17,8 @@ const buttonStyle: CSSProperties = {
   gap: 10,
   alignItems: "center",
   width: "100%",
-  minHeight: 46,
-  padding: "8px 10px",
+  minHeight: 44,
+  padding: "6px 10px",
   border: 0,
   borderRadius: "var(--aw-radius-md)",
   background: "transparent",
@@ -81,7 +81,7 @@ export function AwakenProfileButton({
       onMouseUp={handleUp}
     >
       <AwakenAvatar src={avatarSrc} fallback={avatarFallback} />
-      <span style={{ minWidth: 0, display: "grid", alignContent: "center", minHeight: 32 }}>
+      <span style={{ minWidth: 0, display: "grid", alignContent: "center", minHeight: 30 }}>
         <span style={nameStyle}>{name}</span>
         {subtitle ? <span style={subtitleStyle}>{subtitle}</span> : null}
       </span>

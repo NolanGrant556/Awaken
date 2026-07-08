@@ -138,13 +138,13 @@ func TestValidateSchemaContextMode(t *testing.T) {
 func TestLoadDirValidSkills(t *testing.T) {
 	dir := t.TempDir()
 
-	writeFile(t, dir, "alpha.md", `---
+	writeSkillPackage(t, dir, "alpha", `---
 name: Alpha
 description: First skill
 ---
 Alpha body.
 `)
-	writeFile(t, dir, "beta.md", `---
+	writeSkillPackage(t, dir, "beta", `---
 name: Beta
 description: Second skill
 whenToUse: when you need beta
@@ -171,6 +171,12 @@ Beta body.
 	if alpha.Context != ContextInline {
 		t.Errorf("expected default context inline, got %s", alpha.Context)
 	}
+	if filepath.Base(alpha.RootDir) != "alpha" {
+		t.Errorf("expected root dir for alpha package, got %s", alpha.RootDir)
+	}
+	if filepath.Base(alpha.SkillFilePath) != "SKILL.md" {
+		t.Errorf("expected SKILL.md path, got %s", alpha.SkillFilePath)
+	}
 
 	beta := loaded["beta"]
 	if beta == nil {
@@ -185,13 +191,13 @@ func TestLoadDirSkipsInvalid(t *testing.T) {
 	dir := t.TempDir()
 
 	// Missing name -> should still load but be unavailable.
-	writeFile(t, dir, "broken.md", `---
+	writeSkillPackage(t, dir, "broken", `---
 description: No name
 ---
 Body.
 `)
 	// Valid.
-	writeFile(t, dir, "good.md", `---
+	writeSkillPackage(t, dir, "good", `---
 name: Good
 description: Valid skill
 ---
@@ -200,17 +206,20 @@ Body.
 
 	loaded := LoadDir(dir, SourceUser)
 	if len(loaded) != 2 {
-		t.Fatalf("expected 2 skills (both loaded, one unavailable), got %d", len(loaded))
+		t.Fatalf("expected 2 skills, got %d", len(loaded))
 	}
-	if loaded["broken"].State != StateUnavailable {
-		t.Errorf("expected broken skill to be unavailable, got %s", loaded["broken"].State)
+	if loaded["broken"].State != StateAvailable {
+		t.Errorf("expected missing-name package to use directory name and load, got %s", loaded["broken"].State)
+	}
+	if loaded["broken"].Name != "broken" {
+		t.Errorf("expected fallback name broken, got %s", loaded["broken"].Name)
 	}
 }
 
 func TestLoadDirSkipsNonMd(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "notes.txt", "just notes")
-	writeFile(t, dir, "valid.md", `---
+	writeSkillPackage(t, dir, "valid", `---
 name: Valid
 description: A valid skill
 ---
@@ -220,6 +229,30 @@ Body.
 	loaded := LoadDir(dir, SourceProject)
 	if len(loaded) != 1 {
 		t.Fatalf("expected 1 skill, got %d", len(loaded))
+	}
+}
+
+func TestLoadDirIgnoresFlatMarkdownFiles(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "legacy.md", `---
+name: legacy
+description: Legacy flat skill.
+---
+Body.
+`)
+	writeSkillPackage(t, dir, "packaged", `---
+name: packaged
+description: Packaged skill.
+---
+Body.
+`)
+
+	loaded := LoadDir(dir, SourceProject)
+	if len(loaded) != 1 {
+		t.Fatalf("expected only packaged skill, got %d", len(loaded))
+	}
+	if loaded["packaged"] == nil {
+		t.Fatalf("expected packaged skill, got %+v", loaded)
 	}
 }
 
@@ -234,14 +267,14 @@ func TestLoadDirEmptyDir(t *testing.T) {
 // ---- Merge tests ----
 
 func TestMergePriority(t *testing.T) {
-	bundled := map[string]*SkillDefinition{
-		"alpha": {ID: "alpha", Name: "A Bundled", Description: "desc", Source: SourceBundled, State: StateAvailable},
+	user := map[string]*SkillDefinition{
+		"alpha": {ID: "alpha", Name: "A User", Description: "desc", Source: SourceUser, State: StateAvailable},
 	}
 	project := map[string]*SkillDefinition{
 		"alpha": {ID: "alpha", Name: "A Project", Description: "desc", Source: SourceProject, State: StateAvailable},
 	}
 
-	merged := MergeSkills(project, bundled)
+	merged := MergeSkills(user, project)
 	if len(merged) != 2 {
 		t.Fatalf("expected 2 entries (one shadowed), got %d", len(merged))
 	}
@@ -271,17 +304,14 @@ func TestMergePriority(t *testing.T) {
 func TestSkillRegistryLifecycle(t *testing.T) {
 	reg := NewSkillRegistry(nil)
 
-	// Load bundled skills.
-	bundled := map[string]*SkillDefinition{
-		"test": {
-			ID:          "test",
-			Name:        "Test Skill",
-			Description: "A test skill",
-			Source:      SourceBundled,
-			State:       StateAvailable,
-		},
-	}
-	reg.LoadFromSources(nil, bundled)
+	userDir := t.TempDir()
+	writeSkillPackage(t, userDir, "test", `---
+name: test
+description: A test skill
+---
+Body.
+`)
+	reg.LoadFromSources(map[SourceOrigin]string{SourceUser: userDir})
 
 	avail := reg.ListAvailable()
 	if len(avail) != 1 {
@@ -305,24 +335,22 @@ func TestSkillRegistryLifecycle(t *testing.T) {
 func TestSkillRegistryConnectorAvailability(t *testing.T) {
 	reg := NewSkillRegistry(nil)
 
-	bundled := map[string]*SkillDefinition{
-		"needs-notion": {
-			ID:                 "needs-notion",
-			Name:               "Notion Skill",
-			Description:        "Uses Notion",
-			Source:             SourceBundled,
-			State:              StateAvailable,
-			RequiredConnectors: []string{"notion"},
-		},
-		"no-connector": {
-			ID:          "no-connector",
-			Name:        "Plain Skill",
-			Description: "No connectors needed",
-			Source:      SourceBundled,
-			State:       StateAvailable,
-		},
-	}
-	reg.LoadFromSources(nil, bundled)
+	projectDir := t.TempDir()
+	writeSkillPackage(t, projectDir, "needs-notion", `---
+name: needs-notion
+description: Uses Notion
+requiredConnectors:
+  - notion
+---
+Body.
+`)
+	writeSkillPackage(t, projectDir, "no-connector", `---
+name: no-connector
+description: No connectors needed
+---
+Body.
+`)
+	reg.LoadFromSources(map[SourceOrigin]string{SourceProject: projectDir})
 
 	// Initially no connectors available.
 	avail := reg.ListAvailable()
@@ -366,10 +394,14 @@ func TestSkillRegistryOnChange(t *testing.T) {
 		called = true
 	})
 
-	bundled := map[string]*SkillDefinition{
-		"x": {ID: "x", Name: "X", Description: "x", Source: SourceBundled, State: StateAvailable},
-	}
-	reg.LoadFromSources(nil, bundled)
+	userDir := t.TempDir()
+	writeSkillPackage(t, userDir, "x", `---
+name: X
+description: x
+---
+Body.
+`)
+	reg.LoadFromSources(map[SourceOrigin]string{SourceUser: userDir})
 
 	// onChange runs in a goroutine, give it a moment.
 	if !called {
@@ -378,30 +410,20 @@ func TestSkillRegistryOnChange(t *testing.T) {
 	}
 }
 
-// ---- Buned skills tests ----
-
-func TestLoadBundledSkills(t *testing.T) {
-	bundled := LoadBundledSkills()
-	if len(bundled) < 4 {
-		t.Fatalf("expected at least 4 bundled skills, got %d", len(bundled))
-	}
-
-	expectedIDs := []string{"meeting-notes-distribute", "customer-followup-daily", "sheet-anomaly-scan", "doc-to-actions"}
-	for _, id := range expectedIDs {
-		if def, ok := bundled[id]; !ok {
-			t.Errorf("expected bundled skill %q to exist", id)
-		} else if def.State != StateAvailable {
-			t.Errorf("expected bundled skill %q to be available, got %s: %s", id, def.State, def.UnavailableReason)
-		}
-	}
-}
-
 func writeFile(t *testing.T, dir, name, content string) {
 	t.Helper()
 	path := filepath.Join(dir, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("mkdir for %s: %v", name, err)
+	}
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatalf("write %s: %v", name, err)
 	}
+}
+
+func writeSkillPackage(t *testing.T, root, id, content string) {
+	t.Helper()
+	writeFile(t, root, filepath.Join(id, "SKILL.md"), content)
 }
 
 // ---- Mcp prefix validation tests ----
@@ -409,14 +431,14 @@ func writeFile(t *testing.T, dir, name, content string) {
 func TestLoadDirRejectsMcpPrefix(t *testing.T) {
 	dir := t.TempDir()
 
-	writeFile(t, dir, "mcp__foo__bar.md", `---
+	writeSkillPackage(t, dir, "mcp__foo__bar", `---
 name: mcp__foo__bar
 description: This should be rejected
 ---
 Body.
 `)
-	writeFile(t, dir, "valid.md", `---
-name: Normal Skill
+	writeSkillPackage(t, dir, "valid", `---
+name: valid
 description: A valid skill
 ---
 Body.
@@ -427,7 +449,7 @@ Body.
 		t.Fatalf("expected 2 skills (one rejected as unavailable), got %d", len(loaded))
 	}
 
-	rejected := loaded["mcp__foo__bar"]
+	rejected := loaded["mcp-foo-bar"]
 	if rejected == nil {
 		t.Fatal("expected rejected skill to be present (as unavailable)")
 	}
@@ -470,33 +492,32 @@ func TestValidateNameReserved(t *testing.T) {
 func TestSkillRegistryMcpServerAvailability(t *testing.T) {
 	reg := NewSkillRegistry(nil)
 
-	bundled := map[string]*SkillDefinition{
-		"needs-mcp": {
-			ID:                 "needs-mcp",
-			Name:               "MCPSkill",
-			Description:        "Uses MCP server",
-			Source:             SourceBundled,
-			State:              StateAvailable,
-			RequiredMcpServers: []string{"internal-search"},
-		},
-		"no-mcp": {
-			ID:          "no-mcp",
-			Name:        "Plain Skill",
-			Description: "No MCP needed",
-			Source:      SourceBundled,
-			State:       StateAvailable,
-		},
-		"needs-both": {
-			ID:                 "needs-both",
-			Name:               "Both Needed",
-			Description:        "Needs both",
-			Source:             SourceBundled,
-			State:              StateAvailable,
-			RequiredConnectors: []string{"notion"},
-			RequiredMcpServers: []string{"internal-search"},
-		},
-	}
-	reg.LoadFromSources(nil, bundled)
+	projectDir := t.TempDir()
+	writeSkillPackage(t, projectDir, "needs-mcp", `---
+name: needs-mcp
+description: Uses MCP server
+requiredMcpServers:
+  - internal-search
+---
+Body.
+`)
+	writeSkillPackage(t, projectDir, "no-mcp", `---
+name: no-mcp
+description: No MCP needed
+---
+Body.
+`)
+	writeSkillPackage(t, projectDir, "needs-both", `---
+name: needs-both
+description: Needs both
+requiredConnectors:
+  - notion
+requiredMcpServers:
+  - internal-search
+---
+Body.
+`)
+	reg.LoadFromSources(map[SourceOrigin]string{SourceProject: projectDir})
 
 	// Initially no MCP servers available.
 	avail := reg.ListAvailable()
@@ -551,17 +572,16 @@ func TestSkillRegistryMcpServerAvailability(t *testing.T) {
 func TestSetMcpServerAvailable(t *testing.T) {
 	reg := NewSkillRegistry(nil)
 
-	bundled := map[string]*SkillDefinition{
-		"test": {
-			ID:                 "test",
-			Name:               "Test",
-			Description:        "test",
-			Source:             SourceBundled,
-			State:              StateAvailable,
-			RequiredMcpServers: []string{"s1"},
-		},
-	}
-	reg.LoadFromSources(nil, bundled)
+	projectDir := t.TempDir()
+	writeSkillPackage(t, projectDir, "test", `---
+name: Test
+description: test
+requiredMcpServers:
+  - s1
+---
+Body.
+`)
+	reg.LoadFromSources(map[SourceOrigin]string{SourceProject: projectDir})
 
 	// Initially unavailable.
 	avail := reg.ListAvailable()

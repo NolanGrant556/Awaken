@@ -7,8 +7,7 @@ import (
 	"strings"
 )
 
-// sourceDir returns the default directory for a given source origin.
-// bundled skills are embedded, so we only resolve user and project dirs.
+// sourceDir returns the default directory for a given local source origin.
 func sourceDir(source SourceOrigin) string {
 	switch source {
 	case SourceUser:
@@ -21,10 +20,10 @@ func sourceDir(source SourceOrigin) string {
 	}
 }
 
-// LoadDir scans a directory for .md files, parses each as a SKILL.md,
-// and returns a map of ID -> definition. Files that fail to parse are
-// skipped (the caller should log warnings).
-// source labels every loaded definition.
+// LoadDir scans a skills root for package directories in the form
+// <skill-id>/SKILL.md and returns a map of ID -> definition. Flat .md files
+// are intentionally ignored; skills are directory packages so references,
+// scripts, and assets can stay beside SKILL.md.
 func LoadDir(dir string, source SourceOrigin) map[string]*SkillDefinition {
 	if dir == "" {
 		return nil
@@ -36,20 +35,16 @@ func LoadDir(dir string, source SourceOrigin) map[string]*SkillDefinition {
 
 	result := make(map[string]*SkillDefinition)
 	for _, entry := range entries {
-		if entry.IsDir() {
+		if !entry.IsDir() {
 			continue
 		}
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".md") {
-			continue
-		}
-
-		id := strings.TrimSuffix(name, ".md")
-		if id == "" {
+		dirName := entry.Name()
+		if strings.TrimSpace(dirName) == "" || strings.HasPrefix(dirName, ".") {
 			continue
 		}
 
-		path := filepath.Join(dir, name)
+		rootDir := filepath.Join(dir, dirName)
+		path := filepath.Join(rootDir, "SKILL.md")
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			continue
@@ -60,9 +55,20 @@ func LoadDir(dir string, source SourceOrigin) map[string]*SkillDefinition {
 			continue
 		}
 
+		id := SkillIDFromNameOrFallback(dirName, def.Name)
+		if strings.TrimSpace(def.Name) == "" {
+			def.Name = id
+		}
+
 		def.ID = id
 		def.Source = source
+		def.Scope = source
+		def.RootDir = rootDir
+		def.SkillFilePath = path
 		def.FilePath = path
+		if source == SourceProject {
+			def.ProjectPath = projectPathFromSkillsRoot(dir)
+		}
 		def.State = StateAvailable
 
 		if err := ValidateNameReserved(def.Name); err != nil {
@@ -89,8 +95,51 @@ func LoadDir(dir string, source SourceOrigin) map[string]*SkillDefinition {
 	return result
 }
 
+func projectPathFromSkillsRoot(dir string) string {
+	clean := filepath.Clean(dir)
+	if filepath.Base(clean) != "skills" {
+		return ""
+	}
+	awakenDir := filepath.Dir(clean)
+	if filepath.Base(awakenDir) != ".awaken" {
+		return ""
+	}
+	return filepath.Dir(awakenDir)
+}
+
+func SkillIDFromNameOrFallback(fallback string, skillName string) string {
+	base := strings.TrimSpace(skillName)
+	if base == "" {
+		base = strings.TrimSpace(fallback)
+	}
+	var b strings.Builder
+	lastDash := false
+	for _, r := range strings.ToLower(base) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			lastDash = false
+		case r == '-' || r == '_' || r == ' ' || r == '.':
+			if b.Len() > 0 && !lastDash {
+				b.WriteByte('-')
+				lastDash = true
+			}
+		default:
+			if b.Len() > 0 && !lastDash {
+				b.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+	id := strings.Trim(b.String(), "-")
+	if id == "" {
+		return "custom-skill"
+	}
+	return id
+}
+
 // MergeSkills merges skill maps from multiple sources by priority:
-// project > user > bundled. A higher-priority skill shadows a lower-
+// project > user. A higher-priority skill shadows a lower-
 // priority one: the lower-priority entry is kept with StateShadowed and
 // ShadowedBy set.
 func MergeSkills(sources ...map[string]*SkillDefinition) map[string]*SkillDefinition {

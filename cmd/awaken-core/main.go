@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"awaken/src/agentcore"
 	"awaken/src/connectors"
@@ -29,6 +30,9 @@ func main() {
 	manager := buildMCPManager(defaultWorkspace)
 	connRegistry := buildConnectorRegistry(manager, defaultWorkspace)
 	skillRegistry := buildSkillRegistry(manager, defaultWorkspace)
+	syncSkillsForWorkspace := func(workspaceRoot string) {
+		skillRegistry.ReloadLocalSources(skillSourceDirs(workspaceRoot))
+	}
 
 	runService := runtime.NewRunServiceWithModelProfiles(
 		func(workspace runtime.WorkspaceConfig, threadID string, profile *runtime.ModelProfileConfig) *agentcore.Agent {
@@ -62,8 +66,16 @@ func main() {
 	}
 
 	srv := &http.Server{
-		Addr:    addr,
-		Handler: server.NewRouterWithWorkspace(runService, infoProvider, manager, connRegistry, skillRegistry, defaultWorkspace),
+		Addr: addr,
+		Handler: server.NewRouterWithWorkspaceAndSkillSync(
+			runService,
+			infoProvider,
+			manager,
+			connRegistry,
+			skillRegistry,
+			defaultWorkspace,
+			syncSkillsForWorkspace,
+		),
 	}
 
 	log.Printf("awaken-core listening on http://%s", addr)
@@ -147,13 +159,7 @@ func buildConnectorRegistry(manager *mcpclient.Manager, _ string) *connectors.Re
 func buildSkillRegistry(manager *mcpclient.Manager, workspace string) *skills.SkillRegistry {
 	logger := mcpclient.StdLogger{}
 	registry := skills.NewSkillRegistry(logger)
-	dirs := map[skills.SourceOrigin]string{
-		skills.SourceProject: filepath.Join(workspace, ".awaken", "skills"),
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		dirs[skills.SourceUser] = filepath.Join(home, ".awaken", "skills")
-	}
-	registry.LoadFromSources(dirs, skills.LoadBundledSkills())
+	registry.LoadFromSources(skillSourceDirs(workspace))
 
 	skillManager := skillruntime.NewManager(registry, skillruntime.StdLogger{})
 	skillManager.RefreshTools()
@@ -165,6 +171,19 @@ func buildSkillRegistry(manager *mcpclient.Manager, workspace string) *skills.Sk
 
 	log.Printf("[skills] loaded %d skill definitions", len(registry.ListAll()))
 	return registry
+}
+
+func skillSourceDirs(workspace string) map[skills.SourceOrigin]string {
+	dirs := make(map[skills.SourceOrigin]string)
+	if root := strings.TrimSpace(workspace); root != "" && filepath.IsAbs(root) {
+		if stat, err := os.Stat(root); err == nil && stat.IsDir() {
+			dirs[skills.SourceProject] = filepath.Join(root, ".awaken", "skills")
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		dirs[skills.SourceUser] = filepath.Join(home, ".awaken", "skills")
+	}
+	return dirs
 }
 
 func resolveDefaultWorkspace() string {

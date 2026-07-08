@@ -31,6 +31,9 @@ func NewManager(reg *skills.SkillRegistry, logger Logger) *Manager {
 	}
 	// Subscribe to registry changes.
 	reg.SetOnChange(m.refreshTools)
+	if err := tool.RegisterToolForce(&ResourceReadTool{registry: reg}); err != nil {
+		logger.Warnf("failed to register skill resource reader: %v", err)
+	}
 	return m
 }
 
@@ -76,14 +79,16 @@ func (m *Manager) refreshTools() {
 		}
 
 		st := &SkillTool{
-			SkillID:   skillID,
-			NameStr:   toolName,
-			Desc:      def.Description,
-			WhenToUse: def.WhenToUse,
-			Body:      def.Body,
-			ArgDefs:   argDefs,
-			Executor:  executor,
-			AllowFork: def.Context == skills.ContextFork,
+			SkillID:      skillID,
+			NameStr:      toolName,
+			Desc:         def.Description,
+			WhenToUse:    def.WhenToUse,
+			Body:         def.Body,
+			RootDir:      def.RootDir,
+			AllowedTools: append([]string(nil), def.AllowedTools...),
+			ArgDefs:      argDefs,
+			Executor:     executor,
+			AllowFork:    def.Context == skills.ContextFork,
 		}
 		if def.BodyFetcher != nil && def.McpBinding != nil {
 			fetcher := def.BodyFetcher
@@ -113,5 +118,6 @@ func (m *Manager) refreshTools() {
 // Shutdown unregisters all skill tools from the global registry.
 func (m *Manager) Shutdown() {
 	tool.UnregisterToolsByPrefix(SkillToolPrefix)
+	tool.UnregisterTool(ResourceReadToolName)
 	m.registeredIDs = make(map[string]bool)
 }

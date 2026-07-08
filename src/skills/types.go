@@ -6,10 +6,9 @@ import "context"
 type SourceOrigin string
 
 const (
-	SourceBundled  SourceOrigin = "bundled"
-	SourceUser     SourceOrigin = "user"
-	SourceProject  SourceOrigin = "project"
-	SourceMcp      SourceOrigin = "mcp"
+	SourceUser    SourceOrigin = "user"
+	SourceProject SourceOrigin = "project"
+	SourceMcp     SourceOrigin = "mcp"
 )
 
 // sourcePriority returns integer priority for merging: higher wins.
@@ -21,8 +20,6 @@ func sourcePriority(o SourceOrigin) int {
 		return 2
 	case SourceMcp:
 		return 2
-	case SourceBundled:
-		return 1
 	default:
 		return 0
 	}
@@ -47,7 +44,8 @@ const (
 
 // SkillDefinition is the parsed, canonical representation of a SKILL.md file.
 type SkillDefinition struct {
-	// ID is the unique identifier derived from the filename (without .md).
+	// ID is the unique identifier derived from frontmatter name or the
+	// package directory name.
 	ID string `yaml:"-"`
 
 	// Name is the short, human-readable name.
@@ -111,6 +109,19 @@ type SkillDefinition struct {
 
 	// Source records where this skill was loaded from.
 	Source SourceOrigin `yaml:"-"`
+
+	// Scope mirrors Source for local API consumers. Local skills use
+	// "user" or "project"; MCP skills use "mcp".
+	Scope SourceOrigin `yaml:"-"`
+
+	// RootDir is the absolute path to the skill package directory.
+	RootDir string `yaml:"-"`
+
+	// SkillFilePath is the absolute path to the package entrypoint.
+	SkillFilePath string `yaml:"-"`
+
+	// ProjectPath is set for project-scoped local skills.
+	ProjectPath string `yaml:"-"`
 
 	// FilePath is the absolute path to the source SKILL.md.
 	FilePath string `yaml:"-"`

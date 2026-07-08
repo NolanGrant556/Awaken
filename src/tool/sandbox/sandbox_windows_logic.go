@@ -44,6 +44,10 @@ var ErrPowerShellWrapperUnsupported = errors.New(
 //     protection for this tier. This wrapper documents the intent and gives
 //     the future sandbox a single place to inject -WhatIf / ConstrainedLanguage
 //     mode restrictions.
+//   - TierLocalCLI: the command runs inside PowerShell with the working
+//     location pinned to workspaceRoot. It represents arbitrary local CLI
+//     invocations; local deletion and sensitive paths are guarded by the
+//     permission layer before execution.
 //   - TierWorkspaceMutation: the command runs inside PowerShell with the
 //     working location pinned to workspaceRoot. File writes are confined to
 //     the workspace by the permission layer's writable-roots checks.
@@ -78,7 +82,7 @@ func GeneratePowerShellWrapper(command, tier, workspaceRoot string) (string, err
 			command,
 		), nil
 
-	case TierWorkspaceMutation:
+	case TierLocalCLI, TierWorkspaceMutation:
 		// Pin location to the workspace. Writes are still gated by the
 		// permission layer's writable-roots checks.
 		return fmt.Sprintf(

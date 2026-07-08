@@ -3,7 +3,10 @@ package shelltool
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -80,6 +83,39 @@ func TestShellExecutorInspectReadOnlyExecutes(t *testing.T) {
 	}
 	if result.Tier != ShellTierInspectReadOnly {
 		t.Fatalf("expected tier %q, got %q", ShellTierInspectReadOnly, result.Tier)
+	}
+}
+
+func TestShellExecutorLocalCLIExecutesWithDegradedSandbox(t *testing.T) {
+	t.Cleanup(func() { sandbox.SetAdapter(nil) })
+	sandbox.SetAdapter(degradedSandboxMock{})
+
+	root := t.TempDir()
+	cliPath := filepath.Join(root, "custom-cli")
+	if err := os.WriteFile(cliPath, []byte("#!/bin/sh\nprintf local-cli-ok\n"), 0755); err != nil {
+		t.Fatalf("failed to write local cli: %v", err)
+	}
+
+	permCtx := tool.NewPermissionContext(root, nil)
+	executor := NewShellExecutor()
+
+	result, err := executor.Execute(
+		context.Background(),
+		shellParams{Command: "./custom-cli"},
+		permCtx,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if result.ExitCode != 0 || result.Stdout != "local-cli-ok" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if result.Tier != ShellTierLocalCLI {
+		t.Fatalf("expected tier %q, got %q", ShellTierLocalCLI, result.Tier)
+	}
+	if result.SandboxSupport != sandbox.SandboxDegraded {
+		t.Fatalf("expected SandboxDegraded support, got %q", result.SandboxSupport)
 	}
 }
 
@@ -259,8 +295,10 @@ func TestShellExecutorResolvesWorkdir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
-	if strings.TrimSpace(result.Stdout) != root {
-		t.Fatalf("expected pwd to run from workspace root %q, got %q", root, strings.TrimSpace(result.Stdout))
+	expectedRoot := resolveTestPath(t, root)
+	gotRoot := resolveTestPath(t, strings.TrimSpace(result.Stdout))
+	if gotRoot != expectedRoot {
+		t.Fatalf("expected pwd to run from workspace root %q, got %q", expectedRoot, gotRoot)
 	}
 }
 
@@ -407,4 +445,148 @@ func TestShellExecutorEnvInheritExposesAllEnv(t *testing.T) {
 	if !strings.Contains(result.Stdout, "AWAKEN_TEST_SECRET=sensitive-value") {
 		t.Fatalf("EnvInherit should expose AWAKEN_TEST_SECRET, got stdout:\n%s", result.Stdout)
 	}
+}
+
+func TestAugmentShellPathAddsCommonUserCLIDirs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix-style user CLI paths are not added on Windows")
+	}
+
+	home := t.TempDir()
+	env := augmentShellPath([]string{
+		"HOME=" + home,
+		"PATH=/usr/bin:/bin",
+	})
+	pathValue := envValue(env, "PATH")
+	for _, want := range []string{
+		filepath.Join(home, ".local", "bin"),
+		"/opt/homebrew/bin",
+		"/usr/local/bin",
+	} {
+		if !containsPath(pathValue, want) {
+			t.Fatalf("expected PATH to include %q, got %q", want, pathValue)
+		}
+	}
+}
+
+func TestAugmentShellPathDoesNotDuplicateEntries(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix-style user CLI paths are not added on Windows")
+	}
+
+	home := t.TempDir()
+	localBin := filepath.Join(home, ".local", "bin")
+	env := augmentShellPath([]string{
+		"HOME=" + home,
+		"PATH=" + strings.Join([]string{"/usr/bin", localBin}, string(os.PathListSeparator)),
+	})
+	pathValue := envValue(env, "PATH")
+	if countPath(pathValue, localBin) != 1 {
+		t.Fatalf("expected PATH to include %q once, got %q", localBin, pathValue)
+	}
+}
+
+func TestWindowsShellPathAdditionsAddsCommonUserCLIDirs(t *testing.T) {
+	env := []string{
+		`USERPROFILE=C:\Users\Nolan`,
+		`APPDATA=C:\Users\Nolan\AppData\Roaming`,
+		`LOCALAPPDATA=C:\Users\Nolan\AppData\Local`,
+	}
+	additions := shellPathAdditionsForOS("windows", env)
+	for _, want := range []string{
+		`C:\Users\Nolan\AppData\Roaming\npm`,
+		`C:\Users\Nolan\AppData\Local\pnpm`,
+		`C:\Users\Nolan\AppData\Local\Microsoft\WindowsApps`,
+		`C:\Users\Nolan\.local\bin`,
+		`C:\Users\Nolan\scoop\shims`,
+	} {
+		if !containsString(additions, want) {
+			t.Fatalf("expected Windows PATH additions to include %q, got %#v", want, additions)
+		}
+	}
+}
+
+func TestWindowsShellPathAdditionsFallsBackToUserProfile(t *testing.T) {
+	additions := shellPathAdditionsForOS("windows", []string{
+		`USERPROFILE=C:\Users\Nolan`,
+	})
+	for _, want := range []string{
+		`C:\Users\Nolan\AppData\Roaming\npm`,
+		`C:\Users\Nolan\AppData\Local\pnpm`,
+		`C:\Users\Nolan\AppData\Local\Microsoft\WindowsApps`,
+	} {
+		if !containsString(additions, want) {
+			t.Fatalf("expected fallback Windows PATH additions to include %q, got %#v", want, additions)
+		}
+	}
+}
+
+func TestAugmentShellPathForWindowsPreservesPathKeyAndDeduplicates(t *testing.T) {
+	existingNPMBin := `C:\Users\Nolan\AppData\Roaming\npm`
+	env := augmentShellPathForOS([]string{
+		`Path=C:\Windows\System32;` + existingNPMBin,
+		`USERPROFILE=C:\Users\Nolan`,
+		`APPDATA=C:\Users\Nolan\AppData\Roaming`,
+		`LOCALAPPDATA=C:\Users\Nolan\AppData\Local`,
+	}, "windows", ";")
+
+	if !strings.HasPrefix(env[0], "Path=") {
+		t.Fatalf("expected PATH augmentation to preserve original Path key, got %q", env[0])
+	}
+	pathValue := envValueForOS(env, "PATH", "windows")
+	if countPathWithSeparator(pathValue, existingNPMBin, ";") != 1 {
+		t.Fatalf("expected PATH to include existing npm bin once, got %q", pathValue)
+	}
+	if !containsPathWithSeparator(pathValue, `C:\Users\Nolan\scoop\shims`, ";") {
+		t.Fatalf("expected PATH to include Scoop shims, got %q", pathValue)
+	}
+	if !containsPathWithSeparator(pathValue, `C:\Users\Nolan\AppData\Local\Microsoft\WindowsApps`, ";") {
+		t.Fatalf("expected PATH to include WindowsApps, got %q", pathValue)
+	}
+}
+
+func containsPath(pathValue string, want string) bool {
+	return countPath(pathValue, want) > 0
+}
+
+func countPath(pathValue string, want string) int {
+	count := 0
+	for _, path := range strings.Split(pathValue, string(os.PathListSeparator)) {
+		if path == want {
+			count++
+		}
+	}
+	return count
+}
+
+func containsPathWithSeparator(pathValue string, want string, separator string) bool {
+	return countPathWithSeparator(pathValue, want, separator) > 0
+}
+
+func countPathWithSeparator(pathValue string, want string, separator string) int {
+	count := 0
+	for _, path := range strings.Split(pathValue, separator) {
+		if strings.EqualFold(path, want) {
+			count++
+		}
+	}
+	return count
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func resolveTestPath(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return path
+	}
+	return resolved
 }

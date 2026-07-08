@@ -17,6 +17,7 @@ type ShellLane string
 
 const (
 	ShellLaneInspectReadOnly    ShellLane = "inspect_read_only"
+	ShellLaneLocalCLI           ShellLane = "local_cli"
 	ShellLaneWorkspaceFS        ShellLane = "workspace_fs"
 	ShellLaneTestBuildCodegen   ShellLane = "test_build_codegen"
 	ShellLaneDependencyNetwork  ShellLane = "dependency_network"
@@ -98,6 +99,9 @@ func evaluateShellPolicy(command string, cwd string, permissionContext tool.Perm
 	case ShellTierInspectReadOnly:
 		result.Lane = ShellLaneInspectReadOnly
 		result.DirectAllow = true
+	case ShellTierLocalCLI:
+		result.Lane = ShellLaneLocalCLI
+		result.DirectAllow = true
 	case ShellTierOpenWorldSystem:
 		result.Lane = ShellLaneOpenWorldHighTrust
 		if !executionMode {
@@ -136,11 +140,93 @@ func hardDenyShellCommand(command string, cwd string, permissionContext tool.Per
 		if isDangerousChmod(base, args) {
 			return "destructive chmod/chown command is not allowed"
 		}
+		if isMassMessageCLICommand(base, args) {
+			return "mass message CLI command requires human review"
+		}
 		if reason := denySensitiveOrOutOfScopeArgs(base, args, cwd, permissionContext); reason != "" {
 			return reason
 		}
 	}
 	return ""
+}
+
+func MassMessageReviewMetadataForShellCommand(command string) (*tool.MassMessageMetadata, bool) {
+	for _, segment := range splitCompoundSegments(command) {
+		tokens := shellTokens(segment)
+		if len(tokens) == 0 {
+			continue
+		}
+		base := filepath.Base(tokens[0])
+		args := tokens[1:]
+		if !isMassMessageCLICommand(base, args) {
+			continue
+		}
+		return &tool.MassMessageMetadata{
+			Channel:        strings.ToLower(base),
+			RecipientScope: "cli command",
+			BodyPreview:    truncateShellPreview(command, 240),
+			SourceTool:     "shell",
+		}, true
+	}
+	return nil, false
+}
+
+func isMassMessageCLICommand(base string, args []string) bool {
+	base = strings.ToLower(base)
+	if !isCollaborationCLI(base) {
+		return false
+	}
+	lowerArgs := lowerShellArgs(args)
+	if containsAnyShellToken(lowerArgs, "broadcast", "mass", "bulk", "群发") {
+		return containsAnyShellToken(lowerArgs, "send", "message", "msg", "notify", "notification", "robot", "bot", "ding")
+	}
+	if containsShellSubsequence(lowerArgs, "message", "send") ||
+		containsShellSubsequence(lowerArgs, "msg", "send") ||
+		containsShellSubsequence(lowerArgs, "robot", "send") ||
+		containsShellSubsequence(lowerArgs, "bot", "send") ||
+		containsShellSubsequence(lowerArgs, "chat", "send") ||
+		containsShellSubsequence(lowerArgs, "im", "+messages-send") ||
+		containsShellSubsequence(lowerArgs, "ding", "send") ||
+		containsShellSubsequence(lowerArgs, "notify", "send") {
+		return true
+	}
+	return false
+}
+
+func isCollaborationCLI(base string) bool {
+	switch base {
+	case "dws", "feishu", "lark", "lark-cli", "ding", "dingtalk":
+		return true
+	}
+	return false
+}
+
+func lowerShellArgs(args []string) []string {
+	out := make([]string, len(args))
+	for i, arg := range args {
+		out[i] = strings.ToLower(arg)
+	}
+	return out
+}
+
+func containsShellSubsequence(args []string, first string, second string) bool {
+	seenFirst := false
+	for _, arg := range args {
+		switch {
+		case arg == first:
+			seenFirst = true
+		case seenFirst && arg == second:
+			return true
+		}
+	}
+	return false
+}
+
+func truncateShellPreview(value string, max int) string {
+	if max <= 0 || len(value) <= max {
+		return value
+	}
+	return value[:max] + "..."
 }
 
 func shellTokens(segment string) []string {

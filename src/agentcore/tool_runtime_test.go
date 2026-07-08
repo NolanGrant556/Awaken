@@ -521,6 +521,8 @@ func TestDefaultAutoToolPolicyAllowsSupportedShellLanes(t *testing.T) {
 		{"touch", "touch reports.md", "workspace_fs"},
 		{"go test", "go test ./...", "test_build_codegen"},
 		{"npm build", "npm run build", "test_build_codegen"},
+		{"dws search", `dws aitable base search --query "DVF" --format json`, "local_cli"},
+		{"gh issue list", "gh issue list --limit 10", "local_cli"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

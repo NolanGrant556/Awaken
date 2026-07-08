@@ -72,6 +72,20 @@ func (a SandboxAdapterMac) SupportLevel() SandboxSupport {
 // When sandbox-exec is unavailable, ApplySandbox is a no-op and
 // returns a SandboxResult with Applied=false and Support=SandboxDegraded.
 func (a SandboxAdapterMac) ApplySandbox(cmd *exec.Cmd, tier string, workspaceRoot string) (SandboxResult, error) {
+	if tier == TierLocalCLI {
+		// User-installed CLIs (dws, gh, feishu, obsidian, etc.) often need
+		// macOS Keychain, trustd/Security.framework, user preference services,
+		// and their own ~/.tool cache/token directories. A narrow seatbelt
+		// profile breaks those normal CLI contracts even when network access is
+		// allowed. Shell policy still guards deletion, shell wrappers,
+		// sensitive paths, and mass-message review before execution.
+		return SandboxResult{
+			Support: SandboxDegraded,
+			Method:  "local-cli",
+			Applied: false,
+		}, nil
+	}
+
 	if !a.available || a.execPath == "" {
 		return SandboxResult{
 			Support: SandboxDegraded,
@@ -136,6 +150,10 @@ func (a SandboxAdapterMac) ApplySandbox(cmd *exec.Cmd, tier string, workspaceRoo
 // Profile strategy per tier:
 //   - inspect_read_only: allow process execution and file reads; deny
 //     all writes and network.
+//   - local_cli: does not use sandbox-exec on macOS. Arbitrary
+//     user-installed CLIs need normal access to macOS credential, trust, and
+//     user-state services; local file deletion remains blocked earlier by
+//     shell policy.
 //   - workspace_mutation: allow process execution, file reads, and file
 //     writes within the workspace; deny writes outside the workspace
 //     and deny network.
@@ -158,7 +176,7 @@ func GenerateSandboxProfile(tier string, workspaceRoot string) string {
 	if root == "" || root == "." {
 		// No usable root — fall back to "/" so the profile is still
 		// valid. For inspect_read_only this changes nothing (writes are
-		// denied entirely). For workspace_mutation/open_world_system it
+		// denied entirely). For local_cli/workspace_mutation/open_world_system it
 		// means writes are allowed anywhere, which is the safest
 		// fallback when the workspace boundary is unknown (the command
 		// would otherwise fail to write even legitimate workspace files).
@@ -191,6 +209,18 @@ func GenerateSandboxProfile(tier string, workspaceRoot string) string {
 (allow file-write* (subpath %s))
 (deny file-write*)
 (deny network*)
+`, quoted, quoted)
+
+	case TierLocalCLI:
+		return fmt.Sprintf(`(version 1)
+(deny default)
+(allow process-exec*)
+(allow sysctl-read)
+(allow file-read* (subpath %s))
+(allow file-read* (subpath "/"))
+(allow file-write* (subpath %s))
+(deny file-write*)
+(allow network*)
 `, quoted, quoted)
 
 	case TierOpenWorldSystem:

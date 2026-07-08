@@ -273,7 +273,7 @@ func larkConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclient
 			Scope: mcpclient.ScopeUser,
 			Config: mcpclient.McpServerConfig{
 				Stdio: &mcpclient.StdioTransportConfig{
-					Command: "lark",
+					Command: "lark-cli",
 					Args:    []string{"mcp"},
 					Env:     map[string]string{},
 				},

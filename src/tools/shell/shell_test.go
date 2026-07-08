@@ -181,6 +181,8 @@ func TestShellPermissionAllowsSafeLanes(t *testing.T) {
 		{"touch", "touch reports.md", "workspace_fs"},
 		{"go test", "go test ./...", "test_build_codegen"},
 		{"npm build", "npm run build", "test_build_codegen"},
+		{"dws search", `dws aitable base search --query "DVF" --format json`, "local_cli"},
+		{"gh issue list", "gh issue list --limit 10", "local_cli"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -192,6 +194,39 @@ func TestShellPermissionAllowsSafeLanes(t *testing.T) {
 				t.Fatalf("expected title to include lane %q, got %+v", tc.lane, decision.Metadata)
 			}
 		})
+	}
+}
+
+func TestShellPermissionRequiresMassReviewForMessagingCLI(t *testing.T) {
+	root := t.TempDir()
+	ctx := tool.NewPermissionContext(root, []string{root})
+	shellTool := &ShellTool{}
+
+	cases := []string{
+		`feishu message send --chat-id all --text hello`,
+		`lark-cli im +messages-send --chat-id oc_xxx --text hello`,
+		`dws chat robot send --chat-id group --text hello`,
+		`dws message broadcast --text hello`,
+	}
+	for _, cmd := range cases {
+		t.Run(cmd, func(t *testing.T) {
+			decision := shellTool.CheckPermission(context.Background(), `{"command":`+quoteJSON(cmd)+`}`, ctx)
+			if decision.Behavior != tool.PermissionNeedsMassMessageReview {
+				t.Fatalf("expected mass message review for %q, got %+v", cmd, decision)
+			}
+			if decision.Metadata.MassMessage == nil || decision.Metadata.MassMessage.SourceTool != "shell" {
+				t.Fatalf("expected shell mass message metadata for %q, got %+v", cmd, decision.Metadata)
+			}
+		})
+	}
+}
+
+func TestShellExecutionPolicyDeniesMassMessagingCLIDirectExecution(t *testing.T) {
+	root := t.TempDir()
+	ctx := tool.NewPermissionContext(root, []string{root})
+	policy := EvaluateShellExecutionPolicy(`feishu message send --chat-id all --text hello`, root, ctx)
+	if policy.DenyReason == "" {
+		t.Fatalf("expected direct execution policy to deny mass messaging CLI, got %+v", policy)
 	}
 }
 
@@ -235,8 +270,10 @@ func TestShellExecutesFromWorkspaceRootByDefault(t *testing.T) {
 		t.Fatalf("Execute returned error: %v", err)
 	}
 	result := decodeResult(t, out)
-	if strings.TrimSpace(result.Stdout) != root {
-		t.Fatalf("expected pwd to run from workspace root %q, got %+v", root, result)
+	expectedRoot := resolveTestPath(t, root)
+	gotRoot := resolveTestPath(t, strings.TrimSpace(result.Stdout))
+	if gotRoot != expectedRoot {
+		t.Fatalf("expected pwd to run from workspace root %q, got %+v", expectedRoot, result)
 	}
 }
 

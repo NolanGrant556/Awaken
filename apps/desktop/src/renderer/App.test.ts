@@ -54,6 +54,7 @@ import {
   shouldShowAssistantAnswerFooter,
   shouldShowReturnToLatestAffordance,
   shouldShowTurnMarkerRail,
+  turnMarkerRailHeight,
   shouldUseCenterComposer,
   turnMarkerRailDisplay,
 } from "./workbenchPresentation";
@@ -1150,6 +1151,16 @@ describe("App workbench presentation", () => {
         safeGap: 24,
       }),
     ).toBe(24);
+  });
+
+  it("keeps turn marker rail anchored to the composer bar when runtime panels are tall", () => {
+    expect(
+      turnMarkerRailHeight({
+        scrollViewportHeight: 520,
+        composerContentInset: 360,
+        bottomSafeArea: 152,
+      }),
+    ).toBe(700);
   });
 
   it("measures composer reserve from real dock content instead of the fade", () => {

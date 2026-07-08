@@ -48,6 +48,22 @@ func TestGeneratePowerShellWrapper_WorkspaceMutation(t *testing.T) {
 	}
 }
 
+func TestGeneratePowerShellWrapper_LocalCLI(t *testing.T) {
+	wrapper, err := GeneratePowerShellWrapper("dws schema", TierLocalCLI, `C:\workspace`)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !strings.Contains(wrapper, "Set-Location -LiteralPath") {
+		t.Errorf("expected wrapper to pin location, got %q", wrapper)
+	}
+	if !strings.Contains(wrapper, "dws schema") {
+		t.Errorf("expected wrapper to contain command, got %q", wrapper)
+	}
+	if strings.Contains(wrapper, "$ErrorActionPreference = 'Stop'") {
+		t.Errorf("local_cli wrapper should not force Stop, got %q", wrapper)
+	}
+}
+
 func TestGeneratePowerShellWrapper_OpenWorldSystemReturnsError(t *testing.T) {
 	_, err := GeneratePowerShellWrapper("curl https://example.com", TierOpenWorldSystem, `C:\workspace`)
 	if err == nil {
@@ -137,5 +153,16 @@ func TestGeneratePowerShellWrapper_WorkspaceMutationFormatStable(t *testing.T) {
 	expected := "Set-Location -LiteralPath 'C:\\ws'; touch f.txt"
 	if wrapper != expected {
 		t.Fatalf("workspace_mutation wrapper format mismatch:\nwant: %q\ngot:  %q", expected, wrapper)
+	}
+}
+
+func TestGeneratePowerShellWrapper_LocalCLIFormatStable(t *testing.T) {
+	wrapper, err := GeneratePowerShellWrapper("dws schema", TierLocalCLI, `C:\ws`)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	expected := "Set-Location -LiteralPath 'C:\\ws'; dws schema"
+	if wrapper != expected {
+		t.Fatalf("local_cli wrapper format mismatch:\nwant: %q\ngot:  %q", expected, wrapper)
 	}
 }

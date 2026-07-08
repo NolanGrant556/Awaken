@@ -223,3 +223,39 @@ func TestTransformShellHandlesNestedRelativePath(t *testing.T) {
 		t.Fatalf("expected Add File for nested/deep/file.txt, got: %s", patch)
 	}
 }
+
+func TestTransformShellCatHeredocWriteToApplyPatch(t *testing.T) {
+	workspace := t.TempDir()
+	command := "cat <<'EOF' > report.md\nline one\nline two\nEOF"
+
+	toolName, input, ok, reason := TransformShellToFileChain(command, workspace, workspace)
+
+	if !ok {
+		t.Fatalf("expected heredoc transform to succeed, got reason: %s", reason)
+	}
+	if toolName != "apply_patch" {
+		t.Fatalf("expected apply_patch, got %s", toolName)
+	}
+	patch, _ := input["patch"].(string)
+	if !strings.Contains(patch, "*** Add File: report.md") {
+		t.Fatalf("expected Add File for report.md, got: %s", patch)
+	}
+	if !strings.Contains(patch, "+line one") || !strings.Contains(patch, "+line two") {
+		t.Fatalf("expected heredoc content lines in patch, got: %s", patch)
+	}
+}
+
+func TestTransformShellCatHeredocRedirectBeforeDelimiter(t *testing.T) {
+	workspace := t.TempDir()
+	command := "cat > report.md <<EOF\nhello\nEOF"
+
+	_, input, ok, reason := TransformShellToFileChain(command, workspace, workspace)
+
+	if !ok {
+		t.Fatalf("expected heredoc transform to succeed, got reason: %s", reason)
+	}
+	patch, _ := input["patch"].(string)
+	if !strings.Contains(patch, "*** Add File: report.md") || !strings.Contains(patch, "+hello") {
+		t.Fatalf("expected report.md heredoc patch, got: %s", patch)
+	}
+}

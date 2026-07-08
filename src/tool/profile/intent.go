@@ -274,7 +274,7 @@ func inferRequestedAction(toolName string, kind ToolKind, annotations tool.ToolA
 	return ActionRead
 }
 
-// refinePatchAction inspects a Codex-style patch body and returns the
+// refinePatchAction inspects an Awaken structured patch body and returns the
 // highest-risk action present: delete > move > write. If the patch cannot be
 // parsed, it falls back to ActionWrite.
 func refinePatchAction(arguments string) RequestedAction {

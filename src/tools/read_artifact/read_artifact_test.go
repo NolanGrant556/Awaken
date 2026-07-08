@@ -54,3 +54,31 @@ func TestReadArtifactAllowsAttachedFileOutsideReadableRoots(t *testing.T) {
 		t.Fatalf("expected attached file content, got %q", out)
 	}
 }
+
+func TestReadArtifactUnsupportedTypeHasRoutingHint(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "image.png")
+	if err := os.WriteFile(path, []byte("\x89PNG\r\n\x1a\n"), 0o644); err != nil {
+		t.Fatalf("failed to write image: %v", err)
+	}
+
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	_, err := (&ReadArtifactTool{}).Execute(ctx, `{"path":"image.png"}`)
+	if err == nil || !strings.Contains(err.Error(), "image_inspect") || !strings.Contains(err.Error(), "read_file") {
+		t.Fatalf("expected unsupported type routing hint, got %v", err)
+	}
+}
+
+func TestReadArtifactEmptyPDFHasClearDiagnostic(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "empty.pdf")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatalf("failed to write empty pdf: %v", err)
+	}
+
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	_, err := (&ReadArtifactTool{}).Execute(ctx, `{"path":"empty.pdf"}`)
+	if err == nil || !strings.Contains(err.Error(), "空 PDF") || !strings.Contains(err.Error(), "0 字节") {
+		t.Fatalf("expected empty pdf diagnostic, got %v", err)
+	}
+}

@@ -33,13 +33,13 @@ func (t *ListFilesTool) Name() string {
 }
 
 func (t *ListFilesTool) Description() string {
-	return "按 glob 模式查找文件，返回稳定排序的文件路径列表"
+	return "在当前任务 readable roots/附件范围内按 glob 列出文件，返回稳定排序路径；这是工作区文件发现工具，不用于扫描 /usr/local/bin、系统 PATH 或任意系统目录。本地 runtime/命令依赖请用 workspace_dependencies"
 }
 
 func (t *ListFilesTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
 		{Name: "pattern", Description: "文件匹配模式，例如 *.go 或 **/*.md，默认 **/*", Type: "string", Required: false},
-		{Name: "root", Description: "搜索根目录，默认当前工作目录", Type: "string", Required: false},
+		{Name: "root", Description: "搜索根目录，必须位于 readable roots 或任务附件内；默认当前工作区", Type: "string", Required: false},
 		{Name: "max_results", Description: "最多返回多少条结果，默认 200，最大 1000", Type: "integer", Required: false},
 	}
 }
@@ -105,7 +105,7 @@ func (t *ListFilesTool) CheckPermission(ctx context.Context, input string, permi
 		return tool.DenyPermission(fmt.Sprintf("invalid parameters: %v", err))
 	}
 	if !permissionContext.IsWithinReadableRootsResolved(params.Root) {
-		return tool.DenyPermission(fmt.Sprintf("root %s is outside readable roots or escapes via symlink", params.Root))
+		return tool.DenyPermission(fmt.Sprintf("list_files 只能在当前任务 readable roots 或附件范围内列文件；root %s is outside readable roots or escapes via symlink。不要用它扫描系统目录或 PATH，本地 runtime/命令依赖请用 workspace_dependencies", params.Root))
 	}
 	return tool.AllowPermission()
 }

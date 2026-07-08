@@ -17,14 +17,14 @@ func (t *CalculatorTool) Name() string {
 }
 
 func (t *CalculatorTool) Description() string {
-	return "用于执行数学计算，支持加减乘除、幂运算、平方根等基本数学运算"
+	return "执行纯数学表达式计算，支持加减乘除、幂运算、平方根等基本数学运算；不执行代码、不读取文件、不做表格/文档分析"
 }
 
 func (t *CalculatorTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
 		{
 			Name:        "expression",
-			Description: "要计算的数学表达式",
+			Description: "要计算的纯数学表达式，例如 1+2*3 或 sqrt(9)",
 			Type:        "string",
 			Required:    true,
 		},
@@ -36,7 +36,7 @@ func (t *CalculatorTool) Definition() tool.ToolDefinition {
 		Name:        "calculator",
 		DisplayName: "Calculator",
 		Source:      tool.SourceBuiltin,
-		Description: "用于执行数学计算，支持加减乘除、幂运算、平方根等基本数学运算",
+		Description: t.Description(),
 		Annotations: tool.ToolAnnotations{ReadOnly: true, Destructive: false, OpenWorld: false},
 	}
 }

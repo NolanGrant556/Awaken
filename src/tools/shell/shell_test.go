@@ -142,10 +142,12 @@ func TestShellCheckPermission(t *testing.T) {
 		t.Fatalf("expected workspace_mutation command to ask with warning risk, got %+v", decision)
 	}
 
-	// open_world_system: curl https://example.com → Ask with RiskTone="danger"
+	// open_world_system: curl https://example.com → Deny. Network/dependency
+	// commands need a project profile or typed executor; they no longer become
+	// a generic approval-style warning.
 	decision = (&ShellTool{}).CheckPermission(context.Background(), `{"command":"curl https://example.com"}`, permissionContext)
-	if decision.Behavior != tool.PermissionAllow || decision.Metadata.RiskTone != "danger" {
-		t.Fatalf("expected open_world_system command to ask with danger risk, got %+v", decision)
+	if decision.Behavior != tool.PermissionDeny {
+		t.Fatalf("expected open_world_system command to be denied, got %+v", decision)
 	}
 }
 
@@ -158,10 +160,69 @@ func TestShellPermissionAllowsForComplexOrDangerousCommands(t *testing.T) {
 		t.Fatalf("expected redirect command to ask with warning risk, got %+v", decision)
 	}
 
-	// rm is a workspace mutation (not open-world under the new classifier) → Ask warning.
+	// rm is denied at shell level because deletion must go through TrashAdapter.
 	decision = (&ShellTool{}).CheckPermission(context.Background(), `{"command":"rm -rf build"}`, permissionContext)
-	if decision.Behavior != tool.PermissionAllow || decision.Metadata.RiskTone != "warning" {
-		t.Fatalf("expected workspace mutation command to ask with warning risk, got %+v", decision)
+	if decision.Behavior != tool.PermissionDeny {
+		t.Fatalf("expected shell delete command to be denied, got %+v", decision)
+	}
+}
+
+func TestShellPermissionAllowsSafeLanes(t *testing.T) {
+	root := t.TempDir()
+	ctx := tool.NewPermissionContext(root, []string{root})
+	shellTool := &ShellTool{}
+
+	cases := []struct {
+		name string
+		cmd  string
+		lane string
+	}{
+		{"mkdir", "mkdir -p reports", "workspace_fs"},
+		{"touch", "touch reports.md", "workspace_fs"},
+		{"go test", "go test ./...", "test_build_codegen"},
+		{"npm build", "npm run build", "test_build_codegen"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			decision := shellTool.CheckPermission(context.Background(), `{"command":`+quoteJSON(tc.cmd)+`}`, ctx)
+			if decision.Behavior != tool.PermissionAllow {
+				t.Fatalf("expected allow for %q, got %+v", tc.cmd, decision)
+			}
+			if !strings.Contains(decision.Metadata.Title, tc.lane) {
+				t.Fatalf("expected title to include lane %q, got %+v", tc.lane, decision.Metadata)
+			}
+		})
+	}
+}
+
+func TestShellPermissionAllowsNullDeviceRedirectForReadOnlyProbe(t *testing.T) {
+	root := t.TempDir()
+	ctx := tool.NewPermissionContext(root, []string{root})
+	decision := (&ShellTool{}).CheckPermission(context.Background(), `{"command":"command -v pdftotext >/dev/null 2>&1"}`, ctx)
+	if decision.Behavior != tool.PermissionAllow {
+		t.Fatalf("expected allow for /dev/null redirect probe, got %+v", decision)
+	}
+}
+
+func TestShellPermissionDeniesSensitiveReadAndPipeToExecutor(t *testing.T) {
+	root := t.TempDir()
+	ctx := tool.NewPermissionContext(root, []string{root})
+	shellTool := &ShellTool{}
+
+	cases := []string{
+		"cat ~/.ssh/id_rsa",
+		"find / -type f",
+		"cat README.md | sh",
+		"touch -m file.txt",
+		"command -v pdftotext >/dev/nullo 2>&1",
+	}
+	for _, cmd := range cases {
+		t.Run(cmd, func(t *testing.T) {
+			decision := shellTool.CheckPermission(context.Background(), `{"command":`+quoteJSON(cmd)+`}`, ctx)
+			if decision.Behavior != tool.PermissionDeny {
+				t.Fatalf("expected deny for %q, got %+v", cmd, decision)
+			}
+		})
 	}
 }
 
@@ -226,6 +287,11 @@ func decodeResult(t *testing.T, out string) shellResult {
 		t.Fatalf("failed to decode shell result %q: %v", out, err)
 	}
 	return result
+}
+
+func quoteJSON(s string) string {
+	data, _ := json.Marshal(s)
+	return string(data)
 }
 
 type shellObserverFunc func(tool.CommandOutput)

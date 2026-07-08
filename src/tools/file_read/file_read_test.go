@@ -66,7 +66,7 @@ func TestFileReadRejectsBinary(t *testing.T) {
 	}
 
 	_, err := (&FileReadTool{}).Execute(context.Background(), `{"path":"`+escapePath(path)+`"}`)
-	if err == nil || !strings.Contains(err.Error(), "二进制") {
+	if err == nil || !strings.Contains(err.Error(), "二进制") || !strings.Contains(err.Error(), "read_artifact") || !strings.Contains(err.Error(), "pdf_extract") {
 		t.Fatalf("expected binary rejection, got %v", err)
 	}
 }

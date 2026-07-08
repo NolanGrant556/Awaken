@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"awaken/src/tool"
@@ -18,14 +19,14 @@ func (t *WebSearchTool) Name() string {
 }
 
 func (t *WebSearchTool) Description() string {
-	return "用于在互联网上搜索信息"
+	return "在互联网上搜索公开网页信息；不读取本地文件、不搜索工作区内容，本地文件请用 list_files/grep_search/read_file/read_artifact"
 }
 
 func (t *WebSearchTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
 		{
 			Name:        "query",
-			Description: "搜索关键词",
+			Description: "互联网搜索关键词，不是本地文件路径或 glob",
 			Type:        "string",
 			Required:    true,
 		},
@@ -37,7 +38,7 @@ func (t *WebSearchTool) Definition() tool.ToolDefinition {
 		Name:        "web_search",
 		DisplayName: "Web Search",
 		Source:      tool.SourceBuiltin,
-		Description: "用于在互联网上搜索信息",
+		Description: t.Description(),
 		Annotations: tool.ToolAnnotations{
 			ReadOnly:        true,
 			Destructive:     false,
@@ -54,9 +55,9 @@ func (t *WebSearchTool) Execute(ctx context.Context, input string) (string, erro
 		return "", fmt.Errorf("搜索关键词不能为空")
 	}
 
-	url := "https://api.search.brave.com/res/v1/web/search?q=" + query
+	requestURL := "https://api.search.brave.com/res/v1/web/search?q=" + url.QueryEscape(query)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", requestURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("创建请求失败: %v", err)
 	}

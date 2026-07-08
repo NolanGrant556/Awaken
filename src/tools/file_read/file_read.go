@@ -34,12 +34,12 @@ func (t *FileReadTool) Name() string {
 }
 
 func (t *FileReadTool) Description() string {
-	return "用于读取指定文件的内容"
+	return "读取当前任务 readable roots/附件内的文本文件内容，适合源码、Markdown、JSON、CSV 等文本；不会读取 PDF、Office、图片、音视频等二进制/工作文件。PDF/Office/表格请用 read_artifact，PDF 文本抽取用 pdf_extract，图片元数据用 image_inspect"
 }
 
 func (t *FileReadTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
-		{Name: "path", Description: "文件路径", Type: "string", Required: true},
+		{Name: "path", Description: "文本文件路径，必须位于 readable roots 或任务附件内；PDF/Office/图片不要传给 read_file", Type: "string", Required: true},
 		{Name: "offset", Description: "起始行号，默认 1", Type: "integer", Required: false},
 		{Name: "limit", Description: "最多读取多少行，默认读到 max_bytes 限制，最大 5000", Type: "integer", Required: false},
 		{Name: "max_bytes", Description: "最多返回多少字节，默认 262144，最大 1048576", Type: "integer", Required: false},
@@ -55,7 +55,7 @@ func (t *FileReadTool) Definition() tool.ToolDefinition {
 		Name:        "read_file",
 		DisplayName: "Read File",
 		Source:      tool.SourceBuiltin,
-		Description: "用于读取指定文件的内容",
+		Description: t.Description(),
 		Annotations: tool.ToolAnnotations{
 			ReadOnly:        true,
 			Destructive:     false,
@@ -72,7 +72,7 @@ func (t *FileReadTool) CheckPermission(ctx context.Context, input string, permis
 		return tool.DenyPermission(fmt.Sprintf("invalid parameters: %v", err))
 	}
 	if !permissionContext.IsWithinReadableRootsResolved(params.Path) {
-		return tool.DenyPermission(fmt.Sprintf("path %s is outside readable roots or escapes via symlink", params.Path))
+		return tool.DenyPermission(fmt.Sprintf("read_file 只能读取当前任务 readable roots 或附件内的文本文件；path %s is outside readable roots or escapes via symlink。需要读取工作文件请先确认其在任务范围内，PDF/Office/表格用 read_artifact 或 pdf_extract", params.Path))
 	}
 	return tool.AllowPermission()
 }
@@ -130,7 +130,7 @@ func readTextRange(ctx context.Context, params fileReadParams) (string, error) {
 		return "", fmt.Errorf("检测文件类型失败: %v", err)
 	}
 	if binary {
-		return "", fmt.Errorf("拒绝读取二进制文件: %s", path)
+		return "", fmt.Errorf("拒绝读取二进制文件: %s。read_file 仅用于文本源码/Markdown/JSON/CSV 等文本；PDF/Office/表格请用 read_artifact，PDF 文本抽取用 pdf_extract，图片元数据用 image_inspect", path)
 	}
 
 	offset := normalizeOffset(params.Offset)

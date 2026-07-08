@@ -186,4 +186,37 @@ describe("electron runtime client", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onReconnect).not.toHaveBeenCalled();
   });
+
+  it("does not reconnect when the run is not found on the server", async () => {
+    const { bridge } = createElectronBridge({ status: "running" });
+    const subscriptions: Array<{
+      handlers: Parameters<AwakenBridge["subscribeRun"]>[1];
+      afterSeq?: number;
+    }> = [];
+    bridge.subscribeRun = vi.fn(async (_runId, handlers, afterSeq) => {
+      subscriptions.push({ handlers, afterSeq });
+      return `subscription-${subscriptions.length}`;
+    });
+    installBridge(bridge);
+
+    const client = createRuntimeClient();
+    const onError = vi.fn();
+    const onReconnect = vi.fn();
+    await client.subscribeRun("run-1", {
+      onEvent: vi.fn(),
+      onError,
+      onReconnect,
+    });
+
+    subscriptions[0].handlers.onError?.("404 page not found");
+
+    expect(onReconnect).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith(
+      expect.stringContaining("Run session was not found"),
+    );
+
+    // Advancing timers should not trigger any further subscribe attempts.
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(subscriptions).toHaveLength(1);
+  });
 });

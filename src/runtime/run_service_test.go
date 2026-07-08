@@ -1834,3 +1834,10 @@ func TestNormalizeWorkspaceGuardianReadOnlyFallsBackToDefault(t *testing.T) {
 		t.Fatalf("guardian_read_only leaked through normalizeWorkspace from a client request")
 	}
 }
+
+// Compile-time assertions that sessionEventSink implements the awaiter
+// interfaces expected by agentcore.ToolRuntime. If these fail, tools like
+// ask_user and mass-message review will fall back to the "not supported"
+// error path instead of blocking for user input.
+var _ agentcore.UserQuestionAwaiter = sessionEventSink{}
+var _ agentcore.MassMessageReviewAwaiter = sessionEventSink{}

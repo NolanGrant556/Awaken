@@ -136,28 +136,28 @@ func TestShellCheckPermission(t *testing.T) {
 		t.Fatalf("expected inspect_read_only command (ls) to be allowed, got %+v", decision)
 	}
 
-	// workspace_mutation: echo "hello" > file.txt → Ask with RiskTone="warning"
+	// workspace_mutation: echo "hello" > file.txt → Allow with RiskTone="warning"
 	decision = (&ShellTool{}).CheckPermission(context.Background(), `{"command":"echo \"hello\" > file.txt"}`, permissionContext)
 	if decision.Behavior != tool.PermissionAllow || decision.Metadata.RiskTone != "warning" {
-		t.Fatalf("expected workspace_mutation command to ask with warning risk, got %+v", decision)
+		t.Fatalf("expected workspace_mutation command to be allowed with warning risk, got %+v", decision)
 	}
 
-	// open_world_system: curl https://example.com → Deny. Network/dependency
-	// commands need a project profile or typed executor; they no longer become
-	// a generic approval-style warning.
+	// open_world_system: curl https://example.com → Allow. Shell is a
+	// local-computer surface; network/dependency/system commands are not
+	// constrained to the project workspace.
 	decision = (&ShellTool{}).CheckPermission(context.Background(), `{"command":"curl https://example.com"}`, permissionContext)
-	if decision.Behavior != tool.PermissionDeny {
-		t.Fatalf("expected open_world_system command to be denied, got %+v", decision)
+	if decision.Behavior != tool.PermissionAllow {
+		t.Fatalf("expected open_world_system command to be allowed, got %+v", decision)
 	}
 }
 
 func TestShellPermissionAllowsForComplexOrDangerousCommands(t *testing.T) {
 	permissionContext := tool.NewPermissionContext(t.TempDir(), nil)
 
-	// Redirect to workspace path → workspace_mutation → Ask warning.
+	// Redirect to workspace path → workspace_mutation → Allow warning.
 	decision := (&ShellTool{}).CheckPermission(context.Background(), `{"command":"printf hello > out.txt"}`, permissionContext)
 	if decision.Behavior != tool.PermissionAllow || decision.Metadata.RiskTone != "warning" {
-		t.Fatalf("expected redirect command to ask with warning risk, got %+v", decision)
+		t.Fatalf("expected redirect command to be allowed with warning risk, got %+v", decision)
 	}
 
 	// rm is denied at shell level because deletion must go through TrashAdapter.
@@ -177,12 +177,12 @@ func TestShellPermissionAllowsSafeLanes(t *testing.T) {
 		cmd  string
 		lane string
 	}{
-		{"mkdir", "mkdir -p reports", "workspace_fs"},
-		{"touch", "touch reports.md", "workspace_fs"},
-		{"go test", "go test ./...", "test_build_codegen"},
-		{"npm build", "npm run build", "test_build_codegen"},
-		{"dws search", `dws aitable base search --query "DVF" --format json`, "local_cli"},
-		{"gh issue list", "gh issue list --limit 10", "local_cli"},
+		{"mkdir", "mkdir -p reports", "local_shell"},
+		{"touch", "touch reports.md", "local_shell"},
+		{"go test", "go test ./...", "local_shell"},
+		{"npm build", "npm run build", "local_shell"},
+		{"dws search", `dws aitable base search --query "DVF" --format json`, "local_shell"},
+		{"gh issue list", "gh issue list --limit 10", "local_shell"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -239,7 +239,7 @@ func TestShellPermissionAllowsNullDeviceRedirectForReadOnlyProbe(t *testing.T) {
 	}
 }
 
-func TestShellPermissionDeniesSensitiveReadAndPipeToExecutor(t *testing.T) {
+func TestShellPermissionAllowsLocalComputerCommands(t *testing.T) {
 	root := t.TempDir()
 	ctx := tool.NewPermissionContext(root, []string{root})
 	shellTool := &ShellTool{}
@@ -250,12 +250,36 @@ func TestShellPermissionDeniesSensitiveReadAndPipeToExecutor(t *testing.T) {
 		"cat README.md | sh",
 		"touch -m file.txt",
 		"command -v pdftotext >/dev/nullo 2>&1",
+		"sudo true",
+		"chmod -R 755 /tmp/example",
+	}
+	for _, cmd := range cases {
+		t.Run(cmd, func(t *testing.T) {
+			decision := shellTool.CheckPermission(context.Background(), `{"command":`+quoteJSON(cmd)+`}`, ctx)
+			if decision.Behavior != tool.PermissionAllow {
+				t.Fatalf("expected allow for %q, got %+v", cmd, decision)
+			}
+		})
+	}
+}
+
+func TestShellPermissionDeniesDirectDeleteCommands(t *testing.T) {
+	root := t.TempDir()
+	ctx := tool.NewPermissionContext(root, []string{root})
+	shellTool := &ShellTool{}
+
+	cases := []string{
+		"rm -rf build",
+		"rmdir build",
+		"unlink file.txt",
+		"del file.txt",
+		"Remove-Item file.txt",
 	}
 	for _, cmd := range cases {
 		t.Run(cmd, func(t *testing.T) {
 			decision := shellTool.CheckPermission(context.Background(), `{"command":`+quoteJSON(cmd)+`}`, ctx)
 			if decision.Behavior != tool.PermissionDeny {
-				t.Fatalf("expected deny for %q, got %+v", cmd, decision)
+				t.Fatalf("expected direct delete command to be denied for %q, got %+v", cmd, decision)
 			}
 		})
 	}
@@ -308,12 +332,11 @@ func TestShellPermissionControlOperatorsStillAsk(t *testing.T) {
 	ctx := tool.NewPermissionContext(root, nil)
 	shellTool := &ShellTool{}
 
-	// Redirect to a workspace path raises the tier to workspace_mutation.
-	// Pipe and && of read-only commands stay inspect_read_only under the
-	// new classifier, so only the redirect case remains an Ask.
+	// Redirect writes are allowed as local shell commands; they should still
+	// carry warning metadata for observability, not trigger approval.
 	decision := shellTool.CheckPermission(context.Background(), `{"command":"cat README.md > out.txt"}`, ctx)
 	if decision.Behavior != tool.PermissionAllow || decision.Metadata.RiskTone != "warning" {
-		t.Fatalf("expected redirect command to ask with warning risk, got %+v", decision)
+		t.Fatalf("expected redirect command to be allowed with warning risk, got %+v", decision)
 	}
 }
 

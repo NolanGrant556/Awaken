@@ -11,5 +11,6 @@ import (
 	_ "awaken/src/tools/read_artifact"
 	_ "awaken/src/tools/shell"
 	_ "awaken/src/tools/text_file_create"
+	_ "awaken/src/tools/trash_file"
 	_ "awaken/src/tools/web_search"
 )

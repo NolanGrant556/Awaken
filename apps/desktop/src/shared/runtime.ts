@@ -35,6 +35,22 @@ export type RunInputAttachment = {
   byteSize?: number;
 };
 
+export type PickedAttachmentFile = {
+  id: string;
+  kind: RunInputAttachmentKind;
+  path: string;
+  mimeType: string;
+  displayName: string;
+  byteSize: number;
+  dataBase64?: string;
+  width?: number;
+  height?: number;
+};
+
+export type AttachmentPickResult =
+  | { canceled: true; error?: string }
+  | { canceled: false; files: PickedAttachmentFile[]; errors?: string[] };
+
 export type RuntimeRunWire = {
   run_id: string;
   thread_id: string;
@@ -645,6 +661,7 @@ export type AwakenBridge = {
   testModelProfile: (request: ModelProfileSaveRequest) => Promise<ModelProfileTestResult>;
   syncModelCapabilities: () => Promise<ModelProvider[]>;
   getModelProfileBalances: () => Promise<ModelProfileBalancesResult>;
+  pickAttachments: (defaultPath?: string) => Promise<AttachmentPickResult>;
   pickDirectory: (defaultPath?: string) => Promise<WorkspacePickResult>;
   pickWorkspace: (defaultPath?: string) => Promise<WorkspacePickResult>;
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;

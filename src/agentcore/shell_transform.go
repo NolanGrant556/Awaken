@@ -2,13 +2,10 @@ package agentcore
 
 import (
 	stdcontext "context"
-	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"awaken/src/tool"
 	shelltool "awaken/src/tools/shell"
 )
 
@@ -209,131 +206,6 @@ func shellLineTokens(line string) []string {
 	}
 	flush()
 	return tokens
-}
-
-// decideShellTransform applies the shell→apply_patch transform policy to a
-// shell tool decision request. It returns (decision, true) if the request was
-// handled (either transformed or denied with a reason), or (zero, false) if
-// the request should fall through to the default policy.
-func (p DefaultAutoToolPolicy) decideShellTransform(ctx stdcontext.Context, request ToolDecisionRequest) (ToolDecision, bool) {
-	// Don't transform if we're already inside a transformed execution. This
-	// is the policy-side half of the one-level transform guard; the runtime
-	// side lives in ToolRuntime.executeTransformedTool.
-	if transformDepthFromCtx(ctx) >= 1 {
-		return ToolDecision{}, false
-	}
-
-	command, cwd, ok := parseShellInput(request.NormalizedInput, request.WorkspaceRoot)
-	if !ok {
-		return ToolDecision{}, false
-	}
-
-	tier := shelltool.ClassifyShellCommand(command, cwd)
-
-	switch tier {
-	case shelltool.ShellTierWorkspaceMutation:
-		newToolName, newInput, transformed, reason := TransformShellToFileChain(command, cwd, request.WorkspaceRoot)
-		if transformed {
-			inputJSON, err := json.Marshal(newInput)
-			if err != nil {
-				return ToolDecision{
-					Action: ToolDecisionDeny,
-					Source: ToolDecisionSourcePolicyError,
-					Reason: fmt.Sprintf("failed to encode transformed shell input: %v", err),
-				}, true
-			}
-			return ToolDecision{
-				Action:          ToolDecisionTransform,
-				Source:          ToolDecisionSourceTransform,
-				Reason:          "shell file-write rewritten to apply_patch",
-				UpdatedToolName: newToolName,
-				UpdatedInput:    string(inputJSON),
-			}, true
-		}
-		_ = reason
-	}
-
-	policy := shelltool.EvaluateShellPolicy(command, cwd, permissionContextFromRequest(request))
-	if strings.TrimSpace(policy.DenyReason) != "" {
-		return ToolDecision{
-			Action: ToolDecisionDeny,
-			Source: ToolDecisionSourceHeadlessDefault,
-			Reason: policy.DenyReason,
-		}, true
-	}
-	if policy.DirectAllow && policy.Lane != shelltool.ShellLaneInspectReadOnly {
-		return ToolDecision{
-			Action:       ToolDecisionAllow,
-			Source:       ToolDecisionSourceWorkspaceBoundary,
-			Reason:       "shell command allowed by " + string(policy.Lane) + " lane",
-			UpdatedInput: request.NormalizedInput,
-		}, true
-	}
-
-	switch tier {
-	case shelltool.ShellTierOpenWorldSystem:
-		return ToolDecision{
-			Action: ToolDecisionDeny,
-			Source: ToolDecisionSourceHeadlessDefault,
-			Reason: "shell command reaches outside the workspace or affects the system; use apply_patch directly for file writes",
-		}, true
-
-	case shelltool.ShellTierWorkspaceMutation:
-		return ToolDecision{
-			Action: ToolDecisionDeny,
-			Source: ToolDecisionSourceHeadlessDefault,
-			Reason: "shell command mutates workspace files; use apply_patch or a supported shell lane",
-		}, true
-	}
-
-	// inspect_read_only: fall through to the default policy.
-	return ToolDecision{}, false
-}
-
-func permissionContextFromRequest(request ToolDecisionRequest) tool.PermissionContext {
-	return tool.NewTaskScopePermissionContext(
-		"",
-		request.WorkspaceRoot,
-		request.ReadableRoots,
-		request.WritableRoots,
-		request.OutputRoots,
-		nil,
-		nil,
-		"",
-	)
-}
-
-// parseShellInput extracts the command and effective cwd from a shell tool's
-// normalized input. The cwd is computed from the optional workdir field and
-// the workspace root.
-func parseShellInput(normalizedInput string, workspaceRoot string) (command string, cwd string, ok bool) {
-	normalizedInput = strings.TrimSpace(normalizedInput)
-	if normalizedInput == "" {
-		return "", "", false
-	}
-	var parsed struct {
-		Command string `json:"command"`
-		Workdir string `json:"workdir"`
-	}
-	if err := json.Unmarshal([]byte(normalizedInput), &parsed); err != nil {
-		return "", "", false
-	}
-	command = strings.TrimSpace(parsed.Command)
-	if command == "" {
-		return "", "", false
-	}
-	workdir := strings.TrimSpace(parsed.Workdir)
-	switch {
-	case workdir == "":
-		cwd = workspaceRoot
-	case filepath.IsAbs(workdir):
-		cwd = workdir
-	case workspaceRoot != "":
-		cwd = filepath.Join(workspaceRoot, workdir)
-	default:
-		cwd = workdir
-	}
-	return command, cwd, true
 }
 
 // hasCompoundOperator reports whether command contains a shell compound

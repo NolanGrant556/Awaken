@@ -60,6 +60,22 @@ func TestRuntimeInfoUpdates(t *testing.T) {
 	}
 }
 
+func TestBuildEffectiveSystemPromptIncludesAttachedFiles(t *testing.T) {
+	runtimeInfo := NewRuntimeInfo()
+	runtimeInfo.SetAttachedFiles([]RuntimeAttachedFile{
+		{Path: "/Users/nolangrant/Desktop/report.pdf", DisplayName: "report.pdf"},
+	})
+
+	effectivePrompt := BuildEffectiveSystemPrompt("{{.RuntimeInfo}}", runtimeInfo)
+
+	if !strings.Contains(effectivePrompt, "已授权附件") {
+		t.Fatal("expected prompt to include attached file section")
+	}
+	if !strings.Contains(effectivePrompt, "report.pdf: /Users/nolangrant/Desktop/report.pdf") {
+		t.Fatalf("expected prompt to include attached file path, got %s", effectivePrompt)
+	}
+}
+
 func TestLoadDefaultPrompt(t *testing.T) {
 	content, err := LoadDefaultPrompt()
 	if err != nil {

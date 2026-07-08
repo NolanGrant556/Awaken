@@ -2,7 +2,6 @@ package shelltool
 
 import (
 	"context"
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,10 +14,9 @@ import (
 	"awaken/src/tool/sandbox"
 )
 
-// fullSandboxMock is a SandboxAdapter that claims SandboxFull support and
-// applies no real constraints. It lets open_world_system commands reach
-// /bin/sh so we can verify the executor does NOT fail-closed when a real
-// sandbox is present.
+// fullSandboxMock is a SandboxAdapter that claims SandboxFull support. The
+// shell executor now records adapter support for observability, but does not
+// apply sandbox wrapping to local-computer shell commands.
 type fullSandboxMock struct {
 	applied int
 }
@@ -33,9 +31,8 @@ func (m *fullSandboxMock) ApplySandbox(cmd *exec.Cmd, tier string, workspaceRoot
 }
 
 // noneSandboxMock is a SandboxAdapter that claims SandboxNone support,
-// simulating a platform with no isolation at all (e.g. Linux). It is used
-// to verify fail-closed behavior without depending on the platform-specific
-// SandboxAdapterOther type (which is behind a build tag).
+// simulating a platform with no isolation at all (e.g. Linux). It lets the
+// test verify that sandbox support is observed without blocking execution.
 type noneSandboxMock struct{}
 
 func (noneSandboxMock) SupportLevel() sandbox.SandboxSupport {
@@ -146,26 +143,30 @@ func TestShellExecutorWorkspaceMutationExecutes(t *testing.T) {
 	}
 }
 
-// TestShellExecutorOpenWorldFailsClosedWithDegradedSandbox verifies that
-// open_world_system commands (e.g. `curl`) are refused with
-// ErrSandboxUnavailable when the platform sandbox is degraded. This is the
-// defense-in-depth fail-closed behavior required by the spec.
-func TestShellExecutorOpenWorldFailsClosedWithDegradedSandbox(t *testing.T) {
+// TestShellExecutorOpenWorldExecutesWithDegradedSandbox verifies that
+// open_world_system commands run even when the platform sandbox is degraded.
+// Shell is now a local-computer execution surface; sandbox support is recorded
+// for observability, not used as a hard gate.
+func TestShellExecutorOpenWorldExecutesWithDegradedSandbox(t *testing.T) {
 	t.Cleanup(func() { sandbox.SetAdapter(nil) })
 	sandbox.SetAdapter(degradedSandboxMock{})
 
 	root := t.TempDir()
+	writeFakeCurl(t, root)
 	permCtx := tool.NewPermissionContext(root, nil)
 	executor := NewShellExecutor()
 
 	result, err := executor.Execute(
 		context.Background(),
-		shellParams{Command: "curl https://example.com"},
+		shellParams{Command: "./curl --version"},
 		permCtx,
 		nil,
 	)
-	if !errors.Is(err, ErrSandboxUnavailable) {
-		t.Fatalf("expected ErrSandboxUnavailable, got err=%v", err)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if result.ExitCode != 0 || result.Stdout != "fake-curl" {
+		t.Fatalf("unexpected result: %+v", result)
 	}
 	if result.Tier != ShellTierOpenWorldSystem {
 		t.Fatalf("expected tier %q on result, got %q", ShellTierOpenWorldSystem, result.Tier)
@@ -175,26 +176,29 @@ func TestShellExecutorOpenWorldFailsClosedWithDegradedSandbox(t *testing.T) {
 	}
 }
 
-// TestShellExecutorOpenWorldFailsClosedWithNoneSandbox verifies that
-// open_world_system commands are refused on platforms with SandboxNone
-// support (e.g. Linux). Uses a local mock so the test is not gated by the
-// platform-specific SandboxAdapterOther build tag.
-func TestShellExecutorOpenWorldFailsClosedWithNoneSandbox(t *testing.T) {
+// TestShellExecutorOpenWorldExecutesWithNoneSandbox verifies that
+// open_world_system commands are not denied merely because the platform
+// reports no sandbox support.
+func TestShellExecutorOpenWorldExecutesWithNoneSandbox(t *testing.T) {
 	t.Cleanup(func() { sandbox.SetAdapter(nil) })
 	sandbox.SetAdapter(noneSandboxMock{})
 
 	root := t.TempDir()
+	writeFakeCurl(t, root)
 	permCtx := tool.NewPermissionContext(root, nil)
 	executor := NewShellExecutor()
 
 	result, err := executor.Execute(
 		context.Background(),
-		shellParams{Command: "curl https://example.com"},
+		shellParams{Command: "./curl --version"},
 		permCtx,
 		nil,
 	)
-	if !errors.Is(err, ErrSandboxUnavailable) {
-		t.Fatalf("expected ErrSandboxUnavailable, got err=%v", err)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if result.ExitCode != 0 || result.Stdout != "fake-curl" {
+		t.Fatalf("unexpected result: %+v", result)
 	}
 	if result.Tier != ShellTierOpenWorldSystem {
 		t.Fatalf("expected tier %q on result, got %q", ShellTierOpenWorldSystem, result.Tier)
@@ -206,32 +210,29 @@ func TestShellExecutorOpenWorldFailsClosedWithNoneSandbox(t *testing.T) {
 
 // TestShellExecutorOpenWorldExecutesWithFullSandbox verifies that
 // open_world_system commands are allowed to run when a SandboxFull adapter
-// is injected. The test does not require curl to actually succeed — it only
-// asserts that the executor did not fail-closed and that the command was
-// attempted (the mock adapter's ApplySandbox was called).
+// is injected. The adapter support is reflected on the result, but shell
+// execution is not sandbox-wrapped.
 func TestShellExecutorOpenWorldExecutesWithFullSandbox(t *testing.T) {
 	t.Cleanup(func() { sandbox.SetAdapter(nil) })
 	mock := &fullSandboxMock{}
 	sandbox.SetAdapter(mock)
 
 	root := t.TempDir()
+	writeFakeCurl(t, root)
 	permCtx := tool.NewPermissionContext(root, nil)
 	executor := NewShellExecutor()
 
 	result, err := executor.Execute(
 		context.Background(),
-		shellParams{Command: "curl --version"},
+		shellParams{Command: "./curl --version"},
 		permCtx,
 		nil,
 	)
-	// The executor must NOT fail-closed when a full sandbox is present.
-	// curl --version may or may not succeed depending on the environment,
-	// but the error must not be ErrSandboxUnavailable.
-	if errors.Is(err, ErrSandboxUnavailable) {
-		t.Fatalf("executor fail-closed despite SandboxFull adapter: %v", err)
-	}
 	if err != nil {
 		t.Fatalf("Execute returned unexpected error: %v", err)
+	}
+	if result.ExitCode != 0 || result.Stdout != "fake-curl" {
+		t.Fatalf("unexpected result: %+v", result)
 	}
 	if result.Tier != ShellTierOpenWorldSystem {
 		t.Fatalf("expected tier %q, got %q", ShellTierOpenWorldSystem, result.Tier)
@@ -239,8 +240,8 @@ func TestShellExecutorOpenWorldExecutesWithFullSandbox(t *testing.T) {
 	if result.SandboxSupport != sandbox.SandboxFull {
 		t.Fatalf("expected SandboxFull support, got %q", result.SandboxSupport)
 	}
-	if mock.applied == 0 {
-		t.Fatal("expected ApplySandbox to be called on the full sandbox mock")
+	if mock.applied != 0 {
+		t.Fatalf("expected ApplySandbox not to be called for local shell, got %d", mock.applied)
 	}
 }
 
@@ -256,17 +257,15 @@ func TestShellExecutorNewShellExecutorWithAdapter(t *testing.T) {
 	executor := NewShellExecutorWithAdapter(mock)
 
 	root := t.TempDir()
+	writeFakeCurl(t, root)
 	permCtx := tool.NewPermissionContext(root, nil)
 
 	result, err := executor.Execute(
 		context.Background(),
-		shellParams{Command: "curl --version"},
+		shellParams{Command: "./curl --version"},
 		permCtx,
 		nil,
 	)
-	if errors.Is(err, ErrSandboxUnavailable) {
-		t.Fatalf("executor fail-closed despite injected full sandbox adapter: %v", err)
-	}
 	if err != nil {
 		t.Fatalf("Execute returned unexpected error: %v", err)
 	}
@@ -589,4 +588,12 @@ func resolveTestPath(t *testing.T, path string) string {
 		return path
 	}
 	return resolved
+}
+
+func writeFakeCurl(t *testing.T, root string) {
+	t.Helper()
+	path := filepath.Join(root, "curl")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf fake-curl\n"), 0755); err != nil {
+		t.Fatalf("failed to write fake curl: %v", err)
+	}
 }

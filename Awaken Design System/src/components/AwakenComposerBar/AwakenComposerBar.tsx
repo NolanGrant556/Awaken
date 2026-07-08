@@ -1,7 +1,7 @@
 import "./AwakenComposerBar.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
-import { Check, ChevronDown, X } from "lucide-react";
+import { Check, ChevronDown, FileText, X } from "lucide-react";
 import { AwakenComposerInput } from "../AwakenComposerInput";
 import { AwakenContextButton } from "../AwakenContextButton";
 import { AwakenSendButton } from "../AwakenSendButton";
@@ -35,10 +35,14 @@ export type ComposerBarMetaItem = {
 
 export type ComposerBarAttachment = {
   id: string;
-  kind: "image";
-  src: string;
+  kind: "image" | "file";
+  src?: string;
   alt: string;
   mimeType: string;
+  label?: string;
+  detail?: string;
+  tooltip?: string;
+  extension?: string;
 };
 
 export type AwakenComposerBarProps = {
@@ -288,6 +292,50 @@ export function AwakenComposerBar({
     );
   }
 
+  function renderAttachment(attachment: ComposerBarAttachment) {
+    const label = attachment.label ?? attachment.alt;
+    const title = attachment.tooltip ?? [label, attachment.mimeType, attachment.detail]
+      .filter(Boolean)
+      .join("\n");
+
+    return (
+      <div
+        key={attachment.id}
+        className={`composer-bar-attachment composer-bar-attachment-${attachment.kind}`}
+        title={title || undefined}
+      >
+        {attachment.kind === "image" && attachment.src ? (
+          <img src={attachment.src} alt={attachment.alt} />
+        ) : (
+          <div className="composer-bar-file-card" aria-label={label}>
+            <FileText
+              className="composer-bar-file-card-icon"
+              size={17}
+              strokeWidth={1.85}
+              aria-hidden="true"
+            />
+            <span className="composer-bar-file-card-name">{label}</span>
+            {attachment.extension ? (
+              <span className="composer-bar-file-card-extension">
+                {attachment.extension}
+              </span>
+            ) : null}
+          </div>
+        )}
+        {onRemoveAttachment ? (
+          <button
+            type="button"
+            className="composer-bar-attachment-remove"
+            aria-label={`移除 ${label}`}
+            onClick={() => onRemoveAttachment(attachment.id)}
+          >
+            <X size={12} strokeWidth={2.2} />
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div
       className={`composer-bar composer-bar-${variant}${
@@ -304,23 +352,9 @@ export function AwakenComposerBar({
           {attachments.length > 0 ? (
             <div
               className="composer-bar-attachments"
-              aria-label="Pasted images"
+              aria-label="附件"
             >
-              {attachments.map((attachment) => (
-                <div key={attachment.id} className="composer-bar-attachment">
-                  <img src={attachment.src} alt={attachment.alt} />
-                  {onRemoveAttachment ? (
-                    <button
-                      type="button"
-                      className="composer-bar-attachment-remove"
-                      aria-label={`移除 ${attachment.alt}`}
-                      onClick={() => onRemoveAttachment(attachment.id)}
-                    >
-                      <X size={12} strokeWidth={2.2} />
-                    </button>
-                  ) : null}
-                </div>
-              ))}
+              {attachments.map((attachment) => renderAttachment(attachment))}
             </div>
           ) : null}
           <div className="composer-bar-input-wrap">

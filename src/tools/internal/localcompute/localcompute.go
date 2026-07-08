@@ -74,6 +74,10 @@ func Run(ctx context.Context, permCtx tool.PermissionContext, spec CommandSpec) 
 	output, err := cmd.CombinedOutput()
 	result := Result{Stdout: string(output)}
 	if err != nil {
+		detail := strings.TrimSpace(string(output))
+		if detail != "" {
+			return result, fmt.Errorf("local compute %s failed: %w: %s", spec.Backend, err, truncateDetail(detail, 1200))
+		}
 		return result, fmt.Errorf("local compute %s failed: %w", spec.Backend, err)
 	}
 	return result, nil
@@ -100,7 +104,7 @@ func resolveBackendBinary(name string) (string, error) {
 	}
 	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
 		for _, candidate := range candidates {
-			bundled := filepath.Join(home, ".cache", "codex-runtimes", "codex-primary-runtime", "dependencies", "bin", candidate)
+			bundled := filepath.Join(home, ".cache", "awaken-runtimes", "primary-runtime", "dependencies", "bin", candidate)
 			if _, err := os.Stat(bundled); err == nil {
 				return bundled, nil
 			}
@@ -121,6 +125,13 @@ func resolveBackendBinary(name string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("local compute backend %q is not available", name)
+}
+
+func truncateDetail(value string, limit int) string {
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	return value[:limit] + "... [truncated]"
 }
 
 func minimalEnv() []string {

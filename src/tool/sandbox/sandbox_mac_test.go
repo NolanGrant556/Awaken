@@ -68,6 +68,15 @@ func TestGenerateSandboxProfileWorkspaceMutation(t *testing.T) {
 	}
 }
 
+func TestGenerateSandboxProfileAllowsSysctlRead(t *testing.T) {
+	for _, tier := range []string{TierInspectReadOnly, TierWorkspaceMutation, TierOpenWorldSystem} {
+		profile := GenerateSandboxProfile(tier, "/Users/test/ws")
+		if !strings.Contains(profile, "(allow sysctl-read)") {
+			t.Errorf("%s profile should allow sysctl-read for runtime/tool startup", tier)
+		}
+	}
+}
+
 // TestGenerateSandboxProfileOpenWorldSystem verifies that the
 // open_world_system profile allows network but still restricts file
 // writes to the workspace.

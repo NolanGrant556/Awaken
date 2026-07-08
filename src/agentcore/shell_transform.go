@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"awaken/src/tool"
 	shelltool "awaken/src/tools/shell"
 )
 
@@ -52,23 +53,33 @@ func TransformShellToFileChain(command string, cwd string, workspaceRoot string)
 		return "", nil, false, "compound shell commands cannot be transformed; use apply_patch directly"
 	}
 
+	// Parse `cat <<EOF > path` / `cat > path <<EOF` before echo. This is the
+	// common safe-file-write shape LLMs use for multi-line content.
+	if content, path, appendMode, parsed := parseCatHeredocRedirect(command); parsed {
+		return buildFileWriteTransform(content, path, appendMode, cwd, workspaceRoot)
+	}
+
 	// Parse `echo <content> (>|>>) <path>` first. If the command is not an
 	// echo redirect, fall back to a tier-based rejection below so that
 	// open-world commands like `curl` still surface an open-world reason.
 	content, path, appendMode, parsed := parseEchoRedirect(command)
-	if !parsed {
-		tier := shelltool.ClassifyShellCommand(command, cwd)
-		if tier == shelltool.ShellTierOpenWorldSystem {
-			return "", nil, false, "open-world shell command cannot be transformed; use apply_patch directly"
-		}
-		return "", nil, false, "shell command is not a simple echo redirect; use apply_patch directly"
+	if parsed {
+		return buildFileWriteTransform(content+"\n", path, appendMode, cwd, workspaceRoot)
 	}
 
+	tier := shelltool.ClassifyShellCommand(command, cwd)
+	if tier == shelltool.ShellTierOpenWorldSystem {
+		return "", nil, false, "open-world shell command cannot be transformed; use apply_patch directly"
+	}
+	return "", nil, false, "shell command is not a simple file redirect; use apply_patch directly"
+}
+
+func buildFileWriteTransform(content string, path string, appendMode bool, cwd string, workspaceRoot string) (newToolName string, newInput map[string]any, ok bool, reason string) {
 	// Resolve the target path against cwd.
 	resolved := resolveTransformPath(path, cwd)
 
 	// Only transform if the path is within the workspace root. This catches
-	// echo redirects to absolute paths outside the workspace (e.g. /etc/passwd)
+	// redirects to absolute paths outside the workspace (e.g. /etc/passwd)
 	// with a more specific reason than the open-world fallback above.
 	if !isPathWithinRoot(resolved, workspaceRoot) {
 		return "", nil, false, "redirect target is outside the workspace; use apply_patch with a workspace path"
@@ -81,8 +92,7 @@ func TransformShellToFileChain(command string, cwd string, workspaceRoot string)
 	}
 	rel = filepath.ToSlash(rel)
 
-	// Determine the new file content. echo always appends a trailing newline.
-	newContent := content + "\n"
+	newContent := content
 	if appendMode {
 		existing, err := os.ReadFile(resolved)
 		if err != nil {
@@ -95,12 +105,110 @@ func TransformShellToFileChain(command string, cwd string, workspaceRoot string)
 			if existingStr != "" && !strings.HasSuffix(existingStr, "\n") {
 				existingStr += "\n"
 			}
-			newContent = existingStr + content + "\n"
+			newContent = existingStr + content
 		}
 	}
 
 	patch := buildAddFilePatch(rel, newContent)
-	return "apply_patch", map[string]any{"patch": patch}, true, "echo redirect rewritten to apply_patch Add File"
+	return "apply_patch", map[string]any{"patch": patch}, true, "shell file write rewritten to apply_patch Add File"
+}
+
+func parseCatHeredocRedirect(command string) (content string, path string, appendMode bool, ok bool) {
+	normalized := strings.ReplaceAll(command, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+	lines := strings.Split(normalized, "\n")
+	if len(lines) < 2 {
+		return "", "", false, false
+	}
+	firstLine := strings.TrimSpace(lines[0])
+	if !strings.HasPrefix(firstLine, "cat") {
+		return "", "", false, false
+	}
+	tokens := shellLineTokens(firstLine)
+	if len(tokens) < 4 || tokens[0] != "cat" {
+		return "", "", false, false
+	}
+
+	delimiter := ""
+	for i := 1; i < len(tokens); i++ {
+		token := tokens[i]
+		switch {
+		case token == "<<" || token == "<<-":
+			if i+1 >= len(tokens) {
+				return "", "", false, false
+			}
+			delimiter = strings.Trim(tokens[i+1], `"'`)
+			i++
+		case strings.HasPrefix(token, "<<-"):
+			delimiter = strings.Trim(strings.TrimPrefix(token, "<<-"), `"'`)
+		case strings.HasPrefix(token, "<<"):
+			delimiter = strings.Trim(strings.TrimPrefix(token, "<<"), `"'`)
+		case token == ">" || token == ">>":
+			if i+1 >= len(tokens) {
+				return "", "", false, false
+			}
+			path = tokens[i+1]
+			appendMode = token == ">>"
+			i++
+		}
+	}
+	if delimiter == "" || path == "" {
+		return "", "", false, false
+	}
+	path, ok = unquoteToken(path)
+	if !ok || path == "" {
+		return "", "", false, false
+	}
+
+	end := -1
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == delimiter {
+			end = i
+			break
+		}
+	}
+	if end == -1 {
+		return "", "", false, false
+	}
+	body := strings.Join(lines[1:end], "\n")
+	if end > 1 {
+		body += "\n"
+	}
+	return body, path, appendMode, true
+}
+
+func shellLineTokens(line string) []string {
+	var tokens []string
+	var current strings.Builder
+	inSingle := false
+	inDouble := false
+	escaped := false
+	flush := func() {
+		if current.Len() == 0 {
+			return
+		}
+		tokens = append(tokens, current.String())
+		current.Reset()
+	}
+	for _, r := range line {
+		switch {
+		case escaped:
+			current.WriteRune(r)
+			escaped = false
+		case r == '\\' && !inSingle:
+			escaped = true
+		case r == '\'' && !inDouble:
+			inSingle = !inSingle
+		case r == '"' && !inSingle:
+			inDouble = !inDouble
+		case !inSingle && !inDouble && (r == ' ' || r == '\t'):
+			flush()
+		default:
+			current.WriteRune(r)
+		}
+	}
+	flush()
+	return tokens
 }
 
 // decideShellTransform applies the shell→apply_patch transform policy to a
@@ -123,13 +231,6 @@ func (p DefaultAutoToolPolicy) decideShellTransform(ctx stdcontext.Context, requ
 	tier := shelltool.ClassifyShellCommand(command, cwd)
 
 	switch tier {
-	case shelltool.ShellTierOpenWorldSystem:
-		return ToolDecision{
-			Action: ToolDecisionDeny,
-			Source: ToolDecisionSourceHeadlessDefault,
-			Reason: "shell command reaches outside the workspace or affects the system; use apply_patch directly for file writes",
-		}, true
-
 	case shelltool.ShellTierWorkspaceMutation:
 		newToolName, newInput, transformed, reason := TransformShellToFileChain(command, cwd, request.WorkspaceRoot)
 		if transformed {
@@ -149,15 +250,57 @@ func (p DefaultAutoToolPolicy) decideShellTransform(ctx stdcontext.Context, requ
 				UpdatedInput:    string(inputJSON),
 			}, true
 		}
+		_ = reason
+	}
+
+	policy := shelltool.EvaluateShellPolicy(command, cwd, permissionContextFromRequest(request))
+	if strings.TrimSpace(policy.DenyReason) != "" {
 		return ToolDecision{
 			Action: ToolDecisionDeny,
 			Source: ToolDecisionSourceHeadlessDefault,
-			Reason: firstNonEmpty(reason, "shell command mutates workspace files; use apply_patch directly"),
+			Reason: policy.DenyReason,
+		}, true
+	}
+	if policy.DirectAllow && policy.Lane != shelltool.ShellLaneInspectReadOnly {
+		return ToolDecision{
+			Action:       ToolDecisionAllow,
+			Source:       ToolDecisionSourceWorkspaceBoundary,
+			Reason:       "shell command allowed by " + string(policy.Lane) + " lane",
+			UpdatedInput: request.NormalizedInput,
+		}, true
+	}
+
+	switch tier {
+	case shelltool.ShellTierOpenWorldSystem:
+		return ToolDecision{
+			Action: ToolDecisionDeny,
+			Source: ToolDecisionSourceHeadlessDefault,
+			Reason: "shell command reaches outside the workspace or affects the system; use apply_patch directly for file writes",
+		}, true
+
+	case shelltool.ShellTierWorkspaceMutation:
+		return ToolDecision{
+			Action: ToolDecisionDeny,
+			Source: ToolDecisionSourceHeadlessDefault,
+			Reason: "shell command mutates workspace files; use apply_patch or a supported shell lane",
 		}, true
 	}
 
 	// inspect_read_only: fall through to the default policy.
 	return ToolDecision{}, false
+}
+
+func permissionContextFromRequest(request ToolDecisionRequest) tool.PermissionContext {
+	return tool.NewTaskScopePermissionContext(
+		"",
+		request.WorkspaceRoot,
+		request.ReadableRoots,
+		request.WritableRoots,
+		request.OutputRoots,
+		nil,
+		nil,
+		"",
+	)
 }
 
 // parseShellInput extracts the command and effective cwd from a shell tool's
@@ -332,7 +475,7 @@ func isPathWithinRoot(path string, root string) bool {
 	return !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".."
 }
 
-// buildAddFilePatch builds a Codex-style Add File patch that creates or
+// buildAddFilePatch builds an Awaken structured Add File patch that creates or
 // overwrites relPath with content. apply_patch's Add File overwrites existing
 // files, so this is used for both `>` and `>>` (after pre-composing the
 // existing content for append mode).

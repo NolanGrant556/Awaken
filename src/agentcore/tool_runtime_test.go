@@ -510,6 +510,76 @@ func TestDefaultAutoToolPolicyDeniesNonTransformableShellMutation(t *testing.T) 
 	}
 }
 
+func TestDefaultAutoToolPolicyAllowsSupportedShellLanes(t *testing.T) {
+	workspace := t.TempDir()
+	cases := []struct {
+		name    string
+		command string
+		lane    string
+	}{
+		{"mkdir", "mkdir -p reports", "workspace_fs"},
+		{"touch", "touch reports.md", "workspace_fs"},
+		{"go test", "go test ./...", "test_build_codegen"},
+		{"npm build", "npm run build", "test_build_codegen"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			decision := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
+				ToolName:        "shell",
+				StaticBehavior:  tool.PermissionAllow,
+				NormalizedInput: `{"command":` + mustJSONQuote(t, tc.command) + `}`,
+				WorkspaceRoot:   workspace,
+				ReadableRoots:   []string{workspace},
+				WritableRoots:   []string{workspace},
+				OutputRoots:     []string{workspace},
+				IsOpenWorld:     true,
+			})
+			if decision.Action != ToolDecisionAllow {
+				t.Fatalf("expected allow for %q, got %+v", tc.command, decision)
+			}
+			if !strings.Contains(decision.Reason, tc.lane) {
+				t.Fatalf("expected reason to include lane %q, got %q", tc.lane, decision.Reason)
+			}
+		})
+	}
+}
+
+func TestDefaultAutoToolPolicyAllowsShellNullDeviceRedirectProbe(t *testing.T) {
+	workspace := t.TempDir()
+	decision := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
+		ToolName:        "shell",
+		StaticBehavior:  tool.PermissionAllow,
+		NormalizedInput: `{"command":"command -v pdftotext >/dev/null 2>&1"}`,
+		WorkspaceRoot:   workspace,
+		ReadableRoots:   []string{workspace},
+		WritableRoots:   []string{workspace},
+		OutputRoots:     []string{workspace},
+		IsOpenWorld:     true,
+	})
+
+	if decision.Action != ToolDecisionAllow {
+		t.Fatalf("expected allow for /dev/null redirect probe, got %+v", decision)
+	}
+}
+
+func TestDefaultAutoToolPolicyDeniesShellSensitiveRead(t *testing.T) {
+	workspace := t.TempDir()
+	decision := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
+		ToolName:        "shell",
+		StaticBehavior:  tool.PermissionAllow,
+		NormalizedInput: `{"command":"cat ~/.ssh/id_rsa"}`,
+		WorkspaceRoot:   workspace,
+		ReadableRoots:   []string{workspace},
+		WritableRoots:   []string{workspace},
+		OutputRoots:     []string{workspace},
+		IsOpenWorld:     true,
+	})
+
+	if decision.Action != ToolDecisionDeny {
+		t.Fatalf("expected deny for sensitive read, got %+v", decision)
+	}
+}
+
 func TestDefaultAutoToolPolicyFallsThroughForReadOnlyShell(t *testing.T) {
 	workspace := t.TempDir()
 	normalizedInput := `{"command":"ls -la"}`

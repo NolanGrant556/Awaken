@@ -64,13 +64,13 @@ func (t *GrepSearchTool) Name() string {
 }
 
 func (t *GrepSearchTool) Description() string {
-	return "使用正则表达式搜索文件内容，返回匹配文件、行号和匹配行"
+	return "在当前任务 readable roots/附件范围内搜索文本文件内容，返回匹配文件、行号和匹配行；会跳过二进制文件。这不是系统 PATH/命令发现工具，不用于扫描 /usr/local/bin 等系统目录；本地 runtime/命令依赖请用 workspace_dependencies"
 }
 
 func (t *GrepSearchTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
-		{Name: "query", Description: "要搜索的正则表达式", Type: "string", Required: true},
-		{Name: "root", Description: "搜索根目录，默认当前工作目录", Type: "string", Required: false},
+		{Name: "query", Description: "要搜索的 Go 正则表达式", Type: "string", Required: true},
+		{Name: "root", Description: "搜索根目录，必须位于 readable roots 或任务附件内；默认当前工作区", Type: "string", Required: false},
 		{Name: "include", Description: "文件匹配模式，例如 **/*.go，默认 **/*", Type: "string", Required: false},
 		{Name: "max_results", Description: "最多返回多少条匹配，默认 100，最大 1000", Type: "integer", Required: false},
 		{Name: "offset", Description: "跳过前多少条结果，默认 0", Type: "integer", Required: false},
@@ -155,7 +155,7 @@ func (t *GrepSearchTool) CheckPermission(ctx context.Context, input string, perm
 		return tool.DenyPermission(fmt.Sprintf("invalid parameters: %v", err))
 	}
 	if !permissionContext.IsWithinReadableRootsResolved(params.Root) {
-		return tool.DenyPermission(fmt.Sprintf("root %s is outside readable roots or escapes via symlink", params.Root))
+		return tool.DenyPermission(fmt.Sprintf("grep_search 只能在当前任务 readable roots 或附件范围内搜索文本文件；root %s is outside readable roots or escapes via symlink。不要用它扫描系统目录或 PATH，本地 runtime/命令依赖请用 workspace_dependencies", params.Root))
 	}
 	return tool.AllowPermission()
 }

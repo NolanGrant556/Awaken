@@ -55,7 +55,7 @@ export type RuntimeClient = {
   enableMcpServer: (name: string) => Promise<void>;
   deleteMcpServer: (name: string) => Promise<void>;
   listMcpTools: () => Promise<RuntimeToolInfo[]>;
-  listSkills: () => Promise<RuntimeSkill[]>;
+  listSkills: (projectRoot?: string) => Promise<RuntimeSkill[]>;
   installSkill: (request: InstallSkillRequest) => Promise<InstallSkillResponse>;
   listModelProviders: () => Promise<ModelProvider[]>;
   listModelProfiles: () => Promise<RuntimeModelProfileSummary[]>;
@@ -82,6 +82,7 @@ export type RuntimeClient = {
     handlers: SubscribeHandlers,
     afterSeq?: number,
   ) => Promise<() => void>;
+  pickDirectory: (defaultPath?: string) => Promise<WorkspacePickResult>;
   pickWorkspace: (defaultPath?: string) => Promise<WorkspacePickResult>;
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
   readWorkspaceRegistry: () => Promise<WorkspaceRegistrySnapshot>;
@@ -118,7 +119,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     enableMcpServer: (name) => bridge.enableMcpServer(name),
     deleteMcpServer: (name) => bridge.deleteMcpServer(name),
     listMcpTools: () => bridge.listMcpTools(),
-    listSkills: () => bridge.listSkills(),
+    listSkills: (projectRoot) => bridge.listSkills(projectRoot),
     installSkill: (request) => bridge.installSkill(request),
     listModelProviders: () => bridge.listModelProviders(),
     listModelProfiles: () => bridge.listModelProfiles(),
@@ -237,6 +238,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
         }
       };
     },
+    pickDirectory: (defaultPath) => bridge.pickDirectory(defaultPath),
     pickWorkspace: (defaultPath) => bridge.pickWorkspace(defaultPath),
     validateWorkspace: (path) => bridge.validateWorkspace(path),
     readWorkspaceRegistry: () => bridge.readWorkspaceRegistry(),

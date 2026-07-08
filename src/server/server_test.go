@@ -1,13 +1,17 @@
 package server
 
 import (
+	"archive/zip"
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -3762,6 +3766,7 @@ func TestMCPConfigureServersAcceptsShorthandAndPersists(t *testing.T) {
 }
 
 func TestInstallSkillWritesProjectSkillAndRegisters(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	workspace := t.TempDir()
 	registry := skills.NewSkillRegistry(testLogger{})
 	router := NewRouterWithWorkspace(nil, nil, nil, nil, registry, workspace)
@@ -3796,7 +3801,10 @@ Create a short follow-up checklist.`
 	if resp.Skill.ID != "daily-followup" || resp.Skill.SourceOrigin != "project" {
 		t.Fatalf("unexpected installed skill response: %+v", resp.Skill)
 	}
-	if _, err := os.Stat(filepath.Join(workspace, ".awaken", "skills", "daily-followup.md")); err != nil {
+	if resp.Skill.Scope != "project" || resp.Skill.RootDir == "" || resp.Skill.SkillFilePath == "" {
+		t.Fatalf("expected package paths in response: %+v", resp.Skill)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, ".awaken", "skills", "daily-followup", "SKILL.md")); err != nil {
 		t.Fatalf("expected installed skill file: %v", err)
 	}
 	req = httptest.NewRequest(http.MethodGet, "/v1/skills", nil)
@@ -3811,6 +3819,341 @@ Create a short follow-up checklist.`
 	}
 	if len(listed) != 1 || listed[0].ID != "daily-followup" {
 		t.Fatalf("expected installed skill in list, got %+v", listed)
+	}
+	if listed[0].RootDir == "" || listed[0].SkillFilePath == "" || listed[0].ProjectPath != workspace {
+		t.Fatalf("expected package metadata in list, got %+v", listed[0])
+	}
+}
+
+func TestInstallSkillZipPreservesPackageResources(t *testing.T) {
+	workspace := t.TempDir()
+	registry := skills.NewSkillRegistry(testLogger{})
+	router := NewRouterWithWorkspace(nil, nil, nil, nil, registry, workspace)
+
+	zipData := makeSkillZip(t, map[string]string{
+		"dws/SKILL.md": `---
+name: dws
+description: DingTalk skill.
+---
+Read ./references/guide.md and run ./scripts/helper.py.`,
+		"dws/references/guide.md": "Guide body",
+		"dws/scripts/helper.py":   "print('ok')\n",
+	})
+	body, err := json.Marshal(installSkillRequest{
+		FileName:      "dws.zip",
+		ContentBase64: base64.StdEncoding.EncodeToString(zipData),
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/skills/install", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected install 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	root := filepath.Join(workspace, ".awaken", "skills", "dws")
+	for _, rel := range []string{"SKILL.md", "references/guide.md", "scripts/helper.py"} {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); err != nil {
+			t.Fatalf("expected package file %s: %v", rel, err)
+		}
+	}
+}
+
+func TestInstallSkillZipRejectsInvalidPackages(t *testing.T) {
+	workspace := t.TempDir()
+	registry := skills.NewSkillRegistry(testLogger{})
+	router := NewRouterWithWorkspace(nil, nil, nil, nil, registry, workspace)
+
+	cases := []struct {
+		name string
+		data []byte
+	}{
+		{
+			name: "multiple-skill-md",
+			data: makeSkillZip(t, map[string]string{
+				"a/SKILL.md": "---\nname: a\ndescription: a\n---\n",
+				"b/SKILL.md": "---\nname: b\ndescription: b\n---\n",
+			}),
+		},
+		{
+			name: "path-traversal",
+			data: makeSkillZip(t, map[string]string{
+				"../SKILL.md": "---\nname: bad\ndescription: bad\n---\n",
+			}),
+		},
+	}
+
+	for _, tc := range cases {
+		body, err := json.Marshal(installSkillRequest{
+			FileName:      tc.name + ".zip",
+			ContentBase64: base64.StdEncoding.EncodeToString(tc.data),
+		})
+		if err != nil {
+			t.Fatalf("marshal request: %v", err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/v1/skills/install", strings.NewReader(string(body)))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s: expected 400, got %d: %s", tc.name, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func makeSkillZip(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, content := range files {
+		writer, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("create zip entry %s: %v", name, err)
+		}
+		if _, err := writer.Write([]byte(content)); err != nil {
+			t.Fatalf("write zip entry %s: %v", name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func TestListSkillsReloadsRemovedProjectSkillFromDisk(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	workspace := t.TempDir()
+	registry := skills.NewSkillRegistry(testLogger{})
+	router := NewRouterWithWorkspace(nil, nil, nil, nil, registry, workspace)
+
+	rawSkill := `---
+name: stale-skill
+description: Skill that should disappear when removed from disk.
+---
+
+Body.`
+	body, err := json.Marshal(installSkillRequest{
+		FileName: "stale-skill.md",
+		Content:  rawSkill,
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/skills/install", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected install 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if err := os.RemoveAll(filepath.Join(workspace, ".awaken")); err != nil {
+		t.Fatalf("remove .awaken: %v", err)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/v1/skills", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected list 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var listed []skillInfo
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listed) != 0 {
+		t.Fatalf("expected removed skill to disappear after reload, got %+v", listed)
+	}
+}
+
+func TestInstallSkillWritesSelectedProjectRoot(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	workspace := t.TempDir()
+	selectedProject := t.TempDir()
+	registry := skills.NewSkillRegistry(testLogger{})
+	router := NewRouterWithWorkspace(nil, nil, nil, nil, registry, workspace)
+
+	rawSkill := `---
+name: selected-project-skill
+description: Skill installed into a selected project folder.
+---
+
+Body.`
+	body, err := json.Marshal(installSkillRequest{
+		FileName:    "selected-project-skill.md",
+		Content:     rawSkill,
+		Scope:       "project",
+		ProjectRoot: selectedProject,
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/skills/install", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected install 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(selectedProject, ".awaken", "skills", "selected-project-skill", "SKILL.md")); err != nil {
+		t.Fatalf("expected selected project skill file: %v", err)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/v1/skills?projectRoot="+url.QueryEscape(selectedProject), nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected list 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var listed []skillInfo
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != "selected-project-skill" {
+		t.Fatalf("expected selected project skill in list, got %+v", listed)
+	}
+}
+
+func TestListSkillsWithoutWorkspaceStillLoadsUserSkills(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	userSkillDir := filepath.Join(home, ".awaken", "skills", "always-user")
+	if err := os.MkdirAll(userSkillDir, 0o700); err != nil {
+		t.Fatalf("mkdir user skill: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(userSkillDir, "SKILL.md"), []byte(`---
+name: always-user
+description: Skill available without a project folder.
+---
+
+Body.`), 0o600); err != nil {
+		t.Fatalf("write user skill: %v", err)
+	}
+
+	registry := skills.NewSkillRegistry(testLogger{})
+	router := NewRouterWithWorkspace(nil, nil, nil, nil, registry, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/skills", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected list 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var listed []skillInfo
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != "always-user" || listed[0].SourceOrigin != "user" {
+		t.Fatalf("expected user skill without workspace, got %+v", listed)
+	}
+}
+
+func TestListSkillsProjectPreviewDoesNotMutateRuntimeRegistry(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	workspaceA := t.TempDir()
+	workspaceB := t.TempDir()
+
+	writeSkillFile := func(root, id string) {
+		dir := filepath.Join(root, ".awaken", "skills", id)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatalf("mkdir skills %s: %v", id, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(fmt.Sprintf(`---
+name: %s
+description: Project skill %s.
+---
+
+Body.`, id, id)), 0o600); err != nil {
+			t.Fatalf("write skill %s: %v", id, err)
+		}
+	}
+	writeSkillFile(workspaceA, "project-a")
+	writeSkillFile(workspaceB, "project-b")
+
+	registry := skills.NewSkillRegistry(testLogger{})
+	registry.LoadFromSources(map[skills.SourceOrigin]string{
+		skills.SourceProject: filepath.Join(workspaceA, ".awaken", "skills"),
+	})
+	router := NewRouterWithWorkspace(nil, nil, nil, nil, registry, workspaceA)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/skills?projectRoot="+url.QueryEscape(workspaceB), nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected list 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var listed []skillInfo
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != "project-b" {
+		t.Fatalf("expected project-b preview, got %+v", listed)
+	}
+	if registry.Get("project-a") == nil {
+		t.Fatalf("expected runtime registry to keep project-a after preview")
+	}
+	if registry.Get("project-b") != nil {
+		t.Fatalf("did not expect previewed project-b to mutate runtime registry")
+	}
+}
+
+func TestInstallSkillWritesUserSkill(t *testing.T) {
+	workspace := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	registry := skills.NewSkillRegistry(testLogger{})
+	router := NewRouterWithWorkspace(nil, nil, nil, nil, registry, workspace)
+
+	rawSkill := `---
+name: user-skill
+description: Skill installed for the current user.
+---
+
+Body.`
+	body, err := json.Marshal(installSkillRequest{
+		FileName: "user-skill.md",
+		Content:  rawSkill,
+		Scope:    "global",
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/skills/install", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected install 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp installSkillResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Skill.ID != "user-skill" || resp.Skill.SourceOrigin != "user" || resp.Skill.Scope != "global" {
+		t.Fatalf("unexpected installed skill response: %+v", resp.Skill)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".awaken", "skills", "user-skill", "SKILL.md")); err != nil {
+		t.Fatalf("expected user skill file: %v", err)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/v1/skills", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected list 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var listed []skillInfo
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != "user-skill" || listed[0].SourceOrigin != "user" {
+		t.Fatalf("expected user skill in list, got %+v", listed)
 	}
 }
 

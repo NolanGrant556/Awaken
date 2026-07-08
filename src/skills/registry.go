@@ -7,7 +7,7 @@ import (
 )
 
 // SkillRegistry manages the lifecycle of all discovered skills. It merges
-// skills from bundled, user, and project sources, tracks availability
+// skills from user and project sources, tracks availability
 // based on connector presence and MCP server state, and exposes a stable
 // snapshot for consumers.
 type SkillRegistry struct {
@@ -52,27 +52,48 @@ func (r *SkillRegistry) SetOnChange(fn func()) {
 	r.onChange = fn
 }
 
-// LoadFromSources clears the registry and loads skills from the given
-// source directories. dirs maps SourceOrigin to the absolute directory
-// path. Bundled skills are passed in via the bundled map.
-func (r *SkillRegistry) LoadFromSources(dirs map[SourceOrigin]string, bundled map[string]*SkillDefinition) {
+// LoadFromSources clears the registry and loads skills from the given source
+// directories. dirs maps SourceOrigin to the absolute directory path.
+func (r *SkillRegistry) LoadFromSources(dirs map[SourceOrigin]string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	r.replaceLocalSourcesLocked(dirs)
+	r.fireOnChangeLocked()
+}
+
+// ReloadLocalSources reloads user and project skills from disk while keeping
+// dynamic MCP-sourced skills that are managed by the MCP bridge.
+func (r *SkillRegistry) ReloadLocalSources(dirs map[SourceOrigin]string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.replaceLocalSourcesLocked(dirs)
+	r.fireOnChangeLocked()
+}
+
+// PreviewLocalSources returns the skill set that would be produced by loading
+// the given local source directories without mutating the live registry or
+// registered skill tools. MCP-sourced skills from the live registry are included.
+func (r *SkillRegistry) PreviewLocalSources(dirs map[SourceOrigin]string) []*SkillDefinition {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	defs := r.buildLocalSourcesLocked(dirs)
+	r.reevaluateAvailabilityForLocked(defs)
+	return sortedSkillDefinitions(defs)
+}
+
+func (r *SkillRegistry) replaceLocalSourcesLocked(dirs map[SourceOrigin]string) {
+	r.skills = r.buildLocalSourcesLocked(dirs)
+	r.reevaluateAvailabilityLocked()
+}
+
+func (r *SkillRegistry) buildLocalSourcesLocked(dirs map[SourceOrigin]string) map[string]*SkillDefinition {
 	var sourceMaps []map[string]*SkillDefinition
 
 	// Process sources from lowest to highest priority so merge works.
-	for _, src := range []SourceOrigin{SourceBundled, SourceUser, SourceProject} {
-		if src == SourceBundled {
-			if bundled != nil {
-				// Mark all bundled as SourceBundled.
-				for _, def := range bundled {
-					def.Source = SourceBundled
-				}
-				sourceMaps = append(sourceMaps, bundled)
-			}
-			continue
-		}
+	for _, src := range []SourceOrigin{SourceUser, SourceProject} {
 		dir, ok := dirs[src]
 		if !ok || dir == "" {
 			continue
@@ -83,9 +104,13 @@ func (r *SkillRegistry) LoadFromSources(dirs map[SourceOrigin]string, bundled ma
 		}
 	}
 
-	r.skills = MergeSkills(sourceMaps...)
-	r.reevaluateAvailabilityLocked()
-	r.fireOnChangeLocked()
+	next := MergeSkills(sourceMaps...)
+	for id, def := range r.skills {
+		if def != nil && def.Source == SourceMcp {
+			next[id] = shallowCopy(def)
+		}
+	}
+	return next
 }
 
 // SetConnectorAvailable updates the availability status of a single
@@ -122,7 +147,11 @@ func (r *SkillRegistry) SetMcpServerAvailable(name string, available bool) {
 // reevaluateAvailabilityLocked recalculates State for every skill based on
 // current connector and MCP server availability. Must be called with mu held.
 func (r *SkillRegistry) reevaluateAvailabilityLocked() {
-	for id, def := range r.skills {
+	r.reevaluateAvailabilityForLocked(r.skills)
+}
+
+func (r *SkillRegistry) reevaluateAvailabilityForLocked(defs map[string]*SkillDefinition) {
+	for id, def := range defs {
 		// Don't touch shadowed entries.
 		if def.State == StateShadowed {
 			continue
@@ -198,11 +227,12 @@ func (r *SkillRegistry) ListAvailable() []*SkillDefinition {
 func (r *SkillRegistry) ListAll() []*SkillDefinition {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	result := make([]*SkillDefinition, 0)
-	for id, def := range r.skills {
-		if strings.HasSuffix(id, "__shadowed") {
-			// Shadowed entries have synthetic keys, but we include them.
-		}
+	return sortedSkillDefinitions(r.skills)
+}
+
+func sortedSkillDefinitions(defs map[string]*SkillDefinition) []*SkillDefinition {
+	result := make([]*SkillDefinition, 0, len(defs))
+	for _, def := range defs {
 		result = append(result, def)
 	}
 	sort.Slice(result, func(i, j int) bool {

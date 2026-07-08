@@ -216,6 +216,11 @@ export type RuntimeSkill = {
   state: "available" | "unavailable" | "shadowed" | string;
   unavailableReason?: string;
   sourceOrigin: string;
+  scope?: "global" | "project" | "mcp" | string;
+  rootDir?: string;
+  skillFilePath?: string;
+  projectPath?: string;
+  allowedTools?: string[];
   context: "inline" | "fork" | string;
   shadowedBy?: string;
   requiredMcpServers?: string[];
@@ -225,6 +230,8 @@ export type InstallSkillRequest = {
   fileName: string;
   content?: string;
   contentBase64?: string;
+  scope?: "project" | "global";
+  projectRoot?: string;
 };
 
 export type InstallSkillResponse = {
@@ -618,7 +625,7 @@ export type AwakenBridge = {
   deleteMcpServer: (name: string) => Promise<void>;
   getRuntimeLogs: () => Promise<RuntimeLogEntry[]>;
   listMcpTools: () => Promise<RuntimeToolInfo[]>;
-  listSkills: () => Promise<RuntimeSkill[]>;
+  listSkills: (projectRoot?: string) => Promise<RuntimeSkill[]>;
   installSkill: (request: InstallSkillRequest) => Promise<InstallSkillResponse>;
   listModelProviders: () => Promise<ModelProvider[]>;
   listModelProfiles: () => Promise<RuntimeModelProfileSummary[]>;
@@ -628,6 +635,7 @@ export type AwakenBridge = {
   testModelProfile: (request: ModelProfileSaveRequest) => Promise<ModelProfileTestResult>;
   syncModelCapabilities: () => Promise<ModelProvider[]>;
   getModelProfileBalances: () => Promise<ModelProfileBalancesResult>;
+  pickDirectory: (defaultPath?: string) => Promise<WorkspacePickResult>;
   pickWorkspace: (defaultPath?: string) => Promise<WorkspacePickResult>;
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
   readWorkspaceRegistry: () => Promise<WorkspaceRegistrySnapshot>;

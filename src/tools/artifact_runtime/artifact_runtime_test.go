@@ -86,6 +86,22 @@ func TestPresentationCreateUsesRuntimeAndRenderCheck(t *testing.T) {
 	if _, err := os.Stat(parsed.PreviewDir); err != nil {
 		t.Fatalf("expected preview dir: %v", err)
 	}
+
+	renderResult := executeArtifactToolRaw(t, ctx, artifactRender, map[string]any{
+		"path":       "演示报告.pptx",
+		"output_dir": "manual_preview",
+	})
+	var rendered struct {
+		Path          string   `json:"path"`
+		PDFPath       string   `json:"pdf_path"`
+		PreviewImages []string `json:"preview_images"`
+	}
+	if err := json.Unmarshal([]byte(renderResult), &rendered); err != nil {
+		t.Fatalf("parse artifact_render result: %v\n%s", err, renderResult)
+	}
+	if rendered.Path != deckOut || rendered.PDFPath == "" || len(rendered.PreviewImages) == 0 {
+		t.Fatalf("expected artifact_render to return pptx/pdf/png previews, got %s", renderResult)
+	}
 }
 
 func TestPresentationCreateRejectsImageOutsideReadableRoots(t *testing.T) {

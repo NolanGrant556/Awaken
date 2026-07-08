@@ -61,6 +61,7 @@ export type RunNarrativeItem =
       status: "active" | "done" | "error";
       isFinal?: boolean;
       elapsedMs?: number;
+      footnote?: string;
     };
 
 export type RunNarrativeState = {

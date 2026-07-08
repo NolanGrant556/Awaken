@@ -1570,10 +1570,10 @@ export function App() {
           dispatch({
             type: "run/event",
             event: {
-              type: "RUN_ERROR",
-              rawType: "RUN_ERROR",
-              message: "运行会话在应用重启后已丢失，该 run 已结束。",
-              code: "RUN_SESSION_LOST",
+              type: "RUN_STATUS_CHANGED",
+              rawType: "RUN_STATUS_CHANGED",
+              status: "cancelled",
+              message: "你停止生成了本次回答",
             },
             receivedAtMs: Date.now(),
           });
@@ -1637,10 +1637,10 @@ export function App() {
       dispatch({
         type: "run/event",
         event: {
-          type: "RUN_ERROR",
-          rawType: "RUN_ERROR",
-          message: "运行会话在应用重启后已丢失，该 run 已结束。",
-          code: "RUN_SESSION_LOST",
+          type: "RUN_STATUS_CHANGED",
+          rawType: "RUN_STATUS_CHANGED",
+          status: "cancelled",
+          message: "你停止生成了本次回答",
         },
         receivedAtMs: Date.now(),
       });
@@ -2407,13 +2407,17 @@ export function App() {
         isFinal: item.isFinal,
       });
       return (
-        <AssistantMessage
-          key={key}
-          markdown={item.markdown}
-          status={item.status}
-          elapsedMs={item.elapsedMs}
-          showFooter={showAnswerFooter}
-        />
+        <div key={key} className="assistant-message-wrapper">
+          <AssistantMessage
+            markdown={item.markdown}
+            status={item.status}
+            elapsedMs={item.elapsedMs}
+            showFooter={showAnswerFooter}
+          />
+          {item.footnote ? (
+            <div className="assistant-message-footnote">{item.footnote}</div>
+          ) : null}
+        </div>
       );
     }
     if (item.kind === "compactBoundary") {

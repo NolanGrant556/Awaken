@@ -26,12 +26,12 @@ const (
 	// SandboxDegraded means a partial boundary is available — the adapter
 	// may apply some constraints but cannot fully confine open-world
 	// commands. The executor must fail-closed for open_world_system.
-	// inspect_read_only and workspace_mutation commands may still run.
+	// inspect_read_only, local_cli, and workspace_mutation commands may still run.
 	SandboxDegraded SandboxSupport = "degraded"
 
 	// SandboxNone means no isolation is available on this platform. The
 	// executor must fail-closed for open_world_system and runs
-	// inspect_read_only / workspace_mutation without any confinement.
+	// inspect_read_only / local_cli / workspace_mutation without any confinement.
 	SandboxNone SandboxSupport = "none"
 )
 
@@ -40,6 +40,7 @@ const (
 // import cycle (tools/shell cannot be imported by tool/sandbox).
 const (
 	TierInspectReadOnly   = "inspect_read_only"
+	TierLocalCLI          = "local_cli"
 	TierWorkspaceMutation = "workspace_mutation"
 	TierOpenWorldSystem   = "open_world_system"
 )

@@ -42,7 +42,7 @@ func (t *ShellTool) Name() string {
 }
 
 func (t *ShellTool) Description() string {
-	return "执行高级 shell 命令并返回 exit code、耗时、stdout 和 stderr；普通文件增删改应优先使用 apply_patch"
+	return "执行本机 shell/CLI 命令并返回 exit code、耗时、stdout 和 stderr；可调用本机已安装 CLI（如 dws、gh、feishu、obsidian）。普通文件增删改应优先使用 apply_patch；删除本地文件必须走回收站/Trash 工具，不要用 rm/rmdir；涉及群发、批量通知或机器人广播必须走人工审核能力"
 }
 
 func (t *ShellTool) Parameters() []tool.ToolParameter {
@@ -59,7 +59,7 @@ func (t *ShellTool) Definition() tool.ToolDefinition {
 		Name:        "shell",
 		DisplayName: "Shell",
 		Source:      tool.SourceBuiltin,
-		Description: "执行 shell 命令",
+		Description: "执行本机 shell/CLI 命令；本地文件删除必须走回收站，群发/批量通知必须走人工审核能力",
 		Annotations: tool.ToolAnnotations{
 			ReadOnly:        false,
 			Destructive:     true,
@@ -83,6 +83,14 @@ func (t *ShellTool) CheckPermission(ctx context.Context, input string, permissio
 	if params.Command == "" {
 		return tool.AllowPermission()
 	}
+	if metadata, ok := MassMessageReviewMetadataForShellCommand(params.Command); ok {
+		return tool.NeedsMassMessageReviewPermission("mass message CLI command requires human review", tool.DecisionMetadata{
+			Title:       "Shell mass message review",
+			Description: shellApprovalDescription(params, "mass message CLI command"),
+			RiskTone:    "danger",
+			MassMessage: metadata,
+		})
+	}
 
 	cwd := resolveExecutorCwd(params.Workdir, permissionContext)
 	policy := EvaluateShellPolicy(params.Command, cwd, permissionContext)
@@ -102,6 +110,12 @@ func (t *ShellTool) CheckPermission(ctx context.Context, input string, permissio
 		// Safe read-only: auto-allow. DecideExecution will hit the
 		// StaticBehavior==Allow branch and allow without transform.
 		return tool.AllowPermission()
+	case ShellTierLocalCLI:
+		return tool.AllowPermissionWithMetadata(tool.DecisionMetadata{
+			Title:       "Shell local_cli",
+			Description: shellApprovalDescription(params, "local CLI command"),
+			RiskTone:    "warning",
+		})
 	case ShellTierWorkspaceMutation:
 		// Internal risk signal: routes to decideShellTransform, which
 		// rewrites simple file writes to apply_patch or structurally denies

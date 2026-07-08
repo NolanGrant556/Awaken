@@ -54,7 +54,7 @@ Codex 的 `approval_policy=never` 也不是让 shell 自动升级成全权限。
 Awaken 当前已经有 shell 内置权限执行器的雏形：
 
 - `src/tools/shell/shell.go` 已把 shell 标记为 destructive/open-world，并通过 `CheckPermission` 产出风险元数据。
-- `src/tools/shell/tier.go` 已有 `inspect_read_only`、`workspace_mutation`、`open_world_system` 三档分类。
+- `src/tools/shell/tier.go` 已有 `inspect_read_only`、`local_cli`、`workspace_mutation`、`open_world_system` 分类。
 - `src/agentcore/shell_transform.go` 已能把简单 `echo > file` 转成 `apply_patch`。
 - `src/tools/shell/executor.go` 已有 `ShellExecutor`，会在 open-world 且缺少可信 sandbox 时 fail-closed。
 - `src/tool/profile/profile.go` 已有 `ExecutionProfile`，覆盖 permission、sandbox、network、env、visibility。
@@ -62,9 +62,10 @@ Awaken 当前已经有 shell 内置权限执行器的雏形：
 
 当前缺口也很清楚：
 
-- shell 分类仍偏粗，不能表达常见工程命令的安全意图。
+- shell 分类仍需持续细化，但未知本地 CLI 不应再因为 Awaken 不认识命令而被误判为工作区写入。
 - transform 只覆盖简单 `echo > file`，`mkdir`、`touch`、`cp`、`mv`、`rm`、测试、构建、格式化、代码生成没有稳定 lane。
-- macOS sandbox 当前主要限制写和网络，但仍允许全盘读；因此读取 HOME、SSH key、shell rc、凭证文件必须由 shell 权限层额外保护。
+- macOS sandbox 当前主要限制写和网络，但仍允许全盘读；因此读取 HOME、SSH key、shell rc、凭证文件必须由 shell 权限层额外保护。`local_cli` 例外：用户已安装 CLI 需要正常访问 Keychain、系统证书信任链、用户级 cache/token 目录和网络，macOS 下不套 `sandbox-exec`，由 shell policy 继续兜住删除、危险 wrapper、敏感路径和群发审核。
+- Windows 当前 sandbox adapter 是 degraded：`inspect_read_only`、`local_cli`、`workspace_mutation` 不提供等价 AppContainer/Job Object 进程边界，继续依赖 shell policy、权限层、敏感路径保护和审计兜底；`open_world_system` 在缺少可信 sandbox 时 fail-closed。Windows 本地 CLI 通过子进程 `PATH` 补充 `%APPDATA%\npm`、`%LOCALAPPDATA%\pnpm`、`%LOCALAPPDATA%\Microsoft\WindowsApps`、`%USERPROFILE%\.local\bin`、`%USERPROFILE%\scoop\shims` 等常见用户安装目录。
 - `workspace_mutation` 被识别后缺少受控执行器承接，容易表现为拒绝。
 - network、dependency install、git clone、curl 等命令还没有项目 profile 级授权模型。
 
@@ -129,9 +130,10 @@ LLM 调用 shell 时不得传入临时扩权参数，例如：
 4. transform
 5. profile allow
 6. command family allow
-7. default deny
+7. 未识别但满足单命令本地 CLI 形态 -> `local_cli`
+8. default deny
 
-allowlist 不能覆盖敏感路径、危险 wrapper、系统路径写入、凭证读取、永久删除、网络越界。
+allow 不能覆盖敏感路径、危险 wrapper、系统路径写入、凭证读取、永久删除、网络越界。`local_cli` 是“本地进程执行边界”，不是业务功能白名单；Awaken 不枚举每个 CLI 的子命令功能。
 
 ## Shell Lane 设计
 
@@ -177,7 +179,45 @@ allowlist 不能覆盖敏感路径、危险 wrapper、系统路径写入、凭�
 - `cat ~/.ssh/id_rsa` -> `deny`
 - `find / -type f` -> `deny`
 
-### Lane 2：工作区文件操作
+### Lane 2：本地 CLI
+
+名称：`local_cli`
+
+用途：
+
+- 调用本机已安装的任意 CLI，例如 `dws`、`gh`、`feishu`、`obsidian`。
+- 让 skill 能通过 CLI 自身的 `help`、`schema`、`list`、`search`、`get` 等能力完成真实工作。
+- 避免“Awaken 不认识这个命令 -> 误判为 workspace mutation -> 拒绝”的问题。
+
+允许命令形态：
+
+- 单个本机可执行命令。
+- 可以带普通参数、URL、查询词、JSON 字符串参数。
+- 可以访问网络，由 CLI 自己和用户已有认证决定业务权限。
+- 执行器会在子进程 PATH 中补充常见用户 CLI 目录，例如 `~/.local/bin`、`/opt/homebrew/bin`、`/usr/local/bin`，避免 GUI 启动的 Desktop 因 PATH 过窄找不到本机 CLI。
+- Windows 下同样会补充常见用户 CLI 目录，例如 `%APPDATA%\npm`、`%LOCALAPPDATA%\pnpm`、`%LOCALAPPDATA%\Microsoft\WindowsApps`、`%USERPROFILE%\.local\bin`、`%USERPROFILE%\scoop\shims`，并兼容 `Path`/`PATH` 环境变量大小写差异。
+- macOS 下不使用 `sandbox-exec` 包裹 `local_cli`，否则会破坏 Keychain/token/cache、系统证书信任链与 CLI 自身状态管理。
+- Windows 下 `local_cli` 当前不宣称完整 sandbox 等价能力；它是本地 CLI 执行通道，安全兜底来自命令策略、敏感路径保护、删除拦截、群发审核和执行审计。需要开放 `open_world_system` 前必须补 AppContainer/Job Object 等可信进程隔离。
+
+约束：
+
+- 不允许 `sh -c`、`eval`、`xargs`、把数据管入执行器等 shell wrapper 绕过工具侧判断。
+- 不允许写系统路径、读取敏感 HOME 文件或触碰 protected roots。
+- 文件重定向写入工作区时提升为 `workspace_mutation`，优先 transform 到文件链。
+- 本地文件删除仍然必须走 `TrashAdapter`，不能用 `rm/rmdir` 物理删除。
+- 群发、批量通知、机器人广播等外部大范围消息必须进入人工审核；shell 会对明显的协作 CLI 群发形态（如 `lark-cli im +messages-send`、`feishu message send`、`dws ... robot send`、`... broadcast/bulk/mass ...`）返回 `massMessage` review，直接执行路径则 fail-closed。
+- 输出、超时、审计必须保留。
+
+典型决策：
+
+- `dws aitable base search --query "DVF" --format json` -> `allow`
+- `gh issue list --limit 10` -> `allow`
+- `obsidian note search "ERP"` -> `allow`
+- `dws schema` -> `allow`
+- `dws schema > schema.json` -> `transform/deny`，按文件写入边界处理
+- `rm -rf reports` -> `deny`，提示走回收站删除工具
+
+### Lane 3：工作区文件操作
 
 名称：`workspace_fs`
 
@@ -214,7 +254,7 @@ allowlist 不能覆盖敏感路径、危险 wrapper、系统路径写入、凭�
 - `rm -rf /tmp/foo` -> `deny`
 - `mv .git/config x` -> `deny`
 
-### Lane 3：测试、构建、格式化、代码生成
+### Lane 4：测试、构建、格式化、代码生成
 
 名称：`test_build_codegen`
 
@@ -256,7 +296,7 @@ allowlist 不能覆盖敏感路径、危险 wrapper、系统路径写入、凭�
 - `make` 只能在项目预配置允许的 target 中执行，否则 deny。
 - `python script.py` 只有在脚本位于 workspace 内且命令族被 profile 允许时才可执行。
 
-### Lane 4：依赖与网络命令
+### Lane 5：依赖与网络命令
 
 名称：`dependency_network`
 

@@ -563,6 +563,11 @@ export type WorkspaceValidationResult =
 
 export type MassMessageReviewDecision = "approved" | "rejected";
 
+export type UserQuestionAnswer = {
+  questionId: string;
+  answer: string;
+};
+
 export type WorkspaceRegistryPersistRequest = {
   defaultWorkspacePath: string;
   registeredWorkspacePaths: string[];
@@ -598,6 +603,11 @@ export type AwakenBridge = {
     runId: string,
     reviewId: string,
     decision: MassMessageReviewDecision,
+  ) => Promise<void>;
+  answerUserQuestion: (
+    runId: string,
+    questionId: string,
+    answer: string,
   ) => Promise<void>;
   subscribeRun: (
     runId: string,

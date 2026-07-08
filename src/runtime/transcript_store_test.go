@@ -348,3 +348,62 @@ func TestTranscriptLoaderRecoversLegacyCompactBoundaryAndReactiveMode(t *testing
 func intPtr(value int) *int {
 	return &value
 }
+
+func TestTranscriptStorePersistsCancellationTerminalEvent(t *testing.T) {
+	setRuntimeUserDataDir(t)
+	t.TempDir()
+	run := Run{RunID: "run_cancel", ThreadID: "thread_cancel"}
+	path := transcriptPath(run.ThreadID)
+
+	events := []Event{
+		{
+			Kind:      EventKindAgent,
+			Seq:       1,
+			Timestamp: time.Now().UTC(),
+			AgentEvent: agentcore.AwakenEvent{
+				Type:           agentcore.RunStartedEventType,
+				ThreadID:       run.ThreadID,
+				RunID:          run.RunID,
+				TerminalReason: agentcore.TerminalReasonCompleted,
+			},
+		},
+		{
+			Kind:           EventKindRunCancelled,
+			Seq:            2,
+			Timestamp:      time.Now().UTC().Add(time.Millisecond),
+			ThreadID:       run.ThreadID,
+			RunID:          run.RunID,
+			Message:        "你停止了生成本次回答",
+			Code:           "RUN_CANCELLED",
+			TerminalReason: agentcore.TerminalReasonCancelled,
+		},
+	}
+	if err := appendRunEventTranscriptAtPath(path, run, events); err != nil {
+		t.Fatalf("appendRunEventTranscript returned error: %v", err)
+	}
+
+	durableRuns, err := loadDurableTranscriptRunsAtPath(path, run.ThreadID)
+	if err != nil {
+		t.Fatalf("loadDurableTranscriptRuns returned error: %v", err)
+	}
+	durable, ok := durableRuns[run.RunID]
+	if !ok {
+		t.Fatalf("expected durable run %q, got %+v", run.RunID, durableRuns)
+	}
+	if durable.Run.Status != RunStatusCancelled {
+		t.Fatalf("expected cancelled durable run, got %+v", durable.Run)
+	}
+	if len(durable.Events) != 1 {
+		t.Fatalf("expected 1 durable event, got %+v", durable.Events)
+	}
+	terminal := durable.Events[0].AgentEvent
+	if terminal.Type != agentcore.RunErrorEventType {
+		t.Fatalf("expected terminal RunError event, got %+v", terminal)
+	}
+	if terminal.Code != "RUN_CANCELLED" {
+		t.Fatalf("expected RUN_CANCELLED code, got %q", terminal.Code)
+	}
+	if terminal.Error != "你停止了生成本次回答" {
+		t.Fatalf("expected Chinese cancel message, got %q", terminal.Error)
+	}
+}

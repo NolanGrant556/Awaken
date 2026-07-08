@@ -51,6 +51,7 @@ type Event struct {
 	Status         string
 	AgentEvent     agentcore.AwakenEvent
 	Message        string
+	Content        string
 	Code           string
 	TerminalReason agentcore.TerminalReason
 }
@@ -184,9 +185,13 @@ func (s *Session) RecordAgentEvent(event agentcore.AwakenEvent) {
 		if !s.run.CancelRequested {
 			s.run.Status = RunStatusRunning
 		}
+	case agentcore.TextDeltaEventType:
+		s.run.Result += event.Delta
 	case agentcore.RunFinishedEventType:
 		s.run.Status = RunStatusFinished
-		s.run.Result = event.Content
+		if event.Content != "" {
+			s.run.Result = event.Content
+		}
 		finishedAt := timestamp
 		s.run.FinishedAt = &finishedAt
 		terminal = true
@@ -396,7 +401,7 @@ func (s *Session) ResolveUserQuestion(questionID string, answer string) error {
 	return nil
 }
 
-func (s *Session) CompleteCancelled(message string) {
+func (s *Session) CompleteCancelled(message, result string) {
 	now := time.Now().UTC()
 	if strings.TrimSpace(message) == "" {
 		message = "你停止了生成本次回答"
@@ -408,8 +413,15 @@ func (s *Session) CompleteCancelled(message string) {
 		return
 	}
 
+	if strings.TrimSpace(s.run.Result) != "" {
+		result = strings.TrimSpace(s.run.Result)
+	} else {
+		result = strings.TrimSpace(result)
+	}
+
 	s.run.Status = RunStatusCancelled
 	s.run.Error = message
+	s.run.Result = result
 	s.run.CancelRequested = true
 	s.run.UpdatedAt = now
 	finishedAt := now
@@ -421,6 +433,7 @@ func (s *Session) CompleteCancelled(message string) {
 		RunID:          s.run.RunID,
 		Status:         string(RunStatusCancelled),
 		Message:        message,
+		Content:        result,
 		Code:           "RUN_CANCELLED",
 		TerminalReason: agentcore.TerminalReasonCancelled,
 	}
@@ -430,6 +443,7 @@ func (s *Session) CompleteCancelled(message string) {
 		ThreadID:       s.run.ThreadID,
 		RunID:          s.run.RunID,
 		Message:        message,
+		Content:        result,
 		Code:           "RUN_CANCELLED",
 		TerminalReason: agentcore.TerminalReasonCancelled,
 	}

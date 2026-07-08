@@ -125,14 +125,14 @@ func appendRunEventTranscriptAtPath(path string, run Run, events []Event) error 
 		parentMessageID = transcriptMessageID(run.ThreadID, messageCount-1)
 	}
 	for _, event := range events {
-		if event.Kind != EventKindAgent || !isRecoverableTranscriptEvent(event.AgentEvent.Type) {
+		agentEvent, ok := recoverableAgentEventForTranscript(event)
+		if !ok {
 			continue
 		}
 		id := transcriptEventID(run.ThreadID, run.RunID, event.Seq)
 		if seen[id] {
 			continue
 		}
-		agentEvent := event.AgentEvent
 		timestamp := event.Timestamp
 		if timestamp.IsZero() {
 			timestamp = agentEvent.Timestamp
@@ -523,6 +523,7 @@ func applyTerminalTranscriptEvent(run *Run, record TranscriptRecord) {
 		if event.Code == "RUN_CANCELLED" {
 			run.Status = RunStatusCancelled
 			run.Error = firstNonEmpty(strings.TrimSpace(event.Error), "run cancelled")
+			run.Result = strings.TrimSpace(event.Content)
 		} else {
 			run.Status = RunStatusError
 			run.Error = firstNonEmpty(strings.TrimSpace(event.Error), "run failed")
@@ -540,6 +541,30 @@ func firstTranscriptTerminalReason(record TranscriptRecord) agentcore.TerminalRe
 		return record.Event.TerminalReason
 	}
 	return ""
+}
+
+func recoverableAgentEventForTranscript(event Event) (agentcore.AwakenEvent, bool) {
+	switch event.Kind {
+	case EventKindAgent:
+		if !isRecoverableTranscriptEvent(event.AgentEvent.Type) {
+			return agentcore.AwakenEvent{}, false
+		}
+		return event.AgentEvent, true
+	case EventKindRunCancelled, EventKindRunError:
+		// Persist the session-level terminal event as a RunError agent event so
+		// the durable transcript can restore the run outcome after a restart.
+		return agentcore.AwakenEvent{
+			Type:           agentcore.RunErrorEventType,
+			ThreadID:       event.ThreadID,
+			RunID:          event.RunID,
+			Error:          event.Message,
+			Content:        event.Content,
+			Code:           event.Code,
+			TerminalReason: event.TerminalReason,
+		}, true
+	default:
+		return agentcore.AwakenEvent{}, false
+	}
 }
 
 func isRecoverableTranscriptEvent(eventType agentcore.AwakenEventType) bool {

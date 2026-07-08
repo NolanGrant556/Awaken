@@ -61,7 +61,7 @@ function runStatusChanged(
 }
 
 describe("projectAguiEventToNarrative", () => {
-  it("adds a footnote when a run is cancelled by the user", () => {
+  it("adds a hint item when a run is cancelled by the user", () => {
     let state = createInitialRunNarrativeState();
     state = projectAguiEventToNarrative(state, textMessageStart());
     state = projectAguiEventToNarrative(state, textMessageContent("hello"));
@@ -71,12 +71,13 @@ describe("projectAguiEventToNarrative", () => {
     const answer = state.committedItems.find((item) => item.kind === "answer");
     expect(answer).toBeDefined();
     expect(answer?.kind === "answer" && answer.status).toBe("done");
-    expect(answer?.kind === "answer" && answer.footnote).toBe(
-      "你停止了生成本次回答",
-    );
+
+    const hint = state.committedItems.find((item) => item.kind === "hint");
+    expect(hint).toBeDefined();
+    expect(hint?.kind === "hint" && hint.text).toBe("你停止了生成本次回答");
   });
 
-  it("adds a footnote from message when run status changes to cancelled", () => {
+  it("adds a hint item from message when run status changes to cancelled", () => {
     let state = createInitialRunNarrativeState();
     state = projectAguiEventToNarrative(state, textMessageStart());
     state = projectAguiEventToNarrative(state, textMessageContent("hello"));
@@ -89,12 +90,13 @@ describe("projectAguiEventToNarrative", () => {
     const answer = state.committedItems.find((item) => item.kind === "answer");
     expect(answer).toBeDefined();
     expect(answer?.kind === "answer" && answer.status).toBe("done");
-    expect(answer?.kind === "answer" && answer.footnote).toBe(
-      "你停止生成了本次回答",
-    );
+
+    const hint = state.committedItems.find((item) => item.kind === "hint");
+    expect(hint).toBeDefined();
+    expect(hint?.kind === "hint" && hint.text).toBe("你停止生成了本次回答");
   });
 
-  it("uses a default footnote when cancelled status has no message", () => {
+  it("uses a default hint text when cancelled status has no message", () => {
     let state = createInitialRunNarrativeState();
     state = projectAguiEventToNarrative(state, textMessageStart());
     state = projectAguiEventToNarrative(state, textMessageContent("hello"));
@@ -102,9 +104,10 @@ describe("projectAguiEventToNarrative", () => {
     state = projectAguiEventToNarrative(state, runStatusChanged("cancelled"));
 
     const answer = state.committedItems.find((item) => item.kind === "answer");
-    expect(answer?.kind === "answer" && answer.footnote).toBe(
-      "你停止生成了本次回答",
-    );
+    expect(answer).toBeDefined();
+
+    const hint = state.committedItems.find((item) => item.kind === "hint");
+    expect(hint?.kind === "hint" && hint.text).toBe("你停止生成了本次回答");
   });
 
   it("keeps answer content when cancelled mid-stream", () => {
@@ -116,5 +119,40 @@ describe("projectAguiEventToNarrative", () => {
 
     const answer = state.committedItems.find((item) => item.kind === "answer");
     expect(answer?.kind === "answer" && answer.markdown).toBe("partial");
+
+    const hint = state.committedItems.find((item) => item.kind === "hint");
+    expect(hint?.kind === "hint" && hint.text).toBe("你停止了生成本次回答");
+  });
+
+  it("adds a hint item after an already-committed answer when cancelled late", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, textMessageStart());
+    state = projectAguiEventToNarrative(state, textMessageContent("hello"));
+    state = projectAguiEventToNarrative(state, textMessageEnd());
+
+    state = projectAguiEventToNarrative(state, runError("RUN_CANCELLED"));
+
+    const answer = state.committedItems.find((item) => item.kind === "answer");
+    expect(answer).toBeDefined();
+    expect(answer?.kind === "answer" && answer.status).toBe("done");
+
+    const hint = state.committedItems.find((item) => item.kind === "hint");
+    expect(hint).toBeDefined();
+    expect(hint?.kind === "hint" && hint.text).toBe("你停止了生成本次回答");
+  });
+
+  it("deduplicates cancel hint items when both RUN_STATUS_CHANGED and RUN_ERROR arrive", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, textMessageStart());
+    state = projectAguiEventToNarrative(state, textMessageContent("hello"));
+
+    state = projectAguiEventToNarrative(state, runStatusChanged("cancelled"));
+    state = projectAguiEventToNarrative(state, runError("RUN_CANCELLED"));
+
+    const hints = state.committedItems.filter((item) => item.kind === "hint");
+    expect(hints).toHaveLength(1);
+    expect(hints[0]?.kind === "hint" && hints[0].text).toBe(
+      "你停止了生成本次回答",
+    );
   });
 });

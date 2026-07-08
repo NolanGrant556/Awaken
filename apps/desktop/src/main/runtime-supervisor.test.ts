@@ -11,6 +11,8 @@ vi.mock("electron", () => ({
   },
 }));
 
+const gracefulSignal = process.platform === "win32" ? "SIGINT" : "SIGTERM";
+
 class FakeChild extends EventEmitter {
   stdout = new PassThrough();
   stderr = new PassThrough();
@@ -124,7 +126,7 @@ describe("RuntimeSupervisor", () => {
     });
     expect(allocatePort).toHaveBeenCalledTimes(2);
     expect(waitForHealth).toHaveBeenCalledTimes(2);
-    expect(children[0].killedWith).toBe("SIGTERM");
+    expect(children[0].killedWith).toBe(gracefulSignal);
     expect(supervisor.getLogs()).toEqual([
       {
         id: 0,
@@ -192,7 +194,7 @@ describe("RuntimeSupervisor", () => {
       runtimeBaseUrl: "http://127.0.0.1:19002",
     });
     expect(children).toHaveLength(2);
-    expect(children[0].killedWith).toBe("SIGTERM");
+    expect(children[0].killedWith).toBe(gracefulSignal);
     expect(supervisor.getLogs()).toEqual([]);
   });
 
@@ -307,7 +309,7 @@ describe("RuntimeSupervisor", () => {
     });
     // Only the original (cancelled) child and the restart child.
     expect(children).toHaveLength(2);
-    expect(children[0].killedWith).toBe("SIGTERM");
+    expect(children[0].killedWith).toBe(gracefulSignal);
   });
 
   it("stale waitForHealth resolve does not overwrite stopped after stop()", async () => {

@@ -36,7 +36,7 @@ function syntheticResultEvents(
   run: RuntimeThreadTranscript["runs"][number]["run"],
 ): AguiEvent[] {
   const result = run.result?.trim();
-  if (!result || run.status !== "finished") {
+  if (!result || (run.status !== "finished" && run.status !== "cancelled")) {
     return [];
   }
 

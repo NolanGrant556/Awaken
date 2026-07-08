@@ -17,6 +17,7 @@ import {
   shouldShowSidebarThreadSpinner,
 } from "./App";
 import { composerRuntimePanelsForStatus } from "./useComposerLifecycle";
+import { promptAttachmentViews } from "./composerAttachments";
 import type { RunNarrativeItem } from "./run-narrative";
 import {
   DEFAULT_WORKSPACE_PROJECT_ID,
@@ -98,6 +99,7 @@ function stubElectronBridge(): void {
       testModelProfile: vi.fn(async () => ({ ok: true, message: "ok" })),
       syncModelCapabilities: vi.fn(async () => []),
       getModelProfileBalances: vi.fn(async () => ({ balances: [] })),
+      pickAttachments: vi.fn(async () => ({ canceled: true as const })),
       pickDirectory: vi.fn(async () => ({ canceled: true as const })),
       pickWorkspace: vi.fn(async () => ({ canceled: true as const })),
       validateWorkspace: vi.fn(async () => ({ valid: true as const })),
@@ -407,15 +409,27 @@ describe("AwakenComposerBar layout contract", () => {
             alt: "clip.png",
             mimeType: "image/png",
           },
+          {
+            id: "file-1",
+            kind: "file",
+            alt: "specification.pdf",
+            label: "specification.pdf",
+            detail: "PDF · 24 KB",
+            tooltip: "specification.pdf\n类型: PDF\n大小: 24 KB",
+            extension: "PDF",
+            mimeType: "application/pdf",
+          },
         ],
-        attachmentWarning: "当前模型不支持图片输入，请切换模型或移除图片",
+        attachmentWarning: "部分附件暂时无法读取",
       }),
     );
 
     expect(html).toContain("composer-bar-attachments");
     expect(html).toContain("clip.png");
+    expect(html).toContain("composer-bar-file-card");
+    expect(html).toContain("specification.pdf");
     expect(html).toContain("composer-bar-attachment-warning");
-    expect(html).toContain("当前模型不支持图片输入");
+    expect(html).toContain("部分附件暂时无法读取");
   });
 });
 
@@ -483,6 +497,61 @@ describe("AwakenUserPromptBlock layout contract", () => {
     expect(html).toContain('role="button"');
   });
 
+  it("renders prompt file attachments as compact file cards", () => {
+    const html = renderToString(
+      React.createElement(AwakenUserPromptBlock, {
+        text: "Read this document",
+        attachments: [
+          {
+            id: "attachment-1",
+            kind: "file",
+            alt: "analysis.xlsx",
+            label: "analysis.xlsx",
+            detail: "Excel · 16 KB",
+            tooltip: "analysis.xlsx\n类型: Excel\n大小: 16 KB",
+            extension: "XLSX",
+          },
+        ],
+      }),
+    );
+
+    expect(html).toContain("execution-prompt-bubble-attachments");
+    expect(html).toContain("execution-prompt-bubble-file-card");
+    expect(html).toContain("analysis.xlsx");
+    expect(html).toContain("XLSX");
+  });
+
+  it("collapses extra prompt attachments behind an expand affordance", () => {
+    const attachments = Array.from({ length: 5 }, (_, index) => ({
+      id: `attachment-${index + 1}`,
+      kind: "file" as const,
+      alt: `file-${index + 1}.xlsx`,
+      label: `file-${index + 1}.xlsx`,
+      extension: "XLSX",
+    }));
+
+    const collapsedHtml = renderToString(
+      React.createElement(AwakenUserPromptBlock, {
+        text: "这些附件",
+        attachments,
+      }),
+    );
+    expect(collapsedHtml).toContain("execution-prompt-bubble-attachment-more");
+    expect(collapsedHtml).toContain("还有 2 个附件");
+    expect(collapsedHtml).toContain("file-3.xlsx");
+    expect(collapsedHtml).not.toContain("file-4.xlsx");
+
+    const expandedHtml = renderToString(
+      React.createElement(AwakenUserPromptBlock, {
+        text: "这些附件",
+        attachments,
+        expanded: true,
+      }),
+    );
+    expect(expandedHtml).not.toContain("execution-prompt-bubble-attachment-more");
+    expect(expandedHtml).toContain("file-5.xlsx");
+  });
+
   it("shows the prompt toolbar for short prompts once expanded", () => {
     const html = renderToString(
       React.createElement(AwakenUserPromptBlock, {
@@ -493,6 +562,30 @@ describe("AwakenUserPromptBlock layout contract", () => {
 
     expect(html).toContain("execution-prompt-bubble-toolbar");
     expect(html).toContain("Copy prompt");
+  });
+});
+
+describe("prompt attachment view models", () => {
+  it("preserves file attachment metadata for compact cards", () => {
+    const views = promptAttachmentViews([
+      {
+        id: "file-1",
+        kind: "file",
+        mimeType: "application/pdf",
+        path: "/Users/nolangrant/Desktop/specification.pdf",
+        displayName: "specification.pdf",
+        byteSize: 24 * 1024,
+      },
+    ]);
+
+    expect(views).toHaveLength(1);
+    expect(views[0]).toMatchObject({
+      kind: "file",
+      label: "specification.pdf",
+      detail: "PDF · 24 KB",
+      extension: "PDF",
+    });
+    expect(views[0]?.tooltip).toContain("路径: .../nolangrant/Desktop/specification.pdf");
   });
 });
 

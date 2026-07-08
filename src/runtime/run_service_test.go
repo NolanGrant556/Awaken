@@ -476,7 +476,7 @@ func TestRunServiceAllowsImageOnlyInputWhenModelSupportsVision(t *testing.T) {
 	waitForRunTerminal(t, service, run.RunID)
 }
 
-func TestRunServiceRejectsImageInputWhenModelDoesNotSupportVision(t *testing.T) {
+func TestRunServiceDoesNotBlockImageInputOnProfileVisionFlag(t *testing.T) {
 	t.Setenv(runtimeUserDataDirEnv, t.TempDir())
 	service := NewRunServiceWithModelProfiles(
 		func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent {
@@ -489,7 +489,7 @@ func TestRunServiceRejectsImageInputWhenModelDoesNotSupportVision(t *testing.T) 
 		},
 	)
 
-	_, err := service.StartRun(StartRunRequest{
+	run, err := service.StartRun(StartRunRequest{
 		Input: "",
 		Attachments: []RunInputAttachment{{
 			ID:         "image-1",
@@ -509,9 +509,58 @@ func TestRunServiceRejectsImageInputWhenModelDoesNotSupportVision(t *testing.T) 
 			SupportsVision: false,
 		},
 	})
-	if !errors.Is(err, ErrUnsupportedInputAttachment) {
-		t.Fatalf("expected ErrUnsupportedInputAttachment, got %v", err)
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
 	}
+	waitForRunTerminal(t, service, run.RunID)
+}
+
+func TestRunServiceAllowsManyFileAttachmentsAndMergesTaskScope(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	externalDir := t.TempDir()
+	attachments := make([]RunInputAttachment, 0, 6)
+	for i := 0; i < 6; i++ {
+		filePath := filepath.Join(externalDir, "attachment-"+string(rune('a'+i))+".txt")
+		if err := os.WriteFile(filePath, []byte("hello"), 0o600); err != nil {
+			t.Fatalf("WriteFile returned error: %v", err)
+		}
+		attachments = append(attachments, RunInputAttachment{
+			ID:          "file-" + string(rune('a'+i)),
+			Kind:        RunInputAttachmentKindFile,
+			MimeType:    "text/plain",
+			Path:        filePath,
+			DisplayName: filepath.Base(filePath),
+		})
+	}
+
+	var gotWorkspace WorkspaceConfig
+	service := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			gotWorkspace = workspace
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return "done", nil
+			})
+		},
+	)
+
+	run, err := service.StartRun(StartRunRequest{
+		Input:       "read attachments",
+		Attachments: attachments,
+		Workspace:   WorkspaceConfig{WorkspaceRoot: workspaceRoot},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	if len(run.InputAttachments) != len(attachments) {
+		t.Fatalf("expected %d input attachments, got %d", len(attachments), len(run.InputAttachments))
+	}
+	if len(gotWorkspace.AttachedFiles) != len(attachments) {
+		t.Fatalf("expected %d task-scope attachments, got %+v", len(attachments), gotWorkspace.AttachedFiles)
+	}
+	waitForRunTerminal(t, service, run.RunID)
 }
 
 func TestStartRunValidWorkspaceStartsRun(t *testing.T) {

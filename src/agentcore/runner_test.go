@@ -768,8 +768,13 @@ data: {"type":"message_stop"}`,
 	}
 }
 
-func TestRunnerReadOnlyToolOutsideWorkspaceFeedsErrorBack(t *testing.T) {
+func TestRunnerReadOnlyToolOutsideWorkspaceFeedsResultBack(t *testing.T) {
 	workspaceRoot := t.TempDir()
+	outsideRoot := t.TempDir()
+	outsideFile := filepath.Join(outsideRoot, "outside.txt")
+	if err := os.WriteFile(outsideFile, []byte("outside content"), 0644); err != nil {
+		t.Fatalf("failed to write outside file: %v", err)
+	}
 
 	var calls int
 	server := newRunnerAnthropicStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -780,8 +785,8 @@ func TestRunnerReadOnlyToolOutsideWorkspaceFeedsErrorBack(t *testing.T) {
 data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_outside","name":"read_file"}}`,
 				`event: content_block_delta
 data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{"}}`,
-				`event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"path\":\"/etc/hosts\""}}`,
+				fmt.Sprintf(`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":%s}}`, quoteJSONStringForStream(outsideFile)),
 				`event: content_block_delta
 data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"}"}}`,
 				`event: content_block_stop
@@ -838,10 +843,8 @@ data: {"type":"message_stop"}`,
 	if sawAuthRequired {
 		t.Fatalf("unexpected auth requirement for read-only tool")
 	}
-	if !strings.Contains(toolResultContent, "outside workspace") &&
-		!strings.Contains(toolResultContent, "outside readable roots") &&
-		!strings.Contains(toolResultContent, "permission") {
-		t.Fatalf("expected tool result to contain scope denial, got %q", toolResultContent)
+	if !strings.Contains(toolResultContent, "outside content") {
+		t.Fatalf("expected tool result to contain outside file content, got %q", toolResultContent)
 	}
 
 	messages := agent.GetConversation().Context.GetMessages()
@@ -854,10 +857,15 @@ data: {"type":"message_stop"}`,
 	if messages[2].Role != convcontext.RoleTool || messages[2].ToolCallID != "toolu_outside" {
 		t.Fatalf("expected tool result message, got %+v", messages[2])
 	}
-	if !strings.Contains(messages[2].Content, "outside workspace") &&
-		!strings.Contains(messages[2].Content, "outside readable roots") {
-		t.Fatalf("expected tool result content to contain denial, got %q", messages[2].Content)
+	if !strings.Contains(messages[2].Content, "outside content") {
+		t.Fatalf("expected tool result content to contain outside file content, got %q", messages[2].Content)
 	}
+}
+
+func quoteJSONStringForStream(value string) string {
+	encodedValue, _ := json.Marshal(value)
+	encodedPartial, _ := json.Marshal(`"path":` + string(encodedValue))
+	return string(encodedPartial)
 }
 
 func TestRunnerRunStreamWithEventsPlainQA(t *testing.T) {

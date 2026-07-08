@@ -31,17 +31,13 @@ func (a TrashAdapterMac) TrashPath(path string) (TrashResult, error) {
 		return TrashResult{}, fmt.Errorf("trash: resolve absolute path for %q: %w", path, err)
 	}
 
-	info, err := os.Stat(absPath)
+	_, err = os.Stat(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return TrashResult{}, fmt.Errorf("trash: path does not exist: %s", absPath)
 		}
 		return TrashResult{}, fmt.Errorf("trash: stat %s: %w", absPath, err)
 	}
-	if info.IsDir() {
-		return TrashResult{}, fmt.Errorf("trash: refusing to trash directory %s (only files are supported)", absPath)
-	}
-
 	trashDir := a.trashDir
 	if trashDir == "" {
 		home, err := os.UserHomeDir()

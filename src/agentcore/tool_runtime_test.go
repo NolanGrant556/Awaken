@@ -435,7 +435,7 @@ func TestApplyPatchFileChainRelaxation(t *testing.T) {
 // Do NOT run this from a sub-agent; launch the Desktop app per the root
 // README and drive it from the UI.
 
-func TestDefaultAutoToolPolicyTransformsShellEchoWrite(t *testing.T) {
+func TestDefaultAutoToolPolicyAllowsShellEchoWrite(t *testing.T) {
 	workspace := t.TempDir()
 	normalizedInput := `{"command":"echo \"hello\" > ./file.txt"}`
 
@@ -449,24 +449,21 @@ func TestDefaultAutoToolPolicyTransformsShellEchoWrite(t *testing.T) {
 		IsOpenWorld:     true,
 	})
 
-	if decision.Action != ToolDecisionTransform {
-		t.Fatalf("expected transform action, got %+v", decision)
+	if decision.Action != ToolDecisionAllow {
+		t.Fatalf("expected allow action, got %+v", decision)
 	}
-	if decision.Source != ToolDecisionSourceTransform {
-		t.Fatalf("expected transform source, got %q", decision.Source)
+	if decision.Source != ToolDecisionSourceToolRule {
+		t.Fatalf("expected tool_rule source, got %q", decision.Source)
 	}
-	if decision.UpdatedToolName != "apply_patch" {
-		t.Fatalf("expected UpdatedToolName=apply_patch, got %q", decision.UpdatedToolName)
+	if decision.UpdatedToolName != "" {
+		t.Fatalf("expected no UpdatedToolName, got %q", decision.UpdatedToolName)
 	}
-	if !strings.Contains(decision.UpdatedInput, "*** Add File: file.txt") {
-		t.Fatalf("expected UpdatedInput to contain Add File for file.txt, got %q", decision.UpdatedInput)
-	}
-	if !strings.Contains(decision.UpdatedInput, "+hello") {
-		t.Fatalf("expected UpdatedInput to contain +hello, got %q", decision.UpdatedInput)
+	if decision.UpdatedInput != normalizedInput {
+		t.Fatalf("expected original UpdatedInput, got %q", decision.UpdatedInput)
 	}
 }
 
-func TestDefaultAutoToolPolicyDeniesOpenWorldShellCommand(t *testing.T) {
+func TestDefaultAutoToolPolicyAllowsOpenWorldShellCommand(t *testing.T) {
 	workspace := t.TempDir()
 	normalizedInput := `{"command":"curl http://example.com > file"}`
 
@@ -481,15 +478,15 @@ func TestDefaultAutoToolPolicyDeniesOpenWorldShellCommand(t *testing.T) {
 		IsDestructive:   true,
 	})
 
-	if decision.Action != ToolDecisionDeny {
-		t.Fatalf("expected deny action for open-world shell command, got %+v", decision)
+	if decision.Action != ToolDecisionAllow {
+		t.Fatalf("expected allow action for open-world shell command, got %+v", decision)
 	}
-	if !strings.Contains(decision.Reason, "apply_patch") {
-		t.Fatalf("expected reason to suggest apply_patch, got %q", decision.Reason)
+	if decision.Source != ToolDecisionSourceToolRule {
+		t.Fatalf("expected tool_rule source, got %q", decision.Source)
 	}
 }
 
-func TestDefaultAutoToolPolicyDeniesNonTransformableShellMutation(t *testing.T) {
+func TestDefaultAutoToolPolicyAllowsNonTransformableShellMutation(t *testing.T) {
 	workspace := t.TempDir()
 	normalizedInput := `{"command":"sed -i 's/a/b/' file.txt"}`
 
@@ -503,11 +500,11 @@ func TestDefaultAutoToolPolicyDeniesNonTransformableShellMutation(t *testing.T) 
 		IsOpenWorld:     true,
 	})
 
-	if decision.Action != ToolDecisionDeny {
-		t.Fatalf("expected deny action for non-transformable mutation, got %+v", decision)
+	if decision.Action != ToolDecisionAllow {
+		t.Fatalf("expected allow action for non-transformable mutation, got %+v", decision)
 	}
-	if !strings.Contains(decision.Reason, "apply_patch") {
-		t.Fatalf("expected reason to suggest apply_patch, got %q", decision.Reason)
+	if decision.Source != ToolDecisionSourceToolRule {
+		t.Fatalf("expected tool_rule source, got %q", decision.Source)
 	}
 }
 
@@ -516,14 +513,13 @@ func TestDefaultAutoToolPolicyAllowsSupportedShellLanes(t *testing.T) {
 	cases := []struct {
 		name    string
 		command string
-		lane    string
 	}{
-		{"mkdir", "mkdir -p reports", "workspace_fs"},
-		{"touch", "touch reports.md", "workspace_fs"},
-		{"go test", "go test ./...", "test_build_codegen"},
-		{"npm build", "npm run build", "test_build_codegen"},
-		{"dws search", `dws aitable base search --query "DVF" --format json`, "local_cli"},
-		{"gh issue list", "gh issue list --limit 10", "local_cli"},
+		{"mkdir", "mkdir -p reports"},
+		{"touch", "touch reports.md"},
+		{"go test", "go test ./..."},
+		{"npm build", "npm run build"},
+		{"dws search", `dws aitable base search --query "DVF" --format json`},
+		{"gh issue list", "gh issue list --limit 10"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -540,8 +536,8 @@ func TestDefaultAutoToolPolicyAllowsSupportedShellLanes(t *testing.T) {
 			if decision.Action != ToolDecisionAllow {
 				t.Fatalf("expected allow for %q, got %+v", tc.command, decision)
 			}
-			if !strings.Contains(decision.Reason, tc.lane) {
-				t.Fatalf("expected reason to include lane %q, got %q", tc.lane, decision.Reason)
+			if decision.Reason != "local shell command allowed" {
+				t.Fatalf("expected generic local shell reason, got %q", decision.Reason)
 			}
 		})
 	}
@@ -565,7 +561,7 @@ func TestDefaultAutoToolPolicyAllowsShellNullDeviceRedirectProbe(t *testing.T) {
 	}
 }
 
-func TestDefaultAutoToolPolicyDeniesShellSensitiveRead(t *testing.T) {
+func TestDefaultAutoToolPolicyAllowsShellSensitiveRead(t *testing.T) {
 	workspace := t.TempDir()
 	decision := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
 		ToolName:        "shell",
@@ -578,8 +574,8 @@ func TestDefaultAutoToolPolicyDeniesShellSensitiveRead(t *testing.T) {
 		IsOpenWorld:     true,
 	})
 
-	if decision.Action != ToolDecisionDeny {
-		t.Fatalf("expected deny for sensitive read, got %+v", decision)
+	if decision.Action != ToolDecisionAllow {
+		t.Fatalf("expected allow for sensitive read through local shell, got %+v", decision)
 	}
 }
 
@@ -632,9 +628,9 @@ func TestDefaultAutoToolPolicyDoesNotTransformInsideTransformChain(t *testing.T)
 // --- DecideExecution tests (Task 9) ---
 //
 // These verify that DefaultAutoToolPolicy.DecideExecution produces correct
-// ExecutionDecision outputs for the four scenarios required by the spec:
-// allow (apply_patch write), deny (sensitive path), transform (shell echo
-// write), and deny (open-world shell).
+// ExecutionDecision outputs for the key scenarios required by the spec:
+// allow (apply_patch write), deny (sensitive path), allow (shell echo write),
+// and allow (open-world shell).
 
 func TestDecideExecution_AllowsApplyPatchWrite(t *testing.T) {
 	workspace := t.TempDir()
@@ -704,7 +700,7 @@ func TestDecideExecution_DeniesSensitivePath(t *testing.T) {
 	}
 }
 
-func TestDecideExecution_TransformsShellEchoWrite(t *testing.T) {
+func TestDecideExecution_AllowsShellEchoWrite(t *testing.T) {
 	workspace := t.TempDir()
 	intent := profile.ExecutionIntent{
 		ToolName:        "shell",
@@ -726,31 +722,27 @@ func TestDecideExecution_TransformsShellEchoWrite(t *testing.T) {
 
 	decision := DefaultAutoToolPolicy{}.DecideExecution(context.Background(), intent, request)
 
-	if decision.Action != profile.DecisionTransform {
-		t.Fatalf("expected transform, got %s: %+v", decision.Action, decision)
+	if decision.Action != profile.DecisionAllow {
+		t.Fatalf("expected allow, got %s: %+v", decision.Action, decision)
 	}
-	if decision.Source != profile.DecisionSourceTransform {
-		t.Fatalf("expected transform source, got %s", decision.Source)
+	if decision.Source != profile.DecisionSourceToolRule {
+		t.Fatalf("expected tool_rule source, got %s", decision.Source)
 	}
-	if decision.UpdatedToolName != "apply_patch" {
-		t.Fatalf("expected UpdatedToolName=apply_patch, got %q", decision.UpdatedToolName)
+	if decision.UpdatedToolName != "" {
+		t.Fatalf("expected no UpdatedToolName, got %q", decision.UpdatedToolName)
 	}
-	if decision.UpdatedInput == nil {
-		t.Fatal("UpdatedInput should not be nil for transform")
-	}
-	patch, _ := decision.UpdatedInput["patch"].(string)
-	if !strings.Contains(patch, "*** Add File: file.txt") {
-		t.Fatalf("expected patch to contain Add File for file.txt, got %q", patch)
-	}
-	if !strings.Contains(patch, "+hello") {
-		t.Fatalf("expected patch to contain +hello, got %q", patch)
+	if decision.UpdatedInput != nil {
+		t.Fatalf("expected no UpdatedInput for shell allow, got %+v", decision.UpdatedInput)
 	}
 	if decision.UpdatedIntent == nil {
-		t.Fatal("UpdatedIntent should not be nil for transform")
+		t.Fatal("UpdatedIntent should not be nil for allow")
+	}
+	if decision.UpdatedIntent.ToolName != "shell" {
+		t.Fatalf("expected UpdatedIntent.ToolName=shell, got %q", decision.UpdatedIntent.ToolName)
 	}
 }
 
-func TestDecideExecution_DeniesOpenWorldShell(t *testing.T) {
+func TestDecideExecution_AllowsOpenWorldShell(t *testing.T) {
 	workspace := t.TempDir()
 	intent := profile.ExecutionIntent{
 		ToolName:        "shell",
@@ -773,11 +765,11 @@ func TestDecideExecution_DeniesOpenWorldShell(t *testing.T) {
 
 	decision := DefaultAutoToolPolicy{}.DecideExecution(context.Background(), intent, request)
 
-	if decision.Action != profile.DecisionDeny {
-		t.Fatalf("expected deny, got %s: %+v", decision.Action, decision)
+	if decision.Action != profile.DecisionAllow {
+		t.Fatalf("expected allow, got %s: %+v", decision.Action, decision)
 	}
-	if !strings.Contains(decision.Reason, "apply_patch") {
-		t.Fatalf("expected reason to suggest apply_patch, got %q", decision.Reason)
+	if decision.Source != profile.DecisionSourceToolRule {
+		t.Fatalf("expected tool_rule source, got %s", decision.Source)
 	}
 }
 

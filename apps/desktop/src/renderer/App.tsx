@@ -95,13 +95,13 @@ import { ModelSettingsDialog } from "./ModelSettingsDialog";
 import { ProfileBalancePopover } from "./ProfileBalancePopover";
 import { ExtensionsView, type ExtensionSection } from "./ExtensionsView";
 import {
-  MAX_COMPOSER_IMAGE_ATTACHMENTS,
   MAX_COMPOSER_IMAGE_BYTES,
   SUPPORTED_COMPOSER_IMAGE_MIME_TYPES,
+  composerAttachmentViews,
+  composerDraftAttachmentFromPickedFile,
   type ComposerDraftAttachment,
   promptAttachmentViews,
   readComposerDraftImageAttachment,
-  supportsVisionForProfile,
   toRunInputAttachment,
 } from "./composerAttachments";
 
@@ -567,7 +567,7 @@ function composerThreadLabel(
   const attachmentName = attachments
     .map((attachment) => attachment.displayName?.trim())
     .find(Boolean);
-  return attachmentName || "Image prompt";
+  return attachmentName || "附件任务";
 }
 
 const DEFAULT_SIDEBAR_WIDTH = 300;
@@ -1179,12 +1179,6 @@ export function App() {
     ) ??
     enabledModelProfiles.find((profile) => profile.isDefault) ??
     enabledModelProfiles[0];
-  const selectedModelSupportsVision =
-    supportsVisionForProfile(selectedModelProfile);
-  const composerAttachmentWarning =
-    composerAttachments.length > 0 && !selectedModelSupportsVision
-      ? "当前模型不支持图片输入，请切换模型或移除图片"
-      : undefined;
   const defaultWorkspacePath = runtimeInfo?.defaultWorkspace ?? workspacePath;
   const effectiveDefaultWorkspacePath = defaultProjectRemoved
     ? undefined
@@ -1240,7 +1234,7 @@ export function App() {
     isBusy,
     isWorkspaceValid,
     hasAttachments: composerAttachments.length > 0,
-    inputAttachmentBlocked: Boolean(composerAttachmentWarning),
+    inputAttachmentBlocked: false,
     runtimeErrorMessage: runtimeState.errorMessage,
   });
 
@@ -1743,7 +1737,7 @@ export function App() {
     }));
     const runInputAttachments = draftAttachments.map(toRunInputAttachment);
     if (!prompt && runInputAttachments.length === 0) {
-      setNotice("请输入内容或粘贴图片");
+      setNotice("请输入内容或添加附件");
       return;
     }
     if (isBusy) {
@@ -1767,11 +1761,6 @@ export function App() {
       setNotice(validation.error);
       return;
     }
-    if (composerAttachmentWarning) {
-      setNotice(composerAttachmentWarning);
-      return;
-    }
-
     unsubscribeRef.current?.();
     unsubscribeRef.current = null;
     threadLoadSeqRef.current += 1;
@@ -1790,6 +1779,12 @@ export function App() {
     try {
       const runProjectId = selectedProjectId ?? DEFAULT_WORKSPACE_PROJECT_ID;
       const nextThreadLabel = composerThreadLabel(prompt, draftAttachments);
+      const attachedFiles = runInputAttachments
+        .filter((attachment) => attachment.kind === "file" && attachment.path)
+        .map((attachment) => ({
+          path: attachment.path ?? "",
+          displayName: attachment.displayName,
+        }));
       const startRunRequest: StartRunRequest = {
         input: prompt,
         attachments: runInputAttachments,
@@ -1799,6 +1794,7 @@ export function App() {
           readableRoots: workspaceRoot ? [workspaceRoot] : [],
           writableRoots: workspaceRoot ? [workspaceRoot] : [],
           outputRoots: workspaceRoot ? [workspaceRoot] : [],
+          attachedFiles: attachedFiles.length > 0 ? attachedFiles : undefined,
         },
         client: {
           sessionId: window.crypto.randomUUID(),
@@ -2303,8 +2299,31 @@ export function App() {
     });
   }
 
-  function handleAddContext(): void {
-    setNotice("Context picker is not wired yet.");
+  async function handleAddContext(): Promise<void> {
+    if (composerBarState.disabled) {
+      return;
+    }
+    setNotice(null);
+    try {
+      const result = await runtimeClient.pickAttachments(
+        workspaceRootForRun || defaultWorkspacePath,
+      );
+      if (result.canceled) {
+        if (result.error) {
+          setNotice(result.error);
+        }
+        return;
+      }
+      const nextAttachments = result.files.map(
+        composerDraftAttachmentFromPickedFile,
+      );
+      setComposerAttachments((current) => [...current, ...nextAttachments]);
+      if (result.errors?.length) {
+        setNotice(result.errors.slice(0, 3).join("；"));
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "添加附件失败");
+    }
   }
 
   async function handlePasteImages(files: File[]): Promise<void> {
@@ -2312,13 +2331,6 @@ export function App() {
       return;
     }
     setNotice(null);
-    if (
-      composerAttachments.length + files.length >
-      MAX_COMPOSER_IMAGE_ATTACHMENTS
-    ) {
-      setNotice(`最多只能添加 ${MAX_COMPOSER_IMAGE_ATTACHMENTS} 张图片`);
-      return;
-    }
     const unsupportedFile = files.find(
       (file) =>
         !SUPPORTED_COMPOSER_IMAGE_MIME_TYPES.includes(
@@ -2634,13 +2646,7 @@ export function App() {
   }
 
   const platform = runtimeClient.platform as PlatformKind;
-  const composerBarAttachments = composerAttachments.map((attachment) => ({
-    id: attachment.id,
-    kind: "image" as const,
-    src: attachment.previewURL,
-    alt: attachment.displayName || "Pasted image",
-    mimeType: attachment.mimeType,
-  }));
+  const composerBarAttachments = composerAttachmentViews(composerAttachments);
   const layoutStyle = {
     "--aw-sidebar-width": `${sidebarWidth}px`,
     "--aw-inspector-width": `${inspectorWidth}px`,
@@ -2984,7 +2990,6 @@ export function App() {
                                 metaItems={composerMetaItems}
                                 focusRequest={composerFocusRequest}
                                 attachments={composerBarAttachments}
-                                attachmentWarning={composerAttachmentWarning}
                                 onRemoveAttachment={
                                   handleRemoveComposerAttachment
                                 }
@@ -3019,7 +3024,6 @@ export function App() {
                             metaItems={composerMetaItems}
                             focusRequest={composerFocusRequest}
                             attachments={composerBarAttachments}
-                            attachmentWarning={composerAttachmentWarning}
                             onRemoveAttachment={handleRemoveComposerAttachment}
                             onPasteImages={(files) => {
                               void handlePasteImages(files);

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -301,14 +302,7 @@ func (c PermissionContext) IsWithinWorkspace(path string) bool {
 }
 
 func (c PermissionContext) IsWithinReadableRoots(path string) bool {
-	normalized := c.Normalize()
-	resolved := normalized.resolvePath(path)
-	for _, root := range normalized.ReadableRoots {
-		if PathWithinRoot(resolved, root) {
-			return true
-		}
-	}
-	return normalized.matchesAttachedFile(resolved)
+	return true
 }
 
 func (c PermissionContext) IsWithinWritableRoots(path string) bool {
@@ -353,27 +347,11 @@ func (c PermissionContext) IsWithinWritableRootsResolved(path string) bool {
 	return false
 }
 
-// IsWithinReadableRootsResolved resolves symlinks on both the path and the
-// readable roots before checking boundary. Attached files are allowed when the
-// resolved path matches a declared attached file (or falls under an attached
-// directory).
+// IsWithinReadableRootsResolved is retained for older read-tool call sites.
+// Local read tools no longer use readable_roots as a permission boundary; the
+// resolver below normalizes local paths and maps attached-file display names.
 func (c PermissionContext) IsWithinReadableRootsResolved(path string) bool {
-	normalized := c.Normalize()
-	resolved := normalized.resolvePath(path)
-	realPath, err := filepath.EvalSymlinks(resolved)
-	if err != nil {
-		return false
-	}
-	for _, root := range normalized.ReadableRoots {
-		realRoot, err := filepath.EvalSymlinks(root)
-		if err != nil {
-			continue
-		}
-		if PathWithinRoot(realPath, realRoot) {
-			return true
-		}
-	}
-	return normalized.matchesResolvedAttachedFile(realPath)
+	return true
 }
 
 func (c PermissionContext) WorkspaceRootOrCWD() string {
@@ -402,34 +380,18 @@ func (c PermissionContext) IsWithinWorkspaceResolved(path string) bool {
 	return PathWithinRoot(realPath, realRoot)
 }
 
-// ResolveReadablePathChecked returns the cleaned path if its symlink-resolved
-// target is within readable roots (or matches an attached file / attached
-// directory). Otherwise it returns an error describing the boundary violation
-// (including symlink escapes).
+// ResolveReadablePathChecked resolves a local read path without enforcing a
+// readable_roots boundary. If the caller supplies an attached file's display
+// name or basename, it returns the attached file's real local path.
 func (c PermissionContext) ResolveReadablePathChecked(path string) (string, error) {
 	normalized := c.Normalize()
-	resolved := normalized.resolvePath(path)
-	realPath, err := filepath.EvalSymlinks(resolved)
-	if err != nil {
-		return "", fmt.Errorf("cannot resolve path %q: %w", path, err)
+	if attachedPath, ok, err := normalized.resolveAttachedFileReference(path); ok || err != nil {
+		return attachedPath, err
 	}
-	for _, root := range normalized.ReadableRoots {
-		realRoot, err := filepath.EvalSymlinks(root)
-		if err != nil {
-			continue
-		}
-		if PathWithinRoot(realPath, realRoot) {
-			return resolved, nil
-		}
-	}
-	if normalized.matchesResolvedAttachedFile(realPath) {
-		return resolved, nil
-	}
-	return "", fmt.Errorf("path %q resolves to %q which is outside readable roots", path, realPath)
+	return normalized.resolvePath(path), nil
 }
 
-// ResolvePathChecked preserves the historical API name but now enforces the
-// task scope's readable roots rather than only workspace_root.
+// ResolvePathChecked preserves the historical API name for read-tool callers.
 func (c PermissionContext) ResolvePathChecked(path string) (string, error) {
 	return c.ResolveReadablePathChecked(path)
 }
@@ -694,6 +656,74 @@ func (c PermissionContext) resolvePath(path string) string {
 		return filepath.Clean(path)
 	}
 	return filepath.Clean(abs)
+}
+
+func (c PermissionContext) resolveAttachedFileReference(path string) (string, bool, error) {
+	raw := strings.TrimSpace(path)
+	if raw == "" || filepath.IsAbs(expandTilde(raw)) {
+		return "", false, nil
+	}
+
+	matches := make([]ScopedFile, 0, 1)
+	seen := make(map[string]struct{})
+	for _, attachment := range c.AttachedFiles {
+		if !attachedFileReferenceMatches(raw, attachment) {
+			continue
+		}
+		if _, ok := seen[attachment.Path]; ok {
+			continue
+		}
+		seen[attachment.Path] = struct{}{}
+		matches = append(matches, attachment)
+	}
+	switch len(matches) {
+	case 0:
+		return "", false, nil
+	case 1:
+		return matches[0].Path, true, nil
+	default:
+		paths := make([]string, 0, len(matches))
+		for _, match := range matches {
+			paths = append(paths, match.Path)
+		}
+		sort.Strings(paths)
+		return "", true, fmt.Errorf("附件名 %q 匹配到多个文件，请使用完整路径: %s", raw, strings.Join(paths, ", "))
+	}
+}
+
+func attachedFileReferenceMatches(query string, attachment ScopedFile) bool {
+	queryAlias := cleanAttachedFileAlias(query)
+	if queryAlias == "" {
+		return false
+	}
+	queryBase := cleanAttachedFileAlias(filepath.Base(queryAlias))
+	queryHasSeparator := strings.ContainsAny(query, `/\`)
+	for _, candidate := range []string{attachment.DisplayName, filepath.Base(attachment.Path)} {
+		candidateAlias := cleanAttachedFileAlias(candidate)
+		if candidateAlias == "" {
+			continue
+		}
+		if queryAlias == candidateAlias {
+			return true
+		}
+		if !queryHasSeparator && queryBase == cleanAttachedFileAlias(filepath.Base(candidateAlias)) {
+			return true
+		}
+	}
+	return false
+}
+
+func cleanAttachedFileAlias(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	value = strings.ReplaceAll(value, `\`, string(filepath.Separator))
+	value = filepath.Clean(filepath.FromSlash(value))
+	if value == "." {
+		return ""
+	}
+	return value
 }
 
 func (c PermissionContext) matchesAttachedFile(path string) bool {

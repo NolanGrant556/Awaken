@@ -1,5 +1,6 @@
 import type { AguiEvent } from "./agui";
 import {
+  type AttachmentPickResult,
   type AwakenBridge,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
@@ -88,6 +89,7 @@ export type RuntimeClient = {
     handlers: SubscribeHandlers,
     afterSeq?: number,
   ) => Promise<() => void>;
+  pickAttachments: (defaultPath?: string) => Promise<AttachmentPickResult>;
   pickDirectory: (defaultPath?: string) => Promise<WorkspacePickResult>;
   pickWorkspace: (defaultPath?: string) => Promise<WorkspacePickResult>;
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
@@ -260,6 +262,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
         }
       };
     },
+    pickAttachments: (defaultPath) => bridge.pickAttachments(defaultPath),
     pickDirectory: (defaultPath) => bridge.pickDirectory(defaultPath),
     pickWorkspace: (defaultPath) => bridge.pickWorkspace(defaultPath),
     validateWorkspace: (path) => bridge.validateWorkspace(path),

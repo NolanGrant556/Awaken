@@ -12,9 +12,8 @@ import (
 )
 
 const (
-	maxRunInputAttachments        = 4
-	maxRunInputAttachmentBytes    = 8 * 1024 * 1024
-	defaultImagePromptThreadLabel = "Image prompt"
+	maxRunInputAttachmentBytes        = 8 * 1024 * 1024
+	defaultInputAttachmentThreadLabel = "附件任务"
 )
 
 const runtimeUserDataDirEnv = "AWAKEN_USER_DATA_DIR"
@@ -241,9 +240,6 @@ func validateRunInputAttachments(attachments []RunInputAttachment) error {
 	if len(attachments) == 0 {
 		return nil
 	}
-	if len(attachments) > maxRunInputAttachments {
-		return fmt.Errorf("%w: 最多只能附加 %d 个文件", ErrInvalidInput, maxRunInputAttachments)
-	}
 	for _, attachment := range attachments {
 		if _, _, _, err := normalizeRunInputAttachment(attachment); err != nil {
 			return err
@@ -325,26 +321,6 @@ func runInputAttachmentRootDir() string {
 	return filepath.Join(os.TempDir(), "awaken-runtime-input-attachments")
 }
 
-func validateVisionSupport(profile *ModelProfileConfig, attachments []RunInputAttachment) error {
-	if len(attachments) == 0 {
-		return nil
-	}
-	requiresVision := false
-	for _, attachment := range attachments {
-		if attachment.Kind == RunInputAttachmentKindImage {
-			requiresVision = true
-			break
-		}
-	}
-	if !requiresVision {
-		return nil
-	}
-	if profile == nil || !profile.SupportsVision {
-		return fmt.Errorf("%w: 当前模型不支持图片输入，请切换模型或移除图片", ErrUnsupportedInputAttachment)
-	}
-	return nil
-}
-
 func threadLabelForInput(input string, attachments []RunInputAttachment) string {
 	if trimmed := trimThreadLabel(strings.TrimSpace(input)); trimmed != "" {
 		return trimmed
@@ -354,7 +330,7 @@ func threadLabelForInput(input string, attachments []RunInputAttachment) string 
 			return label
 		}
 	}
-	return defaultImagePromptThreadLabel
+	return defaultInputAttachmentThreadLabel
 }
 
 func isInputRequiredError(err error) bool {

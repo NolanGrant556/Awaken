@@ -81,7 +81,7 @@ Awaken 现在的主链仍然偏向：
 
 其中：
 
-- `readable_roots` 定义本次任务允许读取的文件范围。
+- `readable_roots` 记录本次任务的建议读取范围，并继续服务 connector/file bridge；Awaken 内置本地读工具不再用它拒绝项目外本机路径。
 - `writable_roots` 定义本次任务允许写入的文件范围。
 - `output_roots` 定义允许 Awaken 创建结果产物的目录。
 - `protected_roots` 定义无论何种模式都默认受保护的路径。

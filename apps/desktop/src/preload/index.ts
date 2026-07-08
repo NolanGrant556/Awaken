@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type { AguiEvent } from "../shared/agui.js";
 import {
+  type AttachmentPickResult,
   type AwakenBridge,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
@@ -164,6 +165,8 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:sync-model-capabilities") as Promise<ModelProvider[]>,
   getModelProfileBalances: () =>
     ipcRenderer.invoke("awaken:get-model-profile-balances") as Promise<ModelProfileBalancesResult>,
+  pickAttachments: (defaultPath?: string) =>
+    ipcRenderer.invoke("awaken:pick-attachments", defaultPath) as Promise<AttachmentPickResult>,
   pickDirectory: (defaultPath?: string) =>
     ipcRenderer.invoke("awaken:pick-directory", defaultPath) as Promise<WorkspacePickResult>,
   pickWorkspace: (defaultPath?: string) =>

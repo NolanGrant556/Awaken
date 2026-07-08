@@ -336,10 +336,11 @@ func anthropicUserContent(msg context.Message) interface{} {
 	}
 
 	blocks := make([]map[string]interface{}, 0, len(msg.Attachments)+1)
-	if strings.TrimSpace(msg.Content) != "" {
+	userText := userTextWithAttachmentPaths(msg.Content, msg.Attachments)
+	if strings.TrimSpace(userText) != "" {
 		blocks = append(blocks, map[string]interface{}{
 			"type": "text",
-			"text": msg.Content,
+			"text": userText,
 		})
 	}
 	for _, attachment := range msg.Attachments {

@@ -5,7 +5,6 @@ import (
 
 	"awaken/src/tool"
 	"awaken/src/tool/profile"
-	"awaken/src/tool/sandbox"
 )
 
 // ShellExecutor is the executors-package wrapper for shell command tools.
@@ -14,10 +13,9 @@ import (
 //
 // The existing tools/shell.ShellExecutor already:
 //   - Classifies the command via ClassifyShellCommand.
-//   - Looks up the platform sandbox adapter and its support level.
-//   - Fails closed with ErrSandboxUnavailable when an open_world_system
-//     command is requested on a platform without SandboxFull support.
-//   - Applies sandbox constraints to the exec.Cmd.
+//   - Looks up the platform sandbox adapter support level for observability.
+//   - Enforces the local-computer hard gates: delete via Trash and
+//     mass-message review.
 //
 // This wrapper does NOT duplicate the shell execution logic. Its role is
 // to provide a uniform ToolExecutor interface so the Router can route
@@ -31,20 +29,10 @@ func NewShellExecutor() *ShellExecutor {
 	return &ShellExecutor{}
 }
 
-// Execute enforces the profile's SandboxPolicy and EnvPolicy before
-// delegating to the shell tool's own Execute / ExecuteWithObserver.
-//
-// SandboxPolicy enforcement:
-//   - SandboxRequired: the platform MUST provide SandboxFull isolation.
-//     If sandbox.DefaultAdapter().SupportLevel() is anything less than
-//     SandboxFull, the call is denied fail-closed rather than running
-//     unsandboxed. This is the executor-layer analogue of the
-//     open_world_system guard inside tools/shell.ShellExecutor, but
-//     keyed off the profile's hard requirement rather than the command
-//     tier.
-//   - SandboxBestEffort / SandboxNone: execution proceeds. The
-//     tools/shell.ShellExecutor still consults the adapter for
-//     open_world_system commands.
+// Execute injects the profile EnvPolicy before delegating to the shell tool's
+// own Execute / ExecuteWithObserver. Shell is a local-computer surface and no
+// longer fails closed on sandbox availability; the shell tool's policy keeps
+// the product hard gates (Trash-only deletes and mass-message review).
 //
 // EnvPolicy enforcement:
 //   - The profile's EnvPolicy is injected into the context via
@@ -59,11 +47,6 @@ func (e *ShellExecutor) Execute(
 	input string,
 	observer tool.ToolObserver,
 ) (ToolExecutionOutput, error) {
-	if execProfile.SandboxPolicy == profile.SandboxRequired {
-		if sandbox.DefaultAdapter().SupportLevel() != sandbox.SandboxFull {
-			return deniedOutput("sandbox_required", "profile requires sandbox but platform does not provide trusted isolation")
-		}
-	}
 	ctx = profile.WithEnvPolicy(ctx, execProfile.EnvPolicy)
 	content, err := executeWithObserver(ctx, t, input, observer)
 	if err != nil {

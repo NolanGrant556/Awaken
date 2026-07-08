@@ -114,9 +114,9 @@ export async function fetchDeepSeekBalance(
 }
 
 type KimiUsageDetail = {
-  limit: string;
-  used: string;
-  remaining: string;
+  limit: string | number;
+  used?: string | number;
+  remaining: string | number;
   resetTime?: string;
 };
 
@@ -137,11 +137,18 @@ function parseKimiUsageDetail(
   detail: KimiUsageDetail,
   name: string,
 ): ModelBalanceQuotaWire {
+  const limit = parseBalanceValue(detail.limit);
+  const remaining = parseBalanceValue(detail.remaining);
+  const used =
+    detail.used === undefined
+      ? Math.max(0, limit - remaining)
+      : parseBalanceValue(detail.used);
+
   return {
     name,
-    limit: parseBalanceValue(detail.limit),
-    used: parseBalanceValue(detail.used),
-    remaining: parseBalanceValue(detail.remaining),
+    limit,
+    used,
+    remaining,
     reset_at:
       typeof detail.resetTime === "string" ? detail.resetTime : undefined,
   };
@@ -149,9 +156,13 @@ function parseKimiUsageDetail(
 
 function isKimiUsageDetail(value: unknown): value is KimiUsageDetail {
   const item = assertObject(value);
+  const hasValidUsed =
+    item.used === undefined ||
+    typeof item.used === "string" ||
+    typeof item.used === "number";
   return (
     (typeof item.limit === "string" || typeof item.limit === "number") &&
-    (typeof item.used === "string" || typeof item.used === "number") &&
+    hasValidUsed &&
     (typeof item.remaining === "string" || typeof item.remaining === "number")
   );
 }

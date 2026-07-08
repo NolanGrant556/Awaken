@@ -120,7 +120,7 @@ func githubConnector() ConnectorDefinition {
 func dingTalkConnector() ConnectorDefinition {
 	return ConnectorDefinition{
 		ID:               "dingtalk-workspace",
-		DisplayName:      "钉钉 Workspace CLI",
+		DisplayName:      "钉钉CLI",
 		Description:      "通过 DingTalk-Real-AI/dingtalk-workspace-cli 操作钉钉消息、日程、通讯录等官方连接器能力。",
 		Category:         CategoryChat,
 		Provider:         "DingTalk",
@@ -134,7 +134,7 @@ func dingTalkConnector() ConnectorDefinition {
 func larkConnector() ConnectorDefinition {
 	return ConnectorDefinition{
 		ID:               "lark-cli",
-		DisplayName:      "飞书/Lark CLI",
+		DisplayName:      "飞书CLI",
 		Description:      "通过 larksuite/cli 操作飞书消息、组织与协作能力。",
 		Category:         CategoryChat,
 		Provider:         "Lark",

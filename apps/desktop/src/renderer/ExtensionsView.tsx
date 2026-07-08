@@ -33,6 +33,8 @@ export type McpToolInfo = {
 
 export type ExtensionSection = "connectors" | "skills";
 
+type ConnectorKind = "mcp" | "cli";
+
 type ExtensionsViewProps = {
   section: ExtensionSection;
   desktopReady: boolean;
@@ -51,6 +53,27 @@ const MCP_EXAMPLE = `{
     }
   }
 }`;
+
+const CONNECTOR_KIND_TABS: Array<{ id: ConnectorKind; label: string }> = [
+  { id: "mcp", label: "MCP" },
+  { id: "cli", label: "CLI" },
+];
+
+const CLI_CONNECTOR_KEYWORDS = ["cli", "dingtalk", "钉钉", "lark", "飞书"];
+
+function connectorKind(connector: RuntimeConnector): ConnectorKind {
+  const haystack = [
+    connector.id,
+    connector.displayName,
+    connector.provider,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return CLI_CONNECTOR_KEYWORDS.some((keyword) => haystack.includes(keyword))
+    ? "cli"
+    : "mcp";
+}
 
 function connectorCategoryLabel(category: string): string {
   switch (category) {
@@ -139,6 +162,8 @@ export function ExtensionsView({
   const [mcpServers, setMcpServers] = useState<RuntimeMcpServer[]>([]);
   const [skills, setSkills] = useState<RuntimeSkill[]>([]);
   const [query, setQuery] = useState("");
+  const [activeConnectorKind, setActiveConnectorKind] =
+    useState<ConnectorKind>("mcp");
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [busyConnectorId, setBusyConnectorId] = useState<string | null>(null);
@@ -227,6 +252,38 @@ export function ExtensionsView({
     [connectors, normalizedQuery],
   );
 
+  const visibleMcpConnectors = useMemo(
+    () =>
+      visibleConnectors.filter(
+        (connector) => connectorKind(connector) === "mcp",
+      ),
+    [visibleConnectors],
+  );
+
+  const visibleCliConnectors = useMemo(
+    () =>
+      visibleConnectors.filter(
+        (connector) => connectorKind(connector) === "cli",
+      ),
+    [visibleConnectors],
+  );
+
+  const visibleAwakenBuiltInMcpConnectors = useMemo(
+    () =>
+      visibleMcpConnectors.filter(
+        (connector) => connector.sourceOrigin === "builtin",
+      ),
+    [visibleMcpConnectors],
+  );
+
+  const visibleUserInstalledMcpConnectors = useMemo(
+    () =>
+      visibleMcpConnectors.filter(
+        (connector) => connector.sourceOrigin !== "builtin",
+      ),
+    [visibleMcpConnectors],
+  );
+
   const visibleMcpServers = useMemo(
     () =>
       mcpServers.filter(
@@ -249,6 +306,16 @@ export function ExtensionsView({
           matchesQuery(skill.id, normalizedQuery),
       ),
     [skills, normalizedQuery],
+  );
+
+  const visibleAwakenBuiltInSkills = useMemo(
+    () => visibleSkills.filter((skill) => skill.sourceOrigin === "bundled"),
+    [visibleSkills],
+  );
+
+  const visibleUserInstalledSkills = useMemo(
+    () => visibleSkills.filter((skill) => skill.sourceOrigin !== "bundled"),
+    [visibleSkills],
   );
 
   async function handleConnectorAction(connector: RuntimeConnector): Promise<void> {
@@ -541,12 +608,14 @@ export function ExtensionsView({
   const title = section === "connectors" ? "连接器" : "技能";
   const subtitle =
     section === "connectors"
-      ? "配置 MCP servers，连接外部系统和工具。"
-      : "安装和管理项目级 Skill，扩展 Awaken 的执行能力。";
+      ? "管理 MCP servers 与 CLI 连接器，连接外部系统和工具。"
+      : "管理 Awaken 内置与用户安装 Skill，扩展 Awaken 的执行能力。";
   const primaryAction =
     section === "connectors"
       ? { label: "配置 MCP", icon: <Plus size={16} strokeWidth={1.9} /> }
       : { label: "安装 Skill", icon: <Upload size={16} strokeWidth={1.9} /> };
+  const showPrimaryAction =
+    section === "skills" || activeConnectorKind === "mcp";
 
   return (
     <section className="extension-view" aria-label={title}>
@@ -568,24 +637,54 @@ export function ExtensionsView({
             >
               <RefreshCw size={16} strokeWidth={1.9} />
             </button>
-            <Button
-              variant="primary"
-              size="md"
-              onClick={() => {
-                if (section === "connectors") {
-                  setMcpDialogOpen(true);
-                } else {
-                  setSkillDialogOpen(true);
-                }
-              }}
-            >
-              {primaryAction.icon}
-              {primaryAction.label}
-            </Button>
+            {showPrimaryAction ? (
+              <Button
+                variant="primary"
+                size="md"
+                onClick={() => {
+                  if (section === "connectors") {
+                    setMcpDialogOpen(true);
+                  } else {
+                    setSkillDialogOpen(true);
+                  }
+                }}
+              >
+                {primaryAction.icon}
+                {primaryAction.label}
+              </Button>
+            ) : null}
           </div>
         </header>
 
-        <div className="extension-toolbar">
+        <div
+          className={`extension-toolbar${
+            section === "connectors" ? " extension-toolbar-with-tabs" : ""
+          }`}
+        >
+          {section === "connectors" ? (
+            <div
+              className="extension-category-tabs"
+              role="tablist"
+              aria-label="连接器分类"
+            >
+              {CONNECTOR_KIND_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  className={`extension-category-tab${
+                    activeConnectorKind === tab.id
+                      ? " extension-category-tab-active"
+                      : ""
+                  }`}
+                  role="tab"
+                  aria-selected={activeConnectorKind === tab.id}
+                  onClick={() => setActiveConnectorKind(tab.id)}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <input
             value={query}
             placeholder="搜索..."
@@ -597,38 +696,67 @@ export function ExtensionsView({
 
         {section === "connectors" ? (
           <div className="extension-sections">
+            {activeConnectorKind === "mcp" ? (
+              <>
+                <section className="extension-section">
+                  <h2>Awaken 内置</h2>
+                  <div className="extension-grid">
+                    {visibleAwakenBuiltInMcpConnectors.length > 0 ? (
+                      visibleAwakenBuiltInMcpConnectors.map(renderConnectorCard)
+                    ) : (
+                      <div className="extension-empty">暂无内置 MCP</div>
+                    )}
+                  </div>
+                </section>
+                <section className="extension-section">
+                  <h2>用户安装</h2>
+                  <div className="extension-grid">
+                    {visibleUserInstalledMcpConnectors.length + visibleMcpServers.length > 0 ? (
+                      <>
+                        {visibleUserInstalledMcpConnectors.map(renderConnectorCard)}
+                        {visibleMcpServers.map(renderMcpServerCard)}
+                      </>
+                    ) : (
+                      <div className="extension-empty">暂无用户安装 MCP</div>
+                    )}
+                  </div>
+                </section>
+              </>
+            ) : (
+              <section className="extension-section" aria-label="CLI">
+                <div className="extension-grid">
+                  {visibleCliConnectors.length > 0 ? (
+                    visibleCliConnectors.map(renderConnectorCard)
+                  ) : (
+                    <div className="extension-empty">暂无 CLI</div>
+                  )}
+                </div>
+              </section>
+            )}
+          </div>
+        ) : (
+          <div className="extension-sections">
             <section className="extension-section">
-              <h2>市场</h2>
+              <h2>Awaken 内置</h2>
               <div className="extension-grid">
-                {visibleConnectors.length > 0 ? (
-                  visibleConnectors.map(renderConnectorCard)
+                {visibleAwakenBuiltInSkills.length > 0 ? (
+                  visibleAwakenBuiltInSkills.map(renderSkillCard)
                 ) : (
-                  <div className="extension-empty">暂无连接器</div>
+                  <div className="extension-empty">暂无内置 Skill</div>
                 )}
               </div>
             </section>
             <section className="extension-section">
-              <h2>MCP Servers</h2>
+              <h2>用户安装</h2>
               <div className="extension-grid">
-                {visibleMcpServers.length > 0 ? (
-                  visibleMcpServers.map(renderMcpServerCard)
+                {visibleUserInstalledSkills.length > 0 ? (
+                  visibleUserInstalledSkills.map(renderSkillCard)
                 ) : (
-                  <div className="extension-empty">还没有配置 MCP server</div>
+                  <div className="extension-empty">暂无用户安装 Skill</div>
                 )}
               </div>
             </section>
           </div>
-        ) : (
-          <section className="extension-section">
-            <h2>已安装</h2>
-            <div className="extension-grid">
-              {visibleSkills.length > 0 ? (
-                visibleSkills.map(renderSkillCard)
-              ) : (
-                <div className="extension-empty">暂无 Skill</div>
-              )}
-            </div>
-          </section>
         )}
       </div>
 

@@ -5,7 +5,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"sync"
+	"syscall"
+	"time"
 
 	"awaken/src/agentcore"
 	"awaken/src/connectors"
@@ -62,12 +66,46 @@ func main() {
 	}
 
 	srv := &http.Server{
-		Addr:    addr,
-		Handler: server.NewRouterWithWorkspace(runService, infoProvider, manager, connRegistry, skillRegistry, defaultWorkspace),
+		Addr: addr,
 	}
 
-	log.Printf("awaken-core listening on http://%s", addr)
-	log.Fatal(srv.ListenAndServe())
+	shutdownCh := make(chan struct{}, 1)
+	shutdownOnce := sync.OnceFunc(func() {
+		shutdownCh <- struct{}{}
+	})
+
+	srv.Handler = server.NewRouterWithWorkspace(
+		runService,
+		infoProvider,
+		manager,
+		connRegistry,
+		skillRegistry,
+		defaultWorkspace,
+		shutdownOnce,
+	)
+
+	go func() {
+		log.Printf("awaken-core listening on http://%s", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("awaken-core server error: %v", err)
+		}
+	}()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+
+	select {
+	case <-sigCh:
+	case <-shutdownCh:
+	}
+
+	log.Println("awaken-core shutting down")
+	runService.FlushTranscripts()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("awaken-core shutdown error: %v", err)
+	}
 }
 
 func modelConfigFromProfile(profile *runtime.ModelProfileConfig) agentcore.ModelConfig {

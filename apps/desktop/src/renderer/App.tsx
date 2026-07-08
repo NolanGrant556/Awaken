@@ -1564,7 +1564,23 @@ export function App() {
         }
         dispatch({ type: "run/event", event, receivedAtMs });
       },
-      onError: (message) => dispatch({ type: "run/streamFailed", message }),
+      onError: (message) => {
+        if (message.toLowerCase().includes("run session was not found")) {
+          localStorage.removeItem("awaken:runId");
+          dispatch({
+            type: "run/event",
+            event: {
+              type: "RUN_ERROR",
+              rawType: "RUN_ERROR",
+              message: "运行会话在应用重启后已丢失，该 run 已结束。",
+              code: "RUN_SESSION_LOST",
+            },
+            receivedAtMs: Date.now(),
+          });
+          return;
+        }
+        dispatch({ type: "run/streamFailed", message });
+      },
       onReconnect: () => dispatch({ type: "run/reconnecting" }),
       onClose: () => {
         // Non-terminal close is handled by the client layer's attemptReconnect
@@ -1608,6 +1624,26 @@ export function App() {
 
     if (!shouldResumeSubscription(latestRun.status)) {
       localStorage.removeItem("awaken:runId");
+      return latestRun.status;
+    }
+
+    // The transcript may report a run as running, but if the runtime process
+    // was restarted the in-memory session is gone. Verify the run still exists
+    // before subscribing; otherwise mark it as lost instead of retrying.
+    try {
+      await runtimeClient.getRun(latestRun.runId);
+    } catch {
+      localStorage.removeItem("awaken:runId");
+      dispatch({
+        type: "run/event",
+        event: {
+          type: "RUN_ERROR",
+          rawType: "RUN_ERROR",
+          message: "运行会话在应用重启后已丢失，该 run 已结束。",
+          code: "RUN_SESSION_LOST",
+        },
+        receivedAtMs: Date.now(),
+      });
       return latestRun.status;
     }
 

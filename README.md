@@ -9,14 +9,16 @@ Awaken 是一个本地优先的 Agent runtime 与桌面应用原型。当前仓�
 
 ## 入口契约
 
-本项目只允许两套本地入口：
+本项目只允许两类本地入口：
 
-1. Awaken 使用入口：启动 `npm run open:desktop`，关闭 `npm run close:desktop`
-   - 用户和开发者都从这里打开和关闭同一个 Awaken Desktop。
-   - 这个命令会复用或启动 `awaken-dev-desktop` screen 会话，并检查 renderer、Electron、`awaken-core` 和真实窗口。
-   - 关闭命令会停止 `awaken-dev-desktop` screen 会话，并清理同一入口留下的 renderer、Electron、`awaken-core` 进程。
+1. Awaken Desktop 使用入口
+   - macOS：启动 `npm run open:desktop`，关闭 `npm run close:desktop`。
+   - Windows：在 PowerShell / Windows Terminal 前台运行 `npm run dev:desktop`，关闭时在该终端按 `Ctrl+C`。
+   - macOS 用户和开发者都从 `open:desktop` / `close:desktop` 打开和关闭同一个 Awaken Desktop。
+   - macOS `open:desktop` 会复用或启动 `awaken-dev-desktop` screen 会话，并检查 renderer、Electron、`awaken-core` 和真实窗口。
+   - macOS `close:desktop` 会停止 `awaken-dev-desktop` screen 会话，并清理同一入口留下的 renderer、Electron、`awaken-core` 进程。
    - Desktop 自己启动并管理 `awaken-core`。
-   - 底层开发服务命令仍是 `npm run dev:desktop`，但只作为 `open:desktop` 使用的长期进程，不作为日常打开入口。
+   - `npm run dev:desktop` 会构建 UI、确保当前平台的 `awaken-core` binary、准备 primary-runtime，然后启动 Vite renderer、Electron main/preload 和 Electron。macOS 日常不要直接用它打开 Awaken；Windows 目前把它作为正式开发入口。
    - 不要把 `cmd/awaken-core`、Vite renderer 或 Electron 子脚本当成独立使用入口。
    - 不要用普通浏览器打开 `127.0.0.1:5174` 判断 Desktop 是否成功；renderer 需要 `window.awaken` Electron bridge。
 2. 组件独立观测入口：`npm run open:ui`
@@ -272,14 +274,26 @@ git diff --check
 
 ## 本地运行
 
-### Awaken 使用入口
+### Awaken Desktop 使用入口
+
+macOS：
 
 ```bash
 npm run open:desktop
 npm run close:desktop
 ```
 
-`npm run open:desktop` 会复用或启动 `awaken-dev-desktop` screen 会话，并确认 renderer、Electron、`awaken-core` 和真实 Desktop 窗口都已就绪。`npm run close:desktop` 会停止这个正式入口管理的 screen 会话，并清理遗留的 renderer、Electron、`awaken-core` 进程。底层的 `npm run dev:desktop` 会构建 `@awaken/design-system`，确保 `awaken-core` binary 存在，启动 Vite renderer（`127.0.0.1:5174`），编译 Electron main/preload，并启动 Electron；日常不要直接用它打开 Awaken。
+Windows（PowerShell / Windows Terminal）：
+
+```powershell
+npm run dev:desktop
+```
+
+`npm run open:desktop` 是 macOS 的托管入口，会复用或启动 `awaken-dev-desktop` screen 会话，并确认 renderer、Electron、`awaken-core` 和真实 Desktop 窗口都已就绪。`npm run close:desktop` 会停止这个正式入口管理的 screen 会话，并清理遗留的 renderer、Electron、`awaken-core` 进程。
+
+Windows 当前不使用 macOS 的 screen 托管脚本；`npm run dev:desktop` 是 Windows 开发入口，关闭时在运行该命令的终端按 `Ctrl+C`。它会构建 `@awaken/design-system`，确保 `win32-x64/awaken-core.exe` 存在，准备 primary-runtime，启动 Vite renderer（`127.0.0.1:5174`），编译 Electron main/preload，并启动 Electron。
+
+Windows primary-runtime 需要本机能找到这些依赖：Python（优先 `py -3` 或 `python`）、Node、LibreOffice、Poppler（`pdftoppm.exe` / `pdfinfo.exe`）和 ffmpeg。默认会通过 PATH、`where`、常见安装目录和以下环境变量发现依赖：`AWAKEN_BOOTSTRAP_PYTHON`、`AWAKEN_PYTHON`、`AWAKEN_NODE`、`AWAKEN_SOFFICE`、`AWAKEN_POPPLER_BIN`、`AWAKEN_FFMPEG`。缺少依赖时，`npm run prepare:runtime -- --json` 和 `npm run check:runtime -- --json` 会输出具体缺口。
 
 ### 组件独立观测入口
 

@@ -7,19 +7,31 @@
       "name": "python",
       "kind": "executable",
       "required": true,
-      "path": "../runtime/python/bin/python3"
+      "path": "../runtime/python/bin/python3",
+      "pathByPlatform": {
+        "win32": "../runtime/python/Scripts/python.exe",
+        "windows": "../runtime/python/Scripts/python.exe"
+      }
     },
     {
       "name": "node",
       "kind": "executable",
       "required": true,
-      "path": "../runtime/node/bin/node"
+      "path": "../runtime/node/bin/node",
+      "pathByPlatform": {
+        "win32": "../runtime/node/node.exe",
+        "windows": "../runtime/node/node.exe"
+      }
     },
     {
       "name": "libreoffice",
       "kind": "application",
       "required": true,
-      "path": "../runtime/libreoffice/LibreOffice.app"
+      "path": "../runtime/libreoffice/LibreOffice.app",
+      "pathByPlatform": {
+        "win32": "../runtime/libreoffice",
+        "windows": "../runtime/libreoffice"
+      }
     },
     {
       "name": "poppler",
@@ -31,7 +43,11 @@
       "name": "ffmpeg",
       "kind": "executable",
       "required": true,
-      "path": "../runtime/ffmpeg/bin/ffmpeg"
+      "path": "../runtime/ffmpeg/bin/ffmpeg",
+      "pathByPlatform": {
+        "win32": "../runtime/ffmpeg/bin/ffmpeg.exe",
+        "windows": "../runtime/ffmpeg/bin/ffmpeg.exe"
+      }
     },
     {
       "name": "helper-packages",

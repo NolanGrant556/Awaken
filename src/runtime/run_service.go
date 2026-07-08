@@ -568,7 +568,7 @@ func (s *RunService) execute(session *Session, executor Executor, agent *agentco
 	result, err := executor.Run(ctx, input, sessionEventSink{session: session})
 	if err == nil {
 		if session.CancelRequested() {
-			session.CompleteCancelled("run cancelled")
+			session.CompleteCancelled("你停止了生成本次回答")
 			return
 		}
 		session.CompleteFinished(result)
@@ -576,7 +576,7 @@ func (s *RunService) execute(session *Session, executor Executor, agent *agentco
 	}
 
 	if errors.Is(ctx.Err(), context.Canceled) || session.CancelRequested() {
-		session.CompleteCancelled("run cancelled")
+		session.CompleteCancelled("你停止了生成本次回答")
 		return
 	}
 

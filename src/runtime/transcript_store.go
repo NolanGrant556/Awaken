@@ -520,8 +520,13 @@ func applyTerminalTranscriptEvent(run *Run, record TranscriptRecord) {
 		finishedAt := record.Timestamp
 		run.FinishedAt = &finishedAt
 	case agentcore.RunErrorEventType:
-		run.Status = RunStatusError
-		run.Error = firstNonEmpty(strings.TrimSpace(event.Error), "run failed")
+		if event.Code == "RUN_CANCELLED" {
+			run.Status = RunStatusCancelled
+			run.Error = firstNonEmpty(strings.TrimSpace(event.Error), "run cancelled")
+		} else {
+			run.Status = RunStatusError
+			run.Error = firstNonEmpty(strings.TrimSpace(event.Error), "run failed")
+		}
 		finishedAt := record.Timestamp
 		run.FinishedAt = &finishedAt
 	}
@@ -541,7 +546,10 @@ func isRecoverableTranscriptEvent(eventType agentcore.AwakenEventType) bool {
 	return isContextTranscriptEvent(eventType) ||
 		eventType == agentcore.TurnFinishedEventType ||
 		eventType == agentcore.RunFinishedEventType ||
-		eventType == agentcore.RunErrorEventType
+		eventType == agentcore.RunErrorEventType ||
+		eventType == agentcore.TextMessageStartedEventType ||
+		eventType == agentcore.TextDeltaEventType ||
+		eventType == agentcore.TextMessageFinishedEventType
 }
 
 func isContextTranscriptEvent(eventType agentcore.AwakenEventType) bool {

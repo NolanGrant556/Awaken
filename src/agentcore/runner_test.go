@@ -1919,6 +1919,28 @@ func TestRunEventEmitterRunErroredTransportErrorDoesNotLeakURL(t *testing.T) {
 	}
 }
 
+func TestRunEventEmitterRunErroredSetsRunCancelledCode(t *testing.T) {
+	var gotEvents []AwakenEvent
+	emitter := newRunEventEmitter("thread-test", EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+
+	emitter.runErrored(context.Canceled, TerminalReasonCancelled)
+
+	if len(gotEvents) != 1 {
+		t.Fatalf("expected 1 event, got %d: %+v", len(gotEvents), gotEvents)
+	}
+	if gotEvents[0].Type != RunErrorEventType {
+		t.Fatalf("expected RunError event, got %s", gotEvents[0].Type)
+	}
+	if gotEvents[0].TerminalReason != TerminalReasonCancelled {
+		t.Fatalf("expected TerminalReasonCancelled, got %q", gotEvents[0].TerminalReason)
+	}
+	if gotEvents[0].Code != "RUN_CANCELLED" {
+		t.Fatalf("expected Code RUN_CANCELLED, got %q", gotEvents[0].Code)
+	}
+}
+
 func mustRegisterRunnerTool(t *testing.T, candidate tool.Tool) {
 	t.Helper()
 	if err := tool.RegisterTool(candidate); err != nil {

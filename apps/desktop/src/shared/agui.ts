@@ -36,6 +36,8 @@ export type AguiEventType =
   | "AWAKEN_RUNTIME_MISSING"
   | "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED"
   | "AWAKEN_MASS_MESSAGE_REVIEW_RESOLVED"
+  | "AWAKEN_USER_QUESTION_REQUESTED"
+  | "AWAKEN_USER_QUESTION_RESOLVED"
   | "AWAKEN_ARTIFACT_CREATED"
   | "AWAKEN_ARTIFACT_UPDATED"
   | "AWAKEN_UNKNOWN_EVENT";
@@ -141,6 +143,8 @@ export type AguiEvent = {
   runtimeMissingReason?: string;
   reviewId?: string;
   reviewDecision?: "approved" | "rejected";
+  questionId?: string;
+  questionAnswer?: string;
   massMessageChannel?: string;
   massMessageRecipientScope?: string;
   massMessageRecipientCount?: number;

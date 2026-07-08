@@ -7,14 +7,17 @@ import (
 
 // ShellTier grades a shell command by its blast radius.
 //
-// The three tiers mirror the "零审批自动执行策略" spec's grading model:
+// The tiers mirror the "零审批自动执行策略" spec's grading model:
 //   - inspect_read_only:   read-only inspection commands that do not mutate state.
+//   - local_cli:           arbitrary local CLI invocations with no shell-level
+//     file mutation signal.
 //   - workspace_mutation:  commands that mutate files within the workspace.
 //   - open_world_system:   commands that reach outside the workspace or affect the system.
 type ShellTier string
 
 const (
 	ShellTierInspectReadOnly   ShellTier = "inspect_read_only"
+	ShellTierLocalCLI          ShellTier = "local_cli"
 	ShellTierWorkspaceMutation ShellTier = "workspace_mutation"
 	ShellTierOpenWorldSystem   ShellTier = "open_world_system"
 )
@@ -25,12 +28,14 @@ func tierRank(t ShellTier) int {
 	switch t {
 	case ShellTierInspectReadOnly:
 		return 0
-	case ShellTierWorkspaceMutation:
+	case ShellTierLocalCLI:
 		return 1
+	case ShellTierWorkspaceMutation:
+		return 2
 	case ShellTierOpenWorldSystem:
-		return 2
+		return 3
 	default:
-		return 2
+		return 3
 	}
 }
 
@@ -71,6 +76,11 @@ func IsInspectReadOnlyCommand(command string, cwd string) bool {
 // IsWorkspaceMutationCommand reports whether command is classified as workspace_mutation.
 func IsWorkspaceMutationCommand(command string, cwd string) bool {
 	return ClassifyShellCommand(command, cwd) == ShellTierWorkspaceMutation
+}
+
+// IsLocalCLICommand reports whether command is classified as local_cli.
+func IsLocalCLICommand(command string, cwd string) bool {
+	return ClassifyShellCommand(command, cwd) == ShellTierLocalCLI
 }
 
 // IsOpenWorldCommand reports whether command is classified as open_world_system.
@@ -281,10 +291,11 @@ func classifyBaseCommand(command string, cwd string) ShellTier {
 	if isInspectReadOnlyCommand(base, args) {
 		return ShellTierInspectReadOnly
 	}
-	// Unknown command — conservative middle tier. The spec does not define a
-	// default; workspace_mutation ensures the caller will still gate the
-	// command without assuming it reaches outside the workspace.
-	return ShellTierWorkspaceMutation
+	// Unknown command — treat as an arbitrary local CLI. The tool policy keeps
+	// shell wrappers, unsafe redirects, direct file deletion, and sensitive paths
+	// guarded separately; lack of a built-in command table must not prevent users
+	// from using local CLIs such as dws, gh, feishu, or obsidian.
+	return ShellTierLocalCLI
 }
 
 func isOpenWorldCommand(base string, args []string) bool {

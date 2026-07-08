@@ -69,11 +69,58 @@ func TestGenerateSandboxProfileWorkspaceMutation(t *testing.T) {
 }
 
 func TestGenerateSandboxProfileAllowsSysctlRead(t *testing.T) {
-	for _, tier := range []string{TierInspectReadOnly, TierWorkspaceMutation, TierOpenWorldSystem} {
+	for _, tier := range []string{TierInspectReadOnly, TierLocalCLI, TierWorkspaceMutation, TierOpenWorldSystem} {
 		profile := GenerateSandboxProfile(tier, "/Users/test/ws")
 		if !strings.Contains(profile, "(allow sysctl-read)") {
 			t.Errorf("%s profile should allow sysctl-read for runtime/tool startup", tier)
 		}
+	}
+}
+
+// TestGenerateSandboxProfileLocalCLI documents the fallback profile shape even
+// though ApplySandbox intentionally skips sandbox-exec for local_cli on macOS.
+func TestGenerateSandboxProfileLocalCLI(t *testing.T) {
+	root := "/Users/test/cli"
+	profile := GenerateSandboxProfile(TierLocalCLI, root)
+
+	if !strings.Contains(profile, "(allow network*)") {
+		t.Error("profile should allow network for local_cli tier")
+	}
+	if !strings.Contains(profile, `(allow file-write* (subpath "/Users/test/cli"))`) {
+		t.Error("profile should allow file writes within workspace")
+	}
+	if !strings.Contains(profile, "(deny file-write*)") {
+		t.Error("profile must deny file writes outside workspace")
+	}
+	if strings.Contains(profile, "(deny network") {
+		t.Error("profile must NOT deny network for local_cli tier")
+	}
+}
+
+func TestSandboxAdapterMacApplySandboxLocalCLISkipsSeatbelt(t *testing.T) {
+	adapter := SandboxAdapterMac{execPath: "/usr/bin/sandbox-exec", available: true}
+	cmd := exec.Command("/bin/sh", "-c", "dws auth login")
+	originalPath := cmd.Path
+	originalArgs := append([]string(nil), cmd.Args...)
+
+	result, err := adapter.ApplySandbox(cmd, TierLocalCLI, "/workspace")
+	if err != nil {
+		t.Fatalf("ApplySandbox returned error: %v", err)
+	}
+	if result.Applied {
+		t.Fatal("expected local_cli to skip sandbox-exec on macOS")
+	}
+	if result.Support != SandboxDegraded {
+		t.Fatalf("expected local_cli support to be degraded, got %q", result.Support)
+	}
+	if result.Method != "local-cli" {
+		t.Fatalf("expected local-cli method, got %q", result.Method)
+	}
+	if cmd.Path != originalPath {
+		t.Fatalf("expected command path to stay %q, got %q", originalPath, cmd.Path)
+	}
+	if strings.Join(cmd.Args, "\x00") != strings.Join(originalArgs, "\x00") {
+		t.Fatalf("expected command args to stay unchanged, got %#v", cmd.Args)
 	}
 }
 

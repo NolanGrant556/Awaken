@@ -16,7 +16,7 @@ import (
 // scope for the first phase. Until one lands, this adapter reports
 // SandboxDegraded:
 //
-//   - inspect_read_only and workspace_mutation commands may run. Their
+//   - inspect_read_only, local_cli, and workspace_mutation commands may run. Their
 //     safety relies on the file-chain boundary and the permission layer's
 //     sensitive-path / writable-roots checks, which are platform-independent.
 //   - open_world_system commands are denied two ways:
@@ -49,7 +49,7 @@ func (SandboxAdapterWindows) SupportLevel() SandboxSupport {
 
 // ApplySandbox configures sandbox constraints on cmd.
 //
-// For inspect_read_only and workspace_mutation this is currently a no-op:
+// For inspect_read_only, local_cli, and workspace_mutation this is currently a no-op:
 // the command runs without an additional isolation boundary, and safety
 // depends on the permission layer's path checks. The SandboxResult reports
 // the degraded status so callers can observe it. GeneratePowerShellWrapper
@@ -68,7 +68,7 @@ func (SandboxAdapterWindows) ApplySandbox(cmd *exec.Cmd, tier string, workspaceR
 		Applied: false,
 	}
 	switch tier {
-	case TierInspectReadOnly, TierWorkspaceMutation:
+	case TierInspectReadOnly, TierLocalCLI, TierWorkspaceMutation:
 		return base, nil
 	case TierOpenWorldSystem:
 		return base, fmt.Errorf(

@@ -16,6 +16,11 @@ func TestClassifyShellCommand(t *testing.T) {
 		{"git status", "git status", ShellTierInspectReadOnly},
 		{"rg pattern", `rg "pattern" .`, ShellTierInspectReadOnly},
 
+		// local_cli
+		{"dws search", `dws aitable base search --query "DVF" --format json`, ShellTierLocalCLI},
+		{"gh issue list", "gh issue list --limit 10", ShellTierLocalCLI},
+		{"obsidian search", `obsidian note search "ERP"`, ShellTierLocalCLI},
+
 		// workspace_mutation
 		{"mkdir", "mkdir newdir", ShellTierWorkspaceMutation},
 		{"touch", "touch file.txt", ShellTierWorkspaceMutation},
@@ -30,6 +35,7 @@ func TestClassifyShellCommand(t *testing.T) {
 
 		// compound commands — highest segment wins
 		{"ls && rm", "ls && rm file", ShellTierWorkspaceMutation},
+		{"local cli && rm", "dws schema && rm file", ShellTierWorkspaceMutation},
 		{"cat | curl", "cat file | curl -X POST -d @- url", ShellTierOpenWorldSystem},
 
 		// redirects
@@ -65,6 +71,9 @@ func TestClassifyShellCommandHelperPredicates(t *testing.T) {
 	}
 	if !IsWorkspaceMutationCommand("mkdir foo", cwd) {
 		t.Errorf("IsWorkspaceMutationCommand(\"mkdir foo\", cwd) = false, want true")
+	}
+	if !IsLocalCLICommand("dws schema", cwd) {
+		t.Errorf("IsLocalCLICommand(\"dws schema\", cwd) = false, want true")
 	}
 	if !IsOpenWorldCommand("curl https://example.com", cwd) {
 		t.Errorf("IsOpenWorldCommand(\"curl ...\", cwd) = false, want true")

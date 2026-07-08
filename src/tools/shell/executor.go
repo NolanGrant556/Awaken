@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -141,11 +142,14 @@ func (e *ShellExecutor) Execute(
 	// EnvMinimal, constrain cmd.Env to a minimal allowlist of environment
 	// variables (PATH, HOME, USER, SHELL, TMPDIR, LANG, LC_ALL) so secrets
 	// and project-local tokens are not leaked to the child process. Empty
-	// values are filtered out. When EnvInherit (the default), cmd.Env is
-	// left nil so the child inherits the runtime's full environment.
+	// values are filtered out. When EnvInherit (the default), the child gets
+	// the runtime's full environment with PATH augmented for common user CLI
+	// install locations such as ~/.local/bin and Homebrew.
 	envPolicy := profile.EnvPolicyFromContext(ctx)
 	if envPolicy == profile.EnvMinimal {
-		cmd.Env = minimalEnvAllowlist()
+		cmd.Env = augmentShellPath(minimalEnvAllowlist())
+	} else {
+		cmd.Env = augmentShellPath(os.Environ())
 	}
 
 	sandboxResult, err := adapter.ApplySandbox(cmd, string(tier), workspaceRoot)
@@ -155,7 +159,10 @@ func (e *ShellExecutor) Execute(
 			SandboxSupport: support,
 		}, fmt.Errorf("apply sandbox: %w", err)
 	}
-	_ = sandboxResult // observability hook; not yet surfaced to callers
+	effectiveSupport := sandboxResult.Support
+	if effectiveSupport == "" {
+		effectiveSupport = support
+	}
 
 	stdout := newShellOutputWriter("stdout", maxOutputChars, observer)
 	stderr := newShellOutputWriter("stderr", maxOutputChars, observer)
@@ -179,7 +186,7 @@ func (e *ShellExecutor) Execute(
 				Stderr:         stderr.Result().Content,
 				DurationMS:     duration.Milliseconds(),
 				Tier:           tier,
-				SandboxSupport: support,
+				SandboxSupport: effectiveSupport,
 			}, fmt.Errorf("执行命令失败: %w", runErr)
 		}
 	}
@@ -194,7 +201,7 @@ func (e *ShellExecutor) Execute(
 		DurationMS:     duration.Milliseconds(),
 		Truncated:      stdoutResult.Truncated || stderrResult.Truncated,
 		Tier:           tier,
-		SandboxSupport: support,
+		SandboxSupport: effectiveSupport,
 	}, nil
 }
 
@@ -228,6 +235,181 @@ func minimalEnvAllowlist() []string {
 		env = append(env, key+"="+value)
 	}
 	return env
+}
+
+func augmentShellPath(env []string) []string {
+	return augmentShellPathForOS(env, runtime.GOOS, string(os.PathListSeparator))
+}
+
+func augmentShellPathForOS(env []string, goos string, pathListSeparator string) []string {
+	if pathListSeparator == "" {
+		pathListSeparator = string(os.PathListSeparator)
+	}
+	pathIndex := -1
+	pathKey := "PATH"
+	currentPath := ""
+	for index, entry := range env {
+		key, value, ok := splitEnvEntry(entry)
+		if !ok {
+			continue
+		}
+		if envKeyEqual(goos, key, "PATH") {
+			pathIndex = index
+			pathKey = key
+			currentPath = value
+			break
+		}
+	}
+
+	paths := splitPathListForSeparator(currentPath, pathListSeparator)
+	seen := make(map[string]bool, len(paths)+4)
+	for _, path := range paths {
+		if path != "" {
+			seen[pathSeenKey(goos, path)] = true
+		}
+	}
+	for _, path := range shellPathAdditionsForOS(goos, env) {
+		seenKey := pathSeenKey(goos, path)
+		if path == "" || seen[seenKey] {
+			continue
+		}
+		paths = append(paths, path)
+		seen[seenKey] = true
+	}
+	nextPath := strings.Join(paths, pathListSeparator)
+	if nextPath == "" {
+		return env
+	}
+	if pathIndex >= 0 {
+		out := append([]string(nil), env...)
+		out[pathIndex] = pathKey + "=" + nextPath
+		return out
+	}
+	out := append([]string(nil), env...)
+	out = append(out, "PATH="+nextPath)
+	return out
+}
+
+func shellPathAdditions(env []string) []string {
+	return shellPathAdditionsForOS(runtime.GOOS, env)
+}
+
+func shellPathAdditionsForOS(goos string, env []string) []string {
+	if goos == "windows" {
+		return windowsShellPathAdditions(env)
+	}
+	home := envValue(env, "HOME")
+	if home == "" {
+		home = os.Getenv("HOME")
+	}
+	var additions []string
+	if home != "" {
+		additions = append(additions, filepath.Join(home, ".local", "bin"))
+	}
+	additions = append(additions, "/opt/homebrew/bin", "/usr/local/bin")
+	return additions
+}
+
+func windowsShellPathAdditions(env []string) []string {
+	userProfile := envValueForOS(env, "USERPROFILE", "windows")
+	appData := envValueForOS(env, "APPDATA", "windows")
+	localAppData := envValueForOS(env, "LOCALAPPDATA", "windows")
+	if appData == "" && userProfile != "" {
+		appData = joinPathForOS("windows", userProfile, "AppData", "Roaming")
+	}
+	if localAppData == "" && userProfile != "" {
+		localAppData = joinPathForOS("windows", userProfile, "AppData", "Local")
+	}
+
+	var additions []string
+	if appData != "" {
+		// npm global binaries on Windows, including lark-cli.cmd when installed globally.
+		additions = append(additions, joinPathForOS("windows", appData, "npm"))
+	}
+	if localAppData != "" {
+		additions = append(additions,
+			joinPathForOS("windows", localAppData, "pnpm"),
+			joinPathForOS("windows", localAppData, "Microsoft", "WindowsApps"),
+		)
+	}
+	if userProfile != "" {
+		additions = append(additions,
+			joinPathForOS("windows", userProfile, ".local", "bin"),
+			joinPathForOS("windows", userProfile, "scoop", "shims"),
+		)
+	}
+	return additions
+}
+
+func splitPathList(pathValue string) []string {
+	return splitPathListForSeparator(pathValue, string(os.PathListSeparator))
+}
+
+func splitPathListForSeparator(pathValue string, separator string) []string {
+	if pathValue == "" {
+		return nil
+	}
+	if separator == "" {
+		separator = string(os.PathListSeparator)
+	}
+	return strings.Split(pathValue, separator)
+}
+
+func envValue(env []string, key string) string {
+	return envValueForOS(env, key, runtime.GOOS)
+}
+
+func envValueForOS(env []string, key string, goos string) string {
+	for _, entry := range env {
+		entryKey, value, ok := splitEnvEntry(entry)
+		if !ok {
+			continue
+		}
+		if envKeyEqual(goos, entryKey, key) {
+			return value
+		}
+	}
+	return ""
+}
+
+func splitEnvEntry(entry string) (string, string, bool) {
+	key, value, ok := strings.Cut(entry, "=")
+	if !ok || key == "" {
+		return "", "", false
+	}
+	return key, value, true
+}
+
+func envKeyEqual(goos string, a string, b string) bool {
+	if goos == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
+func pathSeenKey(goos string, path string) string {
+	if goos == "windows" {
+		return strings.ToLower(strings.TrimRight(path, `\/`))
+	}
+	return path
+}
+
+func joinPathForOS(goos string, elems ...string) string {
+	if goos != "windows" {
+		return filepath.Join(elems...)
+	}
+	result := ""
+	for _, elem := range elems {
+		if elem == "" {
+			continue
+		}
+		if result == "" {
+			result = strings.TrimRight(elem, `\/`)
+			continue
+		}
+		result = strings.TrimRight(result, `\/`) + `\` + strings.Trim(elem, `\/`)
+	}
+	return result
 }
 
 // shellCommand builds an *exec.Cmd that runs the given shell script on the

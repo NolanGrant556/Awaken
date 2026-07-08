@@ -271,6 +271,29 @@ export function turnMarkerRailDisplay({
   };
 }
 
+export function turnMarkerRailHeight({
+  scrollViewportHeight,
+  composerContentInset,
+  bottomSafeArea,
+  topInset = 28,
+  minimumBottom = 28,
+}: {
+  scrollViewportHeight: number;
+  composerContentInset: number;
+  bottomSafeArea: number;
+  topInset?: number;
+  minimumBottom?: number;
+}): number {
+  const stageHeight =
+    Math.max(0, scrollViewportHeight) + Math.max(0, composerContentInset);
+  return Math.max(
+    0,
+    stageHeight -
+      Math.max(0, topInset) -
+      Math.max(Math.max(0, minimumBottom), bottomSafeArea),
+  );
+}
+
 export function groupNarrativeByTurns(
   items: RunNarrativeItem[],
 ): NarrativeTurnSections {

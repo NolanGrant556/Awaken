@@ -68,6 +68,7 @@ import {
   projectNarrativeTurnBodySegments,
   shouldShowAssistantAnswerFooter,
   shouldUseCenterComposer,
+  turnMarkerRailHeight,
   turnMarkerRailDisplay,
   type NarrativeTurnBodySegment,
 } from "./workbenchPresentation";
@@ -1577,6 +1578,7 @@ export function App() {
   });
   const {
     activeWorkbenchTurnId,
+    composerBarSafeAreaPx,
     composerContentInsetPx,
     setComposerDockElement,
     composerSafeAreaPx,
@@ -1602,13 +1604,11 @@ export function App() {
     turnIds: narrativeSections.turns.map((turn) => turn.id),
     activeTurnId: activeWorkbenchTurnId,
     latestTurnId: latestPromptId,
-    railHeight: Math.max(
-      0,
-      runStageViewportHeightPx +
-        composerContentInsetPx -
-        28 -
-        Math.max(28, composerSafeAreaPx),
-    ),
+    railHeight: turnMarkerRailHeight({
+      scrollViewportHeight: runStageViewportHeightPx,
+      composerContentInset: composerContentInsetPx,
+      bottomSafeArea: composerBarSafeAreaPx,
+    }),
   });
   const showTurnMarkerRail = turnMarkerDisplay.mode !== "hidden";
   const activeExtensionSection: ExtensionSection | undefined =
@@ -2908,7 +2908,7 @@ export function App() {
                               className={`turn-marker-rail turn-marker-rail-${turnMarkerDisplay.mode}`}
                               aria-label="Message shortcuts"
                               style={{
-                                bottom: Math.max(28, composerSafeAreaPx),
+                                bottom: Math.max(28, composerBarSafeAreaPx),
                               }}
                             >
                               {turnMarkerDisplay.items.map((marker) => (

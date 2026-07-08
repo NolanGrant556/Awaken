@@ -248,8 +248,13 @@ export function useRunStageScrollController({
   const hasPromptNarrative = narrativeSections.turns.length > 0;
   const composerContentInsetPx = hasPromptNarrative ? composerContentBottomInsetPx : 0;
   const composerOutputGapPx = hasPromptNarrative ? RUN_STAGE_COMPOSER_SAFE_GAP : 0;
+  const composerBarInsetPx = hasPromptNarrative ? composerBarBottomInsetPx : 0;
   const composerSafeAreaPx = composerBottomSafeArea({
     composerHeight: composerContentInsetPx,
+    safeGap: composerOutputGapPx,
+  });
+  const composerBarSafeAreaPx = composerBottomSafeArea({
+    composerHeight: composerBarInsetPx,
     safeGap: composerOutputGapPx,
   });
   const activeWorkbenchTurnId =
@@ -815,6 +820,7 @@ export function useRunStageScrollController({
 
   return {
     activeWorkbenchTurnId,
+    composerBarSafeAreaPx,
     composerContentInsetPx,
     setComposerDockElement,
     composerSafeAreaPx,

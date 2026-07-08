@@ -156,6 +156,72 @@ describe("thread transcript replay helpers", () => {
     });
   });
 
+  it("synthesizes a replay answer from cancelled run result when text events are missing", () => {
+    const transcript: RuntimeThreadTranscript = {
+      thread: {
+        threadId: "thread-cancelled",
+        label: "恢复中断",
+        runId: "run-cancelled",
+        workspace: {
+          workspaceRoot: "/tmp/awaken",
+          writableRoots: ["/tmp/awaken"],
+        },
+        createdAt: "2026-06-24T00:00:00Z",
+        updatedAt: "2026-06-24T00:00:10Z",
+      },
+      runs: [
+        {
+          run: {
+            runId: "run-cancelled",
+            threadId: "thread-cancelled",
+            input: "恢复中断",
+            status: "cancelled",
+            result: "这是中断前的回答",
+            cancelRequested: true,
+            createdAt: "2026-06-24T00:00:00Z",
+            updatedAt: "2026-06-24T00:00:10Z",
+            finishedAt: "2026-06-24T00:00:10Z",
+          },
+          events: [
+            { type: "RUN_STARTED", seq: 16, runId: "run-cancelled", threadId: "thread-cancelled" },
+            {
+              type: "RUN_ERROR",
+              seq: 32,
+              runId: "run-cancelled",
+              threadId: "thread-cancelled",
+              code: "RUN_CANCELLED",
+              message: "你停止了生成本次回答",
+            },
+          ],
+        },
+      ],
+    };
+
+    const actions = actionsForThreadTranscript(transcript);
+    expect(actions).toContainEqual({
+      type: "run/event",
+      event: expect.objectContaining({
+        type: "TEXT_MESSAGE_CONTENT",
+        runId: "run-cancelled",
+        delta: "这是中断前的回答",
+      }),
+      receivedAtMs: undefined,
+    });
+
+    const state = actions.reduce(reduceRuntimeState, createInitialRuntimeState());
+    expect(state.narrative.committedItems).toContainEqual({
+      kind: "answer",
+      id: "answer:run-cancelled:transcript:run-cancelled:result",
+      markdown: "这是中断前的回答",
+      status: "done",
+    });
+    expect(state.narrative.committedItems).toContainEqual({
+      kind: "hint",
+      id: "hint:run-cancelled:run-cancelled",
+      text: "你停止了生成本次回答",
+    });
+  });
+
   it("does not synthesize a duplicate answer when text events already exist", () => {
     const actions = actionsForThreadTranscript(makeTranscript());
     const textContentActions = actions.filter(

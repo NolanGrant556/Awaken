@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	convcontext "awaken/src/context"
 	"awaken/src/tool"
 	"awaken/src/tool/profile"
 )
@@ -416,6 +417,31 @@ func (s *RunService) RenameThread(threadID, label string) (ThreadSnapshot, error
 	return s.threadStore.RenameThread(threadID, normalizedLabel, now)
 }
 
+func (s *RunService) FlushTranscripts() {
+	s.mu.RLock()
+	sessions := make([]*Session, 0, len(s.sessions))
+	for _, session := range s.sessions {
+		sessions = append(sessions, session)
+	}
+	s.mu.RUnlock()
+
+	for _, session := range sessions {
+		run := session.Snapshot()
+		snapshot, ok := s.threadSnapshot(run.ThreadID)
+		if !ok {
+			continue
+		}
+		s.mu.RLock()
+		thread, ok := s.threads[run.ThreadID]
+		s.mu.RUnlock()
+		if !ok || thread.agent == nil {
+			continue
+		}
+		_ = s.threadStore.AppendConversation(snapshot, run, thread.agent.GetConversation().Context.GetMessages())
+		_ = s.threadStore.AppendRunEvents(snapshot, run, session.History(0))
+	}
+}
+
 func (s *RunService) DeleteThread(threadID string) error {
 	threadID = strings.TrimSpace(threadID)
 	if threadID == "" {
@@ -550,6 +576,20 @@ func (s *RunService) ResolveUserQuestion(runID, questionID, answer string) error
 	return session.ResolveUserQuestion(questionID, answer)
 }
 
+func partialAssistantResult(agent *agentcore.Agent) string {
+	if agent == nil {
+		return ""
+	}
+	messages := agent.GetConversation().Context.GetMessages()
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Role == convcontext.RoleAssistant && strings.TrimSpace(msg.Content) != "" {
+			return strings.TrimSpace(msg.Content)
+		}
+	}
+	return ""
+}
+
 func (s *RunService) execute(session *Session, executor Executor, agent *agentcore.Agent, input string, attachments []RunInputAttachment, ctx context.Context) {
 	snapshot := session.Snapshot()
 	defer func() {
@@ -568,7 +608,8 @@ func (s *RunService) execute(session *Session, executor Executor, agent *agentco
 	result, err := executor.Run(ctx, input, sessionEventSink{session: session})
 	if err == nil {
 		if session.CancelRequested() {
-			session.CompleteCancelled("你停止了生成本次回答")
+			session.CompleteCancelled("你停止了生成本次回答", partialAssistantResult(agent))
+			s.flushAgentTranscript(session, agent)
 			return
 		}
 		session.CompleteFinished(result)
@@ -576,7 +617,8 @@ func (s *RunService) execute(session *Session, executor Executor, agent *agentco
 	}
 
 	if errors.Is(ctx.Err(), context.Canceled) || session.CancelRequested() {
-		session.CompleteCancelled("你停止了生成本次回答")
+		session.CompleteCancelled("你停止了生成本次回答", partialAssistantResult(agent))
+		s.flushAgentTranscript(session, agent)
 		return
 	}
 

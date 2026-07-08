@@ -1418,6 +1418,115 @@ func TestGetThreadTranscriptRestoresDurableThreadWithoutMemory(t *testing.T) {
 	}
 }
 
+func TestGetThreadTranscriptRestoresCancelledRunPartialResult(t *testing.T) {
+	userDataDir, err := os.MkdirTemp("", "awaken-cancel-restore-test-*")
+	if err != nil {
+		t.Fatalf("failed to create user data dir: %v", err)
+	}
+	t.Setenv(runtimeUserDataDirEnv, userDataDir)
+	root := t.TempDir()
+
+	deltaEmitted := make(chan struct{})
+
+	firstService := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				Workspace: agentcore.WorkspaceConfig{
+					Root: workspace.WorkspaceRoot,
+				},
+			}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				agent.GetConversation().UserInput(input)
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+				sink.Emit(agentcore.AwakenEvent{
+					Type:      agentcore.TextMessageStartedEventType,
+					MessageID: "msg-1",
+					Role:      "assistant",
+				})
+				sink.Emit(agentcore.AwakenEvent{
+					Type:      agentcore.TextDeltaEventType,
+					MessageID: "msg-1",
+					Role:      "assistant",
+					Delta:     "partial answer ",
+				})
+				agent.GetConversation().AssistantOutput("partial answer", nil)
+				close(deltaEmitted)
+				<-ctx.Done()
+				return "", ctx.Err()
+			})
+		},
+	)
+
+	run, err := firstService.StartRun(StartRunRequest{
+		Input:     "hello",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+
+	<-deltaEmitted
+	if _, err := firstService.CancelRun(run.RunID); err != nil {
+		t.Fatalf("CancelRun returned error: %v", err)
+	}
+
+	run = waitForRunTerminal(t, firstService, run.RunID)
+	if run.Status != RunStatusCancelled {
+		t.Fatalf("expected cancelled status, got %q", run.Status)
+	}
+	if run.Result != "partial answer" {
+		t.Fatalf("expected partial result %q, got %q", "partial answer", run.Result)
+	}
+
+	waitForTranscriptMessageCount(t, root, run.ThreadID, 2)
+
+	restartedService := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				Workspace: agentcore.WorkspaceConfig{
+					Root: workspace.WorkspaceRoot,
+				},
+			}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return "done", nil
+			})
+		},
+	)
+	if err := restartedService.SetDefaultWorkspace(WorkspaceConfig{WorkspaceRoot: root}); err != nil {
+		t.Fatalf("SetDefaultWorkspace returned error: %v", err)
+	}
+
+	transcript, err := restartedService.GetThreadTranscript(run.ThreadID)
+	if err != nil {
+		t.Fatalf("GetThreadTranscript returned error: %v", err)
+	}
+	if len(transcript.Runs) != 1 {
+		t.Fatalf("expected one run, got %d", len(transcript.Runs))
+	}
+	if transcript.Runs[0].Run.Status != RunStatusCancelled {
+		t.Fatalf("expected restored status cancelled, got %q", transcript.Runs[0].Run.Status)
+	}
+	if transcript.Runs[0].Run.Result != "partial answer" {
+		t.Fatalf("expected restored result %q, got %q", "partial answer", transcript.Runs[0].Run.Result)
+	}
+
+	var found bool
+	for _, event := range transcript.Runs[0].Events {
+		if event.Kind == EventKindAgent && event.AgentEvent.Type == agentcore.RunErrorEventType {
+			if event.AgentEvent.Content == "partial answer" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected RunError event with content %q, got events: %+v", "partial answer", transcript.Runs[0].Events)
+	}
+}
+
 func TestListThreadsRestoresDurableThreadsAcrossStoredWorkspaces(t *testing.T) {
 	setRuntimeUserDataDir(t)
 	rootA := t.TempDir()

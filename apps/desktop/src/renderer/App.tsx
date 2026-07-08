@@ -2414,9 +2414,13 @@ export function App() {
             elapsedMs={item.elapsedMs}
             showFooter={showAnswerFooter}
           />
-          {item.footnote ? (
-            <div className="assistant-message-footnote">{item.footnote}</div>
-          ) : null}
+        </div>
+      );
+    }
+    if (item.kind === "hint") {
+      return (
+        <div key={key} className="narrative-hint">
+          {item.text}
         </div>
       );
     }

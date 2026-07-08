@@ -52,12 +52,23 @@ export const AwakenToolTraceLineStates: AwakenToolTraceLineState[] = [
   },
   {
     id: "long-content",
-    label: "长轨迹",
+    label: "长工具返回",
     props: {
-      title: "正在处理一个很长的工具调用标题，确认它在执行流里仍然能换行显示",
-      detail: "细节文本可以包含文件路径、命令摘要或运行结果，由父级决定是否可点击进入 Inspector。",
-      status: "active",
-      onSelect: noop,
+      title: "skill__dws",
+      detail:
+        `[skill "dws" executed inline]\n\n` +
+        `Base directory for this skill: /Users/nolangrant/.awaken/skills/dws\n` +
+        `Use skill_resource_read with skill_id "dws" and a relative path to read bundled references, scripts, or assets from this directory.\n\n` +
+        `# 钉钉全产品 Skill\n\n` +
+        `通过 dws 命令管理钉钉产品能力。\n\n` +
+        `## 严格禁止 (NEVER DO)\n` +
+        `- 不要使用 dws 命令以外的方式操作\n` +
+        `- 不要编造 UUID、ID 等标识符，必须从命令返回中提取\n` +
+        `- 不要猜测字段名/参数值，操作前必须先查询确认\n\n` +
+        `## 产品总览\n` +
+        `aitable、attendance、calendar、chat、contact、devdoc、ding、doc、drive、minutes、oa、report、mail、sheet、todo、wiki。`,
+      status: "done",
+      onSelect: undefined,
     } as unknown as Partial<ComponentProps<typeof AwakenToolTraceLine>>,
   },
 ];

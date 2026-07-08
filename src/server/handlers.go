@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"awaken/src/agentcore"
 	"awaken/src/protocol/agui"
@@ -35,6 +36,10 @@ type renameThreadRequest struct {
 
 type resolveMassMessageReviewRequest struct {
 	Decision string `json:"decision"`
+}
+
+type answerUserQuestionRequest struct {
+	Answer string `json:"answer"`
 }
 
 type errorResponse struct {
@@ -300,6 +305,36 @@ func (h runHandlers) handleResolveMassMessageReview(w http.ResponseWriter, r *ht
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h runHandlers) handleAnswerUserQuestion(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("run_id")
+	questionID := r.PathValue("question_id")
+	var req answerUserQuestionRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+
+	answer := strings.TrimSpace(req.Answer)
+	if answer == "" {
+		writeErrorJSON(w, http.StatusBadRequest, "EMPTY_ANSWER", "answer is required")
+		return
+	}
+
+	if err := h.runService.ResolveUserQuestion(runID, questionID, answer); err != nil {
+		switch {
+		case errors.Is(err, awruntime.ErrRunNotFound), errors.Is(err, awruntime.ErrUserQuestionNotFound):
+			writeErrorJSON(w, http.StatusNotFound, "USER_QUESTION_NOT_FOUND", err.Error())
+		case errors.Is(err, awruntime.ErrRunTerminal):
+			writeErrorJSON(w, http.StatusConflict, "RUN_TERMINAL", err.Error())
+		default:
+			writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to answer user question")
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func decodeJSON(r *http.Request, dst any) error {
 	defer r.Body.Close()
 
@@ -381,6 +416,9 @@ func mapRuntimeEvent(event awruntime.Event) []agui.Event {
 			ThreadID:       event.ThreadID,
 			RunID:          event.RunID,
 			Status:         event.Status,
+			Message:        event.Message,
+			Content:        event.Content,
+			Code:           event.Code,
 			TerminalReason: string(event.TerminalReason),
 		}}
 	default:

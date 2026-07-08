@@ -15,6 +15,7 @@ import (
 	"awaken/src/internal/outputlimit"
 	"awaken/src/tool"
 	"awaken/src/tool/profile"
+	"awaken/src/tools/ask_user"
 )
 
 const maxPatchPreviewChars = 50000
@@ -360,6 +361,42 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	if strings.TrimSpace(decision.UpdatedInput) != "" {
 		input = decision.UpdatedInput
 	}
+
+	// ask_user is handled specially: it does not execute a real tool but
+	// blocks the agent loop until the user answers the question(s) in the UI.
+	if call.Function.Name == askuser.ToolName {
+		questions, parseErr := askuser.ParseQuestions(input)
+		if parseErr != nil {
+			result = synthesizeFailedToolResult(result, "ask_user_invalid_input", fmt.Sprintf("提问格式错误: %v", parseErr))
+			result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
+			rt.writeAudit(def, result, permission, string(decision.Source), "failed", parseErr.Error())
+			return finalizeToolResult(result)
+		}
+
+		request := rt.userQuestionEvent(result, def, questions)
+		awaiter, ok := rt.sink.(UserQuestionAwaiter)
+		if !ok {
+			rt.sink.Emit(request)
+			result = synthesizeFailedToolResult(result, "ask_user_no_awaiter", "当前运行环境不支持用户提问")
+			result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
+			rt.writeAudit(def, result, permission, string(decision.Source), "failed", "no user question awaiter")
+			return finalizeToolResult(result)
+		}
+
+		answer, err := awaiter.AwaitUserQuestion(ctx, request)
+		if err != nil {
+			result = synthesizeFailedToolResult(result, "ask_user_aborted", fmt.Sprintf("用户提问未完成: %v", err))
+			result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
+			rt.writeAudit(def, result, permission, string(decision.Source), "failed", err.Error())
+			return finalizeToolResult(result)
+		}
+
+		result.Content = askuser.FormatAnswerTextResult(questions, answer)
+		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
+		rt.writeAudit(def, result, permission, string(decision.Source), "success", "")
+		return finalizeToolResult(result)
+	}
+
 	switch decision.Action {
 	case ToolDecisionAllow:
 	case ToolDecisionDeny:
@@ -793,6 +830,25 @@ func (rt *ToolRuntime) massMessageReviewEvent(result ToolExecutionResult, def to
 		MassMessageAttachments:     append([]string(nil), msg.Attachments...),
 		MassMessageSendingAccount:  msg.SendingAccount,
 		MassMessageSourceTool:      msg.SourceTool,
+	}
+}
+
+func (rt *ToolRuntime) userQuestionEvent(result ToolExecutionResult, def tool.ToolDefinition, questions []askuser.Question) AwakenEvent {
+	questionID := newAwakenID("user_question")
+	contentBytes, err := json.Marshal(map[string]any{
+		"questions": questions,
+	})
+	if err != nil {
+		contentBytes = []byte("{}")
+	}
+	return AwakenEvent{
+		Type:           UserQuestionRequestedType,
+		Timestamp:      timeNowUTC(),
+		ToolCallID:     result.ToolCallID,
+		ToolName:       result.Name,
+		ToolDefinition: def,
+		QuestionID:     questionID,
+		Content:        string(contentBytes),
 	}
 }
 

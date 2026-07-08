@@ -61,6 +61,7 @@ import {
   reduceRuntimeState,
   type ThreadItem,
   type RuntimeAction,
+  type UserQuestionItem,
 } from "./runtime/reducer";
 import type { RunNarrativeItem } from "./run-narrative";
 import {
@@ -104,6 +105,214 @@ import {
 } from "./composerAttachments";
 
 type InspectorTabId = "changes";
+
+type UserQuestionPromptProps = {
+  question: UserQuestionItem;
+  disabled?: boolean;
+  onSubmit: (answer: string) => void;
+};
+
+type UserQuestionSelection = {
+  selected: string[];
+  otherText: string;
+};
+
+const USER_QUESTION_OTHER_OPTION = "__other__";
+
+function UserQuestionPrompt({
+  question,
+  disabled,
+  onSubmit,
+}: UserQuestionPromptProps) {
+  const [answers, setAnswers] = useState<Record<number, UserQuestionSelection>>(
+    {},
+  );
+  const otherInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
+
+  useEffect(() => {
+    setAnswers({});
+  }, [question.id]);
+
+  const questions = question.questions;
+  if (questions.length === 0) {
+    return null;
+  }
+
+  const currentAnswer = (index: number): UserQuestionSelection =>
+    answers[index] ?? { selected: [], otherText: "" };
+
+  const isSelected = (index: number, label: string): boolean =>
+    currentAnswer(index).selected.includes(label);
+
+  const toggleOption = (index: number, multiSelect: boolean, label: string) => {
+    setAnswers((current) => {
+      const entry = current[index] ?? { selected: [], otherText: "" };
+      let selected: string[];
+      if (multiSelect) {
+        selected = entry.selected.includes(label)
+          ? entry.selected.filter((item) => item !== label)
+          : [...entry.selected, label];
+      } else {
+        selected = [label];
+      }
+      return {
+        ...current,
+        [index]: { ...entry, selected },
+      };
+    });
+    if (label === USER_QUESTION_OTHER_OPTION) {
+      window.setTimeout(() => otherInputRefs.current[index]?.focus(), 0);
+    }
+  };
+
+  const setOtherText = (index: number, value: string) => {
+    setAnswers((current) => {
+      const entry = current[index] ?? { selected: [], otherText: "" };
+      return {
+        ...current,
+        [index]: { ...entry, otherText: value },
+      };
+    });
+  };
+
+  const selectedLabelsForQuestion = (index: number): string[] => {
+    const entry = currentAnswer(index);
+    const labels = entry.selected.filter(
+      (label) => label !== USER_QUESTION_OTHER_OPTION,
+    );
+    if (
+      entry.selected.includes(USER_QUESTION_OTHER_OPTION) &&
+      entry.otherText.trim()
+    ) {
+      labels.push(entry.otherText.trim());
+    }
+    return labels;
+  };
+
+  const canSubmit = questions.every(
+    (_item, index) => selectedLabelsForQuestion(index).length > 0,
+  );
+
+  const handleSubmit = () => {
+    if (disabled || !canSubmit) {
+      return;
+    }
+    onSubmit(
+      questions
+        .map((item, index) => {
+          const labels = selectedLabelsForQuestion(index);
+          return `${item.question}: ${labels.join(", ")}`;
+        })
+        .join("\n"),
+    );
+  };
+
+  return (
+    <div className="user-question-card">
+      <div className="user-question-card__body">
+        {questions.map((item, index) => {
+          const isMulti = item.multiSelect ?? false;
+          const options = Array.isArray(item.options) ? item.options : [];
+          const hasOther = isSelected(index, USER_QUESTION_OTHER_OPTION);
+          return (
+            <div
+              className="user-question-card__question"
+              key={`${index}:${item.question}`}
+            >
+              {item.header ? (
+                <div className="user-question-card__header">
+                  {item.header}
+                </div>
+              ) : null}
+              <div className="user-question-card__title">{item.question}</div>
+              <div className="user-question-card__options">
+                {options.map((option) => (
+                  <button
+                    key={option.label}
+                    type="button"
+                    className={`user-question-card__option${
+                      isSelected(index, option.label)
+                        ? " user-question-card__option--selected"
+                        : ""
+                    }`}
+                    onClick={() => toggleOption(index, isMulti, option.label)}
+                    disabled={disabled}
+                  >
+                    <span className="user-question-card__option-label">
+                      {option.label}
+                    </span>
+                    {option.description ? (
+                      <span className="user-question-card__option-description">
+                        {option.description}
+                      </span>
+                    ) : null}
+                  </button>
+                ))}
+                <div
+                  className={`user-question-card__option user-question-card__option--other${
+                    hasOther ? " user-question-card__option--selected" : ""
+                  }${disabled ? " user-question-card__option--disabled" : ""}`}
+                  onClick={() => {
+                    if (!disabled) {
+                      toggleOption(index, isMulti, USER_QUESTION_OTHER_OPTION);
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (
+                      disabled ||
+                      (event.key !== "Enter" && event.key !== " ")
+                    ) {
+                      return;
+                    }
+                    event.preventDefault();
+                    toggleOption(index, isMulti, USER_QUESTION_OTHER_OPTION);
+                  }}
+                  role="button"
+                  aria-pressed={hasOther}
+                  tabIndex={disabled ? -1 : 0}
+                >
+                  <span className="user-question-card__option-label">
+                    其他（输入你的答案）
+                  </span>
+                  {hasOther ? (
+                    <input
+                      ref={(node) => {
+                        otherInputRefs.current[index] = node;
+                      }}
+                      type="text"
+                      className="user-question-card__other-input"
+                      placeholder="请输入你的回答..."
+                      value={currentAnswer(index).otherText}
+                      onChange={(event) =>
+                        setOtherText(index, event.target.value)
+                      }
+                      disabled={disabled}
+                      onClick={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => event.stopPropagation()}
+                    />
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="user-question-card__actions">
+        <Button
+          variant="primary"
+          size="sm"
+          loading={disabled}
+          disabled={disabled || !canSubmit}
+          onClick={() => {
+            void handleSubmit();
+          }}
+        >
+          提交回答
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 export function shouldShowSidebarThreadSpinner(thread: ThreadItem): boolean {
   if (
@@ -531,6 +740,8 @@ export function App() {
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
   const [resolvingMassMessageReviewId, setResolvingMassMessageReviewId] =
+    useState<string | null>(null);
+  const [answeringUserQuestionId, setAnsweringUserQuestionId] =
     useState<string | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
   const [modelProfiles, setModelProfiles] = useState<
@@ -1033,6 +1244,7 @@ export function App() {
   });
 
   const activeMassMessageReview = runtimeState.massMessageReviews[0];
+  const activeUserQuestion = runtimeState.userQuestions[0];
   const navItems: NavItem[] = [
     {
       id: "connectors",
@@ -1420,7 +1632,23 @@ export function App() {
         }
         dispatch({ type: "run/event", event, receivedAtMs });
       },
-      onError: (message) => dispatch({ type: "run/streamFailed", message }),
+      onError: (message) => {
+        if (message.toLowerCase().includes("run session was not found")) {
+          localStorage.removeItem("awaken:runId");
+          dispatch({
+            type: "run/event",
+            event: {
+              type: "RUN_STATUS_CHANGED",
+              rawType: "RUN_STATUS_CHANGED",
+              status: "cancelled",
+              message: "你停止生成了本次回答",
+            },
+            receivedAtMs: Date.now(),
+          });
+          return;
+        }
+        dispatch({ type: "run/streamFailed", message });
+      },
       onReconnect: () => dispatch({ type: "run/reconnecting" }),
       onClose: () => {
         // Non-terminal close is handled by the client layer's attemptReconnect
@@ -1464,6 +1692,26 @@ export function App() {
 
     if (!shouldResumeSubscription(latestRun.status)) {
       localStorage.removeItem("awaken:runId");
+      return latestRun.status;
+    }
+
+    // The transcript may report a run as running, but if the runtime process
+    // was restarted the in-memory session is gone. Verify the run still exists
+    // before subscribing; otherwise mark it as lost instead of retrying.
+    try {
+      await runtimeClient.getRun(latestRun.runId);
+    } catch {
+      localStorage.removeItem("awaken:runId");
+      dispatch({
+        type: "run/event",
+        event: {
+          type: "RUN_STATUS_CHANGED",
+          rawType: "RUN_STATUS_CHANGED",
+          status: "cancelled",
+          message: "你停止生成了本次回答",
+        },
+        receivedAtMs: Date.now(),
+      });
       return latestRun.status;
     }
 
@@ -1956,10 +2204,19 @@ export function App() {
         localStorage.removeItem("awaken:runId");
       }
     } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to cancel run";
+      if (message.includes("RUN_NOT_FOUND")) {
+        // The run no longer exists on the server (e.g. runtime restarted or
+        // the run already terminated). Reset the local runtime state so the
+        // user can start fresh instead of showing a confusing error.
+        localStorage.removeItem("awaken:runId");
+        dispatch({ type: "run/reset" });
+        return;
+      }
       dispatch({
         type: "run/streamFailed",
-        message:
-          error instanceof Error ? error.message : "Failed to cancel run",
+        message,
       });
     }
   }
@@ -1990,6 +2247,38 @@ export function App() {
       );
     } finally {
       setResolvingMassMessageReviewId(null);
+    }
+  }
+
+  async function handleAnswerUserQuestion(answer: string): Promise<void> {
+    if (!runtimeState.runId || !activeUserQuestion) {
+      return;
+    }
+    if (answeringUserQuestionId === activeUserQuestion.id) {
+      return;
+    }
+
+    const trimmed = answer.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    setNotice(null);
+    setAnsweringUserQuestionId(activeUserQuestion.id);
+    try {
+      await runtimeClient.answerUserQuestion(
+        runtimeState.runId,
+        activeUserQuestion.id,
+        trimmed,
+      );
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Failed to answer user question",
+      );
+    } finally {
+      setAnsweringUserQuestionId(null);
     }
   }
 
@@ -2186,13 +2475,21 @@ export function App() {
         isFinal: item.isFinal,
       });
       return (
-        <AssistantMessage
-          key={key}
-          markdown={item.markdown}
-          status={item.status}
-          elapsedMs={item.elapsedMs}
-          showFooter={showAnswerFooter}
-        />
+        <div key={key} className="assistant-message-wrapper">
+          <AssistantMessage
+            markdown={item.markdown}
+            status={item.status}
+            elapsedMs={item.elapsedMs}
+            showFooter={showAnswerFooter}
+          />
+        </div>
+      );
+    }
+    if (item.kind === "hint") {
+      return (
+        <div key={key} className="narrative-hint">
+          {item.text}
+        </div>
       );
     }
     if (item.kind === "compactBoundary") {
@@ -2406,6 +2703,22 @@ export function App() {
           </Button>
         </div>
       </div>
+    );
+  }
+
+  function renderUserQuestionPrompt() {
+    if (!activeUserQuestion) {
+      return null;
+    }
+    const answering = answeringUserQuestionId === activeUserQuestion.id;
+    return (
+      <UserQuestionPrompt
+        question={activeUserQuestion}
+        disabled={answering}
+        onSubmit={(answer) => {
+          void handleAnswerUserQuestion(answer);
+        }}
+      />
     );
   }
 
@@ -2654,6 +2967,7 @@ export function App() {
                             <div className="composer-dock-stack">
                               {renderComposerRuntimePanels()}
                               {renderMassMessageReviewPrompt()}
+                              {renderUserQuestionPrompt()}
                               <ComposerBar
                                 value={composerValue}
                                 onChange={setComposerValue}
@@ -2688,6 +3002,7 @@ export function App() {
                           <TaskWelcome />
                           {renderComposerRuntimePanels()}
                           {renderMassMessageReviewPrompt()}
+                          {renderUserQuestionPrompt()}
                           <ComposerBar
                             value={composerValue}
                             onChange={setComposerValue}

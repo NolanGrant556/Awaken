@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	convcontext "awaken/src/context"
 	"awaken/src/tool"
 	"awaken/src/tool/profile"
 )
@@ -34,6 +35,7 @@ var (
 	ErrUnsupportedInputAttachment = errors.New("model does not support image input")
 	ErrMassMessageReviewNotFound  = errors.New("mass message review not found")
 	ErrInvalidReviewDecision      = errors.New("invalid mass message review decision")
+	ErrUserQuestionNotFound       = errors.New("user question not found")
 )
 
 const maxRetainedThreads = 100
@@ -415,6 +417,31 @@ func (s *RunService) RenameThread(threadID, label string) (ThreadSnapshot, error
 	return s.threadStore.RenameThread(threadID, normalizedLabel, now)
 }
 
+func (s *RunService) FlushTranscripts() {
+	s.mu.RLock()
+	sessions := make([]*Session, 0, len(s.sessions))
+	for _, session := range s.sessions {
+		sessions = append(sessions, session)
+	}
+	s.mu.RUnlock()
+
+	for _, session := range sessions {
+		run := session.Snapshot()
+		snapshot, ok := s.threadSnapshot(run.ThreadID)
+		if !ok {
+			continue
+		}
+		s.mu.RLock()
+		thread, ok := s.threads[run.ThreadID]
+		s.mu.RUnlock()
+		if !ok || thread.agent == nil {
+			continue
+		}
+		_ = s.threadStore.AppendConversation(snapshot, run, thread.agent.GetConversation().Context.GetMessages())
+		_ = s.threadStore.AppendRunEvents(snapshot, run, session.History(0))
+	}
+}
+
 func (s *RunService) DeleteThread(threadID string) error {
 	threadID = strings.TrimSpace(threadID)
 	if threadID == "" {
@@ -539,6 +566,30 @@ func (s *RunService) ResolveMassMessageReview(runID, reviewID string, decision a
 	return session.ResolveMassMessageReview(reviewID, decision)
 }
 
+func (s *RunService) ResolveUserQuestion(runID, questionID, answer string) error {
+	s.mu.RLock()
+	session, ok := s.sessions[runID]
+	s.mu.RUnlock()
+	if !ok {
+		return ErrRunNotFound
+	}
+	return session.ResolveUserQuestion(questionID, answer)
+}
+
+func partialAssistantResult(agent *agentcore.Agent) string {
+	if agent == nil {
+		return ""
+	}
+	messages := agent.GetConversation().Context.GetMessages()
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Role == convcontext.RoleAssistant && strings.TrimSpace(msg.Content) != "" {
+			return strings.TrimSpace(msg.Content)
+		}
+	}
+	return ""
+}
+
 func (s *RunService) execute(session *Session, executor Executor, agent *agentcore.Agent, input string, attachments []RunInputAttachment, ctx context.Context) {
 	snapshot := session.Snapshot()
 	defer func() {
@@ -557,7 +608,8 @@ func (s *RunService) execute(session *Session, executor Executor, agent *agentco
 	result, err := executor.Run(ctx, input, sessionEventSink{session: session})
 	if err == nil {
 		if session.CancelRequested() {
-			session.CompleteCancelled("run cancelled")
+			session.CompleteCancelled("你停止了生成本次回答", partialAssistantResult(agent))
+			s.flushAgentTranscript(session, agent)
 			return
 		}
 		session.CompleteFinished(result)
@@ -565,7 +617,8 @@ func (s *RunService) execute(session *Session, executor Executor, agent *agentco
 	}
 
 	if errors.Is(ctx.Err(), context.Canceled) || session.CancelRequested() {
-		session.CompleteCancelled("run cancelled")
+		session.CompleteCancelled("你停止了生成本次回答", partialAssistantResult(agent))
+		s.flushAgentTranscript(session, agent)
 		return
 	}
 
@@ -744,6 +797,20 @@ func (s sessionEventSink) Emit(event agentcore.AwakenEvent) {
 		return
 	}
 	s.session.RecordAgentEvent(event)
+}
+
+func (s sessionEventSink) AwaitUserQuestion(ctx context.Context, request agentcore.AwakenEvent) (string, error) {
+	if s.session == nil {
+		return "", ErrRunNotFound
+	}
+	return s.session.AwaitUserQuestion(ctx, request)
+}
+
+func (s sessionEventSink) AwaitMassMessageReview(ctx context.Context, request agentcore.AwakenEvent) (agentcore.ReviewDecision, error) {
+	if s.session == nil {
+		return "", ErrRunNotFound
+	}
+	return s.session.AwaitMassMessageReview(ctx, request)
 }
 
 func normalizeWorkspace(ws WorkspaceConfig) (WorkspaceConfig, error) {

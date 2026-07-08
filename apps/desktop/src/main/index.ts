@@ -722,6 +722,19 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  "awaken:answer-user-question",
+  async (_event, payload: { runId: string; questionId: string; answer: string }) => {
+    await requestRuntimeOK(`/v1/runs/${payload.runId}/user-questions/${payload.questionId}/answer`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ answer: payload.answer }),
+    });
+  },
+);
+
+ipcMain.handle(
   "awaken:subscribe-run",
   async (event, payload: { runId: string; subscriptionId: string; afterSeq?: number }) => {
     await subscribeToRun(event.sender, payload.runId, payload.subscriptionId, payload.afterSeq);

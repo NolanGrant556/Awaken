@@ -257,8 +257,27 @@ export class RuntimeSupervisor {
     }
     this.setStatus("stopping");
     const child = this.child;
+    const baseUrl = this.runtimeBaseUrl;
     this.child = null;
     this.runtimeBaseUrl = undefined;
+
+    if (baseUrl) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 2000);
+        try {
+          await fetch(`${baseUrl}/v1/shutdown`, {
+            method: "POST",
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timer);
+        }
+      } catch {
+        // Ignore shutdown endpoint errors and fall back to terminating the child.
+      }
+    }
+
     await this.terminateChild(child);
     this.setStatus("stopped");
   }
@@ -425,9 +444,10 @@ export class RuntimeSupervisor {
   private killChild(child: ChildProcess, force: boolean): boolean {
     try {
       if (process.platform === "win32" && child.pid) {
-        // Signal the immediate process first (keeps tests observable and gives
-        // the child a graceful chance before taskkill tears down the tree).
-        child.kill(force ? "SIGKILL" : "SIGTERM");
+        // On Windows SIGTERM is not gracefully delivered to non-Node console
+        // processes; use SIGINT (CTRL_C_EVENT) so awaken-core can run its
+        // shutdown handler and flush active transcripts.
+        child.kill(force ? "SIGKILL" : "SIGINT");
         const args = ["/pid", String(child.pid), "/t"];
         if (force) {
           args.push("/f");

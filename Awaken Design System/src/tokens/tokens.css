@@ -98,6 +98,10 @@
   --aw-composer-shadow-focus:
     var(--aw-shadow-focus),
     0 14px 40px rgba(23, 23, 23, 0.08);
+  --aw-composer-attachment-remove-bg: rgba(23, 23, 23, 0.72);
+  --aw-composer-attachment-remove-fg: var(--aw-text-onblack);
+  --aw-composer-attachment-remove-border: transparent;
+  --aw-composer-attachment-remove-shadow: none;
   --aw-composer-halo:
     radial-gradient(
       ellipse at 50% 58%,
@@ -289,6 +293,10 @@
   --aw-composer-shadow-focus:
     var(--aw-shadow-focus),
     0 22px 48px rgba(0, 0, 0, 0.42);
+  --aw-composer-attachment-remove-bg: rgba(245, 245, 241, 0.94);
+  --aw-composer-attachment-remove-fg: #111110;
+  --aw-composer-attachment-remove-border: rgba(255, 255, 255, 0.32);
+  --aw-composer-attachment-remove-shadow: 0 4px 12px rgba(0, 0, 0, 0.32);
   --aw-composer-halo:
     radial-gradient(
       ellipse at 50% 58%,

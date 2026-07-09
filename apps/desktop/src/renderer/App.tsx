@@ -48,6 +48,7 @@ import {
 } from "@awaken/design-system";
 import { createRuntimeClient, type SubscribeHandlers } from "./runtime/client";
 import type {
+  AwakenTheme,
   ComposerToken,
   MassMessageReviewDecision,
   RuntimeInfo,
@@ -796,6 +797,7 @@ const MIN_INSPECTOR_WIDTH = 260;
 const MAX_INSPECTOR_WIDTH = 520;
 const LAYOUT_STEP = 12;
 const INSPECTOR_RESPONSIVE_COLLAPSE_QUERY = "(max-width: 1180px)";
+const STORED_THEME_KEY = "awaken:appearance:theme";
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -861,6 +863,10 @@ function readStoredString(key: string, fallback = ""): string {
   } catch {
     return fallback;
   }
+}
+
+function readStoredTheme(): AwakenTheme {
+  return readStoredString(STORED_THEME_KEY) === "dark" ? "dark" : "light";
 }
 
 function readStoredStringRecord(key: string): Record<string, string> {
@@ -975,6 +981,10 @@ export function App() {
     RuntimeModelProfileSummary[]
   >([]);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
+  const [appearanceTheme, setAppearanceTheme] =
+    useState<AwakenTheme>(readStoredTheme);
+  const [appearanceSaving, setAppearanceSaving] = useState(false);
+  const [appearanceMessage, setAppearanceMessage] = useState<string | null>(null);
   const [profilePopoverOpen, setProfilePopoverOpen] = useState(false);
   const profileButtonRef = useRef<HTMLDivElement>(null);
   const [workspacePath, setWorkspacePath] = useState<string>(() =>
@@ -1070,6 +1080,36 @@ export function App() {
     runtimeState.supervisorStatus === "stopping" ||
     runtimeState.supervisorStatus === "stopped";
   const desktopNeedsRestart = runtimeState.supervisorStatus === "crashed";
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+    document.documentElement.dataset.awTheme = appearanceTheme;
+    document.documentElement.style.colorScheme =
+      appearanceTheme === "dark" ? "dark" : "light";
+    writeStoredValue(STORED_THEME_KEY, appearanceTheme);
+  }, [appearanceTheme]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAppearancePreferences(): Promise<void> {
+      try {
+        const preferences = await runtimeClient.getDesktopPreferences();
+        if (!cancelled) {
+          setAppearanceTheme(preferences.theme);
+        }
+      } catch {
+        // The localStorage mirror already provides the best available fallback.
+      }
+    }
+
+    void loadAppearancePreferences();
+    return () => {
+      cancelled = true;
+    };
+  }, [runtimeClient]);
 
   useEffect(() => {
     writeStoredValue("awaken:layout:sidebarWidth", String(sidebarWidth));
@@ -1347,6 +1387,28 @@ export function App() {
       setNotice(
         error instanceof Error ? error.message : "Failed to switch model",
       );
+    }
+  }
+
+  async function handleAppearanceThemeChange(theme: AwakenTheme): Promise<void> {
+    if (theme === appearanceTheme || appearanceSaving) {
+      return;
+    }
+
+    const previousTheme = appearanceTheme;
+    setAppearanceTheme(theme);
+    setAppearanceSaving(true);
+    setAppearanceMessage(null);
+    try {
+      const preferences = await runtimeClient.saveDesktopPreferences({ theme });
+      setAppearanceTheme(preferences.theme);
+    } catch (error) {
+      setAppearanceTheme(previousTheme);
+      setAppearanceMessage(
+        error instanceof Error ? error.message : "Failed to save theme",
+      );
+    } finally {
+      setAppearanceSaving(false);
     }
   }
 
@@ -3714,6 +3776,12 @@ export function App() {
       <ModelSettingsDialog
         open={modelSettingsOpen}
         runtimeClient={runtimeClient}
+        theme={appearanceTheme}
+        themeSaving={appearanceSaving}
+        themeMessage={appearanceMessage}
+        onThemeChange={(theme) => {
+          void handleAppearanceThemeChange(theme);
+        }}
         onOpenChange={setModelSettingsOpen}
         onProfilesChanged={() => {
           void refreshRuntimeInfoNow();

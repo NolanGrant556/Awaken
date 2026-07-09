@@ -183,7 +183,7 @@ Awaken Desktop
 
 ## 配置
 
-模型配置的唯一用户入口是 Awaken Desktop 的 `Settings > Models`。
+模型配置的唯一用户入口是 Awaken Desktop 的 `Settings > Models`。外观主题在同一个 Settings surface 的“外观”分区里配置。
 
 用户在这里配置 provider、model、API key、上下文窗口和输出上限；Desktop 会把 profile 注入每次 run。正式 Desktop 路径不读取项目根目录的 `.env` 或 `config.toml`，也不会要求用户编辑本地配置文件。
 
@@ -199,6 +199,7 @@ API key 由 Electron `safeStorage` 保存；非敏感 profile 字段保存到 De
 当前全局数据布局：
 
 - `config/model-profiles.json`：模型 profile 的非敏感字段
+- `config/desktop-preferences.json`：Desktop 外观等非敏感用户偏好
 - `config/mcp-servers.json`：用户级 MCP 配置
 - `data/threads.sqlite`：线程索引
 - `data/threads/thread_<thread_id>.jsonl`：线程 transcript

@@ -94,6 +94,8 @@ function stubElectronBridge(): void {
       answerUserQuestion: vi.fn(),
       subscribeRun: vi.fn(),
       unsubscribeRun: vi.fn(),
+      getDesktopPreferences: vi.fn(async () => ({ theme: "light" as const })),
+      saveDesktopPreferences: vi.fn(async () => ({ theme: "light" as const })),
       getRuntimeInfo: vi.fn(),
       listConnectors: vi.fn(async () => []),
       connectConnector: vi.fn(),

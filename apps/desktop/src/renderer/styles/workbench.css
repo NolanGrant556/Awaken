@@ -194,12 +194,12 @@
 }
 
 .user-question-card__option:hover:not(:disabled, .user-question-card__option--disabled) {
-  border-color: rgba(115, 115, 115, 0.28);
+  border-color: var(--aw-border-control-hover);
 }
 
 .user-question-card__option--selected {
   border-color: var(--aw-button-black);
-  background: rgba(38, 38, 38, 0.06);
+  background: var(--aw-surface-selection);
 }
 
 .user-question-card__option:disabled,
@@ -406,7 +406,7 @@
 }
 
 .turn-marker-button:focus-visible {
-  outline: 2px solid rgba(31, 31, 31, 0.18);
+  outline: 2px solid var(--aw-border-control-hover);
   outline-offset: 1px;
 }
 
@@ -415,7 +415,7 @@
   width: 12px;
   height: 3px;
   border-radius: 999px;
-  background: rgba(31, 31, 31, 0.14);
+  background: color-mix(in srgb, var(--aw-text-primary) 16%, transparent);
   transition:
     width 140ms ease,
     background-color 140ms ease;
@@ -424,12 +424,12 @@
 .turn-marker-button:hover .turn-marker-bar,
 .turn-marker-button:focus-visible .turn-marker-bar {
   width: 14px;
-  background: rgba(31, 31, 31, 0.28);
+  background: color-mix(in srgb, var(--aw-text-primary) 30%, transparent);
 }
 
 .turn-marker-button-active .turn-marker-bar {
   width: 16px;
-  background: rgba(31, 31, 31, 0.46);
+  background: color-mix(in srgb, var(--aw-text-primary) 48%, transparent);
 }
 
 .turn-marker-rail-compact {
@@ -465,7 +465,7 @@
 .turn-marker-rail-summary .turn-marker-bar {
   width: 8px;
   height: 2px;
-  background: rgba(31, 31, 31, 0.12);
+  background: color-mix(in srgb, var(--aw-text-primary) 14%, transparent);
 }
 
 .turn-marker-rail-summary .turn-marker-button:hover .turn-marker-bar,
@@ -476,7 +476,7 @@
 .turn-marker-rail-summary .turn-marker-button-active .turn-marker-bar {
   width: 12px;
   height: 3px;
-  background: rgba(31, 31, 31, 0.44);
+  background: color-mix(in srgb, var(--aw-text-primary) 46%, transparent);
 }
 
 .return-to-latest-overlay {
@@ -506,13 +506,13 @@
   aspect-ratio: 1 / 1;
   padding: 0;
   overflow: hidden;
-  border: 1px solid rgba(31, 31, 31, 0.12);
+  border: 1px solid var(--aw-border-main);
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--aw-surface-raised);
   appearance: none;
   -webkit-appearance: none;
-  box-shadow: 0 8px 20px rgba(15, 18, 25, 0.12), 0 2px 6px rgba(15, 18, 25, 0.06);
-  color: rgba(15, 18, 25, 0.92);
+  box-shadow: var(--aw-shadow-popover);
+  color: var(--aw-text-primary);
   cursor: pointer;
   line-height: 1;
   pointer-events: auto;
@@ -528,13 +528,13 @@
 
 .return-to-latest-button:hover,
 .return-to-latest-button:focus-visible {
-  border-color: rgba(31, 31, 31, 0.2);
-  box-shadow: 0 10px 24px rgba(15, 18, 25, 0.16), 0 2px 8px rgba(15, 18, 25, 0.08);
+  border-color: var(--aw-border-control-hover);
+  box-shadow: var(--aw-shadow-popover);
   transform: translateY(-1px);
 }
 
 .return-to-latest-button:focus-visible {
-  outline: 2px solid rgba(31, 31, 31, 0.16);
+  outline: 2px solid var(--aw-border-control-hover);
   outline-offset: 2px;
 }
 
@@ -565,7 +565,7 @@
       180deg,
       var(--aw-surface-work) 0%,
       var(--aw-surface-work) 78%,
-      rgba(248, 248, 247, 0) 100%
+      transparent 100%
     );
 }
 
@@ -585,10 +585,10 @@
   width: 100%;
   max-width: 100%;
   padding: 10px 16px;
-  border-color: rgba(31, 31, 31, 0.08);
+  border-color: var(--aw-border-light);
   border-radius: 12px;
-  background: #fbfbf8;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+  background: var(--aw-surface-raised);
+  box-shadow: var(--aw-shadow-raised);
 }
 
 .execution-turn-body {
@@ -663,7 +663,7 @@
   display: block;
   height: 1px;
   min-width: 0;
-  background: rgba(31, 31, 31, 0.12);
+  background: var(--aw-border-main);
 }
 
 .compact-boundary-copy {
@@ -696,7 +696,7 @@
 }
 
 .compact-boundary-started .compact-boundary-line {
-  background: rgba(31, 31, 31, 0.16);
+  background: var(--aw-border-control);
 }
 
 .compact-boundary-failed {
@@ -730,5 +730,5 @@
 .composer-runtime-panel {
   width: 100%;
   padding: 12px 14px;
-  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.08);
+  box-shadow: var(--aw-shadow-raised);
 }

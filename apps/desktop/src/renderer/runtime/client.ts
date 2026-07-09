@@ -4,6 +4,8 @@ import {
   type AwakenBridge,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
+  type DesktopPreferences,
+  type DesktopPreferencesSaveRequest,
   type DesktopPlatform,
   type InstallSkillRequest,
   type InstallSkillResponse,
@@ -84,6 +86,8 @@ export type RuntimeClient = {
     questionId: string,
     answer: string,
   ) => Promise<void>;
+  getDesktopPreferences: () => Promise<DesktopPreferences>;
+  saveDesktopPreferences: (request: DesktopPreferencesSaveRequest) => Promise<DesktopPreferences>;
   subscribeRun: (
     runId: string,
     handlers: SubscribeHandlers,
@@ -155,6 +159,8 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     cancelRun: bridge.cancelRun,
     resolveMassMessageReview: bridge.resolveMassMessageReview,
     answerUserQuestion: bridge.answerUserQuestion,
+    getDesktopPreferences: () => bridge.getDesktopPreferences(),
+    saveDesktopPreferences: (request) => bridge.saveDesktopPreferences(request),
     subscribeRun: async (runId, handlers, afterSeq) => {
       let lastSeq = afterSeq ?? 0;
       let terminalSeen = false;

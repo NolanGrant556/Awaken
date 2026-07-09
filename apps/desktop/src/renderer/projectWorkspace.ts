@@ -122,30 +122,15 @@ export function projectIdForThread(
         threadId: string;
         workspaceRoot?: string;
       },
-  threadProjectIds: Record<string, string>,
   defaultWorkspacePath?: string,
 ): string {
-  if (typeof thread !== "string") {
-    if (thread.workspaceRoot) {
-      return projectIdForWorkspacePath(
-        thread.workspaceRoot,
-        defaultWorkspacePath,
-      );
-    }
-    return threadProjectIds[thread.threadId] ?? DEFAULT_WORKSPACE_PROJECT_ID;
+  if (typeof thread === "string") {
+    return DEFAULT_WORKSPACE_PROJECT_ID;
   }
-  return threadProjectIds[thread] ?? DEFAULT_WORKSPACE_PROJECT_ID;
-}
-
-export function assignThreadToProject(
-  threadProjectIds: Record<string, string>,
-  threadId: string,
-  projectId: string,
-): Record<string, string> {
-  return {
-    ...threadProjectIds,
-    [threadId]: projectId,
-  };
+  return projectIdForWorkspacePath(
+    thread.workspaceRoot,
+    defaultWorkspacePath,
+  );
 }
 
 export function removeWorkspaceProject(
@@ -153,14 +138,4 @@ export function removeWorkspaceProject(
   projectId: string,
 ): WorkspaceProject[] {
   return projects.filter((project) => project.id !== projectId);
-}
-
-export function removeThreadProjectAssignments(
-  threadProjectIds: Record<string, string>,
-  threadIds: string[],
-): Record<string, string> {
-  const toRemove = new Set(threadIds);
-  return Object.fromEntries(
-    Object.entries(threadProjectIds).filter(([threadId]) => !toRemove.has(threadId)),
-  );
 }

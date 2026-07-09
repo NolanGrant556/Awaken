@@ -39,11 +39,9 @@ import type { RuntimeSkill } from "../shared/runtime";
 import type { RunNarrativeItem } from "./run-narrative";
 import {
   DEFAULT_WORKSPACE_PROJECT_ID,
-  assignThreadToProject,
   mergeWorkspaceProjects,
   normalizeWorkspacePath,
   projectIdForThread,
-  removeThreadProjectAssignments,
   removeWorkspaceProject,
   upsertWorkspaceProject,
   workspaceLabelForPath,
@@ -1064,60 +1062,33 @@ describe("project workspace helpers", () => {
     });
   });
 
-  it("assigns new threads to the selected project with default fallback", () => {
-    const mapping = assignThreadToProject(
-      {},
-      "thread-1",
-      "workspace:%2Ftmp%2Fdemo",
-    );
-
-    expect(projectIdForThread("thread-1", mapping)).toBe(
-      "workspace:%2Ftmp%2Fdemo",
-    );
-    expect(projectIdForThread("thread-2", mapping)).toBe(
-      DEFAULT_WORKSPACE_PROJECT_ID,
-    );
-  });
-
-  it("prefers a thread workspace root over the transient project mapping", () => {
-    const mapping = assignThreadToProject(
-      {},
-      "thread-1",
-      "workspace:%2Ftmp%2Fold",
-    );
-
+  it("uses runtime thread workspace root as the project authority", () => {
     expect(
       projectIdForThread(
         { threadId: "thread-1", workspaceRoot: "/tmp/demo" },
-        mapping,
         "/tmp/default",
       ),
     ).toBe("workspace:%2Ftmp%2Fdemo");
     expect(
       projectIdForThread(
         { threadId: "thread-1", workspaceRoot: "/tmp/default" },
-        mapping,
         "/tmp/default",
       ),
     ).toBe(DEFAULT_WORKSPACE_PROJECT_ID);
+    expect(projectIdForThread("thread-1", "/tmp/default")).toBe(
+      DEFAULT_WORKSPACE_PROJECT_ID,
+    );
   });
 
-  it("removes folder projects and thread assignments", () => {
+  it("removes folder projects", () => {
     const projects = [
       { id: "workspace:%2Ftmp%2Fdemo", label: "demo", path: "/tmp/demo" },
       { id: "workspace:%2Ftmp%2Fkeep", label: "keep", path: "/tmp/keep" },
     ];
-    const mapping = {
-      "thread-1": "workspace:%2Ftmp%2Fdemo",
-      "thread-2": "workspace:%2Ftmp%2Fkeep",
-    };
 
     expect(removeWorkspaceProject(projects, "workspace:%2Ftmp%2Fdemo")).toEqual(
       [{ id: "workspace:%2Ftmp%2Fkeep", label: "keep", path: "/tmp/keep" }],
     );
-    expect(removeThreadProjectAssignments(mapping, ["thread-1"])).toEqual({
-      "thread-2": "workspace:%2Ftmp%2Fkeep",
-    });
   });
 
   it("merges runtime thread workspaces into the persisted project list", () => {

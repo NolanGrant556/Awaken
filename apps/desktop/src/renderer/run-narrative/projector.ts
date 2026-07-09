@@ -2,6 +2,7 @@ import type { AguiEvent } from "../../shared/agui";
 import type { RunInputAttachment } from "../../shared/runtime";
 import type {
   CompactBoundaryItem,
+  PromptNarrativeToken,
   RunAction,
   RunNarrativeItem,
   RunNarrativeState,
@@ -21,8 +22,15 @@ export function createRunRequestedNarrative(
   prompt: string,
   attachments?: RunInputAttachment[],
   scopeId = "current",
+  tokens?: PromptNarrativeToken[],
 ): RunNarrativeState {
-  return appendRunRequestedNarrative(createInitialRunNarrativeState(), prompt, attachments, scopeId);
+  return appendRunRequestedNarrative(
+    createInitialRunNarrativeState(),
+    prompt,
+    attachments,
+    scopeId,
+    tokens,
+  );
 }
 
 export function appendRunRequestedNarrative(
@@ -30,18 +38,26 @@ export function appendRunRequestedNarrative(
   prompt: string,
   attachments?: RunInputAttachment[],
   scopeId = "current",
+  tokens?: PromptNarrativeToken[],
 ): RunNarrativeState {
   const trimmed = prompt.trim();
   const settledState = state.activeItem ? commitActive(state, "done") : state;
   const promptAttachments = attachments && attachments.length > 0
     ? attachments.map((attachment) => ({ ...attachment }))
     : undefined;
-  const committedItems = trimmed || promptAttachments
+  const promptTokens = tokens && tokens.length > 0
+    ? tokens.map((token) => ({
+        ...token,
+        payload: token.payload ? { ...token.payload } : undefined,
+      }))
+    : undefined;
+  const committedItems = trimmed || promptAttachments || promptTokens
     ? upsertCommitted(settledState.committedItems, {
         kind: "prompt",
         id: `prompt:${scopeId}`,
         text: trimmed,
-        attachments: promptAttachments,
+        ...(promptAttachments ? { attachments: promptAttachments } : {}),
+        ...(promptTokens ? { tokens: promptTokens } : {}),
       })
     : settledState.committedItems;
 

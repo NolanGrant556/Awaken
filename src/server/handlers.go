@@ -4,16 +4,19 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"awaken/src/agentcore"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
+	"awaken/src/skills"
 )
 
 type runHandlers struct {
 	runService             *awruntime.RunService
+	skillRegistry          *skills.SkillRegistry
 	syncSkillsForWorkspace func(string)
 }
 
@@ -71,6 +74,10 @@ func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.syncSkillsForWorkspace != nil {
 		h.syncSkillsForWorkspace(req.Workspace.WorkspaceRoot)
+	}
+	if err := h.validateComposerTokens(req.ComposerTokens); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_COMPOSER_TOKEN", err.Error())
+		return
 	}
 
 	run, err := h.runService.StartRun(req)
@@ -184,6 +191,60 @@ func (h runHandlers) handleGetRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, run)
+}
+
+func (h runHandlers) validateComposerTokens(tokens []awruntime.ComposerToken) error {
+	if len(tokens) == 0 {
+		return nil
+	}
+	for _, token := range tokens {
+		if !strings.EqualFold(strings.TrimSpace(token.Type), "skill") {
+			continue
+		}
+		if h.skillRegistry == nil {
+			return errors.New("skill registry not configured")
+		}
+		skillID := strings.TrimSpace(firstNonEmpty(token.Payload.SkillID, token.ID))
+		if skillID == "" {
+			return errors.New("skill token is missing skill id")
+		}
+		def := h.skillRegistry.Get(skillID)
+		if def == nil {
+			return errors.New("selected skill not found: " + skillID)
+		}
+		if def.Source != skills.SourceProject && def.Source != skills.SourceUser {
+			return errors.New("selected skill has unsupported source: " + string(def.Source))
+		}
+		if def.State != skills.StateAvailable {
+			if strings.TrimSpace(def.UnavailableReason) != "" {
+				return errors.New("selected skill is not available: " + def.UnavailableReason)
+			}
+			return errors.New("selected skill is not available: " + skillID)
+		}
+		if source := strings.TrimSpace(token.Payload.SourceOrigin); source != "" && source != string(def.Source) {
+			return errors.New("selected skill source changed: " + skillID)
+		}
+		if path := strings.TrimSpace(token.Payload.SkillFilePath); path != "" && cleanPath(path) != cleanPath(def.SkillFilePath) {
+			return errors.New("selected skill path changed: " + skillID)
+		}
+	}
+	return nil
+}
+
+func cleanPath(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return ""
+	}
+	return filepath.Clean(path)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func (h runHandlers) handleRunEvents(w http.ResponseWriter, r *http.Request) {

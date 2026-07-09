@@ -9,7 +9,7 @@ import (
 )
 
 func TestSessionAwaitAndResolveUserQuestion(t *testing.T) {
-	session := NewSession("run-1", "thread-1", "hello", nil, func() {})
+	session := NewSession("run-1", "thread-1", "hello", nil, nil, func() {})
 
 	request := agentcore.AwakenEvent{
 		Type:       agentcore.UserQuestionRequestedType,
@@ -70,14 +70,14 @@ func TestSessionAwaitAndResolveUserQuestion(t *testing.T) {
 }
 
 func TestSessionResolveUserQuestionMissing(t *testing.T) {
-	session := NewSession("run-1", "thread-1", "hello", nil, func() {})
+	session := NewSession("run-1", "thread-1", "hello", nil, nil, func() {})
 	if err := session.ResolveUserQuestion("missing", "answer"); err != ErrUserQuestionNotFound {
 		t.Fatalf("expected ErrUserQuestionNotFound, got %v", err)
 	}
 }
 
 func TestSessionResolveUserQuestionEmptyAnswer(t *testing.T) {
-	session := NewSession("run-1", "thread-1", "hello", nil, func() {})
+	session := NewSession("run-1", "thread-1", "hello", nil, nil, func() {})
 	if err := session.ResolveUserQuestion("q-1", "   "); err != ErrUserQuestionNotFound {
 		t.Fatalf("expected ErrUserQuestionNotFound for empty answer, got %v", err)
 	}

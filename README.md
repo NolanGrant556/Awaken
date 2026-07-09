@@ -295,6 +295,8 @@ Windows 当前不使用 macOS 的 screen 托管脚本；`npm run dev:desktop` �
 
 Windows primary-runtime 需要本机能找到这些依赖：Python（优先 `py -3` 或 `python`）、Node、LibreOffice、Poppler（`pdftoppm.exe` / `pdfinfo.exe`）和 ffmpeg。默认会通过 PATH、`where`、常见安装目录和以下环境变量发现依赖：`AWAKEN_BOOTSTRAP_PYTHON`、`AWAKEN_PYTHON`、`AWAKEN_NODE`、`AWAKEN_SOFFICE`、`AWAKEN_POPPLER_BIN`、`AWAKEN_FFMPEG`。缺少依赖时，`npm run prepare:runtime -- --json` 和 `npm run check:runtime -- --json` 会输出具体缺口。
 
+Windows 上若已安装 `winget`，可以直接运行 `npm run prepare:runtime -- --install`（或 `-i`）自动安装缺失的 LibreOffice、Poppler 和 ffmpeg，安装路径会自动注入当前进程 PATH 并持久化到用户 PATH。
+
 ### 组件独立观测入口
 
 ```bash

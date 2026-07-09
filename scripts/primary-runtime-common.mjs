@@ -230,8 +230,12 @@ export function findSofficeExecutable(path) {
   return firstExecutable([
     path,
     join(path, "Contents", "MacOS", "soffice"),
+    join(path, "program", "soffice.bin"),
+    join(path, "program", "soffice.bin.exe"),
     join(path, "program", "soffice"),
     join(path, "program", "soffice.exe"),
+    join(path, "soffice.bin"),
+    join(path, "soffice.bin.exe"),
     join(path, "soffice"),
     join(path, "soffice.exe"),
   ]);

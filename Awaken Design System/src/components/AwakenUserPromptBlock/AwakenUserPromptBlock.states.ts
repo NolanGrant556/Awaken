@@ -13,6 +13,13 @@ export const AwakenUserPromptBlockStates: AwakenUserPromptBlockState[] = [
     label: "用户提示",
     props: {
       text: "请检查 Awaken Design System 里这一组组件的用途说明是否准确。",
+      tokens: [
+        {
+          id: "skill:design-review:user",
+          type: "skill",
+          label: "design-review",
+        },
+      ],
     } as unknown as Partial<ComponentProps<typeof AwakenUserPromptBlock>>,
   },
   {

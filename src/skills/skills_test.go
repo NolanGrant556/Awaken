@@ -1,8 +1,10 @@
 package skills
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -138,13 +140,13 @@ func TestValidateSchemaContextMode(t *testing.T) {
 func TestLoadDirValidSkills(t *testing.T) {
 	dir := t.TempDir()
 
-	writeSkillPackage(t, dir, "alpha", `---
+	writeTestSkillPackage(t, dir, "alpha", `---
 name: Alpha
 description: First skill
 ---
 Alpha body.
 `)
-	writeSkillPackage(t, dir, "beta", `---
+	writeTestSkillPackage(t, dir, "beta", `---
 name: Beta
 description: Second skill
 whenToUse: when you need beta
@@ -191,13 +193,13 @@ func TestLoadDirSkipsInvalid(t *testing.T) {
 	dir := t.TempDir()
 
 	// Missing name -> should still load but be unavailable.
-	writeSkillPackage(t, dir, "broken", `---
+	writeTestSkillPackage(t, dir, "broken", `---
 description: No name
 ---
 Body.
 `)
 	// Valid.
-	writeSkillPackage(t, dir, "good", `---
+	writeTestSkillPackage(t, dir, "good", `---
 name: Good
 description: Valid skill
 ---
@@ -219,7 +221,7 @@ Body.
 func TestLoadDirSkipsNonMd(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "notes.txt", "just notes")
-	writeSkillPackage(t, dir, "valid", `---
+	writeTestSkillPackage(t, dir, "valid", `---
 name: Valid
 description: A valid skill
 ---
@@ -240,7 +242,7 @@ description: Legacy flat skill.
 ---
 Body.
 `)
-	writeSkillPackage(t, dir, "packaged", `---
+	writeTestSkillPackage(t, dir, "packaged", `---
 name: packaged
 description: Packaged skill.
 ---
@@ -305,7 +307,7 @@ func TestSkillRegistryLifecycle(t *testing.T) {
 	reg := NewSkillRegistry(nil)
 
 	userDir := t.TempDir()
-	writeSkillPackage(t, userDir, "test", `---
+	writeTestSkillPackage(t, userDir, "test", `---
 name: test
 description: A test skill
 ---
@@ -336,7 +338,7 @@ func TestSkillRegistryConnectorAvailability(t *testing.T) {
 	reg := NewSkillRegistry(nil)
 
 	projectDir := t.TempDir()
-	writeSkillPackage(t, projectDir, "needs-notion", `---
+	writeTestSkillPackage(t, projectDir, "needs-notion", `---
 name: needs-notion
 description: Uses Notion
 requiredConnectors:
@@ -344,7 +346,7 @@ requiredConnectors:
 ---
 Body.
 `)
-	writeSkillPackage(t, projectDir, "no-connector", `---
+	writeTestSkillPackage(t, projectDir, "no-connector", `---
 name: no-connector
 description: No connectors needed
 ---
@@ -395,7 +397,7 @@ func TestSkillRegistryOnChange(t *testing.T) {
 	})
 
 	userDir := t.TempDir()
-	writeSkillPackage(t, userDir, "x", `---
+	writeTestSkillPackage(t, userDir, "x", `---
 name: X
 description: x
 ---
@@ -410,6 +412,70 @@ Body.
 	}
 }
 
+func TestInstallSkillPackageFromDirectoryPreservesResources(t *testing.T) {
+	sourceRoot := t.TempDir()
+	writeFile(t, sourceRoot, filepath.Join("nested", "daily-followup", "SKILL.md"), `---
+name: daily-followup
+description: Daily followup.
+---
+Use the references.
+`)
+	writeFile(t, sourceRoot, filepath.Join("nested", "daily-followup", "references", "guide.md"), "guide body")
+
+	pkg, err := PackageFromPath(sourceRoot)
+	if err != nil {
+		t.Fatalf("package from path: %v", err)
+	}
+	workspace := t.TempDir()
+	result, err := InstallSkillPackage(InstallRequest{
+		Package:     pkg,
+		Scope:       string(SourceProject),
+		ProjectRoot: workspace,
+	})
+	if err != nil {
+		t.Fatalf("install skill: %v", err)
+	}
+	if result.Skill == nil || result.Skill.ID != "daily-followup" {
+		t.Fatalf("unexpected installed skill: %+v", result.Skill)
+	}
+	resourcePath := filepath.Join(workspace, ".awaken", "skills", "daily-followup", "references", "guide.md")
+	data, err := os.ReadFile(resourcePath)
+	if err != nil {
+		t.Fatalf("read copied resource: %v", err)
+	}
+	if string(data) != "guide body" {
+		t.Fatalf("unexpected resource body: %q", string(data))
+	}
+}
+
+func TestInstallSkillPackageDefaultsToAbortExisting(t *testing.T) {
+	pkg, err := PackageFromBytes("SKILL.md", []byte(`---
+name: duplicate-skill
+description: Duplicate.
+---
+Body.
+`))
+	if err != nil {
+		t.Fatalf("package bytes: %v", err)
+	}
+	workspace := t.TempDir()
+	req := InstallRequest{
+		Package:     pkg,
+		Scope:       string(SourceProject),
+		ProjectRoot: workspace,
+	}
+	if _, err := InstallSkillPackage(req); err != nil {
+		t.Fatalf("first install: %v", err)
+	}
+	_, err = InstallSkillPackage(req)
+	if !errors.Is(err, ErrSkillAlreadyExists) {
+		t.Fatalf("expected ErrSkillAlreadyExists, got %v", err)
+	}
+	if !strings.Contains(err.Error(), filepath.Join(workspace, ".awaken", "skills", "duplicate-skill")) {
+		t.Fatalf("expected target path in error, got %v", err)
+	}
+}
+
 func writeFile(t *testing.T, dir, name, content string) {
 	t.Helper()
 	path := filepath.Join(dir, name)
@@ -421,7 +487,7 @@ func writeFile(t *testing.T, dir, name, content string) {
 	}
 }
 
-func writeSkillPackage(t *testing.T, root, id, content string) {
+func writeTestSkillPackage(t *testing.T, root, id, content string) {
 	t.Helper()
 	writeFile(t, root, filepath.Join(id, "SKILL.md"), content)
 }
@@ -431,13 +497,13 @@ func writeSkillPackage(t *testing.T, root, id, content string) {
 func TestLoadDirRejectsMcpPrefix(t *testing.T) {
 	dir := t.TempDir()
 
-	writeSkillPackage(t, dir, "mcp__foo__bar", `---
+	writeTestSkillPackage(t, dir, "mcp__foo__bar", `---
 name: mcp__foo__bar
 description: This should be rejected
 ---
 Body.
 `)
-	writeSkillPackage(t, dir, "valid", `---
+	writeTestSkillPackage(t, dir, "valid", `---
 name: valid
 description: A valid skill
 ---
@@ -493,7 +559,7 @@ func TestSkillRegistryMcpServerAvailability(t *testing.T) {
 	reg := NewSkillRegistry(nil)
 
 	projectDir := t.TempDir()
-	writeSkillPackage(t, projectDir, "needs-mcp", `---
+	writeTestSkillPackage(t, projectDir, "needs-mcp", `---
 name: needs-mcp
 description: Uses MCP server
 requiredMcpServers:
@@ -501,13 +567,13 @@ requiredMcpServers:
 ---
 Body.
 `)
-	writeSkillPackage(t, projectDir, "no-mcp", `---
+	writeTestSkillPackage(t, projectDir, "no-mcp", `---
 name: no-mcp
 description: No MCP needed
 ---
 Body.
 `)
-	writeSkillPackage(t, projectDir, "needs-both", `---
+	writeTestSkillPackage(t, projectDir, "needs-both", `---
 name: needs-both
 description: Needs both
 requiredConnectors:
@@ -573,7 +639,7 @@ func TestSetMcpServerAvailable(t *testing.T) {
 	reg := NewSkillRegistry(nil)
 
 	projectDir := t.TempDir()
-	writeSkillPackage(t, projectDir, "test", `---
+	writeTestSkillPackage(t, projectDir, "test", `---
 name: Test
 description: test
 requiredMcpServers:

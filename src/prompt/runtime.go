@@ -11,6 +11,7 @@ type RuntimeInfo struct {
 	ModelName     string
 	EntryPoint    string
 	ToolSummary   string
+	SkillSummary  string
 	AttachedFiles []RuntimeAttachedFile
 }
 
@@ -21,11 +22,12 @@ type RuntimeAttachedFile struct {
 
 func NewRuntimeInfo() RuntimeInfo {
 	return RuntimeInfo{
-		WorkingDir:  getWorkingDir(),
-		CurrentDate: getCurrentDate(),
-		ModelName:   "",
-		EntryPoint:  "unknown",
-		ToolSummary: "无可用工具",
+		WorkingDir:   getWorkingDir(),
+		CurrentDate:  getCurrentDate(),
+		ModelName:    "",
+		EntryPoint:   "unknown",
+		ToolSummary:  "无可用工具",
+		SkillSummary: "none",
 	}
 }
 
@@ -63,6 +65,13 @@ func (r *RuntimeInfo) SetEntryPoint(entry string) {
 
 func (r *RuntimeInfo) SetToolSummary(summary string) {
 	r.ToolSummary = summary
+}
+
+func (r *RuntimeInfo) SetSkillSummary(summary string) {
+	if summary == "" {
+		summary = "none"
+	}
+	r.SkillSummary = summary
 }
 
 func (r *RuntimeInfo) SetAttachedFiles(files []RuntimeAttachedFile) {

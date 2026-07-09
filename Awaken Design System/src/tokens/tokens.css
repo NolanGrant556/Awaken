@@ -90,6 +90,27 @@
   --aw-terminal-bg: #17181a;
   --aw-terminal-text: #ffffff;
   --aw-brand-wordmark-filter: none;
+  --aw-composer-surface: var(--aw-bg-white);
+  --aw-composer-border: rgba(0, 0, 0, 0.18);
+  --aw-composer-shadow:
+    0 14px 40px rgba(23, 23, 23, 0.07),
+    0 1px 2px rgba(23, 23, 23, 0.04);
+  --aw-composer-shadow-focus:
+    var(--aw-shadow-focus),
+    0 14px 40px rgba(23, 23, 23, 0.08);
+  --aw-composer-halo:
+    radial-gradient(
+      ellipse at 50% 58%,
+      rgba(255, 255, 255, 0.96) 0%,
+      rgba(255, 255, 255, 0.78) 42%,
+      rgba(255, 255, 255, 0) 74%
+    ),
+    radial-gradient(
+      ellipse at 50% 82%,
+      rgba(23, 23, 23, 0.09) 0%,
+      rgba(23, 23, 23, 0.04) 46%,
+      rgba(23, 23, 23, 0) 76%
+    );
 
   /* Spacing */
   --aw-space-1: 2px;
@@ -260,6 +281,27 @@
   --aw-terminal-bg: #090908;
   --aw-terminal-text: #f2f1ed;
   --aw-brand-wordmark-filter: invert(1) brightness(1.08);
+  --aw-composer-surface: #1b1b19;
+  --aw-composer-border: rgba(255, 255, 255, 0.24);
+  --aw-composer-shadow:
+    0 20px 44px rgba(0, 0, 0, 0.34),
+    0 1px 0 rgba(255, 255, 255, 0.03);
+  --aw-composer-shadow-focus:
+    var(--aw-shadow-focus),
+    0 22px 48px rgba(0, 0, 0, 0.42);
+  --aw-composer-halo:
+    radial-gradient(
+      ellipse at 50% 58%,
+      rgba(31, 31, 28, 0.88) 0%,
+      rgba(31, 31, 28, 0.48) 42%,
+      rgba(15, 15, 14, 0) 76%
+    ),
+    radial-gradient(
+      ellipse at 50% 82%,
+      rgba(0, 0, 0, 0.42) 0%,
+      rgba(0, 0, 0, 0.18) 48%,
+      rgba(0, 0, 0, 0) 78%
+    );
 
   /* Shadow */
   --aw-shadow-menu: 0 18px 48px rgba(0, 0, 0, 0.42), 0 2px 8px rgba(0, 0, 0, 0.3);

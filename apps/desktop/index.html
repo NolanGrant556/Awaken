@@ -7,6 +7,19 @@
       content="width=device-width, initial-scale=1.0"
     />
     <title>Awaken Desktop</title>
+    <script>
+      try {
+        const theme =
+          localStorage.getItem("awaken:appearance:theme") === "dark"
+            ? "dark"
+            : "light";
+        document.documentElement.dataset.awTheme = theme;
+        document.documentElement.style.colorScheme = theme;
+      } catch {
+        document.documentElement.dataset.awTheme = "light";
+        document.documentElement.style.colorScheme = "light";
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -29,8 +29,10 @@ import {
   normalizeRuntimeThread,
   normalizeStartRunRequest,
   type AttachmentPickResult,
+  type AwakenTheme,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
+  type DesktopPreferencesSaveRequest,
   type DesktopPlatform,
   type InstallSkillRequest,
   type InstallSkillResponse,
@@ -58,6 +60,7 @@ import {
 } from "../shared/runtime.js";
 import { RuntimeSupervisor, type SupervisorStatusInfo } from "./runtime-supervisor.js";
 import { ensureConfigDir } from "./config-bootstrap.js";
+import { DesktopPreferencesStore } from "./desktop-preferences-store.js";
 import { ModelProfileStore } from "./model-profile-store.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -69,6 +72,7 @@ app.setName(appName);
 app.setPath("userData", join(app.getPath("appData"), "@awaken", "desktop"));
 
 let supervisor: RuntimeSupervisor | null = null;
+let desktopPreferencesStore: DesktopPreferencesStore | null = null;
 let modelProfileStore: ModelProfileStore | null = null;
 let isQuitting = false;
 
@@ -83,6 +87,18 @@ const defaultWindowWidth = 1440;
 const defaultWindowHeight = 960;
 const minimumWindowWidth = 1120;
 const minimumWindowHeight = 760;
+
+function windowBackgroundColor(theme?: AwakenTheme): string {
+  return theme === "dark" ? "#0f0f0e" : "#f8f8f7";
+}
+
+function updateWindowBackgrounds(theme: AwakenTheme): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) {
+      window.setBackgroundColor(windowBackgroundColor(theme));
+    }
+  }
+}
 
 function desktopIconPath(): string {
   if (app.isPackaged) {
@@ -493,7 +509,9 @@ function createMainWindow(): BrowserWindow {
     height: defaultWindowHeight,
     minWidth: minimumWindowWidth,
     minHeight: minimumWindowHeight,
-    backgroundColor: "#f8f8f7",
+    backgroundColor: windowBackgroundColor(
+      desktopPreferencesStore?.snapshot().theme,
+    ),
     autoHideMenuBar: true,
     show: false,
     title: "Awaken Desktop",
@@ -584,6 +602,25 @@ function createMainWindow(): BrowserWindow {
 
   return mainWindow;
 }
+
+ipcMain.handle("awaken:get-desktop-preferences", async () => {
+  if (!desktopPreferencesStore) {
+    throw new Error("Desktop preferences store unavailable");
+  }
+  return desktopPreferencesStore.snapshot();
+});
+
+ipcMain.handle(
+  "awaken:save-desktop-preferences",
+  async (_event, request: DesktopPreferencesSaveRequest) => {
+    if (!desktopPreferencesStore) {
+      throw new Error("Desktop preferences store unavailable");
+    }
+    const preferences = await desktopPreferencesStore.savePreferences(request);
+    updateWindowBackgrounds(preferences.theme);
+    return preferences;
+  },
+);
 
 ipcMain.handle("awaken:get-runtime-info", async () => {
   try {
@@ -1195,6 +1232,8 @@ app.whenReady().then(async () => {
   setMacDockIcon();
   await ensureDesktopDataDirs();
   const configDir = await ensureConfigDir();
+  desktopPreferencesStore = new DesktopPreferencesStore(configDir);
+  await desktopPreferencesStore.initialize();
   modelProfileStore = new ModelProfileStore(configDir);
   await modelProfileStore.initialize();
   const lastWorkspace = await readLastWorkspace();

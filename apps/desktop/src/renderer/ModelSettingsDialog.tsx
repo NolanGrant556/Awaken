@@ -6,13 +6,14 @@ import {
   useRef,
   useState,
 } from "react";
-import { ChevronDown, Eye, EyeOff, KeyRound } from "lucide-react";
+import { ChevronDown, Eye, EyeOff, KeyRound, Moon, Sun } from "lucide-react";
 import {
   AwakenButton as Button,
   AwakenDialog as Dialog,
 } from "@awaken/design-system";
 import { calculateAutoCompactThreshold } from "../shared/runtime";
 import type {
+  AwakenTheme,
   ModelProfileSaveRequest,
   ModelProvider,
   RuntimeModelProfileSummary,
@@ -35,6 +36,7 @@ type DraftState = {
 };
 
 type ModelSettingsSection = "configure" | "configured";
+type SettingsDialogSection = "models" | "appearance";
 
 type ConfiguredProfileDraft = {
   enabled: boolean;
@@ -57,9 +59,67 @@ const DUPLICATE_MODEL_PROFILE_ERROR = "模型配置重复，添加失败";
 type ModelSettingsDialogProps = {
   open: boolean;
   runtimeClient: RuntimeClient;
+  theme: AwakenTheme;
+  themeSaving: boolean;
+  themeMessage: string | null;
+  onThemeChange: (theme: AwakenTheme) => void;
   onOpenChange: (open: boolean) => void;
   onProfilesChanged: () => void;
 };
+
+type AppearanceSettingsProps = {
+  theme: AwakenTheme;
+  themeSaving: boolean;
+  onThemeChange: (theme: AwakenTheme) => void;
+};
+
+export function AppearanceSettings({
+  theme,
+  themeSaving,
+  onThemeChange,
+}: AppearanceSettingsProps) {
+  return (
+    <section className="appearance-settings" aria-label="外观">
+      <div className="appearance-settings-row">
+        <div className="appearance-settings-copy">
+          <h2>主题</h2>
+        </div>
+        <div
+          className="theme-choice-group"
+          role="radiogroup"
+          aria-label="主题"
+        >
+          <button
+            type="button"
+            className={`theme-choice${
+              theme === "light" ? " theme-choice-active" : ""
+            }`}
+            role="radio"
+            aria-checked={theme === "light"}
+            disabled={themeSaving}
+            onClick={() => onThemeChange("light")}
+          >
+            <Sun size={17} strokeWidth={1.9} />
+            <span>浅色</span>
+          </button>
+          <button
+            type="button"
+            className={`theme-choice${
+              theme === "dark" ? " theme-choice-active" : ""
+            }`}
+            role="radio"
+            aria-checked={theme === "dark"}
+            disabled={themeSaving}
+            onClick={() => onThemeChange("dark")}
+          >
+            <Moon size={17} strokeWidth={1.9} />
+            <span>黑色</span>
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 function formatContextWindow(value: number): string {
   if (value >= 1_000_000) return `${value / 1_000_000}M`;
@@ -300,6 +360,10 @@ function toSaveRequest(
 export function ModelSettingsDialog({
   open,
   runtimeClient,
+  theme,
+  themeSaving,
+  themeMessage,
+  onThemeChange,
   onOpenChange,
   onProfilesChanged,
 }: ModelSettingsDialogProps) {
@@ -310,6 +374,8 @@ export function ModelSettingsDialog({
   >({});
   const [activeSection, setActiveSection] =
     useState<ModelSettingsSection>("configure");
+  const [activeSettingsSection, setActiveSettingsSection] =
+    useState<SettingsDialogSection>("models");
   const [expandedProviderId, setExpandedProviderId] = useState<string | null>(
     null,
   );
@@ -728,7 +794,7 @@ export function ModelSettingsDialog({
   return (
     <Dialog
       open={open}
-      title="模型"
+      title="设置"
       onOpenChange={onOpenChange}
       footer={
         <Button variant="default" size="md" onClick={() => onOpenChange(false)}>
@@ -749,53 +815,82 @@ export function ModelSettingsDialog({
         <nav className="settings-dialog-nav" aria-label="Settings sections">
           <button
             type="button"
-            className="settings-dialog-nav-item settings-dialog-nav-item-active"
+            className={`settings-dialog-nav-item${
+              activeSettingsSection === "models"
+                ? " settings-dialog-nav-item-active"
+                : ""
+            }`}
+            onClick={() => setActiveSettingsSection("models")}
           >
-            Models
+            模型
+          </button>
+          <button
+            type="button"
+            className={`settings-dialog-nav-item${
+              activeSettingsSection === "appearance"
+                ? " settings-dialog-nav-item-active"
+                : ""
+            }`}
+            onClick={() => setActiveSettingsSection("appearance")}
+          >
+            外观
           </button>
         </nav>
 
         <div className="model-settings">
           <div className="model-settings-toolbar">
-            <h1 className="model-settings-title">模型</h1>
-            <div
-              className="model-settings-tabs"
-              role="tablist"
-              aria-label="模型功能区"
-            >
-              <button
-                type="button"
-                className={`model-settings-tab${
-                  activeSection === "configure"
-                    ? " model-settings-tab-active"
-                    : ""
-                }`}
-                role="tab"
-                aria-selected={activeSection === "configure"}
-                onClick={() => setActiveSection("configure")}
+            <h1 className="model-settings-title">
+              {activeSettingsSection === "models" ? "模型" : "外观"}
+            </h1>
+            {activeSettingsSection === "models" ? (
+              <div
+                className="model-settings-tabs"
+                role="tablist"
+                aria-label="模型功能区"
               >
-                模型配置
-              </button>
-              <button
-                type="button"
-                className={`model-settings-tab${
-                  activeSection === "configured"
-                    ? " model-settings-tab-active"
-                    : ""
-                }`}
-                role="tab"
-                aria-selected={activeSection === "configured"}
-                onClick={() => setActiveSection("configured")}
-              >
-                已配置模型
-              </button>
-            </div>
+                <button
+                  type="button"
+                  className={`model-settings-tab${
+                    activeSection === "configure"
+                      ? " model-settings-tab-active"
+                      : ""
+                  }`}
+                  role="tab"
+                  aria-selected={activeSection === "configure"}
+                  onClick={() => setActiveSection("configure")}
+                >
+                  模型配置
+                </button>
+                <button
+                  type="button"
+                  className={`model-settings-tab${
+                    activeSection === "configured"
+                      ? " model-settings-tab-active"
+                      : ""
+                  }`}
+                  role="tab"
+                  aria-selected={activeSection === "configured"}
+                  onClick={() => setActiveSection("configured")}
+                >
+                  已配置模型
+                </button>
+              </div>
+            ) : null}
           </div>
-          {message ? (
+          {activeSettingsSection === "models" && message ? (
             <div className="model-settings-message">{message}</div>
           ) : null}
+          {activeSettingsSection === "appearance" && themeMessage ? (
+            <div className="model-settings-message">{themeMessage}</div>
+          ) : null}
 
-          {activeSection === "configure" ? (
+          {activeSettingsSection === "appearance" ? (
+            <AppearanceSettings
+              theme={theme}
+              themeSaving={themeSaving}
+              onThemeChange={onThemeChange}
+            />
+          ) : activeSection === "configure" ? (
             <section className="model-provider-list" aria-label="模型配置">
               {providers.map((provider) => {
                 const isExpanded = expandedProviderId === provider.id;

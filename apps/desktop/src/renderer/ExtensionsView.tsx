@@ -44,6 +44,7 @@ type SkillProjectGroup = {
   root: string;
   label: string;
   skills: RuntimeSkill[];
+  errorMessage?: string;
 };
 
 type VisibleSkillProjectGroup = SkillProjectGroup & {
@@ -184,6 +185,35 @@ function projectLabelFromRoot(root: string): string {
   return cleaned.split(/[\\/]/).pop() || cleaned;
 }
 
+type SkillListLoadResult = {
+  root?: string;
+  skills: RuntimeSkill[];
+  errorMessage?: string;
+};
+
+export async function loadSkillListsForRoots(
+  roots: Array<string | undefined>,
+  listSkills: RuntimeClient["listSkills"],
+): Promise<SkillListLoadResult[]> {
+  return Promise.all(
+    roots.map(async (root) => {
+      try {
+        return {
+          root,
+          skills: await listSkills(root),
+        };
+      } catch (error) {
+        return {
+          root,
+          skills: [],
+          errorMessage:
+            error instanceof Error ? error.message : "项目 Skills 加载失败",
+        };
+      }
+    }),
+  );
+}
+
 function dedupePaths(paths: Array<string | undefined>): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -280,11 +310,12 @@ export function ExtensionsView({
         ...workspaceRegistry.registeredWorkspacePaths,
       ]);
       const skillRoots = projectRoots.length > 0 ? projectRoots : [undefined];
-      const [nextConnectors, nextMcpServers, nextSkillLists] = await Promise.all([
+      const [nextConnectors, nextMcpServers, nextSkillResults] = await Promise.all([
         runtimeClient.listConnectors(),
         runtimeClient.listMcpServers(),
-        Promise.all(skillRoots.map((root) => runtimeClient.listSkills(root))),
+        loadSkillListsForRoots(skillRoots, runtimeClient.listSkills),
       ]);
+      const nextSkillLists = nextSkillResults.map((result) => result.skills);
       const nextProjectRoot =
         projectRootOverride?.trim() ||
         skillProjectRoot.trim() ||
@@ -307,6 +338,7 @@ export function ExtensionsView({
           skills: (nextSkillLists[index] ?? []).filter(
             (skill) => skill.sourceOrigin === "project",
           ),
+          errorMessage: nextSkillResults[index]?.errorMessage,
         })),
       );
     } catch (error) {
@@ -775,10 +807,15 @@ export function ExtensionsView({
   function renderProjectSkillGroup(group: VisibleSkillProjectGroup, index: number) {
     const expanded = expandedProjectRoots.has(group.root);
     const bodyId = `skill-project-group-${index}`;
-    const countText =
-      normalizedQuery && group.visibleSkills.length !== group.skills.length
-        ? `${group.visibleSkills.length}/${group.skills.length} Skill`
-        : `${group.skills.length} Skill`;
+    let countText = `${group.skills.length} Skill`;
+    if (group.errorMessage) {
+      countText = "不可用";
+    } else if (
+      normalizedQuery &&
+      group.visibleSkills.length !== group.skills.length
+    ) {
+      countText = `${group.visibleSkills.length}/${group.skills.length} Skill`;
+    }
     return (
       <section className="skill-project-group" key={group.root}>
         <button
@@ -810,7 +847,9 @@ export function ExtensionsView({
                 {group.visibleSkills.map(renderSkillCard)}
               </div>
             ) : (
-              <div className="extension-empty">暂无项目 Skills</div>
+              <div className="extension-empty">
+                {group.errorMessage ?? "暂无项目 Skills"}
+              </div>
             )}
           </div>
         ) : null}

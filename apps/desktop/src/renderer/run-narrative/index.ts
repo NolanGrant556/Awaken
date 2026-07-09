@@ -9,6 +9,7 @@ export {
 export type {
   ChangedFile,
   InspectorSelection,
+  PromptNarrativeToken,
   RunAction,
   RunNarrativeItem,
   RunNarrativeState,

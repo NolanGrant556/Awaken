@@ -95,6 +95,7 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 	if cfg.runService != nil {
 		handlers := runHandlers{
 			runService:             cfg.runService,
+			skillRegistry:          cfg.skillRegistry,
 			syncSkillsForWorkspace: cfg.syncSkillsForWorkspace,
 		}
 		mux.HandleFunc("GET /v1/threads", handlers.handleListThreads)

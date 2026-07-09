@@ -344,6 +344,46 @@ describe("runtime reducer run narrative projection", () => {
     });
   });
 
+  it("keeps selected composer skill tokens on prompt narrative items", () => {
+    const state = dispatch([
+      {
+        type: "run/requested",
+        prompt: "你好，你看到这个 skill 不?",
+        promptTokens: [
+          {
+            id: "skill:deep-research:user",
+            type: "skill",
+            label: "deep-research",
+            leadingText: "你好，你看到这个 skill 不?",
+            payload: {
+              skillId: "deep-research",
+              sourceOrigin: "user",
+              skillFilePath: "/home/.awaken/skills/deep-research/SKILL.md",
+            },
+          },
+        ],
+      },
+    ]);
+
+    expect(state.narrative.committedItems[0]).toMatchObject({
+      kind: "prompt",
+      text: "你好，你看到这个 skill 不?",
+      tokens: [
+        {
+          id: "skill:deep-research:user",
+          type: "skill",
+          label: "deep-research",
+          leadingText: "你好，你看到这个 skill 不?",
+          payload: {
+            skillId: "deep-research",
+            sourceOrigin: "user",
+            skillFilePath: "/home/.awaken/skills/deep-research/SKILL.md",
+          },
+        },
+      ],
+    });
+  });
+
   it("projects reasoning and text deltas into thinking and answer items", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Say hello" },

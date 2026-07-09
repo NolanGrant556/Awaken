@@ -56,6 +56,7 @@ export type RuntimeRunWire = {
   thread_id: string;
   input?: string;
   input_attachments?: RunInputAttachmentWire[];
+  composer_tokens?: ComposerToken[];
   status: RuntimeRunStatus;
   result?: string;
   error?: string;
@@ -70,6 +71,7 @@ export type RuntimeRun = {
   threadId: string;
   input?: string;
   inputAttachments?: RunInputAttachment[];
+  composerTokens?: ComposerToken[];
   status: RuntimeRunStatus;
   result?: string;
   error?: string;
@@ -240,6 +242,22 @@ export type RuntimeSkill = {
   context: "inline" | "fork" | string;
   shadowedBy?: string;
   requiredMcpServers?: string[];
+};
+
+export type ComposerTokenType = "skill" | "file" | "workflow" | "prompt" | "connector";
+
+export type SkillComposerTokenPayload = {
+  skillId: string;
+  sourceOrigin: "project" | "user" | string;
+  skillFilePath: string;
+  rootDir?: string;
+};
+
+export type ComposerToken = {
+  id: string;
+  type: ComposerTokenType | string;
+  label: string;
+  payload?: Record<string, unknown>;
 };
 
 export type InstallSkillRequest = {
@@ -527,6 +545,7 @@ export type ClientInfo = {
 export type StartRunRequestWire = {
   input: string;
   attachments?: RunInputAttachmentWire[];
+  composer_tokens?: ComposerToken[];
   thread_id?: string;
   workspace: WorkspaceConfigWire;
   client: ClientInfoWire;
@@ -536,6 +555,7 @@ export type StartRunRequestWire = {
 export type StartRunRequest = {
   input: string;
   attachments?: RunInputAttachment[];
+  composerTokens?: ComposerToken[];
   threadId?: string;
   workspace: WorkspaceConfig;
   client: ClientInfo;
@@ -678,6 +698,10 @@ export function normalizeRuntimeRun(run: RuntimeRunWire): RuntimeRun {
     threadId: run.thread_id,
     input: run.input?.trim() || undefined,
     inputAttachments: run.input_attachments?.map(normalizeRunInputAttachment),
+    composerTokens: run.composer_tokens?.map((token) => ({
+      ...token,
+      payload: token.payload ? { ...token.payload } : undefined,
+    })),
     status: run.status,
     result: run.result,
     error: run.error,
@@ -738,6 +762,7 @@ export function normalizeStartRunRequest(request: StartRunRequest): StartRunRequ
   return {
     input: request.input,
     attachments: request.attachments?.map(toRunInputAttachmentWire),
+    composer_tokens: request.composerTokens,
     thread_id: request.threadId,
     workspace: {
       workspace_root: request.workspace.workspaceRoot,

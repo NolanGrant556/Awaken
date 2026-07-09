@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -427,6 +428,81 @@ func TestRunServiceValidatesInputAndMissingRun(t *testing.T) {
 	}
 	if _, err := service.CancelRun("missing"); !errors.Is(err, ErrRunNotFound) {
 		t.Fatalf("expected ErrRunNotFound from CancelRun, got %v", err)
+	}
+}
+
+func TestEffectiveInputForComposerSkillTokensInjectsSkillToolInstruction(t *testing.T) {
+	effective := effectiveInputForComposerTokens("summarize the customer list", []ComposerToken{
+		{
+			ID:    "skill:daily-followup:project",
+			Type:  "skill",
+			Label: "Daily Followup",
+			Payload: ComposerTokenPayload{
+				SkillID:       "daily-followup",
+				SourceOrigin:  "project",
+				SkillFilePath: "/workspace/.awaken/skills/daily-followup/SKILL.md",
+				RootDir:       "/workspace/.awaken/skills/daily-followup",
+			},
+		},
+	})
+
+	for _, want := range []string{
+		"<awaken_composer_tokens>",
+		"skillId: daily-followup",
+		"tool: skill__daily_followup",
+		"skillFilePath: /workspace/.awaken/skills/daily-followup/SKILL.md",
+		"User task:\nsummarize the customer list",
+	} {
+		if !strings.Contains(effective, want) {
+			t.Fatalf("expected effective input to contain %q, got:\n%s", want, effective)
+		}
+	}
+}
+
+func TestComposerSkillTokenOnlyRequestIsValidAndLabelsThreadFromToken(t *testing.T) {
+	token := ComposerToken{
+		ID:    "skill:pptx:user",
+		Type:  "skill",
+		Label: "pptx",
+		Payload: ComposerTokenPayload{
+			SkillID:       "pptx",
+			SourceOrigin:  "user",
+			SkillFilePath: "/home/.awaken/skills/pptx/SKILL.md",
+		},
+	}
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			return "ok", nil
+		})
+	})
+
+	run, err := service.StartRun(StartRunRequest{
+		Input:          "   ",
+		ComposerTokens: []ComposerToken{token},
+		Workspace:      WorkspaceConfig{WorkspaceRoot: t.TempDir()},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	if len(run.ComposerTokens) != 1 || run.ComposerTokens[0].Payload.SkillID != "pptx" {
+		t.Fatalf("expected run snapshot to keep composer token, got %+v", run.ComposerTokens)
+	}
+	transcript, err := service.GetThreadTranscript(run.ThreadID)
+	if err != nil {
+		t.Fatalf("GetThreadTranscript returned error: %v", err)
+	}
+	if len(transcript.Runs) != 1 || len(transcript.Runs[0].Run.ComposerTokens) != 1 {
+		t.Fatalf("expected transcript run to keep composer token, got %+v", transcript.Runs)
+	}
+	threads := service.ListThreads()
+	if len(threads) != 1 || threads[0].ThreadID != run.ThreadID {
+		t.Fatalf("expected one thread for token-only run, got %+v", threads)
+	}
+	if threads[0].Label != "pptx" {
+		t.Fatalf("expected token label for thread title, got %q", threads[0].Label)
+	}
+	if got := threadLabelForInputAndTokens("", nil, []ComposerToken{token}); got != "pptx" {
+		t.Fatalf("expected token label from helper, got %q", got)
 	}
 }
 

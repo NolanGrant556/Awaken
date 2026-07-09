@@ -112,14 +112,18 @@ export function actionsForThreadTranscript(
 
   transcript.runs.forEach((entry, index) => {
     const hasPromptAttachments = (entry.run.inputAttachments?.length ?? 0) > 0;
+    const hasPromptTokens = (entry.run.composerTokens?.length ?? 0) > 0;
     const prompt =
       entry.run.input?.trim() ||
-      (!hasPromptAttachments && index === 0 ? transcript.thread.label : "");
-    if (prompt || hasPromptAttachments) {
+      (!hasPromptAttachments && !hasPromptTokens && index === 0
+        ? transcript.thread.label
+        : "");
+    if (prompt || hasPromptAttachments || hasPromptTokens) {
       actions.push({
         type: "run/requested",
         prompt,
         promptAttachments: entry.run.inputAttachments,
+        promptTokens: entry.run.composerTokens,
         startedAtMs: timestampMs(entry.run.createdAt),
       });
     }

@@ -32,6 +32,7 @@ type TranscriptRecord struct {
 	Role              string                        `json:"role,omitempty"`
 	Content           string                        `json:"content,omitempty"`
 	Attachments       []transcriptMessageAttachment `json:"attachments,omitempty"`
+	ComposerTokens    []ComposerToken               `json:"composer_tokens,omitempty"`
 	ToolCalls         []convcontext.ToolCall        `json:"tool_calls,omitempty"`
 	ToolCallID        string                        `json:"tool_call_id,omitempty"`
 	ToolName          string                        `json:"tool_name,omitempty"`
@@ -76,6 +77,7 @@ func appendUserTranscriptRecordAtPath(path string, run Run, sessionID string, in
 		Content:     input,
 		Attachments: inputAttachmentsToContextAttachments(attachments),
 	}, time.Now().UTC())
+	record.ComposerTokens = cloneComposerTokens(run.ComposerTokens)
 	return appendTranscriptRecords(path, []TranscriptRecord{record})
 }
 
@@ -282,6 +284,7 @@ func loadDurableTranscriptRunsAtPath(path string, threadID string) (map[string]T
 			current.run.InputAttachments = contextAttachmentsToRunInputAttachments(
 				transcriptAttachmentsToContextAttachments(record.Attachments),
 			)
+			current.run.ComposerTokens = cloneComposerTokens(record.ComposerTokens)
 		}
 		if record.RecordType == transcriptRecordTypeEvent && record.Event != nil {
 			event := Event{

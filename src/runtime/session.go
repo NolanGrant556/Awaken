@@ -33,6 +33,7 @@ type Run struct {
 	ThreadID         string               `json:"thread_id"`
 	Input            string               `json:"input,omitempty"`
 	InputAttachments []RunInputAttachment `json:"input_attachments,omitempty"`
+	ComposerTokens   []ComposerToken      `json:"composer_tokens,omitempty"`
 	Status           RunStatus            `json:"status"`
 	Result           string               `json:"result,omitempty"`
 	Error            string               `json:"error,omitempty"`
@@ -75,7 +76,7 @@ type pendingUserQuestion struct {
 	answer  chan string
 }
 
-func NewSession(runID, threadID, input string, attachments []RunInputAttachment, cancel context.CancelFunc) *Session {
+func NewSession(runID, threadID, input string, attachments []RunInputAttachment, composerTokens []ComposerToken, cancel context.CancelFunc) *Session {
 	now := time.Now().UTC()
 	return &Session{
 		run: Run{
@@ -83,6 +84,7 @@ func NewSession(runID, threadID, input string, attachments []RunInputAttachment,
 			ThreadID:         threadID,
 			Input:            strings.TrimSpace(input),
 			InputAttachments: cloneRunInputAttachments(attachments),
+			ComposerTokens:   cloneComposerTokens(composerTokens),
 			Status:           RunStatusRunning,
 			CreatedAt:        now,
 			UpdatedAt:        now,
@@ -94,10 +96,20 @@ func NewSession(runID, threadID, input string, attachments []RunInputAttachment,
 	}
 }
 
+func cloneComposerTokens(tokens []ComposerToken) []ComposerToken {
+	if len(tokens) == 0 {
+		return nil
+	}
+	return append([]ComposerToken(nil), tokens...)
+}
+
 func (s *Session) Snapshot() Run {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.run
+	snapshot := s.run
+	snapshot.InputAttachments = cloneRunInputAttachments(snapshot.InputAttachments)
+	snapshot.ComposerTokens = cloneComposerTokens(snapshot.ComposerTokens)
+	return snapshot
 }
 
 func (s *Session) Subscribe(afterSeq uint64) Subscription {

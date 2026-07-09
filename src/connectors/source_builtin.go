@@ -40,7 +40,6 @@ func newBuiltinSource() *builtinSource {
 			githubConnector(),
 			dingTalkConnector(),
 			larkConnector(),
-			outlookConnector(),
 			context7Connector(),
 		},
 	}
@@ -142,20 +141,6 @@ func larkConnector() ConnectorDefinition {
 		TrustLevel:       TrustBuiltin,
 		SourceOrigin:     SourceBuiltin,
 		McpConfigFactory: larkConfigFactory,
-	}
-}
-
-func outlookConnector() ConnectorDefinition {
-	return ConnectorDefinition{
-		ID:               "outlook-mcp",
-		DisplayName:      "Outlook MCP",
-		Description:      "默认邮件连接器，用户通过授权链接连接 Outlook 邮箱。",
-		Category:         CategoryOther,
-		Provider:         "Microsoft Outlook",
-		AuthType:         AuthOAuth2,
-		TrustLevel:       TrustBuiltin,
-		SourceOrigin:     SourceBuiltin,
-		McpConfigFactory: outlookConfigFactory,
 	}
 }
 
@@ -275,23 +260,6 @@ func larkConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclient
 				Stdio: &mcpclient.StdioTransportConfig{
 					Command: "lark-cli",
 					Args:    []string{"mcp"},
-					Env:     map[string]string{},
-				},
-				DisplayName: def.DisplayName,
-			},
-		},
-	}
-}
-
-func outlookConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclient.ScopedMcpServerConfig {
-	return map[string]mcpclient.ScopedMcpServerConfig{
-		"outlook": {
-			Name:  "outlook",
-			Scope: mcpclient.ScopeUser,
-			Config: mcpclient.McpServerConfig{
-				Stdio: &mcpclient.StdioTransportConfig{
-					Command: "outlook-mcp",
-					Args:    []string{"stdio"},
 					Env:     map[string]string{},
 				},
 				DisplayName: def.DisplayName,

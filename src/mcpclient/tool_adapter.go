@@ -229,7 +229,7 @@ func inferTrustedOrigin(manager *Manager, serverName string) tool.TrustedOrigin 
 		}
 	}
 	switch strings.ToLower(strings.TrimSpace(serverName)) {
-	case "github", "playwright", "dingtalk", "dingtalk-workspace", "lark", "feishu", "outlook":
+	case "github", "playwright", "dingtalk", "dingtalk-workspace", "lark", "feishu":
 		return tool.TrustedOriginOfficialConnector
 	default:
 		return tool.TrustedOriginThirdPartyMCP

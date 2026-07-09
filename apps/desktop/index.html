@@ -9,14 +9,20 @@
     <title>Awaken Desktop</title>
     <script>
       try {
+        const preference = localStorage.getItem("awaken:appearance:theme");
         const theme =
-          localStorage.getItem("awaken:appearance:theme") === "dark"
+          preference === "dark" ||
+          (preference === "system" &&
+            window.matchMedia?.("(prefers-color-scheme: dark)").matches)
             ? "dark"
             : "light";
         document.documentElement.dataset.awTheme = theme;
+        document.documentElement.dataset.awThemePreference =
+          preference === "system" || preference === "dark" ? preference : "light";
         document.documentElement.style.colorScheme = theme;
       } catch {
         document.documentElement.dataset.awTheme = "light";
+        document.documentElement.dataset.awThemePreference = "light";
         document.documentElement.style.colorScheme = "light";
       }
     </script>

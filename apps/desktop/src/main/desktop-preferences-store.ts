@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type {
-  AwakenTheme,
+  AwakenThemePreference,
   DesktopPreferences,
   DesktopPreferencesSaveRequest,
 } from "../shared/runtime.js";
@@ -12,8 +12,8 @@ const DEFAULT_DESKTOP_PREFERENCES: DesktopPreferences = {
   theme: "light",
 };
 
-function normalizeTheme(value: unknown): AwakenTheme {
-  return value === "dark" ? "dark" : "light";
+function normalizeThemePreference(value: unknown): AwakenThemePreference {
+  return value === "system" || value === "dark" ? value : "light";
 }
 
 function normalizePreferences(value: unknown): DesktopPreferences {
@@ -23,7 +23,7 @@ function normalizePreferences(value: unknown): DesktopPreferences {
 
   const candidate = value as Record<string, unknown>;
   return {
-    theme: normalizeTheme(candidate.theme),
+    theme: normalizeThemePreference(candidate.theme),
   };
 }
 

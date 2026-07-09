@@ -18,6 +18,7 @@ import {
   createInitialRunNarrativeState,
   createRunRequestedNarrative,
   projectAguiEventToNarrative,
+  type PromptNarrativeToken,
   type RunNarrativeItem,
   type RunNarrativeState,
 } from "../run-narrative";
@@ -231,6 +232,7 @@ export type RuntimeAction =
       type: "run/requested";
       prompt: string;
       promptAttachments?: RunInputAttachment[];
+      promptTokens?: PromptNarrativeToken[];
       startedAtMs?: number;
     }
   | { type: "run/created"; run: RuntimeRun }
@@ -1176,11 +1178,13 @@ export function reduceRuntimeState(
               action.prompt,
               action.promptAttachments,
               nextNarrativeScope(state),
+              action.promptTokens,
             )
           : createRunRequestedNarrative(
               action.prompt,
               action.promptAttachments,
               nextNarrativeScope(state),
+              action.promptTokens,
             ),
         supervisorStatus: state.supervisorStatus,
         threads: state.threads,
@@ -1303,21 +1307,24 @@ export function reduceRuntimeState(
       const prompt = recoveryPrompt(state, action.run, action.prompt);
       const hasPromptAttachments =
         (action.run.inputAttachments?.length ?? 0) > 0;
+      const hasPromptTokens = (action.run.composerTokens?.length ?? 0) > 0;
       return saveActiveThreadView(
         syncActiveThreadSummary({
           ...syncFromRun(initialState, action.run),
           prompt,
-          narrative: prompt
+          narrative: prompt || hasPromptTokens
             ? createRunRequestedNarrative(
                 prompt,
                 action.run.inputAttachments,
                 recoveredNarrativeScope(action.run),
+                action.run.composerTokens,
               )
             : hasPromptAttachments
               ? createRunRequestedNarrative(
                   prompt,
                   action.run.inputAttachments,
                   recoveredNarrativeScope(action.run),
+                  action.run.composerTokens,
                 )
               : createInitialRunNarrativeState(),
           supervisorStatus: state.supervisorStatus,

@@ -18,6 +18,7 @@ import (
 
 	"awaken/src/agentcore"
 	convcontext "awaken/src/context"
+	"awaken/src/skillruntime"
 	"awaken/src/tool"
 	"awaken/src/tool/profile"
 )
@@ -66,12 +67,27 @@ type ClientInfo struct {
 }
 
 type StartRunRequest struct {
-	Input        string               `json:"input"`
-	Attachments  []RunInputAttachment `json:"attachments,omitempty"`
-	Workspace    WorkspaceConfig      `json:"workspace"`
-	Client       ClientInfo           `json:"client"`
-	ThreadID     string               `json:"thread_id,omitempty"`
-	ModelProfile *ModelProfileConfig  `json:"model_profile,omitempty"`
+	Input          string               `json:"input"`
+	Attachments    []RunInputAttachment `json:"attachments,omitempty"`
+	ComposerTokens []ComposerToken      `json:"composer_tokens,omitempty"`
+	Workspace      WorkspaceConfig      `json:"workspace"`
+	Client         ClientInfo           `json:"client"`
+	ThreadID       string               `json:"thread_id,omitempty"`
+	ModelProfile   *ModelProfileConfig  `json:"model_profile,omitempty"`
+}
+
+type ComposerToken struct {
+	ID      string               `json:"id"`
+	Type    string               `json:"type"`
+	Label   string               `json:"label"`
+	Payload ComposerTokenPayload `json:"payload,omitempty"`
+}
+
+type ComposerTokenPayload struct {
+	SkillID       string `json:"skillId,omitempty"`
+	SourceOrigin  string `json:"sourceOrigin,omitempty"`
+	SkillFilePath string `json:"skillFilePath,omitempty"`
+	RootDir       string `json:"rootDir,omitempty"`
 }
 
 type ModelProfileConfig struct {
@@ -185,7 +201,7 @@ func (s *RunService) SetDefaultWorkspace(workspace WorkspaceConfig) error {
 
 func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	trimmed := strings.TrimSpace(req.Input)
-	if trimmed == "" && len(req.Attachments) == 0 {
+	if trimmed == "" && len(req.Attachments) == 0 && len(req.ComposerTokens) == 0 {
 		return Run{}, ErrInvalidInput
 	}
 	if s.newExecutor == nil {
@@ -231,8 +247,10 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		return Run{}, err
 	}
 	workspace = mergeTaskScopeAttachments(workspace, persistedAttachments)
+	effectiveInput := effectiveInputForComposerTokens(trimmed, req.ComposerTokens)
+	threadLabel := threadLabelForInputAndTokens(trimmed, persistedAttachments, req.ComposerTokens)
 	ctx, cancel := context.WithCancel(context.Background())
-	session := NewSession(runID, threadID, trimmed, persistedAttachments, cancel)
+	session := NewSession(runID, threadID, trimmed, persistedAttachments, req.ComposerTokens, cancel)
 	var threadSnapshot ThreadSnapshot
 
 	s.mu.Lock()
@@ -264,10 +282,10 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			s.sessions[runID] = session
 			threadSnapshot = s.threads[threadID].snapshot()
 			s.mu.Unlock()
-			_ = s.threadStore.CreateThread(threadSnapshot, modelProfileKey, threadLabelForInput(trimmed, persistedAttachments))
+			_ = s.threadStore.CreateThread(threadSnapshot, modelProfileKey, threadLabel)
 			_ = s.threadStore.AppendRunInput(threadSnapshot, session.Snapshot(), req.Client.SessionID, trimmed, persistedAttachments)
 			executor := s.newExecutor(agent)
-			go s.execute(session, executor, agent, trimmed, persistedAttachments, ctx)
+			go s.execute(session, executor, agent, effectiveInput, trimmed, persistedAttachments, ctx)
 			return session.Snapshot(), nil
 		}
 		if !sameWorkspaceRoot(thread.workspace, workspace) {
@@ -295,12 +313,11 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		threadSnapshot = thread.snapshot()
 	} else {
 		agent = s.createAgent(workspace, threadID, req.ModelProfile)
-		label := threadLabelForInput(trimmed, persistedAttachments)
 		s.threads[threadID] = &Thread{
 			threadID:        threadID,
 			agent:           agent,
 			workspace:       workspace,
-			label:           label,
+			label:           threadLabel,
 			latestRunID:     runID,
 			activeRunID:     runID,
 			runIDs:          []string{runID},
@@ -314,10 +331,10 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	s.sessions[runID] = session
 	s.mu.Unlock()
 
-	_ = s.threadStore.CreateThread(threadSnapshot, modelProfileKey, threadLabelForInput(trimmed, persistedAttachments))
+	_ = s.threadStore.CreateThread(threadSnapshot, modelProfileKey, threadLabel)
 	_ = s.threadStore.AppendRunInput(threadSnapshot, session.Snapshot(), req.Client.SessionID, trimmed, persistedAttachments)
 	executor := s.newExecutor(agent)
-	go s.execute(session, executor, agent, trimmed, persistedAttachments, ctx)
+	go s.execute(session, executor, agent, effectiveInput, trimmed, persistedAttachments, ctx)
 
 	return session.Snapshot(), nil
 }
@@ -587,9 +604,10 @@ func partialAssistantResult(agent *agentcore.Agent) string {
 	return ""
 }
 
-func (s *RunService) execute(session *Session, executor Executor, agent *agentcore.Agent, input string, attachments []RunInputAttachment, ctx context.Context) {
+func (s *RunService) execute(session *Session, executor Executor, agent *agentcore.Agent, input string, displayInput string, attachments []RunInputAttachment, ctx context.Context) {
 	snapshot := session.Snapshot()
 	defer func() {
+		restoreAgentDisplayInput(agent, input, displayInput)
 		s.flushAgentTranscript(session, agent)
 		s.clearActiveRun(snapshot.ThreadID, snapshot.RunID)
 	}()
@@ -620,6 +638,79 @@ func (s *RunService) execute(session *Session, executor Executor, agent *agentco
 	}
 
 	session.CompleteError(err.Error(), "")
+}
+
+func effectiveInputForComposerTokens(input string, tokens []ComposerToken) string {
+	skillTokens := skillComposerTokens(tokens)
+	if len(skillTokens) == 0 {
+		return input
+	}
+
+	var b strings.Builder
+	b.WriteString("<awaken_composer_tokens>\n")
+	b.WriteString("The user selected these Skill chips in the composer. Use the matching skill tool before continuing with the task unless it is impossible.\n")
+	for _, token := range skillTokens {
+		skillID := strings.TrimSpace(firstNonEmpty(token.Payload.SkillID, token.ID))
+		if skillID == "" {
+			continue
+		}
+		b.WriteString("- skillId: ")
+		b.WriteString(skillID)
+		b.WriteString("\n  tool: ")
+		b.WriteString(skillruntime.SkillToolName(skillID))
+		if path := strings.TrimSpace(token.Payload.SkillFilePath); path != "" {
+			b.WriteString("\n  skillFilePath: ")
+			b.WriteString(path)
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("</awaken_composer_tokens>\n\n")
+	b.WriteString("User task:\n")
+	if strings.TrimSpace(input) != "" {
+		b.WriteString(input)
+	} else {
+		b.WriteString("Use the selected Skill to help the user.")
+	}
+	return b.String()
+}
+
+func skillComposerTokens(tokens []ComposerToken) []ComposerToken {
+	result := make([]ComposerToken, 0, len(tokens))
+	for _, token := range tokens {
+		if strings.EqualFold(strings.TrimSpace(token.Type), "skill") {
+			result = append(result, token)
+		}
+	}
+	return result
+}
+
+func threadLabelForInputAndTokens(input string, attachments []RunInputAttachment, tokens []ComposerToken) string {
+	if strings.TrimSpace(input) != "" || len(attachments) > 0 {
+		return threadLabelForInput(input, attachments)
+	}
+	for _, token := range skillComposerTokens(tokens) {
+		if label := trimThreadLabel(strings.TrimSpace(token.Label)); label != "" {
+			return label
+		}
+		if label := trimThreadLabel(strings.TrimSpace(firstNonEmpty(token.Payload.SkillID, token.ID))); label != "" {
+			return label
+		}
+	}
+	return threadLabelForInput(input, attachments)
+}
+
+func restoreAgentDisplayInput(agent *agentcore.Agent, effectiveInput string, displayInput string) {
+	if agent == nil || effectiveInput == displayInput {
+		return
+	}
+	messages := agent.GetConversation().Context.GetMessages()
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == convcontext.RoleUser && messages[i].Content == effectiveInput {
+			messages[i].Content = displayInput
+			agent.GetConversation().Context.SetMessages(messages)
+			return
+		}
+	}
 }
 
 func (s *RunService) flushAgentTranscript(session *Session, agent *agentcore.Agent) {

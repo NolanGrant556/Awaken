@@ -2,6 +2,16 @@ import type { AguiEvent } from "./agui.js";
 
 export type DesktopPlatform = "macos" | "windows" | "linux";
 
+export type AwakenTheme = "light" | "dark";
+
+export type DesktopPreferences = {
+  theme: AwakenTheme;
+};
+
+export type DesktopPreferencesSaveRequest = {
+  theme?: AwakenTheme;
+};
+
 export type RuntimeRunStatus =
   | "running"
   | "cancelling"
@@ -658,6 +668,8 @@ export type AwakenBridge = {
     afterSeq?: number,
   ) => Promise<string>;
   unsubscribeRun: (subscriptionId: string) => void;
+  getDesktopPreferences: () => Promise<DesktopPreferences>;
+  saveDesktopPreferences: (request: DesktopPreferencesSaveRequest) => Promise<DesktopPreferences>;
   getRuntimeInfo: () => Promise<RuntimeInfo>;
   listConnectors: () => Promise<RuntimeConnector[]>;
   connectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;

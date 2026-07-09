@@ -66,7 +66,7 @@ body {
   font-size: var(--aw-font-size-base);
   line-height: var(--aw-line-height-base);
   color: var(--aw-text-primary);
-  background: var(--aw-bg-main);
+  background: var(--aw-surface-canvas, var(--aw-bg-main));
 }
 
 button,
@@ -191,7 +191,7 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
   min-width: 0;
   height: 100%;
   padding: 0;
-  background: var(--aw-bg-main);
+  background: var(--aw-surface-chrome, var(--aw-bg-main));
   -webkit-app-region: drag;
 }
 
@@ -438,15 +438,27 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
   z-index: 0;
   top: 0;
   bottom: 0;
-  left: 50%;
-  width: min(760px, calc(100% - 64px));
-  transform: translateX(-50%);
+  left: 0;
+  width: 100%;
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0) 0%,
-    rgba(255, 255, 255, 0.84) 34%,
-    rgba(255, 255, 255, 0.98) 62%,
+    transparent 0%,
+    color-mix(in srgb, var(--aw-surface-work) 72%, transparent) 42%,
     var(--aw-surface-work) 100%
+  );
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  mask-image: linear-gradient(
+    180deg,
+    transparent 0%,
+    #000000 34%,
+    #000000 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    180deg,
+    transparent 0%,
+    #000000 34%,
+    #000000 100%
   );
   pointer-events: none;
 }
@@ -1704,6 +1716,7 @@ button.tool-trace-line:focus-visible {
   width: 206px;
   max-width: 46%;
   height: auto;
+  filter: var(--aw-brand-wordmark-filter, none);
   image-rendering: auto;
   user-select: none;
 }
@@ -1990,19 +2003,19 @@ button.tool-trace-line:focus-visible {
   width: 92px;
   height: 8px;
   overflow: hidden;
-  border: 1px solid rgba(115, 115, 115, 0.18);
-  background: repeating-linear-gradient(
-    -62deg,
-    rgba(115, 115, 115, 0.14) 0 4px,
-    rgba(255, 255, 255, 0.78) 4px 8px
-  );
+  border: 1px solid color-mix(in srgb, var(--aw-text-tertiary) 28%, transparent);
+  background: color-mix(in srgb, var(--aw-text-tertiary) 12%, transparent);
 }
 
 .composer-bar-context-meter-fill {
   position: absolute;
   inset: 0 auto 0 0;
   width: var(--composer-bar-context-progress, 0%);
-  background: rgba(115, 115, 115, 0.34);
+  background: repeating-linear-gradient(
+    -62deg,
+    color-mix(in srgb, var(--aw-text-primary) 88%, transparent) 0 4px,
+    color-mix(in srgb, var(--aw-text-primary) 34%, transparent) 4px 8px
+  );
 }
 
 .composer-bar-context,

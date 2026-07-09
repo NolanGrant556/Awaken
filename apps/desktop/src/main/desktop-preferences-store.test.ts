@@ -38,6 +38,21 @@ describe("DesktopPreferencesStore", () => {
     ).resolves.toContain('"theme": "dark"');
   });
 
+  it("persists the system theme preference", async () => {
+    const store = new DesktopPreferencesStore(configDir);
+
+    await store.initialize();
+    await store.savePreferences({ theme: "system" });
+
+    const reloaded = new DesktopPreferencesStore(configDir);
+    await reloaded.initialize();
+
+    expect(reloaded.snapshot()).toEqual({ theme: "system" });
+    await expect(
+      readFile(join(configDir, "desktop-preferences.json"), "utf8"),
+    ).resolves.toContain('"theme": "system"');
+  });
+
   it("normalizes unknown stored themes back to light", async () => {
     await writeFile(
       join(configDir, "desktop-preferences.json"),

@@ -3,13 +3,14 @@ import type { AguiEvent } from "./agui.js";
 export type DesktopPlatform = "macos" | "windows" | "linux";
 
 export type AwakenTheme = "light" | "dark";
+export type AwakenThemePreference = "system" | AwakenTheme;
 
 export type DesktopPreferences = {
-  theme: AwakenTheme;
+  theme: AwakenThemePreference;
 };
 
 export type DesktopPreferencesSaveRequest = {
-  theme?: AwakenTheme;
+  theme?: AwakenThemePreference;
 };
 
 export type RuntimeRunStatus =

@@ -1713,8 +1713,12 @@ func libreOfficeExecutableCandidates(path string) []string {
 	return []string{
 		path,
 		filepath.Join(path, "Contents", "MacOS", "soffice"),
+		filepath.Join(path, "program", "soffice.bin"),
+		filepath.Join(path, "program", "soffice.bin.exe"),
 		filepath.Join(path, "program", "soffice"),
 		filepath.Join(path, "program", "soffice.exe"),
+		filepath.Join(path, "soffice.bin"),
+		filepath.Join(path, "soffice.bin.exe"),
 		filepath.Join(path, "soffice"),
 		filepath.Join(path, "soffice.exe"),
 	}

@@ -5,6 +5,8 @@ import {
   type AwakenBridge,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
+  type DesktopPreferences,
+  type DesktopPreferencesSaveRequest,
   type DesktopPlatform,
   type InstallSkillRequest,
   type InstallSkillResponse,
@@ -119,6 +121,10 @@ const bridge: AwakenBridge = {
     subscriptions.delete(subscriptionId);
     ipcRenderer.send("awaken:unsubscribe-run", subscriptionId);
   },
+  getDesktopPreferences: () =>
+    ipcRenderer.invoke("awaken:get-desktop-preferences") as Promise<DesktopPreferences>,
+  saveDesktopPreferences: (request: DesktopPreferencesSaveRequest) =>
+    ipcRenderer.invoke("awaken:save-desktop-preferences", request) as Promise<DesktopPreferences>,
   getRuntimeInfo: () =>
     ipcRenderer.invoke("awaken:get-runtime-info") as Promise<RuntimeInfo>,
   listConnectors: () =>

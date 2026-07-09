@@ -1,4 +1,6 @@
 :root {
+  color-scheme: light;
+
   /* Background */
   --aw-bg-main: #ffffff;
   --aw-bg-nav: #f5f5f5;
@@ -33,6 +35,7 @@
   --aw-warning: #e27900;
   --aw-error: #e8463a;
   --aw-accent-purple: #4b3fe3;
+  --aw-accent: var(--aw-accent-purple);
 
   --aw-success-soft-bg: rgba(64, 176, 139, 0.12);
   --aw-success-soft-border: rgba(64, 176, 139, 0.18);
@@ -44,6 +47,7 @@
   /* Run Workbench semantic tokens v2 */
   --aw-surface-canvas: var(--aw-bg-main);
   --aw-surface-navigation: var(--aw-bg-nav);
+  --aw-surface-chrome: var(--aw-bg-main);
   --aw-surface-work: #ffffff;
   --aw-surface-detail: #ffffff;
   --aw-surface-raised: #ffffff;
@@ -85,6 +89,7 @@
   --aw-diff-changed-text: #8a4b00;
   --aw-terminal-bg: #17181a;
   --aw-terminal-text: #ffffff;
+  --aw-brand-wordmark-filter: none;
 
   /* Spacing */
   --aw-space-1: 2px;
@@ -168,6 +173,100 @@
   --aw-inspector-collapsed-width: 42px;
   --aw-content-width: 768px;
   --aw-chrome-height: 44px;
+}
+
+:root[data-aw-theme="dark"] {
+  color-scheme: dark;
+
+  /* Background */
+  --aw-bg-main: #0f0f0e;
+  --aw-bg-nav: #161614;
+  --aw-bg-white: #1b1b19;
+  --aw-bg-fill-light: rgba(255, 255, 255, 0.07);
+  --aw-bg-fill-main: rgba(255, 255, 255, 0.11);
+  --aw-bg-fill-dark: rgba(255, 255, 255, 0.16);
+  --aw-overlay-backdrop: rgba(0, 0, 0, 0.58);
+
+  /* Text */
+  --aw-text-primary: #f2f1ed;
+  --aw-text-secondary: #d2d0ca;
+  --aw-text-tertiary: #9d9a93;
+  --aw-text-disabled: #66635d;
+  --aw-text-blue: #8ab3ff;
+  --aw-text-onblack: #11110f;
+
+  /* Border */
+  --aw-border-main: rgba(255, 255, 255, 0.12);
+  --aw-border-light: rgba(255, 255, 255, 0.08);
+  --aw-border-active: rgba(255, 255, 255, 0.74);
+  --aw-border-control: rgba(255, 255, 255, 0.16);
+  --aw-border-control-hover: rgba(255, 255, 255, 0.26);
+
+  /* Button */
+  --aw-button-black: #f2f1ed;
+  --aw-button-black-hover: #ffffff;
+  --aw-button-black-active: #dfddd7;
+
+  /* Status */
+  --aw-success: #49c89c;
+  --aw-warning: #f0a64a;
+  --aw-error: #ff756b;
+  --aw-accent-purple: #9f9aff;
+
+  --aw-success-soft-bg: rgba(73, 200, 156, 0.16);
+  --aw-success-soft-border: rgba(73, 200, 156, 0.24);
+  --aw-warning-soft-bg: rgba(240, 166, 74, 0.16);
+  --aw-warning-soft-border: rgba(240, 166, 74, 0.24);
+  --aw-error-soft-bg: rgba(255, 117, 107, 0.16);
+  --aw-error-soft-border: rgba(255, 117, 107, 0.24);
+
+  /* Run Workbench semantic tokens v2 */
+  --aw-surface-canvas: var(--aw-bg-main);
+  --aw-surface-navigation: var(--aw-bg-nav);
+  --aw-surface-chrome: #0f0f0e;
+  --aw-surface-work: #0f0f0e;
+  --aw-surface-detail: #171715;
+  --aw-surface-raised: #20201d;
+  --aw-surface-panel: #1a1a18;
+  --aw-surface-panel-muted: rgba(255, 255, 255, 0.07);
+  --aw-surface-hover: rgba(255, 255, 255, 0.08);
+  --aw-surface-composer: rgba(255, 255, 255, 0.08);
+  --aw-surface-code: #141413;
+  --aw-surface-selection: rgba(255, 255, 255, 0.13);
+  --aw-surface-focus: #262521;
+  --aw-surface-danger: rgba(255, 117, 107, 0.11);
+  --aw-surface-status-pill: rgba(255, 255, 255, 0.08);
+  --aw-surface-muted-fill: rgba(255, 255, 255, 0.07);
+  --aw-surface-sidebar: var(--aw-surface-navigation);
+  --aw-surface-stage: var(--aw-surface-work);
+  --aw-surface-inspector: var(--aw-surface-detail);
+  --aw-surface-runtime-pill: var(--aw-surface-status-pill);
+  --aw-text-code: #ebe9e2;
+  --aw-text-selection: #8ab3ff;
+  --aw-status-running-bg: rgba(138, 179, 255, 0.16);
+  --aw-status-running-border: rgba(138, 179, 255, 0.24);
+  --aw-status-waiting-bg: rgba(240, 166, 74, 0.15);
+  --aw-status-waiting-text: #e0a24a;
+  --aw-status-success-bg: rgba(73, 200, 156, 0.15);
+  --aw-status-success-text: #75d8b3;
+  --aw-status-danger-bg: rgba(255, 117, 107, 0.15);
+  --aw-status-danger-text: #ff9a92;
+  --aw-diff-added: rgba(73, 200, 156, 0.15);
+  --aw-diff-added-text: #87ddb9;
+  --aw-diff-removed: rgba(255, 117, 107, 0.15);
+  --aw-diff-removed-text: #ffa19a;
+  --aw-diff-changed: rgba(240, 166, 74, 0.15);
+  --aw-diff-changed-text: #e8b35f;
+  --aw-terminal-bg: #090908;
+  --aw-terminal-text: #f2f1ed;
+  --aw-brand-wordmark-filter: invert(1) brightness(1.08);
+
+  /* Shadow */
+  --aw-shadow-menu: 0 18px 48px rgba(0, 0, 0, 0.42), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --aw-shadow-popover: var(--aw-shadow-menu);
+  --aw-shadow-toast: 0 18px 48px rgba(0, 0, 0, 0.36);
+  --aw-shadow-raised: 0 1px 2px rgba(0, 0, 0, 0.32);
+  --aw-shadow-focus: 0 0 0 2px rgba(255, 255, 255, 0.16);
 }
 
 @media (max-width: 1180px) {

@@ -13,10 +13,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   App,
   buildWorkspaceRegistryPersistRequest,
+  isUserQuestionSelectionAnswered,
+  nextUserQuestionPromptIndex,
   restoreWorkspaceProjectsFromRegistry,
   resolveWorkspaceRootForRun,
+  selectedUserQuestionLabels,
   shouldResetActiveThreadForWorkspaceChange,
   shouldShowSidebarThreadSpinner,
+  UserQuestionPrompt,
 } from "./App";
 import {
   actionsFromSlashProviders,
@@ -588,6 +592,55 @@ describe("assistant answer footer contract", () => {
     expect(
       shouldShowAssistantAnswerFooter({ status: "error", isFinal: true }),
     ).toBe(false);
+  });
+});
+
+describe("UserQuestionPrompt pager contract", () => {
+  it("renders one question at a time with a page counter", () => {
+    const html = renderToString(
+      React.createElement(UserQuestionPrompt, {
+        question: {
+          id: "question-1",
+          questions: [
+            {
+              question: "研究深度?",
+              options: [{ label: "standard" }, { label: "deep" }],
+            },
+            {
+              question: "报告侧重点?",
+              options: [{ label: "技术与架构选型" }],
+            },
+          ],
+        },
+        onSubmit: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("1 of 2");
+    expect(html).toContain("研究深度?");
+    expect(html).toContain("standard");
+    expect(html).not.toContain("报告侧重点?");
+  });
+
+  it("keeps other answers incomplete until text is provided", () => {
+    expect(
+      isUserQuestionSelectionAnswered({
+        selected: ["__other__"],
+        otherText: "",
+      }),
+    ).toBe(false);
+    expect(
+      selectedUserQuestionLabels({
+        selected: ["standard", "__other__"],
+        otherText: "自定义方向",
+      }),
+    ).toEqual(["standard", "自定义方向"]);
+  });
+
+  it("advances within the existing question range", () => {
+    expect(nextUserQuestionPromptIndex(0, 2)).toBe(1);
+    expect(nextUserQuestionPromptIndex(1, 2)).toBe(1);
+    expect(nextUserQuestionPromptIndex(0, 0)).toBe(0);
   });
 });
 

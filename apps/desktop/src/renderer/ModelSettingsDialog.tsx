@@ -6,14 +6,22 @@ import {
   useRef,
   useState,
 } from "react";
-import { ChevronDown, Eye, EyeOff, KeyRound, Moon, Sun } from "lucide-react";
+import {
+  ChevronDown,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Monitor,
+  Moon,
+  Sun,
+} from "lucide-react";
 import {
   AwakenButton as Button,
   AwakenDialog as Dialog,
 } from "@awaken/design-system";
 import { calculateAutoCompactThreshold } from "../shared/runtime";
 import type {
-  AwakenTheme,
+  AwakenThemePreference,
   ModelProfileSaveRequest,
   ModelProvider,
   RuntimeModelProfileSummary,
@@ -59,24 +67,24 @@ const DUPLICATE_MODEL_PROFILE_ERROR = "模型配置重复，添加失败";
 type ModelSettingsDialogProps = {
   open: boolean;
   runtimeClient: RuntimeClient;
-  theme: AwakenTheme;
+  themePreference: AwakenThemePreference;
   themeSaving: boolean;
   themeMessage: string | null;
-  onThemeChange: (theme: AwakenTheme) => void;
+  onThemePreferenceChange: (theme: AwakenThemePreference) => void;
   onOpenChange: (open: boolean) => void;
   onProfilesChanged: () => void;
 };
 
 type AppearanceSettingsProps = {
-  theme: AwakenTheme;
+  themePreference: AwakenThemePreference;
   themeSaving: boolean;
-  onThemeChange: (theme: AwakenTheme) => void;
+  onThemePreferenceChange: (theme: AwakenThemePreference) => void;
 };
 
 export function AppearanceSettings({
-  theme,
+  themePreference,
   themeSaving,
-  onThemeChange,
+  onThemePreferenceChange,
 }: AppearanceSettingsProps) {
   return (
     <section className="appearance-settings" aria-label="外观">
@@ -92,12 +100,25 @@ export function AppearanceSettings({
           <button
             type="button"
             className={`theme-choice${
-              theme === "light" ? " theme-choice-active" : ""
+              themePreference === "system" ? " theme-choice-active" : ""
             }`}
             role="radio"
-            aria-checked={theme === "light"}
+            aria-checked={themePreference === "system"}
             disabled={themeSaving}
-            onClick={() => onThemeChange("light")}
+            onClick={() => onThemePreferenceChange("system")}
+          >
+            <Monitor size={17} strokeWidth={1.9} />
+            <span>跟随系统</span>
+          </button>
+          <button
+            type="button"
+            className={`theme-choice${
+              themePreference === "light" ? " theme-choice-active" : ""
+            }`}
+            role="radio"
+            aria-checked={themePreference === "light"}
+            disabled={themeSaving}
+            onClick={() => onThemePreferenceChange("light")}
           >
             <Sun size={17} strokeWidth={1.9} />
             <span>浅色</span>
@@ -105,12 +126,12 @@ export function AppearanceSettings({
           <button
             type="button"
             className={`theme-choice${
-              theme === "dark" ? " theme-choice-active" : ""
+              themePreference === "dark" ? " theme-choice-active" : ""
             }`}
             role="radio"
-            aria-checked={theme === "dark"}
+            aria-checked={themePreference === "dark"}
             disabled={themeSaving}
-            onClick={() => onThemeChange("dark")}
+            onClick={() => onThemePreferenceChange("dark")}
           >
             <Moon size={17} strokeWidth={1.9} />
             <span>黑色</span>
@@ -360,10 +381,10 @@ function toSaveRequest(
 export function ModelSettingsDialog({
   open,
   runtimeClient,
-  theme,
+  themePreference,
   themeSaving,
   themeMessage,
-  onThemeChange,
+  onThemePreferenceChange,
   onOpenChange,
   onProfilesChanged,
 }: ModelSettingsDialogProps) {
@@ -886,9 +907,9 @@ export function ModelSettingsDialog({
 
           {activeSettingsSection === "appearance" ? (
             <AppearanceSettings
-              theme={theme}
+              themePreference={themePreference}
               themeSaving={themeSaving}
-              onThemeChange={onThemeChange}
+              onThemePreferenceChange={onThemePreferenceChange}
             />
           ) : activeSection === "configure" ? (
             <section className="model-provider-list" aria-label="模型配置">

@@ -48,6 +48,7 @@ import {
 import { createRuntimeClient, type SubscribeHandlers } from "./runtime/client";
 import type {
   AwakenTheme,
+  AwakenThemePreference,
   ComposerToken,
   MassMessageReviewDecision,
   RuntimeInfo,
@@ -793,6 +794,7 @@ const MAX_INSPECTOR_WIDTH = 520;
 const LAYOUT_STEP = 12;
 const INSPECTOR_RESPONSIVE_COLLAPSE_QUERY = "(max-width: 1180px)";
 const STORED_THEME_KEY = "awaken:appearance:theme";
+const SYSTEM_THEME_QUERY = "(prefers-color-scheme: dark)";
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -860,8 +862,30 @@ function readStoredString(key: string, fallback = ""): string {
   }
 }
 
-function readStoredTheme(): AwakenTheme {
-  return readStoredString(STORED_THEME_KEY) === "dark" ? "dark" : "light";
+function normalizeThemePreference(value: string): AwakenThemePreference {
+  return value === "system" || value === "dark" ? value : "light";
+}
+
+function readStoredThemePreference(): AwakenThemePreference {
+  return normalizeThemePreference(readStoredString(STORED_THEME_KEY));
+}
+
+function readSystemTheme(): AwakenTheme {
+  if (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia(SYSTEM_THEME_QUERY).matches
+  ) {
+    return "dark";
+  }
+  return "light";
+}
+
+function effectiveThemeForPreference(
+  preference: AwakenThemePreference,
+  systemTheme: AwakenTheme,
+): AwakenTheme {
+  return preference === "system" ? systemTheme : preference;
 }
 
 function readStoredWorkspaceProjects(key: string): WorkspaceProject[] {
@@ -956,8 +980,14 @@ export function App() {
     RuntimeModelProfileSummary[]
   >([]);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
-  const [appearanceTheme, setAppearanceTheme] =
-    useState<AwakenTheme>(readStoredTheme);
+  const [appearanceThemePreference, setAppearanceThemePreference] =
+    useState<AwakenThemePreference>(readStoredThemePreference);
+  const [systemAppearanceTheme, setSystemAppearanceTheme] =
+    useState<AwakenTheme>(readSystemTheme);
+  const appearanceTheme = effectiveThemeForPreference(
+    appearanceThemePreference,
+    systemAppearanceTheme,
+  );
   const [appearanceSaving, setAppearanceSaving] = useState(false);
   const [appearanceMessage, setAppearanceMessage] = useState<string | null>(null);
   const [profilePopoverOpen, setProfilePopoverOpen] = useState(false);
@@ -1062,10 +1092,35 @@ export function App() {
       return;
     }
     document.documentElement.dataset.awTheme = appearanceTheme;
+    document.documentElement.dataset.awThemePreference =
+      appearanceThemePreference;
     document.documentElement.style.colorScheme =
       appearanceTheme === "dark" ? "dark" : "light";
-    writeStoredValue(STORED_THEME_KEY, appearanceTheme);
-  }, [appearanceTheme]);
+    writeStoredValue(STORED_THEME_KEY, appearanceThemePreference);
+  }, [appearanceTheme, appearanceThemePreference]);
+
+  useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      typeof window.matchMedia !== "function"
+    ) {
+      return;
+    }
+
+    const media = window.matchMedia(SYSTEM_THEME_QUERY);
+    const updateSystemTheme = (matches: boolean) => {
+      setSystemAppearanceTheme(matches ? "dark" : "light");
+    };
+    const handleChange = (event: MediaQueryListEvent) => {
+      updateSystemTheme(event.matches);
+    };
+
+    updateSystemTheme(media.matches);
+    media.addEventListener("change", handleChange);
+    return () => {
+      media.removeEventListener("change", handleChange);
+    };
+  }, []);
 
   useEffect(() => {
     if (!renameDialogOpen) {
@@ -1089,7 +1144,7 @@ export function App() {
       try {
         const preferences = await runtimeClient.getDesktopPreferences();
         if (!cancelled) {
-          setAppearanceTheme(preferences.theme);
+          setAppearanceThemePreference(preferences.theme);
         }
       } catch {
         // The localStorage mirror already provides the best available fallback.
@@ -1459,20 +1514,22 @@ export function App() {
     }
   }
 
-  async function handleAppearanceThemeChange(theme: AwakenTheme): Promise<void> {
-    if (theme === appearanceTheme || appearanceSaving) {
+  async function handleAppearanceThemeChange(
+    theme: AwakenThemePreference,
+  ): Promise<void> {
+    if (theme === appearanceThemePreference || appearanceSaving) {
       return;
     }
 
-    const previousTheme = appearanceTheme;
-    setAppearanceTheme(theme);
+    const previousTheme = appearanceThemePreference;
+    setAppearanceThemePreference(theme);
     setAppearanceSaving(true);
     setAppearanceMessage(null);
     try {
       const preferences = await runtimeClient.saveDesktopPreferences({ theme });
-      setAppearanceTheme(preferences.theme);
+      setAppearanceThemePreference(preferences.theme);
     } catch (error) {
-      setAppearanceTheme(previousTheme);
+      setAppearanceThemePreference(previousTheme);
       setAppearanceMessage(
         error instanceof Error ? error.message : "Failed to save theme",
       );
@@ -3918,10 +3975,10 @@ export function App() {
       <ModelSettingsDialog
         open={modelSettingsOpen}
         runtimeClient={runtimeClient}
-        theme={appearanceTheme}
+        themePreference={appearanceThemePreference}
         themeSaving={appearanceSaving}
         themeMessage={appearanceMessage}
-        onThemeChange={(theme) => {
+        onThemePreferenceChange={(theme) => {
           void handleAppearanceThemeChange(theme);
         }}
         onOpenChange={setModelSettingsOpen}

@@ -161,6 +161,37 @@ pre {
   gap: 10px;
 }
 
+.rename-thread-dialog-body {
+  display: grid;
+  gap: 10px;
+  min-width: 280px;
+}
+
+.rename-thread-dialog-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: 6px;
+  background: var(--aw-bg-white);
+  color: var(--aw-text-primary);
+  font-size: 13px;
+  line-height: 1.4;
+  outline: none;
+}
+
+.rename-thread-dialog-input:focus {
+  border-color: var(--aw-border-control-hover);
+}
+
+.rename-thread-dialog-input::placeholder {
+  color: var(--aw-text-muted);
+}
+
+.rename-thread-dialog-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .extension-view {
   display: grid;
   min-width: 0;

@@ -26,6 +26,7 @@ type ThreadStore interface {
 	RestoreThread(threadID string) (storedThreadRecord, restoredTranscript, error)
 	GetTranscript(threadID string) (ThreadTranscript, error)
 	RenameThread(threadID, label string, updatedAt time.Time) (ThreadSnapshot, error)
+	UpdateThreadTitleMetadata(threadID, label string, source ThreadTitleSource, status ThreadTitleStatus, seedRunID string, updatedAt time.Time) (ThreadSnapshot, error)
 	DeleteThread(threadID string) error
 }
 
@@ -96,7 +97,7 @@ func (s *sqliteThreadStore) ListThreads() ([]ThreadSnapshot, error) {
 		return nil, err
 	}
 	rows, err := db.Query(`
-SELECT thread_id, title, workspace_root, scope_id, latest_run_id, created_at, updated_at, workspace_json, model_profile_key, preview
+SELECT thread_id, title, title_source, title_status, title_updated_at, title_seed_run_id, workspace_root, scope_id, latest_run_id, created_at, updated_at, workspace_json, model_profile_key, preview
 FROM threads
 ORDER BY updated_at DESC, created_at DESC
 `)
@@ -193,6 +194,9 @@ func (s *sqliteThreadStore) RenameThread(threadID, label string, updatedAt time.
 		return ThreadSnapshot{}, err
 	}
 	record.Snapshot.Label = trimThreadLabel(strings.TrimSpace(label))
+	record.Snapshot.TitleSource = ThreadTitleSourceManual
+	record.Snapshot.TitleStatus = ThreadTitleStatusReady
+	record.Snapshot.TitleUpdatedAt = updatedAt.UTC()
 	record.Snapshot.UpdatedAt = updatedAt.UTC()
 	if record.Snapshot.Label == "" {
 		return ThreadSnapshot{}, ErrThreadLabelInvalid
@@ -201,6 +205,76 @@ func (s *sqliteThreadStore) RenameThread(threadID, label string, updatedAt time.
 		return ThreadSnapshot{}, err
 	}
 	if err := s.upsertThread(record.Snapshot, record.ModelProfileKey, ""); err != nil {
+		return ThreadSnapshot{}, err
+	}
+	return record.Snapshot, nil
+}
+
+func (s *sqliteThreadStore) UpdateThreadTitleMetadata(threadID, label string, source ThreadTitleSource, status ThreadTitleStatus, seedRunID string, updatedAt time.Time) (ThreadSnapshot, error) {
+	threadID = strings.TrimSpace(threadID)
+	seedRunID = strings.TrimSpace(seedRunID)
+	if threadID == "" {
+		return ThreadSnapshot{}, ErrThreadNotFound
+	}
+	if seedRunID == "" {
+		return ThreadSnapshot{}, ErrThreadNotFound
+	}
+	nextLabel := trimThreadLabel(strings.TrimSpace(label))
+	if status == ThreadTitleStatusReady && nextLabel == "" {
+		return ThreadSnapshot{}, ErrThreadLabelInvalid
+	}
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
+	} else {
+		updatedAt = updatedAt.UTC()
+	}
+
+	db, err := s.open()
+	if err != nil {
+		return ThreadSnapshot{}, err
+	}
+	result, err := db.Exec(`
+UPDATE threads
+SET
+	title = CASE WHEN ? = '' THEN title ELSE ? END,
+	title_source = ?,
+	title_status = ?,
+	title_updated_at = ?,
+	title_seed_run_id = ?,
+	updated_at = ?
+WHERE thread_id = ?
+	AND title_source = ?
+	AND title_status = ?
+	AND title_seed_run_id = ?
+`,
+		nextLabel,
+		nextLabel,
+		string(source),
+		string(status),
+		updatedAt.Format(time.RFC3339Nano),
+		seedRunID,
+		updatedAt.Format(time.RFC3339Nano),
+		threadID,
+		string(ThreadTitleSourceFirstUser),
+		string(ThreadTitleStatusPending),
+		seedRunID,
+	)
+	if err != nil {
+		return ThreadSnapshot{}, fmt.Errorf("update thread title metadata %q: %w", threadID, err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return ThreadSnapshot{}, fmt.Errorf("update thread title metadata %q rows affected: %w", threadID, err)
+	}
+	if rowsAffected == 0 {
+		record, err := s.threadRecord(threadID)
+		if err != nil {
+			return ThreadSnapshot{}, err
+		}
+		return record.Snapshot, nil
+	}
+	record, err := s.threadRecord(threadID)
+	if err != nil {
 		return ThreadSnapshot{}, err
 	}
 	return record.Snapshot, nil
@@ -228,7 +302,7 @@ func (s *sqliteThreadStore) threadRecord(threadID string) (storedThreadRecord, e
 		return storedThreadRecord{}, err
 	}
 	row := db.QueryRow(`
-SELECT thread_id, title, workspace_root, scope_id, latest_run_id, created_at, updated_at, workspace_json, model_profile_key, preview
+SELECT thread_id, title, title_source, title_status, title_updated_at, title_seed_run_id, workspace_root, scope_id, latest_run_id, created_at, updated_at, workspace_json, model_profile_key, preview
 FROM threads
 WHERE thread_id = ?
 `, threadID)
@@ -278,11 +352,51 @@ func (s *sqliteThreadStore) upsertThread(snapshot ThreadSnapshot, modelProfileKe
 	}
 	_, err = db.Exec(`
 INSERT INTO threads (
-	thread_id, title, workspace_root, scope_id, latest_run_id,
+	thread_id, title, title_source, title_status, title_updated_at, title_seed_run_id,
+	workspace_root, scope_id, latest_run_id,
 	created_at, updated_at, archived, deleted, preview, model_profile_key, workspace_json
-) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
 ON CONFLICT(thread_id) DO UPDATE SET
-	title = excluded.title,
+	title = CASE
+		WHEN excluded.title_source = '' THEN threads.title
+		WHEN excluded.title_source = 'first_user'
+			AND excluded.title_status = 'pending'
+			AND threads.title_source <> ''
+			AND NOT (threads.title_source = 'first_user' AND threads.title_status = 'pending') THEN threads.title
+		ELSE excluded.title
+	END,
+	title_source = CASE
+		WHEN excluded.title_source = '' THEN threads.title_source
+		WHEN excluded.title_source = 'first_user'
+			AND excluded.title_status = 'pending'
+			AND threads.title_source <> ''
+			AND NOT (threads.title_source = 'first_user' AND threads.title_status = 'pending') THEN threads.title_source
+		ELSE excluded.title_source
+	END,
+	title_status = CASE
+		WHEN excluded.title_status = '' THEN threads.title_status
+		WHEN excluded.title_source = 'first_user'
+			AND excluded.title_status = 'pending'
+			AND threads.title_source <> ''
+			AND NOT (threads.title_source = 'first_user' AND threads.title_status = 'pending') THEN threads.title_status
+		ELSE excluded.title_status
+	END,
+	title_updated_at = CASE
+		WHEN excluded.title_updated_at = '' THEN threads.title_updated_at
+		WHEN excluded.title_source = 'first_user'
+			AND excluded.title_status = 'pending'
+			AND threads.title_source <> ''
+			AND NOT (threads.title_source = 'first_user' AND threads.title_status = 'pending') THEN threads.title_updated_at
+		ELSE excluded.title_updated_at
+	END,
+	title_seed_run_id = CASE
+		WHEN excluded.title_seed_run_id = '' THEN threads.title_seed_run_id
+		WHEN excluded.title_source = 'first_user'
+			AND excluded.title_status = 'pending'
+			AND threads.title_source <> ''
+			AND NOT (threads.title_source = 'first_user' AND threads.title_status = 'pending') THEN threads.title_seed_run_id
+		ELSE excluded.title_seed_run_id
+	END,
 	workspace_root = excluded.workspace_root,
 	scope_id = excluded.scope_id,
 	latest_run_id = CASE WHEN excluded.latest_run_id = '' THEN threads.latest_run_id ELSE excluded.latest_run_id END,
@@ -294,6 +408,10 @@ ON CONFLICT(thread_id) DO UPDATE SET
 `,
 		snapshot.ThreadID,
 		firstNonEmpty(snapshot.Label, snapshot.ThreadID),
+		string(snapshot.TitleSource),
+		string(snapshot.TitleStatus),
+		formatStoredTime(snapshot.TitleUpdatedAt),
+		strings.TrimSpace(snapshot.TitleSeedRunID),
 		snapshot.Workspace.WorkspaceRoot,
 		snapshot.Workspace.ScopeID,
 		firstNonEmpty(snapshot.RunID, ""),
@@ -326,6 +444,10 @@ func (s *sqliteThreadStore) open() (*sql.DB, error) {
 CREATE TABLE IF NOT EXISTS threads (
 	thread_id TEXT PRIMARY KEY,
 	title TEXT NOT NULL,
+	title_source TEXT NOT NULL DEFAULT '',
+	title_status TEXT NOT NULL DEFAULT '',
+	title_updated_at TEXT NOT NULL DEFAULT '',
+	title_seed_run_id TEXT NOT NULL DEFAULT '',
 	workspace_root TEXT NOT NULL,
 	scope_id TEXT NOT NULL,
 	latest_run_id TEXT NOT NULL DEFAULT '',
@@ -342,6 +464,10 @@ CREATE INDEX IF NOT EXISTS idx_threads_updated_at ON threads(updated_at DESC, cr
 		_ = db.Close()
 		return nil, fmt.Errorf("init threads db: %w", err)
 	}
+	if err := ensureThreadStoreColumns(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if _, err := db.Exec(`DELETE FROM threads WHERE deleted <> 0`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("purge deleted thread residue: %w", err)
@@ -352,6 +478,61 @@ CREATE INDEX IF NOT EXISTS idx_threads_updated_at ON threads(updated_at DESC, cr
 	}
 	s.db = db
 	return s.db, nil
+}
+
+type requiredThreadStoreColumn struct {
+	name string
+	ddl  string
+}
+
+var requiredThreadStoreColumns = []requiredThreadStoreColumn{
+	{name: "title_source", ddl: "title_source TEXT NOT NULL DEFAULT ''"},
+	{name: "title_status", ddl: "title_status TEXT NOT NULL DEFAULT ''"},
+	{name: "title_updated_at", ddl: "title_updated_at TEXT NOT NULL DEFAULT ''"},
+	{name: "title_seed_run_id", ddl: "title_seed_run_id TEXT NOT NULL DEFAULT ''"},
+	{name: "latest_run_id", ddl: "latest_run_id TEXT NOT NULL DEFAULT ''"},
+	{name: "archived", ddl: "archived INTEGER NOT NULL DEFAULT 0"},
+	{name: "deleted", ddl: "deleted INTEGER NOT NULL DEFAULT 0"},
+	{name: "preview", ddl: "preview TEXT NOT NULL DEFAULT ''"},
+	{name: "model_profile_key", ddl: "model_profile_key TEXT NOT NULL DEFAULT ''"},
+	{name: "workspace_json", ddl: "workspace_json TEXT NOT NULL DEFAULT '{}'"},
+}
+
+func ensureThreadStoreColumns(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(threads)`)
+	if err != nil {
+		return fmt.Errorf("inspect threads schema: %w", err)
+	}
+	defer rows.Close()
+
+	existing := map[string]struct{}{}
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			columnType string
+			notNull    int
+			defaultVal sql.NullString
+			primaryKey int
+		)
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultVal, &primaryKey); err != nil {
+			return fmt.Errorf("scan threads schema: %w", err)
+		}
+		existing[name] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate threads schema: %w", err)
+	}
+
+	for _, column := range requiredThreadStoreColumns {
+		if _, ok := existing[column.name]; ok {
+			continue
+		}
+		if _, err := db.Exec(`ALTER TABLE threads ADD COLUMN ` + column.ddl); err != nil {
+			return fmt.Errorf("migrate threads schema add %s: %w", column.name, err)
+		}
+	}
+	return nil
 }
 
 func (s *sqliteThreadStore) purgeOrphanThreadTranscripts(db *sql.DB) error {
@@ -404,20 +585,28 @@ type rowScanner interface {
 
 func scanStoredThread(scanner rowScanner) (storedThreadRecord, error) {
 	var (
-		threadID      string
-		title         string
-		workspaceRoot string
-		scopeID       string
-		latestRunID   string
-		createdAtRaw  string
-		updatedAtRaw  string
-		workspaceJSON string
-		modelProfile  string
-		preview       string
+		threadID       string
+		title          string
+		titleSource    string
+		titleStatus    string
+		titleUpdatedAt string
+		titleSeedRunID string
+		workspaceRoot  string
+		scopeID        string
+		latestRunID    string
+		createdAtRaw   string
+		updatedAtRaw   string
+		workspaceJSON  string
+		modelProfile   string
+		preview        string
 	)
 	if err := scanner.Scan(
 		&threadID,
 		&title,
+		&titleSource,
+		&titleStatus,
+		&titleUpdatedAt,
+		&titleSeedRunID,
 		&workspaceRoot,
 		&scopeID,
 		&latestRunID,
@@ -439,14 +628,27 @@ func scanStoredThread(scanner rowScanner) (storedThreadRecord, error) {
 	if strings.TrimSpace(workspace.ScopeID) == "" {
 		workspace.ScopeID = scopeID
 	}
+	source := ThreadTitleSource(strings.TrimSpace(titleSource))
+	status := ThreadTitleStatus(strings.TrimSpace(titleStatus))
+	// Existing threads created before the title state machine default to
+	// manual+ready so historical labels are not overwritten by later
+	// automatic title generation.
+	if source == "" && status == "" && strings.TrimSpace(title) != "" {
+		source = ThreadTitleSourceManual
+		status = ThreadTitleStatusReady
+	}
 	return storedThreadRecord{
 		Snapshot: ThreadSnapshot{
-			ThreadID:  threadID,
-			Label:     title,
-			RunID:     latestRunID,
-			Workspace: workspace,
-			CreatedAt: parseStoredTime(createdAtRaw),
-			UpdatedAt: parseStoredTime(updatedAtRaw),
+			ThreadID:       threadID,
+			Label:          title,
+			TitleSource:    source,
+			TitleStatus:    status,
+			TitleUpdatedAt: parseStoredTime(titleUpdatedAt),
+			TitleSeedRunID: strings.TrimSpace(titleSeedRunID),
+			RunID:          latestRunID,
+			Workspace:      workspace,
+			CreatedAt:      parseStoredTime(createdAtRaw),
+			UpdatedAt:      parseStoredTime(updatedAtRaw),
 		},
 		ModelProfileKey: modelProfile,
 		Preview:         preview,
@@ -486,6 +688,13 @@ func parseStoredTime(raw string) time.Time {
 		return time.Time{}
 	}
 	return parsed
+}
+
+func formatStoredTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
 }
 
 func maxTime(values ...time.Time) time.Time {

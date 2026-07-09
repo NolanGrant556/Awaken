@@ -19,6 +19,10 @@ export type RuntimeRunStatus =
   | "error"
   | "cancelled";
 
+export type ThreadTitleSource = "first_user" | "llm" | "manual";
+
+export type ThreadTitleStatus = "pending" | "ready" | "failed";
+
 export type RunInputAttachmentKind = "image" | "file";
 
 export type RunInputAttachmentWire = {
@@ -94,6 +98,10 @@ export type RuntimeRun = {
 export type RuntimeThreadWire = {
   thread_id: string;
   label: string;
+  title_source?: ThreadTitleSource;
+  title_status?: ThreadTitleStatus;
+  title_updated_at?: string;
+  title_seed_run_id?: string;
   run_id?: string;
   active_run_id?: string;
   workspace: WorkspaceConfigWire;
@@ -104,6 +112,10 @@ export type RuntimeThreadWire = {
 export type RuntimeThread = {
   threadId: string;
   label: string;
+  titleSource?: ThreadTitleSource;
+  titleStatus?: ThreadTitleStatus;
+  titleUpdatedAt?: string;
+  titleSeedRunId?: string;
   runId?: string;
   activeRunId?: string;
   workspace: WorkspaceConfig;
@@ -728,6 +740,10 @@ export function normalizeRuntimeThread(thread: RuntimeThreadWire): RuntimeThread
   return {
     threadId: thread.thread_id,
     label: thread.label,
+    titleSource: thread.title_source || undefined,
+    titleStatus: thread.title_status || undefined,
+    titleUpdatedAt: thread.title_updated_at || undefined,
+    titleSeedRunId: thread.title_seed_run_id || undefined,
     runId: thread.run_id || undefined,
     activeRunId: thread.active_run_id || undefined,
     workspace: {

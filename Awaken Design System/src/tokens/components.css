@@ -1877,11 +1877,16 @@ button.tool-trace-line:focus-visible {
   width: 18px;
   height: 18px;
   padding: 0;
-  border: 0;
+  border: 1px solid var(--aw-composer-attachment-remove-border);
   border-radius: 999px;
-  background: rgba(23, 23, 23, 0.72);
-  color: var(--aw-text-onblack);
+  background: var(--aw-composer-attachment-remove-bg);
+  color: var(--aw-composer-attachment-remove-fg);
+  box-shadow: var(--aw-composer-attachment-remove-shadow);
   cursor: pointer;
+  transition:
+    background-color var(--aw-transition-fast),
+    color var(--aw-transition-fast),
+    box-shadow var(--aw-transition-fast);
 }
 
 .composer-bar-attachment-warning {

@@ -47,6 +47,7 @@ import {
 } from "@awaken/design-system";
 import { createRuntimeClient, type SubscribeHandlers } from "./runtime/client";
 import type {
+  ComposerToken,
   MassMessageReviewDecision,
   RuntimeInfo,
   RunInputAttachment,
@@ -63,7 +64,7 @@ import {
   type RuntimeAction,
   type UserQuestionItem,
 } from "./runtime/reducer";
-import type { RunNarrativeItem } from "./run-narrative";
+import type { PromptNarrativeToken, RunNarrativeItem } from "./run-narrative";
 import {
   projectNarrativeTurnBodySegments,
   shouldShowAssistantAnswerFooter,
@@ -104,6 +105,19 @@ import {
   readComposerDraftImageAttachment,
   toRunInputAttachment,
 } from "./composerAttachments";
+import {
+  actionsFromSlashProviders,
+  clearSlashTriggerFromComposerValue,
+  composerTokenIdForKeyboardDelete,
+  composerTokenPlacementForSlashTrigger,
+  composerTokenFromSlashAction,
+  filterSlashActions,
+  firstSelectableSlashAction,
+  skillSlashProvider,
+  slashTriggerFromComposerValue,
+  type ComposerTokenPlacement,
+  type SlashAction,
+} from "./composerSlash";
 
 type InspectorTabId = "changes";
 
@@ -119,6 +133,51 @@ type UserQuestionSelection = {
 };
 
 const USER_QUESTION_OTHER_OPTION = "__other__";
+
+function promptNarrativeTokensForComposer(
+  tokens: ComposerToken[],
+  leadingTexts: Record<string, string>,
+): PromptNarrativeToken[] {
+  return tokens.map((token) => {
+    const leadingText = leadingTexts[token.id]?.trim();
+    return {
+      ...token,
+      payload: token.payload ? { ...token.payload } : undefined,
+      ...(leadingText ? { leadingText } : {}),
+    };
+  });
+}
+
+function promptTokenViews(tokens?: PromptNarrativeToken[]) {
+  return tokens?.map((token) => ({
+    id: token.id,
+    type: token.type,
+    label: token.label,
+    leadingText: token.leadingText,
+    title:
+      typeof token.payload?.skillFilePath === "string"
+        ? token.payload.skillFilePath
+        : token.label,
+  }));
+}
+
+function promptTextAfterTokenLeadingText(
+  text: string,
+  tokens?: PromptNarrativeToken[],
+): string {
+  let remainingText = text;
+  for (const token of tokens ?? []) {
+    const leadingText = token.leadingText;
+    if (!leadingText) {
+      continue;
+    }
+    if (!remainingText.startsWith(leadingText)) {
+      return text;
+    }
+    remainingText = remainingText.slice(leadingText.length).replace(/^\s+/, "");
+  }
+  return remainingText;
+}
 
 function UserQuestionPrompt({
   question,
@@ -559,6 +618,7 @@ function firstContentLine(value?: string): string | undefined {
 function composerThreadLabel(
   prompt: string,
   attachments: Array<{ displayName?: string }>,
+  tokens: ComposerToken[] = [],
 ): string {
   const trimmed = prompt.trim();
   if (trimmed) {
@@ -567,7 +627,11 @@ function composerThreadLabel(
   const attachmentName = attachments
     .map((attachment) => attachment.displayName?.trim())
     .find(Boolean);
-  return attachmentName || "附件任务";
+  if (attachmentName) {
+    return attachmentName;
+  }
+  const tokenLabel = tokens.map((token) => token.label.trim()).find(Boolean);
+  return tokenLabel || "附件任务";
 }
 
 const DEFAULT_SIDEBAR_WIDTH = 300;
@@ -732,6 +796,14 @@ export function App() {
     readStoredString("awaken:workspace:path"),
   );
   const runtimeClient = runtimeClientRef.current;
+  const slashProviders = useMemo(
+    () => [
+      skillSlashProvider((workspaceRoot) =>
+        runtimeClient.listSkills(workspaceRoot),
+      ),
+    ],
+    [runtimeClient],
+  );
 
   const [runtimeState, dispatch] = useReducer(
     reduceRuntimeState,
@@ -808,6 +880,19 @@ export function App() {
   const [composerAttachments, setComposerAttachments] = useState<
     ComposerDraftAttachment[]
   >([]);
+  const [composerTokens, setComposerTokens] = useState<ComposerToken[]>([]);
+  const [composerTokenPlacements, setComposerTokenPlacements] = useState<
+    Record<string, ComposerTokenPlacement>
+  >({});
+  const [composerTokenLeadingTexts, setComposerTokenLeadingTexts] = useState<
+    Record<string, string>
+  >({});
+  const [slashActions, setSlashActions] = useState<SlashAction[]>([]);
+  const [slashLoading, setSlashLoading] = useState(false);
+  const [slashError, setSlashError] = useState<string | null>(null);
+  const [slashActiveActionId, setSlashActiveActionId] = useState<
+    string | undefined
+  >();
   const visibleNarrativeItems = useMemo<RunNarrativeItem[]>(() => {
     const narrativeItems: RunNarrativeItem[] = [
       ...runtimeState.narrative.committedItems,
@@ -1222,7 +1307,6 @@ export function App() {
     setComposerValue,
     clearComposerValue,
     restoreComposerValue,
-    trimmedComposerValue,
     composerFocusRequest,
     requestComposerFocus,
     composerBarState,
@@ -1233,10 +1317,130 @@ export function App() {
     desktopNeedsRestart,
     isBusy,
     isWorkspaceValid,
-    hasAttachments: composerAttachments.length > 0,
+    hasAttachments: composerAttachments.length > 0 || composerTokens.length > 0,
     inputAttachmentBlocked: false,
     runtimeErrorMessage: runtimeState.errorMessage,
   });
+  const composerInlineTextPrefix = useMemo(
+    () =>
+      composerTokens
+        .map((token) => composerTokenLeadingTexts[token.id] ?? "")
+        .join(""),
+    [composerTokenLeadingTexts, composerTokens],
+  );
+  const trimmedEffectiveComposerValue =
+    `${composerInlineTextPrefix}${composerValue}`.trim();
+  const slashTrigger = slashTriggerFromComposerValue(composerValue);
+  const slashPaletteOpen =
+    Boolean(slashTrigger) && desktopReady && isWorkspaceValid && !isBusy;
+  const filteredSlashActions = useMemo(
+    () =>
+      filterSlashActions(slashActions, slashTrigger?.query ?? "").slice(0, 24),
+    [slashActions, slashTrigger?.query],
+  );
+  const composerBarTokens = useMemo(
+    () =>
+      composerTokens.map((token) => ({
+        id: token.id,
+        type: token.type,
+        label: token.label,
+        placement: composerTokenPlacements[token.id] ?? "before",
+        leadingText: composerTokenLeadingTexts[token.id],
+        title:
+          typeof token.payload?.skillFilePath === "string"
+            ? token.payload.skillFilePath
+            : token.label,
+      })),
+    [composerTokenLeadingTexts, composerTokenPlacements, composerTokens],
+  );
+  const composerBarSlashActions = useMemo(
+    () =>
+      filteredSlashActions.map(
+        ({
+          id,
+          type,
+          label,
+          description,
+          icon,
+          disabled,
+          disabledReason,
+          preview,
+        }) => ({
+          id,
+          type,
+          label,
+          description,
+          icon,
+          disabled,
+          disabledReason,
+          preview,
+        }),
+      ),
+    [filteredSlashActions],
+  );
+  const composerBarSlashPalette = {
+    open: slashPaletteOpen,
+    actions: composerBarSlashActions,
+    activeActionId: slashActiveActionId,
+    loading: slashLoading,
+    error: slashError,
+    emptyLabel: "没有匹配项",
+    onSelectAction: handleSlashActionSelect,
+    onActiveActionChange: setSlashActiveActionId,
+  };
+
+  useEffect(() => {
+    if (!slashPaletteOpen) {
+      setSlashLoading(false);
+      setSlashError(null);
+      setSlashActiveActionId(undefined);
+      return;
+    }
+
+    let cancelled = false;
+    setSlashLoading(true);
+    setSlashError(null);
+    setSlashActions([]);
+    void actionsFromSlashProviders(slashProviders, { workspaceRootForRun })
+      .then((actions) => {
+        if (cancelled) {
+          return;
+        }
+        setSlashActions(actions);
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        setSlashActions([]);
+        setSlashError(
+          error instanceof Error ? error.message : "斜杠菜单加载失败",
+        );
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setSlashLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [slashPaletteOpen, slashProviders, workspaceRootForRun]);
+
+  useEffect(() => {
+    if (!slashPaletteOpen) {
+      return;
+    }
+    const activeStillVisible = filteredSlashActions.some(
+      (action) => action.id === slashActiveActionId,
+    );
+    if (!activeStillVisible) {
+      setSlashActiveActionId(
+        firstSelectableSlashAction(filteredSlashActions)?.id,
+      );
+    }
+  }, [filteredSlashActions, slashActiveActionId, slashPaletteOpen]);
 
   const activeMassMessageReview = runtimeState.massMessageReviews[0];
   const activeUserQuestion = runtimeState.userQuestions[0];
@@ -1724,6 +1928,147 @@ export function App() {
     return latestRun.status;
   }
 
+  function handleSlashActionSelect(actionId: string): void {
+    const action = filteredSlashActions.find((item) => item.id === actionId);
+    if (!action || action.disabled) {
+      return;
+    }
+    const token = composerTokenFromSlashAction(action);
+    if (!token) {
+      return;
+    }
+    const currentSlashTrigger = slashTriggerFromComposerValue(composerValue);
+    const placement = composerTokenPlacementForSlashTrigger(currentSlashTrigger);
+    const leadingText =
+      placement === "after" && currentSlashTrigger
+        ? composerValue.slice(0, currentSlashTrigger.start)
+        : "";
+    setComposerTokens((current) =>
+      current.some((item) => item.id === token.id)
+        ? current
+        : [...current, token],
+    );
+    setComposerTokenPlacements((current) =>
+      current[token.id] === placement ? current : { ...current, [token.id]: placement },
+    );
+    setComposerTokenLeadingTexts((current) => {
+      if (!leadingText) {
+        if (!(token.id in current)) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[token.id];
+        return next;
+      }
+      return current[token.id] === leadingText
+        ? current
+        : { ...current, [token.id]: leadingText };
+    });
+    setComposerValue((current) => {
+      const trigger = slashTriggerFromComposerValue(current);
+      if (!trigger) {
+        return current;
+      }
+      return composerTokenPlacementForSlashTrigger(trigger) === "after"
+        ? current.slice(trigger.end)
+        : clearSlashTriggerFromComposerValue(current);
+    });
+    setSlashActiveActionId(undefined);
+    requestComposerFocus();
+  }
+
+  function handleRemoveComposerToken(tokenId: string): void {
+    const leadingText = composerTokenLeadingTexts[tokenId] ?? "";
+    if (leadingText) {
+      setComposerValue((current) => `${leadingText}${current}`);
+    }
+    setComposerTokens((current) =>
+      current.filter((token) => token.id !== tokenId),
+    );
+    setComposerTokenPlacements((current) => {
+      if (!(tokenId in current)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[tokenId];
+      return next;
+    });
+    setComposerTokenLeadingTexts((current) => {
+      if (!(tokenId in current)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[tokenId];
+      return next;
+    });
+    requestComposerFocus();
+  }
+
+  function handleComposerInputKeyDown(
+    event: ReactKeyboardEvent<HTMLTextAreaElement>,
+  ): void {
+    const tokenIdForKeyboardDelete = composerTokenIdForKeyboardDelete({
+      key: event.key,
+      selectionStart: event.currentTarget.selectionStart,
+      selectionEnd: event.currentTarget.selectionEnd,
+      valueLength: event.currentTarget.value.length,
+      tokens: composerTokens,
+      placements: composerTokenPlacements,
+    });
+    if (tokenIdForKeyboardDelete && !slashPaletteOpen) {
+      event.preventDefault();
+      handleRemoveComposerToken(tokenIdForKeyboardDelete);
+      return;
+    }
+
+    if (!slashPaletteOpen) {
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setComposerValue((current) => clearSlashTriggerFromComposerValue(current));
+      setSlashActiveActionId(undefined);
+      return;
+    }
+    if (
+      event.key !== "ArrowDown" &&
+      event.key !== "ArrowUp" &&
+      event.key !== "Enter" &&
+      event.key !== "Tab"
+    ) {
+      return;
+    }
+    event.preventDefault();
+    const selectableActions = filteredSlashActions.filter(
+      (action) => !action.disabled,
+    );
+    if (selectableActions.length === 0) {
+      return;
+    }
+    const activeIndex = Math.max(
+      0,
+      selectableActions.findIndex((action) => action.id === slashActiveActionId),
+    );
+    if (event.key === "ArrowDown") {
+      setSlashActiveActionId(
+        selectableActions[(activeIndex + 1) % selectableActions.length]?.id,
+      );
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      setSlashActiveActionId(
+        selectableActions[
+          (activeIndex - 1 + selectableActions.length) %
+            selectableActions.length
+        ]?.id,
+      );
+      return;
+    }
+    handleSlashActionSelect(
+      slashActiveActionId ?? selectableActions[0]?.id ?? "",
+    );
+  }
+
   async function handleSubmit(): Promise<void> {
     if (!desktopReady) {
       setNotice(
@@ -1731,12 +2076,27 @@ export function App() {
       );
       return;
     }
-    const prompt = trimmedComposerValue;
+    const prompt = trimmedEffectiveComposerValue;
+    const draftComposerValue = composerValue;
     const draftAttachments = composerAttachments.map((attachment) => ({
       ...attachment,
     }));
+    const draftComposerTokens = composerTokens.map((token) => ({
+      ...token,
+      payload: token.payload ? { ...token.payload } : undefined,
+    }));
+    const draftComposerTokenPlacements = { ...composerTokenPlacements };
+    const draftComposerTokenLeadingTexts = { ...composerTokenLeadingTexts };
+    const draftPromptTokens = promptNarrativeTokensForComposer(
+      draftComposerTokens,
+      draftComposerTokenLeadingTexts,
+    );
     const runInputAttachments = draftAttachments.map(toRunInputAttachment);
-    if (!prompt && runInputAttachments.length === 0) {
+    if (
+      !prompt &&
+      runInputAttachments.length === 0 &&
+      draftComposerTokens.length === 0
+    ) {
       setNotice("请输入内容或添加附件");
       return;
     }
@@ -1771,14 +2131,22 @@ export function App() {
       type: "run/requested",
       prompt,
       promptAttachments: runInputAttachments,
+      promptTokens: draftPromptTokens,
       startedAtMs: Date.now(),
     });
     clearComposerValue();
     setComposerAttachments([]);
+    setComposerTokens([]);
+    setComposerTokenPlacements({});
+    setComposerTokenLeadingTexts({});
 
     try {
       const runProjectId = selectedProjectId ?? DEFAULT_WORKSPACE_PROJECT_ID;
-      const nextThreadLabel = composerThreadLabel(prompt, draftAttachments);
+      const nextThreadLabel = composerThreadLabel(
+        prompt,
+        draftAttachments,
+        draftComposerTokens,
+      );
       const attachedFiles = runInputAttachments
         .filter((attachment) => attachment.kind === "file" && attachment.path)
         .map((attachment) => ({
@@ -1788,6 +2156,7 @@ export function App() {
       const startRunRequest: StartRunRequest = {
         input: prompt,
         attachments: runInputAttachments,
+        composerTokens: draftComposerTokens,
         threadId: runtimeState.activeThreadId || undefined,
         workspace: {
           workspaceRoot,
@@ -1831,8 +2200,11 @@ export function App() {
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to create run";
-      restoreComposerValue(prompt);
+      restoreComposerValue(draftComposerValue);
       setComposerAttachments(draftAttachments);
+      setComposerTokens(draftComposerTokens);
+      setComposerTokenPlacements(draftComposerTokenPlacements);
+      setComposerTokenLeadingTexts(draftComposerTokenLeadingTexts);
       dispatch({ type: "run/createFailed", message });
     }
   }
@@ -2282,6 +2654,9 @@ export function App() {
     setActiveNavId(undefined);
     clearComposerValue();
     setComposerAttachments([]);
+    setComposerTokens([]);
+    setComposerTokenPlacements({});
+    setComposerTokenLeadingTexts({});
     resetActiveThreadContext();
   }
 
@@ -2990,9 +3365,13 @@ export function App() {
                                 metaItems={composerMetaItems}
                                 focusRequest={composerFocusRequest}
                                 attachments={composerBarAttachments}
+                                tokens={composerBarTokens}
+                                slashPalette={composerBarSlashPalette}
+                                onInputKeyDown={handleComposerInputKeyDown}
                                 onRemoveAttachment={
                                   handleRemoveComposerAttachment
                                 }
+                                onRemoveToken={handleRemoveComposerToken}
                                 onPasteImages={(files) => {
                                   void handlePasteImages(files);
                                 }}
@@ -3024,7 +3403,11 @@ export function App() {
                             metaItems={composerMetaItems}
                             focusRequest={composerFocusRequest}
                             attachments={composerBarAttachments}
+                            tokens={composerBarTokens}
+                            slashPalette={composerBarSlashPalette}
+                            onInputKeyDown={handleComposerInputKeyDown}
                             onRemoveAttachment={handleRemoveComposerAttachment}
+                            onRemoveToken={handleRemoveComposerToken}
                             onPasteImages={(files) => {
                               void handlePasteImages(files);
                             }}
@@ -3078,7 +3461,14 @@ export function App() {
                                 <div className="execution-turn-column">
                                   <div className="execution-turn-header">
                                     <UserPromptBlock
-                                      text={turn.prompt.text}
+                                      text={promptTextAfterTokenLeadingText(
+                                        turn.prompt.text,
+                                        turn.prompt.tokens,
+                                      )}
+                                      tokens={promptTokenViews(
+                                        turn.prompt.tokens,
+                                      )}
+                                      copyText={turn.prompt.text}
                                       attachments={promptAttachmentViews(
                                         turn.prompt.attachments,
                                       )}

@@ -5,6 +5,8 @@ import {
   AwakenUserPromptBlock,
   pastedImageFilesFromClipboardData,
   shouldSubmitComposerInputKey,
+  slashPaletteStyleForAnchor,
+  slashPreviewStyleForAnchor,
 } from "@awaken/design-system";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -16,8 +18,20 @@ import {
   shouldResetActiveThreadForWorkspaceChange,
   shouldShowSidebarThreadSpinner,
 } from "./App";
+import {
+  actionsFromSlashProviders,
+  clearSlashTriggerFromComposerValue,
+  composerTokenIdForKeyboardDelete,
+  composerTokenPlacementForSlashTrigger,
+  composerTokenFromSlashAction,
+  filterSlashActions,
+  skillSlashProvider,
+  skillSlashActionsFromSkills,
+  slashTriggerFromComposerValue,
+} from "./composerSlash";
 import { composerRuntimePanelsForStatus } from "./useComposerLifecycle";
 import { promptAttachmentViews } from "./composerAttachments";
+import type { RuntimeSkill } from "../shared/runtime";
 import type { RunNarrativeItem } from "./run-narrative";
 import {
   DEFAULT_WORKSPACE_PROJECT_ID,
@@ -325,6 +339,213 @@ describe("AwakenComposerInput keyboard behavior", () => {
   });
 });
 
+describe("Composer Slash Palette helpers", () => {
+  const skills: RuntimeSkill[] = [
+    {
+      id: "daily-followup",
+      name: "daily-followup",
+      displayName: "Daily Followup",
+      description: "Create a daily customer follow-up plan.",
+      whenToUse: "Use when the user asks for customer follow-up.",
+      state: "available",
+      sourceOrigin: "project",
+      rootDir: "/workspace/.awaken/skills/daily-followup",
+      skillFilePath: "/workspace/.awaken/skills/daily-followup/SKILL.md",
+      context: "inline",
+    },
+    {
+      id: "pptx",
+      name: "pptx",
+      description: "Work with PowerPoint decks.",
+      state: "unavailable",
+      unavailableReason: "missing mcp servers: pptx",
+      sourceOrigin: "user",
+      skillFilePath: "/home/.awaken/skills/pptx/SKILL.md",
+      context: "inline",
+    },
+    {
+      id: "mcp-skill",
+      name: "mcp-skill",
+      description: "MCP provided skill.",
+      state: "available",
+      sourceOrigin: "mcp",
+      context: "inline",
+    },
+    {
+      id: "shadowed",
+      name: "shadowed",
+      description: "Hidden duplicate.",
+      state: "shadowed",
+      sourceOrigin: "project",
+      context: "inline",
+    },
+  ];
+
+  it("only opens for slash queries and filters skill actions by metadata", () => {
+    expect(slashTriggerFromComposerValue("/")).toMatchObject({ query: "" });
+    expect(slashTriggerFromComposerValue("/daily")).toMatchObject({
+      query: "daily",
+    });
+    expect(slashTriggerFromComposerValue("hello /daily")).toMatchObject({
+      query: "daily",
+      start: 6,
+      end: 12,
+    });
+    expect(slashTriggerFromComposerValue("hello /")).toMatchObject({
+      query: "",
+      start: 6,
+      end: 7,
+    });
+    expect(slashTriggerFromComposerValue("hello/")).toBeNull();
+    expect(slashTriggerFromComposerValue("hello /daily later")).toBeNull();
+    expect(slashTriggerFromComposerValue("daily")).toBeNull();
+
+    const actions = skillSlashActionsFromSkills(skills);
+
+    expect(actions.map((action) => action.label)).toEqual([
+      "Daily Followup",
+      "pptx",
+    ]);
+    expect(actions[1]?.disabled).toBe(true);
+    expect(actions[1]?.disabledReason).toBe("missing mcp servers: pptx");
+    expect(filterSlashActions(actions, "powerpoint")).toHaveLength(1);
+    expect(filterSlashActions(actions, "follow-up")[0]?.id).toContain(
+      "daily-followup",
+    );
+  });
+
+  it("clears only the trailing slash trigger and preserves natural text", () => {
+    expect(clearSlashTriggerFromComposerValue("/daily")).toBe("");
+    expect(clearSlashTriggerFromComposerValue("hello /daily")).toBe("hello ");
+    expect(clearSlashTriggerFromComposerValue("hello /")).toBe("hello ");
+    expect(clearSlashTriggerFromComposerValue("hello/daily")).toBe("hello/daily");
+  });
+
+  it("places tokens based on where the slash trigger was typed", () => {
+    expect(composerTokenPlacementForSlashTrigger(slashTriggerFromComposerValue("/doc"))).toBe(
+      "before",
+    );
+    expect(
+      composerTokenPlacementForSlashTrigger(
+        slashTriggerFromComposerValue("hello /doc"),
+      ),
+    ).toBe("after");
+  });
+
+  it("selects adjacent tokens for keyboard deletion", () => {
+    const tokens = [{ id: "before" }, { id: "after" }];
+    const placements = { before: "before", after: "after" } as const;
+
+    expect(
+      composerTokenIdForKeyboardDelete({
+        key: "Backspace",
+        selectionStart: 0,
+        selectionEnd: 0,
+        valueLength: 5,
+        tokens,
+        placements,
+      }),
+    ).toBe("after");
+    expect(
+      composerTokenIdForKeyboardDelete({
+        key: "Delete",
+        selectionStart: 5,
+        selectionEnd: 5,
+        valueLength: 5,
+        tokens,
+        placements,
+      }),
+    ).toBeUndefined();
+    expect(
+      composerTokenIdForKeyboardDelete({
+        key: "Backspace",
+        selectionStart: 3,
+        selectionEnd: 3,
+        valueLength: 5,
+        tokens,
+        placements,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("turns selected skill actions into structured composer tokens", () => {
+    const [action] = skillSlashActionsFromSkills(skills);
+    const token = action ? composerTokenFromSlashAction(action) : null;
+
+    expect(token).toMatchObject({
+      id: "skill:daily-followup:project",
+      type: "skill",
+      label: "Daily Followup",
+      payload: {
+        skillId: "daily-followup",
+        sourceOrigin: "project",
+        skillFilePath: "/workspace/.awaken/skills/daily-followup/SKILL.md",
+        rootDir: "/workspace/.awaken/skills/daily-followup",
+      },
+    });
+  });
+
+  it("aggregates slash actions from providers without binding the palette to skills", async () => {
+    const skillProvider = skillSlashProvider(async (workspaceRoot) => {
+      expect(workspaceRoot).toBe("/workspace");
+      return skills;
+    });
+    const actions = await actionsFromSlashProviders(
+      [
+        {
+          id: "files",
+          label: "Files",
+          getActions: () => [
+            {
+              id: "file:/workspace/brief.md",
+              type: "file",
+              label: "brief.md",
+              payload: { path: "/workspace/brief.md" },
+              composerToken: {
+                id: "file:/workspace/brief.md",
+                type: "file",
+                label: "brief.md",
+                payload: { path: "/workspace/brief.md" },
+              },
+            },
+          ],
+        },
+        skillProvider,
+      ],
+      { workspaceRootForRun: "/workspace" },
+    );
+
+    expect(actions.map((action) => action.type)).toEqual([
+      "file",
+      "skill",
+      "skill",
+    ]);
+    expect(actions[0]?.label).toBe("brief.md");
+  });
+
+  it("lets non-skill providers define their own composer token payload", () => {
+    const token = composerTokenFromSlashAction({
+      id: "file:/workspace/brief.md",
+      type: "file",
+      label: "brief.md",
+      payload: { path: "/workspace/brief.md" },
+      composerToken: {
+        id: "file:/workspace/brief.md",
+        type: "file",
+        label: "brief.md",
+        payload: { path: "/workspace/brief.md" },
+      },
+    });
+
+    expect(token).toMatchObject({
+      id: "file:/workspace/brief.md",
+      type: "file",
+      label: "brief.md",
+      payload: { path: "/workspace/brief.md" },
+    });
+  });
+});
+
 describe("composer lifecycle presentation", () => {
   it("builds runtime panels without changing their placement order", () => {
     expect(
@@ -431,6 +652,120 @@ describe("AwakenComposerBar layout contract", () => {
     expect(html).toContain("composer-bar-attachment-warning");
     expect(html).toContain("部分附件暂时无法读取");
   });
+
+  it("renders slash palette actions and removable tokens inside the composer", () => {
+    const html = renderToString(
+      React.createElement(AwakenComposerBar, {
+        value: "/ppt",
+        onChange: vi.fn(),
+        onSubmit: vi.fn(),
+        variant: "dock",
+        tokens: [
+          {
+            id: "skill:pptx:user",
+            type: "skill",
+            label: "pptx",
+            title: "/token/path/SKILL.md",
+          },
+        ],
+        slashPalette: {
+          open: true,
+          activeActionId: "skill:pptx:user",
+          actions: [
+            {
+              id: "skill:pptx:user",
+              type: "skill",
+              label: "pptx",
+              description: "Work with PowerPoint decks.",
+              preview: {
+                description: "Long PowerPoint skill description.",
+                path: "/home/.awaken/skills/pptx/SKILL.md",
+              },
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(html).toContain("composer-bar-token");
+    expect(html).toContain("composer-bar-slash-palette");
+    expect(html).toContain('role="listbox"');
+    expect(html).toContain("pptx");
+    expect(html).not.toContain("composer-bar-token-remove");
+    expect(html).not.toContain("Work with PowerPoint decks.");
+    expect(html).not.toContain("Long PowerPoint skill description.");
+    expect(html).not.toContain("/home/.awaken/skills/pptx/SKILL.md");
+  });
+
+  it("renders selected tokens inline after the slash-leading text", () => {
+    const html = renderToString(
+      React.createElement(AwakenComposerBar, {
+        value: "",
+        onChange: vi.fn(),
+        onSubmit: vi.fn(),
+        variant: "dock",
+        tokens: [
+          {
+            id: "skill:documents:user",
+            type: "skill",
+            label: "Documents",
+            leadingText: "你好 ",
+          },
+        ],
+      }),
+    );
+
+    expect(html.indexOf("你好")).toBeGreaterThanOrEqual(0);
+    expect(html.indexOf("Documents")).toBeGreaterThan(html.indexOf("你好"));
+    expect(html).toContain("composer-bar-inline-text");
+    expect(html).not.toContain("composer-bar-token-remove");
+  });
+
+  it("keeps slash preview positioning inside the viewport", () => {
+    const rightEdge = slashPreviewStyleForAnchor(
+      { left: 600, right: 700, top: 40 },
+      { width: 760, height: 420 },
+    );
+    const rightEdgeLeft = Number(rightEdge.left);
+    const rightEdgeWidth = Number(rightEdge.width);
+
+    expect(rightEdgeWidth).toBeLessThanOrEqual(220);
+    expect(rightEdgeLeft).toBeGreaterThanOrEqual(8);
+    expect(rightEdgeLeft + rightEdgeWidth).toBeLessThanOrEqual(752);
+
+    const narrowViewport = slashPreviewStyleForAnchor(
+      { left: 150, right: 190, top: 170 },
+      { width: 210, height: 220 },
+    );
+    const narrowLeft = Number(narrowViewport.left);
+    const narrowTop = Number(narrowViewport.top);
+    const narrowWidth = Number(narrowViewport.width);
+
+    expect(narrowLeft).toBeGreaterThanOrEqual(8);
+    expect(narrowLeft + narrowWidth).toBeLessThanOrEqual(202);
+    expect(narrowTop).toBeGreaterThanOrEqual(8);
+  });
+
+  it("anchors slash preview relative to the palette instead of the desktop", () => {
+    const style = slashPreviewStyleForAnchor(
+      { left: 420, right: 720, top: 180 },
+      { width: 1200, height: 700 },
+      { left: 420, top: 120 },
+    );
+
+    expect(style.left).toBe(306);
+    expect(style.top).toBe(58);
+    expect(style.width).toBe(220);
+  });
+
+  it("limits slash palette height to the space above the composer", () => {
+    expect(
+      slashPaletteStyleForAnchor(160, 700)["--composer-bar-slash-max-height"],
+    ).toBe("146px");
+    expect(
+      slashPaletteStyleForAnchor(520, 700)["--composer-bar-slash-max-height"],
+    ).toBe("210px");
+  });
 });
 
 describe("AwakenUserPromptBlock layout contract", () => {
@@ -463,6 +798,52 @@ describe("AwakenUserPromptBlock layout contract", () => {
     expect(html).not.toContain("execution-prompt-block-limited");
     expect(html).toContain('role="button"');
     expect(html).toContain('aria-expanded="false"');
+  });
+
+  it("renders selected skill tokens in their inline prompt position", () => {
+    const html = renderToString(
+      React.createElement(AwakenUserPromptBlock, {
+        text: "请继续",
+        tokens: [
+          {
+            id: "skill:deep-research:user",
+            type: "skill",
+            label: "deep-research",
+            leadingText: "你好，你看到这个 skill 不?",
+            title: "/home/.awaken/skills/deep-research/SKILL.md",
+          },
+        ],
+      }),
+    );
+
+    expect(html).toContain("execution-prompt-bubble-token");
+    expect(html).toContain("deep-research");
+    expect(html.indexOf("你好，你看到这个 skill 不?")).toBeLessThan(
+      html.indexOf("deep-research"),
+    );
+    expect(html.indexOf("deep-research")).toBeLessThan(
+      html.indexOf("请继续"),
+    );
+  });
+
+  it("renders selected skill tokens before text when no inline position is present", () => {
+    const html = renderToString(
+      React.createElement(AwakenUserPromptBlock, {
+        text: "你好，你看到这个 skill 不?",
+        tokens: [
+          {
+            id: "skill:deep-research:user",
+            type: "skill",
+            label: "deep-research",
+            title: "/home/.awaken/skills/deep-research/SKILL.md",
+          },
+        ],
+      }),
+    );
+
+    expect(html.indexOf("deep-research")).toBeLessThan(
+      html.indexOf("你好，你看到这个 skill 不?"),
+    );
   });
 
   it("allows the expanded state to be controlled by the parent renderer", () => {

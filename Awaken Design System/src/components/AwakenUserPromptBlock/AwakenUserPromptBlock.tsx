@@ -1,12 +1,20 @@
 import "./AwakenUserPromptBlock.css";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { FileText } from "lucide-react";
+import { FileText, Package } from "lucide-react";
 import { AwakenCopyButton } from "../AwakenCopyButton";
 
 const collapsedAttachmentLimit = 3;
 
 export type AwakenUserPromptBlockProps = {
   text: string;
+  copyText?: string;
+  tokens?: Array<{
+    id: string;
+    type?: string;
+    label: string;
+    leadingText?: string;
+    title?: string;
+  }>;
   attachments?: Array<{
     id: string;
     kind?: "image" | "file";
@@ -23,6 +31,8 @@ export type AwakenUserPromptBlockProps = {
 
 export function AwakenUserPromptBlock({
   text,
+  copyText,
+  tokens = [],
   attachments = [],
   expanded,
   onExpandedChange,
@@ -32,7 +42,8 @@ export function AwakenUserPromptBlock({
   const canExpandText =
     text.split(/\r\n|\r|\n/).length > 3 || text.trim().length > 160;
   const hasHiddenAttachments = attachments.length > collapsedAttachmentLimit;
-  const isInteractive = text.trim().length > 0 || attachments.length > 0;
+  const isInteractive =
+    text.trim().length > 0 || tokens.length > 0 || attachments.length > 0;
   const isExpanded = expanded ?? uncontrolledExpanded;
   const visibleAttachments = isExpanded
     ? attachments
@@ -141,6 +152,35 @@ export function AwakenUserPromptBlock({
     );
   }
 
+  function renderToken(
+    token: NonNullable<AwakenUserPromptBlockProps["tokens"]>[number],
+  ) {
+    const tokenType = token.type ?? "token";
+    return (
+      <span key={token.id} className="execution-prompt-bubble-token-group">
+        {token.leadingText ? (
+          <span className="execution-prompt-bubble-inline-text">
+            {token.leadingText}
+          </span>
+        ) : null}
+        <span
+          className={`execution-prompt-bubble-token execution-prompt-bubble-token-${tokenType}`}
+          title={token.title ?? token.label}
+        >
+          <Package
+            className="execution-prompt-bubble-token-icon"
+            size={14}
+            strokeWidth={1.9}
+            aria-hidden="true"
+          />
+          <span className="execution-prompt-bubble-token-label">
+            {token.label}
+          </span>
+        </span>
+      </span>
+    );
+  }
+
   return (
     <article
       ref={blockRef}
@@ -166,8 +206,13 @@ export function AwakenUserPromptBlock({
             {renderAttachmentOverflow()}
           </div>
         ) : null}
-        {text.trim().length > 0 ? (
-          <p className="execution-prompt-bubble-text">{text}</p>
+        {tokens.length > 0 || text.trim().length > 0 ? (
+          <div className="execution-prompt-bubble-main">
+            {tokens.map((token) => renderToken(token))}
+            {text.trim().length > 0 ? (
+              <p className="execution-prompt-bubble-text">{text}</p>
+            ) : null}
+          </div>
         ) : null}
         {isExpanded ? (
           <div
@@ -175,7 +220,7 @@ export function AwakenUserPromptBlock({
             aria-label="Prompt actions"
           >
             <AwakenCopyButton
-              text={text}
+              text={copyText ?? text}
               label="Copy prompt"
               copiedLabel="Copied"
               errorLabel="Copy failed"

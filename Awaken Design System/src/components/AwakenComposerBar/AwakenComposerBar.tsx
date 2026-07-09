@@ -1,7 +1,12 @@
 import "./AwakenComposerBar.css";
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
-import { Check, ChevronDown, FileText, X } from "lucide-react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import type {
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  ReactNode,
+} from "react";
+import { Check, ChevronDown, FileText, Package, X } from "lucide-react";
 import { AwakenComposerInput } from "../AwakenComposerInput";
 import { AwakenContextButton } from "../AwakenContextButton";
 import { AwakenSendButton } from "../AwakenSendButton";
@@ -45,10 +50,117 @@ export type ComposerBarAttachment = {
   extension?: string;
 };
 
+export type ComposerBarToken = {
+  id: string;
+  type: string;
+  label: string;
+  title?: string;
+  leadingText?: string;
+  placement?: "before" | "after";
+};
+
+export type ComposerBarSlashAction = {
+  id: string;
+  type: string;
+  label: string;
+  description?: string;
+  icon?: ReactNode;
+  disabled?: boolean;
+  disabledReason?: string;
+  preview?: {
+    description?: string;
+    path?: string;
+  };
+};
+
+export type ComposerBarSlashPalette = {
+  open: boolean;
+  actions: ComposerBarSlashAction[];
+  activeActionId?: string;
+  loading?: boolean;
+  error?: string | null;
+  emptyLabel?: string;
+  onSelectAction?: (actionId: string) => void;
+  onActiveActionChange?: (actionId: string) => void;
+};
+
+type SlashPreviewState = {
+  actionId: string;
+  style: CSSProperties;
+};
+
+type SlashPaletteStyle = CSSProperties & {
+  "--composer-bar-slash-max-height"?: string;
+};
+
+export type SlashPreviewAnchorRect = {
+  left: number;
+  right: number;
+  top: number;
+};
+
+export type SlashPreviewViewport = {
+  width: number;
+  height: number;
+};
+
+export type SlashPreviewContainerRect = {
+  left: number;
+  top: number;
+};
+
+export function slashPreviewStyleForAnchor(
+  rect: SlashPreviewAnchorRect,
+  viewport: SlashPreviewViewport,
+  containerRect?: SlashPreviewContainerRect,
+): CSSProperties {
+  const margin = 8;
+  const gap = 6;
+  const availableWidth = Math.max(0, viewport.width - margin * 2);
+  const width = Math.min(220, availableWidth);
+  const heightEstimate = Math.min(150, Math.max(0, viewport.height - margin * 2));
+
+  let left = rect.right + gap;
+  if (left + width > viewport.width - margin) {
+    left = rect.left - width - gap;
+  }
+  left = Math.min(
+    Math.max(margin, left),
+    Math.max(margin, viewport.width - width - margin),
+  );
+
+  let top = rect.top - 2;
+  if (top + heightEstimate > viewport.height - margin) {
+    top = viewport.height - heightEstimate - margin;
+  }
+  top = Math.max(margin, top);
+
+  return {
+    left: containerRect ? left - containerRect.left : left,
+    top: containerRect ? top - containerRect.top : top,
+    width,
+  };
+}
+
+export function slashPaletteStyleForAnchor(
+  anchorTop: number,
+  viewportHeight: number,
+): SlashPaletteStyle {
+  const margin = 8;
+  const gap = 6;
+  const maxHeight = Math.max(
+    88,
+    Math.min(210, Math.floor(anchorTop - margin - gap)),
+  );
+
+  return { "--composer-bar-slash-max-height": `${maxHeight}px` };
+}
+
 export type AwakenComposerBarProps = {
   value: string;
   onChange: (value: string) => void;
   onSubmit?: () => void;
+  onInputKeyDown?: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
   onAddContext?: () => void;
   placeholder?: string;
   disabled?: boolean;
@@ -60,7 +172,10 @@ export type AwakenComposerBarProps = {
   submitDisabled?: boolean;
   attachments?: ComposerBarAttachment[];
   attachmentWarning?: ReactNode;
+  tokens?: ComposerBarToken[];
+  slashPalette?: ComposerBarSlashPalette;
   onRemoveAttachment?: (attachmentId: string) => void;
+  onRemoveToken?: (tokenId: string) => void;
   onPasteImages?: (files: File[]) => void;
 };
 
@@ -68,6 +183,7 @@ export function AwakenComposerBar({
   value,
   onChange,
   onSubmit,
+  onInputKeyDown,
   onAddContext,
   placeholder,
   disabled,
@@ -79,16 +195,33 @@ export function AwakenComposerBar({
   submitDisabled = false,
   attachments = [],
   attachmentWarning,
+  tokens = [],
+  slashPalette,
   onRemoveAttachment,
   onPasteImages,
 }: AwakenComposerBarProps) {
   const canSubmit = submitMode === "stop" || (!disabled && !submitDisabled);
   const [openMetaMenuId, setOpenMetaMenuId] = useState<string | null>(null);
+  const [slashPreviewState, setSlashPreviewState] =
+    useState<SlashPreviewState | null>(null);
+  const [slashPaletteStyle, setSlashPaletteStyle] =
+    useState<SlashPaletteStyle>({});
   const modelMetaRef = useRef<HTMLDivElement | null>(null);
+  const inputWrapRef = useRef<HTMLDivElement | null>(null);
+  const slashPaletteRef = useRef<HTMLDivElement | null>(null);
   const modelMetaItem = metaItems.find((item) => item.id === "model");
   const topMetaItems: ComposerBarMetaItem[] = [];
   const bottomMetaItems =
     variant === "dock" ? metaItems.filter((item) => item.id !== "model") : [];
+  const slashActions = slashPalette?.actions ?? [];
+  const slashPreviewAction = slashActions.find(
+    (action) => action.id === slashPreviewState?.actionId,
+  );
+  const slashPreviewDescription =
+    slashPreviewAction?.preview?.description ??
+    slashPreviewAction?.description ??
+    slashPreviewAction?.disabledReason;
+  const slashPreviewPath = slashPreviewAction?.preview?.path;
   const handleSubmit = useCallback(() => {
     if (canSubmit) {
       onSubmit?.();
@@ -117,6 +250,31 @@ export function AwakenComposerBar({
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [openMetaMenuId]);
+
+  useEffect(() => {
+    if (!slashPalette?.open) {
+      setSlashPreviewState(null);
+      setSlashPaletteStyle({});
+    }
+  }, [slashPalette?.open]);
+
+  useEffect(() => {
+    if (!slashPalette?.open) {
+      return;
+    }
+
+    function updateSlashPaletteStyle(): void {
+      const rect = inputWrapRef.current?.getBoundingClientRect();
+      if (!rect) {
+        return;
+      }
+      setSlashPaletteStyle(slashPaletteStyleForAnchor(rect.top, window.innerHeight));
+    }
+
+    updateSlashPaletteStyle();
+    window.addEventListener("resize", updateSlashPaletteStyle);
+    return () => window.removeEventListener("resize", updateSlashPaletteStyle);
+  }, [slashPalette?.open, slashActions.length, value, tokens.length]);
 
   function renderMetaItem(item: ComposerBarMetaItem) {
     const hasProgress =
@@ -336,6 +494,150 @@ export function AwakenComposerBar({
     );
   }
 
+  function renderToken(token: ComposerBarToken) {
+    const title = token.title ?? token.label;
+    return (
+      <Fragment key={token.id}>
+        {token.leadingText ? (
+          <span className="composer-bar-inline-text">{token.leadingText}</span>
+        ) : null}
+        <span
+          className={`composer-bar-token composer-bar-token-${token.type}`}
+          title={title}
+        >
+          <Package
+            className="composer-bar-token-icon"
+            size={14}
+            strokeWidth={1.9}
+            aria-hidden="true"
+          />
+          <span className="composer-bar-token-label">{token.label}</span>
+        </span>
+      </Fragment>
+    );
+  }
+
+  function showSlashPreview(
+    action: ComposerBarSlashAction,
+    event: ReactMouseEvent<HTMLButtonElement>,
+  ): void {
+    const hasPreview =
+      action.preview?.description ||
+      action.description ||
+      action.disabledReason ||
+      action.preview?.path;
+    if (!hasPreview) {
+      setSlashPreviewState(null);
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const paletteRect = slashPaletteRef.current?.getBoundingClientRect();
+    setSlashPreviewState({
+      actionId: action.id,
+      style: slashPreviewStyleForAnchor(
+        { left: rect.left, right: rect.right, top: rect.top },
+        { width: window.innerWidth, height: window.innerHeight },
+        paletteRect
+          ? { left: paletteRect.left, top: paletteRect.top }
+          : undefined,
+      ),
+    });
+  }
+
+  function renderSlashPalette() {
+    if (!slashPalette?.open) {
+      return null;
+    }
+    return (
+      <div
+        className="composer-bar-slash-palette"
+        ref={slashPaletteRef}
+        style={slashPaletteStyle}
+      >
+        <div
+          className="composer-bar-slash-list"
+          role="listbox"
+          aria-label="Slash actions"
+          onMouseLeave={() => setSlashPreviewState(null)}
+        >
+          {slashPalette.loading ? (
+            <div className="composer-bar-slash-empty" role="status">
+              加载中...
+            </div>
+          ) : slashPalette.error ? (
+            <div
+              className="composer-bar-slash-empty composer-bar-slash-empty-error"
+              role="status"
+            >
+              {slashPalette.error}
+            </div>
+          ) : slashActions.length === 0 ? (
+            <div className="composer-bar-slash-empty" role="status">
+              {slashPalette.emptyLabel ?? "没有可用项"}
+            </div>
+          ) : (
+            slashActions.map((action) => {
+              const active = action.id === slashPalette.activeActionId;
+              return (
+                <button
+                  key={action.id}
+                  type="button"
+                  className={`composer-bar-slash-option${
+                    active ? " composer-bar-slash-option-active" : ""
+                  }${action.disabled ? " composer-bar-slash-option-disabled" : ""}`}
+                  role="option"
+                  aria-selected={active}
+                  aria-disabled={action.disabled || undefined}
+                  onMouseEnter={(event) => {
+                    slashPalette.onActiveActionChange?.(action.id);
+                    showSlashPreview(action, event);
+                  }}
+                  onFocus={() => slashPalette.onActiveActionChange?.(action.id)}
+                  onClick={() => {
+                    if (!action.disabled) {
+                      slashPalette.onSelectAction?.(action.id);
+                    }
+                  }}
+                >
+                  <span className="composer-bar-slash-option-main">
+                    <span
+                      className="composer-bar-slash-option-icon"
+                      aria-hidden="true"
+                    >
+                      {action.icon}
+                    </span>
+                    <span className="composer-bar-slash-option-label">
+                      {action.label}
+                    </span>
+                  </span>
+                </button>
+              );
+            })
+          )}
+        </div>
+        {slashPreviewState && (slashPreviewDescription || slashPreviewPath) ? (
+          <div
+            className="composer-bar-slash-preview"
+            style={slashPreviewState.style}
+            aria-hidden="true"
+          >
+            {slashPreviewDescription ? (
+              <span className="composer-bar-slash-preview-description">
+                {slashPreviewDescription}
+              </span>
+            ) : null}
+            {slashPreviewPath ? (
+              <span className="composer-bar-slash-preview-path">
+                {slashPreviewPath}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div
       className={`composer-bar composer-bar-${variant}${
@@ -357,11 +659,24 @@ export function AwakenComposerBar({
               {attachments.map((attachment) => renderAttachment(attachment))}
             </div>
           ) : null}
-          <div className="composer-bar-input-wrap">
+          <div
+            className="composer-bar-input-wrap"
+            ref={inputWrapRef}
+          >
+            {renderSlashPalette()}
+            {tokens.length > 0 ? (
+              <div
+                className="composer-bar-token-strip"
+                aria-label="已选择的输入项"
+              >
+                {tokens.map((token) => renderToken(token))}
+              </div>
+            ) : null}
             <AwakenComposerInput
               value={value}
               onChange={onChange}
               onSubmit={handleSubmit}
+              onKeyDown={onInputKeyDown}
               placeholder={placeholder}
               disabled={disabled}
               focusRequest={focusRequest}

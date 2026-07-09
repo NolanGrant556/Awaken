@@ -541,6 +541,7 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   --execution-prompt-collapsed-content-height: 54px;
   --execution-prompt-expanded-content-height: 162px;
   --execution-prompt-attachment-size: 52px;
+  --execution-prompt-attachment-gap: 8px;
   width: 100%;
   box-sizing: border-box;
   max-width: 100%;
@@ -558,6 +559,8 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 
 .execution-prompt-bubble-text {
   box-sizing: border-box;
+  flex: 1 1 160px;
+  min-width: 0;
   max-width: 100%;
   margin: 0;
   white-space: pre-wrap;
@@ -566,13 +569,72 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   scrollbar-width: thin;
 }
 
+.execution-prompt-bubble-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.execution-prompt-bubble-token {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+  max-width: min(220px, 100%);
+  padding: 0 1px;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--aw-text-blue);
+  font-size: inherit;
+  font-weight: var(--aw-font-weight-semibold);
+  line-height: inherit;
+}
+
+.execution-prompt-bubble-token-icon {
+  flex: 0 0 auto;
+  color: currentColor;
+  transform: translateY(0.08em);
+}
+
+.execution-prompt-bubble-token-group {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.execution-prompt-bubble-inline-text {
+  min-width: 0;
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+  white-space: pre-wrap;
+}
+
+.execution-prompt-bubble-token-label {
+  min-width: 0;
+  overflow: hidden;
+  line-height: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .execution-prompt-bubble-attachments {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
   gap: 6px;
   max-width: 100%;
   min-width: 0;
+  margin-bottom: var(--execution-prompt-attachment-gap);
   overflow: hidden;
+}
+
+.execution-prompt-bubble-attachments:only-child {
+  margin-bottom: 0;
 }
 
 .execution-prompt-bubble-attachment {
@@ -663,8 +725,12 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 
 .execution-prompt-block-expanded .execution-prompt-bubble {
   display: grid;
-  gap: 6px;
+  gap: var(--execution-prompt-attachment-gap);
   cursor: text;
+}
+
+.execution-prompt-block-expanded .execution-prompt-bubble-attachments {
+  margin-bottom: 0;
 }
 
 .execution-prompt-block-expanded .execution-prompt-bubble-attachments {

@@ -7,6 +7,7 @@ export type AwakenComposerInputProps = {
   value: string;
   onChange: (value: string) => void;
   onSubmit?: () => void;
+  onKeyDown?: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   placeholder?: string;
   minRows?: number;
   maxRows?: number;
@@ -61,6 +62,7 @@ export function AwakenComposerInput({
   value,
   onChange,
   onSubmit,
+  onKeyDown,
   placeholder = "",
   minRows = 2,
   maxRows = 6,
@@ -79,6 +81,10 @@ export function AwakenComposerInput({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      onKeyDown?.(e);
+      if (e.defaultPrevented) {
+        return;
+      }
       if (
         !shouldSubmitComposerInputKey({
           key: e.key,
@@ -92,7 +98,7 @@ export function AwakenComposerInput({
       e.preventDefault();
       onSubmit?.();
     },
-    [onSubmit]
+    [onKeyDown, onSubmit]
   );
 
   const handlePaste = useCallback(

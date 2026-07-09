@@ -8,7 +8,6 @@ import {
   ChevronDown,
   ChevronUp,
   FolderPlus,
-  GitBranch,
   ListFilter,
   MessageCirclePlus,
   Monitor,
@@ -120,8 +119,6 @@ import {
   type ComposerTokenPlacement,
   type SlashAction,
 } from "./composerSlash";
-
-type InspectorTabId = "changes";
 
 type UserQuestionPromptProps = {
   question: UserQuestionItem;
@@ -1015,7 +1012,6 @@ export function App() {
   const [threadProjectIds, setThreadProjectIds] = useState<
     Record<string, string>
   >(() => readStoredStringRecord("awaken:threads:projects"));
-  const [inspectorTab, setInspectorTab] = useState<InspectorTabId>("changes");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() =>
     readStoredNumber(
@@ -1312,10 +1308,6 @@ export function App() {
       setWorkspacePath(runtimeInfo.defaultWorkspace);
     }
   }, [defaultProjectRemoved, runtimeInfo, workspacePath]);
-
-  useEffect(() => {
-    setInspectorTab("changes");
-  }, [runtimeState.runId, runtimeState.activeThreadId]);
 
   useEffect(() => {
     if (!notice) {
@@ -1975,11 +1967,11 @@ export function App() {
     runtimeState.activeThreadId
       ? `thread:${runtimeState.activeThreadId}`
       : selectedProjectId;
-  const inspectorTabs = [
+  const inspectorPlaceholderItems = [
     {
-      id: "changes" as const,
-      label: "Changes",
-      icon: <GitBranch size={16} strokeWidth={1.85} />,
+      id: "right-sidebar-placeholder",
+      label: "右侧栏待开发",
+      disabled: true,
       tone: "neutral" as const,
     },
   ];
@@ -3224,18 +3216,6 @@ export function App() {
     return output || fallback || result;
   }
 
-  function renderChangesPane() {
-    return null;
-  }
-
-  function renderInspectorTabPanel() {
-    switch (inspectorTab) {
-      case "changes":
-      default:
-        return renderChangesPane();
-    }
-  }
-
   const platform = runtimeClient.platform as PlatformKind;
   const composerBarAttachments = composerAttachmentViews(composerAttachments);
   const layoutStyle = {
@@ -3720,13 +3700,9 @@ export function App() {
                   inspector={
                     <LightInspectorRail
                       title="On Awaken"
-                      status={desktopReady ? "Local" : "Offline"}
-                      items={inspectorTabs}
-                      activeId={inspectorTab}
-                      onSelect={(id) => setInspectorTab(id as InspectorTabId)}
-                    >
-                      {renderInspectorTabPanel()}
-                    </LightInspectorRail>
+                      items={inspectorPlaceholderItems}
+                      activeId="right-sidebar-placeholder"
+                    />
                   }
                 />
               )}

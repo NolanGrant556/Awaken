@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -35,16 +33,23 @@ func main() {
 	connRegistry := buildConnectorRegistry(manager, defaultWorkspace)
 	skillRegistry := buildSkillRegistry(manager, defaultWorkspace)
 	syncSkillsForWorkspace := func(workspaceRoot string) {
-		skillRegistry.ReloadLocalSources(skillSourceDirs(workspaceRoot))
+		skillRegistry.ReloadLocalSources(skills.LocalSourceDirs(workspaceRoot))
 	}
 
 	runService := runtime.NewRunServiceWithModelProfiles(
 		func(workspace runtime.WorkspaceConfig, threadID string, profile *runtime.ModelProfileConfig) *agentcore.Agent {
 			modelCfg := modelConfigFromProfile(profile)
+			workspaceRoot := workspace.WorkspaceRoot
+			if workspaceRoot == "" {
+				workspaceRoot = defaultWorkspace
+			}
 			agentCfg := agentcore.AgentConfig{
 				MaxThoughts: 0,
 				EntryPoint:  "awaken-core",
 				ModelConfig: modelCfg,
+				SkillSummary: skills.FormatRuntimeSkillSummary(
+					skillRegistry.PreviewLocalSources(skills.LocalSourceDirs(workspaceRoot)),
+				),
 				Workspace: agentcore.WorkspaceConfig{
 					ScopeID:           workspace.ScopeID,
 					Root:              workspace.WorkspaceRoot,
@@ -190,7 +195,7 @@ func buildConnectorRegistry(manager *mcpclient.Manager, _ string) *connectors.Re
 func buildSkillRegistry(manager *mcpclient.Manager, workspace string) *skills.SkillRegistry {
 	logger := mcpclient.StdLogger{}
 	registry := skills.NewSkillRegistry(logger)
-	registry.LoadFromSources(skillSourceDirs(workspace))
+	registry.LoadFromSources(skills.LocalSourceDirs(workspace))
 
 	skillManager := skillruntime.NewManager(registry, skillruntime.StdLogger{})
 	skillManager.RefreshTools()
@@ -202,19 +207,6 @@ func buildSkillRegistry(manager *mcpclient.Manager, workspace string) *skills.Sk
 
 	log.Printf("[skills] loaded %d skill definitions", len(registry.ListAll()))
 	return registry
-}
-
-func skillSourceDirs(workspace string) map[skills.SourceOrigin]string {
-	dirs := make(map[skills.SourceOrigin]string)
-	if root := strings.TrimSpace(workspace); root != "" && filepath.IsAbs(root) {
-		if stat, err := os.Stat(root); err == nil && stat.IsDir() {
-			dirs[skills.SourceProject] = filepath.Join(root, ".awaken", "skills")
-		}
-	}
-	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-		dirs[skills.SourceUser] = filepath.Join(home, ".awaken", "skills")
-	}
-	return dirs
 }
 
 func resolveDefaultWorkspace() string {

@@ -4,19 +4,20 @@ import { describe, expect, it, vi } from "vitest";
 import { AppearanceSettings } from "./ModelSettingsDialog";
 
 describe("AppearanceSettings", () => {
-  it("renders light and dark theme choices with the selected state", () => {
+  it("renders system, light, and dark theme choices with the selected state", () => {
     const html = renderToString(
       React.createElement(AppearanceSettings, {
-        theme: "dark",
+        themePreference: "system",
         themeSaving: false,
-        onThemeChange: vi.fn(),
+        onThemePreferenceChange: vi.fn(),
       }),
     );
 
+    expect(html).toContain("跟随系统");
     expect(html).toContain("浅色");
     expect(html).toContain("黑色");
     expect(html).toContain('role="radiogroup"');
-    expect(html).toContain('aria-checked="false"');
+    expect(html.match(/aria-checked="false"/g)).toHaveLength(2);
     expect(html).toContain('aria-checked="true"');
     expect(html).toContain("theme-choice-active");
   });

@@ -34,6 +34,9 @@ func NewManager(reg *skills.SkillRegistry, logger Logger) *Manager {
 	if err := tool.RegisterToolForce(&ResourceReadTool{registry: reg}); err != nil {
 		logger.Warnf("failed to register skill resource reader: %v", err)
 	}
+	if err := tool.RegisterToolForce(&SkillInstallTool{registry: reg}); err != nil {
+		logger.Warnf("failed to register skill installer: %v", err)
+	}
 	return m
 }
 
@@ -119,5 +122,6 @@ func (m *Manager) refreshTools() {
 func (m *Manager) Shutdown() {
 	tool.UnregisterToolsByPrefix(SkillToolPrefix)
 	tool.UnregisterTool(ResourceReadToolName)
+	tool.UnregisterTool(SkillInstallToolName)
 	m.registeredIDs = make(map[string]bool)
 }

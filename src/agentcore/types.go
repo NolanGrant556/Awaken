@@ -15,6 +15,7 @@ type AgentConfig struct {
 	ModelConfig    ModelConfig
 	EntryPoint     string
 	Workspace      WorkspaceConfig
+	SkillSummary   string
 	AutoToolPolicy AutoToolPolicy
 	// ExecutionProfile is the unified policy bundle applied to every tool
 	// call this agent makes. When nil, EffectiveProfile falls back to

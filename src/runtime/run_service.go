@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -40,6 +41,11 @@ var (
 )
 
 const maxRetainedThreads = 100
+
+var threadTitleRetryDelays = []time.Duration{
+	2 * time.Second,
+	8 * time.Second,
+}
 
 type TaskScope struct {
 	ScopeID           string            `json:"scope_id,omitempty"`
@@ -135,6 +141,10 @@ type Thread struct {
 	agent           *agentcore.Agent
 	workspace       WorkspaceConfig
 	label           string
+	titleSource     ThreadTitleSource
+	titleStatus     ThreadTitleStatus
+	titleUpdatedAt  time.Time
+	titleSeedRunID  string
 	latestRunID     string
 	activeRunID     string
 	runIDs          []string
@@ -143,14 +153,34 @@ type Thread struct {
 	updatedAt       time.Time
 }
 
+type ThreadTitleSource string
+
+const (
+	ThreadTitleSourceFirstUser ThreadTitleSource = "first_user"
+	ThreadTitleSourceLLM       ThreadTitleSource = "llm"
+	ThreadTitleSourceManual    ThreadTitleSource = "manual"
+)
+
+type ThreadTitleStatus string
+
+const (
+	ThreadTitleStatusPending ThreadTitleStatus = "pending"
+	ThreadTitleStatusReady   ThreadTitleStatus = "ready"
+	ThreadTitleStatusFailed  ThreadTitleStatus = "failed"
+)
+
 type ThreadSnapshot struct {
-	ThreadID    string          `json:"thread_id"`
-	Label       string          `json:"label"`
-	RunID       string          `json:"run_id,omitempty"`
-	ActiveRunID string          `json:"active_run_id,omitempty"`
-	Workspace   WorkspaceConfig `json:"workspace"`
-	CreatedAt   time.Time       `json:"created_at"`
-	UpdatedAt   time.Time       `json:"updated_at"`
+	ThreadID       string            `json:"thread_id"`
+	Label          string            `json:"label"`
+	TitleSource    ThreadTitleSource `json:"title_source,omitempty"`
+	TitleStatus    ThreadTitleStatus `json:"title_status,omitempty"`
+	TitleUpdatedAt time.Time         `json:"title_updated_at,omitempty"`
+	TitleSeedRunID string            `json:"title_seed_run_id,omitempty"`
+	RunID          string            `json:"run_id,omitempty"`
+	ActiveRunID    string            `json:"active_run_id,omitempty"`
+	Workspace      WorkspaceConfig   `json:"workspace"`
+	CreatedAt      time.Time         `json:"created_at"`
+	UpdatedAt      time.Time         `json:"updated_at"`
 }
 
 type ThreadTranscriptRun struct {
@@ -252,6 +282,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	session := NewSession(runID, threadID, trimmed, persistedAttachments, req.ComposerTokens, cancel)
 	var threadSnapshot ThreadSnapshot
+	shouldGenerateThreadTitle := false
 
 	s.mu.Lock()
 	if req.ThreadID != "" {
@@ -272,6 +303,10 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 				agent:           agent,
 				workspace:       workspace,
 				label:           firstNonEmpty(restored.Label, restoredMeta.Snapshot.Label),
+				titleSource:     restoredMeta.Snapshot.TitleSource,
+				titleStatus:     restoredMeta.Snapshot.TitleStatus,
+				titleUpdatedAt:  restoredMeta.Snapshot.TitleUpdatedAt,
+				titleSeedRunID:  restoredMeta.Snapshot.TitleSeedRunID,
 				latestRunID:     runID,
 				activeRunID:     runID,
 				runIDs:          runIDs,
@@ -313,11 +348,20 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		threadSnapshot = thread.snapshot()
 	} else {
 		agent = s.createAgent(workspace, threadID, req.ModelProfile)
+		titleStatus := ThreadTitleStatusReady
+		if req.ModelProfile != nil && shouldGenerateThreadTitleForClient(req.Client) {
+			titleStatus = ThreadTitleStatusPending
+			shouldGenerateThreadTitle = true
+		}
 		s.threads[threadID] = &Thread{
 			threadID:        threadID,
 			agent:           agent,
 			workspace:       workspace,
 			label:           threadLabel,
+			titleSource:     ThreadTitleSourceFirstUser,
+			titleStatus:     titleStatus,
+			titleSeedRunID:  runID,
+			titleUpdatedAt:  now,
 			latestRunID:     runID,
 			activeRunID:     runID,
 			runIDs:          []string{runID},
@@ -331,8 +375,11 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	s.sessions[runID] = session
 	s.mu.Unlock()
 
-	_ = s.threadStore.CreateThread(threadSnapshot, modelProfileKey, threadLabel)
-	_ = s.threadStore.AppendRunInput(threadSnapshot, session.Snapshot(), req.Client.SessionID, trimmed, persistedAttachments)
+	createThreadErr := s.threadStore.CreateThread(threadSnapshot, modelProfileKey, threadLabel)
+	appendInputErr := s.threadStore.AppendRunInput(threadSnapshot, session.Snapshot(), req.Client.SessionID, trimmed, persistedAttachments)
+	if shouldGenerateThreadTitle && (createThreadErr == nil || appendInputErr == nil) {
+		go s.scheduleThreadTitleGeneration(context.Background(), threadID, runID, trimmed, persistedAttachments, req.ComposerTokens, req.ModelProfile)
+	}
 	executor := s.newExecutor(agent)
 	go s.execute(session, executor, agent, effectiveInput, trimmed, persistedAttachments, ctx)
 
@@ -347,6 +394,158 @@ func (s *RunService) createAgent(workspace WorkspaceConfig, threadID string, pro
 		return s.newAgent(workspace, threadID)
 	}
 	return nil
+}
+
+func shouldGenerateThreadTitleForClient(client ClientInfo) bool {
+	return strings.EqualFold(strings.TrimSpace(client.EntryPoint), "desktop")
+}
+
+func (s *RunService) scheduleThreadTitleGeneration(ctx context.Context, threadID, seedRunID, firstUserMessage string, attachments []RunInputAttachment, composerTokens []ComposerToken, profile *ModelProfileConfig) {
+	if profile == nil {
+		log.Printf("[thread-title] skip generation: missing model profile thread=%s run=%s", threadID, seedRunID)
+		s.markThreadTitleFailed(threadID, seedRunID)
+		return
+	}
+
+	prompt := buildThreadTitlePrompt(firstUserMessage, attachments, composerTokens, profile)
+	attempts := len(threadTitleRetryDelays) + 1
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if !s.shouldAttemptGeneratedThreadTitle(threadID, seedRunID) {
+			return
+		}
+		titleCtx, cancel := context.WithTimeout(ctx, threadTitleGenerationTimeout)
+		title, err := generateThreadTitleWithProfileFn(titleCtx, profile, prompt)
+		cancel()
+		title = validGeneratedThreadTitle(title, firstUserMessage)
+		if err == nil && title != "" {
+			s.ApplyGeneratedThreadTitle(threadID, seedRunID, title)
+			return
+		}
+
+		reason := "empty_or_low_quality_title"
+		if err != nil {
+			reason = err.Error()
+		}
+		log.Printf("[thread-title] generation attempt failed thread=%s run=%s attempt=%d/%d reason=%s", threadID, seedRunID, attempt, attempts, reason)
+		if attempt == attempts {
+			s.markThreadTitleFailed(threadID, seedRunID)
+			return
+		}
+		timer := time.NewTimer(threadTitleRetryDelays[attempt-1])
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			s.markThreadTitleFailed(threadID, seedRunID)
+			return
+		case <-timer.C:
+		}
+	}
+}
+
+func (s *RunService) ApplyGeneratedThreadTitle(threadID, seedRunID, title string) {
+	threadID = strings.TrimSpace(threadID)
+	seedRunID = strings.TrimSpace(seedRunID)
+	title = cleanGeneratedThreadTitle(title)
+	if threadID == "" || seedRunID == "" || title == "" {
+		return
+	}
+
+	now := time.Now().UTC()
+
+	s.mu.RLock()
+	thread, ok := s.threads[threadID]
+	if !ok {
+		s.mu.RUnlock()
+	} else if thread.titleSource == ThreadTitleSourceManual {
+		s.mu.RUnlock()
+		return
+	} else if thread.titleSource != ThreadTitleSourceFirstUser || thread.titleStatus != ThreadTitleStatusPending || thread.titleSeedRunID != seedRunID {
+		s.mu.RUnlock()
+		return
+	} else {
+		s.mu.RUnlock()
+	}
+
+	persisted, err := s.threadStore.UpdateThreadTitleMetadata(threadID, title, ThreadTitleSourceLLM, ThreadTitleStatusReady, seedRunID, now)
+	if err != nil {
+		return
+	}
+	if persisted.TitleSource != ThreadTitleSourceLLM || persisted.TitleStatus != ThreadTitleStatusReady || persisted.TitleSeedRunID != seedRunID || persisted.Label != title {
+		return
+	}
+
+	s.mu.Lock()
+	if thread, ok := s.threads[threadID]; ok &&
+		thread.titleSource == ThreadTitleSourceFirstUser &&
+		thread.titleStatus == ThreadTitleStatusPending &&
+		thread.titleSeedRunID == seedRunID {
+		thread.label = persisted.Label
+		thread.titleSource = persisted.TitleSource
+		thread.titleStatus = persisted.TitleStatus
+		thread.titleUpdatedAt = persisted.TitleUpdatedAt
+		thread.updatedAt = persisted.UpdatedAt
+	}
+	s.mu.Unlock()
+}
+
+func (s *RunService) shouldAttemptGeneratedThreadTitle(threadID, seedRunID string) bool {
+	threadID = strings.TrimSpace(threadID)
+	seedRunID = strings.TrimSpace(seedRunID)
+	if threadID == "" || seedRunID == "" {
+		return false
+	}
+	s.mu.RLock()
+	thread, ok := s.threads[threadID]
+	s.mu.RUnlock()
+	if !ok {
+		return true
+	}
+	return thread.titleSource == ThreadTitleSourceFirstUser &&
+		thread.titleStatus == ThreadTitleStatusPending &&
+		thread.titleSeedRunID == seedRunID
+}
+
+func (s *RunService) markThreadTitleFailed(threadID, seedRunID string) {
+	threadID = strings.TrimSpace(threadID)
+	seedRunID = strings.TrimSpace(seedRunID)
+	if threadID == "" || seedRunID == "" {
+		return
+	}
+
+	now := time.Now().UTC()
+
+	s.mu.RLock()
+	thread, ok := s.threads[threadID]
+	if !ok {
+		s.mu.RUnlock()
+	} else if thread.titleSource == ThreadTitleSourceManual {
+		s.mu.RUnlock()
+		return
+	} else if thread.titleSource != ThreadTitleSourceFirstUser || thread.titleStatus != ThreadTitleStatusPending || thread.titleSeedRunID != seedRunID {
+		s.mu.RUnlock()
+		return
+	} else {
+		s.mu.RUnlock()
+	}
+
+	persisted, err := s.threadStore.UpdateThreadTitleMetadata(threadID, "", ThreadTitleSourceFirstUser, ThreadTitleStatusFailed, seedRunID, now)
+	if err != nil {
+		return
+	}
+	if persisted.TitleSource != ThreadTitleSourceFirstUser || persisted.TitleStatus != ThreadTitleStatusFailed || persisted.TitleSeedRunID != seedRunID {
+		return
+	}
+
+	s.mu.Lock()
+	if thread, ok := s.threads[threadID]; ok &&
+		thread.titleSource == ThreadTitleSourceFirstUser &&
+		thread.titleStatus == ThreadTitleStatusPending &&
+		thread.titleSeedRunID == seedRunID {
+		thread.titleStatus = persisted.TitleStatus
+		thread.titleUpdatedAt = persisted.TitleUpdatedAt
+		thread.updatedAt = persisted.UpdatedAt
+	}
+	s.mu.Unlock()
 }
 
 func modelProfileCacheKey(profile *ModelProfileConfig) string {
@@ -422,6 +621,9 @@ func (s *RunService) RenameThread(threadID, label string) (ThreadSnapshot, error
 	s.mu.Lock()
 	if thread, ok := s.threads[threadID]; ok {
 		thread.label = normalizedLabel
+		thread.titleSource = ThreadTitleSourceManual
+		thread.titleStatus = ThreadTitleStatusReady
+		thread.titleUpdatedAt = now
 		thread.updatedAt = now
 		snapshot := thread.snapshot()
 		s.mu.Unlock()
@@ -770,13 +972,17 @@ func newRuntimeID(prefix string) string {
 
 func (t *Thread) snapshot() ThreadSnapshot {
 	return ThreadSnapshot{
-		ThreadID:    t.threadID,
-		Label:       t.label,
-		RunID:       t.latestRunID,
-		ActiveRunID: t.activeRunID,
-		Workspace:   t.workspace,
-		CreatedAt:   t.createdAt,
-		UpdatedAt:   t.updatedAt,
+		ThreadID:       t.threadID,
+		Label:          t.label,
+		TitleSource:    t.titleSource,
+		TitleStatus:    t.titleStatus,
+		TitleUpdatedAt: t.titleUpdatedAt,
+		TitleSeedRunID: t.titleSeedRunID,
+		RunID:          t.latestRunID,
+		ActiveRunID:    t.activeRunID,
+		Workspace:      t.workspace,
+		CreatedAt:      t.createdAt,
+		UpdatedAt:      t.updatedAt,
 	}
 }
 

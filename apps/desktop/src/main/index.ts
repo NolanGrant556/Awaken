@@ -5,6 +5,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  nativeTheme,
   nativeImage,
   screen as electronScreen,
   shell,
@@ -30,6 +31,7 @@ import {
   normalizeStartRunRequest,
   type AttachmentPickResult,
   type AwakenTheme,
+  type AwakenThemePreference,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
   type DesktopPreferencesSaveRequest,
@@ -88,11 +90,20 @@ const defaultWindowHeight = 960;
 const minimumWindowWidth = 1120;
 const minimumWindowHeight = 760;
 
-function windowBackgroundColor(theme?: AwakenTheme): string {
-  return theme === "dark" ? "#0f0f0e" : "#f8f8f7";
+function effectiveThemeForPreference(
+  theme?: AwakenThemePreference,
+): AwakenTheme {
+  if (theme === "system") {
+    return nativeTheme.shouldUseDarkColors ? "dark" : "light";
+  }
+  return theme === "dark" ? "dark" : "light";
 }
 
-function updateWindowBackgrounds(theme: AwakenTheme): void {
+function windowBackgroundColor(theme?: AwakenThemePreference): string {
+  return effectiveThemeForPreference(theme) === "dark" ? "#0f0f0e" : "#f8f8f7";
+}
+
+function updateWindowBackgrounds(theme: AwakenThemePreference): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) {
       window.setBackgroundColor(windowBackgroundColor(theme));
@@ -1178,6 +1189,11 @@ app.whenReady().then(async () => {
   const configDir = await ensureConfigDir();
   desktopPreferencesStore = new DesktopPreferencesStore(configDir);
   await desktopPreferencesStore.initialize();
+  nativeTheme.on("updated", () => {
+    if (desktopPreferencesStore?.snapshot().theme === "system") {
+      updateWindowBackgrounds("system");
+    }
+  });
   modelProfileStore = new ModelProfileStore(configDir);
   await modelProfileStore.initialize();
   const lastWorkspace = await readLastWorkspace();

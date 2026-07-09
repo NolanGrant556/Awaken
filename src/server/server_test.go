@@ -3923,6 +3923,17 @@ func makeSkillZip(t *testing.T, files map[string]string) []byte {
 	return buf.Bytes()
 }
 
+func writeServerTestSkillPackage(t *testing.T, root, name, content string) {
+	t.Helper()
+	dir := filepath.Join(root, name)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir skill package: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o600); err != nil {
+		t.Fatalf("write skill package: %v", err)
+	}
+}
+
 func TestListSkillsReloadsRemovedProjectSkillFromDisk(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	workspace := t.TempDir()
@@ -4154,6 +4165,106 @@ Body.`
 	}
 	if len(listed) != 1 || listed[0].ID != "user-skill" || listed[0].SourceOrigin != "user" {
 		t.Fatalf("expected user skill in list, got %+v", listed)
+	}
+}
+
+func TestValidateComposerTokensAcceptsAvailableProjectSkill(t *testing.T) {
+	skillsRoot := t.TempDir()
+	writeServerTestSkillPackage(t, skillsRoot, "daily-followup", `---
+name: daily-followup
+description: Generate follow-up plans.
+---
+Body.`)
+	registry := skills.NewSkillRegistry(testLogger{})
+	registry.LoadFromSources(map[skills.SourceOrigin]string{
+		skills.SourceProject: skillsRoot,
+	})
+	handler := runHandlers{skillRegistry: registry}
+	skillPath := filepath.Join(skillsRoot, "daily-followup", "SKILL.md")
+
+	err := handler.validateComposerTokens([]awruntime.ComposerToken{
+		{
+			ID:    "skill:daily-followup:project",
+			Type:  "skill",
+			Label: "Daily Followup",
+			Payload: awruntime.ComposerTokenPayload{
+				SkillID:       "daily-followup",
+				SourceOrigin:  "project",
+				SkillFilePath: skillPath,
+				RootDir:       filepath.Dir(skillPath),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected available project skill token to pass, got %v", err)
+	}
+}
+
+func TestValidateComposerTokensRejectsUnavailableSkill(t *testing.T) {
+	skillsRoot := t.TempDir()
+	writeServerTestSkillPackage(t, skillsRoot, "needs-mcp", `---
+name: needs-mcp
+description: Needs a missing MCP server.
+requiredMcpServers:
+  - missing-server
+---
+Body.`)
+	registry := skills.NewSkillRegistry(testLogger{})
+	registry.LoadFromSources(map[skills.SourceOrigin]string{
+		skills.SourceProject: skillsRoot,
+	})
+	handler := runHandlers{skillRegistry: registry}
+
+	err := handler.validateComposerTokens([]awruntime.ComposerToken{
+		{
+			ID:    "skill:needs-mcp:project",
+			Type:  "skill",
+			Label: "needs-mcp",
+			Payload: awruntime.ComposerTokenPayload{
+				SkillID:      "needs-mcp",
+				SourceOrigin: "project",
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "not available") {
+		t.Fatalf("expected unavailable skill rejection, got %v", err)
+	}
+}
+
+func TestValidateComposerTokensRejectsMismatchedSkillPath(t *testing.T) {
+	skillsRoot := t.TempDir()
+	writeServerTestSkillPackage(t, skillsRoot, "daily-followup", `---
+name: daily-followup
+description: Generate follow-up plans.
+---
+Body.`)
+	registry := skills.NewSkillRegistry(testLogger{})
+	registry.LoadFromSources(map[skills.SourceOrigin]string{
+		skills.SourceProject: skillsRoot,
+	})
+	handler := runHandlers{skillRegistry: registry}
+
+	err := handler.validateComposerTokens([]awruntime.ComposerToken{
+		{
+			ID:    "skill:daily-followup:project",
+			Type:  "skill",
+			Label: "Daily Followup",
+			Payload: awruntime.ComposerTokenPayload{
+				SkillID:       "daily-followup",
+				SourceOrigin:  "project",
+				SkillFilePath: filepath.Join(t.TempDir(), "SKILL.md"),
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "path changed") {
+		t.Fatalf("expected path mismatch rejection, got %v", err)
+	}
+}
+
+func TestValidateComposerTokensKeepsLegacyNoTokenRequestsCompatible(t *testing.T) {
+	handler := runHandlers{}
+	if err := handler.validateComposerTokens(nil); err != nil {
+		t.Fatalf("expected no-token request to remain compatible, got %v", err)
 	}
 }
 

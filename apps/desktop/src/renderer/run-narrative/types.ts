@@ -1,4 +1,4 @@
-import type { RunInputAttachment } from "../../shared/runtime";
+import type { ComposerToken, RunInputAttachment } from "../../shared/runtime";
 
 export type RunNarrativeStatus =
   | "active"
@@ -13,6 +13,10 @@ export type RunAction = {
   title: string;
   detail?: string;
   status: "active" | "done" | "error";
+};
+
+export type PromptNarrativeToken = ComposerToken & {
+  leadingText?: string;
 };
 
 export type ChangedFile = {
@@ -46,7 +50,13 @@ export type InspectorSelection =
   | { kind: "fileChange"; id: string };
 
 export type RunNarrativeItem =
-  | { kind: "prompt"; id: string; text: string; attachments?: RunInputAttachment[] }
+  | {
+      kind: "prompt";
+      id: string;
+      text: string;
+      attachments?: RunInputAttachment[];
+      tokens?: PromptNarrativeToken[];
+    }
   | { kind: "planning"; id: string; text: string; status: "active" | "done" }
   | { kind: "thinking"; id: string; text: string; status: "active" | "done" }
   | { kind: "exploring"; id: string; actions: RunAction[]; status: "active" | "done" }

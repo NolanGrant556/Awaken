@@ -3,6 +3,8 @@ import {
   calculateAutoCompactThreshold,
   effectiveContextWindow,
   normalizeModelProvider,
+  normalizeRuntimeRun,
+  normalizeStartRunRequest,
 } from "./runtime.js";
 
 describe("runtime shared model provider normalization", () => {
@@ -42,5 +44,95 @@ describe("runtime shared model provider normalization", () => {
     expect(calculateAutoCompactThreshold(1_000_000)).toBe(885_600);
     expect(calculateAutoCompactThreshold(8_000)).toBe(0);
     expect(calculateAutoCompactThreshold(12_000, 20_000)).toBe(0);
+  });
+});
+
+describe("runtime shared start run normalization", () => {
+  it("normalizes composer tokens returned on runtime runs", () => {
+    expect(
+      normalizeRuntimeRun({
+        run_id: "run-1",
+        thread_id: "thread-1",
+        input: "hello",
+        composer_tokens: [
+          {
+            id: "skill:deep-research:user",
+            type: "skill",
+            label: "deep-research",
+            payload: {
+              skillId: "deep-research",
+              sourceOrigin: "user",
+              skillFilePath: "/home/.awaken/skills/deep-research/SKILL.md",
+            },
+          },
+        ],
+        status: "running",
+        created_at: "2026-07-09T00:00:00Z",
+        updated_at: "2026-07-09T00:00:00Z",
+      }),
+    ).toMatchObject({
+      runId: "run-1",
+      composerTokens: [
+        {
+          id: "skill:deep-research:user",
+          type: "skill",
+          label: "deep-research",
+          payload: {
+            skillId: "deep-research",
+            sourceOrigin: "user",
+            skillFilePath: "/home/.awaken/skills/deep-research/SKILL.md",
+          },
+        },
+      ],
+    });
+  });
+
+  it("passes composer tokens through the wire request without mutating input text", () => {
+    expect(
+      normalizeStartRunRequest({
+        input: "summarize this folder",
+        composerTokens: [
+          {
+            id: "skill:daily-followup:project",
+            type: "skill",
+            label: "Daily Followup",
+            payload: {
+              skillId: "daily-followup",
+              sourceOrigin: "project",
+              skillFilePath:
+                "/workspace/.awaken/skills/daily-followup/SKILL.md",
+              rootDir: "/workspace/.awaken/skills/daily-followup",
+            },
+          },
+        ],
+        workspace: {
+          workspaceRoot: "/workspace",
+          readableRoots: ["/workspace"],
+          writableRoots: ["/workspace"],
+          outputRoots: ["/workspace"],
+        },
+        client: {
+          sessionId: "session-1",
+          requestId: "request-1",
+          entrypoint: "desktop",
+        },
+      }),
+    ).toMatchObject({
+      input: "summarize this folder",
+      composer_tokens: [
+        {
+          id: "skill:daily-followup:project",
+          type: "skill",
+          label: "Daily Followup",
+          payload: {
+            skillId: "daily-followup",
+            sourceOrigin: "project",
+            skillFilePath:
+              "/workspace/.awaken/skills/daily-followup/SKILL.md",
+            rootDir: "/workspace/.awaken/skills/daily-followup",
+          },
+        },
+      ],
+    });
   });
 });

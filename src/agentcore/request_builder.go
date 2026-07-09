@@ -175,6 +175,7 @@ func (rb *RequestBuilder) updateRuntimeInfoFromConfig(tools []tool.ToolSchema) {
 	rb.runtimeInfo.SetModelName(rb.config.ModelConfig.Model)
 	rb.runtimeInfo.SetEntryPoint(rb.config.EntryPoint)
 	rb.runtimeInfo.SetToolSummary(rb.buildToolSummary(tools))
+	rb.runtimeInfo.SetSkillSummary(strings.TrimSpace(rb.config.SkillSummary))
 }
 
 func (rb *RequestBuilder) buildRuntimeSnapshot(tools []tool.ToolSchema) RuntimeSnapshot {
@@ -186,6 +187,7 @@ func (rb *RequestBuilder) buildRuntimeSnapshot(tools []tool.ToolSchema) RuntimeS
 		ModelName:        rb.runtimeInfo.ModelName,
 		EntryPoint:       rb.runtimeInfo.EntryPoint,
 		ToolSummary:      rb.runtimeInfo.ToolSummary,
+		SkillSummary:     rb.runtimeInfo.SkillSummary,
 		ScopeID:          permissionContext.ScopeID,
 		WorkspaceRoot:    permissionContext.WorkspaceRoot,
 		ReadableRoots:    append([]string(nil), permissionContext.ReadableRoots...),
@@ -216,7 +218,7 @@ func (rb *RequestBuilder) buildCacheKeys(staticContent string, tools []tool.Tool
 	return []ContextCacheKey{
 		{Name: "system_prompt", Value: fmt.Sprintf("len:%d", len(staticContent))},
 		{Name: "tool_pool", Value: rb.buildToolSummary(tools)},
-		{Name: "runtime_snapshot", Value: snapshot.WorkingDirectory + "|" + snapshot.ModelName + "|" + snapshot.EntryPoint},
+		{Name: "runtime_snapshot", Value: snapshot.WorkingDirectory + "|" + snapshot.ModelName + "|" + snapshot.EntryPoint + "|skills:" + snapshot.SkillSummary},
 	}
 }
 
@@ -224,7 +226,7 @@ func (rb *RequestBuilder) buildContextDeltas(snapshot RuntimeSnapshot, tools []t
 	return []ContextDelta{
 		{
 			Type:    ContextDeltaRuntimeSnapshot,
-			Summary: snapshot.WorkingDirectory + "|" + snapshot.ModelName + "|" + snapshot.EntryPoint,
+			Summary: snapshot.WorkingDirectory + "|" + snapshot.ModelName + "|" + snapshot.EntryPoint + "|skills:" + snapshot.SkillSummary,
 		},
 		{
 			Type:    ContextDeltaToolPool,

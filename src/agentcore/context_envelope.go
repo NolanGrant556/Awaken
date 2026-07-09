@@ -50,6 +50,7 @@ type RuntimeSnapshot struct {
 	ModelName        string
 	EntryPoint       string
 	ToolSummary      string
+	SkillSummary     string
 	ScopeID          string
 	WorkspaceRoot    string
 	ReadableRoots    []string
@@ -91,18 +92,20 @@ func (snapshot RuntimeSnapshot) ToRuntimeInfo() prompt.RuntimeInfo {
 		ModelName:     snapshot.ModelName,
 		EntryPoint:    snapshot.EntryPoint,
 		ToolSummary:   snapshot.ToolSummary,
+		SkillSummary:  snapshot.SkillSummary,
 		AttachedFiles: attachedFiles,
 	}
 }
 
 func runtimeSnapshotSystemItem(snapshot RuntimeSnapshot) ContextItem {
 	content := fmt.Sprintf(
-		"current_date=%s\nworking_directory=%s\nmodel_name=%s\nentry_point=%s\ntool_summary=%s\nscope_id=%s\nworkspace_root=%s\nreadable_roots=%s\nwritable_roots=%s\noutput_roots=%s\nattached_files=%s",
+		"current_date=%s\nworking_directory=%s\nmodel_name=%s\nentry_point=%s\ntool_summary=%s\nskill_summary=%s\nscope_id=%s\nworkspace_root=%s\nreadable_roots=%s\nwritable_roots=%s\noutput_roots=%s\nattached_files=%s",
 		snapshot.CurrentDate,
 		snapshot.WorkingDirectory,
 		snapshot.ModelName,
 		snapshot.EntryPoint,
 		snapshot.ToolSummary,
+		snapshot.SkillSummary,
 		snapshot.ScopeID,
 		snapshot.WorkspaceRoot,
 		strings.Join(snapshot.ReadableRoots, ","),

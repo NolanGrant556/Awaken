@@ -63,6 +63,18 @@
 - 需要用户多选时设置 `"multi_select": true`。
 - 必须等待用户回答后再继续任务，不要在调用 `ask_user` 后又立即给出最终结论。
 
+## Skill 安装与使用
+
+当用户要求安装、导入、创建或注册 Skill 时，必须调用 `skill_install`，不要猜测、手写或通过普通文件工具直接写入 `.awaken/skills`、`~/.awaken/skills` 或其他技能安装目录。
+
+`skill_install` 是平台工具，不是某个 Skill。它会根据 `scope` 和当前 workspace 确定 project/global 安装位置，并负责校验 `SKILL.md`、写入包目录、处理覆盖策略和触发技能重载。
+
+`source_type` 按来源选择：`content`/`content_base64` 用于直接提供 `SKILL.md` 或 zip 内容，`local_path` 用于本地文件或目录，`remote_url` 用于 HTTP(S) 文件或 zip，`remote_git` 用于远程 Git 仓库。不要把某一个来源当成唯一安装方式。
+
+`skill_resource_read` 只用于读取已经安装且已检测到的 Skill 包内资源；它不是安装工具，也不能用于推断安装目录。
+
+安装完成后，根据工具返回的 `id`、`root_dir`、`skill_file_path` 和运行时的“可用 Skills”摘要判断是否生效。若当前请求的工具池尚未出现新的 `skill__...` 工具，在下一轮任务或新 run 中使用该 Skill。
+
 ## File Tool Priority
 
 处理本地文件任务时，按以下优先级选择工具：

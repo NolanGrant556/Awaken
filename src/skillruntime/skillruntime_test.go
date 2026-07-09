@@ -2,6 +2,7 @@ package skillruntime
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -231,6 +232,72 @@ func TestResourceReadToolRejectsTraversal(t *testing.T) {
 	_, err := reader.Execute(context.Background(), `{"skill_id":"sample","path":"../secret.md"}`)
 	if err == nil {
 		t.Fatal("expected traversal to be rejected")
+	}
+}
+
+func TestSkillInstallToolInstallsContentProjectSkillAndReloads(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	workspace := t.TempDir()
+	reg := skills.NewSkillRegistry(nil)
+	installer := &SkillInstallTool{registry: reg}
+	ctx := tool.ContextWithPermissionContext(
+		context.Background(),
+		tool.NewPermissionContext(workspace, []string{workspace}),
+	)
+
+	output, err := installer.Execute(ctx, `{
+		"source_type": "content",
+		"file_name": "SKILL.md",
+		"content": "---\nname: daily-followup\ndescription: Daily followup.\n---\nDo the followup.",
+		"scope": "project"
+	}`)
+	if err != nil {
+		t.Fatalf("install skill: %v", err)
+	}
+
+	var parsed skillInstallOutput
+	if err := json.Unmarshal([]byte(output), &parsed); err != nil {
+		t.Fatalf("parse output: %v\n%s", err, output)
+	}
+	if parsed.ID != "daily-followup" || parsed.Scope != "project" || !parsed.Reloaded {
+		t.Fatalf("unexpected install output: %+v", parsed)
+	}
+	skillPath := filepath.Join(workspace, ".awaken", "skills", "daily-followup", "SKILL.md")
+	if _, err := os.Stat(skillPath); err != nil {
+		t.Fatalf("expected installed SKILL.md: %v", err)
+	}
+	def := reg.Get("daily-followup")
+	if def == nil {
+		t.Fatal("expected installed skill to be reloaded into registry")
+	}
+	if def.SkillFilePath != skillPath {
+		t.Fatalf("expected skill path %q, got %q", skillPath, def.SkillFilePath)
+	}
+}
+
+func TestSkillInstallToolRejectsProjectRootOutsideWorkspace(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	reg := skills.NewSkillRegistry(nil)
+	installer := &SkillInstallTool{registry: reg}
+	input := `{
+		"source_type": "content",
+		"file_name": "SKILL.md",
+		"content": "---\nname: outside\ndescription: Outside.\n---\nBody.",
+		"scope": "project",
+		"project_root": "` + outside + `"
+	}`
+
+	decision := installer.CheckPermission(
+		context.Background(),
+		input,
+		tool.NewPermissionContext(workspace, []string{workspace}),
+	)
+	if decision.Behavior != tool.PermissionDeny {
+		t.Fatalf("expected deny, got %+v", decision)
+	}
+	if !strings.Contains(decision.Reason, "project_root") {
+		t.Fatalf("expected project_root denial reason, got %q", decision.Reason)
 	}
 }
 

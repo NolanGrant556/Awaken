@@ -207,7 +207,7 @@ API key 由 Electron `safeStorage` 保存；非敏感 profile 字段保存到 De
 
 项目级 MCP 配置仍然支持 `<workspace>/awaken.mcp.json`，但它现在是 project override，不再承担 Desktop 全局配置层的职责。
 
-旧的 `workspace/.awaken/transcripts` 不再是正式历史来源。Desktop 发现旧 transcript 目录时，会把它移到系统回收站；新线程统一写入 Desktop 全局线程库。
+旧的 `workspace/.awaken/transcripts` 不再是正式历史来源，也不是迁移入口。Desktop 运行时只读取全局线程库，不扫描、不移动、不删除旧 workspace transcript；新线程统一写入 Desktop 全局线程库。
 
 OAuth token 也不再只放在内存里。当前实现会把授权元数据写入 `data/auth/connector-accounts.sqlite`，敏感 token 则交给系统凭据存储保存，例如 macOS Keychain 或 Windows Credential Manager。
 

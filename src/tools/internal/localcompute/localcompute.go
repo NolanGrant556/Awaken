@@ -113,6 +113,8 @@ func resolveBackendBinary(name string) (string, error) {
 	if runtime.GOOS == "windows" {
 		if name == "soffice" {
 			for _, base := range []string{
+				filepath.Join(os.Getenv("ProgramFiles"), "LibreOffice", "program", "soffice.bin.exe"),
+				filepath.Join(os.Getenv("ProgramFiles(x86)"), "LibreOffice", "program", "soffice.bin.exe"),
 				filepath.Join(os.Getenv("ProgramFiles"), "LibreOffice", "program", "soffice.exe"),
 				filepath.Join(os.Getenv("ProgramFiles(x86)"), "LibreOffice", "program", "soffice.exe"),
 			} {

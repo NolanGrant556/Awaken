@@ -82,12 +82,10 @@ import {
 } from "./runtime/thread-transcript";
 import {
   DEFAULT_WORKSPACE_PROJECT_ID,
-  assignThreadToProject,
   isSameWorkspacePath,
   mergeWorkspaceProjects,
   projectIdForWorkspacePath,
   projectIdForThread,
-  removeThreadProjectAssignments,
   removeWorkspaceProject,
   upsertWorkspaceProject,
   workspaceLabelForPath,
@@ -866,27 +864,6 @@ function readStoredTheme(): AwakenTheme {
   return readStoredString(STORED_THEME_KEY) === "dark" ? "dark" : "light";
 }
 
-function readStoredStringRecord(key: string): Record<string, string> {
-  if (typeof window === "undefined" || !window.localStorage) {
-    return {};
-  }
-
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(key) ?? "{}");
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return {};
-    }
-    return Object.fromEntries(
-      Object.entries(parsed).filter(
-        (entry): entry is [string, string] =>
-          typeof entry[0] === "string" && typeof entry[1] === "string",
-      ),
-    );
-  } catch {
-    return {};
-  }
-}
-
 function readStoredWorkspaceProjects(key: string): WorkspaceProject[] {
   if (typeof window === "undefined" || !window.localStorage) {
     return [];
@@ -949,6 +926,7 @@ export function App() {
   const inspectorCollapsedBeforeResponsiveRef = useRef<boolean | null>(null);
   const persistedWorkspaceRegistryRef = useRef("");
   const workspaceRegistryRestoredRef = useRef(false);
+  const threadTitlePollsRef = useRef<Map<string, () => void>>(new Map());
   const workspaceTargetPathRef = useRef<string>(
     readStoredString("awaken:workspace:path"),
   );
@@ -988,6 +966,11 @@ export function App() {
     readStoredString("awaken:workspace:path"),
   );
   const [createProjectDialogOpen, setCreateProjectDialogOpen] = useState(false);
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [renamingThreadId, setRenamingThreadId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renameSubmitting, setRenameSubmitting] = useState(false);
+  const renameInputRef = useRef<HTMLInputElement>(null);
   const [pendingProjectMode, setPendingProjectMode] =
     useState<"local">("local");
   const [pickingWorkspace, setPickingWorkspace] = useState(false);
@@ -1009,9 +992,6 @@ export function App() {
   const defaultProjectRemoved = removedProjectIds.includes(
     DEFAULT_WORKSPACE_PROJECT_ID,
   );
-  const [threadProjectIds, setThreadProjectIds] = useState<
-    Record<string, string>
-  >(() => readStoredStringRecord("awaken:threads:projects"));
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() =>
     readStoredNumber(
@@ -1088,6 +1068,21 @@ export function App() {
   }, [appearanceTheme]);
 
   useEffect(() => {
+    if (!renameDialogOpen) {
+      return;
+    }
+    const input = renameInputRef.current;
+    if (!input) {
+      return;
+    }
+    const timeoutId = setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 0);
+    return () => clearTimeout(timeoutId);
+  }, [renameDialogOpen]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function loadAppearancePreferences(): Promise<void> {
@@ -1154,13 +1149,6 @@ export function App() {
   }, [expandedProjectIds]);
 
   useEffect(() => {
-    writeStoredValue(
-      "awaken:threads:projects",
-      JSON.stringify(threadProjectIds),
-    );
-  }, [threadProjectIds]);
-
-  useEffect(() => {
     if (
       typeof window === "undefined" ||
       typeof window.matchMedia !== "function"
@@ -1194,6 +1182,10 @@ export function App() {
     return () => {
       media.removeEventListener("change", handleChange);
     };
+  }, []);
+
+  useEffect(() => {
+    window.localStorage?.removeItem("awaken:threads:projects");
   }, []);
 
   useEffect(() => {
@@ -1265,6 +1257,12 @@ export function App() {
     return () => {
       unsubscribeRef.current?.();
       unsubscribeRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      stopThreadTitlePoll();
     };
   }, []);
 
@@ -1368,6 +1366,85 @@ export function App() {
       setRuntimeInfo(null);
       setModelProfiles([]);
     }
+  }
+
+  function stopThreadTitlePoll(threadId?: string): void {
+    if (threadId) {
+      const cancel = threadTitlePollsRef.current.get(threadId);
+      cancel?.();
+      threadTitlePollsRef.current.delete(threadId);
+      return;
+    }
+    for (const cancel of threadTitlePollsRef.current.values()) {
+      cancel();
+    }
+    threadTitlePollsRef.current.clear();
+  }
+
+  function startThreadTitlePoll(threadId: string): void {
+    stopThreadTitlePoll(threadId);
+
+    let cancelled = false;
+    let activeTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const cancel = () => {
+      cancelled = true;
+      if (activeTimeoutId !== null) {
+        clearTimeout(activeTimeoutId);
+        activeTimeoutId = null;
+      }
+    };
+
+    threadTitlePollsRef.current.set(threadId, cancel);
+
+    const delays = [500, 1000, 2000, 4000, 8000, 12000, 20000, 30000];
+
+    async function pollOnce(): Promise<void> {
+      for (const delay of delays) {
+        if (cancelled) {
+          return;
+        }
+        await new Promise<void>((resolve) => {
+          activeTimeoutId = setTimeout(() => {
+            activeTimeoutId = null;
+            resolve();
+          }, delay);
+        });
+        if (cancelled) {
+          return;
+        }
+        try {
+          const threads = await runtimeClient.listThreads();
+          if (cancelled) {
+            return;
+          }
+          const thread = threads.find((t) => t.threadId === threadId);
+          if (!thread) {
+            continue;
+          }
+          if (
+            thread.titleSource === "manual" ||
+            (thread.titleStatus === "ready" && thread.titleSource === "llm")
+          ) {
+            dispatch({ type: "run/threadsLoaded", threads });
+            stopThreadTitlePoll(threadId);
+            return;
+          }
+          if (thread.titleStatus === "failed") {
+            stopThreadTitlePoll(threadId);
+            return;
+          }
+        } catch {
+          // Best-effort polling; transient failures are ignored.
+        }
+      }
+    }
+
+    void pollOnce().finally(() => {
+      if (threadTitlePollsRef.current.get(threadId) === cancel) {
+        threadTitlePollsRef.current.delete(threadId);
+      }
+    });
   }
 
   async function handleSelectModelProfile(profileId: string): Promise<void> {
@@ -2349,12 +2426,18 @@ export function App() {
     setComposerTokenLeadingTexts({});
 
     try {
-      const runProjectId = selectedProjectId ?? DEFAULT_WORKSPACE_PROJECT_ID;
-      const nextThreadLabel = composerThreadLabel(
-        prompt,
-        draftAttachments,
-        draftComposerTokens,
+      const runProjectId = projectIdForWorkspacePath(
+        workspaceRoot,
+        effectiveDefaultWorkspacePath,
       );
+      const isNewThread = !runtimeState.activeThreadId;
+      const nextThreadLabel = isNewThread
+        ? composerThreadLabel(
+            prompt,
+            draftAttachments,
+            draftComposerTokens,
+          )
+        : "";
       const attachedFiles = runInputAttachments
         .filter((attachment) => attachment.kind === "file" && attachment.path)
         .map((attachment) => ({
@@ -2380,9 +2463,6 @@ export function App() {
         },
       };
       const run = await runtimeClient.startRun(startRunRequest);
-      setThreadProjectIds((current) =>
-        assignThreadToProject(current, run.threadId, runProjectId),
-      );
       if (runProjectId === DEFAULT_WORKSPACE_PROJECT_ID) {
         setRemovedProjectIds((current) =>
           current.filter(
@@ -2398,6 +2478,9 @@ export function App() {
         runId: run.runId,
         workspaceRoot: workspaceRoot,
       });
+      if (isNewThread) {
+        startThreadTitlePoll(run.threadId);
+      }
       void refreshThreads();
       localStorage.setItem("awaken:runId", run.runId);
       const unsubscribe = await runtimeClient.subscribeRun(
@@ -2467,7 +2550,6 @@ export function App() {
       (thread) =>
         projectIdForThread(
           thread,
-          threadProjectIds,
           effectiveDefaultWorkspacePath,
         ) === projectId,
     );
@@ -2506,12 +2588,6 @@ export function App() {
   ): Promise<void> {
     if (removedThreadIds.includes(runtimeState.activeThreadId ?? "")) {
       resetActiveThreadContext();
-    }
-
-    if (removedThreadIds.length > 0) {
-      setThreadProjectIds((current) =>
-        removeThreadProjectAssignments(current, removedThreadIds),
-      );
     }
 
     await loadThreadsIntoState();
@@ -2613,18 +2689,54 @@ export function App() {
       return;
     }
 
-    const nextLabel = window.prompt("重命名会话", thread.label)?.trim();
-    if (!nextLabel || nextLabel === thread.label) {
+    setRenamingThreadId(threadId);
+    setRenameDraft(thread.label);
+    setRenameDialogOpen(true);
+  }
+
+  async function handleConfirmRename(): Promise<void> {
+    const threadId = renamingThreadId;
+    if (!threadId) {
       return;
     }
 
+    const nextLabel = renameDraft.trim();
+    if (!nextLabel) {
+      return;
+    }
+
+    const thread = runtimeState.threads.find(
+      (item) => item.threadId === threadId,
+    );
+    if (!thread || nextLabel === thread.label) {
+      setRenameDialogOpen(false);
+      setRenamingThreadId(null);
+      setRenameDraft("");
+      return;
+    }
+
+    setRenameSubmitting(true);
     try {
-      await runtimeClient.renameThread(threadId, nextLabel);
-      await loadThreadsIntoState();
+      const updatedThread = await runtimeClient.renameThread(
+        threadId,
+        nextLabel,
+      );
+      dispatch({ type: "run/threadRenamed", thread: updatedThread });
       setNotice("已重命名会话");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "重命名会话失败");
+    } finally {
+      setRenameSubmitting(false);
+      setRenameDialogOpen(false);
+      setRenamingThreadId(null);
+      setRenameDraft("");
     }
+  }
+
+  function handleCancelRename(): void {
+    setRenameDialogOpen(false);
+    setRenamingThreadId(null);
+    setRenameDraft("");
   }
 
   async function handleDeleteThread(threadId: string): Promise<void> {
@@ -3746,6 +3858,60 @@ export function App() {
             title="Local"
             description="Use a folder on this Mac as an Awaken project."
             onSelect={() => setPendingProjectMode("local")}
+          />
+        </div>
+      </Dialog>
+      <Dialog
+        open={renameDialogOpen}
+        title="重命名会话"
+        onOpenChange={(open) => {
+          if (!open) {
+            handleCancelRename();
+          }
+        }}
+        footer={
+          <>
+            <Button
+              variant="default"
+              size="md"
+              disabled={renameSubmitting}
+              onClick={handleCancelRename}
+            >
+              取消
+            </Button>
+            <Button
+              variant="primary"
+              size="md"
+              loading={renameSubmitting}
+              disabled={renameSubmitting || !renameDraft.trim()}
+              onClick={() => {
+                void handleConfirmRename();
+              }}
+            >
+              确认
+            </Button>
+          </>
+        }
+      >
+        <div className="rename-thread-dialog-body">
+          <input
+            ref={renameInputRef}
+            type="text"
+            className="rename-thread-dialog-input"
+            value={renameDraft}
+            onChange={(event) => setRenameDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void handleConfirmRename();
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                handleCancelRename();
+              }
+            }}
+            placeholder="请输入会话标题"
+            disabled={renameSubmitting}
           />
         </div>
       </Dialog>

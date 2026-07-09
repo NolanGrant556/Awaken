@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AguiEvent } from "../../shared/agui";
-import type { RuntimeRun, SupervisorStatusInfo } from "../../shared/runtime";
+import type { RuntimeRun, RuntimeThread, SupervisorStatusInfo } from "../../shared/runtime";
 import {
   createInitialRuntimeState,
   reduceRuntimeState,
@@ -1728,5 +1728,134 @@ describe("runtime reducer supervisor state", () => {
       { type: "run/recovered", run: makeRun({ status: "running" }) },
     ]);
     expect(state.supervisorStatus).toBe("running");
+  });
+});
+
+describe("runtime reducer thread title lifecycle", () => {
+  function makeThread(overrides: Partial<RuntimeThread> = {}): RuntimeThread {
+    return {
+      threadId: "thread-1",
+      label: "fallback",
+      workspace: { workspaceRoot: "/tmp", writableRoots: ["/tmp"] },
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  it("run/threadAdded does not overwrite the label of an existing thread", () => {
+    const state = dispatch([
+      {
+        type: "run/threadAdded",
+        threadId: "thread-1",
+        label: "first user message",
+        runId: "run-1",
+      },
+      {
+        type: "run/threadAdded",
+        threadId: "thread-1",
+        label: "follow up message",
+        runId: "run-2",
+      },
+    ]);
+
+    const thread = state.threads.find((t) => t.threadId === "thread-1");
+    expect(thread).toBeDefined();
+    expect(thread?.label).toBe("first user message");
+    expect(thread?.runId).toBe("run-2");
+  });
+
+  it("RUN_STARTED does not overwrite the thread label with the current prompt", () => {
+    const state = dispatch([
+      {
+        type: "run/threadAdded",
+        threadId: "thread-1",
+        label: "first user message",
+        runId: "run-1",
+      },
+      { type: "run/requested", prompt: "follow up prompt" },
+      runEvent({
+        type: "RUN_STARTED",
+        runId: "run-2",
+        threadId: "thread-1",
+      }),
+    ]);
+
+    const thread = state.threads.find((t) => t.threadId === "thread-1");
+    expect(thread?.label).toBe("first user message");
+    expect(thread?.runId).toBe("run-2");
+  });
+
+  it("run/threadsLoaded refreshes an LLM-generated title", () => {
+    const state = dispatch([
+      {
+        type: "run/threadAdded",
+        threadId: "thread-1",
+        label: "first user message",
+        runId: "run-1",
+      },
+      {
+        type: "run/threadsLoaded",
+        threads: [
+          makeThread({
+            threadId: "thread-1",
+            label: "LLM title",
+            titleSource: "llm",
+            titleStatus: "ready",
+            titleUpdatedAt: "2026-01-01T00:00:01Z",
+          }),
+        ],
+      },
+    ]);
+
+    const thread = state.threads.find((t) => t.threadId === "thread-1");
+    expect(thread).toMatchObject({
+      label: "LLM title",
+      titleSource: "llm",
+      titleStatus: "ready",
+      titleUpdatedAt: "2026-01-01T00:00:01Z",
+    });
+  });
+
+  it("run/threadRenamed immediately updates the active thread and the thread list", () => {
+    const state = dispatch([
+      {
+        type: "run/threadAdded",
+        threadId: "thread-1",
+        label: "old title",
+        runId: "run-1",
+      },
+      {
+        type: "run/threadAdded",
+        threadId: "thread-2",
+        label: "other thread",
+        runId: "run-3",
+      },
+      { type: "run/threadSwitch", threadId: "thread-1" },
+      {
+        type: "run/threadRenamed",
+        thread: makeThread({
+          threadId: "thread-1",
+          label: "renamed title",
+          titleSource: "manual",
+          titleStatus: "ready",
+          runId: "run-1",
+        }),
+      },
+    ]);
+
+    expect(state.activeThreadId).toBe("thread-1");
+
+    const activeThread = state.threads.find((t) => t.threadId === "thread-1");
+    expect(activeThread).toMatchObject({
+      label: "renamed title",
+      titleSource: "manual",
+      titleStatus: "ready",
+      runStatus: "running",
+      runId: "run-1",
+    });
+
+    const otherThread = state.threads.find((t) => t.threadId === "thread-2");
+    expect(otherThread?.label).toBe("other thread");
   });
 });

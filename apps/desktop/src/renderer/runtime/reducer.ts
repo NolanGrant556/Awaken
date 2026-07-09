@@ -11,6 +11,8 @@ import type {
   RuntimeThread,
   SupervisorStatus,
   SupervisorStatusInfo,
+  ThreadTitleSource,
+  ThreadTitleStatus,
 } from "../../shared/runtime";
 import {
   addRunErrorToNarrative,
@@ -162,6 +164,10 @@ function createInspectorSummary(): InspectorSummary {
 export type ThreadItem = {
   threadId: string;
   label: string;
+  titleSource?: ThreadTitleSource;
+  titleStatus?: ThreadTitleStatus;
+  titleUpdatedAt?: string;
+  titleSeedRunId?: string;
   runId?: string;
   activeRunId?: string;
   workspaceRoot?: string;
@@ -253,6 +259,7 @@ export type RuntimeAction =
       workspaceRoot?: string;
     }
   | { type: "run/threadSwitch"; threadId: string }
+  | { type: "run/threadRenamed"; thread: RuntimeThread }
   | { type: "run/event"; event: AguiEvent; receivedAtMs?: number }
   | { type: "supervisor/status-changed"; info: SupervisorStatusInfo };
 
@@ -379,11 +386,26 @@ function upsertThread(threads: ThreadItem[], next: ThreadItem): ThreadItem[] {
   if (index < 0) {
     return [...threads, next];
   }
+  const existing = threads[index];
+  const nextIsManual = next.titleSource === "manual";
+  const preserveManual = existing.titleSource === "manual" && !nextIsManual;
   const updated = threads.slice();
   updated[index] = {
-    ...updated[index],
+    ...existing,
     ...next,
-    label: next.label || updated[index].label,
+    label: existing.label || next.label,
+    titleSource: preserveManual
+      ? existing.titleSource
+      : (next.titleSource ?? existing.titleSource),
+    titleStatus: preserveManual
+      ? existing.titleStatus
+      : (next.titleStatus ?? existing.titleStatus),
+    titleUpdatedAt: preserveManual
+      ? existing.titleUpdatedAt
+      : (next.titleUpdatedAt ?? existing.titleUpdatedAt),
+    titleSeedRunId: preserveManual
+      ? existing.titleSeedRunId
+      : (next.titleSeedRunId ?? existing.titleSeedRunId),
   };
   return updated;
 }
@@ -398,6 +420,14 @@ function threadItemFromRuntime(thread: RuntimeThread): ThreadItem {
     runStatus: thread.activeRunId ? "running" : undefined,
     approvalCount: 0,
     artifactCount: 0,
+    ...(thread.titleSource ? { titleSource: thread.titleSource } : {}),
+    ...(thread.titleStatus ? { titleStatus: thread.titleStatus } : {}),
+    ...(thread.titleUpdatedAt
+      ? { titleUpdatedAt: thread.titleUpdatedAt }
+      : {}),
+    ...(thread.titleSeedRunId
+      ? { titleSeedRunId: thread.titleSeedRunId }
+      : {}),
   };
 }
 
@@ -416,7 +446,7 @@ function syncActiveThreadSummary(state: RuntimeViewState): RuntimeViewState {
     ...state,
     threads: upsertThread(state.threads, {
       threadId,
-      label: existing?.label || state.prompt || "Untitled thread",
+      label: existing?.label || "Untitled thread",
       runId: state.runId ?? existing?.runId,
       activeRunId: isActiveRunStatus(state.status) ? state.runId : undefined,
       runStatus: state.status ?? existing?.runStatus,
@@ -1355,8 +1385,27 @@ export function reduceRuntimeState(
         const existing = state.threads.find(
           (item) => item.threadId === thread.threadId,
         );
+        const fromRuntime = threadItemFromRuntime(thread);
+        const preserveManual =
+          existing?.titleSource === "manual" &&
+          fromRuntime.titleSource !== "manual";
         return {
-          ...threadItemFromRuntime(thread),
+          ...fromRuntime,
+          label: preserveManual
+            ? existing?.label || fromRuntime.label
+            : fromRuntime.label,
+          titleSource: preserveManual
+            ? existing?.titleSource
+            : fromRuntime.titleSource,
+          titleStatus: preserveManual
+            ? existing?.titleStatus
+            : fromRuntime.titleStatus,
+          titleUpdatedAt: preserveManual
+            ? existing?.titleUpdatedAt
+            : fromRuntime.titleUpdatedAt,
+          titleSeedRunId: preserveManual
+            ? existing?.titleSeedRunId
+            : fromRuntime.titleSeedRunId,
           runStatus:
             existing?.runStatus ?? (thread.activeRunId ? "running" : undefined),
           approvalCount: existing?.approvalCount ?? 0,
@@ -1408,6 +1457,25 @@ export function reduceRuntimeState(
     }
     case "run/threadSwitch":
       return restoreThreadView(saveActiveThreadView(state), action.threadId);
+    case "run/threadRenamed": {
+      const next = threadItemFromRuntime(action.thread);
+      const existing = state.threads.find(
+        (thread) => thread.threadId === next.threadId,
+      );
+      return {
+        ...state,
+        threads: state.threads.map((thread) =>
+          thread.threadId === next.threadId
+            ? {
+                ...next,
+                runStatus: existing?.runStatus ?? next.runStatus,
+                approvalCount: existing?.approvalCount ?? 0,
+                artifactCount: existing?.artifactCount ?? 0,
+              }
+            : thread,
+        ),
+      };
+    }
     case "run/event": {
       const nextState = { ...state };
       const narrativeEvent = scopeNarrativeEvent(action.event, nextState);
@@ -1428,7 +1496,7 @@ export function reduceRuntimeState(
           if (action.event.threadId) {
             nextState.threads = upsertThread(state.threads, {
               threadId: action.event.threadId,
-              label: state.prompt || "Untitled thread",
+              label: "Untitled thread",
               runId: action.event.runId,
               activeRunId: action.event.runId,
             });
@@ -2259,7 +2327,7 @@ export function reduceRuntimeState(
           label:
             state.threads.find(
               (thread) => thread.threadId === nextState.threadId,
-            )?.label || state.prompt,
+            )?.label || "Untitled thread",
           runId: nextState.runId,
           activeRunId: undefined,
         });

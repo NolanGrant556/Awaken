@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { TextDecoder } from "node:util";
 import {
   app,
@@ -1172,62 +1172,6 @@ async function ensureDesktopDataDirs(): Promise<void> {
   ]);
 }
 
-function workspaceMigrationMarkerPath(workspacePath: string): string {
-  const digest = createHash("sha256").update(workspacePath).digest("hex").slice(0, 16);
-  return path.join(
-    app.getPath("userData"),
-    "data",
-    "migrations",
-    `workspace-transcripts-${digest}.json`,
-  );
-}
-
-async function trashLegacyWorkspaceTranscripts(workspaces: Iterable<unknown>): Promise<void> {
-  for (const workspacePath of dedupeWorkspacePaths(workspaces)) {
-    const markerPath = workspaceMigrationMarkerPath(workspacePath);
-    try {
-      await fs.access(markerPath);
-      continue;
-    } catch {
-      // Marker missing; continue.
-    }
-
-    const transcriptsDir = path.join(workspacePath, ".awaken", "transcripts");
-    let exists = false;
-    try {
-      const stat = await fs.stat(transcriptsDir);
-      exists = stat.isDirectory();
-    } catch {
-      exists = false;
-    }
-
-    if (exists) {
-      try {
-        await shell.trashItem(transcriptsDir);
-      } catch (error) {
-        console.warn("[awaken-desktop] failed to trash legacy transcripts", {
-          workspacePath,
-          transcriptsDir,
-          error,
-        });
-        continue;
-      }
-    }
-
-    const marker = {
-      workspacePath,
-      transcriptsDir,
-      trashed: exists,
-      migratedAt: new Date().toISOString(),
-    };
-    try {
-      await fs.writeFile(markerPath, `${JSON.stringify(marker, null, 2)}\n`, "utf8");
-    } catch {
-      // Migration already completed; marker persistence is best-effort.
-    }
-  }
-}
-
 app.whenReady().then(async () => {
   setMacDockIcon();
   await ensureDesktopDataDirs();
@@ -1239,11 +1183,6 @@ app.whenReady().then(async () => {
   const lastWorkspace = await readLastWorkspace();
   const workspaceRegistry = await readWorkspaceRegistry(lastWorkspace);
   const defaultWorkspace = lastWorkspace ?? workspaceRegistry[0] ?? app.getPath("home");
-  await trashLegacyWorkspaceTranscripts([
-    defaultWorkspace,
-    lastWorkspace,
-    ...workspaceRegistry,
-  ]);
   supervisor = new RuntimeSupervisor({
     defaultWorkspace,
   });

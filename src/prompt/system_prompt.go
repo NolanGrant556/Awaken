@@ -36,12 +36,14 @@ func (p *SystemPrompt) buildEffectivePrompt() string {
 			"- **当前日期**: %s\n"+
 			"- **当前模型**: %s\n"+
 			"- **入口方式**: %s\n"+
-			"- **可用工具**: %s",
+			"- **可用工具**: %s\n"+
+			"- **可用 Skills**: %s",
 		p.runtimeInfo.WorkingDir,
 		p.runtimeInfo.CurrentDate,
 		p.runtimeInfo.ModelName,
 		p.runtimeInfo.EntryPoint,
 		p.runtimeInfo.ToolSummary,
+		p.runtimeInfo.SkillSummary,
 	)
 	if len(p.runtimeInfo.AttachedFiles) > 0 {
 		runtimeInfoStr += "\n- **已授权附件**:\n" + formatRuntimeAttachedFiles(p.runtimeInfo.AttachedFiles)

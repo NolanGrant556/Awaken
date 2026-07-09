@@ -1,15 +1,10 @@
 package server
 
 import (
-	"archive/zip"
-	"bytes"
 	"encoding/base64"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
-	"path"
-	"path/filepath"
 	"strings"
 
 	"awaken/src/skills"
@@ -50,11 +45,12 @@ type mcpBindingInfo struct {
 }
 
 type installSkillRequest struct {
-	FileName      string `json:"fileName"`
-	Content       string `json:"content,omitempty"`
-	ContentBase64 string `json:"contentBase64,omitempty"`
-	Scope         string `json:"scope,omitempty"`
-	ProjectRoot   string `json:"projectRoot,omitempty"`
+	FileName        string `json:"fileName"`
+	Content         string `json:"content,omitempty"`
+	ContentBase64   string `json:"contentBase64,omitempty"`
+	Scope           string `json:"scope,omitempty"`
+	ProjectRoot     string `json:"projectRoot,omitempty"`
+	OverwritePolicy string `json:"overwritePolicy,omitempty"`
 }
 
 type installSkillResponse struct {
@@ -63,32 +59,22 @@ type installSkillResponse struct {
 	Message string    `json:"message"`
 }
 
-const (
-	maxSkillPackageFiles = 1000
-	maxSkillPackageBytes = 50 << 20
-)
-
-type skillPackage struct {
-	rawSkill     []byte
-	fallbackName string
-	files        []skillPackageFile
-}
-
-type skillPackageFile struct {
-	relPath string
-	data    []byte
-	mode    os.FileMode
-}
-
 func (h skillHandlers) handleListSkills(w http.ResponseWriter, r *http.Request) {
 	if h.registry == nil {
 		writeErrorJSON(w, http.StatusServiceUnavailable, "SKILLS_UNAVAILABLE", "skill registry not configured")
 		return
 	}
-	projectRoot, err := h.resolveOptionalSkillProjectRoot(r.URL.Query().Get("projectRoot"))
-	if err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, "INVALID_PROJECT_ROOT", err.Error())
-		return
+	projectRoot := strings.TrimSpace(h.workspaceRoot)
+	if rawProjectRoot := strings.TrimSpace(r.URL.Query().Get("projectRoot")); rawProjectRoot != "" {
+		_, resolved, _, _, err := skills.ResolveInstallTarget(skills.InstallTargetRequest{
+			Scope:       string(skills.SourceProject),
+			ProjectRoot: rawProjectRoot,
+		})
+		if err != nil {
+			writeErrorJSON(w, http.StatusBadRequest, "INVALID_PROJECT_ROOT", err.Error())
+			return
+		}
+		projectRoot = resolved
 	}
 
 	all := h.registry.PreviewLocalSources(h.skillSourceDirs(projectRoot))
@@ -140,154 +126,36 @@ func (h skillHandlers) handleInstallSkill(w http.ResponseWriter, r *http.Request
 		writeErrorJSON(w, http.StatusBadRequest, "INVALID_SKILL_UPLOAD", err.Error())
 		return
 	}
-	pkg, err := extractSkillPackage(req.FileName, data)
+	pkg, err := skills.PackageFromBytes(req.FileName, data)
 	if err != nil {
 		writeErrorJSON(w, http.StatusBadRequest, "INVALID_SKILL_PACKAGE", err.Error())
 		return
 	}
-
-	def, err := skills.ParseFrontmatter(string(pkg.rawSkill))
+	result, err := skills.InstallSkillPackage(skills.InstallRequest{
+		Package:          pkg,
+		Scope:            req.Scope,
+		ProjectRoot:      req.ProjectRoot,
+		DefaultWorkspace: h.workspaceRoot,
+		OverwritePolicy:  req.OverwritePolicy,
+	})
 	if err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, "INVALID_SKILL", err.Error())
+		if errors.Is(err, skills.ErrSkillAlreadyExists) {
+			writeErrorJSON(w, http.StatusConflict, "SKILL_ALREADY_EXISTS", err.Error())
+			return
+		}
+		writeErrorJSON(w, http.StatusBadRequest, "SKILL_INSTALL_FAILED", err.Error())
 		return
 	}
-	def.ID = skills.SkillIDFromNameOrFallback(pkg.fallbackName, def.Name)
-	if strings.TrimSpace(def.Name) == "" {
-		def.Name = def.ID
-	}
-	if err := skills.ValidateNameReserved(def.Name); err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, "INVALID_SKILL", err.Error())
-		return
-	}
-	if err := skills.ValidateSchema(def); err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, "INVALID_SKILL", err.Error())
-		return
-	}
-	if def.Context == "" {
-		def.Context = skills.ContextInline
-	}
-
-	scope, projectRoot, dir, source, err := h.resolveSkillInstallTarget(req)
-	if err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, "INVALID_SKILL_TARGET", err.Error())
-		return
-	}
-
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		writeErrorJSON(w, http.StatusInternalServerError, "SKILL_INSTALL_FAILED", err.Error())
-		return
-	}
-	rootDir := filepath.Join(dir, def.ID)
-	if err := writeSkillPackage(rootDir, pkg); err != nil {
-		writeErrorJSON(w, http.StatusInternalServerError, "SKILL_INSTALL_FAILED", err.Error())
-		return
-	}
-	path := filepath.Join(rootDir, "SKILL.md")
-
-	def.Source = source
-	def.Scope = source
-	def.RootDir = rootDir
-	def.SkillFilePath = path
-	def.FilePath = path
-	if source == skills.SourceProject {
-		def.ProjectPath = projectRoot
-	}
-	def.State = skills.StateAvailable
 
 	writeJSON(w, http.StatusOK, installSkillResponse{
-		Skill:   skillInfoFromDefinition(def),
-		Path:    rootDir,
-		Message: fmt.Sprintf("%s skill installed", scope),
+		Skill:   skillInfoFromDefinition(result.Skill),
+		Path:    result.Path,
+		Message: result.Message,
 	})
 }
 
-func (h skillHandlers) resolveSkillInstallTarget(req installSkillRequest) (scope string, projectRoot string, dir string, source skills.SourceOrigin, err error) {
-	scope = strings.TrimSpace(req.Scope)
-	if scope == "" {
-		scope = string(skills.SourceProject)
-	}
-	switch scope {
-	case string(skills.SourceProject):
-		projectRoot, err = h.resolveSkillProjectRoot(req.ProjectRoot)
-		if err != nil {
-			return "", "", "", "", err
-		}
-		return scope, projectRoot, filepath.Join(projectRoot, ".awaken", "skills"), skills.SourceProject, nil
-	case "global", string(skills.SourceUser):
-		home, homeErr := os.UserHomeDir()
-		if homeErr != nil || strings.TrimSpace(home) == "" {
-			return "", "", "", "", fmt.Errorf("user home directory unavailable")
-		}
-		projectRoot, _ = h.resolveOptionalSkillProjectRoot(req.ProjectRoot)
-		return scope, projectRoot, filepath.Join(home, ".awaken", "skills"), skills.SourceUser, nil
-	default:
-		return "", "", "", "", fmt.Errorf("unsupported skill scope %q", scope)
-	}
-}
-
-func (h skillHandlers) resolveSkillProjectRoot(raw string) (string, error) {
-	root := strings.TrimSpace(raw)
-	if root == "" {
-		root = strings.TrimSpace(h.workspaceRoot)
-	}
-	if root == "" {
-		return "", fmt.Errorf("project root is required")
-	}
-	if !filepath.IsAbs(root) {
-		return "", fmt.Errorf("project root must be an absolute path")
-	}
-	clean := filepath.Clean(root)
-	stat, err := os.Stat(clean)
-	if err != nil {
-		return "", fmt.Errorf("project root is not accessible: %w", err)
-	}
-	if !stat.IsDir() {
-		return "", fmt.Errorf("project root is not a directory")
-	}
-	return clean, nil
-}
-
-func (h skillHandlers) resolveOptionalSkillProjectRoot(raw string) (string, error) {
-	root := strings.TrimSpace(raw)
-	explicit := root != ""
-	if root == "" {
-		root = strings.TrimSpace(h.workspaceRoot)
-	}
-	if root == "" {
-		return "", nil
-	}
-	if !filepath.IsAbs(root) {
-		if explicit {
-			return "", fmt.Errorf("project root must be an absolute path")
-		}
-		return "", nil
-	}
-	clean := filepath.Clean(root)
-	stat, err := os.Stat(clean)
-	if err != nil {
-		if explicit {
-			return "", fmt.Errorf("project root is not accessible: %w", err)
-		}
-		return "", nil
-	}
-	if !stat.IsDir() {
-		if explicit {
-			return "", fmt.Errorf("project root is not a directory")
-		}
-		return "", nil
-	}
-	return clean, nil
-}
-
 func (h skillHandlers) skillSourceDirs(projectRoot string) map[skills.SourceOrigin]string {
-	dirs := make(map[skills.SourceOrigin]string)
-	if strings.TrimSpace(projectRoot) != "" {
-		dirs[skills.SourceProject] = filepath.Join(projectRoot, ".awaken", "skills")
-	}
-	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-		dirs[skills.SourceUser] = filepath.Join(home, ".awaken", "skills")
-	}
-	return dirs
+	return skills.LocalSourceDirs(projectRoot)
 }
 
 // handleExecuteSkill triggers direct execution of a skill by ID.
@@ -383,208 +251,4 @@ func skillUploadBytes(req installSkillRequest) ([]byte, error) {
 		return nil, fmt.Errorf("content is required")
 	}
 	return []byte(req.Content), nil
-}
-
-func extractSkillPackage(fileName string, data []byte) (skillPackage, error) {
-	lowerName := strings.ToLower(fileName)
-	if strings.HasSuffix(lowerName, ".zip") {
-		return extractZipSkillPackage(fileName, data)
-	}
-	if !strings.HasSuffix(lowerName, ".md") {
-		return skillPackage{}, fmt.Errorf("skill upload must be a SKILL.md file or a zip package")
-	}
-	if len(bytes.TrimSpace(data)) == 0 {
-		return skillPackage{}, fmt.Errorf("uploaded file is empty")
-	}
-	return skillPackage{
-		rawSkill:     data,
-		fallbackName: strings.TrimSuffix(filepath.Base(fileName), filepath.Ext(fileName)),
-		files: []skillPackageFile{{
-			relPath: "SKILL.md",
-			data:    data,
-			mode:    0o600,
-		}},
-	}, nil
-}
-
-func extractZipSkillPackage(fileName string, data []byte) (skillPackage, error) {
-	if len(data) > maxSkillPackageBytes {
-		return skillPackage{}, fmt.Errorf("skill package exceeds %d bytes", maxSkillPackageBytes)
-	}
-	reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
-	if err != nil {
-		return skillPackage{}, fmt.Errorf("open zip: %w", err)
-	}
-	if len(reader.File) > maxSkillPackageFiles {
-		return skillPackage{}, fmt.Errorf("skill package contains too many files")
-	}
-
-	var skillFiles []*zip.File
-	cleanNames := make(map[*zip.File]string, len(reader.File))
-	for _, file := range reader.File {
-		clean, err := cleanZipPath(file.Name)
-		if err != nil {
-			return skillPackage{}, err
-		}
-		cleanNames[file] = clean
-		if file.FileInfo().Mode()&os.ModeSymlink != 0 {
-			return skillPackage{}, fmt.Errorf("skill package cannot contain symlinks: %s", file.Name)
-		}
-		if file.FileInfo().IsDir() {
-			continue
-		}
-		if strings.EqualFold(path.Base(clean), "SKILL.md") {
-			skillFiles = append(skillFiles, file)
-		}
-	}
-	if len(skillFiles) == 0 {
-		return skillPackage{}, fmt.Errorf("zip must contain exactly one SKILL.md")
-	}
-	if len(skillFiles) > 1 {
-		return skillPackage{}, fmt.Errorf("zip contains multiple SKILL.md files")
-	}
-
-	skillFile := skillFiles[0]
-	skillPath := cleanNames[skillFile]
-	packageRoot := path.Dir(skillPath)
-	if packageRoot == "." {
-		packageRoot = ""
-	}
-	fallbackName := strings.TrimSuffix(filepath.Base(fileName), filepath.Ext(fileName))
-	if packageRoot != "" {
-		fallbackName = path.Base(packageRoot)
-	}
-
-	var files []skillPackageFile
-	var rawSkill []byte
-	var totalBytes int64
-	for _, file := range reader.File {
-		clean := cleanNames[file]
-		if !isInZipPackageRoot(clean, packageRoot) {
-			continue
-		}
-		rel := clean
-		if packageRoot != "" {
-			rel = strings.TrimPrefix(clean, packageRoot+"/")
-		}
-		if rel == "" || rel == "." || file.FileInfo().IsDir() {
-			continue
-		}
-
-		content, err := readZipFile(file)
-		if err != nil {
-			return skillPackage{}, err
-		}
-		totalBytes += int64(len(content))
-		if totalBytes > maxSkillPackageBytes {
-			return skillPackage{}, fmt.Errorf("skill package extracted content exceeds %d bytes", maxSkillPackageBytes)
-		}
-		mode := normalizedPackageFileMode(file.FileInfo().Mode())
-		files = append(files, skillPackageFile{relPath: rel, data: content, mode: mode})
-		if strings.EqualFold(rel, "SKILL.md") {
-			rawSkill = content
-		}
-	}
-	if len(bytes.TrimSpace(rawSkill)) == 0 {
-		return skillPackage{}, fmt.Errorf("SKILL.md is empty")
-	}
-	return skillPackage{rawSkill: rawSkill, fallbackName: fallbackName, files: files}, nil
-}
-
-func cleanZipPath(name string) (string, error) {
-	normalized := strings.ReplaceAll(name, "\\", "/")
-	if strings.TrimSpace(normalized) == "" {
-		return "", fmt.Errorf("skill package contains empty path")
-	}
-	if path.IsAbs(normalized) {
-		return "", fmt.Errorf("skill package contains absolute path: %s", name)
-	}
-	clean := path.Clean(normalized)
-	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
-		return "", fmt.Errorf("skill package contains unsafe path: %s", name)
-	}
-	for _, part := range strings.Split(clean, "/") {
-		if part == "" || part == "." || part == ".." {
-			return "", fmt.Errorf("skill package contains unsafe path: %s", name)
-		}
-	}
-	return clean, nil
-}
-
-func isInZipPackageRoot(clean string, packageRoot string) bool {
-	if packageRoot == "" {
-		return true
-	}
-	return clean == packageRoot || strings.HasPrefix(clean, packageRoot+"/")
-}
-
-func readZipFile(file *zip.File) ([]byte, error) {
-	rc, err := file.Open()
-	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", file.Name, err)
-	}
-	defer rc.Close()
-	data, err := io.ReadAll(io.LimitReader(rc, maxSkillPackageBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", file.Name, err)
-	}
-	if len(data) > maxSkillPackageBytes {
-		return nil, fmt.Errorf("read %s: file exceeds %d bytes", file.Name, maxSkillPackageBytes)
-	}
-	return data, nil
-}
-
-func normalizedPackageFileMode(mode os.FileMode) os.FileMode {
-	if mode&0o111 != 0 {
-		return 0o700
-	}
-	return 0o600
-}
-
-func writeSkillPackage(rootDir string, pkg skillPackage) error {
-	parent := filepath.Dir(rootDir)
-	tempDir, err := os.MkdirTemp(parent, "."+filepath.Base(rootDir)+".tmp-*")
-	if err != nil {
-		return fmt.Errorf("create temp package dir: %w", err)
-	}
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.RemoveAll(tempDir)
-		}
-	}()
-
-	for _, file := range pkg.files {
-		rel, err := cleanPackageRelPath(file.relPath)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(tempDir, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-			return fmt.Errorf("create package directory: %w", err)
-		}
-		if err := os.WriteFile(target, file.data, file.mode); err != nil {
-			return fmt.Errorf("write package file %s: %w", rel, err)
-		}
-	}
-
-	if err := os.RemoveAll(rootDir); err != nil {
-		return fmt.Errorf("replace existing skill package: %w", err)
-	}
-	if err := os.Rename(tempDir, rootDir); err != nil {
-		return fmt.Errorf("install skill package: %w", err)
-	}
-	cleanup = false
-	return nil
-}
-
-func cleanPackageRelPath(rel string) (string, error) {
-	clean, err := cleanZipPath(rel)
-	if err != nil {
-		return "", err
-	}
-	if strings.EqualFold(clean, "SKILL.md") {
-		return "SKILL.md", nil
-	}
-	return clean, nil
 }

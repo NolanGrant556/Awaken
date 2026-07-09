@@ -112,6 +112,37 @@ func TestRequestBuilderUsesConfiguredWorkspaceRoot(t *testing.T) {
 	}
 }
 
+func TestRequestBuilderIncludesSkillSummary(t *testing.T) {
+	skillSummary := "- id: daily-followup; name: daily-followup; scope: project"
+	builder := NewRequestBuilder(AgentConfig{
+		SystemPrompt: "base {{.RuntimeInfo}}",
+		SkillSummary: skillSummary,
+	})
+
+	envelope := builder.BuildContextEnvelope(convcontext.New(), []tool.ToolSchema{})
+	if envelope.RuntimeSnapshot.SkillSummary != skillSummary {
+		t.Fatalf("expected skill summary in snapshot, got %q", envelope.RuntimeSnapshot.SkillSummary)
+	}
+	if len(envelope.SystemContextItems) != 1 || !strings.Contains(envelope.SystemContextItems[0].Content, "skill_summary="+skillSummary) {
+		t.Fatalf("expected skill summary in runtime system item, got %+v", envelope.SystemContextItems)
+	}
+	foundCacheKey := false
+	for _, key := range envelope.CacheKeys {
+		if key.Name == "runtime_snapshot" && strings.Contains(key.Value, "skills:"+skillSummary) {
+			foundCacheKey = true
+			break
+		}
+	}
+	if !foundCacheKey {
+		t.Fatalf("expected skill summary in runtime snapshot cache key, got %+v", envelope.CacheKeys)
+	}
+
+	req := builder.BuildLLMRequestFromEnvelope(envelope)
+	if !strings.Contains(req.SystemPrompt, skillSummary) {
+		t.Fatalf("expected skill summary in system prompt, got %s", req.SystemPrompt)
+	}
+}
+
 func TestRequestBuilderBuildsContextEnvelope(t *testing.T) {
 	ctx := convcontext.New()
 	ctx.AddUserMessage("hello")

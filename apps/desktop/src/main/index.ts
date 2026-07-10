@@ -7,6 +7,7 @@ import {
   ipcMain,
   nativeTheme,
   nativeImage,
+  protocol,
   screen as electronScreen,
   shell,
   webContents,
@@ -64,6 +65,10 @@ import { RuntimeSupervisor, type SupervisorStatusInfo } from "./runtime-supervis
 import { ensureConfigDir } from "./config-bootstrap.js";
 import { DesktopPreferencesStore } from "./desktop-preferences-store.js";
 import { ModelProfileStore } from "./model-profile-store.js";
+import { PetStore } from "./pets/pet-store.js";
+import { detectCodexHome, importCodexPets } from "./pets/codex-pet-importer.js";
+import { PetWindowManager } from "./pets/pet-window-manager.js";
+import { PET_IPC_CHANNELS } from "../shared/pets.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let runtimeBaseUrl: string | null = null;
@@ -72,10 +77,25 @@ const appName = "Awaken";
 
 app.setName(appName);
 app.setPath("userData", join(app.getPath("appData"), "@awaken", "desktop"));
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "awaken-pet",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+    },
+  },
+]);
 
 let supervisor: RuntimeSupervisor | null = null;
 let desktopPreferencesStore: DesktopPreferencesStore | null = null;
 let modelProfileStore: ModelProfileStore | null = null;
+let petStore: PetStore | null = null;
+let petWindowManager: PetWindowManager | null = null;
+let mainWindowRef: BrowserWindow | null = null;
+let pendingPetThreadId: string | null = null;
 let isQuitting = false;
 
 type StreamSubscription = {
@@ -514,6 +534,9 @@ function cleanupWindowSubscriptions(targetId: number): void {
 }
 
 function createMainWindow(): BrowserWindow {
+  if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+    return mainWindowRef;
+  }
   const icon = loadDesktopIcon();
   const mainWindow = new BrowserWindow({
     width: defaultWindowWidth,
@@ -540,6 +563,7 @@ function createMainWindow(): BrowserWindow {
       sandbox: false,
     },
   });
+  mainWindowRef = mainWindow;
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
@@ -572,17 +596,33 @@ function createMainWindow(): BrowserWindow {
     }
     rendererReadyToShow = true;
     showMainWindow();
+    if (pendingPetThreadId) {
+      event.sender.send(
+        PET_IPC_CHANNELS.petThreadActivationRequested,
+        pendingPetThreadId,
+      );
+      pendingPetThreadId = null;
+    }
   }
 
   ipcMain.on("awaken:renderer-ready", handleRendererReady);
 
   mainWindow.on("closed", () => {
+    if (mainWindowRef === mainWindow) {
+      mainWindowRef = null;
+    }
     ipcMain.removeListener("awaken:renderer-ready", handleRendererReady);
     if (fallbackShowTimer) {
       clearTimeout(fallbackShowTimer);
       fallbackShowTimer = undefined;
     }
     cleanupWindowSubscriptions(webContentsId);
+  });
+
+  mainWindow.on("close", () => {
+    if (process.platform !== "darwin" && !isQuitting) {
+      app.quit();
+    }
   });
 
   mainWindow.once("ready-to-show", () => {
@@ -600,6 +640,10 @@ function createMainWindow(): BrowserWindow {
     ensureWindowVisible(mainWindow);
   });
 
+  mainWindow.on("focus", () => {
+    petWindowManager?.notifyMainWindowFocused();
+  });
+
   const loadWindow = isDevServer
     ? mainWindow.loadURL("http://127.0.0.1:5174")
     : mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
@@ -612,6 +656,135 @@ function createMainWindow(): BrowserWindow {
   });
 
   return mainWindow;
+}
+
+function focusOrCreateMainWindow(): BrowserWindow {
+  if (!mainWindowRef || mainWindowRef.isDestroyed()) {
+    return createMainWindow();
+  }
+  const mainWindow = mainWindowRef;
+  if (!mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    ensureWindowVisible(mainWindow);
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.moveTop();
+  }
+  return mainWindow;
+}
+
+function activatePetThread(threadId: string): void {
+  pendingPetThreadId = threadId;
+  const mainWindow = focusOrCreateMainWindow();
+  if (!mainWindow.webContents.isLoadingMainFrame()) {
+    mainWindow.webContents.send(
+      PET_IPC_CHANNELS.petThreadActivationRequested,
+      threadId,
+    );
+    pendingPetThreadId = null;
+  }
+}
+
+function broadcastPetCatalogChanged(): void {
+  for (const wc of webContents.getAllWebContents()) {
+    if (!wc.isDestroyed()) {
+      wc.send(PET_IPC_CHANNELS.petCatalogChanged);
+    }
+  }
+}
+
+function registerPetIpcHandlers(): void {
+  ipcMain.handle(PET_IPC_CHANNELS.listPets, async () => {
+    if (!petStore) throw new Error("Pet store unavailable");
+    return petStore.listPets();
+  });
+
+  ipcMain.handle(PET_IPC_CHANNELS.getPetSettings, async () => {
+    if (!petStore) throw new Error("Pet store unavailable");
+    return petStore.getSettings();
+  });
+
+  ipcMain.handle(PET_IPC_CHANNELS.selectPet, async (_event, petId: string) => {
+    if (!petStore) throw new Error("Pet store unavailable");
+    const settings = await petStore.selectPet(petId);
+    if (settings.overlayOpen && petWindowManager) {
+      await petWindowManager.show(petId);
+    }
+    return settings;
+  });
+
+  ipcMain.handle(PET_IPC_CHANNELS.refreshCodexPets, async () => {
+    if (!petStore) throw new Error("Pet store unavailable");
+    const codexHome = detectCodexHome(app.getPath("home"));
+    const report = await importCodexPets(petStore, codexHome);
+    broadcastPetCatalogChanged();
+    const selectedPetId = petStore.getSettings().selectedPetId;
+    if (selectedPetId && petWindowManager?.isOpen()) {
+      await petWindowManager.setPet(selectedPetId);
+    }
+    return report;
+  });
+
+  ipcMain.handle(PET_IPC_CHANNELS.createPet, async () => {
+    if (!petStore) throw new Error("Pet store unavailable");
+    const now = new Date().toISOString();
+    const result = await petStore.createLocalPet({
+      sourceId: `my-pet-${Date.now()}`,
+      displayName: "My Pet",
+      description: `Awaken 本地宠物模板，创建于 ${now}。请替换 spritesheet.png 后刷新。`,
+    });
+    broadcastPetCatalogChanged();
+    return { threadId: result.threadId };
+  });
+
+  ipcMain.handle(PET_IPC_CHANNELS.setPetOverlayOpen, async (_event, open: boolean) => {
+    if (!petStore) throw new Error("Pet store unavailable");
+    const settings = await petStore.setOverlayOpen(open);
+    if (open) {
+      await petWindowManager?.show();
+    } else {
+      petWindowManager?.hide();
+    }
+    return settings;
+  });
+
+  ipcMain.handle(
+    PET_IPC_CHANNELS.setPetImportPreferences,
+    async (_event, input: { importCodexPets?: boolean }) => {
+      if (!petStore) throw new Error("Pet store unavailable");
+      return petStore.setImportPreferences(input);
+    },
+  );
+
+  ipcMain.handle(PET_IPC_CHANNELS.openAwakenPetsDirectory, async () => {
+    if (!petStore) throw new Error("Pet store unavailable");
+    const dir = path.join(app.getPath("userData"), "data", "pets");
+    await fs.mkdir(dir, { recursive: true });
+    const errorMessage = await shell.openPath(dir);
+    if (errorMessage) {
+      throw new Error(errorMessage);
+    }
+  });
+
+  ipcMain.handle(PET_IPC_CHANNELS.openCodexPetsDirectory, async () => {
+    const codexHome = detectCodexHome(app.getPath("home"));
+    const dir = path.join(codexHome, "pets");
+    try {
+      await fs.access(dir);
+    } catch {
+      throw new Error("未检测到 Codex 自定义宠物目录");
+    }
+    const errorMessage = await shell.openPath(dir);
+    if (errorMessage) {
+      throw new Error(errorMessage);
+    }
+  });
+
+  ipcMain.on(PET_IPC_CHANNELS.updatePetActivity, (_event, snapshot) => {
+    petWindowManager?.updateActivity(snapshot);
+  });
 }
 
 ipcMain.handle("awaken:get-desktop-preferences", async () => {
@@ -1201,6 +1374,35 @@ app.whenReady().then(async () => {
   });
   modelProfileStore = new ModelProfileStore(configDir);
   await modelProfileStore.initialize();
+  petStore = new PetStore(configDir, app.getPath("userData"));
+  await petStore.initialize();
+  petWindowManager = new PetWindowManager({
+    petStore,
+    focusMainWindow: () => {
+      focusOrCreateMainWindow();
+    },
+    activateThread: activatePetThread,
+    getRuntimeBaseUrl: () => runtimeBaseUrl,
+  });
+  await petWindowManager.initialize();
+
+  if (petStore.getSettings().importCodexPets) {
+    const codexHome = detectCodexHome(app.getPath("home"));
+    void importCodexPets(petStore, codexHome)
+      .then(() => {
+        broadcastPetCatalogChanged();
+        const selectedPetId = petStore?.getSettings().selectedPetId;
+        if (selectedPetId && petWindowManager?.isOpen()) {
+          return petWindowManager.setPet(selectedPetId);
+        }
+      })
+      .catch((error: unknown) => {
+        console.error("[awaken-desktop] codex pet import failed", error);
+      });
+  }
+
+  registerPetIpcHandlers();
+
   const lastWorkspace = await readLastWorkspace();
   const workspaceRegistry = await readWorkspaceRegistry(lastWorkspace);
   const defaultWorkspace = lastWorkspace ?? workspaceRegistry[0] ?? app.getPath("home");
@@ -1220,6 +1422,11 @@ app.whenReady().then(async () => {
     }
   });
   createMainWindow();
+  if (petStore.getSettings().overlayOpen) {
+    void petWindowManager.show().catch((error: unknown) => {
+      console.error("[awaken-desktop] failed to restore pet overlay", error);
+    });
+  }
   void supervisor.start().then((statusInfo) => {
     if (statusInfo.runtimeBaseUrl) {
       runtimeBaseUrl = statusInfo.runtimeBaseUrl;
@@ -1227,8 +1434,10 @@ app.whenReady().then(async () => {
   });
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    if (!mainWindowRef || mainWindowRef.isDestroyed()) {
       createMainWindow();
+    } else {
+      focusOrCreateMainWindow();
     }
   });
 });
@@ -1252,10 +1461,11 @@ app.on("before-quit", (event) => {
       if (supervisor) {
         await supervisor.stop();
       }
+      await petWindowManager?.dispose();
     } catch (err) {
       console.error("[awaken-desktop] supervisor stop failed", err);
     }
-    app.quit();
+    app.exit();
   })();
 });
 

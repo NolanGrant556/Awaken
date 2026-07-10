@@ -51,7 +51,8 @@ README.md
 
 - 需要 Coding Agent 行为约束与文档上下文管理规则：读 `AGENTS.md`。
 - 改 Awaken Desktop / Workbench：读 `docs/01_桌面工作台/中间交互区域/架构契约.md`，并按 `docs/01_桌面工作台/中间交互区域/复核清单.md` 复核。
-- 改主智能体闭环：读 `docs/02_主智能体闭环/实施计划.md`。
+- 改主智能体闭环的一般能力：读 `docs/02_主智能体闭环/实施计划.md`。
+- 改工具结果语义、执行历史重放、Skill 能力契约、Artifact 引擎、主运行时或失败恢复：依次读 `docs/02_主智能体闭环/智能体能力与执行稳定性提升/实施方案.md`、`任务.md`、`检查清单.md`。
 - 改 runtime / protocol / AG-UI 边界：读 `docs/09_AGUI与A2UI协议/架构说明.md`。
 - 需要对照 AG-UI / A2UI 上游：读 `docs/09_AGUI与A2UI协议/上游参考.md`。
 - 需要历史项目文件职责总览：读 `docs/10_历史资料/项目文件清单.md`。

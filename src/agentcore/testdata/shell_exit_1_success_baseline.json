@@ -1,0 +1,33 @@
+{
+  "schema": "accident_fixture_v1",
+  "id": "shell_exit_1_success_baseline",
+  "description": "Baseline: shell nonzero exit returns JSON with exit_code and nil Go error; ToolRuntime treats as succeeded until Phase 1 ToolOutcome.",
+  "tool_name": "shell",
+  "input": {
+    "command": "exit 1"
+  },
+  "tool_output_json": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_ms": 12,
+    "stdout": "",
+    "stderr": "",
+    "truncated": false
+  },
+  "go_error": null,
+  "current_tool_runtime_projection": {
+    "is_error": false,
+    "status": "succeeded",
+    "error_code": ""
+  },
+  "phase1_target_projection": {
+    "status": "failed",
+    "transport_status": "completed",
+    "semantic_status": "failure",
+    "process_status": "exited",
+    "exit_code": 1,
+    "error_code": "process_exit_nonzero",
+    "error_category": "process",
+    "retryable": true
+  }
+}

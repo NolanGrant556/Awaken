@@ -17,12 +17,12 @@ func (t *ApplyPatchTool) Name() string {
 }
 
 func (t *ApplyPatchTool) Description() string {
-	return "使用 Awaken 结构化 patch 新增、修改、移动或删除文本文件；输入必须以 *** Begin Patch 开始并以 *** End Patch 结束。删除会进入系统回收站；不要传脚本、Markdown 或普通文件内容，Markdown/普通文本请用 text_file_create，文档/表格/PPT 产物请用对应 artifact create/edit 工具"
+	return "使用 Awaken 结构化 patch 处理多文件、移动、删除或高级 diff；普通单文件精确修改请优先 text_edit，新建普通文本用 text_file_create，删除用 trash_file。输入必须以 *** Begin Patch 开始并以 *** End Patch 结束。删除会进入系统回收站。当前默认工具池可能不暴露本工具，除非内部 transform 或 grammar-capable provider"
 }
 
 func (t *ApplyPatchTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
-		{Name: "patch", Description: "严格 Awaken 结构化 patch 文本：第一行 *** Begin Patch，最后一行 *** End Patch；支持 Add File、Update File、Move to、Delete File、End of File", Type: "string", Required: true},
+		{Name: "patch", Description: "严格 Awaken 结构化 patch 文本：第一行 *** Begin Patch，最后一行 *** End Patch；支持 Add File、Update File、Move to、Delete File；End of File 仅在确有需要时使用，普通截断编辑不要默认加", Type: "string", Required: true},
 	}
 }
 
@@ -33,7 +33,8 @@ func (t *ApplyPatchTool) Execute(ctx context.Context, input string) (string, err
 
 	patch, err := parsePatch(input)
 	if err != nil {
-		return "", fmt.Errorf("%w。apply_patch 只接受 Awaken 结构化 patch，不接受脚本、Markdown 或普通文件内容；Markdown/普通文本请改用 text_file_create，生成 docx/xlsx/pptx 请改用 document_create、spreadsheet_create 或 presentation_create", err)
+		code := classifyLegacyPatchError(err)
+		return "", fmt.Errorf("%s: %w。apply_patch 只接受 Awaken 结构化 patch；普通单文件修改请改用 text_edit，Markdown/普通文本请改用 text_file_create，生成 docx/xlsx/pptx 请改用 document_create、spreadsheet_create 或 presentation_create", code, err)
 	}
 	permissionContext := tool.PermissionContextFromContext(ctx)
 	patch = resolvePatchPaths(patch, permissionContext)
@@ -53,6 +54,10 @@ func (t *ApplyPatchTool) Execute(ctx context.Context, input string) (string, err
 
 	summary, err := applyPatch(ctx, patch)
 	if err != nil {
+		code := classifyLegacyPatchError(err)
+		if code != ErrorCodeInvalidPatchFormat || IsPatchContextMismatch(err) {
+			return "", fmt.Errorf("%s: %w", code, err)
+		}
 		return "", err
 	}
 	return summary.String(), nil

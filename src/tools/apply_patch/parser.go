@@ -1,7 +1,6 @@
 package applypatch
 
 import (
-	"fmt"
 	"strings"
 )
 
@@ -24,13 +23,13 @@ func parsePatch(input string) (*patchDocument, error) {
 		return nil, err
 	}
 	if len(lines) < 3 {
-		return nil, fmt.Errorf("invalid patch: patch must contain Begin Patch, at least one hunk, and End Patch")
+		return nil, patchErrorf(ErrorCodeInvalidPatchFormat, "invalid patch: patch must contain Begin Patch, at least one hunk, and End Patch")
 	}
 	if strings.TrimSpace(lines[0]) != beginPatchMarker {
-		return nil, fmt.Errorf("invalid patch: the first line must be %q", beginPatchMarker)
+		return nil, patchErrorf(ErrorCodePatchMissingBegin, "invalid patch: the first line must be %q", beginPatchMarker)
 	}
 	if strings.TrimSpace(lines[len(lines)-1]) != endPatchMarker {
-		return nil, fmt.Errorf("invalid patch: the last line must be %q", endPatchMarker)
+		return nil, patchErrorf(ErrorCodePatchMissingEnd, "invalid patch: the last line must be %q", endPatchMarker)
 	}
 
 	doc := &patchDocument{}
@@ -42,11 +41,11 @@ func parsePatch(input string) (*patchDocument, error) {
 		}
 		if strings.HasPrefix(trimmed, environmentIDMarker) {
 			if doc.environmentID != "" {
-				return nil, fmt.Errorf("invalid patch: Environment ID cannot be specified more than once")
+				return nil, patchErrorf(ErrorCodeInvalidPatchFormat, "invalid patch: Environment ID cannot be specified more than once")
 			}
 			environmentID := strings.TrimSpace(strings.TrimPrefix(trimmed, environmentIDMarker))
 			if environmentID == "" {
-				return nil, fmt.Errorf("invalid patch: Environment ID cannot be empty")
+				return nil, patchErrorf(ErrorCodeInvalidPatchFormat, "invalid patch: Environment ID cannot be empty")
 			}
 			doc.environmentID = environmentID
 			i++
@@ -64,7 +63,7 @@ func parsePatch(input string) (*patchDocument, error) {
 		case strings.HasPrefix(trimmed, updateFileMarker):
 			op, next, err = parseUpdateFile(lines, i)
 		default:
-			return nil, fmt.Errorf("invalid patch hunk at line %d: %q is not a valid hunk header", i+1, trimmed)
+			return nil, patchErrorf(ErrorCodePatchInvalidHunkHeader, "invalid patch hunk at line %d: %q is not a valid hunk header", i+1, trimmed)
 		}
 		if err != nil {
 			return nil, err
@@ -74,7 +73,7 @@ func parsePatch(input string) (*patchDocument, error) {
 	}
 
 	if len(doc.operations) == 0 {
-		return nil, fmt.Errorf("invalid patch: patch must contain at least one hunk")
+		return nil, patchErrorf(ErrorCodeInvalidPatchFormat, "invalid patch: patch must contain at least one hunk")
 	}
 	return doc, nil
 }
@@ -83,7 +82,7 @@ func normalizedPatchLines(input string) ([]string, error) {
 	patch := strings.TrimSpace(strings.ReplaceAll(input, "\r\n", "\n"))
 	patch = strings.ReplaceAll(patch, "\r", "\n")
 	if patch == "" {
-		return nil, fmt.Errorf("invalid patch: patch is empty")
+		return nil, patchErrorf(ErrorCodeInvalidPatchFormat, "invalid patch: patch is empty")
 	}
 
 	lines := strings.Split(patch, "\n")
@@ -101,7 +100,7 @@ func isHeredocStart(line string) bool {
 func parseAddFile(lines []string, start int) (patchOperation, int, error) {
 	path := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[start]), addFileMarker))
 	if path == "" {
-		return patchOperation{}, start, fmt.Errorf("invalid add hunk at line %d: missing path", start+1)
+		return patchOperation{}, start, patchErrorf(ErrorCodeInvalidPatchFormat, "invalid add hunk at line %d: missing path", start+1)
 	}
 
 	var builder strings.Builder
@@ -109,14 +108,14 @@ func parseAddFile(lines []string, start int) (patchOperation, int, error) {
 	for i < len(lines)-1 && !isPatchBoundary(lines[i]) {
 		line := strings.TrimSuffix(lines[i], "\r")
 		if !strings.HasPrefix(line, "+") {
-			return patchOperation{}, start, fmt.Errorf("invalid add hunk at line %d: content lines must start with +", i+1)
+			return patchOperation{}, start, patchErrorf(ErrorCodePatchInvalidLinePrefix, "invalid add hunk at line %d: content lines must start with +", i+1)
 		}
 		builder.WriteString(strings.TrimPrefix(line, "+"))
 		builder.WriteByte('\n')
 		i++
 	}
 	if i == start+1 {
-		return patchOperation{}, start, fmt.Errorf("invalid add hunk at line %d: missing file content", start+1)
+		return patchOperation{}, start, patchErrorf(ErrorCodeInvalidPatchFormat, "invalid add hunk at line %d: missing file content", start+1)
 	}
 
 	return patchOperation{kind: patchKindAdd, path: path, content: builder.String()}, i, nil
@@ -125,7 +124,7 @@ func parseAddFile(lines []string, start int) (patchOperation, int, error) {
 func parseDeleteFile(lines []string, start int) (patchOperation, int, error) {
 	path := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[start]), deleteFileMarker))
 	if path == "" {
-		return patchOperation{}, start, fmt.Errorf("invalid delete hunk at line %d: missing path", start+1)
+		return patchOperation{}, start, patchErrorf(ErrorCodeInvalidPatchFormat, "invalid delete hunk at line %d: missing path", start+1)
 	}
 	return patchOperation{kind: patchKindDelete, path: path}, start + 1, nil
 }
@@ -133,7 +132,7 @@ func parseDeleteFile(lines []string, start int) (patchOperation, int, error) {
 func parseUpdateFile(lines []string, start int) (patchOperation, int, error) {
 	path := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[start]), updateFileMarker))
 	if path == "" {
-		return patchOperation{}, start, fmt.Errorf("invalid update hunk at line %d: missing path", start+1)
+		return patchOperation{}, start, patchErrorf(ErrorCodeInvalidPatchFormat, "invalid update hunk at line %d: missing path", start+1)
 	}
 
 	op := patchOperation{kind: patchKindUpdate, path: path}
@@ -144,14 +143,14 @@ func parseUpdateFile(lines []string, start int) (patchOperation, int, error) {
 
 		if strings.HasPrefix(updateLine, moveToMarker) {
 			if len(op.chunks) > 0 {
-				return patchOperation{}, start, fmt.Errorf("invalid update hunk at line %d: Move to must appear before update lines", i+1)
+				return patchOperation{}, start, patchErrorf(ErrorCodeInvalidPatchFormat, "invalid update hunk at line %d: Move to must appear before update lines", i+1)
 			}
 			if op.movePath != "" {
-				return patchOperation{}, start, fmt.Errorf("invalid update hunk at line %d: Move to cannot appear more than once", i+1)
+				return patchOperation{}, start, patchErrorf(ErrorCodeInvalidPatchFormat, "invalid update hunk at line %d: Move to cannot appear more than once", i+1)
 			}
 			movePath := strings.TrimSpace(strings.TrimPrefix(updateLine, moveToMarker))
 			if movePath == "" {
-				return patchOperation{}, start, fmt.Errorf("invalid update hunk at line %d: Move to missing path", i+1)
+				return patchOperation{}, start, patchErrorf(ErrorCodeInvalidPatchFormat, "invalid update hunk at line %d: Move to missing path", i+1)
 			}
 			op.movePath = movePath
 			i++
@@ -160,7 +159,7 @@ func parseUpdateFile(lines []string, start int) (patchOperation, int, error) {
 
 		if updateLine == endOfFileMarker {
 			if len(op.chunks) == 0 || op.chunks[len(op.chunks)-1].isEmpty() {
-				return patchOperation{}, start, fmt.Errorf("invalid update hunk at line %d: End of File requires a non-empty update chunk", i+1)
+				return patchOperation{}, start, patchErrorf(ErrorCodeInvalidPatchFormat, "invalid update hunk at line %d: End of File requires a non-empty update chunk", i+1)
 			}
 			op.chunks[len(op.chunks)-1].endOfFile = true
 			i++
@@ -169,7 +168,7 @@ func parseUpdateFile(lines []string, start int) (patchOperation, int, error) {
 
 		if updateLine == emptyContextMarker || strings.HasPrefix(updateLine, changeContextMarker) {
 			if len(op.chunks) > 0 && op.chunks[len(op.chunks)-1].isEmpty() {
-				return patchOperation{}, start, fmt.Errorf("invalid update hunk at line %d: update chunk is empty", i+1)
+				return patchOperation{}, start, patchErrorf(ErrorCodeInvalidPatchFormat, "invalid update hunk at line %d: update chunk is empty", i+1)
 			}
 			var contextLine *string
 			if strings.HasPrefix(updateLine, changeContextMarker) {
@@ -190,7 +189,7 @@ func parseUpdateFile(lines []string, start int) (patchOperation, int, error) {
 				i++
 				continue
 			}
-			return patchOperation{}, start, fmt.Errorf("invalid update hunk at line %d: lines after End of File must start a new @@ context", i+1)
+			return patchOperation{}, start, patchErrorf(ErrorCodeInvalidPatchFormat, "invalid update hunk at line %d: lines after End of File must start a new @@ context", i+1)
 		}
 
 		switch {
@@ -206,17 +205,17 @@ func parseUpdateFile(lines []string, start int) (patchOperation, int, error) {
 		case strings.HasPrefix(line, "-"):
 			chunk.oldLines = append(chunk.oldLines, strings.TrimPrefix(line, "-"))
 		default:
-			return patchOperation{}, start, fmt.Errorf("invalid update hunk at line %d: update lines must start with space, +, -, @@, Move to, or End of File", i+1)
+			return patchOperation{}, start, patchErrorf(ErrorCodePatchInvalidLinePrefix, "invalid update hunk at line %d: update lines must start with space, +, -, @@, Move to, or End of File", i+1)
 		}
 		i++
 	}
 
 	if len(op.chunks) == 0 {
-		return patchOperation{}, start, fmt.Errorf("invalid update hunk at line %d: update hunk is empty", start+1)
+		return patchOperation{}, start, patchErrorf(ErrorCodeInvalidPatchFormat, "invalid update hunk at line %d: update hunk is empty", start+1)
 	}
 	for idx, chunk := range op.chunks {
 		if chunk.isEmpty() {
-			return patchOperation{}, start, fmt.Errorf("invalid update hunk at line %d: update chunk %d is empty", start+1, idx+1)
+			return patchOperation{}, start, patchErrorf(ErrorCodeInvalidPatchFormat, "invalid update hunk at line %d: update chunk %d is empty", start+1, idx+1)
 		}
 	}
 	return op, i, nil

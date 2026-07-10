@@ -186,6 +186,43 @@ func TestFileReadAllowsSymlinkOutsideWorkspace(t *testing.T) {
 	}
 }
 
+func TestFileReadOutcomeIncludesDigest(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "notes.txt")
+	content := []byte("hello\nworld\n")
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	outcome, err := (&FileReadTool{}).ExecuteOutcome(context.Background(), path, nil)
+	if err != nil {
+		t.Fatalf("ExecuteOutcome transport error: %v", err)
+	}
+	if outcome.IsError() {
+		t.Fatalf("expected success, got %+v", outcome)
+	}
+	if outcome.Content != "hello\nworld" {
+		t.Fatalf("pure-text content changed: %q", outcome.Content)
+	}
+	sha, _ := outcome.Diagnostic["sha256"].(string)
+	expected, _ := outcome.Diagnostic["expected_sha256"].(string)
+	size, _ := outcome.Diagnostic["size"].(int64)
+	mtime, _ := outcome.Diagnostic["mtime"].(string)
+	if sha == "" || expected == "" || sha != expected {
+		t.Fatalf("expected sha256/expected_sha256, got diagnostic=%v", outcome.Diagnostic)
+	}
+	if size != int64(len(content)) {
+		t.Fatalf("size=%v want %d", size, len(content))
+	}
+	if mtime == "" {
+		t.Fatal("expected mtime in diagnostic")
+	}
+	payload := outcome.ModelPayload()
+	if !strings.Contains(payload, "expected_sha256") || !strings.Contains(payload, sha) {
+		t.Fatalf("model payload missing digest: %s", payload)
+	}
+}
+
 func escapePath(path string) string {
 	return strings.ReplaceAll(path, `\`, `\\`)
 }

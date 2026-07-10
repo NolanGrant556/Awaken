@@ -14,6 +14,7 @@ func TestBuiltInToolNamesAreProviderSafe(t *testing.T) {
 		"list_files":       false,
 		"read_file":        false,
 		"shell":            false,
+		"text_edit":        false,
 		"text_file_create": false,
 		"web_search":       false,
 	}

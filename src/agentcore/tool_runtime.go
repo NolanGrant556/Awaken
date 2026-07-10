@@ -307,7 +307,7 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		return finalizeToolResult(synthesizeFailedToolResult(result, "unknown_tool", fmt.Sprintf("工具执行失败: %v: %s", err, call.Function.Name)))
 	}
 
-	input, err := normalizeToolInput(call.Function.Arguments, selectedTool.Parameters())
+	input, err := normalizeToolInputWithSchema(call.Function.Arguments, selectedTool)
 	if err != nil {
 		return finalizeToolResult(synthesizeValidationToolResult(result, err.Error()))
 	}
@@ -688,7 +688,7 @@ func (rt *ToolRuntime) executeTransformedTool(
 		return finalizeToolResult(result)
 	}
 
-	transformedInput, err := normalizeToolInput(decision.UpdatedInput, transformedTool.Parameters())
+	transformedInput, err := normalizeToolInputWithSchema(decision.UpdatedInput, transformedTool)
 	if err != nil {
 		denied := ToolDecision{
 			Action: ToolDecisionDeny,
@@ -1372,6 +1372,17 @@ func firstNonEmpty(values ...string) string {
 
 func timeNowUTC() time.Time {
 	return time.Now().UTC()
+}
+
+func normalizeToolInputWithSchema(arguments string, selectedTool tool.Tool) (string, error) {
+	schema := tool.ResolveInputSchema(selectedTool)
+	params := selectedTool.Parameters()
+	if len(schema.Properties) > 0 || len(schema.Required) > 0 || len(schema.OneOf) > 0 {
+		if err := tool.ValidateInputAgainstSchema(arguments, schema); err != nil {
+			return "", err
+		}
+	}
+	return normalizeToolInput(arguments, params)
 }
 
 func normalizeToolInput(arguments string, params []tool.ToolParameter) (string, error) {

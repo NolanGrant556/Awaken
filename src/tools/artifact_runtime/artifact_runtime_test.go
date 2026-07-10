@@ -34,13 +34,13 @@ func TestArtifactRuntimeCreatesOfficeArtifacts(t *testing.T) {
 }
 
 func TestPresentationCreateUsesRuntimeAndRenderCheck(t *testing.T) {
-	requirePresentationRuntime(t)
+	installHermeticPresentationRuntime(t)
 	root := t.TempDir()
 	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
 	imagePath := filepath.Join(root, "chart.png")
 	writeTestPNG(t, imagePath, 80, 50)
 
-	result := executeArtifactToolRaw(t, ctx, presentationCreateOrEdit, map[string]any{
+	result := executeArtifactToolRaw(t, ctx, presentationCreate, map[string]any{
 		"output_path": "演示报告.pptx",
 		"theme": map[string]any{
 			"primary": "#12324A",
@@ -51,6 +51,7 @@ func TestPresentationCreateUsesRuntimeAndRenderCheck(t *testing.T) {
 				"title":    "Intro",
 				"subtitle": "ERP V7 / V8",
 				"body":     "Hello",
+				"layout":   "image_right",
 				"bullets":  []string{"Stable content", "Image rich"},
 				"notes":    "speaker note",
 				"images": []map[string]any{{
@@ -62,10 +63,14 @@ func TestPresentationCreateUsesRuntimeAndRenderCheck(t *testing.T) {
 		},
 	})
 	var parsed struct {
-		Path          string   `json:"path"`
-		PDFPath       string   `json:"pdf_path"`
-		PreviewDir    string   `json:"preview_dir"`
-		PreviewImages []string `json:"preview_images"`
+		Path              string   `json:"path"`
+		PDFPath           string   `json:"pdf_path"`
+		PreviewDir        string   `json:"preview_dir"`
+		PreviewImages     []string `json:"preview_images"`
+		Verified          bool     `json:"verified"`
+		VerificationLevel string   `json:"verification_level"`
+		SlideCount        int      `json:"slide_count"`
+		PNGCount          int      `json:"png_count"`
 	}
 	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
 		t.Fatalf("parse presentation result: %v\n%s", err, result)
@@ -74,6 +79,9 @@ func TestPresentationCreateUsesRuntimeAndRenderCheck(t *testing.T) {
 	assertZipContains(t, deckOut, "ppt/slides/slide1.xml")
 	assertZipContains(t, deckOut, "ppt/slideMasters/slideMaster1.xml")
 	assertZipHasPrefix(t, deckOut, "ppt/media/")
+	if !parsed.Verified || parsed.VerificationLevel != "png" {
+		t.Fatalf("expected verified png-level result, got %s", result)
+	}
 	if parsed.PDFPath == "" {
 		t.Fatalf("expected pdf preview path in result: %s", result)
 	}
@@ -86,6 +94,9 @@ func TestPresentationCreateUsesRuntimeAndRenderCheck(t *testing.T) {
 	if _, err := os.Stat(parsed.PreviewDir); err != nil {
 		t.Fatalf("expected preview dir: %v", err)
 	}
+	if parsed.SlideCount != 1 || parsed.PNGCount != 1 || len(parsed.PreviewImages) != 1 {
+		t.Fatalf("expected consistent slide/png counts, got %s", result)
+	}
 
 	renderResult := executeArtifactToolRaw(t, ctx, artifactRender, map[string]any{
 		"path":       "演示报告.pptx",
@@ -95,11 +106,12 @@ func TestPresentationCreateUsesRuntimeAndRenderCheck(t *testing.T) {
 		Path          string   `json:"path"`
 		PDFPath       string   `json:"pdf_path"`
 		PreviewImages []string `json:"preview_images"`
+		Verified      bool     `json:"verified"`
 	}
 	if err := json.Unmarshal([]byte(renderResult), &rendered); err != nil {
 		t.Fatalf("parse artifact_render result: %v\n%s", err, renderResult)
 	}
-	if rendered.Path != deckOut || rendered.PDFPath == "" || len(rendered.PreviewImages) == 0 {
+	if rendered.Path != deckOut || rendered.PDFPath == "" || len(rendered.PreviewImages) == 0 || !rendered.Verified {
 		t.Fatalf("expected artifact_render to return pptx/pdf/png previews, got %s", renderResult)
 	}
 }
@@ -114,7 +126,7 @@ func TestPresentationCreateAllowsImageOutsideReadableRoots(t *testing.T) {
 		name:       "presentation_create",
 		readOnly:   false,
 		capability: tool.CapabilityArtifactWrite,
-		execute:    presentationCreateOrEdit,
+		execute:    presentationCreate,
 	}
 	decision := create.CheckPermission(
 		context.Background(),
@@ -268,9 +280,108 @@ func requirePresentationRuntime(t *testing.T) {
 	if _, err := resolvePresentationPython(); err != nil {
 		t.Skipf("presentation runtime unavailable: %v", err)
 	}
-	if _, err := resolveSoffice(); err != nil {
-		t.Skipf("presentation render runtime unavailable: %v", err)
+}
+
+func writeExecutable(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("write executable %s: %v", path, err)
 	}
+}
+
+func installHermeticPresentationRuntime(t *testing.T) {
+	t.Helper()
+	requirePresentationRuntime(t)
+	bin := t.TempDir()
+	soffice := filepath.Join(bin, "soffice")
+	pdftoppm := filepath.Join(bin, "pdftoppm")
+	writeExecutable(t, soffice, `#!/bin/bash
+set -euo pipefail
+outdir=""
+input=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --outdir)
+      outdir="$2"
+      shift 2
+      ;;
+    --convert-to)
+      shift 2
+      ;;
+    --headless|--nologo|--nofirststartwizard|--norestore)
+      shift
+      ;;
+    -env:UserInstallation=*)
+      shift
+      ;;
+    *)
+      input="$1"
+      shift
+      ;;
+  esac
+done
+python3 - "$input" "$outdir" <<'PY'
+import os, sys, zipfile
+input_path, outdir = sys.argv[1], sys.argv[2]
+base = os.path.splitext(os.path.basename(input_path))[0]
+count = 0
+with zipfile.ZipFile(input_path) as zf:
+    for name in zf.namelist():
+        if name.startswith("ppt/slides/slide") and name.endswith(".xml") and "_rels" not in name:
+            count += 1
+if count <= 0:
+    count = 1
+pdf_path = os.path.join(outdir, base + ".pdf")
+with open(pdf_path, "w", encoding="utf-8") as f:
+    f.write("%PDF-1.4\n")
+    for i in range(count):
+        f.write(f"% page {i+1}\n")
+    f.write("%%EOF\n")
+with open(pdf_path + ".pagecount", "w", encoding="utf-8") as f:
+    f.write(str(count))
+PY
+`)
+	writeExecutable(t, pdftoppm, `#!/bin/bash
+set -euo pipefail
+pdf=""
+prefix=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -png|-r)
+      if [[ "$1" == "-r" ]]; then
+        shift 2
+      else
+        shift
+      fi
+      ;;
+    *)
+      if [[ -z "$pdf" ]]; then
+        pdf="$1"
+      else
+        prefix="$1"
+      fi
+      shift
+      ;;
+  esac
+done
+python3 - "$pdf" "$prefix" <<'PY'
+import os, struct, sys, zlib
+pdf, prefix = sys.argv[1], sys.argv[2]
+count_path = pdf + ".pagecount"
+count = 1
+if os.path.exists(count_path):
+    count = max(1, int(open(count_path, encoding="utf-8").read().strip() or "1"))
+def chunk(tag, data):
+    return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xffffffff)
+ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(b"\x00\x00\x00\x00")) + chunk(b"IEND", b"")
+for i in range(1, count + 1):
+    open(f"{prefix}-{i}.png", "wb").write(png)
+PY
+`)
+	t.Setenv("AWAKEN_SOFFICE", soffice)
+	t.Setenv("AWAKEN_POPPLER_BIN", bin)
+	t.Setenv("HOME", t.TempDir())
 }
 
 func TestArtifactRuntimeImageInspectAndConvert(t *testing.T) {

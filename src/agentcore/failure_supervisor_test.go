@@ -12,6 +12,7 @@ import (
 
 	convcontext "awaken/src/context"
 	"awaken/src/tool"
+	applypatch "awaken/src/tools/apply_patch"
 )
 
 func TestEffectiveMaxDefaults(t *testing.T) {
@@ -69,11 +70,11 @@ func TestFailureSupervisorBlocksNonRetryableDuplicate(t *testing.T) {
 	}
 	s.NoteRealExecution(before.CallSignature)
 	failed := tool.ExecutionOutcome{
-		Status:        tool.OutcomeFailed,
+		Status:         tool.OutcomeFailed,
 		SemanticStatus: tool.SemanticFailure,
-		ErrorCode:     "invalid_patch_format",
-		ErrorMessage:  "missing begin",
-		Retryable:     false,
+		ErrorCode:      "invalid_patch_format",
+		ErrorMessage:   "missing begin",
+		Retryable:      false,
 	}
 	s.AfterOutcome(call, failed)
 
@@ -139,6 +140,156 @@ func TestFailureSupervisorSameErrorClassBudget(t *testing.T) {
 			t.Fatalf("expected recovery_required after %d same-class failures", maxSameClassFailures)
 		}
 	}
+	fourth := convcontext.ToolCall{
+		ID: "c4",
+		Function: convcontext.FunctionCall{
+			Name:      "text_edit",
+			Arguments: `{"path":"a.txt","old_string":"fresh-shape","new_string":"y","expected_sha256":"rev1"}`,
+		},
+	}
+	blocked := s.BeforeCall(fourth)
+	if !blocked.Block || blocked.ErrorCode != ErrorCodeRepeatedFailure {
+		t.Fatalf("fourth same-class call must be blocked before execution, got %+v", blocked)
+	}
+	if got := s.ToolExecutions(); got != maxSameClassFailures {
+		t.Fatalf("blocked fourth call must not increment real executions: got %d", got)
+	}
+}
+
+func TestApplyPatchTypedOutcomeReachesFailureSupervisor(t *testing.T) {
+	s := NewFailureSupervisor(t.TempDir(), 8, 32)
+	patchText := "*** Update File: a.txt\n@@\n-old\n+new\n*** End Patch"
+	arguments, err := json.Marshal(map[string]string{"patch": patchText})
+	if err != nil {
+		t.Fatalf("marshal arguments: %v", err)
+	}
+	call := convcontext.ToolCall{
+		ID: "patch_1",
+		Function: convcontext.FunctionCall{
+			Name:      "apply_patch",
+			Arguments: string(arguments),
+		},
+	}
+	before := s.BeforeCall(call)
+	s.NoteRealExecution(before.CallSignature)
+	runtime := NewToolRuntime(nil)
+	result := runtime.Execute(context.Background(), call)
+	outcome := result.Outcome
+	if outcome.ErrorCode != applypatch.ErrorCodePatchMissingBegin || outcome.Retryable {
+		t.Fatalf("ToolRuntime lost typed apply_patch outcome: result=%+v", result)
+	}
+	if outcome.Content == patchText {
+		t.Fatalf("unexpected unchanged patch content: %+v", outcome)
+	}
+	s.AfterOutcome(call, outcome)
+	blocked := s.BeforeCall(call)
+	if !blocked.Block || blocked.ErrorCode != ErrorCodeToolRetryBlocked {
+		t.Fatalf("supervisor did not consume typed apply_patch failure: %+v", blocked)
+	}
+}
+
+func TestFailureSupervisorRecoveryInjectedThenClearedOnSuccess(t *testing.T) {
+	cfg := AgentConfig{
+		SystemPrompt: "base system",
+		MaxThoughts:  8,
+		ModelConfig:  ModelConfig{Model: "test-model"},
+	}
+	runner := NewRunner(cfg, convcontext.NewConversation(nil), NewRequestBuilder(cfg))
+	failedCall := convcontext.ToolCall{
+		ID: "fail_1",
+		Function: convcontext.FunctionCall{
+			Name:      "apply_patch",
+			Arguments: `{"patch":"one","path":"a.txt"}`,
+		},
+	}
+	failure := tool.ExecutionOutcome{
+		Status:         tool.OutcomeFailed,
+		SemanticStatus: tool.SemanticFailure,
+		ErrorCode:      "patch_context_mismatch",
+		ErrorMessage:   "context not found",
+		Retryable:      true,
+	}
+	for i := 0; i < 2; i++ {
+		before := runner.failureSupervisor.BeforeCall(failedCall)
+		runner.failureSupervisor.NoteRealExecution(before.CallSignature)
+		runner.failureSupervisor.AfterOutcome(failedCall, failure)
+	}
+	request, err := runner.prepareLLMRequest(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("prepareLLMRequest: %v", err)
+	}
+	if !strings.Contains(request.SystemPrompt, `"recovery_required":true`) ||
+		!strings.Contains(request.SystemPrompt, "patch_context_mismatch") {
+		t.Fatalf("pending recovery was not injected: %s", request.SystemPrompt)
+	}
+	runner.failureSupervisor.AfterOutcome(convcontext.ToolCall{
+		ID: "unrelated_1",
+		Function: convcontext.FunctionCall{
+			Name:      "calculator",
+			Arguments: `{"expression":"1+1"}`,
+		},
+	}, tool.SucceededOutcome("2"))
+	if runner.failureSupervisor.PendingRecovery() == nil {
+		t.Fatal("unrelated successful tool cleared pending recovery")
+	}
+
+	successCall := convcontext.ToolCall{
+		ID: "read_1",
+		Function: convcontext.FunctionCall{
+			Name:      "read_file",
+			Arguments: `{"path":"a.txt"}`,
+		},
+	}
+	runner.failureSupervisor.AfterOutcome(successCall, tool.SucceededOutcome("fresh revision"))
+	if runner.failureSupervisor.PendingRecovery() != nil {
+		t.Fatal("successful recovery must clear pending directive")
+	}
+	request, err = runner.prepareLLMRequest(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("prepareLLMRequest after success: %v", err)
+	}
+	if strings.Contains(request.SystemPrompt, `"recovery_required":true`) {
+		t.Fatalf("stale recovery directive remained after success: %s", request.SystemPrompt)
+	}
+}
+
+func TestFailureSupervisorClassBudgetUsesStablePathWhenOutcomeHasCurrentDigest(t *testing.T) {
+	s := NewFailureSupervisor(t.TempDir(), 8, 64)
+	for i := 0; i < maxSameClassFailures; i++ {
+		call := convcontext.ToolCall{
+			ID: fmt.Sprintf("not_found_%d", i),
+			Function: convcontext.FunctionCall{
+				Name:      "text_edit",
+				Arguments: fmt.Sprintf(`{"path":"a.txt","old_string":"missing-%d","new_string":"new"}`, i),
+			},
+		}
+		before := s.BeforeCall(call)
+		if before.Block {
+			t.Fatalf("call %d blocked too early: %+v", i, before)
+		}
+		s.NoteRealExecution(before.CallSignature)
+		s.AfterOutcome(call, tool.ExecutionOutcome{
+			Status:         tool.OutcomeFailed,
+			SemanticStatus: tool.SemanticFailure,
+			ErrorCode:      "text_not_found",
+			Retryable:      true,
+			Diagnostic: map[string]any{
+				"path":          "a.txt",
+				"before_sha256": "actual-current-digest",
+			},
+		})
+	}
+	fourth := convcontext.ToolCall{
+		ID: "not_found_4",
+		Function: convcontext.FunctionCall{
+			Name:      "text_edit",
+			Arguments: `{"path":"a.txt","old_string":"another variant","new_string":"new"}`,
+		},
+	}
+	decision := s.BeforeCall(fourth)
+	if !decision.Block || decision.ErrorCode != ErrorCodeRepeatedFailure {
+		t.Fatalf("outcome digest changed class revision key and allowed fourth failure: %+v", decision)
+	}
 }
 
 func TestFailureSupervisorNewRevisionAllowsRetry(t *testing.T) {
@@ -191,7 +342,7 @@ func TestFailureSupervisorTurnAndRunBudgets(t *testing.T) {
 			ID: fmt.Sprintf("t%d", i),
 			Function: convcontext.FunctionCall{
 				Name:      "shell",
-				Arguments: fmt.Sprintf(`{"command":"exit %d"}`, i+2),
+				Arguments: fmt.Sprintf(`{"command":"exit %d","resource_revision":"turn-%d"}`, i+2, i),
 			},
 		}
 		before := s.BeforeCall(call)
@@ -219,7 +370,7 @@ func TestFailureSupervisorTurnAndRunBudgets(t *testing.T) {
 			ID: fmt.Sprintf("r%d", i),
 			Function: convcontext.FunctionCall{
 				Name:      "shell",
-				Arguments: fmt.Sprintf(`{"command":"run-exit-%d"}`, i),
+				Arguments: fmt.Sprintf(`{"command":"run-exit-%d","resource_revision":"run-%d"}`, i, i),
 			},
 		}
 		before := s2.BeforeCall(call)
@@ -295,6 +446,7 @@ func (t failingOutcomeTool) Description() string {
 func (t failingOutcomeTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
 		{Name: "value", Description: "value", Type: "string", Required: true},
+		{Name: "resource_revision", Description: "test revision", Type: "string", Required: false},
 	}
 }
 func (t failingOutcomeTool) Definition() tool.ToolDefinition {
@@ -363,19 +515,26 @@ func TestRunnerBlocksExactNonRetryableDuplicate(t *testing.T) {
 		t.Fatalf("expected exactly 1 real execution, got %d", execCount)
 	}
 	blocked := false
-	for _, ev := range gotEvents {
+	blockedIndex, blockedResultIndex := -1, -1
+	for i, ev := range gotEvents {
 		if ev.Type == ToolRetryBlockedEventType {
 			blocked = true
-			break
+			blockedIndex = i
+		}
+		if blockedIndex >= 0 && blockedResultIndex < 0 && ev.Type == ToolResultEventType {
+			blockedResultIndex = i
 		}
 	}
 	if !blocked {
 		t.Fatalf("expected ToolRetryBlocked event, types=%v", eventTypes(gotEvents))
 	}
+	if blockedResultIndex <= blockedIndex {
+		t.Fatalf("blocked recovery decision must precede synthetic denied result: blocked=%d result=%d types=%v", blockedIndex, blockedResultIndex, eventTypes(gotEvents))
+	}
 	_ = args
 }
 
-func TestRunnerRetryableExactCallBlockedOnThird(t *testing.T) {
+func TestA16RunnerRetryableExactCallBlockedOnThird(t *testing.T) {
 	toolName := "fs_retryable_" + t.Name()
 	var execCount int
 	mustRegisterRunnerTool(t, failingOutcomeTool{
@@ -405,7 +564,16 @@ func TestRunnerRetryableExactCallBlockedOnThird(t *testing.T) {
 		t.Fatalf("expected 2 real executions before block, got %d", execCount)
 	}
 	foundBlock := false
-	for _, ev := range gotEvents {
+	resultByCall := map[string]int{}
+	for i, ev := range gotEvents {
+		if ev.Type == ToolResultEventType {
+			resultByCall[ev.ToolCallID] = i
+		}
+		if ev.Type == ToolRecoveryRequiredEventType {
+			if resultIndex, ok := resultByCall[ev.ToolCallID]; !ok || resultIndex >= i {
+				t.Fatalf("real recovery directive appeared before its tool result: call=%s types=%v", ev.ToolCallID, eventTypes(gotEvents))
+			}
+		}
 		if ev.Type == ToolRetryBlockedEventType {
 			foundBlock = true
 		}
@@ -487,7 +655,10 @@ func TestRunnerTurnBudgetTerminatesRun(t *testing.T) {
 		// One turn with enough distinct failing tool calls to hit the turn budget.
 		calls := make([]map[string]interface{}, 0, maxTurnToolFailures)
 		for i := 0; i < maxTurnToolFailures; i++ {
-			args, _ := json.Marshal(map[string]string{"value": fmt.Sprintf("v%d", i)})
+			args, _ := json.Marshal(map[string]string{
+				"value":             fmt.Sprintf("v%d", i),
+				"resource_revision": fmt.Sprintf("budget-%d", i),
+			})
 			calls = append(calls, map[string]interface{}{
 				"index": i,
 				"id":    fmt.Sprintf("b_%d", i),

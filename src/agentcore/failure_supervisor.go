@@ -35,9 +35,10 @@ const (
 type FailureSupervisor struct {
 	workspaceRoot string
 
-	callAttempts       map[string]int
-	callFailureMeta    map[string]callFailureMeta
-	classFailures      map[string]int
+	callAttempts        map[string]int
+	callFailureMeta     map[string]callFailureMeta
+	classFailures       map[string]int
+	classFailureMeta    map[string]classFailureMeta
 	toolConsecutiveFail map[string]int
 
 	lastFingerprint       string
@@ -58,15 +59,25 @@ type callFailureMeta struct {
 	attempts  int
 }
 
+type classFailureMeta struct {
+	toolName   string
+	revision   string
+	errorClass string
+	errorCode  string
+	failures   int
+}
+
 // RecoveryDirective is injected into the next model turn after repeated failures.
 type RecoveryDirective struct {
-	Required        bool
-	ToolName        string
-	ErrorCode       string
-	Fingerprint     string
-	AttemptCount    int
-	RecoveryOptions []string
-	Message         string
+	Required         bool
+	ToolName         string
+	ResourceKey      string
+	ResourceRevision string
+	ErrorCode        string
+	Fingerprint      string
+	AttemptCount     int
+	RecoveryOptions  []string
+	Message          string
 }
 
 // BeforeCallDecision is returned before a real tool execution.
@@ -101,6 +112,7 @@ func NewFailureSupervisor(workspaceRoot string, maxAgentTurns, maxToolExecutions
 		callAttempts:        map[string]int{},
 		callFailureMeta:     map[string]callFailureMeta{},
 		classFailures:       map[string]int{},
+		classFailureMeta:    map[string]classFailureMeta{},
 		toolConsecutiveFail: map[string]int{},
 		maxAgentTurns:       EffectiveMaxAgentTurns(maxAgentTurns),
 		maxToolExecutions:   EffectiveMaxToolExecutions(maxToolExecutions),
@@ -214,6 +226,27 @@ func (s *FailureSupervisor) BeforeCall(call context.ToolCall) BeforeCallDecision
 		}
 	}
 
+	// The class budget is intentionally checked before executing the next
+	// call. After three real failures for the same tool/resource/error class,
+	// a fourth variant must not reach the tool merely because its exact JSON
+	// arguments (and therefore call_signature) changed.
+	revision := ResourceRevision(call.Function.Arguments, tool.ExecutionOutcome{})
+	if exhausted, ok := s.exhaustedClass(toolName, revision); ok {
+		decision.Allow = false
+		decision.Block = true
+		decision.ErrorCode = ErrorCodeRepeatedFailure
+		decision.ErrorMessage = fmt.Sprintf(
+			"blocked %s before execution: tool/resource/error class %s failed %d times (revision=%s)",
+			toolName, exhausted.errorClass, exhausted.failures, exhausted.revision,
+		)
+		decision.RecoveryOptions = mergeUniqueStrings(
+			RecoveryOptionsForError(exhausted.errorCode),
+			[]string{"change_tool_or_refresh_resource_revision", "stop_repeating_same_error_class"},
+		)
+		decision.RecoveryRequired = true
+		return decision
+	}
+
 	if s.pendingRecovery != nil {
 		decision.RecoveryRequired = true
 	}
@@ -237,6 +270,7 @@ func (s *FailureSupervisor) AfterOutcome(call context.ToolCall, outcome tool.Exe
 	toolName := strings.TrimSpace(call.Function.Name)
 	signature := CallSignature(toolName, call.Function.Arguments)
 	revision := ResourceRevision(call.Function.Arguments, outcome)
+	resourceKey := ResourceIdentity(call.Function.Arguments, outcome)
 	errorCode := strings.TrimSpace(outcome.ErrorCode)
 	errorClass := ErrorClass(errorCode, outcome)
 	fingerprint := FailureFingerprint(toolName, errorCode, outcome, s.workspaceRoot)
@@ -254,6 +288,12 @@ func (s *FailureSupervisor) AfterOutcome(call context.ToolCall, outcome tool.Exe
 		s.toolConsecutiveFail[toolName] = 0
 		s.lastFingerprint = ""
 		s.sameFingerprintStreak = 0
+		// Only a success for the failed tool or the same resource satisfies a
+		// recovery directive. An unrelated calculator/shell success must not
+		// silently clear guidance for a still-broken file operation.
+		if recoveryDirectiveSatisfied(s.pendingRecovery, toolName, resourceKey) {
+			s.pendingRecovery = nil
+		}
 		return decision
 	}
 
@@ -268,6 +308,13 @@ func (s *FailureSupervisor) AfterOutcome(call context.ToolCall, outcome tool.Exe
 
 	classKey := toolName + "|" + revision + "|" + errorClass
 	s.classFailures[classKey] = s.classFailures[classKey] + 1
+	s.classFailureMeta[classKey] = classFailureMeta{
+		toolName:   toolName,
+		revision:   revision,
+		errorClass: errorClass,
+		errorCode:  errorCode,
+		failures:   s.classFailures[classKey],
+	}
 
 	if fingerprint != "" && fingerprint == s.lastFingerprint {
 		s.sameFingerprintStreak++
@@ -279,12 +326,14 @@ func (s *FailureSupervisor) AfterOutcome(call context.ToolCall, outcome tool.Exe
 	if s.sameFingerprintStreak >= 2 {
 		decision.RecoveryRequired = true
 		directive := &RecoveryDirective{
-			Required:        true,
-			ToolName:        toolName,
-			ErrorCode:       errorCode,
-			Fingerprint:     fingerprint,
-			AttemptCount:    s.callAttempts[signature],
-			RecoveryOptions: decision.RecoveryOptions,
+			Required:         true,
+			ToolName:         toolName,
+			ResourceKey:      resourceKey,
+			ResourceRevision: revision,
+			ErrorCode:        errorCode,
+			Fingerprint:      fingerprint,
+			AttemptCount:     s.callAttempts[signature],
+			RecoveryOptions:  decision.RecoveryOptions,
 			Message: fmt.Sprintf(
 				"recovery_required: tool=%s error_code=%s attempts=%d; change strategy before retrying the same call",
 				toolName, errorCode, s.callAttempts[signature],
@@ -302,12 +351,14 @@ func (s *FailureSupervisor) AfterOutcome(call context.ToolCall, outcome tool.Exe
 		})
 		if decision.Directive == nil {
 			decision.Directive = &RecoveryDirective{
-				Required:        true,
-				ToolName:        toolName,
-				ErrorCode:       errorCode,
-				Fingerprint:     fingerprint,
-				AttemptCount:    s.classFailures[classKey],
-				RecoveryOptions: decision.RecoveryOptions,
+				Required:         true,
+				ToolName:         toolName,
+				ResourceKey:      resourceKey,
+				ResourceRevision: revision,
+				ErrorCode:        errorCode,
+				Fingerprint:      fingerprint,
+				AttemptCount:     s.classFailures[classKey],
+				RecoveryOptions:  decision.RecoveryOptions,
 				Message: fmt.Sprintf(
 					"recovery_required: same tool/resource/error class failed %d times",
 					s.classFailures[classKey],
@@ -327,6 +378,33 @@ func (s *FailureSupervisor) AfterOutcome(call context.ToolCall, outcome tool.Exe
 		decision.TerminalReason = TerminalReasonRepeatedToolFailure
 	}
 	return decision
+}
+
+func recoveryDirectiveSatisfied(directive *RecoveryDirective, toolName, resourceKey string) bool {
+	if directive == nil {
+		return false
+	}
+	if strings.TrimSpace(toolName) != "" && strings.TrimSpace(toolName) == directive.ToolName {
+		return true
+	}
+	return directive.ResourceKey != "" && directive.ResourceKey != "unknown" && directive.ResourceKey == resourceKey
+}
+
+func (s *FailureSupervisor) exhaustedClass(toolName, revision string) (classFailureMeta, bool) {
+	if s == nil {
+		return classFailureMeta{}, false
+	}
+	var selected classFailureMeta
+	for _, meta := range s.classFailureMeta {
+		if meta.toolName != toolName || meta.revision != revision || meta.failures < maxSameClassFailures {
+			continue
+		}
+		if selected.failures == 0 || meta.failures > selected.failures ||
+			(meta.failures == selected.failures && meta.errorClass < selected.errorClass) {
+			selected = meta
+		}
+	}
+	return selected, selected.failures >= maxSameClassFailures
 }
 
 // ApplyRecoveryToOutcome merges supervisor recovery options into an outcome.
@@ -360,9 +438,9 @@ func SyntheticBlockedResult(call context.ToolCall, decision BeforeCallDecision) 
 		Retryable:       false,
 		RecoveryOptions: append([]string(nil), decision.RecoveryOptions...),
 		Diagnostic: map[string]any{
-			"blocked":          true,
-			"call_signature":   decision.CallSignature,
-			"attempt_count":    decision.AttemptCount,
+			"blocked":           true,
+			"call_signature":    decision.CallSignature,
+			"attempt_count":     decision.AttemptCount,
 			"recovery_required": decision.RecoveryRequired,
 		},
 		StartedAt:  now,
@@ -372,7 +450,7 @@ func SyntheticBlockedResult(call context.ToolCall, decision BeforeCallDecision) 
 	return ToolExecutionResult{
 		ToolCallID: call.ID,
 		Name:       call.Function.Name,
-		Content:    outcome.ModelPayload(),
+		Content:    msg,
 		IsError:    true,
 		Status:     ToolExecutionDenied,
 		ErrorCode:  outcome.ErrorCode,
@@ -395,15 +473,6 @@ func FailureFingerprint(toolName, errorCode string, outcome tool.ExecutionOutcom
 }
 
 func ResourceRevision(arguments string, outcome tool.ExecutionOutcome) string {
-	if outcome.Diagnostic != nil {
-		for _, key := range []string{"sha256", "expected_sha256", "after_sha256", "before_sha256", "resource_revision"} {
-			if v, ok := outcome.Diagnostic[key]; ok {
-				if s := strings.TrimSpace(fmt.Sprint(v)); s != "" && s != "<nil>" {
-					return s
-				}
-			}
-		}
-	}
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(arguments), &payload); err == nil {
 		for _, key := range []string{"expected_sha256", "sha256", "resource_revision"} {
@@ -416,6 +485,34 @@ func ResourceRevision(arguments string, outcome tool.ExecutionOutcome) string {
 		if path, ok := payload["path"]; ok {
 			if s := strings.TrimSpace(fmt.Sprint(path)); s != "" {
 				return "path:" + s
+			}
+		}
+	}
+	if outcome.Diagnostic != nil {
+		for _, key := range []string{"expected_sha256", "resource_revision", "sha256", "after_sha256", "before_sha256"} {
+			if v, ok := outcome.Diagnostic[key]; ok {
+				if s := strings.TrimSpace(fmt.Sprint(v)); s != "" && s != "<nil>" {
+					return s
+				}
+			}
+		}
+	}
+	return "unknown"
+}
+
+func ResourceIdentity(arguments string, outcome tool.ExecutionOutcome) string {
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(arguments), &payload); err == nil {
+		if value, ok := payload["path"]; ok {
+			if path := strings.TrimSpace(fmt.Sprint(value)); path != "" {
+				return "path:" + filepath.ToSlash(filepath.Clean(path))
+			}
+		}
+	}
+	if outcome.Diagnostic != nil {
+		if value, ok := outcome.Diagnostic["path"]; ok {
+			if path := strings.TrimSpace(fmt.Sprint(value)); path != "" && path != "<nil>" {
+				return "path:" + filepath.ToSlash(filepath.Clean(path))
 			}
 		}
 	}

@@ -54,6 +54,25 @@ func (a *Agent) GetConfig() AgentConfig {
 	return a.config
 }
 
+// ModelVisibleToolPool returns the exact tool names exposed by the current
+// RequestBuilder after exposure policy and any resolved Skill gate. Skill
+// activation must inherit this boundary rather than the wider process-global
+// registry.
+func (a *Agent) ModelVisibleToolPool() []string {
+	if a == nil || a.reqBuilder == nil {
+		return nil
+	}
+	schemas := a.reqBuilder.getTools()
+	names := make([]string, 0, len(schemas))
+	for _, schema := range schemas {
+		name := strings.TrimSpace(schema.Function.Name)
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 func (a *Agent) Reconfigure(config AgentConfig) {
 	a.config = config
 	a.reqBuilder = NewRequestBuilder(config)
@@ -103,20 +122,22 @@ func (a *Agent) SetRunIdentity(runID, sessionID string) {
 	a.sessionID = sessionID
 }
 
+// ExecutionIdentity returns the IDs bound by RunService for the current run.
+// Custom Executor implementations that emit SemanticRecord values must use
+// these IDs so restart replay can associate records with the correct run.
+func (a *Agent) ExecutionIdentity() (threadID, runID, sessionID string) {
+	if a == nil {
+		return "", "", ""
+	}
+	return a.threadID, a.runID, a.sessionID
+}
+
 func (a *Agent) SemanticRecorder() SemanticRecorder {
 	return a.recorder
 }
 
 func (a *Agent) RunStreamWithEvents(ctx stdcontext.Context, userInput string, sink EventSink) (string, error) {
 	attachments := a.consumePendingUserAttachments()
-	a.conversation.UserInputWithAttachments(userInput, attachments)
-
-	runner := NewRunner(a.config, a.conversation, a.reqBuilder)
-	runner.threadID = a.threadID
-	runner.runID = a.runID
-	runner.sessionID = a.sessionID
-	runner.recorder = a.recorder
-
 	if a.recorder != nil {
 		payload := map[string]any{
 			"content": userInput,
@@ -135,9 +156,24 @@ func (a *Agent) RunStreamWithEvents(ctx stdcontext.Context, userInput string, si
 			payload,
 		)
 		if err := a.recorder.Append(ctx, record); err != nil {
-			return "", err
+			events := newRunEventEmitter(a.threadID, sink)
+			events.runID = a.runID
+			events.sessionID = a.sessionID
+			events.recorder = a.recorder
+			return "", events.notePersistenceFailure("user_message", err)
 		}
 	}
+
+	// Conversation state may only advance after the user message is durable;
+	// otherwise a failed journal write leaks an unpersisted prompt into the next
+	// run on the same in-memory Agent.
+	a.conversation.UserInputWithAttachments(userInput, attachments)
+
+	runner := NewRunner(a.config, a.conversation, a.reqBuilder)
+	runner.threadID = a.threadID
+	runner.runID = a.runID
+	runner.sessionID = a.sessionID
+	runner.recorder = a.recorder
 
 	return runner.RunStreamWithEvents(ctx, sink)
 }

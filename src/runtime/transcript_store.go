@@ -13,12 +13,14 @@ import (
 	"awaken/src/agentcore"
 	convcontext "awaken/src/context"
 	"awaken/src/desktopdata"
+	"awaken/src/internal/outputlimit"
 )
 
 const (
 	transcriptRecordTypeThread  = "thread"
 	transcriptRecordTypeEvent   = "event"
 	transcriptRecordTypeMessage = "message"
+	threadLabelMaxChars         = 50
 )
 
 type TranscriptRecord struct {
@@ -437,10 +439,8 @@ func safeTranscriptFileName(value string) string {
 
 func trimThreadLabel(input string) string {
 	label := strings.TrimSpace(input)
-	if len(label) > 50 {
-		return label[:50]
-	}
-	return label
+	trimmed, _ := outputlimit.Prefix(label, threadLabelMaxChars)
+	return trimmed
 }
 
 func orderedTranscriptMessageRecords(records []TranscriptRecord) ([]TranscriptRecord, error) {

@@ -97,7 +97,7 @@ describe("electron runtime client", () => {
     expect(onStatus).toHaveBeenCalledWith({ status: "crashed" });
   });
 
-  it("reconnects bridge subscriptions with after_seq", async () => {
+  it("reconnects with stream cursor instead of durable semantic seq", async () => {
     const { bridge } = createElectronBridge({ status: "running" });
     const subscriptions: Array<{
       handlers: Parameters<AwakenBridge["subscribeRun"]>[1];
@@ -116,7 +116,13 @@ describe("electron runtime client", () => {
       onReconnect,
     });
 
-    subscriptions[0].handlers.onEvent({ type: "TEXT_MESSAGE_CONTENT", seq: 32, delta: "partial" });
+    subscriptions[0].handlers.onEvent({
+      type: "TEXT_MESSAGE_CONTENT",
+      seq: 999,
+      semanticSeq: 999,
+      streamCursor: 32,
+      delta: "partial",
+    });
     subscriptions[0].handlers.onError?.("connection dropped");
 
     expect(onReconnect).toHaveBeenCalledTimes(1);

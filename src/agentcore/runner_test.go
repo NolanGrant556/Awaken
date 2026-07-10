@@ -585,9 +585,9 @@ data: {"type":"message_stop"}`,
 		ToolCallStartedEventType,
 		ToolCallArgsEventType,
 		ToolCallFinishedEventType,
+		ToolProgressEventType,
+		ToolProgressEventType,
 		ToolPermissionDecidedEventType,
-		ToolProgressEventType,
-		ToolProgressEventType,
 		ToolResultEventType,
 		TurnFinishedEventType,
 		TurnStartedEventType,
@@ -615,8 +615,8 @@ data: {"type":"message_stop"}`,
 	if gotEvents[10].Arguments != `{"value":"hello"}` {
 		t.Fatalf("expected complete tool args fallback, got %q", gotEvents[10].Arguments)
 	}
-	if gotEvents[13].ToolProgressStage != "started" || gotEvents[14].ToolProgressStage != "completed" {
-		t.Fatalf("unexpected runtime tool progress events: %+v %+v", gotEvents[13], gotEvents[14])
+	if gotEvents[12].ToolProgressStage != "started" || gotEvents[13].ToolProgressStage != "completed" {
+		t.Fatalf("unexpected runtime tool progress events: %+v %+v", gotEvents[12], gotEvents[13])
 	}
 	if gotEvents[15].Content != "echo:hello" {
 		t.Fatalf("expected tool result content echo:hello, got %q", gotEvents[15].Content)
@@ -1588,6 +1588,215 @@ data: {"type":"message_stop"}`,
 	if runErrorIndex < 0 || gotEvents[runErrorIndex].TerminalReason != TerminalReasonAbortedTools {
 		t.Fatalf("expected RunError aborted_tools, got %+v", gotEvents)
 	}
+}
+
+func TestA30ToolCallJournalFailurePreventsExecutionAndPersistsPersistenceTerminal(t *testing.T) {
+	toolName := "a30_tool_call_persistence_" + t.Name()
+	var executions int
+	mustRegisterRunnerTool(t, countingJournalTool{name: toolName, calls: &executions})
+
+	cfg := AgentConfig{MaxThoughts: 2, ModelConfig: ModelConfig{Model: "test-model"}}
+	conv := convcontext.NewConversation(nil)
+	conv.UserInput("must persist before execution")
+	recorder := &failingRecorder{failToolCall: true}
+	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
+	runner.threadID = "thread_a30"
+	runner.runID = "run_a30"
+	runner.sessionID = "session_a30"
+	runner.recorder = recorder
+	runner.streamLLMFunc = func(context.Context, *runEventEmitter) (*llm.Response, error) {
+		return &llm.Response{ToolCalls: []llm.ToolCall{{
+			ID: "call_a30", Name: toolName, Input: `{"value":"side effect"}`,
+		}}}, nil
+	}
+
+	var live []AwakenEvent
+	_, err := runner.RunStreamWithEvents(context.Background(), EventSinkFunc(func(event AwakenEvent) {
+		live = append(live, event)
+	}))
+	if !errors.Is(err, ErrPersistenceFailed) {
+		t.Fatalf("A30 expected ErrPersistenceFailed, got %v", err)
+	}
+	if executions != 0 {
+		t.Fatalf("A30 tool executed before tool_call became durable: %d", executions)
+	}
+	assertOnlyPersistenceTerminalAfterFailure(t, recorder.records, "run_a30")
+	for _, record := range recorder.records {
+		if record.Kind == SemanticKindToolCall || record.Kind == SemanticKindToolResult {
+			t.Fatalf("A30 failed tool_call append leaked tool facts: %+v", recorder.records)
+		}
+	}
+	assertPersistenceErrorVisibleWithoutSuccess(t, live)
+}
+
+func TestA31ToolResultBatchFailureStopsLaterSideEffectsAndPersistsPersistenceTerminal(t *testing.T) {
+	toolName := "a31_tool_result_persistence_" + t.Name()
+	var executions int
+	mustRegisterRunnerTool(t, countingJournalTool{name: toolName, calls: &executions})
+
+	cfg := AgentConfig{MaxThoughts: 2, ModelConfig: ModelConfig{Model: "test-model"}}
+	conv := convcontext.NewConversation(nil)
+	conv.UserInput("two side effects")
+	recorder := &failingRecorder{failToolResult: true}
+	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
+	runner.threadID = "thread_a31"
+	runner.runID = "run_a31"
+	runner.sessionID = "session_a31"
+	runner.recorder = recorder
+	runner.streamLLMFunc = func(context.Context, *runEventEmitter) (*llm.Response, error) {
+		return &llm.Response{ToolCalls: []llm.ToolCall{
+			{ID: "call_a31_1", Name: toolName, Input: `{"value":"one"}`},
+			{ID: "call_a31_2", Name: toolName, Input: `{"value":"two"}`},
+		}}, nil
+	}
+
+	var live []AwakenEvent
+	_, err := runner.RunStreamWithEvents(context.Background(), EventSinkFunc(func(event AwakenEvent) {
+		live = append(live, event)
+	}))
+	if !errors.Is(err, ErrPersistenceFailed) {
+		t.Fatalf("A31 expected ErrPersistenceFailed, got %v", err)
+	}
+	if executions != 1 {
+		t.Fatalf("A31 later side effect executed after tool_result persistence failure: %d", executions)
+	}
+	var calls, results int
+	for _, record := range recorder.records {
+		switch record.Kind {
+		case SemanticKindToolCall:
+			calls++
+			if record.Payload["tool_call_id"] != "call_a31_1" {
+				t.Fatalf("A31 second call became durable/executable: %+v", record)
+			}
+		case SemanticKindToolResult:
+			results++
+		}
+	}
+	if calls != 1 || results != 0 {
+		t.Fatalf("A31 expected one durable call and zero uncommitted results, calls=%d results=%d records=%+v", calls, results, recorder.records)
+	}
+	assertOnlyPersistenceTerminalAfterFailure(t, recorder.records, "run_a31")
+	assertPersistenceErrorVisibleWithoutSuccess(t, live)
+}
+
+func TestA36CancelAfterDurableToolCallKeepsPairingAndCancelledTerminal(t *testing.T) {
+	toolName := "a36_cancel_after_call_" + t.Name()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mustRegisterRunnerTool(t, cancelOnExecuteTool{name: toolName, cancel: cancel})
+
+	cfg := AgentConfig{MaxThoughts: 2, ModelConfig: ModelConfig{Model: "test-model"}}
+	conv := convcontext.NewConversation(nil)
+	conv.UserInput("cancel after tool call")
+	recorder := &failingRecorder{}
+	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
+	runner.threadID = "thread_a36"
+	runner.runID = "run_a36"
+	runner.sessionID = "session_a36"
+	runner.recorder = recorder
+	runner.streamLLMFunc = func(context.Context, *runEventEmitter) (*llm.Response, error) {
+		return &llm.Response{ToolCalls: []llm.ToolCall{{
+			ID: "call_a36", Name: toolName, Input: `{"value":"cancel"}`,
+		}}}, nil
+	}
+
+	_, err := runner.RunStreamWithEvents(ctx, EventSinkFunc(func(AwakenEvent) {}))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("A36 expected context cancellation, got %v", err)
+	}
+	if err := convcontext.ValidateToolResultPairing(conv.Context.GetMessages()); err != nil {
+		t.Fatalf("A36 live model history is unpaired: %v", err)
+	}
+
+	var callRecord, resultRecord, terminalRecord *SemanticRecord
+	for i := range recorder.records {
+		record := &recorder.records[i]
+		switch record.Kind {
+		case SemanticKindToolCall:
+			callRecord = record
+		case SemanticKindToolResult:
+			resultRecord = record
+		case SemanticKindRunTerminal:
+			terminalRecord = record
+		}
+	}
+	if callRecord == nil || resultRecord == nil || terminalRecord == nil {
+		t.Fatalf("A36 durable pairing/terminal incomplete: %+v", recorder.records)
+	}
+	if callRecord.Payload["tool_call_id"] != resultRecord.Payload["tool_call_id"] ||
+		resultRecord.ParentID != "call_a36" {
+		t.Fatalf("A36 durable tool call/result IDs do not pair: call=%+v result=%+v", callRecord, resultRecord)
+	}
+	if terminalRecord.Payload["status"] != "cancelled" ||
+		terminalRecord.Payload["code"] != "RUN_CANCELLED" ||
+		terminalRecord.Payload["terminal_reason"] != string(TerminalReasonAbortedTools) {
+		t.Fatalf("A36 terminal is not a typed cancelled outcome: %+v", terminalRecord.Payload)
+	}
+	if err := convcontext.ValidateToolResultPairing(toolRecordsToMessagesForTest(recorder.records)); err != nil {
+		t.Fatalf("A36 restored durable history is unpaired: %v", err)
+	}
+}
+
+func assertOnlyPersistenceTerminalAfterFailure(t *testing.T, records []SemanticRecord, runID string) {
+	t.Helper()
+	var terminals []SemanticRecord
+	for _, record := range records {
+		if record.Kind == SemanticKindRunTerminal && record.RunID == runID {
+			terminals = append(terminals, record)
+		}
+	}
+	if len(terminals) != 1 {
+		t.Fatalf("expected exactly one persistence terminal for %s, got %+v", runID, terminals)
+	}
+	payload := terminals[0].Payload
+	if payload["status"] != "error" || payload["code"] != string(TerminalReasonPersistenceError) ||
+		payload["terminal_reason"] != string(TerminalReasonPersistenceError) {
+		t.Fatalf("unexpected persistence terminal payload: %+v", payload)
+	}
+}
+
+func assertPersistenceErrorVisibleWithoutSuccess(t *testing.T, events []AwakenEvent) {
+	t.Helper()
+	var persistenceErrors int
+	for _, event := range events {
+		if event.Type == RunFinishedEventType {
+			t.Fatalf("persistence failure exposed false success: %+v", events)
+		}
+		if event.Type == RunErrorEventType && event.Code == "PERSISTENCE_ERROR" &&
+			event.TerminalReason == TerminalReasonPersistenceError {
+			persistenceErrors++
+		}
+	}
+	if persistenceErrors != 1 {
+		t.Fatalf("expected one visible persistence_error, got %d: %+v", persistenceErrors, events)
+	}
+}
+
+func toolRecordsToMessagesForTest(records []SemanticRecord) []convcontext.Message {
+	messages := make([]convcontext.Message, 0, len(records))
+	for _, record := range records {
+		switch record.Kind {
+		case SemanticKindToolCall:
+			messages = append(messages, convcontext.Message{
+				Role: convcontext.RoleAssistant,
+				ToolCalls: []convcontext.ToolCall{{
+					ID: fmt.Sprint(record.Payload["tool_call_id"]),
+					Function: convcontext.FunctionCall{
+						Name:      fmt.Sprint(record.Payload["tool_name"]),
+						Arguments: fmt.Sprint(record.Payload["arguments"]),
+					},
+				}},
+			})
+		case SemanticKindToolResult:
+			messages = append(messages, convcontext.Message{
+				Role:       convcontext.RoleTool,
+				ToolCallID: fmt.Sprint(record.Payload["tool_call_id"]),
+				Name:       fmt.Sprint(record.Payload["tool_name"]),
+				Content:    fmt.Sprint(record.Payload["content"]),
+			})
+		}
+	}
+	return messages
 }
 
 type failIfExecutedTool struct {

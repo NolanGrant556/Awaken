@@ -236,6 +236,21 @@ func deleteThreadInputAttachments(threadID string) error {
 	return os.RemoveAll(filepath.Join(runInputAttachmentRootDir(), safeTranscriptFileName(threadID)))
 }
 
+func cleanupPersistedRunInputAttachments(attachments []RunInputAttachment) error {
+	var errs []error
+	for _, attachment := range attachments {
+		storageKey := strings.TrimSpace(attachment.StorageKey)
+		if storageKey == "" {
+			continue
+		}
+		path := filepath.Join(runInputAttachmentRootDir(), filepath.FromSlash(storageKey))
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
 func validateRunInputAttachments(attachments []RunInputAttachment) error {
 	if len(attachments) == 0 {
 		return nil

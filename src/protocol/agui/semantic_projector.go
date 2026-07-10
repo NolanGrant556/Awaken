@@ -14,13 +14,24 @@ import (
 func ProjectSemanticRecords(records []agentcore.SemanticRecord) []Event {
 	out := make([]Event, 0, len(records)*2)
 	for _, record := range records {
-		out = append(out, ProjectSemanticRecord(record)...)
+		frames := ProjectSemanticRecord(record)
+		out = append(out, frames...)
 	}
 	return out
 }
 
 // ProjectSemanticRecord projects one SemanticRecord into zero or more AG-UI frames.
 func ProjectSemanticRecord(record agentcore.SemanticRecord) []Event {
+	frames := projectSemanticRecord(record)
+	for i := range frames {
+		frames[i].Seq = FrameSeq(record.Seq, i)
+		frames[i].SemanticSeq = frames[i].Seq
+		frames[i].RecordID = record.RecordID
+	}
+	return frames
+}
+
+func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 	base := Event{
 		Timestamp: toUnixMillis(record.Timestamp),
 		ThreadID:  record.ThreadID,
@@ -95,6 +106,9 @@ func ProjectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		result.ToolCallName = stringFromAny(payload["tool_name"])
 		result.Content = stringFromAny(payload["content"])
 		result.Role = "tool"
+		result.TrashedPaths = stringSliceFromAny(payload["trashed_paths"])
+		result.AffectedPaths = stringSliceFromAny(payload["affected_paths"])
+		result.PatchSummary = stringFromAny(payload["patch_summary"])
 		applyOutcomePayload(&result, payload)
 		return []Event{result}
 	case agentcore.SemanticKindArtifact:
@@ -166,6 +180,15 @@ func ProjectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		decision.ToolDecisionAction = stringFromAny(payload["action"])
 		decision.ToolDecisionSource = stringFromAny(payload["source"])
 		decision.ToolDecisionReason = stringFromAny(payload["reason"])
+		decision.StaticPermissionBehavior = stringFromAny(payload["behavior"])
+		decision.StaticPermissionReason = stringFromAny(payload["static_reason"])
+		decision.AffectedPaths = stringSliceFromAny(payload["affected_paths"])
+		decision.PatchSummary = stringFromAny(payload["patch_summary"])
+		decision.ProfileName = stringFromAny(payload["profile_name"])
+		decision.TransformedFrom = stringFromAny(payload["transformed_from"])
+		decision.TransformedTo = stringFromAny(payload["transformed_to"])
+		decision.TrashedPaths = stringSliceFromAny(payload["trashed_paths"])
+		decision.GuardianViolation = stringFromAny(payload["guardian_violation"])
 		return []Event{decision}
 	case agentcore.SemanticKindPersistenceWarning:
 		warning := base
@@ -175,9 +198,28 @@ func ProjectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		return []Event{warning}
 	case agentcore.SemanticKindRuntimeNotice:
 		notice := base
-		notice.Type = EventAwakenUnknown
-		notice.RawType = stringFromAny(payload["event_type"])
+		eventType := agentcore.AwakenEventType(stringFromAny(payload["event_type"]))
+		switch eventType {
+		case agentcore.RuntimePrepareEventType, agentcore.RuntimePrepareStartedEventType:
+			notice.Type = EventAwakenRuntimePrepare
+		case agentcore.RuntimePrepareProgressEventType:
+			notice.Type = EventAwakenRuntimePrepareProgress
+		case agentcore.RuntimeReadyEventType:
+			notice.Type = EventAwakenRuntimeReady
+		case agentcore.RuntimeRepairFailedEventType:
+			notice.Type = EventAwakenRuntimeRepairFailed
+		case agentcore.RuntimeMissingEventType:
+			notice.Type = EventAwakenRuntimeMissing
+		default:
+			notice.Type = EventAwakenUnknown
+			notice.RawType = string(eventType)
+		}
 		notice.Message = stringFromAny(payload["content"])
+		notice.Progress = stringFromAny(payload["progress"])
+		notice.ToolCallID = stringFromAny(payload["tool_call_id"])
+		notice.ToolCallName = stringFromAny(payload["tool_name"])
+		notice.RuntimeName = stringFromAny(payload["runtime_name"])
+		notice.RuntimeVersion = stringFromAny(payload["runtime_version"])
 		return []Event{notice}
 	case agentcore.SemanticKindRecoveryDecision:
 		recovery := base
@@ -198,13 +240,13 @@ func ProjectSemanticRecord(record agentcore.SemanticRecord) []Event {
 				recovery.Message = "tool recovery required"
 			}
 		}
-		if opts, ok := payload["recovery_options"].([]any); ok {
-			for _, opt := range opts {
-				if s := strings.TrimSpace(fmt.Sprint(opt)); s != "" && s != "<nil>" {
-					recovery.RecoveryOptions = append(recovery.RecoveryOptions, s)
-				}
-			}
-		}
+		recovery.RecoveryOptions = stringSliceFromAny(payload["recovery_options"])
+		recovery.ToolStatus = stringFromAny(payload["tool_status"])
+		recovery.TransportStatus = stringFromAny(payload["transport_status"])
+		recovery.SemanticStatus = stringFromAny(payload["semantic_status"])
+		recovery.ProcessStatus = stringFromAny(payload["process_status"])
+		recovery.ErrorCategory = stringFromAny(payload["error_category"])
+		recovery.Retryable = boolFromAny(payload["retryable"])
 		return []Event{recovery}
 	case agentcore.SemanticKindThread,
 		agentcore.SemanticKindFileChange,
@@ -232,17 +274,18 @@ func applyOutcomePayload(dst *Event, payload map[string]any) {
 		return
 	}
 	var outcome struct {
-		Status          string   `json:"status"`
-		TransportStatus string   `json:"transport_status"`
-		SemanticStatus  string   `json:"semantic_status"`
-		ProcessStatus   string   `json:"process_status"`
-		ExitCode        *int     `json:"exit_code"`
-		TimedOut        bool     `json:"timed_out"`
-		ErrorCode       string   `json:"error_code"`
-		ErrorCategory   string   `json:"error_category"`
-		Retryable       bool     `json:"retryable"`
-		RecoveryOptions []string `json:"recovery_options"`
-		DurationMs      int64    `json:"duration_ms"`
+		Status          string         `json:"status"`
+		TransportStatus string         `json:"transport_status"`
+		SemanticStatus  string         `json:"semantic_status"`
+		ProcessStatus   string         `json:"process_status"`
+		ExitCode        *int           `json:"exit_code"`
+		TimedOut        bool           `json:"timed_out"`
+		ErrorCode       string         `json:"error_code"`
+		ErrorCategory   string         `json:"error_category"`
+		Retryable       bool           `json:"retryable"`
+		RecoveryOptions []string       `json:"recovery_options"`
+		DurationMs      int64          `json:"duration_ms"`
+		Diagnostic      map[string]any `json:"diagnostic"`
 	}
 	if err := json.Unmarshal(raw, &outcome); err != nil {
 		return
@@ -258,6 +301,12 @@ func applyOutcomePayload(dst *Event, payload map[string]any) {
 	dst.Retryable = outcome.Retryable
 	dst.RecoveryOptions = append([]string(nil), outcome.RecoveryOptions...)
 	dst.DurationMs = outcome.DurationMs
+	if len(outcome.Diagnostic) > 0 {
+		dst.Diagnostic = make(map[string]any, len(outcome.Diagnostic))
+		for key, value := range outcome.Diagnostic {
+			dst.Diagnostic[key] = value
+		}
+	}
 }
 
 func stringFromAny(value any) string {
@@ -280,6 +329,25 @@ func boolFromAny(value any) bool {
 	}
 }
 
+func stringSliceFromAny(value any) []string {
+	var values []any
+	switch typed := value.(type) {
+	case []string:
+		return append([]string(nil), typed...)
+	case []any:
+		values = typed
+	default:
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, item := range values {
+		if s := strings.TrimSpace(fmt.Sprint(item)); s != "" && s != "<nil>" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // SemanticRecordsToAwakenEvents is used by runtime transcript packaging that still
 // wraps agent events for compatibility with existing ThreadTranscriptRun shapes.
 func SemanticRecordsToAwakenEvents(records []agentcore.SemanticRecord) []agentcore.AwakenEvent {
@@ -293,41 +361,41 @@ func SemanticRecordsToAwakenEvents(records []agentcore.SemanticRecord) []agentco
 
 func awakenEventFromAGUI(frame Event) agentcore.AwakenEvent {
 	event := agentcore.AwakenEvent{
-		Timestamp:       time.UnixMilli(frame.Timestamp).UTC(),
-		ThreadID:        frame.ThreadID,
-		RunID:           frame.RunID,
-		TurnID:          frame.TurnID,
-		MessageID:       frame.MessageID,
-		ParentMessageID: frame.ParentMessageID,
-		Role:            frame.Role,
-		Delta:           frame.Delta,
-		Content:         firstNonEmpty(frame.Content, frame.Result, frame.Message),
-		ToolCallID:      frame.ToolCallID,
-		ToolName:        frame.ToolCallName,
-		Arguments:       frame.Delta,
-		Diff:            frame.Diff,
-		Truncated:       frame.Truncated,
-		Error:           frame.Message,
-		Code:            frame.Code,
-		TerminalReason:  agentcore.TerminalReason(frame.TerminalReason),
-		ToolStatus:      frame.ToolStatus,
-		TransportStatus: frame.TransportStatus,
-		SemanticStatus:  frame.SemanticStatus,
-		ProcessStatus:   frame.ProcessStatus,
-		ProcessExitCode: frame.ProcessExitCode,
-		ProcessTimedOut: frame.ProcessTimedOut,
-		ErrorCode:       frame.ErrorCode,
-		ErrorCategory:   frame.ErrorCategory,
-		Retryable:       frame.Retryable,
-		RecoveryOptions: append([]string(nil), frame.RecoveryOptions...),
-		DurationMs:      frame.DurationMs,
-		ArtifactID:      frame.ArtifactID,
-		ArtifactTitle:   frame.ArtifactTitle,
+		Timestamp:           time.UnixMilli(frame.Timestamp).UTC(),
+		ThreadID:            frame.ThreadID,
+		RunID:               frame.RunID,
+		TurnID:              frame.TurnID,
+		MessageID:           frame.MessageID,
+		ParentMessageID:     frame.ParentMessageID,
+		Role:                frame.Role,
+		Delta:               frame.Delta,
+		Content:             firstNonEmpty(frame.Content, frame.Result, frame.Message),
+		ToolCallID:          frame.ToolCallID,
+		ToolName:            frame.ToolCallName,
+		Arguments:           frame.Delta,
+		Diff:                frame.Diff,
+		Truncated:           frame.Truncated,
+		Error:               frame.Message,
+		Code:                frame.Code,
+		TerminalReason:      agentcore.TerminalReason(frame.TerminalReason),
+		ToolStatus:          frame.ToolStatus,
+		TransportStatus:     frame.TransportStatus,
+		SemanticStatus:      frame.SemanticStatus,
+		ProcessStatus:       frame.ProcessStatus,
+		ProcessExitCode:     frame.ProcessExitCode,
+		ProcessTimedOut:     frame.ProcessTimedOut,
+		ErrorCode:           frame.ErrorCode,
+		ErrorCategory:       frame.ErrorCategory,
+		Retryable:           frame.Retryable,
+		RecoveryOptions:     append([]string(nil), frame.RecoveryOptions...),
+		DurationMs:          frame.DurationMs,
+		ArtifactID:          frame.ArtifactID,
+		ArtifactTitle:       frame.ArtifactTitle,
 		ArtifactDescription: frame.ArtifactDescription,
-		ArtifactKind:    frame.ArtifactKind,
-		ArtifactPath:    frame.ArtifactPath,
-		ArtifactContent: frame.ArtifactContent,
-		ArtifactStatus:  agentcore.ArtifactStatus(frame.ArtifactStatus),
+		ArtifactKind:        frame.ArtifactKind,
+		ArtifactPath:        frame.ArtifactPath,
+		ArtifactContent:     frame.ArtifactContent,
+		ArtifactStatus:      agentcore.ArtifactStatus(frame.ArtifactStatus),
 	}
 	switch frame.Type {
 	case EventRunStarted:

@@ -131,6 +131,7 @@ export type RenameThreadRequest = {
 export type RuntimeThreadTranscriptRunWire = {
   run: RuntimeRunWire;
   events: AguiEvent[];
+  stream_cursor?: number;
 };
 
 export type RuntimeThreadTranscriptWire = {
@@ -141,6 +142,7 @@ export type RuntimeThreadTranscriptWire = {
 export type RuntimeThreadTranscriptRun = {
   run: RuntimeRun;
   events: AguiEvent[];
+  streamCursor?: number;
 };
 
 export type RuntimeThreadTranscript = {
@@ -770,6 +772,7 @@ export function normalizeRuntimeThreadTranscript(
     runs: transcript.runs.map((entry) => ({
       run: normalizeRuntimeRun(entry.run),
       events: entry.events,
+      streamCursor: entry.stream_cursor ?? 0,
     })),
   };
 }

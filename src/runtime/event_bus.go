@@ -1,6 +1,10 @@
 package runtime
 
-import "sync"
+import (
+	"sync"
+
+	"awaken/src/protocol/agui"
+)
 
 const subscriberBufferSize = 2048
 
@@ -93,4 +97,29 @@ func (b *EventBus) Subscribe(afterSeq uint64) Subscription {
 			b.mu.Unlock()
 		},
 	}
+}
+
+// StreamCursor returns a watermark after every frame slot belonging to the
+// latest appended runtime event. The next event always starts above it.
+func (b *EventBus) StreamCursor() uint64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return streamCursorForEventSeq(b.nextSeq)
+}
+
+// Snapshot returns an atomic copy of all retained stream envelopes plus the
+// cursor immediately after them. Active transcript assembly uses this before
+// reading the journal, so records published later are left for SSE resume.
+func (b *EventBus) Snapshot() ([]Event, uint64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	events := append([]Event(nil), b.events...)
+	return events, streamCursorForEventSeq(b.nextSeq)
+}
+
+func streamCursorForEventSeq(seq uint64) uint64 {
+	if seq == 0 {
+		return 0
+	}
+	return agui.FrameSeq(seq, int(agui.FrameSeqStride-1))
 }

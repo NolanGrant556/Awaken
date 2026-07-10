@@ -29,7 +29,6 @@ type SkillTool struct {
 	Activator    *Activator
 	ParentPool   func() []string
 	OnActivated  func(plan *SkillActivationPlan)
-	lastPlan     *SkillActivationPlan
 	// FetchBody is called to obtain the prompt template body at execution
 	// time. Set for MCP-bridged skills whose Body is empty at registration
 	// time (prompts/list only returns metadata, not the template).
@@ -87,11 +86,12 @@ func (st *SkillTool) Execute(ctx context.Context, input string) (string, error) 
 	}
 
 	if st.Activator != nil {
+		scope, scoped := activationScopeFromContext(ctx)
 		var parentPool []string
-		if st.ParentPool != nil {
+		if scoped {
+			parentPool = scope.parentToolPool
+		} else if st.ParentPool != nil {
 			parentPool = st.ParentPool()
-		} else {
-			parentPool = CurrentParentToolPool()
 		}
 		plan, activateErr := st.Activator.Activate(ActivationRequest{
 			SkillID:        st.SkillID,
@@ -99,15 +99,19 @@ func (st *SkillTool) Execute(ctx context.Context, input string) (string, error) 
 			Args:           args,
 		})
 		if activateErr != nil {
-			st.lastPlan = plan
+			if notifyErr := notifyActivation(ctx, scope, plan); notifyErr != nil {
+				return "", notifyErr
+			}
 			if plan != nil && st.OnActivated != nil {
-				st.OnActivated(plan)
+				st.OnActivated(plan.Clone())
 			}
 			return "", activateErr
 		}
-		st.lastPlan = plan
+		if notifyErr := notifyActivation(ctx, scope, plan); notifyErr != nil {
+			return "", notifyErr
+		}
 		if st.OnActivated != nil {
-			st.OnActivated(plan)
+			st.OnActivated(plan.Clone())
 		}
 		if st.Executor == nil {
 			return plan.MainBody, nil
@@ -135,42 +139,6 @@ func (st *SkillTool) Execute(ctx context.Context, input string) (string, error) 
 		return fmt.Sprintf("[skill %q] body after substitution:\n%s", st.SkillID, body), nil
 	}
 	return st.Executor.Execute(ctx, st.SkillID, body, append([]string(nil), st.AllowedTools...))
-}
-
-// LastActivationPlan returns the plan produced by the most recent Execute.
-func (st *SkillTool) LastActivationPlan() *SkillActivationPlan {
-	if st == nil {
-		return nil
-	}
-	return st.lastPlan
-}
-
-// ResolvedToolPoolAfterExecute exposes the effective tool pool for the dual
-// gate after a successful activation.
-func (st *SkillTool) ResolvedToolPoolAfterExecute() []string {
-	if st == nil || st.lastPlan == nil {
-		return nil
-	}
-	if st.lastPlan.CompatibilityStatus != CompatibilityOK {
-		return nil
-	}
-	return append([]string(nil), st.lastPlan.EffectiveTools...)
-}
-
-// LastActivationMainBody returns the host-loaded skill body from the last plan.
-func (st *SkillTool) LastActivationMainBody() string {
-	if st == nil || st.lastPlan == nil {
-		return ""
-	}
-	return st.lastPlan.MainBody
-}
-
-// LastActivationSkillID returns the skill id from the last plan.
-func (st *SkillTool) LastActivationSkillID() string {
-	if st == nil || st.lastPlan == nil {
-		return st.SkillID
-	}
-	return st.lastPlan.SkillID
 }
 
 // IsReadOnly implements tool.ReadOnlyTool. Skills are considered read-only

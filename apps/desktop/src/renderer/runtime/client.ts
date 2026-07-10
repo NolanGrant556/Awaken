@@ -35,6 +35,12 @@ import {
   type WorkspaceRegistryPersistRequest,
   type WorkspaceValidationResult,
 } from "../../shared/runtime";
+import type {
+  PetActivitySnapshot,
+  PetImportReport,
+  PetSettings,
+  PetSummary,
+} from "../../shared/pets";
 
 export type SubscribeHandlers = {
   onEvent: (event: AguiEvent) => void;
@@ -102,6 +108,18 @@ export type RuntimeClient = {
   getSupervisorStatus: () => Promise<SupervisorStatusInfo>;
   onSupervisorStatusChange: (callback: (info: SupervisorStatusInfo) => void) => () => void;
   notifyRendererReady: () => void;
+  listPets: () => Promise<PetSummary[]>;
+  getPetSettings: () => Promise<PetSettings>;
+  selectPet: (petId: string) => Promise<PetSettings>;
+  refreshCodexPets: () => Promise<PetImportReport>;
+  createPet: () => Promise<{ threadId: string }>;
+  setPetOverlayOpen: (open: boolean) => Promise<PetSettings>;
+  setPetImportPreferences: (input: { importCodexPets?: boolean }) => Promise<PetSettings>;
+  updatePetActivity: (snapshot: PetActivitySnapshot) => void;
+  onPetCatalogChanged: (callback: () => void) => () => void;
+  onPetThreadActivationRequested: (callback: (threadId: string) => void) => () => void;
+  openAwakenPetsDirectory: () => Promise<void>;
+  openCodexPetsDirectory: () => Promise<void>;
 };
 
 const MAX_RECONNECT_RETRIES = 5;
@@ -277,6 +295,19 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     getSupervisorStatus: () => bridge.getSupervisorStatus(),
     onSupervisorStatusChange: (callback) => bridge.onSupervisorStatusChange(callback),
     notifyRendererReady: () => bridge.notifyRendererReady(),
+    listPets: () => bridge.listPets(),
+    getPetSettings: () => bridge.getPetSettings(),
+    selectPet: (petId) => bridge.selectPet(petId),
+    refreshCodexPets: () => bridge.refreshCodexPets(),
+    createPet: () => bridge.createPet(),
+    setPetOverlayOpen: (open) => bridge.setPetOverlayOpen(open),
+    setPetImportPreferences: (input) => bridge.setPetImportPreferences(input),
+    updatePetActivity: (snapshot) => bridge.updatePetActivity(snapshot),
+    onPetCatalogChanged: (callback) => bridge.onPetCatalogChanged(callback),
+    onPetThreadActivationRequested: (callback) =>
+      bridge.onPetThreadActivationRequested(callback),
+    openAwakenPetsDirectory: () => bridge.openAwakenPetsDirectory(),
+    openCodexPetsDirectory: () => bridge.openCodexPetsDirectory(),
   };
 }
 

@@ -86,7 +86,9 @@ describe("RuntimeSupervisor", () => {
     expect(spawnOptions?.env).toMatchObject({
       AWAKEN_CORE_ADDR: "127.0.0.1:19001",
       AWAKEN_DEFAULT_WORKSPACE: "/tmp/workspace",
-      AWAKEN_RUNTIME_MANIFEST: expect.stringContaining("resources/runtime-manifest/primary-runtime.json"),
+      AWAKEN_RUNTIME_MANIFEST: expect.stringMatching(
+        /resources[\\/]runtime-manifest[\\/]primary-runtime\.json$/,
+      ),
     });
     expect(spawnOptions?.env).not.toHaveProperty("AWAKEN_CONFIG_DIR");
     expect(spawnOptions?.env).not.toHaveProperty("LLM_API_KEY");

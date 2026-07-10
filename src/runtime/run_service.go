@@ -19,6 +19,7 @@ import (
 
 	"awaken/src/agentcore"
 	convcontext "awaken/src/context"
+	"awaken/src/desktopdata"
 	"awaken/src/skillruntime"
 	"awaken/src/tool"
 	"awaken/src/tool/profile"
@@ -38,6 +39,7 @@ var (
 	ErrMassMessageReviewNotFound  = errors.New("mass message review not found")
 	ErrInvalidReviewDecision      = errors.New("invalid mass message review decision")
 	ErrUserQuestionNotFound       = errors.New("user question not found")
+	ErrPersistenceUnavailable     = agentcore.ErrPersistenceUnavailable
 )
 
 const maxRetainedThreads = 100
@@ -132,6 +134,8 @@ type RunService struct {
 	newProfileAgent  func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent
 	newExecutor      func(agent *agentcore.Agent) Executor
 	threadStore      ThreadStore
+	journals         *journalManager
+	allowNoopRecorder bool
 }
 
 // Thread holds the reusable Agent and metadata for a multi-turn conversation.
@@ -197,12 +201,20 @@ func NewRunService(
 	newAgent func(workspace WorkspaceConfig, threadID string) *agentcore.Agent,
 	newExecutor func(agent *agentcore.Agent) Executor,
 ) *RunService {
+	store := newThreadStore()
+	pathFn := func(threadID string) string {
+		if sqliteStore, ok := store.(*sqliteThreadStore); ok {
+			return sqliteStore.paths.ThreadTranscriptPath(threadID)
+		}
+		return desktopdata.Detect().ThreadTranscriptPath(threadID)
+	}
 	return &RunService{
 		sessions:    make(map[string]*Session),
 		threads:     make(map[string]*Thread),
 		newAgent:    newAgent,
 		newExecutor: newExecutor,
-		threadStore: newThreadStore(),
+		threadStore: store,
+		journals:    newJournalManager(pathFn),
 	}
 }
 
@@ -239,6 +251,9 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	}
 	if s.newProfileAgent != nil && req.ModelProfile == nil {
 		return Run{}, ErrMissingModelProfile
+	}
+	if s.journals == nil && !s.allowNoopRecorder {
+		return Run{}, ErrPersistenceUnavailable
 	}
 
 	workspace, err := normalizeWorkspace(req.Workspace)
@@ -317,8 +332,15 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			s.sessions[runID] = session
 			threadSnapshot = s.threads[threadID].snapshot()
 			s.mu.Unlock()
-			_ = s.threadStore.CreateThread(threadSnapshot, modelProfileKey, threadLabel)
-			_ = s.threadStore.AppendRunInput(threadSnapshot, session.Snapshot(), req.Client.SessionID, trimmed, persistedAttachments)
+			if err := s.bindAgentRecorder(agent, threadID, runID, req.Client.SessionID, threadSnapshot.Label); err != nil {
+				return Run{}, err
+			}
+			if err := s.threadStore.CreateThread(threadSnapshot, modelProfileKey, threadLabel); err != nil {
+				return Run{}, err
+			}
+			if err := s.threadStore.AppendRunInput(threadSnapshot, session.Snapshot(), req.Client.SessionID, trimmed, persistedAttachments); err != nil {
+				return Run{}, err
+			}
 			executor := s.newExecutor(agent)
 			go s.execute(session, executor, agent, effectiveInput, trimmed, persistedAttachments, ctx)
 			return session.Snapshot(), nil
@@ -375,15 +397,49 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	s.sessions[runID] = session
 	s.mu.Unlock()
 
+	if err := s.bindAgentRecorder(agent, threadID, runID, req.Client.SessionID, threadSnapshot.Label); err != nil {
+		return Run{}, err
+	}
 	createThreadErr := s.threadStore.CreateThread(threadSnapshot, modelProfileKey, threadLabel)
 	appendInputErr := s.threadStore.AppendRunInput(threadSnapshot, session.Snapshot(), req.Client.SessionID, trimmed, persistedAttachments)
-	if shouldGenerateThreadTitle && (createThreadErr == nil || appendInputErr == nil) {
+	if createThreadErr != nil {
+		return Run{}, createThreadErr
+	}
+	if appendInputErr != nil {
+		return Run{}, appendInputErr
+	}
+	if shouldGenerateThreadTitle {
 		go s.scheduleThreadTitleGeneration(context.Background(), threadID, runID, trimmed, persistedAttachments, req.ComposerTokens, req.ModelProfile)
 	}
 	executor := s.newExecutor(agent)
 	go s.execute(session, executor, agent, effectiveInput, trimmed, persistedAttachments, ctx)
 
 	return session.Snapshot(), nil
+}
+
+func (s *RunService) bindAgentRecorder(agent *agentcore.Agent, threadID, runID, sessionID, label string) error {
+	if agent == nil {
+		return nil
+	}
+	agent.SetRunIdentity(runID, sessionID)
+	if s.journals == nil {
+		if s.allowNoopRecorder {
+			agent.SetSemanticRecorder(agentcore.NoopSemanticRecorder{})
+			return nil
+		}
+		return ErrPersistenceUnavailable
+	}
+	recorder, err := s.journals.OpenRecorder(threadID)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrPersistenceUnavailable, err)
+	}
+	if journal, ok := recorder.(*ExecutionJournal); ok {
+		if err := ensureThreadJournalRecord(context.Background(), journal, threadID, label); err != nil {
+			return fmt.Errorf("%w: %v", ErrPersistenceUnavailable, err)
+		}
+	}
+	agent.SetSemanticRecorder(recorder)
+	return nil
 }
 
 func (s *RunService) createAgent(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent {
@@ -466,11 +522,24 @@ func (s *RunService) ApplyGeneratedThreadTitle(threadID, seedRunID, title string
 		s.mu.RUnlock()
 	}
 
-	persisted, err := s.threadStore.UpdateThreadTitleMetadata(threadID, title, ThreadTitleSourceLLM, ThreadTitleStatusReady, seedRunID, now)
-	if err != nil {
-		return
+	var persisted ThreadSnapshot
+	var err error
+	for attempt := 0; attempt < 8; attempt++ {
+		persisted, err = s.threadStore.UpdateThreadTitleMetadata(threadID, title, ThreadTitleSourceLLM, ThreadTitleStatusReady, seedRunID, now)
+		if err == nil &&
+			persisted.TitleSource == ThreadTitleSourceLLM &&
+			persisted.TitleStatus == ThreadTitleStatusReady &&
+			persisted.TitleSeedRunID == seedRunID &&
+			persisted.Label == title {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
-	if persisted.TitleSource != ThreadTitleSourceLLM || persisted.TitleStatus != ThreadTitleStatusReady || persisted.TitleSeedRunID != seedRunID || persisted.Label != title {
+	if err != nil ||
+		persisted.TitleSource != ThreadTitleSourceLLM ||
+		persisted.TitleStatus != ThreadTitleStatusReady ||
+		persisted.TitleSeedRunID != seedRunID ||
+		persisted.Label != title {
 		return
 	}
 
@@ -528,11 +597,22 @@ func (s *RunService) markThreadTitleFailed(threadID, seedRunID string) {
 		s.mu.RUnlock()
 	}
 
-	persisted, err := s.threadStore.UpdateThreadTitleMetadata(threadID, "", ThreadTitleSourceFirstUser, ThreadTitleStatusFailed, seedRunID, now)
-	if err != nil {
-		return
+	var persisted ThreadSnapshot
+	var err error
+	for attempt := 0; attempt < 8; attempt++ {
+		persisted, err = s.threadStore.UpdateThreadTitleMetadata(threadID, "", ThreadTitleSourceFirstUser, ThreadTitleStatusFailed, seedRunID, now)
+		if err == nil &&
+			persisted.TitleSource == ThreadTitleSourceFirstUser &&
+			persisted.TitleStatus == ThreadTitleStatusFailed &&
+			persisted.TitleSeedRunID == seedRunID {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
-	if persisted.TitleSource != ThreadTitleSourceFirstUser || persisted.TitleStatus != ThreadTitleStatusFailed || persisted.TitleSeedRunID != seedRunID {
+	if err != nil ||
+		persisted.TitleSource != ThreadTitleSourceFirstUser ||
+		persisted.TitleStatus != ThreadTitleStatusFailed ||
+		persisted.TitleSeedRunID != seedRunID {
 		return
 	}
 
@@ -633,7 +713,7 @@ func (s *RunService) RenameThread(threadID, label string) (ThreadSnapshot, error
 	return s.threadStore.RenameThread(threadID, normalizedLabel, now)
 }
 
-func (s *RunService) FlushTranscripts() {
+func (s *RunService) FlushTranscripts() error {
 	s.mu.RLock()
 	sessions := make([]*Session, 0, len(s.sessions))
 	for _, session := range s.sessions {
@@ -641,6 +721,7 @@ func (s *RunService) FlushTranscripts() {
 	}
 	s.mu.RUnlock()
 
+	var firstErr error
 	for _, session := range sessions {
 		run := session.Snapshot()
 		snapshot, ok := s.threadSnapshot(run.ThreadID)
@@ -653,9 +734,17 @@ func (s *RunService) FlushTranscripts() {
 		if !ok || thread.agent == nil {
 			continue
 		}
-		_ = s.threadStore.AppendConversation(snapshot, run, thread.agent.GetConversation().Context.GetMessages())
-		_ = s.threadStore.AppendRunEvents(snapshot, run, session.History(0))
+		if err := s.flushAgentTranscript(session, thread.agent); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		_ = snapshot
 	}
+	if s.journals != nil {
+		if err := s.journals.FlushAll(context.Background()); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 func (s *RunService) DeleteThread(threadID string) error {
@@ -915,17 +1004,28 @@ func restoreAgentDisplayInput(agent *agentcore.Agent, effectiveInput string, dis
 	}
 }
 
-func (s *RunService) flushAgentTranscript(session *Session, agent *agentcore.Agent) {
+func (s *RunService) flushAgentTranscript(session *Session, agent *agentcore.Agent) error {
 	if session == nil || agent == nil {
-		return
+		return nil
 	}
 	run := session.Snapshot()
 	snapshot, ok := s.threadSnapshot(run.ThreadID)
 	if !ok {
-		return
+		return nil
 	}
-	_ = s.threadStore.AppendConversation(snapshot, run, agent.GetConversation().Context.GetMessages())
-	_ = s.threadStore.AppendRunEvents(snapshot, run, session.History(0))
+	var firstErr error
+	if recorder := agent.SemanticRecorder(); recorder != nil {
+		if err := recorder.Flush(context.Background()); err != nil {
+			firstErr = err
+		}
+	}
+	if err := s.threadStore.AppendConversation(snapshot, run, agent.GetConversation().Context.GetMessages()); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	if err := s.threadStore.AppendRunEvents(snapshot, run, session.History(0)); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	return firstErr
 }
 
 func (s *RunService) clearActiveRun(threadID, runID string) {

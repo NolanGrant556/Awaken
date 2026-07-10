@@ -1,0 +1,618 @@
+package runtime
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	"awaken/src/agentcore"
+	convcontext "awaken/src/context"
+	"awaken/src/tool"
+)
+
+// journalManager owns one ExecutionJournal writer per thread.
+type journalManager struct {
+	mu       sync.Mutex
+	journals map[string]*ExecutionJournal
+	pathFn   func(threadID string) string
+}
+
+func newJournalManager(pathFn func(threadID string) string) *journalManager {
+	return &journalManager{
+		journals: map[string]*ExecutionJournal{},
+		pathFn:   pathFn,
+	}
+}
+
+func (m *journalManager) Open(threadID string) (*ExecutionJournal, error) {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return nil, fmt.Errorf("thread id is required")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if existing, ok := m.journals[threadID]; ok {
+		return existing, nil
+	}
+	path := m.pathFn(threadID)
+	schema, err := DetectJournalSchema(path)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	if schema == 1 {
+		return nil, fmt.Errorf("thread %s uses legacy v1 transcript", threadID)
+	}
+	journal, err := NewExecutionJournal(path, threadID)
+	if err != nil {
+		return nil, err
+	}
+	m.journals[threadID] = journal
+	return journal, nil
+}
+
+func (m *journalManager) OpenRecorder(threadID string) (agentcore.SemanticRecorder, error) {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return nil, fmt.Errorf("thread id is required")
+	}
+	path := m.pathFn(threadID)
+	schema, err := DetectJournalSchema(path)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	if schema == 1 {
+		return newV1SemanticRecorder(path, threadID), nil
+	}
+	return m.Open(threadID)
+}
+
+func (m *journalManager) Get(threadID string) (*ExecutionJournal, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	j, ok := m.journals[threadID]
+	return j, ok
+}
+
+func (m *journalManager) Flush(ctx context.Context, threadID string) error {
+	journal, ok := m.Get(threadID)
+	if !ok {
+		return nil
+	}
+	return journal.Flush(ctx)
+}
+
+func (m *journalManager) FlushAll(ctx context.Context) error {
+	m.mu.Lock()
+	journals := make([]*ExecutionJournal, 0, len(m.journals))
+	for _, journal := range m.journals {
+		journals = append(journals, journal)
+	}
+	m.mu.Unlock()
+	var firstErr error
+	for _, journal := range journals {
+		if err := journal.Flush(ctx); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func (m *journalManager) CloseThread(threadID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	journal, ok := m.journals[threadID]
+	if !ok {
+		return nil
+	}
+	delete(m.journals, threadID)
+	return journal.Close()
+}
+
+func ensureThreadJournalRecord(ctx context.Context, journal *ExecutionJournal, threadID, label string) error {
+	records, err := ReadExecutionJournal(journal.Path())
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, record := range records {
+		if record.Kind == agentcore.SemanticKindThread {
+			return nil
+		}
+	}
+	return journal.Append(ctx, agentcore.NewSemanticRecord(
+		agentcore.SemanticKindThread,
+		threadID,
+		"",
+		"",
+		"",
+		"",
+		map[string]any{"label": strings.TrimSpace(label)},
+	))
+}
+
+func loadSemanticRecordsForThread(path string) ([]agentcore.SemanticRecord, int, error) {
+	schema, err := DetectJournalSchema(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, 0, err
+		}
+		// Empty file returns schema 2.
+		if !os.IsNotExist(err) && schema == 0 {
+			return nil, 0, err
+		}
+	}
+	if schema == 1 {
+		records, err := (LegacyTranscriptAdapter{}).ReadFile(path)
+		return records, 1, err
+	}
+	records, err := ReadExecutionJournal(path)
+	return records, agentcore.SemanticSchemaVersion, err
+}
+
+func messagesFromSemanticRecords(records []agentcore.SemanticRecord) []convcontext.Message {
+	messages := make([]convcontext.Message, 0, len(records))
+	pendingAssistant := map[string]*convcontext.Message{}
+
+	for _, record := range records {
+		switch record.Kind {
+		case agentcore.SemanticKindUserMessage:
+			messages = append(messages, convcontext.Message{
+				Role:    convcontext.RoleUser,
+				Content: stringPayload(record.Payload, "content"),
+			})
+		case agentcore.SemanticKindAssistantMessage:
+			msg := convcontext.Message{
+				Role:    convcontext.RoleAssistant,
+				Content: stringPayload(record.Payload, "content"),
+			}
+			messages = append(messages, msg)
+			if id := stringPayload(record.Payload, "message_id"); id != "" {
+				pendingAssistant[id] = &messages[len(messages)-1]
+			}
+		case agentcore.SemanticKindToolCall:
+			call := convcontext.ToolCall{
+				ID:   stringPayload(record.Payload, "tool_call_id"),
+				Type: "function",
+				Function: convcontext.FunctionCall{
+					Name:      stringPayload(record.Payload, "tool_name"),
+					Arguments: stringPayload(record.Payload, "arguments"),
+				},
+			}
+			if len(messages) > 0 && messages[len(messages)-1].Role == convcontext.RoleAssistant {
+				messages[len(messages)-1].ToolCalls = append(messages[len(messages)-1].ToolCalls, call)
+			} else {
+				messages = append(messages, convcontext.Message{
+					Role:      convcontext.RoleAssistant,
+					ToolCalls: []convcontext.ToolCall{call},
+				})
+			}
+		case agentcore.SemanticKindToolResult:
+			msg := convcontext.Message{
+				Role:       convcontext.RoleTool,
+				Content:    stringPayload(record.Payload, "content"),
+				ToolCallID: stringPayload(record.Payload, "tool_call_id"),
+				Name:       stringPayload(record.Payload, "tool_name"),
+				IsError:    boolPayload(record.Payload, "is_error"),
+			}
+			messages = append(messages, msg)
+		}
+	}
+	_ = pendingAssistant
+	return messages
+}
+
+func recoverOrphanRuns(ctx context.Context, journal *ExecutionJournal, records []agentcore.SemanticRecord) ([]agentcore.SemanticRecord, error) {
+	type runState struct {
+		started bool
+		terminal bool
+		openCalls map[string]agentcore.SemanticRecord
+	}
+	runs := map[string]*runState{}
+	for _, record := range records {
+		runID := record.RunID
+		if runID == "" {
+			continue
+		}
+		state, ok := runs[runID]
+		if !ok {
+			state = &runState{openCalls: map[string]agentcore.SemanticRecord{}}
+			runs[runID] = state
+		}
+		switch record.Kind {
+		case agentcore.SemanticKindRunStarted:
+			state.started = true
+		case agentcore.SemanticKindRunTerminal:
+			state.terminal = true
+		case agentcore.SemanticKindToolCall:
+			callID := stringPayload(record.Payload, "tool_call_id")
+			if callID != "" {
+				state.openCalls[callID] = record
+			}
+		case agentcore.SemanticKindToolResult:
+			callID := stringPayload(record.Payload, "tool_call_id")
+			delete(state.openCalls, callID)
+		}
+	}
+
+	var appended []agentcore.SemanticRecord
+	for runID, state := range runs {
+		if !state.started || state.terminal {
+			continue
+		}
+		for callID, callRecord := range state.openCalls {
+			outcome := SyntheticInterruptedToolResult()
+			payload := map[string]any{
+				"tool_call_id": callID,
+				"tool_name":    stringPayload(callRecord.Payload, "tool_name"),
+				"content":      outcome.Content,
+				"is_error":     true,
+				"outcome":      outcomeToAnyMap(outcome),
+			}
+			resultRec := agentcore.NewSemanticRecord(
+				agentcore.SemanticKindToolResult,
+				journal.ThreadID(),
+				runID,
+				callRecord.TurnID,
+				callID,
+				callRecord.SessionID,
+				payload,
+			)
+			// Preserve original seq numbering by letting journal assign next seq.
+			if err := journal.Append(ctx, resultRec); err != nil {
+				return records, err
+			}
+			appended = append(appended, resultRec)
+		}
+		terminal := agentcore.NewSemanticRecord(
+			agentcore.SemanticKindRunTerminal,
+			journal.ThreadID(),
+			runID,
+			"",
+			"",
+			"",
+			map[string]any{
+				"status": "interrupted",
+				"reason": "process_restarted",
+			},
+		)
+		if err := journal.Append(ctx, terminal); err != nil {
+			return records, err
+		}
+		if err := journal.Flush(ctx); err != nil {
+			return records, err
+		}
+		appended = append(appended, terminal)
+	}
+	if len(appended) == 0 {
+		return records, nil
+	}
+	return append(append([]agentcore.SemanticRecord{}, records...), appended...), nil
+}
+
+func outcomeToAnyMap(outcome tool.ExecutionOutcome) map[string]any {
+	raw, err := json.Marshal(outcome)
+	if err != nil {
+		return map[string]any{
+			"status":            string(outcome.Status),
+			"error_code":        outcome.ErrorCode,
+			"error_category":    string(outcome.ErrorCategory),
+			"retryable":         outcome.Retryable,
+			"transport_status":  string(outcome.TransportStatus),
+			"semantic_status":   string(outcome.SemanticStatus),
+			"process_status":    string(outcome.ProcessStatus),
+			"diagnostic":        outcome.Diagnostic,
+		}
+	}
+	var out map[string]any
+	_ = json.Unmarshal(raw, &out)
+	return out
+}
+
+func stringPayload(payload map[string]any, key string) string {
+	if payload == nil {
+		return ""
+	}
+	value, ok := payload[key]
+	if !ok || value == nil {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return typed
+	default:
+		return fmt.Sprint(typed)
+	}
+}
+
+func boolPayload(payload map[string]any, key string) bool {
+	if payload == nil {
+		return false
+	}
+	value, ok := payload[key]
+	if !ok || value == nil {
+		return false
+	}
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	default:
+		return false
+	}
+}
+
+func runIDsFromSemanticRecords(records []agentcore.SemanticRecord) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, record := range records {
+		if record.RunID == "" || seen[record.RunID] {
+			continue
+		}
+		seen[record.RunID] = true
+		out = append(out, record.RunID)
+	}
+	return out
+}
+
+func restoredTranscriptFromSemantic(records []agentcore.SemanticRecord) restoredTranscript {
+	restored := restoredTranscript{
+		Messages: messagesFromSemanticRecords(records),
+		RunIDs:   runIDsFromSemanticRecords(records),
+	}
+	for _, record := range records {
+		if restored.CreatedAt.IsZero() || record.Timestamp.Before(restored.CreatedAt) {
+			restored.CreatedAt = record.Timestamp
+		}
+		if record.Timestamp.After(restored.UpdatedAt) {
+			restored.UpdatedAt = record.Timestamp
+		}
+		if record.Kind == agentcore.SemanticKindThread {
+			restored.Label = stringPayload(record.Payload, "label")
+		}
+	}
+	if restored.CreatedAt.IsZero() {
+		restored.CreatedAt = time.Now().UTC()
+	}
+	if restored.UpdatedAt.IsZero() {
+		restored.UpdatedAt = restored.CreatedAt
+	}
+	return restored
+}
+
+func durableRunsFromSemanticRecords(threadID string, records []agentcore.SemanticRecord) map[string]ThreadTranscriptRun {
+	byRun := map[string][]agentcore.SemanticRecord{}
+	runMeta := map[string]*Run{}
+	for _, record := range records {
+		if record.RunID == "" {
+			continue
+		}
+		byRun[record.RunID] = append(byRun[record.RunID], record)
+		run, ok := runMeta[record.RunID]
+		if !ok {
+			created := record.Timestamp
+			run = &Run{
+				RunID:     record.RunID,
+				ThreadID:  firstNonEmpty(record.ThreadID, threadID),
+				Status:    RunStatusRunning,
+				CreatedAt: created,
+				UpdatedAt: created,
+			}
+			runMeta[record.RunID] = run
+		}
+		if record.Timestamp.Before(run.CreatedAt) || run.CreatedAt.IsZero() {
+			run.CreatedAt = record.Timestamp
+		}
+		if record.Timestamp.After(run.UpdatedAt) {
+			run.UpdatedAt = record.Timestamp
+		}
+		switch record.Kind {
+		case agentcore.SemanticKindUserMessage:
+			if run.Input == "" {
+				run.Input = stringPayload(record.Payload, "content")
+			}
+		case agentcore.SemanticKindRunStarted:
+			run.Status = RunStatusRunning
+		case agentcore.SemanticKindRunTerminal:
+			status := stringPayload(record.Payload, "status")
+			finished := record.Timestamp
+			run.FinishedAt = &finished
+			switch status {
+			case "finished":
+				run.Status = RunStatusFinished
+				run.Result = stringPayload(record.Payload, "result")
+			case "cancelled":
+				run.Status = RunStatusCancelled
+				run.Error = stringPayload(record.Payload, "error")
+				run.Result = stringPayload(record.Payload, "result")
+			case "interrupted":
+				run.Status = RunStatusError
+				run.Error = firstNonEmpty(stringPayload(record.Payload, "error"), "process restarted")
+			default:
+				run.Status = RunStatusError
+				run.Error = firstNonEmpty(stringPayload(record.Payload, "error"), "run failed")
+			}
+		}
+	}
+
+	out := make(map[string]ThreadTranscriptRun, len(byRun))
+	for runID, runRecords := range byRun {
+		run := *runMeta[runID]
+		events := make([]Event, 0, len(runRecords))
+		for _, record := range runRecords {
+			for _, agentEvent := range semanticRecordToAgentEvents(record) {
+				events = append(events, Event{
+					Kind:           EventKindAgent,
+					Seq:            record.Seq,
+					Timestamp:      record.Timestamp,
+					ThreadID:       run.ThreadID,
+					RunID:          runID,
+					AgentEvent:     agentEvent,
+					TerminalReason: agentEvent.TerminalReason,
+				})
+			}
+		}
+		out[runID] = ThreadTranscriptRun{Run: run, Events: events}
+	}
+	return out
+}
+
+func semanticRecordToAgentEvents(record agentcore.SemanticRecord) []agentcore.AwakenEvent {
+	// Local projection keeps runtime independent of importing projector cycles in tests.
+	switch record.Kind {
+	case agentcore.SemanticKindRunStarted:
+		return []agentcore.AwakenEvent{{
+			Type:      agentcore.RunStartedEventType,
+			Timestamp: record.Timestamp,
+			ThreadID:  record.ThreadID,
+			RunID:     record.RunID,
+			TurnID:    record.TurnID,
+		}}
+	case agentcore.SemanticKindAssistantMessage:
+		content := stringPayload(record.Payload, "content")
+		if strings.TrimSpace(content) == "" {
+			return nil
+		}
+		messageID := firstNonEmpty(stringPayload(record.Payload, "message_id"), record.RecordID)
+		return []agentcore.AwakenEvent{
+			{Type: agentcore.TextMessageStartedEventType, Timestamp: record.Timestamp, ThreadID: record.ThreadID, RunID: record.RunID, TurnID: record.TurnID, MessageID: messageID, Role: "assistant"},
+			{Type: agentcore.TextDeltaEventType, Timestamp: record.Timestamp, ThreadID: record.ThreadID, RunID: record.RunID, TurnID: record.TurnID, MessageID: messageID, Role: "assistant", Delta: content},
+			{Type: agentcore.TextMessageFinishedEventType, Timestamp: record.Timestamp, ThreadID: record.ThreadID, RunID: record.RunID, TurnID: record.TurnID, MessageID: messageID, Role: "assistant"},
+		}
+	case agentcore.SemanticKindToolCall:
+		toolCallID := stringPayload(record.Payload, "tool_call_id")
+		toolName := stringPayload(record.Payload, "tool_name")
+		args := stringPayload(record.Payload, "arguments")
+		events := []agentcore.AwakenEvent{{
+			Type:            agentcore.ToolCallStartedEventType,
+			Timestamp:       record.Timestamp,
+			ThreadID:        record.ThreadID,
+			RunID:           record.RunID,
+			TurnID:          record.TurnID,
+			ToolCallID:      toolCallID,
+			ToolName:        toolName,
+			ParentMessageID: record.ParentID,
+		}}
+		if args != "" {
+			events = append(events, agentcore.AwakenEvent{
+				Type:       agentcore.ToolCallArgsEventType,
+				Timestamp:  record.Timestamp,
+				ThreadID:   record.ThreadID,
+				RunID:      record.RunID,
+				TurnID:     record.TurnID,
+				ToolCallID: toolCallID,
+				ToolName:   toolName,
+				Arguments:  args,
+			})
+		}
+		events = append(events, agentcore.AwakenEvent{
+			Type:       agentcore.ToolCallFinishedEventType,
+			Timestamp:  record.Timestamp,
+			ThreadID:   record.ThreadID,
+			RunID:      record.RunID,
+			TurnID:     record.TurnID,
+			ToolCallID: toolCallID,
+			ToolName:   toolName,
+		})
+		return events
+	case agentcore.SemanticKindToolResult:
+		event := agentcore.AwakenEvent{
+			Type:       agentcore.ToolResultEventType,
+			Timestamp:  record.Timestamp,
+			ThreadID:   record.ThreadID,
+			RunID:      record.RunID,
+			TurnID:     record.TurnID,
+			ToolCallID: stringPayload(record.Payload, "tool_call_id"),
+			ToolName:   stringPayload(record.Payload, "tool_name"),
+			Content:    stringPayload(record.Payload, "content"),
+			Role:       "tool",
+		}
+		if outcome, ok := record.Payload["outcome"].(map[string]any); ok {
+			event.ToolStatus = stringPayload(outcome, "status")
+			event.TransportStatus = stringPayload(outcome, "transport_status")
+			event.SemanticStatus = stringPayload(outcome, "semantic_status")
+			event.ProcessStatus = stringPayload(outcome, "process_status")
+			event.ErrorCode = stringPayload(outcome, "error_code")
+			event.ErrorCategory = stringPayload(outcome, "error_category")
+			event.Retryable = boolPayload(outcome, "retryable")
+		} else if boolPayload(record.Payload, "is_error") {
+			event.ToolStatus = "failed"
+		}
+		return []agentcore.AwakenEvent{event}
+	case agentcore.SemanticKindArtifact:
+		eventType := agentcore.ArtifactUpdatedEventType
+		if boolPayload(record.Payload, "created") {
+			eventType = agentcore.ArtifactCreatedEventType
+		}
+		return []agentcore.AwakenEvent{{
+			Type:                eventType,
+			Timestamp:           record.Timestamp,
+			ThreadID:            record.ThreadID,
+			RunID:               record.RunID,
+			TurnID:              record.TurnID,
+			ToolCallID:          stringPayload(record.Payload, "tool_call_id"),
+			ToolName:            stringPayload(record.Payload, "tool_name"),
+			ArtifactID:          stringPayload(record.Payload, "artifact_id"),
+			ArtifactTitle:       stringPayload(record.Payload, "title"),
+			ArtifactDescription: stringPayload(record.Payload, "description"),
+			ArtifactKind:        stringPayload(record.Payload, "kind"),
+			ArtifactPath:        stringPayload(record.Payload, "path"),
+			ArtifactContent:     stringPayload(record.Payload, "content"),
+			ArtifactStatus:      agentcore.ArtifactStatus(stringPayload(record.Payload, "status")),
+		}}
+	case agentcore.SemanticKindTurnDiff:
+		return []agentcore.AwakenEvent{{
+			Type:      agentcore.TurnDiffEventType,
+			Timestamp: record.Timestamp,
+			ThreadID:  record.ThreadID,
+			RunID:     record.RunID,
+			TurnID:    record.TurnID,
+			Diff:      stringPayload(record.Payload, "diff"),
+			Truncated: boolPayload(record.Payload, "truncated"),
+		}}
+	case agentcore.SemanticKindTurnBoundary:
+		return []agentcore.AwakenEvent{{
+			Type:             agentcore.TurnFinishedEventType,
+			Timestamp:        record.Timestamp,
+			ThreadID:         record.ThreadID,
+			RunID:            record.RunID,
+			TurnID:           record.TurnID,
+			TerminalReason:   agentcore.TerminalReason(stringPayload(record.Payload, "terminal_reason")),
+			TransitionReason: agentcore.TransitionReason(stringPayload(record.Payload, "transition_reason")),
+		}}
+	case agentcore.SemanticKindRunTerminal:
+		status := stringPayload(record.Payload, "status")
+		if status == "finished" {
+			return []agentcore.AwakenEvent{{
+				Type:           agentcore.RunFinishedEventType,
+				Timestamp:      record.Timestamp,
+				ThreadID:       record.ThreadID,
+				RunID:          record.RunID,
+				TurnID:         record.TurnID,
+				Content:        stringPayload(record.Payload, "result"),
+				TerminalReason: agentcore.TerminalReason(stringPayload(record.Payload, "terminal_reason")),
+			}}
+		}
+		code := stringPayload(record.Payload, "code")
+		if status == "cancelled" && code == "" {
+			code = "RUN_CANCELLED"
+		}
+		if status == "interrupted" && code == "" {
+			code = "PROCESS_RESTARTED"
+		}
+		return []agentcore.AwakenEvent{{
+			Type:           agentcore.RunErrorEventType,
+			Timestamp:      record.Timestamp,
+			ThreadID:       record.ThreadID,
+			RunID:          record.RunID,
+			TurnID:         record.TurnID,
+			Error:          firstNonEmpty(stringPayload(record.Payload, "error"), status),
+			Code:           code,
+			Content:        stringPayload(record.Payload, "result"),
+			TerminalReason: agentcore.TerminalReason(firstNonEmpty(stringPayload(record.Payload, "terminal_reason"), stringPayload(record.Payload, "reason"))),
+		}}
+	default:
+		return nil
+	}
+}

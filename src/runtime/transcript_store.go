@@ -571,6 +571,8 @@ func recoverableAgentEventForTranscript(event Event) (agentcore.AwakenEvent, boo
 }
 
 func isRecoverableTranscriptEvent(eventType agentcore.AwakenEventType) bool {
+	// v1 AppendRunEvents whitelist. New threads write SemanticJournal v2 instead.
+	// Continuing v1 threads persist tool facts via v1SemanticRecorder, which bypasses this filter.
 	return isContextTranscriptEvent(eventType) ||
 		eventType == agentcore.TurnFinishedEventType ||
 		eventType == agentcore.RunFinishedEventType ||

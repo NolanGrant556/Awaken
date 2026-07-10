@@ -193,25 +193,7 @@ func firstNonEmptyAttachmentValue(values ...string) string {
 }
 
 func (rb *RequestBuilder) buildToolParameters(t tool.Tool) tool.ToolParametersSchema {
-	params := t.Parameters()
-	properties := make(map[string]tool.ToolParam, len(params))
-	required := make([]string, 0)
-
-	for _, p := range params {
-		properties[p.Name] = tool.ToolParam{
-			Type:        p.Type,
-			Description: p.Description,
-		}
-		if p.Required {
-			required = append(required, p.Name)
-		}
-	}
-
-	return tool.ToolParametersSchema{
-		Type:       "object",
-		Properties: properties,
-		Required:   required,
-	}
+	return tool.ResolveInputSchema(t)
 }
 
 func (rb *RequestBuilder) updateRuntimeInfoFromConfig(tools []tool.ToolSchema) {

@@ -201,6 +201,7 @@ export class PetWindowManager {
   private latestInteractiveRegion: Rectangle = { x: 0, y: 0, ...fixedOverlaySize };
   private dragOrigin: PetDragOrigin | null = null;
   private registeredHandlers = false;
+  private recoveryTimer: ReturnType<typeof setInterval> | null = null;
   private readonly handleDisplayChange = (): void => {
     if (!this.isOpen()) return;
     const bounds = this.window!.getBounds();
@@ -237,14 +238,18 @@ export class PetWindowManager {
 
     if (this.isOpen()) {
       await this.setPet(targetPetId);
-      this.window?.show();
+      this.window?.showInactive();
+      this.restoreAlwaysOnTop();
+      this.startRecoveryWatchdog();
       return;
     }
 
     await this.createWindow(targetPetId);
+    this.startRecoveryWatchdog();
   }
 
   hide(): void {
+    this.stopRecoveryWatchdog();
     if (this.isOpen()) {
       this.savePlacement();
       this.window?.hide();
@@ -276,6 +281,7 @@ export class PetWindowManager {
   }
 
   async dispose(): Promise<void> {
+    this.stopRecoveryWatchdog();
     if (this.isOpen()) {
       await this.petStore.setPlacement(this.buildPlacement());
       this.window?.close();
@@ -311,19 +317,21 @@ export class PetWindowManager {
       hasShadow: false,
       show: false,
       focusable: true,
+      paintWhenInitiallyHidden: true,
       webPreferences: {
         preload: preloadPath,
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: false,
+        backgroundThrottling: false,
       },
     });
 
     if (process.platform === "darwin") {
       this.window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-      this.window.setAlwaysOnTop(true, "floating");
+      this.window.setAlwaysOnTop(true, "screen-saver");
     } else {
-      this.window.setAlwaysOnTop(true, "floating");
+      this.window.setAlwaysOnTop(true, "screen-saver");
     }
 
     this.window.setIgnoreMouseEvents(true, { forward: true });
@@ -352,7 +360,54 @@ export class PetWindowManager {
 
     await loadUrl;
 
-    this.window.show();
+    this.window.showInactive();
+  }
+
+  private restoreAlwaysOnTop(): void {
+    if (!this.isOpen()) return;
+    if (process.platform === "darwin") {
+      this.window!.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    }
+    this.window!.setAlwaysOnTop(true, "screen-saver");
+    this.window!.moveTop();
+  }
+
+  private startRecoveryWatchdog(): void {
+    this.stopRecoveryWatchdog();
+    this.recoveryTimer = setInterval(() => {
+      void this.recoverPetWindowIfNeeded();
+    }, 3000);
+  }
+
+  private stopRecoveryWatchdog(): void {
+    if (this.recoveryTimer) {
+      clearInterval(this.recoveryTimer);
+      this.recoveryTimer = null;
+    }
+  }
+
+  private async recoverPetWindowIfNeeded(): Promise<void> {
+    const settings = this.petStore.getSettings();
+    const shouldBeVisible = settings.overlayOpen && settings.selectedPetId;
+    if (!shouldBeVisible) {
+      return;
+    }
+
+    if (!this.isOpen()) {
+      if (settings.selectedPetId) {
+        await this.show(settings.selectedPetId);
+      }
+      return;
+    }
+
+    const win = this.window!;
+    if (win.isMinimized()) {
+      win.restore();
+    }
+    if (!win.isVisible()) {
+      win.showInactive();
+    }
+    this.restoreAlwaysOnTop();
   }
 
   private registerProtocol(): void {

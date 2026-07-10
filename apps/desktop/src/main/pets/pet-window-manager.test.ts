@@ -5,6 +5,7 @@ import os from "node:os";
 import { PetStore } from "./pet-store.js";
 import { BrowserWindow } from "electron";
 import {
+  applyPetWindowVisibilityPolicy,
   PetWindowManager,
   resolvePetWindowPaths,
 } from "./pet-window-manager.js";
@@ -95,6 +96,39 @@ async function createSpritesheet(dir: string, name = "spritesheet.webp"): Promis
   await fs.writeFile(file, webp);
   return file;
 }
+
+describe("applyPetWindowVisibilityPolicy", () => {
+  it("keeps the macOS app process type intact while preserving fullscreen visibility", () => {
+    const window = {
+      setVisibleOnAllWorkspaces: vi.fn(),
+      setAlwaysOnTop: vi.fn(),
+      moveTop: vi.fn(),
+    };
+
+    applyPetWindowVisibilityPolicy(window, "darwin", true);
+
+    expect(window.setVisibleOnAllWorkspaces).toHaveBeenCalledWith(true, {
+      visibleOnFullScreen: true,
+      skipTransformProcessType: true,
+    });
+    expect(window.setAlwaysOnTop).toHaveBeenCalledWith(true, "screen-saver");
+    expect(window.moveTop).toHaveBeenCalledOnce();
+  });
+
+  it("preserves the existing Windows visibility policy", () => {
+    const window = {
+      setVisibleOnAllWorkspaces: vi.fn(),
+      setAlwaysOnTop: vi.fn(),
+      moveTop: vi.fn(),
+    };
+
+    applyPetWindowVisibilityPolicy(window, "win32");
+
+    expect(window.setVisibleOnAllWorkspaces).not.toHaveBeenCalled();
+    expect(window.setAlwaysOnTop).toHaveBeenCalledWith(true, "screen-saver");
+    expect(window.moveTop).not.toHaveBeenCalled();
+  });
+});
 
 describe("PetWindowManager", () => {
   let tempDir: string;

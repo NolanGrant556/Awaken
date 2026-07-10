@@ -155,6 +155,10 @@ shell 执行仍应记录：
 
 UI 不展示通用审批卡。普通 shell 命令显示为自动执行；直接删除显示结构化拒绝；群发显示专用人工审核。非零退出必须显示 failed 与 exitCode，不得因 content 非空而显示成功。
 
+## FailureSupervisor 交互
+
+shell 的 `process_exit_nonzero`、`process_timeout`、`process_spawn_failed` 进入 `FailureSupervisor` 预算与恢复映射：相同非零命令不得无限重放；恢复选项固定为先解释 exit code/stderr，再改变命令或停止。单一 `rg`/`grep`/`diff`/`test` 的 neutral 成功不计入失败预算。
+
 ## 验收用例
 
 应允许：

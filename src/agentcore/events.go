@@ -54,6 +54,8 @@ const (
 	ArtifactUpdatedEventType       AwakenEventType = "ArtifactUpdated"
 	SkillActivatedEventType        AwakenEventType = "SkillActivated"
 	ResourceReceiptEventType       AwakenEventType = "ResourceReceipt"
+	ToolRecoveryRequiredEventType  AwakenEventType = "ToolRecoveryRequired"
+	ToolRetryBlockedEventType      AwakenEventType = "ToolRetryBlocked"
 )
 
 type ReviewDecision string

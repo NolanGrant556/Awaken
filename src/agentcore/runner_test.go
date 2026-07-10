@@ -390,45 +390,38 @@ func TestRunnerHundredToolLoopStopsAtMaxTurns(t *testing.T) {
 	}
 }
 
-func TestRunnerZeroMaxThoughtsAllowsMoreThanDefaultLimit(t *testing.T) {
-	toolName := "runner_unlimited_loop_tool"
+func TestRunnerZeroMaxThoughtsUsesDefaultNotUnlimited(t *testing.T) {
+	if got := EffectiveMaxAgentTurns(0); got != DefaultMaxAgentTurns {
+		t.Fatalf("MaxThoughts=0 must use product default %d, got %d", DefaultMaxAgentTurns, got)
+	}
+	toolName := "runner_default_limit_tool"
 	mustRegisterRunnerTool(t, runnerTestTool{name: toolName})
 
 	var calls int
 	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		if calls <= 7 {
+		if calls <= 3 {
 			writeRunnerStreamToolCall(t, w,
-				fmt.Sprintf("call_unlimited_%03d", calls),
+				fmt.Sprintf("call_default_%03d", calls),
 				toolName,
 				map[string]string{"value": fmt.Sprintf("again-%03d", calls)},
 			)
 			return
 		}
-		writeRunnerStreamText(t, w, "unlimited final")
+		writeRunnerStreamText(t, w, "default final")
 	})
 	defer server.Close()
 
 	agent := NewAgent(testAgentConfig(server.URL, 0))
-	answer, err := agent.RunStreamWithEvents(context.Background(), "loop without max", nil)
+	answer, err := agent.RunStreamWithEvents(context.Background(), "loop with default budget", nil)
 	if err != nil {
 		t.Fatalf("RunStreamWithEvents returned error: %v", err)
 	}
-	if answer != "unlimited final" {
+	if answer != "default final" {
 		t.Fatalf("expected final answer, got %q", answer)
 	}
-	if calls != 8 {
-		t.Fatalf("expected 8 LLM calls, got %d", calls)
-	}
-
-	var toolResultCount int
-	for _, msg := range agent.GetConversation().Context.GetMessages() {
-		if msg.Role == convcontext.RoleTool {
-			toolResultCount++
-		}
-	}
-	if toolResultCount != 7 {
-		t.Fatalf("expected 7 tool results, got %d", toolResultCount)
+	if calls != 4 {
+		t.Fatalf("expected 4 LLM calls under default budget, got %d", calls)
 	}
 }
 

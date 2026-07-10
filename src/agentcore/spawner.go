@@ -96,6 +96,7 @@ func CreateSubagent(parent AgentConfig, spawn SpawnConfig) (AgentConfig, error) 
 		// usable. The caller may override these.
 		SystemPrompt:       parent.SystemPrompt,
 		MaxThoughts:        parent.MaxThoughts,
+		MaxToolExecutions:  parent.MaxToolExecutions,
 		ModelConfig:        parent.ModelConfig,
 		EntryPoint:         parent.EntryPoint,
 		Workspace:          parent.Workspace,

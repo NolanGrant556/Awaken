@@ -53,11 +53,7 @@ func (e *FileChainExecutor) Execute(
 	if err := enforceFileChainBoundary(intent, execProfile, t); err != nil {
 		return deniedOutput("file_chain_boundary", err.Error())
 	}
-	content, err := executeWithObserver(ctx, t, input, observer)
-	if err != nil {
-		return ToolExecutionOutput{}, err
-	}
-	return ToolExecutionOutput{Content: content}, nil
+	return executeWithObserver(ctx, t, input, observer)
 }
 
 // enforceFileChainBoundary checks that mutation paths in the intent are

@@ -999,11 +999,18 @@ describe("runtime reducer run narrative projection", () => {
     });
   });
 
-  it("marks failed read-only tool actions and inspector records as error", () => {
+  it("marks failed read-only tool actions and inspector records as error from toolStatus", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Inspect failure" },
       runEvent({ type: "TOOL_CALL_ARGS", seq: 1, toolCallId: "read-1", toolCallName: "read_file", delta: "{\"path\":\"missing.md\"}" }),
-      runEvent({ type: "TOOL_CALL_RESULT", seq: 2, toolCallId: "read-1", toolCallName: "read_file", content: "工具执行失败: missing.md" }),
+      runEvent({
+        type: "TOOL_CALL_RESULT",
+        seq: 2,
+        toolCallId: "read-1",
+        toolCallName: "read_file",
+        content: "工具执行失败: missing.md",
+        toolStatus: "failed",
+      }),
     ]);
 
     expect(state.narrative.activeItem).toMatchObject({
@@ -1016,10 +1023,52 @@ describe("runtime reducer run narrative projection", () => {
     expect(state.narrative.activeItem.actions[0]).toMatchObject({
       id: "explore:read-1",
       status: "error",
+      toolStatus: "failed",
     });
     expect(state.toolResults[0]).toMatchObject({
       id: "read-1",
       status: "error",
+      toolStatus: "failed",
+    });
+  });
+
+  it("does not infer tool error from Chinese content when toolStatus is succeeded", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "Inspect success" },
+      runEvent({
+        type: "TOOL_CALL_RESULT",
+        seq: 1,
+        toolCallId: "shell-1",
+        toolCallName: "shell",
+        content: "工具执行失败: quoted in stdout",
+        toolStatus: "succeeded",
+      }),
+    ]);
+
+    expect(state.toolResults[0]).toMatchObject({
+      id: "shell-1",
+      status: "done",
+      toolStatus: "succeeded",
+    });
+  });
+
+  it("treats empty successful tool content as done when toolStatus is succeeded", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "Empty ok" },
+      runEvent({
+        type: "TOOL_CALL_RESULT",
+        seq: 1,
+        toolCallId: "tool-1",
+        toolCallName: "run_command",
+        content: "",
+        toolStatus: "succeeded",
+      }),
+    ]);
+
+    expect(state.toolResults[0]).toMatchObject({
+      id: "tool-1",
+      status: "done",
+      toolStatus: "succeeded",
     });
   });
 

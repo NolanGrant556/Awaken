@@ -242,11 +242,15 @@ func buildAnthropicMessages(req Request) ([]anthropicMessage, error) {
 				i++
 				for i < len(req.Messages) && req.Messages[i].Role == context.RoleTool {
 					tool := req.Messages[i]
-					toolResults = append(toolResults, map[string]interface{}{
+					block := map[string]interface{}{
 						"type":        "tool_result",
 						"tool_use_id": tool.ToolCallID,
 						"content":     tool.Content,
-					})
+					}
+					if tool.IsError {
+						block["is_error"] = true
+					}
+					toolResults = append(toolResults, block)
 					i++
 				}
 

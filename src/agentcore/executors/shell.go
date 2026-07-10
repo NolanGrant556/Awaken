@@ -48,9 +48,5 @@ func (e *ShellExecutor) Execute(
 	observer tool.ToolObserver,
 ) (ToolExecutionOutput, error) {
 	ctx = profile.WithEnvPolicy(ctx, execProfile.EnvPolicy)
-	content, err := executeWithObserver(ctx, t, input, observer)
-	if err != nil {
-		return ToolExecutionOutput{}, err
-	}
-	return ToolExecutionOutput{Content: content}, nil
+	return executeWithObserver(ctx, t, input, observer)
 }

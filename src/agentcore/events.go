@@ -147,9 +147,22 @@ type AwakenEvent struct {
 	ToolProgressStage          string
 	ToolProgressMessage        string
 	ToolProgressPercentage     int
-	ToolDefinition             tool.ToolDefinition
-	RiskHints                  *tool.RiskHints
-	AffectedPaths              []string
+	// ToolOutcome fields (Phase 1). Canonical status lives in ToolStatus;
+	// Desktop maps it to ToolDisplayState and must not infer from content.
+	ToolStatus       string
+	TransportStatus  string
+	SemanticStatus   string
+	ProcessStatus    string
+	ProcessExitCode  *int
+	ProcessTimedOut  bool
+	ErrorCode        string
+	ErrorCategory    string
+	Retryable        bool
+	RecoveryOptions  []string
+	DurationMs       int64
+	ToolDefinition   tool.ToolDefinition
+	RiskHints        *tool.RiskHints
+	AffectedPaths    []string
 	AuthProvider               string
 	AuthURL                    string
 	RuntimeName                string

@@ -1,4 +1,7 @@
 import type { ComposerToken, RunInputAttachment } from "../../shared/runtime";
+import type { ToolDisplayState } from "../../shared/toolStatus";
+
+export type { ToolDisplayState };
 
 export type RunNarrativeStatus =
   | "active"
@@ -6,13 +9,20 @@ export type RunNarrativeStatus =
   | "error"
   | "waiting"
   | "approved"
-  | "rejected";
+  | "rejected"
+  | "denied"
+  | "cancelled"
+  | "interrupted"
+  | "blocked"
+  | "unsupported";
 
 export type RunAction = {
   id: string;
   title: string;
   detail?: string;
-  status: "active" | "done" | "error";
+  status: ToolDisplayState;
+  /** Canonical ToolOutcome status when known. */
+  toolStatus?: string;
 };
 
 export type PromptNarrativeToken = ComposerToken & {
@@ -60,7 +70,7 @@ export type RunNarrativeItem =
   | { kind: "planning"; id: string; text: string; status: "active" | "done" }
   | { kind: "thinking"; id: string; text: string; status: "active" | "done" }
   | { kind: "exploring"; id: string; actions: RunAction[]; status: "active" | "done" }
-  | { kind: "tool"; id: string; title: string; detail?: string; status: "active" | "done" | "error" }
+  | { kind: "tool"; id: string; title: string; detail?: string; status: ToolDisplayState; toolStatus?: string }
   | { kind: "approval"; id: string; title: string; status: "waiting" | "approved" | "rejected" }
   | { kind: "fileChange"; id: string; files: ChangedFile[]; status: "active" | "done" }
   | CompactBoundaryItem

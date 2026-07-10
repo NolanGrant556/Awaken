@@ -4,6 +4,10 @@ import type {
   AguiArtifactStatus,
   AguiEvent,
 } from "./agui";
+import {
+  toolDisplayStateFromStatus,
+  type ToolDisplayState,
+} from "../../shared/toolStatus";
 import type {
   RunInputAttachment,
   RuntimeRun,
@@ -48,7 +52,9 @@ type ToolResultRecord = {
   args?: string;
   commandOutput?: string;
   commandOutputTruncated?: boolean;
-  status?: "active" | "done" | "error";
+  status?: ToolDisplayState;
+  /** Canonical ToolOutcome status from the wire; not a display projection. */
+  toolStatus?: string;
 };
 
 export type PatchPreviewRecord = {
@@ -706,24 +712,6 @@ function upsertPatchPreview(
         : updated[index].affectedPaths,
   };
   return updated;
-}
-
-function toolRecordStatus(content?: string): "done" | "error" {
-  const normalized = (content ?? "").trim();
-  if (!normalized) {
-    return "error";
-  }
-  if (
-    normalized.includes("工具执行失败") ||
-    normalized.includes("工具权限拒绝") ||
-    normalized.includes("AUTO policy 拒绝") ||
-    normalized.includes("工具执行已被取消") ||
-    normalized.includes("工具参数错误") ||
-    normalized.includes("审批拒绝")
-  ) {
-    return "error";
-  }
-  return "done";
 }
 
 function normalizeRiskTone(value?: string): AguiApprovalRiskTone {
@@ -1926,13 +1914,17 @@ export function reduceRuntimeState(
             action.event.toolCallId ||
             `tool-result-${nextState.toolResults.length + 1}`;
           const existing = nextState.toolResults.find((tool) => tool.id === id);
+          const displayStatus = toolDisplayStateFromStatus(
+            action.event.toolStatus,
+          );
           nextState.toolResults = upsertToolResult(nextState.toolResults, {
             id,
             title:
               action.event.toolCallName || existing?.title || "Tool result",
             content,
             args: existing?.args,
-            status: toolRecordStatus(action.event.content),
+            status: displayStatus,
+            toolStatus: action.event.toolStatus,
           });
 
           const stepKey = action.event.toolCallId
@@ -1941,10 +1933,19 @@ export function reduceRuntimeState(
           const description = trashNote
             ? `${excerpt(content)}\n${trashNote}`
             : excerpt(content);
+          const stepStatus: "active" | "done" | "error" =
+            displayStatus === "error" ||
+            displayStatus === "denied" ||
+            displayStatus === "cancelled" ||
+            displayStatus === "interrupted" ||
+            displayStatus === "blocked" ||
+            displayStatus === "unsupported"
+              ? "error"
+              : "done";
           records = upsertStep(records, stepKey, {
             title: action.event.toolCallName || "Tool result",
             description,
-            status: "done",
+            status: stepStatus,
             tag: "tool",
           });
           if (trashedPaths.length > 0) {

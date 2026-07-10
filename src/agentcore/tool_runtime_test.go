@@ -179,8 +179,11 @@ func TestToolRuntimeToolFailureReturnsErrorResult(t *testing.T) {
 		},
 	})
 
-	if !result.IsError || result.Status != ToolExecutionFailed || !strings.Contains(result.Content, "工具执行失败") {
+	if !result.IsError || result.Status != ToolExecutionFailed || !strings.Contains(result.Content, "boom") {
 		t.Fatalf("expected execution error result, got %+v", result)
+	}
+	if result.Outcome.Status != tool.OutcomeFailed || result.ErrorCode != "tool_execution_failed" {
+		t.Fatalf("expected failed outcome fields, got %+v", result)
 	}
 }
 
@@ -1151,8 +1154,11 @@ func TestToolRuntimeMassMessageReviewBlocksExecution(t *testing.T) {
 	if executeCount != 0 {
 		t.Fatalf("expected mass message tool not to execute before review, got %d executions", executeCount)
 	}
-	if !result.IsError || result.ErrorCode != "needs_mass_message_review" {
+	if result.ErrorCode != "needs_mass_message_review" || result.Outcome.Status != tool.OutcomeReviewRequired {
 		t.Fatalf("expected needs_mass_message_review result, got %+v", result)
+	}
+	if result.IsError {
+		t.Fatalf("review_required must not set compatibility IsError per ToolOutcome contract, got %+v", result)
 	}
 	if len(got) != 3 ||
 		got[0].Type != ToolPermissionDecidedEventType ||

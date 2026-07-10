@@ -25,50 +25,6 @@ import (
 	"awaken/src/tool"
 )
 
-const runtimeName = "primary-runtime"
-
-type runtimeComponent struct {
-	Name           string            `json:"name"`
-	Kind           string            `json:"kind"`
-	Required       bool              `json:"required"`
-	Path           string            `json:"path,omitempty"`
-	PathByPlatform map[string]string `json:"pathByPlatform,omitempty"`
-	SHA256         string            `json:"sha256,omitempty"`
-}
-
-type runtimeManifest struct {
-	Name       string             `json:"name"`
-	Version    string             `json:"version"`
-	Mode       string             `json:"mode"`
-	Components []runtimeComponent `json:"components"`
-}
-
-func runtimeComponentPath(component runtimeComponent) string {
-	for _, key := range runtimePlatformPathKeys() {
-		if path := strings.TrimSpace(component.PathByPlatform[key]); path != "" {
-			return path
-		}
-	}
-	return strings.TrimSpace(component.Path)
-}
-
-func runtimePlatformPathKeys() []string {
-	switch goruntime.GOOS {
-	case "windows":
-		return []string{"windows", "win32", "default"}
-	default:
-		return []string{goruntime.GOOS, "default"}
-	}
-}
-
-type preflightReport struct {
-	RuntimeName  string             `json:"runtimeName"`
-	Ready        bool               `json:"ready"`
-	ManifestPath string             `json:"manifestPath,omitempty"`
-	Missing      []string           `json:"missing,omitempty"`
-	Components   []runtimeComponent `json:"components"`
-}
-
 type typedArtifactTool struct {
 	name            string
 	displayName     string
@@ -214,7 +170,7 @@ func (t typedArtifactTool) Artifacts(input string, output string, permissionCont
 
 func (t typedArtifactTool) CheckPermission(ctx context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {
 	if t.requiresRuntime {
-		report := runtimePreflight()
+		report := runtimePreflightCached(true)
 		if !report.Ready {
 			return tool.NeedsRuntimePermission(fmt.Sprintf("%s is not ready: missing %s", runtimeName, strings.Join(report.Missing, ", ")))
 		}
@@ -252,7 +208,7 @@ func (t typedArtifactTool) Execute(ctx context.Context, input string) (string, e
 		return t.execute(ctx, input)
 	}
 	if t.requiresRuntime {
-		report := runtimePreflight()
+		report := runtimePreflightCached(true)
 		if !report.Ready {
 			data, _ := json.MarshalIndent(report, "", "  ")
 			return "", fmt.Errorf("缺少 %s，无法执行 %s: %s", runtimeName, t.name, string(data))
@@ -270,7 +226,7 @@ func workspaceDependenciesTool() typedArtifactTool {
 		capability:  tool.CapabilityArtifactRead,
 		parameters:  nil,
 		execute: func(context.Context, string) (string, error) {
-			report := runtimePreflight()
+			report := runtimePreflightCached(true)
 			data, _ := json.MarshalIndent(report, "", "  ")
 			return string(data), nil
 		},
@@ -286,7 +242,7 @@ func runtimePreflightTool() typedArtifactTool {
 		capability:  tool.CapabilityArtifactRead,
 		parameters:  nil,
 		execute: func(context.Context, string) (string, error) {
-			report := runtimePreflight()
+			report := runtimePreflightCached(true)
 			data, _ := json.MarshalIndent(report, "", "  ")
 			return string(data), nil
 		},
@@ -1500,101 +1456,6 @@ func writeZip(path string, files map[string]string) error {
 	return out.Close()
 }
 
-func resolvePresentationPython() (string, error) {
-	candidates := []string{}
-	if path := strings.TrimSpace(os.Getenv("AWAKEN_PYTHON")); path != "" {
-		candidates = append(candidates, path)
-	}
-	if path, ok := runtimeComponentExistingPath("python"); ok {
-		candidates = append(candidates, path)
-	}
-	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-		candidates = append(candidates,
-			filepath.Join(home, ".cache", "awaken-runtimes", "primary-runtime", "dependencies", "python", "Scripts", "python.exe"),
-			filepath.Join(home, ".cache", "awaken-runtimes", "primary-runtime", "dependencies", "python", "bin", "python3"),
-		)
-	}
-	for _, name := range runtimeExecutableNames("python3", "python", "py") {
-		if path, err := exec.LookPath(name); err == nil {
-			candidates = append(candidates, path)
-		}
-	}
-	for _, path := range existingFiles(candidates) {
-		if pythonCanImportPPTX(path) {
-			return path, nil
-		}
-	}
-	return "", fmt.Errorf("python runtime with python-pptx is not available")
-}
-
-func resolveSoffice() (string, error) {
-	candidates := []string{}
-	if path := strings.TrimSpace(os.Getenv("AWAKEN_SOFFICE")); path != "" {
-		candidates = append(candidates, path)
-	}
-	if path, ok := runtimeComponentExistingPath("libreoffice"); ok {
-		candidates = append(candidates, libreOfficeExecutableCandidates(path)...)
-	}
-	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-		candidates = append(candidates,
-			filepath.Join(home, ".cache", "awaken-runtimes", "primary-runtime", "dependencies", "bin", "soffice"),
-			filepath.Join(home, ".cache", "awaken-runtimes", "primary-runtime", "dependencies", "bin", "soffice.exe"),
-		)
-	}
-	if goruntime.GOOS == "windows" {
-		candidates = append(candidates,
-			filepath.Join(os.Getenv("ProgramFiles"), "LibreOffice", "program", "soffice.exe"),
-			filepath.Join(os.Getenv("ProgramFiles(x86)"), "LibreOffice", "program", "soffice.exe"),
-		)
-	}
-	for _, name := range runtimeExecutableNames("soffice", "libreoffice") {
-		if path, err := exec.LookPath(name); err == nil {
-			candidates = append(candidates, path)
-		}
-	}
-	candidates = append(candidates,
-		"/Applications/LibreOffice.app/Contents/MacOS/soffice",
-		"/opt/homebrew/bin/soffice",
-		"/usr/local/bin/soffice",
-	)
-	if path, ok := firstExistingFile(candidates); ok {
-		return path, nil
-	}
-	return "", fmt.Errorf("libreoffice runtime is not available")
-}
-
-func resolvePopplerTool(name string) (string, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return "", fmt.Errorf("poppler tool name is required")
-	}
-	candidates := []string{}
-	for _, toolName := range runtimeExecutableNames(name) {
-		if path := strings.TrimSpace(os.Getenv("AWAKEN_POPPLER_BIN")); path != "" {
-			candidates = append(candidates, filepath.Join(path, toolName))
-		}
-		if path, ok := runtimeComponentExistingPath("poppler"); ok {
-			candidates = append(candidates, filepath.Join(path, toolName))
-		}
-		if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-			candidates = append(candidates,
-				filepath.Join(home, ".cache", "awaken-runtimes", "primary-runtime", "dependencies", "poppler", "bin", toolName),
-				filepath.Join(home, ".cache", "awaken-runtimes", "primary-runtime", "dependencies", "bin", toolName),
-			)
-		}
-		if path, err := exec.LookPath(toolName); err == nil {
-			candidates = append(candidates, path)
-		}
-		candidates = append(candidates,
-			filepath.Join("/opt/homebrew/bin", toolName),
-			filepath.Join("/usr/local/bin", toolName),
-		)
-	}
-	if path, ok := firstExistingFile(candidates); ok {
-		return path, nil
-	}
-	return "", fmt.Errorf("poppler %s runtime is not available", name)
-}
 
 func runtimeExecutableNames(names ...string) []string {
 	seen := make(map[string]struct{}, len(names)*2)
@@ -1617,34 +1478,6 @@ func runtimeExecutableNames(names ...string) []string {
 		}
 	}
 	return out
-}
-
-func runtimeComponentExistingPath(name string) (string, bool) {
-	manifestPath := runtimeManifestPath()
-	data, err := os.ReadFile(manifestPath)
-	if err != nil {
-		return "", false
-	}
-	var manifest runtimeManifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		return "", false
-	}
-	for _, component := range manifest.Components {
-		if strings.TrimSpace(component.Name) != name {
-			continue
-		}
-		path := runtimeComponentPath(component)
-		if strings.TrimSpace(path) == "" {
-			continue
-		}
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(filepath.Dir(manifestPath), path)
-		}
-		if _, err := os.Stat(path); err == nil {
-			return path, true
-		}
-	}
-	return "", false
 }
 
 func libreOfficeExecutableCandidates(path string) []string {
@@ -1857,50 +1690,6 @@ func naivePDFText(data []byte) string {
 	return strings.Join(parts, "\n")
 }
 
-func runtimePreflight() preflightReport {
-	manifestPath := runtimeManifestPath()
-	report := preflightReport{RuntimeName: runtimeName, ManifestPath: manifestPath}
-	data, err := os.ReadFile(manifestPath)
-	if err != nil {
-		report.Missing = []string{"runtime_manifest"}
-		return report
-	}
-	var manifest runtimeManifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		report.Missing = []string{"valid_runtime_manifest"}
-		return report
-	}
-	report.RuntimeName = firstNonEmpty(manifest.Name, runtimeName)
-	for _, component := range manifest.Components {
-		component.Path = runtimeComponentPath(component)
-		report.Components = append(report.Components, component)
-		if !component.Required {
-			continue
-		}
-		componentPath := component.Path
-		if strings.TrimSpace(componentPath) == "" {
-			report.Missing = append(report.Missing, component.Name)
-			continue
-		}
-		path := componentPath
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(filepath.Dir(manifestPath), path)
-		}
-		if _, err := os.Stat(path); err != nil {
-			report.Missing = append(report.Missing, component.Name)
-			continue
-		}
-		if expected := strings.TrimSpace(component.SHA256); expected != "" {
-			actual, err := fileSHA256(path)
-			if err != nil || !strings.EqualFold(actual, expected) {
-				report.Missing = append(report.Missing, component.Name+"_checksum")
-			}
-		}
-	}
-	report.Ready = len(report.Missing) == 0
-	return report
-}
-
 func fileSHA256(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -1912,47 +1701,6 @@ func fileSHA256(path string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
-}
-
-func runtimeManifestPath() string {
-	if path := strings.TrimSpace(os.Getenv("AWAKEN_RUNTIME_MANIFEST")); path != "" {
-		return path
-	}
-	if path := strings.TrimSpace(os.Getenv("AWAKEN_RUNTIME_ROOT")); path != "" {
-		return filepath.Join(path, "primary-runtime.json")
-	}
-	candidates := []string{
-		filepath.Join("apps", "desktop", "resources", "runtime-manifest", "primary-runtime.json"),
-		filepath.Join("resources", "runtime-manifest", "primary-runtime.json"),
-		filepath.Join("runtime-manifest", "primary-runtime.json"),
-	}
-	if wd, err := os.Getwd(); err == nil {
-		for dir := wd; ; dir = filepath.Dir(dir) {
-			candidates = append(candidates,
-				filepath.Join(dir, "apps", "desktop", "resources", "runtime-manifest", "primary-runtime.json"),
-			)
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				break
-			}
-		}
-	}
-	if exe, err := os.Executable(); err == nil {
-		dir := filepath.Dir(exe)
-		candidates = append(candidates,
-			filepath.Join(dir, "runtime-manifest", "primary-runtime.json"),
-			filepath.Join(dir, "..", "runtime-manifest", "primary-runtime.json"),
-			filepath.Join(dir, "..", "..", "runtime-manifest", "primary-runtime.json"),
-			filepath.Join(dir, "..", "Resources", "runtime-manifest", "primary-runtime.json"),
-			filepath.Join(dir, "..", "..", "Resources", "runtime-manifest", "primary-runtime.json"),
-		)
-	}
-	for _, candidate := range candidates {
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
-		}
-	}
-	return candidates[0]
 }
 
 func firstNonEmpty(values ...string) string {

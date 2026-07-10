@@ -240,11 +240,20 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.AuthProvider = event.AuthProvider
 		base.AuthURL = event.AuthURL
 		return []Event{base}
-	case agentcore.RuntimePrepareEventType:
+	case agentcore.RuntimePrepareEventType, agentcore.RuntimePrepareStartedEventType:
 		base.Type = EventAwakenRuntimePrepare
 		base.ToolCallID = event.ToolCallID
 		base.ToolCallName = event.ToolName
 		base.Message = event.Content
+		base.RuntimeName = event.RuntimeName
+		base.RuntimeVersion = event.RuntimeVersion
+		return []Event{base}
+	case agentcore.RuntimePrepareProgressEventType:
+		base.Type = EventAwakenRuntimePrepareProgress
+		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
+		base.Message = event.Content
+		base.Progress = event.Progress
 		base.RuntimeName = event.RuntimeName
 		base.RuntimeVersion = event.RuntimeVersion
 		return []Event{base}
@@ -253,6 +262,14 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.ToolCallID = event.ToolCallID
 		base.ToolCallName = event.ToolName
 		base.Message = event.Content
+		base.RuntimeName = event.RuntimeName
+		base.RuntimeVersion = event.RuntimeVersion
+		return []Event{base}
+	case agentcore.RuntimeRepairFailedEventType:
+		base.Type = EventAwakenRuntimeRepairFailed
+		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
+		base.Message = firstNonEmpty(event.Content, event.Error)
 		base.RuntimeName = event.RuntimeName
 		base.RuntimeVersion = event.RuntimeVersion
 		return []Event{base}

@@ -377,14 +377,10 @@ func convertToolsToAnthropic(tools []tool.ToolSchema) []anthropicTool {
 
 	result := make([]anthropicTool, 0, len(tools))
 	for _, t := range tools {
-		schema := map[string]interface{}{
-			"type":       "object",
-			"properties": t.Function.Parameters.Properties,
+		schema := tool.SchemaAsMap(t.Function.Parameters)
+		if _, ok := schema["type"]; !ok {
+			schema["type"] = "object"
 		}
-		if len(t.Function.Parameters.Required) > 0 {
-			schema["required"] = t.Function.Parameters.Required
-		}
-
 		result = append(result, anthropicTool{
 			Name:        t.Function.Name,
 			Description: t.Function.Description,

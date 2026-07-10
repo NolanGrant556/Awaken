@@ -12,6 +12,26 @@ type PetsSettingsPanelProps = {
   runtimeClient: RuntimeClient;
 };
 
+function PetStaticPreview({
+  spritesheetUrl,
+  widthPx,
+}: {
+  spritesheetUrl: string;
+  widthPx?: number;
+}) {
+  return (
+    <div
+      className="pet-static-preview"
+      role="img"
+      aria-label="宠物预览"
+      style={{
+        ["--pet-static-preview-width" as string]: `${widthPx ?? 56}px`,
+        backgroundImage: `url(${spritesheetUrl})`,
+      }}
+    />
+  );
+}
+
 export function PetsSettingsPanel({ runtimeClient }: PetsSettingsPanelProps) {
   const [pets, setPets] = useState<PetSummary[]>([]);
   const [settings, setSettings] = useState<PetSettings | null>(null);
@@ -49,22 +69,14 @@ export function PetsSettingsPanel({ runtimeClient }: PetsSettingsPanelProps) {
     }
   }
 
-  async function handleWake() {
-    if (!settings?.selectedPetId) return;
+  async function handleToggleOverlay() {
+    const nextOpen = !settings?.overlayOpen;
+    if (nextOpen && !settings?.selectedPetId) return;
     try {
-      const next = await runtimeClient.setPetOverlayOpen(true);
+      const next = await runtimeClient.setPetOverlayOpen(nextOpen);
       setSettings(next);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to wake pet");
-    }
-  }
-
-  async function handleTuckAway() {
-    try {
-      const next = await runtimeClient.setPetOverlayOpen(false);
-      setSettings(next);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to tuck away pet");
+      setMessage(error instanceof Error ? error.message : "Failed to toggle pet overlay");
     }
   }
 
@@ -109,16 +121,6 @@ export function PetsSettingsPanel({ runtimeClient }: PetsSettingsPanelProps) {
     }
   }
 
-  async function handleCreatePet() {
-    try {
-      await runtimeClient.createPet();
-      setMessage("已创建本地宠物模板，请替换 spritesheet.png 后刷新");
-      await load();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to create pet");
-    }
-  }
-
   const selectedPet = pets.find((p) => p.id === settings?.selectedPetId);
   const hasSelection = Boolean(settings?.selectedPetId);
 
@@ -131,35 +133,18 @@ export function PetsSettingsPanel({ runtimeClient }: PetsSettingsPanelProps) {
               !hasSelection
                 ? "请先选择一只宠物"
                 : settings?.overlayOpen
-                  ? "宠物浮窗已打开"
+                  ? "收起桌面宠物浮窗"
                   : "打开桌面宠物浮窗"
             }
             placement="top"
           >
             <Button
               variant="default"
-              size="sm"
-              onClick={handleWake}
-              disabled={!hasSelection || settings?.overlayOpen}
+              size="md"
+              onClick={handleToggleOverlay}
+              disabled={!hasSelection}
             >
-              唤醒宠物
-            </Button>
-          </Tooltip>
-          <Tooltip
-            label={
-              settings?.overlayOpen
-                ? "收起桌面宠物浮窗"
-                : "宠物浮窗当前未打开"
-            }
-            placement="top"
-          >
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleTuckAway}
-              disabled={!settings?.overlayOpen}
-            >
-              收起宠物
+              {settings?.overlayOpen ? "收起宠物" : "唤醒宠物"}
             </Button>
           </Tooltip>
         </div>
@@ -168,20 +153,19 @@ export function PetsSettingsPanel({ runtimeClient }: PetsSettingsPanelProps) {
       {message ? <div className="pets-settings-message">{message}</div> : null}
 
       <div className="pets-settings-preview">
-        {selectedPet?.spritesheetUrl ? (
-          <div className="pets-settings-preview-sprite">
+        <div className="pets-settings-preview-sprite">
+          {selectedPet?.spritesheetUrl ? (
             <PetSprite
               spritesheetUrl={selectedPet.spritesheetUrl}
               state="waiting"
-              widthPx={120}
+              widthPx={80}
             />
-          </div>
-        ) : (
-          <div className="pets-settings-preview-placeholder">
-            选择一只宠物以预览
-          </div>
-        )}
+          ) : (
+            <div className="pets-settings-preview-placeholder">?</div>
+          )}
+        </div>
         <div className="pets-settings-preview-meta">
+          <span className="pets-settings-preview-label">当前选择的宠物</span>
           <strong>{selectedPet?.displayName ?? "未选择"}</strong>
           <span>{selectedPet?.description}</span>
         </div>
@@ -239,20 +223,18 @@ export function PetsSettingsPanel({ runtimeClient }: PetsSettingsPanelProps) {
                   onChange={() => handleSelect(pet.id)}
                   disabled={!pet.available}
                 />
+                {pet.spritesheetUrl ? (
+                  <PetStaticPreview spritesheetUrl={pet.spritesheetUrl} />
+                ) : (
+                  <div className="pet-static-preview pet-static-preview-placeholder" />
+                )}
                 <span className="pets-settings-item-name">{pet.displayName}</span>
-                <span className="pets-settings-item-source">{sourceLabel(pet.source)}</span>
                 {pet.warning ? (
                   <span className="pets-settings-item-warning">{pet.warning}</span>
                 ) : null}
               </label>
             ))
           )}
-        </div>
-
-        <div className="pets-settings-create">
-          <Button variant="default" size="sm" onClick={handleCreatePet}>
-            创建自己的宠物
-          </Button>
         </div>
       </div>
 
@@ -270,17 +252,4 @@ export function PetsSettingsPanel({ runtimeClient }: PetsSettingsPanelProps) {
       ) : null}
     </section>
   );
-}
-
-function sourceLabel(source: PetSummary["source"]): string {
-  switch (source) {
-    case "awaken-builtin":
-      return "Awaken 内置";
-    case "awaken-local":
-      return "Awaken 本地";
-    case "codex-custom":
-      return "Codex 自定义";
-    default:
-      return source;
-  }
 }

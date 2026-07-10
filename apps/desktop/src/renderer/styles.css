@@ -1148,11 +1148,11 @@ pre {
 
 .pets-settings-preview {
   display: grid;
-  grid-template-columns: 120px minmax(0, 1fr);
+  grid-template-columns: 72px minmax(0, 1fr);
   align-items: center;
-  gap: 16px;
+  gap: 14px;
   min-width: 0;
-  padding: 16px;
+  padding: 12px 14px;
   border: 1px solid var(--aw-border-main);
   border-radius: var(--aw-radius-md);
   background: var(--aw-surface-panel);
@@ -1161,7 +1161,7 @@ pre {
 .pets-settings-preview-sprite {
   display: grid;
   place-items: center;
-  width: 120px;
+  width: 72px;
   aspect-ratio: 192 / 208;
   border-radius: var(--aw-radius-md);
   background: var(--aw-surface-raised);
@@ -1186,19 +1186,26 @@ pre {
   border-radius: var(--aw-radius-md);
   background: var(--aw-surface-raised);
   color: var(--aw-text-tertiary);
-  font-size: 13px;
-  text-align: center;
+  font-size: 18px;
+  font-weight: 700;
 }
 
 .pets-settings-preview-meta {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
+}
+
+.pets-settings-preview-label {
+  color: var(--aw-text-tertiary);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.25;
 }
 
 .pets-settings-preview-meta strong {
   color: var(--aw-text-primary);
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 800;
   line-height: 1.25;
 }
@@ -1263,11 +1270,11 @@ pre {
 
 .pets-settings-item {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto 44px minmax(0, 1fr);
   align-items: center;
   gap: 12px;
   min-width: 0;
-  min-height: 52px;
+  min-height: 64px;
   padding: 10px 12px;
   border: 1px solid var(--aw-border-main);
   border-radius: var(--aw-radius-md);
@@ -1310,17 +1317,20 @@ pre {
   white-space: nowrap;
 }
 
-.pets-settings-item-source {
-  display: inline-flex;
-  align-items: center;
-  padding: 0 7px;
-  border-radius: var(--aw-radius-pill);
-  background: var(--aw-bg-fill-light);
-  color: var(--aw-text-tertiary);
-  font-size: 11px;
-  font-weight: 750;
-  line-height: 1;
-  white-space: nowrap;
+.pet-static-preview {
+  width: var(--pet-static-preview-width);
+  aspect-ratio: 192 / 208;
+  background-repeat: no-repeat;
+  background-position: 0% 0%;
+  background-size: 800% 900%;
+  border-radius: var(--aw-radius-sm);
+  image-rendering: auto;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.pet-static-preview-placeholder {
+  background: var(--aw-surface-raised);
 }
 
 .pets-settings-item-warning {
@@ -1338,11 +1348,6 @@ pre {
   background: var(--aw-bg-fill-light);
   color: var(--aw-text-tertiary);
   font-size: 13px;
-}
-
-.pets-settings-create {
-  display: flex;
-  justify-content: flex-start;
 }
 
 .pets-settings-errors {

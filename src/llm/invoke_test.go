@@ -264,6 +264,37 @@ func TestOpenAIContentForMessageIncludesFileAttachmentPaths(t *testing.T) {
 	}
 }
 
+func TestOpenAIToolMessageContentWrapsIsError(t *testing.T) {
+	content := openAIContentForMessage(ctx.Message{
+		Role:    ctx.RoleTool,
+		Content: "boom",
+		IsError: true,
+	})
+	text, ok := content.(string)
+	if !ok {
+		t.Fatalf("expected string content, got %T", content)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("expected JSON payload, got %q: %v", text, err)
+	}
+	if payload["is_error"] != true || payload["status"] != "failed" {
+		t.Fatalf("unexpected payload: %#v", payload)
+	}
+}
+
+func TestOpenAIToolMessageContentPreservesModelPayload(t *testing.T) {
+	raw := `{"content":"ok","status":"succeeded","transport_status":"completed","semantic_status":"success","process_status":"exited","retryable":false,"duration_ms":1,"truncated":false}`
+	content := openAIContentForMessage(ctx.Message{
+		Role:    ctx.RoleTool,
+		Content: raw,
+		IsError: false,
+	})
+	if content != raw {
+		t.Fatalf("expected ModelPayload preserved, got %q", content)
+	}
+}
+
 func TestInvokeOpenAISendsConfigMaxTokens(t *testing.T) {
 	server := newChatServer(t, func(w http.ResponseWriter, r *http.Request) {
 		var body struct {

@@ -82,6 +82,10 @@ type ToolExecutionResult struct {
 	Truncated      bool
 	Status         ToolExecutionStatus
 	ErrorCode      string
+	// Outcome is the canonical structured tool result when available.
+	// Compatibility fields (Status/IsError/ErrorCode/DurationMs) are derived
+	// from it; emitToolResult prefers Outcome when Status is set.
+	Outcome        tool.ExecutionOutcome
 	DecisionSource ToolDecisionSource
 	DecisionReason string
 	StartedAt      time.Time
@@ -458,9 +462,9 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		return rt.executeTransformedTool(toolCtx, result, call, decision, permission, def, intent)
 	}
 
-	rt.emitToolProgress(result, "started", "", 0)
+	rt.emitHostActivity(result, selectedTool, input)
 
-	output, trashedPaths, err := rt.routeToExecutor(toolCtx, result, intent, selectedTool, input)
+	output, trashedPaths, execOut, err := rt.routeToExecutor(toolCtx, result, intent, selectedTool, input)
 	if err != nil {
 		rt.emitToolProgress(result, "failed", err.Error(), 0)
 		failContent := output
@@ -468,19 +472,25 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 			failContent = fmt.Sprintf("工具执行失败: %v", err)
 		}
 		result = synthesizeFailedToolResult(result, "tool_execution_failed", failContent)
+		applyExecutorOutcome(&result, execOut)
 		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
-		rt.writeAudit(def, result, permission, string(decision.Source), "failed", err.Error())
+		rt.writeAudit(def, result, permission, string(decision.Source), auditOutcomeLabel(result), err.Error())
 		return finalizeToolResult(result)
 	}
 
-	rt.emitToolProgress(result, "completed", "", 100)
 	result.Content = output
+	applyExecutorOutcome(&result, execOut)
 	result.ResultSummary = excerptString(strings.TrimSpace(output), 200)
 	// TrashedPaths are sourced from the executor's ToolExecutionOutput when
 	// the executor populates it, falling back to extractTrashedPaths(content)
 	// for backwards compatibility (routeToExecutor handles the fallback).
 	result.TrashedPaths = trashedPaths
-	rt.writeAudit(def, result, permission, string(decision.Source), "success", "")
+	if result.IsError || (result.Outcome.Status != "" && result.Outcome.IsError()) {
+		rt.emitToolProgress(result, "failed", firstNonEmpty(result.Outcome.ErrorMessage, result.ErrorCode, "tool failed"), 100)
+	} else {
+		rt.emitToolProgress(result, "completed", "", 100)
+	}
+	rt.writeAudit(def, result, permission, string(decision.Source), auditOutcomeLabel(result), "")
 	rt.emitArtifacts(result, selectedTool, input, output)
 	return finalizeToolResult(result)
 }
@@ -519,7 +529,7 @@ func (rt *ToolRuntime) executeTool(
 // When the router is not configured (nil), the method falls back to the
 // legacy executeTool path for backwards compatibility.
 //
-// Returns (content, trashedPaths, error) where content may be non-empty
+// Returns (content, trashedPaths, output, error) where content may be non-empty
 // even when err is non-nil — this happens when the executor denies the call
 // and surfaces a denial message. trashedPaths is sourced from the
 // ToolExecutionOutput when the executor populates it, falling back to
@@ -531,17 +541,29 @@ func (rt *ToolRuntime) routeToExecutor(
 	intent profile.ExecutionIntent,
 	selectedTool tool.Tool,
 	input string,
-) (string, []string, error) {
+) (string, []string, executors.ToolExecutionOutput, error) {
 	if rt.router == nil {
-		content, err := rt.executeTool(ctx, result, selectedTool, input)
-		if err != nil {
-			return content, nil, err
+		var observer tool.ToolObserver
+		if _, ok := selectedTool.(tool.ObservableTool); ok {
+			observer = toolObserverFunc(func(output tool.CommandOutput) {
+				rt.emitCommandOutput(result, output)
+			})
 		}
-		return content, extractTrashedPaths(content), nil
+		outcome, err := tool.ExecuteAsOutcome(ctx, selectedTool, input, observer)
+		out := executors.ToolExecutionOutput{
+			Outcome:   outcome,
+			Content:   outcome.Content,
+			IsError:   outcome.IsError(),
+			ErrorCode: outcome.ErrorCode,
+		}
+		if err != nil {
+			return out.Content, nil, out, err
+		}
+		return out.Content, extractTrashedPaths(out.Content), out, nil
 	}
 	executor, err := rt.router.Route(intent, rt.profile)
 	if err != nil {
-		return "", nil, err
+		return "", nil, executors.ToolExecutionOutput{}, err
 	}
 	var observer tool.ToolObserver
 	if _, ok := selectedTool.(tool.ObservableTool); ok {
@@ -552,7 +574,7 @@ func (rt *ToolRuntime) routeToExecutor(
 	observer = executors.VisibilityFilterObserver(observer, rt.profile.VisibilityPolicy)
 	out, err := executor.Execute(ctx, intent, rt.profile, selectedTool, input, observer)
 	if err != nil {
-		return out.Content, out.TrashedPaths, err
+		return out.Content, out.TrashedPaths, out, err
 	}
 	// VisibilitySummary: when real-time deltas were suppressed, emit a
 	// single truncated summary event so the user still sees that the tool
@@ -570,7 +592,7 @@ func (rt *ToolRuntime) routeToExecutor(
 	if len(trashedPaths) == 0 {
 		trashedPaths = extractTrashedPaths(out.Content)
 	}
-	return out.Content, trashedPaths, nil
+	return out.Content, trashedPaths, out, nil
 }
 
 // executeTransformedTool handles a ToolDecisionTransform by looking up the
@@ -656,8 +678,8 @@ func (rt *ToolRuntime) executeTransformedTool(
 	transformedCall.Function.Arguments = decision.UpdatedInput
 	transformedIntent := profile.BuildExecutionIntent(transformedCall, transformedTool, rt.permissionContext, originalIntent.SubagentOrigin)
 
-	rt.emitToolProgress(result, "started", "", 0)
-	output, trashedPaths, err := rt.routeToExecutor(transformedCtx, result, transformedIntent, transformedTool, transformedInput)
+	rt.emitHostActivity(result, transformedTool, transformedInput)
+	output, trashedPaths, execOut, err := rt.routeToExecutor(transformedCtx, result, transformedIntent, transformedTool, transformedInput)
 	if err != nil {
 		rt.emitToolProgress(result, "failed", err.Error(), 0)
 		failContent := output
@@ -665,19 +687,25 @@ func (rt *ToolRuntime) executeTransformedTool(
 			failContent = fmt.Sprintf("工具执行失败: %v", err)
 		}
 		result = synthesizeFailedToolResult(result, "tool_execution_failed", failContent)
+		applyExecutorOutcome(&result, execOut)
 		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
-		rt.writeAudit(transformedDef, result, permission, string(decision.Source), "failed", err.Error())
+		rt.writeAudit(transformedDef, result, permission, string(decision.Source), auditOutcomeLabel(result), err.Error())
 		return finalizeToolResult(result)
 	}
 
-	rt.emitToolProgress(result, "completed", "", 100)
 	result.Content = output
+	applyExecutorOutcome(&result, execOut)
 	result.ResultSummary = excerptString(strings.TrimSpace(output), 200)
 	// TrashedPaths are sourced from the executor's ToolExecutionOutput when
 	// the executor populates it, falling back to extractTrashedPaths(content)
 	// for backwards compatibility (routeToExecutor handles the fallback).
 	result.TrashedPaths = trashedPaths
-	rt.writeAudit(transformedDef, result, permission, string(decision.Source), "success", "")
+	if result.IsError || (result.Outcome.Status != "" && result.Outcome.IsError()) {
+		rt.emitToolProgress(result, "failed", firstNonEmpty(result.Outcome.ErrorMessage, result.ErrorCode, "tool failed"), 100)
+	} else {
+		rt.emitToolProgress(result, "completed", "", 100)
+	}
+	rt.writeAudit(transformedDef, result, permission, string(decision.Source), auditOutcomeLabel(result), "")
 	rt.emitArtifacts(result, transformedTool, transformedInput, output)
 	return finalizeToolResult(result)
 }
@@ -760,7 +788,7 @@ func (rt *ToolRuntime) emitCommandOutput(result ToolExecutionResult, output tool
 }
 
 func (rt *ToolRuntime) emitToolProgress(result ToolExecutionResult, stage, message string, percentage int) {
-	rt.sink.Emit(AwakenEvent{
+	event := AwakenEvent{
 		Type:                   ToolProgressEventType,
 		Timestamp:              timeNowUTC(),
 		ToolCallID:             result.ToolCallID,
@@ -768,7 +796,39 @@ func (rt *ToolRuntime) emitToolProgress(result ToolExecutionResult, stage, messa
 		ToolProgressStage:      stage,
 		ToolProgressMessage:    message,
 		ToolProgressPercentage: percentage,
-	})
+		Progress:               message,
+	}
+	applyToolOutcomeFields(&event, result)
+	rt.sink.Emit(event)
+}
+
+func (rt *ToolRuntime) emitHostActivity(result ToolExecutionResult, selectedTool tool.Tool, input string) {
+	activity := tool.DefaultActivity(result.Name)
+	if describing, ok := selectedTool.(tool.ActivityDescribingTool); ok {
+		described := describing.DescribeActivity(input)
+		if strings.TrimSpace(described.Title) != "" || strings.TrimSpace(described.Stage) != "" {
+			activity = described
+		}
+	}
+	stage := firstNonEmpty(strings.TrimSpace(activity.Stage), "started")
+	message := firstNonEmpty(strings.TrimSpace(activity.Title), strings.TrimSpace(activity.Detail), "正在执行 "+result.Name)
+	if detail := strings.TrimSpace(activity.Detail); detail != "" && detail != message {
+		message = message + ": " + detail
+	}
+	rt.emitToolProgress(result, stage, message, 0)
+}
+
+func auditOutcomeLabel(result ToolExecutionResult) string {
+	if result.Outcome.Status != "" {
+		return string(result.Outcome.Status)
+	}
+	if result.IsError {
+		return "failed"
+	}
+	if result.Status != "" {
+		return string(result.Status)
+	}
+	return "succeeded"
 }
 
 func (rt *ToolRuntime) emitAuthRequired(result ToolExecutionResult, def tool.ToolDefinition, decision ToolDecision) {
@@ -853,7 +913,14 @@ func (rt *ToolRuntime) userQuestionEvent(result ToolExecutionResult, def tool.To
 }
 
 func (rt *ToolRuntime) writeAudit(def tool.ToolDefinition, result ToolExecutionResult, permission tool.PermissionDecision, decision, outcome, errReason string) {
-	now := timeNowUTC()
+	started := result.StartedAt
+	if started.IsZero() {
+		started = timeNowUTC()
+	}
+	finished := result.FinishedAt
+	if finished.IsZero() {
+		finished = timeNowUTC()
+	}
 	origin := "system_policy"
 	if permission.Behavior == tool.PermissionAllow {
 		origin = "auto_allow"
@@ -867,8 +934,8 @@ func (rt *ToolRuntime) writeAudit(def tool.ToolDefinition, result ToolExecutionR
 		Decision:       decision,
 		DecisionReason: permission.Reason,
 		DecisionOrigin: origin,
-		StartedAt:      now,
-		CompletedAt:    now,
+		StartedAt:      started,
+		CompletedAt:    finished,
 		Outcome:        outcome,
 		ResultSummary:  result.ResultSummary,
 		ErrorReason:    errReason,
@@ -1029,7 +1096,19 @@ func finalizeToolResult(result ToolExecutionResult) ToolExecutionResult {
 	if !result.StartedAt.IsZero() {
 		result.DurationMs = result.FinishedAt.Sub(result.StartedAt).Milliseconds()
 	}
-	if result.Status == "" {
+	if result.Outcome.Status != "" {
+		result.IsError = result.Outcome.IsError()
+		result.Status = ToolExecutionStatus(result.Outcome.Status)
+		if result.ErrorCode == "" {
+			result.ErrorCode = result.Outcome.ErrorCode
+		}
+		if result.Outcome.DurationMs <= 0 && result.DurationMs > 0 {
+			result.Outcome.DurationMs = result.DurationMs
+		}
+		if result.Content == "" {
+			result.Content = result.Outcome.Content
+		}
+	} else if result.Status == "" {
 		if result.IsError {
 			result.Status = ToolExecutionFailed
 		} else {
@@ -1042,6 +1121,34 @@ func finalizeToolResult(result ToolExecutionResult) ToolExecutionResult {
 	return result
 }
 
+// applyExecutorOutcome copies structured Outcome fields from an executor
+// output onto the ToolExecutionResult when present.
+func applyExecutorOutcome(result *ToolExecutionResult, out executors.ToolExecutionOutput) {
+	if out.Outcome.Status == "" {
+		if out.IsError {
+			result.IsError = true
+		}
+		if out.ErrorCode != "" && result.ErrorCode == "" {
+			result.ErrorCode = out.ErrorCode
+		}
+		return
+	}
+	result.Outcome = out.Outcome
+	result.IsError = out.Outcome.IsError()
+	result.Status = ToolExecutionStatus(out.Outcome.Status)
+	if out.Outcome.ErrorCode != "" {
+		result.ErrorCode = out.Outcome.ErrorCode
+	} else if out.ErrorCode != "" {
+		result.ErrorCode = out.ErrorCode
+	}
+	if len(out.AffectedPaths) > 0 && len(result.AffectedPaths) == 0 {
+		result.AffectedPaths = append([]string(nil), out.AffectedPaths...)
+	}
+	if out.PatchSummary != "" && result.PatchSummary == "" {
+		result.PatchSummary = out.PatchSummary
+	}
+}
+
 func synthesizeDeniedToolResult(result ToolExecutionResult, decision ToolDecision) ToolExecutionResult {
 	result.Content = fmt.Sprintf("工具执行被 AUTO policy 拒绝: %s", firstNonEmpty(decision.Reason, "permission policy denied execution"))
 	result.IsError = true
@@ -1049,6 +1156,7 @@ func synthesizeDeniedToolResult(result ToolExecutionResult, decision ToolDecisio
 	result.ErrorCode = "tool_denied"
 	result.DecisionSource = decision.Source
 	result.DecisionReason = decision.Reason
+	result.Outcome = tool.DeniedOutcome(result.Content, "tool_denied")
 	return result
 }
 
@@ -1105,6 +1213,20 @@ func synthesizeAbortedToolResult(result ToolExecutionResult, decision ToolDecisi
 	result.ErrorCode = "tool_policy_abort"
 	result.DecisionSource = decision.Source
 	result.DecisionReason = decision.Reason
+	now := timeNowUTC()
+	result.Outcome = tool.ExecutionOutcome{
+		Content:         result.Content,
+		Status:          tool.OutcomeCancelled,
+		TransportStatus: tool.TransportCancelled,
+		SemanticStatus:  tool.SemanticUnknown,
+		ProcessStatus:   tool.ProcessNotApplicable,
+		ErrorCode:       "tool_policy_abort",
+		ErrorCategory:   tool.ErrorCategoryCancelled,
+		ErrorMessage:    result.Content,
+		Retryable:       false,
+		StartedAt:       now,
+		FinishedAt:      now,
+	}
 	return result
 }
 
@@ -1113,6 +1235,10 @@ func synthesizeValidationToolResult(result ToolExecutionResult, reason string) T
 	result.IsError = true
 	result.Status = ToolExecutionDenied
 	result.ErrorCode = "validation_error"
+	outcome := tool.FailedOutcome(result.Content, tool.ErrorCodeValidationError, tool.ErrorCategoryValidation, false)
+	outcome.Status = tool.OutcomeFailed
+	outcome.TransportStatus = tool.TransportNotStarted
+	result.Outcome = outcome
 	return result
 }
 
@@ -1121,6 +1247,9 @@ func synthesizeFailedToolResult(result ToolExecutionResult, code string, content
 	result.IsError = true
 	result.Status = ToolExecutionFailed
 	result.ErrorCode = code
+	if result.Outcome.Status == "" {
+		result.Outcome = tool.FailedOutcome(content, code, tool.ErrorCategoryTool, true)
+	}
 	return result
 }
 
@@ -1132,6 +1261,37 @@ func synthesizeStructuredToolResult(result ToolExecutionResult, decision ToolDec
 	result.ErrorCode = code
 	result.DecisionSource = decision.Source
 	result.DecisionReason = reason
+	now := timeNowUTC()
+	status := tool.OutcomeDenied
+	category := tool.ErrorCategoryPolicy
+	transport := tool.TransportNotStarted
+	switch code {
+	case "needs_auth":
+		status = tool.OutcomeNeedsAuth
+		category = tool.ErrorCategoryAuthorization
+	case "needs_runtime":
+		status = tool.OutcomeNeedsRuntime
+		category = tool.ErrorCategoryRuntime
+	case "unsupported":
+		status = tool.OutcomeUnsupported
+		category = tool.ErrorCategoryUnsupported
+	case "needs_mass_message_review", "mass_message_review_rejected":
+		status = tool.OutcomeReviewRequired
+		category = tool.ErrorCategoryPolicy
+	}
+	result.Outcome = tool.ExecutionOutcome{
+		Content:         result.Content,
+		Status:          status,
+		TransportStatus: transport,
+		SemanticStatus:  tool.SemanticUnknown,
+		ProcessStatus:   tool.ProcessNotApplicable,
+		ErrorCode:       code,
+		ErrorCategory:   category,
+		ErrorMessage:    result.Content,
+		Retryable:       false,
+		StartedAt:       now,
+		FinishedAt:      now,
+	}
 	return result
 }
 

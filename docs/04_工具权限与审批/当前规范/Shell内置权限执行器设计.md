@@ -120,6 +120,25 @@ shell 不再强制把文件写入 transform 到 `apply_patch`。简单 shell 写
 
 图片可以作为视觉输入进入模型；文档类附件始终按本机文件读取处理。附件是否位于当前 workspace 不影响 shell 读取。
 
+## ToolOutcome 语义（Phase 1）
+
+`ShellTool` 必须实现 `OutcomeTool`。输出保留 `command`、`cwd`、`exitCode`、`stdout`、`stderr`、`duration`、`truncated`；command 与 activity detail 做 secret redaction。
+
+固定映射：
+
+| 场景 | Status | TransportStatus | SemanticStatus | ProcessStatus | ErrorCode |
+|---|---|---|---|---|---|
+| exit 0 | succeeded | completed | success | exited | 空 |
+| 普通非零 | failed | completed | failure | exited | process_exit_nonzero |
+| timeout | failed | completed 或 failed | failure | timed_out | process_timeout |
+| spawn 失败 | failed | failed | failure | spawn_failed | process_spawn_failed |
+| 单一 rg/grep exit 1 | succeeded | completed | neutral | exited | 空；Diagnostic.reason=no_match |
+| 单一 diff exit 1 | succeeded | completed | neutral | exited | 空；Diagnostic.reason=different |
+| 单一 test/`[` exit 1 | succeeded | completed | neutral | exited | 空；Diagnostic.reason=false_condition |
+| 复合命令未知语义非零 | failed | completed | failure | exited | process_exit_nonzero |
+
+宿主活动：识别 `pip` / `python -m pip` / `npm` / `pnpm` / `yarn` / `brew` / `winget` install，生成“正在安装依赖”类标题，不依赖模型口述。
+
 ## 审计与 UI
 
 shell 执行仍应记录：
@@ -130,10 +149,11 @@ shell 执行仍应记录：
 - sandbox support 观测值
 - stdout/stderr 截断状态
 - exit code
+- ToolOutcome 状态字段
 - denied reason
 - mass message review metadata
 
-UI 不展示通用审批卡。普通 shell 命令显示为自动执行；直接删除显示结构化拒绝；群发显示专用人工审核。
+UI 不展示通用审批卡。普通 shell 命令显示为自动执行；直接删除显示结构化拒绝；群发显示专用人工审核。非零退出必须显示 failed 与 exitCode，不得因 content 非空而显示成功。
 
 ## 验收用例
 

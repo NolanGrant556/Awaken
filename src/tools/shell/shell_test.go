@@ -340,6 +340,81 @@ func TestShellPermissionControlOperatorsStillAsk(t *testing.T) {
 	}
 }
 
+func TestShellOutcomeExit7IsFailed(t *testing.T) {
+	outcome, err := (&ShellTool{}).ExecuteOutcome(context.Background(), `{"command":"exit 7"}`, nil)
+	if err != nil {
+		t.Fatalf("ExecuteOutcome returned transport error: %v", err)
+	}
+	if outcome.Status != tool.OutcomeFailed {
+		t.Fatalf("status=%q", outcome.Status)
+	}
+	if outcome.ProcessStatus != tool.ProcessExited || outcome.ExitCode == nil || *outcome.ExitCode != 7 {
+		t.Fatalf("process fields: %+v", outcome)
+	}
+	if outcome.ErrorCode != tool.ErrorCodeProcessExitNonzero {
+		t.Fatalf("error_code=%q", outcome.ErrorCode)
+	}
+	if !outcome.IsError() {
+		t.Fatal("expected IsError")
+	}
+}
+
+func TestShellOutcomeGrepNoMatchIsNeutral(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "sample.txt")
+	if err := os.WriteFile(target, []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	args, err := json.Marshal(map[string]any{
+		"command": "grep definitely-missing-token-xyz " + target,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	outcome, err := (&ShellTool{}).ExecuteOutcome(context.Background(), string(args), nil)
+	if err != nil {
+		t.Fatalf("ExecuteOutcome returned transport error: %v", err)
+	}
+	if outcome.Status != tool.OutcomeSucceeded || outcome.SemanticStatus != tool.SemanticNeutral {
+		t.Fatalf("expected neutral success, got status=%q semantic=%q err=%q content=%s", outcome.Status, outcome.SemanticStatus, outcome.ErrorCode, outcome.Content)
+	}
+	if reason, _ := outcome.Diagnostic["reason"].(string); reason != "no_match" {
+		t.Fatalf("diagnostic=%v", outcome.Diagnostic)
+	}
+}
+
+func TestNeutralNonzeroReasonHelpers(t *testing.T) {
+	cases := []struct {
+		command string
+		want    string
+		ok      bool
+	}{
+		{"rg pattern file", "no_match", true},
+		{"grep pattern file", "no_match", true},
+		{"diff a b", "different", true},
+		{"test -f missing", "false_condition", true},
+		{"[ -f missing ]", "false_condition", true},
+		{"rg a; rg b", "", false},
+		{"exit 1", "", false},
+	}
+	for _, tc := range cases {
+		got, ok := neutralNonzeroReason(tc.command, 1)
+		if ok != tc.ok || got != tc.want {
+			t.Fatalf("command=%q got=(%q,%v) want=(%q,%v)", tc.command, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
+func TestShellDescribeActivityInstall(t *testing.T) {
+	activity := (&ShellTool{}).DescribeActivity(`{"command":"pip install requests"}`)
+	if activity.Title != "正在安装依赖" {
+		t.Fatalf("title=%q", activity.Title)
+	}
+	if !strings.Contains(activity.Detail, "pip install") {
+		t.Fatalf("detail=%q", activity.Detail)
+	}
+}
+
 func decodeResult(t *testing.T, out string) shellResult {
 	t.Helper()
 	var result shellResult

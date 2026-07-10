@@ -132,6 +132,21 @@ export type AguiEvent = {
   trashedPaths?: string[];
   /** Populated when a guardian constraint was violated. */
   guardianViolation?: string;
+  toolProgressStage?: string;
+  toolProgressMessage?: string;
+  toolProgressPercentage?: number;
+  /** Canonical ToolOutcome status (succeeded/failed/denied/...). */
+  toolStatus?: string;
+  transportStatus?: string;
+  semanticStatus?: string;
+  processStatus?: string;
+  processExitCode?: number;
+  processTimedOut?: boolean;
+  errorCode?: string;
+  errorCategory?: string;
+  retryable?: boolean;
+  recoveryOptions?: string[];
+  durationMs?: number;
   authProvider?: string;
   authScope?: string;
   authLink?: string;

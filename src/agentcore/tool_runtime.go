@@ -457,8 +457,9 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
 		rt.writeAudit(def, result, permission, string(decision.Source), "needs_auth", "")
 		return finalizeToolResult(result)
-	case ToolDecisionNeedsRuntime:
+  case ToolDecisionNeedsRuntime:
 		rt.emitToolProgress(result, "needs_runtime", firstNonEmpty(decision.Reason, "tool requires local runtime"), 0)
+		rt.emitRuntimePrepareStarted(result.ToolCallID, result.Name, "host runtime check before artifact tool")
 		rt.emitRuntimeMissing(result, decision)
 		result = synthesizeStructuredToolResult(result, decision, "needs_runtime", "缺少本地 runtime")
 		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
@@ -899,6 +900,53 @@ func (rt *ToolRuntime) emitRuntimeMissing(result ToolExecutionResult, decision T
 		ToolDecisionSource: string(decision.Source),
 		ToolDecisionReason: strings.TrimSpace(decision.Reason),
 		RuntimeName:        "primary-runtime",
+	})
+}
+
+func (rt *ToolRuntime) emitRuntimePrepareStarted(toolCallID, toolName, message string) {
+	rt.sink.Emit(AwakenEvent{
+		Type:        RuntimePrepareStartedEventType,
+		Timestamp:   timeNowUTC(),
+		ToolCallID:  toolCallID,
+		ToolName:    toolName,
+		Content:     message,
+		RuntimeName: "primary-runtime",
+	})
+}
+
+func (rt *ToolRuntime) emitRuntimePrepareProgress(toolCallID, toolName, message, progress string) {
+	rt.sink.Emit(AwakenEvent{
+		Type:        RuntimePrepareProgressEventType,
+		Timestamp:   timeNowUTC(),
+		ToolCallID:  toolCallID,
+		ToolName:    toolName,
+		Content:     message,
+		Progress:    progress,
+		RuntimeName: "primary-runtime",
+	})
+}
+
+func (rt *ToolRuntime) emitRuntimeReady(toolCallID, toolName, version, message string) {
+	rt.sink.Emit(AwakenEvent{
+		Type:           RuntimeReadyEventType,
+		Timestamp:      timeNowUTC(),
+		ToolCallID:     toolCallID,
+		ToolName:       toolName,
+		Content:        message,
+		RuntimeName:    "primary-runtime",
+		RuntimeVersion: version,
+	})
+}
+
+func (rt *ToolRuntime) emitRuntimeRepairFailed(toolCallID, toolName, message string) {
+	rt.sink.Emit(AwakenEvent{
+		Type:        RuntimeRepairFailedEventType,
+		Timestamp:   timeNowUTC(),
+		ToolCallID:  toolCallID,
+		ToolName:    toolName,
+		Content:     message,
+		Error:       message,
+		RuntimeName: "primary-runtime",
 	})
 }
 

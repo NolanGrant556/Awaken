@@ -1,59 +1,101 @@
 {
-  "name": "primary-runtime",
-  "version": "0.1.0",
-  "mode": "hybrid",
+  "schemaVersion": 2,
+  "runtimeName": "primary-runtime",
+  "bundleVersion": "0.2.0",
   "components": [
     {
       "name": "python",
       "kind": "executable",
       "required": true,
-      "path": "../runtime/python/bin/python3",
-      "pathByPlatform": {
-        "win32": "../runtime/python/Scripts/python.exe",
-        "windows": "../runtime/python/Scripts/python.exe"
+      "version": "managed",
+      "source": "awaken_managed",
+      "relativePath": "python/bin/python3",
+      "relativePathByPlatform": {
+        "win32": "python/Scripts/python.exe",
+        "windows": "python/Scripts/python.exe"
+      },
+      "probe": {
+        "args": ["-c", "import pptx, PIL"],
+        "acceptedExitCodes": [0]
       }
     },
     {
       "name": "node",
       "kind": "executable",
       "required": true,
-      "path": "../runtime/node/bin/node",
-      "pathByPlatform": {
-        "win32": "../runtime/node/node.exe",
-        "windows": "../runtime/node/node.exe"
+      "version": "managed",
+      "source": "awaken_managed",
+      "relativePath": "node/bin/node",
+      "relativePathByPlatform": {
+        "win32": "node/node.exe",
+        "windows": "node/node.exe"
+      },
+      "probe": {
+        "args": ["--version"],
+        "acceptedExitCodes": [0]
       }
     },
     {
       "name": "libreoffice",
       "kind": "application",
       "required": true,
-      "path": "../runtime/libreoffice/LibreOffice.app",
-      "pathByPlatform": {
-        "win32": "../runtime/libreoffice",
-        "windows": "../runtime/libreoffice"
+      "version": "managed",
+      "source": "awaken_managed",
+      "relativePath": "libreoffice/LibreOffice.app",
+      "relativePathByPlatform": {
+        "win32": "libreoffice",
+        "windows": "libreoffice",
+        "linux": "libreoffice"
+      },
+      "probe": {
+        "args": ["--version"],
+        "acceptedExitCodes": [0],
+        "executableRelativePath": "Contents/MacOS/soffice",
+        "executableRelativePathByPlatform": {
+          "win32": "program/soffice.exe",
+          "windows": "program/soffice.exe",
+          "linux": "program/soffice"
+        }
       }
     },
     {
       "name": "poppler",
       "kind": "directory",
       "required": true,
-      "path": "../runtime/poppler/bin"
+      "version": "managed",
+      "source": "awaken_managed",
+      "relativePath": "poppler/bin",
+      "probe": {
+        "tools": ["pdftoppm", "pdfinfo"],
+        "acceptedExitCodes": [0, 1]
+      }
     },
     {
       "name": "ffmpeg",
       "kind": "executable",
       "required": true,
-      "path": "../runtime/ffmpeg/bin/ffmpeg",
-      "pathByPlatform": {
-        "win32": "../runtime/ffmpeg/bin/ffmpeg.exe",
-        "windows": "../runtime/ffmpeg/bin/ffmpeg.exe"
+      "version": "managed",
+      "source": "awaken_managed",
+      "relativePath": "ffmpeg/bin/ffmpeg",
+      "relativePathByPlatform": {
+        "win32": "ffmpeg/bin/ffmpeg.exe",
+        "windows": "ffmpeg/bin/ffmpeg.exe"
+      },
+      "probe": {
+        "args": ["-version"],
+        "acceptedExitCodes": [0]
       }
     },
     {
       "name": "helper-packages",
       "kind": "directory",
       "required": true,
-      "path": "../runtime/packages"
+      "version": "managed",
+      "source": "awaken_managed",
+      "relativePath": "packages",
+      "probe": {
+        "requireFile": "runtime.json"
+      }
     }
   ]
 }

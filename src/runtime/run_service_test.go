@@ -431,7 +431,7 @@ func TestRunServiceValidatesInputAndMissingRun(t *testing.T) {
 	}
 }
 
-func TestEffectiveInputForComposerSkillTokensInjectsSkillToolInstruction(t *testing.T) {
+func TestEffectiveInputForComposerSkillTokensKeepsUserTask(t *testing.T) {
 	effective := effectiveInputForComposerTokens("summarize the customer list", []ComposerToken{
 		{
 			ID:    "skill:daily-followup:project",
@@ -445,17 +445,20 @@ func TestEffectiveInputForComposerSkillTokensInjectsSkillToolInstruction(t *test
 			},
 		},
 	})
+	if effective != "summarize the customer list" {
+		t.Fatalf("expected user task unchanged without NL skill__ instruction, got %q", effective)
+	}
+	if strings.Contains(effective, "skill__") || strings.Contains(effective, "<awaken_composer_tokens>") {
+		t.Fatalf("legacy skill tool instruction path must be removed, got %q", effective)
+	}
+}
 
-	for _, want := range []string{
-		"<awaken_composer_tokens>",
-		"skillId: daily-followup",
-		"tool: skill__daily_followup",
-		"skillFilePath: /workspace/.awaken/skills/daily-followup/SKILL.md",
-		"User task:\nsummarize the customer list",
-	} {
-		if !strings.Contains(effective, want) {
-			t.Fatalf("expected effective input to contain %q, got:\n%s", want, effective)
-		}
+func TestEffectiveInputForComposerSkillTokensEmptyInputFallback(t *testing.T) {
+	effective := effectiveInputForComposerTokens("", []ComposerToken{
+		{ID: "skill:pptx:user", Type: "skill", Label: "pptx", Payload: ComposerTokenPayload{SkillID: "pptx"}},
+	})
+	if effective != "Use the selected Skill to help the user." {
+		t.Fatalf("unexpected empty-input fallback: %q", effective)
 	}
 }
 

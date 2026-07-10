@@ -14,6 +14,21 @@ type Result struct {
 	OriginalChars int
 }
 
+// Prefix returns at most maxChars Unicode code points from content. The
+// boolean reports whether any characters were omitted. Converting through
+// []rune also guarantees callers never persist or display a partial UTF-8
+// sequence when a string arrived with malformed bytes.
+func Prefix(content string, maxChars int) (string, bool) {
+	runes := []rune(content)
+	if maxChars <= 0 {
+		return "", len(runes) > 0
+	}
+	if len(runes) <= maxChars {
+		return string(runes), false
+	}
+	return string(runes[:maxChars]), true
+}
+
 func Limit(content string, maxChars int) Result {
 	originalChars := utf8.RuneCountInString(content)
 	if maxChars <= 0 || originalChars <= maxChars {

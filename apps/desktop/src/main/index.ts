@@ -457,11 +457,11 @@ async function subscribeToRun(
   target: WebContents,
   runId: string,
   subscriptionId: string,
-  afterSeq?: number,
+  afterCursor?: number,
 ): Promise<void> {
   const controller = new AbortController();
-  const eventsUrl = afterSeq
-    ? `/v1/runs/${runId}/events?after_seq=${afterSeq}`
+  const eventsUrl = afterCursor
+    ? `/v1/runs/${runId}/events?after_cursor=${afterCursor}`
     : `/v1/runs/${runId}/events`;
   const response = await fetch(runtimeUrl(eventsUrl), {
     headers: {
@@ -922,8 +922,13 @@ ipcMain.handle(
 
 ipcMain.handle(
   "awaken:subscribe-run",
-  async (event, payload: { runId: string; subscriptionId: string; afterSeq?: number }) => {
-    await subscribeToRun(event.sender, payload.runId, payload.subscriptionId, payload.afterSeq);
+  async (event, payload: { runId: string; subscriptionId: string; afterCursor?: number; afterSeq?: number }) => {
+    await subscribeToRun(
+      event.sender,
+      payload.runId,
+      payload.subscriptionId,
+      payload.afterCursor ?? payload.afterSeq,
+    );
     return payload.subscriptionId;
   },
 );

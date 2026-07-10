@@ -200,8 +200,10 @@ type ThreadSnapshot struct {
 }
 
 type ThreadTranscriptRun struct {
-	Run    Run
-	Events []Event
+	Run             Run
+	Events          []Event
+	SemanticRecords []agentcore.SemanticRecord
+	StreamCursor    uint64
 }
 
 type ThreadTranscript struct {
@@ -267,6 +269,11 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	if s.journals == nil && !s.allowNoopRecorder {
 		return Run{}, ErrPersistenceUnavailable
 	}
+	if preparer, ok := s.threadStore.(interface{ Prepare() error }); ok {
+		if err := preparer.Prepare(); err != nil {
+			return Run{}, fmt.Errorf("prepare thread store: %w", err)
+		}
+	}
 
 	workspace, err := normalizeWorkspace(req.Workspace)
 	if err != nil {
@@ -310,6 +317,23 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	session := NewSession(runID, threadID, trimmed, persistedAttachments, req.ComposerTokens, cancel)
 	var threadSnapshot ThreadSnapshot
 	shouldGenerateThreadTitle := false
+	var previousThread *Thread
+	rollbackStart := func(cause error, metadataMayBeTouched bool) (Run, error) {
+		rollbackErr := s.rollbackFailedStartRun(
+			threadID,
+			runID,
+			req.ThreadID == "",
+			metadataMayBeTouched,
+			previousThread,
+			restoredMeta,
+			persistedAttachments,
+			cancel,
+		)
+		if rollbackErr != nil {
+			return Run{}, fmt.Errorf("%w (start rollback failed: %v)", cause, rollbackErr)
+		}
+		return Run{}, cause
+	}
 
 	s.mu.Lock()
 	if req.ThreadID != "" {
@@ -317,7 +341,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		if !ok {
 			if restored == nil {
 				s.mu.Unlock()
-				return Run{}, ErrThreadNotFound
+				return rollbackStart(ErrThreadNotFound, false)
 			}
 			agent = s.createAgent(workspace, threadID, req.ModelProfile)
 			if agent != nil {
@@ -326,10 +350,13 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			runIDs := append([]string(nil), restored.RunIDs...)
 			runIDs = append(runIDs, runID)
 			s.threads[threadID] = &Thread{
-				threadID:        threadID,
-				agent:           agent,
-				workspace:       workspace,
-				label:           firstNonEmpty(restored.Label, restoredMeta.Snapshot.Label),
+				threadID:  threadID,
+				agent:     agent,
+				workspace: workspace,
+				// SQLite metadata owns mutable title state. The append-only journal's
+				// thread label is only the creation-time fallback and must not overwrite
+				// a later manual/generated rename after restart.
+				label:           firstNonEmpty(restoredMeta.Snapshot.Label, restored.Label),
 				titleSource:     restoredMeta.Snapshot.TitleSource,
 				titleStatus:     restoredMeta.Snapshot.TitleStatus,
 				titleUpdatedAt:  restoredMeta.Snapshot.TitleUpdatedAt,
@@ -344,26 +371,27 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			s.sessions[runID] = session
 			threadSnapshot = s.threads[threadID].snapshot()
 			s.mu.Unlock()
-			if err := s.bindAgentRecorder(agent, threadID, runID, req.Client.SessionID, threadSnapshot.Label); err != nil {
-				return Run{}, err
+			if err := s.bindAgentRecorder(agent, session, threadID, runID, req.Client.SessionID, threadSnapshot.Label); err != nil {
+				return rollbackStart(err, false)
 			}
 			if err := s.threadStore.CreateThread(threadSnapshot, modelProfileKey, threadLabel); err != nil {
-				return Run{}, err
+				return rollbackStart(err, true)
 			}
 			if err := s.threadStore.AppendRunInput(threadSnapshot, session.Snapshot(), req.Client.SessionID, trimmed, persistedAttachments); err != nil {
-				return Run{}, err
+				return rollbackStart(err, true)
 			}
 			executor := s.newExecutor(agent)
 			go s.execute(session, executor, agent, effectiveInput, trimmed, persistedAttachments, ctx)
 			return session.Snapshot(), nil
 		}
+		previousThread = cloneThread(thread)
 		if !sameWorkspaceRoot(thread.workspace, workspace) {
 			s.mu.Unlock()
-			return Run{}, ErrThreadWorkspaceMismatch
+			return rollbackStart(ErrThreadWorkspaceMismatch, false)
 		}
 		if thread.activeRunID != "" {
 			s.mu.Unlock()
-			return Run{}, ErrThreadBusy
+			return rollbackStart(ErrThreadBusy, false)
 		}
 		agent = thread.agent
 		if modelProfileKey != thread.modelProfileKey || !sameTaskScope(thread.workspace, workspace) {
@@ -409,16 +437,16 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	s.sessions[runID] = session
 	s.mu.Unlock()
 
-	if err := s.bindAgentRecorder(agent, threadID, runID, req.Client.SessionID, threadSnapshot.Label); err != nil {
-		return Run{}, err
+	if err := s.bindAgentRecorder(agent, session, threadID, runID, req.Client.SessionID, threadSnapshot.Label); err != nil {
+		return rollbackStart(err, false)
 	}
 	createThreadErr := s.threadStore.CreateThread(threadSnapshot, modelProfileKey, threadLabel)
-	appendInputErr := s.threadStore.AppendRunInput(threadSnapshot, session.Snapshot(), req.Client.SessionID, trimmed, persistedAttachments)
 	if createThreadErr != nil {
-		return Run{}, createThreadErr
+		return rollbackStart(createThreadErr, true)
 	}
+	appendInputErr := s.threadStore.AppendRunInput(threadSnapshot, session.Snapshot(), req.Client.SessionID, trimmed, persistedAttachments)
 	if appendInputErr != nil {
-		return Run{}, appendInputErr
+		return rollbackStart(appendInputErr, true)
 	}
 	if shouldGenerateThreadTitle {
 		go s.scheduleThreadTitleGeneration(context.Background(), threadID, runID, trimmed, persistedAttachments, req.ComposerTokens, req.ModelProfile)
@@ -429,7 +457,82 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	return session.Snapshot(), nil
 }
 
-func (s *RunService) bindAgentRecorder(agent *agentcore.Agent, threadID, runID, sessionID, label string) error {
+func cloneThread(thread *Thread) *Thread {
+	if thread == nil {
+		return nil
+	}
+	cloned := *thread
+	cloned.runIDs = append([]string(nil), thread.runIDs...)
+	return &cloned
+}
+
+func (s *RunService) rollbackFailedStartRun(
+	threadID string,
+	runID string,
+	newThread bool,
+	metadataMayBeTouched bool,
+	previousThread *Thread,
+	restoredMeta *storedThreadRecord,
+	persistedAttachments []RunInputAttachment,
+	cancel context.CancelFunc,
+) error {
+	if cancel != nil {
+		cancel()
+	}
+	s.mu.Lock()
+	delete(s.sessions, runID)
+	if previousThread != nil {
+		s.threads[threadID] = cloneThread(previousThread)
+	} else {
+		delete(s.threads, threadID)
+	}
+	s.mu.Unlock()
+
+	var rollbackErrs []error
+	if err := cleanupPersistedRunInputAttachments(persistedAttachments); err != nil {
+		rollbackErrs = append(rollbackErrs, err)
+	}
+
+	if newThread {
+		if s.journals != nil {
+			if err := s.journals.CloseThread(threadID); err != nil {
+				rollbackErrs = append(rollbackErrs, err)
+			}
+		}
+		if metadataMayBeTouched {
+			if err := s.threadStore.DeleteThread(threadID); err != nil && !errors.Is(err, ErrThreadNotFound) {
+				rollbackErrs = append(rollbackErrs, err)
+			}
+		}
+		if s.journals != nil && s.journals.pathFn != nil {
+			if err := os.Remove(s.journals.pathFn(threadID)); err != nil && !errors.Is(err, os.ErrNotExist) {
+				rollbackErrs = append(rollbackErrs, err)
+			}
+		}
+	} else if metadataMayBeTouched {
+		var snapshot ThreadSnapshot
+		var profileKey string
+		var preview string
+		switch {
+		case previousThread != nil:
+			snapshot = previousThread.snapshot()
+			profileKey = previousThread.modelProfileKey
+			preview = previousThread.label
+		case restoredMeta != nil:
+			snapshot = restoredMeta.Snapshot
+			profileKey = restoredMeta.ModelProfileKey
+			preview = restoredMeta.Preview
+		}
+		if snapshot.ThreadID != "" {
+			if err := s.threadStore.CreateThread(snapshot, profileKey, preview); err != nil {
+				rollbackErrs = append(rollbackErrs, err)
+			}
+		}
+	}
+	return errors.Join(rollbackErrs...)
+}
+
+func (s *RunService) bindAgentRecorder(agent *agentcore.Agent, session *Session, threadID, runID, sessionID, label string) error {
 	if agent == nil {
 		return nil
 	}
@@ -449,6 +552,9 @@ func (s *RunService) bindAgentRecorder(agent *agentcore.Agent, threadID, runID, 
 		if err := ensureThreadJournalRecord(context.Background(), journal, threadID, label); err != nil {
 			return fmt.Errorf("%w: %v", ErrPersistenceUnavailable, err)
 		}
+	}
+	if assigned, ok := recorder.(agentcore.AssignedSemanticRecorder); ok && session != nil {
+		recorder = newLiveSemanticRecorder(assigned, session)
 	}
 	agent.SetSemanticRecorder(recorder)
 	return nil
@@ -818,8 +924,40 @@ func (s *RunService) GetThreadTranscript(threadID string) (ThreadTranscript, err
 	}
 	s.mu.RUnlock()
 
+	type activeRunSnapshot struct {
+		run          Run
+		events       []Event
+		streamCursor uint64
+		publishedIDs map[string]struct{}
+	}
+	activeRuns := make(map[string]activeRunSnapshot, len(sessionByRunID))
+	for runID, session := range sessionByRunID {
+		events, cursor := session.StreamSnapshot()
+		published := make(map[string]struct{})
+		for _, event := range events {
+			if event.Kind == EventKindSemantic && event.SemanticRecord.RecordID != "" {
+				published[event.SemanticRecord.RecordID] = struct{}{}
+			}
+		}
+		activeRuns[runID] = activeRunSnapshot{
+			run:          session.Snapshot(),
+			events:       events,
+			streamCursor: cursor,
+			publishedIDs: published,
+		}
+	}
+
 	durableRuns := map[string]ThreadTranscriptRun{}
-	if len(sessionByRunID) < len(runIDs) {
+	if s.journals != nil {
+		if journal, found := s.journals.Get(threadID); found {
+			records, err := journal.SnapshotRecords()
+			if err != nil {
+				return ThreadTranscript{}, err
+			}
+			durableRuns = durableRunsFromSemanticRecords(threadID, records)
+		}
+	}
+	if len(durableRuns) == 0 && len(sessionByRunID) < len(runIDs) {
 		loaded, err := s.threadStore.GetTranscript(threadID)
 		if err == nil {
 			for _, run := range loaded.Runs {
@@ -832,10 +970,25 @@ func (s *RunService) GetThreadTranscript(threadID string) (ThreadTranscript, err
 
 	runs := make([]ThreadTranscriptRun, 0, len(runIDs))
 	for _, runID := range runIDs {
-		if session, ok := sessionByRunID[runID]; ok {
+		if active, ok := activeRuns[runID]; ok {
+			if durable, exists := durableRuns[runID]; exists {
+				published := make([]agentcore.SemanticRecord, 0, len(durable.SemanticRecords))
+				for _, record := range durable.SemanticRecords {
+					if _, visible := active.publishedIDs[record.RecordID]; visible {
+						published = append(published, record)
+					}
+				}
+				durable.Run = active.run
+				durable.SemanticRecords = append([]agentcore.SemanticRecord(nil), published...)
+				durable.StreamCursor = active.streamCursor
+				durable.Events = canonicalizeActiveTranscriptEvents(active.events, durable.SemanticRecords)
+				runs = append(runs, durable)
+				continue
+			}
 			runs = append(runs, ThreadTranscriptRun{
-				Run:    session.Snapshot(),
-				Events: session.History(0),
+				Run:          active.run,
+				Events:       active.events,
+				StreamCursor: active.streamCursor,
 			})
 			continue
 		}
@@ -848,6 +1001,55 @@ func (s *RunService) GetThreadTranscript(threadID string) (ThreadTranscript, err
 		Thread: snapshot,
 		Runs:   runs,
 	}, nil
+}
+
+func canonicalizeActiveTranscriptEvents(events []Event, durableRecords []agentcore.SemanticRecord) []Event {
+	durableByID := make(map[string]agentcore.SemanticRecord, len(durableRecords))
+	assistantMessages := make(map[string]struct{})
+	toolCalls := make(map[string]struct{})
+	for _, record := range durableRecords {
+		durableByID[record.RecordID] = record
+		switch record.Kind {
+		case agentcore.SemanticKindAssistantMessage:
+			if id := stringPayload(record.Payload, "message_id"); id != "" {
+				assistantMessages[id] = struct{}{}
+			}
+		case agentcore.SemanticKindToolCall:
+			if id := stringPayload(record.Payload, "tool_call_id"); id != "" {
+				toolCalls[id] = struct{}{}
+			}
+		}
+	}
+
+	result := make([]Event, 0, len(events))
+	for _, event := range events {
+		if event.Kind == EventKindSemantic {
+			if canonical, ok := durableByID[event.SemanticRecord.RecordID]; ok {
+				event.SemanticRecord = canonical
+			}
+			result = append(result, event)
+			continue
+		}
+		if event.Kind == EventKindAgent {
+			switch event.AgentEvent.Type {
+			case agentcore.TextMessageStartedEventType,
+				agentcore.TextDeltaEventType,
+				agentcore.TextMessageFinishedEventType:
+				if _, superseded := assistantMessages[event.AgentEvent.MessageID]; superseded {
+					continue
+				}
+			case agentcore.ToolCallStartedEventType,
+				agentcore.ToolCallArgsDeltaEventType,
+				agentcore.ToolCallArgsEventType,
+				agentcore.ToolCallFinishedEventType:
+				if _, superseded := toolCalls[event.AgentEvent.ToolCallID]; superseded {
+					continue
+				}
+			}
+		}
+		result = append(result, event)
+	}
+	return result
 }
 
 func threadSnapshotFromRestored(threadID string, workspace WorkspaceConfig, restored restoredTranscript) ThreadSnapshot {
@@ -909,7 +1111,11 @@ func partialAssistantResult(agent *agentcore.Agent) string {
 
 func (s *RunService) execute(session *Session, executor Executor, agent *agentcore.Agent, input string, displayInput string, attachments []RunInputAttachment, ctx context.Context) {
 	snapshot := session.Snapshot()
+	baselineSkillConfig, hasBaselineSkillConfig := snapshotAgentSkillConfig(agent)
 	defer func() {
+		if hasBaselineSkillConfig {
+			restoreAgentSkillConfig(agent, baselineSkillConfig)
+		}
 		restoreAgentDisplayInput(agent, input, displayInput)
 		s.flushAgentTranscript(session, agent)
 		s.clearActiveRun(snapshot.ThreadID, snapshot.RunID)
@@ -948,6 +1154,9 @@ func (s *RunService) execute(session *Session, executor Executor, agent *agentco
 }
 
 func skillActivationErrorCode(err error) string {
+	if errors.Is(err, agentcore.ErrPersistenceUnavailable) {
+		return "persistence_unavailable"
+	}
 	var compat *skillruntime.SkillCompatibilityError
 	if errors.As(err, &compat) && compat != nil && strings.TrimSpace(compat.Code) != "" {
 		return compat.Code
@@ -964,14 +1173,25 @@ func (s *RunService) preActivateComposerSkills(ctx context.Context, agent *agent
 	activator := s.skillActivator
 	s.mu.RUnlock()
 	if activator == nil {
-		return nil
+		err := fmt.Errorf("skill activator unavailable")
+		if recorder := agent.SemanticRecorder(); recorder != nil {
+			if persistErr := persistSkillPreActivationFailure(ctx, recorder, snapshot, nil, err); persistErr != nil {
+				return fmt.Errorf("persist skill pre-activation failure: %w", persistErr)
+			}
+		}
+		return err
 	}
 
-	parentPool := skillruntime.CurrentParentToolPool()
 	cfg := agent.GetConfig()
-	var blocks []agentcore.ContextBlock
-	effective := append([]string(nil), parentPool...)
+	var effective []string
+	if cfg.ResolvedToolPool == nil {
+		effective = agent.ModelVisibleToolPool()
+	} else {
+		effective = append([]string(nil), cfg.ResolvedToolPool...)
+	}
+	blocks := append([]agentcore.ContextBlock(nil), cfg.SkillContextBlocks...)
 	recorder := agent.SemanticRecorder()
+	plans := make([]*skillruntime.SkillActivationPlan, 0, len(tokens))
 
 	for _, token := range tokens {
 		skillID := strings.TrimSpace(firstNonEmpty(token.Payload.SkillID, token.ID))
@@ -986,21 +1206,37 @@ func (s *RunService) preActivateComposerSkills(ctx context.Context, agent *agent
 		}
 		plan, err := activator.Activate(skillruntime.ActivationRequest{
 			SkillID:        skillID,
-			ParentToolPool: parentPool,
+			ParentToolPool: effective,
 			SkipArgRender:  true,
 		})
+		if plan != nil {
+			plans = append(plans, plan.Clone())
+		}
 		if err != nil {
+			if recorder != nil {
+				if persistErr := persistSkillPreActivationFailure(ctx, recorder, snapshot, plans, err); persistErr != nil {
+					return fmt.Errorf("persist skill pre-activation failure: %w", persistErr)
+				}
+			}
 			return err
 		}
-		effective = skillruntime.IntersectToolPools(effective, plan.EffectiveTools)
+		effective = append([]string(nil), plan.EffectiveTools...)
 		blocks = append(blocks, agentcore.ContextBlock{
 			ID:      "skill_activation_" + plan.SkillID,
 			Content: plan.MainBody,
 		})
-		if recorder != nil {
-			if err := emitSkillActivationRecords(ctx, recorder, snapshot, plan); err != nil {
-				return err
+	}
+	if recorder != nil {
+		activationRecords := make([]agentcore.SemanticRecord, 0, len(plans))
+		for _, plan := range plans {
+			activationRecords = append(activationRecords, skillActivationRecords(snapshot, plan)...)
+		}
+		if err := recorder.AppendBatch(ctx, activationRecords); err != nil {
+			persistenceErr := fmt.Errorf("%w: persist composer skill activations: %v", agentcore.ErrPersistenceUnavailable, err)
+			if terminalErr := persistSkillPreActivationFailure(ctx, recorder, snapshot, nil, persistenceErr); terminalErr != nil {
+				return fmt.Errorf("%w; persist failure terminal: %v", persistenceErr, terminalErr)
 			}
+			return persistenceErr
 		}
 	}
 
@@ -1010,64 +1246,105 @@ func (s *RunService) preActivateComposerSkills(ctx context.Context, agent *agent
 	return nil
 }
 
-func emitSkillActivationRecords(ctx context.Context, recorder agentcore.SemanticRecorder, snapshot Run, plan *skillruntime.SkillActivationPlan) error {
-	if recorder == nil || plan == nil {
+func skillActivationRecords(snapshot Run, plan *skillruntime.SkillActivationPlan) []agentcore.SemanticRecord {
+	if plan == nil {
 		return nil
 	}
-	activated := agentcore.NewSemanticRecord(
+	records := []agentcore.SemanticRecord{agentcore.NewSemanticRecord(
 		agentcore.SemanticKindSkillActivated,
 		snapshot.ThreadID,
 		snapshot.RunID,
 		"",
 		"",
 		"",
-		map[string]any{
-			"skill_id":              plan.SkillID,
-			"skill_version":         plan.SkillVersion,
-			"effective_tools":       append([]string(nil), plan.EffectiveTools...),
-			"compatibility_status":  plan.CompatibilityStatus,
-			"required_tools":        append([]string(nil), plan.RequiredTools...),
-			"required_capabilities": capabilityStrings(plan.RequiredCapabilities),
-		},
-	)
-	if err := recorder.Append(ctx, activated); err != nil {
-		return err
-	}
+		plan.DurablePayload(),
+	)}
 	for _, receipt := range plan.ResourceReceipts {
-		rec := agentcore.NewSemanticRecord(
+		records = append(records, agentcore.NewSemanticRecord(
 			agentcore.SemanticKindResourceReceipt,
 			snapshot.ThreadID,
 			snapshot.RunID,
 			"",
 			"",
 			"",
-			map[string]any{
-				"skill_id":      receipt.SkillID,
-				"skill_version": receipt.SkillVersion,
-				"resource":      receipt.Resource,
-				"source":        receipt.Source,
-				"sha256":        receipt.SHA256,
-				"size":          receipt.Size,
-				"mode":          receipt.Mode,
-				"loaded_at":     receipt.LoadedAt.UTC().Format(time.RFC3339Nano),
-			},
-		)
-		if err := recorder.Append(ctx, rec); err != nil {
-			return err
-		}
+			receipt.DurablePayload(),
+		))
 	}
-	return nil
+	return records
 }
 
-func capabilityStrings(caps []tool.CapabilityClass) []string {
-	out := make([]string, 0, len(caps))
-	for _, c := range caps {
-		if strings.TrimSpace(string(c)) == "" {
-			continue
-		}
-		out = append(out, string(c))
+func persistSkillPreActivationFailure(ctx context.Context, recorder agentcore.SemanticRecorder, snapshot Run, plans []*skillruntime.SkillActivationPlan, activationErr error) error {
+	if recorder == nil {
+		return nil
 	}
-	return out
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	records := []agentcore.SemanticRecord{agentcore.NewSemanticRecord(
+		agentcore.SemanticKindRunStarted,
+		snapshot.ThreadID,
+		snapshot.RunID,
+		"",
+		"",
+		"",
+		map[string]any{},
+	)}
+	for _, plan := range plans {
+		records = append(records, skillActivationRecords(snapshot, plan)...)
+	}
+	code := skillActivationErrorCode(activationErr)
+	records = append(records, agentcore.NewSemanticRecord(
+		agentcore.SemanticKindRunTerminal,
+		snapshot.ThreadID,
+		snapshot.RunID,
+		"",
+		"",
+		"",
+		map[string]any{
+			"status":          "error",
+			"error":           activationErr.Error(),
+			"code":            code,
+			"terminal_reason": "skill_activation_failed",
+		},
+	))
+	if err := recorder.AppendBatch(persistCtx, records); err != nil {
+		return err
+	}
+	return recorder.Flush(persistCtx)
+}
+
+type agentSkillConfigSnapshot struct {
+	resolvedToolPool   []string
+	resolvedPoolWasNil bool
+	skillContextBlocks []agentcore.ContextBlock
+}
+
+func snapshotAgentSkillConfig(agent *agentcore.Agent) (agentSkillConfigSnapshot, bool) {
+	if agent == nil {
+		return agentSkillConfigSnapshot{}, false
+	}
+	cfg := agent.GetConfig()
+	snapshot := agentSkillConfigSnapshot{
+		resolvedPoolWasNil: cfg.ResolvedToolPool == nil,
+		skillContextBlocks: append([]agentcore.ContextBlock(nil), cfg.SkillContextBlocks...),
+	}
+	if cfg.ResolvedToolPool != nil {
+		snapshot.resolvedToolPool = append([]string(nil), cfg.ResolvedToolPool...)
+	}
+	return snapshot, true
+}
+
+func restoreAgentSkillConfig(agent *agentcore.Agent, snapshot agentSkillConfigSnapshot) {
+	if agent == nil {
+		return
+	}
+	cfg := agent.GetConfig()
+	if snapshot.resolvedPoolWasNil {
+		cfg.ResolvedToolPool = nil
+	} else {
+		cfg.ResolvedToolPool = append([]string(nil), snapshot.resolvedToolPool...)
+	}
+	cfg.SkillContextBlocks = append([]agentcore.ContextBlock(nil), snapshot.skillContextBlocks...)
+	agent.Reconfigure(cfg)
 }
 
 func effectiveInputForComposerTokens(input string, tokens []ComposerToken) string {
@@ -1134,11 +1411,6 @@ func (s *RunService) flushAgentTranscript(session *Session, agent *agentcore.Age
 		return nil
 	}
 	var firstErr error
-	if recorder := agent.SemanticRecorder(); recorder != nil {
-		if err := recorder.Flush(context.Background()); err != nil {
-			firstErr = err
-		}
-	}
 	if err := s.threadStore.AppendConversation(snapshot, run, agent.GetConversation().Context.GetMessages()); err != nil && firstErr == nil {
 		firstErr = err
 	}

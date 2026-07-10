@@ -55,6 +55,25 @@ type SemanticRecorder interface {
 	Flush(ctx context.Context) error
 }
 
+// AssignedSemanticRecorder exposes the exact records accepted by durable
+// storage, including the sequence assigned while holding the journal lock.
+// Production live projection must use these returned values rather than the
+// caller's pre-append seq=0 copies.
+type AssignedSemanticRecorder interface {
+	SemanticRecorder
+	AppendAssigned(ctx context.Context, record SemanticRecord) (SemanticRecord, error)
+	AppendBatchAssigned(ctx context.Context, records []SemanticRecord) ([]SemanticRecord, error)
+}
+
+// CanonicalLiveSemanticRecorder marks a recorder that publishes successfully
+// appended SemanticRecords to the live runtime stream. PersistDurable uses the
+// marker to avoid also emitting its legacy hand-built AwakenEvent projection.
+// Legacy v1 recorders intentionally do not implement this contract.
+type CanonicalLiveSemanticRecorder interface {
+	SemanticRecorder
+	BroadcastsCanonicalSemanticRecords() bool
+}
+
 // NoopSemanticRecorder is for pure unit tests without side effects only.
 // Formal StartRun must not use this; missing recorder returns persistence_unavailable.
 type NoopSemanticRecorder struct{}

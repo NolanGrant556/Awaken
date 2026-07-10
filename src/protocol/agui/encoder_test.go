@@ -1,6 +1,9 @@
 package agui
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestEncoderEncodeSSE(t *testing.T) {
 	frame, err := (Encoder{}).EncodeSSE(Event{
@@ -34,6 +37,23 @@ func TestEncoderEncodeSSEWithSeq(t *testing.T) {
 	want := "id: 42\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"seq\":42,\"messageId\":\"msg-1\",\"delta\":\"Hello\"}\n\n"
 	if got != want {
 		t.Fatalf("unexpected SSE frame:\nwant %q\ngot  %q", want, got)
+	}
+}
+
+func TestEncoderEncodeSSEPrefersStreamCursorForEventID(t *testing.T) {
+	frame, err := (Encoder{}).EncodeSSE(Event{
+		Type:         EventTextMessageContent,
+		Seq:          999,
+		StreamCursor: 42,
+		SemanticSeq:  999,
+		MessageID:    "msg-1",
+		Delta:        "Hello",
+	})
+	if err != nil {
+		t.Fatalf("EncodeSSE returned error: %v", err)
+	}
+	if got := string(frame); !strings.HasPrefix(got, "id: 42\n") {
+		t.Fatalf("SSE id must use stream cursor, got %q", got)
 	}
 }
 

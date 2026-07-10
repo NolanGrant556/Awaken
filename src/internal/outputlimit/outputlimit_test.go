@@ -3,7 +3,33 @@ package outputlimit
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
+
+func TestPrefixTruncatesUnicodeByRuneWithoutSplittingUTF8(t *testing.T) {
+	input := strings.Repeat("中", 4) + "🚀tail"
+	got, truncated := Prefix(input, 5)
+	if !truncated {
+		t.Fatalf("expected prefix to report truncation")
+	}
+	if got != strings.Repeat("中", 4)+"🚀" {
+		t.Fatalf("unexpected Unicode prefix %q", got)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("expected valid UTF-8, got %q", got)
+	}
+}
+
+func TestPrefixNormalizesMalformedUTF8(t *testing.T) {
+	input := string([]byte{'o', 'k', 0xff})
+	got, truncated := Prefix(input, 3)
+	if truncated {
+		t.Fatalf("did not expect truncation, got %q", got)
+	}
+	if !utf8.ValidString(got) || got != "ok�" {
+		t.Fatalf("expected malformed input normalized to valid UTF-8, got %q", got)
+	}
+}
 
 func TestLimitLeavesSmallContentUnchanged(t *testing.T) {
 	result := Limit("hello", 10)

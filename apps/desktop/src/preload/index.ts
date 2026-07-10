@@ -101,7 +101,7 @@ const bridge: AwakenBridge = {
       questionId,
       answer,
     }) as Promise<void>,
-  subscribeRun: async (runId: string, handlers: RunStreamHandlers, afterSeq?: number) => {
+  subscribeRun: async (runId: string, handlers: RunStreamHandlers, afterCursor?: number) => {
     const subscriptionId = crypto.randomUUID();
     subscriptions.set(subscriptionId, handlers);
 
@@ -109,7 +109,7 @@ const bridge: AwakenBridge = {
       await ipcRenderer.invoke("awaken:subscribe-run", {
         runId,
         subscriptionId,
-        afterSeq,
+        afterCursor,
       });
       return subscriptionId;
     } catch (error) {

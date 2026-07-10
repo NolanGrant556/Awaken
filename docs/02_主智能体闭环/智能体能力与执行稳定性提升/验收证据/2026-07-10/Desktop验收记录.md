@@ -146,6 +146,22 @@ Python、Node、LibreOffice、Poppler、ffmpeg、helper-packages 全部 probe �
 
 证据：`失败工具无假Artifact与中性诊断.png`；截图 SHA256：`5b80f0506b9ed832d267deb79729d3dee638f957fb2e768472efae5bd1f00ca8`。
 
+### 8.1 最终 HEAD 复验
+
+在 Phase 8 验收修复全部拆分提交并进入 `origin/main` 后，又以 `0c4f0646`（`feat: tighten failure-supervisor class budget and runner integration`）为输入 HEAD 完成一次独立复验，确认先前证据不是停留在修复前工作树上的偶然结果。
+
+- 复验时间：2026-07-10 21:05–21:10（Asia/Shanghai）。
+- 正式入口：先执行 `npm run close:desktop`，再执行 `npm run open:desktop`；启动检查确认 screen、renderer、Electron、awaken-core 和 `Awaken Desktop` 1440×900 真实窗口均就绪。
+- 隔离工作区：`/tmp/awaken-acceptance-workspace`。
+- Thread：`thread_1783688891557345000_2`。
+- Run：`run_1783688891557339000_1`。
+- `text_edit` 只调用一次，得到 `semantic_status=failure`、`error_code=text_not_found`、`match_count=0`；`验收样例.txt` 在调用后及重启后 SHA256 均为 `106b537c0c0147e0cdc678d7b89623eca692f9370891737e202dcdce695c081a`。
+- `shell` 只调用一次，命令为 `rg 'PHASE8_DIAGNOSTIC_NOT_PRESENT' 验收样例.txt`；进程退出码为 1，但投影为 `semantic_status=neutral`、`diagnostic.reason=no_match`。
+- transcript API 在直播与重启后都只有 2 个 ToolCall/ToolResult，Artifact 事件 0、文件事件 0，终态为 `RUN_FINISHED / completed / success`。
+- Desktop UI 直播与重启重放均显示完整中文最终回答、`text_not_found`、`neutral`、`no_match`、无文件修改、无 Artifact，执行时间均为 27s；没有 `Streaming response...`、重复工具卡或状态漂移。
+
+复验证据：`最终HEAD复验_重启前.png`（SHA256 `9a4c71126e4da4090c543bd39099f6e176df7d644d0c49401637e0c835e93d69`）、`最终HEAD复验_重启后.png`（SHA256 `2c2eed1732f4eae09f345222b5a1ba60fc8dc9f86af97136937c4213c161f966`）。
+
 ## 9. 最终结论
 
 macOS 结论：通过。正式入口、旧历史文本、工具/Skill 过程、受控失败、中性结果、required resource fail-closed、中文 PPT、Awaken-owned runtime 与重启重放均有真实 Desktop 或真实 runtime 证据。

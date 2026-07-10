@@ -13,6 +13,7 @@ import (
 	"awaken/src/context"
 	"awaken/src/internal/outputlimit"
 	"awaken/src/llm"
+	"awaken/src/skillruntime"
 	"awaken/src/tool"
 )
 
@@ -22,18 +23,20 @@ const (
 	maxOutputContinuationPromptPrefix = "请继续上一条回答，从中断处继续，不要重复已经输出的内容。"
 )
 
+var ErrPersistenceFailed = errors.New("persistence_error")
+
 type Runner struct {
-	config             AgentConfig
-	conversation       *context.Conversation
-	reqBuilder         *RequestBuilder
-	toolRuntime        *ToolRuntime
-	failureSupervisor  *FailureSupervisor
-	threadID           string
-	runID              string
-	sessionID          string
-	recorder           SemanticRecorder
-	contextGovernor    *contextGovernor
-	streamLLMFunc      func(stdcontext.Context, *runEventEmitter) (*llm.Response, error)
+	config            AgentConfig
+	conversation      *context.Conversation
+	reqBuilder        *RequestBuilder
+	toolRuntime       *ToolRuntime
+	failureSupervisor *FailureSupervisor
+	threadID          string
+	runID             string
+	sessionID         string
+	recorder          SemanticRecorder
+	contextGovernor   *contextGovernor
+	streamLLMFunc     func(stdcontext.Context, *runEventEmitter) (*llm.Response, error)
 }
 
 func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *RequestBuilder) *Runner {
@@ -54,8 +57,14 @@ func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *Reque
 	return runner
 }
 
-func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (string, error) {
+func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (answer string, runErr error) {
 	events := newRunEventEmitter(r.threadID, sink)
+	defer func() {
+		if err := events.persistenceFailure(); err != nil {
+			answer = ""
+			runErr = err
+		}
+	}()
 	if r.runID != "" {
 		events.runID = r.runID
 	} else {
@@ -74,6 +83,9 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 	maxThoughts := r.effectiveMaxThoughts()
 
 	for i := 0; i < maxThoughts; i++ {
+		if err := events.persistenceFailure(); err != nil {
+			return "", err
+		}
 		select {
 		case <-ctx.Done():
 			r.injectSyntheticToolResultsForCancel()
@@ -122,6 +134,9 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 
 		events.finishReasoningIfOpen()
 		events.finishTextIfOpen()
+		if err := events.persistenceFailure(); err != nil {
+			return "", err
+		}
 
 		if len(response.ToolCalls) > 0 {
 			toolCalls := llmToolCallsToContext(response.ToolCalls)
@@ -295,6 +310,12 @@ func (r *Runner) prepareLLMRequest(ctx stdcontext.Context, events *runEventEmitt
 	if err != nil {
 		return LLMRequest{}, err
 	}
+	if r.failureSupervisor != nil {
+		if recovery := FormatRecoveryContext(r.failureSupervisor.PendingRecovery()); recovery != "" {
+			llmReq.SystemPrompt = strings.TrimSpace(llmReq.SystemPrompt) +
+				"\n\nRuntime recovery directive (must be followed before the next tool call):\n" + recovery
+		}
+	}
 	if events != nil {
 		return r.contextGovernor.PrepareRequest(ctx, llmReq, events)
 	}
@@ -338,6 +359,14 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 	defer cancel()
 	var terminateReason TerminalReason
 	for _, call := range toolCalls {
+		if events != nil {
+			if err := events.persistenceFailure(); err != nil {
+				results = append(results, syntheticPersistenceFailureResult(call, err))
+				terminateReason = TerminalReasonPersistenceError
+				cancel()
+				continue
+			}
+		}
 		if runCtx.Err() != nil {
 			results = append(results, syntheticCancelledToolResult(call))
 			continue
@@ -356,12 +385,17 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 			if events != nil {
 				if err := events.emitToolCall(runCtx, call); err != nil {
 					cancel()
-					results = append(results, syntheticCancelledToolResult(call))
+					results = append(results, syntheticPersistenceFailureResult(call, err))
+					terminateReason = TerminalReasonPersistenceError
 					continue
 				}
-				events.emitToolRetryBlocked(call, before)
-				_ = events.emitToolResultBatch(runCtx, result, nil)
+				// Persist and canonically project the blocked recovery decision before
+				// its synthetic result, matching causal live/replay order.
 				events.emitRecoveryDecision(call, before.RecoveryOptions, before.ErrorCode, true)
+				if err := events.emitToolResultBatch(runCtx, result, nil, nil); err != nil {
+					cancel()
+					terminateReason = TerminalReasonPersistenceError
+				}
 			}
 			results = append(results, result)
 			if before.TerminateRun || before.TerminateTurn {
@@ -377,7 +411,8 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 		if events != nil {
 			if err := events.emitToolCall(runCtx, call); err != nil {
 				cancel()
-				results = append(results, syntheticCancelledToolResult(call))
+				results = append(results, syntheticPersistenceFailureResult(call, err))
+				terminateReason = TerminalReasonPersistenceError
 				continue
 			}
 		}
@@ -396,23 +431,42 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 			buffer = &artifactBufferingSink{inner: normalizeEventSink(events.sink)}
 			r.toolRuntime.sink = buffer
 		}
-		result := r.toolRuntime.Execute(runCtx, call)
+		executionCtx := runCtx
+		var activationPlan *skillruntime.SkillActivationPlan
+		if strings.HasPrefix(call.Function.Name, skillruntime.SkillToolPrefix) {
+			executionCtx = skillruntime.WithActivationScope(
+				runCtx,
+				r.currentImplicitParentPool(),
+				func(observerCtx stdcontext.Context, plan *skillruntime.SkillActivationPlan) error {
+					activationPlan = plan.Clone()
+					return r.persistImplicitSkillActivation(observerCtx, events, call, activationPlan)
+				},
+			)
+		}
+		result := r.toolRuntime.Execute(executionCtx, call)
 		if events != nil {
 			r.toolRuntime.sink = events.sink
+			if persistErr := events.persistenceFailure(); persistErr != nil {
+				cancel()
+				results = append(results, syntheticPersistenceFailureResult(call, persistErr))
+				terminateReason = TerminalReasonPersistenceError
+				continue
+			}
 		}
 
+		var recoveryRequired bool
+		var recoveryOptions []string
+		var recoveryErrorCode string
 		if r.failureSupervisor != nil {
 			after := r.failureSupervisor.AfterOutcome(call, result.Outcome)
 			if len(after.RecoveryOptions) > 0 || after.RecoveryRequired {
 				result.Outcome = ApplyRecoveryToOutcome(result.Outcome, after.RecoveryOptions, after.RecoveryRequired)
-				result.Content = result.Outcome.ModelPayload()
 				result.IsError = result.Outcome.IsError()
 			}
 			if after.RecoveryRequired {
-				if events != nil {
-					events.emitToolRecoveryRequired(call, after)
-					events.emitRecoveryDecision(call, after.RecoveryOptions, result.Outcome.ErrorCode, false)
-				}
+				recoveryRequired = true
+				recoveryOptions = append([]string(nil), after.RecoveryOptions...)
+				recoveryErrorCode = result.Outcome.ErrorCode
 			}
 			if after.TerminateRun || after.TerminateTurn {
 				terminateReason = after.TerminalReason
@@ -423,31 +477,29 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 			}
 		}
 
-		r.applyImplicitSkillActivation(call.Function.Name, result)
+		r.applyImplicitSkillActivation(call.Function.Name, result, activationPlan)
 		results = append(results, result)
-		if events != nil && call.Function.Name == "apply_patch" && !result.IsError {
-			events.markMutation()
-		}
 		if events != nil {
 			artifacts := []AwakenEvent{}
 			if buffer != nil {
 				artifacts = buffer.artifacts
 			}
-			if err := events.emitToolResultBatch(runCtx, result, artifacts); err != nil && events.recorder != nil {
-				warnCtx := stdcontext.Background()
-				_ = events.recorder.Append(warnCtx, NewSemanticRecord(
-					SemanticKindPersistenceWarning,
-					events.threadID,
-					events.runID,
-					events.turnID(),
-					call.ID,
-					events.sessionID,
-					map[string]any{
-						"error":   err.Error(),
-						"phase":   "tool_result",
-						"tool_id": call.ID,
-					},
-				))
+			if toolResultAppliedMutation(result) &&
+				(len(result.AffectedPaths) > 0 || len(result.TrashedPaths) > 0 || len(artifacts) > 0) {
+				events.markMutation()
+			}
+			var semanticFacts []AwakenEvent
+			if buffer != nil {
+				semanticFacts = buffer.semanticFacts
+			}
+			if err := events.emitToolResultBatch(runCtx, result, artifacts, semanticFacts); err != nil {
+				cancel()
+				terminateReason = TerminalReasonPersistenceError
+			} else if recoveryRequired {
+				// A real execution result is the cause; publish it durably before the
+				// recovery directive so live and replay never ask for recovery before
+				// showing the failure that requires it.
+				events.emitRecoveryDecision(call, recoveryOptions, recoveryErrorCode, false)
 			}
 		}
 	}
@@ -457,32 +509,91 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 	return results
 }
 
-type skillPoolProvider interface {
-	ResolvedToolPoolAfterExecute() []string
-	LastActivationMainBody() string
-	LastActivationSkillID() string
+func (r *Runner) currentImplicitParentPool() []string {
+	if r == nil {
+		return nil
+	}
+	if r.config.ResolvedToolPool != nil {
+		return append([]string(nil), r.config.ResolvedToolPool...)
+	}
+	if r.reqBuilder == nil {
+		return nil
+	}
+	schemas := r.reqBuilder.getTools()
+	names := make([]string, 0, len(schemas))
+	for _, schema := range schemas {
+		name := strings.TrimSpace(schema.Function.Name)
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
-func (r *Runner) applyImplicitSkillActivation(toolName string, result ToolExecutionResult) {
-	if r == nil || result.IsError || !strings.HasPrefix(toolName, "skill__") {
+func (r *Runner) persistImplicitSkillActivation(
+	ctx stdcontext.Context,
+	events *runEventEmitter,
+	call context.ToolCall,
+	plan *skillruntime.SkillActivationPlan,
+) error {
+	if r == nil || plan == nil {
+		return nil
+	}
+	turnID := ""
+	threadID := r.threadID
+	runID := r.runID
+	if events != nil {
+		turnID = events.turnID()
+		threadID = events.threadID
+		runID = events.runID
+	}
+	records := []SemanticRecord{NewSemanticRecord(
+		SemanticKindSkillActivated,
+		threadID,
+		runID,
+		turnID,
+		call.ID,
+		r.sessionID,
+		plan.DurablePayload(),
+	)}
+	for _, receipt := range plan.ResourceReceipts {
+		records = append(records, NewSemanticRecord(
+			SemanticKindResourceReceipt,
+			threadID,
+			runID,
+			turnID,
+			call.ID,
+			r.sessionID,
+			receipt.DurablePayload(),
+		))
+	}
+	if events != nil && events.recorder != nil {
+		return events.persistDurableBatch(ctx, "skill_activation", records)
+	}
+	if r.recorder != nil {
+		persistCtx, cancel := durablePersistenceContext(ctx)
+		defer cancel()
+		if err := r.recorder.AppendBatch(persistCtx, records); err != nil {
+			return fmt.Errorf("%w: phase=skill_activation: %v", ErrPersistenceFailed, err)
+		}
+	}
+	return nil
+}
+
+func (r *Runner) applyImplicitSkillActivation(
+	toolName string,
+	result ToolExecutionResult,
+	plan *skillruntime.SkillActivationPlan,
+) {
+	if r == nil || result.IsError || !strings.HasPrefix(toolName, skillruntime.SkillToolPrefix) ||
+		plan == nil || plan.CompatibilityStatus != skillruntime.CompatibilityOK {
 		return
 	}
-	selected, err := tool.GetTool(toolName)
-	if err != nil {
-		return
-	}
-	provider, ok := selected.(skillPoolProvider)
-	if !ok {
-		return
-	}
-	pool := provider.ResolvedToolPoolAfterExecute()
-	if pool == nil {
-		return
-	}
+	pool := skillruntime.IntersectToolPools(r.currentImplicitParentPool(), plan.EffectiveTools)
 	r.config.ResolvedToolPool = append([]string(nil), pool...)
-	if body := strings.TrimSpace(provider.LastActivationMainBody()); body != "" {
+	if body := strings.TrimSpace(plan.MainBody); body != "" {
 		r.config.SkillContextBlocks = append(r.config.SkillContextBlocks, ContextBlock{
-			ID:      "skill_activation_" + provider.LastActivationSkillID(),
+			ID:      "skill_activation_" + plan.SkillID,
 			Content: body,
 		})
 	}
@@ -491,6 +602,11 @@ func (r *Runner) applyImplicitSkillActivation(toolName string, result ToolExecut
 }
 
 func (r *Runner) stopAfterToolExchangeIfNeeded(ctx stdcontext.Context, events *runEventEmitter, turnIndex int) (bool, error) {
+	if events != nil {
+		if err := events.persistenceFailure(); err != nil {
+			return true, err
+		}
+	}
 	if err := context.ValidateToolResultPairing(r.conversation.Context.GetMessages()); err != nil {
 		runErr := fmt.Errorf("invalid tool result pairing after tool exchange: %w", err)
 		if events != nil {
@@ -613,6 +729,39 @@ func syntheticCancelledToolResult(call context.ToolCall) ToolExecutionResult {
 	}
 }
 
+func syntheticPersistenceFailureResult(call context.ToolCall, err error) ToolExecutionResult {
+	now := time.Now().UTC()
+	message := "persistence_error"
+	if err != nil {
+		message = err.Error()
+	}
+	outcome := tool.ExecutionOutcome{
+		Content:         message,
+		Status:          tool.OutcomeFailed,
+		TransportStatus: tool.TransportNotStarted,
+		SemanticStatus:  tool.SemanticFailure,
+		ProcessStatus:   tool.ProcessNotApplicable,
+		ErrorCode:       string(TerminalReasonPersistenceError),
+		ErrorCategory:   tool.ErrorCategoryPersistence,
+		ErrorMessage:    message,
+		Retryable:       false,
+		RecoveryOptions: []string{"stop_new_side_effects", "wait_for_journal_recovery_or_terminate"},
+		StartedAt:       now,
+		FinishedAt:      now,
+	}
+	return ToolExecutionResult{
+		ToolCallID: call.ID,
+		Name:       call.Function.Name,
+		Content:    message,
+		IsError:    true,
+		Status:     ToolExecutionFailed,
+		ErrorCode:  outcome.ErrorCode,
+		Outcome:    outcome,
+		StartedAt:  now,
+		FinishedAt: now,
+	}
+}
+
 func toolExecutionResultsToContext(results []ToolExecutionResult) []context.ToolResult {
 	out := make([]context.ToolResult, 0, len(results))
 	for _, result := range results {
@@ -652,21 +801,22 @@ func llmToolCallsToContext(toolCalls []llm.ToolCall) []context.ToolCall {
 }
 
 type runEventEmitter struct {
-	sink                   EventSink
-	recorder               SemanticRecorder
-	sessionID              string
-	threadID               string
-	runID                  string
-	turnState              TurnState
-	currentAssistantID     string
-	textMessageID          string
-	reasoningMessageID     string
-	textOpen               bool
-	reasoningOpen          bool
-	textStartedThisTurn    bool
-	mutationOccurred       bool
-	assistantText          strings.Builder
-	pendingTerminalReason  TerminalReason
+	sink                  EventSink
+	recorder              SemanticRecorder
+	sessionID             string
+	threadID              string
+	runID                 string
+	turnState             TurnState
+	currentAssistantID    string
+	textMessageID         string
+	reasoningMessageID    string
+	textOpen              bool
+	reasoningOpen         bool
+	textStartedThisTurn   bool
+	mutationOccurred      bool
+	assistantText         strings.Builder
+	pendingTerminalReason TerminalReason
+	persistenceErr        error
 }
 
 func newRunEventEmitter(threadID string, sink EventSink) *runEventEmitter {
@@ -687,14 +837,124 @@ func (e *runEventEmitter) turnID() string {
 	return string(e.turnState.TurnID)
 }
 
-func (e *runEventEmitter) cancelOnPersistFailure(cancel stdcontext.CancelFunc, err error) error {
-	if err == nil {
+func (e *runEventEmitter) persistenceFailure() error {
+	if e == nil {
 		return nil
 	}
-	if cancel != nil {
-		cancel()
+	return e.persistenceErr
+}
+
+func (e *runEventEmitter) notePersistenceFailure(phase string, cause error) error {
+	if e == nil || cause == nil {
+		return cause
 	}
-	return err
+	if e.persistenceErr != nil {
+		return e.persistenceErr
+	}
+	phase = strings.TrimSpace(phase)
+	if phase == "" {
+		phase = "unknown"
+	}
+	e.persistenceErr = fmt.Errorf("%w: phase=%s: %v", ErrPersistenceFailed, phase, cause)
+	e.pendingTerminalReason = TerminalReasonPersistenceError
+
+	// If storage recovered after the original exhausted append/flush, close
+	// the journal with an explicit persistence_error terminal. Failure of
+	// this recovery write is retained in the returned error and never ignored.
+	canonicalTerminalPublished := false
+	if e.recorder != nil {
+		recoveryCtx, cancel := stdcontext.WithTimeout(stdcontext.Background(), 2*time.Second)
+		terminal := NewSemanticRecord(
+			SemanticKindRunTerminal,
+			e.threadID,
+			e.runID,
+			e.turnID(),
+			"",
+			e.sessionID,
+			map[string]any{
+				"status":          "error",
+				"error":           e.persistenceErr.Error(),
+				"code":            string(TerminalReasonPersistenceError),
+				"terminal_reason": string(TerminalReasonPersistenceError),
+				"failed_phase":    phase,
+			},
+		)
+		recoveryErr := e.recorder.Append(recoveryCtx, terminal)
+		if recoveryErr == nil {
+			recoveryErr = e.recorder.Flush(recoveryCtx)
+		}
+		cancel()
+		if recoveryErr != nil {
+			e.persistenceErr = fmt.Errorf("%w; persistence terminal failed: %v", e.persistenceErr, recoveryErr)
+		} else if canonical, ok := e.recorder.(CanonicalLiveSemanticRecorder); ok && canonical.BroadcastsCanonicalSemanticRecords() {
+			canonicalTerminalPublished = true
+		}
+	}
+
+	event := AwakenEvent{
+		Type:           RunErrorEventType,
+		Error:          e.persistenceErr.Error(),
+		Code:           "PERSISTENCE_ERROR",
+		TerminalReason: TerminalReasonPersistenceError,
+	}
+	e.fillIDs(&event)
+	if !canonicalTerminalPublished {
+		e.sink.Emit(event)
+	}
+	return e.persistenceErr
+}
+
+func (e *runEventEmitter) persistDurable(ctx stdcontext.Context, phase string, record SemanticRecord, liveEvents ...AwakenEvent) error {
+	if err := e.persistenceFailure(); err != nil {
+		return err
+	}
+	persistCtx, cancel := durablePersistenceContext(ctx)
+	defer cancel()
+	if err := PersistDurable(persistCtx, e.recorder, e.sink, record, liveEvents...); err != nil {
+		return e.notePersistenceFailure(phase, err)
+	}
+	return nil
+}
+
+func (e *runEventEmitter) persistDurableBatch(ctx stdcontext.Context, phase string, records []SemanticRecord, liveEvents ...AwakenEvent) error {
+	if err := e.persistenceFailure(); err != nil {
+		return err
+	}
+	persistCtx, cancel := durablePersistenceContext(ctx)
+	defer cancel()
+	if err := PersistDurableBatch(persistCtx, e.recorder, e.sink, records, liveEvents...); err != nil {
+		return e.notePersistenceFailure(phase, err)
+	}
+	return nil
+}
+
+func (e *runEventEmitter) persistTerminal(ctx stdcontext.Context, phase string, record SemanticRecord, event AwakenEvent) error {
+	if err := e.persistenceFailure(); err != nil {
+		return err
+	}
+	persistCtx, cancel := durablePersistenceContext(ctx)
+	defer cancel()
+	if err := e.recorder.Append(persistCtx, record); err != nil {
+		return e.notePersistenceFailure(phase+"_append", err)
+	}
+	if err := e.recorder.Flush(persistCtx); err != nil {
+		return e.notePersistenceFailure(phase+"_flush", err)
+	}
+	if canonical, ok := e.recorder.(CanonicalLiveSemanticRecorder); ok && canonical.BroadcastsCanonicalSemanticRecords() {
+		return nil
+	}
+	// A successful run terminal becomes live only after append + fsync. This
+	// prevents the UI from observing RunFinished when the durable terminal
+	// was never confirmed.
+	e.sink.Emit(event)
+	return nil
+}
+
+func durablePersistenceContext(ctx stdcontext.Context) (stdcontext.Context, stdcontext.CancelFunc) {
+	if ctx != nil && ctx.Err() == nil {
+		return stdcontext.WithCancel(ctx)
+	}
+	return stdcontext.WithTimeout(stdcontext.Background(), 2*time.Second)
 }
 
 func (e *runEventEmitter) fillIDs(event *AwakenEvent) {
@@ -736,7 +996,7 @@ func (e *runEventEmitter) runStarted(ctx stdcontext.Context) error {
 	e.fillIDs(&event)
 	if e.recorder != nil {
 		record := NewSemanticRecord(SemanticKindRunStarted, e.threadID, e.runID, "", "", e.sessionID, map[string]any{})
-		if err := PersistDurable(ctx, e.recorder, e.sink, record, event); err != nil {
+		if err := e.persistDurable(ctx, "run_started", record, event); err != nil {
 			return err
 		}
 		return nil
@@ -766,7 +1026,7 @@ func (e *runEventEmitter) turnFinished(ctx stdcontext.Context, reason TerminalRe
 	}
 	e.fillIDs(&event)
 	if e.recorder != nil {
-		_ = PersistDurable(ctx, e.recorder, e.sink, NewSemanticRecord(
+		if err := e.persistDurable(ctx, "turn_boundary", NewSemanticRecord(
 			SemanticKindTurnBoundary,
 			e.threadID,
 			e.runID,
@@ -777,7 +1037,9 @@ func (e *runEventEmitter) turnFinished(ctx stdcontext.Context, reason TerminalRe
 				"terminal_reason":   string(reason),
 				"transition_reason": string(transition),
 			},
-		), event)
+		), event); err != nil {
+			return
+		}
 		return
 	}
 	e.sink.Emit(event)
@@ -796,7 +1058,7 @@ func (e *runEventEmitter) runFinished(ctx stdcontext.Context, content string, st
 	}
 	e.fillIDs(&event)
 	if e.recorder != nil {
-		_ = PersistDurable(ctx, e.recorder, e.sink, NewSemanticRecord(
+		if err := e.persistTerminal(ctx, "run_terminal_finished", NewSemanticRecord(
 			SemanticKindRunTerminal,
 			e.threadID,
 			e.runID,
@@ -808,8 +1070,9 @@ func (e *runEventEmitter) runFinished(ctx stdcontext.Context, content string, st
 				"result":          content,
 				"terminal_reason": string(reason),
 			},
-		), event)
-		_ = e.recorder.Flush(ctx)
+		), event); err != nil {
+			return
+		}
 		return
 	}
 	e.sink.Emit(event)
@@ -841,7 +1104,7 @@ func (e *runEventEmitter) runErrored(ctx stdcontext.Context, err error, reasons 
 		status = "cancelled"
 	}
 	if e.recorder != nil {
-		_ = PersistDurable(ctx, e.recorder, e.sink, NewSemanticRecord(
+		if persistErr := e.persistTerminal(ctx, "run_terminal_error", NewSemanticRecord(
 			SemanticKindRunTerminal,
 			e.threadID,
 			e.runID,
@@ -854,8 +1117,9 @@ func (e *runEventEmitter) runErrored(ctx stdcontext.Context, err error, reasons 
 				"code":            event.Code,
 				"terminal_reason": string(event.TerminalReason),
 			},
-		), event)
-		_ = e.recorder.Flush(ctx)
+		), event); persistErr != nil {
+			return
+		}
 		return
 	}
 	e.sink.Emit(event)
@@ -950,7 +1214,7 @@ func (e *runEventEmitter) emitToolCall(ctx stdcontext.Context, call context.Tool
 
 	if e.recorder != nil {
 		record := ToolCallSemanticRecord(e.threadID, e.runID, e.turnID(), e.sessionID, parentMessageID, call)
-		if err := PersistDurableBatch(ctx, e.recorder, e.sink, []SemanticRecord{record}, live...); err != nil {
+		if err := e.persistDurableBatch(ctx, "tool_call", []SemanticRecord{record}, live...); err != nil {
 			return err
 		}
 		return nil
@@ -959,7 +1223,12 @@ func (e *runEventEmitter) emitToolCall(ctx stdcontext.Context, call context.Tool
 	return nil
 }
 
-func (e *runEventEmitter) emitToolResultBatch(ctx stdcontext.Context, result ToolExecutionResult, artifacts []AwakenEvent) error {
+func (e *runEventEmitter) emitToolResultBatch(
+	ctx stdcontext.Context,
+	result ToolExecutionResult,
+	artifacts []AwakenEvent,
+	semanticFacts []AwakenEvent,
+) error {
 	event := AwakenEvent{
 		Type:         ToolResultEventType,
 		MessageID:    newAwakenID("toolmsg"),
@@ -972,18 +1241,87 @@ func (e *runEventEmitter) emitToolResultBatch(ctx stdcontext.Context, result Too
 	applyToolOutcomeFields(&event, result)
 	e.fillIDs(&event)
 
-	records := []SemanticRecord{ToolResultSemanticRecord(e.threadID, e.runID, e.turnID(), e.sessionID, result)}
-	live := []AwakenEvent{event}
+	records := make([]SemanticRecord, 0, len(semanticFacts)+len(artifacts)+2)
+	for _, fact := range semanticFacts {
+		switch fact.Type {
+		case ToolPermissionDecidedEventType:
+			records = append(records, PermissionDecisionSemanticRecord(e.threadID, e.runID, e.turnID(), e.sessionID, fact))
+		case RuntimePrepareEventType,
+			RuntimePrepareStartedEventType,
+			RuntimePrepareProgressEventType,
+			RuntimeReadyEventType,
+			RuntimeRepairFailedEventType,
+			RuntimeMissingEventType:
+			records = append(records, RuntimeNoticeSemanticRecord(e.threadID, e.runID, e.turnID(), e.sessionID, fact))
+		}
+	}
+	records = append(records, ToolResultSemanticRecord(e.threadID, e.runID, e.turnID(), e.sessionID, result))
+	records = append(records, fileChangeSemanticRecords(e.threadID, e.runID, e.turnID(), e.sessionID, result)...)
+	live := make([]AwakenEvent, 0, len(semanticFacts)+len(artifacts)+1)
+	for _, fact := range semanticFacts {
+		e.fillIDs(&fact)
+		live = append(live, fact)
+	}
+	live = append(live, event)
 	for _, artifact := range artifacts {
 		e.fillIDs(&artifact)
 		records = append(records, ArtifactSemanticRecord(e.threadID, e.runID, e.turnID(), e.sessionID, artifact))
 		live = append(live, artifact)
 	}
 	if e.recorder != nil {
-		return PersistDurableBatch(ctx, e.recorder, e.sink, records, live...)
+		return e.persistDurableBatch(ctx, "tool_result", records, live...)
 	}
 	emitLive(e.sink, live...)
 	return nil
+}
+
+func toolResultAppliedMutation(result ToolExecutionResult) bool {
+	if result.Outcome.Status != "" {
+		return result.Outcome.Status == tool.OutcomeSucceeded
+	}
+	return result.Status == ToolExecutionSucceeded && !result.IsError
+}
+
+func fileChangeSemanticRecords(threadID, runID, turnID, sessionID string, result ToolExecutionResult) []SemanticRecord {
+	if !toolResultAppliedMutation(result) || len(result.AffectedPaths) == 0 {
+		return nil
+	}
+	operation := "update"
+	switch result.Name {
+	case "text_file_create":
+		operation = "create"
+	case "trash_file":
+		operation = "delete"
+	}
+	seen := make(map[string]struct{}, len(result.AffectedPaths))
+	records := make([]SemanticRecord, 0, len(result.AffectedPaths))
+	for _, path := range result.AffectedPaths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		if _, duplicate := seen[path]; duplicate {
+			continue
+		}
+		seen[path] = struct{}{}
+		records = append(records, NewSemanticRecord(
+			SemanticKindFileChange,
+			threadID,
+			runID,
+			turnID,
+			result.ToolCallID,
+			sessionID,
+			map[string]any{
+				"tool_call_id":  result.ToolCallID,
+				"tool_name":     result.Name,
+				"path":          path,
+				"operation":     operation,
+				"status":        "applied",
+				"patch_summary": strings.TrimSpace(result.PatchSummary),
+			},
+		))
+	}
+	return records
 }
 
 // applyToolOutcomeFields copies canonical ToolOutcome fields onto an event.
@@ -1001,6 +1339,12 @@ func applyToolOutcomeFields(event *AwakenEvent, result ToolExecutionResult) {
 		event.Retryable = result.Outcome.Retryable
 		event.RecoveryOptions = append([]string(nil), result.Outcome.RecoveryOptions...)
 		event.DurationMs = result.Outcome.DurationMs
+		if len(result.Outcome.Diagnostic) > 0 {
+			event.Diagnostic = make(map[string]any, len(result.Outcome.Diagnostic))
+			for key, value := range result.Outcome.Diagnostic {
+				event.Diagnostic[key] = value
+			}
+		}
 		if event.DurationMs <= 0 {
 			event.DurationMs = result.DurationMs
 		}
@@ -1035,54 +1379,8 @@ func (e *runEventEmitter) setPendingTerminalReason(reason TerminalReason) {
 	e.pendingTerminalReason = reason
 }
 
-func (e *runEventEmitter) emitToolRetryBlocked(call context.ToolCall, decision BeforeCallDecision) {
-	if e == nil {
-		return
-	}
-	event := AwakenEvent{
-		Type:            ToolRetryBlockedEventType,
-		ToolCallID:      call.ID,
-		ToolName:        call.Function.Name,
-		Content:         decision.ErrorMessage,
-		Error:           decision.ErrorMessage,
-		ErrorCode:       decision.ErrorCode,
-		ErrorCategory:   string(tool.ErrorCategoryPolicy),
-		Retryable:       false,
-		RecoveryOptions: append([]string(nil), decision.RecoveryOptions...),
-		ToolStatus:      string(tool.OutcomeDenied),
-		TransportStatus: string(tool.TransportNotStarted),
-		SemanticStatus:  string(tool.SemanticFailure),
-		ProcessStatus:   string(tool.ProcessNotApplicable),
-	}
-	e.emit(event)
-}
-
-func (e *runEventEmitter) emitToolRecoveryRequired(call context.ToolCall, after AfterOutcomeDecision) {
-	if e == nil {
-		return
-	}
-	msg := ""
-	if after.Directive != nil {
-		msg = after.Directive.Message
-	}
-	event := AwakenEvent{
-		Type:            ToolRecoveryRequiredEventType,
-		ToolCallID:      call.ID,
-		ToolName:        call.Function.Name,
-		Content:         msg,
-		ErrorCode:       "",
-		RecoveryOptions: append([]string(nil), after.RecoveryOptions...),
-		Retryable:       true,
-	}
-	if after.Directive != nil {
-		event.ErrorCode = after.Directive.ErrorCode
-		event.Code = after.Directive.ErrorCode
-	}
-	e.emit(event)
-}
-
 func (e *runEventEmitter) emitRecoveryDecision(call context.ToolCall, options []string, errorCode string, blocked bool) {
-	if e == nil || e.recorder == nil {
+	if e == nil {
 		return
 	}
 	msg := "tool recovery required"
@@ -1097,8 +1395,42 @@ func (e *runEventEmitter) emitRecoveryDecision(call context.ToolCall, options []
 		"recovery_options":  append([]string(nil), options...),
 		"recovery_required": true,
 		"message":           msg,
+		"retryable":         !blocked,
 	}
-	_ = e.recorder.Append(stdcontext.Background(), NewSemanticRecord(
+	if blocked {
+		payload["tool_status"] = string(tool.OutcomeDenied)
+		payload["transport_status"] = string(tool.TransportNotStarted)
+		payload["semantic_status"] = string(tool.SemanticFailure)
+		payload["process_status"] = string(tool.ProcessNotApplicable)
+		payload["error_category"] = string(tool.ErrorCategoryPolicy)
+	}
+	eventType := ToolRecoveryRequiredEventType
+	if blocked {
+		eventType = ToolRetryBlockedEventType
+	}
+	event := AwakenEvent{
+		Type:            eventType,
+		ToolCallID:      call.ID,
+		ToolName:        call.Function.Name,
+		Content:         msg,
+		Code:            errorCode,
+		ErrorCode:       errorCode,
+		RecoveryOptions: append([]string(nil), options...),
+		Retryable:       !blocked,
+	}
+	if blocked {
+		event.ToolStatus = string(tool.OutcomeDenied)
+		event.TransportStatus = string(tool.TransportNotStarted)
+		event.SemanticStatus = string(tool.SemanticFailure)
+		event.ProcessStatus = string(tool.ProcessNotApplicable)
+		event.ErrorCategory = string(tool.ErrorCategoryPolicy)
+	}
+	e.fillIDs(&event)
+	if e.recorder == nil {
+		e.sink.Emit(event)
+		return
+	}
+	if err := e.persistDurable(stdcontext.Background(), "recovery_decision", NewSemanticRecord(
 		SemanticKindRecoveryDecision,
 		e.threadID,
 		e.runID,
@@ -1106,7 +1438,9 @@ func (e *runEventEmitter) emitRecoveryDecision(call context.ToolCall, options []
 		call.ID,
 		e.sessionID,
 		payload,
-	))
+	), event); err != nil {
+		return
+	}
 }
 
 func (e *runEventEmitter) emitContextWindow(state ContextWindowState) {
@@ -1236,7 +1570,7 @@ func (e *runEventEmitter) emitTurnDiff(ctx stdcontext.Context, workspaceRoot str
 	}
 	e.fillIDs(&event)
 	if e.recorder != nil {
-		_ = PersistDurable(ctx, e.recorder, e.sink, NewSemanticRecord(
+		if err := e.persistDurable(ctx, "turn_diff", NewSemanticRecord(
 			SemanticKindTurnDiff,
 			e.threadID,
 			e.runID,
@@ -1247,7 +1581,9 @@ func (e *runEventEmitter) emitTurnDiff(ctx stdcontext.Context, workspaceRoot str
 				"diff":      diff,
 				"truncated": truncated,
 			},
-		), event)
+		), event); err != nil {
+			return
+		}
 		return
 	}
 	e.sink.Emit(event)
@@ -1344,7 +1680,7 @@ func (e *runEventEmitter) finishTextIfOpen() {
 	e.fillIDs(&finished)
 	content := e.assistantText.String()
 	if e.recorder != nil && strings.TrimSpace(content) != "" {
-		_ = PersistDurable(stdcontext.Background(), e.recorder, e.sink, NewSemanticRecord(
+		if err := e.persistDurable(stdcontext.Background(), "assistant_message", NewSemanticRecord(
 			SemanticKindAssistantMessage,
 			e.threadID,
 			e.runID,
@@ -1356,7 +1692,12 @@ func (e *runEventEmitter) finishTextIfOpen() {
 				"role":       "assistant",
 				"message_id": e.textMessageID,
 			},
-		), finished)
+		), finished); err != nil {
+			e.textOpen = false
+			e.textMessageID = ""
+			e.assistantText.Reset()
+			return
+		}
 	} else {
 		e.sink.Emit(finished)
 	}

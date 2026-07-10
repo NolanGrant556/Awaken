@@ -156,7 +156,7 @@ describe("PetWindowManager", () => {
       spritesheetSourcePath: spritesheet,
       sourcePath: "/fake/codex/pets/my-pet",
     });
-    await store.selectPet("codex-custom:my-pet");
+    await store.selectPet("my-pet");
 
     const manager = new PetWindowManager({
       petStore: store,

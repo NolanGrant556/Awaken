@@ -49,6 +49,8 @@ const (
 	UserQuestionResolvedType       AwakenEventType = "UserQuestionResolved"
 	ArtifactCreatedEventType       AwakenEventType = "ArtifactCreated"
 	ArtifactUpdatedEventType       AwakenEventType = "ArtifactUpdated"
+	SkillActivatedEventType        AwakenEventType = "SkillActivated"
+	ResourceReceiptEventType       AwakenEventType = "ResourceReceipt"
 )
 
 type ReviewDecision string
@@ -186,6 +188,13 @@ type AwakenEvent struct {
 	ArtifactPath               string
 	ArtifactContent            string
 	ArtifactStatus             ArtifactStatus
+	SkillID                    string
+	SkillVersion               string
+	ResourcePath               string
+	ResourceSHA256             string
+	ResourceSize               int64
+	ResourceMode               string
+	ResourceSource             string
 }
 
 var awakenIDCounter uint64

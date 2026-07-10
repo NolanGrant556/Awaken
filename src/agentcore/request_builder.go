@@ -62,6 +62,17 @@ func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool
 		Temperature:        rb.config.ModelConfig.Temperature,
 		MaxTokens:          rb.config.ModelConfig.MaxTokens,
 	}
+	for _, block := range rb.config.SkillContextBlocks {
+		if strings.TrimSpace(block.Content) == "" {
+			continue
+		}
+		envelope.SystemBlocks = append(envelope.SystemBlocks, block)
+		envelope.SystemContextItems = append(envelope.SystemContextItems, ContextItem{
+			ID:      firstNonEmptyAttachmentValue(block.ID, "skill_activation"),
+			Type:    "skill_activation",
+			Content: block.Content,
+		})
+	}
 	envelope.ContextWindowState = NewContextEngine(contextWindowConfigFromModelConfig(rb.config.ModelConfig)).Evaluate(envelope)
 	return envelope
 }
@@ -95,11 +106,40 @@ func (rb *RequestBuilder) buildSystemPromptFromEnvelope(envelope ContextEnvelope
 	if len(envelope.SystemBlocks) > 0 {
 		staticContent = envelope.SystemBlocks[0].Content
 	}
+	var skillParts []string
+	for i, block := range envelope.SystemBlocks {
+		if i == 0 {
+			continue
+		}
+		if strings.TrimSpace(block.Content) == "" {
+			continue
+		}
+		skillParts = append(skillParts, block.Content)
+	}
+	if len(skillParts) > 0 {
+		staticContent = strings.TrimSpace(staticContent) + "\n\n" + strings.Join(skillParts, "\n\n")
+	}
 	return prompt.BuildEffectiveSystemPrompt(staticContent, envelope.RuntimeSnapshot.ToRuntimeInfo())
 }
 
 func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 	tools := tool.FilterToolsForExposure(tool.ListTools(), rb.toolExposurePolicy())
+	if rb.config.ResolvedToolPool != nil {
+		allowed := make(map[string]bool, len(rb.config.ResolvedToolPool))
+		for _, name := range rb.config.ResolvedToolPool {
+			name = strings.TrimSpace(name)
+			if name != "" {
+				allowed[name] = true
+			}
+		}
+		filtered := make([]tool.Tool, 0, len(tools))
+		for _, t := range tools {
+			if allowed[t.Name()] {
+				filtered = append(filtered, t)
+			}
+		}
+		tools = filtered
+	}
 	definitions := make([]tool.ToolSchema, 0, len(tools))
 
 	for _, t := range tools {

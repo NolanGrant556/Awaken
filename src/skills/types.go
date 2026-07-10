@@ -42,6 +42,45 @@ const (
 	StateShadowed    SkillState = "shadowed"
 )
 
+// ToolPolicyMode controls how a skill intersects the parent tool pool.
+type ToolPolicyMode string
+
+const (
+	ToolPolicyIntersect ToolPolicyMode = "intersect"
+)
+
+// ResourceLoadMode controls when a required resource is loaded.
+type ResourceLoadMode string
+
+const (
+	ResourceModePreload  ResourceLoadMode = "preload"
+	ResourceModeOnDemand ResourceLoadMode = "on_demand"
+)
+
+// Error codes used when a skill cannot enter the execution state.
+const (
+	ErrorCodePlatformContractConflict = "skill_platform_contract_conflict"
+	ErrorCodeToolNotAllowed           = "skill_tool_not_allowed"
+)
+
+// ToolPolicy narrows the parent run tool pool for an active skill.
+// Empty Allow inherits the parent pool; it never opens a global pool.
+type ToolPolicy struct {
+	Mode  ToolPolicyMode `yaml:"mode" json:"mode,omitempty"`
+	Allow []string       `yaml:"allow" json:"allow,omitempty"`
+	Deny  []string       `yaml:"deny" json:"deny,omitempty"`
+}
+
+// RequiredResource declares a package-relative resource that must be validated
+// (and optionally preloaded) before the skill may execute.
+type RequiredResource struct {
+	Path     string           `yaml:"path" json:"path"`
+	Mode     ResourceLoadMode `yaml:"mode" json:"mode,omitempty"`
+	Required bool             `yaml:"required" json:"required"`
+	MaxBytes int64            `yaml:"maxBytes" json:"maxBytes,omitempty"`
+	SHA256   string           `yaml:"sha256,omitempty" json:"sha256,omitempty"`
+}
+
 // SkillDefinition is the parsed, canonical representation of a SKILL.md file.
 type SkillDefinition struct {
 	// ID is the unique identifier derived from frontmatter name or the
@@ -60,9 +99,27 @@ type SkillDefinition struct {
 	// WhenToUse guides the LLM on when to select this skill.
 	WhenToUse string `yaml:"whenToUse"`
 
-	// AllowedTools is an optional list of tool names allowed during skill
-	// execution. When empty, the skill inherits the main run's tool pool.
+	// Version is an optional package version recorded on activation receipts.
+	Version string `yaml:"version"`
+
+	// ToolPolicy is the v2 tool-pool contract. Prefer this over AllowedTools.
+	ToolPolicy ToolPolicy `yaml:"toolPolicy"`
+
+	// AllowedTools is the legacy allow-list alias for ToolPolicy.Allow.
+	// Deprecated: loaders map it into ToolPolicy.Allow and emit a warning.
 	AllowedTools []string `yaml:"allowedTools"`
+
+	// RequiredTools must exist in the compiled effective tool pool.
+	RequiredTools []string `yaml:"requiredTools"`
+
+	// RequiredCapabilities must be satisfied by ≥1 tool in the effective pool.
+	RequiredCapabilities []string `yaml:"requiredCapabilities"`
+
+	// RequiredRuntimeComponents lists packaged runtime component names.
+	RequiredRuntimeComponents []string `yaml:"requiredRuntimeComponents"`
+
+	// RequiredResources lists package-relative resources to validate/preload.
+	RequiredResources []RequiredResource `yaml:"requiredResources"`
 
 	// Arguments declares the parameters this skill accepts.
 	Arguments []SkillArgument `yaml:"arguments"`
@@ -133,9 +190,32 @@ type SkillDefinition struct {
 	// State is StateUnavailable).
 	UnavailableReason string `yaml:"-"`
 
+	// UnavailableCode is an optional machine-readable unavailability code
+	// such as skill_platform_contract_conflict.
+	UnavailableCode string `yaml:"-"`
+
 	// ShadowedBy is set when another skill with the same ID from a higher-
 	// priority source overrides this one.
 	ShadowedBy string `yaml:"-"`
+
+	// DeprecatedWarnings collects non-fatal frontmatter compatibility notes.
+	DeprecatedWarnings []string `yaml:"-"`
+}
+
+// EffectiveToolPolicy returns the canonical tool policy after applying the
+// legacy allowedTools alias. Empty Allow means inherit the parent pool.
+func (d *SkillDefinition) EffectiveToolPolicy() ToolPolicy {
+	if d == nil {
+		return ToolPolicy{Mode: ToolPolicyIntersect}
+	}
+	policy := d.ToolPolicy
+	if policy.Mode == "" {
+		policy.Mode = ToolPolicyIntersect
+	}
+	if len(policy.Allow) == 0 && len(d.AllowedTools) > 0 {
+		policy.Allow = append([]string(nil), d.AllowedTools...)
+	}
+	return policy
 }
 
 // SkillArgument describes a single parameter the skill accepts. The agent

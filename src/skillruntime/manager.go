@@ -13,8 +13,10 @@ import (
 type Manager struct {
 	registry      *skills.SkillRegistry
 	inlineExec    *InlineExecutor
+	activator     *Activator
 	logger        Logger
 	registeredIDs map[string]bool // tracks currently registered tool names
+	onActivated   func(plan *SkillActivationPlan)
 }
 
 // NewManager creates a Manager that synchronizes skill tools with the
@@ -26,6 +28,7 @@ func NewManager(reg *skills.SkillRegistry, logger Logger) *Manager {
 	m := &Manager{
 		registry:      reg,
 		inlineExec:    &InlineExecutor{Logger: logger},
+		activator:     NewActivator(reg, logger),
 		logger:        logger,
 		registeredIDs: make(map[string]bool),
 	}
@@ -38,6 +41,24 @@ func NewManager(reg *skills.SkillRegistry, logger Logger) *Manager {
 		logger.Warnf("failed to register skill installer: %v", err)
 	}
 	return m
+}
+
+// Activator returns the shared SkillActivator used for explicit and implicit
+// skill activation.
+func (m *Manager) Activator() *Activator {
+	if m == nil {
+		return nil
+	}
+	return m.activator
+}
+
+// SetOnActivated registers a callback invoked after successful or failed
+// activation attempts from skill__ tools.
+func (m *Manager) SetOnActivated(fn func(plan *SkillActivationPlan)) {
+	if m == nil {
+		return
+	}
+	m.onActivated = fn
 }
 
 // RefreshTools syncs the tool registry with the current available skills.
@@ -88,10 +109,13 @@ func (m *Manager) refreshTools() {
 			WhenToUse:    def.WhenToUse,
 			Body:         def.Body,
 			RootDir:      def.RootDir,
-			AllowedTools: append([]string(nil), def.AllowedTools...),
+			AllowedTools: append([]string(nil), def.EffectiveToolPolicy().Allow...),
 			ArgDefs:      argDefs,
 			Executor:     executor,
 			AllowFork:    def.Context == skills.ContextFork,
+			Activator:    m.activator,
+			ParentPool:   CurrentParentToolPool,
+			OnActivated:  m.onActivated,
 		}
 		if def.BodyFetcher != nil && def.McpBinding != nil {
 			fetcher := def.BodyFetcher

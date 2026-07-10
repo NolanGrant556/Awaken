@@ -2,10 +2,13 @@ package skills
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
+
+var sha256HexPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // ParseFrontmatter extracts YAML frontmatter and Markdown body from raw
 // SKILL.md content. The frontmatter is delimited by --- lines.
@@ -22,6 +25,7 @@ func ParseFrontmatter(raw string) (*SkillDefinition, error) {
 		return nil, fmt.Errorf("parse skill frontmatter: %w", err)
 	}
 	def.Body = strings.TrimSpace(body)
+	normalizeToolPolicy(&def)
 	return &def, nil
 }
 
@@ -61,6 +65,21 @@ func ValidateSchema(def *SkillDefinition) error {
 	if def.Context != "" && def.Context != ContextInline && def.Context != ContextFork {
 		return fmt.Errorf("skill %q: invalid context mode %q (must be inline or fork)", def.ID, def.Context)
 	}
+	policy := def.EffectiveToolPolicy()
+	if policy.Mode != "" && policy.Mode != ToolPolicyIntersect {
+		return fmt.Errorf("skill %q: invalid toolPolicy.mode %q (must be intersect)", def.ID, policy.Mode)
+	}
+	for i, res := range def.RequiredResources {
+		if strings.TrimSpace(res.Path) == "" {
+			return fmt.Errorf("skill %q requiredResources[%d]: path is required", def.ID, i)
+		}
+		if res.Mode != "" && res.Mode != ResourceModePreload && res.Mode != ResourceModeOnDemand {
+			return fmt.Errorf("skill %q requiredResources[%d]: invalid mode %q", def.ID, i, res.Mode)
+		}
+		if sha := strings.TrimSpace(res.SHA256); sha != "" && !sha256HexPattern.MatchString(sha) {
+			return fmt.Errorf("skill %q requiredResources[%d]: sha256 must be 64 lowercase hex chars", def.ID, i)
+		}
+	}
 	return nil
 }
 
@@ -70,6 +89,29 @@ func isValidArgType(t string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// normalizeToolPolicy maps legacy allowedTools into toolPolicy.allow and
+// records a deprecated warning when the alias is used.
+func normalizeToolPolicy(def *SkillDefinition) {
+	if def == nil {
+		return
+	}
+	if def.ToolPolicy.Mode == "" {
+		def.ToolPolicy.Mode = ToolPolicyIntersect
+	}
+	if len(def.AllowedTools) > 0 {
+		if len(def.ToolPolicy.Allow) == 0 {
+			def.ToolPolicy.Allow = append([]string(nil), def.AllowedTools...)
+		}
+		def.DeprecatedWarnings = append(def.DeprecatedWarnings,
+			"allowedTools is deprecated; use toolPolicy.allow")
+	}
+	for i := range def.RequiredResources {
+		if def.RequiredResources[i].Mode == "" {
+			def.RequiredResources[i].Mode = ResourceModePreload
+		}
 	}
 }
 

@@ -79,7 +79,7 @@ import { useComposerLifecycle } from "./useComposerLifecycle";
 import { useRunStageScrollController } from "./useRunStageScrollController";
 import {
   actionsForThreadTranscript,
-  afterSeqForTranscriptRun,
+  streamCursorForTranscriptRun,
 } from "./runtime/thread-transcript";
 import {
   DEFAULT_WORKSPACE_PROJECT_ID,
@@ -2259,7 +2259,7 @@ export function App() {
     const unsubscribe = await runtimeClient.subscribeRun(
       latestRun.runId,
       createSubscribeHandlers(),
-      afterSeqForTranscriptRun(transcript, latestRun.runId),
+      streamCursorForTranscriptRun(transcript, latestRun.runId),
     );
     if (threadLoadSeqRef.current !== loadSeq) {
       unsubscribe();

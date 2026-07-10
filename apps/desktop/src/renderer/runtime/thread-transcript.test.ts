@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { RuntimeThreadTranscript } from "../../shared/runtime";
-import { createInitialRuntimeState, reduceRuntimeState } from "./reducer";
-import { actionsForThreadTranscript, afterSeqForTranscriptRun } from "./thread-transcript";
+import {
+  createInitialRuntimeState,
+  reduceRuntimeState,
+  type RuntimeAction,
+} from "./reducer";
+import {
+  actionsForThreadTranscript,
+  streamCursorForTranscriptRun,
+} from "./thread-transcript";
 
 function makeTranscript(): RuntimeThreadTranscript {
   return {
@@ -54,6 +61,90 @@ function makeTranscript(): RuntimeThreadTranscript {
 }
 
 describe("thread transcript replay helpers", () => {
+  it("restores assistant text when one semantic record projects to frames with the same seq", () => {
+    const transcript: RuntimeThreadTranscript = {
+      thread: {
+        threadId: "thread-semantic",
+        label: "历史重放",
+        runId: "run-semantic",
+        workspace: {
+          workspaceRoot: "/tmp/awaken",
+          writableRoots: ["/tmp/awaken"],
+        },
+        createdAt: "2026-07-10T00:00:00Z",
+        updatedAt: "2026-07-10T00:00:10Z",
+      },
+      runs: [
+        {
+          run: {
+            runId: "run-semantic",
+            threadId: "thread-semantic",
+            input: "恢复历史",
+            status: "finished",
+            cancelRequested: false,
+            createdAt: "2026-07-10T00:00:00Z",
+            updatedAt: "2026-07-10T00:00:10Z",
+            finishedAt: "2026-07-10T00:00:10Z",
+          },
+          events: [
+            {
+              type: "RUN_STARTED",
+              seq: 1,
+              runId: "run-semantic",
+              threadId: "thread-semantic",
+            },
+            {
+              type: "TEXT_MESSAGE_START",
+              seq: 2,
+              runId: "run-semantic",
+              threadId: "thread-semantic",
+              messageId: "msg-semantic",
+              role: "assistant",
+            },
+            {
+              type: "TEXT_MESSAGE_CONTENT",
+              seq: 2,
+              runId: "run-semantic",
+              threadId: "thread-semantic",
+              messageId: "msg-semantic",
+              role: "assistant",
+              delta: "历史回答正文",
+            },
+            {
+              type: "TEXT_MESSAGE_END",
+              seq: 2,
+              runId: "run-semantic",
+              threadId: "thread-semantic",
+              messageId: "msg-semantic",
+              role: "assistant",
+            },
+            {
+              type: "RUN_FINISHED",
+              seq: 3,
+              runId: "run-semantic",
+              threadId: "thread-semantic",
+              result: "历史回答正文",
+            },
+          ],
+        },
+      ],
+    };
+
+    const state = actionsForThreadTranscript(transcript).reduce(
+      reduceRuntimeState,
+      createInitialRuntimeState(),
+    );
+
+    expect(state.narrative.committedItems).toContainEqual({
+      kind: "answer",
+      id: "answer:run-semantic:msg-semantic",
+      markdown: "历史回答正文",
+      status: "done",
+      isFinal: true,
+      elapsedMs: 10000,
+    });
+  });
+
   it("builds ordered reducer actions for a multi-turn transcript", () => {
     const actions = actionsForThreadTranscript(makeTranscript());
 
@@ -98,6 +189,97 @@ describe("thread transcript replay helpers", () => {
       isFinal: true,
       elapsedMs: 10000,
     });
+  });
+
+  it("keeps live and replay elapsed time identical across client and SSE latency", () => {
+    const startedAtMs = Date.parse("2026-07-10T06:59:38.906Z");
+    const finishedAtMs = Date.parse("2026-07-10T07:00:22.299Z");
+    const run: RuntimeThreadTranscript["runs"][number]["run"] = {
+      runId: "run-duration",
+      threadId: "thread-duration",
+      input: "完整验收",
+      status: "finished",
+      result: "验收完成",
+      cancelRequested: false,
+      createdAt: new Date(startedAtMs).toISOString(),
+      updatedAt: new Date(finishedAtMs).toISOString(),
+      finishedAt: new Date(finishedAtMs).toISOString(),
+    };
+    const startedEvent = {
+      type: "RUN_STARTED" as const,
+      runId: run.runId,
+      threadId: run.threadId,
+      timestamp: startedAtMs,
+    };
+    const contentEvent = {
+      type: "TEXT_MESSAGE_CONTENT" as const,
+      runId: run.runId,
+      threadId: run.threadId,
+      messageId: "msg-duration",
+      delta: "验收完成",
+    };
+    const finishedEvent = {
+      type: "RUN_FINISHED" as const,
+      runId: run.runId,
+      threadId: run.threadId,
+      result: "验收完成",
+      timestamp: finishedAtMs,
+    };
+
+    const liveActions: RuntimeAction[] = [
+      {
+        type: "run/requested",
+        prompt: "完整验收",
+        startedAtMs: startedAtMs - 4100,
+      },
+      { type: "run/created", run },
+      {
+        type: "run/event",
+        event: startedEvent,
+        receivedAtMs: startedAtMs + 400,
+      },
+      { type: "run/event", event: contentEvent },
+      {
+        type: "run/event",
+        event: finishedEvent,
+        receivedAtMs: finishedAtMs + 5000,
+      },
+    ];
+    const liveState = liveActions.reduce(
+      reduceRuntimeState,
+      createInitialRuntimeState(),
+    );
+
+    const transcript: RuntimeThreadTranscript = {
+      thread: {
+        threadId: run.threadId,
+        label: "完整验收",
+        runId: run.runId,
+        workspace: {
+          workspaceRoot: "/tmp/awaken",
+          writableRoots: ["/tmp/awaken"],
+        },
+        createdAt: run.createdAt,
+        updatedAt: run.updatedAt,
+      },
+      runs: [
+        {
+          run,
+          events: [startedEvent, contentEvent, finishedEvent],
+        },
+      ],
+    };
+    const replayState = actionsForThreadTranscript(transcript).reduce(
+      reduceRuntimeState,
+      createInitialRuntimeState(),
+    );
+
+    const elapsedFor = (state: typeof liveState) =>
+      state.narrative.committedItems.find(
+        (item) => item.kind === "answer" && item.id.includes("msg-duration"),
+      );
+    expect(elapsedFor(liveState)).toMatchObject({ elapsedMs: 43393 });
+    expect(elapsedFor(replayState)).toMatchObject({ elapsedMs: 43393 });
   });
 
   it("synthesizes a replay answer from finished run result when text events are missing", () => {
@@ -232,7 +414,14 @@ describe("thread transcript replay helpers", () => {
   });
 
   it("returns the last replayed frame seq for the resumed run", () => {
-    expect(afterSeqForTranscriptRun(makeTranscript(), "run-2")).toBe(80);
-    expect(afterSeqForTranscriptRun(makeTranscript(), "missing")).toBe(0);
+    expect(streamCursorForTranscriptRun(makeTranscript(), "run-2")).toBe(80);
+    expect(streamCursorForTranscriptRun(makeTranscript(), "missing")).toBe(0);
+  });
+
+  it("prefers the active transcript stream cursor over semantic frame seq", () => {
+    const transcript = makeTranscript();
+    transcript.runs[1].streamCursor = 511;
+    transcript.runs[1].events[0].seq = 9999;
+    expect(streamCursorForTranscriptRun(transcript, "run-2")).toBe(511);
   });
 });

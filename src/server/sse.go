@@ -31,6 +31,12 @@ func NewSSEStream(w http.ResponseWriter) (*SSEStream, bool) {
 	}, true
 }
 
+func (s *SSEStream) Flush() {
+	if s != nil && s.flusher != nil {
+		s.flusher.Flush()
+	}
+}
+
 func (s *SSEStream) WriteEvent(event agui.Event) error {
 	frame, err := s.encoder.EncodeSSE(event)
 	if err != nil {

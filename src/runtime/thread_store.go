@@ -45,6 +45,15 @@ type sqliteThreadStore struct {
 	db *sql.DB
 }
 
+// Prepare opens and reconciles the metadata store before a run creates its
+// append-only journal. The first open purges transcripts that have no matching
+// SQLite thread row; doing that after bindAgentRecorder has created a new
+// journal would unlink the live journal underneath its writer.
+func (s *sqliteThreadStore) Prepare() error {
+	_, err := s.open()
+	return err
+}
+
 func newThreadStore() ThreadStore {
 	paths := desktopdata.Detect()
 	if strings.TrimSpace(os.Getenv(runtimeUserDataDirEnv)) == "" {
@@ -168,14 +177,9 @@ func (s *sqliteThreadStore) RestoreThread(threadID string) (storedThreadRecord, 
 	}
 	var restored restoredTranscript
 	if schema == agentcore.SemanticSchemaVersion {
-		records, _, loadErr := loadSemanticRecordsForThread(path)
+		records, loadErr := loadAndRecoverSemanticRecords(path, threadID)
 		if loadErr != nil {
 			return storedThreadRecord{}, restoredTranscript{}, loadErr
-		}
-		journal, jerr := NewExecutionJournal(path, threadID)
-		if jerr == nil {
-			records, _ = recoverOrphanRuns(context.Background(), journal, records)
-			_ = journal.Close()
 		}
 		restored = restoredTranscriptFromSemantic(records)
 	} else {
@@ -214,7 +218,7 @@ func (s *sqliteThreadStore) GetTranscript(threadID string) (ThreadTranscript, er
 	}
 
 	if schema == agentcore.SemanticSchemaVersion {
-		records, _, loadErr := loadSemanticRecordsForThread(path)
+		records, loadErr := loadAndRecoverSemanticRecords(path, threadID)
 		if loadErr != nil {
 			return ThreadTranscript{}, loadErr
 		}
@@ -285,6 +289,26 @@ func (s *sqliteThreadStore) GetTranscript(threadID string) (ThreadTranscript, er
 		Thread: snapshot,
 		Runs:   ordered,
 	}, nil
+}
+
+func loadAndRecoverSemanticRecords(path, threadID string) ([]agentcore.SemanticRecord, error) {
+	records, _, err := loadSemanticRecordsForThread(path)
+	if err != nil {
+		return nil, err
+	}
+	journal, err := NewExecutionJournal(path, threadID)
+	if err != nil {
+		return nil, err
+	}
+	recovered, recoverErr := recoverOrphanRuns(context.Background(), journal, records)
+	closeErr := journal.Close()
+	if recoverErr != nil {
+		return nil, recoverErr
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	return recovered, nil
 }
 
 func (s *sqliteThreadStore) RenameThread(threadID, label string, updatedAt time.Time) (ThreadSnapshot, error) {
@@ -457,6 +481,7 @@ func (s *sqliteThreadStore) upsertThread(snapshot ThreadSnapshot, modelProfileKe
 	if snapshot.UpdatedAt.IsZero() {
 		snapshot.UpdatedAt = snapshot.CreatedAt
 	}
+	title := trimThreadLabel(firstNonEmpty(snapshot.Label, snapshot.ThreadID))
 	_, err = db.Exec(`
 INSERT INTO threads (
 	thread_id, title, title_source, title_status, title_updated_at, title_seed_run_id,
@@ -514,7 +539,7 @@ ON CONFLICT(thread_id) DO UPDATE SET
 	workspace_json = excluded.workspace_json
 `,
 		snapshot.ThreadID,
-		firstNonEmpty(snapshot.Label, snapshot.ThreadID),
+		title,
 		string(snapshot.TitleSource),
 		string(snapshot.TitleStatus),
 		formatStoredTime(snapshot.TitleUpdatedAt),
@@ -747,7 +772,7 @@ func scanStoredThread(scanner rowScanner) (storedThreadRecord, error) {
 	return storedThreadRecord{
 		Snapshot: ThreadSnapshot{
 			ThreadID:       threadID,
-			Label:          title,
+			Label:          trimThreadLabel(title),
 			TitleSource:    source,
 			TitleStatus:    status,
 			TitleUpdatedAt: parseStoredTime(titleUpdatedAt),

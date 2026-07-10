@@ -1546,6 +1546,82 @@ func TestGetThreadTranscriptRestoresDurableThreadWithoutMemory(t *testing.T) {
 	}
 }
 
+func TestGetThreadTranscriptRecoversOrphanWithoutStartingFollowUp(t *testing.T) {
+	setRuntimeUserDataDir(t)
+	root := t.TempDir()
+	firstService := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				Workspace: agentcore.WorkspaceConfig{Root: workspace.WorkspaceRoot},
+			}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, _ agentcore.EventSink) (string, error) {
+				threadID, runID, sessionID := agent.ExecutionIdentity()
+				records := []agentcore.SemanticRecord{
+					agentcore.NewSemanticRecord(agentcore.SemanticKindRunStarted, threadID, runID, "turn_orphan", "", sessionID, nil),
+					agentcore.NewSemanticRecord(agentcore.SemanticKindUserMessage, threadID, runID, "turn_orphan", "", sessionID, map[string]any{"content": input}),
+					agentcore.NewSemanticRecord(agentcore.SemanticKindToolCall, threadID, runID, "turn_orphan", "", sessionID, map[string]any{
+						"tool_call_id": "call_orphan_get",
+						"tool_name":    "shell",
+						"arguments":    `{"command":"touch maybe-ran"}`,
+					}),
+				}
+				if err := agent.SemanticRecorder().AppendBatch(ctx, records); err != nil {
+					return "", err
+				}
+				if err := agent.SemanticRecorder().Flush(ctx); err != nil {
+					return "", err
+				}
+				// Deliberately omit tool_result and terminal to simulate a process exit.
+				return "in-memory completion only", nil
+			})
+		},
+	)
+	run, err := firstService.StartRun(StartRunRequest{
+		Input:     "simulate orphan",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForRunTerminal(t, firstService, run.RunID)
+
+	restarted := NewRunService(nil, nil)
+	transcript, err := restarted.GetThreadTranscript(run.ThreadID)
+	if err != nil {
+		t.Fatalf("GET-only orphan recovery failed: %v", err)
+	}
+	if len(transcript.Runs) != 1 || transcript.Runs[0].Run.Status != RunStatusError {
+		t.Fatalf("orphan was not projected as interrupted: %+v", transcript.Runs)
+	}
+	var toolResults, terminals int
+	for _, record := range transcript.Runs[0].SemanticRecords {
+		switch record.Kind {
+		case agentcore.SemanticKindToolResult:
+			toolResults++
+		case agentcore.SemanticKindRunTerminal:
+			terminals++
+		}
+	}
+	if toolResults != 1 || terminals != 1 {
+		t.Fatalf("GET-only recovery missing durable synthetic facts: results=%d terminals=%d", toolResults, terminals)
+	}
+	again, err := restarted.GetThreadTranscript(run.ThreadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondResults := 0
+	for _, record := range again.Runs[0].SemanticRecords {
+		if record.Kind == agentcore.SemanticKindToolResult {
+			secondResults++
+		}
+	}
+	if secondResults != 1 {
+		t.Fatalf("orphan recovery was not idempotent: %d tool results", secondResults)
+	}
+}
+
 func TestGetThreadTranscriptRestoresCancelledRunPartialResult(t *testing.T) {
 	userDataDir, err := os.MkdirTemp("", "awaken-cancel-restore-test-*")
 	if err != nil {
@@ -1582,6 +1658,9 @@ func TestGetThreadTranscriptRestoresCancelledRunPartialResult(t *testing.T) {
 				agent.GetConversation().AssistantOutput("partial answer", nil)
 				close(deltaEmitted)
 				<-ctx.Done()
+				if err := persistTestRunFactsWithStatus(context.Background(), agent, input, "partial answer", "cancelled"); err != nil {
+					return "", err
+				}
 				return "", ctx.Err()
 			})
 		},
@@ -1770,6 +1849,9 @@ func TestRunServiceRestoresThreadConversationFromTranscript(t *testing.T) {
 					}
 					agent.GetConversation().UserInput(input)
 					agent.GetConversation().AssistantOutput("answer: "+input, nil)
+					if err := persistTestRunFacts(ctx, agent, input, "answer: "+input); err != nil {
+						return "", err
+					}
 					sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 					sink.Emit(agentcore.AwakenEvent{
 						Type:           agentcore.RunFinishedEventType,
@@ -1857,7 +1939,9 @@ func TestRunServiceRestoresCancelledThreadUserTranscript(t *testing.T) {
 						restoredHistory <- agent.GetConversation().Context.GetMessages()
 						agent.GetConversation().UserInput(input)
 						agent.GetConversation().AssistantOutput("answer: "+input, nil)
-						persistTestRunFacts(ctx, agent, input, "answer: "+input)
+						if err := persistTestRunFacts(ctx, agent, input, "answer: "+input); err != nil {
+							return "", err
+						}
 						sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 						sink.Emit(agentcore.AwakenEvent{
 							Type:           agentcore.RunFinishedEventType,
@@ -1868,28 +1952,11 @@ func TestRunServiceRestoresCancelledThreadUserTranscript(t *testing.T) {
 					}
 
 					agent.GetConversation().UserInput(input)
-					if recorder := agent.SemanticRecorder(); recorder != nil {
-						_ = recorder.Append(ctx, agentcore.NewSemanticRecord(
-							agentcore.SemanticKindUserMessage, "", "", "", "", "", map[string]any{
-								"content": input,
-								"role":    "user",
-							},
-						))
-						_ = recorder.Append(ctx, agentcore.NewSemanticRecord(
-							agentcore.SemanticKindRunStarted, "", "", "", "", "", map[string]any{},
-						))
-					}
 					sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 					close(started)
 					<-ctx.Done()
-					if recorder := agent.SemanticRecorder(); recorder != nil {
-						_ = recorder.Append(context.Background(), agentcore.NewSemanticRecord(
-							agentcore.SemanticKindRunTerminal, "", "", "", "", "", map[string]any{
-								"status": "cancelled",
-								"code":   "RUN_CANCELLED",
-							},
-						))
-						_ = recorder.Flush(context.Background())
+					if err := persistTestRunFactsWithStatus(context.Background(), agent, input, "", "cancelled"); err != nil {
+						return "", err
 					}
 					return "", ctx.Err()
 				})
@@ -1951,7 +2018,9 @@ func newDurableThreadTestService() *RunService {
 			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 				agent.GetConversation().UserInput(input)
 				agent.GetConversation().AssistantOutput("answer: "+input, nil)
-				persistTestRunFacts(ctx, agent, input, "answer: "+input)
+				if err := persistTestRunFacts(ctx, agent, input, "answer: "+input); err != nil {
+					return "", err
+				}
 				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 				sink.Emit(agentcore.AwakenEvent{
 					Type:           agentcore.RunFinishedEventType,
@@ -1964,35 +2033,200 @@ func newDurableThreadTestService() *RunService {
 	)
 }
 
-func persistTestRunFacts(ctx context.Context, agent *agentcore.Agent, userInput, assistantContent string) {
+type appendFailingThreadStore struct {
+	ThreadStore
+	fail bool
+}
+
+func (s *appendFailingThreadStore) Prepare() error {
+	if preparer, ok := s.ThreadStore.(interface{ Prepare() error }); ok {
+		return preparer.Prepare()
+	}
+	return nil
+}
+
+func (s *appendFailingThreadStore) AppendRunInput(snapshot ThreadSnapshot, run Run, sessionID, input string, attachments []RunInputAttachment) error {
+	if s.fail {
+		return errors.New("injected append run input failure")
+	}
+	return s.ThreadStore.AppendRunInput(snapshot, run, sessionID, input, attachments)
+}
+
+func TestStartRunStorageFailureRollsBackBusyAndGhostState(t *testing.T) {
+	setRuntimeUserDataDir(t)
+	root := t.TempDir()
+	service := newDurableThreadTestService()
+	first, err := service.StartRun(StartRunRequest{
+		Input:     "first",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForRunTerminal(t, service, first.RunID)
+
+	originalStore := service.threadStore
+	failing := &appendFailingThreadStore{ThreadStore: originalStore, fail: true}
+	service.threadStore = failing
+	if _, err := service.StartRun(StartRunRequest{
+		Input:     "must fail",
+		ThreadID:  first.ThreadID,
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	}); err == nil {
+		t.Fatal("expected injected storage failure")
+	}
+	snapshot, ok := service.threadSnapshot(first.ThreadID)
+	if !ok || snapshot.ActiveRunID != "" || snapshot.RunID != first.RunID {
+		t.Fatalf("failed follow-up left thread busy or latest run corrupted: %+v", snapshot)
+	}
+
+	failing.fail = false
+	retry, err := service.StartRun(StartRunRequest{
+		Input:     "retry succeeds",
+		ThreadID:  first.ThreadID,
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("retry remained blocked after rollback: %v", err)
+	}
+	waitForRunTerminal(t, service, retry.RunID)
+
+	t.Setenv(runtimeUserDataDirEnv, t.TempDir())
+	secondService := newDurableThreadTestService()
+	secondFailing := &appendFailingThreadStore{ThreadStore: secondService.threadStore, fail: true}
+	secondService.threadStore = secondFailing
+	if _, err := secondService.StartRun(StartRunRequest{
+		Input:     "new thread fails",
+		Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()},
+	}); err == nil {
+		t.Fatal("expected new-thread storage failure")
+	}
+	if threads := secondService.ListThreads(); len(threads) != 0 {
+		t.Fatalf("failed new run left ghost thread: %+v", threads)
+	}
+	if len(secondService.sessions) != 0 || len(secondService.threads) != 0 {
+		t.Fatalf("failed new run left in-memory ghost: sessions=%d threads=%d", len(secondService.sessions), len(secondService.threads))
+	}
+}
+
+type canonicalFlushSpyRecorder struct {
+	flushCalls int
+}
+
+func (r *canonicalFlushSpyRecorder) Append(context.Context, agentcore.SemanticRecord) error {
+	return nil
+}
+
+func (r *canonicalFlushSpyRecorder) AppendBatch(context.Context, []agentcore.SemanticRecord) error {
+	return nil
+}
+
+func (r *canonicalFlushSpyRecorder) Flush(context.Context) error {
+	r.flushCalls++
+	return errors.New("canonical recorder must not be flushed by legacy transcript projection")
+}
+
+func (r *canonicalFlushSpyRecorder) BroadcastsCanonicalSemanticRecords() bool { return true }
+
+type legacyTranscriptFlushSpyStore struct {
+	ThreadStore
+	conversationCalls int
+	runEventCalls     int
+}
+
+func (s *legacyTranscriptFlushSpyStore) AppendConversation(
+	ThreadSnapshot,
+	Run,
+	[]convcontext.Message,
+) error {
+	s.conversationCalls++
+	return nil
+}
+
+func (s *legacyTranscriptFlushSpyStore) AppendRunEvents(ThreadSnapshot, Run, []Event) error {
+	s.runEventCalls++
+	return nil
+}
+
+func TestFlushAgentTranscriptDoesNotFlushCanonicalRecorder(t *testing.T) {
+	const (
+		threadID = "thread_flush_ownership"
+		runID    = "run_flush_ownership"
+	)
+	now := time.Now().UTC()
+	recorder := &canonicalFlushSpyRecorder{}
+	agent := agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+	agent.SetSemanticRecorder(recorder)
+	store := &legacyTranscriptFlushSpyStore{}
+	service := &RunService{
+		threads: map[string]*Thread{
+			threadID: {
+				threadID:    threadID,
+				agent:       agent,
+				workspace:   WorkspaceConfig{WorkspaceRoot: t.TempDir()},
+				label:       "flush ownership",
+				latestRunID: runID,
+				runIDs:      []string{runID},
+				createdAt:   now,
+				updatedAt:   now,
+			},
+		},
+		threadStore: store,
+	}
+	session := NewSession(runID, threadID, "input", nil, nil, nil)
+
+	if err := service.flushAgentTranscript(session, agent); err != nil {
+		t.Fatalf("legacy transcript projection returned error: %v", err)
+	}
+	if recorder.flushCalls != 0 {
+		t.Fatalf("legacy transcript projection flushed canonical recorder %d times", recorder.flushCalls)
+	}
+	if store.conversationCalls != 1 || store.runEventCalls != 1 {
+		t.Fatalf(
+			"expected one legacy conversation and event projection, got conversation=%d events=%d",
+			store.conversationCalls,
+			store.runEventCalls,
+		)
+	}
+}
+
+func persistTestRunFacts(ctx context.Context, agent *agentcore.Agent, userInput, assistantContent string) error {
+	return persistTestRunFactsWithStatus(ctx, agent, userInput, assistantContent, "finished")
+}
+
+func persistTestRunFactsWithStatus(ctx context.Context, agent *agentcore.Agent, userInput, assistantContent, status string) error {
 	if agent == nil || agent.SemanticRecorder() == nil {
-		return
+		return nil
 	}
 	recorder := agent.SemanticRecorder()
-	_ = recorder.Append(ctx, agentcore.NewSemanticRecord(
-		agentcore.SemanticKindUserMessage, "", "", "", "", "", map[string]any{
+	threadID, runID, sessionID := agent.ExecutionIdentity()
+	records := []agentcore.SemanticRecord{agentcore.NewSemanticRecord(
+		agentcore.SemanticKindUserMessage, threadID, runID, "", "", sessionID, map[string]any{
 			"content": userInput,
 			"role":    "user",
 		},
-	))
-	_ = recorder.Append(ctx, agentcore.NewSemanticRecord(
-		agentcore.SemanticKindRunStarted, "", "", "", "", "", map[string]any{},
-	))
+	), agentcore.NewSemanticRecord(
+		agentcore.SemanticKindRunStarted, threadID, runID, "", "", sessionID, map[string]any{},
+	)}
 	if strings.TrimSpace(assistantContent) != "" {
-		_ = recorder.Append(ctx, agentcore.NewSemanticRecord(
-			agentcore.SemanticKindAssistantMessage, "", "", "", "", "", map[string]any{
+		records = append(records, agentcore.NewSemanticRecord(
+			agentcore.SemanticKindAssistantMessage, threadID, runID, "", "", sessionID, map[string]any{
 				"content": assistantContent,
 				"role":    "assistant",
 			},
 		))
 	}
-	_ = recorder.Append(ctx, agentcore.NewSemanticRecord(
-		agentcore.SemanticKindRunTerminal, "", "", "", "", "", map[string]any{
-			"status": "finished",
+	records = append(records, agentcore.NewSemanticRecord(
+		agentcore.SemanticKindRunTerminal, threadID, runID, "", "", sessionID, map[string]any{
+			"status": status,
 			"result": assistantContent,
+			"code":   map[bool]string{true: "RUN_CANCELLED"}[status == "cancelled"],
 		},
 	))
-	_ = recorder.Flush(ctx)
+	if err := recorder.AppendBatch(ctx, records); err != nil {
+		return err
+	}
+	return recorder.Flush(ctx)
 }
 
 func waitForRunTerminal(t *testing.T, service *RunService, runID string) Run {

@@ -61,6 +61,60 @@ function runStatusChanged(
 }
 
 describe("projectAguiEventToNarrative", () => {
+  it("keeps all projected text frames that share one semantic record sequence", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, {
+      ...textMessageStart(),
+      seq: 7,
+    });
+    state = projectAguiEventToNarrative(state, {
+      ...textMessageContent("历史回答正文"),
+      seq: 7,
+    });
+    state = projectAguiEventToNarrative(state, {
+      ...textMessageEnd(),
+      seq: 7,
+    });
+
+    expect(state.committedItems).toContainEqual({
+      kind: "answer",
+      id: "answer:run-1:msg-1",
+      markdown: "历史回答正文",
+      status: "done",
+    });
+  });
+
+  it("reconciles a durable assistant snapshot with already streamed deltas", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, textMessageStart());
+    state = projectAguiEventToNarrative(state, textMessageContent("streamed answer"));
+    state = projectAguiEventToNarrative(state, {
+      ...textMessageStart(),
+      seq: 32,
+      semanticSeq: 48,
+      recordId: "rec_assistant_1",
+    });
+    state = projectAguiEventToNarrative(state, {
+      ...textMessageContent("streamed answer"),
+      seq: 33,
+      semanticSeq: 49,
+      recordId: "rec_assistant_1",
+    });
+    state = projectAguiEventToNarrative(state, {
+      ...textMessageEnd(),
+      seq: 34,
+      semanticSeq: 50,
+      recordId: "rec_assistant_1",
+    });
+
+    expect(state.committedItems).toContainEqual({
+      kind: "answer",
+      id: "answer:run-1:msg-1",
+      markdown: "streamed answer",
+      status: "done",
+    });
+  });
+
   it("adds a hint item when a run is cancelled by the user", () => {
     let state = createInitialRunNarrativeState();
     state = projectAguiEventToNarrative(state, textMessageStart());

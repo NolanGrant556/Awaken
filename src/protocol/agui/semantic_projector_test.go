@@ -24,8 +24,9 @@ func TestProjectSemanticRecordsToolOrder(t *testing.T) {
 			"outcome": map[string]any{
 				"status":           "succeeded",
 				"transport_status": "completed",
-				"semantic_status":  "success",
+				"semantic_status":  "neutral",
 				"process_status":   "exited",
+				"diagnostic":       map[string]any{"reason": "no_match"},
 			},
 		}},
 		{SchemaVersion: 2, RecordID: "r4", Seq: 4, ThreadID: "t", RunID: "run", Kind: agentcore.SemanticKindArtifact, Timestamp: ts, Payload: map[string]any{
@@ -68,6 +69,9 @@ func TestProjectSemanticRecordsToolOrder(t *testing.T) {
 	if events[4].ToolStatus != "succeeded" {
 		t.Fatalf("expected tool result status succeeded, got %q", events[4].ToolStatus)
 	}
+	if events[4].Diagnostic["reason"] != "no_match" {
+		t.Fatalf("expected diagnostic reason no_match, got %+v", events[4].Diagnostic)
+	}
 }
 
 func TestProjectSemanticRecordsIdempotent(t *testing.T) {
@@ -87,8 +91,45 @@ func TestProjectSemanticRecordsIdempotent(t *testing.T) {
 		t.Fatalf("idempotent length mismatch: %d vs %d", len(first), len(second))
 	}
 	for i := range first {
-		if first[i].Type != second[i].Type || first[i].Delta != second[i].Delta || first[i].MessageID != second[i].MessageID {
+		if first[i].Type != second[i].Type || first[i].Delta != second[i].Delta || first[i].MessageID != second[i].MessageID || first[i].Seq != second[i].Seq {
 			t.Fatalf("idempotent mismatch at %d: %+v vs %+v", i, first[i], second[i])
 		}
+	}
+	if len(first) != 3 {
+		t.Fatalf("expected assistant message to project three frames, got %d", len(first))
+	}
+	seen := map[uint64]bool{}
+	for _, event := range first {
+		if seen[event.Seq] {
+			t.Fatalf("projected frame seq must be unique, duplicate %d in %+v", event.Seq, first)
+		}
+		seen[event.Seq] = true
+	}
+}
+
+func TestProjectSemanticRuntimeNoticePreservesRuntimeFrame(t *testing.T) {
+	record := agentcore.SemanticRecord{
+		SchemaVersion: 2,
+		RecordID:      "runtime-ready",
+		Seq:           9,
+		ThreadID:      "thread-runtime",
+		RunID:         "run-runtime",
+		Kind:          agentcore.SemanticKindRuntimeNotice,
+		Timestamp:     time.Now().UTC(),
+		Payload: map[string]any{
+			"event_type":      string(agentcore.RuntimeReadyEventType),
+			"tool_call_id":    "call-runtime",
+			"tool_name":       "presentation_create",
+			"content":         "runtime ready",
+			"runtime_name":    "primary-runtime",
+			"runtime_version": "0.2.0",
+		},
+	}
+	events := ProjectSemanticRecords([]agentcore.SemanticRecord{record})
+	if len(events) != 1 || events[0].Type != EventAwakenRuntimeReady {
+		t.Fatalf("unexpected runtime replay frame: %+v", events)
+	}
+	if events[0].ToolCallID != "call-runtime" || events[0].RuntimeVersion != "0.2.0" || events[0].Message != "runtime ready" {
+		t.Fatalf("runtime replay fields lost: %+v", events[0])
 	}
 }

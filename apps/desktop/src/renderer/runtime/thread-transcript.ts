@@ -143,7 +143,7 @@ export function actionsForThreadTranscript(
   return actions;
 }
 
-export function afterSeqForTranscriptRun(
+export function streamCursorForTranscriptRun(
   transcript: RuntimeThreadTranscript,
   runId: string,
 ): number {
@@ -152,10 +152,20 @@ export function afterSeqForTranscriptRun(
     return 0;
   }
 
-  return run.events.reduce((maxSeq, event) => {
-    if (typeof event.seq !== "number") {
-      return maxSeq;
+  const transcriptCursor = run.streamCursor ?? 0;
+  if (transcriptCursor > 0) {
+    return transcriptCursor;
+  }
+
+  // Compatibility with transcripts produced before stream_cursor existed.
+  return run.events.reduce((maxCursor, event) => {
+    const cursor = event.streamCursor ?? event.seq;
+    if (typeof cursor !== "number") {
+      return maxCursor;
     }
-    return Math.max(maxSeq, event.seq);
+    return Math.max(maxCursor, cursor);
   }, 0);
 }
+
+/** @deprecated Use streamCursorForTranscriptRun. */
+export const afterSeqForTranscriptRun = streamCursorForTranscriptRun;

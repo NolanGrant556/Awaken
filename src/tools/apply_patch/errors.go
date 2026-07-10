@@ -8,15 +8,17 @@ import (
 
 // Typed apply_patch error codes for FailureSupervisor recovery mapping.
 const (
-	ErrorCodeInvalidPatchFormat      = "invalid_patch_format"
-	ErrorCodePatchMissingBegin       = "patch_missing_begin"
-	ErrorCodePatchMissingEnd         = "patch_missing_end"
-	ErrorCodePatchInvalidHunkHeader  = "patch_invalid_hunk_header"
-	ErrorCodePatchInvalidLinePrefix  = "patch_invalid_line_prefix"
-	ErrorCodePatchContextNotFound    = "patch_context_not_found"
-	ErrorCodePatchContextAmbiguous   = "patch_context_ambiguous"
-	ErrorCodePatchContextMismatch    = "patch_context_mismatch"
-	ErrorCodePatchStaleFile          = "patch_stale_file"
+	ErrorCodeInvalidPatchFormat     = "invalid_patch_format"
+	ErrorCodePatchMissingBegin      = "patch_missing_begin"
+	ErrorCodePatchMissingEnd        = "patch_missing_end"
+	ErrorCodePatchInvalidHunkHeader = "patch_invalid_hunk_header"
+	ErrorCodePatchInvalidLinePrefix = "patch_invalid_line_prefix"
+	ErrorCodePatchContextNotFound   = "patch_context_not_found"
+	ErrorCodePatchContextAmbiguous  = "patch_context_ambiguous"
+	ErrorCodePatchContextMismatch   = "patch_context_mismatch"
+	ErrorCodePatchStaleFile         = "patch_stale_file"
+	ErrorCodePatchPathNotWritable   = "patch_path_not_writable"
+	ErrorCodeApplyPatchFailed       = "apply_patch_failed"
 )
 
 // PatchError is a typed apply_patch failure with a stable machine code.

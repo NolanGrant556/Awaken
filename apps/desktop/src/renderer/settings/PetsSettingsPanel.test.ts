@@ -112,6 +112,7 @@ function createMockRuntimeClient(): RuntimeClient {
         displayName: "Test Pet",
         description: "A test pet.",
         source: "codex-custom" as const,
+        spriteVersionNumber: 1 as const,
         available: true,
       },
     ]),

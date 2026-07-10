@@ -10,15 +10,19 @@ async function createTempDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), "awaken-codex-import-"));
 }
 
-async function createValidSpritesheet(dir: string, name = "spritesheet.png"): Promise<string> {
+async function createValidSpritesheet(
+  dir: string,
+  name = "spritesheet.png",
+  spriteVersionNumber: 1 | 2 = 1,
+): Promise<string> {
   const file = path.join(dir, name);
-  await fs.writeFile(file, createTransparentSpritesheet());
+  await fs.writeFile(file, createTransparentSpritesheet(spriteVersionNumber));
   return file;
 }
 
 async function writePetJson(
   dir: string,
-  manifest: Record<string, string>,
+  manifest: Record<string, string | number>,
 ): Promise<void> {
   await fs.writeFile(path.join(dir, "pet.json"), JSON.stringify(manifest), "utf8");
 }
@@ -123,6 +127,24 @@ describe("importCodexPets", () => {
     expect(report.imported).toHaveLength(2);
     expect(report.failed).toHaveLength(0);
     expect(store.listPets()).toHaveLength(2);
+  });
+
+  it("imports Codex v2 custom pets", async () => {
+    const petDir = path.join(codexHome, "pets", "v2-pet");
+    await fs.mkdir(petDir, { recursive: true });
+    await createValidSpritesheet(petDir, "spritesheet.png", 2);
+    await writePetJson(petDir, {
+      id: "v2-pet",
+      displayName: "V2 Pet",
+      description: "A v2 pet.",
+      spriteVersionNumber: 2,
+      spritesheetPath: "spritesheet.png",
+    });
+
+    const report = await importCodexPets(store, codexHome);
+    expect(report.failed).toHaveLength(0);
+    expect(report.imported[0]?.spriteVersionNumber).toBe(2);
+    expect(store.listPets()[0]?.spriteVersionNumber).toBe(2);
   });
 
   it("keeps the Awaken copy available when the Codex source is removed", async () => {

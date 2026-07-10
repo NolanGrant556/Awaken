@@ -19,6 +19,12 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: "dist/renderer",
       emptyOutDir: false,
+      rollupOptions: {
+        input: {
+          main: "index.html",
+          petOverlay: "pet-overlay.html",
+        },
+      },
     },
   };
 });

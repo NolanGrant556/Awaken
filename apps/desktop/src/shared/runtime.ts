@@ -1,4 +1,8 @@
 import type { AguiEvent } from "./agui.js";
+import type {
+  PetActivitySnapshot,
+  PetBridge,
+} from "./pets.js";
 
 export type DesktopPlatform = "macos" | "windows" | "linux";
 
@@ -702,7 +706,7 @@ export type AwakenBridge = {
   getSupervisorStatus: () => Promise<SupervisorStatusInfo>;
   onSupervisorStatusChange: (callback: (info: SupervisorStatusInfo) => void) => () => void;
   notifyRendererReady: () => void;
-};
+} & PetBridge;
 
 export function normalizeRuntimeRun(run: RuntimeRunWire): RuntimeRun {
   return {

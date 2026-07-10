@@ -36,6 +36,13 @@ import {
   type WorkspaceRegistryPersistRequest,
   type WorkspaceValidationResult,
 } from "../shared/runtime.js";
+import {
+  PET_IPC_CHANNELS,
+  type PetActivitySnapshot,
+  type PetImportReport,
+  type PetSettings,
+  type PetSummary,
+} from "../shared/pets.js";
 
 const subscriptions = new Map<string, RunStreamHandlers>();
 
@@ -193,6 +200,38 @@ const bridge: AwakenBridge = {
   notifyRendererReady: () => {
     ipcRenderer.send("awaken:renderer-ready");
   },
+  listPets: () =>
+    ipcRenderer.invoke(PET_IPC_CHANNELS.listPets) as Promise<PetSummary[]>,
+  getPetSettings: () =>
+    ipcRenderer.invoke(PET_IPC_CHANNELS.getPetSettings) as Promise<PetSettings>,
+  selectPet: (petId: string) =>
+    ipcRenderer.invoke(PET_IPC_CHANNELS.selectPet, petId) as Promise<PetSettings>,
+  refreshCodexPets: () =>
+    ipcRenderer.invoke(PET_IPC_CHANNELS.refreshCodexPets) as Promise<PetImportReport>,
+  createPet: () =>
+    ipcRenderer.invoke(PET_IPC_CHANNELS.createPet) as Promise<{ threadId: string }>,
+  setPetOverlayOpen: (open: boolean) =>
+    ipcRenderer.invoke(PET_IPC_CHANNELS.setPetOverlayOpen, open) as Promise<PetSettings>,
+  setPetImportPreferences: (input: { importCodexPets?: boolean }) =>
+    ipcRenderer.invoke(PET_IPC_CHANNELS.setPetImportPreferences, input) as Promise<PetSettings>,
+  updatePetActivity: (snapshot: PetActivitySnapshot) => {
+    ipcRenderer.send(PET_IPC_CHANNELS.updatePetActivity, snapshot);
+  },
+  onPetCatalogChanged: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on(PET_IPC_CHANNELS.petCatalogChanged, handler);
+    return () => ipcRenderer.removeListener(PET_IPC_CHANNELS.petCatalogChanged, handler);
+  },
+  onPetThreadActivationRequested: (callback: (threadId: string) => void) => {
+    const handler = (_event: IpcRendererEvent, threadId: string) => callback(threadId);
+    ipcRenderer.on(PET_IPC_CHANNELS.petThreadActivationRequested, handler);
+    return () =>
+      ipcRenderer.removeListener(PET_IPC_CHANNELS.petThreadActivationRequested, handler);
+  },
+  openAwakenPetsDirectory: () =>
+    ipcRenderer.invoke(PET_IPC_CHANNELS.openAwakenPetsDirectory) as Promise<void>,
+  openCodexPetsDirectory: () =>
+    ipcRenderer.invoke(PET_IPC_CHANNELS.openCodexPetsDirectory) as Promise<void>,
 };
 
 contextBridge.exposeInMainWorld("awaken", bridge);

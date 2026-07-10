@@ -295,9 +295,9 @@ npm run dev:desktop
 
 Windows 当前不使用 macOS 的 screen 托管脚本；`npm run dev:desktop` 是 Windows 开发入口，关闭时在运行该命令的终端按 `Ctrl+C`。它会构建 `@awaken/design-system`，确保 `win32-x64/awaken-core.exe` 存在，准备 primary-runtime，启动 Vite renderer（`127.0.0.1:5174`），编译 Electron main/preload，并启动 Electron。
 
-Windows primary-runtime 需要本机能找到这些依赖：Python（优先 `py -3` 或 `python`）、Node、LibreOffice、Poppler（`pdftoppm.exe` / `pdfinfo.exe`）和 ffmpeg。默认会通过 PATH、`where`、常见安装目录和以下环境变量发现依赖：`AWAKEN_BOOTSTRAP_PYTHON`、`AWAKEN_PYTHON`、`AWAKEN_NODE`、`AWAKEN_SOFFICE`、`AWAKEN_POPPLER_BIN`、`AWAKEN_FFMPEG`。缺少依赖时，`npm run prepare:runtime -- --json` 和 `npm run check:runtime -- --json` 会输出具体缺口。
+Windows primary-runtime 需要完整、可复制的 Python distribution（推荐 `uv` managed Python）、Node、LibreOffice、Poppler（`pdftoppm.exe` / `pdfinfo.exe`）和 ffmpeg。prepare 阶段优先使用 `AWAKEN_PRIMARY_RUNTIME_SEED_DIR` 或 `AWAKEN_PYTHON`、`AWAKEN_NODE`、`AWAKEN_SOFFICE`、`AWAKEN_POPPLER_BIN`、`AWAKEN_FFMPEG` 指定复制来源；随后才通过 `uv` / `where` / 常见安装目录发现并验证真实来源。上述组件变量只属于 prepare 输入，正式 Artifact 执行只解析已通过 probe/provenance 的 Awaken-owned active revision，不会直接执行这些外部来源。普通 venv、Codex wrapper 和指向外部安装目录的脚本不会被接受为 managed runtime。缺少依赖时，`npm run prepare:runtime -- --json` 和 `npm run check:runtime -- --json` 会输出具体缺口。
 
-Windows 上若已安装 `winget`，可以直接运行 `npm run prepare:runtime -- --install`（或 `-i`）自动安装缺失的 LibreOffice、Poppler 和 ffmpeg，安装路径会自动注入当前进程 PATH 并持久化到用户 PATH。
+Windows 上若已安装 `winget`，可以直接运行 `npm run prepare:runtime -- --install`（或 `-i`）自动安装缺失的 LibreOffice、Poppler 和 ffmpeg。安装完成后 prepare 会重新扫描 WinGet package directory，把通过校验的组件复制进 Awaken-owned managed runtime；不会修改或持久化用户 PATH。
 
 ### 组件独立观测入口
 
@@ -316,25 +316,28 @@ http://127.0.0.1:5173/#/components/awaken-execution-feed
 
 ## 当前工具面
 
-模型可见的内置工具：
+普通 provider 默认可见的核心内置工具：
 
 ```text
 calculator
 read_file
 list_files
 grep_search
-apply_patch
+text_edit
+text_file_create
 shell
 web_search
 ask_user
 ```
 
+这不是完整工具清单：Skill、MCP 和 typed artifact runtime 会按当前任务、策略与运行时状态追加工具。`apply_patch` 仍注册为高级/兼容文件变更工具，但普通 provider 默认不直接暴露它；只有 provider 具备 grammar-constrained transport，或兼容/内部转换链明确选择它时才进入模型可见工具池。
+
 只读工具不应要求审批。会修改文件或有风险的工具通过 `src/tool/permission.go` 与 `src/agentcore/tool_runtime.go` 走权限模型。
 
 当前权限规则：
 
-- `apply_patch` 是默认的文件创建/修改/删除链路。处于当前可写根内的常规文件变更可以自动执行；删除走回收站语义；越界、敏感路径和受保护路径会被拒绝或标记为高风险。
-- `shell` 是更底层的系统操作能力，不再等同于普通文件编辑入口。简单文件写入可能会被重写成 `apply_patch`；open-world 或系统级命令仍受 execution profile、sandbox 和边界规则约束。
+- `text_edit` 是普通单文件精确修改的默认链路，支持基于旧文本与可选 SHA-256 的确定性替换；`text_file_create` 用于创建或覆盖普通文本文件。多文件、移动、删除或高级 diff 才进入兼容/高级文件变更链路；删除必须走可恢复语义，越界、敏感路径和受保护路径会被拒绝或标记为高风险。
+- `shell` 是更底层的系统操作能力，不等同于普通文件编辑入口。可识别的简单文件写入可以被转换成结构化文件工具；open-world 或系统级命令仍受 execution profile、sandbox 和边界规则约束。
 - `web_search` 和只读文件工具通常走低摩擦路径，但仍受当前作用域约束。
 - 路径判断不再只看单一 `workspace root`；runtime 会同时校验 `ReadableRoots`、`WritableRoots`、`OutputRoots`、`ProtectedRoots` 和附件文件范围。
 

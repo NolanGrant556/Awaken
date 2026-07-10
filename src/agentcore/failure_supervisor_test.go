@@ -1,0 +1,542 @@
+package agentcore
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
+
+	convcontext "awaken/src/context"
+	"awaken/src/tool"
+)
+
+func TestEffectiveMaxDefaults(t *testing.T) {
+	if got := EffectiveMaxAgentTurns(0); got != DefaultMaxAgentTurns {
+		t.Fatalf("MaxAgentTurns 0 => %d, want %d", got, DefaultMaxAgentTurns)
+	}
+	if got := EffectiveMaxAgentTurns(12); got != 12 {
+		t.Fatalf("MaxAgentTurns 12 => %d", got)
+	}
+	if got := EffectiveMaxToolExecutions(0); got != DefaultMaxToolExecutions {
+		t.Fatalf("MaxToolExecutions 0 => %d, want %d", got, DefaultMaxToolExecutions)
+	}
+	if got := EffectiveMaxToolExecutions(9); got != 9 {
+		t.Fatalf("MaxToolExecutions 9 => %d", got)
+	}
+}
+
+func TestCallSignatureCanonicalizesJSONKeysAndPatchWhitespace(t *testing.T) {
+	a := CallSignature("apply_patch", `{"patch":"line\r\n","b":1,"a":2}`)
+	b := CallSignature("apply_patch", `{"a":2,"b":1,"patch":"line\n"}`)
+	if a != b {
+		t.Fatalf("expected canonical signatures to match\n%s\n%s", a, b)
+	}
+	c := CallSignature("apply_patch", `{"a":2,"b":1,"patch":"line2\n"}`)
+	if a == c {
+		t.Fatalf("different patch content must differ")
+	}
+}
+
+func TestFailureFingerprintStripsNoise(t *testing.T) {
+	root := "/Users/demo/project"
+	outcome := tool.ExecutionOutcome{
+		ErrorMessage: root + "/src/a.ts line 12 failed at 2026-07-10T03:39:40Z in /tmp/xyz123",
+	}
+	fp1 := FailureFingerprint("apply_patch", "patch_context_mismatch", outcome, root)
+	outcome.ErrorMessage = "<workspace>/src/a.ts line 99 failed at 2026-07-11T01:02:03Z in /tmp/other"
+	fp2 := FailureFingerprint("apply_patch", "patch_context_mismatch", outcome, root)
+	if fp1 != fp2 {
+		t.Fatalf("normalized fingerprints should match\n%s\n%s", fp1, fp2)
+	}
+}
+
+func TestFailureSupervisorBlocksNonRetryableDuplicate(t *testing.T) {
+	s := NewFailureSupervisor("/tmp/ws", 8, 32)
+	call := convcontext.ToolCall{
+		ID: "c1",
+		Function: convcontext.FunctionCall{
+			Name:      "apply_patch",
+			Arguments: `{"patch":"*** Begin Patch\nbad\n*** End Patch"}`,
+		},
+	}
+	before := s.BeforeCall(call)
+	if !before.Allow {
+		t.Fatalf("first call should allow")
+	}
+	s.NoteRealExecution(before.CallSignature)
+	failed := tool.ExecutionOutcome{
+		Status:        tool.OutcomeFailed,
+		SemanticStatus: tool.SemanticFailure,
+		ErrorCode:     "invalid_patch_format",
+		ErrorMessage:  "missing begin",
+		Retryable:     false,
+	}
+	s.AfterOutcome(call, failed)
+
+	second := s.BeforeCall(call)
+	if !second.Block || second.ErrorCode != ErrorCodeToolRetryBlocked {
+		t.Fatalf("second non-retryable duplicate must block, got %+v", second)
+	}
+	if len(second.RecoveryOptions) == 0 {
+		t.Fatalf("expected recovery options")
+	}
+}
+
+func TestFailureSupervisorAllowsRetryableTwiceThenBlocks(t *testing.T) {
+	s := NewFailureSupervisor("/tmp/ws", 8, 32)
+	call := convcontext.ToolCall{
+		ID: "c1",
+		Function: convcontext.FunctionCall{
+			Name:      "shell",
+			Arguments: `{"command":"false"}`,
+		},
+	}
+	for i := 0; i < 2; i++ {
+		before := s.BeforeCall(call)
+		if before.Block {
+			t.Fatalf("attempt %d should allow", i+1)
+		}
+		s.NoteRealExecution(before.CallSignature)
+		s.AfterOutcome(call, tool.ExecutionOutcome{
+			Status:         tool.OutcomeFailed,
+			SemanticStatus: tool.SemanticFailure,
+			ErrorCode:      tool.ErrorCodeProcessExitNonzero,
+			ErrorMessage:   "exit 1",
+			Retryable:      true,
+		})
+	}
+	third := s.BeforeCall(call)
+	if !third.Block {
+		t.Fatalf("third retryable exact call must block")
+	}
+}
+
+func TestFailureSupervisorSameErrorClassBudget(t *testing.T) {
+	s := NewFailureSupervisor("/tmp/ws", 8, 64)
+	for i := 0; i < maxSameClassFailures; i++ {
+		call := convcontext.ToolCall{
+			ID: fmt.Sprintf("c%d", i),
+			Function: convcontext.FunctionCall{
+				Name:      "text_edit",
+				Arguments: fmt.Sprintf(`{"path":"a.txt","old_string":"x%d","new_string":"y","expected_sha256":"rev1"}`, i),
+			},
+		}
+		before := s.BeforeCall(call)
+		s.NoteRealExecution(before.CallSignature)
+		after := s.AfterOutcome(call, tool.ExecutionOutcome{
+			Status:         tool.OutcomeFailed,
+			SemanticStatus: tool.SemanticFailure,
+			ErrorCode:      "text_not_found",
+			ErrorMessage:   "missing",
+			Retryable:      true,
+			Diagnostic:     map[string]any{"sha256": "rev1"},
+		})
+		if i == maxSameClassFailures-1 && !after.RecoveryRequired {
+			t.Fatalf("expected recovery_required after %d same-class failures", maxSameClassFailures)
+		}
+	}
+}
+
+func TestFailureSupervisorNewRevisionAllowsRetry(t *testing.T) {
+	s := NewFailureSupervisor("/tmp/ws", 8, 64)
+	for i := 0; i < maxSameClassFailures; i++ {
+		call := convcontext.ToolCall{
+			ID: fmt.Sprintf("old%d", i),
+			Function: convcontext.FunctionCall{
+				Name:      "text_edit",
+				Arguments: fmt.Sprintf(`{"path":"a.txt","old_string":"x%d","new_string":"y","expected_sha256":"rev-old"}`, i),
+			},
+		}
+		before := s.BeforeCall(call)
+		s.NoteRealExecution(before.CallSignature)
+		s.AfterOutcome(call, tool.ExecutionOutcome{
+			Status:         tool.OutcomeFailed,
+			SemanticStatus: tool.SemanticFailure,
+			ErrorCode:      "stale_file_revision",
+			Retryable:      true,
+			Diagnostic:     map[string]any{"sha256": "rev-old"},
+		})
+	}
+	fresh := convcontext.ToolCall{
+		ID: "fresh",
+		Function: convcontext.FunctionCall{
+			Name:      "text_edit",
+			Arguments: `{"path":"a.txt","old_string":"x","new_string":"y","expected_sha256":"rev-new"}`,
+		},
+	}
+	before := s.BeforeCall(fresh)
+	if before.Block {
+		t.Fatalf("new revision must not be blocked by old class budget")
+	}
+	s.NoteRealExecution(before.CallSignature)
+	after := s.AfterOutcome(fresh, tool.ExecutionOutcome{
+		Status:         tool.OutcomeSucceeded,
+		SemanticStatus: tool.SemanticSuccess,
+		Diagnostic:     map[string]any{"sha256": "rev-new"},
+	})
+	if after.TerminateRun {
+		t.Fatalf("successful recovery must not terminate")
+	}
+}
+
+func TestFailureSupervisorTurnAndRunBudgets(t *testing.T) {
+	s := NewFailureSupervisor("/tmp/ws", 8, 64)
+	s.BeginTurn()
+	for i := 0; i < maxTurnToolFailures; i++ {
+		call := convcontext.ToolCall{
+			ID: fmt.Sprintf("t%d", i),
+			Function: convcontext.FunctionCall{
+				Name:      "shell",
+				Arguments: fmt.Sprintf(`{"command":"exit %d"}`, i+2),
+			},
+		}
+		before := s.BeforeCall(call)
+		s.NoteRealExecution(before.CallSignature)
+		after := s.AfterOutcome(call, tool.ExecutionOutcome{
+			Status:         tool.OutcomeFailed,
+			SemanticStatus: tool.SemanticFailure,
+			ErrorCode:      tool.ErrorCodeProcessExitNonzero,
+			ErrorMessage:   fmt.Sprintf("exit %d", i+2),
+			Retryable:      true,
+		})
+		if i == maxTurnToolFailures-1 {
+			if !after.TerminateTurn || after.TerminalReason != TerminalReasonRepeatedToolFailure {
+				t.Fatalf("turn budget exceeded decision = %+v", after)
+			}
+		}
+	}
+
+	s2 := NewFailureSupervisor("/tmp/ws", 8, 64)
+	for i := 0; i < maxRunToolFailures; i++ {
+		if i%maxTurnToolFailures == 0 {
+			s2.BeginTurn()
+		}
+		call := convcontext.ToolCall{
+			ID: fmt.Sprintf("r%d", i),
+			Function: convcontext.FunctionCall{
+				Name:      "shell",
+				Arguments: fmt.Sprintf(`{"command":"run-exit-%d"}`, i),
+			},
+		}
+		before := s2.BeforeCall(call)
+		s2.NoteRealExecution(before.CallSignature)
+		after := s2.AfterOutcome(call, tool.ExecutionOutcome{
+			Status:         tool.OutcomeFailed,
+			SemanticStatus: tool.SemanticFailure,
+			ErrorCode:      tool.ErrorCodeProcessExitNonzero,
+			Retryable:      true,
+		})
+		if i == maxRunToolFailures-1 && (!after.TerminateRun || after.TerminalReason != TerminalReasonRepeatedToolFailure) {
+			t.Fatalf("run budget exceeded decision = %+v", after)
+		}
+	}
+}
+
+func TestFailureSupervisorRecoveryRequiredAfterRepeatedFingerprint(t *testing.T) {
+	s := NewFailureSupervisor("/tmp/ws", 8, 64)
+	mk := func(id string) convcontext.ToolCall {
+		return convcontext.ToolCall{
+			ID: id,
+			Function: convcontext.FunctionCall{
+				Name:      "apply_patch",
+				Arguments: `{"patch":"*** Begin Patch\n*** Update File: a.txt\n@@\n-old\n+new\n*** End Patch"}`,
+			},
+		}
+	}
+	outcome := tool.ExecutionOutcome{
+		Status:         tool.OutcomeFailed,
+		SemanticStatus: tool.SemanticFailure,
+		ErrorCode:      "patch_context_mismatch",
+		ErrorMessage:   "context not found",
+		Retryable:      true,
+	}
+	c1 := mk("1")
+	b1 := s.BeforeCall(c1)
+	s.NoteRealExecution(b1.CallSignature)
+	a1 := s.AfterOutcome(c1, outcome)
+	if a1.RecoveryRequired {
+		t.Fatalf("first failure should not require recovery yet")
+	}
+	// Change args slightly so call signature differs but fingerprint matches.
+	c2 := convcontext.ToolCall{
+		ID: "2",
+		Function: convcontext.FunctionCall{
+			Name:      "apply_patch",
+			Arguments: `{"patch":"*** Begin Patch\n*** Update File: a.txt\n@@\n-old\n+newer\n*** End Patch"}`,
+		},
+	}
+	b2 := s.BeforeCall(c2)
+	s.NoteRealExecution(b2.CallSignature)
+	a2 := s.AfterOutcome(c2, outcome)
+	if !a2.RecoveryRequired || a2.Directive == nil {
+		t.Fatalf("second same fingerprint must require recovery, got %+v", a2)
+	}
+	opts := RecoveryOptionsForError("patch_context_mismatch")
+	if len(opts) == 0 || opts[0] != "read_file" {
+		t.Fatalf("unexpected recovery options: %v", opts)
+	}
+}
+
+type failingOutcomeTool struct {
+	name      string
+	errorCode string
+	retryable bool
+	calls     *int
+}
+
+func (t failingOutcomeTool) Name() string { return t.name }
+func (t failingOutcomeTool) Description() string {
+	return "test failing tool"
+}
+func (t failingOutcomeTool) Parameters() []tool.ToolParameter {
+	return []tool.ToolParameter{
+		{Name: "value", Description: "value", Type: "string", Required: true},
+	}
+}
+func (t failingOutcomeTool) Definition() tool.ToolDefinition {
+	return tool.ToolDefinition{
+		Name:        t.name,
+		DisplayName: t.name,
+		Source:      tool.SourceBuiltin,
+		Description: t.Description(),
+		Annotations: tool.ToolAnnotations{ReadOnly: true},
+	}
+}
+func (t failingOutcomeTool) Execute(context.Context, string) (string, error) {
+	return "", errors.New("use ExecuteOutcome")
+}
+func (t failingOutcomeTool) ExecuteOutcome(ctx context.Context, input string, observer tool.ToolObserver) (tool.ExecutionOutcome, error) {
+	if t.calls != nil {
+		*t.calls++
+	}
+	now := time.Now().UTC()
+	return tool.ExecutionOutcome{
+		Content:         "failed",
+		Status:          tool.OutcomeFailed,
+		TransportStatus: tool.TransportCompleted,
+		SemanticStatus:  tool.SemanticFailure,
+		ProcessStatus:   tool.ProcessNotApplicable,
+		ErrorCode:       t.errorCode,
+		ErrorCategory:   tool.ErrorCategoryValidation,
+		ErrorMessage:    "failed",
+		Retryable:       t.retryable,
+		StartedAt:       now,
+		FinishedAt:      now,
+	}, nil
+}
+
+func TestRunnerBlocksExactNonRetryableDuplicate(t *testing.T) {
+	toolName := "fs_nonretry_dup_" + t.Name()
+	var execCount int
+	mustRegisterRunnerTool(t, failingOutcomeTool{
+		name:      toolName,
+		errorCode: "invalid_patch_format",
+		retryable: false,
+		calls:     &execCount,
+	})
+
+	args, _ := json.Marshal(map[string]string{"value": "same"})
+	var calls int
+	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls <= 2 {
+			writeRunnerStreamToolCall(t, w, fmt.Sprintf("call_%d", calls), toolName, map[string]string{"value": "same"})
+			return
+		}
+		writeRunnerStreamText(t, w, "should not reach")
+	})
+	defer server.Close()
+
+	agent := NewAgent(testAgentConfig(server.URL, 5))
+	var gotEvents []AwakenEvent
+	_, err := agent.RunStreamWithEvents(context.Background(), "dup", EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+	if err == nil {
+		// May finish with text if model continues; ensure block happened.
+	}
+	if execCount != 1 {
+		t.Fatalf("expected exactly 1 real execution, got %d", execCount)
+	}
+	blocked := false
+	for _, ev := range gotEvents {
+		if ev.Type == ToolRetryBlockedEventType {
+			blocked = true
+			break
+		}
+	}
+	if !blocked {
+		t.Fatalf("expected ToolRetryBlocked event, types=%v", eventTypes(gotEvents))
+	}
+	_ = args
+}
+
+func TestRunnerRetryableExactCallBlockedOnThird(t *testing.T) {
+	toolName := "fs_retryable_" + t.Name()
+	var execCount int
+	mustRegisterRunnerTool(t, failingOutcomeTool{
+		name:      toolName,
+		errorCode: tool.ErrorCodeProcessExitNonzero,
+		retryable: true,
+		calls:     &execCount,
+	})
+
+	var calls int
+	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls <= 3 {
+			writeRunnerStreamToolCall(t, w, fmt.Sprintf("call_%d", calls), toolName, map[string]string{"value": "same"})
+			return
+		}
+		writeRunnerStreamText(t, w, "done")
+	})
+	defer server.Close()
+
+	agent := NewAgent(testAgentConfig(server.URL, 6))
+	var gotEvents []AwakenEvent
+	_, _ = agent.RunStreamWithEvents(context.Background(), "retry", EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+	if execCount != 2 {
+		t.Fatalf("expected 2 real executions before block, got %d", execCount)
+	}
+	foundBlock := false
+	for _, ev := range gotEvents {
+		if ev.Type == ToolRetryBlockedEventType {
+			foundBlock = true
+		}
+	}
+	if !foundBlock {
+		t.Fatalf("expected ToolRetryBlocked, types=%v", eventTypes(gotEvents))
+	}
+}
+
+func TestRunnerSwitchToTextEditSucceedsAfterPatchFailures(t *testing.T) {
+	patchName := "fs_patch_" + t.Name()
+	editName := "fs_edit_" + t.Name()
+	var patchCalls, editCalls int
+	mustRegisterRunnerTool(t, failingOutcomeTool{
+		name:      patchName,
+		errorCode: "patch_context_mismatch",
+		retryable: true,
+		calls:     &patchCalls,
+	})
+	mustRegisterRunnerTool(t, runnerTestTool{name: editName})
+
+	var calls int
+	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		switch calls {
+		case 1, 2:
+			writeRunnerStreamToolCall(t, w, fmt.Sprintf("patch_%d", calls), patchName, map[string]string{"value": fmt.Sprintf("p%d", calls)})
+		case 3:
+			writeRunnerStreamToolCall(t, w, "edit_1", editName, map[string]string{"value": "fixed"})
+		default:
+			writeRunnerStreamText(t, w, "recovered")
+		}
+	})
+	defer server.Close()
+
+	agent := NewAgent(testAgentConfig(server.URL, 8))
+	answer, err := agent.RunStreamWithEvents(context.Background(), "recover", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if answer != "recovered" {
+		t.Fatalf("expected recovered answer, got %q", answer)
+	}
+	if patchCalls != 2 || editCalls != 0 {
+		// edit tool is runnerTestTool which increments via Execute; check messages instead.
+	}
+	if patchCalls != 2 {
+		t.Fatalf("expected 2 patch failures, got %d", patchCalls)
+	}
+	var sawEdit bool
+	for _, msg := range agent.GetConversation().Context.GetMessages() {
+		if msg.Role == convcontext.RoleAssistant {
+			for _, tc := range msg.ToolCalls {
+				if tc.Function.Name == editName {
+					sawEdit = true
+				}
+			}
+		}
+		if msg.Role == convcontext.RoleTool && strings.Contains(msg.Content, "echo:") {
+			sawEdit = true
+		}
+	}
+	if !sawEdit {
+		t.Fatalf("expected text_edit-style recovery call in conversation")
+	}
+}
+
+func TestRunnerTurnBudgetTerminatesRun(t *testing.T) {
+	toolName := "fs_budget_" + t.Name()
+	var execCount int
+	mustRegisterRunnerTool(t, failingOutcomeTool{
+		name:      toolName,
+		errorCode: tool.ErrorCodeProcessExitNonzero,
+		retryable: true,
+		calls:     &execCount,
+	})
+
+	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		// One turn with enough distinct failing tool calls to hit the turn budget.
+		calls := make([]map[string]interface{}, 0, maxTurnToolFailures)
+		for i := 0; i < maxTurnToolFailures; i++ {
+			args, _ := json.Marshal(map[string]string{"value": fmt.Sprintf("v%d", i)})
+			calls = append(calls, map[string]interface{}{
+				"index": i,
+				"id":    fmt.Sprintf("b_%d", i),
+				"type":  "function",
+				"function": map[string]interface{}{
+					"name":      toolName,
+					"arguments": string(args),
+				},
+			})
+		}
+		writeRunnerStreamEvent(t, w, map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{"delta": map[string]interface{}{"tool_calls": calls}},
+			},
+		})
+		writeRunnerStreamLines(t, w, []string{"data: [DONE]"})
+	})
+	defer server.Close()
+
+	agent := NewAgent(testAgentConfig(server.URL, 20))
+	var gotEvents []AwakenEvent
+	_, err := agent.RunStreamWithEvents(context.Background(), "budget", EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+	if err == nil {
+		t.Fatalf("expected repeated_tool_failure termination")
+	}
+	if !strings.Contains(err.Error(), "repeated_tool_failure") && !strings.Contains(err.Error(), "budget") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	runErrorIndex := firstEventIndex(gotEvents, RunErrorEventType)
+	if runErrorIndex < 0 || gotEvents[runErrorIndex].TerminalReason != TerminalReasonRepeatedToolFailure {
+		t.Fatalf("expected repeated_tool_failure terminal, got %+v", gotEvents)
+	}
+	if execCount != maxTurnToolFailures {
+		t.Fatalf("expected %d executions, got %d", maxTurnToolFailures, execCount)
+	}
+}
+
+func TestRunnerZeroMaxThoughtsUsesProductDefault(t *testing.T) {
+	if got := EffectiveMaxAgentTurns(0); got != DefaultMaxAgentTurns {
+		t.Fatalf("0 must map to default %d, got %d", DefaultMaxAgentTurns, got)
+	}
+	cfg := testAgentConfig("http://example.invalid", 0)
+	runner := NewRunner(cfg, convcontext.NewConversation(nil), NewRequestBuilder(cfg))
+	if runner.effectiveMaxThoughts() != DefaultMaxAgentTurns {
+		t.Fatalf("runner effective max thoughts = %d", runner.effectiveMaxThoughts())
+	}
+	if runner.failureSupervisor.MaxToolExecutions() != DefaultMaxToolExecutions {
+		t.Fatalf("runner max tool executions = %d", runner.failureSupervisor.MaxToolExecutions())
+	}
+}

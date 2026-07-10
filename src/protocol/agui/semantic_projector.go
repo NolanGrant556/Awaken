@@ -2,6 +2,7 @@ package agui
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -178,11 +179,37 @@ func ProjectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		notice.RawType = stringFromAny(payload["event_type"])
 		notice.Message = stringFromAny(payload["content"])
 		return []Event{notice}
+	case agentcore.SemanticKindRecoveryDecision:
+		recovery := base
+		if boolFromAny(payload["blocked"]) {
+			recovery.Type = EventAwakenToolRetryBlocked
+		} else {
+			recovery.Type = EventAwakenToolRecoveryRequired
+		}
+		recovery.ToolCallID = stringFromAny(payload["tool_call_id"])
+		recovery.ToolCallName = stringFromAny(payload["tool_name"])
+		recovery.Code = stringFromAny(payload["error_code"])
+		recovery.ErrorCode = stringFromAny(payload["error_code"])
+		recovery.Message = stringFromAny(payload["message"])
+		if recovery.Message == "" {
+			if boolFromAny(payload["blocked"]) {
+				recovery.Message = "tool retry blocked"
+			} else {
+				recovery.Message = "tool recovery required"
+			}
+		}
+		if opts, ok := payload["recovery_options"].([]any); ok {
+			for _, opt := range opts {
+				if s := strings.TrimSpace(fmt.Sprint(opt)); s != "" && s != "<nil>" {
+					recovery.RecoveryOptions = append(recovery.RecoveryOptions, s)
+				}
+			}
+		}
+		return []Event{recovery}
 	case agentcore.SemanticKindThread,
 		agentcore.SemanticKindFileChange,
 		agentcore.SemanticKindSkillActivated,
-		agentcore.SemanticKindResourceReceipt,
-		agentcore.SemanticKindRecoveryDecision:
+		agentcore.SemanticKindResourceReceipt:
 		return nil
 	default:
 		unknown := base

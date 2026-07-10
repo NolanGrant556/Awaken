@@ -111,7 +111,10 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 		mux.HandleFunc("GET /v1/runs/{run_id}/audit", handlers.handleGetRunAudit)
 		if cfg.shutdown != nil {
 			mux.HandleFunc("POST /v1/shutdown", func(w http.ResponseWriter, r *http.Request) {
-				cfg.runService.FlushTranscripts()
+				if err := cfg.runService.FlushTranscripts(); err != nil {
+					writeErrorJSON(w, http.StatusInternalServerError, "PERSISTENCE_ERROR", err.Error())
+					return
+				}
 				writeJSON(w, http.StatusOK, map[string]string{"status": "shutting down"})
 				go cfg.shutdown()
 			})

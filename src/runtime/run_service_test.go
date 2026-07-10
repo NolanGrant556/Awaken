@@ -1854,6 +1854,7 @@ func TestRunServiceRestoresCancelledThreadUserTranscript(t *testing.T) {
 						restoredHistory <- agent.GetConversation().Context.GetMessages()
 						agent.GetConversation().UserInput(input)
 						agent.GetConversation().AssistantOutput("answer: "+input, nil)
+						persistTestRunFacts(ctx, agent, input, "answer: "+input)
 						sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 						sink.Emit(agentcore.AwakenEvent{
 							Type:           agentcore.RunFinishedEventType,
@@ -1863,9 +1864,30 @@ func TestRunServiceRestoresCancelledThreadUserTranscript(t *testing.T) {
 						return "answer: " + input, nil
 					}
 
+					agent.GetConversation().UserInput(input)
+					if recorder := agent.SemanticRecorder(); recorder != nil {
+						_ = recorder.Append(ctx, agentcore.NewSemanticRecord(
+							agentcore.SemanticKindUserMessage, "", "", "", "", "", map[string]any{
+								"content": input,
+								"role":    "user",
+							},
+						))
+						_ = recorder.Append(ctx, agentcore.NewSemanticRecord(
+							agentcore.SemanticKindRunStarted, "", "", "", "", "", map[string]any{},
+						))
+					}
 					sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 					close(started)
 					<-ctx.Done()
+					if recorder := agent.SemanticRecorder(); recorder != nil {
+						_ = recorder.Append(context.Background(), agentcore.NewSemanticRecord(
+							agentcore.SemanticKindRunTerminal, "", "", "", "", "", map[string]any{
+								"status": "cancelled",
+								"code":   "RUN_CANCELLED",
+							},
+						))
+						_ = recorder.Flush(context.Background())
+					}
 					return "", ctx.Err()
 				})
 			},
@@ -1926,6 +1948,7 @@ func newDurableThreadTestService() *RunService {
 			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 				agent.GetConversation().UserInput(input)
 				agent.GetConversation().AssistantOutput("answer: "+input, nil)
+				persistTestRunFacts(ctx, agent, input, "answer: "+input)
 				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 				sink.Emit(agentcore.AwakenEvent{
 					Type:           agentcore.RunFinishedEventType,
@@ -1936,6 +1959,37 @@ func newDurableThreadTestService() *RunService {
 			})
 		},
 	)
+}
+
+func persistTestRunFacts(ctx context.Context, agent *agentcore.Agent, userInput, assistantContent string) {
+	if agent == nil || agent.SemanticRecorder() == nil {
+		return
+	}
+	recorder := agent.SemanticRecorder()
+	_ = recorder.Append(ctx, agentcore.NewSemanticRecord(
+		agentcore.SemanticKindUserMessage, "", "", "", "", "", map[string]any{
+			"content": userInput,
+			"role":    "user",
+		},
+	))
+	_ = recorder.Append(ctx, agentcore.NewSemanticRecord(
+		agentcore.SemanticKindRunStarted, "", "", "", "", "", map[string]any{},
+	))
+	if strings.TrimSpace(assistantContent) != "" {
+		_ = recorder.Append(ctx, agentcore.NewSemanticRecord(
+			agentcore.SemanticKindAssistantMessage, "", "", "", "", "", map[string]any{
+				"content": assistantContent,
+				"role":    "assistant",
+			},
+		))
+	}
+	_ = recorder.Append(ctx, agentcore.NewSemanticRecord(
+		agentcore.SemanticKindRunTerminal, "", "", "", "", "", map[string]any{
+			"status": "finished",
+			"result": assistantContent,
+		},
+	))
+	_ = recorder.Flush(ctx)
 }
 
 func waitForRunTerminal(t *testing.T, service *RunService, runID string) Run {
@@ -1968,10 +2022,28 @@ func waitForTranscriptMessageCount(t *testing.T, workspaceRoot, threadID string,
 	t.Helper()
 	_ = workspaceRoot
 	deadline := time.Now().Add(2 * time.Second)
+	path := transcriptPath(threadID)
 	for time.Now().Before(deadline) {
-		records, err := readTranscriptRecords(transcriptPath(threadID))
-		if err == nil && transcriptMessageCount(records) >= want {
-			return records
+		schema, err := DetectJournalSchema(path)
+		if err == nil && schema == agentcore.SemanticSchemaVersion {
+			semantic, readErr := ReadExecutionJournal(path)
+			if readErr == nil {
+				count := 0
+				for _, record := range semantic {
+					switch record.Kind {
+					case agentcore.SemanticKindUserMessage, agentcore.SemanticKindAssistantMessage:
+						count++
+					}
+				}
+				if count >= want {
+					return nil
+				}
+			}
+		} else {
+			records, err := readTranscriptRecords(path)
+			if err == nil && transcriptMessageCount(records) >= want {
+				return records
+			}
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

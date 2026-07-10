@@ -10,6 +10,9 @@ type Agent struct {
 	conversation           *context.Conversation
 	reqBuilder             *RequestBuilder
 	threadID               string
+	runID                  string
+	sessionID              string
+	recorder               SemanticRecorder
 	pendingUserAttachments []context.MessageAttachment
 }
 
@@ -55,11 +58,53 @@ func (a *Agent) Reconfigure(config AgentConfig) {
 	a.reqBuilder = NewRequestBuilder(config)
 }
 
+// SetSemanticRecorder injects the per-thread durable journal writer.
+func (a *Agent) SetSemanticRecorder(recorder SemanticRecorder) {
+	a.recorder = recorder
+}
+
+// SetRunIdentity binds the current run/session identifiers for journal records.
+func (a *Agent) SetRunIdentity(runID, sessionID string) {
+	a.runID = runID
+	a.sessionID = sessionID
+}
+
+func (a *Agent) SemanticRecorder() SemanticRecorder {
+	return a.recorder
+}
+
 func (a *Agent) RunStreamWithEvents(ctx stdcontext.Context, userInput string, sink EventSink) (string, error) {
-	a.conversation.UserInputWithAttachments(userInput, a.consumePendingUserAttachments())
+	attachments := a.consumePendingUserAttachments()
+	a.conversation.UserInputWithAttachments(userInput, attachments)
 
 	runner := NewRunner(a.config, a.conversation, a.reqBuilder)
 	runner.threadID = a.threadID
+	runner.runID = a.runID
+	runner.sessionID = a.sessionID
+	runner.recorder = a.recorder
+
+	if a.recorder != nil {
+		payload := map[string]any{
+			"content": userInput,
+			"role":    "user",
+		}
+		if len(attachments) > 0 {
+			payload["attachment_count"] = len(attachments)
+		}
+		record := NewSemanticRecord(
+			SemanticKindUserMessage,
+			a.threadID,
+			a.runID,
+			"",
+			"",
+			a.sessionID,
+			payload,
+		)
+		if err := a.recorder.Append(ctx, record); err != nil {
+			return "", err
+		}
+	}
+
 	return runner.RunStreamWithEvents(ctx, sink)
 }
 

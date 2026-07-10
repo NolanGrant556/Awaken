@@ -110,7 +110,9 @@ func main() {
 	}
 
 	log.Println("awaken-core shutting down")
-	runService.FlushTranscripts()
+	if err := runService.FlushTranscripts(); err != nil {
+		log.Printf("awaken-core flush transcripts error: %v", err)
+	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {

@@ -11,14 +11,15 @@ import {
   AwakenButton as Button,
   AwakenDialog as Dialog,
 } from "@awaken/design-system";
-import { calculateAutoCompactThreshold } from "../shared/runtime";
+import { calculateAutoCompactThreshold } from "../../shared/runtime";
 import type {
   AwakenTheme,
   ModelProfileSaveRequest,
   ModelProvider,
   RuntimeModelProfileSummary,
-} from "../shared/runtime";
-import type { RuntimeClient } from "./runtime/client";
+} from "../../shared/runtime";
+import type { RuntimeClient } from "../runtime/client";
+import { PetsSettingsPanel } from "./PetsSettingsPanel";
 
 type DraftState = {
   profileId?: string;
@@ -36,7 +37,7 @@ type DraftState = {
 };
 
 type ModelSettingsSection = "configure" | "configured";
-type SettingsDialogSection = "models" | "appearance";
+type SettingsDialogSection = "models" | "appearance" | "pets";
 
 type ConfiguredProfileDraft = {
   enabled: boolean;
@@ -56,7 +57,7 @@ const MAX_TOKENS_MIN = 256;
 const MAX_TOKENS_MAX = 1_000_000;
 const DUPLICATE_MODEL_PROFILE_ERROR = "模型配置重复，添加失败";
 
-type ModelSettingsDialogProps = {
+type DesktopSettingsDialogProps = {
   open: boolean;
   runtimeClient: RuntimeClient;
   theme: AwakenTheme;
@@ -65,6 +66,7 @@ type ModelSettingsDialogProps = {
   onThemeChange: (theme: AwakenTheme) => void;
   onOpenChange: (open: boolean) => void;
   onProfilesChanged: () => void;
+  initialSection?: SettingsDialogSection;
 };
 
 type AppearanceSettingsProps = {
@@ -357,7 +359,7 @@ function toSaveRequest(
   };
 }
 
-export function ModelSettingsDialog({
+export function DesktopSettingsDialog({
   open,
   runtimeClient,
   theme,
@@ -366,7 +368,8 @@ export function ModelSettingsDialog({
   onThemeChange,
   onOpenChange,
   onProfilesChanged,
-}: ModelSettingsDialogProps) {
+  initialSection = "models",
+}: DesktopSettingsDialogProps) {
   const [providers, setProviders] = useState<ModelProvider[]>([]);
   const [profiles, setProfiles] = useState<RuntimeModelProfileSummary[]>([]);
   const [configuredDrafts, setConfiguredDrafts] = useState<
@@ -375,7 +378,7 @@ export function ModelSettingsDialog({
   const [activeSection, setActiveSection] =
     useState<ModelSettingsSection>("configure");
   const [activeSettingsSection, setActiveSettingsSection] =
-    useState<SettingsDialogSection>("models");
+    useState<SettingsDialogSection>(initialSection);
   const [expandedProviderId, setExpandedProviderId] = useState<string | null>(
     null,
   );
@@ -465,6 +468,7 @@ export function ModelSettingsDialog({
       setOpenModelPickerProviderId(null);
       setDraft(null);
       setActiveSection("configure");
+      setActiveSettingsSection(initialSection);
       setShowApiKey(false);
       setDeletingProfileId(null);
       setToastMessage(null);
@@ -475,7 +479,7 @@ export function ModelSettingsDialog({
       return;
     }
     void loadModelSettings();
-  }, [loadModelSettings, open]);
+  }, [loadModelSettings, open, initialSection]);
 
   useEffect(() => {
     return () => {
@@ -812,9 +816,13 @@ export function ModelSettingsDialog({
             {toastMessage}
           </div>
         ) : null}
-        <nav className="settings-dialog-nav" aria-label="Settings sections">
-          <button
-            type="button"
+        <div className="settings-dialog-sidebar">
+          <div className="settings-dialog-sidebar-title">设置</div>
+          <nav className="settings-dialog-nav" aria-label="Settings sections">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeSettingsSection === "models"}
             className={`settings-dialog-nav-item${
               activeSettingsSection === "models"
                 ? " settings-dialog-nav-item-active"
@@ -826,6 +834,8 @@ export function ModelSettingsDialog({
           </button>
           <button
             type="button"
+            role="tab"
+            aria-selected={activeSettingsSection === "appearance"}
             className={`settings-dialog-nav-item${
               activeSettingsSection === "appearance"
                 ? " settings-dialog-nav-item-active"
@@ -835,12 +845,30 @@ export function ModelSettingsDialog({
           >
             外观
           </button>
-        </nav>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeSettingsSection === "pets"}
+            className={`settings-dialog-nav-item${
+              activeSettingsSection === "pets"
+                ? " settings-dialog-nav-item-active"
+                : ""
+            }`}
+            onClick={() => setActiveSettingsSection("pets")}
+          >
+            宠物
+          </button>
+          </nav>
+        </div>
 
         <div className="model-settings">
           <div className="model-settings-toolbar">
             <h1 className="model-settings-title">
-              {activeSettingsSection === "models" ? "模型" : "外观"}
+              {activeSettingsSection === "models"
+                ? "模型"
+                : activeSettingsSection === "appearance"
+                  ? "外观"
+                  : "宠物"}
             </h1>
             {activeSettingsSection === "models" ? (
               <div
@@ -890,6 +918,8 @@ export function ModelSettingsDialog({
               themeSaving={themeSaving}
               onThemeChange={onThemeChange}
             />
+          ) : activeSettingsSection === "pets" ? (
+            <PetsSettingsPanel runtimeClient={runtimeClient} />
           ) : activeSection === "configure" ? (
             <section className="model-provider-list" aria-label="模型配置">
               {providers.map((provider) => {

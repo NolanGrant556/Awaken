@@ -126,16 +126,28 @@ func (f ExecutorFunc) Run(ctx context.Context, input string, sink agentcore.Even
 }
 
 type RunService struct {
-	mu               sync.RWMutex
-	sessions         map[string]*Session
-	threads          map[string]*Thread
-	defaultWorkspace WorkspaceConfig
-	newAgent         func(workspace WorkspaceConfig, threadID string) *agentcore.Agent
-	newProfileAgent  func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent
-	newExecutor      func(agent *agentcore.Agent) Executor
-	threadStore      ThreadStore
-	journals         *journalManager
+	mu                sync.RWMutex
+	sessions          map[string]*Session
+	threads           map[string]*Thread
+	defaultWorkspace  WorkspaceConfig
+	newAgent          func(workspace WorkspaceConfig, threadID string) *agentcore.Agent
+	newProfileAgent   func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent
+	newExecutor       func(agent *agentcore.Agent) Executor
+	threadStore       ThreadStore
+	journals          *journalManager
 	allowNoopRecorder bool
+	skillActivator    *skillruntime.Activator
+}
+
+// SetSkillActivator injects the shared SkillActivator used for explicit
+// composer-token pre-activation before the first LLM request.
+func (s *RunService) SetSkillActivator(activator *skillruntime.Activator) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.skillActivator = activator
+	s.mu.Unlock()
 }
 
 // Thread holds the reusable Agent and metadata for a multi-turn conversation.
@@ -909,6 +921,10 @@ func (s *RunService) execute(session *Session, executor Executor, agent *agentco
 	}
 	if agent != nil {
 		agent.SetPendingUserAttachments(inputAttachmentsToContextAttachments(attachments))
+		if err := s.preActivateComposerSkills(ctx, agent, snapshot); err != nil {
+			session.CompleteError(err.Error(), skillActivationErrorCode(err))
+			return
+		}
 	}
 
 	result, err := executor.Run(ctx, input, sessionEventSink{session: session})
@@ -931,38 +947,142 @@ func (s *RunService) execute(session *Session, executor Executor, agent *agentco
 	session.CompleteError(err.Error(), "")
 }
 
+func skillActivationErrorCode(err error) string {
+	var compat *skillruntime.SkillCompatibilityError
+	if errors.As(err, &compat) && compat != nil && strings.TrimSpace(compat.Code) != "" {
+		return compat.Code
+	}
+	return "skill_activation_failed"
+}
+
+func (s *RunService) preActivateComposerSkills(ctx context.Context, agent *agentcore.Agent, snapshot Run) error {
+	tokens := skillComposerTokens(snapshot.ComposerTokens)
+	if len(tokens) == 0 || agent == nil {
+		return nil
+	}
+	s.mu.RLock()
+	activator := s.skillActivator
+	s.mu.RUnlock()
+	if activator == nil {
+		return nil
+	}
+
+	parentPool := skillruntime.CurrentParentToolPool()
+	cfg := agent.GetConfig()
+	var blocks []agentcore.ContextBlock
+	effective := append([]string(nil), parentPool...)
+	recorder := agent.SemanticRecorder()
+
+	for _, token := range tokens {
+		skillID := strings.TrimSpace(firstNonEmpty(token.Payload.SkillID, token.ID))
+		if skillID == "" {
+			continue
+		}
+		if strings.HasPrefix(skillID, "skill:") {
+			parts := strings.Split(skillID, ":")
+			if len(parts) >= 2 && strings.TrimSpace(parts[1]) != "" {
+				skillID = strings.TrimSpace(parts[1])
+			}
+		}
+		plan, err := activator.Activate(skillruntime.ActivationRequest{
+			SkillID:        skillID,
+			ParentToolPool: parentPool,
+			SkipArgRender:  true,
+		})
+		if err != nil {
+			return err
+		}
+		effective = skillruntime.IntersectToolPools(effective, plan.EffectiveTools)
+		blocks = append(blocks, agentcore.ContextBlock{
+			ID:      "skill_activation_" + plan.SkillID,
+			Content: plan.MainBody,
+		})
+		if recorder != nil {
+			if err := emitSkillActivationRecords(ctx, recorder, snapshot, plan); err != nil {
+				return err
+			}
+		}
+	}
+
+	cfg.ResolvedToolPool = effective
+	cfg.SkillContextBlocks = blocks
+	agent.Reconfigure(cfg)
+	return nil
+}
+
+func emitSkillActivationRecords(ctx context.Context, recorder agentcore.SemanticRecorder, snapshot Run, plan *skillruntime.SkillActivationPlan) error {
+	if recorder == nil || plan == nil {
+		return nil
+	}
+	activated := agentcore.NewSemanticRecord(
+		agentcore.SemanticKindSkillActivated,
+		snapshot.ThreadID,
+		snapshot.RunID,
+		"",
+		"",
+		"",
+		map[string]any{
+			"skill_id":              plan.SkillID,
+			"skill_version":         plan.SkillVersion,
+			"effective_tools":       append([]string(nil), plan.EffectiveTools...),
+			"compatibility_status":  plan.CompatibilityStatus,
+			"required_tools":        append([]string(nil), plan.RequiredTools...),
+			"required_capabilities": capabilityStrings(plan.RequiredCapabilities),
+		},
+	)
+	if err := recorder.Append(ctx, activated); err != nil {
+		return err
+	}
+	for _, receipt := range plan.ResourceReceipts {
+		rec := agentcore.NewSemanticRecord(
+			agentcore.SemanticKindResourceReceipt,
+			snapshot.ThreadID,
+			snapshot.RunID,
+			"",
+			"",
+			"",
+			map[string]any{
+				"skill_id":      receipt.SkillID,
+				"skill_version": receipt.SkillVersion,
+				"resource":      receipt.Resource,
+				"source":        receipt.Source,
+				"sha256":        receipt.SHA256,
+				"size":          receipt.Size,
+				"mode":          receipt.Mode,
+				"loaded_at":     receipt.LoadedAt.UTC().Format(time.RFC3339Nano),
+			},
+		)
+		if err := recorder.Append(ctx, rec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func capabilityStrings(caps []tool.CapabilityClass) []string {
+	out := make([]string, 0, len(caps))
+	for _, c := range caps {
+		if strings.TrimSpace(string(c)) == "" {
+			continue
+		}
+		out = append(out, string(c))
+	}
+	return out
+}
+
 func effectiveInputForComposerTokens(input string, tokens []ComposerToken) string {
 	skillTokens := skillComposerTokens(tokens)
 	if len(skillTokens) == 0 {
 		return input
 	}
 
-	var b strings.Builder
-	b.WriteString("<awaken_composer_tokens>\n")
-	b.WriteString("The user selected these Skill chips in the composer. Use the matching skill tool before continuing with the task unless it is impossible.\n")
-	for _, token := range skillTokens {
-		skillID := strings.TrimSpace(firstNonEmpty(token.Payload.SkillID, token.ID))
-		if skillID == "" {
-			continue
-		}
-		b.WriteString("- skillId: ")
-		b.WriteString(skillID)
-		b.WriteString("\n  tool: ")
-		b.WriteString(skillruntime.SkillToolName(skillID))
-		if path := strings.TrimSpace(token.Payload.SkillFilePath); path != "" {
-			b.WriteString("\n  skillFilePath: ")
-			b.WriteString(path)
-		}
-		b.WriteString("\n")
-	}
-	b.WriteString("</awaken_composer_tokens>\n\n")
-	b.WriteString("User task:\n")
+	// Explicit Skill chips are host-pre-activated into typed context + tool
+	// pool. Keep the user task text unchanged; do not inject a natural-language
+	// instruction that only asks the model to call skill__xxx.
 	if strings.TrimSpace(input) != "" {
-		b.WriteString(input)
-	} else {
-		b.WriteString("Use the selected Skill to help the user.")
+		return input
 	}
-	return b.String()
+	return "Use the selected Skill to help the user."
 }
 
 func skillComposerTokens(tokens []ComposerToken) []ComposerToken {

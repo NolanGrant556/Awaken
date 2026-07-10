@@ -45,6 +45,8 @@ type ToolRuntime struct {
 	// this runtime issues so the decision layer can attribute the call to
 	// the spawning sub-agent. nil for the root agent.
 	subagentOrigin *profile.SubagentOrigin
+	// resolvedToolPool, when non-nil, is the dual-gate effective tool set.
+	resolvedToolPool map[string]bool
 	// router maps an ExecutionIntent + ExecutionProfile to the appropriate
 	// ToolExecutor (FileChainExecutor / ShellExecutor / McpExecutor /
 	// GuardianExecutor). Task 11 of "零审批自动执行策略": the Router sits
@@ -61,6 +63,9 @@ type ToolRuntimeConfig struct {
 	ServerConnected   func(serverName string) bool
 	AuditSink         tool.AuditSink
 	RunID             string
+	// ResolvedToolPool, when non-nil, is the dual-gate effective tool set.
+	// Execute rejects tool names outside this pool before GetTool.
+	ResolvedToolPool []string
 	// Profile is the unified ExecutionProfile applied to every tool call
 	// this runtime executes. When nil, the runtime falls back to
 	// profile.DefaultProfile() (WorkspaceWrite).
@@ -151,8 +156,23 @@ func NewToolRuntimeWithConfig(sink EventSink, config ToolRuntimeConfig) *ToolRun
 		profile:           execProfile,
 		subagentBoundary:  config.SubagentBoundary,
 		subagentOrigin:    config.SubagentOrigin,
+		resolvedToolPool:  toolPoolSet(config.ResolvedToolPool),
 		router:            executors.NewRouter(),
 	}
+}
+
+func toolPoolSet(names []string) map[string]bool {
+	if names == nil {
+		return nil
+	}
+	set := make(map[string]bool, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			set[name] = true
+		}
+	}
+	return set
 }
 
 // Profile returns the ExecutionProfile applied to every tool call this
@@ -160,6 +180,15 @@ func NewToolRuntimeWithConfig(sink EventSink, config ToolRuntimeConfig) *ToolRun
 // inspect or mutate it without affecting the runtime.
 func (rt *ToolRuntime) Profile() profile.ExecutionProfile {
 	return rt.profile
+}
+
+// SetResolvedToolPool updates the dual-gate tool pool for subsequent Execute
+// calls. nil clears the gate; non-nil rejects tools outside the set.
+func (rt *ToolRuntime) SetResolvedToolPool(names []string) {
+	if rt == nil {
+		return
+	}
+	rt.resolvedToolPool = toolPoolSet(names)
 }
 
 // validateSubagentBoundary is the runtime-side defense-in-depth check for
@@ -258,6 +287,19 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 			result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
 			return finalizeToolResult(result)
 		}
+	}
+
+	if rt.resolvedToolPool != nil && !rt.resolvedToolPool[call.Function.Name] {
+		denied := ToolDecision{
+			Action: ToolDecisionDeny,
+			Source: ToolDecisionSourcePolicyError,
+			Reason: fmt.Sprintf("%s: tool %q is outside the resolved skill tool pool", tool.ErrorCodeSkillToolNotAllowed, call.Function.Name),
+		}
+		result = synthesizeDeniedToolResult(result, denied)
+		result.ErrorCode = tool.ErrorCodeSkillToolNotAllowed
+		result.Outcome.ErrorCode = tool.ErrorCodeSkillToolNotAllowed
+		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
+		return finalizeToolResult(result)
 	}
 
 	selectedTool, err := tool.GetTool(call.Function.Name)

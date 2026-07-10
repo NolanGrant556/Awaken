@@ -94,15 +94,20 @@ func CreateSubagent(parent AgentConfig, spawn SpawnConfig) (AgentConfig, error) 
 	child := AgentConfig{
 		// Copy runnable fields from the parent so the child is immediately
 		// usable. The caller may override these.
-		SystemPrompt:     parent.SystemPrompt,
-		MaxThoughts:      parent.MaxThoughts,
-		ModelConfig:      parent.ModelConfig,
-		EntryPoint:       parent.EntryPoint,
-		Workspace:        parent.Workspace,
-		SkillSummary:     parent.SkillSummary,
-		AutoToolPolicy:   parent.AutoToolPolicy,
-		SubagentBoundary: &childBoundary,
-		SubagentOrigin:   childOrigin,
+		SystemPrompt:       parent.SystemPrompt,
+		MaxThoughts:        parent.MaxThoughts,
+		ModelConfig:        parent.ModelConfig,
+		EntryPoint:         parent.EntryPoint,
+		Workspace:          parent.Workspace,
+		SkillSummary:       parent.SkillSummary,
+		AutoToolPolicy:     parent.AutoToolPolicy,
+		ToolExposure:       parent.ToolExposure,
+		SkillContextBlocks: append([]ContextBlock(nil), parent.SkillContextBlocks...),
+		SubagentBoundary:   &childBoundary,
+		SubagentOrigin:     childOrigin,
+	}
+	if parent.ResolvedToolPool != nil {
+		child.ResolvedToolPool = append([]string(nil), parent.ResolvedToolPool...)
 	}
 
 	// Step 5: set the effective profile. Guardians are forced to

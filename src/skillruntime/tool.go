@@ -26,6 +26,10 @@ type SkillTool struct {
 	ArgDefs      []SkillArgDef
 	Executor     SkillExecutor
 	AllowFork    bool
+	Activator    *Activator
+	ParentPool   func() []string
+	OnActivated  func(plan *SkillActivationPlan)
+	lastPlan     *SkillActivationPlan
 	// FetchBody is called to obtain the prompt template body at execution
 	// time. Set for MCP-bridged skills whose Body is empty at registration
 	// time (prompts/list only returns metadata, not the template).
@@ -74,12 +78,41 @@ func (st *SkillTool) Parameters() []tool.ToolParameter {
 	return params
 }
 
-// Execute implements tool.Tool. Parses JSON input, fetches the prompt body
-// for MCP-bridged skills, substitutes arguments, and delegates to the executor.
+// Execute implements tool.Tool. Parses JSON input, activates the skill via
+// SkillActivator when available, and delegates to the executor.
 func (st *SkillTool) Execute(ctx context.Context, input string) (string, error) {
 	args, err := parseSkillArgs(input, st.ArgDefs)
 	if err != nil {
 		return "", fmt.Errorf("skill %q parse args: %w", st.SkillID, err)
+	}
+
+	if st.Activator != nil {
+		var parentPool []string
+		if st.ParentPool != nil {
+			parentPool = st.ParentPool()
+		} else {
+			parentPool = CurrentParentToolPool()
+		}
+		plan, activateErr := st.Activator.Activate(ActivationRequest{
+			SkillID:        st.SkillID,
+			ParentToolPool: parentPool,
+			Args:           args,
+		})
+		if activateErr != nil {
+			st.lastPlan = plan
+			if plan != nil && st.OnActivated != nil {
+				st.OnActivated(plan)
+			}
+			return "", activateErr
+		}
+		st.lastPlan = plan
+		if st.OnActivated != nil {
+			st.OnActivated(plan)
+		}
+		if st.Executor == nil {
+			return plan.MainBody, nil
+		}
+		return st.Executor.Execute(ctx, st.SkillID, plan.MainBody, append([]string(nil), plan.EffectiveTools...))
 	}
 
 	body := st.Body
@@ -102,6 +135,42 @@ func (st *SkillTool) Execute(ctx context.Context, input string) (string, error) 
 		return fmt.Sprintf("[skill %q] body after substitution:\n%s", st.SkillID, body), nil
 	}
 	return st.Executor.Execute(ctx, st.SkillID, body, append([]string(nil), st.AllowedTools...))
+}
+
+// LastActivationPlan returns the plan produced by the most recent Execute.
+func (st *SkillTool) LastActivationPlan() *SkillActivationPlan {
+	if st == nil {
+		return nil
+	}
+	return st.lastPlan
+}
+
+// ResolvedToolPoolAfterExecute exposes the effective tool pool for the dual
+// gate after a successful activation.
+func (st *SkillTool) ResolvedToolPoolAfterExecute() []string {
+	if st == nil || st.lastPlan == nil {
+		return nil
+	}
+	if st.lastPlan.CompatibilityStatus != CompatibilityOK {
+		return nil
+	}
+	return append([]string(nil), st.lastPlan.EffectiveTools...)
+}
+
+// LastActivationMainBody returns the host-loaded skill body from the last plan.
+func (st *SkillTool) LastActivationMainBody() string {
+	if st == nil || st.lastPlan == nil {
+		return ""
+	}
+	return st.lastPlan.MainBody
+}
+
+// LastActivationSkillID returns the skill id from the last plan.
+func (st *SkillTool) LastActivationSkillID() string {
+	if st == nil || st.lastPlan == nil {
+		return st.SkillID
+	}
+	return st.lastPlan.SkillID
 }
 
 // IsReadOnly implements tool.ReadOnlyTool. Skills are considered read-only
@@ -142,9 +211,8 @@ func (st *SkillTool) renderBodyWithPackageContext(body string) string {
 		return body
 	}
 	return fmt.Sprintf(
-		"Base directory for this skill: %s\nUse skill_resource_read with skill_id %q and a relative path to read bundled references, scripts, or assets from this directory.\n\n%s",
+		"Base directory for this skill: %s\nRequired and preload resources are host-loaded when the skill activator is used. Use skill_resource_read only for optional on-demand package files.\n\n%s",
 		st.RootDir,
-		st.SkillID,
 		body,
 	)
 }

@@ -181,8 +181,8 @@ describe("PetsSettingsPanel", () => {
 
     expect(html).toContain("宠物");
     expect(html).toContain("唤醒宠物");
-    expect(html).toContain("收起宠物");
+    expect(html).toContain("当前选择的宠物");
     expect(html).toContain("刷新 Codex 宠物");
-    expect(html).toContain("创建自己的宠物");
+    expect(html).not.toContain("创建自己的宠物");
   });
 });

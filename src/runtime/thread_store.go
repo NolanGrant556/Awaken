@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -11,7 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"awaken/src/context"
+	"awaken/src/agentcore"
+	convcontext "awaken/src/context"
 	"awaken/src/desktopdata"
 
 	_ "modernc.org/sqlite"
@@ -20,7 +22,7 @@ import (
 type ThreadStore interface {
 	CreateThread(snapshot ThreadSnapshot, modelProfileKey, preview string) error
 	AppendRunInput(snapshot ThreadSnapshot, run Run, sessionID string, input string, attachments []RunInputAttachment) error
-	AppendConversation(snapshot ThreadSnapshot, run Run, messages []context.Message) error
+	AppendConversation(snapshot ThreadSnapshot, run Run, messages []convcontext.Message) error
 	AppendRunEvents(snapshot ThreadSnapshot, run Run, events []Event) error
 	ListThreads() ([]ThreadSnapshot, error)
 	RestoreThread(threadID string) (storedThreadRecord, restoredTranscript, error)
@@ -58,9 +60,17 @@ func (s *sqliteThreadStore) CreateThread(snapshot ThreadSnapshot, modelProfileKe
 }
 
 func (s *sqliteThreadStore) AppendRunInput(snapshot ThreadSnapshot, run Run, sessionID string, input string, attachments []RunInputAttachment) error {
-	if err := appendUserTranscriptRecordAtPath(s.paths.ThreadTranscriptPath(run.ThreadID), run, sessionID, input, attachments); err != nil {
+	path := s.paths.ThreadTranscriptPath(run.ThreadID)
+	schema, err := DetectJournalSchema(path)
+	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	if schema == 1 {
+		if err := appendUserTranscriptRecordAtPath(path, run, sessionID, input, attachments); err != nil {
+			return err
+		}
+	}
+	// v2: durable user_message is written by Agent/SemanticRecorder before the first LLM call.
 	next := snapshot
 	next.RunID = run.RunID
 	next.UpdatedAt = maxTime(next.UpdatedAt, run.UpdatedAt, run.CreatedAt)
@@ -71,8 +81,20 @@ func (s *sqliteThreadStore) AppendRunInput(snapshot ThreadSnapshot, run Run, ses
 	return s.upsertThread(next, "", preview)
 }
 
-func (s *sqliteThreadStore) AppendConversation(snapshot ThreadSnapshot, run Run, messages []context.Message) error {
-	if err := appendConversationTranscriptAtPath(s.paths.ThreadTranscriptPath(run.ThreadID), run, messages); err != nil {
+func (s *sqliteThreadStore) AppendConversation(snapshot ThreadSnapshot, run Run, messages []convcontext.Message) error {
+	path := s.paths.ThreadTranscriptPath(run.ThreadID)
+	schema, err := DetectJournalSchema(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if schema == agentcore.SemanticSchemaVersion {
+		// v2 journal already stores conversation facts via SemanticRecorder.
+		next := snapshot
+		next.RunID = run.RunID
+		next.UpdatedAt = maxTime(next.UpdatedAt, run.UpdatedAt, run.CreatedAt)
+		return s.upsertThread(next, "", "")
+	}
+	if err := appendConversationTranscriptAtPath(path, run, messages); err != nil {
 		return err
 	}
 	next := snapshot
@@ -82,7 +104,18 @@ func (s *sqliteThreadStore) AppendConversation(snapshot ThreadSnapshot, run Run,
 }
 
 func (s *sqliteThreadStore) AppendRunEvents(snapshot ThreadSnapshot, run Run, events []Event) error {
-	if err := appendRunEventTranscriptAtPath(s.paths.ThreadTranscriptPath(run.ThreadID), run, events); err != nil {
+	path := s.paths.ThreadTranscriptPath(run.ThreadID)
+	schema, err := DetectJournalSchema(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if schema == agentcore.SemanticSchemaVersion {
+		next := snapshot
+		next.RunID = run.RunID
+		next.UpdatedAt = maxTime(next.UpdatedAt, run.UpdatedAt, run.CreatedAt)
+		return s.upsertThread(next, "", "")
+	}
+	if err := appendRunEventTranscriptAtPath(path, run, events); err != nil {
 		return err
 	}
 	next := snapshot
@@ -125,12 +158,34 @@ func (s *sqliteThreadStore) RestoreThread(threadID string) (storedThreadRecord, 
 	if err != nil {
 		return storedThreadRecord{}, restoredTranscript{}, err
 	}
-	restored, err := loadRestoredTranscriptAtPath(s.paths.ThreadTranscriptPath(threadID))
+	path := s.paths.ThreadTranscriptPath(threadID)
+	schema, err := DetectJournalSchema(path)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, ErrThreadNotFound) || errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, ErrThreadNotFound) || errors.Is(err, os.ErrNotExist) || os.IsNotExist(err) {
 			return storedThreadRecord{}, restoredTranscript{}, ErrThreadNotFound
 		}
 		return storedThreadRecord{}, restoredTranscript{}, err
+	}
+	var restored restoredTranscript
+	if schema == agentcore.SemanticSchemaVersion {
+		records, _, loadErr := loadSemanticRecordsForThread(path)
+		if loadErr != nil {
+			return storedThreadRecord{}, restoredTranscript{}, loadErr
+		}
+		journal, jerr := NewExecutionJournal(path, threadID)
+		if jerr == nil {
+			records, _ = recoverOrphanRuns(context.Background(), journal, records)
+			_ = journal.Close()
+		}
+		restored = restoredTranscriptFromSemantic(records)
+	} else {
+		restored, err = loadRestoredTranscriptAtPath(path)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) || errors.Is(err, ErrThreadNotFound) || errors.Is(err, os.ErrNotExist) {
+				return storedThreadRecord{}, restoredTranscript{}, ErrThreadNotFound
+			}
+			return storedThreadRecord{}, restoredTranscript{}, err
+		}
 	}
 	if record.Snapshot.Label == "" {
 		record.Snapshot.Label = restored.Label
@@ -149,24 +204,68 @@ func (s *sqliteThreadStore) GetTranscript(threadID string) (ThreadTranscript, er
 	if err != nil {
 		return ThreadTranscript{}, err
 	}
-	restored, err := loadRestoredTranscriptAtPath(s.paths.ThreadTranscriptPath(threadID))
+	path := s.paths.ThreadTranscriptPath(threadID)
+	schema, err := DetectJournalSchema(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) || os.IsNotExist(err) {
+			return ThreadTranscript{}, ErrThreadNotFound
+		}
+		return ThreadTranscript{}, err
+	}
+
+	if schema == agentcore.SemanticSchemaVersion {
+		records, _, loadErr := loadSemanticRecordsForThread(path)
+		if loadErr != nil {
+			return ThreadTranscript{}, loadErr
+		}
+		restored := restoredTranscriptFromSemantic(records)
+		runs := durableRunsFromSemanticRecords(threadID, records)
+		snapshot := record.Snapshot
+		if snapshot.Label == "" {
+			snapshot.Label = restored.Label
+		}
+		if snapshot.CreatedAt.IsZero() {
+			snapshot.CreatedAt = restored.CreatedAt
+		}
+		if snapshot.UpdatedAt.IsZero() {
+			snapshot.UpdatedAt = restored.UpdatedAt
+		}
+		if snapshot.RunID == "" && len(restored.RunIDs) > 0 {
+			snapshot.RunID = restored.RunIDs[len(restored.RunIDs)-1]
+		}
+		ordered := make([]ThreadTranscriptRun, 0, len(restored.RunIDs))
+		for _, runID := range restored.RunIDs {
+			if durable, ok := runs[runID]; ok {
+				ordered = append(ordered, durable)
+			}
+		}
+		return ThreadTranscript{Thread: snapshot, Runs: ordered}, nil
+	}
+
+	restored, err := loadRestoredTranscriptAtPath(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return ThreadTranscript{}, ErrThreadNotFound
 		}
 		return ThreadTranscript{}, err
 	}
-	durableRuns, err := loadDurableTranscriptRunsAtPath(s.paths.ThreadTranscriptPath(threadID), threadID)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return ThreadTranscript{}, ErrThreadNotFound
+	// Project v1 message-layer tool facts into semantic events for replay.
+	semanticRecords, _ := (LegacyTranscriptAdapter{}).ReadFile(path)
+	runs := durableRunsFromSemanticRecords(threadID, semanticRecords)
+	if len(runs) == 0 {
+		durableRuns, derr := loadDurableTranscriptRunsAtPath(path, threadID)
+		if derr != nil {
+			if errors.Is(derr, os.ErrNotExist) {
+				return ThreadTranscript{}, ErrThreadNotFound
+			}
+			return ThreadTranscript{}, derr
 		}
-		return ThreadTranscript{}, err
+		runs = durableRuns
 	}
-	runs := make([]ThreadTranscriptRun, 0, len(restored.RunIDs))
+	ordered := make([]ThreadTranscriptRun, 0, len(restored.RunIDs))
 	for _, runID := range restored.RunIDs {
-		if durable, ok := durableRuns[runID]; ok {
-			runs = append(runs, durable)
+		if durable, ok := runs[runID]; ok {
+			ordered = append(ordered, durable)
 		}
 	}
 	snapshot := record.Snapshot
@@ -184,7 +283,7 @@ func (s *sqliteThreadStore) GetTranscript(threadID string) (ThreadTranscript, er
 	}
 	return ThreadTranscript{
 		Thread: snapshot,
-		Runs:   runs,
+		Runs:   ordered,
 	}, nil
 }
 
@@ -201,9 +300,17 @@ func (s *sqliteThreadStore) RenameThread(threadID, label string, updatedAt time.
 	if record.Snapshot.Label == "" {
 		return ThreadSnapshot{}, ErrThreadLabelInvalid
 	}
-	if err := appendThreadLabelTranscriptRecordAtPath(s.paths.ThreadTranscriptPath(threadID), threadID, record.Snapshot.Label, updatedAt); err != nil {
+	path := s.paths.ThreadTranscriptPath(threadID)
+	schema, err := DetectJournalSchema(path)
+	if err != nil && !os.IsNotExist(err) {
 		return ThreadSnapshot{}, err
 	}
+	if schema == 1 {
+		if err := appendThreadLabelTranscriptRecordAtPath(path, threadID, record.Snapshot.Label, updatedAt); err != nil {
+			return ThreadSnapshot{}, err
+		}
+	}
+	// v2 label updates are reflected in SQLite metadata; journal thread records remain append-only.
 	if err := s.upsertThread(record.Snapshot, record.ModelProfileKey, ""); err != nil {
 		return ThreadSnapshot{}, err
 	}

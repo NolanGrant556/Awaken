@@ -32,6 +32,9 @@ function hasTextMessageEvents(events: AguiEvent[]): boolean {
   );
 }
 
+// Compatibility fallback for v1 transcripts that persisted run.result but
+// omitted final TEXT_MESSAGE_* events. Do not synthesize ToolCall/ToolResult
+// or Artifact facts here — those must come from the server SemanticProjector.
 function syntheticResultEvents(
   run: RuntimeThreadTranscript["runs"][number]["run"],
 ): AguiEvent[] {

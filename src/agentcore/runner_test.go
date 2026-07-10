@@ -1878,7 +1878,7 @@ func TestRunEventEmitterRunErroredSetsRequestFailedCode(t *testing.T) {
 	}))
 
 	wrapped := fmt.Errorf("%w: status 500", llm.ErrRequestFailed)
-	emitter.runErrored(wrapped)
+	emitter.runErrored(context.Background(), wrapped)
 
 	if len(gotEvents) != 1 {
 		t.Fatalf("expected 1 event, got %d: %+v", len(gotEvents), gotEvents)
@@ -1902,7 +1902,7 @@ func TestRunEventEmitterRunErroredTransportErrorDoesNotLeakURL(t *testing.T) {
 
 	// Simulate a sanitized transport error as produced by llm.transportError.
 	wrapped := fmt.Errorf("LLM stream call failed: %w", fmt.Errorf("%w: transport error", llm.ErrRequestFailed))
-	emitter.runErrored(wrapped)
+	emitter.runErrored(context.Background(), wrapped)
 
 	if len(gotEvents) != 1 {
 		t.Fatalf("expected 1 event, got %d: %+v", len(gotEvents), gotEvents)
@@ -1931,7 +1931,7 @@ func TestRunEventEmitterRunErroredSetsRunCancelledCode(t *testing.T) {
 		gotEvents = append(gotEvents, event)
 	}))
 
-	emitter.runErrored(context.Canceled, TerminalReasonCancelled)
+	emitter.runErrored(context.Background(), context.Canceled, TerminalReasonCancelled)
 
 	if len(gotEvents) != 1 {
 		t.Fatalf("expected 1 event, got %d: %+v", len(gotEvents), gotEvents)

@@ -159,9 +159,24 @@ func (r *SkillRegistry) reevaluateAvailabilityForLocked(defs map[string]*SkillDe
 		if strings.HasSuffix(id, "__shadowed") {
 			continue
 		}
+		// Platform-contract conflicts are sticky until the package changes.
+		if def.UnavailableCode == ErrorCodePlatformContractConflict {
+			def.State = StateUnavailable
+			if strings.TrimSpace(def.UnavailableReason) == "" {
+				def.UnavailableReason = ErrorCodePlatformContractConflict
+			}
+			continue
+		}
+		if conflicts := DetectPlatformContractConflicts(def); len(conflicts) > 0 {
+			def.State = StateUnavailable
+			def.UnavailableCode = ErrorCodePlatformContractConflict
+			def.UnavailableReason = FormatPlatformConflictReason(conflicts)
+			continue
+		}
 		if len(def.RequiredConnectors) == 0 && len(def.RequiredMcpServers) == 0 {
 			def.State = StateAvailable
 			def.UnavailableReason = ""
+			def.UnavailableCode = ""
 			continue
 		}
 		var reasons []string
@@ -176,9 +191,11 @@ func (r *SkillRegistry) reevaluateAvailabilityForLocked(defs map[string]*SkillDe
 		if len(reasons) > 0 {
 			def.State = StateUnavailable
 			def.UnavailableReason = stringsJoin(reasons, "; ")
+			def.UnavailableCode = ""
 		} else {
 			def.State = StateAvailable
 			def.UnavailableReason = ""
+			def.UnavailableCode = ""
 		}
 	}
 }

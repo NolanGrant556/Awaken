@@ -13,6 +13,7 @@ import (
 	"awaken/src/context"
 	"awaken/src/internal/outputlimit"
 	"awaken/src/llm"
+	"awaken/src/tool"
 )
 
 const (
@@ -226,12 +227,17 @@ func (r *Runner) injectSyntheticToolResultsForCancel() {
 }
 
 func toolRuntimeConfigFromAgentConfig(config AgentConfig) ToolRuntimeConfig {
+	var pool []string
+	if config.ResolvedToolPool != nil {
+		pool = append([]string(nil), config.ResolvedToolPool...)
+	}
 	return ToolRuntimeConfig{
 		PermissionContext: permissionContextFromTaskScope(config.Workspace),
 		AutoToolPolicy:    config.AutoToolPolicy,
 		Profile:           config.ExecutionProfile,
 		SubagentBoundary:  config.SubagentBoundary,
 		SubagentOrigin:    config.SubagentOrigin,
+		ResolvedToolPool:  pool,
 	}
 }
 
@@ -351,6 +357,7 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 		if events != nil {
 			r.toolRuntime.sink = events.sink
 		}
+		r.applyImplicitSkillActivation(call.Function.Name, result)
 		results = append(results, result)
 		if events != nil && call.Function.Name == "apply_patch" && !result.IsError {
 			events.markMutation()
@@ -379,6 +386,39 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 		}
 	}
 	return results
+}
+
+type skillPoolProvider interface {
+	ResolvedToolPoolAfterExecute() []string
+	LastActivationMainBody() string
+	LastActivationSkillID() string
+}
+
+func (r *Runner) applyImplicitSkillActivation(toolName string, result ToolExecutionResult) {
+	if r == nil || result.IsError || !strings.HasPrefix(toolName, "skill__") {
+		return
+	}
+	selected, err := tool.GetTool(toolName)
+	if err != nil {
+		return
+	}
+	provider, ok := selected.(skillPoolProvider)
+	if !ok {
+		return
+	}
+	pool := provider.ResolvedToolPoolAfterExecute()
+	if pool == nil {
+		return
+	}
+	r.config.ResolvedToolPool = append([]string(nil), pool...)
+	if body := strings.TrimSpace(provider.LastActivationMainBody()); body != "" {
+		r.config.SkillContextBlocks = append(r.config.SkillContextBlocks, ContextBlock{
+			ID:      "skill_activation_" + provider.LastActivationSkillID(),
+			Content: body,
+		})
+	}
+	r.reqBuilder = NewRequestBuilder(r.config)
+	r.toolRuntime.SetResolvedToolPool(pool)
 }
 
 func (r *Runner) stopAfterToolExchangeIfNeeded(ctx stdcontext.Context, events *runEventEmitter, turnIndex int) (bool, error) {

@@ -3,6 +3,7 @@ package agentcore
 import (
 	"awaken/src/context"
 	stdcontext "context"
+	"strings"
 )
 
 type Agent struct {
@@ -56,6 +57,39 @@ func (a *Agent) GetConfig() AgentConfig {
 func (a *Agent) Reconfigure(config AgentConfig) {
 	a.config = config
 	a.reqBuilder = NewRequestBuilder(config)
+}
+
+// ApplySkillActivationPlan narrows the dual-gate tool pool and appends the
+// skill's typed context block. Used after explicit or implicit activation.
+func (a *Agent) ApplySkillActivationPlan(skillID string, effectiveTools []string, mainBody string) {
+	if a == nil {
+		return
+	}
+	cfg := a.config
+	if effectiveTools != nil {
+		if cfg.ResolvedToolPool == nil {
+			cfg.ResolvedToolPool = append([]string(nil), effectiveTools...)
+		} else {
+			set := make(map[string]bool, len(effectiveTools))
+			for _, name := range effectiveTools {
+				set[name] = true
+			}
+			next := make([]string, 0, len(cfg.ResolvedToolPool))
+			for _, name := range cfg.ResolvedToolPool {
+				if set[name] {
+					next = append(next, name)
+				}
+			}
+			cfg.ResolvedToolPool = next
+		}
+	}
+	if strings.TrimSpace(mainBody) != "" {
+		cfg.SkillContextBlocks = append(cfg.SkillContextBlocks, ContextBlock{
+			ID:      "skill_activation_" + skillID,
+			Content: mainBody,
+		})
+	}
+	a.Reconfigure(cfg)
 }
 
 // SetSemanticRecorder injects the per-thread durable journal writer.

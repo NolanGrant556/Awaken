@@ -3379,7 +3379,7 @@ export function App() {
     }
     const output = firstContentLine(tool.commandOutput);
     const result = firstContentLine(tool.content);
-    if (tool.status === "done" || tool.status === "error") {
+    if (tool.status && tool.status !== "active") {
       return result || output || fallback;
     }
     return output || fallback || result;

@@ -57,11 +57,7 @@ func (e *GuardianExecutor) Execute(
 		return deniedOutput("guardian_network_violation",
 			fmt.Sprintf("guardian profile requires restricted network but tool is OpenWorld under policy %q", execProfile.NetworkPolicy))
 	}
-	content, err := executeWithObserver(ctx, t, input, observer)
-	if err != nil {
-		return ToolExecutionOutput{}, err
-	}
-	return ToolExecutionOutput{Content: content}, nil
+	return executeWithObserver(ctx, t, input, observer)
 }
 
 // enforceReadOnly denies tools that are not declared read-only. A tool is

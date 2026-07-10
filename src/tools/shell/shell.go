@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,8 @@ type shellParams struct {
 }
 
 type shellResult struct {
+	Command    string `json:"command"`
+	Cwd        string `json:"cwd,omitempty"`
 	ExitCode   int    `json:"exit_code"`
 	TimedOut   bool   `json:"timed_out"`
 	DurationMS int64  `json:"duration_ms"`
@@ -114,27 +117,79 @@ func (t *ShellTool) CheckPermission(ctx context.Context, input string, permissio
 }
 
 func (t *ShellTool) Execute(ctx context.Context, input string) (string, error) {
-	return t.execute(ctx, input, nil)
+	outcome, err := t.ExecuteOutcome(ctx, input, nil)
+	return outcome.Content, err
 }
 
 func (t *ShellTool) ExecuteWithObserver(ctx context.Context, input string, observer tool.ToolObserver) (string, error) {
-	return t.execute(ctx, input, observer)
+	outcome, err := t.ExecuteOutcome(ctx, input, observer)
+	return outcome.Content, err
 }
 
-func (t *ShellTool) execute(ctx context.Context, input string, observer tool.ToolObserver) (string, error) {
+func (t *ShellTool) DescribeActivity(input string) tool.ToolActivity {
 	params, err := parseParams(input)
 	if err != nil {
-		return "", err
+		return tool.ToolActivity{Stage: "started", Title: "正在执行 shell"}
+	}
+	command := redactShellSecrets(strings.TrimSpace(params.Command))
+	if title, detail, ok := installActivity(command); ok {
+		return tool.ToolActivity{Stage: "started", Title: title, Detail: detail}
+	}
+	detail := command
+	if len([]rune(detail)) > 160 {
+		detail = string([]rune(detail)[:160]) + "…"
+	}
+	return tool.ToolActivity{
+		Stage:  "started",
+		Title:  "正在执行命令",
+		Detail: detail,
+	}
+}
+
+func (t *ShellTool) ExecuteOutcome(ctx context.Context, input string, observer tool.ToolObserver) (tool.ExecutionOutcome, error) {
+	started := time.Now().UTC()
+	params, err := parseParams(input)
+	if err != nil {
+		outcome := tool.FailedOutcome(err.Error(), tool.ErrorCodeValidationError, tool.ErrorCategoryValidation, false)
+		return outcome.WithTiming(started, time.Now().UTC()), nil
 	}
 
 	permissionContext := tool.PermissionContextFromContext(ctx)
+	cwd := resolveExecutorCwd(params.Workdir, permissionContext)
 	executor := NewShellExecutor()
 	result, err := executor.Execute(ctx, params, permissionContext, observer)
+	finished := time.Now().UTC()
 	if err != nil {
-		return "", err
+		msg := err.Error()
+		outcome := tool.ExecutionOutcome{
+			Content:         msg,
+			Status:          tool.OutcomeFailed,
+			TransportStatus: tool.TransportFailed,
+			SemanticStatus:  tool.SemanticFailure,
+			ProcessStatus:   tool.ProcessSpawnFailed,
+			ErrorCode:       tool.ErrorCodeProcessSpawnFailed,
+			ErrorCategory:   tool.ErrorCategoryProcess,
+			ErrorMessage:    msg,
+			Retryable:       true,
+			Diagnostic: map[string]any{
+				"command": redactShellSecrets(params.Command),
+				"cwd":     cwd,
+			},
+		}
+		if strings.Contains(strings.ToLower(msg), "denied") || strings.Contains(msg, "policy") {
+			outcome.Status = tool.OutcomeDenied
+			outcome.TransportStatus = tool.TransportNotStarted
+			outcome.ProcessStatus = tool.ProcessNotApplicable
+			outcome.ErrorCode = tool.ErrorCodeToolDenied
+			outcome.ErrorCategory = tool.ErrorCategoryPolicy
+			outcome.Retryable = false
+		}
+		return outcome.WithTiming(started, finished), nil
 	}
 
 	shellRes := shellResult{
+		Command:    redactShellSecrets(params.Command),
+		Cwd:        cwd,
 		ExitCode:   result.ExitCode,
 		TimedOut:   result.TimedOut,
 		DurationMS: result.DurationMS,
@@ -142,11 +197,143 @@ func (t *ShellTool) execute(ctx context.Context, input string, observer tool.Too
 		Stderr:     result.Stderr,
 		Truncated:  result.Truncated,
 	}
-	data, err := json.MarshalIndent(shellRes, "", "  ")
-	if err != nil {
-		return "", err
+	data, marshalErr := json.MarshalIndent(shellRes, "", "  ")
+	if marshalErr != nil {
+		return tool.ExecutionOutcome{}, marshalErr
 	}
-	return string(data), nil
+	content := string(data)
+	exitCode := result.ExitCode
+	outcome := tool.ExecutionOutcome{
+		Content:    content,
+		ExitCode:   &exitCode,
+		TimedOut:   result.TimedOut,
+		Truncated:  result.Truncated,
+		DurationMs: result.DurationMS,
+		Diagnostic: map[string]any{
+			"command": shellRes.Command,
+			"cwd":     cwd,
+			"stdout":  result.Stdout,
+			"stderr":  result.Stderr,
+		},
+	}
+
+	switch {
+	case result.TimedOut:
+		outcome.Status = tool.OutcomeFailed
+		outcome.TransportStatus = tool.TransportFailed
+		outcome.SemanticStatus = tool.SemanticFailure
+		outcome.ProcessStatus = tool.ProcessTimedOut
+		outcome.ErrorCode = tool.ErrorCodeProcessTimeout
+		outcome.ErrorCategory = tool.ErrorCategoryProcess
+		outcome.ErrorMessage = "command timed out"
+		outcome.Retryable = true
+		outcome.RecoveryOptions = []string{"increase_timeout", "change_command"}
+	case result.ExitCode == 0:
+		outcome.Status = tool.OutcomeSucceeded
+		outcome.TransportStatus = tool.TransportCompleted
+		outcome.SemanticStatus = tool.SemanticSuccess
+		outcome.ProcessStatus = tool.ProcessExited
+	default:
+		if reason, ok := neutralNonzeroReason(params.Command, result.ExitCode); ok {
+			outcome.Status = tool.OutcomeSucceeded
+			outcome.TransportStatus = tool.TransportCompleted
+			outcome.SemanticStatus = tool.SemanticNeutral
+			outcome.ProcessStatus = tool.ProcessExited
+			outcome.Diagnostic["reason"] = reason
+		} else {
+			outcome.Status = tool.OutcomeFailed
+			outcome.TransportStatus = tool.TransportCompleted
+			outcome.SemanticStatus = tool.SemanticFailure
+			outcome.ProcessStatus = tool.ProcessExited
+			outcome.ErrorCode = tool.ErrorCodeProcessExitNonzero
+			outcome.ErrorCategory = tool.ErrorCategoryProcess
+			outcome.ErrorMessage = fmt.Sprintf("process exited with code %d", result.ExitCode)
+			outcome.Retryable = true
+			outcome.RecoveryOptions = []string{"inspect_exit_code_and_stderr", "change_command_or_stop"}
+		}
+	}
+	return outcome.WithTiming(started, finished), nil
+}
+
+func installActivity(command string) (title, detail string, ok bool) {
+	lower := strings.ToLower(command)
+	switch {
+	case strings.Contains(lower, "python -m pip install"), strings.Contains(lower, "pip install"), strings.Contains(lower, "pip3 install"):
+		return "正在安装依赖", redactShellSecrets(command), true
+	case strings.Contains(lower, "npm install"), strings.Contains(lower, "npm i "):
+		return "正在安装依赖", redactShellSecrets(command), true
+	case strings.Contains(lower, "pnpm install"), strings.Contains(lower, "pnpm add"):
+		return "正在安装依赖", redactShellSecrets(command), true
+	case strings.Contains(lower, "yarn add"), strings.Contains(lower, "yarn install"):
+		return "正在安装依赖", redactShellSecrets(command), true
+	case strings.Contains(lower, "brew install"):
+		return "正在安装依赖", redactShellSecrets(command), true
+	case strings.Contains(lower, "winget install"):
+		return "正在安装依赖", redactShellSecrets(command), true
+	default:
+		return "", "", false
+	}
+}
+
+func neutralNonzeroReason(command string, exitCode int) (string, bool) {
+	if exitCode != 1 {
+		return "", false
+	}
+	segments := splitCompoundSegments(command)
+	if len(segments) != 1 {
+		return "", false
+	}
+	tokens := shellTokens(segments[0])
+	if len(tokens) == 0 {
+		return "", false
+	}
+	base := strings.ToLower(filepath.Base(tokens[0]))
+	switch base {
+	case "rg", "grep", "egrep", "fgrep":
+		return "no_match", true
+	case "diff":
+		return "different", true
+	case "test", "[":
+		return "false_condition", true
+	default:
+		return "", false
+	}
+}
+
+func redactShellSecrets(command string) string {
+	redacted := command
+	patterns := []struct {
+		prefix string
+		minLen int
+	}{
+		{"sk-", 8},
+		{"ak-", 8},
+		{"Bearer ", 8},
+	}
+	for _, pattern := range patterns {
+		for {
+			idx := strings.Index(redacted, pattern.prefix)
+			if idx < 0 {
+				break
+			}
+			start := idx + len(pattern.prefix)
+			end := start
+			for end < len(redacted) {
+				ch := redacted[end]
+				if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' {
+					end++
+					continue
+				}
+				break
+			}
+			if end-start >= pattern.minLen {
+				redacted = redacted[:start] + "[redacted]" + redacted[end:]
+			} else {
+				break
+			}
+		}
+	}
+	return redacted
 }
 
 type shellOutputWriter struct {

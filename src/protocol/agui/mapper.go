@@ -133,7 +133,14 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.ToolCallID = event.ToolCallID
 		base.ToolCallName = event.ToolName
 		base.Progress = event.Progress
-		base.Message = event.Progress
+		if base.Progress == "" {
+			base.Progress = event.ToolProgressMessage
+		}
+		base.Message = firstNonEmpty(event.ToolProgressMessage, event.Progress)
+		base.ToolProgressStage = event.ToolProgressStage
+		base.ToolProgressMessage = event.ToolProgressMessage
+		base.ToolProgressPercentage = event.ToolProgressPercentage
+		copyToolOutcomeFields(&base, event)
 		return []Event{base}
 	case agentcore.ToolPermissionDecidedEventType:
 		base.Type = EventAwakenToolPermissionDecided
@@ -167,6 +174,10 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		// event. Propagate them here so the Desktop UI can surface the
 		// "Deleted file moved to recycle bin" notification.
 		base.TrashedPaths = event.TrashedPaths
+		base.ToolProgressStage = event.ToolProgressStage
+		base.ToolProgressMessage = event.ToolProgressMessage
+		base.ToolProgressPercentage = event.ToolProgressPercentage
+		copyToolOutcomeFields(&base, event)
 		if base.Role == "" {
 			base.Role = "tool"
 		}
@@ -335,6 +346,29 @@ func cloneBoolPointer(value *bool) *bool {
 	}
 	cloned := *value
 	return &cloned
+}
+
+func copyToolOutcomeFields(dst *Event, event agentcore.AwakenEvent) {
+	dst.ToolStatus = event.ToolStatus
+	dst.TransportStatus = event.TransportStatus
+	dst.SemanticStatus = event.SemanticStatus
+	dst.ProcessStatus = event.ProcessStatus
+	dst.ProcessExitCode = cloneIntPointer(event.ProcessExitCode)
+	dst.ProcessTimedOut = event.ProcessTimedOut
+	dst.ErrorCode = event.ErrorCode
+	dst.ErrorCategory = event.ErrorCategory
+	dst.Retryable = event.Retryable
+	dst.RecoveryOptions = append([]string(nil), event.RecoveryOptions...)
+	dst.DurationMs = event.DurationMs
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func toUnixMillis(ts time.Time) int64 {

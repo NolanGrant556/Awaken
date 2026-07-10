@@ -1,8 +1,24 @@
 import "./AwakenToolTraceLine.css";
-import { AlertCircle, Check, LoaderCircle } from "lucide-react";
+import {
+  AlertCircle,
+  Ban,
+  Check,
+  CircleSlash,
+  LoaderCircle,
+  OctagonX,
+  ShieldOff,
+} from "lucide-react";
 import { useId, useState, type ReactNode } from "react";
 
-export type ToolTraceStatus = "active" | "done" | "error";
+export type ToolTraceStatus =
+  | "active"
+  | "done"
+  | "error"
+  | "denied"
+  | "cancelled"
+  | "interrupted"
+  | "blocked"
+  | "unsupported";
 
 export type AwakenToolTraceLineProps = {
   title: string;
@@ -16,13 +32,24 @@ const COLLAPSIBLE_DETAIL_CHAR_LIMIT = 420;
 const COLLAPSIBLE_DETAIL_LINE_LIMIT = 6;
 
 function statusIcon(status: ToolTraceStatus) {
-  if (status === "active") {
-    return <LoaderCircle size={14} strokeWidth={2.1} aria-hidden="true" />;
+  switch (status) {
+    case "active":
+      return <LoaderCircle size={14} strokeWidth={2.1} aria-hidden="true" />;
+    case "error":
+      return <AlertCircle size={14} strokeWidth={2.1} aria-hidden="true" />;
+    case "denied":
+      return <Ban size={14} strokeWidth={2.1} aria-hidden="true" />;
+    case "cancelled":
+      return <CircleSlash size={14} strokeWidth={2.1} aria-hidden="true" />;
+    case "interrupted":
+      return <OctagonX size={14} strokeWidth={2.1} aria-hidden="true" />;
+    case "blocked":
+      return <ShieldOff size={14} strokeWidth={2.1} aria-hidden="true" />;
+    case "unsupported":
+      return <AlertCircle size={14} strokeWidth={2.1} aria-hidden="true" />;
+    default:
+      return <Check size={14} strokeWidth={2.25} aria-hidden="true" />;
   }
-  if (status === "error") {
-    return <AlertCircle size={14} strokeWidth={2.1} aria-hidden="true" />;
-  }
-  return <Check size={14} strokeWidth={2.25} aria-hidden="true" />;
 }
 
 function shouldCollapseDetail(detail?: string): boolean {

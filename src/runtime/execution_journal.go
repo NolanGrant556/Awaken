@@ -73,25 +73,51 @@ func (j *ExecutionJournal) ThreadID() string {
 }
 
 func (j *ExecutionJournal) Append(ctx context.Context, record agentcore.SemanticRecord) error {
-	return j.AppendBatch(ctx, []agentcore.SemanticRecord{record})
+	_, err := j.appendBatchAssigned(ctx, []agentcore.SemanticRecord{record})
+	return err
 }
 
 func (j *ExecutionJournal) AppendBatch(ctx context.Context, records []agentcore.SemanticRecord) error {
+	_, err := j.appendBatchAssigned(ctx, records)
+	return err
+}
+
+// AppendBatchAssigned appends a batch and returns the exact durable records,
+// including their journal-assigned sequence values.
+func (j *ExecutionJournal) AppendBatchAssigned(ctx context.Context, records []agentcore.SemanticRecord) ([]agentcore.SemanticRecord, error) {
+	return j.appendBatchAssigned(ctx, records)
+}
+
+// AppendAssigned appends one record and returns the exact durable record,
+// including the seq assigned while holding the journal lock. Startup orphan
+// recovery uses this instead of returning the caller's pre-append seq=0 copy.
+func (j *ExecutionJournal) AppendAssigned(ctx context.Context, record agentcore.SemanticRecord) (agentcore.SemanticRecord, error) {
+	prepared, err := j.appendBatchAssigned(ctx, []agentcore.SemanticRecord{record})
+	if err != nil {
+		return agentcore.SemanticRecord{}, err
+	}
+	if len(prepared) == 0 {
+		return agentcore.SemanticRecord{}, fmt.Errorf("%w: record %q was not appended", ErrJournalEncoding, record.RecordID)
+	}
+	return prepared[0], nil
+}
+
+func (j *ExecutionJournal) appendBatchAssigned(ctx context.Context, records []agentcore.SemanticRecord) ([]agentcore.SemanticRecord, error) {
 	if len(records) == 0 {
-		return nil
+		return nil, nil
 	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	if j.closed {
-		return fmt.Errorf("journal closed")
+		return nil, fmt.Errorf("journal closed")
 	}
 
 	prepared, err := j.prepareRecords(records)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(prepared) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	j.pending = append(j.pending, prepared...)
@@ -101,7 +127,10 @@ func (j *ExecutionJournal) AppendBatch(ctx context.Context, records []agentcore.
 			j.nextSeq = record.Seq + 1
 		}
 	}
-	return j.writePendingWithRetry(ctx, false)
+	if err := j.writePendingWithRetry(ctx, false); err != nil {
+		return nil, err
+	}
+	return prepared, nil
 }
 
 func (j *ExecutionJournal) Flush(ctx context.Context) error {
@@ -138,6 +167,18 @@ func (j *ExecutionJournal) NextSeq() uint64 {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	return j.nextSeq
+}
+
+// SnapshotRecords returns a consistent read of the journal while preventing a
+// concurrent append from exposing a partial JSONL line to active transcript
+// readers.
+func (j *ExecutionJournal) SnapshotRecords() ([]agentcore.SemanticRecord, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.closed {
+		return nil, fmt.Errorf("journal closed")
+	}
+	return ReadExecutionJournal(j.path)
 }
 
 func (j *ExecutionJournal) prepareRecords(records []agentcore.SemanticRecord) ([]agentcore.SemanticRecord, error) {

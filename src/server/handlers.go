@@ -20,17 +20,16 @@ type runHandlers struct {
 	syncSkillsForWorkspace func(string)
 }
 
-// frameSeqStride reserves seq slots per runtime event so that a single runtime
-// event mapping to multiple AG-UI frames still produces unique, monotonic frame
-// seqs. Must be >= max frames produced by mapRuntimeEvent (currently 2).
-const frameSeqStride uint64 = 16
+// Keep the local name for the SSE cursor conversion below while sharing the
+// actual transport contract with durable semantic projection.
+const frameSeqStride uint64 = agui.FrameSeqStride
 
 // frameSeq derives a unique AG-UI frame seq from a runtime event seq and the
 // frame index within that event. Because runtime seq is strictly increasing,
 // runtimeSeq*stride is strictly increasing, and the sub-index fills the gap,
 // guaranteeing monotonicity in stream order.
 func frameSeq(runtimeSeq uint64, frameIndex int) uint64 {
-	return runtimeSeq*frameSeqStride + uint64(frameIndex)
+	return agui.FrameSeq(runtimeSeq, frameIndex)
 }
 
 type renameThreadRequest struct {
@@ -51,8 +50,9 @@ type errorResponse struct {
 }
 
 type threadTranscriptRunResponse struct {
-	Run    awruntime.Run `json:"run"`
-	Events []agui.Event  `json:"events"`
+	Run          awruntime.Run `json:"run"`
+	Events       []agui.Event  `json:"events"`
+	StreamCursor uint64        `json:"stream_cursor,omitempty"`
 }
 
 type threadTranscriptResponse struct {
@@ -166,15 +166,30 @@ func (h runHandlers) handleGetThreadTranscript(w http.ResponseWriter, r *http.Re
 		Runs:   make([]threadTranscriptRunResponse, 0, len(transcript.Runs)),
 	}
 	for _, run := range transcript.Runs {
-		frames := make([]agui.Event, 0, len(run.Events))
-		for _, event := range run.Events {
-			// Prefer projecting through MapEvent so live and replay share shapes.
-			// Durable tool/artifact facts are already restored into AgentEvent form.
-			frames = append(frames, mapRuntimeEvent(event)...)
+		var frames []agui.Event
+		if run.StreamCursor > 0 {
+			// Active transcript retains ephemeral frames (reasoning, open text,
+			// progress) in EventBus order while durable envelopes still map through
+			// the canonical SemanticRecord projector.
+			frames = make([]agui.Event, 0, len(run.Events))
+			for _, event := range run.Events {
+				frames = append(frames, mapRuntimeEvent(event)...)
+			}
+		} else if len(run.SemanticRecords) > 0 {
+			// Durable replay uses the canonical SemanticRecord projector directly.
+			// It assigns a distinct stable semantic seq to START/CONTENT/END and
+			// other multi-frame records. Live transport resume uses stream_cursor.
+			frames = agui.ProjectSemanticRecords(run.SemanticRecords)
+		} else {
+			frames = make([]agui.Event, 0, len(run.Events))
+			for _, event := range run.Events {
+				frames = append(frames, mapRuntimeEvent(event)...)
+			}
 		}
 		response.Runs = append(response.Runs, threadTranscriptRunResponse{
-			Run:    run.Run,
-			Events: frames,
+			Run:          run.Run,
+			Events:       frames,
+			StreamCursor: run.StreamCursor,
 		})
 	}
 
@@ -251,16 +266,21 @@ func firstNonEmpty(values ...string) string {
 
 func (h runHandlers) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("run_id")
-	afterSeqStr := r.URL.Query().Get("after_seq")
-	afterSeq, err := strconv.ParseUint(afterSeqStr, 10, 64)
-	if err != nil {
-		afterSeq = 0
+	afterCursorStr := r.URL.Query().Get("after_cursor")
+	if afterCursorStr == "" {
+		// Compatibility: pre-stream-cursor Desktop clients sent the transport
+		// watermark as after_seq.
+		afterCursorStr = r.URL.Query().Get("after_seq")
 	}
-	// Convert frame-level afterSeq to a coarse runtime-event-level afterSeq for
+	afterCursor, err := strconv.ParseUint(afterCursorStr, 10, 64)
+	if err != nil {
+		afterCursor = 0
+	}
+	// Convert frame-level afterCursor to a coarse runtime-event-level cursor for
 	// EventBus filtering. We over-include by at most one runtime event (the one
-	// containing the afterSeq frame) and filter precisely at the frame level
+	// containing the cursor frame) and filter precisely at the frame level
 	// during replay.
-	coarseAfter := afterSeq / frameSeqStride
+	coarseAfter := afterCursor / frameSeqStride
 	var eventBusAfter uint64
 	if coarseAfter > 0 {
 		eventBusAfter = coarseAfter - 1
@@ -283,12 +303,19 @@ func (h runHandlers) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
+	// Commit SSE headers even when there is no replay history, allowing the
+	// client to know its subscription is established before new events arrive.
+	stream.Flush()
 
 	// Replay history with frame-level filtering: expand each runtime event into
-	// AG-UI frames and skip frames whose seq <= afterSeq.
+	// AG-UI frames and skip frames whose stream cursor is already acknowledged.
 	for _, event := range sub.History {
 		for _, frame := range mapRuntimeEvent(event) {
-			if frame.Seq <= afterSeq {
+			cursor := frame.StreamCursor
+			if cursor == 0 {
+				cursor = frame.Seq
+			}
+			if cursor <= afterCursor {
 				continue
 			}
 			if err := stream.WriteEvent(frame); err != nil {
@@ -443,16 +470,30 @@ func writeRuntimeEvent(stream *SSEStream, event awruntime.Event) error {
 
 func mapRuntimeEvent(event awruntime.Event) []agui.Event {
 	switch event.Kind {
+	case awruntime.EventKindSemantic:
+		mapped := agui.ProjectSemanticRecord(event.SemanticRecord)
+		for i := range mapped {
+			cursor := frameSeq(event.Seq, i)
+			mapped[i].StreamCursor = cursor
+			// Legacy Desktop treats seq as its SSE resume cursor. Keep that wire
+			// contract for active/live frames; semanticSeq remains the stable
+			// journal-derived identity used by current clients.
+			mapped[i].Seq = cursor
+		}
+		return mapped
 	case awruntime.EventKindAgent:
 		mapped := agui.MapEvent(event.AgentEvent)
 		for i := range mapped {
-			mapped[i].Seq = frameSeq(event.Seq, i)
+			cursor := frameSeq(event.Seq, i)
+			mapped[i].Seq = cursor
+			mapped[i].StreamCursor = cursor
 		}
 		return mapped
 	case awruntime.EventKindRunCancelled:
 		return []agui.Event{{
 			Type:           agui.EventRunError,
 			Seq:            frameSeq(event.Seq, 0),
+			StreamCursor:   frameSeq(event.Seq, 0),
 			Timestamp:      event.Timestamp.UnixMilli(),
 			ThreadID:       event.ThreadID,
 			RunID:          event.RunID,
@@ -464,6 +505,7 @@ func mapRuntimeEvent(event awruntime.Event) []agui.Event {
 		return []agui.Event{{
 			Type:           agui.EventRunError,
 			Seq:            frameSeq(event.Seq, 0),
+			StreamCursor:   frameSeq(event.Seq, 0),
 			Timestamp:      event.Timestamp.UnixMilli(),
 			ThreadID:       event.ThreadID,
 			RunID:          event.RunID,
@@ -475,6 +517,7 @@ func mapRuntimeEvent(event awruntime.Event) []agui.Event {
 		return []agui.Event{{
 			Type:           agui.EventRunStatusChanged,
 			Seq:            frameSeq(event.Seq, 0),
+			StreamCursor:   frameSeq(event.Seq, 0),
 			Timestamp:      event.Timestamp.UnixMilli(),
 			ThreadID:       event.ThreadID,
 			RunID:          event.RunID,

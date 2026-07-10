@@ -60,6 +60,10 @@ export type AguiEvent = {
   type: AguiEventType;
   timestamp?: number;
   seq?: number;
+  /** Live SSE resume cursor; independent from durable semantic seq. */
+  streamCursor?: number;
+  semanticSeq?: number;
+  recordId?: string;
   threadId?: string;
   runId?: string;
   turnId?: string;
@@ -151,6 +155,7 @@ export type AguiEvent = {
   retryable?: boolean;
   recoveryOptions?: string[];
   durationMs?: number;
+  diagnostic?: Record<string, unknown>;
   authProvider?: string;
   authScope?: string;
   authLink?: string;

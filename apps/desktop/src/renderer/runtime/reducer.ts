@@ -55,6 +55,7 @@ type ToolResultRecord = {
   status?: ToolDisplayState;
   /** Canonical ToolOutcome status from the wire; not a display projection. */
   toolStatus?: string;
+  diagnostic?: Record<string, unknown>;
 };
 
 export type PatchPreviewRecord = {
@@ -1479,6 +1480,12 @@ export function reduceRuntimeState(
           nextState.timelineStatus = "running";
           nextState.runId = action.event.runId ?? nextState.runId;
           nextState.threadId = action.event.threadId ?? nextState.threadId;
+          // The client records run/requested before startRun and Skill preflight
+          // complete. Rebase elapsed time onto the durable server event so the
+          // live view and transcript replay use the same clock boundary.
+          nextState.runStartedAtMs = validTimestamp(action.event.timestamp)
+            ? action.event.timestamp
+            : nextState.runStartedAtMs;
           nextState.activeThreadId =
             nextState.activeThreadId ?? action.event.threadId;
           if (action.event.threadId) {
@@ -1575,7 +1582,10 @@ export function reduceRuntimeState(
             nextState.massMessageReviews = [];
             nextState.userQuestions = [];
             nextState.runCompletedAtMs =
-              nextState.runCompletedAtMs ?? action.receivedAtMs;
+              nextState.runCompletedAtMs ??
+              (validTimestamp(action.event.timestamp)
+                ? action.event.timestamp
+                : action.receivedAtMs);
           } else if (status === "error") {
             nextState.phase = "error";
             nextState.timelineStatus = "error";
@@ -1621,7 +1631,10 @@ export function reduceRuntimeState(
           nextState.massMessageReviews = [];
           nextState.userQuestions = [];
           nextState.runCompletedAtMs =
-            nextState.runCompletedAtMs ?? action.receivedAtMs;
+            nextState.runCompletedAtMs ??
+            (validTimestamp(action.event.timestamp)
+              ? action.event.timestamp
+              : action.receivedAtMs);
           nextState.inspectorSummary = {
             ...nextState.inspectorSummary,
             contextWindow: hasContextWindowPayload(action.event)
@@ -1658,7 +1671,9 @@ export function reduceRuntimeState(
           break;
         case "TEXT_MESSAGE_CONTENT": {
           const delta = action.event.delta ?? "";
-          nextState.assistantText += delta;
+          if (!(action.event.recordId && nextState.assistantText.endsWith(delta))) {
+            nextState.assistantText += delta;
+          }
           records = upsertStep(
             records,
             `assistant:${action.event.messageId ?? "message"}`,
@@ -1901,6 +1916,10 @@ export function reduceRuntimeState(
         }
         case "TOOL_CALL_RESULT": {
           const content = action.event.content || "Tool returned empty content";
+          const diagnosticReason =
+            typeof action.event.diagnostic?.reason === "string"
+              ? action.event.diagnostic.reason
+              : "";
           // TrashedPaths are parsed from the tool output after execution and
           // now ride on the ToolResult event (post-execution). Surface the
           // "Deleted file moved to recycle bin" notification in the step
@@ -1925,14 +1944,21 @@ export function reduceRuntimeState(
             args: existing?.args,
             status: displayStatus,
             toolStatus: action.event.toolStatus,
+            ...(action.event.diagnostic
+              ? { diagnostic: action.event.diagnostic }
+              : {}),
           });
 
           const stepKey = action.event.toolCallId
             ? `tool:${action.event.toolCallId}`
             : `tool-result:${id}`;
-          const description = trashNote
-            ? `${excerpt(content)}\n${trashNote}`
-            : excerpt(content);
+          const description = [
+            excerpt(content),
+            diagnosticReason ? `diagnostic: ${diagnosticReason}` : "",
+            trashNote,
+          ]
+            .filter(Boolean)
+            .join("\n");
           const stepStatus: "active" | "done" | "error" =
             displayStatus === "error" ||
             displayStatus === "denied" ||

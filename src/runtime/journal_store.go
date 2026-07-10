@@ -129,7 +129,7 @@ func ensureThreadJournalRecord(ctx context.Context, journal *ExecutionJournal, t
 		"",
 		"",
 		"",
-		map[string]any{"label": strings.TrimSpace(label)},
+		map[string]any{"label": trimThreadLabel(label)},
 	))
 }
 
@@ -190,12 +190,22 @@ func messagesFromSemanticRecords(records []agentcore.SemanticRecord) []convconte
 				})
 			}
 		case agentcore.SemanticKindToolResult:
+			content := stringPayload(record.Payload, "content")
+			isError := boolPayload(record.Payload, "is_error")
+			// SemanticJournal stores human-readable display content separately
+			// from the canonical outcome. Model history must receive the same
+			// compact structured payload used during the live run; feeding display
+			// text here loses error_code/retryable/process facts after restart.
+			if outcome, ok := executionOutcomePayload(record.Payload); ok {
+				content = outcome.ModelPayload()
+				isError = outcome.IsError()
+			}
 			msg := convcontext.Message{
 				Role:       convcontext.RoleTool,
-				Content:    stringPayload(record.Payload, "content"),
+				Content:    content,
 				ToolCallID: stringPayload(record.Payload, "tool_call_id"),
 				Name:       stringPayload(record.Payload, "tool_name"),
-				IsError:    boolPayload(record.Payload, "is_error"),
+				IsError:    isError,
 			}
 			messages = append(messages, msg)
 		}
@@ -204,10 +214,28 @@ func messagesFromSemanticRecords(records []agentcore.SemanticRecord) []convconte
 	return messages
 }
 
+func executionOutcomePayload(payload map[string]any) (tool.ExecutionOutcome, bool) {
+	if payload == nil {
+		return tool.ExecutionOutcome{}, false
+	}
+	raw, ok := payload["outcome"]
+	if !ok || raw == nil {
+		return tool.ExecutionOutcome{}, false
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return tool.ExecutionOutcome{}, false
+	}
+	var outcome tool.ExecutionOutcome
+	if err := json.Unmarshal(encoded, &outcome); err != nil || outcome.Status == "" {
+		return tool.ExecutionOutcome{}, false
+	}
+	return outcome, true
+}
+
 func recoverOrphanRuns(ctx context.Context, journal *ExecutionJournal, records []agentcore.SemanticRecord) ([]agentcore.SemanticRecord, error) {
 	type runState struct {
-		started bool
-		terminal bool
+		terminal  bool
 		openCalls map[string]agentcore.SemanticRecord
 	}
 	runs := map[string]*runState{}
@@ -222,8 +250,6 @@ func recoverOrphanRuns(ctx context.Context, journal *ExecutionJournal, records [
 			runs[runID] = state
 		}
 		switch record.Kind {
-		case agentcore.SemanticKindRunStarted:
-			state.started = true
 		case agentcore.SemanticKindRunTerminal:
 			state.terminal = true
 		case agentcore.SemanticKindToolCall:
@@ -239,7 +265,7 @@ func recoverOrphanRuns(ctx context.Context, journal *ExecutionJournal, records [
 
 	var appended []agentcore.SemanticRecord
 	for runID, state := range runs {
-		if !state.started || state.terminal {
+		if state.terminal && len(state.openCalls) == 0 {
 			continue
 		}
 		for callID, callRecord := range state.openCalls {
@@ -261,30 +287,34 @@ func recoverOrphanRuns(ctx context.Context, journal *ExecutionJournal, records [
 				payload,
 			)
 			// Preserve original seq numbering by letting journal assign next seq.
-			if err := journal.Append(ctx, resultRec); err != nil {
+			assigned, err := journal.AppendAssigned(ctx, resultRec)
+			if err != nil {
 				return records, err
 			}
-			appended = append(appended, resultRec)
+			appended = append(appended, assigned)
 		}
-		terminal := agentcore.NewSemanticRecord(
-			agentcore.SemanticKindRunTerminal,
-			journal.ThreadID(),
-			runID,
-			"",
-			"",
-			"",
-			map[string]any{
-				"status": "interrupted",
-				"reason": "process_restarted",
-			},
-		)
-		if err := journal.Append(ctx, terminal); err != nil {
-			return records, err
+		if !state.terminal {
+			terminal := agentcore.NewSemanticRecord(
+				agentcore.SemanticKindRunTerminal,
+				journal.ThreadID(),
+				runID,
+				"",
+				"",
+				"",
+				map[string]any{
+					"status": "interrupted",
+					"reason": "process_restarted",
+				},
+			)
+			assignedTerminal, err := journal.AppendAssigned(ctx, terminal)
+			if err != nil {
+				return records, err
+			}
+			appended = append(appended, assignedTerminal)
 		}
 		if err := journal.Flush(ctx); err != nil {
 			return records, err
 		}
-		appended = append(appended, terminal)
 	}
 	if len(appended) == 0 {
 		return records, nil
@@ -296,14 +326,14 @@ func outcomeToAnyMap(outcome tool.ExecutionOutcome) map[string]any {
 	raw, err := json.Marshal(outcome)
 	if err != nil {
 		return map[string]any{
-			"status":            string(outcome.Status),
-			"error_code":        outcome.ErrorCode,
-			"error_category":    string(outcome.ErrorCategory),
-			"retryable":         outcome.Retryable,
-			"transport_status":  string(outcome.TransportStatus),
-			"semantic_status":   string(outcome.SemanticStatus),
-			"process_status":    string(outcome.ProcessStatus),
-			"diagnostic":        outcome.Diagnostic,
+			"status":           string(outcome.Status),
+			"error_code":       outcome.ErrorCode,
+			"error_category":   string(outcome.ErrorCategory),
+			"retryable":        outcome.Retryable,
+			"transport_status": string(outcome.TransportStatus),
+			"semantic_status":  string(outcome.SemanticStatus),
+			"process_status":   string(outcome.ProcessStatus),
+			"diagnostic":       outcome.Diagnostic,
 		}
 	}
 	var out map[string]any
@@ -369,7 +399,7 @@ func restoredTranscriptFromSemantic(records []agentcore.SemanticRecord) restored
 			restored.UpdatedAt = record.Timestamp
 		}
 		if record.Kind == agentcore.SemanticKindThread {
-			restored.Label = stringPayload(record.Payload, "label")
+			restored.Label = trimThreadLabel(stringPayload(record.Payload, "label"))
 		}
 	}
 	if restored.CreatedAt.IsZero() {
@@ -438,6 +468,7 @@ func durableRunsFromSemanticRecords(threadID string, records []agentcore.Semanti
 
 	out := make(map[string]ThreadTranscriptRun, len(byRun))
 	for runID, runRecords := range byRun {
+		runRecords = semanticRecordsWithTerminalLast(runRecords)
 		run := *runMeta[runID]
 		events := make([]Event, 0, len(runRecords))
 		for _, record := range runRecords {
@@ -453,9 +484,33 @@ func durableRunsFromSemanticRecords(threadID string, records []agentcore.Semanti
 				})
 			}
 		}
-		out[runID] = ThreadTranscriptRun{Run: run, Events: events}
+		out[runID] = ThreadTranscriptRun{
+			Run:             run,
+			Events:          events,
+			SemanticRecords: append([]agentcore.SemanticRecord(nil), runRecords...),
+		}
 	}
 	return out
+}
+
+func semanticRecordsWithTerminalLast(records []agentcore.SemanticRecord) []agentcore.SemanticRecord {
+	if len(records) < 2 {
+		return append([]agentcore.SemanticRecord(nil), records...)
+	}
+	ordered := make([]agentcore.SemanticRecord, 0, len(records))
+	var finalTerminal *agentcore.SemanticRecord
+	for _, record := range records {
+		if record.Kind == agentcore.SemanticKindRunTerminal {
+			candidate := record
+			finalTerminal = &candidate
+			continue
+		}
+		ordered = append(ordered, record)
+	}
+	if finalTerminal != nil {
+		ordered = append(ordered, *finalTerminal)
+	}
+	return ordered
 }
 
 func semanticRecordToAgentEvents(record agentcore.SemanticRecord) []agentcore.AwakenEvent {

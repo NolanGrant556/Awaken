@@ -23,6 +23,7 @@ type EventKind string
 
 const (
 	EventKindAgent            EventKind = "agent"
+	EventKindSemantic         EventKind = "semantic"
 	EventKindRunError         EventKind = "run_error"
 	EventKindRunCancelled     EventKind = "run_cancelled"
 	EventKindRunStatusChanged EventKind = "run_status_changed"
@@ -51,6 +52,7 @@ type Event struct {
 	RunID          string
 	Status         string
 	AgentEvent     agentcore.AwakenEvent
+	SemanticRecord agentcore.SemanticRecord
 	Message        string
 	Content        string
 	Code           string
@@ -226,6 +228,91 @@ func (s *Session) RecordAgentEvent(event agentcore.AwakenEvent) {
 	s.mu.Unlock()
 
 	bus.Append(wrapped, terminal)
+}
+
+// RecordSemanticRecords publishes already-assigned durable facts into the live
+// EventBus. Session state and the stream therefore advance from the same facts
+// that restart replay reads from the journal.
+func (s *Session) RecordSemanticRecords(records []agentcore.SemanticRecord) {
+	for _, record := range records {
+		if record.RunID != "" && record.RunID != s.Snapshot().RunID {
+			continue
+		}
+		timestamp := record.Timestamp.UTC()
+		if timestamp.IsZero() {
+			timestamp = time.Now().UTC()
+		}
+		record.Timestamp = timestamp
+
+		s.mu.Lock()
+		if isTerminalStatus(s.run.Status) {
+			s.mu.Unlock()
+			return
+		}
+		if record.ThreadID == "" {
+			record.ThreadID = s.run.ThreadID
+		}
+		if record.RunID == "" {
+			record.RunID = s.run.RunID
+		}
+		s.run.UpdatedAt = timestamp
+		terminal := false
+		terminalReason := agentcore.TerminalReason("")
+		switch record.Kind {
+		case agentcore.SemanticKindRunStarted:
+			if !s.run.CancelRequested {
+				s.run.Status = RunStatusRunning
+			}
+		case agentcore.SemanticKindRunTerminal:
+			status := stringPayload(record.Payload, "status")
+			terminalReason = agentcore.TerminalReason(firstNonEmpty(
+				stringPayload(record.Payload, "terminal_reason"),
+				stringPayload(record.Payload, "reason"),
+			))
+			switch status {
+			case "finished":
+				s.run.Status = RunStatusFinished
+				s.run.Result = stringPayload(record.Payload, "result")
+			case "cancelled":
+				s.run.Status = RunStatusCancelled
+				s.run.CancelRequested = true
+				s.run.Error = firstNonEmpty(stringPayload(record.Payload, "error"), "run cancelled")
+				s.run.Result = firstNonEmpty(stringPayload(record.Payload, "result"), s.run.Result)
+			default:
+				s.run.Status = RunStatusError
+				s.run.Error = firstNonEmpty(stringPayload(record.Payload, "error"), "run failed")
+			}
+			finishedAt := timestamp
+			s.run.FinishedAt = &finishedAt
+			terminal = true
+		}
+		wrapped := Event{
+			Kind:           EventKindSemantic,
+			Timestamp:      timestamp,
+			ThreadID:       s.run.ThreadID,
+			RunID:          s.run.RunID,
+			SemanticRecord: record,
+			TerminalReason: terminalReason,
+		}
+		bus := s.bus
+		s.mu.Unlock()
+
+		bus.Append(wrapped, terminal)
+	}
+}
+
+func (s *Session) StreamCursor() uint64 {
+	if s == nil || s.bus == nil {
+		return 0
+	}
+	return s.bus.StreamCursor()
+}
+
+func (s *Session) StreamSnapshot() ([]Event, uint64) {
+	if s == nil || s.bus == nil {
+		return nil, 0
+	}
+	return s.bus.Snapshot()
 }
 
 func (s *Session) AwaitMassMessageReview(ctx context.Context, request agentcore.AwakenEvent) (agentcore.ReviewDecision, error) {

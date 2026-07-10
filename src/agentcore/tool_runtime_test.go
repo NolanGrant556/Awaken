@@ -28,6 +28,19 @@ type runtimeTestTool struct {
 	commandOutputs []tool.CommandOutput
 }
 
+type runtimeTypedFailureArtifactTool struct {
+	runtimeTestTool
+}
+
+func (t runtimeTypedFailureArtifactTool) ExecuteOutcome(context.Context, string, tool.ToolObserver) (tool.ExecutionOutcome, error) {
+	return tool.FailedOutcome(
+		"typed transform failure",
+		"typed_transform_failure",
+		tool.ErrorCategoryTool,
+		false,
+	), nil
+}
+
 func (t runtimeTestTool) Name() string {
 	return t.name
 }
@@ -928,6 +941,62 @@ func TestToolRuntimeEmitsArtifactsForAllowedTool(t *testing.T) {
 		got[2].ToolProgressStage != "completed" ||
 		got[3].Type != ArtifactCreatedEventType {
 		t.Fatalf("unexpected emitted events: %+v", got)
+	}
+}
+
+func TestToolRuntimeTransformedTypedFailureDoesNotEmitArtifact(t *testing.T) {
+	sourceName := "runtime_transform_failure_source"
+	targetName := "runtime_transform_failure_target"
+	mustRegisterRuntimeTool(t, runtimeTestTool{
+		name:       sourceName,
+		permission: tool.AllowPermission(),
+		params: []tool.ToolParameter{
+			{Name: "value", Type: "string", Required: true},
+		},
+	})
+	mustRegisterRuntimeTool(t, runtimeTypedFailureArtifactTool{runtimeTestTool: runtimeTestTool{
+		name:       targetName,
+		permission: tool.AllowPermission(),
+		params: []tool.ToolParameter{
+			{Name: "value", Type: "string", Required: true},
+		},
+		artifacts: []tool.ArtifactDescriptor{{
+			Action: tool.ArtifactActionUpdated,
+			ID:     "must-not-surface",
+			Title:  "unchanged.txt",
+			Kind:   "file",
+			Path:   "unchanged.txt",
+			Status: "ready",
+		}},
+	}})
+
+	var events []AwakenEvent
+	runtime := NewToolRuntimeWithConfig(EventSinkFunc(func(event AwakenEvent) {
+		events = append(events, event)
+	}), ToolRuntimeConfig{
+		AutoToolPolicy: staticAutoToolPolicy{decision: ToolDecision{
+			Action:          ToolDecisionTransform,
+			Source:          ToolDecisionSourceTransform,
+			Reason:          "structured rewrite",
+			UpdatedToolName: targetName,
+			UpdatedInput:    `{"value":"rewritten"}`,
+		}},
+	})
+	result := runtime.Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_transform_failure",
+		Function: convcontext.FunctionCall{
+			Name:      sourceName,
+			Arguments: `{"value":"original"}`,
+		},
+	})
+
+	if !result.IsError || result.Outcome.Status != tool.OutcomeFailed || result.Outcome.ErrorCode != "typed_transform_failure" {
+		t.Fatalf("expected typed transformed failure, got %+v", result)
+	}
+	for _, event := range events {
+		if event.Type == ArtifactCreatedEventType || event.Type == ArtifactUpdatedEventType {
+			t.Fatalf("transformed typed failure emitted false artifact: %+v", event)
+		}
 	}
 }
 

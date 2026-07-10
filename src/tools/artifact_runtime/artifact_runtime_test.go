@@ -281,14 +281,44 @@ func requirePresentationRuntime(t *testing.T) {
 	if _, err := resolvePresentationPython(); err == nil {
 		return
 	}
-	// Hermetic tests may bootstrap via PATH only through explicit AWAKEN_PYTHON.
+	// Hermetic tests may bootstrap from PATH through an in-process override;
+	// production execution never reads prepare-only source variables.
 	for _, name := range []string{"python3", "python"} {
 		if path, err := exec.LookPath(name); err == nil && pythonCanImportPPTX(path) {
-			t.Setenv("AWAKEN_PYTHON", path)
+			setPresentationPythonTestOverride(t, path)
 			return
 		}
 	}
 	t.Skipf("presentation runtime unavailable: python with python-pptx not found")
+}
+
+func setPresentationPythonTestOverride(t *testing.T, path string) {
+	t.Helper()
+	presentationRuntimeTestOverrides.Lock()
+	previous := presentationRuntimeTestOverrides.python
+	presentationRuntimeTestOverrides.python = path
+	presentationRuntimeTestOverrides.Unlock()
+	t.Cleanup(func() {
+		presentationRuntimeTestOverrides.Lock()
+		presentationRuntimeTestOverrides.python = previous
+		presentationRuntimeTestOverrides.Unlock()
+	})
+}
+
+func setPresentationRenderingTestOverrides(t *testing.T, soffice, popplerBin string) {
+	t.Helper()
+	presentationRuntimeTestOverrides.Lock()
+	previousSoffice := presentationRuntimeTestOverrides.soffice
+	previousPoppler := presentationRuntimeTestOverrides.popplerBin
+	presentationRuntimeTestOverrides.soffice = soffice
+	presentationRuntimeTestOverrides.popplerBin = popplerBin
+	presentationRuntimeTestOverrides.Unlock()
+	t.Cleanup(func() {
+		presentationRuntimeTestOverrides.Lock()
+		presentationRuntimeTestOverrides.soffice = previousSoffice
+		presentationRuntimeTestOverrides.popplerBin = previousPoppler
+		presentationRuntimeTestOverrides.Unlock()
+	})
 }
 
 func writeExecutable(t *testing.T, path, body string) {
@@ -388,8 +418,7 @@ for i in range(1, count + 1):
     open(f"{prefix}-{i}.png", "wb").write(png)
 PY
 `)
-	t.Setenv("AWAKEN_SOFFICE", soffice)
-	t.Setenv("AWAKEN_POPPLER_BIN", bin)
+	setPresentationRenderingTestOverrides(t, soffice, bin)
 	t.Setenv("HOME", t.TempDir())
 }
 

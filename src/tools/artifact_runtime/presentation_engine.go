@@ -17,7 +17,20 @@ import (
 //go:embed engines/presentation_engine.py
 var presentationEngineScript []byte
 
-func writePPTXWithPython(ctx context.Context, spec presentationSpec) error {
+type presentationEngineReport struct {
+	Path     string   `json:"path"`
+	Slides   int      `json:"slides"`
+	Size     int64    `json:"size"`
+	Warnings []string `json:"warnings"`
+}
+
+type presentationEngineErrorReport struct {
+	ErrorCode string `json:"error_code"`
+	Path      string `json:"path"`
+	Reason    string `json:"reason"`
+}
+
+func writePPTXWithPython(ctx context.Context, spec presentationSpec) (presentationEngineReport, error) {
 	payload := map[string]any{
 		"mode":           "create",
 		"output_path":    spec.OutputPath,
@@ -30,7 +43,7 @@ func writePPTXWithPython(ctx context.Context, spec presentationSpec) error {
 	return runPresentationEngine(ctx, payload, spec.OutputPath)
 }
 
-func editPPTXWithPython(ctx context.Context, spec presentationEditSpec) error {
+func editPPTXWithPython(ctx context.Context, spec presentationEditSpec) (presentationEngineReport, error) {
 	payload := map[string]any{
 		"mode":        "edit",
 		"source_path": spec.SourcePath,
@@ -41,20 +54,20 @@ func editPPTXWithPython(ctx context.Context, spec presentationEditSpec) error {
 	return runPresentationEngine(ctx, payload, spec.OutputPath)
 }
 
-func runPresentationEngine(ctx context.Context, payload map[string]any, outputPath string) error {
+func runPresentationEngine(ctx context.Context, payload map[string]any, outputPath string) (presentationEngineReport, error) {
 	python, err := resolvePresentationPython()
 	if err != nil {
-		return err
+		return presentationEngineReport{}, err
 	}
 	scriptPath, cleanup, err := materializePresentationEngine()
 	if err != nil {
-		return err
+		return presentationEngineReport{}, err
 	}
 	defer cleanup()
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return err
+		return presentationEngineReport{}, err
 	}
 	runCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
@@ -63,19 +76,39 @@ func runPresentationEngine(ctx context.Context, payload map[string]any, outputPa
 	cmd.Env = os.Environ()
 	output, err := cmd.CombinedOutput()
 	if runCtx.Err() != nil {
-		return fmt.Errorf("presentation engine timed out: %w", runCtx.Err())
+		return presentationEngineReport{}, fmt.Errorf("presentation engine timed out: %w", runCtx.Err())
 	}
 	if err != nil {
-		return fmt.Errorf("presentation engine failed: %w: %s", err, excerptOutput(output))
+		var failure presentationEngineErrorReport
+		if json.Unmarshal(bytes.TrimSpace(output), &failure) == nil &&
+			strings.TrimSpace(failure.ErrorCode) != "" &&
+			strings.TrimSpace(failure.Path) != "" &&
+			strings.TrimSpace(failure.Reason) != "" {
+			return presentationEngineReport{}, &presentationInputError{
+				Path:   failure.Path,
+				Reason: failure.Reason,
+			}
+		}
+		return presentationEngineReport{}, fmt.Errorf("presentation engine failed: %w: %s", err, excerptOutput(output))
+	}
+	var report presentationEngineReport
+	if err := json.Unmarshal(output, &report); err != nil {
+		return presentationEngineReport{}, fmt.Errorf("presentation engine returned invalid report: %w: %s", err, excerptOutput(output))
 	}
 	info, err := os.Stat(outputPath)
 	if err != nil {
-		return fmt.Errorf("generated pptx missing: %w", err)
+		return presentationEngineReport{}, fmt.Errorf("generated pptx missing: %w", err)
 	}
 	if info.Size() == 0 {
-		return fmt.Errorf("generated pptx is empty")
+		return presentationEngineReport{}, fmt.Errorf("generated pptx is empty")
 	}
-	return nil
+	if strings.TrimSpace(report.Path) == "" {
+		report.Path = outputPath
+	}
+	if report.Size <= 0 {
+		report.Size = info.Size()
+	}
+	return report, nil
 }
 
 func materializePresentationEngine() (string, func(), error) {

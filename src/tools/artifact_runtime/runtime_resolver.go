@@ -2,6 +2,8 @@ package artifactruntime
 
 import (
 	"context"
+	"debug/macho"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -22,6 +24,33 @@ type runtimeResolverCache struct {
 
 var globalRuntimeProbeCache runtimeResolverCache
 
+// presentationRuntimeTestOverrides lets package tests inject hermetic tools
+// without reusing the prepare-only AWAKEN_PYTHON/AWAKEN_SOFFICE/
+// AWAKEN_POPPLER_BIN source variables at execution time. It is deliberately
+// unexported and has no environment-variable bridge, so production execution
+// can only resolve components from the verified Awaken-managed runtime.
+var presentationRuntimeTestOverrides struct {
+	sync.RWMutex
+	python     string
+	soffice    string
+	popplerBin string
+}
+
+func presentationRuntimeTestOverride(name string) string {
+	presentationRuntimeTestOverrides.RLock()
+	defer presentationRuntimeTestOverrides.RUnlock()
+	switch name {
+	case "python":
+		return presentationRuntimeTestOverrides.python
+	case "libreoffice":
+		return presentationRuntimeTestOverrides.soffice
+	case "poppler":
+		return presentationRuntimeTestOverrides.popplerBin
+	default:
+		return ""
+	}
+}
+
 type preflightReport struct {
 	SchemaVersion int                      `json:"schemaVersion,omitempty"`
 	RuntimeName   string                   `json:"runtimeName"`
@@ -35,6 +64,18 @@ type preflightReport struct {
 	Missing       []string                 `json:"missing,omitempty"`
 	Components    []runtimeComponentStatus `json:"components,omitempty"`
 	Detail        string                   `json:"detail,omitempty"`
+	Provenance    runtimeProvenanceReport  `json:"provenance"`
+}
+
+type runtimeProvenanceReport struct {
+	OK     bool                     `json:"ok"`
+	Issues []runtimeProvenanceIssue `json:"issues,omitempty"`
+}
+
+type runtimeProvenanceIssue struct {
+	Path   string `json:"path"`
+	Code   string `json:"code"`
+	Detail string `json:"detail,omitempty"`
 }
 
 type runtimeComponentStatus struct {
@@ -258,6 +299,223 @@ func runProbe(path string, args []string, accepted []int) (bool, string) {
 	return ok, detail
 }
 
+func pythonPrefixesManaged(path, root string) (bool, string) {
+	ok, output := runProbe(path, []string{
+		"-c",
+		"import json,sys; print(json.dumps({'executable':sys.executable,'prefix':sys.prefix,'base_prefix':sys.base_prefix}))",
+	}, []int{0})
+	if !ok {
+		return false, "python prefix probe failed"
+	}
+	var prefixes struct {
+		Executable string `json:"executable"`
+		Prefix     string `json:"prefix"`
+		BasePrefix string `json:"base_prefix"`
+	}
+	if err := json.Unmarshal([]byte(output), &prefixes); err != nil {
+		return false, "python prefix probe returned invalid JSON"
+	}
+	for _, candidate := range []string{prefixes.Executable, prefixes.Prefix, prefixes.BasePrefix} {
+		if !pathInsideRoot(candidate, root) {
+			return false, "python prefix/base_prefix escapes managed runtime"
+		}
+	}
+	return true, ""
+}
+
+func isAllowedRuntimeSystemDependency(path string) bool {
+	normalized := filepath.ToSlash(path)
+	if goruntime.GOOS == "darwin" {
+		return strings.HasPrefix(normalized, "/System/Library/") ||
+			strings.HasPrefix(normalized, "/usr/lib/")
+	}
+	if goruntime.GOOS == "linux" {
+		return strings.HasPrefix(normalized, "/lib/") ||
+			strings.HasPrefix(normalized, "/lib64/") ||
+			strings.HasPrefix(normalized, "/usr/lib/") ||
+			strings.HasPrefix(normalized, "/usr/lib64/")
+	}
+	return false
+}
+
+func isForbiddenRuntimeDependency(path string) bool {
+	normalized := strings.ToLower(filepath.ToSlash(path))
+	return strings.HasPrefix(normalized, "/opt/homebrew/") ||
+		strings.HasPrefix(normalized, "/usr/local/") ||
+		strings.Contains(normalized, "/.cache/codex-runtimes/") ||
+		strings.Contains(normalized, "/codex-runtimes/")
+}
+
+func machoImportedLibraries(path string) ([]string, error) {
+	if file, err := macho.Open(path); err == nil {
+		defer file.Close()
+		return file.ImportedLibraries()
+	}
+	fat, err := macho.OpenFat(path)
+	if err != nil {
+		return nil, err
+	}
+	defer fat.Close()
+	seen := map[string]struct{}{}
+	var libraries []string
+	for _, arch := range fat.Arches {
+		imports, err := arch.File.ImportedLibraries()
+		if err != nil {
+			return nil, err
+		}
+		for _, dependency := range imports {
+			if _, ok := seen[dependency]; ok {
+				continue
+			}
+			seen[dependency] = struct{}{}
+			libraries = append(libraries, dependency)
+		}
+	}
+	return libraries, nil
+}
+
+func machoInstallNamesFromFile(file *macho.File) []string {
+	var names []string
+	for _, load := range file.Loads {
+		dylib, ok := load.(*macho.Dylib)
+		if !ok {
+			continue
+		}
+		raw := load.Raw()
+		if len(raw) < 4 || file.ByteOrder.Uint32(raw[:4]) != 0xd { // LC_ID_DYLIB
+			continue
+		}
+		names = append(names, dylib.Name)
+	}
+	return names
+}
+
+func machoInstallNames(path string) ([]string, error) {
+	if file, err := macho.Open(path); err == nil {
+		defer file.Close()
+		return machoInstallNamesFromFile(file), nil
+	}
+	fat, err := macho.OpenFat(path)
+	if err != nil {
+		return nil, err
+	}
+	defer fat.Close()
+	seen := map[string]struct{}{}
+	var names []string
+	for _, arch := range fat.Arches {
+		for _, name := range machoInstallNamesFromFile(arch.File) {
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			names = append(names, name)
+		}
+	}
+	return names, nil
+}
+
+func inspectRuntimeProvenance(versionRoot, runtimeRoot string) runtimeProvenanceReport {
+	report := runtimeProvenanceReport{OK: true}
+	fileNames := map[string]struct{}{}
+	if goruntime.GOOS == "darwin" {
+		_ = filepath.WalkDir(versionRoot, func(path string, entry os.DirEntry, err error) error {
+			if err == nil && !entry.IsDir() {
+				fileNames[entry.Name()] = struct{}{}
+			}
+			return nil
+		})
+	}
+	_ = filepath.WalkDir(versionRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			report.Issues = append(report.Issues, runtimeProvenanceIssue{
+				Path: path, Code: "unreadable_runtime_entry", Detail: walkErr.Error(),
+			})
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			target, err := filepath.EvalSymlinks(path)
+			if err != nil {
+				report.Issues = append(report.Issues, runtimeProvenanceIssue{
+					Path: path, Code: "broken_symlink", Detail: err.Error(),
+				})
+			} else if !pathInsideRoot(target, runtimeRoot) {
+				report.Issues = append(report.Issues, runtimeProvenanceIssue{
+					Path: path, Code: "external_symlink", Detail: target,
+				})
+			}
+			return nil
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if strings.EqualFold(entry.Name(), "pyvenv.cfg") {
+			report.Issues = append(report.Issues, runtimeProvenanceIssue{
+				Path: path, Code: "python_venv_not_relocatable", Detail: "pyvenv.cfg is forbidden",
+			})
+		}
+		if goruntime.GOOS != "darwin" {
+			return nil
+		}
+		dependencies, err := machoImportedLibraries(path)
+		if err != nil {
+			return nil // ordinary non-Mach-O file
+		}
+		if installNames, err := machoInstallNames(path); err == nil {
+			for _, installName := range installNames {
+				if filepath.IsAbs(installName) && !isAllowedRuntimeSystemDependency(installName) {
+					code := "external_install_name"
+					if isForbiddenRuntimeDependency(installName) {
+						code = "forbidden_external_install_name"
+					}
+					report.Issues = append(report.Issues, runtimeProvenanceIssue{
+						Path: path, Code: code, Detail: installName,
+					})
+				}
+			}
+		}
+		for _, dependency := range dependencies {
+			switch {
+			case filepath.IsAbs(dependency):
+				if isAllowedRuntimeSystemDependency(dependency) {
+					continue
+				}
+				if _, err := os.Stat(dependency); err != nil {
+					report.Issues = append(report.Issues, runtimeProvenanceIssue{
+						Path: path, Code: "missing_absolute_dependency", Detail: dependency,
+					})
+					continue
+				}
+				if pathInsideRoot(dependency, runtimeRoot) {
+					continue
+				}
+				code := "external_dependency"
+				if isForbiddenRuntimeDependency(dependency) {
+					code = "forbidden_external_dependency"
+				}
+				report.Issues = append(report.Issues, runtimeProvenanceIssue{
+					Path: path, Code: code, Detail: dependency,
+				})
+			case strings.HasPrefix(dependency, "@loader_path/"):
+				target := filepath.Join(filepath.Dir(path), filepath.FromSlash(strings.TrimPrefix(dependency, "@loader_path/")))
+				if _, err := os.Stat(target); err != nil {
+					report.Issues = append(report.Issues, runtimeProvenanceIssue{
+						Path: path, Code: "missing_loader_dependency", Detail: dependency,
+					})
+				}
+			case strings.HasPrefix(dependency, "@rpath/") || strings.HasPrefix(dependency, "@executable_path/"):
+				if _, ok := fileNames[filepath.Base(filepath.ToSlash(dependency))]; !ok {
+					report.Issues = append(report.Issues, runtimeProvenanceIssue{
+						Path: path, Code: "missing_runtime_dependency", Detail: dependency,
+					})
+				}
+			}
+		}
+		return nil
+	})
+	report.OK = len(report.Issues) == 0
+	return report
+}
+
 func findSofficeIn(path string) string {
 	for _, candidate := range libreOfficeExecutableCandidates(path) {
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
@@ -294,7 +552,12 @@ func probeResolvedComponent(component RuntimeResolvedComponent, versionRoot, run
 		ok, detail := runProbe(resolved, args, probe.AcceptedExitCodes)
 		status.OK = ok
 		if ok {
-			status.Detail = "python-pptx and Pillow available"
+			if prefixesOK, prefixDetail := pythonPrefixesManaged(resolved, runtimeRoot); !prefixesOK {
+				status.OK = false
+				status.Detail = prefixDetail
+			} else {
+				status.Detail = "python-pptx and Pillow available"
+			}
 		} else if detail != "" {
 			status.Detail = detail
 		} else {
@@ -505,14 +768,23 @@ func runtimePreflight() preflightReport {
 			report.Missing = append(report.Missing, component.Name)
 		}
 	}
+	report.Provenance = inspectRuntimeProvenance(versionRoot, versionRoot)
+	if !report.Provenance.OK {
+		report.Missing = append(report.Missing, "provenance")
+		if report.Detail == "" && len(report.Provenance.Issues) > 0 {
+			report.Detail = report.Provenance.Issues[0].Code + ": " + report.Provenance.Issues[0].Detail
+		}
+	}
 	report.Ready = len(report.Missing) == 0
 	return report
 }
 
 func managedComponentPath(name string) (string, bool) {
 	report := runtimePreflightCached(false)
-	if !report.Ready {
-		return "", false
+	for _, missing := range report.Missing {
+		if missing == "provenance" {
+			return "", false
+		}
 	}
 	for _, component := range report.Components {
 		if component.Name == name && component.OK {
@@ -526,7 +798,7 @@ func managedComponentPath(name string) (string, bool) {
 }
 
 func resolvePresentationPython() (string, error) {
-	if path := strings.TrimSpace(os.Getenv("AWAKEN_PYTHON")); path != "" {
+	if path := strings.TrimSpace(presentationRuntimeTestOverride("python")); path != "" {
 		if pythonCanImportPPTX(path) {
 			return path, nil
 		}
@@ -538,9 +810,9 @@ func resolvePresentationPython() (string, error) {
 }
 
 func resolveSoffice() (string, error) {
-	if path := strings.TrimSpace(os.Getenv("AWAKEN_SOFFICE")); path != "" {
-		if _, err := os.Stat(path); err == nil {
-			return path, nil
+	if path := strings.TrimSpace(presentationRuntimeTestOverride("libreoffice")); path != "" {
+		if soffice := findSofficeIn(path); soffice != "" {
+			return soffice, nil
 		}
 	}
 	if path, ok := managedComponentPath("libreoffice"); ok {
@@ -557,7 +829,7 @@ func resolvePopplerTool(name string) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("poppler tool name is required")
 	}
-	if bin := strings.TrimSpace(os.Getenv("AWAKEN_POPPLER_BIN")); bin != "" {
+	if bin := strings.TrimSpace(presentationRuntimeTestOverride("poppler")); bin != "" {
 		for _, toolName := range runtimeExecutableNames(name) {
 			candidate := filepath.Join(bin, toolName)
 			if _, err := os.Stat(candidate); err == nil {

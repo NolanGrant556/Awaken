@@ -42,6 +42,8 @@ export type AguiEventType =
   | "AWAKEN_USER_QUESTION_RESOLVED"
   | "AWAKEN_ARTIFACT_CREATED"
   | "AWAKEN_ARTIFACT_UPDATED"
+  | "AWAKEN_TOOL_RECOVERY_REQUIRED"
+  | "AWAKEN_TOOL_RETRY_BLOCKED"
   | "AWAKEN_UNKNOWN_EVENT";
 
 export type AguiApprovalRiskTone = "safe" | "warning" | "danger";

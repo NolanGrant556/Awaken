@@ -23,24 +23,26 @@ const (
 )
 
 type Runner struct {
-	config          AgentConfig
-	conversation    *context.Conversation
-	reqBuilder      *RequestBuilder
-	toolRuntime     *ToolRuntime
-	threadID        string
-	runID           string
-	sessionID       string
-	recorder        SemanticRecorder
-	contextGovernor *contextGovernor
-	streamLLMFunc   func(stdcontext.Context, *runEventEmitter) (*llm.Response, error)
+	config             AgentConfig
+	conversation       *context.Conversation
+	reqBuilder         *RequestBuilder
+	toolRuntime        *ToolRuntime
+	failureSupervisor  *FailureSupervisor
+	threadID           string
+	runID              string
+	sessionID          string
+	recorder           SemanticRecorder
+	contextGovernor    *contextGovernor
+	streamLLMFunc      func(stdcontext.Context, *runEventEmitter) (*llm.Response, error)
 }
 
 func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *RequestBuilder) *Runner {
 	runner := &Runner{
-		config:       config,
-		conversation: conv,
-		reqBuilder:   reqBuilder,
-		toolRuntime:  NewToolRuntimeWithConfig(nil, toolRuntimeConfigFromAgentConfig(config)),
+		config:            config,
+		conversation:      conv,
+		reqBuilder:        reqBuilder,
+		toolRuntime:       NewToolRuntimeWithConfig(nil, toolRuntimeConfigFromAgentConfig(config)),
+		failureSupervisor: NewFailureSupervisor(config.Workspace.Root, config.MaxThoughts, config.MaxToolExecutions),
 	}
 	runner.contextGovernor = newContextGovernor(
 		NewContextEngine(contextWindowConfigFromModelConfig(config.ModelConfig)),
@@ -65,12 +67,13 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 	if err := events.runStarted(ctx); err != nil {
 		return "", err
 	}
-	turnState := newTurnState(events.threadID, events.runID, r.config.MaxThoughts, r.config.ModelConfig.Model)
+	turnState := newTurnState(events.threadID, events.runID, r.effectiveMaxThoughts(), r.config.ModelConfig.Model)
 	transition := TransitionInitial
 	maxOutputContinuations := 0
 	var continuedOutput strings.Builder
+	maxThoughts := r.effectiveMaxThoughts()
 
-	for i := 0; !hasMaxThoughtsLimit(r.config.MaxThoughts) || i < r.config.MaxThoughts; i++ {
+	for i := 0; i < maxThoughts; i++ {
 		select {
 		case <-ctx.Done():
 			r.injectSyntheticToolResultsForCancel()
@@ -79,6 +82,9 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 		default:
 		}
 
+		if r.failureSupervisor != nil {
+			r.failureSupervisor.BeginTurn()
+		}
 		turnState = turnState.nextTurn(r.conversation.Context.GetMessages(), transition)
 		events.turnStarted(turnState)
 
@@ -182,7 +188,7 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 		return finalContent, nil
 	}
 
-	err := maxThoughtsError(r.config.MaxThoughts)
+	err := maxThoughtsError(maxThoughts)
 	events.runErrored(ctx, err, TerminalReasonMaxTurns)
 	return "", err
 }
@@ -330,11 +336,44 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 	results := make([]ToolExecutionResult, 0, len(toolCalls))
 	runCtx, cancel := stdcontext.WithCancel(ctx)
 	defer cancel()
+	var terminateReason TerminalReason
 	for _, call := range toolCalls {
 		if runCtx.Err() != nil {
 			results = append(results, syntheticCancelledToolResult(call))
 			continue
 		}
+		if terminateReason != "" {
+			results = append(results, syntheticCancelledToolResult(call))
+			continue
+		}
+
+		before := BeforeCallDecision{Allow: true}
+		if r.failureSupervisor != nil {
+			before = r.failureSupervisor.BeforeCall(call)
+		}
+		if before.Block {
+			result := SyntheticBlockedResult(call, before)
+			if events != nil {
+				if err := events.emitToolCall(runCtx, call); err != nil {
+					cancel()
+					results = append(results, syntheticCancelledToolResult(call))
+					continue
+				}
+				events.emitToolRetryBlocked(call, before)
+				_ = events.emitToolResultBatch(runCtx, result, nil)
+				events.emitRecoveryDecision(call, before.RecoveryOptions, before.ErrorCode, true)
+			}
+			results = append(results, result)
+			if before.TerminateRun || before.TerminateTurn {
+				terminateReason = before.TerminalReason
+				if terminateReason == "" {
+					terminateReason = TerminalReasonRepeatedToolFailure
+				}
+				cancel()
+			}
+			continue
+		}
+
 		if events != nil {
 			if err := events.emitToolCall(runCtx, call); err != nil {
 				cancel()
@@ -348,6 +387,10 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 			continue
 		}
 
+		if r.failureSupervisor != nil {
+			r.failureSupervisor.NoteRealExecution(before.CallSignature)
+		}
+
 		var buffer *artifactBufferingSink
 		if events != nil {
 			buffer = &artifactBufferingSink{inner: normalizeEventSink(events.sink)}
@@ -357,6 +400,29 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 		if events != nil {
 			r.toolRuntime.sink = events.sink
 		}
+
+		if r.failureSupervisor != nil {
+			after := r.failureSupervisor.AfterOutcome(call, result.Outcome)
+			if len(after.RecoveryOptions) > 0 || after.RecoveryRequired {
+				result.Outcome = ApplyRecoveryToOutcome(result.Outcome, after.RecoveryOptions, after.RecoveryRequired)
+				result.Content = result.Outcome.ModelPayload()
+				result.IsError = result.Outcome.IsError()
+			}
+			if after.RecoveryRequired {
+				if events != nil {
+					events.emitToolRecoveryRequired(call, after)
+					events.emitRecoveryDecision(call, after.RecoveryOptions, result.Outcome.ErrorCode, false)
+				}
+			}
+			if after.TerminateRun || after.TerminateTurn {
+				terminateReason = after.TerminalReason
+				if terminateReason == "" {
+					terminateReason = TerminalReasonRepeatedToolFailure
+				}
+				cancel()
+			}
+		}
+
 		r.applyImplicitSkillActivation(call.Function.Name, result)
 		results = append(results, result)
 		if events != nil && call.Function.Name == "apply_patch" && !result.IsError {
@@ -384,6 +450,9 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 				))
 			}
 		}
+	}
+	if terminateReason != "" && events != nil {
+		events.setPendingTerminalReason(terminateReason)
 	}
 	return results
 }
@@ -430,6 +499,14 @@ func (r *Runner) stopAfterToolExchangeIfNeeded(ctx stdcontext.Context, events *r
 		}
 		return true, runErr
 	}
+	if events != nil && events.pendingTerminalReason != "" {
+		reason := events.pendingTerminalReason
+		events.pendingTerminalReason = ""
+		runErr := fmt.Errorf("tool failure budget exceeded: %s", reason)
+		events.turnFinished(ctx, reason, "")
+		events.runErrored(ctx, runErr, reason)
+		return true, runErr
+	}
 	if ctx.Err() != nil {
 		if events != nil {
 			events.turnFinished(ctx, TerminalReasonAbortedTools, "")
@@ -437,8 +514,9 @@ func (r *Runner) stopAfterToolExchangeIfNeeded(ctx stdcontext.Context, events *r
 		}
 		return true, ctx.Err()
 	}
-	if hasMaxThoughtsLimit(r.config.MaxThoughts) && turnIndex+1 >= r.config.MaxThoughts {
-		err := maxThoughtsError(r.config.MaxThoughts)
+	maxThoughts := r.effectiveMaxThoughts()
+	if turnIndex+1 >= maxThoughts {
+		err := maxThoughtsError(maxThoughts)
 		if events != nil {
 			events.turnFinished(ctx, TerminalReasonMaxTurns, "")
 			events.runErrored(ctx, err, TerminalReasonMaxTurns)
@@ -514,8 +592,14 @@ func maxThoughtsError(maxThoughts int) error {
 	return fmt.Errorf("达到最大思考次数 %d，未能完成任务", maxThoughts)
 }
 
-func hasMaxThoughtsLimit(maxThoughts int) bool {
-	return maxThoughts > 0
+func (r *Runner) effectiveMaxThoughts() int {
+	if r == nil {
+		return DefaultMaxAgentTurns
+	}
+	if r.failureSupervisor != nil {
+		return r.failureSupervisor.MaxAgentTurns()
+	}
+	return EffectiveMaxAgentTurns(r.config.MaxThoughts)
 }
 
 func syntheticCancelledToolResult(call context.ToolCall) ToolExecutionResult {
@@ -568,20 +652,21 @@ func llmToolCallsToContext(toolCalls []llm.ToolCall) []context.ToolCall {
 }
 
 type runEventEmitter struct {
-	sink                EventSink
-	recorder            SemanticRecorder
-	sessionID           string
-	threadID            string
-	runID               string
-	turnState           TurnState
-	currentAssistantID  string
-	textMessageID       string
-	reasoningMessageID  string
-	textOpen            bool
-	reasoningOpen       bool
-	textStartedThisTurn bool
-	mutationOccurred    bool
-	assistantText       strings.Builder
+	sink                   EventSink
+	recorder               SemanticRecorder
+	sessionID              string
+	threadID               string
+	runID                  string
+	turnState              TurnState
+	currentAssistantID     string
+	textMessageID          string
+	reasoningMessageID     string
+	textOpen               bool
+	reasoningOpen          bool
+	textStartedThisTurn    bool
+	mutationOccurred       bool
+	assistantText          strings.Builder
+	pendingTerminalReason  TerminalReason
 }
 
 func newRunEventEmitter(threadID string, sink EventSink) *runEventEmitter {
@@ -941,6 +1026,87 @@ func applyToolOutcomeFields(event *AwakenEvent, result ToolExecutionResult) {
 
 func (e *runEventEmitter) markMutation() {
 	e.mutationOccurred = true
+}
+
+func (e *runEventEmitter) setPendingTerminalReason(reason TerminalReason) {
+	if e == nil || reason == "" {
+		return
+	}
+	e.pendingTerminalReason = reason
+}
+
+func (e *runEventEmitter) emitToolRetryBlocked(call context.ToolCall, decision BeforeCallDecision) {
+	if e == nil {
+		return
+	}
+	event := AwakenEvent{
+		Type:            ToolRetryBlockedEventType,
+		ToolCallID:      call.ID,
+		ToolName:        call.Function.Name,
+		Content:         decision.ErrorMessage,
+		Error:           decision.ErrorMessage,
+		ErrorCode:       decision.ErrorCode,
+		ErrorCategory:   string(tool.ErrorCategoryPolicy),
+		Retryable:       false,
+		RecoveryOptions: append([]string(nil), decision.RecoveryOptions...),
+		ToolStatus:      string(tool.OutcomeDenied),
+		TransportStatus: string(tool.TransportNotStarted),
+		SemanticStatus:  string(tool.SemanticFailure),
+		ProcessStatus:   string(tool.ProcessNotApplicable),
+	}
+	e.emit(event)
+}
+
+func (e *runEventEmitter) emitToolRecoveryRequired(call context.ToolCall, after AfterOutcomeDecision) {
+	if e == nil {
+		return
+	}
+	msg := ""
+	if after.Directive != nil {
+		msg = after.Directive.Message
+	}
+	event := AwakenEvent{
+		Type:            ToolRecoveryRequiredEventType,
+		ToolCallID:      call.ID,
+		ToolName:        call.Function.Name,
+		Content:         msg,
+		ErrorCode:       "",
+		RecoveryOptions: append([]string(nil), after.RecoveryOptions...),
+		Retryable:       true,
+	}
+	if after.Directive != nil {
+		event.ErrorCode = after.Directive.ErrorCode
+		event.Code = after.Directive.ErrorCode
+	}
+	e.emit(event)
+}
+
+func (e *runEventEmitter) emitRecoveryDecision(call context.ToolCall, options []string, errorCode string, blocked bool) {
+	if e == nil || e.recorder == nil {
+		return
+	}
+	msg := "tool recovery required"
+	if blocked {
+		msg = "tool retry blocked"
+	}
+	payload := map[string]any{
+		"tool_call_id":      call.ID,
+		"tool_name":         call.Function.Name,
+		"error_code":        errorCode,
+		"blocked":           blocked,
+		"recovery_options":  append([]string(nil), options...),
+		"recovery_required": true,
+		"message":           msg,
+	}
+	_ = e.recorder.Append(stdcontext.Background(), NewSemanticRecord(
+		SemanticKindRecoveryDecision,
+		e.threadID,
+		e.runID,
+		e.turnID(),
+		call.ID,
+		e.sessionID,
+		payload,
+	))
 }
 
 func (e *runEventEmitter) emitContextWindow(state ContextWindowState) {

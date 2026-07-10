@@ -237,6 +237,25 @@ export function projectAguiEventToNarrative(
             ? "done"
             : "active",
       );
+    case "AWAKEN_TOOL_RECOVERY_REQUIRED":
+    case "AWAKEN_TOOL_RETRY_BLOCKED":
+      return commitRuntimeNotice(
+        base,
+        event,
+        event.type === "AWAKEN_TOOL_RETRY_BLOCKED" ? "retry-blocked" : "recovery",
+        event.type === "AWAKEN_TOOL_RETRY_BLOCKED"
+          ? "Tool retry blocked"
+          : "Tool recovery required",
+        [
+          event.toolCallName,
+          event.errorCode ?? event.code,
+          event.message,
+          ...(event.recoveryOptions ?? []),
+        ]
+          .filter(Boolean)
+          .join(" | "),
+        "error",
+      );
     case "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED":
     case "AWAKEN_MASS_MESSAGE_REVIEW_RESOLVED":
       return commitRuntimeNotice(

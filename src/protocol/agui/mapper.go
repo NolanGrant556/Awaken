@@ -340,6 +340,22 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.ArtifactContent = event.ArtifactContent
 		base.ArtifactStatus = string(event.ArtifactStatus)
 		return []Event{base}
+	case agentcore.ToolRecoveryRequiredEventType:
+		base.Type = EventAwakenToolRecoveryRequired
+		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
+		base.Message = firstNonEmpty(event.Content, event.Error)
+		base.Code = firstNonEmpty(event.Code, event.ErrorCode)
+		copyToolOutcomeFields(&base, event)
+		return []Event{base}
+	case agentcore.ToolRetryBlockedEventType:
+		base.Type = EventAwakenToolRetryBlocked
+		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
+		base.Message = firstNonEmpty(event.Content, event.Error)
+		base.Code = firstNonEmpty(event.Code, event.ErrorCode)
+		copyToolOutcomeFields(&base, event)
+		return []Event{base}
 	default:
 		base.Type = EventAwakenUnknown
 		base.RawType = string(event.Type)

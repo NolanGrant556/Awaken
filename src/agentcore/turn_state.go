@@ -24,20 +24,22 @@ const (
 )
 
 const (
-	TerminalReasonCompleted        TerminalReason = "completed"
-	TerminalReasonCancelled        TerminalReason = "cancelled"
-	TerminalReasonAbortedStreaming TerminalReason = "aborted_streaming"
-	TerminalReasonAbortedTools     TerminalReason = "aborted_tools"
-	TerminalReasonMaxTurns         TerminalReason = "max_turns"
-	TerminalReasonContextWarning   TerminalReason = "context_warning"
-	TerminalReasonContextBlocked   TerminalReason = "context_blocked"
-	TerminalReasonPromptTooLong    TerminalReason = "prompt_too_long"
-	TerminalReasonCompactFailed    TerminalReason = "compact_failed"
-	TerminalReasonModelError       TerminalReason = "model_error"
-	TerminalReasonToolPairingError TerminalReason = "tool_pairing_error"
-	TerminalReasonEmptyResponse    TerminalReason = "empty_response"
-	TerminalReasonToolPolicyAbort  TerminalReason = "tool_policy_abort"
-	TerminalReasonMaxOutputReached TerminalReason = "max_output_reached"
+	TerminalReasonCompleted            TerminalReason = "completed"
+	TerminalReasonCancelled            TerminalReason = "cancelled"
+	TerminalReasonAbortedStreaming     TerminalReason = "aborted_streaming"
+	TerminalReasonAbortedTools         TerminalReason = "aborted_tools"
+	TerminalReasonMaxTurns             TerminalReason = "max_turns"
+	TerminalReasonContextWarning       TerminalReason = "context_warning"
+	TerminalReasonContextBlocked       TerminalReason = "context_blocked"
+	TerminalReasonPromptTooLong        TerminalReason = "prompt_too_long"
+	TerminalReasonCompactFailed        TerminalReason = "compact_failed"
+	TerminalReasonModelError           TerminalReason = "model_error"
+	TerminalReasonToolPairingError     TerminalReason = "tool_pairing_error"
+	TerminalReasonEmptyResponse        TerminalReason = "empty_response"
+	TerminalReasonToolPolicyAbort      TerminalReason = "tool_policy_abort"
+	TerminalReasonMaxOutputReached     TerminalReason = "max_output_reached"
+	TerminalReasonRepeatedToolFailure  TerminalReason = "repeated_tool_failure"
+	TerminalReasonPersistenceError     TerminalReason = "persistence_error"
 )
 
 type TurnState struct {

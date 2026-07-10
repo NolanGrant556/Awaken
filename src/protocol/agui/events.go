@@ -46,6 +46,8 @@ const (
 	EventAwakenUserQuestionResolved  EventType = "AWAKEN_USER_QUESTION_RESOLVED"
 	EventAwakenArtifactCreated       EventType = "AWAKEN_ARTIFACT_CREATED"
 	EventAwakenArtifactUpdated       EventType = "AWAKEN_ARTIFACT_UPDATED"
+	EventAwakenToolRecoveryRequired  EventType = "AWAKEN_TOOL_RECOVERY_REQUIRED"
+	EventAwakenToolRetryBlocked      EventType = "AWAKEN_TOOL_RETRY_BLOCKED"
 	EventAwakenUnknown               EventType = "AWAKEN_UNKNOWN_EVENT"
 )
 

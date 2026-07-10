@@ -194,4 +194,28 @@ describe("projectAguiEventToNarrative", () => {
       toolStatus: "failed",
     });
   });
+
+  it("surfaces tool recovery required and retry blocked notices", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_TOOL_RECOVERY_REQUIRED",
+      toolCallId: "call-1",
+      toolCallName: "apply_patch",
+      errorCode: "patch_context_mismatch",
+      message: "recovery_required",
+      recoveryOptions: ["read_file", "use_text_edit"],
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_TOOL_RETRY_BLOCKED",
+      toolCallId: "call-2",
+      toolCallName: "apply_patch",
+      errorCode: "tool_retry_blocked",
+      message: "blocked repeated tool call",
+      recoveryOptions: ["change_strategy"],
+    });
+
+    const notices = state.committedItems.filter((item) => item.kind === "tool");
+    expect(notices.some((item) => item.kind === "tool" && item.title === "Tool recovery required")).toBe(true);
+    expect(notices.some((item) => item.kind === "tool" && item.title === "Tool retry blocked")).toBe(true);
+  });
 });

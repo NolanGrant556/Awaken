@@ -10,9 +10,13 @@ import (
 
 type AgentConfig struct {
 	SystemPrompt string
-	// MaxThoughts <= 0 means the runner has no turn-count limit.
-	MaxThoughts    int
-	ModelConfig    ModelConfig
+	// MaxThoughts is the max agent turns. <= 0 uses DefaultMaxAgentTurns (128);
+	// it no longer means unlimited.
+	MaxThoughts int
+	// MaxToolExecutions caps real tool executions per run. <= 0 uses
+	// DefaultMaxToolExecutions (512).
+	MaxToolExecutions int
+	ModelConfig       ModelConfig
 	EntryPoint     string
 	Workspace      WorkspaceConfig
 	SkillSummary   string

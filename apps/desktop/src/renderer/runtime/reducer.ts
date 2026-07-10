@@ -2130,6 +2130,31 @@ export function reduceRuntimeState(
           });
           break;
         }
+        case "AWAKEN_TOOL_RECOVERY_REQUIRED":
+        case "AWAKEN_TOOL_RETRY_BLOCKED": {
+          const recoveryKey = [
+            action.event.toolCallId,
+            action.event.toolCallName,
+            action.event.errorCode ?? action.event.code,
+          ]
+            .filter(Boolean)
+            .join(":");
+          const blocked = action.event.type === "AWAKEN_TOOL_RETRY_BLOCKED";
+          records = upsertStep(records, `recovery:${recoveryKey || "tool"}`, {
+            title: blocked ? "Tool retry blocked" : "Tool recovery required",
+            description: [
+              action.event.toolCallName,
+              action.event.errorCode ?? action.event.code,
+              action.event.message,
+              ...(action.event.recoveryOptions ?? []),
+            ]
+              .filter(Boolean)
+              .join(" | "),
+            status: "error",
+            tag: blocked ? "retry-blocked" : "recovery",
+          });
+          break;
+        }
         case "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED": {
           const reviewId = action.event.reviewId ?? action.event.toolCallId ?? "mass-message";
           nextState.massMessageReviews = upsertMassMessageReview(

@@ -9,6 +9,7 @@ import {
   type PetManifest,
   type PetOverlayPlacement,
   type PetSettings,
+  type PetSpriteVersion,
   type PetSource,
   type PetSummary,
   petAssetUrl,
@@ -98,12 +99,15 @@ function normalizeManifest(value: unknown): PetManifest | null {
   ) {
     return null;
   }
+  const spriteVersionNumber =
+    candidate.spriteVersionNumber === 2 ? 2 : 1;
   return {
     schemaVersion: 1,
     id: candidate.id,
     sourceId: candidate.sourceId,
     displayName: candidate.displayName,
     description: candidate.description,
+    spriteVersionNumber,
     spritesheetFile,
     source,
     sourcePath: typeof candidate.sourcePath === "string" ? candidate.sourcePath : undefined,
@@ -334,6 +338,7 @@ export class PetStore {
       sourceId: string;
       displayName: string;
       description: string;
+      spriteVersionNumber?: PetSpriteVersion;
       spritesheetSourcePath: string;
       sourcePath: string;
     },
@@ -347,6 +352,7 @@ export class PetStore {
         sourceId: input.sourceId,
         displayName: input.displayName,
         description: input.description,
+        spriteVersionNumber: input.spriteVersionNumber ?? 1,
         extension: path.extname(input.spritesheetSourcePath).toLowerCase(),
       }),
     );
@@ -362,6 +368,7 @@ export class PetStore {
           ...existing,
           displayName: input.displayName,
           description: input.description,
+          spriteVersionNumber: existing.spriteVersionNumber,
           sourcePath: input.sourcePath,
           importedAt: new Date().toISOString(),
         };
@@ -379,6 +386,7 @@ export class PetStore {
       sourceId: input.sourceId,
       displayName: input.displayName,
       description: input.description,
+      spriteVersionNumber: input.spriteVersionNumber ?? 1,
       spritesheetFile: `spritesheet${ext}`,
       source: input.source,
       sourcePath: input.sourcePath,
@@ -484,6 +492,7 @@ export class PetStore {
       displayName: manifest.displayName,
       description: manifest.description,
       source: manifest.source,
+      spriteVersionNumber: manifest.spriteVersionNumber,
       spritesheetUrl: petAssetUrl(manifest.id, manifest.sourceFingerprint),
       available: true,
       warning: sourceMissing ? "Codex 源包已缺失，正在使用 Awaken 副本" : undefined,

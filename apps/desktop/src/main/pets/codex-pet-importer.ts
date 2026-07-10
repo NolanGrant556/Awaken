@@ -85,6 +85,7 @@ export async function importCodexPets(
         sourceId,
         displayName: validation.value.displayName,
         description: validation.value.description,
+        spriteVersionNumber: validation.value.spriteVersionNumber,
         spritesheetSourcePath: validation.value.spritesheetPath,
         sourcePath: candidate.petDir,
       });

@@ -154,17 +154,6 @@ export function PetOverlayApp() {
       const width = rect.width;
       const height = rect.height;
       if (width > 0 && height > 0) {
-        console.debug("[awaken-pet-debug] bounds:report", {
-          borderBox: { width, height },
-          contentRect: {
-            width: entry.contentRect.width,
-            height: entry.contentRect.height,
-          },
-          offset: {
-            width: element.offsetWidth,
-            height: element.offsetHeight,
-          },
-        });
         bridge.reportBounds({ width: Math.round(width), height: Math.round(height) });
       }
     });
@@ -330,7 +319,7 @@ export function PetOverlayApp() {
     <div className="pet-overlay-root">
       <div
         ref={hitAreaRef}
-        className="pet-hit-area"
+        className={`pet-hit-area${activeNotification ? " pet-hit-area-with-bubble" : ""}`}
         onPointerEnter={() => setHover(true)}
         onPointerLeave={() => setHover(false)}
       >
@@ -416,6 +405,7 @@ export function PetOverlayApp() {
           >
             <PetSprite
               spritesheetUrl={bootstrap.spritesheetUrl}
+              spriteVersionNumber={bootstrap.spriteVersionNumber}
               state={animationState}
               widthPx={mascotWidth}
             />

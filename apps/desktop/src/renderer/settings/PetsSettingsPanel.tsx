@@ -5,7 +5,12 @@ import {
   AwakenTooltip as Tooltip,
 } from "@awaken/design-system";
 import type { RuntimeClient } from "../runtime/client";
-import type { PetImportReport, PetSettings, PetSummary } from "../../shared/pets";
+import {
+  petSheetRowsForVersion,
+  type PetImportReport,
+  type PetSettings,
+  type PetSummary,
+} from "../../shared/pets";
 import { PetSprite } from "../pet-overlay/PetSprite";
 
 type PetsSettingsPanelProps = {
@@ -14,11 +19,14 @@ type PetsSettingsPanelProps = {
 
 function PetStaticPreview({
   spritesheetUrl,
+  spriteVersionNumber,
   widthPx,
 }: {
   spritesheetUrl: string;
+  spriteVersionNumber: PetSummary["spriteVersionNumber"];
   widthPx?: number;
 }) {
+  const sheetRows = petSheetRowsForVersion(spriteVersionNumber);
   return (
     <div
       className="pet-static-preview"
@@ -26,6 +34,7 @@ function PetStaticPreview({
       aria-label="宠物预览"
       style={{
         ["--pet-static-preview-width" as string]: `${widthPx ?? 56}px`,
+        ["--pet-sheet-rows" as string]: sheetRows,
         backgroundImage: `url(${spritesheetUrl})`,
       }}
     />
@@ -157,6 +166,7 @@ export function PetsSettingsPanel({ runtimeClient }: PetsSettingsPanelProps) {
           {selectedPet?.spritesheetUrl ? (
             <PetSprite
               spritesheetUrl={selectedPet.spritesheetUrl}
+              spriteVersionNumber={selectedPet.spriteVersionNumber}
               state="waiting"
               widthPx={80}
             />
@@ -224,7 +234,10 @@ export function PetsSettingsPanel({ runtimeClient }: PetsSettingsPanelProps) {
                   disabled={!pet.available}
                 />
                 {pet.spritesheetUrl ? (
-                  <PetStaticPreview spritesheetUrl={pet.spritesheetUrl} />
+                  <PetStaticPreview
+                    spritesheetUrl={pet.spritesheetUrl}
+                    spriteVersionNumber={pet.spriteVersionNumber}
+                  />
                 ) : (
                   <div className="pet-static-preview pet-static-preview-placeholder" />
                 )}

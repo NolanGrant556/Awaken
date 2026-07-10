@@ -116,6 +116,140 @@ func TestPermissionContextResolvesSymlinksForWorkspaceBoundary(t *testing.T) {
 	}
 }
 
+func TestPermissionContextWriteResolversRejectLeafAndParentSymlinkEscapes(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	ctx := NewPermissionContext(workspace, nil)
+
+	outsideFile := filepath.Join(outside, "outside.txt")
+	if err := os.WriteFile(outsideFile, []byte("outside"), 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	leafLink := filepath.Join(workspace, "leaf-link.txt")
+	if err := os.Symlink(outsideFile, leafLink); err != nil {
+		t.Fatalf("create escaping leaf symlink: %v", err)
+	}
+	parentLink := filepath.Join(workspace, "parent-link")
+	if err := os.Symlink(outside, parentLink); err != nil {
+		t.Fatalf("create escaping parent symlink: %v", err)
+	}
+
+	resolvers := []struct {
+		name string
+		fn   func(string) (string, error)
+	}{
+		{name: "writable", fn: ctx.ResolveWritablePathChecked},
+		{name: "output", fn: ctx.ResolveOutputPathChecked},
+	}
+	for _, resolver := range resolvers {
+		t.Run(resolver.name+"/leaf", func(t *testing.T) {
+			if _, err := resolver.fn(leafLink); err == nil {
+				t.Fatal("expected escaping leaf symlink to be rejected")
+			}
+		})
+		t.Run(resolver.name+"/parent-existing-leaf", func(t *testing.T) {
+			if _, err := resolver.fn(filepath.Join(parentLink, filepath.Base(outsideFile))); err == nil {
+				t.Fatal("expected escaping parent symlink to be rejected for existing leaf")
+			}
+		})
+		t.Run(resolver.name+"/parent-nonexistent-leaf", func(t *testing.T) {
+			if _, err := resolver.fn(filepath.Join(parentLink, "new.txt")); err == nil {
+				t.Fatal("expected escaping parent symlink to be rejected for nonexistent leaf")
+			}
+		})
+	}
+}
+
+func TestPermissionContextWriteResolversAllowNonexistentLeafAndInsideSymlinks(t *testing.T) {
+	workspace := t.TempDir()
+	insideDir := filepath.Join(workspace, "inside")
+	if err := os.MkdirAll(insideDir, 0o755); err != nil {
+		t.Fatalf("create inside directory: %v", err)
+	}
+	insideFile := filepath.Join(insideDir, "existing.txt")
+	if err := os.WriteFile(insideFile, []byte("inside"), 0o644); err != nil {
+		t.Fatalf("write inside file: %v", err)
+	}
+	leafLink := filepath.Join(workspace, "inside-leaf-link.txt")
+	if err := os.Symlink(insideFile, leafLink); err != nil {
+		t.Fatalf("create inside leaf symlink: %v", err)
+	}
+	parentLink := filepath.Join(workspace, "inside-parent-link")
+	if err := os.Symlink(insideDir, parentLink); err != nil {
+		t.Fatalf("create inside parent symlink: %v", err)
+	}
+
+	ctx := NewPermissionContext(workspace, nil)
+	resolvers := []struct {
+		name string
+		fn   func(string) (string, error)
+	}{
+		{name: "writable", fn: ctx.ResolveWritablePathChecked},
+		{name: "output", fn: ctx.ResolveOutputPathChecked},
+	}
+	for _, resolver := range resolvers {
+		t.Run(resolver.name+"/nonexistent-leaf", func(t *testing.T) {
+			path := filepath.Join(insideDir, "new.txt")
+			resolved, err := resolver.fn(path)
+			if err != nil {
+				t.Fatalf("expected nonexistent leaf under real parent to be allowed: %v", err)
+			}
+			if resolved != path {
+				t.Fatalf("expected lexical path %q, got %q", path, resolved)
+			}
+		})
+		t.Run(resolver.name+"/inside-leaf-symlink", func(t *testing.T) {
+			resolved, err := resolver.fn(leafLink)
+			if err != nil {
+				t.Fatalf("expected leaf symlink whose target remains inside root to be allowed: %v", err)
+			}
+			if resolved != leafLink {
+				t.Fatalf("expected lexical symlink path %q, got %q", leafLink, resolved)
+			}
+		})
+		t.Run(resolver.name+"/inside-parent-symlink", func(t *testing.T) {
+			path := filepath.Join(parentLink, "new.txt")
+			resolved, err := resolver.fn(path)
+			if err != nil {
+				t.Fatalf("expected parent symlink whose target remains inside root to be allowed: %v", err)
+			}
+			if resolved != path {
+				t.Fatalf("expected lexical path %q, got %q", path, resolved)
+			}
+		})
+	}
+}
+
+func TestPermissionContextWriteResolversAllowNonexistentConfiguredRoot(t *testing.T) {
+	workspace := t.TempDir()
+	generated := filepath.Join(workspace, "generated")
+	ctx := NewTaskScopePermissionContext(
+		"scope-nonexistent-root",
+		workspace,
+		nil,
+		[]string{generated},
+		[]string{generated},
+		nil,
+		nil,
+		filepath.Join(workspace, "tmp"),
+	)
+	path := filepath.Join(generated, "nested", "new.txt")
+	for name, resolver := range map[string]func(string) (string, error){
+		"writable": ctx.ResolveWritablePathChecked,
+		"output":   ctx.ResolveOutputPathChecked,
+	} {
+		t.Run(name, func(t *testing.T) {
+			resolved, err := resolver(path)
+			if err != nil {
+				t.Fatalf("expected path below nonexistent configured root to be allowed: %v", err)
+			}
+			if resolved != path {
+				t.Fatalf("expected %q, got %q", path, resolved)
+			}
+		})
+	}
+}
+
 func TestPermissionContextReadablePathsAllowOutsideWorkspace(t *testing.T) {
 	workspace := t.TempDir()
 	outside := t.TempDir()

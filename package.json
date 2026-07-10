@@ -10,6 +10,7 @@
     "close:desktop": "node scripts/close-desktop.mjs",
     "prepare:runtime": "node scripts/prepare-primary-runtime.mjs",
     "check:runtime": "node scripts/check-primary-runtime.mjs",
+    "test:runtime": "node --test scripts/tests/primary-runtime.test.mjs",
     "open:ui": "node scripts/open-ui.mjs",
     "dev:ui": "npm --workspace @awaken/design-system run dev",
     "build:ui": "npm --workspace @awaken/design-system run build",

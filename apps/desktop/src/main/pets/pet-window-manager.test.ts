@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { PetStore } from "./pet-store.js";
+import { BrowserWindow } from "electron";
 import {
   PET_OVERLAY_MAX_HEIGHT,
   PET_OVERLAY_MAX_WIDTH,
@@ -25,28 +26,35 @@ vi.mock("electron", () => ({
       return `/tmp/${name}`;
     },
   },
-  BrowserWindow: vi.fn().mockImplementation(() => ({
-    webContents: {
-      id: 1,
-      send: vi.fn(),
+  BrowserWindow: vi.fn().mockImplementation(function BrowserWindowMock() {
+    return {
+      webContents: {
+        id: 1,
+        send: vi.fn(),
+        on: vi.fn(),
+        setWindowOpenHandler: vi.fn(),
+      },
       on: vi.fn(),
-      setWindowOpenHandler: vi.fn(),
-    },
-    setPosition: vi.fn(),
-    setBounds: vi.fn(),
-    setShape: vi.fn(),
-    getBounds: vi.fn(() => ({ x: 100, y: 100, width: 384, height: 400 })),
-    setIgnoreMouseEvents: vi.fn(),
-    setVisibleOnAllWorkspaces: vi.fn(),
-    setAlwaysOnTop: vi.fn(),
-    show: vi.fn(),
-    hide: vi.fn(),
-    close: vi.fn(),
-    isDestroyed: vi.fn(() => false),
-    isVisible: vi.fn(() => true),
-    loadURL: vi.fn().mockResolvedValue(undefined),
-    loadFile: vi.fn().mockResolvedValue(undefined),
-  })),
+      setPosition: vi.fn(),
+      setBounds: vi.fn(),
+      setShape: vi.fn(),
+      getBounds: vi.fn(() => ({ x: 100, y: 100, width: 384, height: 400 })),
+      setIgnoreMouseEvents: vi.fn(),
+      setVisibleOnAllWorkspaces: vi.fn(),
+      setAlwaysOnTop: vi.fn(),
+      show: vi.fn(),
+      showInactive: vi.fn(),
+      hide: vi.fn(),
+      close: vi.fn(),
+      moveTop: vi.fn(),
+      isDestroyed: vi.fn(() => false),
+      isVisible: vi.fn(() => true),
+      isMinimized: vi.fn(() => false),
+      restore: vi.fn(),
+      loadURL: vi.fn().mockResolvedValue(undefined),
+      loadFile: vi.fn().mockResolvedValue(undefined),
+    };
+  }),
   ipcMain: {
     handle: vi.fn(),
     on: vi.fn(),
@@ -84,6 +92,17 @@ vi.mock("electron", () => ({
 
 async function createTempDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), "awaken-pet-window-"));
+}
+
+async function createSpritesheet(dir: string, name = "spritesheet.webp"): Promise<string> {
+  const file = path.join(dir, name);
+  // A minimal valid WebP image (1x1 pixel, lossy).
+  const webp = Buffer.from(
+    "524946461a0000005745425056503820 0d0000009d012a0000fa00ba017d01",
+    "hex",
+  );
+  await fs.writeFile(file, webp);
+  return file;
 }
 
 describe("PetWindowManager", () => {
@@ -125,6 +144,42 @@ describe("PetWindowManager", () => {
     await manager.initialize();
     await manager.show();
     expect(manager.isOpen()).toBe(false);
+  });
+
+  it("creates a screen-recording resilient overlay when a pet is selected", async () => {
+    const spritesheet = await createSpritesheet(tempDir);
+    await store.importOrUpdatePet({
+      source: "codex-custom",
+      sourceId: "my-pet",
+      displayName: "My Pet",
+      description: "A pet.",
+      spritesheetSourcePath: spritesheet,
+      sourcePath: "/fake/codex/pets/my-pet",
+    });
+    await store.selectPet("codex-custom:my-pet");
+
+    const manager = new PetWindowManager({
+      petStore: store,
+      focusMainWindow: vi.fn(),
+      activateThread: vi.fn(),
+      getRuntimeBaseUrl: () => null,
+    });
+    await manager.initialize();
+    await manager.show();
+
+    expect(manager.isOpen()).toBe(true);
+    const ctorCalls = vi.mocked(BrowserWindow).mock.calls;
+    const lastCall = ctorCalls[ctorCalls.length - 1]?.[0];
+    expect(lastCall).toMatchObject({
+      paintWhenInitiallyHidden: true,
+      webPreferences: expect.objectContaining({
+        backgroundThrottling: false,
+      }),
+    });
+
+    const win = vi.mocked(BrowserWindow).mock.results[ctorCalls.length - 1]?.value;
+    expect(win.showInactive).toHaveBeenCalled();
+    expect(win.setAlwaysOnTop).toHaveBeenCalledWith(true, "screen-saver");
   });
 });
 

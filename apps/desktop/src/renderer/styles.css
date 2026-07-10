@@ -1172,7 +1172,7 @@ pre {
   width: var(--pet-width);
   aspect-ratio: 192 / 208;
   background-repeat: no-repeat;
-  background-size: 800% 900%;
+  background-size: 800% calc(var(--pet-sheet-rows, 9) * 100%);
   image-rendering: auto;
   user-select: none;
   -webkit-user-drag: none;
@@ -1322,7 +1322,7 @@ pre {
   aspect-ratio: 192 / 208;
   background-repeat: no-repeat;
   background-position: 0% 0%;
-  background-size: 800% 900%;
+  background-size: 800% calc(var(--pet-sheet-rows, 9) * 100%);
   border-radius: var(--aw-radius-sm);
   image-rendering: auto;
   user-select: none;

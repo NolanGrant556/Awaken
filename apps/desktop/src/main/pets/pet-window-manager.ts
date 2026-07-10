@@ -21,13 +21,18 @@ import {
 } from "../../shared/pets.js";
 import type { PetStore } from "./pet-store.js";
 import { PET_ASSET_PROTOCOL, parsePetAssetUrl, PET_IPC_CHANNELS } from "./pet-protocol.js";
-
-export const PET_OVERLAY_MAX_WIDTH = 384;
-export const PET_OVERLAY_MAX_HEIGHT = 400;
-const fixedOverlaySize = {
-  width: PET_OVERLAY_MAX_WIDTH,
-  height: PET_OVERLAY_MAX_HEIGHT,
-};
+import {
+  clampPetOverlayBoundsToWorkArea,
+  fixedOverlaySize,
+  minOverlaySize,
+  normalizePetWindowBoundsForPlacement,
+  resolveBottomAnchoredDragTop,
+  resolvePetOverlayWindowSize,
+  resolveSavedPetWindowBounds,
+  resizePetWindowBoundsFromBottomRight,
+  stabilizePetWindowBounds,
+  type OverlaySize,
+} from "./pet-window-geometry.js";
 
 async function readErrorMessage(response: Response): Promise<string> {
   const fallback = `Runtime request failed (${response.status})`;
@@ -46,10 +51,6 @@ async function readErrorMessage(response: Response): Promise<string> {
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-
-const minOverlaySize = { width: 120, height: 120 };
-const legacyOversizedPlacementFactor = 1.5;
-const shapeClipSafetyPx = 2;
 
 type PetDragOrigin = {
   rendererX: number;
@@ -71,107 +72,6 @@ function isFinitePoint(point: unknown): point is ScreenPoint {
     typeof candidate.y === "number" &&
     Number.isFinite(candidate.y)
   );
-}
-
-export function sanitizePetOverlayContentSize(
-  width: number,
-  height: number,
-  fallback: { width: number; height: number } = minOverlaySize,
-): { width: number; height: number } {
-  return {
-    width: Math.max(
-      minOverlaySize.width,
-      Math.min(
-        PET_OVERLAY_MAX_WIDTH,
-        Math.round(Number.isFinite(width) ? width : fallback.width),
-      ),
-    ),
-    height: Math.max(
-      minOverlaySize.height,
-      Math.min(
-        PET_OVERLAY_MAX_HEIGHT,
-        Math.round(Number.isFinite(height) ? height : fallback.height),
-      ),
-    ),
-  };
-}
-
-export function resolvePetOverlayShape(
-  width: number,
-  height: number,
-): Rectangle {
-  const contentSize = sanitizePetOverlayContentSize(width, height);
-  const shapeWidth = Math.min(PET_OVERLAY_MAX_WIDTH, contentSize.width + shapeClipSafetyPx);
-  const shapeHeight = Math.min(PET_OVERLAY_MAX_HEIGHT, contentSize.height + shapeClipSafetyPx);
-  return {
-    x: 0,
-    y: fixedOverlaySize.height - shapeHeight,
-    width: shapeWidth,
-    height: shapeHeight,
-  };
-}
-
-export function normalizePetWindowBoundsForPlacement(bounds: Rectangle): Rectangle {
-  return {
-    x: bounds.x,
-    y: bounds.y,
-    ...fixedOverlaySize,
-  };
-}
-
-export function resolveSavedPetWindowBounds(savedBounds: Rectangle): Rectangle {
-  const isLegacyRunawayBounds =
-    savedBounds.width > fixedOverlaySize.width * legacyOversizedPlacementFactor ||
-    savedBounds.height > fixedOverlaySize.height * legacyOversizedPlacementFactor;
-
-  return {
-    x: savedBounds.x,
-    y: isLegacyRunawayBounds
-      ? savedBounds.y + savedBounds.height - fixedOverlaySize.height
-      : savedBounds.y,
-    ...fixedOverlaySize,
-  };
-}
-
-export function resolveBottomAnchoredDragTop(
-  originWindowY: number,
-  originWindowHeight: number,
-  dy: number,
-  observedWindowHeight: number,
-): number {
-  return Math.round(originWindowY + originWindowHeight + dy - observedWindowHeight);
-}
-
-export function stabilizePetWindowBounds(bounds: Rectangle): Rectangle {
-  return {
-    x: bounds.x,
-    y: bounds.y + bounds.height - fixedOverlaySize.height,
-    ...fixedOverlaySize,
-  };
-}
-
-export function clampPetOverlayBoundsToWorkArea(
-  bounds: Rectangle,
-  displayBounds: Rectangle,
-  visibleRegion: Rectangle = { x: 0, y: 0, ...fixedOverlaySize },
-): Rectangle {
-  const width = Math.min(fixedOverlaySize.width, displayBounds.width);
-  const height = Math.min(fixedOverlaySize.height, displayBounds.height);
-  const visibleWidth = Math.min(visibleRegion.width, displayBounds.width);
-  const visibleHeight = Math.min(visibleRegion.height, displayBounds.height);
-  const minX = displayBounds.x - visibleRegion.x;
-  const maxX = displayBounds.x + displayBounds.width - visibleRegion.x - visibleWidth;
-  const minY = displayBounds.y - visibleRegion.y;
-  const maxY = displayBounds.y + displayBounds.height - visibleRegion.y - visibleHeight;
-  const x = Math.min(
-    Math.max(bounds.x, Math.min(minX, maxX)),
-    Math.max(minX, maxX),
-  );
-  const y = Math.min(
-    Math.max(bounds.y, Math.min(minY, maxY)),
-    Math.max(minY, maxY),
-  );
-  return { x, y, width, height };
 }
 
 export function resolvePetWindowPaths(baseDir: string): {
@@ -198,6 +98,7 @@ export class PetWindowManager {
   private activateThread: (threadId: string) => void;
   private getRuntimeBaseUrl: () => string | null;
   private latestSnapshot: PetActivitySnapshot = { sessions: [], emittedAtMs: 0 };
+  private latestWindowSize: OverlaySize = fixedOverlaySize;
   private latestInteractiveRegion: Rectangle = { x: 0, y: 0, ...fixedOverlaySize };
   private dragOrigin: PetDragOrigin | null = null;
   private registeredHandlers = false;
@@ -298,14 +199,15 @@ export class PetWindowManager {
     if (!manifest) return;
 
     const placement = this.resolvePlacement();
+    this.latestWindowSize = { width: placement.width, height: placement.height };
+    this.latestInteractiveRegion = { x: 0, y: 0, ...this.latestWindowSize };
 
     const { preloadPath, rendererPath } = resolvePetWindowPaths(__dirname);
 
     this.window = new BrowserWindow({
-      ...fixedOverlaySize,
       ...placement,
-      minWidth: fixedOverlaySize.width,
-      minHeight: fixedOverlaySize.height,
+      minWidth: minOverlaySize.width,
+      minHeight: minOverlaySize.height,
       maxWidth: fixedOverlaySize.width,
       maxHeight: fixedOverlaySize.height,
       frame: false,
@@ -458,6 +360,7 @@ export class PetWindowManager {
       const bootstrap: PetOverlayBootstrap = {
         petId: manifest?.id ?? null,
         displayName: manifest?.displayName ?? null,
+        spriteVersionNumber: manifest?.spriteVersionNumber ?? 1,
         spritesheetUrl: manifest
           ? petAssetUrl(manifest.id, manifest.sourceFingerprint)
           : null,
@@ -477,8 +380,10 @@ export class PetWindowManager {
     ipcMain.on(PET_IPC_CHANNELS.petDragStart, (_event, point: unknown) => {
       if (!this.isOpen()) return;
       const rawBounds = this.window!.getBounds();
-      const stableBounds = stabilizePetWindowBounds(rawBounds);
+      const stableBounds = stabilizePetWindowBounds(rawBounds, this.latestWindowSize);
       if (
+        rawBounds.x !== stableBounds.x ||
+        rawBounds.y !== stableBounds.y ||
         rawBounds.width !== stableBounds.width ||
         rawBounds.height !== stableBounds.height
       ) {
@@ -523,7 +428,7 @@ export class PetWindowManager {
         dy,
         boundsBefore.height,
       );
-      const unclampedBounds = { x: nextX, y: nextY, ...fixedOverlaySize };
+      const unclampedBounds = { x: nextX, y: nextY, ...this.latestWindowSize };
       const targetDisplay = electronScreen.getDisplayMatching(unclampedBounds);
       const targetBounds = this.clampBoundsToDisplay(
         unclampedBounds,
@@ -538,13 +443,13 @@ export class PetWindowManager {
         boundsAfter.height,
       );
       const correctedBounds = this.clampBoundsToDisplay(
-        { x: targetBounds.x, y: correctedY, ...fixedOverlaySize },
+        { x: targetBounds.x, y: correctedY, ...this.latestWindowSize },
         targetDisplay.bounds,
       );
       if (
         Math.abs(boundsAfter.y - correctedBounds.y) > 0 ||
-        boundsAfter.width !== fixedOverlaySize.width ||
-        boundsAfter.height !== fixedOverlaySize.height
+        boundsAfter.width !== this.latestWindowSize.width ||
+        boundsAfter.height !== this.latestWindowSize.height
       ) {
         this.window!.setBounds(correctedBounds, false);
         boundsAfter = this.window!.getBounds();
@@ -683,14 +588,21 @@ export class PetWindowManager {
     }
 
     const displayBounds = primary.bounds;
+    const initialSize = this.resolveInitialWindowSize();
     return this.clampBoundsToDisplay(
       {
-        x: displayBounds.x + displayBounds.width - fixedOverlaySize.width - 24,
-        y: displayBounds.y + displayBounds.height - fixedOverlaySize.height - 24,
-        ...fixedOverlaySize,
+        x: displayBounds.x + displayBounds.width - initialSize.width - 24,
+        y: displayBounds.y + displayBounds.height - initialSize.height - 24,
+        ...initialSize,
       },
       displayBounds,
     );
+  }
+
+  private resolveInitialWindowSize(): OverlaySize {
+    const mascotWidth = this.petStore.getSettings().mascotWidthPx;
+    const mascotHeight = Math.round((mascotWidth / 192) * 208);
+    return resolvePetOverlayWindowSize(mascotWidth + 18, mascotHeight + 22);
   }
 
   private clampBoundsToDisplay(bounds: Rectangle, displayBounds: Rectangle): Rectangle {
@@ -712,11 +624,31 @@ export class PetWindowManager {
 
   private updateInteractiveRegion(width: number, height: number): void {
     if (!this.isOpen()) return;
-    this.latestInteractiveRegion = resolvePetOverlayShape(width, height);
+    const windowSize = resolvePetOverlayWindowSize(width, height);
+    const currentBounds = this.window!.getBounds();
+    const nextBounds = resizePetWindowBoundsFromBottomRight(currentBounds, windowSize);
+    const display = electronScreen.getDisplayMatching(nextBounds);
+    const clampedBounds = clampPetOverlayBoundsToWorkArea(
+      nextBounds,
+      display.bounds,
+      { x: 0, y: 0, ...windowSize },
+    );
+    if (
+      currentBounds.x !== clampedBounds.x ||
+      currentBounds.y !== clampedBounds.y ||
+      currentBounds.width !== clampedBounds.width ||
+      currentBounds.height !== clampedBounds.height
+    ) {
+      this.window!.setBounds(clampedBounds, false);
+    }
+    this.latestWindowSize = { width: clampedBounds.width, height: clampedBounds.height };
+    this.latestInteractiveRegion = { x: 0, y: 0, ...this.latestWindowSize };
     this.debugPet("shape:update", {
       reportedBounds: { width, height },
+      windowSize,
       shape: this.latestInteractiveRegion,
-      windowBounds: this.window!.getBounds(),
+      windowBoundsBefore: currentBounds,
+      windowBoundsAfter: this.window!.getBounds(),
       supportsShape: this.supportsWindowShape(),
     });
     if (this.supportsWindowShape()) {
@@ -738,7 +670,7 @@ export class PetWindowManager {
         )[0] ?? {
           displayId: electronScreen.getPrimaryDisplay().id.toString(),
           workArea: electronScreen.getPrimaryDisplay().workArea,
-          windowBounds: { x: 0, y: 0, ...fixedOverlaySize },
+          windowBounds: { x: 0, y: 0, ...minOverlaySize },
           mascotWidthPx: settings.mascotWidthPx,
           updatedAt: new Date().toISOString(),
         }
@@ -799,6 +731,7 @@ export class PetWindowManager {
     return {
       petId: manifest.id,
       displayName: manifest.displayName,
+      spriteVersionNumber: manifest.spriteVersionNumber,
       spritesheetUrl: petAssetUrl(manifest.id, manifest.sourceFingerprint),
       mascotWidthPx: settings.mascotWidthPx,
       isOpen: true,

@@ -26,7 +26,7 @@ body,
   width: var(--pet-width);
   aspect-ratio: 192 / 208;
   background-repeat: no-repeat;
-  background-size: 800% 900%;
+  background-size: 800% calc(var(--pet-sheet-rows, 9) * 100%);
   image-rendering: auto;
   pointer-events: auto;
   user-select: none;
@@ -37,7 +37,6 @@ body,
   position: absolute;
   left: 0;
   bottom: 0;
-  width: 330px;
   display: inline-grid;
   grid-template-rows: auto auto;
   justify-items: end;
@@ -45,6 +44,10 @@ body,
   padding: 14px 8px 8px 10px;
   background: transparent;
   pointer-events: auto;
+}
+
+.pet-hit-area-with-bubble {
+  width: 330px;
 }
 
 .pet-mascot-wrapper {

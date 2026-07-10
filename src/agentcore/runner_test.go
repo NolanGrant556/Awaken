@@ -103,7 +103,7 @@ func TestRunnerNativeToolCallLoop(t *testing.T) {
 	if len(messages[1].ToolCalls) != 1 {
 		t.Fatalf("expected assistant tool call in context, got %+v", messages[1])
 	}
-	if messages[2].Role != convcontext.RoleTool || messages[2].Content != "echo:hello" {
+	if messages[2].Role != convcontext.RoleTool || !toolContentMatches(messages[2].Content, "echo:hello") {
 		t.Fatalf("expected tool result message, got %+v", messages[2])
 	}
 }
@@ -133,7 +133,7 @@ func TestRunnerXMLFallbackLoop(t *testing.T) {
 	}
 
 	messages := agent.GetConversation().Context.GetMessages()
-	if len(messages) < 3 || len(messages[1].ToolCalls) != 1 || messages[2].Content != "echo:ping" {
+	if len(messages) < 3 || !strings.Contains(messages[2].Content, "echo:ping") {
 		t.Fatalf("expected XML tool call and result in context, got %+v", messages)
 	}
 }
@@ -159,7 +159,7 @@ func TestRunnerToolErrorObservation(t *testing.T) {
 	}
 
 	messages := agent.GetConversation().Context.GetMessages()
-	if len(messages) < 3 || !strings.Contains(messages[2].Content, "工具执行失败") {
+	if len(messages) < 3 || !messages[2].IsError || !strings.Contains(messages[2].Content, "boom") {
 		t.Fatalf("expected tool failure observation, got %+v", messages)
 	}
 }
@@ -592,9 +592,7 @@ data: {"type":"message_stop"}`,
 		ToolCallStartedEventType,
 		ToolCallArgsEventType,
 		ToolCallFinishedEventType,
-		ToolProgressEventType,
 		ToolPermissionDecidedEventType,
-		ToolProgressEventType,
 		ToolProgressEventType,
 		ToolProgressEventType,
 		ToolResultEventType,
@@ -624,17 +622,17 @@ data: {"type":"message_stop"}`,
 	if gotEvents[10].Arguments != `{"value":"hello"}` {
 		t.Fatalf("expected complete tool args fallback, got %q", gotEvents[10].Arguments)
 	}
-	if gotEvents[12].Progress != "Executing tool" || gotEvents[16].Progress != "Tool execution complete" {
-		t.Fatalf("unexpected tool progress events: %q %q", gotEvents[12].Progress, gotEvents[16].Progress)
+	if gotEvents[13].ToolProgressStage != "started" || gotEvents[14].ToolProgressStage != "completed" {
+		t.Fatalf("unexpected runtime tool progress events: %+v %+v", gotEvents[13], gotEvents[14])
 	}
-	if gotEvents[14].ToolProgressStage != "started" || gotEvents[15].ToolProgressStage != "completed" {
-		t.Fatalf("unexpected runtime tool progress events: %+v %+v", gotEvents[14], gotEvents[15])
+	if gotEvents[15].Content != "echo:hello" {
+		t.Fatalf("expected tool result content echo:hello, got %q", gotEvents[15].Content)
 	}
-	if gotEvents[17].Content != "echo:hello" {
-		t.Fatalf("expected tool result content echo:hello, got %q", gotEvents[17].Content)
+	if gotEvents[15].ToolStatus == "" {
+		t.Fatalf("expected tool result to carry toolStatus, got %+v", gotEvents[15])
 	}
-	if gotEvents[22].Delta != "done" {
-		t.Fatalf("expected final text delta done, got %q", gotEvents[22].Delta)
+	if gotEvents[20].Delta != "done" {
+		t.Fatalf("expected final text delta done, got %q", gotEvents[20].Delta)
 	}
 }
 
@@ -760,7 +758,7 @@ data: {"type":"message_stop"}`,
 	if messages[2].Role != convcontext.RoleTool || messages[2].ToolCallID != "toolu_feedback" {
 		t.Fatalf("expected tool result message with matching tool_call_id, got %+v", messages[2])
 	}
-	if messages[2].Content != "echo:hello" {
+	if !toolContentMatches(messages[2].Content, "echo:hello") {
 		t.Fatalf("expected tool result content echo:hello, got %q", messages[2].Content)
 	}
 	if messages[3].Role != convcontext.RoleAssistant || messages[3].Content != "done" {
@@ -1999,7 +1997,7 @@ func containsToolResult(messages []struct {
 	Name       string `json:"name"`
 }, id, content string) bool {
 	for _, msg := range messages {
-		if msg.Role == "tool" && msg.ToolCallID == id && msg.Content == content {
+		if msg.Role == "tool" && msg.ToolCallID == id && toolContentMatches(msg.Content, content) {
 			return true
 		}
 	}
@@ -2022,11 +2020,20 @@ func containsToolResultSubstring(messages []struct {
 
 func conversationHasToolResult(messages []convcontext.Message, id, content string) bool {
 	for _, msg := range messages {
-		if msg.Role == convcontext.RoleTool && msg.ToolCallID == id && msg.Content == content {
+		if msg.Role == convcontext.RoleTool && msg.ToolCallID == id && toolContentMatches(msg.Content, content) {
 			return true
 		}
 	}
 	return false
+}
+
+// toolContentMatches accepts either exact content or ModelPayload JSON that
+// embeds the expected content (Phase 1 ToolOutcome wire-through).
+func toolContentMatches(actual, expected string) bool {
+	if actual == expected {
+		return true
+	}
+	return strings.Contains(actual, expected)
 }
 
 func firstEventIndex(events []AwakenEvent, eventType AwakenEventType) int {

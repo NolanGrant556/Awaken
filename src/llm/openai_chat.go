@@ -261,6 +261,9 @@ func buildOpenAIMessages(req Request) []openaiChatMessage {
 }
 
 func openAIContentForMessage(msg context.Message) interface{} {
+	if msg.Role == context.RoleTool {
+		return openAIToolMessageContent(msg)
+	}
 	if msg.Role != context.RoleUser || len(msg.Attachments) == 0 {
 		return msg.Content
 	}
@@ -290,6 +293,69 @@ func openAIContentForMessage(msg context.Message) interface{} {
 		return msg.Content
 	}
 	return blocks
+}
+
+// openAIToolMessageContent builds tool-role content for OpenAI-compatible APIs.
+// When content is already ModelPayload-style JSON, preserve it and ensure
+// is_error / status semantics are present. Otherwise wrap plain text with
+// structured status/error fields derived from Message.IsError.
+func openAIToolMessageContent(msg context.Message) string {
+	content := msg.Content
+	if looksLikeModelPayloadJSON(content) {
+		return ensureModelPayloadIsError(content, msg.IsError)
+	}
+	if !msg.IsError {
+		return content
+	}
+	payload := map[string]any{
+		"content":         content,
+		"status":          "failed",
+		"semantic_status": "failure",
+		"is_error":        true,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return content
+	}
+	return string(data)
+}
+
+func looksLikeModelPayloadJSON(content string) bool {
+	trimmed := strings.TrimSpace(content)
+	if !strings.HasPrefix(trimmed, "{") {
+		return false
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+		return false
+	}
+	_, hasStatus := payload["status"]
+	_, hasTransport := payload["transport_status"]
+	_, hasSemantic := payload["semantic_status"]
+	_, hasProcess := payload["process_status"]
+	return hasStatus || hasTransport || hasSemantic || hasProcess
+}
+
+func ensureModelPayloadIsError(content string, isError bool) string {
+	if !isError {
+		return content
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(content), &payload); err != nil {
+		return content
+	}
+	payload["is_error"] = true
+	if status, _ := payload["status"].(string); status == "" || status == "succeeded" {
+		payload["status"] = "failed"
+	}
+	if _, ok := payload["semantic_status"]; !ok {
+		payload["semantic_status"] = "failure"
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return content
+	}
+	return string(data)
 }
 
 func applyOpenAIReasoningControls(chatReq *openaiChatRequest, cfg Config, req Request) {

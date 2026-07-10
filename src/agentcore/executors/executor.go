@@ -39,42 +39,43 @@ type ToolExecutor interface {
 	Execute(ctx context.Context, intent profile.ExecutionIntent, execProfile profile.ExecutionProfile, t tool.Tool, input string, observer tool.ToolObserver) (ToolExecutionOutput, error)
 }
 
-// ToolExecutionOutput carries the outcome of an executor invocation. It
-// mirrors what ToolRuntime.executeTool currently produces (a content string)
-// plus fields for executor-level artifact and path tracking.
+// ToolExecutionOutput carries the outcome of an executor invocation.
 type ToolExecutionOutput struct {
-	// Content is the tool's output string.
+	// Outcome is the canonical structured tool result.
+	Outcome tool.ExecutionOutcome
+	// Content is retained for compatibility; prefer Outcome.Content.
 	Content string
 	// Artifact is an optional artifact descriptor produced by the executor.
-	// Currently unused; reserved for future executor-level artifact surfacing.
 	Artifact *tool.ArtifactDescriptor
 	// PatchSummary is a short summary of a patch operation, if applicable.
 	PatchSummary string
 	// AffectedPaths is the list of paths the tool touched, if known.
 	AffectedPaths []string
-	// TrashedPaths lists the absolute paths moved to the OS recycle bin
-	// during this call. Executors that perform deletions via the trash
-	// adapter populate this field directly so routeToExecutor can surface
-	// "Deleted file moved to recycle bin" without re-parsing the tool's
-	// output. When empty, routeToExecutor falls back to extractTrashedPaths
-	// for backwards compatibility.
+	// TrashedPaths lists the absolute paths moved to the OS recycle bin.
 	TrashedPaths []string
-	// IsError indicates the executor denied or failed the call (vs. the
-	// tool returning an error, which is surfaced via the error return).
+	// IsError is derived from Outcome when present; retained for one compatibility cycle.
 	IsError bool
-	// ErrorCode is a machine-readable error code when IsError is true.
+	// ErrorCode is derived from Outcome when present.
 	ErrorCode string
 }
 
-// executeWithObserver delegates to the tool's ExecuteWithObserver if the
-// tool implements ObservableTool and an observer is provided; otherwise it
-// falls back to Execute. This mirrors ToolRuntime.executeTool's dispatch
-// logic so the observer pattern is preserved across the executor layer.
-func executeWithObserver(ctx context.Context, t tool.Tool, input string, observer tool.ToolObserver) (string, error) {
-	if observableTool, ok := t.(tool.ObservableTool); ok && observer != nil {
-		return observableTool.ExecuteWithObserver(ctx, input, observer)
+// executeWithObserver delegates to OutcomeTool when available, otherwise
+// ObservableTool / Execute, adapting legacy string results into Outcome.
+func executeWithObserver(ctx context.Context, t tool.Tool, input string, observer tool.ToolObserver) (ToolExecutionOutput, error) {
+	outcome, err := tool.ExecuteAsOutcome(ctx, t, input, observer)
+	out := ToolExecutionOutput{
+		Outcome:       outcome,
+		Content:       outcome.Content,
+		AffectedPaths: append([]string(nil), outcome.AffectedPaths...),
+		PatchSummary:  outcome.PatchSummary,
+		IsError:       outcome.IsError(),
+		ErrorCode:     outcome.ErrorCode,
 	}
-	return t.Execute(ctx, input)
+	if len(outcome.Artifacts) == 1 {
+		artifact := outcome.Artifacts[0]
+		out.Artifact = &artifact
+	}
+	return out, err
 }
 
 // deniedOutput builds a ToolExecutionOutput and error pair for an executor
@@ -82,7 +83,9 @@ func executeWithObserver(ctx context.Context, t tool.Tool, input string, observe
 // runtime can display it to the user) and in the error (so the runtime
 // treats it as a failed execution).
 func deniedOutput(code, message string) (ToolExecutionOutput, error) {
+	outcome := tool.DeniedOutcome(message, code)
 	return ToolExecutionOutput{
+		Outcome:   outcome,
 		Content:   message,
 		IsError:   true,
 		ErrorCode: code,

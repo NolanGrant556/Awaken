@@ -576,6 +576,32 @@ func TestBuildAnthropicMessagesMergesToolResults(t *testing.T) {
 	}
 }
 
+func TestBuildAnthropicMessagesSetsIsErrorOnFailedToolResult(t *testing.T) {
+	req := Request{
+		Messages: []ctx.Message{
+			{
+				Role: ctx.RoleAssistant,
+				ToolCalls: []ctx.ToolCall{
+					{ID: "call_1", Type: "function", Function: ctx.FunctionCall{Name: "calc", Arguments: `{"a":1}`}},
+				},
+			},
+			{Role: ctx.RoleTool, ToolCallID: "call_1", Name: "calc", Content: "boom", IsError: true},
+		},
+	}
+
+	messages, err := buildAnthropicMessages(req)
+	if err != nil {
+		t.Fatalf("buildAnthropicMessages returned error: %v", err)
+	}
+	resultBlocks, ok := messages[1].Content.([]map[string]interface{})
+	if !ok || len(resultBlocks) != 1 {
+		t.Fatalf("expected 1 tool_result block, got %T %d", messages[1].Content, len(resultBlocks))
+	}
+	if resultBlocks[0]["is_error"] != true {
+		t.Fatalf("expected is_error=true, got %#v", resultBlocks[0]["is_error"])
+	}
+}
+
 func TestBuildAnthropicMessagesInvalidToolInput(t *testing.T) {
 	req := Request{
 		Messages: []ctx.Message{

@@ -1,5 +1,9 @@
 import type { AguiEvent } from "../../shared/agui";
 import type { RunInputAttachment } from "../../shared/runtime";
+import {
+  toolDisplayStateFromStatus,
+  type ToolDisplayState,
+} from "../../shared/toolStatus";
 import type {
   CompactBoundaryItem,
   PromptNarrativeToken,
@@ -183,24 +187,15 @@ export function projectAguiEventToNarrative(
         event.trashedPaths && event.trashedPaths.length > 0
           ? "Deleted file moved to recycle bin"
           : "";
+      const displayStatus = toolDisplayStateFromStatus(event.toolStatus);
       if (isReadOnlyToolEvent(event)) {
         const summary = summarizeToolResult(event.content);
         const detail = trashNote ? `${summary}\n${trashNote}` : summary;
-        return updateExploringAction(
-          base,
-          event,
-          toolResultStatus(event.content),
-          detail,
-        );
+        return updateExploringAction(base, event, displayStatus, detail, event.toolStatus);
       }
       const baseDetail = event.content || "Tool returned empty content";
       const detail = trashNote ? `${baseDetail}\n${trashNote}` : baseDetail;
-      return commitTool(
-        base,
-        event,
-        event.content ? "done" : "error",
-        detail,
-      );
+      return commitTool(base, event, displayStatus, detail, event.toolStatus);
     }
     case "AWAKEN_AUTH_REQUIRED":
       return commitRuntimeNotice(
@@ -783,24 +778,6 @@ function toolDecisionDetail(event: AguiEvent): string {
   return parts.join(" · ");
 }
 
-function toolResultStatus(content?: string): "done" | "error" {
-  const normalized = (content ?? "").trim();
-  if (!normalized) {
-    return "error";
-  }
-  if (
-    normalized.includes("工具执行失败") ||
-    normalized.includes("工具权限拒绝") ||
-    normalized.includes("AUTO policy 拒绝") ||
-    normalized.includes("工具执行已被取消") ||
-    normalized.includes("工具参数错误") ||
-    normalized.includes("审批拒绝")
-  ) {
-    return "error";
-  }
-  return "done";
-}
-
 function summarizeToolResult(content?: string): string {
   const normalized = (content ?? "").trim();
   if (!normalized) {
@@ -898,8 +875,9 @@ function upsertAction(actions: RunAction[], action: RunAction): RunAction[] {
 function updateExploringAction(
   state: RunNarrativeState,
   event: AguiEvent,
-  status: "active" | "done" | "error",
+  status: ToolDisplayState,
   detail?: string,
+  toolStatus?: string,
 ): RunNarrativeState {
   const existing =
     state.activeItem?.kind === "exploring"
@@ -911,6 +889,7 @@ function updateExploringAction(
     title: readOnlyActionTitle(event),
     detail,
     status,
+    toolStatus,
   };
 
   return setActive(
@@ -1018,8 +997,9 @@ function activateTool(
 function commitTool(
   state: RunNarrativeState,
   event: AguiEvent,
-  status: "done" | "error",
+  status: ToolDisplayState,
   detail: string,
+  toolStatus?: string,
 ): RunNarrativeState {
   const id = toolId(event);
   const active =
@@ -1032,6 +1012,7 @@ function commitTool(
     title: event.toolCallName || active?.title || "Tool result",
     detail,
     status,
+    toolStatus,
   };
 
   if (active) {

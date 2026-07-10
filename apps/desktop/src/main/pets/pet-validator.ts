@@ -4,9 +4,9 @@ import {
   PET_CELL_HEIGHT,
   PET_CELL_WIDTH,
   PET_SHEET_COLUMNS,
-  PET_SHEET_HEIGHT,
-  PET_SHEET_ROWS,
   PET_SHEET_WIDTH,
+  petSheetHeightForVersion,
+  type PetSpriteVersion,
   type PetSource,
 } from "../../shared/pets.js";
 
@@ -20,6 +20,7 @@ export type PetManifestInput = {
   sourceId: string;
   displayName: string;
   description: string;
+  spriteVersionNumber: PetSpriteVersion;
   spritesheetPath: string;
 };
 
@@ -49,6 +50,10 @@ export function validatePetManifestJson(
   const displayName = (candidate.displayName as string).trim();
   const description = (candidate.description as string).trim();
   const spritesheetPath = (candidate.spritesheetPath as string).trim();
+  const spriteVersionNumber =
+    candidate.spriteVersionNumber === undefined
+      ? 1
+      : candidate.spriteVersionNumber;
 
   if (!displayName || !description || !spritesheetPath) {
     return { valid: false, error: "pet.json 必填字段不能只包含空白字符" };
@@ -56,6 +61,10 @@ export function validatePetManifestJson(
 
   if (!/^[a-z0-9-]+$/.test(id)) {
     return { valid: false, error: "id 只能包含小写字母、数字和连字符" };
+  }
+
+  if (spriteVersionNumber !== 1 && spriteVersionNumber !== 2) {
+    return { valid: false, error: "spriteVersionNumber only supports 1 or 2" };
   }
 
   if (displayName.length > MAX_DISPLAY_NAME_LENGTH) {
@@ -85,6 +94,7 @@ export function validatePetManifestJson(
       sourceId: id,
       displayName,
       description,
+      spriteVersionNumber,
       spritesheetPath: normalized,
     },
     warnings,
@@ -120,6 +130,7 @@ export async function validateSpritesheetPath(
 
 export async function validateSpritesheetImage(
   spritesheetPath: string,
+  spriteVersionNumber: PetSpriteVersion = 1,
 ): Promise<ValidationResult<{ width: number; height: number }>> {
   const warnings: string[] = [];
 
@@ -153,10 +164,11 @@ export async function validateSpritesheetImage(
     };
   }
 
-  if (dimensions.width !== PET_SHEET_WIDTH || dimensions.height !== PET_SHEET_HEIGHT) {
+  const expectedHeight = petSheetHeightForVersion(spriteVersionNumber);
+  if (dimensions.width !== PET_SHEET_WIDTH || dimensions.height !== expectedHeight) {
     return {
       valid: false,
-      error: `spritesheet 尺寸必须是 ${PET_SHEET_WIDTH}x${PET_SHEET_HEIGHT}，实际为 ${dimensions.width}x${dimensions.height}`,
+      error: `spritesheet 尺寸必须是 ${PET_SHEET_WIDTH}x${expectedHeight}，实际为 ${dimensions.width}x${dimensions.height}`,
     };
   }
 
@@ -260,6 +272,7 @@ export type ValidatedPetPackage = {
   sourceId: string;
   displayName: string;
   description: string;
+  spriteVersionNumber: PetSpriteVersion;
   spritesheetPath: string;
 };
 
@@ -298,7 +311,10 @@ export async function validatePetPackage(
     return { valid: false, error: pathResult.error };
   }
 
-  const imageResult = await validateSpritesheetImage(pathResult.value);
+  const imageResult = await validateSpritesheetImage(
+    pathResult.value,
+    manifest.spriteVersionNumber,
+  );
   if (!imageResult.valid) {
     return { valid: false, error: imageResult.error };
   }
@@ -309,6 +325,7 @@ export async function validatePetPackage(
       sourceId: manifest.sourceId,
       displayName: manifest.displayName,
       description: manifest.description,
+      spriteVersionNumber: manifest.spriteVersionNumber,
       spritesheetPath: pathResult.value,
     },
     warnings: [
@@ -337,6 +354,7 @@ export function makePetManifest(
   sourceId: string;
   displayName: string;
   description: string;
+  spriteVersionNumber: PetSpriteVersion;
   spritesheetFile: string;
   source: PetSource;
   sourcePath: string;
@@ -350,6 +368,7 @@ export function makePetManifest(
     sourceId: input.sourceId,
     displayName: input.displayName,
     description: input.description,
+    spriteVersionNumber: input.spriteVersionNumber,
     spritesheetFile: "spritesheet" + path.extname(input.spritesheetPath),
     source,
     sourcePath,

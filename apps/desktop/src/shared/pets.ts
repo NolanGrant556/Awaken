@@ -11,12 +11,15 @@ export type PetAnimationState =
 
 export type PetSource = "awaken-builtin" | "awaken-local" | "codex-custom";
 
+export type PetSpriteVersion = 1 | 2;
+
 export type PetManifest = {
   schemaVersion: 1;
   id: string;
   sourceId: string;
   displayName: string;
   description: string;
+  spriteVersionNumber: PetSpriteVersion;
   spritesheetFile: string;
   source: PetSource;
   sourcePath?: string;
@@ -30,6 +33,7 @@ export type PetSummary = {
   displayName: string;
   description: string;
   source: PetSource;
+  spriteVersionNumber: PetSpriteVersion;
   spritesheetUrl?: string;
   available: boolean;
   warning?: string;
@@ -145,6 +149,7 @@ export type PetNotificationActionRequest =
 export type PetOverlayBootstrap = {
   petId: string | null;
   displayName: string | null;
+  spriteVersionNumber: PetSpriteVersion;
   spritesheetUrl: string | null;
   mascotWidthPx: number;
   isOpen: boolean;
@@ -202,10 +207,22 @@ export const PET_ROWS: Record<
 
 export const PET_SHEET_WIDTH = 1536;
 export const PET_SHEET_HEIGHT = 1872;
+export const PET_SHEET_HEIGHT_V1 = 1872;
+export const PET_SHEET_HEIGHT_V2 = 2288;
 export const PET_SHEET_COLUMNS = 8;
 export const PET_SHEET_ROWS = 9;
+export const PET_SHEET_ROWS_V1 = 9;
+export const PET_SHEET_ROWS_V2 = 11;
 export const PET_CELL_WIDTH = 192;
 export const PET_CELL_HEIGHT = 208;
+
+export function petSheetRowsForVersion(version: PetSpriteVersion): number {
+  return version === 2 ? PET_SHEET_ROWS_V2 : PET_SHEET_ROWS_V1;
+}
+
+export function petSheetHeightForVersion(version: PetSpriteVersion): number {
+  return version === 2 ? PET_SHEET_HEIGHT_V2 : PET_SHEET_HEIGHT_V1;
+}
 
 export const PET_MASCOT_MIN_WIDTH_PX = 80;
 export const PET_MASCOT_DEFAULT_WIDTH_PX = 112;

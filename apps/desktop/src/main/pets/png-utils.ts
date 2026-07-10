@@ -3,19 +3,24 @@ import { deflateSync } from "node:zlib";
 import {
   PET_SHEET_HEIGHT,
   PET_SHEET_WIDTH,
+  petSheetHeightForVersion,
+  type PetSpriteVersion,
 } from "../../shared/pets.js";
 
-export function createTransparentSpritesheet(): Buffer {
+export function createTransparentSpritesheet(spriteVersionNumber: PetSpriteVersion = 1): Buffer {
+  const sheetHeight = spriteVersionNumber === 1
+    ? PET_SHEET_HEIGHT
+    : petSheetHeightForVersion(spriteVersionNumber);
   const rowSize = 1 + PET_SHEET_WIDTH * 4;
-  const raw = Buffer.alloc(PET_SHEET_HEIGHT * rowSize);
-  for (let y = 0; y < PET_SHEET_HEIGHT; y++) {
+  const raw = Buffer.alloc(sheetHeight * rowSize);
+  for (let y = 0; y < sheetHeight; y++) {
     raw[y * rowSize] = 0; // filter byte: None
   }
   const compressed = deflateSync(raw);
 
   const chunks: Buffer[] = [];
   chunks.push(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-  chunks.push(pngChunk("IHDR", ihdrData(PET_SHEET_WIDTH, PET_SHEET_HEIGHT)));
+  chunks.push(pngChunk("IHDR", ihdrData(PET_SHEET_WIDTH, sheetHeight)));
   chunks.push(pngChunk("IDAT", compressed));
   chunks.push(pngChunk("IEND", Buffer.alloc(0)));
   return Buffer.concat(chunks);

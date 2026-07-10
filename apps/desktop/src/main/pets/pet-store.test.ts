@@ -69,6 +69,24 @@ describe("PetStore", () => {
     expect(pets[0]?.available).toBe(true);
   });
 
+  it("persists Codex v2 sprite version", async () => {
+    await store.initialize();
+    const spritesheet = await createSpritesheet(tempDir);
+    await store.importOrUpdatePet({
+      source: "codex-custom",
+      sourceId: "my-pet",
+      displayName: "My Pet",
+      description: "A pet.",
+      spriteVersionNumber: 2,
+      spritesheetSourcePath: spritesheet,
+      sourcePath: "/fake/codex/pets/my-pet",
+    });
+
+    const store2 = new PetStore(configDir, dataDir);
+    await store2.initialize();
+    expect(store2.listPets()[0]?.spriteVersionNumber).toBe(2);
+  });
+
   it("selecting a pet does not change on unrelated operations", async () => {
     await store.initialize();
     const spritesheet = await createSpritesheet(tempDir);

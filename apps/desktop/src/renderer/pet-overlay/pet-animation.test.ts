@@ -14,6 +14,10 @@ describe("framePosition", () => {
     expect(framePosition(8, 0)).toBe("0% 100%");
     expect(framePosition(8, 5)).toBe("71.42857142857143% 100%");
   });
+
+  it("computes v2 row percentages against the 11-row atlas", () => {
+    expect(framePosition(8, 0, 11)).toBe("0% 80%");
+  });
 });
 
 describe("frameDurationMs", () => {

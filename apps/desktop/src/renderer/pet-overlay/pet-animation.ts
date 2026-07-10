@@ -3,11 +3,13 @@ import {
   PET_ROWS,
   PET_SHEET_COLUMNS,
   PET_SHEET_ROWS,
+  petSheetRowsForVersion,
   type PetAnimationState,
+  type PetSpriteVersion,
 } from "../../shared/pets";
 
-export function framePosition(row: number, column: number): string {
-  return `${(column / (PET_SHEET_COLUMNS - 1)) * 100}% ${(row / (PET_SHEET_ROWS - 1)) * 100}%`;
+export function framePosition(row: number, column: number, sheetRows = PET_SHEET_ROWS): string {
+  return `${(column / (PET_SHEET_COLUMNS - 1)) * 100}% ${(row / (sheetRows - 1)) * 100}%`;
 }
 
 export function frameDurationMs(
@@ -40,6 +42,7 @@ export type AnimationFrameInfo = {
 export function frameAtElapsedMs(
   state: PetAnimationState,
   elapsedMs: number,
+  sheetRows = PET_SHEET_ROWS,
 ): AnimationFrameInfo {
   const row = PET_ROWS[state];
 
@@ -53,14 +56,14 @@ export function frameAtElapsedMs(
         return {
           row: row.row,
           column: i,
-          backgroundPosition: framePosition(row.row, i),
+          backgroundPosition: framePosition(row.row, i, sheetRows),
         };
       }
     }
     return {
       row: row.row,
       column: row.frames - 1,
-      backgroundPosition: framePosition(row.row, row.frames - 1),
+      backgroundPosition: framePosition(row.row, row.frames - 1, sheetRows),
     };
   }
 
@@ -69,7 +72,7 @@ export function frameAtElapsedMs(
   const cycle = totalCycleDurationMs(state);
   const threeCycles = cycle * 3;
   if (elapsedMs >= threeCycles) {
-    return frameAtElapsedMs("idle", elapsedMs - threeCycles);
+    return frameAtElapsedMs("idle", elapsedMs - threeCycles, sheetRows);
   }
   const wrapped = cycle > 0 ? elapsedMs % cycle : 0;
   let accumulated = 0;
@@ -79,14 +82,14 @@ export function frameAtElapsedMs(
       return {
         row: row.row,
         column: i,
-        backgroundPosition: framePosition(row.row, i),
+        backgroundPosition: framePosition(row.row, i, sheetRows),
       };
     }
   }
   return {
     row: row.row,
     column: row.frames - 1,
-    backgroundPosition: framePosition(row.row, row.frames - 1),
+    backgroundPosition: framePosition(row.row, row.frames - 1, sheetRows),
   };
 }
 
@@ -109,15 +112,16 @@ export function useReducedMotion(): boolean {
   return reduced;
 }
 
-export function usePetAnimation(state: PetAnimationState): {
+export function usePetAnimation(state: PetAnimationState, spriteVersionNumber: PetSpriteVersion = 1): {
   backgroundPosition: string;
   row: number;
   column: number;
 } {
+  const sheetRows = petSheetRowsForVersion(spriteVersionNumber);
   const [frame, setFrame] = useState<AnimationFrameInfo>(() => ({
     row: PET_ROWS[state].row,
     column: 0,
-    backgroundPosition: framePosition(PET_ROWS[state].row, 0),
+    backgroundPosition: framePosition(PET_ROWS[state].row, 0, sheetRows),
   }));
   const reducedMotion = useReducedMotion();
   const startTimeRef = useRef<number>(0);
@@ -132,14 +136,14 @@ export function usePetAnimation(state: PetAnimationState): {
       setFrame({
         row: PET_ROWS[state].row,
         column: 0,
-        backgroundPosition: framePosition(PET_ROWS[state].row, 0),
+        backgroundPosition: framePosition(PET_ROWS[state].row, 0, sheetRows),
       });
       return undefined;
     }
 
     const tick = (now: number): void => {
       const elapsed = now - startTimeRef.current;
-      const nextFrame = frameAtElapsedMs(state, elapsed);
+      const nextFrame = frameAtElapsedMs(state, elapsed, sheetRows);
       setFrame(nextFrame);
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -151,7 +155,7 @@ export function usePetAnimation(state: PetAnimationState): {
         rafRef.current = null;
       }
     };
-  }, [state, reducedMotion]);
+  }, [state, reducedMotion, sheetRows]);
 
   return frame;
 }

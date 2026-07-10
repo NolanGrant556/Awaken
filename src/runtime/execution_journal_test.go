@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	convcontext "awaken/src/context"
 	"awaken/src/tool"
 )
 
@@ -185,6 +186,9 @@ func TestOrphanRunRecoverySynthesizesInterruptedOutcome(t *testing.T) {
 	}
 	var sawResult, sawTerminal bool
 	for _, record := range recovered {
+		if record.Seq == 0 {
+			t.Fatalf("recovered record %s returned seq=0: %+v", record.Kind, record)
+		}
 		if record.Kind == agentcore.SemanticKindToolResult {
 			sawResult = true
 			outcomeRaw, _ := record.Payload["outcome"].(map[string]any)
@@ -212,6 +216,119 @@ func TestOrphanRunRecoverySynthesizesInterruptedOutcome(t *testing.T) {
 	if !sawResult || !sawTerminal {
 		t.Fatalf("expected synthetic tool_result and run_terminal, got %+v", recovered)
 	}
+	durable, err := ReadExecutionJournal(path)
+	if err != nil {
+		t.Fatalf("read durable recovery: %v", err)
+	}
+	if len(durable) != len(recovered) {
+		t.Fatalf("returned recovery and durable journal differ: %d != %d", len(recovered), len(durable))
+	}
+	for i := range durable {
+		if durable[i].Seq != recovered[i].Seq {
+			t.Fatalf("returned seq differs from durable seq at %d: %d != %d", i, recovered[i].Seq, durable[i].Seq)
+		}
+	}
+}
+
+func TestOrphanRecoveryPairsOpenCallEvenWhenPersistenceTerminalExists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "thread_persistence_terminal.jsonl")
+	journal, err := NewExecutionJournal(path, "thread_persistence_terminal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	records := []agentcore.SemanticRecord{
+		agentcore.NewSemanticRecord(agentcore.SemanticKindRunStarted, "thread_persistence_terminal", "run_1", "turn_1", "", "", nil),
+		agentcore.NewSemanticRecord(agentcore.SemanticKindToolCall, "thread_persistence_terminal", "run_1", "turn_1", "", "", map[string]any{
+			"tool_call_id": "call_open",
+			"tool_name":    "text_edit",
+			"arguments":    `{"path":"note.txt","old_string":"a","new_string":"b"}`,
+		}),
+		agentcore.NewSemanticRecord(agentcore.SemanticKindRunTerminal, "thread_persistence_terminal", "run_1", "turn_1", "", "", map[string]any{
+			"status":          "error",
+			"terminal_reason": "persistence_error",
+		}),
+	}
+	if err := journal.AppendBatch(ctx, records); err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	durable, err := ReadExecutionJournal(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewExecutionJournal(path, "thread_persistence_terminal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := recoverOrphanRuns(ctx, reopened, durable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var results, terminals int
+	for _, record := range recovered {
+		switch record.Kind {
+		case agentcore.SemanticKindToolResult:
+			results++
+		case agentcore.SemanticKindRunTerminal:
+			terminals++
+		}
+	}
+	if results != 1 || terminals != 1 {
+		t.Fatalf("expected one synthetic result and original terminal, got results=%d terminals=%d: %+v", results, terminals, recovered)
+	}
+	if err := convcontext.ValidateToolResultPairing(messagesFromSemanticRecords(recovered)); err != nil {
+		t.Fatalf("recovered model history remains unpaired: %v", err)
+	}
+	run := durableRunsFromSemanticRecords("thread_persistence_terminal", recovered)["run_1"]
+	if len(run.SemanticRecords) == 0 || run.SemanticRecords[len(run.SemanticRecords)-1].Kind != agentcore.SemanticKindRunTerminal {
+		t.Fatalf("terminal must project after recovered tool result: %+v", run.SemanticRecords)
+	}
+}
+
+func TestOrphanRecoveryClosesRunThatCrashedBeforeRunStarted(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "thread_pre_runner.jsonl")
+	journal, err := NewExecutionJournal(path, "thread_pre_runner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.Append(context.Background(), agentcore.NewSemanticRecord(
+		agentcore.SemanticKindUserMessage,
+		"thread_pre_runner",
+		"run_pre_runner",
+		"",
+		"",
+		"",
+		map[string]any{"content": "durable before runner"},
+	)); err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.Close(); err != nil {
+		t.Fatal(err)
+	}
+	records, err := ReadExecutionJournal(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewExecutionJournal(path, "thread_pre_runner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := recoverOrphanRuns(context.Background(), reopened, records)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if len(recovered) != 2 || recovered[1].Kind != agentcore.SemanticKindRunTerminal ||
+		stringPayload(recovered[1].Payload, "status") != "interrupted" {
+		t.Fatalf("pre-runner crash remained a running ghost: %+v", recovered)
+	}
 }
 
 func TestWriteFailureKeepsPending(t *testing.T) {
@@ -237,4 +354,38 @@ func TestWriteFailureKeepsPending(t *testing.T) {
 		t.Fatalf("expected pending retained after failed append")
 	}
 	_ = path
+}
+
+func TestExecutionJournalRealClosedFileWriteFailureKeepsAssignedPendingRecord(t *testing.T) {
+	dir := t.TempDir()
+	journal, err := NewExecutionJournal(filepath.Join(dir, "thread_real_failure.jsonl"), "thread_real_failure")
+	if err != nil {
+		t.Fatalf("NewExecutionJournal: %v", err)
+	}
+	defer journal.Close()
+
+	// Close the actual descriptor without marking the journal closed. This
+	// exercises the production os.File write/retry path rather than a fake
+	// recorder or a pre-cancelled context.
+	if err := journal.file.Close(); err != nil {
+		t.Fatalf("close underlying descriptor: %v", err)
+	}
+	err = journal.Append(context.Background(), agentcore.NewSemanticRecord(
+		agentcore.SemanticKindToolResult,
+		"thread_real_failure",
+		"run_1",
+		"turn_1",
+		"call_1",
+		"",
+		map[string]any{"tool_call_id": "call_1"},
+	))
+	if err == nil {
+		t.Fatal("expected real closed-file write failure")
+	}
+	if journal.PendingCount() != 1 {
+		t.Fatalf("failed durable write must retain one pending record, got %d", journal.PendingCount())
+	}
+	if journal.NextSeq() != 2 {
+		t.Fatalf("failed durable write must retain assigned sequence, next=%d", journal.NextSeq())
+	}
 }

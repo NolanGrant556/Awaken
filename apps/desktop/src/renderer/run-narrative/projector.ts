@@ -188,13 +188,29 @@ export function projectAguiEventToNarrative(
           ? "Deleted file moved to recycle bin"
           : "";
       const displayStatus = toolDisplayStateFromStatus(event.toolStatus);
+      const diagnosticReason =
+        typeof event.diagnostic?.reason === "string"
+          ? event.diagnostic.reason
+          : "";
       if (isReadOnlyToolEvent(event)) {
         const summary = summarizeToolResult(event.content);
-        const detail = trashNote ? `${summary}\n${trashNote}` : summary;
+        const detail = [
+          summary,
+          diagnosticReason ? `diagnostic: ${diagnosticReason}` : "",
+          trashNote,
+        ]
+          .filter(Boolean)
+          .join("\n");
         return updateExploringAction(base, event, displayStatus, detail, event.toolStatus);
       }
       const baseDetail = event.content || "Tool returned empty content";
-      const detail = trashNote ? `${baseDetail}\n${trashNote}` : baseDetail;
+      const detail = [
+        baseDetail,
+        diagnosticReason ? `diagnostic: ${diagnosticReason}` : "",
+        trashNote,
+      ]
+        .filter(Boolean)
+        .join("\n");
       return commitTool(base, event, displayStatus, detail, event.toolStatus);
     }
     case "AWAKEN_AUTH_REQUIRED":
@@ -342,8 +358,21 @@ export function projectAguiEventToNarrative(
 }
 
 function eventKey(event: AguiEvent): string | undefined {
-  if (typeof event.seq === "number") {
-    return `seq:${eventScope(event)}:${event.seq}`;
+  const stableSeq = event.semanticSeq ?? event.seq;
+  if (typeof stableSeq === "number") {
+    // One durable SemanticRecord can project into multiple AG-UI frames
+    // (for example START / CONTENT / END) that intentionally share the
+    // record sequence. Deduplicate exact replayed frames, not every frame
+    // produced from the same record.
+    const frameId =
+      event.messageId ||
+      event.toolCallId ||
+      event.approvalId ||
+      event.artifactId ||
+      event.contextCompactBoundaryId ||
+      event.compactBoundaryId ||
+      "frame";
+    return `seq:${eventScope(event)}:${stableSeq}:${event.type}:${frameId}`;
   }
 
   if (
@@ -986,7 +1015,10 @@ function appendAnswer(
   return setActive(state, {
     kind: "answer",
     id,
-    markdown: current + delta,
+    // A durable assistant_message frame is a full snapshot projected from the
+    // journal. It replaces any ephemeral deltas already shown for the same
+    // message instead of appending the text a second time.
+    markdown: event.recordId ? delta : current + delta,
     status: "active",
   });
 }

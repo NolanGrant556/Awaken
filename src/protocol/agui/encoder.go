@@ -17,8 +17,12 @@ func (enc Encoder) EncodeSSE(event Event) ([]byte, error) {
 		return nil, err
 	}
 	var frame []byte
-	if event.Seq > 0 {
-		frame = append(frame, []byte(fmt.Sprintf("id: %d\n", event.Seq))...)
+	cursor := event.StreamCursor
+	if cursor == 0 {
+		cursor = event.Seq
+	}
+	if cursor > 0 {
+		frame = append(frame, []byte(fmt.Sprintf("id: %d\n", cursor))...)
 	}
 	frame = append(frame, []byte("data: ")...)
 	frame = append(frame, payload...)

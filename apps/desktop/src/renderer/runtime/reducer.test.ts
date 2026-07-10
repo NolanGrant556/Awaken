@@ -623,6 +623,45 @@ describe("runtime reducer run narrative projection", () => {
     });
   });
 
+  it("preserves neutral diagnostic reasons in tool history and narrative", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "Search for a missing token" },
+      runEvent({
+        type: "TOOL_CALL_RESULT",
+        seq: 1,
+        toolCallId: "rg-1",
+        toolCallName: "shell",
+        content: '{"exit_code":1}',
+        toolStatus: "succeeded",
+        semanticStatus: "neutral",
+        processStatus: "exited",
+        processExitCode: 1,
+        diagnostic: { reason: "no_match" },
+      }),
+    ]);
+
+    expect(state.toolResults).toContainEqual({
+      id: "rg-1",
+      title: "shell",
+      content: '{"exit_code":1}',
+      args: undefined,
+      status: "done",
+      toolStatus: "succeeded",
+      diagnostic: { reason: "no_match" },
+    });
+    expect(state.steps.find((step) => step.id === "tool:rg-1")?.description).toContain(
+      "diagnostic: no_match",
+    );
+    expect(state.narrative.committedItems).toContainEqual(
+      expect.objectContaining({
+        kind: "tool",
+        id: "tool:rg-1",
+        detail: expect.stringContaining("diagnostic: no_match"),
+        status: "done",
+      }),
+    );
+  });
+
   it("accumulates args deltas, replaces them with full args fallback, and projects progress", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Inspect streaming tool args" },
@@ -659,6 +698,31 @@ describe("runtime reducer run narrative projection", () => {
       detail: "{\"path\":\"README.md\"}",
       status: "active",
     });
+  });
+
+  it("shows a host-generated redacted install activity without assistant narration", () => {
+    const message = "正在安装依赖: pip install requests --index-url sk-[redacted]";
+    const state = dispatch([
+      { type: "run/requested", prompt: "Prepare dependency" },
+      runEvent({
+        type: "TOOL_PROGRESS",
+        seq: 1,
+        toolCallId: "shell-install-1",
+        toolCallName: "shell",
+        toolProgressStage: "started",
+        toolProgressMessage: message,
+        progress: message,
+      }),
+    ]);
+
+    expect(state.narrative.activeItem).toEqual({
+      kind: "tool",
+      id: "tool:shell-install-1",
+      title: "shell",
+      detail: message,
+      status: "active",
+    });
+    expect(JSON.stringify(state)).not.toContain("sk-abcdefghijklmnopqrstuvwxyz");
   });
 
   it("clears active tool projection when a run is cancelled during tool argument preparation", () => {
@@ -1365,6 +1429,27 @@ describe("runtime reducer run narrative projection", () => {
     });
   });
 
+  it("does not double assistantText when a durable snapshot follows streaming", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "Snapshot" },
+      runEvent({ type: "TEXT_MESSAGE_CONTENT", seq: 16, messageId: "m1", delta: "hello" }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        seq: 32,
+        semanticSeq: 64,
+        recordId: "rec_assistant_1",
+        messageId: "m1",
+        delta: "hello",
+      }),
+    ]);
+
+    expect(state.assistantText).toBe("hello");
+    expect(state.narrative.activeItem).toMatchObject({
+      kind: "answer",
+      markdown: "hello",
+    });
+  });
+
   it("preserves repeated unsequenced text deltas", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Repeat token" },
@@ -1417,6 +1502,49 @@ describe("runtime reducer run narrative projection", () => {
       status: "done",
       isFinal: true,
       elapsedMs: 65000,
+    });
+  });
+
+  it("uses durable event timestamps instead of client request and delivery time", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "Finish", startedAtMs: 1000 },
+      {
+        type: "run/created",
+        run: makeRun({ runId: "run-1", threadId: "thread-1" }),
+      },
+      runEventAt(
+        {
+          type: "RUN_STARTED",
+          runId: "run-1",
+          threadId: "thread-1",
+          timestamp: 5000,
+        },
+        9000,
+      ),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        runId: "run-1",
+        messageId: "m1",
+        delta: "done",
+      }),
+      runEventAt(
+        {
+          type: "RUN_FINISHED",
+          runId: "run-1",
+          result: "done",
+          timestamp: 48000,
+        },
+        53000,
+      ),
+    ]);
+
+    expect(state.narrative.committedItems).toContainEqual({
+      kind: "answer",
+      id: "answer:run-1:m1",
+      markdown: "done",
+      status: "done",
+      isFinal: true,
+      elapsedMs: 43000,
     });
   });
 

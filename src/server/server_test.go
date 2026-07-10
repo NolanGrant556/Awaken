@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	"awaken/src/desktopdata"
 	"awaken/src/llm"
 	"awaken/src/mcpclient"
 	"awaken/src/protocol/agui"
@@ -867,6 +868,705 @@ func TestGetThreadTranscriptEndpointReturnsMappedRuns(t *testing.T) {
 	if transcript.Runs[1].Events[0].Type != "RUN_STARTED" {
 		t.Fatalf("expected transcript event to be mapped as AG-UI frame, got %s", transcript.Runs[1].Events[0].Type)
 	}
+	seenSeq := map[uint64]bool{}
+	var restoredText string
+	for _, event := range transcript.Runs[1].Events {
+		if seenSeq[event.Seq] {
+			t.Fatalf("transcript frame seq must be unique, duplicate %d in %+v", event.Seq, transcript.Runs[1].Events)
+		}
+		seenSeq[event.Seq] = true
+		if event.Type == agui.EventTextMessageContent {
+			restoredText += event.Delta
+		}
+	}
+	if restoredText != "follow up" {
+		t.Fatalf("expected transcript assistant text %q, got %q", "follow up", restoredText)
+	}
+}
+
+func TestGetThreadTranscriptEndpointProjectsDurableSemanticFramesAfterRestart(t *testing.T) {
+	t.Setenv("AWAKEN_USER_DATA_DIR", t.TempDir())
+	workspace := t.TempDir()
+	startExecution := make(chan struct{})
+	var durableRunID string
+	var durableThreadID string
+
+	firstService := awruntime.NewRunService(
+		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				Workspace: agentcore.WorkspaceConfig{Root: workspace.WorkspaceRoot},
+			}, threadID)
+		},
+		func(agent *agentcore.Agent) awruntime.Executor {
+			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				<-startExecution
+				recorder := agent.SemanticRecorder()
+				records := []agentcore.SemanticRecord{
+					agentcore.NewSemanticRecord(agentcore.SemanticKindRunStarted, durableThreadID, durableRunID, "turn-1", "", "", nil),
+					agentcore.NewSemanticRecord(agentcore.SemanticKindUserMessage, durableThreadID, durableRunID, "turn-1", "", "", map[string]any{
+						"content": input,
+						"role":    "user",
+					}),
+					agentcore.NewSemanticRecord(agentcore.SemanticKindAssistantMessage, durableThreadID, durableRunID, "turn-1", "", "", map[string]any{
+						"content":    "先读取数据",
+						"role":       "assistant",
+						"message_id": "msg-durable",
+					}),
+					agentcore.NewSemanticRecord(agentcore.SemanticKindToolCall, durableThreadID, durableRunID, "turn-1", "msg-durable", "", map[string]any{
+						"tool_call_id": "call-durable",
+						"tool_name":    "read_file",
+						"arguments":    `{"path":"README.md"}`,
+					}),
+					agentcore.NewSemanticRecord(agentcore.SemanticKindToolResult, durableThreadID, durableRunID, "turn-1", "call-durable", "", map[string]any{
+						"tool_call_id": "call-durable",
+						"tool_name":    "read_file",
+						"content":      "# Awaken",
+						"is_error":     false,
+					}),
+					agentcore.NewSemanticRecord(agentcore.SemanticKindAssistantMessage, durableThreadID, durableRunID, "turn-1", "", "", map[string]any{
+						"content":    "历史最终回答",
+						"role":       "assistant",
+						"message_id": "msg-final",
+					}),
+					agentcore.NewSemanticRecord(agentcore.SemanticKindRunTerminal, durableThreadID, durableRunID, "turn-1", "", "", map[string]any{
+						"status":          "finished",
+						"result":          "历史最终回答",
+						"terminal_reason": "completed",
+					}),
+				}
+				if err := recorder.AppendBatch(ctx, records); err != nil {
+					return "", err
+				}
+				if err := recorder.Flush(ctx); err != nil {
+					return "", err
+				}
+				return "历史最终回答", nil
+			})
+		},
+	)
+
+	run, err := firstService.StartRun(awruntime.StartRunRequest{
+		Input:     "恢复语义历史",
+		Workspace: awruntime.WorkspaceConfig{WorkspaceRoot: workspace},
+	})
+	if err != nil {
+		t.Fatalf("StartRun: %v", err)
+	}
+	durableRunID = run.RunID
+	durableThreadID = run.ThreadID
+	close(startExecution)
+	waitHTTPServiceRunTerminal(t, firstService, run.RunID)
+	waitHTTPServiceThreadIdle(t, firstService, run.ThreadID)
+	if err := firstService.FlushTranscripts(); err != nil {
+		t.Fatalf("FlushTranscripts: %v", err)
+	}
+	// A new service has no in-memory Session and must load the durable journal.
+	restartedService := awruntime.NewRunService(nil, nil)
+	ts := httptest.NewServer(NewRouter(restartedService, nil))
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/v1/threads/" + run.ThreadID + "/transcript")
+	if err != nil {
+		t.Fatalf("GET durable transcript: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var transcript threadTranscriptResponse
+	if err := json.NewDecoder(resp.Body).Decode(&transcript); err != nil {
+		t.Fatalf("decode durable transcript: %v", err)
+	}
+	if len(transcript.Runs) != 1 {
+		t.Fatalf("expected one durable run, got %d", len(transcript.Runs))
+	}
+
+	seenSeq := map[uint64]bool{}
+	var assistantText string
+	var toolArgs string
+	var textStarts, textEnds, toolStarts, toolEnds int
+	for _, event := range transcript.Runs[0].Events {
+		if seenSeq[event.Seq] {
+			t.Fatalf("durable transcript frame seq must be unique, duplicate %d", event.Seq)
+		}
+		seenSeq[event.Seq] = true
+		switch event.Type {
+		case agui.EventTextMessageStart:
+			textStarts++
+		case agui.EventTextMessageContent:
+			assistantText += event.Delta
+		case agui.EventTextMessageEnd:
+			textEnds++
+		case agui.EventToolCallStart:
+			toolStarts++
+		case agui.EventToolCallArgs:
+			toolArgs += event.Delta
+		case agui.EventToolCallEnd:
+			toolEnds++
+		}
+	}
+	if assistantText != "先读取数据历史最终回答" {
+		t.Fatalf("unexpected durable assistant text %q; events=%+v", assistantText, transcript.Runs[0].Events)
+	}
+	if toolArgs != `{"path":"README.md"}` {
+		t.Fatalf("unexpected durable tool args %q", toolArgs)
+	}
+	if textStarts != 2 || textEnds != 2 || toolStarts != 1 || toolEnds != 1 {
+		t.Fatalf("incomplete durable frame lifecycle: text=%d/%d tool=%d/%d", textStarts, textEnds, toolStarts, toolEnds)
+	}
+}
+
+func TestDurableLiveAndRestartTranscriptShareCanonicalProjection(t *testing.T) {
+	t.Setenv("AWAKEN_USER_DATA_DIR", t.TempDir())
+	workspace := t.TempDir()
+	service := awruntime.NewRunService(
+		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				Workspace: agentcore.WorkspaceConfig{Root: workspace.WorkspaceRoot},
+			}, threadID)
+		},
+		func(agent *agentcore.Agent) awruntime.Executor {
+			return awruntime.ExecutorFunc(func(ctx context.Context, _ string, _ agentcore.EventSink) (string, error) {
+				threadID, runID, sessionID := agent.ExecutionIdentity()
+				records := []agentcore.SemanticRecord{
+					agentcore.NewSemanticRecord(agentcore.SemanticKindRunStarted, threadID, runID, "turn_1", "", sessionID, nil),
+					agentcore.NewSemanticRecord(agentcore.SemanticKindToolCall, threadID, runID, "turn_1", "msg_1", sessionID, map[string]any{
+						"tool_call_id": "call_1",
+						"tool_name":    "apply_patch",
+						"arguments":    `{"patch":"*** Begin Patch"}`,
+					}),
+					agentcore.NewSemanticRecord(agentcore.SemanticKindRecoveryDecision, threadID, runID, "turn_1", "call_1", sessionID, map[string]any{
+						"tool_call_id":      "call_1",
+						"tool_name":         "apply_patch",
+						"error_code":        "repeated_tool_failure",
+						"blocked":           true,
+						"recovery_options":  []string{"inspect_current_file", "change_patch_or_stop"},
+						"recovery_required": true,
+						"message":           "tool retry blocked",
+						"retryable":         false,
+						"tool_status":       "denied",
+						"transport_status":  "not_started",
+						"semantic_status":   "failure",
+						"process_status":    "not_applicable",
+						"error_category":    "policy",
+					}),
+					agentcore.NewSemanticRecord(agentcore.SemanticKindToolResult, threadID, runID, "turn_1", "call_1", sessionID, map[string]any{
+						"tool_call_id":   "call_1",
+						"tool_name":      "apply_patch",
+						"content":        "retry blocked",
+						"is_error":       true,
+						"affected_paths": []string{"/tmp/example.txt"},
+						"patch_summary":  "no changes applied",
+						"outcome": map[string]any{
+							"status":           "denied",
+							"transport_status": "not_started",
+							"semantic_status":  "failure",
+							"process_status":   "not_applicable",
+							"error_code":       "repeated_tool_failure",
+							"error_category":   "policy",
+							"retryable":        false,
+						},
+					}),
+					agentcore.NewSemanticRecord(agentcore.SemanticKindArtifact, threadID, runID, "turn_1", "call_1", sessionID, map[string]any{
+						"artifact_id":  "artifact_1",
+						"title":        "验收产物",
+						"description":  "canonical artifact",
+						"kind":         "text",
+						"path":         "/tmp/example.txt",
+						"content":      "artifact body",
+						"status":       "ready",
+						"tool_call_id": "call_1",
+						"tool_name":    "apply_patch",
+						"created":      true,
+					}),
+					agentcore.NewSemanticRecord(agentcore.SemanticKindRunTerminal, threadID, runID, "turn_1", "", sessionID, map[string]any{
+						"status":          "finished",
+						"result":          "done",
+						"terminal_reason": "completed",
+					}),
+				}
+				if err := agent.SemanticRecorder().AppendBatch(ctx, records); err != nil {
+					return "", err
+				}
+				if err := agent.SemanticRecorder().Flush(ctx); err != nil {
+					return "", err
+				}
+				return "done", nil
+			})
+		},
+	)
+	ts := httptest.NewServer(NewRouter(service, nil))
+	defer ts.Close()
+
+	run, err := service.StartRun(awruntime.StartRunRequest{
+		Input:     "canonical durable projection",
+		Workspace: awruntime.WorkspaceConfig{WorkspaceRoot: workspace},
+	})
+	if err != nil {
+		t.Fatalf("StartRun: %v", err)
+	}
+	waitHTTPServiceRunTerminal(t, service, run.RunID)
+	waitHTTPServiceThreadIdle(t, service, run.ThreadID)
+
+	live := fetchSSEEvents(t, ts.URL, run.RunID, "")
+	activeTranscript := fetchThreadTranscript(t, ts.URL, run.ThreadID)
+	if len(activeTranscript.Runs) != 1 || activeTranscript.Runs[0].StreamCursor == 0 {
+		t.Fatalf("active transcript missing reliable stream cursor: %+v", activeTranscript.Runs)
+	}
+	assertCanonicalDurableFramesEqual(t, live, activeTranscript.Runs[0].Events)
+
+	if err := service.FlushTranscripts(); err != nil {
+		t.Fatalf("FlushTranscripts: %v", err)
+	}
+	restarted := awruntime.NewRunService(nil, nil)
+	restartedServer := httptest.NewServer(NewRouter(restarted, nil))
+	defer restartedServer.Close()
+	restartedTranscript := fetchThreadTranscript(t, restartedServer.URL, run.ThreadID)
+	if len(restartedTranscript.Runs) != 1 {
+		t.Fatalf("restarted transcript run count: %d", len(restartedTranscript.Runs))
+	}
+	assertCanonicalDurableFramesEqual(t, live, restartedTranscript.Runs[0].Events)
+
+	frames := canonicalDurableFrames(live)
+	recoveryIndex, resultIndex := -1, -1
+	for i, event := range frames {
+		switch event.Type {
+		case agui.EventAwakenToolRetryBlocked:
+			recoveryIndex = i
+			if event.ErrorCode != "repeated_tool_failure" || event.ToolStatus != "denied" ||
+				event.TransportStatus != "not_started" || event.SemanticStatus != "failure" ||
+				event.ProcessStatus != "not_applicable" || event.ErrorCategory != "policy" ||
+				event.Retryable || len(event.RecoveryOptions) != 2 {
+				t.Fatalf("blocked recovery fields drifted: %+v", event)
+			}
+		case agui.EventToolCallResult:
+			resultIndex = i
+			if event.PatchSummary != "no changes applied" || len(event.AffectedPaths) != 1 {
+				t.Fatalf("tool result fields drifted: %+v", event)
+			}
+		}
+	}
+	if recoveryIndex < 0 || resultIndex < 0 || recoveryIndex >= resultIndex {
+		t.Fatalf("blocked recovery must precede tool result: recovery=%d result=%d frames=%+v", recoveryIndex, resultIndex, frames)
+	}
+}
+
+func TestRunningTranscriptResumesEphemeralStreamWithoutLossOrDuplicates(t *testing.T) {
+	t.Setenv("AWAKEN_USER_DATA_DIR", t.TempDir())
+	workspace := t.TempDir()
+	ready := make(chan struct{})
+	release := make(chan struct{})
+	service := awruntime.NewRunService(
+		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				Workspace: agentcore.WorkspaceConfig{Root: workspace.WorkspaceRoot},
+			}, threadID)
+		},
+		func(agent *agentcore.Agent) awruntime.Executor {
+			return awruntime.ExecutorFunc(func(ctx context.Context, _ string, sink agentcore.EventSink) (string, error) {
+				threadID, runID, sessionID := agent.ExecutionIdentity()
+				if err := agent.SemanticRecorder().Append(ctx, agentcore.NewSemanticRecord(
+					agentcore.SemanticKindRunStarted, threadID, runID, "turn_1", "", sessionID, nil,
+				)); err != nil {
+					return "", err
+				}
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.ReasoningStartedEventType, MessageID: "reason_1"})
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.ReasoningDeltaEventType, MessageID: "reason_1", Delta: "before"})
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextMessageStartedEventType, MessageID: "msg_1", Role: "assistant"})
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextDeltaEventType, MessageID: "msg_1", Role: "assistant", Delta: "partial"})
+				close(ready)
+				<-release
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextDeltaEventType, MessageID: "msg_1", Role: "assistant", Delta: " done"})
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextMessageFinishedEventType, MessageID: "msg_1", Role: "assistant"})
+				terminal := agentcore.NewSemanticRecord(agentcore.SemanticKindRunTerminal, threadID, runID, "turn_1", "", sessionID, map[string]any{
+					"status":          "finished",
+					"result":          "partial done",
+					"terminal_reason": "completed",
+				})
+				if err := agent.SemanticRecorder().Append(ctx, terminal); err != nil {
+					return "", err
+				}
+				if err := agent.SemanticRecorder().Flush(ctx); err != nil {
+					return "", err
+				}
+				return "partial done", nil
+			})
+		},
+	)
+	ts := httptest.NewServer(NewRouter(service, nil))
+	defer ts.Close()
+	run, err := service.StartRun(awruntime.StartRunRequest{
+		Input:     "running resume",
+		Workspace: awruntime.WorkspaceConfig{WorkspaceRoot: workspace},
+	})
+	if err != nil {
+		t.Fatalf("StartRun: %v", err)
+	}
+	<-ready
+
+	transcript := fetchThreadTranscript(t, ts.URL, run.ThreadID)
+	if len(transcript.Runs) != 1 || transcript.Runs[0].StreamCursor == 0 {
+		t.Fatalf("running transcript missing stream cursor: %+v", transcript.Runs)
+	}
+	entry := transcript.Runs[0]
+	if got := joinedTextContent(entry.Events); got != "partial" {
+		t.Fatalf("running transcript lost pre-snapshot ephemeral text: %q events=%+v", got, entry.Events)
+	}
+
+	currentResp := openSSESubscription(t, ts.URL, run.RunID, "after_cursor", entry.StreamCursor)
+	defer currentResp.Body.Close()
+	legacyResp := openSSESubscription(t, ts.URL, run.RunID, "after_seq", entry.StreamCursor)
+	defer legacyResp.Body.Close()
+	close(release)
+	currentEvents, err := collectSSEEvents(currentResp.Body)
+	if err != nil {
+		t.Fatalf("collect current cursor SSE: %v", err)
+	}
+	legacyEvents, err := collectSSEEvents(legacyResp.Body)
+	if err != nil {
+		t.Fatalf("collect legacy after_seq SSE: %v", err)
+	}
+	if got, want := mustJSON(t, currentEvents), mustJSON(t, legacyEvents); got != want {
+		t.Fatalf("legacy after_seq diverged from after_cursor\ncurrent=%s\nlegacy=%s", got, want)
+	}
+	for _, event := range currentEvents {
+		if event.StreamCursor <= entry.StreamCursor {
+			t.Fatalf("resume replayed an acknowledged frame: cursor=%d watermark=%d event=%+v", event.StreamCursor, entry.StreamCursor, event)
+		}
+	}
+
+	combined := append(append([]agui.Event(nil), entry.Events...), currentEvents...)
+	if got := joinedTextContent(combined); got != "partial done" {
+		t.Fatalf("running transcript + SSE text must be exact once, got %q events=%+v", got, combined)
+	}
+	if countEventType(combined, agui.EventRunStarted) != 1 || countEventType(combined, agui.EventRunFinished) != 1 {
+		t.Fatalf("running transcript + SSE duplicated/lost terminal lifecycle: %+v", combined)
+	}
+	seenCursor := map[uint64]struct{}{}
+	lastCursor := uint64(0)
+	for _, event := range combined {
+		if event.StreamCursor == 0 {
+			t.Fatalf("active frame missing stream cursor: %+v", event)
+		}
+		if _, duplicate := seenCursor[event.StreamCursor]; duplicate {
+			t.Fatalf("duplicate stream cursor %d in %+v", event.StreamCursor, combined)
+		}
+		if event.StreamCursor <= lastCursor {
+			t.Fatalf("non-monotonic stream cursor %d after %d", event.StreamCursor, lastCursor)
+		}
+		seenCursor[event.StreamCursor] = struct{}{}
+		lastCursor = event.StreamCursor
+	}
+	waitHTTPServiceThreadIdle(t, service, run.ThreadID)
+	if err := service.FlushTranscripts(); err != nil {
+		t.Fatalf("FlushTranscripts: %v", err)
+	}
+}
+
+func TestA34TranscriptEndpointRecoversCompleteFactsBeforePartialTail(t *testing.T) {
+	service, run, path := createCompletedBoundaryRun(t, "a34 endpoint")
+	if err := service.FlushTranscripts(); err != nil {
+		t.Fatalf("A34 FlushTranscripts: %v", err)
+	}
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("A34 open journal: %v", err)
+	}
+	if _, err := file.WriteString(`{"schema_version":2,"record_id":"partial`); err != nil {
+		file.Close()
+		t.Fatalf("A34 append partial tail: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("A34 close journal: %v", err)
+	}
+
+	restarted := awruntime.NewRunService(nil, nil)
+	ts := httptest.NewServer(NewRouter(restarted, nil))
+	defer ts.Close()
+	transcript := fetchThreadTranscript(t, ts.URL, run.ThreadID)
+	if len(transcript.Runs) != 1 {
+		t.Fatalf("A34 endpoint lost recovered run: %+v", transcript.Runs)
+	}
+	if got := joinedTextContent(transcript.Runs[0].Events); got != "boundary answer" {
+		t.Fatalf("A34 endpoint lost/duplicated pre-tail assistant content: %q events=%+v", got, transcript.Runs[0].Events)
+	}
+	if countEventType(transcript.Runs[0].Events, agui.EventRunFinished) != 1 {
+		t.Fatalf("A34 endpoint lost terminal before partial tail: %+v", transcript.Runs[0].Events)
+	}
+}
+
+func TestA35TranscriptEndpointReturnsFailureForMiddleCorruption(t *testing.T) {
+	service, run, path := createCompletedBoundaryRun(t, "a35 endpoint")
+	if err := service.FlushTranscripts(); err != nil {
+		t.Fatalf("A35 FlushTranscripts: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("A35 read journal: %v", err)
+	}
+	lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("A35 fixture unexpectedly short: %q", raw)
+	}
+	lines = append(lines[:len(lines)-1], append([]string{"{not-json"}, lines[len(lines)-1])...)
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("A35 inject middle corruption: %v", err)
+	}
+
+	restarted := awruntime.NewRunService(nil, nil)
+	ts := httptest.NewServer(NewRouter(restarted, nil))
+	defer ts.Close()
+	resp, err := http.Get(ts.URL + "/v1/threads/" + run.ThreadID + "/transcript")
+	if err != nil {
+		t.Fatalf("A35 GET transcript: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("A35 endpoint silently skipped middle corruption: status=%d body=%s", resp.StatusCode, body)
+	}
+}
+
+func TestPersistenceErrorTerminalWinsAcrossLiveActiveAndRestartTranscript(t *testing.T) {
+	t.Setenv("AWAKEN_USER_DATA_DIR", t.TempDir())
+	workspace := t.TempDir()
+	service := awruntime.NewRunService(
+		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				Workspace: agentcore.WorkspaceConfig{Root: workspace.WorkspaceRoot},
+			}, threadID)
+		},
+		func(agent *agentcore.Agent) awruntime.Executor {
+			return awruntime.ExecutorFunc(func(ctx context.Context, _ string, _ agentcore.EventSink) (string, error) {
+				threadID, runID, sessionID := agent.ExecutionIdentity()
+				records := []agentcore.SemanticRecord{
+					agentcore.NewSemanticRecord(agentcore.SemanticKindRunStarted, threadID, runID, "turn_terminal", "", sessionID, nil),
+					agentcore.NewSemanticRecord(agentcore.SemanticKindRunTerminal, threadID, runID, "turn_terminal", "", sessionID, map[string]any{
+						"status": "finished", "result": "must not surface", "terminal_reason": "completed",
+					}),
+					agentcore.NewSemanticRecord(agentcore.SemanticKindRunTerminal, threadID, runID, "turn_terminal", "", sessionID, map[string]any{
+						"status": "error", "error": "fsync failed", "code": "PERSISTENCE_ERROR", "terminal_reason": "persistence_error",
+					}),
+				}
+				if err := agent.SemanticRecorder().AppendBatch(ctx, records); err != nil {
+					return "", err
+				}
+				if err := agent.SemanticRecorder().Flush(ctx); err != nil {
+					return "", err
+				}
+				return "must not surface", nil
+			})
+		},
+	)
+	ts := httptest.NewServer(NewRouter(service, nil))
+	defer ts.Close()
+	run, err := service.StartRun(awruntime.StartRunRequest{
+		Input:     "terminal last wins",
+		Workspace: awruntime.WorkspaceConfig{WorkspaceRoot: workspace},
+	})
+	if err != nil {
+		t.Fatalf("start terminal recovery run: %v", err)
+	}
+	terminal := waitHTTPServiceRunTerminal(t, service, run.RunID)
+	if terminal.Status != awruntime.RunStatusError || terminal.Error != "fsync failed" {
+		t.Fatalf("live session exposed stale success: %+v", terminal)
+	}
+	waitHTTPServiceThreadIdle(t, service, run.ThreadID)
+
+	live := fetchSSEEvents(t, ts.URL, run.RunID, "")
+	assertOnlyPersistenceRunErrorFrames(t, live)
+	active := fetchThreadTranscript(t, ts.URL, run.ThreadID)
+	assertOnlyPersistenceRunErrorFrames(t, active.Runs[0].Events)
+	if err := service.FlushTranscripts(); err != nil {
+		t.Fatalf("flush terminal recovery transcript: %v", err)
+	}
+
+	restarted := awruntime.NewRunService(nil, nil)
+	restartedServer := httptest.NewServer(NewRouter(restarted, nil))
+	defer restartedServer.Close()
+	replayed := fetchThreadTranscript(t, restartedServer.URL, run.ThreadID)
+	assertOnlyPersistenceRunErrorFrames(t, replayed.Runs[0].Events)
+}
+
+func assertOnlyPersistenceRunErrorFrames(t *testing.T, events []agui.Event) {
+	t.Helper()
+	var finished, persistenceErrors int
+	for _, event := range events {
+		switch event.Type {
+		case agui.EventRunFinished:
+			finished++
+		case agui.EventRunError:
+			if event.Code == "PERSISTENCE_ERROR" && event.TerminalReason == "persistence_error" {
+				persistenceErrors++
+			}
+		}
+	}
+	if finished != 0 || persistenceErrors != 1 {
+		t.Fatalf("terminal last-wins violated: finished=%d persistence_errors=%d events=%+v", finished, persistenceErrors, events)
+	}
+}
+
+func createCompletedBoundaryRun(t *testing.T, input string) (*awruntime.RunService, awruntime.Run, string) {
+	t.Helper()
+	t.Setenv("AWAKEN_USER_DATA_DIR", t.TempDir())
+	workspace := t.TempDir()
+	service := awruntime.NewRunService(
+		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				Workspace: agentcore.WorkspaceConfig{Root: workspace.WorkspaceRoot},
+			}, threadID)
+		},
+		func(agent *agentcore.Agent) awruntime.Executor {
+			return awruntime.ExecutorFunc(func(ctx context.Context, input string, _ agentcore.EventSink) (string, error) {
+				threadID, runID, sessionID := agent.ExecutionIdentity()
+				records := []agentcore.SemanticRecord{
+					agentcore.NewSemanticRecord(agentcore.SemanticKindRunStarted, threadID, runID, "turn_boundary", "", sessionID, nil),
+					agentcore.NewSemanticRecord(agentcore.SemanticKindUserMessage, threadID, runID, "turn_boundary", "", sessionID, map[string]any{"content": input}),
+					agentcore.NewSemanticRecord(agentcore.SemanticKindAssistantMessage, threadID, runID, "turn_boundary", "", sessionID, map[string]any{"content": "boundary answer", "message_id": "msg_boundary"}),
+					agentcore.NewSemanticRecord(agentcore.SemanticKindRunTerminal, threadID, runID, "turn_boundary", "", sessionID, map[string]any{"status": "finished", "result": "boundary answer", "terminal_reason": "completed"}),
+				}
+				if err := agent.SemanticRecorder().AppendBatch(ctx, records); err != nil {
+					return "", err
+				}
+				if err := agent.SemanticRecorder().Flush(ctx); err != nil {
+					return "", err
+				}
+				return "boundary answer", nil
+			})
+		},
+	)
+	run, err := service.StartRun(awruntime.StartRunRequest{
+		Input:     input,
+		Workspace: awruntime.WorkspaceConfig{WorkspaceRoot: workspace},
+	})
+	if err != nil {
+		t.Fatalf("start boundary run: %v", err)
+	}
+	waitHTTPServiceRunTerminal(t, service, run.RunID)
+	waitHTTPServiceThreadIdle(t, service, run.ThreadID)
+	return service, run, desktopdata.Detect().ThreadTranscriptPath(run.ThreadID)
+}
+
+func fetchThreadTranscript(t *testing.T, baseURL, threadID string) threadTranscriptResponse {
+	t.Helper()
+	resp, err := http.Get(baseURL + "/v1/threads/" + threadID + "/transcript")
+	if err != nil {
+		t.Fatalf("GET thread transcript: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET thread transcript status=%d", resp.StatusCode)
+	}
+	var transcript threadTranscriptResponse
+	if err := json.NewDecoder(resp.Body).Decode(&transcript); err != nil {
+		t.Fatalf("decode thread transcript: %v", err)
+	}
+	return transcript
+}
+
+func openSSESubscription(t *testing.T, baseURL, runID, cursorName string, cursor uint64) *http.Response {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+	url := fmt.Sprintf("%s/v1/runs/%s/events?%s=%d", baseURL, runID, cursorName, cursor)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("create SSE request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("open SSE subscription: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("open SSE status=%d", resp.StatusCode)
+	}
+	return resp
+}
+
+func canonicalDurableFrames(events []agui.Event) []agui.Event {
+	frames := make([]agui.Event, 0, len(events))
+	for _, event := range events {
+		if event.RecordID == "" {
+			continue
+		}
+		event.StreamCursor = 0
+		if event.SemanticSeq != 0 {
+			event.Seq = event.SemanticSeq
+		}
+		frames = append(frames, event)
+	}
+	return frames
+}
+
+func assertCanonicalDurableFramesEqual(t *testing.T, left, right []agui.Event) {
+	t.Helper()
+	got := mustJSON(t, canonicalDurableFrames(left))
+	want := mustJSON(t, canonicalDurableFrames(right))
+	if got != want {
+		t.Fatalf("canonical durable projections differ\nleft=%s\nright=%s", got, want)
+	}
+}
+
+func joinedTextContent(events []agui.Event) string {
+	var out strings.Builder
+	for _, event := range events {
+		if event.Type == agui.EventTextMessageContent {
+			out.WriteString(event.Delta)
+		}
+	}
+	return out.String()
+}
+
+func countEventType(events []agui.Event, eventType agui.EventType) int {
+	count := 0
+	for _, event := range events {
+		if event.Type == eventType {
+			count++
+		}
+	}
+	return count
+}
+
+func mustJSON(t *testing.T, value any) string {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal comparison value: %v", err)
+	}
+	return string(raw)
+}
+
+func waitHTTPServiceRunTerminal(t *testing.T, service *awruntime.RunService, runID string) awruntime.Run {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		run, err := service.GetRun(runID)
+		if err != nil {
+			t.Fatalf("GetRun: %v", err)
+		}
+		switch run.Status {
+		case awruntime.RunStatusFinished, awruntime.RunStatusError, awruntime.RunStatusCancelled:
+			return run
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("run %s did not reach terminal status", runID)
+	return awruntime.Run{}
+}
+
+func waitHTTPServiceThreadIdle(t *testing.T, service *awruntime.RunService, threadID string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, thread := range service.ListThreads() {
+			if thread.ThreadID == threadID && thread.ActiveRunID == "" {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("thread %s did not become idle", threadID)
 }
 
 func waitHTTPRunTerminal(t *testing.T, baseURL, runID string) awruntime.Run {

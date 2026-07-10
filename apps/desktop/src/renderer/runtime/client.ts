@@ -161,8 +161,8 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     answerUserQuestion: bridge.answerUserQuestion,
     getDesktopPreferences: () => bridge.getDesktopPreferences(),
     saveDesktopPreferences: (request) => bridge.saveDesktopPreferences(request),
-    subscribeRun: async (runId, handlers, afterSeq) => {
-      let lastSeq = afterSeq ?? 0;
+    subscribeRun: async (runId, handlers, afterCursor) => {
+      let lastCursor = afterCursor ?? 0;
       let terminalSeen = false;
       let retryCount = 0;
       let currentSubscriptionId: string | null = null;
@@ -171,8 +171,9 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
 
       const wrappedHandlers = {
         onEvent: (event: AguiEvent) => {
-          if (event.seq !== undefined && event.seq > lastSeq) {
-            lastSeq = event.seq;
+          const cursor = event.streamCursor ?? event.seq;
+          if (cursor !== undefined && cursor > lastCursor) {
+            lastCursor = cursor;
           }
           if (isTerminalEvent(event)) {
             terminalSeen = true;
@@ -233,7 +234,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
           currentSubscriptionId = await bridge.subscribeRun(
             runId,
             wrappedHandlers,
-            lastSeq,
+            lastCursor,
           );
         } catch (error) {
           if (disposed || terminalSeen) return;
@@ -247,7 +248,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
         currentSubscriptionId = await bridge.subscribeRun(
           runId,
           wrappedHandlers,
-          lastSeq,
+          lastCursor,
         );
       } catch (error) {
         if (disposed) throw error;

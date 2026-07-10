@@ -85,7 +85,7 @@ func projectV1TranscriptRecords(records []TranscriptRecord) []agentcore.Semantic
 		switch record.RecordType {
 		case transcriptRecordTypeThread:
 			appendRec(agentcore.SemanticKindThread, record, "", map[string]any{
-				"label": strings.TrimSpace(record.Content),
+				"label": trimThreadLabel(record.Content),
 			})
 		case transcriptRecordTypeMessage:
 			switch record.Role {

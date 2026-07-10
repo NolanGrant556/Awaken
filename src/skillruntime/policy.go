@@ -108,7 +108,7 @@ func ValidateRequiredCapabilities(
 // ValidateRequiredRuntimeComponents checks packaged runtime availability.
 func ValidateRequiredRuntimeComponents(required []string, available func(component string) bool) []SkillCompatibilityError {
 	if available == nil {
-		available = func(string) bool { return true }
+		available = func(string) bool { return false }
 	}
 	var errs []SkillCompatibilityError
 	for _, name := range normalizeToolNames(required) {

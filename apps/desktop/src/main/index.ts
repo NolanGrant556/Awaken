@@ -608,6 +608,12 @@ function createMainWindow(): BrowserWindow {
     cleanupWindowSubscriptions(webContentsId);
   });
 
+  mainWindow.on("close", () => {
+    if (process.platform !== "darwin" && !isQuitting) {
+      app.quit();
+    }
+  });
+
   mainWindow.once("ready-to-show", () => {
     electronReadyToShow = true;
     if (rendererReadyToShow) {
@@ -1499,7 +1505,7 @@ app.on("before-quit", (event) => {
     } catch (err) {
       console.error("[awaken-desktop] supervisor stop failed", err);
     }
-    app.quit();
+    app.exit();
   })();
 });
 

@@ -32,6 +32,53 @@ describe("validatePetManifestJson", () => {
     expect(result.warnings).toEqual([]);
   });
 
+  it("defaults old manifests to sprite version 1", () => {
+    const result = validatePetManifestJson(
+      {
+        id: "my-pet",
+        displayName: "My Pet",
+        description: "A short sentence.",
+        spritesheetPath: "spritesheet.webp",
+      },
+      "my-pet",
+    );
+    expect(result.valid).toBe(true);
+    if (!result.valid) return;
+    expect(result.value.spriteVersionNumber).toBe(1);
+  });
+
+  it("accepts Codex v2 manifests", () => {
+    const result = validatePetManifestJson(
+      {
+        id: "my-pet",
+        displayName: "My Pet",
+        description: "A short sentence.",
+        spriteVersionNumber: 2,
+        spritesheetPath: "spritesheet.webp",
+      },
+      "my-pet",
+    );
+    expect(result.valid).toBe(true);
+    if (!result.valid) return;
+    expect(result.value.spriteVersionNumber).toBe(2);
+  });
+
+  it("rejects unsupported sprite versions", () => {
+    const result = validatePetManifestJson(
+      {
+        id: "my-pet",
+        displayName: "My Pet",
+        description: "A short sentence.",
+        spriteVersionNumber: 3,
+        spritesheetPath: "spritesheet.webp",
+      },
+      "my-pet",
+    );
+    expect(result.valid).toBe(false);
+    if (result.valid) return;
+    expect(result.error).toContain("spriteVersionNumber");
+  });
+
   it("rejects missing fields", () => {
     const result = validatePetManifestJson({}, "my-pet");
     expect(result.valid).toBe(false);

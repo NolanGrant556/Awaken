@@ -80,13 +80,13 @@ type ToolRuntimeConfig struct {
 }
 
 type ToolExecutionResult struct {
-	ToolCallID     string
-	Name           string
-	Content        string
-	IsError        bool
-	Truncated      bool
-	Status         ToolExecutionStatus
-	ErrorCode      string
+	ToolCallID string
+	Name       string
+	Content    string
+	IsError    bool
+	Truncated  bool
+	Status     ToolExecutionStatus
+	ErrorCode  string
 	// Outcome is the canonical structured tool result when available.
 	// Compatibility fields (Status/IsError/ErrorCode/DurationMs) are derived
 	// from it; emitToolResult prefers Outcome when Status is set.
@@ -457,7 +457,7 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
 		rt.writeAudit(def, result, permission, string(decision.Source), "needs_auth", "")
 		return finalizeToolResult(result)
-  case ToolDecisionNeedsRuntime:
+	case ToolDecisionNeedsRuntime:
 		rt.emitToolProgress(result, "needs_runtime", firstNonEmpty(decision.Reason, "tool requires local runtime"), 0)
 		rt.emitRuntimePrepareStarted(result.ToolCallID, result.Name, "host runtime check before artifact tool")
 		rt.emitRuntimeMissing(result, decision)
@@ -532,9 +532,9 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		rt.emitToolProgress(result, "failed", firstNonEmpty(result.Outcome.ErrorMessage, result.ErrorCode, "tool failed"), 100)
 	} else {
 		rt.emitToolProgress(result, "completed", "", 100)
+		rt.emitArtifacts(result, selectedTool, input, output)
 	}
 	rt.writeAudit(def, result, permission, string(decision.Source), auditOutcomeLabel(result), "")
-	rt.emitArtifacts(result, selectedTool, input, output)
 	return finalizeToolResult(result)
 }
 
@@ -747,9 +747,9 @@ func (rt *ToolRuntime) executeTransformedTool(
 		rt.emitToolProgress(result, "failed", firstNonEmpty(result.Outcome.ErrorMessage, result.ErrorCode, "tool failed"), 100)
 	} else {
 		rt.emitToolProgress(result, "completed", "", 100)
+		rt.emitArtifacts(result, transformedTool, transformedInput, output)
 	}
 	rt.writeAudit(transformedDef, result, permission, string(decision.Source), auditOutcomeLabel(result), "")
-	rt.emitArtifacts(result, transformedTool, transformedInput, output)
 	return finalizeToolResult(result)
 }
 
@@ -1403,10 +1403,14 @@ func fallbackArtifactTitle(path string, toolName string) string {
 }
 
 func excerptString(value string, max int) string {
-	if max <= 0 || len(value) <= max {
+	if max <= 0 {
 		return value
 	}
-	return value[:max-1] + "…"
+	if normalized, truncated := outputlimit.Prefix(value, max); !truncated {
+		return normalized
+	}
+	prefix, _ := outputlimit.Prefix(value, max-1)
+	return prefix + "…"
 }
 
 func firstNonEmpty(values ...string) string {

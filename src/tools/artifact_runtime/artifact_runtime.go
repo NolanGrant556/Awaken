@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -22,19 +23,21 @@ import (
 	"strings"
 	"time"
 
+	"awaken/src/internal/outputlimit"
 	"awaken/src/tool"
 )
 
 type typedArtifactTool struct {
-	name            string
-	displayName     string
-	description     string
-	readOnly        bool
-	capability      tool.CapabilityClass
-	requiresRuntime bool
-	parameters      []tool.ToolParameter
-	inputSchema     *tool.ToolParametersSchema
-	execute         func(context.Context, string) (string, error)
+	name                string
+	displayName         string
+	description         string
+	readOnly            bool
+	capability          tool.CapabilityClass
+	requiresRuntime     bool
+	runtimeRequirements []string
+	parameters          []tool.ToolParameter
+	inputSchema         *tool.ToolParametersSchema
+	execute             func(context.Context, string) (string, error)
 }
 
 type presentationTheme struct {
@@ -94,17 +97,56 @@ type presentationEditSpec struct {
 }
 
 type presentationRenderReport struct {
-	Verified           bool     `json:"verified"`
-	VerificationLevel  string   `json:"verification_level"`
-	Engine             string   `json:"engine"`
-	PDFPath            string   `json:"pdf_path,omitempty"`
-	PreviewDir         string   `json:"preview_dir,omitempty"`
-	PreviewImages      []string `json:"preview_images,omitempty"`
-	Warnings           []string `json:"warnings,omitempty"`
-	NeedsRuntime       bool     `json:"needs_runtime,omitempty"`
-	SlideCount         int      `json:"slide_count,omitempty"`
-	PDFPageCount       int      `json:"pdf_page_count,omitempty"`
-	PNGCount           int      `json:"png_count,omitempty"`
+	Verified          bool     `json:"verified"`
+	VerificationLevel string   `json:"verification_level"`
+	Engine            string   `json:"engine"`
+	PDFPath           string   `json:"pdf_path,omitempty"`
+	PreviewDir        string   `json:"preview_dir,omitempty"`
+	PreviewImages     []string `json:"preview_images,omitempty"`
+	Warnings          []string `json:"warnings,omitempty"`
+	NeedsRuntime      bool     `json:"needs_runtime,omitempty"`
+	SlideCount        int      `json:"slide_count,omitempty"`
+	PDFPageCount      int      `json:"pdf_page_count,omitempty"`
+	PNGCount          int      `json:"png_count,omitempty"`
+}
+
+const errorCodePresentationVerificationFailed = "presentation_verification_failed"
+
+var (
+	presentationAuthoringRuntimeRequirements = []string{"python", "libreoffice", "poppler"}
+	presentationRenderRuntimeRequirements    = []string{"libreoffice", "poppler"}
+)
+
+type artifactExecutionFailure struct {
+	Content    string
+	Code       string
+	Category   tool.ErrorCategory
+	Status     tool.OutcomeStatus
+	Retryable  bool
+	Diagnostic map[string]any
+	Cause      error
+}
+
+func (e *artifactExecutionFailure) Error() string {
+	if e == nil {
+		return "artifact execution failed"
+	}
+	if e.Cause != nil {
+		return e.Cause.Error()
+	}
+	if strings.TrimSpace(e.Content) != "" {
+		return e.Content
+	}
+	return firstNonEmpty(e.Code, "artifact execution failed")
+}
+
+type presentationInputError struct {
+	Path   string
+	Reason string
+}
+
+func (e *presentationInputError) Error() string {
+	return fmt.Sprintf("%s %s", e.Path, e.Reason)
 }
 
 var supportedPresentationLayouts = map[string]struct{}{
@@ -155,24 +197,34 @@ func (t typedArtifactTool) Artifacts(input string, output string, permissionCont
 	if err := json.Unmarshal([]byte(output), &payload); err != nil {
 		return nil
 	}
+	artifactStatus := firstString(payload, "artifact_status")
+	if artifactStatus == "" {
+		artifactStatus = "ready"
+	}
 	var artifacts []tool.ArtifactDescriptor
 	if path := firstString(payload, "path"); path != "" && !strings.HasSuffix(t.name, "_render") {
-		artifacts = append(artifacts, artifactDescriptorForPath(path, permissionContext, t.name))
+		artifact := artifactDescriptorForPath(path, permissionContext, t.name)
+		artifact.Status = artifactStatus
+		artifacts = append(artifacts, artifact)
 	}
 	if pdfPath := firstString(payload, "pdf_path"); pdfPath != "" {
-		artifacts = append(artifacts, artifactDescriptorForPath(pdfPath, permissionContext, t.name))
+		artifact := artifactDescriptorForPath(pdfPath, permissionContext, t.name)
+		artifact.Status = artifactStatus
+		artifacts = append(artifacts, artifact)
 	}
 	for _, imagePath := range stringSliceParam(payload, "preview_images") {
-		artifacts = append(artifacts, artifactDescriptorForPath(imagePath, permissionContext, t.name))
+		artifact := artifactDescriptorForPath(imagePath, permissionContext, t.name)
+		artifact.Status = artifactStatus
+		artifacts = append(artifacts, artifact)
 	}
 	return artifacts
 }
 
 func (t typedArtifactTool) CheckPermission(ctx context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {
 	if t.requiresRuntime {
-		report := runtimePreflightCached(true)
-		if !report.Ready {
-			return tool.NeedsRuntimePermission(fmt.Sprintf("%s is not ready: missing %s", runtimeName, strings.Join(report.Missing, ", ")))
+		_, missing := checkRuntimeRequirements(t.runtimeRequirements)
+		if len(missing) > 0 {
+			return tool.NeedsRuntimePermission(fmt.Sprintf("%s is not ready for %s: missing %s", runtimeName, t.name, strings.Join(missing, ", ")))
 		}
 	}
 	params, _ := decodeParams(input, singleRawParamName(t.parameters))
@@ -204,17 +256,165 @@ func toolRequiresInputPath(name string) bool {
 }
 
 func (t typedArtifactTool) Execute(ctx context.Context, input string) (string, error) {
-	if t.execute != nil {
-		return t.execute(ctx, input)
+	outcome, err := t.ExecuteOutcome(ctx, input, nil)
+	if err != nil {
+		return outcome.Content, err
 	}
-	if t.requiresRuntime {
-		report := runtimePreflightCached(true)
-		if !report.Ready {
-			data, _ := json.MarshalIndent(report, "", "  ")
-			return "", fmt.Errorf("缺少 %s，无法执行 %s: %s", runtimeName, t.name, string(data))
+	if outcome.IsError() {
+		return outcome.Content, fmt.Errorf("%s", firstNonEmpty(outcome.ErrorMessage, outcome.ErrorCode, "artifact execution failed"))
+	}
+	return outcome.Content, nil
+}
+
+func (t typedArtifactTool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObserver) (tool.ExecutionOutcome, error) {
+	started := time.Now().UTC()
+	normalizedInput, err := normalizeTypedArtifactInput(input, t.parameters)
+	if err != nil {
+		outcome := tool.FailedOutcome(err.Error(), tool.ErrorCodeValidationError, tool.ErrorCategoryValidation, false)
+		return outcome.WithTiming(started, time.Now().UTC()), nil
+	}
+	if err := tool.ValidateInputAgainstSchema(normalizedInput, t.InputSchema()); err != nil {
+		outcome := tool.FailedOutcome(err.Error(), tool.ErrorCodeValidationError, tool.ErrorCategoryValidation, false)
+		return outcome.WithTiming(started, time.Now().UTC()), nil
+	}
+	if t.name == "presentation_edit" {
+		if err := validatePresentationEditOperationPayloads(normalizedInput); err != nil {
+			outcome := tool.FailedOutcome(err.Error(), tool.ErrorCodeValidationError, tool.ErrorCategoryValidation, false)
+			return outcome.WithTiming(started, time.Now().UTC()), nil
 		}
 	}
-	return "", fmt.Errorf("%s requires a prepared artifact runtime executor", t.name)
+	if t.requiresRuntime {
+		report, missing := checkRuntimeRequirements(t.runtimeRequirements)
+		if len(missing) > 0 {
+			outcome := needsRuntimeExecutionOutcome(t.name, report, t.runtimeRequirements, missing)
+			return outcome.WithTiming(started, time.Now().UTC()), nil
+		}
+	}
+	if t.execute == nil {
+		outcome := tool.FailedOutcome(
+			fmt.Sprintf("%s requires a prepared artifact runtime executor", t.name),
+			tool.ErrorCodeToolExecutionFailed,
+			tool.ErrorCategoryTool,
+			false,
+		)
+		return outcome.WithTiming(started, time.Now().UTC()), nil
+	}
+
+	content, err := t.execute(ctx, normalizedInput)
+	finished := time.Now().UTC()
+	if err != nil {
+		var executionFailure *artifactExecutionFailure
+		if errors.As(err, &executionFailure) {
+			outcome := tool.FailedOutcome(
+				firstNonEmpty(executionFailure.Content, err.Error()),
+				firstNonEmpty(executionFailure.Code, tool.ErrorCodeToolExecutionFailed),
+				executionFailure.Category,
+				executionFailure.Retryable,
+			)
+			if executionFailure.Status == tool.OutcomeNeedsRuntime {
+				outcome.Status = tool.OutcomeNeedsRuntime
+				outcome.TransportStatus = tool.TransportCompleted
+				outcome.SemanticStatus = tool.SemanticUnknown
+				outcome.RecoveryOptions = []string{"prepare_primary_runtime", "runtime_preflight"}
+			}
+			outcome.Diagnostic = executionFailure.Diagnostic
+			if executionFailure.Cause != nil {
+				outcome.ErrorMessage = executionFailure.Cause.Error()
+			}
+			outcome.Artifacts = t.Artifacts(normalizedInput, outcome.Content, tool.PermissionContextFromContext(ctx))
+			return outcome.WithTiming(started, finished), nil
+		}
+		var inputFailure *presentationInputError
+		if errors.As(err, &inputFailure) {
+			outcome := tool.FailedOutcome(err.Error(), tool.ErrorCodeValidationError, tool.ErrorCategoryValidation, false)
+			outcome.Diagnostic = map[string]any{"path": inputFailure.Path, "reason": inputFailure.Reason}
+			return outcome.WithTiming(started, finished), nil
+		}
+		outcome := tool.FailedOutcome(err.Error(), tool.ErrorCodeToolExecutionFailed, tool.ErrorCategoryTool, false)
+		return outcome.WithTiming(started, finished), nil
+	}
+
+	outcome := tool.SucceededOutcome(content)
+	outcome.Artifacts = t.Artifacts(normalizedInput, content, tool.PermissionContextFromContext(ctx))
+	return outcome.WithTiming(started, finished), nil
+}
+
+func normalizeTypedArtifactInput(input string, parameters []tool.ToolParameter) (string, error) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return "{}", nil
+	}
+	if looksLikeJSONContainer(trimmed) {
+		return trimmed, nil
+	}
+	name := singleRawParamName(parameters)
+	if name == "" {
+		return trimmed, nil
+	}
+	data, err := json.Marshal(map[string]any{name: trimmed})
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func checkRuntimeRequirements(requirements []string) (preflightReport, []string) {
+	report := runtimePreflightCached(true)
+	return report, missingRuntimeRequirements(report, requirements)
+}
+
+func missingRuntimeRequirements(report preflightReport, requirements []string) []string {
+	if len(requirements) == 0 {
+		if report.Ready {
+			return nil
+		}
+		return append([]string(nil), report.Missing...)
+	}
+	components := make(map[string]runtimeComponentStatus, len(report.Components))
+	for _, component := range report.Components {
+		components[component.Name] = component
+	}
+	missing := make([]string, 0, len(requirements))
+	for _, requirement := range requirements {
+		component, ok := components[requirement]
+		if !ok || !component.OK {
+			missing = append(missing, requirement)
+		}
+	}
+	return missing
+}
+
+func needsRuntimeExecutionOutcome(toolName string, report preflightReport, requirements, missing []string) tool.ExecutionOutcome {
+	payload := map[string]any{
+		"status":              "needs_runtime",
+		"runtime":             firstNonEmpty(report.RuntimeName, runtimeName),
+		"tool":                toolName,
+		"required_components": append([]string(nil), requirements...),
+		"missing_components":  append([]string(nil), missing...),
+		"detail":              report.Detail,
+	}
+	content, _ := json.MarshalIndent(payload, "", "  ")
+	now := time.Now().UTC()
+	return tool.ExecutionOutcome{
+		Content:         string(content),
+		Status:          tool.OutcomeNeedsRuntime,
+		TransportStatus: tool.TransportNotStarted,
+		SemanticStatus:  tool.SemanticUnknown,
+		ProcessStatus:   tool.ProcessNotApplicable,
+		ErrorCode:       tool.ErrorCodeNeedsRuntime,
+		ErrorCategory:   tool.ErrorCategoryRuntime,
+		ErrorMessage:    fmt.Sprintf("%s is missing required components: %s", runtimeName, strings.Join(missing, ", ")),
+		Retryable:       false,
+		RecoveryOptions: []string{"prepare_primary_runtime", "runtime_preflight"},
+		Diagnostic: map[string]any{
+			"runtime":             report.RuntimeName,
+			"required_components": append([]string(nil), requirements...),
+			"missing_components":  append([]string(nil), missing...),
+			"detail":              report.Detail,
+		},
+		StartedAt:  now,
+		FinishedAt: now,
+	}
 }
 
 func workspaceDependenciesTool() typedArtifactTool {
@@ -410,26 +610,26 @@ func artifactRender(ctx context.Context, input string) (string, error) {
 	switch strings.ToLower(filepath.Ext(checkedSource)) {
 	case ".ppt", ".pptx":
 		slideCount, _ := countPPTXSlides(checkedSource)
-		report, err := renderPresentation(ctx, checkedSource, outputDir, slideCount)
+		report, err := renderPresentationPreviewAtomically(ctx, checkedSource, outputDir, slideCount)
 		if err != nil {
 			return "", err
 		}
-		return jsonResultWithFields("artifact_rendered", checkedSource, map[string]any{
-			"kind":               "presentation",
-			"verified":           report.Verified,
-			"verification_level": report.VerificationLevel,
-			"render_check":       report.Engine,
-			"pdf_path":           report.PDFPath,
-			"preview_dir":        report.PreviewDir,
-			"preview_images":     report.PreviewImages,
-			"warnings":           report.Warnings,
-			"needs_runtime":      report.NeedsRuntime,
-			"slide_count":        report.SlideCount,
-			"pdf_page_count":     report.PDFPageCount,
-			"png_count":          report.PNGCount,
-		})
+		if !report.Verified {
+			return presentationFailureResult("artifact_render_failed", checkedSource, report, slideCount)
+		}
+		result, err := presentationResultJSON("artifact_rendered", checkedSource, report, slideCount)
+		if err != nil {
+			return "", err
+		}
+		var payload map[string]any
+		if json.Unmarshal([]byte(result), &payload) == nil {
+			payload["kind"] = "presentation"
+			data, _ := json.MarshalIndent(payload, "", "  ")
+			return string(data), nil
+		}
+		return result, nil
 	case ".pdf":
-		images, err := renderPDFPagesToPNG(ctx, checkedSource, outputDir)
+		images, err := renderPDFPreviewAtomically(ctx, checkedSource, outputDir)
 		if err != nil {
 			return "", err
 		}
@@ -520,6 +720,9 @@ func presentationCreate(ctx context.Context, input string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if !report.Verified {
+		return presentationFailureResult("presentation_failed", output, report, len(spec.Slides))
+	}
 	return presentationResultJSON("presentation_written", output, report, len(spec.Slides))
 }
 
@@ -547,6 +750,9 @@ func presentationEdit(ctx context.Context, input string) (string, error) {
 			return "", fmt.Errorf("edits[%d] must be an object", i)
 		}
 		edits = append(edits, obj)
+	}
+	if err := resolvePresentationEditImages(ctx, edits); err != nil {
+		return "", err
 	}
 	checkedSource, err := tool.PermissionContextFromContext(ctx).ResolveReadablePathChecked(source)
 	if err != nil {
@@ -576,34 +782,130 @@ func presentationEdit(ctx context.Context, input string) (string, error) {
 	if spec.RenderPreview {
 		spec.PreviewDir = defaultPresentationPreviewDir(checkedOutput)
 	}
-	if err := editPPTXWithPython(ctx, spec); err != nil {
-		return "", err
-	}
-	slideCount, _ := countPPTXSlides(checkedOutput)
-	report, err := verifyPresentationPackage(ctx, checkedOutput, spec.PreviewDir, spec.RenderPreview, slideCount)
+	report, err := writeVerifiedPresentationEdit(ctx, spec)
 	if err != nil {
 		return "", err
+	}
+	slideCount := report.SlideCount
+	if !report.Verified {
+		return presentationFailureResult("presentation_failed", checkedOutput, report, slideCount)
 	}
 	return presentationResultJSON("presentation_edited", checkedOutput, report, slideCount)
 }
 
+func validatePresentationEditOperationPayloads(input string) error {
+	params, err := decodeParams(input)
+	if err != nil {
+		return err
+	}
+	edits, _ := params["edits"].([]any)
+	for index, raw := range edits {
+		edit, _ := raw.(map[string]any)
+		op := strings.ToLower(strings.TrimSpace(firstString(edit, "op")))
+		if op == "" {
+			op = "update"
+		}
+		switch op {
+		case "update":
+			hasPayload := false
+			for key, value := range edit {
+				if key == "op" || key == "slide_index" {
+					continue
+				}
+				if key == "slide" {
+					slide, _ := value.(map[string]any)
+					if len(slide) == 0 {
+						continue
+					}
+				}
+				hasPayload = true
+				break
+			}
+			if !hasPayload {
+				return fmt.Errorf("$.edits[%d] update requires at least one editable field", index)
+			}
+		case "insert", "replace":
+			slide, _ := edit["slide"].(map[string]any)
+			if len(slide) == 0 {
+				return fmt.Errorf("$.edits[%d].slide must be a non-empty slide object for %s", index, op)
+			}
+		}
+	}
+	return nil
+}
+
 func presentationResultJSON(status, path string, report presentationRenderReport, slideCount int) (string, error) {
+	artifactStatus := "error"
+	if report.Verified {
+		artifactStatus = "ready"
+	}
+	return jsonResultWithFields(status, path, presentationResultFields(report, slideCount, artifactStatus))
+}
+
+func presentationResultFields(report presentationRenderReport, slideCount int, artifactStatus string) map[string]any {
 	fields := map[string]any{
-		"verified":            report.Verified,
-		"verification_level":  report.VerificationLevel,
-		"render_check":        report.Engine,
-		"pdf_path":            report.PDFPath,
-		"preview_dir":         report.PreviewDir,
-		"preview_images":      report.PreviewImages,
-		"warnings":            report.Warnings,
-		"slide_count":         slideCount,
-		"pdf_page_count":      report.PDFPageCount,
-		"png_count":           report.PNGCount,
+		"artifact_status":    artifactStatus,
+		"verified":           report.Verified,
+		"verification_level": report.VerificationLevel,
+		"render_check":       report.Engine,
+		"pdf_path":           report.PDFPath,
+		"preview_dir":        report.PreviewDir,
+		"preview_images":     report.PreviewImages,
+		"warnings":           report.Warnings,
+		"slide_count":        slideCount,
+		"pdf_page_count":     report.PDFPageCount,
+		"png_count":          report.PNGCount,
 	}
 	if report.NeedsRuntime {
 		fields["needs_runtime"] = true
 	}
-	return jsonResultWithFields(status, path, fields)
+	return fields
+}
+
+func presentationFailureResult(status, path string, report presentationRenderReport, slideCount int) (string, error) {
+	fields := presentationResultFields(report, slideCount, "error")
+	// A failed atomic publication deliberately leaves no artifact at the final
+	// path. Keep the requested destination as diagnostic context without using
+	// the canonical `path` field, otherwise typedArtifactTool.Artifacts would
+	// publish a card that points at a non-existent (or unchanged old) file.
+	fields["attempted_path"] = path
+	payload := map[string]any{"status": status}
+	for key, value := range fields {
+		payload[key] = value
+	}
+	data, marshalErr := json.MarshalIndent(payload, "", "  ")
+	if marshalErr != nil {
+		return "", marshalErr
+	}
+	content := string(data)
+	code := errorCodePresentationVerificationFailed
+	category := tool.ErrorCategoryDomain
+	outcomeStatus := tool.OutcomeFailed
+	if report.NeedsRuntime {
+		code = tool.ErrorCodeNeedsRuntime
+		category = tool.ErrorCategoryRuntime
+		outcomeStatus = tool.OutcomeNeedsRuntime
+	}
+	reason := fmt.Sprintf("presentation verification stopped at %s", firstNonEmpty(report.VerificationLevel, "package"))
+	if len(report.Warnings) > 0 {
+		reason += ": " + strings.Join(report.Warnings, "; ")
+	}
+	return content, &artifactExecutionFailure{
+		Content:   content,
+		Code:      code,
+		Category:  category,
+		Status:    outcomeStatus,
+		Retryable: false,
+		Diagnostic: map[string]any{
+			"verified":           false,
+			"attempted_path":     path,
+			"verification_level": report.VerificationLevel,
+			"render_check":       report.Engine,
+			"warnings":           append([]string(nil), report.Warnings...),
+			"artifact_status":    "error",
+		},
+		Cause: errors.New(reason),
+	}
 }
 
 func presentationRender(ctx context.Context, input string) (string, error) {
@@ -624,9 +926,12 @@ func presentationRender(ctx context.Context, input string) (string, error) {
 		return "", err
 	}
 	slideCount, _ := countPPTXSlides(checkedSource)
-	report, err := renderPresentation(ctx, checkedSource, outputDir, slideCount)
+	report, err := renderPresentationPreviewAtomically(ctx, checkedSource, outputDir, slideCount)
 	if err != nil {
 		return "", err
+	}
+	if !report.Verified {
+		return presentationFailureResult("presentation_render_failed", checkedSource, report, slideCount)
 	}
 	return presentationResultJSON("presentation_rendered", checkedSource, report, slideCount)
 }
@@ -974,7 +1279,7 @@ func presentationRenderOutputDir(ctx context.Context, params map[string]any, sou
 	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(checked, 0o755); err != nil {
+	if err := ensureParentDir(checked); err != nil {
 		return "", err
 	}
 	return checked, nil
@@ -1219,11 +1524,23 @@ func presentationSpecFromParams(ctx context.Context, params map[string]any, outp
 		for imageIndex := range spec.Slides[slideIndex].Images {
 			image := &spec.Slides[slideIndex].Images[imageIndex]
 			if strings.TrimSpace(image.Path) == "" {
-				continue
+				return presentationSpec{}, &presentationInputError{
+					Path:   fmt.Sprintf("$.slides[%d].images[%d].path", slideIndex, imageIndex),
+					Reason: "is required",
+				}
 			}
 			checked, err := perm.ResolveReadablePathChecked(image.Path)
 			if err != nil {
-				return presentationSpec{}, err
+				return presentationSpec{}, &presentationInputError{
+					Path:   fmt.Sprintf("$.slides[%d].images[%d].path", slideIndex, imageIndex),
+					Reason: err.Error(),
+				}
+			}
+			if err := validatePresentationImageFile(checked); err != nil {
+				return presentationSpec{}, &presentationInputError{
+					Path:   fmt.Sprintf("$.slides[%d].images[%d].path", slideIndex, imageIndex),
+					Reason: err.Error(),
+				}
 			}
 			image.Path = checked
 		}
@@ -1234,14 +1551,731 @@ func presentationSpecFromParams(ctx context.Context, params map[string]any, outp
 	return spec, nil
 }
 
+func resolvePresentationEditImages(ctx context.Context, edits []map[string]any) error {
+	for editIndex, edit := range edits {
+		if err := resolvePresentationImageList(
+			ctx,
+			edit["images"],
+			fmt.Sprintf("$.edits[%d].images", editIndex),
+		); err != nil {
+			return err
+		}
+		slide, _ := edit["slide"].(map[string]any)
+		if slide == nil {
+			continue
+		}
+		if err := resolvePresentationImageList(
+			ctx,
+			slide["images"],
+			fmt.Sprintf("$.edits[%d].slide.images", editIndex),
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func resolvePresentationImageList(ctx context.Context, value any, basePath string) error {
+	if value == nil {
+		return nil
+	}
+	items, ok := value.([]any)
+	if !ok {
+		return &presentationInputError{Path: basePath, Reason: "expected array"}
+	}
+	perm := tool.PermissionContextFromContext(ctx)
+	for imageIndex, item := range items {
+		image, ok := item.(map[string]any)
+		if !ok {
+			return &presentationInputError{Path: fmt.Sprintf("%s[%d]", basePath, imageIndex), Reason: "expected object"}
+		}
+		path, _ := image["path"].(string)
+		path = strings.TrimSpace(path)
+		if path == "" {
+			return &presentationInputError{Path: fmt.Sprintf("%s[%d].path", basePath, imageIndex), Reason: "is required"}
+		}
+		checked, err := perm.ResolveReadablePathChecked(path)
+		if err != nil {
+			return &presentationInputError{Path: fmt.Sprintf("%s[%d].path", basePath, imageIndex), Reason: err.Error()}
+		}
+		if err := validatePresentationImageFile(checked); err != nil {
+			return &presentationInputError{Path: fmt.Sprintf("%s[%d].path", basePath, imageIndex), Reason: err.Error()}
+		}
+		image["path"] = checked
+	}
+	return nil
+}
+
+func validatePresentationImageFile(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("image file does not exist: %s", path)
+		}
+		return fmt.Errorf("image file is not readable: %v", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("image path is not a regular file: %s", path)
+	}
+	if info.Size() <= 0 {
+		return fmt.Errorf("image file is empty: %s", path)
+	}
+	return nil
+}
+
 func writeVerifiedPresentation(ctx context.Context, spec presentationSpec) (presentationRenderReport, error) {
 	if err := ensureParentDir(spec.OutputPath); err != nil {
 		return presentationRenderReport{}, err
 	}
-	if err := writePPTXWithPython(ctx, spec); err != nil {
+	staging, err := newPresentationStaging(spec.OutputPath, spec.PreviewDir, spec.RenderPreview)
+	if err != nil {
 		return presentationRenderReport{}, err
 	}
-	return verifyPresentationPackage(ctx, spec.OutputPath, spec.PreviewDir, spec.RenderPreview, len(spec.Slides))
+	defer staging.cleanup()
+
+	stagedSpec := spec
+	stagedSpec.OutputPath = staging.stagedPath
+	stagedSpec.PreviewDir = staging.stagedPreviewDir
+	engineReport, err := writePPTXWithPython(ctx, stagedSpec)
+	if err != nil {
+		return presentationRenderReport{}, err
+	}
+	return staging.verifyAndPublish(ctx, engineReport.Warnings, len(spec.Slides))
+}
+
+func writeVerifiedPresentationEdit(ctx context.Context, spec presentationEditSpec) (presentationRenderReport, error) {
+	if err := ensureParentDir(spec.OutputPath); err != nil {
+		return presentationRenderReport{}, err
+	}
+	staging, err := newPresentationStaging(spec.OutputPath, spec.PreviewDir, spec.RenderPreview)
+	if err != nil {
+		return presentationRenderReport{}, err
+	}
+	defer staging.cleanup()
+
+	// SourcePath always remains the caller's original deck. In-place edits are
+	// rendered into the sibling stagedPath and cannot mutate the source before
+	// the full render/visual gate succeeds.
+	stagedSpec := spec
+	stagedSpec.OutputPath = staging.stagedPath
+	stagedSpec.PreviewDir = staging.stagedPreviewDir
+	engineReport, err := editPPTXWithPython(ctx, stagedSpec)
+	if err != nil {
+		return presentationRenderReport{}, err
+	}
+	slideCount, err := countPPTXSlides(staging.stagedPath)
+	if err != nil {
+		return presentationRenderReport{}, fmt.Errorf("count staged presentation slides: %w", err)
+	}
+	return staging.verifyAndPublish(ctx, engineReport.Warnings, slideCount)
+}
+
+type presentationStaging struct {
+	finalPath        string
+	stagedPath       string
+	finalPreviewDir  string
+	stagedPreviewDir string
+	keepPreview      bool
+}
+
+func newPresentationStaging(finalPath, finalPreviewDir string, keepPreview bool) (*presentationStaging, error) {
+	finalPath = filepath.Clean(finalPath)
+	parent := filepath.Dir(finalPath)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return nil, fmt.Errorf("create presentation output directory: %w", err)
+	}
+	base := strings.TrimSuffix(filepath.Base(finalPath), filepath.Ext(finalPath))
+	if strings.TrimSpace(base) == "" || base == "." {
+		base = "presentation"
+	}
+	stagedFile, err := os.CreateTemp(parent, "."+base+".awaken-stage-*.pptx")
+	if err != nil {
+		return nil, fmt.Errorf("create presentation staging file: %w", err)
+	}
+	stagedPath := stagedFile.Name()
+	if err := stagedFile.Close(); err != nil {
+		_ = os.Remove(stagedPath)
+		return nil, fmt.Errorf("close presentation staging file: %w", err)
+	}
+	stagedPreviewDir, err := os.MkdirTemp(parent, "."+base+"_preview.awaken-stage-*")
+	if err != nil {
+		_ = os.Remove(stagedPath)
+		return nil, fmt.Errorf("create presentation preview staging directory: %w", err)
+	}
+	if keepPreview && strings.TrimSpace(finalPreviewDir) == "" {
+		finalPreviewDir = defaultPresentationPreviewDir(finalPath)
+	}
+	return &presentationStaging{
+		finalPath:        finalPath,
+		stagedPath:       stagedPath,
+		finalPreviewDir:  filepath.Clean(finalPreviewDir),
+		stagedPreviewDir: stagedPreviewDir,
+		keepPreview:      keepPreview,
+	}, nil
+}
+
+func (s *presentationStaging) cleanup() {
+	if s == nil {
+		return
+	}
+	_ = os.Remove(s.stagedPath)
+	_ = os.RemoveAll(s.stagedPreviewDir)
+}
+
+func (s *presentationStaging) verifyAndPublish(ctx context.Context, engineWarnings []string, expectedSlides int) (presentationRenderReport, error) {
+	report, err := verifyPresentationPackage(ctx, s.stagedPath, s.stagedPreviewDir, true, expectedSlides)
+	if err != nil {
+		return presentationRenderReport{}, err
+	}
+	report = gatePresentationVerificationWarnings(report, engineWarnings...)
+	if !report.Verified {
+		return clearPresentationPreviewReferences(report), nil
+	}
+
+	var previewSwap *presentationPreviewSwap
+	if s.keepPreview {
+		if err := normalizeStagedPresentationPreview(&report, s.stagedPath, s.finalPath, s.stagedPreviewDir); err != nil {
+			return presentationRenderReport{}, err
+		}
+		policy := presentationManagedPreviewPolicy(s.finalPath, s.finalPreviewDir)
+		if err := prepareManagedPreviewDirectory(s.stagedPreviewDir, policy); err != nil {
+			return presentationRenderReport{}, err
+		}
+		previewSwap, err = beginManagedPreviewSwap(s.stagedPreviewDir, s.finalPreviewDir, policy)
+		if err != nil {
+			return presentationRenderReport{}, err
+		}
+	} else {
+		report = clearPresentationPreviewReferences(report)
+	}
+
+	if err := publishPresentationFile(s.stagedPath, s.finalPath); err != nil {
+		if previewSwap != nil {
+			if rollbackErr := previewSwap.rollback(); rollbackErr != nil {
+				return presentationRenderReport{}, errors.Join(err, fmt.Errorf("rollback presentation preview publication: %w", rollbackErr))
+			}
+		}
+		return presentationRenderReport{}, err
+	}
+	if previewSwap != nil {
+		if err := previewSwap.commit(); err != nil {
+			return presentationRenderReport{}, err
+		}
+		report = rebasePresentationPreviewReport(report, s.stagedPreviewDir, s.finalPreviewDir)
+	}
+	return report, nil
+}
+
+func clearPresentationPreviewReferences(report presentationRenderReport) presentationRenderReport {
+	report.PDFPath = ""
+	report.PreviewDir = ""
+	report.PreviewImages = nil
+	return report
+}
+
+func normalizeStagedPresentationPreview(report *presentationRenderReport, stagedPath, finalPath, stagedPreviewDir string) error {
+	if report == nil || strings.TrimSpace(report.PDFPath) == "" {
+		return nil
+	}
+	expectedPDF := presentationPDFPath(finalPath, stagedPreviewDir)
+	if filepath.Clean(report.PDFPath) != filepath.Clean(expectedPDF) {
+		if err := os.Rename(report.PDFPath, expectedPDF); err != nil {
+			return fmt.Errorf("normalize staged presentation PDF name: %w", err)
+		}
+		oldMetadata := report.PDFPath + ".pagecount"
+		if _, err := os.Stat(oldMetadata); err == nil {
+			if err := os.Rename(oldMetadata, expectedPDF+".pagecount"); err != nil {
+				return fmt.Errorf("normalize staged presentation PDF metadata: %w", err)
+			}
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("inspect staged presentation PDF metadata: %w", err)
+		}
+		report.PDFPath = expectedPDF
+	}
+	report.PreviewDir = stagedPreviewDir
+	_ = stagedPath // kept in the signature to make the source/final basename boundary explicit.
+	return nil
+}
+
+func syncPresentationPreview(report presentationRenderReport) error {
+	paths := append([]string{report.PDFPath, report.PDFPath + ".pagecount"}, report.PreviewImages...)
+	for _, path := range paths {
+		if strings.TrimSpace(path) == "" {
+			continue
+		}
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		if err := syncRegularFile(path); err != nil {
+			return fmt.Errorf("sync staged presentation preview %s: %w", path, err)
+		}
+	}
+	return syncDirectory(report.PreviewDir)
+}
+
+func preparePresentationPreviewPermissions(root string) error {
+	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if err := os.Chmod(path, 0o755); err != nil {
+				return fmt.Errorf("set presentation preview directory permissions: %w", err)
+			}
+			return nil
+		}
+		if info.Mode().IsRegular() {
+			if err := os.Chmod(path, 0o644); err != nil {
+				return fmt.Errorf("set presentation preview file permissions: %w", err)
+			}
+		}
+		return nil
+	})
+}
+
+type presentationPreviewSwap struct {
+	finalDir  string
+	backupDir string
+}
+
+func beginPresentationPreviewSwap(stagedDir, finalDir, finalPath string) (*presentationPreviewSwap, error) {
+	return beginManagedPreviewSwap(stagedDir, finalDir, presentationManagedPreviewPolicy(finalPath, finalDir))
+}
+
+type managedPreviewPolicy struct {
+	pdfName string
+	marker  previewOwnershipMarker
+}
+
+func presentationManagedPreviewPolicy(presentationPath, previewDir string) managedPreviewPolicy {
+	return managedPreviewPolicy{
+		pdfName: filepath.Base(presentationPDFPath(presentationPath, previewDir)),
+		marker:  newPreviewOwnershipMarker("presentation_preview", presentationPath, previewDir),
+	}
+}
+
+func pdfManagedPreviewPolicy(pdfPath, previewDir string) managedPreviewPolicy {
+	return managedPreviewPolicy{
+		marker: newPreviewOwnershipMarker("pdf_preview", pdfPath, previewDir),
+	}
+}
+
+func (policy managedPreviewPolicy) allows(name string) bool {
+	if isManagedPresentationPreviewPage(name) {
+		return true
+	}
+	return policy.pdfName != "" && (name == policy.pdfName || name == policy.pdfName+".pagecount")
+}
+
+const (
+	previewOwnershipMarkerName = ".awaken-preview.json"
+	previewOwnershipSchema     = 1
+	previewOwnershipOwner      = "awaken.artifact_runtime"
+	previewOwnershipMaxBytes   = 16 * 1024
+)
+
+type previewOwnershipMarker struct {
+	SchemaVersion  int    `json:"schema_version"`
+	Owner          string `json:"owner"`
+	Tool           string `json:"tool"`
+	SourceIdentity string `json:"source_identity"`
+	OutputIdentity string `json:"output_identity"`
+}
+
+func newPreviewOwnershipMarker(toolName, sourcePath, outputDir string) previewOwnershipMarker {
+	return previewOwnershipMarker{
+		SchemaVersion:  previewOwnershipSchema,
+		Owner:          previewOwnershipOwner,
+		Tool:           toolName,
+		SourceIdentity: managedPreviewIdentity(sourcePath),
+		OutputIdentity: managedPreviewIdentity(outputDir),
+	}
+}
+
+func managedPreviewIdentity(path string) string {
+	path = filepath.Clean(path)
+	if absolute, err := filepath.Abs(path); err == nil {
+		path = absolute
+	}
+	return filepath.Clean(path)
+}
+
+func (marker previewOwnershipMarker) validate() error {
+	if marker.SchemaVersion != previewOwnershipSchema || marker.Owner != previewOwnershipOwner {
+		return fmt.Errorf("unsupported preview ownership marker schema or owner")
+	}
+	if strings.TrimSpace(marker.Tool) == "" || strings.TrimSpace(marker.SourceIdentity) == "" || strings.TrimSpace(marker.OutputIdentity) == "" {
+		return fmt.Errorf("preview ownership marker is incomplete")
+	}
+	return nil
+}
+
+func beginManagedPreviewSwap(stagedDir, finalDir string, policy managedPreviewPolicy) (*presentationPreviewSwap, error) {
+	if strings.TrimSpace(finalDir) == "" {
+		return nil, fmt.Errorf("final preview directory is required")
+	}
+	parent := filepath.Dir(finalDir)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return nil, err
+	}
+	swap := &presentationPreviewSwap{finalDir: finalDir}
+	if _, err := os.Lstat(finalDir); err == nil {
+		if err := validateManagedPreviewDir(finalDir, policy); err != nil {
+			return nil, err
+		}
+		placeholder, tempErr := os.MkdirTemp(parent, "."+filepath.Base(finalDir)+".awaken-backup-*")
+		if tempErr != nil {
+			return nil, tempErr
+		}
+		if removeErr := os.Remove(placeholder); removeErr != nil {
+			return nil, removeErr
+		}
+		swap.backupDir = placeholder
+		if err := os.Rename(finalDir, swap.backupDir); err != nil {
+			return nil, fmt.Errorf("backup existing presentation preview: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+	if err := os.Rename(stagedDir, finalDir); err != nil {
+		publishErr := fmt.Errorf("publish presentation preview: %w", err)
+		if swap.backupDir != "" {
+			restoreErr := swap.restoreBackup()
+			syncErr := syncDirectory(parent)
+			return nil, errors.Join(publishErr, restoreErr, syncErr)
+		}
+		return nil, publishErr
+	}
+	if err := syncDirectory(parent); err != nil {
+		syncErr := fmt.Errorf("sync presentation preview directory: %w", err)
+		if rollbackErr := swap.rollback(); rollbackErr != nil {
+			return nil, errors.Join(syncErr, fmt.Errorf("rollback preview after sync failure: %w", rollbackErr))
+		}
+		return nil, syncErr
+	}
+	return swap, nil
+}
+
+func validateManagedPresentationPreviewDir(previewDir, presentationPath string) error {
+	return validateManagedPreviewDir(previewDir, presentationManagedPreviewPolicy(presentationPath, previewDir))
+}
+
+func validateManagedPreviewDir(previewDir string, policy managedPreviewPolicy) error {
+	if err := policy.marker.validate(); err != nil {
+		return fmt.Errorf("invalid expected preview ownership: %w", err)
+	}
+	info, err := os.Lstat(previewDir)
+	if err != nil {
+		return fmt.Errorf("inspect preview directory: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("refusing to replace unmanaged preview path %s", previewDir)
+	}
+
+	entries, err := os.ReadDir(previewDir)
+	if err != nil {
+		return fmt.Errorf("inspect preview entries: %w", err)
+	}
+	markerFound := false
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to replace preview directory containing symlink %s", filepath.Join(previewDir, name))
+		}
+		entryInfo, err := entry.Info()
+		if err != nil {
+			return fmt.Errorf("inspect preview entry %s: %w", filepath.Join(previewDir, name), err)
+		}
+		if !entryInfo.Mode().IsRegular() {
+			return fmt.Errorf("refusing to replace preview directory containing non-regular entry %s", filepath.Join(previewDir, name))
+		}
+		if name == previewOwnershipMarkerName {
+			if entryInfo.Size() > previewOwnershipMaxBytes {
+				return fmt.Errorf("refusing to replace preview directory with oversized ownership marker %s", filepath.Join(previewDir, name))
+			}
+			markerFound = true
+			continue
+		}
+		if policy.allows(name) {
+			continue
+		}
+		return fmt.Errorf("refusing to replace preview directory containing unrelated file %s", filepath.Join(previewDir, name))
+	}
+	if !markerFound {
+		return fmt.Errorf("refusing to replace preview directory without ownership marker %s", filepath.Join(previewDir, previewOwnershipMarkerName))
+	}
+	actualMarker, err := readPreviewOwnershipMarker(filepath.Join(previewDir, previewOwnershipMarkerName))
+	if err != nil {
+		return fmt.Errorf("refusing to replace preview directory with invalid ownership marker: %w", err)
+	}
+	if actualMarker != policy.marker {
+		return fmt.Errorf("refusing to replace preview directory with mismatched ownership marker %s", filepath.Join(previewDir, previewOwnershipMarkerName))
+	}
+	return nil
+}
+
+func readPreviewOwnershipMarker(path string) (previewOwnershipMarker, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return previewOwnershipMarker{}, err
+	}
+	if len(data) > previewOwnershipMaxBytes {
+		return previewOwnershipMarker{}, fmt.Errorf("ownership marker exceeds %d bytes", previewOwnershipMaxBytes)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var marker previewOwnershipMarker
+	if err := decoder.Decode(&marker); err != nil {
+		return previewOwnershipMarker{}, err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return previewOwnershipMarker{}, fmt.Errorf("ownership marker contains trailing JSON")
+		}
+		return previewOwnershipMarker{}, err
+	}
+	if err := marker.validate(); err != nil {
+		return previewOwnershipMarker{}, err
+	}
+	return marker, nil
+}
+
+func isManagedPresentationPreviewPage(name string) bool {
+	if !strings.HasPrefix(name, "page-") || !strings.HasSuffix(name, ".png") {
+		return false
+	}
+	page := strings.TrimSuffix(strings.TrimPrefix(name, "page-"), ".png")
+	if page == "" {
+		return false
+	}
+	for _, digit := range page {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	number, err := strconv.Atoi(page)
+	return err == nil && number > 0
+}
+
+func (s *presentationPreviewSwap) rollback() error {
+	if s == nil {
+		return nil
+	}
+	var errs []error
+	if err := os.RemoveAll(s.finalDir); err != nil {
+		errs = append(errs, fmt.Errorf("remove newly published preview %s: %w", s.finalDir, err))
+	}
+	if s.backupDir != "" {
+		if err := s.restoreBackup(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if err := syncDirectory(filepath.Dir(s.finalDir)); err != nil {
+		errs = append(errs, fmt.Errorf("sync preview parent after rollback: %w", err))
+	}
+	return errors.Join(errs...)
+}
+
+func (s *presentationPreviewSwap) restoreBackup() error {
+	if s == nil || s.backupDir == "" {
+		return nil
+	}
+	backupDir := s.backupDir
+	if err := os.Rename(backupDir, s.finalDir); err != nil {
+		return fmt.Errorf("restore preview backup from %s to %s failed; backup retained at %s: %w", backupDir, s.finalDir, backupDir, err)
+	}
+	s.backupDir = ""
+	return nil
+}
+
+func (s *presentationPreviewSwap) commit() error {
+	if s == nil || s.backupDir == "" {
+		return nil
+	}
+	backupDir := s.backupDir
+	if err := os.RemoveAll(backupDir); err != nil {
+		return fmt.Errorf("remove committed preview backup %s: %w", backupDir, err)
+	}
+	s.backupDir = ""
+	if err := syncDirectory(filepath.Dir(s.finalDir)); err != nil {
+		return fmt.Errorf("sync preview parent after commit: %w", err)
+	}
+	return nil
+}
+
+func rebasePresentationPreviewReport(report presentationRenderReport, fromDir, toDir string) presentationRenderReport {
+	rebase := func(path string) string {
+		if strings.TrimSpace(path) == "" {
+			return ""
+		}
+		rel, err := filepath.Rel(fromDir, path)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return path
+		}
+		return filepath.Join(toDir, rel)
+	}
+	report.PDFPath = rebase(report.PDFPath)
+	for index := range report.PreviewImages {
+		report.PreviewImages[index] = rebase(report.PreviewImages[index])
+	}
+	report.PreviewDir = toDir
+	return report
+}
+
+func publishPresentationFile(stagedPath, finalPath string) error {
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(finalPath); err == nil {
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("presentation output path is not a regular file: %s", finalPath)
+		}
+		mode = info.Mode().Perm()
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Chmod(stagedPath, mode); err != nil {
+		return fmt.Errorf("set published presentation permissions: %w", err)
+	}
+	if err := syncRegularFile(stagedPath); err != nil {
+		return fmt.Errorf("sync staged presentation: %w", err)
+	}
+	backupPath, err := backupPresentationFile(finalPath)
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if committed && backupPath != "" {
+			_ = os.Remove(backupPath)
+		}
+	}()
+	if err := os.Rename(stagedPath, finalPath); err != nil {
+		if backupPath != "" {
+			_ = os.Remove(backupPath)
+		}
+		return fmt.Errorf("atomically publish presentation: %w", err)
+	}
+	if err := syncDirectory(filepath.Dir(finalPath)); err != nil {
+		rollbackErr := rollbackPresentationFile(finalPath, backupPath)
+		if rollbackErr != nil {
+			return fmt.Errorf("sync published presentation: %w (rollback failed: %v)", err, rollbackErr)
+		}
+		return fmt.Errorf("sync published presentation: %w", err)
+	}
+	committed = true
+	return nil
+}
+
+func backupPresentationFile(finalPath string) (string, error) {
+	info, err := os.Stat(finalPath)
+	if os.IsNotExist(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("presentation output path is not a regular file: %s", finalPath)
+	}
+	backup, err := os.CreateTemp(filepath.Dir(finalPath), "."+filepath.Base(finalPath)+".awaken-backup-*")
+	if err != nil {
+		return "", err
+	}
+	backupPath := backup.Name()
+	source, err := os.Open(finalPath)
+	if err != nil {
+		_ = backup.Close()
+		_ = os.Remove(backupPath)
+		return "", err
+	}
+	_, copyErr := io.Copy(backup, source)
+	closeSourceErr := source.Close()
+	syncErr := backup.Sync()
+	closeBackupErr := backup.Close()
+	if err := errors.Join(copyErr, closeSourceErr, syncErr, closeBackupErr); err != nil {
+		_ = os.Remove(backupPath)
+		return "", fmt.Errorf("backup existing presentation: %w", err)
+	}
+	if err := os.Chmod(backupPath, info.Mode().Perm()); err != nil {
+		_ = os.Remove(backupPath)
+		return "", err
+	}
+	return backupPath, nil
+}
+
+func rollbackPresentationFile(finalPath, backupPath string) error {
+	if backupPath == "" {
+		if err := os.Remove(finalPath); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return syncDirectory(filepath.Dir(finalPath))
+	}
+	if err := os.Rename(backupPath, finalPath); err != nil {
+		// Windows may refuse replacement. The fallback is only for rollback;
+		// the success path above still publishes with one atomic rename.
+		if removeErr := os.Remove(finalPath); removeErr != nil && !os.IsNotExist(removeErr) {
+			return errors.Join(err, removeErr)
+		}
+		if retryErr := os.Rename(backupPath, finalPath); retryErr != nil {
+			return errors.Join(err, retryErr)
+		}
+	}
+	return syncDirectory(filepath.Dir(finalPath))
+}
+
+func syncRegularFile(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	syncErr := file.Sync()
+	closeErr := file.Close()
+	return errors.Join(syncErr, closeErr)
+}
+
+func syncDirectory(path string) error {
+	if goruntime.GOOS == "windows" {
+		return nil
+	}
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	syncErr := dir.Sync()
+	closeErr := dir.Close()
+	return errors.Join(syncErr, closeErr)
+}
+
+// gatePresentationVerificationWarnings makes the publishing contract stricter
+// than the transport/render contract. LibreOffice and Poppler can successfully
+// produce PDF/PNG files while the semantic engine has already detected a blank,
+// clipped, overflowing, or otherwise visually unsafe slide. Such an artifact is
+// evidence for recovery, not a ready deliverable.
+func gatePresentationVerificationWarnings(report presentationRenderReport, warnings ...string) presentationRenderReport {
+	report.Warnings = appendUniqueStrings(warnings, report.Warnings...)
+	if len(report.Warnings) > 0 {
+		report.Verified = false
+	}
+	return report
+}
+
+func appendUniqueStrings(base []string, values ...string) []string {
+	seen := make(map[string]struct{}, len(base)+len(values))
+	out := make([]string, 0, len(base)+len(values))
+	for _, value := range append(append([]string(nil), base...), values...) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func verifyPresentationPackage(ctx context.Context, path, previewDir string, keepPreview bool, expectedSlides int) (presentationRenderReport, error) {
@@ -1303,12 +2337,144 @@ func verifyPresentationRender(ctx context.Context, path string) error {
 	return nil
 }
 
+func renderPresentationPreviewAtomically(ctx context.Context, path, outputDir string, expectedSlides int) (presentationRenderReport, error) {
+	stagedDir, err := newManagedPreviewStagingDir(outputDir)
+	if err != nil {
+		return presentationRenderReport{}, err
+	}
+	defer os.RemoveAll(stagedDir)
+
+	report, err := renderPresentation(ctx, path, stagedDir, expectedSlides)
+	if err != nil {
+		return presentationRenderReport{}, err
+	}
+	if !report.Verified {
+		return clearPresentationPreviewReferences(report), nil
+	}
+	policy := presentationManagedPreviewPolicy(path, outputDir)
+	if err := publishManagedPreviewDirectory(stagedDir, outputDir, policy); err != nil {
+		return presentationRenderReport{}, err
+	}
+	return rebasePresentationPreviewReport(report, stagedDir, outputDir), nil
+}
+
+func renderPDFPreviewAtomically(ctx context.Context, pdfPath, outputDir string) ([]string, error) {
+	stagedDir, err := newManagedPreviewStagingDir(outputDir)
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(stagedDir)
+
+	images, err := renderPDFPagesToPNG(ctx, pdfPath, stagedDir)
+	if err != nil {
+		return nil, err
+	}
+	if err := publishManagedPreviewDirectory(stagedDir, outputDir, pdfManagedPreviewPolicy(pdfPath, outputDir)); err != nil {
+		return nil, err
+	}
+	published := make([]string, len(images))
+	for index, image := range images {
+		published[index] = filepath.Join(outputDir, filepath.Base(image))
+	}
+	return published, nil
+}
+
+func newManagedPreviewStagingDir(finalDir string) (string, error) {
+	finalDir = filepath.Clean(finalDir)
+	parent := filepath.Dir(finalDir)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return "", fmt.Errorf("create preview output parent: %w", err)
+	}
+	base := filepath.Base(finalDir)
+	if strings.TrimSpace(base) == "" || base == "." || base == string(filepath.Separator) {
+		base = "preview"
+	}
+	stagedDir, err := os.MkdirTemp(parent, "."+base+".awaken-stage-*")
+	if err != nil {
+		return "", fmt.Errorf("create preview staging directory: %w", err)
+	}
+	return stagedDir, nil
+}
+
+func publishManagedPreviewDirectory(stagedDir, finalDir string, policy managedPreviewPolicy) error {
+	if err := prepareManagedPreviewDirectory(stagedDir, policy); err != nil {
+		return err
+	}
+	swap, err := beginManagedPreviewSwap(stagedDir, finalDir, policy)
+	if err != nil {
+		return err
+	}
+	return swap.commit()
+}
+
+func prepareManagedPreviewDirectory(stagedDir string, policy managedPreviewPolicy) error {
+	if err := writePreviewOwnershipMarker(stagedDir, policy.marker); err != nil {
+		return err
+	}
+	if err := validateManagedPreviewDir(stagedDir, policy); err != nil {
+		return fmt.Errorf("validate staged preview: %w", err)
+	}
+	if err := preparePresentationPreviewPermissions(stagedDir); err != nil {
+		return err
+	}
+	return syncManagedPreviewDirectory(stagedDir)
+}
+
+func writePreviewOwnershipMarker(previewDir string, marker previewOwnershipMarker) error {
+	if err := marker.validate(); err != nil {
+		return fmt.Errorf("invalid preview ownership marker: %w", err)
+	}
+	data, err := json.MarshalIndent(marker, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode preview ownership marker: %w", err)
+	}
+	data = append(data, '\n')
+	markerPath := filepath.Join(previewDir, previewOwnershipMarkerName)
+	file, err := os.OpenFile(markerPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return fmt.Errorf("create reserved preview ownership marker %s: %w", markerPath, err)
+	}
+	_, writeErr := file.Write(data)
+	closeErr := file.Close()
+	if err := errors.Join(writeErr, closeErr); err != nil {
+		return fmt.Errorf("write preview ownership marker %s: %w", markerPath, err)
+	}
+	return nil
+}
+
+func syncManagedPreviewDirectory(previewDir string) error {
+	entries, err := os.ReadDir(previewDir)
+	if err != nil {
+		return fmt.Errorf("inspect staged preview for sync: %w", err)
+	}
+	for _, entry := range entries {
+		path := filepath.Join(previewDir, entry.Name())
+		info, err := os.Lstat(path)
+		if err != nil {
+			return fmt.Errorf("inspect staged preview entry %s: %w", path, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("refusing to sync non-regular staged preview entry %s", path)
+		}
+		if err := syncRegularFile(path); err != nil {
+			return fmt.Errorf("sync staged preview entry %s: %w", path, err)
+		}
+	}
+	if err := syncDirectory(previewDir); err != nil {
+		return fmt.Errorf("sync staged preview directory: %w", err)
+	}
+	return nil
+}
+
 func renderPresentation(ctx context.Context, path string, outputDir string, expectedSlides int) (presentationRenderReport, error) {
 	if strings.TrimSpace(outputDir) == "" {
 		return presentationRenderReport{}, fmt.Errorf("output_dir is required")
 	}
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return presentationRenderReport{}, err
+	}
+	if err := clearPresentationRenderOutputs(path, outputDir); err != nil {
+		return presentationRenderReport{}, fmt.Errorf("clear stale presentation preview: %w", err)
 	}
 	slideCount := expectedSlides
 	if counted, err := countPPTXSlides(path); err == nil && counted > 0 {
@@ -1324,7 +2490,7 @@ func renderPresentation(ctx context.Context, path string, outputDir string, expe
 	pdfPath, err := renderPresentationPDF(ctx, path, outputDir)
 	if err != nil {
 		report.Warnings = append(report.Warnings, err.Error())
-		report.NeedsRuntime = true
+		report.NeedsRuntime = isRuntimeDependencyUnavailable(err)
 		return report, nil
 	}
 	report.PDFPath = pdfPath
@@ -1335,7 +2501,7 @@ func renderPresentation(ctx context.Context, path string, outputDir string, expe
 	pngs, err := renderPDFPagesToPNG(ctx, pdfPath, outputDir)
 	if err != nil {
 		report.Warnings = append(report.Warnings, err.Error())
-		report.NeedsRuntime = true
+		report.NeedsRuntime = isRuntimeDependencyUnavailable(err)
 		return report, nil
 	}
 	report.PreviewImages = pngs
@@ -1351,6 +2517,16 @@ func renderPresentation(ctx context.Context, path string, outputDir string, expe
 	report.Verified = true
 	report.VerificationLevel = "png"
 	return report, nil
+}
+
+func isRuntimeDependencyUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "runtime is not available") ||
+		strings.Contains(message, "executable file not found") ||
+		strings.Contains(message, "no such file or directory")
 }
 
 func renderPresentationPDF(ctx context.Context, path string, outDir string) (string, error) {
@@ -1380,6 +2556,13 @@ func renderPresentationPDF(ctx context.Context, path string, outDir string) (str
 	}
 	cmd := exec.CommandContext(runCtx, soffice, args...)
 	cmd.Env = os.Environ()
+	expectedPDF := presentationPDFPath(path, outDir)
+	if err := removeIfExists(expectedPDF); err != nil {
+		return "", fmt.Errorf("remove stale presentation PDF: %w", err)
+	}
+	if err := removeIfExists(expectedPDF + ".pagecount"); err != nil {
+		return "", fmt.Errorf("remove stale presentation PDF metadata: %w", err)
+	}
 	output, err := cmd.CombinedOutput()
 	if runCtx.Err() != nil {
 		return "", fmt.Errorf("libreoffice render timed out: %w", runCtx.Err())
@@ -1387,16 +2570,10 @@ func renderPresentationPDF(ctx context.Context, path string, outDir string) (str
 	if err != nil {
 		return "", fmt.Errorf("libreoffice render failed: %w: %s", err, excerptOutput(output))
 	}
-	pdfs, err := filepath.Glob(filepath.Join(outDir, "*.pdf"))
-	if err != nil {
-		return "", err
+	if info, statErr := os.Stat(expectedPDF); statErr == nil && info.Size() > 0 {
+		return expectedPDF, nil
 	}
-	for _, pdf := range pdfs {
-		if info, statErr := os.Stat(pdf); statErr == nil && info.Size() > 0 {
-			return pdf, nil
-		}
-	}
-	return "", fmt.Errorf("libreoffice render produced no non-empty PDF: %s", excerptOutput(output))
+	return "", fmt.Errorf("libreoffice render produced no non-empty PDF at %s: %s", expectedPDF, excerptOutput(output))
 }
 
 func renderPDFPagesToPNG(ctx context.Context, pdfPath string, outputDir string) ([]string, error) {
@@ -1405,6 +2582,9 @@ func renderPDFPagesToPNG(ctx context.Context, pdfPath string, outputDir string) 
 		return nil, err
 	}
 	prefix := filepath.Join(outputDir, "page")
+	if err := removeGlob(filepath.Join(outputDir, "page-*.png")); err != nil {
+		return nil, fmt.Errorf("remove stale PDF preview pages: %w", err)
+	}
 	runCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, pdftoppm, "-png", "-r", "144", pdfPath, prefix)
@@ -1425,6 +2605,42 @@ func renderPDFPagesToPNG(ctx context.Context, pdfPath string, outputDir string) 
 		return nil, fmt.Errorf("poppler preview render produced no PNG pages")
 	}
 	return pngs, nil
+}
+
+func presentationPDFPath(path, outputDir string) string {
+	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	return filepath.Join(outputDir, base+".pdf")
+}
+
+func clearPresentationRenderOutputs(path, outputDir string) error {
+	pdfPath := presentationPDFPath(path, outputDir)
+	for _, candidate := range []string{pdfPath, pdfPath + ".pagecount"} {
+		if err := removeIfExists(candidate); err != nil {
+			return err
+		}
+	}
+	return removeGlob(filepath.Join(outputDir, "page-*.png"))
+}
+
+func removeIfExists(path string) error {
+	err := os.Remove(path)
+	if err == nil || os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
+func removeGlob(pattern string) error {
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return err
+	}
+	for _, match := range matches {
+		if err := removeIfExists(match); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func writeZip(path string, files map[string]string) error {
@@ -1455,7 +2671,6 @@ func writeZip(path string, files map[string]string) error {
 	}
 	return out.Close()
 }
-
 
 func runtimeExecutableNames(names ...string) []string {
 	seen := make(map[string]struct{}, len(names)*2)
@@ -1540,10 +2755,11 @@ func fileURL(path string) string {
 
 func excerptOutput(output []byte) string {
 	text := strings.TrimSpace(string(output))
-	if len(text) > 1200 {
-		return text[:1200] + "...[truncated]"
+	prefix, truncated := outputlimit.Prefix(text, 1200)
+	if truncated {
+		return prefix + "...[truncated]"
 	}
-	return text
+	return prefix
 }
 
 func xmlText(value string) string {
@@ -1781,11 +2997,13 @@ func init() {
 		execute: documentCreateOrEdit,
 	})
 	tool.MustRegisterTool(typedArtifactTool{
-		name:        "presentation_create",
-		displayName: "Presentation Create",
-		description: "创建图文混排 pptx 演示文稿，支持 theme、slides、bullets、images、speaker notes 与固定 layout enum，并用 LibreOffice/Poppler 生成预览验证；模型只提交 semantic slide spec，不要用 apply_patch 手写 PPTX ZIP/XML 或 CJK helper",
-		readOnly:    false,
-		capability:  tool.CapabilityArtifactWrite,
+		name:                "presentation_create",
+		displayName:         "Presentation Create",
+		description:         "创建图文混排 pptx 演示文稿，支持 theme、slides、bullets、images、speaker notes 与固定 layout enum，并用 LibreOffice/Poppler 生成预览验证；需要 Awaken managed Python/python-pptx、LibreOffice、Poppler；模型只提交 semantic slide spec，不要用 apply_patch 手写 PPTX ZIP/XML 或 CJK helper",
+		readOnly:            false,
+		capability:          tool.CapabilityArtifactWrite,
+		requiresRuntime:     true,
+		runtimeRequirements: append([]string(nil), presentationAuthoringRuntimeRequirements...),
 		parameters: []tool.ToolParameter{
 			{Name: "output_path", Description: "输出 pptx 路径", Type: "string", Required: true},
 			{Name: "title", Description: "演示文稿标题", Type: "string", Required: false},
@@ -1797,11 +3015,13 @@ func init() {
 		execute:     presentationCreate,
 	})
 	tool.MustRegisterTool(typedArtifactTool{
-		name:        "presentation_edit",
-		displayName: "Presentation Edit",
-		description: "对已有 pptx 做增量编辑：必填 source_path 与 edits，保留未修改幻灯片；不支持把全量重写伪装成 edit",
-		readOnly:    false,
-		capability:  tool.CapabilityArtifactWrite,
+		name:                "presentation_edit",
+		displayName:         "Presentation Edit",
+		description:         "对已有 pptx 做增量编辑：必填 source_path 与 edits，按请求顺序执行且 slide_index 基于前一项执行后的当前页序；update 保留未指定正文和图片，replace 必须提供完整 slide；需要 Awaken managed Python/python-pptx、LibreOffice、Poppler",
+		readOnly:            false,
+		capability:          tool.CapabilityArtifactWrite,
+		requiresRuntime:     true,
+		runtimeRequirements: append([]string(nil), presentationAuthoringRuntimeRequirements...),
 		parameters: []tool.ToolParameter{
 			{Name: "source_path", Description: "源 pptx 路径", Type: "string", Required: true},
 			{Name: "edits", Description: "增量编辑数组，每项含 slide_index 与 op/update 字段", Type: "array", Required: true},
@@ -1813,16 +3033,19 @@ func init() {
 		execute:     presentationEdit,
 	})
 	tool.MustRegisterTool(typedArtifactTool{
-		name:        "presentation_render",
-		displayName: "Presentation Render",
-		description: "将本机 pptx 演示文稿渲染成 PDF 与 PNG 页面预览；用于检查 PPT 版式和图片是否可见，不要用 shell 调 LibreOffice/Poppler",
-		readOnly:    false,
-		capability:  tool.CapabilityArtifactWrite,
+		name:                "presentation_render",
+		displayName:         "Presentation Render",
+		description:         "将本机 pptx 演示文稿渲染成 PDF 与 PNG 页面预览；需要 Awaken managed LibreOffice、Poppler；用于检查 PPT 版式和图片是否可见，不要用 shell 调 LibreOffice/Poppler",
+		readOnly:            false,
+		capability:          tool.CapabilityArtifactWrite,
+		requiresRuntime:     true,
+		runtimeRequirements: append([]string(nil), presentationRenderRuntimeRequirements...),
 		parameters: []tool.ToolParameter{
 			{Name: "path", Description: "输入 pptx 路径", Type: "string", Required: true},
 			{Name: "output_dir", Description: "预览输出目录，必须在 writable/output roots 内；不传则使用同名 preview 目录", Type: "string", Required: false},
 		},
-		execute: presentationRender,
+		inputSchema: presentationRenderInputSchema(),
+		execute:     presentationRender,
 	})
 	tool.MustRegisterTool(typedArtifactTool{
 		name:        "pdf_extract",

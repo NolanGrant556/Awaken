@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -383,6 +384,91 @@ func TestShellOutcomeGrepNoMatchIsNeutral(t *testing.T) {
 	}
 }
 
+func TestShellOutcomeRgNoMatchIsNeutral(t *testing.T) {
+	binDir := t.TempDir()
+	writeExitOneCommand(t, binDir, "rg")
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	outcome, err := (&ShellTool{}).ExecuteOutcome(context.Background(), `{"command":"rg definitely-missing-token sample.txt"}`, nil)
+	if err != nil {
+		t.Fatalf("ExecuteOutcome returned transport error: %v", err)
+	}
+	if outcome.Status != tool.OutcomeSucceeded || outcome.TransportStatus != tool.TransportCompleted || outcome.SemanticStatus != tool.SemanticNeutral || outcome.ProcessStatus != tool.ProcessExited {
+		t.Fatalf("expected neutral completed process, got %+v", outcome)
+	}
+	if outcome.ExitCode == nil || *outcome.ExitCode != 1 {
+		t.Fatalf("exit code=%v", outcome.ExitCode)
+	}
+	if reason, _ := outcome.Diagnostic["reason"].(string); reason != "no_match" {
+		t.Fatalf("diagnostic=%v", outcome.Diagnostic)
+	}
+}
+
+func TestShellOutcomeDiffIsNeutralDifferent(t *testing.T) {
+	binDir := t.TempDir()
+	writeExitOneCommand(t, binDir, "diff")
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	outcome, err := (&ShellTool{}).ExecuteOutcome(context.Background(), `{"command":"diff before.txt after.txt"}`, nil)
+	if err != nil {
+		t.Fatalf("ExecuteOutcome returned transport error: %v", err)
+	}
+	if outcome.Status != tool.OutcomeSucceeded || outcome.SemanticStatus != tool.SemanticNeutral || outcome.ProcessStatus != tool.ProcessExited {
+		t.Fatalf("expected neutral difference, got %+v", outcome)
+	}
+	if outcome.ExitCode == nil || *outcome.ExitCode != 1 {
+		t.Fatalf("exit code=%v", outcome.ExitCode)
+	}
+	if reason, _ := outcome.Diagnostic["reason"].(string); reason != "different" {
+		t.Fatalf("diagnostic=%v", outcome.Diagnostic)
+	}
+}
+
+func TestShellOutcomeTimeoutRetainsTruncatedStdoutAndStderr(t *testing.T) {
+	command := "printf 123456789; printf abcdefghi >&2; sleep 1"
+	if runtime.GOOS == "windows" {
+		command = "echo 123456789 & echo abcdefghi 1>&2 & ping -n 3 127.0.0.1 >nul"
+	}
+	input, err := json.Marshal(map[string]any{
+		"command":          command,
+		"timeout_ms":       20,
+		"max_output_chars": 4,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	outcome, err := (&ShellTool{}).ExecuteOutcome(context.Background(), string(input), nil)
+	if err != nil {
+		t.Fatalf("ExecuteOutcome returned transport error: %v", err)
+	}
+	if outcome.Status != tool.OutcomeFailed || outcome.TransportStatus != tool.TransportFailed || outcome.SemanticStatus != tool.SemanticFailure || outcome.ProcessStatus != tool.ProcessTimedOut {
+		t.Fatalf("expected timed-out failure, got %+v", outcome)
+	}
+	if outcome.ErrorCode != tool.ErrorCodeProcessTimeout || !outcome.TimedOut || !outcome.Truncated {
+		t.Fatalf("timeout fields: %+v", outcome)
+	}
+	stdout, _ := outcome.Diagnostic["stdout"].(string)
+	stderr, _ := outcome.Diagnostic["stderr"].(string)
+	if stdout == "" || stderr == "" || !strings.Contains(stdout, "truncated") || !strings.Contains(stderr, "truncated") {
+		t.Fatalf("expected retained truncated streams, stdout=%q stderr=%q diagnostic=%v", stdout, stderr, outcome.Diagnostic)
+	}
+}
+
+func TestShellOutcomeSpawnFailureIsStructured(t *testing.T) {
+	root := t.TempDir()
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	outcome, err := (&ShellTool{}).ExecuteOutcome(ctx, `{"command":"printf never-runs","workdir":"missing/child"}`, nil)
+	if err != nil {
+		t.Fatalf("ExecuteOutcome returned transport error: %v", err)
+	}
+	if outcome.Status != tool.OutcomeFailed || outcome.TransportStatus != tool.TransportFailed || outcome.SemanticStatus != tool.SemanticFailure || outcome.ProcessStatus != tool.ProcessSpawnFailed {
+		t.Fatalf("expected structured spawn failure, got %+v", outcome)
+	}
+	if outcome.ErrorCode != tool.ErrorCodeProcessSpawnFailed || !outcome.Retryable {
+		t.Fatalf("spawn failure fields: %+v", outcome)
+	}
+}
+
 func TestNeutralNonzeroReasonHelpers(t *testing.T) {
 	cases := []struct {
 		command string
@@ -406,12 +492,28 @@ func TestNeutralNonzeroReasonHelpers(t *testing.T) {
 }
 
 func TestShellDescribeActivityInstall(t *testing.T) {
-	activity := (&ShellTool{}).DescribeActivity(`{"command":"pip install requests"}`)
+	activity := (&ShellTool{}).DescribeActivity(`{"command":"pip install requests --index-url sk-abcdefghijklmnopqrstuvwxyz"}`)
 	if activity.Title != "正在安装依赖" {
 		t.Fatalf("title=%q", activity.Title)
 	}
 	if !strings.Contains(activity.Detail, "pip install") {
 		t.Fatalf("detail=%q", activity.Detail)
+	}
+	if strings.Contains(activity.Detail, "sk-abcdefghijklmnopqrstuvwxyz") || !strings.Contains(activity.Detail, "[redacted]") {
+		t.Fatalf("expected redacted install activity, detail=%q", activity.Detail)
+	}
+}
+
+func writeExitOneCommand(t *testing.T, dir, name string) {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	content := "#!/bin/sh\nexit 1\n"
+	if runtime.GOOS == "windows" {
+		path += ".bat"
+		content = "@exit /b 1\r\n"
+	}
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatalf("write fake %s: %v", name, err)
 	}
 }
 

@@ -6,11 +6,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"awaken/src/tool"
 )
 
 type ApplyPatchTool struct{}
+
+var _ tool.OutcomeTool = (*ApplyPatchTool)(nil)
 
 func (t *ApplyPatchTool) Name() string {
 	return "apply_patch"
@@ -61,6 +64,79 @@ func (t *ApplyPatchTool) Execute(ctx context.Context, input string) (string, err
 		return "", err
 	}
 	return summary.String(), nil
+}
+
+// ExecuteOutcome keeps apply_patch grammar, context, and path failures as
+// typed business outcomes. This is the path consumed by ToolRuntime and
+// FailureSupervisor; Go errors are reserved for executor/transport failures.
+func (t *ApplyPatchTool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObserver) (tool.ExecutionOutcome, error) {
+	started := time.Now().UTC()
+	if err := ctx.Err(); err != nil {
+		finished := time.Now().UTC()
+		outcome := tool.ExecutionOutcome{
+			Content:         err.Error(),
+			Status:          tool.OutcomeCancelled,
+			TransportStatus: tool.TransportCancelled,
+			SemanticStatus:  tool.SemanticFailure,
+			ProcessStatus:   tool.ProcessNotApplicable,
+			ErrorCode:       tool.ErrorCodeToolCancelled,
+			ErrorCategory:   tool.ErrorCategoryCancelled,
+			ErrorMessage:    err.Error(),
+			Retryable:       false,
+		}
+		return outcome.WithTiming(started, finished), nil
+	}
+
+	patch, err := parsePatch(input)
+	if err != nil {
+		code := classifyLegacyPatchError(err)
+		message := fmt.Sprintf("%s: %v。apply_patch 只接受 Awaken 结构化 patch；普通单文件修改请改用 text_edit，Markdown/普通文本请改用 text_file_create，生成 docx/xlsx/pptx 请改用 document_create、spreadsheet_create 或 presentation_create", code, err)
+		return patchFailureOutcome(started, message, code, tool.ErrorCategoryValidation, false,
+			[]string{"use_text_edit_or_text_file_create", "re_read_file", "do_not_replay_same_patch"}), nil
+	}
+
+	permissionContext := tool.PermissionContextFromContext(ctx)
+	affectedPaths := patchAffectedPaths(patch, permissionContext)
+	patchSummary := buildPatchSummary(patch)
+	patch = resolvePatchPaths(patch, permissionContext)
+	if tool.HasPermissionContext(ctx) {
+		for _, op := range patch.operations {
+			if err := validateMutationPath(op.path, permissionContext); err != nil {
+				return patchFailureOutcome(started, err.Error(), ErrorCodePatchPathNotWritable, tool.ErrorCategoryPolicy, false,
+					[]string{"choose_path_within_writable_roots", "do_not_bypass_with_shell"}), nil
+			}
+			if strings.TrimSpace(op.movePath) != "" {
+				if err := validateMutationPath(op.movePath, permissionContext); err != nil {
+					return patchFailureOutcome(started, err.Error(), ErrorCodePatchPathNotWritable, tool.ErrorCategoryPolicy, false,
+						[]string{"choose_path_within_writable_roots", "do_not_bypass_with_shell"}), nil
+				}
+			}
+		}
+	}
+
+	summary, err := applyPatch(ctx, patch)
+	if err != nil {
+		if IsPatchContextMismatch(err) {
+			code := classifyLegacyPatchError(err)
+			return patchFailureOutcome(started, err.Error(), code, tool.ErrorCategoryValidation, false,
+				[]string{"read_file", "use_text_edit", "do_not_replay_same_patch"}), nil
+		}
+		return patchFailureOutcome(started, err.Error(), ErrorCodeApplyPatchFailed, tool.ErrorCategoryTool, false,
+			[]string{"inspect_error", "verify_file_state_before_retry"}), nil
+	}
+
+	finished := time.Now().UTC()
+	outcome := tool.SucceededOutcome(summary.String())
+	outcome.AffectedPaths = affectedPaths
+	outcome.PatchSummary = patchSummary
+	return outcome.WithTiming(started, finished), nil
+}
+
+func patchFailureOutcome(started time.Time, message, code string, category tool.ErrorCategory, retryable bool, recovery []string) tool.ExecutionOutcome {
+	finished := time.Now().UTC()
+	outcome := tool.FailedOutcome(message, code, category, retryable)
+	outcome.RecoveryOptions = append([]string(nil), recovery...)
+	return outcome.WithTiming(started, finished)
 }
 
 func (t *ApplyPatchTool) Artifacts(input string, output string, permissionContext tool.PermissionContext) []tool.ArtifactDescriptor {

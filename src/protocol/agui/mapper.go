@@ -393,6 +393,12 @@ func copyToolOutcomeFields(dst *Event, event agentcore.AwakenEvent) {
 	dst.Retryable = event.Retryable
 	dst.RecoveryOptions = append([]string(nil), event.RecoveryOptions...)
 	dst.DurationMs = event.DurationMs
+	if len(event.Diagnostic) > 0 {
+		dst.Diagnostic = make(map[string]any, len(event.Diagnostic))
+		for key, value := range event.Diagnostic {
+			dst.Diagnostic[key] = value
+		}
+	}
 }
 
 func firstNonEmpty(values ...string) string {

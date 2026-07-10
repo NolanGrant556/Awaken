@@ -91,6 +91,30 @@ export type PetWindowManagerDependencies = {
   getRuntimeBaseUrl: () => string | null;
 };
 
+type PetWindowVisibilityTarget = Pick<
+  BrowserWindow,
+  "setVisibleOnAllWorkspaces" | "setAlwaysOnTop" | "moveTop"
+>;
+
+export function applyPetWindowVisibilityPolicy(
+  window: PetWindowVisibilityTarget,
+  platform: NodeJS.Platform,
+  moveToTop = false,
+): void {
+  if (platform === "darwin") {
+    window.setVisibleOnAllWorkspaces(true, {
+      visibleOnFullScreen: true,
+      // Electron otherwise converts the whole process to a UIElement app and
+      // hides Awaken from the macOS Dock. Keep the main app identity intact.
+      skipTransformProcessType: true,
+    });
+  }
+  window.setAlwaysOnTop(true, "screen-saver");
+  if (moveToTop) {
+    window.moveTop();
+  }
+}
+
 export class PetWindowManager {
   private window: BrowserWindow | null = null;
   private petStore: PetStore;
@@ -229,12 +253,7 @@ export class PetWindowManager {
       },
     });
 
-    if (process.platform === "darwin") {
-      this.window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-      this.window.setAlwaysOnTop(true, "screen-saver");
-    } else {
-      this.window.setAlwaysOnTop(true, "screen-saver");
-    }
+    applyPetWindowVisibilityPolicy(this.window, process.platform);
 
     this.window.setIgnoreMouseEvents(true, { forward: true });
 
@@ -267,11 +286,7 @@ export class PetWindowManager {
 
   private restoreAlwaysOnTop(): void {
     if (!this.isOpen()) return;
-    if (process.platform === "darwin") {
-      this.window!.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    }
-    this.window!.setAlwaysOnTop(true, "screen-saver");
-    this.window!.moveTop();
+    applyPetWindowVisibilityPolicy(this.window!, process.platform, true);
   }
 
   private startRecoveryWatchdog(): void {

@@ -33,9 +33,5 @@ func (e *McpExecutor) Execute(
 	if execProfile.PermissionProfile == profile.PermissionReadOnly && !t.Definition().Annotations.ReadOnly {
 		return deniedOutput("read_only_violation", "profile is read_only but MCP tool requests write-capable behavior")
 	}
-	content, err := executeWithObserver(ctx, t, input, observer)
-	if err != nil {
-		return ToolExecutionOutput{}, err
-	}
-	return ToolExecutionOutput{Content: content}, nil
+	return executeWithObserver(ctx, t, input, observer)
 }

@@ -155,4 +155,43 @@ describe("projectAguiEventToNarrative", () => {
       "你停止了生成本次回答",
     );
   });
+
+  it("maps toolStatus to ToolDisplayState without content heuristics", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_START",
+      toolCallId: "shell-1",
+      toolCallName: "shell",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_RESULT",
+      toolCallId: "shell-1",
+      toolCallName: "shell",
+      content: "",
+      toolStatus: "succeeded",
+    });
+
+    const tool = state.committedItems.find((item) => item.kind === "tool");
+    expect(tool).toMatchObject({
+      kind: "tool",
+      status: "done",
+      toolStatus: "succeeded",
+    });
+
+    state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_RESULT",
+      toolCallId: "shell-2",
+      toolCallName: "shell",
+      content: "工具执行失败: quoted",
+      toolStatus: "failed",
+      processExitCode: 7,
+    });
+    const failed = state.committedItems.find((item) => item.kind === "tool");
+    expect(failed).toMatchObject({
+      kind: "tool",
+      status: "error",
+      toolStatus: "failed",
+    });
+  });
 });

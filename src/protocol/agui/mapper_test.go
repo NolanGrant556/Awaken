@@ -93,13 +93,28 @@ func TestMapEventTurnLifecycle(t *testing.T) {
 }
 
 func TestMapEventToolResult(t *testing.T) {
+	exitCode := 7
 	events := MapEvent(agentcore.AwakenEvent{
-		Type:       agentcore.ToolResultEventType,
-		ThreadID:   "thread-1",
-		RunID:      "run-1",
-		MessageID:  "toolmsg-1",
-		ToolCallID: "tool-1",
-		Content:    "echo:hello",
+		Type:               agentcore.ToolResultEventType,
+		ThreadID:           "thread-1",
+		RunID:              "run-1",
+		MessageID:          "toolmsg-1",
+		ToolCallID:         "tool-1",
+		Content:            "echo:hello",
+		ToolStatus:         "failed",
+		TransportStatus:    "completed",
+		SemanticStatus:     "failure",
+		ProcessStatus:      "exited",
+		ProcessExitCode:    &exitCode,
+		ProcessTimedOut:    false,
+		ErrorCode:          "process_exit_nonzero",
+		ErrorCategory:      "process",
+		Retryable:          false,
+		RecoveryOptions:    []string{"retry"},
+		DurationMs:         42,
+		ToolProgressStage:  "completed",
+		ToolProgressMessage: "done",
+		ToolProgressPercentage: 100,
 	})
 
 	if len(events) != 1 {
@@ -116,6 +131,12 @@ func TestMapEventToolResult(t *testing.T) {
 	}
 	if events[0].Content != "echo:hello" {
 		t.Fatalf("unexpected content %q", events[0].Content)
+	}
+	if events[0].ToolStatus != "failed" || events[0].ProcessExitCode == nil || *events[0].ProcessExitCode != 7 {
+		t.Fatalf("unexpected outcome fields: %+v", events[0])
+	}
+	if events[0].ToolProgressStage != "completed" || events[0].ToolProgressPercentage != 100 {
+		t.Fatalf("unexpected progress fields: %+v", events[0])
 	}
 }
 
@@ -163,12 +184,16 @@ func TestMapEventToolCallArgs(t *testing.T) {
 
 func TestMapEventToolProgress(t *testing.T) {
 	events := MapEvent(agentcore.AwakenEvent{
-		Type:       agentcore.ToolProgressEventType,
-		ThreadID:   "thread-1",
-		RunID:      "run-1",
-		ToolCallID: "tool-1",
-		ToolName:   "read_file",
-		Progress:   "Executing tool",
+		Type:                   agentcore.ToolProgressEventType,
+		ThreadID:               "thread-1",
+		RunID:                  "run-1",
+		ToolCallID:             "tool-1",
+		ToolName:               "read_file",
+		Progress:               "Executing tool",
+		ToolProgressStage:      "started",
+		ToolProgressMessage:    "Executing tool",
+		ToolProgressPercentage: 0,
+		ToolStatus:             "succeeded",
 	})
 
 	if len(events) != 1 {
@@ -182,6 +207,9 @@ func TestMapEventToolProgress(t *testing.T) {
 	}
 	if events[0].Progress != "Executing tool" || events[0].Message != "Executing tool" {
 		t.Fatalf("unexpected progress payload: %+v", events[0])
+	}
+	if events[0].ToolProgressStage != "started" || events[0].ToolStatus != "succeeded" {
+		t.Fatalf("unexpected structured progress fields: %+v", events[0])
 	}
 }
 

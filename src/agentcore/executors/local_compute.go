@@ -33,9 +33,5 @@ func (e *LocalComputeExecutor) Execute(
 		intent.RequestedAction != profile.ActionMove {
 		return deniedOutput("local_compute_unsupported_action", fmt.Sprintf("local compute lane does not support %s", intent.RequestedAction))
 	}
-	content, err := executeWithObserver(ctx, t, input, observer)
-	if err != nil {
-		return ToolExecutionOutput{}, err
-	}
-	return ToolExecutionOutput{Content: content}, nil
+	return executeWithObserver(ctx, t, input, observer)
 }

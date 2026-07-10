@@ -139,6 +139,20 @@ type Event struct {
 	// GuardianViolation is populated when a guardian constraint was
 	// violated. Surfaced on AWAKEN_TOOL_PERMISSION_DECIDED.
 	GuardianViolation          string      `json:"guardianViolation,omitempty"`
+	ToolProgressStage          string      `json:"toolProgressStage,omitempty"`
+	ToolProgressMessage        string      `json:"toolProgressMessage,omitempty"`
+	ToolProgressPercentage     int         `json:"toolProgressPercentage,omitempty"`
+	ToolStatus                 string      `json:"toolStatus,omitempty"`
+	TransportStatus            string      `json:"transportStatus,omitempty"`
+	SemanticStatus             string      `json:"semanticStatus,omitempty"`
+	ProcessStatus              string      `json:"processStatus,omitempty"`
+	ProcessExitCode            *int        `json:"processExitCode,omitempty"`
+	ProcessTimedOut            bool        `json:"processTimedOut,omitempty"`
+	ErrorCode                  string      `json:"errorCode,omitempty"`
+	ErrorCategory              string      `json:"errorCategory,omitempty"`
+	Retryable                  bool        `json:"retryable,omitempty"`
+	RecoveryOptions            []string    `json:"recoveryOptions,omitempty"`
+	DurationMs                 int64       `json:"durationMs,omitempty"`
 	AffectedPaths              []string    `json:"affectedPaths,omitempty"`
 	AuthProvider               string      `json:"authProvider,omitempty"`
 	AuthURL                    string      `json:"authUrl,omitempty"`

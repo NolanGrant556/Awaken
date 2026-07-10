@@ -317,7 +317,6 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 		}
 		if events != nil {
 			events.emitToolCall(call)
-			events.emitToolProgress(call, "Executing tool")
 		}
 		result := r.toolRuntime.Execute(ctx, call)
 		results = append(results, result)
@@ -325,7 +324,6 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 			events.markMutation()
 		}
 		if events != nil {
-			events.emitToolProgress(call, toolProgressForResult(result))
 			events.emitToolResult(result)
 		}
 	}
@@ -357,13 +355,6 @@ func (r *Runner) stopAfterToolExchangeIfNeeded(ctx stdcontext.Context, events *r
 		return true, err
 	}
 	return false, nil
-}
-
-func toolProgressForResult(result ToolExecutionResult) string {
-	if result.IsError {
-		return "Tool execution failed"
-	}
-	return "Tool execution complete"
 }
 
 func firstTerminalReason(reasons []TerminalReason, fallback TerminalReason) TerminalReason {
@@ -442,17 +433,25 @@ func syntheticCancelledToolResult(call context.ToolCall) ToolExecutionResult {
 		Name:       call.Function.Name,
 		Content:    "工具执行已被取消",
 		IsError:    true,
+		Status:     ToolExecutionCancelled,
+		ErrorCode:  "tool_cancelled",
 	}
 }
 
 func toolExecutionResultsToContext(results []ToolExecutionResult) []context.ToolResult {
 	out := make([]context.ToolResult, 0, len(results))
 	for _, result := range results {
+		content := result.Content
+		isError := result.IsError
+		if result.Outcome.Status != "" {
+			content = result.Outcome.ModelPayload()
+			isError = result.Outcome.IsError()
+		}
 		out = append(out, context.ToolResult{
 			ToolCallID: result.ToolCallID,
 			Name:       result.Name,
-			Content:    result.Content,
-			IsError:    result.IsError,
+			Content:    content,
+			IsError:    isError,
 		})
 	}
 	return out
@@ -671,20 +670,8 @@ func (e *runEventEmitter) emitToolCall(call context.ToolCall) {
 	})
 }
 
-func (e *runEventEmitter) emitToolProgress(call context.ToolCall, progress string) {
-	if progress == "" {
-		return
-	}
-	e.emit(AwakenEvent{
-		Type:       ToolProgressEventType,
-		ToolCallID: call.ID,
-		ToolName:   call.Function.Name,
-		Progress:   progress,
-	})
-}
-
 func (e *runEventEmitter) emitToolResult(result ToolExecutionResult) {
-	e.emit(AwakenEvent{
+	event := AwakenEvent{
 		Type:         ToolResultEventType,
 		MessageID:    newAwakenID("toolmsg"),
 		ToolCallID:   result.ToolCallID,
@@ -692,7 +679,47 @@ func (e *runEventEmitter) emitToolResult(result ToolExecutionResult) {
 		Content:      result.Content,
 		Role:         "tool",
 		TrashedPaths: result.TrashedPaths,
-	})
+	}
+	applyToolOutcomeFields(&event, result)
+	e.emit(event)
+}
+
+// applyToolOutcomeFields copies canonical ToolOutcome fields onto an event.
+// Prefers result.Outcome when present; otherwise maps legacy Status/IsError.
+func applyToolOutcomeFields(event *AwakenEvent, result ToolExecutionResult) {
+	if result.Outcome.Status != "" {
+		event.ToolStatus = string(result.Outcome.Status)
+		event.TransportStatus = string(result.Outcome.TransportStatus)
+		event.SemanticStatus = string(result.Outcome.SemanticStatus)
+		event.ProcessStatus = string(result.Outcome.ProcessStatus)
+		event.ProcessExitCode = result.Outcome.ExitCode
+		event.ProcessTimedOut = result.Outcome.TimedOut
+		event.ErrorCode = result.Outcome.ErrorCode
+		event.ErrorCategory = string(result.Outcome.ErrorCategory)
+		event.Retryable = result.Outcome.Retryable
+		event.RecoveryOptions = append([]string(nil), result.Outcome.RecoveryOptions...)
+		event.DurationMs = result.Outcome.DurationMs
+		if event.DurationMs <= 0 {
+			event.DurationMs = result.DurationMs
+		}
+		if event.ErrorCode == "" {
+			event.ErrorCode = result.ErrorCode
+		}
+		return
+	}
+
+	status := string(result.Status)
+	if status == "" {
+		if result.IsError {
+			status = string(ToolExecutionFailed)
+		} else {
+			status = string(ToolExecutionSucceeded)
+		}
+	}
+	event.ToolStatus = status
+	event.ErrorCode = result.ErrorCode
+	event.DurationMs = result.DurationMs
+	event.Retryable = false
 }
 
 func (e *runEventEmitter) markMutation() {

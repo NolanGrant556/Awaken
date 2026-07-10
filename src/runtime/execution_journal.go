@@ -1,0 +1,460 @@
+package runtime
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"awaken/src/agentcore"
+)
+
+var (
+	ErrJournalMiddleCorruption = errors.New("journal middle corruption")
+	ErrJournalEncoding         = errors.New("journal encoding error")
+)
+
+const (
+	journalRetryDelay1 = 50 * time.Millisecond
+	journalRetryDelay2 = 200 * time.Millisecond
+	journalMaxAttempts = 3
+)
+
+// ExecutionJournal is the per-thread SemanticRecorder implementation.
+type ExecutionJournal struct {
+	mu       sync.Mutex
+	path     string
+	threadID string
+	file     *os.File
+	nextSeq  uint64
+	pending  []agentcore.SemanticRecord
+	seenIDs  map[string]struct{}
+	closed   bool
+}
+
+func NewExecutionJournal(path, threadID string) (*ExecutionJournal, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, fmt.Errorf("journal path is required")
+	}
+	if strings.TrimSpace(threadID) == "" {
+		return nil, fmt.Errorf("thread id is required")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, fmt.Errorf("create journal directory: %w", err)
+	}
+
+	j := &ExecutionJournal{
+		path:     path,
+		threadID: threadID,
+		nextSeq:  1,
+		seenIDs:  map[string]struct{}{},
+	}
+	if err := j.openAndScan(); err != nil {
+		return nil, err
+	}
+	return j, nil
+}
+
+func (j *ExecutionJournal) Path() string {
+	return j.path
+}
+
+func (j *ExecutionJournal) ThreadID() string {
+	return j.threadID
+}
+
+func (j *ExecutionJournal) Append(ctx context.Context, record agentcore.SemanticRecord) error {
+	return j.AppendBatch(ctx, []agentcore.SemanticRecord{record})
+}
+
+func (j *ExecutionJournal) AppendBatch(ctx context.Context, records []agentcore.SemanticRecord) error {
+	if len(records) == 0 {
+		return nil
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.closed {
+		return fmt.Errorf("journal closed")
+	}
+
+	prepared, err := j.prepareRecords(records)
+	if err != nil {
+		return err
+	}
+	if len(prepared) == 0 {
+		return nil
+	}
+
+	j.pending = append(j.pending, prepared...)
+	for _, record := range prepared {
+		j.seenIDs[record.RecordID] = struct{}{}
+		if record.Seq+1 > j.nextSeq {
+			j.nextSeq = record.Seq + 1
+		}
+	}
+	return j.writePendingWithRetry(ctx, false)
+}
+
+func (j *ExecutionJournal) Flush(ctx context.Context) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.closed {
+		return fmt.Errorf("journal closed")
+	}
+	return j.writePendingWithRetry(ctx, true)
+}
+
+func (j *ExecutionJournal) Close() error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.closed {
+		return nil
+	}
+	j.closed = true
+	if j.file == nil {
+		return nil
+	}
+	err := j.file.Close()
+	j.file = nil
+	return err
+}
+
+func (j *ExecutionJournal) PendingCount() int {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return len(j.pending)
+}
+
+func (j *ExecutionJournal) NextSeq() uint64 {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.nextSeq
+}
+
+func (j *ExecutionJournal) prepareRecords(records []agentcore.SemanticRecord) ([]agentcore.SemanticRecord, error) {
+	out := make([]agentcore.SemanticRecord, 0, len(records))
+	nextSeq := j.nextSeq
+	// Include already-pending IDs so a retry of the same batch is skipped.
+	seen := cloneSeenIDs(j.seenIDs)
+	for _, pending := range j.pending {
+		seen[pending.RecordID] = struct{}{}
+		if pending.Seq+1 > nextSeq {
+			nextSeq = pending.Seq + 1
+		}
+	}
+	for _, record := range records {
+		if record.SchemaVersion == 0 {
+			record.SchemaVersion = agentcore.SemanticSchemaVersion
+		}
+		if record.SchemaVersion != agentcore.SemanticSchemaVersion {
+			return nil, fmt.Errorf("%w: unsupported schema_version %d", ErrJournalEncoding, record.SchemaVersion)
+		}
+		if strings.TrimSpace(string(record.Kind)) == "" {
+			return nil, fmt.Errorf("%w: kind is required", ErrJournalEncoding)
+		}
+		if record.ThreadID == "" {
+			record.ThreadID = j.threadID
+		}
+		if record.ThreadID != j.threadID {
+			return nil, fmt.Errorf("%w: thread_id mismatch", ErrJournalEncoding)
+		}
+		if record.Timestamp.IsZero() {
+			record.Timestamp = time.Now().UTC()
+		} else {
+			record.Timestamp = record.Timestamp.UTC()
+		}
+		if record.RecordID == "" {
+			record.RecordID = agentcore.NewSemanticRecordID(string(record.Kind))
+		}
+		if _, already := seen[record.RecordID]; already {
+			continue
+		}
+		if record.Seq == 0 {
+			record.Seq = nextSeq
+		} else if record.Seq < nextSeq {
+			return nil, fmt.Errorf("%w: seq %d is behind next %d", ErrJournalEncoding, record.Seq, nextSeq)
+		}
+		if record.Payload == nil {
+			record.Payload = map[string]any{}
+		}
+		out = append(out, record)
+		seen[record.RecordID] = struct{}{}
+		nextSeq = record.Seq + 1
+	}
+	return out, nil
+}
+
+func cloneSeenIDs(in map[string]struct{}) map[string]struct{} {
+	out := make(map[string]struct{}, len(in))
+	for id := range in {
+		out[id] = struct{}{}
+	}
+	return out
+}
+
+func (j *ExecutionJournal) writePendingWithRetry(ctx context.Context, syncFile bool) error {
+	if len(j.pending) == 0 {
+		if syncFile {
+			return j.syncFile(ctx)
+		}
+		return nil
+	}
+
+	var lastErr error
+	written := false
+	for attempt := 1; attempt <= journalMaxAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if !written {
+			if err := j.appendPendingOnce(); err != nil {
+				lastErr = err
+				if !isRetryableJournalError(err) {
+					return err
+				}
+			} else {
+				written = true
+				j.pending = j.pending[:0]
+				if !syncFile {
+					return nil
+				}
+			}
+		}
+		if written && syncFile {
+			if err := j.file.Sync(); err != nil {
+				lastErr = err
+				if !isRetryableJournalError(err) {
+					return err
+				}
+			} else {
+				return nil
+			}
+		}
+		if attempt == journalMaxAttempts {
+			break
+		}
+		delay := journalRetryDelay1
+		if attempt >= 2 {
+			delay = journalRetryDelay2
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return lastErr
+}
+
+func (j *ExecutionJournal) appendPendingOnce() error {
+	if j.file == nil {
+		if err := j.reopenForAppend(); err != nil {
+			return err
+		}
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	for _, record := range j.pending {
+		if err := enc.Encode(record); err != nil {
+			return fmt.Errorf("%w: %v", ErrJournalEncoding, err)
+		}
+	}
+	if _, err := j.file.Write(buf.Bytes()); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (j *ExecutionJournal) syncFile(ctx context.Context) error {
+	if j.file == nil {
+		return nil
+	}
+	var lastErr error
+	for attempt := 1; attempt <= journalMaxAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := j.file.Sync(); err == nil {
+			return nil
+		} else {
+			lastErr = err
+			if !isRetryableJournalError(err) {
+				return err
+			}
+		}
+		if attempt == journalMaxAttempts {
+			break
+		}
+		delay := journalRetryDelay1
+		if attempt >= 2 {
+			delay = journalRetryDelay2
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return lastErr
+}
+
+func (j *ExecutionJournal) openAndScan() error {
+	file, err := os.OpenFile(j.path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return fmt.Errorf("open journal: %w", err)
+	}
+	j.file = file
+
+	records, nextSeq, err := readJournalRecordsFromReader(file, true)
+	if err != nil {
+		_ = file.Close()
+		j.file = nil
+		return err
+	}
+	for _, record := range records {
+		j.seenIDs[record.RecordID] = struct{}{}
+	}
+	j.nextSeq = nextSeq
+	if _, err := file.Seek(0, io.SeekEnd); err != nil {
+		_ = file.Close()
+		j.file = nil
+		return err
+	}
+	return nil
+}
+
+func (j *ExecutionJournal) reopenForAppend() error {
+	file, err := os.OpenFile(j.path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	j.file = file
+	return nil
+}
+
+func ReadExecutionJournal(path string) ([]agentcore.SemanticRecord, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	records, _, err := readJournalRecordsFromReader(file, true)
+	return records, err
+}
+
+func readJournalRecordsFromReader(r io.Reader, tolerateIncompleteTail bool) ([]agentcore.SemanticRecord, uint64, error) {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+
+	var lines []string
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, 0, fmt.Errorf("scan journal: %w", err)
+	}
+
+	var (
+		records []agentcore.SemanticRecord
+		nextSeq uint64 = 1
+	)
+	for i, line := range lines {
+		var record agentcore.SemanticRecord
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			isLast := i == len(lines)-1
+			if tolerateIncompleteTail && isLast {
+				break
+			}
+			return nil, 0, fmt.Errorf("%w at line %d: %v", ErrJournalMiddleCorruption, i+1, err)
+		}
+		if record.SchemaVersion != 0 && record.SchemaVersion != agentcore.SemanticSchemaVersion {
+			return nil, 0, fmt.Errorf("%w: unsupported schema_version %d at line %d", ErrJournalMiddleCorruption, record.SchemaVersion, i+1)
+		}
+		records = append(records, record)
+		if record.Seq >= nextSeq {
+			nextSeq = record.Seq + 1
+		}
+	}
+	return records, nextSeq, nil
+}
+
+func isRetryableJournalError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	if errors.Is(err, ErrJournalEncoding) {
+		return false
+	}
+	if errors.Is(err, syscall.ENOSPC) {
+		return false
+	}
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) {
+		if errors.Is(pathErr.Err, syscall.EROFS) || errors.Is(pathErr.Err, syscall.ENOSPC) {
+			return false
+		}
+	}
+	if errors.Is(err, syscall.EROFS) {
+		return false
+	}
+	return true
+}
+
+// DetectJournalSchema peeks the first non-empty JSONL line to decide v1 vs v2.
+func DetectJournalSchema(path string) (int, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var probe struct {
+			SchemaVersion int    `json:"schema_version"`
+			RecordType    string `json:"record_type"`
+			Kind          string `json:"kind"`
+		}
+		if err := json.Unmarshal([]byte(line), &probe); err != nil {
+			return 0, fmt.Errorf("%w: %v", ErrJournalMiddleCorruption, err)
+		}
+		if probe.SchemaVersion == agentcore.SemanticSchemaVersion || probe.Kind != "" {
+			return agentcore.SemanticSchemaVersion, nil
+		}
+		if probe.RecordType != "" {
+			return 1, nil
+		}
+		return 0, fmt.Errorf("%w: unrecognized journal line", ErrJournalMiddleCorruption)
+	}
+	if err := scanner.Err(); err != nil {
+		return 0, err
+	}
+	// Empty file: treat as v2 destination for new writes.
+	return agentcore.SemanticSchemaVersion, nil
+}

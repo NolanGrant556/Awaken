@@ -168,6 +168,8 @@ func (h runHandlers) handleGetThreadTranscript(w http.ResponseWriter, r *http.Re
 	for _, run := range transcript.Runs {
 		frames := make([]agui.Event, 0, len(run.Events))
 		for _, event := range run.Events {
+			// Prefer projecting through MapEvent so live and replay share shapes.
+			// Durable tool/artifact facts are already restored into AgentEvent form.
 			frames = append(frames, mapRuntimeEvent(event)...)
 		}
 		response.Runs = append(response.Runs, threadTranscriptRunResponse{

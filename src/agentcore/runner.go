@@ -27,6 +27,9 @@ type Runner struct {
 	reqBuilder      *RequestBuilder
 	toolRuntime     *ToolRuntime
 	threadID        string
+	runID           string
+	sessionID       string
+	recorder        SemanticRecorder
 	contextGovernor *contextGovernor
 	streamLLMFunc   func(stdcontext.Context, *runEventEmitter) (*llm.Response, error)
 }
@@ -50,8 +53,17 @@ func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *Reque
 
 func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (string, error) {
 	events := newRunEventEmitter(r.threadID, sink)
+	if r.runID != "" {
+		events.runID = r.runID
+	} else {
+		r.runID = events.runID
+	}
+	events.recorder = r.recorder
+	events.sessionID = r.sessionID
 	r.toolRuntime = NewToolRuntimeWithConfig(sink, toolRuntimeConfigFromAgentConfig(r.config))
-	events.runStarted()
+	if err := events.runStarted(ctx); err != nil {
+		return "", err
+	}
 	turnState := newTurnState(events.threadID, events.runID, r.config.MaxThoughts, r.config.ModelConfig.Model)
 	transition := TransitionInitial
 	maxOutputContinuations := 0
@@ -61,7 +73,7 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 		select {
 		case <-ctx.Done():
 			r.injectSyntheticToolResultsForCancel()
-			events.runErrored(ctx.Err(), TerminalReasonCancelled)
+			events.runErrored(ctx, ctx.Err(), TerminalReasonCancelled)
 			return "", ctx.Err()
 		default:
 		}
@@ -77,26 +89,26 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 		if err != nil {
 			if ctx.Err() != nil {
 				r.injectSyntheticToolResultsForCancel()
-				events.turnFinished(TerminalReasonAbortedStreaming, "")
-				events.runErrored(ctx.Err(), TerminalReasonAbortedStreaming)
+				events.turnFinished(ctx, TerminalReasonAbortedStreaming, "")
+				events.runErrored(ctx, ctx.Err(), TerminalReasonAbortedStreaming)
 				return "", ctx.Err()
 			}
 			if isPromptTooLongError(err) {
 				if retried, compactErr := r.compactConversationForRetry(ctx, events); compactErr == nil && retried {
-					events.turnFinished("", TransitionReactiveCompactRetry)
+					events.turnFinished(ctx, "", TransitionReactiveCompactRetry)
 					events.resetTurn()
 					transition = TransitionReactiveCompactRetry
 					continue
 				}
 				runErr := fmt.Errorf("LLM stream call failed: %w", err)
-				events.turnFinished(TerminalReasonPromptTooLong, "")
-				events.runErrored(runErr, TerminalReasonPromptTooLong)
+				events.turnFinished(ctx, TerminalReasonPromptTooLong, "")
+				events.runErrored(ctx, runErr, TerminalReasonPromptTooLong)
 				return "", runErr
 			}
 			runErr := fmt.Errorf("LLM stream call failed: %w", err)
 			reason := terminalReasonForError(err)
-			events.turnFinished(reason, "")
-			events.runErrored(runErr, reason)
+			events.turnFinished(ctx, reason, "")
+			events.runErrored(ctx, runErr, reason)
 			return "", runErr
 		}
 		r.contextGovernor.RecordResponseUsage(lastAPIUsageTokens(response))
@@ -111,7 +123,7 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 			if stop, stopErr := r.stopAfterToolExchangeIfNeeded(ctx, events, i); stop {
 				return "", stopErr
 			}
-			events.turnFinished("", TransitionToolResultContinuation)
+			events.turnFinished(ctx, "", TransitionToolResultContinuation)
 			events.resetTurn()
 			transition = TransitionToolResultContinuation
 			continue
@@ -125,14 +137,14 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 			if maxOutputContinuations < maxOutputContinuationAttempts {
 				maxOutputContinuations++
 				r.conversation.UserInput(maxOutputContinuationPrompt(response.StopReason))
-				events.turnFinished("", TransitionMaxOutputContinuation)
+				events.turnFinished(ctx, "", TransitionMaxOutputContinuation)
 				events.resetTurn()
 				transition = TransitionMaxOutputContinuation
 				continue
 			}
 			err := maxOutputReachedError(maxOutputContinuations, response.StopReason)
-			events.turnFinished(TerminalReasonMaxOutputReached, "")
-			events.runErrored(err, TerminalReasonMaxOutputReached)
+			events.turnFinished(ctx, TerminalReasonMaxOutputReached, "")
+			events.runErrored(ctx, err, TerminalReasonMaxOutputReached)
 			return continuedOutput.String(), err
 		}
 
@@ -141,22 +153,22 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 				finalAnswer = continuedOutput.String() + finalAnswer
 				finalState := r.latestContextWindowState()
 				events.emitTurnDiff(ctx, r.config.Workspace.Root)
-				events.turnFinished(TerminalReasonCompleted, "")
-				events.runFinished(finalAnswer, finalState, TerminalReasonCompleted)
+				events.turnFinished(ctx, TerminalReasonCompleted, "")
+				events.runFinished(ctx, finalAnswer, finalState, TerminalReasonCompleted)
 				return finalAnswer, nil
 			}
 			if stop, stopErr := r.stopAfterToolExchangeIfNeeded(ctx, events, i); stop {
 				return "", stopErr
 			}
-			events.turnFinished("", TransitionXMLFallbackContinuation)
+			events.turnFinished(ctx, "", TransitionXMLFallbackContinuation)
 			events.resetTurn()
 			transition = TransitionXMLFallbackContinuation
 			continue
 		}
 
 		if !responseHasSignal(response) {
-			events.turnFinished(TerminalReasonEmptyResponse, "")
-			events.runErrored(llm.ErrEmptyResponse, TerminalReasonEmptyResponse)
+			events.turnFinished(ctx, TerminalReasonEmptyResponse, "")
+			events.runErrored(ctx, llm.ErrEmptyResponse, TerminalReasonEmptyResponse)
 			return "", llm.ErrEmptyResponse
 		}
 		finalContent := continuedOutput.String() + response.Content
@@ -164,13 +176,13 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (st
 		finalState := r.latestContextWindowState()
 		events.finishTextIfOpen()
 		events.emitTurnDiff(ctx, r.config.Workspace.Root)
-		events.turnFinished(TerminalReasonCompleted, "")
-		events.runFinished(finalContent, finalState, TerminalReasonCompleted)
+		events.turnFinished(ctx, TerminalReasonCompleted, "")
+		events.runFinished(ctx, finalContent, finalState, TerminalReasonCompleted)
 		return finalContent, nil
 	}
 
 	err := maxThoughtsError(r.config.MaxThoughts)
-	events.runErrored(err, TerminalReasonMaxTurns)
+	events.runErrored(ctx, err, TerminalReasonMaxTurns)
 	return "", err
 }
 
@@ -310,21 +322,60 @@ func (r *Runner) handleXMLFallback(ctx stdcontext.Context, response string, even
 
 func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.ToolCall, events *runEventEmitter) []ToolExecutionResult {
 	results := make([]ToolExecutionResult, 0, len(toolCalls))
+	runCtx, cancel := stdcontext.WithCancel(ctx)
+	defer cancel()
 	for _, call := range toolCalls {
-		if ctx.Err() != nil {
+		if runCtx.Err() != nil {
 			results = append(results, syntheticCancelledToolResult(call))
 			continue
 		}
 		if events != nil {
-			events.emitToolCall(call)
+			if err := events.emitToolCall(runCtx, call); err != nil {
+				cancel()
+				results = append(results, syntheticCancelledToolResult(call))
+				continue
+			}
 		}
-		result := r.toolRuntime.Execute(ctx, call)
+		// Re-check after durable tool_call append; never execute tools after journal failure.
+		if runCtx.Err() != nil {
+			results = append(results, syntheticCancelledToolResult(call))
+			continue
+		}
+
+		var buffer *artifactBufferingSink
+		if events != nil {
+			buffer = &artifactBufferingSink{inner: normalizeEventSink(events.sink)}
+			r.toolRuntime.sink = buffer
+		}
+		result := r.toolRuntime.Execute(runCtx, call)
+		if events != nil {
+			r.toolRuntime.sink = events.sink
+		}
 		results = append(results, result)
 		if events != nil && call.Function.Name == "apply_patch" && !result.IsError {
 			events.markMutation()
 		}
 		if events != nil {
-			events.emitToolResult(result)
+			artifacts := []AwakenEvent{}
+			if buffer != nil {
+				artifacts = buffer.artifacts
+			}
+			if err := events.emitToolResultBatch(runCtx, result, artifacts); err != nil && events.recorder != nil {
+				warnCtx := stdcontext.Background()
+				_ = events.recorder.Append(warnCtx, NewSemanticRecord(
+					SemanticKindPersistenceWarning,
+					events.threadID,
+					events.runID,
+					events.turnID(),
+					call.ID,
+					events.sessionID,
+					map[string]any{
+						"error":   err.Error(),
+						"phase":   "tool_result",
+						"tool_id": call.ID,
+					},
+				))
+			}
 		}
 	}
 	return results
@@ -334,23 +385,23 @@ func (r *Runner) stopAfterToolExchangeIfNeeded(ctx stdcontext.Context, events *r
 	if err := context.ValidateToolResultPairing(r.conversation.Context.GetMessages()); err != nil {
 		runErr := fmt.Errorf("invalid tool result pairing after tool exchange: %w", err)
 		if events != nil {
-			events.turnFinished(TerminalReasonToolPairingError, "")
-			events.runErrored(runErr, TerminalReasonToolPairingError)
+			events.turnFinished(ctx, TerminalReasonToolPairingError, "")
+			events.runErrored(ctx, runErr, TerminalReasonToolPairingError)
 		}
 		return true, runErr
 	}
 	if ctx.Err() != nil {
 		if events != nil {
-			events.turnFinished(TerminalReasonAbortedTools, "")
-			events.runErrored(ctx.Err(), TerminalReasonAbortedTools)
+			events.turnFinished(ctx, TerminalReasonAbortedTools, "")
+			events.runErrored(ctx, ctx.Err(), TerminalReasonAbortedTools)
 		}
 		return true, ctx.Err()
 	}
 	if hasMaxThoughtsLimit(r.config.MaxThoughts) && turnIndex+1 >= r.config.MaxThoughts {
 		err := maxThoughtsError(r.config.MaxThoughts)
 		if events != nil {
-			events.turnFinished(TerminalReasonMaxTurns, "")
-			events.runErrored(err, TerminalReasonMaxTurns)
+			events.turnFinished(ctx, TerminalReasonMaxTurns, "")
+			events.runErrored(ctx, err, TerminalReasonMaxTurns)
 		}
 		return true, err
 	}
@@ -478,6 +529,8 @@ func llmToolCallsToContext(toolCalls []llm.ToolCall) []context.ToolCall {
 
 type runEventEmitter struct {
 	sink                EventSink
+	recorder            SemanticRecorder
+	sessionID           string
 	threadID            string
 	runID               string
 	turnState           TurnState
@@ -488,6 +541,7 @@ type runEventEmitter struct {
 	reasoningOpen       bool
 	textStartedThisTurn bool
 	mutationOccurred    bool
+	assistantText       strings.Builder
 }
 
 func newRunEventEmitter(threadID string, sink EventSink) *runEventEmitter {
@@ -501,7 +555,24 @@ func newRunEventEmitter(threadID string, sink EventSink) *runEventEmitter {
 	}
 }
 
-func (e *runEventEmitter) emit(event AwakenEvent) {
+func (e *runEventEmitter) turnID() string {
+	if e.turnState.TurnID == "" {
+		return ""
+	}
+	return string(e.turnState.TurnID)
+}
+
+func (e *runEventEmitter) cancelOnPersistFailure(cancel stdcontext.CancelFunc, err error) error {
+	if err == nil {
+		return nil
+	}
+	if cancel != nil {
+		cancel()
+	}
+	return err
+}
+
+func (e *runEventEmitter) fillIDs(event *AwakenEvent) {
 	if event.Timestamp.IsZero() {
 		event.Timestamp = time.Now()
 	}
@@ -528,11 +599,25 @@ func (e *runEventEmitter) emit(event AwakenEvent) {
 			event.TransitionReason = e.turnState.TransitionReason
 		}
 	}
+}
+
+func (e *runEventEmitter) emit(event AwakenEvent) {
+	e.fillIDs(&event)
 	e.sink.Emit(event)
 }
 
-func (e *runEventEmitter) runStarted() {
-	e.emit(AwakenEvent{Type: RunStartedEventType})
+func (e *runEventEmitter) runStarted(ctx stdcontext.Context) error {
+	event := AwakenEvent{Type: RunStartedEventType}
+	e.fillIDs(&event)
+	if e.recorder != nil {
+		record := NewSemanticRecord(SemanticKindRunStarted, e.threadID, e.runID, "", "", e.sessionID, map[string]any{})
+		if err := PersistDurable(ctx, e.recorder, e.sink, record, event); err != nil {
+			return err
+		}
+		return nil
+	}
+	e.sink.Emit(event)
+	return nil
 }
 
 func (e *runEventEmitter) turnStarted(state TurnState) {
@@ -543,20 +628,37 @@ func (e *runEventEmitter) turnStarted(state TurnState) {
 	})
 }
 
-func (e *runEventEmitter) turnFinished(reason TerminalReason, transition TransitionReason) {
+func (e *runEventEmitter) turnFinished(ctx stdcontext.Context, reason TerminalReason, transition TransitionReason) {
 	if transition == "" {
 		transition = e.turnState.TransitionReason
 	}
 	e.turnState.TerminalReason = reason
 	e.turnState.TransitionReason = transition
-	e.emit(AwakenEvent{
+	event := AwakenEvent{
 		Type:             TurnFinishedEventType,
 		TerminalReason:   reason,
 		TransitionReason: transition,
-	})
+	}
+	e.fillIDs(&event)
+	if e.recorder != nil {
+		_ = PersistDurable(ctx, e.recorder, e.sink, NewSemanticRecord(
+			SemanticKindTurnBoundary,
+			e.threadID,
+			e.runID,
+			e.turnID(),
+			"",
+			e.sessionID,
+			map[string]any{
+				"terminal_reason":   string(reason),
+				"transition_reason": string(transition),
+			},
+		), event)
+		return
+	}
+	e.sink.Emit(event)
 }
 
-func (e *runEventEmitter) runFinished(content string, state *ContextWindowState, reasons ...TerminalReason) {
+func (e *runEventEmitter) runFinished(ctx stdcontext.Context, content string, state *ContextWindowState, reasons ...TerminalReason) {
 	reason := firstTerminalReason(reasons, TerminalReasonCompleted)
 	event := AwakenEvent{
 		Type:           RunFinishedEventType,
@@ -567,10 +669,28 @@ func (e *runEventEmitter) runFinished(content string, state *ContextWindowState,
 		applyContextWindowEstimate(&event, *state)
 		event.ContextActualTokens = state.LastAPIUsageTokens
 	}
-	e.emit(event)
+	e.fillIDs(&event)
+	if e.recorder != nil {
+		_ = PersistDurable(ctx, e.recorder, e.sink, NewSemanticRecord(
+			SemanticKindRunTerminal,
+			e.threadID,
+			e.runID,
+			e.turnID(),
+			"",
+			e.sessionID,
+			map[string]any{
+				"status":          "finished",
+				"result":          content,
+				"terminal_reason": string(reason),
+			},
+		), event)
+		_ = e.recorder.Flush(ctx)
+		return
+	}
+	e.sink.Emit(event)
 }
 
-func (e *runEventEmitter) runErrored(err error, reasons ...TerminalReason) {
+func (e *runEventEmitter) runErrored(ctx stdcontext.Context, err error, reasons ...TerminalReason) {
 	if err == nil {
 		return
 	}
@@ -590,7 +710,30 @@ func (e *runEventEmitter) runErrored(err error, reasons ...TerminalReason) {
 	case errors.Is(err, llm.ErrRequestFailed):
 		event.Code = "PROVIDER_REQUEST_FAILED"
 	}
-	e.emit(event)
+	e.fillIDs(&event)
+	status := "error"
+	if event.Code == "RUN_CANCELLED" {
+		status = "cancelled"
+	}
+	if e.recorder != nil {
+		_ = PersistDurable(ctx, e.recorder, e.sink, NewSemanticRecord(
+			SemanticKindRunTerminal,
+			e.threadID,
+			e.runID,
+			e.turnID(),
+			"",
+			e.sessionID,
+			map[string]any{
+				"status":          status,
+				"error":           event.Error,
+				"code":            event.Code,
+				"terminal_reason": string(event.TerminalReason),
+			},
+		), event)
+		_ = e.recorder.Flush(ctx)
+		return
+	}
+	e.sink.Emit(event)
 }
 
 func (e *runEventEmitter) onLLMDelta(content string, isThinking bool) {
@@ -607,6 +750,7 @@ func (e *runEventEmitter) onLLMDelta(content string, isThinking bool) {
 		return
 	}
 	e.startTextIfNeeded()
+	e.assistantText.WriteString(content)
 	e.emit(AwakenEvent{
 		Type:      TextDeltaEventType,
 		MessageID: e.textMessageID,
@@ -646,31 +790,51 @@ func (e *runEventEmitter) emitStandaloneText(content string) {
 	e.finishTextIfOpen()
 }
 
-func (e *runEventEmitter) emitToolCall(call context.ToolCall) {
+func (e *runEventEmitter) emitToolCall(ctx stdcontext.Context, call context.ToolCall) error {
 	parentMessageID := e.ensureAssistantMessageID()
-	e.emit(AwakenEvent{
+	started := AwakenEvent{
 		Type:            ToolCallStartedEventType,
 		MessageID:       parentMessageID,
 		ParentMessageID: parentMessageID,
 		ToolCallID:      call.ID,
 		ToolName:        call.Function.Name,
-	})
+	}
+	var argsEvent *AwakenEvent
 	if call.Function.Arguments != "" {
-		e.emit(AwakenEvent{
+		ev := AwakenEvent{
 			Type:       ToolCallArgsEventType,
 			ToolCallID: call.ID,
 			ToolName:   call.Function.Name,
 			Arguments:  call.Function.Arguments,
-		})
+		}
+		argsEvent = &ev
 	}
-	e.emit(AwakenEvent{
+	finished := AwakenEvent{
 		Type:       ToolCallFinishedEventType,
 		ToolCallID: call.ID,
 		ToolName:   call.Function.Name,
-	})
+	}
+	e.fillIDs(&started)
+	e.fillIDs(&finished)
+	live := []AwakenEvent{started}
+	if argsEvent != nil {
+		e.fillIDs(argsEvent)
+		live = append(live, *argsEvent)
+	}
+	live = append(live, finished)
+
+	if e.recorder != nil {
+		record := ToolCallSemanticRecord(e.threadID, e.runID, e.turnID(), e.sessionID, parentMessageID, call)
+		if err := PersistDurableBatch(ctx, e.recorder, e.sink, []SemanticRecord{record}, live...); err != nil {
+			return err
+		}
+		return nil
+	}
+	emitLive(e.sink, live...)
+	return nil
 }
 
-func (e *runEventEmitter) emitToolResult(result ToolExecutionResult) {
+func (e *runEventEmitter) emitToolResultBatch(ctx stdcontext.Context, result ToolExecutionResult, artifacts []AwakenEvent) error {
 	event := AwakenEvent{
 		Type:         ToolResultEventType,
 		MessageID:    newAwakenID("toolmsg"),
@@ -681,7 +845,20 @@ func (e *runEventEmitter) emitToolResult(result ToolExecutionResult) {
 		TrashedPaths: result.TrashedPaths,
 	}
 	applyToolOutcomeFields(&event, result)
-	e.emit(event)
+	e.fillIDs(&event)
+
+	records := []SemanticRecord{ToolResultSemanticRecord(e.threadID, e.runID, e.turnID(), e.sessionID, result)}
+	live := []AwakenEvent{event}
+	for _, artifact := range artifacts {
+		e.fillIDs(&artifact)
+		records = append(records, ArtifactSemanticRecord(e.threadID, e.runID, e.turnID(), e.sessionID, artifact))
+		live = append(live, artifact)
+	}
+	if e.recorder != nil {
+		return PersistDurableBatch(ctx, e.recorder, e.sink, records, live...)
+	}
+	emitLive(e.sink, live...)
+	return nil
 }
 
 // applyToolOutcomeFields copies canonical ToolOutcome fields onto an event.
@@ -846,11 +1023,28 @@ func (e *runEventEmitter) emitTurnDiff(ctx stdcontext.Context, workspaceRoot str
 	if !ok || strings.TrimSpace(diff) == "" {
 		return
 	}
-	e.emit(AwakenEvent{
+	event := AwakenEvent{
 		Type:      TurnDiffEventType,
 		Diff:      diff,
 		Truncated: truncated,
-	})
+	}
+	e.fillIDs(&event)
+	if e.recorder != nil {
+		_ = PersistDurable(ctx, e.recorder, e.sink, NewSemanticRecord(
+			SemanticKindTurnDiff,
+			e.threadID,
+			e.runID,
+			e.turnID(),
+			"",
+			e.sessionID,
+			map[string]any{
+				"diff":      diff,
+				"truncated": truncated,
+			},
+		), event)
+		return
+	}
+	e.sink.Emit(event)
 }
 
 func collectWorkspaceDiff(ctx stdcontext.Context, workspaceRoot string) (string, bool, bool) {
@@ -937,12 +1131,32 @@ func (e *runEventEmitter) finishTextIfOpen() {
 	if !e.textOpen {
 		return
 	}
-	e.emit(AwakenEvent{
+	finished := AwakenEvent{
 		Type:      TextMessageFinishedEventType,
 		MessageID: e.textMessageID,
-	})
+	}
+	e.fillIDs(&finished)
+	content := e.assistantText.String()
+	if e.recorder != nil && strings.TrimSpace(content) != "" {
+		_ = PersistDurable(stdcontext.Background(), e.recorder, e.sink, NewSemanticRecord(
+			SemanticKindAssistantMessage,
+			e.threadID,
+			e.runID,
+			e.turnID(),
+			"",
+			e.sessionID,
+			map[string]any{
+				"content":    content,
+				"role":       "assistant",
+				"message_id": e.textMessageID,
+			},
+		), finished)
+	} else {
+		e.sink.Emit(finished)
+	}
 	e.textOpen = false
 	e.textMessageID = ""
+	e.assistantText.Reset()
 }
 
 func (e *runEventEmitter) startReasoningIfNeeded() {
@@ -983,6 +1197,7 @@ func (e *runEventEmitter) resetTurn() {
 	e.textOpen = false
 	e.reasoningOpen = false
 	e.textStartedThisTurn = false
+	e.assistantText.Reset()
 }
 
 func (e *runEventEmitter) textWasStartedThisTurn() bool {

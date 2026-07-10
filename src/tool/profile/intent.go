@@ -124,7 +124,7 @@ func (i ExecutionIntent) String() string {
 func InferToolKind(toolName string, annotations tool.ToolAnnotations) ToolKind {
 	name := strings.TrimSpace(toolName)
 	switch name {
-	case "apply_patch", "file_read", "read_file", "list_files", "grep_search":
+	case "apply_patch", "text_edit", "text_file_create", "trash_file", "file_read", "read_file", "list_files", "grep_search":
 		return ToolKindFileChain
 	case "shell":
 		return ToolKindShellCommand

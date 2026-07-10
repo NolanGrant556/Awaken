@@ -7,6 +7,8 @@ import (
 
 	convcontext "awaken/src/context"
 	"awaken/src/tool"
+	_ "awaken/src/tools/apply_patch"
+	_ "awaken/src/tools/text_edit"
 )
 
 func TestRequestBuilderBuildsCompleteRequest(t *testing.T) {
@@ -79,6 +81,38 @@ func TestRequestBuilderUsesRegisteredTools(t *testing.T) {
 		}
 	}
 	t.Fatalf("expected registered tool %s in request tools", toolName)
+}
+
+func TestRequestBuilderDefaultExposureHidesApplyPatch(t *testing.T) {
+	if _, err := tool.GetTool("text_edit"); err != nil {
+		t.Fatalf("text_edit must be registered: %v", err)
+	}
+	if _, err := tool.GetTool("apply_patch"); err != nil {
+		t.Fatalf("apply_patch must be registered: %v", err)
+	}
+
+	builder := NewRequestBuilder(AgentConfig{})
+	req := builder.Build(convcontext.New(), nil)
+	names := map[string]bool{}
+	for _, definition := range req.Tools {
+		names[definition.Function.Name] = true
+	}
+	if !names["text_edit"] {
+		t.Fatal("expected text_edit visible under default exposure")
+	}
+	if names["apply_patch"] {
+		t.Fatal("ordinary providers must hide apply_patch by default")
+	}
+
+	compat := NewRequestBuilder(AgentConfig{ToolExposure: tool.CompatToolExposurePolicy()})
+	compatReq := compat.Build(convcontext.New(), nil)
+	compatNames := map[string]bool{}
+	for _, definition := range compatReq.Tools {
+		compatNames[definition.Function.Name] = true
+	}
+	if !compatNames["apply_patch"] {
+		t.Fatal("compat exposure must keep apply_patch visible")
+	}
 }
 
 func TestRequestBuilderRefreshesRuntimeInfo(t *testing.T) {

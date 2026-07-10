@@ -79,17 +79,31 @@
 
 处理本地文件任务时，按以下优先级选择工具：
 
-1. **读取文件**：使用 `read_file`。
+1. **读取文件**：使用 `read_file`（结果含 `sha256`，可供后续 `text_edit.expected_sha256`）。
 2. **查找文件**：使用 `list_files`。
 3. **搜索内容**：使用 `grep_search`。
-4. **新增、修改、移动、删除代码/配置文件**：使用 `apply_patch`，不要使用文字模拟文件变更。
-5. **新增或覆盖 Markdown/普通文本报告**：使用 `text_file_create`，不要把整篇 Markdown 当作 patch 传给 `apply_patch`。
-6. **读取 PDF/Office/表格等工作文件**：使用 `read_artifact` 或专用 `pdf_extract`，不要用 `read_file` 读取二进制文件。
-7. **生成 Word/Excel/PPT 产物**：使用 `document_create`、`spreadsheet_create`、`presentation_create`；PPT 需要图文排版、图片素材、备注或预览时，把 `theme/slides/images/notes/render_preview` 作为结构化参数传给 `presentation_create`，不要用 shell 或 `apply_patch` 手写 Office 文件。
-8. **渲染检查 PPT/PDF/Office 产物**：使用 `presentation_render`、`pdf_render`、`document_render` 等 artifact render 工具；缺 runtime 时先看 `runtime_preflight` 或 `workspace_dependencies` 的具体缺口。
-9. **高级系统操作**：只有在上述工具不适合时，才使用 `shell`。
+4. **普通单文件精确修改**：使用 `text_edit`（`path` / `old_string` / `new_string` / 可选 `replace_all` / `expected_sha256`），不要用文字模拟文件变更，也不要默认走 `apply_patch`。
+5. **新增或覆盖 Markdown/普通文本报告**：使用 `text_file_create`，不要把整篇 Markdown 当作 patch。
+6. **显式删除文件/目录**：使用 `trash_file`（进入系统回收站）。
+7. **多文件、移动、删除或高级 diff**：仅在 `text_edit` / `text_file_create` / `trash_file` 不适合时使用 `apply_patch`。当前默认工具池可能不暴露 raw `apply_patch`；不要声称它已受 grammar constrained decoding，除非 provider transport 真正支持。
+8. **读取 PDF/Office/表格等工作文件**：使用 `read_artifact` 或专用 `pdf_extract`，不要用 `read_file` 读取二进制文件。
+9. **生成 Word/Excel/PPT 产物**：使用 `document_create`、`spreadsheet_create`、`presentation_create`；PPT 需要图文排版、图片素材、备注或预览时，把 `theme/slides/images/notes/render_preview` 作为结构化参数传给 `presentation_create`，不要用 shell 或 `apply_patch` 手写 Office 文件。
+10. **渲染检查 PPT/PDF/Office 产物**：使用 `presentation_render`、`pdf_render`、`document_render` 等 artifact render 工具；缺 runtime 时先看 `runtime_preflight` 或 `workspace_dependencies` 的具体缺口。
+11. **高级系统操作**：只有在上述工具不适合时，才使用 `shell`。
 
-`apply_patch` 使用 Awaken 结构化 patch，支持：
+`text_edit` 示例：
+
+```json
+{
+  "path": "src/example.ts",
+  "old_string": "old text",
+  "new_string": "new text",
+  "replace_all": false,
+  "expected_sha256": "optional digest from read_file"
+}
+```
+
+`apply_patch`（高级）使用 Awaken 结构化 patch，支持：
 
 ```text
 *** Begin Patch
@@ -100,7 +114,6 @@
 @@
 -old
 +new
-*** End of File
 *** Delete File: path
 *** End Patch
 ```

@@ -8,6 +8,7 @@ import (
 	"image/color"
 	"image/png"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -277,9 +278,17 @@ func TestPDFExtractRejectsEmptyPDFWithClearDiagnostic(t *testing.T) {
 
 func requirePresentationRuntime(t *testing.T) {
 	t.Helper()
-	if _, err := resolvePresentationPython(); err != nil {
-		t.Skipf("presentation runtime unavailable: %v", err)
+	if _, err := resolvePresentationPython(); err == nil {
+		return
 	}
+	// Hermetic tests may bootstrap via PATH only through explicit AWAKEN_PYTHON.
+	for _, name := range []string{"python3", "python"} {
+		if path, err := exec.LookPath(name); err == nil && pythonCanImportPPTX(path) {
+			t.Setenv("AWAKEN_PYTHON", path)
+			return
+		}
+	}
+	t.Skipf("presentation runtime unavailable: python with python-pptx not found")
 }
 
 func writeExecutable(t *testing.T, path, body string) {
@@ -434,7 +443,12 @@ func TestImageInspectRejectsPDFWithRoutingHint(t *testing.T) {
 }
 
 func TestRuntimeBackedToolsRequirePreparedRuntime(t *testing.T) {
-	t.Setenv("AWAKEN_RUNTIME_MANIFEST", filepath.Join(t.TempDir(), "missing-runtime.json"))
+	t.Setenv("AWAKEN_PRIMARY_RUNTIME_ROOT", filepath.Join(t.TempDir(), "missing-runtime-root"))
+	t.Setenv("AWAKEN_USER_DATA_DIR", t.TempDir())
+	t.Setenv("AWAKEN_PYTHON", "")
+	t.Setenv("AWAKEN_SOFFICE", "")
+	t.Setenv("AWAKEN_POPPLER_BIN", "")
+	invalidateRuntimeProbeCache()
 	render := runtimeBackedTool("document_render", "Document Render", "render docx", true)
 	decision := render.CheckPermission(context.Background(), `{}`, tool.NewPermissionContext(t.TempDir(), nil))
 	if decision.Behavior != tool.PermissionNeedsRuntime {

@@ -209,7 +209,9 @@ export function projectAguiEventToNarrative(
         "error",
       );
     case "AWAKEN_RUNTIME_PREPARE":
+    case "AWAKEN_RUNTIME_PREPARE_PROGRESS":
     case "AWAKEN_RUNTIME_READY":
+    case "AWAKEN_RUNTIME_REPAIR_FAILED":
     case "AWAKEN_RUNTIME_MISSING":
       return commitRuntimeNotice(
         base,
@@ -217,7 +219,7 @@ export function projectAguiEventToNarrative(
         "runtime",
         event.type === "AWAKEN_RUNTIME_READY"
           ? "Runtime ready"
-          : event.type === "AWAKEN_RUNTIME_MISSING"
+          : event.type === "AWAKEN_RUNTIME_MISSING" || event.type === "AWAKEN_RUNTIME_REPAIR_FAILED"
             ? "Runtime missing"
             : "Runtime preparing",
         [
@@ -225,10 +227,11 @@ export function projectAguiEventToNarrative(
           event.runtimeComponent,
           event.runtimePrepareStatus,
           event.runtimeMissingReason,
+          event.message,
         ]
           .filter(Boolean)
           .join(" | "),
-        event.type === "AWAKEN_RUNTIME_MISSING"
+        event.type === "AWAKEN_RUNTIME_MISSING" || event.type === "AWAKEN_RUNTIME_REPAIR_FAILED"
           ? "error"
           : event.type === "AWAKEN_RUNTIME_READY"
             ? "done"

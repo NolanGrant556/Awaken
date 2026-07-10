@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"awaken/src/internal/outputlimit"
 	"awaken/src/skills"
 	"awaken/src/tool"
 )
@@ -364,8 +365,10 @@ func runGit(ctx context.Context, args ...string) error {
 		return nil
 	}
 	msg := strings.TrimSpace(string(output))
-	if len(msg) > 2000 {
-		msg = msg[:2000] + "...(truncated)"
+	if prefix, truncated := outputlimit.Prefix(msg, 2000); truncated {
+		msg = prefix + "...(truncated)"
+	} else {
+		msg = prefix
 	}
 	if msg == "" {
 		return fmt.Errorf("git %s failed: %w", strings.Join(args, " "), err)

@@ -1,8 +1,10 @@
 package skillruntime
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +13,43 @@ import (
 	"awaken/src/skills"
 	"awaken/src/tool"
 )
+
+type runtimePreflightStub struct {
+	payload string
+	err     error
+}
+
+func (s runtimePreflightStub) Name() string        { return "runtime_preflight" }
+func (s runtimePreflightStub) Description() string { return "test runtime readiness" }
+func (s runtimePreflightStub) Parameters() []tool.ToolParameter {
+	return nil
+}
+func (s runtimePreflightStub) Definition() tool.ToolDefinition {
+	return tool.ToolDefinition{
+		Name:        s.Name(),
+		DisplayName: "Runtime Preflight",
+		Source:      tool.SourceBuiltin,
+		Description: s.Description(),
+	}
+}
+func (s runtimePreflightStub) Execute(context.Context, string) (string, error) {
+	return s.payload, s.err
+}
+
+func installRuntimePreflightStub(t *testing.T, stub tool.Tool) {
+	t.Helper()
+	previous, previousErr := tool.GetTool("runtime_preflight")
+	if err := tool.RegisterToolForce(stub); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if previousErr == nil {
+			_ = tool.RegisterToolForce(previous)
+			return
+		}
+		tool.UnregisterTool("runtime_preflight")
+	})
+}
 
 func TestCompileEffectiveToolsIntersectAndDeny(t *testing.T) {
 	parent := []string{"shell", "file_read", "presentation_create", "runtime_preflight"}
@@ -166,4 +205,91 @@ Use pip install python-pptx and soffice.
 		t.Fatalf("err=%v", err)
 	}
 	_ = compat
+}
+
+func TestActivateRequiredRuntimeUsesRegisteredPreflightAndFailsClosed(t *testing.T) {
+	root := t.TempDir()
+	skillRoot := filepath.Join(root, "deck")
+	if err := os.MkdirAll(skillRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillRoot, "SKILL.md"), []byte(`---
+name: deck
+description: slides
+requiredRuntimeComponents: [python]
+---
+Body
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	reg := skills.NewSkillRegistry(nil)
+	reg.LoadFromSources(map[skills.SourceOrigin]string{skills.SourceUser: root})
+
+	installRuntimePreflightStub(t, runtimePreflightStub{payload: `{
+  "ready": false,
+  "components": [
+    {"name": "python", "ok": true},
+    {"name": "libreoffice", "ok": false}
+  ]
+}`})
+	plan, err := NewActivator(reg, nil).Activate(ActivationRequest{
+		SkillID:        "deck",
+		ParentToolPool: []string{"file_read"},
+		SkipArgRender:  true,
+	})
+	if err != nil {
+		t.Fatalf("python should be ready even when another component is missing: %v", err)
+	}
+	if plan == nil || plan.CompatibilityStatus != CompatibilityOK {
+		t.Fatalf("plan=%+v", plan)
+	}
+
+	installRuntimePreflightStub(t, runtimePreflightStub{payload: `{"ready":false,"components":[{"name":"python","ok":false}]}`})
+	plan, err = NewActivator(reg, nil).Activate(ActivationRequest{
+		SkillID:        "deck",
+		ParentToolPool: []string{"file_read"},
+		SkipArgRender:  true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "skill_required_runtime_missing") {
+		t.Fatalf("expected runtime failure, plan=%+v err=%v", plan, err)
+	}
+
+	installRuntimePreflightStub(t, runtimePreflightStub{err: errors.New("probe unavailable")})
+	_, err = NewActivator(reg, nil).Activate(ActivationRequest{
+		SkillID:        "deck",
+		ParentToolPool: []string{"file_read"},
+		SkipArgRender:  true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "skill_required_runtime_missing") {
+		t.Fatalf("probe error must fail closed: %v", err)
+	}
+}
+
+func TestActivateExplicitEmptyParentPoolDoesNotOpenGlobalRegistry(t *testing.T) {
+	root := t.TempDir()
+	skillRoot := filepath.Join(root, "empty-parent")
+	if err := os.MkdirAll(skillRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillRoot, "SKILL.md"), []byte(`---
+name: empty-parent
+description: empty parent must stay empty
+---
+Body
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	reg := skills.NewSkillRegistry(nil)
+	reg.LoadFromSources(map[skills.SourceOrigin]string{skills.SourceUser: root})
+	plan, err := NewActivator(reg, nil).Activate(ActivationRequest{
+		SkillID:        "empty-parent",
+		ParentToolPool: []string{},
+		SkipArgRender:  true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.EffectiveTools == nil || len(plan.EffectiveTools) != 0 {
+		t.Fatalf("explicit empty parent expanded: %v", plan.EffectiveTools)
+	}
 }

@@ -67,3 +67,17 @@ func TestCreateSubagentInheritsResolvedToolPool(t *testing.T) {
 		t.Fatalf("child pool=%v", child.ResolvedToolPool)
 	}
 }
+
+func TestImplicitSkillParentPoolMatchesModelExposure(t *testing.T) {
+	config := AgentConfig{}
+	runner := NewRunner(config, convcontext.NewConversation(nil), NewRequestBuilder(config))
+	pool := runner.currentImplicitParentPool()
+	for _, name := range pool {
+		if name == "apply_patch" {
+			t.Fatalf("implicit Skill inherited hidden tool apply_patch from registry: %v", pool)
+		}
+	}
+	if len(pool) == 0 {
+		t.Fatal("expected ordinary model-visible tools")
+	}
+}

@@ -2,6 +2,7 @@ package skillruntime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -13,9 +14,9 @@ import (
 
 // Compatibility status values for SkillActivationPlan.
 const (
-	CompatibilityOK      = "ok"
+	CompatibilityOK       = "ok"
 	CompatibilityConflict = "conflict"
-	CompatibilityFailed  = "failed"
+	CompatibilityFailed   = "failed"
 )
 
 // SkillCompatibilityError is a structured activation failure.
@@ -50,18 +51,18 @@ type SkillResourceReceipt struct {
 
 // SkillActivationPlan is the compiled activation product for one skill.
 type SkillActivationPlan struct {
-	SkillID                   string                     `json:"skill_id"`
-	SkillVersion              string                     `json:"skill_version"`
-	EffectiveTools            []string                   `json:"effective_tools"`
-	RequiredTools             []string                   `json:"required_tools,omitempty"`
-	RequiredCapabilities      []tool.CapabilityClass     `json:"required_capabilities,omitempty"`
-	RequiredRuntimeComponents []string                   `json:"required_runtime_components,omitempty"`
-	ResourceReceipts          []SkillResourceReceipt     `json:"resource_receipts,omitempty"`
-	CompatibilityStatus       string                     `json:"compatibility_status"`
-	CompatibilityErrors       []SkillCompatibilityError  `json:"compatibility_errors,omitempty"`
-	MainBody                  string                     `json:"-"`
-	Source                    skills.SourceOrigin        `json:"source,omitempty"`
-	RootDir                   string                     `json:"-"`
+	SkillID                   string                    `json:"skill_id"`
+	SkillVersion              string                    `json:"skill_version"`
+	EffectiveTools            []string                  `json:"effective_tools"`
+	RequiredTools             []string                  `json:"required_tools,omitempty"`
+	RequiredCapabilities      []tool.CapabilityClass    `json:"required_capabilities,omitempty"`
+	RequiredRuntimeComponents []string                  `json:"required_runtime_components,omitempty"`
+	ResourceReceipts          []SkillResourceReceipt    `json:"resource_receipts,omitempty"`
+	CompatibilityStatus       string                    `json:"compatibility_status"`
+	CompatibilityErrors       []SkillCompatibilityError `json:"compatibility_errors,omitempty"`
+	MainBody                  string                    `json:"-"`
+	Source                    skills.SourceOrigin       `json:"source,omitempty"`
+	RootDir                   string                    `json:"-"`
 }
 
 // ActivationRequest configures a single skill activation.
@@ -76,8 +77,9 @@ type ActivationRequest struct {
 
 // Activator compiles SkillActivationPlan values from the skill registry.
 type Activator struct {
-	Registry *skills.SkillRegistry
-	Logger   Logger
+	Registry         *skills.SkillRegistry
+	Logger           Logger
+	RuntimeAvailable func(component string) bool
 }
 
 // NewActivator returns an Activator bound to the given registry.
@@ -85,7 +87,10 @@ func NewActivator(registry *skills.SkillRegistry, logger Logger) *Activator {
 	if logger == nil {
 		logger = noopLogger{}
 	}
-	return &Activator{Registry: registry, Logger: logger}
+	return &Activator{
+		Registry: registry,
+		Logger:   logger,
+	}
 }
 
 // Activate compiles and validates a SkillActivationPlan. Required failures
@@ -143,9 +148,13 @@ func (a *Activator) Activate(req ActivationRequest) (*SkillActivationPlan, error
 		return plan, &err
 	}
 
-	parentPool := normalizeToolNames(req.ParentToolPool)
-	if len(parentPool) == 0 {
+	var parentPool []string
+	if req.ParentToolPool == nil {
 		parentPool = CurrentParentToolPool()
+	} else {
+		// A non-nil empty slice is an explicit empty parent boundary. Do not
+		// silently turn it into the process-global tool registry.
+		parentPool = normalizeToolNames(req.ParentToolPool)
 	}
 	effective, policyErrs := CompileEffectiveTools(parentPool, []skills.ToolPolicy{def.EffectiveToolPolicy()})
 	plan.EffectiveTools = effective
@@ -162,12 +171,19 @@ func (a *Activator) Activate(req ActivationRequest) (*SkillActivationPlan, error
 	plan.CompatibilityErrors = append(plan.CompatibilityErrors,
 		ValidateRequiredCapabilities(plan.EffectiveTools, plan.RequiredCapabilities, capLookup)...)
 
-	runtimeOK := req.RuntimeAvailable
-	if runtimeOK == nil {
-		runtimeOK = func(string) bool { return true }
+	if len(def.RequiredRuntimeComponents) > 0 {
+		runtimeOK := req.RuntimeAvailable
+		if runtimeOK == nil {
+			runtimeOK = a.RuntimeAvailable
+		}
+		if runtimeOK == nil {
+			// Capture one real preflight report per activation so a Skill that
+			// requires several components does not run the full probe repeatedly.
+			runtimeOK = registeredRuntimeAvailabilityProbe()
+		}
+		plan.CompatibilityErrors = append(plan.CompatibilityErrors,
+			ValidateRequiredRuntimeComponents(def.RequiredRuntimeComponents, runtimeOK)...)
 	}
-	plan.CompatibilityErrors = append(plan.CompatibilityErrors,
-		ValidateRequiredRuntimeComponents(def.RequiredRuntimeComponents, runtimeOK)...)
 
 	receipts, loadErrs, loaded := LoadSkillResources(def, true)
 	plan.ResourceReceipts = receipts
@@ -216,6 +232,109 @@ func (a *Activator) Activate(req ActivationRequest) (*SkillActivationPlan, error
 		return plan, &first
 	}
 	return plan, nil
+}
+
+// Clone returns a deep copy suitable for handing across a run boundary. The
+// activation plan is a per-call value; callers must never publish the mutable
+// slices owned by an Activator invocation through process-global state.
+func (p *SkillActivationPlan) Clone() *SkillActivationPlan {
+	if p == nil {
+		return nil
+	}
+	clone := *p
+	clone.EffectiveTools = append([]string(nil), p.EffectiveTools...)
+	clone.RequiredTools = append([]string(nil), p.RequiredTools...)
+	clone.RequiredCapabilities = append([]tool.CapabilityClass(nil), p.RequiredCapabilities...)
+	clone.RequiredRuntimeComponents = append([]string(nil), p.RequiredRuntimeComponents...)
+	clone.ResourceReceipts = append([]SkillResourceReceipt(nil), p.ResourceReceipts...)
+	clone.CompatibilityErrors = append([]SkillCompatibilityError(nil), p.CompatibilityErrors...)
+	return &clone
+}
+
+// DurablePayload returns the canonical snake_case activation payload shared by
+// explicit and implicit activation journal writers.
+func (p *SkillActivationPlan) DurablePayload() map[string]any {
+	if p == nil {
+		return nil
+	}
+	capabilities := make([]string, 0, len(p.RequiredCapabilities))
+	for _, capability := range p.RequiredCapabilities {
+		capabilities = append(capabilities, string(capability))
+	}
+	return map[string]any{
+		"skill_id":                    p.SkillID,
+		"skill_version":               p.SkillVersion,
+		"effective_tools":             append([]string(nil), p.EffectiveTools...),
+		"compatibility_status":        p.CompatibilityStatus,
+		"compatibility_errors":        append([]SkillCompatibilityError(nil), p.CompatibilityErrors...),
+		"required_tools":              append([]string(nil), p.RequiredTools...),
+		"required_capabilities":       capabilities,
+		"required_runtime_components": append([]string(nil), p.RequiredRuntimeComponents...),
+	}
+}
+
+// DurablePayload returns the canonical snake_case resource receipt payload.
+func (r SkillResourceReceipt) DurablePayload() map[string]any {
+	return map[string]any{
+		"skill_id":      r.SkillID,
+		"skill_version": r.SkillVersion,
+		"resource":      r.Resource,
+		"source":        r.Source,
+		"sha256":        r.SHA256,
+		"size":          r.Size,
+		"mode":          r.Mode,
+		"loaded_at":     r.LoadedAt.UTC().Format(time.RFC3339Nano),
+	}
+}
+
+type registeredRuntimeReport struct {
+	Ready      bool `json:"ready"`
+	Components []struct {
+		Name string `json:"name"`
+		OK   bool   `json:"ok"`
+	} `json:"components"`
+}
+
+// RegisteredRuntimeAvailable connects Skill activation to the platform-owned
+// runtime_preflight tool. Missing tools, execution failures, malformed output,
+// absent components, and non-ready components all fail closed.
+func RegisteredRuntimeAvailable(component string) bool {
+	return registeredRuntimeAvailabilityProbe()(component)
+}
+
+func registeredRuntimeAvailabilityProbe() func(component string) bool {
+	report, ok := loadRegisteredRuntimeReport()
+	return func(component string) bool {
+		component = strings.TrimSpace(component)
+		if !ok || component == "" {
+			return false
+		}
+		if component == "primary-runtime" || component == "primary_runtime" {
+			return report.Ready
+		}
+		for _, candidate := range report.Components {
+			if strings.EqualFold(strings.TrimSpace(candidate.Name), component) {
+				return candidate.OK
+			}
+		}
+		return false
+	}
+}
+
+func loadRegisteredRuntimeReport() (registeredRuntimeReport, bool) {
+	var report registeredRuntimeReport
+	preflight, err := tool.GetTool("runtime_preflight")
+	if err != nil || preflight == nil {
+		return report, false
+	}
+	payload, err := preflight.Execute(context.Background(), `{}`)
+	if err != nil {
+		return report, false
+	}
+	if err := json.Unmarshal([]byte(payload), &report); err != nil {
+		return report, false
+	}
+	return report, true
 }
 
 func firstNonEmpty(values ...string) string {

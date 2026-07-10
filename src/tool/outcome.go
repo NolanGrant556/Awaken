@@ -75,12 +75,13 @@ const (
 	ErrorCodeProcessTimeout     = "process_timeout"
 	ErrorCodeProcessSpawnFailed = "process_spawn_failed"
 	ErrorCodeValidationError    = "validation_error"
-	ErrorCodeToolDenied         = "tool_denied"
-	ErrorCodeToolCancelled      = "tool_cancelled"
-	ErrorCodeNeedsAuth          = "needs_auth"
-	ErrorCodeNeedsRuntime       = "needs_runtime"
-	ErrorCodeUnsupported        = "unsupported"
+	ErrorCodeToolDenied          = "tool_denied"
+	ErrorCodeToolCancelled       = "tool_cancelled"
+	ErrorCodeNeedsAuth           = "needs_auth"
+	ErrorCodeNeedsRuntime        = "needs_runtime"
+	ErrorCodeUnsupported         = "unsupported"
 	ErrorCodeToolExecutionFailed = "tool_execution_failed"
+	ErrorCodeSkillToolNotAllowed = "skill_tool_not_allowed"
 )
 
 // ExecutionOutcome is the canonical ToolOutcome type.

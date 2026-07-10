@@ -22,6 +22,14 @@ type AgentConfig struct {
 	// Compat/grammar-capable modes and ExtraVisible keep apply_patch available
 	// for internal transforms, compatibility tests, or true grammar providers.
 	ToolExposure tool.ToolExposurePolicy
+	// ResolvedToolPool, when non-nil, is the dual-gate effective tool name
+	// set after SkillActivationPlan compilation. RequestBuilder only exposes
+	// schemas in this pool; ToolRuntime rejects names outside it.
+	// nil means no skill gate (full exposure-filtered registry).
+	ResolvedToolPool []string
+	// SkillContextBlocks are typed system context blocks injected from
+	// explicit Skill pre-activation (main SKILL.md + preload resources).
+	SkillContextBlocks []ContextBlock
 	// ExecutionProfile is the unified policy bundle applied to every tool
 	// call this agent makes. When nil, EffectiveProfile falls back to
 	// profile.DefaultProfile() (WorkspaceWrite).

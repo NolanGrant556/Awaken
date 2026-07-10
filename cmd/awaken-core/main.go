@@ -35,6 +35,8 @@ func main() {
 	syncSkillsForWorkspace := func(workspaceRoot string) {
 		skillRegistry.ReloadLocalSources(skills.LocalSourceDirs(workspaceRoot))
 	}
+	skillManager := skillruntime.NewManager(skillRegistry, skillruntime.StdLogger{})
+	skillManager.RefreshTools()
 
 	runService := runtime.NewRunServiceWithModelProfiles(
 		func(workspace runtime.WorkspaceConfig, threadID string, profile *runtime.ModelProfileConfig) *agentcore.Agent {
@@ -70,6 +72,14 @@ func main() {
 			})
 		},
 	)
+	runService.SetSkillActivator(skillManager.Activator())
+	skillManager.SetOnActivated(func(plan *skillruntime.SkillActivationPlan) {
+		if plan == nil {
+			return
+		}
+		log.Printf("[skills] activated %s status=%s tools=%d receipts=%d",
+			plan.SkillID, plan.CompatibilityStatus, len(plan.EffectiveTools), len(plan.ResourceReceipts))
+	})
 	if err := runService.SetDefaultWorkspace(runtime.WorkspaceConfig{WorkspaceRoot: defaultWorkspace}); err != nil {
 		log.Fatalf("failed to configure default workspace: %v", err)
 	}
@@ -198,9 +208,6 @@ func buildSkillRegistry(manager *mcpclient.Manager, workspace string) *skills.Sk
 	logger := mcpclient.StdLogger{}
 	registry := skills.NewSkillRegistry(logger)
 	registry.LoadFromSources(skills.LocalSourceDirs(workspace))
-
-	skillManager := skillruntime.NewManager(registry, skillruntime.StdLogger{})
-	skillManager.RefreshTools()
 
 	if manager != nil {
 		bridge := skills.NewBridge(logger, manager)

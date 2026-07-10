@@ -89,6 +89,13 @@ func LoadDir(dir string, source SourceOrigin) map[string]*SkillDefinition {
 		if def.Context == "" {
 			def.Context = ContextInline
 		}
+		if def.ToolPolicy.Mode == "" {
+			def.ToolPolicy.Mode = ToolPolicyIntersect
+		}
+		if ApplyPlatformContractConflict(def) {
+			result[id] = def
+			continue
+		}
 
 		result[id] = def
 	}
@@ -179,8 +186,15 @@ func shallowCopy(def *SkillDefinition) *SkillDefinition {
 	c := *def
 	c.Arguments = append([]SkillArgument(nil), def.Arguments...)
 	c.AllowedTools = append([]string(nil), def.AllowedTools...)
+	c.RequiredTools = append([]string(nil), def.RequiredTools...)
+	c.RequiredCapabilities = append([]string(nil), def.RequiredCapabilities...)
+	c.RequiredRuntimeComponents = append([]string(nil), def.RequiredRuntimeComponents...)
+	c.RequiredResources = append([]RequiredResource(nil), def.RequiredResources...)
+	c.ToolPolicy.Allow = append([]string(nil), def.ToolPolicy.Allow...)
+	c.ToolPolicy.Deny = append([]string(nil), def.ToolPolicy.Deny...)
 	c.RequiredConnectors = append([]string(nil), def.RequiredConnectors...)
 	c.RequiredMcpServers = append([]string(nil), def.RequiredMcpServers...)
+	c.DeprecatedWarnings = append([]string(nil), def.DeprecatedWarnings...)
 	if def.McpBinding != nil {
 		mb := *def.McpBinding
 		c.McpBinding = &mb

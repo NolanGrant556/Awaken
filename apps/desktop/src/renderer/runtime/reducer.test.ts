@@ -1072,6 +1072,41 @@ describe("runtime reducer run narrative projection", () => {
     });
   });
 
+  it("records tool recovery required and retry blocked inspector steps", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "Recover" },
+      runEvent({
+        type: "AWAKEN_TOOL_RECOVERY_REQUIRED",
+        seq: 1,
+        toolCallId: "call-1",
+        toolCallName: "apply_patch",
+        errorCode: "patch_context_mismatch",
+        message: "recovery_required",
+        recoveryOptions: ["read_file", "use_text_edit"],
+      }),
+      runEvent({
+        type: "AWAKEN_TOOL_RETRY_BLOCKED",
+        seq: 2,
+        toolCallId: "call-2",
+        toolCallName: "apply_patch",
+        errorCode: "tool_retry_blocked",
+        message: "blocked",
+        recoveryOptions: ["change_strategy"],
+      }),
+    ]);
+
+    const recovery = state.steps.find((step) => step.tag === "recovery");
+    const blocked = state.steps.find((step) => step.tag === "retry-blocked");
+    expect(recovery).toMatchObject({
+      title: "Tool recovery required",
+      status: "error",
+    });
+    expect(blocked).toMatchObject({
+      title: "Tool retry blocked",
+      status: "error",
+    });
+  });
+
   it("points inspector selection to tool details when a tool result arrives", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Inspect tool" },

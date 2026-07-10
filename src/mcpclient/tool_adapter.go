@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"awaken/src/internal/outputlimit"
 	"awaken/src/tool"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -382,10 +383,14 @@ func convertMcpInputSchema(schema any) []tool.ToolParameter {
 }
 
 func excerpt(value string, max int) string {
-	if max <= 0 || len(value) <= max {
+	if max <= 0 {
 		return value
 	}
-	return value[:max-1] + "…"
+	if normalized, truncated := outputlimit.Prefix(value, max); !truncated {
+		return normalized
+	}
+	prefix, _ := outputlimit.Prefix(value, max-1)
+	return prefix + "…"
 }
 
 // isJSONSchemaType reports whether value is a simple JSON Schema type the

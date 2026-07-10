@@ -95,25 +95,26 @@ func TestMapEventTurnLifecycle(t *testing.T) {
 func TestMapEventToolResult(t *testing.T) {
 	exitCode := 7
 	events := MapEvent(agentcore.AwakenEvent{
-		Type:               agentcore.ToolResultEventType,
-		ThreadID:           "thread-1",
-		RunID:              "run-1",
-		MessageID:          "toolmsg-1",
-		ToolCallID:         "tool-1",
-		Content:            "echo:hello",
-		ToolStatus:         "failed",
-		TransportStatus:    "completed",
-		SemanticStatus:     "failure",
-		ProcessStatus:      "exited",
-		ProcessExitCode:    &exitCode,
-		ProcessTimedOut:    false,
-		ErrorCode:          "process_exit_nonzero",
-		ErrorCategory:      "process",
-		Retryable:          false,
-		RecoveryOptions:    []string{"retry"},
-		DurationMs:         42,
-		ToolProgressStage:  "completed",
-		ToolProgressMessage: "done",
+		Type:                   agentcore.ToolResultEventType,
+		ThreadID:               "thread-1",
+		RunID:                  "run-1",
+		MessageID:              "toolmsg-1",
+		ToolCallID:             "tool-1",
+		Content:                "echo:hello",
+		ToolStatus:             "failed",
+		TransportStatus:        "completed",
+		SemanticStatus:         "failure",
+		ProcessStatus:          "exited",
+		ProcessExitCode:        &exitCode,
+		ProcessTimedOut:        false,
+		ErrorCode:              "process_exit_nonzero",
+		ErrorCategory:          "process",
+		Retryable:              false,
+		RecoveryOptions:        []string{"retry"},
+		DurationMs:             42,
+		Diagnostic:             map[string]any{"reason": "no_match"},
+		ToolProgressStage:      "completed",
+		ToolProgressMessage:    "done",
 		ToolProgressPercentage: 100,
 	})
 
@@ -137,6 +138,9 @@ func TestMapEventToolResult(t *testing.T) {
 	}
 	if events[0].ToolProgressStage != "completed" || events[0].ToolProgressPercentage != 100 {
 		t.Fatalf("unexpected progress fields: %+v", events[0])
+	}
+	if events[0].Diagnostic["reason"] != "no_match" {
+		t.Fatalf("unexpected diagnostic: %+v", events[0].Diagnostic)
 	}
 }
 

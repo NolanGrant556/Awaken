@@ -99,7 +99,7 @@ func (rb *RequestBuilder) buildSystemPromptFromEnvelope(envelope ContextEnvelope
 }
 
 func (rb *RequestBuilder) getTools() []tool.ToolSchema {
-	tools := tool.ListTools()
+	tools := tool.FilterToolsForExposure(tool.ListTools(), rb.toolExposurePolicy())
 	definitions := make([]tool.ToolSchema, 0, len(tools))
 
 	for _, t := range tools {
@@ -113,6 +113,15 @@ func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 		})
 	}
 	return definitions
+}
+
+// toolExposurePolicy returns the model-visible tool pool policy.
+// Ordinary providers hide raw apply_patch; compat/grammar-capable modes keep it.
+func (rb *RequestBuilder) toolExposurePolicy() tool.ToolExposurePolicy {
+	if rb.config.ToolExposure.Mode != "" || len(rb.config.ToolExposure.ExtraVisible) > 0 || len(rb.config.ToolExposure.ExtraHidden) > 0 {
+		return rb.config.ToolExposure
+	}
+	return tool.DefaultToolExposurePolicy()
 }
 
 func contextAttachmentsFromMessages(messages []convcontext.Message) []ContextAttachment {

@@ -27,7 +27,7 @@ func (t *TextFileCreateTool) Name() string {
 }
 
 func (t *TextFileCreateTool) Description() string {
-	return "创建或覆盖当前任务 writable roots 内的 Markdown/普通文本文件，适合先输出报告草稿、说明文档、JSON/CSV 等文本产物；不要用于 PDF、Office、图片、音视频或代码 patch，代码局部修改请用 apply_patch"
+	return "创建或覆盖当前任务 writable roots 内的 Markdown/普通文本文件，适合先输出报告草稿、说明文档、JSON/CSV 等文本产物；不要用于 PDF、Office、图片、音视频。已有文件的精确局部修改请用 text_edit；多文件/移动/删除/高级 diff 才用 apply_patch"
 }
 
 func (t *TextFileCreateTool) Parameters() []tool.ToolParameter {

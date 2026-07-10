@@ -17,6 +17,11 @@ type AgentConfig struct {
 	Workspace      WorkspaceConfig
 	SkillSummary   string
 	AutoToolPolicy AutoToolPolicy
+	// ToolExposure selects the model-visible tool pool. Empty Mode uses
+	// DefaultToolExposurePolicy (hides raw apply_patch for ordinary providers).
+	// Compat/grammar-capable modes and ExtraVisible keep apply_patch available
+	// for internal transforms, compatibility tests, or true grammar providers.
+	ToolExposure tool.ToolExposurePolicy
 	// ExecutionProfile is the unified policy bundle applied to every tool
 	// call this agent makes. When nil, EffectiveProfile falls back to
 	// profile.DefaultProfile() (WorkspaceWrite).

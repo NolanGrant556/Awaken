@@ -2098,7 +2098,9 @@ export function reduceRuntimeState(
           break;
         }
         case "AWAKEN_RUNTIME_PREPARE":
+        case "AWAKEN_RUNTIME_PREPARE_PROGRESS":
         case "AWAKEN_RUNTIME_READY":
+        case "AWAKEN_RUNTIME_REPAIR_FAILED":
         case "AWAKEN_RUNTIME_MISSING": {
           const runtimeKey = [
             action.event.runtimeName,
@@ -2106,7 +2108,7 @@ export function reduceRuntimeState(
           ]
             .filter(Boolean)
             .join(":");
-          const missing = action.event.type === "AWAKEN_RUNTIME_MISSING";
+          const missing = action.event.type === "AWAKEN_RUNTIME_MISSING" || action.event.type === "AWAKEN_RUNTIME_REPAIR_FAILED";
           const ready = action.event.type === "AWAKEN_RUNTIME_READY";
           records = upsertStep(records, `runtime:${runtimeKey || "tool"}`, {
             title: ready
@@ -2119,6 +2121,7 @@ export function reduceRuntimeState(
               action.event.runtimePrepareStatus,
               action.event.runtimeMissingReason,
               action.event.runtimeRequiredVersion,
+              action.event.message,
             ]
               .filter(Boolean)
               .join(" | "),

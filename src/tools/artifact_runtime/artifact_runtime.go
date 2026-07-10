@@ -77,6 +77,7 @@ type typedArtifactTool struct {
 	capability      tool.CapabilityClass
 	requiresRuntime bool
 	parameters      []tool.ToolParameter
+	inputSchema     *tool.ToolParametersSchema
 	execute         func(context.Context, string) (string, error)
 }
 
@@ -87,6 +88,8 @@ type presentationTheme struct {
 	Accent     string `json:"accent,omitempty"`
 	Text       string `json:"text,omitempty"`
 	Muted      string `json:"muted,omitempty"`
+	FontLatin  string `json:"font_latin,omitempty"`
+	FontEA     string `json:"font_ea,omitempty"`
 }
 
 type presentationImageData struct {
@@ -110,6 +113,9 @@ type slideData struct {
 	Accent     string                  `json:"accent,omitempty"`
 	Bullets    []string                `json:"bullets,omitempty"`
 	Images     []presentationImageData `json:"images,omitempty"`
+	Columns    []map[string]any        `json:"columns,omitempty"`
+	Metrics    []map[string]any        `json:"metrics,omitempty"`
+	Timeline   []map[string]any        `json:"timeline,omitempty"`
 }
 
 type presentationSpec struct {
@@ -121,13 +127,33 @@ type presentationSpec struct {
 	PreviewDir    string            `json:"preview_dir,omitempty"`
 }
 
+type presentationEditSpec struct {
+	SourcePath    string            `json:"source_path"`
+	OutputPath    string            `json:"output_path"`
+	Theme         presentationTheme `json:"theme,omitempty"`
+	Edits         []map[string]any  `json:"edits"`
+	RenderPreview bool              `json:"render_preview"`
+	PreviewDir    string            `json:"preview_dir,omitempty"`
+	SlideCount    int               `json:"-"`
+}
+
 type presentationRenderReport struct {
-	Verified      bool     `json:"verified"`
-	Engine        string   `json:"engine"`
-	PDFPath       string   `json:"pdf_path,omitempty"`
-	PreviewDir    string   `json:"preview_dir,omitempty"`
-	PreviewImages []string `json:"preview_images,omitempty"`
-	Warnings      []string `json:"warnings,omitempty"`
+	Verified           bool     `json:"verified"`
+	VerificationLevel  string   `json:"verification_level"`
+	Engine             string   `json:"engine"`
+	PDFPath            string   `json:"pdf_path,omitempty"`
+	PreviewDir         string   `json:"preview_dir,omitempty"`
+	PreviewImages      []string `json:"preview_images,omitempty"`
+	Warnings           []string `json:"warnings,omitempty"`
+	NeedsRuntime       bool     `json:"needs_runtime,omitempty"`
+	SlideCount         int      `json:"slide_count,omitempty"`
+	PDFPageCount       int      `json:"pdf_page_count,omitempty"`
+	PNGCount           int      `json:"png_count,omitempty"`
+}
+
+var supportedPresentationLayouts = map[string]struct{}{
+	"title": {}, "section": {}, "bullets": {}, "two_column": {},
+	"image_right": {}, "comparison": {}, "metrics": {}, "timeline": {}, "closing": {},
 }
 
 func (t typedArtifactTool) Name() string { return t.name }
@@ -136,6 +162,13 @@ func (t typedArtifactTool) Description() string { return t.description }
 
 func (t typedArtifactTool) Parameters() []tool.ToolParameter {
 	return append([]tool.ToolParameter(nil), t.parameters...)
+}
+
+func (t typedArtifactTool) InputSchema() tool.ToolParametersSchema {
+	if t.inputSchema != nil {
+		return *t.inputSchema
+	}
+	return tool.SchemaFromParameters(t.Parameters())
 }
 
 func (t typedArtifactTool) IsReadOnly() bool { return t.readOnly }
@@ -191,6 +224,9 @@ func (t typedArtifactTool) CheckPermission(ctx context.Context, input string, pe
 		return tool.AllowPermission()
 	}
 	outputPath := firstString(params, "output_path", "target_path", "output_dir", "preview_dir")
+	if outputPath == "" && t.name == "presentation_edit" {
+		outputPath = firstString(params, "source_path")
+	}
 	if outputPath == "" && !toolRequiresInputPath(t.name) {
 		outputPath = firstString(params, "path")
 	}
@@ -417,18 +453,24 @@ func artifactRender(ctx context.Context, input string) (string, error) {
 	}
 	switch strings.ToLower(filepath.Ext(checkedSource)) {
 	case ".ppt", ".pptx":
-		report, err := renderPresentation(ctx, checkedSource, outputDir)
+		slideCount, _ := countPPTXSlides(checkedSource)
+		report, err := renderPresentation(ctx, checkedSource, outputDir, slideCount)
 		if err != nil {
 			return "", err
 		}
 		return jsonResultWithFields("artifact_rendered", checkedSource, map[string]any{
-			"kind":           "presentation",
-			"verified":       report.Verified,
-			"render_check":   report.Engine,
-			"pdf_path":       report.PDFPath,
-			"preview_dir":    report.PreviewDir,
-			"preview_images": report.PreviewImages,
-			"warnings":       report.Warnings,
+			"kind":               "presentation",
+			"verified":           report.Verified,
+			"verification_level": report.VerificationLevel,
+			"render_check":       report.Engine,
+			"pdf_path":           report.PDFPath,
+			"preview_dir":        report.PreviewDir,
+			"preview_images":     report.PreviewImages,
+			"warnings":           report.Warnings,
+			"needs_runtime":      report.NeedsRuntime,
+			"slide_count":        report.SlideCount,
+			"pdf_page_count":     report.PDFPageCount,
+			"png_count":          report.PNGCount,
 		})
 	case ".pdf":
 		images, err := renderPDFPagesToPNG(ctx, checkedSource, outputDir)
@@ -505,7 +547,7 @@ func documentCreateOrEdit(ctx context.Context, input string) (string, error) {
 	return jsonResult("document_written", output)
 }
 
-func presentationCreateOrEdit(ctx context.Context, input string) (string, error) {
+func presentationCreate(ctx context.Context, input string) (string, error) {
 	params, err := decodeParams(input)
 	if err != nil {
 		return "", err
@@ -522,15 +564,90 @@ func presentationCreateOrEdit(ctx context.Context, input string) (string, error)
 	if err != nil {
 		return "", err
 	}
-	return jsonResultWithFields("presentation_written", output, map[string]any{
-		"verified":       report.Verified,
-		"render_check":   report.Engine,
-		"pdf_path":       report.PDFPath,
-		"preview_dir":    report.PreviewDir,
-		"preview_images": report.PreviewImages,
-		"warnings":       report.Warnings,
-		"slide_count":    len(spec.Slides),
-	})
+	return presentationResultJSON("presentation_written", output, report, len(spec.Slides))
+}
+
+func presentationEdit(ctx context.Context, input string) (string, error) {
+	params, err := decodeParams(input)
+	if err != nil {
+		return "", err
+	}
+	source := firstString(params, "source_path")
+	if source == "" {
+		return "", fmt.Errorf("source_path is required for presentation_edit")
+	}
+	editsRaw, ok := params["edits"]
+	if !ok {
+		return "", fmt.Errorf("edits is required for presentation_edit")
+	}
+	editsList, ok := editsRaw.([]any)
+	if !ok || len(editsList) == 0 {
+		return "", fmt.Errorf("edits must be a non-empty array")
+	}
+	edits := make([]map[string]any, 0, len(editsList))
+	for i, item := range editsList {
+		obj, ok := item.(map[string]any)
+		if !ok {
+			return "", fmt.Errorf("edits[%d] must be an object", i)
+		}
+		edits = append(edits, obj)
+	}
+	checkedSource, err := tool.PermissionContextFromContext(ctx).ResolveReadablePathChecked(source)
+	if err != nil {
+		return "", err
+	}
+	output := firstString(params, "output_path", "path")
+	if output == "" {
+		output = checkedSource
+	}
+	checkedOutput, err := resolveArtifactOutputPathChecked(tool.PermissionContextFromContext(ctx), output)
+	if err != nil {
+		return "", err
+	}
+	if err := ensureParentDir(checkedOutput); err != nil {
+		return "", err
+	}
+	spec := presentationEditSpec{
+		SourcePath:    checkedSource,
+		OutputPath:    checkedOutput,
+		Theme:         presentationThemeFromValue(params["theme"]),
+		Edits:         edits,
+		RenderPreview: true,
+	}
+	if value, ok := boolParam(params, "render_preview", "preview"); ok {
+		spec.RenderPreview = value
+	}
+	if spec.RenderPreview {
+		spec.PreviewDir = defaultPresentationPreviewDir(checkedOutput)
+	}
+	if err := editPPTXWithPython(ctx, spec); err != nil {
+		return "", err
+	}
+	slideCount, _ := countPPTXSlides(checkedOutput)
+	report, err := verifyPresentationPackage(ctx, checkedOutput, spec.PreviewDir, spec.RenderPreview, slideCount)
+	if err != nil {
+		return "", err
+	}
+	return presentationResultJSON("presentation_edited", checkedOutput, report, slideCount)
+}
+
+func presentationResultJSON(status, path string, report presentationRenderReport, slideCount int) (string, error) {
+	fields := map[string]any{
+		"verified":            report.Verified,
+		"verification_level":  report.VerificationLevel,
+		"render_check":        report.Engine,
+		"pdf_path":            report.PDFPath,
+		"preview_dir":         report.PreviewDir,
+		"preview_images":      report.PreviewImages,
+		"warnings":            report.Warnings,
+		"slide_count":         slideCount,
+		"pdf_page_count":      report.PDFPageCount,
+		"png_count":           report.PNGCount,
+	}
+	if report.NeedsRuntime {
+		fields["needs_runtime"] = true
+	}
+	return jsonResultWithFields(status, path, fields)
 }
 
 func presentationRender(ctx context.Context, input string) (string, error) {
@@ -550,18 +667,12 @@ func presentationRender(ctx context.Context, input string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	report, err := renderPresentation(ctx, checkedSource, outputDir)
+	slideCount, _ := countPPTXSlides(checkedSource)
+	report, err := renderPresentation(ctx, checkedSource, outputDir, slideCount)
 	if err != nil {
 		return "", err
 	}
-	return jsonResultWithFields("presentation_rendered", checkedSource, map[string]any{
-		"verified":       report.Verified,
-		"render_check":   report.Engine,
-		"pdf_path":       report.PDFPath,
-		"preview_dir":    report.PreviewDir,
-		"preview_images": report.PreviewImages,
-		"warnings":       report.Warnings,
-	})
+	return presentationResultJSON("presentation_rendered", checkedSource, report, slideCount)
 }
 
 func pdfExtract(ctx context.Context, input string) (string, error) {
@@ -834,6 +945,8 @@ func presentationThemeFromValue(value any) presentationTheme {
 		Accent:     firstString(obj, "accent"),
 		Text:       firstString(obj, "text"),
 		Muted:      firstString(obj, "muted"),
+		FontLatin:  firstString(obj, "font_latin"),
+		FontEA:     firstString(obj, "font_ea"),
 	}
 }
 
@@ -864,7 +977,11 @@ func presentationImagesFromValue(value any) []presentationImageData {
 
 func collectPresentationImagePaths(params map[string]any) []string {
 	var paths []string
-	for _, slide := range slidesFromParams(params) {
+	slides, err := slidesFromParams(params)
+	if err != nil {
+		return nil
+	}
+	for _, slide := range slides {
 		for _, image := range slide.Images {
 			if strings.TrimSpace(image.Path) != "" {
 				paths = append(paths, image.Path)
@@ -1062,38 +1179,72 @@ func writeMinimalDOCX(path string, paragraphs []string) error {
 	})
 }
 
-func slidesFromParams(params map[string]any) []slideData {
+func slidesFromParams(params map[string]any) ([]slideData, error) {
 	raw, ok := params["slides"].([]any)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	slides := make([]slideData, 0, len(raw))
-	for _, item := range raw {
+	for i, item := range raw {
 		obj, ok := item.(map[string]any)
 		if !ok {
-			continue
+			return nil, fmt.Errorf("$.slides[%d] expected object, got %T", i, item)
+		}
+		layout := firstString(obj, "layout")
+		if layout != "" {
+			if _, ok := supportedPresentationLayouts[layout]; !ok {
+				return nil, fmt.Errorf("$.slides[%d].layout unsupported value %q; expected one of title, section, bullets, two_column, image_right, comparison, metrics, timeline, closing", i, layout)
+			}
 		}
 		slides = append(slides, slideData{
 			Title:      firstString(obj, "title"),
 			Subtitle:   firstString(obj, "subtitle", "kicker"),
 			Body:       firstString(obj, "body", "content"),
-			Layout:     firstString(obj, "layout"),
+			Layout:     layout,
 			Notes:      firstString(obj, "notes", "speaker_notes"),
 			Background: firstString(obj, "background"),
 			Accent:     firstString(obj, "accent"),
 			Bullets:    stringSliceParam(obj, "bullets", "points"),
 			Images:     presentationImagesFromValue(obj["images"]),
+			Columns:    objectSliceParam(obj, "columns"),
+			Metrics:    objectSliceParam(obj, "metrics"),
+			Timeline:   objectSliceParam(obj, "timeline", "steps"),
 		})
 	}
-	return slides
+	return slides, nil
+}
+
+func objectSliceParam(params map[string]any, keys ...string) []map[string]any {
+	for _, key := range keys {
+		value, ok := params[key]
+		if !ok {
+			continue
+		}
+		raw, ok := value.([]any)
+		if !ok {
+			continue
+		}
+		out := make([]map[string]any, 0, len(raw))
+		for _, item := range raw {
+			if obj, ok := item.(map[string]any); ok {
+				out = append(out, obj)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 func presentationSpecFromParams(ctx context.Context, params map[string]any, output string) (presentationSpec, error) {
+	slides, err := slidesFromParams(params)
+	if err != nil {
+		return presentationSpec{}, err
+	}
 	spec := presentationSpec{
 		OutputPath:    output,
 		Title:         firstString(params, "title"),
 		Theme:         presentationThemeFromValue(params["theme"]),
-		Slides:        slidesFromParams(params),
+		Slides:        slides,
 		RenderPreview: true,
 	}
 	if value, ok := boolParam(params, "render_preview", "preview"); ok {
@@ -1104,6 +1255,7 @@ func presentationSpecFromParams(ctx context.Context, params map[string]any, outp
 			Title:   firstNonEmpty(spec.Title, "New presentation"),
 			Body:    strings.Join(stringSliceParam(params, "bullets", "content"), "\n"),
 			Bullets: stringSliceParam(params, "bullets"),
+			Layout:  "title",
 		}}
 	}
 	perm := tool.PermissionContextFromContext(ctx)
@@ -1133,7 +1285,21 @@ func writeVerifiedPresentation(ctx context.Context, spec presentationSpec) (pres
 	if err := writePPTXWithPython(ctx, spec); err != nil {
 		return presentationRenderReport{}, err
 	}
-	outputDir := spec.PreviewDir
+	return verifyPresentationPackage(ctx, spec.OutputPath, spec.PreviewDir, spec.RenderPreview, len(spec.Slides))
+}
+
+func verifyPresentationPackage(ctx context.Context, path, previewDir string, keepPreview bool, expectedSlides int) (presentationRenderReport, error) {
+	slideCount := expectedSlides
+	if counted, err := countPPTXSlides(path); err == nil && counted > 0 {
+		slideCount = counted
+	}
+	report := presentationRenderReport{
+		Verified:          false,
+		VerificationLevel: "package",
+		Engine:            "package",
+		SlideCount:        slideCount,
+	}
+	outputDir := previewDir
 	cleanup := false
 	if strings.TrimSpace(outputDir) == "" {
 		tempDir, err := os.MkdirTemp("", "awaken-presentation-render-*")
@@ -1146,48 +1312,19 @@ func writeVerifiedPresentation(ctx context.Context, spec presentationSpec) (pres
 	if cleanup {
 		defer os.RemoveAll(outputDir)
 	}
-	report, err := renderPresentation(ctx, spec.OutputPath, outputDir)
+	rendered, err := renderPresentation(ctx, path, outputDir, slideCount)
 	if err != nil {
+		// Technical verification ran; surface as unverified package-level result only when
+		// the failure is a hard transport error before any level was established.
 		return presentationRenderReport{}, fmt.Errorf("presentation render verification failed: %w", err)
 	}
-	if !spec.RenderPreview {
+	report = rendered
+	if !keepPreview {
 		report.PDFPath = ""
 		report.PreviewDir = ""
 		report.PreviewImages = nil
 	}
 	return report, nil
-}
-
-func writePPTXWithPython(ctx context.Context, spec presentationSpec) error {
-	python, err := resolvePresentationPython()
-	if err != nil {
-		return err
-	}
-	payload, err := json.Marshal(spec)
-	if err != nil {
-		return err
-	}
-
-	runCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(runCtx, python, "-c", presentationPythonScript)
-	cmd.Stdin = bytes.NewReader(payload)
-	cmd.Env = os.Environ()
-	output, err := cmd.CombinedOutput()
-	if runCtx.Err() != nil {
-		return fmt.Errorf("python-pptx generation timed out: %w", runCtx.Err())
-	}
-	if err != nil {
-		return fmt.Errorf("python-pptx generation failed: %w: %s", err, excerptOutput(output))
-	}
-	info, err := os.Stat(spec.OutputPath)
-	if err != nil {
-		return fmt.Errorf("generated pptx missing: %w", err)
-	}
-	if info.Size() == 0 {
-		return fmt.Errorf("generated pptx is empty")
-	}
-	return nil
 }
 
 func verifyPresentationRender(ctx context.Context, path string) error {
@@ -1196,36 +1333,67 @@ func verifyPresentationRender(ctx context.Context, path string) error {
 		return err
 	}
 	defer os.RemoveAll(outDir)
-	_, err = renderPresentation(ctx, path, outDir)
-	return err
+	slideCount, _ := countPPTXSlides(path)
+	report, err := renderPresentation(ctx, path, outDir, slideCount)
+	if err != nil {
+		return err
+	}
+	if !report.Verified {
+		if len(report.Warnings) > 0 {
+			return fmt.Errorf("presentation verification incomplete (%s): %s", report.VerificationLevel, strings.Join(report.Warnings, "; "))
+		}
+		return fmt.Errorf("presentation verification incomplete (%s)", report.VerificationLevel)
+	}
+	return nil
 }
 
-func renderPresentation(ctx context.Context, path string, outputDir string) (presentationRenderReport, error) {
+func renderPresentation(ctx context.Context, path string, outputDir string, expectedSlides int) (presentationRenderReport, error) {
 	if strings.TrimSpace(outputDir) == "" {
 		return presentationRenderReport{}, fmt.Errorf("output_dir is required")
 	}
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return presentationRenderReport{}, err
 	}
-	pdfPath, err := renderPresentationPDF(ctx, path, outputDir)
-	if err != nil {
-		return presentationRenderReport{}, err
+	slideCount := expectedSlides
+	if counted, err := countPPTXSlides(path); err == nil && counted > 0 {
+		slideCount = counted
 	}
 	report := presentationRenderReport{
-		Verified:   true,
-		Engine:     "libreoffice_pdf",
-		PDFPath:    pdfPath,
-		PreviewDir: outputDir,
+		Verified:          false,
+		VerificationLevel: "package",
+		Engine:            "package",
+		PreviewDir:        outputDir,
+		SlideCount:        slideCount,
 	}
+	pdfPath, err := renderPresentationPDF(ctx, path, outputDir)
+	if err != nil {
+		report.Warnings = append(report.Warnings, err.Error())
+		report.NeedsRuntime = true
+		return report, nil
+	}
+	report.PDFPath = pdfPath
+	report.VerificationLevel = "pdf"
+	report.Engine = "libreoffice_pdf"
+	report.PDFPageCount = slideCount // page count confirmed via PNG parity below
+
 	pngs, err := renderPDFPagesToPNG(ctx, pdfPath, outputDir)
 	if err != nil {
 		report.Warnings = append(report.Warnings, err.Error())
-	} else {
-		report.PreviewImages = pngs
-		if len(pngs) > 0 {
-			report.Engine = "libreoffice_pdf_poppler_png"
-		}
+		report.NeedsRuntime = true
+		return report, nil
 	}
+	report.PreviewImages = pngs
+	report.PNGCount = len(pngs)
+	report.PDFPageCount = len(pngs)
+	report.VerificationLevel = "png"
+	report.Engine = "libreoffice_pdf_poppler_png"
+	if slideCount > 0 && len(pngs) != slideCount {
+		report.Warnings = append(report.Warnings, fmt.Sprintf("slide/PDF/PNG count mismatch: slides=%d png=%d", slideCount, len(pngs)))
+		report.NeedsRuntime = false
+		return report, nil
+	}
+	report.Verified = true
+	report.VerificationLevel = "png"
 	return report, nil
 }
 
@@ -1302,232 +1470,6 @@ func renderPDFPagesToPNG(ctx context.Context, pdfPath string, outputDir string) 
 	}
 	return pngs, nil
 }
-
-const presentationPythonScript = `
-import json
-import os
-import sys
-import tempfile
-
-from pptx import Presentation
-from pptx.dml.color import RGBColor
-from pptx.enum.shapes import MSO_SHAPE
-from pptx.enum.text import PP_ALIGN
-from pptx.util import Inches, Pt
-
-try:
-    from PIL import Image
-except Exception:
-    Image = None
-
-payload = json.load(sys.stdin)
-output_path = payload["output_path"]
-slides = payload.get("slides") or [{"title": "New presentation", "body": ""}]
-theme = {
-    "background": "#F7F9FB",
-    "surface": "#FFFFFF",
-    "primary": "#12324A",
-    "accent": "#0EA5A4",
-    "text": "#1F2937",
-    "muted": "#64748B",
-}
-theme.update({k: v for k, v in (payload.get("theme") or {}).items() if v})
-
-prs = Presentation()
-prs.slide_width = Inches(13.333)
-prs.slide_height = Inches(7.5)
-blank_layout = prs.slide_layouts[6]
-tmpdir = tempfile.mkdtemp(prefix="awaken-ppt-assets-")
-
-def rgb(value, fallback):
-    text = str(value or fallback or "").strip()
-    if text.startswith("#"):
-        text = text[1:]
-    if len(text) == 3:
-        text = "".join(ch + ch for ch in text)
-    if len(text) != 6:
-        text = str(fallback or "#000000").strip().lstrip("#")
-    try:
-        return RGBColor(int(text[0:2], 16), int(text[2:4], 16), int(text[4:6], 16))
-    except Exception:
-        return RGBColor(0, 0, 0)
-
-def set_background(slide, color):
-    fill = slide.background.fill
-    fill.solid()
-    fill.fore_color.rgb = rgb(color, theme["background"])
-
-def add_rect(slide, left, top, width, height, color):
-    shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, left, top, width, height)
-    shape.fill.solid()
-    shape.fill.fore_color.rgb = rgb(color, theme["accent"])
-    shape.line.fill.background()
-    return shape
-
-def add_text_box(slide, left, top, width, height, text, size, bold=False, color=(51, 51, 51)):
-    box = slide.shapes.add_textbox(left, top, width, height)
-    frame = box.text_frame
-    frame.word_wrap = True
-    frame.clear()
-    lines = str(text or "").splitlines() or [""]
-    for index, line in enumerate(lines):
-        paragraph = frame.paragraphs[0] if index == 0 else frame.add_paragraph()
-        paragraph.text = line
-        paragraph.alignment = PP_ALIGN.LEFT
-        paragraph.font.size = Pt(size)
-        paragraph.font.bold = bold
-        if isinstance(color, tuple):
-            paragraph.font.color.rgb = RGBColor(*color)
-        else:
-            paragraph.font.color.rgb = rgb(color, theme["text"])
-        paragraph.space_after = Pt(4)
-    return box
-
-def add_body(slide, left, top, width, height, body, bullets):
-    box = slide.shapes.add_textbox(left, top, width, height)
-    frame = box.text_frame
-    frame.word_wrap = True
-    frame.clear()
-    first = True
-    if body:
-        for line in str(body).splitlines():
-            paragraph = frame.paragraphs[0] if first else frame.add_paragraph()
-            first = False
-            paragraph.text = line
-            paragraph.font.size = Pt(17)
-            paragraph.font.color.rgb = rgb(theme["text"], "#1F2937")
-            paragraph.space_after = Pt(7)
-    for bullet in bullets or []:
-        paragraph = frame.paragraphs[0] if first else frame.add_paragraph()
-        first = False
-        paragraph.text = "- " + str(bullet)
-        paragraph.font.size = Pt(16)
-        paragraph.font.color.rgb = rgb(theme["text"], "#1F2937")
-        paragraph.space_after = Pt(6)
-    return box
-
-def image_size(path):
-    if Image is None:
-        return None
-    try:
-        with Image.open(path) as img:
-            return img.size
-    except Exception:
-        return None
-
-def crop_cover(path, target_ratio):
-    if Image is None:
-        return path
-    try:
-        with Image.open(path) as img:
-            img = img.convert("RGB")
-            width, height = img.size
-            current_ratio = float(width) / float(height or 1)
-            if current_ratio > target_ratio:
-                new_width = int(height * target_ratio)
-                left = max(0, int((width - new_width) / 2))
-                box = (left, 0, left + new_width, height)
-            else:
-                new_height = int(width / target_ratio)
-                top = max(0, int((height - new_height) / 2))
-                box = (0, top, width, top + new_height)
-            cropped = img.crop(box)
-            out = os.path.join(tmpdir, "crop_" + os.path.basename(path) + ".jpg")
-            cropped.save(out, quality=92)
-            return out
-    except Exception:
-        return path
-
-def add_image(slide, item, index, total):
-    path = str(item.get("path") or "").strip()
-    if not path or not os.path.exists(path):
-        return
-    default_left = 7.05
-    default_top = 1.38 + index * (4.75 / max(1, total))
-    default_width = 5.55
-    default_height = min(4.55, (4.5 / max(1, total)) - 0.12) if total > 1 else 4.75
-    left = float(item.get("x") or default_left)
-    top = float(item.get("y") or default_top)
-    width = float(item.get("width") or default_width)
-    height = float(item.get("height") or default_height)
-    fit = str(item.get("fit") or "contain").lower()
-    src = crop_cover(path, width / max(0.1, height)) if fit == "cover" else path
-    size = image_size(src)
-    if fit == "stretch" or size is None:
-        pic = slide.shapes.add_picture(src, Inches(left), Inches(top), width=Inches(width), height=Inches(height))
-    else:
-        img_w, img_h = size
-        scale = min(width / max(1, img_w), height / max(1, img_h))
-        final_w = img_w * scale
-        final_h = img_h * scale
-        pic = slide.shapes.add_picture(
-            src,
-            Inches(left + (width - final_w) / 2),
-            Inches(top + (height - final_h) / 2),
-            width=Inches(final_w),
-            height=Inches(final_h),
-        )
-    if item.get("alt"):
-        try:
-            pic.name = str(item.get("alt"))
-        except Exception:
-            pass
-    if item.get("caption"):
-        add_text_box(slide, Inches(left), Inches(top + height + 0.06), Inches(width), Inches(0.28), item.get("caption"), 9, color=theme["muted"])
-
-def add_notes(slide, notes):
-    if not notes:
-        return
-    try:
-        frame = slide.notes_slide.notes_text_frame
-        frame.text = str(notes)
-    except Exception:
-        pass
-
-for index, item in enumerate(slides):
-    slide = prs.slides.add_slide(blank_layout)
-    set_background(slide, item.get("background") or theme["background"])
-    accent = item.get("accent") or theme["accent"]
-    add_rect(slide, Inches(0), Inches(0), Inches(13.333), Inches(0.12), accent)
-    add_rect(slide, Inches(0.55), Inches(6.95), Inches(12.2), Inches(0.03), accent)
-    if item.get("subtitle"):
-        add_text_box(
-            slide,
-            Inches(0.62),
-            Inches(0.42),
-            Inches(11.95),
-            Inches(0.25),
-            item.get("subtitle", ""),
-            10,
-            bold=True,
-            color=theme["accent"],
-        )
-        title_top = 0.68
-    else:
-        title_top = 0.42
-    add_text_box(
-        slide,
-        Inches(0.62),
-        Inches(title_top),
-        Inches(12.2),
-        Inches(0.72),
-        item.get("title", ""),
-        27,
-        bold=True,
-        color=theme["primary"],
-    )
-    images = item.get("images") or []
-    has_images = len(images) > 0
-    body_width = 6.05 if has_images else 11.9
-    add_body(slide, Inches(0.72), Inches(1.45), Inches(body_width), Inches(5.25), item.get("body", ""), item.get("bullets") or [])
-    for image_index, image in enumerate(images):
-        add_image(slide, image, image_index, len(images))
-    add_notes(slide, item.get("notes"))
-
-os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-prs.save(output_path)
-print(json.dumps({"path": output_path, "slides": len(prs.slides), "size": os.path.getsize(output_path)}))
-`
 
 func writeZip(path string, files map[string]string) error {
 	if err := ensureParentDir(path); err != nil {
@@ -2093,7 +2035,7 @@ func init() {
 	tool.MustRegisterTool(typedArtifactTool{
 		name:        "presentation_create",
 		displayName: "Presentation Create",
-		description: "创建图文混排 pptx 演示文稿，支持 theme、slides、bullets、images、speaker notes，并用 LibreOffice/Poppler 生成预览验证；用于生成 PPTX 产物，不要用 apply_patch 手写 PPTX ZIP/XML",
+		description: "创建图文混排 pptx 演示文稿，支持 theme、slides、bullets、images、speaker notes 与固定 layout enum，并用 LibreOffice/Poppler 生成预览验证；模型只提交 semantic slide spec，不要用 apply_patch 手写 PPTX ZIP/XML 或 CJK helper",
 		readOnly:    false,
 		capability:  tool.CapabilityArtifactWrite,
 		parameters: []tool.ToolParameter{
@@ -2101,24 +2043,26 @@ func init() {
 			{Name: "title", Description: "演示文稿标题", Type: "string", Required: false},
 			{Name: "theme", Description: "主题颜色对象，可包含 background/surface/primary/accent/text/muted", Type: "object", Required: false},
 			{Name: "slides", Description: "幻灯片数组，每项可包含 title/subtitle/body/bullets/images/notes/layout", Type: "array", Required: false},
-			{Name: "render_preview", Description: "是否生成 PDF/PNG 预览，默认 true", Type: "boolean", Required: false},
+			{Name: "render_preview", Description: "是否保留 PDF/PNG 预览文件，默认 true；false 仍执行技术验证", Type: "boolean", Required: false},
 		},
-		execute: presentationCreateOrEdit,
+		inputSchema: presentationCreateInputSchema(),
+		execute:     presentationCreate,
 	})
 	tool.MustRegisterTool(typedArtifactTool{
 		name:        "presentation_edit",
 		displayName: "Presentation Edit",
-		description: "写入或重写图文混排 pptx 演示文稿，支持 theme、slides、bullets、images、speaker notes，并用 LibreOffice/Poppler 生成预览验证；用于生成 PPTX 产物，不要用 apply_patch 手写 PPTX ZIP/XML",
+		description: "对已有 pptx 做增量编辑：必填 source_path 与 edits，保留未修改幻灯片；不支持把全量重写伪装成 edit",
 		readOnly:    false,
 		capability:  tool.CapabilityArtifactWrite,
 		parameters: []tool.ToolParameter{
-			{Name: "output_path", Description: "输出 pptx 路径", Type: "string", Required: true},
-			{Name: "title", Description: "演示文稿标题", Type: "string", Required: false},
-			{Name: "theme", Description: "主题颜色对象，可包含 background/surface/primary/accent/text/muted", Type: "object", Required: false},
-			{Name: "slides", Description: "幻灯片数组，每项可包含 title/subtitle/body/bullets/images/notes/layout", Type: "array", Required: false},
-			{Name: "render_preview", Description: "是否生成 PDF/PNG 预览，默认 true", Type: "boolean", Required: false},
+			{Name: "source_path", Description: "源 pptx 路径", Type: "string", Required: true},
+			{Name: "edits", Description: "增量编辑数组，每项含 slide_index 与 op/update 字段", Type: "array", Required: true},
+			{Name: "output_path", Description: "输出 pptx 路径，默认覆盖 source_path", Type: "string", Required: false},
+			{Name: "theme", Description: "主题颜色对象", Type: "object", Required: false},
+			{Name: "render_preview", Description: "是否保留 PDF/PNG 预览文件，默认 true；false 仍执行技术验证", Type: "boolean", Required: false},
 		},
-		execute: presentationCreateOrEdit,
+		inputSchema: presentationEditInputSchema(),
+		execute:     presentationEdit,
 	})
 	tool.MustRegisterTool(typedArtifactTool{
 		name:        "presentation_render",

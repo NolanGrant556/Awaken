@@ -116,8 +116,24 @@ func TestInvokeAnthropicToolsSchema(t *testing.T) {
 		if body.Tools[0].Name != "calculator" {
 			t.Fatalf("expected tool name calculator, got %s", body.Tools[0].Name)
 		}
-		if _, ok := body.Tools[0].InputSchema["properties"]; !ok {
+		props, ok := body.Tools[0].InputSchema["properties"].(map[string]interface{})
+		if !ok {
 			t.Fatalf("expected input_schema to have properties")
+		}
+		slides, ok := props["slides"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected nested slides property, got %#v", props)
+		}
+		items, ok := slides["items"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected slides.items, got %#v", slides)
+		}
+		itemProps, ok := items["properties"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected slides.items.properties, got %#v", items)
+		}
+		if _, ok := itemProps["layout"]; !ok {
+			t.Fatalf("expected nested layout property")
 		}
 		writeJSON(t, w, map[string]interface{}{
 			"content":     []map[string]interface{}{{"type": "text", "text": "ok"}},
@@ -136,6 +152,15 @@ func TestInvokeAnthropicToolsSchema(t *testing.T) {
 					Type: "object",
 					Properties: map[string]tool.ToolParam{
 						"expression": {Type: "string", Description: "expr"},
+						"slides": {
+							Type: "array",
+							Items: &tool.ToolParam{
+								Type: "object",
+								Properties: map[string]tool.ToolParam{
+									"layout": {Type: "string", Enum: []any{"title", "bullets"}},
+								},
+							},
+						},
 					},
 					Required: []string{"expression"},
 				},

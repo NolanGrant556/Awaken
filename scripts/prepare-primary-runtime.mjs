@@ -1,8 +1,17 @@
 #!/usr/bin/env node
-import { basename, dirname, join } from "node:path";
-import { mkdirSync, readdirSync, writeFileSync, cpSync, existsSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import {
   activateVersion,
+  bundleMacOSDependencyClosure,
   buildResolvedState,
   candidateSeedDirs,
   checkPrimaryRuntime,
@@ -10,15 +19,23 @@ import {
   commandOutput,
   componentRelativePath,
   copyDirectoryContents,
+  createBuildRevision,
   createStagingDir,
   ensureDir,
   exists,
   firstExisting,
+  inspectRuntimeProvenance,
+  isCodexCachePath,
   isWindows,
+  materializeMacOSRpathAliases,
   migrateOldAwakenCacheIfNeeded,
+  normalizeMacOSRuntimeTree,
+  pathInsideRoot,
   probeComponent,
   publishStaging,
+  readBashWrapperTarget,
   readRuntimeManifest,
+  resolveLibreOfficeInstallRoot,
   resolvePrimaryRuntimeRoot,
   rollbackToPrevious,
   run,
@@ -172,93 +189,231 @@ function executableName(name) {
   return isWindows ? `${name}.exe` : name;
 }
 
-function pythonSpec(command, args = []) {
-  return { command, args, label: [command, ...args].join(" ") };
+function pythonCanImport(python) {
+  return Boolean(python) && run(python, ["-c", "import pptx, PIL"]).status === 0;
 }
 
-function runPython(spec, args, options = {}) {
-  if (typeof spec === "string") {
-    return run(spec, args, options);
+function resolvedCopySource(candidate) {
+  const value = String(candidate || "").trim();
+  if (!value || !existsSync(value) || isCodexCachePath(value)) {
+    return "";
   }
-  return run(spec.command, [...spec.args, ...args], options);
+  let resolved = value;
+  try {
+    resolved = realpathSync(value);
+  } catch {
+    resolved = resolve(value);
+  }
+  if (isCodexCachePath(resolved)) {
+    return "";
+  }
+  const wrapperTarget = readBashWrapperTarget(resolved);
+  if (wrapperTarget) {
+    const target = isAbsolute(wrapperTarget)
+      ? wrapperTarget
+      : resolve(dirname(resolved), wrapperTarget);
+    if (!existsSync(target) || isCodexCachePath(target)) {
+      return "";
+    }
+    try {
+      resolved = realpathSync(target);
+    } catch {
+      resolved = target;
+    }
+  }
+  return resolved;
 }
 
-function pythonCanImport(spec) {
-  return Boolean(typeof spec === "string" ? spec : spec?.command) &&
-    runPython(spec, ["-c", "import pptx, PIL"]).status === 0;
+function requireExplicitSource(envName) {
+  const configured = String(process.env[envName] || "").trim();
+  if (!configured) {
+    return "";
+  }
+  const resolved = resolvedCopySource(configured);
+  if (!resolved) {
+    fail(`primary-runtime: ${envName} is not a valid copy source (${configured})`);
+  }
+  return resolved;
 }
 
-function findPreparedPython() {
-  const candidates = [
-    process.env.AWAKEN_PYTHON,
-    ...(isWindows
-      ? seedCandidates("python", "Scripts", "python.exe")
-      : []),
-    ...seedCandidates("python", "bin", "python3"),
-  ].filter(Boolean);
-  return candidates.find((candidate) => pythonCanImport(pythonSpec(candidate))) || "";
+function firstCopySource(candidates) {
+  for (const candidate of candidates) {
+    const resolved = resolvedCopySource(candidate);
+    if (resolved) {
+      return resolved;
+    }
+  }
+  return "";
 }
 
-function findBasePython() {
-  // System python is copy/bootstrap source only — never a RuntimeReady target.
-  const candidates = [
-    process.env.AWAKEN_BOOTSTRAP_PYTHON ? pythonSpec(process.env.AWAKEN_BOOTSTRAP_PYTHON) : null,
-    ...whichAll("python3").map((path) => pythonSpec(path)),
-    ...whichAll("python").map((path) => pythonSpec(path)),
-    ...(isWindows ? [pythonSpec("py", ["-3"])] : []),
-    ...seedCandidates("python", "bin", "python3").map((path) => pythonSpec(path)),
-    ...(isWindows
-      ? seedCandidates("python", "Scripts", "python.exe").map((path) => pythonSpec(path))
-      : []),
-  ].filter(Boolean);
-  return candidates.find((candidate) => runPython(candidate, ["--version"]).status === 0) || null;
+function pythonMetadata(python) {
+  const result = run(python, [
+    "-c",
+    "import json,sys; print(json.dumps({'executable':sys.executable,'prefix':sys.prefix,'base_prefix':sys.base_prefix}))",
+  ]);
+  if (result.status !== 0) {
+    return null;
+  }
+  try {
+    return JSON.parse(String(result.stdout || "").trim());
+  } catch {
+    return null;
+  }
+}
+
+function pythonDistribution(python) {
+  const resolvedPython = resolvedCopySource(python);
+  if (!resolvedPython) {
+    return null;
+  }
+  const metadata = pythonMetadata(resolvedPython);
+  if (!metadata || metadata.prefix !== metadata.base_prefix) {
+    return null;
+  }
+  let root = metadata.base_prefix;
+  try {
+    root = realpathSync(root);
+  } catch {
+    root = resolve(root);
+  }
+  const executable = resolve(metadata.executable);
+  const rel = executable.slice(root.length);
+  if (!pathInsideRoot(executable, root)) {
+    return null;
+  }
+  if (existsSync(join(root, "pyvenv.cfg"))) {
+    return null;
+  }
+  return { root, python: resolvedPython, executableRelativePath: rel.replace(/^\/+/, "") };
+}
+
+function findPythonDistribution() {
+  const explicit = requireExplicitSource("AWAKEN_PYTHON") ||
+    requireExplicitSource("AWAKEN_BOOTSTRAP_PYTHON");
+  if (explicit) {
+    const distribution = pythonDistribution(explicit);
+    if (!distribution) {
+      fail(`primary-runtime: configured Python is a venv or non-relocatable install (${explicit})`);
+    }
+    return distribution;
+  }
+
+  const seedPaths = isWindows
+    ? [
+        ...seedCandidates("python", "python.exe"),
+        ...seedCandidates("python", "Scripts", "python.exe"),
+      ]
+    : [
+        ...seedCandidates("python", "bin", "python3"),
+        ...seedCandidates("python", "bin", "python3.13"),
+        ...seedCandidates("python", "bin", "python3.12"),
+        ...seedCandidates("python", "bin", "python3.11"),
+      ];
+  for (const candidate of seedPaths) {
+    const distribution = pythonDistribution(candidate);
+    if (distribution) {
+      return distribution;
+    }
+  }
+
+  const uv = firstCopySource(whichAll(isWindows ? "uv.exe" : "uv"));
+  if (uv) {
+    const managed = commandOutput(uv, ["python", "find", "--managed-python"]);
+    const distribution = pythonDistribution(managed);
+    if (distribution) {
+      return distribution;
+    }
+  }
+  return null;
 }
 
 function ensurePython(stagingDir) {
-  const rel = isWindows ? join("python", "Scripts", "python.exe") : join("python", "bin", "python3");
+  const rel = isWindows ? join("python", "python.exe") : join("python", "bin", "python3");
   const target = join(stagingDir, rel);
-  const prepared = findPreparedPython();
-  if (prepared) {
-    // Prefer creating a managed venv from prepared interpreter when possible.
-  }
-
-  const basePython = prepared ? pythonSpec(prepared) : findBasePython();
-  if (!basePython) {
-    fail("primary-runtime: unable to find Python for bootstrapping");
+  const distribution = findPythonDistribution();
+  if (!distribution) {
+    fail(
+      "primary-runtime: unable to find a relocatable Python distribution; set AWAKEN_PRIMARY_RUNTIME_SEED_DIR/AWAKEN_PYTHON or install an uv-managed Python",
+    );
   }
 
   const venvDir = join(stagingDir, "python");
-  emitProgress("host_install", `creating managed Python venv at ${venvDir}`);
-  ensureDir(dirname(venvDir));
-  const venv = runPython(basePython, ["-m", "venv", venvDir], { stdio: json ? "ignore" : "inherit" });
-  if (venv.status !== 0) {
-    fail("primary-runtime: failed to create Python venv");
+  emitProgress("host_install", `copying relocatable Python distribution to ${venvDir}`);
+  copyDirectoryContents(distribution.root, venvDir);
+  if (!existsSync(target)) {
+    const copiedOriginal = join(venvDir, distribution.executableRelativePath);
+    if (!existsSync(copiedOriginal)) {
+      fail(`primary-runtime: copied Python executable missing (${copiedOriginal})`);
+    }
+    cpSync(copiedOriginal, target, { dereference: true });
+    if (!isWindows) {
+      chmodSync(target, 0o755);
+    }
   }
 
   const python = target;
-  emitProgress("host_install", "installing python-pptx and Pillow into managed runtime");
-  const pipInstall = run(
-    python,
-    ["-m", "pip", "install", "--upgrade", "pip", "python-pptx", "Pillow"],
-    { stdio: json ? "ignore" : "inherit" },
-  );
-  if (pipInstall.status !== 0 || !pythonCanImport(python)) {
-    fail("primary-runtime: failed to install python-pptx and Pillow");
+  if (!pythonCanImport(python)) {
+    emitProgress("host_install", "installing python-pptx and Pillow into managed runtime");
+    const pipArgs = [
+      "-m",
+      "pip",
+      "install",
+      "--disable-pip-version-check",
+      "python-pptx",
+      "Pillow",
+    ];
+    let pipInstall = run(python, pipArgs, { stdio: json ? "ignore" : "inherit" });
+    if (pipInstall.status !== 0) {
+      pipInstall = run(
+        python,
+        [...pipArgs.slice(0, 4), "--break-system-packages", ...pipArgs.slice(4)],
+        { stdio: json ? "ignore" : "inherit" },
+      );
+    }
+    if (pipInstall.status !== 0 || !pythonCanImport(python)) {
+      fail("primary-runtime: failed to install python-pptx and Pillow");
+    }
   }
-  return { target: python, source: basePython.label || String(basePython.command), mode: "venv" };
+  const metadata = pythonMetadata(python);
+  if (!metadata || [metadata.executable, metadata.prefix, metadata.base_prefix].some(
+    (entry) => !pathInsideRoot(entry, venvDir),
+  )) {
+    fail("primary-runtime: copied Python still resolves outside the managed runtime");
+  }
+  return { target: python, source: distribution.root, mode: "relocatable-distribution" };
 }
 
 function executableCandidates(envName, commandName, ...seedSuffixes) {
   return [
-    process.env[envName],
     ...seedCandidates(...seedSuffixes),
     ...whichAll(commandName),
   ].filter(Boolean);
 }
 
+function executableSource(envName, commandName, ...seedSuffixes) {
+  return requireExplicitSource(envName) ||
+    firstCopySource(executableCandidates(envName, commandName, ...seedSuffixes));
+}
+
+function copyWindowsCompanions(source, targetDir) {
+  if (!isWindows) {
+    return;
+  }
+  ensureDir(targetDir);
+  for (const entry of readdirSync(dirname(source))) {
+    if (entry.toLowerCase().endsWith(".dll")) {
+      cpSync(join(dirname(source), entry), join(targetDir, entry), { dereference: true });
+    }
+  }
+}
+
 function ensureNode(stagingDir) {
-  const source = firstExisting(
-    executableCandidates("AWAKEN_NODE", "node", "node", isWindows ? "" : "bin", executableName("node")),
+  const source = executableSource(
+    "AWAKEN_NODE",
+    "node",
+    "node",
+    isWindows ? "" : "bin",
+    executableName("node"),
   );
   if (!source) {
     fail("primary-runtime: unable to find node");
@@ -266,15 +421,28 @@ function ensureNode(stagingDir) {
   const target = isWindows
     ? join(stagingDir, "node", "node.exe")
     : join(stagingDir, "node", "bin", "node");
+  if (process.platform === "darwin") {
+    const closure = bundleMacOSDependencyClosure(
+      [{ source, target, executableSource: source, label: "node" }],
+      join(stagingDir, "node", "lib"),
+    );
+    return { target, source, mode: "copy-with-macho-closure", closure };
+  }
   stageExecutable(target, source, "node");
-  return { target, source, mode: "copy" };
+  copyWindowsCompanions(source, dirname(target));
+  return { target, source, mode: isWindows ? "copy-with-dlls" : "copy" };
 }
 
 function libreOfficeCandidates() {
   return [
-    process.env.AWAKEN_SOFFICE,
-    ...seedCandidates("bin", executableName("soffice")),
     ...seedCandidates("libreoffice"),
+    ...seedCandidates("bin", executableName("soffice")),
+    ...(process.platform === "darwin"
+      ? [
+          "/Applications/LibreOffice.app",
+          "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+        ]
+      : []),
     ...whichAll("soffice"),
     ...whichAll("libreoffice"),
     ...(isWindows
@@ -285,52 +453,66 @@ function libreOfficeCandidates() {
           join(process.env["ProgramFiles(x86)"] || "", "LibreOffice", "program", "soffice.exe"),
         ]
       : []),
-    "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-    "/opt/homebrew/bin/soffice",
-    "/usr/local/bin/soffice",
+    ...(process.platform === "darwin"
+      ? ["/opt/homebrew/bin/soffice", "/usr/local/bin/soffice"]
+      : []),
   ].filter(Boolean);
 }
 
 function ensureLibreOffice(stagingDir) {
   const target = join(stagingDir, "libreoffice");
-  let source = firstExisting(libreOfficeCandidates());
+  let source = requireExplicitSource("AWAKEN_SOFFICE") || firstCopySource(libreOfficeCandidates());
   if (!source && autoInstallComponent("libreoffice")) {
-    source = firstExisting(libreOfficeCandidates());
+    source = firstCopySource(libreOfficeCandidates());
   }
   if (!source) {
     fail("primary-runtime: unable to find LibreOffice/soffice");
   }
 
   if (isWindows) {
-    const parent = dirname(source);
-    const root = basename(parent).toLowerCase() === "program" ? dirname(parent) : parent;
+    const root = resolveLibreOfficeInstallRoot(source, process.platform);
+    if (!root) {
+      fail(`primary-runtime: unable to resolve a bounded Windows LibreOffice install root from ${source}`);
+    }
     copyDirectoryContents(root, target);
     return { target, source: root, mode: "copy" };
   }
 
-  // macOS app bundle or linux install: copy app/dir when possible, else copy soffice binary tree
-  if (source.includes("LibreOffice.app")) {
-    const appRoot = source.slice(0, source.indexOf("LibreOffice.app") + "LibreOffice.app".length);
-    const destApp = join(target, "LibreOffice.app");
-    copyDirectoryContents(appRoot, destApp);
-    return { target: destApp, source: appRoot, mode: "copy" };
-  }
-  if (existsSync(source) && source.endsWith(".app")) {
-    const destApp = join(target, "LibreOffice.app");
-    copyDirectoryContents(source, destApp);
-    return { target: destApp, source, mode: "copy" };
+  if (process.platform === "darwin") {
+    const appRoot = resolveLibreOfficeInstallRoot(source, process.platform);
+    if (appRoot) {
+      const destApp = join(target, "LibreOffice.app");
+      copyDirectoryContents(appRoot, destApp);
+      const aliases = materializeMacOSRpathAliases(destApp);
+      return { target: destApp, source: appRoot, mode: "copy-app-bundle", aliases };
+    }
+    fail(
+      `primary-runtime: LibreOffice source is not a copyable app bundle (${source}); install LibreOffice.app or set AWAKEN_SOFFICE`,
+    );
   }
 
-  // Fallback: copy executable into managed Contents/MacOS layout
-  const wrapperTarget = join(target, "LibreOffice.app", "Contents", "MacOS", "soffice");
-  stageExecutable(wrapperTarget, source, "soffice");
-  return { target: join(target, "LibreOffice.app"), source, mode: "copy" };
+  // Linux packages normally expose /usr/bin/libreoffice as a wrapper whose
+  // real executable lives at <install>/program/soffice. Copy that precise
+  // product root; never infer or copy the broad /usr/lib directory.
+  const linuxRoot = resolveLibreOfficeInstallRoot(source, process.platform);
+  if (!linuxRoot) {
+    fail(`primary-runtime: unable to resolve a bounded Linux LibreOffice install root from ${source}`);
+  }
+  copyDirectoryContents(linuxRoot, target);
+  return { target, source: linuxRoot, mode: "copy-linux-install-root" };
 }
 
 function findPopplerTool(name) {
   const binaryName = executableName(name);
-  return firstExisting([
-    process.env.AWAKEN_POPPLER_BIN ? join(process.env.AWAKEN_POPPLER_BIN, binaryName) : "",
+  const configuredDir = String(process.env.AWAKEN_POPPLER_BIN || "").trim();
+  if (configuredDir) {
+    const configured = resolvedCopySource(join(configuredDir, binaryName));
+    if (!configured) {
+      fail(`primary-runtime: AWAKEN_POPPLER_BIN does not contain a copyable ${binaryName}`);
+    }
+    return configured;
+  }
+  return firstCopySource([
     ...seedCandidates("poppler", "bin", binaryName),
     ...seedCandidates("bin", binaryName),
     ...whichAll(binaryName),
@@ -378,56 +560,67 @@ function ensurePoppler(stagingDir) {
         mode: "copy-dir",
       }));
     }
+    fail("primary-runtime: Poppler executables must come from one Windows bin directory");
   }
 
-  // Also copy sibling shared libs when present next to unix binaries.
-  const sourceDir = dirname(sources[0].source);
   ensureDir(targetDir);
-  try {
-    for (const entry of readdirSync(sourceDir)) {
-      const lower = entry.toLowerCase();
-      if (
-        lower.startsWith("pdf") ||
-        lower.includes("poppler") ||
-        lower.endsWith(".dylib") ||
-        lower.endsWith(".so") ||
-        lower.endsWith(".dll")
-      ) {
-        const from = join(sourceDir, entry);
-        const to = join(targetDir, entry);
-        if (existsSync(from)) {
-          cpSync(from, to, { dereference: true });
-        }
-      }
-    }
-  } catch {
-    // fall through to explicit exe copy
+  if (process.platform === "darwin") {
+    const entries = sources.map(({ name, source }) => ({
+      name,
+      source,
+      target: join(targetDir, executableName(name)),
+      executableSource: source,
+      label: name,
+    }));
+    const closure = bundleMacOSDependencyClosure(entries, join(stagingDir, "poppler", "lib"));
+    return entries.map(({ name, source, target }) => ({
+      name,
+      source,
+      target,
+      mode: "copy-with-macho-closure",
+      closure,
+    }));
   }
+
+  // Linux keeps distribution-owned system libraries in /lib or /usr/lib. We
+  // copy only the two required tools and deliberately never copy /usr/lib.
   return sources.map(({ name, source }) => {
     const target = join(targetDir, executableName(name));
-    if (!exists(target)) {
-      stageExecutable(target, source, name);
-    }
-    return { name, target, source, mode: "copy" };
+    stageExecutable(target, source, name);
+    return { name, target, source, mode: "copy-linux-executable" };
   });
 }
 
 function ensureFFmpeg(stagingDir) {
   const target = join(stagingDir, "ffmpeg", "bin", executableName("ffmpeg"));
-  let source = firstExisting(executableCandidates("AWAKEN_FFMPEG", "ffmpeg", "bin", executableName("ffmpeg")));
+  const resolveFFmpegSource = () => requireExplicitSource("AWAKEN_FFMPEG") || firstCopySource([
+    ...seedCandidates("ffmpeg", "bin", executableName("ffmpeg")),
+    ...seedCandidates("bin", executableName("ffmpeg")),
+    ...whichAll(executableName("ffmpeg")),
+    ...whichAll("ffmpeg"),
+  ]);
+  let source = resolveFFmpegSource();
   if (!source && autoInstallComponent("ffmpeg")) {
     const binDir = discoverWingetBinaryDir(wingetPackages.ffmpeg.id, executableName("ffmpeg"));
     if (binDir) {
       source = join(binDir, executableName("ffmpeg"));
     } else {
-      source = firstExisting(executableCandidates("AWAKEN_FFMPEG", "ffmpeg", "bin", executableName("ffmpeg")));
+      source = resolveFFmpegSource();
     }
   }
   if (!source) {
     fail("primary-runtime: unable to find ffmpeg");
   }
+  if (process.platform === "darwin") {
+    const closure = bundleMacOSDependencyClosure(
+      [{ source, target, executableSource: source, label: "ffmpeg" }],
+      join(stagingDir, "ffmpeg", "lib"),
+    );
+    return { target, source, mode: "copy-with-macho-closure", closure };
+  }
   stageExecutable(target, source, "ffmpeg");
-  return { target, source, mode: "copy" };
+  copyWindowsCompanions(source, dirname(target));
+  return { target, source, mode: isWindows ? "copy-with-dlls" : "copy-linux-executable" };
 }
 
 function ensureHelperPackages(stagingDir, bundleVersion) {
@@ -454,7 +647,9 @@ ensureDir(root);
 emitProgress("started", "RuntimePrepareStarted", { runtimeRoot: root });
 console.error(JSON.stringify({ type: "RuntimePrepareStarted", runtimeRoot: root }));
 
-const migration = migrateOldAwakenCacheIfNeeded({ root });
+const migration = process.env.AWAKEN_PRIMARY_RUNTIME_ROOT
+  ? { migrated: false, skipped: true, reason: "isolated runtime root override" }
+  : migrateOldAwakenCacheIfNeeded({ root });
 if (migration.migrated) {
   emitProgress("migrate", `migrated old awaken cache to ${migration.active}`);
 }
@@ -472,7 +667,8 @@ if (existing.ready && !repair) {
 
 const manifest = readRuntimeManifest();
 const bundleVersion = manifest.bundleVersion || manifest.version || "0.2.0";
-const key = versionKey(bundleVersion);
+const revision = createBuildRevision(Date.now(), `${process.pid}:${bundleVersion}`);
+const key = versionKey(bundleVersion, process.platform, process.arch, revision);
 let stagingDir = "";
 const previousActive = existing.active || "";
 
@@ -488,6 +684,7 @@ try {
     ffmpeg: ensureFFmpeg(stagingDir),
     helperPackages: ensureHelperPackages(stagingDir, bundleVersion),
   };
+  const normalizedMacOS = normalizeMacOSRuntimeTree(stagingDir);
 
   const state = buildResolvedState({
     manifest,
@@ -516,6 +713,14 @@ try {
   if (missing.length > 0) {
     throw new Error(`staged probe failed: ${missing.join("; ")}`);
   }
+  const provenance = inspectRuntimeProvenance(stagingDir, stagingDir, process.platform);
+  if (!provenance.ok) {
+    const summary = provenance.issues
+      .slice(0, 20)
+      .map((issue) => `${issue.code}: ${issue.detail} (${issue.path})`)
+      .join("; ");
+    throw new Error(`staged provenance failed: ${summary}`);
+  }
 
   emitProgress("publish", `publishing ${key}`);
   const versionRoot = publishStaging(root, stagingDir, key);
@@ -529,7 +734,7 @@ try {
   }
 
   if (json) {
-    console.log(JSON.stringify({ ok: true, prepared, report, key, migration }, null, 2));
+    console.log(JSON.stringify({ ok: true, prepared, normalizedMacOS, report, key, migration }, null, 2));
   } else {
     log("[prepare-primary-runtime] primary-runtime ready");
     for (const component of report.components) {

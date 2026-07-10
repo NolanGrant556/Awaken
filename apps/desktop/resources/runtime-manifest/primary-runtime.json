@@ -11,8 +11,8 @@
       "source": "awaken_managed",
       "relativePath": "python/bin/python3",
       "relativePathByPlatform": {
-        "win32": "python/Scripts/python.exe",
-        "windows": "python/Scripts/python.exe"
+        "win32": "python/python.exe",
+        "windows": "python/python.exe"
       },
       "probe": {
         "args": ["-c", "import pptx, PIL"],

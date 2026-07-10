@@ -224,6 +224,83 @@ func TestResolveMutationPathCheckedRejectsSensitivePath(t *testing.T) {
 	}
 }
 
+func TestResolveOutputMutationPathCheckedRejectsResolvedSensitiveAndProtectedSymlinks(t *testing.T) {
+	workspace := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+
+	gitDir := filepath.Join(workspace, ".git")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatalf("create .git directory: %v", err)
+	}
+	gitConfig := filepath.Join(gitDir, "config")
+	if err := os.WriteFile(gitConfig, []byte("[core]\n"), 0o644); err != nil {
+		t.Fatalf("write .git config: %v", err)
+	}
+	sensitiveAlias := filepath.Join(workspace, "publish-config")
+	if err := os.Symlink(gitConfig, sensitiveAlias); err != nil {
+		t.Fatalf("create sensitive alias: %v", err)
+	}
+
+	protectedRoot := filepath.Join(workspace, "protected")
+	if err := os.MkdirAll(protectedRoot, 0o755); err != nil {
+		t.Fatalf("create protected root: %v", err)
+	}
+	protectedFile := filepath.Join(protectedRoot, "state.json")
+	if err := os.WriteFile(protectedFile, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write protected file: %v", err)
+	}
+	protectedAlias := filepath.Join(workspace, "publish-state")
+	if err := os.Symlink(protectedFile, protectedAlias); err != nil {
+		t.Fatalf("create protected alias: %v", err)
+	}
+
+	ctx := NewTaskScopePermissionContext(
+		"scope-output-mutation",
+		workspace,
+		nil,
+		[]string{workspace},
+		[]string{workspace},
+		nil,
+		[]string{protectedRoot},
+		filepath.Join(workspace, "tmp"),
+	)
+
+	if _, err := ctx.ResolveOutputPathChecked(sensitiveAlias); err != nil {
+		t.Fatalf("plain output boundary should allow an in-root symlink: %v", err)
+	}
+	for name, path := range map[string]string{
+		"lexical-sensitive": ".git/config",
+		"lexical-protected": protectedFile,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ctx.ResolveOutputMutationPathChecked(path); err == nil {
+				t.Fatal("expected lexical sensitive/protected path to be rejected")
+			}
+		})
+	}
+	for name, path := range map[string]string{
+		"sensitive": sensitiveAlias,
+		"protected": protectedAlias,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := ctx.ResolveOutputMutationPathChecked(path)
+			if err == nil {
+				t.Fatal("expected resolved sensitive/protected symlink to be rejected")
+			}
+			var sensitiveErr *SensitivePathError
+			if !errors.As(err, &sensitiveErr) {
+				t.Fatalf("expected SensitivePathError, got %T: %v", err, err)
+			}
+		})
+	}
+
+	if _, err := ctx.ResolveMutationPathChecked(sensitiveAlias); err == nil {
+		t.Fatal("generic writable mutation resolver must also reject resolved sensitive symlinks")
+	}
+}
+
 func TestSensitivePathMatcherSkipsHomeChecksWhenHomeUnknown(t *testing.T) {
 	// When HomeDir is empty, the matcher should not panic and should still
 	// apply lexical checks (.git, .env, extensions, tokens).

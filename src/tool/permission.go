@@ -398,24 +398,14 @@ func (c PermissionContext) ResolvePathChecked(path string) (string, error) {
 
 func (c PermissionContext) ResolveWritablePathChecked(path string) (string, error) {
 	normalized := c.Normalize()
-	resolved := normalized.resolvePath(path)
-	for _, root := range normalized.WritableRoots {
-		if PathWithinRoot(resolved, root) {
-			return resolved, nil
-		}
-	}
-	return "", fmt.Errorf("path %q resolves to %q which is outside writable roots", path, resolved)
+	resolved, _, err := normalized.resolvePathWithinRootsChecked(path, normalized.WritableRoots, "writable")
+	return resolved, err
 }
 
 func (c PermissionContext) ResolveOutputPathChecked(path string) (string, error) {
 	normalized := c.Normalize()
-	resolved := normalized.resolvePath(path)
-	for _, root := range normalized.OutputRoots {
-		if PathWithinRoot(resolved, root) {
-			return resolved, nil
-		}
-	}
-	return "", fmt.Errorf("path %q resolves to %q which is outside output roots", path, resolved)
+	resolved, _, err := normalized.resolvePathWithinRootsChecked(path, normalized.OutputRoots, "output")
+	return resolved, err
 }
 
 // ResolveMutationPathChecked is like ResolvePathChecked but additionally
@@ -424,10 +414,122 @@ func (c PermissionContext) ResolveOutputPathChecked(path string) (string, error)
 // (write/delete) path resolution. Reads must continue to use ResolvePathChecked
 // so that sensitive paths remain readable.
 func (c PermissionContext) ResolveMutationPathChecked(path string) (string, error) {
-	if err := c.CheckSensitivePath(path); err != nil {
+	normalized := c.Normalize()
+	return normalized.resolveMutationPathWithinRootsChecked(path, normalized.WritableRoots, "writable")
+}
+
+// ResolveOutputMutationPathChecked enforces the output-root boundary and the
+// mutation sensitive/protected-path policy against both the lexical path and
+// its symlink-resolved destination. Use this for tools that publish or replace
+// files in OutputRoots.
+func (c PermissionContext) ResolveOutputMutationPathChecked(path string) (string, error) {
+	normalized := c.Normalize()
+	return normalized.resolveMutationPathWithinRootsChecked(path, normalized.OutputRoots, "output")
+}
+
+func (c PermissionContext) resolveMutationPathWithinRootsChecked(path string, roots []string, rootKind string) (string, error) {
+	resolved := c.resolvePath(path)
+	if err := c.checkSensitiveAbsolutePath(resolved); err != nil {
 		return "", err
 	}
-	return c.ResolveWritablePathChecked(path)
+	realPath, err := resolvePathWithExistingAncestor(resolved)
+	if err != nil {
+		return "", fmt.Errorf("path %q cannot be resolved safely for mutation: %w", path, err)
+	}
+	if err := c.checkResolvedSensitiveAbsolutePath(realPath); err != nil {
+		return "", err
+	}
+	if err := checkPathWithinRealRoots(path, resolved, realPath, roots, rootKind); err != nil {
+		return "", err
+	}
+	return resolved, nil
+}
+
+func (c PermissionContext) resolvePathWithinRootsChecked(path string, roots []string, rootKind string) (string, string, error) {
+	resolved := c.resolvePath(path)
+	lexicallyAllowed := false
+	for _, root := range roots {
+		if PathWithinRoot(resolved, root) {
+			lexicallyAllowed = true
+			break
+		}
+	}
+	if !lexicallyAllowed {
+		return "", "", fmt.Errorf("path %q resolves to %q which is outside %s roots", path, resolved, rootKind)
+	}
+
+	realPath, err := resolvePathWithExistingAncestor(resolved)
+	if err != nil {
+		return "", "", fmt.Errorf("path %q cannot be resolved safely inside %s roots: %w", path, rootKind, err)
+	}
+	if err := checkPathWithinRealRoots(path, resolved, realPath, roots, rootKind); err != nil {
+		return "", "", err
+	}
+	return resolved, realPath, nil
+}
+
+func checkPathWithinRealRoots(path, resolved, realPath string, roots []string, rootKind string) error {
+	lexicallyAllowed := false
+	for _, root := range roots {
+		if PathWithinRoot(resolved, root) {
+			lexicallyAllowed = true
+			break
+		}
+	}
+	if !lexicallyAllowed {
+		return fmt.Errorf("path %q resolves to %q which is outside %s roots", path, resolved, rootKind)
+	}
+
+	resolvedRootCount := 0
+	for _, root := range roots {
+		realRoot, err := resolvePathWithExistingAncestor(root)
+		if err != nil {
+			continue
+		}
+		resolvedRootCount++
+		if PathWithinRoot(realPath, realRoot) {
+			return nil
+		}
+	}
+	if resolvedRootCount == 0 {
+		return fmt.Errorf("path %q cannot be checked because no %s root resolves safely", path, rootKind)
+	}
+	return fmt.Errorf(
+		"path %q resolves through symlinks from %q to %q which is outside real %s roots",
+		path,
+		resolved,
+		realPath,
+		rootKind,
+	)
+}
+
+// resolvePathWithExistingAncestor resolves every symlink in an existing path.
+// For a path whose leaf does not exist yet, it resolves the nearest existing
+// ancestor and appends the missing suffix. Broken symlinks fail closed.
+func resolvePathWithExistingAncestor(path string) (string, error) {
+	cursor := filepath.Clean(path)
+	missing := make([]string, 0, 2)
+	for {
+		if _, err := os.Lstat(cursor); err == nil {
+			realAncestor, evalErr := filepath.EvalSymlinks(cursor)
+			if evalErr != nil {
+				return "", evalErr
+			}
+			for i := len(missing) - 1; i >= 0; i-- {
+				realAncestor = filepath.Join(realAncestor, missing[i])
+			}
+			return filepath.Clean(realAncestor), nil
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+
+		parent := filepath.Dir(cursor)
+		if parent == cursor {
+			return "", fmt.Errorf("no existing ancestor for %q", path)
+		}
+		missing = append(missing, filepath.Base(cursor))
+		cursor = parent
+	}
 }
 
 // SensitivePathError describes a mutation attempt against a path that the
@@ -602,17 +704,46 @@ func (c PermissionContext) IsSensitivePath(path string) bool {
 func (c PermissionContext) CheckSensitivePath(path string) error {
 	normalized := c.Normalize()
 	resolved := normalized.resolvePath(path)
-	for _, protectedRoot := range normalized.ProtectedRoots {
-		if PathWithinRoot(resolved, protectedRoot) {
-			return &SensitivePathError{Path: resolved, Reason: "protected task-scope root"}
+	return normalized.checkSensitiveAbsolutePath(resolved)
+}
+
+func (c PermissionContext) checkSensitiveAbsolutePath(path string) error {
+	return checkSensitiveAbsolutePathAgainst(path, c.ProtectedRoots, NewSensitivePathMatcher())
+}
+
+func (c PermissionContext) checkResolvedSensitiveAbsolutePath(realPath string) error {
+	protectedRoots := make([]string, 0, len(c.ProtectedRoots))
+	for _, protectedRoot := range c.ProtectedRoots {
+		if realProtectedRoot, err := resolvePathWithExistingAncestor(protectedRoot); err == nil {
+			protectedRoots = append(protectedRoots, realProtectedRoot)
 		}
 	}
+
 	matcher := NewSensitivePathMatcher()
-	sensitive, reason := matcher.IsSensitive(resolved)
+	if matcher.HomeDir != "" {
+		if realHome, err := resolvePathWithExistingAncestor(matcher.HomeDir); err == nil {
+			matcher.HomeDir = realHome
+		}
+	}
+	if matcher.ConfigDir != "" {
+		if realConfigDir, err := resolvePathWithExistingAncestor(matcher.ConfigDir); err == nil {
+			matcher.ConfigDir = realConfigDir
+		}
+	}
+	return checkSensitiveAbsolutePathAgainst(realPath, protectedRoots, matcher)
+}
+
+func checkSensitiveAbsolutePathAgainst(path string, protectedRoots []string, matcher SensitivePathMatcher) error {
+	for _, protectedRoot := range protectedRoots {
+		if PathWithinRoot(path, protectedRoot) {
+			return &SensitivePathError{Path: path, Reason: "protected task-scope root"}
+		}
+	}
+	sensitive, reason := matcher.IsSensitive(path)
 	if !sensitive {
 		return nil
 	}
-	return &SensitivePathError{Path: resolved, Reason: reason}
+	return &SensitivePathError{Path: path, Reason: reason}
 }
 
 func ContextWithPermissionContext(ctx context.Context, permissionContext PermissionContext) context.Context {

@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"awaken/src/internal/outputlimit"
 	"awaken/src/tool"
 )
 
@@ -160,10 +161,14 @@ func containsShellSubsequence(args []string, first string, second string) bool {
 }
 
 func truncateShellPreview(value string, max int) string {
-	if max <= 0 || len(value) <= max {
+	if max <= 0 {
 		return value
 	}
-	return value[:max] + "..."
+	prefix, truncated := outputlimit.Prefix(value, max)
+	if !truncated {
+		return prefix
+	}
+	return prefix + "..."
 }
 
 func shellTokens(segment string) []string {

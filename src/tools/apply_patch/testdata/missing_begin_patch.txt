@@ -1,0 +1,5 @@
+*** Update File: notes/sample.txt
+@@
+-old line
++new line
+*** End Patch

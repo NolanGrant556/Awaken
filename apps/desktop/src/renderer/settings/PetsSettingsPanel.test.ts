@@ -107,7 +107,7 @@ function createMockRuntimeClient(): RuntimeClient {
     notifyRendererReady: vi.fn(),
     listPets: vi.fn(async () => [
       {
-        id: "codex-custom:test-pet",
+        id: "test-pet",
         sourceId: "test-pet",
         displayName: "Test Pet",
         description: "A test pet.",
@@ -117,7 +117,7 @@ function createMockRuntimeClient(): RuntimeClient {
     ]),
     getPetSettings: vi.fn(async () => ({
       schemaVersion: 1 as const,
-      selectedPetId: "codex-custom:test-pet",
+      selectedPetId: "test-pet",
       overlayOpen: false,
       mascotWidthPx: 112,
       importCodexPets: true,
@@ -127,7 +127,7 @@ function createMockRuntimeClient(): RuntimeClient {
     })),
     selectPet: vi.fn(async () => ({
       schemaVersion: 1 as const,
-      selectedPetId: "codex-custom:test-pet",
+      selectedPetId: "test-pet",
       overlayOpen: false,
       mascotWidthPx: 112,
       importCodexPets: true,
@@ -141,12 +141,12 @@ function createMockRuntimeClient(): RuntimeClient {
       sourceMissing: [],
       failed: [],
       conflicts: [],
-      selectedPetIdUnchanged: "codex-custom:test-pet",
+      selectedPetIdUnchanged: "test-pet",
     })),
     createPet: vi.fn(async () => ({ threadId: "task-1" })),
     setPetOverlayOpen: vi.fn(async () => ({
       schemaVersion: 1 as const,
-      selectedPetId: "codex-custom:test-pet",
+      selectedPetId: "test-pet",
       overlayOpen: true,
       mascotWidthPx: 112,
       importCodexPets: true,
@@ -156,7 +156,7 @@ function createMockRuntimeClient(): RuntimeClient {
     })),
     setPetImportPreferences: vi.fn(async () => ({
       schemaVersion: 1 as const,
-      selectedPetId: "codex-custom:test-pet",
+      selectedPetId: "test-pet",
       overlayOpen: false,
       mascotWidthPx: 112,
       importCodexPets: false,

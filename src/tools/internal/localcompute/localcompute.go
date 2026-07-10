@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"awaken/src/internal/outputlimit"
 	"awaken/src/tool"
 )
 
@@ -130,10 +131,14 @@ func resolveBackendBinary(name string) (string, error) {
 }
 
 func truncateDetail(value string, limit int) string {
-	if limit <= 0 || len(value) <= limit {
+	if limit <= 0 {
 		return value
 	}
-	return value[:limit] + "... [truncated]"
+	prefix, truncated := outputlimit.Prefix(value, limit)
+	if !truncated {
+		return prefix
+	}
+	return prefix + "... [truncated]"
 }
 
 func minimalEnv() []string {

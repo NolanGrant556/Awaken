@@ -46,7 +46,7 @@ func computeReplacements(originalLines []string, path string, chunks []updateChu
 		if chunk.changeContext != nil {
 			index := seekSequence(originalLines, []string{*chunk.changeContext}, lineIndex, false)
 			if index < 0 {
-				return nil, fmt.Errorf("failed to find context %q in %s", *chunk.changeContext, path)
+				return nil, patchErrorf(ErrorCodePatchContextNotFound, "failed to find context %q in %s", *chunk.changeContext, path)
 			}
 			lineIndex = index + 1
 		}
@@ -72,7 +72,7 @@ func computeReplacements(originalLines []string, path string, chunks []updateChu
 		}
 
 		if found < 0 {
-			return nil, fmt.Errorf("failed to find expected lines in %s:\n%s", path, strings.Join(chunk.oldLines, "\n"))
+			return nil, patchErrorf(ErrorCodePatchContextNotFound, "failed to find expected lines in %s:\n%s", path, strings.Join(chunk.oldLines, "\n"))
 		}
 		replacements = append(replacements, replacement{
 			start:    found,

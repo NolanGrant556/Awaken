@@ -18,34 +18,38 @@ func TestAccidentFixturesReproducePatchFailures(t *testing.T) {
 	}
 
 	cases := []struct {
-		name      string
-		file      string
-		wantSub   string
-		rewrite   bool
-		seedAlpha bool
+		name     string
+		file     string
+		wantSub  string
+		wantCode string
+		rewrite  bool
 	}{
 		{
-			name:    "missing_begin_patch",
-			file:    "missing_begin_patch.txt",
-			wantSub: "Begin Patch",
+			name:     "missing_begin_patch",
+			file:     "missing_begin_patch.txt",
+			wantSub:  "Begin Patch",
+			wantCode: ErrorCodePatchMissingBegin,
 		},
 		{
-			name:    "hunk_line_missing_prefix",
-			file:    "hunk_line_missing_prefix.txt",
-			wantSub: "must start with",
-			rewrite: true,
+			name:     "hunk_line_missing_prefix",
+			file:     "hunk_line_missing_prefix.txt",
+			wantSub:  "must start with",
+			wantCode: ErrorCodePatchInvalidLinePrefix,
+			rewrite:  true,
 		},
 		{
-			name:    "end_of_file_misuse",
-			file:    "end_of_file_misuse.txt",
-			wantSub: "End of File",
-			rewrite: true,
+			name:     "end_of_file_misuse",
+			file:     "end_of_file_misuse.txt",
+			wantSub:  "End of File",
+			wantCode: ErrorCodeInvalidPatchFormat,
+			rewrite:  true,
 		},
 		{
-			name:    "context_mismatch",
-			file:    "context_mismatch.patch.txt",
-			wantSub: "failed to find expected lines",
-			rewrite: true,
+			name:     "context_mismatch",
+			file:     "context_mismatch.patch.txt",
+			wantSub:  "failed to find expected lines",
+			wantCode: ErrorCodePatchContextNotFound,
+			rewrite:  true,
 		},
 	}
 
@@ -65,6 +69,26 @@ func TestAccidentFixturesReproducePatchFailures(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tc.wantSub) {
 				t.Fatalf("expected error containing %q, got %v", tc.wantSub, err)
+			}
+			if !strings.Contains(err.Error(), tc.wantCode) {
+				t.Fatalf("expected error code %q in %v", tc.wantCode, err)
+			}
+			switch tc.wantCode {
+			case ErrorCodePatchContextNotFound:
+				if !IsPatchContextMismatch(err) {
+					t.Fatalf("expected context mismatch classification for %v", err)
+				}
+			default:
+				if !IsInvalidPatchFormat(err) && tc.wantCode != ErrorCodePatchContextNotFound {
+					// format-family codes should classify as invalid_patch_format family
+					if tc.wantCode == ErrorCodeInvalidPatchFormat ||
+						tc.wantCode == ErrorCodePatchMissingBegin ||
+						tc.wantCode == ErrorCodePatchInvalidLinePrefix {
+						if !IsInvalidPatchFormat(err) {
+							t.Fatalf("expected invalid patch format classification for %v", err)
+						}
+					}
+				}
 			}
 		})
 	}

@@ -67,6 +67,7 @@ import {
   type UserQuestionItem,
 } from "./runtime/reducer";
 import type { PromptNarrativeToken, RunNarrativeItem } from "./run-narrative";
+import { projectPetActivity } from "./pets/pet-activity-projector";
 import {
   projectNarrativeTurnBodySegments,
   shouldShowAssistantAnswerFooter,
@@ -92,7 +93,7 @@ import {
   workspaceLabelForPath,
   type WorkspaceProject,
 } from "./projectWorkspace";
-import { ModelSettingsDialog } from "./ModelSettingsDialog";
+import { DesktopSettingsDialog } from "./settings/DesktopSettingsDialog";
 import { ProfileBalancePopover } from "./ProfileBalancePopover";
 import { ExtensionsView, type ExtensionSection } from "./ExtensionsView";
 import {
@@ -969,6 +970,24 @@ export function App() {
     undefined,
     createInitialRuntimeState,
   );
+  const petThreadActivationRef = useRef<(threadId: string) => void>(() => {});
+  petThreadActivationRef.current = (threadId: string) => {
+    void handleSelectConversation(threadId);
+  };
+
+  useEffect(() => {
+    const snapshot = projectPetActivity(runtimeState);
+    runtimeClient.updatePetActivity(snapshot);
+  }, [runtimeState, runtimeClient]);
+
+  useEffect(
+    () =>
+      runtimeClient.onPetThreadActivationRequested((threadId) => {
+        petThreadActivationRef.current(threadId);
+      }),
+    [runtimeClient],
+  );
+
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
   const [resolvingMassMessageReviewId, setResolvingMassMessageReviewId] =
@@ -3972,7 +3991,7 @@ export function App() {
           />
         </div>
       </Dialog>
-      <ModelSettingsDialog
+      <DesktopSettingsDialog
         open={modelSettingsOpen}
         runtimeClient={runtimeClient}
         themePreference={appearanceThemePreference}

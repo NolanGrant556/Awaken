@@ -234,25 +234,10 @@ export function petIdForSource(source: PetSource, sourceId: string): string {
     case "awaken-local":
       return `${PET_SOURCE_NAMESPACE.awakenLocal}:${sourceId}`;
     case "codex-custom":
-      return `${PET_SOURCE_NAMESPACE.codexCustom}:${sourceId}`;
+      // Keep Codex IDs and folder names consistent with the source: no namespace prefix.
+      return sourceId;
     default:
       return `${PET_SOURCE_NAMESPACE.awakenBuiltin}:${sourceId}`;
-  }
-}
-
-export function sourceIdFromPetId(petId: string): { source: PetSource; sourceId: string } | null {
-  const parts = petId.split(":");
-  if (parts.length !== 2) return null;
-  const [ns, sourceId] = parts;
-  switch (ns) {
-    case PET_SOURCE_NAMESPACE.awakenBuiltin:
-      return { source: "awaken-builtin", sourceId };
-    case PET_SOURCE_NAMESPACE.awakenLocal:
-      return { source: "awaken-local", sourceId };
-    case PET_SOURCE_NAMESPACE.codexCustom:
-      return { source: "codex-custom", sourceId };
-    default:
-      return null;
   }
 }
 

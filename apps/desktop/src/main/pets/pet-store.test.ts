@@ -65,7 +65,7 @@ describe("PetStore", () => {
 
     const pets = store.listPets();
     expect(pets).toHaveLength(1);
-    expect(pets[0]?.id).toBe("codex-custom:my-pet");
+    expect(pets[0]?.id).toBe("my-pet");
     expect(pets[0]?.available).toBe(true);
   });
 
@@ -81,8 +81,8 @@ describe("PetStore", () => {
       sourcePath: "/fake/codex/pets/my-pet",
     });
 
-    await store.selectPet("codex-custom:my-pet");
-    expect(store.getSettings().selectedPetId).toBe("codex-custom:my-pet");
+    await store.selectPet("my-pet");
+    expect(store.getSettings().selectedPetId).toBe("my-pet");
 
     await store.importOrUpdatePet({
       source: "codex-custom",
@@ -93,7 +93,7 @@ describe("PetStore", () => {
       sourcePath: "/fake/codex/pets/other-pet",
     });
 
-    expect(store.getSettings().selectedPetId).toBe("codex-custom:my-pet");
+    expect(store.getSettings().selectedPetId).toBe("my-pet");
   });
 
   it("skips re-import when fingerprint is unchanged", async () => {
@@ -157,7 +157,7 @@ describe("PetStore", () => {
       spritesheetSourcePath: spritesheet,
       sourcePath: "/fake/codex/pets/my-pet",
     });
-    await store.selectPet("codex-custom:my-pet");
+    await store.selectPet("my-pet");
     await store.setOverlayOpen(true);
     await store.setImportPreferences({ importCodexPets: false });
 
@@ -178,8 +178,8 @@ describe("PetStore", () => {
       spritesheetSourcePath: spritesheet,
       sourcePath: "/fake/codex/pets/my-pet",
     });
-    await store.selectPet("codex-custom:my-pet");
-    await store.removeCatalogEntry("codex-custom:my-pet");
+    await store.selectPet("my-pet");
+    await store.removeCatalogEntry("my-pet");
 
     expect(store.listPets()).toHaveLength(0);
     expect(store.getSettings().selectedPetId).toBeNull();

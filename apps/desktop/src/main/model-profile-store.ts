@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { safeStorage } from "electron";
 import type {
   ModelProfileAdvanced,
   ModelProfileBalanceWire,
@@ -29,6 +28,13 @@ import {
   fetchKimiCodingBalance,
   BalanceFetchError,
 } from "./model-balance-fetchers.js";
+import {
+  ElectronSecureCredentialStore,
+  SecureCredentialError,
+  type DecryptedSecureCredential,
+  type SecureCredentialStore,
+  type StoredSecureCredential,
+} from "./secure-credential-store.js";
 
 const MODEL_PROFILES_FILE = "model-profiles.json";
 const DUPLICATE_MODEL_PROFILE_ERROR = "模型配置重复，添加失败";
@@ -114,10 +120,7 @@ export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
   },
 ];
 
-type StoredCredential = {
-  encryptedApiKey: string;
-  last4: string;
-};
+type StoredCredential = StoredSecureCredential;
 
 type StoredModelProfile = {
   id: string;
@@ -219,8 +222,25 @@ function maskKey(credential?: StoredCredential): string | undefined {
   return `•••• ${credential.last4}`;
 }
 
-function profileStatus(profile: StoredModelProfile): RuntimeModelProfileSummaryWire["profile_status"] {
+function sameStoredCredential(
+  left: StoredCredential | undefined,
+  right: StoredCredential | undefined,
+): boolean {
+  if (!left || !right) return left === right;
+  return (
+    left.encryptedApiKey === right.encryptedApiKey &&
+    left.last4 === right.last4 &&
+    left.version === right.version &&
+    left.scheme === right.scheme
+  );
+}
+
+function profileStatus(
+  profile: StoredModelProfile,
+  observedState?: "temporarily_unavailable" | "unreadable",
+): RuntimeModelProfileSummaryWire["profile_status"] {
   if (!profile.enabled) return "disabled";
+  if (observedState) return observedState;
   if (!profile.credential) return "missing_key";
   return "ready";
 }
@@ -302,7 +322,10 @@ function providerTestSuccessMessage(provider: ModelProviderWire): string {
   return "连接测试通过：服务已响应 /models。";
 }
 
-function toSummary(profile: StoredModelProfile): RuntimeModelProfileSummaryWire {
+function toSummary(
+  profile: StoredModelProfile,
+  observedState?: "temporarily_unavailable" | "unreadable",
+): RuntimeModelProfileSummaryWire {
   const provider = providerById(profile.providerId);
   const modelId = normalizeProviderModelId(provider, profile.modelId);
   const baseURL = normalizeProviderBaseURL(provider, profile.baseURL);
@@ -323,7 +346,7 @@ function toSummary(profile: StoredModelProfile): RuntimeModelProfileSummaryWire 
     masked_key: maskKey(profile.credential),
     enabled: profile.enabled,
     is_default: profile.isDefault,
-    profile_status: profileStatus(profile),
+    profile_status: profileStatus(profile, observedState),
     advanced: {
       temperature: advanced.temperature,
       max_tokens: advanced.maxTokens,
@@ -336,33 +359,19 @@ function toSummary(profile: StoredModelProfile): RuntimeModelProfileSummaryWire 
   };
 }
 
-function assertSecureStorageAvailable(): void {
-  if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error("Secure credential storage is unavailable on this device");
-  }
-}
-
-function encryptedCredential(apiKey: string): StoredCredential {
-  assertSecureStorageAvailable();
-  const trimmed = apiKey.trim();
-  const encrypted = safeStorage.encryptString(trimmed);
-  return {
-    encryptedApiKey: encrypted.toString("base64"),
-    last4: trimmed.slice(-4),
-  };
-}
-
-function credentialUnavailableMessage(profileName = "当前模型配置"): string {
-  return `模型配置「${profileName}」的 API key 无法解密，请在 Settings > Models 重新保存 API key。`;
-}
-
-function decryptCredential(credential?: StoredCredential, profileName?: string): string {
-  if (!credential) return "";
-  assertSecureStorageAvailable();
-  try {
-    return safeStorage.decryptString(Buffer.from(credential.encryptedApiKey, "base64"));
-  } catch {
-    throw new Error(credentialUnavailableMessage(profileName));
+function credentialUnavailableMessage(
+  profileName = "当前模型配置",
+  error?: SecureCredentialError,
+): string {
+  switch (error?.code) {
+    case "temporarily_unavailable":
+      return `模型配置「${profileName}」的安全凭据服务暂时不可用，凭据仍已保留。请重新启动 Awaken 后重试。`;
+    case "invalid_ciphertext":
+    case "unsupported_version":
+    case "decrypt_failed":
+      return `模型配置「${profileName}」的 API key 无法解密，请在 Settings > Models 重新保存 API key。`;
+    default:
+      return `模型配置「${profileName}」的 API key 暂时无法读取，请稍后重试。`;
   }
 }
 
@@ -423,11 +432,21 @@ function dedupeStoredProfiles(profiles: StoredModelProfile[]): StoredModelProfil
 export class ModelProfileStore {
   private filePath: string;
   private configDir: string;
+  private credentialStore: SecureCredentialStore;
+  private observedCredentialStates = new Map<
+    string,
+    "temporarily_unavailable" | "unreadable"
+  >();
+  private mutationQueue: Promise<void> = Promise.resolve();
   private capabilityOverrides: Record<string, ProviderCapabilityOverrides> = {};
 
-  constructor(configDir: string) {
+  constructor(
+    configDir: string,
+    credentialStore: SecureCredentialStore = new ElectronSecureCredentialStore(),
+  ) {
     this.filePath = path.join(configDir, MODEL_PROFILES_FILE);
     this.configDir = configDir;
+    this.credentialStore = credentialStore;
   }
 
   async initialize(): Promise<void> {
@@ -443,13 +462,16 @@ export class ModelProfileStore {
     >();
 
     for (const profile of store.profiles) {
-      if (!profile.enabled || !profile.credential) continue;
+      if (
+        !profile.enabled ||
+        !profile.credential
+      ) continue;
       if (candidates.has(profile.providerId)) continue;
       const provider = providerById(profile.providerId);
       if (!provider) continue;
       let apiKey = "";
       try {
-        apiKey = decryptCredential(profile.credential, profile.displayName);
+        apiKey = await this.decryptProfileCredential(store, profile);
       } catch {
         continue;
       }
@@ -493,7 +515,7 @@ export class ModelProfileStore {
 
   async listProfiles(): Promise<RuntimeModelProfileSummaryWire[]> {
     const store = await this.readStore();
-    return store.profiles.map(toSummary);
+    return store.profiles.map((profile) => this.toSummary(profile));
   }
 
   async saveProfile(request: ModelProfileSaveRequest): Promise<RuntimeModelProfileSummaryWire> {
@@ -502,6 +524,16 @@ export class ModelProfileStore {
       throw new Error("未知模型供应商");
     }
 
+    return this.withStoreMutation(() =>
+      this.saveProfileWithProvider(request, provider),
+    );
+  }
+
+  private async saveProfileWithProvider(
+    request: ModelProfileSaveRequest,
+    provider: ModelProviderWire,
+  ): Promise<RuntimeModelProfileSummaryWire> {
+    let credentialWasUpdated = false;
     const store = await this.readStore();
     const existingIndex = request.id
       ? store.profiles.findIndex((profile) => profile.id === request.id)
@@ -543,7 +575,9 @@ export class ModelProfileStore {
     };
 
     if (request.apiKey !== undefined && request.apiKey.trim() !== "") {
-      profile.credential = encryptedCredential(request.apiKey);
+      const apiKey = request.apiKey.trim();
+      profile.credential = await this.credentialStore.encrypt(apiKey);
+      credentialWasUpdated = true;
     }
     if (!profile.enabled) {
       profile.isDefault = false;
@@ -556,31 +590,39 @@ export class ModelProfileStore {
 
     this.ensureSingleDefault(store, profile.id);
     await this.writeStore(store);
-    return toSummary(profile);
+    if (credentialWasUpdated) {
+      this.observedCredentialStates.delete(profile.id);
+    }
+    return this.toSummary(profile);
   }
 
   async deleteProfile(profileId: string): Promise<void> {
-    const store = await this.readStore();
-    const previousDefault = store.profiles.find((profile) => profile.id === profileId)?.isDefault;
-    store.profiles = store.profiles.filter((profile) => profile.id !== profileId);
-    if (previousDefault && store.profiles.length > 0) {
-      store.profiles[0].isDefault = true;
-    }
-    await this.writeStore(store);
+    await this.withStoreMutation(async () => {
+      const store = await this.readStore();
+      const previousDefault = store.profiles.find((profile) => profile.id === profileId)?.isDefault;
+      store.profiles = store.profiles.filter((profile) => profile.id !== profileId);
+      if (previousDefault && store.profiles.length > 0) {
+        store.profiles[0].isDefault = true;
+      }
+      await this.writeStore(store);
+      this.observedCredentialStates.delete(profileId);
+    });
   }
 
   async setDefaultProfile(profileId: string): Promise<RuntimeModelProfileSummaryWire> {
-    const store = await this.readStore();
-    const profile = store.profiles.find((entry) => entry.id === profileId);
-    if (!profile) {
-      throw new Error("Model profile not found");
-    }
-    profile.enabled = true;
-    for (const entry of store.profiles) {
-      entry.isDefault = entry.id === profileId;
-    }
-    await this.writeStore(store);
-    return toSummary(profile);
+    return this.withStoreMutation(async () => {
+      const store = await this.readStore();
+      const profile = store.profiles.find((entry) => entry.id === profileId);
+      if (!profile) {
+        throw new Error("Model profile not found");
+      }
+      profile.enabled = true;
+      for (const entry of store.profiles) {
+        entry.isDefault = entry.id === profileId;
+      }
+      await this.writeStore(store);
+      return this.toSummary(profile);
+    });
   }
 
   async resolveDefaultRunProfile(): Promise<ModelProfileRunConfig | undefined> {
@@ -590,7 +632,7 @@ export class ModelProfileStore {
       store.profiles.find((entry) => entry.enabled);
     if (!profile) return undefined;
     if (!profile.credential) {
-      throw new Error("Configure an API key in Settings > Models before running Awaken");
+      throw new Error("请先在设置 > 模型中配置 API key。");
     }
 
     const provider = providerById(profile.providerId);
@@ -601,6 +643,7 @@ export class ModelProfileStore {
       profile.providerId,
       provider?.endpoint_model ? profile.advanced?.endpointId?.trim() || modelId : modelId,
     );
+    const apiKey = await this.decryptProfileCredential(store, profile);
     return {
       profileId: profile.id,
       providerId: profile.providerId,
@@ -609,7 +652,7 @@ export class ModelProfileStore {
       baseURL,
       protocol: profile.protocol,
       authScheme: profile.authScheme,
-      apiKey: decryptCredential(profile.credential, profile.displayName),
+      apiKey,
       temperature: advanced.temperature,
       maxTokens: advanced.maxTokens,
       contextWindow: advanced.contextWindow,
@@ -624,7 +667,7 @@ export class ModelProfileStore {
     const profile =
       store.profiles.find((entry) => entry.isDefault) ??
       store.profiles.find((entry) => entry.enabled);
-    return profile ? toSummary(profile) : undefined;
+    return profile ? this.toSummary(profile) : undefined;
   }
 
   async testProfile(request: ModelProfileSaveRequest): Promise<ModelProfileTestResult> {
@@ -683,6 +726,10 @@ export class ModelProfileStore {
     const providerBaseURLs = new Map<string, string>();
     const fetchedDetails = new Map<string, ModelProfileBalanceWire["detail"] | null>();
     const fetchErrors = new Map<string, string>();
+    const credentialIssues = new Map<
+      string,
+      "temporarily_unavailable" | "unreadable"
+    >();
 
     for (const profile of candidateProfiles) {
       if (!profile.credential) continue;
@@ -692,8 +739,16 @@ export class ModelProfileStore {
       if (!isBalanceSupportedProvider(profile.providerId)) continue;
       let apiKey = "";
       try {
-        apiKey = decryptCredential(profile.credential, profile.displayName);
+        apiKey = await this.decryptProfileCredential(store, profile);
       } catch (error) {
+        if (error instanceof SecureCredentialError) {
+          credentialIssues.set(
+            profile.providerId,
+            error.code === "temporarily_unavailable"
+              ? "temporarily_unavailable"
+              : "unreadable",
+          );
+        }
         fetchErrors.set(
           profile.providerId,
           error instanceof Error ? error.message : credentialUnavailableMessage(profile.displayName),
@@ -763,10 +818,14 @@ export class ModelProfileStore {
           display_name: displayName,
           status: "error",
           error,
+          credential_issue: credentialIssues.get(profile.providerId),
         };
       }
 
-      if (!profile.credential || !providerKeys.has(profile.providerId)) {
+      if (
+        !profile.credential ||
+        !providerKeys.has(profile.providerId)
+      ) {
         return {
           profile_id: profile.id,
           provider_id: profile.providerId,
@@ -793,7 +852,54 @@ export class ModelProfileStore {
   private async apiKeyForProfile(profileId: string): Promise<string> {
     const store = await this.readStore();
     const profile = store.profiles.find((entry) => entry.id === profileId);
-    return decryptCredential(profile?.credential, profile?.displayName);
+    return this.decryptProfileCredential(store, profile);
+  }
+
+  private async decryptProfileCredential(
+    _store: StoreFile,
+    profile?: StoredModelProfile,
+  ): Promise<string> {
+    if (!profile) return "";
+    if (!profile.credential) return "";
+    let result: DecryptedSecureCredential;
+    try {
+      result = await this.credentialStore.decrypt(profile.credential);
+    } catch (error) {
+      const credentialError =
+        error instanceof SecureCredentialError
+          ? error
+          : new SecureCredentialError(
+              "decrypt_failed",
+              "无法读取已保存的 API key，请重新保存该凭据。",
+            );
+      this.observedCredentialStates.set(
+        profile.id,
+        credentialError.code === "temporarily_unavailable"
+          ? "temporarily_unavailable"
+          : "unreadable",
+      );
+      throw new SecureCredentialError(
+        credentialError.code,
+        credentialUnavailableMessage(profile.displayName, credentialError),
+        credentialError.retryable,
+      );
+    }
+    this.observedCredentialStates.delete(profile.id);
+    if (result.replacement) {
+      await this.persistCredentialReplacement(
+        profile.id,
+        profile.credential,
+        result.replacement,
+      );
+    }
+    return result.plaintext;
+  }
+
+  private toSummary(profile: StoredModelProfile): RuntimeModelProfileSummaryWire {
+    return toSummary(
+      profile,
+      this.observedCredentialStates.get(profile.id),
+    );
   }
 
   private ensureSingleDefault(store: StoreFile, preferredProfileId: string): void {
@@ -825,17 +931,64 @@ export class ModelProfileStore {
         profiles: Array.isArray(parsed.profiles) ? parsed.profiles : [],
       };
       return this.normalizeStore(store);
-    } catch {
-      return { version: 1, profiles: [] };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+        return { version: 1, profiles: [] };
+      }
+      throw error;
     }
   }
 
   private async writeStore(store: StoreFile): Promise<void> {
     const normalizedStore = this.normalizeStore(store);
     await fs.mkdir(path.dirname(this.filePath), { recursive: true });
-    const tempPath = `${this.filePath}.${process.pid}.tmp`;
-    await fs.writeFile(tempPath, `${JSON.stringify(normalizedStore, null, 2)}\n`, "utf8");
-    await fs.rename(tempPath, this.filePath);
+    const tempPath = `${this.filePath}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      await fs.writeFile(tempPath, `${JSON.stringify(normalizedStore, null, 2)}\n`, "utf8");
+      await fs.rename(tempPath, this.filePath);
+    } finally {
+      await fs.rm(tempPath, { force: true }).catch(() => undefined);
+    }
+  }
+
+  private async persistCredentialReplacement(
+    profileId: string,
+    previousCredential: StoredCredential,
+    replacement: StoredCredential,
+  ): Promise<void> {
+    try {
+      await this.withStoreMutation(async () => {
+        const latestStore = await this.readStore();
+        const latestProfile = latestStore.profiles.find(
+          (profile) => profile.id === profileId,
+        );
+        if (
+          !latestProfile ||
+          !sameStoredCredential(latestProfile.credential, previousCredential)
+        ) {
+          return;
+        }
+        latestProfile.credential = replacement;
+        await this.writeStore(latestStore);
+      });
+    } catch {
+      // Migration is maintenance after a successful decrypt. The original
+      // encrypted blob remains authoritative and can be retried later.
+    }
+  }
+
+  private async withStoreMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.mutationQueue;
+    let release: (() => void) | undefined;
+    this.mutationQueue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release?.();
+    }
   }
 
   private normalizeStore(store: StoreFile): StoreFile {

@@ -181,6 +181,9 @@ type Event struct {
 	MassMessageAttachments     []string       `json:"massMessageAttachments,omitempty"`
 	MassMessageSendingAccount  string         `json:"massMessageSendingAccount,omitempty"`
 	MassMessageSourceTool      string         `json:"massMessageSourceTool,omitempty"`
+	ArtifactContractVersion    int            `json:"artifactContractVersion,omitempty"`
+	ArtifactRole               string         `json:"artifactRole,omitempty"`
+	ArtifactProducer           string         `json:"artifactProducer,omitempty"`
 	ArtifactID                 string         `json:"artifactId,omitempty"`
 	ArtifactTitle              string         `json:"artifactTitle,omitempty"`
 	ArtifactDescription        string         `json:"artifactDescription,omitempty"`

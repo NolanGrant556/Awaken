@@ -31,8 +31,9 @@ type ShellPolicyResult struct {
 
 // EvaluateShellPolicy evaluates a shell command for the zero-approval policy
 // layer. Shell is a local-computer surface: it is not constrained to the
-// project workspace. The only product-level hard gates are recoverable delete
-// semantics and mass-message review.
+// project workspace. Product-level hard gates cover recoverable delete
+// semantics, mass-message review, and typed-runtime executables that must not
+// be launched outside their supervised worker.
 func EvaluateShellPolicy(command string, cwd string, permissionContext tool.PermissionContext) ShellPolicyResult {
 	return evaluateShellPolicy(command, cwd, permissionContext, false)
 }
@@ -70,6 +71,9 @@ func evaluateShellPolicy(command string, cwd string, permissionContext tool.Perm
 }
 
 func hardDenyShellCommand(command string, cwd string, permissionContext tool.PermissionContext) string {
+	if directlyLaunchesOfficeRuntime(command, 0) {
+		return "direct soffice/libreoffice execution is disabled; use typed Office artifact tools backed by OfficeRenderWorker"
+	}
 	segments := splitCompoundSegments(command)
 	for _, segment := range segments {
 		tokens := shellTokens(segment)
@@ -86,6 +90,203 @@ func hardDenyShellCommand(command string, cwd string, permissionContext tool.Per
 		}
 	}
 	return ""
+}
+
+const maxOfficeWrapperDepth = 6
+
+// directlyLaunchesOfficeRuntime recognizes direct LibreOffice process starts,
+// including the common shell wrappers that otherwise hide the executable in a
+// later argument. Keeping this check in hardDenyShellCommand makes both the
+// permission decision and the executor's last-moment policy check fail closed.
+// Read-only references such as `command -v soffice`, `rg soffice`, and
+// `echo soffice` intentionally remain available for diagnostics.
+func directlyLaunchesOfficeRuntime(command string, depth int) bool {
+	if depth > maxOfficeWrapperDepth {
+		return true
+	}
+	for _, segment := range splitCompoundSegments(command) {
+		if officeInvocationTokens(shellTokens(segment), depth) {
+			return true
+		}
+	}
+	return false
+}
+
+func officeInvocationTokens(tokens []string, depth int) bool {
+	if depth > maxOfficeWrapperDepth {
+		return true
+	}
+	if len(tokens) == 0 {
+		return false
+	}
+	base := strings.ToLower(filepath.Base(strings.ReplaceAll(tokens[0], `\`, "/")))
+	if isOfficeRuntimeExecutable(tokens[0]) {
+		return true
+	}
+
+	switch base {
+	case "env":
+		return officeInvocationAfterEnv(tokens[1:], depth+1)
+	case "command":
+		return officeInvocationAfterCommand(tokens[1:], depth+1)
+	case "xargs":
+		return officeInvocationTokens(xargsCommand(tokens[1:]), depth+1)
+	case "exec", "nohup":
+		return officeInvocationTokens(argumentsAfterSimpleOptions(tokens[1:]), depth+1)
+	case "sh", "bash", "zsh", "dash", "ksh":
+		return officeInvocationInsideShell(tokens[1:], depth+1)
+	}
+	return false
+}
+
+func isOfficeRuntimeExecutable(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(strings.ReplaceAll(value, `\`, "/")))
+	base := filepath.Base(normalized)
+	base = strings.TrimSuffix(base, ".exe")
+	base = strings.TrimSuffix(base, ".com")
+	if base == "soffice" || base == "soffice.bin" || base == "libreoffice" {
+		return true
+	}
+	// shellTokens follows POSIX backslash escaping even when it is inspecting a
+	// Windows command string. A quoted `C:\Program Files\LibreOffice\...` may
+	// therefore arrive without separators; retain a bounded fallback for that
+	// platform spelling without treating arbitrary names containing "soffice"
+	// as the real executable.
+	return (strings.Contains(normalized, "libreoffice") || strings.Contains(normalized, ":")) &&
+		(strings.HasSuffix(normalized, "soffice") ||
+			strings.HasSuffix(normalized, "soffice.bin") ||
+			strings.HasSuffix(normalized, "soffice.exe") ||
+			strings.HasSuffix(normalized, "soffice.com") ||
+			strings.HasSuffix(normalized, "soffice.bin.exe") ||
+			strings.HasSuffix(normalized, "libreoffice.exe"))
+}
+
+func officeInvocationAfterEnv(args []string, depth int) bool {
+	for index := 0; index < len(args); {
+		arg := args[index]
+		switch {
+		case arg == "--":
+			return officeInvocationTokens(args[index+1:], depth)
+		case arg == "-S" || arg == "--split-string":
+			if index+1 >= len(args) {
+				return false
+			}
+			return directlyLaunchesOfficeRuntime(args[index+1], depth)
+		case strings.HasPrefix(arg, "--split-string="):
+			return directlyLaunchesOfficeRuntime(strings.TrimPrefix(arg, "--split-string="), depth)
+		case arg == "-u" || arg == "--unset" || arg == "-C" || arg == "--chdir":
+			index += 2
+		case strings.HasPrefix(arg, "--unset=") || strings.HasPrefix(arg, "--chdir="):
+			index++
+		case strings.HasPrefix(arg, "-"):
+			index++
+		case isEnvironmentAssignment(arg):
+			index++
+		default:
+			return officeInvocationTokens(args[index:], depth)
+		}
+	}
+	return false
+}
+
+func isEnvironmentAssignment(value string) bool {
+	name, _, ok := strings.Cut(value, "=")
+	if !ok || name == "" {
+		return false
+	}
+	for index, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '_' || (index > 0 && r >= '0' && r <= '9') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func officeInvocationAfterCommand(args []string, depth int) bool {
+	for index, arg := range args {
+		switch arg {
+		case "-v", "-V":
+			return false
+		case "--":
+			return officeInvocationTokens(args[index+1:], depth)
+		case "-p":
+			continue
+		default:
+			if strings.HasPrefix(arg, "-") {
+				continue
+			}
+			return officeInvocationTokens(args[index:], depth)
+		}
+	}
+	return false
+}
+
+func xargsCommand(args []string) []string {
+	for index := 0; index < len(args); {
+		arg := args[index]
+		if arg == "--" {
+			return args[index+1:]
+		}
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			return args[index:]
+		}
+		if strings.Contains(arg, "=") || xargsOptionHasInlineValue(arg) {
+			index++
+			continue
+		}
+		if xargsOptionTakesNextValue(arg) {
+			index += 2
+			continue
+		}
+		index++
+	}
+	return nil
+}
+
+func xargsOptionTakesNextValue(option string) bool {
+	switch option {
+	case "-a", "-E", "-I", "-J", "-L", "-n", "-P", "-R", "-S", "-s",
+		"--arg-file", "--delimiter", "--eof", "--max-args", "--max-chars",
+		"--max-lines", "--max-procs", "--process-slot-var", "--replace":
+		return true
+	}
+	return false
+}
+
+func xargsOptionHasInlineValue(option string) bool {
+	if len(option) <= 2 || !strings.HasPrefix(option, "-") || strings.HasPrefix(option, "--") {
+		return false
+	}
+	switch option[1] {
+	case 'a', 'E', 'I', 'J', 'L', 'n', 'P', 'R', 'S', 's':
+		return true
+	}
+	return false
+}
+
+func argumentsAfterSimpleOptions(args []string) []string {
+	for index, arg := range args {
+		if arg == "--" {
+			return args[index+1:]
+		}
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			return args[index:]
+		}
+	}
+	return nil
+}
+
+func officeInvocationInsideShell(args []string, depth int) bool {
+	for index, arg := range args {
+		if arg == "-c" || (strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") && strings.Contains(arg[1:], "c")) {
+			if index+1 >= len(args) {
+				return false
+			}
+			return directlyLaunchesOfficeRuntime(args[index+1], depth)
+		}
+	}
+	return false
 }
 
 func MassMessageReviewMetadataForShellCommand(command string) (*tool.MassMessageMetadata, bool) {

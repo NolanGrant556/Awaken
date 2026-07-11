@@ -64,6 +64,9 @@ func LoadDir(dir string, source SourceOrigin) map[string]*SkillDefinition {
 		def.Source = source
 		def.Scope = source
 		def.RootDir = rootDir
+		if resolvedRoot, resolveErr := filepath.EvalSymlinks(rootDir); resolveErr == nil {
+			def.ResolvedRootDir = resolvedRoot
+		}
 		def.SkillFilePath = path
 		def.FilePath = path
 		if source == SourceProject {

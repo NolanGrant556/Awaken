@@ -10,6 +10,7 @@ import (
 
 	"awaken/src/agentcore"
 	"awaken/src/protocol/agui"
+	"awaken/src/tool"
 )
 
 func TestLiveAndReplaySemanticProjectionDeepEqual(t *testing.T) {
@@ -54,13 +55,16 @@ func TestLiveAndReplaySemanticProjectionDeepEqual(t *testing.T) {
 		{
 			SchemaVersion: 2, RecordID: "rec_art", Seq: 4, ThreadID: "thread_live", RunID: "run_1", TurnID: "turn_1",
 			Kind: agentcore.SemanticKindArtifact, Timestamp: ts.Add(3 * time.Second), Payload: map[string]any{
-				"artifact_id":  "art_1",
-				"title":        "out.txt",
-				"kind":         "file",
-				"path":         "out.txt",
-				"status":       "ready",
-				"tool_call_id": "call_1",
-				"created":      true,
+				"contract_version": tool.ArtifactContractVersion,
+				"role":             "deliverable",
+				"producer":         "artifact_publish",
+				"artifact_id":      "art_1",
+				"title":            "out.pdf",
+				"kind":             "pdf",
+				"path":             "out.pdf",
+				"status":           "ready",
+				"tool_call_id":     "call_1",
+				"created":          true,
 			},
 		},
 		{
@@ -86,6 +90,19 @@ func TestLiveAndReplaySemanticProjectionDeepEqual(t *testing.T) {
 	replay := normalizeReplayEvents(agui.ProjectSemanticRecords(loaded))
 	if !reflect.DeepEqual(live, replay) {
 		t.Fatalf("live/replay mismatch\nlive=%+v\nreplay=%+v", live, replay)
+	}
+	foundArtifact := false
+	for _, event := range replay {
+		if event.Type != agui.EventAwakenArtifactCreated {
+			continue
+		}
+		foundArtifact = true
+		if event.ArtifactContractVersion != tool.ArtifactContractVersion || event.ArtifactRole != "deliverable" || event.ArtifactProducer != "artifact_publish" {
+			t.Fatalf("artifact replay lost v2 metadata: %+v", event)
+		}
+	}
+	if !foundArtifact {
+		t.Fatal("expected replayed artifact")
 	}
 }
 

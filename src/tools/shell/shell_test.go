@@ -231,6 +231,84 @@ func TestShellExecutionPolicyDeniesMassMessagingCLIDirectExecution(t *testing.T)
 	}
 }
 
+func TestShellPolicyDeniesDirectOfficeRuntimeExecution(t *testing.T) {
+	root := t.TempDir()
+	ctx := tool.NewPermissionContext(root, []string{root})
+	commands := []string{
+		`soffice --headless --convert-to pdf deck.pptx`,
+		`libreoffice --headless --convert-to pdf deck.pptx`,
+		`"/Applications/LibreOffice.app/Contents/MacOS/soffice" --headless deck.pptx`,
+		`'C:\\Program Files\\LibreOffice\\program\\soffice.exe' --headless deck.pptx`,
+		`env SAL_USE_VCLPLUGIN=svp soffice --headless deck.pptx`,
+		`/usr/bin/env -i HOME=/tmp /opt/homebrew/bin/soffice --headless deck.pptx`,
+		`env -S 'soffice --headless --convert-to pdf' deck.pptx`,
+		`env env env env env env env soffice --headless deck.pptx`,
+		`command -- soffice --headless deck.pptx`,
+		`command -p libreoffice --headless deck.pptx`,
+		`printf '%s\\n' deck.pptx | xargs -n 1 soffice --headless`,
+		`xargs -I {} /opt/homebrew/bin/soffice --headless {}`,
+		`xargs -J % /opt/homebrew/bin/soffice --headless %`,
+		`xargs env SAL_USE_VCLPLUGIN=svp soffice --headless`,
+		`sh -c 'soffice --headless --convert-to pdf deck.pptx'`,
+		`nohup /opt/homebrew/bin/soffice --headless deck.pptx`,
+		`exec libreoffice --headless deck.pptx`,
+	}
+	for _, command := range commands {
+		t.Run(command, func(t *testing.T) {
+			for _, policy := range []ShellPolicyResult{
+				EvaluateShellPolicy(command, root, ctx),
+				EvaluateShellExecutionPolicy(command, root, ctx),
+			} {
+				if !strings.Contains(policy.DenyReason, "OfficeRenderWorker") {
+					t.Fatalf("expected OfficeRenderWorker hard deny for %q, got %+v", command, policy)
+				}
+			}
+			decision := (&ShellTool{}).CheckPermission(
+				context.Background(),
+				`{"command":`+quoteJSON(command)+`}`,
+				ctx,
+			)
+			if decision.Behavior != tool.PermissionDeny {
+				t.Fatalf("expected permission deny for %q, got %+v", command, decision)
+			}
+		})
+	}
+}
+
+func TestShellPolicyAllowsOfficeRuntimeDiagnosticsWithoutLaunching(t *testing.T) {
+	root := t.TempDir()
+	ctx := tool.NewPermissionContext(root, []string{root})
+	commands := []string{
+		`command -v soffice`,
+		`command -V libreoffice`,
+		`rg -n soffice src`,
+		`echo soffice`,
+		`printf '%s\\n' soffice | xargs echo`,
+		`plutil -extract LSBackgroundOnly raw -o - LibreOffice.app/Contents/Info.plist`,
+	}
+	for _, command := range commands {
+		t.Run(command, func(t *testing.T) {
+			policy := EvaluateShellExecutionPolicy(command, root, ctx)
+			if policy.DenyReason != "" {
+				t.Fatalf("expected diagnostic command to remain allowed for %q, got %+v", command, policy)
+			}
+		})
+	}
+}
+
+func TestShellExecutorRechecksOfficeRuntimeDenyBeforeSpawning(t *testing.T) {
+	root := t.TempDir()
+	result, err := NewShellExecutor().Execute(
+		context.Background(),
+		shellParams{Command: "soffice --headless --convert-to pdf deck.pptx"},
+		tool.NewPermissionContext(root, []string{root}),
+		nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), "OfficeRenderWorker") {
+		t.Fatalf("expected executor hard deny before spawn, result=%+v err=%v", result, err)
+	}
+}
+
 func TestShellPermissionAllowsNullDeviceRedirectForReadOnlyProbe(t *testing.T) {
 	root := t.TempDir()
 	ctx := tool.NewPermissionContext(root, []string{root})
@@ -354,6 +432,9 @@ func TestShellOutcomeExit7IsFailed(t *testing.T) {
 	}
 	if outcome.ErrorCode != tool.ErrorCodeProcessExitNonzero {
 		t.Fatalf("error_code=%q", outcome.ErrorCode)
+	}
+	if outcome.Retryable {
+		t.Fatalf("nonzero exit must require inspecting/changing the command, not blind retry: %+v", outcome)
 	}
 	if !outcome.IsError() {
 		t.Fatal("expected IsError")

@@ -143,12 +143,13 @@ func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 	definitions := make([]tool.ToolSchema, 0, len(tools))
 
 	for _, t := range tools {
+		definition := requestToolDefinition(t)
 		definitions = append(definitions, tool.ToolSchema{
 			Type: "function",
 			Function: tool.ToolFunctionSchema{
-				Name:        t.Name(),
-				Description: t.Description(),
-				Parameters:  rb.buildToolParameters(t),
+				Name:        definition.Name,
+				Description: tool.ModelDescription(definition),
+				Parameters:  definition.InputSchema,
 			},
 		})
 	}
@@ -193,7 +194,14 @@ func firstNonEmptyAttachmentValue(values ...string) string {
 }
 
 func (rb *RequestBuilder) buildToolParameters(t tool.Tool) tool.ToolParametersSchema {
-	return tool.ResolveInputSchema(t)
+	return requestToolDefinition(t).InputSchema
+}
+
+func requestToolDefinition(t tool.Tool) tool.ToolDefinition {
+	if registered, err := tool.GetRegisteredTool(t.Name()); err == nil {
+		return registered.Definition
+	}
+	return tool.ResolveDefinition(t)
 }
 
 func (rb *RequestBuilder) updateRuntimeInfoFromConfig(tools []tool.ToolSchema) {

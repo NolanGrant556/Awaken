@@ -7,6 +7,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"awaken/src/runtime/officerender"
 	"awaken/src/tool"
 	"awaken/src/tools/internal/localcompute"
 )
@@ -119,11 +121,35 @@ func (t *ReadArtifactTool) IsReadOnly() bool {
 }
 
 func (t *ReadArtifactTool) Definition() tool.ToolDefinition {
-	return tool.ToolDefinition{
+	return tool.BuildBuiltinDefinition(t, tool.ToolDefinition{
 		Name:        "read_artifact",
 		DisplayName: "Read Artifact",
-		Source:      tool.SourceBuiltin,
 		Description: t.Description(),
+		Purpose:     "把表格、PDF 和 Word 等本机工作文件转换成有界、可推理的结构化预览。",
+		WhenToUse: []string{
+			"需要预览 xlsx、xls、csv、tsv、pdf 或 docx 的内容和结构时",
+			"附件是工作文件而不是普通源码或文本时",
+		},
+		WhenNotToUse: []string{
+			"源码、Markdown、JSON 等普通文本使用 read_file",
+			"需要修改工作文件时使用对应 spreadsheet/document/pdf typed artifact 工具",
+		},
+		OutputSchema: tool.ToolParam{Type: "object", Properties: map[string]tool.ToolParam{
+			"kind":       {Type: "string", Description: "识别出的 artifact 类型"},
+			"path":       {Type: "string", Description: "实际预览路径"},
+			"max_rows":   {Type: "integer", Description: "实际表格预览行数上限"},
+			"max_chars":  {Type: "integer", Description: "实际字符上限"},
+			"max_sheets": {Type: "integer", Description: "实际工作表数量上限"},
+		}},
+		SideEffects: []tool.ToolSideEffect{{Kind: tool.SideEffectRead, Resources: []string{"local work artifact"}, Description: "读取并解析工作文件，不修改源文件。", Reversibility: tool.ReversibilityNotApplicable}},
+		Examples:    []tool.ToolExample{{Scenario: "预览工作簿指定工作表", Input: map[string]any{"path": "report.xlsx", "sheet": "Summary", "max_rows": 40}, Outcome: "返回工作表结构和有界单元格预览"}},
+		FailureModes: []tool.ToolFailureMode{
+			{Code: "read_artifact_path_required", Cause: "path 缺失", Retryable: false, Recovery: []string{"提供工作文件路径"}},
+			{Code: "read_artifact_unsupported_type", Cause: "文件类型不受本工具支持", Retryable: false, Recovery: []string{"选择匹配的 artifact 工具"}},
+			{Code: "read_artifact_empty_pdf", Cause: "PDF 没有可抽取内容", Retryable: false, Recovery: []string{"检查是否为扫描 PDF 或使用 OCR 能力"}},
+			{Code: "read_artifact_invalid_or_corrupt", Cause: "工作文件损坏或格式无效", Retryable: false, Recovery: []string{"验证或重新生成文件"}},
+			{Code: "read_artifact_runtime_failed", Cause: "解析 runtime 执行失败；原调用在状态核验前不可安全重试", Retryable: false, Recovery: []string{"准备或修复所需 runtime，再发起新调用"}},
+		},
 		Annotations: tool.ToolAnnotations{
 			ReadOnly:        true,
 			Destructive:     false,
@@ -131,7 +157,7 @@ func (t *ReadArtifactTool) Definition() tool.ToolDefinition {
 			CapabilityClass: tool.CapabilityArtifactRead,
 			TrustedOrigin:   tool.TrustedOriginBuiltin,
 		},
-	}
+	})
 }
 
 func (t *ReadArtifactTool) CheckPermission(ctx context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {
@@ -142,28 +168,80 @@ func (t *ReadArtifactTool) CheckPermission(ctx context.Context, input string, pe
 }
 
 func (t *ReadArtifactTool) Execute(ctx context.Context, input string) (string, error) {
+	outcome, err := t.ExecuteOutcome(ctx, input, nil)
+	if err != nil {
+		return outcome.Content, err
+	}
+	if outcome.IsError() {
+		return "", fmt.Errorf("%s", outcome.ErrorMessage)
+	}
+	return outcome.Content, nil
+}
+
+// ExecuteOutcome reports the resolved artifact kind, preview bounds, and
+// truncation state. Invalid or unreadable artifacts are semantic outcomes;
+// this read-only tool never reports the preview as a filesystem mutation.
+func (t *ReadArtifactTool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObserver) (tool.ExecutionOutcome, error) {
+	started := time.Now().UTC()
 	params, err := parseReadArtifactParams(input)
 	if err != nil {
-		return "", err
+		outcome := tool.FailedOutcome(err.Error(), "read_artifact_invalid_input", tool.ErrorCategoryValidation, false)
+		outcome.RecoveryOptions = []string{"fix_json_parameters", "provide_file_path"}
+		outcome.Diagnostic = map[string]any{"expected_input": "JSON object or file path"}
+		return outcome.WithTiming(started, time.Now().UTC()), nil
 	}
 	if strings.TrimSpace(params.Path) == "" {
-		return "", fmt.Errorf("文件路径不能为空")
+		outcome := tool.FailedOutcome("文件路径不能为空", "read_artifact_path_required", tool.ErrorCategoryValidation, false)
+		outcome.RecoveryOptions = []string{"provide_file_path"}
+		return outcome.WithTiming(started, time.Now().UTC()), nil
 	}
 
+	requestedPath := params.Path
 	permissionContext := tool.PermissionContextFromContext(ctx)
 	if tool.HasPermissionContext(ctx) {
 		checkedPath, err := permissionContext.ResolveReadablePathChecked(params.Path)
 		if err != nil {
-			return "", err
+			outcome := tool.FailedOutcome(err.Error(), "read_artifact_path_unavailable", tool.ErrorCategoryDomain, false)
+			outcome.RecoveryOptions = []string{"provide_unambiguous_file_path", "list_files"}
+			outcome.Diagnostic = map[string]any{"requested_path": requestedPath}
+			return outcome.WithTiming(started, time.Now().UTC()), nil
 		}
 		params.Path = checkedPath
 	} else {
 		params.Path = permissionContext.ResolvePath(params.Path)
 	}
+	ext := strings.ToLower(filepath.Ext(params.Path))
+	if !isSupportedArtifactExtension(ext) {
+		message := fmt.Sprintf("暂不支持读取该文件类型: %s。read_artifact 支持 .csv/.tsv/.xlsx/.xls/.docx/.pdf；普通文本请用 read_file，图片请用 image_inspect，PPTX 请用 artifact_inspect 或 presentation_render", ext)
+		outcome := tool.FailedOutcome(message, "read_artifact_unsupported_type", tool.ErrorCategoryDomain, false)
+		outcome.RecoveryOptions = []string{"use_read_file_for_text", "use_image_inspect_for_images", "use_artifact_inspect_for_pptx"}
+		outcome.Diagnostic = map[string]any{"requested_path": requestedPath, "resolved_path": params.Path, "extension": ext}
+		return outcome.WithTiming(started, time.Now().UTC()), nil
+	}
+	info, err := os.Stat(params.Path)
+	if err != nil {
+		outcome := readArtifactPathFailure(err, requestedPath, params.Path)
+		return outcome.WithTiming(started, time.Now().UTC()), nil
+	}
+	if !info.Mode().IsRegular() {
+		message := fmt.Sprintf("read_artifact 只能读取普通文件: %s", params.Path)
+		outcome := tool.FailedOutcome(message, "read_artifact_not_regular_file", tool.ErrorCategoryDomain, false)
+		outcome.RecoveryOptions = []string{"choose_regular_file", "list_files"}
+		outcome.Diagnostic = map[string]any{"requested_path": requestedPath, "resolved_path": params.Path}
+		return outcome.WithTiming(started, time.Now().UTC()), nil
+	}
+	if ext == ".pdf" && info.Size() == 0 {
+		message := fmt.Sprintf("read_artifact 无法读取空 PDF 文件: %s。该文件大小为 0 字节，可能下载/复制失败或文件已损坏；请提供有效 PDF", params.Path)
+		outcome := tool.FailedOutcome(message, "read_artifact_empty_pdf", tool.ErrorCategoryDomain, false)
+		outcome.RecoveryOptions = []string{"provide_valid_pdf", "verify_file_copy_or_download"}
+		outcome.Diagnostic = map[string]any{"requested_path": requestedPath, "resolved_path": params.Path, "size_bytes": info.Size()}
+		return outcome.WithTiming(started, time.Now().UTC()), nil
+	}
 
 	preview, err := readArtifact(ctx, permissionContext, params)
 	if err != nil {
-		return "", err
+		outcome := readArtifactFailure(err, ext, requestedPath, params.Path)
+		return outcome.WithTiming(started, time.Now().UTC()), nil
 	}
 
 	body := strings.TrimSpace(preview.Content)
@@ -171,7 +249,76 @@ func (t *ReadArtifactTool) Execute(ctx context.Context, input string) (string, e
 		body = "[empty]"
 	}
 	result := fmt.Sprintf("类型: %s\n路径: %s\n\n%s", preview.Kind, preview.Path, body)
-	return truncateArtifactString(result, normalizeArtifactMaxChars(params.MaxChars)), nil
+	result = truncateArtifactString(result, normalizeArtifactMaxChars(params.MaxChars))
+	truncated := strings.Contains(result, "[artifact truncated") || strings.Contains(result, "[preview truncated")
+	outcome := tool.SucceededOutcome(result)
+	outcome.Truncated = truncated
+	outcome.Diagnostic = map[string]any{
+		"requested_path": requestedPath, "resolved_path": params.Path, "preview_path": preview.Path,
+		"kind": preview.Kind, "max_rows": normalizeArtifactMaxRows(params.MaxRows),
+		"max_chars": normalizeArtifactMaxChars(params.MaxChars), "max_sheets": normalizeArtifactMaxSheets(params.MaxSheets),
+		"truncated": truncated,
+	}
+	outcome.Details = map[string]any{
+		"kind": preview.Kind, "path": preview.Path,
+		"max_rows":   normalizeArtifactMaxRows(params.MaxRows),
+		"max_chars":  normalizeArtifactMaxChars(params.MaxChars),
+		"max_sheets": normalizeArtifactMaxSheets(params.MaxSheets),
+	}
+	return outcome.WithTiming(started, time.Now().UTC()), nil
+}
+
+func isSupportedArtifactExtension(ext string) bool {
+	switch ext {
+	case ".csv", ".tsv", ".xlsx", ".xls", ".docx", ".pdf":
+		return true
+	default:
+		return false
+	}
+}
+
+func readArtifactPathFailure(err error, requestedPath, resolvedPath string) tool.ExecutionOutcome {
+	code := "read_artifact_path_unavailable"
+	category := tool.ErrorCategoryDomain
+	recovery := []string{"correct_file_path", "list_files"}
+	if errors.Is(err, os.ErrPermission) {
+		code = "read_artifact_permission_denied"
+		category = tool.ErrorCategoryAuthorization
+		recovery = []string{"choose_readable_file", "adjust_file_permissions"}
+	}
+	outcome := tool.FailedOutcome(err.Error(), code, category, false)
+	outcome.RecoveryOptions = recovery
+	outcome.Diagnostic = map[string]any{"requested_path": requestedPath, "resolved_path": resolvedPath}
+	return outcome
+}
+
+func readArtifactFailure(err error, ext, requestedPath, resolvedPath string) tool.ExecutionOutcome {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		outcome := tool.FailedOutcome(err.Error(), "read_artifact_cancelled", tool.ErrorCategoryCancelled, true)
+		outcome.Status = tool.OutcomeCancelled
+		outcome.TransportStatus = tool.TransportCancelled
+		outcome.RecoveryOptions = []string{"retry_when_context_available"}
+		outcome.Diagnostic = map[string]any{"requested_path": requestedPath, "resolved_path": resolvedPath, "extension": ext}
+		return outcome
+	}
+	if errors.Is(err, os.ErrPermission) {
+		outcome := tool.FailedOutcome(err.Error(), "read_artifact_permission_denied", tool.ErrorCategoryAuthorization, false)
+		outcome.RecoveryOptions = []string{"choose_readable_file", "adjust_file_permissions"}
+		outcome.Diagnostic = map[string]any{"requested_path": requestedPath, "resolved_path": resolvedPath, "extension": ext}
+		return outcome
+	}
+	code := "read_artifact_invalid_or_corrupt"
+	category := tool.ErrorCategoryDomain
+	recovery := []string{"verify_artifact_integrity", "use_specialized_artifact_tool"}
+	if ext == ".pdf" || ext == ".xls" {
+		code = "read_artifact_runtime_failed"
+		category = tool.ErrorCategoryRuntime
+		recovery = []string{"verify_primary_runtime_dependencies", "verify_artifact_integrity", "use_specialized_artifact_tool"}
+	}
+	outcome := tool.FailedOutcome(err.Error(), code, category, false)
+	outcome.RecoveryOptions = recovery
+	outcome.Diagnostic = map[string]any{"requested_path": requestedPath, "resolved_path": resolvedPath, "extension": ext}
+	return outcome
 }
 
 func parseReadArtifactParams(input string) (readArtifactParams, error) {
@@ -247,17 +394,10 @@ func readXLSArtifact(ctx context.Context, permCtx tool.PermissionContext, params
 	if err := os.MkdirAll(convertDir, 0o755); err != nil {
 		return artifactPreview{}, err
 	}
-	if _, err := localcompute.Run(ctx, permCtx, localcompute.CommandSpec{
-		Backend:     "soffice",
-		Args:        []string{"--headless", "--convert-to", "xlsx", "--outdir", convertDir, params.Path},
-		InputPaths:  []string{params.Path},
-		OutputPaths: []string{convertDir},
-		Workdir:     permCtx.TemporaryWorkRoot,
-		Timeout:     45 * time.Second,
-	}); err != nil {
+	converted := filepath.Join(convertDir, strings.TrimSuffix(filepath.Base(params.Path), filepath.Ext(params.Path))+".xlsx")
+	if _, err := officerender.RenderManaged(ctx, params.Path, converted, "xlsx"); err != nil {
 		return artifactPreview{}, err
 	}
-	converted := filepath.Join(convertDir, strings.TrimSuffix(filepath.Base(params.Path), filepath.Ext(params.Path))+".xlsx")
 	return readXLSXArtifact(converted, params.Sheet, normalizeArtifactMaxRows(params.MaxRows), normalizeArtifactMaxSheets(params.MaxSheets), normalizeArtifactMaxChars(params.MaxChars))
 }
 
@@ -637,5 +777,5 @@ func minInt(a, b int) int {
 }
 
 func init() {
-	tool.MustRegisterTool(&ReadArtifactTool{})
+	tool.MustRegisterToolWithMode(&ReadArtifactTool{}, tool.DefinitionValidationStrictBuiltin)
 }

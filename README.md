@@ -1,467 +1,156 @@
 # Awaken
 
-Awaken 是一个本地优先的 Agent runtime 与桌面应用原型。当前仓库有四个活跃面：
+Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为唯一产品使用面，在用户选择的工作区中组织多轮任务，由本地 `awaken-core` 完成模型调用、工具执行、事件记录与恢复，再把可验证的过程和交付物投影到桌面工作台。
 
-- `src/`：Go Agent Core、工具系统、runtime、协议层与本地 server。
-- `cmd/awaken-core`：本地 HTTP/SSE runtime 进程。
-- `apps/desktop`：Electron + React 桌面端 consumer，当前主界面是 Run Workbench。
-- `Awaken Design System`：Awaken Design System package、Gallery、tokens 和组件源码。
+本仓库中的文档只描述当前实现、当前 Desktop 行为、仍有效的产品设计和当前验收结论。详细事实按功能域进入 `docs/`；本 README 只承担项目总入口。
 
-## 入口契约
+## 当前产品形态
 
-本项目只允许两类本地入口：
+当前主产品是 Electron + React 的 Awaken Desktop，主界面为 Run Workbench：
 
-1. Awaken Desktop 使用入口
-   - macOS：启动 `npm run open:desktop`，关闭 `npm run close:desktop`。
-   - Windows：在 PowerShell / Windows Terminal 前台运行 `npm run dev:desktop`，关闭时在该终端按 `Ctrl+C`。
-   - macOS 用户和开发者都从 `open:desktop` / `close:desktop` 打开和关闭同一个 Awaken Desktop。
-   - macOS `open:desktop` 会复用或启动 `awaken-dev-desktop` screen 会话，并检查 renderer、Electron、`awaken-core` 和真实窗口。
-   - macOS `close:desktop` 会停止 `awaken-dev-desktop` screen 会话，并清理同一入口留下的 renderer、Electron、`awaken-core` 进程。
-   - README 开发入口启动前会关闭仍在运行的 Awaken 安装版主进程；窗口激活只针对已经确认的 dev Electron PID，不使用可能拉起另一份应用的泛化 `open -a Electron.app`。
-   - dev 与 packaged app 固定使用同一个 `userData` 和单实例身份；后启动的同版本实例只激活已有窗口，不会再创建第二套 runtime 或第二个 Dock 图标。
-   - Desktop 自己启动并管理 `awaken-core`。
-   - `npm run dev:desktop` 会构建 UI、确保当前平台的 `awaken-core` binary、准备 primary-runtime，然后启动 Vite renderer、Electron main/preload 和 Electron。macOS 日常不要直接用它打开 Awaken；Windows 目前把它作为正式开发入口。
-   - 不要把 `cmd/awaken-core`、Vite renderer 或 Electron 子脚本当成独立使用入口。
-   - 不要用普通浏览器打开 `127.0.0.1:5174` 判断 Desktop 是否成功；renderer 需要 `window.awaken` Electron bridge。
-2. 组件独立观测入口：`npm run open:ui`
-   - 在仓库根目录运行，会启动本地组件观测服务并打开 Gallery。
-   - 如果服务已经在跑，会直接打开 `http://127.0.0.1:5173/`。
-   - 只需要启动服务、不需要自动打开浏览器时，用 `npm run dev:ui`。
-   - 每个组件都有自己的可刷新、可截图 URL。
-   - `http://127.0.0.1:5173/` 只会自动落到某个组件 URL，本身不作为独立入口。
+- 左侧栏负责项目与线程入口；
+- 中间工作区负责输入、运行叙事、状态反馈和最终交付物；
+- 右侧 Inspector 当前只是占位面，不应被理解为已经接通的详情面板；
+- Settings 承载模型、连接器、技能、外观和桌面宠物等配置面；
+- Desktop 负责启动、监督和关闭本地 `awaken-core`，用户不需要单独运行 Core；
+- `Awaken Design System` 是纯 UI 组件包和 Gallery，不拥有产品状态、后端策略或运行时协议。
 
-## 协议归属
+当前没有 Awaken 原生的操作系统级 Computer Use。仓库保留了一份已确认但尚未实现的设计契约；它不是当前产品能力。
 
-一句话：Awaken 用的是 AG-UI 的事件协议格式，但实现是 Awaken 自己写的轻量兼容层；本项目不部署、不 vendor、不直接依赖 AG-UI 项目。
+## 核心能力地图
 
-当前边界：
+| 功能域 | 当前能力摘要 | 权威入口 |
+| --- | --- | --- |
+| 桌面工作台 | 项目与线程导航、Workbench 输入和运行叙事、附件、交付物、外观、宠物与 Desktop 生命周期 | [01 桌面工作台](docs/01_桌面工作台/索引.md) |
+| 主智能体闭环 | thread/run、多轮上下文、压缩、主动提问、取消和失败终止 | [02 主智能体闭环](docs/02_主智能体闭环/索引.md) |
+| 运行时与本地服务 | Desktop 托管本地服务、全局线程存储、SemanticJournal、重放、primary runtime 与 Office 后台渲染 | [03 运行时与本地服务](docs/03_运行时与本地服务/索引.md) |
+| 工具权限与审批 | 工具定义与暴露、TaskScope、决策与 Outcome、Shell、typed 文件工具和可恢复删除 | [04 工具权限与审批](docs/04_工具权限与审批/索引.md) |
+| 模型与供应商 | 模型 profile、能力与余额、调用链、安全凭据存储及故障恢复 | [05 模型与供应商配置](docs/05_模型与供应商配置/索引.md) |
+| MCP runtime | 用户/项目配置、stdio/http/sse 生命周期、动态工具，以及认证与 Skill bridge 的当前缺口 | [06 MCP 运行时](docs/06_MCP运行时/索引.md) |
+| 连接器 | builtin/local 来源、尚未接通的 team 来源，以及配置、生命周期和重启边界 | [07 连接器](docs/07_连接器/索引.md) |
+| 技能 | project/user Skill 加载、安装与激活，以及 fork 和 MCP 来源的当前边界 | [08 技能](docs/08_技能/索引.md) |
+| AG-UI 与 A2UI | Awaken 自有事件到 AG-UI-compatible wire 的映射；A2UI 仅作参考 | [09 AG-UI 与 A2UI 协议](docs/09_AGUI与A2UI协议/索引.md) |
+| Computer Use | 明确当前不支持的边界，以及实现时必须遵守的目标设计合同 | [10 计算机操作能力](docs/10_计算机操作能力/索引.md) |
 
-- 内部事件模型是 Awaken 自己的 `AwakenEvent`，位于 `src/agentcore`。
-- 对外 SSE 输出是 AG-UI-compatible JSON events，映射层位于 `src/protocol/agui`。
-- Desktop 可以消费 AG-UI-compatible events，但 `Awaken Design System` 组件不知道 AG-UI、SSE、Electron 或 runtime。
-- A2UI 目前只作为外部参考，不存在运行时 payload、renderer 或 SDK 集成，也不 vendor A2UI 项目。
+各入口的 `索引.md` 只负责路由。产品行为、代码 owner、状态/数据/事件流、异常恢复和验收方法以索引指向的专项文档为准。
 
-## 先读这里
+## 总体架构
 
-0 上下文 Coding Agent 接手时，先读：
-
-```text
-README.md
+```mermaid
+flowchart TD
+  User["用户"] --> Desktop["Awaken Desktop"]
+  Desktop --> Main["Electron Main / Preload"]
+  Desktop --> Renderer["React Renderer / Workbench"]
+  Renderer --> DS["@awaken/design-system"]
+  Main --> Core["awaken-core 本地服务"]
+  Core --> Agent["Agent Core"]
+  Agent --> Model["模型供应商"]
+  Agent --> Tools["内置工具 / MCP / Skills"]
+  Core --> Store["全局线程库 / SemanticJournal"]
+  Tools --> Runtime["Awaken-owned primary runtime"]
 ```
 
-然后按任务继续读：
+责任边界：
 
-- 需要 Coding Agent 行为约束与文档上下文管理规则：读 `AGENTS.md`。
-- 改 Awaken Desktop / Workbench：读 `docs/01_桌面工作台/中间交互区域/架构契约.md`，并按 `docs/01_桌面工作台/中间交互区域/复核清单.md` 复核。
-- 改主智能体闭环的一般能力：读 `docs/02_主智能体闭环/实施计划.md`。
-- 改工具结果语义、执行历史重放、Skill 能力契约、Artifact 引擎、主运行时或失败恢复：依次读 `docs/02_主智能体闭环/智能体能力与执行稳定性提升/实施方案.md`、`任务.md`、`检查清单.md`。
-- 改 runtime / protocol / AG-UI 边界：读 `docs/09_AGUI与A2UI协议/架构说明.md`。
-- 需要对照 AG-UI / A2UI 上游：读 `docs/09_AGUI与A2UI协议/上游参考.md`。
-- 需要历史项目文件职责总览：读 `docs/10_历史资料/项目文件清单.md`。
-- 改 Awaken Design System / UI 组件库：读 `Awaken Design System/README.md`。
+- `apps/desktop` 拥有 Desktop 生命周期、Electron bridge、产品状态和真实交互投影；
+- `src/agentcore` 拥有智能体运行循环、请求构建、工具调用编排和内部语义事件；
+- `src/runtime`、`src/server` 和 `src/protocol/agui` 分别拥有会话/持久化编排、本地 HTTP/SSE surface 和 wire 映射；
+- `src/tool`、`src/tools`、`src/mcpclient`、`src/skills` 与 `src/skillruntime` 拥有对应能力的定义、策略与实现；
+- `Awaken Design System` 只接收 props/callbacks，不读取 Electron、runtime 或业务 store；
+- primary runtime 和 Office worker 是 Awaken 管理的执行依赖，不构成第三个用户入口。
 
-开始改代码前先看真实工作区：
+更细的模块协作、字段和状态机由相应功能域文档唯一拥有。
 
-```bash
-cd /Users/nolangrant/Awaken
-git status --short
-```
+## 正式入口
 
-当前仓库可能存在未提交实现。除非用户明确要求撤回或丢弃，否则以当前工作区为事实来源。
-
-## 目录结构
-
-```text
-.
-├── cmd/
-│   └── awaken-core/             # 本地 HTTP/SSE runtime 进程
-├── apps/
-│   └── desktop/                 # Electron main/preload/renderer consumer
-├── docs/                        # 按功能域组织的上下文档案
-├── scripts/                     # 构建、验收、runtime binary 自动化脚本；不是使用入口
-├── Awaken Design System/         # @awaken/design-system，组件源码、tokens、Gallery
-├── src/
-│   ├── agentcore/               # agent loop、request builder、tool runtime、内部事件
-│   ├── context/                 # conversation messages 与 tool result pairing
-│   ├── llm/                     # provider transport、streaming、native tool_calls
-│   ├── prompt/                  # system prompt 模板与 runtime metadata
-│   ├── protocol/
-│   │   └── agui/                # AwakenEvent -> AG-UI-compatible events
-│   ├── runtime/                 # run/session/event bus/cancel/approval
-│   ├── server/                  # 本地 HTTP routes 与 SSE
-│   ├── tool/                    # tool interface、registry、schema、permission model
-│   └── tools/                   # 内置工具实现
-└── package.json                 # npm workspaces：Awaken Design System 与 desktop
-```
-
-## 当前 Runtime 契约
-
-Desktop 会自己启动并管理 `cmd/awaken-core`。用户和 Desktop 开发者不需要单独启动 runtime，也不应绕过 Electron bridge 直连 runtime。
-
-Runtime / server 只作为内部工程层测试与验证，不形成第三个使用入口。
-
-线程列表、线程 transcript、重启后续问和线程删除都以 Desktop 全局线程库为准，不再依赖扫描 `workspace/.awaken/transcripts` 恢复历史。
-
-当前 HTTP surface：
-
-```text
-GET  /health
-GET  /v1/agui/demo
-GET  /v1/runtime/info
-GET  /v1/projects
-POST /v1/projects
-DELETE /v1/projects/{project_id}
-DELETE /v1/projects/{project_id}/threads
-POST /v1/projects/{project_id}/trash
-GET  /v1/project-operations/{operation_id}
-POST /v1/project-operations/{operation_id}/cancel
-GET  /v1/threads
-PATCH /v1/threads/{thread_id}
-DELETE /v1/threads/{thread_id}
-GET  /v1/threads/{thread_id}/transcript
-POST /v1/runs
-GET  /v1/runs/{run_id}
-GET  /v1/runs/{run_id}/events
-POST /v1/runs/{run_id}/cancel
-POST /v1/runs/{run_id}/mass-message-reviews/{review_id}/resolve
-POST /v1/runs/{run_id}/user-questions/{question_id}/answer
-POST /v1/shutdown
-```
-
-项目修改接口必须携带 `Idempotency-Key`。项目移除、历史删除和移动到系统废纸篓都由 runtime 的 durable operation 管道负责；Renderer 不逐条删除 thread，也不直接接收或执行磁盘路径。废纸篓的 claim、原子 staging、路径身份复验和 complete/fail 是 Electron Main 与本地 runtime 之间的内部恢复接口，不属于 Renderer surface；Electron 只把 operation-owned staging 路径交给系统废纸篓。
-
-`/v1/runs/{run_id}/events` 输出 AG-UI-compatible SSE events。Awaken 目前有这些 extension events：
-
-```text
-AWAKEN_AUTH_REQUIRED
-AWAKEN_RUNTIME_PREPARE
-AWAKEN_RUNTIME_READY
-AWAKEN_RUNTIME_MISSING
-AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED
-AWAKEN_MASS_MESSAGE_REVIEW_RESOLVED
-AWAKEN_USER_QUESTION_REQUESTED
-AWAKEN_USER_QUESTION_RESOLVED
-AWAKEN_ARTIFACT_CREATED
-AWAKEN_ARTIFACT_UPDATED
-AWAKEN_COMMAND_OUTPUT
-AWAKEN_PATCH_UPDATED
-AWAKEN_TURN_DIFF
-```
-
-新 run 不再产生通用工具审批事件，不进入 `awaiting_approval`，也不展示通用 `ApprovalCard`。缺授权走 `AWAKEN_AUTH_REQUIRED`，缺 runtime 走 runtime prepare/missing/ready 事件；只有工具群发消息进入专用 `AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED` / `AWAKEN_MASS_MESSAGE_REVIEW_RESOLVED` 链路。
-
-## Coding Agent 接手规则
-
-0 上下文 Coding Agent 应以本 README 为唯一接手入口。
-
-当前产品形态：
-
-```text
-Awaken Desktop
-  -> awaken-core local HTTP/SSE runtime
-  -> Agent Core
-  -> LLM provider + local tools
-```
-
-当前主界面是 Run Workbench：左 Sidebar、中心 Run Narrative、右 Inspector、底部 Composer。不要恢复旧 Dashboard、卡片墙或开发者日志主面板。
-
-实现 owner 速查：
-
-- `src/agentcore`：agent 执行循环、LLM request 组装、工具执行、内部 `AwakenEvent` 发射、workspace config、permission-aware `ToolRuntime`。
-- `src/runtime`：run/session 生命周期、事件历史与回放、取消、群发消息专用 review wait/resolve、runtime event dispatch。
-- `src/protocol/agui`：把内部 Awaken events 映射为 AG-UI-compatible JSON events。
-- `src/server`：本地 HTTP endpoints 与 SSE streams。
-- `src/tool` 和 `src/tools`：工具接口、schema generation、registry、permission decisions、内置工具实现。
-- `apps/desktop`：Electron + React Desktop consumer，通过 `window.awaken` bridge 消费 runtime。
-- `Awaken Design System`：UI-only component library，只接收 props 和 callbacks。
-
-改代码前：
-
-1. 先看当前 worktree 和 diff：`git status --short`。
-2. 判断改动属于哪个 owner：Agent Core、runtime、protocol、server、desktop、UI kit 或 docs。
-3. 把改动限制在 owner 边界内。
-4. 修改 runtime/protocol/tool 行为时，加或更新聚焦测试。
-5. 先跑最小相关检查，交付前再跑更大的验证。
-
-现在不要做：
-
-- 不要 vendor AG-UI / A2UI 外部参考仓库，也不要把本机参考路径写进代码或配置。
-- 不要让 `apps/desktop` 拥有后端 policy。
-- 不要让 `Awaken Design System` 依赖 Electron 或 runtime API。
-- 不要重新引入 generated A2UI approval surface 替代当前 approval UI。
-- 不要把 Gallery/mock state 当成真实 run 验收。
-- 不要提交 secrets、依赖目录或构建产物。
-- 不要清理无关 dirty files，不要回滚用户未提交改动。
-
-## 配置
-
-模型配置的唯一用户入口是 Awaken Desktop 的 `Settings > Models`。外观主题在同一个 Settings surface 的“外观”分区里配置。
-
-用户在这里配置 provider、model、API key、上下文窗口和输出上限；Desktop 会把 profile 注入每次 run。正式 Desktop 路径不读取项目根目录的 `.env` 或 `config.toml`，也不会要求用户编辑本地配置文件。
-
-API key 由 Electron `safeStorage` 保存；非敏感 profile 字段保存到 Desktop user data 目录下的 `config/model-profiles.json`。
-
-除模型配置外，Desktop 还会把运行时持久化数据统一收口到 Electron `userData` 目录。当前代码把它固定为 `app.getPath("appData")/@awaken/desktop`。
-
-常见平台路径：
-
-- macOS：`~/Library/Application Support/@awaken/desktop`
-- Windows：`%APPDATA%\\@awaken\\desktop`
-
-当前全局数据布局：
-
-- `config/model-profiles.json`：模型 profile 的非敏感字段
-- `config/desktop-preferences.json`：Desktop 外观等非敏感用户偏好
-- `config/mcp-servers.json`：用户级 MCP 配置
-- `data/threads.sqlite`：线程索引
-- `data/threads/thread_<thread_id>.jsonl`：线程 transcript
-- `data/auth/connector-accounts.sqlite`：OAuth / connector 授权元数据
-
-项目级 MCP 配置仍然支持 `<workspace>/awaken.mcp.json`，但它现在是 project override，不再承担 Desktop 全局配置层的职责。
-
-旧的 `workspace/.awaken/transcripts` 不再是正式历史来源，也不是迁移入口。Desktop 运行时只读取全局线程库，不扫描、不移动、不删除旧 workspace transcript；新线程统一写入 Desktop 全局线程库。
-
-OAuth token 也不再只放在内存里。当前实现会把授权元数据写入 `data/auth/connector-accounts.sqlite`，敏感 token 则交给系统凭据存储保存，例如 macOS Keychain 或 Windows Credential Manager。
-
-## 开发命令
-
-安装 npm workspace 依赖：
+先在仓库根目录安装依赖：
 
 ```bash
 npm install
 ```
 
-Go 测试与检查：
+### Awaken Desktop
 
-```bash
-go test ./...
-go vet ./...
-go build ./...
-```
-
-打开组件 Gallery：
-
-```bash
-npm run open:ui
-```
-
-UI package 检查：
-
-```bash
-npm run typecheck:ui
-npm run build:ui
-```
-
-desktop 检查：
-
-```bash
-npm run typecheck:desktop
-npm run build:desktop
-```
-
-runtime/server 内部验证：
-
-```bash
-go test ./src/runtime ./src/server ./src/agentcore
-```
-
-真实 LLM smoke：
-
-```bash
-go test ./src/server -run 'TestFileMutation(AutoAllow|AutoAllowDoesNotEnterGenericReview|AutoAllowEmitsArtifact|PatchAndTurnDiff)Smoke' -count=1 -v
-```
-
-常用完整验证：
-
-```bash
-go test ./... && go vet ./... && go build ./... && npm run build:desktop && git diff --check
-```
-
-Run Workbench 收口验收：
-
-```bash
-rg -n "Dashboard|card wall|developer log|开发者日志|卡片墙" apps/desktop "Awaken Design System"
-go test ./src/server -run 'TestRunsEndpointsCreateReplayAndCancel|TestRunEventsAfterSeq|TestRunEventsAfterSeqReconnectMultiFrame' -count=1
-git diff --check
-```
-
-## 本地运行
-
-### Awaken Desktop 使用入口
-
-macOS：
+macOS 的正式开发使用入口：
 
 ```bash
 npm run open:desktop
 npm run close:desktop
 ```
 
-Windows（PowerShell / Windows Terminal）：
+`open:desktop` 会复用或建立受管理的 `awaken-dev-desktop` 会话，准备 renderer、Electron、`awaken-core` 和 primary runtime，并以真实 `Awaken Desktop` 窗口作为成功标准。`close:desktop` 负责关闭同一入口拥有的进程。
+
+Windows 当前使用前台入口：
 
 ```powershell
 npm run dev:desktop
 ```
 
-`npm run open:desktop` 是 macOS 的托管入口，会复用或启动 `awaken-dev-desktop` screen 会话，并确认 renderer、Electron、`awaken-core` 和真实 Desktop 窗口都已就绪。`npm run close:desktop` 会停止这个正式入口管理的 screen 会话，并清理遗留的 renderer、Electron、`awaken-core` 进程。
+关闭时在该终端按 `Ctrl+C`。
 
-`apps/desktop/dist-electron/` 只是可删除、可重建的本地打包输出，不是开发验收入口。不要直接双击其中的 `Awaken.app`；真实 Desktop 验收一律重新执行 README 的 `open:desktop` / `close:desktop`。若旧安装版正在运行，README 入口会先关闭它再启动当前源码的 dev 实例，但不会删除用户机器上的应用文件。
+该脚本是当前 Windows 开发入口，但本仓库当前可复核的真实 Desktop 验收基线只覆盖 macOS；脚本存在不能替代 Windows 实机与 CI 验收。
 
-Windows 当前不使用 macOS 的 screen 托管脚本；`npm run dev:desktop` 是 Windows 开发入口，关闭时在运行该命令的终端按 `Ctrl+C`。它会构建 `@awaken/design-system`，确保 `win32-x64/awaken-core.exe` 存在，准备 primary-runtime，启动 Vite renderer（`127.0.0.1:5174`），编译 Electron main/preload，并启动 Electron。
+不要把以下路径当成独立产品入口：
 
-Windows primary-runtime 需要完整、可复制的 Python distribution（推荐 `uv` managed Python）、Node、LibreOffice、Poppler（`pdftoppm.exe` / `pdfinfo.exe`）和 ffmpeg。prepare 阶段优先使用 `AWAKEN_PRIMARY_RUNTIME_SEED_DIR` 或 `AWAKEN_PYTHON`、`AWAKEN_NODE`、`AWAKEN_SOFFICE`、`AWAKEN_POPPLER_BIN`、`AWAKEN_FFMPEG` 指定复制来源；随后才通过 `uv` / `where` / 常见安装目录发现并验证真实来源。上述组件变量只属于 prepare 输入，正式 Artifact 执行只解析已通过 probe/provenance 的 Awaken-owned active revision，不会直接执行这些外部来源。普通 venv、Codex wrapper 和指向外部安装目录的脚本不会被接受为 managed runtime。缺少依赖时，`npm run prepare:runtime -- --json` 和 `npm run check:runtime -- --json` 会输出具体缺口。
+- 单独启动 `cmd/awaken-core`；
+- 单独打开 Vite renderer；
+- 在普通浏览器中用 renderer 页面代替 Electron 验收；
+- 直接运行旧的 `dist-electron` 产物。
 
-macOS 的 Awaken-owned LibreOffice 副本以 `LSBackgroundOnly=true` 运行，DOCX/XLS/XLSX/PPT/PPTX 转换统一进入进程级 `OfficeRenderWorker`；工具不得直接启动 `soffice`。开发 runtime 使用 ad-hoc 签名，发布 runtime 必须在 CI 中完成 Developer ID 签名、公证、staple 和 archive 校验，用户机器只验证并原子安装预签名 archive。
+### Design System Gallery
 
-Windows 上若已安装 `winget`，可以直接运行 `npm run prepare:runtime -- --install`（或 `-i`）自动安装缺失的 LibreOffice、Poppler 和 ffmpeg。安装完成后 prepare 会重新扫描 WinGet package directory，把通过校验的组件复制进 Awaken-owned managed runtime；不会修改或持久化用户 PATH。
-
-### 组件独立观测入口
+仅检查组件时使用：
 
 ```bash
 npm run open:ui
 ```
 
-`npm run open:ui` 会复用或启动本地组件观测服务，然后打开 Gallery。每个组件 URL 都可刷新、可截图、可作为视觉回归目标，例如：
+Gallery 使用 mock state，只能证明组件渲染，不能替代 Awaken Desktop 的产品验收。
 
-```text
-http://127.0.0.1:5173/#/components/awaken-composer-bar
-http://127.0.0.1:5173/#/components/awaken-execution-feed
-```
+## 主要目录与 owner
 
-`http://127.0.0.1:5173/` 只会自动落到某个组件 URL，本身不作为独立入口。
+| 路径 | 职责 |
+| --- | --- |
+| `cmd/awaken-core` | 本地 Core 可执行入口 |
+| `apps/desktop` | Electron main/preload/renderer 与 Desktop 产品行为 |
+| `src/agentcore` | Agent loop、上下文构建、工具编排和内部语义事件 |
+| `src/runtime` | thread/run、journal、重放及本地运行时协作 |
+| `src/server` | 本地 HTTP/SSE handlers 与服务装配 |
+| `src/protocol/agui` | Awaken 语义事件到 AG-UI-compatible wire 的映射 |
+| `src/tool`、`src/tools` | 工具合同、暴露、权限、Outcome 与内置工具 |
+| `src/mcpclient` | MCP 配置、连接、认证和动态工具桥接 |
+| `src/skills`、`src/skillruntime` | Skill 发现、激活和执行 |
+| `scripts` | Desktop、primary runtime、构建与验收自动化 |
+| `Awaken Design System` | UI-only 组件、tokens、资源和 Gallery |
+| `docs` | 按产品功能域组织的确定性工程知识库 |
 
-## 当前工具面
+## Coding Agent 读档路径
 
-普通 provider 默认可见的核心内置工具：
+任何任务按下面的顺序建立上下文：
 
-```text
-calculator
-read_file
-list_files
-grep_search
-text_edit
-text_file_create
-artifact_publish
-shell
-web_search
-ask_user
-```
+1. 阅读本 README，确认产品形态、入口和项目级边界；
+2. 阅读 [AGENTS.md](AGENTS.md)，确认协作与完成规则；
+3. 从上面的能力地图进入对应功能域 `索引.md`；
+4. 读取索引指定的唯一权威文档；
+5. 核对文档指向的当前代码 owner 与测试；
+6. 涉及真实产品行为时，按本 README 的正式入口在 Awaken Desktop 复核。
 
-这不是完整工具清单：Skill、MCP 和 typed artifact runtime 会按当前任务、策略与运行时状态追加工具。`apply_patch` 仍注册为高级/兼容文件变更工具，但普通 provider 默认不直接暴露它；只有 provider 具备 grammar-constrained transport，或兼容/内部转换链明确选择它时才进入模型可见工具池。
+若任务跨域，应分别读取各域权威，不在临时文档中重新定义一套跨域事实。
 
-`artifact_publish` 只把 `OutputRoots` 内已经存在的受支持普通文件显式登记为最终交付物，不扫描目录、不分析最终回答，也不按修改时间猜测文件。最终交付卡只显示当前 run 中 `contractVersion=2`、`role=deliverable`、`status=ready` 的 Word、Markdown、Excel/CSV、PDF 或 PowerPoint 文件；preview、support、源码和自动验证图片不会显示。
+## 项目级硬边界
 
-只读工具不应要求审批。会修改文件或有风险的工具通过 `src/tool/permission.go` 与 `src/agentcore/tool_runtime.go` 走权限模型。
+- Desktop 是正式产品 consumer，并拥有 `awaken-core` 的本地生命周期；不得增加需要用户独立维护的第二套 Core 入口。
+- Workbench 中间区域的 ownership、唯一滚动容器和 `center` / `dock` 形态不得绕过；具体规则只以 [架构契约](docs/01_桌面工作台/中间交互区域/架构契约.md) 为准。
+- `Awaken Design System` 不得依赖 Electron、HTTP/SSE、Agent Core、MCP 或产品 store；Desktop 也不得从其源码内部路径建立私有耦合。
+- `src/agentcore` 不依赖 `src/protocol/agui`；内部语义与外部 wire 由协议映射层隔离。
+- Renderer 不拥有后端权限、路径安全、凭据或持久化策略；这些决策必须留在相应 Main/Core owner。
+- Gallery、旧截图、旧验收摘要和绕过 Desktop 的 provider smoke 不能作为真实产品通过证据。
+- 不得把 A2UI、原生 OS Computer Use、完整 MCP OAuth/Skill bridge 等尚未实现或不完整能力写成当前支持。
+- 不提交 secret、userData、依赖目录或生成产物；不覆盖或清理与当前任务无关的本地改动。
+- 代码改变产品事实时，必须在同一任务同步更新唯一权威文档和当前验收证据。
 
-当前权限规则：
+## 文档状态
 
-- `text_edit` 是普通单文件精确修改的默认链路，支持基于旧文本与可选 SHA-256 的确定性替换；`text_file_create` 用于创建或覆盖普通文本文件。多文件、移动、删除或高级 diff 才进入兼容/高级文件变更链路；删除必须走可恢复语义，越界、敏感路径和受保护路径会被拒绝或标记为高风险。
-- `shell` 是更底层的系统操作能力，不等同于普通文件编辑入口。可识别的简单文件写入可以被转换成结构化文件工具；open-world 或系统级命令仍受 execution profile、sandbox 和边界规则约束。
-- `web_search` 和只读文件工具通常走低摩擦路径，但仍受当前作用域约束。
-- 路径判断不再只看单一 `workspace root`；runtime 会同时校验 `ReadableRoots`、`WritableRoots`、`OutputRoots`、`ProtectedRoots` 和附件文件范围。
+正式知识库不得保存长期历史切片、修复流水账、完成记录或一次性实施计划。仍有效的设计背景必须改写为当前原因、约束或明确限制，进入对应权威文档后再删除旧载体。
 
-### MCP runtime
-
-Awaken 自带一个 MCP（Model Context Protocol）客户端 runtime，启动 `awaken-core` 时会自动加载 MCP server 配置并把每个 server 暴露的工具注入到工具池中。MCP 工具的命名格式固定为 `mcp__{server}__{tool}`，agent 调用时按这个前缀路由。
-
-当前配置来源：
-
-1. 项目级：`<workspace>/awaken.mcp.json`
-2. 用户级：`<userData>/config/mcp-servers.json`
-3. 兼容迁移源：旧的 `~/.awaken/mcp.json` 只在新路径缺失时被一次性迁移
-4. connector 层可在运行时补充 server；其中 builtin connector 生成的 server 会持久化到用户级 MCP 配置里，因而能在 Desktop 设置里继续编辑、删除并在重启后保留
-
-合并规则：`project` 覆盖 `user`；配置错误打 warning 但不阻塞 runtime 启动。
-
-支持的 transport：
-
-| Transport | 字段 | 说明 |
-|---|---|---|
-| stdio | `stdio` | spawn 子进程，stdin/stdout 通信；最常见 |
-| streamable HTTP | `http` | MCP 规范的 streamable HTTP，含 SSE 升级 |
-| SSE | `sse` | 兼容旧版非 streamable HTTP server |
-| in-process | `inProcess` | 本地 Go 包实现的 MCP server，通过 `mcp.NewInMemoryTransports` 通信 |
-| WebSocket | `ws` | v1 不支持，配置后直接转 `failed`，后续版本可能补 |
-
-接入第一个 MCP server（以 stdio filesystem server 为例）：
-
-1. 在项目根目录创建 `awaken.mcp.json`：
-
-   ```json
-   {
-     "servers": {
-       "filesystem": {
-         "stdio": {
-           "command": "npx",
-           "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/me/Documents"]
-         }
-       }
-     }
-   }
-   ```
-
-2. 启动 `awaken-core`（或 `npm run open:desktop` 由 Desktop 拉起）。日志会打印每个 server 的握手结果。
-
-3. 通过 `GET http://127.0.0.1:8787/v1/mcp/servers` 查看 server 状态。`state` 字段含义：
-
-   - `pending`：握手进行中
-   - `connected`：已连接，工具已注册
-   - `failed`：重试 5 次后仍失败（指数退避 1/2/4/8/16s）
-   - `needs-auth`：server 返回 401，需要走 OAuth 流程
-   - `disabled`：用户主动 disable
-
-4. 通过 `GET /v1/mcp/tools` 查看当前工具池，MCP 工具会以 `mcp__filesystem__read_file` 这样的名字出现。
-
-5. agent 在对话中可以直接调用这些工具；MCP 工具不会走一套独立权限系统，而是复用 Awaken 当前统一的 tool permission / AUTO policy。是否自动执行取决于 server annotations、工具元数据、当前 execution profile 和作用域边界。
-
-完整配置示例见 `docs/awaken.mcp.json.example`。
-
-OAuth-protected server：如果 server 返回 401，runtime 把状态转成 `needs-auth` 并保留配置。前端通过 `POST /v1/mcp/servers/{name}/auth` 触发 OAuth 流程，拿到 authorize URL 后在浏览器完成授权。授权成功后，runtime 会把元数据写入 `data/auth/connector-accounts.sqlite`，并把敏感 token 存入系统凭据存储，这样 Desktop 重启后仍可恢复登录态；恢复失败时状态会回到 `needs-auth` 或 `needs-reauth`。
-
-## Runtime 内部验证配置
-
-这部分只面向 `awaken-core` / Go runtime 的内部测试与验证，不是 Awaken 使用流程，也不是独立启动入口。
-
-- `AWAKEN_DEFAULT_WORKSPACE`：指定 `/v1/runtime/info` 返回的默认 workspace。
-- 未设置这些环境变量时，runtime 保持 Go 侧默认行为。
-- Runtime smoke 会在测试进程内启动本地 server，不形成 Awaken 的第三个使用入口。
-
-## Desktop 打包状态
-
-`electron-builder` 当前可以从当前工作区完成 macOS / Windows 本地 Desktop 打包：
-
-```bash
-npm run dist:desktop
-```
-
-该命令先删除 `apps/desktop/dist`、`apps/desktop/dist-electron`、旧 `resources/bin` 和旧 `runtime-archive`，然后重新构建当前源码的 UI、`awaken-core`、runtime 检查和安装包。它不会删除 `resources/runtime`，因为该目录可以承载明确配置的 managed runtime seed。每次打包都从干净 staging 开始，旧 `.app`、`.dmg`、`.exe`、JS 或 runtime archive 不得被新产物复用。
-
-macOS 正式发布链路使用：
-
-```bash
-npm run dist:desktop:release
-```
-
-在 macOS 上，该链路除干净 staging 外，还要求本次构建产生的 Developer ID 签名、公证并 staple 的 primary-runtime archive。在 Windows 上，`dist:desktop` 与 `dist:desktop:release` 都会打包本次 Windows `prepare:runtime` 生成的 managed runtime，以 platform、arch、必需组件和 archive SHA-256 校验安装；Windows 打包/安装不会调用 `codesign`、`xcrun`、`spctl` 或 `ditto`，也不会携带 macOS `LibreOffice.app`。Windows 正式发布的来源可信度由安装包 Authenticode 签名承担，本地未签名 installer 只能用于测试。两种平台都必须在各自 CI 的全新 checkout 中执行当前源码构建，不得把另一台机器或旧 `dist-electron` 中的文件复制进发布目录。
-
-Awaken 自己的 app icon 已配置在 `apps/desktop/build/`：
-
-- `icon-source.png`：原始输入图。
-- `icon.png`：运行期 Dock/window 图标和 Linux 图标。
-- `icon.icns`：macOS 打包图标。
-- `icon.ico`：Windows 图标预留。
-
-正式分发前还有 release packaging readiness 项：
-
-- `apps/desktop/package.json` 还没有完整的 `description` / `author`。
-- 本机没有有效的 `Developer ID Application` 证书时，macOS code signing 会跳过，打包产物未签名、未公证。
-
-这些提醒不影响本机开发测试、统一启动流程、真实 LLM run 或 runtime supervisor 验收。正式分发给其他 macOS 用户前，需要补齐 Developer ID signing 和 notarization，否则可能触发 Gatekeeper 的“无法验证开发者”等提示；Windows 正式分发还需要在发布 CI 配置 Windows 代码签名证书。
-
-## 硬边界
-
-- 不要把后端、Electron、SSE、AG-UI 或 A2UI 逻辑放进 `Awaken Design System`。
-- desktop 不要从 `Awaken Design System/src` 做源码路径 import；后续接入应使用 `@awaken/design-system` 包出口。
-- `src/agentcore` 不要 import `src/protocol/agui`，协议映射只属于 `src/protocol/agui`。
-- 不要 vendor AG-UI / A2UI 外部参考仓库，也不要把本机参考路径写进代码或配置。
-- 不要提交 `.env`、依赖目录或构建产物。
-- 不要擅自回滚未提交的用户改动。
+发现代码、Desktop、测试与文档不一致时，以可复核的当前事实为依据停止错误声明：先记录差异并确认 owner，再决定修代码还是修文档，不能用文档掩盖产品缺口。

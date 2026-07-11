@@ -169,6 +169,34 @@ func contextAttachmentsToRunInputAttachments(attachments []convcontext.MessageAt
 	return converted
 }
 
+func transcriptAttachmentsToRunInputAttachments(attachments []transcriptMessageAttachment) []RunInputAttachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	converted := make([]RunInputAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		next := RunInputAttachment{
+			ID:          attachment.ID,
+			Kind:        attachment.Kind,
+			MimeType:    attachment.MimeType,
+			Path:        attachment.Path,
+			DisplayName: attachment.DisplayName,
+			Width:       attachment.Width,
+			Height:      attachment.Height,
+			ByteSize:    attachment.ByteSize,
+			StorageKey:  attachment.StorageKey,
+		}
+		if hydrated, err := hydrateRunInputAttachment(next); err == nil {
+			next = hydrated
+		}
+		// The durable journal owns attachment identity. A missing image blob
+		// prevents model hydration, but must not erase the historical Desktop
+		// card or cause recovery to infer a replacement from disk.
+		converted = append(converted, next)
+	}
+	return converted
+}
+
 func persistRunInputAttachments(threadID string, attachments []RunInputAttachment) ([]RunInputAttachment, error) {
 	if len(attachments) == 0 {
 		return nil, nil

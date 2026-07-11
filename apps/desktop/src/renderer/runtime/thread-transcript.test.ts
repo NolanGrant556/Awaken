@@ -61,6 +61,78 @@ function makeTranscript(): RuntimeThreadTranscript {
 }
 
 describe("thread transcript replay helpers", () => {
+  it("replays durable attachment cards and composer tokens without text inference", () => {
+    const transcript: RuntimeThreadTranscript = {
+      thread: {
+        threadId: "thread-structured-input",
+        label: "附件任务",
+        runId: "run-structured-input",
+        workspace: {
+          workspaceRoot: "/tmp/awaken",
+          writableRoots: ["/tmp/awaken"],
+        },
+        createdAt: "2026-07-11T00:00:00Z",
+        updatedAt: "2026-07-11T00:00:10Z",
+      },
+      runs: [
+        {
+          run: {
+            runId: "run-structured-input",
+            threadId: "thread-structured-input",
+            input: "",
+            inputAttachments: [
+              {
+                id: "file-1",
+                kind: "file",
+                mimeType: "text/plain",
+                path: "/tmp/acceptance.txt",
+                displayName: "acceptance.txt",
+                byteSize: 17,
+              },
+            ],
+            composerTokens: [
+              {
+                id: "skill:docs:user",
+                type: "skill",
+                label: "docs",
+                payload: {
+                  skillId: "docs",
+                  sourceOrigin: "user",
+                  skillFilePath: "/tmp/skills/docs/SKILL.md",
+                },
+              },
+            ],
+            status: "finished",
+            result: "done",
+            cancelRequested: false,
+            createdAt: "2026-07-11T00:00:00Z",
+            updatedAt: "2026-07-11T00:00:10Z",
+            finishedAt: "2026-07-11T00:00:10Z",
+          },
+          events: [],
+        },
+      ],
+    };
+
+    const actions = actionsForThreadTranscript(transcript);
+    expect(actions).toContainEqual({
+      type: "run/requested",
+      prompt: "",
+      promptAttachments: transcript.runs[0].run.inputAttachments,
+      promptTokens: transcript.runs[0].run.composerTokens,
+      startedAtMs: Date.parse("2026-07-11T00:00:00Z"),
+    });
+
+    const state = actions.reduce(reduceRuntimeState, createInitialRuntimeState());
+    expect(state.narrative.committedItems).toContainEqual({
+      kind: "prompt",
+      id: "prompt:thread-structured-input:1",
+      text: "",
+      attachments: transcript.runs[0].run.inputAttachments,
+      tokens: transcript.runs[0].run.composerTokens,
+    });
+  });
+
   it("restores assistant text when one semantic record projects to frames with the same seq", () => {
     const transcript: RuntimeThreadTranscript = {
       thread: {

@@ -90,10 +90,18 @@ func projectV1TranscriptRecords(records []TranscriptRecord) []agentcore.Semantic
 		case transcriptRecordTypeMessage:
 			switch record.Role {
 			case string(convcontext.RoleUser):
-				appendRec(agentcore.SemanticKindUserMessage, record, record.ParentMessageID, map[string]any{
+				payload := map[string]any{
 					"content": record.Content,
 					"role":    record.Role,
-				})
+				}
+				if len(record.Attachments) > 0 {
+					payload["attachment_count"] = len(record.Attachments)
+					payload["attachments"] = cloneTranscriptAttachments(record.Attachments)
+				}
+				if len(record.ComposerTokens) > 0 {
+					payload["composer_tokens"] = cloneComposerTokens(record.ComposerTokens)
+				}
+				appendRec(agentcore.SemanticKindUserMessage, record, record.ParentMessageID, payload)
 			case string(convcontext.RoleAssistant):
 				payload := map[string]any{
 					"content":    record.Content,

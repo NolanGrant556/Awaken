@@ -100,6 +100,10 @@ func semanticRecordToV1Transcript(record agentcore.SemanticRecord) ([]Transcript
 		base.RecordType = transcriptRecordTypeMessage
 		base.Role = "user"
 		base.Content = stringPayload(record.Payload, "content")
+		base.Attachments = cloneTranscriptAttachments(
+			transcriptAttachmentsFromSemanticUserMessage(record.Payload),
+		)
+		base.ComposerTokens = composerTokensFromSemanticUserMessage(record.Payload)
 		base.MessageID = firstNonEmpty(record.RecordID, fmt.Sprintf("msg_%s", record.RecordID))
 		return []TranscriptRecord{base}, true
 	case agentcore.SemanticKindAssistantMessage:

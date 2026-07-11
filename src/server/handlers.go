@@ -89,6 +89,8 @@ func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 			writeErrorJSON(w, http.StatusBadRequest, "THREAD_WORKSPACE_MISMATCH", err.Error())
 		case errors.Is(err, awruntime.ErrThreadBusy):
 			writeErrorJSON(w, http.StatusConflict, "THREAD_BUSY", err.Error())
+		case errors.Is(err, awruntime.ErrProjectOperationConflict):
+			writeErrorJSON(w, http.StatusConflict, "PROJECT_OPERATION_CONFLICT", err.Error())
 		case errors.Is(err, awruntime.ErrInvalidInput):
 			writeErrorJSON(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 		case errors.Is(err, awruntime.ErrUnsupportedInputAttachment):

@@ -109,6 +109,23 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 		mux.HandleFunc("POST /v1/runs/{run_id}/mass-message-reviews/{review_id}/resolve", handlers.handleResolveMassMessageReview)
 		mux.HandleFunc("POST /v1/runs/{run_id}/user-questions/{question_id}/answer", handlers.handleAnswerUserQuestion)
 		mux.HandleFunc("GET /v1/runs/{run_id}/audit", handlers.handleGetRunAudit)
+		if projectService := cfg.runService.ProjectService(); projectService != nil {
+			projects := projectHandlers{service: projectService}
+			mux.HandleFunc("GET /v1/projects", projects.handleListProjects)
+			mux.HandleFunc("POST /v1/projects", projects.handleUpsertProject)
+			mux.HandleFunc("DELETE /v1/projects/{project_id}", projects.handleDetachProject)
+			mux.HandleFunc("DELETE /v1/projects/{project_id}/threads", projects.handleDeleteProjectThreads)
+			mux.HandleFunc("POST /v1/projects/{project_id}/trash", projects.handlePrepareTrash)
+			mux.HandleFunc("GET /v1/project-operations", projects.handleListPendingTrashOperations)
+			mux.HandleFunc("GET /v1/project-operations/{operation_id}", projects.handleGetOperation)
+			mux.HandleFunc("POST /v1/project-operations/{operation_id}/cancel", projects.handleCancelOperation)
+			mux.HandleFunc("POST /v1/project-operations/{operation_id}/claim-trash", projects.handleClaimTrashOperation)
+			mux.HandleFunc("POST /v1/project-operations/{operation_id}/attest-trash", projects.handleAttestTrashOperation)
+			mux.HandleFunc("POST /v1/project-operations/{operation_id}/stage-trash", projects.handleStageTrashOperation)
+			mux.HandleFunc("POST /v1/project-operations/{operation_id}/begin-trash", projects.handleBeginTrashInvocation)
+			mux.HandleFunc("POST /v1/project-operations/{operation_id}/complete-trash", projects.handleCompleteTrashOperation)
+			mux.HandleFunc("POST /v1/project-operations/{operation_id}/fail-trash", projects.handleFailTrashOperation)
+		}
 		if cfg.shutdown != nil {
 			mux.HandleFunc("POST /v1/shutdown", func(w http.ResponseWriter, r *http.Request) {
 				if err := cfg.runService.FlushTranscripts(); err != nil {

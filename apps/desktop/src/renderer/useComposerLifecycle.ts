@@ -1,5 +1,9 @@
 import { useCallback, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
+import type {
+  DesktopOperationIssue,
+  DesktopOperationRecoveryAction,
+} from "../shared/runtime";
 
 export type ComposerSubmitMode = "send" | "stop";
 
@@ -8,12 +12,14 @@ export type ComposerRuntimePanel = {
   title: string;
   message: string;
   tone?: "error";
+  actions?: DesktopOperationRecoveryAction[];
 };
 
 type ComposerRuntimeStatus = {
   desktopNeedsRestart: boolean;
   desktopStarting: boolean;
   runtimeErrorMessage?: string | null;
+  runtimeOperationIssue?: DesktopOperationIssue | null;
 };
 
 type ComposerLifecycleOptions = ComposerRuntimeStatus & {
@@ -47,6 +53,7 @@ export function composerRuntimePanelsForStatus({
   desktopNeedsRestart,
   desktopStarting,
   runtimeErrorMessage,
+  runtimeOperationIssue,
 }: ComposerRuntimeStatus): ComposerRuntimePanel[] {
   const panels: ComposerRuntimePanel[] = [];
 
@@ -66,11 +73,16 @@ export function composerRuntimePanelsForStatus({
     });
   }
   if (runtimeErrorMessage) {
+    const credentialIssue =
+      runtimeOperationIssue?.code.startsWith("credential_") === true ||
+      runtimeErrorMessage.includes("安全凭据") ||
+      runtimeErrorMessage.includes("API key 无法解密");
     panels.push({
       id: "run-error",
-      title: "Run error",
+      title: credentialIssue ? "模型密钥暂不可用" : "Run error",
       message: runtimeErrorMessage,
       tone: "error",
+      actions: runtimeOperationIssue?.actions,
     });
   }
 
@@ -86,6 +98,7 @@ export function useComposerLifecycle({
   hasAttachments,
   inputAttachmentBlocked = false,
   runtimeErrorMessage,
+  runtimeOperationIssue,
 }: ComposerLifecycleOptions): ComposerLifecycle {
   const [composerValue, setComposerValue] = useState("");
   const [composerFocusRequest, setComposerFocusRequest] = useState(0);
@@ -132,8 +145,14 @@ export function useComposerLifecycle({
         desktopNeedsRestart,
         desktopStarting,
         runtimeErrorMessage,
+        runtimeOperationIssue,
       }),
-    [desktopNeedsRestart, desktopStarting, runtimeErrorMessage],
+    [
+      desktopNeedsRestart,
+      desktopStarting,
+      runtimeErrorMessage,
+      runtimeOperationIssue,
+    ],
   );
 
   return {

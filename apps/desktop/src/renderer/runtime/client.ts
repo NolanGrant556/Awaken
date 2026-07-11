@@ -1,11 +1,16 @@
 import type { AguiEvent } from "./agui";
 import {
   type AttachmentPickResult,
+  type ArtifactOpenRequest,
+  type ArtifactOpenResult,
   type AwakenBridge,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
   type DesktopPreferences,
   type DesktopPreferencesSaveRequest,
+  type DesktopOperationIssue,
+  type DesktopOperationResult,
+  type DesktopOperationRecoveryAction,
   type DesktopPlatform,
   type InstallSkillRequest,
   type InstallSkillResponse,
@@ -15,6 +20,7 @@ import {
   type ModelProfileSaveRequest,
   type ModelProfileTestResult,
   type ModelProvider,
+  type ProjectMutationResult,
   type RuntimeConnector,
   type RuntimeConnectorActionResponse,
   type RuntimeInfo,
@@ -23,12 +29,15 @@ import {
   type RuntimeMcpServerConfigResponse,
   type RuntimeModelProfileSummary,
   type RuntimeRun,
+  type RuntimeProject,
+  type RuntimeProjectOperation,
   type RuntimeSkill,
   type RuntimeThreadTranscript,
   type RuntimeThread,
   type RuntimeToolInfo,
   type StartRunRequest,
   type SupervisorStatusInfo,
+  type ThreadDeleteResult,
   type UpdateMcpServerConfigRequest,
   type WorkspacePickResult,
   type WorkspaceRegistrySnapshot,
@@ -49,9 +58,70 @@ export type SubscribeHandlers = {
   onClose?: () => void;
 };
 
+const DESKTOP_OPERATION_ISSUE_CODES = new Set<DesktopOperationIssue["code"]>([
+  "credential_temporarily_unavailable",
+  "credential_unreadable",
+  "credential_save_failed",
+  "operation_failed",
+]);
+const DESKTOP_OPERATION_RECOVERY_ACTIONS = new Set<DesktopOperationRecoveryAction>([
+  "retry",
+  "relaunch",
+  "reenter",
+]);
+
+export function desktopOperationIssueFromError(
+  error: unknown,
+): DesktopOperationIssue | null {
+  if (!(error instanceof Error)) return null;
+  const candidate = error as Error & {
+    code?: unknown;
+    retryable?: unknown;
+    actions?: unknown;
+  };
+  if (
+    typeof candidate.code !== "string" ||
+    !DESKTOP_OPERATION_ISSUE_CODES.has(
+      candidate.code as DesktopOperationIssue["code"],
+    )
+  ) {
+    return null;
+  }
+  const actions = Array.isArray(candidate.actions)
+    ? candidate.actions.filter(
+        (action): action is DesktopOperationRecoveryAction =>
+          typeof action === "string" &&
+          DESKTOP_OPERATION_RECOVERY_ACTIONS.has(
+            action as DesktopOperationRecoveryAction,
+          ),
+      )
+    : [];
+  return {
+    code: candidate.code as DesktopOperationIssue["code"],
+    message: candidate.message,
+    retryable: candidate.retryable === true,
+    actions,
+  };
+}
+
+async function unwrapDesktopOperation<T>(
+  resultPromise: Promise<DesktopOperationResult<T>>,
+): Promise<T> {
+  const result = await resultPromise;
+  if (result.ok) return result.value;
+  const error = Object.assign(new Error(result.issue.message), {
+    name: "DesktopOperationError",
+    code: result.issue.code,
+    retryable: result.issue.retryable,
+    actions: result.issue.actions,
+  });
+  throw error;
+}
+
 export type RuntimeClient = {
   source: "electron";
   platform: DesktopPlatform;
+  relaunchDesktop: () => Promise<void>;
   getRuntimeInfo: () => Promise<RuntimeInfo>;
   listConnectors: () => Promise<RuntimeConnector[]>;
   connectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
@@ -79,7 +149,15 @@ export type RuntimeClient = {
   getThreadTranscript: (threadId: string) => Promise<RuntimeThreadTranscript>;
   listThreads: () => Promise<RuntimeThread[]>;
   renameThread: (threadId: string, label: string) => Promise<RuntimeThread>;
-  deleteThread: (threadId: string) => Promise<void>;
+  deleteThread: (threadId: string) => Promise<ThreadDeleteResult>;
+  listProjects: (includeRemoved?: boolean) => Promise<RuntimeProject[]>;
+  upsertProject: (workspaceRoot: string, displayName?: string) => Promise<RuntimeProject>;
+  detachProject: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;
+  deleteProjectThreads: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;
+  trashProject: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;
+  getProjectOperation: (operationId: string) => Promise<RuntimeProjectOperation>;
+  openArtifact: (request: ArtifactOpenRequest) => Promise<ArtifactOpenResult>;
+  revealArtifact: (request: ArtifactOpenRequest) => Promise<ArtifactOpenResult>;
   startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
   resolveMassMessageReview: (
@@ -145,6 +223,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
   return {
     source: "electron",
     platform: bridge.platform,
+    relaunchDesktop: () => bridge.relaunchDesktop(),
     getRuntimeInfo: () => bridge.getRuntimeInfo(),
     listConnectors: () => bridge.listConnectors(),
     connectConnector: (connectorId) => bridge.connectConnector(connectorId),
@@ -162,10 +241,12 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     installSkill: (request) => bridge.installSkill(request),
     listModelProviders: () => bridge.listModelProviders(),
     listModelProfiles: () => bridge.listModelProfiles(),
-    saveModelProfile: (request) => bridge.saveModelProfile(request),
+    saveModelProfile: (request) =>
+      unwrapDesktopOperation(bridge.saveModelProfile(request)),
     deleteModelProfile: (profileId) => bridge.deleteModelProfile(profileId),
     setDefaultModelProfile: (profileId) => bridge.setDefaultModelProfile(profileId),
-    testModelProfile: (request) => bridge.testModelProfile(request),
+    testModelProfile: (request) =>
+      unwrapDesktopOperation(bridge.testModelProfile(request)),
     syncModelCapabilities: () => bridge.syncModelCapabilities(),
     getModelProfileBalances: () => bridge.getModelProfileBalances(),
     getRun: (runId) => bridge.getRun(runId),
@@ -173,7 +254,20 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     listThreads: () => bridge.listThreads(),
     renameThread: (threadId, label) => bridge.renameThread(threadId, label),
     deleteThread: (threadId) => bridge.deleteThread(threadId),
-    startRun: (request) => bridge.startRun(request),
+    listProjects: (includeRemoved) => bridge.listProjects(includeRemoved),
+    upsertProject: (workspaceRoot, displayName) =>
+      bridge.upsertProject(workspaceRoot, displayName),
+    detachProject: (projectId, idempotencyKey) =>
+      bridge.detachProject(projectId, idempotencyKey),
+    deleteProjectThreads: (projectId, idempotencyKey) =>
+      bridge.deleteProjectThreads(projectId, idempotencyKey),
+    trashProject: (projectId, idempotencyKey) =>
+      bridge.trashProject(projectId, idempotencyKey),
+    getProjectOperation: (operationId) =>
+      bridge.getProjectOperation(operationId),
+    openArtifact: (request) => bridge.openArtifact(request),
+    revealArtifact: (request) => bridge.revealArtifact(request),
+    startRun: (request) => unwrapDesktopOperation(bridge.startRun(request)),
     cancelRun: bridge.cancelRun,
     resolveMassMessageReview: bridge.resolveMassMessageReview,
     answerUserQuestion: bridge.answerUserQuestion,

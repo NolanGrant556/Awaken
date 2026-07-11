@@ -181,6 +181,7 @@
   z-index: 21;
   top: calc(100% + 4px);
   right: 0;
+  width: max-content;
   min-width: 156px;
   padding: var(--aw-space-2);
   border: 1px solid var(--aw-border-control);
@@ -195,7 +196,9 @@
   border-radius: 6px;
   color: var(--aw-text-primary);
   background: transparent;
-  font-size: var(--aw-font-size-sm);
+  font-size: var(--aw-font-size-xs);
+  line-height: var(--aw-line-height-xs);
+  white-space: nowrap;
   text-align: left;
   cursor: pointer;
 }

@@ -41,6 +41,11 @@ pre {
   height: 100%;
 }
 
+.desktop-root-inspector-hidden .workbench-chrome-right {
+  width: auto;
+  padding: 0 12px;
+}
+
 .desktop-main {
   display: grid;
   grid-template-rows: minmax(0, 1fr);

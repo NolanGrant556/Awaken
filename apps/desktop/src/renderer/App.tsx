@@ -154,6 +154,36 @@ type PendingProjectDelete = {
   threadCount: number;
 };
 
+export type WorkbenchInspectorPresentation = {
+  available: boolean;
+  effectiveCollapsed: boolean;
+  rootClassName:
+    | "desktop-root-inspector-expanded"
+    | "desktop-root-inspector-collapsed"
+    | "desktop-root-inspector-hidden";
+};
+
+export function workbenchInspectorPresentation(
+  activeExtensionSection: ExtensionSection | undefined,
+  inspectorCollapsed: boolean,
+): WorkbenchInspectorPresentation {
+  if (activeExtensionSection) {
+    return {
+      available: false,
+      effectiveCollapsed: true,
+      rootClassName: "desktop-root-inspector-hidden",
+    };
+  }
+
+  return {
+    available: true,
+    effectiveCollapsed: inspectorCollapsed,
+    rootClassName: inspectorCollapsed
+      ? "desktop-root-inspector-collapsed"
+      : "desktop-root-inspector-expanded",
+  };
+}
+
 const emptyUserQuestionSelection = (): UserQuestionSelection => ({
   selected: [],
   otherText: "",
@@ -2445,6 +2475,10 @@ export function App() {
     activeNavId === "connectors" || activeNavId === "skills"
       ? activeNavId
       : undefined;
+  const inspectorPresentation = workbenchInspectorPresentation(
+    activeExtensionSection,
+    inspectorCollapsed,
+  );
 
   function createSubscribeHandlers(): SubscribeHandlers {
     return {
@@ -3937,11 +3971,7 @@ export function App() {
   return (
     <>
       <div
-        className={`desktop-root desktop-root-electron${
-          inspectorCollapsed
-            ? " desktop-root-inspector-collapsed"
-            : " desktop-root-inspector-expanded"
-        }`}
+        className={`desktop-root desktop-root-electron ${inspectorPresentation.rootClassName}`}
         style={layoutStyle}
       >
         <AppShell
@@ -3958,18 +3988,22 @@ export function App() {
             onPointerDown: handleSidebarResizeStart,
             onKeyDown: handleSidebarResizeKeyDown,
           }}
-          inspectorCollapsed={inspectorCollapsed}
-          inspectorResizeHandleProps={{
-            role: "separator",
-            "aria-label": "Resize inspector",
-            "aria-orientation": "vertical",
-            "aria-valuemin": MIN_INSPECTOR_WIDTH,
-            "aria-valuemax": MAX_INSPECTOR_WIDTH,
-            "aria-valuenow": inspectorWidth,
-            tabIndex: 0,
-            onPointerDown: handleInspectorResizeStart,
-            onKeyDown: handleInspectorResizeKeyDown,
-          }}
+          inspectorCollapsed={inspectorPresentation.effectiveCollapsed}
+          inspectorResizeHandleProps={
+            inspectorPresentation.available
+              ? {
+                  role: "separator",
+                  "aria-label": "Resize inspector",
+                  "aria-orientation": "vertical",
+                  "aria-valuemin": MIN_INSPECTOR_WIDTH,
+                  "aria-valuemax": MAX_INSPECTOR_WIDTH,
+                  "aria-valuenow": inspectorWidth,
+                  tabIndex: 0,
+                  onPointerDown: handleInspectorResizeStart,
+                  onKeyDown: handleInspectorResizeKeyDown,
+                }
+              : undefined
+          }
           chrome={
             <WorkbenchChrome
               platform={platform}
@@ -3985,22 +4019,24 @@ export function App() {
                       {topbarStatusLabel}
                     </span>
                   ) : null}
-                  <button
-                    type="button"
-                    className="workbench-chrome-icon workbench-chrome-panel-toggle"
-                    aria-label={
-                      inspectorCollapsed
-                        ? "Expand inspector"
-                        : "Collapse inspector"
-                    }
-                    onClick={handleToggleInspectorCollapsed}
-                  >
-                    {inspectorCollapsed ? (
-                      <PanelRightOpen size={14} strokeWidth={1.9} />
-                    ) : (
-                      <PanelRightClose size={14} strokeWidth={1.9} />
-                    )}
-                  </button>
+                  {inspectorPresentation.available ? (
+                    <button
+                      type="button"
+                      className="workbench-chrome-icon workbench-chrome-panel-toggle"
+                      aria-label={
+                        inspectorCollapsed
+                          ? "Expand inspector"
+                          : "Collapse inspector"
+                      }
+                      onClick={handleToggleInspectorCollapsed}
+                    >
+                      {inspectorCollapsed ? (
+                        <PanelRightOpen size={14} strokeWidth={1.9} />
+                      ) : (
+                        <PanelRightClose size={14} strokeWidth={1.9} />
+                      )}
+                    </button>
+                  ) : null}
                 </div>
               }
             />

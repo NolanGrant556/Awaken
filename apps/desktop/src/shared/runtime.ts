@@ -6,6 +6,28 @@ import type {
 
 export type DesktopPlatform = "macos" | "windows" | "linux";
 
+export type DesktopOperationIssueCode =
+  | "credential_temporarily_unavailable"
+  | "credential_unreadable"
+  | "credential_save_failed"
+  | "operation_failed";
+
+export type DesktopOperationRecoveryAction =
+  | "retry"
+  | "relaunch"
+  | "reenter";
+
+export type DesktopOperationIssue = {
+  code: DesktopOperationIssueCode;
+  message: string;
+  retryable: boolean;
+  actions: DesktopOperationRecoveryAction[];
+};
+
+export type DesktopOperationResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; issue: DesktopOperationIssue };
+
 export type AwakenTheme = "light" | "dark";
 export type AwakenThemePreference = "system" | AwakenTheme;
 
@@ -102,6 +124,7 @@ export type RuntimeRun = {
 
 export type RuntimeThreadWire = {
   thread_id: string;
+  project_id?: string;
   label: string;
   title_source?: ThreadTitleSource;
   title_status?: ThreadTitleStatus;
@@ -116,6 +139,7 @@ export type RuntimeThreadWire = {
 
 export type RuntimeThread = {
   threadId: string;
+  projectId?: string;
   label: string;
   titleSource?: ThreadTitleSource;
   titleStatus?: ThreadTitleStatus;
@@ -127,6 +151,99 @@ export type RuntimeThread = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type RuntimeProjectState = "active" | "removed" | "trash_pending";
+
+export type RuntimeProjectWire = {
+  project_id: string;
+  workspace_root: string;
+  display_name: string;
+  state: RuntimeProjectState;
+  removal_reason?: "detached" | "trashed" | string;
+  removed_at?: string;
+  created_at: string;
+  updated_at: string;
+  version: number;
+};
+
+export type RuntimeProject = {
+  projectId: string;
+  workspaceRoot: string;
+  displayName: string;
+  state: RuntimeProjectState;
+  removalReason?: string;
+  removedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+};
+
+export type RuntimeProjectOperationAction =
+  | "detach"
+  | "delete_history"
+  | "trash_and_purge"
+  | "delete_thread";
+
+export type RuntimeProjectOperationStatus =
+  | "accepted"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "blocked";
+
+export type RuntimeProjectOperationWire = {
+  operation_id: string;
+  idempotency_key: string;
+  project_id?: string;
+  action: RuntimeProjectOperationAction;
+  status: RuntimeProjectOperationStatus;
+  phase: string;
+  previous_project_state?: RuntimeProjectState;
+  workspace_root?: string;
+  path_fingerprint?: string;
+  attempt_id?: string;
+  trash_staging_path?: string;
+  trash_invoked_at?: string;
+  matched_threads: number;
+  pending_cleanup: number;
+  logical_committed_at?: string;
+  physical_completed_at?: string;
+  error_code?: string;
+  error_message?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RuntimeProjectOperation = {
+  operationId: string;
+  idempotencyKey: string;
+  projectId?: string;
+  action: RuntimeProjectOperationAction;
+  status: RuntimeProjectOperationStatus;
+  phase: string;
+  previousProjectState?: RuntimeProjectState;
+  workspaceRoot?: string;
+  pathFingerprint?: string;
+  attemptId?: string;
+  trashStagingPath?: string;
+  trashInvokedAt?: string;
+  matchedThreads: number;
+  pendingCleanup: number;
+  logicalCommittedAt?: string;
+  physicalCompletedAt?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProjectMutationResult =
+  | { ok: true; operation: RuntimeProjectOperation }
+  | { ok: false; code: string; message: string; operationId?: string };
+
+export type ThreadDeleteResult =
+  | { ok: true }
+  | { ok: false; code: string; message: string };
 
 export type RenameThreadRequest = {
   label: string;
@@ -399,6 +516,13 @@ export type ModelProfileAdvanced = {
   supportsVideo?: boolean;
 };
 
+export type ModelCredentialStatus =
+  | "ready"
+  | "missing_key"
+  | "disabled"
+  | "temporarily_unavailable"
+  | "unreadable";
+
 export type RuntimeModelProfileSummaryWire = {
   id: string;
   provider_id: string;
@@ -411,7 +535,7 @@ export type RuntimeModelProfileSummaryWire = {
   masked_key?: string;
   enabled: boolean;
   is_default: boolean;
-  profile_status: "ready" | "missing_key" | "disabled";
+  profile_status: ModelCredentialStatus;
   advanced?: ModelProfileAdvancedWire;
 };
 
@@ -427,7 +551,7 @@ export type RuntimeModelProfileSummary = {
   maskedKey?: string;
   enabled: boolean;
   isDefault: boolean;
-  profileStatus: "ready" | "missing_key" | "disabled";
+  profileStatus: ModelCredentialStatus;
   advanced?: ModelProfileAdvanced;
 };
 
@@ -486,6 +610,7 @@ export type ModelProfileBalanceWire = {
   fetched_at?: string;
   detail?: ModelBalanceDetailWire;
   error?: string;
+  credential_issue?: "temporarily_unavailable" | "unreadable";
 };
 
 export type ModelProfileBalancesResultWire = {
@@ -527,6 +652,7 @@ export type ModelProfileBalance = {
   fetchedAt?: string;
   detail?: ModelBalanceDetail;
   error?: string;
+  credentialIssue?: "temporarily_unavailable" | "unreadable";
 };
 
 export type ModelProfileBalancesResult = {
@@ -650,6 +776,28 @@ export type WorkspaceRegistrySnapshot = {
   registeredWorkspacePaths: string[];
 };
 
+export type ArtifactOpenRequest = {
+  threadId: string;
+  runId: string;
+  artifactId: string;
+};
+
+export type ArtifactOpenErrorCode =
+  | "runtime_unavailable"
+  | "artifact_not_recorded"
+  | "run_not_terminal"
+  | "artifact_not_deliverable"
+  | "unsupported_type"
+  | "outside_output_roots"
+  | "file_not_found"
+  | "not_a_file"
+  | "no_default_application"
+  | "open_failed";
+
+export type ArtifactOpenResult =
+  | { ok: true }
+  | { ok: false; code: ArtifactOpenErrorCode; message: string };
+
 export type RunStreamHandlers = {
   onEvent: (event: AguiEvent) => void;
   onError?: (message: string) => void;
@@ -664,12 +812,23 @@ export type SupervisorStatusInfo = {
 
 export type AwakenBridge = {
   platform: DesktopPlatform;
+  relaunchDesktop: () => Promise<void>;
   getRun: (runId: string) => Promise<RuntimeRun>;
   getThreadTranscript: (threadId: string) => Promise<RuntimeThreadTranscript>;
   listThreads: () => Promise<RuntimeThread[]>;
   renameThread: (threadId: string, label: string) => Promise<RuntimeThread>;
-  deleteThread: (threadId: string) => Promise<void>;
-  startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
+  deleteThread: (threadId: string) => Promise<ThreadDeleteResult>;
+  listProjects: (includeRemoved?: boolean) => Promise<RuntimeProject[]>;
+  upsertProject: (workspaceRoot: string, displayName?: string) => Promise<RuntimeProject>;
+  detachProject: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;
+  deleteProjectThreads: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;
+  trashProject: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;
+  getProjectOperation: (operationId: string) => Promise<RuntimeProjectOperation>;
+  openArtifact: (request: ArtifactOpenRequest) => Promise<ArtifactOpenResult>;
+  revealArtifact: (request: ArtifactOpenRequest) => Promise<ArtifactOpenResult>;
+  startRun: (
+    request: StartRunRequest,
+  ) => Promise<DesktopOperationResult<RuntimeRun>>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
   resolveMassMessageReview: (
     runId: string,
@@ -706,10 +865,14 @@ export type AwakenBridge = {
   installSkill: (request: InstallSkillRequest) => Promise<InstallSkillResponse>;
   listModelProviders: () => Promise<ModelProvider[]>;
   listModelProfiles: () => Promise<RuntimeModelProfileSummary[]>;
-  saveModelProfile: (request: ModelProfileSaveRequest) => Promise<RuntimeModelProfileSummary>;
+  saveModelProfile: (
+    request: ModelProfileSaveRequest,
+  ) => Promise<DesktopOperationResult<RuntimeModelProfileSummary>>;
   deleteModelProfile: (profileId: string) => Promise<void>;
   setDefaultModelProfile: (profileId: string) => Promise<RuntimeModelProfileSummary>;
-  testModelProfile: (request: ModelProfileSaveRequest) => Promise<ModelProfileTestResult>;
+  testModelProfile: (
+    request: ModelProfileSaveRequest,
+  ) => Promise<DesktopOperationResult<ModelProfileTestResult>>;
   syncModelCapabilities: () => Promise<ModelProvider[]>;
   getModelProfileBalances: () => Promise<ModelProfileBalancesResult>;
   pickAttachments: (defaultPath?: string) => Promise<AttachmentPickResult>;
@@ -746,6 +909,7 @@ export function normalizeRuntimeRun(run: RuntimeRunWire): RuntimeRun {
 export function normalizeRuntimeThread(thread: RuntimeThreadWire): RuntimeThread {
   return {
     threadId: thread.thread_id,
+    projectId: thread.project_id || undefined,
     label: thread.label,
     titleSource: thread.title_source || undefined,
     titleStatus: thread.title_status || undefined,
@@ -765,6 +929,47 @@ export function normalizeRuntimeThread(thread: RuntimeThreadWire): RuntimeThread
     },
     createdAt: thread.created_at,
     updatedAt: thread.updated_at,
+  };
+}
+
+export function normalizeRuntimeProject(project: RuntimeProjectWire): RuntimeProject {
+  return {
+    projectId: project.project_id,
+    workspaceRoot: project.workspace_root,
+    displayName: project.display_name,
+    state: project.state,
+    removalReason: project.removal_reason || undefined,
+    removedAt: project.removed_at || undefined,
+    createdAt: project.created_at,
+    updatedAt: project.updated_at,
+    version: project.version,
+  };
+}
+
+export function normalizeRuntimeProjectOperation(
+  operation: RuntimeProjectOperationWire,
+): RuntimeProjectOperation {
+  return {
+    operationId: operation.operation_id,
+    idempotencyKey: operation.idempotency_key,
+    projectId: operation.project_id || undefined,
+    action: operation.action,
+    status: operation.status,
+    phase: operation.phase,
+    previousProjectState: operation.previous_project_state || undefined,
+    workspaceRoot: operation.workspace_root || undefined,
+    pathFingerprint: operation.path_fingerprint || undefined,
+    attemptId: operation.attempt_id || undefined,
+    trashStagingPath: operation.trash_staging_path || undefined,
+    trashInvokedAt: operation.trash_invoked_at || undefined,
+    matchedThreads: operation.matched_threads,
+    pendingCleanup: operation.pending_cleanup,
+    logicalCommittedAt: operation.logical_committed_at || undefined,
+    physicalCompletedAt: operation.physical_completed_at || undefined,
+    errorCode: operation.error_code || undefined,
+    errorMessage: operation.error_message || undefined,
+    createdAt: operation.created_at,
+    updatedAt: operation.updated_at,
   };
 }
 
@@ -1016,6 +1221,7 @@ export function normalizeModelProfileBalance(
     fetchedAt: balance.fetched_at,
     detail: balance.detail ? normalizeModelBalanceDetail(balance.detail) : undefined,
     error: balance.error,
+    credentialIssue: balance.credential_issue,
   };
 }
 

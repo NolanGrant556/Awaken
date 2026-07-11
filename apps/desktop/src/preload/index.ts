@@ -2,11 +2,14 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type { AguiEvent } from "../shared/agui.js";
 import {
   type AttachmentPickResult,
+  type ArtifactOpenRequest,
+  type ArtifactOpenResult,
   type AwakenBridge,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
   type DesktopPreferences,
   type DesktopPreferencesSaveRequest,
+  type DesktopOperationResult,
   type DesktopPlatform,
   type InstallSkillRequest,
   type InstallSkillResponse,
@@ -15,6 +18,7 @@ import {
   type ModelProfileSaveRequest,
   type ModelProfileTestResult,
   type ModelProvider,
+  type ProjectMutationResult,
   type RuntimeConnector,
   type RuntimeConnectorActionResponse,
   type RunStreamHandlers,
@@ -24,12 +28,15 @@ import {
   type RuntimeMcpServerConfigResponse,
   type RuntimeModelProfileSummary,
   type RuntimeRun,
+  type RuntimeProject,
+  type RuntimeProjectOperation,
   type RuntimeSkill,
   type RuntimeThreadTranscript,
   type RuntimeThread,
   type RuntimeToolInfo,
   type StartRunRequest,
   type SupervisorStatusInfo,
+  type ThreadDeleteResult,
   type UpdateMcpServerConfigRequest,
   type WorkspacePickResult,
   type WorkspaceRegistrySnapshot,
@@ -82,6 +89,8 @@ ipcRenderer.on("awaken:run-closed", (_event, payload: { subscriptionId: string }
 
 const bridge: AwakenBridge = {
   platform: toDesktopPlatform(process.platform),
+  relaunchDesktop: () =>
+    ipcRenderer.invoke("awaken:relaunch-desktop") as Promise<void>,
   getRun: (runId: string) =>
     ipcRenderer.invoke("awaken:get-run", runId) as Promise<RuntimeRun>,
   getThreadTranscript: (threadId: string) =>
@@ -91,9 +100,42 @@ const bridge: AwakenBridge = {
   renameThread: (threadId: string, label: string) =>
     ipcRenderer.invoke("awaken:rename-thread", threadId, label) as Promise<RuntimeThread>,
   deleteThread: (threadId: string) =>
-    ipcRenderer.invoke("awaken:delete-thread", threadId) as Promise<void>,
+    ipcRenderer.invoke("awaken:delete-thread", threadId) as Promise<ThreadDeleteResult>,
+  listProjects: (includeRemoved = false) =>
+    ipcRenderer.invoke("awaken:list-projects", includeRemoved) as Promise<RuntimeProject[]>,
+  upsertProject: (workspaceRoot: string, displayName?: string) =>
+    ipcRenderer.invoke("awaken:upsert-project", {
+      workspaceRoot,
+      displayName,
+    }) as Promise<RuntimeProject>,
+  detachProject: (projectId: string, idempotencyKey: string) =>
+    ipcRenderer.invoke("awaken:detach-project", {
+      projectId,
+      idempotencyKey,
+    }) as Promise<ProjectMutationResult>,
+  deleteProjectThreads: (projectId: string, idempotencyKey: string) =>
+    ipcRenderer.invoke("awaken:delete-project-threads", {
+      projectId,
+      idempotencyKey,
+    }) as Promise<ProjectMutationResult>,
+  trashProject: (projectId: string, idempotencyKey: string) =>
+    ipcRenderer.invoke("awaken:trash-project", {
+      projectId,
+      idempotencyKey,
+    }) as Promise<ProjectMutationResult>,
+  getProjectOperation: (operationId: string) =>
+    ipcRenderer.invoke(
+      "awaken:get-project-operation",
+      operationId,
+    ) as Promise<RuntimeProjectOperation>,
+  openArtifact: (request: ArtifactOpenRequest) =>
+    ipcRenderer.invoke("awaken:open-artifact", request) as Promise<ArtifactOpenResult>,
+  revealArtifact: (request: ArtifactOpenRequest) =>
+    ipcRenderer.invoke("awaken:reveal-artifact", request) as Promise<ArtifactOpenResult>,
   startRun: (request: StartRunRequest) =>
-    ipcRenderer.invoke("awaken:start-run", request) as Promise<RuntimeRun>,
+    ipcRenderer.invoke("awaken:start-run", request) as Promise<
+      DesktopOperationResult<RuntimeRun>
+    >,
   cancelRun: (runId: string) =>
     ipcRenderer.invoke("awaken:cancel-run", runId) as Promise<RuntimeRun>,
   resolveMassMessageReview: (runId: string, reviewId: string, decision: MassMessageReviewDecision) =>
@@ -167,13 +209,17 @@ const bridge: AwakenBridge = {
   listModelProfiles: () =>
     ipcRenderer.invoke("awaken:list-model-profiles") as Promise<RuntimeModelProfileSummary[]>,
   saveModelProfile: (request: ModelProfileSaveRequest) =>
-    ipcRenderer.invoke("awaken:save-model-profile", request) as Promise<RuntimeModelProfileSummary>,
+    ipcRenderer.invoke("awaken:save-model-profile", request) as Promise<
+      DesktopOperationResult<RuntimeModelProfileSummary>
+    >,
   deleteModelProfile: (profileId: string) =>
     ipcRenderer.invoke("awaken:delete-model-profile", profileId) as Promise<void>,
   setDefaultModelProfile: (profileId: string) =>
     ipcRenderer.invoke("awaken:set-default-model-profile", profileId) as Promise<RuntimeModelProfileSummary>,
   testModelProfile: (request: ModelProfileSaveRequest) =>
-    ipcRenderer.invoke("awaken:test-model-profile", request) as Promise<ModelProfileTestResult>,
+    ipcRenderer.invoke("awaken:test-model-profile", request) as Promise<
+      DesktopOperationResult<ModelProfileTestResult>
+    >,
   syncModelCapabilities: () =>
     ipcRenderer.invoke("awaken:sync-model-capabilities") as Promise<ModelProvider[]>,
   getModelProfileBalances: () =>

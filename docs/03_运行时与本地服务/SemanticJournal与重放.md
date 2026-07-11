@@ -24,7 +24,7 @@ persistence_warning
 
 设计上必须耐久：用户输入、最终 assistant message、完整 tool call 参数、canonical tool result、artifact/file change/turn diff、permission decision、skill/resource/runtime/recovery 事实、turn boundary 和 terminal。
 
-当前用户输入合同有明确缺口：v2 `user_message` 由Agent goroutine在Skill预激活之后写入；预激活失败可能只有run开始/终态而没有用户消息。附件只以 `attachment_count` 进入payload，`messagesFromSemanticRecords` 只恢复文本，因此附件identity/path和composer token不能从v2 journal完整重放。这些缺口不改变tool call的append-before-side-effect门，但意味着“全部输入事实已完整耐久”尚未实现。
+当前用户输入合同有明确缺口：v2 `user_message` 由Agent goroutine在Skill预激活之后写入；预激活失败可能只有run开始/终态而没有用户消息。附件只以 `attachment_count` 进入payload，`messagesFromSemanticRecords` 只恢复文本，`durableRunsFromSemanticRecords` 也没有重建 `Run.InputAttachments` / composer tokens。Desktop `actionsForThreadTranscript()` 只从这两个 run 字段生成结构化 prompt，所以重启后只剩文本。这些缺口不改变tool call的append-before-side-effect门，但意味着“全部输入事实已完整耐久”尚未实现，并直接违反 [01 Workbench 产品契约](../01_桌面工作台/中间交互区域/产品与交互契约.md) 的输入重放不变量。
 
 仅用于 live 体验：reasoning/text delta、stdout/stderr delta、args delta、spinner/progress。重放从耐久事实重新投影，不要求逐字重现临时动画。
 
@@ -73,6 +73,7 @@ v2 `SemanticRecord.seq` 只定义 journal 内的单调语义顺序。live 与 re
 - canonical outcome 完整保存，UI/模型投影各自有界和脱敏。
 - 当前不支持 persistence degraded continuation。
 - 当前不支持重启后自动重试 outcome unknown 的工具。
+- 当前不支持从 v2 journal 跨重启完整恢复结构化附件和 composer token。
 - journal record sequence 与 09 域定义的 transport/wire sequence 不得合并成一个“序号”。
 
 ## 测试与 Desktop 验收
@@ -87,4 +88,6 @@ v2 `SemanticRecord.seq` 只定义 journal 内的单调语义顺序。live 与 re
 - [`apps/desktop/src/renderer/runtime/thread-transcript.test.ts`](../../apps/desktop/src/renderer/runtime/thread-transcript.test.ts)
 - [`apps/desktop/src/renderer/runtime/client.test.ts`](../../apps/desktop/src/renderer/runtime/client.test.ts)
 
-真实 Desktop 验收需要对同一线程比较重启前 live 和重启后 replay：消息、工具终态、artifact、时长/状态不得重复或漂移；人为中断运行后重开，开放工具显示“结果未知/已中断”，绝不能自动再次执行。
+这些用例当前没有覆盖“附件/token 进入 v2 journal→重建 durable run→Desktop prompt 重放”的端到端合同；仅验证 live 附件或向 renderer 直接提供附件不能关闭该缺口。
+
+真实 Desktop 验收需要对同一线程比较重启前 live 和重启后 replay：消息、结构化附件/token、工具终态、artifact、时长/状态不得重复或漂移；人为中断运行后重开，开放工具显示“结果未知/已中断”，绝不能自动再次执行。当前结构化附件/token 子项是已知失败，修复前不得宣称全量重放通过。

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	"awaken/src/tool"
 )
 
 // ProjectSemanticRecords converts durable SemanticRecord values into AG-UI events.
@@ -120,6 +121,8 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		}
 		artifact.ToolCallID = stringFromAny(payload["tool_call_id"])
 		artifact.ToolCallName = stringFromAny(payload["tool_name"])
+		artifact.ArtifactContractVersion = tool.ArtifactContractVersionOrLegacy(intFromAny(payload["contract_version"]))
+		artifact.ArtifactProducer = firstNonEmpty(stringFromAny(payload["producer"]), artifact.ToolCallName)
 		artifact.ArtifactID = stringFromAny(payload["artifact_id"])
 		artifact.ArtifactTitle = stringFromAny(payload["title"])
 		artifact.ArtifactDescription = stringFromAny(payload["description"])
@@ -127,6 +130,12 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		artifact.ArtifactPath = stringFromAny(payload["path"])
 		artifact.ArtifactContent = stringFromAny(payload["content"])
 		artifact.ArtifactStatus = stringFromAny(payload["status"])
+		artifact.ArtifactRole = string(tool.ResolveArtifactRole(
+			tool.ArtifactRole(stringFromAny(payload["role"])),
+			artifact.ArtifactProducer,
+			artifact.ArtifactKind,
+			artifact.ArtifactPath,
+		))
 		return []Event{artifact}
 	case agentcore.SemanticKindTurnDiff:
 		diff := base
@@ -329,6 +338,43 @@ func boolFromAny(value any) bool {
 	}
 }
 
+func intFromAny(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int8:
+		return int(typed)
+	case int16:
+		return int(typed)
+	case int32:
+		return int(typed)
+	case int64:
+		return int(typed)
+	case uint:
+		return int(typed)
+	case uint8:
+		return int(typed)
+	case uint16:
+		return int(typed)
+	case uint32:
+		return int(typed)
+	case uint64:
+		return int(typed)
+	case float32:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case json.Number:
+		value, err := typed.Int64()
+		if err == nil {
+			return int(value)
+		}
+	default:
+		return 0
+	}
+	return 0
+}
+
 func stringSliceFromAny(value any) []string {
 	var values []any
 	switch typed := value.(type) {
@@ -361,41 +407,44 @@ func SemanticRecordsToAwakenEvents(records []agentcore.SemanticRecord) []agentco
 
 func awakenEventFromAGUI(frame Event) agentcore.AwakenEvent {
 	event := agentcore.AwakenEvent{
-		Timestamp:           time.UnixMilli(frame.Timestamp).UTC(),
-		ThreadID:            frame.ThreadID,
-		RunID:               frame.RunID,
-		TurnID:              frame.TurnID,
-		MessageID:           frame.MessageID,
-		ParentMessageID:     frame.ParentMessageID,
-		Role:                frame.Role,
-		Delta:               frame.Delta,
-		Content:             firstNonEmpty(frame.Content, frame.Result, frame.Message),
-		ToolCallID:          frame.ToolCallID,
-		ToolName:            frame.ToolCallName,
-		Arguments:           frame.Delta,
-		Diff:                frame.Diff,
-		Truncated:           frame.Truncated,
-		Error:               frame.Message,
-		Code:                frame.Code,
-		TerminalReason:      agentcore.TerminalReason(frame.TerminalReason),
-		ToolStatus:          frame.ToolStatus,
-		TransportStatus:     frame.TransportStatus,
-		SemanticStatus:      frame.SemanticStatus,
-		ProcessStatus:       frame.ProcessStatus,
-		ProcessExitCode:     frame.ProcessExitCode,
-		ProcessTimedOut:     frame.ProcessTimedOut,
-		ErrorCode:           frame.ErrorCode,
-		ErrorCategory:       frame.ErrorCategory,
-		Retryable:           frame.Retryable,
-		RecoveryOptions:     append([]string(nil), frame.RecoveryOptions...),
-		DurationMs:          frame.DurationMs,
-		ArtifactID:          frame.ArtifactID,
-		ArtifactTitle:       frame.ArtifactTitle,
-		ArtifactDescription: frame.ArtifactDescription,
-		ArtifactKind:        frame.ArtifactKind,
-		ArtifactPath:        frame.ArtifactPath,
-		ArtifactContent:     frame.ArtifactContent,
-		ArtifactStatus:      agentcore.ArtifactStatus(frame.ArtifactStatus),
+		Timestamp:               time.UnixMilli(frame.Timestamp).UTC(),
+		ThreadID:                frame.ThreadID,
+		RunID:                   frame.RunID,
+		TurnID:                  frame.TurnID,
+		MessageID:               frame.MessageID,
+		ParentMessageID:         frame.ParentMessageID,
+		Role:                    frame.Role,
+		Delta:                   frame.Delta,
+		Content:                 firstNonEmpty(frame.Content, frame.Result, frame.Message),
+		ToolCallID:              frame.ToolCallID,
+		ToolName:                frame.ToolCallName,
+		Arguments:               frame.Delta,
+		Diff:                    frame.Diff,
+		Truncated:               frame.Truncated,
+		Error:                   frame.Message,
+		Code:                    frame.Code,
+		TerminalReason:          agentcore.TerminalReason(frame.TerminalReason),
+		ToolStatus:              frame.ToolStatus,
+		TransportStatus:         frame.TransportStatus,
+		SemanticStatus:          frame.SemanticStatus,
+		ProcessStatus:           frame.ProcessStatus,
+		ProcessExitCode:         frame.ProcessExitCode,
+		ProcessTimedOut:         frame.ProcessTimedOut,
+		ErrorCode:               frame.ErrorCode,
+		ErrorCategory:           frame.ErrorCategory,
+		Retryable:               frame.Retryable,
+		RecoveryOptions:         append([]string(nil), frame.RecoveryOptions...),
+		DurationMs:              frame.DurationMs,
+		ArtifactContractVersion: frame.ArtifactContractVersion,
+		ArtifactRole:            tool.ArtifactRole(frame.ArtifactRole),
+		ArtifactProducer:        frame.ArtifactProducer,
+		ArtifactID:              frame.ArtifactID,
+		ArtifactTitle:           frame.ArtifactTitle,
+		ArtifactDescription:     frame.ArtifactDescription,
+		ArtifactKind:            frame.ArtifactKind,
+		ArtifactPath:            frame.ArtifactPath,
+		ArtifactContent:         frame.ArtifactContent,
+		ArtifactStatus:          agentcore.ArtifactStatus(frame.ArtifactStatus),
 	}
 	switch frame.Type {
 	case EventRunStarted:

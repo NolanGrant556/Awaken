@@ -31,8 +31,8 @@ var ErrSandboxUnavailable = errors.New(
 //
 // Execution flow:
 //  1. Classify the command via ClassifyShellCommand (Task 5).
-//  2. Evaluate the local-computer shell gates (Trash-only deletes and
-//     mass-message review).
+//  2. Evaluate the local-computer shell gates (Trash-only deletes,
+//     mass-message review, and worker-owned typed-runtime executables).
 //  3. Execute via the platform shell (/bin/sh on Unix, sh/cmd.exe on Windows),
 //     capturing stdout/stderr with optional observer streaming.
 type ShellExecutor struct {

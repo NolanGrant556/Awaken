@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	"awaken/src/tool"
 )
 
 func TestMapEventReasoningLifecycle(t *testing.T) {
@@ -460,18 +461,21 @@ func TestMapEventAuthRequired(t *testing.T) {
 
 func TestMapEventArtifactUpdated(t *testing.T) {
 	events := MapEvent(agentcore.AwakenEvent{
-		Type:                agentcore.ArtifactUpdatedEventType,
-		ThreadID:            "thread-1",
-		RunID:               "run-1",
-		ToolCallID:          "tool-1",
-		ToolName:            "write_file",
-		ArtifactID:          "artifact-1",
-		ArtifactTitle:       "README.md",
-		ArtifactDescription: "Updated project readme",
-		ArtifactKind:        "file",
-		ArtifactPath:        "/tmp/README.md",
-		ArtifactContent:     "# hello",
-		ArtifactStatus:      agentcore.ArtifactStatusReady,
+		Type:                    agentcore.ArtifactUpdatedEventType,
+		ThreadID:                "thread-1",
+		RunID:                   "run-1",
+		ToolCallID:              "tool-1",
+		ToolName:                "write_file",
+		ArtifactContractVersion: tool.ArtifactContractVersion,
+		ArtifactRole:            tool.ArtifactRoleDeliverable,
+		ArtifactProducer:        "artifact_publish",
+		ArtifactID:              "artifact-1",
+		ArtifactTitle:           "README.md",
+		ArtifactDescription:     "Updated project readme",
+		ArtifactKind:            "file",
+		ArtifactPath:            "/tmp/README.md",
+		ArtifactContent:         "# hello",
+		ArtifactStatus:          agentcore.ArtifactStatusReady,
 	})
 
 	if len(events) != 1 {
@@ -482,6 +486,9 @@ func TestMapEventArtifactUpdated(t *testing.T) {
 	}
 	if events[0].ArtifactPath != "/tmp/README.md" || events[0].ArtifactStatus != "ready" {
 		t.Fatalf("unexpected artifact payload: %+v", events[0])
+	}
+	if events[0].ArtifactContractVersion != tool.ArtifactContractVersion || events[0].ArtifactRole != "deliverable" || events[0].ArtifactProducer != "artifact_publish" {
+		t.Fatalf("unexpected artifact v2 payload: %+v", events[0])
 	}
 }
 

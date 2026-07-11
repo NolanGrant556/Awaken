@@ -187,6 +187,9 @@ type AwakenEvent struct {
 	MassMessageSourceTool      string
 	QuestionID                 string
 	QuestionAnswer             string
+	ArtifactContractVersion    int
+	ArtifactRole               tool.ArtifactRole
+	ArtifactProducer           string
 	ArtifactID                 string
 	ArtifactTitle              string
 	ArtifactDescription        string

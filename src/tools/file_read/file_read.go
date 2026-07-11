@@ -54,11 +54,32 @@ func (t *FileReadTool) IsReadOnly() bool {
 }
 
 func (t *FileReadTool) Definition() tool.ToolDefinition {
-	return tool.ToolDefinition{
+	return tool.BuildBuiltinDefinition(t, tool.ToolDefinition{
 		Name:        "read_file",
 		DisplayName: "Read File",
-		Source:      tool.SourceBuiltin,
 		Description: t.Description(),
+		Purpose:     "读取有界的 UTF-8 文本范围，并返回可用于安全后续编辑的文件版本事实。",
+		WhenToUse: []string{
+			"需要查看源码、Markdown、JSON、CSV 或其他文本文件的实际内容时",
+			"调用 text_edit 前需要取得当前 sha256 作为 expected_sha256 时",
+		},
+		WhenNotToUse: []string{
+			"PDF、Office、图片或其他二进制工作文件应使用 read_artifact 或对应 artifact 工具",
+			"只需要文件名集合时使用 list_files；需要跨文件内容匹配时使用 grep_search",
+		},
+		OutputSchema: tool.ToolParam{Type: "object", Properties: map[string]tool.ToolParam{
+			"path":            {Type: "string", Description: "实际读取路径"},
+			"sha256":          {Type: "string", Description: "读取时文件内容摘要"},
+			"expected_sha256": {Type: "string", Description: "可直接传给 text_edit 的版本摘要"},
+			"size":            {Type: "integer", Description: "文件总字节数"},
+			"mtime":           {Type: "string", Description: "读取时文件修改时间"},
+		}},
+		SideEffects: []tool.ToolSideEffect{{Kind: tool.SideEffectRead, Resources: []string{"workspace text file"}, Description: "读取文件内容和元数据，不修改文件。", Reversibility: tool.ReversibilityNotApplicable}},
+		Examples:    []tool.ToolExample{{Scenario: "读取 Go 文件前 120 行", Input: map[string]any{"path": "src/tool/tool.go", "offset": 1, "limit": 120}, Outcome: "返回文本片段、sha256、size、mtime 和截断状态"}},
+		FailureModes: []tool.ToolFailureMode{
+			{Code: tool.ErrorCodeValidationError, Cause: "路径或范围参数无效", Retryable: false, Recovery: []string{"修正参数后重试"}},
+			{Code: tool.ErrorCodeToolExecutionFailed, Cause: "文件不存在、不可读或不是受支持文本", Retryable: true, Recovery: []string{"核对路径和可读范围", "二进制工作文件改用 read_artifact"}},
+		},
 		Annotations: tool.ToolAnnotations{
 			ReadOnly:        true,
 			Destructive:     false,
@@ -66,7 +87,7 @@ func (t *FileReadTool) Definition() tool.ToolDefinition {
 			CapabilityClass: tool.CapabilityArtifactRead,
 			TrustedOrigin:   tool.TrustedOriginBuiltin,
 		},
-	}
+	})
 }
 
 func (t *FileReadTool) CheckPermission(ctx context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {
@@ -125,6 +146,10 @@ func (t *FileReadTool) ExecuteOutcome(ctx context.Context, input string, _ tool.
 		"size":            meta.Size,
 		"mtime":           meta.ModTime.UTC().Format(time.RFC3339Nano),
 		"path":            params.Path,
+	}
+	outcome.Details = map[string]any{
+		"path": params.Path, "sha256": meta.SHA256, "expected_sha256": meta.SHA256,
+		"size": meta.Size, "mtime": meta.ModTime.UTC().Format(time.RFC3339Nano),
 	}
 	if meta.Truncated {
 		outcome.Truncated = true
@@ -285,5 +310,5 @@ func takeBytesAtRuneBoundary(value string, maxBytes int) string {
 }
 
 func init() {
-	tool.MustRegisterTool(&FileReadTool{})
+	tool.MustRegisterToolWithMode(&FileReadTool{}, tool.DefinitionValidationStrictBuiltin)
 }

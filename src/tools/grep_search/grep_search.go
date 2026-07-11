@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"awaken/src/tool"
 	"awaken/src/tools/internal/filematch"
@@ -84,11 +86,36 @@ func (t *GrepSearchTool) IsReadOnly() bool {
 }
 
 func (t *GrepSearchTool) Definition() tool.ToolDefinition {
-	return tool.ToolDefinition{
+	return tool.BuildBuiltinDefinition(t, tool.ToolDefinition{
 		Name:        "grep_search",
 		DisplayName: "Grep Search",
-		Source:      tool.SourceBuiltin,
 		Description: t.Description(),
+		Purpose:     "用 Go 正则在本机文本文件内容中搜索，并返回文件、行号和有界匹配。",
+		WhenToUse: []string{
+			"需要查找符号定义、调用点、配置值或跨文件文本时",
+			"需要按 include 范围筛选内容匹配时",
+		},
+		WhenNotToUse: []string{
+			"只需要按文件名或扩展名枚举路径时使用 list_files",
+			"查询互联网公开信息时使用 web_search",
+		},
+		OutputSchema: tool.ToolParam{Type: "object", Properties: map[string]tool.ToolParam{
+			"query":       {Type: "string", Description: "实际 Go 正则"},
+			"root":        {Type: "string", Description: "实际搜索根目录"},
+			"include":     {Type: "string", Description: "实际文件 include 模式"},
+			"output_mode": {Type: "string", Description: "实际输出模式"},
+			"match_count": {Type: "integer", Description: "本次返回的匹配数量"},
+			"offset":      {Type: "integer", Description: "本次结果起始偏移"},
+			"max_results": {Type: "integer", Description: "本次结果上限"},
+		}},
+		SideEffects: []tool.ToolSideEffect{{Kind: tool.SideEffectRead, Resources: []string{"workspace text files"}, Description: "扫描文本内容，不修改文件。", Reversibility: tool.ReversibilityNotApplicable}},
+		Examples:    []tool.ToolExample{{Scenario: "搜索函数定义", Input: map[string]any{"query": `func\s+ResolveDefinition\b`, "root": ".", "include": "**/*.go", "max_results": 100}, Outcome: "返回匹配文件、行号和文本"}},
+		FailureModes: []tool.ToolFailureMode{
+			{Code: "grep_search_query_required", Cause: "query 为空", Retryable: false, Recovery: []string{"提供非空正则"}},
+			{Code: "grep_search_invalid_regex", Cause: "query 不是有效 Go 正则", Retryable: false, Recovery: []string{"修正正则表达式"}},
+			{Code: "grep_search_root_unavailable", Cause: "搜索根不存在或不可读", Retryable: false, Recovery: []string{"检查 root 和任务可读范围"}},
+			{Code: "grep_search_scan_failed", Cause: "文本扫描在执行阶段失败", Retryable: true, Recovery: []string{"缩小 include 和结果范围"}},
+		},
 		Annotations: tool.ToolAnnotations{
 			ReadOnly:        true,
 			Destructive:     false,
@@ -96,16 +123,35 @@ func (t *GrepSearchTool) Definition() tool.ToolDefinition {
 			CapabilityClass: tool.CapabilityArtifactRead,
 			TrustedOrigin:   tool.TrustedOriginBuiltin,
 		},
-	}
+	})
 }
 
 func (t *GrepSearchTool) Execute(ctx context.Context, input string) (string, error) {
+	outcome, err := t.ExecuteOutcome(ctx, input, nil)
+	if err != nil {
+		return outcome.Content, err
+	}
+	if outcome.IsError() {
+		return "", fmt.Errorf("%s", outcome.ErrorMessage)
+	}
+	return outcome.Content, nil
+}
+
+// ExecuteOutcome distinguishes invalid search requests from runtime scan
+// failures and makes pagination/truncation state explicit for the agent.
+func (t *GrepSearchTool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObserver) (tool.ExecutionOutcome, error) {
+	started := time.Now().UTC()
 	params, err := parseParams(input)
 	if err != nil {
-		return "", err
+		outcome := tool.FailedOutcome(err.Error(), "grep_search_invalid_input", tool.ErrorCategoryValidation, false)
+		outcome.RecoveryOptions = []string{"fix_json_parameters"}
+		outcome.Diagnostic = map[string]any{"expected_input": "JSON object"}
+		return outcome.WithTiming(started, time.Now().UTC()), nil
 	}
 	if strings.TrimSpace(params.Query) == "" {
-		return "", fmt.Errorf("缺少必需参数: query")
+		outcome := tool.FailedOutcome("缺少必需参数: query", "grep_search_query_required", tool.ErrorCategoryValidation, false)
+		outcome.RecoveryOptions = []string{"provide_non_empty_query"}
+		return outcome.WithTiming(started, time.Now().UTC()), nil
 	}
 
 	permissionContext := tool.PermissionContextFromContext(ctx)
@@ -113,7 +159,10 @@ func (t *GrepSearchTool) Execute(ctx context.Context, input string) (string, err
 	if tool.HasPermissionContext(ctx) {
 		checkedRoot, err := permissionContext.ResolveReadablePathChecked(params.Root)
 		if err != nil {
-			return "", err
+			outcome := tool.FailedOutcome(err.Error(), "grep_search_root_unavailable", tool.ErrorCategoryDomain, false)
+			outcome.RecoveryOptions = []string{"choose_readable_root", "search_workspace_root"}
+			outcome.Diagnostic = map[string]any{"requested_root": params.Root}
+			return outcome.WithTiming(started, time.Now().UTC()), nil
 		}
 		root = checkedRoot
 	}
@@ -133,20 +182,68 @@ func (t *GrepSearchTool) Execute(ctx context.Context, input string) (string, err
 
 	re, err := regexp.Compile(params.Query)
 	if err != nil {
-		return "", fmt.Errorf("query 不是有效正则表达式: %w", err)
+		message := fmt.Sprintf("query 不是有效正则表达式: %v", err)
+		outcome := tool.FailedOutcome(message, "grep_search_invalid_regex", tool.ErrorCategoryValidation, false)
+		outcome.RecoveryOptions = []string{"fix_regular_expression", "escape_literal_metacharacters"}
+		outcome.Diagnostic = map[string]any{"query": params.Query}
+		return outcome.WithTiming(started, time.Now().UTC()), nil
 	}
 
 	results, truncated, err := searchFiles(ctx, re, options, permissionContext)
 	if err != nil {
-		return "", err
+		outcome := grepSearchFailureOutcome(err, options)
+		return outcome.WithTiming(started, time.Now().UTC()), nil
 	}
+	resultCount := len(results)
 	if len(results) == 0 {
-		return "未找到匹配内容", nil
+		outcome := tool.SucceededOutcome("未找到匹配内容")
+		outcome.Diagnostic = grepSearchDiagnostic(options, params.Query, 0, false)
+		outcome.Details = grepSearchDetails(options, params.Query, 0)
+		return outcome.WithTiming(started, time.Now().UTC()), nil
 	}
 	if truncated {
 		results = append(results, fmt.Sprintf("[grep_search truncated: showing %d results after offset %d]", len(results), options.offset))
 	}
-	return strings.Join(results, "\n"), nil
+	outcome := tool.SucceededOutcome(strings.Join(results, "\n"))
+	outcome.Truncated = truncated
+	outcome.Diagnostic = grepSearchDiagnostic(options, params.Query, resultCount, truncated)
+	outcome.Details = grepSearchDetails(options, params.Query, resultCount)
+	return outcome.WithTiming(started, time.Now().UTC()), nil
+}
+
+func grepSearchFailureOutcome(err error, options grepOptions) tool.ExecutionOutcome {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		outcome := tool.FailedOutcome(err.Error(), "grep_search_cancelled", tool.ErrorCategoryCancelled, true)
+		outcome.Status = tool.OutcomeCancelled
+		outcome.TransportStatus = tool.TransportCancelled
+		outcome.RecoveryOptions = []string{"retry_when_context_available"}
+		outcome.Diagnostic = grepSearchDiagnostic(options, "", 0, false)
+		return outcome
+	}
+	outcome := tool.FailedOutcome(err.Error(), "grep_search_scan_failed", tool.ErrorCategoryRuntime, true)
+	outcome.RecoveryOptions = []string{"inspect_root_access", "narrow_include_pattern", "retry_grep_search"}
+	outcome.Diagnostic = grepSearchDiagnostic(options, "", 0, false)
+	return outcome
+}
+
+func grepSearchDiagnostic(options grepOptions, query string, resultCount int, truncated bool) map[string]any {
+	diagnostic := map[string]any{
+		"root": options.root, "include": options.include, "output_mode": options.outputMode,
+		"offset": options.offset, "max_results": options.maxResults,
+		"result_count": resultCount, "match_count": resultCount, "truncated": truncated,
+	}
+	if strings.TrimSpace(query) != "" {
+		diagnostic["query"] = query
+	}
+	return diagnostic
+}
+
+func grepSearchDetails(options grepOptions, query string, resultCount int) map[string]any {
+	return map[string]any{
+		"query": query, "root": options.root, "include": options.include,
+		"output_mode": options.outputMode, "match_count": resultCount,
+		"offset": options.offset, "max_results": options.maxResults,
+	}
 }
 
 func (t *GrepSearchTool) CheckPermission(ctx context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {
@@ -382,5 +479,5 @@ func trimMatchLine(line string, maxChars int) string {
 }
 
 func init() {
-	tool.MustRegisterTool(&GrepSearchTool{})
+	tool.MustRegisterToolWithMode(&GrepSearchTool{}, tool.DefinitionValidationStrictBuiltin)
 }

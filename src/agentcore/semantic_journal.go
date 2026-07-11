@@ -128,17 +128,23 @@ func skillIDFromToolName(toolName string) string {
 }
 
 func ArtifactSemanticRecord(threadID, runID, turnID, sessionID string, event AwakenEvent) SemanticRecord {
+	contractVersion := tool.ArtifactContractVersionOrLegacy(event.ArtifactContractVersion)
+	producer := firstNonEmpty(event.ArtifactProducer, event.ToolName)
+	role := tool.ResolveArtifactRole(event.ArtifactRole, producer, event.ArtifactKind, event.ArtifactPath)
 	return NewSemanticRecord(SemanticKindArtifact, threadID, runID, turnID, event.ToolCallID, sessionID, map[string]any{
-		"artifact_id":  event.ArtifactID,
-		"title":        event.ArtifactTitle,
-		"description":  event.ArtifactDescription,
-		"kind":         event.ArtifactKind,
-		"path":         event.ArtifactPath,
-		"content":      event.ArtifactContent,
-		"status":       string(event.ArtifactStatus),
-		"tool_call_id": event.ToolCallID,
-		"tool_name":    event.ToolName,
-		"created":      event.Type == ArtifactCreatedEventType,
+		"contract_version": contractVersion,
+		"role":             string(role),
+		"producer":         producer,
+		"artifact_id":      event.ArtifactID,
+		"title":            event.ArtifactTitle,
+		"description":      event.ArtifactDescription,
+		"kind":             event.ArtifactKind,
+		"path":             event.ArtifactPath,
+		"content":          event.ArtifactContent,
+		"status":           string(event.ArtifactStatus),
+		"tool_call_id":     event.ToolCallID,
+		"tool_name":        event.ToolName,
+		"created":          event.Type == ArtifactCreatedEventType,
 	})
 }
 

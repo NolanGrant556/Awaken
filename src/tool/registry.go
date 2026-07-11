@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	toolRegistry     = make(map[string]Tool)
+	toolRegistry     = make(map[string]RegisteredTool)
 	mu               sync.RWMutex
 	ErrToolNotFound  = errors.New("tool not found")
 	ErrDuplicateTool = errors.New("tool already registered")
@@ -25,17 +25,38 @@ var safeNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 // Hyphens are allowed because many public MCP server names use them.
 var mcpSafeNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+(?:__[a-zA-Z0-9_-]+)*$`)
 
-func RegisterTool(tool Tool) error {
-	if err := ValidateTool(tool); err != nil {
+// RegisteredTool binds the executable runtime to the resolved definition
+// snapshot used by model compilation and audits. Origin and Quality are kept
+// separate so a trusted builtin is not mistaken for a complete contract.
+type RegisteredTool struct {
+	Runtime             Tool
+	Definition          ToolDefinition
+	Origin              ToolSource
+	Quality             DefinitionQuality
+	Warnings            []string
+	PreserveInputObject bool
+}
+
+func RegisterTool(runtime Tool) error {
+	return RegisterToolWithMode(runtime, DefinitionValidationCompat)
+}
+
+// RegisterToolWithMode registers a tool under an explicit definition
+// validation gate. The default RegisterTool remains compatibility-safe for
+// legacy and externally authored tools; first-party builtins register through
+// the explicit strict_builtin gate.
+func RegisterToolWithMode(runtime Tool, mode DefinitionValidationMode) error {
+	if err := ValidateToolWithMode(runtime, mode); err != nil {
 		return err
 	}
+	report := ResolveDefinitionReport(runtime)
 
 	mu.Lock()
 	defer mu.Unlock()
-	if _, exists := toolRegistry[tool.Name()]; exists {
-		return fmt.Errorf("%w: %s", ErrDuplicateTool, tool.Name())
+	if _, exists := toolRegistry[runtime.Name()]; exists {
+		return fmt.Errorf("%w: %s", ErrDuplicateTool, runtime.Name())
 	}
-	toolRegistry[tool.Name()] = tool
+	toolRegistry[runtime.Name()] = registeredToolFromResolution(runtime, report)
 	return nil
 }
 
@@ -43,17 +64,32 @@ func RegisterTool(tool Tool) error {
 // with the same name. Used by the MCP manager when refreshing a server's
 // tool list and by tests that re-create tool instances.
 func RegisterToolForce(t Tool) error {
-	if err := ValidateTool(t); err != nil {
+	return RegisterToolForceWithMode(t, DefinitionValidationCompat)
+}
+
+// RegisterToolForceWithMode is the validation-mode variant of
+// RegisterToolForce. It intentionally preserves replacement semantics.
+func RegisterToolForceWithMode(t Tool, mode DefinitionValidationMode) error {
+	if err := ValidateToolWithMode(t, mode); err != nil {
 		return err
 	}
+	report := ResolveDefinitionReport(t)
 	mu.Lock()
 	defer mu.Unlock()
-	toolRegistry[t.Name()] = t
+	toolRegistry[t.Name()] = registeredToolFromResolution(t, report)
 	return nil
 }
 
 func MustRegisterTool(tool Tool) {
 	if err := RegisterTool(tool); err != nil {
+		panic(err)
+	}
+}
+
+// MustRegisterToolWithMode is intended for fully migrated builtin packages and
+// tests that want registration itself to enforce the v2 contract.
+func MustRegisterToolWithMode(runtime Tool, mode DefinitionValidationMode) {
+	if err := RegisterToolWithMode(runtime, mode); err != nil {
 		panic(err)
 	}
 }
@@ -104,32 +140,7 @@ func startsWith(name, prefix string) bool {
 }
 
 func ValidateTool(tool Tool) error {
-	if tool == nil {
-		return fmt.Errorf("%w: nil tool", ErrInvalidTool)
-	}
-	if !isValidToolName(tool.Name()) {
-		return fmt.Errorf("%w: tool name %q must match %s", ErrInvalidTool, tool.Name(), mcpSafeNamePattern.String())
-	}
-	for _, param := range tool.Parameters() {
-		if !safeNamePattern.MatchString(param.Name) {
-			return fmt.Errorf("%w: parameter name %q must match %s", ErrInvalidTool, param.Name, safeNamePattern.String())
-		}
-		if !isJSONSchemaType(param.Type) {
-			return fmt.Errorf("%w: parameter %q has invalid JSON Schema type %q", ErrInvalidTool, param.Name, param.Type)
-		}
-	}
-	// Validate ToolDefinition has required fields.
-	def := tool.Definition()
-	if def.Name == "" {
-		return fmt.Errorf("%w: ToolDefinition.Name is required", ErrInvalidTool)
-	}
-	if def.Source == "" {
-		return fmt.Errorf("%w: ToolDefinition.Source is required", ErrInvalidTool)
-	}
-	if def.Description == "" {
-		return fmt.Errorf("%w: ToolDefinition.Description is required", ErrInvalidTool)
-	}
-	return nil
+	return ValidateToolWithMode(tool, DefinitionValidationCompat)
 }
 
 // isValidToolName accepts both builtin-style names and the namespaced
@@ -144,19 +155,30 @@ func isValidToolName(name string) bool {
 func GetTool(name string) (Tool, error) {
 	mu.RLock()
 	defer mu.RUnlock()
-	tool, exists := toolRegistry[name]
+	registered, exists := toolRegistry[name]
 	if !exists {
 		return nil, ErrToolNotFound
 	}
-	return tool, nil
+	return registered.Runtime, nil
+}
+
+// GetRegisteredTool returns an immutable snapshot of the registry contract.
+func GetRegisteredTool(name string) (RegisteredTool, error) {
+	mu.RLock()
+	defer mu.RUnlock()
+	registered, exists := toolRegistry[name]
+	if !exists {
+		return RegisteredTool{}, ErrToolNotFound
+	}
+	return cloneRegisteredTool(registered), nil
 }
 
 func ListTools() []Tool {
 	mu.RLock()
 	defer mu.RUnlock()
 	tools := make([]Tool, 0, len(toolRegistry))
-	for _, tool := range toolRegistry {
-		tools = append(tools, tool)
+	for _, registered := range toolRegistry {
+		tools = append(tools, registered.Runtime)
 	}
 	sort.Slice(tools, func(i, j int) bool {
 		return tools[i].Name() < tools[j].Name()
@@ -164,24 +186,74 @@ func ListTools() []Tool {
 	return tools
 }
 
+// ListRegisteredTools returns registry snapshots sorted by canonical name.
+func ListRegisteredTools() []RegisteredTool {
+	mu.RLock()
+	defer mu.RUnlock()
+	registered := make([]RegisteredTool, 0, len(toolRegistry))
+	for _, entry := range toolRegistry {
+		registered = append(registered, cloneRegisteredTool(entry))
+	}
+	sort.Slice(registered, func(i, j int) bool {
+		return registered[i].Definition.Name < registered[j].Definition.Name
+	})
+	return registered
+}
+
 func GetToolsDescription() string {
-	tools := ListTools()
-	if len(tools) == 0 {
+	registered := ListRegisteredTools()
+	if len(registered) == 0 {
 		return "No tools available."
 	}
 
 	var desc string
-	for _, tool := range tools {
-		desc += fmt.Sprintf("- %s: %s\n", tool.Name(), tool.Description())
-		for _, param := range tool.Parameters() {
+	for _, entry := range registered {
+		desc += fmt.Sprintf("- %s: %s\n", entry.Definition.Name, ModelDescription(entry.Definition))
+		requiredNames := make(map[string]bool, len(entry.Definition.InputSchema.Required))
+		for _, name := range entry.Definition.InputSchema.Required {
+			requiredNames[name] = true
+		}
+		parameterNames := make([]string, 0, len(entry.Definition.InputSchema.Properties))
+		for name := range entry.Definition.InputSchema.Properties {
+			parameterNames = append(parameterNames, name)
+		}
+		sort.Strings(parameterNames)
+		for _, name := range parameterNames {
+			param := entry.Definition.InputSchema.Properties[name]
 			required := ""
-			if param.Required {
+			if requiredNames[name] {
 				required = " (required)"
 			}
-			desc += fmt.Sprintf("  - %s (%s)%s: %s\n", param.Name, param.Type, required, param.Description)
+			paramType := param.Type
+			if paramType == "" && len(param.OneOf) > 0 {
+				paramType = "oneOf"
+			}
+			desc += fmt.Sprintf("  - %s (%s)%s: %s\n", name, paramType, required, param.Description)
 		}
 	}
 	return desc
+}
+
+func registeredToolFromResolution(runtime Tool, report DefinitionResolution) RegisteredTool {
+	_, hasRecursiveSchema := runtime.(InputSchemaProvider)
+	preserveInputObject := runtime.Definition().SchemaVersion == ToolDefinitionSchemaVersion || hasRecursiveSchema
+	if legacy, ok := runtime.(LegacySingleValueInput); ok && legacy.UnwrapSingleParameterInput() {
+		preserveInputObject = false
+	}
+	return RegisteredTool{
+		Runtime:             runtime,
+		Definition:          cloneToolDefinition(report.Definition),
+		Origin:              report.Origin,
+		Quality:             report.Quality,
+		Warnings:            append([]string(nil), report.Warnings...),
+		PreserveInputObject: preserveInputObject,
+	}
+}
+
+func cloneRegisteredTool(registered RegisteredTool) RegisteredTool {
+	registered.Definition = cloneToolDefinition(registered.Definition)
+	registered.Warnings = append([]string(nil), registered.Warnings...)
+	return registered
 }
 
 func ExecuteTool(ctx context.Context, toolName string, input string) (string, error) {

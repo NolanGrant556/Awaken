@@ -34,6 +34,33 @@ func TestArtifactRuntimeCreatesOfficeArtifacts(t *testing.T) {
 	assertZipContains(t, sheetOut, "xl/worksheets/sheet1.xml")
 }
 
+func TestDocumentCreateRejectsMisleadingPDFExtension(t *testing.T) {
+	root := t.TempDir()
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	_, err := documentCreateOrEdit(ctx, mustJSON(t, map[string]any{
+		"output_path": "report.pdf",
+		"paragraphs":  []string{"This must not become a DOCX disguised as PDF"},
+	}))
+	if err == nil || !strings.Contains(err.Error(), "只支持 .docx") {
+		t.Fatalf("expected explicit extension rejection, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "report.pdf")); !os.IsNotExist(statErr) {
+		t.Fatalf("misleading PDF must not be created, stat error=%v", statErr)
+	}
+}
+
+func TestOfficeExportPDFRejectsNonOfficeInputBeforeRuntime(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "notes.md"), []byte("notes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	_, err := officeExportPDF(ctx, mustJSON(t, map[string]any{"path": "notes.md", "output_path": "notes.pdf"}))
+	if err == nil || !strings.Contains(err.Error(), "只支持 Word、Excel 或 PowerPoint") {
+		t.Fatalf("expected non-Office input rejection, got %v", err)
+	}
+}
+
 func TestPresentationCreateUsesRuntimeAndRenderCheck(t *testing.T) {
 	installHermeticPresentationRuntime(t)
 	root := t.TempDir()
@@ -219,6 +246,100 @@ func TestTypedArtifactToolEmitsPresentationPreviewArtifacts(t *testing.T) {
 	if artifacts[0].Kind != "presentation" || artifacts[1].Kind != "pdf" || artifacts[2].Kind != "image" {
 		t.Fatalf("unexpected artifact kinds: %+v", artifacts)
 	}
+	for _, artifact := range artifacts {
+		if artifact.ContractVersion != tool.ArtifactContractVersion || artifact.Producer != "presentation_create" {
+			t.Fatalf("artifact lacks a complete v2 producer contract: %+v", artifact)
+		}
+		if artifact.Action != tool.ArtifactActionCreated {
+			t.Fatalf("presentation_create artifact must be created: %+v", artifact)
+		}
+	}
+	if artifacts[0].Role != tool.ArtifactRoleDeliverable || artifacts[1].Role != tool.ArtifactRolePreview || artifacts[2].Role != tool.ArtifactRolePreview {
+		t.Fatalf("unexpected artifact roles: %+v", artifacts)
+	}
+}
+
+func TestTypedArtifactCreateAndEditDeclareAccurateMutations(t *testing.T) {
+	create := typedArtifactTool{name: "document_create", description: "create", readOnly: false, capability: tool.CapabilityArtifactWrite}
+	edit := typedArtifactTool{name: "document_edit", description: "edit", readOnly: false, capability: tool.CapabilityArtifactWrite}
+
+	createDefinition := create.Definition()
+	editDefinition := edit.Definition()
+	if len(createDefinition.SideEffects) != 1 || createDefinition.SideEffects[0].Kind != tool.SideEffectCreate {
+		t.Fatalf("document_create side effect=%+v, want create", createDefinition.SideEffects)
+	}
+	if len(editDefinition.SideEffects) != 1 || editDefinition.SideEffects[0].Kind != tool.SideEffectUpdate {
+		t.Fatalf("document_edit side effect=%+v, want update", editDefinition.SideEffects)
+	}
+
+	root := t.TempDir()
+	permissionContext := tool.NewPermissionContext(root, []string{root})
+	output := mustJSON(t, map[string]any{"path": filepath.Join(root, "report.docx")})
+	created := create.Artifacts(`{}`, output, permissionContext)
+	updated := edit.Artifacts(`{}`, output, permissionContext)
+	if len(created) != 1 || created[0].Action != tool.ArtifactActionCreated {
+		t.Fatalf("document_create descriptor=%+v, want created", created)
+	}
+	if len(updated) != 1 || updated[0].Action != tool.ArtifactActionUpdated {
+		t.Fatalf("document_edit descriptor=%+v, want updated", updated)
+	}
+	for _, artifact := range append(created, updated...) {
+		if artifact.ContractVersion != tool.ArtifactContractVersion || artifact.Role != tool.ArtifactRoleDeliverable || artifact.Producer == "" {
+			t.Fatalf("descriptor lacks v2 contract facts: %+v", artifact)
+		}
+	}
+}
+
+func TestTypedArtifactOutcomeProjectsStructuredExecutorDetails(t *testing.T) {
+	runtimeTool := typedArtifactTool{
+		name: "contract_test_create", description: "create test artifact", readOnly: false,
+		capability: tool.CapabilityArtifactWrite,
+		execute: func(context.Context, string) (string, error) {
+			return `{"status":"ready","path":"report.docx","custom_count":3}`, nil
+		},
+	}
+	outcome, err := runtimeTool.ExecuteOutcome(context.Background(), `{}`, nil)
+	if err != nil || outcome.IsError() {
+		t.Fatalf("structured artifact outcome failed: outcome=%+v err=%v", outcome, err)
+	}
+	result, ok := outcome.Details["result"].(map[string]any)
+	if !ok || result["custom_count"] != float64(3) || outcome.Details["path"] != "report.docx" {
+		t.Fatalf("executor result was not projected into typed details: %+v", outcome.Details)
+	}
+	definition := runtimeTool.Definition()
+	normalized := outcome.Normalize(tool.OutcomeNormalizationContext{
+		OperationType: runtimeTool.name, DeclaredSideEffects: definition.SideEffects,
+		OutputSchema: definition.OutputSchema, StrictOutputSchema: true,
+	})
+	if normalized.IsError() || normalized.Status != tool.OutcomeSucceeded {
+		t.Fatalf("typed artifact details failed their registered output schema: %+v", normalized)
+	}
+}
+
+func TestArtifactRenderDoesNotClaimExistingPDFWasCreated(t *testing.T) {
+	root := t.TempDir()
+	permissionContext := tool.NewPermissionContext(root, []string{root})
+	source := filepath.Join(root, "existing.pdf")
+	preview := filepath.Join(root, "preview", "page-1.png")
+	output := mustJSON(t, map[string]any{
+		"path": source, "pdf_path": source, "preview_images": []string{preview},
+	})
+	render := typedArtifactTool{name: "artifact_render", readOnly: false}
+	artifacts := render.Artifacts(`{}`, output, permissionContext)
+	if len(artifacts) != 1 {
+		t.Fatalf("render must emit only generated preview artifacts, got %+v", artifacts)
+	}
+	if artifacts[0].Path != "preview/page-1.png" || artifacts[0].Action != tool.ArtifactActionCreated || artifacts[0].Role != tool.ArtifactRolePreview {
+		t.Fatalf("unexpected render preview descriptor: %+v", artifacts[0])
+	}
+}
+
+func TestUnimplementedArtifactStubsAreNotRegistered(t *testing.T) {
+	for _, name := range []string{"spreadsheet_chart", "document_render", "pdf_render"} {
+		if registered, err := tool.GetTool(name); err == nil {
+			t.Fatalf("unimplemented tool %s must not be advertised: %T", name, registered)
+		}
+	}
 }
 
 func TestPDFExtractAcceptsRawSinglePathInput(t *testing.T) {
@@ -278,7 +399,8 @@ func TestPDFExtractRejectsEmptyPDFWithClearDiagnostic(t *testing.T) {
 
 func requirePresentationRuntime(t *testing.T) {
 	t.Helper()
-	if _, err := resolvePresentationPython(); err == nil {
+	if path, err := resolvePresentationPython(); err == nil {
+		setPresentationPythonTestOverride(t, path)
 		return
 	}
 	// Hermetic tests may bootstrap from PATH through an in-process override;
@@ -410,6 +532,9 @@ count_path = pdf + ".pagecount"
 count = 1
 if os.path.exists(count_path):
     count = max(1, int(open(count_path, encoding="utf-8").read().strip() or "1"))
+else:
+    with open(pdf, encoding="utf-8", errors="ignore") as source:
+        count = max(1, sum(1 for line in source if line.startswith("% page ")))
 def chunk(tag, data):
     return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xffffffff)
 ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)

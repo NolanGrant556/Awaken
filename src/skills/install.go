@@ -3,6 +3,8 @@ package skills
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -126,16 +128,22 @@ func InstallSkillPackage(req InstallRequest) (InstallResult, error) {
 	if err != nil {
 		return InstallResult{}, err
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return InstallResult{}, fmt.Errorf("create skill install directory: %w", err)
-	}
 	rootDir := filepath.Join(dir, def.ID)
-	if _, err := os.Stat(rootDir); err == nil && policy == "abort" {
-		return InstallResult{}, fmt.Errorf("%w: %s", ErrSkillAlreadyExists, rootDir)
-	} else if err != nil && !os.IsNotExist(err) {
+	installRoot, err := openRootedSkillInstallDir(dir)
+	if err != nil {
+		return InstallResult{}, err
+	}
+	defer installRoot.Close()
+	targetExists := false
+	if _, err := installRoot.Stat(def.ID); err == nil {
+		targetExists = true
+	} else if !os.IsNotExist(err) {
 		return InstallResult{}, fmt.Errorf("stat existing skill package: %w", err)
 	}
-	if err := writeSkillPackage(rootDir, pkg); err != nil {
+	if targetExists && policy == "abort" {
+		return InstallResult{}, fmt.Errorf("%w: %s", ErrSkillAlreadyExists, rootDir)
+	}
+	if err := writeSkillPackage(installRoot, def.ID, pkg, targetExists); err != nil {
 		return InstallResult{}, err
 	}
 
@@ -143,6 +151,9 @@ func InstallSkillPackage(req InstallRequest) (InstallResult, error) {
 	def.Source = source
 	def.Scope = source
 	def.RootDir = rootDir
+	if resolvedRoot, resolveErr := filepath.EvalSymlinks(rootDir); resolveErr == nil {
+		def.ResolvedRootDir = resolvedRoot
+	}
 	def.SkillFilePath = skillPath
 	def.FilePath = skillPath
 	if source == SourceProject {
@@ -491,16 +502,36 @@ func normalizedPackageFileMode(mode os.FileMode) os.FileMode {
 	return 0o600
 }
 
-func writeSkillPackage(rootDir string, pkg SkillPackage) error {
-	parent := filepath.Dir(rootDir)
-	tempDir, err := os.MkdirTemp(parent, "."+filepath.Base(rootDir)+".tmp-*")
+func openRootedSkillInstallDir(installDir string) (*os.Root, error) {
+	baseDir := filepath.Dir(filepath.Dir(installDir))
+	rel, err := filepath.Rel(baseDir, installDir)
+	if err != nil || rel == "." || rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("resolve rooted skill install directory")
+	}
+	baseRoot, err := os.OpenRoot(baseDir)
+	if err != nil {
+		return nil, fmt.Errorf("open skill install base: %w", err)
+	}
+	defer baseRoot.Close()
+	if err := baseRoot.MkdirAll(rel, 0o700); err != nil {
+		return nil, fmt.Errorf("create rooted skill install directory: %w", err)
+	}
+	root, err := baseRoot.OpenRoot(rel)
+	if err != nil {
+		return nil, fmt.Errorf("open rooted skill install directory: %w", err)
+	}
+	return root, nil
+}
+
+func writeSkillPackage(root *os.Root, targetName string, pkg SkillPackage, targetExists bool) error {
+	tempName, err := createRootTempDir(root, "."+targetName+".tmp-")
 	if err != nil {
 		return fmt.Errorf("create temp package dir: %w", err)
 	}
-	cleanup := true
+	tempPresent := true
 	defer func() {
-		if cleanup {
-			_ = os.RemoveAll(tempDir)
+		if tempPresent {
+			_ = root.RemoveAll(tempName)
 		}
 	}()
 
@@ -509,23 +540,74 @@ func writeSkillPackage(rootDir string, pkg SkillPackage) error {
 		if err != nil {
 			return err
 		}
-		target := filepath.Join(tempDir, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		target := filepath.Join(tempName, filepath.FromSlash(rel))
+		if err := root.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 			return fmt.Errorf("create package directory: %w", err)
 		}
-		if err := os.WriteFile(target, file.data, file.mode); err != nil {
+		if err := root.WriteFile(target, file.data, file.mode); err != nil {
 			return fmt.Errorf("write package file %s: %w", rel, err)
 		}
 	}
 
-	if err := os.RemoveAll(rootDir); err != nil {
-		return fmt.Errorf("replace existing skill package: %w", err)
+	if !targetExists {
+		if err := root.Rename(tempName, targetName); err != nil {
+			return fmt.Errorf("install skill package: %w", err)
+		}
+		tempPresent = false
+		return nil
 	}
-	if err := os.Rename(tempDir, rootDir); err != nil {
-		return fmt.Errorf("install skill package: %w", err)
+
+	backupName, err := uniqueRootEntryName(root, "."+targetName+".backup-")
+	if err != nil {
+		return fmt.Errorf("prepare skill replacement backup: %w", err)
 	}
-	cleanup = false
+	if err := root.Rename(targetName, backupName); err != nil {
+		return fmt.Errorf("backup existing skill package: %w", err)
+	}
+	if err := root.Rename(tempName, targetName); err != nil {
+		rollbackErr := root.Rename(backupName, targetName)
+		if rollbackErr != nil {
+			return fmt.Errorf("install replacement: %v; restore previous package: %w", err, rollbackErr)
+		}
+		return fmt.Errorf("install replacement: %w", err)
+	}
+	tempPresent = false
+	if err := root.RemoveAll(backupName); err != nil {
+		return fmt.Errorf("replacement installed but previous package cleanup failed: %w", err)
+	}
 	return nil
+}
+
+func createRootTempDir(root *os.Root, prefix string) (string, error) {
+	for i := 0; i < 32; i++ {
+		name, err := uniqueRootEntryName(root, prefix)
+		if err != nil {
+			if errors.Is(err, os.ErrExist) {
+				continue
+			}
+			return "", err
+		}
+		if err := root.Mkdir(name, 0o700); err == nil {
+			return name, nil
+		} else if !os.IsExist(err) {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("could not allocate a unique package directory")
+}
+
+func uniqueRootEntryName(root *os.Root, prefix string) (string, error) {
+	var random [12]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return "", err
+	}
+	name := prefix + hex.EncodeToString(random[:])
+	if _, err := root.Lstat(name); err == nil {
+		return "", os.ErrExist
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	return name, nil
 }
 
 func cleanPackageRelPath(rel string) (string, error) {

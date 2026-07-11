@@ -11,13 +11,16 @@ import (
 func buildTextEditArtifacts(relPath string, replacementCount int) []tool.ArtifactDescriptor {
 	path := filepath.ToSlash(relPath)
 	return []tool.ArtifactDescriptor{{
-		Action:      tool.ArtifactActionUpdated,
-		ID:          "text_edit:" + path,
-		Title:       path,
-		Description: fmt.Sprintf("Modified %s (%d replacement(s))", path, replacementCount),
-		Kind:        "modified",
-		Path:        path,
-		Status:      "ready",
+		ContractVersion: tool.ArtifactContractVersion,
+		Role:            tool.ArtifactRoleSupport,
+		Producer:        "text_edit",
+		Action:          tool.ArtifactActionUpdated,
+		ID:              "text_edit:" + path,
+		Title:           path,
+		Description:     fmt.Sprintf("Modified %s (%d replacement(s))", path, replacementCount),
+		Kind:            "modified",
+		Path:            path,
+		Status:          "ready",
 	}}
 }
 

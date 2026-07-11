@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	"awaken/src/tool"
 )
 
 func MapEvent(event agentcore.AwakenEvent) []Event {
@@ -320,6 +321,9 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.Type = EventAwakenArtifactCreated
 		base.ToolCallID = event.ToolCallID
 		base.ToolCallName = event.ToolName
+		base.ArtifactContractVersion = tool.ArtifactContractVersionOrLegacy(event.ArtifactContractVersion)
+		base.ArtifactProducer = firstNonEmpty(event.ArtifactProducer, event.ToolName)
+		base.ArtifactRole = string(tool.ResolveArtifactRole(event.ArtifactRole, base.ArtifactProducer, event.ArtifactKind, event.ArtifactPath))
 		base.ArtifactID = event.ArtifactID
 		base.ArtifactTitle = event.ArtifactTitle
 		base.ArtifactDescription = event.ArtifactDescription
@@ -332,6 +336,9 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.Type = EventAwakenArtifactUpdated
 		base.ToolCallID = event.ToolCallID
 		base.ToolCallName = event.ToolName
+		base.ArtifactContractVersion = tool.ArtifactContractVersionOrLegacy(event.ArtifactContractVersion)
+		base.ArtifactProducer = firstNonEmpty(event.ArtifactProducer, event.ToolName)
+		base.ArtifactRole = string(tool.ResolveArtifactRole(event.ArtifactRole, base.ArtifactProducer, event.ArtifactKind, event.ArtifactPath))
 		base.ArtifactID = event.ArtifactID
 		base.ArtifactTitle = event.ArtifactTitle
 		base.ArtifactDescription = event.ArtifactDescription

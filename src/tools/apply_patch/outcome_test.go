@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"awaken/src/tool"
+	"awaken/src/tool/trash"
 )
 
 func TestExecuteOutcomeReturnsTypedGrammarFailure(t *testing.T) {
@@ -121,6 +122,88 @@ func TestExecuteOutcomeReturnsTypedContextFailureWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestExecuteOutcomeReportsEarlierOperationsWhenLaterPatchFails(t *testing.T) {
+	root := t.TempDir()
+	existing := filepath.Join(root, "existing.txt")
+	if err := os.WriteFile(existing, []byte("current\n"), 0o644); err != nil {
+		t.Fatalf("seed existing file: %v", err)
+	}
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	patch := "*** Begin Patch\n" +
+		"*** Add File: created.txt\n" +
+		"+created\n" +
+		"*** Update File: existing.txt\n" +
+		"@@\n" +
+		"-stale\n" +
+		"+changed\n" +
+		"*** End Patch"
+
+	outcome, err := (&ApplyPatchTool{}).ExecuteOutcome(ctx, patch, nil)
+	if err != nil {
+		t.Fatalf("business failure returned Go error: %v", err)
+	}
+	if !outcome.IsError() || outcome.ErrorCode != ErrorCodePatchContextNotFound {
+		t.Fatalf("expected later context failure: %+v", outcome)
+	}
+	createdPath := filepath.Join(root, "created.txt")
+	if content, readErr := os.ReadFile(createdPath); readErr != nil || string(content) != "created\n" {
+		t.Fatalf("first operation did not actually apply: content=%q err=%v", content, readErr)
+	}
+	if len(outcome.Changes) != 1 || outcome.Changes[0].Action != "created" || outcome.Changes[0].Resource != "created.txt" {
+		t.Fatalf("partial outcome lost the applied add: %+v", outcome.Changes)
+	}
+	normalized := outcome.Normalize(tool.OutcomeNormalizationContext{OperationType: "apply_patch"})
+	if normalized.Operation == nil || normalized.Operation.SideEffectState != tool.OutcomeSideEffectPartial {
+		t.Fatalf("partially applied patch must report partial: %+v", normalized.Operation)
+	}
+	if len(normalized.NextActions) == 0 || normalized.NextActions[0].ID != "verify_partial_patch_state" {
+		t.Fatalf("partial patch lacks safe recovery guidance: %+v", normalized.NextActions)
+	}
+}
+
+func TestExecuteOutcomeReportsWriteInsideFailedMove(t *testing.T) {
+	useTestTrashAdapter(t)
+	trash.SetAdapter(failingTrashAdapter{})
+	root := t.TempDir()
+	source := filepath.Join(root, "source.txt")
+	if err := os.WriteFile(source, []byte("before\n"), 0o644); err != nil {
+		t.Fatalf("seed source: %v", err)
+	}
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	patch := "*** Begin Patch\n" +
+		"*** Update File: source.txt\n" +
+		"*** Move to: destination.txt\n" +
+		"@@\n" +
+		"-before\n" +
+		"+after\n" +
+		"*** End Patch"
+
+	outcome, err := (&ApplyPatchTool{}).ExecuteOutcome(ctx, patch, nil)
+	if err != nil {
+		t.Fatalf("business failure returned Go error: %v", err)
+	}
+	if !outcome.IsError() || outcome.ErrorCode != ErrorCodeApplyPatchFailed {
+		t.Fatalf("expected failed source cleanup: %+v", outcome)
+	}
+	destination := filepath.Join(root, "destination.txt")
+	if content, readErr := os.ReadFile(destination); readErr != nil || string(content) != "after\n" {
+		t.Fatalf("move destination write was not observed: content=%q err=%v", content, readErr)
+	}
+	if _, statErr := os.Stat(source); statErr != nil {
+		t.Fatalf("failing trash adapter should leave source for this fixture: %v", statErr)
+	}
+	if len(outcome.Changes) != 1 || outcome.Changes[0].Resource != "destination.txt" || outcome.Changes[0].Action != "created" {
+		t.Fatalf("failed move lost its observed destination write: %+v", outcome.Changes)
+	}
+	if outcome.Changes[0].Details["source_state"] != "unknown" {
+		t.Fatalf("failed move guessed source final state: %+v", outcome.Changes[0])
+	}
+	normalized := outcome.Normalize(tool.OutcomeNormalizationContext{OperationType: "apply_patch"})
+	if normalized.Operation == nil || normalized.Operation.SideEffectState != tool.OutcomeSideEffectPartial {
+		t.Fatalf("failed move with written destination must be partial: %+v", normalized.Operation)
+	}
+}
+
 func snapshotPatchTestWorkspace(t *testing.T, root string) map[string]string {
 	t.Helper()
 	snapshot := map[string]string{}
@@ -189,8 +272,104 @@ func TestExecuteOutcomeSuccessCarriesDisplayAndStructuredFacts(t *testing.T) {
 	if outcome.Content == "" || len(outcome.AffectedPaths) != 1 || outcome.PatchSummary == "" {
 		t.Fatalf("success outcome missing display/structured facts: %+v", outcome)
 	}
+	if len(outcome.Changes) != 1 || outcome.Changes[0].Action != "created" || outcome.Changes[0].Certainty != tool.ChangeObserved {
+		t.Fatalf("success outcome lost exact add operation: %+v", outcome.Changes)
+	}
 	content, err := os.ReadFile(path)
 	if err != nil || string(content) != "hello\n" {
 		t.Fatalf("created file mismatch: %q err=%v", content, err)
+	}
+}
+
+func TestPatchResourceChangesPreserveExactActions(t *testing.T) {
+	root := t.TempDir()
+	permissionContext := tool.NewPermissionContext(root, []string{root})
+	patch := &patchDocument{operations: []patchOperation{
+		{kind: patchKindAdd, path: filepath.Join(root, "created.txt")},
+		{kind: patchKindUpdate, path: filepath.Join(root, "updated.txt")},
+		{kind: patchKindUpdate, path: filepath.Join(root, "before.txt"), movePath: filepath.Join(root, "after.txt")},
+		{kind: patchKindDelete, path: filepath.Join(root, "deleted.txt")},
+	}}
+	trashPath := filepath.Join(root, ".trash", "deleted.txt")
+	summary := patchSummary{deleted: []deletedEntry{{path: filepath.Join(root, "deleted.txt"), trashedPath: trashPath}}}
+
+	changes := patchResourceChanges(patch, summary, permissionContext)
+	if len(changes) != 4 {
+		t.Fatalf("expected four typed changes, got %+v", changes)
+	}
+	wantActions := []string{"created", "updated", "moved", "trashed"}
+	for i, want := range wantActions {
+		if changes[i].Action != want || changes[i].Certainty != tool.ChangeObserved {
+			t.Fatalf("change %d lost exact action %q: %+v", i, want, changes[i])
+		}
+	}
+	if changes[2].Resource != "before.txt" || changes[2].Details["destination_path"] != "after.txt" {
+		t.Fatalf("move source/destination facts drifted: %+v", changes[2])
+	}
+	if changes[3].Resource != "deleted.txt" || changes[3].Details["trashed_path"] != trashPath {
+		t.Fatalf("trash original/destination facts drifted: %+v", changes[3])
+	}
+
+	outcome := tool.SucceededOutcome("changed")
+	outcome.AffectedPaths = []string{"created.txt", "updated.txt", "before.txt", "after.txt", "deleted.txt"}
+	outcome.Changes = changes
+	outcome = outcome.Normalize(tool.OutcomeNormalizationContext{OperationType: "apply_patch"})
+	if len(outcome.Changes) != 4 {
+		t.Fatalf("normalization added generic modified changes: %+v", outcome.Changes)
+	}
+}
+
+func TestExecuteOutcomeLabelsCompatibilityAddOverwrite(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "existing.txt")
+	if err := os.WriteFile(target, []byte("old\n"), 0o644); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	permissionContext := tool.NewPermissionContext(root, []string{root})
+	ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
+	patch := "*** Begin Patch\n*** Add File: existing.txt\n+new\n*** End Patch"
+	outcome, err := (&ApplyPatchTool{}).ExecuteOutcome(ctx, patch, nil)
+	if err != nil || outcome.IsError() {
+		t.Fatalf("compatibility overwrite failed: outcome=%+v err=%v", outcome, err)
+	}
+	if len(outcome.Changes) != 1 || outcome.Changes[0].Action != "overwritten" || !strings.Contains(outcome.PatchSummary, "覆盖 1 个文件") {
+		t.Fatalf("Add-existing was misreported as create: %+v", outcome)
+	}
+	if len(outcome.Warnings) == 0 || outcome.Warnings[0].Code != "patch_add_replaced_existing" {
+		t.Fatalf("compatibility overwrite warning missing: %+v", outcome.Warnings)
+	}
+	artifacts := (&ApplyPatchTool{}).Artifacts(patch, outcome.Content, permissionContext)
+	if len(artifacts) != 1 || artifacts[0].Action != tool.ArtifactActionUpdated {
+		t.Fatalf("Add-existing artifact was misreported as created: %+v", artifacts)
+	}
+}
+
+func TestExecuteOutcomeLabelsCompatibilityMoveDestinationReplacement(t *testing.T) {
+	useTestTrashAdapter(t)
+	root := t.TempDir()
+	source := filepath.Join(root, "source.txt")
+	destination := filepath.Join(root, "destination.txt")
+	if err := os.WriteFile(source, []byte("source\n"), 0o644); err != nil {
+		t.Fatalf("seed source: %v", err)
+	}
+	if err := os.WriteFile(destination, []byte("old destination\n"), 0o644); err != nil {
+		t.Fatalf("seed destination: %v", err)
+	}
+	permissionContext := tool.NewPermissionContext(root, []string{root})
+	ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
+	patch := "*** Begin Patch\n*** Update File: source.txt\n*** Move to: destination.txt\n@@\n-source\n+new\n*** End Patch"
+	outcome, err := (&ApplyPatchTool{}).ExecuteOutcome(ctx, patch, nil)
+	if err != nil || outcome.IsError() {
+		t.Fatalf("compatibility move replacement failed: outcome=%+v err=%v", outcome, err)
+	}
+	if len(outcome.Changes) != 1 || outcome.Changes[0].Action != "moved" || outcome.Changes[0].Details["destination_replaced"] != true {
+		t.Fatalf("move destination replacement was not explicit: %+v", outcome.Changes)
+	}
+	if len(outcome.Warnings) == 0 || outcome.Warnings[0].Code != "patch_move_replaced_destination" {
+		t.Fatalf("move replacement warning missing: %+v", outcome.Warnings)
+	}
+	artifacts := (&ApplyPatchTool{}).Artifacts(patch, outcome.Content, permissionContext)
+	if len(artifacts) != 1 || !strings.Contains(artifacts[0].Description, "replaced the existing destination") {
+		t.Fatalf("move artifact lost destination replacement: %+v", artifacts)
 	}
 }

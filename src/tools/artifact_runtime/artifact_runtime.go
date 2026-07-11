@@ -21,9 +21,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"awaken/src/internal/outputlimit"
+	"awaken/src/runtime/officerender"
 	"awaken/src/tool"
 )
 
@@ -115,6 +117,10 @@ const errorCodePresentationVerificationFailed = "presentation_verification_faile
 var (
 	presentationAuthoringRuntimeRequirements = []string{"python", "libreoffice", "poppler"}
 	presentationRenderRuntimeRequirements    = []string{"libreoffice", "poppler"}
+	presentationTestOfficeWorkers            = struct {
+		sync.Mutex
+		bySoffice map[string]*officerender.OfficeRenderWorker
+	}{bySoffice: make(map[string]*officerender.OfficeRenderWorker)}
 )
 
 type artifactExecutionFailure struct {
@@ -163,30 +169,19 @@ func (t typedArtifactTool) Parameters() []tool.ToolParameter {
 }
 
 func (t typedArtifactTool) InputSchema() tool.ToolParametersSchema {
+	var schema tool.ToolParametersSchema
 	if t.inputSchema != nil {
-		return *t.inputSchema
+		schema = *t.inputSchema
+	} else {
+		schema = tool.SchemaFromParameters(t.Parameters())
 	}
-	return tool.SchemaFromParameters(t.Parameters())
+	return completeTypedArtifactInputSchema(schema)
 }
 
 func (t typedArtifactTool) IsReadOnly() bool { return t.readOnly }
 
 func (t typedArtifactTool) Definition() tool.ToolDefinition {
-	return tool.ToolDefinition{
-		Name:        t.name,
-		DisplayName: t.displayName,
-		Source:      tool.SourceBuiltin,
-		Description: t.description,
-		Annotations: tool.ToolAnnotations{
-			ReadOnly:        t.readOnly,
-			Destructive:     false,
-			OpenWorld:       false,
-			CapabilityClass: t.capability,
-			TrustedOrigin:   tool.TrustedOriginBuiltin,
-			FileBridgeScope: fileBridgeScopeForTool(t.readOnly),
-			NetworkScope:    tool.NetworkScopeNone,
-		},
-	}
+	return typedArtifactDefinition(t)
 }
 
 func (t typedArtifactTool) Artifacts(input string, output string, permissionContext tool.PermissionContext) []tool.ArtifactDescriptor {
@@ -202,22 +197,30 @@ func (t typedArtifactTool) Artifacts(input string, output string, permissionCont
 		artifactStatus = "ready"
 	}
 	var artifacts []tool.ArtifactDescriptor
-	if path := firstString(payload, "path"); path != "" && !strings.HasSuffix(t.name, "_render") {
-		artifact := artifactDescriptorForPath(path, permissionContext, t.name)
+	primaryPath := firstString(payload, "path")
+	if primaryPath != "" && !strings.HasSuffix(t.name, "_render") {
+		artifact := artifactDescriptorForPath(primaryPath, permissionContext, t.name, typedArtifactAction(t.name))
 		artifact.Status = artifactStatus
 		artifacts = append(artifacts, artifact)
 	}
-	if pdfPath := firstString(payload, "pdf_path"); pdfPath != "" {
-		artifact := artifactDescriptorForPath(pdfPath, permissionContext, t.name)
+	if pdfPath := firstString(payload, "pdf_path"); pdfPath != "" && !sameArtifactPath(pdfPath, primaryPath) {
+		artifact := artifactDescriptorForPath(pdfPath, permissionContext, t.name, tool.ArtifactActionCreated)
 		artifact.Status = artifactStatus
 		artifacts = append(artifacts, artifact)
 	}
 	for _, imagePath := range stringSliceParam(payload, "preview_images") {
-		artifact := artifactDescriptorForPath(imagePath, permissionContext, t.name)
+		artifact := artifactDescriptorForPath(imagePath, permissionContext, t.name, tool.ArtifactActionCreated)
 		artifact.Status = artifactStatus
 		artifacts = append(artifacts, artifact)
 	}
 	return artifacts
+}
+
+func sameArtifactPath(left, right string) bool {
+	if strings.TrimSpace(left) == "" || strings.TrimSpace(right) == "" {
+		return false
+	}
+	return filepath.Clean(left) == filepath.Clean(right)
 }
 
 func (t typedArtifactTool) CheckPermission(ctx context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {
@@ -336,7 +339,45 @@ func (t typedArtifactTool) ExecuteOutcome(ctx context.Context, input string, _ t
 
 	outcome := tool.SucceededOutcome(content)
 	outcome.Artifacts = t.Artifacts(normalizedInput, content, tool.PermissionContextFromContext(ctx))
+	outcome.Details = typedArtifactOutcomeDetails(content, outcome.Artifacts)
 	return outcome.WithTiming(started, finished), nil
+}
+
+func typedArtifactOutcomeDetails(content string, artifacts []tool.ArtifactDescriptor) map[string]any {
+	details := make(map[string]any)
+	var result map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(content)), &result); err == nil && result != nil {
+		details["result"] = result
+		if path, ok := result["path"].(string); ok && strings.TrimSpace(path) != "" {
+			details["path"] = path
+		}
+		if status, ok := result["status"].(string); ok && strings.TrimSpace(status) != "" {
+			details["artifact_status"] = status
+		}
+		if path, ok := result["pdf_path"].(string); ok && strings.TrimSpace(path) != "" {
+			details["pdf_path"] = path
+		}
+		if previews, ok := result["preview_images"].([]any); ok {
+			details["preview_images"] = previews
+		}
+		if missing, ok := result["missing_components"].([]any); ok {
+			details["runtime_missing"] = missing
+		}
+	} else if text := strings.TrimSpace(content); text != "" {
+		details["result_text"] = text
+	}
+	if len(artifacts) > 0 {
+		if _, exists := details["path"]; !exists && strings.TrimSpace(artifacts[0].Path) != "" {
+			details["path"] = artifacts[0].Path
+		}
+		if _, exists := details["artifact_status"]; !exists && strings.TrimSpace(artifacts[0].Status) != "" {
+			details["artifact_status"] = artifacts[0].Status
+		}
+	}
+	if len(details) == 0 {
+		return nil
+	}
+	return details
 }
 
 func normalizeTypedArtifactInput(input string, parameters []tool.ToolParameter) (string, error) {
@@ -359,7 +400,7 @@ func normalizeTypedArtifactInput(input string, parameters []tool.ToolParameter) 
 }
 
 func checkRuntimeRequirements(requirements []string) (preflightReport, []string) {
-	report := runtimePreflightCached(true)
+	report := runtimePreflightCached(false)
 	return report, missingRuntimeRequirements(report, requirements)
 }
 
@@ -426,7 +467,7 @@ func workspaceDependenciesTool() typedArtifactTool {
 		capability:  tool.CapabilityArtifactRead,
 		parameters:  nil,
 		execute: func(context.Context, string) (string, error) {
-			report := runtimePreflightCached(true)
+			report := runtimePreflightCached(false)
 			data, _ := json.MarshalIndent(report, "", "  ")
 			return string(data), nil
 		},
@@ -442,7 +483,7 @@ func runtimePreflightTool() typedArtifactTool {
 		capability:  tool.CapabilityArtifactRead,
 		parameters:  nil,
 		execute: func(context.Context, string) (string, error) {
-			report := runtimePreflightCached(true)
+			report := runtimePreflightCached(false)
 			data, _ := json.MarshalIndent(report, "", "  ")
 			return string(data), nil
 		},
@@ -642,7 +683,7 @@ func artifactRender(ctx context.Context, input string) (string, error) {
 			"preview_images": images,
 		})
 	default:
-		return "", fmt.Errorf("artifact_render 暂不支持渲染该文件类型: %s。PPTX 请用 presentation_render，PDF 请用 pdf_render；Office 文档深度渲染仍需补 executor", filepath.Ext(checkedSource))
+		return "", fmt.Errorf("artifact_render 暂不支持渲染该文件类型: %s。当前只支持 PPT/PPTX 与 PDF；Office 文档深度渲染尚无可执行工具", filepath.Ext(checkedSource))
 	}
 }
 
@@ -685,6 +726,10 @@ func documentCreateOrEdit(ctx context.Context, input string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	extension := strings.ToLower(filepath.Ext(output))
+	if extension != ".docx" && extension != ".txt" && extension != ".md" {
+		return "", fmt.Errorf("document_create/document_edit 只支持 .docx、.txt 或 .md 输出，不能把 %s 内容写入 %s 文件；如需 PDF，请先创建 DOCX，再使用 Office PDF 转换工具", extension, extension)
+	}
 	paragraphs := stringSliceParam(params, "paragraphs", "content")
 	title := firstString(params, "title")
 	if title != "" {
@@ -693,7 +738,7 @@ func documentCreateOrEdit(ctx context.Context, input string) (string, error) {
 	if len(paragraphs) == 0 {
 		paragraphs = []string{"New document"}
 	}
-	if strings.EqualFold(filepath.Ext(output), ".txt") || strings.EqualFold(filepath.Ext(output), ".md") {
+	if extension == ".txt" || extension == ".md" {
 		if err := os.WriteFile(output, []byte(strings.Join(paragraphs, "\n\n")), 0o644); err != nil {
 			return "", err
 		}
@@ -701,6 +746,51 @@ func documentCreateOrEdit(ctx context.Context, input string) (string, error) {
 		return "", err
 	}
 	return jsonResult("document_written", output)
+}
+
+func officeExportPDF(ctx context.Context, input string) (string, error) {
+	params, err := decodeParams(input)
+	if err != nil {
+		return "", err
+	}
+	source := firstString(params, "path", "input_path", "source_path")
+	if source == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	perm := tool.PermissionContextFromContext(ctx)
+	checkedSource, err := perm.ResolveReadablePathChecked(source)
+	if err != nil {
+		return "", err
+	}
+	switch strings.ToLower(filepath.Ext(checkedSource)) {
+	case ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx":
+	default:
+		return "", fmt.Errorf("office_export_pdf 只支持 Word、Excel 或 PowerPoint 文件，收到 %s", filepath.Ext(checkedSource))
+	}
+	output := firstString(params, "output_path")
+	if output == "" {
+		output = strings.TrimSuffix(filepath.Base(checkedSource), filepath.Ext(checkedSource)) + ".pdf"
+	}
+	if !strings.EqualFold(filepath.Ext(output), ".pdf") {
+		return "", fmt.Errorf("office_export_pdf 的 output_path 必须以 .pdf 结尾")
+	}
+	checkedOutput, err := resolveArtifactOutputPathChecked(perm, output)
+	if err != nil {
+		return "", err
+	}
+	if err := ensureParentDir(checkedOutput); err != nil {
+		return "", err
+	}
+	result, err := officerender.RenderManaged(ctx, checkedSource, checkedOutput, "pdf")
+	if err != nil {
+		return "", fmt.Errorf("Office PDF 转换失败: %w", err)
+	}
+	return jsonResultWithFields("pdf_exported", result.OutputPath, map[string]any{
+		"source_path": checkedSource,
+		"pdf_path":    result.OutputPath,
+		"kind":        "pdf",
+		"verified":    true,
+	})
 }
 
 func presentationCreate(ctx context.Context, input string) (string, error) {
@@ -1029,7 +1119,7 @@ func imageConvert(ctx context.Context, input string) (string, error) {
 	img, _, err := image.Decode(in)
 	_ = in.Close()
 	if err != nil {
-		return "", fmt.Errorf("无法解码图片: %w。image_convert 仅转换 PNG/JPEG/GIF 等可解码图片；PDF 渲染请用 pdf_render 或 pdf_extract/read_artifact，Office 文件请用 read_artifact", err)
+		return "", fmt.Errorf("无法解码图片: %w。image_convert 仅转换 PNG/JPEG/GIF 等可解码图片；PDF 页面预览请用 artifact_render，文本抽取请用 pdf_extract/read_artifact，Office 文件请用 read_artifact", err)
 	}
 	if err := ensureParentDir(output); err != nil {
 		return "", err
@@ -1326,17 +1416,28 @@ func jsonResultWithFields(status, path string, fields map[string]any) (string, e
 	return string(data), nil
 }
 
-func artifactDescriptorForPath(path string, permissionContext tool.PermissionContext, toolName string) tool.ArtifactDescriptor {
+func artifactDescriptorForPath(path string, permissionContext tool.PermissionContext, toolName string, action tool.ArtifactAction) tool.ArtifactDescriptor {
 	displayPath := filepath.ToSlash(relativeArtifactPath(path, permissionContext.WorkspaceRootOrCWD()))
+	kind := artifactKindForPath(path)
 	return tool.ArtifactDescriptor{
-		Action:      tool.ArtifactActionCreated,
-		ID:          toolName + ":" + displayPath,
-		Title:       filepath.Base(displayPath),
-		Description: "Generated " + displayPath,
-		Kind:        artifactKindForPath(path),
-		Path:        displayPath,
-		Status:      "ready",
+		ContractVersion: tool.ArtifactContractVersion,
+		Role:            tool.ResolveArtifactRole("", toolName, kind, displayPath),
+		Producer:        toolName,
+		Action:          action,
+		ID:              toolName + ":" + displayPath,
+		Title:           filepath.Base(displayPath),
+		Description:     typedArtifactDescription(action, displayPath),
+		Kind:            kind,
+		Path:            displayPath,
+		Status:          "ready",
 	}
+}
+
+func typedArtifactDescription(action tool.ArtifactAction, displayPath string) string {
+	if action == tool.ArtifactActionUpdated {
+		return "Updated " + displayPath
+	}
+	return "Generated " + displayPath
 }
 
 func relativeArtifactPath(path string, root string) string {
@@ -2530,50 +2631,48 @@ func isRuntimeDependencyUnavailable(err error) bool {
 }
 
 func renderPresentationPDF(ctx context.Context, path string, outDir string) (string, error) {
-	soffice, err := resolveSoffice()
-	if err != nil {
-		return "", err
-	}
-	profileDir, err := os.MkdirTemp("", "awaken-libreoffice-profile-*")
-	if err != nil {
-		return "", err
-	}
-	defer os.RemoveAll(profileDir)
-
-	runCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
-	defer cancel()
-	args := []string{
-		"--headless",
-		"--nologo",
-		"--nofirststartwizard",
-		"--norestore",
-		"-env:UserInstallation=" + fileURL(profileDir),
-		"--convert-to",
-		"pdf",
-		"--outdir",
-		outDir,
-		path,
-	}
-	cmd := exec.CommandContext(runCtx, soffice, args...)
-	cmd.Env = os.Environ()
 	expectedPDF := presentationPDFPath(path, outDir)
-	if err := removeIfExists(expectedPDF); err != nil {
-		return "", fmt.Errorf("remove stale presentation PDF: %w", err)
-	}
 	if err := removeIfExists(expectedPDF + ".pagecount"); err != nil {
 		return "", fmt.Errorf("remove stale presentation PDF metadata: %w", err)
 	}
-	output, err := cmd.CombinedOutput()
-	if runCtx.Err() != nil {
-		return "", fmt.Errorf("libreoffice render timed out: %w", runCtx.Err())
-	}
+	result, err := renderManagedPresentationPDF(ctx, path, expectedPDF)
 	if err != nil {
-		return "", fmt.Errorf("libreoffice render failed: %w: %s", err, excerptOutput(output))
+		return "", fmt.Errorf("managed office render failed: %w", err)
 	}
-	if info, statErr := os.Stat(expectedPDF); statErr == nil && info.Size() > 0 {
-		return expectedPDF, nil
+	return result.OutputPath, nil
+}
+
+func renderManagedPresentationPDF(ctx context.Context, inputPath, outputPath string) (officerender.Result, error) {
+	testOverride := strings.TrimSpace(presentationRuntimeTestOverride("libreoffice"))
+	if testOverride == "" {
+		return officerender.RenderManaged(ctx, inputPath, outputPath, "pdf")
 	}
-	return "", fmt.Errorf("libreoffice render produced no non-empty PDF at %s: %s", expectedPDF, excerptOutput(output))
+	soffice := findSofficeIn(testOverride)
+	if soffice == "" {
+		return officerender.Result{}, fmt.Errorf("test LibreOffice runtime is not available")
+	}
+	soffice, err := filepath.Abs(soffice)
+	if err != nil {
+		return officerender.Result{}, err
+	}
+	root := filepath.Dir(soffice)
+	presentationTestOfficeWorkers.Lock()
+	worker := presentationTestOfficeWorkers.bySoffice[soffice]
+	if worker == nil {
+		worker = officerender.NewOfficeRenderWorker(officerender.Config{})
+		presentationTestOfficeWorkers.bySoffice[soffice] = worker
+	}
+	presentationTestOfficeWorkers.Unlock()
+	return worker.Render(ctx, officerender.Job{
+		Runtime: officerender.Runtime{
+			Revision:    "test:" + soffice,
+			Root:        root,
+			SOfficePath: soffice,
+		},
+		InputPath:  inputPath,
+		OutputPath: outputPath,
+		Format:     "pdf",
+	})
 }
 
 func renderPDFPagesToPNG(ctx context.Context, pdfPath string, outputDir string) ([]string, error) {
@@ -2929,12 +3028,12 @@ func firstNonEmpty(values ...string) string {
 }
 
 func init() {
-	tool.MustRegisterTool(workspaceDependenciesTool())
-	tool.MustRegisterTool(runtimePreflightTool())
-	tool.MustRegisterTool(artifactInspectTool("artifact_read", "Artifact Read", "读取本机 artifact 的基础文件信息"))
-	tool.MustRegisterTool(artifactInspectTool("artifact_inspect", "Artifact Inspect", "检查本机 artifact 类型、大小与基础元数据"))
-	tool.MustRegisterTool(artifactExportTool())
-	tool.MustRegisterTool(typedArtifactTool{
+	mustRegisterTypedArtifactTool(workspaceDependenciesTool())
+	mustRegisterTypedArtifactTool(runtimePreflightTool())
+	mustRegisterTypedArtifactTool(artifactInspectTool("artifact_read", "Artifact Read", "读取本机 artifact 的基础文件信息"))
+	mustRegisterTypedArtifactTool(artifactInspectTool("artifact_inspect", "Artifact Inspect", "检查本机 artifact 类型、大小与基础元数据"))
+	mustRegisterTypedArtifactTool(artifactExportTool())
+	mustRegisterTypedArtifactTool(typedArtifactTool{
 		name:        "artifact_render",
 		displayName: "Artifact Render",
 		description: "将本机 artifact 渲染为预览产物；PPTX 自动走 presentation_render，PDF 自动走 Poppler PNG 预览，不要用 shell 调 LibreOffice/Poppler",
@@ -2946,7 +3045,7 @@ func init() {
 		},
 		execute: artifactRender,
 	})
-	tool.MustRegisterTool(typedArtifactTool{
+	mustRegisterTypedArtifactTool(typedArtifactTool{
 		name:        "spreadsheet_create",
 		displayName: "Spreadsheet Create",
 		description: "创建 xlsx/csv 表格文件；用于生成表格产物，不要用 apply_patch 或 read_file 手写二进制表格",
@@ -2958,7 +3057,7 @@ func init() {
 		},
 		execute: spreadsheetCreateOrEdit,
 	})
-	tool.MustRegisterTool(typedArtifactTool{
+	mustRegisterTypedArtifactTool(typedArtifactTool{
 		name:        "spreadsheet_edit",
 		displayName: "Spreadsheet Edit",
 		description: "写入或重写 xlsx/csv 表格文件；用于生成表格产物，不要用 apply_patch 或 read_file 手写二进制表格",
@@ -2970,7 +3069,7 @@ func init() {
 		},
 		execute: spreadsheetCreateOrEdit,
 	})
-	tool.MustRegisterTool(typedArtifactTool{
+	mustRegisterTypedArtifactTool(typedArtifactTool{
 		name:        "document_create",
 		displayName: "Document Create",
 		description: "创建 docx/txt/md 文档；用于生成文档产物，不要用 apply_patch 拼 docx 二进制包",
@@ -2983,7 +3082,7 @@ func init() {
 		},
 		execute: documentCreateOrEdit,
 	})
-	tool.MustRegisterTool(typedArtifactTool{
+	mustRegisterTypedArtifactTool(typedArtifactTool{
 		name:        "document_edit",
 		displayName: "Document Edit",
 		description: "写入或重写 docx/txt/md 文档；用于生成文档产物，不要用 apply_patch 拼 docx 二进制包",
@@ -2996,7 +3095,21 @@ func init() {
 		},
 		execute: documentCreateOrEdit,
 	})
-	tool.MustRegisterTool(typedArtifactTool{
+	mustRegisterTypedArtifactTool(typedArtifactTool{
+		name:                "office_export_pdf",
+		displayName:         "Office Export PDF",
+		description:         "将已存在的 Word、Excel 或 PowerPoint 文件通过 Awaken managed Office 后台渲染为真实 PDF；先用对应 typed artifact 工具创建源文件，再用本工具转换，不要把 DOCX 内容直接写进 .pdf 路径",
+		readOnly:            false,
+		capability:          tool.CapabilityArtifactWrite,
+		requiresRuntime:     true,
+		runtimeRequirements: []string{"libreoffice"},
+		parameters: []tool.ToolParameter{
+			{Name: "path", Description: "输入的 doc/docx/xls/xlsx/ppt/pptx 文件", Type: "string", Required: true},
+			{Name: "output_path", Description: "输出 PDF 路径，必须位于 writable/output roots 内；默认与源文件同名", Type: "string", Required: false},
+		},
+		execute: officeExportPDF,
+	})
+	mustRegisterTypedArtifactTool(typedArtifactTool{
 		name:                "presentation_create",
 		displayName:         "Presentation Create",
 		description:         "创建图文混排 pptx 演示文稿，支持 theme、slides、bullets、images、speaker notes 与固定 layout enum，并用 LibreOffice/Poppler 生成预览验证；需要 Awaken managed Python/python-pptx、LibreOffice、Poppler；模型只提交 semantic slide spec，不要用 apply_patch 手写 PPTX ZIP/XML 或 CJK helper",
@@ -3014,7 +3127,7 @@ func init() {
 		inputSchema: presentationCreateInputSchema(),
 		execute:     presentationCreate,
 	})
-	tool.MustRegisterTool(typedArtifactTool{
+	mustRegisterTypedArtifactTool(typedArtifactTool{
 		name:                "presentation_edit",
 		displayName:         "Presentation Edit",
 		description:         "对已有 pptx 做增量编辑：必填 source_path 与 edits，按请求顺序执行且 slide_index 基于前一项执行后的当前页序；update 保留未指定正文和图片，replace 必须提供完整 slide；需要 Awaken managed Python/python-pptx、LibreOffice、Poppler",
@@ -3032,7 +3145,7 @@ func init() {
 		inputSchema: presentationEditInputSchema(),
 		execute:     presentationEdit,
 	})
-	tool.MustRegisterTool(typedArtifactTool{
+	mustRegisterTypedArtifactTool(typedArtifactTool{
 		name:                "presentation_render",
 		displayName:         "Presentation Render",
 		description:         "将本机 pptx 演示文稿渲染成 PDF 与 PNG 页面预览；需要 Awaken managed LibreOffice、Poppler；用于检查 PPT 版式和图片是否可见，不要用 shell 调 LibreOffice/Poppler",
@@ -3047,7 +3160,7 @@ func init() {
 		inputSchema: presentationRenderInputSchema(),
 		execute:     presentationRender,
 	})
-	tool.MustRegisterTool(typedArtifactTool{
+	mustRegisterTypedArtifactTool(typedArtifactTool{
 		name:        "pdf_extract",
 		displayName: "PDF Extract",
 		description: "抽取真实 PDF 文件的文本和页面信息，不执行 OCR；普通文本用 read_file，Office/表格预览用 read_artifact，图片不要传给 pdf_extract",
@@ -3058,7 +3171,7 @@ func init() {
 		},
 		execute: pdfExtract,
 	})
-	tool.MustRegisterTool(typedArtifactTool{
+	mustRegisterTypedArtifactTool(typedArtifactTool{
 		name:        "image_inspect",
 		displayName: "Image Inspect",
 		description: "读取 PNG/JPEG/GIF 等真实图片的尺寸和格式信息，不执行 OCR；PDF 请用 pdf_extract/read_artifact，Office/表格请用 read_artifact",
@@ -3069,7 +3182,7 @@ func init() {
 		},
 		execute: imageInspect,
 	})
-	tool.MustRegisterTool(typedArtifactTool{
+	mustRegisterTypedArtifactTool(typedArtifactTool{
 		name:        "image_convert",
 		displayName: "Image Convert",
 		description: "将 PNG/JPEG/GIF 等真实图片转换为 png/jpg；不用于 PDF/Office 渲染",
@@ -3081,7 +3194,7 @@ func init() {
 		},
 		execute: imageConvert,
 	})
-	tool.MustRegisterTool(typedArtifactTool{
+	mustRegisterTypedArtifactTool(typedArtifactTool{
 		name:        "media_probe",
 		displayName: "Media Probe",
 		description: "读取音视频文件基础元数据；深度 probe 由 ffmpeg runtime 提供。图片用 image_inspect，PDF/Office 用 read_artifact/pdf_extract",
@@ -3093,16 +3206,8 @@ func init() {
 		execute: mediaProbeBasic,
 	})
 
-	for _, spec := range []struct {
-		name        string
-		displayName string
-		description string
-		readOnly    bool
-	}{
-		{"spreadsheet_chart", "Spreadsheet Chart", "为表格生成图表产物", false},
-		{"document_render", "Document Render", "渲染 docx 文档预览", true},
-		{"pdf_render", "PDF Render", "渲染 PDF 页面预览", true},
-	} {
-		tool.MustRegisterTool(runtimeBackedTool(spec.name, spec.displayName, spec.description, spec.readOnly))
-	}
+}
+
+func mustRegisterTypedArtifactTool(runtime tool.Tool) {
+	tool.MustRegisterToolWithMode(runtime, tool.DefinitionValidationStrictBuiltin)
 }

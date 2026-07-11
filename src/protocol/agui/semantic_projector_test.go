@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	"awaken/src/tool"
 )
 
 func TestProjectSemanticRecordsToolOrder(t *testing.T) {
@@ -71,6 +72,77 @@ func TestProjectSemanticRecordsToolOrder(t *testing.T) {
 	}
 	if events[4].Diagnostic["reason"] != "no_match" {
 		t.Fatalf("expected diagnostic reason no_match, got %+v", events[4].Diagnostic)
+	}
+}
+
+func TestArtifactV2SemanticRoundTrip(t *testing.T) {
+	event := agentcore.AwakenEvent{
+		Type:                    agentcore.ArtifactCreatedEventType,
+		ToolCallID:              "call_publish",
+		ToolName:                "artifact_publish",
+		ArtifactContractVersion: tool.ArtifactContractVersion,
+		ArtifactRole:            tool.ArtifactRoleDeliverable,
+		ArtifactProducer:        "artifact_publish",
+		ArtifactID:              "artifact_publish:report.pdf",
+		ArtifactTitle:           "Final report",
+		ArtifactDescription:     "Published report.pdf",
+		ArtifactKind:            "pdf",
+		ArtifactPath:            "report.pdf",
+		ArtifactStatus:          agentcore.ArtifactStatusReady,
+	}
+	record := agentcore.ArtifactSemanticRecord("thread", "run", "turn", "session", event)
+	if record.Payload["contract_version"] != tool.ArtifactContractVersion || record.Payload["role"] != "deliverable" || record.Payload["producer"] != "artifact_publish" {
+		t.Fatalf("semantic record lost v2 metadata: %+v", record.Payload)
+	}
+
+	frames := ProjectSemanticRecord(record)
+	if len(frames) != 1 {
+		t.Fatalf("expected one artifact frame, got %+v", frames)
+	}
+	frame := frames[0]
+	if frame.ArtifactContractVersion != tool.ArtifactContractVersion || frame.ArtifactRole != "deliverable" || frame.ArtifactProducer != "artifact_publish" {
+		t.Fatalf("projector lost v2 metadata: %+v", frame)
+	}
+
+	replayed := SemanticRecordsToAwakenEvents([]agentcore.SemanticRecord{record})
+	if len(replayed) != 1 {
+		t.Fatalf("expected one replay event, got %+v", replayed)
+	}
+	if replayed[0].ArtifactContractVersion != tool.ArtifactContractVersion || replayed[0].ArtifactRole != tool.ArtifactRoleDeliverable || replayed[0].ArtifactProducer != "artifact_publish" {
+		t.Fatalf("replay lost v2 metadata: %+v", replayed[0])
+	}
+}
+
+func TestProjectLegacyArtifactInfersRoleWithoutRewritingHistory(t *testing.T) {
+	record := agentcore.SemanticRecord{
+		SchemaVersion: 2,
+		RecordID:      "legacy_artifact",
+		Seq:           1,
+		ThreadID:      "thread",
+		RunID:         "run",
+		Kind:          agentcore.SemanticKindArtifact,
+		Timestamp:     time.Now().UTC(),
+		Payload: map[string]any{
+			"artifact_id":  "presentation_create:deck_preview/deck.pdf",
+			"title":        "deck.pdf",
+			"kind":         "pdf",
+			"path":         "deck_preview/deck.pdf",
+			"status":       "ready",
+			"tool_call_id": "call_legacy",
+			"tool_name":    "presentation_create",
+			"created":      true,
+		},
+	}
+
+	frames := ProjectSemanticRecord(record)
+	if len(frames) != 1 {
+		t.Fatalf("expected one frame, got %+v", frames)
+	}
+	if frames[0].ArtifactContractVersion != tool.ArtifactLegacyContractVersion || frames[0].ArtifactRole != "preview" || frames[0].ArtifactProducer != "presentation_create" {
+		t.Fatalf("legacy inference mismatch: %+v", frames[0])
+	}
+	if _, exists := record.Payload["role"]; exists {
+		t.Fatalf("projector must not rewrite legacy payload: %+v", record.Payload)
 	}
 }
 

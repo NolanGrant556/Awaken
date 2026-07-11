@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -30,12 +29,15 @@ type Result struct {
 
 var backendCandidates = map[string][]string{
 	"pdftotext": {"pdftotext", "pdftotext.exe"},
-	"soffice":   {"soffice", "soffice.exe", "libreoffice", "libreoffice.exe"},
 }
 
 func Run(ctx context.Context, permCtx tool.PermissionContext, spec CommandSpec) (Result, error) {
 	if strings.TrimSpace(spec.Backend) == "" {
 		return Result{}, fmt.Errorf("local compute backend is required")
+	}
+	if strings.EqualFold(strings.TrimSpace(spec.Backend), "soffice") ||
+		strings.EqualFold(strings.TrimSpace(spec.Backend), "libreoffice") {
+		return Result{}, fmt.Errorf("direct soffice execution is disabled; use OfficeRenderWorker")
 	}
 	for _, input := range spec.InputPaths {
 		if _, err := permCtx.ResolveReadablePathChecked(input); err != nil {
@@ -108,22 +110,6 @@ func resolveBackendBinary(name string) (string, error) {
 			bundled := filepath.Join(home, ".cache", "awaken-runtimes", "primary-runtime", "dependencies", "bin", candidate)
 			if _, err := os.Stat(bundled); err == nil {
 				return bundled, nil
-			}
-		}
-	}
-	if runtime.GOOS == "windows" {
-		if name == "soffice" {
-			for _, base := range []string{
-				filepath.Join(os.Getenv("ProgramFiles"), "LibreOffice", "program", "soffice.bin.exe"),
-				filepath.Join(os.Getenv("ProgramFiles(x86)"), "LibreOffice", "program", "soffice.bin.exe"),
-				filepath.Join(os.Getenv("ProgramFiles"), "LibreOffice", "program", "soffice.exe"),
-				filepath.Join(os.Getenv("ProgramFiles(x86)"), "LibreOffice", "program", "soffice.exe"),
-			} {
-				if base != "" {
-					if _, err := os.Stat(base); err == nil {
-						return base, nil
-					}
-				}
 			}
 		}
 	}

@@ -173,6 +173,10 @@ type SkillDefinition struct {
 
 	// RootDir is the absolute path to the skill package directory.
 	RootDir string `yaml:"-"`
+	// ResolvedRootDir captures the real package root when the registry loads or
+	// installs the Skill. Resource readers use it to detect later symlink
+	// replacement of RootDir before opening bundled files.
+	ResolvedRootDir string `yaml:"-"`
 
 	// SkillFilePath is the absolute path to the package entrypoint.
 	SkillFilePath string `yaml:"-"`

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	"awaken/src/tool"
 )
 
 // v1SemanticRecorder persists SemanticRecord facts into a legacy v1 JSONL transcript
@@ -166,21 +167,27 @@ func semanticRecordToV1Transcript(record agentcore.SemanticRecord) ([]Transcript
 		if boolPayload(record.Payload, "created") {
 			eventType = agentcore.ArtifactCreatedEventType
 		}
+		producer := firstNonEmpty(stringPayload(record.Payload, "producer"), stringPayload(record.Payload, "tool_name"))
+		artifactKind := stringPayload(record.Payload, "kind")
+		artifactPath := stringPayload(record.Payload, "path")
 		event := agentcore.AwakenEvent{
-			Type:                eventType,
-			Timestamp:           ts,
-			ThreadID:            record.ThreadID,
-			RunID:               record.RunID,
-			TurnID:              record.TurnID,
-			ToolCallID:          stringPayload(record.Payload, "tool_call_id"),
-			ToolName:            stringPayload(record.Payload, "tool_name"),
-			ArtifactID:          stringPayload(record.Payload, "artifact_id"),
-			ArtifactTitle:       stringPayload(record.Payload, "title"),
-			ArtifactDescription: stringPayload(record.Payload, "description"),
-			ArtifactKind:        stringPayload(record.Payload, "kind"),
-			ArtifactPath:        stringPayload(record.Payload, "path"),
-			ArtifactContent:     stringPayload(record.Payload, "content"),
-			ArtifactStatus:      agentcore.ArtifactStatus(stringPayload(record.Payload, "status")),
+			Type:                    eventType,
+			Timestamp:               ts,
+			ThreadID:                record.ThreadID,
+			RunID:                   record.RunID,
+			TurnID:                  record.TurnID,
+			ToolCallID:              stringPayload(record.Payload, "tool_call_id"),
+			ToolName:                stringPayload(record.Payload, "tool_name"),
+			ArtifactContractVersion: tool.ArtifactContractVersionOrLegacy(intPayload(record.Payload, "contract_version")),
+			ArtifactRole:            tool.ResolveArtifactRole(tool.ArtifactRole(stringPayload(record.Payload, "role")), producer, artifactKind, artifactPath),
+			ArtifactProducer:        producer,
+			ArtifactID:              stringPayload(record.Payload, "artifact_id"),
+			ArtifactTitle:           stringPayload(record.Payload, "title"),
+			ArtifactDescription:     stringPayload(record.Payload, "description"),
+			ArtifactKind:            artifactKind,
+			ArtifactPath:            artifactPath,
+			ArtifactContent:         stringPayload(record.Payload, "content"),
+			ArtifactStatus:          agentcore.ArtifactStatus(stringPayload(record.Payload, "status")),
 		}
 		return []TranscriptRecord{eventRecord(base, event)}, true
 	case agentcore.SemanticKindTurnDiff:

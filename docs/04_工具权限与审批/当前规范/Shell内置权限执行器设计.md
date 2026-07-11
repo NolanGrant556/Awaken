@@ -9,14 +9,15 @@
 
 当前结论：shell 是“本机执行面”，不是“项目文件夹沙箱”。Agent 可以通过 shell 读取、写入和操作项目内外的本机路径，并运行本机已有命令、脚本、包管理器、网络命令和系统命令。Awaken 不再用 `readable_roots`、`writable_roots`、sandbox support、open-world 分类或模型 endpoint 能力来阻断 shell。
 
-## 唯二硬约束
+## 三类硬边界
 
-shell 只保留两个产品级硬约束：
+shell 保留三类产品级硬边界：
 
 1. 删除必须进入系统回收站。
 2. 工具群发消息必须触发人工审核。
+3. `soffice` / `libreoffice` 只能由受监督的 typed Office artifact tool / `OfficeRenderWorker` 启动，shell 直启必须结构化拒绝。
 
-除此以外，shell 不做项目边界、敏感路径、网络、依赖安装、sudo、chmod、脚本执行、HOME 读取、全盘搜索等产品层硬拦截。真正是否能执行，由操作系统权限、命令自身权限、账号授权、runtime 是否存在以及命令退出码决定。
+第三类是执行路由约束，不是用户审批。`command -v soffice`、搜索包含 `soffice` 的文本或 `echo soffice` 等诊断性引用仍允许执行。除此以外，shell 不做项目边界、敏感路径、网络、依赖安装、sudo、chmod、脚本执行、HOME 读取、全盘搜索等产品层硬拦截。真正是否能执行，由操作系统权限、命令自身权限、账号授权、runtime 是否存在以及命令退出码决定。
 
 ## 边界拆分
 
@@ -54,7 +55,7 @@ shell 调用按以下顺序处理：
 ```text
 ShellTool.CheckPermission
   -> 群发消息检测
-  -> ShellPolicy hard deny 检测
+  -> ShellPolicy 永久删除 / Office runtime 直启 hard deny 检测
   -> PermissionAllow
   -> AutoToolPolicy allow
   -> ShellExecutor 执行前再次 hard deny
@@ -79,6 +80,18 @@ shell hard deny 只拦截直接删除命令，包括：
 命中后返回结构化拒绝，提示改用 `trash_file`。这条规则对项目内、项目外、文件、目录都一样。
 
 不再尝试解析 `rm` 的参数是否安全；只要是直接删除命令，一律不走 shell。
+
+## Office runtime 启动边界
+
+shell 不得直接启动 `soffice`、`soffice.bin` 或 `libreoffice`。该规则同时覆盖常见的间接启动形式，例如 `env`、`command`、`xargs`、`exec`、`nohup` 和 `sh -c` / `bash -c` / `zsh -c` 包装。
+
+命中后返回结构化拒绝，要求改用 `document_*`、`presentation_*` 等 typed Office artifact tool，由 `OfficeRenderWorker` 统一管理 runtime、子进程环境、超时和渲染结果。该拒绝不会进入通用审批或人工确认路径。
+
+以下诊断不视为启动，仍应允许：
+
+- `command -v soffice`
+- `rg soffice .`
+- `echo soffice`
 
 ## 群发消息审核
 
@@ -153,7 +166,7 @@ shell 执行仍应记录：
 - denied reason
 - mass message review metadata
 
-UI 不展示通用审批卡。普通 shell 命令显示为自动执行；直接删除显示结构化拒绝；群发显示专用人工审核。非零退出必须显示 failed 与 exitCode，不得因 content 非空而显示成功。
+UI 不展示通用审批卡。普通 shell 命令显示为自动执行；直接删除和 Office runtime 直启显示结构化拒绝；群发显示专用人工审核。非零退出必须显示 failed 与 exitCode，不得因 content 非空而显示成功。
 
 ## FailureSupervisor 交互
 
@@ -172,6 +185,9 @@ shell 的 `process_exit_nonzero`、`process_timeout`、`process_spawn_failed` �
 - `npm install`
 - `git push`
 - `echo hi > /tmp/awaken-out.txt`
+- `command -v soffice`
+- `rg soffice .`
+- `echo soffice`
 
 应拒绝并提示改用回收站工具：
 
@@ -180,6 +196,13 @@ shell 的 `process_exit_nonzero`、`process_timeout`、`process_spawn_failed` �
 - `unlink file.txt`
 - `del file.txt`
 - `Remove-Item file.txt`
+
+应拒绝并提示改用 typed Office artifact tool：
+
+- `soffice --headless --convert-to pdf report.pptx`
+- `libreoffice --headless --convert-to pdf report.docx`
+- `env soffice --headless --convert-to pdf report.pptx`
+- `bash -c 'soffice --headless --convert-to pdf report.pptx'`
 
 应进入群发人工审核：
 
@@ -195,4 +218,4 @@ shell 的 `process_exit_nonzero`、`process_timeout`、`process_spawn_failed` �
 
 ## 关键结论
 
-当前 Awaken shell 不是受 workspace 沙箱约束的窄工具，而是本机自由执行能力。安全产品契约只保留两条：删除必须可恢复，群发必须人工审核。
+当前 Awaken shell 不是受 workspace 沙箱约束的窄工具，而是本机自由执行能力。安全产品契约保留三类硬边界：删除必须可恢复，群发必须人工审核，Office runtime 必须经受监督的 typed artifact runtime 启动。只有群发属于人工审核；其余两类直接拒绝或改走安全工具链。

@@ -58,6 +58,16 @@ type InputSchemaProvider interface {
 	InputSchema() ToolParametersSchema
 }
 
+// LegacySingleValueInput marks the small set of legacy executors that consume
+// the value of their sole parameter instead of the canonical JSON argument
+// object. New tools should consume the object described by InputSchema.
+//
+// The marker is deliberately opt-in: model validation and execution otherwise
+// share the exact registered v2 schema and the runtime preserves object shape.
+type LegacySingleValueInput interface {
+	UnwrapSingleParameterInput() bool
+}
+
 // ResolveInputSchema returns the recursive schema for a tool, preferring
 // InputSchemaProvider when available and falling back to flat Parameters().
 func ResolveInputSchema(t Tool) ToolParametersSchema {

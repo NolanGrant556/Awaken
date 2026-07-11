@@ -58,11 +58,36 @@ func (t *ShellTool) Parameters() []tool.ToolParameter {
 }
 
 func (t *ShellTool) Definition() tool.ToolDefinition {
-	return tool.ToolDefinition{
+	return tool.BuildBuiltinDefinition(t, tool.ToolDefinition{
 		Name:        "shell",
 		DisplayName: "Shell",
-		Source:      tool.SourceBuiltin,
-		Description: "执行本机 shell/CLI 命令，可操作项目内外本机路径；本地删除必须走回收站，群发/批量通知必须走人工审核能力",
+		Description: t.Description(),
+		Purpose:     "在受策略和任务范围约束下执行本机 CLI，并返回进程状态、stdout、stderr 与截断事实。",
+		WhenToUse: []string{
+			"需要运行构建、测试、格式化、git 或已安装 CLI，且没有职责更窄的 typed tool 时",
+			"需要观察真实 exit code、stderr、timeout 或进程级失败时",
+		},
+		WhenNotToUse: []string{
+			"读取、搜索、创建、精确编辑或删除文件时优先使用 read_file、grep_search、text_file_create、text_edit、trash_file",
+			"不得使用 rm、rmdir、unlink 永久删除；必须使用 trash_file",
+			"不得用 shell 绕过 writable roots、授权、runtime 准备或群发人工审核边界",
+		},
+		OutputSchema: tool.ToolParam{Type: "object", Properties: map[string]tool.ToolParam{
+			"command": {Type: "string", Description: "实际执行命令"},
+			"cwd":     {Type: "string", Description: "实际工作目录"},
+			"stdout":  {Type: "string", Description: "有界标准输出"},
+			"stderr":  {Type: "string", Description: "有界标准错误"},
+			"reason":  {Type: "string", Description: "非零退出被判为 neutral 时的机器原因"},
+		}},
+		SideEffects: []tool.ToolSideEffect{{Kind: tool.SideEffectExecute, Resources: []string{"local process and command-selected resources"}, Description: "启动本机进程；具体文件、git、网络或外部副作用由命令决定。", Reversibility: tool.ReversibilityUnknown}},
+		Examples:    []tool.ToolExample{{Scenario: "在仓库运行聚焦 Go 测试", Input: map[string]any{"command": "go test ./src/tool", "workdir": ".", "timeout_ms": 120000}, Outcome: "返回 exit code、stdout、stderr、duration 和 process status"}},
+		FailureModes: []tool.ToolFailureMode{
+			{Code: tool.ErrorCodeValidationError, Cause: "命令、工作目录、timeout 或输出上限无效", Retryable: false, Recovery: []string{"修正参数"}},
+			{Code: tool.ErrorCodeProcessSpawnFailed, Cause: "本机进程未能启动", Retryable: true, Recovery: []string{"检查可执行文件、工作目录和本机进程环境后重试"}},
+			{Code: tool.ErrorCodeProcessExitNonzero, Cause: "进程完成但返回非零退出码", Retryable: false, Recovery: []string{"根据 stderr 和 exit code 修复原因", "不要盲目原样重试"}},
+			{Code: tool.ErrorCodeProcessTimeout, Cause: "进程超过 timeout", Retryable: true, Recovery: []string{"检查是否应使用更窄命令或合理增加 timeout"}},
+			{Code: tool.ErrorCodeToolDenied, Cause: "命令违反删除、范围或群发策略", Retryable: false, Recovery: []string{"改用职责匹配的 typed tool 或完成专用审核"}},
+		},
 		Annotations: tool.ToolAnnotations{
 			ReadOnly:        false,
 			Destructive:     true,
@@ -70,7 +95,7 @@ func (t *ShellTool) Definition() tool.ToolDefinition {
 			CapabilityClass: tool.CapabilitySystemOperation,
 			TrustedOrigin:   tool.TrustedOriginBuiltin,
 		},
-	}
+	})
 }
 
 func (t *ShellTool) CheckPermission(ctx context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {
@@ -216,6 +241,10 @@ func (t *ShellTool) ExecuteOutcome(ctx context.Context, input string, observer t
 			"stderr":  result.Stderr,
 		},
 	}
+	outcome.Details = map[string]any{
+		"command": shellRes.Command, "cwd": cwd,
+		"stdout": result.Stdout, "stderr": result.Stderr,
+	}
 
 	switch {
 	case result.TimedOut:
@@ -240,6 +269,7 @@ func (t *ShellTool) ExecuteOutcome(ctx context.Context, input string, observer t
 			outcome.SemanticStatus = tool.SemanticNeutral
 			outcome.ProcessStatus = tool.ProcessExited
 			outcome.Diagnostic["reason"] = reason
+			outcome.Details["reason"] = reason
 		} else {
 			outcome.Status = tool.OutcomeFailed
 			outcome.TransportStatus = tool.TransportCompleted
@@ -248,7 +278,7 @@ func (t *ShellTool) ExecuteOutcome(ctx context.Context, input string, observer t
 			outcome.ErrorCode = tool.ErrorCodeProcessExitNonzero
 			outcome.ErrorCategory = tool.ErrorCategoryProcess
 			outcome.ErrorMessage = fmt.Sprintf("process exited with code %d", result.ExitCode)
-			outcome.Retryable = true
+			outcome.Retryable = false
 			outcome.RecoveryOptions = []string{"inspect_exit_code_and_stderr", "change_command_or_stop"}
 		}
 	}
@@ -456,5 +486,5 @@ func normalizeMaxOutputChars(value int) int {
 }
 
 func init() {
-	tool.MustRegisterTool(&ShellTool{})
+	tool.MustRegisterToolWithMode(&ShellTool{}, tool.DefinitionValidationStrictBuiltin)
 }

@@ -1,7 +1,10 @@
 import React from "react";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { ProfileBalancePopover } from "./ProfileBalancePopover";
+import {
+  ProfileBalancePopover,
+  credentialRecoveryForBalances,
+} from "./ProfileBalancePopover";
 import type { RuntimeClient } from "./runtime/client";
 import type { ModelProfileBalance } from "../shared/runtime";
 
@@ -43,7 +46,7 @@ describe("ProfileBalancePopover", () => {
     expect(html).toBe("");
   });
 
-  it("renders loading state when open", () => {
+  it("renders the empty state and in-app settings action when open", () => {
     const anchorRef = { current: null };
     const html = renderToString(
       <ProfileBalancePopover
@@ -54,8 +57,25 @@ describe("ProfileBalancePopover", () => {
         onClose={() => {}}
       />,
     );
-    expect(html).toContain("正在查询余额");
-    expect(html).toContain("设置模型");
-    expect(html).toContain("Nolan");
+    expect(html).toContain("没有已启用且有 API key 的模型");
+    expect(html).toContain("设置");
+  });
+
+  it("collapses repeated provider failures into one credential recovery state", () => {
+    expect(
+      credentialRecoveryForBalances([
+        {
+          ...mockBalance,
+          status: "error",
+          credentialIssue: "unreadable",
+        },
+        {
+          ...mockBalance,
+          profileId: "kimi-1",
+          providerId: "kimi-coding-plan",
+          credentialIssue: "temporarily_unavailable",
+        },
+      ]),
+    ).toBe("temporarily_unavailable");
   });
 });

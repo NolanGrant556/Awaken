@@ -8,6 +8,7 @@ import {
   existsSync,
   fsyncSync,
   lstatSync,
+  mkdtempSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -18,6 +19,7 @@ import {
   renameSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
   writeSync,
   constants,
@@ -127,6 +129,52 @@ export function migrationMarkerPath(env = process.env, platform = process.platfo
 
 export function readRuntimeManifest(path = runtimeManifestPath) {
   return JSON.parse(readFileSync(path, "utf8"));
+}
+
+export function macOSRuntimeSigningExpectation(
+  env = process.env,
+  platform = process.platform,
+) {
+  if (platform !== "darwin") {
+    return null;
+  }
+  const release = envFlag(env.AWAKEN_RUNTIME_RELEASE_SIGNING);
+  const identity = String(env.AWAKEN_RUNTIME_CODESIGN_IDENTITY || "-").trim() || "-";
+  return {
+    release,
+    mode: release ? "developer-id" : "ad-hoc",
+    identity,
+    strictVerified: true,
+    gatekeeperVerified: release,
+    notarized: release,
+    stapled: release,
+  };
+}
+
+export function runtimeRequiresPreparation(report, manifest, repair = false, options = {}) {
+  if (repair || !report?.ready) {
+    return true;
+  }
+  const expectedVersion = String(manifest?.bundleVersion || manifest?.version || "").trim();
+  const activeVersion = String(report?.bundleVersion || "").trim();
+  if (expectedVersion === "" || activeVersion !== expectedVersion) {
+    return true;
+  }
+  const expectedSigning = options.macOSRuntimeSigning;
+  if (expectedSigning) {
+    const activeSigning = report?.security?.macOSRuntimeSigning;
+    if (!activeSigning || activeSigning.mode !== expectedSigning.mode ||
+        activeSigning.strictVerified !== true ||
+        activeSigning.gatekeeperVerified !== expectedSigning.gatekeeperVerified ||
+        activeSigning.notarized !== expectedSigning.notarized ||
+        activeSigning.stapled !== expectedSigning.stapled) {
+      return true;
+    }
+    if (expectedSigning.release && activeSigning.identity !== expectedSigning.identity) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function platformPathKeys(platform = process.platform) {
@@ -295,32 +343,51 @@ export function stageExecutable(path, source, label) {
 }
 
 export function copyDirectoryContents(source, target) {
-  const activeDirectories = new Set();
+  const sourceRoot = realpathSync(source);
+  if (pathInsideRoot(resolve(target), sourceRoot)) {
+    throw new Error(`managed runtime copy target must not be inside its source root: ${target}`);
+  }
   const copyEntry = (from, to) => {
-    const resolvedSource = realpathSync(from);
-    const stat = statSync(resolvedSource);
+    const stat = lstatSync(from);
+    if (stat.isSymbolicLink()) {
+      const linkTarget = readlinkSync(from);
+      if (isAbsolute(linkTarget)) {
+        throw new Error(`absolute symlink is forbidden while copying managed runtime: ${from} -> ${linkTarget}`);
+      }
+      let resolvedTarget;
+      try {
+        resolvedTarget = realpathSync(resolve(dirname(from), linkTarget));
+      } catch {
+        throw new Error(`broken or cyclic symlink while copying managed runtime: ${from} -> ${linkTarget}`);
+      }
+      if (!pathInsideRoot(resolvedTarget, sourceRoot)) {
+        throw new Error(`external symlink is forbidden while copying managed runtime: ${from} -> ${resolvedTarget}`);
+      }
+      ensureDir(dirname(to));
+      const targetStat = statSync(resolvedTarget);
+      symlinkSync(linkTarget, to, targetStat.isDirectory() ? "dir" : "file");
+      return;
+    }
     if (stat.isDirectory()) {
-      if (activeDirectories.has(resolvedSource)) {
-        throw new Error(`directory symlink cycle while copying ${from}`);
-      }
-      activeDirectories.add(resolvedSource);
       ensureDir(to);
-      for (const entry of readdirSync(resolvedSource)) {
-        copyEntry(join(resolvedSource, entry), join(to, entry));
+      for (const entry of readdirSync(from)) {
+        copyEntry(join(from, entry), join(to, entry));
       }
-      activeDirectories.delete(resolvedSource);
+      if (!isWindows) {
+        chmodSync(to, stat.mode & 0o777);
+      }
       return;
     }
     if (!stat.isFile()) {
       throw new Error(`unsupported runtime source entry: ${from}`);
     }
     ensureDir(dirname(to));
-    copyFileSync(resolvedSource, to);
+    copyFileSync(from, to);
     if (!isWindows) {
       chmodSync(to, stat.mode & 0o777);
     }
   };
-  copyEntry(source, target);
+  copyEntry(sourceRoot, target);
 }
 
 export function linkDirectory(path, source, label) {
@@ -764,13 +831,19 @@ export function materializeMacOSRpathAliases(root) {
       }
       const suffix = reference.slice("@rpath/".length);
       const wanted = basenameSafe(suffix);
-      const source = files.find((candidate) => {
+      const candidates = files.filter((candidate) => {
         const name = basenameSafe(candidate);
         return name === wanted || name.startsWith(`${wanted}.`);
       });
-      if (!source) {
+      if (candidates.length === 0) {
         continue;
       }
+      if (candidates.length > 1) {
+        throw new Error(
+          `ambiguous @rpath alias ${reference} from ${loaderPath}: ${candidates.join(", ")}`,
+        );
+      }
+      const source = candidates[0];
       const rpath = machORpaths(loaderPath)[0];
       if (!rpath) {
         continue;
@@ -790,6 +863,461 @@ export function materializeMacOSRpathAliases(root) {
     }
   }
   return created;
+}
+
+function envFlag(value) {
+  return ["1", "true", "yes", "on"].includes(String(value || "").trim().toLowerCase());
+}
+
+function assertStagedMacOSBundle(appRoot, ownershipRoot, sourceRoot = "") {
+  if (!ownershipRoot || !pathInsideRoot(appRoot, ownershipRoot)) {
+    throw new Error(`refusing to mutate macOS bundle outside the staging root: ${appRoot}`);
+  }
+  if (sourceRoot && exists(sourceRoot) && realpathSync(sourceRoot) === realpathSync(appRoot)) {
+    throw new Error(`refusing to mutate the LibreOffice source application: ${sourceRoot}`);
+  }
+}
+
+export const macOSOfficeRenderBundleIdentifier = "com.awaken.runtime.libreoffice-renderer";
+
+const macOSOfficeLaunchServicesKeys = [
+  "CFBundleDocumentTypes",
+  "CFBundleURLTypes",
+  "NSServices",
+  "UTExportedTypeDeclarations",
+  "UTImportedTypeDeclarations",
+];
+
+const macOSOfficeRegistrationBundles = [
+  ["Contents", "Library", "Spotlight", "OOoSpotlightImporter.mdimporter"],
+  ["Contents", "PlugIns", "QuickLookPreview.appex"],
+  ["Contents", "PlugIns", "QuickLookThumbnail.appex"],
+];
+
+export function setMacOSBackgroundOnlyApplication(appRoot, options = {}) {
+  const platform = options.platform || process.platform;
+  if (platform !== "darwin") {
+    return { changed: false, reason: "not macOS" };
+  }
+  assertStagedMacOSBundle(appRoot, options.ownershipRoot, options.sourceRoot);
+  const infoPlist = join(appRoot, "Contents", "Info.plist");
+  if (!exists(infoPlist)) {
+    throw new Error(`macOS application Info.plist is missing: ${infoPlist}`);
+  }
+  if (!which("plutil")) {
+    throw new Error("plutil is required to configure the macOS LibreOffice runtime");
+  }
+
+  // LSBackgroundOnly and LSUIElement are mutually exclusive activation
+  // policies. The managed LibreOffice copy is a faceless render worker, so it
+  // must never inherit an agent/UIElement setting from another build.
+  run("plutil", ["-remove", "LSUIElement", infoPlist]);
+  for (const key of macOSOfficeLaunchServicesKeys) {
+    run("plutil", ["-remove", key, infoPlist]);
+  }
+  runRequired(
+    "plutil",
+    [
+      "-replace",
+      "CFBundleIdentifier",
+      "-string",
+      options.bundleIdentifier || macOSOfficeRenderBundleIdentifier,
+      infoPlist,
+    ],
+    `set managed LibreOffice bundle identifier in ${infoPlist}`,
+  );
+  runRequired(
+    "plutil",
+    ["-replace", "CFBundleName", "-string", "Awaken Office Render Runtime", infoPlist],
+    `set managed LibreOffice bundle name in ${infoPlist}`,
+  );
+  const replaced = run("plutil", ["-replace", "LSBackgroundOnly", "-bool", "YES", infoPlist]);
+  if (replaced.status !== 0) {
+    runRequired(
+      "plutil",
+      ["-insert", "LSBackgroundOnly", "-bool", "YES", infoPlist],
+      `set LSBackgroundOnly in ${infoPlist}`,
+    );
+  }
+  const verified = run("plutil", ["-extract", "LSBackgroundOnly", "raw", "-o", "-", infoPlist]);
+  if (verified.status !== 0 || String(verified.stdout || "").trim() !== "true") {
+    throw new Error(`failed to verify LSBackgroundOnly in ${infoPlist}`);
+  }
+  const removedRegistrationBundles = [];
+  for (const parts of macOSOfficeRegistrationBundles) {
+    const path = join(appRoot, ...parts);
+    if (exists(path)) {
+      rmSync(path, { recursive: true, force: true });
+      removedRegistrationBundles.push(path);
+    }
+  }
+  return {
+    changed: true,
+    appRoot,
+    infoPlist,
+    activationPolicy: "background-only",
+    bundleIdentifier: options.bundleIdentifier || macOSOfficeRenderBundleIdentifier,
+    removedLaunchServicesKeys: macOSOfficeLaunchServicesKeys,
+    removedRegistrationBundles,
+  };
+}
+
+export function sealMacOSRuntimeApplicationPermissions(appRoot, options = {}) {
+  const platform = options.platform || process.platform;
+  if (platform !== "darwin") {
+    return { sealed: false, reason: "not macOS", files: 0, directories: 0 };
+  }
+  assertStagedMacOSBundle(appRoot, options.ownershipRoot, options.sourceRoot);
+  const files = [];
+  const directories = [];
+  const pending = [appRoot];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    const stat = lstatSync(current);
+    if (stat.isSymbolicLink()) {
+      continue;
+    }
+    if (stat.isDirectory()) {
+      directories.push({ path: current, mode: stat.mode & 0o777 });
+      for (const entry of readdirSync(current)) {
+        pending.push(join(current, entry));
+      }
+    } else if (stat.isFile()) {
+      files.push({ path: current, mode: stat.mode & 0o777 });
+    }
+  }
+  for (const file of files) {
+    chmodSync(file.path, file.mode & ~0o222);
+  }
+  directories.sort((left, right) => right.path.length - left.path.length);
+  for (const directory of directories) {
+    chmodSync(directory.path, directory.mode & ~0o222);
+  }
+  return { sealed: true, files: files.length, directories: directories.length };
+}
+
+const macOSCodeBundleSuffixes = [
+  ".app",
+  ".appex",
+  ".bundle",
+  ".framework",
+  ".mdimporter",
+  ".plugin",
+  ".xpc",
+];
+
+function isMacOSCodeBundle(path) {
+  const lower = String(path || "").toLowerCase();
+  return macOSCodeBundleSuffixes.some((suffix) => lower.endsWith(suffix));
+}
+
+function collectMacOSCode(appRoot) {
+  const bundles = [appRoot];
+  const machOFiles = [];
+  const pending = [appRoot];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    const stat = lstatSync(current);
+    if (stat.isSymbolicLink()) {
+      continue;
+    }
+    if (stat.isDirectory()) {
+      if (current !== appRoot && isMacOSCodeBundle(current)) {
+        bundles.push(current);
+      }
+      for (const entry of readdirSync(current)) {
+        pending.push(join(current, entry));
+      }
+      continue;
+    }
+    if (stat.isFile() && isMachOFile(current)) {
+      machOFiles.push(current);
+    }
+  }
+  const depth = (path) => relative(appRoot, path).split(sep).filter(Boolean).length;
+  bundles.sort((left, right) => depth(right) - depth(left));
+  machOFiles.sort((left, right) => depth(right) - depth(left));
+  return { bundles, machOFiles };
+}
+
+function extractCodeEntitlements(codePath, entitlementsDir) {
+  const name = createHash("sha256").update(codePath).digest("hex").slice(0, 20);
+  const outputPath = join(entitlementsDir, `${name}.plist`);
+  const result = run("codesign", ["-d", "--xml", "--entitlements", outputPath, codePath]);
+  if (result.status !== 0 || !exists(outputPath) || fileSize(outputPath) === 0) {
+    rmSync(outputPath, { force: true });
+    return "";
+  }
+  if (!runOk("plutil", ["-lint", outputPath])) {
+    rmSync(outputPath, { force: true });
+    return "";
+  }
+  return outputPath;
+}
+
+export function captureMacOSRuntimeSigningMetadata(appRoot, options = {}) {
+  const platform = options.platform || process.platform;
+  if (platform !== "darwin") {
+    return null;
+  }
+  if (!which("codesign") || !which("plutil")) {
+    throw new Error("codesign and plutil are required to capture macOS runtime signing metadata");
+  }
+  const { bundles, machOFiles } = collectMacOSCode(appRoot);
+  const metadataDir = mkdtempSync(join(tmpdir(), "awaken-runtime-entitlements-"));
+  const entitlements = new Map();
+  try {
+    for (const path of [...machOFiles, ...bundles]) {
+      entitlements.set(path, extractCodeEntitlements(path, metadataDir));
+    }
+    return { appRoot: resolve(appRoot), metadataDir, entitlements };
+  } catch (error) {
+    rmSync(metadataDir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+export function disposeMacOSRuntimeSigningMetadata(metadata) {
+  if (metadata?.metadataDir) {
+    rmSync(metadata.metadataDir, { recursive: true, force: true });
+  }
+}
+
+function macOSBundleVersion(bundlePath) {
+  const candidates = [
+    join(bundlePath, "Contents", "Info.plist"),
+    join(bundlePath, "Resources", "Info.plist"),
+    join(bundlePath, "Versions", "Current", "Resources", "Info.plist"),
+  ];
+  for (const plist of candidates) {
+    if (!exists(plist)) {
+      continue;
+    }
+    const result = run("plutil", ["-extract", "CFBundleVersion", "raw", "-o", "-", plist]);
+    const version = String(result.stdout || "").trim();
+    if (result.status === 0 && /^[a-zA-Z0-9._-]+$/.test(version)) {
+      return version;
+    }
+  }
+  return "";
+}
+
+function signMacOSCode(codePath, entitlementsPath, identity, release) {
+  const args = ["--force", "--sign", identity, "--options", "runtime"];
+  if (release) {
+    args.push("--timestamp");
+  }
+  if (entitlementsPath) {
+    args.push("--entitlements", entitlementsPath);
+  }
+  if (String(codePath).toLowerCase().endsWith(".framework")) {
+    const version = macOSBundleVersion(codePath);
+    if (version) {
+      args.push("--bundle-version", version);
+    }
+  }
+  args.push(codePath);
+  runRequired("codesign", args, `sign macOS runtime code ${codePath}`);
+}
+
+export function verifyMacOSRuntimeApplication(appRoot, options = {}) {
+  const platform = options.platform || process.platform;
+  if (platform !== "darwin") {
+    return { verified: false, reason: "not macOS" };
+  }
+  if (!which("codesign") || !which("plutil")) {
+    throw new Error("codesign and plutil are required to verify the macOS LibreOffice runtime");
+  }
+  const infoPlist = join(appRoot, "Contents", "Info.plist");
+  const expectedIdentifier = options.bundleIdentifier || macOSOfficeRenderBundleIdentifier;
+  const background = run("plutil", ["-extract", "LSBackgroundOnly", "raw", "-o", "-", infoPlist]);
+  const identifier = run("plutil", ["-extract", "CFBundleIdentifier", "raw", "-o", "-", infoPlist]);
+  if (background.status !== 0 || String(background.stdout || "").trim() !== "true") {
+    throw new Error(`managed LibreOffice is not background-only: ${appRoot}`);
+  }
+  if (identifier.status !== 0 || String(identifier.stdout || "").trim() !== expectedIdentifier) {
+    throw new Error(`managed LibreOffice has an unexpected bundle identifier: ${appRoot}`);
+  }
+  for (const key of macOSOfficeLaunchServicesKeys) {
+    if (run("plutil", ["-extract", key, "raw", "-o", "-", infoPlist]).status === 0) {
+      throw new Error(`managed LibreOffice still declares LaunchServices key ${key}: ${appRoot}`);
+    }
+  }
+  for (const parts of macOSOfficeRegistrationBundles) {
+    const path = join(appRoot, ...parts);
+    if (exists(path)) {
+      throw new Error(`managed LibreOffice still contains a registration bundle: ${path}`);
+    }
+  }
+  runRequired(
+    "codesign",
+    ["--verify", "--deep", "--strict", "--verbose=4", appRoot],
+    `strictly verify macOS runtime application ${appRoot}`,
+  );
+  if (options.release) {
+    if (!which("spctl") || !which("xcrun")) {
+      throw new Error("spctl and xcrun are required to validate a release macOS runtime");
+    }
+    runRequired(
+      "xcrun",
+      ["stapler", "validate", appRoot],
+      `validate notarization ticket for macOS runtime application ${appRoot}`,
+    );
+    runRequired(
+      "spctl",
+      ["-a", "-vv", "--type", "execute", appRoot],
+      `Gatekeeper assess macOS runtime application ${appRoot}`,
+    );
+  }
+  return {
+    verified: true,
+    strictVerified: true,
+    gatekeeperVerified: Boolean(options.release),
+    notarized: Boolean(options.release),
+    stapled: Boolean(options.release),
+    activationPolicy: "background-only",
+    bundleIdentifier: expectedIdentifier,
+  };
+}
+
+function notarizeMacOSRuntimeApplication(appRoot, options = {}) {
+  const profile = String(
+    options.notaryProfile || process.env.AWAKEN_RUNTIME_NOTARY_PROFILE || "",
+  ).trim();
+  if (!profile) {
+    throw new Error(
+      "release runtime notarization requires AWAKEN_RUNTIME_NOTARY_PROFILE for notarytool",
+    );
+  }
+  if (!which("xcrun") || !which("ditto")) {
+    throw new Error("xcrun and ditto are required to notarize a release macOS runtime");
+  }
+  const temporary = mkdtempSync(join(tmpdir(), "awaken-runtime-notary-"));
+  const archive = join(temporary, "LibreOffice-runtime.zip");
+  try {
+    runRequired(
+      "ditto",
+      ["-c", "-k", "--keepParent", appRoot, archive],
+      `archive macOS runtime application for notarization ${appRoot}`,
+    );
+    runRequired(
+      "xcrun",
+      ["notarytool", "submit", archive, "--keychain-profile", profile, "--wait"],
+      `notarize macOS runtime application ${appRoot}`,
+    );
+    runRequired(
+      "xcrun",
+      ["stapler", "staple", appRoot],
+      `staple notarization ticket to macOS runtime application ${appRoot}`,
+    );
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+  return { notarized: true, stapled: true };
+}
+
+export function verifyMacOSLibreOfficeReleaseSeed(appRoot, options = {}) {
+  const platform = options.platform || process.platform;
+  if (platform !== "darwin") {
+    return { verified: false, reason: "not macOS" };
+  }
+  const infoPlist = join(appRoot, "Contents", "Info.plist");
+  const identifier = run("plutil", ["-extract", "CFBundleIdentifier", "raw", "-o", "-", infoPlist]);
+  if (identifier.status !== 0 || String(identifier.stdout || "").trim() !== "org.libreoffice.script") {
+    throw new Error(`release LibreOffice seed has an unexpected bundle identifier: ${appRoot}`);
+  }
+  runRequired(
+    "codesign",
+    ["--verify", "--deep", "--strict", "--verbose=4", appRoot],
+    `strictly verify pristine LibreOffice release seed ${appRoot}`,
+  );
+  const details = run("codesign", ["-d", "--verbose=4", appRoot]);
+  const signingOutput = `${details.stdout || ""}\n${details.stderr || ""}`;
+  const team = signingOutput.match(/^TeamIdentifier=(.+)$/m)?.[1]?.trim() || "";
+  const expectedTeam = String(
+    options.teamIdentifier || process.env.AWAKEN_RUNTIME_LIBREOFFICE_TEAM_ID || "7P5S3ZLCN7",
+  ).trim();
+  if (details.status !== 0 || team !== expectedTeam) {
+    throw new Error(
+      `release LibreOffice seed TeamIdentifier mismatch: expected ${expectedTeam}, got ${team || "missing"}`,
+    );
+  }
+  return { verified: true, bundleIdentifier: "org.libreoffice.script", teamIdentifier: team };
+}
+
+/**
+ * Re-signs a staged LibreOffice application inside-out. Development builds use
+ * an ad-hoc identity by default. Release builds must opt in explicitly with a
+ * Developer ID identity and pass both strict codesign and Gatekeeper checks.
+ */
+export function signMacOSRuntimeApplication(appRoot, options = {}) {
+  const platform = options.platform || process.platform;
+  if (platform !== "darwin") {
+    return { signed: false, reason: "not macOS" };
+  }
+  assertStagedMacOSBundle(appRoot, options.ownershipRoot, options.sourceRoot);
+  if (!which("codesign")) {
+    throw new Error("codesign is required to prepare the macOS LibreOffice runtime");
+  }
+
+  const expectation = macOSRuntimeSigningExpectation(process.env, platform);
+  const release = options.release ?? expectation.release;
+  const identity = String(
+    options.identity ?? expectation.identity,
+  ).trim() || "-";
+  if (release && identity === "-") {
+    throw new Error(
+      "release runtime signing requires AWAKEN_RUNTIME_CODESIGN_IDENTITY with a Developer ID Application identity",
+    );
+  }
+
+  const signingMetadata = options.signingMetadata || captureMacOSRuntimeSigningMetadata(appRoot, { platform });
+  if (!signingMetadata || signingMetadata.appRoot !== resolve(appRoot)) {
+    disposeMacOSRuntimeSigningMetadata(signingMetadata);
+    throw new Error(`macOS signing metadata does not belong to the staged application: ${appRoot}`);
+  }
+  const { bundles, machOFiles } = collectMacOSCode(appRoot);
+  try {
+    // Metadata may have been captured from the pristine copy before plist,
+    // rpath, and Mach-O normalization. Only newly materialized code falls back
+    // to its current signature.
+    for (const path of [...machOFiles, ...bundles]) {
+      if (!signingMetadata.entitlements.has(path)) {
+        signingMetadata.entitlements.set(
+          path,
+          extractCodeEntitlements(path, signingMetadata.metadataDir),
+        );
+      }
+    }
+    for (const path of machOFiles) {
+      signMacOSCode(path, signingMetadata.entitlements.get(path), identity, release);
+    }
+    for (const path of bundles) {
+      signMacOSCode(path, signingMetadata.entitlements.get(path), identity, release);
+    }
+  } finally {
+    disposeMacOSRuntimeSigningMetadata(signingMetadata);
+  }
+
+  const notarization = release
+    ? notarizeMacOSRuntimeApplication(appRoot, { notaryProfile: options.notaryProfile })
+    : { notarized: false, stapled: false };
+
+  verifyMacOSRuntimeApplication(appRoot, {
+    release,
+    bundleIdentifier: options.bundleIdentifier,
+  });
+  return {
+    signed: true,
+    mode: release ? "developer-id" : "ad-hoc",
+    identity,
+    machOCount: machOFiles.length,
+    bundleCount: bundles.length,
+    strictVerified: true,
+    gatekeeperVerified: release,
+    notarized: notarization.notarized,
+    stapled: notarization.stapled,
+  };
 }
 
 export function inspectRuntimeProvenance(
@@ -965,6 +1493,7 @@ export function findSofficeExecutable(path) {
   return firstExecutable([
     path,
     join(path, "Contents", "MacOS", "soffice"),
+    join(path, "program", "soffice.com"),
     join(path, "program", "soffice.bin"),
     join(path, "program", "soffice.bin.exe"),
     join(path, "program", "soffice"),
@@ -1120,6 +1649,7 @@ export function buildResolvedState({
     arch,
     root: versionRootPath,
     components,
+    officeRender: manifest.officeRenderWorker || undefined,
     generatedAt: new Date().toISOString(),
   };
 }
@@ -1345,6 +1875,7 @@ export function checkPrimaryRuntime(options = {}) {
     bundleVersion: state.bundleVersion || "",
     platform: state.platform || (platform === "win32" ? "windows" : platform),
     arch: state.arch || arch,
+    security: state.security || {},
     manifestPath,
     runtimeRoot: root,
     runtimeDir: root,
@@ -1625,6 +2156,35 @@ export function publishStaging(root, stagingDir, key) {
 
 export function cleanupStaging(stagingDir) {
   if (stagingDir && exists(stagingDir)) {
+    const pending = [stagingDir];
+    while (pending.length > 0) {
+      const current = pending.pop();
+      let stat;
+      try {
+        stat = lstatSync(current);
+      } catch {
+        continue;
+      }
+      if (stat.isSymbolicLink()) {
+        continue;
+      }
+      if (stat.isDirectory()) {
+        try {
+          chmodSync(current, (stat.mode & 0o777) | 0o700);
+        } catch {
+          // rmSync below remains the source of truth for cleanup failure.
+        }
+        for (const entry of readdirSync(current)) {
+          pending.push(join(current, entry));
+        }
+      } else if (stat.isFile()) {
+        try {
+          chmodSync(current, (stat.mode & 0o777) | 0o200);
+        } catch {
+          // Best effort before recursive removal.
+        }
+      }
+    }
     rmSync(stagingDir, { recursive: true, force: true });
   }
 }

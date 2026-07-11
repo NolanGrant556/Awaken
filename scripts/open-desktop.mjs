@@ -3,6 +3,10 @@ import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import {
+  closeCompetingPackagedAwaken,
+  listPackagedAwakenProcesses,
+} from "./desktop-lifecycle-common.mjs";
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const screenName = "awaken-dev-desktop";
@@ -66,7 +70,7 @@ function screenInfo() {
 function processInfo() {
   const result = run("ps", ["-axo", "pid=,args="]);
   if (!result.ok) {
-    return { vite: [], electron: [], core: [] };
+    return { vite: [], electron: [], core: [], packaged: [] };
   }
 
   const rows = result.stdout
@@ -92,6 +96,7 @@ function processInfo() {
         row.args.includes("/awaken-core") &&
         row.args.includes(`${rootDir}/apps/desktop/resources/bin/`),
     ),
+    packaged: listPackagedAwakenProcesses(),
   };
 }
 
@@ -110,12 +115,23 @@ function startDesktopScreen() {
   }
 }
 
-function activateDarwinApp() {
-  if (process.platform !== "darwin") {
+function stopDesktopScreen() {
+  return run("screen", ["-S", screenName, "-X", "quit"]);
+}
+
+function activateDarwinApp(processes) {
+  if (process.platform !== "darwin" || processes.electron.length === 0) {
     return;
   }
 
-  run("open", ["-a", electronAppPath]);
+  const pid = processes.electron[0].pid;
+  const script = [
+    "import AppKit",
+    `if let target = NSRunningApplication(processIdentifier: pid_t(${pid})) {`,
+    "  _ = target.activate(options: [.activateAllWindows])",
+    "}",
+  ].join("\n");
+  run("swift", ["-e", script]);
 }
 
 function swiftWindowScript(pids) {
@@ -195,6 +211,7 @@ async function collectStatus() {
       rendererReachable &&
       processes.electron.length > 0 &&
       processes.core.length > 0 &&
+      processes.packaged.length === 0 &&
       (!windows.checked || Boolean(usableWindow)),
   };
 }
@@ -208,6 +225,13 @@ function printStatus(status) {
     `- electron: ${
       status.processes.electron.length > 0
         ? status.processes.electron.map((row) => row.pid).join(", ")
+        : "not running"
+    }`,
+  );
+  console.log(
+    `- competing packaged Awaken: ${
+      status.processes.packaged.length > 0
+        ? status.processes.packaged.map((row) => row.pid).join(", ")
         : "not running"
     }`,
   );
@@ -240,7 +264,7 @@ async function waitUntilReady() {
     }
 
     if (lastStatus.processes.electron.length > 0 && !activated) {
-      activateDarwinApp();
+      activateDarwinApp(lastStatus.processes);
       activated = true;
     }
 
@@ -251,6 +275,26 @@ async function waitUntilReady() {
   return lastStatus;
 }
 
+if (!statusOnly) {
+  try {
+    const competing = await closeCompetingPackagedAwaken();
+    if (competing.closed.length > 0) {
+      console.log(
+        `Closed competing packaged Awaken instance(s): ${competing.closed
+          .map((row) => row.pid)
+          .join(", ")}`,
+      );
+    }
+  } catch (error) {
+    console.error(
+      `Awaken Desktop cannot establish the README-owned instance: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    process.exit(1);
+  }
+}
+
 const initialStatus = await collectStatus();
 
 if (statusOnly) {
@@ -259,7 +303,7 @@ if (statusOnly) {
 }
 
 if (initialStatus.ready) {
-  activateDarwinApp();
+  activateDarwinApp(initialStatus.processes);
   printStatus(initialStatus);
   process.exit(0);
 }
@@ -274,7 +318,11 @@ const hasDesktopProcess =
   initialStatus.processes.electron.length > 0 ||
   initialStatus.processes.core.length > 0;
 
-if (!initialStatus.screen.running && !hasDesktopProcess) {
+if (!hasDesktopProcess) {
+  if (initialStatus.screen.running) {
+    console.log(`Resetting stale screen session ${screenName}...`);
+    stopDesktopScreen();
+  }
   console.log(`Starting Awaken Desktop in screen session ${screenName}...`);
   startDesktopScreen();
 } else if (initialStatus.screen.running) {

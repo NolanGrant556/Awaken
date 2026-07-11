@@ -25,6 +25,7 @@ import {
   createRunRequestedNarrative,
   projectAguiEventToNarrative,
   type PromptNarrativeToken,
+  type DeliverableFileType,
   type RunNarrativeItem,
   type RunNarrativeState,
 } from "../run-narrative";
@@ -74,7 +75,10 @@ export type ArtifactRecord = {
   kind: string;
   path?: string;
   content?: string;
-  status: AguiArtifactStatus;
+  status?: AguiArtifactStatus;
+  role: "deliverable" | "preview" | "support";
+  contractVersion: number;
+  producerTool?: string;
 };
 
 export type TurnDiffRecord = {
@@ -170,6 +174,7 @@ function createInspectorSummary(): InspectorSummary {
 
 export type ThreadItem = {
   threadId: string;
+  projectId?: string;
   label: string;
   titleSource?: ThreadTitleSource;
   titleStatus?: ThreadTitleStatus;
@@ -263,6 +268,7 @@ export type RuntimeAction =
       threadId: string;
       label: string;
       runId: string;
+      projectId?: string;
       workspaceRoot?: string;
     }
   | { type: "run/threadSwitch"; threadId: string }
@@ -420,6 +426,7 @@ function upsertThread(threads: ThreadItem[], next: ThreadItem): ThreadItem[] {
 function threadItemFromRuntime(thread: RuntimeThread): ThreadItem {
   return {
     threadId: thread.threadId,
+    projectId: thread.projectId,
     label: thread.label || "Untitled thread",
     runId: thread.runId,
     activeRunId: thread.activeRunId,
@@ -454,6 +461,7 @@ function syncActiveThreadSummary(state: RuntimeViewState): RuntimeViewState {
     threads: upsertThread(state.threads, {
       threadId,
       label: existing?.label || "Untitled thread",
+      projectId: existing?.projectId,
       runId: state.runId ?? existing?.runId,
       activeRunId: isActiveRunStatus(state.status) ? state.runId : undefined,
       runStatus: state.status ?? existing?.runStatus,
@@ -520,6 +528,43 @@ function isSuccessfulTerminalEvent(event: AguiEvent): boolean {
     event.type === "RUN_FINISHED" ||
     (event.type === "RUN_STATUS_CHANGED" && event.status === "finished")
   );
+}
+
+function terminalStatusForEvent(
+  event: AguiEvent,
+): "finished" | "error" | "cancelled" | undefined {
+  if (
+    event.type === "RUN_FINISHED" ||
+    (event.type === "RUN_STATUS_CHANGED" && event.status === "finished")
+  ) {
+    return "finished";
+  }
+  if (
+    (event.type === "RUN_ERROR" && event.code === "RUN_CANCELLED") ||
+    (event.type === "RUN_STATUS_CHANGED" && event.status === "cancelled")
+  ) {
+    return "cancelled";
+  }
+  if (
+    event.type === "RUN_ERROR" ||
+    (event.type === "RUN_STATUS_CHANGED" && event.status === "error")
+  ) {
+    return "error";
+  }
+  return undefined;
+}
+
+function terminalStatusForRun(
+  status: RuntimeRunStatus,
+): "finished" | "error" | "cancelled" | undefined {
+  switch (status) {
+    case "finished":
+    case "error":
+    case "cancelled":
+      return status;
+    default:
+      return undefined;
+  }
 }
 
 function elapsedMsForTerminalRun(
@@ -595,35 +640,109 @@ function attachElapsedMsToLatestAnswer(
   };
 }
 
-function appendFinalFileChangeSummary(
+const deliverableExtensionTypes = new Map<string, DeliverableFileType>([
+  ["doc", "word"],
+  ["docx", "word"],
+  ["md", "markdown"],
+  ["xls", "excel"],
+  ["xlsx", "excel"],
+  ["csv", "excel"],
+  ["tsv", "excel"],
+  ["pdf", "pdf"],
+  ["ppt", "powerpoint"],
+  ["pptx", "powerpoint"],
+]);
+
+function deliverableFileType(path: string): {
+  extension: string;
+  fileType: DeliverableFileType;
+} | undefined {
+  const filename = path.replace(/\\/g, "/").split("/").pop() ?? "";
+  const dot = filename.lastIndexOf(".");
+  if (dot <= 0 || dot === filename.length - 1) {
+    return undefined;
+  }
+  const extension = filename.slice(dot + 1).toLowerCase();
+  const fileType = deliverableExtensionTypes.get(extension);
+  return fileType ? { extension, fileType } : undefined;
+}
+
+function appendFinalDeliverableSummary(
   narrative: RunNarrativeState,
   artifacts: ArtifactRecord[],
+  terminalStatus: "finished" | "error" | "cancelled",
   runId?: string,
 ): RunNarrativeState {
-  if (artifacts.length === 0) {
-    return narrative;
+  const normalizedRunId = runId ?? "current";
+  const byPath = new Map<
+    string,
+    { artifact: ArtifactRecord; extension: string; fileType: DeliverableFileType }
+  >();
+  const pathOrder: string[] = [];
+
+  for (const artifact of artifacts) {
+    if (
+      artifact.role !== "deliverable" ||
+      artifact.status !== "ready" ||
+      !artifact.path
+    ) {
+      continue;
+    }
+    const type = deliverableFileType(artifact.path);
+    if (!type) {
+      continue;
+    }
+    const normalizedPath = artifact.path.replace(/\\/g, "/");
+    const key = normalizedPath.toLowerCase();
+    if (!byPath.has(key)) {
+      pathOrder.push(key);
+    }
+    byPath.set(key, { artifact, ...type });
   }
 
-  const id = `fileChange:${runId ?? "current"}:summary`;
+  const id = `deliverables:${normalizedRunId}:summary`;
+  const withoutLegacyFileChanges = narrative.committedItems.filter(
+    (candidate) => candidate.kind !== "fileChange",
+  );
+  if (pathOrder.length === 0) {
+    return {
+      ...narrative,
+      committedItems: withoutLegacyFileChanges.filter(
+        (candidate) => !(candidate.kind === "deliverables" && candidate.id === id),
+      ),
+      activeItem:
+        narrative.activeItem?.kind === "fileChange" || narrative.activeItem?.id === id
+          ? undefined
+          : narrative.activeItem,
+    };
+  }
+
   const item: RunNarrativeItem = {
-    kind: "fileChange",
+    kind: "deliverables",
     id,
-    files: artifacts.map((artifact) => ({
-      id: artifact.id,
-      path: artifact.path,
-      title: artifact.title || artifact.path || "File change",
-      description: artifact.description,
-      status: artifact.status === "error" ? "error" : "done",
-    })),
-    status: "done",
+    runId: normalizedRunId,
+    terminalStatus,
+    files: pathOrder.map((key) => {
+      const { artifact, extension, fileType } = byPath.get(key)!;
+      const displayPath = artifact.path!.replace(/\\/g, "/");
+      return {
+        artifactId: artifact.id,
+        runId: normalizedRunId,
+        title: artifact.title || displayPath.split("/").pop() || "交付文件",
+        displayPath,
+        fileType,
+        extension,
+        legacy: artifact.contractVersion < 2,
+      };
+    }),
   };
 
   return {
     ...narrative,
     committedItems: [
-      ...narrative.committedItems.filter(
+      ...withoutLegacyFileChanges.filter(
         (candidate) =>
-          !(candidate.kind === "fileChange" && candidate.id === id),
+          !(candidate.kind === "deliverables" && candidate.id === id),
       ),
       item,
     ],
@@ -725,13 +844,14 @@ function normalizeRiskTone(value?: string): AguiApprovalRiskTone {
   }
 }
 
-function normalizeArtifactStatus(value?: string): AguiArtifactStatus {
+function normalizeArtifactStatus(value?: string): AguiArtifactStatus | undefined {
   switch (value) {
+    case "ready":
     case "pending":
     case "error":
       return value;
     default:
-      return "ready";
+      return undefined;
   }
 }
 
@@ -1038,6 +1158,56 @@ function removeUserQuestion(
   return questions.filter((question) => question.id !== questionId);
 }
 
+function inferLegacyArtifactRole(input: {
+  kind?: string;
+  path?: string;
+  producerTool?: string;
+}): "deliverable" | "preview" | "support" {
+  const producer = input.producerTool?.trim().toLowerCase() ?? "";
+  const kind = input.kind?.trim().toLowerCase() ?? "";
+  const extension = input.path
+    ? deliverableFileType(input.path)?.extension
+    : undefined;
+
+  if (
+    producer === "presentation_render" ||
+    producer === "artifact_render" ||
+    producer.endsWith("_render")
+  ) {
+    return "preview";
+  }
+  if (producer === "presentation_create" || producer === "presentation_edit") {
+    return extension === "ppt" || extension === "pptx"
+      ? "deliverable"
+      : "preview";
+  }
+  if (producer === "document_create" || producer === "document_edit") {
+    return extension === "doc" || extension === "docx" || extension === "md"
+      ? "deliverable"
+      : "support";
+  }
+  if (producer === "spreadsheet_create" || producer === "spreadsheet_edit") {
+    return extension === "xls" ||
+      extension === "xlsx" ||
+      extension === "csv" ||
+      extension === "tsv"
+      ? "deliverable"
+      : "support";
+  }
+  if (
+    producer === "artifact_export" ||
+    producer === "artifact_publish" ||
+    producer === "write_file" ||
+    (producer === "text_file_create" && extension === "md")
+  ) {
+    return extension ? "deliverable" : "support";
+  }
+  if (kind === "image") {
+    return "preview";
+  }
+  return "support";
+}
+
 function upsertArtifact(
   artifacts: ArtifactRecord[],
   event: AguiEvent,
@@ -1045,6 +1215,19 @@ function upsertArtifact(
   const id = event.artifactId ?? `artifact-${artifacts.length + 1}`;
   const existingIndex = artifacts.findIndex((artifact) => artifact.id === id);
   const existing = existingIndex >= 0 ? artifacts[existingIndex] : undefined;
+  const producerTool =
+    event.artifactProducer || event.toolCallName || existing?.producerTool;
+  const contractVersion = Number.isFinite(event.artifactContractVersion)
+    ? Math.max(1, Number(event.artifactContractVersion))
+    : existing?.contractVersion ?? 1;
+  const role =
+    event.artifactRole ||
+    existing?.role ||
+    inferLegacyArtifactRole({
+      kind: event.artifactKind,
+      path: event.artifactPath,
+      producerTool,
+    });
   const next: ArtifactRecord = {
     id,
     title: event.artifactTitle || existing?.title || "Artifact",
@@ -1053,6 +1236,9 @@ function upsertArtifact(
     path: event.artifactPath || existing?.path,
     content: event.artifactContent ?? existing?.content,
     status: normalizeArtifactStatus(event.artifactStatus || existing?.status),
+    role,
+    contractVersion,
+    producerTool,
   };
 
   if (existingIndex >= 0) {
@@ -1246,10 +1432,42 @@ export function reduceRuntimeState(
 		userQuestions: [],
 	}),
       );
-    case "run/cancelSync":
-      return saveActiveThreadView(
-        syncActiveThreadSummary(syncFromRun(state, action.run)),
-      );
+    case "run/cancelSync": {
+      const synced = syncActiveThreadSummary(syncFromRun(state, action.run));
+      const terminalStatus = terminalStatusForRun(action.run.status);
+      if (!terminalStatus) {
+        return saveActiveThreadView(synced);
+      }
+
+      let terminalNarrative = synced.narrative;
+      if (terminalStatus === "error") {
+        terminalNarrative = addRunErrorToNarrative(
+          terminalNarrative,
+          action.run.error || "Run failed",
+          `${action.run.runId}:sync`,
+        );
+      } else {
+        terminalNarrative = projectAguiEventToNarrative(terminalNarrative, {
+          type: "RUN_STATUS_CHANGED",
+          threadId: action.run.threadId,
+          runId: action.run.runId,
+          status: terminalStatus,
+          message:
+            terminalStatus === "cancelled"
+              ? "你停止生成了本次回答"
+              : undefined,
+        });
+      }
+      return saveActiveThreadView({
+        ...synced,
+        narrative: appendFinalDeliverableSummary(
+          terminalNarrative,
+          synced.artifacts,
+          terminalStatus,
+          action.run.runId,
+        ),
+      });
+    }
     case "run/streamError":
       return saveActiveThreadView(
         syncActiveThreadSummary({
@@ -1307,10 +1525,15 @@ export function reduceRuntimeState(
               },
             ),
           ),
-          narrative: addRunErrorToNarrative(
-            state.narrative,
-            action.message,
-            `${currentNarrativeScope(state)}:stream`,
+          narrative: appendFinalDeliverableSummary(
+            addRunErrorToNarrative(
+              state.narrative,
+              action.message,
+              `${currentNarrativeScope(state)}:stream`,
+            ),
+            state.artifacts,
+            "error",
+            state.runId,
           ),
         }),
       );
@@ -1435,6 +1658,7 @@ export function reduceRuntimeState(
           threadId: action.threadId,
           label: action.label,
           runId: action.runId,
+          projectId: action.projectId,
           activeRunId: action.runId,
           workspaceRoot: action.workspaceRoot,
           runStatus: "running",
@@ -2393,17 +2617,22 @@ export function reduceRuntimeState(
         state.narrative,
         narrativeEvent,
       );
-      nextState.narrative = isSuccessfulTerminalEvent(action.event)
-        ? appendFinalFileChangeSummary(
-            attachElapsedMsToLatestAnswer(
-              projectedNarrative,
-              elapsedMsForTerminalRun(nextState, action.receivedAtMs),
-              nextState.runId,
-            ),
-            nextState.artifacts,
+      const terminalStatus = terminalStatusForEvent(action.event);
+      const narrativeWithElapsed = isSuccessfulTerminalEvent(action.event)
+        ? attachElapsedMsToLatestAnswer(
+            projectedNarrative,
+            elapsedMsForTerminalRun(nextState, action.receivedAtMs),
             nextState.runId,
           )
         : projectedNarrative;
+      nextState.narrative = terminalStatus
+        ? appendFinalDeliverableSummary(
+            narrativeWithElapsed,
+            nextState.artifacts,
+            terminalStatus,
+            nextState.runId,
+          )
+        : narrativeWithElapsed;
       return saveActiveThreadView(syncActiveThreadSummary(nextState));
     }
     case "supervisor/status-changed":

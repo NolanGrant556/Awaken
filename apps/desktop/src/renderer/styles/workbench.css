@@ -732,3 +732,10 @@
   padding: 12px 14px;
   box-shadow: var(--aw-shadow-raised);
 }
+
+.composer-runtime-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}

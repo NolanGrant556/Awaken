@@ -51,6 +51,17 @@ describe("runtime reducer cancel handling", () => {
       { type: "run/requested", prompt: "cancel me" },
       { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
       { type: "run/threadAdded", threadId: "thread-1", label: "cancel me", runId: "run-1" },
+      runEvent({
+        type: "AWAKEN_ARTIFACT_CREATED",
+        artifactId: "cancelled-report",
+        artifactTitle: "已生成报告.pdf",
+        artifactKind: "pdf",
+        artifactPath: "output/已生成报告.pdf",
+        artifactStatus: "ready",
+        artifactRole: "deliverable",
+        artifactContractVersion: 2,
+        artifactProducer: "artifact_publish",
+      }),
       { type: "run/cancelRequested" },
       { type: "run/cancelSync", run: makeRun({ runId: "run-1", threadId: "thread-1", status: "cancelled" }) },
     ]);
@@ -62,6 +73,18 @@ describe("runtime reducer cancel handling", () => {
     expect(state.threads[0]).toMatchObject({
       runStatus: "cancelled",
       activeRunId: undefined,
+    });
+    expect(
+      state.narrative.committedItems.find((item) => item.kind === "deliverables"),
+    ).toMatchObject({
+      terminalStatus: "cancelled",
+      files: [
+        {
+          artifactId: "cancelled-report",
+          extension: "pdf",
+          fileType: "pdf",
+        },
+      ],
     });
   });
 
@@ -1346,6 +1369,18 @@ describe("runtime reducer run narrative projection", () => {
         reviewId: "approval-1",
         approvalTitle: "Approve patch",
       }),
+      runEvent({
+        type: "AWAKEN_ARTIFACT_CREATED",
+        seq: 2,
+        artifactId: "stream-report",
+        artifactTitle: "中断前报告.pdf",
+        artifactKind: "pdf",
+        artifactPath: "output/中断前报告.pdf",
+        artifactStatus: "ready",
+        artifactRole: "deliverable",
+        artifactContractVersion: 2,
+        artifactProducer: "artifact_publish",
+      }),
       { type: "run/streamFailed", message: "failed after 5 reconnect attempts" },
     ]);
 
@@ -1359,9 +1394,15 @@ describe("runtime reducer run narrative projection", () => {
       status: "error",
     });
     expect(state.narrative.committedItems.some((item) => item.id === "answer:error:current:stream")).toBe(true);
+    expect(
+      state.narrative.committedItems.find((item) => item.kind === "deliverables"),
+    ).toMatchObject({
+      terminalStatus: "error",
+      files: [{ artifactId: "stream-report" }],
+    });
   });
 
-  it("projects artifact path, title, and status into file change narrative and artifacts", () => {
+  it("keeps support artifacts for inspection without rendering a final file list", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Patch a file" },
       runEvent({
@@ -1386,25 +1427,138 @@ describe("runtime reducer run narrative projection", () => {
       path: "src/example.ts",
       content: undefined,
       status: "ready",
+      role: "support",
+      contractVersion: 1,
+      producerTool: undefined,
     });
+    expect(
+      state.narrative.committedItems.some(
+        (item) => item.kind === "fileChange" || item.kind === "deliverables",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not publish deliverables with missing or unknown status", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "Create reports" },
+      runEvent({
+        type: "AWAKEN_ARTIFACT_CREATED",
+        seq: 1,
+        artifactId: "missing-status",
+        artifactTitle: "missing.pdf",
+        artifactKind: "pdf",
+        artifactPath: "output/missing.pdf",
+        artifactRole: "deliverable",
+        artifactContractVersion: 2,
+        artifactProducer: "artifact_publish",
+      }),
+      runEvent({
+        type: "AWAKEN_ARTIFACT_CREATED",
+        seq: 2,
+        artifactId: "unknown-status",
+        artifactTitle: "unknown.pdf",
+        artifactKind: "pdf",
+        artifactPath: "output/unknown.pdf",
+        artifactStatus: "complete" as never,
+        artifactRole: "deliverable",
+        artifactContractVersion: 2,
+        artifactProducer: "artifact_publish",
+      }),
+      runEvent({ type: "RUN_FINISHED", seq: 3, result: "done" }),
+    ]);
+
+    expect(state.artifacts.map((artifact) => artifact.status)).toEqual([
+      undefined,
+      undefined,
+    ]);
+    expect(
+      state.narrative.committedItems.some((item) => item.kind === "deliverables"),
+    ).toBe(false);
+  });
+
+  it("renders ready deliverables after the final answer and hides previews", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "Create a report" },
+      runEvent({
+        type: "AWAKEN_ARTIFACT_CREATED",
+        seq: 1,
+        artifactId: "report",
+        artifactTitle: "风险报告.docx",
+        artifactKind: "document",
+        artifactPath: "output/风险报告.docx",
+        artifactStatus: "ready",
+        artifactRole: "deliverable",
+        artifactContractVersion: 2,
+        artifactProducer: "document_create",
+      }),
+      runEvent({
+        type: "AWAKEN_ARTIFACT_CREATED",
+        seq: 2,
+        artifactId: "preview",
+        artifactTitle: "page-01.png",
+        artifactKind: "image",
+        artifactPath: "output/preview/page-01.png",
+        artifactStatus: "ready",
+        artifactRole: "preview",
+        artifactContractVersion: 2,
+        artifactProducer: "artifact_render",
+      }),
+      runEvent({ type: "TEXT_MESSAGE_CONTENT", seq: 3, messageId: "m1", delta: "done" }),
+      runEvent({ type: "RUN_FINISHED", seq: 4, result: "done" }),
+    ]);
+
     const answerIndex = state.narrative.committedItems.findIndex((item) => item.kind === "answer");
-    const fileChangeIndex = state.narrative.committedItems.findIndex((item) => item.kind === "fileChange");
-    expect(answerIndex).toBeGreaterThanOrEqual(0);
-    expect(fileChangeIndex).toBeGreaterThan(answerIndex);
-    expect(state.narrative.committedItems[fileChangeIndex]).toMatchObject({
-      kind: "fileChange",
-      id: "fileChange:current:summary",
-      status: "done",
+    const deliverableIndex = state.narrative.committedItems.findIndex(
+      (item) => item.kind === "deliverables",
+    );
+    expect(deliverableIndex).toBeGreaterThan(answerIndex);
+    expect(state.narrative.committedItems[deliverableIndex]).toMatchObject({
+      kind: "deliverables",
+      id: "deliverables:current:summary",
+      terminalStatus: "finished",
       files: [
         {
-          id: "artifact-1",
-          title: "example.ts",
-          path: "src/example.ts",
-          description: "Updated file",
-          status: "done",
+          artifactId: "report",
+          title: "风险报告.docx",
+          extension: "docx",
+          fileType: "word",
+          legacy: false,
         },
       ],
     });
+  });
+
+  it.each([
+    {
+      name: "failed",
+      terminal: runEvent({ type: "RUN_ERROR", seq: 2, code: "TOOL_FAILED", message: "failed" }),
+      expected: "error" as const,
+    },
+    {
+      name: "cancelled",
+      terminal: runEvent({ type: "RUN_ERROR", seq: 2, code: "RUN_CANCELLED", message: "cancelled" }),
+      expected: "cancelled" as const,
+    },
+  ])("keeps ready deliverables when a run is $name", ({ terminal, expected }) => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "Create a report" },
+      runEvent({
+        type: "AWAKEN_ARTIFACT_CREATED",
+        seq: 1,
+        artifactId: "report",
+        artifactTitle: "报告.pdf",
+        artifactKind: "pdf",
+        artifactPath: "output/报告.pdf",
+        artifactStatus: "ready",
+        artifactRole: "deliverable",
+        artifactContractVersion: 2,
+        artifactProducer: "artifact_export",
+      }),
+      terminal,
+    ]);
+    expect(
+      state.narrative.committedItems.find((item) => item.kind === "deliverables"),
+    ).toMatchObject({ terminalStatus: expected, files: [{ artifactId: "report" }] });
   });
 
   it("does not duplicate narrative items or deltas when sequenced events replay", () => {

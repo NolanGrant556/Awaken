@@ -161,6 +161,13 @@ pre {
   gap: 10px;
 }
 
+.project-delete-dialog-copy {
+  margin: 0;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-base);
+  line-height: 1.65;
+}
+
 .rename-thread-dialog-body {
   display: grid;
   gap: 10px;
@@ -1012,7 +1019,7 @@ pre {
 }
 
 .model-settings {
-  --model-settings-content-width: 1160px;
+  --model-settings-content-width: 1240px;
   display: grid;
   align-content: start;
   gap: 14px;
@@ -1105,6 +1112,12 @@ pre {
   background: var(--aw-bg-fill-light);
   color: var(--aw-text-secondary);
   font-size: 12px;
+}
+
+.model-settings-message-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .appearance-settings {
@@ -1851,8 +1864,10 @@ pre {
 }
 
 .configured-models-table {
-  --configured-model-columns: minmax(150px, 0.9fr) 60px minmax(280px, 1.5fr)
-    minmax(88px, 0.45fr) minmax(88px, 0.45fr) 168px;
+  --configured-model-actions-width: 244px;
+  --configured-model-columns: minmax(150px, 0.9fr) 60px minmax(244px, 1.4fr)
+    minmax(82px, 0.42fr) minmax(82px, 0.42fr)
+    var(--configured-model-actions-width);
   justify-self: start;
   box-sizing: border-box;
   min-width: 0;
@@ -1938,6 +1953,20 @@ pre {
   color: var(--aw-text-primary);
   font-size: 13px;
   font-weight: 700;
+}
+
+.configured-model-credential-status {
+  overflow: hidden;
+  color: var(--aw-text-subtle);
+  font-size: 10px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.configured-model-credential-status-temporarily_unavailable,
+.configured-model-credential-status-unreadable {
+  color: var(--aw-text-danger, #b42318);
 }
 
 .configured-model-switch {
@@ -2242,8 +2271,10 @@ pre {
 
 @media (max-width: 1180px) {
   .configured-models-table {
+    --configured-model-actions-width: 214px;
     --configured-model-columns: minmax(128px, 0.8fr) 48px minmax(190px, 1.15fr)
-      minmax(74px, 0.45fr) minmax(72px, 0.45fr) 132px;
+      minmax(70px, 0.42fr) minmax(68px, 0.42fr)
+      var(--configured-model-actions-width);
   }
 
   .configured-models-row {
@@ -3121,6 +3152,30 @@ pre {
   color: var(--aw-text-primary);
   font-size: 13px;
   font-weight: 800;
+}
+
+.profile-balance-credential-recovery {
+  display: grid;
+  gap: 10px;
+  margin: 0 12px 10px;
+  padding: 12px;
+  border: 1px solid var(--aw-error-soft-border);
+  border-radius: var(--aw-radius-control);
+  background: var(--aw-surface-danger);
+}
+
+.profile-balance-credential-recovery-copy {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--aw-text-primary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.profile-balance-credential-recovery-copy svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
 }
 
 .profile-balance-list {

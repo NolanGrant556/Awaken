@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AwakenBridge, SupervisorStatusInfo } from "../../shared/runtime";
-import { createRuntimeClient } from "./client";
+import {
+  createRuntimeClient,
+  desktopOperationIssueFromError,
+} from "./client";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -60,6 +63,50 @@ function installBridge(bridge: AwakenBridge): void {
 }
 
 describe("electron runtime client", () => {
+  it("recovers the structured credential issue attached by the preload bridge", () => {
+    const error = Object.assign(new Error("模型密钥暂时不可用"), {
+      code: "credential_temporarily_unavailable",
+      retryable: true,
+      actions: ["relaunch", "unknown"],
+    });
+
+    expect(desktopOperationIssueFromError(error)).toEqual({
+      code: "credential_temporarily_unavailable",
+      message: "模型密钥暂时不可用",
+      retryable: true,
+      actions: ["relaunch"],
+    });
+  });
+
+  it("keeps recovery actions when a plain IPC result crosses into the renderer", async () => {
+    const { bridge } = createElectronBridge({ status: "running" });
+    bridge.startRun = vi.fn(async () => ({
+      ok: false as const,
+      issue: {
+        code: "credential_temporarily_unavailable" as const,
+        message: "模型密钥暂不可用",
+        retryable: true,
+        actions: ["relaunch" as const],
+      },
+    }));
+    installBridge(bridge);
+    const client = createRuntimeClient();
+    let caught: unknown;
+
+    try {
+      await client.startRun({} as never);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(desktopOperationIssueFromError(caught)).toEqual({
+      code: "credential_temporarily_unavailable",
+      message: "模型密钥暂不可用",
+      retryable: true,
+      actions: ["relaunch"],
+    });
+  });
+
   it("requires the Electron bridge", () => {
     vi.stubGlobal("window", { location: { origin: "http://localhost" } });
 

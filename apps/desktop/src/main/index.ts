@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import { TextDecoder } from "node:util";
 import {
   app,
@@ -25,12 +26,16 @@ import {
   normalizeModelProvider,
   normalizeModelProfileRunConfig,
   normalizeModelProfileSummary,
+  normalizeRuntimeProject,
+  normalizeRuntimeProjectOperation,
   normalizeRuntimeInfo,
   normalizeRuntimeRun,
   normalizeRuntimeThreadTranscript,
   normalizeRuntimeThread,
   normalizeStartRunRequest,
   type AttachmentPickResult,
+  type ArtifactOpenRequest,
+  type ArtifactOpenResult,
   type AwakenTheme,
   type AwakenThemePreference,
   type ConfigureMcpServersRequest,
@@ -44,6 +49,7 @@ import {
   type ModelProfileSaveRequest,
   type ModelProviderWire,
   type PickedAttachmentFile,
+  type ProjectMutationResult,
   type RuntimeConnector,
   type RuntimeConnectorActionResponse,
   type RuntimeInfoWire,
@@ -51,6 +57,10 @@ import {
   type RuntimeMcpServer,
   type RuntimeMcpServerConfigResponse,
   type RuntimeRunWire,
+  type RuntimeProject,
+  type RuntimeProjectOperation,
+  type RuntimeProjectOperationWire,
+  type RuntimeProjectWire,
   type RuntimeSkill,
   type RuntimeModelProfileSummaryWire,
   type RenameThreadRequest,
@@ -58,6 +68,7 @@ import {
   type RuntimeThreadWire,
   type RuntimeToolInfo,
   type StartRunRequest,
+  type ThreadDeleteResult,
   type UpdateMcpServerConfigRequest,
   type WorkspaceRegistryPersistRequest,
 } from "../shared/runtime.js";
@@ -65,18 +76,48 @@ import { RuntimeSupervisor, type SupervisorStatusInfo } from "./runtime-supervis
 import { ensureConfigDir } from "./config-bootstrap.js";
 import { DesktopPreferencesStore } from "./desktop-preferences-store.js";
 import { ModelProfileStore } from "./model-profile-store.js";
+import { runDesktopOperation } from "./desktop-operation.js";
 import { PetStore } from "./pets/pet-store.js";
 import { detectCodexHome, importCodexPets } from "./pets/codex-pet-importer.js";
 import { PetWindowManager } from "./pets/pet-window-manager.js";
 import { PET_IPC_CHANNELS } from "../shared/pets.js";
+import { openRecordedArtifact, revealRecordedArtifact } from "./artifact-open.js";
+import { installBundledPrimaryRuntimeArchive } from "./runtime-archive-installer.js";
+import { executeProjectTrashOperation as executeClaimedProjectTrashOperation } from "./project-trash-worker.js";
+import {
+  desktopCredentialApplicationName,
+  desktopInstanceApplicationId,
+  desktopInstanceIdentity,
+  desktopUserDataPathSegments,
+} from "./desktop-instance.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let runtimeBaseUrl: string | null = null;
 const isDevServer = process.argv.includes("--dev");
-const appName = "Awaken";
+app.setName(desktopCredentialApplicationName);
+app.setPath(
+  "userData",
+  join(app.getPath("appData"), ...desktopUserDataPathSegments),
+);
+if (process.platform === "win32") {
+  app.setAppUserModelId(desktopInstanceApplicationId);
+}
 
-app.setName(appName);
-app.setPath("userData", join(app.getPath("appData"), "@awaken", "desktop"));
+const ownsSingleInstanceLock = app.requestSingleInstanceLock(
+  desktopInstanceIdentity(isDevServer),
+);
+if (!ownsSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", (_event, _argv, _workingDirectory, identity) => {
+    console.info("desktop_second_instance_redirected", { identity });
+    if (app.isReady()) {
+      focusOrCreateMainWindow();
+    } else {
+      app.once("ready", () => focusOrCreateMainWindow());
+    }
+  });
+}
 protocol.registerSchemesAsPrivileged([
   {
     scheme: "awaken-pet",
@@ -97,6 +138,8 @@ let petWindowManager: PetWindowManager | null = null;
 let mainWindowRef: BrowserWindow | null = null;
 let pendingPetThreadId: string | null = null;
 let isQuitting = false;
+let projectTrashWorkerTimer: NodeJS.Timeout | null = null;
+let projectTrashWorkerRunning = false;
 
 type StreamSubscription = {
   controller: AbortController;
@@ -387,6 +430,196 @@ async function requestRuntimeOK(pathname: string, init?: RequestInit): Promise<v
   const response = await fetch(runtimeUrl(pathname), init);
   if (!response.ok) {
     throw new Error(await readErrorMessage(response));
+  }
+}
+
+class RuntimeDomainError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "RuntimeDomainError";
+  }
+}
+
+async function requestRuntimeDomain<T>(pathname: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(runtimeUrl(pathname), init);
+  if (!response.ok) {
+    const fallback = `Runtime request failed (${response.status})`;
+    const raw = (await response.text()).trim();
+    let code = "INTERNAL_ERROR";
+    let message = raw || fallback;
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as { code?: string; error?: string; message?: string };
+        code = parsed.code ?? parsed.error ?? code;
+        message = parsed.message ?? message;
+      } catch {
+        // Keep the raw body for internal logs. Renderer-facing callers map it.
+      }
+    }
+    throw new RuntimeDomainError(code, message, response.status);
+  }
+  return (await response.json()) as T;
+}
+
+function projectMutationFailure(error: unknown): ProjectMutationResult {
+  const code = error instanceof RuntimeDomainError ? error.code : "INTERNAL_ERROR";
+  const messages: Record<string, string> = {
+    PROJECT_NOT_FOUND: "项目不存在或已经被移除。",
+    PROJECT_OPERATION_NOT_FOUND: "删除任务不存在或已经结束。",
+    PROJECT_OPERATION_CONFLICT: "项目正在处理另一个操作，请稍后重试。",
+    PROJECT_RUNS_BUSY: "正在等待项目中的任务停止，Awaken 会自动继续。",
+    IDEMPOTENCY_KEY_REQUIRED: "删除请求缺少幂等标识，请重试。",
+    IDEMPOTENCY_KEY_CONFLICT: "该删除请求已用于其他操作，请重试。",
+    PROJECT_PATH_INVALID: "该文件夹不能被移到废纸篓。",
+    PROJECT_PATH_FINGERPRINT_CHANGED:
+      "文件夹身份发生变化，为避免误删新目录，Awaken 已停止本次删除。",
+    PROJECT_TRASH_ATTEMPT_INVALID: "删除任务已由新的执行器接管，Awaken 会自动继续。",
+  };
+  return {
+    ok: false,
+    code,
+    message: messages[code] ?? "项目操作暂时失败，请稍后重试。",
+  };
+}
+
+async function failProjectTrashOperation(
+  operationId: string,
+  attemptId: string,
+  code: string,
+  message: string,
+): Promise<void> {
+  await requestRuntimeDomain<RuntimeProjectOperationWire>(
+    `/v1/project-operations/${encodeURIComponent(operationId)}/fail-trash`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ attempt_id: attemptId, code, message }),
+    },
+  );
+}
+
+async function executeProjectTrashOperation(
+  operation: RuntimeProjectOperationWire,
+): Promise<void> {
+  await executeClaimedProjectTrashOperation(operation, {
+    claim: async (operationId) => {
+      try {
+        return await requestRuntimeDomain<RuntimeProjectOperationWire>(
+          `/v1/project-operations/${encodeURIComponent(operationId)}/claim-trash`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ worker_id: "desktop-main", lease_seconds: 30 }),
+          },
+        );
+      } catch (error) {
+        if (
+          error instanceof RuntimeDomainError &&
+          (error.code === "PROJECT_RUNS_BUSY" ||
+            error.code === "PROJECT_OPERATION_CONFLICT")
+        ) {
+          return null;
+        }
+        throw error;
+      }
+    },
+    pathExists: async (targetPath) => {
+      try {
+        await fs.lstat(targetPath);
+        return true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+          return false;
+        }
+        throw error;
+      }
+    },
+    stage: async (operationId, attemptId) => {
+      return requestRuntimeDomain<RuntimeProjectOperationWire>(
+        `/v1/project-operations/${encodeURIComponent(operationId)}/stage-trash`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ attempt_id: attemptId }),
+        },
+      );
+    },
+    beginInvocation: async (operationId, attemptId) => {
+      await requestRuntimeDomain<RuntimeProjectOperationWire>(
+        `/v1/project-operations/${encodeURIComponent(operationId)}/begin-trash`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ attempt_id: attemptId }),
+        },
+      );
+    },
+    trash: (workspaceRoot) => shell.trashItem(workspaceRoot),
+    complete: async (operationId, attemptId) => {
+      await requestRuntimeDomain<RuntimeProjectOperationWire>(
+        `/v1/project-operations/${encodeURIComponent(operationId)}/complete-trash`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ attempt_id: attemptId }),
+        },
+      );
+    },
+    fail: failProjectTrashOperation,
+    reportTrashFailure: ({ operationId, workspaceRoot, error }) => {
+      console.error("project_trash_failed", { operationId, workspaceRoot, error });
+    },
+  });
+}
+
+async function processPendingProjectTrashOperations(): Promise<void> {
+  if (projectTrashWorkerRunning || !runtimeBaseUrl) {
+    return;
+  }
+  projectTrashWorkerRunning = true;
+  try {
+    const operations = await requestRuntimeDomain<RuntimeProjectOperationWire[]>(
+      "/v1/project-operations",
+      { method: "GET" },
+    );
+    for (const operation of operations) {
+      if (
+        operation.phase !== "waiting_for_runs" &&
+        operation.phase !== "trash_claimed" &&
+        operation.phase !== "trash_staged" &&
+        operation.phase !== "trashing"
+      ) {
+        continue;
+      }
+      await executeProjectTrashOperation(operation);
+    }
+  } catch (error) {
+    console.error("project_trash_worker_failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    projectTrashWorkerRunning = false;
+  }
+}
+
+function startProjectTrashWorker(): void {
+  if (projectTrashWorkerTimer) {
+    return;
+  }
+  void processPendingProjectTrashOperations();
+  projectTrashWorkerTimer = setInterval(() => {
+    void processPendingProjectTrashOperations();
+  }, 750);
+}
+
+function stopProjectTrashWorker(): void {
+  if (projectTrashWorkerTimer) {
+    clearInterval(projectTrashWorkerTimer);
+    projectTrashWorkerTimer = null;
   }
 }
 
@@ -950,10 +1183,12 @@ ipcMain.handle("awaken:list-model-profiles", async () => {
 });
 
 ipcMain.handle("awaken:save-model-profile", async (_event, request: ModelProfileSaveRequest) => {
-  if (!modelProfileStore) {
-    throw new Error("Model profile store unavailable");
-  }
-  return normalizeModelProfileSummary(await modelProfileStore.saveProfile(request));
+  return runDesktopOperation(async () => {
+    if (!modelProfileStore) {
+      throw new Error("Model profile store unavailable");
+    }
+    return normalizeModelProfileSummary(await modelProfileStore.saveProfile(request));
+  });
 });
 
 ipcMain.handle("awaken:delete-model-profile", async (_event, profileId: string) => {
@@ -971,10 +1206,12 @@ ipcMain.handle("awaken:set-default-model-profile", async (_event, profileId: str
 });
 
 ipcMain.handle("awaken:test-model-profile", async (_event, request: ModelProfileSaveRequest) => {
-  if (!modelProfileStore) {
-    throw new Error("Model profile store unavailable");
-  }
-  return modelProfileStore.testProfile(request);
+  return runDesktopOperation(async () => {
+    if (!modelProfileStore) {
+      throw new Error("Model profile store unavailable");
+    }
+    return modelProfileStore.testProfile(request);
+  });
 });
 
 ipcMain.handle("awaken:sync-model-capabilities", async () => {
@@ -993,6 +1230,34 @@ ipcMain.handle("awaken:get-model-profile-balances", async () => {
   const balances = await modelProfileStore.fetchBalances();
   const result: ModelProfileBalancesResultWire = { balances };
   return normalizeModelProfileBalancesResult(result);
+});
+
+ipcMain.handle("awaken:relaunch-desktop", () => {
+  setImmediate(() => {
+    if (isDevServer && process.platform === "darwin") {
+      const repositoryRoot = path.resolve(__dirname, "../../../..");
+      const helperPath = join(
+        repositoryRoot,
+        "scripts",
+        "relaunch-managed-desktop.mjs",
+      );
+      const nodeExecutable = process.env.npm_node_execpath || "node";
+      const helper = spawn(
+        nodeExecutable,
+        [helperPath, String(process.pid)],
+        {
+          cwd: repositoryRoot,
+          detached: true,
+          stdio: "ignore",
+          env: process.env,
+        },
+      );
+      helper.unref();
+    } else {
+      app.relaunch();
+    }
+    app.quit();
+  });
 });
 
 ipcMain.handle("awaken:get-run", async (_event, runId: string) => {
@@ -1035,28 +1300,222 @@ ipcMain.handle("awaken:rename-thread", async (_event, threadId: string, label: s
   return normalizeRuntimeThread(thread);
 });
 
-ipcMain.handle("awaken:delete-thread", async (_event, threadId: string) => {
-  await requestRuntimeOK(`/v1/threads/${threadId}`, {
-    method: "DELETE",
-  });
+ipcMain.handle("awaken:delete-thread", async (_event, threadId: string): Promise<ThreadDeleteResult> => {
+  try {
+    await requestRuntimeOK(`/v1/threads/${threadId}`, {
+      method: "DELETE",
+    });
+    return { ok: true };
+  } catch (error) {
+    console.error("thread_delete_failed", {
+      threadId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      ok: false,
+      code: "THREAD_DELETE_FAILED",
+      message: "删除请求暂时未完成，Awaken 会保留当前会话，请稍后重试。",
+    };
+  }
 });
 
-ipcMain.handle("awaken:start-run", async (_event, request: StartRunRequest) => {
-  const body = normalizeStartRunRequest(request);
-  const defaultProfile = await modelProfileStore?.resolveDefaultRunProfile();
-  if (!defaultProfile) {
-    throw new Error("Configure a model in Settings > Models before running Awaken");
-  }
-  body.model_profile = normalizeModelProfileRunConfig(defaultProfile);
-  const run = await requestRuntime("/v1/runs", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+ipcMain.handle("awaken:list-projects", async (_event, includeRemoved = false) => {
+  const projects = await requestRuntimeDomain<RuntimeProjectWire[]>(
+    `/v1/projects?include_removed=${includeRemoved ? "true" : "false"}`,
+    { method: "GET" },
+  );
+  return projects.map(normalizeRuntimeProject);
+});
 
-  return normalizeRuntimeRun(run);
+ipcMain.handle(
+  "awaken:upsert-project",
+  async (
+    _event,
+    request: { workspaceRoot: string; displayName?: string },
+  ): Promise<RuntimeProject> => {
+    const project = await requestRuntimeDomain<RuntimeProjectWire>("/v1/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspace_root: request.workspaceRoot,
+        display_name: request.displayName,
+      }),
+    });
+    return normalizeRuntimeProject(project);
+  },
+);
+
+async function runProjectMutation(
+  pathname: string,
+  method: "DELETE" | "POST",
+  projectId: string,
+  idempotencyKey: string,
+): Promise<ProjectMutationResult> {
+  try {
+    const operation = await requestRuntimeDomain<RuntimeProjectOperationWire>(pathname, {
+      method,
+      headers: { "Idempotency-Key": idempotencyKey },
+    });
+    return { ok: true, operation: normalizeRuntimeProjectOperation(operation) };
+  } catch (error) {
+    console.error("project_mutation_failed", {
+      projectId,
+      pathname,
+      code: error instanceof RuntimeDomainError ? error.code : "INTERNAL_ERROR",
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return projectMutationFailure(error);
+  }
+}
+
+ipcMain.handle(
+  "awaken:detach-project",
+  async (
+    _event,
+    request: { projectId: string; idempotencyKey: string },
+  ): Promise<ProjectMutationResult> =>
+    runProjectMutation(
+      `/v1/projects/${encodeURIComponent(request.projectId)}`,
+      "DELETE",
+      request.projectId,
+      request.idempotencyKey,
+    ),
+);
+
+ipcMain.handle(
+  "awaken:delete-project-threads",
+  async (
+    _event,
+    request: { projectId: string; idempotencyKey: string },
+  ): Promise<ProjectMutationResult> =>
+    runProjectMutation(
+      `/v1/projects/${encodeURIComponent(request.projectId)}/threads`,
+      "DELETE",
+      request.projectId,
+      request.idempotencyKey,
+    ),
+);
+
+ipcMain.handle(
+  "awaken:trash-project",
+  async (
+    _event,
+    request: { projectId: string; idempotencyKey: string },
+  ): Promise<ProjectMutationResult> => {
+    const result = await runProjectMutation(
+      `/v1/projects/${encodeURIComponent(request.projectId)}/trash`,
+      "POST",
+      request.projectId,
+      request.idempotencyKey,
+    );
+    if (result.ok) {
+      void processPendingProjectTrashOperations();
+    }
+    return result;
+  },
+);
+
+ipcMain.handle(
+  "awaken:get-project-operation",
+  async (_event, operationId: string): Promise<RuntimeProjectOperation> => {
+    const operation = await requestRuntimeDomain<RuntimeProjectOperationWire>(
+      `/v1/project-operations/${encodeURIComponent(operationId)}`,
+      { method: "GET" },
+    );
+    return normalizeRuntimeProjectOperation(operation);
+  },
+);
+
+ipcMain.handle(
+  "awaken:open-artifact",
+  async (event, request: ArtifactOpenRequest): Promise<ArtifactOpenResult> => {
+    if (!mainWindowRef || event.sender.id !== mainWindowRef.webContents.id) {
+      return {
+        ok: false,
+        code: "open_failed",
+        message: "无法确认文件打开请求来自 Awaken 主窗口。",
+      };
+    }
+    try {
+      const transcript = await requestRuntime<RuntimeThreadTranscriptWire>(
+        `/v1/threads/${request.threadId}/transcript`,
+        { method: "GET" },
+      );
+      return openRecordedArtifact(
+        normalizeRuntimeThreadTranscript(transcript),
+        request,
+        (target) => shell.openPath(target),
+      );
+    } catch (error) {
+      console.error("artifact_open_failed", {
+        threadId: request.threadId,
+        runId: request.runId,
+        artifactId: request.artifactId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return {
+        ok: false,
+        code: "runtime_unavailable",
+        message: "暂时无法读取任务记录，请稍后重试。",
+      };
+    }
+  },
+);
+
+ipcMain.handle(
+  "awaken:reveal-artifact",
+  async (event, request: ArtifactOpenRequest): Promise<ArtifactOpenResult> => {
+    if (!mainWindowRef || event.sender.id !== mainWindowRef.webContents.id) {
+      return {
+        ok: false,
+        code: "open_failed",
+        message: "无法确认文件定位请求来自 Awaken 主窗口。",
+      };
+    }
+    try {
+      const transcript = await requestRuntime<RuntimeThreadTranscriptWire>(
+        `/v1/threads/${request.threadId}/transcript`,
+        { method: "GET" },
+      );
+      return revealRecordedArtifact(
+        normalizeRuntimeThreadTranscript(transcript),
+        request,
+        (target) => shell.showItemInFolder(target),
+      );
+    } catch (error) {
+      console.error("artifact_reveal_failed", {
+        threadId: request.threadId,
+        runId: request.runId,
+        artifactId: request.artifactId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return {
+        ok: false,
+        code: "runtime_unavailable",
+        message: "暂时无法读取任务记录，请稍后重试。",
+      };
+    }
+  },
+);
+
+ipcMain.handle("awaken:start-run", async (_event, request: StartRunRequest) => {
+  return runDesktopOperation(async () => {
+    const body = normalizeStartRunRequest(request);
+    const defaultProfile = await modelProfileStore?.resolveDefaultRunProfile();
+    if (!defaultProfile) {
+      throw new Error("请先在设置 > 模型中配置可用模型。");
+    }
+    body.model_profile = normalizeModelProfileRunConfig(defaultProfile);
+    const run = await requestRuntime("/v1/runs", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    return normalizeRuntimeRun(run);
+  });
 });
 
 ipcMain.handle("awaken:cancel-run", async (_event, runId: string) => {
@@ -1362,8 +1821,30 @@ async function ensureDesktopDataDirs(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  if (!ownsSingleInstanceLock) {
+    return;
+  }
   setMacDockIcon();
   await ensureDesktopDataDirs();
+  try {
+    const runtimeArchive = await installBundledPrimaryRuntimeArchive({
+      packaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      userDataDir: app.getPath("userData"),
+      electronExecutable: process.execPath,
+    });
+    if (runtimeArchive.status === "installed") {
+      console.info("primary_runtime_archive_installed", {
+        active: runtimeArchive.active,
+      });
+    }
+  } catch (error) {
+    // Keep the Desktop available for repair and diagnostics, but never fall
+    // back to a user-installed soffice executable.
+    console.error("primary_runtime_archive_install_failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
   const configDir = await ensureConfigDir();
   desktopPreferencesStore = new DesktopPreferencesStore(configDir);
   await desktopPreferencesStore.initialize();
@@ -1412,6 +1893,7 @@ app.whenReady().then(async () => {
   supervisor.onStatusChange((info) => {
     if (info.runtimeBaseUrl) {
       runtimeBaseUrl = info.runtimeBaseUrl;
+      startProjectTrashWorker();
     } else if (info.status !== "running") {
       runtimeBaseUrl = null;
     }
@@ -1430,6 +1912,7 @@ app.whenReady().then(async () => {
   void supervisor.start().then((statusInfo) => {
     if (statusInfo.runtimeBaseUrl) {
       runtimeBaseUrl = statusInfo.runtimeBaseUrl;
+      startProjectTrashWorker();
     }
   });
 
@@ -1452,6 +1935,7 @@ app.on("before-quit", (event) => {
   if (isQuitting) return;
   event.preventDefault();
   isQuitting = true;
+  stopProjectTrashWorker();
   for (const subscription of subscriptions.values()) {
     subscription.controller.abort();
   }

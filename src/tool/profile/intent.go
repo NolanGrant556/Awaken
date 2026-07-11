@@ -204,7 +204,19 @@ func BuildExecutionIntent(
 	permCtx tool.PermissionContext,
 	subagentOrigin *SubagentOrigin,
 ) ExecutionIntent {
-	def := selectedTool.Definition()
+	return BuildExecutionIntentWithDefinition(call, selectedTool, selectedTool.Definition(), permCtx, subagentOrigin)
+}
+
+// BuildExecutionIntentWithDefinition uses the immutable registry definition
+// snapshot supplied by ToolRuntime. The legacy wrapper above remains for
+// callers that do not yet have a registered contract.
+func BuildExecutionIntentWithDefinition(
+	call convcontext.ToolCall,
+	selectedTool tool.Tool,
+	def tool.ToolDefinition,
+	permCtx tool.PermissionContext,
+	subagentOrigin *SubagentOrigin,
+) ExecutionIntent {
 	toolName := strings.TrimSpace(call.Function.Name)
 	if toolName == "" {
 		toolName = def.Name

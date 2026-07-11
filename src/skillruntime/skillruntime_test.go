@@ -3,6 +3,8 @@ package skillruntime
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -187,7 +189,7 @@ func TestInlineExecutor(t *testing.T) {
 
 func TestResourceReadToolReadsWithinSkillPackage(t *testing.T) {
 	root := t.TempDir()
-	skillRoot := filepath.Join(root, "sample")
+	skillRoot := filepath.Join(root, ".awaken", "skills", "sample")
 	if err := os.MkdirAll(filepath.Join(skillRoot, "references"), 0755); err != nil {
 		t.Fatalf("mkdir skill refs: %v", err)
 	}
@@ -196,16 +198,21 @@ func TestResourceReadToolReadsWithinSkillPackage(t *testing.T) {
 	}
 	reg := skills.NewSkillRegistry(nil)
 	reg.RegisterSkill(&skills.SkillDefinition{
-		ID:          "sample",
-		Name:        "sample",
-		Description: "sample",
-		Source:      skills.SourceProject,
-		Scope:       skills.SourceProject,
-		RootDir:     skillRoot,
-		State:       skills.StateAvailable,
+		ID:              "sample",
+		Name:            "sample",
+		Description:     "sample",
+		Source:          skills.SourceProject,
+		Scope:           skills.SourceProject,
+		RootDir:         skillRoot,
+		ResolvedRootDir: mustEvalSymlinks(t, skillRoot),
+		ProjectPath:     root,
+		State:           skills.StateAvailable,
 	})
 
 	reader := &ResourceReadTool{registry: reg}
+	if err := tool.ValidateToolWithMode(reader, tool.DefinitionValidationStrictAll); err != nil {
+		t.Fatalf("skill_resource_read must pass strict validation: %v", err)
+	}
 	result, err := reader.Execute(context.Background(), `{"skill_id":"sample","path":"references/guide.md"}`)
 	if err != nil {
 		t.Fatalf("read resource: %v", err)
@@ -213,25 +220,110 @@ func TestResourceReadToolReadsWithinSkillPackage(t *testing.T) {
 	if !strings.Contains(result, "guide body") {
 		t.Fatalf("expected guide body, got %s", result)
 	}
+	outcome, err := reader.ExecuteOutcome(context.Background(), `{"skill_id":"sample","path":"references/guide.md"}`, nil)
+	if err != nil {
+		t.Fatalf("read structured resource: %v", err)
+	}
+	definition := tool.ResolveDefinition(reader)
+	outcome = outcome.Normalize(tool.OutcomeNormalizationContext{
+		OperationType: ResourceReadToolName, OutputSchema: definition.OutputSchema,
+		StrictOutputSchema: true, DeclaredSideEffects: definition.SideEffects,
+	})
+	if outcome.Status != tool.OutcomeSucceeded || outcome.Operation == nil || outcome.Operation.SideEffectState != tool.OutcomeSideEffectNone {
+		t.Fatalf("unexpected structured resource outcome: %+v", outcome)
+	}
+	if outcome.Details["path"] != "references/guide.md" || outcome.Details["size_bytes"] != 10 || outcome.Details["sha256"] == "" {
+		t.Fatalf("resource details are incomplete: %+v", outcome.Details)
+	}
 }
 
 func TestResourceReadToolRejectsTraversal(t *testing.T) {
 	root := t.TempDir()
+	skillRoot := filepath.Join(root, ".awaken", "skills", "sample")
 	reg := skills.NewSkillRegistry(nil)
 	reg.RegisterSkill(&skills.SkillDefinition{
-		ID:          "sample",
-		Name:        "sample",
-		Description: "sample",
-		Source:      skills.SourceProject,
-		Scope:       skills.SourceProject,
-		RootDir:     filepath.Join(root, "sample"),
-		State:       skills.StateAvailable,
+		ID:              "sample",
+		Name:            "sample",
+		Description:     "sample",
+		Source:          skills.SourceProject,
+		Scope:           skills.SourceProject,
+		RootDir:         skillRoot,
+		ResolvedRootDir: skillRoot,
+		ProjectPath:     root,
+		State:           skills.StateAvailable,
 	})
 
 	reader := &ResourceReadTool{registry: reg}
 	_, err := reader.Execute(context.Background(), `{"skill_id":"sample","path":"../secret.md"}`)
 	if err == nil {
 		t.Fatal("expected traversal to be rejected")
+	}
+}
+
+func TestResourceReadToolRejectsSymlinkEscapeAtOpen(t *testing.T) {
+	projectRoot := t.TempDir()
+	skillRoot := filepath.Join(projectRoot, ".awaken", "skills", "symlink-skill")
+	outside := t.TempDir()
+	secretPath := filepath.Join(outside, "secret.md")
+	if err := os.WriteFile(secretPath, []byte("outside secret"), 0o600); err != nil {
+		t.Fatalf("write outside secret: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(skillRoot, "references"), 0o755); err != nil {
+		t.Fatalf("mkdir references: %v", err)
+	}
+	linkPath := filepath.Join(skillRoot, "references", "escape.md")
+	if err := os.Symlink(secretPath, linkPath); err != nil {
+		t.Skipf("symlink unavailable on this platform: %v", err)
+	}
+	reg := skills.NewSkillRegistry(nil)
+	reg.RegisterSkill(&skills.SkillDefinition{
+		ID: "symlink-skill", Name: "symlink-skill", Description: "symlink test",
+		Source: skills.SourceProject, Scope: skills.SourceProject, RootDir: skillRoot,
+		ResolvedRootDir: mustEvalSymlinks(t, skillRoot), ProjectPath: projectRoot, State: skills.StateAvailable,
+	})
+	reader := &ResourceReadTool{registry: reg}
+	outcome, err := reader.ExecuteOutcome(context.Background(), `{"skill_id":"symlink-skill","path":"references/escape.md"}`, nil)
+	if err != nil {
+		t.Fatalf("typed symlink denial escaped: %v", err)
+	}
+	if outcome.Status != tool.OutcomeFailed || outcome.ErrorCode != "skill_resource_path_denied" || strings.Contains(outcome.Content, "outside secret") {
+		t.Fatalf("rooted read allowed a package escape: %+v", outcome)
+	}
+}
+
+func TestResourceReadToolRejectsPackageRootReplacement(t *testing.T) {
+	projectRoot := t.TempDir()
+	skillRoot := filepath.Join(projectRoot, ".awaken", "skills", "root-swap")
+	if err := os.MkdirAll(skillRoot, 0o755); err != nil {
+		t.Fatalf("mkdir Skill root: %v", err)
+	}
+	trustedRoot, err := filepath.EvalSymlinks(skillRoot)
+	if err != nil {
+		t.Fatalf("resolve trusted Skill root: %v", err)
+	}
+	reg := skills.NewSkillRegistry(nil)
+	reg.RegisterSkill(&skills.SkillDefinition{
+		ID: "root-swap", Name: "root-swap", Description: "root swap test",
+		Source: skills.SourceProject, Scope: skills.SourceProject, RootDir: skillRoot,
+		ResolvedRootDir: trustedRoot, ProjectPath: projectRoot, State: skills.StateAvailable,
+	})
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.md"), []byte("outside root secret"), 0o600); err != nil {
+		t.Fatalf("write outside secret: %v", err)
+	}
+	if err := os.RemoveAll(skillRoot); err != nil {
+		t.Fatalf("remove original Skill root: %v", err)
+	}
+	if err := os.Symlink(outside, skillRoot); err != nil {
+		t.Skipf("symlink unavailable on this platform: %v", err)
+	}
+	reader := &ResourceReadTool{registry: reg}
+	outcome, err := reader.ExecuteOutcome(context.Background(), `{"skill_id":"root-swap","path":"secret.md"}`, nil)
+	if err != nil {
+		t.Fatalf("typed root replacement denial escaped: %v", err)
+	}
+	if outcome.Status != tool.OutcomeFailed || outcome.ErrorCode != "skill_resource_path_denied" || strings.Contains(outcome.Content, "outside root secret") {
+		t.Fatalf("replaced package root escaped its registry identity: %+v", outcome)
 	}
 }
 
@@ -275,6 +367,257 @@ func TestSkillInstallToolInstallsContentProjectSkillAndReloads(t *testing.T) {
 	}
 }
 
+func TestSkillInstallToolStrictDefinitionAndStructuredOutcome(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	workspace := t.TempDir()
+	reg := skills.NewSkillRegistry(nil)
+	installer := &SkillInstallTool{registry: reg}
+	if err := tool.ValidateToolWithMode(installer, tool.DefinitionValidationStrictBuiltin); err != nil {
+		t.Fatalf("skill_install must pass strict builtin validation: %v", err)
+	}
+
+	ctx := tool.ContextWithPermissionContext(
+		context.Background(),
+		tool.NewPermissionContext(workspace, []string{workspace}),
+	)
+	outcome, err := installer.ExecuteOutcome(ctx, `{
+		"source_type": "content",
+		"file_name": "SKILL.md",
+		"content": "---\nname: structured-install\ndescription: Structured install.\n---\nRun it.",
+		"scope": "project"
+	}`, nil)
+	if err != nil {
+		t.Fatalf("execute structured skill install: %v", err)
+	}
+	def := tool.ResolveDefinition(installer)
+	outcome = outcome.Normalize(tool.OutcomeNormalizationContext{
+		OperationType:       SkillInstallToolName,
+		DeclaredSideEffects: def.SideEffects,
+		OutputSchema:        def.OutputSchema,
+		StrictOutputSchema:  true,
+	})
+	if outcome.Status != tool.OutcomeSucceeded || outcome.Operation == nil || outcome.Operation.SideEffectState != tool.OutcomeSideEffectApplied {
+		t.Fatalf("unexpected structured outcome state: %+v", outcome)
+	}
+	if outcome.Details["id"] != "structured-install" || outcome.Details["install_status"] != "installed" {
+		t.Fatalf("unexpected structured details: %+v", outcome.Details)
+	}
+	if len(outcome.Changes) != 1 || outcome.Changes[0].Kind != "skill_package" || outcome.Changes[0].Action != "created" {
+		t.Fatalf("expected one observed Skill package change: %+v", outcome.Changes)
+	}
+	if len(outcome.NextActions) != 1 || outcome.NextActions[0].Tool != SkillToolName("structured-install") {
+		t.Fatalf("expected actionable post-install guidance: %+v", outcome.NextActions)
+	}
+	replaceInput := `{
+		"source_type": "content",
+		"file_name": "SKILL.md",
+		"content": "---\nname: structured-install\ndescription: Replaced install.\n---\nRun the replacement.",
+		"scope": "project",
+		"overwrite_policy": "replace"
+	}`
+	decision := installer.CheckPermission(ctx, replaceInput, tool.PermissionContextFromContext(ctx))
+	if decision.Behavior != tool.PermissionUnsupported || decision.Metadata.RiskTone != "danger" {
+		t.Fatalf("replacement must fail closed at the permission boundary: %+v", decision)
+	}
+	replaced, err := installer.ExecuteOutcome(ctx, replaceInput, nil)
+	if err != nil {
+		t.Fatalf("typed replacement block escaped: %v", err)
+	}
+	replaced = replaced.Normalize(tool.OutcomeNormalizationContext{
+		OperationType:       SkillInstallToolName,
+		DeclaredSideEffects: def.SideEffects,
+		OutputSchema:        def.OutputSchema,
+		StrictOutputSchema:  true,
+	})
+	if replaced.Status != tool.OutcomeUnsupported || replaced.ErrorCode != "skill_install_replace_unsupported" || replaced.TransportStatus != tool.TransportNotStarted || replaced.Operation.SideEffectState != tool.OutcomeSideEffectNotStarted || len(replaced.Changes) != 0 {
+		t.Fatalf("replacement must remain an unexecuted review boundary: %+v", replaced)
+	}
+	originalSkill, err := os.ReadFile(filepath.Join(workspace, ".awaken", "skills", "structured-install", "SKILL.md"))
+	if err != nil || !strings.Contains(string(originalSkill), "Run it.") || strings.Contains(string(originalSkill), "Run the replacement.") {
+		t.Fatalf("blocked replacement changed the existing Skill: err=%v content=%q", err, originalSkill)
+	}
+	notReloaded, err := installer.ExecuteOutcome(ctx, `{
+		"source_type": "content",
+		"file_name": "SKILL.md",
+		"content": "---\nname: deferred-reload\ndescription: Deferred reload.\n---\nRun later.",
+		"scope": "project",
+		"reload_after_install": false
+	}`, nil)
+	if err != nil {
+		t.Fatalf("install without reload: %v", err)
+	}
+	if len(notReloaded.NextActions) != 1 || notReloaded.NextActions[0].ID != "reload_skill_registry" || notReloaded.NextActions[0].Tool != "" {
+		t.Fatalf("reloaded=false must require registry refresh without inventing an executable tool: %+v", notReloaded.NextActions)
+	}
+}
+
+func TestSkillInstallToolReturnsRecoverableTypedInputFailure(t *testing.T) {
+	installer := &SkillInstallTool{registry: skills.NewSkillRegistry(nil)}
+	outcome, err := installer.ExecuteOutcome(context.Background(), `{}`, nil)
+	if err != nil {
+		t.Fatalf("typed failure must stay in the outcome: %v", err)
+	}
+	if outcome.Status != tool.OutcomeFailed || outcome.ErrorCode != "skill_install_invalid_input" || outcome.Retryable {
+		t.Fatalf("unexpected typed input failure: %+v", outcome)
+	}
+	normalized := outcome.Normalize(tool.OutcomeNormalizationContext{
+		OperationType:       SkillInstallToolName,
+		DeclaredSideEffects: tool.ResolveDefinition(installer).SideEffects,
+	})
+	if len(normalized.Errors) != 1 || normalized.Errors[0].RetryStrategy != tool.RetryChangeInput || len(normalized.NextActions) == 0 {
+		t.Fatalf("failure must expose recovery guidance: %+v", normalized)
+	}
+	if normalized.TransportStatus != tool.TransportNotStarted || normalized.Operation == nil || normalized.Operation.SideEffectState != tool.OutcomeSideEffectNotStarted {
+		t.Fatalf("pre-execution validation must not imply installation side effects: %+v", normalized)
+	}
+}
+
+func TestSkillInstallToolClassifiesDeterministicSourceErrorsAsInputRepair(t *testing.T) {
+	installer := &SkillInstallTool{registry: skills.NewSkillRegistry(nil)}
+	definition := tool.ResolveDefinition(installer)
+	inputs := []string{
+		`{"source_type":"content"}`,
+		`{"source_type":"content_base64","content_base64":"not-base64"}`,
+		`{"source_type":"local_path"}`,
+		`{"source_type":"remote_url"}`,
+		`{"source_type":"remote_url","url":"ftp://example.com/SKILL.md"}`,
+		`{"source_type":"remote_git"}`,
+	}
+	for _, input := range inputs {
+		outcome, err := installer.ExecuteOutcome(context.Background(), input, nil)
+		if err != nil {
+			t.Fatalf("typed source failure escaped for %s: %v", input, err)
+		}
+		outcome = outcome.Normalize(tool.OutcomeNormalizationContext{
+			OperationType: SkillInstallToolName, DeclaredSideEffects: definition.SideEffects,
+		})
+		if outcome.ErrorCode != "skill_install_source_invalid" || outcome.ErrorCategory != tool.ErrorCategoryValidation || outcome.Retryable {
+			t.Errorf("deterministic source error was misclassified for %s: %+v", input, outcome)
+			continue
+		}
+		if outcome.TransportStatus != tool.TransportNotStarted || outcome.Operation == nil || outcome.Operation.SideEffectState != tool.OutcomeSideEffectNotStarted {
+			t.Errorf("deterministic source error implied side effects for %s: %+v", input, outcome.Operation)
+		}
+		if len(outcome.Errors) != 1 || outcome.Errors[0].RetryStrategy != tool.RetryChangeInput || len(outcome.NextActions) == 0 || outcome.NextActions[0].ID != "correct_input" {
+			t.Errorf("deterministic source error lacks change-input recovery for %s: errors=%+v next=%+v", input, outcome.Errors, outcome.NextActions)
+		}
+	}
+}
+
+func TestSkillInstallToolClassifiesRemoteServiceFailureAsBoundedRetry(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "temporary", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	installer := &SkillInstallTool{registry: skills.NewSkillRegistry(nil)}
+	definition := tool.ResolveDefinition(installer)
+	outcome, err := installer.ExecuteOutcome(context.Background(), `{"source_type":"remote_url","url":"`+server.URL+`/SKILL.md"}`, nil)
+	if err != nil {
+		t.Fatalf("typed remote failure escaped: %v", err)
+	}
+	outcome = outcome.Normalize(tool.OutcomeNormalizationContext{
+		OperationType: SkillInstallToolName, DeclaredSideEffects: definition.SideEffects,
+	})
+	if outcome.ErrorCode != "skill_install_source_unavailable" || outcome.ErrorCategory != tool.ErrorCategoryRuntime || !outcome.Retryable {
+		t.Fatalf("unexpected remote service classification: %+v", outcome)
+	}
+	if outcome.Operation == nil || outcome.Operation.SideEffectState != tool.OutcomeSideEffectNone || outcome.Errors[0].RetryStrategy != tool.RetryAfterBackoff {
+		t.Fatalf("remote failure must distinguish no install mutation from bounded transport retry: %+v", outcome)
+	}
+}
+
+func TestSkillInstallToolRejectsGitRemoteHelpersAndOptionLikeRefsBeforeGit(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "remote-helper-ran")
+	inputs := []map[string]any{
+		{"source_type": "remote_git", "url": "ext::/usr/bin/touch% " + marker},
+		{"source_type": "remote_git", "url": "file:///tmp/repository"},
+		{"source_type": "remote_git", "url": "."},
+		{"source_type": "remote_git", "url": "https://example.com/repository.git", "ref": "--upload-pack=/usr/bin/false"},
+	}
+	installer := &SkillInstallTool{registry: skills.NewSkillRegistry(nil)}
+	definition := tool.ResolveDefinition(installer)
+	for _, request := range inputs {
+		encoded, err := json.Marshal(request)
+		if err != nil {
+			t.Fatalf("encode malicious regression input: %v", err)
+		}
+		outcome, err := installer.ExecuteOutcome(context.Background(), string(encoded), nil)
+		if err != nil {
+			t.Fatalf("typed remote_git rejection escaped: %v", err)
+		}
+		outcome = outcome.Normalize(tool.OutcomeNormalizationContext{
+			OperationType: SkillInstallToolName, DeclaredSideEffects: definition.SideEffects,
+		})
+		if outcome.ErrorCode != "skill_install_source_invalid" || outcome.ErrorCategory != tool.ErrorCategoryValidation || outcome.TransportStatus != tool.TransportNotStarted || outcome.Operation.SideEffectState != tool.OutcomeSideEffectNotStarted {
+			t.Errorf("unsafe remote_git input reached execution: request=%v outcome=%+v", request, outcome)
+		}
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("Git remote helper executed before validation: %v", err)
+	}
+}
+
+func TestSafeGitEnvironmentDropsAmbientExecutionConfiguration(t *testing.T) {
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "protocol.ext.allow")
+	t.Setenv("GIT_CONFIG_VALUE_0", "always")
+	t.Setenv("GIT_SSH_COMMAND", "/usr/bin/false")
+	t.Setenv("GIT_TEMPLATE_DIR", t.TempDir())
+	t.Setenv("GIT_SSL_NO_VERIFY", "1")
+	env := safeGitEnvironment()
+	joined := "\n" + strings.Join(env, "\n") + "\n"
+	for _, forbidden := range []string{"\nGIT_CONFIG_COUNT=", "\nGIT_CONFIG_KEY_0=", "\nGIT_CONFIG_VALUE_0=", "\nGIT_SSH_COMMAND=", "\nGIT_TEMPLATE_DIR=", "\nGIT_SSL_NO_VERIFY="} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("unsafe Git environment survived sanitization: %s", forbidden)
+		}
+	}
+	for _, required := range []string{"\nGIT_CONFIG_NOSYSTEM=1\n", "\nGIT_TERMINAL_PROMPT=0\n", "\nGIT_PROTOCOL_FROM_USER=0\n", "\nGIT_ALLOW_PROTOCOL=https\n"} {
+		if !strings.Contains(joined, required) {
+			t.Fatalf("safe Git environment lacks %q", required)
+		}
+	}
+}
+
+func TestManagerRegistersSkillInstallThroughStrictGate(t *testing.T) {
+	previous, previousErr := tool.GetRegisteredTool(SkillInstallToolName)
+	previousResource, previousResourceErr := tool.GetRegisteredTool(ResourceReadToolName)
+	defer func() {
+		if previousErr == nil {
+			_ = tool.RegisterToolForce(previous.Runtime)
+		} else {
+			tool.UnregisterTool(SkillInstallToolName)
+		}
+		if previousResourceErr == nil {
+			_ = tool.RegisterToolForce(previousResource.Runtime)
+		} else {
+			tool.UnregisterTool(ResourceReadToolName)
+		}
+	}()
+
+	manager := NewManager(skills.NewSkillRegistry(nil), nil)
+	defer manager.Shutdown()
+	registered, err := tool.GetRegisteredTool(SkillInstallToolName)
+	if err != nil {
+		t.Fatalf("skill_install was not registered: %v", err)
+	}
+	if registered.Origin != tool.SourceBuiltin || registered.Quality != tool.DefinitionQualityStrict {
+		t.Fatalf("skill_install must be a strict builtin: origin=%s quality=%s warnings=%v", registered.Origin, registered.Quality, registered.Warnings)
+	}
+	if _, ok := registered.Runtime.(tool.OutcomeTool); !ok {
+		t.Fatal("skill_install must execute through the structured OutcomeTool path")
+	}
+	resource, err := tool.GetRegisteredTool(ResourceReadToolName)
+	if err != nil {
+		t.Fatalf("skill_resource_read was not registered: %v", err)
+	}
+	if resource.Origin != tool.SourceSkill || resource.Quality != tool.DefinitionQualityStrict {
+		t.Fatalf("skill_resource_read must be a strict first-party Skill tool: origin=%s quality=%s warnings=%v", resource.Origin, resource.Quality, resource.Warnings)
+	}
+	if _, ok := resource.Runtime.(tool.OutcomeTool); !ok {
+		t.Fatal("skill_resource_read must execute through the structured OutcomeTool path")
+	}
+}
+
 func TestSkillInstallToolRejectsProjectRootOutsideWorkspace(t *testing.T) {
 	workspace := t.TempDir()
 	outside := t.TempDir()
@@ -301,88 +644,90 @@ func TestSkillInstallToolRejectsProjectRootOutsideWorkspace(t *testing.T) {
 	}
 }
 
-// ---- fork_test ----
-
-func TestForkExecutorDegradesToInline(t *testing.T) {
-	e := &ForkExecutor{
-		// StartChild is nil -> degrades.
+func TestSkillInstallToolRejectsProjectRootSymlinkEscape(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	linkPath := filepath.Join(workspace, "linked-project")
+	if err := os.Symlink(outside, linkPath); err != nil {
+		t.Skipf("symlink unavailable on this platform: %v", err)
 	}
-	result, err := e.Execute(context.Background(), "test", "do something", nil)
+	reg := skills.NewSkillRegistry(nil)
+	installer := &SkillInstallTool{registry: reg}
+	input := `{
+		"source_type": "content",
+		"file_name": "SKILL.md",
+		"content": "---\nname: escaped-install\ndescription: Escape test.\n---\nBody.",
+		"scope": "project",
+		"project_root": "` + linkPath + `"
+	}`
+	permissionContext := tool.NewPermissionContext(workspace, []string{workspace})
+	decision := installer.CheckPermission(context.Background(), input, permissionContext)
+	if decision.Behavior != tool.PermissionDeny || !strings.Contains(decision.Reason, "project_root") {
+		t.Fatalf("permission check allowed symlink project escape: %+v", decision)
+	}
+	ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
+	outcome, err := installer.ExecuteOutcome(ctx, input, nil)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("typed project-root denial escaped: %v", err)
 	}
-	if !strings.Contains(result, "fork degraded") {
-		t.Errorf("bad fork degradation result: %s", result)
+	outcome = outcome.Normalize(tool.OutcomeNormalizationContext{
+		OperationType: SkillInstallToolName, DeclaredSideEffects: tool.ResolveDefinition(installer).SideEffects,
+	})
+	if outcome.Status != tool.OutcomeDenied || outcome.ErrorCode != "skill_install_target_invalid" || outcome.TransportStatus != tool.TransportNotStarted || outcome.Operation.SideEffectState != tool.OutcomeSideEffectNotStarted {
+		t.Fatalf("symlink project escape was not a pre-execution denial: %+v", outcome)
+	}
+	if _, err := os.Stat(filepath.Join(outside, ".awaken")); !os.IsNotExist(err) {
+		t.Fatalf("symlink project escape created state outside workspace: %v", err)
 	}
 }
 
-func TestForkExecutorStub(t *testing.T) {
-	e := &ForkExecutor{
-		StartChild: func(ctx context.Context, body string) (string, error) {
-			return "child-done: " + body, nil
-		},
-	}
-	result, err := e.Execute(context.Background(), "test", "do something", nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(result, "child-done") {
-		t.Errorf("fork stub didn't return child result: %s", result)
+func TestSkillInstallToolRejectsSymlinkedSkillDirectoryEscape(t *testing.T) {
+	for _, linkRelative := range []string{".awaken", filepath.Join(".awaken", "skills")} {
+		t.Run(filepath.ToSlash(linkRelative), func(t *testing.T) {
+			workspace := t.TempDir()
+			outside := t.TempDir()
+			linkPath := filepath.Join(workspace, linkRelative)
+			if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
+				t.Fatalf("mkdir symlink parent: %v", err)
+			}
+			if err := os.Symlink(outside, linkPath); err != nil {
+				t.Skipf("symlink unavailable on this platform: %v", err)
+			}
+			installer := &SkillInstallTool{registry: skills.NewSkillRegistry(nil)}
+			input := `{
+				"source_type": "content",
+				"file_name": "SKILL.md",
+				"content": "---\nname: escaped-skill-root\ndescription: Escape test.\n---\nBody.",
+				"scope": "project"
+			}`
+			permissionContext := tool.NewPermissionContext(workspace, []string{workspace})
+			decision := installer.CheckPermission(context.Background(), input, permissionContext)
+			if decision.Behavior != tool.PermissionDeny || !strings.Contains(decision.Reason, "symlink") {
+				t.Fatalf("permission check allowed symlinked Skill root: %+v", decision)
+			}
+			ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
+			outcome, err := installer.ExecuteOutcome(ctx, input, nil)
+			if err != nil {
+				t.Fatalf("typed Skill-root denial escaped: %v", err)
+			}
+			outcome = outcome.Normalize(tool.OutcomeNormalizationContext{
+				OperationType: SkillInstallToolName, DeclaredSideEffects: tool.ResolveDefinition(installer).SideEffects,
+			})
+			if outcome.Status != tool.OutcomeDenied || outcome.ErrorCode != "skill_install_target_invalid" || outcome.TransportStatus != tool.TransportNotStarted || outcome.Operation.SideEffectState != tool.OutcomeSideEffectNotStarted {
+				t.Fatalf("symlinked Skill root was not a pre-execution denial: %+v", outcome)
+			}
+			if entries, err := os.ReadDir(outside); err != nil || len(entries) != 0 {
+				t.Fatalf("symlinked Skill root wrote outside workspace: entries=%v err=%v", entries, err)
+			}
+		})
 	}
 }
 
-func TestForkExecutorStartChildErrorDegrades(t *testing.T) {
-	e := &ForkExecutor{
-		StartChild: func(ctx context.Context, body string) (string, error) {
-			return "", context.DeadlineExceeded
-		},
-	}
-	result, err := e.Execute(context.Background(), "test", "do something", nil)
+func mustEvalSymlinks(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("resolve %s: %v", path, err)
 	}
-	if !strings.Contains(result, "fork degraded") {
-		t.Errorf("expected fork to degrade: %s", result)
-	}
-}
-
-// ---- manager_test ----
-
-func TestManagerRefreshAndShutdown(t *testing.T) {
-	// Create a minimal skill registry.
-	// Use skills package to create the registry.
-	// We import skills, but to avoid circular dep test we directly test
-	// Manager refresh via manual tool registration.
-
-	// Clean up any leftover skill tools.
-	tool.UnregisterToolsByPrefix(SkillToolPrefix)
-
-	st := &SkillTool{
-		SkillID: "test_manager",
-		NameStr: SkillToolName("test_manager"),
-		Desc:    "manager test",
-		Body:    "test body",
-		ArgDefs: []SkillArgDef{
-			{Name: "x", Type: "string", Required: true},
-		},
-	}
-	if err := tool.RegisterToolForce(st); err != nil {
-		t.Fatalf("register: %v", err)
-	}
-
-	// Verify it's registered.
-	got, err := tool.GetTool(SkillToolName("test_manager"))
-	if err != nil {
-		t.Fatalf("get tool: %v", err)
-	}
-	if got.Name() != SkillToolName("test_manager") {
-		t.Errorf("bad name: %s", got.Name())
-	}
-
-	// Shutdown should remove it.
-	tool.UnregisterToolsByPrefix(SkillToolPrefix)
-	_, err = tool.GetTool(SkillToolName("test_manager"))
-	if err == nil {
-		t.Fatal("expected tool to be removed after shutdown")
-	}
+	return resolved
 }

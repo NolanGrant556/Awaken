@@ -1,6 +1,7 @@
 package agentcore
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,6 +11,67 @@ import (
 	_ "awaken/src/tools/apply_patch"
 	_ "awaken/src/tools/text_edit"
 )
+
+type requestBuilderDefinitionTool struct{}
+
+func (requestBuilderDefinitionTool) Name() string { return "request_builder_v2_contract" }
+
+func (requestBuilderDefinitionTool) Description() string { return "LEGACY_METHOD_DESCRIPTION" }
+
+func (requestBuilderDefinitionTool) Parameters() []tool.ToolParameter {
+	return []tool.ToolParameter{{Name: "legacy", Description: "Legacy-only parameter.", Type: "string"}}
+}
+
+func (requestBuilderDefinitionTool) Definition() tool.ToolDefinition {
+	return tool.ToolDefinition{
+		SchemaVersion: tool.ToolDefinitionSchemaVersion,
+		Name:          "request_builder_v2_contract",
+		DisplayName:   "Request Builder v2 Contract",
+		Source:        tool.SourceBuiltin,
+		Description:   "Inspect one canonical request-builder contract.",
+		Purpose:       "Prove that model schemas are compiled from resolved ToolDefinition v2 facts.",
+		WhenToUse:     []string{"the request builder needs the canonical query object"},
+		WhenNotToUse:  []string{"the legacy flat parameter is requested"},
+		InputSchema: tool.ToolParametersSchema{
+			Type:                 "object",
+			AdditionalProperties: tool.BoolPtr(false),
+			Required:             []string{"query"},
+			Properties: map[string]tool.ToolParam{
+				"query": {Type: "string", Description: "Canonical query text."},
+			},
+		},
+		OutputSchema: tool.NoDetailsOutputSchema(),
+		SideEffects: []tool.ToolSideEffect{{
+			Kind:          tool.SideEffectNone,
+			Description:   "Does not modify state.",
+			Reversibility: tool.ReversibilityNotApplicable,
+		}},
+		Permissions: tool.ToolPermissionSpec{
+			CapabilityClass: tool.CapabilityArtifactRead,
+			WorkspaceScope:  tool.WorkspaceScopeRead,
+			FileBridgeScope: tool.FileBridgeNone,
+			NetworkScope:    tool.NetworkScopeNone,
+		},
+		Examples: []tool.ToolExample{{
+			Scenario: "Compile a canonical query.",
+			Input:    map[string]any{"query": "status"},
+		}},
+		FailureModes: []tool.ToolFailureMode{{
+			Code:  "invalid_query",
+			Cause: "The canonical query is invalid.",
+		}},
+		Annotations: tool.ToolAnnotations{
+			ReadOnly:        true,
+			CapabilityClass: tool.CapabilityArtifactRead,
+			FileBridgeScope: tool.FileBridgeNone,
+			NetworkScope:    tool.NetworkScopeNone,
+		},
+	}
+}
+
+func (requestBuilderDefinitionTool) Execute(context.Context, string) (string, error) {
+	return "", nil
+}
 
 func TestRequestBuilderBuildsCompleteRequest(t *testing.T) {
 	ctx := convcontext.New()
@@ -81,6 +143,38 @@ func TestRequestBuilderUsesRegisteredTools(t *testing.T) {
 		}
 	}
 	t.Fatalf("expected registered tool %s in request tools", toolName)
+}
+
+func TestRequestBuilderCompilesResolvedToolDefinitionV2(t *testing.T) {
+	runtime := requestBuilderDefinitionTool{}
+	if err := tool.RegisterToolForceWithMode(runtime, tool.DefinitionValidationStrictBuiltin); err != nil {
+		t.Fatalf("register strict v2 tool: %v", err)
+	}
+	defer tool.UnregisterTool(runtime.Name())
+
+	builder := NewRequestBuilder(AgentConfig{ResolvedToolPool: []string{runtime.Name()}})
+	req := builder.Build(convcontext.New(), nil)
+	if len(req.Tools) != 1 {
+		t.Fatalf("expected isolated v2 tool, got %+v", req.Tools)
+	}
+	schema := req.Tools[0].Function
+	if schema.Name != runtime.Name() {
+		t.Fatalf("unexpected tool schema: %+v", schema)
+	}
+	if _, exists := schema.Parameters.Properties["query"]; !exists {
+		t.Fatalf("expected explicit v2 recursive schema, got %+v", schema.Parameters)
+	}
+	if _, exists := schema.Parameters.Properties["legacy"]; exists {
+		t.Fatalf("legacy Parameters must not override explicit v2 schema: %+v", schema.Parameters)
+	}
+	for _, expected := range []string{"Inspect one canonical", "Use when:", "Do not use when:", "Effects:", "Returns:"} {
+		if !strings.Contains(schema.Description, expected) {
+			t.Fatalf("compiled description missing %q: %s", expected, schema.Description)
+		}
+	}
+	if strings.Contains(schema.Description, "LEGACY_METHOD_DESCRIPTION") {
+		t.Fatalf("legacy method description overrode canonical v2 facts: %s", schema.Description)
+	}
 }
 
 func TestRequestBuilderDefaultExposureHidesApplyPatch(t *testing.T) {

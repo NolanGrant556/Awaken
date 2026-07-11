@@ -72,6 +72,31 @@ func TestTrashFileMovesPathThroughTrashAdapter(t *testing.T) {
 	}
 }
 
+func TestTrashFileOutcomeCarriesTypedTrashChange(t *testing.T) {
+	adapter := &recordingTrashAdapter{dir: filepath.Join(t.TempDir(), "trash")}
+	trash.SetAdapter(adapter)
+	t.Cleanup(func() { trash.SetAdapter(nil) })
+
+	target := filepath.Join(t.TempDir(), "obsolete.txt")
+	if err := os.WriteFile(target, []byte("bye"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := (&TrashFileTool{}).ExecuteOutcome(context.Background(), `{"path":`+mustJSONQuote(t, target)+`}`, nil)
+	if err != nil {
+		t.Fatalf("ExecuteOutcome transport error: %v", err)
+	}
+	if outcome.Status != tool.OutcomeSucceeded || len(outcome.Changes) != 1 {
+		t.Fatalf("expected canonical trash success, got %+v", outcome)
+	}
+	change := outcome.Changes[0]
+	if change.Action != "trashed" || change.Resource != target || change.Certainty != tool.ChangeObserved {
+		t.Fatalf("unexpected trash change: %+v", change)
+	}
+	if change.Details["trashed_path"] == "" || outcome.Operation.SideEffectState != tool.OutcomeSideEffectApplied {
+		t.Fatalf("missing trash destination or side effect state: %+v", outcome)
+	}
+}
+
 func TestTrashFileResolvesRelativeDirectoryThroughPermissionContext(t *testing.T) {
 	adapter := &recordingTrashAdapter{dir: filepath.Join(t.TempDir(), "trash")}
 	trash.SetAdapter(adapter)

@@ -2,7 +2,6 @@ package agentcore
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -10,7 +9,6 @@ import (
 
 	convcontext "awaken/src/context"
 	"awaken/src/tool"
-	"awaken/src/tool/profile"
 	_ "awaken/src/tools/ask_user"
 )
 
@@ -32,6 +30,41 @@ type runtimeTypedFailureArtifactTool struct {
 	runtimeTestTool
 }
 
+type runtimeOutcomeTestTool struct {
+	runtimeTestTool
+	outcome    tool.ExecutionOutcome
+	executeErr error
+}
+
+type runtimeStrictOutputArtifactTool struct {
+	runtimeOutcomeTestTool
+}
+
+type runtimeV2InputTool struct {
+	runtimeTestTool
+}
+
+func (t runtimeV2InputTool) Definition() tool.ToolDefinition {
+	return tool.ToolDefinition{
+		SchemaVersion: tool.ToolDefinitionSchemaVersion,
+		Name:          t.name, DisplayName: t.name, Source: tool.SourceBuiltin,
+		Description:  "Execute using the canonical v2 query object.",
+		Purpose:      "Verify model and execution schemas share one registered contract.",
+		WhenToUse:    []string{"a canonical query must be executed"},
+		WhenNotToUse: []string{"the legacy parameter shape is requested"},
+		InputSchema: tool.ToolParametersSchema{
+			Type: "object", AdditionalProperties: tool.BoolPtr(false), Required: []string{"query"},
+			Properties: map[string]tool.ToolParam{"query": {Type: "string", Description: "Canonical query."}},
+		},
+		OutputSchema: tool.NoDetailsOutputSchema(),
+		SideEffects:  []tool.ToolSideEffect{{Kind: tool.SideEffectNone, Description: "Does not modify state.", Reversibility: tool.ReversibilityNotApplicable}},
+		Permissions:  tool.ToolPermissionSpec{WorkspaceScope: tool.WorkspaceScopeRead, FileBridgeScope: tool.FileBridgeNone, NetworkScope: tool.NetworkScopeNone},
+		Examples:     []tool.ToolExample{{Scenario: "Run a query.", Input: map[string]any{"query": "status"}}},
+		FailureModes: []tool.ToolFailureMode{{Code: "invalid_query", Cause: "Query is invalid.", Retryable: false}},
+		Annotations:  tool.ToolAnnotations{ReadOnly: true},
+	}
+}
+
 func (t runtimeTypedFailureArtifactTool) ExecuteOutcome(context.Context, string, tool.ToolObserver) (tool.ExecutionOutcome, error) {
 	return tool.FailedOutcome(
 		"typed transform failure",
@@ -39,6 +72,58 @@ func (t runtimeTypedFailureArtifactTool) ExecuteOutcome(context.Context, string,
 		tool.ErrorCategoryTool,
 		false,
 	), nil
+}
+
+func (t runtimeOutcomeTestTool) ExecuteOutcome(context.Context, string, tool.ToolObserver) (tool.ExecutionOutcome, error) {
+	return t.outcome, t.executeErr
+}
+
+func (t runtimeStrictOutputArtifactTool) Definition() tool.ToolDefinition {
+	noExtra := false
+	return tool.ToolDefinition{
+		SchemaVersion: tool.ToolDefinitionSchemaVersion,
+		Name:          t.name,
+		DisplayName:   t.name,
+		Source:        tool.SourceBuiltin,
+		Description:   "Produce a test artifact and return its verified path.",
+		Purpose:       "Verify strict ToolRuntime output gating before terminal publication.",
+		WhenToUse:     []string{"a runtime output-gate regression must be exercised"},
+		WhenNotToUse:  []string{"the output contract is not under test"},
+		InputSchema: tool.ToolParametersSchema{
+			Type:                 "object",
+			AdditionalProperties: &noExtra,
+			Required:             []string{"value"},
+			Properties: map[string]tool.ToolParam{
+				"value": {Type: "string", Description: "Test input value."},
+			},
+		},
+		OutputSchema: tool.ToolParam{
+			Type:                 "object",
+			AdditionalProperties: &noExtra,
+			Required:             []string{"path"},
+			Properties: map[string]tool.ToolParam{
+				"path": {Type: "string", Description: "Verified artifact path."},
+			},
+		},
+		SideEffects: []tool.ToolSideEffect{{
+			Kind: tool.SideEffectCreate, Description: "May create the declared test artifact.", Reversibility: tool.ReversibilityConditional,
+		}},
+		Permissions: tool.ToolPermissionSpec{
+			CapabilityClass: tool.CapabilityArtifactWrite,
+			WorkspaceScope:  tool.WorkspaceScopeWrite,
+			FileBridgeScope: tool.FileBridgeTaskScopeWrite,
+			NetworkScope:    tool.NetworkScopeNone,
+		},
+		Examples: []tool.ToolExample{{
+			Scenario: "Produce a verified artifact.", Input: map[string]any{"value": "report"}, Outcome: "Returns details.path.",
+		}},
+		FailureModes: []tool.ToolFailureMode{{
+			Code: "tool_output_schema_mismatch", Cause: "The implementation omitted the required path.", Retryable: false,
+		}},
+		Annotations: tool.ToolAnnotations{
+			ReadOnly: false, CapabilityClass: tool.CapabilityArtifactWrite, TrustedOrigin: tool.TrustedOriginBuiltin,
+		},
+	}
 }
 
 func (t runtimeTestTool) Name() string {
@@ -137,6 +222,29 @@ func TestToolRuntimeExecutesKnownTool(t *testing.T) {
 	}
 }
 
+func TestToolRuntimeUsesRegisteredV2SchemaWithoutLegacyReshaping(t *testing.T) {
+	var observed string
+	toolName := "runtime_registered_v2_schema_tool"
+	mustRegisterRuntimeTool(t, runtimeV2InputTool{runtimeTestTool: runtimeTestTool{
+		name: toolName, observe: &observed, readOnly: true,
+		params: []tool.ToolParameter{{Name: "legacy", Type: "string"}},
+	}})
+
+	result := NewToolRuntime(nil).Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_registered_v2_schema", Function: convcontext.FunctionCall{Name: toolName, Arguments: `{"query":"status"}`},
+	})
+	if result.IsError || observed != `{"query":"status"}` {
+		t.Fatalf("execution did not preserve registered v2 object: observed=%q result=%+v", observed, result)
+	}
+
+	rejected := NewToolRuntime(nil).Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_registered_v2_schema_rejected", Function: convcontext.FunctionCall{Name: toolName, Arguments: `{"legacy":"wrong"}`},
+	})
+	if !rejected.IsError || rejected.Outcome.ErrorCategory != tool.ErrorCategoryValidation {
+		t.Fatalf("runtime accepted an input the registered schema rejects: %+v", rejected)
+	}
+}
+
 func TestToolRuntimeUnknownToolReturnsErrorResult(t *testing.T) {
 	result := NewToolRuntime(nil).Execute(context.Background(), convcontext.ToolCall{
 		ID: "call_unknown",
@@ -148,6 +256,18 @@ func TestToolRuntimeUnknownToolReturnsErrorResult(t *testing.T) {
 
 	if !result.IsError || result.ToolCallID != "call_unknown" || !strings.Contains(result.Content, "工具执行失败") {
 		t.Fatalf("expected unknown tool error result, got %+v", result)
+	}
+	if result.Outcome.Status != tool.OutcomeUnsupported ||
+		result.Outcome.TransportStatus != tool.TransportNotStarted ||
+		result.Outcome.ErrorCategory != tool.ErrorCategoryUnsupported ||
+		result.Outcome.Retryable {
+		t.Fatalf("unknown lookup must be an unsupported, non-started, non-retryable outcome: %+v", result.Outcome)
+	}
+	if len(result.Outcome.Errors) == 0 || result.Outcome.Errors[0].RetryStrategy != tool.RetrySwitchTool {
+		t.Fatalf("unknown lookup must switch tools instead of replaying the missing name: %+v", result.Outcome.Errors)
+	}
+	if len(result.Outcome.NextActions) != 2 || result.Outcome.NextActions[0].ID != "refresh_tool_registry" || result.Outcome.NextActions[1].ID != "switch_tool" {
+		t.Fatalf("unknown lookup must tell the agent to refresh and switch: %+v", result.Outcome.NextActions)
 	}
 }
 
@@ -242,6 +362,111 @@ func TestToolRuntimeTruncatesLargeToolResult(t *testing.T) {
 	}
 	if len([]rune(result.Content)) >= 25000 {
 		t.Fatalf("expected content to be shortened")
+	}
+	if result.Outcome.Content != result.Content || !result.Outcome.Truncated {
+		t.Fatalf("canonical outcome truncation drifted from compatibility result: %+v", result.Outcome)
+	}
+}
+
+func TestToolRuntimePermissionPredictionsDoNotBecomeObservedChanges(t *testing.T) {
+	toolName := "runtime_predicted_path_tool"
+	mustRegisterRuntimeTool(t, runtimeTestTool{
+		name: toolName,
+		permission: tool.AllowPermissionWithMetadata(tool.DecisionMetadata{
+			AffectedPaths: []string{"predicted.txt"}, PatchSummary: "M predicted.txt",
+		}),
+	})
+
+	result := NewToolRuntime(nil).Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_predicted_path", Function: convcontext.FunctionCall{Name: toolName, Arguments: `{}`},
+	})
+	if result.IsError {
+		t.Fatalf("expected success: %+v", result)
+	}
+	if len(result.Outcome.Changes) != 0 || len(result.ActualAffectedPaths) != 0 {
+		t.Fatalf("permission prediction was misreported as actual: %+v", result)
+	}
+	if result.Outcome.Operation.SideEffectState != tool.OutcomeSideEffectUnknown {
+		t.Fatalf("unobserved legacy mutation-capable execution should report unknown: %+v", result.Outcome.Operation)
+	}
+	if result.Outcome.Operation.Target != "predicted.txt" {
+		t.Fatalf("permission target context should remain without claiming a change: %+v", result.Outcome.Operation)
+	}
+}
+
+func TestToolRuntimeReadOnlyNoChangeReportsNone(t *testing.T) {
+	toolName := "runtime_read_only_no_change_tool"
+	mustRegisterRuntimeTool(t, runtimeTestTool{name: toolName, readOnly: true})
+	result := NewToolRuntime(nil).Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_read_only_no_change", Function: convcontext.FunctionCall{Name: toolName, Arguments: `{}`},
+	})
+	if result.IsError || result.Outcome.Operation == nil || result.Outcome.Operation.SideEffectState != tool.OutcomeSideEffectNone {
+		t.Fatalf("read-only no-change execution should report none: %+v", result)
+	}
+}
+
+func TestToolRuntimeFailedLegacyAffectedPathRemainsTargetOnly(t *testing.T) {
+	toolName := "runtime_stale_target_tool"
+	outcome := tool.FailedOutcome("file changed after read", "stale_file_revision", tool.ErrorCategoryDomain, true)
+	outcome.AffectedPaths = []string{"stale.txt"}
+	mustRegisterRuntimeTool(t, runtimeOutcomeTestTool{
+		runtimeTestTool: runtimeTestTool{name: toolName, permission: tool.AllowPermission()},
+		outcome:         outcome,
+	})
+
+	result := NewToolRuntime(nil).Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_stale_target", Function: convcontext.FunctionCall{Name: toolName, Arguments: `{}`},
+	})
+	if !result.IsError || result.Outcome.ErrorCode != "stale_file_revision" {
+		t.Fatalf("expected typed stale failure: %+v", result)
+	}
+	if len(result.Outcome.Changes) != 0 || len(result.ActualAffectedPaths) != 0 {
+		t.Fatalf("stale target must not become partial mutation: %+v", result)
+	}
+	if result.Outcome.Operation.Target != "stale.txt" || result.Outcome.Operation.SideEffectState != tool.OutcomeSideEffectUnknown {
+		t.Fatalf("stale target context was lost: %+v", result.Outcome.Operation)
+	}
+	if result.Outcome.Environment == nil || len(result.Outcome.Environment.Files) != 1 || result.Outcome.Environment.Files[0] != "stale.txt" {
+		t.Fatalf("target environment context was lost: %+v", result.Outcome.Environment)
+	}
+}
+
+func TestToolRuntimePrefersTypedTrashChangeOverContentParsing(t *testing.T) {
+	toolName := "runtime_typed_trash_tool"
+	outcome := tool.SucceededOutcome("moved safely")
+	outcome.Changes = []tool.ResourceChange{{
+		Kind: "file", Action: "trashed", Resource: "old.txt",
+		Certainty: tool.ChangeObserved, Reversibility: tool.ChangeConditional,
+		Details: map[string]any{"trashed_path": "/Trash/old.txt"},
+	}}
+	mustRegisterRuntimeTool(t, runtimeOutcomeTestTool{
+		runtimeTestTool: runtimeTestTool{name: toolName, permission: tool.AllowPermission()},
+		outcome:         outcome,
+	})
+
+	result := NewToolRuntime(nil).Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_typed_trash", Function: convcontext.FunctionCall{Name: toolName, Arguments: `{}`},
+	})
+	if result.IsError || len(result.TrashedPaths) != 1 || result.TrashedPaths[0] != "/Trash/old.txt" {
+		t.Fatalf("typed trash facts were not propagated: %+v", result)
+	}
+	if len(result.Outcome.Changes) != 1 || result.Outcome.Changes[0].Resource != "old.txt" {
+		t.Fatalf("typed trash change was replaced by legacy parsing: %+v", result.Outcome.Changes)
+	}
+}
+
+func TestToolRuntimeDoesNotParseTrashFactsFromStructuredToolContent(t *testing.T) {
+	toolName := "runtime_structured_content_not_protocol_tool"
+	outcome := tool.SucceededOutcome("D old.txt (已移到回收站: /Trash/old.txt)")
+	mustRegisterRuntimeTool(t, runtimeOutcomeTestTool{
+		runtimeTestTool: runtimeTestTool{name: toolName, permission: tool.AllowPermission()},
+		outcome:         outcome,
+	})
+	result := NewToolRuntime(nil).Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_structured_content_not_protocol", Function: convcontext.FunctionCall{Name: toolName, Arguments: `{}`},
+	})
+	if result.IsError || len(result.TrashedPaths) != 0 || len(result.Outcome.Changes) != 0 {
+		t.Fatalf("structured tool content was incorrectly promoted to machine trash facts: %+v", result)
 	}
 }
 
@@ -450,928 +675,3 @@ func TestApplyPatchFileChainRelaxation(t *testing.T) {
 //
 // Do NOT run this from a sub-agent; launch the Desktop app per the root
 // README and drive it from the UI.
-
-func TestDefaultAutoToolPolicyAllowsShellEchoWrite(t *testing.T) {
-	workspace := t.TempDir()
-	normalizedInput := `{"command":"echo \"hello\" > ./file.txt"}`
-
-	decision := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
-		ToolName:        "shell",
-		StaticBehavior:  tool.PermissionAllow,
-		StaticReason:    "shell command contains operators, redirections, substitutions, or multiple operations",
-		NormalizedInput: normalizedInput,
-		WorkspaceRoot:   workspace,
-		WritableRoots:   []string{workspace},
-		IsOpenWorld:     true,
-	})
-
-	if decision.Action != ToolDecisionAllow {
-		t.Fatalf("expected allow action, got %+v", decision)
-	}
-	if decision.Source != ToolDecisionSourceToolRule {
-		t.Fatalf("expected tool_rule source, got %q", decision.Source)
-	}
-	if decision.UpdatedToolName != "" {
-		t.Fatalf("expected no UpdatedToolName, got %q", decision.UpdatedToolName)
-	}
-	if decision.UpdatedInput != normalizedInput {
-		t.Fatalf("expected original UpdatedInput, got %q", decision.UpdatedInput)
-	}
-}
-
-func TestDefaultAutoToolPolicyAllowsOpenWorldShellCommand(t *testing.T) {
-	workspace := t.TempDir()
-	normalizedInput := `{"command":"curl http://example.com > file"}`
-
-	decision := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
-		ToolName:        "shell",
-		StaticBehavior:  tool.PermissionAllow,
-		StaticReason:    "shell command may mutate files, change repository state, or access external systems",
-		NormalizedInput: normalizedInput,
-		WorkspaceRoot:   workspace,
-		WritableRoots:   []string{workspace},
-		IsOpenWorld:     true,
-		IsDestructive:   true,
-	})
-
-	if decision.Action != ToolDecisionAllow {
-		t.Fatalf("expected allow action for open-world shell command, got %+v", decision)
-	}
-	if decision.Source != ToolDecisionSourceToolRule {
-		t.Fatalf("expected tool_rule source, got %q", decision.Source)
-	}
-}
-
-func TestDefaultAutoToolPolicyAllowsNonTransformableShellMutation(t *testing.T) {
-	workspace := t.TempDir()
-	normalizedInput := `{"command":"sed -i 's/a/b/' file.txt"}`
-
-	decision := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
-		ToolName:        "shell",
-		StaticBehavior:  tool.PermissionAllow,
-		StaticReason:    "shell command is not classified as read-only",
-		NormalizedInput: normalizedInput,
-		WorkspaceRoot:   workspace,
-		WritableRoots:   []string{workspace},
-		IsOpenWorld:     true,
-	})
-
-	if decision.Action != ToolDecisionAllow {
-		t.Fatalf("expected allow action for non-transformable mutation, got %+v", decision)
-	}
-	if decision.Source != ToolDecisionSourceToolRule {
-		t.Fatalf("expected tool_rule source, got %q", decision.Source)
-	}
-}
-
-func TestDefaultAutoToolPolicyAllowsSupportedShellLanes(t *testing.T) {
-	workspace := t.TempDir()
-	cases := []struct {
-		name    string
-		command string
-	}{
-		{"mkdir", "mkdir -p reports"},
-		{"touch", "touch reports.md"},
-		{"go test", "go test ./..."},
-		{"npm build", "npm run build"},
-		{"dws search", `dws aitable base search --query "DVF" --format json`},
-		{"gh issue list", "gh issue list --limit 10"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			decision := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
-				ToolName:        "shell",
-				StaticBehavior:  tool.PermissionAllow,
-				NormalizedInput: `{"command":` + mustJSONQuote(t, tc.command) + `}`,
-				WorkspaceRoot:   workspace,
-				ReadableRoots:   []string{workspace},
-				WritableRoots:   []string{workspace},
-				OutputRoots:     []string{workspace},
-				IsOpenWorld:     true,
-			})
-			if decision.Action != ToolDecisionAllow {
-				t.Fatalf("expected allow for %q, got %+v", tc.command, decision)
-			}
-			if decision.Reason != "local shell command allowed" {
-				t.Fatalf("expected generic local shell reason, got %q", decision.Reason)
-			}
-		})
-	}
-}
-
-func TestDefaultAutoToolPolicyAllowsShellNullDeviceRedirectProbe(t *testing.T) {
-	workspace := t.TempDir()
-	decision := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
-		ToolName:        "shell",
-		StaticBehavior:  tool.PermissionAllow,
-		NormalizedInput: `{"command":"command -v pdftotext >/dev/null 2>&1"}`,
-		WorkspaceRoot:   workspace,
-		ReadableRoots:   []string{workspace},
-		WritableRoots:   []string{workspace},
-		OutputRoots:     []string{workspace},
-		IsOpenWorld:     true,
-	})
-
-	if decision.Action != ToolDecisionAllow {
-		t.Fatalf("expected allow for /dev/null redirect probe, got %+v", decision)
-	}
-}
-
-func TestDefaultAutoToolPolicyAllowsShellSensitiveRead(t *testing.T) {
-	workspace := t.TempDir()
-	decision := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
-		ToolName:        "shell",
-		StaticBehavior:  tool.PermissionAllow,
-		NormalizedInput: `{"command":"cat ~/.ssh/id_rsa"}`,
-		WorkspaceRoot:   workspace,
-		ReadableRoots:   []string{workspace},
-		WritableRoots:   []string{workspace},
-		OutputRoots:     []string{workspace},
-		IsOpenWorld:     true,
-	})
-
-	if decision.Action != ToolDecisionAllow {
-		t.Fatalf("expected allow for sensitive read through local shell, got %+v", decision)
-	}
-}
-
-func TestDefaultAutoToolPolicyFallsThroughForReadOnlyShell(t *testing.T) {
-	workspace := t.TempDir()
-	normalizedInput := `{"command":"ls -la"}`
-
-	// `ls -la` is inspect_read_only. The shell policy falls through from
-	// transform handling and auto-allows it as a normal safe shell read.
-	decision := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
-		ToolName:        "shell",
-		StaticBehavior:  tool.PermissionAllow,
-		StaticReason:    "shell command is not classified as read-only",
-		NormalizedInput: normalizedInput,
-		WorkspaceRoot:   workspace,
-		WritableRoots:   []string{workspace},
-		IsOpenWorld:     true,
-	})
-
-	if decision.Action != ToolDecisionAllow {
-		t.Fatalf("expected allow for read-only shell fallthrough, got %+v", decision)
-	}
-	if decision.Source != ToolDecisionSourceToolRule {
-		t.Fatalf("expected tool_rule source for read-only shell fallthrough, got %q", decision.Source)
-	}
-}
-
-func TestDefaultAutoToolPolicyDoesNotTransformInsideTransformChain(t *testing.T) {
-	workspace := t.TempDir()
-	normalizedInput := `{"command":"echo \"hello\" > ./file.txt"}`
-
-	// When the context already carries transform depth (i.e. this call is the
-	// result of a transform), the policy must not transform again.
-	transformedCtx := ctxWithTransformDepth(context.Background(), 1)
-	decision := DefaultAutoToolPolicy{}.Decide(transformedCtx, ToolDecisionRequest{
-		ToolName:        "shell",
-		StaticBehavior:  tool.PermissionAllow,
-		StaticReason:    "shell command contains operators",
-		NormalizedInput: normalizedInput,
-		WorkspaceRoot:   workspace,
-		WritableRoots:   []string{workspace},
-		IsOpenWorld:     true,
-	})
-
-	if decision.Action == ToolDecisionTransform {
-		t.Fatalf("expected nested transform to be suppressed, got %+v", decision)
-	}
-}
-
-// --- DecideExecution tests (Task 9) ---
-//
-// These verify that DefaultAutoToolPolicy.DecideExecution produces correct
-// ExecutionDecision outputs for the key scenarios required by the spec:
-// allow (apply_patch write), deny (sensitive path), allow (shell echo write),
-// and allow (open-world shell).
-
-func TestDecideExecution_AllowsApplyPatchWrite(t *testing.T) {
-	workspace := t.TempDir()
-	intent := profile.ExecutionIntent{
-		ToolName:        "apply_patch",
-		ToolKind:        profile.ToolKindFileChain,
-		RequestedAction: profile.ActionWrite,
-		WorkspaceRoot:   workspace,
-		WritableRoots:   []string{workspace},
-	}
-	request := ToolDecisionRequest{
-		ToolName:        "apply_patch",
-		StaticBehavior:  tool.PermissionAllow,
-		StaticReason:    "apply_patch will modify files",
-		WorkspaceRoot:   workspace,
-		WritableRoots:   []string{workspace},
-		RiskTone:        "warning",
-		AffectedPaths:   []string{"note.md"},
-		NormalizedInput: "*** Begin Patch\n*** Add File: note.md\n+hello\n*** End Patch",
-	}
-
-	decision := DefaultAutoToolPolicy{}.DecideExecution(context.Background(), intent, request)
-
-	if decision.Action != profile.DecisionAllow {
-		t.Fatalf("expected allow, got %s: %+v", decision.Action, decision)
-	}
-	if decision.Source != profile.DecisionSourceWorkspaceBoundary {
-		t.Fatalf("expected workspace_boundary source, got %s", decision.Source)
-	}
-	if decision.UpdatedIntent == nil {
-		t.Fatal("UpdatedIntent should not be nil for allow")
-	}
-	if decision.UpdatedIntent.ToolName != "apply_patch" {
-		t.Errorf("UpdatedIntent.ToolName = %q, want apply_patch", decision.UpdatedIntent.ToolName)
-	}
-}
-
-func TestDecideExecution_DeniesSensitivePath(t *testing.T) {
-	workspace := t.TempDir()
-	t.Setenv("HOME", workspace)
-	intent := profile.ExecutionIntent{
-		ToolName:        "apply_patch",
-		ToolKind:        profile.ToolKindFileChain,
-		RequestedAction: profile.ActionWrite,
-		WorkspaceRoot:   workspace,
-		WritableRoots:   []string{workspace},
-	}
-	request := ToolDecisionRequest{
-		ToolName:        "apply_patch",
-		StaticBehavior:  tool.PermissionAllow,
-		StaticReason:    "apply_patch touches sensitive path",
-		WorkspaceRoot:   workspace,
-		WritableRoots:   []string{workspace},
-		RiskTone:        "danger",
-		AffectedPaths:   []string{".git/config"},
-		NormalizedInput: "*** Begin Patch\n*** Add File: .git/config\n+[core]\n*** End Patch",
-		IsDestructive:   true,
-	}
-
-	decision := DefaultAutoToolPolicy{}.DecideExecution(context.Background(), intent, request)
-
-	if decision.Action != profile.DecisionDeny {
-		t.Fatalf("expected deny, got %s: %+v", decision.Action, decision)
-	}
-	if !strings.Contains(decision.Reason, "sensitive path") {
-		t.Fatalf("expected reason to mention sensitive path, got %q", decision.Reason)
-	}
-}
-
-func TestDecideExecution_AllowsShellEchoWrite(t *testing.T) {
-	workspace := t.TempDir()
-	intent := profile.ExecutionIntent{
-		ToolName:        "shell",
-		ToolKind:        profile.ToolKindShellCommand,
-		RequestedAction: profile.ActionExecute,
-		NetworkScope:    profile.NetworkScopeOpen,
-		WorkspaceRoot:   workspace,
-		WritableRoots:   []string{workspace},
-	}
-	request := ToolDecisionRequest{
-		ToolName:        "shell",
-		StaticBehavior:  tool.PermissionAllow,
-		StaticReason:    "shell command contains operators",
-		NormalizedInput: `{"command":"echo \"hello\" > ./file.txt"}`,
-		WorkspaceRoot:   workspace,
-		WritableRoots:   []string{workspace},
-		IsOpenWorld:     true,
-	}
-
-	decision := DefaultAutoToolPolicy{}.DecideExecution(context.Background(), intent, request)
-
-	if decision.Action != profile.DecisionAllow {
-		t.Fatalf("expected allow, got %s: %+v", decision.Action, decision)
-	}
-	if decision.Source != profile.DecisionSourceToolRule {
-		t.Fatalf("expected tool_rule source, got %s", decision.Source)
-	}
-	if decision.UpdatedToolName != "" {
-		t.Fatalf("expected no UpdatedToolName, got %q", decision.UpdatedToolName)
-	}
-	if decision.UpdatedInput != nil {
-		t.Fatalf("expected no UpdatedInput for shell allow, got %+v", decision.UpdatedInput)
-	}
-	if decision.UpdatedIntent == nil {
-		t.Fatal("UpdatedIntent should not be nil for allow")
-	}
-	if decision.UpdatedIntent.ToolName != "shell" {
-		t.Fatalf("expected UpdatedIntent.ToolName=shell, got %q", decision.UpdatedIntent.ToolName)
-	}
-}
-
-func TestDecideExecution_AllowsOpenWorldShell(t *testing.T) {
-	workspace := t.TempDir()
-	intent := profile.ExecutionIntent{
-		ToolName:        "shell",
-		ToolKind:        profile.ToolKindShellCommand,
-		RequestedAction: profile.ActionExecute,
-		NetworkScope:    profile.NetworkScopeOpen,
-		WorkspaceRoot:   workspace,
-		WritableRoots:   []string{workspace},
-	}
-	request := ToolDecisionRequest{
-		ToolName:        "shell",
-		StaticBehavior:  tool.PermissionAllow,
-		StaticReason:    "shell command may access external systems",
-		NormalizedInput: `{"command":"curl http://example.com > file"}`,
-		WorkspaceRoot:   workspace,
-		WritableRoots:   []string{workspace},
-		IsOpenWorld:     true,
-		IsDestructive:   true,
-	}
-
-	decision := DefaultAutoToolPolicy{}.DecideExecution(context.Background(), intent, request)
-
-	if decision.Action != profile.DecisionAllow {
-		t.Fatalf("expected allow, got %s: %+v", decision.Action, decision)
-	}
-	if decision.Source != profile.DecisionSourceToolRule {
-		t.Fatalf("expected tool_rule source, got %s", decision.Source)
-	}
-}
-
-func TestDecideExecution_DeniesOnCancelledContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	intent := profile.ExecutionIntent{
-		ToolName: "read_file",
-		ToolKind: profile.ToolKindFileChain,
-	}
-	request := ToolDecisionRequest{
-		ToolName:       "read_file",
-		StaticBehavior: tool.PermissionAllow,
-		IsReadOnly:     true,
-	}
-
-	decision := DefaultAutoToolPolicy{}.DecideExecution(ctx, intent, request)
-
-	// In the unified model, a cancelled context produces a deny with
-	// policy_error source (not abort, which is a legacy-only action).
-	if decision.Action != profile.DecisionDeny {
-		t.Fatalf("expected deny for cancelled context, got %s", decision.Action)
-	}
-	if decision.Source != profile.DecisionSourcePolicyError {
-		t.Fatalf("expected policy_error source, got %s", decision.Source)
-	}
-}
-
-func TestToolRuntimeDenyDoesNotRequireApprovalAwaiter(t *testing.T) {
-	var executeCount int
-	toolName := "runtime_auto_deny_no_awaiter_tool"
-	mustRegisterRuntimeTool(t, runtimeTestTool{
-		name:         toolName,
-		permission:   tool.DenyPermission("test tool is denied"),
-		executeCount: &executeCount,
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-
-	var got []AwakenEvent
-	result := NewToolRuntime(EventSinkFunc(func(event AwakenEvent) {
-		got = append(got, event)
-	})).Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_missing_awaiter",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"hello"}`,
-		},
-	})
-
-	if executeCount != 0 {
-		t.Fatalf("expected AUTO-denied tool not to execute, got %d executions", executeCount)
-	}
-	if len(got) != 1 ||
-		got[0].Type != ToolPermissionDecidedEventType ||
-		got[0].ToolDecisionAction != string(ToolDecisionDeny) ||
-		got[0].ToolDecisionSource != string(ToolDecisionSourceToolRule) {
-		t.Fatalf("expected one AUTO deny permission event, got %+v", got)
-	}
-	if !result.IsError ||
-		result.Status != ToolExecutionDenied ||
-		result.DecisionSource != ToolDecisionSourceToolRule ||
-		!strings.Contains(result.Content, "工具执行被 AUTO policy 拒绝") ||
-		strings.Contains(result.Content, "no approval awaiter") {
-		t.Fatalf("expected AUTO denial without approval awaiter error, got %+v", result)
-	}
-}
-
-func TestToolRuntimeAutoPolicyAbortSynthesizesResult(t *testing.T) {
-	var executeCount int
-	toolName := "runtime_auto_abort_tool"
-	mustRegisterRuntimeTool(t, runtimeTestTool{
-		name:         toolName,
-		permission:   tool.AllowPermission(),
-		executeCount: &executeCount,
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-
-	runtime := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
-		AutoToolPolicy: staticAutoToolPolicy{decision: ToolDecision{
-			Action: ToolDecisionAbort,
-			Source: ToolDecisionSourcePolicyError,
-			Reason: "policy unavailable",
-		}},
-	})
-	result := runtime.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_abort",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"hello"}`,
-		},
-	})
-
-	if executeCount != 0 {
-		t.Fatalf("expected denied tool not to execute, got %d executions", executeCount)
-	}
-	// In the unified ExecutionDecision model, abort maps to deny with
-	// policy_error source (context cancellation is handled separately).
-	if !result.IsError ||
-		result.Status != ToolExecutionDenied ||
-		result.ErrorCode != "tool_denied" ||
-		result.DecisionSource != ToolDecisionSourcePolicyError ||
-		!strings.Contains(result.Content, "工具执行被 AUTO policy 拒绝") {
-		t.Fatalf("expected denied tool result (abort→deny), got %+v", result)
-	}
-}
-
-func TestToolRuntimeEmitsArtifactsForAllowedTool(t *testing.T) {
-	toolName := "runtime_allowed_artifact_tool"
-	mustRegisterRuntimeTool(t, runtimeTestTool{
-		name:       toolName,
-		permission: tool.AllowPermission(),
-		artifacts: []tool.ArtifactDescriptor{{
-			Action:      tool.ArtifactActionCreated,
-			ID:          "artifact-1",
-			Title:       "README.md",
-			Description: "Generated readme",
-			Kind:        "file",
-			Path:        "/tmp/README.md",
-			Content:     "# hello",
-			Status:      "ready",
-		}},
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-
-	var got []AwakenEvent
-	runtime := NewToolRuntime(EventSinkFunc(func(event AwakenEvent) {
-		got = append(got, event)
-	}))
-	result := runtime.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_allowed_artifact",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"hello"}`,
-		},
-	})
-
-	if result.IsError {
-		t.Fatalf("expected allowed tool to succeed, got %+v", result)
-	}
-	if len(got) != 4 {
-		t.Fatalf("expected decision, progress, and artifact events, got %+v", got)
-	}
-	if got[0].Type != ToolPermissionDecidedEventType ||
-		got[1].Type != ToolProgressEventType ||
-		got[1].ToolProgressStage != "started" ||
-		got[2].Type != ToolProgressEventType ||
-		got[2].ToolProgressStage != "completed" ||
-		got[3].Type != ArtifactCreatedEventType {
-		t.Fatalf("unexpected emitted events: %+v", got)
-	}
-}
-
-func TestToolRuntimeTransformedTypedFailureDoesNotEmitArtifact(t *testing.T) {
-	sourceName := "runtime_transform_failure_source"
-	targetName := "runtime_transform_failure_target"
-	mustRegisterRuntimeTool(t, runtimeTestTool{
-		name:       sourceName,
-		permission: tool.AllowPermission(),
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-	mustRegisterRuntimeTool(t, runtimeTypedFailureArtifactTool{runtimeTestTool: runtimeTestTool{
-		name:       targetName,
-		permission: tool.AllowPermission(),
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-		artifacts: []tool.ArtifactDescriptor{{
-			Action: tool.ArtifactActionUpdated,
-			ID:     "must-not-surface",
-			Title:  "unchanged.txt",
-			Kind:   "file",
-			Path:   "unchanged.txt",
-			Status: "ready",
-		}},
-	}})
-
-	var events []AwakenEvent
-	runtime := NewToolRuntimeWithConfig(EventSinkFunc(func(event AwakenEvent) {
-		events = append(events, event)
-	}), ToolRuntimeConfig{
-		AutoToolPolicy: staticAutoToolPolicy{decision: ToolDecision{
-			Action:          ToolDecisionTransform,
-			Source:          ToolDecisionSourceTransform,
-			Reason:          "structured rewrite",
-			UpdatedToolName: targetName,
-			UpdatedInput:    `{"value":"rewritten"}`,
-		}},
-	})
-	result := runtime.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_transform_failure",
-		Function: convcontext.FunctionCall{
-			Name:      sourceName,
-			Arguments: `{"value":"original"}`,
-		},
-	})
-
-	if !result.IsError || result.Outcome.Status != tool.OutcomeFailed || result.Outcome.ErrorCode != "typed_transform_failure" {
-		t.Fatalf("expected typed transformed failure, got %+v", result)
-	}
-	for _, event := range events {
-		if event.Type == ArtifactCreatedEventType || event.Type == ArtifactUpdatedEventType {
-			t.Fatalf("transformed typed failure emitted false artifact: %+v", event)
-		}
-	}
-}
-
-func TestToolRuntimeEmitsCommandOutputFromObservableTool(t *testing.T) {
-	toolName := "runtime_observable_tool"
-	mustRegisterRuntimeTool(t, runtimeTestTool{
-		name: toolName,
-		commandOutputs: []tool.CommandOutput{
-			{Stream: "stdout", Delta: "hello"},
-			{Stream: "stderr", Delta: "warn", Truncated: true},
-		},
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-
-	var got []AwakenEvent
-	result := NewToolRuntime(EventSinkFunc(func(event AwakenEvent) {
-		got = append(got, event)
-	})).Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_observable",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"hello"}`,
-		},
-	})
-
-	if result.IsError {
-		t.Fatalf("expected success, got %+v", result)
-	}
-	if len(got) != 5 {
-		t.Fatalf("expected permission and two command output events, got %+v", got)
-	}
-	if got[0].Type != ToolPermissionDecidedEventType || got[0].ToolDecisionAction != string(ToolDecisionAllow) {
-		t.Fatalf("unexpected permission event: %+v", got[0])
-	}
-	if got[1].Type != ToolProgressEventType || got[1].ToolProgressStage != "started" {
-		t.Fatalf("unexpected start progress event: %+v", got[1])
-	}
-	if got[2].Type != CommandOutputEventType || got[2].ToolCallID != "call_observable" || got[2].CommandStream != "stdout" || got[2].Delta != "hello" {
-		t.Fatalf("unexpected stdout event: %+v", got[2])
-	}
-	if got[3].Type != CommandOutputEventType || got[3].CommandStream != "stderr" || got[3].Delta != "warn" || !got[3].Truncated {
-		t.Fatalf("unexpected stderr event: %+v", got[3])
-	}
-	if got[4].Type != ToolProgressEventType || got[4].ToolProgressStage != "completed" {
-		t.Fatalf("unexpected completed progress event: %+v", got[4])
-	}
-}
-
-func TestToolRuntimeEmitsPatchPreviewBeforeApplyPatchExecution(t *testing.T) {
-	root := t.TempDir()
-	patch := "*** Begin Patch\n" +
-		"*** Add File: note.md\n" +
-		"+hello\n" +
-		"*** End Patch"
-
-	var got []AwakenEvent
-	runtime := NewToolRuntimeWithConfig(EventSinkFunc(func(event AwakenEvent) {
-		got = append(got, event)
-	}), ToolRuntimeConfig{
-		PermissionContext: tool.NewPermissionContext(root, []string{root}),
-	})
-	result := runtime.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_patch_preview",
-		Function: convcontext.FunctionCall{
-			Name:      "apply_patch",
-			Arguments: `{"patch":` + mustJSONQuote(t, patch) + `}`,
-		},
-	})
-
-	if result.IsError {
-		t.Fatalf("expected apply_patch success, got %+v", result)
-	}
-	if len(got) < 4 {
-		t.Fatalf("expected patch preview and execution events, got %+v", got)
-	}
-	if got[0].Type != PatchUpdatedEventType {
-		t.Fatalf("expected first event to be patch updated, got %+v", got)
-	}
-	if got[0].ToolCallID != "call_patch_preview" || got[0].Patch != patch || got[0].PatchSummary != "新增 1 个文件" {
-		t.Fatalf("unexpected patch preview event: %+v", got[0])
-	}
-	if len(got[0].AffectedPaths) != 1 || got[0].AffectedPaths[0] != "note.md" {
-		t.Fatalf("unexpected affected paths: %+v", got[0].AffectedPaths)
-	}
-	for _, event := range got {
-		if event.Type == AuthRequiredEventType || event.Type == MassMessageReviewRequestedType {
-			t.Fatalf("expected no auth/review event on apply_patch, got %+v", event)
-		}
-	}
-}
-
-func TestToolRuntimeDeniesBeforeExecution(t *testing.T) {
-	var observed string
-	toolName := "runtime_denied_tool"
-	mustRegisterRuntimeTool(t, runtimeTestTool{
-		name:       toolName,
-		observe:    &observed,
-		permission: tool.DenyPermission("policy denied test tool"),
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-
-	result := NewToolRuntime(nil).Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_denied",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"hello"}`,
-		},
-	})
-
-	if !result.IsError || !strings.Contains(result.Content, "policy denied test tool") {
-		t.Fatalf("expected policy denial, got %+v", result)
-	}
-	if observed != "" {
-		t.Fatalf("expected denied tool not to execute, observed %q", observed)
-	}
-}
-
-func TestToolRuntimePassesPermissionContextToTools(t *testing.T) {
-	var observed tool.PermissionContext
-	root := t.TempDir()
-	writable := t.TempDir()
-	toolName := "runtime_policy_tool"
-	mustRegisterRuntimeTool(t, runtimeTestTool{
-		name:          toolName,
-		observePolicy: &observed,
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-
-	runtime := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
-		PermissionContext: tool.NewPermissionContext(root, []string{writable}),
-	})
-	result := runtime.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_policy",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"hello"}`,
-		},
-	})
-
-	if result.IsError {
-		t.Fatalf("expected tool to execute, got %+v", result)
-	}
-	if observed.WorkspaceRoot != root || len(observed.WritableRoots) != 1 || observed.WritableRoots[0] != writable {
-		t.Fatalf("unexpected permission context: %+v", observed)
-	}
-}
-
-func TestToolRuntimeNeedsAuthEmitsAuthRequiredAndDoesNotExecute(t *testing.T) {
-	var executeCount int
-	toolName := "runtime_needs_auth_tool"
-	mustRegisterRuntimeTool(t, runtimeTestTool{
-		name:         toolName,
-		permission:   tool.NeedsAuthPermission("outlook account is not connected"),
-		executeCount: &executeCount,
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-
-	var got []AwakenEvent
-	result := NewToolRuntime(EventSinkFunc(func(event AwakenEvent) {
-		got = append(got, event)
-	})).Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_needs_auth",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"hello"}`,
-		},
-	})
-
-	if executeCount != 0 {
-		t.Fatalf("expected needs_auth tool not to execute, got %d executions", executeCount)
-	}
-	if !result.IsError || result.ErrorCode != "needs_auth" {
-		t.Fatalf("expected needs_auth result, got %+v", result)
-	}
-	if len(got) != 3 ||
-		got[0].Type != ToolPermissionDecidedEventType ||
-		got[0].ToolDecisionAction != string(ToolDecisionNeedsAuth) ||
-		got[1].Type != ToolProgressEventType ||
-		got[1].ToolProgressStage != "needs_auth" ||
-		got[2].Type != AuthRequiredEventType {
-		t.Fatalf("unexpected needs_auth events: %+v", got)
-	}
-}
-
-func TestToolRuntimeMassMessageReviewBlocksExecution(t *testing.T) {
-	var executeCount int
-	toolName := "runtime_mass_message_tool"
-	mustRegisterRuntimeTool(t, runtimeTestTool{
-		name: toolName,
-		permission: tool.NeedsMassMessageReviewPermission("mass message requires review", tool.DecisionMetadata{
-			MassMessage: &tool.MassMessageMetadata{
-				Channel:        "outlook",
-				RecipientScope: "team",
-				RecipientCount: 3,
-				BodyPreview:    "hello",
-				SendingAccount: "me@example.com",
-			},
-		}),
-		executeCount: &executeCount,
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-
-	var got []AwakenEvent
-	result := NewToolRuntime(EventSinkFunc(func(event AwakenEvent) {
-		got = append(got, event)
-	})).Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_mass_message",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"hello"}`,
-		},
-	})
-
-	if executeCount != 0 {
-		t.Fatalf("expected mass message tool not to execute before review, got %d executions", executeCount)
-	}
-	if result.ErrorCode != "needs_mass_message_review" || result.Outcome.Status != tool.OutcomeReviewRequired {
-		t.Fatalf("expected needs_mass_message_review result, got %+v", result)
-	}
-	if result.IsError {
-		t.Fatalf("review_required must not set compatibility IsError per ToolOutcome contract, got %+v", result)
-	}
-	if len(got) != 3 ||
-		got[0].Type != ToolPermissionDecidedEventType ||
-		got[0].ToolDecisionAction != string(ToolDecisionNeedsMassMessageReview) ||
-		got[1].Type != ToolProgressEventType ||
-		got[1].ToolProgressStage != "needs_mass_message_review" ||
-		got[2].Type != MassMessageReviewRequestedType ||
-		got[2].MassMessageRecipientCount != 3 {
-		t.Fatalf("unexpected mass message review events: %+v", got)
-	}
-}
-
-type staticAutoToolPolicy struct {
-	decision ToolDecision
-}
-
-func (p staticAutoToolPolicy) Decide(context.Context, ToolDecisionRequest) ToolDecision {
-	return p.decision
-}
-
-func (p staticAutoToolPolicy) DecideExecution(_ context.Context, intent profile.ExecutionIntent, _ ToolDecisionRequest) profile.ExecutionDecision {
-	return toolDecisionToExecutionDecision(p.decision, intent)
-}
-
-func mustRegisterRuntimeTool(t *testing.T, candidate tool.Tool) {
-	t.Helper()
-	if err := tool.RegisterTool(candidate); err != nil {
-		t.Fatalf("failed to register test tool %s: %v", candidate.Name(), err)
-	}
-}
-
-func mustJSONQuote(t *testing.T, value string) string {
-	t.Helper()
-	data, err := json.Marshal(value)
-	if err != nil {
-		t.Fatalf("failed to quote JSON string: %v", err)
-	}
-	return string(data)
-}
-
-type userQuestionTestSink struct {
-	events []AwakenEvent
-	answer string
-}
-
-func (s *userQuestionTestSink) Emit(event AwakenEvent) {
-	s.events = append(s.events, event)
-}
-
-func (s *userQuestionTestSink) AwaitUserQuestion(ctx context.Context, request AwakenEvent) (string, error) {
-	s.Emit(request)
-	return s.answer, nil
-}
-
-func TestToolRuntimeInterceptsAskUser(t *testing.T) {
-	sink := &userQuestionTestSink{answer: "Dark"}
-	result := NewToolRuntime(sink).Execute(context.Background(), convcontext.ToolCall{
-		ID:   "call_ask_1",
-		Type: "function",
-		Function: convcontext.FunctionCall{
-			Name:      "ask_user",
-			Arguments: `{"questions_json": "[{\"question\":\"Choose a theme\",\"options\":[{\"label\":\"Dark\"},{\"label\":\"Light\"}]}]"}`,
-		},
-	})
-
-	if result.IsError {
-		t.Fatalf("expected success, got %+v", result)
-	}
-	if result.ToolCallID != "call_ask_1" || result.Name != "ask_user" {
-		t.Fatalf("unexpected result: %+v", result)
-	}
-	expected := `User has answered your questions: "Choose a theme"="Dark"`
-	if result.Content != expected {
-		t.Fatalf("expected %q, got %q", expected, result.Content)
-	}
-	var found bool
-	for _, event := range sink.events {
-		if event.Type == UserQuestionRequestedType {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected UserQuestionRequested event, got %+v", sink.events)
-	}
-}
-
-func TestToolRuntimeAskUserReturnsErrorWhenNoAwaiter(t *testing.T) {
-	result := NewToolRuntime(EventSinkFunc(func(event AwakenEvent) {})).Execute(context.Background(), convcontext.ToolCall{
-		ID:   "call_ask_2",
-		Type: "function",
-		Function: convcontext.FunctionCall{
-			Name:      "ask_user",
-			Arguments: `{"questions_json": "[{\"question\":\"Choose a theme\",\"options\":[{\"label\":\"Dark\"},{\"label\":\"Light\"}]}]"}`,
-		},
-	})
-
-	if !result.IsError {
-		t.Fatalf("expected error result")
-	}
-	if !strings.Contains(result.Content, "不支持用户提问") {
-		t.Fatalf("expected unsupported message, got %q", result.Content)
-	}
-}
-
-func TestToolRuntimeAskUserPreservesMultiQuestionAnswer(t *testing.T) {
-	answer := "Choose a theme: Dark\nPick output: PDF"
-	sink := &userQuestionTestSink{answer: answer}
-	result := NewToolRuntime(sink).Execute(context.Background(), convcontext.ToolCall{
-		ID:   "call_ask_multi",
-		Type: "function",
-		Function: convcontext.FunctionCall{
-			Name: "ask_user",
-			Arguments: `{"questions_json": "{\"questions\":[` +
-				`{\"question\":\"Choose a theme\",\"options\":[{\"label\":\"Dark\"},{\"label\":\"Light\"}]},` +
-				`{\"question\":\"Pick output\",\"options\":[{\"label\":\"PDF\"},{\"label\":\"DOCX\"}]}` +
-				`]}"}`,
-		},
-	})
-
-	if result.IsError {
-		t.Fatalf("expected success, got %+v", result)
-	}
-	expected := "User has answered your questions:\n" + answer
-	if result.Content != expected {
-		t.Fatalf("expected %q, got %q", expected, result.Content)
-	}
-}
-
-func TestToolRuntimeAskUserReturnsErrorForInvalidInput(t *testing.T) {
-	sink := &userQuestionTestSink{answer: "Dark"}
-	result := NewToolRuntime(sink).Execute(context.Background(), convcontext.ToolCall{
-		ID:   "call_ask_3",
-		Type: "function",
-		Function: convcontext.FunctionCall{
-			Name:      "ask_user",
-			Arguments: `{"questions_json": "not-json"}`,
-		},
-	})
-
-	if !result.IsError {
-		t.Fatalf("expected error result")
-	}
-	if !strings.Contains(result.Content, "提问格式错误") {
-		t.Fatalf("expected validation message, got %q", result.Content)
-	}
-}

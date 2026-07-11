@@ -19,6 +19,7 @@ const runtimeProbeTTL = 30 * time.Second
 type runtimeResolverCache struct {
 	mu        sync.Mutex
 	report    preflightReport
+	revision  string
 	expiresAt time.Time
 }
 
@@ -668,18 +669,48 @@ func probeResolvedComponent(component RuntimeResolvedComponent, versionRoot, run
 func runtimePreflightCached(force bool) preflightReport {
 	globalRuntimeProbeCache.mu.Lock()
 	defer globalRuntimeProbeCache.mu.Unlock()
-	if !force && time.Now().Before(globalRuntimeProbeCache.expiresAt) && globalRuntimeProbeCache.report.RuntimeName != "" {
-		return globalRuntimeProbeCache.report
+	_ = force // A revision is attested once; force only observes a changed active key.
+	if globalRuntimeProbeCache.report.RuntimeName != "" {
+		if globalRuntimeProbeCache.revision == "" && time.Now().Before(globalRuntimeProbeCache.expiresAt) {
+			return globalRuntimeProbeCache.report
+		}
+		if currentRuntimeRevisionKey() == globalRuntimeProbeCache.revision {
+			return globalRuntimeProbeCache.report
+		}
 	}
 	report := runtimePreflight()
 	globalRuntimeProbeCache.report = report
+	globalRuntimeProbeCache.revision = runtimeRevisionKey(report.RuntimeRoot, report.Active)
 	globalRuntimeProbeCache.expiresAt = time.Now().Add(runtimeProbeTTL)
 	return report
+}
+
+func currentRuntimeRevisionKey() string {
+	root, err := resolvePrimaryRuntimeRoot()
+	if err != nil {
+		return ""
+	}
+	current, err := loadRuntimeCurrent(filepath.Join(root, "current.json"))
+	if err != nil {
+		return ""
+	}
+	return runtimeRevisionKey(root, current.Active)
+}
+
+func runtimeRevisionKey(root, active string) string {
+	root = strings.TrimSpace(root)
+	active = strings.TrimSpace(active)
+	if root == "" || active == "" {
+		return ""
+	}
+	return filepath.Clean(root) + "\x00" + active
 }
 
 func invalidateRuntimeProbeCache() {
 	globalRuntimeProbeCache.mu.Lock()
 	defer globalRuntimeProbeCache.mu.Unlock()
+	globalRuntimeProbeCache.report = preflightReport{}
+	globalRuntimeProbeCache.revision = ""
 	globalRuntimeProbeCache.expiresAt = time.Time{}
 }
 

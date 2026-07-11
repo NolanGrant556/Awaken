@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,9 +47,7 @@ type sqliteThreadStore struct {
 }
 
 // Prepare opens and reconciles the metadata store before a run creates its
-// append-only journal. The first open purges transcripts that have no matching
-// SQLite thread row; doing that after bindAgentRecorder has created a new
-// journal would unlink the live journal underneath its writer.
+// append-only journal.
 func (s *sqliteThreadStore) Prepare() error {
 	_, err := s.open()
 	return err
@@ -139,8 +138,9 @@ func (s *sqliteThreadStore) ListThreads() ([]ThreadSnapshot, error) {
 		return nil, err
 	}
 	rows, err := db.Query(`
-SELECT thread_id, title, title_source, title_status, title_updated_at, title_seed_run_id, workspace_root, scope_id, latest_run_id, created_at, updated_at, workspace_json, model_profile_key, preview
+SELECT thread_id, title, title_source, title_status, title_updated_at, title_seed_run_id, workspace_root, project_id, scope_id, latest_run_id, created_at, updated_at, workspace_json, model_profile_key, preview
 FROM threads
+WHERE deleted = 0
 ORDER BY updated_at DESC, created_at DESC
 `)
 	if err != nil {
@@ -433,9 +433,9 @@ func (s *sqliteThreadStore) threadRecord(threadID string) (storedThreadRecord, e
 		return storedThreadRecord{}, err
 	}
 	row := db.QueryRow(`
-SELECT thread_id, title, title_source, title_status, title_updated_at, title_seed_run_id, workspace_root, scope_id, latest_run_id, created_at, updated_at, workspace_json, model_profile_key, preview
+SELECT thread_id, title, title_source, title_status, title_updated_at, title_seed_run_id, workspace_root, project_id, scope_id, latest_run_id, created_at, updated_at, workspace_json, model_profile_key, preview
 FROM threads
-WHERE thread_id = ?
+WHERE thread_id = ? AND deleted = 0
 `, threadID)
 	record, err := scanStoredThread(row)
 	if err != nil {
@@ -481,13 +481,17 @@ func (s *sqliteThreadStore) upsertThread(snapshot ThreadSnapshot, modelProfileKe
 	if snapshot.UpdatedAt.IsZero() {
 		snapshot.UpdatedAt = snapshot.CreatedAt
 	}
+	projectID, err := ensureProjectForWorkspace(db, snapshot.Workspace.WorkspaceRoot, false)
+	if err != nil {
+		return err
+	}
 	title := trimThreadLabel(firstNonEmpty(snapshot.Label, snapshot.ThreadID))
 	_, err = db.Exec(`
 INSERT INTO threads (
 	thread_id, title, title_source, title_status, title_updated_at, title_seed_run_id,
-	workspace_root, scope_id, latest_run_id,
+	workspace_root, project_id, scope_id, latest_run_id,
 	created_at, updated_at, archived, deleted, preview, model_profile_key, workspace_json
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
 ON CONFLICT(thread_id) DO UPDATE SET
 	title = CASE
 		WHEN excluded.title_source = '' THEN threads.title
@@ -530,6 +534,7 @@ ON CONFLICT(thread_id) DO UPDATE SET
 		ELSE excluded.title_seed_run_id
 	END,
 	workspace_root = excluded.workspace_root,
+	project_id = excluded.project_id,
 	scope_id = excluded.scope_id,
 	latest_run_id = CASE WHEN excluded.latest_run_id = '' THEN threads.latest_run_id ELSE excluded.latest_run_id END,
 	created_at = CASE WHEN threads.created_at = '' THEN excluded.created_at ELSE threads.created_at END,
@@ -545,6 +550,7 @@ ON CONFLICT(thread_id) DO UPDATE SET
 		formatStoredTime(snapshot.TitleUpdatedAt),
 		strings.TrimSpace(snapshot.TitleSeedRunID),
 		snapshot.Workspace.WorkspaceRoot,
+		projectID,
 		snapshot.Workspace.ScopeID,
 		firstNonEmpty(snapshot.RunID, ""),
 		snapshot.CreatedAt.UTC().Format(time.RFC3339Nano),
@@ -568,9 +574,28 @@ func (s *sqliteThreadStore) open() (*sql.DB, error) {
 	if err := s.paths.Ensure(); err != nil {
 		return nil, fmt.Errorf("ensure desktop data dirs: %w", err)
 	}
-	db, err := sql.Open("sqlite", s.paths.ThreadsDBPath())
+	dsn := &url.URL{Scheme: "file", Path: s.paths.ThreadsDBPath()}
+	query := dsn.Query()
+	// modernc SQLite's _txlock setting makes every database/sql Begin use
+	// BEGIN IMMEDIATE, so lifecycle mutations acquire the writer lock before
+	// they inspect state and cannot race a concurrent run start.
+	query.Set("_txlock", "immediate")
+	dsn.RawQuery = query.Encode()
+	db, err := sql.Open("sqlite", dsn.String())
 	if err != nil {
 		return nil, fmt.Errorf("open threads db: %w", err)
+	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	for _, pragma := range []string{
+		`PRAGMA journal_mode = WAL`,
+		`PRAGMA busy_timeout = 5000`,
+		`PRAGMA foreign_keys = ON`,
+	} {
+		if _, err := db.Exec(pragma); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("configure threads db %q: %w", pragma, err)
+		}
 	}
 	if _, err := db.Exec(`
 CREATE TABLE IF NOT EXISTS threads (
@@ -581,12 +606,15 @@ CREATE TABLE IF NOT EXISTS threads (
 	title_updated_at TEXT NOT NULL DEFAULT '',
 	title_seed_run_id TEXT NOT NULL DEFAULT '',
 	workspace_root TEXT NOT NULL,
+	project_id TEXT NOT NULL DEFAULT '',
 	scope_id TEXT NOT NULL,
 	latest_run_id TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL,
 	archived INTEGER NOT NULL DEFAULT 0,
 	deleted INTEGER NOT NULL DEFAULT 0,
+	deleted_at TEXT NOT NULL DEFAULT '',
+	delete_operation_id TEXT NOT NULL DEFAULT '',
 	preview TEXT NOT NULL DEFAULT '',
 	model_profile_key TEXT NOT NULL DEFAULT '',
 	workspace_json TEXT NOT NULL
@@ -600,13 +628,9 @@ CREATE INDEX IF NOT EXISTS idx_threads_updated_at ON threads(updated_at DESC, cr
 		_ = db.Close()
 		return nil, err
 	}
-	if _, err := db.Exec(`DELETE FROM threads WHERE deleted <> 0`); err != nil {
+	if err := ensureProjectLifecycleSchema(db, s.paths); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("purge deleted thread residue: %w", err)
-	}
-	if err := s.purgeOrphanThreadTranscripts(db); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("purge orphan thread transcripts: %w", err)
+		return nil, err
 	}
 	s.db = db
 	return s.db, nil
@@ -623,8 +647,11 @@ var requiredThreadStoreColumns = []requiredThreadStoreColumn{
 	{name: "title_updated_at", ddl: "title_updated_at TEXT NOT NULL DEFAULT ''"},
 	{name: "title_seed_run_id", ddl: "title_seed_run_id TEXT NOT NULL DEFAULT ''"},
 	{name: "latest_run_id", ddl: "latest_run_id TEXT NOT NULL DEFAULT ''"},
+	{name: "project_id", ddl: "project_id TEXT NOT NULL DEFAULT ''"},
 	{name: "archived", ddl: "archived INTEGER NOT NULL DEFAULT 0"},
 	{name: "deleted", ddl: "deleted INTEGER NOT NULL DEFAULT 0"},
+	{name: "deleted_at", ddl: "deleted_at TEXT NOT NULL DEFAULT ''"},
+	{name: "delete_operation_id", ddl: "delete_operation_id TEXT NOT NULL DEFAULT ''"},
 	{name: "preview", ddl: "preview TEXT NOT NULL DEFAULT ''"},
 	{name: "model_profile_key", ddl: "model_profile_key TEXT NOT NULL DEFAULT ''"},
 	{name: "workspace_json", ddl: "workspace_json TEXT NOT NULL DEFAULT '{}'"},
@@ -724,6 +751,7 @@ func scanStoredThread(scanner rowScanner) (storedThreadRecord, error) {
 		titleUpdatedAt string
 		titleSeedRunID string
 		workspaceRoot  string
+		projectID      string
 		scopeID        string
 		latestRunID    string
 		createdAtRaw   string
@@ -740,6 +768,7 @@ func scanStoredThread(scanner rowScanner) (storedThreadRecord, error) {
 		&titleUpdatedAt,
 		&titleSeedRunID,
 		&workspaceRoot,
+		&projectID,
 		&scopeID,
 		&latestRunID,
 		&createdAtRaw,
@@ -772,6 +801,7 @@ func scanStoredThread(scanner rowScanner) (storedThreadRecord, error) {
 	return storedThreadRecord{
 		Snapshot: ThreadSnapshot{
 			ThreadID:       threadID,
+			ProjectID:      projectID,
 			Label:          trimThreadLabel(title),
 			TitleSource:    source,
 			TitleStatus:    status,

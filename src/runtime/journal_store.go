@@ -373,6 +373,48 @@ func boolPayload(payload map[string]any, key string) bool {
 	}
 }
 
+func intPayload(payload map[string]any, key string) int {
+	if payload == nil {
+		return 0
+	}
+	value, ok := payload[key]
+	if !ok || value == nil {
+		return 0
+	}
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int8:
+		return int(typed)
+	case int16:
+		return int(typed)
+	case int32:
+		return int(typed)
+	case int64:
+		return int(typed)
+	case uint:
+		return int(typed)
+	case uint8:
+		return int(typed)
+	case uint16:
+		return int(typed)
+	case uint32:
+		return int(typed)
+	case uint64:
+		return int(typed)
+	case float32:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case json.Number:
+		value, err := typed.Int64()
+		if err == nil {
+			return int(value)
+		}
+	}
+	return 0
+}
+
 func runIDsFromSemanticRecords(records []agentcore.SemanticRecord) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -600,21 +642,27 @@ func semanticRecordToAgentEvents(record agentcore.SemanticRecord) []agentcore.Aw
 		if boolPayload(record.Payload, "created") {
 			eventType = agentcore.ArtifactCreatedEventType
 		}
+		producer := firstNonEmpty(stringPayload(record.Payload, "producer"), stringPayload(record.Payload, "tool_name"))
+		artifactKind := stringPayload(record.Payload, "kind")
+		artifactPath := stringPayload(record.Payload, "path")
 		return []agentcore.AwakenEvent{{
-			Type:                eventType,
-			Timestamp:           record.Timestamp,
-			ThreadID:            record.ThreadID,
-			RunID:               record.RunID,
-			TurnID:              record.TurnID,
-			ToolCallID:          stringPayload(record.Payload, "tool_call_id"),
-			ToolName:            stringPayload(record.Payload, "tool_name"),
-			ArtifactID:          stringPayload(record.Payload, "artifact_id"),
-			ArtifactTitle:       stringPayload(record.Payload, "title"),
-			ArtifactDescription: stringPayload(record.Payload, "description"),
-			ArtifactKind:        stringPayload(record.Payload, "kind"),
-			ArtifactPath:        stringPayload(record.Payload, "path"),
-			ArtifactContent:     stringPayload(record.Payload, "content"),
-			ArtifactStatus:      agentcore.ArtifactStatus(stringPayload(record.Payload, "status")),
+			Type:                    eventType,
+			Timestamp:               record.Timestamp,
+			ThreadID:                record.ThreadID,
+			RunID:                   record.RunID,
+			TurnID:                  record.TurnID,
+			ToolCallID:              stringPayload(record.Payload, "tool_call_id"),
+			ToolName:                stringPayload(record.Payload, "tool_name"),
+			ArtifactContractVersion: tool.ArtifactContractVersionOrLegacy(intPayload(record.Payload, "contract_version")),
+			ArtifactRole:            tool.ResolveArtifactRole(tool.ArtifactRole(stringPayload(record.Payload, "role")), producer, artifactKind, artifactPath),
+			ArtifactProducer:        producer,
+			ArtifactID:              stringPayload(record.Payload, "artifact_id"),
+			ArtifactTitle:           stringPayload(record.Payload, "title"),
+			ArtifactDescription:     stringPayload(record.Payload, "description"),
+			ArtifactKind:            artifactKind,
+			ArtifactPath:            artifactPath,
+			ArtifactContent:         stringPayload(record.Payload, "content"),
+			ArtifactStatus:          agentcore.ArtifactStatus(stringPayload(record.Payload, "status")),
 		}}
 	case agentcore.SemanticKindTurnDiff:
 		return []agentcore.AwakenEvent{{

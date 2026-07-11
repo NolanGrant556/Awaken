@@ -22,14 +22,18 @@ import {
 import { calculateAutoCompactThreshold } from "../../shared/runtime";
 import type {
   AwakenThemePreference,
+  DesktopOperationIssue,
   ModelProfileSaveRequest,
   ModelProvider,
   RuntimeModelProfileSummary,
 } from "../../shared/runtime";
-import type { RuntimeClient } from "../runtime/client";
+import {
+  desktopOperationIssueFromError,
+  type RuntimeClient,
+} from "../runtime/client";
 import { PetsSettingsPanel } from "./PetsSettingsPanel";
 
-type DraftState = {
+export type DraftState = {
   profileId?: string;
   templateProfileId?: string;
   providerId: string;
@@ -42,6 +46,7 @@ type DraftState = {
   isDefault: boolean;
   endpointId: string;
   advanced?: RuntimeModelProfileSummary["advanced"];
+  requiresApiKey?: boolean;
 };
 
 type ModelSettingsSection = "configure" | "configured";
@@ -65,6 +70,55 @@ const MAX_TOKENS_MIN = 256;
 const MAX_TOKENS_MAX = 1_000_000;
 const DUPLICATE_MODEL_PROFILE_ERROR = "模型配置重复，添加失败";
 
+function credentialStatusLabel(
+  status: RuntimeModelProfileSummary["profileStatus"],
+): string | null {
+  switch (status) {
+    case "temporarily_unavailable":
+      return "安全存储暂不可用，原凭据已保留";
+    case "unreadable":
+      return "需要在 Awaken 中重新输入 API key";
+    case "missing_key":
+      return "未配置 API key";
+    default:
+      return null;
+  }
+}
+
+function credentialRecoveryMessage(
+  profiles: RuntimeModelProfileSummary[],
+): string | null {
+  if (
+    profiles.some(
+      (profile) => profile.profileStatus === "temporarily_unavailable",
+    )
+  ) {
+    return "模型密钥暂时无法读取，原加密凭据已保留。请重新启动 Awaken 以重新连接系统安全存储。";
+  }
+  if (profiles.some((profile) => profile.profileStatus === "unreadable")) {
+    return "已有模型密钥无法读取。请直接在 Awaken 中重新输入 API key；其他模型配置会保留。";
+  }
+  return null;
+}
+
+function credentialOperationIssueForProfiles(
+  profiles: RuntimeModelProfileSummary[],
+): DesktopOperationIssue | null {
+  if (
+    profiles.some(
+      (profile) => profile.profileStatus === "temporarily_unavailable",
+    )
+  ) {
+    return {
+      code: "credential_temporarily_unavailable",
+      message: "模型密钥暂时无法读取",
+      retryable: true,
+      actions: ["relaunch"],
+    };
+  }
+  return null;
+}
+
 type DesktopSettingsDialogProps = {
   open: boolean;
   runtimeClient: RuntimeClient;
@@ -75,6 +129,7 @@ type DesktopSettingsDialogProps = {
   onOpenChange: (open: boolean) => void;
   onProfilesChanged: () => void;
   initialSection?: SettingsDialogSection;
+  initialModelSection?: ModelSettingsSection;
 };
 
 type AppearanceSettingsProps = {
@@ -347,7 +402,37 @@ function draftFromTemplate(
   };
 }
 
-function toSaveRequest(
+export function draftFromExistingProfile(
+  profile: RuntimeModelProfileSummary,
+  provider: ModelProvider,
+): DraftState {
+  const modelId = profile.modelId || provider.defaultModel;
+  return {
+    profileId: profile.id,
+    providerId: profile.providerId,
+    modelId,
+    apiKey: "",
+    baseURL: profile.baseURL || provider.baseURL,
+    protocol: profile.protocol || provider.protocol,
+    authScheme: profile.authScheme || provider.authScheme,
+    enabled: profile.enabled,
+    isDefault: profile.isDefault,
+    endpointId:
+      profile.advanced?.endpointId ??
+      (provider.endpointModel ? profile.modelId : ""),
+    advanced: advancedWithModelCapability(
+      provider,
+      modelId,
+      profile.advanced,
+      false,
+    ),
+    requiresApiKey:
+      profile.profileStatus === "unreadable" ||
+      profile.profileStatus === "missing_key",
+  };
+}
+
+export function toSaveRequest(
   draft: DraftState,
   provider: ModelProvider,
 ): ModelProfileSaveRequest {
@@ -390,6 +475,7 @@ export function DesktopSettingsDialog({
   onOpenChange,
   onProfilesChanged,
   initialSection = "models",
+  initialModelSection = "configure",
 }: DesktopSettingsDialogProps) {
   const [providers, setProviders] = useState<ModelProvider[]>([]);
   const [profiles, setProfiles] = useState<RuntimeModelProfileSummary[]>([]);
@@ -415,6 +501,8 @@ export function DesktopSettingsDialog({
   const [testing, setTesting] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [credentialOperationIssue, setCredentialOperationIssue] =
+    useState<DesktopOperationIssue | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
 
@@ -434,6 +522,7 @@ export function DesktopSettingsDialog({
 
   const loadModelSettings = useCallback(async () => {
     setMessage(null);
+    setCredentialOperationIssue(null);
     try {
       const [nextProviders, nextProfiles] = await Promise.all([
         runtimeClient.listModelProviders(),
@@ -441,6 +530,10 @@ export function DesktopSettingsDialog({
       ]);
       setProviders(nextProviders);
       setProfiles(nextProfiles);
+      setMessage(credentialRecoveryMessage(nextProfiles));
+      setCredentialOperationIssue(
+        credentialOperationIssueForProfiles(nextProfiles),
+      );
       setConfiguredDrafts(
         configuredDraftsFromProfiles(nextProfiles, nextProviders),
       );
@@ -450,6 +543,10 @@ export function DesktopSettingsDialog({
         const refreshedProfiles = await runtimeClient.listModelProfiles();
         setProviders(syncedProviders);
         setProfiles(refreshedProfiles);
+        setMessage(credentialRecoveryMessage(refreshedProfiles));
+        setCredentialOperationIssue(
+          credentialOperationIssueForProfiles(refreshedProfiles),
+        );
         setConfiguredDrafts(
           configuredDraftsFromProfiles(refreshedProfiles, syncedProviders),
         );
@@ -472,6 +569,7 @@ export function DesktopSettingsDialog({
     setToastMessage(message);
     toastTimerRef.current = window.setTimeout(() => {
       setToastMessage(null);
+      setCredentialOperationIssue(null);
       toastTimerRef.current = null;
     }, 2000);
   }
@@ -488,7 +586,7 @@ export function DesktopSettingsDialog({
       setExpandedProviderId(null);
       setOpenModelPickerProviderId(null);
       setDraft(null);
-      setActiveSection("configure");
+      setActiveSection(initialModelSection);
       setActiveSettingsSection(initialSection);
       setShowApiKey(false);
       setDeletingProfileId(null);
@@ -499,8 +597,9 @@ export function DesktopSettingsDialog({
       }
       return;
     }
+    setActiveSection(initialModelSection);
     void loadModelSettings();
-  }, [loadModelSettings, open, initialSection]);
+  }, [loadModelSettings, open, initialSection, initialModelSection]);
 
   useEffect(() => {
     return () => {
@@ -544,21 +643,46 @@ export function DesktopSettingsDialog({
     setMessage(null);
   }
 
+  function editExistingProfile(profile: RuntimeModelProfileSummary): void {
+    const provider = providerById.get(profile.providerId);
+    if (!provider) {
+      setMessage("无法找到该模型供应商，请刷新后重试。");
+      return;
+    }
+    setActiveSection("configure");
+    setExpandedProviderId(provider.id);
+    setDraft(draftFromExistingProfile(profile, provider));
+    setOpenModelPickerProviderId(null);
+    setShowApiKey(false);
+    setMessage(
+      profile.profileStatus === "unreadable"
+        ? "请重新输入 API key。只有安全写入成功后，新的全局凭据才会替换原密文。"
+        : null,
+    );
+  }
+
   async function saveDraft(): Promise<void> {
     if (!draft) return;
     const provider = providerById.get(draft.providerId);
     if (!provider) return;
+    if (draft.requiresApiKey && draft.apiKey.trim() === "") {
+      setMessage("请先输入新的 API key。");
+      setCredentialOperationIssue(null);
+      return;
+    }
     setSaving(true);
     setMessage(null);
+    setCredentialOperationIssue(null);
     try {
       await runtimeClient.saveModelProfile(toSaveRequest(draft, provider));
       await loadModelSettings();
       collapseProviderEditor();
       onProfilesChanged();
-      showToast("模型配置已保存");
+      showToast("模型配置已安全保存");
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Failed to save model profile";
+      setCredentialOperationIssue(desktopOperationIssueFromError(error));
       if (errorMessage.includes(DUPLICATE_MODEL_PROFILE_ERROR)) {
         showToast(DUPLICATE_MODEL_PROFILE_ERROR);
         setMessage(null);
@@ -581,8 +705,12 @@ export function DesktopSettingsDialog({
         toSaveRequest(draft, provider),
       );
       showToast(result.message);
-    } catch {
-      showToast("连接测试失败：测试请求未完成。");
+    } catch (error) {
+      showToast(
+        error instanceof Error
+          ? error.message
+          : "连接测试失败：测试请求未完成。",
+      );
     } finally {
       setTesting(false);
     }
@@ -927,7 +1055,24 @@ export function DesktopSettingsDialog({
             ) : null}
           </div>
           {activeSettingsSection === "models" && message ? (
-            <div className="model-settings-message">{message}</div>
+            <div className="model-settings-message">
+              <span>{message}</span>
+              {credentialOperationIssue?.actions.includes("relaunch") ? (
+                <div className="model-settings-message-actions">
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => {
+                      void runtimeClient.relaunchDesktop().catch(() => {
+                        setMessage("Awaken 重新启动失败，请再试一次。");
+                      });
+                    }}
+                  >
+                    重新启动 Awaken
+                  </Button>
+                </div>
+              ) : null}
+            </div>
           ) : null}
           {activeSettingsSection === "appearance" && themeMessage ? (
             <div className="model-settings-message">{themeMessage}</div>
@@ -980,8 +1125,9 @@ export function DesktopSettingsDialog({
                       <div className="model-provider-form">
                         {configuredModelList ? (
                           <div className="model-provider-template-note">
-                            已配置模型：{configuredModelList}。当前提交会新增模型配置；同厂商同模型
-                            ID 会提示失败。
+                            {providerDraft.profileId
+                              ? `正在更新已配置模型：${providerDraft.modelId}。新的全局 API key 只有安全保存成功后才会替换原凭据。`
+                              : `已配置模型：${configuredModelList}。当前提交会新增模型配置；同厂商同模型 ID 会提示失败。`}
                           </div>
                         ) : null}
                         {provider.allowCustomModel ? (
@@ -1405,6 +1551,11 @@ export function DesktopSettingsDialog({
                           </span>
                           <span className="configured-model-copy">
                             <strong>{profile.modelId}</strong>
+                            {credentialStatusLabel(profile.profileStatus) ? (
+                              <span className={`configured-model-credential-status configured-model-credential-status-${profile.profileStatus}`}>
+                                {credentialStatusLabel(profile.profileStatus)}
+                              </span>
+                            ) : null}
                           </span>
                         </div>
                         <label className="configured-model-switch">
@@ -1540,6 +1691,16 @@ export function DesktopSettingsDialog({
                               保存
                             </Button>
                           </div>
+                          <Button
+                            variant="default"
+                            size="md"
+                            disabled={
+                              savingConfigured || Boolean(deletingProfileId)
+                            }
+                            onClick={() => editExistingProfile(profile)}
+                          >
+                            更新 API key
+                          </Button>
                           <Button
                             className="configured-models-delete"
                             variant="default"

@@ -162,6 +162,9 @@ func messagesFromSemanticRecords(records []agentcore.SemanticRecord) []convconte
 			messages = append(messages, convcontext.Message{
 				Role:    convcontext.RoleUser,
 				Content: stringPayload(record.Payload, "content"),
+				Attachments: transcriptAttachmentsToContextAttachments(
+					transcriptAttachmentsFromSemanticUserMessage(record.Payload),
+				),
 			})
 		case agentcore.SemanticKindAssistantMessage:
 			msg := convcontext.Message{
@@ -456,6 +459,7 @@ func restoredTranscriptFromSemantic(records []agentcore.SemanticRecord) restored
 func durableRunsFromSemanticRecords(threadID string, records []agentcore.SemanticRecord) map[string]ThreadTranscriptRun {
 	byRun := map[string][]agentcore.SemanticRecord{}
 	runMeta := map[string]*Run{}
+	seenUserInput := map[string]bool{}
 	for _, record := range records {
 		if record.RunID == "" {
 			continue
@@ -481,8 +485,13 @@ func durableRunsFromSemanticRecords(threadID string, records []agentcore.Semanti
 		}
 		switch record.Kind {
 		case agentcore.SemanticKindUserMessage:
-			if run.Input == "" {
+			if !seenUserInput[record.RunID] {
 				run.Input = stringPayload(record.Payload, "content")
+				run.InputAttachments = transcriptAttachmentsToRunInputAttachments(
+					transcriptAttachmentsFromSemanticUserMessage(record.Payload),
+				)
+				run.ComposerTokens = composerTokensFromSemanticUserMessage(record.Payload)
+				seenUserInput[record.RunID] = true
 			}
 		case agentcore.SemanticKindRunStarted:
 			run.Status = RunStatusRunning

@@ -47,6 +47,32 @@ type SemanticRecord struct {
 	Payload       map[string]any `json:"payload,omitempty"`
 }
 
+// SemanticUserMessageAttachment is the durable identity for an input
+// attachment. Image bytes remain in the runtime-owned attachment store and
+// are addressed by StorageKey; they are deliberately not duplicated into the
+// SemanticJournal payload.
+type SemanticUserMessageAttachment struct {
+	ID          string `json:"id"`
+	Kind        string `json:"kind"`
+	MimeType    string `json:"mime_type"`
+	Path        string `json:"path,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
+	Width       int    `json:"width,omitempty"`
+	Height      int    `json:"height,omitempty"`
+	ByteSize    int    `json:"byte_size,omitempty"`
+	StorageKey  string `json:"storage_key,omitempty"`
+}
+
+// SemanticComposerToken is the durable renderer-independent form of a
+// composer token. Payload stays open-ended so new token providers can preserve
+// their identity without teaching Agent Core provider-specific fields.
+type SemanticComposerToken struct {
+	ID      string         `json:"id"`
+	Type    string         `json:"type"`
+	Label   string         `json:"label"`
+	Payload map[string]any `json:"payload,omitempty"`
+}
+
 // SemanticRecorder persists durable semantic facts. All methods return error.
 // EventSink remains fire-and-forget for live broadcast after successful append.
 type SemanticRecorder interface {

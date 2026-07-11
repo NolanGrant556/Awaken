@@ -14,10 +14,10 @@ import (
 )
 
 const (
-	ErrorCodeTextNotFound       = "text_not_found"
-	ErrorCodeTextNotUnique      = "text_not_unique"
-	ErrorCodeStaleFileRevision  = "stale_file_revision"
-	ErrorCodeValidationError    = "validation_error"
+	ErrorCodeTextNotFound        = "text_not_found"
+	ErrorCodeTextNotUnique       = "text_not_unique"
+	ErrorCodeStaleFileRevision   = "stale_file_revision"
+	ErrorCodeValidationError     = "validation_error"
 	ErrorCodeToolExecutionFailed = "tool_execution_failed"
 )
 
@@ -37,12 +37,12 @@ type textEditParams struct {
 }
 
 type textEditResult struct {
-	Path              string `json:"path"`
-	ReplacementCount  int    `json:"replacement_count"`
-	BeforeSHA256      string `json:"before_sha256"`
-	AfterSHA256       string `json:"after_sha256"`
-	UnifiedDiff       string `json:"unified_diff"`
-	ExpectedSHA256    string `json:"expected_sha256,omitempty"`
+	Path             string `json:"path"`
+	ReplacementCount int    `json:"replacement_count"`
+	BeforeSHA256     string `json:"before_sha256"`
+	AfterSHA256      string `json:"after_sha256"`
+	UnifiedDiff      string `json:"unified_diff"`
+	ExpectedSHA256   string `json:"expected_sha256,omitempty"`
 }
 
 func (t *TextEditTool) Name() string {
@@ -64,11 +64,35 @@ func (t *TextEditTool) Parameters() []tool.ToolParameter {
 }
 
 func (t *TextEditTool) Definition() tool.ToolDefinition {
-	return tool.ToolDefinition{
+	return tool.BuildBuiltinDefinition(t, tool.ToolDefinition{
 		Name:        "text_edit",
 		DisplayName: "Text Edit",
-		Source:      tool.SourceBuiltin,
 		Description: t.Description(),
+		Purpose:     "在一个现有文本文件中执行精确、可校验的字符串替换。",
+		WhenToUse: []string{
+			"已知一个现有文件中的精确 old_string，并要做局部替换时",
+			"需要用 read_file 返回的 expected_sha256 防止覆盖并发修改时",
+		},
+		WhenNotToUse: []string{
+			"新建或整体覆盖文本文件使用 text_file_create",
+			"多文件移动、删除或高级 patch 使用 apply_patch；删除单个资源使用 trash_file",
+			"old_string 尚未从当前文件事实中确认时先使用 read_file",
+		},
+		OutputSchema: tool.ToolParam{Type: "object", Properties: map[string]tool.ToolParam{
+			"path":              {Type: "string", Description: "实际修改的文件"},
+			"replacement_count": {Type: "integer", Description: "完成的替换次数"},
+			"before_sha256":     {Type: "string", Description: "写入前摘要"},
+			"after_sha256":      {Type: "string", Description: "写入后摘要"},
+			"unified_diff":      {Type: "string", Description: "本次文本变化 diff"},
+		}},
+		SideEffects: []tool.ToolSideEffect{{Kind: tool.SideEffectUpdate, Resources: []string{"one existing text file"}, Description: "原子更新一个 writable-root 内文本文件。", Reversibility: tool.ReversibilityConditional}},
+		Examples:    []tool.ToolExample{{Scenario: "基于已读取摘要修改唯一字符串", Input: map[string]any{"path": "docs/note.md", "old_string": "旧标题", "new_string": "新标题", "expected_sha256": "<read_file sha256>"}, Outcome: "返回替换数、前后摘要和 unified diff"}},
+		FailureModes: []tool.ToolFailureMode{
+			{Code: ErrorCodeStaleFileRevision, Cause: "文件摘要与 expected_sha256 不一致", Retryable: true, Recovery: []string{"重新 read_file", "基于新内容重建编辑"}},
+			{Code: ErrorCodeTextNotFound, Cause: "old_string 在当前文件中不存在", Retryable: true, Recovery: []string{"重新读取文件", "修正 old_string"}},
+			{Code: ErrorCodeTextNotUnique, Cause: "old_string 多处匹配且 replace_all=false", Retryable: true, Recovery: []string{"扩大上下文", "确认后使用 replace_all"}},
+			{Code: tool.ErrorCodeToolDenied, Cause: "目标不在 writable roots 内", Retryable: false, Recovery: []string{"选择任务可写路径"}},
+		},
 		Annotations: tool.ToolAnnotations{
 			ReadOnly:        false,
 			Destructive:     false,
@@ -77,7 +101,7 @@ func (t *TextEditTool) Definition() tool.ToolDefinition {
 			TrustedOrigin:   tool.TrustedOriginBuiltin,
 			FileBridgeScope: tool.FileBridgeTaskScopeWrite,
 		},
-	}
+	})
 }
 
 func (t *TextEditTool) CheckPermission(ctx context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {
@@ -216,6 +240,11 @@ func (t *TextEditTool) ExecuteOutcome(ctx context.Context, input string, _ tool.
 		"after_sha256":      afterDigest,
 		"sha256":            afterDigest,
 	}
+	outcome.Details = map[string]any{
+		"path": rel, "replacement_count": count,
+		"before_sha256": beforeDigest, "after_sha256": afterDigest,
+		"unified_diff": diff,
+	}
 	return outcome, nil
 }
 
@@ -283,10 +312,10 @@ func textEditMatchFailure(
 	outcome.RecoveryOptions = recovery
 	outcome.AffectedPaths = []string{rel}
 	outcome.Diagnostic = map[string]any{
-		"path":              rel,
-		"before_sha256":     beforeDigest,
-		"match_count":       count,
-		"replace_all":       params.ReplaceAll,
+		"path":          rel,
+		"before_sha256": beforeDigest,
+		"match_count":   count,
+		"replace_all":   params.ReplaceAll,
 	}
 	return outcome.WithTiming(started, time.Now().UTC())
 }
@@ -317,5 +346,5 @@ func parseTextEditParams(input string) (textEditParams, error) {
 }
 
 func init() {
-	tool.MustRegisterTool(&TextEditTool{})
+	tool.MustRegisterToolWithMode(&TextEditTool{}, tool.DefinitionValidationStrictBuiltin)
 }

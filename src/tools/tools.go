@@ -2,6 +2,7 @@ package tools
 
 import (
 	_ "awaken/src/tools/apply_patch"
+	_ "awaken/src/tools/artifact_publish"
 	_ "awaken/src/tools/artifact_runtime"
 	_ "awaken/src/tools/ask_user"
 	_ "awaken/src/tools/calculator"

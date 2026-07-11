@@ -536,13 +536,12 @@ func normalizeToolDecision(decision ToolDecision, fallbackReason string) ToolDec
 func inferToolDecisionRequest(
 	callID string,
 	toolName string,
-	selectedTool tool.Tool,
+	definition tool.ToolDefinition,
 	rawInput string,
 	normalizedInput string,
 	permission tool.PermissionDecision,
 	permissionContext tool.PermissionContext,
 ) ToolDecisionRequest {
-	def := selectedTool.Definition()
 	return ToolDecisionRequest{
 		ToolCallID:              callID,
 		ToolName:                toolName,
@@ -554,13 +553,13 @@ func inferToolDecisionRequest(
 		ReadableRoots:           append([]string(nil), permissionContext.ReadableRoots...),
 		WritableRoots:           append([]string(nil), permissionContext.WritableRoots...),
 		OutputRoots:             append([]string(nil), permissionContext.OutputRoots...),
-		IsReadOnly:              isReadOnlyTool(selectedTool),
+		IsReadOnly:              definition.Annotations.ReadOnly,
 		IsDestructive:           isDestructivePermission(permission),
-		IsOpenWorld:             def.Annotations.OpenWorld,
+		IsOpenWorld:             definition.Annotations.OpenWorld,
 		RequiresUserInteraction: requiresUserInteraction(permission),
-		CapabilityClass:         def.Annotations.CapabilityClass,
-		TrustedOrigin:           def.Annotations.TrustedOrigin,
-		FileBridgeScope:         def.Annotations.FileBridgeScope,
+		CapabilityClass:         definition.Annotations.CapabilityClass,
+		TrustedOrigin:           definition.Annotations.TrustedOrigin,
+		FileBridgeScope:         definition.Annotations.FileBridgeScope,
 		RiskTone:                permission.Metadata.RiskTone,
 		AffectedPaths:           append([]string(nil), permission.Metadata.AffectedPaths...),
 	}

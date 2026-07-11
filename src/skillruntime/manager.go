@@ -34,10 +34,10 @@ func NewManager(reg *skills.SkillRegistry, logger Logger) *Manager {
 	}
 	// Subscribe to registry changes.
 	reg.SetOnChange(m.refreshTools)
-	if err := tool.RegisterToolForce(&ResourceReadTool{registry: reg}); err != nil {
+	if err := tool.RegisterToolForceWithMode(&ResourceReadTool{registry: reg}, tool.DefinitionValidationStrictAll); err != nil {
 		logger.Warnf("failed to register skill resource reader: %v", err)
 	}
-	if err := tool.RegisterToolForce(&SkillInstallTool{registry: reg}); err != nil {
+	if err := tool.RegisterToolForceWithMode(&SkillInstallTool{registry: reg}, tool.DefinitionValidationStrictBuiltin); err != nil {
 		logger.Warnf("failed to register skill installer: %v", err)
 	}
 	return m

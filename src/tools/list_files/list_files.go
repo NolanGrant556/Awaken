@@ -3,11 +3,13 @@ package listfiles
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"awaken/src/tool"
 	"awaken/src/tools/internal/filematch"
@@ -49,11 +51,33 @@ func (t *ListFilesTool) IsReadOnly() bool {
 }
 
 func (t *ListFilesTool) Definition() tool.ToolDefinition {
-	return tool.ToolDefinition{
+	return tool.BuildBuiltinDefinition(t, tool.ToolDefinition{
 		Name:        "list_files",
 		DisplayName: "List Files",
-		Source:      tool.SourceBuiltin,
 		Description: t.Description(),
+		Purpose:     "按 glob 枚举目录中的文件路径，不读取文件内容。",
+		WhenToUse: []string{
+			"需要发现文件、目录结构或匹配扩展名的路径集合时",
+			"后续读取或搜索前需要确定候选文件时",
+		},
+		WhenNotToUse: []string{
+			"需要匹配文件内容或函数定义时使用 grep_search",
+			"已知精确文件路径并需要内容时直接使用 read_file 或 read_artifact",
+		},
+		OutputSchema: tool.ToolParam{Type: "object", Properties: map[string]tool.ToolParam{
+			"root":          {Type: "string", Description: "实际搜索根目录"},
+			"pattern":       {Type: "string", Description: "实际 glob 模式"},
+			"match_count":   {Type: "integer", Description: "本次返回的路径数量"},
+			"total_matches": {Type: "integer", Description: "观察到的总匹配数"},
+			"max_results":   {Type: "integer", Description: "本次结果上限"},
+		}},
+		SideEffects: []tool.ToolSideEffect{{Kind: tool.SideEffectRead, Resources: []string{"directory entries"}, Description: "遍历目录项，不读取内容或修改文件。", Reversibility: tool.ReversibilityNotApplicable}},
+		Examples:    []tool.ToolExample{{Scenario: "列出所有 Go 文件", Input: map[string]any{"root": ".", "pattern": "**/*.go", "max_results": 200}, Outcome: "返回稳定排序的匹配路径及截断事实"}},
+		FailureModes: []tool.ToolFailureMode{
+			{Code: "list_files_invalid_input", Cause: "glob、root 或 max_results 参数无效", Retryable: false, Recovery: []string{"修正枚举参数"}},
+			{Code: "list_files_root_unavailable", Cause: "目录不存在或不在任务可读范围", Retryable: false, Recovery: []string{"检查 root 和任务可读范围"}},
+			{Code: "list_files_scan_failed", Cause: "目录遍历在执行阶段失败", Retryable: true, Recovery: []string{"缩小范围并检查文件系统状态"}},
+		},
 		Annotations: tool.ToolAnnotations{
 			ReadOnly:        true,
 			Destructive:     false,
@@ -61,13 +85,32 @@ func (t *ListFilesTool) Definition() tool.ToolDefinition {
 			CapabilityClass: tool.CapabilityArtifactRead,
 			TrustedOrigin:   tool.TrustedOriginBuiltin,
 		},
-	}
+	})
 }
 
 func (t *ListFilesTool) Execute(ctx context.Context, input string) (string, error) {
+	outcome, err := t.ExecuteOutcome(ctx, input, nil)
+	if err != nil {
+		return outcome.Content, err
+	}
+	if outcome.IsError() {
+		return "", fmt.Errorf("%s", outcome.ErrorMessage)
+	}
+	return outcome.Content, nil
+}
+
+// ExecuteOutcome exposes stable result counts and truncation state while
+// keeping directory scans read-only. Expected input, path, and filesystem
+// failures are business outcomes; a Go error is reserved for implementation
+// or transport failures outside this tool's domain.
+func (t *ListFilesTool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObserver) (tool.ExecutionOutcome, error) {
+	started := time.Now().UTC()
 	params, err := parseParams(input)
 	if err != nil {
-		return "", err
+		outcome := tool.FailedOutcome(err.Error(), "list_files_invalid_input", tool.ErrorCategoryValidation, false)
+		outcome.RecoveryOptions = []string{"fix_json_parameters"}
+		outcome.Diagnostic = map[string]any{"expected_input": "JSON object"}
+		return outcome.WithTiming(started, time.Now().UTC()), nil
 	}
 
 	permissionContext := tool.PermissionContextFromContext(ctx)
@@ -75,7 +118,10 @@ func (t *ListFilesTool) Execute(ctx context.Context, input string) (string, erro
 	if tool.HasPermissionContext(ctx) {
 		checkedRoot, err := permissionContext.ResolveReadablePathChecked(params.Root)
 		if err != nil {
-			return "", err
+			outcome := tool.FailedOutcome(err.Error(), "list_files_root_unavailable", tool.ErrorCategoryDomain, false)
+			outcome.RecoveryOptions = []string{"choose_readable_root", "list_workspace_root"}
+			outcome.Diagnostic = map[string]any{"requested_root": params.Root}
+			return outcome.WithTiming(started, time.Now().UTC()), nil
 		}
 		root = checkedRoot
 	}
@@ -88,15 +134,53 @@ func (t *ListFilesTool) Execute(ctx context.Context, input string) (string, erro
 
 	results, total, err := listFiles(ctx, root, workspaceRoot, pattern, maxResults, permissionContext)
 	if err != nil {
-		return "", err
+		outcome := listFilesFailureOutcome(err, root, pattern)
+		return outcome.WithTiming(started, time.Now().UTC()), nil
 	}
+	truncated := total > len(results)
+	resultCount := len(results)
 	if len(results) == 0 {
-		return "未找到匹配文件", nil
+		outcome := tool.SucceededOutcome("未找到匹配文件")
+		outcome.Diagnostic = map[string]any{
+			"root": root, "pattern": pattern, "result_count": 0, "match_count": 0,
+			"total_matches": 0, "max_results": maxResults, "truncated": false,
+		}
+		outcome.Details = listFilesDetails(root, pattern, 0, 0, maxResults)
+		return outcome.WithTiming(started, time.Now().UTC()), nil
 	}
-	if total > len(results) {
+	if truncated {
 		results = append(results, fmt.Sprintf("[list_files truncated: showing %d of %d matches]", len(results), total))
 	}
-	return strings.Join(results, "\n"), nil
+	outcome := tool.SucceededOutcome(strings.Join(results, "\n"))
+	outcome.Truncated = truncated
+	outcome.Diagnostic = map[string]any{
+		"root": root, "pattern": pattern, "result_count": resultCount, "match_count": resultCount,
+		"total_matches": total, "max_results": maxResults, "truncated": truncated,
+	}
+	outcome.Details = listFilesDetails(root, pattern, resultCount, total, maxResults)
+	return outcome.WithTiming(started, time.Now().UTC()), nil
+}
+
+func listFilesDetails(root, pattern string, matchCount, totalMatches, maxResults int) map[string]any {
+	return map[string]any{
+		"root": root, "pattern": pattern, "match_count": matchCount,
+		"total_matches": totalMatches, "max_results": maxResults,
+	}
+}
+
+func listFilesFailureOutcome(err error, root, pattern string) tool.ExecutionOutcome {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		outcome := tool.FailedOutcome(err.Error(), "list_files_cancelled", tool.ErrorCategoryCancelled, true)
+		outcome.Status = tool.OutcomeCancelled
+		outcome.TransportStatus = tool.TransportCancelled
+		outcome.RecoveryOptions = []string{"retry_when_context_available"}
+		outcome.Diagnostic = map[string]any{"root": root, "pattern": pattern}
+		return outcome
+	}
+	outcome := tool.FailedOutcome(err.Error(), "list_files_scan_failed", tool.ErrorCategoryRuntime, true)
+	outcome.RecoveryOptions = []string{"inspect_root_access", "choose_another_root", "retry_list_files"}
+	outcome.Diagnostic = map[string]any{"root": root, "pattern": pattern}
+	return outcome
 }
 
 func (t *ListFilesTool) CheckPermission(ctx context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {
@@ -196,5 +280,5 @@ func relativePathWithin(root string, path string) (string, bool) {
 }
 
 func init() {
-	tool.MustRegisterTool(&ListFilesTool{})
+	tool.MustRegisterToolWithMode(&ListFilesTool{}, tool.DefinitionValidationStrictBuiltin)
 }

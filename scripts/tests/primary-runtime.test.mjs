@@ -1,7 +1,21 @@
 import assert from "node:assert/strict";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, it } from "node:test";
 import {
@@ -11,10 +25,12 @@ import {
   checkPrimaryRuntime,
   cleanupStaging,
   componentRelativePath,
+  copyDirectoryContents,
   createBuildRevision,
   createStagingDir,
   inspectRuntimeProvenance,
   isForbiddenExternalPath,
+  macOSRuntimeSigningExpectation,
   machODependencies,
   migrateOldAwakenCacheIfNeeded,
   pathInsideRoot,
@@ -27,13 +43,26 @@ import {
   resolveManagedPath,
   resolvePrimaryRuntimeRoot,
   rollbackToPrevious,
+  runtimeRequiresPreparation,
+  sealMacOSRuntimeApplicationPermissions,
+  setMacOSBackgroundOnlyApplication,
+  signMacOSRuntimeApplication,
   versionKey,
   versionDir,
+  verifyMacOSLibreOfficeReleaseSeed,
   writeCurrentJson,
   writeExecutable,
   writeExecWrapper,
   writeResolvedState,
 } from "../primary-runtime-common.mjs";
+import {
+  createRuntimeArchiveInvocation,
+  extractRuntimeArchiveInvocation,
+  hasRuntimeArchiveIntegrity,
+  runtimeArchiveIntegrityManifest,
+  runtimeArchivePlatform,
+  runtimeOfficeExecutableRelativePath,
+} from "../runtime-archive-platform.mjs";
 
 const temps = [];
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -46,7 +75,7 @@ function tempDir(prefix = "awaken-runtime-test-") {
 
 afterEach(() => {
   while (temps.length) {
-    rmSync(temps.pop(), { recursive: true, force: true });
+    cleanupStaging(temps.pop());
   }
 });
 
@@ -64,6 +93,32 @@ set -euo pipefail
 echo fail >&2
 exit 2
 `;
+}
+
+function writeMinimalMacOSApp(appRoot) {
+  const executable = join(appRoot, "Contents", "MacOS", "test-app");
+  mkdirSync(dirname(executable), { recursive: true });
+  copyFileSync("/usr/bin/true", executable);
+  chmodSync(executable, 0o755);
+  writeFileSync(join(appRoot, "Contents", "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleExecutable</key><string>test-app</string>
+  <key>CFBundleIdentifier</key><string>com.awaken.runtime-sign-test</string>
+  <key>CFBundleName</key><string>Runtime Sign Test</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleDocumentTypes</key><array><dict><key>CFBundleTypeName</key><string>Office</string></dict></array>
+  <key>CFBundleURLTypes</key><array><dict><key>CFBundleURLSchemes</key><array><string>ms-word</string></array></dict></array>
+  <key>NSServices</key><array><dict/></array>
+  <key>UTExportedTypeDeclarations</key><array><dict/></array>
+  <key>UTImportedTypeDeclarations</key><array><dict/></array>
+  <key>LSUIElement</key><true/>
+</dict></plist>
+`);
+  mkdirSync(join(appRoot, "Contents", "Library", "Spotlight", "OOoSpotlightImporter.mdimporter"), { recursive: true });
+  mkdirSync(join(appRoot, "Contents", "PlugIns", "QuickLookPreview.appex"), { recursive: true });
+  mkdirSync(join(appRoot, "Contents", "PlugIns", "QuickLookThumbnail.appex"), { recursive: true });
 }
 
 function baseManifest() {
@@ -193,6 +248,46 @@ describe("ownership and seeds", () => {
     assert.equal(resolvePrimaryRuntimeRoot({ AWAKEN_PRIMARY_RUNTIME_ROOT: root }, "darwin"), root);
   });
 
+  it("prepares a new immutable revision when the manifest bundle version changes", () => {
+    const ready = { ready: true, bundleVersion: "0.2.0" };
+    assert.equal(runtimeRequiresPreparation(ready, { bundleVersion: "0.3.0" }), true);
+    assert.equal(runtimeRequiresPreparation(ready, { bundleVersion: "0.2.0" }), false);
+    assert.equal(runtimeRequiresPreparation(ready, { bundleVersion: "0.2.0" }, true), true);
+    assert.equal(runtimeRequiresPreparation({ ready: false }, { bundleVersion: "0.2.0" }), true);
+  });
+
+  it("does not reuse an ad-hoc runtime for a release signing build", () => {
+    const adHocExpectation = macOSRuntimeSigningExpectation({}, "darwin");
+    const releaseExpectation = macOSRuntimeSigningExpectation({
+      AWAKEN_RUNTIME_RELEASE_SIGNING: "1",
+      AWAKEN_RUNTIME_CODESIGN_IDENTITY: "Developer ID Application: Awaken Test",
+    }, "darwin");
+    const report = {
+      ready: true,
+      bundleVersion: "0.3.0",
+      security: {
+        macOSRuntimeSigning: {
+          mode: "ad-hoc",
+          identity: "-",
+          strictVerified: true,
+          gatekeeperVerified: false,
+          notarized: false,
+          stapled: false,
+        },
+      },
+    };
+    assert.equal(runtimeRequiresPreparation(report, { bundleVersion: "0.3.0" }, false, {
+      macOSRuntimeSigning: adHocExpectation,
+    }), false);
+    assert.equal(runtimeRequiresPreparation(report, { bundleVersion: "0.3.0" }, false, {
+      macOSRuntimeSigning: releaseExpectation,
+    }), true);
+    report.security.macOSRuntimeSigning = { ...releaseExpectation };
+    assert.equal(runtimeRequiresPreparation(report, { bundleVersion: "0.3.0" }, false, {
+      macOSRuntimeSigning: releaseExpectation,
+    }), false);
+  });
+
   it("resolves platform-specific managed paths without venv or macOS leakage", () => {
     const manifest = JSON.parse(readFileSync(
       join(repoRoot, "apps/desktop/resources/runtime-manifest/primary-runtime.json"),
@@ -203,6 +298,18 @@ describe("ownership and seeds", () => {
     assert.equal(componentRelativePath(python, "win32"), "python/python.exe");
     assert.equal(componentRelativePath(python, "linux"), "python/bin/python3");
     assert.equal(componentRelativePath(libreoffice, "linux"), "libreoffice");
+    assert.equal(manifest.bundleVersion, "0.3.0");
+    assert.deepEqual(manifest.officeRenderWorker, {
+      component: "libreoffice",
+      defaultMaxConcurrency: 1,
+      defaultTimeoutSeconds: 90,
+      profileIsolation: "per-job",
+      outputCommit: "atomic",
+      macOSActivationPolicy: "background-only",
+      macOSBundleIdentifier: "com.awaken.runtime.libreoffice-renderer",
+      macOSLaunchServicesClaims: "none",
+      macOSReleaseNotarization: "required",
+    });
   });
 
   it("keeps Linux LibreOffice discovery bounded to the product root", () => {
@@ -216,6 +323,135 @@ describe("ownership and seeds", () => {
     const unsafeSoffice = join(broadRoot, "program", "soffice");
     writeExecutable(unsafeSoffice, fakeOkScript());
     assert.equal(resolveLibreOfficeInstallRoot(unsafeSoffice, "linux"), "");
+  });
+});
+
+describe("managed directory copying", () => {
+  it("rejects a destination nested inside the source tree", () => {
+    const source = tempDir();
+    writeFileSync(join(source, "payload"), "ok");
+    assert.throws(
+      () => copyDirectoryContents(source, join(source, "copy")),
+      /copy target must not be inside its source root/,
+    );
+  });
+
+  it("preserves relative symlinks whose targets remain inside the source root", () => {
+    const source = tempDir();
+    const target = tempDir();
+    mkdirSync(join(source, "Versions", "1"), { recursive: true });
+    writeFileSync(join(source, "Versions", "1", "payload"), "ok");
+    symlinkSync("1", join(source, "Versions", "Current"));
+    symlinkSync("Versions/Current/payload", join(source, "payload-link"));
+
+    copyDirectoryContents(source, join(target, "copy"));
+
+    const copiedCurrent = join(target, "copy", "Versions", "Current");
+    const copiedPayload = join(target, "copy", "payload-link");
+    assert.equal(lstatSync(copiedCurrent).isSymbolicLink(), true);
+    assert.equal(readlinkSync(copiedCurrent), "1");
+    assert.equal(lstatSync(copiedPayload).isSymbolicLink(), true);
+    assert.equal(readFileSync(copiedPayload, "utf8"), "ok");
+  });
+
+  it("rejects broken and source-root escaping symlinks", () => {
+    const brokenSource = tempDir();
+    symlinkSync("missing", join(brokenSource, "broken"));
+    assert.throws(
+      () => copyDirectoryContents(brokenSource, join(tempDir(), "copy")),
+      /broken or cyclic symlink/,
+    );
+
+    const escapingSource = tempDir();
+    const outside = join(tempDir(), "outside");
+    writeFileSync(outside, "outside");
+    symlinkSync(relative(escapingSource, outside), join(escapingSource, "escape"));
+    assert.throws(
+      () => copyDirectoryContents(escapingSource, join(tempDir(), "copy")),
+      /external symlink is forbidden/,
+    );
+  });
+
+  it("rejects absolute symlinks even when the target is inside the source root", () => {
+    const source = tempDir();
+    const payload = join(source, "payload");
+    writeFileSync(payload, "ok");
+    symlinkSync(payload, join(source, "absolute"));
+    assert.throws(
+      () => copyDirectoryContents(source, join(tempDir(), "copy")),
+      /absolute symlink is forbidden/,
+    );
+  });
+});
+
+describe("macOS LibreOffice staging policy", () => {
+  it("sets background-only and completes an ad-hoc inside-out signature", {
+    skip: process.platform !== "darwin",
+  }, () => {
+    const stagingRoot = tempDir();
+    const appRoot = join(stagingRoot, "LibreOffice.app");
+    writeMinimalMacOSApp(appRoot);
+
+    const background = setMacOSBackgroundOnlyApplication(appRoot, { ownershipRoot: stagingRoot });
+    assert.equal(background.activationPolicy, "background-only");
+    assert.equal(background.bundleIdentifier, "com.awaken.runtime.libreoffice-renderer");
+    const plist = readFileSync(join(appRoot, "Contents", "Info.plist"), "utf8");
+    assert.match(plist, /LSBackgroundOnly/);
+    assert.match(plist, /com\.awaken\.runtime\.libreoffice-renderer/);
+    assert.doesNotMatch(plist, /LSUIElement/);
+    assert.doesNotMatch(plist, /CFBundleDocumentTypes|CFBundleURLTypes|NSServices|UTExportedTypeDeclarations|UTImportedTypeDeclarations/);
+    assert.equal(existsSync(join(appRoot, "Contents", "PlugIns", "QuickLookPreview.appex")), false);
+    assert.equal(existsSync(join(appRoot, "Contents", "PlugIns", "QuickLookThumbnail.appex")), false);
+    assert.equal(existsSync(join(appRoot, "Contents", "Library", "Spotlight", "OOoSpotlightImporter.mdimporter")), false);
+
+    const cacheDirectory = join(appRoot, "Contents", "Resources", "python", "__pycache__");
+    mkdirSync(cacheDirectory, { recursive: true });
+    const cacheFile = join(cacheDirectory, "runtime.pyc");
+    writeFileSync(cacheFile, "sealed");
+    const signing = signMacOSRuntimeApplication(appRoot, { ownershipRoot: stagingRoot });
+    assert.equal(signing.mode, "ad-hoc");
+    assert.equal(signing.strictVerified, true);
+    assert.equal(signing.gatekeeperVerified, false);
+    const immutable = sealMacOSRuntimeApplicationPermissions(appRoot, {
+      ownershipRoot: stagingRoot,
+    });
+    assert.equal(immutable.sealed, true);
+    assert.equal(lstatSync(cacheDirectory).mode & 0o222, 0);
+    assert.equal(lstatSync(cacheFile).mode & 0o222, 0);
+    assert.throws(
+      () => verifyMacOSLibreOfficeReleaseSeed(appRoot),
+      /unexpected bundle identifier/,
+    );
+  });
+
+  it("requires an explicit non-ad-hoc identity for release signing", {
+    skip: process.platform !== "darwin",
+  }, () => {
+    const stagingRoot = tempDir();
+    const appRoot = join(stagingRoot, "LibreOffice.app");
+    writeMinimalMacOSApp(appRoot);
+    assert.throws(
+      () => signMacOSRuntimeApplication(appRoot, {
+        ownershipRoot: stagingRoot,
+        release: true,
+        identity: "-",
+      }),
+      /requires AWAKEN_RUNTIME_CODESIGN_IDENTITY/,
+    );
+  });
+
+  it("refuses to mutate the source application itself", {
+    skip: process.platform !== "darwin",
+  }, () => {
+    const appRoot = join(tempDir(), "LibreOffice.app");
+    writeMinimalMacOSApp(appRoot);
+    assert.throws(
+      () => setMacOSBackgroundOnlyApplication(appRoot, {
+        ownershipRoot: dirname(appRoot),
+        sourceRoot: appRoot,
+      }),
+      /refusing to mutate the LibreOffice source application/,
+    );
   });
 });
 
@@ -466,6 +702,108 @@ describe("stage publish rollback", () => {
     assert.equal(parsed.active, "0.2.0/darwin-arm64");
     assert.equal(parsed.previous, "0.1.0/darwin-arm64");
     assert.equal(resolveManagedPath(join(root, "current"), root).ok, false);
+  });
+});
+
+describe("release runtime archive contract", () => {
+  it("packages only fully signed and notarized revisions with a digest manifest", () => {
+    const source = readFileSync(
+      join(repoRoot, "scripts/package-primary-runtime-archive.mjs"),
+      "utf8",
+    );
+    const platformSource = readFileSync(
+      join(repoRoot, "scripts/runtime-archive-platform.mjs"),
+      "utf8",
+    );
+    assert.match(source, /mode !== "developer-id"/);
+    assert.match(source, /notarized !== true/);
+    assert.match(source, /stapled !== true/);
+    assert.match(source, /codesign/);
+    assert.match(source, /stapler/);
+    assert.match(source, /spctl/);
+    assert.match(source, /sha256/);
+    assert.match(source, /designatedRequirement/);
+    assert.match(source, /teamIdentifier/);
+    assert.match(platformSource, /--keepParent/);
+  });
+
+  it("uses platform-native archive commands and a shared SHA-256 contract", () => {
+    assert.equal(runtimeArchivePlatform("win32"), "windows");
+    assert.equal(runtimeArchivePlatform("darwin"), "darwin");
+    assert.equal(runtimeOfficeExecutableRelativePath("win32"), "program/soffice.com");
+    assert.equal(runtimeOfficeExecutableRelativePath("darwin"), "Contents/MacOS/soffice");
+
+    const macCreate = createRuntimeArchiveInvocation(
+      "darwin",
+      "/runtime/revision",
+      "/output/runtime.zip",
+    );
+    assert.equal(macCreate.command, "ditto");
+    assert.ok(macCreate.args.includes("--keepParent"));
+
+    const windowsCreate = createRuntimeArchiveInvocation(
+      "win32",
+      "C:\\runtime\\revision",
+      "C:\\output\\runtime.zip",
+    );
+    const windowsExtract = extractRuntimeArchiveInvocation(
+      "win32",
+      "C:\\output\\runtime.zip",
+      "C:\\staging",
+    );
+    assert.equal(windowsCreate.command, "powershell.exe");
+    assert.equal(windowsExtract.command, "powershell.exe");
+    assert.match(windowsCreate.args.join(" "), /Compress-Archive/);
+    assert.match(windowsCreate.args.join(" "), /hidden entries/);
+    assert.match(windowsExtract.args.join(" "), /Expand-Archive/);
+    const quoted = createRuntimeArchiveInvocation(
+      "win32",
+      "C:\\Nolan's runtime\\revision",
+      "C:\\output\\runtime.zip",
+    );
+    assert.match(quoted.args.join(" "), /Nolan''s runtime/);
+    assert.doesNotMatch(
+      `${windowsCreate.command} ${windowsCreate.args.join(" ")} ${windowsExtract.command} ${windowsExtract.args.join(" ")}`,
+      /codesign|xcrun|spctl|ditto/,
+    );
+
+    const integrity = runtimeArchiveIntegrityManifest();
+    assert.equal(hasRuntimeArchiveIntegrity({ integrity }), true);
+    assert.equal(hasRuntimeArchiveIntegrity({}), false);
+  });
+
+  it("installs without signing and activates only after archive and platform verification", () => {
+    const source = readFileSync(
+      join(repoRoot, "scripts/install-primary-runtime-archive.mjs"),
+      "utf8",
+    );
+    assert.match(source, /SHA-256/);
+    assert.match(source, /validateExtractedTree/);
+    assert.match(source, /codesign/);
+    assert.match(source, /stapler/);
+    assert.match(source, /spctl/);
+    assert.match(source, /expectedTeamIdentifier/);
+    assert.match(source, /expectedPlatform === "darwin"/);
+    assert.match(source, /expectedPlatform !== "darwin" && expectedPlatform !== "windows"/);
+    assert.match(source, /com\.awaken\.runtime\.libreoffice-renderer/);
+    assert.match(source, /renameSync\(extracted, target\)/);
+    assert.match(source, /writeCurrentJson/);
+    assert.doesNotMatch(source, /codesign[^\n]*--sign/);
+    assert.ok(
+      source.indexOf("renameSync(extracted, target)") >
+        source.indexOf("runtime designated requirement does not match"),
+      "immutable publish must happen after signature verification",
+    );
+  });
+
+  it("ordinary Windows Desktop packages the managed runtime without using the macOS release path", () => {
+    const source = readFileSync(
+      join(repoRoot, "scripts/package-primary-runtime-for-desktop.mjs"),
+      "utf8",
+    );
+    assert.match(source, /process\.platform !== "win32"/);
+    assert.match(source, /package-primary-runtime-archive\.mjs/);
+    assert.doesNotMatch(source, /codesign|xcrun|spctl|ditto/);
   });
 });
 

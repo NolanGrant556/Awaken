@@ -24,8 +24,8 @@ import {
   AwakenComposerBar as ComposerBar,
   AwakenDisclosure as Disclosure,
   AwakenDialog as Dialog,
+  AwakenDeliverableList as DeliverableList,
   AwakenExecutionFeed as ExecutionFeed,
-  AwakenFileChangeSummary as FileChangeSummary,
   AwakenLightInspectorRail as LightInspectorRail,
   AwakenSelectableCard as SelectableCard,
   AwakenSidebar as Sidebar,
@@ -45,13 +45,19 @@ import {
   type PlatformKind,
   type ProjectItem,
 } from "@awaken/design-system";
-import { createRuntimeClient, type SubscribeHandlers } from "./runtime/client";
+import {
+  createRuntimeClient,
+  desktopOperationIssueFromError,
+  type SubscribeHandlers,
+} from "./runtime/client";
 import type {
   AwakenTheme,
   AwakenThemePreference,
   ComposerToken,
+  DesktopOperationIssue,
   MassMessageReviewDecision,
   RuntimeInfo,
+  RuntimeProject,
   RunInputAttachment,
   RuntimeModelProfileSummary,
   RuntimeRunStatus,
@@ -84,13 +90,18 @@ import {
 } from "./runtime/thread-transcript";
 import {
   DEFAULT_WORKSPACE_PROJECT_ID,
+  TRACKED_TRASH_OPERATIONS_STORAGE_KEY,
+  canReconcileTrackedTrashOperation,
   isSameWorkspacePath,
   mergeWorkspaceProjects,
+  parseTrackedTrashOperations,
   projectIdForWorkspacePath,
   projectIdForThread,
-  removeWorkspaceProject,
-  upsertWorkspaceProject,
+  projectOperationReconciliationState,
+  upsertTrackedTrashOperation,
+  workspacePathForLegacyProjectId,
   workspaceLabelForPath,
+  type TrackedTrashOperation,
   type WorkspaceProject,
 } from "./projectWorkspace";
 import { DesktopSettingsDialog } from "./settings/DesktopSettingsDialog";
@@ -132,6 +143,16 @@ export type UserQuestionSelection = {
 };
 
 const USER_QUESTION_OTHER_OPTION = "__other__";
+
+type ProjectDeleteAction = "detach" | "delete_history" | "trash";
+
+type PendingProjectDelete = {
+  projectId: string;
+  backendProjectId: string;
+  label: string;
+  action: ProjectDeleteAction;
+  threadCount: number;
+};
 
 const emptyUserQuestionSelection = (): UserQuestionSelection => ({
   selected: [],
@@ -614,16 +635,11 @@ export function buildWorkspaceRegistryPersistRequest(args: {
     defaultProjectRemoved,
   } = args;
 
-  const shouldKeepDefaultWorkspace =
-    !defaultProjectRemoved ||
-    threadWorkspacePaths.some((path) =>
-      isSameWorkspacePath(path, defaultWorkspacePath),
-    );
+  const shouldKeepDefaultWorkspace = !defaultProjectRemoved;
 
   const registeredWorkspacePaths = dedupeWorkspacePaths([
     pathForSelectedProject,
     ...projectsFromWorkspace.map((project) => project.path),
-    ...threadWorkspacePaths,
     shouldKeepDefaultWorkspace ? defaultWorkspacePath : undefined,
   ]);
 
@@ -679,18 +695,11 @@ function sameWorkspaceProjects(
       const existing = current[index];
       return (
         existing?.id === project.id &&
+        existing.backendProjectId === project.backendProjectId &&
         existing.path === project.path &&
         existing.label === project.label
       );
     })
-  );
-}
-
-function isThreadBusyForDelete(thread: ThreadItem): boolean {
-  return Boolean(
-    thread.activeRunId ||
-    thread.runStatus === "running" ||
-    thread.runStatus === "cancelling",
   );
 }
 
@@ -950,7 +959,8 @@ export function App() {
   const inspectorCollapsedValueRef = useRef(false);
   const inspectorCollapsedBeforeResponsiveRef = useRef<boolean | null>(null);
   const persistedWorkspaceRegistryRef = useRef("");
-  const workspaceRegistryRestoredRef = useRef(false);
+  const projectLifecycleRestoredRef = useRef(false);
+  const projectOperationPollFailuresRef = useRef<Set<string>>(new Set());
   const threadTitlePollsRef = useRef<Map<string, () => void>>(new Map());
   const workspaceTargetPathRef = useRef<string>(
     readStoredString("awaken:workspace:path"),
@@ -990,6 +1000,7 @@ export function App() {
 
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
+  const [openingArtifactId, setOpeningArtifactId] = useState<string | null>(null);
   const [resolvingMassMessageReviewId, setResolvingMassMessageReviewId] =
     useState<string | null>(null);
   const [answeringUserQuestionId, setAnsweringUserQuestionId] =
@@ -999,6 +1010,10 @@ export function App() {
     RuntimeModelProfileSummary[]
   >([]);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
+  const [modelSettingsInitialModelSection, setModelSettingsInitialModelSection] =
+    useState<"configure" | "configured">("configure");
+  const [runCreateIssue, setRunCreateIssue] =
+    useState<DesktopOperationIssue | null>(null);
   const [appearanceThemePreference, setAppearanceThemePreference] =
     useState<AwakenThemePreference>(readStoredThemePreference);
   const [systemAppearanceTheme, setSystemAppearanceTheme] =
@@ -1037,6 +1052,19 @@ export function App() {
   });
   const [removedProjectIds, setRemovedProjectIds] = useState<string[]>(() =>
     readStoredStringArray("awaken:projects:removed"),
+  );
+  const [defaultBackendProjectId, setDefaultBackendProjectId] = useState<
+    string | undefined
+  >(undefined);
+  const [pendingProjectDelete, setPendingProjectDelete] =
+    useState<PendingProjectDelete | null>(null);
+  const [projectDeleteSubmitting, setProjectDeleteSubmitting] = useState(false);
+  const [trackedTrashOperations, setTrackedTrashOperations] = useState<
+    TrackedTrashOperation[]
+  >(() =>
+    parseTrackedTrashOperations(
+      readStoredString(TRACKED_TRASH_OPERATIONS_STORAGE_KEY),
+    ),
   );
   const defaultProjectRemoved = removedProjectIds.includes(
     DEFAULT_WORKSPACE_PROJECT_ID,
@@ -1198,6 +1226,13 @@ export function App() {
       JSON.stringify(removedProjectIds),
     );
   }, [removedProjectIds]);
+
+  useEffect(() => {
+    writeStoredValue(
+      TRACKED_TRASH_OPERATIONS_STORAGE_KEY,
+      JSON.stringify(trackedTrashOperations),
+    );
+  }, [trackedTrashOperations]);
 
   useEffect(() => {
     writeStoredValue("awaken:workspace:path", workspacePath);
@@ -1404,6 +1439,48 @@ export function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
+  function applyRuntimeProjects(projects: RuntimeProject[]): void {
+    const configuredDefaultWorkspacePath =
+      runtimeInfo?.defaultWorkspace ?? workspacePath;
+    const defaultProject = projects.find((project) =>
+      isSameWorkspacePath(
+        project.workspaceRoot,
+        configuredDefaultWorkspacePath,
+      ),
+    );
+    setDefaultBackendProjectId(defaultProject?.projectId);
+    setRemovedProjectIds(
+      defaultProject && defaultProject.state !== "active"
+        ? [DEFAULT_WORKSPACE_PROJECT_ID]
+        : [],
+    );
+
+    const nextProjects = projects
+      .filter(
+        (project) =>
+          project.state === "active" &&
+          !isSameWorkspacePath(
+            project.workspaceRoot,
+            configuredDefaultWorkspacePath,
+          ),
+      )
+      .map<WorkspaceProject>((project) => ({
+        id: project.projectId,
+        backendProjectId: project.projectId,
+        label: project.displayName || workspaceLabelForPath(project.workspaceRoot),
+        path: project.workspaceRoot,
+      }));
+    setProjectsFromWorkspace((current) =>
+      sameWorkspaceProjects(current, nextProjects) ? current : nextProjects,
+    );
+  }
+
+  async function refreshProjects(): Promise<RuntimeProject[]> {
+    const projects = await runtimeClient.listProjects(true);
+    applyRuntimeProjects(projects);
+    return projects;
+  }
+
   async function refreshThreads(): Promise<void> {
     if (!desktopReady) {
       return;
@@ -1422,6 +1499,136 @@ export function App() {
     dispatch({ type: "run/threadsLoaded", threads });
     return threads;
   }
+
+  useEffect(() => {
+    if (!desktopReady || trackedTrashOperations.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    let timer: number | undefined;
+
+    async function pollTrackedTrashOperations(): Promise<void> {
+      const checked = await Promise.all(
+        trackedTrashOperations.map(async (tracked) => {
+          try {
+            const operation = await runtimeClient.getProjectOperation(
+              tracked.operationId,
+            );
+            projectOperationPollFailuresRef.current.delete(tracked.operationId);
+            return {
+              tracked,
+              operation,
+              state: projectOperationReconciliationState(operation),
+            };
+          } catch (error) {
+            if (
+              !projectOperationPollFailuresRef.current.has(tracked.operationId)
+            ) {
+              projectOperationPollFailuresRef.current.add(tracked.operationId);
+              console.warn("project_operation_poll_failed", {
+                operationId: tracked.operationId,
+                error,
+              });
+            }
+            return undefined;
+          }
+        }),
+      );
+      if (cancelled) {
+        return;
+      }
+
+      const terminal = checked.filter(
+        (
+          result,
+        ): result is Exclude<(typeof checked)[number], undefined> =>
+          Boolean(result && result.state !== "pending"),
+      );
+      if (terminal.length > 0) {
+        try {
+          const projects = await runtimeClient.listProjects(true);
+          if (cancelled) {
+            return;
+          }
+          const reconciled = terminal.filter(({ tracked, state }) => {
+            const project = projects.find(
+              (candidate) =>
+                candidate.projectId === tracked.backendProjectId,
+            );
+            return canReconcileTrackedTrashOperation(state, project?.state);
+          });
+
+          if (reconciled.length > 0) {
+            applyRuntimeProjects(projects);
+            const reconciledIds = new Set(
+              reconciled.map(({ tracked }) => tracked.operationId),
+            );
+            const failed = reconciled.filter(
+              ({ state }) => state === "failed",
+            );
+            if (failed.length > 0) {
+              setExpandedProjectIds((current) => {
+                const next = [...current];
+                for (const { tracked } of failed) {
+                  if (tracked.wasExpanded && !next.includes(tracked.projectId)) {
+                    next.push(tracked.projectId);
+                  }
+                }
+                return next;
+              });
+              setNotice(
+                `未能将“${failed[0].tracked.label}”移到废纸篓，项目、历史和磁盘文件均保持不变。`,
+              );
+            } else {
+              setNotice(
+                `已将“${reconciled[0].tracked.label}”移到废纸篓。`,
+              );
+            }
+            setTrackedTrashOperations((current) =>
+              current.filter(
+                (tracked) => !reconciledIds.has(tracked.operationId),
+              ),
+            );
+            for (const operationId of reconciledIds) {
+              projectOperationPollFailuresRef.current.delete(operationId);
+            }
+
+            void runtimeClient
+              .listThreads()
+              .then((threads) => {
+                dispatch({ type: "run/threadsLoaded", threads });
+              })
+              .catch((error) => {
+                console.warn("project_operation_thread_refresh_failed", error);
+              });
+          }
+        } catch (error) {
+          console.warn("project_operation_reconcile_failed", error);
+        }
+      }
+
+      if (!cancelled) {
+        timer = window.setTimeout(() => {
+          void pollTrackedTrashOperations();
+        }, 1000);
+      }
+    }
+
+    void pollTrackedTrashOperations();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [
+    desktopReady,
+    runtimeClient,
+    runtimeInfo?.defaultWorkspace,
+    trackedTrashOperations,
+    workspacePath,
+  ]);
 
   async function refreshRuntimeInfoNow(): Promise<void> {
     if (runtimeState.supervisorStatus !== "running") {
@@ -1681,6 +1888,7 @@ export function App() {
     hasAttachments: composerAttachments.length > 0 || composerTokens.length > 0,
     inputAttachmentBlocked: false,
     runtimeErrorMessage: runtimeState.errorMessage,
+    runtimeOperationIssue: runCreateIssue,
   });
   const composerInlineTextPrefix = useMemo(
     () =>
@@ -1851,83 +2059,111 @@ export function App() {
   const workspaceRegistrySignature = JSON.stringify(workspaceRegistryRequest);
 
   useEffect(() => {
-    if (workspaceRegistryRestoredRef.current) {
+    if (
+      projectLifecycleRestoredRef.current ||
+      !desktopReady ||
+      !effectiveDefaultWorkspacePath
+    ) {
       return;
     }
-    workspaceRegistryRestoredRef.current = true;
+    projectLifecycleRestoredRef.current = true;
     let cancelled = false;
 
-    async function restoreWorkspaceRegistry(): Promise<void> {
+    async function restoreProjectLifecycle(): Promise<void> {
       try {
-        const snapshot = await runtimeClient.readWorkspaceRegistry();
+        let projects = await runtimeClient.listProjects(true);
+        const projectAtPath = (workspaceRoot: string) =>
+          projects.find((project) =>
+            isSameWorkspacePath(project.workspaceRoot, workspaceRoot),
+          );
+
+        const legacyActivePaths = dedupeWorkspacePaths([
+          ...(defaultProjectRemoved
+            ? []
+            : [effectiveDefaultWorkspacePath]),
+          ...projectsFromWorkspace.map((project) => project.path),
+        ]);
+        for (const workspaceRoot of legacyActivePaths) {
+          if (!projectAtPath(workspaceRoot)) {
+            const imported = await runtimeClient.upsertProject(
+              workspaceRoot,
+              workspaceLabelForPath(workspaceRoot),
+            );
+            projects = [...projects, imported];
+          }
+        }
+
+        for (const legacyProjectId of removedProjectIds) {
+          const workspaceRoot =
+            legacyProjectId === DEFAULT_WORKSPACE_PROJECT_ID
+              ? effectiveDefaultWorkspacePath
+              : workspacePathForLegacyProjectId(legacyProjectId);
+          if (!workspaceRoot) {
+            continue;
+          }
+          let project = projectAtPath(workspaceRoot);
+          if (!project) {
+            project = await runtimeClient.upsertProject(
+              workspaceRoot,
+              workspaceLabelForPath(workspaceRoot),
+            );
+            projects = [...projects, project];
+          }
+          if (project.state === "active") {
+            await runtimeClient.detachProject(
+              project.projectId,
+              `legacy-removed:${project.projectId}`,
+            );
+          }
+        }
+
+        const refreshed = await runtimeClient.listProjects(true);
         if (cancelled) {
           return;
         }
-        setProjectsFromWorkspace((current) => {
-          const restored = restoreWorkspaceProjectsFromRegistry({
-            currentProjects: current,
-            snapshot,
-            defaultWorkspacePath,
-            defaultProjectRemoved,
-            currentWorkspacePath: workspacePath,
-          });
-          return sameWorkspaceProjects(current, restored.projects)
-            ? current
-            : restored.projects;
-        });
-        const restoredWorkspacePath =
-          workspacePath.trim() || snapshot.lastWorkspacePath?.trim() || "";
-        if (restoredWorkspacePath && workspacePath.trim() === "") {
-          workspaceTargetPathRef.current = restoredWorkspacePath;
-          setWorkspacePath(restoredWorkspacePath);
-        }
-      } catch {
-        // Workspace registry restoration is best-effort.
+        applyRuntimeProjects(refreshed);
+      } catch (error) {
+        projectLifecycleRestoredRef.current = false;
+        console.error("project_lifecycle_restore_failed", error);
       }
     }
 
-    void restoreWorkspaceRegistry();
+    void restoreProjectLifecycle();
 
     return () => {
       cancelled = true;
     };
   }, [
+    desktopReady,
     defaultProjectRemoved,
-    defaultWorkspacePath,
+    effectiveDefaultWorkspacePath,
+    projectsFromWorkspace,
+    removedProjectIds,
     runtimeClient,
-    workspacePath,
   ]);
 
   useEffect(() => {
-    setProjectsFromWorkspace((current) => {
-      const next = mergeWorkspaceProjects(
-        current,
-        threadWorkspacePaths,
-        effectiveDefaultWorkspacePath,
-      );
-      return sameWorkspaceProjects(current, next) ? current : next;
-    });
-  }, [effectiveDefaultWorkspacePath, runtimeState.threads]);
-
-  useEffect(() => {
     const knownProjectIds = new Set([
-      DEFAULT_WORKSPACE_PROJECT_ID,
+      ...(defaultProjectRemoved ? [] : [DEFAULT_WORKSPACE_PROJECT_ID]),
       ...projectsFromWorkspace.map((project) => project.id),
     ]);
+    const fallbackProjectId = defaultProjectRemoved
+      ? projectsFromWorkspace[0]?.id
+      : DEFAULT_WORKSPACE_PROJECT_ID;
     setSelectedProjectId((current) =>
       current === undefined
         ? undefined
         : knownProjectIds.has(current)
           ? current
-          : DEFAULT_WORKSPACE_PROJECT_ID,
+          : fallbackProjectId,
     );
     setExpandedProjectIds((current) => {
       const next = current.filter((id) => knownProjectIds.has(id));
-      return next.includes(DEFAULT_WORKSPACE_PROJECT_ID)
+      return defaultProjectRemoved || next.includes(DEFAULT_WORKSPACE_PROJECT_ID)
         ? next
         : [DEFAULT_WORKSPACE_PROJECT_ID, ...next];
     });
-  }, [projectsFromWorkspace]);
+  }, [defaultProjectRemoved, projectsFromWorkspace]);
 
   useEffect(() => {
     if (persistedWorkspaceRegistryRef.current === workspaceRegistrySignature) {
@@ -1993,7 +2229,10 @@ export function App() {
           menuFooterAction: {
             label: "添加模型",
             icon: <Settings size={16} strokeWidth={1.9} />,
-            onClick: () => setModelSettingsOpen(true),
+            onClick: () => {
+              setModelSettingsInitialModelSection("configure");
+              setModelSettingsOpen(true);
+            },
           },
         }
       : {
@@ -2021,22 +2260,55 @@ export function App() {
     );
   }
 
+  function backendProjectIdFor(projectId: string): string | undefined {
+    if (projectId === DEFAULT_WORKSPACE_PROJECT_ID) {
+      return defaultBackendProjectId;
+    }
+    const project = projectsFromWorkspace.find((item) => item.id === projectId);
+    return project?.backendProjectId ?? project?.id;
+  }
+
+  function requestProjectDelete(
+    projectId: string,
+    action: ProjectDeleteAction,
+  ): void {
+    const backendProjectId = backendProjectIdFor(projectId);
+    if (!backendProjectId) {
+      setNotice("项目正在初始化，请稍后重试。");
+      return;
+    }
+    setPendingProjectDelete({
+      projectId,
+      backendProjectId,
+      label: projectLabelById.get(projectId) ?? "项目",
+      action,
+      threadCount: threadsForProject(projectId).length,
+    });
+  }
+
   function projectMenuItems(projectId: string) {
     return [
       {
-        id: "remove-folder",
-        label: "移除文件夹",
-        tone: "danger" as const,
+        id: "remove-project",
+        label: "从 Awaken 移除",
         onSelect: () => {
-          void deleteThreadsForProject(projectId, { removeProject: true });
+          requestProjectDelete(projectId, "detach");
         },
       },
       {
-        id: "delete-folder-history",
-        label: "全量删除历史会话",
+        id: "delete-project-history",
+        label: "删除 Awaken 历史",
         tone: "danger" as const,
         onSelect: () => {
-          void deleteThreadsForProject(projectId, { removeProject: false });
+          requestProjectDelete(projectId, "delete_history");
+        },
+      },
+      {
+        id: "trash-project",
+        label: "移到废纸篓",
+        tone: "danger" as const,
+        onSelect: () => {
+          requestProjectDelete(projectId, "trash");
         },
       },
     ];
@@ -2061,7 +2333,6 @@ export function App() {
             id: "delete-thread",
             label: "删除会话",
             tone: "danger",
-            disabled: isThreadBusyForDelete(thread),
             onSelect: () => {
               void handleDeleteThread(thread.threadId);
             },
@@ -2487,6 +2758,7 @@ export function App() {
     threadLoadSeqRef.current += 1;
     terminalSeenRef.current = false;
     setNotice(null);
+    setRunCreateIssue(null);
     prepareForRunStart();
     dispatch({
       type: "run/requested",
@@ -2502,10 +2774,18 @@ export function App() {
     setComposerTokenLeadingTexts({});
 
     try {
-      const runProjectId = projectIdForWorkspacePath(
+      const runProjectId = isSameWorkspacePath(
         workspaceRoot,
         effectiveDefaultWorkspacePath,
-      );
+      )
+        ? DEFAULT_WORKSPACE_PROJECT_ID
+        : projectsFromWorkspace.find((project) =>
+            isSameWorkspacePath(project.path, workspaceRoot),
+          )?.id ??
+          projectIdForWorkspacePath(
+            workspaceRoot,
+            effectiveDefaultWorkspacePath,
+          );
       const isNewThread = !runtimeState.activeThreadId;
       const nextThreadLabel = isNewThread
         ? composerThreadLabel(
@@ -2552,6 +2832,7 @@ export function App() {
         threadId: run.threadId,
         label: nextThreadLabel,
         runId: run.runId,
+        projectId: runProjectId,
         workspaceRoot: workspaceRoot,
       });
       if (isNewThread) {
@@ -2567,6 +2848,7 @@ export function App() {
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to create run";
+      setRunCreateIssue(desktopOperationIssueFromError(error));
       restoreComposerValue(draftComposerValue);
       setComposerAttachments(draftAttachments);
       setComposerTokens(draftComposerTokens);
@@ -2638,17 +2920,18 @@ export function App() {
       return;
     }
 
-    const nextProjectId = projectIdForWorkspacePath(
+    const nextProjectId = isSameWorkspacePath(
       nextWorkspacePath,
       effectiveDefaultWorkspacePath,
-    );
-    setProjectsFromWorkspace((current) =>
-      mergeWorkspaceProjects(
-        current,
-        [nextWorkspacePath],
-        effectiveDefaultWorkspacePath,
-      ),
-    );
+    )
+      ? DEFAULT_WORKSPACE_PROJECT_ID
+      : projectsFromWorkspace.find((project) =>
+          isSameWorkspacePath(project.path, nextWorkspacePath),
+        )?.id ??
+        projectIdForWorkspacePath(
+          nextWorkspacePath,
+          effectiveDefaultWorkspacePath,
+        );
     setSelectedProjectId(nextProjectId);
     workspaceTargetPathRef.current = nextWorkspacePath;
     setWorkspacePath(nextWorkspacePath);
@@ -2669,86 +2952,110 @@ export function App() {
     await loadThreadsIntoState();
   }
 
-  async function deleteThreadsForProject(
-    projectId: string,
-    options: { removeProject: boolean },
-  ): Promise<void> {
-    if (!desktopReady) {
+  async function handleConfirmProjectDelete(): Promise<void> {
+    const pending = pendingProjectDelete;
+    if (!pending || projectDeleteSubmitting || !desktopReady) {
       return;
     }
-
-    const projectLabel = projectLabelById.get(projectId) ?? "项目";
-    const threads = threadsForProject(projectId);
-    const shouldRemoveProject = options.removeProject;
-    const busyThread = threads.find(isThreadBusyForDelete);
-    if (busyThread) {
-      setNotice(`"${busyThread.label}" 正在运行，先停止后再删除。`);
-      return;
-    }
-
-    const hasThreads = threads.length > 0;
-    const shouldProceed = window.confirm(
-      hasThreads
-        ? `确认删除 "${projectLabel}" 下的 ${threads.length} 条历史会话？`
-        : shouldRemoveProject
-          ? `确认移除 "${projectLabel}"？`
-          : `"${projectLabel}" 暂无历史会话。`,
-    );
-    if (!shouldProceed || (!hasThreads && !shouldRemoveProject)) {
-      return;
-    }
-
-    const removedThreadIds = threads.map((thread) => thread.threadId);
+    setProjectDeleteSubmitting(true);
+    setNotice(null);
+    const idempotencyKey = window.crypto.randomUUID();
     try {
-      await Promise.all(
-        removedThreadIds.map((threadId) =>
-          runtimeClient.deleteThread(threadId),
-        ),
-      );
-      await refreshAfterThreadMutation(removedThreadIds);
-      if (shouldRemoveProject) {
-        if (projectId === DEFAULT_WORKSPACE_PROJECT_ID) {
-          setRemovedProjectIds((current) =>
-            current.includes(projectId) ? current : [...current, projectId],
-          );
-        } else {
-          setProjectsFromWorkspace((current) =>
-            removeWorkspaceProject(current, projectId),
-          );
-        }
-        setExpandedProjectIds((current) =>
-          current.filter((id) => id !== projectId),
+      const result =
+        pending.action === "detach"
+          ? await runtimeClient.detachProject(
+              pending.backendProjectId,
+              idempotencyKey,
+            )
+          : pending.action === "delete_history"
+            ? await runtimeClient.deleteProjectThreads(
+                pending.backendProjectId,
+                idempotencyKey,
+              )
+            : await runtimeClient.trashProject(
+                pending.backendProjectId,
+                idempotencyKey,
+              );
+      if (!result.ok) {
+        setNotice(result.message);
+        return;
+      }
+
+      const operation = result.operation;
+      const operationState = projectOperationReconciliationState(operation);
+      if (operationState === "failed") {
+        await Promise.all([
+          refreshProjects(),
+          loadThreadsIntoState(),
+        ]);
+        setNotice(
+          pending.action === "trash"
+            ? "未能移到废纸篓，项目、历史和磁盘文件均保持不变。"
+            : "项目操作未完成，请稍后重试。",
         );
-        if (selectedProjectId === projectId) {
-          const fallbackProject = projectsFromWorkspace.find(
-            (project) =>
-              project.id !== projectId &&
-              !isSameWorkspacePath(
-                project.path,
-                effectiveDefaultWorkspacePath,
-              ),
-          );
-          if (fallbackProject) {
-            setSelectedProjectId(fallbackProject.id);
-            workspaceTargetPathRef.current = fallbackProject.path;
-            setWorkspacePath(fallbackProject.path);
-          } else {
-            setSelectedProjectId(undefined);
-            workspaceTargetPathRef.current = "";
-            setWorkspacePath("");
+        setPendingProjectDelete(null);
+        return;
+      }
+
+      if (pending.action === "trash" && operationState === "pending") {
+        setTrackedTrashOperations((current) =>
+          upsertTrackedTrashOperation(current, {
+            operationId: operation.operationId,
+            projectId: pending.projectId,
+            backendProjectId: pending.backendProjectId,
+            label: pending.label,
+            wasExpanded: expandedProjectIds.includes(pending.projectId),
+          }),
+        );
+        resetActiveThreadContext();
+        setExpandedProjectIds((current) =>
+          current.filter((id) => id !== pending.projectId),
+        );
+        setPendingProjectDelete(null);
+        setNotice(
+          `正在将“${pending.label}”移到废纸篓，Awaken 会自动完成。`,
+        );
+        const refreshResults = await Promise.allSettled([
+          refreshProjects(),
+          loadThreadsIntoState(),
+        ]);
+        for (const refreshResult of refreshResults) {
+          if (refreshResult.status === "rejected") {
+            console.warn(
+              "project_operation_initial_refresh_failed",
+              refreshResult.reason,
+            );
           }
         }
+        return;
       }
+
+      if (pending.action !== "delete_history") {
+        resetActiveThreadContext();
+      }
+      await Promise.all([refreshProjects(), loadThreadsIntoState()]);
+      setExpandedProjectIds((current) =>
+        pending.action === "delete_history"
+          ? current
+          : current.filter((id) => id !== pending.projectId),
+      );
+      setPendingProjectDelete(null);
       setNotice(
-        shouldRemoveProject
-          ? hasThreads
-            ? `已移除 "${projectLabel}" 并删除历史会话`
-            : `已移除 "${projectLabel}"`
-          : `已删除 "${projectLabel}" 下的历史会话`,
+        pending.action === "detach"
+          ? `已从 Awaken 移除“${pending.label}”，磁盘文件和历史均已保留。`
+          : pending.action === "delete_history"
+            ? `已删除“${pending.label}”的 Awaken 历史，磁盘文件未改变。`
+            : `已将“${pending.label}”移到废纸篓。`,
       );
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "删除历史会话失败");
-      await refreshThreads();
+      console.error("project_delete_ui_failed", error);
+      setNotice("项目操作暂时失败，请稍后重试。");
+      await Promise.all([
+        refreshProjects().catch(() => []),
+        refreshThreads(),
+      ]);
+    } finally {
+      setProjectDeleteSubmitting(false);
     }
   }
 
@@ -2827,16 +3134,16 @@ export function App() {
       setNotice("会话不存在");
       return;
     }
-    if (isThreadBusyForDelete(thread)) {
-      setNotice(`"${thread.label}" 正在运行，先停止后再删除。`);
-      return;
-    }
     if (!window.confirm(`确认删除会话 "${thread.label}"？`)) {
       return;
     }
 
     try {
-      await runtimeClient.deleteThread(threadId);
+      const result = await runtimeClient.deleteThread(threadId);
+      if (!result.ok) {
+        setNotice(result.message);
+        return;
+      }
       await refreshAfterThreadMutation([threadId]);
       setNotice("已删除会话");
     } catch (error) {
@@ -2901,19 +3208,17 @@ export function App() {
         return;
       }
 
-      const next = upsertWorkspaceProject(
-        projectsFromWorkspace,
+      const project = await runtimeClient.upsertProject(
         result.path,
-        effectiveDefaultWorkspacePath,
+        workspaceLabelForPath(result.path),
       );
-      setProjectsFromWorkspace(next.projects);
-      if (next.projectId === DEFAULT_WORKSPACE_PROJECT_ID) {
-        setRemovedProjectIds((current) =>
-          current.filter(
-            (projectId) => projectId !== DEFAULT_WORKSPACE_PROJECT_ID,
-          ),
-        );
-      }
+      const nextProjectId = isSameWorkspacePath(
+        project.workspaceRoot,
+        effectiveDefaultWorkspacePath,
+      )
+        ? DEFAULT_WORKSPACE_PROJECT_ID
+        : project.projectId;
+      await refreshProjects();
       if (
         shouldResetActiveThreadForWorkspaceChange(
           activeThreadWorkspacePath,
@@ -2924,11 +3229,11 @@ export function App() {
       }
       workspaceTargetPathRef.current = result.path;
       setWorkspacePath(result.path);
-      setSelectedProjectId(next.projectId);
+      setSelectedProjectId(nextProjectId);
       setExpandedProjectIds((current) =>
-        current.includes(next.projectId)
+        current.includes(nextProjectId)
           ? current
-          : [...current, next.projectId],
+          : [...current, nextProjectId],
       );
       setCreateProjectDialogOpen(false);
     } catch (error) {
@@ -3334,10 +3639,56 @@ export function App() {
         />
       );
     }
-    if (item.kind === "fileChange") {
+    if (item.kind === "deliverables") {
+      const threadId = runtimeState.activeThreadId ?? runtimeState.threadId;
       return (
-        <FileChangeSummary key={key} files={item.files} status={item.status} />
+        <DeliverableList
+          key={key}
+          terminalStatus={item.terminalStatus}
+          items={item.files.map((file) => ({
+            id: file.artifactId,
+            title: file.title,
+            extension: file.extension,
+            fileType: file.fileType,
+            opening: openingArtifactId === file.artifactId,
+            disabled: !threadId,
+            onOpen: threadId
+              ? async () => {
+                  setOpeningArtifactId(file.artifactId);
+                  try {
+                    const result = await runtimeClient.openArtifact({
+                      threadId,
+                      runId: file.runId,
+                      artifactId: file.artifactId,
+                    });
+                    if (!result.ok) {
+                      setNotice(result.message);
+                    }
+                  } finally {
+                    setOpeningArtifactId((current) =>
+                      current === file.artifactId ? null : current,
+                    );
+                  }
+                }
+              : undefined,
+            onReveal: threadId
+              ? async () => {
+                  const result = await runtimeClient.revealArtifact({
+                    threadId,
+                    runId: file.runId,
+                    artifactId: file.artifactId,
+                  });
+                  if (!result.ok) {
+                    setNotice(result.message);
+                  }
+                }
+              : undefined,
+          }))}
+        />
       );
+    }
+    if (item.kind === "fileChange") {
+      return null;
     }
     return null;
   }
@@ -3504,6 +3855,47 @@ export function App() {
           >
             <strong>{panel.title}</strong>
             <p>{panel.message}</p>
+            {panel.actions && panel.actions.length > 0 ? (
+              <div className="composer-runtime-panel-actions">
+                {panel.actions.includes("retry") ? (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => {
+                      void handleComposerSubmit();
+                    }}
+                  >
+                    重试
+                  </Button>
+                ) : null}
+                {panel.actions.includes("relaunch") ? (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => {
+                      setNotice("正在重新启动 Awaken…");
+                      void runtimeClient.relaunchDesktop().catch(() => {
+                        setNotice("Awaken 重新启动失败，请再试一次。");
+                      });
+                    }}
+                  >
+                    重新启动 Awaken
+                  </Button>
+                ) : null}
+                {panel.actions.includes("reenter") ? (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => {
+                      setModelSettingsInitialModelSection("configured");
+                      setModelSettingsOpen(true);
+                    }}
+                  >
+                    在 Awaken 中恢复
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         ))}
       </div>
@@ -3521,6 +3913,26 @@ export function App() {
       </div>
     );
   }
+
+  const projectDeleteDialogTitle =
+    pendingProjectDelete?.action === "detach"
+      ? "从 Awaken 移除项目"
+      : pendingProjectDelete?.action === "delete_history"
+        ? "删除 Awaken 历史"
+        : "将项目移到废纸篓";
+  const projectDeleteDialogBody = !pendingProjectDelete
+    ? ""
+    : pendingProjectDelete.action === "detach"
+      ? `“${pendingProjectDelete.label}”会从侧栏移除。${pendingProjectDelete.threadCount} 条历史会话和磁盘文件都会保留。`
+      : pendingProjectDelete.action === "delete_history"
+        ? `将删除“${pendingProjectDelete.label}”的 ${pendingProjectDelete.threadCount} 条 Awaken 历史会话。项目和磁盘目录都会保留；运行中的任务会先自动停止。`
+        : `“${pendingProjectDelete.label}”的磁盘目录将进入系统废纸篓。只有废纸篓操作成功后，Awaken 才会删除对应历史；失败时项目、历史和文件都会保持原样。`;
+  const projectDeleteConfirmLabel =
+    pendingProjectDelete?.action === "detach"
+      ? "确认移除"
+      : pendingProjectDelete?.action === "delete_history"
+        ? "确认删除历史"
+        : "移到废纸篓";
 
   return (
     <>
@@ -3938,6 +4350,39 @@ export function App() {
         </div>
       </Dialog>
       <Dialog
+        open={Boolean(pendingProjectDelete)}
+        title={projectDeleteDialogTitle}
+        onOpenChange={(open) => {
+          if (!open && !projectDeleteSubmitting) {
+            setPendingProjectDelete(null);
+          }
+        }}
+        footer={
+          <>
+            <Button
+              variant="default"
+              size="md"
+              disabled={projectDeleteSubmitting}
+              onClick={() => setPendingProjectDelete(null)}
+            >
+              取消
+            </Button>
+            <Button
+              variant="primary"
+              size="md"
+              loading={projectDeleteSubmitting}
+              onClick={() => {
+                void handleConfirmProjectDelete();
+              }}
+            >
+              {projectDeleteConfirmLabel}
+            </Button>
+          </>
+        }
+      >
+        <p className="project-delete-dialog-copy">{projectDeleteDialogBody}</p>
+      </Dialog>
+      <Dialog
         open={renameDialogOpen}
         title="重命名会话"
         onOpenChange={(open) => {
@@ -4001,6 +4446,7 @@ export function App() {
           void handleAppearanceThemeChange(theme);
         }}
         onOpenChange={setModelSettingsOpen}
+        initialModelSection={modelSettingsInitialModelSection}
         onProfilesChanged={() => {
           void refreshRuntimeInfoNow();
         }}
@@ -4011,6 +4457,7 @@ export function App() {
         runtimeClient={runtimeClient}
         onOpenSettings={() => {
           setProfilePopoverOpen(false);
+          setModelSettingsInitialModelSection("configured");
           setModelSettingsOpen(true);
         }}
         onClose={() => setProfilePopoverOpen(false)}

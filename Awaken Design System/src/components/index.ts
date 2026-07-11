@@ -3,6 +3,8 @@ export * from "./AwakenApprovalCard";
 export * from "./AwakenAppShell";
 export * from "./AwakenArtifactCard";
 export * from "./AwakenArtifactGrid";
+export * from "./AwakenDeliverableCard";
+export * from "./AwakenDeliverableList";
 export * from "./AwakenAssistantMessage";
 export * from "./AwakenAvatar";
 export * from "./AwakenBrandRow";

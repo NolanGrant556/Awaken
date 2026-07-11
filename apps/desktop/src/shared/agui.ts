@@ -52,6 +52,8 @@ export type AguiApprovalDecision = "approved" | "rejected";
 
 export type AguiArtifactStatus = "ready" | "pending" | "error";
 
+export type AguiArtifactRole = "deliverable" | "preview" | "support";
+
 export type AguiRunOutcome = {
   type: string;
 };
@@ -192,6 +194,9 @@ export type AguiEvent = {
   artifactPath?: string;
   artifactContent?: string;
   artifactStatus?: AguiArtifactStatus;
+  artifactRole?: AguiArtifactRole;
+  artifactContractVersion?: number;
+  artifactProducer?: string;
   outcome?: AguiRunOutcome;
   rawType?: string;
   rawEvent?: Record<string, unknown>;

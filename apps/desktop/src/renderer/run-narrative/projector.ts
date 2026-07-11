@@ -536,6 +536,7 @@ function applyStatus(
     case "fileChange":
       return status === "done" ? { ...item, status } : item;
     case "compactBoundary":
+    case "deliverables":
       return item;
     case "tool":
       return status === "done" || status === "error" ? { ...item, status } : item;

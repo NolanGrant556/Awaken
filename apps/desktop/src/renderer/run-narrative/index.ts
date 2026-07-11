@@ -8,6 +8,8 @@ export {
 
 export type {
   ChangedFile,
+  DeliverableFile,
+  DeliverableFileType,
   InspectorSelection,
   PromptNarrativeToken,
   RunAction,

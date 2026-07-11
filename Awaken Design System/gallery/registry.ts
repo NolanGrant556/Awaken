@@ -3,6 +3,8 @@ import { AwakenActivityLineDemo } from "../src/components/AwakenActivityLine";
 import { AwakenApprovalCardDemo } from "../src/components/AwakenApprovalCard";
 import { AwakenAppShellDemo } from "../src/components/AwakenAppShell";
 import { AwakenArtifactCardDemo } from "../src/components/AwakenArtifactCard";
+import { AwakenDeliverableCardDemo } from "../src/components/AwakenDeliverableCard";
+import { AwakenDeliverableListDemo } from "../src/components/AwakenDeliverableList";
 import { AwakenArtifactGridDemo } from "../src/components/AwakenArtifactGrid";
 import { AwakenAssistantMessageDemo } from "../src/components/AwakenAssistantMessage";
 import { AwakenAvatarDemo } from "../src/components/AwakenAvatar";
@@ -79,6 +81,8 @@ export const awakenGalleryEntries: AwakenGalleryEntry[] = [
   { id: "awaken-approval-card", name: "AwakenApprovalCard", displayName: "审批卡片", demo: AwakenApprovalCardDemo },
   { id: "awaken-app-shell", name: "AwakenAppShell", displayName: "应用外壳", demo: AwakenAppShellDemo },
   { id: "awaken-artifact-card", name: "AwakenArtifactCard", displayName: "产物卡片", demo: AwakenArtifactCardDemo },
+  { id: "awaken-deliverable-card", name: "AwakenDeliverableCard", displayName: "最终交付物卡片", demo: AwakenDeliverableCardDemo },
+  { id: "awaken-deliverable-list", name: "AwakenDeliverableList", displayName: "最终交付物列表", demo: AwakenDeliverableListDemo },
   { id: "awaken-artifact-grid", name: "AwakenArtifactGrid", displayName: "产物网格", demo: AwakenArtifactGridDemo },
   { id: "awaken-assistant-message", name: "AwakenAssistantMessage", displayName: "助手消息", demo: AwakenAssistantMessageDemo },
   { id: "awaken-avatar", name: "AwakenAvatar", displayName: "头像", demo: AwakenAvatarDemo },

@@ -268,7 +268,7 @@ export function useRunStageScrollController({
   });
   const returnToLatestBottomPx = Math.max(16, composerBarBottomInsetPx + RETURN_TO_LATEST_BUTTON_GAP_PX);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     interactionStateRef.current = interactionState;
   }, [interactionState]);
 
@@ -721,8 +721,11 @@ export function useRunStageScrollController({
       return;
     }
 
-    const state = interactionStateRef.current;
-    if (state.followMode === "anchoring" && !state.pendingPromptAnchorTurnId) {
+    if (
+      interactionState.followMode === "anchoring" &&
+      !interactionState.pendingPromptAnchorTurnId &&
+      interactionState.currentTurnId !== latestPromptId
+    ) {
       dispatchInteraction({ type: "bind-latest-turn", turnId: latestPromptId });
       return;
     }
@@ -733,7 +736,8 @@ export function useRunStageScrollController({
       return;
     }
 
-    const isPromptAnchorPending = state.pendingPromptAnchorTurnId === latestPromptId;
+    const isPromptAnchorPending =
+      interactionState.pendingPromptAnchorTurnId === latestPromptId;
     const bottomReserve = latestTurnMinHeightBottomReserve({
       hasBodyItems: turnHasBodyItems(turn),
       isPromptAnchorPending,
@@ -767,16 +771,19 @@ export function useRunStageScrollController({
       return;
     }
 
-    if (state.followMode === "anchoring" && turnHasBodyItems(turn)) {
+    if (interactionState.followMode === "anchoring" && turnHasBodyItems(turn)) {
       dispatchInteraction({ type: "latest-body-ready" });
       return;
     }
 
-    if (state.followMode === "following_latest") {
+    if (interactionState.followMode === "following_latest") {
       scrollLatestTurnToScrollTail(latestPromptId, "follow_latest");
     }
   }, [
     composerOutputGapPx,
+    interactionState.currentTurnId,
+    interactionState.followMode,
+    interactionState.pendingPromptAnchorTurnId,
     latestPromptId,
     latestTurnMinHeightPx,
     narrativeItems,

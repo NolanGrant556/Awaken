@@ -79,6 +79,7 @@ import { ModelProfileStore } from "./model-profile-store.js";
 import { runDesktopOperation } from "./desktop-operation.js";
 import { PetStore } from "./pets/pet-store.js";
 import { detectCodexHome, importCodexPets } from "./pets/codex-pet-importer.js";
+import { importBuiltinPets, resolveBuiltinPetsRoot } from "./pets/builtin-pet-importer.js";
 import { PetWindowManager } from "./pets/pet-window-manager.js";
 import { PET_IPC_CHANNELS } from "../shared/pets.js";
 import { openRecordedArtifact, revealRecordedArtifact } from "./artifact-open.js";
@@ -1857,6 +1858,20 @@ app.whenReady().then(async () => {
   await modelProfileStore.initialize();
   petStore = new PetStore(configDir, app.getPath("userData"));
   await petStore.initialize();
+  const builtinPetReport = await importBuiltinPets(
+    petStore,
+    resolveBuiltinPetsRoot({
+      packaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      appPath: app.getAppPath(),
+    }),
+  );
+  if (builtinPetReport.failed.length > 0 || builtinPetReport.conflicts.length > 0) {
+    console.error("[awaken-desktop] built-in pet import incomplete", {
+      failed: builtinPetReport.failed,
+      conflicts: builtinPetReport.conflicts,
+    });
+  }
   petWindowManager = new PetWindowManager({
     petStore,
     focusMainWindow: () => {

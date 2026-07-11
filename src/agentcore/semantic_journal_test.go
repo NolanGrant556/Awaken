@@ -2,7 +2,9 @@ package agentcore
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,6 +73,89 @@ func TestUserMessagePersistenceFailureIsVisibleAndDoesNotAdvanceConversation(t *
 	if len(events) != 1 || events[0].Type != RunErrorEventType ||
 		events[0].Code != "PERSISTENCE_ERROR" || events[0].TerminalReason != TerminalReasonPersistenceError {
 		t.Fatalf("missing user-visible persistence event: %+v", events)
+	}
+}
+
+func TestUserMessagePersistsStructuredAttachmentsAndComposerTokens(t *testing.T) {
+	server := newRunnerStreamServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		writeRunnerStreamText(t, w, "done")
+	})
+	defer server.Close()
+
+	recorder := &failingRecorder{}
+	agent := NewAgentWithThreadID(testAgentConfig(server.URL, 1), "thread_structured_input")
+	agent.SetRunIdentity("run_structured_input", "session_structured_input")
+	agent.SetSemanticRecorder(recorder)
+	agent.SetPendingUserAttachments([]convcontext.MessageAttachment{
+		{
+			ID:          "image-1",
+			Kind:        "image",
+			MimeType:    "image/png",
+			DataBase64:  "must-not-enter-journal",
+			DisplayName: "clipboard.png",
+			Width:       120,
+			Height:      80,
+			ByteSize:    42,
+			StorageKey:  "thread_structured_input/image-1.png",
+		},
+		{
+			ID:          "file-1",
+			Kind:        "file",
+			MimeType:    "text/plain",
+			Path:        "/tmp/acceptance.txt",
+			DisplayName: "acceptance.txt",
+			ByteSize:    17,
+		},
+	})
+	agent.SetPendingComposerTokens([]SemanticComposerToken{{
+		ID:    "skill:docs:user",
+		Type:  "skill",
+		Label: "docs",
+		Payload: map[string]any{
+			"skillId":      "docs",
+			"sourceOrigin": "user",
+		},
+	}})
+
+	if _, err := agent.RunStreamWithEvents(context.Background(), "inspect inputs", nil); err != nil {
+		t.Fatalf("RunStreamWithEvents: %v", err)
+	}
+
+	var userRecord *SemanticRecord
+	for i := range recorder.records {
+		if recorder.records[i].Kind == SemanticKindUserMessage {
+			userRecord = &recorder.records[i]
+			break
+		}
+	}
+	if userRecord == nil {
+		t.Fatal("missing durable user_message")
+	}
+	encoded, err := json.Marshal(userRecord.Payload)
+	if err != nil {
+		t.Fatalf("marshal user_message payload: %v", err)
+	}
+	if strings.Contains(string(encoded), "must-not-enter-journal") || strings.Contains(string(encoded), "data_base64") {
+		t.Fatalf("journal duplicated inline image bytes: %s", encoded)
+	}
+	var payload struct {
+		AttachmentCount int                             `json:"attachment_count"`
+		Attachments     []SemanticUserMessageAttachment `json:"attachments"`
+		ComposerTokens  []SemanticComposerToken         `json:"composer_tokens"`
+	}
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatalf("decode user_message payload: %v", err)
+	}
+	if payload.AttachmentCount != 2 || len(payload.Attachments) != 2 {
+		t.Fatalf("attachment identity/order missing: %+v", payload)
+	}
+	if payload.Attachments[0].ID != "image-1" || payload.Attachments[0].StorageKey != "thread_structured_input/image-1.png" ||
+		payload.Attachments[1].ID != "file-1" || payload.Attachments[1].Path != "/tmp/acceptance.txt" {
+		t.Fatalf("unexpected durable attachments: %+v", payload.Attachments)
+	}
+	if len(payload.ComposerTokens) != 1 || payload.ComposerTokens[0].ID != "skill:docs:user" ||
+		payload.ComposerTokens[0].Payload["skillId"] != "docs" {
+		t.Fatalf("composer token identity missing: %+v", payload.ComposerTokens)
 	}
 }
 

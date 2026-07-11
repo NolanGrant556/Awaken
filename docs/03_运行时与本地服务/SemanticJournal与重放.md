@@ -24,7 +24,11 @@ persistence_warning
 
 设计上必须耐久：用户输入、最终 assistant message、完整 tool call 参数、canonical tool result、artifact/file change/turn diff、permission decision、skill/resource/runtime/recovery 事实、turn boundary 和 terminal。
 
-当前用户输入合同有明确缺口：v2 `user_message` 由Agent goroutine在Skill预激活之后写入；预激活失败可能只有run开始/终态而没有用户消息。附件只以 `attachment_count` 进入payload，`messagesFromSemanticRecords` 只恢复文本，`durableRunsFromSemanticRecords` 也没有重建 `Run.InputAttachments` / composer tokens。Desktop `actionsForThreadTranscript()` 只从这两个 run 字段生成结构化 prompt，所以重启后只剩文本。这些缺口不改变tool call的append-before-side-effect门，但意味着“全部输入事实已完整耐久”尚未实现，并直接违反 [01 Workbench 产品契约](../01_桌面工作台/中间交互区域/产品与交互契约.md) 的输入重放不变量。
+当前 v2 `user_message` 耐久保存用户文本、有序 `attachments` 和 `composer_tokens`。附件字段保存 identity、kind、MIME、path/display name、尺寸、字节数与 runtime-owned `storage_key`；image base64 不重复写入 JSONL。`attachment_count` 只是兼容字段，不是恢复来源。
+
+`messagesFromSemanticRecords` 只把可成功 hydrate 的附件注入模型历史；`durableRunsFromSemanticRecords` 则恢复 `Run.InputAttachments` / `Run.ComposerTokens` 供 Desktop 投影。若 runtime-owned image blob 缺失，durable run 仍保留其历史卡 identity，但不将无内容的图片注入模型上下文；不扫描目录寻找替代物。修复前已写入、只有 `attachment_count` 的旧 v2 记录没有足够事实可补回，只恢复可确认文本； v1 adapter/recorder 保留旧记录本来已有的附件与 token 字段。
+
+尚存的用户输入时序缺口是：v2 `user_message` 由 Agent goroutine 在 Skill 预激活之后写入；预激活失败可能只有 run 开始/终态而没有用户消息。这一缺口不改变 tool call 的 append-before-side-effect 门，但意味着“所有被接受输入都已在预激活前耐久”尚未实现。
 
 仅用于 live 体验：reasoning/text delta、stdout/stderr delta、args delta、spinner/progress。重放从耐久事实重新投影，不要求逐字重现临时动画。
 
@@ -73,7 +77,7 @@ v2 `SemanticRecord.seq` 只定义 journal 内的单调语义顺序。live 与 re
 - canonical outcome 完整保存，UI/模型投影各自有界和脱敏。
 - 当前不支持 persistence degraded continuation。
 - 当前不支持重启后自动重试 outcome unknown 的工具。
-- 当前不支持从 v2 journal 跨重启完整恢复结构化附件和 composer token。
+- 不支持从旧 v2 count-only 记录、prompt 文字或附件目录推断未持久化的结构化附件/token。
 - journal record sequence 与 09 域定义的 transport/wire sequence 不得合并成一个“序号”。
 
 ## 测试与 Desktop 验收
@@ -84,10 +88,11 @@ v2 `SemanticRecord.seq` 只定义 journal 内的单调语义顺序。live 与 re
 - [`src/runtime/journal_store_semantic_test.go`](../../src/runtime/journal_store_semantic_test.go)
 - [`src/runtime/live_semantic_recorder_test.go`](../../src/runtime/live_semantic_recorder_test.go)
 - [`src/runtime/semantic_replay_test.go`](../../src/runtime/semantic_replay_test.go)
+- [`src/runtime/semantic_user_message_test.go`](../../src/runtime/semantic_user_message_test.go)
 - [`src/protocol/agui/semantic_projector_test.go`](../../src/protocol/agui/semantic_projector_test.go)
 - [`apps/desktop/src/renderer/runtime/thread-transcript.test.ts`](../../apps/desktop/src/renderer/runtime/thread-transcript.test.ts)
 - [`apps/desktop/src/renderer/runtime/client.test.ts`](../../apps/desktop/src/renderer/runtime/client.test.ts)
 
-这些用例当前没有覆盖“附件/token 进入 v2 journal→重建 durable run→Desktop prompt 重放”的端到端合同；仅验证 live 附件或向 renderer 直接提供附件不能关闭该缺口。
+`semantic_user_message_test.go` 覆盖新 v2 记录的有序附件/token、服务重建、image blob hydrate/缺失、旧 count-only 不猜造和 v1 兼容；Desktop transcript 用例覆盖 durable run 到 prompt item 的投影。
 
-真实 Desktop 验收需要对同一线程比较重启前 live 和重启后 replay：消息、结构化附件/token、工具终态、artifact、时长/状态不得重复或漂移；人为中断运行后重开，开放工具显示“结果未知/已中断”，绝不能自动再次执行。当前结构化附件/token 子项是已知失败，修复前不得宣称全量重放通过。
+真实 Desktop 验收需要使用新写入的完整 v2 记录，对同一线程比较重启前 live 和重启后 replay：消息、结构化附件/token、工具终态、artifact、时长/状态不得重复或漂移；人为中断运行后重开，开放工具显示“结果未知/已中断”，绝不能自动再次执行。

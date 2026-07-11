@@ -1323,6 +1323,7 @@ func (s *RunService) execute(session *Session, executor Executor, agent *agentco
 	}
 	if agent != nil {
 		agent.SetPendingUserAttachments(inputAttachmentsToContextAttachments(attachments))
+		agent.SetPendingComposerTokens(semanticComposerTokensForRun(snapshot.ComposerTokens))
 		if err := s.preActivateComposerSkills(ctx, agent, snapshot); err != nil {
 			session.CompleteError(err.Error(), skillActivationErrorCode(err))
 			return

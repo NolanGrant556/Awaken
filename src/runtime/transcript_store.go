@@ -283,9 +283,7 @@ func loadDurableTranscriptRunsAtPath(path string, threadID string) (map[string]T
 			record.Role == string(convcontext.RoleUser) &&
 			current.run.Input == "" {
 			current.run.Input = record.Content
-			current.run.InputAttachments = contextAttachmentsToRunInputAttachments(
-				transcriptAttachmentsToContextAttachments(record.Attachments),
-			)
+			current.run.InputAttachments = transcriptAttachmentsToRunInputAttachments(record.Attachments)
 			current.run.ComposerTokens = cloneComposerTokens(record.ComposerTokens)
 		}
 		if record.RecordType == transcriptRecordTypeEvent && record.Event != nil {

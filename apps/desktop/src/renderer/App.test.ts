@@ -20,6 +20,7 @@ import {
   selectedUserQuestionLabels,
   shouldResetActiveThreadForWorkspaceChange,
   shouldShowSidebarThreadSpinner,
+  workbenchInspectorPresentation,
   UserQuestionPrompt,
 } from "./App";
 import {
@@ -1314,6 +1315,9 @@ describe("App workbench presentation", () => {
     const html = renderToString(React.createElement(App));
 
     expect(html).toContain("On Awaken");
+    expect(html).toContain("desktop-root-inspector-expanded");
+    expect(html).toContain('aria-label="Collapse inspector"');
+    expect(html).toContain('aria-label="Resize inspector"');
     expect(html).toContain("aw-task-welcome__logo");
     expect(html).toContain("把任务交给 Awaken，自主执行，唤醒自由。");
     expect(html).toContain('placeholder=""');
@@ -1336,6 +1340,29 @@ describe("App workbench presentation", () => {
     expect(html).not.toContain("run-timeline-shell");
     expect(html).toContain("composer-runtime-panels");
     expect(html).toContain("Starting Awaken");
+  });
+
+  it("only exposes inspector controls on the main workbench", () => {
+    expect(workbenchInspectorPresentation(undefined, false)).toEqual({
+      available: true,
+      effectiveCollapsed: false,
+      rootClassName: "desktop-root-inspector-expanded",
+    });
+    expect(workbenchInspectorPresentation(undefined, true)).toEqual({
+      available: true,
+      effectiveCollapsed: true,
+      rootClassName: "desktop-root-inspector-collapsed",
+    });
+    expect(workbenchInspectorPresentation("connectors", false)).toEqual({
+      available: false,
+      effectiveCollapsed: true,
+      rootClassName: "desktop-root-inspector-hidden",
+    });
+    expect(workbenchInspectorPresentation("skills", true)).toEqual({
+      available: false,
+      effectiveCollapsed: true,
+      rootClassName: "desktop-root-inspector-hidden",
+    });
   });
 
   it("uses the dock composer only after a run exists or narrative appears", () => {

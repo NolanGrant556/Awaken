@@ -37,6 +37,23 @@ export type ChangedFile = {
   status: "active" | "done" | "error";
 };
 
+export type DeliverableFileType =
+  | "word"
+  | "markdown"
+  | "excel"
+  | "pdf"
+  | "powerpoint";
+
+export type DeliverableFile = {
+  artifactId: string;
+  runId: string;
+  title: string;
+  displayPath: string;
+  fileType: DeliverableFileType;
+  extension: string;
+  legacy: boolean;
+};
+
 export type CompactBoundaryStatus = "started" | "finished" | "failed";
 
 export type CompactBoundaryItem = {
@@ -57,7 +74,8 @@ export type InspectorSelection =
   | { kind: "tool"; id: string }
   | { kind: "approval"; id: string }
   | { kind: "artifact"; id: string }
-  | { kind: "fileChange"; id: string };
+  | { kind: "fileChange"; id: string }
+  | { kind: "deliverables"; id: string };
 
 export type RunNarrativeItem =
   | {
@@ -73,6 +91,13 @@ export type RunNarrativeItem =
   | { kind: "tool"; id: string; title: string; detail?: string; status: ToolDisplayState; toolStatus?: string }
   | { kind: "approval"; id: string; title: string; status: "waiting" | "approved" | "rejected" }
   | { kind: "fileChange"; id: string; files: ChangedFile[]; status: "active" | "done" }
+  | {
+      kind: "deliverables";
+      id: string;
+      runId: string;
+      terminalStatus: "finished" | "error" | "cancelled";
+      files: DeliverableFile[];
+    }
   | CompactBoundaryItem
   | {
       kind: "answer";

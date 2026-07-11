@@ -39,10 +39,14 @@ import type { RuntimeSkill } from "../shared/runtime";
 import type { RunNarrativeItem } from "./run-narrative";
 import {
   DEFAULT_WORKSPACE_PROJECT_ID,
+  canReconcileTrackedTrashOperation,
   mergeWorkspaceProjects,
   normalizeWorkspacePath,
+  parseTrackedTrashOperations,
   projectIdForThread,
+  projectOperationReconciliationState,
   removeWorkspaceProject,
+  upsertTrackedTrashOperation,
   upsertWorkspaceProject,
   workspaceLabelForPath,
 } from "./projectWorkspace";
@@ -81,11 +85,20 @@ function stubElectronBridge(): void {
   vi.stubGlobal("window", {
     awaken: {
       platform: "macos",
+      relaunchDesktop: vi.fn(async () => undefined),
       getRun: vi.fn(),
       getThreadTranscript: vi.fn(),
       listThreads: vi.fn(async () => []),
       renameThread: vi.fn(),
-      deleteThread: vi.fn(),
+      deleteThread: vi.fn(async () => ({ ok: true as const })),
+      listProjects: vi.fn(async () => []),
+      upsertProject: vi.fn(),
+      detachProject: vi.fn(),
+      deleteProjectThreads: vi.fn(),
+      trashProject: vi.fn(),
+      getProjectOperation: vi.fn(),
+      openArtifact: vi.fn(async () => ({ ok: true as const })),
+      revealArtifact: vi.fn(async () => ({ ok: true as const })),
       startRun: vi.fn(),
       cancelRun: vi.fn(),
       resolveMassMessageReview: vi.fn(),
@@ -114,7 +127,10 @@ function stubElectronBridge(): void {
       saveModelProfile: vi.fn(),
       deleteModelProfile: vi.fn(),
       setDefaultModelProfile: vi.fn(),
-      testModelProfile: vi.fn(async () => ({ ok: true, message: "ok" })),
+      testModelProfile: vi.fn(async () => ({
+        ok: true as const,
+        value: { ok: true, message: "ok" },
+      })),
       syncModelCapabilities: vi.fn(async () => []),
       getModelProfileBalances: vi.fn(async () => ({ balances: [] })),
       pickAttachments: vi.fn(async () => ({ canceled: true as const })),
@@ -307,7 +323,7 @@ describe("buildWorkspaceRegistryPersistRequest", () => {
     });
   });
 
-  it("retains the default workspace while threads still belong to it", () => {
+  it("does not reactivate a removed workspace from retained thread history", () => {
     expect(
       buildWorkspaceRegistryPersistRequest({
         defaultWorkspacePath: "/tmp/default",
@@ -316,8 +332,8 @@ describe("buildWorkspaceRegistryPersistRequest", () => {
         defaultProjectRemoved: true,
       }),
     ).toEqual({
-      defaultWorkspacePath: "/tmp/default",
-      registeredWorkspacePaths: ["/tmp/default"],
+      defaultWorkspacePath: "",
+      registeredWorkspacePaths: [],
     });
   });
 });
@@ -1079,6 +1095,53 @@ describe("prompt attachment view models", () => {
 });
 
 describe("project workspace helpers", () => {
+  it.each([
+    [{ status: "accepted", phase: "waiting_for_runs" }, "pending"],
+    [{ status: "running", phase: "trashing" }, "pending"],
+    [{ status: "running", phase: "cleaning" }, "succeeded"],
+    [{ status: "succeeded", phase: "completed" }, "succeeded"],
+    [{ status: "failed", phase: "failed" }, "failed"],
+    [{ status: "blocked", phase: "cancelled" }, "failed"],
+  ] as const)("classifies durable project operation %o as %s", (operation, expected) => {
+    expect(projectOperationReconciliationState(operation)).toBe(expected);
+  });
+
+  it("waits for the durable project state before reconciling a terminal trash operation", () => {
+    expect(canReconcileTrackedTrashOperation("failed", "trash_pending")).toBe(false);
+    expect(canReconcileTrackedTrashOperation("failed", "active")).toBe(true);
+    expect(canReconcileTrackedTrashOperation("succeeded", "trash_pending")).toBe(false);
+    expect(canReconcileTrackedTrashOperation("succeeded", "removed")).toBe(true);
+  });
+
+  it("persists valid trash trackers, removes malformed entries, and replaces duplicates", () => {
+    const tracked = {
+      operationId: "operation-1",
+      projectId: "project-ui-1",
+      backendProjectId: "project-backend-1",
+      label: "待删除项目",
+      wasExpanded: true,
+    };
+    expect(
+      parseTrackedTrashOperations(
+        JSON.stringify([tracked, { operationId: "broken" }, tracked]),
+      ),
+    ).toEqual([tracked]);
+    expect(parseTrackedTrashOperations("not-json")).toEqual([]);
+    expect(
+      upsertTrackedTrashOperation([tracked], {
+        ...tracked,
+        label: "更新后的项目名",
+        wasExpanded: false,
+      }),
+    ).toEqual([
+      {
+        ...tracked,
+        label: "更新后的项目名",
+        wasExpanded: false,
+      },
+    ]);
+  });
+
   it("normalizes workspace paths and labels them by folder name", () => {
     expect(normalizeWorkspacePath("/Users/nolangrant/Awaken/")).toBe(
       "/Users/nolangrant/Awaken",
@@ -1117,7 +1180,17 @@ describe("project workspace helpers", () => {
     });
   });
 
-  it("uses runtime thread workspace root as the project authority", () => {
+  it("uses stable runtime project IDs with a workspace fallback", () => {
+    expect(
+      projectIdForThread(
+        {
+          threadId: "thread-stable",
+          projectId: "project_123",
+          workspaceRoot: "/tmp/demo",
+        },
+        "/tmp/default",
+      ),
+    ).toBe("project_123");
     expect(
       projectIdForThread(
         { threadId: "thread-1", workspaceRoot: "/tmp/demo" },

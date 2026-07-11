@@ -8,6 +8,7 @@ function createMockRuntimeClient(): RuntimeClient {
   return {
     source: "electron",
     platform: "windows",
+    relaunchDesktop: vi.fn(async () => undefined),
     getRuntimeInfo: vi.fn(async () => ({
       runtimeVersion: "1.0.0",
       apiVersion: "v1",
@@ -74,7 +75,15 @@ function createMockRuntimeClient(): RuntimeClient {
     getThreadTranscript: vi.fn(async () => ({ thread: {} as never, runs: [] })),
     listThreads: vi.fn(async () => []),
     renameThread: vi.fn(async () => ({ threadId: "", label: "", workspace: {} as never, createdAt: "", updatedAt: "" })),
-    deleteThread: vi.fn(async () => undefined),
+    deleteThread: vi.fn(async () => ({ ok: true as const })),
+    listProjects: vi.fn(async () => []),
+    upsertProject: vi.fn(async () => ({} as never)),
+    detachProject: vi.fn(async () => ({} as never)),
+    deleteProjectThreads: vi.fn(async () => ({} as never)),
+    trashProject: vi.fn(async () => ({} as never)),
+    getProjectOperation: vi.fn(async () => ({} as never)),
+    openArtifact: vi.fn(async () => ({ ok: true as const })),
+    revealArtifact: vi.fn(async () => ({ ok: true as const })),
     startRun: vi.fn(async () => ({
       runId: "",
       threadId: "",

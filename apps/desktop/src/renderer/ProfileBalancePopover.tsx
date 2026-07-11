@@ -40,6 +40,12 @@ function formatUsedPercentage(used: number, limit: number): string {
 }
 
 function formatBalanceSummary(balance: ModelProfileBalance): string {
+  if (balance.credentialIssue === "temporarily_unavailable") {
+    return "模型密钥暂不可用";
+  }
+  if (balance.credentialIssue === "unreadable") {
+    return "需要重新输入 API key";
+  }
   if (balance.status === "missing_key") return "未配置 key";
   if (balance.status === "unsupported") return "暂不支持";
   if (balance.status === "error") return balance.error || "查询失败";
@@ -50,6 +56,21 @@ function formatBalanceSummary(balance: ModelProfileBalance): string {
   }
   const weekly = balance.detail.quotas[0];
   return weekly ? formatUsedPercentage(weekly.used, weekly.limit) : "—";
+}
+
+export function credentialRecoveryForBalances(
+  balances: ModelProfileBalance[],
+): "temporarily_unavailable" | "unreadable" | null {
+  if (
+    balances.some(
+      (balance) => balance.credentialIssue === "temporarily_unavailable",
+    )
+  ) {
+    return "temporarily_unavailable";
+  }
+  return balances.some((balance) => balance.credentialIssue === "unreadable")
+    ? "unreadable"
+    : null;
 }
 
 function BalanceAmountView({ amounts }: { amounts: ModelBalanceAmount[] }) {
@@ -143,6 +164,7 @@ export function ProfileBalancePopover({
   const selectedBalance = balances.find(
     (balance) => balance.profileId === selectedProfileId,
   );
+  const credentialRecovery = credentialRecoveryForBalances(balances);
 
   useLayoutEffect(() => {
     if (!open || !anchorRef.current) return;
@@ -247,6 +269,38 @@ export function ProfileBalancePopover({
         ) : (
           <>
             <div className="profile-balance-section-title">剩余用量</div>
+            {credentialRecovery ? (
+              <div
+                className="profile-balance-credential-recovery"
+                role="alert"
+              >
+                <div className="profile-balance-credential-recovery-copy">
+                  <AlertCircle size={18} strokeWidth={2} />
+                  <span>
+                    {credentialRecovery === "temporarily_unavailable"
+                      ? "模型密钥暂时无法读取，原加密凭据已保留。"
+                      : "已有模型密钥无法读取，请在 Awaken 中重新输入。"}
+                  </span>
+                </div>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => {
+                    if (credentialRecovery === "temporarily_unavailable") {
+                      void runtimeClient.relaunchDesktop().catch(() => {
+                        setError("Awaken 重新启动失败，请再试一次。");
+                      });
+                      return;
+                    }
+                    handleOpenSettings();
+                  }}
+                >
+                  {credentialRecovery === "temporarily_unavailable"
+                    ? "重新启动 Awaken"
+                    : "在 Awaken 中恢复"}
+                </Button>
+              </div>
+            ) : null}
             <div className="profile-balance-list">
               {balances.map((balance) => (
                 <button
@@ -295,6 +349,11 @@ export function ProfileBalancePopover({
                     <span>
                       {selectedBalance.status === "missing_key"
                         ? "请先配置 API key"
+                        : selectedBalance.credentialIssue ===
+                            "temporarily_unavailable"
+                          ? "模型密钥暂不可用，请重新启动 Awaken"
+                          : selectedBalance.credentialIssue === "unreadable"
+                            ? "请在 Awaken 中重新输入 API key"
                         : selectedBalance.status === "unsupported"
                           ? "暂不支持查询该供应商余额"
                           : selectedBalance.error || "余额查询失败"}

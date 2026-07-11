@@ -83,6 +83,11 @@ func main() {
 	if err := runService.SetDefaultWorkspace(runtime.WorkspaceConfig{WorkspaceRoot: defaultWorkspace}); err != nil {
 		log.Fatalf("failed to configure default workspace: %v", err)
 	}
+	cleanupCtx, cancelCleanup := context.WithCancel(context.Background())
+	defer cancelCleanup()
+	if projectService := runService.ProjectService(); projectService != nil {
+		go projectService.RunCleanupWorker(cleanupCtx)
+	}
 
 	srv := &http.Server{
 		Addr: addr,
@@ -120,6 +125,7 @@ func main() {
 	}
 
 	log.Println("awaken-core shutting down")
+	cancelCleanup()
 	if err := runService.FlushTranscripts(); err != nil {
 		log.Printf("awaken-core flush transcripts error: %v", err)
 	}

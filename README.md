@@ -17,6 +17,8 @@ Awaken 是一个本地优先的 Agent runtime 与桌面应用原型。当前仓�
    - macOS 用户和开发者都从 `open:desktop` / `close:desktop` 打开和关闭同一个 Awaken Desktop。
    - macOS `open:desktop` 会复用或启动 `awaken-dev-desktop` screen 会话，并检查 renderer、Electron、`awaken-core` 和真实窗口。
    - macOS `close:desktop` 会停止 `awaken-dev-desktop` screen 会话，并清理同一入口留下的 renderer、Electron、`awaken-core` 进程。
+   - README 开发入口启动前会关闭仍在运行的 Awaken 安装版主进程；窗口激活只针对已经确认的 dev Electron PID，不使用可能拉起另一份应用的泛化 `open -a Electron.app`。
+   - dev 与 packaged app 固定使用同一个 `userData` 和单实例身份；后启动的同版本实例只激活已有窗口，不会再创建第二套 runtime 或第二个 Dock 图标。
    - Desktop 自己启动并管理 `awaken-core`。
    - `npm run dev:desktop` 会构建 UI、确保当前平台的 `awaken-core` binary、准备 primary-runtime，然后启动 Vite renderer、Electron main/preload 和 Electron。macOS 日常不要直接用它打开 Awaken；Windows 目前把它作为正式开发入口。
    - 不要把 `cmd/awaken-core`、Vite renderer 或 Electron 子脚本当成独立使用入口。
@@ -106,6 +108,13 @@ Runtime / server 只作为内部工程层测试与验证，不形成第三个使
 GET  /health
 GET  /v1/agui/demo
 GET  /v1/runtime/info
+GET  /v1/projects
+POST /v1/projects
+DELETE /v1/projects/{project_id}
+DELETE /v1/projects/{project_id}/threads
+POST /v1/projects/{project_id}/trash
+GET  /v1/project-operations/{operation_id}
+POST /v1/project-operations/{operation_id}/cancel
 GET  /v1/threads
 PATCH /v1/threads/{thread_id}
 DELETE /v1/threads/{thread_id}
@@ -118,6 +127,8 @@ POST /v1/runs/{run_id}/mass-message-reviews/{review_id}/resolve
 POST /v1/runs/{run_id}/user-questions/{question_id}/answer
 POST /v1/shutdown
 ```
+
+项目修改接口必须携带 `Idempotency-Key`。项目移除、历史删除和移动到系统废纸篓都由 runtime 的 durable operation 管道负责；Renderer 不逐条删除 thread，也不直接接收或执行磁盘路径。废纸篓的 claim、原子 staging、路径身份复验和 complete/fail 是 Electron Main 与本地 runtime 之间的内部恢复接口，不属于 Renderer surface；Electron 只把 operation-owned staging 路径交给系统废纸篓。
 
 `/v1/runs/{run_id}/events` 输出 AG-UI-compatible SSE events。Awaken 目前有这些 extension events：
 
@@ -293,9 +304,13 @@ npm run dev:desktop
 
 `npm run open:desktop` 是 macOS 的托管入口，会复用或启动 `awaken-dev-desktop` screen 会话，并确认 renderer、Electron、`awaken-core` 和真实 Desktop 窗口都已就绪。`npm run close:desktop` 会停止这个正式入口管理的 screen 会话，并清理遗留的 renderer、Electron、`awaken-core` 进程。
 
+`apps/desktop/dist-electron/` 只是可删除、可重建的本地打包输出，不是开发验收入口。不要直接双击其中的 `Awaken.app`；真实 Desktop 验收一律重新执行 README 的 `open:desktop` / `close:desktop`。若旧安装版正在运行，README 入口会先关闭它再启动当前源码的 dev 实例，但不会删除用户机器上的应用文件。
+
 Windows 当前不使用 macOS 的 screen 托管脚本；`npm run dev:desktop` 是 Windows 开发入口，关闭时在运行该命令的终端按 `Ctrl+C`。它会构建 `@awaken/design-system`，确保 `win32-x64/awaken-core.exe` 存在，准备 primary-runtime，启动 Vite renderer（`127.0.0.1:5174`），编译 Electron main/preload，并启动 Electron。
 
 Windows primary-runtime 需要完整、可复制的 Python distribution（推荐 `uv` managed Python）、Node、LibreOffice、Poppler（`pdftoppm.exe` / `pdfinfo.exe`）和 ffmpeg。prepare 阶段优先使用 `AWAKEN_PRIMARY_RUNTIME_SEED_DIR` 或 `AWAKEN_PYTHON`、`AWAKEN_NODE`、`AWAKEN_SOFFICE`、`AWAKEN_POPPLER_BIN`、`AWAKEN_FFMPEG` 指定复制来源；随后才通过 `uv` / `where` / 常见安装目录发现并验证真实来源。上述组件变量只属于 prepare 输入，正式 Artifact 执行只解析已通过 probe/provenance 的 Awaken-owned active revision，不会直接执行这些外部来源。普通 venv、Codex wrapper 和指向外部安装目录的脚本不会被接受为 managed runtime。缺少依赖时，`npm run prepare:runtime -- --json` 和 `npm run check:runtime -- --json` 会输出具体缺口。
+
+macOS 的 Awaken-owned LibreOffice 副本以 `LSBackgroundOnly=true` 运行，DOCX/XLS/XLSX/PPT/PPTX 转换统一进入进程级 `OfficeRenderWorker`；工具不得直接启动 `soffice`。开发 runtime 使用 ad-hoc 签名，发布 runtime 必须在 CI 中完成 Developer ID 签名、公证、staple 和 archive 校验，用户机器只验证并原子安装预签名 archive。
 
 Windows 上若已安装 `winget`，可以直接运行 `npm run prepare:runtime -- --install`（或 `-i`）自动安装缺失的 LibreOffice、Poppler 和 ffmpeg。安装完成后 prepare 会重新扫描 WinGet package directory，把通过校验的组件复制进 Awaken-owned managed runtime；不会修改或持久化用户 PATH。
 
@@ -325,12 +340,15 @@ list_files
 grep_search
 text_edit
 text_file_create
+artifact_publish
 shell
 web_search
 ask_user
 ```
 
 这不是完整工具清单：Skill、MCP 和 typed artifact runtime 会按当前任务、策略与运行时状态追加工具。`apply_patch` 仍注册为高级/兼容文件变更工具，但普通 provider 默认不直接暴露它；只有 provider 具备 grammar-constrained transport，或兼容/内部转换链明确选择它时才进入模型可见工具池。
+
+`artifact_publish` 只把 `OutputRoots` 内已经存在的受支持普通文件显式登记为最终交付物，不扫描目录、不分析最终回答，也不按修改时间猜测文件。最终交付卡只显示当前 run 中 `contractVersion=2`、`role=deliverable`、`status=ready` 的 Word、Markdown、Excel/CSV、PDF 或 PowerPoint 文件；preview、support、源码和自动验证图片不会显示。
 
 只读工具不应要求审批。会修改文件或有风险的工具通过 `src/tool/permission.go` 与 `src/agentcore/tool_runtime.go` 走权限模型。
 
@@ -409,7 +427,23 @@ OAuth-protected server：如果 server 返回 401，runtime 把状态转成 `nee
 
 ## Desktop 打包状态
 
-`electron-builder` 当前可以完成本地 Desktop 打包；Awaken 自己的 app icon 已配置在 `apps/desktop/build/`：
+`electron-builder` 当前可以从当前工作区完成 macOS / Windows 本地 Desktop 打包：
+
+```bash
+npm run dist:desktop
+```
+
+该命令先删除 `apps/desktop/dist`、`apps/desktop/dist-electron`、旧 `resources/bin` 和旧 `runtime-archive`，然后重新构建当前源码的 UI、`awaken-core`、runtime 检查和安装包。它不会删除 `resources/runtime`，因为该目录可以承载明确配置的 managed runtime seed。每次打包都从干净 staging 开始，旧 `.app`、`.dmg`、`.exe`、JS 或 runtime archive 不得被新产物复用。
+
+macOS 正式发布链路使用：
+
+```bash
+npm run dist:desktop:release
+```
+
+在 macOS 上，该链路除干净 staging 外，还要求本次构建产生的 Developer ID 签名、公证并 staple 的 primary-runtime archive。在 Windows 上，`dist:desktop` 与 `dist:desktop:release` 都会打包本次 Windows `prepare:runtime` 生成的 managed runtime，以 platform、arch、必需组件和 archive SHA-256 校验安装；Windows 打包/安装不会调用 `codesign`、`xcrun`、`spctl` 或 `ditto`，也不会携带 macOS `LibreOffice.app`。Windows 正式发布的来源可信度由安装包 Authenticode 签名承担，本地未签名 installer 只能用于测试。两种平台都必须在各自 CI 的全新 checkout 中执行当前源码构建，不得把另一台机器或旧 `dist-electron` 中的文件复制进发布目录。
+
+Awaken 自己的 app icon 已配置在 `apps/desktop/build/`：
 
 - `icon-source.png`：原始输入图。
 - `icon.png`：运行期 Dock/window 图标和 Linux 图标。
@@ -421,7 +455,7 @@ OAuth-protected server：如果 server 返回 401，runtime 把状态转成 `nee
 - `apps/desktop/package.json` 还没有完整的 `description` / `author`。
 - 本机没有有效的 `Developer ID Application` 证书时，macOS code signing 会跳过，打包产物未签名、未公证。
 
-这些提醒不影响本机开发测试、统一启动流程、真实 LLM run 或 runtime supervisor 验收。正式分发给其他 macOS 用户前，需要补齐 app icon、Developer ID signing 和 notarization，否则可能触发 Gatekeeper 的“无法验证开发者”等提示。
+这些提醒不影响本机开发测试、统一启动流程、真实 LLM run 或 runtime supervisor 验收。正式分发给其他 macOS 用户前，需要补齐 Developer ID signing 和 notarization，否则可能触发 Gatekeeper 的“无法验证开发者”等提示；Windows 正式分发还需要在发布 CI 配置 Windows 代码签名证书。
 
 ## 硬边界
 

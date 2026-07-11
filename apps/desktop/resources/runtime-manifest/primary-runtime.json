@@ -1,7 +1,25 @@
 {
   "schemaVersion": 2,
   "runtimeName": "primary-runtime",
-  "bundleVersion": "0.2.0",
+  "bundleVersion": "0.3.0",
+  "officeRenderWorker": {
+    "component": "libreoffice",
+    "defaultMaxConcurrency": 1,
+    "defaultTimeoutSeconds": 90,
+    "profileIsolation": "per-job",
+    "outputCommit": "atomic",
+    "macOSActivationPolicy": "background-only",
+    "macOSBundleIdentifier": "com.awaken.runtime.libreoffice-renderer",
+    "macOSLaunchServicesClaims": "none",
+    "macOSReleaseNotarization": "required"
+  },
+  "distribution": {
+    "development": "local-ad-hoc-revision",
+    "release": "pre-signed-notarized-archive",
+    "manifestDigest": "sha256",
+    "install": "verify-then-atomic-activate",
+    "signOnUserMachine": false
+  },
   "components": [
     {
       "name": "python",
@@ -52,8 +70,8 @@
         "acceptedExitCodes": [0],
         "executableRelativePath": "Contents/MacOS/soffice",
         "executableRelativePathByPlatform": {
-          "win32": "program/soffice.exe",
-          "windows": "program/soffice.exe",
+          "win32": "program/soffice.com",
+          "windows": "program/soffice.com",
           "linux": "program/soffice"
         }
       }

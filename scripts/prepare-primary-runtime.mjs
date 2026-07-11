@@ -14,6 +14,7 @@ import {
   bundleMacOSDependencyClosure,
   buildResolvedState,
   candidateSeedDirs,
+  captureMacOSRuntimeSigningMetadata,
   checkPrimaryRuntime,
   cleanupStaging,
   commandOutput,
@@ -21,12 +22,14 @@ import {
   copyDirectoryContents,
   createBuildRevision,
   createStagingDir,
+  disposeMacOSRuntimeSigningMetadata,
   ensureDir,
   exists,
   firstExisting,
   inspectRuntimeProvenance,
   isCodexCachePath,
   isWindows,
+  macOSRuntimeSigningExpectation,
   materializeMacOSRpathAliases,
   migrateOldAwakenCacheIfNeeded,
   normalizeMacOSRuntimeTree,
@@ -40,8 +43,14 @@ import {
   rollbackToPrevious,
   run,
   runOk,
+  runtimeRequiresPreparation,
+  setMacOSBackgroundOnlyApplication,
+  sealMacOSRuntimeApplicationPermissions,
+  signMacOSRuntimeApplication,
   stageExecutable,
   versionKey,
+  verifyMacOSRuntimeApplication,
+  verifyMacOSLibreOfficeReleaseSeed,
   whichAll,
   writeResolvedState,
 } from "./primary-runtime-common.mjs";
@@ -447,6 +456,8 @@ function libreOfficeCandidates() {
     ...whichAll("libreoffice"),
     ...(isWindows
       ? [
+          join(process.env.ProgramFiles || "", "LibreOffice", "program", "soffice.com"),
+          join(process.env["ProgramFiles(x86)"] || "", "LibreOffice", "program", "soffice.com"),
           join(process.env.ProgramFiles || "", "LibreOffice", "program", "soffice.bin.exe"),
           join(process.env["ProgramFiles(x86)"] || "", "LibreOffice", "program", "soffice.bin.exe"),
           join(process.env.ProgramFiles || "", "LibreOffice", "program", "soffice.exe"),
@@ -459,9 +470,13 @@ function libreOfficeCandidates() {
   ].filter(Boolean);
 }
 
-function ensureLibreOffice(stagingDir) {
+function ensureLibreOffice(stagingDir, options = {}) {
   const target = join(stagingDir, "libreoffice");
-  let source = requireExplicitSource("AWAKEN_SOFFICE") || firstCopySource(libreOfficeCandidates());
+  const explicitSource = requireExplicitSource("AWAKEN_SOFFICE");
+  if (options.release && !explicitSource) {
+    fail("primary-runtime: release signing requires an explicit pristine AWAKEN_SOFFICE source");
+  }
+  let source = explicitSource || firstCopySource(libreOfficeCandidates());
   if (!source && autoInstallComponent("libreoffice")) {
     source = firstCopySource(libreOfficeCandidates());
   }
@@ -481,10 +496,12 @@ function ensureLibreOffice(stagingDir) {
   if (process.platform === "darwin") {
     const appRoot = resolveLibreOfficeInstallRoot(source, process.platform);
     if (appRoot) {
+      const releaseSeed = options.release
+        ? verifyMacOSLibreOfficeReleaseSeed(appRoot)
+        : null;
       const destApp = join(target, "LibreOffice.app");
       copyDirectoryContents(appRoot, destApp);
-      const aliases = materializeMacOSRpathAliases(destApp);
-      return { target: destApp, source: appRoot, mode: "copy-app-bundle", aliases };
+      return { target: destApp, source: appRoot, mode: "copy-app-bundle", releaseSeed };
     }
     fail(
       `primary-runtime: LibreOffice source is not a copyable app bundle (${source}); install LibreOffice.app or set AWAKEN_SOFFICE`,
@@ -654,8 +671,36 @@ if (migration.migrated) {
   emitProgress("migrate", `migrated old awaken cache to ${migration.active}`);
 }
 
-const existing = checkPrimaryRuntime({ root });
-if (existing.ready && !repair) {
+const manifest = readRuntimeManifest();
+const bundleVersion = manifest.bundleVersion || manifest.version || "0.2.0";
+const macOSSigningExpectation = macOSRuntimeSigningExpectation();
+if (macOSSigningExpectation?.release && macOSSigningExpectation.identity === "-") {
+  fail(
+    "primary-runtime: release signing requires AWAKEN_RUNTIME_CODESIGN_IDENTITY with a Developer ID Application identity",
+  );
+}
+if (macOSSigningExpectation?.release && !String(process.env.AWAKEN_RUNTIME_NOTARY_PROFILE || "").trim()) {
+  fail(
+    "primary-runtime: release signing requires AWAKEN_RUNTIME_NOTARY_PROFILE for notarytool and stapler",
+  );
+}
+const existing = checkPrimaryRuntime({ root, manifest });
+let requiresPreparation = runtimeRequiresPreparation(existing, manifest, repair || migration.migrated, {
+  macOSRuntimeSigning: macOSSigningExpectation,
+});
+if (!requiresPreparation && process.platform === "darwin") {
+  const existingLibreOffice = existing.components?.find((component) => component.name === "libreoffice");
+  try {
+    verifyMacOSRuntimeApplication(existingLibreOffice?.path || "", {
+      release: macOSSigningExpectation.release,
+      bundleIdentifier: manifest.officeRenderWorker?.macOSBundleIdentifier,
+    });
+  } catch (error) {
+    requiresPreparation = true;
+    emitProgress("repair", `active LibreOffice runtime verification failed: ${error.message}`);
+  }
+}
+if (!requiresPreparation) {
   if (json) {
     console.log(JSON.stringify({ ok: true, reused: true, report: existing, migration }, null, 2));
   } else {
@@ -664,12 +709,17 @@ if (existing.ready && !repair) {
   console.error(JSON.stringify({ type: "RuntimeReady", active: existing.active }));
   process.exit(0);
 }
+if (existing.ready && existing.bundleVersion !== bundleVersion) {
+  emitProgress(
+    "upgrade",
+    `active runtime ${existing.bundleVersion || "unknown"} differs from manifest ${bundleVersion}; preparing a new revision`,
+  );
+}
 
-const manifest = readRuntimeManifest();
-const bundleVersion = manifest.bundleVersion || manifest.version || "0.2.0";
 const revision = createBuildRevision(Date.now(), `${process.pid}:${bundleVersion}`);
 const key = versionKey(bundleVersion, process.platform, process.arch, revision);
 let stagingDir = "";
+let libreOfficeSigningMetadata = null;
 const previousActive = existing.active || "";
 
 try {
@@ -679,12 +729,29 @@ try {
   const prepared = {
     python: ensurePython(stagingDir),
     node: ensureNode(stagingDir),
-    libreoffice: ensureLibreOffice(stagingDir),
+    libreoffice: ensureLibreOffice(stagingDir, { release: Boolean(macOSSigningExpectation?.release) }),
     poppler: ensurePoppler(stagingDir),
     ffmpeg: ensureFFmpeg(stagingDir),
     helperPackages: ensureHelperPackages(stagingDir, bundleVersion),
   };
+  if (process.platform === "darwin") {
+    libreOfficeSigningMetadata = captureMacOSRuntimeSigningMetadata(prepared.libreoffice.target);
+    prepared.libreoffice.background = setMacOSBackgroundOnlyApplication(prepared.libreoffice.target, {
+      ownershipRoot: stagingDir,
+      sourceRoot: prepared.libreoffice.source,
+      bundleIdentifier: manifest.officeRenderWorker?.macOSBundleIdentifier,
+    });
+    prepared.libreoffice.aliases = materializeMacOSRpathAliases(prepared.libreoffice.target);
+  }
   const normalizedMacOS = normalizeMacOSRuntimeTree(stagingDir);
+  const signedMacOSLibreOffice = process.platform === "darwin"
+    ? signMacOSRuntimeApplication(prepared.libreoffice.target, {
+        ownershipRoot: stagingDir,
+        sourceRoot: prepared.libreoffice.source,
+        bundleIdentifier: manifest.officeRenderWorker?.macOSBundleIdentifier,
+        signingMetadata: libreOfficeSigningMetadata,
+      })
+    : { signed: false, reason: "not macOS" };
 
   const state = buildResolvedState({
     manifest,
@@ -698,6 +765,10 @@ try {
       "helper-packages": prepared.helperPackages.mode,
     },
   });
+  if (process.platform === "darwin") {
+    state.security = { macOSRuntimeSigning: signedMacOSLibreOffice };
+  }
+  state.officeRender = manifest.officeRenderWorker || {};
   // Probe against staging as temporary ownership root before publish.
   writeResolvedState(stagingDir, { ...state, root: stagingDir });
 
@@ -721,6 +792,15 @@ try {
       .join("; ");
     throw new Error(`staged provenance failed: ${summary}`);
   }
+  const immutableMacOSLibreOffice = process.platform === "darwin"
+    ? sealMacOSRuntimeApplicationPermissions(prepared.libreoffice.target, {
+        ownershipRoot: stagingDir,
+        sourceRoot: prepared.libreoffice.source,
+      })
+    : { sealed: false, reason: "not macOS" };
+  if (process.platform === "darwin") {
+    signedMacOSLibreOffice.immutablePermissions = immutableMacOSLibreOffice.sealed;
+  }
 
   emitProgress("publish", `publishing ${key}`);
   const versionRoot = publishStaging(root, stagingDir, key);
@@ -734,7 +814,16 @@ try {
   }
 
   if (json) {
-    console.log(JSON.stringify({ ok: true, prepared, normalizedMacOS, report, key, migration }, null, 2));
+    console.log(JSON.stringify({
+      ok: true,
+      prepared,
+      normalizedMacOS,
+      signedMacOSLibreOffice,
+      immutableMacOSLibreOffice,
+      report,
+      key,
+      migration,
+    }, null, 2));
   } else {
     log("[prepare-primary-runtime] primary-runtime ready");
     for (const component of report.components) {
@@ -750,6 +839,7 @@ try {
   }
   console.error(JSON.stringify({ type: "RuntimeReady", active: key }));
 } catch (error) {
+  disposeMacOSRuntimeSigningMetadata(libreOfficeSigningMetadata);
   cleanupStaging(stagingDir);
   let rolledBack = null;
   if (repair || previousActive) {

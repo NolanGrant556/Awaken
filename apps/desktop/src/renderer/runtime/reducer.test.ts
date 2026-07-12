@@ -158,6 +158,24 @@ describe("runtime reducer cancel handling", () => {
   });
 });
 
+describe("runtime reducer canonical auth wire", () => {
+  it("projects authUrl from the Go AG-UI contract", () => {
+    const state = dispatch([
+      runEvent({
+        type: "AWAKEN_AUTH_REQUIRED",
+        toolCallId: "call-auth",
+        authProvider: "github",
+        authScope: "repo",
+        authUrl: "https://github.com/login/device",
+      }),
+    ]);
+    expect(state.steps.find((step) => step.id.startsWith("auth:"))).toMatchObject({
+      title: "Authorization required",
+      description: "github | repo | https://github.com/login/device",
+    });
+  });
+});
+
 describe("runtime reducer replay idempotency", () => {
   it("run/recovered resets state so full replay does not duplicate text deltas", () => {
     // Simulate a partial state with some accumulated text, then a recovery
@@ -685,6 +703,41 @@ describe("runtime reducer run narrative projection", () => {
     );
   });
 
+  it("retains provider, snapshot, dependency and side-effect metadata", () => {
+    const state = dispatch([
+      runEvent({
+        type: "TOOL_CALL_RESULT",
+        seq: 1,
+        toolCallId: "render-1",
+        toolCallName: "presentation_render",
+        content: "rendered",
+        toolStatus: "succeeded",
+        environmentSnapshotId: "env-1",
+        toolAvailabilitySnapshotId: "tools-1",
+        providerId: "builtin.presentation_render",
+        capability: "presentation.render",
+        capabilities: ["presentation.render", "artifact.preview"],
+        readiness: "ready",
+        dependency: { name: "libreoffice", kind: "executable" },
+        dependencies: [{ name: "libreoffice", kind: "executable" }],
+        sideEffectState: "applied",
+      }),
+    ]);
+
+    expect(state.toolResults[0]).toMatchObject({
+      id: "render-1",
+      environmentSnapshotId: "env-1",
+      toolAvailabilitySnapshotId: "tools-1",
+      providerId: "builtin.presentation_render",
+      capability: "presentation.render",
+      capabilities: ["presentation.render", "artifact.preview"],
+      readiness: "ready",
+      dependency: { name: "libreoffice", kind: "executable" },
+      dependencies: [{ name: "libreoffice", kind: "executable" }],
+      sideEffectState: "applied",
+    });
+  });
+
   it("accumulates args deltas, replaces them with full args fallback, and projects progress", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Inspect streaming tool args" },
@@ -1194,6 +1247,68 @@ describe("runtime reducer run narrative projection", () => {
     });
   });
 
+  it("projects durable Skill lifecycle events into stable activity steps", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "Build a deck" },
+      runEvent({
+        type: "AWAKEN_SKILL_INVOKED",
+        seq: 1,
+        skillId: "presentations",
+        skillVersion: "2",
+        skillStatus: "ok",
+      }),
+      runEvent({
+        type: "AWAKEN_SKILL_EXECUTION_CONTEXT",
+        seq: 2,
+        skillId: "presentations",
+        skillEffectiveTools: ["presentation_create", "shell"],
+      }),
+      runEvent({
+        type: "AWAKEN_SKILL_CONTENT_LOADED",
+        seq: 3,
+        skillId: "presentations",
+        skillResource: "references/layout.md",
+      }),
+    ]);
+
+    expect(state.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "skill:presentations",
+          title: "Skill execution context ready",
+          status: "done",
+          tag: "skill",
+        }),
+        expect.objectContaining({
+          id: "skill:presentations:resource:references/layout.md",
+          title: "Skill content loaded",
+          status: "done",
+          tag: "skill",
+        }),
+      ]),
+    );
+  });
+
+  it("keeps failed Skill loading as an error activity", () => {
+    const state = dispatch([
+      runEvent({
+        type: "AWAKEN_SKILL_FAILED_TO_LOAD",
+        seq: 1,
+        skillId: "broken-skill",
+        skillDiagnostics: ["parse_failed: frontmatter is invalid"],
+      }),
+    ]);
+
+    expect(state.steps).toContainEqual(
+      expect.objectContaining({
+        id: "skill:broken-skill",
+        title: "Skill failed to load",
+        description: expect.stringContaining("frontmatter is invalid"),
+        status: "error",
+      }),
+    );
+  });
+
   it("points inspector selection to tool details when a tool result arrives", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Inspect tool" },
@@ -1237,6 +1352,14 @@ describe("runtime reducer run narrative projection", () => {
         type: "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED",
         reviewId: "approval-1",
         approvalTitle: "Approve patch",
+        massMessageTemplatePreview: "Hello {{name}}",
+        massMessageAttachments: ["brief.pdf"],
+        massMessageSendingAccount: "sender@example.com",
+        reviewEnvelopeDigest: "digest-1",
+        reviewBodyDigest: "body-digest-1",
+        reviewRecipientIdentityDigest: "recipient-digest-1",
+        massMessageMessageCount: 25,
+        massMessageExpandsRecipients: true,
       }),
     ]);
 
@@ -1248,6 +1371,16 @@ describe("runtime reducer run narrative projection", () => {
     expect(state.narrative.inspectorSelection).toEqual({
       kind: "tool",
       id: "mass-message-review:approval-1",
+    });
+    expect(state.massMessageReviews[0]).toMatchObject({
+      templatePreview: "Hello {{name}}",
+      attachments: ["brief.pdf"],
+      sendingAccount: "sender@example.com",
+      reviewEnvelopeDigest: "digest-1",
+      reviewBodyDigest: "body-digest-1",
+      reviewRecipientIdentityDigest: "recipient-digest-1",
+      messageCount: 25,
+      expandsRecipients: true,
     });
   });
 

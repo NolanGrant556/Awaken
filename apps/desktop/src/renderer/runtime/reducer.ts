@@ -57,6 +57,15 @@ type ToolResultRecord = {
   /** Canonical ToolOutcome status from the wire; not a display projection. */
   toolStatus?: string;
   diagnostic?: Record<string, unknown>;
+  environmentSnapshotId?: string;
+  toolAvailabilitySnapshotId?: string;
+  providerId?: string;
+  capability?: string;
+  capabilities?: string[];
+  readiness?: string;
+  dependency?: Record<string, unknown>;
+  dependencies?: Array<Record<string, unknown>>;
+  sideEffectState?: string;
 };
 
 export type PatchPreviewRecord = {
@@ -282,10 +291,15 @@ export type MassMessageReviewItem = {
   recipientScope?: string;
   recipientCount?: number;
   bodyPreview?: string;
-  templateId?: string;
-  attachmentNames: string[];
-  account?: string;
+  templatePreview?: string;
+  attachments: string[];
+  sendingAccount?: string;
   sourceTool?: string;
+  reviewEnvelopeDigest?: string;
+  reviewBodyDigest?: string;
+  reviewRecipientIdentityDigest?: string;
+  messageCount?: number;
+  expandsRecipients?: boolean;
 };
 
 export type UserQuestionOption = {
@@ -2171,6 +2185,36 @@ export function reduceRuntimeState(
             ...(action.event.diagnostic
               ? { diagnostic: action.event.diagnostic }
               : {}),
+            ...(action.event.environmentSnapshotId !== undefined
+              ? { environmentSnapshotId: action.event.environmentSnapshotId }
+              : {}),
+            ...(action.event.toolAvailabilitySnapshotId !== undefined
+              ? {
+                  toolAvailabilitySnapshotId:
+                    action.event.toolAvailabilitySnapshotId,
+                }
+              : {}),
+            ...(action.event.providerId !== undefined
+              ? { providerId: action.event.providerId }
+              : {}),
+            ...(action.event.capability !== undefined
+              ? { capability: action.event.capability }
+              : {}),
+            ...(action.event.capabilities !== undefined
+              ? { capabilities: action.event.capabilities }
+              : {}),
+            ...(action.event.readiness !== undefined
+              ? { readiness: action.event.readiness }
+              : {}),
+            ...(action.event.dependency !== undefined
+              ? { dependency: action.event.dependency }
+              : {}),
+            ...(action.event.dependencies !== undefined
+              ? { dependencies: action.event.dependencies }
+              : {}),
+            ...(action.event.sideEffectState !== undefined
+              ? { sideEffectState: action.event.sideEffectState }
+              : {}),
           });
 
           const stepKey = action.event.toolCallId
@@ -2338,7 +2382,7 @@ export function reduceRuntimeState(
             description: [
               action.event.authProvider,
               action.event.authScope,
-              action.event.authLink,
+              action.event.authUrl,
             ]
               .filter(Boolean)
               .join(" | "),
@@ -2380,6 +2424,45 @@ export function reduceRuntimeState(
           });
           break;
         }
+        case "AWAKEN_SKILL_DISCOVERED":
+        case "AWAKEN_SKILL_INVOKED":
+        case "AWAKEN_SKILL_CONTENT_LOADED":
+        case "AWAKEN_SKILL_EXECUTION_CONTEXT":
+        case "AWAKEN_SKILL_FAILED_TO_LOAD": {
+          const skillId = action.event.skillId ?? "unknown-skill";
+          const contentLoaded = action.event.type === "AWAKEN_SKILL_CONTENT_LOADED";
+          const failed = action.event.type === "AWAKEN_SKILL_FAILED_TO_LOAD";
+          const active = action.event.type === "AWAKEN_SKILL_INVOKED";
+          const stepId = contentLoaded
+            ? `skill:${skillId}:resource:${action.event.skillResource ?? "content"}`
+            : `skill:${skillId}`;
+          const title = failed
+            ? "Skill failed to load"
+            : contentLoaded
+              ? "Skill content loaded"
+              : active
+                ? "Skill invoked"
+                : action.event.type === "AWAKEN_SKILL_DISCOVERED"
+                  ? "Skill discovered"
+                  : "Skill execution context ready";
+          records = upsertStep(records, stepId, {
+            title,
+            description: [
+              action.event.skillId,
+              action.event.skillVersion,
+              action.event.skillSource,
+              action.event.skillPath,
+              action.event.skillResource,
+              action.event.skillStatus,
+              ...(action.event.skillDiagnostics ?? []),
+            ]
+              .filter(Boolean)
+              .join(" | "),
+            status: failed ? "error" : active ? "active" : "done",
+            tag: "skill",
+          });
+          break;
+        }
         case "AWAKEN_TOOL_RECOVERY_REQUIRED":
         case "AWAKEN_TOOL_RETRY_BLOCKED": {
           const recoveryKey = [
@@ -2415,10 +2498,15 @@ export function reduceRuntimeState(
               recipientScope: action.event.massMessageRecipientScope,
               recipientCount: action.event.massMessageRecipientCount,
               bodyPreview: action.event.massMessageBodyPreview,
-              templateId: action.event.massMessageTemplateId,
-              attachmentNames: action.event.massMessageAttachmentNames ?? [],
-              account: action.event.massMessageAccount,
+              templatePreview: action.event.massMessageTemplatePreview,
+              attachments: action.event.massMessageAttachments ?? [],
+              sendingAccount: action.event.massMessageSendingAccount,
               sourceTool: action.event.massMessageSourceTool ?? action.event.toolCallName,
+              reviewEnvelopeDigest: action.event.reviewEnvelopeDigest,
+              reviewBodyDigest: action.event.reviewBodyDigest,
+              reviewRecipientIdentityDigest: action.event.reviewRecipientIdentityDigest,
+              messageCount: action.event.massMessageMessageCount,
+              expandsRecipients: action.event.massMessageExpandsRecipients,
             },
           );
           records = upsertStep(records, `mass-message-review:${reviewId}`, {
@@ -2427,7 +2515,13 @@ export function reduceRuntimeState(
               action.event.massMessageChannel,
               action.event.massMessageRecipientScope,
               action.event.massMessageRecipientCount?.toString(),
-              action.event.massMessageAccount,
+              action.event.massMessageSendingAccount,
+              action.event.massMessageMessageCount?.toString(),
+              action.event.massMessageExpandsRecipients === true
+                ? "recipient set expands"
+                : action.event.massMessageExpandsRecipients === false
+                  ? "recipient set fixed"
+                  : undefined,
               action.event.massMessageBodyPreview,
             ]
               .filter(Boolean)

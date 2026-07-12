@@ -487,21 +487,36 @@ pre {
 }
 
 .extension-state-connected,
-.extension-state-available {
+.extension-state-loaded {
   background: color-mix(in srgb, var(--aw-success) 13%, var(--aw-bg-white));
   color: color-mix(in srgb, var(--aw-success) 72%, var(--aw-text-primary));
 }
 
 .extension-state-failed,
-.extension-state-unavailable {
+.extension-state-invalid {
   background: color-mix(in srgb, var(--aw-error) 10%, var(--aw-bg-white));
   color: color-mix(in srgb, var(--aw-error) 72%, var(--aw-text-primary));
 }
 
 .extension-state-pending,
-.extension-state-needs-auth {
+.extension-state-needs-auth,
+.extension-state-disabled_by_policy,
+.extension-state-shadowed {
   background: color-mix(in srgb, var(--aw-warning) 18%, var(--aw-bg-white));
   color: color-mix(in srgb, var(--aw-warning) 74%, var(--aw-text-primary));
+}
+
+.extension-card-meta .extension-card-path {
+  display: inline-block;
+  max-width: min(100%, 280px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.extension-card .extension-card-diagnostic {
+  color: color-mix(in srgb, var(--aw-error) 72%, var(--aw-text-secondary));
+  -webkit-line-clamp: 2;
 }
 
 .extension-card-actions {

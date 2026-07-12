@@ -36,6 +36,11 @@ export type AguiEventType =
   | "AWAKEN_RUNTIME_READY"
   | "AWAKEN_RUNTIME_REPAIR_FAILED"
   | "AWAKEN_RUNTIME_MISSING"
+  | "AWAKEN_SKILL_DISCOVERED"
+  | "AWAKEN_SKILL_INVOKED"
+  | "AWAKEN_SKILL_CONTENT_LOADED"
+  | "AWAKEN_SKILL_EXECUTION_CONTEXT"
+  | "AWAKEN_SKILL_FAILED_TO_LOAD"
   | "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED"
   | "AWAKEN_MASS_MESSAGE_REVIEW_RESOLVED"
   | "AWAKEN_USER_QUESTION_REQUESTED"
@@ -158,27 +163,54 @@ export type AguiEvent = {
   recoveryOptions?: string[];
   durationMs?: number;
   diagnostic?: Record<string, unknown>;
+  environmentSnapshotId?: string;
+  toolAvailabilitySnapshotId?: string;
+  providerId?: string;
+  capability?: string;
+  capabilities?: string[];
+  readiness?: string;
+  dependency?: Record<string, unknown>;
+  dependencies?: Array<Record<string, unknown>>;
+  sideEffectState?: string;
   authProvider?: string;
   authScope?: string;
-  authLink?: string;
+  authUrl?: string;
   runtimeName?: string;
+  runtimeVersion?: string;
   runtimeComponent?: string;
   runtimeRequiredVersion?: string;
   runtimeDetectedVersion?: string;
   runtimePrepareStatus?: string;
   runtimeMissingReason?: string;
+  skillId?: string;
+  skillVersion?: string;
+  skillSource?: string;
+  skillPath?: string;
+  skillStatus?: string;
+  skillResource?: string;
+  skillResourceSource?: string;
+  skillResourceSha256?: string;
+  skillResourceSize?: number;
+  skillResourceMode?: string;
+  skillEffectiveTools?: string[];
+  skillDiagnostics?: string[];
   reviewId?: string;
   reviewDecision?: "approved" | "rejected";
+  reviewEnvelopeDigest?: string;
+  reviewBodyDigest?: string;
+  reviewRecipientIdentityDigest?: string;
   questionId?: string;
   questionAnswer?: string;
   massMessageChannel?: string;
   massMessageRecipientScope?: string;
   massMessageRecipientCount?: number;
   massMessageBodyPreview?: string;
-  massMessageTemplateId?: string;
-  massMessageAttachmentNames?: string[];
-  massMessageAccount?: string;
+  massMessageTemplatePreview?: string;
+  massMessageAttachments?: string[];
+  massMessageSendingAccount?: string;
   massMessageSourceTool?: string;
+  massMessageMessageCount?: number;
+  massMessageExpandsRecipients?: boolean;
   /** Legacy transcript-only fields. New runs must not emit generic approval events. */
   approvalId?: string;
   approvalTitle?: string;

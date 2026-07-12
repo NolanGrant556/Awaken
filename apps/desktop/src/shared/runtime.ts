@@ -371,14 +371,27 @@ export type RuntimeToolInfo = {
   readOnly: boolean;
 };
 
+export type RuntimeSkillState =
+  | "loaded"
+  | "invalid"
+  | "shadowed"
+  | "disabled_by_policy";
+
+export type RuntimeSkillDiagnostic =
+  | string
+  | {
+      code?: string;
+      message?: string;
+      severity?: "warning" | "error" | string;
+    };
+
 export type RuntimeSkill = {
   id: string;
   name: string;
   displayName?: string;
   description: string;
   whenToUse?: string;
-  state: "available" | "unavailable" | "shadowed" | string;
-  unavailableReason?: string;
+  state: RuntimeSkillState;
   sourceOrigin: string;
   scope?: "global" | "project" | "mcp" | string;
   rootDir?: string;
@@ -388,6 +401,10 @@ export type RuntimeSkill = {
   context: "inline" | "fork" | string;
   shadowedBy?: string;
   requiredMcpServers?: string[];
+  userInvocable?: boolean;
+  modelInvocable?: boolean;
+  diagnostics?: RuntimeSkillDiagnostic[];
+  lastInvokedAt?: string;
 };
 
 export type ComposerTokenType = "skill" | "file" | "workflow" | "prompt" | "connector";
@@ -804,6 +821,12 @@ export type RunStreamHandlers = {
   onClose?: () => void;
 };
 
+export type MassMessageReviewDigests = {
+  envelopeDigest: string;
+  bodyDigest: string;
+  recipientIdentityDigest: string;
+};
+
 export type SupervisorStatus = "stopped" | "starting" | "running" | "crashed" | "stopping";
 
 export type SupervisorStatusInfo = {
@@ -834,6 +857,7 @@ export type AwakenBridge = {
     runId: string,
     reviewId: string,
     decision: MassMessageReviewDecision,
+    digests: MassMessageReviewDigests,
   ) => Promise<void>;
   answerUserQuestion: (
     runId: string,

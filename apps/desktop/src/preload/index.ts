@@ -14,6 +14,7 @@ import {
   type InstallSkillRequest,
   type InstallSkillResponse,
   type MassMessageReviewDecision,
+  type MassMessageReviewDigests,
   type ModelProfileBalancesResult,
   type ModelProfileSaveRequest,
   type ModelProfileTestResult,
@@ -138,11 +139,17 @@ const bridge: AwakenBridge = {
     >,
   cancelRun: (runId: string) =>
     ipcRenderer.invoke("awaken:cancel-run", runId) as Promise<RuntimeRun>,
-  resolveMassMessageReview: (runId: string, reviewId: string, decision: MassMessageReviewDecision) =>
+  resolveMassMessageReview: (
+    runId: string,
+    reviewId: string,
+    decision: MassMessageReviewDecision,
+    digests: MassMessageReviewDigests,
+  ) =>
     ipcRenderer.invoke("awaken:resolve-mass-message-review", {
       runId,
       reviewId,
       decision,
+      ...digests,
     }) as Promise<void>,
   answerUserQuestion: (runId: string, questionId: string, answer: string) =>
     ipcRenderer.invoke("awaken:answer-user-question", {

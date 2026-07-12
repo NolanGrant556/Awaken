@@ -3333,6 +3333,16 @@ export function App() {
     if (resolvingMassMessageReviewId === activeMassMessageReview.id) {
       return;
     }
+    if (
+      !activeMassMessageReview.reviewEnvelopeDigest ||
+      !activeMassMessageReview.reviewBodyDigest ||
+      !activeMassMessageReview.reviewRecipientIdentityDigest
+    ) {
+      setNotice(
+        "Mass message review is missing its canonical approval binding. Start a new tool call.",
+      );
+      return;
+    }
 
     setNotice(null);
     setResolvingMassMessageReviewId(activeMassMessageReview.id);
@@ -3341,6 +3351,12 @@ export function App() {
         runtimeState.runId,
         activeMassMessageReview.id,
         decision,
+        {
+          envelopeDigest: activeMassMessageReview.reviewEnvelopeDigest,
+          bodyDigest: activeMassMessageReview.reviewBodyDigest,
+          recipientIdentityDigest:
+            activeMassMessageReview.reviewRecipientIdentityDigest,
+        },
       );
     } catch (error) {
       setNotice(
@@ -3803,12 +3819,26 @@ export function App() {
     const resolving =
       resolvingMassMessageReviewId === activeMassMessageReview.id;
     const detail = [
-      activeMassMessageReview.channel,
-      activeMassMessageReview.recipientScope,
-      activeMassMessageReview.recipientCount !== undefined
-        ? `${activeMassMessageReview.recipientCount} recipients`
+      activeMassMessageReview.channel
+        ? `发送渠道：${activeMassMessageReview.channel}`
         : undefined,
-      activeMassMessageReview.account,
+      activeMassMessageReview.sendingAccount
+        ? `发送账号：${activeMassMessageReview.sendingAccount}`
+        : undefined,
+      activeMassMessageReview.recipientScope
+        ? `收件人范围：${activeMassMessageReview.recipientScope}`
+        : undefined,
+      activeMassMessageReview.recipientCount !== undefined
+        ? `收件人数量：${activeMassMessageReview.recipientCount}`
+        : undefined,
+      activeMassMessageReview.messageCount !== undefined
+        ? `消息数量：${activeMassMessageReview.messageCount}`
+        : undefined,
+      activeMassMessageReview.expandsRecipients === true
+        ? "收件人集合将继续批量扩展"
+        : activeMassMessageReview.expandsRecipients === false
+          ? "收件人集合固定"
+          : undefined,
     ]
       .filter(Boolean)
       .join(" | ");
@@ -3821,12 +3851,17 @@ export function App() {
           ) : null}
           {activeMassMessageReview.bodyPreview ? (
             <div className="mass-message-review-card__preview">
-              {activeMassMessageReview.bodyPreview}
+              正文预览：{activeMassMessageReview.bodyPreview}
             </div>
           ) : null}
-          {activeMassMessageReview.attachmentNames.length > 0 ? (
+          {activeMassMessageReview.templatePreview ? (
+            <div className="mass-message-review-card__preview">
+              模板预览：{activeMassMessageReview.templatePreview}
+            </div>
+          ) : null}
+          {activeMassMessageReview.attachments.length > 0 ? (
             <div className="mass-message-review-card__meta">
-              {activeMassMessageReview.attachmentNames.join(", ")}
+              附件：{activeMassMessageReview.attachments.join(", ")}
             </div>
           ) : null}
         </div>

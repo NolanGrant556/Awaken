@@ -497,28 +497,26 @@ func TestDefaultAutoToolPolicyDecisions(t *testing.T) {
 		t.Fatalf("expected read-only allow to be allowed, got %+v", allow)
 	}
 
-	// Other destructive tools (not apply_patch) are still hard-denied in
-	// headless mode.
-	deny := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
+	// Ordinary writes do not enter a generic approval/deny path. Any true hard
+	// boundary must have been expressed by the tool's PermissionDecision.
+	ordinaryWrite := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
 		ToolName:       "destructive_write_tool",
 		StaticBehavior: tool.PermissionAllow,
 		StaticReason:   "destructive tool requires approval",
 		IsDestructive:  true,
 	})
-	if deny.Action != ToolDecisionDeny || deny.Source != ToolDecisionSourceHeadlessDefault {
-		t.Fatalf("expected destructive ask to be denied, got %+v", deny)
+	if ordinaryWrite.Action != ToolDecisionAllow || ordinaryWrite.Source != ToolDecisionSourceToolRule {
+		t.Fatalf("expected ordinary write to auto-execute, got %+v", ordinaryWrite)
 	}
 
-	// Other destructive tools (not apply_patch) are still hard-denied on
-	// the PermissionAllow path via deniesStaticAllowInHeadless.
-	denyStaticAllowWrite := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
+	ordinaryStaticAllowWrite := DefaultAutoToolPolicy{}.Decide(context.Background(), ToolDecisionRequest{
 		ToolName:       "destructive_write_tool",
 		StaticBehavior: tool.PermissionAllow,
 		StaticReason:   "destructive tool static allow",
 		IsDestructive:  true,
 	})
-	if denyStaticAllowWrite.Action != ToolDecisionDeny || denyStaticAllowWrite.Source != ToolDecisionSourceHeadlessDefault {
-		t.Fatalf("expected destructive static allow to be denied in headless AUTO, got %+v", denyStaticAllowWrite)
+	if ordinaryStaticAllowWrite.Action != ToolDecisionAllow || ordinaryStaticAllowWrite.Source != ToolDecisionSourceToolRule {
+		t.Fatalf("expected static allow write to remain allowed, got %+v", ordinaryStaticAllowWrite)
 	}
 
 	allowlistedStaticAllowWrite := DefaultAutoToolPolicy{

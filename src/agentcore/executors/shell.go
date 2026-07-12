@@ -12,10 +12,10 @@ import (
 // which internally calls the existing tools/shell.ShellExecutor (Task 7).
 //
 // The existing tools/shell.ShellExecutor already:
-//   - Classifies the command via ClassifyShellCommand.
-//   - Looks up the platform sandbox adapter support level for observability.
-//   - Enforces the local-computer hard gates: delete via Trash and
-//     mass-message review.
+//   - Classifies the command via ClassifyShellCommand for observability.
+//   - Uses the current-login-user direct broker by default.
+//   - Applies a sandbox/staging boundary only when an explicitly injected
+//     broker requests one.
 //
 // This wrapper does NOT duplicate the shell execution logic. Its role is
 // to provide a uniform ToolExecutor interface so the Router can route
@@ -31,8 +31,8 @@ func NewShellExecutor() *ShellExecutor {
 
 // Execute injects the profile EnvPolicy before delegating to the shell tool's
 // own Execute / ExecuteWithObserver. Shell is a local-computer surface and no
-// longer fails closed on sandbox availability; the shell tool's policy keeps
-// the product hard gates (Trash-only deletes and mass-message review).
+// longer fails closed on sandbox availability, workspace scope, package
+// managers, network access, raw deletion, or collaboration-CLI detection.
 //
 // EnvPolicy enforcement:
 //   - The profile's EnvPolicy is injected into the context via

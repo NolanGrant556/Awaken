@@ -4,6 +4,13 @@
 // recoverable.
 package trash
 
+import "errors"
+
+// ErrCrossVolumeTrashUnsupported means the adapter could not provide an
+// atomic move into the platform Trash. Callers must fail closed; copying then
+// deleting the source would violate recoverable-delete semantics.
+var ErrCrossVolumeTrashUnsupported = errors.New("cross-volume Trash move is unsupported")
+
 // TrashAdapter is the interface for moving files to the OS recycle bin or
 // trash directory. Implementations must be safe for concurrent use.
 type TrashAdapter interface {

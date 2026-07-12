@@ -71,17 +71,20 @@ const (
 
 // Common machine-readable error codes.
 const (
-	ErrorCodeProcessExitNonzero  = "process_exit_nonzero"
-	ErrorCodeProcessTimeout      = "process_timeout"
-	ErrorCodeProcessSpawnFailed  = "process_spawn_failed"
-	ErrorCodeValidationError     = "validation_error"
-	ErrorCodeToolDenied          = "tool_denied"
-	ErrorCodeToolCancelled       = "tool_cancelled"
-	ErrorCodeNeedsAuth           = "needs_auth"
-	ErrorCodeNeedsRuntime        = "needs_runtime"
-	ErrorCodeUnsupported         = "unsupported"
-	ErrorCodeToolExecutionFailed = "tool_execution_failed"
-	ErrorCodeSkillToolNotAllowed = "skill_tool_not_allowed"
+	ErrorCodeProcessExitNonzero          = "process_exit_nonzero"
+	ErrorCodeProcessTimeout              = "process_timeout"
+	ErrorCodeProcessSpawnFailed          = "process_spawn_failed"
+	ErrorCodeValidationError             = "validation_error"
+	ErrorCodeToolDenied                  = "tool_denied"
+	ErrorCodeToolCancelled               = "tool_cancelled"
+	ErrorCodeNeedsAuth                   = "needs_auth"
+	ErrorCodeNeedsRuntime                = "needs_runtime"
+	ErrorCodeUnsupported                 = "unsupported"
+	ErrorCodeToolExecutionFailed         = "tool_execution_failed"
+	ErrorCodeExecutionBrokerUnavailable  = "execution_broker_unavailable"
+	ErrorCodeSupervisedExecutionRequired = "supervised_execution_required"
+	ErrorCodeRecoverableDeleteTransform  = "recoverable_delete_transform_required"
+	ErrorCodeUnsafeRecoverableDeletePath = "unsafe_recoverable_delete_path"
 )
 
 // ExecutionOutcome is the canonical ToolOutcome type.

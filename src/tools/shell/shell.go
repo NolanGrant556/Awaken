@@ -3,6 +3,7 @@ package shelltool
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -14,8 +15,8 @@ import (
 )
 
 const (
-	defaultTimeoutMS      = 10000
-	maxTimeoutMS          = 120000
+	defaultTimeoutMS      = 10 * 60 * 1000
+	maxTimeoutMS          = 30 * 60 * 1000
 	defaultMaxOutputChars = 12000
 	maxOutputCharsLimit   = 50000
 )
@@ -30,14 +31,17 @@ type shellParams struct {
 }
 
 type shellResult struct {
-	Command    string `json:"command"`
-	Cwd        string `json:"cwd,omitempty"`
-	ExitCode   int    `json:"exit_code"`
-	TimedOut   bool   `json:"timed_out"`
-	DurationMS int64  `json:"duration_ms"`
-	Stdout     string `json:"stdout"`
-	Stderr     string `json:"stderr"`
-	Truncated  bool   `json:"truncated"`
+	Command               string                       `json:"command"`
+	Cwd                   string                       `json:"cwd,omitempty"`
+	ExitCode              int                          `json:"exit_code"`
+	TimedOut              bool                         `json:"timed_out"`
+	Cancelled             bool                         `json:"cancelled,omitempty"`
+	DurationMS            int64                        `json:"duration_ms"`
+	Stdout                string                       `json:"stdout"`
+	Stderr                string                       `json:"stderr"`
+	Truncated             bool                         `json:"truncated"`
+	EnvironmentSnapshotID string                       `json:"environment_snapshot_id,omitempty"`
+	BrokerReceipt         *tool.BrokerExecutionReceipt `json:"broker_receipt,omitempty"`
 }
 
 func (t *ShellTool) Name() string {
@@ -45,14 +49,14 @@ func (t *ShellTool) Name() string {
 }
 
 func (t *ShellTool) Description() string {
-	return "执行本机 shell/CLI 命令并返回 exit code、耗时、stdout 和 stderr；可读取和操作项目内外本机路径，可调用本机已安装 CLI（如 dws、gh、feishu、obsidian）。删除本地文件必须走 trash_file/Trash 工具，不要用 rm/rmdir/unlink；涉及群发、批量通知或机器人广播必须走人工审核能力"
+	return "使用当前登录用户的本机环境与操作系统权限直接执行 shell/CLI，允许访问用户目录、网络、包管理器、安装脚本和本机程序；返回真实 exit code、耗时、stdout、stderr 与执行 provider receipt。默认 provider 不声称 workspace 隔离、可恢复修改或完整副作用观察"
 }
 
 func (t *ShellTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
 		{Name: "command", Description: "要执行的 shell 命令", Type: "string", Required: true},
 		{Name: "workdir", Description: "命令工作目录，默认当前工作目录", Type: "string", Required: false},
-		{Name: "timeout_ms", Description: "超时时间毫秒，默认 10000，最大 120000", Type: "integer", Required: false},
+		{Name: "timeout_ms", Description: "超时时间毫秒，默认 600000（10 分钟），最大 1800000（30 分钟）", Type: "integer", Required: false},
 		{Name: "max_output_chars", Description: "stdout/stderr 各自最多返回字符数，默认 12000，最大 50000", Type: "integer", Required: false},
 	}
 }
@@ -62,22 +66,26 @@ func (t *ShellTool) Definition() tool.ToolDefinition {
 		Name:        "shell",
 		DisplayName: "Shell",
 		Description: t.Description(),
-		Purpose:     "在受策略和任务范围约束下执行本机 CLI，并返回进程状态、stdout、stderr 与截断事实。",
+		Purpose:     "以当前登录用户身份执行本机 CLI，并返回真实进程状态、stdout、stderr 与截断事实。",
 		WhenToUse: []string{
-			"需要运行构建、测试、格式化、git 或已安装 CLI，且没有职责更窄的 typed tool 时",
+			"需要运行 Skill 初始化、npm/pip 安装脚本、构建、测试、网络 CLI 或本机应用命令时",
+			"需要在 workspace、用户级 Skill 目录、用户缓存或其他用户可访问目录操作时",
 			"需要观察真实 exit code、stderr、timeout 或进程级失败时",
 		},
 		WhenNotToUse: []string{
-			"读取、搜索、创建、精确编辑或删除文件时优先使用 read_file、grep_search、text_file_create、text_edit、trash_file",
-			"不得使用 rm、rmdir、unlink 永久删除；必须使用 trash_file",
-			"不得用 shell 绕过 writable roots、授权、runtime 准备或群发人工审核边界",
+			"只需读取或搜索时可优先使用 read_file、grep_search；精确编辑时可优先使用 text_edit",
+			"需要可恢复删除或可验证文件提交时可优先使用 trash_file 等职责更窄的 typed tool",
+			"不要把默认 direct provider 的 receipt 当作文件变化、网络收件人或可恢复删除证明",
 		},
 		OutputSchema: tool.ToolParam{Type: "object", Properties: map[string]tool.ToolParam{
-			"command": {Type: "string", Description: "实际执行命令"},
-			"cwd":     {Type: "string", Description: "实际工作目录"},
-			"stdout":  {Type: "string", Description: "有界标准输出"},
-			"stderr":  {Type: "string", Description: "有界标准错误"},
-			"reason":  {Type: "string", Description: "非零退出被判为 neutral 时的机器原因"},
+			"command":                 {Type: "string", Description: "实际执行命令"},
+			"cwd":                     {Type: "string", Description: "实际工作目录"},
+			"stdout":                  {Type: "string", Description: "有界标准输出"},
+			"stderr":                  {Type: "string", Description: "有界标准错误"},
+			"cancelled":               {Type: "boolean", Description: "命令是否因调用上下文取消而终止"},
+			"reason":                  {Type: "string", Description: "非零退出被判为 neutral 时的机器原因"},
+			"environment_snapshot_id": {Type: "string", Description: "本次命令使用的只读环境快照 ID"},
+			"broker_receipt":          {Type: "object", Description: "执行 broker 的授权与强制证据", AdditionalProperties: tool.BoolPtr(true)},
 		}},
 		SideEffects: []tool.ToolSideEffect{{Kind: tool.SideEffectExecute, Resources: []string{"local process and command-selected resources"}, Description: "启动本机进程；具体文件、git、网络或外部副作用由命令决定。", Reversibility: tool.ReversibilityUnknown}},
 		Examples:    []tool.ToolExample{{Scenario: "在仓库运行聚焦 Go 测试", Input: map[string]any{"command": "go test ./src/tool", "workdir": ".", "timeout_ms": 120000}, Outcome: "返回 exit code、stdout、stderr、duration 和 process status"}},
@@ -86,15 +94,23 @@ func (t *ShellTool) Definition() tool.ToolDefinition {
 			{Code: tool.ErrorCodeProcessSpawnFailed, Cause: "本机进程未能启动", Retryable: true, Recovery: []string{"检查可执行文件、工作目录和本机进程环境后重试"}},
 			{Code: tool.ErrorCodeProcessExitNonzero, Cause: "进程完成但返回非零退出码", Retryable: false, Recovery: []string{"根据 stderr 和 exit code 修复原因", "不要盲目原样重试"}},
 			{Code: tool.ErrorCodeProcessTimeout, Cause: "进程超过 timeout", Retryable: true, Recovery: []string{"检查是否应使用更窄命令或合理增加 timeout"}},
-			{Code: tool.ErrorCodeToolDenied, Cause: "命令违反删除、范围或群发策略", Retryable: false, Recovery: []string{"改用职责匹配的 typed tool 或完成专用审核"}},
+			{Code: tool.ErrorCodeToolDenied, Cause: "显式注入的受限 broker 拒绝命令", Retryable: false, Recovery: []string{"检查该 run 的 broker 合同或使用默认本机 provider"}},
 		},
 		Annotations: tool.ToolAnnotations{
 			ReadOnly:        false,
-			Destructive:     true,
+			Destructive:     false,
 			OpenWorld:       true,
 			CapabilityClass: tool.CapabilitySystemOperation,
 			TrustedOrigin:   tool.TrustedOriginBuiltin,
 		},
+		Permissions: tool.ToolPermissionSpec{
+			CapabilityClass: tool.CapabilitySystemOperation,
+			WorkspaceScope:  tool.WorkspaceScopeNone,
+			FileBridgeScope: tool.FileBridgeNone,
+			NetworkScope:    tool.NetworkScopeOpen,
+		},
+		ProviderID:   tool.ProviderID("builtin:shell"),
+		Capabilities: []tool.Capability{tool.CapabilityShellExecute},
 	})
 }
 
@@ -111,15 +127,6 @@ func (t *ShellTool) CheckPermission(ctx context.Context, input string, permissio
 	if params.Command == "" {
 		return tool.AllowPermission()
 	}
-	if metadata, ok := MassMessageReviewMetadataForShellCommand(params.Command); ok {
-		return tool.NeedsMassMessageReviewPermission("mass message CLI command requires human review", tool.DecisionMetadata{
-			Title:       "Shell mass message review",
-			Description: shellApprovalDescription(params, "mass message CLI command"),
-			RiskTone:    "danger",
-			MassMessage: metadata,
-		})
-	}
-
 	cwd := resolveExecutorCwd(params.Workdir, permissionContext)
 	policy := EvaluateShellPolicy(params.Command, cwd, permissionContext)
 	if policy.DenyReason != "" {
@@ -201,7 +208,68 @@ func (t *ShellTool) ExecuteOutcome(ctx context.Context, input string, observer t
 				"cwd":     cwd,
 			},
 		}
-		if strings.Contains(strings.ToLower(msg), "denied") || strings.Contains(msg, "policy") {
+		if result.EnvironmentSnapshot.SnapshotID != "" {
+			outcome.Diagnostic["environment_snapshot_id"] = result.EnvironmentSnapshot.SnapshotID
+		}
+		if result.BrokerAuthorization.AuthorizationID != "" {
+			outcome.Diagnostic["broker_authorization"] = result.BrokerAuthorization
+		}
+		if result.BrokerReceipt.AuthorizationID != "" {
+			outcome.Diagnostic["broker_receipt"] = result.BrokerReceipt
+		}
+		switch {
+		case errors.Is(err, tool.ErrExecutionBrokerUnavailable), errors.Is(err, tool.ErrExecutionSandboxRequired):
+			outcome.Status = tool.OutcomeUnsupported
+			outcome.TransportStatus = tool.TransportNotStarted
+			outcome.ProcessStatus = tool.ProcessNotApplicable
+			outcome.ErrorCode = tool.ErrorCodeExecutionBrokerUnavailable
+			outcome.ErrorCategory = tool.ErrorCategoryRuntime
+			outcome.Retryable = false
+			outcome.RecoveryOptions = []string{"install_or_restore_execution_broker"}
+		case errors.Is(err, tool.ErrExecutionBrokerCommit), errors.Is(err, tool.ErrExecutionWorkspaceChanged):
+			outcome.Status = tool.OutcomeFailed
+			outcome.TransportStatus = tool.TransportCompleted
+			outcome.ProcessStatus = tool.ProcessExited
+			outcome.ErrorCode = tool.ErrorCodeToolExecutionFailed
+			outcome.ErrorCategory = tool.ErrorCategoryTool
+			outcome.Retryable = false
+			exitCode := result.ExitCode
+			outcome.ExitCode = &exitCode
+			outcome.RecoveryOptions = []string{"inspect_workspace_and_trash_recovery_bundle", "refresh_workspace_before_retry"}
+		case errors.Is(err, tool.ErrExecutionBrokerDenied):
+			if result.BrokerReceipt.CommitStatus == "denied_writable_scope" || result.BrokerReceipt.CommitStatus == "denied_protected_root" {
+				// The process completed only inside the sealed staging workspace;
+				// commit-time scope validation then denied publication before Trash
+				// or any live-workspace mutation.
+				outcome.Status = tool.OutcomeDenied
+				outcome.TransportStatus = tool.TransportCompleted
+				outcome.ProcessStatus = tool.ProcessExited
+				outcome.ErrorCode = tool.ErrorCodeToolDenied
+				outcome.ErrorCategory = tool.ErrorCategoryPolicy
+				exitCode := result.ExitCode
+				outcome.ExitCode = &exitCode
+				outcome.Retryable = false
+				outcome.RecoveryOptions = []string{"restrict_command_to_writable_roots", "avoid_protected_roots"}
+			} else {
+				outcome.Status = tool.OutcomeUnsupported
+				outcome.TransportStatus = tool.TransportNotStarted
+				outcome.ProcessStatus = tool.ProcessNotApplicable
+				outcome.ErrorCode = tool.ErrorCodeSupervisedExecutionRequired
+				outcome.ErrorCategory = tool.ErrorCategoryPolicy
+				outcome.Retryable = false
+				outcome.RecoveryOptions = []string{"use_typed_tool", "prepare_staging_or_overlay_broker"}
+			}
+		case errors.Is(err, tool.ErrExecutionTransformRequired):
+			outcome.Status = tool.OutcomeUnsupported
+			outcome.TransportStatus = tool.TransportNotStarted
+			outcome.ProcessStatus = tool.ProcessNotApplicable
+			outcome.ErrorCode = tool.ErrorCodeSupervisedExecutionRequired
+			outcome.ErrorCategory = tool.ErrorCategoryPolicy
+			outcome.Retryable = false
+			outcome.RecoveryOptions = []string{"use_typed_tool", "prepare_staging_or_overlay_broker"}
+		}
+		applyBrokerReceiptToOutcome(&outcome, result.BrokerReceipt)
+		if outcome.Status == tool.OutcomeFailed && (strings.Contains(strings.ToLower(msg), "denied") || strings.Contains(msg, "policy")) {
 			outcome.Status = tool.OutcomeDenied
 			outcome.TransportStatus = tool.TransportNotStarted
 			outcome.ProcessStatus = tool.ProcessNotApplicable
@@ -213,14 +281,20 @@ func (t *ShellTool) ExecuteOutcome(ctx context.Context, input string, observer t
 	}
 
 	shellRes := shellResult{
-		Command:    redactShellSecrets(params.Command),
-		Cwd:        cwd,
-		ExitCode:   result.ExitCode,
-		TimedOut:   result.TimedOut,
-		DurationMS: result.DurationMS,
-		Stdout:     result.Stdout,
-		Stderr:     result.Stderr,
-		Truncated:  result.Truncated,
+		Command:               redactShellSecrets(params.Command),
+		Cwd:                   cwd,
+		ExitCode:              result.ExitCode,
+		TimedOut:              result.TimedOut,
+		Cancelled:             result.Cancelled,
+		DurationMS:            result.DurationMS,
+		Stdout:                result.Stdout,
+		Stderr:                result.Stderr,
+		Truncated:             result.Truncated,
+		EnvironmentSnapshotID: result.EnvironmentSnapshot.SnapshotID,
+	}
+	if result.BrokerReceipt.AuthorizationID != "" {
+		receipt := result.BrokerReceipt
+		shellRes.BrokerReceipt = &receipt
 	}
 	data, marshalErr := json.MarshalIndent(shellRes, "", "  ")
 	if marshalErr != nil {
@@ -244,9 +318,29 @@ func (t *ShellTool) ExecuteOutcome(ctx context.Context, input string, observer t
 	outcome.Details = map[string]any{
 		"command": shellRes.Command, "cwd": cwd,
 		"stdout": result.Stdout, "stderr": result.Stderr,
+		"environment_snapshot_id": result.EnvironmentSnapshot.SnapshotID,
+	}
+	if shellRes.BrokerReceipt != nil {
+		outcome.Details["broker_receipt"] = shellRes.BrokerReceipt
+	}
+	outcome.Environment = &tool.EnvironmentObservation{
+		Observation: tool.ObservationPartial, ObservedAt: finished, Scope: cwd,
+		Source:        "execution_environment_snapshot:" + result.EnvironmentSnapshot.SnapshotID,
+		WorkspaceRoot: permissionContext.WorkspaceRoot, WorkingDirectory: cwd,
+		Processes:  []tool.ProcessObservation{{Status: tool.ProcessExited, ExitCode: &exitCode, CWD: cwd}},
+		Unobserved: []string{"git", "environment_variable_values"},
 	}
 
 	switch {
+	case result.Cancelled:
+		outcome.Status = tool.OutcomeCancelled
+		outcome.TransportStatus = tool.TransportCancelled
+		outcome.SemanticStatus = tool.SemanticFailure
+		outcome.ProcessStatus = tool.ProcessSignaled
+		outcome.ErrorCode = tool.ErrorCodeToolCancelled
+		outcome.ErrorCategory = tool.ErrorCategoryCancelled
+		outcome.ErrorMessage = "command cancelled"
+		outcome.Retryable = false
 	case result.TimedOut:
 		outcome.Status = tool.OutcomeFailed
 		outcome.TransportStatus = tool.TransportFailed
@@ -282,7 +376,37 @@ func (t *ShellTool) ExecuteOutcome(ctx context.Context, input string, observer t
 			outcome.RecoveryOptions = []string{"inspect_exit_code_and_stderr", "change_command_or_stop"}
 		}
 	}
+	applyBrokerReceiptToOutcome(&outcome, result.BrokerReceipt)
 	return outcome.WithTiming(started, finished), nil
+}
+
+func applyBrokerReceiptToOutcome(outcome *tool.ExecutionOutcome, receipt tool.BrokerExecutionReceipt) {
+	if outcome == nil || receipt.AuthorizationID == "" {
+		return
+	}
+	if receipt.SideEffectState != "" {
+		if outcome.Operation == nil {
+			outcome.Operation = &tool.OperationDescriptor{Type: "shell", Target: receipt.WorkspaceRoot}
+		}
+		outcome.Operation.SideEffectState = receipt.SideEffectState
+	}
+	for _, change := range receipt.WorkspaceChanges {
+		details := map[string]any{"broker_id": receipt.BrokerID, "commit_status": receipt.CommitStatus}
+		if change.RecoveryPath != "" {
+			details["recovery_path"] = change.RecoveryPath
+			details["recovery_method"] = change.RecoveryMethod
+		}
+		reversibility := tool.ChangeConditional
+		summary := "Workspace change committed by the supervised execution broker."
+		if change.Action == "deleted" {
+			summary = "Workspace resource moved into a recoverable Trash bundle."
+		}
+		outcome.Changes = append(outcome.Changes, tool.ResourceChange{
+			Kind: "file", Action: change.Action, Resource: change.Path, Summary: summary,
+			Certainty: tool.ChangeObserved, Reversibility: reversibility, Details: details,
+		})
+		outcome.AffectedPaths = append(outcome.AffectedPaths, change.Path)
+	}
 }
 
 func installActivity(command string) (title, detail string, ok bool) {

@@ -19,6 +19,7 @@ type TrashAdapterMac struct {
 	// trashDir overrides the default ~/.Trash destination. When empty,
 	// ~/.Trash is used. This is primarily for testing.
 	trashDir string
+	rename   func(oldPath, newPath string) error
 }
 
 func defaultPlatformAdapter() TrashAdapter {
@@ -31,12 +32,15 @@ func (a TrashAdapterMac) TrashPath(path string) (TrashResult, error) {
 		return TrashResult{}, fmt.Errorf("trash: resolve absolute path for %q: %w", path, err)
 	}
 
-	_, err = os.Stat(absPath)
+	info, err := os.Lstat(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return TrashResult{}, fmt.Errorf("trash: path does not exist: %s", absPath)
 		}
 		return TrashResult{}, fmt.Errorf("trash: stat %s: %w", absPath, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || (!info.Mode().IsRegular() && !info.IsDir()) {
+		return TrashResult{}, fmt.Errorf("trash: refusing symlink or special filesystem object: %s", absPath)
 	}
 	trashDir := a.trashDir
 	if trashDir == "" {
@@ -60,7 +64,14 @@ func (a TrashAdapterMac) TrashPath(path string) (TrashResult, error) {
 		target = filepath.Join(trashDir, nameWithoutExt+"."+stamp+ext)
 	}
 
-	if err := os.Rename(absPath, target); err != nil {
+	rename := a.rename
+	if rename == nil {
+		rename = os.Rename
+	}
+	if err := rename(absPath, target); err != nil {
+		if isCrossDeviceError(err) {
+			return TrashResult{}, fmt.Errorf("trash: %w: %s to %s", ErrCrossVolumeTrashUnsupported, absPath, target)
+		}
 		return TrashResult{}, fmt.Errorf("trash: move %s to %s: %w", absPath, target, err)
 	}
 

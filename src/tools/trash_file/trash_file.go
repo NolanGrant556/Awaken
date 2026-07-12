@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,7 +16,8 @@ type TrashFileTool struct{}
 var _ tool.OutcomeTool = (*TrashFileTool)(nil)
 
 type trashFileParams struct {
-	Path string `json:"path"`
+	Path  string   `json:"path"`
+	Paths []string `json:"paths"`
 }
 
 type trashFileResult struct {
@@ -36,9 +36,30 @@ func (t *TrashFileTool) Description() string {
 
 func (t *TrashFileTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
-		{Name: "path", Description: "要移入回收站的本机文件或文件夹路径，可以是项目内或项目外路径", Type: "string", Required: true},
+		{Name: "path", Description: "要移入回收站的单个本机文件或文件夹路径", Type: "string", Required: false},
+		{Name: "paths", Description: "要依次移入回收站的明确路径列表；用于安全转换 shell 删除", Type: "array", Required: false},
 	}
 }
+
+func (t *TrashFileTool) InputSchema() tool.ToolParametersSchema {
+	additional := tool.BoolPtr(false)
+	item := tool.ToolParam{Type: "string", Description: "要移入回收站的明确路径", MinLength: intPtr(1)}
+	minItems := 1
+	return tool.ToolParametersSchema{
+		Type: "object",
+		Properties: map[string]tool.ToolParam{
+			"path":  {Type: "string", Description: "单个明确路径", MinLength: intPtr(1)},
+			"paths": {Type: "array", Description: "一个或多个明确路径", Items: &item, MinItems: &minItems},
+		},
+		AdditionalProperties: additional,
+		OneOf: []tool.ToolParam{
+			{Type: "object", Properties: map[string]tool.ToolParam{"path": {Type: "string", Description: "单个明确路径", MinLength: intPtr(1)}}, Required: []string{"path"}, AdditionalProperties: additional},
+			{Type: "object", Properties: map[string]tool.ToolParam{"paths": {Type: "array", Description: "一个或多个明确路径", Items: &item, MinItems: &minItems}}, Required: []string{"paths"}, AdditionalProperties: additional},
+		},
+	}
+}
+
+func intPtr(value int) *int { return &value }
 
 func (t *TrashFileTool) Definition() tool.ToolDefinition {
 	return tool.BuildBuiltinDefinition(t, tool.ToolDefinition{
@@ -58,11 +79,13 @@ func (t *TrashFileTool) Definition() tool.ToolDefinition {
 			"original_path": {Type: "string", Description: "删除前绝对路径"},
 			"trashed_path":  {Type: "string", Description: "操作系统返回的回收站路径（若可得）"},
 			"method":        {Type: "string", Description: "实际回收站实现"},
+			"results":       {Type: "array", Description: "批量安全转换时每个已处理目标的结果", Items: &tool.ToolParam{Type: "object", AdditionalProperties: tool.BoolPtr(true)}},
 		}},
 		SideEffects: []tool.ToolSideEffect{{Kind: tool.SideEffectDelete, Resources: []string{"one local file or directory"}, Description: "把资源移动到系统回收站；恢复能力取决于操作系统。", Reversibility: tool.ReversibilityConditional}},
 		Examples:    []tool.ToolExample{{Scenario: "可恢复删除临时文件", Input: map[string]any{"path": "tmp/obsolete.txt"}, Outcome: "返回 original_path、trashed_path、method 和 trashed change"}},
 		FailureModes: []tool.ToolFailureMode{
 			{Code: tool.ErrorCodeValidationError, Cause: "path 缺失或参数不是 JSON 对象", Retryable: false, Recovery: []string{"提供明确 path"}},
+			{Code: tool.ErrorCodeUnsafeRecoverableDeletePath, Cause: "path 是敏感/受保护路径、符号链接、根目录或特殊文件", Retryable: false, Recovery: []string{"选择明确的普通文件或目录目标"}},
 			{Code: tool.ErrorCodeToolExecutionFailed, Cause: "回收站移动失败且最终文件状态未知", Retryable: false, Recovery: []string{"先检查原路径和回收站状态", "不要原样重试或改用永久删除"}},
 		},
 		Annotations: tool.ToolAnnotations{
@@ -72,6 +95,8 @@ func (t *TrashFileTool) Definition() tool.ToolDefinition {
 			CapabilityClass: tool.CapabilityArtifactWrite,
 			TrustedOrigin:   tool.TrustedOriginBuiltin,
 		},
+		ProviderID:   tool.ProviderID("builtin:trash_file"),
+		Capabilities: []tool.Capability{tool.CapabilityFileDelete},
 	})
 }
 
@@ -80,15 +105,20 @@ func (t *TrashFileTool) CheckPermission(ctx context.Context, input string, permi
 	if err != nil {
 		return tool.DenyPermission(fmt.Sprintf("invalid parameters: %v", err))
 	}
-	if strings.TrimSpace(params.Path) == "" {
-		return tool.DenyPermission("trash_file requires path")
+	paths := trashFilePaths(params)
+	resolved := make([]string, 0, len(paths))
+	for _, path := range paths {
+		cleaned, resolveErr := permissionContext.ResolveRecoverableDeletePathChecked(path)
+		if resolveErr != nil {
+			return tool.DenyPermission(resolveErr.Error())
+		}
+		resolved = append(resolved, cleaned)
 	}
-	resolved := permissionContext.ResolvePath(params.Path)
 	return tool.AllowPermissionWithMetadata(tool.DecisionMetadata{
 		Title:         "Move to Trash",
-		Description:   resolved,
+		Description:   strings.Join(resolved, "\n"),
 		RiskTone:      "danger",
-		AffectedPaths: []string{resolved},
+		AffectedPaths: resolved,
 	})
 }
 
@@ -121,48 +151,63 @@ func (t *TrashFileTool) ExecuteOutcome(ctx context.Context, input string, _ tool
 		outcome.RecoveryOptions = []string{"provide_valid_path"}
 		return outcome.WithTiming(started, time.Now().UTC()), nil
 	}
-	path := strings.TrimSpace(params.Path)
-	if path == "" {
-		outcome := tool.FailedOutcome("trash_file requires path", tool.ErrorCodeValidationError, tool.ErrorCategoryValidation, false)
-		outcome.TransportStatus = tool.TransportNotStarted
-		outcome.RecoveryOptions = []string{"provide_path"}
-		return outcome.WithTiming(started, time.Now().UTC()), nil
+	permissionContext := tool.PermissionContextFromContext(ctx)
+	requestedPaths := trashFilePaths(params)
+	cleanedPaths := make([]string, 0, len(requestedPaths))
+	for _, path := range requestedPaths {
+		cleaned, resolveErr := permissionContext.ResolveRecoverableDeletePathChecked(path)
+		if resolveErr != nil {
+			outcome := tool.FailedOutcome(resolveErr.Error(), tool.ErrorCodeUnsafeRecoverableDeletePath, tool.ErrorCategoryPolicy, false)
+			outcome.Status = tool.OutcomeDenied
+			outcome.TransportStatus = tool.TransportNotStarted
+			outcome.ProcessStatus = tool.ProcessNotApplicable
+			outcome.RecoveryOptions = []string{"choose_explicit_non_sensitive_non_symlink_path"}
+			return outcome.WithTiming(started, time.Now().UTC()), nil
+		}
+		cleanedPaths = append(cleanedPaths, cleaned)
 	}
-	resolved := tool.PermissionContextFromContext(ctx).ResolvePath(path)
-	cleaned, err := filepath.Abs(resolved)
-	if err != nil {
-		outcome := tool.FailedOutcome(fmt.Sprintf("resolve path %q: %v", path, err), tool.ErrorCodeValidationError, tool.ErrorCategoryValidation, false)
-		outcome.TransportStatus = tool.TransportNotStarted
-		outcome.RecoveryOptions = []string{"provide_resolvable_path"}
-		return outcome.WithTiming(started, time.Now().UTC()), nil
+
+	results := make([]trashFileResult, 0, len(cleanedPaths))
+	changes := make([]tool.ResourceChange, 0, len(cleanedPaths))
+	for _, cleaned := range cleanedPaths {
+		result, trashErr := trash.DefaultAdapter().TrashPath(cleaned)
+		if trashErr != nil {
+			outcome := tool.FailedOutcome(trashErr.Error(), tool.ErrorCodeToolExecutionFailed, tool.ErrorCategoryTool, false)
+			state := tool.OutcomeSideEffectUnknown
+			if len(results) > 0 {
+				state = tool.OutcomeSideEffectPartial
+			}
+			outcome.Operation = &tool.OperationDescriptor{Type: t.Name(), Target: cleaned, SideEffectState: state}
+			outcome.RecoveryOptions = []string{"inspect_original_and_trash_state", "do_not_retry_until_state_is_known"}
+			outcome.Diagnostic = map[string]any{"original_path": cleaned, "final_state": "unknown", "completed_results": results}
+			outcome.Changes = changes
+			return outcome.WithTiming(started, time.Now().UTC()), nil
+		}
+		results = append(results, trashFileResult{OriginalPath: result.OriginalPath, TrashedPath: result.TrashedPath, Method: result.Method})
+		changes = append(changes, tool.ResourceChange{
+			Kind: "file", Action: "trashed", Resource: result.OriginalPath,
+			Summary: "Moved to the operating-system Trash.", Certainty: tool.ChangeObserved, Reversibility: tool.ChangeConditional,
+			Details: map[string]any{"trashed_path": result.TrashedPath, "method": result.Method},
+		})
 	}
-	result, err := trash.DefaultAdapter().TrashPath(cleaned)
-	if err != nil {
-		outcome := tool.FailedOutcome(err.Error(), tool.ErrorCodeToolExecutionFailed, tool.ErrorCategoryTool, false)
-		outcome.Operation = &tool.OperationDescriptor{Type: t.Name(), Target: cleaned, SideEffectState: tool.OutcomeSideEffectUnknown}
-		outcome.RecoveryOptions = []string{"inspect_original_and_trash_state", "do_not_retry_until_state_is_known"}
-		outcome.Diagnostic = map[string]any{"original_path": cleaned, "final_state": "unknown"}
-		return outcome.WithTiming(started, time.Now().UTC()), nil
+	typedResult := results[0]
+	payload := any(typedResult)
+	if len(results) > 1 {
+		payload = map[string]any{"results": results}
 	}
-	typedResult := trashFileResult{
-		OriginalPath: result.OriginalPath,
-		TrashedPath:  result.TrashedPath,
-		Method:       result.Method,
-	}
-	data, err := json.MarshalIndent(typedResult, "", "  ")
+	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		return tool.ExecutionOutcome{}, err
 	}
 	outcome := tool.SucceededOutcome(string(data)).WithTiming(started, time.Now().UTC())
-	outcome.Summary = "Moved resource to the operating-system Trash: " + result.OriginalPath
-	outcome.AffectedPaths = []string{result.OriginalPath}
-	outcome.Operation = &tool.OperationDescriptor{Type: t.Name(), Target: result.OriginalPath, SideEffectState: tool.OutcomeSideEffectApplied}
-	outcome.Details = map[string]any{"original_path": result.OriginalPath, "trashed_path": result.TrashedPath, "method": result.Method}
-	outcome.Changes = []tool.ResourceChange{{
-		Kind: "file", Action: "trashed", Resource: result.OriginalPath,
-		Summary: "Moved to the operating-system Trash.", Certainty: tool.ChangeObserved, Reversibility: tool.ChangeConditional,
-		Details: map[string]any{"trashed_path": result.TrashedPath, "method": result.Method},
-	}}
+	outcome.Summary = fmt.Sprintf("Moved %d resource(s) to the operating-system Trash.", len(results))
+	outcome.AffectedPaths = append([]string(nil), cleanedPaths...)
+	outcome.Operation = &tool.OperationDescriptor{Type: t.Name(), Target: cleanedPaths[0], SideEffectState: tool.OutcomeSideEffectApplied}
+	outcome.Details = map[string]any{"results": results}
+	if len(results) == 1 {
+		outcome.Details = map[string]any{"original_path": typedResult.OriginalPath, "trashed_path": typedResult.TrashedPath, "method": typedResult.Method}
+	}
+	outcome.Changes = changes
 	return outcome, nil
 }
 
@@ -171,10 +216,32 @@ func parseTrashFileParams(input string) (trashFileParams, error) {
 	if err := json.Unmarshal([]byte(input), &params); err != nil {
 		return trashFileParams{}, fmt.Errorf("参数格式错误，需要 JSON 对象: %w", err)
 	}
-	if strings.TrimSpace(params.Path) == "" {
-		return trashFileParams{}, fmt.Errorf("path is required")
+	paths := trashFilePaths(params)
+	if len(paths) == 0 {
+		return trashFileParams{}, fmt.Errorf("exactly one of path or paths is required")
 	}
 	return params, nil
+}
+
+func trashFilePaths(params trashFileParams) []string {
+	if strings.TrimSpace(params.Path) != "" && len(params.Paths) > 0 {
+		return nil
+	}
+	values := append([]string(nil), params.Paths...)
+	if strings.TrimSpace(params.Path) != "" {
+		values = []string{params.Path}
+	}
+	seen := map[string]bool{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
 }
 
 func init() {

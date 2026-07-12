@@ -162,24 +162,62 @@ func (rt *ToolRuntime) executeTransformedTool(
 	}
 	result.outcomeContext.OperationType = newToolName
 
-	registeredTool, err := tool.GetRegisteredTool(newToolName)
-	if err != nil {
+	var (
+		transformedTool    tool.Tool
+		transformedDef     tool.ToolDefinition
+		transformedQuality tool.DefinitionQuality
+		preserveInput      bool
+		provider           tool.ProviderManifest
+		readiness          tool.ProviderReadinessReport
+		lookupErr          error
+	)
+	if rt.toolSnapshot != nil {
+		entry, err := rt.toolSnapshot.Lookup(newToolName)
+		lookupErr = err
+		if err == nil {
+			transformedTool = entry.Runtime
+			transformedDef = entry.Definition
+			transformedQuality = entry.Quality
+			preserveInput = entry.PreserveInputObject
+			provider = entry.Provider
+			readiness = entry.Readiness
+		}
+	} else {
+		registered, err := tool.GetRegisteredTool(newToolName)
+		lookupErr = err
+		if err == nil {
+			transformedTool = registered.Runtime
+			transformedDef = registered.Definition
+			transformedQuality = registered.Quality
+			preserveInput = registered.PreserveInputObject
+			provider = registered.Provider
+			readiness = tool.ProviderReadinessReport{Readiness: provider.Readiness}
+		}
+	}
+	if lookupErr != nil || transformedTool == nil {
 		denied := ToolDecision{
 			Action: ToolDecisionDeny,
 			Source: ToolDecisionSourcePolicyError,
-			Reason: fmt.Sprintf("transform target tool %q not found: %v", newToolName, err),
+			Reason: fmt.Sprintf("transform target tool %q not found in pinned run snapshot: %v", newToolName, lookupErr),
 		}
 		result = synthesizeDeniedToolResult(result, denied)
 		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
 		rt.writeAudit(originalDef, result, permission, string(denied.Source), "denied", "")
 		return finalizeToolResult(result)
 	}
-	transformedTool := registeredTool.Runtime
-	result.outcomeContext.DeclaredSideEffects = append([]tool.ToolSideEffect(nil), registeredTool.Definition.SideEffects...)
-	result.outcomeContext.OutputSchema = registeredTool.Definition.OutputSchema
-	result.outcomeContext.StrictOutputSchema = registeredTool.Quality == tool.DefinitionQualityStrict
+	result.outcomeContext.DeclaredSideEffects = append([]tool.ToolSideEffect(nil), transformedDef.SideEffects...)
+	result.outcomeContext.OutputSchema = transformedDef.OutputSchema
+	result.outcomeContext.StrictOutputSchema = transformedQuality == tool.DefinitionQualityStrict
+	result.ProviderID = provider.ProviderID
+	result.ProviderCapabilities = append([]tool.Capability(nil), provider.Capabilities...)
+	result.ProviderReadiness = readiness.Readiness
+	result.ProviderDependencies = append([]tool.DependencyRequirement(nil), provider.Dependencies...)
+	result.DependencyObservations = append([]tool.DependencyObservation(nil), readiness.Dependencies...)
+	if readiness.Readiness == tool.ProviderNeedsAuth || readiness.Readiness == tool.ProviderNeedsRuntime || readiness.Readiness == tool.ProviderUnavailable {
+		return finalizeToolResult(rt.providerReadinessResult(result, provider, readiness))
+	}
 
-	transformedInput, err := normalizeToolInputWithSchema(decision.UpdatedInput, transformedTool, registeredTool.Definition.InputSchema, registeredTool.PreserveInputObject)
+	transformedInput, err := normalizeToolInputWithSchema(decision.UpdatedInput, transformedTool, transformedDef.InputSchema, preserveInput)
 	if err != nil {
 		denied := ToolDecision{
 			Action: ToolDecisionDeny,
@@ -199,8 +237,6 @@ func (rt *ToolRuntime) executeTransformedTool(
 	// Execute the transformed tool with a context flagged with transform depth
 	// so any nested transform decision is denied by the guard above.
 	transformedCtx := ctxWithTransformDepth(ctx, transformDepthFromCtx(ctx)+1)
-	transformedDef := registeredTool.Definition
-
 	// Build an ExecutionIntent for the transformed tool so the Router can
 	// select the appropriate executor. The transformed tool kind is inferred
 	// from the transformed tool's name and annotations (e.g. apply_patch →

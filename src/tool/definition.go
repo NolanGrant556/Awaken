@@ -558,6 +558,8 @@ func cloneToolDefinition(def ToolDefinition) ToolDefinition {
 	def.InputSchema = cloneParametersSchema(def.InputSchema)
 	def.OutputSchema = cloneToolParam(def.OutputSchema)
 	def.SideEffects = cloneSideEffects(def.SideEffects)
+	def.Capabilities = append([]Capability(nil), def.Capabilities...)
+	def.Dependencies = cloneDependencyRequirements(def.Dependencies)
 	def.Examples = cloneExamples(def.Examples)
 	def.FailureModes = cloneFailureModes(def.FailureModes)
 	return def

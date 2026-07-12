@@ -32,6 +32,30 @@ func finalizeToolResult(result ToolExecutionResult) ToolExecutionResult {
 	if result.Outcome.DurationMs <= 0 && result.DurationMs > 0 {
 		result.Outcome.DurationMs = result.DurationMs
 	}
+	if result.Outcome.Diagnostic == nil {
+		result.Outcome.Diagnostic = map[string]any{}
+	}
+	if strings.TrimSpace(result.ToolSnapshotID) != "" {
+		result.Outcome.Diagnostic["tool_snapshot_id"] = result.ToolSnapshotID
+	}
+	if strings.TrimSpace(result.EnvironmentSnapshotID) != "" {
+		result.Outcome.Diagnostic["environment_snapshot_id"] = result.EnvironmentSnapshotID
+	}
+	if result.ProviderID != "" {
+		result.Outcome.Diagnostic["provider_id"] = result.ProviderID
+	}
+	if len(result.ProviderCapabilities) > 0 {
+		result.Outcome.Diagnostic["capabilities"] = append([]tool.Capability(nil), result.ProviderCapabilities...)
+	}
+	if result.ProviderReadiness != "" {
+		result.Outcome.Diagnostic["provider_readiness"] = result.ProviderReadiness
+	}
+	if len(result.ProviderDependencies) > 0 {
+		result.Outcome.Diagnostic["dependency_requirements"] = append([]tool.DependencyRequirement(nil), result.ProviderDependencies...)
+	}
+	if len(result.DependencyObservations) > 0 {
+		result.Outcome.Diagnostic["dependency_observations"] = append([]tool.DependencyObservation(nil), result.DependencyObservations...)
+	}
 
 	canonicalContent := result.Outcome.Content
 	if canonicalContent == "" {
@@ -88,6 +112,111 @@ func finalizeToolResult(result ToolExecutionResult) ToolExecutionResult {
 	result.DurationMs = result.Outcome.DurationMs
 	if strings.TrimSpace(result.ResultSummary) == "" {
 		result.ResultSummary = result.Outcome.Summary
+	}
+	return result
+}
+
+func (rt *ToolRuntime) providerReadinessResult(
+	result ToolExecutionResult,
+	provider tool.ProviderManifest,
+	readiness tool.ProviderReadinessReport,
+) ToolExecutionResult {
+	status := tool.OutcomeNeedsRuntime
+	errorCode := tool.ErrorCodeNeedsRuntime
+	category := tool.ErrorCategoryRuntime
+	retryStrategy := tool.RetryPrepareRuntime
+	recovery := []string{"inspect_dependency_observations", "prepare_runtime_or_switch_provider"}
+	nextActions := []tool.NextAction{
+		{ID: "inspect_dependencies", Description: "Inspect the dependency observations and the user-machine environment snapshot."},
+		{ID: "switch_provider", Description: "Select another ready provider for the same capability.", Preconditions: []string{"Do not replay an unavailable provider unchanged."}},
+	}
+	switch readiness.Readiness {
+	case tool.ProviderNeedsAuth:
+		status = tool.OutcomeNeedsAuth
+		errorCode = tool.ErrorCodeNeedsAuth
+		category = tool.ErrorCategoryAuthorization
+		retryStrategy = tool.RetryRequestAuthorization
+		recovery = []string{"authenticate_provider", "switch_provider"}
+		nextActions[0] = tool.NextAction{ID: "authenticate_provider", Description: "Authenticate the selected provider, then explicitly refresh run availability."}
+	case tool.ProviderUnavailable:
+		status = tool.OutcomeUnsupported
+		errorCode = tool.ErrorCodeUnsupported
+		category = tool.ErrorCategoryUnsupported
+		retryStrategy = tool.RetrySwitchTool
+		recovery = []string{"switch_provider", "refresh_tool_catalog_after_provider_recovery"}
+		nextActions = []tool.NextAction{
+			{ID: "switch_provider", Description: "Select another ready provider for the same capability."},
+			{ID: "refresh_catalog", Description: "After recovering the provider, explicitly start or refresh the run snapshot."},
+		}
+	}
+
+	packageManagers := []string(nil)
+	if rt != nil && rt.environment != nil {
+		packageManagers = append(packageManagers, rt.environment.AvailablePackageManagers...)
+	}
+	if readiness.Readiness == tool.ProviderNeedsRuntime {
+		seenPlans := map[string]bool{}
+		installActions := make([]tool.NextAction, 0)
+		for _, observation := range readiness.Dependencies {
+			for _, plan := range observation.CandidateInstallPlans {
+				if strings.TrimSpace(plan.PlanID) == "" || seenPlans[plan.PlanID] {
+					continue
+				}
+				seenPlans[plan.PlanID] = true
+				installActions = append(installActions, tool.NextAction{
+					ID:          "install_dependency_" + plan.PlanID,
+					Description: "Execute this exact host-generated dependency plan through the typed staged installer.",
+					Tool:        "dependency_install",
+					Preconditions: []string{
+						"Use only the plan_id from this pinned run snapshot.",
+						"Do not translate the plan into Shell, command, argv, package, URL, or install-directory input.",
+					},
+					InputHint: map[string]any{"plan_id": plan.PlanID},
+				})
+			}
+		}
+		if len(installActions) > 0 {
+			nextActions = append(installActions, nextActions...)
+			recovery = append([]string{"execute_typed_dependency_install_plan"}, recovery...)
+		}
+	}
+	details := map[string]any{
+		"provider_id":                provider.ProviderID,
+		"provider_readiness":         readiness.Readiness,
+		"readiness_reason":           readiness.Reason,
+		"dependency_requirements":    provider.Dependencies,
+		"dependency_observations":    readiness.Dependencies,
+		"available_package_managers": packageManagers,
+		"tool_snapshot_id":           result.ToolSnapshotID,
+		"environment_snapshot_id":    result.EnvironmentSnapshotID,
+	}
+	contentBytes, _ := json.Marshal(details)
+	now := timeNowUTC()
+	result.Content = string(contentBytes)
+	result.Outcome = tool.ExecutionOutcome{
+		Content: result.Content, Status: status, TransportStatus: tool.TransportNotStarted,
+		SemanticStatus: tool.SemanticFailure, ProcessStatus: tool.ProcessNotApplicable,
+		ErrorCode: errorCode, ErrorCategory: category,
+		ErrorMessage:    firstNonEmpty(readiness.Reason, "provider is not ready in the pinned run snapshot"),
+		Retryable:       readiness.RetryableAfterRemediation,
+		RecoveryOptions: recovery,
+		Diagnostic:      details,
+		Summary:         "Selected provider is not ready in the pinned run snapshot.",
+		Operation:       &tool.OperationDescriptor{Type: result.Name, SideEffectState: tool.OutcomeSideEffectNotStarted},
+		Environment: &tool.EnvironmentObservation{
+			Observation: tool.ObservationPartial, ObservedAt: now, Scope: "run_snapshot",
+			Source: "execution_environment_snapshot",
+		},
+		Errors: []tool.OutcomeError{{
+			Type: errorCode, Category: category, Stage: tool.ErrorStagePrecondition,
+			Cause:         firstNonEmpty(readiness.Reason, "provider readiness precondition failed"),
+			PossibleFixes: recovery, RetryStrategy: retryStrategy,
+		}},
+		NextActions: nextActions, Details: details,
+	}
+	if rt != nil && rt.environment != nil {
+		result.Outcome.Environment.WorkspaceRoot = rt.environment.WorkspaceRoot
+		result.Outcome.Environment.WorkingDirectory = rt.environment.WorkingDirectory
 	}
 	return result
 }
@@ -414,17 +543,17 @@ func synthesizeStructuredToolResult(result ToolExecutionResult, decision ToolDec
 	category := tool.ErrorCategoryPolicy
 	transport := tool.TransportNotStarted
 	semantic := tool.SemanticFailure
-	switch code {
-	case "needs_auth":
+	switch decision.Action {
+	case ToolDecisionNeedsAuth:
 		status = tool.OutcomeNeedsAuth
 		category = tool.ErrorCategoryAuthorization
-	case "needs_runtime":
+	case ToolDecisionNeedsRuntime:
 		status = tool.OutcomeNeedsRuntime
 		category = tool.ErrorCategoryRuntime
-	case "unsupported":
+	case ToolDecisionUnsupported:
 		status = tool.OutcomeUnsupported
 		category = tool.ErrorCategoryUnsupported
-	case "needs_mass_message_review", "mass_message_review_rejected":
+	case ToolDecisionNeedsMassMessageReview:
 		status = tool.OutcomeReviewRequired
 		category = tool.ErrorCategoryPolicy
 		semantic = tool.SemanticNeutral

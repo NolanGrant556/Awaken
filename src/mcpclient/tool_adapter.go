@@ -39,10 +39,14 @@ type McpToolAdapter struct {
 	// outputSchemaJSON preserves the server-authored MCP output schema. The
 	// adapted form is details-only and may use outputWrapperKey when an external
 	// property would otherwise collide with ExecutionOutcome's envelope.
-	outputSchemaJSON    json.RawMessage
-	outputSchema        tool.ToolParam
-	outputWrapperKey    string
-	outputSchemaWarning []string
+	outputSchemaJSON      json.RawMessage
+	outputSchema          tool.ToolParam
+	outputWrapperKey      string
+	outputSchemaWarning   []string
+	providerMetadata      MCPToolProviderMetadata
+	providerMetadataValid bool
+	providerManifest      tool.ProviderManifest
+	messageEgressGateway  tool.MessageEgressGateway
 }
 
 // McpToolAdapterOption configures an adapter at construction.
@@ -55,21 +59,33 @@ func WithInputSchemaJSON(raw json.RawMessage) McpToolAdapterOption {
 	}
 }
 
+// withAdapterMessageEgressGateway installs the mandatory recipient-aware outbound
+// message gate. Manager supplies its configured gateway automatically; direct
+// adapter construction defaults to tool.DefaultMessageEgressGateway.
+func withAdapterMessageEgressGateway(gateway tool.MessageEgressGateway) McpToolAdapterOption {
+	return func(a *McpToolAdapter) {
+		if gateway != nil {
+			a.messageEgressGateway = gateway
+		}
+	}
+}
+
 // NewMcpToolAdapter builds an adapter from an MCP tool definition. The
 // annotations are derived from the SDK's *mcp.ToolAnnotations hints when
 // present; conservative defaults are applied otherwise.
 func NewMcpToolAdapter(manager *Manager, serverName string, mcpTool *mcp.Tool, opts ...McpToolAdapterOption) *McpToolAdapter {
 	adapter := &McpToolAdapter{
-		manager:          manager,
-		serverName:       serverName,
-		toolName:         mcpTool.Name,
-		prefixedName:     McpToolName(serverName, mcpTool.Name),
-		description:      mcpTool.Description,
-		parameters:       convertMcpInputSchema(mcpTool.InputSchema),
-		inputSchemaJSON:  marshalMcpSchema(mcpTool.InputSchema),
-		outputSchemaJSON: marshalMcpSchema(mcpTool.OutputSchema),
-		fileBridgeScope:  tool.FileBridgeNone,
-		networkScope:     tool.NetworkScopeRestricted,
+		manager:              manager,
+		serverName:           serverName,
+		toolName:             mcpTool.Name,
+		prefixedName:         McpToolName(serverName, mcpTool.Name),
+		description:          mcpTool.Description,
+		parameters:           convertMcpInputSchema(mcpTool.InputSchema),
+		inputSchemaJSON:      marshalMcpSchema(mcpTool.InputSchema),
+		outputSchemaJSON:     marshalMcpSchema(mcpTool.OutputSchema),
+		fileBridgeScope:      tool.FileBridgeNone,
+		networkScope:         tool.NetworkScopeRestricted,
+		messageEgressGateway: tool.DefaultMessageEgressGateway{},
 	}
 	adapter.loadOutputSchema()
 	if mcpTool.Annotations != nil {
@@ -112,6 +128,7 @@ func NewMcpToolAdapter(manager *Manager, serverName string, mcpTool *mcp.Tool, o
 	for _, opt := range opts {
 		opt(adapter)
 	}
+	adapter.resolveProviderManifest(mcpTool)
 	return adapter
 }
 
@@ -160,12 +177,20 @@ func (a *McpToolAdapter) IsReadOnly() bool { return a.readOnly }
 
 // Definition implements tool.Tool.
 func (a *McpToolAdapter) Definition() tool.ToolDefinition {
+	source := a.providerManifest.Source
+	if source == "" {
+		source = tool.SourceMCP
+	}
 	return tool.ToolDefinition{
 		Name:         a.prefixedName,
 		DisplayName:  a.prefixedName,
-		Source:       tool.SourceMCP,
+		Source:       source,
 		Description:  a.Description(),
 		OutputSchema: a.outputSchema,
+		ProviderID:   a.providerManifest.ProviderID,
+		Capabilities: append([]tool.Capability(nil), a.providerManifest.Capabilities...),
+		Dependencies: append([]tool.DependencyRequirement(nil), a.providerManifest.Dependencies...),
+		SideEffects:  append([]tool.ToolSideEffect(nil), a.providerManifest.SideEffects...),
 		Annotations: tool.ToolAnnotations{
 			ReadOnly:        a.readOnly,
 			Destructive:     a.destructive,
@@ -185,8 +210,13 @@ func (a *McpToolAdapter) Definition() tool.ToolDefinition {
 // surfaces needs_auth when the owning server is in the needs-auth state;
 // otherwise it delegates to the unified no-review policy engine.
 func (a *McpToolAdapter) CheckPermission(ctx context.Context, input string, permCtx tool.PermissionContext) tool.PermissionDecision {
+	_ = permCtx
 	if a.manager == nil {
-		return tool.Decide(ctx, a.Definition())
+		arguments, err := parseArguments(input, a.parameters)
+		if err != nil {
+			return tool.DenyPermission("invalid MCP tool arguments: " + err.Error())
+		}
+		return a.evaluateSafety(ctx, arguments).permission
 	}
 	snap, err := a.manager.SnapshotServer(a.serverName)
 	if err != nil {
@@ -195,7 +225,16 @@ func (a *McpToolAdapter) CheckPermission(ctx context.Context, input string, perm
 	if snap.State == StateNeedsAuth {
 		return tool.NeedsAuthPermission("mcp server " + a.serverName + " requires authorization")
 	}
-	return tool.Decide(ctx, a.Definition())
+	if snap.State != StateConnected {
+		return tool.NeedsRuntimePermission("mcp server " + a.serverName + " is " + string(snap.State))
+	}
+	arguments, err := parseArguments(input, a.parameters)
+	if err != nil {
+		return tool.DenyPermission("invalid MCP tool arguments: " + err.Error())
+	}
+	// MCP/Connector calls are ordinary automatic tools unless an input-aware
+	// hard boundary below returns delete-unsupported or mass-message review.
+	return a.evaluateSafety(ctx, arguments).permission
 }
 
 // Execute implements the legacy tool.Tool execution contract. New runtime
@@ -234,6 +273,34 @@ func (a *McpToolAdapter) ExecuteOutcome(ctx context.Context, input string, _ too
 		outcome.Diagnostic = a.mcpDiagnostic(nil)
 		return outcome.WithTiming(started, time.Now().UTC()), nil
 	}
+	safety := a.evaluateSafety(ctx, arguments)
+	switch safety.permission.Behavior {
+	case tool.PermissionUnsupported:
+		outcome := unsupportedMCPCallOutcome(safety.permission)
+		outcome.Diagnostic = a.mcpDiagnostic(nil)
+		return outcome.WithTiming(started, time.Now().UTC()), nil
+	case tool.PermissionDeny:
+		// Fail closed here as defense in depth.
+		outcome := unobservableMessageOutcome(safety.permission.Reason)
+		outcome.Diagnostic = a.mcpDiagnostic(nil)
+		return outcome.WithTiming(started, time.Now().UTC()), nil
+	case tool.PermissionNeedsMassMessageReview:
+		binding, bindingErr := a.massMessageApprovalBinding(ctx, safety)
+		if bindingErr != nil {
+			outcome := massMessageReviewRequiredOutcome(safety.permission.Reason, safety, bindingErr)
+			for key, value := range a.mcpDiagnostic(nil) {
+				outcome.Diagnostic[key] = value
+			}
+			return outcome.WithTiming(started, time.Now().UTC()), nil
+		}
+		if grantErr := tool.ConsumeMassMessageApprovalGrant(ctx, binding); grantErr != nil {
+			outcome := massMessageReviewRequiredOutcome(safety.permission.Reason, safety, grantErr)
+			for key, value := range a.mcpDiagnostic(nil) {
+				outcome.Diagnostic[key] = value
+			}
+			return outcome.WithTiming(started, time.Now().UTC()), nil
+		}
+	}
 	if a.manager == nil {
 		err := errors.New("MCP manager is unavailable")
 		outcome := a.callFailureOutcome(err)
@@ -244,7 +311,20 @@ func (a *McpToolAdapter) ExecuteOutcome(ctx context.Context, input string, _ too
 		outcome := a.callFailureOutcome(err)
 		return outcome.WithTiming(started, time.Now().UTC()), err
 	}
+	if safety.artifactCall {
+		if safety.deleteCall && result != nil && !result.IsError && !a.verifyRecoverableDeleteResult(result.StructuredContent) {
+			outcome := recoverableDeleteResultUnverifiedOutcome()
+			outcome.Diagnostic = a.artifactDiagnostic(result)
+			return outcome.WithTiming(started, time.Now().UTC()), nil
+		}
+		outcome := a.publishArtifactOutput(ctx, result)
+		return outcome.WithTiming(started, time.Now().UTC()), nil
+	}
 	outcome := a.callResultOutcome(result)
+	if safety.deleteCall && outcome.Status == tool.OutcomeSucceeded && !a.verifyRecoverableDeleteResult(result.StructuredContent) {
+		outcome = recoverableDeleteResultUnverifiedOutcome()
+		outcome.Diagnostic = a.mcpDiagnostic(result)
+	}
 	return outcome.WithTiming(started, time.Now().UTC()), nil
 }
 
@@ -408,6 +488,138 @@ func (a *McpToolAdapter) OutputSchemaWarnings() []string {
 	return append([]string(nil), a.outputSchemaWarning...)
 }
 
+func (a *McpToolAdapter) resolveProviderManifest(mcpTool *mcp.Tool) {
+	metadata, warnings, metadataValid := decodeMCPToolProviderMetadata(mcpTool)
+	a.providerMetadata = metadata
+	a.providerMetadataValid = metadataValid
+	if !metadataValid && a.requiresExplicitProviderMetadata() {
+		warnings = append(warnings, "non-read-only MCP tool is blocked until it declares valid per-tool "+AwakenProviderMetaKey+" metadata")
+	}
+	providerContext := a.manager.adapterProviderContext(a.serverName)
+
+	source := providerContext.serverManifest.Source
+	if source == "" {
+		if providerContext.connectorID != "" {
+			source = tool.SourceConnector
+		} else {
+			source = tool.SourceMCP
+		}
+	}
+	providerID := metadata.ProviderID
+	if providerID == "" {
+		providerID = providerContext.serverManifest.ProviderID
+		if providerID != "" {
+			providerID = tool.ProviderID(strings.TrimSuffix(string(providerID), ":") + ":" + a.toolName)
+		}
+	}
+	if providerID == "" {
+		providerID = tool.ProviderID(string(source) + ":" + a.serverName + ":" + a.toolName)
+	}
+	readiness := providerReadinessFromServerState(providerContext.state)
+	if a.manager == nil {
+		readiness = tool.ProviderUnavailable
+	}
+	dependencies := mergeDependencies(
+		providerContext.serverManifest.Dependencies,
+		metadata.Dependencies,
+		[]tool.DependencyRequirement{{
+			Kind:    tool.DependencyMCPConnector,
+			Name:    a.serverName,
+			ProbeID: "mcp.server." + a.serverName,
+			Source:  string(source),
+		}},
+	)
+	capabilities := mergeCapabilities(
+		metadata.Capabilities,
+		inferMCPProviderCapabilities(a.toolName, a.capabilityClass),
+	)
+	var sideEffects []tool.ToolSideEffect
+	if metadata.ArtifactOutput != nil {
+		a.readOnly = false
+		a.destructive = false
+		a.capabilityClass = tool.CapabilityArtifactWrite
+		a.fileBridgeScope = tool.FileBridgeTaskScopeWrite
+		sideEffects = []tool.ToolSideEffect{
+			{Kind: tool.SideEffectCreate, Resources: []string{"TaskScope output artifact"}, Description: "May create a host-validated artifact in writable output roots.", Reversibility: tool.ReversibilityConditional},
+			{Kind: tool.SideEffectUpdate, Resources: []string{"TaskScope output artifact"}, Description: "May replace an output artifact after its preimage is moved to Trash.", Reversibility: tool.ReversibilityReversible},
+		}
+		if tool.HasCapability(capabilities, tool.CapabilityFileDelete) {
+			sideEffects = append(sideEffects, tool.ToolSideEffect{
+				Kind: tool.SideEffectDelete, Resources: []string{"remote provider resource"},
+				Description: "May perform the provider's separately declared recoverable delete operation.", Reversibility: tool.ReversibilityConditional,
+			})
+		}
+		if tool.HasCapability(capabilities, tool.CapabilityMessageSend) || tool.HasCapability(capabilities, tool.CapabilityMessageMassSend) {
+			sideEffects = append(sideEffects, tool.ToolSideEffect{
+				Kind: tool.SideEffectNetwork, Resources: []string{"typed message recipients"},
+				Description: "May send through the separately gated provider message egress contract.", Reversibility: tool.ReversibilityIrreversible,
+			})
+		}
+	}
+	displayName := strings.TrimSpace(providerContext.serverManifest.DisplayName)
+	if displayName == "" {
+		displayName = a.serverName + " / " + a.toolName
+	}
+	a.providerManifest = tool.ProviderManifest{
+		ProviderID:   providerID,
+		ToolName:     a.prefixedName,
+		DisplayName:  displayName,
+		Source:       source,
+		Capabilities: capabilities,
+		Readiness:    readiness,
+		Dependencies: dependencies,
+		SideEffects:  sideEffects,
+		Warnings:     append([]string(nil), warnings...),
+	}
+}
+
+// ProviderManifest exposes stable implementation identity, capabilities and
+// dependencies to the unified tool catalog.
+func (a *McpToolAdapter) ProviderManifest() tool.ProviderManifest {
+	manifest := a.providerManifest
+	manifest.Capabilities = append([]tool.Capability(nil), manifest.Capabilities...)
+	manifest.Dependencies = append([]tool.DependencyRequirement(nil), manifest.Dependencies...)
+	manifest.SideEffects = append([]tool.ToolSideEffect(nil), manifest.SideEffects...)
+	manifest.Warnings = append([]string(nil), manifest.Warnings...)
+	return manifest
+}
+
+// ProviderReadiness projects the live MCP connection/auth state when a run
+// availability snapshot is built. It performs no external call or mutation.
+func (a *McpToolAdapter) ProviderReadiness(_ tool.ExecutionEnvironmentSnapshot) tool.ProviderReadinessReport {
+	if a.manager == nil {
+		return tool.ProviderReadinessReport{Readiness: tool.ProviderUnavailable, Reason: "MCP manager is unavailable"}
+	}
+	snap, err := a.manager.SnapshotServer(a.serverName)
+	if err != nil {
+		return tool.ProviderReadinessReport{Readiness: tool.ProviderUnavailable, Reason: err.Error()}
+	}
+	readiness := providerReadinessFromServerState(snap.State)
+	report := tool.ProviderReadinessReport{Readiness: readiness}
+	switch readiness {
+	case tool.ProviderNeedsAuth:
+		report.Reason = firstNonEmpty(strings.TrimSpace(snap.ErrorReason), "MCP server requires authentication")
+		report.RetryableAfterRemediation = true
+	case tool.ProviderUnavailable:
+		report.Reason = firstNonEmpty(strings.TrimSpace(snap.ErrorReason), "MCP server is "+string(snap.State))
+		report.RetryableAfterRemediation = snap.State == StatePending || snap.State == StateFailed || snap.State == StateDisabled
+	}
+	return report
+}
+
+func providerReadinessFromServerState(state ServerState) tool.ProviderReadiness {
+	switch state {
+	case StateConnected:
+		return tool.ProviderReady
+	case StateNeedsAuth:
+		return tool.ProviderNeedsAuth
+	case StatePending, StateFailed, StateDisabled:
+		return tool.ProviderUnavailable
+	default:
+		return tool.ProviderUnavailable
+	}
+}
+
 // Annotations exposes the derived annotation hints. Consumed by the
 // downstream tool-platform capability for permission decisions.
 func (a *McpToolAdapter) Annotations() MCPToolAnnotations {
@@ -453,12 +665,9 @@ func inferTrustedOrigin(manager *Manager, serverName string) tool.TrustedOrigin 
 			}
 		}
 	}
-	switch strings.ToLower(strings.TrimSpace(serverName)) {
-	case "github", "playwright", "dingtalk", "dingtalk-workspace", "lark", "feishu":
-		return tool.TrustedOriginOfficialConnector
-	default:
-		return tool.TrustedOriginThirdPartyMCP
-	}
+	// A user-controlled server name is not provenance. Only a host-injected
+	// connector identity may elevate an MCP server to an official origin.
+	return tool.TrustedOriginThirdPartyMCP
 }
 
 func inferMcpCapabilityClass(serverName string, toolName string, readOnly bool, origin tool.TrustedOrigin) tool.CapabilityClass {

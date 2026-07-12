@@ -21,25 +21,30 @@ import (
 	convcontext "awaken/src/context"
 	"awaken/src/desktopdata"
 	"awaken/src/skillruntime"
+	"awaken/src/skills"
 	"awaken/src/tool"
 	"awaken/src/tool/profile"
 )
 
 var (
-	ErrInvalidInput               = errors.New("input is required")
-	ErrRunNotFound                = errors.New("run not found")
-	ErrRunTerminal                = errors.New("run is already finished")
-	ErrRunCancelling              = errors.New("run is being cancelled")
-	ErrThreadNotFound             = errors.New("thread not found")
-	ErrThreadWorkspaceMismatch    = errors.New("thread workspace mismatch")
-	ErrThreadBusy                 = errors.New("thread already has an active run")
-	ErrThreadLabelInvalid         = errors.New("thread label is required")
-	ErrMissingModelProfile        = errors.New("model profile is required")
-	ErrUnsupportedInputAttachment = errors.New("model does not support image input")
-	ErrMassMessageReviewNotFound  = errors.New("mass message review not found")
-	ErrInvalidReviewDecision      = errors.New("invalid mass message review decision")
-	ErrUserQuestionNotFound       = errors.New("user question not found")
-	ErrPersistenceUnavailable     = agentcore.ErrPersistenceUnavailable
+	ErrInvalidInput                     = errors.New("input is required")
+	ErrRunNotFound                      = errors.New("run not found")
+	ErrRunTerminal                      = errors.New("run is already finished")
+	ErrRunCancelling                    = errors.New("run is being cancelled")
+	ErrThreadNotFound                   = errors.New("thread not found")
+	ErrThreadWorkspaceMismatch          = errors.New("thread workspace mismatch")
+	ErrThreadBusy                       = errors.New("thread already has an active run")
+	ErrThreadLabelInvalid               = errors.New("thread label is required")
+	ErrMissingModelProfile              = errors.New("model profile is required")
+	ErrUnsupportedInputAttachment       = errors.New("model does not support image input")
+	ErrMassMessageReviewNotFound        = errors.New("mass message review not found")
+	ErrMassMessageReviewDigestMissing   = errors.New("mass message review canonical digest is required")
+	ErrMassMessageReviewDigestMismatch  = errors.New("mass message review canonical digest mismatch")
+	ErrMassMessageReviewAlreadyResolved = errors.New("mass message review is already resolved")
+	ErrMassMessageReviewAlreadyPending  = errors.New("mass message review is already pending")
+	ErrInvalidReviewDecision            = errors.New("invalid mass message review decision")
+	ErrUserQuestionNotFound             = errors.New("user question not found")
+	ErrPersistenceUnavailable           = agentcore.ErrPersistenceUnavailable
 )
 
 const maxRetainedThreads = 100
@@ -151,6 +156,37 @@ func (s *RunService) SetSkillActivator(activator *skillruntime.Activator) {
 	s.mu.Lock()
 	s.skillActivator = activator
 	s.mu.Unlock()
+	s.restoreSkillInvocationHistory(activator)
+}
+
+func (s *RunService) restoreSkillInvocationHistory(activator *skillruntime.Activator) {
+	if s == nil || activator == nil || activator.Registry == nil || s.threadStore == nil {
+		return
+	}
+	if preparer, ok := s.threadStore.(interface{ Prepare() error }); ok {
+		if err := preparer.Prepare(); err != nil {
+			return
+		}
+	}
+	threads, err := s.threadStore.ListThreads()
+	if err != nil {
+		return
+	}
+	latest := map[string]time.Time{}
+	for _, thread := range threads {
+		_, restored, restoreErr := s.threadStore.RestoreThread(thread.ThreadID)
+		if restoreErr != nil {
+			continue
+		}
+		for skillID, invokedAt := range restored.SkillInvokedAt {
+			if previous, exists := latest[skillID]; !exists || invokedAt.After(previous) {
+				latest[skillID] = invokedAt
+			}
+		}
+	}
+	for skillID, invokedAt := range latest {
+		activator.Registry.MarkInvoked(skillID, invokedAt)
+	}
 }
 
 // Thread holds the reusable Agent and metadata for a multi-turn conversation.
@@ -516,6 +552,9 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			agent = s.createAgent(workspace, threadID, req.ModelProfile)
 			if agent != nil {
 				agent.GetConversation().Context.SetMessages(restored.Messages)
+				cfg := agent.GetConfig()
+				cfg.SkillContextBlocks = append([]agentcore.ContextBlock(nil), restored.SkillContextBlocks...)
+				agent.Reconfigure(cfg)
 			}
 			runIDs := append([]string(nil), restored.RunIDs...)
 			runIDs = append(runIDs, runID)
@@ -573,6 +612,9 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			agent = s.createAgent(workspace, threadID, req.ModelProfile)
 			if agent != nil && thread.agent != nil {
 				agent.GetConversation().Context.SetMessages(thread.agent.GetConversation().Context.GetMessages())
+				cfg := agent.GetConfig()
+				cfg.SkillContextBlocks = append([]agentcore.ContextBlock(nil), thread.agent.GetConfig().SkillContextBlocks...)
+				agent.Reconfigure(cfg)
 			}
 			thread.agent = agent
 			thread.modelProfileKey = modelProfileKey
@@ -712,10 +754,18 @@ func (s *RunService) bindAgentRecorder(agent *agentcore.Agent, session *Session,
 	if agent == nil {
 		return nil
 	}
+	// A run gets one immutable view of both the user-machine environment and
+	// the executable catalog. Later MCP/Connector refreshes only affect a new
+	// run (or an explicit future refresh contract), never an in-flight call.
+	agent.RefreshRunAvailabilityWithReason(context.Background(), "run_start")
 	agent.SetRunIdentity(runID, sessionID)
 	if s.journals == nil {
 		if s.allowNoopRecorder {
-			agent.SetSemanticRecorder(agentcore.NoopSemanticRecorder{})
+			recorder := agentcore.NoopSemanticRecorder{}
+			agent.SetSemanticRecorder(recorder)
+			if session != nil {
+				session.SetSemanticRecorder(recorder)
+			}
 			return nil
 		}
 		return ErrPersistenceUnavailable
@@ -733,6 +783,9 @@ func (s *RunService) bindAgentRecorder(agent *agentcore.Agent, session *Session,
 		recorder = newLiveSemanticRecorder(assigned, session)
 	}
 	agent.SetSemanticRecorder(recorder)
+	if session != nil {
+		session.SetSemanticRecorder(recorder)
+	}
 	return nil
 }
 
@@ -1270,14 +1323,14 @@ func (s *RunService) CancelRun(runID string) (Run, error) {
 	return session.RequestCancel(), nil
 }
 
-func (s *RunService) ResolveMassMessageReview(runID, reviewID string, decision agentcore.ReviewDecision) error {
+func (s *RunService) ResolveMassMessageReview(runID, reviewID string, decision agentcore.ReviewDecision, digests MassMessageReviewDigests) error {
 	s.mu.RLock()
 	session, ok := s.sessions[runID]
 	s.mu.RUnlock()
 	if !ok {
 		return ErrRunNotFound
 	}
-	return session.ResolveMassMessageReview(reviewID, decision)
+	return session.ResolveMassMessageReview(reviewID, decision, digests)
 }
 
 func (s *RunService) ResolveUserQuestion(runID, questionID, answer string) error {
@@ -1308,6 +1361,9 @@ func (s *RunService) execute(session *Session, executor Executor, agent *agentco
 	snapshot := session.Snapshot()
 	baselineSkillConfig, hasBaselineSkillConfig := snapshotAgentSkillConfig(agent)
 	defer func() {
+		if agent != nil {
+			agent.ClearPreparedUserMessage()
+		}
 		if hasBaselineSkillConfig {
 			restoreAgentSkillConfig(agent, baselineSkillConfig)
 		}
@@ -1324,7 +1380,17 @@ func (s *RunService) execute(session *Session, executor Executor, agent *agentco
 	if agent != nil {
 		agent.SetPendingUserAttachments(inputAttachmentsToContextAttachments(attachments))
 		agent.SetPendingComposerTokens(semanticComposerTokensForRun(snapshot.ComposerTokens))
-		if err := s.preActivateComposerSkills(ctx, agent, snapshot); err != nil {
+		if len(skillComposerTokens(snapshot.ComposerTokens)) > 0 {
+			if err := agent.PrepareUserMessage(ctx, input, sessionEventSink{session: session}); err != nil {
+				code := "persistence_error"
+				if errors.Is(err, agentcore.ErrPersistenceUnavailable) {
+					code = "persistence_unavailable"
+				}
+				session.CompleteError(err.Error(), code)
+				return
+			}
+		}
+		if err := s.preActivateComposerSkillsWithSink(ctx, agent, snapshot, sessionEventSink{session: session}); err != nil {
 			session.CompleteError(err.Error(), skillActivationErrorCode(err))
 			return
 		}
@@ -1362,6 +1428,10 @@ func skillActivationErrorCode(err error) string {
 }
 
 func (s *RunService) preActivateComposerSkills(ctx context.Context, agent *agentcore.Agent, snapshot Run) error {
+	return s.preActivateComposerSkillsWithSink(ctx, agent, snapshot, nil)
+}
+
+func (s *RunService) preActivateComposerSkillsWithSink(ctx context.Context, agent *agentcore.Agent, snapshot Run, sink agentcore.EventSink) error {
 	tokens := skillComposerTokens(snapshot.ComposerTokens)
 	if len(tokens) == 0 || agent == nil {
 		return nil
@@ -1380,36 +1450,32 @@ func (s *RunService) preActivateComposerSkills(ctx context.Context, agent *agent
 	}
 
 	cfg := agent.GetConfig()
-	var effective []string
-	if cfg.ResolvedToolPool == nil {
-		effective = agent.ModelVisibleToolPool()
-	} else {
-		effective = append([]string(nil), cfg.ResolvedToolPool...)
-	}
 	blocks := append([]agentcore.ContextBlock(nil), cfg.SkillContextBlocks...)
 	recorder := agent.SemanticRecorder()
 	plans := make([]*skillruntime.SkillActivationPlan, 0, len(tokens))
 
 	for _, token := range tokens {
-		skillID := strings.TrimSpace(firstNonEmpty(token.Payload.SkillID, token.ID))
+		skillID := composerTokenSkillID(token)
 		if skillID == "" {
 			continue
 		}
-		if strings.HasPrefix(skillID, "skill:") {
-			parts := strings.Split(skillID, ":")
-			if len(parts) >= 2 && strings.TrimSpace(parts[1]) != "" {
-				skillID = strings.TrimSpace(parts[1])
-			}
-		}
 		plan, err := activator.Activate(skillruntime.ActivationRequest{
-			SkillID:        skillID,
-			ParentToolPool: effective,
-			SkipArgRender:  true,
+			Context: ctx, SkillID: skillID, RawArgs: snapshot.Input,
+			InvocationSource: skillruntime.InvocationUser,
 		})
-		if plan != nil {
-			plans = append(plans, plan.Clone())
-		}
 		if err != nil {
+			failurePlans := plans
+			if plan != nil {
+				failurePlans = append(append([]*skillruntime.SkillActivationPlan(nil), plans...), plan.Clone())
+			}
+			if recorder != nil {
+				if persistErr := persistSkillPreActivationFailure(ctx, recorder, snapshot, failurePlans, err); persistErr != nil {
+					return fmt.Errorf("persist skill pre-activation failure: %w", persistErr)
+				}
+			}
+			return err
+		}
+		if err := validateComposerSkillToken(token, plan, activator.Registry); err != nil {
 			if recorder != nil {
 				if persistErr := persistSkillPreActivationFailure(ctx, recorder, snapshot, plans, err); persistErr != nil {
 					return fmt.Errorf("persist skill pre-activation failure: %w", persistErr)
@@ -1417,11 +1483,16 @@ func (s *RunService) preActivateComposerSkills(ctx context.Context, agent *agent
 			}
 			return err
 		}
-		effective = append([]string(nil), plan.EffectiveTools...)
-		blocks = append(blocks, agentcore.ContextBlock{
-			ID:      "skill_activation_" + plan.SkillID,
-			Content: plan.MainBody,
-		})
+		plans = append(plans, plan.Clone())
+		if plan.Context != skills.ContextFork {
+			blocks = append(blocks, agentcore.ContextBlock{
+				ID:         "skill_activation_" + plan.SkillID,
+				SkillID:    plan.SkillID,
+				SourcePath: filepath.Join(plan.RootDir, "SKILL.md"),
+				InvokedAt:  time.Now().UTC(),
+				Content:    plan.MainBody,
+			})
+		}
 	}
 	if recorder != nil {
 		activationRecords := make([]agentcore.SemanticRecord, 0, len(plans))
@@ -1436,17 +1507,136 @@ func (s *RunService) preActivateComposerSkills(ctx context.Context, agent *agent
 			return persistenceErr
 		}
 	}
+	if activator.Registry != nil {
+		for _, plan := range plans {
+			activator.Registry.MarkInvoked(plan.SkillID, time.Now().UTC())
+		}
+	}
+	for _, plan := range plans {
+		if plan.Context != skills.ContextFork {
+			continue
+		}
+		if sink == nil {
+			return &skillruntime.SkillCompatibilityError{Code: "skill_fork_unavailable", Message: "composer fork Skill requires a live run event sink"}
+		}
+		child, err := agent.RunForkedSkill(ctx, skillruntime.SkillForkRequest{
+			SkillID: plan.SkillID, Body: plan.MainBody, RootDir: plan.RootDir,
+			SkillPath: plan.SkillFilePath, Agent: plan.Agent, Model: plan.Model,
+			Effort: plan.Effort, ToolHints: append([]skills.ToolHint(nil), plan.ToolHints...),
+		}, sink)
+		if err != nil {
+			return fmt.Errorf("fork composer Skill %q: %w", plan.SkillID, err)
+		}
+		blocks = append(blocks, agentcore.ContextBlock{
+			ID: "skill_fork_result_" + plan.SkillID, SkillID: plan.SkillID,
+			AgentID: child.ChildID, InvokedAt: time.Now().UTC(),
+			Content: "Forked Skill child result (already executed; do not repeat the child task):\n\n" + child.Content,
+		})
+	}
 
-	cfg.ResolvedToolPool = effective
 	cfg.SkillContextBlocks = blocks
+	cfg.ComposerSkillSelection = composerSkillSelectionContext(snapshot.RunID, plans)
 	agent.Reconfigure(cfg)
 	return nil
+}
+
+func composerTokenSkillID(token ComposerToken) string {
+	skillID := strings.TrimSpace(firstNonEmpty(token.Payload.SkillID, token.ID))
+	if !strings.HasPrefix(skillID, "skill:") {
+		return skillID
+	}
+	parts := strings.Split(skillID, ":")
+	if len(parts) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(parts[1])
+}
+
+func validateComposerSkillToken(token ComposerToken, plan *skillruntime.SkillActivationPlan, registry *skills.SkillRegistry) error {
+	if plan == nil {
+		return &skillruntime.SkillCompatibilityError{Code: "skill_composer_token_invalid", Message: "composer Skill activation returned no plan"}
+	}
+	if registry == nil {
+		return &skillruntime.SkillCompatibilityError{Code: "skill_composer_token_invalid", Message: "composer Skill registry unavailable"}
+	}
+	definition := registry.Get(plan.SkillID)
+	if definition == nil {
+		return &skillruntime.SkillCompatibilityError{Code: "skill_composer_token_invalid", Message: fmt.Sprintf("composer Skill %q is no longer registered", plan.SkillID)}
+	}
+	if !definition.UserInvocable {
+		return &skillruntime.SkillCompatibilityError{Code: "skill_user_invocation_disabled", Message: fmt.Sprintf("skill %q is not user-invocable", plan.SkillID)}
+	}
+	if plan.Source != skills.SourceMcp &&
+		(!filepath.IsAbs(strings.TrimSpace(plan.RootDir)) || !filepath.IsAbs(strings.TrimSpace(plan.SkillFilePath))) {
+		return &skillruntime.SkillCompatibilityError{
+			Code:    "skill_composer_token_invalid",
+			Message: fmt.Sprintf("composer Skill %q registry identity must use absolute root and SKILL.md paths", plan.SkillID),
+		}
+	}
+	if claimed := strings.TrimSpace(token.Payload.SourceOrigin); claimed != "" &&
+		!strings.EqualFold(claimed, string(plan.Source)) {
+		return &skillruntime.SkillCompatibilityError{
+			Code:    "skill_composer_token_mismatch",
+			Message: fmt.Sprintf("composer Skill %q source changed from %q to %q", plan.SkillID, claimed, plan.Source),
+		}
+	}
+	if claimed := strings.TrimSpace(token.Payload.SkillFilePath); claimed != "" &&
+		!sameComposerSkillPath(claimed, plan.SkillFilePath) {
+		return &skillruntime.SkillCompatibilityError{
+			Code:    "skill_composer_token_mismatch",
+			Message: fmt.Sprintf("composer Skill %q entrypoint changed", plan.SkillID),
+		}
+	}
+	if claimed := strings.TrimSpace(token.Payload.RootDir); claimed != "" &&
+		!sameComposerSkillPath(claimed, plan.RootDir) {
+		return &skillruntime.SkillCompatibilityError{
+			Code:    "skill_composer_token_mismatch",
+			Message: fmt.Sprintf("composer Skill %q root changed", plan.SkillID),
+		}
+	}
+	return nil
+}
+
+func sameComposerSkillPath(left, right string) bool {
+	left = strings.TrimSpace(left)
+	right = strings.TrimSpace(right)
+	if left == "" || right == "" {
+		return left == right
+	}
+	return filepath.Clean(left) == filepath.Clean(right)
+}
+
+func composerSkillSelectionContext(runID string, plans []*skillruntime.SkillActivationPlan) *agentcore.ComposerSkillSelectionContext {
+	selections := make([]agentcore.ComposerSkillSelection, 0, len(plans))
+	for _, plan := range plans {
+		if plan == nil || strings.TrimSpace(plan.SkillID) == "" || strings.TrimSpace(string(plan.Source)) == "" {
+			continue
+		}
+		selections = append(selections, agentcore.ComposerSkillSelection{
+			SkillID:        plan.SkillID,
+			Source:         string(plan.Source),
+			ActivationMode: string(plan.Context),
+			RootDir:        plan.RootDir,
+			SkillFilePath:  plan.SkillFilePath,
+		})
+	}
+	if len(selections) == 0 {
+		return nil
+	}
+	return &agentcore.ComposerSkillSelectionContext{
+		RunID:      runID,
+		Selections: selections,
+	}
 }
 
 func skillActivationRecords(snapshot Run, plan *skillruntime.SkillActivationPlan) []agentcore.SemanticRecord {
 	if plan == nil {
 		return nil
 	}
+	payload := plan.DurablePayload()
+	payload["skill_path"] = filepath.Join(plan.RootDir, "SKILL.md")
+	payload["content"] = plan.MainBody
+	payload["invoked_at"] = time.Now().UTC().Format(time.RFC3339Nano)
 	records := []agentcore.SemanticRecord{agentcore.NewSemanticRecord(
 		agentcore.SemanticKindSkillActivated,
 		snapshot.ThreadID,
@@ -1454,7 +1644,7 @@ func skillActivationRecords(snapshot Run, plan *skillruntime.SkillActivationPlan
 		"",
 		"",
 		"",
-		plan.DurablePayload(),
+		payload,
 	)}
 	for _, receipt := range plan.ResourceReceipts {
 		records = append(records, agentcore.NewSemanticRecord(
@@ -1510,9 +1700,8 @@ func persistSkillPreActivationFailure(ctx context.Context, recorder agentcore.Se
 }
 
 type agentSkillConfigSnapshot struct {
-	resolvedToolPool   []string
-	resolvedPoolWasNil bool
-	skillContextBlocks []agentcore.ContextBlock
+	skillContextBlocks     []agentcore.ContextBlock
+	composerSkillSelection *agentcore.ComposerSkillSelectionContext
 }
 
 func snapshotAgentSkillConfig(agent *agentcore.Agent) (agentSkillConfigSnapshot, bool) {
@@ -1521,11 +1710,8 @@ func snapshotAgentSkillConfig(agent *agentcore.Agent) (agentSkillConfigSnapshot,
 	}
 	cfg := agent.GetConfig()
 	snapshot := agentSkillConfigSnapshot{
-		resolvedPoolWasNil: cfg.ResolvedToolPool == nil,
-		skillContextBlocks: append([]agentcore.ContextBlock(nil), cfg.SkillContextBlocks...),
-	}
-	if cfg.ResolvedToolPool != nil {
-		snapshot.resolvedToolPool = append([]string(nil), cfg.ResolvedToolPool...)
+		skillContextBlocks:     append([]agentcore.ContextBlock(nil), cfg.SkillContextBlocks...),
+		composerSkillSelection: cloneAgentComposerSkillSelection(cfg.ComposerSkillSelection),
 	}
 	return snapshot, true
 }
@@ -1535,28 +1721,27 @@ func restoreAgentSkillConfig(agent *agentcore.Agent, snapshot agentSkillConfigSn
 		return
 	}
 	cfg := agent.GetConfig()
-	if snapshot.resolvedPoolWasNil {
-		cfg.ResolvedToolPool = nil
-	} else {
-		cfg.ResolvedToolPool = append([]string(nil), snapshot.resolvedToolPool...)
-	}
 	cfg.SkillContextBlocks = append([]agentcore.ContextBlock(nil), snapshot.skillContextBlocks...)
+	cfg.ComposerSkillSelection = cloneAgentComposerSkillSelection(snapshot.composerSkillSelection)
 	agent.Reconfigure(cfg)
 }
 
-func effectiveInputForComposerTokens(input string, tokens []ComposerToken) string {
-	skillTokens := skillComposerTokens(tokens)
-	if len(skillTokens) == 0 {
-		return input
+func cloneAgentComposerSkillSelection(value *agentcore.ComposerSkillSelectionContext) *agentcore.ComposerSkillSelectionContext {
+	if value == nil {
+		return nil
 	}
+	return &agentcore.ComposerSkillSelectionContext{
+		RunID:      value.RunID,
+		Selections: append([]agentcore.ComposerSkillSelection(nil), value.Selections...),
+	}
+}
 
-	// Explicit Skill chips are host-pre-activated into typed context + tool
-	// pool. Keep the user task text unchanged; do not inject a natural-language
-	// instruction that only asks the model to call skill__xxx.
-	if strings.TrimSpace(input) != "" {
-		return input
-	}
-	return "Use the selected Skill to help the user."
+func effectiveInputForComposerTokens(input string, tokens []ComposerToken) string {
+	_ = tokens
+	// Explicit Skill identity enters the host-generated system context. The
+	// model-facing user message remains byte-for-byte the accepted input,
+	// including the empty string for a token-only turn.
+	return input
 }
 
 func skillComposerTokens(tokens []ComposerToken) []ComposerToken {

@@ -423,7 +423,8 @@ describe("Composer Slash Palette helpers", () => {
       displayName: "Daily Followup",
       description: "Create a daily customer follow-up plan.",
       whenToUse: "Use when the user asks for customer follow-up.",
-      state: "available",
+      state: "loaded",
+      userInvocable: true,
       sourceOrigin: "project",
       rootDir: "/workspace/.awaken/skills/daily-followup",
       skillFilePath: "/workspace/.awaken/skills/daily-followup/SKILL.md",
@@ -433,8 +434,8 @@ describe("Composer Slash Palette helpers", () => {
       id: "pptx",
       name: "pptx",
       description: "Work with PowerPoint decks.",
-      state: "unavailable",
-      unavailableReason: "missing mcp servers: pptx",
+      state: "invalid",
+      userInvocable: true,
       sourceOrigin: "user",
       skillFilePath: "/home/.awaken/skills/pptx/SKILL.md",
       context: "inline",
@@ -443,7 +444,8 @@ describe("Composer Slash Palette helpers", () => {
       id: "mcp-skill",
       name: "mcp-skill",
       description: "MCP provided skill.",
-      state: "available",
+      state: "loaded",
+      userInvocable: true,
       sourceOrigin: "mcp",
       context: "inline",
     },
@@ -453,6 +455,16 @@ describe("Composer Slash Palette helpers", () => {
       description: "Hidden duplicate.",
       state: "shadowed",
       sourceOrigin: "project",
+      context: "inline",
+    },
+    {
+      id: "model-only",
+      name: "model-only",
+      description: "Only the model may invoke this Skill.",
+      state: "loaded",
+      userInvocable: false,
+      modelInvocable: true,
+      sourceOrigin: "plugin",
       context: "inline",
     },
   ];
@@ -480,11 +492,11 @@ describe("Composer Slash Palette helpers", () => {
 
     expect(actions.map((action) => action.label)).toEqual([
       "Daily Followup",
-      "pptx",
+      "mcp-skill",
     ]);
-    expect(actions[1]?.disabled).toBe(true);
-    expect(actions[1]?.disabledReason).toBe("missing mcp servers: pptx");
-    expect(filterSlashActions(actions, "powerpoint")).toHaveLength(1);
+    expect(actions.every((action) => !action.disabled)).toBe(true);
+    expect(filterSlashActions(actions, "powerpoint")).toHaveLength(0);
+    expect(filterSlashActions(actions, "mcp provided")).toHaveLength(1);
     expect(filterSlashActions(actions, "follow-up")[0]?.id).toContain(
       "daily-followup",
     );

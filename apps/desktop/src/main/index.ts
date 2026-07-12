@@ -45,6 +45,7 @@ import {
   type InstallSkillRequest,
   type InstallSkillResponse,
   type MassMessageReviewDecision,
+  type MassMessageReviewDigests,
   type ModelProfileBalancesResultWire,
   type ModelProfileSaveRequest,
   type ModelProviderWire,
@@ -1528,14 +1529,29 @@ ipcMain.handle("awaken:cancel-run", async (_event, runId: string) => {
 
 ipcMain.handle(
   "awaken:resolve-mass-message-review",
-  async (_event, payload: { runId: string; reviewId: string; decision: MassMessageReviewDecision }) => {
-    await requestRuntimeOK(`/v1/runs/${payload.runId}/mass-message-reviews/${payload.reviewId}/resolve`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+  async (
+    _event,
+    payload: {
+      runId: string;
+      reviewId: string;
+      decision: MassMessageReviewDecision;
+    } & MassMessageReviewDigests,
+  ) => {
+    await requestRuntimeOK(
+      `/v1/runs/${payload.runId}/mass-message-reviews/${payload.reviewId}/resolve`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          decision: payload.decision,
+          envelopeDigest: payload.envelopeDigest,
+          bodyDigest: payload.bodyDigest,
+          recipientIdentityDigest: payload.recipientIdentityDigest,
+        }),
       },
-      body: JSON.stringify({ decision: payload.decision }),
-    });
+    );
   },
 );
 

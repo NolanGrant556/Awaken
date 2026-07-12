@@ -15,6 +15,7 @@ import {
   type InstallSkillRequest,
   type InstallSkillResponse,
   type MassMessageReviewDecision,
+  type MassMessageReviewDigests,
   type ModelProfileBalancesResult,
   type UserQuestionAnswer,
   type ModelProfileSaveRequest,
@@ -164,6 +165,7 @@ export type RuntimeClient = {
     runId: string,
     reviewId: string,
     decision: MassMessageReviewDecision,
+    digests: MassMessageReviewDigests,
   ) => Promise<void>;
   answerUserQuestion: (
     runId: string,

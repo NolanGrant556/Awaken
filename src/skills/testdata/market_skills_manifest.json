@@ -1,0 +1,347 @@
+{
+  "schema_version": 1,
+  "verification_mode": "load_only_no_script_execution",
+  "clone_root_env": "AWAKEN_MARKET_SKILLS_CLONE_ROOT",
+  "samples": [
+    {
+      "source_id": "anthropics/skills",
+      "owner": "anthropics",
+      "repository_name": "skills",
+      "repository_url": "https://github.com/anthropics/skills.git",
+      "commit": "9d2f1ae187231d8199c64b5b762e1bdf2244733d",
+      "skill_path": "skills/algorithmic-art/SKILL.md",
+      "skill_sha256": "3bc4092c09804853186524c826bc0621b940bb6122c05b84496dff95388e6eef",
+      "license": { "spdx": "Apache-2.0", "path": "skills/algorithmic-art/LICENSE.txt" },
+      "category": "creative-coding",
+      "package_resources": {
+        "scripts": { "present": false, "paths": [] },
+        "assets": { "present": false, "paths": [] },
+        "references": { "present": false, "paths": [] }
+      },
+      "golden": { "id": "algorithmic-art", "name": "algorithmic-art", "state": "loaded", "context": "inline", "user_invocable": true, "body_cached": false, "description_nonempty": true }
+    },
+    {
+      "source_id": "arvindrk/extract-design-system",
+      "owner": "arvindrk",
+      "repository_name": "extract-design-system",
+      "repository_url": "https://github.com/arvindrk/extract-design-system.git",
+      "commit": "1873741ba8dea755e35e6e15134f7918cd58e036",
+      "skill_path": "skills/extract-design-system/SKILL.md",
+      "skill_sha256": "e1a08d959b6f6d8d6012bc1dd6b12493dc83f615e32e70117d2fdda33b053c65",
+      "license": { "spdx": "MIT", "path": "LICENSE" },
+      "category": "design-systems",
+      "package_resources": {
+        "scripts": { "present": false, "paths": [] },
+        "assets": { "present": false, "paths": [] },
+        "references": { "present": true, "paths": ["references"] }
+      },
+      "golden": { "id": "extract-design-system", "name": "extract-design-system", "state": "loaded", "context": "inline", "user_invocable": true, "body_cached": false, "description_nonempty": true }
+    },
+    {
+      "source_id": "browser-act/skills",
+      "owner": "browser-act",
+      "repository_name": "skills",
+      "repository_url": "https://github.com/browser-act/skills.git",
+      "commit": "22aad3f4d161115a9d4fd11267bb2b46f1a215a2",
+      "skill_path": "browser-act/SKILL.md",
+      "skill_sha256": "c03a115aac8c28cce730938db312df0643e930b030e3e8e2241ccb42d5c980f4",
+      "license": { "spdx": "MIT", "path": "LICENSE" },
+      "category": "browser-automation",
+      "package_resources": {
+        "scripts": { "present": false, "paths": [] },
+        "assets": { "present": false, "paths": [] },
+        "references": { "present": false, "paths": [] }
+      },
+      "golden": { "id": "browser-act", "name": "browser-act", "state": "loaded", "context": "inline", "user_invocable": true, "body_cached": false, "description_nonempty": true }
+    },
+    {
+      "source_id": "browser-use/browser-use",
+      "owner": "browser-use",
+      "repository_name": "browser-use",
+      "repository_url": "https://github.com/browser-use/browser-use.git",
+      "commit": "fa21b7820120070d2ae3381849cd24a39db87248",
+      "skill_path": "skills/browser-use/SKILL.md",
+      "skill_sha256": "6a2698e0d3062cb10fa83a8c40b86d2bcfd13de916cd236f7e46938e9db758c5",
+      "license": { "spdx": "MIT", "path": "LICENSE" },
+      "category": "browser-automation",
+      "package_resources": {
+        "scripts": { "present": false, "paths": [] },
+        "assets": { "present": false, "paths": [] },
+        "references": { "present": false, "paths": [] }
+      },
+      "golden": { "id": "browser-use", "name": "browser-use", "state": "loaded", "context": "inline", "user_invocable": true, "body_cached": false, "description_nonempty": true }
+    },
+    {
+      "source_id": "coreyhaines31/marketingskills",
+      "owner": "coreyhaines31",
+      "repository_name": "marketingskills",
+      "repository_url": "https://github.com/coreyhaines31/marketingskills.git",
+      "commit": "5139746081be40a975316a0a11d8bcf61fae8fe4",
+      "skill_path": "skills/ab-testing/SKILL.md",
+      "skill_sha256": "1fd229160f6014f3f2d7c92cc7d2f991fbf8dc9ed68aac9793c71b408a6d1144",
+      "license": { "spdx": "MIT", "path": "LICENSE" },
+      "category": "marketing",
+      "package_resources": {
+        "scripts": { "present": false, "paths": [] },
+        "assets": { "present": false, "paths": [] },
+        "references": { "present": true, "paths": ["references"] }
+      },
+      "golden": { "id": "ab-testing", "name": "ab-testing", "state": "loaded", "context": "inline", "user_invocable": true, "body_cached": false, "description_nonempty": true }
+    },
+    {
+      "source_id": "emilkowalski/skills",
+      "owner": "emilkowalski",
+      "repository_name": "skills",
+      "repository_url": "https://github.com/emilkowalski/skills.git",
+      "commit": "7bb7061b5cf7de15ea1aeaf00fbd9e6592a20fce",
+      "skill_path": "skills/animation-vocabulary/SKILL.md",
+      "skill_sha256": "d718b48fe3c7898804d588f050a2e266d82c9f5ef51da256c8cb8b5951527757",
+      "license": { "spdx": "MIT", "path": "LICENSE" },
+      "category": "motion-design",
+      "package_resources": {
+        "scripts": { "present": false, "paths": [] },
+        "assets": { "present": false, "paths": [] },
+        "references": { "present": false, "paths": [] }
+      },
+      "golden": { "id": "animation-vocabulary", "name": "animation-vocabulary", "state": "loaded", "context": "inline", "user_invocable": true, "body_cached": false, "description_nonempty": true }
+    },
+    {
+      "source_id": "firebase/agent-skills",
+      "owner": "firebase",
+      "repository_name": "agent-skills",
+      "repository_url": "https://github.com/firebase/agent-skills.git",
+      "commit": "538130c39402a40d9c2586ede87def5914641a33",
+      "skill_path": "skills/firebase-firestore/SKILL.md",
+      "skill_sha256": "6ffca8a8835056793cdda49ce7c5addd23cf2a8a5b327e10108b6f0e2c7a4227",
+      "license": { "spdx": "Apache-2.0", "path": "LICENSE" },
+      "category": "database",
+      "package_resources": {
+        "scripts": { "present": false, "paths": [] },
+        "assets": { "present": false, "paths": [] },
+        "references": { "present": true, "paths": ["references"] }
+      },
+      "golden": { "id": "firebase-firestore", "name": "firebase-firestore", "state": "loaded", "context": "inline", "user_invocable": true, "body_cached": false, "description_nonempty": true }
+    },
+    {
+      "source_id": "heygen-com/hyperframes",
+      "owner": "heygen-com",
+      "repository_name": "hyperframes",
+      "repository_url": "https://github.com/heygen-com/hyperframes.git",
+      "commit": "8c21736a5b8aecbd5ca168ed3855976e374a5adb",
+      "skill_path": "skills/hyperframes/SKILL.md",
+      "skill_sha256": "91c4c514018ed830832a601a7f23d2db48ba9e0b9e4fbd00a25ad93fa1d64876",
+      "license": { "spdx": "Apache-2.0", "path": "LICENSE" },
+      "category": "video",
+      "package_resources": {
+        "scripts": { "present": false, "paths": [] },
+        "assets": { "present": false, "paths": [] },
+        "references": { "present": false, "paths": [] }
+      },
+      "golden": { "id": "hyperframes", "name": "hyperframes", "state": "loaded", "context": "inline", "user_invocable": true, "body_cached": false, "description_nonempty": true }
+    },
+    {
+      "source_id": "higgsfield-ai/skills",
+      "owner": "higgsfield-ai",
+      "repository_name": "skills",
+      "repository_url": "https://github.com/higgsfield-ai/skills.git",
+      "commit": "4f3537e0b459d47159ce3ab144e71bc1bfb49366",
+      "skill_path": "higgsfield-generate/SKILL.md",
+      "skill_sha256": "b48249e9a0ce055992d12c93476b6fec2bf405ae0f827e863305050deb615ed8",
+      "license": { "spdx": "MIT", "path": "LICENSE" },
+      "category": "generative-media",
+      "package_resources": {
+        "scripts": { "present": false, "paths": [] },
+        "assets": { "present": false, "paths": [] },
+        "references": { "present": true, "paths": ["references"] }
+      },
+      "golden": { "id": "higgsfield-generate", "name": "higgsfield-generate", "state": "loaded", "context": "inline", "user_invocable": true, "body_cached": false, "description_nonempty": true }
+    },
+    {
+      "source_id": "juliusbrussee/caveman",
+      "owner": "juliusbrussee",
+      "repository_name": "caveman",
+      "repository_url": "https://github.com/juliusbrussee/caveman.git",
+      "commit": "0d95a81d35a9f2d123a5e9430d1cfc43d55f1bb0",
+      "skill_path": "skills/caveman/SKILL.md",
+      "skill_sha256": "5e30bb56afbd0b01bd736f2da84180e76f18db4a64de8e124525d5c8dc2e8605",
+      "license": { "spdx": "MIT", "path": "LICENSE" },
+      "category": "communication",
+      "package_resources": {
+        "scripts": { "present": false, "paths": [] },
+        "assets": { "present": false, "paths": [] },
+        "references": { "present": false, "paths": [] }
+      },
+      "golden": { "id": "caveman", "name": "caveman", "state": "loaded", "context": "inline", "user_invocable": true, "body_cached": false, "description_nonempty": true }
+    },
+    {
+      "source_id": "larksuite/cli",
+      "owner": "larksuite",
+      "repository_name": "cli",
+      "repository_url": "https://github.com/larksuite/cli.git",
+      "commit": "4847f06ca898f84802513bc5f7dae49b5f7a8bb8",
+      "skill_path": "skills/lark-base/SKILL.md",
+      "skill_sha256": "4dc986a08848393277c76aea6ff6ec4e00c7398f37e77657cb59b485b45a1225",
+      "license": { "spdx": "MIT", "path": "LICENSE" },
+      "category": "productivity",
+      "package_resources": {
+        "scripts": { "present": false, "paths": [] },
+        "assets": { "present": false, "paths": [] },
+        "references": { "present": true, "paths": ["references"] }
+      },
+      "golden": { "id": "lark-base", "name": "lark-base", "state": "loaded", "context": "inline", "user_invocable": true, "body_cached": false, "description_nonempty": true }
+    },
+    {
+      "source_id": "leonxlnx/taste-skill",
+      "owner": "leonxlnx",
+      "repository_name": "taste-skill",
+      "repository_url": "https://github.com/leonxlnx/taste-skill.git",
+      "commit": "b17742737e796305d829b3ad39eda3add0d79060",
+      "skill_path": "skills/brandkit/SKILL.md",
+      "skill_sha256": "b0c4837e1bd140ca816ae54948754ddd2ac1e2a4d3619363777a80caf00b2ede",
+      "license": { "spdx": "MIT", "path": "LICENSE" },
+      "category": "brand-design",
+      "package_resources": {
+        "scripts": { "present": false, "paths": [] },
+        "assets": { "present": false, "paths": [] },
+        "references": { "present": false, "paths": [] }
+      },
+      "golden": { "id": "brandkit", "name": "brandkit", "state": "loaded", "context": "inline", "user_invocable": true, "body_cached": false, "description_nonempty": true }
+    },
+    {
+      "source_id": "mattpocock/skills",
+      "owner": "mattpocock",
+      "repository_name": "skills",
+      "repository_url": "https://github.com/mattpocock/skills.git",
+      "commit": "391a2701dd948f94f56a39f7533f8eea9a859c87",
+      "skill_path": "skills/engineering/code-review/SKILL.md",
+      "skill_sha256": "6a65cc61114f96db07ec41e3920e67c9c5bf70dd6e0901eb9460ebcb2bdc209f",
+      "license": { "spdx": "MIT", "path": "LICENSE" },
+      "category": "software-engineering",
+      "package_resources": {
+        "scripts": { "present": false, "paths": [] },
+        "assets": { "present": false, "paths": [] },
+        "references": { "present": false, "paths": [] }
+      },
+      "golden": { "id": "code-review", "name": "code-review", "state": "loaded", "context": "inline", "user_invocable": true, "body_cached": false, "description_nonempty": true }
+    },
+    {
+      "source_id": "microsoft/playwright-cli",
+      "owner": "microsoft",
+      "repository_name": "playwright-cli",
+      "repository_url": "https://github.com/microsoft/playwright-cli.git",
+      "commit": "793cfb32572733cbcb401e6f28d05a7a914ce408",
+      "skill_path": "skills/playwright-cli/SKILL.md",
+      "skill_sha256": "29c0b669a524d42b51934d7db9144c1c07a566d0549ae6fb6ccd810e5a3cf61b",
+      "license": { "spdx": "Apache-2.0", "path": "LICENSE" },
+      "category": "browser-testing",
+      "package_resources": {
+        "scripts": { "present": false, "paths": [] },
+        "assets": { "present": false, "paths": [] },
+        "references": { "present": true, "paths": ["references"] }
+      },
+      "golden": { "id": "playwright-cli", "name": "playwright-cli", "state": "loaded", "context": "inline", "user_invocable": true, "body_cached": false, "description_nonempty": true }
+    },
+    {
+      "source_id": "nextlevelbuilder/ui-ux-pro-max-skill",
+      "owner": "nextlevelbuilder",
+      "repository_name": "ui-ux-pro-max-skill",
+      "repository_url": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git",
+      "commit": "3da52ff1cab1be91848072ec1be5f493d730fd5f",
+      "skill_path": ".claude/skills/ui-ux-pro-max/SKILL.md",
+      "skill_sha256": "360d09d9a3099c5e94fc725e8cb85753d210162e4c7822c9003d8c5f38899d15",
+      "license": { "spdx": "MIT", "path": "LICENSE" },
+      "category": "ui-ux-design",
+      "package_resources": {
+        "scripts": { "present": true, "paths": ["scripts"] },
+        "assets": { "present": false, "paths": [] },
+        "references": { "present": false, "paths": [] }
+      },
+      "golden": { "id": "ui-ux-pro-max", "name": "ui-ux-pro-max", "state": "loaded", "context": "inline", "user_invocable": true, "body_cached": false, "description_nonempty": true }
+    },
+    {
+      "source_id": "obra/superpowers",
+      "owner": "obra",
+      "repository_name": "superpowers",
+      "repository_url": "https://github.com/obra/superpowers.git",
+      "commit": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+      "skill_path": "skills/systematic-debugging/SKILL.md",
+      "skill_sha256": "3b20719eca4f0461cb51a195221320d775dcf03b6859271066a03a5132a6ce7a",
+      "license": { "spdx": "MIT", "path": "LICENSE" },
+      "category": "software-engineering",
+      "package_resources": {
+        "scripts": { "present": false, "paths": [] },
+        "assets": { "present": false, "paths": [] },
+        "references": { "present": false, "paths": [] }
+      },
+      "golden": { "id": "systematic-debugging", "name": "systematic-debugging", "state": "loaded", "context": "inline", "user_invocable": true, "body_cached": false, "description_nonempty": true }
+    },
+    {
+      "source_id": "pbakaus/impeccable",
+      "owner": "pbakaus",
+      "repository_name": "impeccable",
+      "repository_url": "https://github.com/pbakaus/impeccable.git",
+      "commit": "630fc2682a5bd39b25a8e61f74b6b3f14f2b1e21",
+      "skill_path": ".agents/skills/impeccable/SKILL.md",
+      "skill_sha256": "14c4642368557af1f7bbaaac0aa184b791e6d70665dfd8fc53d8d4124f81abb8",
+      "license": { "spdx": "Apache-2.0", "path": "LICENSE" },
+      "category": "frontend-design",
+      "package_resources": {
+        "scripts": { "present": true, "paths": ["scripts"] },
+        "assets": { "present": false, "paths": [] },
+        "references": { "present": true, "paths": ["reference"] }
+      },
+      "golden": { "id": "impeccable", "name": "impeccable", "state": "loaded", "context": "inline", "user_invocable": true, "body_cached": false, "description_nonempty": true }
+    },
+    {
+      "source_id": "scrapegraphai/just-scrape",
+      "owner": "scrapegraphai",
+      "repository_name": "just-scrape",
+      "repository_url": "https://github.com/scrapegraphai/just-scrape.git",
+      "commit": "a3d179ffe2695c5bb7aacffec2c6018d3d9f056e",
+      "skill_path": "skills/just-scrape/SKILL.md",
+      "skill_sha256": "28b2d87fe0b5bc267ba9b8dae1592c4d74fe84b2a5f88b2b805c86b4010bb847",
+      "license": { "spdx": "MIT", "path": "LICENSE" },
+      "category": "web-data",
+      "package_resources": {
+        "scripts": { "present": false, "paths": [] },
+        "assets": { "present": false, "paths": [] },
+        "references": { "present": false, "paths": [] }
+      },
+      "golden": { "id": "just-scrape", "name": "just-scrape", "state": "loaded", "context": "inline", "user_invocable": true, "body_cached": false, "description_nonempty": true }
+    },
+    {
+      "source_id": "shadcn/ui",
+      "owner": "shadcn",
+      "repository_name": "ui",
+      "repository_url": "https://github.com/shadcn/ui.git",
+      "commit": "3cdaa6eb2f0da27aca8598cb752c32d840e06940",
+      "skill_path": "skills/shadcn/SKILL.md",
+      "skill_sha256": "a45cddd4511f8262df05b20506f4d52be8210a9ee05a13d9e36d4ee321bab593",
+      "license": { "spdx": "MIT", "path": "LICENSE.md" },
+      "category": "ui-components",
+      "package_resources": {
+        "scripts": { "present": false, "paths": [] },
+        "assets": { "present": true, "paths": ["assets"] },
+        "references": { "present": false, "paths": [] }
+      },
+      "golden": { "id": "shadcn", "name": "shadcn", "state": "loaded", "context": "inline", "user_invocable": false, "body_cached": false, "description_nonempty": true }
+    },
+    {
+      "source_id": "supabase/agent-skills",
+      "owner": "supabase",
+      "repository_name": "agent-skills",
+      "repository_url": "https://github.com/supabase/agent-skills.git",
+      "commit": "1ad9aaeb49caafd9e95c0a91116f71890eebbc53",
+      "skill_path": "skills/supabase-postgres-best-practices/SKILL.md",
+      "skill_sha256": "ccd6e4596bd51cf344fe76c464867c541ccc16b6d90ae7a9db449fb17588613b",
+      "license": { "spdx": "MIT", "path": "LICENSE" },
+      "category": "database",
+      "package_resources": {
+        "scripts": { "present": false, "paths": [] },
+        "assets": { "present": false, "paths": [] },
+        "references": { "present": true, "paths": ["references"] }
+      },
+      "golden": { "id": "supabase-postgres-best-practices", "name": "supabase-postgres-best-practices", "state": "loaded", "context": "inline", "user_invocable": true, "body_cached": false, "description_nonempty": true }
+    }
+  ]
+}

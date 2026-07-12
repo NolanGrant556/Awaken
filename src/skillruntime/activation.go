@@ -2,8 +2,10 @@ package skillruntime
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -14,9 +16,8 @@ import (
 
 // Compatibility status values for SkillActivationPlan.
 const (
-	CompatibilityOK       = "ok"
-	CompatibilityConflict = "conflict"
-	CompatibilityFailed   = "failed"
+	CompatibilityOK     = "ok"
+	CompatibilityFailed = "failed"
 )
 
 // SkillCompatibilityError is a structured activation failure.
@@ -63,23 +64,36 @@ type SkillActivationPlan struct {
 	MainBody                  string                    `json:"-"`
 	Source                    skills.SourceOrigin       `json:"source,omitempty"`
 	RootDir                   string                    `json:"-"`
+	SkillFilePath             string                    `json:"skill_file_path,omitempty"`
+	Context                   skills.ContextMode        `json:"context,omitempty"`
+	Agent                     string                    `json:"agent,omitempty"`
+	Model                     string                    `json:"model,omitempty"`
+	Effort                    string                    `json:"effort,omitempty"`
+	ToolHints                 []skills.ToolHint         `json:"tool_hints,omitempty"`
 }
+
+type InvocationSource string
+
+const (
+	InvocationUser  InvocationSource = "user"
+	InvocationModel InvocationSource = "model"
+)
 
 // ActivationRequest configures a single skill activation.
 type ActivationRequest struct {
+	Context          context.Context
 	SkillID          string
 	ParentToolPool   []string
 	Args             map[string]string
 	SkipArgRender    bool
-	RuntimeAvailable func(component string) bool
-	ToolCapability   func(toolName string) (tool.CapabilityClass, bool)
+	RawArgs          string
+	InvocationSource InvocationSource
 }
 
 // Activator compiles SkillActivationPlan values from the skill registry.
 type Activator struct {
-	Registry         *skills.SkillRegistry
-	Logger           Logger
-	RuntimeAvailable func(component string) bool
+	Registry *skills.SkillRegistry
+	Logger   Logger
 }
 
 // NewActivator returns an Activator bound to the given registry.
@@ -93,8 +107,9 @@ func NewActivator(registry *skills.SkillRegistry, logger Logger) *Activator {
 	}
 }
 
-// Activate compiles and validates a SkillActivationPlan. Required failures
-// fail closed before the caller may issue the first LLM request.
+// Activate compiles a SkillActivationPlan and loads SKILL.md on demand.
+// Runtime, provider, tool and resource hints never disable a structurally
+// valid Universal Skill at the catalog boundary.
 func (a *Activator) Activate(req ActivationRequest) (*SkillActivationPlan, error) {
 	if a == nil || a.Registry == nil {
 		return nil, fmt.Errorf("skill activator unavailable")
@@ -107,7 +122,7 @@ func (a *Activator) Activate(req ActivationRequest) (*SkillActivationPlan, error
 	if def == nil {
 		return nil, fmt.Errorf("skill %q not found", skillID)
 	}
-	if def.State == skills.StateUnavailable || def.State == skills.StateShadowed {
+	if def.State == skills.StateInvalid || def.State == skills.StateShadowed || def.State == skills.StateDisabledByPolicy {
 		code := strings.TrimSpace(def.UnavailableCode)
 		if code == "" {
 			code = CompatibilityFailed
@@ -115,14 +130,14 @@ func (a *Activator) Activate(req ActivationRequest) (*SkillActivationPlan, error
 		return &SkillActivationPlan{
 			SkillID:             skillID,
 			SkillVersion:        strings.TrimSpace(def.Version),
-			CompatibilityStatus: CompatibilityConflict,
+			CompatibilityStatus: CompatibilityFailed,
 			CompatibilityErrors: []SkillCompatibilityError{{
 				Code:    code,
-				Message: firstNonEmpty(def.UnavailableReason, "skill is not available"),
+				Message: firstNonEmpty(def.UnavailableReason, "skill package is not loaded"),
 			}},
 			Source:  def.Source,
 			RootDir: def.RootDir,
-		}, &SkillCompatibilityError{Code: code, Message: firstNonEmpty(def.UnavailableReason, "skill is not available")}
+		}, &SkillCompatibilityError{Code: code, Message: firstNonEmpty(def.UnavailableReason, "skill package is not loaded")}
 	}
 
 	plan := &SkillActivationPlan{
@@ -132,18 +147,24 @@ func (a *Activator) Activate(req ActivationRequest) (*SkillActivationPlan, error
 		RequiredRuntimeComponents: append([]string(nil), def.RequiredRuntimeComponents...),
 		Source:                    def.Source,
 		RootDir:                   def.RootDir,
+		SkillFilePath:             def.SkillFilePath,
+		Context:                   def.Context,
+		Agent:                     def.Agent,
+		Model:                     def.Model,
+		Effort:                    def.Effort,
+		ToolHints:                 append([]skills.ToolHint(nil), def.ToolHints...),
 		CompatibilityStatus:       CompatibilityOK,
 	}
 	for _, capName := range def.RequiredCapabilities {
 		plan.RequiredCapabilities = append(plan.RequiredCapabilities, tool.CapabilityClass(strings.TrimSpace(capName)))
 	}
 
-	if conflicts := skills.DetectPlatformContractConflicts(def); len(conflicts) > 0 {
+	if req.InvocationSource == InvocationModel && def.DisableModelInvocation {
 		err := SkillCompatibilityError{
-			Code:    skills.ErrorCodePlatformContractConflict,
-			Message: strings.Join(conflicts, "; "),
+			Code:    "skill_model_invocation_disabled",
+			Message: fmt.Sprintf("skill %q can only be invoked explicitly by the user", skillID),
 		}
-		plan.CompatibilityStatus = CompatibilityConflict
+		plan.CompatibilityStatus = CompatibilityFailed
 		plan.CompatibilityErrors = append(plan.CompatibilityErrors, err)
 		return plan, &err
 	}
@@ -156,42 +177,18 @@ func (a *Activator) Activate(req ActivationRequest) (*SkillActivationPlan, error
 		// silently turn it into the process-global tool registry.
 		parentPool = normalizeToolNames(req.ParentToolPool)
 	}
-	effective, policyErrs := CompileEffectiveTools(parentPool, []skills.ToolPolicy{def.EffectiveToolPolicy()})
-	plan.EffectiveTools = effective
-	for _, pe := range policyErrs {
-		plan.CompatibilityErrors = append(plan.CompatibilityErrors, pe)
-	}
-
-	capLookup := req.ToolCapability
-	if capLookup == nil {
-		capLookup = defaultToolCapability
-	}
-	plan.CompatibilityErrors = append(plan.CompatibilityErrors,
-		ValidateRequiredTools(plan.EffectiveTools, def.RequiredTools)...)
-	plan.CompatibilityErrors = append(plan.CompatibilityErrors,
-		ValidateRequiredCapabilities(plan.EffectiveTools, plan.RequiredCapabilities, capLookup)...)
-
-	if len(def.RequiredRuntimeComponents) > 0 {
-		runtimeOK := req.RuntimeAvailable
-		if runtimeOK == nil {
-			runtimeOK = a.RuntimeAvailable
-		}
-		if runtimeOK == nil {
-			// Capture one real preflight report per activation so a Skill that
-			// requires several components does not run the full probe repeatedly.
-			runtimeOK = registeredRuntimeAvailabilityProbe()
-		}
-		plan.CompatibilityErrors = append(plan.CompatibilityErrors,
-			ValidateRequiredRuntimeComponents(def.RequiredRuntimeComponents, runtimeOK)...)
-	}
-
-	receipts, loadErrs, loaded := LoadSkillResources(def, true)
-	plan.ResourceReceipts = receipts
-	plan.CompatibilityErrors = append(plan.CompatibilityErrors, loadErrs...)
+	// A Skill may guide tool choice but never narrows the run. Keep the legacy
+	// EffectiveTools field equal to the parent snapshot while upper layers
+	// migrate away from that field.
+	plan.EffectiveTools = normalizeToolNames(parentPool)
 
 	body := def.Body
 	if def.BodyFetcher != nil && def.McpBinding != nil {
-		fetched, fetchErr := def.BodyFetcher.FetchPromptBody(context.Background(), def.McpBinding.ServerName, def.McpBinding.PromptName)
+		fetchCtx := req.Context
+		if fetchCtx == nil {
+			fetchCtx = context.Background()
+		}
+		fetched, fetchErr := def.BodyFetcher.FetchPromptBody(fetchCtx, def.McpBinding.ServerName, def.McpBinding.PromptName)
 		if fetchErr != nil {
 			plan.CompatibilityStatus = CompatibilityFailed
 			cerr := SkillCompatibilityError{Code: CompatibilityFailed, Message: fetchErr.Error()}
@@ -199,6 +196,15 @@ func (a *Activator) Activate(req ActivationRequest) (*SkillActivationPlan, error
 			return plan, &cerr
 		}
 		body = fetched
+	} else if strings.TrimSpace(def.SkillFilePath) != "" {
+		loadedBody, loadErr := loadLocalSkillBody(def)
+		if loadErr != nil {
+			plan.CompatibilityStatus = CompatibilityFailed
+			cerr := SkillCompatibilityError{Code: "skill_content_load_failed", Message: loadErr.Error()}
+			plan.CompatibilityErrors = append(plan.CompatibilityErrors, cerr)
+			return plan, &cerr
+		}
+		body = loadedBody
 	}
 	body = strings.ReplaceAll(body, "${AWAKEN_SKILL_DIR}", def.RootDir)
 	if !req.SkipArgRender {
@@ -220,14 +226,12 @@ func (a *Activator) Activate(req ActivationRequest) (*SkillActivationPlan, error
 			return plan, &cerr
 		}
 		body = rendered
+		body = substituteRawArgs(body, req.RawArgs)
 	}
-	plan.MainBody = renderActivatedBody(def, body, loaded)
+	plan.MainBody = renderActivatedBody(def, body)
 
 	if len(plan.CompatibilityErrors) > 0 {
 		plan.CompatibilityStatus = CompatibilityFailed
-		if plan.CompatibilityErrors[0].Code == skills.ErrorCodePlatformContractConflict {
-			plan.CompatibilityStatus = CompatibilityConflict
-		}
 		first := plan.CompatibilityErrors[0]
 		return plan, &first
 	}
@@ -248,6 +252,7 @@ func (p *SkillActivationPlan) Clone() *SkillActivationPlan {
 	clone.RequiredRuntimeComponents = append([]string(nil), p.RequiredRuntimeComponents...)
 	clone.ResourceReceipts = append([]SkillResourceReceipt(nil), p.ResourceReceipts...)
 	clone.CompatibilityErrors = append([]SkillCompatibilityError(nil), p.CompatibilityErrors...)
+	clone.ToolHints = append([]skills.ToolHint(nil), p.ToolHints...)
 	return &clone
 }
 
@@ -264,12 +269,20 @@ func (p *SkillActivationPlan) DurablePayload() map[string]any {
 	return map[string]any{
 		"skill_id":                    p.SkillID,
 		"skill_version":               p.SkillVersion,
+		"source":                      string(p.Source),
 		"effective_tools":             append([]string(nil), p.EffectiveTools...),
 		"compatibility_status":        p.CompatibilityStatus,
 		"compatibility_errors":        append([]SkillCompatibilityError(nil), p.CompatibilityErrors...),
 		"required_tools":              append([]string(nil), p.RequiredTools...),
 		"required_capabilities":       capabilities,
 		"required_runtime_components": append([]string(nil), p.RequiredRuntimeComponents...),
+		"skill_file_path":             p.SkillFilePath,
+		"root_dir":                    p.RootDir,
+		"context":                     string(p.Context),
+		"agent":                       p.Agent,
+		"model":                       p.Model,
+		"effort":                      p.Effort,
+		"tool_hints":                  append([]skills.ToolHint(nil), p.ToolHints...),
 	}
 }
 
@@ -287,56 +300,6 @@ func (r SkillResourceReceipt) DurablePayload() map[string]any {
 	}
 }
 
-type registeredRuntimeReport struct {
-	Ready      bool `json:"ready"`
-	Components []struct {
-		Name string `json:"name"`
-		OK   bool   `json:"ok"`
-	} `json:"components"`
-}
-
-// RegisteredRuntimeAvailable connects Skill activation to the platform-owned
-// runtime_preflight tool. Missing tools, execution failures, malformed output,
-// absent components, and non-ready components all fail closed.
-func RegisteredRuntimeAvailable(component string) bool {
-	return registeredRuntimeAvailabilityProbe()(component)
-}
-
-func registeredRuntimeAvailabilityProbe() func(component string) bool {
-	report, ok := loadRegisteredRuntimeReport()
-	return func(component string) bool {
-		component = strings.TrimSpace(component)
-		if !ok || component == "" {
-			return false
-		}
-		if component == "primary-runtime" || component == "primary_runtime" {
-			return report.Ready
-		}
-		for _, candidate := range report.Components {
-			if strings.EqualFold(strings.TrimSpace(candidate.Name), component) {
-				return candidate.OK
-			}
-		}
-		return false
-	}
-}
-
-func loadRegisteredRuntimeReport() (registeredRuntimeReport, bool) {
-	var report registeredRuntimeReport
-	preflight, err := tool.GetTool("runtime_preflight")
-	if err != nil || preflight == nil {
-		return report, false
-	}
-	payload, err := preflight.Execute(context.Background(), `{}`)
-	if err != nil {
-		return report, false
-	}
-	if err := json.Unmarshal([]byte(payload), &report); err != nil {
-		return report, false
-	}
-	return report, true
-}
-
 func firstNonEmpty(values ...string) string {
 	for _, v := range values {
 		if strings.TrimSpace(v) != "" {
@@ -346,32 +309,70 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func renderActivatedBody(def *skills.SkillDefinition, body string, loaded map[string]string) string {
+func renderActivatedBody(def *skills.SkillDefinition, body string) string {
 	var b strings.Builder
 	if root := strings.TrimSpace(def.RootDir); root != "" {
 		b.WriteString("Base directory for this skill: ")
 		b.WriteString(root)
 		b.WriteString("\n")
-		b.WriteString("Required and preload resources are already loaded by the host. Use skill_resource_read only for optional on-demand package files.\n\n")
+		b.WriteString("Resources are not preloaded. Read references, scripts, templates, and assets from this package only when the task needs them, using the appropriate file, artifact, or shell tool.\n\n")
 	}
 	b.WriteString(body)
-	if len(loaded) > 0 {
-		keys := make([]string, 0, len(loaded))
-		for k := range loaded {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		b.WriteString("\n\n<awaken_skill_resources>\n")
-		for _, k := range keys {
-			b.WriteString("### ")
-			b.WriteString(k)
-			b.WriteString("\n")
-			b.WriteString(loaded[k])
-			b.WriteString("\n\n")
-		}
-		b.WriteString("</awaken_skill_resources>\n")
-	}
 	return b.String()
+}
+
+func loadLocalSkillBody(def *skills.SkillDefinition) (string, error) {
+	if def == nil || strings.TrimSpace(def.RootDir) == "" {
+		return "", fmt.Errorf("skill package root is unavailable")
+	}
+	currentRoot, err := filepath.EvalSymlinks(def.RootDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve current skill package root: %w", err)
+	}
+	trustedRoot := strings.TrimSpace(def.ResolvedRootDir)
+	if trustedRoot != "" && filepath.Clean(currentRoot) != filepath.Clean(trustedRoot) {
+		return "", fmt.Errorf("skill package root changed after catalog discovery")
+	}
+	root, err := os.OpenRoot(currentRoot)
+	if err != nil {
+		return "", fmt.Errorf("open skill package root: %w", err)
+	}
+	defer root.Close()
+	entrypoint := "SKILL.md"
+	if skillPath := strings.TrimSpace(def.SkillFilePath); skillPath != "" {
+		resolvedSkillPath, resolveErr := filepath.EvalSymlinks(skillPath)
+		if resolveErr != nil {
+			return "", fmt.Errorf("resolve skill entrypoint: %w", resolveErr)
+		}
+		relative, relErr := filepath.Rel(currentRoot, resolvedSkillPath)
+		if relErr != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+			return "", fmt.Errorf("skill entrypoint escapes package root")
+		}
+		entrypoint = relative
+	}
+	file, err := root.Open(entrypoint)
+	if err != nil {
+		return "", fmt.Errorf("open SKILL.md: %w", err)
+	}
+	defer file.Close()
+	raw, err := io.ReadAll(file)
+	if err != nil {
+		return "", fmt.Errorf("read SKILL.md: %w", err)
+	}
+	parsed, err := skills.ParseFrontmatter(string(raw))
+	if err != nil {
+		if def.Source == skills.SourceLegacy {
+			return strings.TrimSpace(string(raw)), nil
+		}
+		return "", err
+	}
+	return parsed.Body, nil
+}
+
+func substituteRawArgs(body, rawArgs string) string {
+	body = strings.ReplaceAll(body, "$ARGUMENTS", rawArgs)
+	body = strings.ReplaceAll(body, "${ARGUMENTS}", rawArgs)
+	return body
 }
 
 // CurrentParentToolPool returns the currently registered tool names as the
@@ -384,14 +385,6 @@ func CurrentParentToolPool() []string {
 	}
 	sort.Strings(names)
 	return names
-}
-
-func defaultToolCapability(toolName string) (tool.CapabilityClass, bool) {
-	t, err := tool.GetTool(toolName)
-	if err != nil {
-		return "", false
-	}
-	return t.Definition().Annotations.CapabilityClass, true
 }
 
 func normalizeToolNames(names []string) []string {

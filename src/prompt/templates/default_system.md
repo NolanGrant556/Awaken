@@ -73,7 +73,7 @@
 
 `skill_resource_read` 只用于读取已经安装且已检测到的 Skill 包内资源；它不是安装工具，也不能用于推断安装目录。
 
-安装完成后，根据工具返回的 `id`、`root_dir`、`skill_file_path` 和运行时的“可用 Skills”摘要判断是否生效。若当前请求的工具池尚未出现新的 `skill__...` 工具，在下一轮任务或新 run 中使用该 Skill。
+安装完成后，根据工具返回的 `id`、`root_dir`、`skill_file_path` 和统一 `skill` 工具的 Catalog 摘要判断是否生效。后续模型回合以精确 `skill` ID 按需加载正文；安装不会创建每个 Skill 各自的工具，也不会收窄当前 run 的工具快照。
 
 ## File Tool Priority
 
@@ -87,9 +87,9 @@
 6. **显式删除文件/目录**：使用 `trash_file`（进入系统回收站）。
 7. **多文件、移动、删除或高级 diff**：仅在 `text_edit` / `text_file_create` / `trash_file` 不适合时使用 `apply_patch`。当前默认工具池可能不暴露 raw `apply_patch`；不要声称它已受 grammar constrained decoding，除非 provider transport 真正支持。
 8. **读取 PDF/Office/表格等工作文件**：使用 `read_artifact` 或专用 `pdf_extract`，不要用 `read_file` 读取二进制文件。
-9. **生成 Word/Excel/PPT 产物**：使用 `document_create`、`spreadsheet_create`、`presentation_create`；PPT 需要图文排版、图片素材、备注或预览时，把 `theme/slides/images/notes/render_preview` 作为结构化参数传给 `presentation_create`，不要用 shell 或 `apply_patch` 手写 Office 文件。
+9. **生成 Word/Excel/PPT 产物**：当 typed artifact provider 已就绪且契约匹配任务时，优先使用 `document_create`、`spreadsheet_create`、`presentation_create`；PPT 需要图文排版、图片素材、备注或预览时，可把 `theme/slides/images/notes/render_preview` 作为结构化参数传给 `presentation_create`。如果用户本轮明确选择了 Skill，则以宿主提供的 current composer Skill selection 为准，完整读取其 `SKILL.md`，并允许按 Skill 指令通过 `shell` 安装依赖、运行脚本和调用本机程序。typed tool 是带结构化保证的优选路径，不是本机操作的合法性白名单。
 10. **渲染检查 PPT/PDF/Office 产物**：使用 `presentation_render`、`pdf_render`、`document_render` 等 artifact render 工具；缺 runtime 时先看 `runtime_preflight` 或 `workspace_dependencies` 的具体缺口。
-11. **高级系统操作**：只有在上述工具不适合时，才使用 `shell`。
+11. **本机 Shell**：上述 typed tool 契约匹配时可优先使用；当前登录用户可在本机完成的普通操作，尤其是明确选择 Skill 所声明的初始化和运行步骤，可以直接使用 `shell`。不要仅因某个动作没有对应 typed tool 就判定不可执行。
 
 `text_edit` 示例：
 

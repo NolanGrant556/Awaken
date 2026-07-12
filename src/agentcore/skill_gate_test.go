@@ -9,10 +9,9 @@ import (
 	_ "awaken/src/tools"
 )
 
-func TestRequestBuilderFiltersResolvedToolPool(t *testing.T) {
+func TestRequestBuilderUsesUnifiedCatalogWithConfiguredExposure(t *testing.T) {
 	builder := NewRequestBuilder(AgentConfig{
-		ResolvedToolPool: []string{"text_edit", "shell"},
-		ToolExposure:     tool.CompatToolExposurePolicy(),
+		ToolExposure: tool.CompatToolExposurePolicy(),
 	})
 	req := builder.Build(convcontext.NewConversation(nil).Context, nil)
 	names := make([]string, 0, len(req.Tools))
@@ -26,35 +25,38 @@ func TestRequestBuilderFiltersResolvedToolPool(t *testing.T) {
 	if !strings.Contains(joined, "shell") {
 		t.Fatalf("expected shell in pool, got %v", names)
 	}
-	if strings.Contains(joined, "apply_patch") {
-		t.Fatalf("apply_patch should be filtered out of resolved pool, got %v", names)
+	if !strings.Contains(joined, "apply_patch") {
+		t.Fatalf("configured exposure unexpectedly hid apply_patch, got %v", names)
 	}
 }
 
-func TestToolRuntimeRejectsOutsideResolvedPool(t *testing.T) {
-	rt := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
-		ResolvedToolPool: []string{"file_read"},
-	})
+func TestToolRuntimeExecutesUnifiedCatalogTool(t *testing.T) {
+	name := "skill_pool_noop_test"
+	calls := 0
+	if err := tool.RegisterToolForce(&snapshotTestTool{name: name, version: "ok", readiness: tool.ProviderReady, calls: &calls}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { tool.UnregisterTool(name) })
+	rt := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{})
 	result := rt.Execute(t.Context(), convcontext.ToolCall{
 		ID: "tc1",
 		Function: convcontext.FunctionCall{
-			Name:      "shell",
-			Arguments: `{"command":"echo hi"}`,
+			Name:      name,
+			Arguments: `{}`,
 		},
 	})
-	if !result.IsError {
-		t.Fatalf("expected denial, got %+v", result)
-	}
-	if result.ErrorCode != tool.ErrorCodeSkillToolNotAllowed && result.Outcome.ErrorCode != tool.ErrorCodeSkillToolNotAllowed {
-		t.Fatalf("expected skill_tool_not_allowed, got code=%q outcome=%q content=%q",
-			result.ErrorCode, result.Outcome.ErrorCode, result.Content)
+	if result.IsError || calls != 1 {
+		t.Fatalf("unified catalog blocked ordinary execution: calls=%d result=%+v", calls, result)
 	}
 }
 
-func TestCreateSubagentInheritsResolvedToolPool(t *testing.T) {
+func TestCreateSubagentInheritsImmutableRunSnapshots(t *testing.T) {
+	snapshot := &tool.RunToolAvailabilitySnapshot{SnapshotID: "tools_parent", CatalogVersion: 7}
+	environment := &tool.ExecutionEnvironmentSnapshot{SnapshotID: "env_parent"}
 	parent := AgentConfig{
-		ResolvedToolPool: []string{"file_read", "text_edit"},
-		Workspace:        WorkspaceConfig{Root: "/tmp/ws"},
+		Workspace:                    WorkspaceConfig{Root: "/tmp/ws"},
+		ToolAvailabilitySnapshot:     snapshot,
+		ExecutionEnvironmentSnapshot: environment,
 	}
 	child, err := CreateSubagent(parent, SpawnConfig{
 		AgentID:       "child",
@@ -63,8 +65,8 @@ func TestCreateSubagentInheritsResolvedToolPool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(child.ResolvedToolPool, ",") != "file_read,text_edit" {
-		t.Fatalf("child pool=%v", child.ResolvedToolPool)
+	if child.ToolAvailabilitySnapshot != snapshot || child.ExecutionEnvironmentSnapshot != environment {
+		t.Fatalf("child did not inherit immutable run snapshots: %+v", child)
 	}
 }
 

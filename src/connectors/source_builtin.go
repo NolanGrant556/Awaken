@@ -5,6 +5,7 @@ import (
 	"runtime"
 
 	"awaken/src/mcpclient"
+	"awaken/src/tool"
 )
 
 // npxCommand returns the OS-appropriate command and arguments for running an
@@ -64,6 +65,9 @@ func puppeteerConnector() ConnectorDefinition {
 		Description:      "Control a headless browser via Puppeteer to navigate pages, take screenshots, and run automations.",
 		Category:         CategoryCode,
 		Provider:         "Puppeteer",
+		ProviderID:       tool.ProviderID("connector:puppeteer"),
+		Capabilities:     []tool.Capability{tool.CapabilityBrowserInteractV2},
+		Dependencies:     []tool.DependencyRequirement{npxDependency("@modelcontextprotocol/server-puppeteer")},
 		AuthType:         AuthNone,
 		TrustLevel:       TrustBuiltin,
 		SourceOrigin:     SourceBuiltin,
@@ -79,6 +83,9 @@ func chromeDevToolsConnector() ConnectorDefinition {
 		Description:      "Inspect and debug web pages using the Chrome DevTools Protocol MCP server.",
 		Category:         CategoryCode,
 		Provider:         "Chrome DevTools MCP",
+		ProviderID:       tool.ProviderID("connector:chrome-devtools-mcp"),
+		Capabilities:     []tool.Capability{tool.CapabilityBrowserInteractV2},
+		Dependencies:     []tool.DependencyRequirement{npxDependency("chrome-devtools-mcp")},
 		AuthType:         AuthNone,
 		TrustLevel:       TrustBuiltin,
 		SourceOrigin:     SourceBuiltin,
@@ -94,6 +101,9 @@ func playwrightConnector() ConnectorDefinition {
 		Description:      "Automate browsers with Playwright for testing, scraping, and page interactions.",
 		Category:         CategoryCode,
 		Provider:         "Playwright",
+		ProviderID:       tool.ProviderID("connector:playwright"),
+		Capabilities:     []tool.Capability{tool.CapabilityBrowserInteractV2},
+		Dependencies:     []tool.DependencyRequirement{npxDependency("@executeautomation/playwright-mcp-server")},
 		AuthType:         AuthNone,
 		TrustLevel:       TrustBuiltin,
 		SourceOrigin:     SourceBuiltin,
@@ -109,6 +119,8 @@ func githubConnector() ConnectorDefinition {
 		Description:      "Interact with GitHub repositories, issues, pull requests, and more. Set GITHUB_PERSONAL_ACCESS_TOKEN to authenticate.",
 		Category:         CategoryCode,
 		Provider:         "GitHub",
+		ProviderID:       tool.ProviderID("connector:github"),
+		Dependencies:     []tool.DependencyRequirement{npxDependency("@modelcontextprotocol/server-github")},
 		AuthType:         AuthAPIKey,
 		TrustLevel:       TrustBuiltin,
 		SourceOrigin:     SourceBuiltin,
@@ -118,11 +130,16 @@ func githubConnector() ConnectorDefinition {
 
 func dingTalkConnector() ConnectorDefinition {
 	return ConnectorDefinition{
-		ID:               "dingtalk-workspace",
-		DisplayName:      "钉钉CLI",
-		Description:      "通过 DingTalk-Real-AI/dingtalk-workspace-cli 操作钉钉消息、日程、通讯录等官方连接器能力。",
-		Category:         CategoryChat,
-		Provider:         "DingTalk",
+		ID:           "dingtalk-workspace",
+		DisplayName:  "钉钉CLI",
+		Description:  "通过 DingTalk-Real-AI/dingtalk-workspace-cli 操作钉钉消息、日程、通讯录等官方连接器能力。",
+		Category:     CategoryChat,
+		Provider:     "DingTalk",
+		ProviderID:   tool.ProviderID("connector:dingtalk-workspace"),
+		Capabilities: []tool.Capability{tool.CapabilityMessageSend},
+		Dependencies: []tool.DependencyRequirement{{
+			Kind: tool.DependencyOSExecutable, Name: "dingtalk-workspace-cli", ProbeID: "executable.dingtalk-workspace-cli", Source: "connector",
+		}},
 		AuthType:         AuthOAuth2,
 		TrustLevel:       TrustBuiltin,
 		SourceOrigin:     SourceBuiltin,
@@ -132,11 +149,16 @@ func dingTalkConnector() ConnectorDefinition {
 
 func larkConnector() ConnectorDefinition {
 	return ConnectorDefinition{
-		ID:               "lark-cli",
-		DisplayName:      "飞书CLI",
-		Description:      "通过 larksuite/cli 操作飞书消息、组织与协作能力。",
-		Category:         CategoryChat,
-		Provider:         "Lark",
+		ID:           "lark-cli",
+		DisplayName:  "飞书CLI",
+		Description:  "通过 larksuite/cli 操作飞书消息、组织与协作能力。",
+		Category:     CategoryChat,
+		Provider:     "Lark",
+		ProviderID:   tool.ProviderID("connector:lark-cli"),
+		Capabilities: []tool.Capability{tool.CapabilityMessageSend},
+		Dependencies: []tool.DependencyRequirement{{
+			Kind: tool.DependencyOSExecutable, Name: "lark-cli", ProbeID: "executable.lark-cli", Source: "connector",
+		}},
 		AuthType:         AuthOAuth2,
 		TrustLevel:       TrustBuiltin,
 		SourceOrigin:     SourceBuiltin,
@@ -152,10 +174,22 @@ func context7Connector() ConnectorDefinition {
 		Description:      "Use Upstash Context7 to retrieve contextual documentation and code references.",
 		Category:         CategoryData,
 		Provider:         "context7",
+		ProviderID:       tool.ProviderID("connector:context7"),
+		Capabilities:     []tool.Capability{tool.CapabilityWebSearch},
+		Dependencies:     []tool.DependencyRequirement{npxDependency("@upstash/context7-mcp")},
 		AuthType:         AuthNone,
 		TrustLevel:       TrustBuiltin,
 		SourceOrigin:     SourceBuiltin,
 		McpConfigFactory: context7ConfigFactory,
+	}
+}
+
+func npxDependency(source string) tool.DependencyRequirement {
+	return tool.DependencyRequirement{
+		Kind:    tool.DependencyPackageManager,
+		Name:    "npx",
+		ProbeID: "executable.npx",
+		Source:  source,
 	}
 }
 

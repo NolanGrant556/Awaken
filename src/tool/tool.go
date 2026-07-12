@@ -11,6 +11,7 @@ const (
 	SourceConnector ToolSource = "connector"
 	SourceSkill     ToolSource = "skill"
 	SourcePlugin    ToolSource = "plugin"
+	SourceRuntime   ToolSource = "runtime_provider"
 )
 
 // ToolAnnotations carries the behavioural hints every tool must declare.
@@ -70,6 +71,16 @@ type ToolDefinition struct {
 	Examples     []ToolExample      `json:"examples"`
 	FailureModes []ToolFailureMode  `json:"failure_modes"`
 	Annotations  ToolAnnotations    `json:"annotations"`
+	// ProviderID is the stable implementation identity within the unified tool
+	// catalog. Empty values receive a deterministic source:name compatibility ID
+	// at registration.
+	ProviderID ProviderID `json:"provider_id,omitempty"`
+	// Capabilities are provider-neutral semantics. They drive capability
+	// discovery/routing only; they do not authorize execution.
+	Capabilities []Capability `json:"capabilities,omitempty"`
+	// Dependencies describe provider readiness probes. They are evaluated when
+	// building a run availability snapshot, never as a Skill-loading whitelist.
+	Dependencies []DependencyRequirement `json:"dependencies,omitempty"`
 	// Policy is the default permission posture; empty means "use global default".
 	Policy PermissionPolicy `json:"policy,omitempty"`
 }
@@ -225,15 +236,20 @@ const (
 )
 
 type MassMessageMetadata struct {
-	ReviewID        string   `json:"reviewId,omitempty"`
-	Channel         string   `json:"channel,omitempty"`
-	RecipientScope  string   `json:"recipientScope,omitempty"`
-	RecipientCount  int      `json:"recipientCount,omitempty"`
-	BodyPreview     string   `json:"bodyPreview,omitempty"`
-	TemplatePreview string   `json:"templatePreview,omitempty"`
-	Attachments     []string `json:"attachments,omitempty"`
-	SendingAccount  string   `json:"sendingAccount,omitempty"`
-	SourceTool      string   `json:"sourceTool,omitempty"`
+	ReviewID                string   `json:"reviewId,omitempty"`
+	Channel                 string   `json:"channel,omitempty"`
+	RecipientScope          string   `json:"recipientScope,omitempty"`
+	RecipientCount          int      `json:"recipientCount,omitempty"`
+	MessageCount            int      `json:"messageCount,omitempty"`
+	ExpandsRecipients       bool     `json:"expandsRecipients,omitempty"`
+	BodyPreview             string   `json:"bodyPreview,omitempty"`
+	TemplatePreview         string   `json:"templatePreview,omitempty"`
+	Attachments             []string `json:"attachments,omitempty"`
+	SendingAccount          string   `json:"sendingAccount,omitempty"`
+	SourceTool              string   `json:"sourceTool,omitempty"`
+	EnvelopeDigest          string   `json:"envelopeDigest,omitempty"`
+	BodyDigest              string   `json:"bodyDigest,omitempty"`
+	RecipientIdentityDigest string   `json:"recipientIdentityDigest,omitempty"`
 }
 
 type ArtifactProducingTool interface {

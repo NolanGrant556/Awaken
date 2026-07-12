@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -16,10 +17,9 @@ import (
 	"awaken/src/tool/sandbox"
 )
 
-// ErrSandboxUnavailable is retained for compatibility with older tests and
-// callers. Local-computer shell no longer fails open-world commands because a
-// platform sandbox is unavailable; the active hard gates are implemented by
-// EvaluateShellExecutionPolicy.
+// ErrSandboxUnavailable is retained for compatibility with older callers.
+// New code reports tool.ErrExecutionSandboxRequired when a workspace broker
+// cannot prove that its platform write boundary was actually applied.
 var ErrSandboxUnavailable = errors.New(
 	"open-world shell command requires a trusted sandbox that is not available on this platform",
 )
@@ -30,11 +30,12 @@ var ErrSandboxUnavailable = errors.New(
 // layer.
 //
 // Execution flow:
-//  1. Classify the command via ClassifyShellCommand (Task 5).
-//  2. Evaluate the local-computer shell gates (Trash-only deletes,
-//     mass-message review, and worker-owned typed-runtime executables).
-//  3. Execute via the platform shell (/bin/sh on Unix, sh/cmd.exe on Windows),
-//     capturing stdout/stderr with optional observer streaming.
+//  1. Classify the command for observation.
+//  2. Authorize through a broker. The default broker executes directly as the
+//     current login user; callers may explicitly inject a restricted/staged
+//     broker when they need its narrower contract.
+//  3. Apply a platform sandbox only when that broker explicitly requests it.
+//  4. Execute via the user's shell and return the real process facts.
 type ShellExecutor struct {
 	// adapter is the sandbox adapter to use. When nil, the executor
 	// resolves the platform default at execution time via
@@ -64,14 +65,18 @@ func NewShellExecutorWithAdapter(adapter sandbox.SandboxAdapter) *ShellExecutor 
 // for tool callers; the tier and sandbox fields are kept here for
 // observability and future audit hooks.
 type ShellExecResult struct {
-	Stdout         string
-	Stderr         string
-	ExitCode       int
-	TimedOut       bool
-	DurationMS     int64
-	Truncated      bool
-	Tier           ShellTier
-	SandboxSupport sandbox.SandboxSupport
+	Stdout              string
+	Stderr              string
+	ExitCode            int
+	TimedOut            bool
+	Cancelled           bool
+	DurationMS          int64
+	Truncated           bool
+	Tier                ShellTier
+	SandboxSupport      sandbox.SandboxSupport
+	EnvironmentSnapshot tool.ExecutionEnvironmentSnapshot
+	BrokerAuthorization tool.BrokerAuthorization
+	BrokerReceipt       tool.BrokerExecutionReceipt
 }
 
 // Execute runs the shell command through the executor.
@@ -86,6 +91,7 @@ func (e *ShellExecutor) Execute(
 	permissionContext tool.PermissionContext,
 	observer tool.ToolObserver,
 ) (ShellExecResult, error) {
+	permissionContext = permissionContext.Normalize()
 	command := strings.TrimSpace(params.Command)
 	if command == "" {
 		return ShellExecResult{}, fmt.Errorf("缺少必需参数: command")
@@ -99,40 +105,142 @@ func (e *ShellExecutor) Execute(
 			Tier: tier,
 		}, fmt.Errorf("shell policy denied command: %s", policy.DenyReason)
 	}
-
-	support := sandbox.SandboxNone
-	if adapter := e.adapter; adapter != nil {
-		support = adapter.SupportLevel()
-	} else if defaultAdapter := sandbox.DefaultAdapter(); defaultAdapter != nil {
-		support = defaultAdapter.SupportLevel()
+	activeSandbox := e.adapter
+	if activeSandbox == nil {
+		activeSandbox = sandbox.DefaultAdapter()
 	}
+
+	environmentSnapshot, hasSnapshot := tool.ExecutionEnvironmentSnapshotFromContext(ctx)
+	var hostEnvironment HostShellEnvironment
+	if hasSnapshot {
+		if environmentSnapshot.PATHTruncated && strings.TrimSpace(environmentSnapshot.PinnedTransportPATH()) == "" {
+			return ShellExecResult{Tier: tier, EnvironmentSnapshot: environmentSnapshot}, fmt.Errorf("pinned environment full PATH is unavailable for process transport")
+		}
+		hostEnvironment = hostShellEnvironmentFromSnapshot(environmentSnapshot)
+	} else {
+		executableNames := shellExecutableNames(command)
+		hostEnvironment = ResolveHostShellEnvironment(ctx, tool.ExecutionEnvironmentProbeOptions{
+			WorkspaceRoot: permissionContext.WorkspaceRoot, WorkingDirectory: cwd,
+			Executables: executableNames, ProbeVersions: false,
+		})
+		environmentSnapshot = hostEnvironment.Snapshot
+	}
+
+	// EnvPolicy enforcement: when the execution profile's EnvPolicy is
+	// EnvMinimal, constrain cmd.Env to a minimal allowlist of environment
+	// variables (PATH, HOME, USER, SHELL, TMPDIR, LANG, LC_ALL) so secrets
+	// and project-local tokens are not leaked to the child process. Filtering
+	// happens after host resolution so even GUI-launched children retain the
+	// exact pinned PATH/SHELL and repaired HOME.
+	executionEnv := append([]string(nil), hostEnvironment.Environment...)
+	if profile.EnvPolicyFromContext(ctx) == profile.EnvMinimal {
+		executionEnv = minimalEnvAllowlistFrom(executionEnv)
+	}
+
+	operation, referencedPaths := ClassifyShellBrokerOperation(command, cwd, permissionContext)
+	broker, explicitlyConfigured := tool.ExecutionBrokerFromContext(ctx)
+	if !explicitlyConfigured {
+		broker = tool.NewLocalUserExecutionBroker()
+	}
+	if broker == nil {
+		return ShellExecResult{Tier: tier, EnvironmentSnapshot: environmentSnapshot}, tool.ErrExecutionBrokerUnavailable
+	}
+	brokerRequest := tool.ExecutionBrokerRequest{
+		ProviderID: tool.ProviderID("builtin:shell"), Capability: tool.CapabilityShellExecute,
+		Operation: operation, Command: command, WorkingDirectory: cwd,
+		WorkspaceRoot:         permissionContext.WorkspaceRoot,
+		ReferencedPaths:       referencedPaths,
+		EnvironmentSnapshotID: environmentSnapshot.SnapshotID,
+	}
+	if scopedBroker, ok := broker.(tool.WorkspaceScopeExecutionBroker); ok && scopedBroker.EnforcesWorkspaceScope() {
+		brokerScope, scopeErr := tool.CanonicalBrokerWorkspaceScope(permissionContext)
+		if scopeErr != nil {
+			return ShellExecResult{Tier: tier, EnvironmentSnapshot: environmentSnapshot}, fmt.Errorf("%w: canonicalize broker workspace scope: %v", tool.ErrExecutionBrokerDenied, scopeErr)
+		}
+		brokerRequest.WorkspaceScopeDeclared = true
+		brokerRequest.WritableRoots = brokerScope.WritableRoots
+		brokerRequest.ProtectedRoots = brokerScope.ProtectedRoots
+	}
+	authorization, brokerErr := broker.Authorize(ctx, brokerRequest)
+	if brokerErr != nil || authorization.Action != tool.BrokerAllow {
+		if brokerErr == nil {
+			brokerErr = tool.ErrExecutionBrokerDenied
+		}
+		return ShellExecResult{
+			Tier: tier, EnvironmentSnapshot: environmentSnapshot, BrokerAuthorization: authorization,
+		}, fmt.Errorf("execution broker %s rejected command: %w", broker.ID(), brokerErr)
+	}
+	executionCwd := cwd
+	if strings.TrimSpace(authorization.ExecutionWorkingDirectory) != "" {
+		executionCwd = authorization.ExecutionWorkingDirectory
+	}
+	executionEnv = applyShellEnvironmentOverrides(executionEnv, authorization.EnvironmentOverrides)
+	executionEnv = stripImplicitShellStartupEnvironment(executionEnv)
 
 	timeout := normalizeTimeout(params.TimeoutMS)
 	maxOutputChars := normalizeMaxOutputChars(params.MaxOutputChars)
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd, err := shellCommand(runCtx, command)
+	cmd, err := shellCommand(runCtx, command, hostEnvironment.Shell, executionEnv)
 	if err != nil {
-		return ShellExecResult{}, fmt.Errorf("resolve shell: %w", err)
+		receipt, _ := completeShellBroker(broker, authorization, tool.BrokerExecutionResult{
+			TransportStatus: tool.TransportNotStarted, ProcessStatus: tool.ProcessNotApplicable,
+			SideEffectState: tool.OutcomeSideEffectNone,
+		})
+		return ShellExecResult{
+			Tier: tier, EnvironmentSnapshot: environmentSnapshot, BrokerAuthorization: authorization, BrokerReceipt: receipt,
+		}, fmt.Errorf("resolve shell: %w", err)
 	}
-	cmd.Dir = cwd
+	cmd.Dir = executionCwd
+	cmd.Env = executionEnv
 
-	// EnvPolicy enforcement: when the execution profile's EnvPolicy is
-	// EnvMinimal, constrain cmd.Env to a minimal allowlist of environment
-	// variables (PATH, HOME, USER, SHELL, TMPDIR, LANG, LC_ALL) so secrets
-	// and project-local tokens are not leaked to the child process. Empty
-	// values are filtered out. When EnvInherit (the default), the child gets
-	// the runtime's full environment with PATH augmented for common user CLI
-	// install locations such as ~/.local/bin and Homebrew.
-	envPolicy := profile.EnvPolicyFromContext(ctx)
-	if envPolicy == profile.EnvMinimal {
-		cmd.Env = augmentShellPath(minimalEnvAllowlist())
-	} else {
-		cmd.Env = augmentShellPath(os.Environ())
+	effectiveSupport := sandbox.SandboxNone
+	sandboxRequested := authorization.RequiresAppliedSandbox ||
+		strings.TrimSpace(authorization.SandboxTier) != "" ||
+		strings.TrimSpace(authorization.SandboxRoot) != ""
+	if sandboxRequested && activeSandbox != nil {
+		sandboxTier := string(tier)
+		if strings.TrimSpace(authorization.SandboxTier) != "" {
+			sandboxTier = authorization.SandboxTier
+		}
+		sandboxRoot := permissionContext.WorkspaceRoot
+		if strings.TrimSpace(authorization.SandboxRoot) != "" {
+			sandboxRoot = authorization.SandboxRoot
+		}
+		sandboxResult, sandboxErr := activeSandbox.ApplySandbox(cmd, sandboxTier, sandboxRoot)
+		if sandboxErr != nil {
+			receipt, _ := completeShellBroker(broker, authorization, tool.BrokerExecutionResult{
+				TransportStatus: tool.TransportNotStarted, ProcessStatus: tool.ProcessNotApplicable,
+				SideEffectState: tool.OutcomeSideEffectNone,
+			})
+			return ShellExecResult{
+				Tier: tier, SandboxSupport: sandboxResult.Support,
+				EnvironmentSnapshot: environmentSnapshot, BrokerAuthorization: authorization, BrokerReceipt: receipt,
+			}, fmt.Errorf("apply shell sandbox: %w", sandboxErr)
+		}
+		effectiveSupport = sandboxResult.Support
+		if authorization.RequiresAppliedSandbox && !sandboxResult.Applied {
+			receipt, _ := completeShellBroker(broker, authorization, tool.BrokerExecutionResult{
+				TransportStatus: tool.TransportNotStarted, ProcessStatus: tool.ProcessNotApplicable,
+				SideEffectState: tool.OutcomeSideEffectNone,
+			})
+			return ShellExecResult{
+				Tier: tier, SandboxSupport: sandboxResult.Support,
+				EnvironmentSnapshot: environmentSnapshot, BrokerAuthorization: authorization, BrokerReceipt: receipt,
+			}, fmt.Errorf("%w: broker %s requires a real sandbox boundary", tool.ErrExecutionSandboxRequired, broker.ID())
+		}
+	} else if authorization.RequiresAppliedSandbox {
+		receipt, _ := completeShellBroker(broker, authorization, tool.BrokerExecutionResult{
+			TransportStatus: tool.TransportNotStarted, ProcessStatus: tool.ProcessNotApplicable,
+			SideEffectState: tool.OutcomeSideEffectNone,
+		})
+		return ShellExecResult{
+			Tier: tier, EnvironmentSnapshot: environmentSnapshot,
+			BrokerAuthorization: authorization, BrokerReceipt: receipt,
+		}, fmt.Errorf("%w: no sandbox adapter", tool.ErrExecutionSandboxRequired)
 	}
-
-	effectiveSupport := support
+	configureShellProcessTree(cmd)
 
 	stdout := newShellOutputWriter("stdout", maxOutputChars, observer)
 	stderr := newShellOutputWriter("stderr", maxOutputChars, observer)
@@ -141,8 +249,10 @@ func (e *ShellExecutor) Execute(
 
 	started := time.Now()
 	runErr := cmd.Run()
+	terminateShellProcessTree(cmd)
 	duration := time.Since(started)
 	timedOut := runCtx.Err() == context.DeadlineExceeded
+	cancelled := runCtx.Err() == context.Canceled
 	exitCode := 0
 	if runErr != nil {
 		var exitErr *exec.ExitError
@@ -151,28 +261,108 @@ func (e *ShellExecutor) Execute(
 		} else if timedOut {
 			exitCode = -1
 		} else {
-			return ShellExecResult{
-				Stdout:         stdout.Result().Content,
-				Stderr:         stderr.Result().Content,
-				DurationMS:     duration.Milliseconds(),
-				Tier:           tier,
-				SandboxSupport: effectiveSupport,
-			}, fmt.Errorf("执行命令失败: %w", runErr)
+			partial := ShellExecResult{
+				Stdout:              rewriteBrokerExecutionPath(stdout.Result().Content, authorization, permissionContext.WorkspaceRoot),
+				Stderr:              rewriteBrokerExecutionPath(stderr.Result().Content, authorization, permissionContext.WorkspaceRoot),
+				DurationMS:          duration.Milliseconds(),
+				Cancelled:           cancelled,
+				Tier:                tier,
+				SandboxSupport:      effectiveSupport,
+				EnvironmentSnapshot: environmentSnapshot,
+				BrokerAuthorization: authorization,
+			}
+			partial.BrokerReceipt, _ = completeShellBroker(broker, authorization, tool.BrokerExecutionResult{
+				TransportStatus: tool.TransportFailed, ProcessStatus: tool.ProcessSpawnFailed,
+				SideEffectState: tool.OutcomeSideEffectUnknown,
+			})
+			return partial, fmt.Errorf("执行命令失败: %w", runErr)
 		}
 	}
 
 	stdoutResult := stdout.Result()
 	stderrResult := stderr.Result()
-	return ShellExecResult{
-		Stdout:         stdoutResult.Content,
-		Stderr:         stderrResult.Content,
-		ExitCode:       exitCode,
-		TimedOut:       timedOut,
-		DurationMS:     duration.Milliseconds(),
-		Truncated:      stdoutResult.Truncated || stderrResult.Truncated,
-		Tier:           tier,
-		SandboxSupport: effectiveSupport,
-	}, nil
+	result := ShellExecResult{
+		Stdout:              rewriteBrokerExecutionPath(stdoutResult.Content, authorization, permissionContext.WorkspaceRoot),
+		Stderr:              rewriteBrokerExecutionPath(stderrResult.Content, authorization, permissionContext.WorkspaceRoot),
+		ExitCode:            exitCode,
+		TimedOut:            timedOut,
+		Cancelled:           cancelled,
+		DurationMS:          duration.Milliseconds(),
+		Truncated:           stdoutResult.Truncated || stderrResult.Truncated,
+		Tier:                tier,
+		SandboxSupport:      effectiveSupport,
+		EnvironmentSnapshot: environmentSnapshot,
+		BrokerAuthorization: authorization,
+	}
+	processStatus := tool.ProcessExited
+	transportStatus := tool.TransportCompleted
+	if timedOut {
+		processStatus = tool.ProcessTimedOut
+		transportStatus = tool.TransportFailed
+	} else if cancelled {
+		processStatus = tool.ProcessSignaled
+		transportStatus = tool.TransportCancelled
+	}
+	sideEffectState := tool.OutcomeSideEffectNone
+	if operation != tool.BrokerOperationInspect {
+		sideEffectState = tool.OutcomeSideEffectUnknown
+	}
+	result.BrokerReceipt, err = completeShellBroker(broker, authorization, tool.BrokerExecutionResult{
+		TransportStatus: transportStatus, ProcessStatus: processStatus, ExitCode: &exitCode,
+		SideEffectState: sideEffectState,
+	})
+	if err != nil {
+		return result, fmt.Errorf("execution broker completion failed: %w", err)
+	}
+	return result, nil
+}
+
+func shellExecutableNames(command string) []string {
+	tokens := shellTokens(command)
+	if len(tokens) == 0 {
+		return []string{}
+	}
+	name := filepath.Base(strings.ReplaceAll(tokens[0], `\`, "/"))
+	if name == "" {
+		return []string{}
+	}
+	return []string{name}
+}
+
+func completeShellBroker(broker tool.ExecutionBroker, authorization tool.BrokerAuthorization, result tool.BrokerExecutionResult) (tool.BrokerExecutionReceipt, error) {
+	completeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	return broker.Complete(completeCtx, authorization, result)
+}
+
+func applyShellEnvironmentOverrides(environment []string, overrides map[string]string) []string {
+	if len(overrides) == 0 {
+		return environment
+	}
+	result := append([]string(nil), environment...)
+	for key, value := range overrides {
+		replaced := false
+		for index, entry := range result {
+			existingKey, _, ok := splitEnvEntry(entry)
+			if ok && envKeyEqual(runtime.GOOS, existingKey, key) {
+				result[index] = existingKey + "=" + value
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			result = append(result, key+"="+value)
+		}
+	}
+	return result
+}
+
+func rewriteBrokerExecutionPath(value string, authorization tool.BrokerAuthorization, workspaceRoot string) string {
+	stagedRoot := strings.TrimSpace(authorization.ExecutionWorkspaceRoot)
+	if stagedRoot == "" || strings.TrimSpace(workspaceRoot) == "" {
+		return value
+	}
+	return strings.ReplaceAll(value, stagedRoot, workspaceRoot)
 }
 
 // resolveExecutorCwd resolves the working directory the command should
@@ -192,19 +382,94 @@ func resolveExecutorCwd(workdir string, permissionContext tool.PermissionContext
 // included; secrets and project-local tokens are stripped. Variables whose
 // value is empty are omitted so the child does not see "VAR=" entries.
 func minimalEnvAllowlist() []string {
+	return minimalEnvAllowlistFrom(os.Environ())
+}
+
+func minimalEnvAllowlistFrom(source []string) []string {
 	keys := []string{"PATH", "HOME", "USER", "SHELL", "TMPDIR", "LANG", "LC_ALL"}
 	if runtime.GOOS == "windows" {
 		keys = append(keys, "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "PATHEXT", "SYSTEMROOT")
 	}
 	env := make([]string, 0, len(keys))
 	for _, key := range keys {
-		value := os.Getenv(key)
+		value := envValue(source, key)
 		if value == "" {
 			continue
 		}
 		env = append(env, key+"="+value)
 	}
 	return env
+}
+
+// stripImplicitShellStartupEnvironment prevents non-interactive shells from
+// executing user-selected startup hook files such as BASH_ENV or ENV. The
+// command itself can still source a file explicitly when that is part of the
+// requested workflow.
+func stripImplicitShellStartupEnvironment(environment []string) []string {
+	result := make([]string, 0, len(environment))
+	for _, entry := range environment {
+		key, _, ok := splitEnvEntry(entry)
+		if ok && (envKeyEqual(runtime.GOOS, key, "BASH_ENV") || envKeyEqual(runtime.GOOS, key, "ENV")) {
+			continue
+		}
+		result = append(result, entry)
+	}
+	return result
+}
+
+// inheritedShellEnvironment preserves the complete awaken-core process
+// environment (including proxy, certificate, registry, cache, and tool-specific
+// variables) while repairing the essential values GUI-launched processes may
+// omit. It does not source shell rc files or replace an existing user value.
+func inheritedShellEnvironment() []string {
+	home := currentUserHomeDirectory()
+	environment := ensureEssentialShellEnvironmentForOS(os.Environ(), runtime.GOOS, home, os.TempDir())
+	return augmentShellPathForOS(environment, runtime.GOOS, string(os.PathListSeparator))
+}
+
+func currentUserHomeDirectory() string {
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		return home
+	}
+	if current, err := user.Current(); err == nil && current != nil {
+		return strings.TrimSpace(current.HomeDir)
+	}
+	return ""
+}
+
+func ensureEssentialShellEnvironmentForOS(environment []string, goos string, fallbackHome string, fallbackTemp string) []string {
+	result := append([]string(nil), environment...)
+	setDefault := func(key string, value string) {
+		if strings.TrimSpace(value) == "" || strings.TrimSpace(envValueForOS(result, key, goos)) != "" {
+			return
+		}
+		replaced := false
+		for index, entry := range result {
+			existingKey, _, ok := splitEnvEntry(entry)
+			if ok && envKeyEqual(goos, existingKey, key) {
+				result[index] = existingKey + "=" + value
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			result = append(result, key+"="+value)
+		}
+	}
+
+	setDefault("HOME", fallbackHome)
+	setDefault("TMPDIR", fallbackTemp)
+	if goos == "windows" {
+		setDefault("USERPROFILE", fallbackHome)
+		systemRoot := envValueForOS(result, "SYSTEMROOT", goos)
+		if systemRoot != "" {
+			setDefault("PATH", joinPathForOS(goos, systemRoot, "System32"))
+		}
+	} else {
+		setDefault("SHELL", "/bin/sh")
+		setDefault("PATH", "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+	}
+	return result
 }
 
 func augmentShellPath(env []string) []string {
@@ -382,20 +647,35 @@ func joinPathForOS(goos string, elems ...string) string {
 	return result
 }
 
-// shellCommand builds an *exec.Cmd that runs the given shell script on the
-// current platform. On Unix it uses /bin/sh. On Windows it first tries to
-// find a POSIX sh in PATH (e.g., Git Bash); if none is available it falls
-// back to cmd.exe /c so common commands like "npx ..." still work.
-func shellCommand(ctx context.Context, script string) (*exec.Cmd, error) {
-	if runtime.GOOS != "windows" {
-		return exec.CommandContext(ctx, "/bin/sh", "-c", script), nil
+// shellCommand builds an *exec.Cmd from the exact shell recorded by the host
+// environment snapshot. Known shells receive their no-rc/no-profile flags so
+// transport never executes arbitrary user startup files merely to run a tool.
+func shellCommand(ctx context.Context, script string, shell string, environment []string) (*exec.Cmd, error) {
+	shell = resolveShellCandidate(shell, environment)
+	if shell == "" {
+		return nil, fmt.Errorf("no executable shell found in pinned environment")
 	}
-	if shPath, err := exec.LookPath("sh"); err == nil {
-		return exec.CommandContext(ctx, shPath, "-c", script), nil
+	base := strings.ToLower(filepath.Base(shell))
+	switch base {
+	case "bash", "bash.exe":
+		return exec.CommandContext(ctx, shell, "--noprofile", "--norc", "-c", script), nil
+	case "zsh", "zsh.exe":
+		return exec.CommandContext(ctx, shell, "-f", "-c", script), nil
+	case "fish", "fish.exe":
+		return exec.CommandContext(ctx, shell, "--no-config", "-c", script), nil
+	case "nu", "nu.exe":
+		return exec.CommandContext(ctx, shell, "--no-config-file", "-c", script), nil
+	case "xonsh", "xonsh.exe":
+		return exec.CommandContext(ctx, shell, "--no-rc", "-c", script), nil
+	case "csh", "csh.exe", "tcsh", "tcsh.exe":
+		return exec.CommandContext(ctx, shell, "-f", "-c", script), nil
+	case "pwsh", "pwsh.exe", "powershell", "powershell.exe":
+		return exec.CommandContext(ctx, shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script), nil
+	case "cmd", "cmd.exe":
+		return exec.CommandContext(ctx, shell, "/d", "/s", "/c", script), nil
+	case "sh", "sh.exe", "dash", "dash.exe", "ksh", "ksh.exe", "mksh", "mksh.exe":
+		return exec.CommandContext(ctx, shell, "-c", script), nil
+	default:
+		return nil, fmt.Errorf("shell %q has no supported no-rc transport mode", shell)
 	}
-	cmdPath, err := exec.LookPath("cmd.exe")
-	if err != nil {
-		return nil, fmt.Errorf("no shell found in PATH")
-	}
-	return exec.CommandContext(ctx, cmdPath, "/c", script), nil
 }

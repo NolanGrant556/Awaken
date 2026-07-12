@@ -11,6 +11,7 @@ import (
 
 var (
 	toolRegistry     = make(map[string]RegisteredTool)
+	registryVersion  uint64
 	mu               sync.RWMutex
 	ErrToolNotFound  = errors.New("tool not found")
 	ErrDuplicateTool = errors.New("tool already registered")
@@ -21,8 +22,8 @@ var safeNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // mcpSafeNamePattern extends the builtin safe-name pattern to allow the
 // double-underscore separator used by MCP-sourced tools
-// (mcp__{server}__{tool}) and the skill__ prefix used by skill tools.
-// Hyphens are allowed because many public MCP server names use them.
+// (mcp__{server}__{tool}). Hyphens are allowed because many public MCP server
+// names use them.
 var mcpSafeNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+(?:__[a-zA-Z0-9_-]+)*$`)
 
 // RegisteredTool binds the executable runtime to the resolved definition
@@ -35,6 +36,10 @@ type RegisteredTool struct {
 	Quality             DefinitionQuality
 	Warnings            []string
 	PreserveInputObject bool
+	// RegistrationID changes whenever the executable/definition bound to a
+	// canonical name is replaced. Run snapshots pin this identity and Runtime.
+	RegistrationID string
+	Provider       ProviderManifest
 }
 
 func RegisterTool(runtime Tool) error {
@@ -56,7 +61,8 @@ func RegisterToolWithMode(runtime Tool, mode DefinitionValidationMode) error {
 	if _, exists := toolRegistry[runtime.Name()]; exists {
 		return fmt.Errorf("%w: %s", ErrDuplicateTool, runtime.Name())
 	}
-	toolRegistry[runtime.Name()] = registeredToolFromResolution(runtime, report)
+	version := nextRegistryVersionLocked()
+	toolRegistry[runtime.Name()] = registeredToolFromResolution(runtime, report, version)
 	return nil
 }
 
@@ -76,7 +82,8 @@ func RegisterToolForceWithMode(t Tool, mode DefinitionValidationMode) error {
 	report := ResolveDefinitionReport(t)
 	mu.Lock()
 	defer mu.Unlock()
-	toolRegistry[t.Name()] = registeredToolFromResolution(t, report)
+	version := nextRegistryVersionLocked()
+	toolRegistry[t.Name()] = registeredToolFromResolution(t, report, version)
 	return nil
 }
 
@@ -100,7 +107,11 @@ func MustRegisterToolWithMode(runtime Tool, mode DefinitionValidationMode) {
 func UnregisterTool(name string) {
 	mu.Lock()
 	defer mu.Unlock()
+	if _, exists := toolRegistry[name]; !exists {
+		return
+	}
 	delete(toolRegistry, name)
+	nextRegistryVersionLocked()
 }
 
 // UnregisterToolsByPrefix removes every tool whose name starts with the
@@ -115,6 +126,9 @@ func UnregisterToolsByPrefix(prefix string) int {
 			delete(toolRegistry, name)
 			removed++
 		}
+	}
+	if removed > 0 {
+		nextRegistryVersionLocked()
 	}
 	return removed
 }
@@ -143,8 +157,8 @@ func ValidateTool(tool Tool) error {
 	return ValidateToolWithMode(tool, DefinitionValidationCompat)
 }
 
-// isValidToolName accepts both builtin-style names and the namespaced
-// mcp__{server}__{tool} / skill__{id} forms.
+// isValidToolName accepts builtin-style names and namespaced
+// mcp__{server}__{tool} forms.
 func isValidToolName(name string) bool {
 	if name == "" {
 		return false
@@ -234,12 +248,13 @@ func GetToolsDescription() string {
 	return desc
 }
 
-func registeredToolFromResolution(runtime Tool, report DefinitionResolution) RegisteredTool {
+func registeredToolFromResolution(runtime Tool, report DefinitionResolution, version uint64) RegisteredTool {
 	_, hasRecursiveSchema := runtime.(InputSchemaProvider)
 	preserveInputObject := runtime.Definition().SchemaVersion == ToolDefinitionSchemaVersion || hasRecursiveSchema
 	if legacy, ok := runtime.(LegacySingleValueInput); ok && legacy.UnwrapSingleParameterInput() {
 		preserveInputObject = false
 	}
+	provider := resolveProviderManifest(runtime, report.Definition, report.Quality, report.Warnings)
 	return RegisteredTool{
 		Runtime:             runtime,
 		Definition:          cloneToolDefinition(report.Definition),
@@ -247,13 +262,28 @@ func registeredToolFromResolution(runtime Tool, report DefinitionResolution) Reg
 		Quality:             report.Quality,
 		Warnings:            append([]string(nil), report.Warnings...),
 		PreserveInputObject: preserveInputObject,
+		RegistrationID:      fmt.Sprintf("toolreg_%016x", version),
+		Provider:            provider,
 	}
 }
 
 func cloneRegisteredTool(registered RegisteredTool) RegisteredTool {
 	registered.Definition = cloneToolDefinition(registered.Definition)
 	registered.Warnings = append([]string(nil), registered.Warnings...)
+	registered.Provider = cloneProviderManifest(registered.Provider)
 	return registered
+}
+
+func nextRegistryVersionLocked() uint64 {
+	registryVersion++
+	return registryVersion
+}
+
+// RegistryVersion reports the current monotonic catalog generation.
+func RegistryVersion() uint64 {
+	mu.RLock()
+	defer mu.RUnlock()
+	return registryVersion
 }
 
 func ExecuteTool(ctx context.Context, toolName string, input string) (string, error) {

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // sandboxExecPath is the canonical location of the sandbox-exec utility
@@ -45,11 +46,24 @@ func newSandboxAdapterMac() SandboxAdapterMac {
 	if err != nil || path == "" {
 		return SandboxAdapterMac{execPath: "", available: false}
 	}
+	// Presence alone is insufficient in hardened/containerized macOS
+	// environments where Seatbelt invocation is blocked. Probe a no-op profile
+	// once so SupportLevel never claims a boundary that cannot start.
+	probe := exec.Command(path, "-p", "(version 1) (allow default)", "/usr/bin/true")
+	if err := probe.Run(); err != nil {
+		return SandboxAdapterMac{execPath: "", available: false}
+	}
 	return SandboxAdapterMac{execPath: path, available: true}
 }
 
+var (
+	defaultMacAdapterOnce sync.Once
+	defaultMacAdapter     SandboxAdapterMac
+)
+
 func defaultPlatformAdapter() SandboxAdapter {
-	return newSandboxAdapterMac()
+	defaultMacAdapterOnce.Do(func() { defaultMacAdapter = newSandboxAdapterMac() })
+	return defaultMacAdapter
 }
 
 // SupportLevel returns SandboxFull when sandbox-exec is available on
@@ -72,20 +86,6 @@ func (a SandboxAdapterMac) SupportLevel() SandboxSupport {
 // When sandbox-exec is unavailable, ApplySandbox is a no-op and
 // returns a SandboxResult with Applied=false and Support=SandboxDegraded.
 func (a SandboxAdapterMac) ApplySandbox(cmd *exec.Cmd, tier string, workspaceRoot string) (SandboxResult, error) {
-	if tier == TierLocalCLI {
-		// User-installed CLIs (dws, gh, feishu, obsidian, etc.) often need
-		// macOS Keychain, trustd/Security.framework, user preference services,
-		// and their own ~/.tool cache/token directories. A narrow seatbelt
-		// profile breaks those normal CLI contracts even when network access is
-		// allowed. Shell policy still guards deletion, shell wrappers,
-		// sensitive paths, and mass-message review before execution.
-		return SandboxResult{
-			Support: SandboxDegraded,
-			Method:  "local-cli",
-			Applied: false,
-		}, nil
-	}
-
 	if !a.available || a.execPath == "" {
 		return SandboxResult{
 			Support: SandboxDegraded,
@@ -150,10 +150,8 @@ func (a SandboxAdapterMac) ApplySandbox(cmd *exec.Cmd, tier string, workspaceRoo
 // Profile strategy per tier:
 //   - inspect_read_only: allow process execution and file reads; deny
 //     all writes and network.
-//   - local_cli: does not use sandbox-exec on macOS. Arbitrary
-//     user-installed CLIs need normal access to macOS credential, trust, and
-//     user-state services; local file deletion remains blocked earlier by
-//     shell policy.
+//   - local_cli: preserve normal macOS services and network while confining
+//     file writes to the supplied root.
 //   - workspace_mutation: allow process execution, file reads, and file
 //     writes within the workspace; deny writes outside the workspace
 //     and deny network.
@@ -161,25 +159,23 @@ func (a SandboxAdapterMac) ApplySandbox(cmd *exec.Cmd, tier string, workspaceRoo
 //     writes within the workspace, and network; deny writes outside
 //     the workspace.
 //
-// All tiers allow reads from the entire filesystem because commands
-// need to read system binaries (/bin, /usr/lib) and shared libraries
-// to execute at all. The security boundary is on writes and network:
-// those are scoped to the workspace or denied entirely based on tier.
+// `allow default` preserves Keychain/trustd/runtime services needed by local
+// CLIs. The scoped deny uses `require-not (subpath ...)`: Seatbelt deny rules
+// override broad allow rules, so an unconditional deny after an allow would
+// incorrectly reject writes inside the root. Reads remain available; writes
+// are confined to the root; network is denied for read-only/workspace tiers.
 //
 // For an unknown tier the profile is the most restrictive
 // (inspect_read_only-style) as a safe default.
 //
-// workspaceRoot should be an absolute path. If it is empty or relative,
-// the profile still compiles but scopes writes to "/" as a fallback.
+// workspaceRoot should be an absolute, real path. The supervising caller must
+// reject a missing root before authorizing a write-capable command.
 func GenerateSandboxProfile(tier string, workspaceRoot string) string {
 	root := filepath.Clean(workspaceRoot)
 	if root == "" || root == "." {
-		// No usable root — fall back to "/" so the profile is still
-		// valid. For inspect_read_only this changes nothing (writes are
-		// denied entirely). For local_cli/workspace_mutation/open_world_system it
-		// means writes are allowed anywhere, which is the safest
-		// fallback when the workspace boundary is unknown (the command
-		// would otherwise fail to write even legitimate workspace files).
+		// Callers requiring a write boundary reject an absent workspace before
+		// applying this profile. Slash keeps the read-only fallback syntactically
+		// valid without interpolating an empty Seatbelt literal.
 		root = "/"
 	}
 
@@ -190,61 +186,74 @@ func GenerateSandboxProfile(tier string, workspaceRoot string) string {
 	switch tier {
 	case TierInspectReadOnly:
 		return fmt.Sprintf(`(version 1)
-(deny default)
+(allow default)
 (allow process-exec*)
+(allow process-fork)
 (allow sysctl-read)
 (allow file-read* (subpath %s))
 (allow file-read* (subpath "/"))
-(deny file-write*)
+(deny file-write* (require-not (literal "/dev/null")))
 (deny network*)
+(deny appleevent-send)
 `, quoted)
 
 	case TierWorkspaceMutation:
 		return fmt.Sprintf(`(version 1)
-(deny default)
+(allow default)
 (allow process-exec*)
+(allow process-fork)
 (allow sysctl-read)
 (allow file-read* (subpath %s))
 (allow file-read* (subpath "/"))
 (allow file-write* (subpath %s))
-(deny file-write*)
+(allow file-write* (literal "/dev/null"))
+(deny file-write* (require-all (require-not (subpath %s)) (require-not (literal "/dev/null"))))
 (deny network*)
-`, quoted, quoted)
+(deny appleevent-send)
+`, quoted, quoted, quoted)
 
 	case TierLocalCLI:
 		return fmt.Sprintf(`(version 1)
-(deny default)
+(allow default)
 (allow process-exec*)
+(allow process-fork)
 (allow sysctl-read)
 (allow file-read* (subpath %s))
 (allow file-read* (subpath "/"))
 (allow file-write* (subpath %s))
-(deny file-write*)
+(allow file-write* (literal "/dev/null"))
+(deny file-write* (require-all (require-not (subpath %s)) (require-not (literal "/dev/null"))))
 (allow network*)
-`, quoted, quoted)
+(deny appleevent-send)
+`, quoted, quoted, quoted)
 
 	case TierOpenWorldSystem:
 		return fmt.Sprintf(`(version 1)
-(deny default)
+(allow default)
 (allow process-exec*)
+(allow process-fork)
 (allow sysctl-read)
 (allow file-read* (subpath %s))
 (allow file-read* (subpath "/"))
 (allow file-write* (subpath %s))
-(deny file-write*)
+(allow file-write* (literal "/dev/null"))
+(deny file-write* (require-all (require-not (subpath %s)) (require-not (literal "/dev/null"))))
 (allow network*)
-`, quoted, quoted)
+(deny appleevent-send)
+`, quoted, quoted, quoted)
 
 	default:
 		// Conservative default: treat unknown tiers as read-only.
 		return fmt.Sprintf(`(version 1)
-(deny default)
+(allow default)
 (allow process-exec*)
+(allow process-fork)
 (allow sysctl-read)
 (allow file-read* (subpath %s))
 (allow file-read* (subpath "/"))
-(deny file-write*)
+(deny file-write* (require-not (literal "/dev/null")))
 (deny network*)
+(deny appleevent-send)
 `, quoted)
 	}
 }

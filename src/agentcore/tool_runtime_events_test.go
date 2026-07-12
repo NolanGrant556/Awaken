@@ -525,11 +525,14 @@ func TestToolRuntimeMassMessageReviewBlocksExecution(t *testing.T) {
 		name: toolName,
 		permission: tool.NeedsMassMessageReviewPermission("mass message requires review", tool.DecisionMetadata{
 			MassMessage: &tool.MassMessageMetadata{
-				Channel:        "outlook",
-				RecipientScope: "team",
-				RecipientCount: 3,
-				BodyPreview:    "hello",
-				SendingAccount: "me@example.com",
+				Channel:                 "outlook",
+				RecipientScope:          "team",
+				RecipientCount:          3,
+				BodyPreview:             "hello",
+				SendingAccount:          "me@example.com",
+				EnvelopeDigest:          "message:event-test",
+				BodyDigest:              "sha256:event-test",
+				RecipientIdentityDigest: "recipients_sha256:event-test",
 			},
 		}),
 		executeCount: &executeCount,
@@ -564,7 +567,8 @@ func TestToolRuntimeMassMessageReviewBlocksExecution(t *testing.T) {
 		got[1].Type != ToolProgressEventType ||
 		got[1].ToolProgressStage != "needs_mass_message_review" ||
 		got[2].Type != MassMessageReviewRequestedType ||
-		got[2].MassMessageRecipientCount != 3 {
+		got[2].MassMessageRecipientCount != 3 ||
+		got[2].ReviewEnvelopeDigest == "" || got[2].ReviewBodyDigest == "" || got[2].ReviewRecipientIdentityDigest == "" {
 		t.Fatalf("unexpected mass message review events: %+v", got)
 	}
 }

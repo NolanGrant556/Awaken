@@ -3,7 +3,10 @@
 package sandbox
 
 import (
+	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -18,8 +21,8 @@ func TestGenerateSandboxProfileInspectReadOnly(t *testing.T) {
 	if !strings.Contains(profile, "(version 1)") {
 		t.Error("profile missing (version 1)")
 	}
-	if !strings.Contains(profile, "(deny default)") {
-		t.Error("profile missing (deny default)")
+	if !strings.Contains(profile, "(allow default)") {
+		t.Error("profile must preserve normal macOS runtime services")
 	}
 	if !strings.Contains(profile, "(allow process-exec*)") {
 		t.Error("profile missing (allow process-exec*)")
@@ -30,7 +33,7 @@ func TestGenerateSandboxProfileInspectReadOnly(t *testing.T) {
 	if !strings.Contains(profile, "(allow file-read*") {
 		t.Error("profile should allow file reads within workspace")
 	}
-	if !strings.Contains(profile, "(deny file-write*)") {
+	if !strings.Contains(profile, `(deny file-write* (require-not (literal "/dev/null")))`) {
 		t.Error("profile must deny file writes for inspect_read_only tier")
 	}
 	if !strings.Contains(profile, "(deny network*)") {
@@ -54,8 +57,8 @@ func TestGenerateSandboxProfileWorkspaceMutation(t *testing.T) {
 	if !strings.Contains(profile, `(allow file-write* (subpath "/Users/test/ws"))`) {
 		t.Error("profile should allow file writes within workspace")
 	}
-	if !strings.Contains(profile, "(deny file-write*)") {
-		t.Error("profile must deny file writes outside workspace (deny after allow)")
+	if !strings.Contains(profile, `(deny file-write* (require-all (require-not (subpath "/Users/test/ws")) (require-not (literal "/dev/null"))))`) {
+		t.Error("profile must scope its file-write deny to paths outside workspace")
 	}
 	if !strings.Contains(profile, "(deny network*)") {
 		t.Error("profile must deny network for workspace_mutation tier")
@@ -77,8 +80,17 @@ func TestGenerateSandboxProfileAllowsSysctlRead(t *testing.T) {
 	}
 }
 
-// TestGenerateSandboxProfileLocalCLI documents the fallback profile shape even
-// though ApplySandbox intentionally skips sandbox-exec for local_cli on macOS.
+func TestGenerateSandboxProfileBlocksAppleEventEgress(t *testing.T) {
+	for _, tier := range []string{TierInspectReadOnly, TierLocalCLI, TierWorkspaceMutation, TierOpenWorldSystem, "unknown"} {
+		profile := GenerateSandboxProfile(tier, "/Users/test/ws")
+		if !strings.Contains(profile, "(deny appleevent-send)") {
+			t.Errorf("%s profile must not delegate egress to another app", tier)
+		}
+	}
+}
+
+// TestGenerateSandboxProfileLocalCLI verifies that local CLIs keep network and
+// normal macOS services while their writes remain inside the broker root.
 func TestGenerateSandboxProfileLocalCLI(t *testing.T) {
 	root := "/Users/test/cli"
 	profile := GenerateSandboxProfile(TierLocalCLI, root)
@@ -89,7 +101,7 @@ func TestGenerateSandboxProfileLocalCLI(t *testing.T) {
 	if !strings.Contains(profile, `(allow file-write* (subpath "/Users/test/cli"))`) {
 		t.Error("profile should allow file writes within workspace")
 	}
-	if !strings.Contains(profile, "(deny file-write*)") {
+	if !strings.Contains(profile, `(deny file-write* (require-all (require-not (subpath "/Users/test/cli")) (require-not (literal "/dev/null"))))`) {
 		t.Error("profile must deny file writes outside workspace")
 	}
 	if strings.Contains(profile, "(deny network") {
@@ -97,31 +109,61 @@ func TestGenerateSandboxProfileLocalCLI(t *testing.T) {
 	}
 }
 
-func TestSandboxAdapterMacApplySandboxLocalCLISkipsSeatbelt(t *testing.T) {
+func TestSandboxAdapterMacApplySandboxLocalCLIUsesSeatbelt(t *testing.T) {
 	adapter := SandboxAdapterMac{execPath: "/usr/bin/sandbox-exec", available: true}
 	cmd := exec.Command("/bin/sh", "-c", "dws auth login")
-	originalPath := cmd.Path
-	originalArgs := append([]string(nil), cmd.Args...)
 
 	result, err := adapter.ApplySandbox(cmd, TierLocalCLI, "/workspace")
 	if err != nil {
 		t.Fatalf("ApplySandbox returned error: %v", err)
 	}
-	if result.Applied {
-		t.Fatal("expected local_cli to skip sandbox-exec on macOS")
+	if !result.Applied {
+		t.Fatal("expected local_cli to use sandbox-exec on macOS")
 	}
-	if result.Support != SandboxDegraded {
-		t.Fatalf("expected local_cli support to be degraded, got %q", result.Support)
+	if result.Support != SandboxFull {
+		t.Fatalf("expected local_cli support to be full, got %q", result.Support)
 	}
-	if result.Method != "local-cli" {
-		t.Fatalf("expected local-cli method, got %q", result.Method)
+	if result.Method != "sandbox-exec" {
+		t.Fatalf("expected sandbox-exec method, got %q", result.Method)
 	}
-	if cmd.Path != originalPath {
-		t.Fatalf("expected command path to stay %q, got %q", originalPath, cmd.Path)
+	if cmd.Path != "/usr/bin/sandbox-exec" {
+		t.Fatalf("expected sandbox-exec wrapper, got %q", cmd.Path)
 	}
-	if strings.Join(cmd.Args, "\x00") != strings.Join(originalArgs, "\x00") {
-		t.Fatalf("expected command args to stay unchanged, got %#v", cmd.Args)
+	if len(cmd.Args) < 6 || cmd.Args[3] != "/bin/sh" || !strings.Contains(cmd.Args[2], `(require-not (subpath "/workspace"))`) {
+		t.Fatalf("local CLI wrapper lost command or scoped profile: %#v", cmd.Args)
 	}
+}
+
+func TestSandboxAdapterMacReallyAllowsStagingWritesAndDeniesOutside(t *testing.T) {
+	adapter := newSandboxAdapterMac()
+	if adapter.SupportLevel() != SandboxFull {
+		t.Skip("sandbox-exec cannot establish a Seatbelt boundary in this environment")
+	}
+	stage := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	inside := filepath.Join(stage, "inside.txt")
+	command := "printf inside > " + quoteShellTestPath(inside) + "; printf outside > " + quoteShellTestPath(outside)
+	cmd := exec.Command("/bin/sh", "-c", command)
+	cmd.Dir = stage
+	result, err := adapter.ApplySandbox(cmd, TierWorkspaceMutation, stage)
+	if err != nil || !result.Applied {
+		t.Fatalf("ApplySandbox: result=%+v err=%v", result, err)
+	}
+	runErr := cmd.Run()
+	var exitErr *exec.ExitError
+	if !errors.As(runErr, &exitErr) {
+		t.Fatalf("outside write should make the shell fail, got %v", runErr)
+	}
+	if content, err := os.ReadFile(inside); err != nil || string(content) != "inside" {
+		t.Fatalf("staging write was not allowed: content=%q err=%v", content, err)
+	}
+	if _, err := os.Lstat(outside); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("outside write escaped Seatbelt: %v", err)
+	}
+}
+
+func quoteShellTestPath(path string) string {
+	return "'" + strings.ReplaceAll(path, "'", "'\\''") + "'"
 }
 
 // TestGenerateSandboxProfileOpenWorldSystem verifies that the
@@ -137,8 +179,11 @@ func TestGenerateSandboxProfileOpenWorldSystem(t *testing.T) {
 	if !strings.Contains(profile, `(allow file-write* (subpath "/Users/test/open"))`) {
 		t.Error("profile should allow file writes within workspace")
 	}
-	if !strings.Contains(profile, "(deny file-write*)") {
+	if !strings.Contains(profile, `(deny file-write* (require-all (require-not (subpath "/Users/test/open")) (require-not (literal "/dev/null"))))`) {
 		t.Error("profile must deny file writes outside workspace")
+	}
+	if !strings.Contains(profile, `(allow file-write* (literal "/dev/null"))`) {
+		t.Error("profile should allow the null device without widening regular filesystem writes")
 	}
 	if strings.Contains(profile, "(deny network") {
 		t.Error("profile must NOT deny network for open_world_system tier")
@@ -153,7 +198,7 @@ func TestGenerateSandboxProfileOpenWorldSystem(t *testing.T) {
 func TestGenerateSandboxProfileUnknownTierDefaultsToReadOnly(t *testing.T) {
 	profile := GenerateSandboxProfile("bogus_tier", "/Users/test/ws")
 
-	if !strings.Contains(profile, "(deny file-write*)") {
+	if !strings.Contains(profile, `(deny file-write* (require-not (literal "/dev/null")))`) {
 		t.Error("unknown tier should deny writes (conservative default)")
 	}
 	if !strings.Contains(profile, "(deny network*)") {
@@ -175,7 +220,7 @@ func TestGenerateSandboxProfileEmptyRootUsesSlash(t *testing.T) {
 	if !strings.Contains(profile, `(subpath "/")`) {
 		t.Errorf("empty root should fall back to / ; profile=%q", profile)
 	}
-	if !strings.Contains(profile, "(deny file-write*)") {
+	if !strings.Contains(profile, `(deny file-write* (require-not (literal "/dev/null")))`) {
 		t.Error("empty root profile must still deny writes")
 	}
 }
@@ -203,7 +248,9 @@ func TestSandboxAdapterMacSupportLevelWhenAvailable(t *testing.T) {
 	}
 
 	adapter := newSandboxAdapterMac()
-	if got := adapter.SupportLevel(); got != SandboxFull {
+	if got := adapter.SupportLevel(); got == SandboxDegraded {
+		t.Skip("sandbox-exec exists but cannot establish a Seatbelt boundary in this environment")
+	} else if got != SandboxFull {
 		t.Fatalf("expected SandboxFull when sandbox-exec is available, got %q", got)
 	}
 }

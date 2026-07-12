@@ -25,6 +25,18 @@ export function isPackagedAwakenCommand(command, platform = process.platform) {
   return normalized.endsWith("/Awaken");
 }
 
+export function isUsableDevDesktopWindow(window) {
+  if (!window || (window.name && window.name !== "Awaken Desktop")) {
+    return false;
+  }
+  return (
+    window.width >= 1000 &&
+    window.height >= 700 &&
+    window.x + window.width > 200 &&
+    window.y + window.height > 200
+  );
+}
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     encoding: "utf8",

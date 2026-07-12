@@ -1,9 +1,18 @@
 package agentcore
 
 import (
-	"awaken/src/context"
 	stdcontext "context"
+	"fmt"
+	"path/filepath"
+	"sort"
 	"strings"
+	"time"
+
+	"awaken/src/context"
+	"awaken/src/skillruntime"
+	"awaken/src/skills"
+	"awaken/src/tool"
+	shelltool "awaken/src/tools/shell"
 )
 
 type Agent struct {
@@ -16,6 +25,13 @@ type Agent struct {
 	recorder               SemanticRecorder
 	pendingUserAttachments []context.MessageAttachment
 	pendingComposerTokens  []SemanticComposerToken
+	preparedUserTurn       *preparedUserTurn
+}
+
+type preparedUserTurn struct {
+	content        string
+	attachments    []context.MessageAttachment
+	composerTokens []SemanticComposerToken
 }
 
 func NewAgent(config AgentConfig) *Agent {
@@ -79,34 +95,76 @@ func (a *Agent) Reconfigure(config AgentConfig) {
 	a.reqBuilder = NewRequestBuilder(config)
 }
 
-// ApplySkillActivationPlan narrows the dual-gate tool pool and appends the
-// skill's typed context block. Used after explicit or implicit activation.
+// RefreshRunAvailability captures the user-machine environment and the exact
+// tool catalog once for the next run. The two snapshots remain fixed until the
+// next explicit refresh, even if MCP/Connector registrations change mid-run.
+func (a *Agent) RefreshRunAvailability(ctx stdcontext.Context) {
+	a.RefreshRunAvailabilityWithReason(ctx, "explicit_refresh")
+}
+
+// RefreshRunAvailabilityWithReason replaces the Agent configuration only at
+// an explicit run/refresh boundary. Existing ToolRuntime instances retain deep
+// clones of their old snapshots and cannot observe this replacement in place.
+func (a *Agent) RefreshRunAvailabilityWithReason(ctx stdcontext.Context, reason string) {
+	if a == nil {
+		return
+	}
+	cfg := a.config
+	permissionContext := permissionContextFromTaskScope(cfg.Workspace)
+	hostEnvironment := shelltool.ResolveHostShellEnvironment(ctx, tool.ExecutionEnvironmentProbeOptions{
+		WorkspaceRoot:     permissionContext.WorkspaceRoot,
+		WorkingDirectory:  permissionContext.WorkspaceRootOrCWD(),
+		SkillRoots:        localSkillRootObservations(permissionContext.WorkspaceRoot),
+		TemporaryWorkRoot: permissionContext.TemporaryWorkRoot,
+		RefreshReason:     reason,
+		ProbeVersions:     true,
+	})
+	environment := hostEnvironment.Snapshot
+	snapshot := tool.NewRunToolAvailabilitySnapshot(environment)
+	cfg.ExecutionEnvironmentSnapshot = &environment
+	cfg.ToolAvailabilitySnapshot = &snapshot
+	a.Reconfigure(cfg)
+}
+
+func localSkillRootObservations(workspaceRoot string) []tool.SkillRootObservation {
+	sourceDirs := skills.LocalSourceDirs(workspaceRoot)
+	result := make([]tool.SkillRootObservation, 0, len(sourceDirs)+2)
+	for source, pathList := range sourceDirs {
+		for _, path := range filepath.SplitList(pathList) {
+			if strings.TrimSpace(path) == "" {
+				continue
+			}
+			if !filepath.IsAbs(path) {
+				if absolute, err := filepath.Abs(path); err == nil {
+					path = absolute
+				}
+			}
+			result = append(result, tool.SkillRootObservation{Source: string(source), Path: filepath.Clean(path)})
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Source != result[j].Source {
+			return result[i].Source < result[j].Source
+		}
+		return result[i].Path < result[j].Path
+	})
+	return result
+}
+
+// ApplySkillActivationPlan appends the skill's typed context block. Skill
+// guidance never changes the run tool catalog.
 func (a *Agent) ApplySkillActivationPlan(skillID string, effectiveTools []string, mainBody string) {
 	if a == nil {
 		return
 	}
 	cfg := a.config
-	if effectiveTools != nil {
-		if cfg.ResolvedToolPool == nil {
-			cfg.ResolvedToolPool = append([]string(nil), effectiveTools...)
-		} else {
-			set := make(map[string]bool, len(effectiveTools))
-			for _, name := range effectiveTools {
-				set[name] = true
-			}
-			next := make([]string, 0, len(cfg.ResolvedToolPool))
-			for _, name := range cfg.ResolvedToolPool {
-				if set[name] {
-					next = append(next, name)
-				}
-			}
-			cfg.ResolvedToolPool = next
-		}
-	}
+	_ = effectiveTools
 	if strings.TrimSpace(mainBody) != "" {
 		cfg.SkillContextBlocks = append(cfg.SkillContextBlocks, ContextBlock{
-			ID:      "skill_activation_" + skillID,
-			Content: mainBody,
+			ID:        "skill_activation_" + skillID,
+			SkillID:   skillID,
+			InvokedAt: time.Now().UTC(),
+			Content:   mainBody,
 		})
 	}
 	a.Reconfigure(cfg)
@@ -137,36 +195,27 @@ func (a *Agent) SemanticRecorder() SemanticRecorder {
 	return a.recorder
 }
 
+// RunForkedSkill starts a true child Agent with a separate conversation while
+// inheriting the current run's workspace, execution profile, tool snapshot,
+// recorder, cancellation, and model credentials. Only the returned child
+// result is intended to enter the parent context.
+func (a *Agent) RunForkedSkill(ctx stdcontext.Context, request skillruntime.SkillForkRequest, sink EventSink) (skillruntime.SkillForkResult, error) {
+	if a == nil {
+		return skillruntime.SkillForkResult{}, fmt.Errorf("parent Agent unavailable")
+	}
+	parentRunner := NewRunner(a.config, context.NewConversation(nil), NewRequestBuilder(a.config))
+	parentRunner.threadID = a.threadID
+	parentRunner.runID = a.runID
+	parentRunner.sessionID = a.sessionID
+	parentRunner.recorder = a.recorder
+	return parentRunner.startSkillChild(ctx, request, sink)
+}
+
 func (a *Agent) RunStreamWithEvents(ctx stdcontext.Context, userInput string, sink EventSink) (string, error) {
-	attachments := a.consumePendingUserAttachments()
-	composerTokens := a.consumePendingComposerTokens()
-	if a.recorder != nil {
-		payload := map[string]any{
-			"content": userInput,
-			"role":    "user",
-		}
-		if len(attachments) > 0 {
-			payload["attachment_count"] = len(attachments)
-			payload["attachments"] = semanticUserMessageAttachments(attachments)
-		}
-		if len(composerTokens) > 0 {
-			payload["composer_tokens"] = composerTokens
-		}
-		record := NewSemanticRecord(
-			SemanticKindUserMessage,
-			a.threadID,
-			a.runID,
-			"",
-			"",
-			a.sessionID,
-			payload,
-		)
-		if err := a.recorder.Append(ctx, record); err != nil {
-			events := newRunEventEmitter(a.threadID, sink)
-			events.runID = a.runID
-			events.sessionID = a.sessionID
-			events.recorder = a.recorder
-			return "", events.notePersistenceFailure("user_message", err)
+	attachments, composerTokens, alreadyPersisted := a.consumeUserTurn(userInput)
+	if !alreadyPersisted {
+		if err := a.persistUserMessage(ctx, userInput, attachments, composerTokens, sink); err != nil {
+			return "", err
 		}
 	}
 
@@ -181,7 +230,74 @@ func (a *Agent) RunStreamWithEvents(ctx stdcontext.Context, userInput string, si
 	runner.sessionID = a.sessionID
 	runner.recorder = a.recorder
 
-	return runner.RunStreamWithEvents(ctx, sink)
+	result, err := runner.RunStreamWithEvents(ctx, sink)
+	// Skill invocation and compact restoration update per-agent context. Keep
+	// the runner's immutable-by-call snapshot as the next run's starting point.
+	a.config = runner.config
+	a.reqBuilder = NewRequestBuilder(a.config)
+	return result, err
+}
+
+// PrepareUserMessage persists a composer-selected Skill turn before Skill
+// pre-activation. This guarantees that an activation failure never erases the
+// user-authored input from durable history. RunStreamWithEvents consumes the
+// prepared turn exactly once and will not append a duplicate user_message.
+func (a *Agent) PrepareUserMessage(ctx stdcontext.Context, userInput string, sink EventSink) error {
+	if a == nil {
+		return fmt.Errorf("agent unavailable")
+	}
+	attachments := a.consumePendingUserAttachments()
+	composerTokens := a.consumePendingComposerTokens()
+	if err := a.persistUserMessage(ctx, userInput, attachments, composerTokens, sink); err != nil {
+		a.preparedUserTurn = nil
+		return err
+	}
+	a.preparedUserTurn = &preparedUserTurn{
+		content: userInput, attachments: append([]context.MessageAttachment(nil), attachments...),
+		composerTokens: cloneSemanticComposerTokens(composerTokens),
+	}
+	return nil
+}
+
+func (a *Agent) ClearPreparedUserMessage() {
+	if a != nil {
+		a.preparedUserTurn = nil
+	}
+}
+
+func (a *Agent) consumeUserTurn(userInput string) ([]context.MessageAttachment, []SemanticComposerToken, bool) {
+	if a != nil && a.preparedUserTurn != nil && a.preparedUserTurn.content == userInput {
+		prepared := a.preparedUserTurn
+		a.preparedUserTurn = nil
+		return append([]context.MessageAttachment(nil), prepared.attachments...), cloneSemanticComposerTokens(prepared.composerTokens), true
+	}
+	if a != nil {
+		a.preparedUserTurn = nil
+	}
+	return a.consumePendingUserAttachments(), a.consumePendingComposerTokens(), false
+}
+
+func (a *Agent) persistUserMessage(ctx stdcontext.Context, userInput string, attachments []context.MessageAttachment, composerTokens []SemanticComposerToken, sink EventSink) error {
+	if a == nil || a.recorder == nil {
+		return nil
+	}
+	payload := map[string]any{"content": userInput, "role": "user"}
+	if len(attachments) > 0 {
+		payload["attachment_count"] = len(attachments)
+		payload["attachments"] = semanticUserMessageAttachments(attachments)
+	}
+	if len(composerTokens) > 0 {
+		payload["composer_tokens"] = composerTokens
+	}
+	record := NewSemanticRecord(SemanticKindUserMessage, a.threadID, a.runID, "", "", a.sessionID, payload)
+	if err := a.recorder.Append(ctx, record); err != nil {
+		events := newRunEventEmitter(a.threadID, sink)
+		events.runID = a.runID
+		events.sessionID = a.sessionID
+		events.recorder = a.recorder
+		return events.notePersistenceFailure("user_message", err)
+	}
+	return nil
 }
 
 func (a *Agent) SetPendingUserAttachments(attachments []context.MessageAttachment) {

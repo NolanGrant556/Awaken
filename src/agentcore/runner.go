@@ -14,6 +14,7 @@ import (
 	"awaken/src/internal/outputlimit"
 	"awaken/src/llm"
 	"awaken/src/skillruntime"
+	"awaken/src/skills"
 	"awaken/src/tool"
 )
 
@@ -26,17 +27,18 @@ const (
 var ErrPersistenceFailed = errors.New("persistence_error")
 
 type Runner struct {
-	config            AgentConfig
-	conversation      *context.Conversation
-	reqBuilder        *RequestBuilder
-	toolRuntime       *ToolRuntime
-	failureSupervisor *FailureSupervisor
-	threadID          string
-	runID             string
-	sessionID         string
-	recorder          SemanticRecorder
-	contextGovernor   *contextGovernor
-	streamLLMFunc     func(stdcontext.Context, *runEventEmitter) (*llm.Response, error)
+	config               AgentConfig
+	conversation         *context.Conversation
+	reqBuilder           *RequestBuilder
+	toolRuntime          *ToolRuntime
+	failureSupervisor    *FailureSupervisor
+	threadID             string
+	runID                string
+	sessionID            string
+	recorder             SemanticRecorder
+	contextGovernor      *contextGovernor
+	streamLLMFunc        func(stdcontext.Context, *runEventEmitter) (*llm.Response, error)
+	suppressRunLifecycle bool
 }
 
 func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *RequestBuilder) *Runner {
@@ -52,6 +54,7 @@ func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *Reque
 		runner.buildLLMRequest,
 		func(result CompactResult) {
 			runner.conversation.Context.SetMessages(result.Messages)
+			runner.compactInvokedSkillContext()
 		},
 	)
 	return runner
@@ -59,6 +62,10 @@ func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *Reque
 
 func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (answer string, runErr error) {
 	events := newRunEventEmitter(r.threadID, sink)
+	events.suppressRunLifecycle = r.suppressRunLifecycle
+	if r.config.SubagentOrigin != nil {
+		events.agentID = r.config.SubagentOrigin.AgentID
+	}
 	defer func() {
 		if err := events.persistenceFailure(); err != nil {
 			answer = ""
@@ -73,6 +80,11 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 	events.recorder = r.recorder
 	events.sessionID = r.sessionID
 	r.toolRuntime = NewToolRuntimeWithConfig(sink, toolRuntimeConfigFromAgentConfig(r.config))
+	// The run identity is host-owned and becomes final only after the emitter
+	// adopts a caller-supplied ID or generates one. Bind that exact identity to
+	// the already configured runtime before any model turn can issue a tool call.
+	// Child/fork runners enter through this same path with their inherited ID.
+	r.toolRuntime.runID = r.runID
 	if err := events.runStarted(ctx); err != nil {
 		return "", err
 	}
@@ -248,17 +260,14 @@ func (r *Runner) injectSyntheticToolResultsForCancel() {
 }
 
 func toolRuntimeConfigFromAgentConfig(config AgentConfig) ToolRuntimeConfig {
-	var pool []string
-	if config.ResolvedToolPool != nil {
-		pool = append([]string(nil), config.ResolvedToolPool...)
-	}
 	return ToolRuntimeConfig{
-		PermissionContext: permissionContextFromTaskScope(config.Workspace),
-		AutoToolPolicy:    config.AutoToolPolicy,
-		Profile:           config.ExecutionProfile,
-		SubagentBoundary:  config.SubagentBoundary,
-		SubagentOrigin:    config.SubagentOrigin,
-		ResolvedToolPool:  pool,
+		PermissionContext:            permissionContextFromTaskScope(config.Workspace),
+		AutoToolPolicy:               config.AutoToolPolicy,
+		Profile:                      config.ExecutionProfile,
+		SubagentBoundary:             config.SubagentBoundary,
+		SubagentOrigin:               config.SubagentOrigin,
+		ToolAvailabilitySnapshot:     config.ToolAvailabilitySnapshot,
+		ExecutionEnvironmentSnapshot: config.ExecutionEnvironmentSnapshot,
 	}
 }
 
@@ -433,7 +442,7 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 		}
 		executionCtx := runCtx
 		var activationPlan *skillruntime.SkillActivationPlan
-		if strings.HasPrefix(call.Function.Name, skillruntime.SkillToolPrefix) {
+		if isSkillInvocationToolName(call.Function.Name) {
 			executionCtx = skillruntime.WithActivationScope(
 				runCtx,
 				r.currentImplicitParentPool(),
@@ -442,6 +451,11 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 					return r.persistImplicitSkillActivation(observerCtx, events, call, activationPlan)
 				},
 			)
+			executionCtx = skillruntime.WithChildAgentStarter(executionCtx, skillruntime.ChildAgentStarterFunc(
+				func(childCtx stdcontext.Context, request skillruntime.SkillForkRequest) (skillruntime.SkillForkResult, error) {
+					return r.startSkillChild(childCtx, request, events.sink)
+				},
+			))
 		}
 		result := r.toolRuntime.Execute(executionCtx, call)
 		if events != nil {
@@ -513,9 +527,6 @@ func (r *Runner) currentImplicitParentPool() []string {
 	if r == nil {
 		return nil
 	}
-	if r.config.ResolvedToolPool != nil {
-		return append([]string(nil), r.config.ResolvedToolPool...)
-	}
 	if r.reqBuilder == nil {
 		return nil
 	}
@@ -547,6 +558,13 @@ func (r *Runner) persistImplicitSkillActivation(
 		threadID = events.threadID
 		runID = events.runID
 	}
+	payload := plan.DurablePayload()
+	payload["skill_path"] = skillActivationSourcePath(plan)
+	payload["content"] = plan.MainBody
+	payload["invoked_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+	if r.config.SubagentOrigin != nil {
+		payload["agent_id"] = r.config.SubagentOrigin.AgentID
+	}
 	records := []SemanticRecord{NewSemanticRecord(
 		SemanticKindSkillActivated,
 		threadID,
@@ -554,7 +572,7 @@ func (r *Runner) persistImplicitSkillActivation(
 		turnID,
 		call.ID,
 		r.sessionID,
-		plan.DurablePayload(),
+		payload,
 	)}
 	for _, receipt := range plan.ResourceReceipts {
 		records = append(records, NewSemanticRecord(
@@ -585,20 +603,100 @@ func (r *Runner) applyImplicitSkillActivation(
 	result ToolExecutionResult,
 	plan *skillruntime.SkillActivationPlan,
 ) {
-	if r == nil || result.IsError || !strings.HasPrefix(toolName, skillruntime.SkillToolPrefix) ||
+	if r == nil || result.IsError || !isSkillInvocationToolName(toolName) ||
 		plan == nil || plan.CompatibilityStatus != skillruntime.CompatibilityOK {
 		return
 	}
-	pool := skillruntime.IntersectToolPools(r.currentImplicitParentPool(), plan.EffectiveTools)
-	r.config.ResolvedToolPool = append([]string(nil), pool...)
+	if plan.Context == skills.ContextFork {
+		// A forked Skill body belongs exclusively to its child conversation. The
+		// parent receives only the child result through the Skill tool result.
+		return
+	}
 	if body := strings.TrimSpace(plan.MainBody); body != "" {
 		r.config.SkillContextBlocks = append(r.config.SkillContextBlocks, ContextBlock{
-			ID:      "skill_activation_" + plan.SkillID,
-			Content: body,
+			ID:         "skill_activation_" + plan.SkillID,
+			SkillID:    plan.SkillID,
+			SourcePath: skillActivationSourcePath(plan),
+			InvokedAt:  time.Now().UTC(),
+			Content:    body,
 		})
 	}
 	r.reqBuilder = NewRequestBuilder(r.config)
-	r.toolRuntime.SetResolvedToolPool(pool)
+}
+
+func (r *Runner) startSkillChild(
+	ctx stdcontext.Context,
+	request skillruntime.SkillForkRequest,
+	sink EventSink,
+) (skillruntime.SkillForkResult, error) {
+	if r == nil {
+		return skillruntime.SkillForkResult{}, fmt.Errorf("skill child runner unavailable")
+	}
+	parentID := "root"
+	depth := 0
+	if r.config.SubagentOrigin != nil {
+		if strings.TrimSpace(r.config.SubagentOrigin.AgentID) != "" {
+			parentID = r.config.SubagentOrigin.AgentID
+		}
+		depth = r.config.SubagentOrigin.Depth
+	}
+	if depth >= 8 {
+		return skillruntime.SkillForkResult{}, fmt.Errorf("skill child depth limit reached")
+	}
+	childID := newAwakenID("skill_agent")
+	childConfig, err := CreateSubagent(r.config, SpawnConfig{AgentID: childID, ParentAgentID: parentID})
+	if err != nil {
+		return skillruntime.SkillForkResult{}, err
+	}
+	if model := strings.TrimSpace(request.Model); model != "" {
+		childConfig.ModelConfig.Model = model
+	}
+	metadata := []string{"Forked Skill: " + request.SkillID}
+	if agentRole := strings.TrimSpace(request.Agent); agentRole != "" {
+		metadata = append(metadata, "Agent role: "+agentRole)
+	}
+	if effort := strings.TrimSpace(request.Effort); effort != "" {
+		metadata = append(metadata, "Effort hint: "+effort)
+	}
+	childConfig.SkillContextBlocks = append(childConfig.SkillContextBlocks, ContextBlock{
+		ID: "skill_fork_" + request.SkillID, SkillID: request.SkillID,
+		SourcePath: request.SkillPath, AgentID: childID, InvokedAt: timeNowUTC(),
+		Content: strings.Join(metadata, "\n") + "\n\n" + request.Body,
+	})
+
+	if r.recorder != nil {
+		record := NewSemanticRecord(
+			SemanticKindRuntimeNotice, r.threadID, r.runID, "", "", r.sessionID,
+			map[string]any{
+				"notice": "skill_child_started", "skill_id": request.SkillID,
+				"agent_id": childID, "parent_agent_id": parentID,
+				"skill_path": request.SkillPath,
+			},
+		)
+		if err := r.recorder.Append(ctx, record); err != nil {
+			return skillruntime.SkillForkResult{}, fmt.Errorf("persist skill child start: %w", err)
+		}
+	}
+
+	conversation := context.NewConversation(nil)
+	conversation.UserInput("Execute the loaded forked Skill instructions and return the completed result to the parent Agent.")
+	childRunner := NewRunner(childConfig, conversation, NewRequestBuilder(childConfig))
+	childRunner.threadID = r.threadID
+	childRunner.runID = r.runID
+	childRunner.sessionID = r.sessionID
+	childRunner.recorder = r.recorder
+	childRunner.suppressRunLifecycle = true
+	childRunner.streamLLMFunc = r.streamLLMFunc
+	content, err := childRunner.RunStreamWithEvents(ctx, sink)
+	if err != nil {
+		return skillruntime.SkillForkResult{ChildID: childID}, err
+	}
+	return skillruntime.SkillForkResult{ChildID: childID, Content: content}, nil
+}
+
+func isSkillInvocationToolName(name string) bool {
+	name = strings.TrimSpace(name)
+	return name == skillruntime.CatalogToolName
 }
 
 func (r *Runner) stopAfterToolExchangeIfNeeded(ctx stdcontext.Context, events *runEventEmitter, turnIndex int) (bool, error) {
@@ -817,6 +915,8 @@ type runEventEmitter struct {
 	assistantText         strings.Builder
 	pendingTerminalReason TerminalReason
 	persistenceErr        error
+	suppressRunLifecycle  bool
+	agentID               string
 }
 
 func newRunEventEmitter(threadID string, sink EventSink) *runEventEmitter {
@@ -908,6 +1008,7 @@ func (e *runEventEmitter) persistDurable(ctx stdcontext.Context, phase string, r
 	if err := e.persistenceFailure(); err != nil {
 		return err
 	}
+	record = e.withAgentIdentity(record)
 	persistCtx, cancel := durablePersistenceContext(ctx)
 	defer cancel()
 	if err := PersistDurable(persistCtx, e.recorder, e.sink, record, liveEvents...); err != nil {
@@ -920,12 +1021,28 @@ func (e *runEventEmitter) persistDurableBatch(ctx stdcontext.Context, phase stri
 	if err := e.persistenceFailure(); err != nil {
 		return err
 	}
+	for index := range records {
+		records[index] = e.withAgentIdentity(records[index])
+	}
 	persistCtx, cancel := durablePersistenceContext(ctx)
 	defer cancel()
 	if err := PersistDurableBatch(persistCtx, e.recorder, e.sink, records, liveEvents...); err != nil {
 		return e.notePersistenceFailure(phase, err)
 	}
 	return nil
+}
+
+func (e *runEventEmitter) withAgentIdentity(record SemanticRecord) SemanticRecord {
+	if e == nil || strings.TrimSpace(e.agentID) == "" {
+		return record
+	}
+	copyPayload := make(map[string]any, len(record.Payload)+1)
+	for key, value := range record.Payload {
+		copyPayload[key] = value
+	}
+	copyPayload["agent_id"] = e.agentID
+	record.Payload = copyPayload
+	return record
 }
 
 func (e *runEventEmitter) persistTerminal(ctx stdcontext.Context, phase string, record SemanticRecord, event AwakenEvent) error {
@@ -992,6 +1109,9 @@ func (e *runEventEmitter) emit(event AwakenEvent) {
 }
 
 func (e *runEventEmitter) runStarted(ctx stdcontext.Context) error {
+	if e.suppressRunLifecycle {
+		return nil
+	}
 	event := AwakenEvent{Type: RunStartedEventType}
 	e.fillIDs(&event)
 	if e.recorder != nil {
@@ -1046,6 +1166,9 @@ func (e *runEventEmitter) turnFinished(ctx stdcontext.Context, reason TerminalRe
 }
 
 func (e *runEventEmitter) runFinished(ctx stdcontext.Context, content string, state *ContextWindowState, reasons ...TerminalReason) {
+	if e.suppressRunLifecycle {
+		return
+	}
 	reason := firstTerminalReason(reasons, TerminalReasonCompleted)
 	event := AwakenEvent{
 		Type:           RunFinishedEventType,
@@ -1080,6 +1203,9 @@ func (e *runEventEmitter) runFinished(ctx stdcontext.Context, content string, st
 
 func (e *runEventEmitter) runErrored(ctx stdcontext.Context, err error, reasons ...TerminalReason) {
 	if err == nil {
+		return
+	}
+	if e.suppressRunLifecycle {
 		return
 	}
 	event := AwakenEvent{

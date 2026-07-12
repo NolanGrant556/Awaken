@@ -111,6 +111,7 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		result.AffectedPaths = stringSliceFromAny(payload["affected_paths"])
 		result.PatchSummary = stringFromAny(payload["patch_summary"])
 		applyOutcomePayload(&result, payload)
+		applyExecutionMetadata(&result, payload)
 		return []Event{result}
 	case agentcore.SemanticKindArtifact:
 		artifact := base
@@ -256,11 +257,45 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		recovery.ProcessStatus = stringFromAny(payload["process_status"])
 		recovery.ErrorCategory = stringFromAny(payload["error_category"])
 		recovery.Retryable = boolFromAny(payload["retryable"])
+		applyExecutionMetadata(&recovery, payload)
 		return []Event{recovery}
+	case agentcore.SemanticKindSkillActivated:
+		invoked := skillEventFromPayload(base, payload)
+		invoked.Type = EventAwakenSkillInvoked
+		frames := []Event{invoked}
+		if invoked.SkillStatus == "" || invoked.SkillStatus == "ok" {
+			executionContext := invoked
+			executionContext.Type = EventAwakenSkillExecutionContext
+			frames = append(frames, executionContext)
+		} else {
+			failed := invoked
+			failed.Type = EventAwakenSkillFailedToLoad
+			frames = append(frames, failed)
+		}
+		return frames
+	case agentcore.SemanticKindResourceReceipt:
+		loaded := skillEventFromPayload(base, payload)
+		loaded.Type = EventAwakenSkillContentLoaded
+		loaded.SkillResource = stringFromAny(payload["resource"])
+		loaded.SkillResourceSource = stringFromAny(payload["source"])
+		loaded.SkillResourceSHA256 = stringFromAny(payload["sha256"])
+		loaded.SkillResourceSize = int64FromAny(payload["size"])
+		loaded.SkillResourceMode = stringFromAny(payload["mode"])
+		return []Event{loaded}
+	case agentcore.SemanticKindMassMessageReviewRequested:
+		requested := massMessageReviewEventFromPayload(base, payload)
+		requested.Type = EventAwakenMassReviewRequested
+		return []Event{requested}
+	case agentcore.SemanticKindMassMessageReviewResolved:
+		resolved := massMessageReviewEventFromPayload(base, payload)
+		resolved.Type = EventAwakenMassReviewResolved
+		resolved.ReviewDecision = firstNonEmpty(
+			stringFromAny(payload["decision"]),
+			stringFromAny(payload["review_decision"]),
+		)
+		return []Event{resolved}
 	case agentcore.SemanticKindThread,
-		agentcore.SemanticKindFileChange,
-		agentcore.SemanticKindSkillActivated,
-		agentcore.SemanticKindResourceReceipt:
+		agentcore.SemanticKindFileChange:
 		return nil
 	default:
 		unknown := base
@@ -316,6 +351,83 @@ func applyOutcomePayload(dst *Event, payload map[string]any) {
 			dst.Diagnostic[key] = value
 		}
 	}
+	var outcomePayload map[string]any
+	if err := json.Unmarshal(raw, &outcomePayload); err == nil {
+		applyExecutionMetadata(dst, outcomePayload)
+	}
+	applyExecutionMetadata(dst, outcome.Diagnostic)
+}
+
+func skillEventFromPayload(base Event, payload map[string]any) Event {
+	event := base
+	event.SkillID = stringFromAny(payload["skill_id"])
+	event.SkillVersion = stringFromAny(payload["skill_version"])
+	event.SkillSource = firstNonEmpty(stringFromAny(payload["skill_source"]), stringFromAny(payload["source"]))
+	event.SkillPath = firstNonEmpty(
+		stringFromAny(payload["skill_path"]),
+		stringFromAny(payload["skill_file_path"]),
+		stringFromAny(payload["path"]),
+	)
+	event.SkillStatus = firstNonEmpty(stringFromAny(payload["skill_status"]), stringFromAny(payload["compatibility_status"]), stringFromAny(payload["status"]))
+	event.SkillEffectiveTools = stringSliceFromAny(payload["effective_tools"])
+	event.SkillDiagnostics = diagnosticStringsFromAny(firstPresentValue(payload, "diagnostics", "compatibility_errors"))
+	return event
+}
+
+func massMessageReviewEventFromPayload(base Event, payload map[string]any) Event {
+	event := base
+	event.ReviewID = stringFromAny(payload["review_id"])
+	event.ReviewEnvelopeDigest = stringFromAny(payload["envelope_digest"])
+	event.ReviewBodyDigest = stringFromAny(payload["body_digest"])
+	event.ReviewRecipientIdentityDigest = stringFromAny(payload["recipient_identity_digest"])
+	event.ToolCallID = stringFromAny(payload["tool_call_id"])
+	event.ToolCallName = stringFromAny(payload["tool_name"])
+	event.MassMessageChannel = stringFromAny(payload["channel"])
+	event.MassMessageRecipientScope = stringFromAny(payload["recipient_scope"])
+	event.MassMessageRecipientCount = intFromAny(payload["recipient_count"])
+	event.MassMessageBodyPreview = stringFromAny(payload["body_preview"])
+	event.MassMessageTemplatePreview = stringFromAny(payload["template_preview"])
+	event.MassMessageAttachments = stringSliceFromAny(payload["attachments"])
+	event.MassMessageSendingAccount = stringFromAny(payload["sending_account"])
+	event.MassMessageSourceTool = stringFromAny(payload["source_tool"])
+	event.MassMessageMessageCount = intFromAny(payload["message_count"])
+	event.MassMessageExpandsRecipients = boolPointerFromAny(payload["expands_recipients"])
+	return event
+}
+
+func diagnosticStringsFromAny(value any) []string {
+	if value == nil {
+		return nil
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var values []any
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		switch typed := value.(type) {
+		case string:
+			if trimmed := strings.TrimSpace(typed); trimmed != "" {
+				out = append(out, trimmed)
+			}
+		case map[string]any:
+			code := strings.TrimSpace(stringFromAny(typed["code"]))
+			message := strings.TrimSpace(stringFromAny(typed["message"]))
+			switch {
+			case code != "" && message != "":
+				out = append(out, code+": "+message)
+			case message != "":
+				out = append(out, message)
+			case code != "":
+				out = append(out, code)
+			}
+		}
+	}
+	return out
 }
 
 func stringFromAny(value any) string {
@@ -336,6 +448,14 @@ func boolFromAny(value any) bool {
 	default:
 		return false
 	}
+}
+
+func boolPointerFromAny(value any) *bool {
+	valueBool, ok := value.(bool)
+	if !ok {
+		return nil
+	}
+	return &valueBool
 }
 
 func intFromAny(value any) int {
@@ -375,6 +495,41 @@ func intFromAny(value any) int {
 	return 0
 }
 
+func int64FromAny(value any) int64 {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed)
+	case int8:
+		return int64(typed)
+	case int16:
+		return int64(typed)
+	case int32:
+		return int64(typed)
+	case int64:
+		return typed
+	case uint:
+		return int64(typed)
+	case uint8:
+		return int64(typed)
+	case uint16:
+		return int64(typed)
+	case uint32:
+		return int64(typed)
+	case uint64:
+		return int64(typed)
+	case float32:
+		return int64(typed)
+	case float64:
+		return int64(typed)
+	case json.Number:
+		value, err := typed.Int64()
+		if err == nil {
+			return value
+		}
+	}
+	return 0
+}
+
 func stringSliceFromAny(value any) []string {
 	var values []any
 	switch typed := value.(type) {
@@ -383,7 +538,10 @@ func stringSliceFromAny(value any) []string {
 	case []any:
 		values = typed
 	default:
-		return nil
+		raw, err := json.Marshal(value)
+		if err != nil || json.Unmarshal(raw, &values) != nil {
+			return nil
+		}
 	}
 	out := make([]string, 0, len(values))
 	for _, item := range values {

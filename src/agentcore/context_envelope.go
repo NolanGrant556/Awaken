@@ -3,6 +3,7 @@ package agentcore
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	convcontext "awaken/src/context"
 	"awaken/src/prompt"
@@ -27,8 +28,13 @@ type ContextEnvelope struct {
 }
 
 type ContextBlock struct {
-	ID      string
-	Content string
+	ID         string
+	Content    string
+	SkillID    string
+	SourcePath string
+	AgentID    string
+	InvokedAt  time.Time
+	Compacted  bool
 }
 
 type ContextItem struct {
@@ -45,18 +51,29 @@ type ContextAttachment struct {
 }
 
 type RuntimeSnapshot struct {
-	CurrentDate      string
-	WorkingDirectory string
-	ModelName        string
-	EntryPoint       string
-	ToolSummary      string
-	SkillSummary     string
-	ScopeID          string
-	WorkspaceRoot    string
-	ReadableRoots    []string
-	WritableRoots    []string
-	OutputRoots      []string
-	AttachedFiles    []tool.ScopedFile
+	CurrentDate       string
+	WorkingDirectory  string
+	ModelName         string
+	EntryPoint        string
+	ToolSummary       string
+	SkillSummary      string
+	ScopeID           string
+	WorkspaceRoot     string
+	ReadableRoots     []string
+	WritableRoots     []string
+	OutputRoots       []string
+	AttachedFiles     []tool.ScopedFile
+	ToolSnapshotID    string
+	CatalogVersion    uint64
+	EnvironmentID     string
+	OperatingSystem   string
+	Architecture      string
+	PATHSource        string
+	SkillRoots        []tool.SkillRootObservation
+	TemporaryWorkRoot string
+	RefreshReason     string
+	Executables       []string
+	PackageManagers   []string
 }
 
 type ContextCacheKey struct {
@@ -99,7 +116,7 @@ func (snapshot RuntimeSnapshot) ToRuntimeInfo() prompt.RuntimeInfo {
 
 func runtimeSnapshotSystemItem(snapshot RuntimeSnapshot) ContextItem {
 	content := fmt.Sprintf(
-		"current_date=%s\nworking_directory=%s\nmodel_name=%s\nentry_point=%s\ntool_summary=%s\nskill_summary=%s\nscope_id=%s\nworkspace_root=%s\nreadable_roots=%s\nwritable_roots=%s\noutput_roots=%s\nattached_files=%s",
+		"current_date=%s\nworking_directory=%s\nmodel_name=%s\nentry_point=%s\ntool_summary=%s\nskill_summary=%s\nscope_id=%s\nworkspace_root=%s\nreadable_roots=%s\nwritable_roots=%s\noutput_roots=%s\nattached_files=%s\ntool_snapshot_id=%s\ntool_catalog_version=%d\nenvironment_snapshot_id=%s\nos=%s\narchitecture=%s\npath_source=%s\nskill_roots=%s\ntemporary_work_root=%s\nenvironment_refresh_reason=%s\nobserved_executables=%s\npackage_managers=%s",
 		snapshot.CurrentDate,
 		snapshot.WorkingDirectory,
 		snapshot.ModelName,
@@ -112,12 +129,40 @@ func runtimeSnapshotSystemItem(snapshot RuntimeSnapshot) ContextItem {
 		strings.Join(snapshot.WritableRoots, ","),
 		strings.Join(snapshot.OutputRoots, ","),
 		formatRuntimeSnapshotAttachedFiles(snapshot.AttachedFiles),
+		snapshot.ToolSnapshotID,
+		snapshot.CatalogVersion,
+		snapshot.EnvironmentID,
+		snapshot.OperatingSystem,
+		snapshot.Architecture,
+		snapshot.PATHSource,
+		formatRuntimeSnapshotSkillRoots(snapshot.SkillRoots),
+		snapshot.TemporaryWorkRoot,
+		snapshot.RefreshReason,
+		strings.Join(snapshot.Executables, ","),
+		strings.Join(snapshot.PackageManagers, ","),
 	)
 	return ContextItem{
 		ID:      "runtime_snapshot",
 		Type:    "runtime_snapshot",
 		Content: content,
 	}
+}
+
+func formatRuntimeSnapshotSkillRoots(roots []tool.SkillRootObservation) string {
+	if len(roots) == 0 {
+		return "none"
+	}
+	parts := make([]string, 0, len(roots))
+	for _, root := range roots {
+		if strings.TrimSpace(root.Path) == "" {
+			continue
+		}
+		parts = append(parts, strings.TrimSpace(root.Source)+"="+root.Path)
+	}
+	if len(parts) == 0 {
+		return "none"
+	}
+	return strings.Join(parts, ",")
 }
 
 func formatRuntimeSnapshotAttachedFiles(files []tool.ScopedFile) string {

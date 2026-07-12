@@ -91,3 +91,29 @@ func TestMessagesFromSemanticRecordsKeepsLegacyDisplayFallback(t *testing.T) {
 		t.Fatalf("legacy fallback changed: %+v", messages)
 	}
 }
+
+func TestSkillInvocationHistoryRestoresLatestTimestampWithoutLeakingForkContext(t *testing.T) {
+	first := time.Date(2026, 7, 11, 1, 0, 0, 0, time.UTC)
+	latest := first.Add(time.Hour)
+	records := []agentcore.SemanticRecord{
+		{Kind: agentcore.SemanticKindSkillActivated, Timestamp: first, Payload: map[string]any{
+			"skill_id": "inline", "content": "inline body", "context": "inline", "invoked_at": first.Format(time.RFC3339Nano),
+		}},
+		{Kind: agentcore.SemanticKindSkillActivated, Timestamp: latest, Payload: map[string]any{
+			"skill_id": "inline", "content": "new body", "context": "inline", "invoked_at": latest.Format(time.RFC3339Nano),
+		}},
+		{Kind: agentcore.SemanticKindSkillActivated, Timestamp: latest, Payload: map[string]any{
+			"skill_id": "forked", "content": "child-only body", "context": "fork", "invoked_at": latest.Format(time.RFC3339Nano),
+		}},
+	}
+	restored := restoredTranscriptFromSemantic(records)
+	if got := restored.SkillInvokedAt["inline"]; !got.Equal(latest) {
+		t.Fatalf("latest inline invocation=%s", got)
+	}
+	if got := restored.SkillInvokedAt["forked"]; !got.Equal(latest) {
+		t.Fatalf("fork invocation timestamp missing=%s", got)
+	}
+	if len(restored.SkillContextBlocks) != 1 || restored.SkillContextBlocks[0].SkillID != "inline" || restored.SkillContextBlocks[0].Content != "new body" {
+		t.Fatalf("fork context leaked or inline latest lost: %+v", restored.SkillContextBlocks)
+	}
+}

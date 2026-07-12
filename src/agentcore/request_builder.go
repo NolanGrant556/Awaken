@@ -15,6 +15,7 @@ type RequestBuilder struct {
 }
 
 func NewRequestBuilder(config AgentConfig) *RequestBuilder {
+	config.ComposerSkillSelection = cloneComposerSkillSelectionContext(config.ComposerSkillSelection)
 	return &RequestBuilder{
 		config:      config,
 		runtimeInfo: prompt.NewRuntimeInfo(),
@@ -73,6 +74,13 @@ func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool
 			Content: block.Content,
 		})
 	}
+	// Append the host-generated explicit selection after every Skill body.
+	// A Skill may contain arbitrary instructions, including text that mimics
+	// this block, but it cannot replace the typed Runtime-owned binding.
+	if block, item, ok := hostComposerSkillSelectionBlock(rb.config.ComposerSkillSelection); ok {
+		envelope.SystemBlocks = append(envelope.SystemBlocks, block)
+		envelope.SystemContextItems = append(envelope.SystemContextItems, item)
+	}
 	envelope.ContextWindowState = NewContextEngine(contextWindowConfigFromModelConfig(rb.config.ModelConfig)).Evaluate(envelope)
 	return envelope
 }
@@ -123,23 +131,25 @@ func (rb *RequestBuilder) buildSystemPromptFromEnvelope(envelope ContextEnvelope
 }
 
 func (rb *RequestBuilder) getTools() []tool.ToolSchema {
-	tools := tool.FilterToolsForExposure(tool.ListTools(), rb.toolExposurePolicy())
-	if rb.config.ResolvedToolPool != nil {
-		allowed := make(map[string]bool, len(rb.config.ResolvedToolPool))
-		for _, name := range rb.config.ResolvedToolPool {
-			name = strings.TrimSpace(name)
-			if name != "" {
-				allowed[name] = true
+	if rb.config.ToolAvailabilitySnapshot != nil {
+		entries := rb.config.ToolAvailabilitySnapshot.Entries()
+		definitions := make([]tool.ToolSchema, 0, len(entries))
+		for _, entry := range entries {
+			if entry.Runtime == nil || !tool.IsToolExposed(entry.Definition.Name, rb.toolExposurePolicy()) {
+				continue
 			}
+			definitions = append(definitions, tool.ToolSchema{
+				Type: "function",
+				Function: tool.ToolFunctionSchema{
+					Name:        entry.Definition.Name,
+					Description: requestToolModelDescription(entry.Runtime, entry.Definition, rb.config.ModelConfig.ContextWindow),
+					Parameters:  entry.Definition.InputSchema,
+				},
+			})
 		}
-		filtered := make([]tool.Tool, 0, len(tools))
-		for _, t := range tools {
-			if allowed[t.Name()] {
-				filtered = append(filtered, t)
-			}
-		}
-		tools = filtered
+		return definitions
 	}
+	tools := tool.FilterToolsForExposure(tool.ListTools(), rb.toolExposurePolicy())
 	definitions := make([]tool.ToolSchema, 0, len(tools))
 
 	for _, t := range tools {
@@ -148,12 +158,25 @@ func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 			Type: "function",
 			Function: tool.ToolFunctionSchema{
 				Name:        definition.Name,
-				Description: tool.ModelDescription(definition),
+				Description: requestToolModelDescription(t, definition, rb.config.ModelConfig.ContextWindow),
 				Parameters:  definition.InputSchema,
 			},
 		})
 	}
 	return definitions
+}
+
+type contextWindowToolDescriptionProvider interface {
+	ModelDescriptionForContext(contextWindowTokens int) string
+}
+
+func requestToolModelDescription(runtime tool.Tool, definition tool.ToolDefinition, contextWindowTokens int) string {
+	if provider, ok := runtime.(contextWindowToolDescriptionProvider); ok {
+		if description := strings.TrimSpace(provider.ModelDescriptionForContext(contextWindowTokens)); description != "" {
+			return description
+		}
+	}
+	return tool.ModelDescription(definition)
 }
 
 // toolExposurePolicy returns the model-visible tool pool policy.
@@ -234,6 +257,24 @@ func (rb *RequestBuilder) buildRuntimeSnapshot(tools []tool.ToolSchema) RuntimeS
 		OutputRoots:      append([]string(nil), permissionContext.OutputRoots...),
 		AttachedFiles:    append([]tool.ScopedFile(nil), permissionContext.AttachedFiles...),
 	}
+	if rb.config.ToolAvailabilitySnapshot != nil {
+		snapshot.ToolSnapshotID = rb.config.ToolAvailabilitySnapshot.SnapshotID
+		snapshot.CatalogVersion = rb.config.ToolAvailabilitySnapshot.CatalogVersion
+		snapshot.EnvironmentID = rb.config.ToolAvailabilitySnapshot.EnvironmentSnapshotID
+	}
+	if environment := rb.config.ExecutionEnvironmentSnapshot; environment != nil {
+		snapshot.EnvironmentID = environment.SnapshotID
+		snapshot.OperatingSystem = environment.OS
+		snapshot.Architecture = environment.Architecture
+		snapshot.PATHSource = environment.PATHSource
+		snapshot.SkillRoots = append([]tool.SkillRootObservation(nil), environment.SkillRoots...)
+		snapshot.TemporaryWorkRoot = environment.TemporaryWorkRoot
+		snapshot.RefreshReason = environment.RefreshReason
+		snapshot.PackageManagers = append([]string(nil), environment.AvailablePackageManagers...)
+		for _, executable := range environment.Executables {
+			snapshot.Executables = append(snapshot.Executables, executable.Name)
+		}
+	}
 	rb.runtimeInfo = snapshot.ToRuntimeInfo()
 	return snapshot
 }
@@ -257,7 +298,7 @@ func (rb *RequestBuilder) buildCacheKeys(staticContent string, tools []tool.Tool
 	return []ContextCacheKey{
 		{Name: "system_prompt", Value: fmt.Sprintf("len:%d", len(staticContent))},
 		{Name: "tool_pool", Value: rb.buildToolSummary(tools)},
-		{Name: "runtime_snapshot", Value: snapshot.WorkingDirectory + "|" + snapshot.ModelName + "|" + snapshot.EntryPoint + "|skills:" + snapshot.SkillSummary},
+		{Name: "runtime_snapshot", Value: snapshot.WorkingDirectory + "|" + snapshot.ModelName + "|" + snapshot.EntryPoint + "|skills:" + snapshot.SkillSummary + "|tools:" + snapshot.ToolSnapshotID + "|env:" + snapshot.EnvironmentID},
 	}
 }
 
@@ -265,7 +306,7 @@ func (rb *RequestBuilder) buildContextDeltas(snapshot RuntimeSnapshot, tools []t
 	return []ContextDelta{
 		{
 			Type:    ContextDeltaRuntimeSnapshot,
-			Summary: snapshot.WorkingDirectory + "|" + snapshot.ModelName + "|" + snapshot.EntryPoint + "|skills:" + snapshot.SkillSummary,
+			Summary: snapshot.WorkingDirectory + "|" + snapshot.ModelName + "|" + snapshot.EntryPoint + "|skills:" + snapshot.SkillSummary + "|tools:" + snapshot.ToolSnapshotID + "|env:" + snapshot.EnvironmentID,
 		},
 		{
 			Type:    ContextDeltaToolPool,

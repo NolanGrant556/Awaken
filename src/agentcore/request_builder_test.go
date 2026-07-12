@@ -145,21 +145,26 @@ func TestRequestBuilderUsesRegisteredTools(t *testing.T) {
 	t.Fatalf("expected registered tool %s in request tools", toolName)
 }
 
-func TestRequestBuilderCompilesResolvedToolDefinitionV2(t *testing.T) {
+func TestRequestBuilderCompilesDefinitionV2WithoutSkillPoolNarrowing(t *testing.T) {
 	runtime := requestBuilderDefinitionTool{}
 	if err := tool.RegisterToolForceWithMode(runtime, tool.DefinitionValidationStrictBuiltin); err != nil {
 		t.Fatalf("register strict v2 tool: %v", err)
 	}
 	defer tool.UnregisterTool(runtime.Name())
 
-	builder := NewRequestBuilder(AgentConfig{ResolvedToolPool: []string{runtime.Name()}})
+	builder := NewRequestBuilder(AgentConfig{})
 	req := builder.Build(convcontext.New(), nil)
-	if len(req.Tools) != 1 {
-		t.Fatalf("expected isolated v2 tool, got %+v", req.Tools)
+	var schema tool.ToolFunctionSchema
+	found := false
+	for _, candidate := range req.Tools {
+		if candidate.Function.Name == runtime.Name() {
+			schema = candidate.Function
+			found = true
+			break
+		}
 	}
-	schema := req.Tools[0].Function
-	if schema.Name != runtime.Name() {
-		t.Fatalf("unexpected tool schema: %+v", schema)
+	if !found {
+		t.Fatalf("expected v2 tool in unified catalog, got %d tools", len(req.Tools))
 	}
 	if _, exists := schema.Parameters.Properties["query"]; !exists {
 		t.Fatalf("expected explicit v2 recursive schema, got %+v", schema.Parameters)

@@ -274,11 +274,11 @@ func TestBufferedPermissionAndRuntimeFactsStayInvisibleWhenBatchAppendFails(t *t
 	}
 }
 
-func TestImplicitSkillActivationPersistsBeforeExecutionAndNarrowsPool(t *testing.T) {
+func TestImplicitSkillActivationPersistsBeforeExecutionWithoutNarrowingPool(t *testing.T) {
 	recorder := &failingRecorder{}
 	allowedName := "implicit_skill_allowed"
 	skillID := "journal-implicit"
-	skillName := skillruntime.SkillToolName(skillID)
+	skillName := skillruntime.CatalogToolName
 	mustRegisterRunnerTool(t, countingJournalTool{name: allowedName, calls: new(int)})
 	t.Cleanup(func() { tool.UnregisterTool(allowedName) })
 
@@ -294,10 +294,8 @@ func TestImplicitSkillActivationPersistsBeforeExecutionAndNarrowsPool(t *testing
 	registry := skills.NewSkillRegistry(nil)
 	registry.LoadFromSources(map[skills.SourceOrigin]string{skills.SourceUser: root})
 	executed := false
-	skillTool := &skillruntime.SkillTool{
-		SkillID:   skillID,
-		NameStr:   skillName,
-		Desc:      "durable implicit skill",
+	skillTool := &skillruntime.CatalogTool{
+		Registry:  registry,
 		Activator: skillruntime.NewActivator(registry, nil),
 		Executor: skillruntime.SkillExecutorFunc(func(_ context.Context, _ string, body string, allowed []string) (string, error) {
 			executed = true
@@ -305,7 +303,7 @@ func TestImplicitSkillActivationPersistsBeforeExecutionAndNarrowsPool(t *testing
 				t.Fatal("skill executor ran before activation was durable")
 			}
 			if strings.Join(allowed, ",") != allowedName {
-				t.Fatalf("executor received widened pool: %v", allowed)
+				t.Fatalf("executor should receive non-enforcing author hints only: %v", allowed)
 			}
 			if !strings.Contains(body, "Activated body") {
 				t.Fatalf("missing activated body: %q", body)
@@ -316,7 +314,7 @@ func TestImplicitSkillActivationPersistsBeforeExecutionAndNarrowsPool(t *testing
 	mustRegisterRunnerTool(t, skillTool)
 	t.Cleanup(func() { tool.UnregisterTool(skillName) })
 
-	config := AgentConfig{ResolvedToolPool: []string{skillName, allowedName}}
+	config := AgentConfig{}
 	events := newRunEventEmitter("thread_skill", EventSinkFunc(func(AwakenEvent) {}))
 	events.runID = "run_skill"
 	events.recorder = recorder
@@ -326,23 +324,18 @@ func TestImplicitSkillActivationPersistsBeforeExecutionAndNarrowsPool(t *testing
 		threadID:          "thread_skill",
 		runID:             "run_skill",
 		failureSupervisor: NewFailureSupervisor(t.TempDir(), 8, 32),
-		toolRuntime: NewToolRuntimeWithConfig(events.sink, ToolRuntimeConfig{
-			ResolvedToolPool: append([]string(nil), config.ResolvedToolPool...),
-		}),
+		toolRuntime:       NewToolRuntimeWithConfig(events.sink, ToolRuntimeConfig{}),
 	}
 	results := runner.executeToolCalls(context.Background(), []convcontext.ToolCall{{
 		ID: "call_skill",
 		Function: convcontext.FunctionCall{
 			Name:      skillName,
-			Arguments: `{}`,
+			Arguments: `{"skill":"journal-implicit"}`,
 		},
 	}}, events)
 
 	if len(results) != 1 || results[0].IsError || !executed {
 		t.Fatalf("implicit skill did not execute successfully: executed=%v results=%+v", executed, results)
-	}
-	if strings.Join(runner.config.ResolvedToolPool, ",") != allowedName {
-		t.Fatalf("runner pool not narrowed: %v", runner.config.ResolvedToolPool)
 	}
 	if len(runner.config.SkillContextBlocks) != 1 || !strings.Contains(runner.config.SkillContextBlocks[0].Content, "Activated body") {
 		t.Fatalf("activation context not installed: %+v", runner.config.SkillContextBlocks)
@@ -357,7 +350,7 @@ func TestImplicitSkillActivationPersistsBeforeExecutionAndNarrowsPool(t *testing
 func TestImplicitSkillActivationPersistenceFailurePreventsExecutor(t *testing.T) {
 	recorder := &failingRecorder{failSkill: true}
 	skillID := "journal-persist-failure"
-	skillName := skillruntime.SkillToolName(skillID)
+	skillName := skillruntime.CatalogToolName
 	root := t.TempDir()
 	skillRoot := filepath.Join(root, skillID)
 	if err := os.MkdirAll(skillRoot, 0o755); err != nil {
@@ -369,10 +362,8 @@ func TestImplicitSkillActivationPersistenceFailurePreventsExecutor(t *testing.T)
 	registry := skills.NewSkillRegistry(nil)
 	registry.LoadFromSources(map[skills.SourceOrigin]string{skills.SourceUser: root})
 	executed := false
-	mustRegisterRunnerTool(t, &skillruntime.SkillTool{
-		SkillID:   skillID,
-		NameStr:   skillName,
-		Desc:      "persistence-gated implicit skill",
+	mustRegisterRunnerTool(t, &skillruntime.CatalogTool{
+		Registry:  registry,
 		Activator: skillruntime.NewActivator(registry, nil),
 		Executor: skillruntime.SkillExecutorFunc(func(context.Context, string, string, []string) (string, error) {
 			executed = true
@@ -381,7 +372,7 @@ func TestImplicitSkillActivationPersistenceFailurePreventsExecutor(t *testing.T)
 	})
 	t.Cleanup(func() { tool.UnregisterTool(skillName) })
 
-	config := AgentConfig{ResolvedToolPool: []string{skillName}}
+	config := AgentConfig{}
 	events := newRunEventEmitter("thread_skill_fail", EventSinkFunc(func(AwakenEvent) {}))
 	events.runID = "run_skill_fail"
 	events.recorder = recorder
@@ -390,11 +381,11 @@ func TestImplicitSkillActivationPersistenceFailurePreventsExecutor(t *testing.T)
 		recorder:    recorder,
 		threadID:    "thread_skill_fail",
 		runID:       "run_skill_fail",
-		toolRuntime: NewToolRuntimeWithConfig(events.sink, ToolRuntimeConfig{ResolvedToolPool: config.ResolvedToolPool}),
+		toolRuntime: NewToolRuntimeWithConfig(events.sink, ToolRuntimeConfig{}),
 	}
 	results := runner.executeToolCalls(context.Background(), []convcontext.ToolCall{{
 		ID:       "call_skill_fail",
-		Function: convcontext.FunctionCall{Name: skillName, Arguments: `{}`},
+		Function: convcontext.FunctionCall{Name: skillName, Arguments: `{"skill":"journal-persist-failure"}`},
 	}}, events)
 
 	if executed {

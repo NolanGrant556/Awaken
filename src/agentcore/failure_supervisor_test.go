@@ -116,6 +116,222 @@ func TestFailureSupervisorAllowsRetryableTwiceThenBlocks(t *testing.T) {
 	}
 }
 
+func TestShellResourceRevisionSeparatesCommandsWithoutLeakingTheirText(t *testing.T) {
+	first := ResourceRevision(`{"command":"node scripts/validate.js output/slides.json","workdir":"/workspace"}`, tool.ExecutionOutcome{})
+	second := ResourceRevision(`{"command":"npm install","workdir":"/workspace"}`, tool.ExecutionOutcome{})
+	third := ResourceRevision(`{"command":"node scripts/validate.js output/slides.json","workdir":"/other"}`, tool.ExecutionOutcome{})
+	if first == "unknown" || second == "unknown" || third == "unknown" {
+		t.Fatalf("shell command revisions must be stable hashes: %q %q %q", first, second, third)
+	}
+	if first == second || first == third || second == third {
+		t.Fatalf("different commands/cwds shared one revision: %q %q %q", first, second, third)
+	}
+	if strings.Contains(first, "validate") || strings.Contains(second, "npm") {
+		t.Fatalf("revision leaked command text: %q %q", first, second)
+	}
+}
+
+func TestFailureSupervisorAllowsShellValidationAfterObservedMutation(t *testing.T) {
+	s := NewFailureSupervisor("/workspace", 8, 64)
+	validate := convcontext.ToolCall{ID: "validate_1", Function: convcontext.FunctionCall{
+		Name: "shell", Arguments: `{"command":"node scripts/validate.js output/slides.json","workdir":"/workspace"}`,
+	}}
+	before := s.BeforeCall(validate)
+	if !before.Allow {
+		t.Fatalf("initial validator call blocked: %+v", before)
+	}
+	s.NoteRealExecution(before.CallSignature)
+	s.AfterOutcome(validate, tool.ExecutionOutcome{
+		Status: tool.OutcomeFailed, SemanticStatus: tool.SemanticFailure,
+		ErrorCode: tool.ErrorCodeProcessExitNonzero, ErrorMessage: "image path missing", Retryable: false,
+	})
+	if retry := s.BeforeCall(validate); !retry.Block {
+		t.Fatal("unchanged non-retryable validator call should remain blocked")
+	}
+
+	edit := convcontext.ToolCall{ID: "edit_1", Function: convcontext.FunctionCall{
+		Name: "text_edit", Arguments: `{"path":"output/slides.json"}`,
+	}}
+	s.AfterOutcome(edit, tool.ExecutionOutcome{
+		Status: tool.OutcomeSucceeded, TransportStatus: tool.TransportCompleted,
+		SemanticStatus: tool.SemanticSuccess, ProcessStatus: tool.ProcessNotApplicable,
+		AffectedPaths: []string{"output/slides.json"},
+		Operation:     &tool.OperationDescriptor{Type: "text_edit", Target: "output/slides.json", SideEffectState: tool.OutcomeSideEffectApplied},
+	})
+	if retry := s.BeforeCall(validate); !retry.Allow || retry.Block {
+		t.Fatalf("validator stayed blocked after observed input repair: %+v", retry)
+	}
+}
+
+func TestFailureSupervisorAllowsPipelineRetryAfterDirectShellInstall(t *testing.T) {
+	s := NewFailureSupervisor("/workspace", 8, 64)
+	pipeline := convcontext.ToolCall{ID: "pipeline_1", Function: convcontext.FunctionCall{
+		Name: "shell", Arguments: `{"command":"node /Users/test/.awaken/skills/qoderwork-ppt/scripts/run-pipeline.js output/slides.json output/presentation.pptx","workdir":"/workspace"}`,
+	}}
+	before := s.BeforeCall(pipeline)
+	if !before.Allow {
+		t.Fatalf("initial pipeline call blocked: %+v", before)
+	}
+	s.NoteRealExecution(before.CallSignature)
+	s.AfterOutcome(pipeline, tool.ExecutionOutcome{
+		Status: tool.OutcomeFailed, SemanticStatus: tool.SemanticFailure,
+		ErrorCode: tool.ErrorCodeProcessExitNonzero, ErrorMessage: "dom-to-pptx not found", Retryable: false,
+		Operation: &tool.OperationDescriptor{Type: "shell", SideEffectState: tool.OutcomeSideEffectUnknown},
+	})
+	if retry := s.BeforeCall(pipeline); !retry.Block {
+		t.Fatal("unchanged non-retryable pipeline should remain blocked before recovery")
+	}
+
+	install := convcontext.ToolCall{ID: "install_1", Function: convcontext.FunctionCall{
+		Name: "shell", Arguments: `{"command":"npm install","workdir":"/Users/test/.awaken/skills/qoderwork-ppt"}`,
+	}}
+	installBefore := s.BeforeCall(install)
+	if !installBefore.Allow || installBefore.Block {
+		t.Fatalf("recovery install command was blocked: %+v", installBefore)
+	}
+	s.NoteRealExecution(installBefore.CallSignature)
+	s.AfterOutcome(install, tool.ExecutionOutcome{
+		Status: tool.OutcomeSucceeded, TransportStatus: tool.TransportCompleted,
+		SemanticStatus: tool.SemanticSuccess, ProcessStatus: tool.ProcessExited,
+		Operation: &tool.OperationDescriptor{Type: "shell", SideEffectState: tool.OutcomeSideEffectUnknown},
+	})
+	if retry := s.BeforeCall(pipeline); !retry.Allow || retry.Block {
+		t.Fatalf("pipeline stayed blocked after successful direct Shell install: %+v", retry)
+	}
+}
+
+func TestFailureSupervisorReadOnlyShellSuccessDoesNotUnlockFailedPipeline(t *testing.T) {
+	s := NewFailureSupervisor("/workspace", 8, 64)
+	pipeline := convcontext.ToolCall{ID: "pipeline_1", Function: convcontext.FunctionCall{
+		Name: "shell", Arguments: `{"command":"node scripts/run-pipeline.js","workdir":"/workspace"}`,
+	}}
+	before := s.BeforeCall(pipeline)
+	s.NoteRealExecution(before.CallSignature)
+	s.AfterOutcome(pipeline, tool.ExecutionOutcome{
+		Status: tool.OutcomeFailed, SemanticStatus: tool.SemanticFailure,
+		ErrorCode: tool.ErrorCodeProcessExitNonzero, ErrorMessage: "missing dependency", Retryable: false,
+	})
+
+	inspect := convcontext.ToolCall{ID: "inspect_1", Function: convcontext.FunctionCall{
+		Name: "shell", Arguments: `{"command":"pwd","workdir":"/workspace"}`,
+	}}
+	inspectBefore := s.BeforeCall(inspect)
+	s.NoteRealExecution(inspectBefore.CallSignature)
+	s.AfterOutcome(inspect, tool.ExecutionOutcome{
+		Status: tool.OutcomeSucceeded, TransportStatus: tool.TransportCompleted,
+		SemanticStatus: tool.SemanticSuccess, ProcessStatus: tool.ProcessExited,
+		Operation: &tool.OperationDescriptor{Type: "shell", SideEffectState: tool.OutcomeSideEffectNone},
+	})
+	if retry := s.BeforeCall(pipeline); !retry.Block {
+		t.Fatalf("read-only Shell success incorrectly unlocked failed pipeline: %+v", retry)
+	}
+}
+
+func TestFailureSupervisorUnknownReadOnlyOrUnrelatedShellSuccessDoesNotUnlockFailedPipeline(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{name: "node version", command: "node --version"},
+		{name: "plain curl", command: "curl https://example.invalid/health"},
+		{name: "unrelated local cli", command: "awaken-doctor --version"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			s := NewFailureSupervisor("/workspace", 8, 64)
+			pipeline := convcontext.ToolCall{ID: "pipeline_1", Function: convcontext.FunctionCall{
+				Name: "shell", Arguments: `{"command":"node scripts/run-pipeline.js","workdir":"/workspace"}`,
+			}}
+			before := s.BeforeCall(pipeline)
+			s.NoteRealExecution(before.CallSignature)
+			s.AfterOutcome(pipeline, tool.ExecutionOutcome{
+				Status: tool.OutcomeFailed, SemanticStatus: tool.SemanticFailure,
+				ErrorCode: tool.ErrorCodeProcessExitNonzero, ErrorMessage: "missing dependency", Retryable: false,
+			})
+			s.pendingRecovery = &RecoveryDirective{
+				ToolName:         "shell",
+				ResourceRevision: ResourceRevision(pipeline.Function.Arguments, tool.ExecutionOutcome{}),
+			}
+
+			arguments, err := json.Marshal(map[string]string{"command": test.command, "workdir": "/workspace"})
+			if err != nil {
+				t.Fatalf("marshal arguments: %v", err)
+			}
+			inspect := convcontext.ToolCall{ID: "inspect_1", Function: convcontext.FunctionCall{
+				Name: "shell", Arguments: string(arguments),
+			}}
+			inspectBefore := s.BeforeCall(inspect)
+			if !inspectBefore.Allow || inspectBefore.Block {
+				t.Fatalf("unrelated command was blocked: %+v", inspectBefore)
+			}
+			s.NoteRealExecution(inspectBefore.CallSignature)
+			s.AfterOutcome(inspect, tool.ExecutionOutcome{
+				Status: tool.OutcomeSucceeded, TransportStatus: tool.TransportCompleted,
+				SemanticStatus: tool.SemanticSuccess, ProcessStatus: tool.ProcessExited,
+				Operation: &tool.OperationDescriptor{Type: "shell", SideEffectState: tool.OutcomeSideEffectUnknown},
+			})
+			if retry := s.BeforeCall(pipeline); !retry.Block {
+				t.Fatalf("unknown-side-effect %q incorrectly unlocked failed pipeline: %+v", test.command, retry)
+			}
+			if s.PendingRecovery() == nil {
+				t.Fatalf("unknown-side-effect %q incorrectly cleared pending recovery", test.command)
+			}
+		})
+	}
+}
+
+func TestShellCallHostClassifiesOnlyExplicitRecoveryMutations(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		want    bool
+	}{
+		{name: "npm install", command: "npm install", want: true},
+		{name: "python pip install", command: "python3 -m pip install -r requirements.txt", want: true},
+		{name: "create directory", command: "mkdir -p .cache/runtime", want: true},
+		{name: "explicit workspace file redirect", command: "printf ready > .awaken-ready", want: true},
+		{name: "node version", command: "node --version", want: false},
+		{name: "plain curl", command: "curl https://example.invalid/health", want: false},
+		{name: "unrelated cli", command: "awaken-doctor --version", want: false},
+		{name: "quoted install prose", command: `echo "npm install"`, want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			arguments, err := json.Marshal(map[string]string{"command": test.command, "workdir": "/workspace"})
+			if err != nil {
+				t.Fatalf("marshal arguments: %v", err)
+			}
+			if got := shellCallHasHostClassifiedRecoveryMutation(string(arguments)); got != test.want {
+				t.Fatalf("classification for %q = %v, want %v", test.command, got, test.want)
+			}
+		})
+	}
+}
+
+func TestFailureSupervisorDoesNotMergeUnrelatedShellFailures(t *testing.T) {
+	s := NewFailureSupervisor("/workspace", 8, 64)
+	commands := []string{
+		"node scripts/validate.js output/slides.json",
+		"node scripts/run-pipeline.js output/slides.json output/presentation.pptx",
+		"npm install",
+		"cp -R ~/.awaken/skills/ppt output/ppt-runtime",
+	}
+	for index, command := range commands {
+		call := convcontext.ToolCall{ID: fmt.Sprintf("shell_%d", index), Function: convcontext.FunctionCall{
+			Name: "shell", Arguments: fmt.Sprintf(`{"command":%q,"workdir":"/workspace"}`, command),
+		}}
+		before := s.BeforeCall(call)
+		if before.Block || !before.Allow {
+			t.Fatalf("unrelated shell command %d was merged into an exhausted class: %+v", index, before)
+		}
+		s.NoteRealExecution(before.CallSignature)
+		s.AfterOutcome(call, tool.ExecutionOutcome{
+			Status: tool.OutcomeFailed, SemanticStatus: tool.SemanticFailure,
+			ErrorCode: tool.ErrorCodeProcessExitNonzero, ErrorMessage: "exit 1", Retryable: false,
+		})
+	}
+}
+
 func TestFailureSupervisorSameErrorClassBudget(t *testing.T) {
 	s := NewFailureSupervisor("/tmp/ws", 8, 64)
 	for i := 0; i < maxSameClassFailures; i++ {

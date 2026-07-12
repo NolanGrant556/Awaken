@@ -282,25 +282,33 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.RuntimeName = event.RuntimeName
 		base.RuntimeVersion = event.RuntimeVersion
 		return []Event{base}
+	case agentcore.AwakenEventType("SkillDiscovered"):
+		base.Type = EventAwakenSkillDiscovered
+		copySkillFields(&base, event)
+		return []Event{base}
+	case agentcore.AwakenEventType("SkillInvoked"), agentcore.SkillActivatedEventType:
+		base.Type = EventAwakenSkillInvoked
+		copySkillFields(&base, event)
+		return []Event{base}
+	case agentcore.AwakenEventType("SkillContentLoaded"), agentcore.ResourceReceiptEventType:
+		base.Type = EventAwakenSkillContentLoaded
+		copySkillFields(&base, event)
+		return []Event{base}
+	case agentcore.AwakenEventType("SkillExecutionContext"):
+		base.Type = EventAwakenSkillExecutionContext
+		copySkillFields(&base, event)
+		return []Event{base}
+	case agentcore.AwakenEventType("SkillFailedToLoad"):
+		base.Type = EventAwakenSkillFailedToLoad
+		copySkillFields(&base, event)
+		return []Event{base}
 	case agentcore.MassMessageReviewRequestedType:
 		base.Type = EventAwakenMassReviewRequested
-		base.ToolCallID = event.ToolCallID
-		base.ToolCallName = event.ToolName
-		base.ReviewID = event.ReviewID
-		base.MassMessageChannel = event.MassMessageChannel
-		base.MassMessageRecipientScope = event.MassMessageRecipientScope
-		base.MassMessageRecipientCount = event.MassMessageRecipientCount
-		base.MassMessageBodyPreview = event.MassMessageBodyPreview
-		base.MassMessageTemplatePreview = event.MassMessageTemplatePreview
-		base.MassMessageAttachments = append([]string(nil), event.MassMessageAttachments...)
-		base.MassMessageSendingAccount = event.MassMessageSendingAccount
-		base.MassMessageSourceTool = event.MassMessageSourceTool
+		copyMassMessageFields(&base, event)
 		return []Event{base}
 	case agentcore.MassMessageReviewResolvedType:
 		base.Type = EventAwakenMassReviewResolved
-		base.ToolCallID = event.ToolCallID
-		base.ToolCallName = event.ToolName
-		base.ReviewID = event.ReviewID
+		copyMassMessageFields(&base, event)
 		base.ReviewDecision = string(event.ReviewDecision)
 		return []Event{base}
 	case agentcore.UserQuestionRequestedType:
@@ -405,7 +413,44 @@ func copyToolOutcomeFields(dst *Event, event agentcore.AwakenEvent) {
 		for key, value := range event.Diagnostic {
 			dst.Diagnostic[key] = value
 		}
+		applyExecutionMetadata(dst, event.Diagnostic)
 	}
+}
+
+func copySkillFields(dst *Event, event agentcore.AwakenEvent) {
+	dst.SkillID = event.SkillID
+	dst.SkillVersion = event.SkillVersion
+	dst.SkillResource = event.ResourcePath
+	dst.SkillResourceSHA256 = event.ResourceSHA256
+	dst.SkillResourceSize = event.ResourceSize
+	dst.SkillResourceMode = event.ResourceMode
+	dst.SkillResourceSource = event.ResourceSource
+	if len(event.Diagnostic) > 0 {
+		dst.SkillSource = firstStringValue(event.Diagnostic, "skill_source", "skillSource", "source")
+		dst.SkillPath = firstStringValue(event.Diagnostic, "skill_path", "skillPath", "skill_file_path", "skillFilePath", "path")
+		dst.SkillStatus = firstStringValue(event.Diagnostic, "skill_status", "skillStatus", "compatibility_status", "compatibilityStatus", "status")
+		dst.SkillEffectiveTools = stringSliceFromAny(firstPresentValue(event.Diagnostic, "effective_tools", "effectiveTools"))
+		dst.SkillDiagnostics = diagnosticStringsFromAny(firstPresentValue(event.Diagnostic, "diagnostics", "compatibility_errors", "compatibilityErrors"))
+	}
+}
+
+func copyMassMessageFields(dst *Event, event agentcore.AwakenEvent) {
+	dst.ToolCallID = event.ToolCallID
+	dst.ToolCallName = event.ToolName
+	dst.ReviewID = event.ReviewID
+	dst.ReviewEnvelopeDigest = event.ReviewEnvelopeDigest
+	dst.ReviewBodyDigest = event.ReviewBodyDigest
+	dst.ReviewRecipientIdentityDigest = event.ReviewRecipientIdentityDigest
+	dst.MassMessageChannel = event.MassMessageChannel
+	dst.MassMessageRecipientScope = event.MassMessageRecipientScope
+	dst.MassMessageRecipientCount = event.MassMessageRecipientCount
+	dst.MassMessageBodyPreview = event.MassMessageBodyPreview
+	dst.MassMessageTemplatePreview = event.MassMessageTemplatePreview
+	dst.MassMessageAttachments = append([]string(nil), event.MassMessageAttachments...)
+	dst.MassMessageSendingAccount = event.MassMessageSendingAccount
+	dst.MassMessageSourceTool = event.MassMessageSourceTool
+	dst.MassMessageMessageCount = event.MassMessageMessageCount
+	dst.MassMessageExpandsRecipients = cloneBoolPointer(&event.MassMessageExpandsRecipients)
 }
 
 func firstNonEmpty(values ...string) string {

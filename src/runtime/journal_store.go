@@ -157,6 +157,11 @@ func messagesFromSemanticRecords(records []agentcore.SemanticRecord) []convconte
 	pendingAssistant := map[string]*convcontext.Message{}
 
 	for _, record := range records {
+		if strings.TrimSpace(stringPayload(record.Payload, "agent_id")) != "" {
+			// Child-Agent conversations stay out of the reusable parent model
+			// transcript. Their records remain available to replay and audit.
+			continue
+		}
 		switch record.Kind {
 		case agentcore.SemanticKindUserMessage:
 			messages = append(messages, convcontext.Message{
@@ -433,8 +438,10 @@ func runIDsFromSemanticRecords(records []agentcore.SemanticRecord) []string {
 
 func restoredTranscriptFromSemantic(records []agentcore.SemanticRecord) restoredTranscript {
 	restored := restoredTranscript{
-		Messages: messagesFromSemanticRecords(records),
-		RunIDs:   runIDsFromSemanticRecords(records),
+		Messages:           messagesFromSemanticRecords(records),
+		RunIDs:             runIDsFromSemanticRecords(records),
+		SkillContextBlocks: skillContextBlocksFromSemanticRecords(records),
+		SkillInvokedAt:     skillInvocationTimesFromSemanticRecords(records),
 	}
 	for _, record := range records {
 		if restored.CreatedAt.IsZero() || record.Timestamp.Before(restored.CreatedAt) {
@@ -454,6 +461,73 @@ func restoredTranscriptFromSemantic(records []agentcore.SemanticRecord) restored
 		restored.UpdatedAt = restored.CreatedAt
 	}
 	return restored
+}
+
+func skillContextBlocksFromSemanticRecords(records []agentcore.SemanticRecord) []agentcore.ContextBlock {
+	latest := make(map[string]agentcore.ContextBlock)
+	order := make([]string, 0)
+	for _, record := range records {
+		if record.Kind != agentcore.SemanticKindSkillActivated {
+			continue
+		}
+		// Fork bodies and child-local invocations never become parent system
+		// context on restart. The parent retains only the child result already
+		// recorded in its Skill tool exchange.
+		if strings.EqualFold(strings.TrimSpace(stringPayload(record.Payload, "context")), "fork") ||
+			strings.TrimSpace(stringPayload(record.Payload, "agent_id")) != "" {
+			continue
+		}
+		skillID := strings.TrimSpace(stringPayload(record.Payload, "skill_id"))
+		content := strings.TrimSpace(stringPayload(record.Payload, "content"))
+		if skillID == "" || content == "" {
+			continue
+		}
+		if _, exists := latest[skillID]; !exists {
+			order = append(order, skillID)
+		}
+		invokedAt := record.Timestamp
+		if raw := strings.TrimSpace(stringPayload(record.Payload, "invoked_at")); raw != "" {
+			if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+				invokedAt = parsed
+			}
+		}
+		latest[skillID] = agentcore.ContextBlock{
+			ID:         "skill_activation_" + skillID,
+			SkillID:    skillID,
+			SourcePath: stringPayload(record.Payload, "skill_path"),
+			AgentID:    stringPayload(record.Payload, "agent_id"),
+			InvokedAt:  invokedAt,
+			Content:    content,
+		}
+	}
+	blocks := make([]agentcore.ContextBlock, 0, len(order))
+	for _, skillID := range order {
+		blocks = append(blocks, latest[skillID])
+	}
+	return blocks
+}
+
+func skillInvocationTimesFromSemanticRecords(records []agentcore.SemanticRecord) map[string]time.Time {
+	result := map[string]time.Time{}
+	for _, record := range records {
+		if record.Kind != agentcore.SemanticKindSkillActivated {
+			continue
+		}
+		skillID := strings.TrimSpace(stringPayload(record.Payload, "skill_id"))
+		if skillID == "" {
+			continue
+		}
+		invokedAt := record.Timestamp.UTC()
+		if raw := strings.TrimSpace(stringPayload(record.Payload, "invoked_at")); raw != "" {
+			if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+				invokedAt = parsed.UTC()
+			}
+		}
+		if previous, exists := result[skillID]; !exists || invokedAt.After(previous) {
+			result[skillID] = invokedAt
+		}
+	}
+	return result
 }
 
 func durableRunsFromSemanticRecords(threadID string, records []agentcore.SemanticRecord) map[string]ThreadTranscriptRun {

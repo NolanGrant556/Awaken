@@ -205,3 +205,182 @@ func TestProjectSemanticRuntimeNoticePreservesRuntimeFrame(t *testing.T) {
 		t.Fatalf("runtime replay fields lost: %+v", events[0])
 	}
 }
+
+func TestProjectSemanticSkillLifecycle(t *testing.T) {
+	ts := time.Date(2026, 7, 12, 8, 0, 0, 0, time.UTC)
+	records := []agentcore.SemanticRecord{
+		{
+			SchemaVersion: 2,
+			RecordID:      "skill-invoked",
+			Seq:           3,
+			ThreadID:      "thread-skill",
+			RunID:         "run-skill",
+			Kind:          agentcore.SemanticKindSkillActivated,
+			Timestamp:     ts,
+			Payload: map[string]any{
+				"skill_id":             "presentations",
+				"skill_version":        "2",
+				"compatibility_status": "ok",
+				"effective_tools":      []string{"presentation_create", "shell"},
+			},
+		},
+		{
+			SchemaVersion: 2,
+			RecordID:      "skill-resource",
+			Seq:           4,
+			ThreadID:      "thread-skill",
+			RunID:         "run-skill",
+			Kind:          agentcore.SemanticKindResourceReceipt,
+			Timestamp:     ts,
+			Payload: map[string]any{
+				"skill_id":      "presentations",
+				"skill_version": "2",
+				"resource":      "references/layout.md",
+				"source":        "package",
+				"sha256":        "abc123",
+				"size":          int64(42),
+				"mode":          "text",
+			},
+		},
+	}
+
+	frames := ProjectSemanticRecords(records)
+	if len(frames) != 3 {
+		t.Fatalf("expected invoked, execution-context and content-loaded frames, got %+v", frames)
+	}
+	if frames[0].Type != EventAwakenSkillInvoked || frames[1].Type != EventAwakenSkillExecutionContext || frames[2].Type != EventAwakenSkillContentLoaded {
+		t.Fatalf("unexpected skill lifecycle order: %+v", frames)
+	}
+	if frames[0].SkillID != "presentations" || len(frames[1].SkillEffectiveTools) != 2 {
+		t.Fatalf("skill activation metadata lost: %+v", frames)
+	}
+	if frames[2].SkillResource != "references/layout.md" || frames[2].SkillResourceSHA256 != "abc123" || frames[2].SkillResourceSize != 42 {
+		t.Fatalf("skill resource metadata lost: %+v", frames[2])
+	}
+}
+
+func TestProjectSemanticFailedSkillLifecycle(t *testing.T) {
+	record := agentcore.SemanticRecord{
+		SchemaVersion: 2,
+		RecordID:      "skill-failed",
+		Seq:           7,
+		ThreadID:      "thread-skill",
+		RunID:         "run-skill",
+		Kind:          agentcore.SemanticKindSkillActivated,
+		Timestamp:     time.Now().UTC(),
+		Payload: map[string]any{
+			"skill_id":             "broken-skill",
+			"compatibility_status": "failed",
+			"compatibility_errors": []map[string]any{{"code": "parse_failed", "message": "frontmatter is invalid"}},
+		},
+	}
+
+	frames := ProjectSemanticRecord(record)
+	if len(frames) != 2 || frames[0].Type != EventAwakenSkillInvoked || frames[1].Type != EventAwakenSkillFailedToLoad {
+		t.Fatalf("unexpected failed skill lifecycle: %+v", frames)
+	}
+	if len(frames[1].SkillDiagnostics) != 1 || frames[1].SkillDiagnostics[0] != "parse_failed: frontmatter is invalid" {
+		t.Fatalf("failed skill diagnostics lost: %+v", frames[1])
+	}
+}
+
+func TestProjectSemanticToolExecutionMetadata(t *testing.T) {
+	record := agentcore.SemanticRecord{
+		SchemaVersion: 2,
+		RecordID:      "tool-result-with-provider",
+		Seq:           8,
+		ThreadID:      "thread-tool",
+		RunID:         "run-tool",
+		Kind:          agentcore.SemanticKindToolResult,
+		Timestamp:     time.Now().UTC(),
+		Payload: map[string]any{
+			"tool_call_id": "call-1",
+			"tool_name":    "presentation_render",
+			"content":      "rendered",
+			"outcome": map[string]any{
+				"status":                  "succeeded",
+				"environment_snapshot_id": "env-1",
+				"tool_snapshot_id":        "tools-1",
+				"provider_id":             "builtin.presentation_render",
+				"capabilities":            []string{"presentation.render", "artifact.preview"},
+				"provider_readiness":      "ready",
+				"dependency":              map[string]any{"name": "libreoffice", "kind": "executable"},
+				"dependency_observations": []map[string]any{{"name": "libreoffice", "kind": "executable"}},
+				"operation":               map[string]any{"side_effect_state": "applied"},
+			},
+		},
+	}
+
+	frames := ProjectSemanticRecord(record)
+	if len(frames) != 1 {
+		t.Fatalf("expected one tool result frame, got %+v", frames)
+	}
+	frame := frames[0]
+	if frame.EnvironmentSnapshotID != "env-1" || frame.ToolAvailabilitySnapshotID != "tools-1" || frame.ProviderID != "builtin.presentation_render" || frame.Capability != "presentation.render" || len(frame.Capabilities) != 2 || frame.Readiness != "ready" || frame.SideEffectState != "applied" {
+		t.Fatalf("execution metadata lost: %+v", frame)
+	}
+	if frame.Dependency["name"] != "libreoffice" || len(frame.Dependencies) != 1 {
+		t.Fatalf("dependency metadata lost: %+v", frame)
+	}
+}
+
+func TestProjectSemanticMassMessageReviewLifecycle(t *testing.T) {
+	payload := map[string]any{
+		"review_id":                 "review-1",
+		"tool_call_id":              "call-1",
+		"tool_name":                 "connector_send",
+		"channel":                   "email",
+		"recipient_scope":           "segment:customers",
+		"recipient_count":           42,
+		"message_count":             25,
+		"expands_recipients":        true,
+		"body_preview":              "Hello customer",
+		"template_preview":          "Hello {{name}}",
+		"attachments":               []string{"brief.pdf"},
+		"sending_account":           "sender@example.com",
+		"source_tool":               "connector_send",
+		"envelope_digest":           "digest-1",
+		"body_digest":               "body-digest-1",
+		"recipient_identity_digest": "recipient-digest-1",
+	}
+	requested := agentcore.SemanticRecord{
+		SchemaVersion: 2,
+		RecordID:      "review-requested",
+		Seq:           9,
+		ThreadID:      "thread-review",
+		RunID:         "run-review",
+		Kind:          agentcore.SemanticKindMassMessageReviewRequested,
+		Timestamp:     time.Now().UTC(),
+		Payload:       payload,
+	}
+
+	frames := ProjectSemanticRecord(requested)
+	if len(frames) != 1 || frames[0].Type != EventAwakenMassReviewRequested {
+		t.Fatalf("unexpected mass-message review request projection: %+v", frames)
+	}
+	frame := frames[0]
+	if frame.ReviewID != "review-1" || frame.ReviewEnvelopeDigest != "digest-1" || frame.ReviewBodyDigest != "body-digest-1" || frame.ReviewRecipientIdentityDigest != "recipient-digest-1" || frame.MassMessageTemplatePreview != "Hello {{name}}" || frame.MassMessageSendingAccount != "sender@example.com" {
+		t.Fatalf("mass-message review envelope lost: %+v", frame)
+	}
+	if frame.MassMessageRecipientCount != 42 || len(frame.MassMessageAttachments) != 1 || frame.MassMessageAttachments[0] != "brief.pdf" {
+		t.Fatalf("mass-message review audience or attachments lost: %+v", frame)
+	}
+	if frame.MassMessageMessageCount != 25 || frame.MassMessageExpandsRecipients == nil || !*frame.MassMessageExpandsRecipients {
+		t.Fatalf("mass-message review expansion metadata lost: %+v", frame)
+	}
+
+	resolvedPayload := make(map[string]any, len(payload)+1)
+	for key, value := range payload {
+		resolvedPayload[key] = value
+	}
+	resolvedPayload["decision"] = "approved"
+	resolved := requested
+	resolved.RecordID = "review-resolved"
+	resolved.Seq = 10
+	resolved.Kind = agentcore.SemanticKindMassMessageReviewResolved
+	resolved.Payload = resolvedPayload
+	frames = ProjectSemanticRecord(resolved)
+	if len(frames) != 1 || frames[0].Type != EventAwakenMassReviewResolved || frames[0].ReviewDecision != "approved" || frames[0].ReviewEnvelopeDigest != "digest-1" {
+		t.Fatalf("unexpected mass-message review resolution projection: %+v", frames)
+	}
+}

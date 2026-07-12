@@ -5,23 +5,16 @@ package trash
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"strings"
-	"time"
 )
 
-// TrashAdapterWindows moves files to a .trash directory under the user
-// profile using os.Rename.
-//
-// TODO: Replace this pure-Go fallback with a real SHFileOperation (or
-// IFileOperation) implementation that sends files to the Windows Recycle
-// Bin. The current implementation merely relocates files to
-// %USERPROFILE%\.trash and does not integrate with the Explorer shell.
+// TrashAdapterWindows sends files and directories to the Windows Recycle Bin
+// through the Microsoft.VisualBasic FileIO shell integration. The target path
+// is passed only through an environment variable, never interpolated into the
+// PowerShell program. Missing PowerShell/Recycle Bin support fails closed.
 type TrashAdapterWindows struct {
-	// trashDir overrides the default %USERPROFILE%\.trash destination.
-	// When empty, %USERPROFILE%\.trash is used. This is primarily for
-	// testing.
-	trashDir string
+	run func(path string, isDirectory bool) error
 }
 
 func defaultPlatformAdapter() TrashAdapter {
@@ -34,42 +27,43 @@ func (a TrashAdapterWindows) TrashPath(path string) (TrashResult, error) {
 		return TrashResult{}, fmt.Errorf("trash: resolve absolute path for %q: %w", path, err)
 	}
 
-	_, err = os.Stat(absPath)
+	info, err := os.Lstat(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return TrashResult{}, fmt.Errorf("trash: path does not exist: %s", absPath)
 		}
 		return TrashResult{}, fmt.Errorf("trash: stat %s: %w", absPath, err)
 	}
-	trashDir := a.trashDir
-	if trashDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return TrashResult{}, fmt.Errorf("trash: resolve user home dir: %w", err)
+	if info.Mode()&os.ModeSymlink != 0 || (!info.Mode().IsRegular() && !info.IsDir()) {
+		return TrashResult{}, fmt.Errorf("trash: refusing symlink or special filesystem object: %s", absPath)
+	}
+	run := a.run
+	if run == nil {
+		run = recycleWindowsPath
+	}
+	if err := run(absPath, info.IsDir()); err != nil {
+		return TrashResult{}, fmt.Errorf("trash: send %s to Windows Recycle Bin: %w", absPath, err)
+	}
+	if _, err := os.Lstat(absPath); err == nil || !os.IsNotExist(err) {
+		return TrashResult{}, fmt.Errorf("trash: Windows Recycle Bin operation did not remove the source path")
+	}
+
+	return TrashResult{OriginalPath: absPath, Method: "windows_recycle_bin"}, nil
+}
+
+func recycleWindowsPath(path string, isDirectory bool) error {
+	method := "DeleteFile"
+	if isDirectory {
+		method = "DeleteDirectory"
+	}
+	program := fmt.Sprintf(`$ErrorActionPreference='Stop'; Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::%s($env:AWAKEN_TRASH_TARGET, [Microsoft.VisualBasic.FileIO.UIOption]::OnlyErrorDialogs, [Microsoft.VisualBasic.FileIO.RecycleOption]::SendToRecycleBin)`, method)
+	command := exec.Command("powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", program)
+	command.Env = append(os.Environ(), "AWAKEN_TRASH_TARGET="+path)
+	if output, err := command.CombinedOutput(); err != nil {
+		if len(output) > 1024 {
+			output = output[:1024]
 		}
-		trashDir = filepath.Join(home, ".trash")
+		return fmt.Errorf("powershell recycle failed: %w: %s", err, output)
 	}
-	if err := os.MkdirAll(trashDir, 0o700); err != nil {
-		return TrashResult{}, fmt.Errorf("trash: ensure trash dir %s: %w", trashDir, err)
-	}
-
-	base := filepath.Base(absPath)
-	target := filepath.Join(trashDir, base)
-	if _, err := os.Stat(target); err == nil {
-		// Name collision — append a timestamp to disambiguate.
-		stamp := time.Now().Format("20060102-150405.000")
-		ext := filepath.Ext(base)
-		nameWithoutExt := strings.TrimSuffix(base, ext)
-		target = filepath.Join(trashDir, nameWithoutExt+"."+stamp+ext)
-	}
-
-	if err := os.Rename(absPath, target); err != nil {
-		return TrashResult{}, fmt.Errorf("trash: move %s to %s: %w", absPath, target, err)
-	}
-
-	return TrashResult{
-		OriginalPath: absPath,
-		TrashedPath:  target,
-		Method:       "rename",
-	}, nil
+	return nil
 }

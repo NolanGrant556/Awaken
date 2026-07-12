@@ -16,15 +16,9 @@ import (
 // scope for the first phase. Until one lands, this adapter reports
 // SandboxDegraded:
 //
-//   - inspect_read_only, local_cli, and workspace_mutation commands may run. Their
-//     safety relies on the file-chain boundary and the permission layer's
-//     sensitive-path / writable-roots checks, which are platform-independent.
-//   - open_world_system commands are denied two ways:
-//     1. The ShellExecutor fail-closes before constructing the exec.Cmd
-//     because SupportLevel() != SandboxFull (executor.go line ~112).
-//     2. ApplySandbox also returns an error for open_world_system as
-//     defense-in-depth, in case a future caller bypasses the executor's
-//     pre-check.
+//   - the default Shell broker permits bounded read-only inspection only;
+//   - workspace mutation cannot obtain RequiresAppliedSandbox authorization;
+//   - open_world_system is also rejected by ApplySandbox as defense-in-depth.
 //
 // ESCALATION PATH: GeneratePowerShellWrapper (in sandbox_windows_logic.go,
 // no build tag) generates the PowerShell command string that a real
@@ -49,18 +43,14 @@ func (SandboxAdapterWindows) SupportLevel() SandboxSupport {
 
 // ApplySandbox configures sandbox constraints on cmd.
 //
-// For inspect_read_only, local_cli, and workspace_mutation this is currently a no-op:
-// the command runs without an additional isolation boundary, and safety
-// depends on the permission layer's path checks. The SandboxResult reports
-// the degraded status so callers can observe it. GeneratePowerShellWrapper
-// is available for a future SandboxFull implementation to wrap cmd with a
-// PowerShell profile; it is intentionally NOT invoked here because the
-// degraded adapter does not provide a real process boundary.
+// For inspect_read_only, local_cli, and workspace_mutation this reports a
+// visible no-op. That is sufficient only for a restricted read-only broker;
+// RequiresAppliedSandbox authorizations reject Applied=false. The generated
+// PowerShell wrapper is not a security boundary and is intentionally unused.
 //
 // For open_world_system this returns an error (fail-closed). The
-// ShellExecutor already refuses open_world_system commands when
-// SupportLevel() != SandboxFull; this guard is defense-in-depth for any
-// caller that constructs an exec.Cmd directly and invokes ApplySandbox.
+// The default broker already refuses open_world_system; this guard is
+// defense-in-depth for direct adapter callers.
 func (SandboxAdapterWindows) ApplySandbox(cmd *exec.Cmd, tier string, workspaceRoot string) (SandboxResult, error) {
 	base := SandboxResult{
 		Support: SandboxDegraded,

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"awaken/src/mcpclient"
+	"awaken/src/tool"
 )
 
 // ConnectorState represents the lifecycle state of a connector.
@@ -79,6 +80,14 @@ type ConnectorDefinition struct {
 	// Provider is the service provider name (e.g. "Notion", "Slack").
 	Provider string `json:"provider"`
 
+	// ProviderID is the stable implementation identity propagated into every
+	// MCP tool registered from this connector. Capabilities are connector-level
+	// discovery facts; per-tool message/delete semantics must still be declared
+	// by MCP tool metadata.
+	ProviderID   tool.ProviderID              `json:"providerId"`
+	Capabilities []tool.Capability            `json:"capabilities,omitempty"`
+	Dependencies []tool.DependencyRequirement `json:"dependencies,omitempty"`
+
 	// AuthType describes how authentication is performed.
 	AuthType AuthType `json:"authType"`
 
@@ -115,6 +124,11 @@ type ConnectorStatus struct {
 
 	// Provider matches the connector definition's Provider.
 	Provider string `json:"provider,omitempty"`
+
+	ProviderID        tool.ProviderID              `json:"providerId"`
+	Capabilities      []tool.Capability            `json:"capabilities,omitempty"`
+	Dependencies      []tool.DependencyRequirement `json:"dependencies,omitempty"`
+	ProviderReadiness tool.ProviderReadiness       `json:"providerReadiness"`
 
 	// State is the derived connector state (disconnected/connected/needs-auth/failed).
 	State ConnectorState `json:"state"`

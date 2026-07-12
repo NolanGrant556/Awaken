@@ -21,13 +21,48 @@ import (
 var (
 	toolRegisterForce      = func(t tool.Tool) error { return tool.RegisterToolForce(t) }
 	toolUnregisterByPrefix = tool.UnregisterToolsByPrefix
+	toolRegistryHooksMu    sync.RWMutex
 )
+
+func registerToolThroughHook(value tool.Tool) error {
+	toolRegistryHooksMu.RLock()
+	hook := toolRegisterForce
+	toolRegistryHooksMu.RUnlock()
+	return hook(value)
+}
+
+func unregisterToolsThroughHook(prefix string) int {
+	toolRegistryHooksMu.RLock()
+	hook := toolUnregisterByPrefix
+	toolRegistryHooksMu.RUnlock()
+	return hook(prefix)
+}
+
+func setToolRegistryHooksForTest(register func(tool.Tool) error, unregister func(string) int) func() {
+	toolRegistryHooksMu.Lock()
+	previousRegister := toolRegisterForce
+	previousUnregister := toolUnregisterByPrefix
+	if register != nil {
+		toolRegisterForce = register
+	}
+	if unregister != nil {
+		toolUnregisterByPrefix = unregister
+	}
+	toolRegistryHooksMu.Unlock()
+	return func() {
+		toolRegistryHooksMu.Lock()
+		toolRegisterForce = previousRegister
+		toolUnregisterByPrefix = previousUnregister
+		toolRegistryHooksMu.Unlock()
+	}
+}
 
 // Manager owns the lifecycle of every MCP server connection. It is the
 // single entry point for the server layer and is safe for concurrent use.
 type Manager struct {
-	logger   Logger
-	registry *InProcRegistry
+	logger               Logger
+	registry             *InProcRegistry
+	messageEgressGateway tool.MessageEgressGateway
 
 	mu      sync.RWMutex
 	servers map[string]*managedServer
@@ -111,13 +146,24 @@ func WithToolsChangedCallback(fn func(serverName string)) ManagerOption {
 	return func(m *Manager) { m.onToolsChanged = fn }
 }
 
+// WithMessageEgressGateway installs the central recipient-aware outbound
+// message gate used by every dynamically registered MCP tool.
+func WithMessageEgressGateway(gateway tool.MessageEgressGateway) ManagerOption {
+	return func(m *Manager) {
+		if gateway != nil {
+			m.messageEgressGateway = gateway
+		}
+	}
+}
+
 // NewManager builds an empty manager. Servers are not started until
 // Start is called.
 func NewManager(opts ...ManagerOption) *Manager {
 	m := &Manager{
-		logger:      noopLogger{},
-		servers:     make(map[string]*managedServer),
-		credentials: NewInMemoryCredentialStore(),
+		logger:               noopLogger{},
+		servers:              make(map[string]*managedServer),
+		credentials:          NewInMemoryCredentialStore(),
+		messageEgressGateway: tool.DefaultMessageEgressGateway{},
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -764,8 +810,8 @@ func (m *Manager) registerTools(ctx context.Context, server *managedServer) erro
 	// so the registry reflects exactly the server's current tool list.
 	m.unregisterTools(server.name)
 	for _, mcpTool := range result.Tools {
-		adapter := NewMcpToolAdapter(m, server.name, mcpTool)
-		if err := toolRegisterForce(adapter); err != nil {
+		adapter := NewMcpToolAdapter(m, server.name, mcpTool, withAdapterMessageEgressGateway(m.messageEgressGateway))
+		if err := registerToolThroughHook(adapter); err != nil {
 			m.logger.Warnf("register mcp tool %q failed: %v", adapter.Name(), err)
 			continue
 		}
@@ -777,7 +823,7 @@ func (m *Manager) registerTools(ctx context.Context, server *managedServer) erro
 // is a no-op when the server has no tools registered.
 func (m *Manager) unregisterTools(serverName string) {
 	prefix := "mcp__" + serverName + "__"
-	toolUnregisterByPrefix(prefix)
+	unregisterToolsThroughHook(prefix)
 }
 
 // RefreshTools re-queries the server's tool list and updates the

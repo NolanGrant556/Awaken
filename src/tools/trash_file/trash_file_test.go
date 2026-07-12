@@ -141,6 +141,94 @@ func TestTrashFileResolvesRelativeDirectoryThroughPermissionContext(t *testing.T
 	}
 }
 
+func TestTrashFileRejectsSensitiveAndProtectedPathsBeforeAdapter(t *testing.T) {
+	adapter := &recordingTrashAdapter{dir: filepath.Join(t.TempDir(), "trash")}
+	trash.SetAdapter(adapter)
+	t.Cleanup(func() { trash.SetAdapter(nil) })
+
+	workspace := t.TempDir()
+	sensitive := filepath.Join(workspace, ".env")
+	protected := filepath.Join(workspace, "protected")
+	if err := os.WriteFile(sensitive, []byte("SECRET=value"), 0o600); err != nil {
+		t.Fatalf("write sensitive target: %v", err)
+	}
+	if err := os.MkdirAll(protected, 0o755); err != nil {
+		t.Fatalf("create protected target: %v", err)
+	}
+	permissionContext := tool.NewTaskScopePermissionContext(
+		"test", workspace, nil, []string{workspace}, nil, nil, []string{protected}, "",
+	)
+	ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
+	for _, target := range []string{sensitive, protected} {
+		t.Run(filepath.Base(target), func(t *testing.T) {
+			input := `{"path":` + mustJSONQuote(t, target) + `}`
+			decision := (&TrashFileTool{}).CheckPermission(context.Background(), input, permissionContext)
+			if decision.Behavior != tool.PermissionDeny {
+				t.Fatalf("expected safe-path denial, got %+v", decision)
+			}
+			outcome, err := (&TrashFileTool{}).ExecuteOutcome(ctx, input, nil)
+			if err != nil {
+				t.Fatalf("transport error: %v", err)
+			}
+			if outcome.Status != tool.OutcomeDenied || outcome.ErrorCode != tool.ErrorCodeUnsafeRecoverableDeletePath || outcome.TransportStatus != tool.TransportNotStarted {
+				t.Fatalf("unexpected denial outcome: %+v", outcome)
+			}
+			if _, err := os.Lstat(target); err != nil {
+				t.Fatalf("denied target changed: %v", err)
+			}
+		})
+	}
+	if len(adapter.calls) != 0 {
+		t.Fatalf("adapter ran for denied paths: %+v", adapter.calls)
+	}
+}
+
+func TestTrashFileRejectsLeafAndResolvedSensitiveSymlinks(t *testing.T) {
+	adapter := &recordingTrashAdapter{dir: filepath.Join(t.TempDir(), "trash")}
+	trash.SetAdapter(adapter)
+	t.Cleanup(func() { trash.SetAdapter(nil) })
+
+	workspace := t.TempDir()
+	realFile := filepath.Join(workspace, "real.txt")
+	leafLink := filepath.Join(workspace, "real-link.txt")
+	gitDir := filepath.Join(workspace, ".git")
+	gitConfig := filepath.Join(gitDir, "config")
+	gitAlias := filepath.Join(workspace, "git-alias")
+	if err := os.WriteFile(realFile, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realFile, leafLink); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(gitConfig, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(gitDir, gitAlias); err != nil {
+		t.Fatal(err)
+	}
+	permissionContext := tool.NewPermissionContext(workspace, []string{workspace})
+	ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
+	for _, target := range []string{leafLink, filepath.Join(gitAlias, "config")} {
+		input := `{"path":` + mustJSONQuote(t, target) + `}`
+		outcome, err := (&TrashFileTool{}).ExecuteOutcome(ctx, input, nil)
+		if err != nil || outcome.Status != tool.OutcomeDenied || outcome.ErrorCode != tool.ErrorCodeUnsafeRecoverableDeletePath {
+			t.Fatalf("expected symlink-safe denial for %q, outcome=%+v err=%v", target, outcome, err)
+		}
+	}
+	if content, err := os.ReadFile(realFile); err != nil || string(content) != "keep" {
+		t.Fatalf("leaf symlink target changed: content=%q err=%v", content, err)
+	}
+	if content, err := os.ReadFile(gitConfig); err != nil || string(content) != "keep" {
+		t.Fatalf("resolved sensitive target changed: content=%q err=%v", content, err)
+	}
+	if len(adapter.calls) != 0 {
+		t.Fatalf("adapter ran for symlink paths: %+v", adapter.calls)
+	}
+}
+
 func mustJSONQuote(t *testing.T, value string) string {
 	t.Helper()
 	data, err := json.Marshal(value)

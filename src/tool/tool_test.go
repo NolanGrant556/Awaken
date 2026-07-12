@@ -81,15 +81,14 @@ func TestListToolsIsStableSorted(t *testing.T) {
 	}
 }
 
-// TestValidateToolAcceptsMcpAndSkillNames verifies the extended
-// mcpSafeNamePattern accepts the namespaced forms used by the MCP runtime
-// and the skill runtime.
-func TestValidateToolAcceptsMcpAndSkillNames(t *testing.T) {
+// TestValidateToolAcceptsNamespacedMcpNames verifies the extended
+// mcpSafeNamePattern accepts nested forms used by the MCP runtime.
+func TestValidateToolAcceptsNamespacedMcpNames(t *testing.T) {
 	cases := []string{
 		"mcp__filesystem__read_file",
 		"mcp__slack__post_message",
 		"mcp__chrome-devtools-mcp__close_page",
-		"skill__planner__draft_outline",
+		"mcp__planning__draft_outline",
 		"web_search", // builtin-style still accepted
 	}
 	for _, name := range cases {

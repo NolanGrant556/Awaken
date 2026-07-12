@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"awaken/src/mcpclient"
+	"awaken/src/tool"
 )
 
 // ErrConnectorNotFound is returned when a connector ID is not registered.
@@ -88,6 +90,7 @@ func (r *Registry) LoadSources(ctx context.Context, sources []ConnectorSource) e
 		for _, d := range defs {
 			// Ensure SourceOrigin is set correctly.
 			d.SourceOrigin = src.Origin()
+			d = normalizeConnectorDefinition(d)
 
 			existing, ok := all[d.ID]
 			if ok {
@@ -174,6 +177,19 @@ func (r *Registry) Connect(ctx context.Context, connectorID string) error {
 		scopedConfigs = def.McpConfigFactory(def, nil)
 	} else {
 		return fmt.Errorf("connector %q has neither a config factory nor a raw config", connectorID)
+	}
+	for key, scoped := range scopedConfigs {
+		providerID := def.ProviderID
+		if providerID == "" {
+			providerID = tool.ProviderID("connector:" + def.ID)
+		}
+		scoped.Config.Provider = &mcpclient.ServerProviderManifest{
+			ProviderID:   providerID,
+			DisplayName:  def.DisplayName,
+			Source:       tool.SourceConnector,
+			Dependencies: append([]tool.DependencyRequirement(nil), def.Dependencies...),
+		}
+		scopedConfigs[key] = scoped
 	}
 
 	var serverKeys []string
@@ -297,13 +313,17 @@ func (r *Registry) List() []ConnectorStatus {
 	var out []ConnectorStatus
 	for id, def := range r.defs {
 		status := ConnectorStatus{
-			ID:           def.ID,
-			DisplayName:  def.DisplayName,
-			Category:     def.Category,
-			Provider:     def.Provider,
-			SourceOrigin: def.SourceOrigin,
-			AuthType:     def.AuthType,
-			State:        StateDisconnected,
+			ID:                def.ID,
+			DisplayName:       def.DisplayName,
+			Category:          def.Category,
+			Provider:          def.Provider,
+			ProviderID:        def.ProviderID,
+			Capabilities:      append([]tool.Capability(nil), def.Capabilities...),
+			Dependencies:      append([]tool.DependencyRequirement(nil), def.Dependencies...),
+			SourceOrigin:      def.SourceOrigin,
+			AuthType:          def.AuthType,
+			State:             StateDisconnected,
+			ProviderReadiness: tool.ProviderUnavailable,
 		}
 
 		entry := r.active[id]
@@ -311,6 +331,7 @@ func (r *Registry) List() []ConnectorStatus {
 			status.ServerNames = entry.serverKeys
 			// Derive state from the MCP server snapshots.
 			status.State = deriveConnectorState(entry.serverKeys, snapByServer)
+			status.ProviderReadiness = connectorProviderReadiness(status.State)
 		}
 
 		// Check for shadowing by inspecting ServerSnapshot.SourceConnectorID.
@@ -332,6 +353,46 @@ func (r *Registry) List() []ConnectorStatus {
 	return out
 }
 
+func normalizeConnectorDefinition(def ConnectorDefinition) ConnectorDefinition {
+	if def.ProviderID == "" {
+		def.ProviderID = tool.ProviderID("connector:" + def.ID)
+	}
+	def.Capabilities = tool.NormalizeCapabilities(def.Capabilities)
+	def.Dependencies = normalizeConnectorDependencies(def.Dependencies)
+	return def
+}
+
+func normalizeConnectorDependencies(values []tool.DependencyRequirement) []tool.DependencyRequirement {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]tool.DependencyRequirement, 0, len(values))
+	for _, value := range values {
+		value.Name = strings.TrimSpace(value.Name)
+		if value.Name == "" {
+			continue
+		}
+		key := string(value.Kind) + "\x00" + value.Name + "\x00" + value.VersionConstraint
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func connectorProviderReadiness(state ConnectorState) tool.ProviderReadiness {
+	switch state {
+	case StateConnected:
+		return tool.ProviderReady
+	case StateNeedsAuth:
+		return tool.ProviderNeedsAuth
+	case StatePending, StateFailed, StateDisconnected:
+		return tool.ProviderUnavailable
+	default:
+		return tool.ProviderUnavailable
+	}
+}
+
 // Status returns the derived status for a single connector.
 func (r *Registry) Status(connectorID string) (ConnectorStatus, error) {
 	r.mu.RLock()
@@ -349,19 +410,24 @@ func (r *Registry) Status(connectorID string) (ConnectorStatus, error) {
 	}
 
 	status := ConnectorStatus{
-		ID:           def.ID,
-		DisplayName:  def.DisplayName,
-		Category:     def.Category,
-		Provider:     def.Provider,
-		SourceOrigin: def.SourceOrigin,
-		AuthType:     def.AuthType,
-		State:        StateDisconnected,
+		ID:                def.ID,
+		DisplayName:       def.DisplayName,
+		Category:          def.Category,
+		Provider:          def.Provider,
+		ProviderID:        def.ProviderID,
+		Capabilities:      append([]tool.Capability(nil), def.Capabilities...),
+		Dependencies:      append([]tool.DependencyRequirement(nil), def.Dependencies...),
+		ProviderReadiness: tool.ProviderUnavailable,
+		SourceOrigin:      def.SourceOrigin,
+		AuthType:          def.AuthType,
+		State:             StateDisconnected,
 	}
 
 	entry := r.active[connectorID]
 	if entry != nil && entry.connected {
 		status.ServerNames = entry.serverKeys
 		status.State = deriveConnectorState(entry.serverKeys, snapByServer)
+		status.ProviderReadiness = connectorProviderReadiness(status.State)
 	}
 
 	return status, nil

@@ -127,4 +127,4 @@ func (schemaProviderTool) Definition() ToolDefinition {
 	return ToolDefinition{Name: "demo", Description: "demo"}
 }
 func (schemaProviderTool) Execute(context.Context, string) (string, error) { return "", nil }
-func (t schemaProviderTool) InputSchema() ToolParametersSchema           { return t.schema }
+func (t schemaProviderTool) InputSchema() ToolParametersSchema             { return t.schema }

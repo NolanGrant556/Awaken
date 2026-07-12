@@ -4745,6 +4745,8 @@ Body.`), 0o600); err != nil {
 	}
 
 	registry := skills.NewSkillRegistry(testLogger{})
+	invokedAt := time.Date(2026, 7, 12, 1, 2, 3, 0, time.UTC)
+	registry.MarkInvoked("always-user", invokedAt)
 	router := NewRouterWithWorkspace(nil, nil, nil, nil, registry, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/skills", nil)
@@ -4759,6 +4761,12 @@ Body.`), 0o600); err != nil {
 	}
 	if len(listed) != 1 || listed[0].ID != "always-user" || listed[0].SourceOrigin != "user" {
 		t.Fatalf("expected user skill without workspace, got %+v", listed)
+	}
+	if listed[0].State != string(skills.StateLoaded) || !listed[0].UserInvocable || !listed[0].ModelInvocable {
+		t.Fatalf("expected concrete loaded/invocation states, got %+v", listed[0])
+	}
+	if listed[0].LastInvokedAt != invokedAt.Format(time.RFC3339Nano) {
+		t.Fatalf("lastInvokedAt=%q", listed[0].LastInvokedAt)
 	}
 }
 
@@ -4900,7 +4908,7 @@ Body.`)
 	}
 }
 
-func TestValidateComposerTokensRejectsUnavailableSkill(t *testing.T) {
+func TestValidateComposerTokensAllowsSkillWithMissingExecutionDependency(t *testing.T) {
 	skillsRoot := t.TempDir()
 	writeServerTestSkillPackage(t, skillsRoot, "needs-mcp", `---
 name: needs-mcp
@@ -4926,8 +4934,47 @@ Body.`)
 			},
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "not available") {
-		t.Fatalf("expected unavailable skill rejection, got %v", err)
+	if err != nil {
+		t.Fatalf("dependency readiness must not disable a structurally valid Skill: %v", err)
+	}
+	def := registry.Get("needs-mcp")
+	if def == nil || def.State != skills.StateLoaded || len(def.DeprecatedWarnings) == 0 {
+		t.Fatalf("expected loaded Skill with execution diagnostic, got %+v", def)
+	}
+}
+
+func TestValidateComposerTokensAllowsLoadedUserInvocableMCPSkill(t *testing.T) {
+	registry := skills.NewSkillRegistry(testLogger{})
+	registry.RegisterSkill(&skills.SkillDefinition{
+		ID: "mcp-calendar", Name: "mcp-calendar", Description: "Calendar prompt",
+		Source: skills.SourceMcp, Scope: skills.SourceMcp, State: skills.StateLoaded,
+		Context: skills.ContextInline, UserInvocable: true,
+		McpBinding: &skills.McpBinding{ServerName: "calendar", PromptName: "plan", Kind: "prompt"},
+	})
+	handler := runHandlers{skillRegistry: registry}
+	err := handler.validateComposerTokens([]awruntime.ComposerToken{{
+		ID: "skill:mcp-calendar:mcp", Type: "skill", Label: "MCP Calendar",
+		Payload: awruntime.ComposerTokenPayload{SkillID: "mcp-calendar", SourceOrigin: "mcp"},
+	}})
+	if err != nil {
+		t.Fatalf("loaded user-invocable MCP Skill should be accepted: %v", err)
+	}
+}
+
+func TestValidateComposerTokensRejectsNonUserInvocableSkill(t *testing.T) {
+	registry := skills.NewSkillRegistry(testLogger{})
+	registry.RegisterSkill(&skills.SkillDefinition{
+		ID: "model-only", Name: "model-only", Description: "Model-only workflow",
+		Source: skills.SourcePlugin, Scope: skills.SourcePlugin, State: skills.StateLoaded,
+		Context: skills.ContextInline, UserInvocable: false, UserInvocableSet: true,
+	})
+	handler := runHandlers{skillRegistry: registry}
+	err := handler.validateComposerTokens([]awruntime.ComposerToken{{
+		ID: "skill:model-only:plugin", Type: "skill",
+		Payload: awruntime.ComposerTokenPayload{SkillID: "model-only", SourceOrigin: "plugin"},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "not user-invocable") {
+		t.Fatalf("expected user-invocable rejection, got %v", err)
 	}
 }
 
@@ -5087,3 +5134,23 @@ func echoInProcServerFactory() mcpclient.InProcServerFactory {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+func TestResolveMassMessageReviewRequiresAllCanonicalDigests(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/v1/runs/run-1/mass-message-reviews/review-1/resolve", strings.NewReader(`{"decision":"approved","envelopeDigest":"message-1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("run_id", "run-1")
+	req.SetPathValue("review_id", "review-1")
+	rec := httptest.NewRecorder()
+
+	(runHandlers{}).handleResolveMassMessageReview(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing canonical digests status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var response errorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if response.Error != "MASS_MESSAGE_REVIEW_DIGEST_REQUIRED" {
+		t.Fatalf("unexpected error response: %+v", response)
+	}
+}

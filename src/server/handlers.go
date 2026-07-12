@@ -37,7 +37,10 @@ type renameThreadRequest struct {
 }
 
 type resolveMassMessageReviewRequest struct {
-	Decision string `json:"decision"`
+	Decision                string `json:"decision"`
+	EnvelopeDigest          string `json:"envelopeDigest"`
+	BodyDigest              string `json:"bodyDigest"`
+	RecipientIdentityDigest string `json:"recipientIdentityDigest"`
 }
 
 type answerUserQuestionRequest struct {
@@ -231,20 +234,25 @@ func (h runHandlers) validateComposerTokens(tokens []awruntime.ComposerToken) er
 		if def == nil {
 			return errors.New("selected skill not found: " + skillID)
 		}
-		if def.Source != skills.SourceProject && def.Source != skills.SourceUser {
-			return errors.New("selected skill has unsupported source: " + string(def.Source))
-		}
-		if def.State != skills.StateAvailable {
+		if def.State != skills.StateLoaded {
 			if strings.TrimSpace(def.UnavailableReason) != "" {
-				return errors.New("selected skill is not available: " + def.UnavailableReason)
+				return errors.New("selected skill is not loaded: " + def.UnavailableReason)
 			}
-			return errors.New("selected skill is not available: " + skillID)
+			return errors.New("selected skill is not loaded: " + skillID)
+		}
+		if !def.UserInvocable {
+			return errors.New("selected skill is not user-invocable: " + skillID)
 		}
 		if source := strings.TrimSpace(token.Payload.SourceOrigin); source != "" && source != string(def.Source) {
 			return errors.New("selected skill source changed: " + skillID)
 		}
-		if path := strings.TrimSpace(token.Payload.SkillFilePath); path != "" && cleanPath(path) != cleanPath(def.SkillFilePath) {
-			return errors.New("selected skill path changed: " + skillID)
+		if path := strings.TrimSpace(token.Payload.SkillFilePath); path != "" {
+			if strings.TrimSpace(def.SkillFilePath) == "" {
+				return errors.New("selected skill source has no local package path: " + skillID)
+			}
+			if cleanPath(path) != cleanPath(def.SkillFilePath) {
+				return errors.New("selected skill path changed: " + skillID)
+			}
 		}
 	}
 	return nil
@@ -379,13 +387,28 @@ func (h runHandlers) handleResolveMassMessageReview(w http.ResponseWriter, r *ht
 		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REVIEW_DECISION", "decision must be approved or rejected")
 		return
 	}
+	digests := awruntime.MassMessageReviewDigests{
+		EnvelopeDigest:          strings.TrimSpace(req.EnvelopeDigest),
+		BodyDigest:              strings.TrimSpace(req.BodyDigest),
+		RecipientIdentityDigest: strings.TrimSpace(req.RecipientIdentityDigest),
+	}
+	if digests.EnvelopeDigest == "" || digests.BodyDigest == "" || digests.RecipientIdentityDigest == "" {
+		writeErrorJSON(w, http.StatusBadRequest, "MASS_MESSAGE_REVIEW_DIGEST_REQUIRED", "envelopeDigest, bodyDigest, and recipientIdentityDigest are required")
+		return
+	}
 
-	if err := h.runService.ResolveMassMessageReview(runID, reviewID, decision); err != nil {
+	if err := h.runService.ResolveMassMessageReview(runID, reviewID, decision, digests); err != nil {
 		switch {
 		case errors.Is(err, awruntime.ErrRunNotFound), errors.Is(err, awruntime.ErrMassMessageReviewNotFound):
 			writeErrorJSON(w, http.StatusNotFound, "MASS_MESSAGE_REVIEW_NOT_FOUND", err.Error())
 		case errors.Is(err, awruntime.ErrRunTerminal):
 			writeErrorJSON(w, http.StatusConflict, "RUN_TERMINAL", err.Error())
+		case errors.Is(err, awruntime.ErrMassMessageReviewDigestMismatch):
+			writeErrorJSON(w, http.StatusConflict, "MASS_MESSAGE_REVIEW_DIGEST_MISMATCH", err.Error())
+		case errors.Is(err, awruntime.ErrMassMessageReviewAlreadyResolved):
+			writeErrorJSON(w, http.StatusConflict, "MASS_MESSAGE_REVIEW_ALREADY_RESOLVED", err.Error())
+		case errors.Is(err, awruntime.ErrMassMessageReviewDigestMissing):
+			writeErrorJSON(w, http.StatusBadRequest, "MASS_MESSAGE_REVIEW_DIGEST_REQUIRED", err.Error())
 		case errors.Is(err, awruntime.ErrInvalidReviewDecision):
 			writeErrorJSON(w, http.StatusBadRequest, "INVALID_REVIEW_DECISION", err.Error())
 		default:

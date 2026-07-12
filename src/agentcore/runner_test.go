@@ -18,6 +18,7 @@ import (
 	convcontext "awaken/src/context"
 	"awaken/src/llm"
 	"awaken/src/tool"
+	"awaken/src/tool/profile"
 	_ "awaken/src/tools/apply_patch"
 	_ "awaken/src/tools/file_read"
 )
@@ -25,6 +26,48 @@ import (
 type runnerTestTool struct {
 	name string
 	fail bool
+}
+
+type runnerMassMessageTool struct {
+	name       string
+	executions *int
+}
+
+func (t runnerMassMessageTool) Name() string        { return t.name }
+func (t runnerMassMessageTool) Description() string { return "mass-message run identity probe" }
+func (t runnerMassMessageTool) Parameters() []tool.ToolParameter {
+	return []tool.ToolParameter{{Name: "value", Type: "string", Required: true}}
+}
+func (t runnerMassMessageTool) Definition() tool.ToolDefinition {
+	return tool.ToolDefinition{Name: t.name, Source: tool.SourceBuiltin, Description: t.Description()}
+}
+func (t runnerMassMessageTool) CheckPermission(context.Context, string, tool.PermissionContext) tool.PermissionDecision {
+	return tool.NeedsMassMessageReviewPermission("mass message requires review", tool.DecisionMetadata{
+		MassMessage: &tool.MassMessageMetadata{
+			Channel: "test", RecipientCount: 2, MessageCount: 2,
+			SendingAccount: "host-account", SourceTool: t.name,
+			EnvelopeDigest: "message:runner", BodyDigest: "sha256:runner",
+			RecipientIdentityDigest: "recipients_sha256:runner",
+		},
+	})
+}
+func (t runnerMassMessageTool) Execute(context.Context, string) (string, error) {
+	*t.executions = *t.executions + 1
+	return "sent", nil
+}
+
+type runnerApprovingMassReviewSink struct {
+	events  []AwakenEvent
+	request AwakenEvent
+}
+
+func (s *runnerApprovingMassReviewSink) Emit(event AwakenEvent) {
+	s.events = append(s.events, event)
+}
+
+func (s *runnerApprovingMassReviewSink) AwaitMassMessageReview(_ context.Context, request AwakenEvent) (ReviewDecision, error) {
+	s.request = request
+	return ReviewDecisionApproved, nil
 }
 
 func (t runnerTestTool) Name() string {
@@ -56,6 +99,61 @@ func (t runnerTestTool) Execute(ctx context.Context, input string) (string, erro
 		return "", errors.New("boom")
 	}
 	return "echo:" + input, nil
+}
+
+func TestRunnerBindsAcceptedAndGeneratedRunIDBeforeApprovedToolExecution(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		presetRun string
+		child     bool
+	}{
+		{name: "accepted host run id", presetRun: "run_host_owned"},
+		{name: "generated run id"},
+		{name: "inherited child run id", presetRun: "run_parent", child: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			toolName := "runner_mass_identity_" + strings.ReplaceAll(test.name, " ", "_")
+			var executions int
+			mustRegisterRunnerTool(t, runnerMassMessageTool{name: toolName, executions: &executions})
+
+			config := AgentConfig{MaxThoughts: 2, ModelConfig: ModelConfig{Model: "test-model"}}
+			if test.child {
+				config.SubagentOrigin = &profile.SubagentOrigin{AgentID: "child-1", ParentAgentID: "root", Depth: 1}
+			}
+			conversation := convcontext.NewConversation(nil)
+			conversation.UserInput("send approved batch")
+			runner := NewRunner(config, conversation, NewRequestBuilder(config))
+			runner.runID = test.presetRun
+			runner.recorder = NoopSemanticRecorder{}
+			turn := 0
+			runner.streamLLMFunc = func(context.Context, *runEventEmitter) (*llm.Response, error) {
+				turn++
+				if turn == 1 {
+					return &llm.Response{ToolCalls: []llm.ToolCall{{
+						ID: "call_mass_identity", Name: toolName, Input: `{"value":"send"}`,
+					}}}, nil
+				}
+				return &llm.Response{Content: "done"}, nil
+			}
+			sink := &runnerApprovingMassReviewSink{}
+			answer, err := runner.RunStreamWithEvents(context.Background(), sink)
+			if err != nil {
+				t.Fatalf("RunStreamWithEvents: %v", err)
+			}
+			if answer != "done" || executions != 1 {
+				t.Fatalf("approved tool did not execute once: answer=%q executions=%d", answer, executions)
+			}
+			if runner.runID == "" || runner.toolRuntime.runID != runner.runID {
+				t.Fatalf("runtime run identity drifted: runner=%q runtime=%q", runner.runID, runner.toolRuntime.runID)
+			}
+			if test.presetRun != "" && runner.runID != test.presetRun {
+				t.Fatalf("caller run id was replaced: got %q want %q", runner.runID, test.presetRun)
+			}
+			if sink.request.ReviewEnvelopeDigest == "" || sink.request.ReviewBodyDigest == "" || sink.request.ReviewRecipientIdentityDigest == "" {
+				t.Fatalf("canonical review binding missing: %+v", sink.request)
+			}
+		})
+	}
 }
 
 func TestRunnerNativeToolCallLoop(t *testing.T) {

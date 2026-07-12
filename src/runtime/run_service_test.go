@@ -446,19 +446,19 @@ func TestEffectiveInputForComposerSkillTokensKeepsUserTask(t *testing.T) {
 		},
 	})
 	if effective != "summarize the customer list" {
-		t.Fatalf("expected user task unchanged without NL skill__ instruction, got %q", effective)
+		t.Fatalf("expected user task unchanged without duplicate Skill instruction, got %q", effective)
 	}
-	if strings.Contains(effective, "skill__") || strings.Contains(effective, "<awaken_composer_tokens>") {
-		t.Fatalf("legacy skill tool instruction path must be removed, got %q", effective)
+	if strings.Contains(effective, "<awaken_composer_tokens>") {
+		t.Fatalf("composer token internals must not enter user text, got %q", effective)
 	}
 }
 
-func TestEffectiveInputForComposerSkillTokensEmptyInputFallback(t *testing.T) {
+func TestEffectiveInputForComposerSkillTokensKeepsEmptyInput(t *testing.T) {
 	effective := effectiveInputForComposerTokens("", []ComposerToken{
 		{ID: "skill:pptx:user", Type: "skill", Label: "pptx", Payload: ComposerTokenPayload{SkillID: "pptx"}},
 	})
-	if effective != "Use the selected Skill to help the user." {
-		t.Fatalf("unexpected empty-input fallback: %q", effective)
+	if effective != "" {
+		t.Fatalf("token-only turn changed the user-authored empty input: %q", effective)
 	}
 }
 

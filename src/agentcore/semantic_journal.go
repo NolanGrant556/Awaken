@@ -87,9 +87,6 @@ func ToolCallSemanticRecord(threadID, runID, turnID, sessionID, parentID string,
 		"tool_name":    call.Function.Name,
 		"arguments":    call.Function.Arguments,
 	}
-	if skillID := skillIDFromToolName(call.Function.Name); skillID != "" {
-		payload["skill_id"] = skillID
-	}
 	return NewSemanticRecord(SemanticKindToolCall, threadID, runID, turnID, parentID, sessionID, payload)
 }
 
@@ -99,9 +96,6 @@ func ToolResultSemanticRecord(threadID, runID, turnID, sessionID string, result 
 		"tool_name":    result.Name,
 		"content":      result.Content,
 		"is_error":     result.IsError,
-	}
-	if skillID := skillIDFromToolName(result.Name); skillID != "" {
-		payload["skill_id"] = skillID
 	}
 	if result.Outcome.Status != "" {
 		payload["outcome"] = outcomeToMap(result.Outcome)
@@ -116,15 +110,6 @@ func ToolResultSemanticRecord(threadID, runID, turnID, sessionID string, result 
 		payload["patch_summary"] = strings.TrimSpace(result.PatchSummary)
 	}
 	return NewSemanticRecord(SemanticKindToolResult, threadID, runID, turnID, result.ToolCallID, sessionID, payload)
-}
-
-func skillIDFromToolName(toolName string) string {
-	const prefix = "skill__"
-	if !strings.HasPrefix(toolName, prefix) {
-		return ""
-	}
-	id := strings.TrimPrefix(toolName, prefix)
-	return strings.ReplaceAll(id, "_", "-")
 }
 
 func ArtifactSemanticRecord(threadID, runID, turnID, sessionID string, event AwakenEvent) SemanticRecord {

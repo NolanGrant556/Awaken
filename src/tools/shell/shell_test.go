@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"awaken/src/tool"
+	"awaken/src/tool/sandbox"
 )
 
 func TestShellSuccess(t *testing.T) {
@@ -32,6 +33,26 @@ func TestShellNonZeroExitIsReturned(t *testing.T) {
 	result := decodeResult(t, out)
 	if result.ExitCode != 7 || result.Stderr != "nope" {
 		t.Fatalf("unexpected nonzero result: %+v", result)
+	}
+}
+
+func TestShellDirectNonzeroOutcomePreservesProcessAndUnknownSideEffects(t *testing.T) {
+	root := t.TempDir()
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, nil))
+	outcome, err := (&ShellTool{}).ExecuteOutcome(
+		ctx, `{"command":"printf partial > direct-partial.txt; exit 7"}`, nil,
+	)
+	if err != nil {
+		t.Fatalf("ExecuteOutcome transport error: %v", err)
+	}
+	if outcome.Status != tool.OutcomeFailed || outcome.ProcessStatus != tool.ProcessExited || outcome.ErrorCode != tool.ErrorCodeProcessExitNonzero || outcome.ExitCode == nil || *outcome.ExitCode != 7 {
+		t.Fatalf("real process failure facts were lost: %+v", outcome)
+	}
+	if outcome.Operation == nil || outcome.Operation.SideEffectState != tool.OutcomeSideEffectUnknown || len(outcome.Changes) != 0 {
+		t.Fatalf("direct provider fabricated side-effect certainty: operation=%+v changes=%+v", outcome.Operation, outcome.Changes)
+	}
+	if content, readErr := os.ReadFile(filepath.Join(root, "direct-partial.txt")); readErr != nil || string(content) != "partial" {
+		t.Fatalf("real partial side effect was lost: content=%q err=%v", content, readErr)
 	}
 }
 
@@ -161,10 +182,11 @@ func TestShellPermissionAllowsForComplexOrDangerousCommands(t *testing.T) {
 		t.Fatalf("expected redirect command to be allowed with warning risk, got %+v", decision)
 	}
 
-	// rm is denied at shell level because deletion must go through TrashAdapter.
+	// A direct rm is allowed by the current-user shell; no Trash guarantee is
+	// fabricated at permission time.
 	decision = (&ShellTool{}).CheckPermission(context.Background(), `{"command":"rm -rf build"}`, permissionContext)
-	if decision.Behavior != tool.PermissionDeny {
-		t.Fatalf("expected shell delete command to be denied, got %+v", decision)
+	if decision.Behavior != tool.PermissionAllow || decision.Metadata.RiskTone == "recoverable_delete_transform" || len(decision.Metadata.AffectedPaths) != 0 {
+		t.Fatalf("expected direct current-user execution without Trash claim, got %+v", decision)
 	}
 }
 
@@ -198,7 +220,7 @@ func TestShellPermissionAllowsSafeLanes(t *testing.T) {
 	}
 }
 
-func TestShellPermissionRequiresMassReviewForMessagingCLI(t *testing.T) {
+func TestShellPermissionDoesNotClaimUniversalMassMessageGate(t *testing.T) {
 	root := t.TempDir()
 	ctx := tool.NewPermissionContext(root, []string{root})
 	shellTool := &ShellTool{}
@@ -212,26 +234,23 @@ func TestShellPermissionRequiresMassReviewForMessagingCLI(t *testing.T) {
 	for _, cmd := range cases {
 		t.Run(cmd, func(t *testing.T) {
 			decision := shellTool.CheckPermission(context.Background(), `{"command":`+quoteJSON(cmd)+`}`, ctx)
-			if decision.Behavior != tool.PermissionNeedsMassMessageReview {
-				t.Fatalf("expected mass message review for %q, got %+v", cmd, decision)
-			}
-			if decision.Metadata.MassMessage == nil || decision.Metadata.MassMessage.SourceTool != "shell" {
-				t.Fatalf("expected shell mass message metadata for %q, got %+v", cmd, decision.Metadata)
+			if decision.Behavior != tool.PermissionAllow || decision.Metadata.MassMessage != nil {
+				t.Fatalf("default host shell must not pretend it can universally intercept %q: %+v", cmd, decision)
 			}
 		})
 	}
 }
 
-func TestShellExecutionPolicyDeniesMassMessagingCLIDirectExecution(t *testing.T) {
+func TestShellExecutionPolicyAllowsCollaborationCLI(t *testing.T) {
 	root := t.TempDir()
 	ctx := tool.NewPermissionContext(root, []string{root})
 	policy := EvaluateShellExecutionPolicy(`feishu message send --chat-id all --text hello`, root, ctx)
-	if policy.DenyReason == "" {
-		t.Fatalf("expected direct execution policy to deny mass messaging CLI, got %+v", policy)
+	if policy.DenyReason != "" || !policy.DirectAllow {
+		t.Fatalf("expected current-user execution policy to allow collaboration CLI, got %+v", policy)
 	}
 }
 
-func TestShellPolicyDeniesDirectOfficeRuntimeExecution(t *testing.T) {
+func TestShellPolicyHasNoOfficeExecutableNameDeny(t *testing.T) {
 	root := t.TempDir()
 	ctx := tool.NewPermissionContext(root, []string{root})
 	commands := []string{
@@ -259,8 +278,8 @@ func TestShellPolicyDeniesDirectOfficeRuntimeExecution(t *testing.T) {
 				EvaluateShellPolicy(command, root, ctx),
 				EvaluateShellExecutionPolicy(command, root, ctx),
 			} {
-				if !strings.Contains(policy.DenyReason, "OfficeRenderWorker") {
-					t.Fatalf("expected OfficeRenderWorker hard deny for %q, got %+v", command, policy)
+				if strings.Contains(policy.DenyReason, "OfficeRenderWorker") {
+					t.Fatalf("Office executable names must not be a policy hard deny for %q: %+v", command, policy)
 				}
 			}
 			decision := (&ShellTool{}).CheckPermission(
@@ -268,8 +287,8 @@ func TestShellPolicyDeniesDirectOfficeRuntimeExecution(t *testing.T) {
 				`{"command":`+quoteJSON(command)+`}`,
 				ctx,
 			)
-			if decision.Behavior != tool.PermissionDeny {
-				t.Fatalf("expected permission deny for %q, got %+v", command, decision)
+			if decision.Behavior != tool.PermissionAllow {
+				t.Fatalf("expected Office command to reach the broker for %q, got %+v", command, decision)
 			}
 		})
 	}
@@ -296,16 +315,44 @@ func TestShellPolicyAllowsOfficeRuntimeDiagnosticsWithoutLaunching(t *testing.T)
 	}
 }
 
-func TestShellExecutorRechecksOfficeRuntimeDenyBeforeSpawning(t *testing.T) {
+func TestShellExecutorRunsOfficeNamedCLIThroughDefaultProvider(t *testing.T) {
+	sandbox.SetAdapter(degradedSandboxMock{})
+	t.Cleanup(func() { sandbox.SetAdapter(nil) })
 	root := t.TempDir()
+	path := filepath.Join(root, "soffice")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf office-direct\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	result, err := NewShellExecutor().Execute(
 		context.Background(),
-		shellParams{Command: "soffice --headless --convert-to pdf deck.pptx"},
+		shellParams{Command: "./soffice --headless --convert-to pdf deck.pptx"},
 		tool.NewPermissionContext(root, []string{root}),
 		nil,
 	)
-	if err == nil || !strings.Contains(err.Error(), "OfficeRenderWorker") {
-		t.Fatalf("expected executor hard deny before spawn, result=%+v err=%v", result, err)
+	if err != nil || result.ExitCode != 0 || result.Stdout != "office-direct" || result.BrokerReceipt.BrokerID != "local_user_direct_v1" {
+		t.Fatalf("expected direct Office CLI execution, result=%+v err=%v", result, err)
+	}
+}
+
+func TestShellExecutorCanRunOfficeNamedCLIThroughSupervisingBroker(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "soffice")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf office-ok\n"), 0o755); err != nil {
+		t.Fatalf("write fake Office CLI: %v", err)
+	}
+	broker := &allowExecutionBroker{}
+	ctx := tool.ContextWithExecutionBroker(context.Background(), broker)
+	result, err := NewShellExecutor().Execute(
+		ctx,
+		shellParams{Command: "./soffice --headless --convert-to pdf deck.pptx"},
+		tool.NewPermissionContext(root, []string{root}),
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("expected supervising broker to authorize Office-named CLI: %v", err)
+	}
+	if result.Stdout != "office-ok" || result.BrokerReceipt.BrokerID != broker.ID() {
+		t.Fatalf("unexpected execution facts: %+v", result)
 	}
 }
 
@@ -342,7 +389,7 @@ func TestShellPermissionAllowsLocalComputerCommands(t *testing.T) {
 	}
 }
 
-func TestShellPermissionDeniesDirectDeleteCommands(t *testing.T) {
+func TestShellPermissionAllowsDirectDeleteCommandsWithoutTrashClaim(t *testing.T) {
 	root := t.TempDir()
 	ctx := tool.NewPermissionContext(root, []string{root})
 	shellTool := &ShellTool{}
@@ -357,8 +404,8 @@ func TestShellPermissionDeniesDirectDeleteCommands(t *testing.T) {
 	for _, cmd := range cases {
 		t.Run(cmd, func(t *testing.T) {
 			decision := shellTool.CheckPermission(context.Background(), `{"command":`+quoteJSON(cmd)+`}`, ctx)
-			if decision.Behavior != tool.PermissionDeny {
-				t.Fatalf("expected direct delete command to be denied for %q, got %+v", cmd, decision)
+			if decision.Behavior != tool.PermissionAllow || decision.Metadata.RiskTone == "recoverable_delete_transform" || len(decision.Metadata.AffectedPaths) != 0 {
+				t.Fatalf("expected current-user direct delete for %q without recoverability claim, got %+v", cmd, decision)
 			}
 		})
 	}

@@ -384,18 +384,18 @@ func isWorkspaceMutationGitCommand(args []string) bool {
 func isInspectReadOnlyCommand(base string, args []string) bool {
 	switch base {
 	case "pwd", "ls", "cat", "head", "tail", "wc", "stat", "file", "strings",
-		"rg", "grep", "tree", "du", "df", "which", "whereis", "whoami", "id",
+		"rg", "grep", "diff", "tree", "du", "df", "which", "whereis", "whoami", "id",
 		"uname", "ps", "top", "htop", "date", "echo", "printf", "sleep",
 		"exit", "true", "false":
 		return true
 	case "command":
-		return len(args) > 0 && args[0] == "-v"
+		return len(args) > 0 && (args[0] == "-v" || args[0] == "-V")
 	case "env":
 		// `env` without args prints env vars (read-only). With arguments it
 		// may execute a command — fall through to the conservative default.
 		return len(args) == 0
 	case "find":
-		return !containsAnyShellToken(args, "-delete", "-exec", "-execdir", "-ok")
+		return !containsAnyShellToken(args, "-delete", "-exec", "-execdir", "-ok", "-fprint", "-fprintf", "-fls")
 	case "git":
 		return isInspectReadOnlyGitCommand(args)
 	}
@@ -409,6 +409,11 @@ func isNullDevicePath(path string) bool {
 func isInspectReadOnlyGitCommand(args []string) bool {
 	if len(args) == 0 {
 		return false
+	}
+	for _, arg := range args {
+		if arg == "--output" || strings.HasPrefix(arg, "--output=") {
+			return false
+		}
 	}
 	switch args[0] {
 	case "status", "diff", "log", "show", "rev-parse", "ls-files", "blame",

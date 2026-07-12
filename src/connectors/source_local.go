@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"awaken/src/mcpclient"
+	"awaken/src/tool"
 )
 
 // connectorsJSONSchema is the on-disk shape of ~/.awaken/connectors.json.
@@ -18,18 +19,21 @@ type connectorsJSONSchema struct {
 
 // localConnectorEntry is a single entry in the local connectors config file.
 type localConnectorEntry struct {
-	ID          string                  `json:"id"`
-	DisplayName string                  `json:"displayName"`
-	Description string                  `json:"description,omitempty"`
-	Category    Category                `json:"category"`
-	Provider    string                  `json:"provider,omitempty"`
-	AuthType    AuthType                `json:"authType,omitempty"`
-	MCPConfig   mcpclient.McpServerConfig `json:"mcp"`
+	ID           string                       `json:"id"`
+	DisplayName  string                       `json:"displayName"`
+	Description  string                       `json:"description,omitempty"`
+	Category     Category                     `json:"category"`
+	Provider     string                       `json:"provider,omitempty"`
+	AuthType     AuthType                     `json:"authType,omitempty"`
+	ProviderID   tool.ProviderID              `json:"providerId,omitempty"`
+	Capabilities []tool.Capability            `json:"capabilities,omitempty"`
+	Dependencies []tool.DependencyRequirement `json:"dependencies,omitempty"`
+	MCPConfig    mcpclient.McpServerConfig    `json:"mcp"`
 }
 
 // localSource implements ConnectorSource for user-defined local connectors.
 type localSource struct {
-	defs  []ConnectorDefinition
+	defs   []ConnectorDefinition
 	logger Logger
 }
 
@@ -112,14 +116,17 @@ func validateLocalEntry(entry localConnectorEntry, index int) (ConnectorDefiniti
 
 	raw := entry.MCPConfig
 	return ConnectorDefinition{
-		ID:            entry.ID,
-		DisplayName:   entry.DisplayName,
-		Description:   entry.Description,
-		Category:      entry.Category,
-		Provider:      entry.Provider,
-		AuthType:      authType,
-		TrustLevel:    TrustUserLocal,
-		SourceOrigin:  SourceLocal,
-		MCPRawConfig:  &raw,
+		ID:           entry.ID,
+		DisplayName:  entry.DisplayName,
+		Description:  entry.Description,
+		Category:     entry.Category,
+		Provider:     entry.Provider,
+		ProviderID:   entry.ProviderID,
+		Capabilities: tool.NormalizeCapabilities(entry.Capabilities),
+		Dependencies: append([]tool.DependencyRequirement(nil), entry.Dependencies...),
+		AuthType:     authType,
+		TrustLevel:   TrustUserLocal,
+		SourceOrigin: SourceLocal,
+		MCPRawConfig: &raw,
 	}, nil
 }

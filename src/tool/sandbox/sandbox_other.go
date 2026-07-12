@@ -4,11 +4,9 @@ package sandbox
 
 import "os/exec"
 
-// SandboxAdapterOther is the fail-closed fallback for platforms without
-// a dedicated sandbox adapter. It reports SandboxNone so the
-// ShellExecutor refuses to run open_world_system commands.
-// inspect_read_only, local_cli, and workspace_mutation commands still run without
-// confinement.
+// SandboxAdapterOther is the fail-closed fallback for platforms without a
+// dedicated sandbox adapter. It reports SandboxNone, so the default Shell
+// broker permits bounded read-only inspection only.
 type SandboxAdapterOther struct{}
 
 func defaultPlatformAdapter() SandboxAdapter {

@@ -7,6 +7,7 @@ import { rmSync } from "node:fs";
 import {
   closeCompetingPackagedAwaken,
   isPackagedAwakenCommand,
+  isUsableDevDesktopWindow,
   listPackagedAwakenProcesses,
   parsePsRows,
 } from "../desktop-lifecycle-common.mjs";
@@ -21,6 +22,27 @@ afterEach(() => {
 });
 
 describe("desktop process ownership", () => {
+  it("accepts a PID-scoped main window when macOS omits its title", () => {
+    assert.equal(
+      isUsableDevDesktopWindow({ name: "", width: 1440, height: 863, x: 36, y: 33 }),
+      true,
+    );
+    assert.equal(
+      isUsableDevDesktopWindow({
+        name: "Developer Tools",
+        width: 1440,
+        height: 863,
+        x: 36,
+        y: 33,
+      }),
+      false,
+    );
+    assert.equal(
+      isUsableDevDesktopWindow({ name: "", width: 1512, height: 33, x: 0, y: 0 }),
+      false,
+    );
+  });
+
   it("detects only packaged Awaken main executables on macOS", () => {
     assert.equal(
       isPackagedAwakenCommand(

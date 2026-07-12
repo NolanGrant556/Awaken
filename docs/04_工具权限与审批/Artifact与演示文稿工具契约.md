@@ -1,208 +1,101 @@
 # Artifact 与演示文稿工具契约
 
-## 1. 权威范围
+## 1. 当前支持
 
-本文唯一拥有 typed Artifact producer 的输入校验、演示文稿 semantic schema、嵌入式生成/编辑引擎、技术与视觉验证门、原子发布和失败结果合同。
+Awaken 提供 typed artifact/presentation provider，用于创建、编辑、渲染和读取结构化交付物。它声明 `document.create`、`presentation.create/edit/render`、`spreadsheet.create`、`pdf.read/render` 等 capability，并通过 provider readiness 报告 managed runtime/worker 依赖。
 
-本文不拥有：
+typed provider 的价值是：稳定 schema、TaskScope、可观测 changes/artifacts、渲染验证和结构化失败。模型应在它 ready 且契约匹配时优先使用，但它不是唯一合法实现。Skill 脚本、用户机器工具或 MCP provider 也可以成为候选。默认 Shell 以当前登录用户权限运行脚本/本机 CLI，可访问网络和 workspace 外路径，但只返回进程事实及 unobserved side-effect receipt，不自动获得 typed artifact provider 的 schema、TaskScope、Trash、渲染或 preview 验证。需要这些产物保证时，Agent 再显式调用对应 typed inspect/render/publish provider。
 
-- Python、LibreOffice、Poppler 的安装、active revision 与 worker 生命周期；见 [03 本地主运行时](../03_运行时与本地服务/本地主运行时准备链路.md) 和 [03 Office 后台渲染](../03_运行时与本地服务/Office后台渲染.md)。
-- Artifact 的 journal/wire/Desktop 交付物投影；分别见 [03 SemanticJournal](../03_运行时与本地服务/SemanticJournal与重放.md)、[09 事件字段](../09_AGUI与A2UI协议/事件与字段契约.md) 和 [01 最终交付物](../01_桌面工作台/中间交互区域/最终交付物展示与安全打开.md)。
-- Skill 包是否允许绕过平台 typed Artifact；见 [08 安装与激活契约](../08_技能/安装与激活契约.md)。
+MCP provider 当前可通过 per-tool `io.awaken.tool/provider/v1.artifact_output` 返回有界 base64 bytes、lowercase SHA-256、workspace-relative output path、content type 和可选 title。宿主在 MCP transport 成功后验证 output schema、32 MiB host 上限（provider 可进一步收窄）、hash、扩展名/MIME、Artifact kind、PDF/Office/text 容器签名、TaskScope writable 与 output roots 交集、workspace real path、敏感/protected path 和 symlink；通过后只由 host 把 bytes 写入 `WorkspaceExecutionBroker` private snapshot。broker 只接受该 digest/size 对应的单文件 delta，replacement preimage 先进入 Trash，receipt 再决定 created/updated/published、changes 和 side-effect state。provider-local path 或“已经发布”的文字不能产生 ArtifactDescriptor，失败也不生成伪 artifact。
 
-## 2. 当前能力与入口
+## 2. Presentation 路径
 
-[`src/tools/artifact_runtime`](../../src/tools/artifact_runtime) 提供 workspace dependency/runtime preflight、artifact read/inspect/export/render、spreadsheet/document/presentation create/edit/render、Office export PDF、PDF extract、image inspect/convert 和 media probe 等 typed 工具。注册真相是 [`src/tools/tools.go`](../../src/tools/tools.go) 与各工具 `Definition()`；文档不以固定工具总数代替注册核对。
+presentation create/edit/render 必须：
 
-本文件详细固定复杂度最高的三条演示文稿入口：
+- 在 writable root 内写入；
+- 保留稳定 artifact identity 与输出路径；
+- 渲染时验证产物存在、格式和页级输出；
+- 失败时不把半写文件或预览声明为成功 artifact；
+- 将 provider/runtime dependency 和 side-effect state 投影到结果。
 
-| 工具 | 当前用途 | 必要输入 |
+Office worker 的 managed LibreOffice 路径、timeout、独立 profile、进程组取消和原子发布由 [03 Office 后台渲染](../03_运行时与本地服务/Office后台渲染.md) 拥有。
+
+### 2.1 当前 typed 入口
+
+`src/tools/artifact_runtime` 当前注册 workspace dependencies/runtime preflight、artifact read/inspect/export/render、spreadsheet/document/presentation create/edit/render、Office export PDF、PDF extract、image inspect/convert 和 media probe 等工具；注册真相始终是 `src/tools/tools.go` 与各工具 `Definition()`，文档不固定工具总数。
+
+复杂入口：
+
+| 工具 | 用途 | 必需输入 |
 | --- | --- | --- |
-| `presentation_create` | 从 semantic deck/slide spec 创建 PPTX，并完成验证后发布 | `output_path`；`title/theme/slides/render_preview` 可选 |
-| `presentation_edit` | 对既有 PPTX 按顺序做增量编辑，并在完整验证后发布 | `source_path`、非空 `edits`；`output_path/theme/render_preview` 可选 |
-| `presentation_render` | 为既有 PPTX 生成并验证 PDF/PNG preview | `path`；`output_dir` 可选 |
+| `presentation_create` | semantic deck/slide spec -> PPTX，完整验证后发布 | `output_path` |
+| `presentation_edit` | 对既有 PPTX 顺序执行增量 edits，完整验证后发布 | `source_path`、非空 `edits` |
+| `presentation_render` | 既有 PPTX -> 已验证 PDF/PNG preview | `path` |
 
-当前不支持把页面尺寸、原生 PowerPoint 表格、原生图表、任意 XML/helper 源码或未声明字段作为 semantic slide spec。模型需要这些能力时必须得到结构化不支持/校验结果，不能让未识别字段被静默丢弃。
+`artifact_render` 对 PPT/PPTX 复用 presentation 验证，对 PDF 走 Poppler PNG；其 Definition 当前未声明与 presentation tools 相同的 runtime requirements，因此 preflight 可能不先返回 `needs_runtime`，PDF 缺依赖也可能落成普通 execution failure。这是保留的错误分类缺口。
 
-`artifact_render` 对 PPT/PPTX 复用 presentation 验证链，对 PDF 只走 Poppler PNG。但该通用工具的 Definition 当前没有声明 presentation tools 同等的 runtime requirements，因此 permission/preflight 可能不提前返回 `needs_runtime`，PDF 分支缺依赖时还可能落成普通 `tool_execution_failed`。这是当前错误分类缺口。
+### 2.2 递归 schema 与 semantic deck
 
-## 3. 递归 schema 与执行前校验
+模型 schema 与执行前 validator 共用 `ToolParametersSchema/ToolParam`，支持 object properties/required/additionalProperties、array items/min/max、string enum/length、number/integer bounds 和 `oneOf`。内建 definition 默认拒绝未知字段；runtime 仍须二次验证，错误携带从 `$` 开始的 JSON path、expected 和 actual。
 
-[`src/tool/schema.go`](../../src/tool/schema.go) 的 `ToolParametersSchema` / `ToolParam` 是模型侧 definition 与执行前 validator 共用的 schema 结构。当前支持：
-
-```text
-object properties / required / additionalProperties
-array items / minItems / maxItems
-string enum / minLength / maxLength
-number|integer minimum / maximum
-oneOf
-```
-
-内置 definition 默认 `additionalProperties=false`。RequestBuilder 发送给模型的 schema 与 ToolRuntime 执行前校验来自同一 resolved definition；外部输入仍必须在 runtime 再校验，不能信任模型已遵守 schema。
-
-错误必须携带从 `$` 开始的精确 JSON path、expected 与 actual 语义，例如：
-
-```text
-$.slides[2].images[0].width expected number, got string
-```
-
-Go schema 只验证可表达的结构；布局字段组合、颜色、图片可解码性和编辑语义还会由嵌入式 presentation engine 二次验证。两层任一失败都必须形成结构化 validation failure，且在生成/发布副作用前停止。
-
-## 4. `presentation_create` semantic schema
-
-### 4.1 Deck 与主题
-
-顶层允许：`output_path`、`title`、`theme`、`slides`、`render_preview`。`theme` 只允许：
-
-```text
-background, surface, primary, accent, text, muted, font_latin, font_ea
-```
-
-颜色必须是 3 或 6 位十六进制值。`title` 在没有 slides 时成为默认标题页；有 slides 时还写入 PPTX 文档标题 metadata。
-
-### 4.2 Slide 公共字段
-
-每页只允许：
-
-```text
-title, subtitle, body, notes, background, accent, layout,
-bullets, images, columns, metrics, timeline
-```
-
-`title`、`subtitle`、`body` 是所有布局的公共文本；`notes` 写入 speaker notes。当前 layout enum 固定为九类：
+presentation 顶层只接受 output/title/theme/slides/render-preview 契约。每页公共字段为 `title/subtitle/body/notes/background/accent/layout/bullets/images/columns/metrics/timeline`；layout 固定为：
 
 ```text
 title | section | bullets | two_column | image_right |
 comparison | metrics | timeline | closing
 ```
 
-layout 省略时按内容推断：`metrics` → `timeline` → `columns`（3 项及以上为 comparison，否则 two_column）→ `images` → `bullets` → 只有 subtitle 时 section；否则回到 title/bullets 默认。输出页面固定为 `13.333 × 7.5` 英寸 16:9；当前不提供自定义 page size。
+输出固定 16:9 `13.333 × 7.5` 英寸。two-column/comparison 分别最多 2/3 列，metrics 最多 4 项，timeline 最多 5 步；结构化数组与 bullets fallback 不能同时非空。不适用于当前 layout 的字段必须按 path 拒绝，不能解析后忽略。
 
-### 4.3 布局与内容组合
+图片至少含 `path`，fit 只支持 contain/cover/stretch；坐标非负、宽高大于零。文件需在输入边界内且为 regular/non-empty；contain/cover 由 Pillow 解码，alt 写入 PPTX metadata。当前不支持自定义页面尺寸、原生 PowerPoint 表格/图表或任意 OOXML/helper 输入。
 
-| layout | 专用内容 | 当前上限与组合规则 |
-| --- | --- | --- |
-| `title`、`section` | 无 | 只接受公共标题、副标题与正文 |
-| `bullets` | `bullets` | 项目列表 |
-| `two_column` | `columns` 或 bullets fallback | columns 最多 2；两种内容源不能同时非空 |
-| `image_right` | `images`、`bullets` | 图片在右侧，正文/项目在内容区 |
-| `comparison` | `columns` 或 bullets fallback | columns 最多 3；两种内容源不能同时非空 |
-| `metrics` | `metrics` 或 bullets fallback | 指标最多 4；两种内容源不能同时非空 |
-| `timeline` | `timeline` 或 bullets fallback | 步骤最多 5；两种内容源不能同时非空 |
-| `closing` | `bullets` | 结束页公共文本与可选项目 |
+### 2.3 嵌入式引擎与编辑语义
 
-`columns[]` 只接受 `title/bullets`；`metrics[]` 只接受 `label/value`；`timeline[]` 只接受 `title/detail/body`。布局不接受的非空字段必须以准确 path 拒绝，不能解析后忽略。
+`src/tools/artifact_runtime/engines/presentation_engine.py` 由 Go `go:embed` 随 Core 发布，调用时 materialize 到受控临时目录；managed Python 是该 typed provider 的依赖。模型只提交 semantic spec，引擎拥有九类布局、字体/CJK helper、图片、notes、overflow/blank warning、package reopen 与 edits。
 
-### 4.4 图片
+`presentation_edit.edits` 按数组顺序作用于当前页序：update/replace/delete/insert。update 可靠支持 title/subtitle/body/bullets/images/notes；layout/columns/metrics/timeline/background/accent 等结构变更必须 replace。第三方 deck 缺少 Awaken semantic shape name 时 update 可能 unsupported；replace 当前可能保留旧 notes，custom-size deck 会被改为固定 16:9，因而不提供第三方 deck 无损保证。
 
-图片至少包含 `path`，可带 `alt/caption/fit/x/y/width/height`。`fit` 只支持 `contain|cover|stretch`；坐标不得为负，宽高必须大于零。`contain/cover` 依赖 Pillow 解码真实图片；文件不存在、为空、不可解码或解析后逃出允许输入边界时失败。`alt` 写入 PPTX 图片替代文本 metadata。
+source 始终先写同目录 staged PPTX；只有完整验证后才能替换原目标。失败不能静默退化为全量重建。
 
-## 5. 版本化引擎与所有权
+### 2.4 Verification、staging 与发布
 
-[`presentation_engine.py`](../../src/tools/artifact_runtime/engines/presentation_engine.py) 由 [`presentation_engine.go`](../../src/tools/artifact_runtime/presentation_engine.go) 使用 `go:embed` 随 `awaken-core` 发布，调用时才 materialize 到受控临时目录；Python 必须来自 Awaken managed runtime。
+`verification_level` 只有 package -> pdf -> png。`verified=true` 至少要求 PPTX ZIP/核心 entries/slide、LibreOffice PDF、Poppler 全页 PNG、页数一致，并且没有当前启发式 blank/页面越界/超长 text warning。它不证明 overlap、文本框内部裁切、字体替换、对比度、图片/业务内容、PowerPoint/WPS 兼容或完整可访问性；这些仍需真实逐页视觉验收。
 
-模型只提交 semantic spec，不提交 Python、OOXML、ZIP 或字体 helper。引擎集中拥有：
+MCP host bridge 的验证级别更低且必须明确区分：它只证明收到的有界 bytes 与 SHA-256 一致、扩展名/MIME/基础容器签名相符，并由 host recoverable commit 到正确 TaskScope。它不等价于 typed artifact runtime 的 schema、渲染、逐页视觉、业务语义或兼容性验证，也不能把 MCP 产物标为 `verified=true`。需要这些质量事实时仍须调用对应 typed inspect/render provider 并完成真实视觉验收。
 
-- 九类布局的渲染；
-- `set_run_font`、text box、bullets、images、notes；
-- 唯一的 Latin/East Asian/complex-script 字体 XML helper；
-- `validate_overflow` 与 blank/clipping/overflow warning；
-- package 保存与重新打开校验；
-- 增量编辑。
+`render_preview=false` 只是不保留 preview，技术验证仍执行。create/edit 使用同目录 staged PPTX/preview、ownership marker、fsync、可回滚 preview swap 和目标 rename。既有 preview 只有 marker、预期 PDF/PNG、全部 regular file 且无 symlink/无关文件时才能替换；否则 fail closed。验证失败不发布 staged 产物，不生成指向旧/不存在文件的假 Artifact。post-publish commit failure 仍可能形成 partial side effect，Outcome 必须按实际文件状态记录。
 
-CJK helper 使用正确的 `lxml.etree.SubElement` 方式写入 `a:latin/a:ea/a:cs`，中文标题、正文、项目符号和 notes 必须由 OOXML 与真实渲染回归保护。复制第二套 helper 或让模型手写 OOXML 会重新引入字体和结构漂移，禁止作为恢复路径。
+## 3. Skill 边界
 
-## 6. `presentation_edit` 增量语义
+Skill 是工作流和知识包，不是 artifact runtime 的权限 owner。它可以建议 typed presentation 工具、受控资源读取或其他已就绪 provider；`allowed-tools`/required runtime 只是提示，不能激活一个未进入父 run 快照的工具，也不能强制把 Skill 标为 unavailable。
 
-`edits` 按数组顺序执行；每个 `slide_index` 都基于前一项完成后的当前页序。允许：
+旧“Skill 永远不得使用脚本、Python、soffice 或 OOXML”的绝对禁令不是当前契约。Agent 可在默认 direct Shell 中使用用户机的本机环境、网络、Skill root 和用户缓存；该路径的 raw 文件/外部副作用保持 unobserved。无论 Shell 成败，如果要将结果标为 verified artifact，仍必须通过对应 typed inspect/render/publish 的独立验证；文件只存在不等于渲染、格式或视觉质量已通过。
 
-| op | 语义 |
-| --- | --- |
-| `update` 或省略 op | 更新指定字段；至少提供一个字段，未指定内容和图片保持不变 |
-| `replace` | 用完整 `slide` 替换该页 |
-| `delete` | 删除当前页序的一页；不得附带无关更新字段 |
-| `insert` | 在当前页序插入完整 `slide` |
+## 4. 当前缺口
 
-`update` 当前可靠支持 `title/subtitle/body/bullets/images/notes`。`layout/columns/metrics/timeline/background/accent` 属于结构变更，update 会返回 `unsupported_edit`，必须改用 replace。title/subtitle/body 更新依赖 Awaken semantic shape name；第三方 deck 通常没有这些标记，可能必须 replace。images update 只移除 Awaken 命名的图片/说明，第三方未标记图片可能保留并与新图片并存。
+- provider 候选解析当前主要用于诊断，尚无通用的运行中自动 fallback/迁移；
+- 用户机器上的 Office/Python 包可被环境快照观察，但不等于经过 Awaken attestation；
+- Windows managed Office runtime、真实渲染和 Desktop 交付物验收尚无本轮实机证据；
+- 右侧 Inspector 尚未接入 artifact/tool 详情。
+- artifact 部分写入还未全部统一 typed 文本工具的 sensitive/protected/symlink resolver；
+- presentation create/edit 不严格要求 `.pptx`，错误扩展名可能承载 PPTX 字节；
+- presentation assets/edit 临时目录未全部清理，Python 进程仍继承完整环境且没有独立 OS sandbox；
+- slides/字符串/图片/源 deck 缺少统一总资源上限；第三方/custom-size deck、replace notes、ancestor replacement 和 post-publish commit failure 仍缺完整回归。
 
-replace 清除可见 shapes 后重画，但当前不会先清空 notes；replace payload 未带 notes 时原 notes 可能残留。“完整 slide”目前只要求非空 object，并不强制 title/layout。insert 允许 index `0..len`，delete/update/replace 只允许 `0..len-1`；删除最后一页会在 package gate 失败并拒绝发布。编辑任何 deck 都把全局 slide size 改为固定 16:9，特殊 template 还依赖预期 blank layout，因此对第三方/custom-size deck 不是无损编辑保证。
+## 5. 代码 owner
 
-`source_path` 始终保持为调用者原 deck；即使 `output_path` 等于 source，编辑也先写同目录 staged PPTX。只有完整验证通过才原子替换。输入、edit 组合或验证失败时不得静默退化成全量重建，也不得改变原 deck。
+- `src/tools/artifact_runtime` 与 presentation/artifact tools：typed provider。
+- `src/runtime/officerender` 与 primary runtime resolver：Awaken managed execution provider。
+- `src/tool/catalog_snapshot.go`：provider readiness 与 capability 候选诊断。
+- `src/tool/schema.go`：递归 schema/validator。
+- `src/mcpclient/provider_manifest.go`、`tool_safety.go`、`artifact_bridge.go`：MCP artifact output 声明、结果验证和 host bridge。
+- `src/tool/execution_broker.go`、`execution_broker_workspace.go`：`host_artifact_publish` exact-delta、concurrent guard 与 Trash commit。
 
-## 7. 验证等级与 `verified`
-
-当前 `verification_level` 只有：
-
-```text
-package -> pdf -> png
-```
-
-`verified=true` 需要全部满足：
-
-1. 生成的 PPTX 非空，ZIP 可打开，包含 `[Content_Types].xml`、`ppt/presentation.xml` 和至少一份 slide XML；
-2. managed LibreOffice 成功转成 PDF；
-3. managed Poppler 成功把全部页转成 PNG；
-4. slide/PDF/PNG 数量一致；
-5. semantic engine 没有当前启发式 warning：空白页、shape 越出页面约 0.01 英寸以上，或单个 text shape 超过 1200 字符。
-
-`visual` 不是当前 `verification_level` 枚举。`verified=true` 也不证明 PNG 已被人或视觉模型核对，不检测 shape 重叠、文本框内部裁切、字体替换、低对比度、图片/caption/业务内容正确性、PowerPoint/WPS 兼容性或完整可访问性。真实像素质量必须按 03/04 验收用中文样本逐页人工核对。
-
-`render_preview=false` 只是不保留/返回 preview 路径，技术验证仍完整执行。LibreOffice/Poppler 不可用时返回 needs-runtime 或未验证结果；Poppler 失败、数量不一致或视觉 warning 均不得产生 ready/verified 交付物。
-
-## 8. Staging、原子发布与失败恢复
-
-create/edit 先在目标同目录创建 staged PPTX 和 staged preview。验证通过后的发布顺序是：
-
-1. 规范化 staged preview 中的最终路径；
-2. 为 preview 写入 Awaken ownership marker 并 fsync；
-3. 若保留 preview，先启动可回滚的目录 swap；
-4. 备份既有目标并以 rename 原子发布 PPTX；
-5. fsync 后提交 preview swap；失败时回滚目标/preview，备份无法恢复则保留并报告路径。
-
-既有 preview 目录只有同时满足 ownership marker、预期 PDF/PNG 名称、全部 regular file、无 symlink/特殊节点/无关文件时才可替换。否则 fail closed，不能清理用户目录来“帮忙恢复”。
-
-生成、编辑、warning、render 或发布任一步失败时：
-
-- 不发布 staged PPTX/preview；
-- 原有 deck 和 managed preview 保持不变；
-- canonical outcome 保留 validation/runtime/verification 事实；
-- 不生成指向不存在路径或旧文件的假 Artifact 卡片。
-
-极少数 preview swap commit 后置失败（例如已发布后删除 backup 或 sync 失败）可能在返回失败时留下新 deck/preview；因此“验证前零发布”成立，但 post-publish commit error 不能被宣称为绝对零 partial side effect，outcome 必须以实际文件状态为准。
-
-## 9. 路径与跨域安全边界
-
-Artifact producer 必须使用 writable/output roots；但当前 `artifact_export` 等部分写入只做 root 包含检查，可直接覆盖，尚未统一使用 typed 文本工具的 sensitive/protected/symlink 强 resolver。这是 [TaskScope 与路径安全](TaskScope与路径安全.md) 中的已知缺口。
-
-演示文稿还有以下当前缺口：
-
-- create/edit 不强制 `.pptx`：无扩展名时会补 `.pptx`，已有任意扩展名则原样写入；例如 `.ppt` 可能实际包含 OOXML/PPTX 字节并被按扩展名投影。edit/render source 也没有扩展名门禁。
-- `awaken-ppt-assets-*`、`awaken-ppt-edit-*` 临时目录当前未清理，`fit=cover` 的裁剪 JPEG 可能残留系统 temp。
-- Python 进程继承完整 `os.Environ()`，没有 OS sandbox；模型不能注入脚本并不等于进程环境最小化。
-- slides、字符串、图片数量/总大小和 source PPTX 没有整体资源上限；超时不能完全阻止内存/磁盘耗尽。
-- Go 图片前检只要求 regular/non-empty；`contain/cover` 到 Pillow 才验证解码，`stretch` 到 python-pptx 插图时才失败。
-- Python 的 `unsupported_edit/unsupported_field` code 进入 Go 后折叠为通用 validation error，只保留 path/reason。
-
-真实验收只能使用隔离 workspace/output root，不得以 `.git`、`.env`、凭据目录或用户真实交付物测试覆盖行为。Shell 不得直接启动 Office，Skill 也不得用 pip/npm、动态 `generate.py`、直接 soffice/pdftoppm 或手写 Office ZIP/XML 绕过本契约。
-
-## 10. 代码 owner 与回归门
-
-| 责任 | Owner / 测试 |
-| --- | --- |
-| 递归 schema/validator | `src/tool/schema.go`、`schema_test.go` |
-| presentation schema | `src/tools/artifact_runtime/presentation_schema.go` |
-| Go producer、staging、verification、publish | `src/tools/artifact_runtime/artifact_runtime.go`、`artifact_runtime_test.go` |
-| embedded engine 与 CJK/layout/edit | `src/tools/artifact_runtime/presentation_engine.go`、`engines/presentation_engine.py`、`presentation_engine_test.go` |
-| managed Office worker | `src/runtime/officerender/` |
-| Skill platform conflict | `src/skills/legacy_conflict.go`、`schema_v2_test.go`、`src/runtime/skill_activation_test.go` |
-
-最低自动化：
+聚焦回归：
 
 ```bash
-go test ./src/tool/... ./src/tools/artifact_runtime ./src/runtime/officerender ./src/skills ./src/runtime
-go vet ./src/tool/... ./src/tools/artifact_runtime ./src/runtime/officerender ./src/skills ./src/runtime
+go test ./src/tool/... ./src/mcpclient ./src/tools/artifact_runtime ./src/runtime/officerender
+go vet ./src/tool/... ./src/mcpclient ./src/tools/artifact_runtime ./src/runtime/officerender
 ```
 
-真实 Desktop 使用 typed presentation tool 创建至少五页中文 PPTX，覆盖九类布局中的适用组合、图片、notes 与一次增量 edit；逐页核对 PDF/PNG、字体、溢出和内容无损，重启后再核对 Artifact identity/verified/preview 投影。不得以“文件存在”或旧截图代替。
-
-当前自动化尚未覆盖错误扩展名、sensitive/protected output、路径检查后的 ancestor/symlink 替换、Python temp 清理、任意第三方/custom-size deck、replace notes 残留和 post-publish commit failure；涉及这些边界的代码变更必须先补测试。
+真实 Desktop 至少创建五页中文 PPTX，覆盖适用布局、图片、notes 与一次 edit，逐页核对 PDF/PNG、字体、溢出和内容，重启后再核对 artifact identity/verified/preview。文件存在或旧截图不能替代。

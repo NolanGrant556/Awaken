@@ -12,6 +12,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"awaken/src/tool/trash"
 )
 
 const (
@@ -20,7 +22,8 @@ const (
 )
 
 var (
-	ErrSkillAlreadyExists = errors.New("skill already exists")
+	ErrSkillAlreadyExists           = errors.New("skill already exists")
+	ErrSkillReplaceTrashUnavailable = errors.New("skill replacement Trash unavailable")
 )
 
 type SkillPackage struct {
@@ -41,13 +44,15 @@ type InstallRequest struct {
 	ProjectRoot      string
 	DefaultWorkspace string
 	OverwritePolicy  string
+	TrashAdapter     trash.TrashAdapter
 }
 
 type InstallResult struct {
-	Skill   *SkillDefinition
-	Path    string
-	Scope   string
-	Message string
+	Skill                *SkillDefinition
+	Path                 string
+	Scope                string
+	Message              string
+	PreviousPackageTrash *trash.TrashResult
 }
 
 func PackageFromBytes(fileName string, data []byte) (SkillPackage, error) {
@@ -143,7 +148,12 @@ func InstallSkillPackage(req InstallRequest) (InstallResult, error) {
 	if targetExists && policy == "abort" {
 		return InstallResult{}, fmt.Errorf("%w: %s", ErrSkillAlreadyExists, rootDir)
 	}
-	if err := writeSkillPackage(installRoot, def.ID, pkg, targetExists); err != nil {
+	trashAdapter := req.TrashAdapter
+	if trashAdapter == nil {
+		trashAdapter = trash.DefaultAdapter()
+	}
+	previousTrash, err := writeSkillPackage(installRoot, dir, def.ID, pkg, targetExists, trashAdapter)
+	if err != nil {
 		return InstallResult{}, err
 	}
 
@@ -151,6 +161,7 @@ func InstallSkillPackage(req InstallRequest) (InstallResult, error) {
 	def.Source = source
 	def.Scope = source
 	def.RootDir = rootDir
+	def.SourceRoot = dir
 	if resolvedRoot, resolveErr := filepath.EvalSymlinks(rootDir); resolveErr == nil {
 		def.ResolvedRootDir = resolvedRoot
 	}
@@ -159,13 +170,14 @@ func InstallSkillPackage(req InstallRequest) (InstallResult, error) {
 	if source == SourceProject {
 		def.ProjectPath = projectRoot
 	}
-	def.State = StateAvailable
+	def.State = StateLoaded
 
 	return InstallResult{
-		Skill:   def,
-		Path:    rootDir,
-		Scope:   scope,
-		Message: fmt.Sprintf("%s skill installed", scope),
+		Skill:                def,
+		Path:                 rootDir,
+		Scope:                scope,
+		Message:              fmt.Sprintf("%s skill installed", scope),
+		PreviousPackageTrash: previousTrash,
 	}, nil
 }
 
@@ -199,67 +211,19 @@ func ResolveInstallTarget(req InstallTargetRequest) (scope string, projectRoot s
 	}
 }
 
-func LocalSourceDirs(projectRoot string) map[SourceOrigin]string {
-	dirs := make(map[SourceOrigin]string)
-	if root := strings.TrimSpace(projectRoot); root != "" && filepath.IsAbs(root) {
-		if stat, err := os.Stat(root); err == nil && stat.IsDir() {
-			dirs[SourceProject] = filepath.Join(root, ".awaken", "skills")
-		}
-	}
-	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-		dirs[SourceUser] = filepath.Join(home, ".awaken", "skills")
-	}
-	return dirs
-}
-
 func FormatRuntimeSkillSummary(defs []*SkillDefinition) string {
-	if len(defs) == 0 {
-		return "none"
-	}
-	var b strings.Builder
+	loaded := 0
 	for _, def := range defs {
-		if def == nil {
-			continue
-		}
-		if b.Len() > 0 {
-			b.WriteString("\n")
-		}
-		b.WriteString("- id: ")
-		b.WriteString(def.ID)
-		b.WriteString("; name: ")
-		b.WriteString(def.Name)
-		b.WriteString("; scope: ")
-		b.WriteString(publicScopeForSource(def.Source))
-		b.WriteString("; state: ")
-		b.WriteString(string(def.State))
-		if strings.TrimSpace(def.RootDir) != "" {
-			b.WriteString("; rootDir: ")
-			b.WriteString(def.RootDir)
-		}
-		if strings.TrimSpace(def.SkillFilePath) != "" {
-			b.WriteString("; skillFilePath: ")
-			b.WriteString(def.SkillFilePath)
-		}
-		if strings.TrimSpace(def.ProjectPath) != "" {
-			b.WriteString("; projectPath: ")
-			b.WriteString(def.ProjectPath)
-		}
-		if strings.TrimSpace(def.ShadowedBy) != "" {
-			b.WriteString("; shadowedBy: ")
-			b.WriteString(def.ShadowedBy)
-		}
-		if strings.TrimSpace(def.WhenToUse) != "" {
-			b.WriteString("; whenToUse: ")
-			b.WriteString(def.WhenToUse)
-		} else if strings.TrimSpace(def.Description) != "" {
-			b.WriteString("; description: ")
-			b.WriteString(def.Description)
+		if def != nil && def.State == StateLoaded && !def.DisableModelInvocation {
+			loaded++
 		}
 	}
-	if b.Len() == 0 {
+	if loaded == 0 {
 		return "none"
 	}
-	return b.String()
+	// The unified `skill` tool owns the budgeted Catalog. Do not duplicate
+	// paths, package state, or unbounded descriptions in RuntimeInfo.
+	return fmt.Sprintf("%d Skills available through the skill tool", loaded)
 }
 
 func publicScopeForSource(source SourceOrigin) string {
@@ -523,10 +487,10 @@ func openRootedSkillInstallDir(installDir string) (*os.Root, error) {
 	return root, nil
 }
 
-func writeSkillPackage(root *os.Root, targetName string, pkg SkillPackage, targetExists bool) error {
+func writeSkillPackage(root *os.Root, installDir string, targetName string, pkg SkillPackage, targetExists bool, trashAdapter trash.TrashAdapter) (*trash.TrashResult, error) {
 	tempName, err := createRootTempDir(root, "."+targetName+".tmp-")
 	if err != nil {
-		return fmt.Errorf("create temp package dir: %w", err)
+		return nil, fmt.Errorf("create temp package dir: %w", err)
 	}
 	tempPresent := true
 	defer func() {
@@ -538,44 +502,56 @@ func writeSkillPackage(root *os.Root, targetName string, pkg SkillPackage, targe
 	for _, file := range pkg.files {
 		rel, err := cleanPackageRelPath(file.relPath)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		target := filepath.Join(tempName, filepath.FromSlash(rel))
 		if err := root.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-			return fmt.Errorf("create package directory: %w", err)
+			return nil, fmt.Errorf("create package directory: %w", err)
 		}
 		if err := root.WriteFile(target, file.data, file.mode); err != nil {
-			return fmt.Errorf("write package file %s: %w", rel, err)
+			return nil, fmt.Errorf("write package file %s: %w", rel, err)
 		}
 	}
 
 	if !targetExists {
 		if err := root.Rename(tempName, targetName); err != nil {
-			return fmt.Errorf("install skill package: %w", err)
+			return nil, fmt.Errorf("install skill package: %w", err)
 		}
 		tempPresent = false
-		return nil
+		return nil, nil
+	}
+	if trashAdapter == nil {
+		return nil, fmt.Errorf("%w: adapter unavailable", ErrSkillReplaceTrashUnavailable)
 	}
 
 	backupName, err := uniqueRootEntryName(root, "."+targetName+".backup-")
 	if err != nil {
-		return fmt.Errorf("prepare skill replacement backup: %w", err)
+		return nil, fmt.Errorf("prepare skill replacement backup: %w", err)
 	}
 	if err := root.Rename(targetName, backupName); err != nil {
-		return fmt.Errorf("backup existing skill package: %w", err)
+		return nil, fmt.Errorf("backup existing skill package: %w", err)
 	}
 	if err := root.Rename(tempName, targetName); err != nil {
 		rollbackErr := root.Rename(backupName, targetName)
 		if rollbackErr != nil {
-			return fmt.Errorf("install replacement: %v; restore previous package: %w", err, rollbackErr)
+			return nil, fmt.Errorf("install replacement: %v; restore previous package: %w", err, rollbackErr)
 		}
-		return fmt.Errorf("install replacement: %w", err)
+		return nil, fmt.Errorf("install replacement: %w", err)
 	}
 	tempPresent = false
-	if err := root.RemoveAll(backupName); err != nil {
-		return fmt.Errorf("replacement installed but previous package cleanup failed: %w", err)
+	trashed, err := trashAdapter.TrashPath(filepath.Join(installDir, backupName))
+	if err != nil {
+		rollbackNewErr := root.Rename(targetName, tempName)
+		rollbackOldErr := root.Rename(backupName, targetName)
+		if rollbackNewErr == nil {
+			tempPresent = true
+		}
+		if rollbackNewErr != nil || rollbackOldErr != nil {
+			return nil, fmt.Errorf("%w: replace installed but Trash failed: %v; rollback new package: %v; restore previous package: %v", ErrSkillReplaceTrashUnavailable, err, rollbackNewErr, rollbackOldErr)
+		}
+		return nil, fmt.Errorf("%w: previous package could not enter Trash: %v", ErrSkillReplaceTrashUnavailable, err)
 	}
-	return nil
+	return &trashed, nil
 }
 
 func createRootTempDir(root *os.Root, prefix string) (string, error) {

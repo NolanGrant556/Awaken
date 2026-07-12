@@ -2,94 +2,56 @@ package skillruntime
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"awaken/src/skills"
 	"awaken/src/tool"
 )
 
-// ---- fork_test ----
-
-func TestForkExecutorDegradesToInline(t *testing.T) {
-	e := &ForkExecutor{
-		// StartChild is nil -> degrades.
-	}
-	result, err := e.Execute(context.Background(), "test", "do something", nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(result, "fork degraded") {
-		t.Errorf("bad fork degradation result: %s", result)
+func TestForkExecutorWithoutStarterFailsClosed(t *testing.T) {
+	_, err := (&ForkExecutor{}).Execute(context.Background(), "test", "do something", nil)
+	if err == nil || !strings.Contains(err.Error(), "skill_fork_unavailable") {
+		t.Fatalf("fork silently degraded: %v", err)
 	}
 }
 
-func TestForkExecutorStub(t *testing.T) {
-	e := &ForkExecutor{
-		StartChild: func(ctx context.Context, body string) (string, error) {
-			return "child-done: " + body, nil
-		},
-	}
+func TestForkExecutorUsesStarter(t *testing.T) {
+	e := &ForkExecutor{StartChild: func(_ context.Context, body string) (string, error) {
+		return "child-done: " + body, nil
+	}}
 	result, err := e.Execute(context.Background(), "test", "do something", nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(result, "child-done") {
-		t.Errorf("fork stub didn't return child result: %s", result)
+	if err != nil || !strings.Contains(result, "child-done") {
+		t.Fatalf("result=%q err=%v", result, err)
 	}
 }
 
-func TestForkExecutorStartChildErrorDegrades(t *testing.T) {
-	e := &ForkExecutor{
-		StartChild: func(ctx context.Context, body string) (string, error) {
-			return "", context.DeadlineExceeded
-		},
-	}
-	result, err := e.Execute(context.Background(), "test", "do something", nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(result, "fork degraded") {
-		t.Errorf("expected fork to degrade: %s", result)
+func TestForkExecutorPropagatesStarterError(t *testing.T) {
+	e := &ForkExecutor{StartChild: func(context.Context, string) (string, error) {
+		return "", context.DeadlineExceeded
+	}}
+	_, err := e.Execute(context.Background(), "test", "do something", nil)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("fork error was hidden: %v", err)
 	}
 }
 
-// ---- manager_test ----
+func TestManagerRegistersOnlyUnifiedCatalogTool(t *testing.T) {
+	tool.UnregisterTool(CatalogToolName)
+	reg := skills.NewSkillRegistry(nil)
+	reg.RegisterSkill(&skills.SkillDefinition{
+		ID: "test-manager", Name: "test-manager", Description: "manager test",
+		State: skills.StateLoaded, Source: skills.SourceMcp, Body: "test body",
+	})
+	manager := NewManager(reg, nil)
+	t.Cleanup(manager.Shutdown)
 
-func TestManagerRefreshAndShutdown(t *testing.T) {
-	// Create a minimal skill registry.
-	// Use skills package to create the registry.
-	// We import skills, but to avoid circular dep test we directly test
-	// Manager refresh via manual tool registration.
-
-	// Clean up any leftover skill tools.
-	tool.UnregisterToolsByPrefix(SkillToolPrefix)
-
-	st := &SkillTool{
-		SkillID: "test_manager",
-		NameStr: SkillToolName("test_manager"),
-		Desc:    "manager test",
-		Body:    "test body",
-		ArgDefs: []SkillArgDef{
-			{Name: "x", Type: "string", Required: true},
-		},
+	if _, err := tool.GetTool(CatalogToolName); err != nil {
+		t.Fatalf("unified catalog tool missing: %v", err)
 	}
-	if err := tool.RegisterToolForce(st); err != nil {
-		t.Fatalf("register: %v", err)
-	}
-
-	// Verify it's registered.
-	got, err := tool.GetTool(SkillToolName("test_manager"))
-	if err != nil {
-		t.Fatalf("get tool: %v", err)
-	}
-	if got.Name() != SkillToolName("test_manager") {
-		t.Errorf("bad name: %s", got.Name())
-	}
-
-	// Shutdown should remove it.
-	tool.UnregisterToolsByPrefix(SkillToolPrefix)
-	_, err = tool.GetTool(SkillToolName("test_manager"))
-	if err == nil {
-		t.Fatal("expected tool to be removed after shutdown")
+	manager.Shutdown()
+	if _, err := tool.GetTool(CatalogToolName); err == nil {
+		t.Fatal("catalog tool remained after shutdown")
 	}
 }

@@ -6,7 +6,28 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"awaken/src/tool/trash"
 )
+
+type installTrashAdapter struct {
+	dir  string
+	fail bool
+}
+
+func (a installTrashAdapter) TrashPath(source string) (trash.TrashResult, error) {
+	if a.fail {
+		return trash.TrashResult{}, errors.New("Trash unavailable")
+	}
+	if err := os.MkdirAll(a.dir, 0o700); err != nil {
+		return trash.TrashResult{}, err
+	}
+	destination := filepath.Join(a.dir, filepath.Base(source))
+	if err := os.Rename(source, destination); err != nil {
+		return trash.TrashResult{}, err
+	}
+	return trash.TrashResult{OriginalPath: source, TrashedPath: destination, Method: "test_rename"}, nil
+}
 
 func TestInstallSkillPackageFromDirectoryPreservesResources(t *testing.T) {
 	sourceRoot := t.TempDir()
@@ -69,6 +90,70 @@ Body.
 	}
 	if !strings.Contains(err.Error(), filepath.Join(workspace, ".awaken", "skills", "duplicate-skill")) {
 		t.Fatalf("expected target path in error, got %v", err)
+	}
+}
+
+func TestInstallSkillPackageReplaceMovesPreviousPackageToTrash(t *testing.T) {
+	oldPackage, err := PackageFromBytes("SKILL.md", []byte("---\nname: replaceable\ndescription: Old.\n---\nOld body.\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	newPackage, err := PackageFromBytes("SKILL.md", []byte("---\nname: replaceable\ndescription: New.\n---\nNew body.\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := t.TempDir()
+	if _, err := InstallSkillPackage(InstallRequest{Package: oldPackage, Scope: string(SourceProject), ProjectRoot: workspace}); err != nil {
+		t.Fatalf("initial install: %v", err)
+	}
+	result, err := InstallSkillPackage(InstallRequest{
+		Package: newPackage, Scope: string(SourceProject), ProjectRoot: workspace,
+		OverwritePolicy: "replace", TrashAdapter: installTrashAdapter{dir: filepath.Join(t.TempDir(), "Trash")},
+	})
+	if err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	if result.PreviousPackageTrash == nil || result.PreviousPackageTrash.TrashedPath == "" {
+		t.Fatalf("replacement did not report previous package Trash receipt: %+v", result)
+	}
+	current, err := os.ReadFile(filepath.Join(result.Path, "SKILL.md"))
+	if err != nil || !strings.Contains(string(current), "New body.") {
+		t.Fatalf("new package not installed: err=%v content=%q", err, current)
+	}
+	previous, err := os.ReadFile(filepath.Join(result.PreviousPackageTrash.TrashedPath, "SKILL.md"))
+	if err != nil || !strings.Contains(string(previous), "Old body.") {
+		t.Fatalf("old package not recoverable from Trash: err=%v content=%q", err, previous)
+	}
+}
+
+func TestInstallSkillPackageReplaceRollsBackWhenTrashUnavailable(t *testing.T) {
+	oldPackage, err := PackageFromBytes("SKILL.md", []byte("---\nname: rollback\ndescription: Old.\n---\nOld body.\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	newPackage, err := PackageFromBytes("SKILL.md", []byte("---\nname: rollback\ndescription: New.\n---\nNew body.\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := t.TempDir()
+	initial, err := InstallSkillPackage(InstallRequest{Package: oldPackage, Scope: string(SourceProject), ProjectRoot: workspace})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = InstallSkillPackage(InstallRequest{
+		Package: newPackage, Scope: string(SourceProject), ProjectRoot: workspace,
+		OverwritePolicy: "replace", TrashAdapter: installTrashAdapter{fail: true},
+	})
+	if !errors.Is(err, ErrSkillReplaceTrashUnavailable) {
+		t.Fatalf("expected typed Trash failure, got %v", err)
+	}
+	current, readErr := os.ReadFile(filepath.Join(initial.Path, "SKILL.md"))
+	if readErr != nil || !strings.Contains(string(current), "Old body.") || strings.Contains(string(current), "New body.") {
+		t.Fatalf("failed replacement did not restore old package: err=%v content=%q", readErr, current)
+	}
+	entries, readErr := os.ReadDir(filepath.Dir(initial.Path))
+	if readErr != nil || len(entries) != 1 || entries[0].Name() != "rollback" {
+		t.Fatalf("failed replacement left staging or backup state: entries=%v err=%v", entries, readErr)
 	}
 }
 

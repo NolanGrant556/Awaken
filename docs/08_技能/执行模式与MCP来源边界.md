@@ -1,66 +1,44 @@
 # 执行模式与 MCP 来源边界
 
-## 1. 权威范围
+## 1. Inline
 
-本文唯一拥有 Skill 的 inline/fork 当前行为、外部依赖可用性和 MCP 动态来源边界。MCP transport、认证和工具生命周期由 [MCP 运行时](../06_MCP运行时/索引.md) 拥有；本文不重新定义它们。
+inline 激活把调用时读取的 Skill 正文和包根加入当前 run 的上下文块。它继承父 run 已固定的模型、工具可用性快照、环境快照、TaskScope 与取消边界；Skill 元数据不能扩大或收窄这些边界。环境快照中的 source/root 只用于记录本地发现来源，不代替调用时的锚定资源读取。
 
-## 2. Inline 与 fork
+## 2. Fork
 
-`context` 省略时默认为 `inline`。
+`context: fork` 当前创建真实 child agent，不再静默降级为 inline。run-scoped `ChildAgentStarter` 优先于 Manager fallback；没有 starter 时返回 `skill_fork_unavailable`。
 
-- inline：激活后的正文、参数和资源上下文进入当前 run，effective tool pool 仍受父 run 边界限制。
-- fork：执行器存在 fork 分支和 `ChildRunStarter` 接口；如果注入了 child starter，可把激活计划交给子 run。
-- 当前Desktop/production没有注入 `StartChild`。模型调用 `skill__*` 工具时会经过 `ForkExecutor`，记录warning后降级inline。
-- composer显式Skill token走 `preActivateComposerSkills`，直接把 `plan.MainBody` 加入当前run ContextBlock，不检查 `context`，也不记录fork降级warning；这条路径是**静默inline**。
+handoff 包含正文、根目录、锚定路径、参数、agent/model/effort 和工具提示。child 拥有独立上下文，父 run 只接收明确的 child 结果；父 run 的后续 SkillContextBlocks 不混入 child 正文。父子工具能力仍由创建 child 时的显式继承/收窄契约决定，Skill 文本本身不是权限。child 获取的 pinned environment 元数据不授权它预加载根内其他 Skill 或绕过 TaskScope/resource reader。
 
-在真正接线前，不得把 fork 写成并行运行、独立上下文窗口、独立审批域或独立持久化线程。未来实现必须先定义父子 run 所有权、取消传播、工具权限继承、日志归属和 Desktop 投影。
+## 3. MCP 动态 Skill
 
-## 3. Connector 与 MCP 依赖
+MCP bridge 把 server 的 prompt/resource 动态注册为 `mcp__<server>__...` Skill：
 
-registry 能表达 `requiredConnectors` 和 `requiredMcpServers`，两组条件取 AND：任一缺失都使 Skill `unavailable`。
+- 注册时只持有目录元数据和 body fetcher；
+- 调用时才请求 prompt messages 或读取 resource 正文；
+- server disconnect/disable/reconcile 时注销动态条目；
+- re-register 保留进程内最近调用时间；
+- MCP readiness 不作为本地 Skill 的加载门禁；
+- MCP 正文中的 shell 文本只是说明，宿主不会在 bridge 内直接执行。
 
-当前接线并不对称：
+MCP Skill 依旧通过统一 `skill` 工具调用；它不会绕过 MCP transport、认证或 ToolRuntime。
 
-- `SetConnectorAvailable` API 和单元测试存在，但 production 中没有连接器生命周期调用它。不能把 `requiredConnectors` 写成已完成的自动可用性闭环。
-- MCP bridge 会调用 `SetMcpServerAvailable`，但当前 `syncForServer` 在 server 没有可桥接 prompt/resource 时把该 server 标为 unavailable。这会让只声明 `requiredMcpServers` 的本地 Skill 在 server 已连接时仍可能错误不可用。
+## 4. 当前不支持或已知缺口
 
-因此这两项是已确认实现缺口，不是文档可以掩盖的用户配置错误。
+- MCP WebSocket transport 仍不支持；in-process 只用于测试。
+- 外部 MCP server 的 prompt/resource 能力、认证和内容可靠性取决于 provider；bridge 不能为 provider 错报内容兜底。
+- fork 已有 Agent Core 集成测试，但本轮尚未形成 Windows 实机和真实 Desktop 跨进程证据。
 
-## 4. MCP 动态 Skill 映射
+## 5. 不变量
 
-MCP server 进入 connected 后，bridge 枚举：
+- fork 缺少 child starter 时必须显式失败，不能回落 inline。
+- MCP server 离线时必须移除其 tools 和动态 Skills，不能继续调用旧 fetcher。
+- MCP Skill 不改变父 run 的工具池，也不反向控制 server lifecycle。
+- MCP 动态 Skill 没有本地 Skill root；不得为了环境快照 identity 伪造本地路径。
 
-- `prompts/list` 返回的 prompt；
-- `resources/list` 中 MIME 为 `text/x-prompt` 的 resource。
+## 6. 代码 owner
 
-条目以 `mcp__<server>__...` ID 动态注册，带 `requiredMcpServers` 和 `McpBinding`；断开、disable 或 reconcile 时注销。它们不写入project/user skills目录。设计上重启后应随MCP server重新发现，但当前bridge没有启动snapshot reconcile，连接事件早于订阅时会漏发现；请求级根因见06权威。
-
-MCP请求、arguments/messages、resource URI/read、timeout和启动订阅竞态的唯一缺口清单在 [工具接入与技能桥接](../06_MCP运行时/工具接入与技能桥接.md)。本域只拥有其Skill后果：动态条目可能漏注册、正文可能不是真实prompt内容、resource无法可靠读取、依赖可用性可能错误，因此产品只能称“动态发现与部分桥接”。
-
-## 5. 状态与恢复
-
-```text
-local load / MCP reconcile
-  -> available | unavailable | shadowed
-  -> activation preflight
-  -> inline | fork requested
-  -> current production: inline execution
-```
-
-- connector/MCP状态事件被bridge观察并触发registry重算时，可从unavailable恢复为available；启动前已丢失的connected事件当前不会自动补偿。
-- MCP server 断开时，bridge 注销其动态 Skill；不能继续使用旧 body fetcher。
-- 获取 prompt body 失败使该次激活失败，不回退到过期缓存正文。
-- 模型Skill工具的fork降级必须保留可观察warning；composer token当前静默inline，必须按缺口呈现，不能声称已隔离。
-
-## 6. 不变量
-
-- Skill 来源状态不能替代 MCP server 的真实连接状态。
-- MCP 动态 Skill 的名字、正文和生命周期由 server 驱动；本地包不得冒用 `mcp__`。
-- 依赖检查只能收紧可用性；缺少 production 状态接线时必须记录缺口，不能默认 available。
-- 修复 bridge 时不得绕过 06 的认证、transport、tool namespace 和 lifecycle 合同。
-
-## 7. 验证依据
-
-- 实现：`src/skillruntime/executor.go`、`src/skillruntime/fork.go`、`src/skills/registry.go`、`src/skills/mcp_bridge.go`、`cmd/awaken-core/main.go`。
-- 测试：`src/skillruntime/executors_manager_test.go`、`src/skills/skills_test.go`、`src/skills/schema_v2_test.go`。现有测试覆盖 registry 状态和桥接条目转换，没有独立 bridge 端到端测试。
-- Desktop：只读核对 MCP 来源分组；不得以 UI 列出条目推断 prompt body 已正确执行。
+- `src/skillruntime/manager.go`：inline/fork 调度与 receipt。
+- `src/agentcore/agent.go`、`runner.go`：真实 child-agent handoff。
+- `src/skills/mcp_bridge.go`：MCP prompt/resource 动态注册和注销。
+- `src/mcpclient`：MCP transport、认证、tool/provider 生命周期。

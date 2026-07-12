@@ -4,8 +4,9 @@ import {
   type SpawnOptions,
 } from "node:child_process";
 import { createServer } from "node:net";
+import { userInfo } from "node:os";
 import { createInterface } from "node:readline";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app } from "electron";
 
@@ -40,14 +41,24 @@ type SpawnProcess = (
   args: string[],
   options: SpawnOptions,
 ) => ChildProcess;
+type ResolveLoginUserEnvironment = () => Promise<NodeJS.ProcessEnv>;
 
 export interface RuntimeSupervisorDeps {
   allocatePort?: () => Promise<number>;
+  loginEnvironmentTimeoutMs?: number;
   now?: () => number;
   resolveBinaryPath?: () => string;
+  resolveLoginUserEnvironment?: ResolveLoginUserEnvironment;
   spawnProcess?: SpawnProcess;
   waitForHealth?: (baseUrl: string) => Promise<void>;
 }
+
+const LOGIN_ENV_TIMEOUT_MS = 3000;
+const LOGIN_ENV_MAX_BYTES = 256 * 1024;
+const LOGIN_ENV_START_MARKER =
+  "__AWAKEN_LOGIN_ENV_START_9F6E01A594834F489AB8D774F20A21D8__";
+const LOGIN_ENV_END_MARKER =
+  "__AWAKEN_LOGIN_ENV_END_9F6E01A594834F489AB8D774F20A21D8__";
 
 function resolveBinaryPath(): string {
   const platform = process.platform;
@@ -86,8 +97,183 @@ function allocatePort(): Promise<number> {
   });
 }
 
-function sanitizedRuntimeEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
+function parseLoginEnvironment(output: Buffer): NodeJS.ProcessEnv {
+  const text = output.toString("utf8");
+  const startToken = `\0${LOGIN_ENV_START_MARKER}\0`;
+  const endToken = `\0${LOGIN_ENV_END_MARKER}\0`;
+  const startIndex = text.indexOf(startToken);
+  const endIndex = text.indexOf(
+    endToken,
+    startIndex < 0 ? 0 : startIndex + startToken.length,
+  );
+  if (startIndex < 0 || endIndex < 0) {
+    throw new Error("login environment output was not framed correctly");
+  }
+
+  const env: NodeJS.ProcessEnv = {};
+  const payload = text.slice(startIndex + startToken.length, endIndex);
+  for (const entry of payload.split("\0")) {
+    const separator = entry.indexOf("=");
+    if (separator <= 0) {
+      continue;
+    }
+    const name = entry.slice(0, separator);
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+      continue;
+    }
+    env[name] = entry.slice(separator + 1);
+  }
+  if (!env.PATH?.trim() || !env.HOME?.trim()) {
+    throw new Error("login environment did not contain PATH and HOME");
+  }
+  return env;
+}
+
+function resolveLoginIdentity(): { shell: string; home?: string } {
+  let accountShell: string | undefined;
+  let accountHome: string | undefined;
+  try {
+    const account = userInfo({ encoding: "utf8" });
+    accountShell = account.shell?.trim();
+    accountHome = account.homedir;
+  } catch {
+    // The inherited environment and /bin/sh fallback still provide a safe path.
+  }
+
+  const inheritedShell = process.env.SHELL?.trim();
+  const shell = [inheritedShell, accountShell].find(
+    (candidate): candidate is string =>
+      typeof candidate === "string" &&
+      candidate.length > 0 &&
+      isAbsolute(candidate),
+  );
+  return {
+    shell: shell ?? "/bin/sh",
+    home: process.env.HOME || accountHome,
+  };
+}
+
+function readShellEnvironment(
+  shell: string,
+  args: string[],
+  inheritedEnv: NodeJS.ProcessEnv,
+  timeoutMs: number,
+): Promise<NodeJS.ProcessEnv> {
+  const command =
+    `printf '\\0${LOGIN_ENV_START_MARKER}\\0'; ` +
+    `/usr/bin/env -0; ` +
+    `printf '${LOGIN_ENV_END_MARKER}\\0'`;
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(shell, [...args, command], {
+      env: inheritedEnv,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    let settled = false;
+
+    const finish = (error?: Error, env?: NodeJS.ProcessEnv): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      if (error) {
+        reject(error);
+      } else {
+        resolve(env ?? {});
+      }
+    };
+    const stopChild = (): void => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // The process may already have exited.
+      }
+    };
+    const timer = setTimeout(() => {
+      stopChild();
+      finish(new Error("login environment resolution timed out"));
+    }, timeoutMs);
+
+    child.stdout?.on("data", (chunk: Buffer | string) => {
+      if (settled) {
+        return;
+      }
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      bytes += buffer.length;
+      if (bytes > LOGIN_ENV_MAX_BYTES) {
+        stopChild();
+        finish(new Error("login environment output exceeded the size limit"));
+        return;
+      }
+      chunks.push(buffer);
+    });
+    child.once("error", () => {
+      finish(new Error("login environment process failed to start"));
+    });
+    child.once("close", (code, signal) => {
+      if (settled) {
+        return;
+      }
+      if (code !== 0 || signal) {
+        finish(new Error("login environment process did not exit successfully"));
+        return;
+      }
+      try {
+        finish(undefined, parseLoginEnvironment(Buffer.concat(chunks)));
+      } catch {
+        finish(new Error("login environment output could not be parsed"));
+      }
+    });
+  });
+}
+
+async function resolveLoginUserEnvironment(
+  timeoutMs = LOGIN_ENV_TIMEOUT_MS,
+): Promise<NodeJS.ProcessEnv> {
+  if (process.platform === "win32") {
+    return { ...process.env };
+  }
+
+  const { shell, home } = resolveLoginIdentity();
+  const inheritedEnv = { ...process.env };
+  if (!inheritedEnv.HOME && home) {
+    inheritedEnv.HOME = home;
+  }
+  if (!inheritedEnv.SHELL) {
+    inheritedEnv.SHELL = shell;
+  }
+
+  // Interactive login mode loads both login and interactive startup files
+  // (for example .zprofile + .zshrc), which is where nvm, pyenv and mise are
+  // commonly initialized. Marker framing isolates env(1)'s NUL-delimited
+  // payload from any startup-file stdout; stderr and values are never logged.
+  // Each mode is independently bounded so every interactive failure still gets
+  // a real non-interactive login fallback before Core uses the process env.
+  for (const args of [["-lic"], ["-lc"]]) {
+    try {
+      return await readShellEnvironment(
+        shell,
+        args,
+        inheritedEnv,
+        timeoutMs,
+      );
+    } catch {
+      // A noisy or broken interactive profile may still have a valid login
+      // environment. The caller performs the final process-environment fallback.
+    }
+  }
+  throw new Error("login environment could not be resolved");
+}
+
+function sanitizedRuntimeEnv(
+  sourceEnvironment: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  // The selected source is authoritative. In particular, variables explicitly
+  // unset by the user's startup files must not leak back from Electron's env.
+  const env = { ...sourceEnvironment };
   delete env.AWAKEN_CONFIG_DIR;
   delete env.LLM_API_KEY;
   delete env.LLM_BASE_URL;
@@ -138,10 +324,16 @@ export class RuntimeSupervisor {
 
   constructor(options: SupervisorOptions, deps: RuntimeSupervisorDeps = {}) {
     this.options = options;
+    const loginEnvironmentTimeoutMs =
+      deps.loginEnvironmentTimeoutMs ?? LOGIN_ENV_TIMEOUT_MS;
     this.deps = {
       allocatePort: deps.allocatePort ?? allocatePort,
+      loginEnvironmentTimeoutMs,
       now: deps.now ?? Date.now,
       resolveBinaryPath: deps.resolveBinaryPath ?? resolveBinaryPath,
+      resolveLoginUserEnvironment:
+        deps.resolveLoginUserEnvironment ??
+        (() => resolveLoginUserEnvironment(loginEnvironmentTimeoutMs)),
       spawnProcess: deps.spawnProcess ?? spawn,
       waitForHealth:
         deps.waitForHealth ?? ((baseUrl) => waitForHealth(baseUrl)),
@@ -156,6 +348,21 @@ export class RuntimeSupervisor {
     const myGen = ++this.startGeneration;
     const maxAttempts = Math.max(1, this.options.maxStartAttempts ?? 3);
     let lastError: Error | undefined;
+    this.setStatus("starting");
+    let runtimeEnvironment: NodeJS.ProcessEnv;
+    try {
+      runtimeEnvironment = sanitizedRuntimeEnv(
+        await this.deps.resolveLoginUserEnvironment(),
+      );
+    } catch {
+      // A missing, slow, or broken login shell must not prevent Desktop from
+      // starting Core. Fall back to the Electron process environment without
+      // exposing shell output or environment values through supervisor logs.
+      runtimeEnvironment = sanitizedRuntimeEnv(process.env);
+    }
+    if (this.startGeneration !== myGen) {
+      return this.getStatus();
+    }
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       // Bail out if stop()/restart() invalidated this start loop.
@@ -176,7 +383,7 @@ export class RuntimeSupervisor {
 
         child = this.deps.spawnProcess(binaryPath, [], {
           env: {
-            ...sanitizedRuntimeEnv(),
+            ...runtimeEnvironment,
             AWAKEN_CORE_ADDR: `127.0.0.1:${port}`,
             AWAKEN_RUNTIME_MANIFEST: resolveRuntimeManifestPath(),
             AWAKEN_USER_DATA_DIR: app.getPath("userData"),

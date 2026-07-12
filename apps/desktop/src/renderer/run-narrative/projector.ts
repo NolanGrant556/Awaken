@@ -219,7 +219,7 @@ export function projectAguiEventToNarrative(
         event,
         "auth",
         "Authorization required",
-        [event.authProvider, event.authScope, event.authLink]
+        [event.authProvider, event.authScope, event.authUrl]
           .filter(Boolean)
           .join(" | "),
         "error",

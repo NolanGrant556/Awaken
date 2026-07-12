@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -34,8 +35,10 @@ func LoadDir(dir string, source SourceOrigin) map[string]*SkillDefinition {
 	}
 
 	result := make(map[string]*SkillDefinition)
+	resolvedSkillsRoot, _ := filepath.EvalSymlinks(dir)
+	seenRealPaths := make(map[string]string)
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() && entry.Type()&os.ModeSymlink == 0 {
 			continue
 		}
 		dirName := entry.Name()
@@ -45,13 +48,46 @@ func LoadDir(dir string, source SourceOrigin) map[string]*SkillDefinition {
 
 		rootDir := filepath.Join(dir, dirName)
 		path := filepath.Join(rootDir, "SKILL.md")
+		fallbackID := SkillIDFromNameOrFallback(dirName, "")
+		base := &SkillDefinition{
+			ID: fallbackID, Name: fallbackID, Source: source, Scope: source,
+			RootDir: rootDir, SourceRoot: resolvedSkillsRoot, SkillFilePath: path, FilePath: path,
+			State: StateInvalid, Context: ContextInline, UserInvocable: true,
+		}
+		resolvedRoot, resolveErr := filepath.EvalSymlinks(rootDir)
+		if resolveErr != nil {
+			base.UnavailableReason = fmt.Sprintf("resolve skill package root: %v", resolveErr)
+			base.Diagnostics = []SkillDiagnostic{{Code: "skill_package_root_invalid", Message: base.UnavailableReason, Severity: "error"}}
+			result[fallbackID] = base
+			continue
+		}
+		base.ResolvedRootDir = resolvedRoot
+		if resolvedSkillsRoot == "" || !pathWithinRoot(resolvedRoot, resolvedSkillsRoot) {
+			base.UnavailableReason = "skill package symlink escapes the configured skills root"
+			base.Diagnostics = []SkillDiagnostic{{Code: "skill_package_root_escape", Message: base.UnavailableReason, Severity: "error"}}
+			result[fallbackID] = base
+			continue
+		}
+		if firstID, duplicate := seenRealPaths[resolvedRoot]; duplicate {
+			base.State = StateShadowed
+			base.ShadowedBy = firstID + "(" + resolvedRoot + ")"
+			result[shadowedMapKey(fallbackID, source, len(result))] = base
+			continue
+		}
+		seenRealPaths[resolvedRoot] = fallbackID
 		raw, err := os.ReadFile(path)
 		if err != nil {
+			base.UnavailableReason = fmt.Sprintf("read SKILL.md: %v", err)
+			base.Diagnostics = []SkillDiagnostic{{Code: "skill_file_unreadable", Message: base.UnavailableReason, Severity: "error"}}
+			result[fallbackID] = base
 			continue
 		}
 
 		def, err := ParseFrontmatter(string(raw))
 		if err != nil {
+			base.UnavailableReason = err.Error()
+			base.Diagnostics = []SkillDiagnostic{{Code: "skill_frontmatter_invalid", Message: base.UnavailableReason, Severity: "error"}}
+			result[fallbackID] = base
 			continue
 		}
 
@@ -64,26 +100,27 @@ func LoadDir(dir string, source SourceOrigin) map[string]*SkillDefinition {
 		def.Source = source
 		def.Scope = source
 		def.RootDir = rootDir
-		if resolvedRoot, resolveErr := filepath.EvalSymlinks(rootDir); resolveErr == nil {
-			def.ResolvedRootDir = resolvedRoot
-		}
+		def.SourceRoot = resolvedSkillsRoot
+		def.ResolvedRootDir = resolvedRoot
 		def.SkillFilePath = path
 		def.FilePath = path
 		if source == SourceProject {
 			def.ProjectPath = projectPathFromSkillsRoot(dir)
 		}
-		def.State = StateAvailable
+		def.State = StateLoaded
 
 		if err := ValidateNameReserved(def.Name); err != nil {
-			def.State = StateUnavailable
+			def.State = StateInvalid
 			def.UnavailableReason = err.Error()
+			def.Diagnostics = append(def.Diagnostics, SkillDiagnostic{Code: "skill_reserved_name", Message: err.Error(), Severity: "error"})
 			result[id] = def
 			continue
 		}
 
 		if err := ValidateSchema(def); err != nil {
-			def.State = StateUnavailable
+			def.State = StateInvalid
 			def.UnavailableReason = err.Error()
+			def.Diagnostics = append(def.Diagnostics, SkillDiagnostic{Code: "skill_schema_invalid", Message: err.Error(), Severity: "error"})
 			result[id] = def
 			continue
 		}
@@ -92,17 +129,26 @@ func LoadDir(dir string, source SourceOrigin) map[string]*SkillDefinition {
 		if def.Context == "" {
 			def.Context = ContextInline
 		}
-		if def.ToolPolicy.Mode == "" {
-			def.ToolPolicy.Mode = ToolPolicyIntersect
-		}
-		if ApplyPlatformContractConflict(def) {
-			result[id] = def
-			continue
-		}
-
+		// Catalog discovery retains metadata only. The full body is re-read from
+		// the anchored SKILL.md path when the unified skill tool is invoked.
+		def.Body = ""
 		result[id] = def
 	}
 	return result
+}
+
+func pathWithinRoot(path, root string) bool {
+	path = filepath.Clean(path)
+	root = filepath.Clean(root)
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel))
+}
+
+func shadowedMapKey(id string, source SourceOrigin, ordinal int) string {
+	return fmt.Sprintf("%s__shadowed__%s__%d", id, source, ordinal)
 }
 
 func projectPathFromSkillsRoot(dir string) string {
@@ -115,6 +161,98 @@ func projectPathFromSkillsRoot(dir string) string {
 		return ""
 	}
 	return filepath.Dir(awakenDir)
+}
+
+// LoadLegacyCommandsDir discovers both nested <name>/SKILL.md packages and
+// flat <name>.md legacy commands. Flat files may omit frontmatter; their file
+// name and first meaningful body line provide the minimum catalog metadata.
+func LoadLegacyCommandsDir(dir string) map[string]*SkillDefinition {
+	if strings.TrimSpace(dir) == "" {
+		return nil
+	}
+	packages := LoadDir(dir, SourceLegacy)
+	for key, def := range packages {
+		if def != nil && def.State == StateInvalid {
+			if _, err := os.Stat(def.SkillFilePath); os.IsNotExist(err) {
+				delete(packages, key)
+			}
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return packages
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return packages
+	}
+	flat := make(map[string]*SkillDefinition)
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, ".") || !strings.EqualFold(filepath.Ext(name), ".md") {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		resolvedFile, resolveErr := filepath.EvalSymlinks(path)
+		fallbackID := SkillIDFromNameOrFallback(strings.TrimSuffix(name, filepath.Ext(name)), "")
+		base := &SkillDefinition{
+			ID: fallbackID, Name: fallbackID, Source: SourceLegacy, Scope: SourceLegacy,
+			RootDir: dir, SourceRoot: resolvedRoot, ResolvedRootDir: resolvedRoot, SkillFilePath: path, FilePath: path,
+			State: StateInvalid, Context: ContextInline, UserInvocable: true,
+		}
+		if resolveErr != nil || !pathWithinRoot(resolvedFile, resolvedRoot) {
+			base.UnavailableReason = "legacy command path escapes its configured commands root"
+			base.Diagnostics = []SkillDiagnostic{{Code: "skill_package_root_escape", Message: base.UnavailableReason, Severity: "error"}}
+			flat[fallbackID] = base
+			continue
+		}
+		info, statErr := os.Stat(resolvedFile)
+		if statErr != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			base.UnavailableReason = fmt.Sprintf("read legacy command: %v", readErr)
+			base.Diagnostics = []SkillDiagnostic{{Code: "skill_file_unreadable", Message: base.UnavailableReason, Severity: "error"}}
+			flat[fallbackID] = base
+			continue
+		}
+		var def *SkillDefinition
+		var parseErr error
+		trimmed := strings.TrimSpace(string(raw))
+		if strings.HasPrefix(trimmed, "---") {
+			def, parseErr = ParseFrontmatter(trimmed)
+		} else {
+			def = &SkillDefinition{
+				Name: fallbackID, Description: descriptionFromBody(trimmed), Body: trimmed,
+				Context: ContextInline, UserInvocable: true,
+			}
+		}
+		if parseErr != nil {
+			base.UnavailableReason = parseErr.Error()
+			base.Diagnostics = []SkillDiagnostic{{Code: "skill_frontmatter_invalid", Message: parseErr.Error(), Severity: "error"}}
+			flat[fallbackID] = base
+			continue
+		}
+		id := SkillIDFromNameOrFallback(fallbackID, def.Name)
+		if strings.TrimSpace(def.Name) == "" {
+			def.Name = id
+		}
+		def.ID, def.Source, def.Scope = id, SourceLegacy, SourceLegacy
+		def.RootDir, def.SourceRoot, def.ResolvedRootDir = dir, resolvedRoot, resolvedRoot
+		def.SkillFilePath, def.FilePath = path, path
+		def.State = StateLoaded
+		if err := ValidateNameReserved(def.Name); err != nil {
+			def.State, def.UnavailableReason = StateInvalid, err.Error()
+			def.Diagnostics = append(def.Diagnostics, SkillDiagnostic{Code: "skill_reserved_name", Message: err.Error(), Severity: "error"})
+		} else if err := ValidateSchema(def); err != nil {
+			def.State, def.UnavailableReason = StateInvalid, err.Error()
+			def.Diagnostics = append(def.Diagnostics, SkillDiagnostic{Code: "skill_schema_invalid", Message: err.Error(), Severity: "error"})
+		}
+		def.Body = ""
+		flat[id] = def
+	}
+	return MergeSkills(packages, flat)
 }
 
 func SkillIDFromNameOrFallback(fallback string, skillName string) string {
@@ -148,41 +286,88 @@ func SkillIDFromNameOrFallback(fallback string, skillName string) string {
 	return id
 }
 
-// MergeSkills merges skill maps from multiple sources by priority:
-// project > user. A higher-priority skill shadows a lower-
-// priority one: the lower-priority entry is kept with StateShadowed and
-// ShadowedBy set.
+// MergeSkills merges sources using deterministic first-wins priority while
+// retaining lower-priority entries as shadowed diagnostics.
 func MergeSkills(sources ...map[string]*SkillDefinition) map[string]*SkillDefinition {
 	merged := make(map[string]*SkillDefinition)
+	identities := make(map[string]*SkillDefinition)
+	shadowOrdinal := 0
 	for _, src := range sources {
 		if src == nil {
 			continue
 		}
-		for id, def := range src {
+		keys := make([]string, 0, len(src))
+		for key := range src {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, mapKey := range keys {
+			def := src[mapKey]
 			if def == nil {
 				continue
 			}
+			def = shallowCopy(def)
+			id := strings.TrimSpace(def.ID)
+			if id == "" {
+				id = strings.TrimSpace(mapKey)
+			}
+			if isShadowedMapKey(mapKey) || def.State == StateShadowed {
+				def.State = StateShadowed
+				merged[shadowedMapKey(id, def.Source, shadowOrdinal)] = def
+				shadowOrdinal++
+				continue
+			}
+			if identity := skillFileIdentity(def); identity != "" {
+				if owner := identities[identity]; owner != nil {
+					if sourcePriority(def.Source) <= sourcePriority(owner.Source) {
+						def.State = StateShadowed
+						def.ShadowedBy = fmt.Sprintf("%s(%s)", owner.Source, owner.FilePath)
+						def.Diagnostics = append(def.Diagnostics, SkillDiagnostic{Code: "skill_realpath_duplicate", Message: "same Skill file already discovered from " + string(owner.Source), Severity: "warning"})
+						merged[shadowedMapKey(id, def.Source, shadowOrdinal)] = def
+						shadowOrdinal++
+						continue
+					}
+				}
+				identities[identity] = def
+			}
 			existing, ok := merged[id]
 			if !ok {
-				merged[id] = shallowCopy(def)
+				merged[id] = def
 				continue
 			}
 			if sourcePriority(def.Source) > sourcePriority(existing.Source) {
 				// existing gets shadowed.
 				existing.State = StateShadowed
 				existing.ShadowedBy = fmt.Sprintf("%s(%s)", def.Source, def.FilePath)
-				merged[id] = shallowCopy(def)
-				// Store shadowed entry under a synthetic key so it appears in listing.
-				merged[id+"__shadowed"] = existing
+				merged[id] = def
+				merged[shadowedMapKey(id, existing.Source, shadowOrdinal)] = existing
+				shadowOrdinal++
 			} else {
 				// New entry is lower priority; shadow it.
 				def.State = StateShadowed
 				def.ShadowedBy = fmt.Sprintf("%s(%s)", existing.Source, existing.FilePath)
-				merged[id+"__shadowed"] = def
+				merged[shadowedMapKey(id, def.Source, shadowOrdinal)] = def
+				shadowOrdinal++
 			}
 		}
 	}
 	return merged
+}
+
+func skillFileIdentity(def *SkillDefinition) string {
+	if def == nil {
+		return ""
+	}
+	path := strings.TrimSpace(def.SkillFilePath)
+	if path == "" {
+		path = strings.TrimSpace(def.FilePath)
+	}
+	if path != "" {
+		if resolved, err := filepath.EvalSymlinks(path); err == nil {
+			return filepath.Clean(resolved)
+		}
+	}
+	return ""
 }
 
 func shallowCopy(def *SkillDefinition) *SkillDefinition {
@@ -198,9 +383,28 @@ func shallowCopy(def *SkillDefinition) *SkillDefinition {
 	c.RequiredConnectors = append([]string(nil), def.RequiredConnectors...)
 	c.RequiredMcpServers = append([]string(nil), def.RequiredMcpServers...)
 	c.DeprecatedWarnings = append([]string(nil), def.DeprecatedWarnings...)
+	c.ToolHints = append([]ToolHint(nil), def.ToolHints...)
+	c.Diagnostics = append([]SkillDiagnostic(nil), def.Diagnostics...)
+	c.Paths = append([]string(nil), def.Paths...)
+	if def.UnknownFields != nil {
+		c.UnknownFields = make(map[string]any, len(def.UnknownFields))
+		for key, value := range def.UnknownFields {
+			c.UnknownFields[key] = value
+		}
+	}
+	if def.Awaken != nil {
+		c.Awaken = make(map[string]any, len(def.Awaken))
+		for key, value := range def.Awaken {
+			c.Awaken[key] = value
+		}
+	}
 	if def.McpBinding != nil {
 		mb := *def.McpBinding
 		c.McpBinding = &mb
+	}
+	if def.LastInvokedAt != nil {
+		invokedAt := *def.LastInvokedAt
+		c.LastInvokedAt = &invokedAt
 	}
 	return &c
 }

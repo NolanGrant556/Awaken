@@ -1,25 +1,43 @@
 package skills
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // SourceOrigin labels where a skill definition came from.
 type SourceOrigin string
 
 const (
-	SourceUser    SourceOrigin = "user"
-	SourceProject SourceOrigin = "project"
-	SourceMcp     SourceOrigin = "mcp"
+	SourceManaged    SourceOrigin = "managed"
+	SourceUser       SourceOrigin = "user"
+	SourceProject    SourceOrigin = "project"
+	SourceAdditional SourceOrigin = "additional"
+	SourcePlugin     SourceOrigin = "plugin"
+	SourceMcp        SourceOrigin = "mcp"
+	SourceBundled    SourceOrigin = "bundled"
+	SourceLegacy     SourceOrigin = "legacy"
 )
 
 // sourcePriority returns integer priority for merging: higher wins.
 func sourcePriority(o SourceOrigin) int {
 	switch o {
+	case SourceManaged:
+		return 8
 	case SourceProject:
-		return 3
+		return 7
+	case SourceAdditional:
+		return 6
 	case SourceUser:
-		return 2
+		return 5
+	case SourcePlugin:
+		return 4
 	case SourceMcp:
+		return 3
+	case SourceBundled:
 		return 2
+	case SourceLegacy:
+		return 1
 	default:
 		return 0
 	}
@@ -33,20 +51,16 @@ const (
 	ContextFork   ContextMode = "fork"
 )
 
-// SkillState describes the runtime availability of a skill.
+// SkillState describes package/catalog state. Runtime, authentication, and
+// tool readiness are deliberately not represented here; those are evaluated
+// only when the agent selects a real provider.
 type SkillState string
 
 const (
-	StateAvailable   SkillState = "available"
-	StateUnavailable SkillState = "unavailable"
-	StateShadowed    SkillState = "shadowed"
-)
-
-// ToolPolicyMode controls how a skill intersects the parent tool pool.
-type ToolPolicyMode string
-
-const (
-	ToolPolicyIntersect ToolPolicyMode = "intersect"
+	StateLoaded           SkillState = "loaded"
+	StateInvalid          SkillState = "invalid"
+	StateShadowed         SkillState = "shadowed"
+	StateDisabledByPolicy SkillState = "disabled_by_policy"
 )
 
 // ResourceLoadMode controls when a required resource is loaded.
@@ -57,22 +71,30 @@ const (
 	ResourceModeOnDemand ResourceLoadMode = "on_demand"
 )
 
-// Error codes used when a skill cannot enter the execution state.
-const (
-	ErrorCodePlatformContractConflict = "skill_platform_contract_conflict"
-	ErrorCodeToolNotAllowed           = "skill_tool_not_allowed"
-)
-
-// ToolPolicy narrows the parent run tool pool for an active skill.
-// Empty Allow inherits the parent pool; it never opens a global pool.
-type ToolPolicy struct {
-	Mode  ToolPolicyMode `yaml:"mode" json:"mode,omitempty"`
-	Allow []string       `yaml:"allow" json:"allow,omitempty"`
-	Deny  []string       `yaml:"deny" json:"deny,omitempty"`
+// ToolHint preserves author-supplied allowed-tools guidance without turning
+// it into an execution allow-list. Canonical is an optional Awaken alias that
+// helps the model understand common Claude Code tool names.
+type ToolHint struct {
+	Declared  string `json:"declared"`
+	Canonical string `json:"canonical,omitempty"`
+	Aliased   bool   `json:"aliased,omitempty"`
 }
 
-// RequiredResource declares a package-relative resource that must be validated
-// (and optionally preloaded) before the skill may execute.
+type SkillDiagnostic struct {
+	Code     string `json:"code,omitempty"`
+	Message  string `json:"message"`
+	Severity string `json:"severity,omitempty"`
+}
+
+// ToolPolicy is a legacy input shape. Allow and Deny are retained as author
+// hints only; they never change a run's tool availability snapshot.
+type ToolPolicy struct {
+	Allow []string `yaml:"allow" json:"allow,omitempty"`
+	Deny  []string `yaml:"deny" json:"deny,omitempty"`
+}
+
+// RequiredResource preserves legacy package metadata. Resources are resolved
+// on demand; this declaration never preloads or disables a Universal Skill.
 type RequiredResource struct {
 	Path     string           `yaml:"path" json:"path"`
 	Mode     ResourceLoadMode `yaml:"mode" json:"mode,omitempty"`
@@ -97,32 +119,42 @@ type SkillDefinition struct {
 	Description string `yaml:"description"`
 
 	// WhenToUse guides the LLM on when to select this skill.
-	WhenToUse string `yaml:"whenToUse"`
+	WhenToUse string `yaml:"when_to_use"`
 
 	// Version is an optional package version recorded on activation receipts.
 	Version string `yaml:"version"`
 
-	// ToolPolicy is the v2 tool-pool contract. Prefer this over AllowedTools.
+	// ToolPolicy is retained only as an input compatibility field. It is never
+	// compiled into a run-level tool boundary.
 	ToolPolicy ToolPolicy `yaml:"toolPolicy"`
 
-	// AllowedTools is the legacy allow-list alias for ToolPolicy.Allow.
-	// Deprecated: loaders map it into ToolPolicy.Allow and emit a warning.
-	AllowedTools []string `yaml:"allowedTools"`
+	// AllowedTools is author guidance from allowed-tools/allowedTools. It is a
+	// selection hint, not permission and not a tool-pool restriction.
+	AllowedTools []string   `yaml:"allowed-tools"`
+	ToolHints    []ToolHint `yaml:"-"`
 
-	// RequiredTools must exist in the compiled effective tool pool.
+	// UserInvocable defaults to true. DisableModelInvocation only prevents the
+	// model-facing catalog tool from selecting the Skill; an explicit user
+	// invocation remains valid.
+	UserInvocable          bool `yaml:"user-invocable"`
+	DisableModelInvocation bool `yaml:"disable-model-invocation"`
+	UserInvocableSet       bool `yaml:"-"`
+
+	// RequiredTools is legacy author guidance surfaced in diagnostics only.
 	RequiredTools []string `yaml:"requiredTools"`
 
-	// RequiredCapabilities must be satisfied by ≥1 tool in the effective pool.
+	// RequiredCapabilities is legacy author guidance surfaced in diagnostics.
 	RequiredCapabilities []string `yaml:"requiredCapabilities"`
 
-	// RequiredRuntimeComponents lists packaged runtime component names.
+	// RequiredRuntimeComponents is resolved only when a concrete provider runs.
 	RequiredRuntimeComponents []string `yaml:"requiredRuntimeComponents"`
 
-	// RequiredResources lists package-relative resources to validate/preload.
+	// RequiredResources lists package-relative resources for on-demand access.
 	RequiredResources []RequiredResource `yaml:"requiredResources"`
 
 	// Arguments declares the parameters this skill accepts.
-	Arguments []SkillArgument `yaml:"arguments"`
+	Arguments    []SkillArgument `yaml:"arguments"`
+	ArgumentHint string          `yaml:"-"`
 
 	// Model is an optional override for the LLM model during execution.
 	Model string `yaml:"model"`
@@ -137,18 +169,24 @@ type SkillDefinition struct {
 	Agent string `yaml:"agent"`
 
 	// Hooks are optional lifecycle callbacks.
-	Hooks SkillHooks `yaml:"hooks"`
+	Hooks    SkillHooks     `yaml:"hooks"`
+	HooksRaw any            `yaml:"-"`
+	Paths    []string       `yaml:"paths"`
+	Shell    string         `yaml:"shell"`
+	Awaken   map[string]any `yaml:"awaken"`
 
-	// RequiredConnectors lists connector names that must be available for
-	// this skill to be usable. Any missing connector makes the skill
-	// unavailable.
+	// UnknownFields preserves unrecognized frontmatter fields so installing and
+	// reserializing a market Skill does not silently destroy its metadata.
+	UnknownFields map[string]any `yaml:"-"`
+
+	// RequiredConnectors is legacy execution guidance. Missing connectors are
+	// reported as diagnostics and are resolved only when a concrete provider is
+	// invoked; they never make a structurally valid package unavailable.
 	RequiredConnectors []string `yaml:"requiredConnectors"`
 
-	// RequiredMcpServers lists MCP server names that must be in the
-	// connected state for this skill to be available. Present on both
-	// bridged MCP skills (auto-derived) and local SKILL.md files
-	// (manually declared). A skill is available only when both
-	// requiredConnectors AND requiredMcpServers are satisfied.
+	// RequiredMcpServers is the equivalent execution hint for MCP-backed
+	// providers. It is present on bridged MCP Skills and may be declared by a
+	// local package, but connection state does not gate Catalog loading.
 	RequiredMcpServers []string `yaml:"requiredMcpServers"`
 
 	// McpBinding is set when the Skill was bridged from an MCP server.
@@ -173,6 +211,10 @@ type SkillDefinition struct {
 
 	// RootDir is the absolute path to the skill package directory.
 	RootDir string `yaml:"-"`
+	// SourceRoot is the resolved discovery root that authorized RootDir. It is
+	// used as the os.Root anchor for managed/additional/user/project/plugin/
+	// bundled/legacy local package resources and is never model-authored.
+	SourceRoot string `yaml:"-"`
 	// ResolvedRootDir captures the real package root when the registry loads or
 	// installs the Skill. Resource readers use it to detect later symlink
 	// replacement of RootDir before opening bundled files.
@@ -187,11 +229,11 @@ type SkillDefinition struct {
 	// FilePath is the absolute path to the source SKILL.md.
 	FilePath string `yaml:"-"`
 
-	// State is the runtime availability state.
+	// State is the package/catalog state.
 	State SkillState `yaml:"-"`
 
-	// UnavailableReason explains why this skill is not available (when
-	// State is StateUnavailable).
+	// UnavailableReason explains why this package is invalid, shadowed, or
+	// disabled by policy.
 	UnavailableReason string `yaml:"-"`
 
 	// UnavailableCode is an optional machine-readable unavailability code
@@ -202,24 +244,13 @@ type SkillDefinition struct {
 	// priority source overrides this one.
 	ShadowedBy string `yaml:"-"`
 
+	// LastInvokedAt is registry-owned recent-use metadata. It is not parsed
+	// from SKILL.md and survives local source reloads within the Core process.
+	LastInvokedAt *time.Time        `yaml:"-"`
+	Diagnostics   []SkillDiagnostic `yaml:"-"`
+
 	// DeprecatedWarnings collects non-fatal frontmatter compatibility notes.
 	DeprecatedWarnings []string `yaml:"-"`
-}
-
-// EffectiveToolPolicy returns the canonical tool policy after applying the
-// legacy allowedTools alias. Empty Allow means inherit the parent pool.
-func (d *SkillDefinition) EffectiveToolPolicy() ToolPolicy {
-	if d == nil {
-		return ToolPolicy{Mode: ToolPolicyIntersect}
-	}
-	policy := d.ToolPolicy
-	if policy.Mode == "" {
-		policy.Mode = ToolPolicyIntersect
-	}
-	if len(policy.Allow) == 0 && len(d.AllowedTools) > 0 {
-		policy.Allow = append([]string(nil), d.AllowedTools...)
-	}
-	return policy
 }
 
 // SkillArgument describes a single parameter the skill accepts. The agent

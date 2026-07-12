@@ -5,6 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import {
   closeCompetingPackagedAwaken,
+  isUsableDevDesktopWindow,
   listPackagedAwakenProcesses,
 } from "./desktop-lifecycle-common.mjs";
 
@@ -148,7 +149,7 @@ var rows: [[String: Any]] = []
 for window in windows {
   let pid = window[kCGWindowOwnerPID as String] as? Int ?? -1
   let name = window[kCGWindowName as String] as? String ?? ""
-  if targetPids.contains(pid) && name == "Awaken Desktop" {
+  if targetPids.contains(pid) && (name.isEmpty || name == "Awaken Desktop") {
     let bounds = window[kCGWindowBounds as String] as? [String: Any] ?? [:]
     rows.append([
       "pid": pid,
@@ -184,22 +185,12 @@ function windowInfo(processes) {
   }
 }
 
-function isUsableWindow(window) {
-  return (
-    window &&
-    window.width >= 1000 &&
-    window.height >= 700 &&
-    window.x + window.width > 200 &&
-    window.y + window.height > 200
-  );
-}
-
 async function collectStatus() {
   const processes = processInfo();
   const windows = windowInfo(processes);
   const rendererReachable = await canReachRenderer();
   const screen = screenInfo();
-  const usableWindow = windows.windows.find(isUsableWindow);
+  const usableWindow = windows.windows.find(isUsableDevDesktopWindow);
 
   return {
     screen,

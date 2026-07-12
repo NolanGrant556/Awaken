@@ -140,14 +140,11 @@ export function skillSlashActionsFromSkills(
 ): SlashAction[] {
   return skills
     .filter(
-      (skill) =>
-        skill.sourceOrigin === "project" || skill.sourceOrigin === "user",
+      (skill) => skill.state === "loaded" && skill.userInvocable !== false,
     )
-    .filter((skill) => skill.state !== "shadowed")
     .map((skill) => {
       const label = skill.displayName || skill.name || skill.id;
       const description = skill.description || skill.whenToUse || "";
-      const unavailable = skill.state !== "available";
       const id = `skill:${skill.id}:${skill.sourceOrigin}`;
       return {
         id,
@@ -163,10 +160,6 @@ export function skillSlashActionsFromSkills(
           skill.skillFilePath,
         ].filter((value): value is string => Boolean(value)),
         icon: createElement(Wrench, { size: 13, strokeWidth: 1.85 }),
-        disabled: unavailable,
-        disabledReason: unavailable
-          ? skill.unavailableReason || "Skill 当前不可用"
-          : undefined,
         preview: {
           description: skill.whenToUse || skill.description,
           path: skill.skillFilePath,

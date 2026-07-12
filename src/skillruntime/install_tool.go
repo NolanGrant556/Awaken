@@ -41,18 +41,19 @@ type skillInstallInput struct {
 }
 
 type skillInstallOutput struct {
-	Status          string `json:"status"`
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	Scope           string `json:"scope"`
-	SourceOrigin    string `json:"source_origin"`
-	RootDir         string `json:"root_dir"`
-	SkillFilePath   string `json:"skill_file_path"`
-	ProjectPath     string `json:"project_path,omitempty"`
-	State           string `json:"state"`
-	Reloaded        bool   `json:"reloaded"`
-	OverwritePolicy string `json:"overwrite_policy"`
-	Message         string `json:"message"`
+	Status                     string `json:"status"`
+	ID                         string `json:"id"`
+	Name                       string `json:"name"`
+	Scope                      string `json:"scope"`
+	SourceOrigin               string `json:"source_origin"`
+	RootDir                    string `json:"root_dir"`
+	SkillFilePath              string `json:"skill_file_path"`
+	ProjectPath                string `json:"project_path,omitempty"`
+	State                      string `json:"state"`
+	Reloaded                   bool   `json:"reloaded"`
+	OverwritePolicy            string `json:"overwrite_policy"`
+	Message                    string `json:"message"`
+	PreviousPackageTrashedPath string `json:"previous_package_trashed_path,omitempty"`
 }
 
 type skillInstallFailure struct {
@@ -122,7 +123,7 @@ func (t *SkillInstallTool) Parameters() []tool.ToolParameter {
 		{Name: "subpath", Type: "string", Required: false, Description: "Optional relative subdirectory within a remote_git repository that contains the skill package."},
 		{Name: "scope", Type: "string", Required: false, Description: "Install scope: project (default) or global. user is accepted as a global alias."},
 		{Name: "project_root", Type: "string", Required: false, Description: "Project root for project scope; defaults to the current workspace and is resolved by the runtime."},
-		{Name: "overwrite_policy", Type: "string", Required: false, Description: "Existing skill policy: abort (default); replace is recognized but currently returns unsupported until a recoverable review path exists."},
+		{Name: "overwrite_policy", Type: "string", Required: false, Description: "Existing skill policy: abort (default) or replace. Replace atomically installs the new package and moves the previous package to the operating-system Trash."},
 		{Name: "reload_after_install", Type: "boolean", Required: false, Description: "Reload the skill registry after installation. Defaults to true."},
 	}
 }
@@ -138,27 +139,29 @@ func (t *SkillInstallTool) Definition() tool.ToolDefinition {
 			"Use when installation must follow Awaken's package validation, scope resolution, overwrite policy, and registry reload contract.",
 		},
 		WhenNotToUse: []string{
-			"Do not use to read or execute an already installed Skill; use skill_resource_read or the corresponding skill__ tool.",
-			"Do not write .awaken/skills manually; overwrite_policy=replace currently fails closed until a dedicated recoverable replacement and review path is available.",
+			"Do not use to read or execute an already installed Skill; use skill_resource_read for package resources or skill for invocation.",
+			"Do not write .awaken/skills manually or permanently delete an existing package during replacement.",
 		},
 		InputSchema: skillInstallInputSchema(),
 		OutputSchema: tool.ToolParam{Type: "object", Properties: map[string]tool.ToolParam{
-			"install_status":   {Type: "string", Enum: []any{"installed"}, Description: "Installation completion state."},
-			"id":               {Type: "string", Description: "Stable installed Skill identifier."},
-			"name":             {Type: "string", Description: "Installed Skill display name."},
-			"scope":            {Type: "string", Enum: []any{"project", "global"}, Description: "Resolved installation scope."},
-			"source_origin":    {Type: "string", Description: "Resolved project or user source origin."},
-			"root_dir":         {Type: "string", Description: "Observed installed package directory."},
-			"skill_file_path":  {Type: "string", Description: "Observed installed SKILL.md path."},
-			"project_path":     {Type: "string", Description: "Associated project path when applicable."},
-			"state":            {Type: "string", Description: "Installed Skill availability state."},
-			"reloaded":         {Type: "boolean", Description: "Whether the live Skill registry was reloaded."},
-			"overwrite_policy": {Type: "string", Enum: []any{"abort", "replace"}, Description: "Effective existing-package policy used by the installer."},
-			"message":          {Type: "string", Description: "Bounded installation result message."},
+			"install_status":                {Type: "string", Enum: []any{"installed"}, Description: "Installation completion state."},
+			"id":                            {Type: "string", Description: "Stable installed Skill identifier."},
+			"name":                          {Type: "string", Description: "Installed Skill display name."},
+			"scope":                         {Type: "string", Enum: []any{"project", "global"}, Description: "Resolved installation scope."},
+			"source_origin":                 {Type: "string", Description: "Resolved project or user source origin."},
+			"root_dir":                      {Type: "string", Description: "Observed installed package directory."},
+			"skill_file_path":               {Type: "string", Description: "Observed installed SKILL.md path."},
+			"project_path":                  {Type: "string", Description: "Associated project path when applicable."},
+			"state":                         {Type: "string", Description: "Installed Skill availability state."},
+			"reloaded":                      {Type: "boolean", Description: "Whether the live Skill registry was reloaded."},
+			"overwrite_policy":              {Type: "string", Enum: []any{"abort", "replace"}, Description: "Effective existing-package policy used by the installer."},
+			"message":                       {Type: "string", Description: "Bounded installation result message."},
+			"previous_package_trashed_path": {Type: "string", Description: "Observed Trash destination for the previous package when overwrite_policy=replace."},
 		}, Required: []string{"install_status", "id", "name", "scope", "source_origin", "root_dir", "skill_file_path", "state", "reloaded", "overwrite_policy", "message"}, AdditionalProperties: tool.BoolPtr(false)},
 		SideEffects: []tool.ToolSideEffect{
 			{Kind: tool.SideEffectCreate, Resources: []string{"project or global Skill package"}, Description: "Creates a validated Skill package under the resolved Awaken skill root.", Reversibility: tool.ReversibilityReversible},
-			{Kind: tool.SideEffectUpdate, Resources: []string{"existing Skill package", "live Skill registry"}, Description: "Registry reload may update live Skill state; package replacement is blocked until a dedicated recoverable review path exists.", Reversibility: tool.ReversibilityConditional},
+			{Kind: tool.SideEffectUpdate, Resources: []string{"existing Skill package", "live Skill registry"}, Description: "Registry reload may update live Skill state; package replacement moves the prior version to Trash.", Reversibility: tool.ReversibilityConditional},
+			{Kind: tool.SideEffectDelete, Resources: []string{"previous Skill package"}, Description: "Replacement removes the prior package from the live catalog only after moving it to operating-system Trash.", Reversibility: tool.ReversibilityReversible},
 			{Kind: tool.SideEffectNetwork, Resources: []string{"declared HTTP(S) or Git source"}, Description: "Remote source modes read the declared network location before installation.", Reversibility: tool.ReversibilityNotApplicable},
 		},
 		Examples: []tool.ToolExample{{
@@ -178,7 +181,7 @@ func (t *SkillInstallTool) Definition() tool.ToolDefinition {
 			{Code: "skill_install_source_invalid", Cause: "The declared content or local source could not produce a valid package.", Retryable: false, Recovery: []string{"Correct the package content or choose a valid readable local path."}},
 			{Code: "skill_install_source_unavailable", Cause: "The declared HTTP(S) or Git source could not be retrieved.", Retryable: true, Recovery: []string{"Inspect the remote source and retry with backoff or choose a different source."}},
 			{Code: "skill_install_already_exists", Cause: "A package with the same Skill ID exists while overwrite_policy is abort.", Retryable: false, Recovery: []string{"Keep the existing Skill or explicitly request reviewed replacement."}},
-			{Code: "skill_install_replace_unsupported", Cause: "Package replacement is unsupported because no dedicated recoverable review path is available.", Retryable: false, Recovery: []string{"Keep the existing Skill or use a new Skill ID; do not bypass the safety boundary."}},
+			{Code: "skill_install_trash_unavailable", Cause: "The previous package could not be moved to operating-system Trash, so replacement was rolled back or stopped.", Retryable: false, Recovery: []string{"Inspect the existing and staged package state, restore Trash availability, then issue a fresh replacement; do not retry blindly."}},
 			{Code: "skill_install_failed", Cause: "Package validation or the atomic installation step failed.", Retryable: false, Recovery: []string{"Fix the package or target permissions before retrying."}},
 			{Code: "skill_install_output_invalid", Cause: "The installed result could not be encoded into the declared output contract.", Retryable: false, Recovery: []string{"Report an implementation failure; do not reinstall blindly."}},
 		},
@@ -191,6 +194,7 @@ func (t *SkillInstallTool) Definition() tool.ToolDefinition {
 			FileBridgeScope: tool.FileBridgeTaskScopeWrite,
 			NetworkScope:    tool.NetworkScopeOpen,
 		},
+		Capabilities: []tool.Capability{tool.CapabilityFileWrite, tool.CapabilityFileDelete},
 	})
 }
 
@@ -209,7 +213,7 @@ func skillInstallInputSchema() tool.ToolParametersSchema {
 			"subpath":              {Type: "string", Description: "Optional relative Skill directory within a Git repository."},
 			"scope":                {Type: "string", Enum: []any{"project", "global", "user"}, Description: "Installation scope; empty defaults to project."},
 			"project_root":         {Type: "string", Description: "Project root inside the current workspace; runtime supplies the default."},
-			"overwrite_policy":     {Type: "string", Enum: []any{"abort", "replace"}, Description: "Existing package policy; empty defaults to abort, while replace currently fails closed as unsupported."},
+			"overwrite_policy":     {Type: "string", Enum: []any{"abort", "replace"}, Description: "Existing package policy; empty defaults to abort, while replace moves the prior package to Trash."},
 			"reload_after_install": {Type: "boolean", Description: "Reload the live registry after installation; defaults to true."},
 		},
 		Required:             []string{"source_type"},
@@ -224,13 +228,6 @@ func (t *SkillInstallTool) CheckPermission(ctx context.Context, input string, pe
 	req, err := parseSkillInstallInput(input)
 	if err != nil {
 		return tool.DenyPermission(fmt.Sprintf("invalid parameters: %v", err))
-	}
-	if strings.EqualFold(strings.TrimSpace(req.OverwritePolicy), "replace") {
-		return tool.PermissionDecision{
-			Behavior: tool.PermissionUnsupported,
-			Reason:   "skill replacement is unsupported until a dedicated recoverable review path is available",
-			Metadata: tool.DecisionMetadata{Title: "Replace skill", Description: "Replacement would delete the existing package before installation completes.", RiskTone: "danger"},
-		}
 	}
 	if normalizeSourceType(req.SourceType) == "remote_git" {
 		if err := validateRemoteGitRequest(req); err != nil {
@@ -285,6 +282,7 @@ func (t *SkillInstallTool) ExecuteOutcome(ctx context.Context, input string, _ t
 		"source_origin": out.SourceOrigin, "root_dir": out.RootDir, "skill_file_path": out.SkillFilePath,
 		"project_path": out.ProjectPath, "state": out.State, "reloaded": out.Reloaded,
 		"overwrite_policy": out.OverwritePolicy, "message": out.Message,
+		"previous_package_trashed_path": out.PreviousPackageTrashedPath,
 	}
 	outcome := tool.SucceededOutcome(string(data))
 	outcome.Summary = fmt.Sprintf("Installed Skill %s in %s scope", out.ID, out.Scope)
@@ -299,9 +297,9 @@ func (t *SkillInstallTool) ExecuteOutcome(ctx context.Context, input string, _ t
 		"reloaded": out.Reloaded, "overwrite_policy": out.OverwritePolicy,
 	}
 	if out.OverwritePolicy == "replace" {
-		changeAction = "installed"
-		changeSummary = "Installed a validated Skill package with replacement allowed; the installer did not expose whether the target existed before execution."
-		changeDetails["pre_state"] = "unobserved"
+		changeAction = "updated"
+		changeSummary = "Installed a validated Skill package and moved the previous package to operating-system Trash."
+		changeDetails["previous_package_trashed_path"] = out.PreviousPackageTrashedPath
 	}
 	outcome.Changes = []tool.ResourceChange{{
 		Kind: "skill_package", Action: changeAction, Resource: out.RootDir,
@@ -309,11 +307,20 @@ func (t *SkillInstallTool) ExecuteOutcome(ctx context.Context, input string, _ t
 		Certainty: tool.ChangeObserved, Reversibility: tool.ChangeConditional,
 		Details: changeDetails,
 	}}
+	if out.PreviousPackageTrashedPath != "" {
+		outcome.Changes = append(outcome.Changes, tool.ResourceChange{
+			Kind: "skill_package", Action: "trashed", Resource: out.RootDir,
+			Summary:   "Previous Skill package moved to operating-system Trash before replacement completed.",
+			Certainty: tool.ChangeObserved, Reversibility: tool.ChangeReversible,
+			Details: map[string]any{"trashed_path": out.PreviousPackageTrashedPath},
+		})
+	}
 	outcome.Details = details
 	if out.Reloaded {
 		outcome.NextActions = []tool.NextAction{{
 			ID: "use_installed_skill", Description: "Invoke the installed Skill when its declared use boundary matches the task.",
-			Tool: SkillToolName(out.ID), Preconditions: []string{"The reloaded Skill is available and matches the user's request."},
+			Tool: CatalogToolName, Preconditions: []string{"The reloaded Skill is available and matches the user's request."},
+			InputHint: map[string]any{"skill": out.ID},
 		}}
 	} else {
 		outcome.NextActions = []tool.NextAction{{
@@ -342,13 +349,6 @@ func (t *SkillInstallTool) install(ctx context.Context, input string) (skillInst
 		return skillInstallOutput{}, &skillInstallFailure{
 			code: "skill_install_invalid_input", category: tool.ErrorCategoryValidation,
 			retryable: false, recovery: []string{"fix_skill_install_arguments"}, underlying: err,
-		}
-	}
-	if strings.EqualFold(strings.TrimSpace(req.OverwritePolicy), "replace") {
-		return skillInstallOutput{}, &skillInstallFailure{
-			code: "skill_install_replace_unsupported", category: tool.ErrorCategoryUnsupported,
-			retryable: false, recovery: []string{"keep_existing_skill", "use_new_skill_id", "do_not_bypass_safety_boundary"},
-			underlying: fmt.Errorf("skill replacement is unsupported until a dedicated recoverable review path is available"),
 		}
 	}
 	target, err := resolveSkillInstallTargetForTool(req, tool.PermissionContextFromContext(ctx))
@@ -394,6 +394,12 @@ func (t *SkillInstallTool) install(ctx context.Context, input string) (skillInst
 				underlying: fmt.Errorf("skill already exists; set overwrite_policy to replace to replace it: %w", err),
 			}
 		}
+		if errors.Is(err, skills.ErrSkillReplaceTrashUnavailable) {
+			return skillInstallOutput{}, &skillInstallFailure{
+				code: "skill_install_trash_unavailable", category: tool.ErrorCategoryUnsupported,
+				retryable: false, recovery: []string{"inspect_existing_and_staged_packages", "restore_operating_system_trash", "issue_fresh_replacement", "do_not_retry_blindly"}, underlying: err,
+			}
+		}
 		return skillInstallOutput{}, &skillInstallFailure{
 			code: "skill_install_failed", category: tool.ErrorCategoryTool,
 			retryable: false, recovery: []string{"fix_skill_package", "verify_target_permissions"}, underlying: err,
@@ -425,6 +431,12 @@ func (t *SkillInstallTool) install(ctx context.Context, input string) (skillInst
 		Reloaded:        reload,
 		OverwritePolicy: overwritePolicy,
 		Message:         result.Message,
+		PreviousPackageTrashedPath: func() string {
+			if result.PreviousPackageTrash == nil {
+				return ""
+			}
+			return result.PreviousPackageTrash.TrashedPath
+		}(),
 	}, nil
 }
 
@@ -458,10 +470,8 @@ func skillInstallFailureOutcome(err error) tool.ExecutionOutcome {
 	case "skill_install_source_unavailable":
 		// A remote read may have been attempted, but installation never began.
 		outcome.Operation.SideEffectState = tool.OutcomeSideEffectNone
-	case "skill_install_replace_unsupported":
+	case "skill_install_trash_unavailable":
 		outcome.Status = tool.OutcomeUnsupported
-		outcome.TransportStatus = tool.TransportNotStarted
-		outcome.Operation.SideEffectState = tool.OutcomeSideEffectNotStarted
 	}
 	return outcome
 }

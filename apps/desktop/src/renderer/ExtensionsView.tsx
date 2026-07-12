@@ -121,12 +121,14 @@ function stateLabel(state: string): string {
       return "需授权";
     case "failed":
       return "失败";
-    case "available":
-      return "可用";
-    case "unavailable":
-      return "不可用";
+    case "loaded":
+      return "已加载";
+    case "invalid":
+      return "无效";
     case "shadowed":
       return "被覆盖";
+    case "disabled_by_policy":
+      return "策略禁用";
     case "disabled":
       return "已停用";
     default:
@@ -148,6 +150,17 @@ function sourceLabel(source: string): string {
       return "本地";
     case "team":
       return "团队";
+    case "managed":
+      return "管理策略";
+    case "additional":
+      return "附加目录";
+    case "plugin":
+      return "插件";
+    case "bundled":
+      return "随附";
+    case "legacy":
+    case "legacy-command":
+      return "旧命令";
     default:
       return source;
   }
@@ -175,8 +188,27 @@ function skillMatchesQuery(skill: RuntimeSkill, query: string): boolean {
     matchesQuery(skill.name, query) ||
     matchesQuery(skill.description, query) ||
     matchesQuery(skill.whenToUse, query) ||
-    matchesQuery(skill.id, query)
+    matchesQuery(skill.id, query) ||
+    matchesQuery(skill.skillFilePath, query) ||
+    (skill.diagnostics ?? []).some((diagnostic) =>
+      matchesQuery(skillDiagnosticText(diagnostic), query),
+    )
   );
+}
+
+export function skillDiagnosticText(
+  diagnostic: NonNullable<RuntimeSkill["diagnostics"]>[number],
+): string {
+  if (typeof diagnostic === "string") {
+    return diagnostic;
+  }
+  return [diagnostic.code, diagnostic.message].filter(Boolean).join(": ");
+}
+
+function skillLastInvokedLabel(value?: string): string {
+  if (!value) return "暂无";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
 }
 
 function projectLabelFromRoot(root: string): string {
@@ -471,6 +503,17 @@ export function ExtensionsView({
 
   const visibleMcpSkills = useMemo(
     () => visibleSkills.filter((skill) => skill.sourceOrigin === "mcp"),
+    [visibleSkills],
+  );
+
+  const visibleOtherSkills = useMemo(
+    () =>
+      visibleSkills.filter(
+        (skill) =>
+          skill.sourceOrigin !== "project" &&
+          skill.sourceOrigin !== "user" &&
+          skill.sourceOrigin !== "mcp",
+      ),
     [visibleSkills],
   );
 
@@ -779,6 +822,10 @@ export function ExtensionsView({
   }
 
   function renderSkillCard(skill: RuntimeSkill) {
+    const skillPath = skill.skillFilePath || skill.rootDir;
+    const diagnostics = (skill.diagnostics ?? [])
+      .map(skillDiagnosticText)
+      .filter(Boolean);
     return (
       <article className="extension-card" key={`${skill.id}:${skill.sourceOrigin}`}>
         <div className="extension-card-icon" aria-hidden="true">
@@ -795,10 +842,21 @@ export function ExtensionsView({
           <div className="extension-card-meta">
             <span>{skillSourceLabel(skill.sourceOrigin)}</span>
             <span>{skill.context}</span>
+            <span>最近调用：{skillLastInvokedLabel(skill.lastInvokedAt)}</span>
+            {skillPath ? (
+              <span className="extension-card-path" title={skillPath}>
+                {skillPath}
+              </span>
+            ) : null}
             {skill.requiredMcpServers?.length ? (
               <span>MCP: {skill.requiredMcpServers.join(", ")}</span>
             ) : null}
           </div>
+          {diagnostics.length > 0 ? (
+            <p className="extension-card-diagnostic" title={diagnostics.join(" · ")}>
+              诊断：{diagnostics.join(" · ")}
+            </p>
+          ) : null}
         </div>
       </article>
     );
@@ -809,7 +867,7 @@ export function ExtensionsView({
     const bodyId = `skill-project-group-${index}`;
     let countText = `${group.skills.length} Skill`;
     if (group.errorMessage) {
-      countText = "不可用";
+      countText = "读取失败";
     } else if (
       normalizedQuery &&
       group.visibleSkills.length !== group.skills.length
@@ -1030,6 +1088,14 @@ export function ExtensionsView({
                     <h2>MCP 动态</h2>
                     <div className="extension-grid">
                       {visibleMcpSkills.map(renderSkillCard)}
+                    </div>
+                  </section>
+                ) : null}
+                {visibleOtherSkills.length > 0 ? (
+                  <section className="extension-section">
+                    <h2>其他来源</h2>
+                    <div className="extension-grid">
+                      {visibleOtherSkills.map(renderSkillCard)}
                     </div>
                   </section>
                 ) : null}

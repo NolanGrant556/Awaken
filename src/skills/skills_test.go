@@ -2,6 +2,7 @@ package skills
 
 import (
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -161,7 +162,7 @@ Beta body.
 	if alpha == nil {
 		t.Fatal("expected alpha skill")
 	}
-	if alpha.State != StateAvailable {
+	if alpha.State != StateLoaded {
 		t.Errorf("expected available, got %s", alpha.State)
 	}
 	if alpha.Source != SourceProject {
@@ -207,7 +208,7 @@ Body.
 	if len(loaded) != 2 {
 		t.Fatalf("expected 2 skills, got %d", len(loaded))
 	}
-	if loaded["broken"].State != StateAvailable {
+	if loaded["broken"].State != StateLoaded {
 		t.Errorf("expected missing-name package to use directory name and load, got %s", loaded["broken"].State)
 	}
 	if loaded["broken"].Name != "broken" {
@@ -267,10 +268,10 @@ func TestLoadDirEmptyDir(t *testing.T) {
 
 func TestMergePriority(t *testing.T) {
 	user := map[string]*SkillDefinition{
-		"alpha": {ID: "alpha", Name: "A User", Description: "desc", Source: SourceUser, State: StateAvailable},
+		"alpha": {ID: "alpha", Name: "A User", Description: "desc", Source: SourceUser, State: StateLoaded},
 	}
 	project := map[string]*SkillDefinition{
-		"alpha": {ID: "alpha", Name: "A Project", Description: "desc", Source: SourceProject, State: StateAvailable},
+		"alpha": {ID: "alpha", Name: "A Project", Description: "desc", Source: SourceProject, State: StateLoaded},
 	}
 
 	merged := MergeSkills(user, project)
@@ -286,7 +287,12 @@ func TestMergePriority(t *testing.T) {
 		t.Errorf("expected project source to win, got %s", winner.Source)
 	}
 
-	shadowed := merged["alpha__shadowed"]
+	var shadowed *SkillDefinition
+	for key, def := range merged {
+		if isShadowedMapKey(key) {
+			shadowed = def
+		}
+	}
 	if shadowed == nil {
 		t.Fatal("expected shadowed alpha")
 	}
@@ -312,7 +318,7 @@ Body.
 `)
 	reg.LoadFromSources(map[SourceOrigin]string{SourceUser: userDir})
 
-	avail := reg.ListAvailable()
+	avail := reg.ListLoaded()
 	if len(avail) != 1 {
 		t.Fatalf("expected 1 available skill, got %d", len(avail))
 	}
@@ -331,7 +337,7 @@ Body.
 	}
 }
 
-func TestSkillRegistryConnectorAvailability(t *testing.T) {
+func TestSkillRegistryConnectorRequirementsAreExecutionHints(t *testing.T) {
 	reg := NewSkillRegistry(nil)
 
 	projectDir := t.TempDir()
@@ -351,46 +357,40 @@ Body.
 `)
 	reg.LoadFromSources(map[SourceOrigin]string{SourceProject: projectDir})
 
-	// Initially no connectors available.
-	avail := reg.ListAvailable()
-	if len(avail) != 1 {
-		t.Fatalf("expected 1 available skill (no-connector), got %d", len(avail))
-	}
-	if avail[0].ID != "no-connector" {
-		t.Errorf("expected no-connector, got %s", avail[0].ID)
+	// Catalog loading is independent of connector readiness.
+	avail := reg.ListLoaded()
+	if len(avail) != 2 {
+		t.Fatalf("expected both packages loaded, got %d", len(avail))
 	}
 
 	needsNotion := reg.Get("needs-notion")
 	if needsNotion == nil {
 		t.Fatal("expected needs-notion to exist")
 	}
-	if needsNotion.State != StateUnavailable {
-		t.Errorf("expected unavailable state, got %s", needsNotion.State)
-	}
-	if needsNotion.UnavailableReason == "" {
-		t.Error("expected unavailable reason to be set")
+	if needsNotion.State != StateLoaded || needsNotion.UnavailableReason != "" {
+		t.Errorf("dependency incorrectly gated package: %+v", needsNotion)
 	}
 
 	// Make notion connector available.
 	reg.SetConnectorAvailable("notion", true)
-	avail = reg.ListAvailable()
+	avail = reg.ListLoaded()
 	if len(avail) != 2 {
 		t.Fatalf("expected 2 available skills after connector, got %d", len(avail))
 	}
 
 	// Disconnect notion again.
 	reg.SetConnectorAvailable("notion", false)
-	avail = reg.ListAvailable()
-	if len(avail) != 1 {
-		t.Fatalf("expected 1 available skill after disconnect, got %d", len(avail))
+	avail = reg.ListLoaded()
+	if len(avail) != 2 {
+		t.Fatalf("connector disconnect must not unload package, got %d", len(avail))
 	}
 }
 
 func TestSkillRegistryOnChange(t *testing.T) {
 	reg := NewSkillRegistry(nil)
-	called := false
+	var called atomic.Bool
 	reg.SetOnChange(func() {
-		called = true
+		called.Store(true)
 	})
 
 	userDir := t.TempDir()
@@ -403,7 +403,7 @@ Body.
 	reg.LoadFromSources(map[SourceOrigin]string{SourceUser: userDir})
 
 	// onChange runs in a goroutine, give it a moment.
-	if !called {
+	if !called.Load() {
 		// Retry the callback manually.
 		reg.FireOnChange()
 	}
@@ -436,7 +436,7 @@ Body.
 	if rejected == nil {
 		t.Fatal("expected rejected skill to be present (as unavailable)")
 	}
-	if rejected.State != StateUnavailable {
+	if rejected.State != StateInvalid {
 		t.Errorf("expected rejected skill to be unavailable, got %s", rejected.State)
 	}
 	if rejected.UnavailableReason == "" {
@@ -447,7 +447,7 @@ Body.
 	if valid == nil {
 		t.Fatal("expected valid skill to be present")
 	}
-	if valid.State != StateAvailable {
+	if valid.State != StateLoaded {
 		t.Errorf("expected valid skill to be available, got %s", valid.State)
 	}
 }
@@ -472,7 +472,7 @@ func TestValidateNameReserved(t *testing.T) {
 
 // ---- RequiredMcpServers availability tests ----
 
-func TestSkillRegistryMcpServerAvailability(t *testing.T) {
+func TestSkillRegistryMcpRequirementsAreExecutionHints(t *testing.T) {
 	reg := NewSkillRegistry(nil)
 
 	projectDir := t.TempDir()
@@ -503,56 +503,52 @@ Body.
 	reg.LoadFromSources(map[SourceOrigin]string{SourceProject: projectDir})
 
 	// Initially no MCP servers available.
-	avail := reg.ListAvailable()
-	if len(avail) != 1 {
-		t.Fatalf("expected 1 available skill (no-mcp), got %d", len(avail))
-	}
-	if avail[0].ID != "no-mcp" {
-		t.Errorf("expected no-mcp, got %s", avail[0].ID)
+	avail := reg.ListLoaded()
+	if len(avail) != 3 {
+		t.Fatalf("expected all packages loaded, got %d", len(avail))
 	}
 
 	needsMcp := reg.Get("needs-mcp")
 	if needsMcp == nil {
 		t.Fatal("expected needs-mcp to exist")
 	}
-	if needsMcp.State != StateUnavailable {
-		t.Errorf("expected unavailable state, got %s", needsMcp.State)
+	if needsMcp.State != StateLoaded {
+		t.Errorf("expected loaded state, got %s", needsMcp.State)
 	}
 
 	needsBoth := reg.Get("needs-both")
 	if needsBoth == nil {
 		t.Fatal("expected needs-both to exist")
 	}
-	if needsBoth.State != StateUnavailable {
-		t.Errorf("expected unavailable state, got %s", needsBoth.State)
+	if needsBoth.State != StateLoaded {
+		t.Errorf("expected loaded state, got %s", needsBoth.State)
 	}
 
 	// Make MCP server available.
 	reg.SetMcpServerAvailable("internal-search", true)
-	avail = reg.ListAvailable()
-	// no-mcp + needs-mcp = 2, needs-both is still unavailable because notion is missing.
-	if len(avail) != 2 {
-		t.Fatalf("expected 2 available skills after MCP server, got %d", len(avail))
+	avail = reg.ListLoaded()
+	if len(avail) != 3 {
+		t.Fatalf("MCP state must not change package catalog, got %d", len(avail))
 	}
 
 	// Make connector available too.
 	reg.SetConnectorAvailable("notion", true)
-	avail = reg.ListAvailable()
+	avail = reg.ListLoaded()
 	if len(avail) != 3 {
 		t.Fatalf("expected 3 available skills after both, got %d", len(avail))
 	}
 
 	// Disconnect MCP server.
 	reg.SetMcpServerAvailable("internal-search", false)
-	avail = reg.ListAvailable()
-	if len(avail) != 1 {
-		t.Fatalf("expected 1 available skill after MCP disconnect, got %d", len(avail))
+	avail = reg.ListLoaded()
+	if len(avail) != 3 {
+		t.Fatalf("MCP disconnect must not unload local packages, got %d", len(avail))
 	}
 }
 
 // ---- SetMcpServerAvailable tests ----
 
-func TestSetMcpServerAvailable(t *testing.T) {
+func TestSetMcpServerAvailableDoesNotGateLocalSkill(t *testing.T) {
 	reg := NewSkillRegistry(nil)
 
 	projectDir := t.TempDir()
@@ -566,24 +562,39 @@ Body.
 `)
 	reg.LoadFromSources(map[SourceOrigin]string{SourceProject: projectDir})
 
-	// Initially unavailable.
-	avail := reg.ListAvailable()
-	if len(avail) != 0 {
-		t.Fatalf("expected 0 available skills, got %d", len(avail))
+	// The package is loaded even before the provider is ready.
+	avail := reg.ListLoaded()
+	if len(avail) != 1 {
+		t.Fatalf("expected 1 loaded skill, got %d", len(avail))
 	}
 
 	// Set available.
 	reg.SetMcpServerAvailable("s1", true)
-	avail = reg.ListAvailable()
+	avail = reg.ListLoaded()
 	if len(avail) != 1 {
 		t.Fatalf("expected 1 available skill, got %d", len(avail))
 	}
 
 	// Set unavailable again.
 	reg.SetMcpServerAvailable("s1", false)
-	avail = reg.ListAvailable()
-	if len(avail) != 0 {
-		t.Fatalf("expected 0 available skills, got %d", len(avail))
+	avail = reg.ListLoaded()
+	if len(avail) != 1 {
+		t.Fatalf("MCP disconnect must not unload package, got %d", len(avail))
+	}
+}
+
+func TestSkillRegistryDisabledByPolicyIsDistinctFromInvalid(t *testing.T) {
+	reg := NewSkillRegistry(nil)
+	dir := t.TempDir()
+	writeTestSkillPackage(t, dir, "policy-skill", "---\nname: policy-skill\ndescription: policy\n---\nBody")
+	reg.LoadFromSources(map[SourceOrigin]string{SourceUser: dir})
+	reg.SetDisabledByPolicy("policy-skill", true, "organization policy")
+	got := reg.Get("policy-skill")
+	if got == nil || got.State != StateDisabledByPolicy || got.UnavailableReason != "organization policy" {
+		t.Fatalf("policy state=%+v", got)
+	}
+	if len(reg.ListLoaded()) != 0 {
+		t.Fatal("disabled package leaked into loaded catalog")
 	}
 }
 
@@ -597,7 +608,7 @@ func TestRegisterAndUnregisterSkill(t *testing.T) {
 		Name:               "my-prompt",
 		Description:        "A test prompt",
 		Source:             SourceMcp,
-		State:              StateAvailable,
+		State:              StateLoaded,
 		RequiredMcpServers: []string{"test"},
 		McpBinding: &McpBinding{
 			ServerName: "test",
@@ -638,14 +649,14 @@ func TestUnregisterSkillsByPrefix(t *testing.T) {
 			Name:        id,
 			Description: "test",
 			Source:      SourceMcp,
-			State:       StateAvailable,
+			State:       StateLoaded,
 		})
 	}
 
 	// Remove all skills for server "a".
 	reg.UnregisterSkillsByPrefix("mcp__a__")
 
-	avail := reg.ListAvailable()
+	avail := reg.ListLoaded()
 	// Should have mcp__b__p1 and other-skill left.
 	if len(avail) != 2 {
 		t.Fatalf("expected 2 skills remaining, got %d", len(avail))

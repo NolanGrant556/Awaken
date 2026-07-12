@@ -6,6 +6,19 @@ import (
 	"log"
 )
 
+// SkillExecutor executes an already activated Skill body. allowedTools contains
+// non-enforcing author hints; it never narrows the parent run's tool pool.
+type SkillExecutor interface {
+	Execute(ctx context.Context, skillID string, body string, allowedTools []string) (string, error)
+}
+
+// SkillExecutorFunc adapts a function to SkillExecutor.
+type SkillExecutorFunc func(ctx context.Context, skillID string, body string, allowedTools []string) (string, error)
+
+func (f SkillExecutorFunc) Execute(ctx context.Context, skillID string, body string, allowedTools []string) (string, error) {
+	return f(ctx, skillID, body, allowedTools)
+}
+
 // InlineExecutor executes a skill body by appending it as additional
 // context to the current run. In practice the agentcore Runner will see
 // the result string and continue processing.

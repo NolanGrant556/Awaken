@@ -12,7 +12,21 @@ import (
 
 	"awaken/src/skills"
 	"awaken/src/tool"
+	tooltrash "awaken/src/tool/trash"
 )
+
+type skillInstallTrashAdapter struct{ dir string }
+
+func (a skillInstallTrashAdapter) TrashPath(source string) (tooltrash.TrashResult, error) {
+	if err := os.MkdirAll(a.dir, 0o700); err != nil {
+		return tooltrash.TrashResult{}, err
+	}
+	destination := filepath.Join(a.dir, filepath.Base(source))
+	if err := os.Rename(source, destination); err != nil {
+		return tooltrash.TrashResult{}, err
+	}
+	return tooltrash.TrashResult{OriginalPath: source, TrashedPath: destination, Method: "test_rename"}, nil
+}
 
 // ---- args_test ----
 
@@ -96,81 +110,6 @@ func TestSubstituteArgsEscapedPlaceholders(t *testing.T) {
 	}
 }
 
-// ---- tool_test ----
-
-func TestSkillToolInterface(t *testing.T) {
-	st := &SkillTool{
-		SkillID:   "test-skill",
-		NameStr:   SkillToolName("test-skill"),
-		Desc:      "A test skill",
-		WhenToUse: "use for testing",
-		Body:      "Task: ${input}",
-		ArgDefs: []SkillArgDef{
-			{Name: "input", Type: "string", Required: true},
-		},
-	}
-
-	if st.Name() != "skill__test_skill" {
-		t.Errorf("bad name: %s", st.Name())
-	}
-	if st.Description() != "use for testing" {
-		t.Errorf("bad description: %s", st.Description())
-	}
-	if !st.IsReadOnly() {
-		t.Errorf("skill tool should be read-only")
-	}
-
-	params := st.Parameters()
-	if len(params) != 1 {
-		t.Fatalf("expected 1 param, got %d", len(params))
-	}
-	if params[0].Name != "input" {
-		t.Errorf("bad param name: %s", params[0].Name)
-	}
-}
-
-func TestSkillToolExecute(t *testing.T) {
-	var gotAllowed []string
-	st := &SkillTool{
-		SkillID:      "test-skill",
-		NameStr:      SkillToolName("test-skill"),
-		Desc:         "Test",
-		Body:         "Root ${AWAKEN_SKILL_DIR}: Hello ${name}!",
-		RootDir:      "/tmp/test-skill",
-		AllowedTools: []string{"shell", "skill_resource_read"},
-		ArgDefs: []SkillArgDef{
-			{Name: "name", Type: "string", Required: true},
-		},
-		Executor: SkillExecutorFunc(func(ctx context.Context, skillID string, body string, allowedTools []string) (string, error) {
-			gotAllowed = append([]string(nil), allowedTools...)
-			return "RESULT: " + body, nil
-		}),
-	}
-
-	result, err := st.Execute(context.Background(), `{"name":"World"}`)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(result, "Hello World!") {
-		t.Errorf("bad result: %s", result)
-	}
-	if !strings.Contains(result, "Base directory for this skill: /tmp/test-skill") {
-		t.Errorf("base directory missing from result: %s", result)
-	}
-	if !strings.Contains(result, "Root /tmp/test-skill") {
-		t.Errorf("AWAKEN_SKILL_DIR was not substituted: %s", result)
-	}
-	if strings.Join(gotAllowed, ",") != "shell,skill_resource_read" {
-		t.Errorf("allowed tools were not passed through: %v", gotAllowed)
-	}
-}
-
-func TestSkillToolName(t *testing.T) {
-	if name := SkillToolName("meeting-notes"); name != "skill__meeting_notes" {
-		t.Errorf("bad tool name: %s", name)
-	}
-}
-
 // ---- executor_test ----
 
 func TestInlineExecutor(t *testing.T) {
@@ -206,7 +145,7 @@ func TestResourceReadToolReadsWithinSkillPackage(t *testing.T) {
 		RootDir:         skillRoot,
 		ResolvedRootDir: mustEvalSymlinks(t, skillRoot),
 		ProjectPath:     root,
-		State:           skills.StateAvailable,
+		State:           skills.StateLoaded,
 	})
 
 	reader := &ResourceReadTool{registry: reg}
@@ -235,6 +174,38 @@ func TestResourceReadToolReadsWithinSkillPackage(t *testing.T) {
 	if outcome.Details["path"] != "references/guide.md" || outcome.Details["size_bytes"] != 10 || outcome.Details["sha256"] == "" {
 		t.Fatalf("resource details are incomplete: %+v", outcome.Details)
 	}
+	if err := os.WriteFile(filepath.Join(skillRoot, "references", "asset.bin"), []byte{0xff, 0xfe, 0x00}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	binaryOutcome, err := reader.ExecuteOutcome(context.Background(), `{"skill_id":"sample","path":"references/asset.bin"}`, nil)
+	if err != nil || binaryOutcome.ErrorCode != "skill_resource_binary" {
+		t.Fatalf("binary resource should route to file/artifact tools: outcome=%+v err=%v", binaryOutcome, err)
+	}
+}
+
+func TestResourceReadToolUsesRecordedDiscoveryRootForPluginPackage(t *testing.T) {
+	sourceRoot := filepath.Join(t.TempDir(), "plugin-skills")
+	packageRoot := filepath.Join(sourceRoot, "plugin-report")
+	if err := os.MkdirAll(filepath.Join(packageRoot, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(packageRoot, "SKILL.md"), []byte("---\nname: plugin-report\ndescription: Plugin report.\n---\nUse the asset.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(packageRoot, "assets", "template.txt"), []byte("plugin template"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	registry := skills.NewSkillRegistry(nil)
+	registry.LoadFromSources(map[skills.SourceOrigin]string{skills.SourcePlugin: sourceRoot})
+	definition := registry.Get("plugin-report")
+	if definition == nil || definition.SourceRoot == "" || definition.State != skills.StateLoaded {
+		t.Fatalf("plugin Skill did not retain its discovery root: %+v", definition)
+	}
+	reader := &ResourceReadTool{registry: registry}
+	result, err := reader.Execute(context.Background(), `{"skill_id":"plugin-report","path":"assets/template.txt"}`)
+	if err != nil || !strings.Contains(result, "plugin template") {
+		t.Fatalf("plugin resource did not use recorded local boundary: result=%q err=%v", result, err)
+	}
 }
 
 func TestResourceReadToolRejectsTraversal(t *testing.T) {
@@ -250,7 +221,7 @@ func TestResourceReadToolRejectsTraversal(t *testing.T) {
 		RootDir:         skillRoot,
 		ResolvedRootDir: skillRoot,
 		ProjectPath:     root,
-		State:           skills.StateAvailable,
+		State:           skills.StateLoaded,
 	})
 
 	reader := &ResourceReadTool{registry: reg}
@@ -279,7 +250,7 @@ func TestResourceReadToolRejectsSymlinkEscapeAtOpen(t *testing.T) {
 	reg.RegisterSkill(&skills.SkillDefinition{
 		ID: "symlink-skill", Name: "symlink-skill", Description: "symlink test",
 		Source: skills.SourceProject, Scope: skills.SourceProject, RootDir: skillRoot,
-		ResolvedRootDir: mustEvalSymlinks(t, skillRoot), ProjectPath: projectRoot, State: skills.StateAvailable,
+		ResolvedRootDir: mustEvalSymlinks(t, skillRoot), ProjectPath: projectRoot, State: skills.StateLoaded,
 	})
 	reader := &ResourceReadTool{registry: reg}
 	outcome, err := reader.ExecuteOutcome(context.Background(), `{"skill_id":"symlink-skill","path":"references/escape.md"}`, nil)
@@ -305,7 +276,7 @@ func TestResourceReadToolRejectsPackageRootReplacement(t *testing.T) {
 	reg.RegisterSkill(&skills.SkillDefinition{
 		ID: "root-swap", Name: "root-swap", Description: "root swap test",
 		Source: skills.SourceProject, Scope: skills.SourceProject, RootDir: skillRoot,
-		ResolvedRootDir: trustedRoot, ProjectPath: projectRoot, State: skills.StateAvailable,
+		ResolvedRootDir: trustedRoot, ProjectPath: projectRoot, State: skills.StateLoaded,
 	})
 	outside := t.TempDir()
 	if err := os.WriteFile(filepath.Join(outside, "secret.md"), []byte("outside root secret"), 0o600); err != nil {
@@ -369,6 +340,8 @@ func TestSkillInstallToolInstallsContentProjectSkillAndReloads(t *testing.T) {
 
 func TestSkillInstallToolStrictDefinitionAndStructuredOutcome(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	tooltrash.SetAdapter(skillInstallTrashAdapter{dir: filepath.Join(t.TempDir(), "Trash")})
+	t.Cleanup(func() { tooltrash.SetAdapter(nil) })
 	workspace := t.TempDir()
 	reg := skills.NewSkillRegistry(nil)
 	installer := &SkillInstallTool{registry: reg}
@@ -405,7 +378,7 @@ func TestSkillInstallToolStrictDefinitionAndStructuredOutcome(t *testing.T) {
 	if len(outcome.Changes) != 1 || outcome.Changes[0].Kind != "skill_package" || outcome.Changes[0].Action != "created" {
 		t.Fatalf("expected one observed Skill package change: %+v", outcome.Changes)
 	}
-	if len(outcome.NextActions) != 1 || outcome.NextActions[0].Tool != SkillToolName("structured-install") {
+	if len(outcome.NextActions) != 1 || outcome.NextActions[0].Tool != CatalogToolName || outcome.NextActions[0].InputHint["skill"] != "structured-install" {
 		t.Fatalf("expected actionable post-install guidance: %+v", outcome.NextActions)
 	}
 	replaceInput := `{
@@ -416,8 +389,8 @@ func TestSkillInstallToolStrictDefinitionAndStructuredOutcome(t *testing.T) {
 		"overwrite_policy": "replace"
 	}`
 	decision := installer.CheckPermission(ctx, replaceInput, tool.PermissionContextFromContext(ctx))
-	if decision.Behavior != tool.PermissionUnsupported || decision.Metadata.RiskTone != "danger" {
-		t.Fatalf("replacement must fail closed at the permission boundary: %+v", decision)
+	if decision.Behavior != tool.PermissionAllow {
+		t.Fatalf("recoverable replacement should be an ordinary automatic tool call: %+v", decision)
 	}
 	replaced, err := installer.ExecuteOutcome(ctx, replaceInput, nil)
 	if err != nil {
@@ -429,12 +402,17 @@ func TestSkillInstallToolStrictDefinitionAndStructuredOutcome(t *testing.T) {
 		OutputSchema:        def.OutputSchema,
 		StrictOutputSchema:  true,
 	})
-	if replaced.Status != tool.OutcomeUnsupported || replaced.ErrorCode != "skill_install_replace_unsupported" || replaced.TransportStatus != tool.TransportNotStarted || replaced.Operation.SideEffectState != tool.OutcomeSideEffectNotStarted || len(replaced.Changes) != 0 {
-		t.Fatalf("replacement must remain an unexecuted review boundary: %+v", replaced)
+	if replaced.Status != tool.OutcomeSucceeded || replaced.Operation == nil || replaced.Operation.SideEffectState != tool.OutcomeSideEffectApplied || len(replaced.Changes) != 2 {
+		t.Fatalf("replacement must install and preserve the previous package in Trash: %+v", replaced)
 	}
-	originalSkill, err := os.ReadFile(filepath.Join(workspace, ".awaken", "skills", "structured-install", "SKILL.md"))
-	if err != nil || !strings.Contains(string(originalSkill), "Run it.") || strings.Contains(string(originalSkill), "Run the replacement.") {
-		t.Fatalf("blocked replacement changed the existing Skill: err=%v content=%q", err, originalSkill)
+	currentSkill, err := os.ReadFile(filepath.Join(workspace, ".awaken", "skills", "structured-install", "SKILL.md"))
+	if err != nil || !strings.Contains(string(currentSkill), "Run the replacement.") {
+		t.Fatalf("replacement did not install the new Skill: err=%v content=%q", err, currentSkill)
+	}
+	trashedPath, _ := replaced.Details["previous_package_trashed_path"].(string)
+	previousSkill, err := os.ReadFile(filepath.Join(trashedPath, "SKILL.md"))
+	if err != nil || !strings.Contains(string(previousSkill), "Run it.") {
+		t.Fatalf("previous Skill is not recoverable from Trash: err=%v content=%q", err, previousSkill)
 	}
 	notReloaded, err := installer.ExecuteOutcome(ctx, `{
 		"source_type": "content",

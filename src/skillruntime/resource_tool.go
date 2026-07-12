@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"awaken/src/skills"
 	"awaken/src/tool"
@@ -93,6 +94,7 @@ func (t *ResourceReadTool) Definition() tool.ToolDefinition {
 			{Code: "skill_resource_not_found", Cause: "The Skill or requested resource does not exist.", Retryable: false, Recovery: []string{"Refresh installed Skill state and select an existing resource."}},
 			{Code: "skill_resource_path_denied", Cause: "The path is absolute, escapes the package, or resolves to a directory.", Retryable: false, Recovery: []string{"Use a package-relative regular-file path."}},
 			{Code: "skill_resource_too_large", Cause: "The resource exceeds the bounded read limit.", Retryable: false, Recovery: []string{"Read a smaller package resource."}},
+			{Code: "skill_resource_binary", Cause: "The resource is not UTF-8 text.", Retryable: false, Recovery: []string{"Use the matching file or artifact tool for binary assets."}},
 			{Code: "skill_resource_read_failed", Cause: "The local resource could not be statted or read.", Retryable: true, Recovery: []string{"Verify the installed package and retry once if the failure is transient."}},
 		},
 		Annotations: tool.ToolAnnotations{
@@ -187,6 +189,9 @@ func (t *ResourceReadTool) ExecuteOutcome(ctx context.Context, input string, _ t
 	if len(data) > maxSkillResourceReadSize {
 		return resourceReadFailure("skill_resource_too_large", tool.ErrorCategoryDomain, fmt.Sprintf("skill resource exceeds %d bytes", maxSkillResourceReadSize), false, []string{"choose_smaller_resource"}).WithTiming(started, time.Now().UTC()), nil
 	}
+	if !utf8.Valid(data) {
+		return resourceReadFailure("skill_resource_binary", tool.ErrorCategoryValidation, "skill_resource_read only returns UTF-8 text; use a file or artifact tool for binary resources", false, []string{"use_file_or_artifact_tool"}).WithTiming(started, time.Now().UTC()), nil
+	}
 	content := fmt.Sprintf("[skill resource %q:%s]\n\n%s", skillID, rel, string(data))
 	outcome := tool.SucceededOutcome(content)
 	outcome.Summary = fmt.Sprintf("Read %d bytes from Skill %s resource %s", len(data), skillID, rel)
@@ -219,20 +224,34 @@ func openAnchoredSkillResource(ctx context.Context, def *skills.SkillDefinition,
 		return nil, nil, fmt.Errorf("Skill package root changed after registry load")
 	}
 
-	var anchor string
+	anchor := strings.TrimSpace(def.SourceRoot)
 	switch def.Source {
 	case skills.SourceProject:
-		anchor = strings.TrimSpace(def.ProjectPath)
-		if anchor == "" {
+		projectRoot := strings.TrimSpace(def.ProjectPath)
+		if projectRoot == "" {
 			return nil, nil, fmt.Errorf("project Skill has no project identity")
 		}
-		if tool.HasPermissionContext(ctx) && !tool.PermissionContextFromContext(ctx).IsWithinWorkspaceResolved(anchor) {
+		if tool.HasPermissionContext(ctx) && !tool.PermissionContextFromContext(ctx).IsWithinWorkspaceResolved(projectRoot) {
 			return nil, nil, fmt.Errorf("project Skill root is outside the active workspace")
 		}
+		if anchor == "" {
+			anchor = filepath.Join(projectRoot, ".awaken", "skills")
+		}
 	case skills.SourceUser:
-		anchor, err = os.UserHomeDir()
-		if err != nil || strings.TrimSpace(anchor) == "" {
-			return nil, nil, fmt.Errorf("user Skill root is unavailable")
+		if anchor == "" {
+			home, homeErr := os.UserHomeDir()
+			if homeErr != nil || strings.TrimSpace(home) == "" {
+				return nil, nil, fmt.Errorf("user Skill root is unavailable")
+			}
+			anchor = filepath.Join(home, ".awaken", "skills")
+		}
+	case skills.SourceManaged, skills.SourceAdditional, skills.SourcePlugin, skills.SourceBundled:
+		if anchor == "" {
+			return nil, nil, fmt.Errorf("Skill source %q has no recorded discovery root", def.Source)
+		}
+	case skills.SourceLegacy:
+		if anchor == "" || (filepath.Clean(def.RootDir) == filepath.Clean(anchor) && !strings.EqualFold(filepath.Base(def.SkillFilePath), "SKILL.md")) {
+			return nil, nil, fmt.Errorf("flat legacy commands do not expose package resources")
 		}
 	default:
 		return nil, nil, fmt.Errorf("Skill source %q has no local resource boundary", def.Source)
@@ -249,8 +268,8 @@ func openAnchoredSkillResource(ctx context.Context, def *skills.SkillDefinition,
 		return nil, nil, fmt.Errorf("resolve Skill package identity: %w", err)
 	}
 	parts := strings.Split(filepath.ToSlash(packageRel), "/")
-	if len(parts) != 3 || parts[0] != ".awaken" || parts[1] != "skills" || strings.TrimSpace(parts[2]) == "" {
-		return nil, nil, fmt.Errorf("Skill package root is not under the authorized .awaken/skills directory")
+	if len(parts) != 1 || strings.TrimSpace(parts[0]) == "" || parts[0] == "." {
+		return nil, nil, fmt.Errorf("Skill package root is not one package below its authorized discovery root")
 	}
 
 	root, err := os.OpenRoot(anchor)

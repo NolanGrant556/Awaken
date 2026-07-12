@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"awaken/src/skills"
 )
@@ -18,23 +19,33 @@ type skillHandlers struct {
 
 // skillInfo is the wire shape for entries returned by GET /v1/skills.
 type skillInfo struct {
-	ID                 string          `json:"id"`
-	Name               string          `json:"name"`
-	DisplayName        string          `json:"displayName,omitempty"`
-	Description        string          `json:"description"`
-	WhenToUse          string          `json:"whenToUse,omitempty"`
-	State              string          `json:"state"`
-	UnavailableReason  string          `json:"unavailableReason,omitempty"`
-	SourceOrigin       string          `json:"sourceOrigin"`
-	Scope              string          `json:"scope"`
-	RootDir            string          `json:"rootDir,omitempty"`
-	SkillFilePath      string          `json:"skillFilePath,omitempty"`
-	ProjectPath        string          `json:"projectPath,omitempty"`
-	Context            string          `json:"context"`
-	ShadowedBy         string          `json:"shadowedBy,omitempty"`
-	AllowedTools       []string        `json:"allowedTools,omitempty"`
-	McpBinding         *mcpBindingInfo `json:"mcpBinding,omitempty"`
-	RequiredMcpServers []string        `json:"requiredMcpServers,omitempty"`
+	ID                 string                `json:"id"`
+	Name               string                `json:"name"`
+	DisplayName        string                `json:"displayName,omitempty"`
+	Description        string                `json:"description"`
+	WhenToUse          string                `json:"whenToUse,omitempty"`
+	State              string                `json:"state"`
+	UnavailableReason  string                `json:"unavailableReason,omitempty"`
+	SourceOrigin       string                `json:"sourceOrigin"`
+	Scope              string                `json:"scope"`
+	RootDir            string                `json:"rootDir,omitempty"`
+	SkillFilePath      string                `json:"skillFilePath,omitempty"`
+	ProjectPath        string                `json:"projectPath,omitempty"`
+	Context            string                `json:"context"`
+	ShadowedBy         string                `json:"shadowedBy,omitempty"`
+	AllowedTools       []string              `json:"allowedTools,omitempty"`
+	McpBinding         *mcpBindingInfo       `json:"mcpBinding,omitempty"`
+	RequiredMcpServers []string              `json:"requiredMcpServers,omitempty"`
+	UserInvocable      bool                  `json:"userInvocable"`
+	ModelInvocable     bool                  `json:"modelInvocable"`
+	Diagnostics        []skillDiagnosticInfo `json:"diagnostics,omitempty"`
+	LastInvokedAt      string                `json:"lastInvokedAt,omitempty"`
+}
+
+type skillDiagnosticInfo struct {
+	Code     string `json:"code,omitempty"`
+	Message  string `json:"message,omitempty"`
+	Severity string `json:"severity,omitempty"`
 }
 
 // mcpBindingInfo is the wire shape for the MCP binding field.
@@ -80,32 +91,7 @@ func (h skillHandlers) handleListSkills(w http.ResponseWriter, r *http.Request) 
 	all := h.registry.PreviewLocalSources(h.skillSourceDirs(projectRoot))
 	out := make([]skillInfo, 0, len(all))
 	for _, def := range all {
-		info := skillInfo{
-			ID:                 def.ID,
-			Name:               def.Name,
-			DisplayName:        def.DisplayName,
-			Description:        def.Description,
-			WhenToUse:          def.WhenToUse,
-			State:              string(def.State),
-			UnavailableReason:  def.UnavailableReason,
-			SourceOrigin:       string(def.Source),
-			Scope:              publicSkillScope(def),
-			RootDir:            def.RootDir,
-			SkillFilePath:      def.SkillFilePath,
-			ProjectPath:        def.ProjectPath,
-			Context:            string(def.Context),
-			ShadowedBy:         def.ShadowedBy,
-			AllowedTools:       def.AllowedTools,
-			RequiredMcpServers: def.RequiredMcpServers,
-		}
-		if def.McpBinding != nil {
-			info.McpBinding = &mcpBindingInfo{
-				ServerName: def.McpBinding.ServerName,
-				PromptName: def.McpBinding.PromptName,
-				Kind:       def.McpBinding.Kind,
-			}
-		}
-		out = append(out, info)
+		out = append(out, skillInfoFromDefinition(def))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -178,7 +164,7 @@ func (h skillHandlers) handleExecuteSkill(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if def.State != skills.StateAvailable {
+	if def.State != skills.StateLoaded {
 		writeErrorJSON(w, http.StatusConflict, "SKILL_UNAVAILABLE", def.UnavailableReason)
 		return
 	}
@@ -203,6 +189,12 @@ func skillInfoFromDefinition(def *skills.SkillDefinition) skillInfo {
 		Context:            string(def.Context),
 		AllowedTools:       def.AllowedTools,
 		RequiredMcpServers: def.RequiredMcpServers,
+		UserInvocable:      def.UserInvocable,
+		ModelInvocable:     !def.DisableModelInvocation,
+		Diagnostics:        skillDiagnostics(def),
+	}
+	if def.LastInvokedAt != nil && !def.LastInvokedAt.IsZero() {
+		info.LastInvokedAt = def.LastInvokedAt.UTC().Format(time.RFC3339Nano)
 	}
 	if def.McpBinding != nil {
 		info.McpBinding = &mcpBindingInfo{
@@ -212,6 +204,38 @@ func skillInfoFromDefinition(def *skills.SkillDefinition) skillInfo {
 		}
 	}
 	return info
+}
+
+func skillDiagnostics(def *skills.SkillDefinition) []skillDiagnosticInfo {
+	if def == nil {
+		return nil
+	}
+	result := make([]skillDiagnosticInfo, 0, len(def.Diagnostics)+len(def.DeprecatedWarnings)+1)
+	seen := map[string]bool{}
+	appendDiagnostic := func(value skillDiagnosticInfo) {
+		key := value.Code + "\x00" + value.Message + "\x00" + value.Severity
+		if strings.TrimSpace(value.Message) == "" || seen[key] {
+			return
+		}
+		seen[key] = true
+		result = append(result, value)
+	}
+	for _, diagnostic := range def.Diagnostics {
+		appendDiagnostic(skillDiagnosticInfo{Code: diagnostic.Code, Message: diagnostic.Message, Severity: diagnostic.Severity})
+	}
+	if reason := strings.TrimSpace(def.UnavailableReason); reason != "" {
+		code := strings.TrimSpace(def.UnavailableCode)
+		if code == "" {
+			code = "skill_" + string(def.State)
+		}
+		appendDiagnostic(skillDiagnosticInfo{Code: code, Message: reason, Severity: "error"})
+	}
+	for _, warning := range def.DeprecatedWarnings {
+		if warning = strings.TrimSpace(warning); warning != "" {
+			appendDiagnostic(skillDiagnosticInfo{Code: "skill_compatibility_note", Message: warning, Severity: "warning"})
+		}
+	}
+	return result
 }
 
 func publicSkillScope(def *skills.SkillDefinition) string {

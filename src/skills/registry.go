@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // SkillRegistry manages the lifecycle of all discovered skills. It merges
@@ -11,12 +12,14 @@ import (
 // based on connector presence and MCP server state, and exposes a stable
 // snapshot for consumers.
 type SkillRegistry struct {
-	mu         sync.RWMutex
-	skills     map[string]*SkillDefinition
-	logger     Logger
-	onChange   func()
-	connectors map[string]bool // available connector names
-	mcpServers map[string]bool // available MCP server names
+	mu               sync.RWMutex
+	skills           map[string]*SkillDefinition
+	logger           Logger
+	onChange         func()
+	connectors       map[string]bool // available connector names
+	mcpServers       map[string]bool // available MCP server names
+	disabledByPolicy map[string]string
+	lastInvoked      map[string]time.Time
 }
 
 // Logger is the minimal logging surface consumed by the skills package.
@@ -37,10 +40,12 @@ func NewSkillRegistry(logger Logger) *SkillRegistry {
 		logger = noopLogger{}
 	}
 	return &SkillRegistry{
-		skills:     make(map[string]*SkillDefinition),
-		logger:     logger,
-		connectors: make(map[string]bool),
-		mcpServers: make(map[string]bool),
+		skills:           make(map[string]*SkillDefinition),
+		logger:           logger,
+		connectors:       make(map[string]bool),
+		mcpServers:       make(map[string]bool),
+		disabledByPolicy: make(map[string]string),
+		lastInvoked:      make(map[string]time.Time),
 	}
 }
 
@@ -93,14 +98,19 @@ func (r *SkillRegistry) buildLocalSourcesLocked(dirs map[SourceOrigin]string) ma
 	var sourceMaps []map[string]*SkillDefinition
 
 	// Process sources from lowest to highest priority so merge works.
-	for _, src := range []SourceOrigin{SourceUser, SourceProject} {
-		dir, ok := dirs[src]
-		if !ok || dir == "" {
+	for _, src := range []SourceOrigin{SourceLegacy, SourceBundled, SourceMcp, SourcePlugin, SourceUser, SourceAdditional, SourceProject, SourceManaged} {
+		dirList, ok := dirs[src]
+		if !ok || dirList == "" {
 			continue
 		}
-		loaded := LoadDir(dir, src)
-		if len(loaded) > 0 {
-			sourceMaps = append(sourceMaps, loaded)
+		for _, dir := range splitSourceDirList(dirList) {
+			loaded := LoadDir(dir, src)
+			if src == SourceLegacy {
+				loaded = LoadLegacyCommandsDir(dir)
+			}
+			if len(loaded) > 0 {
+				sourceMaps = append(sourceMaps, loaded)
+			}
 		}
 	}
 
@@ -110,7 +120,53 @@ func (r *SkillRegistry) buildLocalSourcesLocked(dirs map[SourceOrigin]string) ma
 			next[id] = shallowCopy(def)
 		}
 	}
+	for _, def := range next {
+		if def == nil {
+			continue
+		}
+		if invokedAt, ok := r.lastInvoked[def.ID]; ok {
+			copy := invokedAt
+			def.LastInvokedAt = &copy
+		}
+	}
 	return next
+}
+
+// MarkInvoked records successful Skill activation independently from the
+// reloadable package snapshot.
+func (r *SkillRegistry) MarkInvoked(id string, invokedAt time.Time) {
+	if r == nil {
+		return
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return
+	}
+	if invokedAt.IsZero() {
+		invokedAt = time.Now().UTC()
+	} else {
+		invokedAt = invokedAt.UTC()
+	}
+	r.mu.Lock()
+	r.lastInvoked[id] = invokedAt
+	for _, def := range r.skills {
+		if def != nil && def.ID == id {
+			copy := invokedAt
+			def.LastInvokedAt = &copy
+		}
+	}
+	r.fireOnChangeLocked()
+	r.mu.Unlock()
+}
+
+func (r *SkillRegistry) LastInvokedAt(id string) (time.Time, bool) {
+	if r == nil {
+		return time.Time{}, false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	value, ok := r.lastInvoked[strings.TrimSpace(id)]
+	return value, ok
 }
 
 // SetConnectorAvailable updates the availability status of a single
@@ -144,8 +200,9 @@ func (r *SkillRegistry) SetMcpServerAvailable(name string, available bool) {
 	r.fireOnChangeLocked()
 }
 
-// reevaluateAvailabilityLocked recalculates State for every skill based on
-// current connector and MCP server availability. Must be called with mu held.
+// reevaluateAvailabilityLocked recalculates package policy state. Connector,
+// MCP, runtime, resource, and tool readiness are execution-time facts and never
+// make an otherwise valid local package unavailable.
 func (r *SkillRegistry) reevaluateAvailabilityLocked() {
 	r.reevaluateAvailabilityForLocked(r.skills)
 }
@@ -156,48 +213,57 @@ func (r *SkillRegistry) reevaluateAvailabilityForLocked(defs map[string]*SkillDe
 		if def.State == StateShadowed {
 			continue
 		}
-		if strings.HasSuffix(id, "__shadowed") {
+		if isShadowedMapKey(id) {
 			continue
 		}
-		// Platform-contract conflicts are sticky until the package changes.
-		if def.UnavailableCode == ErrorCodePlatformContractConflict {
-			def.State = StateUnavailable
-			if strings.TrimSpace(def.UnavailableReason) == "" {
-				def.UnavailableReason = ErrorCodePlatformContractConflict
-			}
+		if def.State == StateInvalid {
 			continue
 		}
-		if conflicts := DetectPlatformContractConflicts(def); len(conflicts) > 0 {
-			def.State = StateUnavailable
-			def.UnavailableCode = ErrorCodePlatformContractConflict
-			def.UnavailableReason = FormatPlatformConflictReason(conflicts)
+		def.Diagnostics = filterDiagnostics(def.Diagnostics, "skill_disabled_by_policy", "skill_connector_not_ready", "skill_mcp_not_ready")
+		if reason, disabled := r.disabledByPolicy[def.ID]; disabled {
+			def.State = StateDisabledByPolicy
+			def.UnavailableReason = reason
+			def.UnavailableCode = "skill_disabled_by_policy"
+			def.Diagnostics = appendUniqueDiagnostic(def.Diagnostics, SkillDiagnostic{Code: "skill_disabled_by_policy", Message: reason, Severity: "error"})
 			continue
 		}
-		if len(def.RequiredConnectors) == 0 && len(def.RequiredMcpServers) == 0 {
-			def.State = StateAvailable
-			def.UnavailableReason = ""
-			def.UnavailableCode = ""
-			continue
-		}
-		var reasons []string
+		def.State = StateLoaded
+		def.UnavailableReason = ""
+		def.UnavailableCode = ""
+		// Preserve dependency observations as diagnostics only. They help the
+		// agent plan remediation without turning Catalog into a readiness gate.
 		missingConn := r.missingConnectorsLocked(def.RequiredConnectors)
 		if len(missingConn) > 0 {
-			reasons = append(reasons, "missing connectors: "+stringsJoin(missingConn, ", "))
+			def.DeprecatedWarnings = appendUnique(def.DeprecatedWarnings, "execution hint: missing connectors: "+stringsJoin(missingConn, ", "))
+			def.Diagnostics = appendUniqueDiagnostic(def.Diagnostics, SkillDiagnostic{Code: "skill_connector_not_ready", Message: "execution hint: missing connectors: " + stringsJoin(missingConn, ", "), Severity: "warning"})
 		}
 		missingMcp := r.missingMcpServersLocked(def.RequiredMcpServers)
 		if len(missingMcp) > 0 {
-			reasons = append(reasons, "missing mcp servers: "+stringsJoin(missingMcp, ", "))
-		}
-		if len(reasons) > 0 {
-			def.State = StateUnavailable
-			def.UnavailableReason = stringsJoin(reasons, "; ")
-			def.UnavailableCode = ""
-		} else {
-			def.State = StateAvailable
-			def.UnavailableReason = ""
-			def.UnavailableCode = ""
+			def.DeprecatedWarnings = appendUnique(def.DeprecatedWarnings, "execution hint: missing mcp servers: "+stringsJoin(missingMcp, ", "))
+			def.Diagnostics = appendUniqueDiagnostic(def.Diagnostics, SkillDiagnostic{Code: "skill_mcp_not_ready", Message: "execution hint: missing mcp servers: " + stringsJoin(missingMcp, ", "), Severity: "warning"})
 		}
 	}
+}
+
+// SetDisabledByPolicy is the only runtime mutation that can make a structurally
+// valid package unavailable in the Catalog.
+func (r *SkillRegistry) SetDisabledByPolicy(id string, disabled bool, reason string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return
+	}
+	if disabled {
+		if strings.TrimSpace(reason) == "" {
+			reason = "disabled by configured Skill source policy"
+		}
+		r.disabledByPolicy[id] = reason
+	} else {
+		delete(r.disabledByPolicy, id)
+	}
+	r.reevaluateAvailabilityLocked()
+	r.fireOnChangeLocked()
 }
 
 func (r *SkillRegistry) missingConnectorsLocked(required []string) []string {
@@ -220,22 +286,31 @@ func (r *SkillRegistry) missingMcpServersLocked(required []string) []string {
 	return missing
 }
 
-// ListAvailable returns all skills with StateAvailable.
-func (r *SkillRegistry) ListAvailable() []*SkillDefinition {
+// ListLoaded returns all model/user usable package definitions.
+func (r *SkillRegistry) ListLoaded() []*SkillDefinition {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	result := make([]*SkillDefinition, 0)
 	for id, def := range r.skills {
-		if strings.HasSuffix(id, "__shadowed") {
+		if isShadowedMapKey(id) || def.State != StateLoaded {
 			continue
 		}
-		if def.State == StateAvailable {
+		result = append(result, shallowCopy(def))
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result
+}
+
+// ListModelInvocable excludes Skills that explicitly opt out of proactive
+// model invocation while keeping them available to explicit user entrypoints.
+func (r *SkillRegistry) ListModelInvocable() []*SkillDefinition {
+	loaded := r.ListLoaded()
+	result := loaded[:0]
+	for _, def := range loaded {
+		if !def.DisableModelInvocation {
 			result = append(result, def)
 		}
 	}
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].ID < result[j].ID
-	})
 	return result
 }
 
@@ -250,7 +325,7 @@ func (r *SkillRegistry) ListAll() []*SkillDefinition {
 func sortedSkillDefinitions(defs map[string]*SkillDefinition) []*SkillDefinition {
 	result := make([]*SkillDefinition, 0, len(defs))
 	for _, def := range defs {
-		result = append(result, def)
+		result = append(result, shallowCopy(def))
 	}
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].ID < result[j].ID
@@ -262,7 +337,11 @@ func sortedSkillDefinitions(defs map[string]*SkillDefinition) []*SkillDefinition
 func (r *SkillRegistry) Get(id string) *SkillDefinition {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.skills[id]
+	def := r.skills[id]
+	if def == nil {
+		return nil
+	}
+	return shallowCopy(def)
 }
 
 // RegisterSkill adds or replaces a single skill in the registry. Used by
@@ -277,9 +356,14 @@ func (r *SkillRegistry) RegisterSkill(def *SkillDefinition) {
 
 	// Clear shadowed marker for this ID before inserting.
 	delete(r.skills, def.ID)
-	delete(r.skills, def.ID+"__shadowed")
+	deleteShadowedEntries(r.skills, def.ID)
 
-	r.skills[def.ID] = shallowCopy(def)
+	next := shallowCopy(def)
+	if invokedAt, ok := r.lastInvoked[def.ID]; ok {
+		copy := invokedAt
+		next.LastInvokedAt = &copy
+	}
+	r.skills[def.ID] = next
 	r.reevaluateAvailabilityLocked()
 	r.fireOnChangeLocked()
 }
@@ -291,7 +375,7 @@ func (r *SkillRegistry) UnregisterSkill(id string) {
 	defer r.mu.Unlock()
 
 	delete(r.skills, id)
-	delete(r.skills, id+"__shadowed")
+	deleteShadowedEntries(r.skills, id)
 	r.fireOnChangeLocked()
 }
 
@@ -339,3 +423,47 @@ func stringsJoin(s []string, sep string) string {
 
 // Ensure strings is used.
 var _ = sort.Strings
+
+func isShadowedMapKey(id string) bool {
+	return strings.Contains(id, "__shadowed__") || strings.HasSuffix(id, "__shadowed")
+}
+
+func deleteShadowedEntries(defs map[string]*SkillDefinition, id string) {
+	for key := range defs {
+		if strings.HasPrefix(key, id+"__shadowed") {
+			delete(defs, key)
+		}
+	}
+}
+
+func appendUnique(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
+}
+
+func appendUniqueDiagnostic(values []SkillDiagnostic, value SkillDiagnostic) []SkillDiagnostic {
+	for _, existing := range values {
+		if existing.Code == value.Code && existing.Message == value.Message {
+			return values
+		}
+	}
+	return append(values, value)
+}
+
+func filterDiagnostics(values []SkillDiagnostic, codes ...string) []SkillDiagnostic {
+	blocked := make(map[string]bool, len(codes))
+	for _, code := range codes {
+		blocked[code] = true
+	}
+	out := values[:0]
+	for _, value := range values {
+		if !blocked[value.Code] {
+			out = append(out, value)
+		}
+	}
+	return out
+}

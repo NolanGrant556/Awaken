@@ -1,75 +1,30 @@
 # Office 后台渲染
 
-## 权威范围
+## 1. 当前支持
 
-本文唯一定义 DOCX/XLSX/PPTX 等 Office 文件通过受管 LibreOffice 后台转换的 worker 架构、隔离、并发、原子发布和平台打包约束。04 拥有 `office_export_pdf` 等工具输入/输出；01 拥有最终交付物显示和安全打开。
+Office worker 是 Awaken typed artifact provider 的受管转换路径。它从 primary runtime active pointer 解析并校验 LibreOffice，而不是信任调用者传入任意 binary；revision/fingerprint 改变后重新 attestation。
 
-## 当前架构
+每次转换使用独立 LibreOffice user profile、明确输入/输出目录、timeout 和输出校验。取消/超时终止 process group；成功校验后原子发布目标，失败保留此前有效文件，不以半写 PDF/预览覆盖成功产物。
 
-[`src/runtime/officerender`](../../src/runtime/officerender) 提供进程级共享 worker：
+## 2. 与工具目录的关系
 
-```text
-typed Office tool
-  -> RenderManaged(request)
-  -> resolve active primary-runtime revision
-  -> attest LibreOffice + dependencies
-  -> shared worker queue / identical-job singleflight
-  -> private staging + isolated profile
-  -> process group
-  -> validate output
-  -> atomic replace destination
-```
+worker 通过 provider manifest 声明 presentation/document render capability、managed-runtime dependencies 和 readiness。run 工具快照固定本次调用使用的 provider/runtime；active revision 在运行中变化只影响后续 run。
 
-默认并发为 1，避免 LibreOffice profile/字体/cache 争用。同一输入、目标和 revision 的同时请求可 singleflight，共享一次实际转换结果；不同 job 保持独立 staging。
+Office worker 是已定义的 typed provider，不是所有 Office/Artifact 任务的唯一实现。默认 Shell 可以当前登录用户的环境和操作系统权限直接调用用户已安装的 `soffice`、网络或 workspace 外资源，但该路径不自动获得 Office worker 的 attestation、独立 profile、原子发布、渲染验证或 artifact schema。因此直接 `soffice` 是可用的本机候选，但不是 typed worker 的质量/恢复合同等价替代；需要 verified artifact 时仍应调用独立 inspect/render 并完成真实视觉验收。
 
-调用者不能向 `RenderManaged` 传任意 LibreOffice 路径。worker 必须从 primary runtime 的 active pointer 解析 binary；active revision 或 fingerprint 改变时，旧 attestation 失效并重新检查。
+## 3. 平台边界
 
-## 作业隔离与发布
+- macOS：managed LibreOffice.app 及 helper 进入签名/公证和后台无窗口约束；仍需本轮真实 Desktop 渲染复验。
+- Windows：代码/manifest 必须解析 `soffice.exe`、处理进程树和原子替换；本轮无 Windows 实机渲染证据。
+- Linux：没有可从现有 macOS pipeline 推导的发布承诺。
 
-每个 job 拥有：
+## 4. 不变量
 
-- 私有 staging/input/output；
-- 独立 LibreOffice user profile；
-- 最小化环境变量；
-- 独立 process group；
-- 默认 90 秒 timeout。
+- PATH 中存在 LibreOffice 不等于 managed provider attested/ready。
+- render 失败不得生成成功 artifact 或让最终回合伪装完成。
+- worker readiness、tool outcome 与 UI artifact 展示必须使用同一 run snapshot 和 journal 事实。
 
-取消或超时终止整个 process group，不能只杀父进程留下 soffice 子进程。转换输出完成并校验后才原子替换目标；失败时保留此前有效文件，不能留下半写 PDF 覆盖成功产物。
+## 5. 代码 owner
 
-所有 Office 转换必须经过 worker。04 的 Shell 硬门禁拒绝直接 `soffice`/`libreoffice` 以及已知 wrapper，防止绕开 resolver、隔离、timeout 和原子发布。
-
-## 平台打包边界
-
-- macOS：随 primary runtime 提供完整 LibreOffice.app；所有依赖和 helper 进入签名/公证范围，后台启动不得弹出窗口或 Dock 图标。
-- Windows：随 archive 提供完整 program/DLL 集；process group 与替换使用 Windows 实现，不假设 Unix signal/rename 行为。
-- 字体和布局属于目标平台验收的一部分；“转换命令退出 0”不足以证明页面内容完整。
-
-## 异常分类与恢复
-
-| 异常 | 当前处理 |
-| --- | --- |
-| runtime/LibreOffice 缺失或 attestation 失败 | `needs_runtime` 或明确失败，不用系统 binary 兜底 |
-| queue 等待时取消 | job 不启动子进程，返回 cancelled |
-| 转换超时 | 终止 process group，保留旧目标 |
-| LibreOffice 非零退出/无输出 | failed，保留 stderr 摘要和诊断，拒绝发布 |
-| 输出校验失败 | failed，staging 清理，旧目标保留 |
-| active revision 变化 | 重新 attestation；进行中的 job 继续绑定原 immutable revision |
-
-## 当前不支持与限制
-
-- 不支持并行复用同一个 LibreOffice profile。
-- 不支持调用者指定系统 LibreOffice 绕过主运行时。
-- 集成测试需要显式提供受管 runtime，默认单测不会证明所有目标平台字体/渲染一致。
-- 页面视觉正确性仍需真实 DOCX/XLSX/PPTX 样本检查；PDF 存在不等于内容完整。
-
-## 测试与真实验收
-
-自动化 owner：
-
-- [`src/runtime/officerender/worker_test.go`](../../src/runtime/officerender/worker_test.go)
-- [`src/runtime/officerender/shared_test.go`](../../src/runtime/officerender/shared_test.go)
-- [`src/runtime/officerender/managed_runtime_test.go`](../../src/runtime/officerender/managed_runtime_test.go)
-- [`src/runtime/officerender/process_unix_test.go`](../../src/runtime/officerender/process_unix_test.go)
-- [`src/runtime/officerender/integration_test.go`](../../src/runtime/officerender/integration_test.go)
-
-测试覆盖 50 次顺序转换、相同 job singleflight、timeout/cancel process-group、revision 变化和旧目标保全。真实 Desktop 验收使用含中文字体、表格、图片、多页/多 sheet 的 DOCX/XLSX/PPTX，走 typed 工具导出 PDF，逐页核对内容完整、无前台 Office 窗口，并确认重启后 artifact 仍可重放和安全打开。
+- `src/runtime/officerender`：managed revision 解析、进程隔离、timeout、验证和原子发布。
+- `src/tools/artifact_runtime`：tool/provider 接入与 runtime resolver。

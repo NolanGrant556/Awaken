@@ -14,6 +14,7 @@ import (
 
 	"awaken/src/context"
 	"awaken/src/tool"
+	shelltool "awaken/src/tools/shell"
 )
 
 const (
@@ -285,13 +286,15 @@ func (s *FailureSupervisor) AfterOutcome(call context.ToolCall, outcome tool.Exe
 
 	isFailure := outcome.IsError()
 	if !isFailure {
+		recoveryMutation := outcomeMayHaveRevisedShellInputs(toolName, call.Function.Arguments, outcome)
+		s.resetFailureHistoryAfterSuccess(toolName, signature, revision, recoveryMutation)
 		s.toolConsecutiveFail[toolName] = 0
 		s.lastFingerprint = ""
 		s.sameFingerprintStreak = 0
 		// Only a success for the failed tool or the same resource satisfies a
 		// recovery directive. An unrelated calculator/shell success must not
 		// silently clear guidance for a still-broken file operation.
-		if recoveryDirectiveSatisfied(s.pendingRecovery, toolName, resourceKey) {
+		if recoveryDirectiveSatisfied(s.pendingRecovery, toolName, resourceKey, revision, recoveryMutation) {
 			s.pendingRecovery = nil
 		}
 		return decision
@@ -380,11 +383,24 @@ func (s *FailureSupervisor) AfterOutcome(call context.ToolCall, outcome tool.Exe
 	return decision
 }
 
-func recoveryDirectiveSatisfied(directive *RecoveryDirective, toolName, resourceKey string) bool {
+func recoveryDirectiveSatisfied(
+	directive *RecoveryDirective,
+	toolName, resourceKey, resourceRevision string,
+	recoveryMutation bool,
+) bool {
 	if directive == nil {
 		return false
 	}
-	if strings.TrimSpace(toolName) != "" && strings.TrimSpace(toolName) == directive.ToolName {
+	toolName = strings.TrimSpace(toolName)
+	if toolName == "shell" && directive.ToolName == "shell" {
+		// Shell is a broad process surface, not one resource. A successful
+		// unrelated Shell call (for example node --version or curl) cannot
+		// satisfy recovery merely because its tool name matches. The exact
+		// formerly failing command can satisfy its own directive, while a
+		// host-classified mutation may have deliberately repaired its inputs.
+		return resourceRevision == directive.ResourceRevision || recoveryMutation
+	}
+	if toolName != "" && toolName == directive.ToolName {
 		return true
 	}
 	return directive.ResourceKey != "" && directive.ResourceKey != "unknown" && directive.ResourceKey == resourceKey
@@ -487,6 +503,17 @@ func ResourceRevision(arguments string, outcome tool.ExecutionOutcome) string {
 				return "path:" + s
 			}
 		}
+		// Shell does not expose a typed path/revision field. Treating every
+		// command as revision=unknown merges unrelated compiler, installer and
+		// recovery failures into one class budget. Bind the revision to the
+		// command and cwd without retaining the command text itself.
+		if command, ok := payload["command"]; ok {
+			if normalized := strings.TrimSpace(fmt.Sprint(command)); normalized != "" {
+				workdir := strings.TrimSpace(fmt.Sprint(payload["workdir"]))
+				digest := sha256.Sum256([]byte(normalized + "\x00" + workdir))
+				return "command:" + hex.EncodeToString(digest[:8])
+			}
+		}
 	}
 	if outcome.Diagnostic != nil {
 		for _, key := range []string{"expected_sha256", "resource_revision", "sha256", "after_sha256", "before_sha256"} {
@@ -498,6 +525,106 @@ func ResourceRevision(arguments string, outcome tool.ExecutionOutcome) string {
 		}
 	}
 	return "unknown"
+}
+
+func (s *FailureSupervisor) resetFailureHistoryAfterSuccess(toolName, signature, revision string, recoveryMutation bool) {
+	if s == nil {
+		return
+	}
+	delete(s.callAttempts, signature)
+	delete(s.callFailureMeta, signature)
+	for key, meta := range s.classFailureMeta {
+		if meta.toolName == toolName && meta.revision == revision {
+			delete(s.classFailureMeta, key)
+			delete(s.classFailures, key)
+		}
+	}
+
+	// A verified or host-classified mutation can intentionally repair the input
+	// consumed by a previously failing Shell command. Do not treat every direct
+	// Shell success with unknown side effects as recovery: node --version, curl
+	// and arbitrary local CLIs are unrelated even though their direct broker
+	// cannot observe child-process side effects.
+	if !recoveryMutation {
+		return
+	}
+	for key := range s.callFailureMeta {
+		if strings.HasPrefix(key, "shell|") {
+			delete(s.callFailureMeta, key)
+			delete(s.callAttempts, key)
+		}
+	}
+	for key, meta := range s.classFailureMeta {
+		if meta.toolName == "shell" {
+			delete(s.classFailureMeta, key)
+			delete(s.classFailures, key)
+		}
+	}
+	s.toolConsecutiveFail["shell"] = 0
+}
+
+func outcomeMayHaveRevisedShellInputs(toolName, arguments string, outcome tool.ExecutionOutcome) bool {
+	if outcomeIncludesObservedMutation(outcome) {
+		return true
+	}
+	if strings.TrimSpace(toolName) != "shell" || outcome.Operation == nil ||
+		outcome.Operation.SideEffectState != tool.OutcomeSideEffectUnknown {
+		return false
+	}
+	return shellCallHasHostClassifiedRecoveryMutation(arguments)
+}
+
+// shellCallHasHostClassifiedRecoveryMutation derives recovery semantics from
+// the host-owned Shell classifier and canonical call arguments. It never
+// trusts prose or a model-supplied side-effect claim. Commands the shared
+// classifier proves to be file/workspace mutations are recovery candidates.
+// The narrow fallback covers package operations whose network-capable wrapper
+// is conservatively classified as local/open-world (notably python -m pip).
+func shellCallHasHostClassifiedRecoveryMutation(arguments string) bool {
+	var payload struct {
+		Command string `json:"command"`
+		Workdir string `json:"workdir"`
+	}
+	if err := json.Unmarshal([]byte(arguments), &payload); err != nil {
+		return false
+	}
+	command := strings.TrimSpace(payload.Command)
+	if command == "" {
+		return false
+	}
+	if shelltool.ClassifyShellCommand(command, payload.Workdir) == shelltool.ShellTierWorkspaceMutation {
+		return true
+	}
+	return reExplicitDependencyRecoveryCommand.MatchString(command) ||
+		reExplicitPythonEnvironmentRecoveryCommand.MatchString(command)
+}
+
+var (
+	reExplicitDependencyRecoveryCommand = regexp.MustCompile(
+		`(?i)(^|[;&|][&|]?[[:space:]]*)(env[[:space:]]+)?([A-Z_][A-Z0-9_]*=[^[:space:]]+[[:space:]]+)*` +
+			`((python([0-9.]*)?|py)[[:space:]]+-m[[:space:]]+)?` +
+			`(npm|pnpm|yarn|pip([0-9.]*)?|pipx|brew|apt|apt-get|yum|dnf|conda)[[:space:]]+` +
+			`(-[^[:space:];|&]+[[:space:]]+)*(install|i|ci|add|create|update|upgrade|remove|uninstall)([[:space:]]|$)`,
+	)
+	reExplicitPythonEnvironmentRecoveryCommand = regexp.MustCompile(
+		`(?i)(^|[;&|][&|]?[[:space:]]*)(env[[:space:]]+)?([A-Z_][A-Z0-9_]*=[^[:space:]]+[[:space:]]+)*` +
+			`(python([0-9.]*)?|py)[[:space:]]+-m[[:space:]]+(venv|virtualenv)([[:space:]]|$)`,
+	)
+)
+
+func outcomeIncludesObservedMutation(outcome tool.ExecutionOutcome) bool {
+	if outcome.Operation != nil && outcome.Operation.SideEffectState == tool.OutcomeSideEffectApplied {
+		return true
+	}
+	if len(outcome.AffectedPaths) > 0 {
+		return true
+	}
+	for _, change := range outcome.Changes {
+		if change.Certainty == tool.ChangeObserved {
+			return true
+		}
+	}
+	return false
 }
 
 func ResourceIdentity(arguments string, outcome tool.ExecutionOutcome) string {
@@ -551,11 +678,7 @@ func RecoveryOptionsForError(errorCode string) []string {
 	case code == tool.ErrorCodeProcessExitNonzero:
 		return []string{"inspect_exit_code_and_stderr", "change_command_or_stop"}
 	case code == tool.ErrorCodeNeedsRuntime || code == "needs_runtime":
-		return []string{"use_host_runtime_manager", "do_not_shell_install_for_artifact_skill"}
-	case code == tool.ErrorCodeSkillToolNotAllowed:
-		return []string{"recompile_skill_activation_plan", "do_not_shell_around_denied_tool"}
-	case code == "skill_platform_contract_conflict":
-		return []string{"exit_skill", "plan_typed_platform_tool_outside_skill_scope"}
+		return []string{"follow_selected_skill_initialization_or_use_matching_provider_runtime", "inspect_runtime_requirement"}
 	case code == "persistence_error" || code == "persistence_unavailable":
 		return []string{"stop_new_side_effects", "wait_for_journal_recovery_or_terminate"}
 	case code == ErrorCodeToolRetryBlocked:

@@ -17,23 +17,31 @@ type AgentConfig struct {
 	// DefaultMaxToolExecutions (512).
 	MaxToolExecutions int
 	ModelConfig       ModelConfig
-	EntryPoint     string
-	Workspace      WorkspaceConfig
-	SkillSummary   string
-	AutoToolPolicy AutoToolPolicy
+	EntryPoint        string
+	Workspace         WorkspaceConfig
+	SkillSummary      string
+	AutoToolPolicy    AutoToolPolicy
 	// ToolExposure selects the model-visible tool pool. Empty Mode uses
 	// DefaultToolExposurePolicy (hides raw apply_patch for ordinary providers).
 	// Compat/grammar-capable modes and ExtraVisible keep apply_patch available
 	// for internal transforms, compatibility tests, or true grammar providers.
 	ToolExposure tool.ToolExposurePolicy
-	// ResolvedToolPool, when non-nil, is the dual-gate effective tool name
-	// set after SkillActivationPlan compilation. RequestBuilder only exposes
-	// schemas in this pool; ToolRuntime rejects names outside it.
-	// nil means no skill gate (full exposure-filtered registry).
-	ResolvedToolPool []string
+	// ToolAvailabilitySnapshot pins the exact executable instances and
+	// definitions available for one run. Request compilation and execution must
+	// consume the same snapshot so registry refreshes cannot create TOCTOU drift.
+	ToolAvailabilitySnapshot *tool.RunToolAvailabilitySnapshot
+	// ExecutionEnvironmentSnapshot is the bounded, secret-free observation used
+	// to evaluate provider readiness for ToolAvailabilitySnapshot.
+	ExecutionEnvironmentSnapshot *tool.ExecutionEnvironmentSnapshot
 	// SkillContextBlocks are typed system context blocks injected from
-	// explicit Skill pre-activation (main SKILL.md + preload resources).
+	// explicit or model-selected Skill activation. Package resources stay
+	// on-demand and are not preloaded here.
 	SkillContextBlocks []ContextBlock
+	// ComposerSkillSelection is a run-scoped, host-generated binding for the
+	// Skills explicitly selected in the current composer turn. It is distinct
+	// from SkillContextBlocks: restored or model-invoked Skill bodies must never
+	// be promoted into an explicit user selection.
+	ComposerSkillSelection *ComposerSkillSelectionContext
 	// ExecutionProfile is the unified policy bundle applied to every tool
 	// call this agent makes. When nil, EffectiveProfile falls back to
 	// profile.DefaultProfile() (WorkspaceWrite).
@@ -50,6 +58,24 @@ type AgentConfig struct {
 	// It is propagated into every ExecutionIntent this agent issues so
 	// the decision layer can attribute the call. nil for the root agent.
 	SubagentOrigin *profile.SubagentOrigin
+}
+
+// ComposerSkillSelectionContext records the current run and the ordered Skills
+// that Runtime revalidated from composer tokens. The invocation mode is not a
+// field here: RequestBuilder always emits the host-owned value user_composer.
+type ComposerSkillSelectionContext struct {
+	RunID      string
+	Selections []ComposerSkillSelection
+}
+
+// ComposerSkillSelection contains registry-owned identity. Runtime populates
+// it from a successful activation plan, never from Skill body text.
+type ComposerSkillSelection struct {
+	SkillID        string
+	Source         string
+	ActivationMode string
+	RootDir        string
+	SkillFilePath  string
 }
 
 // EffectiveProfile returns the profile that should be used for tool

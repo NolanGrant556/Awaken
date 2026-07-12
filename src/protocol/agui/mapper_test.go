@@ -96,24 +96,32 @@ func TestMapEventTurnLifecycle(t *testing.T) {
 func TestMapEventToolResult(t *testing.T) {
 	exitCode := 7
 	events := MapEvent(agentcore.AwakenEvent{
-		Type:                   agentcore.ToolResultEventType,
-		ThreadID:               "thread-1",
-		RunID:                  "run-1",
-		MessageID:              "toolmsg-1",
-		ToolCallID:             "tool-1",
-		Content:                "echo:hello",
-		ToolStatus:             "failed",
-		TransportStatus:        "completed",
-		SemanticStatus:         "failure",
-		ProcessStatus:          "exited",
-		ProcessExitCode:        &exitCode,
-		ProcessTimedOut:        false,
-		ErrorCode:              "process_exit_nonzero",
-		ErrorCategory:          "process",
-		Retryable:              false,
-		RecoveryOptions:        []string{"retry"},
-		DurationMs:             42,
-		Diagnostic:             map[string]any{"reason": "no_match"},
+		Type:            agentcore.ToolResultEventType,
+		ThreadID:        "thread-1",
+		RunID:           "run-1",
+		MessageID:       "toolmsg-1",
+		ToolCallID:      "tool-1",
+		Content:         "echo:hello",
+		ToolStatus:      "failed",
+		TransportStatus: "completed",
+		SemanticStatus:  "failure",
+		ProcessStatus:   "exited",
+		ProcessExitCode: &exitCode,
+		ProcessTimedOut: false,
+		ErrorCode:       "process_exit_nonzero",
+		ErrorCategory:   "process",
+		Retryable:       false,
+		RecoveryOptions: []string{"retry"},
+		DurationMs:      42,
+		Diagnostic: map[string]any{
+			"reason":                  "no_match",
+			"environment_snapshot_id": "env-1",
+			"tool_snapshot_id":        "tools-1",
+			"provider_id":             tool.ProviderID("builtin.shell"),
+			"capabilities":            []tool.Capability{"process.execute"},
+			"provider_readiness":      tool.ProviderReadiness("ready"),
+			"dependency_observations": []map[string]any{{"name": "zsh", "kind": "executable"}},
+		},
 		ToolProgressStage:      "completed",
 		ToolProgressMessage:    "done",
 		ToolProgressPercentage: 100,
@@ -142,6 +150,72 @@ func TestMapEventToolResult(t *testing.T) {
 	}
 	if events[0].Diagnostic["reason"] != "no_match" {
 		t.Fatalf("unexpected diagnostic: %+v", events[0].Diagnostic)
+	}
+	if events[0].EnvironmentSnapshotID != "env-1" || events[0].ToolAvailabilitySnapshotID != "tools-1" || events[0].ProviderID != "builtin.shell" || events[0].Capability != "process.execute" || len(events[0].Capabilities) != 1 || events[0].Readiness != "ready" || len(events[0].Dependencies) != 1 {
+		t.Fatalf("unexpected execution metadata: %+v", events[0])
+	}
+}
+
+func TestMapEventSkillLifecycle(t *testing.T) {
+	invoked := MapEvent(agentcore.AwakenEvent{
+		Type:         agentcore.SkillActivatedEventType,
+		SkillID:      "presentations",
+		SkillVersion: "2",
+		Diagnostic: map[string]any{
+			"source":          "project",
+			"skill_path":      "/workspace/.awaken/skills/presentations/SKILL.md",
+			"status":          "ok",
+			"effective_tools": []string{"presentation_create", "shell"},
+		},
+	})
+	if len(invoked) != 1 || invoked[0].Type != EventAwakenSkillInvoked {
+		t.Fatalf("unexpected Skill activation projection: %+v", invoked)
+	}
+	if invoked[0].SkillSource != "project" || len(invoked[0].SkillEffectiveTools) != 2 {
+		t.Fatalf("Skill activation metadata lost: %+v", invoked[0])
+	}
+
+	loaded := MapEvent(agentcore.AwakenEvent{
+		Type:           agentcore.ResourceReceiptEventType,
+		SkillID:        "presentations",
+		SkillVersion:   "2",
+		ResourcePath:   "references/layout.md",
+		ResourceSHA256: "abc123",
+		ResourceSize:   42,
+		ResourceMode:   "text",
+		ResourceSource: "package",
+	})
+	if len(loaded) != 1 || loaded[0].Type != EventAwakenSkillContentLoaded || loaded[0].SkillResource != "references/layout.md" {
+		t.Fatalf("unexpected Skill resource projection: %+v", loaded)
+	}
+}
+
+func TestMapEventMassMessageReviewMetadata(t *testing.T) {
+	events := MapEvent(agentcore.AwakenEvent{
+		Type:                          agentcore.MassMessageReviewRequestedType,
+		ReviewID:                      "review-1",
+		ReviewEnvelopeDigest:          "envelope-1",
+		ReviewBodyDigest:              "body-1",
+		ReviewRecipientIdentityDigest: "recipients-1",
+		MassMessageRecipientCount:     42,
+		MassMessageMessageCount:       25,
+		MassMessageExpandsRecipients:  true,
+		MassMessageTemplatePreview:    "Hello {{name}}",
+		MassMessageAttachments:        []string{"brief.pdf"},
+		MassMessageSendingAccount:     "sender@example.com",
+	})
+	if len(events) != 1 || events[0].Type != EventAwakenMassReviewRequested {
+		t.Fatalf("unexpected mass-message review projection: %+v", events)
+	}
+	frame := events[0]
+	if frame.ReviewEnvelopeDigest != "envelope-1" || frame.ReviewBodyDigest != "body-1" || frame.ReviewRecipientIdentityDigest != "recipients-1" {
+		t.Fatalf("canonical review binding lost: %+v", frame)
+	}
+	if frame.MassMessageMessageCount != 25 || frame.MassMessageExpandsRecipients == nil || !*frame.MassMessageExpandsRecipients {
+		t.Fatalf("mass-message expansion metadata lost: %+v", frame)
+	}
+	if frame.MassMessageTemplatePreview != "Hello {{name}}" || frame.MassMessageSendingAccount != "sender@example.com" || len(frame.MassMessageAttachments) != 1 {
+		t.Fatalf("mass-message review details lost: %+v", frame)
 	}
 }
 

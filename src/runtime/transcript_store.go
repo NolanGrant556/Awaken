@@ -47,6 +47,8 @@ type TranscriptRecord struct {
 
 type restoredTranscript struct {
 	Messages               []convcontext.Message
+	SkillContextBlocks     []agentcore.ContextBlock
+	SkillInvokedAt         map[string]time.Time
 	RunIDs                 []string
 	Label                  string
 	CreatedAt              time.Time

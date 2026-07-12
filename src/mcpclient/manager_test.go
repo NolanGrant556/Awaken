@@ -208,14 +208,8 @@ func TestManagerStateMachineWSRejected(t *testing.T) {
 // and unregisters its tools; Enable re-arms the connect loop.
 func TestManagerDisableEnable(t *testing.T) {
 	fakeReg := newFakeRegistry()
-	origRegister := toolRegisterForce
-	origUnreg := toolUnregisterByPrefix
-	toolRegisterForce = fakeReg.register
-	toolUnregisterByPrefix = fakeReg.unregisterByPrefix
-	defer func() {
-		toolRegisterForce = origRegister
-		toolUnregisterByPrefix = origUnreg
-	}()
+	restoreHooks := setToolRegistryHooksForTest(fakeReg.register, fakeReg.unregisterByPrefix)
+	defer restoreHooks()
 
 	registry := NewInProcRegistry()
 	if err := registry.Register("echo", echoServerWithTools("a", "b")); err != nil {
@@ -354,14 +348,8 @@ func TestManagerCallToolRouting(t *testing.T) {
 // the correct prefixed names and unregisters them on shutdown.
 func TestManagerToolRegistration(t *testing.T) {
 	fakeReg := newFakeRegistry()
-	origRegister := toolRegisterForce
-	origUnreg := toolUnregisterByPrefix
-	toolRegisterForce = fakeReg.register
-	toolUnregisterByPrefix = fakeReg.unregisterByPrefix
-	defer func() {
-		toolRegisterForce = origRegister
-		toolUnregisterByPrefix = origUnreg
-	}()
+	restoreHooks := setToolRegistryHooksForTest(fakeReg.register, fakeReg.unregisterByPrefix)
+	defer restoreHooks()
 
 	registry := NewInProcRegistry()
 	if err := registry.Register("echo", echoServerWithTools("alpha", "beta")); err != nil {

@@ -23,15 +23,13 @@ const (
 	// open_world_system commands may run under this adapter.
 	SandboxFull SandboxSupport = "full"
 
-	// SandboxDegraded means a partial boundary is available — the adapter
-	// may apply some constraints but cannot fully confine open-world
-	// commands. The executor must fail-closed for open_world_system.
-	// inspect_read_only, local_cli, and workspace_mutation commands may still run.
+	// SandboxDegraded means a partial boundary is available. It cannot satisfy
+	// a WorkspaceExecutionBroker authorization, so raw mutation/network must
+	// fail closed; bounded read-only inspection may still run.
 	SandboxDegraded SandboxSupport = "degraded"
 
-	// SandboxNone means no isolation is available on this platform. The
-	// executor must fail-closed for open_world_system and runs
-	// inspect_read_only / local_cli / workspace_mutation without any confinement.
+	// SandboxNone means no isolation is available. Only bounded read-only
+	// inspection may run through the default restricted broker.
 	SandboxNone SandboxSupport = "none"
 )
 

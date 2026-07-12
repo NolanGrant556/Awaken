@@ -9,14 +9,10 @@ import (
 	"strings"
 )
 
-// Decide returns a PermissionDecision based solely on ToolDefinition annotations
-// and user-configured overrides — never on hard-coded tool name matches.
-//
-// Default rules:
-//   - requiresAuth==true && server/connector not connected → needs_auth
-//   - artifact_read / connector_read / browser_read / local_transform / readOnly → allow
-//   - mass_message_send → needs_mass_message_review
-//   - external_publish / system_operation / destructive / unknown side-effects → deny
+// Decide returns the zero-approval decision derived from the provider
+// contract. Ordinary tools default to allow; deny/unsupported is reserved for
+// an explicit hard boundary such as an unrecoverable delete. Authentication
+// and the single mass-message review are structured non-generic states.
 func Decide(ctx context.Context, def ToolDefinition) PermissionDecision {
 	return DecideWithOverride(ctx, def, nil)
 }
@@ -46,40 +42,35 @@ func DecideWithOverride(ctx context.Context, def ToolDefinition, overrides map[s
 	if def.Annotations.RequiresAuth {
 		return NeedsAuthPermission("tool requires authentication")
 	}
+	if def.Policy == PolicyAlwaysDeny {
+		return DenyPermission("tool definition explicitly disables execution")
+	}
+	if def.Policy == PolicyAlwaysAllow {
+		return AllowPermission()
+	}
 
 	switch def.Annotations.CapabilityClass {
-	case CapabilityArtifactRead, CapabilityArtifactWrite, CapabilityConnectorRead, CapabilityBrowserRead, CapabilityLocalTransform:
-		return AllowPermission()
 	case CapabilityMassMessageSend:
 		return NeedsMassMessageReviewPermission("mass message send requires human review", DecisionMetadata{
 			MassMessage: def.Annotations.MassMessage,
 		})
-	case CapabilityConnectorWrite, CapabilityBrowserInteract:
-		switch def.Annotations.TrustedOrigin {
-		case TrustedOriginBuiltin, TrustedOriginOfficialConnector, TrustedOriginOfficialHosted:
-			return AllowPermission()
-		default:
-			return DenyPermission("connector/browser write capability requires a trusted origin")
+	}
+	if HasCapability(def.Capabilities, CapabilityMessageMassSend) {
+		return NeedsMassMessageReviewPermission("mass message send requires human review", DecisionMetadata{MassMessage: def.Annotations.MassMessage})
+	}
+	if definitionDeclaresDelete(def) && !HasCapability(def.Capabilities, CapabilityFileDelete) {
+		return UnsupportedPermission("unsupported_recoverable_delete: provider does not declare a recoverable file-delete contract")
+	}
+	return AllowPermission()
+}
+
+func definitionDeclaresDelete(def ToolDefinition) bool {
+	for _, effect := range def.SideEffects {
+		if strings.EqualFold(strings.TrimSpace(effect.Kind), SideEffectDelete) {
+			return true
 		}
 	}
-
-	// Default rules based on annotations
-	if def.Annotations.ReadOnly {
-		return AllowPermission()
-	}
-
-	if def.Annotations.Destructive {
-		return DenyPermissionWithMetadata("destructive tool is not allowed by the default tool policy", DecisionMetadata{
-			Title:    fmt.Sprintf("Approve %s", def.Name),
-			RiskTone: "warning",
-		})
-	}
-
-	// readOnly==false && destructive==false → conservative structural deny.
-	return DenyPermissionWithMetadata("tool may have unknown side-effects", DecisionMetadata{
-		Title:    fmt.Sprintf("Approve %s", def.Name),
-		RiskTone: "warning",
-	})
+	return false
 }
 
 // DecideWithServerCheck is like Decide but accepts a server state callback.
@@ -118,9 +109,10 @@ const (
 )
 
 type PermissionDecision struct {
-	Behavior PermissionBehavior
-	Reason   string
-	Metadata DecisionMetadata
+	Behavior  PermissionBehavior
+	Reason    string
+	ErrorCode string
+	Metadata  DecisionMetadata
 }
 
 type PermissionContext struct {
@@ -184,6 +176,14 @@ func UnsupportedPermission(reason string) PermissionDecision {
 	return PermissionDecision{
 		Behavior: PermissionUnsupported,
 		Reason:   reason,
+	}
+}
+
+func UnsupportedPermissionWithCode(reason, code string) PermissionDecision {
+	return PermissionDecision{
+		Behavior:  PermissionUnsupported,
+		Reason:    reason,
+		ErrorCode: strings.TrimSpace(code),
 	}
 }
 
@@ -425,6 +425,79 @@ func (c PermissionContext) ResolveMutationPathChecked(path string) (string, erro
 func (c PermissionContext) ResolveOutputMutationPathChecked(path string) (string, error) {
 	normalized := c.Normalize()
 	return normalized.resolveMutationPathWithinRootsChecked(path, normalized.OutputRoots, "output")
+}
+
+// RecoverableDeletePathError reports a path that cannot safely enter the
+// recoverable-delete pipeline. The adapter must never treat this as permission
+// to fall back to permanent deletion.
+type RecoverableDeletePathError struct {
+	Path   string
+	Reason string
+}
+
+func (e *RecoverableDeletePathError) Error() string {
+	return fmt.Sprintf("recoverable delete path %q denied: %s", e.Path, e.Reason)
+}
+
+// ResolveRecoverableDeletePathChecked validates a path for trash_file without
+// imposing workspace writable-root scope: user-requested project-external
+// files remain supported. Sensitive/protected paths, symlinks, filesystem
+// roots, missing paths, and special files fail closed before the Trash adapter.
+func (c PermissionContext) ResolveRecoverableDeletePathChecked(path string) (string, error) {
+	normalized := c.Normalize()
+	resolved := normalized.resolvePath(path)
+	if err := normalized.checkSensitiveAbsolutePath(resolved); err != nil {
+		return "", err
+	}
+	if isFilesystemRoot(resolved) {
+		return "", &RecoverableDeletePathError{Path: resolved, Reason: "filesystem root cannot be moved to Trash"}
+	}
+	info, err := os.Lstat(resolved)
+	if err != nil {
+		return "", &RecoverableDeletePathError{Path: resolved, Reason: err.Error()}
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", &RecoverableDeletePathError{Path: resolved, Reason: "symbolic links require an explicit non-link target"}
+	}
+	if !info.Mode().IsRegular() && !info.IsDir() {
+		return "", &RecoverableDeletePathError{Path: resolved, Reason: "special filesystem objects are not supported"}
+	}
+	realPath, err := filepath.EvalSymlinks(resolved)
+	if err != nil {
+		return "", &RecoverableDeletePathError{Path: resolved, Reason: "real path cannot be resolved: " + err.Error()}
+	}
+	if err := normalized.checkResolvedSensitiveAbsolutePath(realPath); err != nil {
+		return "", err
+	}
+	for _, protectedRoot := range normalized.ProtectedRoots {
+		if PathWithinRoot(protectedRoot, resolved) {
+			return "", &RecoverableDeletePathError{Path: resolved, Reason: "path contains a protected task-scope root"}
+		}
+		if realProtectedRoot, resolveErr := resolvePathWithExistingAncestor(protectedRoot); resolveErr == nil && PathWithinRoot(realProtectedRoot, realPath) {
+			return "", &RecoverableDeletePathError{Path: resolved, Reason: "real path contains a protected task-scope root"}
+		}
+	}
+	matcher := NewSensitivePathMatcher()
+	for _, root := range []string{matcher.HomeDir, matcher.ConfigDir} {
+		if root == "" {
+			continue
+		}
+		realRoot, resolveErr := filepath.EvalSymlinks(root)
+		if resolveErr == nil && samePermissionPath(realPath, realRoot) {
+			return "", &RecoverableDeletePathError{Path: resolved, Reason: "user home or configuration root cannot be moved to Trash"}
+		}
+	}
+	return resolved, nil
+}
+
+func isFilesystemRoot(path string) bool {
+	cleaned := filepath.Clean(path)
+	parent := filepath.Dir(cleaned)
+	return cleaned == parent
+}
+
+func samePermissionPath(left, right string) bool {
+	return PathWithinRoot(left, right) && PathWithinRoot(right, left)
 }
 
 func (c PermissionContext) resolveMutationPathWithinRootsChecked(path string, roots []string, rootKind string) (string, error) {

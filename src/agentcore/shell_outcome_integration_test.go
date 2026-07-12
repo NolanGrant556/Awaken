@@ -23,6 +23,39 @@ type registeredShellTool struct {
 	name string
 }
 
+func TestShellDirectDeleteUsesCurrentLoginUserProvider(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "obsolete.txt")
+	if err := os.WriteFile(target, []byte("direct shell fixture"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	runtime := agentcore.NewToolRuntimeWithConfig(nil, agentcore.ToolRuntimeConfig{
+		PermissionContext: tool.NewPermissionContext(root, []string{root}),
+	})
+	result := runtime.Execute(t.Context(), convcontext.ToolCall{
+		ID: "call_delete_transform",
+		Function: convcontext.FunctionCall{
+			Name: "shell", Arguments: `{"command":"rm -f obsolete.txt"}`,
+		},
+	})
+	if result.IsError || result.Decision == nil || result.Decision.Action != profile.DecisionAllow {
+		t.Fatalf("direct delete was not executed successfully: %+v", result)
+	}
+	if result.TransformedFrom != "" {
+		t.Fatalf("raw shell must not be transformed to a typed delete: %+v", result)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("original target still exists or stat failed unexpectedly: %v", err)
+	}
+	if result.Outcome.Operation == nil || result.Outcome.Operation.SideEffectState != tool.OutcomeSideEffectUnknown {
+		t.Fatalf("direct shell must preserve unobserved side-effect semantics: %+v", result.Outcome)
+	}
+	if len(result.Outcome.Changes) != 0 || !strings.Contains(result.Outcome.Content, `"broker_id": "local_user_direct_v1"`) {
+		t.Fatalf("direct provider must not invent Trash changes and must expose its receipt: %+v", result.Outcome)
+	}
+}
+
 func (t registeredShellTool) Name() string { return t.name }
 
 func (t registeredShellTool) Definition() tool.ToolDefinition {
@@ -88,7 +121,6 @@ func TestShellExit7SurvivesRuntimeJournalAndAGUIProjection(t *testing.T) {
 	execProfile := profile.DangerFullAccess()
 	runtime := agentcore.NewToolRuntimeWithConfig(nil, agentcore.ToolRuntimeConfig{
 		PermissionContext: tool.NewPermissionContext(root, []string{root}),
-		ResolvedToolPool:  []string{toolName},
 		RunID:             "run-shell-exit7",
 		Profile:           &execProfile,
 		AutoToolPolicy:    allowAutoPolicy{},
@@ -156,7 +188,6 @@ func TestInstallActivityIsHostGeneratedRedactedAndMappedWithoutNarrative(t *test
 		events = append(events, event)
 	}), agentcore.ToolRuntimeConfig{
 		PermissionContext: tool.NewPermissionContext(t.TempDir(), nil),
-		ResolvedToolPool:  []string{toolName},
 		Profile:           &execProfile,
 		AutoToolPolicy:    allowAutoPolicy{},
 	})
@@ -207,7 +238,6 @@ func TestShellNeutralTimeoutAndSpawnOutcomesSurviveJournalProjection(t *testing.
 	execProfile := profile.DangerFullAccess()
 	toolRuntime := agentcore.NewToolRuntimeWithConfig(nil, agentcore.ToolRuntimeConfig{
 		PermissionContext: tool.NewPermissionContext(root, []string{root}),
-		ResolvedToolPool:  []string{toolName},
 		Profile:           &execProfile,
 		AutoToolPolicy:    allowAutoPolicy{},
 	})

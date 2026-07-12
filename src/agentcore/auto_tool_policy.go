@@ -134,6 +134,15 @@ func (p DefaultAutoToolPolicy) Decide(ctx stdcontext.Context, request ToolDecisi
 			return decision
 		}
 	}
+	if request.ToolName == "shell" && request.StaticBehavior == tool.PermissionAllow &&
+		strings.EqualFold(strings.TrimSpace(request.RiskTone), "recoverable_delete_transform") {
+		input, _ := json.Marshal(map[string]any{"paths": append([]string(nil), request.AffectedPaths...)})
+		return ToolDecision{
+			Action: ToolDecisionTransform, Source: ToolDecisionSourceTransform,
+			Reason:          "shell delete converted to recoverable Trash operation",
+			UpdatedToolName: "trash_file", UpdatedInput: string(input),
+		}
+	}
 
 	if request.ToolName == "shell" && request.StaticBehavior == tool.PermissionAllow {
 		return ToolDecision{
@@ -144,24 +153,16 @@ func (p DefaultAutoToolPolicy) Decide(ctx stdcontext.Context, request ToolDecisi
 		}
 	}
 
-	if decision, handled := decideByCapabilityClass(request); handled {
-		return decision
-	}
-
 	if request.StaticBehavior == tool.PermissionAllow {
-		if deniesStaticAllowInHeadless(request) {
-			return ToolDecision{
-				Action: ToolDecisionDeny,
-				Source: ToolDecisionSourceHeadlessDefault,
-				Reason: firstNonEmpty(strings.TrimSpace(request.StaticReason), "AUTO policy denies write-capable tool by default"),
-			}
-		}
 		return ToolDecision{
 			Action:       ToolDecisionAllow,
 			Source:       ToolDecisionSourceToolRule,
 			Reason:       firstNonEmpty(strings.TrimSpace(request.StaticReason), "tool allowed execution"),
 			UpdatedInput: request.NormalizedInput,
 		}
+	}
+	if decision, handled := decideByCapabilityClass(request); handled {
+		return decision
 	}
 
 	if request.IsReadOnly && !request.IsOpenWorld && !request.RequiresUserInteraction {
@@ -173,18 +174,11 @@ func (p DefaultAutoToolPolicy) Decide(ctx stdcontext.Context, request ToolDecisi
 		}
 	}
 
-	// File-chain relaxation (Task 4 of "零审批自动执行策略"):
-	// apply_patch is no longer hard-denied in headless mode. With workspace
-	// boundary checks (validateMutationPath), sensitive-path guards
-	// (SensitivePathMatcher), and trash-backed deletes (TrashAdapter) all
-	// enforced inside apply_patch itself, in-workspace mutations can
-	// auto-execute without approval. Out-of-writable-roots and sensitive
-	// paths are still denied here so the policy fails fast before execution.
-	reason := firstNonEmpty(strings.TrimSpace(request.StaticReason), "AUTO policy denied tool execution")
 	return ToolDecision{
-		Action: ToolDecisionDeny,
-		Source: ToolDecisionSourceHeadlessDefault,
-		Reason: reason,
+		Action:       ToolDecisionAllow,
+		Source:       ToolDecisionSourceHeadlessDefault,
+		Reason:       firstNonEmpty(strings.TrimSpace(request.StaticReason), "ordinary tool auto-allowed by default policy"),
+		UpdatedInput: request.NormalizedInput,
 	}
 }
 
@@ -234,6 +228,17 @@ func (p DefaultAutoToolPolicy) DecideExecution(ctx stdcontext.Context, intent pr
 			return toolDecisionToExecutionDecision(td, intent)
 		}
 	}
+	if request.ToolName == "shell" && request.StaticBehavior == tool.PermissionAllow &&
+		strings.EqualFold(strings.TrimSpace(request.RiskTone), "recoverable_delete_transform") {
+		updatedInput := map[string]any{"paths": append([]string(nil), request.AffectedPaths...)}
+		decision := profile.TransformDecision(
+			"shell delete converted to recoverable Trash operation",
+			"trash_file",
+			updatedInput,
+		)
+		decision.UpdatedIntent = &intent
+		return decision
+	}
 
 	if request.ToolName == "shell" && request.StaticBehavior == tool.PermissionAllow {
 		decision := profile.AllowDecision(
@@ -244,24 +249,16 @@ func (p DefaultAutoToolPolicy) DecideExecution(ctx stdcontext.Context, intent pr
 		return decision
 	}
 
-	if td, handled := decideByCapabilityClass(request); handled {
-		return toolDecisionToExecutionDecision(td, intent)
-	}
-
 	if request.StaticBehavior == tool.PermissionAllow {
-		if deniesStaticAllowInHeadless(request) {
-			return profile.DenyDecision(
-				string(profile.DecisionSourceHeadlessDefault),
-				firstNonEmpty(strings.TrimSpace(request.StaticReason), "AUTO policy denies write-capable tool by default"),
-				false,
-			)
-		}
 		decision := profile.AllowDecision(
 			string(profile.DecisionSourceToolRule),
 			firstNonEmpty(strings.TrimSpace(request.StaticReason), "tool allowed execution"),
 		)
 		decision.UpdatedIntent = &intent
 		return decision
+	}
+	if td, handled := decideByCapabilityClass(request); handled {
+		return toolDecisionToExecutionDecision(td, intent)
 	}
 
 	if request.IsReadOnly && !request.IsOpenWorld && !request.RequiresUserInteraction {
@@ -273,8 +270,12 @@ func (p DefaultAutoToolPolicy) DecideExecution(ctx stdcontext.Context, intent pr
 		return decision
 	}
 
-	reason := firstNonEmpty(strings.TrimSpace(request.StaticReason), "AUTO policy denied tool execution")
-	return profile.DenyDecision(string(profile.DecisionSourceHeadlessDefault), reason, false)
+	decision := profile.AllowDecision(
+		string(profile.DecisionSourceHeadlessDefault),
+		firstNonEmpty(strings.TrimSpace(request.StaticReason), "ordinary tool auto-allowed by default policy"),
+	)
+	decision.UpdatedIntent = &intent
+	return decision
 }
 
 // toolDecisionToExecutionDecision maps a legacy ToolDecision to the unified
@@ -324,34 +325,6 @@ func toolDecisionToExecutionDecision(td ToolDecision, intent profile.ExecutionIn
 		ed.Reason = firstNonEmpty(strings.TrimSpace(td.Reason), "invalid tool decision action")
 	}
 	return ed
-}
-
-// deniesStaticAllowInHeadless reports whether a tool that returned
-// PermissionAllow should still be denied in headless AUTO mode. Read-only
-// tools are always allowed. Destructive tools (IsDestructive) are denied
-// because they lack the file-chain safety constraints.
-//
-// apply_patch is handled by decideApplyPatchFileChain, which uses
-// workspace boundaries, sensitive-path guards, and trash-backed delete
-// semantics before allowing in-workspace mutation.
-func deniesStaticAllowInHeadless(request ToolDecisionRequest) bool {
-	if strings.HasPrefix(strings.TrimSpace(request.ToolName), "mcp__") {
-		return false
-	}
-	switch request.CapabilityClass {
-	case tool.CapabilityConnectorRead,
-		tool.CapabilityConnectorWrite,
-		tool.CapabilityBrowserRead,
-		tool.CapabilityBrowserInteract:
-		return false
-	}
-	if request.IsReadOnly {
-		return false
-	}
-	if request.IsDestructive {
-		return true
-	}
-	return false
 }
 
 // decideApplyPatchFileChain applies the file-chain relaxation policy to an
@@ -455,30 +428,13 @@ func decideByCapabilityClass(request ToolDecisionRequest) (ToolDecision, bool) {
 			Source: ToolDecisionSourceMassMessageReview,
 			Reason: "mass message send requires human review",
 		}, true
-	case tool.CapabilityConnectorWrite, tool.CapabilityBrowserInteract:
-		if request.TrustedOrigin == tool.TrustedOriginOfficialConnector ||
-			request.TrustedOrigin == tool.TrustedOriginOfficialHosted ||
-			request.TrustedOrigin == tool.TrustedOriginBuiltin {
-			return ToolDecision{
-				Action:       ToolDecisionAllow,
-				Source:       ToolDecisionSourceWorkspaceBoundary,
-				Reason:       "trusted connector/browser capability is allowed by lane policy",
-				UpdatedInput: request.NormalizedInput,
-			}, true
-		}
+	case tool.CapabilityConnectorWrite, tool.CapabilityBrowserInteract,
+		tool.CapabilityExternalPublish, tool.CapabilitySystemOperation:
 		return ToolDecision{
-			Action: ToolDecisionDeny,
-			Source: ToolDecisionSourceHeadlessDefault,
-			Reason: "connector/browser write capability requires a trusted origin",
-		}, true
-	case tool.CapabilityExternalPublish, tool.CapabilitySystemOperation:
-		if request.TrustedOrigin == tool.TrustedOriginBuiltin && request.ToolName == "shell" {
-			return ToolDecision{}, false
-		}
-		return ToolDecision{
-			Action: ToolDecisionDeny,
-			Source: ToolDecisionSourceHeadlessDefault,
-			Reason: "system/external capabilities require a higher-trust execution profile",
+			Action:       ToolDecisionAllow,
+			Source:       ToolDecisionSourceHeadlessDefault,
+			Reason:       "ordinary capability is auto-allowed; executor hard boundaries remain authoritative",
+			UpdatedInput: request.NormalizedInput,
 		}, true
 	}
 	return ToolDecision{}, false

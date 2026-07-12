@@ -8,8 +8,8 @@ var (
 )
 
 // DefaultAdapter returns the platform-appropriate TrashAdapter. On macOS
-// this moves files to ~/.Trash; on Windows to %USERPROFILE%\.trash; on
-// other platforms it returns a fail-closed adapter that refuses to delete.
+// this moves files to ~/.Trash; on Windows it uses the Explorer Recycle Bin;
+// on other platforms it returns a fail-closed adapter that refuses to delete.
 // If an override has been installed via SetAdapter, that override is
 // returned instead.
 func DefaultAdapter() TrashAdapter {

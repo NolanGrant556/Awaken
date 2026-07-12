@@ -14,6 +14,40 @@ import (
 
 var _ tool.InputSchemaProvider = (*McpToolAdapter)(nil)
 var _ tool.OutcomeTool = (*McpToolAdapter)(nil)
+var _ tool.PermissionCheckingTool = (*McpToolAdapter)(nil)
+var _ tool.ProviderManifestProvider = (*McpToolAdapter)(nil)
+var _ tool.ProviderReadinessProvider = (*McpToolAdapter)(nil)
+
+func TestMcpToolAdapterDoesNotTrustOfficialLookingServerName(t *testing.T) {
+	adapter := NewMcpToolAdapter(nil, "github", &mcp.Tool{
+		Name: "search",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint:    true,
+			DestructiveHint: boolPtr(false),
+			OpenWorldHint:   boolPtr(true),
+		},
+	})
+	if adapter.trustedOrigin != tool.TrustedOriginThirdPartyMCP {
+		t.Fatalf("user-named github MCP was elevated to %q", adapter.trustedOrigin)
+	}
+	if adapter.fileBridgeScope != tool.FileBridgeNone {
+		t.Fatalf("spoofed official name received file bridge scope %q", adapter.fileBridgeScope)
+	}
+
+	mgr := NewManager()
+	mgr.servers["host-connector"] = &managedServer{
+		name: "host-connector", state: StateConnected, sourceConnectorID: "connector/github",
+	}
+	hostAdapter := NewMcpToolAdapter(mgr, "host-connector", &mcp.Tool{
+		Name: "search",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint: true, DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(true),
+		},
+	})
+	if hostAdapter.trustedOrigin != tool.TrustedOriginOfficialConnector {
+		t.Fatalf("host connector provenance was not retained: %q", hostAdapter.trustedOrigin)
+	}
+}
 
 func TestMcpToolAdapterPreservesOutputSchemaAsDetailsContract(t *testing.T) {
 	additionalProperties := false
@@ -257,6 +291,11 @@ func TestMcpToolAdapterExecuteOutcomeAndLegacyWrapper(t *testing.T) {
 
 	adapter := NewMcpToolAdapter(mgr, serverName, &mcp.Tool{
 		Name: "probe",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint:    true,
+			DestructiveHint: boolPtr(false),
+			OpenWorldHint:   boolPtr(false),
+		},
 		InputSchema: map[string]any{
 			"type":       "object",
 			"properties": map[string]any{"mode": map[string]any{"type": "string"}},

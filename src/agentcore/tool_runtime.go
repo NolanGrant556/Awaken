@@ -24,6 +24,8 @@ type ToolRuntime struct {
 	serverConnected   func(serverName string) bool
 	auditSink         tool.AuditSink
 	runID             string
+	toolSnapshot      *tool.RunToolAvailabilitySnapshot
+	environment       *tool.ExecutionEnvironmentSnapshot
 	// profile is the unified ExecutionProfile applied to every tool call
 	// this runtime executes. It is populated from ToolRuntimeConfig.Profile
 	// and defaults to profile.DefaultProfile() (WorkspaceWrite) when unset.
@@ -42,8 +44,6 @@ type ToolRuntime struct {
 	// this runtime issues so the decision layer can attribute the call to
 	// the spawning sub-agent. nil for the root agent.
 	subagentOrigin *profile.SubagentOrigin
-	// resolvedToolPool, when non-nil, is the dual-gate effective tool set.
-	resolvedToolPool map[string]bool
 	// router maps an ExecutionIntent + ExecutionProfile to the appropriate
 	// ToolExecutor (FileChainExecutor / ShellExecutor / McpExecutor /
 	// GuardianExecutor). Task 11 of "零审批自动执行策略": the Router sits
@@ -55,14 +55,13 @@ type ToolRuntime struct {
 }
 
 type ToolRuntimeConfig struct {
-	PermissionContext tool.PermissionContext
-	AutoToolPolicy    AutoToolPolicy
-	ServerConnected   func(serverName string) bool
-	AuditSink         tool.AuditSink
-	RunID             string
-	// ResolvedToolPool, when non-nil, is the dual-gate effective tool set.
-	// Execute rejects tool names outside this pool before GetTool.
-	ResolvedToolPool []string
+	PermissionContext            tool.PermissionContext
+	AutoToolPolicy               AutoToolPolicy
+	ServerConnected              func(serverName string) bool
+	AuditSink                    tool.AuditSink
+	RunID                        string
+	ToolAvailabilitySnapshot     *tool.RunToolAvailabilitySnapshot
+	ExecutionEnvironmentSnapshot *tool.ExecutionEnvironmentSnapshot
 	// Profile is the unified ExecutionProfile applied to every tool call
 	// this runtime executes. When nil, the runtime falls back to
 	// profile.DefaultProfile() (WorkspaceWrite).
@@ -111,6 +110,15 @@ type ToolExecutionResult struct {
 	// "workspace_write") surfaced for audit/logging. The full profile is
 	// available on the ToolRuntime via Profile().
 	ProfileName string
+	// ToolSnapshotID and EnvironmentSnapshotID identify the immutable catalog
+	// and bounded user-machine probe used for both selection and execution.
+	ToolSnapshotID         string
+	EnvironmentSnapshotID  string
+	ProviderID             tool.ProviderID
+	ProviderCapabilities   []tool.Capability
+	ProviderReadiness      tool.ProviderReadiness
+	ProviderDependencies   []tool.DependencyRequirement
+	DependencyObservations []tool.DependencyObservation
 	// TransformedFrom is the original tool name when this execution is the
 	// target of a transform decision (e.g. "shell" when a shell echo-write
 	// was rewritten to apply_patch). Empty for direct (non-transformed)
@@ -150,6 +158,16 @@ func NewToolRuntimeWithConfig(sink EventSink, config ToolRuntimeConfig) *ToolRun
 	if config.Profile != nil {
 		execProfile = *config.Profile
 	}
+	var pinnedToolSnapshot *tool.RunToolAvailabilitySnapshot
+	if config.ToolAvailabilitySnapshot != nil {
+		clone := config.ToolAvailabilitySnapshot.Clone()
+		pinnedToolSnapshot = &clone
+	}
+	var pinnedEnvironment *tool.ExecutionEnvironmentSnapshot
+	if config.ExecutionEnvironmentSnapshot != nil {
+		clone := config.ExecutionEnvironmentSnapshot.Clone()
+		pinnedEnvironment = &clone
+	}
 	return &ToolRuntime{
 		sink:              normalizeEventSink(sink),
 		permissionContext: config.PermissionContext.Normalize(),
@@ -157,10 +175,11 @@ func NewToolRuntimeWithConfig(sink EventSink, config ToolRuntimeConfig) *ToolRun
 		serverConnected:   config.ServerConnected,
 		auditSink:         auditSink,
 		runID:             config.RunID,
+		toolSnapshot:      pinnedToolSnapshot,
+		environment:       pinnedEnvironment,
 		profile:           execProfile,
 		subagentBoundary:  config.SubagentBoundary,
 		subagentOrigin:    config.SubagentOrigin,
-		resolvedToolPool:  toolPoolSet(config.ResolvedToolPool),
 		router:            executors.NewRouter(),
 	}
 }
@@ -184,15 +203,6 @@ func toolPoolSet(names []string) map[string]bool {
 // inspect or mutate it without affecting the runtime.
 func (rt *ToolRuntime) Profile() profile.ExecutionProfile {
 	return rt.profile
-}
-
-// SetResolvedToolPool updates the dual-gate tool pool for subsequent Execute
-// calls. nil clears the gate; non-nil rejects tools outside the set.
-func (rt *ToolRuntime) SetResolvedToolPool(names []string) {
-	if rt == nil {
-		return
-	}
-	rt.resolvedToolPool = toolPoolSet(names)
 }
 
 // validateSubagentBoundary is the runtime-side defense-in-depth check for
@@ -270,6 +280,18 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		Name:        call.Function.Name,
 		StartedAt:   timeNowUTC(),
 		ProfileName: rt.profile.Name,
+		ToolSnapshotID: func() string {
+			if rt.toolSnapshot != nil {
+				return rt.toolSnapshot.SnapshotID
+			}
+			return ""
+		}(),
+		EnvironmentSnapshotID: func() string {
+			if rt.environment != nil {
+				return rt.environment.SnapshotID
+			}
+			return ""
+		}(),
 		outcomeContext: tool.OutcomeNormalizationContext{
 			OperationType:     call.Function.Name,
 			WorkspaceRoot:     rt.permissionContext.WorkspaceRoot,
@@ -298,25 +320,43 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		}
 	}
 
-	if rt.resolvedToolPool != nil && !rt.resolvedToolPool[call.Function.Name] {
-		denied := ToolDecision{
-			Action: ToolDecisionDeny,
-			Source: ToolDecisionSourcePolicyError,
-			Reason: fmt.Sprintf("%s: tool %q is outside the resolved skill tool pool", tool.ErrorCodeSkillToolNotAllowed, call.Function.Name),
+	var (
+		selectedTool      tool.Tool
+		def               tool.ToolDefinition
+		definitionQuality tool.DefinitionQuality
+		preserveInput     bool
+		readiness         tool.ProviderReadinessReport
+		provider          tool.ProviderManifest
+		lookupErr         error
+	)
+	if rt.toolSnapshot != nil {
+		entry, err := rt.toolSnapshot.Lookup(call.Function.Name)
+		if err == nil {
+			selectedTool = entry.Runtime
+			def = entry.Definition
+			definitionQuality = entry.Quality
+			preserveInput = entry.PreserveInputObject
+			readiness = entry.Readiness
+			provider = entry.Provider
 		}
-		result = synthesizeDeniedToolResult(result, denied)
-		result.ErrorCode = tool.ErrorCodeSkillToolNotAllowed
-		result.Outcome.ErrorCode = tool.ErrorCodeSkillToolNotAllowed
-		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
-		return finalizeToolResult(result)
+		lookupErr = err
+	} else {
+		registeredTool, err := tool.GetRegisteredTool(call.Function.Name)
+		if err == nil {
+			selectedTool = registeredTool.Runtime
+			def = registeredTool.Definition
+			definitionQuality = registeredTool.Quality
+			preserveInput = registeredTool.PreserveInputObject
+			provider = registeredTool.Provider
+			readiness = tool.ProviderReadinessReport{Readiness: provider.Readiness}
+		}
+		lookupErr = err
 	}
-
-	registeredTool, err := tool.GetRegisteredTool(call.Function.Name)
-	if err != nil {
+	if lookupErr != nil || selectedTool == nil {
 		return finalizeToolResult(synthesizeUnsupportedToolResult(
 			result,
 			"unknown_tool",
-			fmt.Sprintf("工具执行失败: %v: %s", err, call.Function.Name),
+			fmt.Sprintf("工具执行失败: %v: %s", lookupErr, call.Function.Name),
 			[]string{"refresh_tool_registry", "select_an_available_tool"},
 			[]tool.NextAction{
 				{ID: "refresh_tool_registry", Description: "Refresh the available tool registry before making another selection."},
@@ -324,13 +364,19 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 			},
 		))
 	}
-	selectedTool := registeredTool.Runtime
-	def := registeredTool.Definition
-	result.outcomeContext.DeclaredSideEffects = append([]tool.ToolSideEffect(nil), registeredTool.Definition.SideEffects...)
-	result.outcomeContext.OutputSchema = registeredTool.Definition.OutputSchema
-	result.outcomeContext.StrictOutputSchema = registeredTool.Quality == tool.DefinitionQualityStrict
+	result.outcomeContext.DeclaredSideEffects = append([]tool.ToolSideEffect(nil), def.SideEffects...)
+	result.outcomeContext.OutputSchema = def.OutputSchema
+	result.outcomeContext.StrictOutputSchema = definitionQuality == tool.DefinitionQualityStrict
+	result.ProviderID = provider.ProviderID
+	result.ProviderCapabilities = append([]tool.Capability(nil), provider.Capabilities...)
+	result.ProviderReadiness = readiness.Readiness
+	result.ProviderDependencies = append([]tool.DependencyRequirement(nil), provider.Dependencies...)
+	result.DependencyObservations = append([]tool.DependencyObservation(nil), readiness.Dependencies...)
+	if readiness.Readiness == tool.ProviderNeedsAuth || readiness.Readiness == tool.ProviderNeedsRuntime || readiness.Readiness == tool.ProviderUnavailable {
+		return finalizeToolResult(rt.providerReadinessResult(result, provider, readiness))
+	}
 
-	input, err := normalizeToolInputWithSchema(call.Function.Arguments, selectedTool, registeredTool.Definition.InputSchema, registeredTool.PreserveInputObject)
+	input, err := normalizeToolInputWithSchema(call.Function.Arguments, selectedTool, def.InputSchema, preserveInput)
 	if err != nil {
 		return finalizeToolResult(synthesizeValidationToolResult(result, err.Error()))
 	}
@@ -378,6 +424,19 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	}
 
 	toolCtx := tool.ContextWithPermissionContext(ctx, rt.permissionContext)
+	toolCtx = tool.ContextWithToolExecutionIdentity(toolCtx, tool.ToolExecutionIdentity{
+		RunID:      rt.runID,
+		ToolCallID: result.ToolCallID,
+		ToolName:   result.Name,
+	})
+	if rt.toolSnapshot != nil && rt.environment != nil {
+		toolCtx = tool.ContextWithRunAvailability(toolCtx, *rt.toolSnapshot, *rt.environment)
+		// Process-backed tools (for example Shell and the typed dependency
+		// installer) consume the same immutable environment through the narrow
+		// environment context API.  Pin both views here so execution cannot
+		// silently re-probe a newer PATH after provider selection.
+		toolCtx = tool.ContextWithExecutionEnvironmentSnapshot(toolCtx, *rt.environment)
+	}
 	permission := rt.decideToolPermission(toolCtx, selectedTool, def, input)
 	result.AffectedPaths = append([]string(nil), permission.Metadata.AffectedPaths...)
 	result.PatchSummary = strings.TrimSpace(permission.Metadata.PatchSummary)
@@ -507,7 +566,7 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		return finalizeToolResult(result)
 	case ToolDecisionUnsupported:
 		rt.emitToolProgress(result, "unsupported", firstNonEmpty(decision.Reason, "tool capability is unsupported"), 0)
-		result = synthesizeStructuredToolResult(result, decision, "unsupported", "暂不支持该工具能力")
+		result = synthesizeStructuredToolResult(result, decision, firstNonEmpty(permission.ErrorCode, "unsupported"), "暂不支持该工具能力")
 		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
 		rt.writeAudit(def, result, permission, string(decision.Source), "unsupported", "")
 		return finalizeToolResult(result)
@@ -535,6 +594,31 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 			rt.writeAudit(def, result, permission, string(decision.Source), "mass_message_review_rejected", "")
 			return finalizeToolResult(result)
 		}
+		if strings.TrimSpace(rt.runID) == "" || strings.TrimSpace(result.ToolCallID) == "" || strings.TrimSpace(result.Name) == "" ||
+			strings.TrimSpace(string(result.ProviderID)) == "" || strings.TrimSpace(reviewRequest.ReviewEnvelopeDigest) == "" ||
+			strings.TrimSpace(reviewRequest.ReviewBodyDigest) == "" || strings.TrimSpace(reviewRequest.ReviewRecipientIdentityDigest) == "" {
+			result = synthesizeStructuredToolResult(result, decision, "mass_message_review_binding_invalid", "群发消息审核绑定不完整")
+			result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
+			rt.writeAudit(def, result, permission, string(decision.Source), "needs_mass_message_review", "incomplete canonical review binding")
+			return finalizeToolResult(result)
+		}
+		var revokeMassMessageGrant func()
+		toolCtx, revokeMassMessageGrant, err = tool.IssueMassMessageApprovalGrant(toolCtx, tool.MassMessageApprovalBinding{
+			RunID:                   rt.runID,
+			ToolCallID:              result.ToolCallID,
+			ToolName:                result.Name,
+			ProviderID:              result.ProviderID,
+			EnvelopeDigest:          reviewRequest.ReviewEnvelopeDigest,
+			BodyDigest:              reviewRequest.ReviewBodyDigest,
+			RecipientIdentityDigest: reviewRequest.ReviewRecipientIdentityDigest,
+		})
+		if err != nil {
+			result = synthesizeStructuredToolResult(result, decision, "mass_message_review_grant_failed", "群发消息审核授权失败")
+			result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
+			rt.writeAudit(def, result, permission, string(decision.Source), "needs_mass_message_review", err.Error())
+			return finalizeToolResult(result)
+		}
+		defer revokeMassMessageGrant()
 		rt.emitToolProgress(result, "mass_message_review_approved", "mass message review approved", 0)
 	case ToolDecisionAbort:
 		result = synthesizeAbortedToolResult(result, decision)

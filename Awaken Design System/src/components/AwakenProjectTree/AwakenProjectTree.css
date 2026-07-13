@@ -230,29 +230,6 @@
   color: var(--aw-color-danger, #c2410c);
 }
 
-.aw-project-folder-icon {
-  transform-origin: 50% 65%;
-  transition:
-    color var(--aw-transition-fast),
-    transform 170ms ease;
-}
-
-.aw-project-folder-icon[data-expanded="true"] {
-  color: var(--aw-text-secondary);
-  transform: translateY(-1px) scale(1.05);
-}
-
-.aw-project-folder-icon__lid {
-  transform-origin: 20% 45%;
-  transition:
-    opacity var(--aw-transition-fast),
-    transform 170ms ease;
-}
-
-.aw-project-folder-icon[data-expanded="true"] .aw-project-folder-icon__lid {
-  transform: translateY(-1px) rotate(-7deg);
-}
-
 .aw-project-empty-children {
   min-width: 0;
   padding: 4px 10px 5px 38px;

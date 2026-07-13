@@ -40,6 +40,7 @@ import {
   type SupervisorStatusInfo,
   type ThreadDeleteResult,
   type UpdateMcpServerConfigRequest,
+  type UpsertProjectResult,
   type WorkspacePickResult,
   type WorkspaceRegistrySnapshot,
   type WorkspaceRegistryPersistRequest,
@@ -152,7 +153,7 @@ export type RuntimeClient = {
   renameThread: (threadId: string, label: string) => Promise<RuntimeThread>;
   deleteThread: (threadId: string) => Promise<ThreadDeleteResult>;
   listProjects: (includeRemoved?: boolean) => Promise<RuntimeProject[]>;
-  upsertProject: (workspaceRoot: string, displayName?: string) => Promise<RuntimeProject>;
+  upsertProject: (workspaceRoot: string, displayName?: string) => Promise<UpsertProjectResult>;
   detachProject: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;
   deleteProjectThreads: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;
   trashProject: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;

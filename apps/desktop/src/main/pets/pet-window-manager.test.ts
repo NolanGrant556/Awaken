@@ -196,6 +196,8 @@ describe("PetWindowManager", () => {
     const ctorCalls = vi.mocked(BrowserWindow).mock.calls;
     const lastCall = ctorCalls[ctorCalls.length - 1]?.[0];
     expect(lastCall).toMatchObject({
+      transparent: true,
+      backgroundColor: "#00000000",
       paintWhenInitiallyHidden: true,
       webPreferences: expect.objectContaining({
         backgroundThrottling: false,

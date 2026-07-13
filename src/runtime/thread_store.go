@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -574,7 +575,7 @@ func (s *sqliteThreadStore) open() (*sql.DB, error) {
 	if err := s.paths.Ensure(); err != nil {
 		return nil, fmt.Errorf("ensure desktop data dirs: %w", err)
 	}
-	dsn := &url.URL{Scheme: "file", Path: s.paths.ThreadsDBPath()}
+	dsn := &url.URL{Scheme: "file", Path: sqliteFilePath(s.paths.ThreadsDBPath())}
 	query := dsn.Query()
 	// modernc SQLite's _txlock setting makes every database/sql Begin use
 	// BEGIN IMMEDIATE, so lifecycle mutations acquire the writer lock before
@@ -840,6 +841,22 @@ var (
 	jsonMarshalWorkspace   = json.Marshal
 	jsonUnmarshalWorkspace = json.Unmarshal
 )
+
+// sqliteFilePath converts a native filesystem path into a slash-separated,
+// absolute path suitable for a SQLite URI. On Windows this turns a drive
+// letter like "C:\foo" into "/C:/foo" so that url.URL produces a valid
+// file:// URI instead of treating the drive letter as an authority.
+func sqliteFilePath(native string) string {
+	absolute, err := filepath.Abs(native)
+	if err != nil {
+		absolute = native
+	}
+	slashed := filepath.ToSlash(absolute)
+	if runtime.GOOS == "windows" && len(slashed) >= 2 && slashed[1] == ':' {
+		slashed = "/" + slashed
+	}
+	return slashed
+}
 
 func parseStoredTime(raw string) time.Time {
 	if strings.TrimSpace(raw) == "" {

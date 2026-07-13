@@ -2119,7 +2119,9 @@ export function App() {
               workspaceRoot,
               workspaceLabelForPath(workspaceRoot),
             );
-            projects = [...projects, imported];
+            if (imported.ok) {
+              projects = [...projects, imported.project];
+            }
           }
         }
 
@@ -2133,10 +2135,14 @@ export function App() {
           }
           let project = projectAtPath(workspaceRoot);
           if (!project) {
-            project = await runtimeClient.upsertProject(
+            const restored = await runtimeClient.upsertProject(
               workspaceRoot,
               workspaceLabelForPath(workspaceRoot),
             );
+            if (!restored.ok) {
+              continue;
+            }
+            project = restored.project;
             projects = [...projects, project];
           }
           if (project.state === "active") {
@@ -3242,10 +3248,54 @@ export function App() {
         return;
       }
 
-      const project = await runtimeClient.upsertProject(
+      if (
+        !defaultProjectRemoved &&
+        isSameWorkspacePath(result.path, effectiveDefaultWorkspacePath)
+      ) {
+        setNotice("该项目已存在");
+        workspaceTargetPathRef.current = result.path;
+        setWorkspacePath(result.path);
+        setSelectedProjectId(DEFAULT_WORKSPACE_PROJECT_ID);
+        setExpandedProjectIds((current) =>
+          current.includes(DEFAULT_WORKSPACE_PROJECT_ID)
+            ? current
+            : [DEFAULT_WORKSPACE_PROJECT_ID, ...current],
+        );
+        setCreateProjectDialogOpen(false);
+        return;
+      }
+
+      const existingProject = projectsFromWorkspace.find((project) =>
+        isSameWorkspacePath(project.path, result.path),
+      );
+      if (existingProject) {
+        setNotice("该项目已存在");
+        workspaceTargetPathRef.current = result.path;
+        setWorkspacePath(result.path);
+        setSelectedProjectId(existingProject.id);
+        setExpandedProjectIds((current) =>
+          current.includes(existingProject.id)
+            ? current
+            : [...current, existingProject.id],
+        );
+        setCreateProjectDialogOpen(false);
+        return;
+      }
+
+      const upsertResult = await runtimeClient.upsertProject(
         result.path,
         workspaceLabelForPath(result.path),
       );
+      if (!upsertResult.ok) {
+        setNotice(
+          upsertResult.code === "PROJECT_OPERATION_CONFLICT"
+            ? "该项目正在移除中"
+            : upsertResult.message,
+        );
+        return;
+      }
+
+      const project = upsertResult.project;
       const nextProjectId = isSameWorkspacePath(
         project.workspaceRoot,
         effectiveDefaultWorkspacePath,

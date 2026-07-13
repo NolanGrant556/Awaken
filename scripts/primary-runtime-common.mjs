@@ -2150,6 +2150,28 @@ export function publishStaging(root, stagingDir, key) {
   if (exists(target)) {
     throw new Error(`immutable runtime version already exists: ${key}`);
   }
+  if (isWindows) {
+    // Windows may hold transient locks on freshly copied/executed files (e.g.
+    // antivirus indexing, pip install handles). Retry the directory rename with
+    // a short backoff instead of failing immediately.
+    const maxAttempts = 20;
+    const initialDelayMs = 50;
+    let lastError = null;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        renameSync(stagingDir, target);
+        return target;
+      } catch (error) {
+        lastError = error;
+        if (error.code !== "EPERM" && error.code !== "EACCES") {
+          throw error;
+        }
+        const delay = initialDelayMs * 2 ** attempt;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(delay, 5000));
+      }
+    }
+    throw lastError;
+  }
   renameSync(stagingDir, target);
   return target;
 }

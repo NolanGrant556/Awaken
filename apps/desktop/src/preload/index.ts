@@ -39,6 +39,7 @@ import {
   type SupervisorStatusInfo,
   type ThreadDeleteResult,
   type UpdateMcpServerConfigRequest,
+  type UpsertProjectResult,
   type WorkspacePickResult,
   type WorkspaceRegistrySnapshot,
   type WorkspaceRegistryPersistRequest,
@@ -108,7 +109,7 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:upsert-project", {
       workspaceRoot,
       displayName,
-    }) as Promise<RuntimeProject>,
+    }) as Promise<UpsertProjectResult>,
   detachProject: (projectId: string, idempotencyKey: string) =>
     ipcRenderer.invoke("awaken:detach-project", {
       projectId,

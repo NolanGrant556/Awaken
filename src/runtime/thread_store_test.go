@@ -480,6 +480,26 @@ func TestThreadStoreGeneratedTitleDoesNotOverwriteManualTitle(t *testing.T) {
 	}
 }
 
+func TestThreadStoreOpensWithNativeWindowsPath(t *testing.T) {
+	userDataDir := t.TempDir()
+	t.Setenv(runtimeUserDataDirEnv, userDataDir)
+
+	store := newThreadStore().(*sqliteThreadStore)
+	db, err := store.open()
+	if err != nil {
+		t.Fatalf("open thread store: %v", err)
+	}
+	defer db.Close()
+
+	var journalMode string
+	if err := db.QueryRow(`PRAGMA journal_mode`).Scan(&journalMode); err != nil {
+		t.Fatalf("query journal_mode: %v", err)
+	}
+	if journalMode != "wal" {
+		t.Fatalf("expected wal, got %q", journalMode)
+	}
+}
+
 func storeTitleTestSnapshot(t *testing.T, threadID, runID, label string, now time.Time) ThreadSnapshot {
 	t.Helper()
 	root := t.TempDir()

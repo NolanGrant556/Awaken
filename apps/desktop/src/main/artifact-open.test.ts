@@ -1,9 +1,29 @@
 import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { RuntimeThreadTranscript } from "../shared/runtime.js";
 import { openRecordedArtifact, resolveArtifactTarget } from "./artifact-open.js";
+
+function symlinksSupported(): boolean {
+  const tmp = fsSync.mkdtempSync(
+    path.join(os.tmpdir(), "awaken-artifact-open-symlink-probe-"),
+  );
+  const target = path.join(tmp, "target.txt");
+  const link = path.join(tmp, "link.txt");
+  fsSync.writeFileSync(target, "");
+  try {
+    fsSync.symlinkSync(target, link);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    fsSync.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+const itIfSymlinks = it.skipIf(!symlinksSupported());
 
 const temporaryRoots: string[] = [];
 
@@ -140,7 +160,7 @@ describe("artifact open authorization", () => {
     });
   });
 
-  it("rejects a symlink that resolves outside output roots", async () => {
+  itIfSymlinks("rejects a symlink that resolves outside output roots", async () => {
     const { root, output, transcript } = await fixture();
     const outside = path.join(root, "outside.pdf");
     await fs.writeFile(outside, "outside");
@@ -176,7 +196,7 @@ describe("artifact open authorization", () => {
     });
   });
 
-  it("accepts an internal symlink only after resolving its target", async () => {
+  itIfSymlinks("accepts an internal symlink only after resolving its target", async () => {
     const { output, file, transcript } = await fixture();
     const link = path.join(output, "internal-link.pdf");
     await fs.symlink(file, link);
@@ -190,7 +210,7 @@ describe("artifact open authorization", () => {
     expect(resolved).toEqual({ ok: true, path: await fs.realpath(file) });
   });
 
-  it("rejects a supported-looking symlink whose real target has another extension", async () => {
+  itIfSymlinks("rejects a supported-looking symlink whose real target has another extension", async () => {
     const { output, transcript } = await fixture();
     const command = path.join(output, "payload.command");
     await fs.writeFile(command, "#!/bin/sh\necho unsafe\n");

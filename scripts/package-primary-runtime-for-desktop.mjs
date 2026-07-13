@@ -14,7 +14,7 @@ if (process.platform !== "win32") {
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const script = join(root, "scripts", "package-primary-runtime-archive.mjs");
 const result = spawnSync(process.execPath, [script, ...process.argv.slice(2)], {
-  cwd: root,
+  cwd: process.cwd(),
   env: process.env,
   stdio: "inherit",
 });

@@ -4,7 +4,6 @@ import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import {
-  closeCompetingPackagedAwaken,
   isUsableDevDesktopWindow,
   listPackagedAwakenProcesses,
 } from "./desktop-lifecycle-common.mjs";
@@ -202,7 +201,6 @@ async function collectStatus() {
       rendererReachable &&
       processes.electron.length > 0 &&
       processes.core.length > 0 &&
-      processes.packaged.length === 0 &&
       (!windows.checked || Boolean(usableWindow)),
   };
 }
@@ -220,7 +218,7 @@ function printStatus(status) {
     }`,
   );
   console.log(
-    `- competing packaged Awaken: ${
+    `- packaged Awaken (independent): ${
       status.processes.packaged.length > 0
         ? status.processes.packaged.map((row) => row.pid).join(", ")
         : "not running"
@@ -264,26 +262,6 @@ async function waitUntilReady() {
   }
 
   return lastStatus;
-}
-
-if (!statusOnly) {
-  try {
-    const competing = await closeCompetingPackagedAwaken();
-    if (competing.closed.length > 0) {
-      console.log(
-        `Closed competing packaged Awaken instance(s): ${competing.closed
-          .map((row) => row.pid)
-          .join(", ")}`,
-      );
-    }
-  } catch (error) {
-    console.error(
-      `Awaken Desktop cannot establish the README-owned instance: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-    process.exit(1);
-  }
 }
 
 const initialStatus = await collectStatus();

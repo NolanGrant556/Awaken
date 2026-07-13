@@ -23,7 +23,7 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 | --- | --- | --- |
 | 桌面工作台 | 项目与线程导航、Workbench 输入和运行叙事、附件、交付物、外观、宠物与 Desktop 生命周期 | [01 桌面工作台](docs/01_桌面工作台/索引.md) |
 | 主智能体闭环 | thread/run、多轮上下文、压缩、主动提问、取消和失败终止 | [02 主智能体闭环](docs/02_主智能体闭环/索引.md) |
-| 运行时与本地服务 | Desktop 托管本地服务、SemanticJournal、执行环境快照、受管 primary runtime 与 Office worker | [03 运行时与本地服务](docs/03_运行时与本地服务/索引.md) |
+| 运行时与本地服务 | Desktop 托管本地服务、SemanticJournal、当前用户执行环境观察与 Office worker | [03 运行时与本地服务](docs/03_运行时与本地服务/索引.md) |
 | 工具、权限与安全执行 | provider/capability/dependency、每 run 可用性快照、默认自动执行、当前登录用户 direct Shell、可选 restricted/staging broker，以及拥有独立 schema/恢复/审核合同的 typed 工具 | [04 工具、权限与安全执行](docs/04_工具权限与审批/索引.md) |
 | 模型与供应商 | 模型 profile、能力与余额、调用链、安全凭据存储及故障恢复 | [05 模型与供应商配置](docs/05_模型与供应商配置/索引.md) |
 | MCP runtime | user/project/dynamic 配置、stdio/http/sse、动态工具、provider 安全 metadata、认证与 prompt/resource Skill bridge | [06 MCP 运行时](docs/06_MCP运行时/索引.md) |
@@ -49,8 +49,7 @@ flowchart TD
   Agent --> Tools["Tool Catalog / run snapshot"]
   Tools --> Providers["内置 / MCP / Connector providers"]
   Core --> Store["全局线程库 / SemanticJournal"]
-  Providers --> Machine["当前用户机器环境"]
-  Providers --> Runtime["Awaken managed primary runtime"]
+  Providers --> Machine["当前用户 PATH / 项目 / Skill / 系统工具"]
 ```
 
 责任边界：
@@ -60,7 +59,7 @@ flowchart TD
 - `src/runtime`、`src/server` 和 `src/protocol/agui` 分别拥有会话/持久化编排、本地 HTTP/SSE surface 和 wire 映射；
 - `src/tool`、`src/tools`、`src/mcpclient`、`src/skills` 与 `src/skillruntime` 拥有对应能力的定义、策略与实现；
 - `Awaken Design System` 只接收 props/callbacks，不读取 Electron、runtime 或业务 store；
-- primary runtime 和 Office worker 是 Awaken 管理的 provider/执行依赖，不是所有工具的唯一环境，也不构成第三个用户入口。
+- Work 工具与 Office worker 复用当前用户、项目和 Skill 已有环境；缺少依赖时由 Agent 根据真实 Shell 错误按正常包管理方式安装，Awaken 不复制或维护完整 Work runtime。
 
 更细的模块协作、字段和状态机由相应功能域文档唯一拥有。
 
@@ -81,7 +80,7 @@ npm run open:desktop
 npm run close:desktop
 ```
 
-`open:desktop` 会复用或建立受管理的 `awaken-dev-desktop` 会话，准备 renderer、Electron、`awaken-core` 和 primary runtime，并以真实 `Awaken Desktop` 窗口作为成功标准。`close:desktop` 负责关闭同一入口拥有的进程。
+`open:desktop` 会复用或建立受管理的 `awaken-dev-desktop` 会话，准备 renderer、Electron 和 `awaken-core`，并以真实 `Awaken Dev` 窗口作为成功标准。它不检查或安装 Python、LibreOffice、Poppler、FFmpeg；缺少 Work 依赖不会阻止 Desktop/Core 启动。开发版与安装版使用不同 identity、userData、凭据和单实例域，可以同时运行；`close:desktop` 只关闭开发入口拥有的进程。
 
 Windows 当前使用前台入口：
 
@@ -123,7 +122,7 @@ Gallery 使用 mock state，只能证明组件渲染，不能替代 Awaken Deskt
 | `src/tool`、`src/tools` | 工具合同、暴露、权限、Outcome 与内置工具 |
 | `src/mcpclient` | MCP 配置、连接、认证和动态工具桥接 |
 | `src/skills`、`src/skillruntime` | Skill 发现、激活和执行 |
-| `scripts` | Desktop、primary runtime、构建与验收自动化 |
+| `scripts` | Desktop、构建与验收自动化 |
 | `Awaken Design System` | UI-only 组件、tokens、资源和 Gallery |
 | `docs` | 按产品功能域组织的确定性工程知识库 |
 

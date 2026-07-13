@@ -2,7 +2,7 @@
 
 ## 1. 当前支持
 
-Awaken 提供 typed artifact/presentation provider，用于创建、编辑、渲染和读取结构化交付物。它声明 `document.create`、`presentation.create/edit/render`、`spreadsheet.create`、`pdf.read/render` 等 capability，并通过 provider readiness 报告 managed runtime/worker 依赖。
+Awaken 提供 typed artifact/presentation provider，用于创建、编辑、渲染和读取结构化交付物。它声明 `document.create`、`presentation.create/edit/render`、`spreadsheet.create`、`pdf.read/render` 等 capability，并在执行前报告当前用户环境中的具体依赖缺口。
 
 typed provider 的价值是：稳定 schema、TaskScope、可观测 changes/artifacts、渲染验证和结构化失败。模型应在它 ready 且契约匹配时优先使用，但它不是唯一合法实现。Skill 脚本、用户机器工具或 MCP provider 也可以成为候选。默认 Shell 以当前登录用户权限运行脚本/本机 CLI，可访问网络和 workspace 外路径，但只返回进程事实及 unobserved side-effect receipt，不自动获得 typed artifact provider 的 schema、TaskScope、Trash、渲染或 preview 验证。需要这些产物保证时，Agent 再显式调用对应 typed inspect/render/publish provider。
 
@@ -85,7 +85,7 @@ Skill 是工作流和知识包，不是 artifact runtime 的权限 owner。它�
 ## 5. 代码 owner
 
 - `src/tools/artifact_runtime` 与 presentation/artifact tools：typed provider。
-- `src/runtime/officerender` 与 primary runtime resolver：Awaken managed execution provider。
+- `src/runtime/officerender` 与 host environment resolver：复用用户 LibreOffice，同时保留隔离 profile、timeout、验证和原子发布。
 - `src/tool/catalog_snapshot.go`：provider readiness 与 capability 候选诊断。
 - `src/tool/schema.go`：递归 schema/validator。
 - `src/mcpclient/provider_manifest.go`、`tool_safety.go`、`artifact_bridge.go`：MCP artifact output 声明、结果验证和 host bridge。

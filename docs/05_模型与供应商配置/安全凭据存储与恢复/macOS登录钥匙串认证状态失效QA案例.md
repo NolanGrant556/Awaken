@@ -447,7 +447,7 @@ npm run open:desktop
 | MAC-06 | 正常修改登录密码 | 通过系统设置修改密码并重新登录 | 同一用户下原凭据仍可读，或给出可诊断恢复状态 | P1 |
 | MAC-07 | 管理员重置密码 | 在可销毁 QA 账号中模拟旧钥匙串密码不可得 | 进入重新录入状态；旧密文不自动删除，不明文回退 | P1 |
 | MAC-08 | 历史/当前 namespace | 覆盖 `@awaken/desktop` 与 `Awaken` 两种 Safe Storage identity | 新密文成功持久化后才替换；失败保留旧数据 | P0 |
-| MAC-09 | 打包与开发身份 | 比较开发态、正式签名包和版本升级 | app name、bundle ID、签名身份、userData 路径稳定 | P1 |
+| MAC-09 | 打包与开发身份 | 并行启动 `Awaken` 与 `Awaken Dev`，再做安装版升级 | 两套 app name、bundle ID、userData 与凭据互不串用；安装版升级身份稳定 | P1 |
 | CORE-01 | 所有业务入口统一分类 | 运行、余额、模型测试、保存分别触发同类错误 | 使用同一凭据层、状态码与脱敏提示 | P0 |
 | CORE-02 | 安全写入失败 | 更新 key 时模拟 secure write 失败 | 明确显示“未保存”，新 key 不落盘，旧密文不变 | P0 |
 | CORE-03 | legacy 与轮换 | legacy 密文或 `shouldReEncrypt=true` | 新密文成功并原子持久化后才替换旧密文 | P0 |

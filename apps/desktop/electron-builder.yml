@@ -13,24 +13,9 @@ extraResources:
   - from: resources/pets
     to: pets
     filter: ["**/*"]
-  - from: resources/bin
-    to: bin
+  - from: resources/bin/${platform}-${arch}
+    to: bin/${platform}-${arch}
     filter: ["**/*"]
-  - from: resources/runtime-manifest
-    to: runtime-manifest
-    filter: ["**/*"]
-  - from: resources/runtime
-    to: runtime
-    filter: ["**/*"]
-  - from: resources/runtime-archive
-    to: runtime-archive
-    filter: ["*.zip", "*.manifest.json"]
-  - from: ../../scripts
-    to: runtime-installer
-    filter:
-      - "install-primary-runtime-archive.mjs"
-      - "primary-runtime-common.mjs"
-      - "runtime-archive-platform.mjs"
   - from: build/icon.png
     to: icon.png
 mac:

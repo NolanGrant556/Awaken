@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { rmSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
-  closeCompetingPackagedAwaken,
   isPackagedAwakenCommand,
   isUsableDevDesktopWindow,
   listPackagedAwakenProcesses,
@@ -14,6 +13,7 @@ import {
 import { cleanDesktopPackageOutputs } from "../clean-desktop-package.mjs";
 
 const tempRoots = [];
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 afterEach(() => {
   for (const root of tempRoots.splice(0)) {
@@ -112,57 +112,15 @@ describe("desktop process ownership", () => {
     ]);
   });
 
-  it("gracefully closes a competing package before the README dev entry starts", async () => {
-    let rows = [{ pid: 81, command: "/Applications/Awaken.app/Contents/MacOS/Awaken" }];
-    const signals = [];
-    const result = await closeCompetingPackagedAwaken({
-      listProcesses: () => rows,
-      killProcess: (pid, signal) => {
-        signals.push([pid, signal]);
-        rows = [];
-      },
-      delay: async () => {},
-    });
-    assert.deepEqual(signals, [[81, "SIGTERM"]]);
-    assert.equal(result.closed.length, 1);
-    assert.deepEqual(result.forced, []);
-  });
-
-  it("forces a package that ignores graceful termination", async () => {
-    let rows = [{ pid: 82, command: "/Applications/Awaken.app/Contents/MacOS/Awaken" }];
-    const signals = [];
-    const result = await closeCompetingPackagedAwaken({
-      listProcesses: () => rows,
-      killProcess: (pid, signal) => {
-        signals.push([pid, signal]);
-        if (signal === "SIGKILL") {
-          rows = [];
-        }
-      },
-      delay: async () => {},
-      gracefulTimeoutMs: 0,
-    });
-    assert.deepEqual(signals, [
-      [82, "SIGTERM"],
-      [82, "SIGKILL"],
-    ]);
-    assert.equal(result.forced.length, 1);
-  });
 });
 
 describe("desktop package staging", () => {
-  it("removes generated package inputs while preserving the managed runtime seed", () => {
+  it("removes generated package outputs without creating runtime staging", () => {
     const root = mkdtempSync(join(tmpdir(), "awaken-desktop-clean-"));
     tempRoots.push(root);
-    mkdirSync(join(root, "apps", "desktop", "resources", "runtime", "python"), {
-      recursive: true,
-    });
     mkdirSync(join(root, "apps", "desktop", "dist-electron"), { recursive: true });
     mkdirSync(join(root, "apps", "desktop", "dist"), { recursive: true });
     mkdirSync(join(root, "apps", "desktop", "resources", "bin"), { recursive: true });
-    mkdirSync(join(root, "apps", "desktop", "resources", "runtime-archive"), {
-      recursive: true,
-    });
     writeFileSync(join(root, "package.json"), JSON.stringify({ name: "awaken" }));
     writeFileSync(
       join(root, "apps", "desktop", "package.json"),
@@ -174,38 +132,19 @@ describe("desktop package staging", () => {
       "stale",
     );
     writeFileSync(join(root, "apps", "desktop", "resources", "bin", "stale"), "stale");
-    writeFileSync(
-      join(root, "apps", "desktop", "resources", "runtime-archive", "stale.zip"),
-      "stale",
-    );
-    writeFileSync(
-      join(root, "apps", "desktop", "resources", "runtime", "python", "seed"),
-      "keep",
-    );
-
     cleanDesktopPackageOutputs(root);
-
-    assert.equal(
-      readFileSync(
-        join(root, "apps", "desktop", "resources", "runtime", "python", "seed"),
-        "utf8",
-      ),
-      "keep",
-    );
-    assert.equal(
-      readFileSync(
-        join(root, "apps", "desktop", "resources", "runtime-archive", ".gitkeep"),
-        "utf8",
-      ),
-      "",
-    );
     assert.throws(() =>
       readFileSync(join(root, "apps", "desktop", "dist", "stale.js")),
     );
-    assert.throws(() =>
-      readFileSync(
-        join(root, "apps", "desktop", "resources", "runtime-archive", "stale.zip"),
-      ),
+    assert.equal(existsSync(join(root, "apps", "desktop", "resources", "runtime-archive")), false);
+  });
+
+  it("packages only the target architecture awaken-core", () => {
+    const config = readFileSync(
+      join(repoRoot, "apps", "desktop", "electron-builder.yml"),
+      "utf8",
     );
+    assert.match(config, /resources\/bin\/\$\{platform\}-\$\{arch\}/);
+    assert.doesNotMatch(config, /^\s*- from: resources\/bin\s*$/m);
   });
 });

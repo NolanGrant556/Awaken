@@ -558,7 +558,6 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		return finalizeToolResult(result)
 	case ToolDecisionNeedsRuntime:
 		rt.emitToolProgress(result, "needs_runtime", firstNonEmpty(decision.Reason, "tool requires local runtime"), 0)
-		rt.emitRuntimePrepareStarted(result.ToolCallID, result.Name, "host runtime check before artifact tool")
 		rt.emitRuntimeMissing(result, decision)
 		result = synthesizeStructuredToolResult(result, decision, "needs_runtime", "缺少本地 runtime")
 		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)

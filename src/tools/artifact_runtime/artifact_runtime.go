@@ -224,12 +224,6 @@ func sameArtifactPath(left, right string) bool {
 }
 
 func (t typedArtifactTool) CheckPermission(ctx context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {
-	if t.requiresRuntime {
-		_, missing := checkRuntimeRequirements(t.runtimeRequirements)
-		if len(missing) > 0 {
-			return tool.NeedsRuntimePermission(fmt.Sprintf("%s is not ready for %s: missing %s", runtimeName, t.name, strings.Join(missing, ", ")))
-		}
-	}
 	params, _ := decodeParams(input, singleRawParamName(t.parameters))
 	if t.readOnly {
 		return tool.AllowPermission()
@@ -318,7 +312,7 @@ func (t typedArtifactTool) ExecuteOutcome(ctx context.Context, input string, _ t
 				outcome.Status = tool.OutcomeNeedsRuntime
 				outcome.TransportStatus = tool.TransportCompleted
 				outcome.SemanticStatus = tool.SemanticUnknown
-				outcome.RecoveryOptions = []string{"prepare_primary_runtime", "runtime_preflight"}
+				outcome.RecoveryOptions = []string{"install_missing_dependency", "retry_tool"}
 			}
 			outcome.Diagnostic = executionFailure.Diagnostic
 			if executionFailure.Cause != nil {
@@ -427,7 +421,7 @@ func missingRuntimeRequirements(report preflightReport, requirements []string) [
 
 func needsRuntimeExecutionOutcome(toolName string, report preflightReport, requirements, missing []string) tool.ExecutionOutcome {
 	payload := map[string]any{
-		"status":              "needs_runtime",
+		"status":              "dependency_missing",
 		"runtime":             firstNonEmpty(report.RuntimeName, runtimeName),
 		"tool":                toolName,
 		"required_components": append([]string(nil), requirements...),
@@ -444,9 +438,9 @@ func needsRuntimeExecutionOutcome(toolName string, report preflightReport, requi
 		ProcessStatus:   tool.ProcessNotApplicable,
 		ErrorCode:       tool.ErrorCodeNeedsRuntime,
 		ErrorCategory:   tool.ErrorCategoryRuntime,
-		ErrorMessage:    fmt.Sprintf("%s is missing required components: %s", runtimeName, strings.Join(missing, ", ")),
-		Retryable:       false,
-		RecoveryOptions: []string{"prepare_primary_runtime", "runtime_preflight"},
+		ErrorMessage:    fmt.Sprintf("%s is missing host dependencies: %s", toolName, strings.Join(missing, ", ")),
+		Retryable:       true,
+		RecoveryOptions: []string{"install_missing_dependency", "retry_tool"},
 		Diagnostic: map[string]any{
 			"runtime":             report.RuntimeName,
 			"required_components": append([]string(nil), requirements...),
@@ -462,7 +456,7 @@ func workspaceDependenciesTool() typedArtifactTool {
 	return typedArtifactTool{
 		name:        "workspace_dependencies",
 		displayName: "Workspace Dependencies",
-		description: "返回 Awaken 打包/准备的本地 Work runtime 依赖清单，例如 Python、LibreOffice/soffice 等路径；需要确认本机文档/PPT/PDF 渲染依赖时用这个工具，不要用 list_files/grep_search 去扫描系统目录",
+		description: "返回当前用户环境中可复用的 Work 依赖，例如 Python、LibreOffice/soffice、Poppler 和 FFmpeg 的实际路径；缺失时可由 Agent 使用 Shell 按正常包管理方式安装",
 		readOnly:    true,
 		capability:  tool.CapabilityArtifactRead,
 		parameters:  nil,
@@ -478,7 +472,7 @@ func runtimePreflightTool() typedArtifactTool {
 	return typedArtifactTool{
 		name:        "runtime_preflight",
 		displayName: "Runtime Preflight",
-		description: "检查 Office/PDF/媒体 typed artifact tools 所需本地 runtime 是否准备完成；文档、表格、PPT、PDF 渲染/转换前可先调用，缺失时返回具体 runtime 缺口",
+		description: "检查 Office/PDF/媒体 typed artifact tools 所需的当前用户环境依赖；缺失时返回具体命令或包缺口，安装后可直接重试",
 		readOnly:    true,
 		capability:  tool.CapabilityArtifactRead,
 		parameters:  nil,
@@ -533,7 +527,7 @@ func runtimeBackedTool(name, displayName, description string, readOnly bool) typ
 	return typedArtifactTool{
 		name:            name,
 		displayName:     displayName,
-		description:     description + "；需要 primary-runtime 就绪，执行前可用 runtime_preflight 检查依赖",
+		description:     description + "；复用当前用户环境，缺少依赖时先按错误提示用 Shell 安装，再重试",
 		readOnly:        readOnly,
 		capability:      capability,
 		requiresRuntime: true,
@@ -781,7 +775,7 @@ func officeExportPDF(ctx context.Context, input string) (string, error) {
 	if err := ensureParentDir(checkedOutput); err != nil {
 		return "", err
 	}
-	result, err := officerender.RenderManaged(ctx, checkedSource, checkedOutput, "pdf")
+	result, err := officerender.Render(ctx, checkedSource, checkedOutput, "pdf")
 	if err != nil {
 		return "", fmt.Errorf("Office PDF 转换失败: %w", err)
 	}
@@ -2645,7 +2639,7 @@ func renderPresentationPDF(ctx context.Context, path string, outDir string) (str
 func renderManagedPresentationPDF(ctx context.Context, inputPath, outputPath string) (officerender.Result, error) {
 	testOverride := strings.TrimSpace(presentationRuntimeTestOverride("libreoffice"))
 	if testOverride == "" {
-		return officerender.RenderManaged(ctx, inputPath, outputPath, "pdf")
+		return officerender.Render(ctx, inputPath, outputPath, "pdf")
 	}
 	soffice := findSofficeIn(testOverride)
 	if soffice == "" {
@@ -2844,7 +2838,7 @@ func existingFiles(candidates []string) []string {
 func pythonCanImportPPTX(path string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, path, "-c", "import pptx")
+	cmd := exec.CommandContext(ctx, path, "-c", "import pptx, PIL")
 	return cmd.Run() == nil
 }
 

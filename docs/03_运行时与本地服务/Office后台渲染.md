@@ -2,29 +2,28 @@
 
 ## 1. 当前支持
 
-Office worker 是 Awaken typed artifact provider 的受管转换路径。它从 primary runtime active pointer 解析并校验 LibreOffice，而不是信任调用者传入任意 binary；revision/fingerprint 改变后重新 attestation。
+Office worker 复用当前用户已安装的 LibreOffice。每次转换前从 `AWAKEN_SOFFICE`、当前 PATH 和平台标准应用位置解析 `soffice`，记录绝对路径、大小与修改时间指纹，并在执行前再次解析，避免调用过程中可执行身份漂移。Awaken 不复制、修改、重签或版本化 LibreOffice。
 
-每次转换使用独立 LibreOffice user profile、明确输入/输出目录、timeout 和输出校验。取消/超时终止 process group；成功校验后原子发布目标，失败保留此前有效文件，不以半写 PDF/预览覆盖成功产物。
+每次转换使用独立 LibreOffice user profile、明确输入/输出目录、timeout 和输出校验。取消/超时终止 process group；成功后原子发布目标，失败保留此前有效文件，不以半写 PDF/预览覆盖成功产物。
 
-## 2. 与工具目录的关系
+## 2. 与 Agent/Shell 的关系
 
-worker 通过 provider manifest 声明 presentation/document render capability、managed-runtime dependencies 和 readiness。run 工具快照固定本次调用使用的 provider/runtime；active revision 在运行中变化只影响后续 run。
-
-Office worker 是已定义的 typed provider，不是所有 Office/Artifact 任务的唯一实现。默认 Shell 可以当前登录用户的环境和操作系统权限直接调用用户已安装的 `soffice`、网络或 workspace 外资源，但该路径不自动获得 Office worker 的 attestation、独立 profile、原子发布、渲染验证或 artifact schema。因此直接 `soffice` 是可用的本机候选，但不是 typed worker 的质量/恢复合同等价替代；需要 verified artifact 时仍应调用独立 inspect/render 并完成真实视觉验收。
+LibreOffice 缺失时 typed 工具返回明确依赖错误，不形成权限 gate或后台安装状态。Agent可用当前用户 Shell 按正常系统方式安装，再重试；worker在下一次调用重新解析环境。直接 Shell 调用 `soffice` 仍是合法本机路径，但不自动获得 worker 的独立 profile、原子发布、Artifact schema 和渲染验证。
 
 ## 3. 平台边界
 
-- macOS：managed LibreOffice.app 及 helper 进入签名/公证和后台无窗口约束；仍需本轮真实 Desktop 渲染复验。
-- Windows：代码/manifest 必须解析 `soffice.exe`、处理进程树和原子替换；本轮无 Windows 实机渲染证据。
-- Linux：没有可从现有 macOS pipeline 推导的发布承诺。
+- macOS：发现 PATH、`/Applications/LibreOffice.app` 与用户 Applications；真实 Desktop 仍需验证 headless 行为及安装版签名上下文。
+- Windows：发现 PATH、Program Files、LocalAppData；必须实机验证 `soffice.exe`、进程树和原子替换。
+- Linux：发现 PATH 与常见系统位置，仍需对应发布环境验证。
 
 ## 4. 不变量
 
-- PATH 中存在 LibreOffice 不等于 managed provider attested/ready。
-- render 失败不得生成成功 artifact 或让最终回合伪装完成。
-- worker readiness、tool outcome 与 UI artifact 展示必须使用同一 run snapshot 和 journal 事实。
+- 找到文件不等于可用；执行前必须 probe并复核具体可执行身份。
+- render 失败不得生成成功 Artifact 或伪装完成。
+- 不在启动、构建、打包阶段安装或复制 LibreOffice。
 
 ## 5. 代码 owner
 
-- `src/runtime/officerender`：managed revision 解析、进程隔离、timeout、验证和原子发布。
-- `src/tools/artifact_runtime`：tool/provider 接入与 runtime resolver。
+- `src/runtime/officerender/host_runtime.go`：当前用户 LibreOffice 发现与指纹。
+- `src/runtime/officerender/worker.go`：隔离 profile、进程、timeout、验证和原子发布。
+- `src/tools/artifact_runtime`：typed tool 依赖发现、Outcome 与 Artifact 接入。

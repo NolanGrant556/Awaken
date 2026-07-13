@@ -107,15 +107,13 @@ describe("RuntimeSupervisor", () => {
     expect(spawnOptions?.env).toMatchObject({
       AWAKEN_CORE_ADDR: "127.0.0.1:19001",
       AWAKEN_DEFAULT_WORKSPACE: "/tmp/workspace",
-      AWAKEN_RUNTIME_MANIFEST: expect.stringMatching(
-        /resources[\\/]runtime-manifest[\\/]primary-runtime\.json$/,
-      ),
       AWAKEN_USER_DATA_DIR: "/tmp/awaken-user-data",
       PATH: "/login/bin:/usr/bin",
       HOME: "/Users/login-user",
       AWAKEN_LOGIN_ENV_CANARY: "login-value",
     });
     expect(spawnOptions?.env).not.toHaveProperty("AWAKEN_CONFIG_DIR");
+    expect(spawnOptions?.env).not.toHaveProperty("AWAKEN_RUNTIME_MANIFEST");
     expect(spawnOptions?.env).not.toHaveProperty("LLM_API_KEY");
     expect(spawnOptions?.env).not.toHaveProperty("LLM_BASE_URL");
     expect(spawnOptions?.env).not.toHaveProperty("LLM_MODEL_ID");

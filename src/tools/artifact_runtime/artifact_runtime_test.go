@@ -596,17 +596,21 @@ func TestImageInspectRejectsPDFWithRoutingHint(t *testing.T) {
 	}
 }
 
-func TestRuntimeBackedToolsRequirePreparedRuntime(t *testing.T) {
-	t.Setenv("AWAKEN_PRIMARY_RUNTIME_ROOT", filepath.Join(t.TempDir(), "missing-runtime-root"))
-	t.Setenv("AWAKEN_USER_DATA_DIR", t.TempDir())
+func TestRuntimeBackedToolsReportMissingHostDependenciesAtExecution(t *testing.T) {
+	t.Setenv("PATH", "")
 	t.Setenv("AWAKEN_PYTHON", "")
 	t.Setenv("AWAKEN_SOFFICE", "")
 	t.Setenv("AWAKEN_POPPLER_BIN", "")
 	invalidateRuntimeProbeCache()
 	render := runtimeBackedTool("document_render", "Document Render", "render docx", true)
-	decision := render.CheckPermission(context.Background(), `{}`, tool.NewPermissionContext(t.TempDir(), nil))
-	if decision.Behavior != tool.PermissionNeedsRuntime {
-		t.Fatalf("expected needs_runtime, got %+v", decision)
+	input := `{"path":"missing.docx"}`
+	decision := render.CheckPermission(context.Background(), input, tool.NewPermissionContext(t.TempDir(), nil))
+	if decision.Behavior != tool.PermissionAllow {
+		t.Fatalf("host dependency discovery must not become a permission gate, got %+v", decision)
+	}
+	outcome, err := render.ExecuteOutcome(context.Background(), input, nil)
+	if err != nil || outcome.Status != tool.OutcomeNeedsRuntime {
+		t.Fatalf("expected structured missing dependency outcome, outcome=%+v err=%v", outcome, err)
 	}
 }
 

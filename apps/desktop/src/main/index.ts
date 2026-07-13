@@ -71,6 +71,7 @@ import {
   type StartRunRequest,
   type ThreadDeleteResult,
   type UpdateMcpServerConfigRequest,
+  type UpsertProjectResult,
   type WorkspaceRegistryPersistRequest,
 } from "../shared/runtime.js";
 import { RuntimeSupervisor, type SupervisorStatusInfo } from "./runtime-supervisor.js";
@@ -465,6 +466,22 @@ async function requestRuntimeDomain<T>(pathname: string, init?: RequestInit): Pr
     throw new RuntimeDomainError(code, message, response.status);
   }
   return (await response.json()) as T;
+}
+
+function upsertProjectFailureMessage(error: unknown): string {
+  if (!(error instanceof RuntimeDomainError)) {
+    return error instanceof Error ? error.message : "打开项目失败，请稍后重试。";
+  }
+  const messages: Record<string, string> = {
+    PROJECT_NOT_FOUND: "项目不存在或已经被移除。",
+    PROJECT_OPERATION_CONFLICT:
+      "该文件夹正在处理其他操作（例如移除），请稍后再试。",
+    PROJECT_RUNS_BUSY: "项目中有正在运行的任务，请等待任务结束后再打开。",
+    PROJECT_PATH_INVALID: "该文件夹不能作为 Awaken 项目。",
+    PROJECT_PATH_FINGERPRINT_CHANGED:
+      "文件夹内容已发生变化，Awaken 已停止本次操作以避免误操作。",
+  };
+  return messages[error.code] ?? "打开项目失败，请稍后重试。";
 }
 
 function projectMutationFailure(error: unknown): ProjectMutationResult {
@@ -1334,16 +1351,26 @@ ipcMain.handle(
   async (
     _event,
     request: { workspaceRoot: string; displayName?: string },
-  ): Promise<RuntimeProject> => {
-    const project = await requestRuntimeDomain<RuntimeProjectWire>("/v1/projects", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        workspace_root: request.workspaceRoot,
-        display_name: request.displayName,
-      }),
-    });
-    return normalizeRuntimeProject(project);
+  ): Promise<UpsertProjectResult> => {
+    try {
+      const project = await requestRuntimeDomain<RuntimeProjectWire>("/v1/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspace_root: request.workspaceRoot,
+          display_name: request.displayName,
+        }),
+      });
+      return { ok: true, project: normalizeRuntimeProject(project) };
+    } catch (error) {
+      const code = error instanceof RuntimeDomainError ? error.code : "INTERNAL_ERROR";
+      console.error("upsert_project_failed", {
+        workspaceRoot: request.workspaceRoot,
+        code,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { ok: false, code, message: upsertProjectFailureMessage(error) };
+    }
   },
 );
 

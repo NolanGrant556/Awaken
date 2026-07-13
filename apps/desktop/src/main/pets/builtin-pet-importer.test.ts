@@ -32,7 +32,7 @@ describe("resolveBuiltinPetsRoot", () => {
       packaged: true,
       resourcesPath: "/Applications/Awaken.app/Contents/Resources",
       appPath: "/unused",
-    })).toBe("/Applications/Awaken.app/Contents/Resources/pets");
+    })).toBe(path.join("/Applications/Awaken.app/Contents/Resources", "pets"));
   });
 
   it("uses app resources in development", () => {
@@ -40,7 +40,7 @@ describe("resolveBuiltinPetsRoot", () => {
       packaged: false,
       resourcesPath: "/unused",
       appPath: "/repo/apps/desktop",
-    })).toBe("/repo/apps/desktop/resources/pets");
+    })).toBe(path.join("/repo/apps/desktop", "resources", "pets"));
   });
 });
 

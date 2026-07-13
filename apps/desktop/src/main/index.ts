@@ -36,8 +36,6 @@ import {
   type AttachmentPickResult,
   type ArtifactOpenRequest,
   type ArtifactOpenResult,
-  type AwakenTheme,
-  type AwakenThemePreference,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
   type DesktopPreferencesSaveRequest,
@@ -73,6 +71,10 @@ import {
   type UpdateMcpServerConfigRequest,
   type WorkspaceRegistryPersistRequest,
 } from "../shared/runtime.js";
+import {
+  updateMainWindowBackground,
+  windowBackgroundColor,
+} from "./window-background.js";
 import { RuntimeSupervisor, type SupervisorStatusInfo } from "./runtime-supervisor.js";
 import { ensureConfigDir } from "./config-bootstrap.js";
 import { DesktopPreferencesStore } from "./desktop-preferences-store.js";
@@ -154,27 +156,6 @@ const defaultWindowWidth = 1440;
 const defaultWindowHeight = 960;
 const minimumWindowWidth = 1120;
 const minimumWindowHeight = 760;
-
-function effectiveThemeForPreference(
-  theme?: AwakenThemePreference,
-): AwakenTheme {
-  if (theme === "system") {
-    return nativeTheme.shouldUseDarkColors ? "dark" : "light";
-  }
-  return theme === "dark" ? "dark" : "light";
-}
-
-function windowBackgroundColor(theme?: AwakenThemePreference): string {
-  return effectiveThemeForPreference(theme) === "dark" ? "#0f0f0e" : "#f8f8f7";
-}
-
-function updateWindowBackgrounds(theme: AwakenThemePreference): void {
-  for (const window of BrowserWindow.getAllWindows()) {
-    if (!window.isDestroyed()) {
-      window.setBackgroundColor(windowBackgroundColor(theme));
-    }
-  }
-}
 
 function desktopIconPath(): string {
   if (app.isPackaged) {
@@ -780,6 +761,7 @@ function createMainWindow(): BrowserWindow {
     minHeight: minimumWindowHeight,
     backgroundColor: windowBackgroundColor(
       desktopPreferencesStore?.snapshot().theme,
+      nativeTheme.shouldUseDarkColors,
     ),
     autoHideMenuBar: true,
     show: false,
@@ -1036,7 +1018,11 @@ ipcMain.handle(
       throw new Error("Desktop preferences store unavailable");
     }
     const preferences = await desktopPreferencesStore.savePreferences(request);
-    updateWindowBackgrounds(preferences.theme);
+    updateMainWindowBackground(
+      mainWindowRef,
+      preferences.theme,
+      nativeTheme.shouldUseDarkColors,
+    );
     return preferences;
   },
 );
@@ -1867,7 +1853,11 @@ app.whenReady().then(async () => {
   await desktopPreferencesStore.initialize();
   nativeTheme.on("updated", () => {
     if (desktopPreferencesStore?.snapshot().theme === "system") {
-      updateWindowBackgrounds("system");
+      updateMainWindowBackground(
+        mainWindowRef,
+        "system",
+        nativeTheme.shouldUseDarkColors,
+      );
     }
   });
   modelProfileStore = new ModelProfileStore(configDir);

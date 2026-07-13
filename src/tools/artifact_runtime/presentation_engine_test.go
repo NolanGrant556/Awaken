@@ -410,8 +410,6 @@ func TestPresentationCreateInputSchemaIsRecursive(t *testing.T) {
 }
 
 func TestPresentationCreateNestedValidationReportsExactJSONPathBeforeRuntimeAndExecutor(t *testing.T) {
-	t.Setenv("AWAKEN_PRIMARY_RUNTIME_ROOT", filepath.Join(t.TempDir(), "missing-runtime"))
-	t.Setenv("AWAKEN_USER_DATA_DIR", t.TempDir())
 	invalidateRuntimeProbeCache()
 	executed := false
 	create := typedArtifactTool{
@@ -482,8 +480,6 @@ func TestPresentationEditSchemaAcceptsOperationSpecificPayloads(t *testing.T) {
 }
 
 func TestPresentationEditInvalidPayloadFailsBeforeRuntimeAndExecutor(t *testing.T) {
-	t.Setenv("AWAKEN_PRIMARY_RUNTIME_ROOT", filepath.Join(t.TempDir(), "missing-runtime"))
-	t.Setenv("AWAKEN_USER_DATA_DIR", t.TempDir())
 	invalidateRuntimeProbeCache()
 
 	invalid := []struct {
@@ -575,9 +571,11 @@ func TestPresentationToolsDeclareComponentRuntimeRequirements(t *testing.T) {
 	}
 }
 
-func TestPresentationMissingRuntimeReturnsTypedNeedsRuntimeOutcome(t *testing.T) {
-	t.Setenv("AWAKEN_PRIMARY_RUNTIME_ROOT", filepath.Join(t.TempDir(), "missing-runtime"))
-	t.Setenv("AWAKEN_USER_DATA_DIR", t.TempDir())
+func TestPresentationMissingHostDependencyReturnsTypedNeedsRuntimeOutcome(t *testing.T) {
+	t.Setenv("PATH", "")
+	t.Setenv("AWAKEN_PYTHON", "")
+	t.Setenv("AWAKEN_SOFFICE", "")
+	t.Setenv("AWAKEN_POPPLER_BIN", "")
 	invalidateRuntimeProbeCache()
 	root := t.TempDir()
 	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
@@ -592,8 +590,8 @@ func TestPresentationMissingRuntimeReturnsTypedNeedsRuntimeOutcome(t *testing.T)
 		},
 	}
 	decision := create.CheckPermission(ctx, `{"output_path":"deck.pptx"}`, tool.NewPermissionContext(root, []string{root}))
-	if decision.Behavior != tool.PermissionNeedsRuntime {
-		t.Fatalf("expected permission gate to declare needs_runtime, got %+v", decision)
+	if decision.Behavior != tool.PermissionAllow {
+		t.Fatalf("missing host dependency must not become a permission gate, got %+v", decision)
 	}
 	outcome, err := create.ExecuteOutcome(ctx, `{"output_path":"deck.pptx"}`, nil)
 	if err != nil {

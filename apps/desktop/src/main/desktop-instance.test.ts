@@ -1,30 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
-  desktopCredentialApplicationName,
-  desktopInstanceApplicationId,
   desktopInstanceIdentity,
-  desktopUserDataPathSegments,
 } from "./desktop-instance.js";
 
 describe("desktop instance identity", () => {
-  it("freezes the application name used by macOS Safe Storage", () => {
-    expect(desktopCredentialApplicationName).toBe("Awaken");
-  });
-
-  it("uses one stable application identity for development and packaged launches", () => {
+  it("isolates development and packaged identity, credentials, and userData", () => {
     expect(desktopInstanceIdentity(true)).toEqual({
       schemaVersion: 1,
-      applicationId: desktopInstanceApplicationId,
+      applicationId: "com.awaken.desktop.dev",
+      applicationName: "Awaken Dev",
+      userDataPathSegments: ["@awaken-dev", "desktop"],
       launchMode: "development",
     });
     expect(desktopInstanceIdentity(false)).toEqual({
       schemaVersion: 1,
-      applicationId: desktopInstanceApplicationId,
+      applicationId: "com.awaken.desktop",
+      applicationName: "Awaken",
+      userDataPathSegments: ["@awaken", "desktop"],
       launchMode: "packaged",
     });
-  });
-
-  it("freezes the cross-platform userData namespace used by encrypted storage", () => {
-    expect(desktopUserDataPathSegments).toEqual(["@awaken", "desktop"]);
   });
 });

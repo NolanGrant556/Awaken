@@ -166,7 +166,7 @@ func (rt *ToolRuntime) emitRuntimeMissing(result ToolExecutionResult, decision T
 		ToolDecisionAction: string(decision.Action),
 		ToolDecisionSource: string(decision.Source),
 		ToolDecisionReason: strings.TrimSpace(decision.Reason),
-		RuntimeName:        "primary-runtime",
+		RuntimeName:        "host-environment",
 	})
 }
 
@@ -177,7 +177,7 @@ func (rt *ToolRuntime) emitRuntimePrepareStarted(toolCallID, toolName, message s
 		ToolCallID:  toolCallID,
 		ToolName:    toolName,
 		Content:     message,
-		RuntimeName: "primary-runtime",
+		RuntimeName: "host-environment",
 	})
 }
 
@@ -189,7 +189,7 @@ func (rt *ToolRuntime) emitRuntimePrepareProgress(toolCallID, toolName, message,
 		ToolName:    toolName,
 		Content:     message,
 		Progress:    progress,
-		RuntimeName: "primary-runtime",
+		RuntimeName: "host-environment",
 	})
 }
 
@@ -200,7 +200,7 @@ func (rt *ToolRuntime) emitRuntimeReady(toolCallID, toolName, version, message s
 		ToolCallID:     toolCallID,
 		ToolName:       toolName,
 		Content:        message,
-		RuntimeName:    "primary-runtime",
+		RuntimeName:    "host-environment",
 		RuntimeVersion: version,
 	})
 }
@@ -213,7 +213,7 @@ func (rt *ToolRuntime) emitRuntimeRepairFailed(toolCallID, toolName, message str
 		ToolName:    toolName,
 		Content:     message,
 		Error:       message,
-		RuntimeName: "primary-runtime",
+		RuntimeName: "host-environment",
 	})
 }
 

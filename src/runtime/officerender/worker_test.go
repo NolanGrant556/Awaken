@@ -415,7 +415,10 @@ func TestLeaderCancellationDoesNotCancelActiveFollower(t *testing.T) {
 		_, err := worker.Render(leaderContext, job)
 		leaderDone <- err
 	}()
-	waitForPath(t, countFile, 2*time.Second)
+	// Whole-repository test runs compile and execute many packages in parallel;
+	// allow the fake soffice process to be scheduled without weakening any
+	// production render deadline or the assertions below.
+	waitForPath(t, countFile, 10*time.Second)
 	followerDone := make(chan error, 1)
 	go func() {
 		_, err := worker.Render(context.Background(), job)

@@ -1,6 +1,6 @@
 import "./AwakenProjectTree.css";
 import { useState, type CSSProperties } from "react";
-import { MoreHorizontal } from "lucide-react";
+import { Folder, FolderOpen, MoreHorizontal } from "lucide-react";
 import type { ProjectItem } from "../../types";
 import { AwakenDropdown } from "../AwakenDropdown";
 import { AwakenIcon } from "../AwakenIcon";
@@ -166,15 +166,11 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
         >
           <span className="aw-project-row-icon">
             {isProject ? (
-              <AwakenIcon size={16}>
-                <g className="aw-project-folder-icon" data-expanded={isExpanded ? "true" : "false"}>
-                  <path d="M3 8.5h7l2 2h9v7.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-                  <path
-                    className="aw-project-folder-icon__lid"
-                    d="M3 8.5V6a2 2 0 0 1 2-2h4l2 2h4"
-                  />
-                </g>
-              </AwakenIcon>
+              isExpanded ? (
+                <FolderOpen size={18} strokeWidth={1.5} aria-hidden="true" />
+              ) : (
+                <Folder size={18} strokeWidth={1.5} aria-hidden="true" />
+              )
             ) : null}
           </span>
           <span className="aw-project-row-label-wrap">

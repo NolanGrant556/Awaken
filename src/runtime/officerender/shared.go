@@ -2,52 +2,28 @@ package officerender
 
 import (
 	"context"
-	"fmt"
-	"path/filepath"
 	"sync"
 )
 
-var sharedManagedWorkers = struct {
+var sharedHostWorker = struct {
 	sync.Mutex
-	byRoot map[string]*OfficeRenderWorker
-}{byRoot: make(map[string]*OfficeRenderWorker)}
+	worker *OfficeRenderWorker
+}{}
 
-// SharedManagedWorker returns the process-wide worker for the currently
-// configured primary-runtime root. Artifact producers in different packages
-// therefore share the same semaphore, singleflight map, and attestation cache.
-func SharedManagedWorker() (*OfficeRenderWorker, error) {
-	root, err := DefaultManagedRuntimeRoot()
-	if err != nil {
-		return nil, err
+// SharedHostWorker returns one process-wide worker. The resolver runs before
+// every conversion, so a user or Agent can install LibreOffice and retry in the
+// same Awaken process without publishing an Awaken-owned runtime revision.
+func SharedHostWorker() *OfficeRenderWorker {
+	sharedHostWorker.Lock()
+	defer sharedHostWorker.Unlock()
+	if sharedHostWorker.worker == nil {
+		sharedHostWorker.worker = NewHostRuntimeResolver().NewWorker(Config{})
 	}
-	root, err = filepath.Abs(root)
-	if err != nil {
-		return nil, err
-	}
-	root = filepath.Clean(root)
-	sharedManagedWorkers.Lock()
-	defer sharedManagedWorkers.Unlock()
-	if worker := sharedManagedWorkers.byRoot[root]; worker != nil {
-		return worker, nil
-	}
-	resolver, err := NewManagedRuntimeResolver(root)
-	if err != nil {
-		return nil, err
-	}
-	worker := resolver.NewWorker(Config{})
-	sharedManagedWorkers.byRoot[root] = worker
-	return worker, nil
+	return sharedHostWorker.worker
 }
 
-// RenderManaged converts through the process-wide managed LibreOffice worker.
-// The active executable is resolved internally; callers provide only artifact
-// paths and the target format.
-func RenderManaged(ctx context.Context, inputPath, outputPath, format string) (Result, error) {
-	worker, err := SharedManagedWorker()
-	if err != nil {
-		return Result{}, fmt.Errorf("resolve shared managed office worker: %w", err)
-	}
-	return worker.Render(ctx, Job{
+func Render(ctx context.Context, inputPath, outputPath, format string) (Result, error) {
+	return SharedHostWorker().Render(ctx, Job{
 		InputPath:  inputPath,
 		OutputPath: outputPath,
 		Format:     format,

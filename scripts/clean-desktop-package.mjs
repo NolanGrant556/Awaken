@@ -1,10 +1,8 @@
 #!/usr/bin/env node
 
 import {
-  mkdirSync,
   readFileSync,
   rmSync,
-  writeFileSync,
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,7 +13,6 @@ export const desktopPackageOutputPaths = [
   "apps/desktop/dist",
   "apps/desktop/dist-electron",
   "apps/desktop/resources/bin",
-  "apps/desktop/resources/runtime-archive",
 ];
 
 function packageName(path) {
@@ -44,17 +41,6 @@ export function cleanDesktopPackageOutputs(root = scriptRoot) {
     rmSync(target, { recursive: true, force: true });
     removed.push(relativePath);
   }
-
-  const archiveDir = join(
-    resolvedRoot,
-    "apps",
-    "desktop",
-    "resources",
-    "runtime-archive",
-  );
-  mkdirSync(archiveDir, { recursive: true });
-  writeFileSync(join(archiveDir, ".gitkeep"), "", "utf8");
-
   return removed;
 }
 

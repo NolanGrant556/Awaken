@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process";
 import { basename } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 
 export function parsePsRows(output) {
   return String(output || "")
@@ -90,59 +89,5 @@ export function listPackagedAwakenProcesses(options = {}) {
   }
   return parsePsRows(result.stdout).filter((row) =>
     isPackagedAwakenCommand(row.command, platform),
-  );
-}
-
-function terminate(pid, signal, killProcess) {
-  try {
-    killProcess(pid, signal);
-    return true;
-  } catch (error) {
-    return error?.code === "ESRCH";
-  }
-}
-
-export async function closeCompetingPackagedAwaken(options = {}) {
-  const platform = options.platform ?? process.platform;
-  const listProcesses =
-    options.listProcesses ?? (() => listPackagedAwakenProcesses({ platform }));
-  const killProcess = options.killProcess ?? process.kill.bind(process);
-  const wait = options.delay ?? delay;
-  const gracefulTimeoutMs = options.gracefulTimeoutMs ?? 5_000;
-  const forceTimeoutMs = options.forceTimeoutMs ?? 2_000;
-  const initial = listProcesses();
-
-  if (initial.length === 0) {
-    return { closed: [], forced: [] };
-  }
-
-  for (const row of initial) {
-    terminate(row.pid, "SIGTERM", killProcess);
-  }
-
-  const gracefulDeadline = Date.now() + gracefulTimeoutMs;
-  while (Date.now() < gracefulDeadline) {
-    if (listProcesses().length === 0) {
-      return { closed: initial, forced: [] };
-    }
-    await wait(100);
-  }
-
-  const forced = listProcesses();
-  for (const row of forced) {
-    terminate(row.pid, "SIGKILL", killProcess);
-  }
-
-  const forceDeadline = Date.now() + forceTimeoutMs;
-  while (Date.now() < forceDeadline) {
-    if (listProcesses().length === 0) {
-      return { closed: initial, forced };
-    }
-    await wait(100);
-  }
-
-  const remaining = listProcesses();
-  throw new Error(
-    `无法关闭其他 Awaken 实例：${remaining.map((row) => row.pid).join(", ")}`,
   );
 }

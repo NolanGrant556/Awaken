@@ -313,7 +313,7 @@ func readArtifactFailure(err error, ext, requestedPath, resolvedPath string) too
 	if ext == ".pdf" || ext == ".xls" {
 		code = "read_artifact_runtime_failed"
 		category = tool.ErrorCategoryRuntime
-		recovery = []string{"verify_primary_runtime_dependencies", "verify_artifact_integrity", "use_specialized_artifact_tool"}
+		recovery = []string{"install_missing_dependency", "verify_artifact_integrity", "retry_or_use_specialized_artifact_tool"}
 	}
 	outcome := tool.FailedOutcome(err.Error(), code, category, false)
 	outcome.RecoveryOptions = recovery
@@ -395,7 +395,7 @@ func readXLSArtifact(ctx context.Context, permCtx tool.PermissionContext, params
 		return artifactPreview{}, err
 	}
 	converted := filepath.Join(convertDir, strings.TrimSuffix(filepath.Base(params.Path), filepath.Ext(params.Path))+".xlsx")
-	if _, err := officerender.RenderManaged(ctx, params.Path, converted, "xlsx"); err != nil {
+	if _, err := officerender.Render(ctx, params.Path, converted, "xlsx"); err != nil {
 		return artifactPreview{}, err
 	}
 	return readXLSXArtifact(converted, params.Sheet, normalizeArtifactMaxRows(params.MaxRows), normalizeArtifactMaxSheets(params.MaxSheets), normalizeArtifactMaxChars(params.MaxChars))

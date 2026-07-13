@@ -36,7 +36,7 @@ Shell 的 command 分类、environment snapshot 和 broker receipt 仍保留作�
 
 run-start 环境快照与 Shell transport 共用同一个 host resolver。快照只向模型/日志投影最多 128 个 PATH entry，但另以 `PATHDigest`、`PATHEntryCount`、`PATHTruncated` 和不序列化的 pinned transport PATH 绑定完整真值；真实子进程不会因为诊断预览有界而丢失后续 PATH entry。Shell 使用快照固定的用户 shell，并以 no-profile/no-rc 参数执行当前命令；登录环境已经由 Desktop 注入，Skill 若确实需要额外 startup 文件仍可在命令中显式 source。
 
-Awaken 不为通用 Skill 要求 primary runtime，也不把用户的 Node、Python 或系统程序替换成平台私有运行时。只有明确声明依赖 managed runtime 的 typed provider 才走该准备链。
+Awaken 不为通用 Skill或 typed Work provider 准备完整 runtime，也不把用户的 Node、Python、LibreOffice、Poppler、FFmpeg 或系统程序替换成平台私有副本。typed Work provider 使用同一当前用户环境做组件级 probe；缺失时 Agent可按真实错误使用 Shell 安装并重试。
 
 `EnvMinimal` 仍可由 guardian 或显式受限 run 使用；它不是普通 Desktop Agent 的默认环境。
 

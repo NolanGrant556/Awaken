@@ -31,7 +31,7 @@ var (
 	ErrNoOutput           = errors.New("office render produced no output")
 )
 
-// Runtime identifies one immutable managed-runtime revision.
+// Runtime identifies the concrete host LibreOffice executable used for a job.
 type Runtime struct {
 	Revision    string
 	Root        string
@@ -128,7 +128,7 @@ func (w *OfficeRenderWorker) Render(ctx context.Context, job Job) (Result, error
 	if w.resolveRuntime != nil {
 		resolvedRuntime, err := w.resolveRuntime(ctx)
 		if err != nil {
-			return Result{}, fmt.Errorf("resolve managed office runtime: %w", err)
+			return Result{}, fmt.Errorf("resolve host LibreOffice: %w", err)
 		}
 		job.Runtime = resolvedRuntime
 	}
@@ -442,7 +442,7 @@ func defaultRuntimeAttestation(runtimeSpec Runtime) error {
 	}
 	inside, err := pathInside(soffice, root)
 	if err != nil || !inside {
-		return fmt.Errorf("%w: soffice escapes the managed runtime root", ErrRuntimeAttestation)
+		return fmt.Errorf("%w: soffice escapes its resolved executable directory", ErrRuntimeAttestation)
 	}
 	info, err := os.Stat(soffice)
 	if err != nil || !info.Mode().IsRegular() {

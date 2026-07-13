@@ -85,29 +85,27 @@ import { importBuiltinPets, resolveBuiltinPetsRoot } from "./pets/builtin-pet-im
 import { PetWindowManager } from "./pets/pet-window-manager.js";
 import { PET_IPC_CHANNELS } from "../shared/pets.js";
 import { openRecordedArtifact, revealRecordedArtifact } from "./artifact-open.js";
-import { installBundledPrimaryRuntimeArchive } from "./runtime-archive-installer.js";
 import { executeProjectTrashOperation as executeClaimedProjectTrashOperation } from "./project-trash-worker.js";
 import {
-  desktopCredentialApplicationName,
-  desktopInstanceApplicationId,
   desktopInstanceIdentity,
-  desktopUserDataPathSegments,
 } from "./desktop-instance.js";
+import { cleanupLegacyPrimaryRuntime } from "./legacy-runtime-cleanup.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let runtimeBaseUrl: string | null = null;
 const isDevServer = process.argv.includes("--dev");
-app.setName(desktopCredentialApplicationName);
+const instanceIdentity = desktopInstanceIdentity(isDevServer);
+app.setName(instanceIdentity.applicationName);
 app.setPath(
   "userData",
-  join(app.getPath("appData"), ...desktopUserDataPathSegments),
+  join(app.getPath("appData"), ...instanceIdentity.userDataPathSegments),
 );
 if (process.platform === "win32") {
-  app.setAppUserModelId(desktopInstanceApplicationId);
+  app.setAppUserModelId(instanceIdentity.applicationId);
 }
 
 const ownsSingleInstanceLock = app.requestSingleInstanceLock(
-  desktopInstanceIdentity(isDevServer),
+  instanceIdentity,
 );
 if (!ownsSingleInstanceLock) {
   app.quit();
@@ -1871,21 +1869,15 @@ app.whenReady().then(async () => {
   setMacDockIcon();
   await ensureDesktopDataDirs();
   try {
-    const runtimeArchive = await installBundledPrimaryRuntimeArchive({
-      packaged: app.isPackaged,
-      resourcesPath: process.resourcesPath,
-      userDataDir: app.getPath("userData"),
-      electronExecutable: process.execPath,
-    });
-    if (runtimeArchive.status === "installed") {
-      console.info("primary_runtime_archive_installed", {
-        active: runtimeArchive.active,
-      });
+    const cleanup = await cleanupLegacyPrimaryRuntime(app.getPath("userData"));
+    if (cleanup.status === "removed") {
+      console.info("legacy_primary_runtime_removed", { root: cleanup.root });
+    } else if (cleanup.status === "refused") {
+      console.warn("legacy_primary_runtime_cleanup_refused", cleanup);
     }
   } catch (error) {
-    // Keep the Desktop available for repair and diagnostics, but never fall
-    // back to a user-installed soffice executable.
-    console.error("primary_runtime_archive_install_failed", {
+    // Retired cache cleanup must never block Desktop startup.
+    console.warn("legacy_primary_runtime_cleanup_failed", {
       error: error instanceof Error ? error.message : String(error),
     });
   }

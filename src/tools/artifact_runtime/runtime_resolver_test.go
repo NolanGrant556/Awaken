@@ -3,65 +3,88 @@ package artifactruntime
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
-	"time"
 )
 
-func TestResolveAwakenUserDataDirEnvFirst(t *testing.T) {
+func writeHostTool(t *testing.T, dir, name string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(name), ".exe") {
+		name += ".exe"
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func setHostOverrides(t *testing.T, python, soffice, popplerBin, node, ffmpeg string) {
+	t.Helper()
+	t.Setenv("AWAKEN_PYTHON", python)
+	t.Setenv("AWAKEN_SOFFICE", soffice)
+	t.Setenv("AWAKEN_POPPLER_BIN", popplerBin)
+	t.Setenv("AWAKEN_NODE", node)
+	t.Setenv("AWAKEN_FFMPEG", ffmpeg)
+}
+
+func TestHostPreflightUsesExistingUserToolsWithoutManagedRuntime(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("AWAKEN_USER_DATA_DIR", dir)
-	got, err := resolveAwakenUserDataDir()
-	if err != nil {
-		t.Fatal(err)
+	python := writeHostTool(t, dir, "python3")
+	soffice := writeHostTool(t, dir, "soffice")
+	node := writeHostTool(t, dir, "node")
+	ffmpeg := writeHostTool(t, dir, "ffmpeg")
+	writeHostTool(t, dir, "pdftoppm")
+	writeHostTool(t, dir, "pdfinfo")
+	setHostOverrides(t, python, soffice, dir, node, ffmpeg)
+
+	report := runtimePreflight()
+	if !report.Ready || len(report.Missing) != 0 {
+		t.Fatalf("expected host environment ready, got %#v", report)
 	}
-	if got != dir {
-		t.Fatalf("got %q want %q", got, dir)
+	if report.RuntimeName != "host-environment" {
+		t.Fatalf("unexpected environment name %q", report.RuntimeName)
 	}
 }
 
-func TestManagedComponentPathDoesNotRequireUnrelatedComponents(t *testing.T) {
-	component := filepath.Join(t.TempDir(), "python")
-	if err := os.WriteFile(component, []byte("python"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	globalRuntimeProbeCache.mu.Lock()
-	globalRuntimeProbeCache.report = preflightReport{
-		RuntimeName: runtimeName,
-		Ready:       false,
-		Missing:     []string{"ffmpeg"},
-		Components: []runtimeComponentStatus{
-			{Name: "python", OK: true, ResolvedPath: component},
-			{Name: "ffmpeg", OK: false},
-		},
-	}
-	globalRuntimeProbeCache.expiresAt = time.Now().Add(time.Minute)
-	globalRuntimeProbeCache.mu.Unlock()
-	t.Cleanup(invalidateRuntimeProbeCache)
+func TestPresentationResolversAcceptExplicitExistingInstallations(t *testing.T) {
+	dir := t.TempDir()
+	python := writeHostTool(t, dir, "python3")
+	soffice := writeHostTool(t, dir, "soffice")
+	writeHostTool(t, dir, "pdftoppm")
+	setHostOverrides(t, python, soffice, dir, "", "")
 
-	got, ok := managedComponentPath("python")
-	if !ok || got != component {
-		t.Fatalf("expected ready python despite unrelated ffmpeg failure, got %q ok=%v", got, ok)
+	if got, err := resolvePresentationPython(); err != nil || got != python {
+		t.Fatalf("python got %q err=%v", got, err)
+	}
+	if got, err := resolveSoffice(); err != nil || got != soffice {
+		t.Fatalf("soffice got %q err=%v", got, err)
+	}
+	if got, err := resolvePopplerTool("pdftoppm"); err != nil || got == "" {
+		t.Fatalf("pdftoppm got %q err=%v", got, err)
 	}
 }
 
-func TestManagedComponentPathRejectsFailedProvenance(t *testing.T) {
-	component := filepath.Join(t.TempDir(), "python")
-	if err := os.WriteFile(component, []byte("python"), 0o755); err != nil {
-		t.Fatal(err)
+func TestHostPreflightDoesNotCacheMissingTools(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", "")
+	setHostOverrides(t, "", "", "", "", "")
+	before := runtimePreflightCached(false)
+	if len(before.Missing) == 0 {
+		t.Fatal("expected missing host dependencies")
 	}
-	globalRuntimeProbeCache.mu.Lock()
-	globalRuntimeProbeCache.report = preflightReport{
-		RuntimeName: runtimeName,
-		Ready:       false,
-		Missing:     []string{"provenance"},
-		Components:  []runtimeComponentStatus{{Name: "python", OK: true, ResolvedPath: component}},
-	}
-	globalRuntimeProbeCache.expiresAt = time.Now().Add(time.Minute)
-	globalRuntimeProbeCache.mu.Unlock()
-	t.Cleanup(invalidateRuntimeProbeCache)
-	if got, ok := managedComponentPath("python"); ok || got != "" {
-		t.Fatalf("expected provenance failure to block managed component, got %q ok=%v", got, ok)
+
+	python := writeHostTool(t, dir, "python3")
+	soffice := writeHostTool(t, dir, "soffice")
+	node := writeHostTool(t, dir, "node")
+	ffmpeg := writeHostTool(t, dir, "ffmpeg")
+	writeHostTool(t, dir, "pdftoppm")
+	writeHostTool(t, dir, "pdfinfo")
+	setHostOverrides(t, python, soffice, dir, node, ffmpeg)
+	after := runtimePreflightCached(false)
+	if !after.Ready {
+		t.Fatalf("expected install-and-retry refresh, got %#v", after)
 	}
 }
 
@@ -78,153 +101,5 @@ func TestPresentationRuntimeRequirementsIgnoreUnrelatedComponentFailure(t *testi
 	}
 	if missing := missingRuntimeRequirements(report, presentationAuthoringRuntimeRequirements); len(missing) != 0 {
 		t.Fatalf("presentation authoring must not require unrelated ffmpeg: %v", missing)
-	}
-	if missing := missingRuntimeRequirements(report, []string{"python", "node"}); len(missing) != 1 || missing[0] != "node" {
-		t.Fatalf("expected only node missing, got %v", missing)
-	}
-}
-
-func TestResolvePrimaryRuntimeRootOverride(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("AWAKEN_PRIMARY_RUNTIME_ROOT", dir)
-	got, err := resolvePrimaryRuntimeRoot()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != dir {
-		t.Fatalf("got %q want %q", got, dir)
-	}
-}
-
-func TestRuntimePreflightRejectsMissingCurrent(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("AWAKEN_PRIMARY_RUNTIME_ROOT", root)
-	t.Setenv("AWAKEN_PYTHON", "")
-	t.Setenv("AWAKEN_SOFFICE", "")
-	t.Setenv("AWAKEN_POPPLER_BIN", "")
-	invalidateRuntimeProbeCache()
-	report := runtimePreflight()
-	if report.Ready {
-		t.Fatal("expected not ready without current.json")
-	}
-	if len(report.Missing) == 0 || report.Missing[0] != "current" {
-		t.Fatalf("expected missing current, got %#v", report.Missing)
-	}
-}
-
-func TestPresentationResolversIgnorePrepareOnlySourceEnvironment(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("AWAKEN_PRIMARY_RUNTIME_ROOT", root)
-	external := t.TempDir()
-	python := filepath.Join(external, "python")
-	soffice := filepath.Join(external, "soffice")
-	poppler := filepath.Join(external, "poppler")
-	if err := os.MkdirAll(poppler, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range []string{python, soffice, filepath.Join(poppler, "pdftoppm")} {
-		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	t.Setenv("AWAKEN_PYTHON", python)
-	t.Setenv("AWAKEN_SOFFICE", soffice)
-	t.Setenv("AWAKEN_POPPLER_BIN", poppler)
-	invalidateRuntimeProbeCache()
-	t.Cleanup(invalidateRuntimeProbeCache)
-
-	if got, err := resolvePresentationPython(); err == nil || got != "" {
-		t.Fatalf("prepare-only AWAKEN_PYTHON must not bypass managed runtime, got %q err=%v", got, err)
-	}
-	if got, err := resolveSoffice(); err == nil || got != "" {
-		t.Fatalf("prepare-only AWAKEN_SOFFICE must not bypass managed runtime, got %q err=%v", got, err)
-	}
-	if got, err := resolvePopplerTool("pdftoppm"); err == nil || got != "" {
-		t.Fatalf("prepare-only AWAKEN_POPPLER_BIN must not bypass managed runtime, got %q err=%v", got, err)
-	}
-}
-
-func TestRuntimePreflightAgainstPreparedIntegrationRoot(t *testing.T) {
-	root := strings.TrimSpace(os.Getenv("AWAKEN_TEST_PRIMARY_RUNTIME_ROOT"))
-	if root == "" {
-		t.Skip("set AWAKEN_TEST_PRIMARY_RUNTIME_ROOT to a prepared isolated runtime")
-	}
-	t.Setenv("AWAKEN_PRIMARY_RUNTIME_ROOT", root)
-	t.Setenv("AWAKEN_PYTHON", "")
-	t.Setenv("AWAKEN_SOFFICE", "")
-	t.Setenv("AWAKEN_POPPLER_BIN", "")
-	invalidateRuntimeProbeCache()
-	report := runtimePreflight()
-	if !report.Ready || !report.Provenance.OK {
-		t.Fatalf("prepared runtime must be ready with clean provenance: %#v", report)
-	}
-}
-
-func TestResolveManagedPathRejectsEscapingWrapper(t *testing.T) {
-	root := t.TempDir()
-	outside := t.TempDir()
-	outsideBin := filepath.Join(outside, "tool")
-	if err := os.WriteFile(outsideBin, []byte("#!/bin/bash\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	wrapper := filepath.Join(root, "tool")
-	body := "#!/usr/bin/env bash\nset -euo pipefail\nexec '" + outsideBin + "' \"$@\"\n"
-	if err := os.WriteFile(wrapper, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := resolveManagedPath(wrapper, root); err == nil {
-		t.Fatal("expected escaping wrapper to fail")
-	}
-}
-
-func TestPathInsideRoot(t *testing.T) {
-	root := t.TempDir()
-	inside := filepath.Join(root, "a", "b")
-	if err := os.MkdirAll(inside, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if !pathInsideRoot(inside, root) {
-		t.Fatal("expected inside")
-	}
-	if pathInsideRoot(t.TempDir(), root) {
-		t.Fatal("expected outside")
-	}
-}
-
-func TestInspectRuntimeProvenanceRejectsPyVenv(t *testing.T) {
-	root := t.TempDir()
-	pythonRoot := filepath.Join(root, "python")
-	if err := os.MkdirAll(pythonRoot, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(pythonRoot, "pyvenv.cfg"), []byte("home = /opt/homebrew/bin\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	report := inspectRuntimeProvenance(root, root)
-	if report.OK {
-		t.Fatal("expected pyvenv.cfg to make provenance fail")
-	}
-	found := false
-	for _, issue := range report.Issues {
-		if issue.Code == "python_venv_not_relocatable" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected python_venv_not_relocatable, got %#v", report.Issues)
-	}
-}
-
-func TestPythonPrefixesManagedRejectsExternalBasePrefix(t *testing.T) {
-	root := t.TempDir()
-	python := filepath.Join(root, "python")
-	body := "#!/bin/sh\necho '{\"executable\":\"/outside/python\",\"prefix\":\"/outside\",\"base_prefix\":\"/outside\"}'\n"
-	if err := os.WriteFile(python, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	ok, detail := pythonPrefixesManaged(python, root)
-	if ok || !strings.Contains(detail, "escapes managed runtime") {
-		t.Fatalf("expected external prefix rejection, ok=%v detail=%q", ok, detail)
 	}
 }

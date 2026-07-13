@@ -105,14 +105,6 @@ func resolveBackendBinary(name string) (string, error) {
 			return path, nil
 		}
 	}
-	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-		for _, candidate := range candidates {
-			bundled := filepath.Join(home, ".cache", "awaken-runtimes", "primary-runtime", "dependencies", "bin", candidate)
-			if _, err := os.Stat(bundled); err == nil {
-				return bundled, nil
-			}
-		}
-	}
 	return "", fmt.Errorf("local compute backend %q is not available", name)
 }
 

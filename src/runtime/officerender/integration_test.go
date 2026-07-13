@@ -35,15 +35,15 @@ func TestManagedLibreOfficeIntegration(t *testing.T) {
 	}
 }
 
-func TestSharedManagedRuntimeIntegration(t *testing.T) {
-	root := strings.TrimSpace(os.Getenv("AWAKEN_TEST_PRIMARY_RUNTIME_ROOT"))
+func TestSharedHostRuntimeIntegration(t *testing.T) {
+	soffice := strings.TrimSpace(os.Getenv("AWAKEN_TEST_OFFICE_RENDER_SOFFICE"))
 	input := strings.TrimSpace(os.Getenv("AWAKEN_TEST_OFFICE_RENDER_INPUT"))
-	if root == "" || input == "" {
-		t.Skip("set AWAKEN_TEST_PRIMARY_RUNTIME_ROOT and AWAKEN_TEST_OFFICE_RENDER_INPUT")
+	if soffice == "" || input == "" {
+		t.Skip("set AWAKEN_TEST_OFFICE_RENDER_SOFFICE and AWAKEN_TEST_OFFICE_RENDER_INPUT")
 	}
-	t.Setenv("AWAKEN_PRIMARY_RUNTIME_ROOT", root)
-	output := filepath.Join(t.TempDir(), "shared-managed-output.pdf")
-	result, err := RenderManaged(context.Background(), input, output, "pdf")
+	t.Setenv("AWAKEN_SOFFICE", soffice)
+	output := filepath.Join(t.TempDir(), "shared-host-output.pdf")
+	result, err := Render(context.Background(), input, output, "pdf")
 	if err != nil {
 		t.Fatal(err)
 	}

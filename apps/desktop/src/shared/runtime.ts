@@ -424,6 +424,11 @@ export type ComposerToken = {
   id: string;
   type: ComposerTokenType | string;
   label: string;
+  /**
+   * Prompt text segment immediately before this token. Durable so canonical
+   * user_message reflow and thread replay keep the token's inline position.
+   */
+  leadingText?: string;
   payload?: Record<string, unknown>;
 };
 

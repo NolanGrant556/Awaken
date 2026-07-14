@@ -29,7 +29,7 @@ type contextWindowEventSink interface {
 type contextGovernor struct {
 	engine                     ContextEngine
 	rebuildRequest             func() (LLMRequest, error)
-	applyCompactResult         func(CompactResult)
+	applyCompactResult         func(stdcontext.Context, CompactResult) error
 	consecutiveCompactFailures int
 	reactiveCompactAttempted   bool
 	compactCircuitOpen         bool
@@ -54,7 +54,7 @@ func (e *defaultContextEngine) Compact(ctx stdcontext.Context, req CompactReques
 	return e.compactFn(ctx, req)
 }
 
-func newContextGovernor(engine ContextEngine, rebuildRequest func() (LLMRequest, error), applyCompactResult func(CompactResult)) *contextGovernor {
+func newContextGovernor(engine ContextEngine, rebuildRequest func() (LLMRequest, error), applyCompactResult func(stdcontext.Context, CompactResult) error) *contextGovernor {
 	if engine == nil {
 		engine = NewContextEngine(ContextWindowConfig{})
 	}
@@ -172,10 +172,20 @@ func (g *contextGovernor) compactForRequest(ctx stdcontext.Context, llmReq LLMRe
 		}
 		return llmReq, err
 	}
-	g.consecutiveCompactFailures = 0
+	// Journal-first: the compacted conversation must be durable before it
+	// replaces the in-memory truth. A persistence failure is a compact
+	// failure and keeps the pre-compact messages authoritative.
 	if g.applyCompactResult != nil {
-		g.applyCompactResult(result)
+		if applyErr := g.applyCompactResult(ctx, result); applyErr != nil {
+			g.recordCompactFailure()
+			failedState := g.withRunState(llmReq.ContextWindowState)
+			if events != nil {
+				events.emitCompactFailed(failedState, mode, applyErr.Error(), applyErr.Error())
+			}
+			return llmReq, applyErr
+		}
 	}
+	g.consecutiveCompactFailures = 0
 	if events != nil {
 		events.emitCompactFinished(state, result, compactSummaryModel(*llmReq.EnvelopeDebug))
 	}

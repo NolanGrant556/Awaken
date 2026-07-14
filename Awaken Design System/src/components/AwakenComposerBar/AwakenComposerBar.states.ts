@@ -69,4 +69,22 @@ export const AwakenComposerBarStates: AwakenComposerBarState[] = [
       isReady: true,
     } as unknown as Partial<ComponentProps<typeof AwakenComposerBar>>,
   },
+  {
+    id: "inline-skill-token",
+    label: "长前缀中的技能",
+    props: {
+      value: "这个技能写",
+      variant: "center",
+      isReady: true,
+      tokens: [
+        {
+          id: "skill:docx:user",
+          type: "skill",
+          label: "docx",
+          leadingText:
+            "不行，报告过于简单了，缺乏对资料完整性，你可以直接把资料的内容写进 word 里面的。另外不需要说明基于什么文档而得来的什么说明。而且排版不好看，你使用 ",
+        },
+      ],
+    } as unknown as Partial<ComponentProps<typeof AwakenComposerBar>>,
+  },
 ];

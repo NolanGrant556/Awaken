@@ -1,15 +1,20 @@
 import "./AwakenComposerBar.css";
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
   ReactNode,
 } from "react";
-import { Check, ChevronDown, FileText, Package, X } from "lucide-react";
+import { Check, ChevronDown, FileText, X } from "lucide-react";
 import { AwakenComposerInput } from "../AwakenComposerInput";
 import { AwakenContextButton } from "../AwakenContextButton";
 import { AwakenSendButton } from "../AwakenSendButton";
+import {
+  AwakenComposerInlineInput,
+  type ComposerInlineInputElement,
+  type ComposerInlineStructuredValue,
+} from "./AwakenComposerInlineInput";
 
 export type ComposerBarMetaMenuItem = {
   id: string;
@@ -58,6 +63,8 @@ export type ComposerBarToken = {
   leadingText?: string;
   placement?: "before" | "after";
 };
+
+export type ComposerBarStructuredInputValue = ComposerInlineStructuredValue;
 
 export type ComposerBarSlashAction = {
   id: string;
@@ -160,7 +167,10 @@ export type AwakenComposerBarProps = {
   value: string;
   onChange: (value: string) => void;
   onSubmit?: () => void;
-  onInputKeyDown?: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
+  onInputKeyDown?: (
+    event: ReactKeyboardEvent<HTMLTextAreaElement | ComposerInlineInputElement>,
+  ) => void;
+  onStructuredInputChange?: (value: ComposerBarStructuredInputValue) => void;
   onAddContext?: () => void;
   placeholder?: string;
   disabled?: boolean;
@@ -184,6 +194,7 @@ export function AwakenComposerBar({
   onChange,
   onSubmit,
   onInputKeyDown,
+  onStructuredInputChange,
   onAddContext,
   placeholder,
   disabled,
@@ -198,6 +209,7 @@ export function AwakenComposerBar({
   tokens = [],
   slashPalette,
   onRemoveAttachment,
+  onRemoveToken,
   onPasteImages,
 }: AwakenComposerBarProps) {
   const canSubmit = submitMode === "stop" || (!disabled && !submitDisabled);
@@ -494,29 +506,6 @@ export function AwakenComposerBar({
     );
   }
 
-  function renderToken(token: ComposerBarToken) {
-    const title = token.title ?? token.label;
-    return (
-      <Fragment key={token.id}>
-        {token.leadingText ? (
-          <span className="composer-bar-inline-text">{token.leadingText}</span>
-        ) : null}
-        <span
-          className={`composer-bar-token composer-bar-token-${token.type}`}
-          title={title}
-        >
-          <Package
-            className="composer-bar-token-icon"
-            size={14}
-            strokeWidth={1.9}
-            aria-hidden="true"
-          />
-          <span className="composer-bar-token-label">{token.label}</span>
-        </span>
-      </Fragment>
-    );
-  }
-
   function showSlashPreview(
     action: ComposerBarSlashAction,
     event: ReactMouseEvent<HTMLButtonElement>,
@@ -665,25 +654,35 @@ export function AwakenComposerBar({
           >
             {renderSlashPalette()}
             {tokens.length > 0 ? (
-              <div
-                className="composer-bar-token-strip"
-                aria-label="已选择的输入项"
-              >
-                {tokens.map((token) => renderToken(token))}
-              </div>
-            ) : null}
-            <AwakenComposerInput
-              value={value}
-              onChange={onChange}
-              onSubmit={handleSubmit}
-              onKeyDown={onInputKeyDown}
-              placeholder={placeholder}
-              disabled={disabled}
-              focusRequest={focusRequest}
-              minRows={variant === "dock" ? 1 : 3}
-              maxRows={variant === "dock" ? 8 : 6}
-              onPasteImages={onPasteImages}
-            />
+              <AwakenComposerInlineInput
+                value={value}
+                tokens={tokens}
+                onChange={onChange}
+                onStructuredChange={onStructuredInputChange}
+                onSubmit={handleSubmit}
+                onKeyDown={onInputKeyDown}
+                onRemoveToken={slashPalette?.open ? undefined : onRemoveToken}
+                placeholder={placeholder}
+                disabled={disabled}
+                focusRequest={focusRequest}
+                minRows={variant === "dock" ? 1 : 3}
+                maxRows={variant === "dock" ? 8 : 6}
+                onPasteImages={onPasteImages}
+              />
+            ) : (
+              <AwakenComposerInput
+                value={value}
+                onChange={onChange}
+                onSubmit={handleSubmit}
+                onKeyDown={onInputKeyDown}
+                placeholder={placeholder}
+                disabled={disabled}
+                focusRequest={focusRequest}
+                minRows={variant === "dock" ? 1 : 3}
+                maxRows={variant === "dock" ? 8 : 6}
+                onPasteImages={onPasteImages}
+              />
+            )}
           </div>
           {attachmentWarning ? (
             <div className="composer-bar-attachment-warning" role="status">

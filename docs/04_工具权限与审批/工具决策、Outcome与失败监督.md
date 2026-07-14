@@ -73,7 +73,9 @@ Agent 根据稳定 error code、retryability、transport 和 side-effect state �
 
 被声明为 remote `file.delete` 的 MCP tool 在 transport 前要求 per-tool recoverable-delete contract；调用后仍必须返回声明的 recovery evidence。未声明 metadata 的任意非 read-only 别名已由通用 MCP metadata 门禁在 transport 前阻断；有效 metadata 的 provider 若调用后撒谎，仍只能检测 contract violation，Awaken 无法撤销已发生的远程副作用。
 
-当前硬预算是：默认 128 turns/512 个 supervisor-admitted tool calls；同一 retryable call 最多允许 2 次失败尝试，non-retryable 最多 1 次；同 tool + resource revision + error class 累计 3 次后阻断下一变体；同 fingerprint 连续 2 次后注入 recovery directive；单 turn 6 次或单 run 12 次失败终止 run。调用方可配置 turn/call 上限，其余阈值当前固定。
+当前硬预算是：默认 128 turns/512 个 supervisor-admitted tool calls；同一 retryable call 最多允许 2 次失败尝试，non-retryable 最多 1 次；同 tool + resource revision + error class 累计 3 次后阻断下一变体；同 fingerprint 连续 2 次后注入 recovery directive。调用方可配置 turn/call 上限，其余阈值当前固定。
+
+单个业务工具的累计失败不再直接终止 run：单 turn 6 次或单 run 12 次失败会升级为强制 `strategy_change_required` directive——要求更换工具、参数或实现路径，或停止该策略并说明；run 只被 run 级预算（max turns / max tool executions）终止。被阻断的完全相同重复调用返回可恢复 tool result（`status=strategy_change_required`、`retryable=true`、`same_call_retryable=false`、`next_actions`），run 继续；改变工具、参数或策略视为新的尝试，不沿用旧 fingerprint 阻断。
 
 signature 由 tool name + canonical arguments hash 组成，fingerprint 用稳定 error code/主诊断并清除 workspace root、timestamp、temp path、随机 ID 等易漂移信息。对 partial/unknown 或外部副作用不得盲目重放；非相关工具的成功也不能清除未完成的 recovery directive。
 

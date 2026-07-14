@@ -12,7 +12,6 @@ import (
 
 	"awaken/src/agentcore"
 	convcontext "awaken/src/context"
-	"awaken/src/desktopdata"
 	"awaken/src/internal/outputlimit"
 )
 
@@ -415,7 +414,7 @@ func transcriptMessageCount(records []TranscriptRecord) int {
 }
 
 func transcriptPath(threadID string) string {
-	return desktopdata.Detect().ThreadTranscriptPath(threadID)
+	return filepath.Join(activeSessionsDir(), sanitizeSessionID(threadID), "journal.jsonl")
 }
 
 func transcriptMessageID(threadID string, index int) string {

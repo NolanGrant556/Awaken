@@ -30,7 +30,6 @@ export interface SupervisorStatusInfo {
 }
 
 export interface SupervisorOptions {
-  defaultWorkspace?: string;
   maxStartAttempts?: number;
 }
 
@@ -379,9 +378,13 @@ export class RuntimeSupervisor {
             ...runtimeEnvironment,
             AWAKEN_CORE_ADDR: `127.0.0.1:${port}`,
             AWAKEN_USER_DATA_DIR: app.getPath("userData"),
-            ...(this.options.defaultWorkspace
-              ? { AWAKEN_DEFAULT_WORKSPACE: this.options.defaultWorkspace }
-              : {}),
+            // Business data root shared by dev and packaged installs. Main
+            // resolves the user home itself; inherited shell values must not
+            // change the product identity.
+            AWAKEN_HOME: join(app.getPath("home"), ".awaken"),
+            // FileStore projects are selected per run. Core must never derive
+            // a project from Electron userData, a previous workspace, or cwd.
+            AWAKEN_DEFAULT_WORKSPACE: "",
           },
           stdio: ["ignore", "pipe", "pipe"],
         });

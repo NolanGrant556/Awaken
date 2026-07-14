@@ -10,8 +10,28 @@ import (
 	awruntime "awaken/src/runtime"
 )
 
+func TestProjectLifecycleRESTEmptyCollectionsEncodeAsArrays(t *testing.T) {
+	t.Setenv("AWAKEN_HOME", t.TempDir())
+	service := awruntime.NewRunService(nil, nil)
+	router := NewRouter(service, nil)
+
+	for _, route := range []string{"/v1/projects", "/v1/project-operations"} {
+		response := projectJSONRequest(t, router, http.MethodGet, route, nil, "")
+		if response.Code != http.StatusOK {
+			t.Fatalf("GET %s: expected 200, got %d: %s", route, response.Code, response.Body.String())
+		}
+		var values []json.RawMessage
+		if err := json.Unmarshal(response.Body.Bytes(), &values); err != nil {
+			t.Fatalf("GET %s must return a JSON array, got %q: %v", route, response.Body.String(), err)
+		}
+		if values == nil || len(values) != 0 {
+			t.Fatalf("GET %s: expected [], got %s", route, response.Body.String())
+		}
+	}
+}
+
 func TestProjectLifecycleRESTCreateDetachAndIdempotency(t *testing.T) {
-	t.Setenv("AWAKEN_USER_DATA_DIR", t.TempDir())
+	t.Setenv("AWAKEN_HOME", t.TempDir())
 	service := awruntime.NewRunService(nil, nil)
 	router := NewRouter(service, nil)
 	workspaceRoot := t.TempDir()
@@ -57,7 +77,7 @@ func TestProjectLifecycleRESTCreateDetachAndIdempotency(t *testing.T) {
 }
 
 func TestProjectLifecycleRESTTrashPrepareClaimFail(t *testing.T) {
-	t.Setenv("AWAKEN_USER_DATA_DIR", t.TempDir())
+	t.Setenv("AWAKEN_HOME", t.TempDir())
 	service := awruntime.NewRunService(nil, nil)
 	router := NewRouter(service, nil)
 	workspaceRoot := t.TempDir()

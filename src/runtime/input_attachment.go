@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	convcontext "awaken/src/context"
+	"awaken/src/filestore"
 )
 
 const (
@@ -210,10 +211,15 @@ func persistRunInputAttachments(threadID string, attachments []RunInputAttachmen
 		if shouldPersist {
 			storageKey := filepath.ToSlash(filepath.Join(
 				safeTranscriptFileName(threadID),
+				"attachments",
 				fmt.Sprintf("%s.%s", safeTranscriptFileName(normalized.ID), imageFileExtension(normalized.MimeType)),
 			))
 			targetPath := filepath.Join(runInputAttachmentRootDir(), filepath.FromSlash(storageKey))
-			if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+			attachmentDir := filepath.Dir(targetPath)
+			if err := filestore.EnsureDir(attachmentDir); err != nil {
+				return nil, err
+			}
+			if err := os.Chmod(attachmentDir, filestore.DirPerm); err != nil {
 				return nil, err
 			}
 			if err := os.WriteFile(targetPath, data, 0o600); err != nil {
@@ -261,7 +267,9 @@ func deleteThreadInputAttachments(threadID string) error {
 	if strings.TrimSpace(threadID) == "" {
 		return nil
 	}
-	return os.RemoveAll(filepath.Join(runInputAttachmentRootDir(), safeTranscriptFileName(threadID)))
+	// Only the attachments subdirectory is owned here; the session directory
+	// itself (metadata + journal) is removed by its store.
+	return os.RemoveAll(filepath.Join(runInputAttachmentRootDir(), safeTranscriptFileName(threadID), "attachments"))
 }
 
 func cleanupPersistedRunInputAttachments(attachments []RunInputAttachment) error {
@@ -354,14 +362,12 @@ func imageFileExtension(mimeType string) string {
 	}
 }
 
+// runInputAttachmentRootDir resolves the sessions directory of the active
+// FileStore generation: runtime-owned attachment blobs live inside their
+// session directory (sessions/<thread-id>/attachments/) so deleting a session
+// removes its blobs with it. StorageKey stays relative to this root.
 func runInputAttachmentRootDir() string {
-	if userDataDir := strings.TrimSpace(os.Getenv(runtimeUserDataDirEnv)); userDataDir != "" {
-		return filepath.Join(userDataDir, "runtime-input-attachments")
-	}
-	if configDir, err := os.UserConfigDir(); err == nil && strings.TrimSpace(configDir) != "" {
-		return filepath.Join(configDir, "awaken", "runtime-input-attachments")
-	}
-	return filepath.Join(os.TempDir(), "awaken-runtime-input-attachments")
+	return activeSessionsDir()
 }
 
 func threadLabelForInput(input string, attachments []RunInputAttachment) string {

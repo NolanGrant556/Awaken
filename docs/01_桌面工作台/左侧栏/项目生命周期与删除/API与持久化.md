@@ -1,114 +1,114 @@
-# 项目生命周期与删除：API与持久化
+# 项目生命周期与删除：API 与持久化
 
 ## 1. 权威范围
 
-本文唯一拥有项目生命周期各 API 动作的业务语义、领域错误、SQLite 表、事务/outbox 和 Electron Trash worker 协作。当前 route 注册清单及条件由 [09 协议域](../../../09_AGUI与A2UI协议/HTTP与SSE接口契约.md) 唯一拥有；用户语义见 [产品与状态机](产品与状态机.md)。
+本文唯一拥有项目生命周期 API 动作、领域错误、FileStore mutation/outbox 和 Electron Trash worker 协作。当前 route 注册清单及条件由 [09 协议域](../../../09_AGUI与A2UI协议/HTTP与SSE接口契约.md) 唯一拥有；用户语义见 [产品与状态机](产品与状态机.md)，文件布局与恢复原语见 [03 全局数据与会话存储](../../../03_运行时与本地服务/全局数据与会话存储.md)。
 
 ## 2. 代码 owner
 
-- `src/runtime/project_store.go`：schema、迁移、scan和稳定project/operation数据。
-- `src/runtime/project_service.go`：状态机、事务、idempotency、lease、staging、恢复和cleanup。
-- `src/server/project_handlers.go`、`router.go`：HTTP和领域错误映射。
-- `apps/desktop/src/main/project-trash-worker.ts`：系统trash调用与attempt握手。
-- `apps/desktop/src/renderer/projectWorkspace.ts`：operation/project reconciliation纯判断。
-- `apps/desktop/src/renderer/App.tsx`：dialog、tracker、refresh和用户notice。
+- `src/runtime/project_store.go`：稳定 project/operation 类型、枚举与纯 helper。
+- `src/runtime/repository.go`：项目生命周期 repository contract。
+- `src/runtime/file_desktop_store.go`：lifecycle journal、snapshot、thread metadata 和 cleanup job 的唯一产品实现。
+- `src/runtime/project_service.go`：状态机、idempotency、lease、staging、恢复和 run 协调。
+- `src/server/project_handlers.go`、`router.go`：HTTP 与领域错误映射。
+- `apps/desktop/src/main/project-trash-worker.ts`：系统 trash 调用与 attempt 握手。
+- `apps/desktop/src/renderer/projectWorkspace.ts`：operation/project reconciliation 纯判断。
 
-## 3. 公共 API 动作语义
+## 3. 公共 API 动作
 
-具体 method、path 与注册条件只查 09 域 route 清单。项目域当前提供以下动作：列出项目（默认排除 removed）、upsert workspace project、detach 且保留历史和目录、逻辑删除项目历史、prepare trash-and-purge、列出未终态 trash operation、查询 durable operation，以及只在合法等待阶段取消 operation。
+具体 method、path 与注册条件只查 09 域。项目域提供：列出项目（默认排除 removed）、upsert workspace project、detach 且保留历史和目录、逻辑删除项目历史、prepare trash-and-purge、列出未终态 trash operation、查询 operation，以及只在合法等待阶段取消 operation。
 
-修改类公共请求必须带 `Idempotency-Key`。同key/同project/action返回同operation；同key被其他operation占用返回冲突。
+修改类公共请求必须带 `Idempotency-Key`。同 key/同 project/action 返回同 operation；同 key 被其他 operation 占用返回冲突。“删除会话”内部使用稳定 `thread-delete:<thread-id>`，重复请求不重复创建 job。
 
 ## 4. Worker 内部动作
 
 | 动作 | 责任 |
 |---|---|
-| `claim-trash` | worker领取lease并生成attempt id；确认run已停 |
-| `attest-trash` | 在staging前复验原路径身份 |
-| `stage-trash` | 原子rename到同卷operation目录并持久化路径 |
-| `begin-trash` | 系统调用前durable记录invoked boundary |
-| `complete-trash` | 确认staging消失后提交tombstone/history/cleanup |
-| `fail-trash` | 恢复staging和project state，保存稳定错误 |
+| `claim-trash` | worker 领取 lease、生成 attempt id，并确认 run 已停 |
+| `attest-trash` | staging 前复验原路径身份 |
+| `stage-trash` | 原子 rename 到同卷 operation 目录并持久化路径 |
+| `begin-trash` | 系统调用前耐久记录 invoked boundary |
+| `complete-trash` | 确认 staging 消失后提交 tombstone/history/cleanup |
+| `fail-trash` | 恢复 staging 和 project state，保存稳定错误 |
 
-除 claim 外的后续请求必须带当前 `attempt_id`。lease 恢复也必须重新 claim；旧 attempt 调用返回 `PROJECT_TRASH_ATTEMPT_INVALID`。这些动作对应的 route path 只由 09 域清单定义。
+除 claim 外的后续请求必须带当前 `attempt_id`。lease 恢复必须重新 claim；旧 attempt 返回 `PROJECT_TRASH_ATTEMPT_INVALID`。
 
 ## 5. 领域错误
 
 | code | HTTP | 语义 |
 |---|---:|---|
-| `PROJECT_NOT_FOUND` | 404 | project不存在 |
-| `PROJECT_OPERATION_NOT_FOUND` | 404 | operation不存在 |
+| `PROJECT_NOT_FOUND` | 404 | project 不存在 |
+| `PROJECT_OPERATION_NOT_FOUND` | 404 | operation 不存在 |
 | `PROJECT_OPERATION_CONFLICT` | 409 | 状态/阶段不允许 |
-| `PROJECT_RUNS_BUSY` | 409 | active run尚未停止 |
+| `PROJECT_RUNS_BUSY` | 409 | active run 尚未停止 |
 | `PROJECT_PATH_FINGERPRINT_CHANGED` | 409 | 路径身份被替换 |
-| `PROJECT_TRASH_ATTEMPT_INVALID` | 409 | attempt已过期/不匹配 |
-| `IDEMPOTENCY_KEY_CONFLICT` | 409 | key属于其他operation |
-| `IDEMPOTENCY_KEY_REQUIRED` | 400 | 修改请求缺key |
-| `PROJECT_PATH_INVALID` | 400 | workspace path无效 |
+| `PROJECT_TRASH_ATTEMPT_INVALID` | 409 | attempt 已过期/不匹配 |
+| `IDEMPOTENCY_KEY_CONFLICT` | 409 | key 属于其他 operation |
+| `IDEMPOTENCY_KEY_REQUIRED` | 400 | 修改请求缺 key |
+| `PROJECT_PATH_INVALID` | 400 | workspace path 无效 |
 
-未知内部错误返回 `INTERNAL_ERROR`，详细错误只写带operation id的结构化日志；renderer显示稳定notice。
+未知错误返回 `INTERNAL_ERROR`；详细错误只写带 operation id 的结构化日志，Renderer 显示稳定 notice。
 
-## 6. SQLite与事务
+## 6. FileStore transaction
 
-共享 `sql.DB` 开启WAL、foreign keys、busy timeout，关键mutation使用单writer/`BEGIN IMMEDIATE`。
+项目、operation、idempotency index、operation-thread cutoff 和 cleanup jobs 的 authority 是活动 generation 下的 `lifecycle/mutations.jsonl`。每个领域 commit 形成一条包含完整 post-state 的 mutation：
 
-主要表：
+```text
+获取 store.lock
+  -> append + fsync lifecycle mutation
+  -> 更新内存 state
+  -> 幂等物化 thread metadata side files
+  -> 原子替换 lifecycle/state.json
+  -> 释放 lock
+```
 
-- `projects`：workspace identity、state、reason、version；
-- `desktop_state`：迁移/桌面状态；
-- `threads`：durable thread与project关系；
-- `project_operations`：action/status/phase/fingerprint/attempt/staging/invocation；
-- `project_operation_threads`：prepare时的thread cutoff集合；
-- `cleanup_jobs`：thread purge和trash worker outbox。
+`state.json` 是可重建快照，不是第二 authority；启动从 journal seq 重放到最新。禁止先删除 session 目录再提交逻辑 mutation，否则 crash 会造成 UI 历史与物理文件不一致。operation/job ID、时间和 cutoff 必须先生成并写进 mutation，重放不得重新生成。
 
-逻辑状态、operation和outbox必须同事务提交。禁止先删JSONL再写SQLite；否则crash会出现UI历史与物理文件不一致。
+## 7. Cleanup 与业务完成
 
-## 7. Cleanup与业务完成
+`detach` 可同步完成。`delete_history`、`delete_thread` 和 trash finalize 先在 lifecycle mutation 中 soft-delete thread 并创建 cleanup jobs；pending cleanup 大于 0 时 HTTP 可返回 202。
 
-`detach` 可同步完成。`delete_history` 和trash finalize会soft-delete thread并写cleanup jobs；pending cleanup >0时HTTP可返回202。
+业务完成（logical committed）与物理完成（session metadata/journal/附件清理）分离：
 
-业务完成（logical committed）与物理完成（JSONL/附件清理）分离：
-
-- UI以逻辑提交和project durable state为准；
-- cleanup job幂等重试；
-- 已逻辑删除的thread不能因physical失败复活；
-- operation 在 pending cleanup 清零后进入 `phase=completed, status=succeeded`。
+- UI 以逻辑提交和 project durable state 为准；
+- cleanup job 幂等 claim/retry；
+- 只有已 soft-deleted session 才可物理清理；
+- 已逻辑删除的 thread 不能因 physical failure 复活；
+- pending cleanup 清零后 operation 进入 `phase=completed, status=succeeded`。
 
 ## 8. Renderer tracker
 
-pending trash tracker至少保存：operationId、UI projectId、backendProjectId、label和原expanded状态，并写入localStorage。启动/重载后继续查询operation和project：
+pending trash tracker 至少保存 operationId、UI projectId、backendProjectId、label 和原 expanded 状态，并写入 localStorage。启动/重载后继续查询 operation 与 project：
 
 - pending/unknown：继续低频跟踪；
-- committed且project removed：清除tracker，保持移除；
+- committed 且 project removed：清除 tracker，保持移除；
 - `status=failed` 且 `phase=failed|cancelled`、project active：清除 tracker 并恢复项目/expanded；
-- operation请求失败或project refresh失败：不清tracker。
+- operation 请求失败或 project refresh 失败：不清 tracker。
 
-`projectWorkspace.ts` 的reconciliation纯函数是判断authority；App不应散落第二套phase集合。
+`projectWorkspace.ts` 的 reconciliation 纯函数是判断 authority；App 不应散落第二套 phase 集合。
 
-## 9. 迁移与兼容
+## 9. FileStore 唯一项目 authority
 
-一次性导入旧Local Storage project状态、`workspace-registry.json`、`last-workspace.json`和distinct thread workspace：
+Renderer 启动无条件调用项目列表 API，并只把返回的 stable `project_id` 投影到侧栏。空 FileStore 必须返回 JSON `[]`，Electron Main 和 Renderer 不接受 `null` 作为集合，也不回退到旧 UI 状态。
 
-- 显式removed优先；
-- 只有历史thread证据的workspace按detached导入；
-- 回填稳定project id；
-- renderer不再用thread workspace反向创建/激活tombstone project；
-- 重新添加同路径通过upsert显式恢复。
+当前产品不存在旧 Local Storage、workspace registry 或历史 thread workspace 的读取、清理、导入、转换及 upsert 入口。用户重新添加目录时，先通过公共 upsert API取得 FileStore `project_id`，后续生命周期动作只使用该 ID；不得把路径编码的 Renderer ID 当成后端 ID。
 
 ## 10. 安全不变量
 
-1. 系统trash只接收staging路径。
-2. staging必须同卷原子rename。
-3. begin-trash先于shell trash调用durable提交。
-4. complete前必须确认staging不存在。
-5. original path若已被新目录占用，不覆盖、不删。
-6. cutoff之后新建thread不被旧operation误删。
-7. renderer不能直接调用文件删除命令。
+1. 系统 trash 只接收 staging 路径。
+2. staging 必须同卷原子 rename。
+3. begin-trash 先于系统 trash 调用耐久提交。
+4. complete 前必须确认 staging 不存在。
+5. original path 已被新目录占用时不覆盖、不删。
+6. cutoff 后新建 thread 不被旧 operation 误删。
+7. Renderer 不能直接调用文件删除命令。
+8. FileStore lifecycle mutation journal-first；snapshot 损坏只能重建，不能反向覆盖 journal。
 
-## 11. 测试
+## 11. 验证
 
-- `src/runtime/project_service_test.go`：三动作、状态、idempotency、cutoff、lease、fingerprint、crash recovery、cleanup。
-- `src/runtime/project_service_test.go` 中的store-backed场景：schema/migration/FK与operation持久化。
-- `src/server/project_handlers_test.go`：routes、HTTP错误、attempt链。
-- `apps/desktop/src/main/project-trash-worker.test.ts`：claim、path replacement、invocation boundary、attempt透传、vanished staging。
-- `apps/desktop/src/renderer/App.test.ts`、`projectWorkspace` tests：tracker和reconcile。
+- `src/runtime/file_desktop_store_test.go`、`project_service_test.go`：状态、idempotency、cutoff、lease、fingerprint、crash recovery、cleanup、restart replay。
+- `src/server/project_handlers_test.go`：routes、HTTP 错误、attempt 链。
+- `apps/desktop/src/main/project-trash-worker.test.ts`：claim、path replacement、invocation boundary、attempt、vanished staging。
+- `apps/desktop/src/renderer/App.test.ts`、`projectWorkspace` tests：tracker 与 reconcile。
+
+真实 Desktop 必须在专用测试项目执行 detach、delete history、delete thread、trash success/failure/restart recovery；同时检查活动 `~/.awaken` generation 的 lifecycle journal、session 物理清理与原 workspace 路径，不能用 Renderer cache 或 mock state 作为结果证据。

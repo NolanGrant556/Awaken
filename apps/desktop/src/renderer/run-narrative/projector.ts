@@ -261,7 +261,9 @@ export function projectAguiEventToNarrative(
         event.type === "AWAKEN_TOOL_RETRY_BLOCKED" ? "retry-blocked" : "recovery",
         event.type === "AWAKEN_TOOL_RETRY_BLOCKED"
           ? "Tool retry blocked"
-          : "Tool recovery required",
+          : event.message?.includes("strategy_change_required")
+            ? "Strategy change required"
+            : "Tool recovery required",
         [
           event.toolCallName,
           event.errorCode ?? event.code,

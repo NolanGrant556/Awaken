@@ -15,19 +15,19 @@ import (
 )
 
 type persistentOAuthHandler struct {
-	serverName string
-	cfg        AuthFlowConfig
-	store      CredentialStore
+	credentialIdentity string
+	cfg                AuthFlowConfig
+	store              CredentialStore
 
 	mu          sync.Mutex
 	tokenSource oauth2.TokenSource
 }
 
-func newPersistentOAuthHandler(serverName string, cfg AuthFlowConfig, store CredentialStore) *persistentOAuthHandler {
+func newPersistentOAuthHandler(credentialIdentity string, cfg AuthFlowConfig, store CredentialStore) *persistentOAuthHandler {
 	return &persistentOAuthHandler{
-		serverName: serverName,
-		cfg:        cfg,
-		store:      store,
+		credentialIdentity: credentialIdentity,
+		cfg:                cfg,
+		store:              store,
 	}
 }
 
@@ -40,7 +40,7 @@ func (h *persistentOAuthHandler) TokenSource(ctx context.Context) (oauth2.TokenS
 	if h.store == nil {
 		return nil, nil
 	}
-	stored, err := h.store.LoadTokenSource(h.serverName)
+	stored, err := h.store.LoadTokenSource(h.credentialIdentity)
 	if err != nil {
 		if err == ErrCredentialNotFound {
 			return nil, nil
@@ -48,6 +48,12 @@ func (h *persistentOAuthHandler) TokenSource(ctx context.Context) (oauth2.TokenS
 		return nil, err
 	}
 	if stored.NeedsReauth {
+		return nil, nil
+	}
+	if canonicalServerURL(stored.ServerURL) != canonicalServerURL(h.cfg.ServerURL) {
+		if err := h.store.ClearTokenSource(h.credentialIdentity); err != nil {
+			return nil, err
+		}
 		return nil, nil
 	}
 	ts, err := h.wrapStoredTokenSource(ctx, stored)
@@ -82,7 +88,7 @@ func (h *persistentOAuthHandler) Authorize(ctx context.Context, req *http.Reques
 		return err
 	}
 	if h.store != nil {
-		if err := h.store.SaveTokenSource(h.serverName, discovered); err != nil {
+		if err := h.store.SaveTokenSource(h.credentialIdentity, discovered); err != nil {
 			return err
 		}
 	}
@@ -122,7 +128,7 @@ func (h *persistentOAuthHandler) wrapStoredTokenSource(ctx context.Context, stor
 			next := stored
 			next.Token = token
 			next.NeedsReauth = false
-			return h.store.SaveTokenSource(h.serverName, next)
+			return h.store.SaveTokenSource(h.credentialIdentity, next)
 		},
 	}, nil
 }

@@ -167,9 +167,12 @@ func buildMCPManager(workspace string) *mcpclient.Manager {
 	if err != nil {
 		log.Printf("[mcp] user config load failed: %v", err)
 	}
-	projectCfg, err := mcpclient.LoadProjectConfig(workspace)
-	if err != nil {
-		log.Printf("[mcp] project config load failed: %v", err)
+	var projectCfg mcpclient.ConfigFile
+	if workspace != "" {
+		projectCfg, err = mcpclient.LoadProjectConfig(workspace)
+		if err != nil {
+			log.Printf("[mcp] project config load failed: %v", err)
+		}
 	}
 	merged := mcpclient.MergeScoped(
 		mcpclient.ToScoped(userCfg, mcpclient.ScopeUser),
@@ -210,6 +213,12 @@ func buildConnectorRegistry(manager *mcpclient.Manager, _ string) *connectors.Re
 	registry := connectors.NewRegistry(manager, logger)
 	if err := registry.LoadSources(ctx, sources); err != nil {
 		log.Printf("[connectors] load sources failed: %v", err)
+	}
+	userCfg, err := mcpclient.LoadUserConfig()
+	if err != nil {
+		log.Printf("[connectors] user mcp config load failed: %v", err)
+	} else {
+		registry.RestoreBuiltinOwnership(userCfg)
 	}
 
 	log.Printf("[connectors] loaded %d connector definitions", len(registry.List()))

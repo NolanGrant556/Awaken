@@ -12,10 +12,8 @@ import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   App,
-  buildWorkspaceRegistryPersistRequest,
   isUserQuestionSelectionAnswered,
   nextUserQuestionPromptIndex,
-  restoreWorkspaceProjectsFromRegistry,
   resolveWorkspaceRootForRun,
   selectedUserQuestionLabels,
   shouldResetActiveThreadForWorkspaceChange,
@@ -41,14 +39,12 @@ import type { RunNarrativeItem } from "./run-narrative";
 import {
   DEFAULT_WORKSPACE_PROJECT_ID,
   canReconcileTrackedTrashOperation,
-  mergeWorkspaceProjects,
   normalizeWorkspacePath,
   parseTrackedTrashOperations,
   projectIdForThread,
   projectOperationReconciliationState,
   removeWorkspaceProject,
   upsertTrackedTrashOperation,
-  upsertWorkspaceProject,
   workspaceLabelForPath,
 } from "./projectWorkspace";
 import {
@@ -138,8 +134,6 @@ function stubElectronBridge(): void {
       pickDirectory: vi.fn(async () => ({ canceled: true as const })),
       pickWorkspace: vi.fn(async () => ({ canceled: true as const })),
       validateWorkspace: vi.fn(async () => ({ valid: true as const })),
-      readWorkspaceRegistry: vi.fn(async () => ({ registeredWorkspacePaths: [] })),
-      persistWorkspaceRegistry: vi.fn(async () => undefined),
       getSupervisorStatus: vi.fn(async () => ({ status: "running" as const })),
       onSupervisorStatusChange: vi.fn(() => () => {}),
       notifyRendererReady: vi.fn(),
@@ -234,11 +228,11 @@ describe("resolveWorkspaceRootForRun", () => {
       resolveWorkspaceRootForRun({
         workspacePath: "/tmp/old",
         workspaceTargetPath: "/tmp/new",
-        selectedProjectId: "workspace:%2Ftmp%2Fnew",
+        selectedProjectId: "project-new",
         defaultWorkspacePath: "/tmp/default",
         projectsFromWorkspace: [
           {
-            id: "workspace:%2Ftmp%2Fnew",
+            id: "project-new",
             label: "new",
             path: "/tmp/new",
           },
@@ -251,11 +245,11 @@ describe("resolveWorkspaceRootForRun", () => {
     expect(
       resolveWorkspaceRootForRun({
         workspacePath: "/tmp/old",
-        selectedProjectId: "workspace:%2Ftmp%2Fknowledge",
+        selectedProjectId: "project-knowledge",
         defaultWorkspacePath: "/tmp/default",
         projectsFromWorkspace: [
           {
-            id: "workspace:%2Ftmp%2Fknowledge",
+            id: "project-knowledge",
             label: "knowledge",
             path: "/tmp/knowledge",
           },
@@ -285,107 +279,6 @@ describe("resolveWorkspaceRootForRun", () => {
         projectsFromWorkspace: [],
       }),
     ).toBe("");
-  });
-});
-
-describe("buildWorkspaceRegistryPersistRequest", () => {
-  it("omits the default workspace after the default project is removed", () => {
-    expect(
-      buildWorkspaceRegistryPersistRequest({
-        defaultWorkspacePath: "/tmp/default",
-        projectsFromWorkspace: [],
-        threadWorkspacePaths: [],
-        defaultProjectRemoved: true,
-      }),
-    ).toEqual({
-      defaultWorkspacePath: "",
-      registeredWorkspacePaths: [],
-    });
-  });
-
-  it("keeps non-default visible projects and promotes them to default when needed", () => {
-    expect(
-      buildWorkspaceRegistryPersistRequest({
-        defaultWorkspacePath: "/tmp/default",
-        pathForSelectedProject: "/tmp/knowledge",
-        projectsFromWorkspace: [
-          {
-            id: "workspace:%2Ftmp%2Fknowledge",
-            label: "knowledge",
-            path: "/tmp/knowledge",
-          },
-        ],
-        threadWorkspacePaths: [],
-        defaultProjectRemoved: true,
-      }),
-    ).toEqual({
-      defaultWorkspacePath: "/tmp/knowledge",
-      registeredWorkspacePaths: ["/tmp/knowledge"],
-    });
-  });
-
-  it("does not reactivate a removed workspace from retained thread history", () => {
-    expect(
-      buildWorkspaceRegistryPersistRequest({
-        defaultWorkspacePath: "/tmp/default",
-        projectsFromWorkspace: [],
-        threadWorkspacePaths: ["/tmp/default"],
-        defaultProjectRemoved: true,
-      }),
-    ).toEqual({
-      defaultWorkspacePath: "",
-      registeredWorkspacePaths: [],
-    });
-  });
-});
-
-describe("restoreWorkspaceProjectsFromRegistry", () => {
-  it("rehydrates workspace projects from the desktop-global registry", () => {
-    expect(
-      restoreWorkspaceProjectsFromRegistry({
-        currentProjects: [],
-        snapshot: {
-          lastWorkspacePath: "/tmp/default",
-          registeredWorkspacePaths: ["/tmp/default", "/tmp/knowledge"],
-        },
-        defaultWorkspacePath: "/tmp/default",
-        defaultProjectRemoved: false,
-        currentWorkspacePath: "",
-      }),
-    ).toEqual({
-      projects: [
-        {
-          id: "workspace:%2Ftmp%2Fknowledge",
-          label: "knowledge",
-          path: "/tmp/knowledge",
-        },
-      ],
-      workspacePath: "/tmp/default",
-    });
-  });
-
-  it("keeps the default workspace visible as an explicit project when the default project is hidden", () => {
-    expect(
-      restoreWorkspaceProjectsFromRegistry({
-        currentProjects: [],
-        snapshot: {
-          lastWorkspacePath: "/tmp/default",
-          registeredWorkspacePaths: ["/tmp/default"],
-        },
-        defaultWorkspacePath: "/tmp/default",
-        defaultProjectRemoved: true,
-        currentWorkspacePath: "",
-      }),
-    ).toEqual({
-      projects: [
-        {
-          id: "workspace:%2Ftmp%2Fdefault",
-          label: "default",
-          path: "/tmp/default",
-        },
-      ],
-      workspacePath: "/tmp/default",
-    });
   });
 });
 
@@ -1162,38 +1055,7 @@ describe("project workspace helpers", () => {
     expect(workspaceLabelForPath("/Users/nolangrant/Awaken/")).toBe("Awaken");
   });
 
-  it("maps the default workspace to the built-in project", () => {
-    const result = upsertWorkspaceProject(
-      [],
-      "/Users/nolangrant/Awaken",
-      "/Users/nolangrant/Awaken/",
-    );
-
-    expect(result.projectId).toBe(DEFAULT_WORKSPACE_PROJECT_ID);
-    expect(result.projects).toEqual([]);
-  });
-
-  it("adds and deduplicates local folder projects", () => {
-    const first = upsertWorkspaceProject(
-      [],
-      "/Users/nolangrant/Other",
-      "/Users/nolangrant/Awaken",
-    );
-    const second = upsertWorkspaceProject(
-      first.projects,
-      "/Users/nolangrant/Other/",
-      "/Users/nolangrant/Awaken",
-    );
-
-    expect(first.projectId).toBe(second.projectId);
-    expect(second.projects).toHaveLength(1);
-    expect(second.projects[0]).toMatchObject({
-      label: "Other",
-      path: "/Users/nolangrant/Other",
-    });
-  });
-
-  it("uses stable runtime project IDs with a workspace fallback", () => {
+  it("uses only stable runtime project IDs", () => {
     expect(
       projectIdForThread(
         {
@@ -1209,46 +1071,24 @@ describe("project workspace helpers", () => {
         { threadId: "thread-1", workspaceRoot: "/tmp/demo" },
         "/tmp/default",
       ),
-    ).toBe("workspace:%2Ftmp%2Fdemo");
+    ).toBeUndefined();
     expect(
       projectIdForThread(
         { threadId: "thread-1", workspaceRoot: "/tmp/default" },
         "/tmp/default",
       ),
     ).toBe(DEFAULT_WORKSPACE_PROJECT_ID);
-    expect(projectIdForThread("thread-1", "/tmp/default")).toBe(
-      DEFAULT_WORKSPACE_PROJECT_ID,
-    );
   });
 
   it("removes folder projects", () => {
     const projects = [
-      { id: "workspace:%2Ftmp%2Fdemo", label: "demo", path: "/tmp/demo" },
-      { id: "workspace:%2Ftmp%2Fkeep", label: "keep", path: "/tmp/keep" },
+      { id: "project-demo", label: "demo", path: "/tmp/demo" },
+      { id: "project-keep", label: "keep", path: "/tmp/keep" },
     ];
 
-    expect(removeWorkspaceProject(projects, "workspace:%2Ftmp%2Fdemo")).toEqual(
-      [{ id: "workspace:%2Ftmp%2Fkeep", label: "keep", path: "/tmp/keep" }],
+    expect(removeWorkspaceProject(projects, "project-demo")).toEqual(
+      [{ id: "project-keep", label: "keep", path: "/tmp/keep" }],
     );
-  });
-
-  it("merges runtime thread workspaces into the persisted project list", () => {
-    expect(
-      mergeWorkspaceProjects(
-        [
-          {
-            id: "workspace:%2Ftmp%2Fold",
-            label: "old",
-            path: "/tmp/old",
-          },
-        ],
-        ["/tmp/old", "/tmp/demo", "/tmp/default"],
-        "/tmp/default",
-      ),
-    ).toEqual([
-      { id: "workspace:%2Ftmp%2Fold", label: "old", path: "/tmp/old" },
-      { id: "workspace:%2Ftmp%2Fdemo", label: "demo", path: "/tmp/demo" },
-    ]);
   });
 });
 

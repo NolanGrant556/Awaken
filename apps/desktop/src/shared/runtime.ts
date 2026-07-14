@@ -792,16 +792,6 @@ export type UserQuestionAnswer = {
   answer: string;
 };
 
-export type WorkspaceRegistryPersistRequest = {
-  defaultWorkspacePath: string;
-  registeredWorkspacePaths: string[];
-};
-
-export type WorkspaceRegistrySnapshot = {
-  lastWorkspacePath?: string;
-  registeredWorkspacePaths: string[];
-};
-
 export type ArtifactOpenRequest = {
   threadId: string;
   runId: string;
@@ -912,8 +902,6 @@ export type AwakenBridge = {
   pickDirectory: (defaultPath?: string) => Promise<WorkspacePickResult>;
   pickWorkspace: (defaultPath?: string) => Promise<WorkspacePickResult>;
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
-  readWorkspaceRegistry: () => Promise<WorkspaceRegistrySnapshot>;
-  persistWorkspaceRegistry: (request: WorkspaceRegistryPersistRequest) => Promise<void>;
   getSupervisorStatus: () => Promise<SupervisorStatusInfo>;
   onSupervisorStatusChange: (callback: (info: SupervisorStatusInfo) => void) => () => void;
   notifyRendererReady: () => void;

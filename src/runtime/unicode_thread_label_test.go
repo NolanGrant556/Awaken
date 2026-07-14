@@ -61,12 +61,12 @@ func TestJournalOnlyThreadLabelRestoreIsUnicodeSafe(t *testing.T) {
 	assertUnicodeThreadLabel(t, restored.Label, want)
 }
 
-func TestSQLiteThreadLabelRoundTripIsUnicodeSafe(t *testing.T) {
+func TestStoreThreadLabelRoundTripIsUnicodeSafe(t *testing.T) {
 	setRuntimeUserDataDir(t)
 	input, want := unicodeThreadLabelFixture()
 	now := time.Now().UTC()
 	store := newThreadStore()
-	snapshot := storeTitleTestSnapshot(t, "thread_unicode_sqlite", "run_unicode_sqlite", input, now)
+	snapshot := storeTitleTestSnapshot(t, "thread_unicode_store", "run_unicode_store", input, now)
 	if err := store.CreateThread(snapshot, "", input); err != nil {
 		t.Fatalf("CreateThread: %v", err)
 	}
@@ -76,11 +76,11 @@ func TestSQLiteThreadLabelRoundTripIsUnicodeSafe(t *testing.T) {
 		t.Fatalf("ListThreads: %v", err)
 	}
 	if len(threads) != 1 {
-		t.Fatalf("expected one SQLite thread, got %d", len(threads))
+		t.Fatalf("expected one durable thread, got %d", len(threads))
 	}
 	assertUnicodeThreadLabel(t, threads[0].Label, want)
 
-	record, err := store.(*sqliteThreadStore).threadRecord(snapshot.ThreadID)
+	record, err := store.(*FileDesktopStore).threadRecord(snapshot.ThreadID)
 	if err != nil {
 		t.Fatalf("threadRecord: %v", err)
 	}

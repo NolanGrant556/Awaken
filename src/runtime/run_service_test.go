@@ -189,7 +189,7 @@ func TestRunServiceUsesModelProfileForNewAndExistingThreads(t *testing.T) {
 func setRuntimeUserDataDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	t.Setenv(runtimeUserDataDirEnv, dir)
+	t.Setenv(awakenHomeEnv, dir)
 	return dir
 }
 
@@ -510,7 +510,7 @@ func TestComposerSkillTokenOnlyRequestIsValidAndLabelsThreadFromToken(t *testing
 }
 
 func TestRunServiceAllowsImageOnlyInputWhenModelSupportsVision(t *testing.T) {
-	t.Setenv(runtimeUserDataDirEnv, t.TempDir())
+	t.Setenv(awakenHomeEnv, t.TempDir())
 	service := NewRunServiceWithModelProfiles(
 		func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent {
 			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
@@ -556,7 +556,7 @@ func TestRunServiceAllowsImageOnlyInputWhenModelSupportsVision(t *testing.T) {
 }
 
 func TestRunServiceDoesNotBlockImageInputOnProfileVisionFlag(t *testing.T) {
-	t.Setenv(runtimeUserDataDirEnv, t.TempDir())
+	t.Setenv(awakenHomeEnv, t.TempDir())
 	service := NewRunServiceWithModelProfiles(
 		func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent {
 			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
@@ -1623,11 +1623,11 @@ func TestGetThreadTranscriptRecoversOrphanWithoutStartingFollowUp(t *testing.T) 
 }
 
 func TestGetThreadTranscriptRestoresCancelledRunPartialResult(t *testing.T) {
-	userDataDir, err := os.MkdirTemp("", "awaken-cancel-restore-test-*")
+	storeRoot, err := os.MkdirTemp("", "awaken-cancel-restore-test-*")
 	if err != nil {
 		t.Fatalf("failed to create user data dir: %v", err)
 	}
-	t.Setenv(runtimeUserDataDirEnv, userDataDir)
+	t.Setenv(awakenHomeEnv, storeRoot)
 	root := t.TempDir()
 
 	deltaEmitted := make(chan struct{})
@@ -2091,7 +2091,7 @@ func TestStartRunStorageFailureRollsBackBusyAndGhostState(t *testing.T) {
 	}
 	waitForRunTerminal(t, service, retry.RunID)
 
-	t.Setenv(runtimeUserDataDirEnv, t.TempDir())
+	t.Setenv(awakenHomeEnv, t.TempDir())
 	secondService := newDurableThreadTestService()
 	secondFailing := &appendFailingThreadStore{ThreadStore: secondService.threadStore, fail: true}
 	secondService.threadStore = secondFailing

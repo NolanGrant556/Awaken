@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -95,22 +96,45 @@ func (r *SkillRegistry) replaceLocalSourcesLocked(dirs map[SourceOrigin]string) 
 }
 
 func (r *SkillRegistry) buildLocalSourcesLocked(dirs map[SourceOrigin]string) map[string]*SkillDefinition {
-	var sourceMaps []map[string]*SkillDefinition
+	type skillSourceRoot struct {
+		src SourceOrigin
+		dir string
+	}
 
 	// Process sources from lowest to highest priority so merge works.
+	ordered := make([]skillSourceRoot, 0, 8)
 	for _, src := range []SourceOrigin{SourceLegacy, SourceBundled, SourceMcp, SourcePlugin, SourceUser, SourceAdditional, SourceProject, SourceManaged} {
 		dirList, ok := dirs[src]
 		if !ok || dirList == "" {
 			continue
 		}
 		for _, dir := range splitSourceDirList(dirList) {
-			loaded := LoadDir(dir, src)
-			if src == SourceLegacy {
-				loaded = LoadLegacyCommandsDir(dir)
-			}
-			if len(loaded) > 0 {
-				sourceMaps = append(sourceMaps, loaded)
-			}
+			ordered = append(ordered, skillSourceRoot{src: src, dir: dir})
+		}
+	}
+
+	// Canonical realpath dedup: the same real directory reached through more
+	// than one source configuration (e.g. project workspace equal to the user
+	// home makes project and user skills the same directory) must produce
+	// exactly one user-facing skill set, never a duplicate batch marked
+	// shadowed. Iteration is lowest-to-highest priority, so the last
+	// occurrence wins.
+	keeperIndex := make(map[string]int, len(ordered))
+	for index, root := range ordered {
+		keeperIndex[canonicalSkillSourceRoot(root.dir)] = index
+	}
+
+	var sourceMaps []map[string]*SkillDefinition
+	for index, root := range ordered {
+		if keeperIndex[canonicalSkillSourceRoot(root.dir)] != index {
+			continue
+		}
+		loaded := LoadDir(root.dir, root.src)
+		if root.src == SourceLegacy {
+			loaded = LoadLegacyCommandsDir(root.dir)
+		}
+		if len(loaded) > 0 {
+			sourceMaps = append(sourceMaps, loaded)
 		}
 	}
 
@@ -423,6 +447,17 @@ func stringsJoin(s []string, sep string) string {
 
 // Ensure strings is used.
 var _ = sort.Strings
+
+// canonicalSkillSourceRoot resolves a configured skills root to its canonical
+// real path so identical directories can be discovered exactly once. When the
+// directory does not exist (or resolution fails) the cleaned literal path is
+// used, which still dedupes textual duplicates.
+func canonicalSkillSourceRoot(dir string) string {
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		return filepath.Clean(resolved)
+	}
+	return filepath.Clean(dir)
+}
 
 func isShadowedMapKey(id string) bool {
 	return strings.Contains(id, "__shadowed__") || strings.HasSuffix(id, "__shadowed")

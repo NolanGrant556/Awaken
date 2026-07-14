@@ -550,10 +550,10 @@ func TestFailureSupervisorNewRevisionAllowsRetry(t *testing.T) {
 	}
 }
 
-func TestFailureSupervisorTurnAndRunBudgets(t *testing.T) {
+func TestFailureSupervisorAccumulatedFailuresRequireStrategyChangeNotTermination(t *testing.T) {
 	s := NewFailureSupervisor("/tmp/ws", 8, 64)
 	s.BeginTurn()
-	for i := 0; i < maxTurnToolFailures; i++ {
+	for i := 0; i < strategyChangeTurnFailures; i++ {
 		call := convcontext.ToolCall{
 			ID: fmt.Sprintf("t%d", i),
 			Function: convcontext.FunctionCall{
@@ -570,16 +570,29 @@ func TestFailureSupervisorTurnAndRunBudgets(t *testing.T) {
 			ErrorMessage:   fmt.Sprintf("exit %d", i+2),
 			Retryable:      true,
 		})
-		if i == maxTurnToolFailures-1 {
-			if !after.TerminateTurn || after.TerminalReason != TerminalReasonRepeatedToolFailure {
-				t.Fatalf("turn budget exceeded decision = %+v", after)
+		if after.TerminateTurn || after.TerminateRun {
+			t.Fatalf("accumulated failures must not terminate the run: %+v", after)
+		}
+		if i == strategyChangeTurnFailures-1 {
+			if !after.RecoveryRequired || after.Directive == nil ||
+				!strings.Contains(after.Directive.Message, StatusStrategyChangeRequired) {
+				t.Fatalf("expected strategy_change_required directive, got %+v", after)
+			}
+			found := false
+			for _, option := range after.RecoveryOptions {
+				if option == "change_tool_or_library" {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("expected strategy change next actions, got %+v", after.RecoveryOptions)
 			}
 		}
 	}
 
 	s2 := NewFailureSupervisor("/tmp/ws", 8, 64)
-	for i := 0; i < maxRunToolFailures; i++ {
-		if i%maxTurnToolFailures == 0 {
+	for i := 0; i < strategyChangeRunFailures; i++ {
+		if i%strategyChangeTurnFailures == 0 {
 			s2.BeginTurn()
 		}
 		call := convcontext.ToolCall{
@@ -597,9 +610,49 @@ func TestFailureSupervisorTurnAndRunBudgets(t *testing.T) {
 			ErrorCode:      tool.ErrorCodeProcessExitNonzero,
 			Retryable:      true,
 		})
-		if i == maxRunToolFailures-1 && (!after.TerminateRun || after.TerminalReason != TerminalReasonRepeatedToolFailure) {
-			t.Fatalf("run budget exceeded decision = %+v", after)
+		if after.TerminateRun {
+			t.Fatalf("run-level accumulated failures must escalate, not terminate: %+v", after)
 		}
+		if i == strategyChangeRunFailures-1 && (!after.RecoveryRequired || after.Directive == nil) {
+			t.Fatalf("expected strategy change escalation on run failure budget, got %+v", after)
+		}
+	}
+}
+
+func TestSyntheticBlockedResultIsRecoverableStrategyChange(t *testing.T) {
+	call := convcontext.ToolCall{
+		ID: "blocked-1",
+		Function: convcontext.FunctionCall{
+			Name:      "read_artifact",
+			Arguments: `{"path":"report.xlsx"}`,
+		},
+	}
+	result := SyntheticBlockedResult(call, BeforeCallDecision{
+		Block:         true,
+		ErrorCode:     ErrorCodeToolRetryBlocked,
+		ErrorMessage:  "blocked repeated tool call read_artifact after 2 failure(s)",
+		CallSignature: "read_artifact|abc",
+		AttemptCount:  2,
+	})
+	if !result.IsError {
+		t.Fatalf("blocked result must surface as tool error: %+v", result)
+	}
+	if !strings.Contains(result.Content, StatusStrategyChangeRequired) ||
+		!strings.Contains(result.Content, `"same_call_retryable":false`) ||
+		!strings.Contains(result.Content, `"retryable":true`) {
+		t.Fatalf("blocked result content missing recoverable guidance: %q", result.Content)
+	}
+	if result.Outcome.Diagnostic["status"] != StatusStrategyChangeRequired {
+		t.Fatalf("blocked outcome missing strategy_change_required status: %+v", result.Outcome.Diagnostic)
+	}
+	found := false
+	for _, option := range result.Outcome.RecoveryOptions {
+		if option == "use_specialized_artifact_tool" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected next actions on blocked outcome: %+v", result.Outcome.RecoveryOptions)
 	}
 }
 
@@ -857,7 +910,7 @@ func TestRunnerSwitchToTextEditSucceedsAfterPatchFailures(t *testing.T) {
 	}
 }
 
-func TestRunnerTurnBudgetTerminatesRun(t *testing.T) {
+func TestRunnerAccumulatedFailuresContinueRunWithStrategyChange(t *testing.T) {
 	toolName := "fs_budget_" + t.Name()
 	var execCount int
 	mustRegisterRunnerTool(t, failingOutcomeTool{
@@ -867,10 +920,19 @@ func TestRunnerTurnBudgetTerminatesRun(t *testing.T) {
 		calls:     &execCount,
 	})
 
+	var modelCalls int
 	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
-		// One turn with enough distinct failing tool calls to hit the turn budget.
-		calls := make([]map[string]interface{}, 0, maxTurnToolFailures)
-		for i := 0; i < maxTurnToolFailures; i++ {
+		modelCalls++
+		if modelCalls > 1 {
+			// The agent changed strategy after the failing turn: the run
+			// must still be alive to receive this answer.
+			writeRunnerStreamText(t, w, "switched strategy")
+			return
+		}
+		// One turn with enough distinct failing tool calls to hit the
+		// strategy-change threshold.
+		calls := make([]map[string]interface{}, 0, strategyChangeTurnFailures)
+		for i := 0; i < strategyChangeTurnFailures; i++ {
 			args, _ := json.Marshal(map[string]string{
 				"value":             fmt.Sprintf("v%d", i),
 				"resource_revision": fmt.Sprintf("budget-%d", i),
@@ -896,21 +958,24 @@ func TestRunnerTurnBudgetTerminatesRun(t *testing.T) {
 
 	agent := NewAgent(testAgentConfig(server.URL, 20))
 	var gotEvents []AwakenEvent
-	_, err := agent.RunStreamWithEvents(context.Background(), "budget", EventSinkFunc(func(event AwakenEvent) {
+	answer, err := agent.RunStreamWithEvents(context.Background(), "budget", EventSinkFunc(func(event AwakenEvent) {
 		gotEvents = append(gotEvents, event)
 	}))
-	if err == nil {
-		t.Fatalf("expected repeated_tool_failure termination")
+	if err != nil {
+		t.Fatalf("accumulated tool failures must not terminate the run: %v", err)
 	}
-	if !strings.Contains(err.Error(), "repeated_tool_failure") && !strings.Contains(err.Error(), "budget") {
-		t.Fatalf("unexpected error: %v", err)
+	if answer != "switched strategy" {
+		t.Fatalf("expected run to continue after strategy change, got %q", answer)
 	}
-	runErrorIndex := firstEventIndex(gotEvents, RunErrorEventType)
-	if runErrorIndex < 0 || gotEvents[runErrorIndex].TerminalReason != TerminalReasonRepeatedToolFailure {
-		t.Fatalf("expected repeated_tool_failure terminal, got %+v", gotEvents)
+	if execCount != strategyChangeTurnFailures {
+		t.Fatalf("expected %d executions, got %d", strategyChangeTurnFailures, execCount)
 	}
-	if execCount != maxTurnToolFailures {
-		t.Fatalf("expected %d executions, got %d", maxTurnToolFailures, execCount)
+	recoveryIndex := firstEventIndex(gotEvents, ToolRecoveryRequiredEventType)
+	if recoveryIndex < 0 {
+		t.Fatalf("expected ToolRecoveryRequired directive, types=%v", eventTypes(gotEvents))
+	}
+	if runErrorIndex := firstEventIndex(gotEvents, RunErrorEventType); runErrorIndex >= 0 {
+		t.Fatalf("run must not error from accumulated tool failures: %+v", gotEvents[runErrorIndex])
 	}
 }
 

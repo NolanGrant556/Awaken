@@ -272,4 +272,26 @@ describe("projectAguiEventToNarrative", () => {
     expect(notices.some((item) => item.kind === "tool" && item.title === "Tool recovery required")).toBe(true);
     expect(notices.some((item) => item.kind === "tool" && item.title === "Tool retry blocked")).toBe(true);
   });
+
+  it("surfaces strategy_change_required directives with a dedicated title", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_TOOL_RECOVERY_REQUIRED",
+      toolCallId: "call-3",
+      toolCallName: "read_artifact",
+      errorCode: "read_artifact_specialized_tool_required",
+      message:
+        "strategy_change_required: 6 tool failures accumulated (turn=6 run=6); do not repeat the failing approach",
+      recoveryOptions: ["use_specialized_artifact_tool", "change_tool_or_library"],
+    });
+
+    const notice = state.committedItems.find(
+      (item) => item.kind === "tool" && item.title === "Strategy change required",
+    );
+    expect(notice).toBeDefined();
+    if (notice?.kind !== "tool") {
+      throw new Error("strategy change notice missing");
+    }
+    expect(notice.detail).toContain("use_specialized_artifact_tool");
+  });
 });

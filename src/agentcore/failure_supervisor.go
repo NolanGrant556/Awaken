@@ -24,11 +24,20 @@ const (
 	maxRetryableSameCallAttempts    = 2
 	maxNonRetryableSameCallAttempts = 1
 	maxSameClassFailures            = 3
-	maxTurnToolFailures             = 6
-	maxRunToolFailures              = 12
+	// strategyChangeTurnFailures / strategyChangeRunFailures escalate to a
+	// mandatory strategy change directive. They never terminate the run:
+	// a single business tool failing repeatedly is a recoverable condition
+	// and only run-level budgets (max turns / max tool executions) end a run.
+	strategyChangeTurnFailures = 6
+	strategyChangeRunFailures  = 12
 
 	ErrorCodeToolRetryBlocked = "tool_retry_blocked"
 	ErrorCodeRepeatedFailure  = "repeated_tool_failure"
+
+	// StatusStrategyChangeRequired marks a recoverable tool result whose exact
+	// call must not be replayed; the agent must change tool, arguments, or
+	// implementation path. The run continues.
+	StatusStrategyChangeRequired = "strategy_change_required"
 )
 
 // FailureSupervisor enforces hard budgets and recovery policy for repeated
@@ -371,16 +380,41 @@ func (s *FailureSupervisor) AfterOutcome(call context.ToolCall, outcome tool.Exe
 		}
 	}
 
-	if s.turnFailures >= maxTurnToolFailures {
-		decision.TerminateTurn = true
-		decision.TerminateRun = true
-		decision.TerminalReason = TerminalReasonRepeatedToolFailure
-	}
-	if s.runFailures >= maxRunToolFailures {
-		decision.TerminateRun = true
-		decision.TerminalReason = TerminalReasonRepeatedToolFailure
+	// Accumulated business-tool failures never terminate the run on their
+	// own. They escalate to a mandatory strategy change: the agent must pick
+	// a different tool, arguments, or implementation path (or stop the failing
+	// strategy and explain). Run-level protection stays with the max turns
+	// and max tool execution budgets.
+	if s.turnFailures >= strategyChangeTurnFailures || s.runFailures >= strategyChangeRunFailures {
+		decision.RecoveryRequired = true
+		decision.RecoveryOptions = mergeUniqueStrings(decision.RecoveryOptions, strategyChangeNextActions())
+		directive := &RecoveryDirective{
+			Required:         true,
+			ToolName:         toolName,
+			ResourceKey:      resourceKey,
+			ResourceRevision: revision,
+			ErrorCode:        errorCode,
+			Fingerprint:      fingerprint,
+			AttemptCount:     s.runFailures,
+			RecoveryOptions:  decision.RecoveryOptions,
+			Message: fmt.Sprintf(
+				"%s: %d tool failures accumulated (turn=%d run=%d); do not repeat the failing approach — change tool, arguments, or implementation path, or stop this strategy and report",
+				StatusStrategyChangeRequired, s.runFailures, s.turnFailures, s.runFailures,
+			),
+		}
+		s.pendingRecovery = directive
+		decision.Directive = directive
 	}
 	return decision
+}
+
+func strategyChangeNextActions() []string {
+	return []string{
+		"use_specialized_artifact_tool",
+		"change_tool_or_library",
+		"inspect_file_structure",
+		"stop_if_non_retryable",
+	}
 }
 
 func recoveryDirectiveSatisfied(
@@ -436,14 +470,25 @@ func ApplyRecoveryToOutcome(outcome tool.ExecutionOutcome, options []string, req
 }
 
 // SyntheticBlockedResult builds a ToolExecutionResult for a blocked retry.
+// The result is recoverable: only the identical call is refused, the run
+// continues, and the agent is told explicitly which strategy changes count
+// as a fresh attempt.
 func SyntheticBlockedResult(call context.ToolCall, decision BeforeCallDecision) ToolExecutionResult {
 	now := time.Now().UTC()
 	msg := strings.TrimSpace(decision.ErrorMessage)
 	if msg == "" {
 		msg = "tool retry blocked by FailureSupervisor"
 	}
+	nextActions := mergeUniqueStrings(decision.RecoveryOptions, strategyChangeNextActions())
+	guidance, _ := json.Marshal(map[string]any{
+		"status":              StatusStrategyChangeRequired,
+		"retryable":           true,
+		"same_call_retryable": false,
+		"next_actions":        nextActions,
+	})
+	content := msg + "\n" + string(guidance)
 	outcome := tool.ExecutionOutcome{
-		Content:         msg,
+		Content:         content,
 		Status:          tool.OutcomeDenied,
 		TransportStatus: tool.TransportNotStarted,
 		SemanticStatus:  tool.SemanticFailure,
@@ -452,12 +497,15 @@ func SyntheticBlockedResult(call context.ToolCall, decision BeforeCallDecision) 
 		ErrorCategory:   tool.ErrorCategoryPolicy,
 		ErrorMessage:    msg,
 		Retryable:       false,
-		RecoveryOptions: append([]string(nil), decision.RecoveryOptions...),
+		RecoveryOptions: nextActions,
 		Diagnostic: map[string]any{
-			"blocked":           true,
-			"call_signature":    decision.CallSignature,
-			"attempt_count":     decision.AttemptCount,
-			"recovery_required": decision.RecoveryRequired,
+			"blocked":             true,
+			"status":              StatusStrategyChangeRequired,
+			"same_call_retryable": false,
+			"retryable":           true,
+			"call_signature":      decision.CallSignature,
+			"attempt_count":       decision.AttemptCount,
+			"recovery_required":   decision.RecoveryRequired,
 		},
 		StartedAt:  now,
 		FinishedAt: now,
@@ -466,7 +514,7 @@ func SyntheticBlockedResult(call context.ToolCall, decision BeforeCallDecision) 
 	return ToolExecutionResult{
 		ToolCallID: call.ID,
 		Name:       call.Function.Name,
-		Content:    msg,
+		Content:    content,
 		IsError:    true,
 		Status:     ToolExecutionDenied,
 		ErrorCode:  outcome.ErrorCode,

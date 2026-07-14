@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -61,8 +62,9 @@ type xlsxRelationships struct {
 }
 
 type xlsxRelationship struct {
-	ID     string `xml:"Id,attr"`
-	Target string `xml:"Target,attr"`
+	ID         string `xml:"Id,attr"`
+	Target     string `xml:"Target,attr"`
+	TargetMode string `xml:"TargetMode,attr"`
 }
 
 type xlsxSharedStrings struct {
@@ -148,6 +150,7 @@ func (t *ReadArtifactTool) Definition() tool.ToolDefinition {
 			{Code: "read_artifact_unsupported_type", Cause: "文件类型不受本工具支持", Retryable: false, Recovery: []string{"选择匹配的 artifact 工具"}},
 			{Code: "read_artifact_empty_pdf", Cause: "PDF 没有可抽取内容", Retryable: false, Recovery: []string{"检查是否为扫描 PDF 或使用 OCR 能力"}},
 			{Code: "read_artifact_invalid_or_corrupt", Cause: "工作文件损坏或格式无效", Retryable: false, Recovery: []string{"验证或重新生成文件"}},
+			{Code: "read_artifact_specialized_tool_required", Cause: "文件完整但内置轻量预览不支持该变体", Retryable: false, Recovery: []string{"改用 spreadsheet Skill、openpyxl/pandas 等成熟工具读取"}},
 			{Code: "read_artifact_runtime_failed", Cause: "解析 runtime 执行失败；原调用在状态核验前不可安全重试", Retryable: false, Recovery: []string{"准备或修复所需 runtime，再发起新调用"}},
 		},
 		Annotations: tool.ToolAnnotations{
@@ -307,6 +310,12 @@ func readArtifactFailure(err error, ext, requestedPath, resolvedPath string) too
 		outcome.Diagnostic = map[string]any{"requested_path": requestedPath, "resolved_path": resolvedPath, "extension": ext}
 		return outcome
 	}
+	if errors.Is(err, errXLSXVariantUnsupported) {
+		outcome := tool.FailedOutcome(err.Error(), "read_artifact_specialized_tool_required", tool.ErrorCategoryDomain, false)
+		outcome.RecoveryOptions = []string{"use_specialized_artifact_tool", "use_spreadsheet_skill_or_library", "install_missing_dependency"}
+		outcome.Diagnostic = map[string]any{"requested_path": requestedPath, "resolved_path": resolvedPath, "extension": ext, "file_intact": true}
+		return outcome
+	}
 	code := "read_artifact_invalid_or_corrupt"
 	category := tool.ErrorCategoryDomain
 	recovery := []string{"verify_artifact_integrity", "use_specialized_artifact_tool"}
@@ -401,6 +410,16 @@ func readXLSArtifact(ctx context.Context, permCtx tool.PermissionContext, params
 	return readXLSXArtifact(converted, params.Sheet, normalizeArtifactMaxRows(params.MaxRows), normalizeArtifactMaxSheets(params.MaxSheets), normalizeArtifactMaxChars(params.MaxChars))
 }
 
+// errXLSXVariantUnsupported marks failures where the archive passed ZIP
+// integrity checks but the lightweight built-in reader cannot handle the
+// workbook variant. These must never be reported as invalid_or_corrupt; the
+// agent should route to a specialized spreadsheet tool or library instead.
+var errXLSXVariantUnsupported = errors.New("read_artifact 内置 XLSX 预览不支持该工作簿变体")
+
+func xlsxVariantUnsupported(err error) error {
+	return fmt.Errorf("%w（文件 ZIP 完整性正常）: %v。请改用 spreadsheet Skill 或成熟库（如 openpyxl/pandas）读取", errXLSXVariantUnsupported, err)
+}
+
 func readXLSXArtifact(path string, sheetFilter string, maxRows int, maxSheets int, maxChars int) (artifactPreview, error) {
 	zr, err := zip.OpenReader(path)
 	if err != nil {
@@ -410,24 +429,28 @@ func readXLSXArtifact(path string, sheetFilter string, maxRows int, maxSheets in
 
 	workbookData, err := readZipEntry(&zr.Reader, "xl/workbook.xml")
 	if err != nil {
-		return artifactPreview{}, err
+		return artifactPreview{}, xlsxVariantUnsupported(err)
 	}
 	var workbook xlsxWorkbook
 	if err := xml.Unmarshal(workbookData, &workbook); err != nil {
-		return artifactPreview{}, err
+		return artifactPreview{}, xlsxVariantUnsupported(err)
 	}
 	relsData, err := readZipEntry(&zr.Reader, "xl/_rels/workbook.xml.rels")
 	if err != nil {
-		return artifactPreview{}, err
+		return artifactPreview{}, xlsxVariantUnsupported(err)
 	}
 	var rels xlsxRelationships
 	if err := xml.Unmarshal(relsData, &rels); err != nil {
-		return artifactPreview{}, err
+		return artifactPreview{}, xlsxVariantUnsupported(err)
 	}
 	sharedStrings := readSharedStrings(&zr.Reader)
 	targets := make(map[string]string, len(rels.Items))
 	for _, rel := range rels.Items {
-		targets[rel.ID] = "xl/" + strings.TrimPrefix(rel.Target, "/")
+		resolved, ok := resolveOPCRelationshipTarget("xl/workbook.xml", rel)
+		if !ok {
+			continue
+		}
+		targets[rel.ID] = resolved
 	}
 
 	sections := make([]string, 0, maxSheets)
@@ -441,7 +464,7 @@ func readXLSXArtifact(path string, sheetFilter string, maxRows int, maxSheets in
 		}
 		table, err := readWorksheetPreview(&zr.Reader, target, sharedStrings, maxRows)
 		if err != nil {
-			return artifactPreview{}, err
+			return artifactPreview{}, xlsxVariantUnsupported(err)
 		}
 		section := "[Sheet] " + sheet.Name
 		if table != "" {
@@ -453,7 +476,7 @@ func readXLSXArtifact(path string, sheetFilter string, maxRows int, maxSheets in
 		}
 	}
 	if len(sections) == 0 {
-		return artifactPreview{}, fmt.Errorf("未找到可读取的工作表")
+		return artifactPreview{}, xlsxVariantUnsupported(fmt.Errorf("未找到可读取的工作表"))
 	}
 	content := strings.Join(sections, "\n\n")
 	if len(sections) == maxSheets && len(workbook.Sheets) > maxSheets {
@@ -657,6 +680,37 @@ func readPDFArtifact(ctx context.Context, permCtx tool.PermissionContext, path s
 		Path:    path,
 		Content: truncateArtifactString(strings.TrimSpace(string(data)), maxChars),
 	}, nil
+}
+
+// resolveOPCRelationshipTarget resolves a relationship target following OPC
+// (ECMA-376 Part 2) rules instead of naive string concatenation:
+//   - external targets are not ZIP entries and are skipped;
+//   - a target starting with "/" is a package absolute part name, used after
+//     removing exactly one leading slash;
+//   - other targets resolve relative to the directory of the source part
+//     (the part owning the .rels file, e.g. xl/workbook.xml);
+//   - the result is cleaned with path.Clean and must not escape the package
+//     root through "..".
+func resolveOPCRelationshipTarget(sourcePart string, rel xlsxRelationship) (string, bool) {
+	if strings.EqualFold(strings.TrimSpace(rel.TargetMode), "External") {
+		return "", false
+	}
+	target := strings.TrimSpace(rel.Target)
+	if target == "" {
+		return "", false
+	}
+	target = strings.ReplaceAll(target, "\\", "/")
+	var resolved string
+	if strings.HasPrefix(target, "/") {
+		resolved = strings.TrimPrefix(target, "/")
+	} else {
+		resolved = path.Join(path.Dir(sourcePart), target)
+	}
+	resolved = path.Clean(resolved)
+	if resolved == "." || resolved == ".." || strings.HasPrefix(resolved, "../") || strings.HasPrefix(resolved, "/") {
+		return "", false
+	}
+	return resolved, true
 }
 
 func readZipEntry(zr *zip.Reader, name string) ([]byte, error) {

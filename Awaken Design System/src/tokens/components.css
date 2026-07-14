@@ -535,7 +535,6 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 
 .execution-prompt-bubble-text {
   box-sizing: border-box;
-  flex: 1 1 160px;
   min-width: 0;
   max-width: 100%;
   margin: 0;
@@ -546,10 +545,6 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 }
 
 .execution-prompt-bubble-main {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px;
   max-width: 100%;
   min-width: 0;
 }
@@ -560,6 +555,7 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   gap: 4px;
   min-width: 0;
   max-width: min(220px, 100%);
+  margin-inline-end: 0.35em;
   padding: 0 1px;
   border-radius: 4px;
   background: transparent;
@@ -575,16 +571,7 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   transform: translateY(0.08em);
 }
 
-.execution-prompt-bubble-token-group {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  min-width: 0;
-  max-width: 100%;
-}
-
 .execution-prompt-bubble-inline-text {
-  min-width: 0;
   color: var(--aw-text-primary);
   font-size: var(--aw-font-size-sm);
   line-height: var(--aw-line-height-sm);

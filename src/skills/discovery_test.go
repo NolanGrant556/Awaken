@@ -119,6 +119,90 @@ func TestProductionDiscoveryMultipleRootsPriorityAndRealpathDedupe(t *testing.T)
 	}
 }
 
+// When the project workspace equals the user home, project and user skill
+// source roots resolve to the same real directory. The catalog must present
+// exactly one set of skills without a duplicate batch marked shadowed.
+func TestSameRealDirectoryAcrossProjectAndUserSourcesIsDiscoveredOnce(t *testing.T) {
+	home := t.TempDir()
+	skillsRoot := filepath.Join(home, ".awaken", "skills")
+	writeTestSkillPackage(t, skillsRoot, "pptx", "---\nname: pptx\ndescription: build decks\n---\nBody")
+	writeTestSkillPackage(t, skillsRoot, "docs", "---\nname: docs\ndescription: write docs\n---\nBody")
+	t.Setenv("HOME", home)
+	t.Setenv(EnvManagedSkillDirs, filepath.Join(t.TempDir(), "none"))
+	t.Setenv(EnvAdditionalSkillDirs, "")
+	t.Setenv(EnvPluginSkillDirs, "")
+	t.Setenv(EnvBundledSkillDirs, "")
+	t.Setenv(EnvLegacyCommandDirs, "")
+
+	reg := NewSkillRegistry(nil)
+	// Project root == home: project skills dir and user skills dir are the
+	// same real directory.
+	reg.LoadFromSources(LocalSourceDirs(home))
+
+	shadowed := 0
+	loadedByID := map[string]int{}
+	for _, def := range reg.ListAll() {
+		if def.State == StateShadowed {
+			shadowed++
+			continue
+		}
+		if def.State == StateLoaded {
+			loadedByID[def.ID]++
+		}
+	}
+	if shadowed != 0 {
+		t.Fatalf("same real directory produced %d shadowed duplicates", shadowed)
+	}
+	if loadedByID["pptx"] != 1 || loadedByID["docs"] != 1 {
+		t.Fatalf("expected each skill loaded exactly once, got %+v", loadedByID)
+	}
+}
+
+// A symlinked duplicate of the same source root must also collapse to one
+// discovery even across different source origins.
+func TestSymlinkedSourceRootAcrossOriginsIsDiscoveredOnce(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink fixture is not portable to windows CI")
+	}
+	base := t.TempDir()
+	home := filepath.Join(base, "home")
+	realRoot := filepath.Join(base, "real-skills")
+	writeTestSkillPackage(t, realRoot, "shared", "---\nname: shared\ndescription: canonical\n---\nBody")
+	linkRoot := filepath.Join(base, "linked-skills")
+	if err := os.Symlink(realRoot, linkRoot); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv(EnvManagedSkillDirs, filepath.Join(t.TempDir(), "none"))
+	t.Setenv(EnvAdditionalSkillDirs, realRoot)
+	t.Setenv(EnvPluginSkillDirs, linkRoot)
+	t.Setenv(EnvBundledSkillDirs, "")
+	t.Setenv(EnvLegacyCommandDirs, "")
+
+	reg := NewSkillRegistry(nil)
+	reg.LoadFromSources(LocalSourceDirs(""))
+
+	shadowed := 0
+	loaded := 0
+	for _, def := range reg.ListAll() {
+		if def.ID != "shared" {
+			continue
+		}
+		switch def.State {
+		case StateShadowed:
+			shadowed++
+		case StateLoaded:
+			loaded++
+		}
+	}
+	if shadowed != 0 || loaded != 1 {
+		t.Fatalf("symlinked root duplicated discovery: loaded=%d shadowed=%d", loaded, shadowed)
+	}
+}
+
 func TestLegacyFlatCommandDiscoveryWithoutFrontmatter(t *testing.T) {
 	project := t.TempDir()
 	commands := filepath.Join(project, ".awaken", "commands")

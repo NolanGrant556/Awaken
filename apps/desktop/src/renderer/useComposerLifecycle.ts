@@ -75,11 +75,11 @@ export function composerRuntimePanelsForStatus({
   if (runtimeErrorMessage) {
     const credentialIssue =
       runtimeOperationIssue?.code.startsWith("credential_") === true ||
-      runtimeErrorMessage.includes("安全凭据") ||
-      runtimeErrorMessage.includes("API key 无法解密");
+      runtimeErrorMessage.includes("~/.awaken/.env") ||
+      runtimeErrorMessage.includes("API key 无法读取");
     panels.push({
       id: "run-error",
-      title: credentialIssue ? "模型密钥暂不可用" : "Run error",
+      title: credentialIssue ? "模型密钥无法读取" : "Run error",
       message: runtimeErrorMessage,
       tone: "error",
       actions: runtimeOperationIssue?.actions,

@@ -32,10 +32,11 @@ Desktop 向 core 注入：
 
 - `AWAKEN_CORE_ADDR`：本次随机 loopback 地址；
 - `AWAKEN_RUNTIME_MANIFEST`：打包的主运行时 manifest；
-- `AWAKEN_USER_DATA_DIR`：Desktop userData 对应全局数据根；
-- 可选 `AWAKEN_DEFAULT_WORKSPACE`：明确的默认 workspace。
+- `AWAKEN_USER_DATA_DIR`：当前 launch mode 的 Electron userData，供桌面偏好、宠物、旧状态兼容和测试隔离使用；
+- `AWAKEN_HOME`：由 Main 从用户主目录确定的业务数据根 `~/.awaken`，承载 FileStore、模型配置、user MCP server 配置和 connector 认证 metadata；其中 user MCP 配置唯一位于 `config/mcp-servers.json`；
+- `AWAKEN_DEFAULT_WORKSPACE`：始终注入。值为用户明确选择过的 workspace；没有任何用户选择时注入空值，core 视为"无默认 workspace"启动，不回退 cwd 或用户主目录。用户主目录不再被隐式注册为默认项目；startRun 仍要求每次 run 携带有效 workspace。
 
-启动前移除 `AWAKEN_CONFIG_DIR` 和历史 LLM provider/API key 环境变量，避免 shell 环境意外改变 Desktop 身份或泄露旧凭据。模型凭据由 05 的 secure credential contract 管理。
+启动前移除 `AWAKEN_CONFIG_DIR` 和历史 LLM provider/API key 环境变量，避免 shell 环境意外改变 Desktop 身份或泄露旧凭据。模型 key 由 05 域的 `~/.awaken/.env` 文件契约管理。MCP user config 不从 `AWAKEN_USER_DATA_DIR` 或任何旧位置迁移、导入或 fallback；没有 default workspace 时 project scope 缺席，但 user scope 的管理与连接不受影响。
 
 ## 停止与崩溃恢复
 
@@ -49,7 +50,8 @@ core 异常退出后状态为 `crashed`。重新启动会恢复线程历史，�
 
 - 正式 Desktop 必须使用随机 loopback 地址，不得把固定端口写入 renderer 或文档。
 - renderer 不得自行 spawn core 或持有独立的 runtime lifecycle。
-- userData、manifest 和 workspace 必须显式传入；不得依赖调用者终端当前目录推断身份。
+- userData、`AWAKEN_HOME`、manifest 和 workspace 必须显式传入；不得依赖调用者终端当前目录推断身份。
+- `AWAKEN_HOME/config/mcp-servers.json` 是 user MCP server 配置的唯一 authority；无 default workspace 不能使 user scope 管理面不可用。
 - stop 必须有 graceful -> force 的有界升级，不能留下孤儿 core。
 - 当前没有把外部远程 runtime URL 作为正式 Desktop 产品入口。
 - 当前不保证 crash 后自动续跑 active run，只保证可确认历史恢复。

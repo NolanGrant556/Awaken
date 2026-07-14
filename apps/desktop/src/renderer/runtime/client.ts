@@ -59,9 +59,7 @@ export type SubscribeHandlers = {
 };
 
 const DESKTOP_OPERATION_ISSUE_CODES = new Set<DesktopOperationIssue["code"]>([
-  "credential_temporarily_unavailable",
   "credential_unreadable",
-  "credential_save_failed",
   "operation_failed",
 ]);
 const DESKTOP_OPERATION_RECOVERY_ACTIONS = new Set<DesktopOperationRecoveryAction>([

@@ -41,6 +41,7 @@ import {
   AwakenRunStage as RunStage,
   AwakenComposerDock as ComposerDock,
   type ComposerBarMetaItem,
+  type ComposerBarStructuredInputValue,
   type NavItem,
   type PlatformKind,
   type ProjectItem,
@@ -116,7 +117,6 @@ import {
 import {
   actionsFromSlashProviders,
   clearSlashTriggerFromComposerValue,
-  composerTokenIdForKeyboardDelete,
   composerTokenPlacementForSlashTrigger,
   composerTokenFromSlashAction,
   filterSlashActions,
@@ -226,26 +226,74 @@ function clampUserQuestionPromptIndex(
   return Math.min(Math.max(index, 0), questionCount - 1);
 }
 
-function promptNarrativeTokensForComposer(
+export function promptNarrativeTokensForComposer(
   tokens: ComposerToken[],
   leadingTexts: Record<string, string>,
 ): PromptNarrativeToken[] {
   return tokens.map((token) => {
-    const leadingText = leadingTexts[token.id]?.trim();
+    const leadingText = token.leadingText ?? leadingTexts[token.id];
     return {
       ...token,
       payload: token.payload ? { ...token.payload } : undefined,
-      ...(leadingText ? { leadingText } : {}),
+      leadingText: leadingText || undefined,
     };
   });
 }
 
-function promptTokenViews(tokens?: PromptNarrativeToken[]) {
+export function reconcileComposerStructuredInput(
+  tokens: ComposerToken[],
+  placements: Record<string, ComposerTokenPlacement>,
+  nextValue: ComposerBarStructuredInputValue,
+): {
+  tokens: ComposerToken[];
+  placements: Record<string, ComposerTokenPlacement>;
+  leadingTexts: Record<string, string>;
+  value: string;
+} {
+  const leadingTextByTokenId = new Map(
+    nextValue.tokens.map((token) => [token.id, token.leadingText]),
+  );
+  const currentTokenIds = new Set(tokens.map((token) => token.id));
+  const remainingTokenIds = new Set(
+    nextValue.tokens
+      .map((token) => token.id)
+      .filter((tokenId) => currentTokenIds.has(tokenId)),
+  );
+  const nextTokens = tokens
+    .filter((token) => remainingTokenIds.has(token.id))
+    .map((token) => {
+      const leadingText = leadingTextByTokenId.get(token.id) ?? "";
+      const tokenWithoutLeadingText = { ...token };
+      delete tokenWithoutLeadingText.leadingText;
+      return leadingText
+        ? { ...tokenWithoutLeadingText, leadingText }
+        : tokenWithoutLeadingText;
+    });
+
+  return {
+    tokens: nextTokens,
+    placements: Object.fromEntries(
+      Object.entries(placements).filter(([tokenId]) =>
+        remainingTokenIds.has(tokenId),
+      ),
+    ),
+    leadingTexts: Object.fromEntries(
+      nextValue.tokens
+        .filter(
+          (token) => remainingTokenIds.has(token.id) && token.leadingText,
+        )
+        .map((token) => [token.id, token.leadingText]),
+    ),
+    value: nextValue.value,
+  };
+}
+
+export function promptTokenViews(tokens?: PromptNarrativeToken[]) {
   return tokens?.map((token) => ({
     id: token.id,
     type: token.type,
     label: token.label,
-    leadingText: token.leadingText,
+    leadingText: token.leadingText || undefined,
     title:
       typeof token.payload?.skillFilePath === "string"
         ? token.payload.skillFilePath
@@ -253,7 +301,7 @@ function promptTokenViews(tokens?: PromptNarrativeToken[]) {
   }));
 }
 
-function promptTextAfterTokenLeadingText(
+export function promptTextAfterTokenLeadingText(
   text: string,
   tokens?: PromptNarrativeToken[],
 ): string {
@@ -263,10 +311,26 @@ function promptTextAfterTokenLeadingText(
     if (!leadingText) {
       continue;
     }
-    if (!remainingText.startsWith(leadingText)) {
+
+    // The submitted prompt trims only its outer boundary. Prefer the exact
+    // durable segment so whitespace between the token and the suffix survives,
+    // then tolerate only the outer trim variants for token-only/indented input.
+    const candidates = [
+      leadingText,
+      leadingText.trimStart(),
+      leadingText.trimEnd(),
+      leadingText.trim(),
+    ].filter(
+      (candidate, index, values) =>
+        candidate.length > 0 && values.indexOf(candidate) === index,
+    );
+    const matchedLeadingText = candidates.find((candidate) =>
+      remainingText.startsWith(candidate),
+    );
+    if (!matchedLeadingText) {
       return text;
     }
-    remainingText = remainingText.slice(leadingText.length).replace(/^\s+/, "");
+    remainingText = remainingText.slice(matchedLeadingText.length);
   }
   return remainingText;
 }
@@ -1764,7 +1828,10 @@ export function App() {
   const composerInlineTextPrefix = useMemo(
     () =>
       composerTokens
-        .map((token) => composerTokenLeadingTexts[token.id] ?? "")
+        .map(
+          (token) =>
+            token.leadingText ?? composerTokenLeadingTexts[token.id] ?? "",
+        )
         .join(""),
     [composerTokenLeadingTexts, composerTokens],
   );
@@ -1785,7 +1852,7 @@ export function App() {
         type: token.type,
         label: token.label,
         placement: composerTokenPlacements[token.id] ?? "before",
-        leadingText: composerTokenLeadingTexts[token.id],
+        leadingText: token.leadingText ?? composerTokenLeadingTexts[token.id],
         title:
           typeof token.payload?.skillFilePath === "string"
             ? token.payload.skillFilePath
@@ -2332,10 +2399,13 @@ export function App() {
       placement === "after" && currentSlashTrigger
         ? composerValue.slice(0, currentSlashTrigger.start)
         : "";
+    // The token itself is the durable owner of its leading text; the
+    // composerTokenLeadingTexts map only mirrors it for composer editing.
+    const tokenWithPlacement = leadingText ? { ...token, leadingText } : token;
     setComposerTokens((current) =>
       current.some((item) => item.id === token.id)
         ? current
-        : [...current, token],
+        : [...current, tokenWithPlacement],
     );
     setComposerTokenPlacements((current) =>
       current[token.id] === placement ? current : { ...current, [token.id]: placement },
@@ -2367,13 +2437,41 @@ export function App() {
   }
 
   function handleRemoveComposerToken(tokenId: string): void {
-    const leadingText = composerTokenLeadingTexts[tokenId] ?? "";
-    if (leadingText) {
-      setComposerValue((current) => `${leadingText}${current}`);
-    }
-    setComposerTokens((current) =>
-      current.filter((token) => token.id !== tokenId),
+    const removedTokenIndex = composerTokens.findIndex(
+      (item) => item.id === tokenId,
     );
+    const removedToken = composerTokens[removedTokenIndex];
+    const leadingText =
+      removedToken?.leadingText ?? composerTokenLeadingTexts[tokenId] ?? "";
+    const nextToken = composerTokens[removedTokenIndex + 1];
+    if (leadingText && nextToken) {
+      const nextLeadingText =
+        nextToken.leadingText ?? composerTokenLeadingTexts[nextToken.id] ?? "";
+      const mergedLeadingText = `${leadingText}${nextLeadingText}`;
+      setComposerTokens((current) =>
+        current
+          .filter((token) => token.id !== tokenId)
+          .map((token) =>
+            token.id === nextToken.id
+              ? { ...token, leadingText: mergedLeadingText }
+              : token,
+          ),
+      );
+      setComposerTokenLeadingTexts((current) => {
+        const next = { ...current, [nextToken.id]: mergedLeadingText };
+        delete next[tokenId];
+        return next;
+      });
+    } else if (leadingText) {
+      setComposerValue((current) => `${leadingText}${current}`);
+      setComposerTokens((current) =>
+        current.filter((token) => token.id !== tokenId),
+      );
+    } else {
+      setComposerTokens((current) =>
+        current.filter((token) => token.id !== tokenId),
+      );
+    }
     setComposerTokenPlacements((current) => {
       if (!(tokenId in current)) {
         return current;
@@ -2382,34 +2480,36 @@ export function App() {
       delete next[tokenId];
       return next;
     });
-    setComposerTokenLeadingTexts((current) => {
-      if (!(tokenId in current)) {
-        return current;
-      }
-      const next = { ...current };
-      delete next[tokenId];
-      return next;
-    });
+    if (!nextToken) {
+      setComposerTokenLeadingTexts((current) => {
+        if (!(tokenId in current)) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[tokenId];
+        return next;
+      });
+    }
     requestComposerFocus();
   }
 
-  function handleComposerInputKeyDown(
-    event: ReactKeyboardEvent<HTMLTextAreaElement>,
+  function handleComposerStructuredInputChange(
+    nextValue: ComposerBarStructuredInputValue,
   ): void {
-    const tokenIdForKeyboardDelete = composerTokenIdForKeyboardDelete({
-      key: event.key,
-      selectionStart: event.currentTarget.selectionStart,
-      selectionEnd: event.currentTarget.selectionEnd,
-      valueLength: event.currentTarget.value.length,
-      tokens: composerTokens,
-      placements: composerTokenPlacements,
-    });
-    if (tokenIdForKeyboardDelete && !slashPaletteOpen) {
-      event.preventDefault();
-      handleRemoveComposerToken(tokenIdForKeyboardDelete);
-      return;
-    }
+    const nextDraft = reconcileComposerStructuredInput(
+      composerTokens,
+      composerTokenPlacements,
+      nextValue,
+    );
+    setComposerValue(nextDraft.value);
+    setComposerTokens(nextDraft.tokens);
+    setComposerTokenLeadingTexts(nextDraft.leadingTexts);
+    setComposerTokenPlacements(nextDraft.placements);
+  }
 
+  function handleComposerInputKeyDown(
+    event: ReactKeyboardEvent<HTMLTextAreaElement | HTMLDivElement>,
+  ): void {
     if (!slashPaletteOpen) {
       return;
     }
@@ -3981,6 +4081,9 @@ export function App() {
                               <ComposerBar
                                 value={composerValue}
                                 onChange={setComposerValue}
+                                onStructuredInputChange={
+                                  handleComposerStructuredInputChange
+                                }
                                 onSubmit={() => {
                                   void handleComposerSubmit();
                                 }}
@@ -4019,6 +4122,9 @@ export function App() {
                           <ComposerBar
                             value={composerValue}
                             onChange={setComposerValue}
+                            onStructuredInputChange={
+                              handleComposerStructuredInputChange
+                            }
                             onSubmit={() => {
                               void handleComposerSubmit();
                             }}

@@ -14,6 +14,10 @@ import {
   App,
   isUserQuestionSelectionAnswered,
   nextUserQuestionPromptIndex,
+  promptNarrativeTokensForComposer,
+  promptTextAfterTokenLeadingText,
+  promptTokenViews,
+  reconcileComposerStructuredInput,
   resolveWorkspaceRootForRun,
   selectedUserQuestionLabels,
   shouldResetActiveThreadForWorkspaceChange,
@@ -683,7 +687,7 @@ describe("AwakenComposerBar layout contract", () => {
     expect(html).toContain("部分附件暂时无法读取");
   });
 
-  it("renders slash palette actions and removable tokens inside the composer", () => {
+  it("renders slash palette actions with the structured editor host", () => {
     const html = renderToString(
       React.createElement(AwakenComposerBar, {
         value: "/ppt",
@@ -717,7 +721,7 @@ describe("AwakenComposerBar layout contract", () => {
       }),
     );
 
-    expect(html).toContain("composer-bar-token");
+    expect(html).toContain("composer-bar-inline-editor");
     expect(html).toContain("composer-bar-slash-palette");
     expect(html).toContain('role="listbox"');
     expect(html).toContain("pptx");
@@ -727,10 +731,10 @@ describe("AwakenComposerBar layout contract", () => {
     expect(html).not.toContain("/home/.awaken/skills/pptx/SKILL.md");
   });
 
-  it("renders selected tokens inline after the slash-leading text", () => {
+  it("renders one editing host when structured tokens are selected", () => {
     const html = renderToString(
       React.createElement(AwakenComposerBar, {
-        value: "",
+        value: "这个技能写",
         onChange: vi.fn(),
         onSubmit: vi.fn(),
         variant: "dock",
@@ -745,10 +749,24 @@ describe("AwakenComposerBar layout contract", () => {
       }),
     );
 
-    expect(html.indexOf("你好")).toBeGreaterThanOrEqual(0);
-    expect(html.indexOf("Documents")).toBeGreaterThan(html.indexOf("你好"));
-    expect(html).toContain("composer-bar-inline-text");
+    expect(html).toContain("composer-bar-inline-editor");
+    expect(html).toContain('contentEditable="plaintext-only"');
+    expect(html).not.toContain("<textarea");
     expect(html).not.toContain("composer-bar-token-remove");
+  });
+
+  it("keeps the native textarea when no structured token is selected", () => {
+    const html = renderToString(
+      React.createElement(AwakenComposerBar, {
+        value: "普通输入",
+        onChange: vi.fn(),
+        onSubmit: vi.fn(),
+        variant: "dock",
+      }),
+    );
+
+    expect(html).toContain("<textarea");
+    expect(html).not.toContain("composer-bar-inline-editor");
   });
 
   it("keeps slash preview positioning inside the viewport", () => {
@@ -854,6 +872,15 @@ describe("AwakenUserPromptBlock layout contract", () => {
     expect(html.indexOf("deep-research")).toBeLessThan(
       html.indexOf("请继续"),
     );
+    const promptStart = html.indexOf(
+      '<p class="execution-prompt-bubble-text">',
+    );
+    const promptEnd = html.indexOf("</p>", promptStart);
+    const inlinePrompt = html.slice(promptStart, promptEnd);
+    expect(inlinePrompt).toContain("你好，你看到这个 skill 不?");
+    expect(inlinePrompt).toContain("deep-research");
+    expect(inlinePrompt).toContain("请继续");
+    expect(html).not.toContain("execution-prompt-bubble-token-group");
   });
 
   it("renders selected skill tokens before text when no inline position is present", () => {
@@ -973,6 +1000,146 @@ describe("AwakenUserPromptBlock layout contract", () => {
 
     expect(html).toContain("execution-prompt-bubble-toolbar");
     expect(html).toContain("Copy prompt");
+  });
+});
+
+describe("prompt token text projection", () => {
+  it("preserves durable token boundary whitespace in view models", () => {
+    const tokens = promptNarrativeTokensForComposer(
+      [
+        {
+          id: "skill:docx:user",
+          type: "skill",
+          label: "docx",
+          leadingText: "请使用 \n",
+        },
+      ],
+      {},
+    );
+
+    expect(tokens[0]?.leadingText).toBe("请使用 \n");
+    expect(promptTokenViews(tokens)?.[0]?.leadingText).toBe("请使用 \n");
+  });
+
+  it("removes only durable leading segments and keeps suffix whitespace", () => {
+    const tokens = [
+      {
+        id: "skill:docx:user",
+        type: "skill",
+        label: "docx",
+        leadingText: "请使用 ",
+      },
+    ];
+
+    expect(
+      promptTextAfterTokenLeadingText("请使用  这个技能写", tokens),
+    ).toBe(" 这个技能写");
+    expect(promptTextAfterTokenLeadingText("请使用", tokens)).toBe("");
+  });
+});
+
+describe("structured Composer draft reconciliation", () => {
+  it("maps editable prefix segments and tail text back to durable Desktop state", () => {
+    const tokens = [
+      {
+        id: "skill:docx:user",
+        type: "skill",
+        label: "docx",
+        leadingText: "旧前文",
+      },
+      {
+        id: "skill:deep-research:user",
+        type: "skill",
+        label: "deep-research",
+        leadingText: "旧中间文",
+      },
+    ];
+
+    expect(
+      reconcileComposerStructuredInput(
+        tokens,
+        {
+          "skill:docx:user": "after",
+          "skill:deep-research:user": "after",
+        },
+        {
+          tokens: [
+            { id: "skill:docx:user", leadingText: "新前文 " },
+            {
+              id: "skill:deep-research:user",
+              leadingText: "\n新中间文 ",
+            },
+          ],
+          value: "新尾文",
+        },
+      ),
+    ).toEqual({
+      tokens: [
+        {
+          id: "skill:docx:user",
+          type: "skill",
+          label: "docx",
+          leadingText: "新前文 ",
+        },
+        {
+          id: "skill:deep-research:user",
+          type: "skill",
+          label: "deep-research",
+          leadingText: "\n新中间文 ",
+        },
+      ],
+      placements: {
+        "skill:docx:user": "after",
+        "skill:deep-research:user": "after",
+      },
+      leadingTexts: {
+        "skill:docx:user": "新前文 ",
+        "skill:deep-research:user": "\n新中间文 ",
+      },
+      value: "新尾文",
+    });
+  });
+
+  it("drops deleted atomic tokens without retaining their placement or label", () => {
+    expect(
+      reconcileComposerStructuredInput(
+        [
+          { id: "skill:docx:user", type: "skill", label: "docx" },
+          {
+            id: "skill:deep-research:user",
+            type: "skill",
+            label: "deep-research",
+          },
+        ],
+        {
+          "skill:docx:user": "after",
+          "skill:deep-research:user": "after",
+        },
+        {
+          tokens: [
+            {
+              id: "skill:deep-research:user",
+              leadingText: "已恢复的前文 ",
+            },
+          ],
+          value: "尾文",
+        },
+      ),
+    ).toEqual({
+      tokens: [
+        {
+          id: "skill:deep-research:user",
+          type: "skill",
+          label: "deep-research",
+          leadingText: "已恢复的前文 ",
+        },
+      ],
+      placements: { "skill:deep-research:user": "after" },
+      leadingTexts: {
+        "skill:deep-research:user": "已恢复的前文 ",
+      },
+      value: "尾文",
+    });
   });
 });
 

@@ -2,26 +2,46 @@
 
 .composer-bar-input-wrap {
   position: relative;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.composer-bar-token-strip {
-  display: inline-flex;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px;
   min-width: 0;
-  max-width: 100%;
 }
 
 .composer-bar-input-wrap > textarea {
-  flex: 1 1 48px;
-  min-width: min(48px, 100%);
-  width: auto !important;
+  width: 100%;
+}
+
+.composer-bar-inline-editor {
+  min-width: 0;
+  min-height: var(--composer-inline-input-min-height);
+  max-height: var(--composer-inline-input-max-height);
+  border: 0;
+  outline: 0;
+  background: transparent;
+  overflow-x: hidden;
+  overflow-y: auto;
+  color: var(--aw-text-primary);
+  font-family: var(--aw-font-sans);
+  font-size: var(--aw-font-size-md);
+  line-height: var(--aw-line-height-md);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  caret-color: currentColor;
+  cursor: text;
+}
+
+.composer-bar-inline-editor:focus,
+.composer-bar-inline-editor:focus-visible {
+  outline: 0;
+}
+
+.composer-bar-inline-editor-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.composer-bar-inline-editor:empty::before {
+  color: var(--aw-text-tertiary);
+  content: attr(data-placeholder) "\200B";
+  pointer-events: none;
 }
 
 .composer-bar-token {
@@ -37,20 +57,13 @@
   font-size: inherit;
   font-weight: var(--aw-font-weight-semibold);
   line-height: inherit;
+  margin-inline-end: var(--aw-space-2);
 }
 
 .composer-bar-token-icon {
   flex: 0 0 auto;
   color: currentColor;
   transform: translateY(0.08em);
-}
-
-.composer-bar-inline-text {
-  min-width: 0;
-  color: var(--aw-text-primary);
-  font-size: 14px;
-  line-height: 20px;
-  white-space: pre-wrap;
 }
 
 .composer-bar-token-label {

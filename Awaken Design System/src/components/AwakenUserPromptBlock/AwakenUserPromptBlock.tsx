@@ -1,5 +1,11 @@
 import "./AwakenUserPromptBlock.css";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import {
+  Fragment,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 import { FileText, Package } from "lucide-react";
 import { AwakenCopyButton } from "../AwakenCopyButton";
 
@@ -39,8 +45,12 @@ export function AwakenUserPromptBlock({
 }: AwakenUserPromptBlockProps) {
   const [uncontrolledExpanded, setUncontrolledExpanded] = useState(false);
   const blockRef = useRef<HTMLElement | null>(null);
+  const visiblePromptText = `${tokens
+    .map((token) => `${token.leadingText ?? ""}${token.label}`)
+    .join("")}${text}`;
   const canExpandText =
-    text.split(/\r\n|\r|\n/).length > 3 || text.trim().length > 160;
+    visiblePromptText.split(/\r\n|\r|\n/).length > 3 ||
+    visiblePromptText.trim().length > 160;
   const hasHiddenAttachments = attachments.length > collapsedAttachmentLimit;
   const isInteractive =
     text.trim().length > 0 || tokens.length > 0 || attachments.length > 0;
@@ -157,25 +167,18 @@ export function AwakenUserPromptBlock({
   ) {
     const tokenType = token.type ?? "token";
     return (
-      <span key={token.id} className="execution-prompt-bubble-token-group">
-        {token.leadingText ? (
-          <span className="execution-prompt-bubble-inline-text">
-            {token.leadingText}
-          </span>
-        ) : null}
-        <span
-          className={`execution-prompt-bubble-token execution-prompt-bubble-token-${tokenType}`}
-          title={token.title ?? token.label}
-        >
-          <Package
-            className="execution-prompt-bubble-token-icon"
-            size={14}
-            strokeWidth={1.9}
-            aria-hidden="true"
-          />
-          <span className="execution-prompt-bubble-token-label">
-            {token.label}
-          </span>
+      <span
+        className={`execution-prompt-bubble-token execution-prompt-bubble-token-${tokenType}`}
+        title={token.title ?? token.label}
+      >
+        <Package
+          className="execution-prompt-bubble-token-icon"
+          size={14}
+          strokeWidth={1.9}
+          aria-hidden="true"
+        />
+        <span className="execution-prompt-bubble-token-label">
+          {token.label}
         </span>
       </span>
     );
@@ -208,10 +211,19 @@ export function AwakenUserPromptBlock({
         ) : null}
         {tokens.length > 0 || text.trim().length > 0 ? (
           <div className="execution-prompt-bubble-main">
-            {tokens.map((token) => renderToken(token))}
-            {text.trim().length > 0 ? (
-              <p className="execution-prompt-bubble-text">{text}</p>
-            ) : null}
+            <p className="execution-prompt-bubble-text">
+              {tokens.map((token) => (
+                <Fragment key={token.id}>
+                  {token.leadingText ? (
+                    <span className="execution-prompt-bubble-inline-text">
+                      {token.leadingText}
+                    </span>
+                  ) : null}
+                  {renderToken(token)}
+                </Fragment>
+              ))}
+              {text}
+            </p>
           </div>
         ) : null}
         {isExpanded ? (

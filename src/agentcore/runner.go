@@ -52,12 +52,79 @@ func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *Reque
 	runner.contextGovernor = newContextGovernor(
 		NewContextEngine(contextWindowConfigFromModelConfig(config.ModelConfig)),
 		runner.buildLLMRequest,
-		func(result CompactResult) {
+		func(ctx stdcontext.Context, result CompactResult) error {
+			// Journal-first: persist the compacted conversation before it
+			// becomes the in-memory truth so a restart replays the same
+			// post-compact context instead of the pre-compact history.
+			if err := runner.persistContextCompacted(ctx, result); err != nil {
+				return err
+			}
 			runner.conversation.Context.SetMessages(result.Messages)
 			runner.compactInvokedSkillContext()
+			return nil
 		},
 	)
 	return runner
+}
+
+// SemanticCompactedMessage is the durable, blob-free form of one message in a
+// post-compact conversation. Attachment bytes never enter the journal; only
+// their identity and storage key are kept so replay can rehydrate owned blobs.
+type SemanticCompactedMessage struct {
+	Role              string                          `json:"role"`
+	Content           string                          `json:"content"`
+	ToolCalls         []context.ToolCall              `json:"tool_calls,omitempty"`
+	ToolCallID        string                          `json:"tool_call_id,omitempty"`
+	Name              string                          `json:"name,omitempty"`
+	IsError           bool                            `json:"is_error,omitempty"`
+	CompactBoundaryID string                          `json:"compact_boundary_id,omitempty"`
+	Attachments       []SemanticUserMessageAttachment `json:"attachments,omitempty"`
+}
+
+func semanticCompactedMessages(messages []context.Message) []SemanticCompactedMessage {
+	out := make([]SemanticCompactedMessage, 0, len(messages))
+	for _, message := range messages {
+		out = append(out, SemanticCompactedMessage{
+			Role:              string(message.Role),
+			Content:           message.Content,
+			ToolCalls:         append([]context.ToolCall(nil), message.ToolCalls...),
+			ToolCallID:        message.ToolCallID,
+			Name:              message.Name,
+			IsError:           message.IsError,
+			CompactBoundaryID: message.CompactBoundaryID,
+			Attachments:       semanticUserMessageAttachments(message.Attachments),
+		})
+	}
+	return out
+}
+
+// persistContextCompacted appends the context_compacted semantic record that
+// makes a compaction durable. Without a recorder (bare unit runners) the
+// compaction stays in-memory only, matching the run's overall durability.
+func (r *Runner) persistContextCompacted(ctx stdcontext.Context, result CompactResult) error {
+	if r == nil || r.recorder == nil {
+		return nil
+	}
+	payload := map[string]any{
+		"compact_boundary_id":  result.BoundaryID,
+		"mode":                 string(result.Mode),
+		"messages":             semanticCompactedMessages(result.Messages),
+		"pre_estimate_tokens":  result.PreEstimateTokens,
+		"post_estimate_tokens": result.PostEstimateTokens,
+	}
+	if r.config.SubagentOrigin != nil && strings.TrimSpace(r.config.SubagentOrigin.AgentID) != "" {
+		payload["agent_id"] = r.config.SubagentOrigin.AgentID
+	}
+	record := NewSemanticRecord(SemanticKindContextCompacted, r.threadID, r.runID, "", "", r.sessionID, payload)
+	persistCtx, cancel := durablePersistenceContext(ctx)
+	defer cancel()
+	if err := r.recorder.Append(persistCtx, record); err != nil {
+		return fmt.Errorf("persist context compaction: %w", err)
+	}
+	if err := r.recorder.Flush(persistCtx); err != nil {
+		return fmt.Errorf("flush context compaction: %w", err)
+	}
+	return nil
 }
 
 func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (answer string, runErr error) {

@@ -22,6 +22,7 @@ type failingRecorder struct {
 	failSkill      bool
 	failUser       bool
 	failFlush      bool
+	flushes        int
 	records        []SemanticRecord
 	batches        [][]SemanticKind
 }
@@ -108,9 +109,10 @@ func TestUserMessagePersistsStructuredAttachmentsAndComposerTokens(t *testing.T)
 		},
 	})
 	agent.SetPendingComposerTokens([]SemanticComposerToken{{
-		ID:    "skill:docs:user",
-		Type:  "skill",
-		Label: "docs",
+		ID:          "skill:docs:user",
+		Type:        "skill",
+		LeadingText: "先阅读附件，然后使用 ",
+		Label:       "docs",
 		Payload: map[string]any{
 			"skillId":      "docs",
 			"sourceOrigin": "user",
@@ -156,6 +158,9 @@ func TestUserMessagePersistsStructuredAttachmentsAndComposerTokens(t *testing.T)
 	if len(payload.ComposerTokens) != 1 || payload.ComposerTokens[0].ID != "skill:docs:user" ||
 		payload.ComposerTokens[0].Payload["skillId"] != "docs" {
 		t.Fatalf("composer token identity missing: %+v", payload.ComposerTokens)
+	}
+	if payload.ComposerTokens[0].LeadingText != "先阅读附件，然后使用 " {
+		t.Fatalf("composer token leadingText missing from durable payload: %+v", payload.ComposerTokens)
 	}
 }
 
@@ -416,10 +421,54 @@ func semanticKindIndex(records []SemanticRecord, kind SemanticKind) int {
 }
 
 func (r *failingRecorder) Flush(context.Context) error {
+	r.flushes++
 	if r.failFlush {
 		return errors.New("fsync failed")
 	}
 	return nil
+}
+
+func TestContextCompactionIsFlushedBeforeConversationChanges(t *testing.T) {
+	original := []convcontext.Message{{Role: convcontext.RoleUser, Content: "old history"}}
+	compacted := []convcontext.Message{{
+		Role:              convcontext.RoleUser,
+		Content:           "durable summary",
+		CompactBoundaryID: "compact_durable",
+	}}
+	conversation := convcontext.NewConversation(nil)
+	conversation.Context.SetMessages(original)
+	runner := NewRunner(AgentConfig{}, conversation, NewRequestBuilder(AgentConfig{}))
+	runner.threadID = "thread_compact"
+	runner.runID = "run_compact"
+	runner.sessionID = "session_compact"
+	recorder := &failingRecorder{}
+	runner.recorder = recorder
+
+	if err := runner.persistContextCompacted(context.Background(), CompactResult{
+		Mode:               CompactModeAuto,
+		BoundaryID:         "compact_durable",
+		Messages:           compacted,
+		PreEstimateTokens:  90000,
+		PostEstimateTokens: 12000,
+	}); err != nil {
+		t.Fatalf("persistContextCompacted: %v", err)
+	}
+	if recorder.flushes != 1 || len(recorder.records) != 1 || recorder.records[0].Kind != SemanticKindContextCompacted {
+		t.Fatalf("compaction was not appended and flushed exactly once: records=%+v flushes=%d", recorder.records, recorder.flushes)
+	}
+
+	failing := &failingRecorder{failFlush: true}
+	runner.recorder = failing
+	if err := runner.contextGovernor.applyCompactResult(context.Background(), CompactResult{
+		BoundaryID: "compact_unconfirmed",
+		Messages:   compacted,
+	}); err == nil {
+		t.Fatal("expected compaction flush failure")
+	}
+	got := conversation.Context.GetMessages()
+	if len(got) != 1 || got[0].Content != "old history" || got[0].CompactBoundaryID != "" {
+		t.Fatalf("unconfirmed compaction replaced in-memory truth: %+v", got)
+	}
 }
 
 func TestEmitToolCallPersistFailureBlocksBeforeExecution(t *testing.T) {

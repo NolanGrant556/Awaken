@@ -28,6 +28,7 @@ const (
 	SemanticKindMassMessageReviewRequested SemanticKind = "mass_message_review_requested"
 	SemanticKindMassMessageReviewResolved  SemanticKind = "mass_message_review_resolved"
 	SemanticKindRuntimeNotice              SemanticKind = "runtime_notice"
+	SemanticKindContextCompacted           SemanticKind = "context_compacted"
 	SemanticKindRecoveryDecision           SemanticKind = "recovery_decision"
 	SemanticKindTurnBoundary               SemanticKind = "turn_boundary"
 	SemanticKindRunTerminal                SemanticKind = "run_terminal"
@@ -69,10 +70,13 @@ type SemanticUserMessageAttachment struct {
 // composer token. Payload stays open-ended so new token providers can preserve
 // their identity without teaching Agent Core provider-specific fields.
 type SemanticComposerToken struct {
-	ID      string         `json:"id"`
-	Type    string         `json:"type"`
-	Label   string         `json:"label"`
-	Payload map[string]any `json:"payload,omitempty"`
+	ID   string `json:"id"`
+	Type string `json:"type"`
+	// LeadingText preserves the prompt text segment that appears immediately
+	// before the token so durable replay keeps the token's inline position.
+	LeadingText string         `json:"leadingText,omitempty"`
+	Label       string         `json:"label"`
+	Payload     map[string]any `json:"payload,omitempty"`
 }
 
 // SemanticRecorder persists durable semantic facts. All methods return error.

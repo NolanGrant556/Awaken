@@ -133,6 +133,67 @@ describe("thread transcript replay helpers", () => {
     });
   });
 
+  it("replays inline token position through durable leadingText", () => {
+    const leadingText = "现在我需要你帮我分析现有的财务数据风险，然后使用 ";
+    const transcript: RuntimeThreadTranscript = {
+      thread: {
+        threadId: "thread-inline-token",
+        label: "财务风险报告",
+        runId: "run-inline-token",
+        workspace: {
+          workspaceRoot: "/tmp/awaken",
+          writableRoots: ["/tmp/awaken"],
+        },
+        createdAt: "2026-07-13T00:00:00Z",
+        updatedAt: "2026-07-13T00:00:10Z",
+      },
+      runs: [
+        {
+          run: {
+            runId: "run-inline-token",
+            threadId: "thread-inline-token",
+            input:
+              "现在我需要你帮我分析现有的财务数据风险，然后使用 输出一份风险报告给我",
+            composerTokens: [
+              {
+                id: "skill:pptx:user",
+                type: "skill",
+                label: "pptx",
+                leadingText,
+                payload: {
+                  skillId: "pptx",
+                  sourceOrigin: "user",
+                  skillFilePath: "/tmp/skills/pptx/SKILL.md",
+                },
+              },
+            ],
+            status: "finished",
+            result: "done",
+            cancelRequested: false,
+            createdAt: "2026-07-13T00:00:00Z",
+            updatedAt: "2026-07-13T00:00:10Z",
+            finishedAt: "2026-07-13T00:00:10Z",
+          },
+          events: [],
+        },
+      ],
+    };
+
+    const actions = actionsForThreadTranscript(transcript);
+    const state = actions.reduce(reduceRuntimeState, createInitialRuntimeState());
+    const promptItem = state.narrative.committedItems.find(
+      (item) => item.kind === "prompt",
+    );
+    expect(promptItem?.kind).toBe("prompt");
+    if (promptItem?.kind !== "prompt") {
+      throw new Error("prompt item missing");
+    }
+    expect(promptItem.tokens?.[0]?.leadingText).toBe(leadingText);
+    expect(promptItem.text).toBe(
+      "现在我需要你帮我分析现有的财务数据风险，然后使用 输出一份风险报告给我",
+    );
+  });
+
   it("restores assistant text when one semantic record projects to frames with the same seq", () => {
     const transcript: RuntimeThreadTranscript = {
       thread: {

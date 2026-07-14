@@ -106,9 +106,12 @@ func TestStartRunComposerSkillSelectionReachesFinalProviderRequest(t *testing.T)
 			for _, skillID := range tc.selected {
 				skillPath := skillPaths[skillID]
 				tokens = append(tokens, ComposerToken{
-					ID:    "skill:" + skillID + ":user",
-					Type:  "skill",
-					Label: skillID,
+					ID:   "skill:" + skillID + ":user",
+					Type: "skill",
+					// Inline position metadata must not disturb skill
+					// activation or the final provider request.
+					LeadingText: "然后使用 ",
+					Label:       skillID,
 					Payload: ComposerTokenPayload{
 						SkillID:       skillID,
 						SourceOrigin:  "user",

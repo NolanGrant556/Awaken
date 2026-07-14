@@ -94,8 +94,9 @@ func TestContextGovernorPrepareRequestAutoCompactsAndRebuilds(t *testing.T) {
 			Messages:      compactedMessages,
 			EnvelopeDebug: &compactedEnvelope,
 		}, nil
-	}, func(result CompactResult) {
+	}, func(_ stdcontext.Context, result CompactResult) error {
 		appliedMessages = cloneContextMessages(result.Messages)
+		return nil
 	})
 	governor.consecutiveCompactFailures = 2
 

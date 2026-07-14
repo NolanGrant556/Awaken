@@ -90,10 +90,14 @@ type StartRunRequest struct {
 }
 
 type ComposerToken struct {
-	ID      string               `json:"id"`
-	Type    string               `json:"type"`
-	Label   string               `json:"label"`
-	Payload ComposerTokenPayload `json:"payload,omitempty"`
+	ID   string `json:"id"`
+	Type string `json:"type"`
+	// LeadingText is the prompt text segment immediately before this token.
+	// It keeps the token's inline position durable across canonical
+	// user_message reflow and thread replay.
+	LeadingText string               `json:"leadingText,omitempty"`
+	Label       string               `json:"label"`
+	Payload     ComposerTokenPayload `json:"payload,omitempty"`
 }
 
 type ComposerTokenPayload struct {

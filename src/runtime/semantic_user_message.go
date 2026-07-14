@@ -30,10 +30,11 @@ func semanticComposerTokensForRun(tokens []ComposerToken) []agentcore.SemanticCo
 			payload = nil
 		}
 		converted = append(converted, agentcore.SemanticComposerToken{
-			ID:      token.ID,
-			Type:    token.Type,
-			Label:   token.Label,
-			Payload: payload,
+			ID:          token.ID,
+			Type:        token.Type,
+			LeadingText: token.LeadingText,
+			Label:       token.Label,
+			Payload:     payload,
 		})
 	}
 	return converted

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"awaken/src/mcpclient"
@@ -85,6 +86,11 @@ type mcpServerShorthand struct {
 	InsecureSkipVerify bool              `json:"insecureSkipVerify,omitempty"`
 }
 
+type effectiveMCPServerConfig struct {
+	Scope  mcpclient.Scope
+	Config mcpclient.McpServerConfig
+}
+
 func (h mcpHandlers) handleListServers(w http.ResponseWriter, r *http.Request) {
 	if h.manager == nil {
 		writeErrorJSON(w, http.StatusServiceUnavailable, "MCP_UNAVAILABLE", "mcp manager not configured")
@@ -117,10 +123,6 @@ func (h mcpHandlers) handleConfigureServers(w http.ResponseWriter, r *http.Reque
 		writeErrorJSON(w, http.StatusServiceUnavailable, "MCP_UNAVAILABLE", "mcp manager not configured")
 		return
 	}
-	if strings.TrimSpace(h.workspaceRoot) == "" {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "WORKSPACE_UNAVAILABLE", "workspace root not configured")
-		return
-	}
 
 	var req configureMCPServersRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -132,19 +134,36 @@ func (h mcpHandlers) handleConfigureServers(w http.ResponseWriter, r *http.Reque
 		writeErrorJSON(w, http.StatusBadRequest, "INVALID_MCP_CONFIG", err.Error())
 		return
 	}
-
-	userCfg, err := mcpclient.LoadUserConfig()
+	currentUserCfg, err := mcpclient.LoadUserConfig()
 	if err != nil {
 		writeErrorJSON(w, http.StatusBadRequest, "USER_CONFIG_INVALID", err.Error())
 		return
 	}
-	if userCfg.Servers == nil {
-		userCfg.Servers = map[string]mcpclient.McpServerConfig{}
+	var projectCfg mcpclient.ConfigFile
+	if strings.TrimSpace(h.workspaceRoot) != "" {
+		projectCfg, err = mcpclient.LoadProjectConfig(h.workspaceRoot)
+		if err != nil {
+			writeErrorJSON(w, http.StatusBadRequest, "PROJECT_CONFIG_INVALID", err.Error())
+			return
+		}
 	}
 	for name, cfg := range servers {
-		userCfg.Servers[name] = cfg
+		previous, ok := currentUserCfg.Servers[name]
+		if !ok || mcpclient.CredentialIdentity(mcpclient.ScopeUser, name, previous) == mcpclient.CredentialIdentity(mcpclient.ScopeUser, name, cfg) {
+			continue
+		}
+		if err := h.manager.ClearCredentialsFor(mcpclient.ScopedMcpServerConfig{Name: name, Scope: mcpclient.ScopeUser, Config: previous}); err != nil {
+			writeErrorJSON(w, http.StatusInternalServerError, "CREDENTIAL_CLEAR_FAILED", err.Error())
+			return
+		}
 	}
-	if err := mcpclient.SaveUserConfig(userCfg); err != nil {
+
+	if err := mcpclient.MutateUserConfig(func(userCfg *mcpclient.ConfigFile) (bool, error) {
+		for name, cfg := range servers {
+			userCfg.Servers[name] = cfg
+		}
+		return true, nil
+	}); err != nil {
 		writeErrorJSON(w, http.StatusInternalServerError, "USER_CONFIG_WRITE_FAILED", err.Error())
 		return
 	}
@@ -152,14 +171,23 @@ func (h mcpHandlers) handleConfigureServers(w http.ResponseWriter, r *http.Reque
 	serverNames := make([]string, 0, len(servers))
 	for name, cfg := range servers {
 		serverNames = append(serverNames, name)
+		runtimeScope := mcpclient.ScopeUser
+		runtimeConfig := cfg
+		if projectConfig, ok := projectCfg.Servers[name]; ok {
+			runtimeScope = mcpclient.ScopeProject
+			runtimeConfig = projectConfig
+		}
 		// Detach from the request context so the async connect loop keeps
 		// running after the HTTP response is sent. Without this, request
 		// cancellation would mask the real connection failure reason.
-		h.manager.Start(context.WithoutCancel(r.Context()), []mcpclient.ScopedMcpServerConfig{{
+		if err := h.manager.RestartWithConfig(context.WithoutCancel(r.Context()), mcpclient.ScopedMcpServerConfig{
 			Name:   name,
-			Scope:  mcpclient.ScopeUser,
-			Config: cfg,
-		}})
+			Scope:  runtimeScope,
+			Config: runtimeConfig,
+		}); err != nil {
+			writeErrorJSON(w, http.StatusInternalServerError, "RESTART_FAILED", err.Error())
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, configureMCPServersResponse{
 		ServerNames: serverNames,
@@ -173,10 +201,6 @@ func (h mcpHandlers) handleGetServerConfig(w http.ResponseWriter, r *http.Reques
 		writeErrorJSON(w, http.StatusServiceUnavailable, "MCP_UNAVAILABLE", "mcp manager not configured")
 		return
 	}
-	if strings.TrimSpace(h.workspaceRoot) == "" {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "WORKSPACE_UNAVAILABLE", "workspace root not configured")
-		return
-	}
 
 	name := r.PathValue("name")
 	if name == "" {
@@ -184,23 +208,13 @@ func (h mcpHandlers) handleGetServerConfig(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	userCfg, err := mcpclient.LoadUserConfig()
+	effective, found, err := h.loadEffectiveServerConfig(name)
 	if err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, "USER_CONFIG_INVALID", err.Error())
+		writeErrorJSON(w, http.StatusBadRequest, "MCP_CONFIG_INVALID", err.Error())
 		return
 	}
-	if cfg, ok := userCfg.Servers[name]; ok {
-		writeServerConfig(w, name, mcpclient.ScopeUser, cfg)
-		return
-	}
-
-	projectCfg, err := mcpclient.LoadProjectConfig(h.workspaceRoot)
-	if err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, "PROJECT_CONFIG_INVALID", err.Error())
-		return
-	}
-	if cfg, ok := projectCfg.Servers[name]; ok {
-		writeServerConfig(w, name, mcpclient.ScopeProject, cfg)
+	if found {
+		writeServerConfig(w, name, effective.Scope, effective.Config)
 		return
 	}
 
@@ -220,18 +234,49 @@ func writeServerConfig(w http.ResponseWriter, name string, scope mcpclient.Scope
 	})
 }
 
-// userMcpConfigPath returns the absolute path to ~/.awaken/mcp.json.
+// userMcpConfigPath returns the absolute path to
+// ~/.awaken/config/mcp-servers.json.
 func userMcpConfigPath() string {
 	return mcpclient.UserConfigPath()
+}
+
+func (h mcpHandlers) configPath(scope mcpclient.Scope) string {
+	if scope == mcpclient.ScopeProject {
+		return filepath.Join(h.workspaceRoot, "awaken.mcp.json")
+	}
+	return userMcpConfigPath()
+}
+
+func (h mcpHandlers) loadEffectiveServerConfig(name string) (effectiveMCPServerConfig, bool, error) {
+	if strings.TrimSpace(h.workspaceRoot) != "" {
+		projectCfg, err := mcpclient.LoadProjectConfig(h.workspaceRoot)
+		if err != nil {
+			return effectiveMCPServerConfig{}, false, fmt.Errorf("load project mcp config: %w", err)
+		}
+		if cfg, ok := projectCfg.Servers[name]; ok {
+			return effectiveMCPServerConfig{Scope: mcpclient.ScopeProject, Config: cfg}, true, nil
+		}
+	}
+	userCfg, err := mcpclient.LoadUserConfig()
+	if err != nil {
+		return effectiveMCPServerConfig{}, false, fmt.Errorf("load user mcp config: %w", err)
+	}
+	if cfg, ok := userCfg.Servers[name]; ok {
+		return effectiveMCPServerConfig{Scope: mcpclient.ScopeUser, Config: cfg}, true, nil
+	}
+	return effectiveMCPServerConfig{}, false, nil
+}
+
+func (h mcpHandlers) mutateServerConfig(scope mcpclient.Scope, mutate func(*mcpclient.ConfigFile) (bool, error)) error {
+	if scope == mcpclient.ScopeProject {
+		return mcpclient.MutateProjectConfig(h.workspaceRoot, mutate)
+	}
+	return mcpclient.MutateUserConfig(mutate)
 }
 
 func (h mcpHandlers) handleUpdateServerConfig(w http.ResponseWriter, r *http.Request) {
 	if h.manager == nil {
 		writeErrorJSON(w, http.StatusServiceUnavailable, "MCP_UNAVAILABLE", "mcp manager not configured")
-		return
-	}
-	if strings.TrimSpace(h.workspaceRoot) == "" {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "WORKSPACE_UNAVAILABLE", "workspace root not configured")
 		return
 	}
 
@@ -252,24 +297,33 @@ func (h mcpHandlers) handleUpdateServerConfig(w http.ResponseWriter, r *http.Req
 		writeErrorJSON(w, http.StatusBadRequest, "INVALID_MCP_CONFIG", err.Error())
 		return
 	}
-
-	userCfg, err := mcpclient.LoadUserConfig()
+	effective, found, err := h.loadEffectiveServerConfig(name)
 	if err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, "USER_CONFIG_INVALID", err.Error())
+		writeErrorJSON(w, http.StatusBadRequest, "MCP_CONFIG_INVALID", err.Error())
 		return
 	}
-	if userCfg.Servers == nil {
-		userCfg.Servers = map[string]mcpclient.McpServerConfig{}
+	scope := mcpclient.ScopeUser
+	if found {
+		scope = effective.Scope
+		if mcpclient.CredentialIdentity(scope, name, effective.Config) != mcpclient.CredentialIdentity(scope, name, cfg) {
+			if err := h.manager.ClearCredentialsFor(mcpclient.ScopedMcpServerConfig{Name: name, Scope: scope, Config: effective.Config}); err != nil {
+				writeErrorJSON(w, http.StatusInternalServerError, "CREDENTIAL_CLEAR_FAILED", err.Error())
+				return
+			}
+		}
 	}
-	userCfg.Servers[name] = cfg
-	if err := mcpclient.SaveUserConfig(userCfg); err != nil {
-		writeErrorJSON(w, http.StatusInternalServerError, "USER_CONFIG_WRITE_FAILED", err.Error())
+
+	if err := h.mutateServerConfig(scope, func(configFile *mcpclient.ConfigFile) (bool, error) {
+		configFile.Servers[name] = cfg
+		return true, nil
+	}); err != nil {
+		writeErrorJSON(w, http.StatusInternalServerError, "MCP_CONFIG_WRITE_FAILED", err.Error())
 		return
 	}
 
 	if err := h.manager.RestartWithConfig(context.WithoutCancel(r.Context()), mcpclient.ScopedMcpServerConfig{
 		Name:   name,
-		Scope:  mcpclient.ScopeUser,
+		Scope:  scope,
 		Config: cfg,
 	}); err != nil {
 		writeErrorJSON(w, http.StatusInternalServerError, "RESTART_FAILED", err.Error())
@@ -278,7 +332,7 @@ func (h mcpHandlers) handleUpdateServerConfig(w http.ResponseWriter, r *http.Req
 
 	writeJSON(w, http.StatusOK, configureMCPServersResponse{
 		ServerNames: []string{name},
-		ConfigPath:  userMcpConfigPath(),
+		ConfigPath:  h.configPath(scope),
 		Message:     fmt.Sprintf("updated MCP server %q", name),
 	})
 }
@@ -315,10 +369,6 @@ func (h mcpHandlers) handleDeleteServer(w http.ResponseWriter, r *http.Request) 
 		writeErrorJSON(w, http.StatusServiceUnavailable, "MCP_UNAVAILABLE", "mcp manager not configured")
 		return
 	}
-	if strings.TrimSpace(h.workspaceRoot) == "" {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "WORKSPACE_UNAVAILABLE", "workspace root not configured")
-		return
-	}
 
 	name := r.PathValue("name")
 	if name == "" {
@@ -326,36 +376,10 @@ func (h mcpHandlers) handleDeleteServer(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Remove from user config if present; otherwise remove from project config.
-	deleted := false
-	userCfg, err := mcpclient.LoadUserConfig()
+	effective, deleted, err := h.loadEffectiveServerConfig(name)
 	if err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, "USER_CONFIG_INVALID", err.Error())
+		writeErrorJSON(w, http.StatusBadRequest, "MCP_CONFIG_INVALID", err.Error())
 		return
-	}
-	if _, ok := userCfg.Servers[name]; ok {
-		delete(userCfg.Servers, name)
-		if err := mcpclient.SaveUserConfig(userCfg); err != nil {
-			writeErrorJSON(w, http.StatusInternalServerError, "USER_CONFIG_WRITE_FAILED", err.Error())
-			return
-		}
-		deleted = true
-	}
-
-	if !deleted {
-		projectCfg, err := mcpclient.LoadProjectConfig(h.workspaceRoot)
-		if err != nil {
-			writeErrorJSON(w, http.StatusBadRequest, "PROJECT_CONFIG_INVALID", err.Error())
-			return
-		}
-		if _, ok := projectCfg.Servers[name]; ok {
-			delete(projectCfg.Servers, name)
-			if err := mcpclient.SaveProjectConfig(h.workspaceRoot, projectCfg); err != nil {
-				writeErrorJSON(w, http.StatusInternalServerError, "PROJECT_CONFIG_WRITE_FAILED", err.Error())
-				return
-			}
-			deleted = true
-		}
 	}
 
 	// Determine whether the manager knows this server so we can still allow removal
@@ -367,9 +391,39 @@ func (h mcpHandlers) handleDeleteServer(w http.ResponseWriter, r *http.Request) 
 		writeErrorJSON(w, http.StatusNotFound, "SERVER_NOT_FOUND", fmt.Sprintf("mcp server %q not found", name))
 		return
 	}
+	if deleted {
+		if err := h.manager.ClearCredentialsFor(mcpclient.ScopedMcpServerConfig{Name: name, Scope: effective.Scope, Config: effective.Config}); err != nil {
+			writeErrorJSON(w, http.StatusInternalServerError, "CREDENTIAL_CLEAR_FAILED", err.Error())
+			return
+		}
+		if err := h.mutateServerConfig(effective.Scope, func(configFile *mcpclient.ConfigFile) (bool, error) {
+			delete(configFile.Servers, name)
+			return true, nil
+		}); err != nil {
+			writeErrorJSON(w, http.StatusInternalServerError, "MCP_CONFIG_WRITE_FAILED", err.Error())
+			return
+		}
+	}
 
-	// Stop and unregister the running server (if any) so it disappears from the UI.
-	_ = h.manager.Remove(name)
+	// Deleting a project override reveals a same-name user config. Rebuild the
+	// runtime from that fallback instead of making the server disappear.
+	if deleted && effective.Scope == mcpclient.ScopeProject {
+		userCfg, loadErr := mcpclient.LoadUserConfig()
+		if loadErr != nil {
+			writeErrorJSON(w, http.StatusBadRequest, "USER_CONFIG_INVALID", loadErr.Error())
+			return
+		}
+		if fallback, ok := userCfg.Servers[name]; ok {
+			if err := h.manager.RestartWithConfig(context.WithoutCancel(r.Context()), mcpclient.ScopedMcpServerConfig{Name: name, Scope: mcpclient.ScopeUser, Config: fallback}); err != nil {
+				writeErrorJSON(w, http.StatusInternalServerError, "RESTART_FAILED", err.Error())
+				return
+			}
+		} else {
+			_ = h.manager.Remove(name)
+		}
+	} else {
+		_ = h.manager.Remove(name)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"name": name})
 }
@@ -502,6 +556,9 @@ func (h mcpHandlers) handleServerDisable(w http.ResponseWriter, r *http.Request)
 		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "server name is required")
 		return
 	}
+	if h.setPersistedServerEnabled(w, r, name, false) {
+		return
+	}
 	if err := h.manager.Disable(name); err != nil {
 		if errors.Is(err, mcpclient.ErrServerNotFound) {
 			writeErrorJSON(w, http.StatusNotFound, "SERVER_NOT_FOUND", err.Error())
@@ -523,6 +580,9 @@ func (h mcpHandlers) handleServerEnable(w http.ResponseWriter, r *http.Request) 
 		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "server name is required")
 		return
 	}
+	if h.setPersistedServerEnabled(w, r, name, true) {
+		return
+	}
 	// Detach from the request context so the async connect loop keeps
 	// running after the HTTP response is sent. Without this, request
 	// cancellation would mask the real connection failure reason.
@@ -535,6 +595,35 @@ func (h mcpHandlers) handleServerEnable(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// setPersistedServerEnabled updates the effective config owner and rebuilds
+// the manager entry. It returns true when the request has been fully handled;
+// dynamic-only servers return false and keep the existing runtime-only path.
+func (h mcpHandlers) setPersistedServerEnabled(w http.ResponseWriter, r *http.Request, name string, enabled bool) bool {
+	effective, found, err := h.loadEffectiveServerConfig(name)
+	if err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "MCP_CONFIG_INVALID", err.Error())
+		return true
+	}
+	if !found {
+		return false
+	}
+	value := enabled
+	effective.Config.Enabled = &value
+	if err := h.mutateServerConfig(effective.Scope, func(configFile *mcpclient.ConfigFile) (bool, error) {
+		configFile.Servers[name] = effective.Config
+		return true, nil
+	}); err != nil {
+		writeErrorJSON(w, http.StatusInternalServerError, "MCP_CONFIG_WRITE_FAILED", err.Error())
+		return true
+	}
+	if err := h.manager.RestartWithConfig(context.WithoutCancel(r.Context()), mcpclient.ScopedMcpServerConfig{Name: name, Scope: effective.Scope, Config: effective.Config}); err != nil {
+		writeErrorJSON(w, http.StatusInternalServerError, "RESTART_FAILED", err.Error())
+		return true
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return true
 }
 
 func (h mcpHandlers) handleListTools(w http.ResponseWriter, r *http.Request) {

@@ -33,6 +33,7 @@ type RuntimeManager interface {
 	Remove(name string) error
 	Snapshot() []mcpclient.ServerSnapshot
 	SnapshotServer(name string) (mcpclient.ServerSnapshot, error)
+	ClearCredentialsFor(config mcpclient.ScopedMcpServerConfig) error
 }
 
 // Registry is the central connector lifecycle manager. It holds connector
@@ -51,6 +52,7 @@ type Registry struct {
 type activeEntry struct {
 	connected  bool
 	serverKeys []string // MCP server names injected for this connector
+	scope      mcpclient.Scope
 }
 
 // NewRegistry creates a connector registry backed by the given runtime manager.
@@ -123,6 +125,36 @@ func (r *Registry) LoadSources(ctx context.Context, sources []ConnectorSource) e
 	return nil
 }
 
+// RestoreBuiltinOwnership rebuilds builtin connector ownership from the
+// canonical user MCP config. Provider identity is the durable owner; server
+// names alone are never enough because a manual server may use the same name.
+func (r *Registry) RestoreBuiltinOwnership(userCfg mcpclient.ConfigFile) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for id, def := range r.defs {
+		if def.SourceOrigin != SourceBuiltin {
+			continue
+		}
+		providerID := def.ProviderID
+		if providerID == "" {
+			providerID = tool.ProviderID("connector:" + def.ID)
+		}
+		var serverKeys []string
+		for name, cfg := range userCfg.Servers {
+			if cfg.Provider == nil || cfg.Provider.ProviderID != providerID || cfg.Provider.Source != tool.SourceConnector {
+				continue
+			}
+			serverKeys = append(serverKeys, name)
+		}
+		if len(serverKeys) == 0 {
+			continue
+		}
+		sort.Strings(serverKeys)
+		r.active[id] = &activeEntry{connected: true, serverKeys: serverKeys, scope: mcpclient.ScopeUser}
+	}
+}
+
 // Connect initiates a connector. It generates MCP server configs from the
 // connector definition (via factory or raw config), injects them into the
 // MCP runtime, and marks the connector as connected.
@@ -142,18 +174,23 @@ func (r *Registry) Connect(ctx context.Context, connectorID string) error {
 	if entry := r.active[connectorID]; entry != nil && entry.connected {
 		// If the connector is marked connected but its servers are no longer in the
 		// runtime (e.g. the user deleted the MCP server from the settings dialog),
-		// reset the entry and allow reconnect.
+		// or every persisted builtin server is disabled, reset the entry and allow
+		// the card's Connect action to restore an enabled runtime.
 		stale := false
+		allDisabled := false
 		if def.SourceOrigin == SourceBuiltin {
 			stale = true
+			allDisabled = true
 			for _, key := range entry.serverKeys {
-				if _, err := r.manager.SnapshotServer(key); err == nil {
+				if snapshot, err := r.manager.SnapshotServer(key); err == nil {
 					stale = false
-					break
+					if snapshot.State != mcpclient.StateDisabled {
+						allDisabled = false
+					}
 				}
 			}
 		}
-		if !stale {
+		if !stale && !allDisabled {
 			return ErrConnectorAlreadyConnected
 		}
 		entry.connected = false
@@ -193,23 +230,37 @@ func (r *Registry) Connect(ctx context.Context, connectorID string) error {
 	}
 
 	var serverKeys []string
+	activeScope := mcpclient.ScopeDynamic
 	if def.SourceOrigin == SourceBuiltin {
 		// Builtin connectors are shortcuts for adding user-level MCP servers.
 		// Persist the generated config and start it normally so it behaves like
 		// any other server added through the MCP settings dialog.
+		activeScope = mcpclient.ScopeUser
 		userCfg, err := mcpclient.LoadUserConfig()
 		if err != nil {
 			return fmt.Errorf("load user mcp config: %w", err)
 		}
-		if userCfg.Servers == nil {
-			userCfg.Servers = map[string]mcpclient.McpServerConfig{}
+		for key, scoped := range scopedConfigs {
+			previous, ok := userCfg.Servers[key]
+			if !ok || mcpclient.CredentialIdentity(mcpclient.ScopeUser, key, previous) == mcpclient.CredentialIdentity(mcpclient.ScopeUser, key, scoped.Config) {
+				continue
+			}
+			if err := r.manager.ClearCredentialsFor(mcpclient.ScopedMcpServerConfig{Name: key, Scope: mcpclient.ScopeUser, Config: previous}); err != nil {
+				return fmt.Errorf("clear credentials for %q: %w", key, err)
+			}
 		}
-		for key, cfg := range scopedConfigs {
-			userCfg.Servers[key] = cfg.Config
-			serverKeys = append(serverKeys, key)
-		}
-		if err := mcpclient.SaveUserConfig(userCfg); err != nil {
+		if err := mcpclient.MutateUserConfig(func(userCfg *mcpclient.ConfigFile) (bool, error) {
+			for key, cfg := range scopedConfigs {
+				userCfg.Servers[key] = cfg.Config
+				serverKeys = append(serverKeys, key)
+			}
+			return true, nil
+		}); err != nil {
 			return fmt.Errorf("save user mcp config: %w", err)
+		}
+		sort.Strings(serverKeys)
+		for _, key := range serverKeys {
+			_ = r.manager.Remove(key)
 		}
 		// Detach from the request context so the async connect loop keeps
 		// running after the HTTP response is sent.
@@ -225,6 +276,7 @@ func (r *Registry) Connect(ctx context.Context, connectorID string) error {
 	r.active[connectorID] = &activeEntry{
 		connected:  true,
 		serverKeys: serverKeys,
+		scope:      activeScope,
 	}
 
 	r.logger.Debugf("connector %q connected with %d server(s): %v", connectorID, len(serverKeys), serverKeys)
@@ -262,15 +314,23 @@ func (r *Registry) Disconnect(ctx context.Context, connectorID string) error {
 		if err != nil {
 			return fmt.Errorf("load user mcp config: %w", err)
 		}
-		if userCfg.Servers == nil {
-			userCfg.Servers = map[string]mcpclient.McpServerConfig{}
+		for _, key := range entry.serverKeys {
+			if cfg, ok := userCfg.Servers[key]; ok {
+				if err := r.manager.ClearCredentialsFor(mcpclient.ScopedMcpServerConfig{Name: key, Scope: mcpclient.ScopeUser, Config: cfg}); err != nil {
+					return fmt.Errorf("clear credentials for %q: %w", key, err)
+				}
+			}
+		}
+		if err := mcpclient.MutateUserConfig(func(userCfg *mcpclient.ConfigFile) (bool, error) {
+			for _, key := range entry.serverKeys {
+				delete(userCfg.Servers, key)
+			}
+			return true, nil
+		}); err != nil {
+			return fmt.Errorf("save user mcp config: %w", err)
 		}
 		for _, key := range entry.serverKeys {
-			delete(userCfg.Servers, key)
 			_ = r.manager.Remove(key)
-		}
-		if err := mcpclient.SaveUserConfig(userCfg); err != nil {
-			return fmt.Errorf("save user mcp config: %w", err)
 		}
 	} else {
 		// Remove each injected server from the runtime.
@@ -330,7 +390,7 @@ func (r *Registry) List() []ConnectorStatus {
 		if entry != nil && entry.connected {
 			status.ServerNames = entry.serverKeys
 			// Derive state from the MCP server snapshots.
-			status.State = deriveConnectorState(entry.serverKeys, snapByServer)
+			status.State = deriveConnectorState(entry.serverKeys, entry.scope, snapByServer)
 			status.ProviderReadiness = connectorProviderReadiness(status.State)
 		}
 
@@ -426,7 +486,7 @@ func (r *Registry) Status(connectorID string) (ConnectorStatus, error) {
 	entry := r.active[connectorID]
 	if entry != nil && entry.connected {
 		status.ServerNames = entry.serverKeys
-		status.State = deriveConnectorState(entry.serverKeys, snapByServer)
+		status.State = deriveConnectorState(entry.serverKeys, entry.scope, snapByServer)
 		status.ProviderReadiness = connectorProviderReadiness(status.State)
 	}
 
@@ -456,7 +516,7 @@ func (r *Registry) SetManager(manager RuntimeManager) {
 // deriveConnectorState computes a connector's state from its MCP server states.
 // If any server is connected -> connected. If any needs auth -> needs-auth.
 // If any failed -> failed. If all pending -> pending. Otherwise disconnected.
-func deriveConnectorState(serverKeys []string, snapByServer map[string]mcpclient.ServerSnapshot) ConnectorState {
+func deriveConnectorState(serverKeys []string, expectedScope mcpclient.Scope, snapByServer map[string]mcpclient.ServerSnapshot) ConnectorState {
 	if len(serverKeys) == 0 {
 		return StateDisconnected
 	}
@@ -468,7 +528,7 @@ func deriveConnectorState(serverKeys []string, snapByServer map[string]mcpclient
 
 	for _, key := range serverKeys {
 		snap, ok := snapByServer[key]
-		if !ok {
+		if !ok || (expectedScope != "" && snap.Scope != expectedScope) {
 			// Server not yet started → treat as disconnected.
 			continue
 		}

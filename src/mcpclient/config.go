@@ -11,11 +11,12 @@ import (
 	"time"
 
 	"awaken/src/desktopdata"
+	"awaken/src/filestore"
 )
 
-// McpServerConfig is the wire shape of a single server entry in
-// awaken.mcp.json or ~/.awaken/mcp.json. Exactly one transport variant
-// field must be set.
+// McpServerConfig is the wire shape of a single server entry in project
+// awaken.mcp.json or user ~/.awaken/config/mcp-servers.json. Exactly one
+// transport variant field must be set.
 type McpServerConfig struct {
 	Stdio  *StdioTransportConfig  `json:"stdio,omitempty"`
 	HTTP   *HTTPTransportConfig   `json:"http,omitempty"`
@@ -76,99 +77,144 @@ func SaveProjectConfig(workspaceRoot string, cfg ConfigFile) error {
 	if strings.TrimSpace(workspaceRoot) == "" {
 		return fmt.Errorf("workspace root is required")
 	}
-	if cfg.Servers == nil {
-		cfg.Servers = map[string]McpServerConfig{}
+	path := filepath.Join(workspaceRoot, "awaken.mcp.json")
+	return withConfigFileLock(path, func() error {
+		return saveConfigFile(path, cfg, "project")
+	})
+}
+
+// LoadUserConfig reads ~/.awaken/config/mcp-servers.json. A missing file
+// returns an empty result with no error. There is deliberately no legacy
+// import or fallback path.
+func LoadUserConfig() (ConfigFile, error) {
+	return loadConfigFile(UserConfigPath())
+}
+
+// SaveUserConfig writes cfg to ~/.awaken/config/mcp-servers.json, creating the
+// parent directory if necessary.
+func SaveUserConfig(cfg ConfigFile) error {
+	path := UserConfigPath()
+	if err := ensurePrivateConfigDir(filepath.Dir(path)); err != nil {
+		return err
 	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return fmt.Errorf("serialize project mcp config: %w", err)
+	return withConfigFileLock(path, func() error {
+		return saveConfigFile(path, cfg, "user")
+	})
+}
+
+// MutateUserConfig serializes a read-modify-write transaction across Awaken
+// processes. The latest complete file is read only after the cross-process
+// lock is held, then atomically replaced with the mutated document.
+func MutateUserConfig(mutate func(*ConfigFile) (bool, error)) error {
+	if mutate == nil {
+		return fmt.Errorf("mutate user mcp config: callback is required")
+	}
+	path := UserConfigPath()
+	if err := ensurePrivateConfigDir(filepath.Dir(path)); err != nil {
+		return err
+	}
+	return withConfigFileLock(path, func() error {
+		cfg, err := loadConfigFile(path)
+		if err != nil {
+			return err
+		}
+		if cfg.Servers == nil {
+			cfg.Servers = map[string]McpServerConfig{}
+		}
+		changed, err := mutate(&cfg)
+		if err != nil {
+			return err
+		}
+		if !changed {
+			return nil
+		}
+		return saveConfigFile(path, cfg, "user")
+	})
+}
+
+// MutateProjectConfig provides the same locked, atomic read-modify-write
+// semantics for <workspace>/awaken.mcp.json.
+func MutateProjectConfig(workspaceRoot string, mutate func(*ConfigFile) (bool, error)) error {
+	if strings.TrimSpace(workspaceRoot) == "" {
+		return fmt.Errorf("workspace root is required")
+	}
+	if mutate == nil {
+		return fmt.Errorf("mutate project mcp config: callback is required")
 	}
 	path := filepath.Join(workspaceRoot, "awaken.mcp.json")
-	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	return nil
-}
-
-// LoadUserConfig reads ~/.awaken/mcp.json. A missing file returns an empty
-// result with no error.
-func LoadUserConfig() (ConfigFile, error) {
-	path := UserConfigPath()
-	if err := migrateLegacyUserConfig(path); err != nil {
-		return ConfigFile{}, err
-	}
-	return loadConfigFile(path)
-}
-
-// SaveUserConfig writes cfg to ~/.awaken/mcp.json, creating the parent
-// directory if necessary.
-func SaveUserConfig(cfg ConfigFile) error {
-	if cfg.Servers == nil {
-		cfg.Servers = map[string]McpServerConfig{}
-	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return fmt.Errorf("serialize user mcp config: %w", err)
-	}
-	path := UserConfigPath()
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("create %s: %w", dir, err)
-	}
-	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	return nil
+	return withConfigFileLock(path, func() error {
+		cfg, err := loadConfigFile(path)
+		if err != nil {
+			return err
+		}
+		if cfg.Servers == nil {
+			cfg.Servers = map[string]McpServerConfig{}
+		}
+		changed, err := mutate(&cfg)
+		if err != nil {
+			return err
+		}
+		if !changed {
+			return nil
+		}
+		return saveConfigFile(path, cfg, "project")
+	})
 }
 
 func UserConfigPath() string {
-	return desktopdata.Detect().MCPConfigPath()
+	root := desktopdata.AwakenHomeRoot()
+	if root == "" {
+		// Standalone/test callers without an injected data root must not touch
+		// the real home. Keep their config process-local and temporary.
+		root = filepath.Join(os.TempDir(), fmt.Sprintf("awaken-mcp-config-%d", os.Getpid()))
+	}
+	return desktopdata.MCPConfigPath(root)
 }
 
-func LegacyUserConfigPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join("~", ".awaken", "mcp.json")
+func ensurePrivateConfigDir(dir string) error {
+	if err := os.MkdirAll(dir, filestore.DirPerm); err != nil {
+		return fmt.Errorf("create %s: %w", dir, err)
 	}
-	return filepath.Join(home, ".awaken", "mcp.json")
+	if err := os.Chmod(dir, filestore.DirPerm); err != nil {
+		return fmt.Errorf("chmod %s: %w", dir, err)
+	}
+	return nil
 }
 
-func migrateLegacyUserConfig(targetPath string) error {
-	if strings.TrimSpace(targetPath) == "" {
-		return fmt.Errorf("desktop mcp config path is required")
-	}
-	if _, err := os.Stat(targetPath); err == nil {
-		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("stat %s: %w", targetPath, err)
-	}
-	legacyPath := LegacyUserConfigPath()
-	data, err := os.ReadFile(legacyPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+func withConfigFileLock(path string, action func() error) error {
+	deadline := time.Now().Add(5 * time.Second)
+	lockPath := path + ".lock"
+	owner := fmt.Sprintf("awaken-mcp-config-%d", os.Getpid())
+	for {
+		lock, err := filestore.AcquireLock(lockPath, owner, 10*time.Second)
+		if err == nil {
+			actionErr := action()
+			releaseErr := lock.Release()
+			if actionErr != nil {
+				return actionErr
+			}
+			if releaseErr != nil {
+				return releaseErr
+			}
 			return nil
 		}
-		return fmt.Errorf("read legacy mcp config %s: %w", legacyPath, err)
-	}
-	if strings.TrimSpace(string(data)) == "" {
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0o700); err != nil {
-		return fmt.Errorf("create %s: %w", filepath.Dir(targetPath), err)
-	}
-	if err := os.WriteFile(targetPath, data, 0o600); err != nil {
-		return fmt.Errorf("write migrated mcp config %s: %w", targetPath, err)
-	}
-	paths := desktopdata.Detect()
-	if err := paths.Ensure(); err == nil {
-		marker := map[string]string{
-			"migrated_at": time.Now().UTC().Format(time.RFC3339Nano),
-			"source":      legacyPath,
-			"target":      targetPath,
+		if !errors.Is(err, filestore.ErrLockHeld) || time.Now().After(deadline) {
+			return fmt.Errorf("lock %s: %w", path, err)
 		}
-		if markerData, marshalErr := json.MarshalIndent(marker, "", "  "); marshalErr == nil {
-			_ = os.WriteFile(paths.MigrationMarkerPath("mcp-servers-legacy-migrated"), append(markerData, '\n'), 0o600)
-		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func saveConfigFile(path string, cfg ConfigFile, scope string) error {
+	if cfg.Servers == nil {
+		cfg.Servers = map[string]McpServerConfig{}
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("serialize %s mcp config: %w", scope, err)
+	}
+	if err := filestore.WriteFileAtomic(path, append(data, '\n')); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
 }
@@ -191,7 +237,9 @@ func loadConfigFile(path string) (ConfigFile, error) {
 // MergeScoped combines user, project, and dynamic-scoped server lists.
 // Project scope overrides user scope on name collision; dynamic scope is
 // applied last and overrides both. Invalid entries are dropped with a
-// warning logged via the provided logger (or silently if nil).
+// warning logged via the provided logger (or silently if nil). Disabled
+// entries are retained so the manager can restore their disabled state after
+// a process restart without attempting a connection.
 func MergeScoped(
 	user []ScopedMcpServerConfig,
 	project []ScopedMcpServerConfig,
@@ -221,15 +269,10 @@ func MergeScoped(
 
 	result := make([]ScopedMcpServerConfig, 0, len(merged))
 	for _, entry := range merged {
-		enabled := true
-		if entry.Config.Enabled != nil {
-			enabled = *entry.Config.Enabled
-		}
-		if !enabled {
+		if entry.Config.Enabled != nil && !*entry.Config.Enabled {
 			if logger != nil {
-				logger.Debugf("mcp server %q disabled by config", entry.Name)
+				logger.Debugf("mcp server %q retained in disabled state from config", entry.Name)
 			}
-			continue
 		}
 		result = append(result, entry)
 	}

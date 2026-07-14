@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"os"
 	"testing"
 
+	"awaken/src/mcpclient"
 	"awaken/src/runtime"
+	"awaken/src/tool"
 )
 
 func TestResolveDefaultWorkspaceUsesEnv(t *testing.T) {
@@ -80,5 +83,44 @@ func TestMCPManagerAndConnectorsExistWithoutStaticConfig(t *testing.T) {
 	}
 	if got := len(registry.List()); got == 0 {
 		t.Fatal("expected builtin connector definitions")
+	}
+}
+
+func TestBuildConnectorRegistryRestoresPersistedBuiltinOwnership(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AWAKEN_HOME", home)
+	disabled := false
+	if err := mcpclient.SaveUserConfig(mcpclient.ConfigFile{Servers: map[string]mcpclient.McpServerConfig{
+		"playwright": {
+			Stdio:   &mcpclient.StdioTransportConfig{Command: "npx"},
+			Enabled: &disabled,
+			Provider: &mcpclient.ServerProviderManifest{
+				ProviderID: "connector:playwright",
+				Source:     tool.SourceConnector,
+			},
+		},
+	}}); err != nil {
+		t.Fatalf("save user config: %v", err)
+	}
+
+	manager := buildMCPManager("")
+	t.Cleanup(func() { manager.Shutdown(context.Background()) })
+	registry := buildConnectorRegistry(manager, "")
+	status, err := registry.Status("playwright")
+	if err != nil {
+		t.Fatalf("playwright status: %v", err)
+	}
+	if len(status.ServerNames) != 1 || status.ServerNames[0] != "playwright" {
+		t.Fatalf("persisted builtin owner was not wired into registry: %+v", status)
+	}
+	if err := registry.Disconnect(context.Background(), "playwright"); err != nil {
+		t.Fatalf("disconnect restored builtin: %v", err)
+	}
+	userCfg, err := mcpclient.LoadUserConfig()
+	if err != nil {
+		t.Fatalf("load user config after disconnect: %v", err)
+	}
+	if _, ok := userCfg.Servers["playwright"]; ok {
+		t.Fatal("disconnect did not remove restored builtin config")
 	}
 }

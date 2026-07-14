@@ -1,23 +1,26 @@
 package mcpclient
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"awaken/src/desktopdata"
+	"awaken/src/filestore"
 
 	"github.com/google/uuid"
 	"github.com/zalando/go-keyring"
-
-	_ "modernc.org/sqlite"
 )
 
-const credentialKeyringService = "awaken-mcp"
+const (
+	credentialKeyringService  = "awaken-mcp"
+	credentialMetadataVersion = 1
+)
 
 type secretBackend interface {
 	Get(service, user string) (string, error)
@@ -50,22 +53,49 @@ func (keyringSecretBackend) Delete(service, user string) error {
 }
 
 type PersistentCredentialStore struct {
-	paths   desktopdata.Paths
-	secrets secretBackend
+	metadataPath         string
+	secrets              secretBackend
+	initErr              error
+	writeMetadataForTest func(credentialMetadataFile) error
 
 	mu sync.Mutex
-	db *sql.DB
+}
+
+type credentialMetadataFile struct {
+	Version  int                           `json:"version"`
+	Accounts map[string]credentialMetadata `json:"accounts"`
+}
+
+type credentialMetadata struct {
+	CredentialRef string   `json:"credentialRef"`
+	State         string   `json:"state"`
+	ServerURL     string   `json:"serverUrl,omitempty"`
+	AuthURL       string   `json:"authUrl,omitempty"`
+	TokenURL      string   `json:"tokenUrl,omitempty"`
+	RedirectURL   string   `json:"redirectUrl,omitempty"`
+	ClientID      string   `json:"clientId,omitempty"`
+	Scopes        []string `json:"scopes,omitempty"`
+	UpdatedAt     string   `json:"updatedAt"`
+	ExpiresAt     string   `json:"expiresAt,omitempty"`
 }
 
 func NewPersistentCredentialStore() *PersistentCredentialStore {
+	root := desktopdata.AwakenHomeRoot()
+	var initErr error
+	if root == "" {
+		root, initErr = os.MkdirTemp("", "awaken-mcp-credentials-")
+	}
 	return &PersistentCredentialStore{
-		paths:   desktopdata.Detect(),
-		secrets: keyringSecretBackend{},
+		metadataPath: filepath.Join(root, "auth", "connector-accounts.json"),
+		secrets:      keyringSecretBackend{},
+		initErr:      initErr,
 	}
 }
 
 func (s *PersistentCredentialStore) LoadTokenSource(serverName string) (StoredTokenSource, error) {
-	meta, err := s.metadata(serverName)
+	s.mu.Lock()
+	meta, err := s.metadataLocked(serverName)
+	s.mu.Unlock()
 	if err != nil {
 		return StoredTokenSource{}, err
 	}
@@ -91,24 +121,38 @@ func (s *PersistentCredentialStore) LoadTokenSource(serverName string) (StoredTo
 }
 
 func (s *PersistentCredentialStore) SaveTokenSource(serverName string, source StoredTokenSource) error {
-	db, err := s.open()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.withMetadataMutationLock(func() error {
+		return s.saveTokenSourceLocked(serverName, source)
+	})
+}
+
+func (s *PersistentCredentialStore) saveTokenSourceLocked(serverName string, source StoredTokenSource) error {
+	file, err := s.readMetadataLocked()
 	if err != nil {
 		return err
 	}
 	if strings.TrimSpace(source.CredentialRef) == "" {
-		source.CredentialRef = uuid.NewString()
+		if previous, ok := file.Accounts[serverName]; ok && strings.TrimSpace(previous.CredentialRef) != "" {
+			source.CredentialRef = previous.CredentialRef
+		} else {
+			source.CredentialRef = uuid.NewString()
+		}
 	}
 	payload, err := json.Marshal(source)
 	if err != nil {
 		return fmt.Errorf("encode credential for %q: %w", serverName, err)
 	}
+	previousPayload, previousErr := s.secrets.Get(credentialKeyringService, source.CredentialRef)
+	hadPreviousSecret := previousErr == nil
+	if previousErr != nil && !errors.Is(previousErr, ErrCredentialNotFound) {
+		return fmt.Errorf("read previous credential secret for %q: %w", serverName, previousErr)
+	}
 	if err := s.secrets.Set(credentialKeyringService, source.CredentialRef, string(payload)); err != nil {
 		return fmt.Errorf("persist credential secret for %q: %w", serverName, err)
 	}
-	scopeJSON, err := json.Marshal(source.Scopes)
-	if err != nil {
-		return fmt.Errorf("encode scopes for %q: %w", serverName, err)
-	}
+
 	expiresAt := ""
 	if source.Token != nil && !source.Token.Expiry.IsZero() {
 		expiresAt = source.Token.Expiry.UTC().Format(time.RFC3339Nano)
@@ -117,154 +161,170 @@ func (s *PersistentCredentialStore) SaveTokenSource(serverName string, source St
 	if source.NeedsReauth {
 		state = "needs_reauth"
 	}
-	_, err = db.Exec(`
-INSERT INTO connector_accounts (
-	server_name, credential_ref, state, server_url, auth_url, token_url,
-	redirect_url, client_id, scopes_json, updated_at, expires_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(server_name) DO UPDATE SET
-	credential_ref = excluded.credential_ref,
-	state = excluded.state,
-	server_url = excluded.server_url,
-	auth_url = excluded.auth_url,
-	token_url = excluded.token_url,
-	redirect_url = excluded.redirect_url,
-	client_id = excluded.client_id,
-	scopes_json = excluded.scopes_json,
-	updated_at = excluded.updated_at,
-	expires_at = excluded.expires_at
-`,
-		serverName,
-		source.CredentialRef,
-		state,
-		source.ServerURL,
-		source.AuthURL,
-		source.TokenURL,
-		source.RedirectURL,
-		source.ClientID,
-		string(scopeJSON),
-		time.Now().UTC().Format(time.RFC3339Nano),
-		expiresAt,
-	)
-	if err != nil {
-		return fmt.Errorf("upsert credential metadata for %q: %w", serverName, err)
+	file.Accounts[serverName] = credentialMetadata{
+		CredentialRef: source.CredentialRef,
+		State:         state,
+		ServerURL:     source.ServerURL,
+		AuthURL:       source.AuthURL,
+		TokenURL:      source.TokenURL,
+		RedirectURL:   source.RedirectURL,
+		ClientID:      source.ClientID,
+		Scopes:        append([]string(nil), source.Scopes...),
+		UpdatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
+		ExpiresAt:     expiresAt,
+	}
+	if err := s.writeMetadataLocked(file); err != nil {
+		rollbackErr := s.restoreSecret(source.CredentialRef, previousPayload, hadPreviousSecret)
+		return errors.Join(
+			fmt.Errorf("upsert credential metadata for %q: %w", serverName, err),
+			rollbackErr,
+		)
 	}
 	return nil
 }
 
 func (s *PersistentCredentialStore) ClearTokenSource(serverName string) error {
-	db, err := s.open()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.withMetadataMutationLock(func() error {
+		return s.clearTokenSourceLocked(serverName)
+	})
+}
+
+func (s *PersistentCredentialStore) clearTokenSourceLocked(serverName string) error {
+	file, err := s.readMetadataLocked()
 	if err != nil {
 		return err
 	}
-	meta, err := s.metadata(serverName)
-	if err != nil && !errors.Is(err, ErrCredentialNotFound) {
-		return err
+	meta, ok := file.Accounts[serverName]
+	if !ok {
+		return nil
 	}
-	if err == nil && strings.TrimSpace(meta.CredentialRef) != "" {
+	previousPayload := ""
+	hadPreviousSecret := false
+	if strings.TrimSpace(meta.CredentialRef) != "" {
+		var getErr error
+		previousPayload, getErr = s.secrets.Get(credentialKeyringService, meta.CredentialRef)
+		hadPreviousSecret = getErr == nil
+		if getErr != nil && !errors.Is(getErr, ErrCredentialNotFound) {
+			return fmt.Errorf("read credential before delete for %q: %w", serverName, getErr)
+		}
 		if err := s.secrets.Delete(credentialKeyringService, meta.CredentialRef); err != nil {
 			return fmt.Errorf("delete credential secret for %q: %w", serverName, err)
 		}
 	}
-	if _, err := db.Exec(`DELETE FROM connector_accounts WHERE server_name = ?`, serverName); err != nil {
-		return fmt.Errorf("delete credential metadata for %q: %w", serverName, err)
+	delete(file.Accounts, serverName)
+	if err := s.writeMetadataLocked(file); err != nil {
+		rollbackErr := s.restoreSecret(meta.CredentialRef, previousPayload, hadPreviousSecret)
+		return errors.Join(
+			fmt.Errorf("delete credential metadata for %q: %w", serverName, err),
+			rollbackErr,
+		)
+	}
+	return nil
+}
+
+func (s *PersistentCredentialStore) restoreSecret(ref, previousPayload string, hadPrevious bool) error {
+	if strings.TrimSpace(ref) == "" {
+		return nil
+	}
+	if hadPrevious {
+		if err := s.secrets.Set(credentialKeyringService, ref, previousPayload); err != nil {
+			return fmt.Errorf("restore previous credential secret: %w", err)
+		}
+		return nil
+	}
+	if err := s.secrets.Delete(credentialKeyringService, ref); err != nil {
+		return fmt.Errorf("remove unreferenced credential secret: %w", err)
 	}
 	return nil
 }
 
 func (s *PersistentCredentialStore) HasTokenSource(serverName string) (bool, error) {
-	db, err := s.open()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	file, err := s.readMetadataLocked()
 	if err != nil {
 		return false, err
 	}
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(1) FROM connector_accounts WHERE server_name = ?`, serverName).Scan(&count); err != nil {
-		return false, fmt.Errorf("count credential metadata for %q: %w", serverName, err)
-	}
-	return count > 0, nil
+	_, ok := file.Accounts[serverName]
+	return ok, nil
 }
 
-type credentialMetadata struct {
-	CredentialRef string
-	State         string
-	ServerURL     string
-	AuthURL       string
-	TokenURL      string
-	RedirectURL   string
-	ClientID      string
-	Scopes        []string
-}
-
-func (s *PersistentCredentialStore) metadata(serverName string) (credentialMetadata, error) {
-	db, err := s.open()
+func (s *PersistentCredentialStore) metadataLocked(serverName string) (credentialMetadata, error) {
+	file, err := s.readMetadataLocked()
 	if err != nil {
 		return credentialMetadata{}, err
 	}
-	var (
-		meta      credentialMetadata
-		scopesRaw string
-	)
-	err = db.QueryRow(`
-SELECT credential_ref, state, server_url, auth_url, token_url, redirect_url, client_id, scopes_json
-FROM connector_accounts
-WHERE server_name = ?
-`, serverName).Scan(
-		&meta.CredentialRef,
-		&meta.State,
-		&meta.ServerURL,
-		&meta.AuthURL,
-		&meta.TokenURL,
-		&meta.RedirectURL,
-		&meta.ClientID,
-		&scopesRaw,
-	)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return credentialMetadata{}, ErrCredentialNotFound
-		}
-		return credentialMetadata{}, fmt.Errorf("query credential metadata for %q: %w", serverName, err)
-	}
-	if strings.TrimSpace(scopesRaw) != "" {
-		if err := json.Unmarshal([]byte(scopesRaw), &meta.Scopes); err != nil {
-			return credentialMetadata{}, fmt.Errorf("decode scopes for %q: %w", serverName, err)
-		}
+	meta, ok := file.Accounts[serverName]
+	if !ok {
+		return credentialMetadata{}, ErrCredentialNotFound
 	}
 	return meta, nil
 }
 
-func (s *PersistentCredentialStore) open() (*sql.DB, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.db != nil {
-		return s.db, nil
+func (s *PersistentCredentialStore) readMetadataLocked() (credentialMetadataFile, error) {
+	if s.initErr != nil {
+		return credentialMetadataFile{}, fmt.Errorf("initialize credential metadata root: %w", s.initErr)
 	}
-	if err := s.paths.Ensure(); err != nil {
-		return nil, fmt.Errorf("ensure desktop data dirs: %w", err)
+	file := credentialMetadataFile{
+		Version:  credentialMetadataVersion,
+		Accounts: map[string]credentialMetadata{},
 	}
-	db, err := sql.Open("sqlite", s.paths.ConnectorAccountsDBPath())
+	err := filestore.ReadJSON(s.metadataPath, &file)
+	if os.IsNotExist(err) {
+		return file, nil
+	}
 	if err != nil {
-		return nil, fmt.Errorf("open credential db: %w", err)
+		return credentialMetadataFile{}, err
 	}
-	if _, err := db.Exec(`
-CREATE TABLE IF NOT EXISTS connector_accounts (
-	server_name TEXT PRIMARY KEY,
-	credential_ref TEXT NOT NULL,
-	state TEXT NOT NULL DEFAULT 'authorized',
-	server_url TEXT NOT NULL DEFAULT '',
-	auth_url TEXT NOT NULL DEFAULT '',
-	token_url TEXT NOT NULL DEFAULT '',
-	redirect_url TEXT NOT NULL DEFAULT '',
-	client_id TEXT NOT NULL DEFAULT '',
-	scopes_json TEXT NOT NULL DEFAULT '[]',
-	updated_at TEXT NOT NULL,
-	expires_at TEXT NOT NULL DEFAULT ''
-);
-`); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("init credential db: %w", err)
+	if file.Version != credentialMetadataVersion {
+		return credentialMetadataFile{}, fmt.Errorf("unsupported connector account metadata version %d", file.Version)
 	}
-	s.db = db
-	return s.db, nil
+	if file.Accounts == nil {
+		file.Accounts = map[string]credentialMetadata{}
+	}
+	return file, nil
+}
+
+func (s *PersistentCredentialStore) writeMetadataLocked(file credentialMetadataFile) error {
+	if s.writeMetadataForTest != nil {
+		return s.writeMetadataForTest(file)
+	}
+	file.Version = credentialMetadataVersion
+	if file.Accounts == nil {
+		file.Accounts = map[string]credentialMetadata{}
+	}
+	if err := ensurePrivateConfigDir(filepath.Dir(s.metadataPath)); err != nil {
+		return fmt.Errorf("create credential metadata directory: %w", err)
+	}
+	encoded, err := json.MarshalIndent(file, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode credential metadata: %w", err)
+	}
+	return filestore.WriteFileAtomic(s.metadataPath, append(encoded, '\n'))
+}
+
+func (s *PersistentCredentialStore) withMetadataMutationLock(action func() error) error {
+	if s.initErr != nil {
+		return fmt.Errorf("initialize credential metadata root: %w", s.initErr)
+	}
+	if err := ensurePrivateConfigDir(filepath.Dir(s.metadataPath)); err != nil {
+		return fmt.Errorf("create credential metadata directory: %w", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	lockPath := s.metadataPath + ".lock"
+	owner := fmt.Sprintf("awaken-mcp-credentials-%d", os.Getpid())
+	for {
+		lock, err := filestore.AcquireLock(lockPath, owner, 10*time.Second)
+		if err == nil {
+			return errors.Join(action(), lock.Release())
+		}
+		if !errors.Is(err, filestore.ErrLockHeld) || time.Now().After(deadline) {
+			return fmt.Errorf("lock credential metadata: %w", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func firstNonEmpty(values ...string) string {

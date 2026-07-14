@@ -225,6 +225,20 @@ func (m *Manager) startOne(ctx context.Context, scoped ScopedMcpServerConfig) {
 		m.logger.Warnf("mcp server %q has invalid transport, marking failed", scoped.Name)
 		return
 	}
+	if scoped.Config.Enabled != nil && !*scoped.Config.Enabled {
+		m.mu.Lock()
+		m.servers[scoped.Name] = &managedServer{
+			name:      scoped.Name,
+			scope:     scoped.Scope,
+			config:    scoped.Config,
+			transport: kind,
+			state:     StateDisabled,
+			seq:       m.nextServerSeq(),
+		}
+		m.mu.Unlock()
+		m.logger.Debugf("mcp server %q restored in disabled state", scoped.Name)
+		return
+	}
 	if kind == TransportWS {
 		m.mu.Lock()
 		m.servers[scoped.Name] = &managedServer{
@@ -287,7 +301,7 @@ func (m *Manager) connectLoop(parentCtx context.Context, server *managedServer) 
 	m.mu.Lock()
 	authHandler := server.authHandler
 	if authHandler == nil && serverAuthURL(server.config) != "" {
-		authHandler = newPersistentOAuthHandler(server.name, AuthFlowConfig{
+		authHandler = newPersistentOAuthHandler(CredentialIdentity(server.scope, server.name, server.config), AuthFlowConfig{
 			ServerURL: serverAuthURL(server.config),
 		}, m.credentials)
 		server.authHandler = authHandler
@@ -386,6 +400,10 @@ func (m *Manager) connectLoop(parentCtx context.Context, server *managedServer) 
 
 func (m *Manager) recordFailure(server *managedServer, err error) {
 	m.mu.Lock()
+	if server.state == StateDisabled {
+		m.mu.Unlock()
+		return
+	}
 	server.session = nil
 	server.state = StateFailed
 	server.errorReason = err.Error()
@@ -419,6 +437,8 @@ func (m *Manager) Disable(name string) error {
 	}
 	server.state = StateDisabled
 	server.errorReason = ""
+	disabled := false
+	server.config.Enabled = &disabled
 	m.mu.Unlock()
 	m.unregisterTools(name)
 	if m.onToolsChanged != nil {
@@ -444,6 +464,8 @@ func (m *Manager) Enable(ctx context.Context, name string) error {
 	server.state = StatePending
 	server.errorReason = ""
 	server.running = false
+	enabled := true
+	server.config.Enabled = &enabled
 	m.mu.Unlock()
 	go m.connectLoop(ctx, server)
 	return nil
@@ -725,6 +747,20 @@ func (m *Manager) Remove(name string) error {
 		m.emitEvent(ServerEvent{Type: EventDisconnected, ServerName: name})
 	}
 	return nil
+}
+
+// ClearCredentialsFor permanently removes OAuth credentials owned by one
+// scoped MCP configuration. Credential ownership includes scope, server name,
+// and canonical endpoint, so a project override cannot reuse a user token and
+// an endpoint edit cannot inherit credentials from the previous endpoint.
+func (m *Manager) ClearCredentialsFor(scoped ScopedMcpServerConfig) error {
+	m.mu.RLock()
+	store := m.credentials
+	m.mu.RUnlock()
+	if store == nil || serverAuthURL(scoped.Config) == "" {
+		return nil
+	}
+	return store.ClearTokenSource(CredentialIdentity(scoped.Scope, scoped.Name, scoped.Config))
 }
 
 // Shutdown closes every connection. Used by tests and on graceful host

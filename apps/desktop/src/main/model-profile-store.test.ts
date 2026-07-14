@@ -1,27 +1,26 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ModelProfileStore } from "./model-profile-store.js";
-
-const electronMock = vi.hoisted(() => ({
-  safeStorage: {
-    decryptStringAsync: vi.fn(async () => ({ result: "", shouldReEncrypt: false })),
-    encryptStringAsync: vi.fn(async () => Buffer.from("encrypted")),
-  },
-}));
-
-vi.mock("electron", () => electronMock);
+import {
+  ModelProfileStore,
+  type ModelProfileKeyStore,
+} from "./model-profile-store.js";
+import { AwakenEnvStore, AwakenEnvStoreError } from "./awaken-env-store.js";
 
 let configDir: string;
 
+function modelsPath(): string {
+  return join(configDir, "config", "models.json");
+}
+
+async function writeModels(value: string): Promise<void> {
+  await mkdir(join(configDir, "config"), { recursive: true });
+  await writeFile(modelsPath(), value, "utf8");
+}
+
 beforeEach(async () => {
   configDir = await mkdtemp(join(tmpdir(), "awaken-model-profile-"));
-  electronMock.safeStorage.decryptStringAsync.mockResolvedValue({
-    result: "",
-    shouldReEncrypt: false,
-  });
-  electronMock.safeStorage.encryptStringAsync.mockResolvedValue(Buffer.from("encrypted"));
 });
 
 afterEach(async () => {
@@ -68,6 +67,37 @@ describe("ModelProfileStore", () => {
       ok: false,
       message: "连接测试失败：API key 无效或未授权。",
     });
+  });
+
+  it("stores provider capability overrides under ~/.awaken/cache", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: [{ id: "deepseek-v4-pro", context_window: 256_000 }],
+        }),
+      }) as Response),
+    );
+    const store = new ModelProfileStore(configDir);
+
+    await expect(store.testProfile({
+      providerId: "deepseek",
+      displayName: "DeepSeek",
+      modelId: "deepseek-v4-pro",
+      baseURL: "https://api.deepseek.com",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "test-key",
+      enabled: true,
+      isDefault: true,
+    })).resolves.toMatchObject({ ok: true });
+
+    const cached = JSON.parse(
+      await readFile(join(configDir, "cache", "model-capabilities.json"), "utf8"),
+    ) as { providers: Record<string, Record<string, { context_window?: number }>> };
+    expect(cached.providers.deepseek?.["deepseek-v4-pro"]?.context_window).toBe(256_000);
   });
 
   it("normalizes the Kimi Code base URL before testing", async () => {
@@ -156,10 +186,10 @@ describe("ModelProfileStore", () => {
     });
   });
 
-  it("persists newly saved API keys in a versioned async-safeStorage envelope", async () => {
+  it("stores non-secret profile data in models.json and the key only in .env", async () => {
     const store = new ModelProfileStore(configDir);
 
-    await store.saveProfile({
+    const saved = await store.saveProfile({
       providerId: "deepseek",
       displayName: "DeepSeek",
       modelId: "deepseek-v4-pro",
@@ -171,28 +201,29 @@ describe("ModelProfileStore", () => {
       isDefault: true,
     });
 
-    const persisted = JSON.parse(
-      await readFile(join(configDir, "model-profiles.json"), "utf8"),
-    ) as {
-      profiles: Array<{
-        credential?: { version?: number; scheme?: string; encryptedApiKey?: string };
-      }>;
+    const rawModels = await readFile(modelsPath(), "utf8");
+    const persisted = JSON.parse(rawModels) as {
+      profiles: Array<{ keyLast4?: string; credential?: unknown; apiKey?: string }>;
     };
-    expect(persisted.profiles[0]?.credential).toMatchObject({
-      version: 2,
-      scheme: "electron-safe-storage",
-      encryptedApiKey: Buffer.from("encrypted").toString("base64"),
-    });
-    expect(electronMock.safeStorage.encryptStringAsync).toHaveBeenCalledWith("test-key");
+    expect(persisted.profiles[0]).toMatchObject({ keyLast4: "-key" });
+    expect(persisted.profiles[0]?.credential).toBeUndefined();
+    expect(persisted.profiles[0]?.apiKey).toBeUndefined();
+    expect(rawModels).not.toContain("test-key");
+    expect(await readFile(join(configDir, ".env"), "utf8")).toContain(
+      `AWAKEN_API_KEY_${saved.id}="test-key"`,
+    );
+    expect((await stat(join(configDir, ".env"))).mode & 0o777).toBe(0o600);
   });
 
-  it("does not persist or retain a user-entered API key when secure storage is temporary", async () => {
-    electronMock.safeStorage.encryptStringAsync.mockRejectedValueOnce(
-      new Error(
-        "safeStorage.encryptStringAsync is temporarily unavailable. Please try again.",
-      ),
-    );
-    const store = new ModelProfileStore(configDir);
+  it("does not persist profile metadata when .env key writing fails", async () => {
+    const keyStore: ModelProfileKeyStore = {
+      getKey: async () => "",
+      setKey: async () => {
+        throw new AwakenEnvStoreError("write_failed", "env write failed");
+      },
+      deleteKey: async () => undefined,
+    };
+    const store = new ModelProfileStore(configDir, keyStore);
 
     await expect(
       store.saveProfile({
@@ -206,17 +237,14 @@ describe("ModelProfileStore", () => {
         enabled: true,
         isDefault: true,
       }),
-    ).rejects.toMatchObject({
-      code: "temporarily_unavailable",
-      retryable: true,
-    });
+    ).rejects.toMatchObject({ code: "write_failed" });
 
-    await expect(readFile(join(configDir, "model-profiles.json"), "utf8")).rejects.toMatchObject({
+    await expect(readFile(modelsPath(), "utf8")).rejects.toMatchObject({
       code: "ENOENT",
     });
   });
 
-  it("keeps an existing global profile byte-for-byte unchanged when replacement encryption fails", async () => {
+  it("keeps an existing profile and key unchanged when replacement .env writing fails", async () => {
     const store = new ModelProfileStore(configDir);
     const saved = await store.saveProfile({
       providerId: "deepseek",
@@ -229,15 +257,19 @@ describe("ModelProfileStore", () => {
       enabled: true,
       isDefault: true,
     });
-    const before = await readFile(join(configDir, "model-profiles.json"), "utf8");
-    electronMock.safeStorage.encryptStringAsync.mockRejectedValueOnce(
-      new Error(
-        "safeStorage.encryptStringAsync is temporarily unavailable. Please try again.",
-      ),
-    );
+    const before = await readFile(modelsPath(), "utf8");
+    const realKeyStore = new AwakenEnvStore(configDir);
+    const failingKeyStore: ModelProfileKeyStore = {
+      getKey: (profileId) => realKeyStore.getKey(profileId),
+      setKey: async () => {
+        throw new AwakenEnvStoreError("write_failed", "env write failed");
+      },
+      deleteKey: (profileId) => realKeyStore.deleteKey(profileId),
+    };
+    const failingStore = new ModelProfileStore(configDir, failingKeyStore);
 
     await expect(
-      store.saveProfile({
+      failingStore.saveProfile({
         id: saved.id,
         providerId: "deepseek",
         displayName: "DeepSeek updated",
@@ -249,14 +281,15 @@ describe("ModelProfileStore", () => {
         enabled: true,
         isDefault: true,
       }),
-    ).rejects.toMatchObject({ code: "temporarily_unavailable" });
+    ).rejects.toMatchObject({ code: "write_failed" });
 
-    expect(await readFile(join(configDir, "model-profiles.json"), "utf8")).toBe(before);
+    expect(await readFile(modelsPath(), "utf8")).toBe(before);
+    await expect(realKeyStore.getKey(saved.id)).resolves.toBe("old-key");
   });
 
   it("never treats a corrupted global profile store as an empty writable store", async () => {
     const corrupted = '{"version":1,"profiles":[';
-    await writeFile(join(configDir, "model-profiles.json"), corrupted, "utf8");
+    await writeModels(corrupted);
     const store = new ModelProfileStore(configDir);
 
     await expect(
@@ -273,10 +306,10 @@ describe("ModelProfileStore", () => {
       }),
     ).rejects.toBeInstanceOf(SyntaxError);
 
-    expect(await readFile(join(configDir, "model-profiles.json"), "utf8")).toBe(corrupted);
+    expect(await readFile(modelsPath(), "utf8")).toBe(corrupted);
   });
 
-  it("lazily persists a v2 replacement after reading a legacy credential", async () => {
+  it("does not import the retired model-profiles.json store", async () => {
     await writeFile(
       join(configDir, "model-profiles.json"),
       JSON.stringify({
@@ -292,118 +325,20 @@ describe("ModelProfileStore", () => {
             authScheme: "bearer",
             enabled: true,
             isDefault: true,
-            credential: {
-              encryptedApiKey: Buffer.from("legacy-encrypted").toString("base64"),
-              last4: "-key",
-            },
           },
         ],
       }),
       "utf8",
     );
-    electronMock.safeStorage.decryptStringAsync.mockResolvedValue({
-      result: "legacy-key",
-      shouldReEncrypt: false,
-    });
-    electronMock.safeStorage.encryptStringAsync.mockResolvedValue(
-      Buffer.from("replacement-encrypted"),
-    );
     const store = new ModelProfileStore(configDir);
 
-    const profile = await store.resolveDefaultRunProfile();
-
-    expect(profile?.apiKey).toBe("legacy-key");
-    const persisted = JSON.parse(
-      await readFile(join(configDir, "model-profiles.json"), "utf8"),
-    ) as {
-      profiles: Array<{
-        credential?: { version?: number; scheme?: string; encryptedApiKey?: string };
-      }>;
-    };
-    expect(persisted.profiles[0]?.credential).toEqual({
-      version: 2,
-      scheme: "electron-safe-storage",
-      encryptedApiKey: Buffer.from("replacement-encrypted").toString("base64"),
-      last4: "-key",
-    });
+    await expect(store.listProfiles()).resolves.toEqual([]);
+    await expect(store.resolveDefaultRunProfile()).resolves.toBeUndefined();
   });
 
-  it("does not let a lazy credential migration overwrite a concurrently saved global key", async () => {
-    await writeFile(
-      join(configDir, "model-profiles.json"),
-      JSON.stringify({
-        version: 1,
-        profiles: [
-          {
-            id: "legacy-profile",
-            providerId: "deepseek",
-            displayName: "DeepSeek",
-            modelId: "deepseek-v4-pro",
-            baseURL: "https://api.deepseek.com",
-            protocol: "openai_chat",
-            authScheme: "bearer",
-            enabled: true,
-            isDefault: true,
-            credential: {
-              encryptedApiKey: Buffer.from("legacy-encrypted").toString("base64"),
-              last4: "-key",
-            },
-          },
-        ],
-      }),
-      "utf8",
-    );
-    let finishDecrypt!: (value: {
-      result: string;
-      shouldReEncrypt: boolean;
-    }) => void;
-    electronMock.safeStorage.decryptStringAsync.mockReturnValueOnce(
-      new Promise((resolve) => {
-        finishDecrypt = resolve;
-      }),
-    );
-    electronMock.safeStorage.encryptStringAsync.mockImplementation(
-      async (...args: unknown[]) =>
-        Buffer.from(
-          args[0] === "new-global-key"
-            ? "new-global-encrypted"
-            : "migration-encrypted",
-        ),
-    );
+  it("marks a profile unreadable when .env cannot be read", async () => {
     const store = new ModelProfileStore(configDir);
-    const resolving = store.resolveDefaultRunProfile();
-    await vi.waitFor(() => {
-      expect(electronMock.safeStorage.decryptStringAsync).toHaveBeenCalledTimes(1);
-    });
-
-    await store.saveProfile({
-      id: "legacy-profile",
-      providerId: "deepseek",
-      displayName: "DeepSeek",
-      modelId: "deepseek-v4-pro",
-      baseURL: "https://api.deepseek.com",
-      protocol: "openai_chat",
-      authScheme: "bearer",
-      apiKey: "new-global-key",
-      enabled: true,
-      isDefault: true,
-    });
-    finishDecrypt({ result: "legacy-key", shouldReEncrypt: false });
-    await expect(resolving).resolves.toMatchObject({ apiKey: "legacy-key" });
-
-    const persisted = JSON.parse(
-      await readFile(join(configDir, "model-profiles.json"), "utf8"),
-    ) as {
-      profiles: Array<{ credential?: { encryptedApiKey?: string } }>;
-    };
-    expect(persisted.profiles[0]?.credential?.encryptedApiKey).toBe(
-      Buffer.from("new-global-encrypted").toString("base64"),
-    );
-  });
-
-  it("reports a friendly error when a stored API key cannot be decrypted", async () => {
-    const store = new ModelProfileStore(configDir);
-    await store.saveProfile({
+    const saved = await store.saveProfile({
       providerId: "kimi-coding-plan",
       displayName: "Kimi Coding Plan",
       modelId: "kimi-for-coding",
@@ -414,60 +349,30 @@ describe("ModelProfileStore", () => {
       enabled: true,
       isDefault: true,
     });
-    electronMock.safeStorage.decryptStringAsync.mockRejectedValueOnce(
-      new Error(
-        "Error while decrypting the ciphertext provided to safeStorage.decryptStringAsync.",
-      ),
-    );
+    const unreadableKeyStore: ModelProfileKeyStore = {
+      getKey: async () => {
+        throw new AwakenEnvStoreError("unreadable", "env unreadable");
+      },
+      setKey: async () => undefined,
+      deleteKey: async () => undefined,
+    };
+    const unreadableStore = new ModelProfileStore(configDir, unreadableKeyStore);
 
-    await expect(store.resolveDefaultRunProfile()).rejects.toThrow(
-      "模型配置「Kimi Coding Plan」的 API key 无法解密，请在 Settings > Models 重新保存 API key。",
-    );
-  });
-
-  it("classifies temporarily unavailable credential storage without deleting the key", async () => {
-    const store = new ModelProfileStore(configDir);
-    await store.saveProfile({
-      providerId: "kimi-coding-plan",
-      displayName: "Kimi Coding Plan",
-      modelId: "kimi-for-coding",
-      baseURL: "https://api.kimi.com/coding/v1",
-      protocol: "openai_chat",
-      authScheme: "bearer",
-      apiKey: "test-key",
-      enabled: true,
-      isDefault: true,
+    await expect(unreadableStore.resolveDefaultRunProfile()).rejects.toMatchObject({
+      name: "AwakenEnvStoreError",
+      code: "unreadable",
     });
-    electronMock.safeStorage.decryptStringAsync.mockRejectedValueOnce(
-      new Error(
-        "safeStorage.decryptStringAsync is temporarily unavailable. Please try again.",
-      ),
-    );
-
-    await expect(store.resolveDefaultRunProfile()).rejects.toMatchObject({
-      name: "SecureCredentialError",
-      code: "temporarily_unavailable",
-      retryable: true,
-      message:
-        "模型配置「Kimi Coding Plan」的安全凭据服务暂时不可用，凭据仍已保留。请重新启动 Awaken 后重试。",
-    });
-    const persisted = JSON.parse(
-      await readFile(join(configDir, "model-profiles.json"), "utf8"),
-    ) as { profiles: Array<{ credential?: { encryptedApiKey?: string } }> };
-    expect(persisted.profiles[0]?.credential?.encryptedApiKey).toBe(
-      Buffer.from("encrypted").toString("base64"),
-    );
-    await expect(store.listProfiles()).resolves.toEqual([
+    await expect(unreadableStore.listProfiles()).resolves.toEqual([
       expect.objectContaining({
-        has_key: true,
-        profile_status: "temporarily_unavailable",
+        id: saved.id,
+        has_key: false,
+        profile_status: "unreadable",
       }),
     ]);
   });
 
-  it("migrates an existing Volcengine Coding Plan profile to the coding gateway", async () => {
-    await writeFile(
-      join(configDir, "model-profiles.json"),
+  it("normalizes an existing Volcengine Coding Plan profile to the coding gateway", async () => {
+    await writeModels(
       JSON.stringify({
         version: 1,
         profiles: [
@@ -486,15 +391,12 @@ describe("ModelProfileStore", () => {
               contextWindow: 1_000_000,
               maxTokens: 384_000,
             },
-            credential: {
-              encryptedApiKey: Buffer.from("encrypted").toString("base64"),
-              last4: "test",
-            },
+            keyLast4: "test",
           },
         ],
       }),
-      "utf8",
     );
+    await new AwakenEnvStore(configDir).setKey("volc-profile", "api-test");
 
     const store = new ModelProfileStore(configDir);
     const profile = await store.resolveDefaultRunProfile();
@@ -610,7 +512,7 @@ describe("ModelProfileStore", () => {
     });
   });
 
-  it("copies the template profile credential when adding another model for the same provider", async () => {
+  it("copies the template profile key when adding another model for the same provider", async () => {
     const store = new ModelProfileStore(configDir);
 
     const templateProfile = await store.saveProfile({
@@ -649,13 +551,9 @@ describe("ModelProfileStore", () => {
     });
   });
 
-  it("reuses the template profile credential during connection testing", async () => {
+  it("reuses the template profile key during connection testing", async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as Response);
     vi.stubGlobal("fetch", fetchMock);
-    electronMock.safeStorage.decryptStringAsync.mockResolvedValue({
-      result: "shared-key",
-      shouldReEncrypt: false,
-    });
 
     const store = new ModelProfileStore(configDir);
     const templateProfile = await store.saveProfile({
@@ -697,8 +595,7 @@ describe("ModelProfileStore", () => {
   });
 
   it("hides existing duplicate provider-model entries when listing profiles", async () => {
-    await writeFile(
-      join(configDir, "model-profiles.json"),
+    await writeModels(
       JSON.stringify({
         version: 1,
         profiles: [
@@ -716,10 +613,6 @@ describe("ModelProfileStore", () => {
               contextWindow: 128_000,
               maxTokens: 16_000,
             },
-            credential: {
-              encryptedApiKey: Buffer.from("old").toString("base64"),
-              last4: "old1",
-            },
           },
           {
             id: "deepseek-new",
@@ -735,11 +628,12 @@ describe("ModelProfileStore", () => {
               contextWindow: 256_000,
               maxTokens: 32_000,
             },
+            keyLast4: "new1",
           },
         ],
       }),
-      "utf8",
     );
+    await new AwakenEnvStore(configDir).setKey("deepseek-new", "key-new1");
 
     const store = new ModelProfileStore(configDir);
     const profiles = await store.listProfiles();
@@ -750,7 +644,7 @@ describe("ModelProfileStore", () => {
       model_id: "deepseek-v4-pro",
       base_url: "https://api.deepseek.com/v2",
       has_key: true,
-      masked_key: "•••• old1",
+      masked_key: "•••• new1",
     });
   });
 
@@ -778,7 +672,7 @@ describe("ModelProfileStore", () => {
       });
     });
 
-    it("returns missing_key status for profiles without a credential", async () => {
+    it("returns missing_key status for profiles without a .env key", async () => {
       const store = new ModelProfileStore(configDir);
       await store.saveProfile({
         providerId: "deepseek",
@@ -801,10 +695,6 @@ describe("ModelProfileStore", () => {
     });
 
     it("fetches DeepSeek balance for a ready profile", async () => {
-      electronMock.safeStorage.decryptStringAsync.mockResolvedValue({
-        result: "sk-test",
-        shouldReEncrypt: false,
-      });
       vi.stubGlobal(
         "fetch",
         vi.fn(async () =>
@@ -854,10 +744,6 @@ describe("ModelProfileStore", () => {
     });
 
     it("deduplicates provider queries across multiple profiles", async () => {
-      electronMock.safeStorage.decryptStringAsync.mockResolvedValue({
-        result: "sk-test",
-        shouldReEncrypt: false,
-      });
       const fetchMock = vi.fn(async () =>
         Promise.resolve({
           ok: true,

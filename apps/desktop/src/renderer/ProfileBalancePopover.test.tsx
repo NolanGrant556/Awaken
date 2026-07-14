@@ -73,9 +73,9 @@ describe("ProfileBalancePopover", () => {
           ...mockBalance,
           profileId: "kimi-1",
           providerId: "kimi-coding-plan",
-          credentialIssue: "temporarily_unavailable",
+          credentialIssue: "unreadable",
         },
       ]),
-    ).toBe("temporarily_unavailable");
+    ).toBe("unreadable");
   });
 });

@@ -1984,7 +1984,6 @@ pre {
   white-space: nowrap;
 }
 
-.configured-model-credential-status-temporarily_unavailable,
 .configured-model-credential-status-unreadable {
   color: var(--aw-text-danger, #b42318);
 }

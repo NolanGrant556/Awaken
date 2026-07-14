@@ -35,12 +35,12 @@ describe("ensureConfigDir", () => {
   it("preserves existing files in the config directory", async () => {
     const configDir = join(userDataDir, "config");
     await mkdir(configDir, { recursive: true });
-    await writeFile(join(configDir, "model-profiles.json"), "sentinel profiles", "utf8");
+    await writeFile(join(configDir, "desktop-preferences.json"), "sentinel config", "utf8");
     await writeFile(join(configDir, "notes.txt"), "sentinel notes", "utf8");
 
     await ensureConfigDir();
 
-    expect(await readFile(join(configDir, "model-profiles.json"), "utf8")).toBe("sentinel profiles");
+    expect(await readFile(join(configDir, "desktop-preferences.json"), "utf8")).toBe("sentinel config");
     expect(await readFile(join(configDir, "notes.txt"), "utf8")).toBe("sentinel notes");
   });
 });

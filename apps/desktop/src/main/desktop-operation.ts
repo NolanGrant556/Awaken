@@ -2,7 +2,7 @@ import type {
   DesktopOperationIssue,
   DesktopOperationResult,
 } from "../shared/runtime.js";
-import { SecureCredentialError } from "./secure-credential-store.js";
+import { AwakenEnvStoreError } from "./awaken-env-store.js";
 
 const SAFE_OPERATION_MESSAGES = new Set([
   "模型配置重复，添加失败",
@@ -12,32 +12,13 @@ const SAFE_OPERATION_MESSAGES = new Set([
 ]);
 
 export function desktopOperationIssue(error: unknown): DesktopOperationIssue {
-  if (error instanceof SecureCredentialError) {
-    switch (error.code) {
-      case "temporarily_unavailable":
-        return {
-          code: "credential_temporarily_unavailable",
-          message: error.message,
-          retryable: true,
-          actions: ["relaunch"],
-        };
-      case "encrypt_failed":
-        return {
-          code: "credential_save_failed",
-          message: error.message,
-          retryable: error.retryable,
-          actions: ["relaunch"],
-        };
-      case "invalid_ciphertext":
-      case "unsupported_version":
-      case "decrypt_failed":
-        return {
-          code: "credential_unreadable",
-          message: error.message,
-          retryable: false,
-          actions: ["reenter"],
-        };
-    }
+  if (error instanceof AwakenEnvStoreError && error.code === "unreadable") {
+    return {
+      code: "credential_unreadable",
+      message: error.message,
+      retryable: true,
+      actions: ["retry", "reenter"],
+    };
   }
 
   const message = error instanceof Error ? error.message : "";

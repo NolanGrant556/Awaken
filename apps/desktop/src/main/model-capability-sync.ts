@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { ModelCapabilityWire } from "../shared/runtime.js";
 
-const OVERRIDES_FILE = "model-capability-overrides.json";
+const OVERRIDES_FILE = "model-capabilities.json";
 
 export type ProviderCapabilityOverrides = Record<string, ModelCapabilityWire>;
 
@@ -20,10 +20,10 @@ function isValidOverridesFile(value: unknown): value is CapabilityOverridesFile 
 }
 
 export async function loadCapabilityOverrides(
-  configDir: string,
+  cacheDir: string,
 ): Promise<Record<string, ProviderCapabilityOverrides>> {
   try {
-    const filePath = path.join(configDir, OVERRIDES_FILE);
+    const filePath = path.join(cacheDir, OVERRIDES_FILE);
     const raw = await fs.readFile(filePath, "utf8");
     const parsed = JSON.parse(raw) as unknown;
     if (isValidOverridesFile(parsed)) {
@@ -36,10 +36,10 @@ export async function loadCapabilityOverrides(
 }
 
 export async function saveCapabilityOverrides(
-  configDir: string,
+  cacheDir: string,
   providers: Record<string, ProviderCapabilityOverrides>,
 ): Promise<void> {
-  const filePath = path.join(configDir, OVERRIDES_FILE);
+  const filePath = path.join(cacheDir, OVERRIDES_FILE);
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   const tempPath = `${filePath}.${process.pid}.tmp`;
   const file: CapabilityOverridesFile = { version: 1, providers };

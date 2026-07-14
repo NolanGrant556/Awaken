@@ -42,8 +42,6 @@ import {
   type UpdateMcpServerConfigRequest,
   type UpsertProjectResult,
   type WorkspacePickResult,
-  type WorkspaceRegistrySnapshot,
-  type WorkspaceRegistryPersistRequest,
   type WorkspaceValidationResult,
 } from "../../shared/runtime";
 import type {
@@ -184,8 +182,6 @@ export type RuntimeClient = {
   pickDirectory: (defaultPath?: string) => Promise<WorkspacePickResult>;
   pickWorkspace: (defaultPath?: string) => Promise<WorkspacePickResult>;
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
-  readWorkspaceRegistry: () => Promise<WorkspaceRegistrySnapshot>;
-  persistWorkspaceRegistry: (request: WorkspaceRegistryPersistRequest) => Promise<void>;
   getSupervisorStatus: () => Promise<SupervisorStatusInfo>;
   onSupervisorStatusChange: (callback: (info: SupervisorStatusInfo) => void) => () => void;
   notifyRendererReady: () => void;
@@ -388,8 +384,6 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     pickDirectory: (defaultPath) => bridge.pickDirectory(defaultPath),
     pickWorkspace: (defaultPath) => bridge.pickWorkspace(defaultPath),
     validateWorkspace: (path) => bridge.validateWorkspace(path),
-    readWorkspaceRegistry: () => bridge.readWorkspaceRegistry(),
-    persistWorkspaceRegistry: (request) => bridge.persistWorkspaceRegistry(request),
     getSupervisorStatus: () => bridge.getSupervisorStatus(),
     onSupervisorStatusChange: (callback) => bridge.onSupervisorStatusChange(callback),
     notifyRendererReady: () => bridge.notifyRendererReady(),

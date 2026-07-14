@@ -62,17 +62,17 @@ function installBridge(bridge: AwakenBridge): void {
 
 describe("electron runtime client", () => {
   it("recovers the structured credential issue attached by the preload bridge", () => {
-    const error = Object.assign(new Error("模型密钥暂时不可用"), {
-      code: "credential_temporarily_unavailable",
+    const error = Object.assign(new Error("模型密钥无法读取"), {
+      code: "credential_unreadable",
       retryable: true,
-      actions: ["relaunch", "unknown"],
+      actions: ["retry", "reenter", "unknown"],
     });
 
     expect(desktopOperationIssueFromError(error)).toEqual({
-      code: "credential_temporarily_unavailable",
-      message: "模型密钥暂时不可用",
+      code: "credential_unreadable",
+      message: "模型密钥无法读取",
       retryable: true,
-      actions: ["relaunch"],
+      actions: ["retry", "reenter"],
     });
   });
 
@@ -81,10 +81,10 @@ describe("electron runtime client", () => {
     bridge.startRun = vi.fn(async () => ({
       ok: false as const,
       issue: {
-        code: "credential_temporarily_unavailable" as const,
-        message: "模型密钥暂不可用",
+        code: "credential_unreadable" as const,
+        message: "模型密钥无法读取",
         retryable: true,
-        actions: ["relaunch" as const],
+        actions: ["retry" as const, "reenter" as const],
       },
     }));
     installBridge(bridge);
@@ -98,10 +98,10 @@ describe("electron runtime client", () => {
     }
 
     expect(desktopOperationIssueFromError(caught)).toEqual({
-      code: "credential_temporarily_unavailable",
-      message: "模型密钥暂不可用",
+      code: "credential_unreadable",
+      message: "模型密钥无法读取",
       retryable: true,
-      actions: ["relaunch"],
+      actions: ["retry", "reenter"],
     });
   });
 

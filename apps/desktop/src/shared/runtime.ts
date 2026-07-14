@@ -7,9 +7,7 @@ import type {
 export type DesktopPlatform = "macos" | "windows" | "linux";
 
 export type DesktopOperationIssueCode =
-  | "credential_temporarily_unavailable"
   | "credential_unreadable"
-  | "credential_save_failed"
   | "operation_failed";
 
 export type DesktopOperationRecoveryAction =
@@ -546,7 +544,6 @@ export type ModelCredentialStatus =
   | "ready"
   | "missing_key"
   | "disabled"
-  | "temporarily_unavailable"
   | "unreadable";
 
 export type RuntimeModelProfileSummaryWire = {
@@ -636,7 +633,7 @@ export type ModelProfileBalanceWire = {
   fetched_at?: string;
   detail?: ModelBalanceDetailWire;
   error?: string;
-  credential_issue?: "temporarily_unavailable" | "unreadable";
+  credential_issue?: "unreadable";
 };
 
 export type ModelProfileBalancesResultWire = {
@@ -678,7 +675,7 @@ export type ModelProfileBalance = {
   fetchedAt?: string;
   detail?: ModelBalanceDetail;
   error?: string;
-  credentialIssue?: "temporarily_unavailable" | "unreadable";
+  credentialIssue?: "unreadable";
 };
 
 export type ModelProfileBalancesResult = {

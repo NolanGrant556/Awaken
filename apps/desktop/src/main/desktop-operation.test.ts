@@ -1,40 +1,35 @@
-import { describe, expect, it, vi } from "vitest";
-
-vi.mock("electron", () => ({ safeStorage: {} }));
+import { describe, expect, it } from "vitest";
 
 import {
   desktopOperationIssue,
   runDesktopOperation,
 } from "./desktop-operation.js";
-import { SecureCredentialError } from "./secure-credential-store.js";
+import { AwakenEnvStoreError } from "./awaken-env-store.js";
 
 describe("desktop operation result boundary", () => {
-  it("turns temporary credential failures into an in-app relaunch action", () => {
+  it("routes an unreadable .env to retry or API key re-entry", () => {
     expect(
       desktopOperationIssue(
-        new SecureCredentialError(
-          "temporarily_unavailable",
-          "安全凭据服务暂时不可用，请重新启动 Awaken 后重试。",
-          true,
-        ),
+        new AwakenEnvStoreError("unreadable", "无法读取 ~/.awaken/.env 中的 API key。"),
       ),
     ).toEqual({
-      code: "credential_temporarily_unavailable",
-      message: "安全凭据服务暂时不可用，请重新启动 Awaken 后重试。",
+      code: "credential_unreadable",
+      message: "无法读取 ~/.awaken/.env 中的 API key。",
       retryable: true,
-      actions: ["relaunch"],
+      actions: ["retry", "reenter"],
     });
   });
 
-  it("routes unreadable credentials to in-app re-entry", () => {
+  it("maps .env write failures to a generic operation failure", () => {
     expect(
       desktopOperationIssue(
-        new SecureCredentialError("decrypt_failed", "请重新保存 API key。"),
+        new AwakenEnvStoreError("write_failed", "must not cross IPC"),
       ),
-    ).toMatchObject({
-      code: "credential_unreadable",
-      retryable: false,
-      actions: ["reenter"],
+    ).toEqual({
+      code: "operation_failed",
+      message: "Awaken 操作未完成，请稍后重试。",
+      retryable: true,
+      actions: ["retry"],
     });
   });
 
@@ -49,7 +44,7 @@ describe("desktop operation result boundary", () => {
   it("returns a serializable result instead of throwing across Electron IPC", async () => {
     await expect(
       runDesktopOperation(async () => {
-        throw new SecureCredentialError("decrypt_failed", "请重新保存 API key。");
+        throw new AwakenEnvStoreError("unreadable", "请重新输入 API key。");
       }),
     ).resolves.toMatchObject({
       ok: false,

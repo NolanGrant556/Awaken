@@ -109,8 +109,6 @@ function createMockRuntimeClient(): RuntimeClient {
     pickDirectory: vi.fn(async () => ({ canceled: true as const })),
     pickWorkspace: vi.fn(async () => ({ canceled: true as const })),
     validateWorkspace: vi.fn(async () => ({ valid: true as const })),
-    readWorkspaceRegistry: vi.fn(async () => ({ registeredWorkspacePaths: [] })),
-    persistWorkspaceRegistry: vi.fn(async () => undefined),
     getSupervisorStatus: vi.fn(async () => ({ status: "running" as const })),
     onSupervisorStatusChange: vi.fn(() => () => {}),
     notifyRendererReady: vi.fn(),

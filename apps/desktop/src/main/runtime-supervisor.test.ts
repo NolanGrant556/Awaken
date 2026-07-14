@@ -54,9 +54,7 @@ describe("RuntimeSupervisor", () => {
     process.env.LLM_API_KEY = "legacy-key";
     process.env.AWAKEN_PROCESS_ONLY_CANARY = "must-not-flow-back";
     const supervisor = new RuntimeSupervisor(
-      {
-        defaultWorkspace: "/tmp/workspace",
-      },
+      {},
       {
         allocatePort: async () => 19001,
         resolveBinaryPath: () => "/fake/awaken-core",
@@ -106,7 +104,7 @@ describe("RuntimeSupervisor", () => {
     });
     expect(spawnOptions?.env).toMatchObject({
       AWAKEN_CORE_ADDR: "127.0.0.1:19001",
-      AWAKEN_DEFAULT_WORKSPACE: "/tmp/workspace",
+      AWAKEN_DEFAULT_WORKSPACE: "",
       AWAKEN_USER_DATA_DIR: "/tmp/awaken-user-data",
       PATH: "/login/bin:/usr/bin",
       HOME: "/Users/login-user",
@@ -122,6 +120,32 @@ describe("RuntimeSupervisor", () => {
     expect(spawnOptions?.env).not.toHaveProperty(
       "AWAKEN_PROCESS_ONLY_CANARY",
     );
+  });
+
+  it("sets an explicit empty default workspace so Core does not fall back to cwd", async () => {
+    let spawnOptions: SpawnOptions | undefined;
+    const supervisor = new RuntimeSupervisor(
+      {},
+      {
+        allocatePort: async () => 19002,
+        resolveBinaryPath: () => "/fake/awaken-core",
+        resolveLoginUserEnvironment: async () => ({
+          PATH: "/login/bin:/usr/bin",
+        }),
+        spawnProcess: (_command: string, _args: string[], options: SpawnOptions) => {
+          spawnOptions = options;
+          return asChild(new FakeChild());
+        },
+        waitForHealth: vi.fn(async () => {}),
+      },
+    );
+
+    const info = await supervisor.start();
+
+    expect(info.status).toBe("running");
+    expect(spawnOptions?.env).toMatchObject({
+      AWAKEN_DEFAULT_WORKSPACE: "",
+    });
   });
 
   it.skipIf(process.platform === "win32")(

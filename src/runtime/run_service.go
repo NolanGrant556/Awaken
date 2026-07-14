@@ -19,7 +19,6 @@ import (
 
 	"awaken/src/agentcore"
 	convcontext "awaken/src/context"
-	"awaken/src/desktopdata"
 	"awaken/src/skillruntime"
 	"awaken/src/skills"
 	"awaken/src/tool"
@@ -137,6 +136,10 @@ func (f ExecutorFunc) Run(ctx context.Context, input string, sink agentcore.Even
 type RunService struct {
 	mu                sync.RWMutex
 	projectMutationMu sync.RWMutex
+	// runWG tracks in-flight run goroutines. Terminal run status is
+	// observable before the final transcript flush completes; tests and
+	// shutdown paths use drainRunWorkers to join those trailing writes.
+	runWG             sync.WaitGroup
 	sessions          map[string]*Session
 	threads           map[string]*Thread
 	projectFences     map[string]bool
@@ -149,6 +152,16 @@ type RunService struct {
 	journals          *journalManager
 	allowNoopRecorder bool
 	skillActivator    *skillruntime.Activator
+}
+
+// drainRunWorkers blocks until every launched run goroutine has fully
+// returned, including the trailing transcript flush that runs after the
+// terminal status became observable.
+func (s *RunService) drainRunWorkers() {
+	if s == nil {
+		return
+	}
+	s.runWG.Wait()
 }
 
 // SetSkillActivator injects the shared SkillActivator used for explicit
@@ -263,10 +276,10 @@ func NewRunService(
 ) *RunService {
 	store := newThreadStore()
 	pathFn := func(threadID string) string {
-		if sqliteStore, ok := store.(*sqliteThreadStore); ok {
-			return sqliteStore.paths.ThreadTranscriptPath(threadID)
+		if repo, ok := store.(ThreadRepository); ok {
+			return repo.ThreadTranscriptPath(threadID)
 		}
-		return desktopdata.Detect().ThreadTranscriptPath(threadID)
+		return transcriptPath(threadID)
 	}
 	service := &RunService{
 		sessions:      make(map[string]*Session),
@@ -277,8 +290,10 @@ func NewRunService(
 		threadStore:   store,
 		journals:      newJournalManager(pathFn),
 	}
-	if sqliteStore, ok := store.(*sqliteThreadStore); ok {
-		service.projectService = newProjectService(service, sqliteStore)
+	// Project lifecycle is available whenever the thread store also satisfies
+	// the domain repository contract; no concrete storage type checks.
+	if repo, ok := store.(ProjectLifecycleRepository); ok {
+		service.projectService = newProjectService(service, repo)
 	}
 	return service
 }
@@ -567,7 +582,11 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 				projectID: firstNonEmpty(restoredMeta.Snapshot.ProjectID, stableProjectID(workspace.WorkspaceRoot)),
 				agent:     agent,
 				workspace: workspace,
-				// SQLite metadata owns mutable title state. The append-only journal's
+				// thread label is only the creation-time fallback and must not overwrite
+				// a later manual/generated rename after restart.
+				// FileStore metadata owns mutable title state. The append-only journal's
+				// thread label is only the creation-time fallback and must not overwrite
+				// a later manual/generated rename after restart.
 				// thread label is only the creation-time fallback and must not overwrite
 				// a later manual/generated rename after restart.
 				label:           firstNonEmpty(restoredMeta.Snapshot.Label, restored.Label),
@@ -595,7 +614,11 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 				return rollbackStart(err, true)
 			}
 			executor := s.newExecutor(agent)
-			go s.execute(session, executor, agent, effectiveInput, trimmed, persistedAttachments, ctx)
+			s.runWG.Add(1)
+			go func() {
+				defer s.runWG.Done()
+				s.execute(session, executor, agent, effectiveInput, trimmed, persistedAttachments, ctx)
+			}()
 			return session.Snapshot(), nil
 		}
 		previousThread = cloneThread(thread)
@@ -674,7 +697,11 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		go s.scheduleThreadTitleGeneration(context.Background(), threadID, runID, trimmed, persistedAttachments, req.ComposerTokens, req.ModelProfile)
 	}
 	executor := s.newExecutor(agent)
-	go s.execute(session, executor, agent, effectiveInput, trimmed, persistedAttachments, ctx)
+	s.runWG.Add(1)
+	go func() {
+		defer s.runWG.Done()
+		s.execute(session, executor, agent, effectiveInput, trimmed, persistedAttachments, ctx)
+	}()
 
 	return session.Snapshot(), nil
 }

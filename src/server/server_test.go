@@ -23,6 +23,7 @@ import (
 
 	"awaken/src/agentcore"
 	"awaken/src/desktopdata"
+	"awaken/src/filestore"
 	"awaken/src/llm"
 	"awaken/src/mcpclient"
 	"awaken/src/protocol/agui"
@@ -885,7 +886,7 @@ func TestGetThreadTranscriptEndpointReturnsMappedRuns(t *testing.T) {
 }
 
 func TestGetThreadTranscriptEndpointProjectsDurableSemanticFramesAfterRestart(t *testing.T) {
-	t.Setenv("AWAKEN_USER_DATA_DIR", t.TempDir())
+	t.Setenv("AWAKEN_HOME", t.TempDir())
 	workspace := t.TempDir()
 	startExecution := make(chan struct{})
 	var durableRunID string
@@ -1017,7 +1018,7 @@ func TestGetThreadTranscriptEndpointProjectsDurableSemanticFramesAfterRestart(t 
 }
 
 func TestDurableLiveAndRestartTranscriptShareCanonicalProjection(t *testing.T) {
-	t.Setenv("AWAKEN_USER_DATA_DIR", t.TempDir())
+	t.Setenv("AWAKEN_HOME", t.TempDir())
 	workspace := t.TempDir()
 	service := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
@@ -1152,7 +1153,7 @@ func TestDurableLiveAndRestartTranscriptShareCanonicalProjection(t *testing.T) {
 }
 
 func TestRunningTranscriptResumesEphemeralStreamWithoutLossOrDuplicates(t *testing.T) {
-	t.Setenv("AWAKEN_USER_DATA_DIR", t.TempDir())
+	t.Setenv("AWAKEN_HOME", t.TempDir())
 	workspace := t.TempDir()
 	ready := make(chan struct{})
 	release := make(chan struct{})
@@ -1328,7 +1329,7 @@ func TestA35TranscriptEndpointReturnsFailureForMiddleCorruption(t *testing.T) {
 }
 
 func TestPersistenceErrorTerminalWinsAcrossLiveActiveAndRestartTranscript(t *testing.T) {
-	t.Setenv("AWAKEN_USER_DATA_DIR", t.TempDir())
+	t.Setenv("AWAKEN_HOME", t.TempDir())
 	workspace := t.TempDir()
 	service := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
@@ -1408,7 +1409,7 @@ func assertOnlyPersistenceRunErrorFrames(t *testing.T, events []agui.Event) {
 
 func createCompletedBoundaryRun(t *testing.T, input string) (*awruntime.RunService, awruntime.Run, string) {
 	t.Helper()
-	t.Setenv("AWAKEN_USER_DATA_DIR", t.TempDir())
+	t.Setenv("AWAKEN_HOME", t.TempDir())
 	workspace := t.TempDir()
 	service := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
@@ -1444,7 +1445,11 @@ func createCompletedBoundaryRun(t *testing.T, input string) (*awruntime.RunServi
 	}
 	waitHTTPServiceRunTerminal(t, service, run.RunID)
 	waitHTTPServiceThreadIdle(t, service, run.ThreadID)
-	return service, run, desktopdata.Detect().ThreadTranscriptPath(run.ThreadID)
+	generationDir, _, err := filestore.ReadCurrentGeneration(desktopdata.AwakenHomeRoot())
+	if err != nil {
+		t.Fatalf("resolve FileStore generation: %v", err)
+	}
+	return service, run, filepath.Join(generationDir, "sessions", run.ThreadID, "journal.jsonl")
 }
 
 func fetchThreadTranscript(t *testing.T, baseURL, threadID string) threadTranscriptResponse {

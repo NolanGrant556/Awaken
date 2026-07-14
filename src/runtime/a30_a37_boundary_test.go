@@ -202,20 +202,13 @@ func TestA37OrphanRecoveryIsInterruptedPairedOutcomeUnknownAndNeverReexecutes(t 
 	}
 }
 
-func prepareSemanticBoundaryFixture(t *testing.T, suffix string) (*sqliteThreadStore, ThreadSnapshot, string, []agentcore.SemanticRecord) {
+func prepareSemanticBoundaryFixture(t *testing.T, suffix string) (ThreadRepository, ThreadSnapshot, string, []agentcore.SemanticRecord) {
 	t.Helper()
-	t.Setenv(runtimeUserDataDirEnv, t.TempDir())
-	store, ok := newThreadStore().(*sqliteThreadStore)
+	t.Setenv(awakenHomeEnv, t.TempDir())
+	store, ok := newThreadStore().(ThreadRepository)
 	if !ok {
-		t.Fatal("expected sqliteThreadStore")
+		t.Fatal("expected ThreadRepository store")
 	}
-	t.Cleanup(func() {
-		store.mu.Lock()
-		defer store.mu.Unlock()
-		if store.db != nil {
-			_ = store.db.Close()
-		}
-	})
 
 	now := time.Date(2026, 7, 10, 8, 0, 0, 0, time.UTC)
 	threadID := "thread_" + suffix
@@ -233,7 +226,7 @@ func prepareSemanticBoundaryFixture(t *testing.T, suffix string) (*sqliteThreadS
 	if err := store.CreateThread(snapshot, "", suffix); err != nil {
 		t.Fatalf("create fixture thread metadata: %v", err)
 	}
-	path := store.paths.ThreadTranscriptPath(threadID)
+	path := store.ThreadTranscriptPath(threadID)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("create fixture transcript dir: %v", err)
 	}

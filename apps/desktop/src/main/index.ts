@@ -1751,7 +1751,8 @@ app.whenReady().then(async () => {
       );
     }
   });
-  modelProfileStore = new ModelProfileStore(configDir);
+  const awakenHome = join(app.getPath("home"), ".awaken");
+  modelProfileStore = new ModelProfileStore(awakenHome);
   await modelProfileStore.initialize();
   petStore = new PetStore(configDir, app.getPath("userData"));
   await petStore.initialize();

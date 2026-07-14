@@ -8,22 +8,22 @@ describe("composer credential recovery presentation", () => {
         desktopNeedsRestart: false,
         desktopStarting: false,
         runtimeErrorMessage:
-          "模型配置「Kimi Coding Plan」的安全凭据服务暂时不可用，凭据仍已保留。请重新启动 Awaken 后重试。",
+          "模型配置「Kimi Coding Plan」的 API key 无法从 ~/.awaken/.env 读取。",
         runtimeOperationIssue: {
-          code: "credential_temporarily_unavailable",
-          message: "模型密钥暂时不可用",
+          code: "credential_unreadable",
+          message: "模型密钥无法读取",
           retryable: true,
-          actions: ["relaunch"],
+          actions: ["retry", "reenter"],
         },
       }),
     ).toEqual([
       {
         id: "run-error",
-        title: "模型密钥暂不可用",
+        title: "模型密钥无法读取",
         message:
-          "模型配置「Kimi Coding Plan」的安全凭据服务暂时不可用，凭据仍已保留。请重新启动 Awaken 后重试。",
+          "模型配置「Kimi Coding Plan」的 API key 无法从 ~/.awaken/.env 读取。",
         tone: "error",
-        actions: ["relaunch"],
+        actions: ["retry", "reenter"],
       },
     ]);
   });

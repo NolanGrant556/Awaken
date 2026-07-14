@@ -22,15 +22,11 @@ import {
 import { calculateAutoCompactThreshold } from "../../shared/runtime";
 import type {
   AwakenThemePreference,
-  DesktopOperationIssue,
   ModelProfileSaveRequest,
   ModelProvider,
   RuntimeModelProfileSummary,
 } from "../../shared/runtime";
-import {
-  desktopOperationIssueFromError,
-  type RuntimeClient,
-} from "../runtime/client";
+import type { RuntimeClient } from "../runtime/client";
 import { PetsSettingsPanel } from "./PetsSettingsPanel";
 
 export type DraftState = {
@@ -74,10 +70,8 @@ function credentialStatusLabel(
   status: RuntimeModelProfileSummary["profileStatus"],
 ): string | null {
   switch (status) {
-    case "temporarily_unavailable":
-      return "安全存储暂不可用，原凭据已保留";
     case "unreadable":
-      return "需要在 Awaken 中重新输入 API key";
+      return "无法读取 ~/.awaken/.env，请重新输入 API key";
     case "missing_key":
       return "未配置 API key";
     default:
@@ -88,33 +82,8 @@ function credentialStatusLabel(
 function credentialRecoveryMessage(
   profiles: RuntimeModelProfileSummary[],
 ): string | null {
-  if (
-    profiles.some(
-      (profile) => profile.profileStatus === "temporarily_unavailable",
-    )
-  ) {
-    return "模型密钥暂时无法读取，原加密凭据已保留。请重新启动 Awaken 以重新连接系统安全存储。";
-  }
   if (profiles.some((profile) => profile.profileStatus === "unreadable")) {
-    return "已有模型密钥无法读取。请直接在 Awaken 中重新输入 API key；其他模型配置会保留。";
-  }
-  return null;
-}
-
-function credentialOperationIssueForProfiles(
-  profiles: RuntimeModelProfileSummary[],
-): DesktopOperationIssue | null {
-  if (
-    profiles.some(
-      (profile) => profile.profileStatus === "temporarily_unavailable",
-    )
-  ) {
-    return {
-      code: "credential_temporarily_unavailable",
-      message: "模型密钥暂时无法读取",
-      retryable: true,
-      actions: ["relaunch"],
-    };
+    return "无法读取 ~/.awaken/.env 中的模型密钥。请检查文件权限，或重新输入 API key；其他模型配置会保留。";
   }
   return null;
 }
@@ -501,8 +470,6 @@ export function DesktopSettingsDialog({
   const [testing, setTesting] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [credentialOperationIssue, setCredentialOperationIssue] =
-    useState<DesktopOperationIssue | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
 
@@ -522,7 +489,6 @@ export function DesktopSettingsDialog({
 
   const loadModelSettings = useCallback(async () => {
     setMessage(null);
-    setCredentialOperationIssue(null);
     try {
       const [nextProviders, nextProfiles] = await Promise.all([
         runtimeClient.listModelProviders(),
@@ -531,9 +497,6 @@ export function DesktopSettingsDialog({
       setProviders(nextProviders);
       setProfiles(nextProfiles);
       setMessage(credentialRecoveryMessage(nextProfiles));
-      setCredentialOperationIssue(
-        credentialOperationIssueForProfiles(nextProfiles),
-      );
       setConfiguredDrafts(
         configuredDraftsFromProfiles(nextProfiles, nextProviders),
       );
@@ -544,9 +507,6 @@ export function DesktopSettingsDialog({
         setProviders(syncedProviders);
         setProfiles(refreshedProfiles);
         setMessage(credentialRecoveryMessage(refreshedProfiles));
-        setCredentialOperationIssue(
-          credentialOperationIssueForProfiles(refreshedProfiles),
-        );
         setConfiguredDrafts(
           configuredDraftsFromProfiles(refreshedProfiles, syncedProviders),
         );
@@ -569,7 +529,6 @@ export function DesktopSettingsDialog({
     setToastMessage(message);
     toastTimerRef.current = window.setTimeout(() => {
       setToastMessage(null);
-      setCredentialOperationIssue(null);
       toastTimerRef.current = null;
     }, 2000);
   }
@@ -656,7 +615,7 @@ export function DesktopSettingsDialog({
     setShowApiKey(false);
     setMessage(
       profile.profileStatus === "unreadable"
-        ? "请重新输入 API key。只有安全写入成功后，新的全局凭据才会替换原密文。"
+        ? "请重新输入 API key。保存成功后会更新 ~/.awaken/.env 中该配置对应的变量。"
         : null,
     );
   }
@@ -667,22 +626,19 @@ export function DesktopSettingsDialog({
     if (!provider) return;
     if (draft.requiresApiKey && draft.apiKey.trim() === "") {
       setMessage("请先输入新的 API key。");
-      setCredentialOperationIssue(null);
       return;
     }
     setSaving(true);
     setMessage(null);
-    setCredentialOperationIssue(null);
     try {
       await runtimeClient.saveModelProfile(toSaveRequest(draft, provider));
       await loadModelSettings();
       collapseProviderEditor();
       onProfilesChanged();
-      showToast("模型配置已安全保存");
+      showToast("模型配置已保存");
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Failed to save model profile";
-      setCredentialOperationIssue(desktopOperationIssueFromError(error));
       if (errorMessage.includes(DUPLICATE_MODEL_PROFILE_ERROR)) {
         showToast(DUPLICATE_MODEL_PROFILE_ERROR);
         setMessage(null);
@@ -1057,21 +1013,6 @@ export function DesktopSettingsDialog({
           {activeSettingsSection === "models" && message ? (
             <div className="model-settings-message">
               <span>{message}</span>
-              {credentialOperationIssue?.actions.includes("relaunch") ? (
-                <div className="model-settings-message-actions">
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={() => {
-                      void runtimeClient.relaunchDesktop().catch(() => {
-                        setMessage("Awaken 重新启动失败，请再试一次。");
-                      });
-                    }}
-                  >
-                    重新启动 Awaken
-                  </Button>
-                </div>
-              ) : null}
             </div>
           ) : null}
           {activeSettingsSection === "appearance" && themeMessage ? (

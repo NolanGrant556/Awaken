@@ -40,9 +40,6 @@ function formatUsedPercentage(used: number, limit: number): string {
 }
 
 function formatBalanceSummary(balance: ModelProfileBalance): string {
-  if (balance.credentialIssue === "temporarily_unavailable") {
-    return "模型密钥暂不可用";
-  }
   if (balance.credentialIssue === "unreadable") {
     return "需要重新输入 API key";
   }
@@ -60,14 +57,7 @@ function formatBalanceSummary(balance: ModelProfileBalance): string {
 
 export function credentialRecoveryForBalances(
   balances: ModelProfileBalance[],
-): "temporarily_unavailable" | "unreadable" | null {
-  if (
-    balances.some(
-      (balance) => balance.credentialIssue === "temporarily_unavailable",
-    )
-  ) {
-    return "temporarily_unavailable";
-  }
+): "unreadable" | null {
   return balances.some((balance) => balance.credentialIssue === "unreadable")
     ? "unreadable"
     : null;
@@ -276,28 +266,14 @@ export function ProfileBalancePopover({
               >
                 <div className="profile-balance-credential-recovery-copy">
                   <AlertCircle size={18} strokeWidth={2} />
-                  <span>
-                    {credentialRecovery === "temporarily_unavailable"
-                      ? "模型密钥暂时无法读取，原加密凭据已保留。"
-                      : "已有模型密钥无法读取，请在 Awaken 中重新输入。"}
-                  </span>
+                  <span>无法读取 ~/.awaken/.env 中的模型密钥，请重新输入。</span>
                 </div>
                 <Button
                   variant="primary"
                   size="sm"
-                  onClick={() => {
-                    if (credentialRecovery === "temporarily_unavailable") {
-                      void runtimeClient.relaunchDesktop().catch(() => {
-                        setError("Awaken 重新启动失败，请再试一次。");
-                      });
-                      return;
-                    }
-                    handleOpenSettings();
-                  }}
+                  onClick={handleOpenSettings}
                 >
-                  {credentialRecovery === "temporarily_unavailable"
-                    ? "重新启动 Awaken"
-                    : "在 Awaken 中恢复"}
+                  在 Awaken 中恢复
                 </Button>
               </div>
             ) : null}
@@ -349,10 +325,7 @@ export function ProfileBalancePopover({
                     <span>
                       {selectedBalance.status === "missing_key"
                         ? "请先配置 API key"
-                        : selectedBalance.credentialIssue ===
-                            "temporarily_unavailable"
-                          ? "模型密钥暂不可用，请重新启动 Awaken"
-                          : selectedBalance.credentialIssue === "unreadable"
+                        : selectedBalance.credentialIssue === "unreadable"
                             ? "请在 Awaken 中重新输入 API key"
                         : selectedBalance.status === "unsupported"
                           ? "暂不支持查询该供应商余额"

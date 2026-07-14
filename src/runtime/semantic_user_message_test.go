@@ -109,6 +109,105 @@ func TestStructuredUserInputSurvivesDurableServiceRestart(t *testing.T) {
 	}
 }
 
+func TestComposerTokenLeadingTextSurvivesDurableServiceRestart(t *testing.T) {
+	setRuntimeUserDataDir(t)
+	workspace := t.TempDir()
+
+	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer model.Close()
+
+	service := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				MaxThoughts: 1,
+				ModelConfig: agentcore.ModelConfig{
+					APIKey:  "test-key",
+					BaseURL: model.URL,
+					Model:   "test-model",
+				},
+				Workspace: agentcore.WorkspaceConfig{Root: workspace.WorkspaceRoot},
+			}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return agent.RunStreamWithEvents(ctx, input, sink)
+			})
+		},
+	)
+
+	leadingText := "现在我需要你帮我分析现有的财务数据风险，然后使用 "
+	token := ComposerToken{
+		ID:          "prompt:pptx:user",
+		Type:        "prompt",
+		LeadingText: leadingText,
+		Label:       "pptx",
+		Payload: ComposerTokenPayload{
+			SkillID:      "pptx",
+			SourceOrigin: "user",
+		},
+	}
+	run, err := service.StartRun(StartRunRequest{
+		Input:          leadingText + "输出一份风险报告给我",
+		ComposerTokens: []ComposerToken{token},
+		Workspace:      WorkspaceConfig{WorkspaceRoot: workspace},
+	})
+	if err != nil {
+		t.Fatalf("StartRun: %v", err)
+	}
+	waitForRunTerminal(t, service, run.RunID)
+
+	restarted := NewRunService(nil, nil)
+	transcript, err := restarted.GetThreadTranscript(run.ThreadID)
+	if err != nil {
+		t.Fatalf("GetThreadTranscript after restart: %v", err)
+	}
+	if len(transcript.Runs) != 1 {
+		t.Fatalf("expected one durable run, got %+v", transcript.Runs)
+	}
+	replayed := transcript.Runs[0].Run
+	if len(replayed.ComposerTokens) != 1 {
+		t.Fatalf("composer token missing after restart: %+v", replayed.ComposerTokens)
+	}
+	if replayed.ComposerTokens[0].LeadingText != leadingText {
+		t.Fatalf("token leadingText lost after restart: %+v", replayed.ComposerTokens[0])
+	}
+	if replayed.ComposerTokens[0] != token {
+		t.Fatalf("composer token changed after restart: %+v", replayed.ComposerTokens[0])
+	}
+}
+
+func TestSemanticComposerTokensForRunKeepsLeadingText(t *testing.T) {
+	tokens := semanticComposerTokensForRun([]ComposerToken{{
+		ID:          "skill:pptx:user",
+		Type:        "skill",
+		LeadingText: "然后使用 ",
+		Label:       "pptx",
+		Payload:     ComposerTokenPayload{SkillID: "pptx"},
+	}})
+	if len(tokens) != 1 || tokens[0].LeadingText != "然后使用 " {
+		t.Fatalf("leadingText not carried into semantic token: %+v", tokens)
+	}
+}
+
+func TestComposerTokensFromSemanticUserMessageRestoresLeadingText(t *testing.T) {
+	payload := map[string]any{
+		"composer_tokens": []map[string]any{{
+			"id":          "skill:pptx:user",
+			"type":        "skill",
+			"leadingText": "然后使用 ",
+			"label":       "pptx",
+		}},
+	}
+	tokens := composerTokensFromSemanticUserMessage(payload)
+	if len(tokens) != 1 || tokens[0].LeadingText != "然后使用 " {
+		t.Fatalf("leadingText not restored from semantic payload: %+v", tokens)
+	}
+}
+
 func TestV1AdapterPreservesStructuredUserInputForDurableRun(t *testing.T) {
 	now := time.Date(2026, 7, 11, 1, 2, 3, 0, time.UTC)
 	token := ComposerToken{

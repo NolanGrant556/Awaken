@@ -265,6 +265,40 @@ describe("runtime reducer replay idempotency", () => {
     expect(state.timelineTitle).toContain("Build a feature");
   });
 
+  it("run/recovered keeps inline token position through durable leadingText", () => {
+    const leadingText = "现在我需要你帮我分析现有的财务数据风险，然后使用 ";
+    const state = dispatch([
+      {
+        type: "run/recovered",
+        run: makeRun({
+          runId: "run-1",
+          threadId: "thread-1",
+          status: "running",
+          composerTokens: [
+            {
+              id: "skill:pptx:user",
+              type: "skill",
+              label: "pptx",
+              leadingText,
+              payload: { skillId: "pptx", sourceOrigin: "user" },
+            },
+          ],
+        }),
+        prompt:
+          "现在我需要你帮我分析现有的财务数据风险，然后使用 输出一份风险报告给我",
+      },
+    ]);
+
+    const promptItem = state.narrative.committedItems.find(
+      (item) => item.kind === "prompt",
+    );
+    expect(promptItem?.kind).toBe("prompt");
+    if (promptItem?.kind !== "prompt") {
+      throw new Error("prompt item missing");
+    }
+    expect(promptItem.tokens?.[0]?.leadingText).toBe(leadingText);
+  });
+
   it("run/recovered restores prompt from thread label before full replay", () => {
     const state = dispatch([
       {

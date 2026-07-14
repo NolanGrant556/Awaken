@@ -216,10 +216,77 @@ func messagesFromSemanticRecords(records []agentcore.SemanticRecord) []convconte
 				IsError:    isError,
 			}
 			messages = append(messages, msg)
+		case agentcore.SemanticKindContextCompacted:
+			compacted, ok := compactedMessagesFromSemanticRecord(record.Payload)
+			if !ok {
+				// A malformed compaction record must not erase the last known-good
+				// conversation. The record remains auditable while replay keeps the
+				// pre-compaction messages as its fail-closed fallback.
+				continue
+			}
+			messages = compacted
+			pendingAssistant = map[string]*convcontext.Message{}
 		}
 	}
 	_ = pendingAssistant
 	return messages
+}
+
+func compactedMessagesFromSemanticRecord(payload map[string]any) ([]convcontext.Message, bool) {
+	var durable []agentcore.SemanticCompactedMessage
+	if !decodeSemanticUserMessageField(payload, "messages", &durable) || len(durable) == 0 {
+		return nil, false
+	}
+	boundaryID := strings.TrimSpace(stringPayload(payload, "compact_boundary_id"))
+	messages := make([]convcontext.Message, 0, len(durable))
+	for _, message := range durable {
+		role := convcontext.Role(strings.TrimSpace(message.Role))
+		switch role {
+		case convcontext.RoleUser, convcontext.RoleAssistant, convcontext.RoleTool:
+		default:
+			return nil, false
+		}
+		attachments := make([]transcriptMessageAttachment, 0, len(message.Attachments))
+		for _, attachment := range message.Attachments {
+			attachments = append(attachments, transcriptMessageAttachment{
+				ID:          attachment.ID,
+				Kind:        RunInputAttachmentKind(attachment.Kind),
+				MimeType:    attachment.MimeType,
+				Path:        attachment.Path,
+				DisplayName: attachment.DisplayName,
+				Width:       attachment.Width,
+				Height:      attachment.Height,
+				ByteSize:    attachment.ByteSize,
+				StorageKey:  attachment.StorageKey,
+			})
+		}
+		compactBoundaryID := strings.TrimSpace(message.CompactBoundaryID)
+		if len(messages) == 0 {
+			if compactBoundaryID == "" {
+				compactBoundaryID = boundaryID
+			}
+			if boundaryID == "" {
+				boundaryID = compactBoundaryID
+			}
+			if compactBoundaryID == "" || compactBoundaryID != boundaryID {
+				return nil, false
+			}
+		}
+		messages = append(messages, convcontext.Message{
+			Role:              role,
+			Content:           message.Content,
+			Attachments:       transcriptAttachmentsToContextAttachments(attachments),
+			ToolCalls:         append([]convcontext.ToolCall(nil), message.ToolCalls...),
+			ToolCallID:        message.ToolCallID,
+			Name:              message.Name,
+			IsError:           message.IsError,
+			CompactBoundaryID: compactBoundaryID,
+		})
+	}
+	if err := convcontext.ValidateToolResultPairing(messages); err != nil {
+		return nil, false
+	}
+	return messages, true
 }
 
 func executionOutcomePayload(payload map[string]any) (tool.ExecutionOutcome, bool) {

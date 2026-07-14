@@ -70,7 +70,6 @@ import {
   type ThreadDeleteResult,
   type UpdateMcpServerConfigRequest,
   type UpsertProjectResult,
-  type WorkspaceRegistryPersistRequest,
 } from "../shared/runtime.js";
 import {
   updateMainWindowBackground,
@@ -1692,9 +1691,6 @@ ipcMain.handle(
       if (!stat.isDirectory()) {
         return { canceled: true, error: "Selected path is not a directory" };
       }
-      await writeLastWorkspace(selected);
-      const registry = await readWorkspaceRegistry(selected);
-      await writeWorkspaceRegistry(registry);
       return { canceled: false, path: selected };
     } catch {
       return { canceled: true, error: "Cannot access selected directory" };
@@ -1721,139 +1717,15 @@ ipcMain.handle("awaken:validate-workspace", async (_event, candidate: string) =>
   }
 });
 
-ipcMain.handle("awaken:read-workspace-registry", async () => {
-  const lastWorkspacePath = await readLastWorkspace();
-  const registeredWorkspacePaths = await readWorkspaceRegistry(lastWorkspacePath);
-  return {
-    lastWorkspacePath,
-    registeredWorkspacePaths,
-  };
-});
-
-ipcMain.handle(
-  "awaken:persist-workspace-registry",
-  async (_event, request: WorkspaceRegistryPersistRequest) => {
-    const defaultWorkspace = normalizeStoredWorkspacePath(
-      request.defaultWorkspacePath,
-    );
-    const workspaces = dedupeWorkspacePaths([
-      defaultWorkspace,
-      ...request.registeredWorkspacePaths,
-    ]);
-
-    await writeWorkspaceRegistry(workspaces);
-    const nextLastWorkspace = defaultWorkspace ?? workspaces[0];
-    if (nextLastWorkspace) {
-      await writeLastWorkspace(nextLastWorkspace);
-    } else {
-      await clearLastWorkspace();
-    }
-  },
-);
-
 ipcMain.handle("awaken:runtime-supervisor-status", async () => {
   return toRendererSupervisorStatus(supervisor?.getStatus() ?? { status: "stopped" });
 });
-
-function normalizeStoredWorkspacePath(candidate: unknown): string | null {
-  const value = typeof candidate === "string" ? candidate.trim() : "";
-  if (!path.isAbsolute(value)) {
-    return null;
-  }
-  return path.normalize(value);
-}
-
-function dedupeWorkspacePaths(paths: Iterable<unknown>): string[] {
-  const nextPaths: string[] = [];
-  for (const value of paths) {
-    const normalized = normalizeStoredWorkspacePath(value);
-    if (!normalized || nextPaths.includes(normalized)) {
-      continue;
-    }
-    nextPaths.push(normalized);
-  }
-  return nextPaths;
-}
-
-// Persist the last user-selected workspace so the supervisor can default to it
-// on the next launch instead of always falling back to the home directory.
-async function readLastWorkspace(): Promise<string | undefined> {
-  try {
-    const file = path.join(app.getPath("userData"), "last-workspace.json");
-    const raw = await fs.readFile(file, "utf8");
-    const parsed = JSON.parse(raw) as { path?: unknown };
-    return normalizeStoredWorkspacePath(parsed.path) ?? undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function writeLastWorkspace(workspacePath: string): Promise<void> {
-  try {
-    const file = path.join(app.getPath("userData"), "last-workspace.json");
-    await fs.writeFile(file, JSON.stringify({ path: workspacePath }), "utf8");
-  } catch {
-    // Persistence is best-effort; a write failure must not block the picker.
-  }
-}
-
-async function clearLastWorkspace(): Promise<void> {
-  try {
-    const file = path.join(app.getPath("userData"), "last-workspace.json");
-    await fs.rm(file, { force: true });
-  } catch {
-    // Persistence is best-effort; a write failure must not block the picker.
-  }
-}
-
-async function readWorkspaceRegistry(
-  seedWorkspace?: string,
-): Promise<string[]> {
-  try {
-    const file = path.join(app.getPath("userData"), "workspace-registry.json");
-    const raw = await fs.readFile(file, "utf8");
-    const parsed = JSON.parse(raw) as { workspaces?: unknown };
-    const storedWorkspaces = Array.isArray(parsed.workspaces)
-      ? parsed.workspaces
-      : [];
-    return dedupeWorkspacePaths([
-      seedWorkspace,
-      ...storedWorkspaces,
-    ]);
-  } catch {
-    return dedupeWorkspacePaths([seedWorkspace]);
-  }
-}
-
-async function writeWorkspaceRegistry(workspaces: string[]): Promise<void> {
-  try {
-    const file = path.join(app.getPath("userData"), "workspace-registry.json");
-    const normalized = dedupeWorkspacePaths(workspaces);
-    await fs.writeFile(
-      file,
-      JSON.stringify({ workspaces: normalized }),
-      "utf8",
-    );
-  } catch {
-    // Persistence is best-effort; a write failure must not block the UI.
-  }
-}
-
-async function ensureDesktopDataDirs(): Promise<void> {
-  await Promise.all([
-    fs.mkdir(path.join(app.getPath("userData"), "config"), { recursive: true }),
-    fs.mkdir(path.join(app.getPath("userData"), "data", "threads"), { recursive: true }),
-    fs.mkdir(path.join(app.getPath("userData"), "data", "auth"), { recursive: true }),
-    fs.mkdir(path.join(app.getPath("userData"), "data", "migrations"), { recursive: true }),
-  ]);
-}
 
 app.whenReady().then(async () => {
   if (!ownsSingleInstanceLock) {
     return;
   }
   setMacDockIcon();
-  await ensureDesktopDataDirs();
   try {
     const cleanup = await cleanupLegacyPrimaryRuntime(app.getPath("userData"));
     if (cleanup.status === "removed") {
@@ -1924,12 +1796,7 @@ app.whenReady().then(async () => {
 
   registerPetIpcHandlers();
 
-  const lastWorkspace = await readLastWorkspace();
-  const workspaceRegistry = await readWorkspaceRegistry(lastWorkspace);
-  const defaultWorkspace = lastWorkspace ?? workspaceRegistry[0] ?? app.getPath("home");
-  supervisor = new RuntimeSupervisor({
-    defaultWorkspace,
-  });
+  supervisor = new RuntimeSupervisor({});
   supervisor.onStatusChange((info) => {
     if (info.runtimeBaseUrl) {
       runtimeBaseUrl = info.runtimeBaseUrl;

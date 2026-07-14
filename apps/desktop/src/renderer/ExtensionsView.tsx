@@ -327,19 +327,15 @@ export function ExtensionsView({
     }
     setErrorMessage(null);
     try {
-      const runtimeInfo = await runtimeClient.getRuntimeInfo();
-      const workspaceRegistry = await runtimeClient
-        .readWorkspaceRegistry()
-        .catch(() => ({
-          lastWorkspacePath: undefined,
-          registeredWorkspacePaths: [],
-        }));
+      const [runtimeInfo, runtimeProjects] = await Promise.all([
+        runtimeClient.getRuntimeInfo(),
+        runtimeClient.listProjects(false),
+      ]);
       const projectRoots = dedupePaths([
         projectRootOverride,
         skillProjectRoot,
         runtimeInfo?.defaultWorkspace,
-        workspaceRegistry.lastWorkspacePath,
-        ...workspaceRegistry.registeredWorkspacePaths,
+        ...runtimeProjects.map((project) => project.workspaceRoot),
       ]);
       const skillRoots = projectRoots.length > 0 ? projectRoots : [undefined];
       const [nextConnectors, nextMcpServers, nextSkillResults] = await Promise.all([

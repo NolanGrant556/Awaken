@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -13,34 +12,8 @@ import (
 	"awaken/src/agentcore"
 )
 
-func TestProjectOperationSchemaMigratesDurableTrashAttemptColumns(t *testing.T) {
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if _, err := db.Exec(`CREATE TABLE project_operations (operation_id TEXT PRIMARY KEY)`); err != nil {
-		t.Fatal(err)
-	}
-	if err := ensureProjectOperationColumns(db); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`INSERT INTO project_operations(operation_id) VALUES('operation-legacy')`); err != nil {
-		t.Fatal(err)
-	}
-	var attemptID, trashInvokedAt string
-	if err := db.QueryRow(`
-SELECT attempt_id, trash_invoked_at FROM project_operations WHERE operation_id = 'operation-legacy'
-`).Scan(&attemptID, &trashInvokedAt); err != nil {
-		t.Fatal(err)
-	}
-	if attemptID != "" || trashInvokedAt != "" {
-		t.Fatalf("legacy rows must receive empty durable-attempt defaults, got attempt=%q invoked=%q", attemptID, trashInvokedAt)
-	}
-}
-
 func TestProjectDetachIsIdempotentAndKeepsThreads(t *testing.T) {
-	t.Setenv(runtimeUserDataDirEnv, t.TempDir())
+	t.Setenv(awakenHomeEnv, t.TempDir())
 	workspaceRoot := t.TempDir()
 	service := newDurableThreadTestService()
 	projects := service.ProjectService()
@@ -77,7 +50,7 @@ func TestProjectDetachIsIdempotentAndKeepsThreads(t *testing.T) {
 }
 
 func TestProjectUpsertCannotReactivateTrashPendingOrClearFence(t *testing.T) {
-	t.Setenv(runtimeUserDataDirEnv, t.TempDir())
+	t.Setenv(awakenHomeEnv, t.TempDir())
 	workspaceRoot := t.TempDir()
 	service := newDurableThreadTestService()
 	projects := service.ProjectService()
@@ -108,7 +81,7 @@ func TestProjectUpsertCannotReactivateTrashPendingOrClearFence(t *testing.T) {
 }
 
 func TestProjectHistoryDeleteSoftDeletesOneHundredThreadsAndCleansUp(t *testing.T) {
-	t.Setenv(runtimeUserDataDirEnv, t.TempDir())
+	t.Setenv(awakenHomeEnv, t.TempDir())
 	workspaceRoot := t.TempDir()
 	service := newDurableThreadTestService()
 	projects := service.ProjectService()
@@ -154,7 +127,7 @@ func TestProjectHistoryDeleteSoftDeletesOneHundredThreadsAndCleansUp(t *testing.
 }
 
 func TestProjectHistoryDeleteCancelsBusyRunAndCleansAfterTerminal(t *testing.T) {
-	t.Setenv(runtimeUserDataDirEnv, t.TempDir())
+	t.Setenv(awakenHomeEnv, t.TempDir())
 	workspaceRoot := t.TempDir()
 	started := make(chan struct{})
 	service := NewRunService(
@@ -196,6 +169,9 @@ func TestProjectHistoryDeleteCancelsBusyRunAndCleansAfterTerminal(t *testing.T) 
 	if snapshot, err := service.GetRun(run.RunID); err != nil || snapshot.Status != RunStatusCancelled {
 		t.Fatalf("expected cancelled run, got %+v err=%v", snapshot, err)
 	}
+	// Join the run goroutine's trailing transcript flush before purging so
+	// TempDir teardown does not race late store writes.
+	service.drainRunWorkers()
 	if _, err := projects.ProcessCleanupJobs(context.Background(), 16); err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +181,7 @@ func TestProjectHistoryDeleteCancelsBusyRunAndCleansAfterTerminal(t *testing.T) 
 }
 
 func TestTrashTwoPhaseFailureKeepsHistoryAndSuccessDeletesIt(t *testing.T) {
-	t.Setenv(runtimeUserDataDirEnv, t.TempDir())
+	t.Setenv(awakenHomeEnv, t.TempDir())
 	workspaceRoot := t.TempDir()
 	service := newDurableThreadTestService()
 	projects := service.ProjectService()
@@ -292,7 +268,7 @@ func TestTrashTwoPhaseFailureKeepsHistoryAndSuccessDeletesIt(t *testing.T) {
 }
 
 func TestTrashLeaseCanBeReclaimedAfterCrash(t *testing.T) {
-	t.Setenv(runtimeUserDataDirEnv, t.TempDir())
+	t.Setenv(awakenHomeEnv, t.TempDir())
 	workspaceRoot := t.TempDir()
 	service := newDurableThreadTestService()
 	projects := service.ProjectService()
@@ -304,14 +280,16 @@ func TestTrashLeaseCanBeReclaimedAfterCrash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	firstClaim, err := projects.ClaimTrashOperation(prepared.OperationID, "worker-a", 10*time.Millisecond)
+	// The lease must comfortably outlive the fsync-heavy FileStore claim path
+	// so the live-conflict assertion below cannot race lease expiry.
+	firstClaim, err := projects.ClaimTrashOperation(prepared.OperationID, "worker-a", 300*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := projects.ClaimTrashOperation(prepared.OperationID, "worker-b", time.Second); !errors.Is(err, ErrProjectOperationConflict) {
 		t.Fatalf("expected live lease conflict, got %v", err)
 	}
-	time.Sleep(20 * time.Millisecond)
+	time.Sleep(350 * time.Millisecond)
 	secondClaim, err := projects.ClaimTrashOperation(prepared.OperationID, "worker-b", time.Second)
 	if err != nil {
 		t.Fatalf("expected expired lease reclaim, got %v", err)
@@ -344,7 +322,7 @@ func TestTrashLeaseCanBeReclaimedAfterCrash(t *testing.T) {
 }
 
 func TestTrashFailureAfterStagingAtomicallyRestoresProject(t *testing.T) {
-	t.Setenv(runtimeUserDataDirEnv, t.TempDir())
+	t.Setenv(awakenHomeEnv, t.TempDir())
 	parent := t.TempDir()
 	workspaceRoot := filepath.Join(parent, "restore-me")
 	if err := os.Mkdir(workspaceRoot, 0o755); err != nil {
@@ -401,7 +379,7 @@ func TestTrashFailureAfterStagingAtomicallyRestoresProject(t *testing.T) {
 func TestTrashCrashRecoveryAcrossDurableFilesystemPhases(t *testing.T) {
 	for _, crashPoint := range []string{"after_stage", "after_invocation", "after_system_trash"} {
 		t.Run(crashPoint, func(t *testing.T) {
-			t.Setenv(runtimeUserDataDirEnv, t.TempDir())
+			t.Setenv(awakenHomeEnv, t.TempDir())
 			parent := t.TempDir()
 			workspaceRoot := filepath.Join(parent, "crash-project")
 			if err := os.Mkdir(workspaceRoot, 0o755); err != nil {
@@ -478,7 +456,7 @@ func TestTrashCrashRecoveryAcrossDurableFilesystemPhases(t *testing.T) {
 }
 
 func TestTrashStagingSurvivesContentChangesAndNeverTrashesSamePathReplacement(t *testing.T) {
-	t.Setenv(runtimeUserDataDirEnv, t.TempDir())
+	t.Setenv(awakenHomeEnv, t.TempDir())
 	parent := t.TempDir()
 	workspaceRoot := filepath.Join(parent, "workspace")
 	if err := os.Mkdir(workspaceRoot, 0o755); err != nil {
@@ -539,7 +517,7 @@ func TestTrashStagingSurvivesContentChangesAndNeverTrashesSamePathReplacement(t 
 }
 
 func TestTrashStageRejectsReplacementBeforeRenameWithoutDeletingEitherDirectory(t *testing.T) {
-	t.Setenv(runtimeUserDataDirEnv, t.TempDir())
+	t.Setenv(awakenHomeEnv, t.TempDir())
 	parent := t.TempDir()
 	workspaceRoot := filepath.Join(parent, "workspace")
 	if err := os.Mkdir(workspaceRoot, 0o755); err != nil {

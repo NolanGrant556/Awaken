@@ -15,8 +15,23 @@ func TestResolveDefaultWorkspaceUsesEnv(t *testing.T) {
 	}
 }
 
-func TestResolveDefaultWorkspaceFallsBackToCwd(t *testing.T) {
+func TestResolveDefaultWorkspaceHonorsExplicitEmptyEnv(t *testing.T) {
+	// The Desktop host always sets the variable; an explicit empty value means
+	// "no default workspace" and must not fall back to cwd or home.
 	t.Setenv("AWAKEN_DEFAULT_WORKSPACE", "")
+
+	if got := resolveDefaultWorkspace(); got != "" {
+		t.Fatalf("expected empty workspace for explicit empty env, got %q", got)
+	}
+}
+
+func TestResolveDefaultWorkspaceFallsBackToCwdWhenUnset(t *testing.T) {
+	// t.Setenv records the original value for cleanup; unset afterwards to
+	// simulate a standalone launch without the variable.
+	t.Setenv("AWAKEN_DEFAULT_WORKSPACE", "placeholder")
+	if err := os.Unsetenv("AWAKEN_DEFAULT_WORKSPACE"); err != nil {
+		t.Fatalf("failed to unset env: %v", err)
+	}
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -52,8 +67,7 @@ func TestModelConfigFromProfileUsesOnlyProfile(t *testing.T) {
 func TestMCPManagerAndConnectorsExistWithoutStaticConfig(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
+	t.Setenv("AWAKEN_HOME", home)
 
 	manager := buildMCPManager(workspace)
 	if manager == nil {

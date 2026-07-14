@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -80,8 +81,13 @@ func main() {
 		log.Printf("[skills] activated %s status=%s tools=%d receipts=%d",
 			plan.SkillID, plan.CompatibilityStatus, len(plan.EffectiveTools), len(plan.ResourceReceipts))
 	})
-	if err := runService.SetDefaultWorkspace(runtime.WorkspaceConfig{WorkspaceRoot: defaultWorkspace}); err != nil {
-		log.Fatalf("failed to configure default workspace: %v", err)
+	// Core supports starting without any workspace; runs still require one at
+	// StartRun time. Only configure the service default when the host
+	// provided a real path.
+	if defaultWorkspace != "" {
+		if err := runService.SetDefaultWorkspace(runtime.WorkspaceConfig{WorkspaceRoot: defaultWorkspace}); err != nil {
+			log.Fatalf("failed to configure default workspace: %v", err)
+		}
 	}
 	cleanupCtx, cancelCleanup := context.WithCancel(context.Background())
 	defer cancelCleanup()
@@ -224,10 +230,14 @@ func buildSkillRegistry(manager *mcpclient.Manager, workspace string) *skills.Sk
 	return registry
 }
 
+// resolveDefaultWorkspace returns the startup default workspace. When the
+// host sets AWAKEN_DEFAULT_WORKSPACE (even to an empty value) that value is
+// authoritative: an empty value means "no default workspace" and Core starts
+// without one instead of guessing cwd or home. The cwd fallback only applies
+// to standalone launches where the variable is not set at all.
 func resolveDefaultWorkspace() string {
-	defaultWorkspace := os.Getenv("AWAKEN_DEFAULT_WORKSPACE")
-	if defaultWorkspace != "" {
-		return defaultWorkspace
+	if defaultWorkspace, ok := os.LookupEnv("AWAKEN_DEFAULT_WORKSPACE"); ok {
+		return strings.TrimSpace(defaultWorkspace)
 	}
 
 	cwd, err := os.Getwd()

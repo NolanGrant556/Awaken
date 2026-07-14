@@ -586,19 +586,19 @@ func forcePendingThreadTitle(t *testing.T, service *RunService, threadID, seedRu
 	thread.titleUpdatedAt = now
 	service.mu.Unlock()
 
-	store, ok := service.threadStore.(*sqliteThreadStore)
+	store, ok := service.threadStore.(*FileDesktopStore)
 	if !ok {
-		t.Fatalf("expected sqlite thread store")
+		t.Fatalf("expected FileDesktopStore")
 	}
-	db, err := store.open()
+	meta, err := store.readSessionMetadata(threadID)
 	if err != nil {
-		t.Fatalf("open thread store: %v", err)
+		t.Fatalf("read session metadata: %v", err)
 	}
-	if _, err := db.Exec(`
-UPDATE threads
-SET title_source = ?, title_status = ?, title_seed_run_id = ?, title_updated_at = ?
-WHERE thread_id = ?
-`, string(ThreadTitleSourceFirstUser), string(ThreadTitleStatusPending), seedRunID, now.Format(time.RFC3339Nano), threadID); err != nil {
+	meta.TitleSource = string(ThreadTitleSourceFirstUser)
+	meta.TitleStatus = string(ThreadTitleStatusPending)
+	meta.TitleSeedRunID = seedRunID
+	meta.TitleUpdatedAt = now.Format(time.RFC3339Nano)
+	if err := store.writeSessionMetadata(meta); err != nil {
 		t.Fatalf("force pending durable title: %v", err)
 	}
 }

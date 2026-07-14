@@ -2,8 +2,6 @@ package runtime
 
 import (
 	"context"
-	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -49,13 +47,17 @@ func ProjectErrorCode(err error) string {
 	}
 }
 
+// ProjectService owns the project lifecycle state machine, filesystem staging
+// and run-service coordination. Durable state changes go through the
+// ProjectLifecycleRepository domain commands; the service never touches the
+// storage engine directly.
 type ProjectService struct {
 	runService *RunService
-	store      *sqliteThreadStore
+	store      ProjectLifecycleRepository
 	wake       chan struct{}
 }
 
-func newProjectService(runService *RunService, store *sqliteThreadStore) *ProjectService {
+func newProjectService(runService *RunService, store ProjectLifecycleRepository) *ProjectService {
 	if runService == nil || store == nil {
 		return nil
 	}
@@ -71,50 +73,18 @@ func (s *ProjectService) CanStartRun(workspaceRoot string) (bool, error) {
 	if root == "" {
 		return false, ErrProjectPathInvalid
 	}
-	db, err := s.store.open()
+	state, found, err := s.store.ProjectStateForWorkspace(root)
 	if err != nil {
 		return false, err
 	}
-	var state string
-	err = db.QueryRow(`SELECT state FROM projects WHERE workspace_key = ?`, root).Scan(&state)
-	if errors.Is(err, sql.ErrNoRows) {
+	if !found {
 		return true, nil
 	}
-	if err != nil {
-		return false, err
-	}
-	return ProjectState(state) == ProjectStateActive, nil
+	return state == ProjectStateActive, nil
 }
 
 func (s *ProjectService) ListProjects(includeRemoved bool) ([]Project, error) {
-	db, err := s.store.open()
-	if err != nil {
-		return nil, err
-	}
-	query := `
-SELECT project_id, workspace_root, display_name, state, removal_reason, removed_at, created_at, updated_at, version
-FROM projects`
-	if !includeRemoved {
-		query += ` WHERE state <> 'removed'`
-	}
-	query += ` ORDER BY updated_at DESC, created_at DESC`
-	rows, err := db.Query(query)
-	if err != nil {
-		return nil, fmt.Errorf("list projects: %w", err)
-	}
-	defer rows.Close()
-	var projects []Project
-	for rows.Next() {
-		project, err := scanProject(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan project: %w", err)
-		}
-		projects = append(projects, project)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate projects: %w", err)
-	}
-	return projects, nil
+	return s.store.ListProjects(includeRemoved)
 }
 
 func (s *ProjectService) UpsertProject(workspaceRoot, displayName string) (Project, error) {
@@ -124,35 +94,19 @@ func (s *ProjectService) UpsertProject(workspaceRoot, displayName string) (Proje
 	if root == "" {
 		return Project{}, ErrProjectPathInvalid
 	}
-	db, err := s.store.open()
+	existingState, found, err := s.store.ProjectStateForWorkspace(root)
+	if err != nil {
+		return Project{}, fmt.Errorf("read project before upsert: %w", err)
+	}
+	if found && existingState == ProjectStateTrashPending {
+		return Project{}, ErrProjectOperationConflict
+	}
+	project, err := s.store.EnsureProjectActive(root, displayName, time.Now().UTC())
 	if err != nil {
 		return Project{}, err
 	}
-	var existingState string
-	err = db.QueryRow(`SELECT state FROM projects WHERE workspace_key = ?`, root).Scan(&existingState)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return Project{}, fmt.Errorf("read project before upsert: %w", err)
-	}
-	if ProjectState(existingState) == ProjectStateTrashPending {
-		return Project{}, ErrProjectOperationConflict
-	}
-	projectID, err := ensureProjectForWorkspace(db, root, true)
-	if err != nil {
-		return Project{}, fmt.Errorf("%w: %v", ErrProjectPathInvalid, err)
-	}
-	if strings.TrimSpace(displayName) != "" {
-		if _, err := db.Exec(`UPDATE projects SET display_name = ?, updated_at = ?, version = version + 1 WHERE project_id = ?`, strings.TrimSpace(displayName), formatStoredTime(time.Now().UTC()), projectID); err != nil {
-			return Project{}, fmt.Errorf("update project display name: %w", err)
-		}
-	}
-	if _, err := db.Exec(`
-INSERT INTO desktop_state(key, value, updated_at) VALUES('last_workspace_path', ?, ?)
-ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-`, root, formatStoredTime(time.Now().UTC())); err != nil {
-		return Project{}, fmt.Errorf("persist last project workspace: %w", err)
-	}
 	s.runService.setProjectDeletionFence(root, false)
-	return projectByID(db, projectID)
+	return project, nil
 }
 
 func (s *ProjectService) DetachProject(projectID, idempotencyKey string) (ProjectOperation, error) {
@@ -161,47 +115,15 @@ func (s *ProjectService) DetachProject(projectID, idempotencyKey string) (Projec
 	if err := requireIdempotencyKey(idempotencyKey); err != nil {
 		return ProjectOperation{}, err
 	}
-	db, err := s.store.open()
-	if err != nil {
-		return ProjectOperation{}, err
-	}
-	if existing, found, err := lookupIdempotentOperation(db, idempotencyKey, projectID, ProjectOperationDetach); err != nil || found {
+	if existing, found, err := s.store.LookupIdempotentOperation(idempotencyKey, projectID, ProjectOperationDetach); err != nil || found {
 		return existing, err
 	}
-	tx, err := db.Begin()
+	operation, err := s.store.CommitDetach(projectID, idempotencyKey, time.Now().UTC())
 	if err != nil {
 		return ProjectOperation{}, err
 	}
-	defer tx.Rollback()
-	project, err := projectByID(tx, projectID)
-	if err != nil {
-		return ProjectOperation{}, err
-	}
-	if project.State == ProjectStateTrashPending {
-		return ProjectOperation{}, ErrProjectOperationConflict
-	}
-	now := time.Now().UTC()
-	operation := newProjectOperation(project, idempotencyKey, ProjectOperationDetach, ProjectOperationSucceeded, projectOperationPhaseCompleted, now)
-	operation.LogicalCommittedAt = &now
-	operation.PhysicalCompletedAt = &now
-	if err := insertProjectOperation(tx, operation, 0); err != nil {
-		return ProjectOperation{}, err
-	}
-	if _, err := tx.Exec(`
-UPDATE projects
-SET state = 'removed', removal_reason = 'detached', removed_at = ?, updated_at = ?, version = version + 1
-WHERE project_id = ?
-`, formatStoredTime(now), formatStoredTime(now), project.ProjectID); err != nil {
-		return ProjectOperation{}, fmt.Errorf("detach project: %w", err)
-	}
-	if err := selectFallbackWorkspaceTx(tx, project.ProjectID, now); err != nil {
-		return ProjectOperation{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return ProjectOperation{}, fmt.Errorf("commit project detach: %w", err)
-	}
-	s.runService.setProjectDeletionFence(project.WorkspaceRoot, true)
-	s.runService.cancelRunsForThreads(s.runService.threadIDsForWorkspace(project.WorkspaceRoot))
+	s.runService.setProjectDeletionFence(operation.WorkspaceRoot, true)
+	s.runService.cancelRunsForThreads(s.runService.threadIDsForWorkspace(operation.WorkspaceRoot))
 	return operation, nil
 }
 
@@ -211,14 +133,10 @@ func (s *ProjectService) DeleteProjectThreads(projectID, idempotencyKey string) 
 	if err := requireIdempotencyKey(idempotencyKey); err != nil {
 		return ProjectOperation{}, err
 	}
-	db, err := s.store.open()
-	if err != nil {
-		return ProjectOperation{}, err
-	}
-	if existing, found, err := lookupIdempotentOperation(db, idempotencyKey, projectID, ProjectOperationDeleteHistory); err != nil || found {
+	if existing, found, err := s.store.LookupIdempotentOperation(idempotencyKey, projectID, ProjectOperationDeleteHistory); err != nil || found {
 		return existing, err
 	}
-	project, err := projectByID(db, projectID)
+	project, err := s.store.ProjectByID(projectID)
 	if err != nil {
 		return ProjectOperation{}, err
 	}
@@ -232,42 +150,11 @@ func (s *ProjectService) DeleteProjectThreads(projectID, idempotencyKey string) 
 			s.runService.setProjectDeletionFence(project.WorkspaceRoot, false)
 		}
 	}()
-	tx, err := db.Begin()
+	operation, threadIDs, err := s.store.CommitDeleteHistory(project, idempotencyKey, time.Now().UTC())
 	if err != nil {
 		return ProjectOperation{}, err
-	}
-	defer tx.Rollback()
-	threadIDs, err := liveThreadIDsForProject(tx, projectID)
-	if err != nil {
-		return ProjectOperation{}, err
-	}
-	now := time.Now().UTC()
-	status := ProjectOperationAccepted
-	phase := projectOperationPhaseCleaning
-	if len(threadIDs) == 0 {
-		status = ProjectOperationSucceeded
-		phase = projectOperationPhaseCompleted
-	}
-	operation := newProjectOperation(project, idempotencyKey, ProjectOperationDeleteHistory, status, phase, now)
-	operation.LogicalCommittedAt = &now
-	if len(threadIDs) == 0 {
-		operation.PhysicalCompletedAt = &now
-	}
-	if err := insertProjectOperation(tx, operation, len(threadIDs)); err != nil {
-		return ProjectOperation{}, err
-	}
-	if err := softDeleteThreadsTx(tx, operation.OperationID, threadIDs, now); err != nil {
-		return ProjectOperation{}, err
-	}
-	if err := insertThreadCleanupJobsTx(tx, operation.OperationID, threadIDs, now); err != nil {
-		return ProjectOperation{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return ProjectOperation{}, fmt.Errorf("commit project history deletion: %w", err)
 	}
 	committed = true
-	operation.MatchedThreads = len(threadIDs)
-	operation.PendingCleanup = len(threadIDs)
 	s.runService.markThreadsDeletionRequested(threadIDs)
 	s.runService.cancelRunsForThreads(threadIDs)
 	s.Wake()
@@ -281,24 +168,18 @@ func (s *ProjectService) DeleteThread(threadID string) error {
 	if threadID == "" {
 		return nil
 	}
-	db, err := s.store.open()
+	projectID, deleted, found, err := s.store.ThreadDeletionState(threadID)
 	if err != nil {
 		return err
 	}
-	var projectID string
-	var deleted int
-	err = db.QueryRow(`SELECT project_id, deleted FROM threads WHERE thread_id = ?`, threadID).Scan(&projectID, &deleted)
-	if errors.Is(err, sql.ErrNoRows) {
+	if !found {
 		return nil
 	}
-	if err != nil {
-		return fmt.Errorf("read thread before delete: %w", err)
-	}
-	if deleted != 0 {
+	if deleted {
 		s.Wake()
 		return nil
 	}
-	project, err := projectByID(db, projectID)
+	project, err := s.store.ProjectByID(projectID)
 	if err != nil {
 		return err
 	}
@@ -306,31 +187,14 @@ func (s *ProjectService) DeleteThread(threadID string) error {
 		return ErrProjectOperationConflict
 	}
 	idempotencyKey := "thread-delete:" + threadID
-	if _, found, err := lookupIdempotentOperation(db, idempotencyKey, projectID, ProjectOperationDeleteThread); err != nil {
+	if _, found, err := s.store.LookupIdempotentOperation(idempotencyKey, projectID, ProjectOperationDeleteThread); err != nil {
 		return err
 	} else if found {
 		s.Wake()
 		return nil
 	}
-	tx, err := db.Begin()
-	if err != nil {
+	if _, err := s.store.CommitDeleteThread(project, threadID, idempotencyKey, time.Now().UTC()); err != nil {
 		return err
-	}
-	defer tx.Rollback()
-	now := time.Now().UTC()
-	operation := newProjectOperation(project, idempotencyKey, ProjectOperationDeleteThread, ProjectOperationAccepted, projectOperationPhaseCleaning, now)
-	operation.LogicalCommittedAt = &now
-	if err := insertProjectOperation(tx, operation, 1); err != nil {
-		return err
-	}
-	if err := softDeleteThreadsTx(tx, operation.OperationID, []string{threadID}, now); err != nil {
-		return err
-	}
-	if err := insertThreadCleanupJobsTx(tx, operation.OperationID, []string{threadID}, now); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit thread deletion: %w", err)
 	}
 	s.runService.markThreadsDeletionRequested([]string{threadID})
 	s.runService.cancelRunsForThreads([]string{threadID})
@@ -344,24 +208,20 @@ func (s *ProjectService) PrepareTrash(projectID, idempotencyKey string) (Project
 	if err := requireIdempotencyKey(idempotencyKey); err != nil {
 		return ProjectOperation{}, err
 	}
-	db, err := s.store.open()
-	if err != nil {
-		return ProjectOperation{}, err
-	}
-	if existing, found, err := lookupIdempotentOperation(db, idempotencyKey, projectID, ProjectOperationTrashAndPurge); err != nil || found {
+	if existing, found, err := s.store.LookupIdempotentOperation(idempotencyKey, projectID, ProjectOperationTrashAndPurge); err != nil || found {
 		if found && (existing.Status == ProjectOperationAccepted || existing.Status == ProjectOperationRunning) {
 			s.runService.setProjectDeletionFence(existing.WorkspaceRoot, true)
 		}
 		return existing, err
 	}
-	project, err := projectByID(db, projectID)
+	project, err := s.store.ProjectByID(projectID)
 	if err != nil {
 		return ProjectOperation{}, err
 	}
 	if project.State == ProjectStateTrashPending {
 		return ProjectOperation{}, ErrProjectOperationConflict
 	}
-	if err := validateTrashProjectPath(project.WorkspaceRoot, s.store.paths.Root()); err != nil {
+	if err := validateTrashProjectPath(project.WorkspaceRoot, s.store.UserDataRoot()); err != nil {
 		return ProjectOperation{}, err
 	}
 	fingerprint, err := projectPathFingerprint(project.WorkspaceRoot)
@@ -375,82 +235,26 @@ func (s *ProjectService) PrepareTrash(projectID, idempotencyKey string) (Project
 			s.runService.setProjectDeletionFence(project.WorkspaceRoot, false)
 		}
 	}()
-	tx, err := db.Begin()
+	operation, threadIDs, err := s.store.CommitPrepareTrash(project, idempotencyKey, fingerprint, time.Now().UTC())
 	if err != nil {
 		return ProjectOperation{}, err
-	}
-	defer tx.Rollback()
-	threadIDs, err := liveThreadIDsForProject(tx, projectID)
-	if err != nil {
-		return ProjectOperation{}, err
-	}
-	now := time.Now().UTC()
-	operation := newProjectOperation(project, idempotencyKey, ProjectOperationTrashAndPurge, ProjectOperationAccepted, projectOperationPhaseWaitingForRuns, now)
-	operation.PathFingerprint = fingerprint
-	if err := insertProjectOperation(tx, operation, len(threadIDs)); err != nil {
-		return ProjectOperation{}, err
-	}
-	for _, threadID := range threadIDs {
-		if _, err := tx.Exec(`INSERT OR IGNORE INTO project_operation_threads(operation_id, thread_id) VALUES(?, ?)`, operation.OperationID, threadID); err != nil {
-			return ProjectOperation{}, fmt.Errorf("capture trash operation thread: %w", err)
-		}
-	}
-	if _, err := tx.Exec(`
-UPDATE projects SET state = 'trash_pending', updated_at = ?, version = version + 1 WHERE project_id = ?
-`, formatStoredTime(now), projectID); err != nil {
-		return ProjectOperation{}, fmt.Errorf("mark project trash pending: %w", err)
-	}
-	if _, err := tx.Exec(`
-INSERT INTO cleanup_jobs(job_id, operation_id, kind, target_id, status, next_attempt_at, created_at, updated_at)
-VALUES(?, ?, 'project_trash', ?, 'pending', ?, ?, ?)
-`, newRuntimeID("job"), operation.OperationID, projectID, formatStoredTime(now), formatStoredTime(now), formatStoredTime(now)); err != nil {
-		return ProjectOperation{}, fmt.Errorf("enqueue project trash job: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return ProjectOperation{}, fmt.Errorf("commit trash prepare: %w", err)
 	}
 	committed = true
-	operation.MatchedThreads = len(threadIDs)
 	s.runService.cancelRunsForThreads(threadIDs)
 	return operation, nil
 }
 
 func (s *ProjectService) GetOperation(operationID string) (ProjectOperation, error) {
-	db, err := s.store.open()
+	operation, err := s.store.OperationByID(operationID)
 	if err != nil {
 		return ProjectOperation{}, err
 	}
-	operation, err := projectOperationByID(db, operationID)
-	if err != nil {
-		return ProjectOperation{}, err
-	}
-	operation.PendingCleanup, _ = pendingCleanupCount(db, operation.OperationID)
+	operation.PendingCleanup, _ = s.store.PendingCleanupCount(operation.OperationID)
 	return operation, nil
 }
 
 func (s *ProjectService) ListPendingTrashOperations() ([]ProjectOperation, error) {
-	db, err := s.store.open()
-	if err != nil {
-		return nil, err
-	}
-	rows, err := db.Query(projectOperationSelect + `
- WHERE action = 'trash_and_purge'
-   AND status IN ('accepted', 'running')
-   AND phase IN ('waiting_for_runs', 'trash_claimed', 'trash_staged', 'trashing')
- ORDER BY created_at ASC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var operations []ProjectOperation
-	for rows.Next() {
-		operation, err := scanProjectOperation(rows)
-		if err != nil {
-			return nil, err
-		}
-		operations = append(operations, operation)
-	}
-	return operations, rows.Err()
+	return s.store.ListPendingTrashOperations()
 }
 
 func (s *ProjectService) ClaimTrashOperation(operationID, workerID string, lease time.Duration) (ProjectOperation, error) {
@@ -463,11 +267,7 @@ func (s *ProjectService) ClaimTrashOperation(operationID, workerID string, lease
 	if lease <= 0 {
 		lease = 30 * time.Second
 	}
-	db, err := s.store.open()
-	if err != nil {
-		return ProjectOperation{}, err
-	}
-	operation, err := projectOperationByID(db, operationID)
+	operation, err := s.store.OperationByID(operationID)
 	if err != nil {
 		return ProjectOperation{}, err
 	}
@@ -479,50 +279,14 @@ func (s *ProjectService) ClaimTrashOperation(operationID, workerID string, lease
 			operation.Phase != projectOperationPhaseTrashing) {
 		return ProjectOperation{}, ErrProjectOperationConflict
 	}
-	threadIDs, err := operationThreadIDs(db, operationID)
+	threadIDs, err := s.store.OperationThreadIDs(operationID)
 	if err != nil {
 		return ProjectOperation{}, err
 	}
 	if s.runService.anyThreadActive(threadIDs) {
 		return ProjectOperation{}, ErrProjectRunsBusy
 	}
-	tx, err := db.Begin()
-	if err != nil {
-		return ProjectOperation{}, err
-	}
-	defer tx.Rollback()
-	now := time.Now().UTC()
-	attemptID := newRuntimeID("trash_attempt")
-	result, err := tx.Exec(`
-UPDATE cleanup_jobs
-SET status = 'leased', lease_owner = ?, lease_expires_at = ?, attempts = attempts + 1, updated_at = ?
-WHERE operation_id = ? AND kind = 'project_trash'
-  AND (status IN ('pending', 'retry') OR (status = 'leased' AND lease_expires_at <= ?))
-`, workerID, formatStoredTime(now.Add(lease)), formatStoredTime(now), operationID, formatStoredTime(now))
-	if err != nil {
-		return ProjectOperation{}, fmt.Errorf("claim project trash job: %w", err)
-	}
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		return ProjectOperation{}, ErrProjectOperationConflict
-	}
-	nextPhase := projectOperationPhaseTrashClaimed
-	if operation.Phase == projectOperationPhaseTrashStaged {
-		nextPhase = projectOperationPhaseTrashStaged
-	} else if operation.Phase == projectOperationPhaseTrashing {
-		// A previous worker durably crossed the invocation boundary. Preserve that
-		// fact so a replacement worker can distinguish post-trash ENOENT from a
-		// source that vanished before any system trash call was attempted.
-		nextPhase = projectOperationPhaseTrashing
-	}
-	if _, err := tx.Exec(`
-UPDATE project_operations
-SET status = 'running', phase = ?, attempt_id = ?, updated_at = ?
-WHERE operation_id = ?
-`, nextPhase, attemptID, formatStoredTime(now), operationID); err != nil {
-		return ProjectOperation{}, fmt.Errorf("mark trash operation running: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
+	if err := s.store.ClaimTrash(operation, workerID, lease, time.Now().UTC()); err != nil {
 		return ProjectOperation{}, err
 	}
 	return s.GetOperation(operationID)
@@ -536,11 +300,7 @@ WHERE operation_id = ?
 func (s *ProjectService) StageTrashOperation(operationID, attemptID string) (ProjectOperation, error) {
 	s.runService.lockProjectMutation()
 	defer s.runService.unlockProjectMutation()
-	db, err := s.store.open()
-	if err != nil {
-		return ProjectOperation{}, err
-	}
-	operation, err := projectOperationByID(db, operationID)
+	operation, err := s.store.OperationByID(operationID)
 	if err != nil {
 		return ProjectOperation{}, err
 	}
@@ -572,7 +332,7 @@ func (s *ProjectService) StageTrashOperation(operationID, attemptID string) (Pro
 		}
 		if !sourceExists {
 			if operation.Phase == projectOperationPhaseTrashing && operation.TrashInvokedAt != nil {
-				if _, err := db.Exec(`UPDATE project_operations SET trash_staging_path = ?, updated_at = ? WHERE operation_id = ? AND attempt_id = ?`, stagedPath, formatStoredTime(time.Now().UTC()), operationID, strings.TrimSpace(attemptID)); err != nil {
+				if err := s.store.PersistTrashStagingPath(operationID, attemptID, stagedPath, time.Now().UTC()); err != nil {
 					return ProjectOperation{}, err
 				}
 				return s.GetOperation(operationID)
@@ -604,17 +364,12 @@ func (s *ProjectService) StageTrashOperation(operationID, attemptID string) (Pro
 		}
 	}
 
-	now := time.Now().UTC()
 	nextPhase := projectOperationPhaseTrashStaged
 	if operation.Phase == projectOperationPhaseTrashing {
 		nextPhase = projectOperationPhaseTrashing
 	}
-	if _, err := db.Exec(`
-UPDATE project_operations
-SET status = 'running', phase = ?, trash_staging_path = ?, updated_at = ?
-WHERE operation_id = ? AND attempt_id = ?
-`, nextPhase, stagedPath, formatStoredTime(now), operationID, strings.TrimSpace(attemptID)); err != nil {
-		return ProjectOperation{}, fmt.Errorf("persist staged trash path: %w", err)
+	if err := s.store.MarkTrashStaged(operationID, attemptID, nextPhase, stagedPath, time.Now().UTC()); err != nil {
+		return ProjectOperation{}, err
 	}
 	return s.GetOperation(operationID)
 }
@@ -622,11 +377,7 @@ WHERE operation_id = ? AND attempt_id = ?
 func (s *ProjectService) AttestTrashOperationPath(operationID, attemptID string) (ProjectOperation, error) {
 	s.runService.lockProjectMutation()
 	defer s.runService.unlockProjectMutation()
-	db, err := s.store.open()
-	if err != nil {
-		return ProjectOperation{}, err
-	}
-	operation, err := projectOperationByID(db, operationID)
+	operation, err := s.store.OperationByID(operationID)
 	if err != nil {
 		return ProjectOperation{}, err
 	}
@@ -649,16 +400,7 @@ func (s *ProjectService) AttestTrashOperationPath(operationID, attemptID string)
 func (s *ProjectService) BeginTrashInvocation(operationID, attemptID string) (ProjectOperation, error) {
 	s.runService.lockProjectMutation()
 	defer s.runService.unlockProjectMutation()
-	db, err := s.store.open()
-	if err != nil {
-		return ProjectOperation{}, err
-	}
-	tx, err := db.Begin()
-	if err != nil {
-		return ProjectOperation{}, err
-	}
-	defer tx.Rollback()
-	operation, err := projectOperationByID(tx, operationID)
+	operation, err := s.store.OperationByID(operationID)
 	if err != nil {
 		return ProjectOperation{}, err
 	}
@@ -678,15 +420,7 @@ func (s *ProjectService) BeginTrashInvocation(operationID, attemptID string) (Pr
 			return ProjectOperation{}, ErrProjectOperationConflict
 		}
 	}
-	now := time.Now().UTC()
-	if _, err := tx.Exec(`
-UPDATE project_operations
-SET status = 'running', phase = 'trashing', trash_invoked_at = ?, updated_at = ?
-WHERE operation_id = ? AND attempt_id = ?
-`, formatStoredTime(now), formatStoredTime(now), operationID, strings.TrimSpace(attemptID)); err != nil {
-		return ProjectOperation{}, fmt.Errorf("mark trash invocation durable: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
+	if err := s.store.CommitBeginTrash(operationID, attemptID, time.Now().UTC()); err != nil {
 		return ProjectOperation{}, err
 	}
 	return s.GetOperation(operationID)
@@ -695,16 +429,7 @@ WHERE operation_id = ? AND attempt_id = ?
 func (s *ProjectService) CompleteTrashOperation(operationID, attemptID string) (ProjectOperation, error) {
 	s.runService.lockProjectMutation()
 	defer s.runService.unlockProjectMutation()
-	db, err := s.store.open()
-	if err != nil {
-		return ProjectOperation{}, err
-	}
-	tx, err := db.Begin()
-	if err != nil {
-		return ProjectOperation{}, err
-	}
-	defer tx.Rollback()
-	operation, err := projectOperationByID(tx, operationID)
+	operation, err := s.store.OperationByID(operationID)
 	if err != nil {
 		return ProjectOperation{}, err
 	}
@@ -746,50 +471,11 @@ func (s *ProjectService) CompleteTrashOperation(operationID, attemptID string) (
 		}
 	}
 	_ = os.Remove(container)
-	threadIDs, err := operationThreadIDs(tx, operationID)
+	threadIDs, err := s.store.OperationThreadIDs(operationID)
 	if err != nil {
 		return ProjectOperation{}, err
 	}
-	now := time.Now().UTC()
-	if _, err := tx.Exec(`
-UPDATE projects
-SET state = 'removed', removal_reason = 'trashed', removed_at = ?, updated_at = ?, version = version + 1
-WHERE project_id = ?
-`, formatStoredTime(now), formatStoredTime(now), operation.ProjectID); err != nil {
-		return ProjectOperation{}, fmt.Errorf("finalize trashed project: %w", err)
-	}
-	if err := softDeleteThreadsTx(tx, operationID, threadIDs, now); err != nil {
-		return ProjectOperation{}, err
-	}
-	if err := insertThreadCleanupJobsTx(tx, operationID, threadIDs, now); err != nil {
-		return ProjectOperation{}, err
-	}
-	status := ProjectOperationAccepted
-	phase := projectOperationPhaseCleaning
-	physicalCompleted := ""
-	if len(threadIDs) == 0 {
-		status = ProjectOperationSucceeded
-		phase = projectOperationPhaseCompleted
-		physicalCompleted = formatStoredTime(now)
-	}
-	resultJSON, _ := json.Marshal(map[string]int{"matched_threads": len(threadIDs)})
-	if _, err := tx.Exec(`
-UPDATE project_operations
-SET status = ?, phase = ?, logical_committed_at = ?, physical_completed_at = ?, result_json = ?, updated_at = ?
-WHERE operation_id = ?
-`, status, phase, formatStoredTime(now), physicalCompleted, string(resultJSON), formatStoredTime(now), operationID); err != nil {
-		return ProjectOperation{}, fmt.Errorf("finalize trash operation: %w", err)
-	}
-	if _, err := tx.Exec(`
-UPDATE cleanup_jobs SET status = 'succeeded', completed_at = ?, lease_owner = '', lease_expires_at = '', updated_at = ?
-WHERE operation_id = ? AND kind = 'project_trash'
-`, formatStoredTime(now), formatStoredTime(now), operationID); err != nil {
-		return ProjectOperation{}, fmt.Errorf("complete trash job: %w", err)
-	}
-	if err := selectFallbackWorkspaceTx(tx, operation.ProjectID, now); err != nil {
-		return ProjectOperation{}, err
-	}
-	if err := tx.Commit(); err != nil {
+	if err := s.store.CommitCompleteTrash(operation, threadIDs, time.Now().UTC()); err != nil {
 		return ProjectOperation{}, err
 	}
 	s.runService.markThreadsDeletionRequested(threadIDs)
@@ -808,16 +494,7 @@ func (s *ProjectService) CancelOperation(operationID string) (ProjectOperation, 
 func (s *ProjectService) finishTrashWithoutDeletion(operationID, attemptID string, status ProjectOperationStatus, phase, code, message string) (ProjectOperation, error) {
 	s.runService.lockProjectMutation()
 	defer s.runService.unlockProjectMutation()
-	db, err := s.store.open()
-	if err != nil {
-		return ProjectOperation{}, err
-	}
-	tx, err := db.Begin()
-	if err != nil {
-		return ProjectOperation{}, err
-	}
-	defer tx.Rollback()
-	operation, err := projectOperationByID(tx, operationID)
+	operation, err := s.store.OperationByID(operationID)
 	if err != nil {
 		return ProjectOperation{}, err
 	}
@@ -835,26 +512,7 @@ func (s *ProjectService) finishTrashWithoutDeletion(operationID, attemptID strin
 	if err := restoreStagedProject(operation); err != nil {
 		return ProjectOperation{}, err
 	}
-	now := time.Now().UTC()
-	if _, err := tx.Exec(`
-UPDATE projects SET state = ?, updated_at = ?, version = version + 1 WHERE project_id = ?
-`, operation.PreviousProjectState, formatStoredTime(now), operation.ProjectID); err != nil {
-		return ProjectOperation{}, fmt.Errorf("restore project after trash failure: %w", err)
-	}
-	if _, err := tx.Exec(`
-UPDATE project_operations
-SET status = ?, phase = ?, error_code = ?, error_message = ?, updated_at = ?
-WHERE operation_id = ?
-`, status, phase, strings.TrimSpace(code), strings.TrimSpace(message), formatStoredTime(now), operationID); err != nil {
-		return ProjectOperation{}, err
-	}
-	if _, err := tx.Exec(`
-UPDATE cleanup_jobs SET status = 'blocked', last_error = ?, lease_owner = '', lease_expires_at = '', updated_at = ?
-WHERE operation_id = ? AND kind = 'project_trash'
-`, strings.TrimSpace(message), formatStoredTime(now), operationID); err != nil {
-		return ProjectOperation{}, err
-	}
-	if err := tx.Commit(); err != nil {
+	if err := s.store.CommitTrashFailure(operation, status, phase, code, message, time.Now().UTC()); err != nil {
 		return ProjectOperation{}, err
 	}
 	if operation.PreviousProjectState == ProjectStateActive {
@@ -894,7 +552,7 @@ func (s *ProjectService) ProcessCleanupJobs(ctx context.Context, limit int) (int
 	if limit <= 0 {
 		limit = 16
 	}
-	jobs, err := s.claimThreadCleanupJobs(limit)
+	jobs, err := s.store.ClaimThreadCleanupJobs(limit, 30*time.Second, time.Now().UTC())
 	if err != nil {
 		return 0, err
 	}
@@ -905,12 +563,12 @@ func (s *ProjectService) ProcessCleanupJobs(ctx context.Context, limit int) (int
 		}
 		err := s.purgeThread(job.TargetID)
 		if err == nil {
-			if finalizeErr := s.completeThreadCleanupJob(job); finalizeErr != nil {
+			if finalizeErr := s.store.CompleteThreadCleanupJob(job, time.Now().UTC()); finalizeErr != nil {
 				err = finalizeErr
 			}
 		}
 		if err != nil {
-			if retryErr := s.retryCleanupJob(job, err); retryErr != nil {
+			if retryErr := s.store.RetryCleanupJob(job, err, time.Now().UTC()); retryErr != nil {
 				return processed, retryErr
 			}
 			continue
@@ -920,56 +578,6 @@ func (s *ProjectService) ProcessCleanupJobs(ctx context.Context, limit int) (int
 	return processed, nil
 }
 
-func (s *ProjectService) claimThreadCleanupJobs(limit int) ([]cleanupJob, error) {
-	db, err := s.store.open()
-	if err != nil {
-		return nil, err
-	}
-	now := time.Now().UTC()
-	rows, err := db.Query(`
-SELECT job_id, operation_id, kind, target_id, status, attempts, next_attempt_at, lease_owner, lease_expires_at
-FROM cleanup_jobs
-WHERE kind = 'thread_purge'
-  AND (status = 'pending' OR (status = 'retry' AND (next_attempt_at = '' OR next_attempt_at <= ?)) OR (status = 'leased' AND lease_expires_at <= ?))
-ORDER BY created_at ASC LIMIT ?
-`, formatStoredTime(now), formatStoredTime(now), limit)
-	if err != nil {
-		return nil, err
-	}
-	var jobs []cleanupJob
-	for rows.Next() {
-		var job cleanupJob
-		var nextRaw, leaseRaw string
-		if err := rows.Scan(&job.JobID, &job.OperationID, &job.Kind, &job.TargetID, &job.Status, &job.Attempts, &nextRaw, &job.LeaseOwner, &leaseRaw); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		job.NextAttemptAt = parseStoredTime(nextRaw)
-		job.LeaseExpiresAt = parseStoredTime(leaseRaw)
-		jobs = append(jobs, job)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	workerID := newRuntimeID("cleanup_worker")
-	claimed := jobs[:0]
-	for _, job := range jobs {
-		result, err := db.Exec(`
-UPDATE cleanup_jobs
-SET status = 'leased', lease_owner = ?, lease_expires_at = ?, attempts = attempts + 1, updated_at = ?
-WHERE job_id = ? AND (status IN ('pending', 'retry') OR (status = 'leased' AND lease_expires_at <= ?))
-`, workerID, formatStoredTime(now.Add(30*time.Second)), formatStoredTime(now), job.JobID, formatStoredTime(now))
-		if err != nil {
-			return nil, err
-		}
-		if affected, _ := result.RowsAffected(); affected > 0 {
-			job.LeaseOwner = workerID
-			claimed = append(claimed, job)
-		}
-	}
-	return claimed, nil
-}
-
 func (s *ProjectService) purgeThread(threadID string) error {
 	if s.runService.isThreadActive(threadID) {
 		return ErrThreadBusy
@@ -977,67 +585,13 @@ func (s *ProjectService) purgeThread(threadID string) error {
 	if err := s.runService.closeAndEvictDeletedThread(threadID); err != nil {
 		return err
 	}
-	if err := deleteThreadTranscriptAtPath(s.store.paths.ThreadTranscriptPath(threadID)); err != nil && !errors.Is(err, ErrThreadNotFound) {
+	if err := deleteThreadTranscriptAtPath(s.store.ThreadTranscriptPath(threadID)); err != nil && !errors.Is(err, ErrThreadNotFound) {
 		return err
 	}
 	if err := deleteThreadInputAttachments(threadID); err != nil && !errors.Is(err, ErrThreadNotFound) {
 		return err
 	}
 	return nil
-}
-
-func (s *ProjectService) completeThreadCleanupJob(job cleanupJob) error {
-	db, err := s.store.open()
-	if err != nil {
-		return err
-	}
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	now := time.Now().UTC()
-	if _, err := tx.Exec(`DELETE FROM threads WHERE thread_id = ? AND deleted <> 0`, job.TargetID); err != nil {
-		return fmt.Errorf("finalize deleted thread %q: %w", job.TargetID, err)
-	}
-	if _, err := tx.Exec(`
-UPDATE cleanup_jobs SET status = 'succeeded', completed_at = ?, lease_owner = '', lease_expires_at = '', updated_at = ?
-WHERE job_id = ?
-`, formatStoredTime(now), formatStoredTime(now), job.JobID); err != nil {
-		return err
-	}
-	remaining, err := pendingCleanupCount(tx, job.OperationID)
-	if err != nil {
-		return err
-	}
-	if remaining == 0 {
-		if _, err := tx.Exec(`
-UPDATE project_operations SET status = 'succeeded', phase = 'completed', physical_completed_at = ?, updated_at = ?
-WHERE operation_id = ? AND status IN ('accepted', 'running')
-`, formatStoredTime(now), formatStoredTime(now), job.OperationID); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
-
-func (s *ProjectService) retryCleanupJob(job cleanupJob, cause error) error {
-	db, err := s.store.open()
-	if err != nil {
-		return err
-	}
-	attempts := job.Attempts + 1
-	delay := time.Duration(attempts) * 250 * time.Millisecond
-	if delay > 30*time.Second {
-		delay = 30 * time.Second
-	}
-	now := time.Now().UTC()
-	_, err = db.Exec(`
-UPDATE cleanup_jobs
-SET status = 'retry', next_attempt_at = ?, lease_owner = '', lease_expires_at = '', last_error = ?, updated_at = ?
-WHERE job_id = ?
-`, formatStoredTime(now.Add(delay)), cause.Error(), formatStoredTime(now), job.JobID)
-	return err
 }
 
 func requireIdempotencyKey(key string) error {
@@ -1053,132 +607,6 @@ func validateTrashAttempt(operation ProjectOperation, attemptID string) error {
 		return ErrProjectTrashAttempt
 	}
 	return nil
-}
-
-func lookupIdempotentOperation(db projectDBTX, key, projectID string, action ProjectOperationAction) (ProjectOperation, bool, error) {
-	operation, err := projectOperationByIdempotencyKey(db, key)
-	if errors.Is(err, ErrProjectOperationNotFound) {
-		return ProjectOperation{}, false, nil
-	}
-	if err != nil {
-		return ProjectOperation{}, false, err
-	}
-	if operation.ProjectID != projectID || operation.Action != action {
-		return ProjectOperation{}, false, ErrIdempotencyKeyConflict
-	}
-	operation.PendingCleanup, _ = pendingCleanupCount(db, operation.OperationID)
-	return operation, true, nil
-}
-
-func newProjectOperation(project Project, key string, action ProjectOperationAction, status ProjectOperationStatus, phase string, now time.Time) ProjectOperation {
-	return ProjectOperation{
-		OperationID:          newRuntimeID("project_operation"),
-		IdempotencyKey:       strings.TrimSpace(key),
-		ProjectID:            project.ProjectID,
-		Action:               action,
-		Status:               status,
-		Phase:                phase,
-		PreviousProjectState: project.State,
-		WorkspaceRoot:        project.WorkspaceRoot,
-		CreatedAt:            now,
-		UpdatedAt:            now,
-	}
-}
-
-func insertProjectOperation(tx *sql.Tx, operation ProjectOperation, matchedThreads int) error {
-	resultJSON, _ := json.Marshal(map[string]int{"matched_threads": matchedThreads})
-	logical := ""
-	if operation.LogicalCommittedAt != nil {
-		logical = formatStoredTime(*operation.LogicalCommittedAt)
-	}
-	physical := ""
-	if operation.PhysicalCompletedAt != nil {
-		physical = formatStoredTime(*operation.PhysicalCompletedAt)
-	}
-	_, err := tx.Exec(`
-INSERT INTO project_operations(
-  operation_id, idempotency_key, project_id, action, status, phase,
-  previous_project_state, workspace_root, path_fingerprint, attempt_id,
-  trash_staging_path, trash_invoked_at, cutoff_at, logical_committed_at,
-  physical_completed_at, result_json, created_at, updated_at
-) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`, operation.OperationID, operation.IdempotencyKey, operation.ProjectID, operation.Action, operation.Status, operation.Phase,
-		operation.PreviousProjectState, operation.WorkspaceRoot, operation.PathFingerprint, operation.AttemptID, operation.TrashStagingPath, "", formatStoredTime(operation.CreatedAt),
-		logical, physical, string(resultJSON), formatStoredTime(operation.CreatedAt), formatStoredTime(operation.UpdatedAt))
-	if err != nil {
-		return fmt.Errorf("insert project operation: %w", err)
-	}
-	return nil
-}
-
-func liveThreadIDsForProject(tx *sql.Tx, projectID string) ([]string, error) {
-	rows, err := tx.Query(`SELECT thread_id FROM threads WHERE project_id = ? AND deleted = 0 ORDER BY created_at`, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("list project threads: %w", err)
-	}
-	defer rows.Close()
-	var threadIDs []string
-	for rows.Next() {
-		var threadID string
-		if err := rows.Scan(&threadID); err != nil {
-			return nil, err
-		}
-		threadIDs = append(threadIDs, threadID)
-	}
-	return threadIDs, rows.Err()
-}
-
-func operationThreadIDs(db projectDBTX, operationID string) ([]string, error) {
-	queryer, ok := db.(interface {
-		Query(query string, args ...any) (*sql.Rows, error)
-	})
-	if !ok {
-		return nil, fmt.Errorf("operation thread query unavailable")
-	}
-	rows, err := queryer.Query(`SELECT thread_id FROM project_operation_threads WHERE operation_id = ? ORDER BY thread_id`, operationID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var threadIDs []string
-	for rows.Next() {
-		var threadID string
-		if err := rows.Scan(&threadID); err != nil {
-			return nil, err
-		}
-		threadIDs = append(threadIDs, threadID)
-	}
-	return threadIDs, rows.Err()
-}
-
-func softDeleteThreadsTx(tx *sql.Tx, operationID string, threadIDs []string, now time.Time) error {
-	for _, threadID := range threadIDs {
-		if _, err := tx.Exec(`
-UPDATE threads SET deleted = 1, deleted_at = ?, delete_operation_id = ?, updated_at = ?
-WHERE thread_id = ? AND deleted = 0
-`, formatStoredTime(now), operationID, formatStoredTime(now), threadID); err != nil {
-			return fmt.Errorf("soft delete thread %q: %w", threadID, err)
-		}
-	}
-	return nil
-}
-
-func insertThreadCleanupJobsTx(tx *sql.Tx, operationID string, threadIDs []string, now time.Time) error {
-	for _, threadID := range threadIDs {
-		if _, err := tx.Exec(`
-INSERT OR IGNORE INTO cleanup_jobs(job_id, operation_id, kind, target_id, status, next_attempt_at, created_at, updated_at)
-VALUES(?, ?, 'thread_purge', ?, 'pending', ?, ?, ?)
-`, newRuntimeID("job"), operationID, threadID, formatStoredTime(now), formatStoredTime(now), formatStoredTime(now)); err != nil {
-			return fmt.Errorf("enqueue cleanup for thread %q: %w", threadID, err)
-		}
-	}
-	return nil
-}
-
-func pendingCleanupCount(db projectDBTX, operationID string) (int, error) {
-	var count int
-	err := db.QueryRow(`SELECT COUNT(*) FROM cleanup_jobs WHERE operation_id = ? AND status <> 'succeeded' AND kind = 'thread_purge'`, operationID).Scan(&count)
-	return count, err
 }
 
 func projectPathFingerprint(root string) (string, error) {
@@ -1294,30 +722,6 @@ func restoreStagedProject(operation ProjectOperation) error {
 		return fmt.Errorf("%w: restored project identity changed", ErrProjectPathChanged)
 	}
 	_ = os.Remove(container)
-	return nil
-}
-
-func selectFallbackWorkspaceTx(tx *sql.Tx, excludedProjectID string, now time.Time) error {
-	var fallback string
-	err := tx.QueryRow(`
-SELECT workspace_root FROM projects
-WHERE state = 'active' AND project_id <> ?
-ORDER BY updated_at DESC, created_at DESC LIMIT 1
-`, excludedProjectID).Scan(&fallback)
-	if errors.Is(err, sql.ErrNoRows) {
-		_, err = tx.Exec(`DELETE FROM desktop_state WHERE key = 'last_workspace_path'`)
-		return err
-	}
-	if err != nil {
-		return fmt.Errorf("select fallback workspace: %w", err)
-	}
-	_, err = tx.Exec(`
-INSERT INTO desktop_state(key, value, updated_at) VALUES('last_workspace_path', ?, ?)
-ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-`, fallback, formatStoredTime(now))
-	if err != nil {
-		return fmt.Errorf("persist fallback workspace: %w", err)
-	}
 	return nil
 }
 

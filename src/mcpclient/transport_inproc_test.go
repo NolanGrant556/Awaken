@@ -159,10 +159,10 @@ func TestWSTransportUnsupported(t *testing.T) {
 // route tool calls.
 func TestSplitMcpToolName(t *testing.T) {
 	cases := []struct {
-		input        string
-		wantServer   string
-		wantTool     string
-		wantOk       bool
+		input      string
+		wantServer string
+		wantTool   string
+		wantOk     bool
 	}{
 		{"mcp__slack__post_message", "slack", "post_message", true},
 		{"mcp__crm__client_followup", "crm", "client_followup", true},
@@ -249,9 +249,9 @@ func TestMergeScopedDropsInvalid(t *testing.T) {
 	}
 }
 
-// TestMergeScopedDisabledExcluded confirms that servers with enabled=false
-// are dropped from the merged result.
-func TestMergeScopedDisabledExcluded(t *testing.T) {
+// TestMergeScopedDisabledRetained confirms that servers with enabled=false
+// remain visible to the manager so disabled state survives a restart.
+func TestMergeScopedDisabledRetained(t *testing.T) {
 	disabled := false
 	servers := []ScopedMcpServerConfig{
 		{Name: "on", Scope: ScopeUser, Config: McpServerConfig{
@@ -263,11 +263,18 @@ func TestMergeScopedDisabledExcluded(t *testing.T) {
 		}},
 	}
 	merged := MergeScoped(servers, nil, nil, nil)
-	if len(merged) != 1 {
-		t.Fatalf("expected 1 enabled server, got %d", len(merged))
+	if len(merged) != 2 {
+		t.Fatalf("expected enabled and disabled servers, got %+v", merged)
 	}
-	if merged[0].Name != "on" {
-		t.Errorf("expected 'on' to survive, got %s", merged[0].Name)
+	byName := map[string]ScopedMcpServerConfig{}
+	for _, entry := range merged {
+		byName[entry.Name] = entry
+	}
+	if _, ok := byName["on"]; !ok {
+		t.Fatalf("enabled server missing from merge: %+v", merged)
+	}
+	if off, ok := byName["off"]; !ok || off.Config.Enabled == nil || *off.Config.Enabled {
+		t.Fatalf("disabled server was not retained: %+v", merged)
 	}
 }
 

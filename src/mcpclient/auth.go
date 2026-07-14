@@ -2,9 +2,12 @@ package mcpclient
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,10 +34,10 @@ var ErrCredentialNotFound = errors.New("credential not found")
 // CredentialStore persists OAuth tokens and the metadata required to
 // rebuild a token source after a Desktop restart.
 type CredentialStore interface {
-	LoadTokenSource(serverName string) (StoredTokenSource, error)
-	SaveTokenSource(serverName string, source StoredTokenSource) error
-	ClearTokenSource(serverName string) error
-	HasTokenSource(serverName string) (bool, error)
+	LoadTokenSource(credentialIdentity string) (StoredTokenSource, error)
+	SaveTokenSource(credentialIdentity string, source StoredTokenSource) error
+	ClearTokenSource(credentialIdentity string) error
+	HasTokenSource(credentialIdentity string) (bool, error)
 }
 
 // InMemoryCredentialStore is the default CredentialStore implementation.
@@ -158,7 +161,7 @@ func (m *Manager) StartAuth(ctx context.Context, serverName string, req AuthRequ
 	if err != nil {
 		return AuthResult{}, err
 	}
-	handler := newPersistentOAuthHandler(serverName, cfg, m.credentials)
+	handler := newPersistentOAuthHandler(CredentialIdentity(server.scope, serverName, server.config), cfg, m.credentials)
 	// Install the handler on the server so the next Connect/CallTool picks
 	// it up. We do not block on the flow here; the desktop UI drives it.
 	m.mu.Lock()
@@ -202,6 +205,30 @@ func serverAuthURL(cfg McpServerConfig) string {
 		return cfg.WS.URL
 	}
 	return ""
+}
+
+// CredentialIdentity binds an OAuth account to the effective config owner and
+// endpoint. The full endpoint hash avoids leaking URLs into keyring account
+// names while keeping the identity deterministic across restarts.
+func CredentialIdentity(scope Scope, serverName string, cfg McpServerConfig) string {
+	endpoint := canonicalServerURL(serverAuthURL(cfg))
+	sum := sha256.Sum256([]byte(endpoint))
+	return fmt.Sprintf("%s:%s:%x", scope, serverName, sum[:])
+}
+
+func canonicalServerURL(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return trimmed
+	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	parsed.Host = strings.ToLower(parsed.Host)
+	parsed.Fragment = ""
+	if parsed.Path == "" {
+		parsed.Path = "/"
+	}
+	return parsed.String()
 }
 
 // buildOAuthHandler constructs an SDK AuthorizationCodeHandler from the

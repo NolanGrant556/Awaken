@@ -181,6 +181,28 @@ func TestManagerStateMachineInvalidTransport(t *testing.T) {
 	}
 }
 
+func TestManagerRestoresDisabledConfigWithoutConnecting(t *testing.T) {
+	disabled := false
+	mgr := NewManager(WithLogger(noopLogger{}))
+	mgr.Start(context.Background(), []ScopedMcpServerConfig{{
+		Name:  "disabled-http",
+		Scope: ScopeProject,
+		Config: McpServerConfig{
+			HTTP:    &HTTPTransportConfig{URL: "https://should-not-connect.invalid/mcp"},
+			Enabled: &disabled,
+		},
+	}})
+	t.Cleanup(func() { mgr.Shutdown(context.Background()) })
+
+	snapshot, err := mgr.SnapshotServer("disabled-http")
+	if err != nil {
+		t.Fatalf("SnapshotServer: %v", err)
+	}
+	if snapshot.State != StateDisabled || snapshot.Scope != ScopeProject {
+		t.Fatalf("disabled config was not restored: %+v", snapshot)
+	}
+}
+
 // TestManagerStateMachineWSRejected confirms the WS transport is marked
 // failed rather than attempted.
 func TestManagerStateMachineWSRejected(t *testing.T) {

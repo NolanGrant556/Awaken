@@ -23,6 +23,7 @@ import type {
   RuntimeConnector,
   RuntimeLogEntry,
   RuntimeMcpServer,
+  RuntimeMcpServerConfigResponse,
   RuntimeSkill,
   RuntimeToolInfo,
 } from "../shared/runtime";
@@ -223,6 +224,39 @@ type SkillListLoadResult = {
   errorMessage?: string;
 };
 
+type McpSettingsLoadResult = {
+  config?: RuntimeMcpServerConfigResponse;
+  configErrorMessage?: string;
+  tools: RuntimeToolInfo[];
+  logs: RuntimeLogEntry[];
+};
+
+export async function loadMcpSettingsResources(
+  serverName: string,
+  runtimeClient: Pick<
+    RuntimeClient,
+    "getMcpServerConfig" | "listMcpTools" | "getRuntimeLogs"
+  >,
+): Promise<McpSettingsLoadResult> {
+  const [configResult, toolsResult, logsResult] = await Promise.allSettled([
+    runtimeClient.getMcpServerConfig(serverName),
+    runtimeClient.listMcpTools(),
+    runtimeClient.getRuntimeLogs(),
+  ]);
+  return {
+    config:
+      configResult.status === "fulfilled" ? configResult.value : undefined,
+    configErrorMessage:
+      configResult.status === "rejected"
+        ? configResult.reason instanceof Error
+          ? configResult.reason.message
+          : "加载 MCP 配置失败"
+        : undefined,
+    tools: toolsResult.status === "fulfilled" ? toolsResult.value : [],
+    logs: logsResult.status === "fulfilled" ? logsResult.value : [],
+  };
+}
+
 export async function loadSkillListsForRoots(
   roots: Array<string | undefined>,
   listSkills: RuntimeClient["listSkills"],
@@ -310,6 +344,7 @@ export function ExtensionsView({
   const [selectedMcpServer, setSelectedMcpServer] = useState<RuntimeMcpServer | null>(null);
   const [mcpSettingsConfigText, setMcpSettingsConfigText] = useState("");
   const [mcpSettingsScope, setMcpSettingsScope] = useState("");
+  const [mcpSettingsError, setMcpSettingsError] = useState<string | null>(null);
   const [mcpTools, setMcpTools] = useState<McpToolInfo[]>([]);
   const [mcpLogs, setMcpLogs] = useState<RuntimeLogEntry[]>([]);
   const [savingMcpConfig, setSavingMcpConfig] = useState(false);
@@ -574,19 +609,20 @@ export function ExtensionsView({
     setSelectedMcpServer(server);
     setMcpSettingsOpen(true);
     setLoadingMcpSettings(true);
-    setErrorMessage(null);
+    setMcpSettingsConfigText("");
+    setMcpSettingsScope("");
+    setMcpSettingsError(null);
+    setMcpTools([]);
+    setMcpLogs([]);
     try {
-      const [config, tools, logs] = await Promise.all([
-        runtimeClient.getMcpServerConfig(server.name),
-        runtimeClient.listMcpTools(),
-        runtimeClient.getRuntimeLogs(),
-      ]);
-      setMcpSettingsConfigText(config.configText);
-      setMcpSettingsScope(config.scope);
-      setMcpTools(extractServerTools(tools, server.name));
-      setMcpLogs(filterMcpLogs(logs, server.name));
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "加载 MCP 设置失败");
+      const resources = await loadMcpSettingsResources(server.name, runtimeClient);
+      if (resources.config) {
+        setMcpSettingsConfigText(resources.config.configText);
+        setMcpSettingsScope(resources.config.scope);
+      }
+      setMcpSettingsError(resources.configErrorMessage ?? null);
+      setMcpTools(extractServerTools(resources.tools, server.name));
+      setMcpLogs(filterMcpLogs(resources.logs, server.name));
     } finally {
       setLoadingMcpSettings(false);
     }
@@ -620,11 +656,11 @@ export function ExtensionsView({
   async function handleSaveMcpConfig(): Promise<void> {
     if (!selectedMcpServer) return;
     if (mcpSettingsConfigText.trim() === "") {
-      setErrorMessage("MCP 配置不能为空");
+      setMcpSettingsError("MCP 配置不能为空");
       return;
     }
     setSavingMcpConfig(true);
-    setErrorMessage(null);
+    setMcpSettingsError(null);
     try {
       await runtimeClient.updateMcpServerConfig(selectedMcpServer.name, {
         configText: mcpSettingsConfigText,
@@ -638,7 +674,7 @@ export function ExtensionsView({
       setMcpLogs(filterMcpLogs(logs, selectedMcpServer.name));
       await refresh();
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "保存 MCP 配置失败");
+      setMcpSettingsError(error instanceof Error ? error.message : "保存 MCP 配置失败");
     } finally {
       setSavingMcpConfig(false);
     }
@@ -650,7 +686,7 @@ export function ExtensionsView({
       return;
     }
     setSavingMcpConfig(true);
-    setErrorMessage(null);
+    setMcpSettingsError(null);
     try {
       await runtimeClient.deleteMcpServer(selectedMcpServer.name);
       onNotice(`已删除 ${selectedMcpServer.name}`);
@@ -658,7 +694,7 @@ export function ExtensionsView({
       setSelectedMcpServer(null);
       await refresh();
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "删除 MCP server 失败");
+      setMcpSettingsError(error instanceof Error ? error.message : "删除 MCP server 失败");
     } finally {
       setSavingMcpConfig(false);
     }
@@ -1151,6 +1187,7 @@ export function ExtensionsView({
             setSelectedMcpServer(null);
             setMcpSettingsConfigText("");
             setMcpSettingsScope("");
+            setMcpSettingsError(null);
             setMcpTools([]);
             setMcpLogs([]);
           }
@@ -1196,7 +1233,7 @@ export function ExtensionsView({
         }
       >
         <div className="mcp-settings-dialog-body">
-          {errorMessage ? <div className="extension-message" role="alert">{errorMessage}</div> : null}
+          {mcpSettingsError ? <div className="extension-message" role="alert">{mcpSettingsError}</div> : null}
 
           <section className="mcp-settings-section">
             <div className="mcp-settings-section-header">

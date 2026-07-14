@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import type { RuntimeSkill } from "../shared/runtime";
-import { loadSkillListsForRoots, skillDiagnosticText } from "./ExtensionsView";
+import type { RuntimeSkill, RuntimeToolInfo } from "../shared/runtime";
+import {
+  loadMcpSettingsResources,
+  loadSkillListsForRoots,
+  skillDiagnosticText,
+} from "./ExtensionsView";
 
 describe("loadSkillListsForRoots", () => {
   it("keeps loading other projects when one project root is invalid", async () => {
@@ -46,5 +50,32 @@ describe("loadSkillListsForRoots", () => {
         severity: "error",
       }),
     ).toBe("parse_failed: frontmatter is invalid");
+  });
+});
+
+describe("loadMcpSettingsResources", () => {
+  it("keeps tools available and reports the config error independently", async () => {
+    const tool: RuntimeToolInfo = {
+      name: "mcp__playwright__browser_click",
+      source: "mcp",
+      description: "Click an element",
+      readOnly: false,
+    };
+    const runtimeClient = {
+      getMcpServerConfig: vi.fn(async () => {
+        throw new Error("WORKSPACE_UNAVAILABLE");
+      }),
+      listMcpTools: vi.fn(async () => [tool]),
+      getRuntimeLogs: vi.fn(async () => []),
+    };
+
+    await expect(
+      loadMcpSettingsResources("playwright", runtimeClient),
+    ).resolves.toEqual({
+      config: undefined,
+      configErrorMessage: "WORKSPACE_UNAVAILABLE",
+      tools: [tool],
+      logs: [],
+    });
   });
 });

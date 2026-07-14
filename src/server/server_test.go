@@ -4432,8 +4432,7 @@ func TestMCPConfigureServersAcceptsShorthandAndPersists(t *testing.T) {
 	workspace := t.TempDir()
 	// Redirect user-level MCP config into the temporary workspace so tests
 	// do not write to the real home directory.
-	t.Setenv("HOME", workspace)
-	t.Setenv("USERPROFILE", workspace)
+	t.Setenv("AWAKEN_HOME", workspace)
 	mgr := mcpclient.NewManager(mcpclient.WithLogger(testLogger{}))
 	router := NewRouterWithWorkspace(nil, nil, mgr, nil, nil, workspace)
 
@@ -4467,6 +4466,336 @@ func TestMCPConfigureServersAcceptsShorthandAndPersists(t *testing.T) {
 	}
 	if _, err := mgr.SnapshotServer("example_server"); err != nil {
 		t.Fatalf("expected manager snapshot for configured server: %v", err)
+	}
+}
+
+func TestMCPUserConfigRoutesWorkWithoutWorkspace(t *testing.T) {
+	awakenHome := t.TempDir()
+	t.Setenv("AWAKEN_HOME", awakenHome)
+
+	configPath := filepath.Clean(mcpclient.UserConfigPath())
+	relConfigPath, err := filepath.Rel(awakenHome, configPath)
+	if err != nil || relConfigPath == ".." || strings.HasPrefix(relConfigPath, ".."+string(os.PathSeparator)) {
+		t.Fatalf("user MCP config path %q must be inside isolated AWAKEN_HOME %q", configPath, awakenHome)
+	}
+
+	registry := mcpclient.NewInProcRegistry()
+	if err := registry.Register("workspace-free-echo", echoInProcServerFactory()); err != nil {
+		t.Fatalf("register in-process MCP server: %v", err)
+	}
+	mgr := mcpclient.NewManager(
+		mcpclient.WithInProcRegistry(registry),
+		mcpclient.WithLogger(testLogger{}),
+	)
+	const serverName = "workspace_free_user"
+	t.Cleanup(func() { _ = mgr.Remove(serverName) })
+	router := NewRouterWithWorkspace(nil, nil, mgr, nil, nil, "")
+
+	doRequest := func(method, target string, body any) *httptest.ResponseRecorder {
+		t.Helper()
+		var reader io.Reader
+		if body != nil {
+			data, err := json.Marshal(body)
+			if err != nil {
+				t.Fatalf("marshal %s %s request: %v", method, target, err)
+			}
+			reader = bytes.NewReader(data)
+		}
+		req := httptest.NewRequest(method, target, reader)
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	initialConfig := mcpclient.McpServerConfig{
+		InProc:      &mcpclient.InProcTransportConfig{ServerName: "workspace-free-echo"},
+		DisplayName: "Workspace-free initial",
+	}
+	initialEntry, err := json.Marshal(initialConfig)
+	if err != nil {
+		t.Fatalf("marshal initial MCP server entry: %v", err)
+	}
+	postConfigText := fmt.Sprintf(`{"servers":{%q:%s}}`, serverName, initialEntry)
+	postRec := doRequest(http.MethodPost, "/v1/mcp/servers", configureMCPServersRequest{ConfigText: postConfigText})
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST user MCP config without workspace: expected 200, got %d: %s", postRec.Code, postRec.Body.String())
+	}
+	if _, err := os.Stat(configPath); err != nil {
+		t.Fatalf("expected persisted user MCP config at %q: %v", configPath, err)
+	}
+	persisted, err := mcpclient.LoadUserConfig()
+	if err != nil {
+		t.Fatalf("load persisted user MCP config after POST: %v", err)
+	}
+	if got := persisted.Servers[serverName]; got.InProc == nil || got.InProc.ServerName != "workspace-free-echo" || got.DisplayName != initialConfig.DisplayName {
+		t.Fatalf("unexpected persisted user MCP config after POST: %+v", got)
+	}
+	postSnapshot, err := mgr.SnapshotServer(serverName)
+	if err != nil {
+		t.Fatalf("expected manager snapshot after POST: %v", err)
+	}
+	if postSnapshot.Scope != mcpclient.ScopeUser || postSnapshot.Transport != mcpclient.TransportInProc {
+		t.Fatalf("unexpected manager snapshot after POST: %+v", postSnapshot)
+	}
+
+	getRec := doRequest(http.MethodGet, "/v1/mcp/servers/"+serverName+"/config", nil)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET user MCP config without workspace: expected 200, got %d: %s", getRec.Code, getRec.Body.String())
+	}
+	var getResponse mcpServerConfigResponse
+	if err := json.Unmarshal(getRec.Body.Bytes(), &getResponse); err != nil {
+		t.Fatalf("decode GET user MCP config response: %v", err)
+	}
+	if getResponse.Name != serverName || getResponse.Scope != string(mcpclient.ScopeUser) || strings.TrimSpace(getResponse.ConfigText) == "" {
+		t.Fatalf("unexpected GET user MCP config response: %+v", getResponse)
+	}
+	var fetchedConfig mcpclient.McpServerConfig
+	if err := json.Unmarshal([]byte(getResponse.ConfigText), &fetchedConfig); err != nil {
+		t.Fatalf("decode configText from GET response: %v", err)
+	}
+	if fetchedConfig.DisplayName != initialConfig.DisplayName || fetchedConfig.InProc == nil || fetchedConfig.InProc.ServerName != "workspace-free-echo" {
+		t.Fatalf("unexpected configText from GET response: %+v", fetchedConfig)
+	}
+
+	updatedConfig := initialConfig
+	updatedConfig.DisplayName = "Workspace-free updated"
+	updatedEntry, err := json.Marshal(updatedConfig)
+	if err != nil {
+		t.Fatalf("marshal updated MCP server entry: %v", err)
+	}
+	patchRec := doRequest(http.MethodPatch, "/v1/mcp/servers/"+serverName+"/config", updateMcpServerConfigRequest{ConfigText: string(updatedEntry)})
+	if patchRec.Code != http.StatusOK {
+		t.Fatalf("PATCH user MCP config without workspace: expected 200, got %d: %s", patchRec.Code, patchRec.Body.String())
+	}
+	persisted, err = mcpclient.LoadUserConfig()
+	if err != nil {
+		t.Fatalf("load persisted user MCP config after PATCH: %v", err)
+	}
+	if got := persisted.Servers[serverName]; got.DisplayName != updatedConfig.DisplayName {
+		t.Fatalf("expected updated config to persist, got %+v", got)
+	}
+	patchSnapshot, err := mgr.SnapshotServer(serverName)
+	if err != nil {
+		t.Fatalf("expected manager snapshot after PATCH: %v", err)
+	}
+	if patchSnapshot.Scope != mcpclient.ScopeUser {
+		t.Fatalf("expected user-scope manager snapshot after PATCH, got %+v", patchSnapshot)
+	}
+
+	deleteRec := doRequest(http.MethodDelete, "/v1/mcp/servers/"+serverName, nil)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("DELETE user MCP config without workspace: expected 200, got %d: %s", deleteRec.Code, deleteRec.Body.String())
+	}
+	persisted, err = mcpclient.LoadUserConfig()
+	if err != nil {
+		t.Fatalf("load persisted user MCP config after DELETE: %v", err)
+	}
+	if _, ok := persisted.Servers[serverName]; ok {
+		t.Fatalf("expected DELETE to remove %q from persisted user config", serverName)
+	}
+	if _, err := mgr.SnapshotServer(serverName); err == nil {
+		t.Fatalf("expected DELETE to remove %q from manager snapshots", serverName)
+	}
+}
+
+func TestMCPProjectOverrideLifecyclePersistsAcrossRestart(t *testing.T) {
+	awakenHome := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("AWAKEN_HOME", awakenHome)
+
+	registry := mcpclient.NewInProcRegistry()
+	if err := registry.Register("scoped-echo", echoInProcServerFactory()); err != nil {
+		t.Fatalf("register in-process MCP server: %v", err)
+	}
+	const serverName = "shared_scope"
+	userConfig := mcpclient.McpServerConfig{
+		InProc:      &mcpclient.InProcTransportConfig{ServerName: "scoped-echo"},
+		DisplayName: "User fallback",
+	}
+	projectConfig := mcpclient.McpServerConfig{
+		InProc:      &mcpclient.InProcTransportConfig{ServerName: "scoped-echo"},
+		DisplayName: "Project override",
+	}
+	if err := mcpclient.SaveUserConfig(mcpclient.ConfigFile{Servers: map[string]mcpclient.McpServerConfig{serverName: userConfig}}); err != nil {
+		t.Fatalf("save user config: %v", err)
+	}
+	if err := mcpclient.SaveProjectConfig(workspace, mcpclient.ConfigFile{Servers: map[string]mcpclient.McpServerConfig{serverName: projectConfig}}); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+
+	newManager := func() *mcpclient.Manager {
+		mgr := mcpclient.NewManager(mcpclient.WithInProcRegistry(registry), mcpclient.WithLogger(testLogger{}))
+		userCfg, err := mcpclient.LoadUserConfig()
+		if err != nil {
+			t.Fatalf("load user config: %v", err)
+		}
+		projectCfg, err := mcpclient.LoadProjectConfig(workspace)
+		if err != nil {
+			t.Fatalf("load project config: %v", err)
+		}
+		mgr.Start(context.Background(), mcpclient.MergeScoped(
+			mcpclient.ToScoped(userCfg, mcpclient.ScopeUser),
+			mcpclient.ToScoped(projectCfg, mcpclient.ScopeProject),
+			nil,
+			testLogger{},
+		))
+		return mgr
+	}
+	doRequest := func(router http.Handler, method, target string, body any) *httptest.ResponseRecorder {
+		t.Helper()
+		var reader io.Reader
+		if body != nil {
+			data, err := json.Marshal(body)
+			if err != nil {
+				t.Fatalf("marshal %s %s request: %v", method, target, err)
+			}
+			reader = bytes.NewReader(data)
+		}
+		req := httptest.NewRequest(method, target, reader)
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	mgr := newManager()
+	t.Cleanup(func() { mgr.Shutdown(context.Background()) })
+	router := NewRouterWithWorkspace(nil, nil, mgr, nil, nil, workspace)
+	userConfig.DisplayName = "User updated under override"
+	userEntry, err := json.Marshal(userConfig)
+	if err != nil {
+		t.Fatalf("marshal user update: %v", err)
+	}
+	postRec := doRequest(router, http.MethodPost, "/v1/mcp/servers", configureMCPServersRequest{ConfigText: fmt.Sprintf(`{"servers":{%q:%s}}`, serverName, userEntry)})
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST shadowed user config: expected 200, got %d: %s", postRec.Code, postRec.Body.String())
+	}
+	if snapshot, err := mgr.SnapshotServer(serverName); err != nil || snapshot.Scope != mcpclient.ScopeProject {
+		t.Fatalf("POST shadowed user config replaced effective project runtime: snapshot=%+v err=%v", snapshot, err)
+	}
+	getRec := doRequest(router, http.MethodGet, "/v1/mcp/servers/"+serverName+"/config", nil)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET effective config: expected 200, got %d: %s", getRec.Code, getRec.Body.String())
+	}
+	var getResponse mcpServerConfigResponse
+	if err := json.Unmarshal(getRec.Body.Bytes(), &getResponse); err != nil {
+		t.Fatalf("decode GET response: %v", err)
+	}
+	if getResponse.Scope != string(mcpclient.ScopeProject) || !strings.Contains(getResponse.ConfigText, "Project override") {
+		t.Fatalf("GET did not return project override: %+v", getResponse)
+	}
+
+	projectConfig.DisplayName = "Project updated"
+	updatedEntry, err := json.Marshal(projectConfig)
+	if err != nil {
+		t.Fatalf("marshal project update: %v", err)
+	}
+	patchRec := doRequest(router, http.MethodPatch, "/v1/mcp/servers/"+serverName+"/config", updateMcpServerConfigRequest{ConfigText: string(updatedEntry)})
+	if patchRec.Code != http.StatusOK {
+		t.Fatalf("PATCH effective project config: expected 200, got %d: %s", patchRec.Code, patchRec.Body.String())
+	}
+	projectCfg, err := mcpclient.LoadProjectConfig(workspace)
+	if err != nil || projectCfg.Servers[serverName].DisplayName != "Project updated" {
+		t.Fatalf("project update was not persisted: cfg=%+v err=%v", projectCfg.Servers[serverName], err)
+	}
+	userCfg, err := mcpclient.LoadUserConfig()
+	if err != nil || userCfg.Servers[serverName].DisplayName != "User updated under override" {
+		t.Fatalf("project update mutated user fallback: cfg=%+v err=%v", userCfg.Servers[serverName], err)
+	}
+
+	disableRec := doRequest(router, http.MethodPost, "/v1/mcp/servers/"+serverName+"/disable", nil)
+	if disableRec.Code != http.StatusNoContent {
+		t.Fatalf("disable project override: expected 204, got %d: %s", disableRec.Code, disableRec.Body.String())
+	}
+	projectCfg, err = mcpclient.LoadProjectConfig(workspace)
+	if err != nil || projectCfg.Servers[serverName].Enabled == nil || *projectCfg.Servers[serverName].Enabled {
+		t.Fatalf("disabled flag was not persisted in project config: cfg=%+v err=%v", projectCfg.Servers[serverName], err)
+	}
+	if snapshot, err := mgr.SnapshotServer(serverName); err != nil || snapshot.State != mcpclient.StateDisabled {
+		t.Fatalf("manager did not enter disabled state: snapshot=%+v err=%v", snapshot, err)
+	}
+
+	mgr.Shutdown(context.Background())
+	restarted := newManager()
+	t.Cleanup(func() { restarted.Shutdown(context.Background()) })
+	if snapshot, err := restarted.SnapshotServer(serverName); err != nil || snapshot.State != mcpclient.StateDisabled || snapshot.Scope != mcpclient.ScopeProject {
+		t.Fatalf("restart did not restore project disabled state: snapshot=%+v err=%v", snapshot, err)
+	}
+	restartedRouter := NewRouterWithWorkspace(nil, nil, restarted, nil, nil, workspace)
+	enableRec := doRequest(restartedRouter, http.MethodPost, "/v1/mcp/servers/"+serverName+"/enable", nil)
+	if enableRec.Code != http.StatusNoContent {
+		t.Fatalf("enable project override: expected 204, got %d: %s", enableRec.Code, enableRec.Body.String())
+	}
+	projectCfg, err = mcpclient.LoadProjectConfig(workspace)
+	if err != nil || projectCfg.Servers[serverName].Enabled == nil || !*projectCfg.Servers[serverName].Enabled {
+		t.Fatalf("enabled flag was not persisted in project config: cfg=%+v err=%v", projectCfg.Servers[serverName], err)
+	}
+
+	deleteRec := doRequest(restartedRouter, http.MethodDelete, "/v1/mcp/servers/"+serverName, nil)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("delete project override: expected 200, got %d: %s", deleteRec.Code, deleteRec.Body.String())
+	}
+	projectCfg, err = mcpclient.LoadProjectConfig(workspace)
+	if err != nil {
+		t.Fatalf("load project config after delete: %v", err)
+	}
+	if _, ok := projectCfg.Servers[serverName]; ok {
+		t.Fatalf("project override still exists after delete: %+v", projectCfg.Servers[serverName])
+	}
+	userCfg, err = mcpclient.LoadUserConfig()
+	if err != nil || userCfg.Servers[serverName].DisplayName != "User updated under override" {
+		t.Fatalf("user fallback was not preserved: cfg=%+v err=%v", userCfg.Servers[serverName], err)
+	}
+	if snapshot, err := restarted.SnapshotServer(serverName); err != nil || snapshot.Scope != mcpclient.ScopeUser {
+		t.Fatalf("deleting project override did not reveal user runtime: snapshot=%+v err=%v", snapshot, err)
+	}
+}
+
+func TestMCPConfigEndpointChangeClearsOldCredential(t *testing.T) {
+	t.Setenv("AWAKEN_HOME", t.TempDir())
+	disabled := false
+	const serverName = "remote"
+	oldConfig := mcpclient.McpServerConfig{
+		HTTP:    &mcpclient.HTTPTransportConfig{URL: "https://old.example/mcp"},
+		Enabled: &disabled,
+	}
+	if err := mcpclient.SaveUserConfig(mcpclient.ConfigFile{Servers: map[string]mcpclient.McpServerConfig{serverName: oldConfig}}); err != nil {
+		t.Fatalf("save user config: %v", err)
+	}
+	store := mcpclient.NewInMemoryCredentialStore()
+	oldIdentity := mcpclient.CredentialIdentity(mcpclient.ScopeUser, serverName, oldConfig)
+	if err := store.SaveTokenSource(oldIdentity, mcpclient.StoredTokenSource{ServerURL: oldConfig.HTTP.URL}); err != nil {
+		t.Fatalf("save old credential: %v", err)
+	}
+	mgr := mcpclient.NewManager(mcpclient.WithLogger(testLogger{}))
+	mgr.SetCredentialStore(store)
+	mgr.Start(context.Background(), []mcpclient.ScopedMcpServerConfig{{Name: serverName, Scope: mcpclient.ScopeUser, Config: oldConfig}})
+	t.Cleanup(func() { mgr.Shutdown(context.Background()) })
+	router := NewRouterWithWorkspace(nil, nil, mgr, nil, nil, "")
+	newConfig := oldConfig
+	newConfig.HTTP = &mcpclient.HTTPTransportConfig{URL: "https://new.example/mcp"}
+	entry, err := json.Marshal(newConfig)
+	if err != nil {
+		t.Fatalf("marshal new config: %v", err)
+	}
+	body, err := json.Marshal(updateMcpServerConfigRequest{ConfigText: string(entry)})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPatch, "/v1/mcp/servers/"+serverName+"/config", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PATCH endpoint: expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if exists, err := store.HasTokenSource(oldIdentity); err != nil || exists {
+		t.Fatalf("old endpoint credential was not cleared: exists=%v err=%v", exists, err)
 	}
 }
 

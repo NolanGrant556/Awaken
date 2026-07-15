@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"awaken/src/agentcore"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
 	"awaken/src/skills"
@@ -34,13 +33,6 @@ func frameSeq(runtimeSeq uint64, frameIndex int) uint64 {
 
 type renameThreadRequest struct {
 	Label string `json:"label"`
-}
-
-type resolveMassMessageReviewRequest struct {
-	Decision                string `json:"decision"`
-	EnvelopeDigest          string `json:"envelopeDigest"`
-	BodyDigest              string `json:"bodyDigest"`
-	RecipientIdentityDigest string `json:"recipientIdentityDigest"`
 }
 
 type answerUserQuestionRequest struct {
@@ -366,58 +358,6 @@ func (h runHandlers) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, run)
-}
-
-func (h runHandlers) handleResolveMassMessageReview(w http.ResponseWriter, r *http.Request) {
-	runID := r.PathValue("run_id")
-	reviewID := r.PathValue("review_id")
-	var req resolveMassMessageReviewRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
-		return
-	}
-
-	var decision agentcore.ReviewDecision
-	switch req.Decision {
-	case string(agentcore.ReviewDecisionApproved):
-		decision = agentcore.ReviewDecisionApproved
-	case string(agentcore.ReviewDecisionRejected):
-		decision = agentcore.ReviewDecisionRejected
-	default:
-		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REVIEW_DECISION", "decision must be approved or rejected")
-		return
-	}
-	digests := awruntime.MassMessageReviewDigests{
-		EnvelopeDigest:          strings.TrimSpace(req.EnvelopeDigest),
-		BodyDigest:              strings.TrimSpace(req.BodyDigest),
-		RecipientIdentityDigest: strings.TrimSpace(req.RecipientIdentityDigest),
-	}
-	if digests.EnvelopeDigest == "" || digests.BodyDigest == "" || digests.RecipientIdentityDigest == "" {
-		writeErrorJSON(w, http.StatusBadRequest, "MASS_MESSAGE_REVIEW_DIGEST_REQUIRED", "envelopeDigest, bodyDigest, and recipientIdentityDigest are required")
-		return
-	}
-
-	if err := h.runService.ResolveMassMessageReview(runID, reviewID, decision, digests); err != nil {
-		switch {
-		case errors.Is(err, awruntime.ErrRunNotFound), errors.Is(err, awruntime.ErrMassMessageReviewNotFound):
-			writeErrorJSON(w, http.StatusNotFound, "MASS_MESSAGE_REVIEW_NOT_FOUND", err.Error())
-		case errors.Is(err, awruntime.ErrRunTerminal):
-			writeErrorJSON(w, http.StatusConflict, "RUN_TERMINAL", err.Error())
-		case errors.Is(err, awruntime.ErrMassMessageReviewDigestMismatch):
-			writeErrorJSON(w, http.StatusConflict, "MASS_MESSAGE_REVIEW_DIGEST_MISMATCH", err.Error())
-		case errors.Is(err, awruntime.ErrMassMessageReviewAlreadyResolved):
-			writeErrorJSON(w, http.StatusConflict, "MASS_MESSAGE_REVIEW_ALREADY_RESOLVED", err.Error())
-		case errors.Is(err, awruntime.ErrMassMessageReviewDigestMissing):
-			writeErrorJSON(w, http.StatusBadRequest, "MASS_MESSAGE_REVIEW_DIGEST_REQUIRED", err.Error())
-		case errors.Is(err, awruntime.ErrInvalidReviewDecision):
-			writeErrorJSON(w, http.StatusBadRequest, "INVALID_REVIEW_DECISION", err.Error())
-		default:
-			writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to resolve mass message review")
-		}
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h runHandlers) handleAnswerUserQuestion(w http.ResponseWriter, r *http.Request) {

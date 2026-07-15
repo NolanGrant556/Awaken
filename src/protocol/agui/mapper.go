@@ -302,15 +302,6 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.Type = EventAwakenSkillFailedToLoad
 		copySkillFields(&base, event)
 		return []Event{base}
-	case agentcore.MassMessageReviewRequestedType:
-		base.Type = EventAwakenMassReviewRequested
-		copyMassMessageFields(&base, event)
-		return []Event{base}
-	case agentcore.MassMessageReviewResolvedType:
-		base.Type = EventAwakenMassReviewResolved
-		copyMassMessageFields(&base, event)
-		base.ReviewDecision = string(event.ReviewDecision)
-		return []Event{base}
 	case agentcore.UserQuestionRequestedType:
 		base.Type = EventAwakenUserQuestionRequested
 		base.ToolCallID = event.ToolCallID
@@ -432,25 +423,6 @@ func copySkillFields(dst *Event, event agentcore.AwakenEvent) {
 		dst.SkillEffectiveTools = stringSliceFromAny(firstPresentValue(event.Diagnostic, "effective_tools", "effectiveTools"))
 		dst.SkillDiagnostics = diagnosticStringsFromAny(firstPresentValue(event.Diagnostic, "diagnostics", "compatibility_errors", "compatibilityErrors"))
 	}
-}
-
-func copyMassMessageFields(dst *Event, event agentcore.AwakenEvent) {
-	dst.ToolCallID = event.ToolCallID
-	dst.ToolCallName = event.ToolName
-	dst.ReviewID = event.ReviewID
-	dst.ReviewEnvelopeDigest = event.ReviewEnvelopeDigest
-	dst.ReviewBodyDigest = event.ReviewBodyDigest
-	dst.ReviewRecipientIdentityDigest = event.ReviewRecipientIdentityDigest
-	dst.MassMessageChannel = event.MassMessageChannel
-	dst.MassMessageRecipientScope = event.MassMessageRecipientScope
-	dst.MassMessageRecipientCount = event.MassMessageRecipientCount
-	dst.MassMessageBodyPreview = event.MassMessageBodyPreview
-	dst.MassMessageTemplatePreview = event.MassMessageTemplatePreview
-	dst.MassMessageAttachments = append([]string(nil), event.MassMessageAttachments...)
-	dst.MassMessageSendingAccount = event.MassMessageSendingAccount
-	dst.MassMessageSourceTool = event.MassMessageSourceTool
-	dst.MassMessageMessageCount = event.MassMessageMessageCount
-	dst.MassMessageExpandsRecipients = cloneBoolPointer(&event.MassMessageExpandsRecipients)
 }
 
 func firstNonEmpty(values ...string) string {

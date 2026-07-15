@@ -102,7 +102,6 @@ function stubElectronBridge(): void {
       revealArtifact: vi.fn(async () => ({ ok: true as const })),
       startRun: vi.fn(),
       cancelRun: vi.fn(),
-      resolveMassMessageReview: vi.fn(),
       answerUserQuestion: vi.fn(),
       subscribeRun: vi.fn(),
       unsubscribeRun: vi.fn(),

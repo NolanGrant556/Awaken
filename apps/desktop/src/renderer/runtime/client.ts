@@ -16,8 +16,6 @@ import {
   type DeleteSkillResponse,
   type InstallSkillRequest,
   type InstallSkillResponse,
-  type MassMessageReviewDecision,
-  type MassMessageReviewDigests,
   type ModelProfileBalancesResult,
   type UserQuestionAnswer,
   type ModelProfileSaveRequest,
@@ -161,12 +159,6 @@ export type RuntimeClient = {
   revealArtifact: (request: ArtifactOpenRequest) => Promise<ArtifactOpenResult>;
   startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
-  resolveMassMessageReview: (
-    runId: string,
-    reviewId: string,
-    decision: MassMessageReviewDecision,
-    digests: MassMessageReviewDigests,
-  ) => Promise<void>;
   answerUserQuestion: (
     runId: string,
     questionId: string,
@@ -270,7 +262,6 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     revealArtifact: (request) => bridge.revealArtifact(request),
     startRun: (request) => unwrapDesktopOperation(bridge.startRun(request)),
     cancelRun: bridge.cancelRun,
-    resolveMassMessageReview: bridge.resolveMassMessageReview,
     answerUserQuestion: bridge.answerUserQuestion,
     getDesktopPreferences: () => bridge.getDesktopPreferences(),
     saveDesktopPreferences: (request) => bridge.saveDesktopPreferences(request),

@@ -26,7 +26,6 @@ type ToolAnnotations struct {
 	TrustedOrigin   TrustedOrigin
 	FileBridgeScope FileBridgeScope
 	NetworkScope    NetworkScope
-	MassMessage     *MassMessageMetadata
 }
 
 // RiskHints summarises the risk profile of a tool invocation.
@@ -140,7 +139,6 @@ type DecisionMetadata struct {
 	RiskTone      string
 	AffectedPaths []string
 	PatchSummary  string
-	MassMessage   *MassMessageMetadata
 }
 
 type DecisionMetadataDescribingTool interface {
@@ -204,7 +202,6 @@ const (
 	CapabilityBrowserRead     CapabilityClass = "browser_read"
 	CapabilityBrowserInteract CapabilityClass = "browser_interaction"
 	CapabilityLocalTransform  CapabilityClass = "local_transform"
-	CapabilityMassMessageSend CapabilityClass = "mass_message_send"
 	CapabilityExternalPublish CapabilityClass = "external_publish"
 	CapabilitySystemOperation CapabilityClass = "system_operation"
 )
@@ -234,23 +231,6 @@ const (
 	NetworkScopeRestricted NetworkScope = "restricted"
 	NetworkScopeOpen       NetworkScope = "open"
 )
-
-type MassMessageMetadata struct {
-	ReviewID                string   `json:"reviewId,omitempty"`
-	Channel                 string   `json:"channel,omitempty"`
-	RecipientScope          string   `json:"recipientScope,omitempty"`
-	RecipientCount          int      `json:"recipientCount,omitempty"`
-	MessageCount            int      `json:"messageCount,omitempty"`
-	ExpandsRecipients       bool     `json:"expandsRecipients,omitempty"`
-	BodyPreview             string   `json:"bodyPreview,omitempty"`
-	TemplatePreview         string   `json:"templatePreview,omitempty"`
-	Attachments             []string `json:"attachments,omitempty"`
-	SendingAccount          string   `json:"sendingAccount,omitempty"`
-	SourceTool              string   `json:"sourceTool,omitempty"`
-	EnvelopeDigest          string   `json:"envelopeDigest,omitempty"`
-	BodyDigest              string   `json:"bodyDigest,omitempty"`
-	RecipientIdentityDigest string   `json:"recipientIdentityDigest,omitempty"`
-}
 
 type ArtifactProducingTool interface {
 	Artifacts(input string, output string, permissionContext PermissionContext) []ArtifactDescriptor

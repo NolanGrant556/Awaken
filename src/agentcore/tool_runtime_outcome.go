@@ -355,9 +355,6 @@ func executionDecisionToToolDecision(ed profile.ExecutionDecision) ToolDecision 
 		td.Source = ToolDecisionSourceRuntimeRequired
 	case profile.DecisionUnsupported:
 		td.Action = ToolDecisionUnsupported
-	case profile.DecisionNeedsMassMessageReview:
-		td.Action = ToolDecisionNeedsMassMessageReview
-		td.Source = ToolDecisionSourceMassMessageReview
 	default:
 		td.Action = ToolDecisionDeny
 		td.Source = ToolDecisionSourcePolicyError
@@ -553,10 +550,6 @@ func synthesizeStructuredToolResult(result ToolExecutionResult, decision ToolDec
 	case ToolDecisionUnsupported:
 		status = tool.OutcomeUnsupported
 		category = tool.ErrorCategoryUnsupported
-	case ToolDecisionNeedsMassMessageReview:
-		status = tool.OutcomeReviewRequired
-		category = tool.ErrorCategoryPolicy
-		semantic = tool.SemanticNeutral
 	}
 	result.Outcome = tool.ExecutionOutcome{
 		Content:         result.Content,

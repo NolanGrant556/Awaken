@@ -421,18 +421,25 @@ func TestMCPArtifactBridgeReplacementMovesPreimageToTrash(t *testing.T) {
 	}
 }
 
-func TestMCPArtifactContractMissingOutputSchemaFailsBeforeTransport(t *testing.T) {
+func TestMCPInvalidArtifactContractFallsBackToOrdinaryMCPResult(t *testing.T) {
 	definition := artifactBridgeTool(defaultArtifactBridgeContract())
 	properties := definition.OutputSchema.(map[string]any)["properties"].(map[string]any)
 	delete(properties, "content_type")
 	adapter, calls := startArtifactBridgeAdapter(t, definition)
 	decision := adapter.CheckPermission(context.Background(), `{}`, tool.PermissionContext{})
-	if decision.Behavior != tool.PermissionUnsupported || decision.ErrorCode != ErrorCodeUnsupportedArtifactOutput {
-		t.Fatalf("missing output schema field must be unsupported: %+v", decision)
+	if decision.Behavior != tool.PermissionAllow {
+		t.Fatalf("invalid optional artifact metadata must not gate the MCP call: %+v", decision)
 	}
 	outcome, err := adapter.ExecuteOutcome(context.Background(), `{}`, nil)
-	if err != nil || outcome.Status != tool.OutcomeUnsupported || outcome.TransportStatus != tool.TransportNotStarted || calls.Load() != 0 {
-		t.Fatalf("schema failure reached transport: outcome=%+v err=%v calls=%d", outcome, err, calls.Load())
+	if err != nil || outcome.Status != tool.OutcomeSucceeded || outcome.TransportStatus != tool.TransportCompleted || calls.Load() != 1 {
+		t.Fatalf("invalid artifact metadata should fall back to an ordinary MCP result: outcome=%+v err=%v calls=%d", outcome, err, calls.Load())
+	}
+	if len(outcome.Artifacts) != 0 || adapter.artifactOutputEnabled {
+		t.Fatalf("invalid artifact metadata must not publish a host Artifact: outcome=%+v", outcome)
+	}
+	warnings := adapter.ProviderManifest().Warnings
+	if len(warnings) == 0 || !strings.Contains(strings.Join(warnings, "\n"), "artifact_output ignored") {
+		t.Fatalf("artifact contract downgrade should remain diagnostic: %+v", warnings)
 	}
 }
 

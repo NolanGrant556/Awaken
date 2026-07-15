@@ -26,24 +26,18 @@ import (
 )
 
 var (
-	ErrInvalidInput                     = errors.New("input is required")
-	ErrRunNotFound                      = errors.New("run not found")
-	ErrRunTerminal                      = errors.New("run is already finished")
-	ErrRunCancelling                    = errors.New("run is being cancelled")
-	ErrThreadNotFound                   = errors.New("thread not found")
-	ErrThreadWorkspaceMismatch          = errors.New("thread workspace mismatch")
-	ErrThreadBusy                       = errors.New("thread already has an active run")
-	ErrThreadLabelInvalid               = errors.New("thread label is required")
-	ErrMissingModelProfile              = errors.New("model profile is required")
-	ErrUnsupportedInputAttachment       = errors.New("model does not support image input")
-	ErrMassMessageReviewNotFound        = errors.New("mass message review not found")
-	ErrMassMessageReviewDigestMissing   = errors.New("mass message review canonical digest is required")
-	ErrMassMessageReviewDigestMismatch  = errors.New("mass message review canonical digest mismatch")
-	ErrMassMessageReviewAlreadyResolved = errors.New("mass message review is already resolved")
-	ErrMassMessageReviewAlreadyPending  = errors.New("mass message review is already pending")
-	ErrInvalidReviewDecision            = errors.New("invalid mass message review decision")
-	ErrUserQuestionNotFound             = errors.New("user question not found")
-	ErrPersistenceUnavailable           = agentcore.ErrPersistenceUnavailable
+	ErrInvalidInput               = errors.New("input is required")
+	ErrRunNotFound                = errors.New("run not found")
+	ErrRunTerminal                = errors.New("run is already finished")
+	ErrRunCancelling              = errors.New("run is being cancelled")
+	ErrThreadNotFound             = errors.New("thread not found")
+	ErrThreadWorkspaceMismatch    = errors.New("thread workspace mismatch")
+	ErrThreadBusy                 = errors.New("thread already has an active run")
+	ErrThreadLabelInvalid         = errors.New("thread label is required")
+	ErrMissingModelProfile        = errors.New("model profile is required")
+	ErrUnsupportedInputAttachment = errors.New("model does not support image input")
+	ErrUserQuestionNotFound       = errors.New("user question not found")
+	ErrPersistenceUnavailable     = agentcore.ErrPersistenceUnavailable
 )
 
 const maxRetainedThreads = 100
@@ -1354,16 +1348,6 @@ func (s *RunService) CancelRun(runID string) (Run, error) {
 	return session.RequestCancel(), nil
 }
 
-func (s *RunService) ResolveMassMessageReview(runID, reviewID string, decision agentcore.ReviewDecision, digests MassMessageReviewDigests) error {
-	s.mu.RLock()
-	session, ok := s.sessions[runID]
-	s.mu.RUnlock()
-	if !ok {
-		return ErrRunNotFound
-	}
-	return session.ResolveMassMessageReview(reviewID, decision, digests)
-}
-
 func (s *RunService) ResolveUserQuestion(runID, questionID, answer string) error {
 	s.mu.RLock()
 	session, ok := s.sessions[runID]
@@ -2004,13 +1988,6 @@ func (s sessionEventSink) AwaitUserQuestion(ctx context.Context, request agentco
 		return "", ErrRunNotFound
 	}
 	return s.session.AwaitUserQuestion(ctx, request)
-}
-
-func (s sessionEventSink) AwaitMassMessageReview(ctx context.Context, request agentcore.AwakenEvent) (agentcore.ReviewDecision, error) {
-	if s.session == nil {
-		return "", ErrRunNotFound
-	}
-	return s.session.AwaitMassMessageReview(ctx, request)
 }
 
 func normalizeWorkspace(ws WorkspaceConfig) (WorkspaceConfig, error) {

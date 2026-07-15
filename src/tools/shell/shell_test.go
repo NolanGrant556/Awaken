@@ -220,7 +220,7 @@ func TestShellPermissionAllowsSafeLanes(t *testing.T) {
 	}
 }
 
-func TestShellPermissionDoesNotClaimUniversalMassMessageGate(t *testing.T) {
+func TestShellPermissionAllowsCollaborationMessageCommands(t *testing.T) {
 	root := t.TempDir()
 	ctx := tool.NewPermissionContext(root, []string{root})
 	shellTool := &ShellTool{}
@@ -234,8 +234,8 @@ func TestShellPermissionDoesNotClaimUniversalMassMessageGate(t *testing.T) {
 	for _, cmd := range cases {
 		t.Run(cmd, func(t *testing.T) {
 			decision := shellTool.CheckPermission(context.Background(), `{"command":`+quoteJSON(cmd)+`}`, ctx)
-			if decision.Behavior != tool.PermissionAllow || decision.Metadata.MassMessage != nil {
-				t.Fatalf("default host shell must not pretend it can universally intercept %q: %+v", cmd, decision)
+			if decision.Behavior != tool.PermissionAllow {
+				t.Fatalf("default host shell must allow %q: %+v", cmd, decision)
 			}
 		})
 	}

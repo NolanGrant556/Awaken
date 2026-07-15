@@ -71,6 +71,10 @@
 - 需要用户多选时设置 `"multi_select": true`。
 - 必须等待用户回答后再继续任务，不要在调用 `ask_user` 后又立即给出最终结论。
 
+## Skill 选择与调用
+
+开始执行任务前，先检查统一 `skill` 工具描述——目录清单前固定携带何时必须调用、如何处理多 Skill 匹配、以及无匹配时如何继续的完整规则，那份规则是唯一权威，本节不重复列出。
+
 ## Skill 安装与使用
 
 当用户要求安装、导入、创建或注册 Skill 时，必须调用 `skill_install`，不要猜测、手写或通过普通文件工具直接写入 `.awaken/skills`、`~/.awaken/skills` 或其他技能安装目录。
@@ -95,7 +99,7 @@
 6. **显式删除文件/目录**：使用 `trash_file`（进入系统回收站）。
 7. **多文件、移动、删除或高级 diff**：仅在 `text_edit` / `text_file_create` / `trash_file` 不适合时使用 `apply_patch`。当前默认工具池可能不暴露 raw `apply_patch`；不要声称它已受 grammar constrained decoding，除非 provider transport 真正支持。
 8. **读取 PDF/Office/表格等工作文件**：使用 `read_artifact` 或专用 `pdf_extract`，不要用 `read_file` 读取二进制文件。
-9. **生成 Word/Excel/PPT 产物**：当 typed artifact provider 已就绪且契约匹配任务时，优先使用 `document_create`、`spreadsheet_create`、`presentation_create`；PPT 需要图文排版、图片素材、备注或预览时，可把 `theme/slides/images/notes/render_preview` 作为结构化参数传给 `presentation_create`。如果用户本轮明确选择了 Skill，则以宿主提供的 current composer Skill selection 为准，完整读取其 `SKILL.md`，并允许按 Skill 指令通过 `shell` 安装依赖、运行脚本和调用本机程序。typed tool 是带结构化保证的优选路径，不是本机操作的合法性白名单。
+9. **生成 Word/Excel/PPT 产物**：先按“Skill 选择与调用”检查是否有匹配的 Skill（composer 本轮选择的 Skill 必须遵循；Catalog 明显匹配的 Skill 必须先调用加载指令）。加载后按 Skill 指令决定执行路径，允许通过 `shell` 安装依赖、运行脚本和调用本机程序。Skill 未规定具体路径或没有匹配 Skill 时，typed artifact provider 已就绪且契约匹配则优先使用 `document_create`、`spreadsheet_create`、`presentation_create`；PPT 需要图文排版、图片素材、备注或预览时，可把 `theme/slides/images/notes/render_preview` 作为结构化参数传给 `presentation_create`。typed tool 是带结构化保证的执行路径，不是本机操作的合法性白名单。
 10. **渲染检查 PPT/PDF/Office 产物**：使用 `presentation_render`、`pdf_render`、`document_render` 等 artifact render 工具；缺 runtime 时先看 `runtime_preflight` 或 `workspace_dependencies` 的具体缺口。
 11. **本机 Shell**：上述 typed tool 契约匹配时可优先使用；当前登录用户可在本机完成的普通操作，尤其是明确选择 Skill 所声明的初始化和运行步骤，可以直接使用 `shell`。不要仅因某个动作没有对应 typed tool 就判定不可执行。
 

@@ -40,6 +40,8 @@ import {
   type ConfigureMcpServersResponse,
   type DesktopPreferencesSaveRequest,
   type DesktopPlatform,
+  type DeleteSkillRequest,
+  type DeleteSkillResponse,
   type InstallSkillRequest,
   type InstallSkillResponse,
   type MassMessageReviewDecision,
@@ -1165,6 +1167,23 @@ ipcMain.handle("awaken:install-skill", async (_event, request: InstallSkillReque
 			"Content-Type": "application/json",
 		},
 		body: JSON.stringify(request),
+	});
+});
+
+ipcMain.handle("awaken:delete-skill", async (_event, request: DeleteSkillRequest) => {
+	const id = request.id.trim();
+	if (!id) {
+		throw new Error("Skill id is required");
+	}
+	return requestRuntime<DeleteSkillResponse>(`/v1/skills/${encodeURIComponent(id)}`, {
+		method: "DELETE",
+		headers: {
+			"Content-Type": "application/json",
+		},
+		body: JSON.stringify({
+			sourceOrigin: request.sourceOrigin,
+			projectRoot: request.projectRoot,
+		}),
 	});
 });
 

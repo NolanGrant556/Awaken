@@ -157,6 +157,67 @@ func TestInstallSkillPackageReplaceRollsBackWhenTrashUnavailable(t *testing.T) {
 	}
 }
 
+func TestDeleteSkillPackageMovesProjectPackageToTrash(t *testing.T) {
+	workspace := t.TempDir()
+	packageDir := filepath.Join(workspace, ".awaken", "skills", "folder-name")
+	writeFile(t, packageDir, "SKILL.md", `---
+name: deletable-skill
+description: Delete this package.
+---
+Body.
+`)
+	trashDir := filepath.Join(t.TempDir(), "Trash")
+	result, err := DeleteSkillPackage(DeleteRequest{
+		ID:           "deletable-skill",
+		Source:       SourceProject,
+		ProjectRoot:  workspace,
+		TrashAdapter: installTrashAdapter{dir: trashDir},
+	})
+	if err != nil {
+		t.Fatalf("delete skill: %v", err)
+	}
+	if result.OriginalPath != packageDir || result.Trash.TrashedPath == "" {
+		t.Fatalf("unexpected delete result: %+v", result)
+	}
+	if _, err := os.Stat(packageDir); !os.IsNotExist(err) {
+		t.Fatalf("package still exists after delete: %v", err)
+	}
+	trashedSkill, err := os.ReadFile(filepath.Join(result.Trash.TrashedPath, "SKILL.md"))
+	if err != nil || !strings.Contains(string(trashedSkill), "deletable-skill") {
+		t.Fatalf("trashed package is not recoverable: err=%v content=%q", err, trashedSkill)
+	}
+}
+
+func TestDeleteSkillPackageTrashFailureLeavesPackageUntouched(t *testing.T) {
+	workspace := t.TempDir()
+	packageDir := filepath.Join(workspace, ".awaken", "skills", "kept-skill")
+	writeFile(t, packageDir, "SKILL.md", `---
+name: kept-skill
+description: Keep this package when Trash fails.
+---
+Body.
+`)
+	_, err := DeleteSkillPackage(DeleteRequest{
+		ID:           "kept-skill",
+		Source:       SourceProject,
+		ProjectRoot:  workspace,
+		TrashAdapter: installTrashAdapter{fail: true},
+	})
+	if !errors.Is(err, ErrSkillDeleteTrashUnavailable) {
+		t.Fatalf("expected Trash failure, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(packageDir, "SKILL.md")); statErr != nil {
+		t.Fatalf("failed delete removed or damaged source package: %v", statErr)
+	}
+}
+
+func TestDeleteSkillPackageRejectsNonOwnedSource(t *testing.T) {
+	_, err := DeleteSkillPackage(DeleteRequest{ID: "dynamic-skill", Source: SourceMcp})
+	if !errors.Is(err, ErrSkillDeleteSourceUnsupported) {
+		t.Fatalf("expected unsupported source failure, got %v", err)
+	}
+}
+
 func TestInstallSkillPackageRootedWriteRejectsSymlinkedInstallDirectory(t *testing.T) {
 	pkg, err := PackageFromBytes("SKILL.md", []byte(`---
 name: rooted-install

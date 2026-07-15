@@ -10,6 +10,7 @@ import (
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
 	"awaken/src/skills"
+	"awaken/src/tool/trash"
 )
 
 func NewRouter(runService *awruntime.RunService, infoProvider RuntimeInfoProvider) http.Handler {
@@ -79,6 +80,7 @@ type routerConfig struct {
 	manager                *mcpclient.Manager
 	connectorRegistry      *connectors.Registry
 	skillRegistry          *skills.SkillRegistry
+	skillTrashAdapter      trash.TrashAdapter
 	workspaceRoot          string
 	syncSkillsForWorkspace func(string)
 	shutdown               func()
@@ -156,9 +158,10 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 		mux.HandleFunc("POST /v1/connectors/{id}/connect", connH.handleConnect)
 		mux.HandleFunc("POST /v1/connectors/{id}/disconnect", connH.handleDisconnect)
 	}
-	skillH := skillHandlers{registry: cfg.skillRegistry, workspaceRoot: cfg.workspaceRoot}
+	skillH := skillHandlers{registry: cfg.skillRegistry, workspaceRoot: cfg.workspaceRoot, trashAdapter: cfg.skillTrashAdapter}
 	mux.HandleFunc("GET /v1/skills", skillH.handleListSkills)
 	mux.HandleFunc("POST /v1/skills/install", skillH.handleInstallSkill)
+	mux.HandleFunc("DELETE /v1/skills/{id}", skillH.handleDeleteSkill)
 	// POST /v1/skills/{id}/execute reserved for follow-up
 	return mux
 }

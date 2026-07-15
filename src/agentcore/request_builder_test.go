@@ -2,11 +2,14 @@ package agentcore
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	convcontext "awaken/src/context"
+	"awaken/src/skillruntime"
+	"awaken/src/skills"
 	"awaken/src/tool"
 	_ "awaken/src/tools/apply_patch"
 	_ "awaken/src/tools/text_edit"
@@ -179,6 +182,82 @@ func TestRequestBuilderCompilesDefinitionV2WithoutSkillPoolNarrowing(t *testing.
 	}
 	if strings.Contains(schema.Description, "LEGACY_METHOD_DESCRIPTION") {
 		t.Fatalf("legacy method description overrode canonical v2 facts: %s", schema.Description)
+	}
+}
+
+func TestRequestBuilderInjectsSkillTriggerRulesAndCatalogIntoFinalToolSchema(t *testing.T) {
+	root := t.TempDir()
+	writeSkill := func(id, extraFrontmatter string) {
+		t.Helper()
+		dir := filepath.Join(root, id)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		content := "---\nname: " + id + "\ndescription: Create polished " + id + " deliverables.\n" + extraFrontmatter + "---\nFollow the " + id + " workflow.\n"
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeSkill("documents", "")
+	writeSkill("manual-only", "disable-model-invocation: true\n")
+
+	registry := skills.NewSkillRegistry(nil)
+	registry.LoadFromSources(map[skills.SourceOrigin]string{skills.SourceUser: root})
+	catalogTool := &skillruntime.CatalogTool{
+		Registry:  registry,
+		Activator: skillruntime.NewActivator(registry, nil),
+	}
+	previous, previousErr := tool.GetRegisteredTool(skillruntime.CatalogToolName)
+	if err := tool.RegisterToolForce(catalogTool); err != nil {
+		t.Fatalf("register skill catalog tool: %v", err)
+	}
+	t.Cleanup(func() {
+		if previousErr == nil {
+			if err := tool.RegisterToolForce(previous.Runtime); err != nil {
+				t.Errorf("restore previous skill tool: %v", err)
+			}
+			return
+		}
+		tool.UnregisterTool(skillruntime.CatalogToolName)
+	})
+
+	snapshot := tool.NewRunToolAvailabilitySnapshot(tool.ExecutionEnvironmentSnapshot{})
+	builder := NewRequestBuilder(AgentConfig{
+		ModelConfig:              ModelConfig{ContextWindow: 100_000},
+		ToolAvailabilitySnapshot: &snapshot,
+	})
+	request := builder.Build(convcontext.New(), nil)
+
+	var skillDescription string
+	for _, candidate := range request.Tools {
+		if candidate.Function.Name == skillruntime.CatalogToolName {
+			skillDescription = candidate.Function.Description
+			break
+		}
+	}
+	if skillDescription == "" {
+		t.Fatalf("final provider request omitted the unified skill tool: %+v", request.Tools)
+	}
+	for _, expected := range []string{
+		"Trigger rules (mandatory):",
+		"If the user explicitly names an available Skill from this catalog, you MUST invoke it.",
+		"BLOCKING REQUIREMENT",
+		"If multiple Skills match",
+		"If nothing in the catalog matches",
+		"- documents [user]: Create polished documents deliverables.",
+	} {
+		if !strings.Contains(skillDescription, expected) {
+			t.Fatalf("final skill tool description missing %q: %s", expected, skillDescription)
+		}
+	}
+	if strings.Count(skillDescription, "Trigger rules (mandatory):") != 1 {
+		t.Fatalf("final request duplicated the authoritative trigger rules: %s", skillDescription)
+	}
+	if strings.Contains(skillDescription, "manual-only") {
+		t.Fatalf("model-disabled Skill leaked into the model-invocable catalog: %s", skillDescription)
+	}
+	if strings.Contains(request.SystemPrompt, "Trigger rules (mandatory):") {
+		t.Fatalf("system prompt duplicated the authoritative trigger rules: %s", request.SystemPrompt)
 	}
 }
 

@@ -175,3 +175,79 @@ func TestModelInvokedSkillBodyDoesNotBecomeComposerSelection(t *testing.T) {
 		t.Fatalf("model-invoked Skill forged a composer selection: %s", request.SystemPrompt)
 	}
 }
+
+func TestRepeatedImplicitSkillActivationReplacesInsteadOfDuplicatingBlock(t *testing.T) {
+	config := AgentConfig{SystemPrompt: "base"}
+	runner := NewRunner(config, convcontext.NewConversation(nil), NewRequestBuilder(config))
+	activate := func(body string) {
+		runner.applyImplicitSkillActivation(
+			skillruntime.CatalogToolName,
+			ToolExecutionResult{Status: "succeeded"},
+			&skillruntime.SkillActivationPlan{
+				SkillID:             "repeated-skill",
+				Source:              skills.SourceUser,
+				Context:             skills.ContextInline,
+				CompatibilityStatus: skillruntime.CompatibilityOK,
+				MainBody:            body,
+			},
+		)
+	}
+	activate("first body")
+	activate("second body")
+
+	matches := 0
+	for _, block := range runner.config.SkillContextBlocks {
+		if block.SkillID == "repeated-skill" {
+			matches++
+			if block.Content != "second body" {
+				t.Fatalf("expected latest-wins content, got %q", block.Content)
+			}
+		}
+	}
+	if matches != 1 {
+		t.Fatalf("expected exactly one block for a repeatedly activated Skill, got %d", matches)
+	}
+
+	request, err := runner.buildLLMRequest()
+	if err != nil {
+		t.Fatalf("build model request: %v", err)
+	}
+	if strings.Contains(request.SystemPrompt, "first body") {
+		t.Fatalf("stale duplicate Skill body leaked into the request: %s", request.SystemPrompt)
+	}
+	if !strings.Contains(request.SystemPrompt, "second body") {
+		t.Fatalf("latest Skill body missing from the request: %s", request.SystemPrompt)
+	}
+}
+
+func TestRepeatedImplicitSkillActivationPreservesOriginalOrderPosition(t *testing.T) {
+	config := AgentConfig{SystemPrompt: "base"}
+	runner := NewRunner(config, convcontext.NewConversation(nil), NewRequestBuilder(config))
+	activatePlan := func(skillID, body string) {
+		runner.applyImplicitSkillActivation(
+			skillruntime.CatalogToolName,
+			ToolExecutionResult{Status: "succeeded"},
+			&skillruntime.SkillActivationPlan{
+				SkillID:             skillID,
+				Source:              skills.SourceUser,
+				Context:             skills.ContextInline,
+				CompatibilityStatus: skillruntime.CompatibilityOK,
+				MainBody:            body,
+			},
+		)
+	}
+	activatePlan("first-skill", "first-skill body v1")
+	activatePlan("second-skill", "second-skill body")
+	activatePlan("first-skill", "first-skill body v2")
+
+	blocks := runner.config.SkillContextBlocks
+	if len(blocks) != 2 {
+		t.Fatalf("expected two distinct Skill blocks, got %d: %+v", len(blocks), blocks)
+	}
+	if blocks[0].SkillID != "first-skill" || blocks[0].Content != "first-skill body v2" {
+		t.Fatalf("re-activation must update in place, not move to the end: %+v", blocks[0])
+	}
+	if blocks[1].SkillID != "second-skill" {
+		t.Fatalf("unrelated Skill block was disturbed: %+v", blocks[1])
+	}
+}

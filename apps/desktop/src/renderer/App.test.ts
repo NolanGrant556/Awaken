@@ -123,6 +123,7 @@ function stubElectronBridge(): void {
       listMcpTools: vi.fn(async () => []),
       listSkills: vi.fn(async () => []),
       installSkill: vi.fn(),
+      deleteSkill: vi.fn(),
       listModelProviders: vi.fn(async () => []),
       listModelProfiles: vi.fn(async () => []),
       saveModelProfile: vi.fn(),

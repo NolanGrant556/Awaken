@@ -47,6 +47,9 @@ func TestArtifactsAddOperation(t *testing.T) {
 	if a.Status != "ready" {
 		t.Fatalf("expected status ready, got %q", a.Status)
 	}
+	if a.Role != tool.ArtifactRoleDeliverable {
+		t.Fatalf("expected created document to be deliverable, got %q", a.Role)
+	}
 	if a.ID != "apply_patch:added:note.md" {
 		t.Fatalf("expected ID 'apply_patch:added:note.md', got %q", a.ID)
 	}
@@ -89,6 +92,9 @@ func TestArtifactsUpdateOperation(t *testing.T) {
 	if a.Status != "ready" {
 		t.Fatalf("expected status ready, got %q", a.Status)
 	}
+	if a.Role != tool.ArtifactRoleDeliverable {
+		t.Fatalf("expected modified document to be deliverable, got %q", a.Role)
+	}
 }
 
 func TestArtifactsDeleteOperation(t *testing.T) {
@@ -115,6 +121,9 @@ func TestArtifactsDeleteOperation(t *testing.T) {
 	}
 	if a.Description != "Deleted note.md" {
 		t.Fatalf("expected description 'Deleted note.md', got %q", a.Description)
+	}
+	if a.Role != tool.ArtifactRoleSupport {
+		t.Fatalf("expected deleted document to stay support, got %q", a.Role)
 	}
 	if a.ID != "apply_patch:deleted:note.md" {
 		t.Fatalf("expected ID 'apply_patch:deleted:note.md', got %q", a.ID)
@@ -149,6 +158,9 @@ func TestArtifactsMoveOperation(t *testing.T) {
 	}
 	if a.Description != "Moved old.md to new.md" {
 		t.Fatalf("expected description 'Moved old.md to new.md', got %q", a.Description)
+	}
+	if a.Role != tool.ArtifactRoleSupport {
+		t.Fatalf("expected moved document to stay support, got %q", a.Role)
 	}
 	if a.ID != "apply_patch:moved:new.md" {
 		t.Fatalf("expected ID 'apply_patch:moved:new.md', got %q", a.ID)
@@ -193,6 +205,9 @@ func TestArtifactsMultipleOperations(t *testing.T) {
 	}
 	if artifacts[2].Action != tool.ArtifactActionUpdated {
 		t.Fatalf("expected third artifact action updated, got %q", artifacts[2].Action)
+	}
+	if artifacts[0].Role != tool.ArtifactRoleDeliverable || artifacts[1].Role != tool.ArtifactRoleDeliverable || artifacts[2].Role != tool.ArtifactRoleSupport {
+		t.Fatalf("unexpected artifact roles: %+v", artifacts)
 	}
 	if artifacts[2].Path != "c.md" {
 		t.Fatalf("expected third artifact path c.md, got %q", artifacts[2].Path)

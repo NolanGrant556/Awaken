@@ -690,22 +690,15 @@ function appendFinalDeliverableSummary(
   const normalizedRunId = runId ?? "current";
   const byPath = new Map<
     string,
-    { artifact: ArtifactRecord; extension: string; fileType: DeliverableFileType }
+    { artifact: ArtifactRecord; extension?: string; fileType?: DeliverableFileType }
   >();
   const pathOrder: string[] = [];
 
   for (const artifact of artifacts) {
-    if (
-      artifact.role !== "deliverable" ||
-      artifact.status !== "ready" ||
-      !artifact.path
-    ) {
+    if (!artifact.path) {
       continue;
     }
     const type = deliverableFileType(artifact.path);
-    if (!type) {
-      continue;
-    }
     const normalizedPath = artifact.path.replace(/\\/g, "/");
     const key = normalizedPath.toLowerCase();
     if (!byPath.has(key)) {
@@ -714,11 +707,21 @@ function appendFinalDeliverableSummary(
     byPath.set(key, { artifact, ...type });
   }
 
+  const eligiblePaths = pathOrder.filter((key) => {
+    const candidate = byPath.get(key);
+    return Boolean(
+      candidate?.artifact.role === "deliverable" &&
+        candidate.artifact.status === "ready" &&
+        candidate.extension &&
+        candidate.fileType,
+    );
+  });
+
   const id = `deliverables:${normalizedRunId}:summary`;
   const withoutLegacyFileChanges = narrative.committedItems.filter(
     (candidate) => candidate.kind !== "fileChange",
   );
-  if (pathOrder.length === 0) {
+  if (eligiblePaths.length === 0) {
     return {
       ...narrative,
       committedItems: withoutLegacyFileChanges.filter(
@@ -736,7 +739,7 @@ function appendFinalDeliverableSummary(
     id,
     runId: normalizedRunId,
     terminalStatus,
-    files: pathOrder.map((key) => {
+    files: eligiblePaths.map((key) => {
       const { artifact, extension, fileType } = byPath.get(key)!;
       const displayPath = artifact.path!.replace(/\\/g, "/");
       return {
@@ -744,8 +747,8 @@ function appendFinalDeliverableSummary(
         runId: normalizedRunId,
         title: artifact.title || displayPath.split("/").pop() || "交付文件",
         displayPath,
-        fileType,
-        extension,
+        fileType: fileType!,
+        extension: extension!,
         legacy: artifact.contractVersion < 2,
       };
     }),

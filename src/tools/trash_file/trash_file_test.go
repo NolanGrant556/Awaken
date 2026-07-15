@@ -97,6 +97,27 @@ func TestTrashFileOutcomeCarriesTypedTrashChange(t *testing.T) {
 	}
 }
 
+func TestTrashFileEmitsDeletedArtifactTombstones(t *testing.T) {
+	workspace := t.TempDir()
+	permissionContext := tool.NewPermissionContext(workspace, []string{workspace})
+	artifacts := (&TrashFileTool{}).Artifacts(
+		`{"paths":["output/first.md","output/second.pdf"]}`,
+		"",
+		permissionContext,
+	)
+	if len(artifacts) != 2 {
+		t.Fatalf("expected two deletion tombstones, got %+v", artifacts)
+	}
+	for index, artifact := range artifacts {
+		if artifact.Role != tool.ArtifactRoleSupport || artifact.Kind != "deleted" || artifact.Status != "ready" {
+			t.Fatalf("artifact %d is not a deletion tombstone: %+v", index, artifact)
+		}
+	}
+	if artifacts[0].Path != "output/first.md" || artifacts[1].Path != "output/second.pdf" {
+		t.Fatalf("unexpected tombstone paths: %+v", artifacts)
+	}
+}
+
 func TestTrashFileResolvesRelativeDirectoryThroughPermissionContext(t *testing.T) {
 	adapter := &recordingTrashAdapter{dir: filepath.Join(t.TempDir(), "trash")}
 	trash.SetAdapter(adapter)

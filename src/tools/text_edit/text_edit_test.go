@@ -39,6 +39,9 @@ func TestA07TextEditUniqueMatchCarriesDigestPreviewAndArtifactContract(t *testin
 	if len(outcome.Artifacts) != 1 || outcome.Artifacts[0].Path != "sample.txt" || outcome.Artifacts[0].Status != "ready" {
 		t.Fatalf("A07 outcome artifact contract incomplete: %+v", outcome.Artifacts)
 	}
+	if outcome.Artifacts[0].Role != tool.ArtifactRoleSupport {
+		t.Fatalf("plain-text source edit must stay support: %+v", outcome.Artifacts)
+	}
 	produced := (&TextEditTool{}).Artifacts(input, outcome.Content, permissionContext)
 	if len(produced) != 1 || produced[0].ID != outcome.Artifacts[0].ID || produced[0].Path != outcome.Artifacts[0].Path {
 		t.Fatalf("A07 artifact producer diverged from outcome: outcome=%+v produced=%+v", outcome.Artifacts, produced)
@@ -46,6 +49,13 @@ func TestA07TextEditUniqueMatchCarriesDigestPreviewAndArtifactContract(t *testin
 	content, err := os.ReadFile(path)
 	if err != nil || string(content) != "new\nkeep\n" {
 		t.Fatalf("A07 file result mismatch: %q err=%v", content, err)
+	}
+}
+
+func TestTextEditPublishesModifiedMarkdownDocument(t *testing.T) {
+	artifacts := buildTextEditArtifacts("report.md", 1)
+	if len(artifacts) != 1 || artifacts[0].Role != tool.ArtifactRoleDeliverable {
+		t.Fatalf("modified Markdown document must be deliverable: %+v", artifacts)
 	}
 }
 

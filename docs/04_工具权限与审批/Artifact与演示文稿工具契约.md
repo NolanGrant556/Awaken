@@ -6,6 +6,8 @@ Awaken 提供 typed artifact/presentation provider，用于创建、编辑、渲
 
 typed provider 的价值是：稳定 schema、TaskScope、可观测 changes/artifacts、渲染验证和结构化失败。模型应在它 ready 且契约匹配时优先使用，但它不是唯一合法实现。Skill 脚本、用户机器工具或 MCP provider 也可以成为候选。默认 Shell 以当前登录用户权限运行脚本/本机 CLI，可访问网络和 workspace 外路径，但只返回进程事实及 unobserved side-effect receipt，不自动获得 typed artifact provider 的 schema、TaskScope、Trash、渲染或 preview 验证。需要这些产物保证时，Agent 再显式调用对应 typed inspect/render/publish provider。
 
+Artifact v2 的用户可见角色按已观察事实决定：typed document/spreadsheet/presentation create/edit、`office_export_pdf`、显式 `artifact_publish`，以及 `apply_patch` / `text_edit` 创建、覆盖或修改的受支持文档声明为 `deliverable`。`apply_patch` / `trash_file` 的删除事实以同路径 `support + deleted` Artifact 覆盖此前交付记录；移动、源码/配置、渲染预览和过程文件保持 `support` / `preview`。因此“隐藏删除卡片”不能通过把整个文件 producer 降为 `support` 实现；同一 run 的多个合格 Artifact 必须保留独立 path/identity，并在终态先按路径折叠最后状态再筛选。
+
 MCP provider 当前可通过 per-tool `io.awaken.tool/provider/v1.artifact_output` 返回有界 base64 bytes、lowercase SHA-256、workspace-relative output path、content type 和可选 title。宿主在 MCP transport 成功后验证 output schema、32 MiB host 上限（provider 可进一步收窄）、hash、扩展名/MIME、Artifact kind、PDF/Office/text 容器签名、TaskScope writable 与 output roots 交集、workspace real path、敏感/protected path 和 symlink；通过后只由 host 把 bytes 写入 `WorkspaceExecutionBroker` private snapshot。broker 只接受该 digest/size 对应的单文件 delta，replacement preimage 先进入 Trash，receipt 再决定 created/updated/published、changes 和 side-effect state。provider-local path 或“已经发布”的文字不能产生 ArtifactDescriptor，失败也不生成伪 artifact。
 
 ## 2. Presentation 路径

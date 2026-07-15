@@ -259,6 +259,24 @@ func TestTypedArtifactToolEmitsPresentationPreviewArtifacts(t *testing.T) {
 	}
 }
 
+func TestOfficeExportPDFPublishesFinalDeliverable(t *testing.T) {
+	root := t.TempDir()
+	permissionContext := tool.NewPermissionContext(root, []string{root})
+	output := mustJSON(t, map[string]any{
+		"status":   "pdf_exported",
+		"path":     filepath.Join(root, "report.pdf"),
+		"pdf_path": filepath.Join(root, "report.pdf"),
+	})
+	export := typedArtifactTool{name: "office_export_pdf", readOnly: false}
+	artifacts := export.Artifacts(`{}`, output, permissionContext)
+	if len(artifacts) != 1 {
+		t.Fatalf("expected one exported PDF artifact, got %+v", artifacts)
+	}
+	if artifacts[0].Role != tool.ArtifactRoleDeliverable || artifacts[0].Kind != "pdf" {
+		t.Fatalf("Office-exported PDF must be a final deliverable: %+v", artifacts[0])
+	}
+}
+
 func TestTypedArtifactCreateAndEditDeclareAccurateMutations(t *testing.T) {
 	create := typedArtifactTool{name: "document_create", description: "create", readOnly: false, capability: tool.CapabilityArtifactWrite}
 	edit := typedArtifactTool{name: "document_edit", description: "edit", readOnly: false, capability: tool.CapabilityArtifactWrite}

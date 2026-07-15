@@ -11,6 +11,8 @@ import {
   type DesktopPreferencesSaveRequest,
   type DesktopOperationResult,
   type DesktopPlatform,
+  type DeleteSkillRequest,
+  type DeleteSkillResponse,
   type InstallSkillRequest,
   type InstallSkillResponse,
   type MassMessageReviewDecision,
@@ -210,6 +212,8 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:list-skills", projectRoot) as Promise<RuntimeSkill[]>,
   installSkill: (request: InstallSkillRequest) =>
     ipcRenderer.invoke("awaken:install-skill", request) as Promise<InstallSkillResponse>,
+  deleteSkill: (request: DeleteSkillRequest) =>
+    ipcRenderer.invoke("awaken:delete-skill", request) as Promise<DeleteSkillResponse>,
   listModelProviders: () =>
     ipcRenderer.invoke("awaken:list-model-providers") as Promise<ModelProvider[]>,
   listModelProfiles: () =>

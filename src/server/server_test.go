@@ -29,10 +29,26 @@ import (
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
 	"awaken/src/skills"
+	"awaken/src/tool/trash"
 	_ "awaken/src/tools"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+type serverSkillTrashAdapter struct {
+	dir string
+}
+
+func (a serverSkillTrashAdapter) TrashPath(source string) (trash.TrashResult, error) {
+	if err := os.MkdirAll(a.dir, 0o700); err != nil {
+		return trash.TrashResult{}, err
+	}
+	destination := filepath.Join(a.dir, filepath.Base(source))
+	if err := os.Rename(source, destination); err != nil {
+		return trash.TrashResult{}, err
+	}
+	return trash.TrashResult{OriginalPath: source, TrashedPath: destination, Method: "test_rename"}, nil
+}
 
 func TestHealthEndpoint(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -4856,6 +4872,81 @@ Create a short follow-up checklist.`
 	}
 	if listed[0].RootDir == "" || listed[0].SkillFilePath == "" || listed[0].ProjectPath != workspace {
 		t.Fatalf("expected package metadata in list, got %+v", listed[0])
+	}
+}
+
+func TestDeleteSkillMovesPackageToTrashAndSynchronizesList(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	workspace := t.TempDir()
+	registry := skills.NewSkillRegistry(testLogger{})
+	trashDir := filepath.Join(t.TempDir(), "Trash")
+	router := newRouterInternal(routerConfig{
+		skillRegistry:     registry,
+		workspaceRoot:     workspace,
+		skillTrashAdapter: serverSkillTrashAdapter{dir: trashDir},
+	})
+
+	rawSkill := `---
+name: removable-skill
+description: Remove this skill.
+---
+Body.`
+	body, err := json.Marshal(installSkillRequest{
+		FileName: "removable-skill.md",
+		Content:  rawSkill,
+		Scope:    "project",
+	})
+	if err != nil {
+		t.Fatalf("marshal install request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/skills/install", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("install expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	deleteBody, err := json.Marshal(deleteSkillRequest{
+		SourceOrigin: string(skills.SourceProject),
+		ProjectRoot:  workspace,
+	})
+	if err != nil {
+		t.Fatalf("marshal delete request: %v", err)
+	}
+	req = httptest.NewRequest(http.MethodDelete, "/v1/skills/removable-skill", bytes.NewReader(deleteBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var deleted deleteSkillResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &deleted); err != nil {
+		t.Fatalf("decode delete response: %v", err)
+	}
+	if deleted.ID != "removable-skill" || deleted.SourceOrigin != "project" || deleted.TrashedPath == "" {
+		t.Fatalf("unexpected delete response: %+v", deleted)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, ".awaken", "skills", "removable-skill")); !os.IsNotExist(err) {
+		t.Fatalf("source package still exists: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(deleted.TrashedPath, "SKILL.md")); err != nil {
+		t.Fatalf("trashed package missing: %v", err)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/v1/skills", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var listed []skillInfo
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listed) != 0 || registry.Get("removable-skill") != nil {
+		t.Fatalf("deleted skill remained in list or registry: listed=%+v registry=%+v", listed, registry.Get("removable-skill"))
 	}
 }
 

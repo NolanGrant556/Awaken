@@ -680,13 +680,29 @@ func (r *Runner) applyImplicitSkillActivation(
 		return
 	}
 	if body := strings.TrimSpace(plan.MainBody); body != "" {
-		r.config.SkillContextBlocks = append(r.config.SkillContextBlocks, ContextBlock{
+		block := ContextBlock{
 			ID:         "skill_activation_" + plan.SkillID,
 			SkillID:    plan.SkillID,
 			SourcePath: skillActivationSourcePath(plan),
 			InvokedAt:  time.Now().UTC(),
 			Content:    body,
-		})
+		}
+		// Re-activating the same Skill within one run must replace its
+		// existing block rather than append a duplicate. Restart recovery
+		// (skillContextBlocksFromSemanticRecords) already dedupes by
+		// SkillID and keeps the latest; live runs must match that
+		// latest-wins semantics instead of diverging from it.
+		replaced := false
+		for i, existing := range r.config.SkillContextBlocks {
+			if existing.SkillID == plan.SkillID {
+				r.config.SkillContextBlocks[i] = block
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			r.config.SkillContextBlocks = append(r.config.SkillContextBlocks, block)
+		}
 	}
 	r.reqBuilder = NewRequestBuilder(r.config)
 }

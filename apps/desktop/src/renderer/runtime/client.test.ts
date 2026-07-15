@@ -27,7 +27,6 @@ function createElectronBridge(
     deleteThread: vi.fn(),
     startRun: vi.fn(),
     cancelRun: vi.fn(),
-    resolveMassMessageReview: vi.fn(),
     subscribeRun: vi.fn(async () => "subscription-1"),
     unsubscribeRun: vi.fn(),
     getRuntimeInfo: vi.fn(),

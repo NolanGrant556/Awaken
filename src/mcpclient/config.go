@@ -28,9 +28,9 @@ type McpServerConfig struct {
 	DisplayName        string `json:"displayName,omitempty"`
 	HeadersHelper      string `json:"headersHelper,omitempty"`
 	InsecureSkipVerify bool   `json:"insecureSkipVerify,omitempty"`
-	// Provider is stable connector/provider identity. Invocation semantics such
-	// as message recipients and recoverable delete remain per-tool MCP _meta and
-	// must never be inherited from this server-level declaration.
+	// Provider is stable connector/provider identity. Host-mediated Artifact
+	// publication remains per-tool MCP _meta and must never be inherited from
+	// this server-level declaration.
 	Provider *ServerProviderManifest `json:"provider,omitempty"`
 }
 

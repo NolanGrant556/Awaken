@@ -456,7 +456,7 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	switch permission.Behavior {
 	case tool.PermissionAllow:
 		execDecision = rt.autoPolicy.DecideExecution(toolCtx, intent, decisionRequest)
-	case tool.PermissionDeny, tool.PermissionNeedsAuth, tool.PermissionNeedsRuntime, tool.PermissionUnsupported, tool.PermissionNeedsMassMessageReview:
+	case tool.PermissionDeny, tool.PermissionNeedsAuth, tool.PermissionNeedsRuntime, tool.PermissionUnsupported:
 		execDecision = DefaultAutoToolPolicy{}.DecideExecution(toolCtx, intent, decisionRequest)
 	default:
 		execDecision = profile.DenyDecision(
@@ -569,56 +569,6 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
 		rt.writeAudit(def, result, permission, string(decision.Source), "unsupported", "")
 		return finalizeToolResult(result)
-	case ToolDecisionNeedsMassMessageReview:
-		rt.emitToolProgress(result, "needs_mass_message_review", firstNonEmpty(decision.Reason, "mass message send requires human review"), 0)
-		reviewRequest := rt.massMessageReviewEvent(result, def, permission)
-		awaiter, ok := rt.sink.(MassMessageReviewAwaiter)
-		if !ok {
-			rt.sink.Emit(reviewRequest)
-			result = synthesizeStructuredToolResult(result, decision, "needs_mass_message_review", "群发消息需要人工审核")
-			result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
-			rt.writeAudit(def, result, permission, string(decision.Source), "needs_mass_message_review", "")
-			return finalizeToolResult(result)
-		}
-		reviewDecision, err := awaiter.AwaitMassMessageReview(ctx, reviewRequest)
-		if err != nil {
-			result = synthesizeStructuredToolResult(result, decision, "needs_mass_message_review", "群发消息审核未完成")
-			result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
-			rt.writeAudit(def, result, permission, string(decision.Source), "needs_mass_message_review", err.Error())
-			return finalizeToolResult(result)
-		}
-		if reviewDecision != ReviewDecisionApproved {
-			result = synthesizeStructuredToolResult(result, decision, "mass_message_review_rejected", "群发消息审核拒绝")
-			result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
-			rt.writeAudit(def, result, permission, string(decision.Source), "mass_message_review_rejected", "")
-			return finalizeToolResult(result)
-		}
-		if strings.TrimSpace(rt.runID) == "" || strings.TrimSpace(result.ToolCallID) == "" || strings.TrimSpace(result.Name) == "" ||
-			strings.TrimSpace(string(result.ProviderID)) == "" || strings.TrimSpace(reviewRequest.ReviewEnvelopeDigest) == "" ||
-			strings.TrimSpace(reviewRequest.ReviewBodyDigest) == "" || strings.TrimSpace(reviewRequest.ReviewRecipientIdentityDigest) == "" {
-			result = synthesizeStructuredToolResult(result, decision, "mass_message_review_binding_invalid", "群发消息审核绑定不完整")
-			result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
-			rt.writeAudit(def, result, permission, string(decision.Source), "needs_mass_message_review", "incomplete canonical review binding")
-			return finalizeToolResult(result)
-		}
-		var revokeMassMessageGrant func()
-		toolCtx, revokeMassMessageGrant, err = tool.IssueMassMessageApprovalGrant(toolCtx, tool.MassMessageApprovalBinding{
-			RunID:                   rt.runID,
-			ToolCallID:              result.ToolCallID,
-			ToolName:                result.Name,
-			ProviderID:              result.ProviderID,
-			EnvelopeDigest:          reviewRequest.ReviewEnvelopeDigest,
-			BodyDigest:              reviewRequest.ReviewBodyDigest,
-			RecipientIdentityDigest: reviewRequest.ReviewRecipientIdentityDigest,
-		})
-		if err != nil {
-			result = synthesizeStructuredToolResult(result, decision, "mass_message_review_grant_failed", "群发消息审核授权失败")
-			result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
-			rt.writeAudit(def, result, permission, string(decision.Source), "needs_mass_message_review", err.Error())
-			return finalizeToolResult(result)
-		}
-		defer revokeMassMessageGrant()
-		rt.emitToolProgress(result, "mass_message_review_approved", "mass message review approved", 0)
 	case ToolDecisionAbort:
 		result = synthesizeAbortedToolResult(result, decision)
 		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)

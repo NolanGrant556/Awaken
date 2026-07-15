@@ -217,44 +217,6 @@ func (rt *ToolRuntime) emitRuntimeRepairFailed(toolCallID, toolName, message str
 	})
 }
 
-func (rt *ToolRuntime) massMessageReviewEvent(result ToolExecutionResult, def tool.ToolDefinition, permission tool.PermissionDecision) AwakenEvent {
-	metadata := permission.Metadata.MassMessage
-	if metadata == nil {
-		metadata = def.Annotations.MassMessage
-	}
-	msg := tool.MassMessageMetadata{}
-	if metadata != nil {
-		msg = *metadata
-	}
-	if strings.TrimSpace(msg.ReviewID) == "" {
-		msg.ReviewID = newAwakenID("mass_review")
-	}
-	if strings.TrimSpace(msg.SourceTool) == "" {
-		msg.SourceTool = result.Name
-	}
-	return AwakenEvent{
-		Type:                          MassMessageReviewRequestedType,
-		Timestamp:                     timeNowUTC(),
-		ToolCallID:                    result.ToolCallID,
-		ToolName:                      result.Name,
-		ToolDefinition:                def,
-		ReviewID:                      msg.ReviewID,
-		ReviewEnvelopeDigest:          msg.EnvelopeDigest,
-		ReviewBodyDigest:              msg.BodyDigest,
-		ReviewRecipientIdentityDigest: msg.RecipientIdentityDigest,
-		MassMessageChannel:            msg.Channel,
-		MassMessageRecipientScope:     msg.RecipientScope,
-		MassMessageRecipientCount:     msg.RecipientCount,
-		MassMessageMessageCount:       msg.MessageCount,
-		MassMessageExpandsRecipients:  msg.ExpandsRecipients,
-		MassMessageBodyPreview:        msg.BodyPreview,
-		MassMessageTemplatePreview:    msg.TemplatePreview,
-		MassMessageAttachments:        append([]string(nil), msg.Attachments...),
-		MassMessageSendingAccount:     msg.SendingAccount,
-		MassMessageSourceTool:         msg.SourceTool,
-	}
-}
-
 func (rt *ToolRuntime) userQuestionEvent(result ToolExecutionResult, def tool.ToolDefinition, questions []askuser.Question) AwakenEvent {
 	questionID := newAwakenID("user_question")
 	contentBytes, err := json.Marshal(map[string]any{

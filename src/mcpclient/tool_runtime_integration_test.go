@@ -14,115 +14,39 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-type runtimeDeleteInput struct {
-	ID string `json:"id"`
+type unrestrictedRuntimeInput struct {
+	Command    string           `json:"command,omitempty"`
+	ID         string           `json:"id,omitempty"`
+	Recipients []map[string]any `json:"recipients,omitempty"`
 }
 
-type runtimeDeleteOutput struct {
-	Deleted bool `json:"deleted"`
+type unrestrictedRuntimeOutput struct {
+	OK bool `json:"ok"`
 }
 
-type runtimeRecipient struct {
-	ID   string `json:"id"`
-	Kind string `json:"kind"`
-}
-
-type runtimeMessageInput struct {
-	Recipients []runtimeRecipient `json:"recipients"`
-	Body       string             `json:"body"`
-}
-
-type runtimeMessageOutput struct {
-	Sent bool `json:"sent"`
-}
-
-type approvingMassReviewSink struct {
-	request agentcore.AwakenEvent
-}
-
-func (s *approvingMassReviewSink) Emit(agentcore.AwakenEvent) {}
-
-func (s *approvingMassReviewSink) AwaitMassMessageReview(_ context.Context, request agentcore.AwakenEvent) (agentcore.ReviewDecision, error) {
-	s.request = request
-	return agentcore.ReviewDecisionApproved, nil
-}
-
-func TestToolRuntimePreservesUnsupportedRecoverableDeleteCode(t *testing.T) {
-	const serverName = "runtime-delete-preflight"
+func TestToolRuntimeLetsConnectedMCPToolsCallProviderDirectly(t *testing.T) {
+	const serverName = "runtime-unrestricted-mcp"
 	var calls atomic.Int32
+	definitions := []*mcp.Tool{
+		{
+			Name: "officecli",
+			InputSchema: map[string]any{
+				"type": "object", "required": []string{"command"},
+				"properties": map[string]any{"command": map[string]any{"type": "string"}},
+			},
+		},
+		{Name: "send_message"},
+		{Name: "delete_record"},
+	}
 	registry := mcpclient.NewInProcRegistry()
 	if err := registry.Register(serverName, func() *mcp.Server {
 		server := mcp.NewServer(&mcp.Implementation{Name: serverName, Version: "v1"}, nil)
-		mcp.AddTool(server, &mcp.Tool{
-			Meta: mcp.Meta{mcpclient.AwakenProviderMetaKey: mcpclient.MCPToolProviderMetadata{
-				Capabilities: []tool.Capability{tool.CapabilityFileDelete},
-			}},
-			Name: "delete_record",
-		}, func(_ context.Context, _ *mcp.CallToolRequest, _ runtimeDeleteInput) (*mcp.CallToolResult, runtimeDeleteOutput, error) {
-			calls.Add(1)
-			return nil, runtimeDeleteOutput{Deleted: true}, nil
-		})
-		return server
-	}); err != nil {
-		t.Fatalf("register in-process MCP server: %v", err)
-	}
-	mgr := mcpclient.NewManager(mcpclient.WithInProcRegistry(registry))
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	mgr.Start(ctx, []mcpclient.ScopedMcpServerConfig{{
-		Name:  serverName,
-		Scope: mcpclient.ScopeProject,
-		Config: mcpclient.McpServerConfig{
-			InProc: &mcpclient.InProcTransportConfig{ServerName: serverName},
-		},
-	}})
-	defer mgr.Shutdown(context.Background())
-	defer mcpclient.UnregisterMcpToolsForTest(serverName)
-	if err := mcpclient.WaitForServerStateForTest(mgr, serverName, mcpclient.StateConnected, 3*time.Second); err != nil {
-		t.Fatalf("wait for MCP server: %v", err)
-	}
-	toolName := mcpclient.McpToolName(serverName, "delete_record")
-
-	result := agentcore.NewToolRuntime(nil).Execute(ctx, convcontext.ToolCall{
-		ID: "remote_delete_preflight",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"id":"42"}`,
-		},
-	})
-	if result.ErrorCode != mcpclient.ErrorCodeUnsupportedRecoverableDelete ||
-		result.Outcome.Status != tool.OutcomeUnsupported ||
-		result.Outcome.TransportStatus != tool.TransportNotStarted {
-		t.Fatalf("ToolRuntime did not preserve remote-delete preflight code: %+v", result)
-	}
-	if calls.Load() != 0 {
-		t.Fatalf("ToolRuntime preflight reached remote MCP delete (%d calls)", calls.Load())
-	}
-}
-
-func TestToolRuntimeUsesInputAwareMCPMessageEgress(t *testing.T) {
-	const serverName = "runtime-message-egress"
-	var calls atomic.Int32
-	registry := mcpclient.NewInProcRegistry()
-	if err := registry.Register(serverName, func() *mcp.Server {
-		server := mcp.NewServer(&mcp.Implementation{Name: serverName, Version: "v1"}, nil)
-		mcp.AddTool(server, &mcp.Tool{
-			Meta: mcp.Meta{mcpclient.AwakenProviderMetaKey: mcpclient.MCPToolProviderMetadata{
-				Capabilities: []tool.Capability{tool.CapabilityMessageSend},
-				MessageEgress: &mcpclient.MCPMessageEgressContract{
-					Channel:            "email",
-					SendingAccount:     "sender@example.com",
-					RecipientsField:    "recipients",
-					RecipientIDField:   "id",
-					RecipientKindField: "kind",
-					BodyField:          "body",
-				},
-			}},
-			Name: "send_message",
-		}, func(_ context.Context, _ *mcp.CallToolRequest, _ runtimeMessageInput) (*mcp.CallToolResult, runtimeMessageOutput, error) {
-			calls.Add(1)
-			return nil, runtimeMessageOutput{Sent: true}, nil
-		})
+		for _, definition := range definitions {
+			mcp.AddTool(server, definition, func(_ context.Context, _ *mcp.CallToolRequest, _ unrestrictedRuntimeInput) (*mcp.CallToolResult, unrestrictedRuntimeOutput, error) {
+				calls.Add(1)
+				return nil, unrestrictedRuntimeOutput{OK: true}, nil
+			})
+		}
 		return server
 	}); err != nil {
 		t.Fatalf("register in-process MCP server: %v", err)
@@ -139,39 +63,35 @@ func TestToolRuntimeUsesInputAwareMCPMessageEgress(t *testing.T) {
 	if err := mcpclient.WaitForServerStateForTest(mgr, serverName, mcpclient.StateConnected, 3*time.Second); err != nil {
 		t.Fatalf("wait for MCP server: %v", err)
 	}
-	toolName := mcpclient.McpToolName(serverName, "send_message")
+	officeToolName := mcpclient.McpToolName(serverName, "officecli")
+	request := agentcore.NewRequestBuilder(agentcore.AgentConfig{}).Build(convcontext.New(), nil)
+	officeExposed := false
+	for _, definition := range request.Tools {
+		if definition.Function.Name == officeToolName {
+			officeExposed = true
+			if _, ok := definition.Function.Parameters.Properties["command"]; !ok {
+				t.Fatalf("OfficeCLI command schema was not exposed to the model: %+v", definition.Function.Parameters)
+			}
+			break
+		}
+	}
+	if !officeExposed {
+		t.Fatalf("connected OfficeCLI-style MCP tool was not exposed to the model")
+	}
+
 	runtime := agentcore.NewToolRuntime(nil)
-
-	single := runtime.Execute(ctx, convcontext.ToolCall{ID: "single", Function: convcontext.FunctionCall{
-		Name: toolName, Arguments: `{"recipients":[{"id":"one@example.com","kind":"individual"}],"body":"hello"}`,
-	}})
-	if single.Outcome.Status != tool.OutcomeSucceeded || calls.Load() != 1 {
-		t.Fatalf("one observable recipient should auto-send: result=%+v calls=%d", single, calls.Load())
+	callsToMake := []convcontext.ToolCall{
+		{ID: "office", Function: convcontext.FunctionCall{Name: officeToolName, Arguments: `{"command":"word create report.docx"}`}},
+		{ID: "message", Function: convcontext.FunctionCall{Name: mcpclient.McpToolName(serverName, "send_message"), Arguments: `{"recipients":[{"id":"group-1","kind":"group"},{"id":"group-2","kind":"group"}]}`}},
+		{ID: "delete", Function: convcontext.FunctionCall{Name: mcpclient.McpToolName(serverName, "delete_record"), Arguments: `{"id":"42"}`}},
 	}
-
-	mass := runtime.Execute(ctx, convcontext.ToolCall{ID: "mass", Function: convcontext.FunctionCall{
-		Name: toolName, Arguments: `{"recipients":[{"id":"a@example.com","kind":"individual"},{"id":"b@example.com","kind":"individual"}],"body":"hello"}`,
-	}})
-	if mass.Outcome.Status != tool.OutcomeReviewRequired || mass.ErrorCode != "needs_mass_message_review" || calls.Load() != 1 {
-		t.Fatalf("multiple recipients must stop for review: result=%+v calls=%d", mass, calls.Load())
+	for _, call := range callsToMake {
+		result := runtime.Execute(ctx, call)
+		if result.Outcome.Status != tool.OutcomeSucceeded || result.Outcome.TransportStatus != tool.TransportCompleted {
+			t.Fatalf("%s was blocked before MCP transport: %+v", call.Function.Name, result)
+		}
 	}
-
-	approvalSink := &approvingMassReviewSink{}
-	approvedRuntime := agentcore.NewToolRuntimeWithConfig(approvalSink, agentcore.ToolRuntimeConfig{RunID: "run_mass_approved"})
-	approved := approvedRuntime.Execute(ctx, convcontext.ToolCall{ID: "mass-approved", Function: convcontext.FunctionCall{
-		Name: toolName, Arguments: `{"recipients":[{"id":"a@example.com","kind":"individual"},{"id":"b@example.com","kind":"individual"}],"body":"hello"}`,
-	}})
-	if approved.Outcome.Status != tool.OutcomeSucceeded || calls.Load() != 2 {
-		t.Fatalf("durably approved runtime path must call provider exactly once: result=%+v calls=%d", approved, calls.Load())
-	}
-	if approvalSink.request.ReviewEnvelopeDigest == "" || approvalSink.request.ReviewBodyDigest == "" || approvalSink.request.ReviewRecipientIdentityDigest == "" {
-		t.Fatalf("review request lost canonical binding: %+v", approvalSink.request)
-	}
-
-	unknown := runtime.Execute(ctx, convcontext.ToolCall{ID: "unknown", Function: convcontext.FunctionCall{
-		Name: toolName, Arguments: `{"recipients":[{"id":"one@example.com","kind":"mystery"}],"body":"hello"}`,
-	}})
-	if unknown.Outcome.Status != tool.OutcomeDenied || calls.Load() != 2 {
-		t.Fatalf("unknown recipient semantics must fail closed: result=%+v calls=%d", unknown, calls.Load())
+	if calls.Load() != int32(len(callsToMake)) {
+		t.Fatalf("expected all MCP calls to reach provider, calls=%d", calls.Load())
 	}
 }

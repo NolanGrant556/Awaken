@@ -2379,8 +2379,6 @@ func TestNormalizeWorkspaceGuardianReadOnlyFallsBackToDefault(t *testing.T) {
 }
 
 // Compile-time assertions that sessionEventSink implements the awaiter
-// interfaces expected by agentcore.ToolRuntime. If these fail, tools like
-// ask_user and mass-message review will fall back to the "not supported"
-// error path instead of blocking for user input.
+// interface expected by agentcore.ToolRuntime. If this fails, ask_user will
+// fall back to the "not supported" error path instead of awaiting input.
 var _ agentcore.UserQuestionAwaiter = sessionEventSink{}
-var _ agentcore.MassMessageReviewAwaiter = sessionEventSink{}

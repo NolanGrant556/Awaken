@@ -796,8 +796,6 @@ export type WorkspaceValidationResult =
   | { valid: true }
   | { valid: false; error: string };
 
-export type MassMessageReviewDecision = "approved" | "rejected";
-
 export type UserQuestionAnswer = {
   questionId: string;
   answer: string;
@@ -831,12 +829,6 @@ export type RunStreamHandlers = {
   onClose?: () => void;
 };
 
-export type MassMessageReviewDigests = {
-  envelopeDigest: string;
-  bodyDigest: string;
-  recipientIdentityDigest: string;
-};
-
 export type SupervisorStatus = "stopped" | "starting" | "running" | "crashed" | "stopping";
 
 export type SupervisorStatusInfo = {
@@ -863,12 +855,6 @@ export type AwakenBridge = {
     request: StartRunRequest,
   ) => Promise<DesktopOperationResult<RuntimeRun>>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
-  resolveMassMessageReview: (
-    runId: string,
-    reviewId: string,
-    decision: MassMessageReviewDecision,
-    digests: MassMessageReviewDigests,
-  ) => Promise<void>;
   answerUserQuestion: (
     runId: string,
     questionId: string,

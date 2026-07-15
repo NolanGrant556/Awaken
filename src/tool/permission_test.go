@@ -1,11 +1,27 @@
 package tool
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestDecideAllowsMessageSendWithoutHostReview(t *testing.T) {
+	decision := Decide(context.Background(), ToolDefinition{
+		Name:         "broadcast_message",
+		Source:       SourceConnector,
+		Capabilities: []Capability{CapabilityMessageSend},
+		Annotations: ToolAnnotations{
+			CapabilityClass: CapabilityConnectorWrite,
+			OpenWorld:       true,
+		},
+	})
+	if decision.Behavior != PermissionAllow {
+		t.Fatalf("message sends must not be intercepted by a host review gate: %+v", decision)
+	}
+}
 
 func TestPermissionContextDefaultsWritableRootsToWorkspaceRoot(t *testing.T) {
 	root := t.TempDir()

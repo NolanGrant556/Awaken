@@ -2248,8 +2248,6 @@ func TestPlainQASmoke(t *testing.T) {
 			finalTerminalReason = ev.TerminalReason
 		case agui.EventToolCallStart:
 			t.Fatalf("unexpected TOOL_CALL_START event")
-		case agui.EventAwakenMassReviewRequested:
-			t.Fatalf("unexpected AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED event")
 		case agui.EventAwakenArtifactCreated:
 			t.Fatalf("unexpected AWAKEN_ARTIFACT_CREATED event")
 		case agui.EventRunError:
@@ -2412,8 +2410,6 @@ func TestReadOnlyFileSmoke(t *testing.T) {
 		case agui.EventRunFinished:
 			sawRunFinished = true
 			finalResult = ev.Result
-		case agui.EventAwakenMassReviewRequested:
-			t.Fatalf("unexpected AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED event")
 		case agui.EventAwakenArtifactCreated:
 			t.Fatalf("unexpected AWAKEN_ARTIFACT_CREATED event")
 		case agui.EventAwakenArtifactUpdated:
@@ -2560,7 +2556,6 @@ func TestFileMutationAutoAllowSmoke(t *testing.T) {
 		sawRunStarted                bool
 		sawApplyPatchToolCallStart   bool
 		sawToolPermissionDecided     bool
-		sawMassMessageReview         bool
 		sawStatusAwaitingApproval    bool
 		sawApplyPatchToolCallResult  bool
 		sawFinalTextAfterAllowedTool bool
@@ -2599,8 +2594,6 @@ func TestFileMutationAutoAllowSmoke(t *testing.T) {
 					t.Fatalf("expected tool decision affected paths to contain note.md, got %v", ev.AffectedPaths)
 				}
 			}
-		case agui.EventAwakenMassReviewRequested:
-			sawMassMessageReview = true
 		case agui.EventRunStatusChanged:
 			if ev.Status == "awaiting_approval" {
 				sawStatusAwaitingApproval = true
@@ -2632,9 +2625,6 @@ func TestFileMutationAutoAllowSmoke(t *testing.T) {
 	}
 	if !sawToolPermissionDecided {
 		t.Fatalf("expected AWAKEN_TOOL_PERMISSION_DECIDED event for apply_patch")
-	}
-	if sawMassMessageReview {
-		t.Fatalf("did not expect AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED event on AUTO allow path")
 	}
 	if sawStatusAwaitingApproval {
 		t.Fatalf("did not expect RUN_STATUS_CHANGED event with awaiting_approval on AUTO allow path")
@@ -2755,12 +2745,9 @@ func TestFileMutationAutoAllowDoesNotEnterGenericReviewSmoke(t *testing.T) {
 		sawRunStarted              bool
 		sawApplyPatchToolCallStart bool
 		sawToolPermissionDecided   bool
-		sawMassMessageReview       bool
 		sawStatusAwaitingApproval  bool
 		sawRunFinished             bool
 		toolResultContent          string
-		massReviewRequestedCount   int
-		massReviewResolvedCount    int
 		finalOutcome               string
 	)
 
@@ -2781,11 +2768,6 @@ func TestFileMutationAutoAllowDoesNotEnterGenericReviewSmoke(t *testing.T) {
 					t.Fatalf("expected apply_patch tool decision action allow, got %q", ev.ToolDecisionAction)
 				}
 			}
-		case agui.EventAwakenMassReviewRequested:
-			sawMassMessageReview = true
-			massReviewRequestedCount++
-		case agui.EventAwakenMassReviewResolved:
-			massReviewResolvedCount++
 		case agui.EventToolCallResult:
 			if ev.ToolCallName == "apply_patch" {
 				toolResultContent = ev.Content
@@ -2813,17 +2795,8 @@ func TestFileMutationAutoAllowDoesNotEnterGenericReviewSmoke(t *testing.T) {
 	if !sawToolPermissionDecided {
 		t.Fatalf("expected AWAKEN_TOOL_PERMISSION_DECIDED event for apply_patch")
 	}
-	if sawMassMessageReview {
-		t.Fatalf("did not expect AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED event on AUTO allow path")
-	}
 	if sawStatusAwaitingApproval {
 		t.Fatalf("did not expect RUN_STATUS_CHANGED event with awaiting_approval on AUTO allow path")
-	}
-	if massReviewRequestedCount != 0 {
-		t.Fatalf("expected zero mass message review requests on AUTO allow path, got %d", massReviewRequestedCount)
-	}
-	if massReviewResolvedCount != 0 {
-		t.Fatalf("expected zero mass message review resolved events on AUTO allow path, got %d", massReviewResolvedCount)
 	}
 	if strings.Contains(toolResultContent, "AUTO policy 拒绝") {
 		t.Fatalf("expected AUTO-allowed tool result, got denial: %q", toolResultContent)
@@ -3111,7 +3084,6 @@ func TestFileMutationPatchAndTurnDiffSmoke(t *testing.T) {
 	var (
 		patchUpdatedByCallID = map[string]int{}
 		decisionByCallID     = map[string]int{}
-		massReviewIndex      = -1
 		turnDiff             string
 		sawRunFinished       bool
 		toolResultContent    string
@@ -3142,10 +3114,6 @@ func TestFileMutationPatchAndTurnDiffSmoke(t *testing.T) {
 				if !hasNoteMD {
 					t.Fatalf("expected patch preview affected paths to contain note.md, got %v", ev.AffectedPaths)
 				}
-			}
-		case agui.EventAwakenMassReviewRequested:
-			if ev.ToolCallName == "apply_patch" && massReviewIndex < 0 {
-				massReviewIndex = i
 			}
 		case agui.EventAwakenToolPermissionDecided:
 			if ev.ToolCallName == "apply_patch" {
@@ -3178,9 +3146,6 @@ func TestFileMutationPatchAndTurnDiffSmoke(t *testing.T) {
 	}
 	if len(decisionByCallID) == 0 {
 		t.Fatalf("expected AWAKEN_TOOL_PERMISSION_DECIDED event")
-	}
-	if massReviewIndex >= 0 {
-		t.Fatalf("did not expect AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED event on AUTO allow path")
 	}
 	matchedPreviewAndDecision := false
 	for callID, patchIndex := range patchUpdatedByCallID {
@@ -3325,7 +3290,6 @@ func TestFileMutationAllowlistAllowSmoke(t *testing.T) {
 	var (
 		patchUpdatedByCallID = map[string]int{}
 		decisionByCallID     = map[string]int{}
-		approvalRequestIndex = -1
 		toolResultContent    string
 		turnDiff             string
 		artifactPath         string
@@ -3360,10 +3324,6 @@ func TestFileMutationAllowlistAllowSmoke(t *testing.T) {
 					t.Fatalf("expected apply_patch tool decision source auto_allowlist, got %q", ev.ToolDecisionSource)
 				}
 			}
-		case agui.EventAwakenMassReviewRequested:
-			if ev.ToolCallName == "apply_patch" && approvalRequestIndex < 0 {
-				approvalRequestIndex = i
-			}
 		case agui.EventToolCallResult:
 			if ev.ToolCallName == "apply_patch" {
 				toolResultContent = ev.Content
@@ -3391,9 +3351,6 @@ func TestFileMutationAllowlistAllowSmoke(t *testing.T) {
 	}
 	if len(decisionByCallID) == 0 {
 		t.Fatalf("expected AWAKEN_TOOL_PERMISSION_DECIDED event")
-	}
-	if approvalRequestIndex >= 0 {
-		t.Fatalf("did not expect AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED event on allowlist AUTO path")
 	}
 	matchedPreviewAndDecision := false
 	for callID, patchIndex := range patchUpdatedByCallID {
@@ -3538,8 +3495,6 @@ func TestMultiTurnThreadSmoke(t *testing.T) {
 		switch ev.Type {
 		case agui.EventToolCallStart:
 			t.Fatalf("did not expect tool call on first memory-only run")
-		case agui.EventAwakenMassReviewRequested:
-			t.Fatalf("did not expect mass message review request on first memory-only run")
 		case agui.EventRunFinished:
 			firstSawRunFinished = true
 			if ev.Outcome != nil {
@@ -3603,8 +3558,6 @@ func TestMultiTurnThreadSmoke(t *testing.T) {
 		switch ev.Type {
 		case agui.EventToolCallStart:
 			t.Fatalf("did not expect tool call on second memory-only run")
-		case agui.EventAwakenMassReviewRequested:
-			t.Fatalf("did not expect mass message review request on second memory-only run")
 		case agui.EventTextMessageContent:
 			secondAssistantText.WriteString(ev.Delta)
 		case agui.EventRunFinished:
@@ -5559,23 +5512,3 @@ func echoInProcServerFactory() mcpclient.InProcServerFactory {
 }
 
 func boolPtr(b bool) *bool { return &b }
-
-func TestResolveMassMessageReviewRequiresAllCanonicalDigests(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/v1/runs/run-1/mass-message-reviews/review-1/resolve", strings.NewReader(`{"decision":"approved","envelopeDigest":"message-1"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.SetPathValue("run_id", "run-1")
-	req.SetPathValue("review_id", "review-1")
-	rec := httptest.NewRecorder()
-
-	(runHandlers{}).handleResolveMassMessageReview(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("missing canonical digests status=%d body=%s", rec.Code, rec.Body.String())
-	}
-	var response errorResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
-		t.Fatalf("decode error response: %v", err)
-	}
-	if response.Error != "MASS_MESSAGE_REVIEW_DIGEST_REQUIRED" {
-		t.Fatalf("unexpected error response: %+v", response)
-	}
-}

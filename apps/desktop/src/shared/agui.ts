@@ -41,8 +41,6 @@ export type AguiEventType =
   | "AWAKEN_SKILL_CONTENT_LOADED"
   | "AWAKEN_SKILL_EXECUTION_CONTEXT"
   | "AWAKEN_SKILL_FAILED_TO_LOAD"
-  | "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED"
-  | "AWAKEN_MASS_MESSAGE_REVIEW_RESOLVED"
   | "AWAKEN_USER_QUESTION_REQUESTED"
   | "AWAKEN_USER_QUESTION_RESOLVED"
   | "AWAKEN_ARTIFACT_CREATED"
@@ -194,23 +192,8 @@ export type AguiEvent = {
   skillResourceMode?: string;
   skillEffectiveTools?: string[];
   skillDiagnostics?: string[];
-  reviewId?: string;
-  reviewDecision?: "approved" | "rejected";
-  reviewEnvelopeDigest?: string;
-  reviewBodyDigest?: string;
-  reviewRecipientIdentityDigest?: string;
   questionId?: string;
   questionAnswer?: string;
-  massMessageChannel?: string;
-  massMessageRecipientScope?: string;
-  massMessageRecipientCount?: number;
-  massMessageBodyPreview?: string;
-  massMessageTemplatePreview?: string;
-  massMessageAttachments?: string[];
-  massMessageSendingAccount?: string;
-  massMessageSourceTool?: string;
-  massMessageMessageCount?: number;
-  massMessageExpandsRecipients?: boolean;
   /** Legacy transcript-only fields. New runs must not emit generic approval events. */
   approvalId?: string;
   approvalTitle?: string;

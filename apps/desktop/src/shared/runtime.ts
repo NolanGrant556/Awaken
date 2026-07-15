@@ -444,6 +444,20 @@ export type InstallSkillResponse = {
   message: string;
 };
 
+export type DeleteSkillRequest = {
+  id: string;
+  sourceOrigin: "project" | "user" | string;
+  projectRoot?: string;
+};
+
+export type DeleteSkillResponse = {
+  id: string;
+  sourceOrigin: string;
+  originalPath: string;
+  trashedPath?: string;
+  message: string;
+};
+
 export type ModelProviderWire = {
   id: string;
   display_name: string;
@@ -883,6 +897,7 @@ export type AwakenBridge = {
   listMcpTools: () => Promise<RuntimeToolInfo[]>;
   listSkills: (projectRoot?: string) => Promise<RuntimeSkill[]>;
   installSkill: (request: InstallSkillRequest) => Promise<InstallSkillResponse>;
+  deleteSkill: (request: DeleteSkillRequest) => Promise<DeleteSkillResponse>;
   listModelProviders: () => Promise<ModelProvider[]>;
   listModelProfiles: () => Promise<RuntimeModelProfileSummary[]>;
   saveModelProfile: (

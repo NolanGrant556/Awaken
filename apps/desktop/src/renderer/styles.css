@@ -543,6 +543,12 @@ pre {
   color: var(--aw-text-primary);
 }
 
+.extension-card-action-danger:hover:enabled,
+.extension-card-action-danger:focus-visible {
+  background: color-mix(in srgb, var(--aw-error) 10%, transparent);
+  color: var(--aw-error);
+}
+
 .extension-card-action:disabled {
   opacity: 0.42;
   cursor: default;
@@ -781,6 +787,20 @@ pre {
   color: color-mix(in srgb, var(--aw-warning) 72%, var(--aw-text-secondary));
   font-size: 12px;
   font-weight: 750;
+}
+
+.skill-delete-confirm-button {
+  background: var(--aw-error) !important;
+  border-color: var(--aw-error) !important;
+  color: #fff !important;
+}
+
+.skill-delete-confirm-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--aw-error) 86%, #000) !important;
+}
+
+.skill-delete-dialog-body strong {
+  color: var(--aw-text-primary);
 }
 
 .skill-install-scope,

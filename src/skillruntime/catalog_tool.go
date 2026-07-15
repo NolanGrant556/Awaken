@@ -95,7 +95,7 @@ func (t *CatalogTool) Description() string {
 	if snapshot.Listing == "" {
 		return "Load an installed Skill by name and apply its instructions to the current task."
 	}
-	return "Load one Skill by name. Available Skills:\n" + snapshot.Listing
+	return skillTriggerRulesPrefix + snapshot.Listing
 }
 
 // ModelDescriptionForContext lets RequestBuilder preserve the Skill Catalog's
@@ -109,8 +109,29 @@ func (t *CatalogTool) ModelDescriptionForContext(contextWindowTokens int) string
 	if strings.TrimSpace(snapshot.Listing) == "" {
 		return "Load an installed Skill by name and apply its instructions to the current task."
 	}
-	return "Load one installed Skill by exact catalog name. Available Skills:\n" + snapshot.Listing
+	return skillTriggerRulesPrefix + snapshot.Listing
 }
+
+// skillTriggerRulesPrefix carries the mandatory Skill selection rules right
+// next to the Catalog listing, so the model sees "when to call" and "what is
+// available" in the same place. This is a deterministic Prompt constraint,
+// not a host-side matcher: the model still judges whether a task matches a
+// Skill's description. It sits outside the Catalog's own 1%-of-context
+// budget, mirroring how Claude Code's SkillTool prompt and Codex's skills
+// developer fragment both place trigger rules beside their listings.
+const skillTriggerRulesPrefix = `Load one installed Skill by exact catalog name.
+
+Trigger rules (mandatory):
+- If the user explicitly names an available Skill from this catalog, you MUST invoke it.
+- If the task clearly matches a Skill's description below, invoking it is a BLOCKING REQUIREMENT: call this tool BEFORE using ordinary tools for that part of the task.
+- If multiple Skills match, invoke the minimal set that covers the request and state the order you will apply them.
+- Announce which Skill(s) you are using and why (one short line). If you skip an obviously matching Skill, say why.
+- NEVER claim that you are using or have loaded a Skill without actually invoking it. Do not re-invoke a Skill whose instructions are already in your context.
+- If a named Skill is not in the catalog, say so briefly and continue with the best fallback.
+- If nothing in the catalog matches, proceed with ordinary tools; do not invoke a Skill just to satisfy this rule.
+
+Available Skills:
+`
 
 func (t *CatalogTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{

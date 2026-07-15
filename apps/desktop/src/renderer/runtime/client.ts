@@ -12,6 +12,8 @@ import {
   type DesktopOperationResult,
   type DesktopOperationRecoveryAction,
   type DesktopPlatform,
+  type DeleteSkillRequest,
+  type DeleteSkillResponse,
   type InstallSkillRequest,
   type InstallSkillResponse,
   type MassMessageReviewDecision,
@@ -135,6 +137,7 @@ export type RuntimeClient = {
   listMcpTools: () => Promise<RuntimeToolInfo[]>;
   listSkills: (projectRoot?: string) => Promise<RuntimeSkill[]>;
   installSkill: (request: InstallSkillRequest) => Promise<InstallSkillResponse>;
+  deleteSkill: (request: DeleteSkillRequest) => Promise<DeleteSkillResponse>;
   listModelProviders: () => Promise<ModelProvider[]>;
   listModelProfiles: () => Promise<RuntimeModelProfileSummary[]>;
   saveModelProfile: (request: ModelProfileSaveRequest) => Promise<RuntimeModelProfileSummary>;
@@ -236,6 +239,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     listMcpTools: () => bridge.listMcpTools(),
     listSkills: (projectRoot) => bridge.listSkills(projectRoot),
     installSkill: (request) => bridge.installSkill(request),
+    deleteSkill: (request) => bridge.deleteSkill(request),
     listModelProviders: () => bridge.listModelProviders(),
     listModelProfiles: () => bridge.listModelProfiles(),
     saveModelProfile: (request) =>

@@ -3,6 +3,7 @@ import type { RuntimeSkill, RuntimeToolInfo } from "../shared/runtime";
 import {
   loadMcpSettingsResources,
   loadSkillListsForRoots,
+  isSkillPackageDeletable,
   skillDiagnosticText,
 } from "./ExtensionsView";
 
@@ -77,5 +78,14 @@ describe("loadMcpSettingsResources", () => {
       tools: [tool],
       logs: [],
     });
+  });
+});
+
+describe("isSkillPackageDeletable", () => {
+  it("only allows project and user .awaken/skills packages", () => {
+    expect(isSkillPackageDeletable({ sourceOrigin: "project" })).toBe(true);
+    expect(isSkillPackageDeletable({ sourceOrigin: "user" })).toBe(true);
+    expect(isSkillPackageDeletable({ sourceOrigin: "mcp" })).toBe(false);
+    expect(isSkillPackageDeletable({ sourceOrigin: "plugin" })).toBe(false);
   });
 });

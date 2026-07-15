@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"awaken/src/skills"
 )
@@ -37,6 +38,49 @@ func TestCompileCatalogUsesOnePercentAndNamesOnlyFallback(t *testing.T) {
 	tiny := CompileCatalog(defs, 100)
 	if tiny.Mode != CatalogModeNamesOnly || tiny.Listing != "- alpha\n- beta" || strings.Contains(tiny.Listing, "manual") {
 		t.Fatalf("tiny catalog=%+v", tiny)
+	}
+}
+
+func TestCompileCatalogDegradesToUniformlyTruncatedDescriptionsBeforeNamesOnly(t *testing.T) {
+	defs := []*skills.SkillDefinition{
+		{ID: "x", Description: strings.Repeat("d", 300), Source: skills.SourceProject, State: skills.StateLoaded},
+		{ID: "y", Description: strings.Repeat("e", 300), Source: skills.SourceUser, State: skills.StateLoaded},
+	}
+	// contextWindowTokens=2500 -> budget = int(2500*4*0.01) = 100 chars: too
+	// small for full 250-capped descriptions, but large enough that the
+	// per-entry floor (20 chars) still fits once name/bracket overhead is
+	// subtracted, so the catalog should truncate descriptions uniformly
+	// instead of jumping straight to names-only.
+	truncated := CompileCatalog(defs, 2500)
+	if truncated.Mode != CatalogModeTruncated {
+		t.Fatalf("expected truncated mode, got %+v", truncated)
+	}
+	if !strings.Contains(truncated.Listing, "- x [project]:") || !strings.Contains(truncated.Listing, "- y [user]:") {
+		t.Fatalf("truncated listing lost entry names: %q", truncated.Listing)
+	}
+	for _, line := range strings.Split(truncated.Listing, "\n") {
+		idx := strings.Index(line, "]: ")
+		if idx < 0 {
+			t.Fatalf("truncated listing line missing description separator: %q", line)
+		}
+		desc := line[idx+len("]: "):]
+		if utf8.RuneCountInString(desc) > SkillCatalogDescriptionCap {
+			t.Fatalf("truncated description exceeded the per-entry cap: %q", desc)
+		}
+		if utf8.RuneCountInString(desc) < SkillCatalogMinTruncatedDescChars-1 {
+			t.Fatalf("truncated description fell below the floor without switching to names-only: %q", desc)
+		}
+	}
+}
+
+func TestCompileCatalogFallsBackToNamesOnlyBelowTruncationFloor(t *testing.T) {
+	defs := []*skills.SkillDefinition{
+		{ID: "alpha", Description: strings.Repeat("a", 400), WhenToUse: "first", Source: skills.SourceProject, State: skills.StateLoaded},
+		{ID: "beta", Description: strings.Repeat("b", 400), WhenToUse: "second", Source: skills.SourceUser, State: skills.StateLoaded},
+	}
+	tiny := CompileCatalog(defs, 100)
+	if tiny.Mode != CatalogModeNamesOnly || tiny.Listing != "- alpha\n- beta" {
+		t.Fatalf("expected names-only fallback below the truncation floor, got %+v", tiny)
 	}
 }
 

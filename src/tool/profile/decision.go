@@ -15,13 +15,12 @@ import "fmt"
 type ExecutionDecisionAction string
 
 const (
-	DecisionAllow                  ExecutionDecisionAction = "allow"
-	DecisionDeny                   ExecutionDecisionAction = "deny"
-	DecisionTransform              ExecutionDecisionAction = "transform"
-	DecisionNeedsAuth              ExecutionDecisionAction = "needs_auth"
-	DecisionNeedsRuntime           ExecutionDecisionAction = "needs_runtime"
-	DecisionUnsupported            ExecutionDecisionAction = "unsupported"
-	DecisionNeedsMassMessageReview ExecutionDecisionAction = "needs_mass_message_review"
+	DecisionAllow        ExecutionDecisionAction = "allow"
+	DecisionDeny         ExecutionDecisionAction = "deny"
+	DecisionTransform    ExecutionDecisionAction = "transform"
+	DecisionNeedsAuth    ExecutionDecisionAction = "needs_auth"
+	DecisionNeedsRuntime ExecutionDecisionAction = "needs_runtime"
+	DecisionUnsupported  ExecutionDecisionAction = "unsupported"
 )
 
 // ExecutionDecisionSource records which layer of the policy produced a
@@ -39,7 +38,6 @@ const (
 	DecisionSourceSensitivePath     ExecutionDecisionSource = "sensitive_path"
 	DecisionSourceAuthRequired      ExecutionDecisionSource = "auth_required"
 	DecisionSourceRuntimeRequired   ExecutionDecisionSource = "runtime_required"
-	DecisionSourceMassMessageReview ExecutionDecisionSource = "mass_message_review"
 )
 
 // ExecutionDecision is the unified decision output of the auto tool policy.

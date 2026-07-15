@@ -29,7 +29,6 @@ POST   /v1/runs
 GET    /v1/runs/{run_id}
 GET    /v1/runs/{run_id}/events
 POST   /v1/runs/{run_id}/cancel
-POST   /v1/runs/{run_id}/mass-message-reviews/{review_id}/resolve
 POST   /v1/runs/{run_id}/user-questions/{question_id}/answer
 GET    /v1/runs/{run_id}/audit
 POST   /v1/shutdown

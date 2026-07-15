@@ -60,9 +60,8 @@ func setToolRegistryHooksForTest(register func(tool.Tool) error, unregister func
 // Manager owns the lifecycle of every MCP server connection. It is the
 // single entry point for the server layer and is safe for concurrent use.
 type Manager struct {
-	logger               Logger
-	registry             *InProcRegistry
-	messageEgressGateway tool.MessageEgressGateway
+	logger   Logger
+	registry *InProcRegistry
 
 	mu      sync.RWMutex
 	servers map[string]*managedServer
@@ -146,24 +145,13 @@ func WithToolsChangedCallback(fn func(serverName string)) ManagerOption {
 	return func(m *Manager) { m.onToolsChanged = fn }
 }
 
-// WithMessageEgressGateway installs the central recipient-aware outbound
-// message gate used by every dynamically registered MCP tool.
-func WithMessageEgressGateway(gateway tool.MessageEgressGateway) ManagerOption {
-	return func(m *Manager) {
-		if gateway != nil {
-			m.messageEgressGateway = gateway
-		}
-	}
-}
-
 // NewManager builds an empty manager. Servers are not started until
 // Start is called.
 func NewManager(opts ...ManagerOption) *Manager {
 	m := &Manager{
-		logger:               noopLogger{},
-		servers:              make(map[string]*managedServer),
-		credentials:          NewInMemoryCredentialStore(),
-		messageEgressGateway: tool.DefaultMessageEgressGateway{},
+		logger:      noopLogger{},
+		servers:     make(map[string]*managedServer),
+		credentials: NewInMemoryCredentialStore(),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -846,7 +834,7 @@ func (m *Manager) registerTools(ctx context.Context, server *managedServer) erro
 	// so the registry reflects exactly the server's current tool list.
 	m.unregisterTools(server.name)
 	for _, mcpTool := range result.Tools {
-		adapter := NewMcpToolAdapter(m, server.name, mcpTool, withAdapterMessageEgressGateway(m.messageEgressGateway))
+		adapter := NewMcpToolAdapter(m, server.name, mcpTool)
 		if err := registerToolThroughHook(adapter); err != nil {
 			m.logger.Warnf("register mcp tool %q failed: %v", adapter.Name(), err)
 			continue

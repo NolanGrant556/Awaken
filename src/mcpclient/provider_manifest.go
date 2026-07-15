@@ -10,10 +10,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// AwakenProviderMetaKey is the versioned MCP _meta extension used by a
-// provider to declare execution semantics that the standard MCP annotations
-// cannot express. The metadata is deliberately per-tool: server-wide trust is
-// never enough to authorize a delete or to infer message recipients.
+// AwakenProviderMetaKey is the optional versioned MCP _meta extension used for
+// catalog metadata and host-mediated Artifact publication. It is never a
+// prerequisite for calling an MCP tool.
 const AwakenProviderMetaKey = "io.awaken.tool/provider/v1"
 
 // ServerProviderManifest records stable provider identity supplied by a
@@ -26,45 +25,14 @@ type ServerProviderManifest struct {
 	Dependencies []tool.DependencyRequirement `json:"dependencies,omitempty"`
 }
 
-// MCPToolProviderMetadata is the Awaken extension carried in mcp.Tool._meta.
-// Capabilities are input-aware safety facts, not a permission grant.
+// MCPToolProviderMetadata is the optional Awaken extension carried in
+// mcp.Tool._meta. Capabilities and dependencies improve catalog diagnostics;
+// ArtifactOutput opts into host publication of returned bytes.
 type MCPToolProviderMetadata struct {
-	ProviderID        tool.ProviderID               `json:"provider_id,omitempty"`
-	Capabilities      []tool.Capability             `json:"capabilities,omitempty"`
-	Dependencies      []tool.DependencyRequirement  `json:"dependencies,omitempty"`
-	MessageEgress     *MCPMessageEgressContract     `json:"message_egress,omitempty"`
-	RecoverableDelete *MCPRecoverableDeleteContract `json:"recoverable_delete,omitempty"`
-	ArtifactOutput    *MCPArtifactOutputContract    `json:"artifact_output,omitempty"`
-}
-
-// MCPMessageEgressContract maps a provider's normal tool input onto the
-// canonical MessageEgressEnvelope. Field values are dotted paths into the MCP
-// arguments object. Fixed values are useful for providers whose channel or
-// sending account is intrinsic to the connected server.
-type MCPMessageEgressContract struct {
-	Channel             string                    `json:"channel,omitempty"`
-	ChannelField        string                    `json:"channel_field,omitempty"`
-	SendingAccount      string                    `json:"sending_account,omitempty"`
-	SendingAccountField string                    `json:"sending_account_field,omitempty"`
-	RecipientField      string                    `json:"recipient_field,omitempty"`
-	RecipientsField     string                    `json:"recipients_field,omitempty"`
-	RecipientIDField    string                    `json:"recipient_id_field,omitempty"`
-	RecipientKind       tool.MessageRecipientKind `json:"recipient_kind,omitempty"`
-	RecipientKindField  string                    `json:"recipient_kind_field,omitempty"`
-	RecipientScopeField string                    `json:"recipient_scope_field,omitempty"`
-	MessageCountField   string                    `json:"message_count_field,omitempty"`
-	ExpandsField        string                    `json:"expands_recipients_field,omitempty"`
-	BodyField           string                    `json:"body_field,omitempty"`
-	AttachmentsField    string                    `json:"attachments_field,omitempty"`
-}
-
-// MCPRecoverableDeleteContract declares the typed evidence a remote delete
-// returns. A declaration without a confirmation or restore-handle field is
-// intentionally invalid and blocks the call before it reaches the server.
-type MCPRecoverableDeleteContract struct {
-	Recoverable        bool   `json:"recoverable"`
-	ConfirmationField  string `json:"confirmation_field,omitempty"`
-	RestoreHandleField string `json:"restore_handle_field,omitempty"`
+	ProviderID     tool.ProviderID              `json:"provider_id,omitempty"`
+	Capabilities   []tool.Capability            `json:"capabilities,omitempty"`
+	Dependencies   []tool.DependencyRequirement `json:"dependencies,omitempty"`
+	ArtifactOutput *MCPArtifactOutputContract   `json:"artifact_output,omitempty"`
 }
 
 // MCPArtifactOutputContract declares the only MCP result shape from which the
@@ -183,9 +151,6 @@ func inferMCPProviderCapabilities(toolName string, capabilityClass tool.Capabili
 	if isMessageToolName(name) {
 		capabilities = append(capabilities, tool.CapabilityMessageSend)
 	}
-	if isMassMessageToolName(name) || capabilityClass == tool.CapabilityMassMessageSend {
-		capabilities = append(capabilities, tool.CapabilityMessageSend, tool.CapabilityMessageMassSend)
-	}
 	if isDeleteToolName(name) {
 		capabilities = append(capabilities, tool.CapabilityFileDelete)
 	}
@@ -202,10 +167,6 @@ func isMessageToolName(name string) bool {
 		"send_email", "send-email", "send_mail", "send-mail", "send_dm", "send-dm",
 		"broadcast_message", "broadcast-message", "message_send", "message-send",
 	)
-}
-
-func isMassMessageToolName(name string) bool {
-	return containsAny(name, "broadcast", "mass_message", "mass-message", "bulk_message", "bulk-message", "batch_send", "batch-send")
 }
 
 func isDeleteToolName(name string) bool {

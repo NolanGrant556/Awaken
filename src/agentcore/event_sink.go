@@ -6,10 +6,6 @@ type EventSink interface {
 	Emit(AwakenEvent)
 }
 
-type MassMessageReviewAwaiter interface {
-	AwaitMassMessageReview(ctx context.Context, request AwakenEvent) (ReviewDecision, error)
-}
-
 type UserQuestionAwaiter interface {
 	AwaitUserQuestion(ctx context.Context, request AwakenEvent) (string, error)
 }

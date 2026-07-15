@@ -26,7 +26,7 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 | 运行时与本地服务 | Desktop 托管本地服务、SemanticJournal、当前用户执行环境观察与 Office worker | [03 运行时与本地服务](docs/03_运行时与本地服务/索引.md) |
 | 工具、权限与安全执行 | provider/capability/dependency、每 run 可用性快照、默认自动执行、当前登录用户 direct Shell、可选 restricted/staging broker，以及拥有独立 schema/恢复/审核合同的 typed 工具 | [04 工具、权限与安全执行](docs/04_工具权限与审批/索引.md) |
 | 模型与供应商 | 模型 profile、能力与余额、调用链、安全凭据存储及故障恢复 | [05 模型与供应商配置](docs/05_模型与供应商配置/索引.md) |
-| MCP runtime | user/project/dynamic 配置、stdio/http/sse、动态工具、provider 安全 metadata、认证与 prompt/resource Skill bridge | [06 MCP 运行时](docs/06_MCP运行时/索引.md) |
+| MCP runtime | user/project/dynamic 配置、stdio/http/sse、动态工具直通、可选 Artifact metadata、认证与 prompt/resource Skill bridge | [06 MCP 运行时](docs/06_MCP运行时/索引.md) |
 | 连接器 | builtin/local capability provider、MCP 接入、生命周期、readiness 与重启 ownership 边界 | [07 连接器](docs/07_连接器/索引.md) |
 | 技能 | 多来源 Universal Skill 发现、按需正文/资源、composer 当前选择的 run-scoped 确定性绑定、统一 catalog、inline/真实 child fork、MCP 动态来源与恢复 | [08 技能](docs/08_技能/索引.md) |
 | AG-UI 与 A2UI | Awaken 自有事件到 AG-UI-compatible wire 的映射；A2UI 仅作参考 | [09 AG-UI 与 A2UI 协议](docs/09_AGUI与A2UI协议/索引.md) |
@@ -147,7 +147,7 @@ Gallery 使用 mock state，只能证明组件渲染，不能替代 Awaken Deskt
 - `src/agentcore` 不依赖 `src/protocol/agui`；内部语义与外部 wire 由协议映射层隔离。
 - Renderer 不拥有后端权限、路径安全、凭据或持久化策略；这些决策必须留在相应 Main/Core owner。
 - Gallery、旧截图、旧验收摘要和绕过 Desktop 的 provider smoke 不能作为真实产品通过证据。
-- 默认 raw Shell 以 Desktop 向 `awaken-core` 注入的当前登录用户身份和 login 环境直接执行，不声称 workspace 隔离、全系统 overlay、全部副作用可观测、任意删除可恢复或任意 CLI 群发受审核；这些更窄保证只属于实际选用的 typed/restricted provider。
+- 默认 raw Shell 以 Desktop 向 `awaken-core` 注入的当前登录用户身份和 login 环境直接执行，不声称 workspace 隔离、全系统 overlay、全部副作用可观测或任意删除可恢复；这些更窄保证只属于实际选用的 typed/restricted provider。消息发送（包括多人、群、频道、广播和批量发送）不经过 Awaken 人工审核门，按所选工具与 provider 自身合同直接执行。
 - 不得把 A2UI、原生 OS Computer Use、MCP WebSocket、完整 OAuth/401 自动恢复、全平台强制 Shell overlay 等尚未实现或不完整能力写成当前支持。
 - 不提交 secret、userData、依赖目录或生成产物；不覆盖或清理与当前任务无关的本地改动。
 - 代码改变产品事实时，必须在同一任务同步更新唯一权威文档和当前验收证据。

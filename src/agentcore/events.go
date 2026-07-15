@@ -46,8 +46,6 @@ const (
 	RuntimeReadyEventType           AwakenEventType = "RuntimeReady"
 	RuntimeRepairFailedEventType    AwakenEventType = "RuntimeRepairFailed"
 	RuntimeMissingEventType         AwakenEventType = "RuntimeMissing"
-	MassMessageReviewRequestedType  AwakenEventType = "MassMessageReviewRequested"
-	MassMessageReviewResolvedType   AwakenEventType = "MassMessageReviewResolved"
 	UserQuestionRequestedType       AwakenEventType = "UserQuestionRequested"
 	UserQuestionResolvedType        AwakenEventType = "UserQuestionResolved"
 	ArtifactCreatedEventType        AwakenEventType = "ArtifactCreated"
@@ -56,13 +54,6 @@ const (
 	ResourceReceiptEventType        AwakenEventType = "ResourceReceipt"
 	ToolRecoveryRequiredEventType   AwakenEventType = "ToolRecoveryRequired"
 	ToolRetryBlockedEventType       AwakenEventType = "ToolRetryBlocked"
-)
-
-type ReviewDecision string
-
-const (
-	ReviewDecisionApproved ReviewDecision = "approved"
-	ReviewDecisionRejected ReviewDecision = "rejected"
 )
 
 type ArtifactStatus string
@@ -156,59 +147,44 @@ type AwakenEvent struct {
 	ToolProgressPercentage int
 	// ToolOutcome fields (Phase 1). Canonical status lives in ToolStatus;
 	// Desktop maps it to ToolDisplayState and must not infer from content.
-	ToolStatus                    string
-	TransportStatus               string
-	SemanticStatus                string
-	ProcessStatus                 string
-	ProcessExitCode               *int
-	ProcessTimedOut               bool
-	ErrorCode                     string
-	ErrorCategory                 string
-	Retryable                     bool
-	RecoveryOptions               []string
-	DurationMs                    int64
-	Diagnostic                    map[string]any
-	ToolDefinition                tool.ToolDefinition
-	RiskHints                     *tool.RiskHints
-	AffectedPaths                 []string
-	AuthProvider                  string
-	AuthURL                       string
-	RuntimeName                   string
-	RuntimeVersion                string
-	ReviewID                      string
-	ReviewDecision                ReviewDecision
-	ReviewEnvelopeDigest          string
-	ReviewBodyDigest              string
-	ReviewRecipientIdentityDigest string
-	MassMessageChannel            string
-	MassMessageRecipientScope     string
-	MassMessageRecipientCount     int
-	MassMessageMessageCount       int
-	MassMessageExpandsRecipients  bool
-	MassMessageBodyPreview        string
-	MassMessageTemplatePreview    string
-	MassMessageAttachments        []string
-	MassMessageSendingAccount     string
-	MassMessageSourceTool         string
-	QuestionID                    string
-	QuestionAnswer                string
-	ArtifactContractVersion       int
-	ArtifactRole                  tool.ArtifactRole
-	ArtifactProducer              string
-	ArtifactID                    string
-	ArtifactTitle                 string
-	ArtifactDescription           string
-	ArtifactKind                  string
-	ArtifactPath                  string
-	ArtifactContent               string
-	ArtifactStatus                ArtifactStatus
-	SkillID                       string
-	SkillVersion                  string
-	ResourcePath                  string
-	ResourceSHA256                string
-	ResourceSize                  int64
-	ResourceMode                  string
-	ResourceSource                string
+	ToolStatus              string
+	TransportStatus         string
+	SemanticStatus          string
+	ProcessStatus           string
+	ProcessExitCode         *int
+	ProcessTimedOut         bool
+	ErrorCode               string
+	ErrorCategory           string
+	Retryable               bool
+	RecoveryOptions         []string
+	DurationMs              int64
+	Diagnostic              map[string]any
+	ToolDefinition          tool.ToolDefinition
+	RiskHints               *tool.RiskHints
+	AffectedPaths           []string
+	AuthProvider            string
+	AuthURL                 string
+	RuntimeName             string
+	RuntimeVersion          string
+	QuestionID              string
+	QuestionAnswer          string
+	ArtifactContractVersion int
+	ArtifactRole            tool.ArtifactRole
+	ArtifactProducer        string
+	ArtifactID              string
+	ArtifactTitle           string
+	ArtifactDescription     string
+	ArtifactKind            string
+	ArtifactPath            string
+	ArtifactContent         string
+	ArtifactStatus          ArtifactStatus
+	SkillID                 string
+	SkillVersion            string
+	ResourcePath            string
+	ResourceSHA256          string
+	ResourceSize            int64
+	ResourceMode            string
+	ResourceSource          string
 }
 
 var awakenIDCounter uint64

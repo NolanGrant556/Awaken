@@ -68,8 +68,7 @@ func (t *openWorldReadOnlyTool) Execute(ctx context.Context, input string) (stri
 
 // TestShellExecutorAllowsSandboxRequiredProfile verifies that ShellExecutor
 // no longer treats SandboxRequired as a hard gate. Shell is a local-computer
-// execution surface; delete and mass-message safety lives inside the shell
-// tool policy.
+// execution surface; command behavior follows the selected shell tool policy.
 func TestShellExecutorAllowsSandboxRequiredProfile(t *testing.T) {
 	executor := NewShellExecutor()
 	intent := profile.ExecutionIntent{

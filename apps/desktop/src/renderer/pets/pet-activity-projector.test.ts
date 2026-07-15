@@ -14,7 +14,6 @@ function emptyViewState(): RuntimeViewState {
     toolResults: [],
     patchPreviews: [],
     approvals: [],
-    massMessageReviews: [],
     userQuestions: [],
     artifacts: [],
     inspectorSummary: { unknownEvents: [] },

@@ -101,7 +101,6 @@ function createMockRuntimeClient(): RuntimeClient {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     })),
-    resolveMassMessageReview: vi.fn(async () => undefined),
     answerUserQuestion: vi.fn(async () => undefined),
     getDesktopPreferences: vi.fn(async () => ({ theme: "light" as const })),
     saveDesktopPreferences: vi.fn(async () => ({ theme: "light" as const })),

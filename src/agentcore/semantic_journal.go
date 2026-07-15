@@ -225,10 +225,3 @@ func (s *artifactBufferingSink) AwaitUserQuestion(ctx context.Context, request A
 	}
 	return "", context.Canceled
 }
-
-func (s *artifactBufferingSink) AwaitMassMessageReview(ctx context.Context, request AwakenEvent) (ReviewDecision, error) {
-	if awaiter, ok := s.inner.(MassMessageReviewAwaiter); ok {
-		return awaiter.AwaitMassMessageReview(ctx, request)
-	}
-	return "", context.Canceled
-}

@@ -8,14 +8,12 @@ import type {
 
 type WaitingStateLike = Pick<
   RuntimeViewState,
-  "approvals" | "userQuestions" | "massMessageReviews"
+  "approvals" | "userQuestions"
 >;
 
 function isWaiting(state: WaitingStateLike): boolean {
   return (
-    state.approvals.length > 0 ||
-    state.userQuestions.length > 0 ||
-    state.massMessageReviews.length > 0
+    state.approvals.length > 0 || state.userQuestions.length > 0
   );
 }
 
@@ -44,7 +42,6 @@ type ActiveViewLike = Pick<
   RuntimeViewState,
   | "approvals"
   | "userQuestions"
-  | "massMessageReviews"
   | "steps"
   | "assistantText"
   | "inspectorSummary"
@@ -84,15 +81,6 @@ function waitingRequestForActiveThread(
       type: "command-approval",
       requestId: approval.id,
       summary: approval.title || "需要审批",
-    };
-  }
-
-  const review = view.massMessageReviews[0];
-  if (review) {
-    return {
-      type: "permission",
-      requestId: review.id,
-      summary: review.bodyPreview || "群发消息审批",
     };
   }
 

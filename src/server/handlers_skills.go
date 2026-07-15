@@ -9,12 +9,14 @@ import (
 	"time"
 
 	"awaken/src/skills"
+	"awaken/src/tool/trash"
 )
 
 // skillHandlers wires the /v1/skills HTTP surface to a skills.SkillRegistry.
 type skillHandlers struct {
 	registry      *skills.SkillRegistry
 	workspaceRoot string
+	trashAdapter  trash.TrashAdapter
 }
 
 // skillInfo is the wire shape for entries returned by GET /v1/skills.
@@ -68,6 +70,19 @@ type installSkillResponse struct {
 	Skill   skillInfo `json:"skill"`
 	Path    string    `json:"path"`
 	Message string    `json:"message"`
+}
+
+type deleteSkillRequest struct {
+	SourceOrigin string `json:"sourceOrigin"`
+	ProjectRoot  string `json:"projectRoot,omitempty"`
+}
+
+type deleteSkillResponse struct {
+	ID           string `json:"id"`
+	SourceOrigin string `json:"sourceOrigin"`
+	OriginalPath string `json:"originalPath"`
+	TrashedPath  string `json:"trashedPath,omitempty"`
+	Message      string `json:"message"`
 }
 
 func (h skillHandlers) handleListSkills(w http.ResponseWriter, r *http.Request) {
@@ -137,6 +152,55 @@ func (h skillHandlers) handleInstallSkill(w http.ResponseWriter, r *http.Request
 		Skill:   skillInfoFromDefinition(result.Skill),
 		Path:    result.Path,
 		Message: result.Message,
+	})
+}
+
+func (h skillHandlers) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
+	if h.registry == nil {
+		writeErrorJSON(w, http.StatusServiceUnavailable, "SKILLS_UNAVAILABLE", "skill registry not configured")
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "skill id is required")
+		return
+	}
+	var req deleteSkillRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+	result, err := skills.DeleteSkillPackage(skills.DeleteRequest{
+		ID:               id,
+		Source:           skills.SourceOrigin(strings.TrimSpace(req.SourceOrigin)),
+		ProjectRoot:      req.ProjectRoot,
+		DefaultWorkspace: h.workspaceRoot,
+		TrashAdapter:     h.trashAdapter,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, skills.ErrSkillDeleteNotFound):
+			writeErrorJSON(w, http.StatusNotFound, "SKILL_NOT_FOUND", err.Error())
+		case errors.Is(err, skills.ErrSkillDeleteSourceUnsupported):
+			writeErrorJSON(w, http.StatusBadRequest, "SKILL_DELETE_SOURCE_UNSUPPORTED", err.Error())
+		case errors.Is(err, skills.ErrSkillDeleteTrashUnavailable):
+			writeErrorJSON(w, http.StatusConflict, "SKILL_DELETE_TRASH_UNAVAILABLE", err.Error())
+		default:
+			writeErrorJSON(w, http.StatusBadRequest, "SKILL_DELETE_FAILED", err.Error())
+		}
+		return
+	}
+
+	// Keep the live Catalog synchronized before the Desktop receives success.
+	// Project previews for other roots remain read-only and are refreshed from
+	// disk by the caller's follow-up GET.
+	h.registry.ReloadLocalSources(h.skillSourceDirs(h.workspaceRoot))
+	writeJSON(w, http.StatusOK, deleteSkillResponse{
+		ID:           result.ID,
+		SourceOrigin: string(result.Source),
+		OriginalPath: result.OriginalPath,
+		TrashedPath:  result.Trash.TrashedPath,
+		Message:      fmt.Sprintf("%s skill moved to Trash", result.ID),
 	})
 }
 

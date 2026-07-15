@@ -41,6 +41,11 @@ type ConnectorKind = "mcp" | "cli";
 type SkillView = "project" | "user";
 type SkillInstallScope = "project" | "global";
 
+type PendingSkillDelete = {
+  skill: RuntimeSkill;
+  projectRoot?: string;
+};
+
 type SkillProjectGroup = {
   root: string;
   label: string;
@@ -176,6 +181,10 @@ function skillSourceLabel(source: string): string {
     default:
       return sourceLabel(source);
   }
+}
+
+export function isSkillPackageDeletable(skill: Pick<RuntimeSkill, "sourceOrigin">): boolean {
+  return skill.sourceOrigin === "project" || skill.sourceOrigin === "user";
 }
 
 function matchesQuery(value: string | undefined, query: string): boolean {
@@ -340,6 +349,9 @@ export function ExtensionsView({
     useState<SkillInstallScope>("project");
   const [skillInstallProjectRoot, setSkillInstallProjectRoot] = useState("");
   const [pickingSkillProjectRoot, setPickingSkillProjectRoot] = useState(false);
+  const [pendingSkillDelete, setPendingSkillDelete] =
+    useState<PendingSkillDelete | null>(null);
+  const [deletingSkill, setDeletingSkill] = useState(false);
   const [mcpSettingsOpen, setMcpSettingsOpen] = useState(false);
   const [selectedMcpServer, setSelectedMcpServer] = useState<RuntimeMcpServer | null>(null);
   const [mcpSettingsConfigText, setMcpSettingsConfigText] = useState("");
@@ -741,6 +753,27 @@ export function ExtensionsView({
     }
   }
 
+  async function handleDeleteSkill(): Promise<void> {
+    if (!pendingSkillDelete) return;
+    const { skill, projectRoot } = pendingSkillDelete;
+    setDeletingSkill(true);
+    setErrorMessage(null);
+    try {
+      await runtimeClient.deleteSkill({
+        id: skill.id,
+        sourceOrigin: skill.sourceOrigin,
+        projectRoot: skill.sourceOrigin === "project" ? projectRoot : undefined,
+      });
+      setPendingSkillDelete(null);
+      onNotice(`已删除 ${skill.displayName || skill.name}，Skill 包已移到废纸篓`);
+      await refresh(true, projectRoot);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Skill 删除失败");
+    } finally {
+      setDeletingSkill(false);
+    }
+  }
+
   async function handlePickSkillProjectRoot(): Promise<void> {
     setPickingSkillProjectRoot(true);
     setErrorMessage(null);
@@ -853,13 +886,14 @@ export function ExtensionsView({
     );
   }
 
-  function renderSkillCard(skill: RuntimeSkill) {
+  function renderSkillCard(skill: RuntimeSkill, projectRoot?: string) {
     const skillPath = skill.skillFilePath || skill.rootDir;
+    const deletable = isSkillPackageDeletable(skill);
     const diagnostics = (skill.diagnostics ?? [])
       .map(skillDiagnosticText)
       .filter(Boolean);
     return (
-      <article className="extension-card" key={`${skill.id}:${skill.sourceOrigin}`}>
+      <article className="extension-card" key={`${skill.id}:${skill.sourceOrigin}:${projectRoot ?? ""}`}>
         <div className="extension-card-icon" aria-hidden="true">
           <Wrench size={20} strokeWidth={1.9} />
         </div>
@@ -890,6 +924,20 @@ export function ExtensionsView({
             </p>
           ) : null}
         </div>
+        <button
+          type="button"
+          className="extension-card-action extension-card-action-danger"
+          aria-label={`删除 ${skill.displayName || skill.name}`}
+          title={
+            deletable
+              ? `删除 ${skill.displayName || skill.name}`
+              : "此 Skill 不属于项目或全局 .awaken/skills，不能在这里删除"
+          }
+          disabled={!deletable || deletingSkill}
+          onClick={() => setPendingSkillDelete({ skill, projectRoot })}
+        >
+          <Trash2 size={18} strokeWidth={1.9} />
+        </button>
       </article>
     );
   }
@@ -934,7 +982,7 @@ export function ExtensionsView({
           <div className="skill-project-body" id={bodyId}>
             {group.visibleSkills.length > 0 ? (
               <div className="extension-grid">
-                {group.visibleSkills.map(renderSkillCard)}
+                {group.visibleSkills.map((skill) => renderSkillCard(skill, group.root))}
               </div>
             ) : (
               <div className="extension-empty">
@@ -1109,7 +1157,7 @@ export function ExtensionsView({
                 <section className="extension-section" aria-label="全局 Skills">
                   <div className="extension-grid">
                     {visibleUserSkills.length > 0 ? (
-                      visibleUserSkills.map(renderSkillCard)
+                      visibleUserSkills.map((skill) => renderSkillCard(skill))
                     ) : (
                       <div className="extension-empty">暂无全局 Skills</div>
                     )}
@@ -1119,7 +1167,7 @@ export function ExtensionsView({
                   <section className="extension-section">
                     <h2>MCP 动态</h2>
                     <div className="extension-grid">
-                      {visibleMcpSkills.map(renderSkillCard)}
+                      {visibleMcpSkills.map((skill) => renderSkillCard(skill))}
                     </div>
                   </section>
                 ) : null}
@@ -1127,7 +1175,7 @@ export function ExtensionsView({
                   <section className="extension-section">
                     <h2>其他来源</h2>
                     <div className="extension-grid">
-                      {visibleOtherSkills.map(renderSkillCard)}
+                      {visibleOtherSkills.map((skill) => renderSkillCard(skill))}
                     </div>
                   </section>
                 ) : null}
@@ -1136,6 +1184,53 @@ export function ExtensionsView({
           </div>
         )}
       </div>
+
+      <Dialog
+        open={pendingSkillDelete !== null}
+        title="删除 Skill"
+        onOpenChange={(open) => {
+          if (!open && !deletingSkill) {
+            setPendingSkillDelete(null);
+          }
+        }}
+        footer={
+          <>
+            <Button
+              variant="default"
+              size="md"
+              disabled={deletingSkill}
+              onClick={() => setPendingSkillDelete(null)}
+            >
+              取消
+            </Button>
+            <Button
+              className="skill-delete-confirm-button"
+              variant="primary"
+              size="md"
+              loading={deletingSkill}
+              onClick={() => {
+                void handleDeleteSkill();
+              }}
+            >
+              <Trash2 size={15} strokeWidth={1.9} />
+              确认删除
+            </Button>
+          </>
+        }
+      >
+        <div className="extension-dialog-body skill-delete-dialog-body">
+          <p>
+            确定要删除 Skill「
+            <strong>
+              {pendingSkillDelete?.skill.displayName || pendingSkillDelete?.skill.name}
+            </strong>
+            」吗？
+          </p>
+          <p className="extension-dialog-note">
+            确认后会立即从对应的 .awaken/skills 目录移除，并将完整 Skill 包移动到系统废纸篓。
+          </p>
+        </div>
+      </Dialog>
 
       <Dialog
         open={mcpDialogOpen}

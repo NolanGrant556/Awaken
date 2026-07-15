@@ -274,31 +274,6 @@ export function projectAguiEventToNarrative(
           .join(" | "),
         "error",
       );
-    case "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED":
-    case "AWAKEN_MASS_MESSAGE_REVIEW_RESOLVED":
-      return commitRuntimeNotice(
-        base,
-        event,
-        "mass-message-review",
-        event.type === "AWAKEN_MASS_MESSAGE_REVIEW_RESOLVED"
-          ? event.reviewDecision === "approved"
-            ? "Mass message approved"
-            : "Mass message rejected"
-          : "Mass message review required",
-        [
-          event.massMessageChannel,
-          event.massMessageRecipientScope,
-          event.massMessageRecipientCount?.toString(),
-          event.massMessageBodyPreview,
-        ]
-          .filter(Boolean)
-          .join(" | "),
-        event.type === "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED"
-          ? "active"
-          : event.reviewDecision === "approved"
-            ? "done"
-            : "error",
-      );
     case "AWAKEN_USER_QUESTION_REQUESTED":
     case "AWAKEN_USER_QUESTION_RESOLVED": {
       let detail = "";
@@ -1098,8 +1073,7 @@ function commitRuntimeNotice(
 ): RunNarrativeState {
   const id = `${prefix}:${eventScopedId(
     event,
-    event.reviewId ??
-      event.toolCallId ??
+    event.toolCallId ??
       event.runtimeComponent ??
       event.runtimeName ??
       event.authProvider ??

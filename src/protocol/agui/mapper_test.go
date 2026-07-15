@@ -190,35 +190,6 @@ func TestMapEventSkillLifecycle(t *testing.T) {
 	}
 }
 
-func TestMapEventMassMessageReviewMetadata(t *testing.T) {
-	events := MapEvent(agentcore.AwakenEvent{
-		Type:                          agentcore.MassMessageReviewRequestedType,
-		ReviewID:                      "review-1",
-		ReviewEnvelopeDigest:          "envelope-1",
-		ReviewBodyDigest:              "body-1",
-		ReviewRecipientIdentityDigest: "recipients-1",
-		MassMessageRecipientCount:     42,
-		MassMessageMessageCount:       25,
-		MassMessageExpandsRecipients:  true,
-		MassMessageTemplatePreview:    "Hello {{name}}",
-		MassMessageAttachments:        []string{"brief.pdf"},
-		MassMessageSendingAccount:     "sender@example.com",
-	})
-	if len(events) != 1 || events[0].Type != EventAwakenMassReviewRequested {
-		t.Fatalf("unexpected mass-message review projection: %+v", events)
-	}
-	frame := events[0]
-	if frame.ReviewEnvelopeDigest != "envelope-1" || frame.ReviewBodyDigest != "body-1" || frame.ReviewRecipientIdentityDigest != "recipients-1" {
-		t.Fatalf("canonical review binding lost: %+v", frame)
-	}
-	if frame.MassMessageMessageCount != 25 || frame.MassMessageExpandsRecipients == nil || !*frame.MassMessageExpandsRecipients {
-		t.Fatalf("mass-message expansion metadata lost: %+v", frame)
-	}
-	if frame.MassMessageTemplatePreview != "Hello {{name}}" || frame.MassMessageSendingAccount != "sender@example.com" || len(frame.MassMessageAttachments) != 1 {
-		t.Fatalf("mass-message review details lost: %+v", frame)
-	}
-}
-
 func TestMapEventToolCallArgsDelta(t *testing.T) {
 	events := MapEvent(agentcore.AwakenEvent{
 		Type:       agentcore.ToolCallArgsDeltaEventType,

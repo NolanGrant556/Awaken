@@ -56,7 +56,6 @@ import type {
   AwakenThemePreference,
   ComposerToken,
   DesktopOperationIssue,
-  MassMessageReviewDecision,
   RuntimeInfo,
   RuntimeProject,
   RunInputAttachment,
@@ -961,8 +960,6 @@ export function App() {
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
   const [openingArtifactId, setOpeningArtifactId] = useState<string | null>(null);
-  const [resolvingMassMessageReviewId, setResolvingMassMessageReviewId] =
-    useState<string | null>(null);
   const [answeringUserQuestionId, setAnsweringUserQuestionId] =
     useState<string | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
@@ -1949,7 +1946,6 @@ export function App() {
     }
   }, [filteredSlashActions, slashActiveActionId, slashPaletteOpen]);
 
-  const activeMassMessageReview = runtimeState.massMessageReviews[0];
   const activeUserQuestion = runtimeState.userQuestions[0];
   const navItems: NavItem[] = [
     {
@@ -3186,51 +3182,6 @@ export function App() {
     }
   }
 
-  async function handleResolveMassMessageReview(
-    decision: MassMessageReviewDecision,
-  ): Promise<void> {
-    if (!runtimeState.runId || !activeMassMessageReview) {
-      return;
-    }
-    if (resolvingMassMessageReviewId === activeMassMessageReview.id) {
-      return;
-    }
-    if (
-      !activeMassMessageReview.reviewEnvelopeDigest ||
-      !activeMassMessageReview.reviewBodyDigest ||
-      !activeMassMessageReview.reviewRecipientIdentityDigest
-    ) {
-      setNotice(
-        "Mass message review is missing its canonical approval binding. Start a new tool call.",
-      );
-      return;
-    }
-
-    setNotice(null);
-    setResolvingMassMessageReviewId(activeMassMessageReview.id);
-    try {
-      await runtimeClient.resolveMassMessageReview(
-        runtimeState.runId,
-        activeMassMessageReview.id,
-        decision,
-        {
-          envelopeDigest: activeMassMessageReview.reviewEnvelopeDigest,
-          bodyDigest: activeMassMessageReview.reviewBodyDigest,
-          recipientIdentityDigest:
-            activeMassMessageReview.reviewRecipientIdentityDigest,
-        },
-      );
-    } catch (error) {
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : "Failed to resolve mass message review",
-      );
-    } finally {
-      setResolvingMassMessageReviewId(null);
-    }
-  }
-
   async function handleAnswerUserQuestion(answer: string): Promise<void> {
     if (!runtimeState.runId || !activeUserQuestion) {
       return;
@@ -3674,85 +3625,6 @@ export function App() {
     "--aw-inspector-width": `${inspectorWidth}px`,
   } as CSSProperties;
 
-  function renderMassMessageReviewPrompt() {
-    if (!activeMassMessageReview) {
-      return null;
-    }
-    const resolving =
-      resolvingMassMessageReviewId === activeMassMessageReview.id;
-    const detail = [
-      activeMassMessageReview.channel
-        ? `发送渠道：${activeMassMessageReview.channel}`
-        : undefined,
-      activeMassMessageReview.sendingAccount
-        ? `发送账号：${activeMassMessageReview.sendingAccount}`
-        : undefined,
-      activeMassMessageReview.recipientScope
-        ? `收件人范围：${activeMassMessageReview.recipientScope}`
-        : undefined,
-      activeMassMessageReview.recipientCount !== undefined
-        ? `收件人数量：${activeMassMessageReview.recipientCount}`
-        : undefined,
-      activeMassMessageReview.messageCount !== undefined
-        ? `消息数量：${activeMassMessageReview.messageCount}`
-        : undefined,
-      activeMassMessageReview.expandsRecipients === true
-        ? "收件人集合将继续批量扩展"
-        : activeMassMessageReview.expandsRecipients === false
-          ? "收件人集合固定"
-          : undefined,
-    ]
-      .filter(Boolean)
-      .join(" | ");
-    return (
-      <div className="mass-message-review-card">
-        <div className="mass-message-review-card__body">
-          <div className="mass-message-review-card__title">群发消息审核</div>
-          {detail ? (
-            <div className="mass-message-review-card__meta">{detail}</div>
-          ) : null}
-          {activeMassMessageReview.bodyPreview ? (
-            <div className="mass-message-review-card__preview">
-              正文预览：{activeMassMessageReview.bodyPreview}
-            </div>
-          ) : null}
-          {activeMassMessageReview.templatePreview ? (
-            <div className="mass-message-review-card__preview">
-              模板预览：{activeMassMessageReview.templatePreview}
-            </div>
-          ) : null}
-          {activeMassMessageReview.attachments.length > 0 ? (
-            <div className="mass-message-review-card__meta">
-              附件：{activeMassMessageReview.attachments.join(", ")}
-            </div>
-          ) : null}
-        </div>
-        <div className="mass-message-review-card__actions">
-          <Button
-            variant="default"
-            size="sm"
-            disabled={resolving}
-            onClick={() => {
-              void handleResolveMassMessageReview("rejected");
-            }}
-          >
-            拒绝
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            loading={resolving}
-            onClick={() => {
-              void handleResolveMassMessageReview("approved");
-            }}
-          >
-            通过发送
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
   function renderUserQuestionPrompt() {
     if (!activeUserQuestion) {
       return null;
@@ -4076,7 +3948,6 @@ export function App() {
                           <ComposerDock ref={setComposerDockElement}>
                             <div className="composer-dock-stack">
                               {renderComposerRuntimePanels()}
-                              {renderMassMessageReviewPrompt()}
                               {renderUserQuestionPrompt()}
                               <ComposerBar
                                 value={composerValue}
@@ -4117,7 +3988,6 @@ export function App() {
                         <div className="run-stage-center-composer">
                           <TaskWelcome />
                           {renderComposerRuntimePanels()}
-                          {renderMassMessageReviewPrompt()}
                           {renderUserQuestionPrompt()}
                           <ComposerBar
                             value={composerValue}

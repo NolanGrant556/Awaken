@@ -218,7 +218,7 @@ func (b *WorkspaceExecutionBroker) Authorize(ctx context.Context, request Execut
 			Action:          BrokerDeny,
 			Reason:          "raw network execution has no recipient-observable egress gateway; use a typed web/MCP/connector provider",
 			EnforcementMode: workspaceExecutionBrokerID,
-			Evidence:        []string{"network_denied_without_egress_gateway", "mass_message_review_cannot_be_bypassed"},
+			Evidence:        []string{"network_denied_without_egress_gateway"},
 			IssuedAt:        time.Now().UTC(),
 		}, ErrExecutionBrokerDenied
 	}

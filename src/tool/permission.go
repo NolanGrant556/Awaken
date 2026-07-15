@@ -12,7 +12,7 @@ import (
 // Decide returns the zero-approval decision derived from the provider
 // contract. Ordinary tools default to allow; deny/unsupported is reserved for
 // an explicit hard boundary such as an unrecoverable delete. Authentication
-// and the single mass-message review are structured non-generic states.
+// and runtime readiness remain structured non-generic states.
 func Decide(ctx context.Context, def ToolDefinition) PermissionDecision {
 	return DecideWithOverride(ctx, def, nil)
 }
@@ -49,15 +49,6 @@ func DecideWithOverride(ctx context.Context, def ToolDefinition, overrides map[s
 		return AllowPermission()
 	}
 
-	switch def.Annotations.CapabilityClass {
-	case CapabilityMassMessageSend:
-		return NeedsMassMessageReviewPermission("mass message send requires human review", DecisionMetadata{
-			MassMessage: def.Annotations.MassMessage,
-		})
-	}
-	if HasCapability(def.Capabilities, CapabilityMessageMassSend) {
-		return NeedsMassMessageReviewPermission("mass message send requires human review", DecisionMetadata{MassMessage: def.Annotations.MassMessage})
-	}
 	if definitionDeclaresDelete(def) && !HasCapability(def.Capabilities, CapabilityFileDelete) {
 		return UnsupportedPermission("unsupported_recoverable_delete: provider does not declare a recoverable file-delete contract")
 	}
@@ -100,12 +91,11 @@ func policyToDecision(policy PermissionPolicy) PermissionDecision {
 type PermissionBehavior string
 
 const (
-	PermissionAllow                  PermissionBehavior = "allow"
-	PermissionDeny                   PermissionBehavior = "deny"
-	PermissionNeedsAuth              PermissionBehavior = "needs_auth"
-	PermissionNeedsRuntime           PermissionBehavior = "needs_runtime"
-	PermissionUnsupported            PermissionBehavior = "unsupported"
-	PermissionNeedsMassMessageReview PermissionBehavior = "needs_mass_message_review"
+	PermissionAllow        PermissionBehavior = "allow"
+	PermissionDeny         PermissionBehavior = "deny"
+	PermissionNeedsAuth    PermissionBehavior = "needs_auth"
+	PermissionNeedsRuntime PermissionBehavior = "needs_runtime"
+	PermissionUnsupported  PermissionBehavior = "unsupported"
 )
 
 type PermissionDecision struct {
@@ -184,14 +174,6 @@ func UnsupportedPermissionWithCode(reason, code string) PermissionDecision {
 		Behavior:  PermissionUnsupported,
 		Reason:    reason,
 		ErrorCode: strings.TrimSpace(code),
-	}
-}
-
-func NeedsMassMessageReviewPermission(reason string, metadata DecisionMetadata) PermissionDecision {
-	return PermissionDecision{
-		Behavior: PermissionNeedsMassMessageReview,
-		Reason:   reason,
-		Metadata: metadata,
 	}
 }
 

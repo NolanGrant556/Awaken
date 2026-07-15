@@ -386,8 +386,8 @@ func TestToolRuntimeEmitsPatchPreviewBeforeApplyPatchExecution(t *testing.T) {
 		t.Fatalf("unexpected affected paths: %+v", got[0].AffectedPaths)
 	}
 	for _, event := range got {
-		if event.Type == AuthRequiredEventType || event.Type == MassMessageReviewRequestedType {
-			t.Fatalf("expected no auth/review event on apply_patch, got %+v", event)
+		if event.Type == AuthRequiredEventType {
+			t.Fatalf("expected no auth event on apply_patch, got %+v", event)
 		}
 	}
 }
@@ -515,61 +515,6 @@ func TestToolRuntimeNeedsRuntimePreservesRecoveryDecision(t *testing.T) {
 		result.Outcome.Errors[0].RetryStrategy != tool.RetryPrepareRuntime ||
 		len(result.Outcome.NextActions) == 0 {
 		t.Fatalf("needs_runtime recovery facts were lost: %+v", result.Outcome)
-	}
-}
-
-func TestToolRuntimeMassMessageReviewBlocksExecution(t *testing.T) {
-	var executeCount int
-	toolName := "runtime_mass_message_tool"
-	mustRegisterRuntimeTool(t, runtimeTestTool{
-		name: toolName,
-		permission: tool.NeedsMassMessageReviewPermission("mass message requires review", tool.DecisionMetadata{
-			MassMessage: &tool.MassMessageMetadata{
-				Channel:                 "outlook",
-				RecipientScope:          "team",
-				RecipientCount:          3,
-				BodyPreview:             "hello",
-				SendingAccount:          "me@example.com",
-				EnvelopeDigest:          "message:event-test",
-				BodyDigest:              "sha256:event-test",
-				RecipientIdentityDigest: "recipients_sha256:event-test",
-			},
-		}),
-		executeCount: &executeCount,
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-
-	var got []AwakenEvent
-	result := NewToolRuntime(EventSinkFunc(func(event AwakenEvent) {
-		got = append(got, event)
-	})).Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_mass_message",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"hello"}`,
-		},
-	})
-
-	if executeCount != 0 {
-		t.Fatalf("expected mass message tool not to execute before review, got %d executions", executeCount)
-	}
-	if result.ErrorCode != "needs_mass_message_review" || result.Outcome.Status != tool.OutcomeReviewRequired {
-		t.Fatalf("expected needs_mass_message_review result, got %+v", result)
-	}
-	if result.IsError {
-		t.Fatalf("review_required must not set compatibility IsError per ToolOutcome contract, got %+v", result)
-	}
-	if len(got) != 3 ||
-		got[0].Type != ToolPermissionDecidedEventType ||
-		got[0].ToolDecisionAction != string(ToolDecisionNeedsMassMessageReview) ||
-		got[1].Type != ToolProgressEventType ||
-		got[1].ToolProgressStage != "needs_mass_message_review" ||
-		got[2].Type != MassMessageReviewRequestedType ||
-		got[2].MassMessageRecipientCount != 3 ||
-		got[2].ReviewEnvelopeDigest == "" || got[2].ReviewBodyDigest == "" || got[2].ReviewRecipientIdentityDigest == "" {
-		t.Fatalf("unexpected mass message review events: %+v", got)
 	}
 }
 

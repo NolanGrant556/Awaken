@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -61,28 +60,12 @@ type Event struct {
 }
 
 type Session struct {
-	mu                         sync.RWMutex
-	run                        Run
-	cancel                     context.CancelFunc
-	bus                        *EventBus
-	semanticRecorder           agentcore.SemanticRecorder
-	massMessageReviews         map[string]*pendingMassMessageReview
-	resolvedMassMessageReviews map[string]agentcore.ReviewDecision
-	userQuestions              map[string]*pendingUserQuestion
-}
-
-type pendingMassMessageReview struct {
-	request   agentcore.AwakenEvent
-	decision  chan agentcore.ReviewDecision
-	resolveMu sync.Mutex
-}
-
-// MassMessageReviewDigests identifies the exact canonical send envelope the
-// user saw. Resolve callers must echo all three values from the request event.
-type MassMessageReviewDigests struct {
-	EnvelopeDigest          string
-	BodyDigest              string
-	RecipientIdentityDigest string
+	mu               sync.RWMutex
+	run              Run
+	cancel           context.CancelFunc
+	bus              *EventBus
+	semanticRecorder agentcore.SemanticRecorder
+	userQuestions    map[string]*pendingUserQuestion
 }
 
 type pendingUserQuestion struct {
@@ -103,11 +86,9 @@ func NewSession(runID, threadID, input string, attachments []RunInputAttachment,
 			CreatedAt:        now,
 			UpdatedAt:        now,
 		},
-		cancel:                     cancel,
-		bus:                        NewEventBus(),
-		massMessageReviews:         make(map[string]*pendingMassMessageReview),
-		resolvedMassMessageReviews: make(map[string]agentcore.ReviewDecision),
-		userQuestions:              make(map[string]*pendingUserQuestion),
+		cancel:        cancel,
+		bus:           NewEventBus(),
+		userQuestions: make(map[string]*pendingUserQuestion),
 	}
 }
 
@@ -335,235 +316,6 @@ func (s *Session) StreamSnapshot() ([]Event, uint64) {
 		return nil, 0
 	}
 	return s.bus.Snapshot()
-}
-
-func (s *Session) AwaitMassMessageReview(ctx context.Context, request agentcore.AwakenEvent) (agentcore.ReviewDecision, error) {
-	timestamp := request.Timestamp.UTC()
-	if request.Timestamp.IsZero() {
-		timestamp = time.Now().UTC()
-	}
-	request.Timestamp = timestamp
-	request.Type = agentcore.MassMessageReviewRequestedType
-	if strings.TrimSpace(request.ReviewID) == "" {
-		request.ReviewID = "mass_review"
-	}
-	if !validMassMessageReviewDigests(massMessageReviewDigestsFromEvent(request)) {
-		return "", ErrMassMessageReviewDigestMissing
-	}
-
-	pending := &pendingMassMessageReview{
-		request:  request,
-		decision: make(chan agentcore.ReviewDecision, 1),
-	}
-
-	s.mu.Lock()
-	if isTerminalStatus(s.run.Status) {
-		s.mu.Unlock()
-		return "", ErrRunTerminal
-	}
-	if _, exists := s.massMessageReviews[request.ReviewID]; exists {
-		s.mu.Unlock()
-		return "", ErrMassMessageReviewAlreadyPending
-	}
-	if _, resolved := s.resolvedMassMessageReviews[request.ReviewID]; resolved {
-		s.mu.Unlock()
-		return "", ErrMassMessageReviewAlreadyResolved
-	}
-	request.ThreadID = s.run.ThreadID
-	request.RunID = s.run.RunID
-	pending.request = request
-	s.run.UpdatedAt = timestamp
-	s.massMessageReviews[request.ReviewID] = pending
-	recorder := s.semanticRecorder
-	wrapped := Event{
-		Kind:       EventKindAgent,
-		Timestamp:  timestamp,
-		ThreadID:   s.run.ThreadID,
-		RunID:      s.run.RunID,
-		AgentEvent: request,
-	}
-	bus := s.bus
-	s.mu.Unlock()
-
-	if recorder != nil {
-		record := agentcore.NewSemanticRecord(
-			agentcore.SemanticKindMassMessageReviewRequested,
-			request.ThreadID,
-			request.RunID,
-			request.TurnID,
-			request.ToolCallID,
-			"",
-			massMessageReviewPayload(request),
-		)
-		if err := recorder.Append(ctx, record); err != nil {
-			s.mu.Lock()
-			delete(s.massMessageReviews, request.ReviewID)
-			s.mu.Unlock()
-			return "", fmt.Errorf("persist mass-message review request: %w", err)
-		}
-		if _, canonical := recorder.(agentcore.CanonicalLiveSemanticRecorder); !canonical {
-			bus.Append(wrapped, false)
-		}
-	} else {
-		bus.Append(wrapped, false)
-	}
-
-	select {
-	case decision := <-pending.decision:
-		return decision, nil
-	case <-ctx.Done():
-		s.mu.Lock()
-		delete(s.massMessageReviews, request.ReviewID)
-		s.mu.Unlock()
-		return "", ctx.Err()
-	}
-}
-
-func (s *Session) ResolveMassMessageReview(reviewID string, decision agentcore.ReviewDecision, digests MassMessageReviewDigests) error {
-	reviewID = strings.TrimSpace(reviewID)
-	if reviewID == "" {
-		return ErrMassMessageReviewNotFound
-	}
-	if decision != agentcore.ReviewDecisionApproved && decision != agentcore.ReviewDecisionRejected {
-		return ErrInvalidReviewDecision
-	}
-	digests = normalizeMassMessageReviewDigests(digests)
-	if !validMassMessageReviewDigests(digests) {
-		return ErrMassMessageReviewDigestMissing
-	}
-
-	now := time.Now().UTC()
-	s.mu.Lock()
-	if isTerminalStatus(s.run.Status) {
-		s.mu.Unlock()
-		return ErrRunTerminal
-	}
-	pending, ok := s.massMessageReviews[reviewID]
-	if !ok {
-		if _, resolved := s.resolvedMassMessageReviews[reviewID]; resolved {
-			s.mu.Unlock()
-			return ErrMassMessageReviewAlreadyResolved
-		}
-		s.mu.Unlock()
-		return ErrMassMessageReviewNotFound
-	}
-	if massMessageReviewDigestsFromEvent(pending.request) != digests {
-		s.mu.Unlock()
-		return ErrMassMessageReviewDigestMismatch
-	}
-	s.mu.Unlock()
-
-	// Persisting a resolution can re-enter Session through a live recorder, so
-	// it cannot happen while s.mu is held. Serialize per-review resolution and
-	// re-check state after taking that lock: exactly one caller may persist and
-	// release the waiter; every later resolution is rejected as a replay.
-	pending.resolveMu.Lock()
-	defer pending.resolveMu.Unlock()
-	s.mu.Lock()
-	if isTerminalStatus(s.run.Status) {
-		s.mu.Unlock()
-		return ErrRunTerminal
-	}
-	current, stillPending := s.massMessageReviews[reviewID]
-	if !stillPending || current != pending {
-		if _, resolved := s.resolvedMassMessageReviews[reviewID]; resolved {
-			s.mu.Unlock()
-			return ErrMassMessageReviewAlreadyResolved
-		}
-		s.mu.Unlock()
-		return ErrMassMessageReviewNotFound
-	}
-	if massMessageReviewDigestsFromEvent(pending.request) != digests {
-		s.mu.Unlock()
-		return ErrMassMessageReviewDigestMismatch
-	}
-	resolved := pending.request
-	resolved.Type = agentcore.MassMessageReviewResolvedType
-	resolved.Timestamp = now
-	resolved.ReviewDecision = decision
-	resolved.ThreadID = s.run.ThreadID
-	resolved.RunID = s.run.RunID
-	s.run.UpdatedAt = now
-	recorder := s.semanticRecorder
-	wrapped := Event{
-		Kind:       EventKindAgent,
-		Timestamp:  now,
-		ThreadID:   s.run.ThreadID,
-		RunID:      s.run.RunID,
-		AgentEvent: resolved,
-	}
-	s.mu.Unlock()
-
-	if recorder != nil {
-		record := agentcore.NewSemanticRecord(
-			agentcore.SemanticKindMassMessageReviewResolved,
-			resolved.ThreadID,
-			resolved.RunID,
-			resolved.TurnID,
-			resolved.ToolCallID,
-			"",
-			massMessageReviewPayload(resolved),
-		)
-		if err := recorder.Append(context.Background(), record); err != nil {
-			return fmt.Errorf("persist mass-message review resolution: %w", err)
-		}
-	}
-	s.mu.Lock()
-	delete(s.massMessageReviews, reviewID)
-	s.resolvedMassMessageReviews[reviewID] = decision
-	bus := s.bus
-	s.mu.Unlock()
-	if recorder == nil {
-		bus.Append(wrapped, false)
-	} else if _, canonical := recorder.(agentcore.CanonicalLiveSemanticRecorder); !canonical {
-		bus.Append(wrapped, false)
-	}
-	pending.decision <- decision
-	return nil
-}
-
-func massMessageReviewPayload(event agentcore.AwakenEvent) map[string]any {
-	payload := map[string]any{
-		"review_id":                 event.ReviewID,
-		"decision":                  string(event.ReviewDecision),
-		"review_decision":           string(event.ReviewDecision),
-		"tool_call_id":              event.ToolCallID,
-		"tool_name":                 event.ToolName,
-		"channel":                   event.MassMessageChannel,
-		"recipient_scope":           event.MassMessageRecipientScope,
-		"recipient_count":           event.MassMessageRecipientCount,
-		"message_count":             event.MassMessageMessageCount,
-		"expands_recipients":        event.MassMessageExpandsRecipients,
-		"body_preview":              event.MassMessageBodyPreview,
-		"template_preview":          event.MassMessageTemplatePreview,
-		"attachments":               append([]string(nil), event.MassMessageAttachments...),
-		"sending_account":           event.MassMessageSendingAccount,
-		"source_tool":               event.MassMessageSourceTool,
-		"envelope_digest":           event.ReviewEnvelopeDigest,
-		"body_digest":               event.ReviewBodyDigest,
-		"recipient_identity_digest": event.ReviewRecipientIdentityDigest,
-	}
-	return payload
-}
-
-func massMessageReviewDigestsFromEvent(event agentcore.AwakenEvent) MassMessageReviewDigests {
-	return normalizeMassMessageReviewDigests(MassMessageReviewDigests{
-		EnvelopeDigest:          event.ReviewEnvelopeDigest,
-		BodyDigest:              event.ReviewBodyDigest,
-		RecipientIdentityDigest: event.ReviewRecipientIdentityDigest,
-	})
-}
-
-func normalizeMassMessageReviewDigests(digests MassMessageReviewDigests) MassMessageReviewDigests {
-	digests.EnvelopeDigest = strings.TrimSpace(digests.EnvelopeDigest)
-	digests.BodyDigest = strings.TrimSpace(digests.BodyDigest)
-	digests.RecipientIdentityDigest = strings.TrimSpace(digests.RecipientIdentityDigest)
-	return digests
-}
-
-func validMassMessageReviewDigests(digests MassMessageReviewDigests) bool {
-	digests = normalizeMassMessageReviewDigests(digests)
-	return digests.EnvelopeDigest != "" && digests.BodyDigest != "" && digests.RecipientIdentityDigest != ""
 }
 
 func (s *Session) AwaitUserQuestion(ctx context.Context, request agentcore.AwakenEvent) (string, error) {

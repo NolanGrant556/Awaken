@@ -27,7 +27,6 @@ const (
 	CapabilitySpreadsheetCreate  Capability = "spreadsheet.create"
 	CapabilityImageGenerate      Capability = "image.generate"
 	CapabilityMessageSend        Capability = "message.send"
-	CapabilityMessageMassSend    Capability = "message.mass_send"
 	CapabilityToolDiagnose       Capability = "tool.diagnose"
 	CapabilityDependencyInstall  Capability = "dependency.install"
 	CapabilityGitRemoteRead      Capability = "git.remote_read"
@@ -116,8 +115,6 @@ func inferCapabilitiesFromDefinition(def ToolDefinition) []Capability {
 		}
 	case CapabilityBrowserRead, CapabilityBrowserInteract:
 		capabilities = append(capabilities, CapabilityBrowserInteractV2)
-	case CapabilityMassMessageSend:
-		capabilities = append(capabilities, CapabilityMessageMassSend)
 	case CapabilityConnectorWrite:
 		// Connector-write is intentionally not assumed to be message.send or
 		// file.delete. Those semantics require an input-aware provider manifest.

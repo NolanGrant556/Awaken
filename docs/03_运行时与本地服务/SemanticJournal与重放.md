@@ -8,12 +8,11 @@ SemanticJournal v2 是 run 内容与恢复的耐久事实源；09 域拥有 wire
 thread, run_started, user_message, assistant_message,
 tool_call, tool_result, artifact, file_change, turn_diff,
 permission_decision, skill_activated, resource_receipt,
-mass_message_review_requested, mass_message_review_resolved,
 runtime_notice, recovery_decision, context_compacted, turn_boundary,
 run_terminal, persistence_warning
 ```
 
-`permission_decision` 是工具自动策略、transform 或专用 gate 的记录，不代表通用 Approval 能力。
+`permission_decision` 是工具自动策略或 transform 的记录，不代表通用 Approval 能力。
 
 ## 2. Journal-first 写入顺序
 
@@ -21,7 +20,6 @@ run_terminal, persistence_warning
 - run 主循环写 `run_started`，已准备的 composer turn 被 Agent 消费一次，不再写第二条 user message；
 - 有副作用工具必须在 transport 前耐久 `tool_call` 和 decision；
 - Skill 成功激活在正文进入执行上下文或 child 启动前写 `skill_activated`/`resource_receipt`；失败不写伪 activation；
-- 群发消息在 external call 前写 requested，用户决定后写 resolved，批准 digest 必须匹配；
 - observed changes、artifacts 与 canonical `tool_result` 成批写入；
 - 上下文压缩结果在替换内存消息前写并 flush `context_compacted`；
 - 最后写唯一 `run_terminal`。
@@ -59,11 +57,11 @@ tool call/result payload 持久保存 tool/environment snapshot ID、provider ID
 
 模型历史使用 canonical `ModelPayload`，UI 使用 display/projection。失败工具不能在重放时凭卡片文案生成不存在的 change/artifact。
 
-## 6. Skill 与专用 gate 恢复
+## 6. Skill 与任务输入恢复
 
 `skill_activated` 保存锚定路径、正文、来源、调用模式和 receipt；服务重建时按 run 恢复 inline SkillContextBlocks。压缩按恢复后的最近调用顺序保留，单 Skill 约 5,000 tokens、合计约 25,000 tokens；6 个满预算块保留最新 5 个。截断块必须保留精确 `read_file` 源路径。
 
-mass-message requested/resolved 是专用耐久 gate。重启后未 resolved 或已拒绝的请求不得发送；批准只对相同 digest 生效，resolution 写入失败不得解锁 transport。
+消息发送不写 requested/resolved 审核记录，也不在重启恢复时重建 pending review；它只保留普通 tool call/result 与 provider outcome 事实。
 
 ## 7. Live 与 replay
 

@@ -22,14 +22,13 @@ const (
 type ToolDecisionAction string
 
 const (
-	ToolDecisionAllow                  ToolDecisionAction = "allow"
-	ToolDecisionDeny                   ToolDecisionAction = "deny"
-	ToolDecisionAbort                  ToolDecisionAction = "abort"
-	ToolDecisionTransform              ToolDecisionAction = "transform"
-	ToolDecisionNeedsAuth              ToolDecisionAction = "needs_auth"
-	ToolDecisionNeedsRuntime           ToolDecisionAction = "needs_runtime"
-	ToolDecisionUnsupported            ToolDecisionAction = "unsupported"
-	ToolDecisionNeedsMassMessageReview ToolDecisionAction = "needs_mass_message_review"
+	ToolDecisionAllow        ToolDecisionAction = "allow"
+	ToolDecisionDeny         ToolDecisionAction = "deny"
+	ToolDecisionAbort        ToolDecisionAction = "abort"
+	ToolDecisionTransform    ToolDecisionAction = "transform"
+	ToolDecisionNeedsAuth    ToolDecisionAction = "needs_auth"
+	ToolDecisionNeedsRuntime ToolDecisionAction = "needs_runtime"
+	ToolDecisionUnsupported  ToolDecisionAction = "unsupported"
 )
 
 type ToolDecisionSource string
@@ -43,7 +42,6 @@ const (
 	ToolDecisionSourceTransform         ToolDecisionSource = "transform"
 	ToolDecisionSourceAuthRequired      ToolDecisionSource = "auth_required"
 	ToolDecisionSourceRuntimeRequired   ToolDecisionSource = "runtime_required"
-	ToolDecisionSourceMassMessageReview ToolDecisionSource = "mass_message_review"
 )
 
 type ToolDecisionRequest struct {
@@ -194,10 +192,8 @@ func (p DefaultAutoToolPolicy) Decide(ctx stdcontext.Context, request ToolDecisi
 // action — context cancellation is handled separately by the runtime.
 //
 // The runtime no-review contract is final here: DecideExecution may return
-// allow, deny, transform, needs_auth, needs_runtime, unsupported, or
-// needs_mass_message_review. It never returns a generic human review action;
-// mass-message review is the only dedicated gate and is represented by its
-// own action.
+// allow, deny, transform, needs_auth, needs_runtime, or unsupported. It never
+// returns a generic or message-specific human review action.
 func (p DefaultAutoToolPolicy) DecideExecution(ctx stdcontext.Context, intent profile.ExecutionIntent, request ToolDecisionRequest) profile.ExecutionDecision {
 	if err := ctx.Err(); err != nil {
 		return profile.DenyDecision(string(profile.DecisionSourcePolicyError), err.Error(), false)
@@ -316,9 +312,6 @@ func toolDecisionToExecutionDecision(td ToolDecision, intent profile.ExecutionIn
 		ed.Source = profile.DecisionSourceRuntimeRequired
 	case ToolDecisionUnsupported:
 		ed.Action = profile.DecisionUnsupported
-	case ToolDecisionNeedsMassMessageReview:
-		ed.Action = profile.DecisionNeedsMassMessageReview
-		ed.Source = profile.DecisionSourceMassMessageReview
 	default:
 		ed.Action = profile.DecisionDeny
 		ed.Source = profile.DecisionSourcePolicyError
@@ -422,12 +415,6 @@ func decideByCapabilityClass(request ToolDecisionRequest) (ToolDecision, bool) {
 			Reason:       "local transform runs in the restricted local-compute lane",
 			UpdatedInput: request.NormalizedInput,
 		}, true
-	case tool.CapabilityMassMessageSend:
-		return ToolDecision{
-			Action: ToolDecisionNeedsMassMessageReview,
-			Source: ToolDecisionSourceMassMessageReview,
-			Reason: "mass message send requires human review",
-		}, true
 	case tool.CapabilityConnectorWrite, tool.CapabilityBrowserInteract,
 		tool.CapabilityExternalPublish, tool.CapabilitySystemOperation:
 		return ToolDecision{
@@ -462,12 +449,6 @@ func decideStructuredPermissionBehavior(request ToolDecisionRequest) (ToolDecisi
 			Source: ToolDecisionSourcePolicyError,
 			Reason: firstNonEmpty(strings.TrimSpace(request.StaticReason), "tool capability is unsupported"),
 		}, true
-	case tool.PermissionNeedsMassMessageReview:
-		return ToolDecision{
-			Action: ToolDecisionNeedsMassMessageReview,
-			Source: ToolDecisionSourceMassMessageReview,
-			Reason: firstNonEmpty(strings.TrimSpace(request.StaticReason), "mass message send requires human review"),
-		}, true
 	default:
 		return ToolDecision{}, false
 	}
@@ -476,7 +457,7 @@ func decideStructuredPermissionBehavior(request ToolDecisionRequest) (ToolDecisi
 func normalizeToolDecision(decision ToolDecision, fallbackReason string) ToolDecision {
 	switch decision.Action {
 	case ToolDecisionAllow, ToolDecisionDeny, ToolDecisionAbort, ToolDecisionTransform,
-		ToolDecisionNeedsAuth, ToolDecisionNeedsRuntime, ToolDecisionUnsupported, ToolDecisionNeedsMassMessageReview:
+		ToolDecisionNeedsAuth, ToolDecisionNeedsRuntime, ToolDecisionUnsupported:
 	default:
 		decision.Action = ToolDecisionDeny
 		decision.Source = ToolDecisionSourcePolicyError

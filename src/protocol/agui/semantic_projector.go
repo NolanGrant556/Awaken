@@ -282,18 +282,6 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		loaded.SkillResourceSize = int64FromAny(payload["size"])
 		loaded.SkillResourceMode = stringFromAny(payload["mode"])
 		return []Event{loaded}
-	case agentcore.SemanticKindMassMessageReviewRequested:
-		requested := massMessageReviewEventFromPayload(base, payload)
-		requested.Type = EventAwakenMassReviewRequested
-		return []Event{requested}
-	case agentcore.SemanticKindMassMessageReviewResolved:
-		resolved := massMessageReviewEventFromPayload(base, payload)
-		resolved.Type = EventAwakenMassReviewResolved
-		resolved.ReviewDecision = firstNonEmpty(
-			stringFromAny(payload["decision"]),
-			stringFromAny(payload["review_decision"]),
-		)
-		return []Event{resolved}
 	case agentcore.SemanticKindThread,
 		agentcore.SemanticKindFileChange:
 		return nil
@@ -371,27 +359,6 @@ func skillEventFromPayload(base Event, payload map[string]any) Event {
 	event.SkillStatus = firstNonEmpty(stringFromAny(payload["skill_status"]), stringFromAny(payload["compatibility_status"]), stringFromAny(payload["status"]))
 	event.SkillEffectiveTools = stringSliceFromAny(payload["effective_tools"])
 	event.SkillDiagnostics = diagnosticStringsFromAny(firstPresentValue(payload, "diagnostics", "compatibility_errors"))
-	return event
-}
-
-func massMessageReviewEventFromPayload(base Event, payload map[string]any) Event {
-	event := base
-	event.ReviewID = stringFromAny(payload["review_id"])
-	event.ReviewEnvelopeDigest = stringFromAny(payload["envelope_digest"])
-	event.ReviewBodyDigest = stringFromAny(payload["body_digest"])
-	event.ReviewRecipientIdentityDigest = stringFromAny(payload["recipient_identity_digest"])
-	event.ToolCallID = stringFromAny(payload["tool_call_id"])
-	event.ToolCallName = stringFromAny(payload["tool_name"])
-	event.MassMessageChannel = stringFromAny(payload["channel"])
-	event.MassMessageRecipientScope = stringFromAny(payload["recipient_scope"])
-	event.MassMessageRecipientCount = intFromAny(payload["recipient_count"])
-	event.MassMessageBodyPreview = stringFromAny(payload["body_preview"])
-	event.MassMessageTemplatePreview = stringFromAny(payload["template_preview"])
-	event.MassMessageAttachments = stringSliceFromAny(payload["attachments"])
-	event.MassMessageSendingAccount = stringFromAny(payload["sending_account"])
-	event.MassMessageSourceTool = stringFromAny(payload["source_tool"])
-	event.MassMessageMessageCount = intFromAny(payload["message_count"])
-	event.MassMessageExpandsRecipients = boolPointerFromAny(payload["expands_recipients"])
 	return event
 }
 

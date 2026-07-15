@@ -212,7 +212,6 @@ type ThreadViewState = {
   toolResults: ToolResultRecord[];
   patchPreviews: PatchPreviewRecord[];
   approvals: ApprovalItem[];
-  massMessageReviews: MassMessageReviewItem[];
   userQuestions: UserQuestionItem[];
   artifacts: ArtifactRecord[];
   turnDiff?: TurnDiffRecord;
@@ -238,7 +237,6 @@ export type RuntimeViewState = {
   toolResults: ToolResultRecord[];
   patchPreviews: PatchPreviewRecord[];
   approvals: ApprovalItem[];
-  massMessageReviews: MassMessageReviewItem[];
   userQuestions: UserQuestionItem[];
   artifacts: ArtifactRecord[];
   turnDiff?: TurnDiffRecord;
@@ -285,23 +283,6 @@ export type RuntimeAction =
   | { type: "run/event"; event: AguiEvent; receivedAtMs?: number }
   | { type: "supervisor/status-changed"; info: SupervisorStatusInfo };
 
-export type MassMessageReviewItem = {
-  id: string;
-  channel?: string;
-  recipientScope?: string;
-  recipientCount?: number;
-  bodyPreview?: string;
-  templatePreview?: string;
-  attachments: string[];
-  sendingAccount?: string;
-  sourceTool?: string;
-  reviewEnvelopeDigest?: string;
-  reviewBodyDigest?: string;
-  reviewRecipientIdentityDigest?: string;
-  messageCount?: number;
-  expandsRecipients?: boolean;
-};
-
 export type UserQuestionOption = {
   label: string;
   description?: string;
@@ -332,7 +313,6 @@ const initialState: RuntimeViewState = {
   toolResults: [],
   patchPreviews: [],
   approvals: [],
-  massMessageReviews: [],
   userQuestions: [],
   artifacts: [],
   narrative: createInitialRunNarrativeState(),
@@ -358,7 +338,6 @@ function viewFromState(state: RuntimeViewState): ThreadViewState {
     toolResults: state.toolResults,
     patchPreviews: state.patchPreviews,
     approvals: state.approvals,
-    massMessageReviews: state.massMessageReviews,
     userQuestions: state.userQuestions,
     artifacts: state.artifacts,
     turnDiff: state.turnDiff,
@@ -1127,30 +1106,6 @@ function removeApproval(
   return approvals.filter((approval) => approval.id !== approvalId);
 }
 
-function upsertMassMessageReview(
-  reviews: MassMessageReviewItem[],
-  next: MassMessageReviewItem,
-): MassMessageReviewItem[] {
-  const index = reviews.findIndex((review) => review.id === next.id);
-  if (index < 0) {
-    return [...reviews, next];
-  }
-
-  const updated = reviews.slice();
-  updated[index] = next;
-  return updated;
-}
-
-function removeMassMessageReview(
-  reviews: MassMessageReviewItem[],
-  reviewId?: string,
-): MassMessageReviewItem[] {
-  if (!reviewId) {
-    return reviews;
-  }
-  return reviews.filter((review) => review.id !== reviewId);
-}
-
 function upsertUserQuestion(
   questions: UserQuestionItem[],
   next: UserQuestionItem,
@@ -1281,7 +1236,6 @@ function syncFromRun(
       status: run.status,
 		timelineStatus: "running",
 		approvals: [],
-		massMessageReviews: [],
 		userQuestions: [],
 		steps: toSteps(
         upsertStep(
@@ -1312,7 +1266,6 @@ function syncFromRun(
       status: run.status,
 		timelineStatus: "done",
 		approvals: [],
-		massMessageReviews: [],
 		userQuestions: [],
 	};
   }
@@ -1327,7 +1280,6 @@ function syncFromRun(
       status: run.status,
 		timelineStatus: "done",
 		approvals: [],
-		massMessageReviews: [],
 		userQuestions: [],
 	};
   }
@@ -1343,7 +1295,6 @@ function syncFromRun(
       timelineStatus: "error",
 		errorMessage: run.error || "Run failed",
 		approvals: [],
-		massMessageReviews: [],
 		userQuestions: [],
 	};
   }
@@ -1389,7 +1340,6 @@ export function reduceRuntimeState(
 		toolResults: [],
 		patchPreviews: [],
 		approvals: [],
-		massMessageReviews: [],
 		userQuestions: [],
 		artifacts: [],
         turnDiff: undefined,
@@ -1445,7 +1395,6 @@ export function reduceRuntimeState(
           status: "cancelling",
 		timelineStatus: "running",
 		approvals: [],
-		massMessageReviews: [],
 		userQuestions: [],
 	}),
       );
@@ -1519,7 +1468,6 @@ export function reduceRuntimeState(
           timelineStatus: "error",
 		errorMessage: action.message,
 		approvals: [],
-		massMessageReviews: [],
 		userQuestions: [],
 		inspectorSummary: {
             ...state.inspectorSummary,
@@ -1808,19 +1756,16 @@ export function reduceRuntimeState(
             nextState.phase = "cancelling";
             nextState.timelineStatus = "running";
             nextState.approvals = [];
-            nextState.massMessageReviews = [];
             nextState.userQuestions = [];
           } else if (status === "cancelled") {
             nextState.phase = "cancelled";
             nextState.timelineStatus = "done";
             nextState.approvals = [];
-            nextState.massMessageReviews = [];
             nextState.userQuestions = [];
           } else if (status === "finished") {
             nextState.phase = "done";
             nextState.timelineStatus = "done";
             nextState.approvals = [];
-            nextState.massMessageReviews = [];
             nextState.userQuestions = [];
             nextState.runCompletedAtMs =
               nextState.runCompletedAtMs ??
@@ -1831,7 +1776,6 @@ export function reduceRuntimeState(
             nextState.phase = "error";
             nextState.timelineStatus = "error";
             nextState.approvals = [];
-            nextState.massMessageReviews = [];
             nextState.userQuestions = [];
           }
           if (
@@ -1869,7 +1813,6 @@ export function reduceRuntimeState(
           nextState.status = "finished";
           nextState.timelineStatus = "done";
           nextState.approvals = [];
-          nextState.massMessageReviews = [];
           nextState.userQuestions = [];
           nextState.runCompletedAtMs =
             nextState.runCompletedAtMs ??
@@ -2491,66 +2434,6 @@ export function reduceRuntimeState(
           });
           break;
         }
-        case "AWAKEN_MASS_MESSAGE_REVIEW_REQUESTED": {
-          const reviewId = action.event.reviewId ?? action.event.toolCallId ?? "mass-message";
-          nextState.massMessageReviews = upsertMassMessageReview(
-            nextState.massMessageReviews,
-            {
-              id: reviewId,
-              channel: action.event.massMessageChannel,
-              recipientScope: action.event.massMessageRecipientScope,
-              recipientCount: action.event.massMessageRecipientCount,
-              bodyPreview: action.event.massMessageBodyPreview,
-              templatePreview: action.event.massMessageTemplatePreview,
-              attachments: action.event.massMessageAttachments ?? [],
-              sendingAccount: action.event.massMessageSendingAccount,
-              sourceTool: action.event.massMessageSourceTool ?? action.event.toolCallName,
-              reviewEnvelopeDigest: action.event.reviewEnvelopeDigest,
-              reviewBodyDigest: action.event.reviewBodyDigest,
-              reviewRecipientIdentityDigest: action.event.reviewRecipientIdentityDigest,
-              messageCount: action.event.massMessageMessageCount,
-              expandsRecipients: action.event.massMessageExpandsRecipients,
-            },
-          );
-          records = upsertStep(records, `mass-message-review:${reviewId}`, {
-            title: "Mass message review required",
-            description: [
-              action.event.massMessageChannel,
-              action.event.massMessageRecipientScope,
-              action.event.massMessageRecipientCount?.toString(),
-              action.event.massMessageSendingAccount,
-              action.event.massMessageMessageCount?.toString(),
-              action.event.massMessageExpandsRecipients === true
-                ? "recipient set expands"
-                : action.event.massMessageExpandsRecipients === false
-                  ? "recipient set fixed"
-                  : undefined,
-              action.event.massMessageBodyPreview,
-            ]
-              .filter(Boolean)
-              .join(" | "),
-            status: "active",
-            tag: "mass-message-review",
-          });
-          break;
-        }
-        case "AWAKEN_MASS_MESSAGE_REVIEW_RESOLVED": {
-          const reviewId = action.event.reviewId ?? action.event.toolCallId ?? "mass-message";
-          const approved = action.event.reviewDecision === "approved";
-          nextState.massMessageReviews = removeMassMessageReview(
-            nextState.massMessageReviews,
-            reviewId,
-          );
-          records = upsertStep(records, `mass-message-review:${reviewId}`, {
-            title: approved
-              ? "Mass message approved"
-              : "Mass message rejected",
-            description: action.event.massMessageSourceTool,
-            status: approved ? "done" : "error",
-            tag: "mass-message-review",
-          });
-          break;
-        }
         case "AWAKEN_USER_QUESTION_REQUESTED": {
           const questionId = action.event.questionId ?? action.event.toolCallId ?? "user-question";
           let questions: UserQuestion[] = [];
@@ -2620,7 +2503,6 @@ export function reduceRuntimeState(
             nextState.status = "cancelled";
             nextState.timelineStatus = "done";
             nextState.approvals = [];
-            nextState.massMessageReviews = [];
             nextState.userQuestions = [];
             records = upsertStep(records, "run-cancelled", {
               title: "Run cancelled",
@@ -2647,7 +2529,6 @@ export function reduceRuntimeState(
             }
             nextState.errorMessage = errorMessage;
             nextState.approvals = [];
-            nextState.massMessageReviews = [];
             nextState.userQuestions = [];
             records = upsertStep(records, "run-error", {
               title: "Run failed",

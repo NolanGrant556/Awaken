@@ -47,9 +47,9 @@ func ResolveArtifactRole(role ArtifactRole, producer, kind, path string) Artifac
 }
 
 // ClassifyLegacyArtifactRole adapts artifacts recorded before v2 without
-// rewriting history. Producer-specific rules take precedence over extensions so
-// generic edits never become final deliverables merely because they touched an
-// Office or Markdown file.
+// rewriting history. Created or modified files with a publishable document
+// extension are deliverables; deleted/moved files and non-document changes stay
+// support artifacts.
 func ClassifyLegacyArtifactRole(producer, kind, path string) ArtifactRole {
 	producer = strings.ToLower(strings.TrimSpace(producer))
 	kind = strings.ToLower(strings.TrimSpace(kind))
@@ -57,10 +57,13 @@ func ClassifyLegacyArtifactRole(producer, kind, path string) ArtifactRole {
 
 	switch producer {
 	case "apply_patch", "text_edit":
+		if isCreatedOrModifiedArtifactKind(kind) && IsPublishableArtifactPath(path) {
+			return ArtifactRoleDeliverable
+		}
 		return ArtifactRoleSupport
 	}
 	switch kind {
-	case "added", "deleted", "modified", "moved", "patch", "file_change":
+	case "deleted", "moved", "patch", "file_change":
 		return ArtifactRoleSupport
 	}
 
@@ -99,7 +102,7 @@ func ClassifyLegacyArtifactRole(producer, kind, path string) ArtifactRole {
 		default:
 			return ArtifactRoleSupport
 		}
-	case "artifact_export":
+	case "artifact_export", "office_export_pdf":
 		if IsPublishableArtifactPath(path) {
 			return ArtifactRoleDeliverable
 		}
@@ -127,6 +130,15 @@ func ClassifyLegacyArtifactRole(producer, kind, path string) ArtifactRole {
 		return ArtifactRolePreview
 	}
 	return ArtifactRoleSupport
+}
+
+func isCreatedOrModifiedArtifactKind(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "added", "created", "modified", "updated", "overwritten":
+		return true
+	default:
+		return false
+	}
 }
 
 func isRenderProducer(producer string) bool {

@@ -366,7 +366,7 @@ func (t *ApplyPatchTool) Artifacts(input string, output string, permissionContex
 		}
 		artifacts = append(artifacts, tool.ArtifactDescriptor{
 			ContractVersion: tool.ArtifactContractVersion,
-			Role:            tool.ArtifactRoleSupport,
+			Role:            tool.ResolveArtifactRole("", "apply_patch", kind, path),
 			Producer:        "apply_patch",
 			Action:          action,
 			ID:              fmt.Sprintf("apply_patch:%s:%s", kind, path),

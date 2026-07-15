@@ -1695,6 +1695,83 @@ describe("runtime reducer run narrative projection", () => {
     });
   });
 
+  it("renders every created or modified document and excludes deleted documents", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "Create and update reports" },
+      runEvent({
+        type: "AWAKEN_ARTIFACT_CREATED",
+        seq: 1,
+        artifactId: "apply_patch:added:new.md",
+        artifactTitle: "new.md",
+        artifactKind: "added",
+        artifactPath: "output/new.md",
+        artifactStatus: "ready",
+        artifactRole: "deliverable",
+        artifactContractVersion: 2,
+        artifactProducer: "apply_patch",
+      }),
+      runEvent({
+        type: "AWAKEN_ARTIFACT_UPDATED",
+        seq: 2,
+        artifactId: "apply_patch:modified:existing.md",
+        artifactTitle: "existing.md",
+        artifactKind: "modified",
+        artifactPath: "output/existing.md",
+        artifactStatus: "ready",
+        artifactRole: "deliverable",
+        artifactContractVersion: 2,
+        artifactProducer: "apply_patch",
+      }),
+      runEvent({
+        type: "AWAKEN_ARTIFACT_UPDATED",
+        seq: 3,
+        artifactId: "apply_patch:added:removed.md",
+        artifactTitle: "removed.md",
+        artifactKind: "added",
+        artifactPath: "output/removed.md",
+        artifactStatus: "ready",
+        artifactRole: "deliverable",
+        artifactContractVersion: 2,
+        artifactProducer: "apply_patch",
+      }),
+      runEvent({
+        type: "AWAKEN_ARTIFACT_UPDATED",
+        seq: 4,
+        artifactId: "apply_patch:deleted:removed.md",
+        artifactTitle: "removed.md",
+        artifactKind: "deleted",
+        artifactPath: "output/removed.md",
+        artifactStatus: "ready",
+        artifactRole: "support",
+        artifactContractVersion: 2,
+        artifactProducer: "apply_patch",
+      }),
+      runEvent({
+        type: "AWAKEN_ARTIFACT_CREATED",
+        seq: 5,
+        artifactId: "office_export_pdf:report.pdf",
+        artifactTitle: "report.pdf",
+        artifactKind: "pdf",
+        artifactPath: "output/report.pdf",
+        artifactStatus: "ready",
+        artifactRole: "deliverable",
+        artifactContractVersion: 2,
+        artifactProducer: "office_export_pdf",
+      }),
+      runEvent({ type: "RUN_FINISHED", seq: 6, result: "done" }),
+    ]);
+
+    expect(
+      state.narrative.committedItems.find((item) => item.kind === "deliverables"),
+    ).toMatchObject({
+      files: [
+        { artifactId: "apply_patch:added:new.md" },
+        { artifactId: "apply_patch:modified:existing.md" },
+        { artifactId: "office_export_pdf:report.pdf" },
+      ],
+    });
+  });
+
   it.each([
     {
       name: "failed",

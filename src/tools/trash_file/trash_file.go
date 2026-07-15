@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 type TrashFileTool struct{}
 
 var _ tool.OutcomeTool = (*TrashFileTool)(nil)
+var _ tool.ArtifactProducingTool = (*TrashFileTool)(nil)
 
 type trashFileParams struct {
 	Path  string   `json:"path"`
@@ -134,6 +136,44 @@ func (t *TrashFileTool) Execute(ctx context.Context, input string) (string, erro
 		}
 	}
 	return outcome.Content, nil
+}
+
+func (t *TrashFileTool) Artifacts(input string, _ string, permissionContext tool.PermissionContext) []tool.ArtifactDescriptor {
+	params, err := parseTrashFileParams(input)
+	if err != nil {
+		return nil
+	}
+	root := permissionContext.WorkspaceRootOrCWD()
+	paths := trashFilePaths(params)
+	artifacts := make([]tool.ArtifactDescriptor, 0, len(paths))
+	for _, requested := range paths {
+		resolved := permissionContext.ResolvePath(requested)
+		path := filepath.ToSlash(relativeTrashArtifactPath(resolved, root))
+		artifacts = append(artifacts, tool.ArtifactDescriptor{
+			ContractVersion: tool.ArtifactContractVersion,
+			Role:            tool.ArtifactRoleSupport,
+			Producer:        t.Name(),
+			Action:          tool.ArtifactActionUpdated,
+			ID:              t.Name() + ":deleted:" + path,
+			Title:           path,
+			Description:     "Moved " + path + " to Trash",
+			Kind:            "deleted",
+			Path:            path,
+			Status:          "ready",
+		})
+	}
+	return artifacts
+}
+
+func relativeTrashArtifactPath(path string, root string) string {
+	if strings.TrimSpace(root) == "" {
+		return filepath.Clean(path)
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return filepath.Clean(path)
+	}
+	return rel
 }
 
 func (t *TrashFileTool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObserver) (tool.ExecutionOutcome, error) {

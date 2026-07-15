@@ -12,7 +12,7 @@ func buildTextEditArtifacts(relPath string, replacementCount int) []tool.Artifac
 	path := filepath.ToSlash(relPath)
 	return []tool.ArtifactDescriptor{{
 		ContractVersion: tool.ArtifactContractVersion,
-		Role:            tool.ArtifactRoleSupport,
+		Role:            tool.ResolveArtifactRole("", "text_edit", "modified", path),
 		Producer:        "text_edit",
 		Action:          tool.ArtifactActionUpdated,
 		ID:              "text_edit:" + path,

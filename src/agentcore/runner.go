@@ -79,6 +79,7 @@ type SemanticCompactedMessage struct {
 	IsError           bool                            `json:"is_error,omitempty"`
 	CompactBoundaryID string                          `json:"compact_boundary_id,omitempty"`
 	Attachments       []SemanticUserMessageAttachment `json:"attachments,omitempty"`
+	ModelContent      []tool.ModelContentPart         `json:"model_content,omitempty"`
 }
 
 func semanticCompactedMessages(messages []context.Message) []SemanticCompactedMessage {
@@ -93,6 +94,7 @@ func semanticCompactedMessages(messages []context.Message) []SemanticCompactedMe
 			IsError:           message.IsError,
 			CompactBoundaryID: message.CompactBoundaryID,
 			Attachments:       semanticUserMessageAttachments(message.Attachments),
+			ModelContent:      tool.CloneModelContent(message.ModelContent),
 		})
 	}
 	return out
@@ -152,6 +154,7 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 	// the already configured runtime before any model turn can issue a tool call.
 	// Child/fork runners enter through this same path with their inherited ID.
 	r.toolRuntime.runID = r.runID
+	r.toolRuntime.threadID = r.threadID
 	if err := events.runStarted(ctx); err != nil {
 		return "", err
 	}
@@ -335,6 +338,9 @@ func toolRuntimeConfigFromAgentConfig(config AgentConfig) ToolRuntimeConfig {
 		SubagentOrigin:               config.SubagentOrigin,
 		ToolAvailabilitySnapshot:     config.ToolAvailabilitySnapshot,
 		ExecutionEnvironmentSnapshot: config.ExecutionEnvironmentSnapshot,
+		ModelCapabilities:            config.ModelConfig.Capabilities,
+		ToolSessionState:             config.ToolSessionState,
+		ModelContentStore:            config.ModelContentStore,
 	}
 }
 
@@ -953,10 +959,11 @@ func toolExecutionResultsToContext(results []ToolExecutionResult) []context.Tool
 			isError = result.Outcome.IsError()
 		}
 		out = append(out, context.ToolResult{
-			ToolCallID: result.ToolCallID,
-			Name:       result.Name,
-			Content:    content,
-			IsError:    isError,
+			ToolCallID:   result.ToolCallID,
+			Name:         result.Name,
+			Content:      content,
+			IsError:      isError,
+			ModelContent: tool.CloneModelContent(result.Outcome.ModelContent),
 		})
 	}
 	return out
@@ -1497,8 +1504,13 @@ func fileChangeSemanticRecords(threadID, runID, turnID, sessionID string, result
 	}
 	operation := "update"
 	switch result.Name {
-	case "text_file_create":
-		operation = "create"
+	case "Write":
+		for _, change := range result.Outcome.Changes {
+			if change.Action == "created" {
+				operation = "create"
+				break
+			}
+		}
 	case "trash_file":
 		operation = "delete"
 	}

@@ -133,18 +133,6 @@ type ReadOnlyTool interface {
 	IsReadOnly() bool
 }
 
-type DecisionMetadata struct {
-	Title         string
-	Description   string
-	RiskTone      string
-	AffectedPaths []string
-	PatchSummary  string
-}
-
-type DecisionMetadataDescribingTool interface {
-	DecisionMetadata(input string) DecisionMetadata
-}
-
 type ArtifactAction string
 
 const (

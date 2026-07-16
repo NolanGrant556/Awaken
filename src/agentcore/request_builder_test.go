@@ -11,8 +11,8 @@ import (
 	"awaken/src/skillruntime"
 	"awaken/src/skills"
 	"awaken/src/tool"
-	_ "awaken/src/tools/apply_patch"
-	_ "awaken/src/tools/text_edit"
+	_ "awaken/src/tools/edit"
+	_ "awaken/src/tools/write"
 )
 
 type requestBuilderDefinitionTool struct{}
@@ -261,12 +261,11 @@ func TestRequestBuilderInjectsSkillTriggerRulesAndCatalogIntoFinalToolSchema(t *
 	}
 }
 
-func TestRequestBuilderDefaultExposureHidesApplyPatch(t *testing.T) {
-	if _, err := tool.GetTool("text_edit"); err != nil {
-		t.Fatalf("text_edit must be registered: %v", err)
-	}
-	if _, err := tool.GetTool("apply_patch"); err != nil {
-		t.Fatalf("apply_patch must be registered: %v", err)
+func TestRequestBuilderDefaultExposureContainsCanonicalFileTools(t *testing.T) {
+	for _, name := range []string{"Edit", "Write"} {
+		if _, err := tool.GetTool(name); err != nil {
+			t.Fatalf("%s must be registered: %v", name, err)
+		}
 	}
 
 	builder := NewRequestBuilder(AgentConfig{})
@@ -275,11 +274,8 @@ func TestRequestBuilderDefaultExposureHidesApplyPatch(t *testing.T) {
 	for _, definition := range req.Tools {
 		names[definition.Function.Name] = true
 	}
-	if !names["text_edit"] {
-		t.Fatal("expected text_edit visible under default exposure")
-	}
-	if names["apply_patch"] {
-		t.Fatal("ordinary providers must hide apply_patch by default")
+	if !names["Edit"] || !names["Write"] {
+		t.Fatalf("canonical file tools missing under default exposure: %v", names)
 	}
 
 	compat := NewRequestBuilder(AgentConfig{ToolExposure: tool.CompatToolExposurePolicy()})
@@ -288,8 +284,8 @@ func TestRequestBuilderDefaultExposureHidesApplyPatch(t *testing.T) {
 	for _, definition := range compatReq.Tools {
 		compatNames[definition.Function.Name] = true
 	}
-	if !compatNames["apply_patch"] {
-		t.Fatal("compat exposure must keep apply_patch visible")
+	if !compatNames["Edit"] || !compatNames["Write"] {
+		t.Fatalf("compat exposure must preserve canonical file tools: %v", compatNames)
 	}
 }
 

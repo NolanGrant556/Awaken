@@ -43,7 +43,7 @@ Make a deck.
 	act := NewActivator(reg, nil)
 	plan, err := act.Activate(ActivationRequest{
 		SkillID:        "deck",
-		ParentToolPool: []string{"presentation_create", "runtime_preflight", "shell"},
+		ParentToolPool: []string{"Bash", "Read", "Write", "artifact_publish"},
 		SkipArgRender:  true,
 	})
 	if err != nil {
@@ -58,7 +58,7 @@ Make a deck.
 	if !strings.Contains(plan.MainBody, "Make a deck") || !strings.Contains(plan.MainBody, "Resources are not preloaded") {
 		t.Fatalf("lazy body context missing: %s", plan.MainBody)
 	}
-	if strings.Join(plan.EffectiveTools, ",") != "presentation_create,runtime_preflight,shell" {
+	if strings.Join(plan.EffectiveTools, ",") != "Bash,Read,Write,artifact_publish" {
 		t.Fatalf("effective=%v", plan.EffectiveTools)
 	}
 }
@@ -84,7 +84,7 @@ Body
 	reg.LoadFromSources(map[skills.SourceOrigin]string{skills.SourceUser: root})
 	plan, err := NewActivator(reg, nil).Activate(ActivationRequest{
 		SkillID:        "deck",
-		ParentToolPool: []string{"file_read"},
+		ParentToolPool: []string{"Read"},
 		SkipArgRender:  true,
 	})
 	if err != nil || plan == nil || !strings.Contains(plan.MainBody, "Body") {
@@ -114,7 +114,7 @@ Use pip install python-pptx and soffice.
 	}
 	plan, err := NewActivator(reg, nil).Activate(ActivationRequest{
 		SkillID:        "pptx",
-		ParentToolPool: []string{"shell"},
+		ParentToolPool: []string{"Bash"},
 		SkipArgRender:  true,
 	})
 	if err != nil || !strings.Contains(plan.MainBody, "pip install") || !strings.Contains(plan.MainBody, "soffice") {
@@ -142,7 +142,7 @@ Body
 
 	plan, err := NewActivator(reg, nil).Activate(ActivationRequest{
 		SkillID:        "deck",
-		ParentToolPool: []string{"file_read"},
+		ParentToolPool: []string{"Read"},
 		SkipArgRender:  true,
 	})
 	if err != nil {

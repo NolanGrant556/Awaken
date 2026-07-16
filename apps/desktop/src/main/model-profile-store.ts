@@ -344,6 +344,7 @@ function toSummary(
       prompt_cache_key: advanced.promptCacheKey,
       context_window: advanced.contextWindow,
       supports_vision: advanced.supportsVision,
+      supports_native_pdf: advanced.supportsNativePDF,
       supports_video: advanced.supportsVideo,
     },
   };
@@ -664,6 +665,7 @@ export class ModelProfileStore {
       contextWindow: advanced.contextWindow,
       promptCacheKey: advanced.promptCacheKey,
       supportsVision: advanced.supportsVision,
+      supportsNativePDF: advanced.supportsNativePDF,
       supportsVideo: advanced.supportsVideo,
     };
   }

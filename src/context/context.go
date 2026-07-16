@@ -20,14 +20,15 @@ const (
 )
 
 type Message struct {
-	Role              Role                `json:"role"`
-	Content           string              `json:"content"`
-	Attachments       []MessageAttachment `json:"attachments,omitempty"`
-	ToolCalls         []ToolCall          `json:"tool_calls,omitempty"`
-	ToolCallID        string              `json:"tool_call_id,omitempty"`
-	Name              string              `json:"name,omitempty"`
-	IsError           bool                `json:"is_error,omitempty"`
-	CompactBoundaryID string              `json:"compact_boundary_id,omitempty"`
+	Role              Role                    `json:"role"`
+	Content           string                  `json:"content"`
+	Attachments       []MessageAttachment     `json:"attachments,omitempty"`
+	ToolCalls         []ToolCall              `json:"tool_calls,omitempty"`
+	ToolCallID        string                  `json:"tool_call_id,omitempty"`
+	Name              string                  `json:"name,omitempty"`
+	IsError           bool                    `json:"is_error,omitempty"`
+	CompactBoundaryID string                  `json:"compact_boundary_id,omitempty"`
+	ModelContent      []tool.ModelContentPart `json:"model_content,omitempty"`
 }
 
 type MessageAttachment struct {
@@ -134,26 +135,24 @@ func (c *Context) AddToolMessage(toolCallID, content string) {
 }
 
 func (c *Context) AddToolResult(toolCallID, name, content string) {
+	c.AddToolResultWithModelContent(toolCallID, name, content, nil, false)
+}
+
+func (c *Context) AddToolResultWithModelContent(toolCallID, name, content string, modelContent []tool.ModelContentPart, isError bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.messages = append(c.messages, Message{
-		Role:       RoleTool,
-		ToolCallID: toolCallID,
-		Name:       name,
-		Content:    content,
+		Role:         RoleTool,
+		ToolCallID:   toolCallID,
+		Name:         name,
+		Content:      content,
+		ModelContent: tool.CloneModelContent(modelContent),
+		IsError:      isError,
 	})
 }
 
 func (c *Context) AddToolResultWithError(toolCallID, name, content string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.messages = append(c.messages, Message{
-		Role:       RoleTool,
-		ToolCallID: toolCallID,
-		Name:       name,
-		Content:    content,
-		IsError:    true,
-	})
+	c.AddToolResultWithModelContent(toolCallID, name, content, nil, true)
 }
 
 func (c *Context) GetMessages() []Message {
@@ -290,6 +289,14 @@ func EstimateMessageAttachmentTokens(attachment MessageAttachment) int {
 	return total
 }
 
+func EstimateModelContentTokens(part tool.ModelContentPart) int {
+	total := EstimateTokens(part.Type) + EstimateTokens(part.MimeType) + EstimateTokens(part.DisplayName)
+	if part.Type == "image" || part.Type == "file" {
+		return total + roughImageAttachmentTokenEstimate
+	}
+	return total
+}
+
 func (c *Context) EstimateTotalTokens() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -299,6 +306,9 @@ func (c *Context) EstimateTotalTokens() int {
 		total += EstimateTokens(msg.Content)
 		for _, attachment := range msg.Attachments {
 			total += EstimateMessageAttachmentTokens(attachment)
+		}
+		for _, part := range msg.ModelContent {
+			total += EstimateModelContentTokens(part)
 		}
 		for _, tc := range msg.ToolCalls {
 			total += EstimateTokens(tc.Function.Arguments)
@@ -313,6 +323,7 @@ func cloneMessages(messages []Message) []Message {
 	for i, message := range messages {
 		result[i] = message
 		result[i].Attachments = cloneAttachments(message.Attachments)
+		result[i].ModelContent = tool.CloneModelContent(message.ModelContent)
 		result[i].ToolCalls = append([]ToolCall(nil), message.ToolCalls...)
 	}
 	return result
@@ -363,20 +374,17 @@ func (conv *Conversation) ToolResult(toolCallID, name, result string) {
 }
 
 type ToolResult struct {
-	ToolCallID string
-	Name       string
-	Content    string
-	IsError    bool
+	ToolCallID   string
+	Name         string
+	Content      string
+	IsError      bool
+	ModelContent []tool.ModelContentPart
 }
 
 func (conv *Conversation) ToolExchange(content string, toolCalls []ToolCall, results []ToolResult) {
 	conv.AssistantOutput(content, toolCalls)
 	for _, result := range results {
-		if result.IsError {
-			conv.Context.AddToolResultWithError(result.ToolCallID, result.Name, result.Content)
-			continue
-		}
-		conv.Context.AddToolResult(result.ToolCallID, result.Name, result.Content)
+		conv.Context.AddToolResultWithModelContent(result.ToolCallID, result.Name, result.Content, result.ModelContent, result.IsError)
 	}
 	conv.UpdatedAt = time.Now()
 }

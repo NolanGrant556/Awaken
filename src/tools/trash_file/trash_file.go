@@ -108,20 +108,13 @@ func (t *TrashFileTool) CheckPermission(ctx context.Context, input string, permi
 		return tool.DenyPermission(fmt.Sprintf("invalid parameters: %v", err))
 	}
 	paths := trashFilePaths(params)
-	resolved := make([]string, 0, len(paths))
 	for _, path := range paths {
-		cleaned, resolveErr := permissionContext.ResolveRecoverableDeletePathChecked(path)
+		_, resolveErr := permissionContext.ResolveRecoverableDeletePathChecked(path)
 		if resolveErr != nil {
 			return tool.DenyPermission(resolveErr.Error())
 		}
-		resolved = append(resolved, cleaned)
 	}
-	return tool.AllowPermissionWithMetadata(tool.DecisionMetadata{
-		Title:         "Move to Trash",
-		Description:   strings.Join(resolved, "\n"),
-		RiskTone:      "danger",
-		AffectedPaths: resolved,
-	})
+	return tool.AllowPermission()
 }
 
 func (t *TrashFileTool) Execute(ctx context.Context, input string) (string, error) {

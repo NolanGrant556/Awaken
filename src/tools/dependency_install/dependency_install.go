@@ -130,15 +130,13 @@ func (t *Tool) Definition() tool.ToolDefinition {
 }
 
 func (*Tool) CheckPermission(_ context.Context, raw string, _ tool.PermissionContext) tool.PermissionDecision {
-	params, err := parseInput(raw)
+	_, err := parseInput(raw)
 	if err != nil {
 		// Execution returns the canonical validation outcome. Permission must not
 		// invent a broader fallback or generic review gate.
 		return tool.AllowPermission()
 	}
-	return tool.AllowPermissionWithMetadata(tool.DecisionMetadata{
-		Title: "Install pinned dependency", Description: params.PlanID, RiskTone: "warning",
-	})
+	return tool.AllowPermission()
 }
 
 func (t *Tool) Execute(ctx context.Context, raw string) (string, error) {

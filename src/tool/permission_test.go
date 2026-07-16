@@ -123,12 +123,8 @@ func TestPermissionContextResolvesSymlinksForWorkspaceBoundary(t *testing.T) {
 		t.Fatalf("expected resolved path %q, got %q", insideFile, resolved)
 	}
 
-	resolved, err = ctx.ResolvePathChecked("external-link")
-	if err != nil {
-		t.Fatalf("expected ResolvePathChecked to allow local read symlink: %v", err)
-	}
-	if resolved != externalLink {
-		t.Fatalf("expected readable path %q, got %q", externalLink, resolved)
+	if _, err = ctx.ResolvePathChecked("external-link"); err == nil {
+		t.Fatalf("expected readable-root resolver to reject symlink escape %q", externalLink)
 	}
 }
 
@@ -266,7 +262,7 @@ func TestPermissionContextWriteResolversAllowNonexistentConfiguredRoot(t *testin
 	}
 }
 
-func TestPermissionContextReadablePathsAllowOutsideWorkspace(t *testing.T) {
+func TestPermissionContextReadablePathsDenyOutsideReadableRoots(t *testing.T) {
 	workspace := t.TempDir()
 	outside := t.TempDir()
 	outsideFile := filepath.Join(outside, "report.txt")
@@ -275,15 +271,11 @@ func TestPermissionContextReadablePathsAllowOutsideWorkspace(t *testing.T) {
 	}
 
 	ctx := NewPermissionContext(workspace, []string{workspace})
-	if !ctx.IsWithinReadableRootsResolved(outsideFile) {
-		t.Fatalf("expected local read path outside workspace to be allowed")
+	if ctx.IsWithinReadableRootsResolved(outsideFile) {
+		t.Fatalf("expected local read path outside readable roots to be denied")
 	}
-	resolved, err := ctx.ResolveReadablePathChecked(outsideFile)
-	if err != nil {
-		t.Fatalf("expected readable path outside workspace to resolve: %v", err)
-	}
-	if resolved != outsideFile {
-		t.Fatalf("expected %q, got %q", outsideFile, resolved)
+	if _, err := ctx.ResolveReadablePathChecked(outsideFile); err == nil {
+		t.Fatal("expected readable-root denial")
 	}
 }
 

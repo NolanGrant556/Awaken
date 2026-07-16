@@ -9,22 +9,19 @@ import (
 type ExposureMode string
 
 const (
-	// ExposureDefault uses ordinary provider rules (hide fragile raw tools).
+	// ExposureDefault uses ordinary provider rules.
 	ExposureDefault ExposureMode = "default"
-	// ExposureCompat exposes tools needed for internal transforms and
-	// compatibility tests (including raw apply_patch).
+	// ExposureCompat is retained as a wire-compatible generic mode.
 	ExposureCompat ExposureMode = "compat"
-	// ExposureGrammarCapable exposes grammar-constrained apply_patch when the
-	// provider transport truly supports constrained decoding.
+	// ExposureGrammarCapable is retained as a wire-compatible generic mode.
 	ExposureGrammarCapable ExposureMode = "grammar_capable"
 	// ExposureAll exposes every registered tool without filtering.
 	ExposureAll ExposureMode = "all"
 )
 
-// ToolExposurePolicy filters the model-visible tool pool.
-// Ordinary providers hide raw apply_patch by default; text_edit remains visible.
-// Internal shell→patch transforms and grammar-capable providers may still use
-// apply_patch via ExposureCompat / ExposureGrammarCapable.
+// ToolExposurePolicy filters the model-visible tool pool through explicit
+// generic hide/show lists. Legacy modes remain wire-compatible but no longer
+// contain tool-specific rules.
 type ToolExposurePolicy struct {
 	Mode ExposureMode
 	// ExtraHidden names are always removed from the model pool.
@@ -33,18 +30,17 @@ type ToolExposurePolicy struct {
 	ExtraVisible []string
 }
 
-// DefaultToolExposurePolicy is the ordinary-provider policy: hide raw apply_patch.
+// DefaultToolExposurePolicy is the ordinary-provider policy.
 func DefaultToolExposurePolicy() ToolExposurePolicy {
 	return ToolExposurePolicy{Mode: ExposureDefault}
 }
 
-// CompatToolExposurePolicy keeps apply_patch visible for transforms/tests.
+// CompatToolExposurePolicy returns the legacy-compatible generic mode.
 func CompatToolExposurePolicy() ToolExposurePolicy {
 	return ToolExposurePolicy{Mode: ExposureCompat}
 }
 
-// GrammarCapableToolExposurePolicy keeps apply_patch visible when the provider
-// transport can actually constrain the patch mini-language.
+// GrammarCapableToolExposurePolicy returns the grammar-capable generic mode.
 func GrammarCapableToolExposurePolicy() ToolExposurePolicy {
 	return ToolExposurePolicy{Mode: ExposureGrammarCapable}
 }
@@ -87,13 +83,9 @@ func FilterToolsForExposure(tools []Tool, policy ToolExposurePolicy) []Tool {
 }
 
 func shouldHideTool(name string, mode ExposureMode) bool {
-	switch mode {
-	case ExposureAll, ExposureCompat, ExposureGrammarCapable:
-		return false
-	default:
-		// Ordinary providers: hide fragile raw apply_patch mini-language.
-		return name == "apply_patch"
-	}
+	_ = name
+	_ = mode
+	return false
 }
 
 // IsToolExposed reports whether a single tool name is visible under policy.

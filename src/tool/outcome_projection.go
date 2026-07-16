@@ -233,6 +233,7 @@ func cloneExecutionOutcome(outcome ExecutionOutcome) ExecutionOutcome {
 	clone.Diagnostic = cloneProjectionMap(outcome.Diagnostic)
 	clone.AffectedPaths = append([]string(nil), outcome.AffectedPaths...)
 	clone.Artifacts = append([]ArtifactDescriptor(nil), outcome.Artifacts...)
+	clone.ModelContent = CloneModelContent(outcome.ModelContent)
 	if outcome.Operation != nil {
 		operation := *outcome.Operation
 		clone.Operation = &operation

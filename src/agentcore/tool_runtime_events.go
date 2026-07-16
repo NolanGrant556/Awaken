@@ -298,7 +298,7 @@ func decisionAction(result ToolExecutionResult) string {
 // transformedToName returns the rewritten tool name when the result is the
 // target of a transform decision, or "" otherwise. It inspects the
 // ExecutionDecision carried on the result: for transform decisions, the
-// decision's UpdatedToolName is the rewritten tool (e.g. "apply_patch").
+// decision's UpdatedToolName is the rewritten tool.
 func transformedToName(result ToolExecutionResult) string {
 	if result.Decision == nil {
 		return ""
@@ -307,50 +307,6 @@ func transformedToName(result ToolExecutionResult) string {
 		return ""
 	}
 	return result.Decision.UpdatedToolName
-}
-
-// extractTrashedPaths parses the apply_patch tool's summary output and
-// returns the trashed-path component of every deletion line. The apply_patch
-// tool encodes deletions as either:
-//
-//	D path (已移到回收站: trashedPath)
-//	D path (已移到回收站)
-//
-// In the first form the trashed-path component is returned verbatim. In the
-// second form (no explicit trashed path was surfaced) the line contributes
-// nothing — the file was trashed but the OS did not report a destination.
-// Lines that do not match the deletion pattern are ignored.
-//
-// This is a best-effort parser keyed off the Chinese marker the apply_patch
-// tool emits today. If the marker changes, this parser must be updated in
-// lockstep.
-func extractTrashedPaths(output string) []string {
-	if strings.TrimSpace(output) == "" {
-		return nil
-	}
-	const trashMarker = "已移到回收站"
-	var paths []string
-	for _, line := range strings.Split(output, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "D ") {
-			continue
-		}
-		idx := strings.Index(trimmed, trashMarker)
-		if idx < 0 {
-			continue
-		}
-		tail := trimmed[idx+len(trashMarker):]
-		// Expect either ": trashedPath)" or ")".
-		tail = strings.TrimPrefix(tail, ":")
-		tail = strings.TrimSpace(tail)
-		tail = strings.TrimSuffix(tail, ")")
-		tail = strings.TrimSpace(tail)
-		if tail == "" {
-			continue
-		}
-		paths = append(paths, tail)
-	}
-	return paths
 }
 
 func (rt *ToolRuntime) emitPatchPreview(result ToolExecutionResult, selectedTool tool.Tool, input string) {
@@ -396,7 +352,7 @@ func (rt *ToolRuntime) emitToolPermissionDecided(
 		// Task 16 unified observability: surface the profile name and the
 		// transform origin (original tool name + rewritten tool name) so the
 		// Desktop UI can render "Profile: workspace_write" and
-		// "shell → apply_patch" alongside the decision. TrashedPaths and
+		// a generic transform alongside the decision. TrashedPaths and
 		// GuardianViolation are populated on the result by the executor /
 		// guardian check and are mirrored here for the audit trail.
 		ProfileName:       result.ProfileName,

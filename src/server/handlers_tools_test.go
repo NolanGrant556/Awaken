@@ -62,19 +62,19 @@ func TestToolsEndpointReturnsResolvedDefinitionV2(t *testing.T) {
 
 func TestMigratedCoreToolsPassStrictDefinitionValidation(t *testing.T) {
 	expected := map[string]bool{
-		"apply_patch":      false,
-		"artifact_publish": false,
-		"ask_user":         false,
-		"calculator":       false,
-		"grep_search":      false,
-		"list_files":       false,
-		"read_artifact":    false,
-		"read_file":        false,
-		"shell":            false,
-		"text_edit":        false,
-		"text_file_create": false,
-		"trash_file":       false,
-		"web_search":       false,
+		"Bash":               false,
+		"Read":               false,
+		"Edit":               false,
+		"Write":              false,
+		"Glob":               false,
+		"Grep":               false,
+		"WebSearch":          false,
+		"artifact_publish":   false,
+		"ask_user":           false,
+		"calculator":         false,
+		"dependency_install": false,
+		"git_remote":         false,
+		"trash_file":         false,
 	}
 	for _, registered := range tool.ListRegisteredTools() {
 		if _, selected := expected[registered.Definition.Name]; !selected {

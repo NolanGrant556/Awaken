@@ -57,7 +57,7 @@ type ToolAuditRecord struct {
 	// "transform" (e.g. "shell"). Empty for allow/deny.
 	TransformedFrom string `json:"transformedFrom,omitempty"`
 	// TransformedTo is the rewritten tool name when DecisionAction ==
-	// "transform" (e.g. "apply_patch"). Empty for allow/deny.
+	// "transform". Empty for allow/deny.
 	TransformedTo string `json:"transformedTo,omitempty"`
 	// TrashedPaths lists the absolute paths that were moved to the OS recycle
 	// bin during this call (for delete operations). Empty when no files were

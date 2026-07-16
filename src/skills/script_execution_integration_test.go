@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"awaken/src/tool"
-	shelltool "awaken/src/tools/shell"
+	bashtool "awaken/src/tools/bash"
 )
 
 func TestInstalledSkillPythonNodeAndShellScriptsUseCurrentUserShell(t *testing.T) {
@@ -68,17 +68,17 @@ Run only the package script needed by the task.
 	}
 	for _, testCase := range commands {
 		input, marshalErr := json.Marshal(map[string]any{
-			"command": testCase.command, "workdir": workspace, "timeout_ms": 30_000,
+			"command": testCase.command, "timeout": 30_000,
 		})
 		if marshalErr != nil {
 			t.Fatal(marshalErr)
 		}
-		outcome, executeErr := (&shelltool.ShellTool{}).ExecuteOutcome(ctx, string(input), nil)
+		outcome, executeErr := (&bashtool.Tool{}).ExecuteOutcome(ctx, string(input), nil)
 		if executeErr != nil || outcome.Status != tool.OutcomeSucceeded || outcome.ExitCode == nil || *outcome.ExitCode != 0 {
 			t.Fatalf("execute %q: outcome=%+v err=%v", testCase.command, outcome, executeErr)
 		}
-		if outcome.Operation == nil || outcome.Operation.SideEffectState != tool.OutcomeSideEffectUnknown || len(outcome.Changes) != 0 {
-			t.Fatalf("direct Skill script execution fabricated staged mutation facts: %+v", outcome)
+		if len(outcome.Changes) != 0 {
+			t.Fatalf("direct Skill script execution fabricated typed mutation facts: %+v", outcome)
 		}
 		content, readErr := os.ReadFile(filepath.Join(workspace, testCase.output))
 		if readErr != nil || string(content) != testCase.want {

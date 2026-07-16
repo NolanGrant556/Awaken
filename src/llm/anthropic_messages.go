@@ -245,7 +245,7 @@ func buildAnthropicMessages(req Request) ([]anthropicMessage, error) {
 					block := map[string]interface{}{
 						"type":        "tool_result",
 						"tool_use_id": tool.ToolCallID,
-						"content":     tool.Content,
+						"content":     anthropicToolResultContent(tool),
 					}
 					if tool.IsError {
 						block["is_error"] = true
@@ -277,6 +277,34 @@ func buildAnthropicMessages(req Request) ([]anthropicMessage, error) {
 	}
 
 	return messages, nil
+}
+
+func anthropicToolResultContent(message context.Message) interface{} {
+	if len(message.ModelContent) == 0 {
+		return message.Content
+	}
+	blocks := make([]map[string]interface{}, 0, len(message.ModelContent)+1)
+	if strings.TrimSpace(message.Content) != "" {
+		blocks = append(blocks, map[string]interface{}{"type": "text", "text": message.Content})
+	}
+	for _, part := range message.ModelContent {
+		if strings.TrimSpace(part.DataBase64) == "" || strings.TrimSpace(part.MimeType) == "" {
+			continue
+		}
+		source := map[string]interface{}{"type": "base64", "media_type": part.MimeType, "data": part.DataBase64}
+		switch part.Type {
+		case "image":
+			blocks = append(blocks, map[string]interface{}{"type": "image", "source": source})
+		case "file":
+			if part.MimeType == "application/pdf" {
+				blocks = append(blocks, map[string]interface{}{"type": "document", "source": source})
+			}
+		}
+	}
+	if len(blocks) == 0 {
+		return message.Content
+	}
+	return blocks
 }
 
 func buildAssistantContentBlocks(msg context.Message) []map[string]interface{} {

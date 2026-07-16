@@ -259,6 +259,8 @@ export function normalizeAdvancedWithModelCapability(
     ...advanced,
     temperature: advanced?.temperature ?? capability?.default_temperature,
     supportsVision: advanced?.supportsVision ?? capability?.supports_vision,
+    supportsNativePDF:
+      advanced?.supportsNativePDF ?? capability?.supports_native_pdf ?? false,
     supportsVideo: advanced?.supportsVideo ?? capability?.supports_video,
     maxTokens:
       capability?.max_output_tokens !== undefined

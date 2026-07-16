@@ -3,7 +3,6 @@ package agentcore
 import (
 	stdcontext "context"
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"awaken/src/tool"
@@ -59,21 +58,11 @@ type ToolDecisionRequest struct {
 	WritableRoots           []string
 	OutputRoots             []string
 	IsReadOnly              bool
-	IsDestructive           bool
 	IsOpenWorld             bool
 	RequiresUserInteraction bool
 	CapabilityClass         tool.CapabilityClass
 	TrustedOrigin           tool.TrustedOrigin
 	FileBridgeScope         tool.FileBridgeScope
-	// RiskTone carries the tool-declared risk tone ("", "safe", "warning",
-	// or "danger"). The auto policy uses it to distinguish normal
-	// in-workspace mutations from dangerous ones (delete,
-	// out-of-writable-roots, sensitive path).
-	RiskTone string
-	// AffectedPaths carries the workspace-relative (or absolute if outside)
-	// paths the tool will touch. Used by the auto policy to re-check
-	// workspace boundary and sensitive-path membership for file-chain tools.
-	AffectedPaths []string
 }
 
 type ToolDecision struct {
@@ -127,26 +116,11 @@ func (p DefaultAutoToolPolicy) Decide(ctx stdcontext.Context, request ToolDecisi
 		}
 	}
 
-	if request.ToolName == "apply_patch" {
-		if decision, handled := decideApplyPatchFileChain(request); handled {
-			return decision
-		}
-	}
-	if request.ToolName == "shell" && request.StaticBehavior == tool.PermissionAllow &&
-		strings.EqualFold(strings.TrimSpace(request.RiskTone), "recoverable_delete_transform") {
-		input, _ := json.Marshal(map[string]any{"paths": append([]string(nil), request.AffectedPaths...)})
-		return ToolDecision{
-			Action: ToolDecisionTransform, Source: ToolDecisionSourceTransform,
-			Reason:          "shell delete converted to recoverable Trash operation",
-			UpdatedToolName: "trash_file", UpdatedInput: string(input),
-		}
-	}
-
-	if request.ToolName == "shell" && request.StaticBehavior == tool.PermissionAllow {
+	if request.ToolName == "Bash" && request.StaticBehavior == tool.PermissionAllow {
 		return ToolDecision{
 			Action:       ToolDecisionAllow,
 			Source:       ToolDecisionSourceToolRule,
-			Reason:       firstNonEmpty(strings.TrimSpace(request.StaticReason), "local shell command allowed"),
+			Reason:       firstNonEmpty(strings.TrimSpace(request.StaticReason), "local Bash command allowed"),
 			UpdatedInput: request.NormalizedInput,
 		}
 	}
@@ -219,27 +193,10 @@ func (p DefaultAutoToolPolicy) DecideExecution(ctx stdcontext.Context, intent pr
 		return decision
 	}
 
-	if request.ToolName == "apply_patch" {
-		if td, handled := decideApplyPatchFileChain(request); handled {
-			return toolDecisionToExecutionDecision(td, intent)
-		}
-	}
-	if request.ToolName == "shell" && request.StaticBehavior == tool.PermissionAllow &&
-		strings.EqualFold(strings.TrimSpace(request.RiskTone), "recoverable_delete_transform") {
-		updatedInput := map[string]any{"paths": append([]string(nil), request.AffectedPaths...)}
-		decision := profile.TransformDecision(
-			"shell delete converted to recoverable Trash operation",
-			"trash_file",
-			updatedInput,
-		)
-		decision.UpdatedIntent = &intent
-		return decision
-	}
-
-	if request.ToolName == "shell" && request.StaticBehavior == tool.PermissionAllow {
+	if request.ToolName == "Bash" && request.StaticBehavior == tool.PermissionAllow {
 		decision := profile.AllowDecision(
 			string(profile.DecisionSourceToolRule),
-			firstNonEmpty(strings.TrimSpace(request.StaticReason), "local shell command allowed"),
+			firstNonEmpty(strings.TrimSpace(request.StaticReason), "local Bash command allowed"),
 		)
 		decision.UpdatedIntent = &intent
 		return decision
@@ -318,85 +275,6 @@ func toolDecisionToExecutionDecision(td ToolDecision, intent profile.ExecutionIn
 		ed.Reason = firstNonEmpty(strings.TrimSpace(td.Reason), "invalid tool decision action")
 	}
 	return ed
-}
-
-// decideApplyPatchFileChain applies the file-chain relaxation policy to an
-// apply_patch decision request. It returns (decision, true) if the request
-// was handled.
-//
-// Safety invariants that make this relaxation safe (Task 4 of the
-// "零审批自动执行策略" spec):
-//   - Workspace boundary: apply_patch.validateMutationPath enforces that
-//     every mutation path is within workspace_root/writable_roots (with
-//     symlink resolution) before any filesystem write.
-//   - Sensitive paths: validateMutationPath also rejects .git/, .env,
-//     key/certificate files, and agent metadata directories regardless of
-//     workspace membership.
-//   - Trash: deletes go through TrashAdapter, making them recoverable.
-//
-// Decision matrix:
-//   - PermissionAllow (parse failure fall-through): allow - executor will
-//     surface the parse error.
-//   - warning RiskTone: allow - normal in-workspace Add/Update.
-//   - danger RiskTone:
-//   - All paths within writable roots and non-sensitive: allow (delete/move
-//     within workspace; trash makes it recoverable).
-//   - Any path outside writable roots: deny.
-//   - Any sensitive path: deny.
-func decideApplyPatchFileChain(request ToolDecisionRequest) (ToolDecision, bool) {
-	if strings.TrimSpace(request.ToolName) != "apply_patch" {
-		return ToolDecision{}, false
-	}
-
-	riskTone := strings.ToLower(strings.TrimSpace(request.RiskTone))
-	switch riskTone {
-	case "", "safe", "warning":
-		// Normal in-workspace mutation (Add/Update). Boundary + sensitive
-		// path checks already passed in CheckPermission. Auto-allow.
-		return ToolDecision{
-			Action:       ToolDecisionAllow,
-			Source:       ToolDecisionSourceWorkspaceBoundary,
-			Reason:       "apply_patch within workspace boundary (boundary + sensitive-path + trash constraints satisfied)",
-			UpdatedInput: request.NormalizedInput,
-		}, true
-	case "danger":
-		// Danger tone means at least one operation is a delete, move, or
-		// touches an out-of-writable-roots / sensitive path. Allow
-		// deletes/moves within workspace (trash makes them recoverable)
-		// but deny out-of-writable-roots and sensitive paths.
-		permCtx := tool.NewPermissionContext(request.WorkspaceRoot, request.WritableRoots)
-		for _, path := range request.AffectedPaths {
-			if err := permCtx.CheckSensitivePath(path); err != nil {
-				return ToolDecision{
-					Action: ToolDecisionDeny,
-					Source: ToolDecisionSourceHeadlessDefault,
-					Reason: fmt.Sprintf("apply_patch touches sensitive path: %v", err),
-				}, true
-			}
-			if !permCtx.IsWithinWritableRoots(path) {
-				return ToolDecision{
-					Action: ToolDecisionDeny,
-					Source: ToolDecisionSourceHeadlessDefault,
-					Reason: fmt.Sprintf("apply_patch path %q is outside writable roots", path),
-				}, true
-			}
-		}
-		// All paths are within writable roots and non-sensitive. The danger
-		// tone is from a delete or move within workspace — trash makes
-		// these recoverable, so auto-allow.
-		return ToolDecision{
-			Action:       ToolDecisionAllow,
-			Source:       ToolDecisionSourceWorkspaceBoundary,
-			Reason:       "apply_patch delete/move within workspace (trash-recoverable)",
-			UpdatedInput: request.NormalizedInput,
-		}, true
-	default:
-		return ToolDecision{
-			Action: ToolDecisionDeny,
-			Source: ToolDecisionSourceHeadlessDefault,
-			Reason: "apply_patch has unknown risk tone, denied in headless mode",
-		}, true
-	}
 }
 
 func decideByCapabilityClass(request ToolDecisionRequest) (ToolDecision, bool) {
@@ -491,37 +369,15 @@ func inferToolDecisionRequest(
 		WritableRoots:           append([]string(nil), permissionContext.WritableRoots...),
 		OutputRoots:             append([]string(nil), permissionContext.OutputRoots...),
 		IsReadOnly:              definition.Annotations.ReadOnly,
-		IsDestructive:           isDestructivePermission(permission),
 		IsOpenWorld:             definition.Annotations.OpenWorld,
-		RequiresUserInteraction: requiresUserInteraction(permission),
+		RequiresUserInteraction: permission.Behavior == tool.PermissionNeedsAuth,
 		CapabilityClass:         definition.Annotations.CapabilityClass,
 		TrustedOrigin:           definition.Annotations.TrustedOrigin,
 		FileBridgeScope:         definition.Annotations.FileBridgeScope,
-		RiskTone:                permission.Metadata.RiskTone,
-		AffectedPaths:           append([]string(nil), permission.Metadata.AffectedPaths...),
 	}
 }
 
 func isReadOnlyTool(selectedTool tool.Tool) bool {
 	readOnlyTool, ok := selectedTool.(tool.ReadOnlyTool)
 	return ok && readOnlyTool.IsReadOnly()
-}
-
-func isDestructivePermission(permission tool.PermissionDecision) bool {
-	request := permission.Metadata
-	if strings.EqualFold(strings.TrimSpace(request.RiskTone), "danger") {
-		return true
-	}
-	text := strings.ToLower(permission.Reason + " " + request.Description + " " + request.PatchSummary)
-	for _, marker := range []string{"delete", "move", "modify", "mutate", "write", "outside writable", "danger"} {
-		if strings.Contains(text, marker) {
-			return true
-		}
-	}
-	return false
-}
-
-func requiresUserInteraction(permission tool.PermissionDecision) bool {
-	text := strings.ToLower(permission.Reason + " " + permission.Metadata.Description)
-	return strings.Contains(text, "requires user interaction") || strings.Contains(text, "user interaction")
 }

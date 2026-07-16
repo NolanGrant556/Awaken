@@ -102,7 +102,6 @@ type PermissionDecision struct {
 	Behavior  PermissionBehavior
 	Reason    string
 	ErrorCode string
-	Metadata  DecisionMetadata
 }
 
 type PermissionContext struct {
@@ -126,25 +125,10 @@ func AllowPermission() PermissionDecision {
 	return PermissionDecision{Behavior: PermissionAllow}
 }
 
-func AllowPermissionWithMetadata(metadata DecisionMetadata) PermissionDecision {
-	return PermissionDecision{
-		Behavior: PermissionAllow,
-		Metadata: metadata,
-	}
-}
-
 func DenyPermission(reason string) PermissionDecision {
 	return PermissionDecision{
 		Behavior: PermissionDeny,
 		Reason:   reason,
-	}
-}
-
-func DenyPermissionWithMetadata(reason string, metadata DecisionMetadata) PermissionDecision {
-	return PermissionDecision{
-		Behavior: PermissionDeny,
-		Reason:   reason,
-		Metadata: metadata,
 	}
 }
 
@@ -284,7 +268,19 @@ func (c PermissionContext) IsWithinWorkspace(path string) bool {
 }
 
 func (c PermissionContext) IsWithinReadableRoots(path string) bool {
-	return true
+	normalized := c.Normalize()
+	resolved := normalized.resolvePath(path)
+	for _, root := range normalized.ReadableRoots {
+		if PathWithinRoot(resolved, root) {
+			return true
+		}
+	}
+	for _, attached := range normalized.AttachedFiles {
+		if samePermissionPath(resolved, attached.Path) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c PermissionContext) IsWithinWritableRoots(path string) bool {
@@ -329,11 +325,9 @@ func (c PermissionContext) IsWithinWritableRootsResolved(path string) bool {
 	return false
 }
 
-// IsWithinReadableRootsResolved is retained for older read-tool call sites.
-// Local read tools no longer use readable_roots as a permission boundary; the
-// resolver below normalizes local paths and maps attached-file display names.
 func (c PermissionContext) IsWithinReadableRootsResolved(path string) bool {
-	return true
+	_, err := c.ResolveReadablePathChecked(path)
+	return err == nil
 }
 
 func (c PermissionContext) WorkspaceRootOrCWD() string {
@@ -362,15 +356,16 @@ func (c PermissionContext) IsWithinWorkspaceResolved(path string) bool {
 	return PathWithinRoot(realPath, realRoot)
 }
 
-// ResolveReadablePathChecked resolves a local read path without enforcing a
-// readable_roots boundary. If the caller supplies an attached file's display
-// name or basename, it returns the attached file's real local path.
+// ResolveReadablePathChecked enforces readable_roots after resolving symlinks.
+// Attached file references are an explicit read grant and may live outside the
+// workspace roots.
 func (c PermissionContext) ResolveReadablePathChecked(path string) (string, error) {
 	normalized := c.Normalize()
 	if attachedPath, ok, err := normalized.resolveAttachedFileReference(path); ok || err != nil {
 		return attachedPath, err
 	}
-	return normalized.resolvePath(path), nil
+	resolved, _, err := normalized.resolvePathWithinRootsChecked(path, normalized.ReadableRoots, "readable")
+	return resolved, err
 }
 
 // ResolvePathChecked preserves the historical API name for read-tool callers.

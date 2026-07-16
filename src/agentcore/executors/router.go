@@ -71,7 +71,7 @@ func (r *Router) Route(intent profile.ExecutionIntent, execProfile profile.Execu
 
 func legacyLaneForKind(kind profile.ToolKind) profile.ExecutionLane {
 	switch kind {
-	case profile.ToolKindFileChain, profile.ToolKindReviewAgent:
+	case profile.ToolKindFileOperation, profile.ToolKindReviewAgent:
 		return profile.LaneArtifact
 	case profile.ToolKindMcpApp:
 		return profile.LaneConnector

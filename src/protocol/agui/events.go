@@ -137,17 +137,14 @@ type Event struct {
 	// unified observability). Surfaced on AWAKEN_TOOL_PERMISSION_DECIDED.
 	ProfileName string `json:"profileName,omitempty"`
 	// TransformedFrom is the original tool name when the decision was a
-	// transform (e.g. "shell"). Surfaced on AWAKEN_TOOL_PERMISSION_DECIDED.
+	// transform. Surfaced on AWAKEN_TOOL_PERMISSION_DECIDED.
 	TransformedFrom string `json:"transformedFrom,omitempty"`
 	// TransformedTo is the rewritten tool name when the decision was a
-	// transform (e.g. "apply_patch"). Surfaced on AWAKEN_TOOL_PERMISSION_DECIDED.
+	// transform. Surfaced on AWAKEN_TOOL_PERMISSION_DECIDED.
 	TransformedTo string `json:"transformedTo,omitempty"`
 	// TrashedPaths lists the absolute paths moved to the OS recycle bin
-	// during this call. The paths are parsed from the apply_patch output
-	// after execution succeeds (see tool_runtime.extractTrashedPaths), so
-	// they are carried on the ToolResult event (post-execution). The
-	// AWAKEN_TOOL_PERMISSION_DECIDED event still declares the field for
-	// backwards compatibility but it is always nil there.
+	// during this call. The paths come from the structured tool outcome and
+	// are carried on the ToolResult event after execution succeeds.
 	TrashedPaths []string `json:"trashedPaths,omitempty"`
 	// GuardianViolation is populated when a guardian constraint was
 	// violated. Surfaced on AWAKEN_TOOL_PERMISSION_DECIDED.

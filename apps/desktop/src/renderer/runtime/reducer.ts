@@ -1,9 +1,5 @@
-import type { ApprovalItem, RunStepItem } from "@awaken/design-system";
-import type {
-  AguiApprovalRiskTone,
-  AguiArtifactStatus,
-  AguiEvent,
-} from "./agui";
+import type { RunStepItem } from "@awaken/design-system";
+import type { AguiArtifactStatus, AguiEvent } from "./agui";
 import {
   toolDisplayStateFromStatus,
   type ToolDisplayState,
@@ -144,9 +140,9 @@ export type ToolDecisionRecord = {
   patchSummary?: string;
   /** ExecutionProfile name applied to this call (Task 16 unified observability). */
   profileName?: string;
-  /** Original tool name when the decision was a transform (e.g. "shell"). */
+  /** Original tool name when a generic provider transform is used. */
   transformedFrom?: string;
-  /** Rewritten tool name when the decision was a transform (e.g. "apply_patch"). */
+  /** Rewritten tool name when a generic provider transform is used. */
   transformedTo?: string;
   /** Absolute paths moved to the OS recycle bin during this call. */
   trashedPaths?: string[];
@@ -193,7 +189,6 @@ export type ThreadItem = {
   activeRunId?: string;
   workspaceRoot?: string;
   runStatus?: RuntimeRunStatus;
-  approvalCount?: number;
   artifactCount?: number;
 };
 
@@ -211,7 +206,6 @@ type ThreadViewState = {
   reasoningText: string;
   toolResults: ToolResultRecord[];
   patchPreviews: PatchPreviewRecord[];
-  approvals: ApprovalItem[];
   userQuestions: UserQuestionItem[];
   artifacts: ArtifactRecord[];
   turnDiff?: TurnDiffRecord;
@@ -236,7 +230,6 @@ export type RuntimeViewState = {
   reasoningText: string;
   toolResults: ToolResultRecord[];
   patchPreviews: PatchPreviewRecord[];
-  approvals: ApprovalItem[];
   userQuestions: UserQuestionItem[];
   artifacts: ArtifactRecord[];
   turnDiff?: TurnDiffRecord;
@@ -312,7 +305,6 @@ const initialState: RuntimeViewState = {
   reasoningText: "",
   toolResults: [],
   patchPreviews: [],
-  approvals: [],
   userQuestions: [],
   artifacts: [],
   narrative: createInitialRunNarrativeState(),
@@ -337,7 +329,6 @@ function viewFromState(state: RuntimeViewState): ThreadViewState {
     reasoningText: state.reasoningText,
     toolResults: state.toolResults,
     patchPreviews: state.patchPreviews,
-    approvals: state.approvals,
     userQuestions: state.userQuestions,
     artifacts: state.artifacts,
     turnDiff: state.turnDiff,
@@ -425,7 +416,6 @@ function threadItemFromRuntime(thread: RuntimeThread): ThreadItem {
     activeRunId: thread.activeRunId,
     workspaceRoot: thread.workspace.workspaceRoot,
     runStatus: thread.activeRunId ? "running" : undefined,
-    approvalCount: 0,
     artifactCount: 0,
     ...(thread.titleSource ? { titleSource: thread.titleSource } : {}),
     ...(thread.titleStatus ? { titleStatus: thread.titleStatus } : {}),
@@ -458,7 +448,6 @@ function syncActiveThreadSummary(state: RuntimeViewState): RuntimeViewState {
       runId: state.runId ?? existing?.runId,
       activeRunId: isActiveRunStatus(state.status) ? state.runId : undefined,
       runStatus: state.status ?? existing?.runStatus,
-      approvalCount: state.approvals.length,
       artifactCount: state.artifacts.length,
     }),
   };
@@ -830,16 +819,6 @@ function upsertPatchPreview(
   return updated;
 }
 
-function normalizeRiskTone(value?: string): AguiApprovalRiskTone {
-  switch (value) {
-    case "safe":
-    case "danger":
-      return value;
-    default:
-      return "warning";
-  }
-}
-
 function normalizeArtifactStatus(value?: string): AguiArtifactStatus | undefined {
   switch (value) {
     case "ready":
@@ -1014,8 +993,8 @@ function toolDecisionRecord(event: AguiEvent): ToolDecisionRecord {
     reason: event.toolDecisionReason || event.message,
     staticPermissionBehavior: event.staticPermissionBehavior,
     staticPermissionReason: event.staticPermissionReason,
-    affectedPaths: event.affectedPaths ?? event.approvalAffectedPaths ?? [],
-    patchSummary: event.patchSummary ?? event.approvalPatchSummary,
+    affectedPaths: event.affectedPaths ?? [],
+    patchSummary: event.patchSummary,
     // Task 16 unified observability: carry the profile name, transform
     // origin, trashed paths, and guardian violation reason so the UI can
     // render them.
@@ -1080,30 +1059,6 @@ function buildArtifactDescription(artifact: ArtifactRecord): string {
   }
 
   return details.join(" | ");
-}
-
-function upsertApproval(
-  approvals: ApprovalItem[],
-  next: ApprovalItem,
-): ApprovalItem[] {
-  const index = approvals.findIndex((approval) => approval.id === next.id);
-  if (index < 0) {
-    return [...approvals, next];
-  }
-
-  const updated = approvals.slice();
-  updated[index] = next;
-  return updated;
-}
-
-function removeApproval(
-  approvals: ApprovalItem[],
-  approvalId?: string,
-): ApprovalItem[] {
-  if (!approvalId) {
-    return approvals;
-  }
-  return approvals.filter((approval) => approval.id !== approvalId);
 }
 
 function upsertUserQuestion(
@@ -1235,7 +1190,6 @@ function syncFromRun(
       phase: "cancelling",
       status: run.status,
 		timelineStatus: "running",
-		approvals: [],
 		userQuestions: [],
 		steps: toSteps(
         upsertStep(
@@ -1265,7 +1219,6 @@ function syncFromRun(
       phase: "done",
       status: run.status,
 		timelineStatus: "done",
-		approvals: [],
 		userQuestions: [],
 	};
   }
@@ -1279,7 +1232,6 @@ function syncFromRun(
       phase: "cancelled",
       status: run.status,
 		timelineStatus: "done",
-		approvals: [],
 		userQuestions: [],
 	};
   }
@@ -1294,7 +1246,6 @@ function syncFromRun(
       status: run.status,
       timelineStatus: "error",
 		errorMessage: run.error || "Run failed",
-		approvals: [],
 		userQuestions: [],
 	};
   }
@@ -1339,7 +1290,6 @@ export function reduceRuntimeState(
         reasoningText: "",
 		toolResults: [],
 		patchPreviews: [],
-		approvals: [],
 		userQuestions: [],
 		artifacts: [],
         turnDiff: undefined,
@@ -1394,7 +1344,6 @@ export function reduceRuntimeState(
           phase: "cancelling",
           status: "cancelling",
 		timelineStatus: "running",
-		approvals: [],
 		userQuestions: [],
 	}),
       );
@@ -1467,7 +1416,6 @@ export function reduceRuntimeState(
           status: "error",
           timelineStatus: "error",
 		errorMessage: action.message,
-		approvals: [],
 		userQuestions: [],
 		inspectorSummary: {
             ...state.inspectorSummary,
@@ -1585,7 +1533,6 @@ export function reduceRuntimeState(
             : fromRuntime.titleSeedRunId,
           runStatus:
             existing?.runStatus ?? (thread.activeRunId ? "running" : undefined),
-          approvalCount: existing?.approvalCount ?? 0,
           artifactCount: existing?.artifactCount ?? 0,
         };
       });
@@ -1627,7 +1574,6 @@ export function reduceRuntimeState(
           activeRunId: action.runId,
           workspaceRoot: action.workspaceRoot,
           runStatus: "running",
-          approvalCount: 0,
           artifactCount: 0,
         }),
       };
@@ -1647,7 +1593,6 @@ export function reduceRuntimeState(
             ? {
                 ...next,
                 runStatus: existing?.runStatus ?? next.runStatus,
-                approvalCount: existing?.approvalCount ?? 0,
                 artifactCount: existing?.artifactCount ?? 0,
               }
             : thread,
@@ -1755,17 +1700,14 @@ export function reduceRuntimeState(
           } else if (status === "cancelling") {
             nextState.phase = "cancelling";
             nextState.timelineStatus = "running";
-            nextState.approvals = [];
             nextState.userQuestions = [];
           } else if (status === "cancelled") {
             nextState.phase = "cancelled";
             nextState.timelineStatus = "done";
-            nextState.approvals = [];
             nextState.userQuestions = [];
           } else if (status === "finished") {
             nextState.phase = "done";
             nextState.timelineStatus = "done";
-            nextState.approvals = [];
             nextState.userQuestions = [];
             nextState.runCompletedAtMs =
               nextState.runCompletedAtMs ??
@@ -1775,7 +1717,6 @@ export function reduceRuntimeState(
           } else if (status === "error") {
             nextState.phase = "error";
             nextState.timelineStatus = "error";
-            nextState.approvals = [];
             nextState.userQuestions = [];
           }
           if (
@@ -1812,7 +1753,6 @@ export function reduceRuntimeState(
           nextState.phase = "done";
           nextState.status = "finished";
           nextState.timelineStatus = "done";
-          nextState.approvals = [];
           nextState.userQuestions = [];
           nextState.runCompletedAtMs =
             nextState.runCompletedAtMs ??
@@ -2284,10 +2224,7 @@ export function reduceRuntimeState(
               title: action.event.toolCallName || "Patch preview",
               patch: action.event.patch || "",
               summary: action.event.patchSummary,
-              affectedPaths:
-                action.event.affectedPaths ??
-                action.event.approvalAffectedPaths ??
-                [],
+              affectedPaths: action.event.affectedPaths ?? [],
               truncated: action.event.truncated,
             },
           );
@@ -2502,7 +2439,6 @@ export function reduceRuntimeState(
             nextState.phase = "cancelled";
             nextState.status = "cancelled";
             nextState.timelineStatus = "done";
-            nextState.approvals = [];
             nextState.userQuestions = [];
             records = upsertStep(records, "run-cancelled", {
               title: "Run cancelled",
@@ -2528,7 +2464,6 @@ export function reduceRuntimeState(
               errorDescription = `Provider 请求失败：${rawMessage}`;
             }
             nextState.errorMessage = errorMessage;
-            nextState.approvals = [];
             nextState.userQuestions = [];
             records = upsertStep(records, "run-error", {
               title: "Run failed",

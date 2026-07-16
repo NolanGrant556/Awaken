@@ -9,6 +9,7 @@ import { createInterface } from "node:readline";
 import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app } from "electron";
+import { resolveSystemSkillsTargetRoot } from "./system-skills-importer.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -267,6 +268,7 @@ function sanitizedRuntimeEnv(
   // unset by the user's startup files must not leak back from Electron's env.
   const env = { ...sourceEnvironment };
   delete env.AWAKEN_CONFIG_DIR;
+  delete env.AWAKEN_BUNDLED_SKILL_DIRS;
   delete env.LLM_API_KEY;
   delete env.LLM_BASE_URL;
   delete env.LLM_MODEL_ID;
@@ -382,6 +384,11 @@ export class RuntimeSupervisor {
             // resolves the user home itself; inherited shell values must not
             // change the product identity.
             AWAKEN_HOME: join(app.getPath("home"), ".awaken"),
+            // Bundled Skills are product-owned. Login shell configuration may
+            // not replace the synchronized Desktop source identity.
+            AWAKEN_BUNDLED_SKILL_DIRS: resolveSystemSkillsTargetRoot(
+              app.getPath("home"),
+            ),
             // FileStore projects are selected per run. Core must never derive
             // a project from Electron userData, a previous workspace, or cwd.
             AWAKEN_DEFAULT_WORKSPACE: "",

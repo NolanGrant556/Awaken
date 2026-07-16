@@ -1,10 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RuntimeSkill, RuntimeToolInfo } from "../shared/runtime";
 import {
+  DEFAULT_SKILL_VIEW,
+  SKILL_VIEW_TABS,
+  isSkillVisibleInView,
   loadMcpSettingsResources,
   loadSkillListsForRoots,
   isSkillPackageDeletable,
+  shouldRenderSkillDeleteAction,
   skillDiagnosticText,
+  skillSourceLabel,
 } from "./ExtensionsView";
 
 describe("loadSkillListsForRoots", () => {
@@ -87,5 +92,37 @@ describe("isSkillPackageDeletable", () => {
     expect(isSkillPackageDeletable({ sourceOrigin: "user" })).toBe(true);
     expect(isSkillPackageDeletable({ sourceOrigin: "mcp" })).toBe(false);
     expect(isSkillPackageDeletable({ sourceOrigin: "plugin" })).toBe(false);
+    expect(isSkillPackageDeletable({ sourceOrigin: "bundled" })).toBe(false);
+  });
+
+  it("hides the delete action only for product-owned bundled Skills", () => {
+    expect(shouldRenderSkillDeleteAction({ sourceOrigin: "bundled" })).toBe(false);
+    expect(shouldRenderSkillDeleteAction({ sourceOrigin: "mcp" })).toBe(true);
+    expect(shouldRenderSkillDeleteAction({ sourceOrigin: "plugin" })).toBe(true);
+    expect(shouldRenderSkillDeleteAction({ sourceOrigin: "project" })).toBe(true);
+  });
+});
+
+describe("Skill views", () => {
+  it("defaults to Awaken and keeps the locked tab order", () => {
+    expect(DEFAULT_SKILL_VIEW).toBe("awaken");
+    expect(SKILL_VIEW_TABS).toEqual([
+      { id: "awaken", label: "Awaken Skills" },
+      { id: "project", label: "项目 Skills" },
+      { id: "user", label: "全局 Skills" },
+    ]);
+  });
+
+  it("routes bundled Skills only to Awaken without changing other source views", () => {
+    expect(isSkillVisibleInView({ sourceOrigin: "bundled" }, "awaken")).toBe(true);
+    expect(isSkillVisibleInView({ sourceOrigin: "bundled" }, "user")).toBe(false);
+    expect(isSkillVisibleInView({ sourceOrigin: "project" }, "project")).toBe(true);
+    expect(isSkillVisibleInView({ sourceOrigin: "user" }, "user")).toBe(true);
+    expect(isSkillVisibleInView({ sourceOrigin: "mcp" }, "user")).toBe(true);
+    expect(isSkillVisibleInView({ sourceOrigin: "plugin" }, "user")).toBe(true);
+  });
+
+  it("labels bundled cards as Awaken built-ins", () => {
+    expect(skillSourceLabel("bundled")).toBe("Awaken 内置");
   });
 });

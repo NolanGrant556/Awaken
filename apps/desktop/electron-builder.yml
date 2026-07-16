@@ -10,6 +10,9 @@ files:
   - "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}"
   - "!**/.{idea,git,cache,vscode,DS_Store}"
 extraResources:
+  - from: resources/system-skills
+    to: system-skills
+    filter: ["**/*"]
   - from: resources/pets
     to: pets
     filter: ["**/*"]

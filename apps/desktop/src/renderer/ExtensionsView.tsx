@@ -38,7 +38,7 @@ export type McpToolInfo = {
 export type ExtensionSection = "connectors" | "skills";
 
 type ConnectorKind = "mcp" | "cli";
-type SkillView = "project" | "user";
+export type SkillView = "awaken" | "project" | "user";
 type SkillInstallScope = "project" | "global";
 
 type PendingSkillDelete = {
@@ -81,7 +81,10 @@ const CONNECTOR_KIND_TABS: Array<{ id: ConnectorKind; label: string }> = [
   { id: "cli", label: "CLI" },
 ];
 
-const SKILL_VIEW_TABS: Array<{ id: SkillView; label: string }> = [
+export const DEFAULT_SKILL_VIEW: SkillView = "awaken";
+
+export const SKILL_VIEW_TABS: Array<{ id: SkillView; label: string }> = [
+  { id: "awaken", label: "Awaken Skills" },
   { id: "project", label: "项目 Skills" },
   { id: "user", label: "全局 Skills" },
 ];
@@ -172,12 +175,14 @@ function sourceLabel(source: string): string {
   }
 }
 
-function skillSourceLabel(source: string): string {
+export function skillSourceLabel(source: string): string {
   switch (source) {
     case "project":
       return "项目";
     case "user":
       return "全局";
+    case "bundled":
+      return "Awaken 内置";
     default:
       return sourceLabel(source);
   }
@@ -185,6 +190,26 @@ function skillSourceLabel(source: string): string {
 
 export function isSkillPackageDeletable(skill: Pick<RuntimeSkill, "sourceOrigin">): boolean {
   return skill.sourceOrigin === "project" || skill.sourceOrigin === "user";
+}
+
+export function shouldRenderSkillDeleteAction(
+  skill: Pick<RuntimeSkill, "sourceOrigin">,
+): boolean {
+  return skill.sourceOrigin !== "bundled";
+}
+
+export function isSkillVisibleInView(
+  skill: Pick<RuntimeSkill, "sourceOrigin">,
+  view: SkillView,
+): boolean {
+  switch (view) {
+    case "awaken":
+      return skill.sourceOrigin === "bundled";
+    case "project":
+      return skill.sourceOrigin === "project";
+    case "user":
+      return skill.sourceOrigin !== "project" && skill.sourceOrigin !== "bundled";
+  }
 }
 
 function matchesQuery(value: string | undefined, query: string): boolean {
@@ -329,7 +354,9 @@ export function ExtensionsView({
   const [query, setQuery] = useState("");
   const [activeConnectorKind, setActiveConnectorKind] =
     useState<ConnectorKind>("mcp");
-  const [activeSkillView, setActiveSkillView] = useState<SkillView>("project");
+  const [activeSkillView, setActiveSkillView] = useState<SkillView>(
+    DEFAULT_SKILL_VIEW,
+  );
   const [expandedProjectRoots, setExpandedProjectRoots] = useState<Set<string>>(
     () => new Set(),
   );
@@ -544,6 +571,11 @@ export function ExtensionsView({
     [visibleSkills],
   );
 
+  const visibleAwakenSkills = useMemo(
+    () => visibleSkills.filter((skill) => skill.sourceOrigin === "bundled"),
+    [visibleSkills],
+  );
+
   const visibleMcpSkills = useMemo(
     () => visibleSkills.filter((skill) => skill.sourceOrigin === "mcp"),
     [visibleSkills],
@@ -555,7 +587,8 @@ export function ExtensionsView({
         (skill) =>
           skill.sourceOrigin !== "project" &&
           skill.sourceOrigin !== "user" &&
-          skill.sourceOrigin !== "mcp",
+          skill.sourceOrigin !== "mcp" &&
+          skill.sourceOrigin !== "bundled",
       ),
     [visibleSkills],
   );
@@ -924,20 +957,22 @@ export function ExtensionsView({
             </p>
           ) : null}
         </div>
-        <button
-          type="button"
-          className="extension-card-action extension-card-action-danger"
-          aria-label={`删除 ${skill.displayName || skill.name}`}
-          title={
-            deletable
-              ? `删除 ${skill.displayName || skill.name}`
-              : "此 Skill 不属于项目或全局 .awaken/skills，不能在这里删除"
-          }
-          disabled={!deletable || deletingSkill}
-          onClick={() => setPendingSkillDelete({ skill, projectRoot })}
-        >
-          <Trash2 size={18} strokeWidth={1.9} />
-        </button>
+        {shouldRenderSkillDeleteAction(skill) ? (
+          <button
+            type="button"
+            className="extension-card-action extension-card-action-danger"
+            aria-label={`删除 ${skill.displayName || skill.name}`}
+            title={
+              deletable
+                ? `删除 ${skill.displayName || skill.name}`
+                : "此 Skill 不属于项目或全局 .awaken/skills，不能在这里删除"
+            }
+            disabled={!deletable || deletingSkill}
+            onClick={() => setPendingSkillDelete({ skill, projectRoot })}
+          >
+            <Trash2 size={18} strokeWidth={1.9} />
+          </button>
+        ) : null}
       </article>
     );
   }
@@ -999,7 +1034,7 @@ export function ExtensionsView({
   const subtitle =
     section === "connectors"
       ? "管理 MCP servers 与 CLI 连接器，连接外部系统和工具。"
-      : "管理项目 Skills 与全局 Skills，扩展 Awaken 的执行能力。";
+      : "管理 Awaken、项目与全局 Skills，扩展 Awaken 的执行能力。";
   const primaryAction =
     section === "connectors"
       ? { label: "配置 MCP", icon: <Plus size={16} strokeWidth={1.9} /> }
@@ -1142,7 +1177,19 @@ export function ExtensionsView({
           </div>
         ) : (
           <div className="extension-sections">
-            {activeSkillView === "project" ? (
+            {activeSkillView === "awaken" ? (
+              <section className="extension-section" aria-label="Awaken Skills">
+                <div className="extension-grid">
+                  {visibleAwakenSkills.length > 0 ? (
+                    visibleAwakenSkills.map((skill) => renderSkillCard(skill))
+                  ) : (
+                    <div className="extension-empty">
+                      内置 Skills 未就绪，重启 Awaken 后重试
+                    </div>
+                  )}
+                </div>
+              </section>
+            ) : activeSkillView === "project" ? (
               <section className="extension-section" aria-label="项目 Skills">
                 <div className="skill-project-list">
                   {visibleProjectSkillGroups.length > 0 ? (

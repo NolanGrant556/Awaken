@@ -42,6 +42,7 @@ import {
   type DesktopPlatform,
   type DeleteSkillRequest,
   type DeleteSkillResponse,
+  type GetSkillPreviewRequest,
   type InstallSkillRequest,
   type InstallSkillResponse,
   type ModelProfileBalancesResultWire,
@@ -61,6 +62,7 @@ import {
   type RuntimeProjectOperationWire,
   type RuntimeProjectWire,
   type RuntimeSkill,
+  type SkillPreviewResponse,
   type RuntimeModelProfileSummaryWire,
   type RenameThreadRequest,
   type RuntimeThreadTranscriptWire,
@@ -1161,6 +1163,16 @@ ipcMain.handle("awaken:list-skills", async (_event, projectRoot?: string) => {
 		: "/v1/skills";
 	return requestRuntime<RuntimeSkill[]>(path, {
 		method: "GET",
+	});
+});
+
+ipcMain.handle("awaken:get-skill-preview", async (_event, request: GetSkillPreviewRequest) => {
+	return requestRuntime<SkillPreviewResponse>("/v1/skills/preview", {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+		},
+		body: JSON.stringify(request),
 	});
 });
 

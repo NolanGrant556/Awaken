@@ -411,6 +411,47 @@ pre {
   min-height: 78px;
 }
 
+.extension-skill-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0;
+  padding: 0;
+}
+
+.extension-card-main {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  width: 100%;
+  min-height: 88px;
+  padding: 14px;
+  border: 0;
+  border-radius: var(--aw-radius-md);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+button.extension-card-main {
+  cursor: pointer;
+}
+
+button.extension-card-main:hover {
+  background: color-mix(in srgb, var(--aw-bg-fill-light) 54%, transparent);
+}
+
+button.extension-card-main:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline-offset: -3px;
+}
+
+.extension-card-main-static {
+  cursor: default;
+}
+
 .extension-card-icon {
   display: inline-grid;
   place-items: center;
@@ -436,7 +477,9 @@ pre {
   min-width: 0;
 }
 
-.extension-card h3 {
+.extension-card h3,
+.extension-card-heading {
+  display: block;
   min-width: 0;
   margin: 0;
   overflow: hidden;
@@ -448,7 +491,9 @@ pre {
   white-space: nowrap;
 }
 
-.extension-card p {
+.extension-card p,
+.extension-card-description,
+.extension-card-diagnostic {
   display: -webkit-box;
   min-width: 0;
   margin: 0;
@@ -519,6 +564,10 @@ pre {
   -webkit-line-clamp: 2;
 }
 
+.extension-skill-card > .extension-card-action {
+  margin-right: 14px;
+}
+
 .extension-card-actions {
   display: flex;
   align-items: center;
@@ -552,6 +601,122 @@ pre {
 .extension-card-action:disabled {
   opacity: 0.42;
   cursor: default;
+}
+
+.aw-dialog.skill-preview-dialog {
+  width: min(920px, calc(100vw - 80px));
+  max-height: min(720px, calc(100vh - 80px));
+}
+
+.skill-preview-dialog .aw-dialog__head {
+  justify-content: flex-end;
+  padding: var(--aw-space-5) var(--aw-space-6) var(--aw-space-3);
+}
+
+.skill-preview-dialog-scroll {
+  padding: 0 var(--aw-space-9) var(--aw-space-9);
+  scroll-behavior: auto;
+}
+
+.skill-preview-dialog-scroll:focus-visible {
+  outline: none;
+}
+
+.skill-preview-content {
+  display: grid;
+  gap: var(--aw-space-8);
+  width: min(100%, 920px);
+  min-width: 0;
+  margin: 0 auto;
+  padding: var(--aw-space-3) 0 var(--aw-space-7);
+}
+
+.skill-preview-status {
+  padding: var(--aw-space-9) 0;
+  color: var(--aw-text-tertiary);
+  text-align: center;
+}
+
+.skill-preview-error {
+  display: grid;
+  gap: var(--aw-space-2);
+  padding: var(--aw-space-6);
+  border: 1px solid color-mix(in srgb, var(--aw-error) 32%, var(--aw-border-main));
+  border-radius: var(--aw-radius-md);
+  background: color-mix(in srgb, var(--aw-error) 7%, var(--aw-bg-white));
+  color: var(--aw-text-secondary);
+}
+
+.skill-preview-error strong {
+  color: var(--aw-error);
+}
+
+.skill-preview-frontmatter {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: var(--aw-space-6);
+  overflow-x: auto;
+  overflow-y: visible;
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-code);
+  color: var(--aw-text-code);
+  font-family: var(--aw-font-mono);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-base);
+  white-space: pre;
+}
+
+.skill-preview-frontmatter code {
+  font: inherit;
+}
+
+.skill-preview-markdown {
+  gap: var(--aw-space-5);
+  font-size: var(--aw-font-size-base);
+  line-height: 1.72;
+}
+
+.skill-preview-markdown h1 {
+  font-size: 28px;
+  line-height: 1.25;
+}
+
+.skill-preview-markdown h2 {
+  margin-top: var(--aw-space-6);
+  font-size: 20px;
+  line-height: 1.35;
+}
+
+.skill-preview-markdown h3 {
+  margin-top: var(--aw-space-5);
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.skill-preview-markdown .assistant-message-code-block,
+.skill-preview-markdown .assistant-message-table-wrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.aw-markdown-image-alt {
+  color: var(--aw-text-tertiary);
+  font-style: italic;
+}
+
+@media (max-width: 720px) {
+  .aw-dialog.skill-preview-dialog {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+  }
+
+  .skill-preview-dialog-scroll {
+    padding-right: var(--aw-space-6);
+    padding-left: var(--aw-space-6);
+  }
 }
 
 .mcp-toggle-switch {

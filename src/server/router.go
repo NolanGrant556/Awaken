@@ -159,6 +159,7 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 	}
 	skillH := skillHandlers{registry: cfg.skillRegistry, workspaceRoot: cfg.workspaceRoot, trashAdapter: cfg.skillTrashAdapter}
 	mux.HandleFunc("GET /v1/skills", skillH.handleListSkills)
+	mux.HandleFunc("POST /v1/skills/preview", skillH.handlePreviewSkill)
 	mux.HandleFunc("POST /v1/skills/install", skillH.handleInstallSkill)
 	mux.HandleFunc("DELETE /v1/skills/{id}", skillH.handleDeleteSkill)
 	// POST /v1/skills/{id}/execute reserved for follow-up

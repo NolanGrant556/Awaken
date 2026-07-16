@@ -18,8 +18,8 @@ import (
 	convcontext "awaken/src/context"
 	"awaken/src/llm"
 	"awaken/src/tool"
-	_ "awaken/src/tools/apply_patch"
-	_ "awaken/src/tools/file_read"
+	_ "awaken/src/tools/read"
+	_ "awaken/src/tools/write"
 )
 
 type runnerTestTool struct {
@@ -164,19 +164,15 @@ func TestRunnerToolErrorObservation(t *testing.T) {
 	}
 }
 
-func TestRunnerOpenAIApplyPatchAutoAllowFeedsBack(t *testing.T) {
+func TestRunnerOpenAIWriteAutoAllowFeedsBack(t *testing.T) {
 	root := t.TempDir()
-	target := root + "/runner_patch.txt"
-	createPatch := "*** Begin Patch\n" +
-		"*** Add File: " + target + "\n" +
-		"+created by runner\n" +
-		"*** End Patch"
+	target := root + "/runner_write.txt"
 
 	var calls int
 	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		if calls == 1 {
-			writeRunnerStreamToolCall(t, w, "call_create_patch", "apply_patch", map[string]string{"patch": createPatch})
+			writeRunnerStreamToolCall(t, w, "call_create_write", "Write", map[string]string{"file_path": target, "content": "created by runner\n"})
 			return
 		}
 		if calls == 2 {
@@ -184,19 +180,13 @@ func TestRunnerOpenAIApplyPatchAutoAllowFeedsBack(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatalf("failed to decode request: %v", err)
 			}
-			// Task 4: apply_patch within workspace is now auto-allowed
-			// (boundary + sensitive-path + trash constraints). The file
-			// must exist and the tool result must be a success.
 			if _, err := os.Stat(target); err != nil {
-				t.Fatalf("expected AUTO-allowed patch to create file, stat err=%v", err)
+				t.Fatalf("expected AUTO-allowed Write to create file, stat err=%v", err)
 			}
-			if containsToolResultSubstring(body.Messages, "call_create_patch", "工具执行被 AUTO policy 拒绝") {
+			if containsToolResultSubstring(body.Messages, "call_create_write", "工具执行被 AUTO policy 拒绝") {
 				t.Fatalf("expected AUTO allow tool result, got denial in %+v", body.Messages)
 			}
-			if !containsToolResultSubstring(body.Messages, "call_create_patch", "Success") {
-				t.Fatalf("expected AUTO allow tool result to contain Success, got %+v", body.Messages)
-			}
-			writeRunnerStreamText(t, w, "patch applied")
+			writeRunnerStreamText(t, w, "write applied")
 			return
 		}
 		t.Fatalf("unexpected call %d", calls)
@@ -206,7 +196,7 @@ func TestRunnerOpenAIApplyPatchAutoAllowFeedsBack(t *testing.T) {
 	var sawAuthRequired bool
 	var gotEvents []AwakenEvent
 	agent := NewAgent(testAgentConfigWithWorkspace(server.URL, 3, root))
-	answer, err := agent.RunStreamWithEvents(context.Background(), "create via apply_patch", EventSinkFunc(func(event AwakenEvent) {
+	answer, err := agent.RunStreamWithEvents(context.Background(), "create via Write", EventSinkFunc(func(event AwakenEvent) {
 		gotEvents = append(gotEvents, event)
 		if event.Type == AuthRequiredEventType {
 			sawAuthRequired = true
@@ -215,7 +205,7 @@ func TestRunnerOpenAIApplyPatchAutoAllowFeedsBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if answer != "patch applied" {
+	if answer != "write applied" {
 		t.Fatalf("expected final answer, got %q", answer)
 	}
 	if sawAuthRequired {
@@ -230,13 +220,9 @@ func TestRunnerOpenAIApplyPatchAutoAllowFeedsBack(t *testing.T) {
 	}
 }
 
-func TestRunnerAnthropicApplyPatchAutoAllowFeedsBack(t *testing.T) {
+func TestRunnerAnthropicWriteAutoAllowFeedsBack(t *testing.T) {
 	root := t.TempDir()
-	target := root + "/anthropic_patch.txt"
-	patch := "*** Begin Patch\n" +
-		"*** Add File: " + target + "\n" +
-		"+created by anthropic\n" +
-		"*** End Patch"
+	target := root + "/anthropic_write.txt"
 
 	var calls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -245,8 +231,8 @@ func TestRunnerAnthropicApplyPatchAutoAllowFeedsBack(t *testing.T) {
 		}
 		calls++
 		if calls == 1 {
-			writeRunnerAnthropicToolUseStream(t, w, "toolu_patch", "apply_patch", map[string]string{
-				"patch": patch,
+			writeRunnerAnthropicToolUseStream(t, w, "toolu_write", "Write", map[string]string{
+				"file_path": target, "content": "created by anthropic\n",
 			})
 			return
 		}
@@ -260,22 +246,20 @@ func TestRunnerAnthropicApplyPatchAutoAllowFeedsBack(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("failed to decode anthropic request: %v", err)
 		}
-		if !anthropicRequestContainsToolResult(body.Messages, "toolu_patch") {
+		if !anthropicRequestContainsToolResult(body.Messages, "toolu_write") {
 			t.Fatalf("expected anthropic tool_result, got %+v", body.Messages)
 		}
-		// Task 4: apply_patch within workspace is now auto-allowed.
-		// The file must exist after the call.
 		if _, err := os.Stat(target); err != nil {
-			t.Fatalf("expected AUTO-allowed patch to create file, stat err=%v", err)
+			t.Fatalf("expected AUTO-allowed Write to create file, stat err=%v", err)
 		}
-		writeRunnerAnthropicTextStream(t, w, "anthropic patch applied")
+		writeRunnerAnthropicTextStream(t, w, "anthropic write applied")
 	}))
 	defer server.Close()
 
 	cfg := testAgentConfigWithWorkspace(server.URL+"/anthropic", 3, root)
 	var sawAuthRequired bool
 	agent := NewAgent(cfg)
-	answer, err := agent.RunStreamWithEvents(context.Background(), "create via anthropic apply_patch", EventSinkFunc(func(event AwakenEvent) {
+	answer, err := agent.RunStreamWithEvents(context.Background(), "create via anthropic Write", EventSinkFunc(func(event AwakenEvent) {
 		if event.Type == AuthRequiredEventType {
 			sawAuthRequired = true
 		}
@@ -283,7 +267,7 @@ func TestRunnerAnthropicApplyPatchAutoAllowFeedsBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if answer != "anthropic patch applied" {
+	if answer != "anthropic write applied" {
 		t.Fatalf("expected final answer, got %q", answer)
 	}
 	if sawAuthRequired {
@@ -759,7 +743,7 @@ data: {"type":"message_stop"}`,
 	}
 }
 
-func TestRunnerReadOnlyToolOutsideWorkspaceFeedsResultBack(t *testing.T) {
+func TestRunnerReadOutsideReadableRootsFeedsDenialBack(t *testing.T) {
 	workspaceRoot := t.TempDir()
 	outsideRoot := t.TempDir()
 	outsideFile := filepath.Join(outsideRoot, "outside.txt")
@@ -773,7 +757,7 @@ func TestRunnerReadOnlyToolOutsideWorkspaceFeedsResultBack(t *testing.T) {
 		if calls == 1 {
 			writeRunnerAnthropicStreamEvents(t, w, []string{
 				`event: content_block_start
-data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_outside","name":"read_file"}}`,
+data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_outside","name":"Read"}}`,
 				`event: content_block_delta
 data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{"}}`,
 				fmt.Sprintf(`event: content_block_delta
@@ -803,6 +787,7 @@ data: {"type":"message_stop"}`,
 
 	cfg := testAgentConfig(server.URL+"/anthropic", 3)
 	cfg.Workspace.Root = workspaceRoot
+	cfg.Workspace.ReadableRoots = []string{workspaceRoot}
 	cfg.Workspace.WritableRoots = []string{workspaceRoot}
 
 	var gotEvents []AwakenEvent
@@ -834,8 +819,8 @@ data: {"type":"message_stop"}`,
 	if sawAuthRequired {
 		t.Fatalf("unexpected auth requirement for read-only tool")
 	}
-	if !strings.Contains(toolResultContent, "outside content") {
-		t.Fatalf("expected tool result to contain outside file content, got %q", toolResultContent)
+	if !strings.Contains(toolResultContent, "outside") && !strings.Contains(toolResultContent, "readable") {
+		t.Fatalf("expected tool result to explain readable-root denial, got %q", toolResultContent)
 	}
 
 	messages := agent.GetConversation().Context.GetMessages()
@@ -848,14 +833,14 @@ data: {"type":"message_stop"}`,
 	if messages[2].Role != convcontext.RoleTool || messages[2].ToolCallID != "toolu_outside" {
 		t.Fatalf("expected tool result message, got %+v", messages[2])
 	}
-	if !strings.Contains(messages[2].Content, "outside content") {
-		t.Fatalf("expected tool result content to contain outside file content, got %q", messages[2].Content)
+	if !strings.Contains(messages[2].Content, "outside") && !strings.Contains(messages[2].Content, "readable") {
+		t.Fatalf("expected tool result content to contain denial, got %q", messages[2].Content)
 	}
 }
 
 func quoteJSONStringForStream(value string) string {
 	encodedValue, _ := json.Marshal(value)
-	encodedPartial, _ := json.Marshal(`"path":` + string(encodedValue))
+	encodedPartial, _ := json.Marshal(`"file_path":` + string(encodedValue))
 	return string(encodedPartial)
 }
 

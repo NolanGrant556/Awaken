@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -349,12 +351,8 @@ func TestToolRuntimeEmitsCommandOutputFromObservableTool(t *testing.T) {
 	}
 }
 
-func TestToolRuntimeEmitsPatchPreviewBeforeApplyPatchExecution(t *testing.T) {
+func TestToolRuntimeExecutesWriteWithoutApproval(t *testing.T) {
 	root := t.TempDir()
-	patch := "*** Begin Patch\n" +
-		"*** Add File: note.md\n" +
-		"+hello\n" +
-		"*** End Patch"
 
 	var got []AwakenEvent
 	runtime := NewToolRuntimeWithConfig(EventSinkFunc(func(event AwakenEvent) {
@@ -363,31 +361,22 @@ func TestToolRuntimeEmitsPatchPreviewBeforeApplyPatchExecution(t *testing.T) {
 		PermissionContext: tool.NewPermissionContext(root, []string{root}),
 	})
 	result := runtime.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_patch_preview",
+		ID: "call_write",
 		Function: convcontext.FunctionCall{
-			Name:      "apply_patch",
-			Arguments: `{"patch":` + mustJSONQuote(t, patch) + `}`,
+			Name:      "Write",
+			Arguments: `{"file_path":"note.md","content":"hello\n"}`,
 		},
 	})
 
 	if result.IsError {
-		t.Fatalf("expected apply_patch success, got %+v", result)
+		t.Fatalf("expected Write success, got %+v", result)
 	}
-	if len(got) < 4 {
-		t.Fatalf("expected patch preview and execution events, got %+v", got)
-	}
-	if got[0].Type != PatchUpdatedEventType {
-		t.Fatalf("expected first event to be patch updated, got %+v", got)
-	}
-	if got[0].ToolCallID != "call_patch_preview" || got[0].Patch != patch || got[0].PatchSummary != "新增 1 个文件" {
-		t.Fatalf("unexpected patch preview event: %+v", got[0])
-	}
-	if len(got[0].AffectedPaths) != 1 || got[0].AffectedPaths[0] != "note.md" {
-		t.Fatalf("unexpected affected paths: %+v", got[0].AffectedPaths)
+	if content, err := os.ReadFile(filepath.Join(root, "note.md")); err != nil || string(content) != "hello\n" {
+		t.Fatalf("Write result=%q err=%v", content, err)
 	}
 	for _, event := range got {
 		if event.Type == AuthRequiredEventType {
-			t.Fatalf("expected no auth event on apply_patch, got %+v", event)
+			t.Fatalf("expected no auth event on Write, got %+v", event)
 		}
 	}
 }

@@ -59,7 +59,7 @@ type ExecutionDecision struct {
 	// For allow/deny it carries the original intent (for logging).
 	UpdatedIntent *ExecutionIntent
 	// UpdatedToolName is the tool to execute after transform (e.g.
-	// "apply_patch" when a shell echo-write is rewritten).
+	// another registered tool when a generic rewrite occurs).
 	UpdatedToolName string
 	// UpdatedInput is the input map for the transformed tool.
 	UpdatedInput map[string]any

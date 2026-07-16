@@ -58,7 +58,7 @@ func (t *ResourceReadTool) Definition() tool.ToolDefinition {
 			"Use when skill_id and the package-relative path are known and only file contents or metadata are required.",
 		},
 		WhenNotToUse: []string{
-			"Do not use for workspace files outside an installed Skill package; use read_file or read_artifact.",
+			"Do not use for workspace files outside an installed Skill package; use Read.",
 			"Do not use to install or execute a Skill, enumerate arbitrary directories, or read files larger than the declared bound.",
 		},
 		InputSchema: tool.ToolParametersSchema{

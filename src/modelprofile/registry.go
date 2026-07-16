@@ -25,6 +25,7 @@ type ModelCapability struct {
 	DefaultMaxTokens   int     `json:"default_max_tokens,omitempty"`
 	DefaultTemperature float64 `json:"default_temperature,omitempty"`
 	SupportsVision     bool    `json:"supports_vision,omitempty"`
+	SupportsNativePDF  bool    `json:"supports_native_pdf,omitempty"`
 	SupportsVideo      bool    `json:"supports_video,omitempty"`
 }
 

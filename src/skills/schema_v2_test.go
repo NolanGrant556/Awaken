@@ -60,8 +60,8 @@ func TestAllowedToolsRemainNonEnforcingHintsWithWarning(t *testing.T) {
 name: legacy
 description: legacy allow list
 allowedTools:
-  - file_read
-  - shell
+  - Read
+  - Bash
 ---
 Body.
 `
@@ -69,7 +69,7 @@ Body.
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if len(def.AllowedTools) != 2 || def.AllowedTools[0] != "file_read" {
+	if len(def.AllowedTools) != 2 || def.AllowedTools[0] != "Read" {
 		t.Fatalf("expected allowedTools normalized as hints, got %+v", def.AllowedTools)
 	}
 	if len(def.DeprecatedWarnings) == 0 {
@@ -147,7 +147,7 @@ Use the bundled scripts when needed.`)
 	if def.UserInvocable || !def.DisableModelInvocation || !def.UserInvocableSet {
 		t.Fatalf("invocation flags=%+v", def)
 	}
-	if len(def.ToolHints) != 3 || def.ToolHints[0].Canonical != "read_file" || def.ToolHints[2].Canonical != "VendorTool" {
+	if len(def.ToolHints) != 3 || def.ToolHints[0].Canonical != "Read" || def.ToolHints[2].Canonical != "VendorTool" {
 		t.Fatalf("tool hints=%+v", def.ToolHints)
 	}
 	canonical := def.CanonicalFrontmatterMap()

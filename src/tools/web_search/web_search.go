@@ -6,93 +6,218 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"sort"
 	"strings"
 	"time"
 
 	"awaken/src/tool"
 )
 
-const defaultWebSearchEndpoint = "https://api.search.brave.com/res/v1/web/search"
+const (
+	ToolName                 = "WebSearch"
+	defaultWebSearchEndpoint = "https://api.search.brave.com/res/v1/web/search"
+	maximumResults           = 10
+)
 
-type WebSearchTool struct {
+type SearchRequest struct {
+	Query          string
+	AllowedDomains []string
+	BlockedDomains []string
+	Limit          int
+}
+
+type SearchResult struct {
+	Title   string `json:"title"`
+	URL     string `json:"url"`
+	Snippet string `json:"snippet,omitempty"`
+}
+
+type SearchResponse struct {
+	Results  []SearchResult
+	Provider string
+	Metadata map[string]any
+}
+
+type SearchProvider interface {
+	Search(context.Context, SearchRequest) (SearchResponse, error)
+}
+
+type ProviderErrorKind string
+
+const (
+	ProviderErrorAuthentication ProviderErrorKind = "authentication"
+	ProviderErrorRateLimit      ProviderErrorKind = "rate_limit"
+	ProviderErrorNetwork        ProviderErrorKind = "network"
+	ProviderErrorUpstream       ProviderErrorKind = "upstream"
+	ProviderErrorFormat         ProviderErrorKind = "format"
+	ProviderErrorCancelled      ProviderErrorKind = "cancelled"
+)
+
+type ProviderError struct {
+	Kind       ProviderErrorKind
+	Message    string
+	Retryable  bool
+	HTTPStatus int
+	Cause      error
+}
+
+func (e *ProviderError) Error() string {
+	if strings.TrimSpace(e.Message) != "" {
+		return e.Message
+	}
+	return string(e.Kind)
+}
+func (e *ProviderError) Unwrap() error { return e.Cause }
+
+type BraveProvider struct {
 	client   *http.Client
 	endpoint string
+	apiKey   string
 }
+
+func NewBraveProvider(client *http.Client, endpoint, apiKey string) *BraveProvider {
+	if client == nil {
+		client = http.DefaultClient
+	}
+	return &BraveProvider{client: client, endpoint: strings.TrimSpace(endpoint), apiKey: strings.TrimSpace(apiKey)}
+}
+
+func NewBraveProviderFromEnvironment() *BraveProvider {
+	return NewBraveProvider(nil, os.Getenv("AWAKEN_WEB_SEARCH_ENDPOINT"), os.Getenv("AWAKEN_WEB_SEARCH_API_KEY"))
+}
+
+func (p *BraveProvider) Search(ctx context.Context, request SearchRequest) (SearchResponse, error) {
+	endpoint := strings.TrimSpace(p.endpoint)
+	if endpoint == "" {
+		endpoint = defaultWebSearchEndpoint
+	}
+	if endpoint == defaultWebSearchEndpoint && strings.TrimSpace(p.apiKey) == "" {
+		return SearchResponse{}, &ProviderError{Kind: ProviderErrorAuthentication, Message: "WebSearch provider credentials are not configured.", Retryable: false}
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return SearchResponse{}, &ProviderError{Kind: ProviderErrorFormat, Message: "WebSearch endpoint is invalid.", Retryable: false, Cause: err}
+	}
+	query := constrainedQuery(request.Query, request.AllowedDomains, request.BlockedDomains)
+	values := parsed.Query()
+	values.Set("q", query)
+	values.Set("count", fmt.Sprintf("%d", request.Limit))
+	parsed.RawQuery = values.Encode()
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		return SearchResponse{}, &ProviderError{Kind: ProviderErrorFormat, Message: "WebSearch request could not be constructed.", Retryable: false, Cause: err}
+	}
+	if p.apiKey != "" {
+		httpRequest.Header.Set("X-Subscription-Token", p.apiKey)
+	}
+	httpRequest.Header.Set("Accept", "application/json")
+	response, err := p.client.Do(httpRequest)
+	if err != nil {
+		kind := ProviderErrorNetwork
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			kind = ProviderErrorCancelled
+		}
+		return SearchResponse{}, &ProviderError{Kind: kind, Message: "WebSearch provider request failed.", Retryable: true, Cause: err}
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return SearchResponse{}, classifyHTTPError(response.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, 4*1024*1024))
+	if err != nil {
+		return SearchResponse{}, &ProviderError{Kind: ProviderErrorNetwork, Message: "WebSearch provider response could not be read.", Retryable: true, Cause: err}
+	}
+	var payload struct {
+		Web struct {
+			Results []struct {
+				Title       string `json:"title"`
+				URL         string `json:"url"`
+				Description string `json:"description"`
+			} `json:"results"`
+		} `json:"web"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return SearchResponse{}, &ProviderError{Kind: ProviderErrorFormat, Message: "WebSearch provider returned an invalid response.", Retryable: true, Cause: err, HTTPStatus: response.StatusCode}
+	}
+	results := make([]SearchResult, 0, len(payload.Web.Results))
+	for _, item := range payload.Web.Results {
+		if strings.TrimSpace(item.Title) == "" || strings.TrimSpace(item.URL) == "" {
+			continue
+		}
+		results = append(results, SearchResult{Title: strings.TrimSpace(item.Title), URL: strings.TrimSpace(item.URL), Snippet: strings.TrimSpace(item.Description)})
+	}
+	return SearchResponse{Results: results, Provider: "brave", Metadata: map[string]any{"http_status": response.StatusCode, "provider_result_count": len(payload.Web.Results)}}, nil
+}
+
+func classifyHTTPError(status int) *ProviderError {
+	switch {
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		return &ProviderError{Kind: ProviderErrorAuthentication, Message: "WebSearch provider rejected authentication.", HTTPStatus: status}
+	case status == http.StatusTooManyRequests:
+		return &ProviderError{Kind: ProviderErrorRateLimit, Message: "WebSearch provider rate limit was reached.", HTTPStatus: status, Retryable: true}
+	case status >= 500:
+		return &ProviderError{Kind: ProviderErrorUpstream, Message: "WebSearch provider is temporarily unavailable.", HTTPStatus: status, Retryable: true}
+	default:
+		return &ProviderError{Kind: ProviderErrorUpstream, Message: fmt.Sprintf("WebSearch provider rejected the request with HTTP %d.", status), HTTPStatus: status}
+	}
+}
+
+type WebSearchTool struct {
+	provider SearchProvider
+	// Compatibility fields keep direct package tests and embedders able to
+	// inject an HTTP transport without exposing credentials to model input.
+	client   *http.Client
+	endpoint string
+	apiKey   string
+}
+
+func New(provider SearchProvider) *WebSearchTool { return &WebSearchTool{provider: provider} }
 
 var _ tool.LegacySingleValueInput = (*WebSearchTool)(nil)
 
 func (t *WebSearchTool) UnwrapSingleParameterInput() bool { return true }
-
-type webSearchResponse struct {
-	Web struct {
-		Results []webSearchResult `json:"results"`
-	} `json:"web"`
-}
-
-type webSearchResult struct {
-	Title       string `json:"title"`
-	URL         string `json:"url"`
-	Description string `json:"description"`
-}
-
-func (t *WebSearchTool) Name() string {
-	return "web_search"
-}
-
+func (t *WebSearchTool) Name() string                     { return ToolName }
 func (t *WebSearchTool) Description() string {
-	return "在互联网上搜索公开网页信息；不读取本地文件、不搜索工作区内容，本地文件请用 list_files/grep_search/read_file/read_artifact"
+	return "Search current public web pages through a host-configured provider. Optional allowed_domains or blocked_domains are normalized and enforced both in the provider query and against returned URLs."
 }
-
 func (t *WebSearchTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
-		{
-			Name:        "query",
-			Description: "互联网搜索关键词，不是本地文件路径或 glob",
-			Type:        "string",
-			Required:    true,
-		},
+		{Name: "query", Description: "Public web search query.", Type: "string", Required: true},
+		{Name: "allowed_domains", Description: "Only return these domains and their subdomains.", Type: "array"},
+		{Name: "blocked_domains", Description: "Exclude these domains and their subdomains.", Type: "array"},
 	}
 }
-
 func (t *WebSearchTool) Definition() tool.ToolDefinition {
 	return tool.BuildBuiltinDefinition(t, tool.ToolDefinition{
-		Name:        "web_search",
-		DisplayName: "Web Search",
-		Description: t.Description(),
-		Purpose:     "查询当前互联网公开信息，并返回可继续打开或引用的搜索结果。",
-		WhenToUse: []string{
-			"用户要求搜索、查最新信息或事实可能随时间变化时",
-			"工作区文件不能回答且公开网络检索适合时",
-		},
-		WhenNotToUse: []string{
-			"搜索本机工作区文件内容使用 grep_search；枚举文件使用 list_files",
-			"请求依赖登录态、私有数据或专用连接器时使用对应 connector/MCP，而不是公开搜索",
-		},
-		OutputSchema: tool.ToolParam{Type: "object", Properties: map[string]tool.ToolParam{
-			"query":                 {Type: "string", Description: "实际搜索词"},
-			"result_count":          {Type: "integer", Description: "返回结果数量"},
-			"provider_result_count": {Type: "integer", Description: "上游返回结果总数"},
-			"http_status":           {Type: "integer", Description: "搜索服务 HTTP 状态"},
-		}},
-		SideEffects: []tool.ToolSideEffect{{Kind: tool.SideEffectNetwork, Resources: []string{"public search service"}, Description: "向公开搜索服务发送查询；不修改工作区或外部业务数据。", Reversibility: tool.ReversibilityNotApplicable}},
-		Examples:    []tool.ToolExample{{Scenario: "查询当前官方文档", Input: map[string]any{"query": "OpenAI Codex tool architecture official"}, Outcome: "返回有界搜索结果和来源链接"}},
+		Name: ToolName, DisplayName: "Web Search", Description: t.Description(), Purpose: "Retrieve current public web sources with provider and domain-filter evidence.",
+		InputSchema: tool.ToolParametersSchema{Type: "object", Properties: map[string]tool.ToolParam{
+			"query":           {Type: "string", Description: "Public web search query."},
+			"allowed_domains": {Type: "array", Description: "Only return these domains and subdomains.", Items: &tool.ToolParam{Type: "string"}},
+			"blocked_domains": {Type: "array", Description: "Exclude these domains and subdomains.", Items: &tool.ToolParam{Type: "string"}},
+		}, Required: []string{"query"}, AdditionalProperties: tool.BoolPtr(false)},
+		WhenToUse:    []string{"The user requests web research or current information", "Repository files cannot answer a public time-sensitive question"},
+		WhenNotToUse: []string{"Use Grep for local files", "Use an authenticated MCP or connector for private sources"},
+		SideEffects:  []tool.ToolSideEffect{{Kind: tool.SideEffectNetwork, Resources: []string{"public search provider"}, Description: "Sends the query and domain constraints to the configured search provider.", Reversibility: tool.ReversibilityNotApplicable}},
+		Examples:     []tool.ToolExample{{Scenario: "Search official sources", Input: map[string]any{"query": "Go release notes", "allowed_domains": []string{"go.dev"}}, Outcome: "Returns up to 10 post-filtered sources with provider metadata."}},
 		FailureModes: []tool.ToolFailureMode{
-			{Code: "web_search_query_required", Cause: "query 缺失", Retryable: false, Recovery: []string{"提供具体搜索词"}},
-			{Code: "web_search_authorization_failed", Cause: "搜索服务拒绝授权", Retryable: false, Recovery: []string{"修复服务凭据"}},
-			{Code: "web_search_rate_limited", Cause: "搜索服务限流", Retryable: true, Recovery: []string{"按 backoff 等待后重试"}},
-			{Code: "web_search_request_failed", Cause: "网络或请求执行失败", Retryable: true, Recovery: []string{"检查网络后有界重试"}},
-			{Code: "web_search_upstream_failed", Cause: "上游搜索服务返回失败", Retryable: true, Recovery: []string{"等待后重试或改用官方来源"}},
+			{Code: "web_search_authorization_failed", Cause: "Provider credentials are absent or rejected", Retryable: false},
+			{Code: "web_search_rate_limited", Cause: "Provider rate limit", Retryable: true},
+			{Code: "web_search_network_failed", Cause: "Network transport failed", Retryable: true},
+			{Code: "web_search_response_invalid", Cause: "Provider response is malformed", Retryable: true},
 		},
-		Annotations: tool.ToolAnnotations{
-			ReadOnly:        true,
-			Destructive:     false,
-			OpenWorld:       true,
-			CapabilityClass: tool.CapabilityBrowserRead,
-			TrustedOrigin:   tool.TrustedOriginBuiltin,
-		},
+		OutputSchema: tool.ToolParam{Type: "object", Description: "Filtered sources, provider metadata, counts, and truncation details.", AdditionalProperties: tool.BoolPtr(true)},
+		Annotations:  tool.ToolAnnotations{ReadOnly: true, OpenWorld: true, CapabilityClass: tool.CapabilityBrowserRead, TrustedOrigin: tool.TrustedOriginBuiltin},
 	})
+}
+
+type searchParams struct {
+	Query          string   `json:"query"`
+	AllowedDomains []string `json:"allowed_domains,omitempty"`
+	BlockedDomains []string `json:"blocked_domains,omitempty"`
 }
 
 func (t *WebSearchTool) Execute(ctx context.Context, input string) (string, error) {
@@ -101,165 +226,203 @@ func (t *WebSearchTool) Execute(ctx context.Context, input string) (string, erro
 		return outcome.Content, err
 	}
 	if outcome.IsError() {
-		return "", fmt.Errorf("%s", outcome.ErrorMessage)
+		return outcome.Content, fmt.Errorf("%s", outcome.ErrorMessage)
 	}
 	return outcome.Content, nil
 }
 
-// ExecuteOutcome separates authorization, throttling, upstream, and response
-// failures so the agent does not blindly replay an internet search request.
 func (t *WebSearchTool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObserver) (tool.ExecutionOutcome, error) {
 	started := time.Now().UTC()
-	query := strings.TrimSpace(input)
-	if query == "" {
-		outcome := tool.FailedOutcome("搜索关键词不能为空", "web_search_query_required", tool.ErrorCategoryValidation, false)
-		outcome.RecoveryOptions = []string{"provide_search_query"}
-		return outcome.WithTiming(started, time.Now().UTC()), nil
-	}
-
-	endpoint := strings.TrimSpace(t.endpoint)
-	if endpoint == "" {
-		endpoint = defaultWebSearchEndpoint
-	}
-	separator := "?"
-	if strings.Contains(endpoint, "?") {
-		separator = "&"
-	}
-	requestURL := endpoint + separator + "q=" + url.QueryEscape(query)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", requestURL, nil)
+	params, err := parseSearchParams(input)
 	if err != nil {
-		message := fmt.Sprintf("创建请求失败: %v", err)
-		outcome := tool.FailedOutcome(message, "web_search_request_invalid", tool.ErrorCategoryValidation, false)
-		outcome.RecoveryOptions = []string{"change_search_query"}
-		outcome.Diagnostic = map[string]any{"query": query}
-		return outcome.WithTiming(started, time.Now().UTC()), nil
+		return tool.FailedOutcome(err.Error(), "web_search_invalid_input", tool.ErrorCategoryValidation, false).WithTiming(started, time.Now().UTC()), nil
 	}
-
-	client := t.client
-	if client == nil {
-		client = http.DefaultClient
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		message := fmt.Sprintf("搜索请求失败: %v", err)
-		outcome := webSearchRequestFailure(err, message, query)
-		return outcome.WithTiming(started, time.Now().UTC()), nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		outcome := webSearchHTTPFailure(resp.StatusCode, query)
-		return outcome.WithTiming(started, time.Now().UTC()), nil
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		message := fmt.Sprintf("读取响应失败: %v", err)
-		outcome := tool.FailedOutcome(message, "web_search_response_read_failed", tool.ErrorCategoryRuntime, true)
-		outcome.RecoveryOptions = []string{"retry_web_search"}
-		outcome.Diagnostic = map[string]any{"query": query, "http_status": resp.StatusCode}
-		return outcome.WithTiming(started, time.Now().UTC()), nil
-	}
-
-	var result webSearchResponse
-	if err := json.Unmarshal(body, &result); err != nil {
-		message := fmt.Sprintf("解析响应失败: %v", err)
-		outcome := tool.FailedOutcome(message, "web_search_response_invalid", tool.ErrorCategoryRuntime, true)
-		outcome.RecoveryOptions = []string{"retry_web_search", "inspect_search_provider"}
-		outcome.Diagnostic = map[string]any{"query": query, "http_status": resp.StatusCode}
-		return outcome.WithTiming(started, time.Now().UTC()), nil
-	}
-
-	if len(result.Web.Results) == 0 {
-		outcome := tool.SucceededOutcome("未找到相关结果")
-		outcome.Diagnostic = map[string]any{"query": query, "result_count": 0, "http_status": resp.StatusCode}
-		return outcome.WithTiming(started, time.Now().UTC()), nil
-	}
-
-	var summary strings.Builder
-	summary.WriteString("搜索结果:\n")
-	resultCount := 0
-	for _, result := range result.Web.Results {
-		if resultCount >= 5 {
-			break
+	provider := t.provider
+	if provider == nil {
+		if t.client != nil || strings.TrimSpace(t.endpoint) != "" || strings.TrimSpace(t.apiKey) != "" {
+			provider = NewBraveProvider(t.client, t.endpoint, t.apiKey)
+		} else {
+			provider = NewBraveProviderFromEnvironment()
 		}
-		if strings.TrimSpace(result.Title) == "" || strings.TrimSpace(result.URL) == "" {
+	}
+	response, err := provider.Search(ctx, SearchRequest{Query: params.Query, AllowedDomains: params.AllowedDomains, BlockedDomains: params.BlockedDomains, Limit: maximumResults})
+	if err != nil {
+		return providerFailure(err).WithTiming(started, time.Now().UTC()), nil
+	}
+	filtered := filterResults(response.Results, params.AllowedDomains, params.BlockedDomains)
+	providerCount := len(response.Results)
+	if len(filtered) > maximumResults {
+		filtered = filtered[:maximumResults]
+	}
+	var builder strings.Builder
+	for index, item := range filtered {
+		fmt.Fprintf(&builder, "%d. %s\n   URL: %s", index+1, item.Title, item.URL)
+		if item.Snippet != "" {
+			fmt.Fprintf(&builder, "\n   Summary: %s", item.Snippet)
+		}
+		builder.WriteString("\n")
+	}
+	content := strings.TrimSpace(builder.String())
+	if content == "" {
+		content = "No web results found."
+	}
+	outcome := tool.SucceededOutcome(content).WithTiming(started, time.Now().UTC())
+	outcome.Truncated = providerCount > len(filtered)
+	outcome.Summary = fmt.Sprintf("WebSearch returned %d source(s).", len(filtered))
+	outcome.Details = map[string]any{
+		"query": params.Query, "allowed_domains": params.AllowedDomains, "blocked_domains": params.BlockedDomains,
+		"results": filtered, "result_count": len(filtered), "provider_result_count": providerCount,
+		"provider": response.Provider, "provider_metadata": response.Metadata, "truncated": outcome.Truncated,
+	}
+	outcome.Diagnostic = map[string]any{"query": params.Query, "result_count": len(filtered), "provider_result_count": providerCount, "provider": response.Provider}
+	return outcome, nil
+}
+
+func parseSearchParams(input string) (searchParams, error) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return searchParams{}, fmt.Errorf("query is required")
+	}
+	params := searchParams{}
+	if strings.HasPrefix(input, "{") {
+		decoder := json.NewDecoder(strings.NewReader(input))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&params); err != nil {
+			return searchParams{}, fmt.Errorf("invalid WebSearch input: %w", err)
+		}
+	} else {
+		params.Query = input
+	}
+	params.Query = strings.TrimSpace(params.Query)
+	if params.Query == "" {
+		return searchParams{}, fmt.Errorf("query is required")
+	}
+	if len(params.AllowedDomains) > 0 && len(params.BlockedDomains) > 0 {
+		return searchParams{}, fmt.Errorf("allowed_domains and blocked_domains cannot both be non-empty")
+	}
+	var err error
+	params.AllowedDomains, err = normalizeDomains(params.AllowedDomains)
+	if err != nil {
+		return searchParams{}, err
+	}
+	params.BlockedDomains, err = normalizeDomains(params.BlockedDomains)
+	if err != nil {
+		return searchParams{}, err
+	}
+	return params, nil
+}
+
+func normalizeDomains(domains []string) ([]string, error) {
+	seen := make(map[string]bool)
+	result := make([]string, 0, len(domains))
+	for _, domain := range domains {
+		domain = strings.ToLower(strings.TrimSpace(domain))
+		if strings.Contains(domain, "://") {
+			parsed, err := url.Parse(domain)
+			if err != nil {
+				return nil, fmt.Errorf("invalid domain %q", domain)
+			}
+			domain = parsed.Hostname()
+		}
+		domain = strings.TrimPrefix(domain, "www.")
+		domain = strings.TrimSuffix(domain, ".")
+		if domain == "" || net.ParseIP(domain) == nil && (!strings.Contains(domain, ".") || strings.ContainsAny(domain, " /?#")) {
+			return nil, fmt.Errorf("invalid domain %q", domain)
+		}
+		if !seen[domain] {
+			seen[domain] = true
+			result = append(result, domain)
+		}
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+func constrainedQuery(query string, allowed, blocked []string) string {
+	if len(allowed) > 0 {
+		terms := make([]string, len(allowed))
+		for i, domain := range allowed {
+			terms[i] = "site:" + domain
+		}
+		return query + " (" + strings.Join(terms, " OR ") + ")"
+	}
+	if len(blocked) > 0 {
+		for _, domain := range blocked {
+			query += " -site:" + domain
+		}
+	}
+	return query
+}
+
+func filterResults(results []SearchResult, allowed, blocked []string) []SearchResult {
+	filtered := make([]SearchResult, 0, len(results))
+	seen := make(map[string]bool)
+	for _, result := range results {
+		parsed, err := url.Parse(result.URL)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" {
 			continue
 		}
-		resultCount++
-		summary.WriteString(fmt.Sprintf("%d. %s\n   URL: %s\n   摘要: %s\n\n", resultCount, result.Title, result.URL, result.Description))
+		host := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
+		if len(allowed) > 0 && !hostMatchesAny(host, allowed) {
+			continue
+		}
+		if len(blocked) > 0 && hostMatchesAny(host, blocked) {
+			continue
+		}
+		canonical := parsed.String()
+		if seen[canonical] {
+			continue
+		}
+		seen[canonical] = true
+		result.URL = canonical
+		filtered = append(filtered, result)
 	}
-
-	if resultCount == 0 {
-		outcome := tool.SucceededOutcome("未找到相关结果")
-		outcome.Diagnostic = map[string]any{"query": query, "result_count": 0, "http_status": resp.StatusCode}
-		outcome.Details = webSearchDetails(query, 0, 0, resp.StatusCode)
-		return outcome.WithTiming(started, time.Now().UTC()), nil
-	}
-	outcome := tool.SucceededOutcome(summary.String())
-	outcome.Truncated = len(result.Web.Results) > resultCount
-	outcome.Diagnostic = map[string]any{
-		"query": query, "result_count": resultCount, "provider_result_count": len(result.Web.Results),
-		"http_status": resp.StatusCode, "truncated": outcome.Truncated,
-	}
-	outcome.Details = webSearchDetails(query, resultCount, len(result.Web.Results), resp.StatusCode)
-	return outcome.WithTiming(started, time.Now().UTC()), nil
+	return filtered
 }
 
-func webSearchDetails(query string, resultCount, providerResultCount, statusCode int) map[string]any {
-	return map[string]any{
-		"query": query, "result_count": resultCount,
-		"provider_result_count": providerResultCount, "http_status": statusCode,
+func hostMatchesAny(host string, domains []string) bool {
+	for _, domain := range domains {
+		if host == domain || strings.HasSuffix(host, "."+domain) {
+			return true
+		}
 	}
+	return false
 }
 
-func webSearchRequestFailure(err error, message, query string) tool.ExecutionOutcome {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		outcome := tool.FailedOutcome(message, "web_search_cancelled", tool.ErrorCategoryCancelled, true)
-		outcome.Status = tool.OutcomeCancelled
-		outcome.TransportStatus = tool.TransportCancelled
-		outcome.RecoveryOptions = []string{"retry_when_context_available"}
-		outcome.Diagnostic = map[string]any{"query": query}
-		return outcome
+func providerFailure(err error) tool.ExecutionOutcome {
+	var providerError *ProviderError
+	if !errors.As(err, &providerError) {
+		providerError = &ProviderError{Kind: ProviderErrorNetwork, Message: "WebSearch provider failed.", Retryable: true, Cause: err}
 	}
-	outcome := tool.FailedOutcome(message, "web_search_request_failed", tool.ErrorCategoryRuntime, true)
-	outcome.RecoveryOptions = []string{"check_network_connection", "retry_web_search"}
-	outcome.Diagnostic = map[string]any{"query": query}
-	return outcome
-}
-
-func webSearchHTTPFailure(statusCode int, query string) tool.ExecutionOutcome {
-	message := fmt.Sprintf("搜索失败，状态码: %d", statusCode)
-	code := "web_search_upstream_rejected"
-	category := tool.ErrorCategoryDomain
-	retryable := false
-	recovery := []string{"change_search_query_or_stop"}
-	switch {
-	case statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden:
-		code = "web_search_authorization_failed"
-		category = tool.ErrorCategoryAuthorization
-		recovery = []string{"configure_web_search_credentials", "use_another_research_source"}
-	case statusCode == http.StatusTooManyRequests:
+	code := "web_search_upstream_failed"
+	category := tool.ErrorCategoryRuntime
+	status := tool.OutcomeFailed
+	recovery := []string{"retry_web_search", "use_another_research_source"}
+	switch providerError.Kind {
+	case ProviderErrorAuthentication:
+		code, category, status = "web_search_authorization_failed", tool.ErrorCategoryAuthorization, tool.OutcomeNeedsAuth
+		recovery = []string{"configure_web_search_credentials"}
+	case ProviderErrorRateLimit:
 		code = "web_search_rate_limited"
-		category = tool.ErrorCategoryRuntime
-		retryable = true
 		recovery = []string{"retry_after_backoff", "narrow_search_query"}
-	case statusCode >= http.StatusInternalServerError:
-		code = "web_search_upstream_failed"
-		category = tool.ErrorCategoryRuntime
-		retryable = true
-		recovery = []string{"retry_web_search", "use_another_research_source"}
+	case ProviderErrorNetwork:
+		code = "web_search_network_failed"
+		recovery = []string{"check_network", "retry_web_search"}
+	case ProviderErrorFormat:
+		code = "web_search_response_invalid"
+	case ProviderErrorCancelled:
+		code, category, status = "web_search_cancelled", tool.ErrorCategoryCancelled, tool.OutcomeCancelled
+		recovery = []string{"retry_when_context_available"}
 	}
-	outcome := tool.FailedOutcome(message, code, category, retryable)
-	if code == "web_search_authorization_failed" {
-		outcome.Status = tool.OutcomeNeedsAuth
-	}
+	outcome := tool.FailedOutcome(providerError.Message, code, category, providerError.Retryable)
+	outcome.Status = status
 	outcome.RecoveryOptions = recovery
-	outcome.Diagnostic = map[string]any{"query": query, "http_status": statusCode}
+	if providerError.HTTPStatus != 0 {
+		outcome.Diagnostic = map[string]any{"http_status": providerError.HTTPStatus}
+	}
 	return outcome
 }
 
 func init() {
-	tool.MustRegisterToolWithMode(&WebSearchTool{}, tool.DefinitionValidationStrictBuiltin)
+	tool.MustRegisterToolWithMode(New(NewBraveProviderFromEnvironment()), tool.DefinitionValidationStrictBuiltin)
 }

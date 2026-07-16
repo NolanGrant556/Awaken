@@ -3492,16 +3492,6 @@ export function App() {
         />
       );
     }
-    if (item.kind === "approval") {
-      return (
-        <ToolTraceLine
-          key={key}
-          title={item.title}
-          detail="Legacy approval record"
-          status={item.status === "rejected" ? "error" : item.status === "waiting" ? "active" : "done"}
-        />
-      );
-    }
     if (item.kind === "deliverables") {
       const threadId = runtimeState.activeThreadId ?? runtimeState.threadId;
       return (

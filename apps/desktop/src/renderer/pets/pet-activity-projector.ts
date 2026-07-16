@@ -8,13 +8,11 @@ import type {
 
 type WaitingStateLike = Pick<
   RuntimeViewState,
-  "approvals" | "userQuestions"
+  "userQuestions"
 >;
 
 function isWaiting(state: WaitingStateLike): boolean {
-  return (
-    state.approvals.length > 0 || state.userQuestions.length > 0
-  );
+  return state.userQuestions.length > 0;
 }
 
 function statusForThread(
@@ -22,7 +20,7 @@ function statusForThread(
   view: WaitingStateLike | undefined,
   isActive: boolean,
 ): PetSessionStatus {
-  if ((view && isWaiting(view)) || (thread.approvalCount ?? 0) > 0) return "waiting";
+  if (view && isWaiting(view)) return "waiting";
   if (!thread.runStatus) return "idle";
   switch (thread.runStatus) {
     case "running":
@@ -40,7 +38,6 @@ function statusForThread(
 
 type ActiveViewLike = Pick<
   RuntimeViewState,
-  | "approvals"
   | "userQuestions"
   | "steps"
   | "assistantText"
@@ -75,15 +72,6 @@ function waitingRequestForActiveThread(
     };
   }
 
-  const approval = view.approvals[0];
-  if (approval) {
-    return {
-      type: "command-approval",
-      requestId: approval.id,
-      summary: approval.title || "需要审批",
-    };
-  }
-
   return null;
 }
 
@@ -99,7 +87,6 @@ function subtitleForActiveThread(state: RuntimeViewState): string | undefined {
   const lastTool = view.inspectorSummary.lastToolDecision;
   if (lastTool?.toolName) return lastTool.toolName;
 
-  if (view.approvals.length > 0) return "等待审批";
   if (view.userQuestions.length > 0) return "等待回答";
 
   return "Thinking";

@@ -2,28 +2,24 @@ package tool
 
 import "testing"
 
-func TestDefaultExposureHidesApplyPatch(t *testing.T) {
+func TestDefaultExposureUsesGenericRules(t *testing.T) {
 	tools := []Tool{
-		namedTool("read_file"),
-		namedTool("text_edit"),
-		namedTool("apply_patch"),
-		namedTool("text_file_create"),
+		namedTool("Read"),
+		namedTool("Edit"),
+		namedTool("Write"),
 	}
 	filtered := FilterToolsForExposure(tools, DefaultToolExposurePolicy())
 	names := map[string]bool{}
 	for _, tool := range filtered {
 		names[tool.Name()] = true
 	}
-	if !names["text_edit"] || !names["read_file"] || !names["text_file_create"] {
+	if !names["Edit"] || !names["Read"] || !names["Write"] {
 		t.Fatalf("expected ordinary file tools visible, got %v", names)
-	}
-	if names["apply_patch"] {
-		t.Fatal("ordinary providers must hide apply_patch by default")
 	}
 }
 
-func TestCompatAndGrammarExposeApplyPatch(t *testing.T) {
-	tools := []Tool{namedTool("apply_patch"), namedTool("text_edit")}
+func TestLegacyModesUseSameGenericExposure(t *testing.T) {
+	tools := []Tool{namedTool("Read"), namedTool("Edit")}
 	for _, policy := range []ToolExposurePolicy{
 		CompatToolExposurePolicy(),
 		GrammarCapableToolExposurePolicy(),
@@ -37,12 +33,12 @@ func TestCompatAndGrammarExposeApplyPatch(t *testing.T) {
 }
 
 func TestExtraVisibleOverridesHide(t *testing.T) {
-	tools := []Tool{namedTool("apply_patch")}
+	tools := []Tool{namedTool("Edit")}
 	filtered := FilterToolsForExposure(tools, ToolExposurePolicy{
 		Mode:         ExposureDefault,
-		ExtraVisible: []string{"apply_patch"},
+		ExtraVisible: []string{"Edit"},
 	})
 	if len(filtered) != 1 {
-		t.Fatalf("expected ExtraVisible to keep apply_patch, got %d", len(filtered))
+		t.Fatalf("expected ExtraVisible to keep Edit, got %d", len(filtered))
 	}
 }

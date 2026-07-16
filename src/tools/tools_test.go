@@ -8,15 +8,10 @@ import (
 
 func TestBuiltInToolNamesAreProviderSafe(t *testing.T) {
 	expected := map[string]bool{
-		"apply_patch":      false,
-		"calculator":       false,
-		"grep_search":      false,
-		"list_files":       false,
-		"read_file":        false,
-		"shell":            false,
-		"text_edit":        false,
-		"text_file_create": false,
-		"web_search":       false,
+		"Bash": false, "Read": false, "Edit": false, "Write": false,
+		"Glob": false, "Grep": false, "WebSearch": false,
+		"artifact_publish": false, "trash_file": false, "calculator": false,
+		"ask_user": false, "dependency_install": false, "git_remote": false,
 	}
 
 	for _, candidate := range tool.ListTools() {
@@ -35,9 +30,9 @@ func TestBuiltInToolNamesAreProviderSafe(t *testing.T) {
 		}
 	}
 
-	for _, candidate := range tool.ListTools() {
-		if candidate.Name() == "write_file" {
-			t.Fatal("write_file should not be registered")
+	for _, retired := range []string{"apply_patch", "artifact_runtime", "read_artifact", "file_read", "read_file", "text_edit", "text_file_create", "list_files", "grep_search", "shell", "web_search", "capability_diagnose"} {
+		if _, err := tool.GetTool(retired); err == nil {
+			t.Fatalf("retired tool %q is still registered", retired)
 		}
 	}
 }

@@ -12,7 +12,6 @@ import (
 	"awaken/src/skillruntime"
 	"awaken/src/skills"
 	"awaken/src/tool"
-	shelltool "awaken/src/tools/shell"
 )
 
 type Agent struct {
@@ -49,6 +48,9 @@ func NewAgentWithConversation(config AgentConfig, conv *context.Conversation) *A
 }
 
 func NewAgentWithConversationAndThreadID(config AgentConfig, conv *context.Conversation, threadID string) *Agent {
+	if config.ToolSessionState == nil {
+		config.ToolSessionState = tool.NewToolSessionState(config.Workspace.Root)
+	}
 	reqBuilder := NewRequestBuilder(config)
 
 	return &Agent{
@@ -111,7 +113,7 @@ func (a *Agent) RefreshRunAvailabilityWithReason(ctx stdcontext.Context, reason 
 	}
 	cfg := a.config
 	permissionContext := permissionContextFromTaskScope(cfg.Workspace)
-	hostEnvironment := shelltool.ResolveHostShellEnvironment(ctx, tool.ExecutionEnvironmentProbeOptions{
+	hostEnvironment := tool.ResolveHostEnvironment(ctx, tool.ExecutionEnvironmentProbeOptions{
 		WorkspaceRoot:     permissionContext.WorkspaceRoot,
 		WorkingDirectory:  permissionContext.WorkspaceRootOrCWD(),
 		SkillRoots:        localSkillRootObservations(permissionContext.WorkspaceRoot),

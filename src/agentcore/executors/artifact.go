@@ -7,16 +7,14 @@ import (
 	"awaken/src/tool/profile"
 )
 
-// ArtifactExecutor is the top-level lane executor for file/artifact work. It
-// keeps file-chain tools behind a product-facing artifact capability instead of
-// exposing them directly as the top-level routing concept.
+// ArtifactExecutor is the top-level lane executor for typed file/artifact work.
 type ArtifactExecutor struct {
-	fileChain ToolExecutor
+	fileOperation ToolExecutor
 }
 
 func NewArtifactExecutor() *ArtifactExecutor {
 	return &ArtifactExecutor{
-		fileChain: NewFileChainExecutor(),
+		fileOperation: NewFileOperationExecutor(),
 	}
 }
 
@@ -28,5 +26,5 @@ func (e *ArtifactExecutor) Execute(
 	input string,
 	observer tool.ToolObserver,
 ) (ToolExecutionOutput, error) {
-	return e.fileChain.Execute(ctx, intent, execProfile, t, input, observer)
+	return e.fileOperation.Execute(ctx, intent, execProfile, t, input, observer)
 }

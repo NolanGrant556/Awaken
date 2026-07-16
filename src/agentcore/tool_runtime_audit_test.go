@@ -117,11 +117,10 @@ func TestWriteAuditPopulatesObservabilityFieldsForDeny(t *testing.T) {
 }
 
 // TestWriteAuditPopulatesTransformFieldsForTransformDecision verifies that
-// when the auto policy returns a transform decision (shell → apply_patch),
-// the audit record carries TransformedFrom="shell" and
-// TransformedTo="apply_patch".
+// when the auto policy returns a generic transform decision, the audit record
+// carries both source and target identities.
 func TestWriteAuditPopulatesTransformFieldsForTransformDecision(t *testing.T) {
-	// Register the original tool (shell-like) and the transform target.
+	// Register an original compatibility tool and its transform target.
 	originalToolName := "audit_transform_source_tool"
 	targetToolName := "audit_transform_target_tool"
 	mustRegisterRuntimeTool(t, runtimeTestTool{
@@ -144,7 +143,7 @@ func TestWriteAuditPopulatesTransformFieldsForTransformDecision(t *testing.T) {
 	transformDecision := ToolDecision{
 		Action:          ToolDecisionTransform,
 		Source:          ToolDecisionSourceTransform,
-		Reason:          "rewrite to file-chain",
+		Reason:          "rewrite to compatible target",
 		UpdatedToolName: targetToolName,
 		UpdatedInput:    `{"patch":"*** Begin Patch\n*** End Patch"}`,
 	}
@@ -175,112 +174,6 @@ func TestWriteAuditPopulatesTransformFieldsForTransformDecision(t *testing.T) {
 	}
 	if rec.TransformedTo != targetToolName {
 		t.Errorf("TransformedTo = %q, want %q", rec.TransformedTo, targetToolName)
-	}
-}
-
-// TestExtractTrashedPaths verifies the helper that parses the apply_patch
-// output for trashed-path information. The apply_patch tool encodes deletions
-// as "D path (已移到回收站: trashedPath)" or "D path (已移到回收站)".
-func TestExtractTrashedPaths(t *testing.T) {
-	tests := []struct {
-		name   string
-		output string
-		want   []string
-	}{
-		{
-			name:   "empty output",
-			output: "",
-			want:   nil,
-		},
-		{
-			name:   "no deletions",
-			output: "Success. Updated the following files:\nA note.md\nM other.md",
-			want:   nil,
-		},
-		{
-			name:   "single deletion with trashed path",
-			output: "Success. Updated the following files:\nD note.md (已移到回收站: /tmp/trash/note.md)",
-			want:   []string{"/tmp/trash/note.md"},
-		},
-		{
-			name:   "single deletion without trashed path",
-			output: "Success. Updated the following files:\nD note.md (已移到回收站)",
-			want:   nil,
-		},
-		{
-			name: "multiple deletions with trashed paths",
-			output: "Success. Updated the following files:\n" +
-				"D a.md (已移到回收站: /tmp/trash/a.md)\n" +
-				"D b.md (已移到回收站: /tmp/trash/b.md)",
-			want: []string{"/tmp/trash/a.md", "/tmp/trash/b.md"},
-		},
-		{
-			name: "mixed add and delete",
-			output: "Success. Updated the following files:\n" +
-				"A new.md\n" +
-				"D old.md (已移到回收站: /tmp/trash/old.md)",
-			want: []string{"/tmp/trash/old.md"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := extractTrashedPaths(tt.output)
-			if len(got) != len(tt.want) {
-				t.Fatalf("extractTrashedPaths(%q) = %v, want %v", tt.output, got, tt.want)
-			}
-			for i := range got {
-				if got[i] != tt.want[i] {
-					t.Errorf("extractTrashedPaths(%q)[%d] = %q, want %q", tt.output, i, got[i], tt.want[i])
-				}
-			}
-		})
-	}
-}
-
-// TestWriteAuditPopulatesTrashedPathsForSuccessfulExecution verifies that
-// when a tool's output contains the trash marker, the audit record's
-// TrashedPaths field is populated. This simulates an apply_patch delete
-// without requiring a real filesystem operation.
-func TestWriteAuditPopulatesTrashedPathsForSuccessfulExecution(t *testing.T) {
-	toolName := "audit_trash_tool"
-	trashOutput := "Success. Updated the following files:\nD note.md (已移到回收站: /tmp/trash/note.md)"
-	mustRegisterRuntimeTool(t, runtimeTestTool{
-		name:   toolName,
-		output: trashOutput,
-		params: []tool.ToolParameter{
-			{Name: "value", Type: "string", Required: true},
-		},
-	})
-
-	sink := &tool.InMemorySink{}
-	runtime := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
-		AuditSink: sink,
-	})
-
-	result := runtime.Execute(context.Background(), convcontext.ToolCall{
-		ID: "call_audit_trash",
-		Function: convcontext.FunctionCall{
-			Name:      toolName,
-			Arguments: `{"value":"delete note.md"}`,
-		},
-	})
-
-	if result.IsError {
-		t.Fatalf("expected success, got %+v", result)
-	}
-
-	if len(result.TrashedPaths) != 1 || result.TrashedPaths[0] != "/tmp/trash/note.md" {
-		t.Errorf("result.TrashedPaths = %v, want [/tmp/trash/note.md]", result.TrashedPaths)
-	}
-
-	records := sink.Records()
-	if len(records) != 1 {
-		t.Fatalf("expected 1 audit record, got %d", len(records))
-	}
-	rec := records[0]
-	if len(rec.TrashedPaths) != 1 || rec.TrashedPaths[0] != "/tmp/trash/note.md" {
-		t.Errorf("audit TrashedPaths = %v, want [/tmp/trash/note.md]", rec.TrashedPaths)
 	}
 }
 

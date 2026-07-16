@@ -13,7 +13,6 @@ function emptyViewState(): RuntimeViewState {
     reasoningText: "",
     toolResults: [],
     patchPreviews: [],
-    approvals: [],
     userQuestions: [],
     artifacts: [],
     inspectorSummary: { unknownEvents: [] },
@@ -28,7 +27,6 @@ function threadItem(overrides: Partial<ThreadItem> = {}): ThreadItem {
   return {
     threadId: "thread-1",
     label: "Test thread",
-    approvalCount: 0,
     artifactCount: 0,
     ...overrides,
   };
@@ -86,7 +84,12 @@ describe("projectPetActivity", () => {
       threadItem({ threadId: "b", runStatus: "finished" }),
     ];
     state.activeThreadId = "a";
-    state.approvals = [{ id: "ap-1", title: "Approve shell", affectedPaths: [], riskTone: "warning" }];
+    state.userQuestions = [
+      {
+        id: "q-waiting",
+        questions: [{ question: "Continue?", options: [{ label: "yes" }] }],
+      },
+    ];
     const snapshot = projectPetActivity(state);
     expect(highestPetStatus(snapshot)).toBe("waiting");
   });

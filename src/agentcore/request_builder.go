@@ -180,7 +180,7 @@ func requestToolModelDescription(runtime tool.Tool, definition tool.ToolDefiniti
 }
 
 // toolExposurePolicy returns the model-visible tool pool policy.
-// Ordinary providers hide raw apply_patch; compat/grammar-capable modes keep it.
+// Tool exposure uses generic explicit hide/show policy after the seven-tool cutover.
 func (rb *RequestBuilder) toolExposurePolicy() tool.ToolExposurePolicy {
 	if rb.config.ToolExposure.Mode != "" || len(rb.config.ToolExposure.ExtraVisible) > 0 || len(rb.config.ToolExposure.ExtraHidden) > 0 {
 		return rb.config.ToolExposure

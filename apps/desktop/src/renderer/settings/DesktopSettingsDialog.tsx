@@ -253,6 +253,10 @@ function advancedWithModelCapability(
       overwrite || advanced?.supportsVision === undefined
         ? capability.supportsVision
         : advanced.supportsVision,
+    supportsNativePDF:
+      overwrite || advanced?.supportsNativePDF === undefined
+        ? capability.supportsNativePDF
+        : advanced.supportsNativePDF,
     supportsVideo:
       overwrite || advanced?.supportsVideo === undefined
         ? capability.supportsVideo
@@ -1359,6 +1363,34 @@ export function DesktopSettingsDialog({
                                       })
                                     }
                                     aria-label={`${providerDraft.modelId} 支持图片输入`}
+                                  />
+                                  <span />
+                                </span>
+                              </label>
+                              <label className="model-provider-capability-card">
+                                <span className="model-provider-capability-copy">
+                                  <strong>支持原生 PDF 输入</strong>
+                                  <span>
+                                    开启后 Read 会直接向模型发送 PDF；关闭时使用视觉模型的 Poppler 页面渲染回退。
+                                  </span>
+                                </span>
+                                <span className="configured-model-switch">
+                                  <input
+                                    type="checkbox"
+                                    checked={
+                                      providerDraft.advanced?.supportsNativePDF ===
+                                      true
+                                    }
+                                    onChange={(event) =>
+                                      setDraft({
+                                        ...providerDraft,
+                                        advanced: {
+                                          ...providerDraft.advanced,
+                                          supportsNativePDF: event.target.checked,
+                                        },
+                                      })
+                                    }
+                                    aria-label={`${providerDraft.modelId} 支持原生 PDF 输入`}
                                   />
                                   <span />
                                 </span>

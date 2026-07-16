@@ -35,8 +35,23 @@ func TestBuiltinProvidersIncludeRequiredDefaults(t *testing.T) {
 	if kimiCode.DefaultModel != "kimi-for-coding" {
 		t.Fatalf("expected kimi-for-coding default model, got %q", kimiCode.DefaultModel)
 	}
+	wantKimiModels := []string{"k3", "kimi-for-coding", "kimi-for-coding-highspeed"}
+	if len(kimiCode.Models) != len(wantKimiModels) {
+		t.Fatalf("expected Kimi Code models %v, got %v", wantKimiModels, kimiCode.Models)
+	}
+	for index, model := range wantKimiModels {
+		if kimiCode.Models[index] != model {
+			t.Fatalf("expected Kimi Code models %v, got %v", wantKimiModels, kimiCode.Models)
+		}
+	}
+	if got := kimiCode.ModelCapabilities["k3"].ContextWindow; got != 1024*1024 {
+		t.Fatalf("expected K3 1048576 context metadata, got %d", got)
+	}
 	if got := kimiCode.ModelCapabilities["kimi-for-coding"].MaxOutputTokens; got != 32*1024 {
 		t.Fatalf("expected Kimi Code max output metadata, got %d", got)
+	}
+	if got := kimiCode.ModelCapabilities["kimi-for-coding-highspeed"].ContextWindow; got != 256*1024 {
+		t.Fatalf("expected Kimi Code HighSpeed context metadata, got %d", got)
 	}
 	if got := kimiCode.ModelCapabilities["kimi-for-coding"].DefaultTemperature; got != 1 {
 		t.Fatalf("expected Kimi Code default temperature 1, got %v", got)

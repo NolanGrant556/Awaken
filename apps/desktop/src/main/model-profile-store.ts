@@ -79,8 +79,8 @@ export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
     auth_scheme: "bearer",
     key_env_name: "KIMI_CODE_API_KEY",
     default_model: "kimi-for-coding",
-    models: ["kimi-for-coding"],
-    docs_url: "https://www.kimi.com/code/docs/en/third-party-tools/other-coding-agents.html",
+    models: ["k3", "kimi-for-coding", "kimi-for-coding-highspeed"],
+    docs_url: "https://www.kimi.com/code/docs/kimi-code/models.html",
     api_docs_url: "https://www.kimi.com/code/console",
     coding_preset: true,
   },
@@ -237,12 +237,14 @@ function profileStatus(
 function providerTestStatusMessage(status: number, provider?: ModelProviderWire): string {
   if (provider?.id === "kimi-coding-plan") {
     switch (status) {
+      case 401:
+        return "连接测试失败：API key 无效，或当前会员套餐无权访问所选 Kimi Code 模型（K3 需 Moderato 及以上，高速版需 Allegretto 及以上）。";
       case 402:
         return "连接测试失败：Kimi Code 会员权益无法验证，请确认会员状态。";
       case 403:
         return "连接测试失败：Kimi Code 拒绝当前客户端或账号权限，请确认会员权益、额度和客户端支持状态。";
       case 404:
-        return "连接测试失败：未找到 kimi-for-coding 或账号无权访问该模型。";
+        return "连接测试失败：未找到所选 Kimi Code 模型，或账号无权访问该模型。";
     }
   }
   if (provider?.id === "volcengine") {

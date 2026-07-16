@@ -1,6 +1,7 @@
 package websearch
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,9 +19,11 @@ import (
 )
 
 const (
-	ToolName                 = "WebSearch"
-	defaultWebSearchEndpoint = "https://api.search.brave.com/res/v1/web/search"
-	maximumResults           = 10
+	ToolName              = "WebSearch"
+	defaultExaEndpoint    = "https://mcp.exa.ai/mcp?tools=web_search_exa"
+	defaultTavilyEndpoint = "https://api.tavily.com/search"
+	maximumResults        = 10
+	maximumResponseBytes  = 4 * 1024 * 1024
 )
 
 type SearchRequest struct {
@@ -55,6 +58,7 @@ const (
 	ProviderErrorUpstream       ProviderErrorKind = "upstream"
 	ProviderErrorFormat         ProviderErrorKind = "format"
 	ProviderErrorCancelled      ProviderErrorKind = "cancelled"
+	ProviderErrorDisabled       ProviderErrorKind = "disabled"
 )
 
 type ProviderError struct {
@@ -73,48 +77,53 @@ func (e *ProviderError) Error() string {
 }
 func (e *ProviderError) Unwrap() error { return e.Cause }
 
-type BraveProvider struct {
+type ExaProvider struct {
 	client   *http.Client
 	endpoint string
-	apiKey   string
 }
 
-func NewBraveProvider(client *http.Client, endpoint, apiKey string) *BraveProvider {
+func NewExaProvider(client *http.Client, endpoint string) *ExaProvider {
 	if client == nil {
-		client = http.DefaultClient
+		client = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &BraveProvider{client: client, endpoint: strings.TrimSpace(endpoint), apiKey: strings.TrimSpace(apiKey)}
+	return &ExaProvider{client: client, endpoint: strings.TrimSpace(endpoint)}
 }
 
-func NewBraveProviderFromEnvironment() *BraveProvider {
-	return NewBraveProvider(nil, os.Getenv("AWAKEN_WEB_SEARCH_ENDPOINT"), os.Getenv("AWAKEN_WEB_SEARCH_API_KEY"))
-}
+func NewExaProviderFromEnvironment() *ExaProvider { return NewExaProvider(nil, "") }
 
-func (p *BraveProvider) Search(ctx context.Context, request SearchRequest) (SearchResponse, error) {
+func (p *ExaProvider) Search(ctx context.Context, request SearchRequest) (SearchResponse, error) {
 	endpoint := strings.TrimSpace(p.endpoint)
 	if endpoint == "" {
-		endpoint = defaultWebSearchEndpoint
-	}
-	if endpoint == defaultWebSearchEndpoint && strings.TrimSpace(p.apiKey) == "" {
-		return SearchResponse{}, &ProviderError{Kind: ProviderErrorAuthentication, Message: "WebSearch provider credentials are not configured.", Retryable: false}
+		endpoint = defaultExaEndpoint
 	}
 	parsed, err := url.Parse(endpoint)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+	if err != nil || parsed.Host == "" ||
+		(parsed.Scheme != "https" && !(parsed.Scheme == "http" && isLoopbackHost(parsed.Hostname()))) {
 		return SearchResponse{}, &ProviderError{Kind: ProviderErrorFormat, Message: "WebSearch endpoint is invalid.", Retryable: false, Cause: err}
 	}
 	query := constrainedQuery(request.Query, request.AllowedDomains, request.BlockedDomains)
-	values := parsed.Query()
-	values.Set("q", query)
-	values.Set("count", fmt.Sprintf("%d", request.Limit))
-	parsed.RawQuery = values.Encode()
-	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	payload := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "web_search_exa",
+			"arguments": map[string]any{
+				"query":      query,
+				"numResults": request.Limit,
+			},
+		},
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return SearchResponse{}, &ProviderError{Kind: ProviderErrorFormat, Message: "WebSearch request could not be constructed.", Retryable: false, Cause: err}
 	}
-	if p.apiKey != "" {
-		httpRequest.Header.Set("X-Subscription-Token", p.apiKey)
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, parsed.String(), strings.NewReader(string(body)))
+	if err != nil {
+		return SearchResponse{}, &ProviderError{Kind: ProviderErrorFormat, Message: "WebSearch request could not be constructed.", Retryable: false, Cause: err}
 	}
-	httpRequest.Header.Set("Accept", "application/json")
+	httpRequest.Header.Set("Accept", "application/json, text/event-stream")
+	httpRequest.Header.Set("Content-Type", "application/json")
 	response, err := p.client.Do(httpRequest)
 	if err != nil {
 		kind := ProviderErrorNetwork
@@ -127,30 +136,307 @@ func (p *BraveProvider) Search(ctx context.Context, request SearchRequest) (Sear
 	if response.StatusCode != http.StatusOK {
 		return SearchResponse{}, classifyHTTPError(response.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, 4*1024*1024))
+	responseBody, err := readBoundedResponse(response.Body)
 	if err != nil {
+		var tooLarge *responseTooLargeError
+		if errors.As(err, &tooLarge) {
+			return SearchResponse{}, &ProviderError{Kind: ProviderErrorFormat, Message: "WebSearch provider response exceeded the size limit.", Retryable: true, Cause: err}
+		}
 		return SearchResponse{}, &ProviderError{Kind: ProviderErrorNetwork, Message: "WebSearch provider response could not be read.", Retryable: true, Cause: err}
 	}
-	var payload struct {
-		Web struct {
-			Results []struct {
-				Title       string `json:"title"`
-				URL         string `json:"url"`
-				Description string `json:"description"`
-			} `json:"results"`
-		} `json:"web"`
-	}
-	if err := json.Unmarshal(body, &payload); err != nil {
+	text, err := parseExaMCPResponse(responseBody)
+	if err != nil {
 		return SearchResponse{}, &ProviderError{Kind: ProviderErrorFormat, Message: "WebSearch provider returned an invalid response.", Retryable: true, Cause: err, HTTPStatus: response.StatusCode}
 	}
-	results := make([]SearchResult, 0, len(payload.Web.Results))
-	for _, item := range payload.Web.Results {
+	results := parseExaResults(text)
+	return SearchResponse{
+		Results:  results,
+		Provider: "exa",
+		Metadata: map[string]any{"http_status": response.StatusCode, "provider_result_count": len(results)},
+	}, nil
+}
+
+type TavilyProvider struct {
+	client   *http.Client
+	endpoint string
+}
+
+func NewTavilyProvider(client *http.Client, endpoint string) *TavilyProvider {
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	return &TavilyProvider{client: client, endpoint: strings.TrimSpace(endpoint)}
+}
+
+func NewTavilyProviderFromEnvironment() *TavilyProvider {
+	return NewTavilyProvider(nil, "")
+}
+
+func (p *TavilyProvider) Search(ctx context.Context, request SearchRequest) (SearchResponse, error) {
+	endpoint := p.endpoint
+	if endpoint == "" {
+		endpoint = defaultTavilyEndpoint
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil || parsed.Host == "" ||
+		(parsed.Scheme != "https" && !(parsed.Scheme == "http" && isLoopbackHost(parsed.Hostname()))) {
+		return SearchResponse{}, &ProviderError{Kind: ProviderErrorFormat, Message: "WebSearch endpoint is invalid.", Cause: err}
+	}
+	payload := map[string]any{
+		"query":               request.Query,
+		"search_depth":        "basic",
+		"max_results":         request.Limit,
+		"include_answer":      false,
+		"include_raw_content": false,
+		"include_images":      false,
+		"include_domains":     request.AllowedDomains,
+		"exclude_domains":     request.BlockedDomains,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return SearchResponse{}, &ProviderError{Kind: ProviderErrorFormat, Message: "WebSearch request could not be constructed.", Cause: err}
+	}
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, parsed.String(), bytes.NewReader(body))
+	if err != nil {
+		return SearchResponse{}, &ProviderError{Kind: ProviderErrorFormat, Message: "WebSearch request could not be constructed.", Cause: err}
+	}
+	httpRequest.Header.Set("Accept", "application/json")
+	httpRequest.Header.Set("Content-Type", "application/json")
+	httpRequest.Header.Set("X-Tavily-Access-Mode", "keyless")
+	response, err := p.client.Do(httpRequest)
+	if err != nil {
+		kind := ProviderErrorNetwork
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			kind = ProviderErrorCancelled
+		}
+		return SearchResponse{}, &ProviderError{Kind: kind, Message: "WebSearch provider request failed.", Retryable: true, Cause: err}
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return SearchResponse{}, classifyHTTPError(response.StatusCode)
+	}
+	responseBody, err := readBoundedResponse(response.Body)
+	if err != nil {
+		var tooLarge *responseTooLargeError
+		if errors.As(err, &tooLarge) {
+			return SearchResponse{}, &ProviderError{Kind: ProviderErrorFormat, Message: "WebSearch provider response exceeded the size limit.", Retryable: true, Cause: err}
+		}
+		return SearchResponse{}, &ProviderError{Kind: ProviderErrorNetwork, Message: "WebSearch provider response could not be read.", Retryable: true, Cause: err}
+	}
+	var payloadResponse struct {
+		Results      json.RawMessage `json:"results"`
+		ResponseTime any             `json:"response_time"`
+	}
+	if err := json.Unmarshal(responseBody, &payloadResponse); err != nil {
+		return SearchResponse{}, &ProviderError{Kind: ProviderErrorFormat, Message: "WebSearch provider returned an invalid response.", Retryable: true, Cause: err, HTTPStatus: response.StatusCode}
+	}
+	if len(payloadResponse.Results) == 0 || string(payloadResponse.Results) == "null" {
+		return SearchResponse{}, &ProviderError{Kind: ProviderErrorFormat, Message: "WebSearch provider returned an invalid response.", Retryable: true, HTTPStatus: response.StatusCode}
+	}
+	var providerResults []struct {
+		Title   string `json:"title"`
+		URL     string `json:"url"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(payloadResponse.Results, &providerResults); err != nil {
+		return SearchResponse{}, &ProviderError{Kind: ProviderErrorFormat, Message: "WebSearch provider returned an invalid response.", Retryable: true, Cause: err, HTTPStatus: response.StatusCode}
+	}
+	results := make([]SearchResult, 0, len(providerResults))
+	for _, item := range providerResults {
 		if strings.TrimSpace(item.Title) == "" || strings.TrimSpace(item.URL) == "" {
 			continue
 		}
-		results = append(results, SearchResult{Title: strings.TrimSpace(item.Title), URL: strings.TrimSpace(item.URL), Snippet: strings.TrimSpace(item.Description)})
+		results = append(results, SearchResult{
+			Title: strings.TrimSpace(item.Title), URL: strings.TrimSpace(item.URL), Snippet: strings.TrimSpace(item.Content),
+		})
 	}
-	return SearchResponse{Results: results, Provider: "brave", Metadata: map[string]any{"http_status": response.StatusCode, "provider_result_count": len(payload.Web.Results)}}, nil
+	return SearchResponse{
+		Results: results, Provider: "tavily",
+		Metadata: map[string]any{"http_status": response.StatusCode, "provider_result_count": len(providerResults), "response_time": payloadResponse.ResponseTime},
+	}, nil
+}
+
+type fallbackProvider struct {
+	providers []SearchProvider
+}
+
+func (p fallbackProvider) Search(ctx context.Context, request SearchRequest) (SearchResponse, error) {
+	var previousProvider string
+	var previousError error
+	for index, provider := range p.providers {
+		response, err := provider.Search(ctx, request)
+		if err == nil {
+			if index > 0 {
+				if response.Metadata == nil {
+					response.Metadata = map[string]any{}
+				}
+				response.Metadata["fallback_from"] = previousProvider
+				response.Metadata["fallback_reason"] = previousError.Error()
+			}
+			return response, nil
+		}
+		var providerError *ProviderError
+		if errors.As(err, &providerError) && providerError.Kind == ProviderErrorCancelled {
+			return SearchResponse{}, err
+		}
+		previousError = err
+		switch provider.(type) {
+		case *ExaProvider:
+			previousProvider = "exa"
+		case *TavilyProvider:
+			previousProvider = "tavily"
+		default:
+			previousProvider = fmt.Sprintf("provider_%d", index)
+		}
+	}
+	return SearchResponse{}, previousError
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+type disabledProvider struct{}
+
+func (disabledProvider) Search(context.Context, SearchRequest) (SearchResponse, error) {
+	return SearchResponse{}, &ProviderError{Kind: ProviderErrorDisabled, Message: "WebSearch is disabled in Settings.", Retryable: false}
+}
+
+func NewProviderFromEnvironment() SearchProvider {
+	configured, configuredByHost := os.LookupEnv("AWAKEN_WEB_SEARCH_PROVIDERS")
+	configured = strings.TrimSpace(configured)
+	if !configuredByHost {
+		configured = "exa"
+	}
+	var providers []SearchProvider
+	seen := make(map[string]bool)
+	for _, raw := range strings.Split(configured, ",") {
+		name := strings.ToLower(strings.TrimSpace(raw))
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		switch name {
+		case "exa":
+			providers = append(providers, NewExaProviderFromEnvironment())
+		case "tavily":
+			providers = append(providers, NewTavilyProviderFromEnvironment())
+		}
+	}
+	switch len(providers) {
+	case 0:
+		return disabledProvider{}
+	case 1:
+		return providers[0]
+	default:
+		return fallbackProvider{providers: providers}
+	}
+}
+
+type responseTooLargeError struct{}
+
+func (*responseTooLargeError) Error() string { return "response exceeds size limit" }
+
+func readBoundedResponse(reader io.Reader) ([]byte, error) {
+	limited := io.LimitReader(reader, maximumResponseBytes+1)
+	body, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maximumResponseBytes {
+		return nil, &responseTooLargeError{}
+	}
+	return body, nil
+}
+
+func parseExaMCPResponse(body []byte) (string, error) {
+	type mcpPayload struct {
+		Result struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	parse := func(raw []byte) (string, bool, error) {
+		var payload mcpPayload
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return "", false, err
+		}
+		if payload.Error != nil {
+			return "", false, fmt.Errorf("mcp error %d: %s", payload.Error.Code, payload.Error.Message)
+		}
+		for _, content := range payload.Result.Content {
+			if content.Type == "text" && strings.TrimSpace(content.Text) != "" {
+				return strings.TrimSpace(content.Text), true, nil
+			}
+		}
+		return "", false, nil
+	}
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 {
+		return "", fmt.Errorf("empty response")
+	}
+	if trimmed[0] == '{' {
+		if text, ok, err := parse(trimmed); err != nil {
+			return "", err
+		} else if ok {
+			return text, nil
+		}
+		return "", fmt.Errorf("response did not contain text content")
+	}
+	for _, line := range strings.Split(string(body), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		raw := bytes.TrimSpace([]byte(strings.TrimPrefix(line, "data:")))
+		if text, ok, err := parse(raw); err != nil {
+			return "", err
+		} else if ok {
+			return text, nil
+		}
+	}
+	return "", fmt.Errorf("response did not contain an MCP data payload")
+}
+
+func parseExaResults(text string) []SearchResult {
+	sections := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n---\n")
+	results := make([]SearchResult, 0, len(sections))
+	for _, section := range sections {
+		var result SearchResult
+		var snippet []string
+		inHighlights := false
+		for _, line := range strings.Split(section, "\n") {
+			trimmed := strings.TrimSpace(line)
+			switch {
+			case strings.HasPrefix(trimmed, "Title:"):
+				result.Title = strings.TrimSpace(strings.TrimPrefix(trimmed, "Title:"))
+			case strings.HasPrefix(trimmed, "URL:"):
+				result.URL = strings.TrimSpace(strings.TrimPrefix(trimmed, "URL:"))
+			case strings.HasPrefix(trimmed, "Highlights:"):
+				inHighlights = true
+				if value := strings.TrimSpace(strings.TrimPrefix(trimmed, "Highlights:")); value != "" {
+					snippet = append(snippet, value)
+				}
+			case inHighlights && trimmed != "":
+				snippet = append(snippet, trimmed)
+			}
+		}
+		result.Snippet = strings.TrimSpace(strings.Join(snippet, "\n"))
+		if result.Title != "" && result.URL != "" {
+			results = append(results, result)
+		}
+	}
+	return results
 }
 
 func classifyHTTPError(status int) *ProviderError {
@@ -168,11 +454,6 @@ func classifyHTTPError(status int) *ProviderError {
 
 type WebSearchTool struct {
 	provider SearchProvider
-	// Compatibility fields keep direct package tests and embedders able to
-	// inject an HTTP transport without exposing credentials to model input.
-	client   *http.Client
-	endpoint string
-	apiKey   string
 }
 
 func New(provider SearchProvider) *WebSearchTool { return &WebSearchTool{provider: provider} }
@@ -239,11 +520,7 @@ func (t *WebSearchTool) ExecuteOutcome(ctx context.Context, input string, _ tool
 	}
 	provider := t.provider
 	if provider == nil {
-		if t.client != nil || strings.TrimSpace(t.endpoint) != "" || strings.TrimSpace(t.apiKey) != "" {
-			provider = NewBraveProvider(t.client, t.endpoint, t.apiKey)
-		} else {
-			provider = NewBraveProviderFromEnvironment()
-		}
+		provider = NewProviderFromEnvironment()
 	}
 	response, err := provider.Search(ctx, SearchRequest{Query: params.Query, AllowedDomains: params.AllowedDomains, BlockedDomains: params.BlockedDomains, Limit: maximumResults})
 	if err != nil {
@@ -401,7 +678,7 @@ func providerFailure(err error) tool.ExecutionOutcome {
 	switch providerError.Kind {
 	case ProviderErrorAuthentication:
 		code, category, status = "web_search_authorization_failed", tool.ErrorCategoryAuthorization, tool.OutcomeNeedsAuth
-		recovery = []string{"configure_web_search_credentials"}
+		recovery = []string{"retry_web_search", "enable_another_search_provider"}
 	case ProviderErrorRateLimit:
 		code = "web_search_rate_limited"
 		recovery = []string{"retry_after_backoff", "narrow_search_query"}
@@ -413,6 +690,9 @@ func providerFailure(err error) tool.ExecutionOutcome {
 	case ProviderErrorCancelled:
 		code, category, status = "web_search_cancelled", tool.ErrorCategoryCancelled, tool.OutcomeCancelled
 		recovery = []string{"retry_when_context_available"}
+	case ProviderErrorDisabled:
+		code, category, status = "web_search_disabled", tool.ErrorCategoryPolicy, tool.OutcomeUnsupported
+		recovery = []string{"enable_web_search_in_settings"}
 	}
 	outcome := tool.FailedOutcome(providerError.Message, code, category, providerError.Retryable)
 	outcome.Status = status
@@ -424,5 +704,5 @@ func providerFailure(err error) tool.ExecutionOutcome {
 }
 
 func init() {
-	tool.MustRegisterToolWithMode(New(NewBraveProviderFromEnvironment()), tool.DefinitionValidationStrictBuiltin)
+	tool.MustRegisterToolWithMode(New(NewProviderFromEnvironment()), tool.DefinitionValidationStrictBuiltin)
 }

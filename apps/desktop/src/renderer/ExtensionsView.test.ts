@@ -3,6 +3,7 @@ import type { RuntimeSkill, RuntimeToolInfo } from "../shared/runtime";
 import {
   DEFAULT_SKILL_VIEW,
   SKILL_VIEW_TABS,
+  canPreviewSkill,
   isSkillVisibleInView,
   loadMcpSettingsResources,
   loadSkillListsForRoots,
@@ -100,6 +101,39 @@ describe("isSkillPackageDeletable", () => {
     expect(shouldRenderSkillDeleteAction({ sourceOrigin: "mcp" })).toBe(true);
     expect(shouldRenderSkillDeleteAction({ sourceOrigin: "plugin" })).toBe(true);
     expect(shouldRenderSkillDeleteAction({ sourceOrigin: "project" })).toBe(true);
+  });
+});
+
+describe("canPreviewSkill", () => {
+  it("requires an opaque local catalog entry identity and a SKILL.md path", () => {
+    expect(
+      canPreviewSkill({
+        catalogEntryId: "opaque-id",
+        skillFilePath: "/workspace/.awaken/skills/demo/SKILL.md",
+        sourceOrigin: "project",
+      }),
+    ).toBe(true);
+    expect(
+      canPreviewSkill({
+        catalogEntryId: "opaque-id",
+        skillFilePath: "/app/system-skills/excel/SKILL.md",
+        sourceOrigin: "bundled",
+      }),
+    ).toBe(false);
+    expect(
+      canPreviewSkill({
+        catalogEntryId: "opaque-id",
+        skillFilePath: undefined,
+        sourceOrigin: "mcp",
+      }),
+    ).toBe(false);
+    expect(
+      canPreviewSkill({
+        catalogEntryId: undefined,
+        skillFilePath: "/tmp/SKILL.md",
+        sourceOrigin: "user",
+      }),
+    ).toBe(false);
   });
 });
 

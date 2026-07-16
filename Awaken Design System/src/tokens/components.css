@@ -1076,6 +1076,12 @@ button.tool-trace-line:focus-visible {
   accent-color: var(--aw-text-primary);
 }
 
+.assistant-message-task-content {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .assistant-message > *,
 .assistant-message li {
   box-sizing: border-box;

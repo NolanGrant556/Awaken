@@ -8,6 +8,8 @@ import (
 	"strings"
 )
 
+const reservedSystemSkillsDirName = "system-skills"
+
 // sourceDir returns the default directory for a given local source origin.
 func sourceDir(source SourceOrigin) string {
 	switch source {
@@ -42,7 +44,7 @@ func LoadDir(dir string, source SourceOrigin) map[string]*SkillDefinition {
 			continue
 		}
 		dirName := entry.Name()
-		if strings.TrimSpace(dirName) == "" || strings.HasPrefix(dirName, ".") {
+		if strings.TrimSpace(dirName) == "" || strings.HasPrefix(dirName, ".") || strings.EqualFold(dirName, reservedSystemSkillsDirName) {
 			continue
 		}
 

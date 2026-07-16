@@ -212,9 +212,13 @@ Body.
 }
 
 func TestDeleteSkillPackageRejectsNonOwnedSource(t *testing.T) {
-	_, err := DeleteSkillPackage(DeleteRequest{ID: "dynamic-skill", Source: SourceMcp})
-	if !errors.Is(err, ErrSkillDeleteSourceUnsupported) {
-		t.Fatalf("expected unsupported source failure, got %v", err)
+	for _, source := range []SourceOrigin{SourceMcp, SourceBundled} {
+		t.Run(string(source), func(t *testing.T) {
+			_, err := DeleteSkillPackage(DeleteRequest{ID: "dynamic-skill", Source: source})
+			if !errors.Is(err, ErrSkillDeleteSourceUnsupported) {
+				t.Fatalf("expected unsupported source failure, got %v", err)
+			}
+		})
 	}
 }
 

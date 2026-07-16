@@ -3970,6 +3970,26 @@ Body.`
 	}
 }
 
+func TestDeleteBundledSkillFailsClosed(t *testing.T) {
+	registry := skills.NewSkillRegistry(testLogger{})
+	router := NewRouterWithWorkspace(nil, nil, nil, nil, registry, t.TempDir())
+	body, err := json.Marshal(deleteSkillRequest{SourceOrigin: string(skills.SourceBundled)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodDelete, "/v1/skills/bundled-skill", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "SKILL_DELETE_SOURCE_UNSUPPORTED") {
+		t.Fatalf("expected bundled delete error code, got %s", rec.Body.String())
+	}
+}
+
 func TestInstallSkillZipPreservesPackageResources(t *testing.T) {
 	workspace := t.TempDir()
 	registry := skills.NewSkillRegistry(testLogger{})

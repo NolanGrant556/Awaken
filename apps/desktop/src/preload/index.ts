@@ -13,6 +13,7 @@ import {
   type DesktopPlatform,
   type DeleteSkillRequest,
   type DeleteSkillResponse,
+  type GetSkillPreviewRequest,
   type InstallSkillRequest,
   type InstallSkillResponse,
   type ModelProfileBalancesResult,
@@ -32,6 +33,7 @@ import {
   type RuntimeProject,
   type RuntimeProjectOperation,
   type RuntimeSkill,
+  type SkillPreviewResponse,
   type RuntimeThreadTranscript,
   type RuntimeThread,
   type RuntimeToolInfo,
@@ -196,6 +198,8 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:list-mcp-tools") as Promise<RuntimeToolInfo[]>,
   listSkills: (projectRoot?: string) =>
     ipcRenderer.invoke("awaken:list-skills", projectRoot) as Promise<RuntimeSkill[]>,
+  getSkillPreview: (request: GetSkillPreviewRequest) =>
+    ipcRenderer.invoke("awaken:get-skill-preview", request) as Promise<SkillPreviewResponse>,
   installSkill: (request: InstallSkillRequest) =>
     ipcRenderer.invoke("awaken:install-skill", request) as Promise<InstallSkillResponse>,
   deleteSkill: (request: DeleteSkillRequest) =>

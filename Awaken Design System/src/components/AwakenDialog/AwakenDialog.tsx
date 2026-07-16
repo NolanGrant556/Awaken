@@ -6,6 +6,8 @@ import {
   useRef,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
+  type Ref,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import { AwakenIconButton } from "../AwakenIconButton";
@@ -17,6 +19,13 @@ export type AwakenDialogProps = {
   footer?: ReactNode;
   onOpenChange: (open: boolean) => void;
   ariaLabelledBy?: string;
+  size?: "default" | "large";
+  titleVisuallyHidden?: boolean;
+  initialFocusRef?: RefObject<HTMLElement | null>;
+  className?: string;
+  bodyClassName?: string;
+  bodyRef?: Ref<HTMLDivElement>;
+  bodyTabIndex?: number;
 };
 
 const focusableSelector = [
@@ -35,6 +44,13 @@ export function AwakenDialog({
   footer,
   onOpenChange,
   ariaLabelledBy,
+  size = "default",
+  titleVisuallyHidden = false,
+  initialFocusRef,
+  className,
+  bodyClassName,
+  bodyRef,
+  bodyTabIndex,
 }: AwakenDialogProps) {
   const generatedTitleId = useId();
   const titleId = ariaLabelledBy ?? generatedTitleId;
@@ -48,14 +64,14 @@ export function AwakenDialog({
     const previousActiveElement = document.activeElement;
     const dialog = dialogRef.current;
     const firstFocusable = dialog?.querySelector<HTMLElement>(focusableSelector);
-    (firstFocusable ?? dialog)?.focus();
+    (initialFocusRef?.current ?? firstFocusable ?? dialog)?.focus();
 
     return () => {
       if (previousActiveElement instanceof HTMLElement) {
         previousActiveElement.focus();
       }
     };
-  }, [open]);
+  }, [initialFocusRef, open]);
 
   useEffect(() => {
     if (!open || typeof document === "undefined") {
@@ -89,7 +105,11 @@ export function AwakenDialog({
     >
       <div
         ref={dialogRef}
-        className="aw-dialog"
+        className={[
+          "aw-dialog",
+          size === "large" ? "aw-dialog--large" : "",
+          className ?? "",
+        ].filter(Boolean).join(" ")}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
@@ -117,14 +137,26 @@ export function AwakenDialog({
         }}
       >
         <header className="aw-dialog__head">
-          <h2 className="aw-dialog__title" id={titleId}>
+          <h2
+            className={[
+              "aw-dialog__title",
+              titleVisuallyHidden ? "aw-dialog__title--visually-hidden" : "",
+            ].filter(Boolean).join(" ")}
+            id={titleId}
+          >
             {title}
           </h2>
           <AwakenIconButton label="关闭" size="sm" onClick={() => onOpenChange(false)}>
             <X size={15} strokeWidth={1.9} />
           </AwakenIconButton>
         </header>
-        <div className="aw-dialog__body">{children}</div>
+        <div
+          ref={bodyRef}
+          className={["aw-dialog__body", bodyClassName ?? ""].filter(Boolean).join(" ")}
+          tabIndex={bodyTabIndex}
+        >
+          {children}
+        </div>
         {footer ? <footer className="aw-dialog__foot">{footer}</footer> : null}
       </div>
     </div>

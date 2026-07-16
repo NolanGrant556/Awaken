@@ -22,6 +22,7 @@ type skillHandlers struct {
 // skillInfo is the wire shape for entries returned by GET /v1/skills.
 type skillInfo struct {
 	ID                 string                `json:"id"`
+	CatalogEntryID     string                `json:"catalogEntryId,omitempty"`
 	Name               string                `json:"name"`
 	DisplayName        string                `json:"displayName,omitempty"`
 	Description        string                `json:"description"`
@@ -85,22 +86,25 @@ type deleteSkillResponse struct {
 	Message      string `json:"message"`
 }
 
+type previewSkillRequest struct {
+	CatalogEntryID string `json:"catalogEntryId"`
+	ProjectRoot    string `json:"projectRoot,omitempty"`
+}
+
+type previewSkillResponse struct {
+	FrontmatterRaw string `json:"frontmatterRaw"`
+	BodyMarkdown   string `json:"bodyMarkdown"`
+}
+
 func (h skillHandlers) handleListSkills(w http.ResponseWriter, r *http.Request) {
 	if h.registry == nil {
 		writeErrorJSON(w, http.StatusServiceUnavailable, "SKILLS_UNAVAILABLE", "skill registry not configured")
 		return
 	}
-	projectRoot := strings.TrimSpace(h.workspaceRoot)
-	if rawProjectRoot := strings.TrimSpace(r.URL.Query().Get("projectRoot")); rawProjectRoot != "" {
-		_, resolved, _, _, err := skills.ResolveInstallTarget(skills.InstallTargetRequest{
-			Scope:       string(skills.SourceProject),
-			ProjectRoot: rawProjectRoot,
-		})
-		if err != nil {
-			writeErrorJSON(w, http.StatusBadRequest, "INVALID_PROJECT_ROOT", err.Error())
-			return
-		}
-		projectRoot = resolved
+	projectRoot, err := resolveSkillPreviewProjectRoot(r.URL.Query().Get("projectRoot"), h.workspaceRoot)
+	if err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_PROJECT_ROOT", err.Error())
+		return
 	}
 
 	all := h.registry.PreviewLocalSources(h.skillSourceDirs(projectRoot))
@@ -109,6 +113,73 @@ func (h skillHandlers) handleListSkills(w http.ResponseWriter, r *http.Request) 
 		out = append(out, skillInfoFromDefinition(def))
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (h skillHandlers) handlePreviewSkill(w http.ResponseWriter, r *http.Request) {
+	if h.registry == nil {
+		writeErrorJSON(w, http.StatusServiceUnavailable, "SKILLS_UNAVAILABLE", "skill registry not configured")
+		return
+	}
+	var req previewSkillRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+	entryID := strings.TrimSpace(req.CatalogEntryID)
+	if entryID == "" {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "catalogEntryId is required")
+		return
+	}
+	projectRoot, err := resolveSkillPreviewProjectRoot(req.ProjectRoot, h.workspaceRoot)
+	if err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_PROJECT_ROOT", err.Error())
+		return
+	}
+
+	var selected *skills.SkillDefinition
+	for _, def := range h.registry.PreviewLocalSources(h.skillSourceDirs(projectRoot)) {
+		if skills.CatalogEntryID(def) == entryID {
+			selected = def
+			break
+		}
+	}
+	if selected == nil {
+		writeErrorJSON(w, http.StatusNotFound, "SKILL_PREVIEW_NOT_FOUND", "skill preview entry is no longer available; refresh the Skills list")
+		return
+	}
+	preview, err := skills.ReadSkillPreview(selected)
+	if err != nil {
+		switch {
+		case errors.Is(err, skills.ErrSkillPreviewTooLarge):
+			writeErrorJSON(w, http.StatusRequestEntityTooLarge, "SKILL_PREVIEW_TOO_LARGE", err.Error())
+		case errors.Is(err, skills.ErrSkillPreviewNotUTF8):
+			writeErrorJSON(w, http.StatusUnprocessableEntity, "SKILL_PREVIEW_NOT_UTF8", err.Error())
+		case errors.Is(err, skills.ErrSkillPreviewPathDenied):
+			writeErrorJSON(w, http.StatusForbidden, "SKILL_PREVIEW_PATH_DENIED", err.Error())
+		default:
+			writeErrorJSON(w, http.StatusConflict, "SKILL_PREVIEW_UNAVAILABLE", err.Error())
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, previewSkillResponse{
+		FrontmatterRaw: preview.FrontmatterRaw,
+		BodyMarkdown:   preview.BodyMarkdown,
+	})
+}
+
+func resolveSkillPreviewProjectRoot(rawProjectRoot, fallback string) (string, error) {
+	projectRoot := strings.TrimSpace(fallback)
+	if rawProjectRoot = strings.TrimSpace(rawProjectRoot); rawProjectRoot != "" {
+		_, resolved, _, _, err := skills.ResolveInstallTarget(skills.InstallTargetRequest{
+			Scope:       string(skills.SourceProject),
+			ProjectRoot: rawProjectRoot,
+		})
+		if err != nil {
+			return "", err
+		}
+		projectRoot = resolved
+	}
+	return projectRoot, nil
 }
 
 func (h skillHandlers) handleInstallSkill(w http.ResponseWriter, r *http.Request) {
@@ -239,6 +310,7 @@ func (h skillHandlers) handleExecuteSkill(w http.ResponseWriter, r *http.Request
 func skillInfoFromDefinition(def *skills.SkillDefinition) skillInfo {
 	info := skillInfo{
 		ID:                 def.ID,
+		CatalogEntryID:     skills.CatalogEntryID(def),
 		Name:               def.Name,
 		DisplayName:        def.DisplayName,
 		Description:        def.Description,

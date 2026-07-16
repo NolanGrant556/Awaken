@@ -38,6 +38,11 @@ import {
   type RuntimeThreadTranscript,
   type RuntimeThread,
   type RuntimeToolInfo,
+  type SearchSettings,
+  type SearchSettingsSaveRequest,
+  type SearchSettingsSaveResult,
+  type SearchProviderTestRequest,
+  type SearchProviderTestResult,
   type StartRunRequest,
   type SupervisorStatusInfo,
   type ThreadDeleteResult,
@@ -123,6 +128,9 @@ export type RuntimeClient = {
   platform: DesktopPlatform;
   relaunchDesktop: () => Promise<void>;
   getRuntimeInfo: () => Promise<RuntimeInfo>;
+  getSearchSettings: () => Promise<SearchSettings>;
+  saveSearchSettings: (request: SearchSettingsSaveRequest) => Promise<SearchSettingsSaveResult>;
+  testSearchProvider: (request: SearchProviderTestRequest) => Promise<SearchProviderTestResult>;
   listConnectors: () => Promise<RuntimeConnector[]>;
   connectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
   disconnectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
@@ -220,6 +228,9 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     platform: bridge.platform,
     relaunchDesktop: () => bridge.relaunchDesktop(),
     getRuntimeInfo: () => bridge.getRuntimeInfo(),
+    getSearchSettings: () => bridge.getSearchSettings(),
+    saveSearchSettings: (request) => bridge.saveSearchSettings(request),
+    testSearchProvider: (request) => bridge.testSearchProvider(request),
     listConnectors: () => bridge.listConnectors(),
     connectConnector: (connectorId) => bridge.connectConnector(connectorId),
     disconnectConnector: (connectorId) => bridge.disconnectConnector(connectorId),

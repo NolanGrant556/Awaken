@@ -28,6 +28,7 @@ import type {
 } from "../../shared/runtime";
 import type { RuntimeClient } from "../runtime/client";
 import { PetsSettingsPanel } from "./PetsSettingsPanel";
+import { SearchSettingsPanel } from "./SearchSettingsPanel";
 
 export type DraftState = {
   profileId?: string;
@@ -46,7 +47,7 @@ export type DraftState = {
 };
 
 type ModelSettingsSection = "configure" | "configured";
-type SettingsDialogSection = "models" | "appearance" | "pets";
+type SettingsDialogSection = "models" | "search" | "appearance" | "pets";
 
 type ConfiguredProfileDraft = {
   enabled: boolean;
@@ -944,6 +945,19 @@ export function DesktopSettingsDialog({
           <button
             type="button"
             role="tab"
+            aria-selected={activeSettingsSection === "search"}
+            className={`settings-dialog-nav-item${
+              activeSettingsSection === "search"
+                ? " settings-dialog-nav-item-active"
+                : ""
+            }`}
+            onClick={() => setActiveSettingsSection("search")}
+          >
+            搜索
+          </button>
+          <button
+            type="button"
+            role="tab"
             aria-selected={activeSettingsSection === "appearance"}
             className={`settings-dialog-nav-item${
               activeSettingsSection === "appearance"
@@ -975,6 +989,8 @@ export function DesktopSettingsDialog({
             <h1 className="model-settings-title">
               {activeSettingsSection === "models"
                 ? "模型"
+                : activeSettingsSection === "search"
+                  ? "搜索"
                 : activeSettingsSection === "appearance"
                   ? "外观"
                   : "宠物"}
@@ -1023,7 +1039,9 @@ export function DesktopSettingsDialog({
             <div className="model-settings-message">{themeMessage}</div>
           ) : null}
 
-          {activeSettingsSection === "appearance" ? (
+          {activeSettingsSection === "search" ? (
+            <SearchSettingsPanel runtimeClient={runtimeClient} />
+          ) : activeSettingsSection === "appearance" ? (
             <AppearanceSettings
               themePreference={themePreference}
               themeSaving={themeSaving}

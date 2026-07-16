@@ -73,6 +73,10 @@ describe("RuntimeSupervisor", () => {
           LLM_MODEL_ID: "legacy-model",
           LLM_PROTOCOL: "legacy-protocol",
           LLM_AUTH_SCHEME: "legacy-auth",
+          AWAKEN_WEB_SEARCH_API_KEY: "legacy-search-secret",
+        }),
+        resolveProductEnvironment: async () => ({
+          AWAKEN_WEB_SEARCH_PROVIDERS: "exa,tavily",
         }),
         spawnProcess: (_command: string, _args: string[], options: SpawnOptions) => {
           spawnOptions = options;
@@ -120,8 +124,9 @@ describe("RuntimeSupervisor", () => {
       HOME: "/Users/login-user",
       AWAKEN_LOGIN_ENV_CANARY: "login-value",
       AWAKEN_BUNDLED_SKILL_DIRS:
-        "/Users/awaken-home/.awaken/skills/system-skills",
+        join("/Users/awaken-home", ".awaken", "skills", "system-skills"),
     });
+    expect(spawnOptions?.env?.AWAKEN_WEB_SEARCH_PROVIDERS).toBe("exa,tavily");
     expect(spawnOptions?.env).not.toHaveProperty("AWAKEN_CONFIG_DIR");
     expect(spawnOptions?.env).not.toHaveProperty("AWAKEN_RUNTIME_MANIFEST");
     expect(spawnOptions?.env).not.toHaveProperty("LLM_API_KEY");

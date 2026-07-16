@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -264,6 +265,29 @@ func TestLoadDirEmptyDir(t *testing.T) {
 	}
 }
 
+func TestLoadDirSkipsReservedSystemSkillsDirectoryCaseInsensitive(t *testing.T) {
+	for _, reservedName := range []string{"system-skills", "SYSTEM-SKILLS", "System-Skills"} {
+		t.Run(reservedName, func(t *testing.T) {
+			root := t.TempDir()
+			bundledRoot := filepath.Join(root, reservedName)
+			writeTestSkillPackage(t, bundledRoot, "word", `---
+name: word
+description: Word documents.
+---
+Body.
+`)
+
+			if loaded := LoadDir(root, SourceUser); len(loaded) != 0 {
+				t.Fatalf("reserved system-skills directory leaked into user discovery: %+v", loaded)
+			}
+			loaded := LoadDir(bundledRoot, SourceBundled)
+			if len(loaded) != 1 || loaded["word"] == nil || loaded["word"].Source != SourceBundled {
+				t.Fatalf("bundled root did not load its direct child package: %+v", loaded)
+			}
+		})
+	}
+}
+
 // ---- Merge tests ----
 
 func TestMergePriority(t *testing.T) {
@@ -334,6 +358,54 @@ Body.
 	got := reg.Get("test")
 	if got == nil {
 		t.Fatal("expected test skill in registry")
+	}
+}
+
+func TestBundledSkillIsShadowedAndRestoredAfterOverrideRemoval(t *testing.T) {
+	for _, source := range []SourceOrigin{SourceUser, SourceProject} {
+		t.Run(string(source), func(t *testing.T) {
+			bundledDir := t.TempDir()
+			overrideDir := t.TempDir()
+			writeTestSkillPackage(t, bundledDir, "documents", `---
+name: documents
+description: Bundled documents.
+---
+Bundled.
+`)
+			writeTestSkillPackage(t, overrideDir, "documents", `---
+name: documents
+description: Override documents.
+---
+Override.
+`)
+
+			registry := NewSkillRegistry(nil)
+			dirs := map[SourceOrigin]string{
+				SourceBundled: bundledDir,
+				source:        overrideDir,
+			}
+			registry.LoadFromSources(dirs)
+			if winner := registry.Get("documents"); winner == nil || winner.Source != source {
+				t.Fatalf("override source did not win: %+v", winner)
+			}
+			shadowedBundled := false
+			for _, definition := range registry.ListAll() {
+				if definition.ID == "documents" && definition.Source == SourceBundled && definition.State == StateShadowed {
+					shadowedBundled = true
+				}
+			}
+			if !shadowedBundled {
+				t.Fatal("bundled definition was not retained as shadowed")
+			}
+
+			if err := os.RemoveAll(filepath.Join(overrideDir, "documents")); err != nil {
+				t.Fatal(err)
+			}
+			registry.ReloadLocalSources(dirs)
+			if restored := registry.Get("documents"); restored == nil || restored.Source != SourceBundled || restored.State != StateLoaded {
+				t.Fatalf("bundled definition was not restored: %+v", restored)
+			}
+		})
 	}
 }
 

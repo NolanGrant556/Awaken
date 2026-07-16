@@ -10,7 +10,9 @@ import { RuntimeSupervisor } from "./runtime-supervisor.js";
 vi.mock("electron", () => ({
   app: {
     isPackaged: false,
-    getPath: vi.fn(() => "/tmp/awaken-user-data"),
+    getPath: vi.fn((name: string) =>
+      name === "home" ? "/Users/awaken-home" : "/tmp/awaken-user-data",
+    ),
   },
 }));
 
@@ -50,9 +52,11 @@ describe("RuntimeSupervisor", () => {
     const previousConfigDir = process.env.AWAKEN_CONFIG_DIR;
     const previousAPIKey = process.env.LLM_API_KEY;
     const previousProcessOnly = process.env.AWAKEN_PROCESS_ONLY_CANARY;
+    const previousBundledSkills = process.env.AWAKEN_BUNDLED_SKILL_DIRS;
     process.env.AWAKEN_CONFIG_DIR = "/tmp/legacy-config";
     process.env.LLM_API_KEY = "legacy-key";
     process.env.AWAKEN_PROCESS_ONLY_CANARY = "must-not-flow-back";
+    process.env.AWAKEN_BUNDLED_SKILL_DIRS = "/tmp/process-controlled-skills";
     const supervisor = new RuntimeSupervisor(
       {},
       {
@@ -63,6 +67,7 @@ describe("RuntimeSupervisor", () => {
           HOME: "/Users/login-user",
           AWAKEN_LOGIN_ENV_CANARY: "login-value",
           AWAKEN_CONFIG_DIR: "/tmp/login-legacy-config",
+          AWAKEN_BUNDLED_SKILL_DIRS: "/tmp/login-controlled-skills",
           LLM_API_KEY: "login-legacy-key",
           LLM_BASE_URL: "https://legacy.example.invalid",
           LLM_MODEL_ID: "legacy-model",
@@ -96,6 +101,11 @@ describe("RuntimeSupervisor", () => {
       } else {
         process.env.AWAKEN_PROCESS_ONLY_CANARY = previousProcessOnly;
       }
+      if (previousBundledSkills === undefined) {
+        delete process.env.AWAKEN_BUNDLED_SKILL_DIRS;
+      } else {
+        process.env.AWAKEN_BUNDLED_SKILL_DIRS = previousBundledSkills;
+      }
     }
 
     expect(info).toEqual({
@@ -109,6 +119,8 @@ describe("RuntimeSupervisor", () => {
       PATH: "/login/bin:/usr/bin",
       HOME: "/Users/login-user",
       AWAKEN_LOGIN_ENV_CANARY: "login-value",
+      AWAKEN_BUNDLED_SKILL_DIRS:
+        "/Users/awaken-home/.awaken/skills/system-skills",
     });
     expect(spawnOptions?.env).not.toHaveProperty("AWAKEN_CONFIG_DIR");
     expect(spawnOptions?.env).not.toHaveProperty("AWAKEN_RUNTIME_MANIFEST");

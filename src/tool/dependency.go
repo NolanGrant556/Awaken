@@ -368,6 +368,7 @@ func hostPackageNames(goos string, executable string) hostPackageMapping {
 		"soffice":     {brew: "libreoffice", brewArgs: []string{"--cask", "libreoffice"}, winget: "TheDocumentFoundation.LibreOffice", choco: "libreoffice-fresh", apt: "libreoffice"},
 		"libreoffice": {brew: "libreoffice", brewArgs: []string{"--cask", "libreoffice"}, winget: "TheDocumentFoundation.LibreOffice", choco: "libreoffice-fresh", apt: "libreoffice"},
 		"pdftoppm":    {brew: "poppler", brewArgs: []string{"poppler"}, winget: "oschwartz10612.Poppler", choco: "poppler", apt: "poppler-utils"},
+		"pandoc":      {brew: "pandoc", brewArgs: []string{"pandoc"}, winget: "JohnMacFarlane.Pandoc", choco: "pandoc", apt: "pandoc"},
 		"ffmpeg":      {brew: "ffmpeg", brewArgs: []string{"ffmpeg"}, winget: "Gyan.FFmpeg", choco: "ffmpeg", apt: "ffmpeg"},
 		"git":         {brew: "git", brewArgs: []string{"git"}, winget: "Git.Git", choco: "git", apt: "git"},
 		"node":        {brew: "node", brewArgs: []string{"node"}, winget: "OpenJS.NodeJS.LTS", choco: "nodejs-lts", apt: "nodejs"},

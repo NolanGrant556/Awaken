@@ -98,7 +98,7 @@ func TestCatalogToolLoadsBodyOnDemandAndSubstitutesArgs(t *testing.T) {
 	if err != nil || !strings.Contains(result.Content, "New input.pdf") || strings.Contains(result.Content, "Old") {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
-	if len(result.Plan.ToolHints) != 2 || result.Plan.ToolHints[0].Canonical != "read_file" {
+	if len(result.Plan.ToolHints) != 2 || result.Plan.ToolHints[0].Canonical != "Read" {
 		t.Fatalf("hints=%+v", result.Plan.ToolHints)
 	}
 }
@@ -111,7 +111,7 @@ func TestSequentialComplementarySkillsNeverIntersectParentToolPool(t *testing.T)
 	registry := skills.NewSkillRegistry(nil)
 	registry.LoadFromSources(map[skills.SourceOrigin]string{skills.SourceUser: root})
 	catalogTool := &CatalogTool{Registry: registry, Activator: NewActivator(registry, nil)}
-	parentPool := []string{"read_file", "shell", "text_file_create", "web_search"}
+	parentPool := []string{"Bash", "Read", "WebSearch", "Write"}
 
 	first, err := catalogTool.Invoke(context.Background(), SkillInvocationRequest{
 		Skill: "research", Args: "sources", Source: InvocationModel, ParentToolPool: parentPool,

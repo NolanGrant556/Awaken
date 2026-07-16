@@ -49,10 +49,6 @@ export type AguiEventType =
   | "AWAKEN_TOOL_RETRY_BLOCKED"
   | "AWAKEN_UNKNOWN_EVENT";
 
-export type AguiApprovalRiskTone = "safe" | "warning" | "danger";
-
-export type AguiApprovalDecision = "approved" | "rejected";
-
 export type AguiArtifactStatus = "ready" | "pending" | "error";
 
 export type AguiArtifactRole = "deliverable" | "preview" | "support";
@@ -137,9 +133,9 @@ export type AguiEvent = {
   toolDecisionReason?: string;
   /** ExecutionProfile name applied to this call (Task 16 unified observability). */
   profileName?: string;
-  /** Original tool name when the decision was a transform (e.g. "shell"). */
+  /** Original tool name when a generic provider transform is used. */
   transformedFrom?: string;
-  /** Rewritten tool name when the decision was a transform (e.g. "apply_patch"). */
+  /** Rewritten tool name when a generic provider transform is used. */
   transformedTo?: string;
   /** Absolute paths moved to the OS recycle bin during this call. */
   trashedPaths?: string[];
@@ -194,14 +190,6 @@ export type AguiEvent = {
   skillDiagnostics?: string[];
   questionId?: string;
   questionAnswer?: string;
-  /** Legacy transcript-only fields. New runs must not emit generic approval events. */
-  approvalId?: string;
-  approvalTitle?: string;
-  approvalDescription?: string;
-  approvalRiskTone?: AguiApprovalRiskTone;
-  approvalDecision?: AguiApprovalDecision;
-  approvalAffectedPaths?: string[];
-  approvalPatchSummary?: string;
   artifactId?: string;
   artifactTitle?: string;
   artifactDescription?: string;

@@ -1,6 +1,6 @@
 // Package trash provides a unified interface for moving files to the
 // operating system's recycle bin / trash instead of permanently deleting
-// them. It is consumed by tools like apply_patch so that deletions remain
+// them. It is consumed by trash_file so that deletions remain
 // recoverable.
 package trash
 

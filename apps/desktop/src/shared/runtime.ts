@@ -481,6 +481,7 @@ export type ModelCapabilityWire = {
   default_max_tokens?: number;
   default_temperature?: number;
   supports_vision?: boolean;
+  supports_native_pdf?: boolean;
   supports_video?: boolean;
 };
 
@@ -507,6 +508,7 @@ export type ModelCapability = {
   defaultMaxTokens?: number;
   defaultTemperature?: number;
   supportsVision?: boolean;
+  supportsNativePDF?: boolean;
   supportsVideo?: boolean;
 };
 
@@ -541,6 +543,7 @@ export type ModelProfileAdvancedWire = {
   prompt_cache_key?: string;
   context_window?: number;
   supports_vision?: boolean;
+  supports_native_pdf?: boolean;
   supports_video?: boolean;
 };
 
@@ -551,6 +554,7 @@ export type ModelProfileAdvanced = {
   promptCacheKey?: string;
   contextWindow?: number;
   supportsVision?: boolean;
+  supportsNativePDF?: boolean;
   supportsVideo?: boolean;
 };
 
@@ -768,6 +772,7 @@ export type ModelProfileRunConfigWire = {
   context_window?: number;
   prompt_cache_key?: string;
   supports_vision?: boolean;
+  supports_native_pdf?: boolean;
   supports_video?: boolean;
 };
 
@@ -785,6 +790,7 @@ export type ModelProfileRunConfig = {
   contextWindow?: number;
   promptCacheKey?: string;
   supportsVision?: boolean;
+  supportsNativePDF?: boolean;
   supportsVideo?: boolean;
 };
 
@@ -1075,6 +1081,7 @@ export function normalizeModelCapabilities(
         defaultMaxTokens: capability.default_max_tokens,
         defaultTemperature: capability.default_temperature,
         supportsVision: capability.supports_vision,
+        supportsNativePDF: capability.supports_native_pdf,
         supportsVideo: capability.supports_video,
       },
     ]),
@@ -1092,6 +1099,7 @@ export function normalizeModelProfileAdvanced(
     promptCacheKey: advanced.prompt_cache_key,
     contextWindow: advanced.context_window,
     supportsVision: advanced.supports_vision,
+    supportsNativePDF: advanced.supports_native_pdf,
     supportsVideo: advanced.supports_video,
   };
 }
@@ -1107,6 +1115,7 @@ export function toModelProfileAdvancedWire(
     prompt_cache_key: advanced.promptCacheKey,
     context_window: advanced.contextWindow,
     supports_vision: advanced.supportsVision,
+    supports_native_pdf: advanced.supportsNativePDF,
     supports_video: advanced.supportsVideo,
   };
 }
@@ -1148,6 +1157,7 @@ export function normalizeModelProfileRunConfig(
     context_window: profile.contextWindow,
     prompt_cache_key: profile.promptCacheKey,
     supports_vision: profile.supportsVision,
+    supports_native_pdf: profile.supportsNativePDF,
     supports_video: profile.supportsVideo,
   };
 }

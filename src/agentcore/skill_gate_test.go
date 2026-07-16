@@ -19,14 +19,14 @@ func TestRequestBuilderUsesUnifiedCatalogWithConfiguredExposure(t *testing.T) {
 		names = append(names, schema.Function.Name)
 	}
 	joined := strings.Join(names, ",")
-	if !strings.Contains(joined, "text_edit") {
-		t.Fatalf("expected text_edit in pool, got %v", names)
+	if !strings.Contains(joined, "Edit") {
+		t.Fatalf("expected Edit in pool, got %v", names)
 	}
-	if !strings.Contains(joined, "shell") {
-		t.Fatalf("expected shell in pool, got %v", names)
+	if !strings.Contains(joined, "Bash") {
+		t.Fatalf("expected Bash in pool, got %v", names)
 	}
-	if !strings.Contains(joined, "apply_patch") {
-		t.Fatalf("configured exposure unexpectedly hid apply_patch, got %v", names)
+	if strings.Contains(joined, "apply_patch") {
+		t.Fatalf("retired apply_patch leaked into model exposure: %v", names)
 	}
 }
 
@@ -76,7 +76,7 @@ func TestImplicitSkillParentPoolMatchesModelExposure(t *testing.T) {
 	pool := runner.currentImplicitParentPool()
 	for _, name := range pool {
 		if name == "apply_patch" {
-			t.Fatalf("implicit Skill inherited hidden tool apply_patch from registry: %v", pool)
+			t.Fatalf("implicit Skill inherited retired tool apply_patch from registry: %v", pool)
 		}
 	}
 	if len(pool) == 0 {

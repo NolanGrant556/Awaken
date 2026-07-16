@@ -168,9 +168,8 @@ type ExecutionBroker interface {
 }
 
 // WorkspaceScopeExecutionBroker marks a broker that actually enforces the
-// canonical workspace writable/protected scope. Shell only projects TaskScope
-// roots to brokers implementing this interface; a direct host broker must not
-// receive those roots as if they were an enforced boundary.
+// canonical workspace writable/protected scope for reserved typed operations.
+// Bash never consumes or projects into this broker contract.
 type WorkspaceScopeExecutionBroker interface {
 	ExecutionBroker
 	EnforcesWorkspaceScope() bool
@@ -184,133 +183,6 @@ var (
 	ErrExecutionBrokerCommit      = errors.New("execution broker could not safely commit workspace changes")
 	ErrExecutionWorkspaceChanged  = errors.New("workspace changed outside the supervised execution")
 )
-
-// LocalUserExecutionBroker is the default Shell provider. It deliberately
-// does not claim sandboxing, workspace confinement, recoverable mutation, or
-// egress observation: the child runs with the same operating-system identity
-// and ambient machine access as awaken-core itself. Optional restricted or
-// staged brokers remain injectable through ContextWithExecutionBroker.
-type LocalUserExecutionBroker struct{}
-
-func NewLocalUserExecutionBroker() *LocalUserExecutionBroker { return &LocalUserExecutionBroker{} }
-func (*LocalUserExecutionBroker) ID() string                 { return "local_user_direct_v1" }
-
-func (b *LocalUserExecutionBroker) Authorize(ctx context.Context, request ExecutionBrokerRequest) (BrokerAuthorization, error) {
-	if err := ctx.Err(); err != nil {
-		return BrokerAuthorization{}, err
-	}
-	if request.ProviderID != ProviderID("builtin:shell") || request.Capability != CapabilityShellExecute {
-		return BrokerAuthorization{
-			AuthorizationID: brokerAuthorizationIdentity(request),
-			Action:          BrokerDeny,
-			Reason:          "local-user direct execution is reserved for the builtin Shell provider",
-			EnforcementMode: "current_login_user_direct",
-			Evidence:        []string{"provider_capability_mismatch"},
-			IssuedAt:        time.Now().UTC(),
-		}, ErrExecutionBrokerDenied
-	}
-	switch request.Operation {
-	case BrokerOperationDependencyInstall, BrokerOperationGitRemote, BrokerOperationArtifactPublish:
-		return BrokerAuthorization{
-			AuthorizationID: brokerAuthorizationIdentity(request),
-			Action:          BrokerDeny,
-			Reason:          "typed reserved operations must use their own provider broker contract",
-			EnforcementMode: "current_login_user_direct",
-			Evidence:        []string{"typed_reserved_operation_not_shell"},
-			IssuedAt:        time.Now().UTC(),
-		}, ErrExecutionBrokerDenied
-	}
-	return BrokerAuthorization{
-		AuthorizationID: brokerAuthorizationIdentity(request),
-		Action:          BrokerAllow,
-		Reason:          "execute directly with the current login user's operating-system permissions",
-		EnforcementMode: "current_login_user_direct",
-		Evidence: []string{
-			"current_process_user_identity",
-			"ambient_host_environment",
-			"no_awaken_workspace_or_network_confinement",
-			"side_effects_not_broker_observed",
-		},
-		IssuedAt: time.Now().UTC(),
-	}, nil
-}
-
-func (b *LocalUserExecutionBroker) Complete(ctx context.Context, authorization BrokerAuthorization, result BrokerExecutionResult) (BrokerExecutionReceipt, error) {
-	if err := ctx.Err(); err != nil {
-		return BrokerExecutionReceipt{}, err
-	}
-	if authorization.Action != BrokerAllow {
-		return BrokerExecutionReceipt{}, ErrExecutionBrokerDenied
-	}
-	commitStatus := "not_applicable"
-	if result.SideEffectState == OutcomeSideEffectUnknown {
-		commitStatus = "side_effects_unobserved"
-	}
-	return BrokerExecutionReceipt{
-		AuthorizationID: authorization.AuthorizationID,
-		BrokerID:        b.ID(),
-		EnforcementMode: authorization.EnforcementMode,
-		Action:          authorization.Action,
-		Evidence:        append([]string(nil), authorization.Evidence...),
-		CommitStatus:    commitStatus,
-		SideEffectState: result.SideEffectState,
-		CompletedAt:     time.Now().UTC(),
-	}, nil
-}
-
-// RestrictedExecutionBroker is the honest fallback until a platform overlay or
-// staging broker is installed. It allows only commands classified as bounded
-// read-only inspection. Raw mutations/network/unknown programs fail closed;
-// delete intents return an explicit trash transform proposal.
-type RestrictedExecutionBroker struct{}
-
-func NewRestrictedExecutionBroker() *RestrictedExecutionBroker { return &RestrictedExecutionBroker{} }
-func (*RestrictedExecutionBroker) ID() string                  { return "restricted_read_only_v1" }
-
-func (b *RestrictedExecutionBroker) Authorize(ctx context.Context, request ExecutionBrokerRequest) (BrokerAuthorization, error) {
-	if err := ctx.Err(); err != nil {
-		return BrokerAuthorization{}, err
-	}
-	authorization := BrokerAuthorization{
-		AuthorizationID: brokerAuthorizationIdentity(request),
-		EnforcementMode: "read_only_command_allowlist",
-		IssuedAt:        time.Now().UTC(),
-	}
-	switch request.Operation {
-	case BrokerOperationInspect:
-		authorization.Action = BrokerAllow
-		authorization.Reason = "command is in the broker read-only inspection subset"
-		authorization.Evidence = []string{"read_only_semantics", "no_user_file_commit"}
-		return authorization, nil
-	case BrokerOperationDelete:
-		authorization.Action = BrokerTransform
-		authorization.Reason = "file deletion must be committed through trash_file"
-		authorization.Transform = &BrokerTransformProposal{
-			Kind: BrokerTransformTrashPaths, Paths: append([]string(nil), request.ReferencedPaths...), ToolName: "trash_file",
-		}
-		return authorization, ErrExecutionTransformRequired
-	default:
-		authorization.Action = BrokerDeny
-		authorization.Reason = "raw execution is not proven isolated; install a staging/overlay execution broker"
-		authorization.Evidence = []string{"no_overlay_receipt", "side_effects_unobservable"}
-		return authorization, ErrExecutionBrokerDenied
-	}
-}
-
-func (b *RestrictedExecutionBroker) Complete(ctx context.Context, authorization BrokerAuthorization, result BrokerExecutionResult) (BrokerExecutionReceipt, error) {
-	if err := ctx.Err(); err != nil {
-		return BrokerExecutionReceipt{}, err
-	}
-	if authorization.Action != BrokerAllow {
-		return BrokerExecutionReceipt{}, ErrExecutionBrokerDenied
-	}
-	return BrokerExecutionReceipt{
-		AuthorizationID: authorization.AuthorizationID,
-		BrokerID:        b.ID(), EnforcementMode: authorization.EnforcementMode,
-		Action: authorization.Action, Evidence: append([]string(nil), authorization.Evidence...),
-		CompletedAt: time.Now().UTC(),
-	}, nil
-}
 
 type UnavailableExecutionBroker struct{}
 

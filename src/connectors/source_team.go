@@ -15,7 +15,7 @@ type TeamConnectorSource interface {
 
 // TeamEvent is emitted by TeamConnectorSource.Subscribe.
 type TeamEvent struct {
-	Kind       string             // "added", "removed", "updated"
+	Kind       string // "added", "removed", "updated"
 	Definition ConnectorDefinition
 }
 

@@ -200,24 +200,30 @@ func messagesFromSemanticRecords(records []agentcore.SemanticRecord) []convconte
 		case agentcore.SemanticKindToolResult:
 			content := stringPayload(record.Payload, "content")
 			isError := boolPayload(record.Payload, "is_error")
+			var modelContent []tool.ModelContentPart
 			// SemanticJournal stores human-readable display content separately
 			// from the canonical outcome. Model history must receive the same
 			// compact structured payload used during the live run; feeding display
 			// text here loses error_code/retryable/process facts after restart.
 			if outcome, ok := executionOutcomePayload(record.Payload); ok {
+				hydrated, warnings := NewToolResultStore().HydrateToolResult(context.Background(), record.ThreadID, outcome.ModelContent)
+				outcome.ModelContent = hydrated
+				outcome.Warnings = append(outcome.Warnings, warnings...)
 				content = outcome.ModelPayload()
 				isError = outcome.IsError()
+				modelContent = tool.CloneModelContent(outcome.ModelContent)
 			}
 			msg := convcontext.Message{
-				Role:       convcontext.RoleTool,
-				Content:    content,
-				ToolCallID: stringPayload(record.Payload, "tool_call_id"),
-				Name:       stringPayload(record.Payload, "tool_name"),
-				IsError:    isError,
+				Role:         convcontext.RoleTool,
+				Content:      content,
+				ToolCallID:   stringPayload(record.Payload, "tool_call_id"),
+				Name:         stringPayload(record.Payload, "tool_name"),
+				IsError:      isError,
+				ModelContent: modelContent,
 			}
 			messages = append(messages, msg)
 		case agentcore.SemanticKindContextCompacted:
-			compacted, ok := compactedMessagesFromSemanticRecord(record.Payload)
+			compacted, ok := compactedMessagesFromSemanticRecord(record.ThreadID, record.Payload)
 			if !ok {
 				// A malformed compaction record must not erase the last known-good
 				// conversation. The record remains auditable while replay keeps the
@@ -232,7 +238,7 @@ func messagesFromSemanticRecords(records []agentcore.SemanticRecord) []convconte
 	return messages
 }
 
-func compactedMessagesFromSemanticRecord(payload map[string]any) ([]convcontext.Message, bool) {
+func compactedMessagesFromSemanticRecord(threadID string, payload map[string]any) ([]convcontext.Message, bool) {
 	var durable []agentcore.SemanticCompactedMessage
 	if !decodeSemanticUserMessageField(payload, "messages", &durable) || len(durable) == 0 {
 		return nil, false
@@ -261,6 +267,11 @@ func compactedMessagesFromSemanticRecord(payload map[string]any) ([]convcontext.
 			})
 		}
 		compactBoundaryID := strings.TrimSpace(message.CompactBoundaryID)
+		hydratedModelContent, warnings := NewToolResultStore().HydrateToolResult(context.Background(), threadID, message.ModelContent)
+		content := message.Content
+		for _, warning := range warnings {
+			content += fmt.Sprintf("\n[%s: %s]", warning.Code, warning.Message)
+		}
 		if len(messages) == 0 {
 			if compactBoundaryID == "" {
 				compactBoundaryID = boundaryID
@@ -274,13 +285,14 @@ func compactedMessagesFromSemanticRecord(payload map[string]any) ([]convcontext.
 		}
 		messages = append(messages, convcontext.Message{
 			Role:              role,
-			Content:           message.Content,
+			Content:           content,
 			Attachments:       transcriptAttachmentsToContextAttachments(attachments),
 			ToolCalls:         append([]convcontext.ToolCall(nil), message.ToolCalls...),
 			ToolCallID:        message.ToolCallID,
 			Name:              message.Name,
 			IsError:           message.IsError,
 			CompactBoundaryID: compactBoundaryID,
+			ModelContent:      hydratedModelContent,
 		})
 	}
 	if err := convcontext.ValidateToolResultPairing(messages); err != nil {

@@ -23,6 +23,7 @@ import (
 	"awaken/src/skills"
 	"awaken/src/tool"
 	"awaken/src/tool/profile"
+	bashtool "awaken/src/tools/bash"
 )
 
 var (
@@ -101,20 +102,21 @@ type ComposerTokenPayload struct {
 }
 
 type ModelProfileConfig struct {
-	ProfileID      string  `json:"profile_id,omitempty"`
-	ProviderID     string  `json:"provider_id,omitempty"`
-	DisplayName    string  `json:"display_name,omitempty"`
-	ModelID        string  `json:"model_id,omitempty"`
-	BaseURL        string  `json:"base_url,omitempty"`
-	Protocol       string  `json:"protocol,omitempty"`
-	AuthScheme     string  `json:"auth_scheme,omitempty"`
-	APIKey         string  `json:"api_key,omitempty"`
-	Temperature    float64 `json:"temperature,omitempty"`
-	MaxTokens      int     `json:"max_tokens,omitempty"`
-	ContextWindow  int     `json:"context_window,omitempty"`
-	PromptCacheKey string  `json:"prompt_cache_key,omitempty"`
-	SupportsVision bool    `json:"supports_vision,omitempty"`
-	SupportsVideo  bool    `json:"supports_video,omitempty"`
+	ProfileID         string  `json:"profile_id,omitempty"`
+	ProviderID        string  `json:"provider_id,omitempty"`
+	DisplayName       string  `json:"display_name,omitempty"`
+	ModelID           string  `json:"model_id,omitempty"`
+	BaseURL           string  `json:"base_url,omitempty"`
+	Protocol          string  `json:"protocol,omitempty"`
+	AuthScheme        string  `json:"auth_scheme,omitempty"`
+	APIKey            string  `json:"api_key,omitempty"`
+	Temperature       float64 `json:"temperature,omitempty"`
+	MaxTokens         int     `json:"max_tokens,omitempty"`
+	ContextWindow     int     `json:"context_window,omitempty"`
+	PromptCacheKey    string  `json:"prompt_cache_key,omitempty"`
+	SupportsVision    bool    `json:"supports_vision,omitempty"`
+	SupportsNativePDF bool    `json:"supports_native_pdf,omitempty"`
+	SupportsVideo     bool    `json:"supports_video,omitempty"`
 }
 
 type Executor interface {
@@ -390,6 +392,9 @@ func (s *RunService) cancelRunsForThreads(threadIDs []string) {
 	s.mu.RUnlock()
 	for _, session := range sessions {
 		session.RequestCancel()
+	}
+	for _, threadID := range threadIDs {
+		bashtool.CancelThreadTasks(threadID)
 	}
 }
 
@@ -1016,6 +1021,9 @@ func modelProfileCacheKey(profile *ModelProfileConfig) string {
 		strconv.Itoa(profile.MaxTokens),
 		strconv.Itoa(profile.ContextWindow),
 		profile.PromptCacheKey,
+		strconv.FormatBool(profile.SupportsVision),
+		strconv.FormatBool(profile.SupportsNativePDF),
+		strconv.FormatBool(profile.SupportsVideo),
 	}
 	return strings.Join(parts, "\x00")
 }
@@ -1135,6 +1143,7 @@ func (s *RunService) DeleteThread(threadID string) error {
 		if err := s.projectService.DeleteThread(threadID); err != nil {
 			return err
 		}
+		bashtool.CancelThreadTasks(threadID)
 		_, err := s.projectService.ProcessCleanupJobs(context.Background(), 16)
 		return err
 	}
@@ -1151,9 +1160,11 @@ func (s *RunService) DeleteThread(threadID string) error {
 			delete(s.sessions, runID)
 		}
 		s.mu.Unlock()
+		bashtool.CancelThreadTasks(threadID)
 		return s.threadStore.DeleteThread(threadID)
 	}
 	s.mu.Unlock()
+	bashtool.CancelThreadTasks(threadID)
 	return s.threadStore.DeleteThread(threadID)
 }
 
@@ -1345,7 +1356,9 @@ func (s *RunService) CancelRun(runID string) (Run, error) {
 	if err != nil {
 		return Run{}, err
 	}
-	return session.RequestCancel(), nil
+	run := session.RequestCancel()
+	bashtool.CancelThreadTasks(run.ThreadID)
+	return run, nil
 }
 
 func (s *RunService) ResolveUserQuestion(runID, questionID, answer string) error {

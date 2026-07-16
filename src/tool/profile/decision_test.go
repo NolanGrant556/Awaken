@@ -56,29 +56,29 @@ func TestDenyDecisionNotRetryable(t *testing.T) {
 }
 
 func TestTransformDecision(t *testing.T) {
-	input := map[string]any{"patch": "*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch"}
-	d := TransformDecision("shell echo rewritten to apply_patch", "apply_patch", input)
+	input := map[string]any{"file_path": "a.txt", "content": "hello"}
+	d := TransformDecision("legacy source rewritten to Write", "Write", input)
 	if d.Action != DecisionTransform {
 		t.Errorf("Action = %q, want %q", d.Action, DecisionTransform)
 	}
 	if d.Source != DecisionSourceTransform {
 		t.Errorf("Source = %q, want %q", d.Source, DecisionSourceTransform)
 	}
-	if d.Reason != "shell echo rewritten to apply_patch" {
-		t.Errorf("Reason = %q, want %q", d.Reason, "shell echo rewritten to apply_patch")
+	if d.Reason != "legacy source rewritten to Write" {
+		t.Errorf("Reason = %q, want %q", d.Reason, "legacy source rewritten to Write")
 	}
-	if d.UpdatedToolName != "apply_patch" {
-		t.Errorf("UpdatedToolName = %q, want %q", d.UpdatedToolName, "apply_patch")
+	if d.UpdatedToolName != "Write" {
+		t.Errorf("UpdatedToolName = %q, want %q", d.UpdatedToolName, "Write")
 	}
 	if d.UpdatedInput == nil {
 		t.Fatal("UpdatedInput should not be nil")
 	}
-	patch, ok := d.UpdatedInput["patch"].(string)
+	content, ok := d.UpdatedInput["content"].(string)
 	if !ok {
-		t.Fatalf("UpdatedInput[\"patch\"] is not a string: %T", d.UpdatedInput["patch"])
+		t.Fatalf("UpdatedInput[\"content\"] is not a string: %T", d.UpdatedInput["content"])
 	}
-	if !strings.Contains(patch, "*** Add File: a.txt") {
-		t.Errorf("UpdatedInput patch = %q, expected to contain Add File for a.txt", patch)
+	if content != "hello" {
+		t.Errorf("UpdatedInput content = %q, want hello", content)
 	}
 }
 
@@ -108,16 +108,16 @@ func TestExecutionDecision_StringDeny(t *testing.T) {
 }
 
 func TestExecutionDecision_StringTransform(t *testing.T) {
-	d := TransformDecision("rewritten", "apply_patch", map[string]any{"patch": "..."})
+	d := TransformDecision("rewritten", "Write", map[string]any{"content": "..."})
 	s := d.String()
-	for _, want := range []string{"transform", "apply_patch", "rewritten"} {
+	for _, want := range []string{"transform", "Write", "rewritten"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("String() = %q, expected to contain %q", s, want)
 		}
 	}
 	// Transform decisions should include the tool name in the output.
-	if !strings.Contains(s, "tool=apply_patch") {
-		t.Errorf("String() = %q, expected to contain tool=apply_patch", s)
+	if !strings.Contains(s, "tool=Write") {
+		t.Errorf("String() = %q, expected to contain tool=Write", s)
 	}
 }
 

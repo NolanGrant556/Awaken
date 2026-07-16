@@ -23,8 +23,8 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 | --- | --- | --- |
 | 桌面工作台 | 项目与线程导航、Workbench 输入和运行叙事、附件、交付物、外观、宠物与 Desktop 生命周期 | [01 桌面工作台](docs/01_桌面工作台/索引.md) |
 | 主智能体闭环 | thread/run、多轮上下文、压缩、主动提问、取消和失败终止 | [02 主智能体闭环](docs/02_主智能体闭环/索引.md) |
-| 运行时与本地服务 | Desktop 托管本地服务、SemanticJournal、当前用户执行环境观察与 Office worker | [03 运行时与本地服务](docs/03_运行时与本地服务/索引.md) |
-| 工具、权限与安全执行 | provider/capability/dependency、每 run 可用性快照、默认自动执行、当前登录用户 direct Shell、可选 restricted/staging broker，以及拥有独立 schema/恢复/审核合同的 typed 工具 | [04 工具、权限与安全执行](docs/04_工具权限与审批/索引.md) |
+| 运行时与本地服务 | Desktop 托管本地服务、SemanticJournal、工具媒体 blob、当前用户执行环境观察与历史回放 | [03 运行时与本地服务](docs/03_运行时与本地服务/索引.md) |
+| 工具、权限与安全执行 | 七个模型基础工具、provider/capability/dependency、每 run 可用性快照、零审批、TaskScope/Trash，以及保留工具的窄 broker 合同 | [04 工具、权限与安全执行](docs/04_工具权限与审批/索引.md) |
 | 模型与供应商 | 模型 profile、能力与余额、调用链、安全凭据存储及故障恢复 | [05 模型与供应商配置](docs/05_模型与供应商配置/索引.md) |
 | MCP runtime | user/project/dynamic 配置、stdio/http/sse、动态工具直通、可选 Artifact metadata、认证与 prompt/resource Skill bridge | [06 MCP 运行时](docs/06_MCP运行时/索引.md) |
 | 连接器 | builtin/local capability provider、MCP 接入、生命周期、readiness 与重启 ownership 边界 | [07 连接器](docs/07_连接器/索引.md) |
@@ -59,7 +59,7 @@ flowchart TD
 - `src/runtime`、`src/server` 和 `src/protocol/agui` 分别拥有会话/持久化编排、本地 HTTP/SSE surface 和 wire 映射；
 - `src/tool`、`src/tools`、`src/mcpclient`、`src/skills` 与 `src/skillruntime` 拥有对应能力的定义、策略与实现；
 - `Awaken Design System` 只接收 props/callbacks，不读取 Electron、runtime 或业务 store；
-- Work 工具与 Office worker 复用当前用户、项目和 Skill 已有环境；缺少依赖时由 Agent 根据真实 Shell 错误按正常包管理方式安装，Awaken 不复制或维护完整 Work runtime。
+- `Bash` 与 Skill 复用当前用户、项目和 Skill 已有环境；缺少生成依赖时由 Agent 根据真实错误按正常包管理方式安装。Core 当前不提供 Office worker 或完整 Work runtime，生成文件后通过 `artifact_publish` 发布。
 
 更细的模块协作、字段和状态机由相应功能域文档唯一拥有。
 
@@ -147,7 +147,7 @@ Gallery 使用 mock state，只能证明组件渲染，不能替代 Awaken Deskt
 - `src/agentcore` 不依赖 `src/protocol/agui`；内部语义与外部 wire 由协议映射层隔离。
 - Renderer 不拥有后端权限、路径安全、凭据或持久化策略；这些决策必须留在相应 Main/Core owner。
 - Gallery、旧截图、旧验收摘要和绕过 Desktop 的 provider smoke 不能作为真实产品通过证据。
-- 默认 raw Shell 以 Desktop 向 `awaken-core` 注入的当前登录用户身份和 login 环境直接执行，不声称 workspace 隔离、全系统 overlay、全部副作用可观测或任意删除可恢复；这些更窄保证只属于实际选用的 typed/restricted provider。消息发送（包括多人、群、频道、广播和批量发送）不经过 Awaken 人工审核门，按所选工具与 provider 自身合同直接执行。
+- `Bash` 以 Desktop 向 `awaken-core` 注入的当前登录用户身份和 login 环境直接执行，不经过 restricted/staging broker，也不声称 workspace 隔离、全部副作用可观测或任意删除可恢复；TaskScope、Trash 与 staging 只属于实际选用的 typed 工具及 `dependency_install`、`git_remote`、MCP Artifact bridge。消息发送不经过 Awaken 人工审核门。
 - 不得把 A2UI、原生 OS Computer Use、MCP WebSocket、完整 OAuth/401 自动恢复、全平台强制 Shell overlay 等尚未实现或不完整能力写成当前支持。
 - 不提交 secret、userData、依赖目录或生成产物；不覆盖或清理与当前任务无关的本地改动。
 - 代码改变产品事实时，必须在同一任务同步更新唯一权威文档和当前验收证据。

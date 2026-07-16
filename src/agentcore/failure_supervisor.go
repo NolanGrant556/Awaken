@@ -14,7 +14,6 @@ import (
 
 	"awaken/src/context"
 	"awaken/src/tool"
-	shelltool "awaken/src/tools/shell"
 )
 
 const (
@@ -426,7 +425,7 @@ func recoveryDirectiveSatisfied(
 		return false
 	}
 	toolName = strings.TrimSpace(toolName)
-	if toolName == "shell" && directive.ToolName == "shell" {
+	if toolName == "Bash" && directive.ToolName == "Bash" {
 		// Shell is a broad process surface, not one resource. A successful
 		// unrelated Shell call (for example node --version or curl) cannot
 		// satisfy recovery merely because its tool name matches. The exact
@@ -597,25 +596,25 @@ func (s *FailureSupervisor) resetFailureHistoryAfterSuccess(toolName, signature,
 		return
 	}
 	for key := range s.callFailureMeta {
-		if strings.HasPrefix(key, "shell|") {
+		if strings.HasPrefix(key, "Bash|") {
 			delete(s.callFailureMeta, key)
 			delete(s.callAttempts, key)
 		}
 	}
 	for key, meta := range s.classFailureMeta {
-		if meta.toolName == "shell" {
+		if meta.toolName == "Bash" {
 			delete(s.classFailureMeta, key)
 			delete(s.classFailures, key)
 		}
 	}
-	s.toolConsecutiveFail["shell"] = 0
+	s.toolConsecutiveFail["Bash"] = 0
 }
 
 func outcomeMayHaveRevisedShellInputs(toolName, arguments string, outcome tool.ExecutionOutcome) bool {
 	if outcomeIncludesObservedMutation(outcome) {
 		return true
 	}
-	if strings.TrimSpace(toolName) != "shell" || outcome.Operation == nil ||
+	if strings.TrimSpace(toolName) != "Bash" || outcome.Operation == nil ||
 		outcome.Operation.SideEffectState != tool.OutcomeSideEffectUnknown {
 		return false
 	}
@@ -631,7 +630,6 @@ func outcomeMayHaveRevisedShellInputs(toolName, arguments string, outcome tool.E
 func shellCallHasHostClassifiedRecoveryMutation(arguments string) bool {
 	var payload struct {
 		Command string `json:"command"`
-		Workdir string `json:"workdir"`
 	}
 	if err := json.Unmarshal([]byte(arguments), &payload); err != nil {
 		return false
@@ -639,9 +637,6 @@ func shellCallHasHostClassifiedRecoveryMutation(arguments string) bool {
 	command := strings.TrimSpace(payload.Command)
 	if command == "" {
 		return false
-	}
-	if shelltool.ClassifyShellCommand(command, payload.Workdir) == shelltool.ShellTierWorkspaceMutation {
-		return true
 	}
 	return reExplicitDependencyRecoveryCommand.MatchString(command) ||
 		reExplicitPythonEnvironmentRecoveryCommand.MatchString(command)
@@ -699,10 +694,6 @@ func ErrorClass(errorCode string, outcome tool.ExecutionOutcome) string {
 	switch {
 	case code == "" && outcome.ErrorCategory != "":
 		return string(outcome.ErrorCategory)
-	case isInvalidPatchFormatCode(code):
-		return "invalid_patch_format"
-	case isPatchContextMismatchCode(code):
-		return "patch_context_mismatch"
 	case code != "":
 		return code
 	default:
@@ -713,16 +704,12 @@ func ErrorClass(errorCode string, outcome tool.ExecutionOutcome) string {
 func RecoveryOptionsForError(errorCode string) []string {
 	code := strings.TrimSpace(errorCode)
 	switch {
-	case isInvalidPatchFormatCode(code):
-		return []string{"use_text_edit_or_text_file_create", "re_read_file", "do_not_replay_same_patch"}
-	case isPatchContextMismatchCode(code):
-		return []string{"read_file", "use_text_edit", "do_not_replay_same_patch"}
-	case code == "text_not_unique":
+	case code == "edit_match_not_unique":
 		return []string{"expand_old_string_context", "set_replace_all_true"}
-	case code == "text_not_found":
-		return []string{"read_file", "retry_text_edit_with_current_content"}
-	case code == "stale_file_revision":
-		return []string{"read_file", "retry_text_edit_with_fresh_digest"}
+	case code == "edit_match_not_found":
+		return []string{"Read", "retry_Edit_with_current_content"}
+	case code == "file_changed_since_read" || code == "file_not_read":
+		return []string{"Read", "retry_Edit_with_fresh_snapshot"}
 	case code == tool.ErrorCodeProcessExitNonzero:
 		return []string{"inspect_exit_code_and_stderr", "change_command_or_stop"}
 	case code == tool.ErrorCodeNeedsRuntime || code == "needs_runtime":
@@ -736,31 +723,6 @@ func RecoveryOptionsForError(errorCode string) []string {
 			return []string{"change_strategy", "inspect_error_and_stop_if_non_retryable"}
 		}
 		return nil
-	}
-}
-
-func isInvalidPatchFormatCode(code string) bool {
-	switch code {
-	case "invalid_patch_format",
-		"patch_missing_begin",
-		"patch_missing_end",
-		"patch_invalid_hunk_header",
-		"patch_invalid_line_prefix":
-		return true
-	default:
-		return false
-	}
-}
-
-func isPatchContextMismatchCode(code string) bool {
-	switch code {
-	case "patch_context_mismatch",
-		"patch_context_not_found",
-		"patch_context_ambiguous",
-		"patch_stale_file":
-		return true
-	default:
-		return false
 	}
 }
 

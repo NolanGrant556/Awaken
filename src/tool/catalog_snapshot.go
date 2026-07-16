@@ -417,7 +417,7 @@ func RunAvailabilityFromContext(ctx context.Context) (RunToolAvailabilitySnapsho
 }
 
 func providerPreference(provider ProviderManifest, toolName string) int {
-	if strings.EqualFold(strings.TrimSpace(toolName), "shell") {
+	if strings.EqualFold(strings.TrimSpace(toolName), "Bash") {
 		return 50
 	}
 	switch provider.Source {

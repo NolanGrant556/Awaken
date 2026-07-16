@@ -123,7 +123,7 @@ func TestNormalizeOutcomeV2UsesOnlyObservedChanges(t *testing.T) {
 	outcome.StartedAt = started
 	outcome.FinishedAt = started.Add(12 * time.Millisecond)
 	outcome = outcome.Normalize(OutcomeNormalizationContext{
-		OperationType:       "text_edit",
+		OperationType:       "Edit",
 		ActualAffectedPaths: []string{"src/tool/outcome.go"},
 		PatchSummary:        "M src/tool/outcome.go",
 		WorkspaceRoot:       "/workspace",
@@ -134,7 +134,7 @@ func TestNormalizeOutcomeV2UsesOnlyObservedChanges(t *testing.T) {
 	if outcome.SchemaVersion != OutcomeSchemaVersion || outcome.Operation == nil {
 		t.Fatalf("missing v2 contract: %+v", outcome)
 	}
-	if outcome.Operation.Type != "text_edit" || outcome.Operation.Target != "src/tool/outcome.go" || outcome.Operation.SideEffectState != OutcomeSideEffectApplied {
+	if outcome.Operation.Type != "Edit" || outcome.Operation.Target != "src/tool/outcome.go" || outcome.Operation.SideEffectState != OutcomeSideEffectApplied {
 		t.Fatalf("unexpected operation: %+v", outcome.Operation)
 	}
 	if len(outcome.Changes) != 1 || outcome.Changes[0].Certainty != ChangeObserved || outcome.Changes[0].Reversibility != ChangeConditional {
@@ -179,7 +179,7 @@ func TestNormalizeStrictOutputContractFailsAtVerificationStage(t *testing.T) {
 	outcome.AffectedPaths = []string{"report.md"}
 	outcome.Details = map[string]any{"undeclared": true}
 	outcome = outcome.Normalize(OutcomeNormalizationContext{
-		OperationType: "text_file_create",
+		OperationType: "Write",
 		DeclaredSideEffects: []ToolSideEffect{{
 			Kind: SideEffectCreate, Description: "Creates a file.", Reversibility: ReversibilityConditional,
 		}},
@@ -208,7 +208,7 @@ func TestNormalizeInterruptedObservedMutationIsPartial(t *testing.T) {
 			Kind: "file", Action: "updated", Resource: "partial.txt",
 			Certainty: ChangeObserved, Reversibility: ChangeConditional,
 		}},
-	}.Normalize(OutcomeNormalizationContext{OperationType: "text_edit"})
+	}.Normalize(OutcomeNormalizationContext{OperationType: "Edit"})
 	if outcome.Operation == nil || outcome.Operation.SideEffectState != OutcomeSideEffectPartial {
 		t.Fatalf("interrupted observed mutation must be partial: %+v", outcome.Operation)
 	}
@@ -217,7 +217,7 @@ func TestNormalizeInterruptedObservedMutationIsPartial(t *testing.T) {
 func TestNormalizeFailedAffectedPathIsTargetNotObservedMutation(t *testing.T) {
 	outcome := FailedOutcome("file changed after read", "stale_file_revision", ErrorCategoryDomain, true)
 	outcome.AffectedPaths = []string{"src/example.go"}
-	outcome = outcome.Normalize(OutcomeNormalizationContext{OperationType: "text_edit"})
+	outcome = outcome.Normalize(OutcomeNormalizationContext{OperationType: "Edit"})
 
 	if len(outcome.Changes) != 0 {
 		t.Fatalf("failed legacy affected path must not become a mutation: %+v", outcome.Changes)
@@ -239,7 +239,7 @@ func TestNormalizeFailedAffectedPathIsTargetNotObservedMutation(t *testing.T) {
 func TestValidationFailureChangesInputWithoutBlindReplay(t *testing.T) {
 	outcome := FailedOutcome("path is required", ErrorCodeValidationError, ErrorCategoryValidation, false)
 	outcome.RecoveryOptions = []string{"provide_path"}
-	outcome = outcome.Normalize(OutcomeNormalizationContext{OperationType: "read_file"})
+	outcome = outcome.Normalize(OutcomeNormalizationContext{OperationType: "Read"})
 
 	if outcome.Retryable {
 		t.Fatal("validation failure must not advertise replaying the same call")
@@ -309,7 +309,7 @@ func TestModelPayloadV2Golden(t *testing.T) {
 		SemanticStatus:  SemanticSuccess,
 		ProcessStatus:   ProcessNotApplicable,
 		Operation: &OperationDescriptor{
-			Type: "text_edit", Target: "config.json", SideEffectState: OutcomeSideEffectApplied,
+			Type: "Edit", Target: "config.json", SideEffectState: OutcomeSideEffectApplied,
 		},
 		Changes: []ResourceChange{{
 			Kind: "file", Action: "updated", Resource: "config.json",
@@ -323,7 +323,7 @@ func TestModelPayloadV2Golden(t *testing.T) {
 		DurationMs: 9,
 	}
 	got := outcome.ModelPayload()
-	want := `{"changes":[{"action":"updated","certainty":"observed","kind":"file","resource":"config.json","reversibility":"conditional"}],"content":"updated","duration_ms":9,"environment":{"files":["config.json"],"observation":"partial","observed_at":"2026-07-11T04:05:06Z","scope":"/workspace","source":"executor","unobserved":["git","processes","environment_variables"],"workspace_root":"/workspace"},"operation":{"type":"text_edit","target":"config.json","side_effect_state":"applied"},"process_status":"not_applicable","retryable":false,"schema_version":2,"semantic_status":"success","status":"succeeded","summary":"Updated config.json","transport_status":"completed","truncated":false}`
+	want := `{"changes":[{"action":"updated","certainty":"observed","kind":"file","resource":"config.json","reversibility":"conditional"}],"content":"updated","duration_ms":9,"environment":{"files":["config.json"],"observation":"partial","observed_at":"2026-07-11T04:05:06Z","scope":"/workspace","source":"executor","unobserved":["git","processes","environment_variables"],"workspace_root":"/workspace"},"operation":{"type":"Edit","target":"config.json","side_effect_state":"applied"},"process_status":"not_applicable","retryable":false,"schema_version":2,"semantic_status":"success","status":"succeeded","summary":"Updated config.json","transport_status":"completed","truncated":false}`
 	if got != want {
 		t.Fatalf("model payload contract drifted\nwant: %s\n got: %s", want, got)
 	}

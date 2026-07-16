@@ -22,9 +22,7 @@ type AgentConfig struct {
 	SkillSummary      string
 	AutoToolPolicy    AutoToolPolicy
 	// ToolExposure selects the model-visible tool pool. Empty Mode uses
-	// DefaultToolExposurePolicy (hides raw apply_patch for ordinary providers).
-	// Compat/grammar-capable modes and ExtraVisible keep apply_patch available
-	// for internal transforms, compatibility tests, or true grammar providers.
+	// DefaultToolExposurePolicy applies generic explicit hide/show rules.
 	ToolExposure tool.ToolExposurePolicy
 	// ToolAvailabilitySnapshot pins the exact executable instances and
 	// definitions available for one run. Request compilation and execution must
@@ -58,6 +56,11 @@ type AgentConfig struct {
 	// It is propagated into every ExecutionIntent this agent issues so
 	// the decision layer can attribute the call. nil for the root agent.
 	SubagentOrigin *profile.SubagentOrigin
+	// ToolSessionState is mutable thread-local file/cwd state. It is never
+	// journaled and must not be shared with child agents.
+	ToolSessionState *tool.ToolSessionState
+	// ModelContentStore owns tool-result media blobs beneath the thread session.
+	ModelContentStore tool.ModelContentStore
 }
 
 // ComposerSkillSelectionContext records the current run and the ordered Skills
@@ -112,6 +115,7 @@ type ModelConfig struct {
 	AuthScheme            string
 	ContextWindow         int
 	AutoCompactTokenLimit int
+	Capabilities          tool.ModelCapabilities
 }
 
 type LLMRequest struct {

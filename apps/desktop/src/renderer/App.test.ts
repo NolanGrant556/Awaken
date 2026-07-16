@@ -1758,24 +1758,24 @@ describe("App workbench presentation", () => {
       text: "first thought",
       status: "done",
     } as const;
-    const approval = {
-      kind: "approval",
-      id: "approval:1",
-      title: "Need approval",
-      status: "waiting",
+    const legacyTool = {
+      kind: "tool",
+      id: "tool:legacy-1",
+      title: "Legacy tool record",
+      status: "done",
     } as const;
 
     expect(
       projectNarrativeTurnBodySegments({
         turnId: "prompt:thread-1:1",
-        items: [thinking, approval],
+        items: [thinking, legacyTool],
         executionProcessOpen: false,
       }),
     ).toEqual([
       {
         kind: "items",
         id: "turn-items:prompt:thread-1:1",
-        items: [thinking, approval],
+        items: [thinking, legacyTool],
       },
     ]);
   });

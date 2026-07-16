@@ -546,7 +546,7 @@ export class PetWindowManager {
           await this.cancelRun(request.runId);
           return;
         }
-        // Other action types (approvals, answers, follow-ups) require the main
+        // Other action types (answers and follow-ups) require the main
         // window's UI context; fall back to focusing it.
         this.focusMainWindow();
       },

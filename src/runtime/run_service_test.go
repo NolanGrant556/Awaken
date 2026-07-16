@@ -509,6 +509,15 @@ func TestComposerSkillTokenOnlyRequestIsValidAndLabelsThreadFromToken(t *testing
 	}
 }
 
+func TestModelProfileCacheKeyIncludesNativePDFCapability(t *testing.T) {
+	base := &ModelProfileConfig{ProfileID: "profile", ModelID: "model", SupportsVision: true}
+	withPDF := *base
+	withPDF.SupportsNativePDF = true
+	if modelProfileCacheKey(base) == modelProfileCacheKey(&withPDF) {
+		t.Fatal("supports_native_pdf must participate in the profile cache key")
+	}
+}
+
 func TestRunServiceAllowsImageOnlyInputWhenModelSupportsVision(t *testing.T) {
 	t.Setenv(awakenHomeEnv, t.TempDir())
 	service := NewRunServiceWithModelProfiles(

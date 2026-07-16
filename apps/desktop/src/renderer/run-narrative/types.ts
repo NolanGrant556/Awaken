@@ -8,8 +8,6 @@ export type RunNarrativeStatus =
   | "done"
   | "error"
   | "waiting"
-  | "approved"
-  | "rejected"
   | "denied"
   | "cancelled"
   | "interrupted"
@@ -72,7 +70,6 @@ export type CompactBoundaryItem = {
 export type InspectorSelection =
   | { kind: "runtime"; id?: string }
   | { kind: "tool"; id: string }
-  | { kind: "approval"; id: string }
   | { kind: "artifact"; id: string }
   | { kind: "fileChange"; id: string }
   | { kind: "deliverables"; id: string };
@@ -89,7 +86,6 @@ export type RunNarrativeItem =
   | { kind: "thinking"; id: string; text: string; status: "active" | "done" }
   | { kind: "exploring"; id: string; actions: RunAction[]; status: "active" | "done" }
   | { kind: "tool"; id: string; title: string; detail?: string; status: ToolDisplayState; toolStatus?: string }
-  | { kind: "approval"; id: string; title: string; status: "waiting" | "approved" | "rejected" }
   | { kind: "fileChange"; id: string; files: ChangedFile[]; status: "active" | "done" }
   | {
       kind: "deliverables";

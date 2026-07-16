@@ -245,19 +245,80 @@ func buildOpenAIMessages(req Request) []openaiChatMessage {
 	}
 
 	if len(req.Messages) > 0 {
-		for _, msg := range req.Messages {
+		for index := 0; index < len(req.Messages); {
+			msg := req.Messages[index]
 			messages = append(messages, openaiChatMessage{
-				Role:       string(msg.Role),
-				Content:    openAIContentForMessage(msg),
-				ToolCalls:  contextToolCallsToOpenAI(msg.ToolCalls),
-				ToolCallID: msg.ToolCallID,
-				Name:       msg.Name,
+				Role: string(msg.Role), Content: openAIContentForMessage(msg),
+				ToolCalls: contextToolCallsToOpenAI(msg.ToolCalls), ToolCallID: msg.ToolCallID, Name: msg.Name,
 			})
+			index++
+			if msg.Role != context.RoleAssistant || len(msg.ToolCalls) == 0 {
+				continue
+			}
+			toolMessages := make([]context.Message, 0, len(msg.ToolCalls))
+			for index < len(req.Messages) && req.Messages[index].Role == context.RoleTool {
+				toolMessage := req.Messages[index]
+				messages = append(messages, openaiChatMessage{
+					Role: string(toolMessage.Role), Content: openAIToolMessageContent(toolMessage),
+					ToolCallID: toolMessage.ToolCallID, Name: toolMessage.Name,
+				})
+				toolMessages = append(toolMessages, toolMessage)
+				index++
+			}
+			if content := openAIToolMediaUserContent(toolMessages); content != nil {
+				// OpenAI-compatible APIs require every tool-role result for the
+				// assistant batch before the associated multimodal user message.
+				messages = append(messages, openaiChatMessage{Role: "user", Content: content})
+			}
 		}
 	} else if req.UserPrompt != "" {
 		messages = append(messages, openaiChatMessage{Role: "user", Content: req.UserPrompt})
 	}
 	return messages
+}
+
+func openAIToolMediaUserContent(messages []context.Message) interface{} {
+	blocks := make([]map[string]interface{}, 0)
+	toolCallIDs := make([]string, 0)
+	for _, message := range messages {
+		if len(message.ModelContent) == 0 {
+			continue
+		}
+		toolCallIDs = append(toolCallIDs, message.ToolCallID)
+		for _, part := range message.ModelContent {
+			if strings.TrimSpace(part.DataBase64) == "" || strings.TrimSpace(part.MimeType) == "" {
+				continue
+			}
+			switch part.Type {
+			case "image":
+				blocks = append(blocks, map[string]interface{}{
+					"type": "image_url", "image_url": map[string]interface{}{
+						"url": fmt.Sprintf("data:%s;base64,%s", part.MimeType, part.DataBase64),
+					},
+				})
+			case "file":
+				if part.MimeType == "application/pdf" {
+					filename := strings.TrimSpace(part.DisplayName)
+					if filename == "" {
+						filename = "tool-result.pdf"
+					}
+					blocks = append(blocks, map[string]interface{}{
+						"type": "file", "file": map[string]interface{}{
+							"filename":  filename,
+							"file_data": fmt.Sprintf("data:%s;base64,%s", part.MimeType, part.DataBase64),
+						},
+					})
+				}
+			}
+		}
+	}
+	if len(blocks) == 0 {
+		return nil
+	}
+	blocks = append([]map[string]interface{}{{
+		"type": "text", "text": "Multimodal content returned by tool_call_id(s): " + strings.Join(toolCallIDs, ", "),
+	}}, blocks...)
+	return blocks
 }
 
 func openAIContentForMessage(msg context.Message) interface{} {

@@ -13,7 +13,7 @@ import type {
 } from "./types";
 
 const MAX_SEEN_EVENTS = 1000;
-const READ_ONLY_TOOL_NAMES = new Set(["read_file", "list_files", "grep_search"]);
+const READ_ONLY_TOOL_NAMES = new Set(["Read", "Glob", "Grep", "WebSearch"]);
 
 export function createInitialRunNarrativeState(): RunNarrativeState {
   return {
@@ -344,7 +344,6 @@ function eventKey(event: AguiEvent): string | undefined {
     const frameId =
       event.messageId ||
       event.toolCallId ||
-      event.approvalId ||
       event.artifactId ||
       event.contextCompactBoundaryId ||
       event.compactBoundaryId ||
@@ -365,13 +364,12 @@ function eventKey(event: AguiEvent): string | undefined {
   const id =
     event.messageId ||
     event.toolCallId ||
-    event.approvalId ||
     event.artifactId ||
     event.contextCompactBoundaryId ||
     event.compactBoundaryId ||
     event.runId ||
     event.type;
-  const content = event.delta || event.content || event.status || event.approvalDecision || "";
+  const content = event.delta || event.content || event.status || "";
   return `${event.type}:${eventScope(event)}:${id}:${content}`;
 }
 
@@ -397,7 +395,7 @@ function upsertCommitted(
 
 function commitActive(
   state: RunNarrativeState,
-  status?: "done" | "error" | "approved" | "rejected" | "waiting",
+  status?: "done" | "error",
 ): RunNarrativeState {
   if (!state.activeItem) {
     return state;
@@ -501,7 +499,7 @@ function setActive(state: RunNarrativeState, item: RunNarrativeItem): RunNarrati
 
 function applyStatus(
   item: RunNarrativeItem,
-  status?: "done" | "error" | "approved" | "rejected" | "waiting",
+  status?: "done" | "error",
 ): RunNarrativeItem {
   if (!status || item.kind === "prompt") {
     return item;
@@ -517,11 +515,6 @@ function applyStatus(
       return item;
     case "tool":
       return status === "done" || status === "error" ? { ...item, status } : item;
-    case "approval":
-      if (status === "approved" || status === "rejected" || status === "waiting") {
-        return { ...item, status };
-      }
-      return item;
     case "answer":
       return status === "done" || status === "error" ? { ...item, status } : item;
     case "hint":
@@ -579,10 +572,6 @@ function narrativeErrorMessage(event: AguiEvent): string {
 
 function toolId(event: AguiEvent): string {
   return `tool:${eventScopedId(event, event.toolCallId ?? event.toolCallName)}`;
-}
-
-function approvalId(event: AguiEvent): string {
-  return `approval:${eventScopedId(event, event.approvalId)}`;
 }
 
 function exploringActionId(event: AguiEvent): string {
@@ -764,7 +753,7 @@ function isReadOnlyToolEvent(event: AguiEvent): boolean {
 // toolDecisionDetail builds a human-readable detail line for the
 // AWAKEN_TOOL_PERMISSION_DECIDED event, surfacing the Task 16 unified
 // observability data:
-//   - transform: "Shell command transformed to apply_patch"
+//   - transform: "Tool transformed to another registered tool"
 //   - deny:      "Denied: sensitive path .git/config"
 //   - trash:     "Deleted file moved to recycle bin"
 //   - guardian:  "Guardian: <violation reason>"
@@ -845,8 +834,8 @@ function numberArg(args: Record<string, unknown> | undefined, key: string): numb
 function readOnlyActionTitle(event: AguiEvent): string {
   const args = parseToolArgs(event.delta);
   switch (event.toolCallName) {
-    case "read_file": {
-      const path = stringArg(args, "path") ?? "file";
+    case "Read": {
+	  const path = stringArg(args, "file_path") ?? "file";
       const offset = numberArg(args, "offset");
       const limit = numberArg(args, "limit");
       const range =
@@ -857,9 +846,9 @@ function readOnlyActionTitle(event: AguiEvent): string {
             : "";
       return `Read ${path}${range}`;
     }
-    case "list_files": {
+    case "Glob": {
       const pattern = stringArg(args, "pattern");
-      const root = stringArg(args, "root");
+	  const root = stringArg(args, "path");
       if (pattern && root) {
         return `List ${pattern} in ${root}`;
       }
@@ -868,9 +857,9 @@ function readOnlyActionTitle(event: AguiEvent): string {
       }
       return "List files";
     }
-    case "grep_search": {
-      const query = stringArg(args, "query");
-      const include = stringArg(args, "include");
+	case "Grep": {
+	  const query = stringArg(args, "pattern");
+	  const include = stringArg(args, "path") ?? stringArg(args, "glob");
       if (query && include) {
         return `Search "${query}" in ${include}`;
       }
@@ -879,6 +868,10 @@ function readOnlyActionTitle(event: AguiEvent): string {
       }
       return "Search files";
     }
+	case "WebSearch": {
+	  const query = stringArg(args, "query");
+	  return query ? `Search web for "${query}"` : "Search web";
+	}
     default:
       return event.toolCallName || "Explore project";
   }

@@ -9,6 +9,14 @@ function createMockRuntimeClient(): RuntimeClient {
     source: "electron",
     platform: "windows",
     relaunchDesktop: vi.fn(async () => undefined),
+    getSearchSettings: vi.fn(async () => ({
+      providers: {
+        exa: { enabled: true },
+        tavily: { enabled: false },
+      },
+    })),
+    saveSearchSettings: vi.fn(),
+    testSearchProvider: vi.fn(),
     getRuntimeInfo: vi.fn(async () => ({
       runtimeVersion: "1.0.0",
       apiVersion: "v1",

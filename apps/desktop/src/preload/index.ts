@@ -91,6 +91,12 @@ const bridge: AwakenBridge = {
   platform: toDesktopPlatform(process.platform),
   relaunchDesktop: () =>
     ipcRenderer.invoke("awaken:relaunch-desktop") as Promise<void>,
+  getSearchSettings: () =>
+    ipcRenderer.invoke("awaken:get-search-settings"),
+  saveSearchSettings: (request) =>
+    ipcRenderer.invoke("awaken:save-search-settings", request),
+  testSearchProvider: (request) =>
+    ipcRenderer.invoke("awaken:test-search-provider", request),
   getRun: (runId: string) =>
     ipcRenderer.invoke("awaken:get-run", runId) as Promise<RuntimeRun>,
   getThreadTranscript: (threadId: string) =>

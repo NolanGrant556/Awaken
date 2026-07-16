@@ -82,6 +82,15 @@
   - 支持截图验证、人工接管和操作轨迹记录。
   - 接入安全策略，避免不受控地操作系统。
 
+- [ ] **WebSearch 联网供应商与 API Key 前端配置闭环**
+  - 当前只有 Core 认证链路：内置 Brave adapter 从 `AWAKEN_WEB_SEARCH_ENDPOINT` 和 `AWAKEN_WEB_SEARCH_API_KEY` 读取配置并发送 `X-Subscription-Token`；Desktop 尚无联网搜索配置页、凭据持久化和连接测试，模型供应商 API Key 与 Context7 Connector 都不能代替该链路。
+  - 在 Settings 增加独立的联网搜索配置；第一期只展示当前真实支持的 Brave provider，提供可选 Endpoint 高级项、蒙版 API Key 输入、已配置状态、更换和删除入口，不提前展示尚未实现的供应商。
+  - 凭据由 Electron Main 的安全存储 owner 管理，与模型 Profile、MCP 和 Connector 凭据分开命名；Renderer 不持久、不回读明文，Key 不进入模型上下文、SemanticJournal、AG-UI、audit 或普通日志。
+  - Runtime Supervisor 启动 Core 前清除登录 Shell 继承的 `AWAKEN_WEB_SEARCH_ENDPOINT` / `AWAKEN_WEB_SEARCH_API_KEY`，再注入 Desktop 持久化的产品配置，避免 Shell 配置静默改变产品身份。
+  - 支持不落盘的连接测试，分别呈现未配置、认证失败、限流、网络错误、上游格式错误和取消；错误文案不回显 Endpoint 中的 credential 或 API Key。
+  - 保存、更换或删除配置后必须通过可观测的 Core restart/reload 生效；失败时回滚到上一份可用配置，不能出现页面显示已配置但 Core 仍使用旧值。
+  - 自动化覆盖凭据不进入 Renderer/日志、重启恢复、Shell 环境不能覆盖、错误分类和配置回滚；真实 Desktop 验收要求在无预设环境变量的新环境中从页面完成配置，重启后执行一次真实 `WebSearch`，再删除 Key 确认工具恢复为明确的未配置状态。
+
 - [ ] **模型生态与能力闭环**
   - 扩充模型供应商和模型目录。
   - 建立统一的工具调用能力判断。

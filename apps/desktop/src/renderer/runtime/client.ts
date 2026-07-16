@@ -14,6 +14,7 @@ import {
   type DesktopPlatform,
   type DeleteSkillRequest,
   type DeleteSkillResponse,
+  type GetSkillPreviewRequest,
   type InstallSkillRequest,
   type InstallSkillResponse,
   type ModelProfileBalancesResult,
@@ -33,6 +34,7 @@ import {
   type RuntimeProject,
   type RuntimeProjectOperation,
   type RuntimeSkill,
+  type SkillPreviewResponse,
   type RuntimeThreadTranscript,
   type RuntimeThread,
   type RuntimeToolInfo,
@@ -142,6 +144,7 @@ export type RuntimeClient = {
   deleteMcpServer: (name: string) => Promise<void>;
   listMcpTools: () => Promise<RuntimeToolInfo[]>;
   listSkills: (projectRoot?: string) => Promise<RuntimeSkill[]>;
+  getSkillPreview: (request: GetSkillPreviewRequest) => Promise<SkillPreviewResponse>;
   installSkill: (request: InstallSkillRequest) => Promise<InstallSkillResponse>;
   deleteSkill: (request: DeleteSkillRequest) => Promise<DeleteSkillResponse>;
   listModelProviders: () => Promise<ModelProvider[]>;
@@ -241,6 +244,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     deleteMcpServer: (name) => bridge.deleteMcpServer(name),
     listMcpTools: () => bridge.listMcpTools(),
     listSkills: (projectRoot) => bridge.listSkills(projectRoot),
+    getSkillPreview: (request) => bridge.getSkillPreview(request),
     installSkill: (request) => bridge.installSkill(request),
     deleteSkill: (request) => bridge.deleteSkill(request),
     listModelProviders: () => bridge.listModelProviders(),

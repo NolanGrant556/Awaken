@@ -39,6 +39,7 @@ function createMockRuntimeClient(): RuntimeClient {
     deleteMcpServer: vi.fn(async () => undefined),
     listMcpTools: vi.fn(async () => []),
     listSkills: vi.fn(async () => []),
+    getSkillPreview: vi.fn(async () => ({ frontmatterRaw: "", bodyMarkdown: "" })),
     installSkill: vi.fn(async () => ({ skill: {} as never, path: "", message: "" })),
     deleteSkill: vi.fn(async () => ({ id: "", sourceOrigin: "user", originalPath: "", message: "" })),
     listModelProviders: vi.fn(async () => []),

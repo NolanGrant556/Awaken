@@ -129,6 +129,7 @@ function stubElectronBridge(): void {
       getRuntimeLogs: vi.fn(async () => []),
       listMcpTools: vi.fn(async () => []),
       listSkills: vi.fn(async () => []),
+      getSkillPreview: vi.fn(async () => ({ frontmatterRaw: "", bodyMarkdown: "" })),
       installSkill: vi.fn(),
       deleteSkill: vi.fn(),
       listModelProviders: vi.fn(async () => []),

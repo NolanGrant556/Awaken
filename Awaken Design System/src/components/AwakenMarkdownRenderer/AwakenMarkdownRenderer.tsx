@@ -9,6 +9,9 @@ export type AwakenMarkdownRendererProps = {
   markdown: string;
   fallback?: string;
   className?: string;
+  renderMermaid?: boolean;
+  renderImages?: boolean;
+  allowedLinkProtocols?: readonly string[];
 };
 
 const closedMermaidFencePattern =
@@ -53,22 +56,76 @@ export function AwakenMarkdownRenderer({
   markdown,
   fallback = "Streaming response...",
   className,
+  renderMermaid = true,
+  renderImages = true,
+  allowedLinkProtocols,
 }: AwakenMarkdownRendererProps) {
   const source = markdown || fallback;
-  const closedMermaidSources = useMemo(() => findClosedMermaidSources(source), [source]);
+  const closedMermaidSources = useMemo(
+    () => renderMermaid ? findClosedMermaidSources(source) : new Set<string>(),
+    [renderMermaid, source],
+  );
   const markdownComponents = useMemo<Components>(
     () => ({
-      a({ node: _node, children, ...props }) {
+      a({ node: _node, children, href, ...props }) {
+        if (allowedLinkProtocols) {
+          let protocol = "";
+          try {
+            protocol = new URL(href ?? "").protocol.replace(/:$/, "").toLowerCase();
+          } catch {
+            return <span>{children}</span>;
+          }
+          if (!allowedLinkProtocols.includes(protocol)) {
+            return <span>{children}</span>;
+          }
+        }
         return (
-          <a {...props} target="_blank" rel="noreferrer">
+          <a {...props} href={href} target="_blank" rel="noreferrer">
             {children}
           </a>
+        );
+      },
+      img({ node: _node, alt, ...props }) {
+        if (!renderImages) {
+          return alt ? <span className="aw-markdown-image-alt">[{alt}]</span> : null;
+        }
+        return <img {...props} alt={alt ?? ""} />;
+      },
+      input({ node: _node, type, ...props }) {
+        return <input {...props} type={type} disabled={type === "checkbox" || props.disabled} />;
+      },
+      li({ node: _node, className: listItemClassName, children, ...props }) {
+        const childArray = Children.toArray(children);
+        const checkboxIndex = childArray.findIndex(
+          (child) =>
+            isValidElement<{ type?: string }>(child) && child.props.type === "checkbox",
+        );
+        const isTaskListItem = listItemClassName
+          ?.split(/\s+/)
+          .includes("task-list-item");
+
+        if (!isTaskListItem || checkboxIndex < 0) {
+          return (
+            <li {...props} className={listItemClassName}>
+              {children}
+            </li>
+          );
+        }
+
+        const checkbox = childArray[checkboxIndex];
+        const taskContent = childArray.filter((_, index) => index !== checkboxIndex);
+        return (
+          <li {...props} className={listItemClassName}>
+            {checkbox}
+            <div className="assistant-message-task-content">{taskContent}</div>
+          </li>
         );
       },
       code({ node: _node, className: codeClassName, children, ...props }) {
         const language = languageFromClassName(codeClassName);
         const codeText = textFromNode(children).replace(/\n$/, "");
         const isClosedMermaid =
+          renderMermaid &&
           language === "mermaid" &&
           closedMermaidSources.has(normalizeMermaidSource(codeText));
 
@@ -106,7 +163,7 @@ export function AwakenMarkdownRenderer({
         );
       },
     }),
-    [closedMermaidSources],
+    [allowedLinkProtocols, closedMermaidSources, renderImages, renderMermaid],
   );
 
   return (

@@ -28,6 +28,10 @@ import type {
   RuntimeToolInfo,
 } from "../shared/runtime";
 import type { RuntimeClient } from "./runtime/client";
+import {
+  SkillPreviewDialog,
+  type SkillPreviewTarget,
+} from "./SkillPreviewDialog";
 
 export type McpToolInfo = {
   name: string;
@@ -190,6 +194,17 @@ export function skillSourceLabel(source: string): string {
 
 export function isSkillPackageDeletable(skill: Pick<RuntimeSkill, "sourceOrigin">): boolean {
   return skill.sourceOrigin === "project" || skill.sourceOrigin === "user";
+}
+
+export function canPreviewSkill(
+  skill: Pick<RuntimeSkill, "catalogEntryId" | "skillFilePath" | "sourceOrigin">,
+): boolean {
+  return (
+    skill.sourceOrigin !== "bundled" &&
+    skill.sourceOrigin !== "mcp" &&
+    Boolean(skill.catalogEntryId?.trim()) &&
+    Boolean(skill.skillFilePath?.trim())
+  );
 }
 
 export function shouldRenderSkillDeleteAction(
@@ -378,6 +393,8 @@ export function ExtensionsView({
   const [pickingSkillProjectRoot, setPickingSkillProjectRoot] = useState(false);
   const [pendingSkillDelete, setPendingSkillDelete] =
     useState<PendingSkillDelete | null>(null);
+  const [skillPreviewTarget, setSkillPreviewTarget] =
+    useState<SkillPreviewTarget | null>(null);
   const [deletingSkill, setDeletingSkill] = useState(false);
   const [mcpSettingsOpen, setMcpSettingsOpen] = useState(false);
   const [selectedMcpServer, setSelectedMcpServer] = useState<RuntimeMcpServer | null>(null);
@@ -925,20 +942,24 @@ export function ExtensionsView({
     const diagnostics = (skill.diagnostics ?? [])
       .map(skillDiagnosticText)
       .filter(Boolean);
-    return (
-      <article className="extension-card" key={`${skill.id}:${skill.sourceOrigin}:${projectRoot ?? ""}`}>
-        <div className="extension-card-icon" aria-hidden="true">
+    const previewable = canPreviewSkill(skill);
+    const skillName = skill.displayName || skill.name;
+    const cardBody = (
+      <>
+        <span className="extension-card-icon" aria-hidden="true">
           <Wrench size={20} strokeWidth={1.9} />
-        </div>
-        <div className="extension-card-copy">
-          <div className="extension-card-title-row">
-            <h3>{skill.displayName || skill.name}</h3>
+        </span>
+        <span className="extension-card-copy">
+          <span className="extension-card-title-row">
+            <span className="extension-card-heading">{skillName}</span>
             <span className={`extension-state extension-state-${skill.state}`}>
               {stateLabel(skill.state)}
             </span>
-          </div>
-          <p>{skill.whenToUse || skill.description}</p>
-          <div className="extension-card-meta">
+          </span>
+          <span className="extension-card-description">
+            {skill.whenToUse || skill.description}
+          </span>
+          <span className="extension-card-meta">
             <span>{skillSourceLabel(skill.sourceOrigin)}</span>
             <span>{skill.context}</span>
             <span>最近调用：{skillLastInvokedLabel(skill.lastInvokedAt)}</span>
@@ -950,13 +971,39 @@ export function ExtensionsView({
             {skill.requiredMcpServers?.length ? (
               <span>MCP: {skill.requiredMcpServers.join(", ")}</span>
             ) : null}
-          </div>
+          </span>
           {diagnostics.length > 0 ? (
-            <p className="extension-card-diagnostic" title={diagnostics.join(" · ")}>
+            <span className="extension-card-diagnostic" title={diagnostics.join(" · ")}>
               诊断：{diagnostics.join(" · ")}
-            </p>
+            </span>
           ) : null}
-        </div>
+        </span>
+      </>
+    );
+    return (
+      <article
+        className="extension-card extension-skill-card"
+        key={`${skill.id}:${skill.sourceOrigin}:${projectRoot ?? ""}`}
+      >
+        {previewable ? (
+          <button
+            type="button"
+            className="extension-card-main"
+            aria-label={`查看 ${skillName} 的 SKILL.md`}
+            onClick={() => {
+              setSkillPreviewTarget({
+                catalogEntryId: skill.catalogEntryId!,
+                projectRoot,
+              });
+            }}
+          >
+            {cardBody}
+          </button>
+        ) : (
+          <span className="extension-card-main extension-card-main-static">
+            {cardBody}
+          </span>
+        )}
         {shouldRenderSkillDeleteAction(skill) ? (
           <button
             type="button"
@@ -1231,6 +1278,16 @@ export function ExtensionsView({
           </div>
         )}
       </div>
+
+      <SkillPreviewDialog
+        target={skillPreviewTarget}
+        runtimeClient={runtimeClient}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSkillPreviewTarget(null);
+          }
+        }}
+      />
 
       <Dialog
         open={pendingSkillDelete !== null}

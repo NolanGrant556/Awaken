@@ -389,6 +389,7 @@ export type RuntimeSkillDiagnostic =
 
 export type RuntimeSkill = {
   id: string;
+  catalogEntryId?: string;
   name: string;
   displayName?: string;
   description: string;
@@ -456,6 +457,16 @@ export type DeleteSkillResponse = {
   originalPath: string;
   trashedPath?: string;
   message: string;
+};
+
+export type GetSkillPreviewRequest = {
+  catalogEntryId: string;
+  projectRoot?: string;
+};
+
+export type SkillPreviewResponse = {
+  frontmatterRaw: string;
+  bodyMarkdown: string;
 };
 
 export type ModelProviderWire = {
@@ -921,6 +932,7 @@ export type AwakenBridge = {
   getRuntimeLogs: () => Promise<RuntimeLogEntry[]>;
   listMcpTools: () => Promise<RuntimeToolInfo[]>;
   listSkills: (projectRoot?: string) => Promise<RuntimeSkill[]>;
+  getSkillPreview: (request: GetSkillPreviewRequest) => Promise<SkillPreviewResponse>;
   installSkill: (request: InstallSkillRequest) => Promise<InstallSkillResponse>;
   deleteSkill: (request: DeleteSkillRequest) => Promise<DeleteSkillResponse>;
   listModelProviders: () => Promise<ModelProvider[]>;

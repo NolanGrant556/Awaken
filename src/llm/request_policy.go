@@ -18,8 +18,6 @@ func applyCompactSummaryRequestPolicy(cfg Config, req Request) Request {
 		// Kimi K2.7 Code always thinks and rejects thinking.disabled.
 		req.DisableReasoning = false
 		setCompactTemperature(&req, 1.0)
-	case isKimiForCoding(model):
-		setCompactTemperature(&req, 0.6)
 	case isKimiK25OrK26(model):
 		if req.DisableReasoning {
 			setCompactTemperature(&req, 0.6)
@@ -58,16 +56,15 @@ func isKimiProvider(key string) bool {
 	return strings.Contains(key, "kimi") || strings.Contains(key, "moonshot")
 }
 
-func isKimiForCoding(model string) bool {
-	return model == "kimi-for-coding"
-}
-
 func isKimiK25OrK26(model string) bool {
 	return model == "kimi-k2.5" || model == "kimi-k2.6"
 }
 
 func isKimiK27Code(model string) bool {
-	return model == "kimi-k2.7-code" || model == "kimi-k2.7-code-highspeed"
+	return model == "kimi-k2.7-code" ||
+		model == "kimi-k2.7-code-highspeed" ||
+		model == "kimi-for-coding" ||
+		model == "kimi-for-coding-highspeed"
 }
 
 func isDeepSeekProvider(key string) bool {

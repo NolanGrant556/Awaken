@@ -142,13 +142,31 @@ func BuiltinProviders() []Provider {
 			KeyEnvName:   "KIMI_CODE_API_KEY",
 			DefaultModel: "kimi-for-coding",
 			Models: []string{
+				"k3",
 				"kimi-for-coding",
+				"kimi-for-coding-highspeed",
 			},
-			DocsURL:      "https://www.kimi.com/code/docs/en/third-party-tools/other-coding-agents.html",
+			DocsURL:      "https://www.kimi.com/code/docs/kimi-code/models.html",
 			APIDocsURL:   "https://www.kimi.com/code/console",
 			CodingPreset: true,
 			ModelCapabilities: map[string]ModelCapability{
+				"k3": {
+					ContextWindow:      1024 * 1024,
+					MaxOutputTokens:    32 * 1024,
+					DefaultMaxTokens:   32 * 1024,
+					DefaultTemperature: 1,
+					SupportsVision:     true,
+					SupportsVideo:      true,
+				},
 				"kimi-for-coding": {
+					ContextWindow:      256 * 1024,
+					MaxOutputTokens:    32 * 1024,
+					DefaultMaxTokens:   32 * 1024,
+					DefaultTemperature: 1,
+					SupportsVision:     true,
+					SupportsVideo:      true,
+				},
+				"kimi-for-coding-highspeed": {
 					ContextWindow:      256 * 1024,
 					MaxOutputTokens:    32 * 1024,
 					DefaultMaxTokens:   32 * 1024,

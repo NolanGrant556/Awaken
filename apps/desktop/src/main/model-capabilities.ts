@@ -88,7 +88,23 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
     },
   },
   "kimi-coding-plan": {
+    k3: {
+      context_window: 1024 * 1024,
+      max_output_tokens: 32 * 1024,
+      default_max_tokens: 32 * 1024,
+      default_temperature: 1,
+      supports_vision: true,
+      supports_video: true,
+    },
     "kimi-for-coding": {
+      context_window: 256 * 1024,
+      max_output_tokens: 32 * 1024,
+      default_max_tokens: 32 * 1024,
+      default_temperature: 1,
+      supports_vision: true,
+      supports_video: true,
+    },
+    "kimi-for-coding-highspeed": {
       context_window: 256 * 1024,
       max_output_tokens: 32 * 1024,
       default_max_tokens: 32 * 1024,
@@ -221,10 +237,13 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
 };
 
 export function capabilitiesForProvider(providerId: string): Record<string, ModelCapabilityWire> {
-  return {
-    ...(MODEL_CAPABILITIES[providerId] ?? {}),
-    ...(dynamicCapabilityOverrides[providerId] ?? {}),
-  };
+  const builtin = MODEL_CAPABILITIES[providerId] ?? {};
+  const dynamic = dynamicCapabilityOverrides[providerId] ?? {};
+  return Object.fromEntries(
+    Array.from(new Set([...Object.keys(builtin), ...Object.keys(dynamic)])).map(
+      (modelId) => [modelId, { ...builtin[modelId], ...dynamic[modelId] }],
+    ),
+  );
 }
 
 export function capabilityForModel(

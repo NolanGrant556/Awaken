@@ -170,7 +170,7 @@ func TestStreamInvokeOpenAIDisableReasoningWithThinkingTypeDisabledProviders(t *
 	}{
 		{name: "deepseek", baseURL: "https://api.deepseek.com", model: "deepseek-v4-pro"},
 		{name: "kimi cn", baseURL: "https://api.moonshot.cn/v1", model: "kimi-k2.6"},
-		{name: "kimi coding", baseURL: "https://api.kimi.com/coding/v1", model: "kimi-for-coding"},
+		{name: "kimi k3", baseURL: "https://api.kimi.com/coding/v1", model: "k3"},
 		{name: "volcengine ark", baseURL: "https://ark.cn-beijing.volces.com/api/coding/v3", model: "ark-code-latest"},
 	}
 	for _, tc := range cases {
@@ -187,7 +187,7 @@ func TestStreamInvokeOpenAIDisableReasoningWithThinkingTypeDisabledProviders(t *
 	}
 }
 
-func TestStreamInvokeOpenAIDisableReasoningForKimiDoesNotAffectNormalRequest(t *testing.T) {
+func TestStreamInvokeOpenAIKimiK27AliasSuppressesDisableReasoning(t *testing.T) {
 	requests := make([]map[string]json.RawMessage, 0, 2)
 	server := newStreamInspectServer(t, "/chat/completions", func(r *http.Request) {
 		var body map[string]json.RawMessage
@@ -209,16 +209,8 @@ func TestStreamInvokeOpenAIDisableReasoningForKimiDoesNotAffectNormalRequest(t *
 	if len(requests) != 1 {
 		t.Fatalf("expected one request, got %d", len(requests))
 	}
-	var thinking struct {
-		Type string `json:"type"`
-	}
-	if raw := requests[0]["thinking"]; len(raw) == 0 {
-		t.Fatalf("expected Kimi disable reasoning request to include thinking field: %+v", requests[0])
-	} else if err := json.Unmarshal(raw, &thinking); err != nil {
-		t.Fatalf("failed to decode thinking field: %v", err)
-	}
-	if thinking.Type != "disabled" {
-		t.Fatalf("expected thinking.type disabled, got %+v", thinking)
+	if _, ok := requests[0]["thinking"]; ok {
+		t.Fatalf("Kimi K2.7 alias must not include thinking.disabled: %+v", requests[0])
 	}
 
 	if _, err := StreamInvoke(context.Background(), cfg, Request{UserPrompt: "normal"}, nil); err != nil {
@@ -240,7 +232,8 @@ func TestStreamInvokeOpenAICompactSummaryAppliesProviderTemperaturePolicy(t *tes
 		wantThinkingType string
 		wantNoThinking   bool
 	}{
-		{name: "kimi coding instant", model: "kimi-for-coding", wantTemperature: 0.6, wantThinkingType: "disabled"},
+		{name: "kimi coding standard always thinking", model: "kimi-for-coding", wantTemperature: 1.0, wantNoThinking: true},
+		{name: "kimi coding highspeed always thinking", model: "kimi-for-coding-highspeed", wantTemperature: 1.0, wantNoThinking: true},
 		{name: "kimi k2.6 instant", model: "kimi-k2.6", wantTemperature: 0.6, wantThinkingType: "disabled"},
 		{name: "kimi k2.7 always thinking", model: "kimi-k2.7-code", wantTemperature: 1.0, wantNoThinking: true},
 		{name: "deepseek deterministic compact", model: "deepseek-v4-pro", wantTemperature: 0.0, wantThinkingType: "disabled"},
@@ -293,10 +286,18 @@ func TestStreamInvokeOpenAICompactSummaryAppliesProviderTemperaturePolicy(t *tes
 }
 
 func TestStreamInvokeOpenAIKimiK27DisableReasoningIsSuppressed(t *testing.T) {
-	chatReq := openaiChatRequest{Model: "kimi-k2.7-code"}
-	applyOpenAIReasoningControls(&chatReq, Config{BaseURL: "https://api.moonshot.cn/v1", Model: "kimi-k2.7-code"}, Request{DisableReasoning: true})
-	if chatReq.Thinking != nil {
-		t.Fatalf("Kimi K2.7 Code rejects thinking.disabled, got %+v", chatReq.Thinking)
+	models := []string{
+		"kimi-k2.7-code",
+		"kimi-k2.7-code-highspeed",
+		"kimi-for-coding",
+		"kimi-for-coding-highspeed",
+	}
+	for _, model := range models {
+		chatReq := openaiChatRequest{Model: model}
+		applyOpenAIReasoningControls(&chatReq, Config{BaseURL: "https://api.kimi.com/coding/v1", Model: model}, Request{DisableReasoning: true})
+		if chatReq.Thinking != nil {
+			t.Fatalf("Kimi K2.7 Code model %q rejects thinking.disabled, got %+v", model, chatReq.Thinking)
+		}
 	}
 }
 

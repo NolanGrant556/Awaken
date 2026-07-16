@@ -30,6 +30,20 @@ afterEach(async () => {
 });
 
 describe("ModelProfileStore", () => {
+  it("exposes all three current Kimi Coding Plan model IDs", () => {
+    const store = new ModelProfileStore(configDir);
+    const kimi = store
+      .listProviders()
+      .find((provider) => provider.id === "kimi-coding-plan");
+
+    expect(kimi).toMatchObject({
+      base_url: "https://api.kimi.com/coding/v1",
+      default_model: "kimi-for-coding",
+      models: ["k3", "kimi-for-coding", "kimi-for-coding-highspeed"],
+      docs_url: "https://www.kimi.com/code/docs/kimi-code/models.html",
+    });
+  });
+
   it("exposes Volcengine Coding Plan models as suggestions while allowing custom IDs", () => {
     const store = new ModelProfileStore(configDir);
     const volcengine = store.listProviders().find((provider) => provider.id === "volcengine");
@@ -66,6 +80,32 @@ describe("ModelProfileStore", () => {
     expect(result).toEqual({
       ok: false,
       message: "连接测试失败：API key 无效或未授权。",
+    });
+  });
+
+  it("explains Kimi Code model-plan permissions for an unauthorized test", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, status: 401 }) as Response),
+    );
+
+    const store = new ModelProfileStore(configDir);
+    const result = await store.testProfile({
+      providerId: "kimi-coding-plan",
+      displayName: "Kimi Coding Plan",
+      modelId: "k3",
+      baseURL: "https://api.kimi.com/coding/v1",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "valid-but-under-tier-key",
+      enabled: true,
+      isDefault: true,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      message:
+        "连接测试失败：API key 无效，或当前会员套餐无权访问所选 Kimi Code 模型（K3 需 Moderato 及以上，高速版需 Allegretto 及以上）。",
     });
   });
 
@@ -130,6 +170,33 @@ describe("ModelProfileStore", () => {
     );
   });
 
+  it("tests the selected K3 model ID", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const store = new ModelProfileStore(configDir);
+    await expect(
+      store.testProfile({
+        providerId: "kimi-coding-plan",
+        displayName: "Kimi Coding Plan",
+        modelId: "k3",
+        baseURL: "https://api.kimi.com/coding/v1",
+        protocol: "openai_chat",
+        authScheme: "bearer",
+        apiKey: "test-key",
+        enabled: true,
+        isDefault: true,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.kimi.com/coding/v1/chat/completions",
+      expect.objectContaining({
+        body: expect.stringContaining('"model":"k3"'),
+      }),
+    );
+  });
+
   it("normalizes Volcengine Coding Plan base URL and model before testing", async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as Response);
     vi.stubGlobal("fetch", fetchMock);
@@ -183,6 +250,30 @@ describe("ModelProfileStore", () => {
       temperature: 1,
       maxTokens: 32 * 1024,
       contextWindow: 256 * 1024,
+    });
+  });
+
+  it("resolves K3 with the full 1048576-token context window", async () => {
+    const store = new ModelProfileStore(configDir);
+    await store.saveProfile({
+      providerId: "kimi-coding-plan",
+      displayName: "Kimi Coding Plan",
+      modelId: "k3",
+      baseURL: "https://api.kimi.com/coding/v1",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "test-key",
+      enabled: true,
+      isDefault: true,
+    });
+
+    await expect(store.resolveDefaultRunProfile()).resolves.toMatchObject({
+      providerId: "kimi-coding-plan",
+      modelId: "k3",
+      contextWindow: 1024 * 1024,
+      maxTokens: 32 * 1024,
+      supportsVision: true,
+      supportsVideo: true,
     });
   });
 

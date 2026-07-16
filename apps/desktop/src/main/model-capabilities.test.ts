@@ -1,10 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   capabilityForModel,
   normalizeAdvancedWithModelCapability,
+  setCapabilityOverrides,
 } from "./model-capabilities.js";
 
 describe("model capabilities", () => {
+  afterEach(() => {
+    setCapabilityOverrides({});
+  });
+
   it("knows DeepSeek V4 context and output limits", () => {
     expect(capabilityForModel("deepseek", "deepseek-v4-pro")).toMatchObject({
       context_window: 1_000_000,
@@ -15,13 +20,47 @@ describe("model capabilities", () => {
     });
   });
 
-  it("knows Kimi Code plan model limits", () => {
+  it("knows all Kimi Code plan model limits", () => {
+    expect(capabilityForModel("kimi-coding-plan", "k3")).toMatchObject({
+      context_window: 1024 * 1024,
+      max_output_tokens: 32 * 1024,
+      default_max_tokens: 32 * 1024,
+      default_temperature: 1,
+      supports_vision: true,
+      supports_video: true,
+    });
     expect(
       capabilityForModel("kimi-coding-plan", "kimi-for-coding"),
     ).toMatchObject({
       context_window: 256 * 1024,
       max_output_tokens: 32 * 1024,
       default_max_tokens: 32 * 1024,
+      default_temperature: 1,
+      supports_vision: true,
+      supports_video: true,
+    });
+    expect(
+      capabilityForModel("kimi-coding-plan", "kimi-for-coding-highspeed"),
+    ).toMatchObject({
+      context_window: 256 * 1024,
+      max_output_tokens: 32 * 1024,
+      default_max_tokens: 32 * 1024,
+      default_temperature: 1,
+      supports_vision: true,
+      supports_video: true,
+    });
+  });
+
+  it("merges dynamic Kimi metadata without dropping static output and media capabilities", () => {
+    setCapabilityOverrides({
+      "kimi-coding-plan": {
+        k3: { context_window: 1024 * 1024 },
+      },
+    });
+
+    expect(capabilityForModel("kimi-coding-plan", "k3")).toMatchObject({
+      context_window: 1024 * 1024,
+      max_output_tokens: 32 * 1024,
       default_temperature: 1,
       supports_vision: true,
       supports_video: true,

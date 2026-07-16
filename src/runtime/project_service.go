@@ -591,6 +591,9 @@ func (s *ProjectService) purgeThread(threadID string) error {
 	if err := deleteThreadInputAttachments(threadID); err != nil && !errors.Is(err, ErrThreadNotFound) {
 		return err
 	}
+	if err := deleteThreadToolResults(threadID); err != nil && !errors.Is(err, ErrThreadNotFound) {
+		return err
+	}
 	return nil
 }
 

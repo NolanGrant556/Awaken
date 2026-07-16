@@ -61,12 +61,12 @@ type ServerSnapshot struct {
 
 // ServerCapability is the trimmed-down result of the MCP initialize handshake.
 type ServerCapability struct {
-	Name             string `json:"name,omitempty"`
-	Version          string `json:"version,omitempty"`
-	ProtocolVersion  string `json:"protocolVersion,omitempty"`
-	SupportsTools    bool   `json:"supportsTools,omitempty"`
-	SupportsPrompts  bool   `json:"supportsPrompts,omitempty"`
-	SupportsResources bool  `json:"supportsResources,omitempty"`
+	Name              string `json:"name,omitempty"`
+	Version           string `json:"version,omitempty"`
+	ProtocolVersion   string `json:"protocolVersion,omitempty"`
+	SupportsTools     bool   `json:"supportsTools,omitempty"`
+	SupportsPrompts   bool   `json:"supportsPrompts,omitempty"`
+	SupportsResources bool   `json:"supportsResources,omitempty"`
 }
 
 // NeedsAuthError is returned when a tool call cannot proceed because the
@@ -111,10 +111,10 @@ func (e *ToolNotFoundError) Error() string {
 type ServerEventType string
 
 const (
-	EventConnected          ServerEventType = "Connected"
-	EventDisconnected       ServerEventType = "Disconnected"
-	EventDisabled           ServerEventType = "Disabled"
-	EventPromptsListChanged ServerEventType = "PromptsListChanged"
+	EventConnected            ServerEventType = "Connected"
+	EventDisconnected         ServerEventType = "Disconnected"
+	EventDisabled             ServerEventType = "Disabled"
+	EventPromptsListChanged   ServerEventType = "PromptsListChanged"
 	EventResourcesListChanged ServerEventType = "ResourcesListChanged"
 )
 

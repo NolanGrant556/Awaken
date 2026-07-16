@@ -21,7 +21,7 @@ import (
 	"testing"
 
 	"awaken/src/tool"
-	shelltool "awaken/src/tools/shell"
+	bashtool "awaken/src/tools/bash"
 )
 
 const marketSkillsManifestPath = "testdata/market_skills_manifest.json"
@@ -448,20 +448,20 @@ func TestPinnedMarketSkillScriptExecutesThroughSupervisedShell(t *testing.T) {
 	}
 
 	command := `python3 .awaken/skills/ui-ux-pro-max/scripts/search.py dashboard --domain product --max-results 1 --json`
-	input, err := json.Marshal(map[string]any{"command": command, "workdir": workspace, "timeout_ms": 30_000})
+	input, err := json.Marshal(map[string]any{"command": command, "timeout": 30_000})
 	if err != nil {
 		t.Fatal(err)
 	}
 	permissionContext := tool.NewPermissionContext(workspace, []string{workspace})
 	ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
-	outcome, err := (&shelltool.ShellTool{}).ExecuteOutcome(ctx, string(input), nil)
+	outcome, err := (&bashtool.Tool{}).ExecuteOutcome(ctx, string(input), nil)
 	if err != nil {
 		t.Fatalf("market Skill script transport error: %v", err)
 	}
 	if outcome.Status != tool.OutcomeSucceeded || outcome.ExitCode == nil || *outcome.ExitCode != 0 {
-		t.Fatalf("market Skill script did not execute successfully through supervised Shell: %+v", outcome)
+		t.Fatalf("market Skill script did not execute successfully through Bash: %+v", outcome)
 	}
-	stdout, _ := outcome.Diagnostic["stdout"].(string)
+	stdout, _ := outcome.Details["stdout"].(string)
 	if !strings.Contains(stdout, `"domain": "product"`) || !strings.Contains(stdout, `"count":`) {
 		t.Fatalf("unexpected pinned market Skill script output: %q", stdout)
 	}

@@ -454,14 +454,14 @@ describe("runtime reducer run narrative projection", () => {
         seq: 3,
         runId: "run-1",
         toolCallId: "read-1",
-        toolCallName: "read_file",
+        toolCallName: "Read",
       }),
       runEvent({
         type: "TOOL_CALL_RESULT",
         seq: 4,
         runId: "run-1",
         toolCallId: "read-1",
-        toolCallName: "read_file",
+        toolCallName: "Read",
         content: "package main",
       }),
       runEvent({
@@ -529,15 +529,15 @@ describe("runtime reducer run narrative projection", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Summarize project" },
       runEvent({ type: "RUN_STARTED", seq: 1 }),
-      runEvent({ type: "TOOL_CALL_START", seq: 2, toolCallId: "read-1", toolCallName: "read_file" }),
-      runEvent({ type: "TOOL_CALL_ARGS", seq: 3, toolCallId: "read-1", toolCallName: "read_file", delta: "{\"path\":\"README.md\",\"offset\":1,\"limit\":80}" }),
-      runEvent({ type: "TOOL_CALL_RESULT", seq: 4, toolCallId: "read-1", toolCallName: "read_file", content: "# Awaken\nlong content that should stay out of center narrative" }),
-      runEvent({ type: "TOOL_CALL_START", seq: 5, toolCallId: "list-1", toolCallName: "list_files" }),
-      runEvent({ type: "TOOL_CALL_ARGS", seq: 6, toolCallId: "list-1", toolCallName: "list_files", delta: "{\"pattern\":\"**/*.md\"}" }),
-      runEvent({ type: "TOOL_CALL_RESULT", seq: 7, toolCallId: "list-1", toolCallName: "list_files", content: "README.md\ndocs/intro.md" }),
-      runEvent({ type: "TOOL_CALL_START", seq: 8, toolCallId: "grep-1", toolCallName: "grep_search" }),
-      runEvent({ type: "TOOL_CALL_ARGS", seq: 9, toolCallId: "grep-1", toolCallName: "grep_search", delta: "{\"query\":\"Run Workbench\",\"include\":\"**/*.md\"}" }),
-      runEvent({ type: "TOOL_CALL_RESULT", seq: 10, toolCallId: "grep-1", toolCallName: "grep_search", content: "docs/desktop-run-workbench-vertical-slices.md:1:Run Workbench" }),
+      runEvent({ type: "TOOL_CALL_START", seq: 2, toolCallId: "read-1", toolCallName: "Read" }),
+      runEvent({ type: "TOOL_CALL_ARGS", seq: 3, toolCallId: "read-1", toolCallName: "Read", delta: "{\"file_path\":\"README.md\",\"offset\":1,\"limit\":80}" }),
+      runEvent({ type: "TOOL_CALL_RESULT", seq: 4, toolCallId: "read-1", toolCallName: "Read", content: "# Awaken\nlong content that should stay out of center narrative" }),
+      runEvent({ type: "TOOL_CALL_START", seq: 5, toolCallId: "list-1", toolCallName: "Glob" }),
+      runEvent({ type: "TOOL_CALL_ARGS", seq: 6, toolCallId: "list-1", toolCallName: "Glob", delta: "{\"pattern\":\"**/*.md\"}" }),
+      runEvent({ type: "TOOL_CALL_RESULT", seq: 7, toolCallId: "list-1", toolCallName: "Glob", content: "README.md\ndocs/intro.md" }),
+      runEvent({ type: "TOOL_CALL_START", seq: 8, toolCallId: "grep-1", toolCallName: "Grep" }),
+      runEvent({ type: "TOOL_CALL_ARGS", seq: 9, toolCallId: "grep-1", toolCallName: "Grep", delta: "{\"pattern\":\"Run Workbench\",\"glob\":\"**/*.md\"}" }),
+      runEvent({ type: "TOOL_CALL_RESULT", seq: 10, toolCallId: "grep-1", toolCallName: "Grep", content: "docs/desktop-run-workbench-vertical-slices.md:1:Run Workbench" }),
     ]);
 
     expect(state.narrative.activeItem).toMatchObject({
@@ -573,15 +573,15 @@ describe("runtime reducer run narrative projection", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Inspect ordering" },
       runEvent({ type: "RUN_STARTED", seq: 1 }),
-      runEvent({ type: "TOOL_CALL_START", seq: 2, toolCallId: "read-1", toolCallName: "read_file" }),
-      runEvent({ type: "TOOL_CALL_ARGS", seq: 3, toolCallId: "read-1", toolCallName: "read_file", delta: "{\"path\":\"README.md\"}" }),
-      runEvent({ type: "TOOL_CALL_RESULT", seq: 4, toolCallId: "read-1", toolCallName: "read_file", content: "# Awaken" }),
+      runEvent({ type: "TOOL_CALL_START", seq: 2, toolCallId: "read-1", toolCallName: "Read" }),
+      runEvent({ type: "TOOL_CALL_ARGS", seq: 3, toolCallId: "read-1", toolCallName: "Read", delta: "{\"file_path\":\"README.md\"}" }),
+      runEvent({ type: "TOOL_CALL_RESULT", seq: 4, toolCallId: "read-1", toolCallName: "Read", content: "# Awaken" }),
       runEvent({ type: "REASONING_MESSAGE_START", seq: 5, messageId: "reason-1" }),
       runEvent({ type: "REASONING_MESSAGE_CONTENT", seq: 6, messageId: "reason-1", delta: "Now inspect source." }),
       runEvent({ type: "REASONING_MESSAGE_END", seq: 7, messageId: "reason-1" }),
-      runEvent({ type: "TOOL_CALL_START", seq: 8, toolCallId: "list-1", toolCallName: "list_files" }),
-      runEvent({ type: "TOOL_CALL_ARGS", seq: 9, toolCallId: "list-1", toolCallName: "list_files", delta: "{\"pattern\":\"src/**/*.go\"}" }),
-      runEvent({ type: "TOOL_CALL_RESULT", seq: 10, toolCallId: "list-1", toolCallName: "list_files", content: "src/main.go" }),
+      runEvent({ type: "TOOL_CALL_START", seq: 8, toolCallId: "list-1", toolCallName: "Glob" }),
+      runEvent({ type: "TOOL_CALL_ARGS", seq: 9, toolCallId: "list-1", toolCallName: "Glob", delta: "{\"pattern\":\"src/**/*.go\"}" }),
+      runEvent({ type: "TOOL_CALL_RESULT", seq: 10, toolCallId: "list-1", toolCallName: "Glob", content: "src/main.go" }),
       runEvent({ type: "RUN_FINISHED", seq: 11 }),
     ]);
 
@@ -607,12 +607,12 @@ describe("runtime reducer run narrative projection", () => {
   it("does not duplicate read-only exploring actions when sequenced events replay", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Replay exploring" },
-      runEvent({ type: "TOOL_CALL_START", seq: 1, toolCallId: "read-1", toolCallName: "read_file" }),
-      runEvent({ type: "TOOL_CALL_ARGS", seq: 2, toolCallId: "read-1", toolCallName: "read_file", delta: "{\"path\":\"README.md\"}" }),
-      runEvent({ type: "TOOL_CALL_RESULT", seq: 3, toolCallId: "read-1", toolCallName: "read_file", content: "# Awaken" }),
-      runEvent({ type: "TOOL_CALL_START", seq: 1, toolCallId: "read-1", toolCallName: "read_file" }),
-      runEvent({ type: "TOOL_CALL_ARGS", seq: 2, toolCallId: "read-1", toolCallName: "read_file", delta: "{\"path\":\"README.md\"}" }),
-      runEvent({ type: "TOOL_CALL_RESULT", seq: 3, toolCallId: "read-1", toolCallName: "read_file", content: "# Awaken" }),
+      runEvent({ type: "TOOL_CALL_START", seq: 1, toolCallId: "read-1", toolCallName: "Read" }),
+      runEvent({ type: "TOOL_CALL_ARGS", seq: 2, toolCallId: "read-1", toolCallName: "Read", delta: "{\"file_path\":\"README.md\"}" }),
+      runEvent({ type: "TOOL_CALL_RESULT", seq: 3, toolCallId: "read-1", toolCallName: "Read", content: "# Awaken" }),
+      runEvent({ type: "TOOL_CALL_START", seq: 1, toolCallId: "read-1", toolCallName: "Read" }),
+      runEvent({ type: "TOOL_CALL_ARGS", seq: 2, toolCallId: "read-1", toolCallName: "Read", delta: "{\"file_path\":\"README.md\"}" }),
+      runEvent({ type: "TOOL_CALL_RESULT", seq: 3, toolCallId: "read-1", toolCallName: "Read", content: "# Awaken" }),
     ]);
 
     expect(state.narrative.activeItem).toMatchObject({
@@ -628,14 +628,14 @@ describe("runtime reducer run narrative projection", () => {
   it("stores raw tool args and result for inspector records", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Inspect tool" },
-      runEvent({ type: "TOOL_CALL_ARGS", seq: 1, toolCallId: "read-1", toolCallName: "read_file", delta: "{\"path\":\"README.md\"}" }),
-      runEvent({ type: "TOOL_CALL_RESULT", seq: 2, toolCallId: "read-1", toolCallName: "read_file", content: "# Awaken\nfull result" }),
+      runEvent({ type: "TOOL_CALL_ARGS", seq: 1, toolCallId: "read-1", toolCallName: "Read", delta: "{\"file_path\":\"README.md\"}" }),
+      runEvent({ type: "TOOL_CALL_RESULT", seq: 2, toolCallId: "read-1", toolCallName: "Read", content: "# Awaken\nfull result" }),
     ]);
 
     expect(state.toolResults).toContainEqual({
       id: "read-1",
-      title: "read_file",
-      args: "{\"path\":\"README.md\"}",
+      title: "Read",
+      args: "{\"file_path\":\"README.md\"}",
       content: "# Awaken\nfull result",
       status: "done",
     });
@@ -648,7 +648,7 @@ describe("runtime reducer run narrative projection", () => {
         type: "TOOL_CALL_RESULT",
         seq: 1,
         toolCallId: "rg-1",
-        toolCallName: "shell",
+        toolCallName: "Bash",
         content: '{"exit_code":1}',
         toolStatus: "succeeded",
         semanticStatus: "neutral",
@@ -660,7 +660,7 @@ describe("runtime reducer run narrative projection", () => {
 
     expect(state.toolResults).toContainEqual({
       id: "rg-1",
-      title: "shell",
+      title: "Bash",
       content: '{"exit_code":1}',
       args: undefined,
       status: "done",
@@ -718,23 +718,23 @@ describe("runtime reducer run narrative projection", () => {
   it("accumulates args deltas, replaces them with full args fallback, and projects progress", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Inspect streaming tool args" },
-      runEvent({ type: "TOOL_CALL_ARGS_DELTA", seq: 1, toolCallId: "read-1", toolCallName: "read_file", delta: "{\"path\"" }),
-      runEvent({ type: "TOOL_CALL_ARGS_DELTA", seq: 2, toolCallId: "read-1", toolCallName: "read_file", delta: ":\"README.md\"}" }),
-      runEvent({ type: "TOOL_PROGRESS", seq: 3, toolCallId: "read-1", toolCallName: "read_file", progress: "Executing tool" }),
-      runEvent({ type: "TOOL_CALL_ARGS", seq: 4, toolCallId: "read-1", toolCallName: "read_file", delta: "{\"path\":\"README.md\"}" }),
+      runEvent({ type: "TOOL_CALL_ARGS_DELTA", seq: 1, toolCallId: "read-1", toolCallName: "Read", delta: "{\"file_path\"" }),
+      runEvent({ type: "TOOL_CALL_ARGS_DELTA", seq: 2, toolCallId: "read-1", toolCallName: "Read", delta: ":\"README.md\"}" }),
+      runEvent({ type: "TOOL_PROGRESS", seq: 3, toolCallId: "read-1", toolCallName: "Read", progress: "Executing tool" }),
+      runEvent({ type: "TOOL_CALL_ARGS", seq: 4, toolCallId: "read-1", toolCallName: "Read", delta: "{\"file_path\":\"README.md\"}" }),
     ]);
 
     expect(state.toolResults).toContainEqual({
       id: "read-1",
-      title: "read_file",
-      args: "{\"path\":\"README.md\"}",
+      title: "Read",
+      args: "{\"file_path\":\"README.md\"}",
       content: "",
       status: "active",
     });
     const step = state.steps.find((item) => item.id === "tool:read-1");
     expect(step).toMatchObject({
-      title: "read_file",
-      description: "{\"path\":\"README.md\"}",
+      title: "Read",
+      description: "{\"file_path\":\"README.md\"}",
       status: "active",
     });
     expect(state.narrative.activeItem).toMatchObject({
@@ -748,7 +748,7 @@ describe("runtime reducer run narrative projection", () => {
     expect(state.narrative.activeItem.actions[0]).toMatchObject({
       id: "explore:read-1",
       title: "Read README.md",
-      detail: "{\"path\":\"README.md\"}",
+      detail: "{\"file_path\":\"README.md\"}",
       status: "active",
     });
   });
@@ -849,7 +849,7 @@ describe("runtime reducer run narrative projection", () => {
         type: "AWAKEN_PATCH_UPDATED",
         seq: 1,
         toolCallId: "patch-1",
-        toolCallName: "apply_patch",
+        toolCallName: "Edit",
         patch,
         patchSummary: "新增 1 个文件",
         affectedPaths: ["note.md"],
@@ -860,7 +860,7 @@ describe("runtime reducer run narrative projection", () => {
     expect(state.patchPreviews).toEqual([
       {
         id: "patch-1",
-        title: "apply_patch",
+        title: "Edit",
         patch,
         summary: "新增 1 个文件",
         affectedPaths: ["note.md"],
@@ -887,7 +887,7 @@ describe("runtime reducer run narrative projection", () => {
         type: "AWAKEN_TOOL_PERMISSION_DECIDED",
         seq: 1,
         toolCallId: "read-1",
-        toolCallName: "read_file",
+        toolCallName: "Read",
         toolDecisionAction: "allow",
         toolDecisionSource: "static_permission",
         toolDecisionReason: "read-only tool",
@@ -896,7 +896,7 @@ describe("runtime reducer run narrative projection", () => {
         type: "AWAKEN_TOOL_PERMISSION_DECIDED",
         seq: 2,
         toolCallId: "patch-1",
-        toolCallName: "apply_patch",
+        toolCallName: "Edit",
         toolDecisionAction: "deny",
         toolDecisionSource: "headless_default",
         toolDecisionReason: "writes require allowlist",
@@ -905,26 +905,25 @@ describe("runtime reducer run narrative projection", () => {
       }),
     ]);
 
-    expect(state.approvals).toHaveLength(0);
     expect(state.inspectorSummary.lastToolDecision).toMatchObject({
       toolCallId: "patch-1",
-      toolName: "apply_patch",
+      toolName: "Edit",
       action: "deny",
       source: "headless_default",
       affectedPaths: ["note.md"],
       patchSummary: "modify note.md",
     });
     expect(state.toolResults.find((tool) => tool.id === "read-1")).toMatchObject({
-      title: "read_file",
+      title: "Read",
       status: "done",
     });
     expect(state.toolResults.find((tool) => tool.id === "patch-1")).toMatchObject({
-      title: "apply_patch",
+      title: "Edit",
       status: "error",
       content: expect.stringContaining("writes require allowlist"),
     });
     expect(state.steps.find((step) => step.id === "tool-decision:patch-1")).toMatchObject({
-      title: "apply_patch deny",
+      title: "Edit deny",
       status: "error",
       tag: "headless_default",
     });
@@ -1119,12 +1118,12 @@ describe("runtime reducer run narrative projection", () => {
   it("marks failed read-only tool actions and inspector records as error from toolStatus", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Inspect failure" },
-      runEvent({ type: "TOOL_CALL_ARGS", seq: 1, toolCallId: "read-1", toolCallName: "read_file", delta: "{\"path\":\"missing.md\"}" }),
+      runEvent({ type: "TOOL_CALL_ARGS", seq: 1, toolCallId: "read-1", toolCallName: "Read", delta: "{\"file_path\":\"missing.md\"}" }),
       runEvent({
         type: "TOOL_CALL_RESULT",
         seq: 2,
         toolCallId: "read-1",
-        toolCallName: "read_file",
+        toolCallName: "Read",
         content: "工具执行失败: missing.md",
         toolStatus: "failed",
       }),
@@ -1344,7 +1343,6 @@ describe("runtime reducer run narrative projection", () => {
     expect(state.status).toBe("error");
     expect(state.timelineStatus).toBe("error");
     expect(state.errorMessage).toBe("failed after 5 reconnect attempts");
-    expect(state.approvals).toHaveLength(0);
     expect(state.steps.find((step) => step.id === "stream-failed")).toMatchObject({
       title: "Stream failed",
       status: "error",
@@ -1861,7 +1859,6 @@ describe("runtime reducer thread snapshots", () => {
       threadId: "thread-1",
       runStatus: "running",
       activeRunId: "run-1",
-      approvalCount: 0,
       artifactCount: 0,
     });
 
@@ -1875,7 +1872,6 @@ describe("runtime reducer thread snapshots", () => {
     }));
 
     expect(state.threads[0]).toMatchObject({
-      approvalCount: 0,
       artifactCount: 1,
     });
 
@@ -1953,7 +1949,6 @@ describe("runtime reducer thread snapshots", () => {
     ];
 
     expect(state.activeThreadId).toBe("thread-1");
-    expect(state.approvals).toHaveLength(0);
     expect(state.artifacts).toHaveLength(1);
     expect(narrativeItems.some((item) => item.kind === "fileChange")).toBe(false);
   });

@@ -101,7 +101,10 @@ function capabilityFromModelObject(item: unknown): ModelCapabilityWire | undefin
   }
 
   if (typeof model.supports_vision === "boolean") {
-    cap.supports_vision = model.supports_vision;
+	cap.supports_vision = model.supports_vision;
+  }
+  if (typeof model.supports_native_pdf === "boolean") {
+    cap.supports_native_pdf = model.supports_native_pdf;
   }
   if (typeof model.supports_video === "boolean") {
     cap.supports_video = model.supports_video;

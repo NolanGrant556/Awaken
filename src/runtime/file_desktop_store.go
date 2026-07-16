@@ -830,6 +830,9 @@ func (s *FileDesktopStore) DeleteThread(threadID string) error {
 	if err := deleteThreadInputAttachments(threadID); err != nil && !errors.Is(err, ErrThreadNotFound) {
 		return err
 	}
+	if err := deleteThreadToolResults(threadID); err != nil && !errors.Is(err, ErrThreadNotFound) {
+		return err
+	}
 	return os.RemoveAll(s.sessionDir(threadID))
 }
 

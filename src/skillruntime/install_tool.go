@@ -234,7 +234,7 @@ func (t *SkillInstallTool) CheckPermission(ctx context.Context, input string, pe
 			return tool.DenyPermission(fmt.Sprintf("invalid remote_git parameters: %v", err))
 		}
 	}
-	target, err := resolveSkillInstallTargetForTool(req, permissionContext)
+	_, err = resolveSkillInstallTargetForTool(req, permissionContext)
 	if err != nil {
 		return tool.DenyPermission(err.Error())
 	}
@@ -243,12 +243,7 @@ func (t *SkillInstallTool) CheckPermission(ctx context.Context, input string, pe
 			return tool.DenyPermission(err.Error())
 		}
 	}
-	return tool.AllowPermissionWithMetadata(tool.DecisionMetadata{
-		Title:         "Install skill",
-		Description:   fmt.Sprintf("Install a new skill into %s scope", target.scope),
-		RiskTone:      "warning",
-		AffectedPaths: []string{target.installDir},
-	})
+	return tool.AllowPermission()
 }
 
 func (t *SkillInstallTool) Execute(ctx context.Context, input string) (string, error) {

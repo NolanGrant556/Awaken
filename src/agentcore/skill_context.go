@@ -29,7 +29,7 @@ func skillActivationSourcePath(plan *skillruntime.SkillActivationPlan) string {
 // compactInvokedSkillContext mirrors the Claude Code recovery budget: most
 // recent invocations first, at most 5k estimated tokens per Skill and 25k in
 // total. The source path remains in the recovery notice so the model can use
-// read_file when it needs the full package instructions again.
+// Read when it needs the full package instructions again.
 func (r *Runner) compactInvokedSkillContext() {
 	if r == nil || len(r.config.SkillContextBlocks) == 0 {
 		return
@@ -61,7 +61,7 @@ func (r *Runner) compactInvokedSkillContext() {
 			if path == "" {
 				path = "the Skill package path recorded by the host"
 			}
-			content += fmt.Sprintf("\n\n[... skill content truncated for compaction; use read_file on %s if you need the full text]", path)
+			content += fmt.Sprintf("\n\n[... skill content truncated for compaction; use Read on %s if you need the full text]", path)
 		}
 		block.Content = content
 		block.Compacted = true

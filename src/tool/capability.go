@@ -74,17 +74,17 @@ func inferCapabilitiesFromDefinition(def ToolDefinition) []Capability {
 	name := strings.ToLower(strings.TrimSpace(def.Name))
 	var capabilities []Capability
 	switch name {
-	case "read_file", "file_read", "list_files", "grep_search", "read_artifact", "artifact_read", "artifact_inspect":
+	case "read", "glob", "grep", "file_read", "artifact_read", "artifact_inspect":
 		capabilities = append(capabilities, CapabilityFileRead)
-	case "text_file_create":
+	case "write":
 		capabilities = append(capabilities, CapabilityFileWrite)
-	case "text_edit", "apply_patch":
+	case "edit":
 		capabilities = append(capabilities, CapabilityFileEdit)
 	case "trash_file":
 		capabilities = append(capabilities, CapabilityFileDelete)
-	case "shell":
+	case "bash":
 		capabilities = append(capabilities, CapabilityShellExecute)
-	case "web_search":
+	case "websearch":
 		capabilities = append(capabilities, CapabilityWebSearch)
 	case "dependency_install":
 		capabilities = append(capabilities, CapabilityDependencyInstall)

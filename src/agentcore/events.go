@@ -133,7 +133,7 @@ type AwakenEvent struct {
 	// transform (e.g. "shell"). Empty for allow/deny.
 	TransformedFrom string
 	// TransformedTo is the rewritten tool name when the decision was a
-	// transform (e.g. "apply_patch"). Empty for allow/deny.
+	// transformed tool name, when a generic policy transform applies. Empty for allow/deny.
 	TransformedTo string
 	// TrashedPaths lists the absolute paths moved to the OS recycle bin
 	// during this call. Surfaced on ToolPermissionDecided (for the audit

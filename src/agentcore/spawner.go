@@ -5,6 +5,7 @@ import (
 
 	"awaken/src/agentcore/guardian"
 	"awaken/src/agentcore/subagent"
+	"awaken/src/tool"
 	"awaken/src/tool/profile"
 )
 
@@ -106,6 +107,8 @@ func CreateSubagent(parent AgentConfig, spawn SpawnConfig) (AgentConfig, error) 
 		ToolAvailabilitySnapshot:     parent.ToolAvailabilitySnapshot,
 		ExecutionEnvironmentSnapshot: parent.ExecutionEnvironmentSnapshot,
 		SkillContextBlocks:           append([]ContextBlock(nil), parent.SkillContextBlocks...),
+		ToolSessionState:             tool.NewToolSessionState(parent.Workspace.Root),
+		ModelContentStore:            parent.ModelContentStore,
 		SubagentBoundary:             &childBoundary,
 		SubagentOrigin:               childOrigin,
 	}

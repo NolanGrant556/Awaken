@@ -100,15 +100,11 @@ func (t *ArtifactPublishTool) CheckPermission(_ context.Context, input string, p
 	if err != nil {
 		return tool.DenyPermission(fmt.Sprintf("invalid parameters: %v", err))
 	}
-	resolved, err := validatePublishableArtifact(params.Path, permissionContext)
+	_, err = validatePublishableArtifact(params.Path, permissionContext)
 	if err != nil {
 		return tool.DenyPermission(err.Error())
 	}
-	return tool.AllowPermissionWithMetadata(tool.DecisionMetadata{
-		Title:       "Publish final artifact",
-		Description: resolved,
-		RiskTone:    "safe",
-	})
+	return tool.AllowPermission()
 }
 
 func (t *ArtifactPublishTool) Execute(ctx context.Context, input string) (string, error) {

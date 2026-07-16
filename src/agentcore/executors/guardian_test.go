@@ -66,7 +66,7 @@ func TestGuardianExecutorDeniesNonReadOnlyTool(t *testing.T) {
 	executor := NewGuardianExecutor()
 	intent := profile.ExecutionIntent{
 		ToolName: "write_tool",
-		ToolKind: profile.ToolKindFileChain,
+		ToolKind: profile.ToolKindFileOperation,
 	}
 	nonReadOnly := &writeTestTool{name: "write_tool"}
 	output, err := executor.Execute(context.Background(), intent, profile.GuardianReadOnly(), nonReadOnly, "test", nil)
@@ -91,7 +91,7 @@ func TestGuardianExecutorAllowsReadOnlyTool(t *testing.T) {
 	executor := NewGuardianExecutor()
 	intent := profile.ExecutionIntent{
 		ToolName: "read_tool",
-		ToolKind: profile.ToolKindFileChain,
+		ToolKind: profile.ToolKindFileOperation,
 	}
 	readOnly := &readOnlyTestTool{name: "read_tool"}
 	output, err := executor.Execute(context.Background(), intent, profile.GuardianReadOnly(), readOnly, "test_input", nil)

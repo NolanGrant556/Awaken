@@ -66,6 +66,11 @@ import {
   type RuntimeThreadTranscriptWire,
   type RuntimeThreadWire,
   type RuntimeToolInfo,
+  type SearchSettings,
+  type SearchSettingsSaveRequest,
+  type SearchSettingsSaveResult,
+  type SearchProviderTestRequest,
+  type SearchProviderTestResult,
   type StartRunRequest,
   type ThreadDeleteResult,
   type UpdateMcpServerConfigRequest,
@@ -79,6 +84,7 @@ import { RuntimeSupervisor, type SupervisorStatusInfo } from "./runtime-supervis
 import { ensureConfigDir } from "./config-bootstrap.js";
 import { DesktopPreferencesStore } from "./desktop-preferences-store.js";
 import { ModelProfileStore } from "./model-profile-store.js";
+import { SearchSettingsStore } from "./search-settings-store.js";
 import { runDesktopOperation } from "./desktop-operation.js";
 import { PetStore } from "./pets/pet-store.js";
 import { detectCodexHome, importCodexPets } from "./pets/codex-pet-importer.js";
@@ -141,6 +147,7 @@ protocol.registerSchemesAsPrivileged([
 let supervisor: RuntimeSupervisor | null = null;
 let desktopPreferencesStore: DesktopPreferencesStore | null = null;
 let modelProfileStore: ModelProfileStore | null = null;
+let searchSettingsStore: SearchSettingsStore | null = null;
 let petStore: PetStore | null = null;
 let petWindowManager: PetWindowManager | null = null;
 let mainWindowRef: BrowserWindow | null = null;
@@ -1257,6 +1264,60 @@ ipcMain.handle("awaken:get-model-profile-balances", async () => {
   return normalizeModelProfileBalancesResult(result);
 });
 
+ipcMain.handle("awaken:get-search-settings", async (): Promise<SearchSettings> => {
+  if (!searchSettingsStore) {
+    throw new Error("Search settings store unavailable");
+  }
+  return searchSettingsStore.snapshot();
+});
+
+ipcMain.handle(
+  "awaken:test-search-provider",
+  async (
+    _event,
+    request: SearchProviderTestRequest,
+  ): Promise<SearchProviderTestResult> => {
+    if (!searchSettingsStore) {
+      throw new Error("Search settings store unavailable");
+    }
+    return searchSettingsStore.testProvider(request.provider);
+  },
+);
+
+ipcMain.handle(
+  "awaken:save-search-settings",
+  async (
+    _event,
+    request: SearchSettingsSaveRequest,
+  ): Promise<SearchSettingsSaveResult> => {
+    if (!searchSettingsStore || !supervisor) {
+      throw new Error("Search settings are unavailable");
+    }
+    const threads = await requestRuntime<RuntimeThreadWire[]>("/v1/threads");
+    if (threads.some((thread) => Boolean(thread.active_run_id))) {
+      throw new Error("当前有任务正在运行，请结束任务后重试。");
+    }
+    const settings = await searchSettingsStore.save(request);
+    try {
+      const status = await supervisor.restart();
+      if (status.status !== "running" || !status.runtimeBaseUrl) {
+        return {
+          settings,
+          restartStatus: "restart_failed",
+          message: "搜索设置已保存，但 Core 重启失败。请稍后重试重启。",
+        };
+      }
+      return { settings, restartStatus: "restarted" };
+    } catch {
+      return {
+        settings,
+        restartStatus: "restart_failed",
+        message: "搜索设置已保存，但 Core 重启失败。请稍后重试重启。",
+      };
+    }
+  },
+);
+
 ipcMain.handle("awaken:relaunch-desktop", () => {
   setImmediate(() => {
     if (isDevServer && process.platform === "darwin") {
@@ -1777,6 +1838,7 @@ app.whenReady().then(async () => {
   const awakenHome = join(app.getPath("home"), ".awaken");
   modelProfileStore = new ModelProfileStore(awakenHome);
   await modelProfileStore.initialize();
+  searchSettingsStore = new SearchSettingsStore(configDir);
   petStore = new PetStore(configDir, app.getPath("userData"));
   await petStore.initialize();
   const builtinPetReport = await importBuiltinPets(
@@ -1820,7 +1882,25 @@ app.whenReady().then(async () => {
 
   registerPetIpcHandlers();
 
-  supervisor = new RuntimeSupervisor({});
+  supervisor = new RuntimeSupervisor(
+    {},
+    {
+      resolveProductEnvironment: async () => {
+        try {
+          return (
+            (await searchSettingsStore?.runtimeEnvironment()) ?? {
+              AWAKEN_WEB_SEARCH_PROVIDERS: "",
+            }
+          );
+        } catch (error) {
+          console.error("[awaken-desktop] search settings unavailable", {
+            message: error instanceof Error ? error.message : String(error),
+          });
+          return { AWAKEN_WEB_SEARCH_PROVIDERS: "" };
+        }
+      },
+    },
+  );
   supervisor.onStatusChange((info) => {
     if (info.runtimeBaseUrl) {
       runtimeBaseUrl = info.runtimeBaseUrl;

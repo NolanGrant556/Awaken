@@ -25,6 +25,11 @@
   animation: panel-in var(--aw-transition-normal);
 }
 
+.aw-dialog--large {
+  width: min(1100px, calc(100vw - 64px));
+  max-height: min(860px, calc(100vh - 48px));
+}
+
 .aw-dialog__head {
   display: flex;
   align-items: center;
@@ -42,13 +47,59 @@
   font-weight: var(--aw-font-weight-bold);
 }
 
+.aw-dialog__title--visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .aw-dialog__body {
   min-width: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 38%, transparent) transparent;
+  scrollbar-width: thin;
   padding: var(--aw-space-5) var(--aw-space-8);
   color: var(--aw-text-secondary);
   font-size: var(--aw-font-size-base);
   line-height: var(--aw-line-height-base);
+}
+
+.aw-dialog__body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.aw-dialog__body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.aw-dialog__body::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--aw-radius-pill);
+  background: color-mix(in srgb, var(--aw-text-tertiary) 38%, transparent);
+  background-clip: padding-box;
+}
+
+.aw-dialog__body::-webkit-scrollbar-button {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .aw-dialog-backdrop {
+    padding: var(--aw-space-5);
+  }
+
+  .aw-dialog--large {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+  }
 }
 
 .aw-dialog__foot {

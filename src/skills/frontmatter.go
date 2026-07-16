@@ -21,12 +21,12 @@ var knownFrontmatterFields = map[string]struct{}{
 }
 
 var commonToolAliases = map[string]string{
-	"read":  "read_file",
-	"write": "text_file_create",
-	"edit":  "text_edit",
-	"bash":  "shell",
-	"glob":  "list_files",
-	"grep":  "grep_search",
+	"read":  "Read",
+	"write": "Write",
+	"edit":  "Edit",
+	"bash":  "Bash",
+	"glob":  "Glob",
+	"grep":  "Grep",
 }
 
 // ParseFrontmatter extracts YAML frontmatter and Markdown body from raw

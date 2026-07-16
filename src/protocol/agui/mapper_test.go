@@ -117,7 +117,7 @@ func TestMapEventToolResult(t *testing.T) {
 			"reason":                  "no_match",
 			"environment_snapshot_id": "env-1",
 			"tool_snapshot_id":        "tools-1",
-			"provider_id":             tool.ProviderID("builtin.shell"),
+			"provider_id":             tool.ProviderID("builtin:bash"),
 			"capabilities":            []tool.Capability{"process.execute"},
 			"provider_readiness":      tool.ProviderReadiness("ready"),
 			"dependency_observations": []map[string]any{{"name": "zsh", "kind": "executable"}},
@@ -151,7 +151,7 @@ func TestMapEventToolResult(t *testing.T) {
 	if events[0].Diagnostic["reason"] != "no_match" {
 		t.Fatalf("unexpected diagnostic: %+v", events[0].Diagnostic)
 	}
-	if events[0].EnvironmentSnapshotID != "env-1" || events[0].ToolAvailabilitySnapshotID != "tools-1" || events[0].ProviderID != "builtin.shell" || events[0].Capability != "process.execute" || len(events[0].Capabilities) != 1 || events[0].Readiness != "ready" || len(events[0].Dependencies) != 1 {
+	if events[0].EnvironmentSnapshotID != "env-1" || events[0].ToolAvailabilitySnapshotID != "tools-1" || events[0].ProviderID != "builtin:bash" || events[0].Capability != "process.execute" || len(events[0].Capabilities) != 1 || events[0].Readiness != "ready" || len(events[0].Dependencies) != 1 {
 		t.Fatalf("unexpected execution metadata: %+v", events[0])
 	}
 }
@@ -165,13 +165,13 @@ func TestMapEventSkillLifecycle(t *testing.T) {
 			"source":          "project",
 			"skill_path":      "/workspace/.awaken/skills/presentations/SKILL.md",
 			"status":          "ok",
-			"effective_tools": []string{"presentation_create", "shell"},
+			"effective_tools": []string{"Bash", "Read", "artifact_publish"},
 		},
 	})
 	if len(invoked) != 1 || invoked[0].Type != EventAwakenSkillInvoked {
 		t.Fatalf("unexpected Skill activation projection: %+v", invoked)
 	}
-	if invoked[0].SkillSource != "project" || len(invoked[0].SkillEffectiveTools) != 2 {
+	if invoked[0].SkillSource != "project" || len(invoked[0].SkillEffectiveTools) != 3 {
 		t.Fatalf("Skill activation metadata lost: %+v", invoked[0])
 	}
 
@@ -196,7 +196,7 @@ func TestMapEventToolCallArgsDelta(t *testing.T) {
 		ThreadID:   "thread-1",
 		RunID:      "run-1",
 		ToolCallID: "tool-1",
-		ToolName:   "read_file",
+		ToolName:   "Read",
 		Delta:      `{"path"`,
 	})
 
@@ -206,7 +206,7 @@ func TestMapEventToolCallArgsDelta(t *testing.T) {
 	if events[0].Type != EventToolCallArgsDelta {
 		t.Fatalf("expected TOOL_CALL_ARGS_DELTA, got %s", events[0].Type)
 	}
-	if events[0].ToolCallID != "tool-1" || events[0].ToolCallName != "read_file" || events[0].Delta != `{"path"` {
+	if events[0].ToolCallID != "tool-1" || events[0].ToolCallName != "Read" || events[0].Delta != `{"path"` {
 		t.Fatalf("unexpected args delta payload: %+v", events[0])
 	}
 }
@@ -217,7 +217,7 @@ func TestMapEventToolCallArgs(t *testing.T) {
 		ThreadID:   "thread-1",
 		RunID:      "run-1",
 		ToolCallID: "tool-1",
-		ToolName:   "read_file",
+		ToolName:   "Read",
 		Arguments:  `{"path":"README.md"}`,
 	})
 
@@ -227,7 +227,7 @@ func TestMapEventToolCallArgs(t *testing.T) {
 	if events[0].Type != EventToolCallArgs {
 		t.Fatalf("expected TOOL_CALL_ARGS, got %s", events[0].Type)
 	}
-	if events[0].ToolCallID != "tool-1" || events[0].ToolCallName != "read_file" || events[0].Delta != `{"path":"README.md"}` {
+	if events[0].ToolCallID != "tool-1" || events[0].ToolCallName != "Read" || events[0].Delta != `{"path":"README.md"}` {
 		t.Fatalf("unexpected args payload: %+v", events[0])
 	}
 }
@@ -238,7 +238,7 @@ func TestMapEventToolProgress(t *testing.T) {
 		ThreadID:               "thread-1",
 		RunID:                  "run-1",
 		ToolCallID:             "tool-1",
-		ToolName:               "read_file",
+		ToolName:               "Read",
 		Progress:               "Executing tool",
 		ToolProgressStage:      "started",
 		ToolProgressMessage:    "Executing tool",
@@ -252,7 +252,7 @@ func TestMapEventToolProgress(t *testing.T) {
 	if events[0].Type != EventToolProgress {
 		t.Fatalf("expected TOOL_PROGRESS, got %s", events[0].Type)
 	}
-	if events[0].ToolCallID != "tool-1" || events[0].ToolCallName != "read_file" {
+	if events[0].ToolCallID != "tool-1" || events[0].ToolCallName != "Read" {
 		t.Fatalf("unexpected tool identity: %+v", events[0])
 	}
 	if events[0].Progress != "Executing tool" || events[0].Message != "Executing tool" {
@@ -269,13 +269,13 @@ func TestMapEventToolPermissionDecided(t *testing.T) {
 		ThreadID:                 "thread-1",
 		RunID:                    "run-1",
 		ToolCallID:               "tool-1",
-		ToolName:                 "apply_patch",
-		Content:                  "apply_patch will modify files",
-		StaticPermissionBehavior: "ask",
-		StaticPermissionReason:   "apply_patch will modify files",
+		ToolName:                 "Edit",
+		Content:                  "Edit was denied by the file boundary",
+		StaticPermissionBehavior: "deny",
+		StaticPermissionReason:   "path escapes writable roots",
 		ToolDecisionAction:       "deny",
 		ToolDecisionSource:       "headless_default",
-		ToolDecisionReason:       "apply_patch will modify files",
+		ToolDecisionReason:       "path escapes writable roots",
 		AffectedPaths:            []string{"note.md"},
 		PatchSummary:             "新增 1 个文件",
 	})
@@ -301,7 +301,7 @@ func TestMapEventCommandOutput(t *testing.T) {
 		ThreadID:      "thread-1",
 		RunID:         "run-1",
 		ToolCallID:    "tool-1",
-		ToolName:      "shell",
+		ToolName:      "Bash",
 		CommandStream: "stdout",
 		Delta:         "hello",
 		Truncated:     true,
@@ -313,7 +313,7 @@ func TestMapEventCommandOutput(t *testing.T) {
 	if events[0].Type != EventAwakenCommandOutput {
 		t.Fatalf("expected AWAKEN_COMMAND_OUTPUT, got %s", events[0].Type)
 	}
-	if events[0].ToolCallID != "tool-1" || events[0].ToolCallName != "shell" || events[0].CommandStream != "stdout" || events[0].Delta != "hello" || !events[0].Truncated {
+	if events[0].ToolCallID != "tool-1" || events[0].ToolCallName != "Bash" || events[0].CommandStream != "stdout" || events[0].Delta != "hello" || !events[0].Truncated {
 		t.Fatalf("unexpected command output payload: %+v", events[0])
 	}
 }
@@ -324,8 +324,8 @@ func TestMapEventPatchUpdated(t *testing.T) {
 		ThreadID:      "thread-1",
 		RunID:         "run-1",
 		ToolCallID:    "tool-1",
-		ToolName:      "apply_patch",
-		Patch:         "*** Begin Patch\n*** End Patch",
+		ToolName:      "Edit",
+		Patch:         "--- a/note.md\n+++ b/note.md",
 		PatchSummary:  "新增 1 个文件",
 		AffectedPaths: []string{"note.md"},
 	})
@@ -336,7 +336,7 @@ func TestMapEventPatchUpdated(t *testing.T) {
 	if events[0].Type != EventAwakenPatchUpdated {
 		t.Fatalf("expected AWAKEN_PATCH_UPDATED, got %s", events[0].Type)
 	}
-	if events[0].ToolCallID != "tool-1" || events[0].ToolCallName != "apply_patch" || events[0].PatchSummary != "新增 1 个文件" {
+	if events[0].ToolCallID != "tool-1" || events[0].ToolCallName != "Edit" || events[0].PatchSummary != "新增 1 个文件" {
 		t.Fatalf("unexpected patch identity: %+v", events[0])
 	}
 	if events[0].Patch == "" || len(events[0].AffectedPaths) != 1 || events[0].AffectedPaths[0] != "note.md" {

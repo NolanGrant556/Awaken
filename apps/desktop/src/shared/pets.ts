@@ -78,9 +78,6 @@ export type PetQuestionOption = {
 
 export type PetWaitingRequest =
   | { type: "question"; requestId: string; prompt: string; options: PetQuestionOption[] }
-  | { type: "command-approval"; requestId: string; summary: string }
-  | { type: "file-approval"; requestId: string; files: string[] }
-  | { type: "permission"; requestId: string; summary: string }
   | { type: "mcp-elicitation"; requestId: string; summary: string }
   | { type: "implement-plan"; turnId: string; summary: string };
 
@@ -134,14 +131,6 @@ export type ScreenPoint = {
 
 export type PetNotificationActionRequest =
   | { type: "answer-question"; runId: string; questionId: string; answer: string }
-  | { type: "approve-command"; runId: string; approvalId: string }
-  | { type: "deny-command"; runId: string; approvalId: string }
-  | { type: "approve-file"; runId: string; approvalId: string }
-  | { type: "deny-file"; runId: string; approvalId: string }
-  | { type: "approve-permission"; runId: string; approvalId: string }
-  | { type: "deny-permission"; runId: string; approvalId: string }
-  | { type: "approve-mcp"; runId: string; approvalId: string }
-  | { type: "deny-mcp"; runId: string; approvalId: string }
   | { type: "implement-plan"; runId: string; turnId: string }
   | { type: "stop-run"; runId: string }
   | { type: "follow-up"; threadId: string; prompt: string };

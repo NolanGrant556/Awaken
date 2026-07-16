@@ -1,7 +1,7 @@
 // Package profile defines ExecutionIntent, the unified type that every tool
 // call is converted into before execution. This is the foundational type for
 // Phase 3 (unified execution profile) of the "零审批自动执行策略" spec:
-// every ToolCall — whether builtin (apply_patch, shell, file_read, ...),
+// every ToolCall — whether builtin (Read, Edit, Bash, ...),
 // MCP-sourced, connector-sourced, or issued by a sub-agent — is normalised
 // into an ExecutionIntent so that the decision layer can reason about a
 // single shape.
@@ -21,10 +21,10 @@ import (
 type ToolKind string
 
 const (
-	ToolKindFileChain    ToolKind = "file_chain"
-	ToolKindShellCommand ToolKind = "shell_command"
-	ToolKindMcpApp       ToolKind = "mcp_app"
-	ToolKindReviewAgent  ToolKind = "review_agent"
+	ToolKindFileOperation ToolKind = "file_operation"
+	ToolKindShellCommand  ToolKind = "shell_command"
+	ToolKindMcpApp        ToolKind = "mcp_app"
+	ToolKindReviewAgent   ToolKind = "review_agent"
 )
 
 // ExecutionLane is the current top-level routing key used by the executor
@@ -110,12 +110,12 @@ func (i ExecutionIntent) String() string {
 // InferToolKind maps a tool name plus its declared annotations to a ToolKind.
 //
 // Mapping rules (from the spec):
-//   - apply_patch, file_read/read_file, list_files, grep_search → file_chain
-//   - shell → shell_command
+//   - Read, Edit, Write, Glob, Grep and trash_file -> file_operation
+//   - Bash → shell_command
 //   - MCP/connector-sourced tools (name starts with "mcp__" or
 //     annotations.ServerName != "") → mcp_app
 //   - review/guardian tools → review_agent
-//   - otherwise: read-only tools default to file_chain, everything else falls
+//   - otherwise: read-only tools default to file_operation, everything else falls
 //     back to shell_command as the conservative default.
 //
 // Note: the annotations struct does not carry ToolDefinition.Source directly;
@@ -123,10 +123,10 @@ func (i ExecutionIntent) String() string {
 // proxies for MCP/connector origin.
 func InferToolKind(toolName string, annotations tool.ToolAnnotations) ToolKind {
 	name := strings.TrimSpace(toolName)
-	switch name {
-	case "apply_patch", "text_edit", "text_file_create", "trash_file", "file_read", "read_file", "list_files", "grep_search":
-		return ToolKindFileChain
-	case "shell":
+	switch strings.ToLower(name) {
+	case "read", "edit", "write", "glob", "grep", "trash_file":
+		return ToolKindFileOperation
+	case "bash":
 		return ToolKindShellCommand
 	}
 
@@ -144,10 +144,10 @@ func InferToolKind(toolName string, annotations tool.ToolAnnotations) ToolKind {
 		return ToolKindMcpApp
 	}
 
-	// Conservative default: read-only tools look like file-chain reads;
+	// Conservative default: read-only tools look like typed file reads;
 	// everything else is treated as a shell-style command.
 	if annotations.ReadOnly {
-		return ToolKindFileChain
+		return ToolKindFileOperation
 	}
 	return ToolKindShellCommand
 }
@@ -165,7 +165,7 @@ func InferExecutionLane(toolName string, annotations tool.ToolAnnotations) Execu
 	}
 
 	switch InferToolKind(toolName, annotations) {
-	case ToolKindFileChain, ToolKindReviewAgent:
+	case ToolKindFileOperation, ToolKindReviewAgent:
 		return LaneArtifact
 	case ToolKindMcpApp:
 		return LaneConnector
@@ -248,24 +248,18 @@ func firstNonEmptyLane(values ...ExecutionLane) ExecutionLane {
 	return ""
 }
 
-// inferRequestedAction derives the primary action a tool will perform. For
-// apply_patch the action is refined by inspecting the patch body so that
-// delete-only and move patches classify as ActionDelete / ActionMove rather
-// than the generic ActionWrite.
+// inferRequestedAction derives the primary action a tool will perform.
 func inferRequestedAction(toolName string, kind ToolKind, annotations tool.ToolAnnotations, arguments string) RequestedAction {
 	switch kind {
 	case ToolKindShellCommand:
 		return ActionExecute
-	case ToolKindFileChain:
-		if toolName == "apply_patch" {
-			return refinePatchAction(arguments)
-		}
+	case ToolKindFileOperation:
 		if annotations.Destructive {
 			return ActionWrite
 		}
 		if annotations.ReadOnly {
-			switch toolName {
-			case "list_files", "grep_search":
+			switch strings.ToLower(toolName) {
+			case "glob", "grep":
 				return ActionInspect
 			default:
 				return ActionRead
@@ -286,51 +280,16 @@ func inferRequestedAction(toolName string, kind ToolKind, annotations tool.ToolA
 	return ActionRead
 }
 
-// refinePatchAction inspects an Awaken structured patch body and returns the
-// highest-risk action present: delete > move > write. If the patch cannot be
-// parsed, it falls back to ActionWrite.
-func refinePatchAction(arguments string) RequestedAction {
-	patch := extractPatchBody(arguments)
-	if patch == "" {
-		return ActionWrite
-	}
-	hasDelete := false
-	hasMove := false
-	hasAddOrUpdate := false
-	for _, line := range strings.Split(patch, "\n") {
-		trimmed := strings.TrimSpace(line)
-		switch {
-		case strings.HasPrefix(trimmed, "*** Delete File:"):
-			hasDelete = true
-		case strings.HasPrefix(trimmed, "*** Move to:"):
-			hasMove = true
-		case strings.HasPrefix(trimmed, "*** Add File:"), strings.HasPrefix(trimmed, "*** Update File:"):
-			hasAddOrUpdate = true
-		}
-	}
-	switch {
-	case hasDelete:
-		return ActionDelete
-	case hasMove:
-		return ActionMove
-	case hasAddOrUpdate:
-		return ActionWrite
-	}
-	return ActionWrite
-}
-
 // extractPaths performs a best-effort extraction of the file paths a tool
-// invocation will touch. For apply_patch (and any PatchPreviewingTool) it
+// invocation will touch. For any PatchPreviewingTool it
 // uses the PatchPreviewingTool interface so the same path-resolution logic
-// the decision metadata path uses is reused here. For file_read/read_file,
-// list_files, and grep_search it parses the JSON arguments and pulls the
-// path/root parameter. For shell it scans for redirect targets. If paths
+// the decision metadata path uses is reused here. For Read/Edit/Write/Glob/
+// Grep it parses the JSON arguments and pulls the path parameter. For Bash it
+// scans for redirect targets. If paths
 // cannot be extracted, an empty slice is returned.
 func extractPaths(selectedTool tool.Tool, arguments string, permCtx tool.PermissionContext) []string {
-	// apply_patch (and any other PatchPreviewingTool) already knows how to
-	// enumerate affected paths with full workspace resolution. The tool
-	// expects the normalised input (the patch body for apply_patch, not the
-	// raw JSON wrapper), so we extract it first.
+	// A generic PatchPreviewingTool can enumerate affected paths with its own
+	// workspace resolution. Normalize the input before requesting a preview.
 	if previewingTool, ok := selectedTool.(tool.PatchPreviewingTool); ok {
 		normalised := extractToolInput(arguments, selectedTool.Parameters())
 		preview, ok := previewingTool.PatchPreview(normalised, permCtx)
@@ -339,18 +298,18 @@ func extractPaths(selectedTool tool.Tool, arguments string, permCtx tool.Permiss
 		}
 	}
 
-	name := selectedTool.Name()
+	name := strings.ToLower(selectedTool.Name())
 	normalised := extractToolInput(arguments, selectedTool.Parameters())
 	switch name {
-	case "file_read", "read_file":
-		if path := jsonStringField(normalised, "path"); path != "" {
+	case "read", "edit", "write":
+		if path := jsonStringField(normalised, "file_path"); path != "" {
 			return []string{path}
 		}
-	case "list_files", "grep_search":
-		if root := jsonStringField(normalised, "root"); root != "" {
+	case "glob", "grep":
+		if root := jsonStringField(normalised, "path"); root != "" {
 			return []string{root}
 		}
-	case "shell":
+	case "bash":
 		if cmd := jsonStringField(normalised, "command"); cmd != "" {
 			return extractShellRedirectTargets(cmd)
 		}
@@ -450,13 +409,6 @@ func extractToolInput(arguments string, params []tool.ToolParameter) string {
 		return trimmed
 	}
 	return string(data)
-}
-
-// extractPatchBody extracts the "patch" parameter value from a JSON arguments
-// string. Returns "" if the patch field is absent or the input is not valid
-// JSON.
-func extractPatchBody(arguments string) string {
-	return jsonStringField(arguments, "patch")
 }
 
 // jsonStringField decodes a single string field from a JSON object. Returns

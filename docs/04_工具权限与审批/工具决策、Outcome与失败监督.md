@@ -2,9 +2,9 @@
 
 ## 1. 当前决策模型
 
-普通工具默认自动执行。typed provider 仍依次通过固定快照查找、provider readiness、input schema 正规化、工具自身合同和对应 executor。默认 `shell` 是当前登录用户的直接本机 provider：命令分类和 TaskScope 可用于观测，但不把 workspace、网络、包管理器或未建模 CLI 变成默认拒绝条件。
+普通工具默认自动执行。typed provider 仍依次通过固定快照查找、provider readiness、input schema 正规化、工具自身合同和对应 executor。`Bash` 是当前登录用户的直接本机工具：命令分类和 TaskScope 只用于上下文/观测，不把 workspace、网络、包管理器或未建模 CLI 变成默认拒绝条件。
 
-统一决策动作是 allow、deny、needs_auth、needs_runtime、unsupported、transform。取消由 runtime 独立处理；legacy `abort` 输入只能转为 `deny` + `policy_error`，不是当前决策枚举。
+统一决策动作是 allow、deny、needs_auth、needs_runtime、unsupported，以及为外部/兼容 provider 保留的通用 transform。取消由 runtime 独立处理；legacy `abort` 输入只能转为 `deny` + `policy_error`，不是当前决策枚举。`PermissionDecision` 只保存 behavior、reason 和可选 error code；审批标题、描述、风险色、路径和副作用不再作为 decision metadata 传输。
 
 当前没有通用逐工具 Approval、消息发送审核，也没有 `awaiting_approval` run 状态。唯一由工具执行过程触发的交互 gate 是：
 
@@ -12,11 +12,11 @@
 
 消息发送无论目标是个人、多人、群、频道、广播还是批量扩展，都按普通工具调用处理；Awaken 不解析收件人、不签发一次性发送 grant，也不在 transport 前等待人工批准。工具和 provider 自己负责远端权限、幂等性与副作用。
 
-`transform` 只允许一层；目标工具必须仍在同一 run 快照中，用目标 schema 重新正规化，并经目标 executor 硬门禁。已授权的转换不再进入第二次 AutoToolPolicy，但嵌套 transform 必须 deny。`TransformShellToFileChain` 是 helper/测试路径，当前默认策略不会把所有 Shell 写命令普遍自动转为 typed file chain。
+`transform` 只允许一层；目标工具必须仍在同一 run 快照中，用目标 schema 重新正规化，并经目标 executor 硬门禁。当前没有 Bash -> 文件工具或 `apply_patch` 的内建转换策略；嵌套 transform 必须 deny。
 
-typed 删除工具仍可通过 `trash_file` 提供可恢复语义；默认 raw Shell 不再拦截或转换 `rm` 等命令。因此只有实际选用 typed 路径时才能声称 Trash recovery，不能将该保证扩大到任意 Shell 或 Skill 子脚本。
+typed 删除工具仍可通过 `trash_file` 提供可恢复语义；`Bash` 不拦截或转换 `rm` 等命令。因此只有实际选用 typed 路径时才能声称 Trash recovery，不能将该保证扩大到任意 Bash 或 Skill 子脚本。
 
-provider `needs_runtime` 的 host-generated plan 仍可投影为 `dependency_install` next action，该 typed installer 继续验证 plan/environment/manager 和它自身的 staging 合同。但这是一条可选的 typed provider 恢复路径，不是通用 Skill 安装依赖的前置要求。Agent 可以按 `SKILL.md` 用默认 Shell 直接执行 `npm install`、`pip install` 或其他初始化命令，以真实命令结果继续诊断。
+provider `needs_runtime` 的 host-generated plan 仍可投影为 `dependency_install` next action，该 typed installer 继续验证 plan/environment/manager 和它自身的 staging 合同。但这是一条可选的 typed provider 恢复路径，不是通用 Skill 安装依赖的前置要求。Agent 可以按 `SKILL.md` 用 `Bash` 直接执行 `npm install`、`pip install` 或其他初始化命令，以真实命令结果继续诊断。
 
 ## 2. ExecutionOutcome v2
 
@@ -68,7 +68,7 @@ MCP delete 与其他 MCP mutation 一样直接进入 provider transport，不要
 
 signature 由 tool name + canonical arguments hash 组成，fingerprint 用稳定 error code/主诊断并清除 workspace root、timestamp、temp path、随机 ID 等易漂移信息。对 partial/unknown 或外部副作用不得盲目重放；非相关工具的成功也不能清除未完成的 recovery directive。
 
-Shell 的 resource revision 使用 `command + workdir` 生成不暴露命令文本的稳定摘要；不同命令不再共用 `unknown` class budget。当已观测 mutation 成功，或默认 direct Shell 成功且由宿主基于 canonical call arguments 与 Shell command classifier 判定为明确恢复型 mutation（例如 `npm install`、`python -m pip install`、创建/写入文件）时，才清除旧 Shell 失败历史，使同一 validator/build 可以针对新状态重跑。仅有 `side_effect_state=unknown` 不足以解锁：`node --version`、无输出文件的 `curl` 和无关本机 CLI 即使 direct broker 无法观察副作用，也不能清除失败历史或 pending recovery；副作用已证明为 `none` 的只读成功同样不能绕过失败监督。
+`Bash` 的 resource revision 使用 `command + cwd` 生成不暴露命令文本的稳定摘要；不同命令不共用 `unknown` class budget。当已观测 mutation 成功，或 Bash 成功且宿主基于 canonical call arguments 与 command classifier 判定为明确恢复型 mutation（例如 `npm install`、`python -m pip install`、创建/写入文件）时，才清除旧 Bash 失败历史，使同一 validator/build 可以针对新状态重跑。仅有 `side_effect_state=unknown` 不足以解锁：`node --version`、无输出文件的 `curl` 和无关本机 CLI 不能清除失败历史或 pending recovery；副作用已证明为 `none` 的只读成功同样不能绕过失败监督。
 
 同 capability 存在多个 provider 也不允许 runtime 在失败后暗中换实现。若 provider A 已 `transport=completed` 且返回 partial/observed side effect，当次 call 必须以 A 的失败与变更事实终止，不自动调用 provider B。只有模型在检查外部状态后明确发出新的 B tool call，B 才可执行。
 

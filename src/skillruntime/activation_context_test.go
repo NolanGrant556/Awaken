@@ -115,7 +115,7 @@ func TestCatalogToolActivationObserverFailurePreventsExecution(t *testing.T) {
 			return "ok", nil
 		}),
 	}
-	ctx := WithActivationScope(context.Background(), []string{"file_read"}, func(context.Context, *SkillActivationPlan) error {
+	ctx := WithActivationScope(context.Background(), []string{"Read"}, func(context.Context, *SkillActivationPlan) error {
 		return context.Canceled
 	})
 	if _, err := catalogTool.Invoke(ctx, SkillInvocationRequest{Skill: "durable", Source: InvocationUser}); err == nil {

@@ -45,13 +45,17 @@ type ToolRuntime struct {
 	// the spawning sub-agent. nil for the root agent.
 	subagentOrigin *profile.SubagentOrigin
 	// router maps an ExecutionIntent + ExecutionProfile to the appropriate
-	// ToolExecutor (FileChainExecutor / ShellExecutor / McpExecutor /
+	// ToolExecutor (FileOperationExecutor / BashExecutor / McpExecutor /
 	// GuardianExecutor). Task 11 of "零审批自动执行策略": the Router sits
 	// between the auto policy decision and the raw tool execution, adding
 	// executor-specific enforcement (boundary checks, sandbox consultation,
 	// risk annotation checks, read-only enforcement). When nil, Execute
 	// falls back to the legacy executeTool path.
-	router *executors.Router
+	router            *executors.Router
+	threadID          string
+	modelCapabilities tool.ModelCapabilities
+	toolSessionState  *tool.ToolSessionState
+	modelContentStore tool.ModelContentStore
 }
 
 type ToolRuntimeConfig struct {
@@ -72,7 +76,10 @@ type ToolRuntimeConfig struct {
 	SubagentBoundary *subagent.ParentBoundary
 	// SubagentOrigin, when set, is propagated into every ExecutionIntent
 	// so the decision layer can attribute the call.
-	SubagentOrigin *profile.SubagentOrigin
+	SubagentOrigin    *profile.SubagentOrigin
+	ModelCapabilities tool.ModelCapabilities
+	ToolSessionState  *tool.ToolSessionState
+	ModelContentStore tool.ModelContentStore
 }
 
 type ToolExecutionResult struct {
@@ -120,16 +127,12 @@ type ToolExecutionResult struct {
 	ProviderDependencies   []tool.DependencyRequirement
 	DependencyObservations []tool.DependencyObservation
 	// TransformedFrom is the original tool name when this execution is the
-	// target of a transform decision (e.g. "shell" when a shell echo-write
-	// was rewritten to apply_patch). Empty for direct (non-transformed)
-	// calls. Task 16: surfaced on the audit record and the
-	// ToolPermissionDecided event so the UI can show "shell → apply_patch".
+	// target of a transform decision. Empty for direct (non-transformed)
+	// calls and surfaced on the audit record and ToolPermissionDecided event.
 	TransformedFrom string
 	// TrashedPaths lists the absolute paths moved to the OS recycle bin
-	// during this call. Populated by parsing the apply_patch output (which
-	// encodes "D path (已移到回收站: trashedPath)" lines). Task 16: surfaced
-	// on the audit record and the ToolPermissionDecided event so the UI can
-	// show "Deleted file moved to recycle bin".
+	// during this call. Populated from structured executor outcomes and
+	// surfaced on the audit record and ToolPermissionDecided event.
 	TrashedPaths []string
 	// GuardianViolation is populated when a guardian constraint was
 	// violated (i.e. the call was denied because a guardian agent attempted
@@ -181,6 +184,9 @@ func NewToolRuntimeWithConfig(sink EventSink, config ToolRuntimeConfig) *ToolRun
 		subagentBoundary:  config.SubagentBoundary,
 		subagentOrigin:    config.SubagentOrigin,
 		router:            executors.NewRouter(),
+		modelCapabilities: config.ModelCapabilities,
+		toolSessionState:  config.ToolSessionState,
+		modelContentStore: config.ModelContentStore,
 	}
 }
 
@@ -424,6 +430,10 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	}
 
 	toolCtx := tool.ContextWithPermissionContext(ctx, rt.permissionContext)
+	toolCtx = tool.ContextWithToolThreadID(toolCtx, rt.threadID)
+	toolCtx = tool.ContextWithModelCapabilities(toolCtx, rt.modelCapabilities)
+	toolCtx = tool.ContextWithToolSessionState(toolCtx, rt.toolSessionState)
+	toolCtx = tool.ContextWithModelContentStore(toolCtx, rt.modelContentStore)
 	toolCtx = tool.ContextWithToolExecutionIdentity(toolCtx, tool.ToolExecutionIdentity{
 		RunID:      rt.runID,
 		ToolCallID: result.ToolCallID,
@@ -438,8 +448,6 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		toolCtx = tool.ContextWithExecutionEnvironmentSnapshot(toolCtx, *rt.environment)
 	}
 	permission := rt.decideToolPermission(toolCtx, selectedTool, def, input)
-	result.AffectedPaths = append([]string(nil), permission.Metadata.AffectedPaths...)
-	result.PatchSummary = strings.TrimSpace(permission.Metadata.PatchSummary)
 	rt.emitPatchPreview(result, selectedTool, input)
 
 	decisionRequest := inferToolDecisionRequest(
@@ -467,8 +475,7 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	}
 
 	decision = executionDecisionToToolDecision(execDecision)
-	// Preserve the normalized input for allow decisions that don't carry
-	// an explicit UpdatedInput (e.g. the compatibility approval path).
+	// Preserve the normalized input for allow decisions that do not rewrite it.
 	if decision.Action == ToolDecisionAllow && strings.TrimSpace(decision.UpdatedInput) == "" {
 		decision.UpdatedInput = input
 	}
@@ -476,9 +483,8 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 
 	decision = normalizeToolDecision(decision, firstNonEmpty(permission.Reason, "AUTO policy denied tool execution"))
 	// Task 16: when the decision is a transform, record the original tool
-	// name on the result BEFORE emitting the ToolPermissionDecided event so
-	// the event carries TransformedFrom (e.g. "shell") alongside
-	// TransformedTo (e.g. "apply_patch") and the UI can show the rewrite.
+	// name on the result before emitting ToolPermissionDecided so the UI can
+	// show the rewrite.
 	if decision.Action == ToolDecisionTransform {
 		result.TransformedFrom = call.Function.Name
 	}
@@ -596,9 +602,7 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	result.Content = output
 	applyExecutorOutcome(&result, execOut)
 	result.ResultSummary = excerptString(strings.TrimSpace(output), 200)
-	// TrashedPaths are sourced from the executor's ToolExecutionOutput when
-	// the executor populates it, falling back to extractTrashedPaths(content)
-	// for backwards compatibility (routeToExecutor handles the fallback).
+	// TrashedPaths are sourced from structured executor outcomes.
 	result.TrashedPaths = trashedPaths
 	return rt.finalizeExecutedToolResult(result, def, permission, string(decision.Source), selectedTool, input, output)
 }

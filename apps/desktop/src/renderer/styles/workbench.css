@@ -675,11 +675,6 @@
   background: var(--aw-surface-detail);
 }
 
-.narrative-kind-approval {
-  border-color: var(--aw-warning-soft-border);
-  background: var(--aw-warning-soft-bg);
-}
-
 .narrative-kind-fileChange {
   border-color: var(--aw-success-soft-border);
   background: var(--aw-success-soft-bg);

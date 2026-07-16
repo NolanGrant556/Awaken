@@ -107,6 +107,7 @@ type ExecutionOutcome struct {
 	AffectedPaths   []string                `json:"affected_paths,omitempty"`
 	PatchSummary    string                  `json:"patch_summary,omitempty"`
 	Artifacts       []ArtifactDescriptor    `json:"artifacts,omitempty"`
+	ModelContent    []ModelContentPart      `json:"model_content,omitempty"`
 	Summary         string                  `json:"summary"`
 	Operation       *OperationDescriptor    `json:"operation,omitempty"`
 	Changes         []ResourceChange        `json:"changes,omitempty"`

@@ -34,7 +34,7 @@ func TestCompactInvokedSkillContextEnforcesBudgetsAndKeepsNewest(t *testing.T) {
 		if !block.Compacted {
 			t.Fatalf("kept Skill was not marked compacted: %+v", block)
 		}
-		if !strings.Contains(block.Content, "use read_file on "+block.SourcePath) {
+		if !strings.Contains(block.Content, "use Read on "+block.SourcePath) {
 			t.Fatalf("truncated Skill lacks an exact reread path: %s", block.Content)
 		}
 		contentBeforeNotice := strings.SplitN(block.Content, "\n\n[... skill content truncated", 2)[0]

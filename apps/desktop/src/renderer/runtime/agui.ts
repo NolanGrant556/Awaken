@@ -1,5 +1,4 @@
 export type {
-  AguiApprovalRiskTone,
   AguiArtifactStatus,
   AguiEvent,
   AguiEventType,

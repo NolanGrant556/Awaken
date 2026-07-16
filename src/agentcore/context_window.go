@@ -206,6 +206,9 @@ func estimateMessageTokens(message convcontext.Message) int {
 		total += convcontext.EstimateTokens(toolCall.Function.Name)
 		total += convcontext.EstimateTokens(toolCall.Function.Arguments)
 	}
+	for _, part := range message.ModelContent {
+		total += convcontext.EstimateModelContentTokens(part)
+	}
 	return total
 }
 

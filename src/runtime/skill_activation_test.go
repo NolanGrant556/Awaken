@@ -25,7 +25,7 @@ func TestComposerMultiSkillActivationPersistenceIsAtomic(t *testing.T) {
 		if err := os.MkdirAll(skillRoot, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		definition := "---\nname: " + skillID + "\ndescription: atomic activation\ntoolPolicy:\n  allow: [read_file]\n---\nBody\n"
+		definition := "---\nname: " + skillID + "\ndescription: atomic activation\ntoolPolicy:\n  allow: [Read]\n---\nBody\n"
 		if err := os.WriteFile(filepath.Join(skillRoot, "SKILL.md"), []byte(definition), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -173,8 +173,8 @@ name: deck
 description: slides
 version: "9"
 toolPolicy:
-  allow: [read_file, text_edit]
-requiredTools: [read_file]
+  allow: [Read, Edit]
+requiredTools: [Read]
 requiredCapabilities: [artifact_read]
 requiredResources:
   - path: references/recipes.md
@@ -262,7 +262,7 @@ func TestComposerMissingDeclaredResourceDoesNotDisableSkillOrUseNetworkFallback(
 name: missing-resource
 description: must fail before the first model request
 toolPolicy:
-  allow: [read_file]
+  allow: [Read]
 requiredResources:
   - path: references/required.md
     required: true
@@ -434,7 +434,7 @@ func TestComposerSkillContextDoesNotLeakIntoNextRun(t *testing.T) {
 name: read-only
 description: read only
 toolPolicy:
-  allow: [read_file]
+  allow: [Read]
 ---
 Read-only body.
 `), 0644); err != nil {
@@ -512,7 +512,7 @@ func TestComposerSkillHintsDoNotExpandOrNarrowParentAndActivationIsDurable(t *te
 name: too-wide
 description: asks for a tool outside the run
 toolPolicy:
-  allow: [read_file, text_edit]
+  allow: [Read, Edit]
 ---
 Body.
 `), 0644); err != nil {

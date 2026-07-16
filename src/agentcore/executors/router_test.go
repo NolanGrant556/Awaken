@@ -6,13 +6,12 @@ import (
 	"awaken/src/tool/profile"
 )
 
-// TestRouterRoutesFileChainToFileChainExecutor verifies that a legacy
-// file_chain intent routes into the new ArtifactExecutor lane.
-func TestRouterRoutesFileChainToFileChainExecutor(t *testing.T) {
+// TestRouterRoutesFileOperationToArtifactExecutor verifies the artifact lane.
+func TestRouterRoutesFileOperationToArtifactExecutor(t *testing.T) {
 	router := NewRouter()
 	intent := profile.ExecutionIntent{
-		ToolName: "apply_patch",
-		ToolKind: profile.ToolKindFileChain,
+		ToolName: "Edit",
+		ToolKind: profile.ToolKindFileOperation,
 	}
 	executor, err := router.Route(intent, profile.WorkspaceWrite())
 	if err != nil {
@@ -23,12 +22,11 @@ func TestRouterRoutesFileChainToFileChainExecutor(t *testing.T) {
 	}
 }
 
-// TestRouterRoutesShellCommandToShellExecutor verifies that a legacy
-// shell_command intent routes into the SystemExecutor lane.
-func TestRouterRoutesShellCommandToShellExecutor(t *testing.T) {
+// TestRouterRoutesBashCommandToSystemExecutor verifies the system lane.
+func TestRouterRoutesBashCommandToSystemExecutor(t *testing.T) {
 	router := NewRouter()
 	intent := profile.ExecutionIntent{
-		ToolName: "shell",
+		ToolName: "Bash",
 		ToolKind: profile.ToolKindShellCommand,
 	}
 	executor, err := router.Route(intent, profile.WorkspaceWrite())
@@ -81,7 +79,7 @@ func TestRouterGuardianReadOnlyRoutesAllToGuardianExecutor(t *testing.T) {
 	router := NewRouter()
 	guardianProfile := profile.GuardianReadOnly()
 	kinds := []profile.ToolKind{
-		profile.ToolKindFileChain,
+		profile.ToolKindFileOperation,
 		profile.ToolKindShellCommand,
 		profile.ToolKindMcpApp,
 		profile.ToolKindReviewAgent,

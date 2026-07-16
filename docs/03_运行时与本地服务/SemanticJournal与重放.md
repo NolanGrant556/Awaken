@@ -45,7 +45,7 @@ post_estimate_tokens
 agent_id               # 仅 child runner
 ```
 
-每条 compacted message 保存 role、content、tool calls/result pairing、name、error 标志、boundary ID 和无 blob 的 attachment identity/storage key。第一条消息必须带与 payload 一致的 boundary；role 只允许 user/assistant/tool；完整消息集必须通过 tool-result pairing 校验。
+每条 compacted message 保存 role、content、tool calls/result pairing、name、error 标志、boundary ID、无 blob 的 attachment identity/storage key，以及 tool result 的 `model_content` metadata/storage key。第一条消息必须带与 payload 一致的 boundary；role 只允许 user/assistant/tool；完整消息集必须通过 tool-result pairing 校验。
 
 重放按 journal seq 处理：遇到合法 `context_compacted` 时，用其完整 `messages` 替换之前累计的模型上下文，并清空待合并 assistant 片段；之后的记录继续追加。记录缺 messages、boundary 不一致、role 非法或 tool pairing 非法时，保留压缩前最后一份有效上下文，不让坏记录擦除历史。该记录仍留在 journal 供诊断。
 
@@ -53,13 +53,17 @@ agent_id               # 仅 child runner
 
 ## 5. 工具、环境与 provider 事实
 
-tool call/result payload 持久保存 tool/environment snapshot ID、provider ID、capabilities、readiness、dependencies、transport/process/semantic 状态和 side-effect state。重放不查询当前 registry 或当前机器环境，也不因 provider 后来 ready 而改写旧 run。
+tool call/result payload 持久保存 tool/environment snapshot ID、provider ID、capabilities、readiness、dependencies、transport/process/semantic 状态、side-effect state 和 `model_content` metadata。工具媒体实际文件位于 `sessions/<thread>/tool-results/<tool-call>/`，Journal 与 compact record 只保存 runtime-owned `storage_key`；Base64 不进入 JSONL、AG-UI、audit 或日志。
+
+重放和 compaction 在进入模型上下文前重新水合 storage key。blob 缺失或 key 非法时保留原历史 tool card，并向模型结果追加 `tool_media_blob_missing` warning；不得把路径字符串或空 content 伪装成视觉成功。删除 thread 时删除其 tool-results，workspace/profile/线程状态重建后不会沿用内存文件快照或 cwd。
+
+重放不查询当前 registry 或当前机器环境，也不因 provider 后来 ready 而改写旧 run。旧工具名按通用 legacy tool card 投影，不重写历史记录。
 
 模型历史使用 canonical `ModelPayload`，UI 使用 display/projection。失败工具不能在重放时凭卡片文案生成不存在的 change/artifact。
 
 ## 6. Skill 与任务输入恢复
 
-`skill_activated` 保存锚定路径、正文、来源、调用模式和 receipt；服务重建时按 run 恢复 inline SkillContextBlocks。压缩按恢复后的最近调用顺序保留，单 Skill 约 5,000 tokens、合计约 25,000 tokens；6 个满预算块保留最新 5 个。截断块必须保留精确 `read_file` 源路径。
+`skill_activated` 保存锚定路径、正文、来源、调用模式和 receipt；服务重建时按 run 恢复 inline SkillContextBlocks。压缩按恢复后的最近调用顺序保留，单 Skill 约 5,000 tokens、合计约 25,000 tokens；6 个满预算块保留最新 5 个。截断块必须保留精确 `Read` 源路径。
 
 消息发送不写 requested/resolved 审核记录，也不在重启恢复时重建 pending review；它只保留普通 tool call/result 与 provider outcome 事实。
 
@@ -70,7 +74,7 @@ tool call/result payload 持久保存 tool/environment snapshot ID、provider ID
 ## 8. Owner 与验证
 
 - kind/payload 与 Runner：`src/agentcore/semantic_record.go`、`semantic_journal.go`、`runner.go`。
-- 耐久与模型历史恢复：`src/runtime/journal_store.go`、`transcript_store.go`、`session.go`。
+- 耐久、工具媒体与模型历史恢复：`src/runtime/journal_store.go`、`tool_result_store.go`、`transcript_store.go`、`session.go`。
 - wire 投影：`src/protocol/agui/semantic_projector.go`。
 
-自动化必须覆盖压缩 append/flush 先于内存替换、持久化失败保留旧内存上下文、重建 `RunService` 后 summary+tail 精确恢复、坏 compaction fail closed、tool pairing 与 attachment storage key 重放。真实 Desktop 还需执行一次触发压缩的长会话，完整重启后继续追问并检查 provider request 使用压缩后的上下文。
+自动化必须覆盖压缩 append/flush 先于内存替换、持久化失败保留旧内存上下文、重建 `RunService` 后 summary+tail 精确恢复、坏 compaction fail closed、tool pairing、attachment/tool-media storage key 重放、blob 缺失 warning 和 Base64 不落盘。真实 Desktop 还需执行一次含 `Read` 图片/PDF 的重启回放，并确认旧新工具卡片都不崩溃。

@@ -55,15 +55,13 @@ func TestBuiltinToolCatalogHasResolvedV2Contracts(t *testing.T) {
 
 func TestCoreModelDescriptionsDeclareNeighborToolBoundaries(t *testing.T) {
 	cases := map[string][]string{
-		"read_file":        {"read_artifact", "list_files", "grep_search"},
-		"read_artifact":    {"read_file"},
-		"list_files":       {"grep_search", "read_file"},
-		"grep_search":      {"list_files", "web_search"},
-		"text_edit":        {"read_file", "text_file_create", "apply_patch", "trash_file"},
-		"text_file_create": {"text_edit", "trash_file"},
-		"apply_patch":      {"text_edit", "text_file_create", "trash_file"},
-		"trash_file":       {"rm", "rmdir", "unlink"},
-		"shell":            {"read_file", "grep_search", "text_edit", "trash_file"},
+		"Read":      {"Glob", "Grep"},
+		"Edit":      {"Read", "Write", "trash_file"},
+		"Write":     {"Read", "Edit", "trash_file"},
+		"Glob":      {"Grep", "Read"},
+		"Grep":      {"Glob", "Read"},
+		"Bash":      {"Read", "Edit", "Write", "Glob", "Grep", "trash_file"},
+		"WebSearch": {"Grep"},
 	}
 	for name, boundaries := range cases {
 		entry, err := tool.GetRegisteredTool(name)
@@ -91,11 +89,9 @@ func TestBuiltinFailureModeRetryabilityMatchesRuntimeSemantics(t *testing.T) {
 		{toolName: "artifact_publish", code: "artifact_publish_file_unavailable", retryable: true},
 		{toolName: "artifact_publish", code: "artifact_publish_permission_denied", retryable: false},
 		{toolName: "artifact_publish", code: "artifact_publish_not_regular_file", retryable: false},
-		{toolName: "presentation_create", code: tool.ErrorCodeNeedsRuntime, retryable: false},
-		{toolName: "presentation_create", code: tool.ErrorCodeToolExecutionFailed, retryable: false},
-		{toolName: "read_artifact", code: "read_artifact_runtime_failed", retryable: false},
 		{toolName: "trash_file", code: tool.ErrorCodeToolExecutionFailed, retryable: false},
-		{toolName: "shell", code: tool.ErrorCodeProcessSpawnFailed, retryable: true},
+		{toolName: "Bash", code: tool.ErrorCodeProcessSpawnFailed, retryable: true},
+		{toolName: "Read", code: tool.ErrorCodeNeedsRuntime, retryable: true},
 	}
 	for _, test := range tests {
 		entry, err := tool.GetRegisteredTool(test.toolName)

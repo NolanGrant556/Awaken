@@ -48,9 +48,8 @@ func (rt *ToolRuntime) executeTool(
 // Returns (content, trashedPaths, output, error) where content may be non-empty
 // even when err is non-nil — this happens when the executor denies the call
 // and surfaces a denial message. trashedPaths is sourced from the
-// ToolExecutionOutput when the executor populates it, falling back to
-// extractTrashedPaths(content) for backwards compatibility. Callers should
-// use content when non-empty, otherwise fall back to formatting err.
+// ToolExecutionOutput when the executor populates it. Callers should use
+// content when non-empty, otherwise fall back to formatting err.
 func (rt *ToolRuntime) routeToExecutor(
 	ctx stdcontext.Context,
 	result ToolExecutionResult,
@@ -73,9 +72,6 @@ func (rt *ToolRuntime) routeToExecutor(
 			ErrorCode: outcome.ErrorCode,
 		}
 		trashedPaths := out.Outcome.ObservedTrashedPaths()
-		if len(trashedPaths) == 0 && usesLegacyOutcomeAdapter(selectedTool) {
-			trashedPaths = extractTrashedPaths(out.Content)
-		}
 		if err != nil {
 			return out.Content, trashedPaths, out, err
 		}
@@ -97,9 +93,6 @@ func (rt *ToolRuntime) routeToExecutor(
 	if len(trashedPaths) == 0 {
 		trashedPaths = out.Outcome.ObservedTrashedPaths()
 	}
-	if len(trashedPaths) == 0 && usesLegacyOutcomeAdapter(selectedTool) {
-		trashedPaths = extractTrashedPaths(out.Content)
-	}
 	if err != nil {
 		return out.Content, trashedPaths, out, err
 	}
@@ -118,13 +111,8 @@ func (rt *ToolRuntime) routeToExecutor(
 	return out.Content, trashedPaths, out, nil
 }
 
-func usesLegacyOutcomeAdapter(selectedTool tool.Tool) bool {
-	_, structured := selectedTool.(tool.OutcomeTool)
-	return !structured
-}
-
 // executeTransformedTool handles a ToolDecisionTransform by looking up the
-// rewritten tool (e.g. apply_patch), normalizing its input, and executing it
+// rewritten tool, normalizing its input, and executing it
 // directly. The transform decision authorizes the rewritten call, so the
 // auto policy is not re-evaluated for the transformed tool.
 //
@@ -239,8 +227,8 @@ func (rt *ToolRuntime) executeTransformedTool(
 	transformedCtx := ctxWithTransformDepth(ctx, transformDepthFromCtx(ctx)+1)
 	// Build an ExecutionIntent for the transformed tool so the Router can
 	// select the appropriate executor. The transformed tool kind is inferred
-	// from the transformed tool's name and annotations (e.g. apply_patch →
-	// file_chain). Workspace roots and subagent origin are inherited from
+	// from the transformed tool's name and annotations. Workspace roots and
+	// subagent origin are inherited from
 	// the original intent.
 	transformedCall := call
 	transformedCall.Function.Name = newToolName
@@ -264,9 +252,7 @@ func (rt *ToolRuntime) executeTransformedTool(
 	result.Content = output
 	applyExecutorOutcome(&result, execOut)
 	result.ResultSummary = excerptString(strings.TrimSpace(output), 200)
-	// TrashedPaths are sourced from the executor's ToolExecutionOutput when
-	// the executor populates it, falling back to extractTrashedPaths(content)
-	// for backwards compatibility (routeToExecutor handles the fallback).
+	// TrashedPaths are sourced from structured executor outcomes.
 	result.TrashedPaths = trashedPaths
 	return rt.finalizeExecutedToolResult(result, transformedDef, permission, string(decision.Source), transformedTool, transformedInput, output)
 }
@@ -284,6 +270,29 @@ func (rt *ToolRuntime) finalizeExecutedToolResult(
 	input string,
 	output string,
 ) ToolExecutionResult {
+	if len(result.Outcome.ModelContent) > 0 && rt.modelContentStore != nil {
+		identity := tool.ToolExecutionIdentity{
+			RunID:      rt.runID,
+			ToolCallID: result.ToolCallID,
+			ToolName:   result.Name,
+		}
+		persisted, err := rt.modelContentStore.PersistToolResult(
+			stdcontext.Background(),
+			rt.threadID,
+			identity,
+			result.Outcome.ModelContent,
+		)
+		if err != nil {
+			result = synthesizeExecutionErrorToolResult(
+				result,
+				"tool_media_persistence_failed",
+				"Tool media could not be persisted safely.",
+				err.Error(),
+			)
+		} else {
+			result.Outcome.ModelContent = persisted
+		}
+	}
 	result = finalizeToolResult(result)
 	if result.IsError || result.Outcome.IsError() {
 		rt.emitToolProgress(result, "failed", firstNonEmpty(result.Outcome.ErrorMessage, result.ErrorCode, "tool failed"), 100)

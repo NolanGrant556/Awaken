@@ -12,7 +12,7 @@ import (
 // --- Mock tools for executor tests ---
 
 // noopTool is a minimal tool that returns a fixed string. It is used by
-// ShellExecutor and FileChainExecutor tests where the executor should
+// BashExecutor and FileOperationExecutor tests where the executor should
 // delegate to the tool after passing enforcement checks.
 type noopTool struct {
 	name        string
@@ -64,21 +64,20 @@ func (t *openWorldReadOnlyTool) Execute(ctx context.Context, input string) (stri
 	return "open-world read-only output: " + input, nil
 }
 
-// --- ShellExecutor tests ---
+// --- BashExecutor tests ---
 
-// TestShellExecutorAllowsSandboxRequiredProfile verifies that ShellExecutor
-// no longer treats SandboxRequired as a hard gate. Shell is a local-computer
-// execution surface; command behavior follows the selected shell tool policy.
-func TestShellExecutorAllowsSandboxRequiredProfile(t *testing.T) {
-	executor := NewShellExecutor()
+// TestBashExecutorAllowsSandboxRequiredProfile verifies that Bash delegates
+// to the current-user tool even when the profile carries a legacy sandbox flag.
+func TestBashExecutorAllowsSandboxRequiredProfile(t *testing.T) {
+	executor := NewBashExecutor()
 	intent := profile.ExecutionIntent{
-		ToolName: "shell",
+		ToolName: "Bash",
 		ToolKind: profile.ToolKindShellCommand,
 	}
-	shellProfile := profile.GuardianReadOnly()
-	noop := &noopTool{name: "shell"}
+	profileConfig := profile.GuardianReadOnly()
+	noop := &noopTool{name: "Bash"}
 
-	output, err := executor.Execute(context.Background(), intent, shellProfile, noop, "test", nil)
+	output, err := executor.Execute(context.Background(), intent, profileConfig, noop, "test", nil)
 	if err != nil {
 		t.Fatalf("unexpected error for SandboxRequired shell profile: %v", err)
 	}
@@ -90,18 +89,17 @@ func TestShellExecutorAllowsSandboxRequiredProfile(t *testing.T) {
 	}
 }
 
-// TestShellExecutorAllowsBestEffortProfile verifies that the shell wrapper
-// delegates to the shell tool under the normal WorkspaceWrite profile.
-func TestShellExecutorAllowsBestEffortProfile(t *testing.T) {
-	executor := NewShellExecutor()
+// TestBashExecutorAllowsBestEffortProfile verifies the normal profile path.
+func TestBashExecutorAllowsBestEffortProfile(t *testing.T) {
+	executor := NewBashExecutor()
 	intent := profile.ExecutionIntent{
-		ToolName: "shell",
+		ToolName: "Bash",
 		ToolKind: profile.ToolKindShellCommand,
 	}
-	shellProfile := profile.WorkspaceWrite() // SandboxBestEffort
-	noop := &noopTool{name: "shell"}
+	profileConfig := profile.WorkspaceWrite()
+	noop := &noopTool{name: "Bash"}
 
-	output, err := executor.Execute(context.Background(), intent, shellProfile, noop, "test", nil)
+	output, err := executor.Execute(context.Background(), intent, profileConfig, noop, "test", nil)
 	if err != nil {
 		t.Fatalf("unexpected error for SandboxBestEffort without sandbox: %v", err)
 	}
@@ -169,20 +167,20 @@ func TestMcpExecutorAllowsOpenWorldWithNetworkRestricted(t *testing.T) {
 	}
 }
 
-// --- FileChainExecutor tests ---
+// --- FileOperationExecutor tests ---
 
-// TestFileChainExecutorDeniesWriteUnderReadOnlyProfile verifies that
-// FileChainExecutor denies a write action when the profile is
+// TestFileOperationExecutorDeniesWriteUnderReadOnlyProfile verifies that
+// FileOperationExecutor denies a write action when the profile is
 // PermissionReadOnly.
-func TestFileChainExecutorDeniesWriteUnderReadOnlyProfile(t *testing.T) {
-	executor := NewFileChainExecutor()
+func TestFileOperationExecutorDeniesWriteUnderReadOnlyProfile(t *testing.T) {
+	executor := NewFileOperationExecutor()
 	intent := profile.ExecutionIntent{
-		ToolName:        "apply_patch",
-		ToolKind:        profile.ToolKindFileChain,
+		ToolName:        "Edit",
+		ToolKind:        profile.ToolKindFileOperation,
 		RequestedAction: profile.ActionWrite,
 	}
 	readOnlyProfile := profile.WorkspaceReadOnly() // PermissionReadOnly
-	noop := &noopTool{name: "apply_patch"}
+	noop := &noopTool{name: "Edit"}
 
 	output, err := executor.Execute(context.Background(), intent, readOnlyProfile, noop, "test", nil)
 	if err == nil {
@@ -196,21 +194,21 @@ func TestFileChainExecutorDeniesWriteUnderReadOnlyProfile(t *testing.T) {
 	}
 }
 
-// TestFileChainExecutorAllowsWriteUnderWorkspaceWriteProfile verifies that
-// FileChainExecutor allows a write action when the profile is
+// TestFileOperationExecutorAllowsWriteUnderWorkspaceWriteProfile verifies that
+// FileOperationExecutor allows a write action when the profile is
 // PermissionWorkspaceWrite.
-func TestFileChainExecutorAllowsWriteUnderWorkspaceWriteProfile(t *testing.T) {
-	executor := NewFileChainExecutor()
+func TestFileOperationExecutorAllowsWriteUnderWorkspaceWriteProfile(t *testing.T) {
+	executor := NewFileOperationExecutor()
 	intent := profile.ExecutionIntent{
-		ToolName:        "apply_patch",
-		ToolKind:        profile.ToolKindFileChain,
+		ToolName:        "Edit",
+		ToolKind:        profile.ToolKindFileOperation,
 		RequestedAction: profile.ActionWrite,
 		// Paths intentionally empty: the boundary check skips when no
 		// paths are declared, so the tool's own Execute is the last line
-		// of defense (as documented in enforceFileChainBoundary).
+		// of defense (as documented in enforceFileOperationBoundary).
 	}
 	writeProfile := profile.WorkspaceWrite() // PermissionWorkspaceWrite
-	noop := &noopTool{name: "apply_patch"}
+	noop := &noopTool{name: "Edit"}
 
 	output, err := executor.Execute(context.Background(), intent, writeProfile, noop, "test", nil)
 	if err != nil {

@@ -17,11 +17,11 @@ func ptrProfile(p profile.ExecutionProfile) *profile.ExecutionProfile {
 }
 
 // TestEnforceGuardianConstraints_ReadOnlyToolAllowed verifies that a
-// read-only tool (e.g. file_read) is allowed under the guardian profile.
+// read-only tool (for example Read) is allowed under the guardian profile.
 func TestEnforceGuardianConstraints_ReadOnlyToolAllowed(t *testing.T) {
 	intent := profile.ExecutionIntent{
-		ToolName:        "file_read",
-		ToolKind:        profile.ToolKindFileChain,
+		ToolName:        "Read",
+		ToolKind:        profile.ToolKindFileOperation,
 		RequestedAction: profile.ActionRead,
 		NetworkScope:    profile.NetworkScopeNone,
 	}
@@ -32,11 +32,11 @@ func TestEnforceGuardianConstraints_ReadOnlyToolAllowed(t *testing.T) {
 }
 
 // TestEnforceGuardianConstraints_InspectActionAllowed verifies that an
-// inspect action (e.g. list_files, grep_search) is allowed.
+// inspect action (for example Glob or Grep) is allowed.
 func TestEnforceGuardianConstraints_InspectActionAllowed(t *testing.T) {
 	intent := profile.ExecutionIntent{
-		ToolName:        "list_files",
-		ToolKind:        profile.ToolKindFileChain,
+		ToolName:        "Glob",
+		ToolKind:        profile.ToolKindFileOperation,
 		RequestedAction: profile.ActionInspect,
 		NetworkScope:    profile.NetworkScopeNone,
 	}
@@ -47,11 +47,11 @@ func TestEnforceGuardianConstraints_InspectActionAllowed(t *testing.T) {
 }
 
 // TestEnforceGuardianConstraints_WriteToolRejected verifies that a write
-// tool (e.g. apply_patch with ActionWrite) is rejected.
+// tool (for example Edit with ActionWrite) is rejected.
 func TestEnforceGuardianConstraints_WriteToolRejected(t *testing.T) {
 	intent := profile.ExecutionIntent{
-		ToolName:        "apply_patch",
-		ToolKind:        profile.ToolKindFileChain,
+		ToolName:        "Edit",
+		ToolKind:        profile.ToolKindFileOperation,
 		RequestedAction: profile.ActionWrite,
 		NetworkScope:    profile.NetworkScopeNone,
 	}
@@ -63,8 +63,8 @@ func TestEnforceGuardianConstraints_WriteToolRejected(t *testing.T) {
 	if !errors.As(err, &violation) {
 		t.Fatalf("expected *GuardianViolationError, got %T: %v", err, err)
 	}
-	if violation.ToolName != "apply_patch" {
-		t.Errorf("expected ToolName %q, got %q", "apply_patch", violation.ToolName)
+	if violation.ToolName != "Edit" {
+		t.Errorf("expected ToolName %q, got %q", "Edit", violation.ToolName)
 	}
 	if !strings.Contains(strings.ToLower(violation.Reason), "read-only") && !strings.Contains(strings.ToLower(violation.Reason), "forbids") {
 		t.Errorf("expected reason to mention read-only or forbids, got %q", violation.Reason)
@@ -75,8 +75,8 @@ func TestEnforceGuardianConstraints_WriteToolRejected(t *testing.T) {
 // destructive tool (delete action) is rejected.
 func TestEnforceGuardianConstraints_DestructiveToolRejected(t *testing.T) {
 	intent := profile.ExecutionIntent{
-		ToolName:        "apply_patch",
-		ToolKind:        profile.ToolKindFileChain,
+		ToolName:        "trash_file",
+		ToolKind:        profile.ToolKindFileOperation,
 		RequestedAction: profile.ActionDelete,
 		NetworkScope:    profile.NetworkScopeNone,
 	}
@@ -88,8 +88,8 @@ func TestEnforceGuardianConstraints_DestructiveToolRejected(t *testing.T) {
 	if !errors.As(err, &violation) {
 		t.Fatalf("expected *GuardianViolationError, got %T: %v", err, err)
 	}
-	if violation.ToolName != "apply_patch" {
-		t.Errorf("expected ToolName %q, got %q", "apply_patch", violation.ToolName)
+	if violation.ToolName != "trash_file" {
+		t.Errorf("expected ToolName %q, got %q", "trash_file", violation.ToolName)
 	}
 }
 
@@ -97,8 +97,8 @@ func TestEnforceGuardianConstraints_DestructiveToolRejected(t *testing.T) {
 // action is rejected as destructive.
 func TestEnforceGuardianConstraints_MoveActionRejected(t *testing.T) {
 	intent := profile.ExecutionIntent{
-		ToolName:        "apply_patch",
-		ToolKind:        profile.ToolKindFileChain,
+		ToolName:        "Edit",
+		ToolKind:        profile.ToolKindFileOperation,
 		RequestedAction: profile.ActionMove,
 		NetworkScope:    profile.NetworkScopeNone,
 	}
@@ -116,7 +116,7 @@ func TestEnforceGuardianConstraints_MoveActionRejected(t *testing.T) {
 // execute action (e.g. shell command) is rejected.
 func TestEnforceGuardianConstraints_ExecuteActionRejected(t *testing.T) {
 	intent := profile.ExecutionIntent{
-		ToolName:        "shell",
+		ToolName:        "Bash",
 		ToolKind:        profile.ToolKindShellCommand,
 		RequestedAction: profile.ActionExecute,
 		NetworkScope:    profile.NetworkScopeNone,
@@ -135,7 +135,7 @@ func TestEnforceGuardianConstraints_ExecuteActionRejected(t *testing.T) {
 // open-world tool (NetworkScope == open) is rejected.
 func TestEnforceGuardianConstraints_OpenWorldToolRejected(t *testing.T) {
 	intent := profile.ExecutionIntent{
-		ToolName:        "web_search",
+		ToolName:        "WebSearch",
 		ToolKind:        profile.ToolKindShellCommand,
 		RequestedAction: profile.ActionRead,
 		NetworkScope:    profile.NetworkScopeOpen,
@@ -189,8 +189,8 @@ func TestEnforceGuardianConstraints_RestrictedNetworkAllowed(t *testing.T) {
 // guardian enforcement — even for a write action.
 func TestEnforceGuardianConstraints_NonGuardianProfileNotEnforced(t *testing.T) {
 	intent := profile.ExecutionIntent{
-		ToolName:        "apply_patch",
-		ToolKind:        profile.ToolKindFileChain,
+		ToolName:        "Edit",
+		ToolKind:        profile.ToolKindFileOperation,
 		RequestedAction: profile.ActionWrite,
 		NetworkScope:    profile.NetworkScopeNone,
 	}
@@ -205,8 +205,8 @@ func TestEnforceGuardianConstraints_NonGuardianProfileNotEnforced(t *testing.T) 
 // not a guardian profile) does not trigger guardian enforcement.
 func TestEnforceGuardianConstraints_NonGuardianReadOnlyProfileNotEnforced(t *testing.T) {
 	intent := profile.ExecutionIntent{
-		ToolName:        "apply_patch",
-		ToolKind:        profile.ToolKindFileChain,
+		ToolName:        "Edit",
+		ToolKind:        profile.ToolKindFileOperation,
 		RequestedAction: profile.ActionWrite,
 		NetworkScope:    profile.NetworkScopeNone,
 	}
@@ -220,7 +220,7 @@ func TestEnforceGuardianConstraints_NonGuardianReadOnlyProfileNotEnforced(t *tes
 // the danger profile does not trigger guardian enforcement.
 func TestEnforceGuardianConstraints_DangerFullAccessNotEnforced(t *testing.T) {
 	intent := profile.ExecutionIntent{
-		ToolName:        "shell",
+		ToolName:        "Bash",
 		ToolKind:        profile.ToolKindShellCommand,
 		RequestedAction: profile.ActionExecute,
 		NetworkScope:    profile.NetworkScopeOpen,
@@ -250,11 +250,11 @@ func TestEnforceGuardianConstraints_EmptyToolName(t *testing.T) {
 // readable message.
 func TestGuardianViolationError_Error(t *testing.T) {
 	e := &GuardianViolationError{
-		ToolName: "apply_patch",
+		ToolName: "Edit",
 		Reason:   "write action forbidden",
 	}
 	msg := e.Error()
-	if !strings.Contains(msg, "apply_patch") {
+	if !strings.Contains(msg, "Edit") {
 		t.Errorf("expected error message to contain tool name, got %q", msg)
 	}
 	if !strings.Contains(msg, "write action forbidden") {

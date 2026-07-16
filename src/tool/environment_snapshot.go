@@ -116,7 +116,7 @@ type ExecutionEnvironmentProbeOptions struct {
 
 var defaultEnvironmentExecutables = []string{
 	"sh", "bash", "zsh", "pwsh", "powershell", "python3", "python", "node",
-	"git", "gh", "go", "java", "soffice", "libreoffice", "pdftoppm", "ffmpeg",
+	"git", "gh", "go", "java", "soffice", "libreoffice", "pdftoppm", "pdfinfo", "rg", "ffmpeg",
 	"pandoc", "docker",
 }
 

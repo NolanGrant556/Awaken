@@ -2,11 +2,10 @@
 // auto tool policy decision and the raw tool execution. Each ToolExecutor
 // wraps tool execution with kind-specific enforcement:
 //
-//   - FileChainExecutor: enforces the file-chain boundary (sensitive paths,
+//   - FileOperationExecutor: enforces typed file boundaries (sensitive paths,
 //     symlink escape, workspace roots) before delegating to the tool.
-//   - ShellExecutor: a thin wrapper that delegates to the existing
-//     tools/shell.ShellExecutor (via the shell tool's own Execute), ensuring
-//     the sandbox adapter is consulted.
+//   - BashExecutor: delegates to Bash while preserving canonical process
+//     status and streaming.
 //   - McpExecutor: checks MCP risk annotations; denies fail-closed when
 //     annotations are missing.
 //   - GuardianExecutor: enforces read-only for guardian/review agents.
@@ -30,8 +29,8 @@ import (
 type ToolExecutor interface {
 	// Execute runs the tool with the given input and observer. The intent
 	// provides the tool kind, requested action, and paths for enforcement.
-	// The execProfile carries the unified ExecutionProfile (approval,
-	// permission, sandbox, network, env, visibility policies) that the
+	// The execProfile carries the unified ExecutionProfile (permission,
+	// sandbox, network, env, visibility policies) that the
 	// executor enforces before delegating to the tool. The observer, if
 	// non-nil, receives streamed stdout/stderr deltas for ObservableTool
 	// implementations so the existing streaming pattern is preserved across

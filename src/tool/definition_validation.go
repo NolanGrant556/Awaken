@@ -20,10 +20,14 @@ const (
 
 var builtinNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
+var canonicalModelToolNames = map[string]struct{}{
+	"Bash": {}, "Read": {}, "Edit": {}, "Write": {}, "Glob": {}, "Grep": {}, "WebSearch": {},
+}
+
 var canonicalOutcomeFields = map[string]struct{}{
 	"schema_version": {}, "content": {}, "status": {}, "transport_status": {}, "semantic_status": {}, "process_status": {},
 	"exit_code": {}, "signal": {}, "timed_out": {}, "error_code": {}, "error_category": {}, "error_message": {},
-	"retryable": {}, "recovery_options": {}, "diagnostic": {}, "affected_paths": {}, "patch_summary": {}, "artifacts": {},
+	"retryable": {}, "recovery_options": {}, "diagnostic": {}, "affected_paths": {}, "patch_summary": {}, "artifacts": {}, "model_content": {},
 	"summary": {}, "operation": {}, "changes": {}, "environment": {}, "warnings": {}, "errors": {}, "next_actions": {}, "details": {},
 	"started_at": {}, "finished_at": {}, "duration_ms": {}, "truncated": {},
 }
@@ -84,7 +88,8 @@ func ValidateResolvedDefinition(def ToolDefinition) error {
 	if strings.TrimSpace(def.Name) == "" {
 		return fmt.Errorf("name is required")
 	}
-	if def.Source == SourceBuiltin && !builtinNamePattern.MatchString(def.Name) {
+	_, canonicalModelTool := canonicalModelToolNames[def.Name]
+	if def.Source == SourceBuiltin && !builtinNamePattern.MatchString(def.Name) && !canonicalModelTool {
 		return fmt.Errorf("builtin name %q must use lower snake_case", def.Name)
 	}
 	if !isKnownSource(def.Source) {

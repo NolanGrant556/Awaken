@@ -18,7 +18,9 @@ import (
 	"awaken/src/server"
 	"awaken/src/skillruntime"
 	"awaken/src/skills"
+	"awaken/src/tool"
 	_ "awaken/src/tools"
+	bashtool "awaken/src/tools/bash"
 )
 
 func main() {
@@ -63,7 +65,8 @@ func main() {
 					ProtectedRoots:    workspace.ProtectedRoots,
 					TemporaryWorkRoot: workspace.TemporaryWorkRoot,
 				},
-				ExecutionProfile: workspace.ExecutionProfile,
+				ExecutionProfile:  workspace.ExecutionProfile,
+				ModelContentStore: runtime.NewToolResultStore(),
 			}
 			return agentcore.NewAgentWithThreadID(agentCfg, threadID)
 		},
@@ -132,6 +135,7 @@ func main() {
 
 	log.Println("awaken-core shutting down")
 	cancelCleanup()
+	bashtool.CancelAllTasks()
 	if err := runService.FlushTranscripts(); err != nil {
 		log.Printf("awaken-core flush transcripts error: %v", err)
 	}
@@ -155,6 +159,10 @@ func modelConfigFromProfile(profile *runtime.ModelProfileConfig) agentcore.Model
 		MaxTokens:     profile.MaxTokens,
 		AuthScheme:    profile.AuthScheme,
 		ContextWindow: profile.ContextWindow,
+		Capabilities: tool.ModelCapabilities{
+			SupportsVision:    profile.SupportsVision,
+			SupportsNativePDF: profile.SupportsNativePDF,
+		},
 	}
 }
 

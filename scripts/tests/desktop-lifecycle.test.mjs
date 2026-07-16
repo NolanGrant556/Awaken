@@ -121,6 +121,7 @@ describe("desktop package staging", () => {
     mkdirSync(join(root, "apps", "desktop", "dist-electron"), { recursive: true });
     mkdirSync(join(root, "apps", "desktop", "dist"), { recursive: true });
     mkdirSync(join(root, "apps", "desktop", "resources", "bin"), { recursive: true });
+    mkdirSync(join(root, "apps", "desktop", "resources", "system-skills"), { recursive: true });
     writeFileSync(join(root, "package.json"), JSON.stringify({ name: "awaken" }));
     writeFileSync(
       join(root, "apps", "desktop", "package.json"),
@@ -132,11 +133,22 @@ describe("desktop package staging", () => {
       "stale",
     );
     writeFileSync(join(root, "apps", "desktop", "resources", "bin", "stale"), "stale");
+    writeFileSync(
+      join(root, "apps", "desktop", "resources", "system-skills", "README.md"),
+      "owned source",
+    );
     cleanDesktopPackageOutputs(root);
     assert.throws(() =>
       readFileSync(join(root, "apps", "desktop", "dist", "stale.js")),
     );
     assert.equal(existsSync(join(root, "apps", "desktop", "resources", "runtime-archive")), false);
+    assert.equal(
+      readFileSync(
+        join(root, "apps", "desktop", "resources", "system-skills", "README.md"),
+        "utf8",
+      ),
+      "owned source",
+    );
   });
 
   it("packages only the target architecture awaken-core", () => {
@@ -146,5 +158,6 @@ describe("desktop package staging", () => {
     );
     assert.match(config, /resources\/bin\/\$\{platform\}-\$\{arch\}/);
     assert.doesNotMatch(config, /^\s*- from: resources\/bin\s*$/m);
+    assert.match(config, /^\s*- from: resources\/system-skills\s*$/m);
   });
 });

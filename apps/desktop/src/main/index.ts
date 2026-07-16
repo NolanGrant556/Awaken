@@ -91,6 +91,12 @@ import {
   desktopInstanceIdentity,
 } from "./desktop-instance.js";
 import { cleanupLegacyPrimaryRuntime } from "./legacy-runtime-cleanup.js";
+import {
+  resolveSystemSkillsSourceRoot,
+  resolveSystemSkillsTargetRoot,
+  syncSystemSkills,
+  SystemSkillsSyncError,
+} from "./system-skills-importer.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let runtimeBaseUrl: string | null = null;
@@ -1725,6 +1731,34 @@ app.whenReady().then(async () => {
   } catch (error) {
     // Retired cache cleanup must never block Desktop startup.
     console.warn("legacy_primary_runtime_cleanup_failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const systemSkillsSourceRoot = resolveSystemSkillsSourceRoot({
+    packaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appPath: app.getAppPath(),
+  });
+  const systemSkillsTargetRoot = resolveSystemSkillsTargetRoot(
+    app.getPath("home"),
+  );
+  try {
+    const report = await syncSystemSkills({
+      sourceRoot: systemSkillsSourceRoot,
+      targetRoot: systemSkillsTargetRoot,
+      appVersion: app.getVersion(),
+    });
+    console.info("system_skills_sync_complete", report);
+  } catch (error) {
+    // Bundled Skills are an optional startup input. A missing or invalid
+    // packaged resource must not prevent Desktop/Core from starting.
+    console.warn("system_skills_sync_failed", {
+      code:
+        error instanceof SystemSkillsSyncError
+          ? error.code
+          : "SYSTEM_SKILLS_SYNC_FAILED",
+      sourceRoot: systemSkillsSourceRoot,
+      targetRoot: systemSkillsTargetRoot,
       error: error instanceof Error ? error.message : String(error),
     });
   }

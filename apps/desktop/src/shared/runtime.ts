@@ -841,9 +841,42 @@ export type SupervisorStatusInfo = {
   status: SupervisorStatus;
 };
 
+export type SearchProviderId = "exa" | "tavily";
+
+export type SearchSettings = {
+  providers: Record<SearchProviderId, { enabled: boolean }>;
+};
+
+export type SearchSettingsSaveRequest = {
+  provider: SearchProviderId;
+  enabled: boolean;
+};
+
+export type SearchSettingsSaveResult = {
+  settings: SearchSettings;
+  restartStatus: "restarted" | "restart_failed";
+  message?: string;
+};
+
+export type SearchProviderTestRequest = {
+  provider: SearchProviderId;
+};
+
+export type SearchProviderTestResult = {
+  ok: boolean;
+  message: string;
+};
+
 export type AwakenBridge = {
   platform: DesktopPlatform;
   relaunchDesktop: () => Promise<void>;
+  getSearchSettings: () => Promise<SearchSettings>;
+  saveSearchSettings: (
+    request: SearchSettingsSaveRequest,
+  ) => Promise<SearchSettingsSaveResult>;
+  testSearchProvider: (
+    request: SearchProviderTestRequest,
+  ) => Promise<SearchProviderTestResult>;
   getRun: (runId: string) => Promise<RuntimeRun>;
   getThreadTranscript: (threadId: string) => Promise<RuntimeThreadTranscript>;
   listThreads: () => Promise<RuntimeThread[]>;

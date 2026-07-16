@@ -87,6 +87,14 @@ function stubElectronBridge(): void {
     awaken: {
       platform: "macos",
       relaunchDesktop: vi.fn(async () => undefined),
+      getSearchSettings: vi.fn(async () => ({
+        providers: {
+          exa: { enabled: true },
+          tavily: { enabled: false },
+        },
+      })),
+      saveSearchSettings: vi.fn(),
+      testSearchProvider: vi.fn(),
       getRun: vi.fn(),
       getThreadTranscript: vi.fn(),
       listThreads: vi.fn(async () => []),

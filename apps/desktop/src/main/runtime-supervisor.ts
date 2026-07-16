@@ -42,6 +42,7 @@ type SpawnProcess = (
   options: SpawnOptions,
 ) => ChildProcess;
 type ResolveLoginUserEnvironment = () => Promise<NodeJS.ProcessEnv>;
+type ResolveProductEnvironment = () => Promise<NodeJS.ProcessEnv>;
 
 export interface RuntimeSupervisorDeps {
   allocatePort?: () => Promise<number>;
@@ -49,6 +50,7 @@ export interface RuntimeSupervisorDeps {
   now?: () => number;
   resolveBinaryPath?: () => string;
   resolveLoginUserEnvironment?: ResolveLoginUserEnvironment;
+  resolveProductEnvironment?: ResolveProductEnvironment;
   spawnProcess?: SpawnProcess;
   waitForHealth?: (baseUrl: string) => Promise<void>;
 }
@@ -274,6 +276,11 @@ function sanitizedRuntimeEnv(
   delete env.LLM_MODEL_ID;
   delete env.LLM_PROTOCOL;
   delete env.LLM_AUTH_SCHEME;
+  delete env.AWAKEN_WEB_SEARCH_ENABLED;
+  delete env.AWAKEN_WEB_SEARCH_PROVIDER;
+  delete env.AWAKEN_WEB_SEARCH_ENDPOINT;
+  delete env.AWAKEN_WEB_SEARCH_API_KEY;
+  delete env.AWAKEN_WEB_SEARCH_PROVIDERS;
   return env;
 }
 
@@ -328,6 +335,8 @@ export class RuntimeSupervisor {
       resolveLoginUserEnvironment:
         deps.resolveLoginUserEnvironment ??
         (() => resolveLoginUserEnvironment(loginEnvironmentTimeoutMs)),
+      resolveProductEnvironment:
+        deps.resolveProductEnvironment ?? (async () => ({})),
       spawnProcess: deps.spawnProcess ?? spawn,
       waitForHealth:
         deps.waitForHealth ?? ((baseUrl) => waitForHealth(baseUrl)),
@@ -354,6 +363,7 @@ export class RuntimeSupervisor {
       // exposing shell output or environment values through supervisor logs.
       runtimeEnvironment = sanitizedRuntimeEnv(process.env);
     }
+    const productEnvironment = await this.deps.resolveProductEnvironment();
     if (this.startGeneration !== myGen) {
       return this.getStatus();
     }
@@ -378,6 +388,7 @@ export class RuntimeSupervisor {
         child = this.deps.spawnProcess(binaryPath, [], {
           env: {
             ...runtimeEnvironment,
+            ...productEnvironment,
             AWAKEN_CORE_ADDR: `127.0.0.1:${port}`,
             AWAKEN_USER_DATA_DIR: app.getPath("userData"),
             // Business data root shared by dev and packaged installs. Main

@@ -585,7 +585,7 @@ func TestCompactConversationSummaryRequestStreamsWithReasoningDisabled(t *testin
 	}
 }
 
-func TestCompactConversationDefaultSummaryInvokerStreamsAndDisablesReasoning(t *testing.T) {
+func TestCompactConversationDefaultSummaryInvokerPreservesKimiK27Thinking(t *testing.T) {
 	messages := []convcontext.Message{
 		{Role: convcontext.RoleUser, Content: "old fact"},
 		{Role: convcontext.RoleAssistant, Content: "old answer"},
@@ -664,11 +664,11 @@ func TestCompactConversationDefaultSummaryInvokerStreamsAndDisablesReasoning(t *
 	if !gotStream {
 		t.Fatalf("expected default compact summary invoker to use streaming")
 	}
-	if gotThinkingType != "disabled" {
-		t.Fatalf("expected default compact summary invoker to disable reasoning, got %q", gotThinkingType)
+	if gotThinkingType != "" {
+		t.Fatalf("expected Kimi K2.7 compact summary to omit thinking.disabled, got %q", gotThinkingType)
 	}
-	if gotTemperature != 0.6 {
-		t.Fatalf("expected Kimi Coding compact summary temperature 0.6, got %v", gotTemperature)
+	if gotTemperature != 1 {
+		t.Fatalf("expected Kimi K2.7 compact summary temperature 1, got %v", gotTemperature)
 	}
 	if result.Fallback.Used {
 		t.Fatalf("expected streamed compact summary to avoid fallback, got %+v", result.Fallback)

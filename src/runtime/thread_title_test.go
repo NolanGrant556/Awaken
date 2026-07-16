@@ -528,20 +528,12 @@ func TestGenerateThreadTitleWithProfileUsesProviderRequestPolicy(t *testing.T) {
 	} else if err := json.Unmarshal(raw, &temperature); err != nil {
 		t.Fatalf("failed to decode temperature: %v", err)
 	}
-	if temperature != 0.6 {
-		t.Fatalf("expected kimi request policy temperature 0.6, got %v in body %+v", temperature, body)
+	if temperature != 1 {
+		t.Fatalf("expected Kimi K2.7 request policy temperature 1, got %v in body %+v", temperature, body)
 	}
 
-	var thinking struct {
-		Type string `json:"type"`
-	}
-	if raw := body["thinking"]; len(raw) == 0 {
-		t.Fatalf("expected thinking controls in request body: %+v", body)
-	} else if err := json.Unmarshal(raw, &thinking); err != nil {
-		t.Fatalf("failed to decode thinking controls: %v", err)
-	}
-	if thinking.Type != "disabled" {
-		t.Fatalf("expected thinking.type disabled, got %+v", thinking)
+	if _, ok := body["thinking"]; ok {
+		t.Fatalf("expected Kimi K2.7 request to omit thinking.disabled, got %+v", body)
 	}
 }
 

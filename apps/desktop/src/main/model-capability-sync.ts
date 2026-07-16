@@ -100,14 +100,16 @@ function capabilityFromModelObject(item: unknown): ModelCapabilityWire | undefin
     cap.default_temperature = defaultTemperature;
   }
 
-  if (typeof model.supports_vision === "boolean") {
-	cap.supports_vision = model.supports_vision;
+  const supportsVision = model.supports_vision ?? model.supports_image_in;
+  if (typeof supportsVision === "boolean") {
+    cap.supports_vision = supportsVision;
   }
   if (typeof model.supports_native_pdf === "boolean") {
     cap.supports_native_pdf = model.supports_native_pdf;
   }
-  if (typeof model.supports_video === "boolean") {
-    cap.supports_video = model.supports_video;
+  const supportsVideo = model.supports_video ?? model.supports_video_in;
+  if (typeof supportsVideo === "boolean") {
+    cap.supports_video = supportsVideo;
   }
 
   return Object.keys(cap).length > 0 ? cap : undefined;

@@ -219,6 +219,7 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 		if err := events.persistenceFailure(); err != nil {
 			return "", err
 		}
+		events.flushPendingToolCallArgsDeltas()
 
 		if len(response.ToolCalls) > 0 {
 			toolCalls := llmToolCallsToContext(response.ToolCalls)
@@ -1003,6 +1004,7 @@ type runEventEmitter struct {
 	textStartedThisTurn   bool
 	mutationOccurred      bool
 	assistantText         strings.Builder
+	pendingToolCallDeltas []llm.ToolCallDelta
 	pendingTerminalReason TerminalReason
 	persistenceErr        error
 	suppressRunLifecycle  bool
@@ -1369,6 +1371,19 @@ func (e *runEventEmitter) onToolCallArgsDelta(delta llm.ToolCallDelta) {
 		return
 	}
 	e.ensureAssistantMessageID()
+	// Some OpenAI-compatible providers stream assistant text and tool arguments
+	// in the same response. Keep tool argument previews behind the current text
+	// boundary so the durable assistant snapshot is projected before the tool
+	// item activates; otherwise the renderer can mistake that snapshot for a
+	// second post-tool answer segment.
+	if e.textOpen {
+		e.pendingToolCallDeltas = append(e.pendingToolCallDeltas, delta)
+		return
+	}
+	e.emitToolCallArgsDelta(delta)
+}
+
+func (e *runEventEmitter) emitToolCallArgsDelta(delta llm.ToolCallDelta) {
 	toolCallID := delta.ID
 	if toolCallID == "" {
 		toolCallID = fmt.Sprintf("tool_index_%d", delta.Index)
@@ -1379,6 +1394,13 @@ func (e *runEventEmitter) onToolCallArgsDelta(delta llm.ToolCallDelta) {
 		ToolName:   delta.Name,
 		Delta:      delta.ArgumentsDelta,
 	})
+}
+
+func (e *runEventEmitter) flushPendingToolCallArgsDeltas() {
+	for _, delta := range e.pendingToolCallDeltas {
+		e.emitToolCallArgsDelta(delta)
+	}
+	e.pendingToolCallDeltas = nil
 }
 
 func (e *runEventEmitter) emitStandaloneText(content string) {
@@ -1966,6 +1988,7 @@ func (e *runEventEmitter) resetTurn() {
 	e.reasoningOpen = false
 	e.textStartedThisTurn = false
 	e.assistantText.Reset()
+	e.pendingToolCallDeltas = nil
 }
 
 func (e *runEventEmitter) textWasStartedThisTurn() bool {

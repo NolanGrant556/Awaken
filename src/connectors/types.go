@@ -18,6 +18,15 @@ const (
 	StateFailed       ConnectorState = "failed"
 )
 
+// ConnectorKind separates ordinary MCP-backed connectors from Desktop-owned
+// CLI lifecycle providers. CLI connectors never create MCP server configs.
+type ConnectorKind string
+
+const (
+	KindMCP ConnectorKind = "mcp"
+	KindCLI ConnectorKind = "cli"
+)
+
 // AuthType enumerates the authentication methods a connector supports.
 type AuthType string
 
@@ -68,6 +77,9 @@ type ConnectorDefinition struct {
 	// ID is the unique identifier (e.g. "notion", "slack").
 	ID string `json:"id"`
 
+	// Kind determines which lifecycle owner handles the connector.
+	Kind ConnectorKind `json:"kind"`
+
 	// DisplayName is the human-readable label shown in the UI.
 	DisplayName string `json:"displayName"`
 
@@ -116,8 +128,13 @@ type ConnectorStatus struct {
 	// ID matches the connector definition's ID.
 	ID string `json:"id"`
 
+	Kind ConnectorKind `json:"kind"`
+
 	// DisplayName matches the connector definition's DisplayName.
 	DisplayName string `json:"displayName"`
+
+	// Description matches the connector definition's Description.
+	Description string `json:"description,omitempty"`
 
 	// Category matches the connector definition's Category.
 	Category Category `json:"category"`
@@ -148,6 +165,86 @@ type ConnectorStatus struct {
 	// ShadowedBy indicates that another connector with higher priority covers
 	// the same server. Empty string means this connector is active.
 	ShadowedBy string `json:"shadowedBy,omitempty"`
+
+	// CLIReadiness is present only for Desktop-owned CLI connectors.
+	CLIReadiness *CLIConnectorReadiness `json:"cliReadiness,omitempty"`
+
+	// LegacyMCPReviewRequired is true when a same-name user MCP record did not
+	// exactly match the retired built-in factory and was therefore preserved.
+	LegacyMCPReviewRequired bool `json:"legacyMcpReviewRequired,omitempty"`
+}
+
+type CLIActivation string
+type CLIInstallState string
+type CLIExecutableState string
+type CLIConfigurationState string
+type CLIAuthenticationState string
+type CLIOverallState string
+
+const (
+	CLIActivationEnabled  CLIActivation = "enabled"
+	CLIActivationDisabled CLIActivation = "disabled"
+
+	CLIInstallMissing     CLIInstallState = "missing"
+	CLIInstallInstalling  CLIInstallState = "installing"
+	CLIInstallInstalled   CLIInstallState = "installed"
+	CLIInstallUnsupported CLIInstallState = "unsupported"
+	CLIInstallFailed      CLIInstallState = "failed"
+
+	CLIExecutableUnknown   CLIExecutableState = "unknown"
+	CLIExecutableMissing   CLIExecutableState = "missing"
+	CLIExecutableAvailable CLIExecutableState = "available"
+	CLIExecutableInvalid   CLIExecutableState = "invalid"
+
+	CLIConfigurationUnknown  CLIConfigurationState = "unknown"
+	CLIConfigurationRequired CLIConfigurationState = "required"
+	CLIConfigurationReady    CLIConfigurationState = "ready"
+	CLIConfigurationFailed   CLIConfigurationState = "failed"
+
+	CLIAuthenticationUnknown    CLIAuthenticationState = "unknown"
+	CLIAuthenticationRequired   CLIAuthenticationState = "required"
+	CLIAuthenticationInProgress CLIAuthenticationState = "in_progress"
+	CLIAuthenticationAuthorized CLIAuthenticationState = "authorized"
+	CLIAuthenticationFailed     CLIAuthenticationState = "failed"
+
+	CLIOverallDisabled       CLIOverallState = "disabled"
+	CLIOverallNotReady       CLIOverallState = "not_ready"
+	CLIOverallActionRequired CLIOverallState = "action_required"
+	CLIOverallWorking        CLIOverallState = "working"
+	CLIOverallReady          CLIOverallState = "ready"
+	CLIOverallFailed         CLIOverallState = "failed"
+)
+
+type CLISafeError struct {
+	Code     string `json:"code"`
+	Message  string `json:"message"`
+	Recovery string `json:"recovery,omitempty"`
+}
+
+// CLIAccountProfile is a non-sensitive connected-account projection for UI.
+// It must never include phone numbers, emails, tokens, or raw CLI output.
+type CLIAccountProfile struct {
+	DisplayName  string `json:"displayName,omitempty"`
+	Organization string `json:"organization,omitempty"`
+}
+
+// CLIConnectorReadiness is a non-sensitive Desktop-to-Core snapshot. It must
+// never contain tokens, device codes, authorization URLs, or raw CLI output.
+type CLIConnectorReadiness struct {
+	ProviderID     string                 `json:"providerId"`
+	Activation     CLIActivation          `json:"activation"`
+	Install        CLIInstallState        `json:"install"`
+	Executable     CLIExecutableState     `json:"executable"`
+	Configuration  CLIConfigurationState  `json:"configuration"`
+	Authentication CLIAuthenticationState `json:"authentication"`
+	Overall        CLIOverallState        `json:"overall"`
+	Version        string                 `json:"version,omitempty"`
+	ExecutablePath string                 `json:"executablePath,omitempty"`
+	Ownership      string                 `json:"ownership,omitempty"`
+	InstallMethod  string                 `json:"installMethod,omitempty"`
+	Account        *CLIAccountProfile     `json:"account,omitempty"`
+	SafeError      *CLISafeError          `json:"safeError,omitempty"`
+	UpdatedAt      string                 `json:"updatedAt"`
 }
 
 // ConnectorSource is the interface all connector sources must implement.

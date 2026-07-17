@@ -45,8 +45,10 @@ const (
 	EventAwakenSkillContentLoaded     EventType = "AWAKEN_SKILL_CONTENT_LOADED"
 	EventAwakenSkillExecutionContext  EventType = "AWAKEN_SKILL_EXECUTION_CONTEXT"
 	EventAwakenSkillFailedToLoad      EventType = "AWAKEN_SKILL_FAILED_TO_LOAD"
-	EventAwakenUserQuestionRequested  EventType = "AWAKEN_USER_QUESTION_REQUESTED"
-	EventAwakenUserQuestionResolved   EventType = "AWAKEN_USER_QUESTION_RESOLVED"
+	EventAwakenUserQuestionRequested         EventType = "AWAKEN_USER_QUESTION_REQUESTED"
+	EventAwakenUserQuestionResolved          EventType = "AWAKEN_USER_QUESTION_RESOLVED"
+	EventAwakenExternalInteractionRequested  EventType = "AWAKEN_EXTERNAL_INTERACTION_REQUESTED"
+	EventAwakenExternalInteractionResolved   EventType = "AWAKEN_EXTERNAL_INTERACTION_RESOLVED"
 	EventAwakenArtifactCreated        EventType = "AWAKEN_ARTIFACT_CREATED"
 	EventAwakenArtifactUpdated        EventType = "AWAKEN_ARTIFACT_UPDATED"
 	EventAwakenToolRecoveryRequired   EventType = "AWAKEN_TOOL_RECOVERY_REQUIRED"
@@ -190,9 +192,17 @@ type Event struct {
 	SkillResourceMode          string           `json:"skillResourceMode,omitempty"`
 	SkillEffectiveTools        []string         `json:"skillEffectiveTools,omitempty"`
 	SkillDiagnostics           []string         `json:"skillDiagnostics,omitempty"`
-	QuestionID                 string           `json:"questionId,omitempty"`
-	QuestionAnswer             string           `json:"questionAnswer,omitempty"`
-	ArtifactContractVersion    int              `json:"artifactContractVersion,omitempty"`
+	QuestionID                   string   `json:"questionId,omitempty"`
+	QuestionAnswer               string   `json:"questionAnswer,omitempty"`
+	InteractionID                string   `json:"interactionId,omitempty"`
+	InteractionResolution        string   `json:"interactionResolution,omitempty"`
+	InteractionTitle             string   `json:"interactionTitle,omitempty"`
+	InteractionSafeMessage       string   `json:"interactionSafeMessage,omitempty"`
+	InteractionVerificationURL   string   `json:"interactionVerificationUrl,omitempty"`
+	InteractionQRImageURL        string   `json:"interactionQrImageUrl,omitempty"`
+	InteractionProvider          string   `json:"interactionProvider,omitempty"`
+	InteractionRecoveries        []string `json:"interactionRecoveries,omitempty"`
+	ArtifactContractVersion      int      `json:"artifactContractVersion,omitempty"`
 	ArtifactRole               string           `json:"artifactRole,omitempty"`
 	ArtifactProducer           string           `json:"artifactProducer,omitempty"`
 	ArtifactID                 string           `json:"artifactId,omitempty"`

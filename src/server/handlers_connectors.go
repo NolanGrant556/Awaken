@@ -16,16 +16,20 @@ type connectorHandlers struct {
 
 // connectorInfo is the wire shape for entries returned by GET /v1/connectors.
 type connectorInfo struct {
-	ID           string                    `json:"id"`
-	DisplayName  string                    `json:"displayName"`
-	Category     connectors.Category       `json:"category"`
-	Provider     string                    `json:"provider,omitempty"`
-	State        connectors.ConnectorState `json:"state"`
-	SourceOrigin connectors.SourceOrigin   `json:"sourceOrigin"`
-	AuthType     connectors.AuthType       `json:"authType"`
-	LastError    string                    `json:"lastError,omitempty"`
-	ServerNames  []string                  `json:"serverNames,omitempty"`
-	ShadowedBy   string                    `json:"shadowedBy,omitempty"`
+	ID                      string                            `json:"id"`
+	Kind                    connectors.ConnectorKind          `json:"kind"`
+	DisplayName             string                            `json:"displayName"`
+	Description             string                            `json:"description,omitempty"`
+	Category                connectors.Category               `json:"category"`
+	Provider                string                            `json:"provider,omitempty"`
+	State                   connectors.ConnectorState         `json:"state"`
+	SourceOrigin            connectors.SourceOrigin           `json:"sourceOrigin"`
+	AuthType                connectors.AuthType               `json:"authType"`
+	LastError               string                            `json:"lastError,omitempty"`
+	ServerNames             []string                          `json:"serverNames,omitempty"`
+	ShadowedBy              string                            `json:"shadowedBy,omitempty"`
+	CLIReadiness            *connectors.CLIConnectorReadiness `json:"cliReadiness,omitempty"`
+	LegacyMCPReviewRequired bool                              `json:"legacyMcpReviewRequired,omitempty"`
 }
 
 // connectRequest is the wire payload for POST /v1/connectors/{id}/connect.
@@ -60,16 +64,20 @@ func (h connectorHandlers) handleListConnectors(w http.ResponseWriter, r *http.R
 	out := make([]connectorInfo, 0, len(statuses))
 	for _, s := range statuses {
 		out = append(out, connectorInfo{
-			ID:           s.ID,
-			DisplayName:  s.DisplayName,
-			Category:     s.Category,
-			Provider:     s.Provider,
-			State:        s.State,
-			SourceOrigin: s.SourceOrigin,
-			AuthType:     s.AuthType,
-			LastError:    s.LastError,
-			ServerNames:  s.ServerNames,
-			ShadowedBy:   s.ShadowedBy,
+			ID:                      s.ID,
+			Kind:                    s.Kind,
+			DisplayName:             s.DisplayName,
+			Description:             s.Description,
+			Category:                s.Category,
+			Provider:                s.Provider,
+			State:                   s.State,
+			SourceOrigin:            s.SourceOrigin,
+			AuthType:                s.AuthType,
+			LastError:               s.LastError,
+			ServerNames:             s.ServerNames,
+			ShadowedBy:              s.ShadowedBy,
+			CLIReadiness:            s.CLIReadiness,
+			LegacyMCPReviewRequired: s.LegacyMCPReviewRequired,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -105,6 +113,10 @@ func (h connectorHandlers) handleConnect(w http.ResponseWriter, r *http.Request)
 	_ = decodeJSON(r, &req) // Optional body; ignore parse errors for now.
 
 	if err := h.registry.Connect(r.Context(), connectorID); err != nil {
+		if errors.Is(err, connectors.ErrConnectorActionUnsupported) {
+			writeErrorJSON(w, http.StatusUnprocessableEntity, "CONNECTOR_ACTION_UNSUPPORTED", err.Error())
+			return
+		}
 		if errors.Is(err, connectors.ErrConnectorAlreadyConnected) {
 			writeErrorJSON(w, http.StatusConflict, "ALREADY_CONNECTED", err.Error())
 			return
@@ -135,6 +147,10 @@ func (h connectorHandlers) handleDisconnect(w http.ResponseWriter, r *http.Reque
 	}
 
 	if err := h.registry.Disconnect(r.Context(), connectorID); err != nil {
+		if errors.Is(err, connectors.ErrConnectorActionUnsupported) {
+			writeErrorJSON(w, http.StatusUnprocessableEntity, "CONNECTOR_ACTION_UNSUPPORTED", err.Error())
+			return
+		}
 		if errors.Is(err, connectors.ErrConnectorNotConnected) {
 			writeErrorJSON(w, http.StatusConflict, "NOT_CONNECTED", err.Error())
 			return
@@ -153,6 +169,31 @@ func (h connectorHandlers) handleDisconnect(w http.ResponseWriter, r *http.Reque
 		Message:     "connector " + connectorID + " disconnected",
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h connectorHandlers) handleCLIReadiness(w http.ResponseWriter, r *http.Request) {
+	if h.registry == nil {
+		writeErrorJSON(w, http.StatusServiceUnavailable, "CONNECTOR_UNAVAILABLE", "connector registry not configured")
+		return
+	}
+	connectorID := r.PathValue("id")
+	var snapshot connectors.CLIConnectorReadiness
+	if err := decodeJSON(r, &snapshot); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid CLI readiness payload")
+		return
+	}
+	if err := h.registry.UpdateCLIReadiness(r.Header.Get("X-Awaken-Control-Token"), connectorID, snapshot); err != nil {
+		switch {
+		case errors.Is(err, connectors.ErrCLIReadinessUnauthorized):
+			writeErrorJSON(w, http.StatusUnauthorized, "CLI_READINESS_UNAUTHORIZED", "CLI readiness update is unauthorized")
+		case errors.Is(err, connectors.ErrConnectorNotFound):
+			writeErrorJSON(w, http.StatusNotFound, "CONNECTOR_NOT_FOUND", err.Error())
+		default:
+			writeErrorJSON(w, http.StatusUnprocessableEntity, "INVALID_CLI_READINESS", err.Error())
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, snapshot)
 }
 
 // Ensure json import stays referenced.

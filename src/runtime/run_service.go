@@ -37,8 +37,9 @@ var (
 	ErrThreadLabelInvalid         = errors.New("thread label is required")
 	ErrMissingModelProfile        = errors.New("model profile is required")
 	ErrUnsupportedInputAttachment = errors.New("model does not support image input")
-	ErrUserQuestionNotFound       = errors.New("user question not found")
-	ErrPersistenceUnavailable     = agentcore.ErrPersistenceUnavailable
+	ErrUserQuestionNotFound         = errors.New("user question not found")
+	ErrExternalInteractionNotFound  = errors.New("external interaction not found")
+	ErrPersistenceUnavailable       = agentcore.ErrPersistenceUnavailable
 )
 
 const maxRetainedThreads = 100
@@ -1371,6 +1372,16 @@ func (s *RunService) ResolveUserQuestion(runID, questionID, answer string) error
 	return session.ResolveUserQuestion(questionID, answer)
 }
 
+func (s *RunService) ResolveExternalInteraction(runID, interactionID string, resolution agentcore.ExternalInteractionResolution) error {
+	s.mu.RLock()
+	session, ok := s.sessions[runID]
+	s.mu.RUnlock()
+	if !ok {
+		return ErrRunNotFound
+	}
+	return session.ResolveExternalInteraction(interactionID, resolution)
+}
+
 func partialAssistantResult(agent *agentcore.Agent) string {
 	if agent == nil {
 		return ""
@@ -2001,6 +2012,13 @@ func (s sessionEventSink) AwaitUserQuestion(ctx context.Context, request agentco
 		return "", ErrRunNotFound
 	}
 	return s.session.AwaitUserQuestion(ctx, request)
+}
+
+func (s sessionEventSink) AwaitExternalInteraction(ctx context.Context, request agentcore.AwakenEvent) (agentcore.ExternalInteractionResolution, error) {
+	if s.session == nil {
+		return "", ErrRunNotFound
+	}
+	return s.session.AwaitExternalInteraction(ctx, request)
 }
 
 func normalizeWorkspace(ws WorkspaceConfig) (WorkspaceConfig, error) {

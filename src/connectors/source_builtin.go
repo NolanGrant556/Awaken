@@ -131,27 +131,28 @@ func githubConnector() ConnectorDefinition {
 func dingTalkConnector() ConnectorDefinition {
 	return ConnectorDefinition{
 		ID:           "dingtalk-workspace",
-		DisplayName:  "钉钉CLI",
-		Description:  "通过 DingTalk-Real-AI/dingtalk-workspace-cli 操作钉钉消息、日程、通讯录等官方连接器能力。",
+		Kind:         KindCLI,
+		DisplayName:  "钉钉",
+		Description:  "连接钉钉，管理日历、联系人、群聊、任务和审批。",
 		Category:     CategoryChat,
 		Provider:     "DingTalk",
 		ProviderID:   tool.ProviderID("connector:dingtalk-workspace"),
 		Capabilities: []tool.Capability{tool.CapabilityMessageSend},
 		Dependencies: []tool.DependencyRequirement{{
-			Kind: tool.DependencyOSExecutable, Name: "dingtalk-workspace-cli", ProbeID: "executable.dingtalk-workspace-cli", Source: "connector",
+			Kind: tool.DependencyOSExecutable, Name: "dws", ProbeID: "executable.dws", Source: "connector",
 		}},
-		AuthType:         AuthOAuth2,
-		TrustLevel:       TrustBuiltin,
-		SourceOrigin:     SourceBuiltin,
-		McpConfigFactory: dingTalkConfigFactory,
+		AuthType:     AuthOAuth2,
+		TrustLevel:   TrustBuiltin,
+		SourceOrigin: SourceBuiltin,
 	}
 }
 
 func larkConnector() ConnectorDefinition {
 	return ConnectorDefinition{
 		ID:           "lark-cli",
-		DisplayName:  "飞书CLI",
-		Description:  "通过 larksuite/cli 操作飞书消息、组织与协作能力。",
+		Kind:         KindCLI,
+		DisplayName:  "飞书",
+		Description:  "连接飞书，通过官方 CLI 授权调用日历、云文档与消息能力。",
 		Category:     CategoryChat,
 		Provider:     "Lark",
 		ProviderID:   tool.ProviderID("connector:lark-cli"),
@@ -159,10 +160,9 @@ func larkConnector() ConnectorDefinition {
 		Dependencies: []tool.DependencyRequirement{{
 			Kind: tool.DependencyOSExecutable, Name: "lark-cli", ProbeID: "executable.lark-cli", Source: "connector",
 		}},
-		AuthType:         AuthOAuth2,
-		TrustLevel:       TrustBuiltin,
-		SourceOrigin:     SourceBuiltin,
-		McpConfigFactory: larkConfigFactory,
+		AuthType:     AuthOAuth2,
+		TrustLevel:   TrustBuiltin,
+		SourceOrigin: SourceBuiltin,
 	}
 }
 
@@ -261,40 +261,6 @@ func githubConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclie
 				Stdio: &mcpclient.StdioTransportConfig{
 					Command: cmd,
 					Args:    args,
-				},
-				DisplayName: def.DisplayName,
-			},
-		},
-	}
-}
-
-func dingTalkConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclient.ScopedMcpServerConfig {
-	return map[string]mcpclient.ScopedMcpServerConfig{
-		"dingtalk-workspace": {
-			Name:  "dingtalk-workspace",
-			Scope: mcpclient.ScopeUser,
-			Config: mcpclient.McpServerConfig{
-				Stdio: &mcpclient.StdioTransportConfig{
-					Command: "dingtalk-workspace-cli",
-					Args:    []string{"mcp"},
-					Env:     map[string]string{},
-				},
-				DisplayName: def.DisplayName,
-			},
-		},
-	}
-}
-
-func larkConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclient.ScopedMcpServerConfig {
-	return map[string]mcpclient.ScopedMcpServerConfig{
-		"lark": {
-			Name:  "lark",
-			Scope: mcpclient.ScopeUser,
-			Config: mcpclient.McpServerConfig{
-				Stdio: &mcpclient.StdioTransportConfig{
-					Command: "lark-cli",
-					Args:    []string{"mcp"},
-					Env:     map[string]string{},
 				},
 				DisplayName: def.DisplayName,
 			},

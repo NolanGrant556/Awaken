@@ -16,6 +16,9 @@ extraResources:
   - from: resources/pets
     to: pets
     filter: ["**/*"]
+  - from: resources/cli-connectors
+    to: cli-connectors
+    filter: ["**/*"]
   - from: resources/bin/${platform}-${arch}
     to: bin/${platform}-${arch}
     filter: ["**/*"]

@@ -55,6 +55,8 @@ import type {
   AwakenTheme,
   AwakenThemePreference,
   ComposerToken,
+  CliAuthSessionView,
+  CliProviderId,
   DesktopOperationIssue,
   RuntimeInfo,
   RuntimeProject,
@@ -102,7 +104,13 @@ import {
 } from "./projectWorkspace";
 import { DesktopSettingsDialog } from "./settings/DesktopSettingsDialog";
 import { ProfileBalancePopover } from "./ProfileBalancePopover";
-import { ExtensionsView, type ExtensionSection } from "./ExtensionsView";
+import {
+  ExtensionsView,
+  type CliProductActionHandoff,
+  type ExtensionSection,
+} from "./ExtensionsView";
+import { CliAuthCard } from "./CliAuthCard";
+import { ExternalActionGate } from "./ExternalActionGate";
 import {
   MAX_COMPOSER_IMAGE_BYTES,
   SUPPORTED_COMPOSER_IMAGE_MIME_TYPES,
@@ -959,6 +967,10 @@ export function App() {
 
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
+  const [activeCliAuthSession, setActiveCliAuthSession] = useState<CliAuthSessionView | null>(null);
+  const [resolvingExternalInteractionId, setResolvingExternalInteractionId] =
+    useState<string | null>(null);
+  const cliHandoffInFlightRef = useRef<Set<string>>(new Set());
   const [openingArtifactId, setOpeningArtifactId] = useState<string | null>(null);
   const [answeringUserQuestionId, setAnsweringUserQuestionId] =
     useState<string | null>(null);
@@ -1695,6 +1707,92 @@ export function App() {
     if (!desktopReady) {
       return;
     }
+    let disposed = false;
+    void runtimeClient.listCliConnectors().then((connectors) => {
+      if (!disposed) setActiveCliAuthSession(connectors.find((entry) => entry.authSession)?.authSession ?? null);
+    }).catch(() => undefined);
+    const unsubscribe = runtimeClient.subscribeCliConnectorState(({ connector }) => {
+      setActiveCliAuthSession((current) => connector.authSession ?? (current?.provider === connector.providerId ? null : current));
+    });
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
+  }, [desktopReady, runtimeClient]);
+
+  async function cancelActiveCliAuth(): Promise<void> {
+    if (!activeCliAuthSession) return;
+    await runtimeClient.cancelCliAuth(activeCliAuthSession.provider as CliProviderId);
+    setActiveCliAuthSession(null);
+  }
+
+  async function retryActiveCliAuth(): Promise<void> {
+    if (!activeCliAuthSession) return;
+    const view = await runtimeClient.retryCliAuth(activeCliAuthSession.provider as CliProviderId);
+    setActiveCliAuthSession(view.authSession ?? null);
+  }
+
+  async function resolveActiveExternalInteraction(
+    resolution: "completed" | "cancelled" | "expired" | "failed",
+  ): Promise<void> {
+    if (!runtimeState.runId || !activeExternalInteraction) {
+      return;
+    }
+    if (resolvingExternalInteractionId === activeExternalInteraction.id) {
+      return;
+    }
+    setNotice(null);
+    setResolvingExternalInteractionId(activeExternalInteraction.id);
+    try {
+      await runtimeClient.resolveExternalInteraction(
+        runtimeState.runId,
+        activeExternalInteraction.id,
+        resolution,
+      );
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Failed to resolve external interaction",
+      );
+    } finally {
+      setResolvingExternalInteractionId(null);
+    }
+  }
+
+  function cliHandoffPrompt(action: CliProductActionHandoff): string {
+    const name = action.displayName || action.providerId;
+    if (action.providerId === "dingtalk-workspace") {
+      return `请使用钉钉官方 CLI（${name}）完成登录与授权。根据 CLI 本次返回向我展示可点击的 HTTPS 授权链接；如需二维码，请基于同一授权 URL 生成，不要编造链接或权限。`;
+    }
+    return `请使用飞书官方 CLI（${name}）完成登录与授权。根据 CLI 本次返回展示 verification_url 或管理员入口；如 CLI 提供二维码命令，基于同一授权 URL 生成，不要编造 scope 或链接。bot 缺权限时展示 console_url，不要错误执行 user login。`;
+  }
+
+  async function handleCliProductActionHandoff(
+    action: CliProductActionHandoff,
+  ): Promise<void> {
+    const key = action.providerId;
+    if (cliHandoffInFlightRef.current.has(key)) {
+      return;
+    }
+    cliHandoffInFlightRef.current.add(key);
+    try {
+      handleNewTask();
+      const prompt = cliHandoffPrompt(action);
+      setComposerValue(prompt);
+      await handleSubmitWithPrompt({ prompt, forceNewThread: true });
+    } finally {
+      // Keep short debounce so double-clicks stay idempotent.
+      window.setTimeout(() => {
+        cliHandoffInFlightRef.current.delete(key);
+      }, 1500);
+    }
+  }
+
+  useEffect(() => {
+    if (!desktopReady) {
+      return;
+    }
     void refreshProjects().catch((error) => {
       console.error("project_list_refresh_failed", error);
     });
@@ -1947,6 +2045,7 @@ export function App() {
   }, [filteredSlashActions, slashActiveActionId, slashPaletteOpen]);
 
   const activeUserQuestion = runtimeState.userQuestions[0];
+  const activeExternalInteraction = runtimeState.externalInteractions[0];
   const navItems: NavItem[] = [
     {
       id: "connectors",
@@ -2554,14 +2653,18 @@ export function App() {
     );
   }
 
-  async function handleSubmit(): Promise<void> {
+  async function handleSubmitWithPrompt(options?: {
+    prompt?: string;
+    forceNewThread?: boolean;
+  }): Promise<void> {
     if (!desktopReady) {
       setNotice(
         desktopNeedsRestart ? "Awaken needs restart" : "Awaken is starting",
       );
       return;
     }
-    const prompt = trimmedEffectiveComposerValue;
+    const prompt = (options?.prompt ?? trimmedEffectiveComposerValue).trim();
+    const forceNewThread = options?.forceNewThread === true;
     const draftComposerValue = composerValue;
     const draftAttachments = composerAttachments.map((attachment) => ({
       ...attachment,
@@ -2585,7 +2688,7 @@ export function App() {
       setNotice("请输入内容或添加附件");
       return;
     }
-    if (isBusy) {
+    if (isBusy && !forceNewThread) {
       return;
     }
     if (!isWorkspaceValid) {
@@ -2616,8 +2719,8 @@ export function App() {
     dispatch({
       type: "run/requested",
       prompt,
-      promptAttachments: runInputAttachments,
-      promptTokens: draftPromptTokens,
+      promptAttachments: forceNewThread ? [] : runInputAttachments,
+      promptTokens: forceNewThread ? [] : draftPromptTokens,
       startedAtMs: Date.now(),
     });
     clearComposerValue();
@@ -2635,7 +2738,7 @@ export function App() {
         : projectsFromWorkspace.find((project) =>
             isSameWorkspacePath(project.path, workspaceRoot),
           )?.id;
-      const isNewThread = !runtimeState.activeThreadId;
+      const isNewThread = forceNewThread || !runtimeState.activeThreadId;
       const nextThreadLabel = isNewThread
         ? composerThreadLabel(
             prompt,
@@ -2651,9 +2754,9 @@ export function App() {
         }));
       const startRunRequest: StartRunRequest = {
         input: prompt,
-        attachments: runInputAttachments,
-        composerTokens: draftComposerTokens,
-        threadId: runtimeState.activeThreadId || undefined,
+        attachments: forceNewThread ? [] : runInputAttachments,
+        composerTokens: forceNewThread ? [] : draftComposerTokens,
+        threadId: forceNewThread ? undefined : runtimeState.activeThreadId || undefined,
         workspace: {
           workspaceRoot,
           readableRoots: workspaceRoot ? [workspaceRoot] : [],
@@ -2713,7 +2816,7 @@ export function App() {
       requestComposerFocus();
       return;
     }
-    await handleSubmit();
+    await handleSubmitWithPrompt();
     requestComposerFocus();
   }
 
@@ -3615,6 +3718,41 @@ export function App() {
     "--aw-inspector-width": `${inspectorWidth}px`,
   } as CSSProperties;
 
+  function renderExternalActionGate() {
+    if (activeExternalInteraction) {
+      const resolving =
+        resolvingExternalInteractionId === activeExternalInteraction.id;
+      return (
+        <ExternalActionGate
+          compact
+          interaction={activeExternalInteraction}
+          resolving={resolving}
+          onConfirmDone={() => {
+            void resolveActiveExternalInteraction("completed");
+          }}
+          onCancel={() => {
+            void resolveActiveExternalInteraction("cancelled");
+          }}
+        />
+      );
+    }
+    if (!activeCliAuthSession) {
+      return null;
+    }
+    return (
+      <CliAuthCard
+        compact
+        session={activeCliAuthSession}
+        onCancel={() => {
+          void cancelActiveCliAuth();
+        }}
+        onRetry={() => {
+          void retryActiveCliAuth();
+        }}
+      />
+    );
+  }
+
   function renderUserQuestionPrompt() {
     if (!activeUserQuestion) {
       return null;
@@ -3857,6 +3995,9 @@ export function App() {
                     desktopReady={desktopReady}
                     runtimeClient={runtimeClient}
                     onNotice={setNotice}
+                    onCliProductActionHandoff={(action) => {
+                      void handleCliProductActionHandoff(action);
+                    }}
                   />
                 </>
               ) : (
@@ -3939,6 +4080,7 @@ export function App() {
                             <div className="composer-dock-stack">
                               {renderComposerRuntimePanels()}
                               {renderUserQuestionPrompt()}
+                              {renderExternalActionGate()}
                               <ComposerBar
                                 value={composerValue}
                                 onChange={setComposerValue}
@@ -3979,6 +4121,7 @@ export function App() {
                           <TaskWelcome />
                           {renderComposerRuntimePanels()}
                           {renderUserQuestionPrompt()}
+                          {renderExternalActionGate()}
                           <ComposerBar
                             value={composerValue}
                             onChange={setComposerValue}

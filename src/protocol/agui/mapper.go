@@ -316,6 +316,28 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.QuestionID = event.QuestionID
 		base.QuestionAnswer = event.QuestionAnswer
 		return []Event{base}
+	case agentcore.ExternalInteractionRequestedType:
+		base.Type = EventAwakenExternalInteractionRequested
+		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
+		base.InteractionID = event.InteractionID
+		base.InteractionTitle = event.InteractionTitle
+		base.InteractionSafeMessage = event.InteractionSafeMessage
+		base.InteractionVerificationURL = event.InteractionVerificationURL
+		base.InteractionQRImageURL = event.InteractionQRImageURL
+		base.InteractionProvider = event.InteractionProvider
+		base.InteractionRecoveries = append([]string(nil), event.InteractionRecoveries...)
+		base.AuthProvider = event.AuthProvider
+		base.AuthURL = event.AuthURL
+		return []Event{base}
+	case agentcore.ExternalInteractionResolvedType:
+		base.Type = EventAwakenExternalInteractionResolved
+		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
+		base.InteractionID = event.InteractionID
+		base.InteractionResolution = event.InteractionResolution
+		base.InteractionProvider = event.InteractionProvider
+		return []Event{base}
 	case agentcore.ArtifactCreatedEventType:
 		base.Type = EventAwakenArtifactCreated
 		base.ToolCallID = event.ToolCallID

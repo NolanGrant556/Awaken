@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"awaken/src/agentcore"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
 	"awaken/src/skills"
@@ -37,6 +38,10 @@ type renameThreadRequest struct {
 
 type answerUserQuestionRequest struct {
 	Answer string `json:"answer"`
+}
+
+type resolveExternalInteractionRequest struct {
+	Resolution string `json:"resolution"`
 }
 
 type errorResponse struct {
@@ -383,6 +388,41 @@ func (h runHandlers) handleAnswerUserQuestion(w http.ResponseWriter, r *http.Req
 			writeErrorJSON(w, http.StatusConflict, "RUN_TERMINAL", err.Error())
 		default:
 			writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to answer user question")
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h runHandlers) handleResolveExternalInteraction(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("run_id")
+	interactionID := r.PathValue("interaction_id")
+	var req resolveExternalInteractionRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+
+	resolution := agentcore.ExternalInteractionResolution(strings.TrimSpace(req.Resolution))
+	switch resolution {
+	case agentcore.ExternalInteractionCompleted,
+		agentcore.ExternalInteractionCancelled,
+		agentcore.ExternalInteractionExpired,
+		agentcore.ExternalInteractionFailed:
+	default:
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_RESOLUTION", "resolution must be completed, cancelled, expired, or failed")
+		return
+	}
+
+	if err := h.runService.ResolveExternalInteraction(runID, interactionID, resolution); err != nil {
+		switch {
+		case errors.Is(err, awruntime.ErrRunNotFound), errors.Is(err, awruntime.ErrExternalInteractionNotFound):
+			writeErrorJSON(w, http.StatusNotFound, "EXTERNAL_INTERACTION_NOT_FOUND", err.Error())
+		case errors.Is(err, awruntime.ErrRunTerminal):
+			writeErrorJSON(w, http.StatusConflict, "RUN_TERMINAL", err.Error())
+		default:
+			writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to resolve external interaction")
 		}
 		return
 	}

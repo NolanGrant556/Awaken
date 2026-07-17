@@ -2,6 +2,7 @@ package connectors
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"sort"
@@ -23,6 +24,13 @@ var ErrConnectorAlreadyConnected = errors.New("connector is already connected")
 // connector that is not connected.
 var ErrConnectorNotConnected = errors.New("connector is not connected")
 
+// ErrConnectorActionUnsupported is returned when an MCP lifecycle action is
+// attempted for a Desktop-owned CLI connector.
+var ErrConnectorActionUnsupported = errors.New("connector action is unsupported for this connector kind")
+
+var ErrCLIReadinessUnauthorized = errors.New("cli readiness update is unauthorized")
+var ErrCLIReadinessInvalid = errors.New("cli readiness snapshot is invalid")
+
 // RuntimeManager abstracts the MCP manager operations that the connector
 // registry needs: InjectDynamic, RemoveDynamic, Start, Remove, Snapshot, and
 // SnapshotServer.
@@ -43,9 +51,12 @@ type Registry struct {
 	logger  Logger
 	manager RuntimeManager
 
-	mu     sync.RWMutex
-	active map[string]*activeEntry        // connectorID -> runtime state
-	defs   map[string]ConnectorDefinition // resolved+merged definitions
+	mu              sync.RWMutex
+	active          map[string]*activeEntry        // connectorID -> runtime state
+	defs            map[string]ConnectorDefinition // resolved+merged definitions
+	cliReadiness    map[string]CLIConnectorReadiness
+	legacyCLIReview map[string]bool
+	cliControlToken string
 }
 
 // activeEntry tracks runtime state for a connector that has been connected.
@@ -61,11 +72,56 @@ func NewRegistry(manager RuntimeManager, logger Logger) *Registry {
 		logger = noopLogger{}
 	}
 	return &Registry{
-		logger:  logger,
-		manager: manager,
-		active:  make(map[string]*activeEntry),
-		defs:    make(map[string]ConnectorDefinition),
+		logger:          logger,
+		manager:         manager,
+		active:          make(map[string]*activeEntry),
+		defs:            make(map[string]ConnectorDefinition),
+		cliReadiness:    make(map[string]CLIConnectorReadiness),
+		legacyCLIReview: make(map[string]bool),
 	}
+}
+
+// SetLegacyCLIReviewRequired records ambiguous user MCP entries without
+// changing or deleting them. The marker is catalog-only and survives later
+// Desktop readiness snapshots for the current Core process.
+func (r *Registry) SetLegacyCLIReviewRequired(serverKeys []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, key := range serverKeys {
+		switch key {
+		case "dingtalk-workspace":
+			r.legacyCLIReview["dingtalk-workspace"] = true
+		case "lark":
+			r.legacyCLIReview["lark-cli"] = true
+		}
+	}
+}
+
+// SetCLIControlToken configures the startup-scoped secret required for
+// Desktop-to-Core CLI readiness updates.
+func (r *Registry) SetCLIControlToken(token string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cliControlToken = strings.TrimSpace(token)
+}
+
+// UpdateCLIReadiness accepts only complete, non-sensitive snapshots for known
+// CLI providers. The control token is compared in constant time.
+func (r *Registry) UpdateCLIReadiness(token, connectorID string, snapshot CLIConnectorReadiness) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.cliControlToken == "" || len(token) != len(r.cliControlToken) || subtle.ConstantTimeCompare([]byte(token), []byte(r.cliControlToken)) != 1 {
+		return ErrCLIReadinessUnauthorized
+	}
+	def, ok := r.defs[connectorID]
+	if !ok {
+		return ErrConnectorNotFound
+	}
+	if def.Kind != KindCLI || snapshot.ProviderID != connectorID || !validCLIReadiness(snapshot) {
+		return ErrCLIReadinessInvalid
+	}
+	r.cliReadiness[connectorID] = snapshot
+	return nil
 }
 
 // LoadSources loads connector definitions from all supplied sources and merges
@@ -133,7 +189,7 @@ func (r *Registry) RestoreBuiltinOwnership(userCfg mcpclient.ConfigFile) {
 	defer r.mu.Unlock()
 
 	for id, def := range r.defs {
-		if def.SourceOrigin != SourceBuiltin {
+		if def.SourceOrigin != SourceBuiltin || def.Kind != KindMCP {
 			continue
 		}
 		providerID := def.ProviderID
@@ -169,6 +225,9 @@ func (r *Registry) Connect(ctx context.Context, connectorID string) error {
 	def, ok := r.defs[connectorID]
 	if !ok {
 		return ErrConnectorNotFound
+	}
+	if def.Kind != KindMCP {
+		return ErrConnectorActionUnsupported
 	}
 
 	if entry := r.active[connectorID]; entry != nil && entry.connected {
@@ -301,6 +360,9 @@ func (r *Registry) Disconnect(ctx context.Context, connectorID string) error {
 	if !ok {
 		return ErrConnectorNotFound
 	}
+	if def.Kind != KindMCP {
+		return ErrConnectorActionUnsupported
+	}
 
 	entry, ok := r.active[connectorID]
 	if !ok || !entry.connected {
@@ -374,7 +436,9 @@ func (r *Registry) List() []ConnectorStatus {
 	for id, def := range r.defs {
 		status := ConnectorStatus{
 			ID:                def.ID,
+			Kind:              def.Kind,
 			DisplayName:       def.DisplayName,
+			Description:       def.Description,
 			Category:          def.Category,
 			Provider:          def.Provider,
 			ProviderID:        def.ProviderID,
@@ -384,6 +448,20 @@ func (r *Registry) List() []ConnectorStatus {
 			AuthType:          def.AuthType,
 			State:             StateDisconnected,
 			ProviderReadiness: tool.ProviderUnavailable,
+		}
+
+		if def.Kind == KindCLI {
+			status.LegacyMCPReviewRequired = r.legacyCLIReview[id]
+			if readiness, ok := r.cliReadiness[id]; ok {
+				copy := readiness
+				status.CLIReadiness = &copy
+				status.State, status.ProviderReadiness = cliConnectorProjection(readiness)
+				if readiness.SafeError != nil {
+					status.LastError = readiness.SafeError.Message
+				}
+			}
+			out = append(out, status)
+			continue
 		}
 
 		entry := r.active[id]
@@ -414,6 +492,9 @@ func (r *Registry) List() []ConnectorStatus {
 }
 
 func normalizeConnectorDefinition(def ConnectorDefinition) ConnectorDefinition {
+	if def.Kind == "" {
+		def.Kind = KindMCP
+	}
 	if def.ProviderID == "" {
 		def.ProviderID = tool.ProviderID("connector:" + def.ID)
 	}
@@ -471,7 +552,9 @@ func (r *Registry) Status(connectorID string) (ConnectorStatus, error) {
 
 	status := ConnectorStatus{
 		ID:                def.ID,
+		Kind:              def.Kind,
 		DisplayName:       def.DisplayName,
+		Description:       def.Description,
 		Category:          def.Category,
 		Provider:          def.Provider,
 		ProviderID:        def.ProviderID,
@@ -482,6 +565,17 @@ func (r *Registry) Status(connectorID string) (ConnectorStatus, error) {
 		AuthType:          def.AuthType,
 		State:             StateDisconnected,
 	}
+	if def.Kind == KindCLI {
+		if readiness, ok := r.cliReadiness[connectorID]; ok {
+			copy := readiness
+			status.CLIReadiness = &copy
+			status.State, status.ProviderReadiness = cliConnectorProjection(readiness)
+			if readiness.SafeError != nil {
+				status.LastError = readiness.SafeError.Message
+			}
+		}
+		return status, nil
+	}
 
 	entry := r.active[connectorID]
 	if entry != nil && entry.connected {
@@ -491,6 +585,34 @@ func (r *Registry) Status(connectorID string) (ConnectorStatus, error) {
 	}
 
 	return status, nil
+}
+
+func validCLIReadiness(value CLIConnectorReadiness) bool {
+	if strings.TrimSpace(value.UpdatedAt) == "" {
+		return false
+	}
+	validActivation := value.Activation == CLIActivationEnabled || value.Activation == CLIActivationDisabled
+	validInstall := value.Install == CLIInstallMissing || value.Install == CLIInstallInstalling || value.Install == CLIInstallInstalled || value.Install == CLIInstallUnsupported || value.Install == CLIInstallFailed
+	validExecutable := value.Executable == CLIExecutableUnknown || value.Executable == CLIExecutableMissing || value.Executable == CLIExecutableAvailable || value.Executable == CLIExecutableInvalid
+	validConfiguration := value.Configuration == CLIConfigurationUnknown || value.Configuration == CLIConfigurationRequired || value.Configuration == CLIConfigurationReady || value.Configuration == CLIConfigurationFailed
+	validAuthentication := value.Authentication == CLIAuthenticationUnknown || value.Authentication == CLIAuthenticationRequired || value.Authentication == CLIAuthenticationInProgress || value.Authentication == CLIAuthenticationAuthorized || value.Authentication == CLIAuthenticationFailed
+	validOverall := value.Overall == CLIOverallDisabled || value.Overall == CLIOverallNotReady || value.Overall == CLIOverallActionRequired || value.Overall == CLIOverallWorking || value.Overall == CLIOverallReady || value.Overall == CLIOverallFailed
+	return validActivation && validInstall && validExecutable && validConfiguration && validAuthentication && validOverall
+}
+
+func cliConnectorProjection(value CLIConnectorReadiness) (ConnectorState, tool.ProviderReadiness) {
+	switch value.Overall {
+	case CLIOverallReady:
+		return StateConnected, tool.ProviderReady
+	case CLIOverallWorking:
+		return StatePending, tool.ProviderUnavailable
+	case CLIOverallActionRequired:
+		return StateNeedsAuth, tool.ProviderNeedsAuth
+	case CLIOverallFailed:
+		return StateFailed, tool.ProviderUnavailable
+	default:
+		return StateDisconnected, tool.ProviderUnavailable
+	}
 }
 
 // Definition returns the resolved ConnectorDefinition for the given ID.

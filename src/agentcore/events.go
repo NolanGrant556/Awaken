@@ -46,8 +46,10 @@ const (
 	RuntimeReadyEventType           AwakenEventType = "RuntimeReady"
 	RuntimeRepairFailedEventType    AwakenEventType = "RuntimeRepairFailed"
 	RuntimeMissingEventType         AwakenEventType = "RuntimeMissing"
-	UserQuestionRequestedType       AwakenEventType = "UserQuestionRequested"
-	UserQuestionResolvedType        AwakenEventType = "UserQuestionResolved"
+	UserQuestionRequestedType             AwakenEventType = "UserQuestionRequested"
+	UserQuestionResolvedType              AwakenEventType = "UserQuestionResolved"
+	ExternalInteractionRequestedType      AwakenEventType = "ExternalInteractionRequested"
+	ExternalInteractionResolvedType       AwakenEventType = "ExternalInteractionResolved"
 	ArtifactCreatedEventType        AwakenEventType = "ArtifactCreated"
 	ArtifactUpdatedEventType        AwakenEventType = "ArtifactUpdated"
 	SkillActivatedEventType         AwakenEventType = "SkillActivated"
@@ -166,8 +168,17 @@ type AwakenEvent struct {
 	AuthURL                 string
 	RuntimeName             string
 	RuntimeVersion          string
-	QuestionID              string
-	QuestionAnswer          string
+	QuestionID                   string
+	QuestionAnswer               string
+	InteractionID                string
+	InteractionResolution        string
+	InteractionTitle             string
+	InteractionSafeMessage       string
+	InteractionVerificationURL   string
+	InteractionQRImageURL        string
+	InteractionProvider          string
+	InteractionRecoveries        []string
+	InteractionRequiresReplay    bool
 	ArtifactContractVersion int
 	ArtifactRole            tool.ArtifactRole
 	ArtifactProducer        string

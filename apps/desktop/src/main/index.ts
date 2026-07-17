@@ -8,6 +8,7 @@ import {
   ipcMain,
   nativeTheme,
   nativeImage,
+  net,
   protocol,
   screen as electronScreen,
   shell,
@@ -38,6 +39,10 @@ import {
   type ArtifactOpenResult,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
+  type CliActivation,
+  type CliConnectorReadiness,
+  type CliConnectorView,
+  type CliProviderId,
   type DesktopPreferencesSaveRequest,
   type DesktopPlatform,
   type DeleteSkillRequest,
@@ -105,6 +110,7 @@ import {
   syncSystemSkills,
   SystemSkillsSyncError,
 } from "./system-skills-importer.js";
+import { CliConnectorManager } from "./cli-connectors/manager.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let runtimeBaseUrl: string | null = null;
@@ -144,6 +150,15 @@ protocol.registerSchemesAsPrivileged([
       corsEnabled: true,
     },
   },
+  {
+    scheme: "awaken-cli-auth",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: false,
+    },
+  },
 ]);
 
 let supervisor: RuntimeSupervisor | null = null;
@@ -152,6 +167,7 @@ let modelProfileStore: ModelProfileStore | null = null;
 let searchSettingsStore: SearchSettingsStore | null = null;
 let petStore: PetStore | null = null;
 let petWindowManager: PetWindowManager | null = null;
+let cliConnectorManager: CliConnectorManager | null = null;
 let mainWindowRef: BrowserWindow | null = null;
 let pendingPetThreadId: string | null = null;
 let isQuitting = false;
@@ -164,6 +180,7 @@ type StreamSubscription = {
 };
 
 const subscriptions = new Map<string, StreamSubscription>();
+const desktopControlToken = randomUUID();
 
 const defaultWindowWidth = 1440;
 const defaultWindowHeight = 960;
@@ -175,6 +192,49 @@ function desktopIconPath(): string {
     return join(process.resourcesPath, "icon.png");
   }
   return join(__dirname, "../../build/icon.png");
+}
+
+function cliConnectorManifestPath(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, "cli-connectors", "manifest.json")
+    : join(app.getAppPath(), "resources", "cli-connectors", "manifest.json");
+}
+
+function broadcastCliConnectorState(connector: CliConnectorView): void {
+  for (const wc of webContents.getAllWebContents()) {
+    if (!wc.isDestroyed()) wc.send("awaken:cli-connector-state", { connector });
+  }
+}
+
+async function publishCliReadiness(readiness: CliConnectorReadiness): Promise<void> {
+  if (!runtimeBaseUrl) return;
+  await requestRuntime(`/v1/connectors/${encodeURIComponent(readiness.providerId)}/cli-readiness`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Awaken-Control-Token": desktopControlToken,
+    },
+    body: JSON.stringify(readiness),
+  });
+}
+
+function registerCliAuthProtocol(): void {
+  protocol.handle("awaken-cli-auth", async (request) => {
+    try {
+      const url = new URL(request.url);
+      const parts = url.pathname.split("/").filter(Boolean);
+      if (parts.length !== 2 || parts[1] !== "qr.png") return new Response("Not found", { status: 404 });
+      const assetPath = cliConnectorManager?.resolveAuthAsset(url.hostname, parts[0]);
+      if (!assetPath) return new Response("Not found", { status: 404 });
+      const bytes = await fs.readFile(assetPath);
+      return new Response(bytes, {
+        status: 200,
+        headers: { "Content-Type": "image/png", "Cache-Control": "no-store" },
+      });
+    } catch {
+      return new Response("Not found", { status: 404 });
+    }
+  });
 }
 
 function loadDesktopIcon() {
@@ -1083,8 +1143,13 @@ ipcMain.handle("awaken:get-runtime-info", async () => {
 });
 
 ipcMain.handle("awaken:list-connectors", async () => {
-	return requestRuntime<RuntimeConnector[]>("/v1/connectors", {
+	const connectors = await requestRuntime<RuntimeConnector[]>("/v1/connectors", {
 		method: "GET",
+	});
+	const cliById = new Map((cliConnectorManager?.list() ?? []).map((entry) => [entry.providerId, entry]));
+	return connectors.map((connector) => {
+		const cli = cliById.get(connector.id as CliProviderId);
+		return cli ? { ...connector, kind: "cli" as const, cliReadiness: cli.readiness } : connector;
 	});
 });
 
@@ -1102,6 +1167,61 @@ ipcMain.handle("awaken:disconnect-connector", async (_event, connectorId: string
 	return requestRuntime<RuntimeConnectorActionResponse>(`/v1/connectors/${connectorId}/disconnect`, {
 		method: "POST",
 	});
+});
+
+ipcMain.handle("awaken:list-cli-connectors", async () => cliConnectorManager?.list() ?? []);
+ipcMain.handle("awaken:refresh-cli-connector", async (_event, providerId: CliProviderId) => {
+	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
+	return cliConnectorManager.refreshProvider(providerId);
+});
+ipcMain.handle("awaken:install-cli-connector", async (_event, providerId: CliProviderId) => {
+	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
+	return cliConnectorManager.install(providerId);
+});
+ipcMain.handle("awaken:cancel-cli-install", async (_event, providerId: CliProviderId) => {
+	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
+	return cliConnectorManager.cancelInstall(providerId);
+});
+ipcMain.handle("awaken:select-cli-executable", async (_event, providerId: CliProviderId) => {
+	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
+	const result = await dialog.showOpenDialog({
+		title: providerId === "dingtalk-workspace" ? "选择 dws 可执行文件" : "选择 lark-cli 可执行文件",
+		properties: ["openFile"],
+	});
+	if (result.canceled || result.filePaths.length !== 1) {
+		const current = cliConnectorManager.list().find((entry) => entry.providerId === providerId);
+		if (!current) throw new Error("CLI connector unavailable");
+		return current;
+	}
+	return cliConnectorManager.selectExecutable(providerId, result.filePaths[0]);
+});
+ipcMain.handle("awaken:configure-cli-connector", async (_event, providerId: CliProviderId) => {
+	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
+	return cliConnectorManager.configure(providerId);
+});
+ipcMain.handle("awaken:start-cli-auth", async (_event, providerId: CliProviderId) => {
+	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
+	return cliConnectorManager.startAuth(providerId);
+});
+ipcMain.handle("awaken:cancel-cli-auth", async (_event, providerId: CliProviderId) => {
+	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
+	return cliConnectorManager.cancelAuth(providerId);
+});
+ipcMain.handle("awaken:retry-cli-auth", async (_event, providerId: CliProviderId) => {
+	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
+	return cliConnectorManager.retryAuth(providerId);
+});
+ipcMain.handle("awaken:set-cli-activation", async (_event, providerId: CliProviderId, activation: CliActivation) => {
+	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
+	return cliConnectorManager.setActivation(providerId, activation);
+});
+ipcMain.handle("awaken:logout-cli-connector", async (_event, providerId: CliProviderId) => {
+	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
+	return cliConnectorManager.logout(providerId);
+});
+ipcMain.handle("awaken:uninstall-managed-cli", async (_event, providerId: CliProviderId) => {
+	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
+	return cliConnectorManager.uninstallManaged(providerId);
 });
 
 ipcMain.handle("awaken:list-mcp-servers", async () => {
@@ -1648,6 +1768,29 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  "awaken:resolve-external-interaction",
+  async (
+    _event,
+    payload: {
+      runId: string;
+      interactionId: string;
+      resolution: "completed" | "cancelled" | "expired" | "failed";
+    },
+  ) => {
+    await requestRuntimeOK(
+      `/v1/runs/${payload.runId}/external-interactions/${payload.interactionId}/resolve`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ resolution: payload.resolution }),
+      },
+    );
+  },
+);
+
+ipcMain.handle(
   "awaken:subscribe-run",
   async (event, payload: { runId: string; subscriptionId: string; afterCursor?: number; afterSeq?: number }) => {
     await subscribeToRun(
@@ -1851,6 +1994,17 @@ app.whenReady().then(async () => {
   modelProfileStore = new ModelProfileStore(awakenHome);
   await modelProfileStore.initialize();
   searchSettingsStore = new SearchSettingsStore(configDir);
+  cliConnectorManager = new CliConnectorManager({
+    homeDir: app.getPath("home"),
+    platform: process.platform,
+    architecture: process.arch,
+    manifestPath: cliConnectorManifestPath(),
+    fetchAsset: (url, signal) => net.fetch(url, { signal }),
+    publishReadiness: publishCliReadiness,
+    onStateChanged: broadcastCliConnectorState,
+  });
+  await cliConnectorManager.initialize();
+  registerCliAuthProtocol();
   petStore = new PetStore(configDir, app.getPath("userData"));
   await petStore.initialize();
   const builtinPetReport = await importBuiltinPets(
@@ -1899,11 +2053,16 @@ app.whenReady().then(async () => {
     {
       resolveProductEnvironment: async () => {
         try {
-          return (
-            (await searchSettingsStore?.runtimeEnvironment()) ?? {
-              AWAKEN_WEB_SEARCH_PROVIDERS: "",
-            }
-          );
+          const searchEnvironment = (await searchSettingsStore?.runtimeEnvironment()) ?? {
+            AWAKEN_WEB_SEARCH_PROVIDERS: "",
+          };
+          const managedBin = cliConnectorManager?.managedBinPath() ?? "";
+          const inheritedPath = process.env.PATH ?? "";
+          return {
+            ...searchEnvironment,
+            AWAKEN_DESKTOP_CONTROL_TOKEN: desktopControlToken,
+            PATH: managedBin ? `${managedBin}${path.delimiter}${inheritedPath}` : inheritedPath,
+          };
         } catch (error) {
           console.error("[awaken-desktop] search settings unavailable", {
             message: error instanceof Error ? error.message : String(error),
@@ -1917,6 +2076,7 @@ app.whenReady().then(async () => {
     if (info.runtimeBaseUrl) {
       runtimeBaseUrl = info.runtimeBaseUrl;
       startProjectTrashWorker();
+      void cliConnectorManager?.refreshAll();
     } else if (info.status !== "running") {
       runtimeBaseUrl = null;
     }
@@ -1936,6 +2096,7 @@ app.whenReady().then(async () => {
     if (statusInfo.runtimeBaseUrl) {
       runtimeBaseUrl = statusInfo.runtimeBaseUrl;
       startProjectTrashWorker();
+      void cliConnectorManager?.refreshAll();
     }
   });
 
@@ -1968,6 +2129,7 @@ app.on("before-quit", (event) => {
       if (supervisor) {
         await supervisor.stop();
       }
+      await cliConnectorManager?.dispose();
       await petWindowManager?.dispose();
     } catch (err) {
       console.error("[awaken-desktop] supervisor stop failed", err);

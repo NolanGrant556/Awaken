@@ -109,6 +109,7 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 		mux.HandleFunc("GET /v1/runs/{run_id}/events", handlers.handleRunEvents)
 		mux.HandleFunc("POST /v1/runs/{run_id}/cancel", handlers.handleCancelRun)
 		mux.HandleFunc("POST /v1/runs/{run_id}/user-questions/{question_id}/answer", handlers.handleAnswerUserQuestion)
+		mux.HandleFunc("POST /v1/runs/{run_id}/external-interactions/{interaction_id}/resolve", handlers.handleResolveExternalInteraction)
 		mux.HandleFunc("GET /v1/runs/{run_id}/audit", handlers.handleGetRunAudit)
 		if projectService := cfg.runService.ProjectService(); projectService != nil {
 			projects := projectHandlers{service: projectService}
@@ -156,6 +157,7 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 		mux.HandleFunc("GET /v1/connectors", connH.handleListConnectors)
 		mux.HandleFunc("POST /v1/connectors/{id}/connect", connH.handleConnect)
 		mux.HandleFunc("POST /v1/connectors/{id}/disconnect", connH.handleDisconnect)
+		mux.HandleFunc("PUT /v1/connectors/{id}/cli-readiness", connH.handleCLIReadiness)
 	}
 	skillH := skillHandlers{registry: cfg.skillRegistry, workspaceRoot: cfg.workspaceRoot, trashAdapter: cfg.skillTrashAdapter}
 	mux.HandleFunc("GET /v1/skills", skillH.handleListSkills)

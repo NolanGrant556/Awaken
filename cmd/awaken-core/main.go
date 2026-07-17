@@ -31,9 +31,15 @@ func main() {
 
 	defaultWorkspace := resolveDefaultWorkspace()
 	infoProvider := server.NewLLMRuntimeInfoProvider("", "", "", defaultWorkspace, "")
+	legacyCLIReport, err := connectors.MigrateLegacyBuiltinCLIConfigs()
+	if err != nil {
+		log.Printf("[connectors] legacy CLI MCP migration failed: %v", err)
+	} else if len(legacyCLIReport.Removed) > 0 || len(legacyCLIReport.ReviewRequired) > 0 {
+		log.Printf("[connectors] legacy CLI MCP migration removed=%v review_required=%v", legacyCLIReport.Removed, legacyCLIReport.ReviewRequired)
+	}
 
 	manager := buildMCPManager(defaultWorkspace)
-	connRegistry := buildConnectorRegistry(manager, defaultWorkspace)
+	connRegistry := buildConnectorRegistry(manager, defaultWorkspace, legacyCLIReport.ReviewRequired)
 	skillRegistry := buildSkillRegistry(manager, defaultWorkspace)
 	syncSkillsForWorkspace := func(workspaceRoot string) {
 		skillRegistry.ReloadLocalSources(skills.LocalSourceDirs(workspaceRoot))
@@ -199,7 +205,7 @@ func buildMCPManager(workspace string) *mcpclient.Manager {
 // buildConnectorRegistry loads the connector sources (builtin + local) and
 // returns a connector registry backed by the MCP manager. Returns nil when
 // no MCP manager is available, since connector lifecycle depends on it.
-func buildConnectorRegistry(manager *mcpclient.Manager, _ string) *connectors.Registry {
+func buildConnectorRegistry(manager *mcpclient.Manager, _ string, legacyCLIReview []string) *connectors.Registry {
 	if manager == nil {
 		return nil
 	}
@@ -219,9 +225,11 @@ func buildConnectorRegistry(manager *mcpclient.Manager, _ string) *connectors.Re
 
 	logger := connectors.StdLogger{}
 	registry := connectors.NewRegistry(manager, logger)
+	registry.SetCLIControlToken(os.Getenv("AWAKEN_DESKTOP_CONTROL_TOKEN"))
 	if err := registry.LoadSources(ctx, sources); err != nil {
 		log.Printf("[connectors] load sources failed: %v", err)
 	}
+	registry.SetLegacyCLIReviewRequired(legacyCLIReview)
 	userCfg, err := mcpclient.LoadUserConfig()
 	if err != nil {
 		log.Printf("[connectors] user mcp config load failed: %v", err)

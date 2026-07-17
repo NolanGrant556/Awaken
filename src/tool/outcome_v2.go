@@ -284,7 +284,7 @@ func (o *ExecutionOutcome) normalizeStatus() {
 		switch o.Status {
 		case OutcomeSucceeded:
 			o.TransportStatus = TransportCompleted
-		case OutcomeDenied, OutcomeNeedsAuth, OutcomeNeedsRuntime, OutcomeUnsupported, OutcomeReviewRequired:
+		case OutcomeDenied, OutcomeNeedsAuth, OutcomeNeedsRuntime, OutcomeUnsupported, OutcomeReviewRequired, OutcomeInteractionRequired:
 			o.TransportStatus = TransportNotStarted
 		case OutcomeCancelled, OutcomeInterrupted:
 			o.TransportStatus = TransportCancelled
@@ -313,7 +313,7 @@ func (o *ExecutionOutcome) normalizeStatus() {
 			o.ErrorMessage = firstNonBlank(o.ErrorMessage, "succeeded outcome reported contradictory transport or semantic state")
 			o.Retryable = false
 		}
-	case OutcomeDenied, OutcomeNeedsAuth, OutcomeNeedsRuntime, OutcomeUnsupported, OutcomeReviewRequired:
+	case OutcomeDenied, OutcomeNeedsAuth, OutcomeNeedsRuntime, OutcomeUnsupported, OutcomeReviewRequired, OutcomeInteractionRequired:
 		o.TransportStatus = TransportNotStarted
 		if o.SemanticStatus == SemanticUnknown || o.SemanticStatus == SemanticSuccess {
 			o.SemanticStatus = SemanticFailure
@@ -340,7 +340,7 @@ func firstNonErrorCategory(values ...ErrorCategory) ErrorCategory {
 func validOutcomeStatus(status OutcomeStatus) bool {
 	switch status {
 	case OutcomeSucceeded, OutcomeFailed, OutcomeDenied, OutcomeCancelled, OutcomeInterrupted,
-		OutcomeNeedsAuth, OutcomeNeedsRuntime, OutcomeUnsupported, OutcomeReviewRequired:
+		OutcomeNeedsAuth, OutcomeNeedsRuntime, OutcomeUnsupported, OutcomeReviewRequired, OutcomeInteractionRequired:
 		return true
 	default:
 		return false
@@ -376,7 +376,7 @@ func validProcessStatus(status ProcessStatus) bool {
 
 func normalizeSideEffectState(state SideEffectState, o ExecutionOutcome, declared []ToolSideEffect) SideEffectState {
 	switch o.Status {
-	case OutcomeDenied, OutcomeNeedsAuth, OutcomeNeedsRuntime, OutcomeUnsupported, OutcomeReviewRequired:
+	case OutcomeDenied, OutcomeNeedsAuth, OutcomeNeedsRuntime, OutcomeUnsupported, OutcomeReviewRequired, OutcomeInteractionRequired:
 		return OutcomeSideEffectNotStarted
 	case OutcomeSucceeded:
 		if len(o.Changes) > 0 || len(o.Artifacts) > 0 {
@@ -607,7 +607,7 @@ func errorStageFor(o ExecutionOutcome) ErrorStage {
 
 func retryStrategyFor(o ExecutionOutcome) RetryStrategy {
 	switch o.Status {
-	case OutcomeNeedsAuth:
+	case OutcomeNeedsAuth, OutcomeInteractionRequired:
 		return RetryRequestAuthorization
 	case OutcomeNeedsRuntime:
 		return RetryPrepareRuntime

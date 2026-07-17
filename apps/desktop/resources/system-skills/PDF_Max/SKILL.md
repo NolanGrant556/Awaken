@@ -1,12 +1,12 @@
 ---
-name: typst-pdf-maker
+name: PDF_Max
 version: 1.0.0
 description: 使用 Typst 创建高质量 PDF，适合专业报告、论文、简历、数学与代码密集型长文档及精确排版；普通 PDF 加工用 pdf Skill，普通演示文稿用 ppt Skill。
 when_to_use: 用户需要新建专业 PDF、把 Markdown 转成精排 PDF、维护现有 Typst 项目，或明确要求 Typst/PDF 幻灯片时使用。
 user-invocable: true
 ---
 
-# Awaken Typst PDF 生成 Skill
+# PDF_Max
 
 使用 Typst 创建结构清晰、排版精确、可复核的 PDF。此 Skill 负责“生成专业文档”，不替代其他 Awaken 内置 Skill：
 

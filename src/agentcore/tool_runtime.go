@@ -594,6 +594,10 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 			failContent = fmt.Sprintf("工具执行失败: %v", err)
 		}
 		applyExecutorOutcome(&result, execOut)
+		result.Content = failContent
+		if handled, done := rt.maybeAwaitCLIAuthInteraction(toolCtx, result, def, permission, decision, selectedTool, intent, input, false); done {
+			return handled
+		}
 		result = synthesizeExecutionErrorToolResult(result, "tool_execution_failed", failContent, err.Error())
 		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
 		return rt.finalizeExecutedToolResult(result, def, permission, string(decision.Source), selectedTool, input, output)
@@ -604,5 +608,8 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	result.ResultSummary = excerptString(strings.TrimSpace(output), 200)
 	// TrashedPaths are sourced from structured executor outcomes.
 	result.TrashedPaths = trashedPaths
+	if handled, done := rt.maybeAwaitCLIAuthInteraction(toolCtx, result, def, permission, decision, selectedTool, intent, input, false); done {
+		return handled
+	}
 	return rt.finalizeExecutedToolResult(result, def, permission, string(decision.Source), selectedTool, input, output)
 }

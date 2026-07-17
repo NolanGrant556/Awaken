@@ -6,9 +6,10 @@
 
 统一决策动作是 allow、deny、needs_auth、needs_runtime、unsupported，以及为外部/兼容 provider 保留的通用 transform。取消由 runtime 独立处理；legacy `abort` 输入只能转为 `deny` + `policy_error`，不是当前决策枚举。`PermissionDecision` 只保存 behavior、reason 和可选 error code；审批标题、描述、风险色、路径和副作用不再作为 decision metadata 传输。
 
-当前没有通用逐工具 Approval、消息发送审核，也没有 `awaiting_approval` run 状态。唯一由工具执行过程触发的交互 gate 是：
+当前没有通用逐工具 Approval、消息发送审核，也没有 `awaiting_approval` run 状态。工具执行过程可触发的交互 gate 是：
 
 - `ask_user`：补充任务所需用户输入；
+- `interaction_required`：等待用户完成浏览器/手机等外部操作（首个使用者为官方 CLI 授权）。run 保持非终态，原 tool call 不丢失；Desktop 以 Workbench `ExternalActionGate` 展示安全 HTTPS 链接/受控二维码；用户完成后由 host 验证，同一调用最多自动重放一次。再次返回相同授权要求时停止循环并给出可恢复错误。device code、token、secret、原始 CLI 输出不得进入模型、Journal 或 transcript。
 
 消息发送无论目标是个人、多人、群、频道、广播还是批量扩展，都按普通工具调用处理；Awaken 不解析收件人、不签发一次性发送 grant，也不在 transport 前等待人工批准。工具和 provider 自己负责远端权限、幂等性与副作用。
 
@@ -22,7 +23,7 @@ provider `needs_runtime` 的 host-generated plan 仍可投影为 `dependency_ins
 
 工具结果必须区分：
 
-- outcome status：succeeded、failed、denied、cancelled、interrupted、needs_auth、needs_runtime、unsupported；`review_required` 只保留为旧结果兼容值，当前策略不产生该状态；
+- outcome status：succeeded、failed、denied、cancelled、interrupted、needs_auth、needs_runtime、unsupported、interaction_required；`review_required` 只保留为旧结果兼容值，当前策略不产生该状态；
 - transport status：not_started、completed、failed、cancelled、unknown；
 - process status/exit/signal；
 - semantic status；
@@ -55,7 +56,7 @@ SemanticJournal 持久的是 canonical Outcome，不是缩减后的 ModelPayload
 
 Agent 根据稳定 error code、retryability、transport 和 side-effect state 决定下一步：
 
-- `needs_auth`、`needs_runtime`、`unsupported` 提供可执行 next action，不盲重试；
+- `needs_auth`、`needs_runtime`、`unsupported`、`interaction_required` 提供可执行 next action，不盲重试；`interaction_required` 由 runtime await/resolve，不得当作普通失败直接结束 tool call；
 - `not_started` 可按修正后的输入重试；
 - `partial` 或 `unknown` 先检查外部状态，禁止原样重放有副作用调用；
 - 输出契约不匹配、provider readiness 改变或外部 provider 违约都保留诊断证据。

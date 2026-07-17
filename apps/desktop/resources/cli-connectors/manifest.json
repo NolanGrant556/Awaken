@@ -1,5 +1,5 @@
 {
-  "revision": "2026-07-17.1",
+  "revision": "2026-07-17.2",
   "assets": [
     {
       "providerId": "dingtalk-workspace",
@@ -88,6 +88,55 @@
       "archiveType": "zip",
       "executableName": "lark-cli.exe",
       "archiveExecutablePath": "lark-cli.exe"
+    }
+  ],
+  "skillBundles": [
+    {
+      "providerId": "dingtalk-workspace",
+      "version": "1.0.32",
+      "url": "https://github.com/DingTalk-Real-AI/dingtalk-workspace-cli/releases/download/v1.0.32/dws-skills.zip",
+      "sha256": "54aeedca9fc0ff4f343c1a1d5c4c73841a2384212514f4dc1a3ff46d31ac6bc8",
+      "archiveType": "zip",
+      "archiveRoot": "",
+      "destinationRoot": "dws",
+      "skillNames": ["dws"]
+    },
+    {
+      "providerId": "lark-cli",
+      "version": "1.0.71",
+      "url": "https://github.com/larksuite/cli/archive/refs/tags/v1.0.71.tar.gz",
+      "sha256": "f7d03e18570b665c223cea4df512fbd0e0005e4ee8164582c1e2d5f25b70c8b9",
+      "archiveType": "tar.gz",
+      "archiveRoot": "cli-1.0.71/skills",
+      "skillNames": [
+        "lark-approval",
+        "lark-apps",
+        "lark-attendance",
+        "lark-base",
+        "lark-calendar",
+        "lark-contact",
+        "lark-doc",
+        "lark-drive",
+        "lark-event",
+        "lark-im",
+        "lark-mail",
+        "lark-markdown",
+        "lark-minutes",
+        "lark-note",
+        "lark-okr",
+        "lark-openapi-explorer",
+        "lark-shared",
+        "lark-sheets",
+        "lark-skill-maker",
+        "lark-slides",
+        "lark-task",
+        "lark-vc-agent",
+        "lark-vc",
+        "lark-whiteboard",
+        "lark-wiki",
+        "lark-workflow-meeting-summary",
+        "lark-workflow-standup-report"
+      ]
     }
   ]
 }

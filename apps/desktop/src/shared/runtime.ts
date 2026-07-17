@@ -313,6 +313,22 @@ export type CliAuthenticationState = "unknown" | "required" | "in_progress" | "a
 export type CliOverallState = "disabled" | "not_ready" | "action_required" | "working" | "ready" | "failed";
 export type CliInstallOwnership = "awaken-managed" | "user-managed" | "system-managed";
 
+export type CliInstallPhase =
+  | "preparing"
+  | "downloading_cli"
+  | "verifying_cli"
+  | "installing_cli"
+  | "downloading_skills"
+  | "verifying_skills"
+  | "installing_skills"
+  | "finishing";
+
+export type CliInstallProgress = {
+  phase: CliInstallPhase;
+  percent: number;
+  label: string;
+};
+
 export type CliSafeError = {
   code: string;
   message: string;
@@ -347,21 +363,14 @@ export type CliAuthPhase =
   | "waiting_user"
   | "confirming"
   | "authorized"
-  | "expired"
   | "failed"
   | "cancelled";
-
-export type CliAuthRecovery = "open_url" | "refresh_qr" | "retry" | "cancel";
 
 export type CliAuthSessionView = {
   id: string;
   provider: CliProviderId;
   phase: CliAuthPhase;
-  qrImageUrl?: string;
-  verificationUrl?: string;
   safeMessage?: string;
-  expiresAt?: string;
-  recoveries: CliAuthRecovery[];
 };
 
 export type CliConnectorView = {
@@ -369,6 +378,7 @@ export type CliConnectorView = {
   displayName: string;
   readiness: CliConnectorReadiness;
   authSession?: CliAuthSessionView;
+  installProgress?: CliInstallProgress;
 };
 
 export type CliConnectorStateEvent = {
@@ -1010,10 +1020,7 @@ export type AwakenBridge = {
   refreshCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
   installCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
   cancelCliInstall: (providerId: CliProviderId) => Promise<CliConnectorView>;
-  selectCliExecutable: (providerId: CliProviderId) => Promise<CliConnectorView>;
-  startCliConfigure: (providerId: CliProviderId) => Promise<CliConnectorView>;
   startCliAuth: (providerId: CliProviderId) => Promise<CliConnectorView>;
-  cancelCliAuth: (providerId: CliProviderId) => Promise<CliConnectorView>;
   retryCliAuth: (providerId: CliProviderId) => Promise<CliConnectorView>;
   setCliConnectorActivation: (providerId: CliProviderId, activation: CliActivation) => Promise<CliConnectorView>;
   logoutCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;

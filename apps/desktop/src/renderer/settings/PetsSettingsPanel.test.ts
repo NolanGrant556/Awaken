@@ -34,6 +34,7 @@ function createMockRuntimeClient(): RuntimeClient {
     refreshCliConnector: vi.fn(),
     cancelCliInstall: vi.fn(),
     startCliAuth: vi.fn(),
+    cancelCliAuth: vi.fn(),
     retryCliAuth: vi.fn(),
     setCliConnectorActivation: vi.fn(),
     logoutCliConnector: vi.fn(),

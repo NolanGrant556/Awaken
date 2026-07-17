@@ -55,8 +55,6 @@ import type {
   AwakenTheme,
   AwakenThemePreference,
   ComposerToken,
-  CliAuthSessionView,
-  CliProviderId,
   DesktopOperationIssue,
   RuntimeInfo,
   RuntimeProject,
@@ -106,10 +104,8 @@ import { DesktopSettingsDialog } from "./settings/DesktopSettingsDialog";
 import { ProfileBalancePopover } from "./ProfileBalancePopover";
 import {
   ExtensionsView,
-  type CliProductActionHandoff,
   type ExtensionSection,
 } from "./ExtensionsView";
-import { CliAuthCard } from "./CliAuthCard";
 import { ExternalActionGate } from "./ExternalActionGate";
 import {
   MAX_COMPOSER_IMAGE_BYTES,
@@ -967,10 +963,8 @@ export function App() {
 
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
-  const [activeCliAuthSession, setActiveCliAuthSession] = useState<CliAuthSessionView | null>(null);
   const [resolvingExternalInteractionId, setResolvingExternalInteractionId] =
     useState<string | null>(null);
-  const cliHandoffInFlightRef = useRef<Set<string>>(new Set());
   const [openingArtifactId, setOpeningArtifactId] = useState<string | null>(null);
   const [answeringUserQuestionId, setAnsweringUserQuestionId] =
     useState<string | null>(null);
@@ -1703,35 +1697,6 @@ export function App() {
     }
   }
 
-  useEffect(() => {
-    if (!desktopReady) {
-      return;
-    }
-    let disposed = false;
-    void runtimeClient.listCliConnectors().then((connectors) => {
-      if (!disposed) setActiveCliAuthSession(connectors.find((entry) => entry.authSession)?.authSession ?? null);
-    }).catch(() => undefined);
-    const unsubscribe = runtimeClient.subscribeCliConnectorState(({ connector }) => {
-      setActiveCliAuthSession((current) => connector.authSession ?? (current?.provider === connector.providerId ? null : current));
-    });
-    return () => {
-      disposed = true;
-      unsubscribe();
-    };
-  }, [desktopReady, runtimeClient]);
-
-  async function cancelActiveCliAuth(): Promise<void> {
-    if (!activeCliAuthSession) return;
-    await runtimeClient.cancelCliAuth(activeCliAuthSession.provider as CliProviderId);
-    setActiveCliAuthSession(null);
-  }
-
-  async function retryActiveCliAuth(): Promise<void> {
-    if (!activeCliAuthSession) return;
-    const view = await runtimeClient.retryCliAuth(activeCliAuthSession.provider as CliProviderId);
-    setActiveCliAuthSession(view.authSession ?? null);
-  }
-
   async function resolveActiveExternalInteraction(
     resolution: "completed" | "cancelled" | "expired" | "failed",
   ): Promise<void> {
@@ -1757,35 +1722,6 @@ export function App() {
       );
     } finally {
       setResolvingExternalInteractionId(null);
-    }
-  }
-
-  function cliHandoffPrompt(action: CliProductActionHandoff): string {
-    const name = action.displayName || action.providerId;
-    if (action.providerId === "dingtalk-workspace") {
-      return `请使用钉钉官方 CLI（${name}）完成登录与授权。根据 CLI 本次返回向我展示可点击的 HTTPS 授权链接；如需二维码，请基于同一授权 URL 生成，不要编造链接或权限。`;
-    }
-    return `请使用飞书官方 CLI（${name}）完成登录与授权。根据 CLI 本次返回展示 verification_url 或管理员入口；如 CLI 提供二维码命令，基于同一授权 URL 生成，不要编造 scope 或链接。bot 缺权限时展示 console_url，不要错误执行 user login。`;
-  }
-
-  async function handleCliProductActionHandoff(
-    action: CliProductActionHandoff,
-  ): Promise<void> {
-    const key = action.providerId;
-    if (cliHandoffInFlightRef.current.has(key)) {
-      return;
-    }
-    cliHandoffInFlightRef.current.add(key);
-    try {
-      handleNewTask();
-      const prompt = cliHandoffPrompt(action);
-      setComposerValue(prompt);
-      await handleSubmitWithPrompt({ prompt, forceNewThread: true });
-    } finally {
-      // Keep short debounce so double-clicks stay idempotent.
-      window.setTimeout(() => {
-        cliHandoffInFlightRef.current.delete(key);
-      }, 1500);
     }
   }
 
@@ -3736,21 +3672,7 @@ export function App() {
         />
       );
     }
-    if (!activeCliAuthSession) {
-      return null;
-    }
-    return (
-      <CliAuthCard
-        compact
-        session={activeCliAuthSession}
-        onCancel={() => {
-          void cancelActiveCliAuth();
-        }}
-        onRetry={() => {
-          void retryActiveCliAuth();
-        }}
-      />
-    );
+    return null;
   }
 
   function renderUserQuestionPrompt() {
@@ -3995,9 +3917,6 @@ export function App() {
                     desktopReady={desktopReady}
                     runtimeClient={runtimeClient}
                     onNotice={setNotice}
-                    onCliProductActionHandoff={(action) => {
-                      void handleCliProductActionHandoff(action);
-                    }}
                     activeWorkspaceRoot={workspacePath}
                   />
                 </>

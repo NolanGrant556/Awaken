@@ -109,6 +109,13 @@ func LoadDir(dir string, source SourceOrigin) map[string]*SkillDefinition {
 		if source == SourceProject {
 			def.ProjectPath = projectPathFromSkillsRoot(dir)
 		}
+		if source == SourceAgents {
+			if projectPath := projectPathFromSkillsRoot(dir); projectPath != "" {
+				if home, homeErr := os.UserHomeDir(); homeErr != nil || !isSameRealPath(projectPath, home) {
+					def.ProjectPath = projectPath
+				}
+			}
+		}
 		def.State = StateLoaded
 
 		if err := ValidateNameReserved(def.Name); err != nil {
@@ -158,11 +165,24 @@ func projectPathFromSkillsRoot(dir string) string {
 	if filepath.Base(clean) != "skills" {
 		return ""
 	}
-	awakenDir := filepath.Dir(clean)
-	if filepath.Base(awakenDir) != ".awaken" {
+	parentDir := filepath.Dir(clean)
+	parentName := strings.ToLower(filepath.Base(parentDir))
+	if parentName != ".awaken" && parentName != ".agents" {
 		return ""
 	}
-	return filepath.Dir(awakenDir)
+	return filepath.Dir(parentDir)
+}
+
+func isSameRealPath(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	ra, errA := filepath.EvalSymlinks(a)
+	rb, errB := filepath.EvalSymlinks(b)
+	if errA != nil || errB != nil {
+		return filepath.Clean(a) == filepath.Clean(b)
+	}
+	return filepath.Clean(ra) == filepath.Clean(rb)
 }
 
 // LoadLegacyCommandsDir discovers both nested <name>/SKILL.md packages and

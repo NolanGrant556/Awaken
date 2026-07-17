@@ -24,6 +24,9 @@ func TestLocalSourceDirsProductionContract(t *testing.T) {
 	plugin := filepath.Join(base, "plugin-skills")
 	legacy := filepath.Join(base, "legacy")
 	t.Setenv("HOME", home)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", home)
+	}
 	t.Setenv(EnvManagedSkillDirs, joinSourceDirList([]string{managedA, managedB}))
 	t.Setenv(EnvAdditionalSkillDirs, joinSourceDirList([]string{additionalA, additionalB}))
 	t.Setenv(EnvPluginSkillDirs, plugin)
@@ -46,6 +49,7 @@ func TestLocalSourceDirsProductionContract(t *testing.T) {
 	assertPaths(SourceManaged, managedA, managedB)
 	assertPaths(SourceProject, filepath.Join(project, ".awaken", "skills"))
 	assertPaths(SourceUser, filepath.Join(home, ".awaken", "skills"))
+	assertPaths(SourceAgents, filepath.Join(project, ".agents", "skills"), filepath.Join(home, ".agents", "skills"))
 	assertPaths(SourceAdditional, additionalA, additionalB)
 	assertPaths(SourcePlugin, plugin)
 	assertPaths(SourceLegacy, filepath.Join(project, ".awaken", "commands"), filepath.Join(home, ".awaken", "commands"), legacy)
@@ -200,6 +204,65 @@ func TestSymlinkedSourceRootAcrossOriginsIsDiscoveredOnce(t *testing.T) {
 	}
 	if shadowed != 0 || loaded != 1 {
 		t.Fatalf("symlinked root duplicated discovery: loaded=%d shadowed=%d", loaded, shadowed)
+	}
+}
+
+// Agent skills are discovered from both the user home and the project root,
+// but Awaken-owned user/project .awaken/skills win on name conflicts.
+func TestAgentSkillSourceDiscoveryAndPriority(t *testing.T) {
+	base := t.TempDir()
+	home := filepath.Join(base, "home")
+	project := filepath.Join(base, "project")
+	for _, dir := range []string{home, project} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeTestSkillPackage(t, filepath.Join(home, ".agents", "skills"), "shared", "---\nname: shared\ndescription: agents home\n---\nBody")
+	writeTestSkillPackage(t, filepath.Join(project, ".agents", "skills"), "project-agent", "---\nname: project-agent\ndescription: agents project\n---\nBody")
+	writeTestSkillPackage(t, filepath.Join(home, ".awaken", "skills"), "shared", "---\nname: shared\ndescription: awaken user\n---\nBody")
+	t.Setenv("HOME", home)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", home)
+	}
+	t.Setenv(EnvManagedSkillDirs, filepath.Join(t.TempDir(), "none"))
+	t.Setenv(EnvAdditionalSkillDirs, "")
+	t.Setenv(EnvPluginSkillDirs, "")
+	t.Setenv(EnvBundledSkillDirs, "")
+	t.Setenv(EnvLegacyCommandDirs, "")
+
+	dirs := LocalSourceDirs(project)
+	assertPaths := func(source SourceOrigin, want ...string) {
+		t.Helper()
+		got := splitSourceDirList(dirs[source])
+		if len(got) != len(want) {
+			t.Fatalf("%s paths=%v want=%v", source, got, want)
+		}
+		for i := range want {
+			if got[i] != filepath.Clean(want[i]) {
+				t.Fatalf("%s path[%d]=%q want %q", source, i, got[i], want[i])
+			}
+		}
+	}
+	assertPaths(SourceAgents, filepath.Join(project, ".agents", "skills"), filepath.Join(home, ".agents", "skills"))
+
+	reg := NewSkillRegistry(nil)
+	reg.LoadFromSources(dirs)
+	if def := reg.Get("project-agent"); def == nil || def.State != StateLoaded || def.Source != SourceAgents {
+		t.Fatalf("project-agent=%+v", def)
+	}
+	shared := reg.Get("shared")
+	if shared == nil || shared.State != StateLoaded || shared.Source != SourceUser || shared.Description != "awaken user" {
+		t.Fatalf("shared should be owned by .awaken/user, got=%+v", shared)
+	}
+	shadowedAgent := 0
+	for _, def := range reg.ListAll() {
+		if def.ID == "shared" && def.State == StateShadowed && def.Source == SourceAgents {
+			shadowedAgent++
+		}
+	}
+	if shadowedAgent != 1 {
+		t.Fatalf("expected one shadowed agent 'shared', got %d", shadowedAgent)
 	}
 }
 

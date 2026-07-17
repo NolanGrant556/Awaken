@@ -31,6 +31,15 @@ func LocalSourceDirs(projectRoot string) map[SourceOrigin]string {
 		dirs[SourceUser] = joinSourceDirList([]string{filepath.Join(home, ".awaken", "skills")})
 	}
 
+	agentDirs := make([]string, 0, 2)
+	if projectRoot != "" {
+		agentDirs = append(agentDirs, filepath.Join(projectRoot, ".agents", "skills"))
+	}
+	if home != "" {
+		agentDirs = append(agentDirs, filepath.Join(home, ".agents", "skills"))
+	}
+	setSourceDirList(dirs, SourceAgents, agentDirs)
+
 	managed := configuredSourceDirs(os.Getenv(EnvManagedSkillDirs), home)
 	if len(managed) == 0 {
 		if defaultDir := defaultManagedSkillsDir(home); defaultDir != "" {

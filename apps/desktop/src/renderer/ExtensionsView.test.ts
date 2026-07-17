@@ -4,13 +4,11 @@ import {
   DEFAULT_SKILL_VIEW,
   SKILL_VIEW_TABS,
   canPreviewSkill,
+  dedupeSkills,
   isSkillVisibleInView,
   loadMcpSettingsResources,
   loadSkillListsForRoots,
-  isSkillPackageDeletable,
-  shouldRenderSkillDeleteAction,
   skillDiagnosticText,
-  skillSourceLabel,
 } from "./ExtensionsView";
 
 describe("loadSkillListsForRoots", () => {
@@ -87,23 +85,6 @@ describe("loadMcpSettingsResources", () => {
   });
 });
 
-describe("isSkillPackageDeletable", () => {
-  it("only allows project and user .awaken/skills packages", () => {
-    expect(isSkillPackageDeletable({ sourceOrigin: "project" })).toBe(true);
-    expect(isSkillPackageDeletable({ sourceOrigin: "user" })).toBe(true);
-    expect(isSkillPackageDeletable({ sourceOrigin: "mcp" })).toBe(false);
-    expect(isSkillPackageDeletable({ sourceOrigin: "plugin" })).toBe(false);
-    expect(isSkillPackageDeletable({ sourceOrigin: "bundled" })).toBe(false);
-  });
-
-  it("hides the delete action only for product-owned bundled Skills", () => {
-    expect(shouldRenderSkillDeleteAction({ sourceOrigin: "bundled" })).toBe(false);
-    expect(shouldRenderSkillDeleteAction({ sourceOrigin: "mcp" })).toBe(true);
-    expect(shouldRenderSkillDeleteAction({ sourceOrigin: "plugin" })).toBe(true);
-    expect(shouldRenderSkillDeleteAction({ sourceOrigin: "project" })).toBe(true);
-  });
-});
-
 describe("canPreviewSkill", () => {
   it("requires an opaque local catalog entry identity and a SKILL.md path", () => {
     expect(
@@ -119,7 +100,7 @@ describe("canPreviewSkill", () => {
         skillFilePath: "/app/system-skills/excel/SKILL.md",
         sourceOrigin: "bundled",
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       canPreviewSkill({
         catalogEntryId: "opaque-id",
@@ -144,6 +125,7 @@ describe("Skill views", () => {
       { id: "awaken", label: "Awaken Skills" },
       { id: "project", label: "项目 Skills" },
       { id: "user", label: "全局 Skills" },
+      { id: "agents", label: "Agents Skills" },
     ]);
   });
 
@@ -154,9 +136,58 @@ describe("Skill views", () => {
     expect(isSkillVisibleInView({ sourceOrigin: "user" }, "user")).toBe(true);
     expect(isSkillVisibleInView({ sourceOrigin: "mcp" }, "user")).toBe(true);
     expect(isSkillVisibleInView({ sourceOrigin: "plugin" }, "user")).toBe(true);
+    expect(isSkillVisibleInView({ sourceOrigin: "agents" }, "agents")).toBe(true);
+    expect(isSkillVisibleInView({ sourceOrigin: "agents" }, "user")).toBe(false);
   });
 
-  it("labels bundled cards as Awaken built-ins", () => {
-    expect(skillSourceLabel("bundled")).toBe("Awaken 内置");
+});
+
+describe("dedupeSkills", () => {
+  it("merges skills from multiple project roots and dedupes by id, source and root", () => {
+    const globalUserSkill = {
+      id: "user-skill",
+      name: "user-skill",
+      description: "global",
+      state: "loaded" as const,
+      sourceOrigin: "user",
+      context: "inline" as const,
+      rootDir: "/home/.awaken/skills/user-skill",
+    };
+    const projectAgentA = {
+      id: "agent-skill",
+      name: "agent-skill",
+      description: "project a",
+      state: "loaded" as const,
+      sourceOrigin: "agents",
+      context: "inline" as const,
+      rootDir: "/project-a/.agents/skills/agent-skill",
+    };
+    const projectAgentB = {
+      id: "agent-skill",
+      name: "agent-skill",
+      description: "project b",
+      state: "loaded" as const,
+      sourceOrigin: "agents",
+      context: "inline" as const,
+      rootDir: "/project-b/.agents/skills/agent-skill",
+    };
+    expect(dedupeSkills([globalUserSkill, projectAgentA, projectAgentB])).toEqual([
+      globalUserSkill,
+      projectAgentA,
+      projectAgentB,
+    ]);
+  });
+
+  it("dedupes the same global skill returned from multiple project roots", () => {
+    const skill = {
+      id: "shared",
+      name: "shared",
+      description: "global",
+      state: "loaded" as const,
+      sourceOrigin: "user",
+      context: "inline" as const,
+      rootDir: "/home/.awaken/skills/shared",
+    };
+    expect(dedupeSkills([skill, skill])).toEqual([skill]);
   });
 });

@@ -19,15 +19,55 @@ afterEach(() => {
 });
 
 describe("CliConnectorManager", () => {
-  it("only accepts provider-owned HTTPS authorization URLs", () => {
+  it("only accepts provider-owned user-facing HTTPS authorization URLs", () => {
     expect(authVerificationUrl(
       '{"verification_url":"https://login.dingtalk.com/oauth2/auth?state=1"}',
       "dingtalk-workspace",
     )).toBe("https://login.dingtalk.com/oauth2/auth?state=1");
     expect(authVerificationUrl(
+      "GET https://mcp.dingtalk.com/cli/clientId returned 200",
+      "dingtalk-workspace",
+    )).toBeUndefined();
+    expect(authVerificationUrl(
+      "Open https://login.dingtalk.com/oauth2/logout to continue",
+      "dingtalk-workspace",
+    )).toBeUndefined();
+    expect(authVerificationUrl(
+      "GET https://mcp.dingtalk.com/cli/clientId succeeded; open https://login.dingtalk.com/oauth2/auth?state=1",
+      "dingtalk-workspace",
+    )).toBe("https://login.dingtalk.com/oauth2/auth?state=1");
+    expect(authVerificationUrl(
+      "Open https://evil.login.dingtalk.com/oauth2/auth?state=1",
+      "dingtalk-workspace",
+    )).toBeUndefined();
+    expect(authVerificationUrl(
+      "Open https://open.feishu.cn/page/cli?user_code=abc to continue",
+      "lark-cli",
+    )).toBe("https://open.feishu.cn/page/cli?user_code=abc");
+    expect(authVerificationUrl(
       "Open https://accounts.feishu.cn/device?code=abc to continue",
       "lark-cli",
     )).toBe("https://accounts.feishu.cn/device?code=abc");
+    expect(authVerificationUrl(
+      '{"verification_uri_complete":"https://open.larksuite.com/page/cli?user_code=abc"}',
+      "lark-cli",
+    )).toBe("https://open.larksuite.com/page/cli?user_code=abc");
+    expect(authVerificationUrl(
+      "POST https://accounts.feishu.cn/oauth/v1/app/registration failed: EOF",
+      "lark-cli",
+    )).toBeUndefined();
+    expect(authVerificationUrl(
+      "POST https://accounts.feishu.cn/oauth/v1/device_authorization failed: EOF",
+      "lark-cli",
+    )).toBeUndefined();
+    expect(authVerificationUrl(
+      "POST https://open.feishu.cn/open-apis/authen/v2/oauth/token failed: EOF",
+      "lark-cli",
+    )).toBeUndefined();
+    expect(authVerificationUrl(
+      "POST https://accounts.larksuite.com/oauth/v1/app/registration failed: EOF",
+      "lark-cli",
+    )).toBeUndefined();
     expect(authVerificationUrl("https://evil.example/auth", "lark-cli")).toBeUndefined();
     expect(authVerificationUrl("http://open.feishu.cn/auth", "lark-cli")).toBeUndefined();
   });
@@ -132,7 +172,21 @@ fi
     expect(progressEvents.length).toBeGreaterThan(3);
     expect(progressEvents).toEqual([...progressEvents].sort((a, b) => a - b));
     expect(stateChanges.mock.calls.some(([view]) => view.installProgress?.phase === "downloading_skills")).toBe(true);
+
+    const authRoot = path.join(root, ".awaken", "runtime", "auth");
+    await fs.rm(authRoot, { recursive: true, force: true });
+    const refreshedWithoutAuthRoot = await manager.refreshProvider("dingtalk-workspace");
+    expect(refreshedWithoutAuthRoot.readiness).toMatchObject({
+      install: "installed",
+      executable: "available",
+      authentication: "required",
+      overall: "action_required",
+    });
+    expect(refreshedWithoutAuthRoot.readiness.safeError).toBeUndefined();
+    await expect(fs.stat(authRoot)).resolves.toMatchObject({ mode: expect.any(Number) });
+
     await manager.dispose();
+    await expect(fs.stat(authRoot)).resolves.toMatchObject({ mode: expect.any(Number) });
 
     await fs.rm(path.join(root, ".agents", "skills", "dws"), { recursive: true, force: true });
     const restarted = new CliConnectorManager({
@@ -200,6 +254,15 @@ fi
     await vi.waitFor(() => {
       expect(stateChanges.mock.calls.some(([view]) => view.installProgress?.phase === "downloading_cli")).toBe(true);
     });
+
+    const reopened = await manager.refreshProvider("dingtalk-workspace");
+    expect(reopened.readiness).toMatchObject({ install: "installing", overall: "working" });
+    expect(reopened.installProgress).toMatchObject({ phase: "downloading_cli", label: "正在下载官方 CLI" });
+
+    const duplicateStart = await manager.install("dingtalk-workspace");
+    expect(duplicateStart.readiness).toMatchObject({ install: "installing", overall: "working" });
+    expect(duplicateStart.installProgress).toMatchObject({ phase: "downloading_cli", label: "正在下载官方 CLI" });
+
     await manager.cancelInstall("dingtalk-workspace");
     const cancelled = await installing;
 
@@ -207,6 +270,92 @@ fi
     expect(cancelled.readiness.safeError).toBeUndefined();
     expect(cancelled.installProgress).toBeUndefined();
     await expect(fs.stat(path.join(root, ".awaken", "runtime", "cli", "bin", "dws"))).rejects.toMatchObject({ code: "ENOENT" });
+    await manager.dispose();
+  });
+
+  it("cancels a waiting authorization without letting child exit overwrite the recovery state", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "awaken-cli-auth-cancel-"));
+    const bin = path.join(root, "bin");
+    const stateDir = path.join(root, "state");
+    await fs.mkdir(bin, { recursive: true });
+    await fs.mkdir(stateDir, { recursive: true });
+    const executable = path.join(bin, "dws");
+    await fs.writeFile(executable, `#!${process.execPath}
+const fs = require("node:fs");
+const path = require("node:path");
+const args = process.argv.slice(2);
+const stateDir = ${JSON.stringify(stateDir)};
+if (args[0] === "version") {
+  process.stdout.write('{"version":"v1.0.32"}\\n');
+} else if (args[0] === "auth" && args[1] === "status") {
+  process.stdout.write('{"success":true,"authenticated":false}\\n');
+} else if (args[0] === "auth" && args[1] === "login") {
+  process.stdout.write('GET https://mcp.dingtalk.com/cli/clientId succeeded\\n');
+  process.stdout.write('Open https://login.dingtalk.com/oauth2/auth?state=cancel-test\\n');
+  process.on("SIGTERM", () => {
+    fs.writeFileSync(path.join(stateDir, "cancelled"), "ok");
+    process.exit(0);
+  });
+  setInterval(() => undefined, 1000);
+} else {
+  process.stdout.write('{"ok":true}\\n');
+}
+`, { mode: 0o700 });
+    const manifestPath = path.join(root, "manifest.json");
+    await fs.writeFile(manifestPath, JSON.stringify({
+      revision: "test.auth-cancel",
+      assets: [{
+        providerId: "dingtalk-workspace",
+        version: "1.0.32",
+        platform: "darwin",
+        architecture: "arm64",
+        url: "https://github.com/example/dws.tar.gz",
+        sha256: "0".repeat(64),
+        archiveType: "tar.gz",
+        executableName: "dws",
+        archiveExecutablePath: "dws",
+      }],
+    }));
+    process.env.PATH = bin;
+    const openedUrls: string[] = [];
+    const manager = new CliConnectorManager({
+      homeDir: root,
+      platform: "darwin",
+      architecture: "arm64",
+      manifestPath,
+      fetchAsset: vi.fn(),
+      openExternal: vi.fn(async (url) => { openedUrls.push(url); }),
+      publishReadiness: vi.fn(async () => undefined),
+      onStateChanged: vi.fn(),
+    });
+    await manager.initialize();
+    const waiting = await manager.startAuth("dingtalk-workspace");
+    expect(waiting.authSession?.phase).toBe("waiting_user");
+    await vi.waitFor(() => {
+      expect(openedUrls).toEqual(["https://login.dingtalk.com/oauth2/auth?state=cancel-test"]);
+    });
+
+    const cancelled = await manager.cancelAuth("dingtalk-workspace");
+    expect(cancelled).toMatchObject({
+      readiness: {
+        install: "installed",
+        executable: "available",
+        authentication: "required",
+        overall: "action_required",
+      },
+      authSession: undefined,
+    });
+    expect(cancelled.readiness.safeError).toBeUndefined();
+    await vi.waitFor(async () => {
+      await expect(fs.stat(path.join(stateDir, "cancelled"))).resolves.toBeDefined();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(manager.list().find((entry) => entry.providerId === "dingtalk-workspace")).toMatchObject({
+      readiness: { authentication: "required", overall: "action_required" },
+      authSession: undefined,
+    });
+    await expect(fs.readdir(path.join(root, ".awaken", "runtime", "auth", "dingtalk-workspace")))
+      .resolves.toEqual([]);
     await manager.dispose();
   });
 
@@ -221,7 +370,8 @@ mkdir -p "$state_dir"
 if [ "$1" = "--version" ]; then
   printf 'lark-cli version 1.0.71\\n'
 elif [ "$1" = "config" ] && [ "$2" = "init" ]; then
-  printf 'Open https://open.feishu.cn/app/onboarding?flow=test to continue\\n'
+  printf 'POST https://accounts.feishu.cn/oauth/v1/app/registration failed once; retrying\\n' >&2
+  printf 'Open https://open.feishu.cn/page/cli?user_code=test to continue\\n'
   while [ ! -f "$state_dir/config-approved" ]; do sleep 0.05; done
   touch "$state_dir/configured"
 elif [ "$1" = "auth" ] && [ "$2" = "status" ]; then
@@ -230,10 +380,9 @@ elif [ "$1" = "auth" ] && [ "$2" = "status" ]; then
     exit 1
   fi
   if [ -f "$state_dir/authorized" ]; then
-    printf '{"ok":true,"verified":true,"identities":{"user":{"userName":"Nolan"}}}\\n'
+    printf '{"identity":"user","verified":true,"identities":{"bot":{"status":"ready","available":true,"verified":true},"user":{"status":"ready","available":true,"verified":true,"userName":"Nolan","tokenStatus":"valid"}}}\\n'
   else
-    printf '{"ok":false,"type":"auth"}\\n' >&2
-    exit 1
+    printf '{"identity":"bot","verified":true,"identities":{"bot":{"status":"ready","available":true,"verified":true},"user":{"status":"missing","available":false}}}\\n'
   fi
 elif [ "$1" = "auth" ] && [ "$2" = "login" ]; then
   case " $* " in
@@ -245,6 +394,9 @@ elif [ "$1" = "auth" ] && [ "$2" = "login" ]; then
       touch "$state_dir/authorized"
       ;;
   esac
+elif [ "$1" = "auth" ] && [ "$2" = "logout" ]; then
+  rm -f "$state_dir/authorized"
+  printf '{"loggedOut":true}\\n'
 else
   printf '{"ok":true}\\n'
 fi
@@ -306,7 +458,7 @@ fi
         openedUrls.push(url);
         await fs.mkdir(stateDir, { recursive: true });
         await fs.writeFile(
-          path.join(stateDir, url.includes("onboarding") ? "config-approved" : "auth-approved"),
+          path.join(stateDir, url.includes("/page/cli") ? "config-approved" : "auth-approved"),
           "ok",
         );
       }),
@@ -327,7 +479,7 @@ fi
     }
 
     expect(openedUrls).toEqual([
-      "https://open.feishu.cn/app/onboarding?flow=test",
+      "https://open.feishu.cn/page/cli?user_code=test",
       "https://accounts.feishu.cn/device?code=abc",
     ]);
     expect(manager.list().find((entry) => entry.providerId === "lark-cli")).toMatchObject({
@@ -339,6 +491,14 @@ fi
       },
       authSession: undefined,
     });
+
+    const loggedOut = await manager.logout("lark-cli");
+    expect(loggedOut.readiness).toMatchObject({
+      configuration: "ready",
+      authentication: "required",
+      overall: "action_required",
+    });
+    expect(loggedOut.readiness.account).toBeUndefined();
     await manager.dispose();
   });
 

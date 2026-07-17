@@ -1019,6 +1019,10 @@ export function ExtensionsView({
       void handleCliAction(providerId, () => runtimeClient.startCliAuth(providerId));
       return;
     }
+    if (action === "cancel_authorization") {
+      void handleCliAction(providerId, () => runtimeClient.cancelCliAuth(providerId));
+      return;
+    }
     if (action === "retry_authorization") {
       void handleCliAction(providerId, () => runtimeClient.retryCliAuth(providerId));
       return;

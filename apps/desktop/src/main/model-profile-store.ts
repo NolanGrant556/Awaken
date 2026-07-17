@@ -733,6 +733,7 @@ export class ModelProfileStore {
     const candidateProfiles = store.profiles.filter((profile) => profile.enabled);
 
     const providerKeys = new Map<string, string>();
+    const providerKeyProfileIds = new Map<string, string>();
     const providerBaseURLs = new Map<string, string>();
     const fetchedDetails = new Map<string, ModelProfileBalanceWire["detail"] | null>();
     const fetchErrors = new Map<string, string>();
@@ -760,6 +761,7 @@ export class ModelProfileStore {
       }
       if (!apiKey) continue;
       providerKeys.set(profile.providerId, apiKey);
+      providerKeyProfileIds.set(profile.providerId, profile.id);
       providerBaseURLs.set(
         profile.providerId,
         normalizeProviderBaseURL(provider, profile.baseURL),
@@ -796,59 +798,75 @@ export class ModelProfileStore {
       }),
     );
 
-    return candidateProfiles.map((profile): ModelProfileBalanceWire => {
+    // Balance is account/provider-scoped: one list entry per provider regardless of
+    // how many enabled profiles share that vendor.
+    const seenProviders = new Set<string>();
+    const balances: ModelProfileBalanceWire[] = [];
+
+    for (const profile of candidateProfiles) {
+      if (seenProviders.has(profile.providerId)) continue;
+      seenProviders.add(profile.providerId);
+
       const provider = providerById(profile.providerId);
-      const modelId = normalizeProviderModelId(provider, profile.modelId);
-      const displayName = profile.displayName;
+      const representativeId = providerKeyProfileIds.get(profile.providerId);
+      const representative =
+        (representativeId
+          ? candidateProfiles.find((entry) => entry.id === representativeId)
+          : undefined) ?? profile;
+      const modelId = normalizeProviderModelId(provider, representative.modelId);
+      const displayName = provider?.display_name ?? representative.displayName;
 
       if (!isBalanceSupportedProvider(profile.providerId)) {
-        return {
-          profile_id: profile.id,
+        balances.push({
+          profile_id: representative.id,
           provider_id: profile.providerId,
           model_id: modelId,
           display_name: displayName,
           status: "unsupported",
           error: "暂不支持查询该供应商余额",
-        };
+        });
+        continue;
       }
 
       const error = fetchErrors.get(profile.providerId);
       if (error) {
-        return {
-          profile_id: profile.id,
+        balances.push({
+          profile_id: representative.id,
           provider_id: profile.providerId,
           model_id: modelId,
           display_name: displayName,
           status: "error",
           error,
           credential_issue: credentialIssues.get(profile.providerId),
-        };
+        });
+        continue;
       }
 
-      if (
-        !providerKeys.has(profile.providerId)
-      ) {
-        return {
-          profile_id: profile.id,
+      if (!providerKeys.has(profile.providerId)) {
+        balances.push({
+          profile_id: representative.id,
           provider_id: profile.providerId,
           model_id: modelId,
           display_name: displayName,
           status: "missing_key",
           error: "请先配置 API key",
-        };
+        });
+        continue;
       }
 
       const detail = fetchedDetails.get(profile.providerId);
-      return {
-        profile_id: profile.id,
+      balances.push({
+        profile_id: representative.id,
         provider_id: profile.providerId,
         model_id: modelId,
         display_name: displayName,
         status: detail ? "available" : "error",
         fetched_at: new Date().toISOString(),
         detail: detail ?? undefined,
-      };
-    });
+      });
+    }
+
+    return balances;
   }
 
   private async apiKeyForProfile(profileId: string): Promise<string> {

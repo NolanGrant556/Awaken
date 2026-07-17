@@ -239,6 +239,62 @@ describe("PetStore", () => {
     expect(pet).toBeDefined();
     expect(pet?.available).toBe(true);
   });
+
+  it("discovers a manually dropped pet with legacy manifest format", async () => {
+    const petDir = path.join(dataDir, "data", "pets", "legacy-pet");
+    const manifestPath = path.join(petDir, "pet.json");
+    const spritesheet = await createSpritesheet(tempDir);
+    await fs.mkdir(petDir, { recursive: true });
+    await fs.copyFile(spritesheet, path.join(petDir, "spritesheet.webp"));
+    await fs.writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "legacy-pet",
+        displayName: "Legacy Pet",
+        description: "A pet dropped manually without source or spritesheetFile.",
+        spriteVersionNumber: 2,
+        spritesheetPath: "spritesheet.webp",
+      }),
+      "utf8",
+    );
+
+    const store2 = new PetStore(configDir, dataDir);
+    await store2.initialize();
+
+    const pets = store2.listPets();
+    const pet = pets.find((p) => p.id === "legacy-pet");
+    expect(pet).toBeDefined();
+    expect(pet?.available).toBe(true);
+    expect(pet?.spriteVersionNumber).toBe(2);
+  });
+
+  it("deduplicates pets with the same sourceId by source priority", async () => {
+    await store.initialize();
+    const spritesheet = await createSpritesheet(tempDir);
+
+    await store.importOrUpdatePet({
+      source: "codex-custom",
+      sourceId: "shared-pet",
+      displayName: "Shared Pet Codex",
+      description: "Codex version.",
+      spritesheetSourcePath: spritesheet,
+      sourcePath: "/fake/codex/pets/shared-pet",
+    });
+
+    await store.importOrUpdatePet({
+      source: "awaken-builtin",
+      sourceId: "shared-pet",
+      displayName: "Shared Pet Builtin",
+      description: "Builtin version.",
+      spritesheetSourcePath: spritesheet,
+      sourcePath: "/fake/builtin/pets/shared-pet",
+    });
+
+    const pets = store.listPets();
+    expect(pets).toHaveLength(1);
+    expect(pets[0]?.id).toBe("awaken:shared-pet");
+    expect(pets[0]?.displayName).toBe("Shared Pet Builtin");
+  });
 });
 
 describe("sha256String", () => {

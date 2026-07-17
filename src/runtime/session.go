@@ -60,17 +60,23 @@ type Event struct {
 }
 
 type Session struct {
-	mu               sync.RWMutex
-	run              Run
-	cancel           context.CancelFunc
-	bus              *EventBus
-	semanticRecorder agentcore.SemanticRecorder
-	userQuestions    map[string]*pendingUserQuestion
+	mu                   sync.RWMutex
+	run                  Run
+	cancel               context.CancelFunc
+	bus                  *EventBus
+	semanticRecorder     agentcore.SemanticRecorder
+	userQuestions        map[string]*pendingUserQuestion
+	externalInteractions map[string]*pendingExternalInteraction
 }
 
 type pendingUserQuestion struct {
 	request agentcore.AwakenEvent
 	answer  chan string
+}
+
+type pendingExternalInteraction struct {
+	request agentcore.AwakenEvent
+	answer  chan agentcore.ExternalInteractionResolution
 }
 
 func NewSession(runID, threadID, input string, attachments []RunInputAttachment, composerTokens []ComposerToken, cancel context.CancelFunc) *Session {
@@ -86,9 +92,10 @@ func NewSession(runID, threadID, input string, attachments []RunInputAttachment,
 			CreatedAt:        now,
 			UpdatedAt:        now,
 		},
-		cancel:        cancel,
-		bus:           NewEventBus(),
-		userQuestions: make(map[string]*pendingUserQuestion),
+		cancel:               cancel,
+		bus:                  NewEventBus(),
+		userQuestions:        make(map[string]*pendingUserQuestion),
+		externalInteractions: make(map[string]*pendingExternalInteraction),
 	}
 }
 
@@ -408,6 +415,103 @@ func (s *Session) ResolveUserQuestion(questionID string, answer string) error {
 
 	bus.Append(wrapped, false)
 	pending.answer <- answer
+	return nil
+}
+
+func (s *Session) AwaitExternalInteraction(ctx context.Context, request agentcore.AwakenEvent) (agentcore.ExternalInteractionResolution, error) {
+	timestamp := request.Timestamp.UTC()
+	if request.Timestamp.IsZero() {
+		timestamp = time.Now().UTC()
+	}
+	request.Timestamp = timestamp
+	request.Type = agentcore.ExternalInteractionRequestedType
+	if strings.TrimSpace(request.InteractionID) == "" {
+		request.InteractionID = "external_interaction"
+	}
+
+	pending := &pendingExternalInteraction{
+		request: request,
+		answer:  make(chan agentcore.ExternalInteractionResolution, 1),
+	}
+
+	s.mu.Lock()
+	if isTerminalStatus(s.run.Status) {
+		s.mu.Unlock()
+		return "", ErrRunTerminal
+	}
+	request.ThreadID = s.run.ThreadID
+	request.RunID = s.run.RunID
+	pending.request = request
+	s.run.UpdatedAt = timestamp
+	s.externalInteractions[request.InteractionID] = pending
+	wrapped := Event{
+		Kind:       EventKindAgent,
+		Timestamp:  timestamp,
+		ThreadID:   s.run.ThreadID,
+		RunID:      s.run.RunID,
+		AgentEvent: request,
+	}
+	bus := s.bus
+	s.mu.Unlock()
+
+	bus.Append(wrapped, false)
+
+	select {
+	case resolution := <-pending.answer:
+		return resolution, nil
+	case <-ctx.Done():
+		s.mu.Lock()
+		delete(s.externalInteractions, request.InteractionID)
+		s.mu.Unlock()
+		return "", ctx.Err()
+	}
+}
+
+func (s *Session) ResolveExternalInteraction(interactionID string, resolution agentcore.ExternalInteractionResolution) error {
+	interactionID = strings.TrimSpace(interactionID)
+	if interactionID == "" {
+		return ErrExternalInteractionNotFound
+	}
+	switch resolution {
+	case agentcore.ExternalInteractionCompleted,
+		agentcore.ExternalInteractionCancelled,
+		agentcore.ExternalInteractionExpired,
+		agentcore.ExternalInteractionFailed:
+	default:
+		return ErrExternalInteractionNotFound
+	}
+
+	now := time.Now().UTC()
+	s.mu.Lock()
+	if isTerminalStatus(s.run.Status) {
+		s.mu.Unlock()
+		return ErrRunTerminal
+	}
+	pending, ok := s.externalInteractions[interactionID]
+	if !ok {
+		s.mu.Unlock()
+		return ErrExternalInteractionNotFound
+	}
+	delete(s.externalInteractions, interactionID)
+	resolved := pending.request
+	resolved.Type = agentcore.ExternalInteractionResolvedType
+	resolved.Timestamp = now
+	resolved.InteractionResolution = string(resolution)
+	resolved.ThreadID = s.run.ThreadID
+	resolved.RunID = s.run.RunID
+	s.run.UpdatedAt = now
+	wrapped := Event{
+		Kind:       EventKindAgent,
+		Timestamp:  now,
+		ThreadID:   s.run.ThreadID,
+		RunID:      s.run.RunID,
+		AgentEvent: resolved,
+	}
+	bus := s.bus
+	s.mu.Unlock()
+
+	bus.Append(wrapped, false)
+	pending.answer <- resolution
 	return nil
 }
 

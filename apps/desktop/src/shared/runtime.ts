@@ -302,9 +302,86 @@ export type RuntimeConnectorState =
   | "needs-auth"
   | "failed";
 
+export type RuntimeConnectorKind = "mcp" | "cli";
+
+export type CliProviderId = "dingtalk-workspace" | "lark-cli";
+export type CliActivation = "enabled" | "disabled";
+export type CliInstallState = "missing" | "installing" | "installed" | "unsupported" | "failed";
+export type CliExecutableState = "unknown" | "missing" | "available" | "invalid";
+export type CliConfigurationState = "unknown" | "required" | "ready" | "failed";
+export type CliAuthenticationState = "unknown" | "required" | "in_progress" | "authorized" | "failed";
+export type CliOverallState = "disabled" | "not_ready" | "action_required" | "working" | "ready" | "failed";
+export type CliInstallOwnership = "awaken-managed" | "user-managed" | "system-managed";
+
+export type CliSafeError = {
+  code: string;
+  message: string;
+  recovery?: string;
+};
+
+/** Non-sensitive account projection for connected CLI detail UI. */
+export type CliAccountProfile = {
+  displayName?: string;
+  organization?: string;
+};
+
+export type CliConnectorReadiness = {
+  providerId: CliProviderId;
+  activation: CliActivation;
+  install: CliInstallState;
+  executable: CliExecutableState;
+  configuration: CliConfigurationState;
+  authentication: CliAuthenticationState;
+  overall: CliOverallState;
+  version?: string;
+  executablePath?: string;
+  ownership?: CliInstallOwnership;
+  installMethod?: "managed-download" | "npm" | "homebrew" | "system" | "unknown";
+  account?: CliAccountProfile;
+  safeError?: CliSafeError;
+  updatedAt: string;
+};
+
+export type CliAuthPhase =
+  | "starting"
+  | "waiting_user"
+  | "confirming"
+  | "authorized"
+  | "expired"
+  | "failed"
+  | "cancelled";
+
+export type CliAuthRecovery = "open_url" | "refresh_qr" | "retry" | "cancel";
+
+export type CliAuthSessionView = {
+  id: string;
+  provider: CliProviderId;
+  phase: CliAuthPhase;
+  qrImageUrl?: string;
+  verificationUrl?: string;
+  safeMessage?: string;
+  expiresAt?: string;
+  recoveries: CliAuthRecovery[];
+};
+
+export type CliConnectorView = {
+  providerId: CliProviderId;
+  displayName: string;
+  readiness: CliConnectorReadiness;
+  authSession?: CliAuthSessionView;
+};
+
+export type CliConnectorStateEvent = {
+  connector: CliConnectorView;
+};
+
+export type CliConnectorStateHandler = (event: CliConnectorStateEvent) => void;
+
 export type RuntimeConnector = {
   id: string;
+  kind: RuntimeConnectorKind;
   displayName: string;
+  description?: string;
   category: string;
   provider?: string;
   state: RuntimeConnectorState;
@@ -313,6 +390,8 @@ export type RuntimeConnector = {
   lastError?: string;
   serverNames?: string[];
   shadowedBy?: string;
+  cliReadiness?: CliConnectorReadiness;
+  legacyMcpReviewRequired?: boolean;
 };
 
 export type RuntimeConnectorActionResponse = {
@@ -910,6 +989,11 @@ export type AwakenBridge = {
     questionId: string,
     answer: string,
   ) => Promise<void>;
+  resolveExternalInteraction: (
+    runId: string,
+    interactionId: string,
+    resolution: "completed" | "cancelled" | "expired" | "failed",
+  ) => Promise<void>;
   subscribeRun: (
     runId: string,
     handlers: RunStreamHandlers,
@@ -922,6 +1006,19 @@ export type AwakenBridge = {
   listConnectors: () => Promise<RuntimeConnector[]>;
   connectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
   disconnectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
+  listCliConnectors: () => Promise<CliConnectorView[]>;
+  refreshCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
+  installCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
+  cancelCliInstall: (providerId: CliProviderId) => Promise<CliConnectorView>;
+  selectCliExecutable: (providerId: CliProviderId) => Promise<CliConnectorView>;
+  startCliConfigure: (providerId: CliProviderId) => Promise<CliConnectorView>;
+  startCliAuth: (providerId: CliProviderId) => Promise<CliConnectorView>;
+  cancelCliAuth: (providerId: CliProviderId) => Promise<CliConnectorView>;
+  retryCliAuth: (providerId: CliProviderId) => Promise<CliConnectorView>;
+  setCliConnectorActivation: (providerId: CliProviderId, activation: CliActivation) => Promise<CliConnectorView>;
+  logoutCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
+  uninstallManagedCli: (providerId: CliProviderId) => Promise<CliConnectorView>;
+  subscribeCliConnectorState: (handler: CliConnectorStateHandler) => () => void;
   listMcpServers: () => Promise<RuntimeMcpServer[]>;
   configureMcpServers: (request: ConfigureMcpServersRequest) => Promise<ConfigureMcpServersResponse>;
   getMcpServerConfig: (name: string) => Promise<RuntimeMcpServerConfigResponse>;

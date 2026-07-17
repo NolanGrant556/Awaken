@@ -207,6 +207,7 @@ type ThreadViewState = {
   toolResults: ToolResultRecord[];
   patchPreviews: PatchPreviewRecord[];
   userQuestions: UserQuestionItem[];
+  externalInteractions: ExternalInteractionItem[];
   artifacts: ArtifactRecord[];
   turnDiff?: TurnDiffRecord;
   inspectorSummary: InspectorSummary;
@@ -231,6 +232,7 @@ export type RuntimeViewState = {
   toolResults: ToolResultRecord[];
   patchPreviews: PatchPreviewRecord[];
   userQuestions: UserQuestionItem[];
+  externalInteractions: ExternalInteractionItem[];
   artifacts: ArtifactRecord[];
   turnDiff?: TurnDiffRecord;
   inspectorSummary: InspectorSummary;
@@ -294,6 +296,17 @@ export type UserQuestionItem = {
   sourceTool?: string;
 };
 
+export type ExternalInteractionItem = {
+  id: string;
+  title?: string;
+  safeMessage?: string;
+  verificationUrl?: string;
+  qrImageUrl?: string;
+  provider?: string;
+  recoveries: string[];
+  sourceTool?: string;
+};
+
 const initialState: RuntimeViewState = {
   prompt: "",
   promptAttachments: undefined,
@@ -306,6 +319,7 @@ const initialState: RuntimeViewState = {
   toolResults: [],
   patchPreviews: [],
   userQuestions: [],
+  externalInteractions: [],
   artifacts: [],
   narrative: createInitialRunNarrativeState(),
   inspectorSummary: createInspectorSummary(),
@@ -330,6 +344,7 @@ function viewFromState(state: RuntimeViewState): ThreadViewState {
     toolResults: state.toolResults,
     patchPreviews: state.patchPreviews,
     userQuestions: state.userQuestions,
+    externalInteractions: state.externalInteractions,
     artifacts: state.artifacts,
     turnDiff: state.turnDiff,
     inspectorSummary: state.inspectorSummary,
@@ -1085,6 +1100,29 @@ function removeUserQuestion(
   return questions.filter((question) => question.id !== questionId);
 }
 
+function upsertExternalInteraction(
+  items: ExternalInteractionItem[],
+  next: ExternalInteractionItem,
+): ExternalInteractionItem[] {
+  const index = items.findIndex((item) => item.id === next.id);
+  if (index < 0) {
+    return [...items, next];
+  }
+  const updated = items.slice();
+  updated[index] = next;
+  return updated;
+}
+
+function removeExternalInteraction(
+  items: ExternalInteractionItem[],
+  interactionId?: string,
+): ExternalInteractionItem[] {
+  if (!interactionId) {
+    return items;
+  }
+  return items.filter((item) => item.id !== interactionId);
+}
+
 function inferLegacyArtifactRole(input: {
   kind?: string;
   path?: string;
@@ -1191,6 +1229,7 @@ function syncFromRun(
       status: run.status,
 		timelineStatus: "running",
 		userQuestions: [],
+		externalInteractions: [],
 		steps: toSteps(
         upsertStep(
           state.steps.map((step, index) => ({
@@ -1220,6 +1259,7 @@ function syncFromRun(
       status: run.status,
 		timelineStatus: "done",
 		userQuestions: [],
+		externalInteractions: [],
 	};
   }
 
@@ -1233,6 +1273,7 @@ function syncFromRun(
       status: run.status,
 		timelineStatus: "done",
 		userQuestions: [],
+		externalInteractions: [],
 	};
   }
 
@@ -1247,6 +1288,7 @@ function syncFromRun(
       timelineStatus: "error",
 		errorMessage: run.error || "Run failed",
 		userQuestions: [],
+		externalInteractions: [],
 	};
   }
 
@@ -1291,6 +1333,7 @@ export function reduceRuntimeState(
 		toolResults: [],
 		patchPreviews: [],
 		userQuestions: [],
+		externalInteractions: [],
 		artifacts: [],
         turnDiff: undefined,
         inspectorSummary: createInspectorSummary(),
@@ -1345,6 +1388,7 @@ export function reduceRuntimeState(
           status: "cancelling",
 		timelineStatus: "running",
 		userQuestions: [],
+		externalInteractions: [],
 	}),
       );
     case "run/cancelSync": {
@@ -1417,6 +1461,7 @@ export function reduceRuntimeState(
           timelineStatus: "error",
 		errorMessage: action.message,
 		userQuestions: [],
+		externalInteractions: [],
 		inspectorSummary: {
             ...state.inspectorSummary,
             terminalReason: "stream_failed",
@@ -1701,14 +1746,17 @@ export function reduceRuntimeState(
             nextState.phase = "cancelling";
             nextState.timelineStatus = "running";
             nextState.userQuestions = [];
+            nextState.externalInteractions = [];
           } else if (status === "cancelled") {
             nextState.phase = "cancelled";
             nextState.timelineStatus = "done";
             nextState.userQuestions = [];
+            nextState.externalInteractions = [];
           } else if (status === "finished") {
             nextState.phase = "done";
             nextState.timelineStatus = "done";
             nextState.userQuestions = [];
+            nextState.externalInteractions = [];
             nextState.runCompletedAtMs =
               nextState.runCompletedAtMs ??
               (validTimestamp(action.event.timestamp)
@@ -1718,6 +1766,7 @@ export function reduceRuntimeState(
             nextState.phase = "error";
             nextState.timelineStatus = "error";
             nextState.userQuestions = [];
+            nextState.externalInteractions = [];
           }
           if (
             status === "cancelled" ||
@@ -1754,6 +1803,7 @@ export function reduceRuntimeState(
           nextState.status = "finished";
           nextState.timelineStatus = "done";
           nextState.userQuestions = [];
+            nextState.externalInteractions = [];
           nextState.runCompletedAtMs =
             nextState.runCompletedAtMs ??
             (validTimestamp(action.event.timestamp)
@@ -2412,6 +2462,43 @@ export function reduceRuntimeState(
           });
           break;
         }
+        case "AWAKEN_EXTERNAL_INTERACTION_REQUESTED": {
+          // Ephemeral composer gate only — never create narrative/step records.
+          if (
+            nextState.status === "finished" ||
+            nextState.status === "error" ||
+            nextState.status === "cancelled"
+          ) {
+            break;
+          }
+          const interactionId =
+            action.event.interactionId ?? action.event.toolCallId ?? "external-interaction";
+          nextState.externalInteractions = upsertExternalInteraction(
+            nextState.externalInteractions,
+            {
+              id: interactionId,
+              title: action.event.interactionTitle,
+              safeMessage: action.event.interactionSafeMessage,
+              verificationUrl: action.event.interactionVerificationUrl ?? action.event.authUrl,
+              qrImageUrl: action.event.interactionQrImageUrl,
+              provider: action.event.interactionProvider ?? action.event.authProvider,
+              recoveries: Array.isArray(action.event.interactionRecoveries)
+                ? action.event.interactionRecoveries
+                : ["confirm_done", "cancel"],
+              sourceTool: action.event.toolCallName,
+            },
+          );
+          break;
+        }
+        case "AWAKEN_EXTERNAL_INTERACTION_RESOLVED": {
+          const interactionId =
+            action.event.interactionId ?? action.event.toolCallId ?? "external-interaction";
+          nextState.externalInteractions = removeExternalInteraction(
+            nextState.externalInteractions,
+            interactionId,
+          );
+          break;
+        }
         case "AWAKEN_ARTIFACT_CREATED":
         case "AWAKEN_ARTIFACT_UPDATED": {
           nextState.artifacts = upsertArtifact(
@@ -2440,6 +2527,7 @@ export function reduceRuntimeState(
             nextState.status = "cancelled";
             nextState.timelineStatus = "done";
             nextState.userQuestions = [];
+            nextState.externalInteractions = [];
             records = upsertStep(records, "run-cancelled", {
               title: "Run cancelled",
               description: action.event.message || "Run was cancelled by user",
@@ -2465,6 +2553,7 @@ export function reduceRuntimeState(
             }
             nextState.errorMessage = errorMessage;
             nextState.userQuestions = [];
+            nextState.externalInteractions = [];
             records = upsertStep(records, "run-error", {
               title: "Run failed",
               description: errorDescription,

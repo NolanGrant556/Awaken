@@ -6,6 +6,10 @@ import {
   type AwakenBridge,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
+  type CliActivation,
+  type CliConnectorStateHandler,
+  type CliConnectorView,
+  type CliProviderId,
   type DesktopPreferences,
   type DesktopPreferencesSaveRequest,
   type DesktopOperationIssue,
@@ -134,6 +138,19 @@ export type RuntimeClient = {
   listConnectors: () => Promise<RuntimeConnector[]>;
   connectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
   disconnectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
+  listCliConnectors: () => Promise<CliConnectorView[]>;
+  refreshCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
+  installCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
+  cancelCliInstall: (providerId: CliProviderId) => Promise<CliConnectorView>;
+  selectCliExecutable: (providerId: CliProviderId) => Promise<CliConnectorView>;
+  startCliConfigure: (providerId: CliProviderId) => Promise<CliConnectorView>;
+  startCliAuth: (providerId: CliProviderId) => Promise<CliConnectorView>;
+  cancelCliAuth: (providerId: CliProviderId) => Promise<CliConnectorView>;
+  retryCliAuth: (providerId: CliProviderId) => Promise<CliConnectorView>;
+  setCliConnectorActivation: (providerId: CliProviderId, activation: CliActivation) => Promise<CliConnectorView>;
+  logoutCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
+  uninstallManagedCli: (providerId: CliProviderId) => Promise<CliConnectorView>;
+  subscribeCliConnectorState: (handler: CliConnectorStateHandler) => () => void;
   listMcpServers: () => Promise<RuntimeMcpServer[]>;
   configureMcpServers: (request: ConfigureMcpServersRequest) => Promise<ConfigureMcpServersResponse>;
   getMcpServerConfig: (name: string) => Promise<RuntimeMcpServerConfigResponse>;
@@ -174,6 +191,11 @@ export type RuntimeClient = {
     runId: string,
     questionId: string,
     answer: string,
+  ) => Promise<void>;
+  resolveExternalInteraction: (
+    runId: string,
+    interactionId: string,
+    resolution: "completed" | "cancelled" | "expired" | "failed",
   ) => Promise<void>;
   getDesktopPreferences: () => Promise<DesktopPreferences>;
   saveDesktopPreferences: (request: DesktopPreferencesSaveRequest) => Promise<DesktopPreferences>;
@@ -234,6 +256,19 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     listConnectors: () => bridge.listConnectors(),
     connectConnector: (connectorId) => bridge.connectConnector(connectorId),
     disconnectConnector: (connectorId) => bridge.disconnectConnector(connectorId),
+    listCliConnectors: () => bridge.listCliConnectors(),
+    refreshCliConnector: (providerId) => bridge.refreshCliConnector(providerId),
+    installCliConnector: (providerId) => bridge.installCliConnector(providerId),
+    cancelCliInstall: (providerId) => bridge.cancelCliInstall(providerId),
+    selectCliExecutable: (providerId) => bridge.selectCliExecutable(providerId),
+    startCliConfigure: (providerId) => bridge.startCliConfigure(providerId),
+    startCliAuth: (providerId) => bridge.startCliAuth(providerId),
+    cancelCliAuth: (providerId) => bridge.cancelCliAuth(providerId),
+    retryCliAuth: (providerId) => bridge.retryCliAuth(providerId),
+    setCliConnectorActivation: (providerId, activation) => bridge.setCliConnectorActivation(providerId, activation),
+    logoutCliConnector: (providerId) => bridge.logoutCliConnector(providerId),
+    uninstallManagedCli: (providerId) => bridge.uninstallManagedCli(providerId),
+    subscribeCliConnectorState: (handler) => bridge.subscribeCliConnectorState(handler),
     listMcpServers: () => bridge.listMcpServers(),
     configureMcpServers: (request) => bridge.configureMcpServers(request),
     getMcpServerConfig: (name) => bridge.getMcpServerConfig(name),
@@ -278,6 +313,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     startRun: (request) => unwrapDesktopOperation(bridge.startRun(request)),
     cancelRun: bridge.cancelRun,
     answerUserQuestion: bridge.answerUserQuestion,
+    resolveExternalInteraction: bridge.resolveExternalInteraction,
     getDesktopPreferences: () => bridge.getDesktopPreferences(),
     saveDesktopPreferences: (request) => bridge.saveDesktopPreferences(request),
     subscribeRun: async (runId, handlers, afterCursor) => {

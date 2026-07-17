@@ -16,6 +16,7 @@ func TestSkillPreviewHandlerReadsExactCatalogEntry(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv(skills.EnvAdditionalSkillDirs, "")
 	t.Setenv(skills.EnvPluginSkillDirs, "")
 	t.Setenv(skills.EnvBundledSkillDirs, "")
@@ -100,23 +101,24 @@ func TestSkillPreviewHandlerRejectsUnknownIdentity(t *testing.T) {
 	}
 }
 
-func TestSkillListDoesNotExposeBundledPreviewIdentity(t *testing.T) {
+func TestSkillListExposesBundledPreviewIdentity(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	bundledRoot := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv(skills.EnvAdditionalSkillDirs, "")
 	t.Setenv(skills.EnvPluginSkillDirs, "")
 	t.Setenv(skills.EnvBundledSkillDirs, bundledRoot)
 	t.Setenv(skills.EnvLegacyCommandDirs, "")
 
-	packageRoot := filepath.Join(bundledRoot, "bundled-preview-disabled")
+	packageRoot := filepath.Join(bundledRoot, "bundled-preview-enabled")
 	if err := os.MkdirAll(packageRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(
 		filepath.Join(packageRoot, "SKILL.md"),
-		[]byte("---\nname: bundled-preview-disabled\ndescription: bundled test\n---\n# Bundled\n"),
+		[]byte("---\nname: bundled-preview-enabled\ndescription: bundled test\n---\n# Bundled\n"),
 		0o644,
 	); err != nil {
 		t.Fatal(err)
@@ -134,14 +136,35 @@ func TestSkillListDoesNotExposeBundledPreviewIdentity(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &listed); err != nil {
 		t.Fatal(err)
 	}
+	var entryID string
 	for _, info := range listed {
-		if info.ID != "bundled-preview-disabled" {
+		if info.ID != "bundled-preview-enabled" {
 			continue
 		}
-		if info.SourceOrigin != string(skills.SourceBundled) || info.CatalogEntryID != "" {
-			t.Fatalf("bundled Skill must remain visible without a preview identity: %#v", info)
+		if info.SourceOrigin != string(skills.SourceBundled) || info.CatalogEntryID == "" {
+			t.Fatalf("bundled Skill must expose a preview identity: %#v", info)
 		}
-		return
+		entryID = info.CatalogEntryID
+		break
 	}
-	t.Fatal("expected bundled Skill in list")
+	if entryID == "" {
+		t.Fatal("expected bundled Skill in list")
+	}
+
+	requestBody, err := json.Marshal(previewSkillRequest{CatalogEntryID: entryID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previewRecorder := httptest.NewRecorder()
+	handler.handlePreviewSkill(previewRecorder, httptest.NewRequest(http.MethodPost, "/v1/skills/preview", bytes.NewReader(requestBody)))
+	if previewRecorder.Code != http.StatusOK {
+		t.Fatalf("preview status=%d body=%s", previewRecorder.Code, previewRecorder.Body.String())
+	}
+	var preview previewSkillResponse
+	if err := json.Unmarshal(previewRecorder.Body.Bytes(), &preview); err != nil {
+		t.Fatal(err)
+	}
+	if preview.BodyMarkdown != "# Bundled\n" {
+		t.Fatalf("unexpected bundled preview body: %q", preview.BodyMarkdown)
+	}
 }

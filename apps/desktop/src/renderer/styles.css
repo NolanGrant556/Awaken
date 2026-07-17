@@ -690,7 +690,7 @@ button.extension-card-main {
   cursor: pointer;
 }
 
-button.extension-card-main:hover {
+.extension-skill-card:hover {
   background: color-mix(in srgb, var(--aw-bg-fill-light) 54%, transparent);
 }
 
@@ -866,14 +866,14 @@ button.extension-card-main:focus-visible {
   -webkit-line-clamp: 2;
 }
 
-.extension-skill-card > .extension-card-action {
-  margin-right: 14px;
-}
-
 .extension-card-actions {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.extension-card-actions-skill {
+  padding-right: 14px;
 }
 
 .extension-card-action {

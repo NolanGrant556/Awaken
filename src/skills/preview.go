@@ -29,12 +29,12 @@ type SkillPreview struct {
 }
 
 // CatalogEntryID returns an opaque, deterministic identity for one concrete
-// previewable local Catalog entry. Product-owned bundled Skills and dynamic
-// MCP Skills do not expose preview identities. The value deliberately hashes
-// host-owned source/path facts so callers cannot use it as a filesystem
+// previewable local Catalog entry. Dynamic MCP Skills do not expose a local
+// preview identity because they have no on-disk SKILL.md. The value deliberately
+// hashes host-owned source/path facts so callers cannot use it as a filesystem
 // capability.
 func CatalogEntryID(def *SkillDefinition) string {
-	if def == nil || def.Source == SourceBundled || def.Source == SourceMcp || strings.TrimSpace(def.SkillFilePath) == "" {
+	if def == nil || def.Source == SourceMcp || strings.TrimSpace(def.SkillFilePath) == "" {
 		return ""
 	}
 	identity := strings.Join([]string{

@@ -10,10 +10,12 @@ import type {
   CliAuthSessionView,
   CliConnectorReadiness,
   CliConnectorView,
+  CliInstallPhase,
+  CliInstallProgress,
   CliInstallOwnership,
   CliProviderId,
 } from "../../shared/runtime.js";
-import { extractSingleExecutable } from "./archive.js";
+import { extractSingleExecutable, extractSkillBundle } from "./archive.js";
 
 type ManifestAsset = {
   providerId: CliProviderId;
@@ -27,7 +29,18 @@ type ManifestAsset = {
   archiveExecutablePath: string;
 };
 
-type CliManifest = { revision: string; assets: ManifestAsset[] };
+type ManifestSkillBundle = {
+  providerId: CliProviderId;
+  version: string;
+  url: string;
+  sha256: string;
+  archiveType: "tar.gz" | "zip";
+  archiveRoot: string;
+  destinationRoot?: string;
+  skillNames: string[];
+};
+
+type CliManifest = { revision: string; assets: ManifestAsset[]; skillBundles?: ManifestSkillBundle[] };
 
 type InstallationRecord = {
   providerId: CliProviderId;
@@ -39,9 +52,10 @@ type InstallationRecord = {
   assetSha256: string;
   ownership: CliInstallOwnership;
   installMethod: "managed-download" | "npm" | "homebrew" | "system" | "unknown";
-  selectedPath?: string;
   activation: CliActivation;
   lastVerifiedAt: string;
+  officialSkillVersion?: string;
+  officialSkillNames?: string[];
 };
 
 type StoredInstallations = { version: 1; records: Partial<Record<CliProviderId, InstallationRecord>> };
@@ -51,6 +65,7 @@ type AuthSessionInternal = {
   directory: string;
   child?: ChildProcess;
   deviceCode?: string;
+  openedVerificationUrl?: string;
 };
 
 type CommandResult = { exitCode: number; stdout: string; stderr: string };
@@ -61,6 +76,7 @@ type ManagerOptions = {
   architecture: string;
   manifestPath: string;
   fetchAsset: (url: string, signal: AbortSignal) => Promise<Response>;
+  openExternal?: (url: string) => Promise<void>;
   publishReadiness: (readiness: CliConnectorReadiness) => Promise<void>;
   onStateChanged: (view: CliConnectorView) => void;
 };
@@ -87,6 +103,8 @@ export class CliConnectorManager {
   private installations: StoredInstallations = { version: 1, records: {} };
   private readonly views = new Map<CliProviderId, CliConnectorView>();
   private readonly installControllers = new Map<CliProviderId, AbortController>();
+  private readonly installSettled = new Map<CliProviderId, Promise<void>>();
+  private readonly installProgress = new Map<CliProviderId, CliInstallProgress>();
   private readonly authSessions = new Map<CliProviderId, AuthSessionInternal>();
 
   constructor(private readonly options: ManagerOptions) {
@@ -111,6 +129,7 @@ export class CliConnectorManager {
     this.installations = await this.loadInstallations();
     if (await pathExists(this.installationsPath)) await fs.chmod(this.installationsPath, 0o600);
     for (const providerId of providers) await this.refresh(providerId);
+    await this.backfillOfficialSkills();
   }
 
   list(): CliConnectorView[] {
@@ -133,7 +152,13 @@ export class CliConnectorManager {
     const asset = this.assetFor(providerId);
     if (!asset) throw new CliConnectorError("CLI_UNSUPPORTED", "当前平台或架构没有受支持的安装资产");
     const controller = new AbortController();
+    let resolveInstallSettled!: () => void;
+    const settled = new Promise<void>((resolve) => {
+      resolveInstallSettled = resolve;
+    });
     this.installControllers.set(providerId, controller);
+    this.installSettled.set(providerId, settled);
+    this.setInstallProgress(providerId, "preparing", 2, "正在准备安装");
     this.setReadiness(providerId, {
       ...this.readiness(providerId),
       install: "installing",
@@ -162,11 +187,16 @@ export class CliConnectorManager {
         await fs.mkdir(staging, { recursive: true, mode: 0o700 });
         const archivePath = path.join(staging, `asset.${asset.archiveType === "zip" ? "zip" : "tar.gz"}`);
         try {
+          this.setInstallProgress(providerId, "downloading_cli", 5, "正在下载官方 CLI");
           const response = await this.options.fetchAsset(asset.url, controller.signal);
           if (!response.ok) throw new CliConnectorError("CLI_DOWNLOAD_FAILED", `下载失败 (${response.status})`, "retry");
           const declaredLength = Number(response.headers.get("content-length") ?? 0);
           if (declaredLength > maxArchiveBytes) throw new CliConnectorError("CLI_ARCHIVE_TOO_LARGE", "安装包超过安全大小限制");
-          const bytes = await readResponseBody(response, maxArchiveBytes);
+          const bytes = await readResponseBody(response, maxArchiveBytes, (received, total) => {
+            const ratio = total > 0 ? Math.min(received / total, 1) : 0.5;
+            this.setInstallProgress(providerId, "downloading_cli", 5 + Math.round(ratio * 38), "正在下载官方 CLI");
+          });
+          this.setInstallProgress(providerId, "verifying_cli", 46, "正在校验官方 CLI");
           if (sha256(bytes) !== asset.sha256) throw new CliConnectorError("CLI_CHECKSUM_MISMATCH", "安装包校验失败", "retry");
           await fs.writeFile(archivePath, bytes, { mode: 0o600 });
           const payloadDirectory = path.join(staging, "payload");
@@ -176,12 +206,17 @@ export class CliConnectorManager {
           await fs.chmod(extractedPath, 0o700);
           const version = await this.probeVersion(providerId, extractedPath);
           if (version !== asset.version) throw new CliConnectorError("CLI_VERSION_MISMATCH", "安装包版本与 manifest 不一致");
+          this.setInstallProgress(providerId, "installing_cli", 58, "正在安装官方 CLI");
           await fs.mkdir(path.dirname(targetDirectory), { recursive: true, mode: 0o700 });
           await replaceDirectoryAtomically(payloadDirectory, targetDirectory);
         } finally {
           await fs.rm(staging, { recursive: true, force: true });
         }
+      } else {
+        this.setInstallProgress(providerId, "installing_cli", 58, "已验证本机 CLI");
       }
+      const officialSkillNames = await this.installOfficialSkills(providerId, controller.signal);
+      this.setInstallProgress(providerId, "finishing", 97, "正在完成安装");
       await this.activateManagedExecutable(asset, executablePath);
       this.installations.records[providerId] = {
         providerId,
@@ -195,10 +230,17 @@ export class CliConnectorManager {
         installMethod: "managed-download",
         activation: "enabled",
         lastVerifiedAt: new Date().toISOString(),
+        officialSkillVersion: this.skillBundleFor(providerId)?.version,
+        officialSkillNames,
       };
       await this.saveInstallations();
+      this.installProgress.delete(providerId);
       return await this.refresh(providerId);
     } catch (error) {
+      this.installProgress.delete(providerId);
+      if (controller.signal.aborted) {
+        return await this.refresh(providerId);
+      }
       const mapped = mapError(error, controller.signal.aborted ? "CLI_INSTALL_CANCELLED" : "CLI_INSTALL_FAILED");
       this.setReadiness(providerId, {
         ...this.readiness(providerId),
@@ -210,61 +252,42 @@ export class CliConnectorManager {
       throw mapped;
     } finally {
       this.installControllers.delete(providerId);
+      this.installSettled.delete(providerId);
+      resolveInstallSettled();
     }
   }
 
   async cancelInstall(providerId: CliProviderId): Promise<CliConnectorView> {
+    const settled = this.installSettled.get(providerId);
     this.installControllers.get(providerId)?.abort();
+    await settled;
     return this.view(providerId);
   }
 
-  async selectExecutable(providerId: CliProviderId, executablePath: string): Promise<CliConnectorView> {
-    this.assertProvider(providerId);
-    const normalized = path.resolve(executablePath);
-    if (!(await isExecutableFile(normalized))) throw new CliConnectorError("CLI_EXECUTABLE_INVALID", "所选文件不是可执行 CLI");
-    const version = await this.probeVersion(providerId, normalized);
-    const current = this.installations.records[providerId];
-    this.installations.records[providerId] = {
-      providerId,
-      executablePath: normalized,
-      selectedPath: normalized,
-      version,
-      platform: this.supportedPlatform(),
-      architecture: this.options.architecture,
-      manifestRevision: this.manifest.revision,
-      assetSha256: "",
-      ownership: ownershipForPath(normalized, this.options.homeDir),
-      installMethod: installMethodForPath(normalized),
-      activation: current?.activation ?? "enabled",
-      lastVerifiedAt: new Date().toISOString(),
-    };
-    await this.saveInstallations();
-    return this.refresh(providerId);
-  }
-
-  async configure(providerId: CliProviderId): Promise<CliConnectorView> {
-    this.assertProvider(providerId);
-    if (providerId !== "lark-cli") return this.refresh(providerId);
+  private async configureLark(continueWithAuth = false): Promise<CliConnectorView> {
+    const providerId: CliProviderId = "lark-cli";
     const executable = this.requireExecutable(providerId);
     if (this.authSessions.has(providerId)) return this.view(providerId);
     const session = await this.createAuthSession(providerId, "正在打开飞书应用配置页面…");
     const child = spawn(executable, ["config", "init", "--new"], safeSpawnOptions(session.directory));
-    drainChildOutput(child);
+    this.monitorVerificationUrl(session, child, "请在已打开的飞书页面完成应用配置");
     session.child = child;
     session.view.phase = "waiting_user";
-    session.view.recoveries = ["cancel"];
     this.emit(providerId);
-    void this.finishBlockingSession(providerId, child, true);
+    void this.finishBlockingSession(providerId, child, true, continueWithAuth);
     return this.view(providerId);
   }
 
   async startAuth(providerId: CliProviderId): Promise<CliConnectorView> {
     this.assertProvider(providerId);
     if (this.authSessions.has(providerId)) return this.view(providerId);
+    if (providerId === "lark-cli" && this.readiness(providerId).configuration === "required") {
+      return this.configureLark(true);
+    }
     const executable = this.requireExecutable(providerId);
     const session = await this.createAuthSession(
       providerId,
-      providerId === "dingtalk-workspace" ? "请在已打开的浏览器中完成钉钉授权" : "正在生成飞书授权二维码…",
+      providerId === "dingtalk-workspace" ? "请在已打开的浏览器中完成钉钉授权" : "正在打开飞书授权页面…",
     );
     this.setReadiness(providerId, {
       ...this.readiness(providerId),
@@ -274,10 +297,9 @@ export class CliConnectorManager {
     });
     if (providerId === "dingtalk-workspace") {
       const child = spawn(executable, ["auth", "login", "--format", "json"], safeSpawnOptions(session.directory));
-      drainChildOutput(child);
+      this.monitorVerificationUrl(session, child, "请在已打开的钉钉页面完成授权");
       session.child = child;
       session.view.phase = "waiting_user";
-      session.view.recoveries = ["cancel"];
       this.emit(providerId);
       void this.finishBlockingSession(providerId, child, false);
       return this.view(providerId);
@@ -292,7 +314,6 @@ export class CliConnectorManager {
     session.child?.kill();
     session.view.phase = "cancelled";
     session.view.safeMessage = "授权已取消";
-    session.view.recoveries = ["retry"];
     delete session.deviceCode;
     await this.cleanupSessionFiles(session);
     this.setReadiness(providerId, {
@@ -345,13 +366,6 @@ export class CliConnectorManager {
     delete this.installations.records[providerId];
     await this.saveInstallations();
     return this.refresh(providerId);
-  }
-
-  resolveAuthAsset(providerId: string, sessionId: string): string | undefined {
-    if (!providers.includes(providerId as CliProviderId)) return undefined;
-    const session = this.authSessions.get(providerId as CliProviderId);
-    if (!session || session.view.id !== sessionId || !session.view.qrImageUrl) return undefined;
-    return path.join(session.directory, "qr.png");
   }
 
   async dispose(): Promise<void> {
@@ -540,16 +554,10 @@ export class CliConnectorManager {
       const deviceCode = stringField(payload, ["device_code"]);
       if (!verificationUrl || !deviceCode) throw new CliConnectorError("CLI_AUTH_RESPONSE_INVALID", "飞书授权响应缺少必要字段", "retry");
       session.deviceCode = deviceCode;
-      const qr = await runCommand(executable, ["auth", "qrcode", verificationUrl, "--output", "qr.png"], session.directory, 30_000);
-      if (qr.exitCode !== 0 || !(await isExecutableFile(path.join(session.directory, "qr.png"), false))) {
-        throw new CliConnectorError("CLI_QR_GENERATION_FAILED", "无法生成飞书授权二维码", "retry");
-      }
       session.view.phase = "waiting_user";
-      session.view.verificationUrl = verificationUrl;
-      session.view.qrImageUrl = `awaken-cli-auth://${session.view.provider}/${session.view.id}/qr.png`;
-      session.view.safeMessage = "请使用飞书扫码并确认授权";
-      session.view.recoveries = ["open_url", "refresh_qr", "cancel"];
+      session.view.safeMessage = "请在已打开的飞书页面完成授权";
       this.emit("lark-cli");
+      await this.presentVerificationUrl(session, verificationUrl);
       session.view.phase = "confirming";
       session.view.safeMessage = "等待飞书确认授权…";
       const child = spawn(executable, ["auth", "login", "--device-code", deviceCode, "--json"], safeSpawnOptions(session.directory));
@@ -562,7 +570,12 @@ export class CliConnectorManager {
     }
   }
 
-  private async finishBlockingSession(providerId: CliProviderId, child: ChildProcess, configurationOnly: boolean): Promise<void> {
+  private async finishBlockingSession(
+    providerId: CliProviderId,
+    child: ChildProcess,
+    configurationOnly: boolean,
+    continueWithAuth = false,
+  ): Promise<void> {
     const exitCode = await childExit(child);
     const session = this.authSessions.get(providerId);
     if (!session || session.child !== child) return;
@@ -574,7 +587,24 @@ export class CliConnectorManager {
     if (configurationOnly) {
       this.authSessions.delete(providerId);
       await this.cleanupSessionFiles(session);
-      await this.refresh(providerId);
+      const refreshed = await this.refresh(providerId);
+      if (continueWithAuth) {
+        if (refreshed.readiness.configuration !== "ready") {
+          this.setReadiness(providerId, {
+            ...refreshed.readiness,
+            configuration: "failed",
+            overall: "failed",
+            safeError: {
+              code: "CLI_CONFIGURE_VERIFY_FAILED",
+              message: "飞书应用配置结果验证失败",
+              recovery: "retry",
+            },
+            updatedAt: new Date().toISOString(),
+          });
+          return;
+        }
+        await this.startAuth(providerId);
+      }
       return;
     }
     const refreshed = await this.refresh(providerId);
@@ -584,9 +614,6 @@ export class CliConnectorManager {
     }
     session.view.phase = "authorized";
     session.view.safeMessage = "授权成功";
-    session.view.recoveries = [];
-    delete session.view.qrImageUrl;
-    delete session.view.verificationUrl;
     await this.cleanupSessionFiles(session);
     this.emit(providerId);
     this.authSessions.delete(providerId);
@@ -600,9 +627,6 @@ export class CliConnectorManager {
     delete session.deviceCode;
     session.view.phase = "failed";
     session.view.safeMessage = error.message;
-    session.view.recoveries = ["retry"];
-    delete session.view.qrImageUrl;
-    delete session.view.verificationUrl;
     await this.cleanupSessionFiles(session);
     this.setReadiness(providerId, {
       ...this.readiness(providerId),
@@ -621,7 +645,7 @@ export class CliConnectorManager {
     await fs.mkdir(directory, { recursive: true, mode: 0o700 });
     const session: AuthSessionInternal = {
       directory,
-      view: { id, provider: providerId, phase: "starting", safeMessage: message, recoveries: ["cancel"] },
+      view: { id, provider: providerId, phase: "starting", safeMessage: message },
     };
     this.authSessions.set(providerId, session);
     this.emit(providerId);
@@ -630,6 +654,37 @@ export class CliConnectorManager {
 
   private async cleanupSessionFiles(session: AuthSessionInternal): Promise<void> {
     await fs.rm(session.directory, { recursive: true, force: true });
+  }
+
+  private monitorVerificationUrl(
+    session: AuthSessionInternal,
+    child: ChildProcess,
+    safeMessage: string,
+  ): void {
+    let buffered = "";
+    const onData = (chunk: Buffer | string) => {
+      buffered = `${buffered}${chunk.toString()}`.slice(-commandOutputLimit);
+      const verificationUrl = authVerificationUrl(buffered, session.view.provider);
+      if (!verificationUrl || session.openedVerificationUrl === verificationUrl) return;
+      session.view.safeMessage = safeMessage;
+      void this.presentVerificationUrl(session, verificationUrl).catch((error) => {
+        void this.failSession(session.view.provider, mapError(error, "CLI_AUTH_PAGE_OPEN_FAILED"));
+      });
+    };
+    child.stdout?.on("data", onData);
+    child.stderr?.on("data", onData);
+  }
+
+  private async presentVerificationUrl(session: AuthSessionInternal, verificationUrl: string): Promise<void> {
+    const safeUrl = authVerificationUrl(verificationUrl, session.view.provider);
+    if (!safeUrl || session.openedVerificationUrl === safeUrl) return;
+    session.openedVerificationUrl = safeUrl;
+    this.emit(session.view.provider);
+    try {
+      await this.options.openExternal?.(safeUrl);
+    } catch {
+      throw new CliConnectorError("CLI_AUTH_PAGE_OPEN_FAILED", "无法打开官方授权页面", "retry");
+    }
   }
 
   private async discoverCandidates(providerId: CliProviderId, record?: InstallationRecord): Promise<string[]> {
@@ -684,9 +739,66 @@ export class CliConnectorManager {
     }
   }
 
+  private async installOfficialSkills(
+    providerId: CliProviderId,
+    signal: AbortSignal,
+    reportProgress = true,
+  ): Promise<string[]> {
+    const bundle = this.skillBundleFor(providerId);
+    if (!bundle) throw new CliConnectorError("CLI_SKILL_BUNDLE_MISSING", "官方 Skill 安装资产缺失");
+    const staging = path.join(this.root, ".staging", `${providerId}-skills-${randomUUID()}`);
+    await fs.mkdir(staging, { recursive: true, mode: 0o700 });
+    const archivePath = path.join(staging, `skills.${bundle.archiveType === "zip" ? "zip" : "tar.gz"}`);
+    try {
+      if (reportProgress) this.setInstallProgress(providerId, "downloading_skills", 62, "正在下载官方 Skills");
+      const response = await this.options.fetchAsset(bundle.url, signal);
+      if (!response.ok) throw new CliConnectorError("CLI_SKILL_DOWNLOAD_FAILED", `官方 Skill 下载失败 (${response.status})`, "retry");
+      const declaredLength = Number(response.headers.get("content-length") ?? 0);
+      if (declaredLength > maxArchiveBytes) throw new CliConnectorError("CLI_SKILL_ARCHIVE_TOO_LARGE", "官方 Skill 包超过安全大小限制");
+      const bytes = await readResponseBody(response, maxArchiveBytes, (received, total) => {
+        const ratio = total > 0 ? Math.min(received / total, 1) : 0.5;
+        if (reportProgress) this.setInstallProgress(providerId, "downloading_skills", 62 + Math.round(ratio * 24), "正在下载官方 Skills");
+      });
+      if (reportProgress) this.setInstallProgress(providerId, "verifying_skills", 88, "正在校验官方 Skills");
+      if (sha256(bytes) !== bundle.sha256) throw new CliConnectorError("CLI_SKILL_CHECKSUM_MISMATCH", "官方 Skill 包校验失败", "retry");
+      await fs.writeFile(archivePath, bytes, { mode: 0o600 });
+      const payload = path.join(staging, "payload");
+      await extractSkillBundle(archivePath, bundle.archiveType, bundle, payload);
+      if (reportProgress) this.setInstallProgress(providerId, "installing_skills", 93, "正在安装官方 Skills");
+      await replaceSkillDirectoriesAtomically(payload, path.join(this.options.homeDir, ".agents", "skills"), bundle.skillNames);
+      return [...bundle.skillNames];
+    } catch (error) {
+      if (error instanceof CliConnectorError) throw error;
+      throw new CliConnectorError("CLI_SKILL_INSTALL_FAILED", "官方 Skill 安装失败", "retry");
+    } finally {
+      await fs.rm(staging, { recursive: true, force: true });
+    }
+  }
+
+  private async backfillOfficialSkills(): Promise<void> {
+    let changed = false;
+    for (const providerId of providers) {
+      const record = this.installations.records[providerId];
+      const bundle = this.skillBundleFor(providerId);
+      if (!record || record.ownership !== "awaken-managed" || !bundle) continue;
+      const skillFiles = bundle.skillNames.map((name) => path.join(this.options.homeDir, ".agents", "skills", name, "SKILL.md"));
+      const presence = await Promise.all(skillFiles.map((file) => isRegularFile(file)));
+      if (presence.every(Boolean)) continue;
+      if (presence.some(Boolean)) continue; // Preserve a partial set owned by another installer or the user.
+      try {
+        record.officialSkillNames = await this.installOfficialSkills(providerId, new AbortController().signal, false);
+        record.officialSkillVersion = bundle.version;
+        changed = true;
+      } catch {
+        // Keep an already usable CLI available while retrying the migration on next launch.
+      }
+    }
+    if (changed) await this.saveInstallations();
+  }
+
   private async loadManifest(): Promise<CliManifest> {
     const raw = JSON.parse(await fs.readFile(this.options.manifestPath, "utf8")) as CliManifest;
-    if (!raw || typeof raw.revision !== "string" || !Array.isArray(raw.assets)) throw new CliConnectorError("CLI_MANIFEST_INVALID", "CLI manifest 无效");
+    if (!raw || typeof raw.revision !== "string" || !Array.isArray(raw.assets) || (raw.skillBundles !== undefined && !Array.isArray(raw.skillBundles))) throw new CliConnectorError("CLI_MANIFEST_INVALID", "CLI manifest 无效");
     const identities = new Set<string>();
     for (const asset of raw.assets) {
       if (!providers.includes(asset.providerId) || !["darwin", "win32"].includes(asset.platform) || !["arm64", "x64"].includes(asset.architecture)) throw new CliConnectorError("CLI_MANIFEST_INVALID", "CLI manifest 包含无效平台条目");
@@ -694,6 +806,21 @@ export class CliConnectorManager {
       const identity = `${asset.providerId}:${asset.platform}:${asset.architecture}`;
       if (identities.has(identity)) throw new CliConnectorError("CLI_MANIFEST_INVALID", "CLI manifest 包含重复条目");
       identities.add(identity);
+    }
+    const skillProviders = new Set<string>();
+    for (const bundle of raw.skillBundles ?? []) {
+      if (!providers.includes(bundle.providerId)
+        || !/^https:\/\/github\.com\//.test(bundle.url)
+        || !/^[0-9a-f]{64}$/.test(bundle.sha256)
+        || !["tar.gz", "zip"].includes(bundle.archiveType)
+        || !Array.isArray(bundle.skillNames)
+        || bundle.skillNames.length === 0
+        || bundle.skillNames.some((name) => !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(name))
+        || (bundle.destinationRoot !== undefined && (bundle.skillNames.length !== 1 || bundle.skillNames[0] !== bundle.destinationRoot))) {
+        throw new CliConnectorError("CLI_MANIFEST_INVALID", "CLI manifest 包含无效 Skill 资产");
+      }
+      if (skillProviders.has(bundle.providerId)) throw new CliConnectorError("CLI_MANIFEST_INVALID", "CLI manifest 包含重复 Skill 资产");
+      skillProviders.add(bundle.providerId);
     }
     return raw;
   }
@@ -721,6 +848,10 @@ export class CliConnectorManager {
     return this.manifest.assets.find((asset) => asset.providerId === providerId && asset.platform === this.options.platform && asset.architecture === this.options.architecture);
   }
 
+  private skillBundleFor(providerId: CliProviderId): ManifestSkillBundle | undefined {
+    return this.manifest.skillBundles?.find((bundle) => bundle.providerId === providerId);
+  }
+
   private supportedPlatform(): "darwin" | "win32" {
     if (this.options.platform !== "darwin" && this.options.platform !== "win32") throw new CliConnectorError("CLI_UNSUPPORTED", "当前平台不受支持");
     return this.options.platform;
@@ -738,6 +869,7 @@ export class CliConnectorManager {
       displayName: providerId === "dingtalk-workspace" ? "钉钉" : "飞书",
       readiness,
       authSession: this.authSessions.get(providerId)?.view,
+      installProgress: this.installProgress.get(providerId),
     };
     this.views.set(providerId, view);
     this.emit(providerId);
@@ -748,14 +880,34 @@ export class CliConnectorManager {
   private emit(providerId: CliProviderId): void {
     const current = this.views.get(providerId) ?? this.defaultView(providerId);
     const session = this.authSessions.get(providerId)?.view;
-    const view = structuredClone({ ...current, authSession: session });
+    const view = structuredClone({
+      ...current,
+      authSession: session,
+      installProgress: this.installProgress.get(providerId),
+    });
     this.views.set(providerId, view);
     this.options.onStateChanged(view);
   }
 
   private view(providerId: CliProviderId): CliConnectorView {
     this.assertProvider(providerId);
-    return structuredClone(this.views.get(providerId) ?? this.defaultView(providerId));
+    const current = this.views.get(providerId) ?? this.defaultView(providerId);
+    return structuredClone({ ...current, installProgress: this.installProgress.get(providerId) });
+  }
+
+  private setInstallProgress(
+    providerId: CliProviderId,
+    phase: CliInstallPhase,
+    percent: number,
+    label: string,
+  ): void {
+    const previous = this.installProgress.get(providerId)?.percent ?? 0;
+    this.installProgress.set(providerId, {
+      phase,
+      percent: Math.max(previous, Math.min(100, Math.round(percent))),
+      label,
+    });
+    this.emit(providerId);
   }
 
   private readiness(providerId: CliProviderId): CliConnectorReadiness {
@@ -798,6 +950,35 @@ function safeSpawnOptions(cwd: string) {
   };
 }
 
+export function authVerificationUrl(raw: string, providerId: CliProviderId): string | undefined {
+  const candidates: string[] = [];
+  const parsed = parseJSONObject(raw);
+  if (parsed) {
+    for (const key of ["verification_url", "verification_uri_complete", "verification_uri", "url"]) {
+      const value = stringField(parsed, [key]);
+      if (value) candidates.push(value);
+    }
+  }
+  const matches = raw.match(/https:\/\/[^\s"'<>\\]+/g) ?? [];
+  candidates.push(...matches.map((value) => value.replace(/[),.;\]}]+$/, "")));
+  for (const candidate of candidates) {
+    try {
+      const url = new URL(candidate);
+      if (url.protocol !== "https:") continue;
+      const host = url.hostname.toLowerCase();
+      const allowed = providerId === "dingtalk-workspace"
+        ? host === "dingtalk.com" || host.endsWith(".dingtalk.com")
+        : ["feishu.cn", "larksuite.com", "larkoffice.com"].some(
+            (suffix) => host === suffix || host.endsWith(`.${suffix}`),
+          );
+      if (allowed) return url.toString();
+    } catch {
+      // Ignore malformed or non-provider URLs from CLI output.
+    }
+  }
+  return undefined;
+}
+
 export function safeCliEnvironment(): NodeJS.ProcessEnv {
   const allowed = [
     "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PATH", "TMPDIR", "TEMP", "TMP",
@@ -810,8 +991,13 @@ export function safeCliEnvironment(): NodeJS.ProcessEnv {
   return env;
 }
 
-export async function readResponseBody(response: Response, limit: number): Promise<Buffer> {
+export async function readResponseBody(
+  response: Response,
+  limit: number,
+  onProgress?: (receivedBytes: number, totalBytes: number) => void,
+): Promise<Buffer> {
   if (!response.body) return Buffer.alloc(0);
+  const declaredLength = Number(response.headers.get("content-length") ?? 0);
   const reader = response.body.getReader();
   const chunks: Buffer[] = [];
   let size = 0;
@@ -825,6 +1011,7 @@ export async function readResponseBody(response: Response, limit: number): Promi
         throw new CliConnectorError("CLI_ARCHIVE_TOO_LARGE", "安装包超过安全大小限制");
       }
       chunks.push(Buffer.from(value));
+      onProgress?.(size, Number.isFinite(declaredLength) ? declaredLength : 0);
     }
     return Buffer.concat(chunks, size);
   } finally {
@@ -849,10 +1036,61 @@ async function replaceDirectoryAtomically(source: string, target: string): Promi
   }
 }
 
+async function replaceSkillDirectoriesAtomically(
+  sourceRoot: string,
+  targetRoot: string,
+  skillNames: string[],
+): Promise<void> {
+  await fs.mkdir(targetRoot, { recursive: true, mode: 0o700 });
+  const swaps: Array<{ target: string; backup?: string }> = [];
+  try {
+    for (const skillName of skillNames) {
+      const source = path.join(sourceRoot, skillName);
+      const target = path.join(targetRoot, skillName);
+      if (!(await isRegularFile(path.join(source, "SKILL.md")))) {
+        throw new Error("CLI_SKILL_BUNDLE_MISSING_SKILL");
+      }
+      let backup: string | undefined;
+      if (await pathExists(target)) {
+        const stat = await fs.lstat(target);
+        if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("CLI_SKILL_TARGET_UNSAFE");
+        backup = path.join(targetRoot, `.${skillName}.${randomUUID()}.old`);
+        await fs.rename(target, backup);
+      }
+      try {
+        await fs.rename(source, target);
+      } catch (error) {
+        if (backup) await fs.rename(backup, target);
+        throw error;
+      }
+      swaps.push({ target, backup });
+    }
+    await Promise.all(swaps.flatMap(({ backup }) => backup
+      ? [fs.rm(backup, { recursive: true, force: true }).catch(() => undefined)]
+      : []));
+  } catch (error) {
+    for (const { target, backup } of swaps.reverse()) {
+      await fs.rm(target, { recursive: true, force: true });
+      if (backup) await fs.rename(backup, target);
+    }
+    throw error;
+  }
+}
+
 async function pathExists(value: string): Promise<boolean> {
   try {
     await fs.lstat(value);
     return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+async function isRegularFile(value: string): Promise<boolean> {
+  try {
+    const stat = await fs.lstat(value);
+    return stat.isFile() && !stat.isSymbolicLink();
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
     throw error;

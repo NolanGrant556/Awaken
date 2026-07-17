@@ -150,15 +150,6 @@ protocol.registerSchemesAsPrivileged([
       corsEnabled: true,
     },
   },
-  {
-    scheme: "awaken-cli-auth",
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      corsEnabled: false,
-    },
-  },
 ]);
 
 let supervisor: RuntimeSupervisor | null = null;
@@ -215,25 +206,6 @@ async function publishCliReadiness(readiness: CliConnectorReadiness): Promise<vo
       "X-Awaken-Control-Token": desktopControlToken,
     },
     body: JSON.stringify(readiness),
-  });
-}
-
-function registerCliAuthProtocol(): void {
-  protocol.handle("awaken-cli-auth", async (request) => {
-    try {
-      const url = new URL(request.url);
-      const parts = url.pathname.split("/").filter(Boolean);
-      if (parts.length !== 2 || parts[1] !== "qr.png") return new Response("Not found", { status: 404 });
-      const assetPath = cliConnectorManager?.resolveAuthAsset(url.hostname, parts[0]);
-      if (!assetPath) return new Response("Not found", { status: 404 });
-      const bytes = await fs.readFile(assetPath);
-      return new Response(bytes, {
-        status: 200,
-        headers: { "Content-Type": "image/png", "Cache-Control": "no-store" },
-      });
-    } catch {
-      return new Response("Not found", { status: 404 });
-    }
   });
 }
 
@@ -1183,30 +1155,9 @@ ipcMain.handle("awaken:cancel-cli-install", async (_event, providerId: CliProvid
 	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
 	return cliConnectorManager.cancelInstall(providerId);
 });
-ipcMain.handle("awaken:select-cli-executable", async (_event, providerId: CliProviderId) => {
-	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
-	const result = await dialog.showOpenDialog({
-		title: providerId === "dingtalk-workspace" ? "选择 dws 可执行文件" : "选择 lark-cli 可执行文件",
-		properties: ["openFile"],
-	});
-	if (result.canceled || result.filePaths.length !== 1) {
-		const current = cliConnectorManager.list().find((entry) => entry.providerId === providerId);
-		if (!current) throw new Error("CLI connector unavailable");
-		return current;
-	}
-	return cliConnectorManager.selectExecutable(providerId, result.filePaths[0]);
-});
-ipcMain.handle("awaken:configure-cli-connector", async (_event, providerId: CliProviderId) => {
-	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
-	return cliConnectorManager.configure(providerId);
-});
 ipcMain.handle("awaken:start-cli-auth", async (_event, providerId: CliProviderId) => {
 	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
 	return cliConnectorManager.startAuth(providerId);
-});
-ipcMain.handle("awaken:cancel-cli-auth", async (_event, providerId: CliProviderId) => {
-	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
-	return cliConnectorManager.cancelAuth(providerId);
 });
 ipcMain.handle("awaken:retry-cli-auth", async (_event, providerId: CliProviderId) => {
 	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
@@ -2024,11 +1975,11 @@ app.whenReady().then(async () => {
     architecture: process.arch,
     manifestPath: cliConnectorManifestPath(),
     fetchAsset: (url, signal) => net.fetch(url, { signal }),
+    openExternal: (url) => shell.openExternal(url),
     publishReadiness: publishCliReadiness,
     onStateChanged: broadcastCliConnectorState,
   });
   await cliConnectorManager.initialize();
-  registerCliAuthProtocol();
   petStore = new PetStore(configDir, app.getPath("userData"));
   await petStore.initialize();
   const builtinPetReport = await importBuiltinPets(

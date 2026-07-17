@@ -485,6 +485,13 @@ pre {
   width: 22px;
   height: 22px;
   border-radius: 999px;
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-tertiary);
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.cli-connector-detail-link.is-connected {
   background: color-mix(in srgb, #16a34a 16%, transparent);
   color: #16a34a;
 }
@@ -548,10 +555,123 @@ pre {
   font-weight: 650;
 }
 
-.cli-connector-logout-button {
+.cli-connector-detail-state,
+.cli-connector-install-progress {
   width: 100%;
+  padding: 12px 14px;
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-bg-fill-light);
+}
+
+.cli-connector-detail-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--aw-text-secondary);
+  font-size: 13px;
+  text-align: left;
+}
+
+.cli-connector-detail-state-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--aw-text-tertiary);
+}
+
+.cli-connector-detail-state-dot.is-waiting {
+  background: #d97706;
+  box-shadow: 0 0 0 4px color-mix(in srgb, #d97706 12%, transparent);
+}
+
+.cli-connector-install-progress {
+  display: grid;
+  gap: 9px;
+  text-align: left;
+}
+
+.cli-connector-install-progress-copy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--aw-text-primary);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.cli-connector-install-progress-copy strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.cli-connector-install-progress-track {
+  width: 100%;
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--aw-bg-fill-main);
+}
+
+.cli-connector-install-progress-track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--aw-button-black);
+  transition: width 180ms ease;
+}
+
+.cli-connector-install-progress p {
+  margin: 0;
+  color: var(--aw-text-tertiary);
+  font-size: 11px;
+}
+
+.cli-connector-detail-action {
+  width: 100%;
+}
+
+.cli-connector-detail-action-cancel {
   color: var(--aw-error) !important;
   background: color-mix(in srgb, var(--aw-error) 10%, transparent) !important;
+}
+
+.cli-connector-detail-action-connected {
+  border-color: color-mix(in srgb, #16a34a 28%, transparent) !important;
+  color: #15803d !important;
+  background: color-mix(in srgb, #16a34a 12%, transparent) !important;
+}
+
+.cli-connector-detail-action-connected:hover,
+.cli-connector-detail-action-connected:focus-visible {
+  border-color: color-mix(in srgb, var(--aw-error) 28%, transparent) !important;
+  color: var(--aw-error) !important;
+  background: color-mix(in srgb, var(--aw-error) 10%, transparent) !important;
+}
+
+.cli-connector-connected-label,
+.cli-connector-logout-label {
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.cli-connector-connected-label {
+  display: inline-flex;
+}
+
+.cli-connector-logout-label {
+  display: none;
+}
+
+.cli-connector-detail-action-connected:hover .cli-connector-connected-label,
+.cli-connector-detail-action-connected:focus-visible .cli-connector-connected-label {
+  display: none;
+}
+
+.cli-connector-detail-action-connected:hover .cli-connector-logout-label,
+.cli-connector-detail-action-connected:focus-visible .cli-connector-logout-label {
+  display: inline-flex;
 }
 
 /* Match brand icons to the slightly smaller detail marks */

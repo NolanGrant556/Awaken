@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -236,6 +237,9 @@ func buildConnectorRegistry(manager *mcpclient.Manager, _ string) *connectors.Re
 func buildSkillRegistry(manager *mcpclient.Manager, workspace string) *skills.SkillRegistry {
 	logger := mcpclient.StdLogger{}
 	registry := skills.NewSkillRegistry(logger)
+	if home, err := os.UserHomeDir(); err == nil {
+		registry.SetDisabledStorePath(filepath.Join(home, ".awaken", "skills", "disabled-skills.json"))
+	}
 	registry.LoadFromSources(skills.LocalSourceDirs(workspace))
 
 	if manager != nil {

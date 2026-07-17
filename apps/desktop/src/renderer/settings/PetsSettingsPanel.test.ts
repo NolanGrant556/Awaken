@@ -42,6 +42,8 @@ function createMockRuntimeClient(): RuntimeClient {
     getSkillPreview: vi.fn(async () => ({ frontmatterRaw: "", bodyMarkdown: "" })),
     installSkill: vi.fn(async () => ({ skill: {} as never, path: "", message: "" })),
     deleteSkill: vi.fn(async () => ({ id: "", sourceOrigin: "user", originalPath: "", message: "" })),
+    disableSkill: vi.fn(async () => undefined),
+    enableSkill: vi.fn(async () => undefined),
     listModelProviders: vi.fn(async () => []),
     listModelProfiles: vi.fn(async () => []),
     saveModelProfile: vi.fn(async () => ({

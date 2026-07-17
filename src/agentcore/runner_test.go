@@ -481,6 +481,53 @@ func TestRunnerRunStreamWithEventsNativeToolCallLoop(t *testing.T) {
 	}
 }
 
+func TestRunnerFinishesStreamedTextBeforeToolArgumentDeltas(t *testing.T) {
+	toolName := "runner_text_then_tool"
+	mustRegisterRunnerTool(t, runnerTestTool{name: toolName})
+
+	var calls int
+	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			writeRunnerStreamLines(t, w, []string{
+				`data: {"choices":[{"delta":{"content":"I will inspect the workspace."}}]}`,
+				`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_text_then_tool","type":"function","function":{"name":"` + toolName + `","arguments":"{\"value\""}}]}}]}`,
+				`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"hello\"}"}}]}}]}`,
+				`data: [DONE]`,
+			})
+			return
+		}
+		writeRunnerStreamText(t, w, "done")
+	})
+	defer server.Close()
+
+	var events []AwakenEvent
+	agent := NewAgent(testAgentConfig(server.URL, 3))
+	answer, err := agent.RunStreamWithEvents(context.Background(), "stream text then tool", EventSinkFunc(func(event AwakenEvent) {
+		events = append(events, event)
+	}))
+	if err != nil {
+		t.Fatalf("RunStreamWithEvents returned error: %v", err)
+	}
+	if answer != "done" {
+		t.Fatalf("expected done, got %q", answer)
+	}
+
+	textFinishedIndex := firstEventIndex(events, TextMessageFinishedEventType)
+	toolArgsDeltaIndex := firstEventIndex(events, ToolCallArgsDeltaEventType)
+	if textFinishedIndex < 0 || toolArgsDeltaIndex < 0 {
+		t.Fatalf("expected text completion and tool argument delta events, got %v", eventTypes(events))
+	}
+	if textFinishedIndex > toolArgsDeltaIndex {
+		t.Fatalf(
+			"assistant text must finish before tool argument deltas can activate a tool item: text end=%d tool args=%d events=%v",
+			textFinishedIndex,
+			toolArgsDeltaIndex,
+			eventTypes(events),
+		)
+	}
+}
+
 func TestRunnerRunStreamWithEventsEmitsLifecycleSequence(t *testing.T) {
 	toolName := "runner_event_tool"
 	mustRegisterRunnerTool(t, runnerTestTool{name: toolName})

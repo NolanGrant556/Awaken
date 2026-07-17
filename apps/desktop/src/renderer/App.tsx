@@ -3857,6 +3857,7 @@ export function App() {
                     desktopReady={desktopReady}
                     runtimeClient={runtimeClient}
                     onNotice={setNotice}
+                    activeWorkspaceRoot={workspacePath}
                   />
                 </>
               ) : (

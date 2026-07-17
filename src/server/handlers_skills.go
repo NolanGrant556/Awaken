@@ -96,6 +96,11 @@ type previewSkillResponse struct {
 	BodyMarkdown   string `json:"bodyMarkdown"`
 }
 
+type skillStateResponse struct {
+	ID    string `json:"id"`
+	State string `json:"state"`
+}
+
 func (h skillHandlers) handleListSkills(w http.ResponseWriter, r *http.Request) {
 	if h.registry == nil {
 		writeErrorJSON(w, http.StatusServiceUnavailable, "SKILLS_UNAVAILABLE", "skill registry not configured")
@@ -281,6 +286,36 @@ func (h skillHandlers) skillSourceDirs(projectRoot string) map[skills.SourceOrig
 
 // handleExecuteSkill triggers direct execution of a skill by ID.
 // POST /v1/skills/{id}/execute with JSON body of arguments.
+func (h skillHandlers) handleEnableSkill(w http.ResponseWriter, r *http.Request) {
+	if h.registry == nil {
+		writeErrorJSON(w, http.StatusServiceUnavailable, "SKILLS_UNAVAILABLE", "skill registry not configured")
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "skill id is required")
+		return
+	}
+	h.registry.SetDisabledByPolicy(id, false, "")
+	h.registry.ReloadLocalSources(h.skillSourceDirs(h.workspaceRoot))
+	writeJSON(w, http.StatusOK, skillStateResponse{ID: id, State: string(skills.StateLoaded)})
+}
+
+func (h skillHandlers) handleDisableSkill(w http.ResponseWriter, r *http.Request) {
+	if h.registry == nil {
+		writeErrorJSON(w, http.StatusServiceUnavailable, "SKILLS_UNAVAILABLE", "skill registry not configured")
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "skill id is required")
+		return
+	}
+	h.registry.SetDisabledByPolicy(id, true, "disabled by user")
+	h.registry.ReloadLocalSources(h.skillSourceDirs(h.workspaceRoot))
+	writeJSON(w, http.StatusOK, skillStateResponse{ID: id, State: string(skills.StateDisabledByPolicy)})
+}
+
 func (h skillHandlers) handleExecuteSkill(w http.ResponseWriter, r *http.Request) {
 	if h.registry == nil {
 		writeErrorJSON(w, http.StatusServiceUnavailable, "SKILLS_UNAVAILABLE", "skill registry not configured")
@@ -353,6 +388,11 @@ func skillDiagnostics(def *skills.SkillDefinition) []skillDiagnosticInfo {
 		if strings.TrimSpace(value.Message) == "" || seen[key] {
 			return
 		}
+		// The disabled-by-policy state is already represented by the card's
+		// toggle switch; don't repeat it as a red diagnostic line.
+		if value.Code == "skill_disabled_by_policy" {
+			return
+		}
 		seen[key] = true
 		result = append(result, value)
 	}
@@ -364,7 +404,9 @@ func skillDiagnostics(def *skills.SkillDefinition) []skillDiagnosticInfo {
 		if code == "" {
 			code = "skill_" + string(def.State)
 		}
-		appendDiagnostic(skillDiagnosticInfo{Code: code, Message: reason, Severity: "error"})
+		if code != "skill_disabled_by_policy" {
+			appendDiagnostic(skillDiagnosticInfo{Code: code, Message: reason, Severity: "error"})
+		}
 	}
 	for _, warning := range def.DeprecatedWarnings {
 		if warning = strings.TrimSpace(warning); warning != "" {
@@ -385,6 +427,8 @@ func publicSkillScope(def *skills.SkillDefinition) string {
 		return "project"
 	case skills.SourceMcp:
 		return "mcp"
+	case skills.SourceAgents:
+		return "agents"
 	default:
 		if def.Scope == skills.SourceUser {
 			return "global"

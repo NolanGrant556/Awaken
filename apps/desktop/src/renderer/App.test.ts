@@ -132,6 +132,8 @@ function stubElectronBridge(): void {
       getSkillPreview: vi.fn(async () => ({ frontmatterRaw: "", bodyMarkdown: "" })),
       installSkill: vi.fn(),
       deleteSkill: vi.fn(),
+      disableSkill: vi.fn(),
+      enableSkill: vi.fn(),
       listModelProviders: vi.fn(async () => []),
       listModelProfiles: vi.fn(async () => []),
       saveModelProfile: vi.fn(),

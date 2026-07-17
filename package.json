@@ -13,6 +13,7 @@
     "build:ui": "npm --workspace @awaken/design-system run build",
     "typecheck:ui": "npm --workspace @awaken/design-system run typecheck",
     "smoke:ui": "npm --workspace @awaken/design-system run smoke:render",
+    "predev:desktop": "npm run close:desktop",
     "dev:desktop": "npm run build:ui && node scripts/ensure-desktop-runtime.mjs && npm --workspace @awaken/desktop run build:main && npm --workspace @awaken/desktop run dev",
     "build:desktop": "npm run build:ui && npm run build:binary && npm --workspace @awaken/desktop run build",
     "dist:desktop": "npm run build:ui && npm --workspace @awaken/desktop run dist",

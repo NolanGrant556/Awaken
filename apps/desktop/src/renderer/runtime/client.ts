@@ -147,6 +147,8 @@ export type RuntimeClient = {
   getSkillPreview: (request: GetSkillPreviewRequest) => Promise<SkillPreviewResponse>;
   installSkill: (request: InstallSkillRequest) => Promise<InstallSkillResponse>;
   deleteSkill: (request: DeleteSkillRequest) => Promise<DeleteSkillResponse>;
+  disableSkill: (id: string) => Promise<void>;
+  enableSkill: (id: string) => Promise<void>;
   listModelProviders: () => Promise<ModelProvider[]>;
   listModelProfiles: () => Promise<RuntimeModelProfileSummary[]>;
   saveModelProfile: (request: ModelProfileSaveRequest) => Promise<RuntimeModelProfileSummary>;
@@ -247,6 +249,8 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     getSkillPreview: (request) => bridge.getSkillPreview(request),
     installSkill: (request) => bridge.installSkill(request),
     deleteSkill: (request) => bridge.deleteSkill(request),
+    disableSkill: (id) => bridge.disableSkill(id),
+    enableSkill: (id) => bridge.enableSkill(id),
     listModelProviders: () => bridge.listModelProviders(),
     listModelProfiles: () => bridge.listModelProfiles(),
     saveModelProfile: (request) =>

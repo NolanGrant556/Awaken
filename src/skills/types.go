@@ -14,6 +14,7 @@ const (
 	SourceProject    SourceOrigin = "project"
 	SourceAdditional SourceOrigin = "additional"
 	SourcePlugin     SourceOrigin = "plugin"
+	SourceAgents     SourceOrigin = "agents"
 	SourceMcp        SourceOrigin = "mcp"
 	SourceBundled    SourceOrigin = "bundled"
 	SourceLegacy     SourceOrigin = "legacy"
@@ -32,12 +33,14 @@ func sourcePriority(o SourceOrigin) int {
 		return 5
 	case SourcePlugin:
 		return 4
-	case SourceMcp:
+	case SourceAgents:
 		return 3
-	case SourceBundled:
+	case SourceMcp:
 		return 2
-	case SourceLegacy:
+	case SourceBundled:
 		return 1
+	case SourceLegacy:
+		return 0
 	default:
 		return 0
 	}

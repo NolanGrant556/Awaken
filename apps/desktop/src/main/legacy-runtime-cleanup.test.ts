@@ -53,7 +53,14 @@ describe("legacy primary runtime cleanup", () => {
     roots.push(external);
     await fs.writeFile(join(external, "keep"), "safe");
     await fs.mkdir(join(root, "runtimes"), { recursive: true });
-    await fs.symlink(external, join(root, "runtimes", "primary-runtime"));
+    try {
+      await fs.symlink(external, join(root, "runtimes", "primary-runtime"));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EPERM") {
+        return;
+      }
+      throw error;
+    }
 
     await expect(cleanupLegacyPrimaryRuntime(root)).resolves.toMatchObject({ status: "refused" });
     await expect(fs.readFile(join(external, "keep"), "utf8")).resolves.toBe("safe");

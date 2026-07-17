@@ -1,6 +1,8 @@
 package skills
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -13,14 +15,15 @@ import (
 // based on connector presence and MCP server state, and exposes a stable
 // snapshot for consumers.
 type SkillRegistry struct {
-	mu               sync.RWMutex
-	skills           map[string]*SkillDefinition
-	logger           Logger
-	onChange         func()
-	connectors       map[string]bool // available connector names
-	mcpServers       map[string]bool // available MCP server names
-	disabledByPolicy map[string]string
-	lastInvoked      map[string]time.Time
+	mu                sync.RWMutex
+	skills            map[string]*SkillDefinition
+	logger            Logger
+	onChange          func()
+	connectors        map[string]bool // available connector names
+	mcpServers        map[string]bool // available MCP server names
+	disabledByPolicy  map[string]string
+	disabledStorePath string
+	lastInvoked       map[string]time.Time
 }
 
 // Logger is the minimal logging surface consumed by the skills package.
@@ -92,6 +95,7 @@ func (r *SkillRegistry) PreviewLocalSources(dirs map[SourceOrigin]string) []*Ski
 
 func (r *SkillRegistry) replaceLocalSourcesLocked(dirs map[SourceOrigin]string) {
 	r.skills = r.buildLocalSourcesLocked(dirs)
+	r.loadDisabledLocked()
 	r.reevaluateAvailabilityLocked()
 }
 
@@ -103,7 +107,7 @@ func (r *SkillRegistry) buildLocalSourcesLocked(dirs map[SourceOrigin]string) ma
 
 	// Process sources from lowest to highest priority so merge works.
 	ordered := make([]skillSourceRoot, 0, 8)
-	for _, src := range []SourceOrigin{SourceLegacy, SourceBundled, SourceMcp, SourcePlugin, SourceUser, SourceAdditional, SourceProject, SourceManaged} {
+	for _, src := range []SourceOrigin{SourceLegacy, SourceBundled, SourceMcp, SourceAgents, SourcePlugin, SourceUser, SourceAdditional, SourceProject, SourceManaged} {
 		dirList, ok := dirs[src]
 		if !ok || dirList == "" {
 			continue
@@ -269,8 +273,10 @@ func (r *SkillRegistry) reevaluateAvailabilityForLocked(defs map[string]*SkillDe
 	}
 }
 
-// SetDisabledByPolicy is the only runtime mutation that can make a structurally
-// valid package unavailable in the Catalog.
+// SetDisabledByPolicy is the runtime mutation that makes a structurally valid
+// package unavailable in the Catalog. When a persistent store path has been
+// configured, the disabled set is also written to disk so the state survives
+// restarts.
 func (r *SkillRegistry) SetDisabledByPolicy(id string, disabled bool, reason string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -288,6 +294,64 @@ func (r *SkillRegistry) SetDisabledByPolicy(id string, disabled bool, reason str
 	}
 	r.reevaluateAvailabilityLocked()
 	r.fireOnChangeLocked()
+	r.persistDisabledLocked()
+}
+
+// SetDisabledStorePath configures the file used to persist the disabled-by-user
+// skill set. The path is created on first write if its parent directory exists.
+func (r *SkillRegistry) SetDisabledStorePath(path string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.disabledStorePath = strings.TrimSpace(path)
+	if r.disabledStorePath != "" {
+		r.loadDisabledLocked()
+	}
+}
+
+func (r *SkillRegistry) loadDisabledLocked() {
+	if r.disabledStorePath == "" {
+		return
+	}
+	data, err := os.ReadFile(r.disabledStorePath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			r.logger.Warnf("failed to read disabled skills store: %v", err)
+		}
+		return
+	}
+	var ids []string
+	if err := json.Unmarshal(data, &ids); err != nil {
+		r.logger.Warnf("failed to parse disabled skills store: %v", err)
+		return
+	}
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := r.disabledByPolicy[id]; !ok {
+			r.disabledByPolicy[id] = "disabled by user"
+		}
+	}
+}
+
+func (r *SkillRegistry) persistDisabledLocked() {
+	if r.disabledStorePath == "" {
+		return
+	}
+	ids := make([]string, 0, len(r.disabledByPolicy))
+	for id := range r.disabledByPolicy {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	data, err := json.Marshal(ids)
+	if err != nil {
+		r.logger.Warnf("failed to encode disabled skills store: %v", err)
+		return
+	}
+	if err := os.WriteFile(r.disabledStorePath, data, 0o600); err != nil {
+		r.logger.Warnf("failed to write disabled skills store: %v", err)
+	}
 }
 
 func (r *SkillRegistry) missingConnectorsLocked(required []string) []string {

@@ -1165,12 +1165,15 @@ ipcMain.handle("awaken:delete-mcp-server", async (_event, name: string) => {
 });
 
 ipcMain.handle("awaken:list-skills", async (_event, projectRoot?: string) => {
+	console.log("[main:list-skills] projectRoot:", projectRoot);
 	const path = projectRoot
 		? `/v1/skills?projectRoot=${encodeURIComponent(projectRoot)}`
 		: "/v1/skills";
-	return requestRuntime<RuntimeSkill[]>(path, {
+	const result = await requestRuntime<RuntimeSkill[]>(path, {
 		method: "GET",
 	});
+	console.log("[main:list-skills] path:", path, "agents count:", result.filter((s) => s.sourceOrigin === "agents").length);
+	return result;
 });
 
 ipcMain.handle("awaken:get-skill-preview", async (_event, request: GetSkillPreviewRequest) => {
@@ -1207,6 +1210,26 @@ ipcMain.handle("awaken:delete-skill", async (_event, request: DeleteSkillRequest
 			sourceOrigin: request.sourceOrigin,
 			projectRoot: request.projectRoot,
 		}),
+	});
+});
+
+ipcMain.handle("awaken:disable-skill", async (_event, id: string) => {
+	const trimmed = id.trim();
+	if (!trimmed) {
+		throw new Error("Skill id is required");
+	}
+	return requestRuntime<{ id: string; state: string }>(`/v1/skills/${encodeURIComponent(trimmed)}/disable`, {
+		method: "POST",
+	});
+});
+
+ipcMain.handle("awaken:enable-skill", async (_event, id: string) => {
+	const trimmed = id.trim();
+	if (!trimmed) {
+		throw new Error("Skill id is required");
+	}
+	return requestRuntime<{ id: string; state: string }>(`/v1/skills/${encodeURIComponent(trimmed)}/enable`, {
+		method: "POST",
 	});
 });
 

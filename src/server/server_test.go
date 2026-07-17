@@ -3837,6 +3837,7 @@ func TestMCPConfigEndpointChangeClearsOldCredential(t *testing.T) {
 
 func TestInstallSkillWritesProjectSkillAndRegisters(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
 	workspace := t.TempDir()
 	registry := skills.NewSkillRegistry(testLogger{})
 	router := NewRouterWithWorkspace(nil, nil, nil, nil, registry, workspace)
@@ -3897,6 +3898,7 @@ Create a short follow-up checklist.`
 
 func TestDeleteSkillMovesPackageToTrashAndSynchronizesList(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
 	workspace := t.TempDir()
 	registry := skills.NewSkillRegistry(testLogger{})
 	trashDir := filepath.Join(t.TempDir(), "Trash")
@@ -4101,6 +4103,7 @@ func writeServerTestSkillPackage(t *testing.T, root, name, content string) {
 
 func TestListSkillsReloadsRemovedProjectSkillFromDisk(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
 	workspace := t.TempDir()
 	registry := skills.NewSkillRegistry(testLogger{})
 	router := NewRouterWithWorkspace(nil, nil, nil, nil, registry, workspace)
@@ -4147,6 +4150,7 @@ Body.`
 
 func TestInstallSkillWritesSelectedProjectRoot(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
 	workspace := t.TempDir()
 	selectedProject := t.TempDir()
 	registry := skills.NewSkillRegistry(testLogger{})
@@ -4196,6 +4200,7 @@ Body.`
 func TestListSkillsWithoutWorkspaceStillLoadsUserSkills(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	userSkillDir := filepath.Join(home, ".awaken", "skills", "always-user")
 	if err := os.MkdirAll(userSkillDir, 0o700); err != nil {
 		t.Fatalf("mkdir user skill: %v", err)
@@ -4238,6 +4243,7 @@ Body.`), 0o600); err != nil {
 func TestListSkillsProjectPreviewDoesNotMutateRuntimeRegistry(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	workspaceA := t.TempDir()
 	workspaceB := t.TempDir()
 
@@ -4289,6 +4295,7 @@ func TestInstallSkillWritesUserSkill(t *testing.T) {
 	workspace := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	registry := skills.NewSkillRegistry(testLogger{})
 	router := NewRouterWithWorkspace(nil, nil, nil, nil, registry, workspace)

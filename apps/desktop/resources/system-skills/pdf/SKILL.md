@@ -1,14 +1,14 @@
 ---
 name: pdf
 version: 1.0.0
-description: 处理通用 PDF：阅读/抽取文本与表格、合并拆分、旋转、水印、新建、填表、加密解密、抽图，以及扫描件 OCR（本机有工具时）。专业长文档、Markdown 精排、论文/简历或明确要求 Typst/PDF 幻灯片时改用 typst-pdf-maker。
+description: 处理通用 PDF：阅读/抽取文本与表格、合并拆分、旋转、水印、新建、填表、加密解密、抽图，以及扫描件 OCR（本机有工具时）。专业长文档、Markdown 精排、论文/简历或明确要求 Typst/PDF 幻灯片时改用 PDF_Max（调用 ID：pdf-max）。
 when_to_use: 需要读写、加工或生成通用 PDF 时；需要合并拆分、填表或 OCR 时；需要专业 Typst 排版时不要使用本 Skill。
 user-invocable: true
 ---
 
 # Awaken PDF Skill
 
-用 **Bash + Python 库 / Poppler** 处理通用 PDF。复杂示例见 `references/reference.md`、填表见 `references/forms.md`（按需读取）。专业长文档、Markdown 精排、论文、简历和 Typst/PDF 幻灯片交给 `typst-pdf-maker`。交付走 **`artifact_publish`**。
+用 **Bash + Python 库 / Poppler** 处理通用 PDF。复杂示例见 `references/reference.md`、填表见 `references/forms.md`（按需读取）。专业长文档、Markdown 精排、论文、简历和 Typst/PDF 幻灯片交给 `PDF_Max`（调用 ID：`pdf-max`）。交付走 **`artifact_publish`**。
 
 ## Awaken 工具约定
 
@@ -51,7 +51,7 @@ Windows 上把 `python3` / `pip3` 换成 `python` / `pip`（或 `py -m pip`）�
 | 新建 PDF | `reportlab` |
 | 填可填表单 | 见 `references/forms.md` + `scripts/` |
 | 页预览 | `pdftoppm` → `Read` |
-| Typst 专业长文档/PDF 幻灯片 | 改用 `typst-pdf-maker` Skill |
+| Typst 专业长文档/PDF 幻灯片 | 改用 `PDF_Max` Skill（调用 ID：`pdf-max`） |
 | 交付 | `artifact_publish` |
 
 ## 阅读

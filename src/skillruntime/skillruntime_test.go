@@ -208,6 +208,31 @@ func TestResourceReadToolUsesRecordedDiscoveryRootForPluginPackage(t *testing.T)
 	}
 }
 
+func TestResourceReadToolUsesRecordedDiscoveryRootForAgentPackage(t *testing.T) {
+	sourceRoot := filepath.Join(t.TempDir(), ".agents", "skills")
+	packageRoot := filepath.Join(sourceRoot, "agents-report")
+	if err := os.MkdirAll(filepath.Join(packageRoot, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(packageRoot, "SKILL.md"), []byte("---\nname: agents-report\ndescription: agents report skill\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(packageRoot, "assets", "template.txt"), []byte("agent template"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	registry := skills.NewSkillRegistry(nil)
+	registry.LoadFromSources(map[skills.SourceOrigin]string{skills.SourceAgents: sourceRoot})
+	definition := registry.Get("agents-report")
+	if definition == nil || definition.SourceRoot == "" || definition.State != skills.StateLoaded {
+		t.Fatalf("agents Skill did not retain its discovery root: %+v", definition)
+	}
+	reader := &ResourceReadTool{registry: registry}
+	result, err := reader.Execute(context.Background(), `{"skill_id":"agents-report","path":"assets/template.txt"}`)
+	if err != nil || !strings.Contains(result, "agent template") {
+		t.Fatalf("agents resource did not use recorded local boundary: result=%q err=%v", result, err)
+	}
+}
+
 func TestResourceReadToolRejectsTraversal(t *testing.T) {
 	root := t.TempDir()
 	skillRoot := filepath.Join(root, ".awaken", "skills", "sample")
@@ -601,13 +626,17 @@ func TestSkillInstallToolRejectsProjectRootOutsideWorkspace(t *testing.T) {
 	outside := t.TempDir()
 	reg := skills.NewSkillRegistry(nil)
 	installer := &SkillInstallTool{registry: reg}
-	input := `{
-		"source_type": "content",
-		"file_name": "SKILL.md",
-		"content": "---\nname: outside\ndescription: Outside.\n---\nBody.",
-		"scope": "project",
-		"project_root": "` + outside + `"
-	}`
+	inputBytes, err := json.Marshal(map[string]any{
+		"source_type":  "content",
+		"file_name":    "SKILL.md",
+		"content":      "---\nname: outside\ndescription: Outside.\n---\nBody.",
+		"scope":        "project",
+		"project_root": outside,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := string(inputBytes)
 
 	decision := installer.CheckPermission(
 		context.Background(),
@@ -631,13 +660,17 @@ func TestSkillInstallToolRejectsProjectRootSymlinkEscape(t *testing.T) {
 	}
 	reg := skills.NewSkillRegistry(nil)
 	installer := &SkillInstallTool{registry: reg}
-	input := `{
-		"source_type": "content",
-		"file_name": "SKILL.md",
-		"content": "---\nname: escaped-install\ndescription: Escape test.\n---\nBody.",
-		"scope": "project",
-		"project_root": "` + linkPath + `"
-	}`
+	inputBytes, err := json.Marshal(map[string]any{
+		"source_type":  "content",
+		"file_name":    "SKILL.md",
+		"content":      "---\nname: escaped-install\ndescription: Escape test.\n---\nBody.",
+		"scope":        "project",
+		"project_root": linkPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := string(inputBytes)
 	permissionContext := tool.NewPermissionContext(workspace, []string{workspace})
 	decision := installer.CheckPermission(context.Background(), input, permissionContext)
 	if decision.Behavior != tool.PermissionDeny || !strings.Contains(decision.Reason, "project_root") {

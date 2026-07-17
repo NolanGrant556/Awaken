@@ -245,7 +245,7 @@ func openAnchoredSkillResource(ctx context.Context, def *skills.SkillDefinition,
 			}
 			anchor = filepath.Join(home, ".awaken", "skills")
 		}
-	case skills.SourceManaged, skills.SourceAdditional, skills.SourcePlugin, skills.SourceBundled:
+	case skills.SourceManaged, skills.SourceAdditional, skills.SourcePlugin, skills.SourceBundled, skills.SourceAgents:
 		if anchor == "" {
 			return nil, nil, fmt.Errorf("Skill source %q has no recorded discovery root", def.Source)
 		}

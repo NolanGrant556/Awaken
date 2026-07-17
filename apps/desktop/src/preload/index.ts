@@ -210,6 +210,10 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:install-skill", request) as Promise<InstallSkillResponse>,
   deleteSkill: (request: DeleteSkillRequest) =>
     ipcRenderer.invoke("awaken:delete-skill", request) as Promise<DeleteSkillResponse>,
+  disableSkill: (id: string) =>
+    ipcRenderer.invoke("awaken:disable-skill", id) as Promise<void>,
+  enableSkill: (id: string) =>
+    ipcRenderer.invoke("awaken:enable-skill", id) as Promise<void>,
   listModelProviders: () =>
     ipcRenderer.invoke("awaken:list-model-providers") as Promise<ModelProvider[]>,
   listModelProfiles: () =>

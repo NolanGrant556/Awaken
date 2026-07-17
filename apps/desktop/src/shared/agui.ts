@@ -43,6 +43,8 @@ export type AguiEventType =
   | "AWAKEN_SKILL_FAILED_TO_LOAD"
   | "AWAKEN_USER_QUESTION_REQUESTED"
   | "AWAKEN_USER_QUESTION_RESOLVED"
+  | "AWAKEN_EXTERNAL_INTERACTION_REQUESTED"
+  | "AWAKEN_EXTERNAL_INTERACTION_RESOLVED"
   | "AWAKEN_ARTIFACT_CREATED"
   | "AWAKEN_ARTIFACT_UPDATED"
   | "AWAKEN_TOOL_RECOVERY_REQUIRED"
@@ -190,6 +192,14 @@ export type AguiEvent = {
   skillDiagnostics?: string[];
   questionId?: string;
   questionAnswer?: string;
+  interactionId?: string;
+  interactionResolution?: string;
+  interactionTitle?: string;
+  interactionSafeMessage?: string;
+  interactionVerificationUrl?: string;
+  interactionQrImageUrl?: string;
+  interactionProvider?: string;
+  interactionRecoveries?: string[];
   artifactId?: string;
   artifactTitle?: string;
   artifactDescription?: string;

@@ -14,6 +14,7 @@ function emptyViewState(): RuntimeViewState {
     toolResults: [],
     patchPreviews: [],
     userQuestions: [],
+    externalInteractions: [],
     artifacts: [],
     inspectorSummary: { unknownEvents: [] },
     narrative: { committedItems: [], activeItem: undefined, seenEventKeys: [] },

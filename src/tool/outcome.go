@@ -18,10 +18,11 @@ const (
 	OutcomeDenied         OutcomeStatus = "denied"
 	OutcomeCancelled      OutcomeStatus = "cancelled"
 	OutcomeInterrupted    OutcomeStatus = "interrupted"
-	OutcomeNeedsAuth      OutcomeStatus = "needs_auth"
-	OutcomeNeedsRuntime   OutcomeStatus = "needs_runtime"
-	OutcomeUnsupported    OutcomeStatus = "unsupported"
-	OutcomeReviewRequired OutcomeStatus = "review_required"
+	OutcomeNeedsAuth             OutcomeStatus = "needs_auth"
+	OutcomeNeedsRuntime          OutcomeStatus = "needs_runtime"
+	OutcomeUnsupported           OutcomeStatus = "unsupported"
+	OutcomeReviewRequired        OutcomeStatus = "review_required"
+	OutcomeInteractionRequired   OutcomeStatus = "interaction_required"
 )
 
 type TransportStatus string
@@ -80,6 +81,7 @@ const (
 	ErrorCodeNeedsAuth                   = "needs_auth"
 	ErrorCodeNeedsRuntime                = "needs_runtime"
 	ErrorCodeUnsupported                 = "unsupported"
+	ErrorCodeInteractionRequired         = "interaction_required"
 	ErrorCodeToolExecutionFailed         = "tool_execution_failed"
 	ErrorCodeExecutionBrokerUnavailable  = "execution_broker_unavailable"
 	ErrorCodeSupervisedExecutionRequired = "supervised_execution_required"
@@ -158,7 +160,7 @@ type OutcomeTool interface {
 func (o ExecutionOutcome) IsError() bool {
 	switch o.Status {
 	case OutcomeFailed, OutcomeDenied, OutcomeCancelled, OutcomeInterrupted,
-		OutcomeNeedsAuth, OutcomeNeedsRuntime, OutcomeUnsupported:
+		OutcomeNeedsAuth, OutcomeNeedsRuntime, OutcomeUnsupported, OutcomeInteractionRequired:
 		return true
 	}
 	return o.SemanticStatus == SemanticFailure

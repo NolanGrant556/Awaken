@@ -10,6 +10,10 @@ type UserQuestionAwaiter interface {
 	AwaitUserQuestion(ctx context.Context, request AwakenEvent) (string, error)
 }
 
+type ExternalInteractionAwaiter interface {
+	AwaitExternalInteraction(ctx context.Context, request AwakenEvent) (ExternalInteractionResolution, error)
+}
+
 type EventSinkFunc func(AwakenEvent)
 
 func (f EventSinkFunc) Emit(event AwakenEvent) {

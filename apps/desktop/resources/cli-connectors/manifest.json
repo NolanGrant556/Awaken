@@ -1,0 +1,93 @@
+{
+  "revision": "2026-07-17.1",
+  "assets": [
+    {
+      "providerId": "dingtalk-workspace",
+      "version": "1.0.32",
+      "platform": "darwin",
+      "architecture": "x64",
+      "url": "https://github.com/DingTalk-Real-AI/dingtalk-workspace-cli/releases/download/v1.0.32/dws-darwin-amd64.tar.gz",
+      "sha256": "e28ccb0fe807166fe282727b3eab52dad0fb23c375f2c7fcb67bd8ad89156e4a",
+      "archiveType": "tar.gz",
+      "executableName": "dws",
+      "archiveExecutablePath": "dws"
+    },
+    {
+      "providerId": "dingtalk-workspace",
+      "version": "1.0.32",
+      "platform": "darwin",
+      "architecture": "arm64",
+      "url": "https://github.com/DingTalk-Real-AI/dingtalk-workspace-cli/releases/download/v1.0.32/dws-darwin-arm64.tar.gz",
+      "sha256": "0abad4f46c546897f4335dac4a84ed0f50615706fa4d07bb0dce03edbff3e9c8",
+      "archiveType": "tar.gz",
+      "executableName": "dws",
+      "archiveExecutablePath": "dws"
+    },
+    {
+      "providerId": "dingtalk-workspace",
+      "version": "1.0.32",
+      "platform": "win32",
+      "architecture": "x64",
+      "url": "https://github.com/DingTalk-Real-AI/dingtalk-workspace-cli/releases/download/v1.0.32/dws-windows-amd64.zip",
+      "sha256": "ac2fe016dd7bd284dc8180b59ad8f3371ef8f4a065fef567f4210ba69d4a49f0",
+      "archiveType": "zip",
+      "executableName": "dws.exe",
+      "archiveExecutablePath": "dws.exe"
+    },
+    {
+      "providerId": "dingtalk-workspace",
+      "version": "1.0.32",
+      "platform": "win32",
+      "architecture": "arm64",
+      "url": "https://github.com/DingTalk-Real-AI/dingtalk-workspace-cli/releases/download/v1.0.32/dws-windows-arm64.zip",
+      "sha256": "3c4f617a61d55d411c896e5a7bccc0a8335ed5ed3a707bec728fa62604db19fd",
+      "archiveType": "zip",
+      "executableName": "dws.exe",
+      "archiveExecutablePath": "dws.exe"
+    },
+    {
+      "providerId": "lark-cli",
+      "version": "1.0.71",
+      "platform": "darwin",
+      "architecture": "x64",
+      "url": "https://github.com/larksuite/cli/releases/download/v1.0.71/lark-cli-1.0.71-darwin-amd64.tar.gz",
+      "sha256": "2b04bf385ffb412afd5cc2af8e4cc0ecc07eeb79d8d3c45db438ba68244cf4e4",
+      "archiveType": "tar.gz",
+      "executableName": "lark-cli",
+      "archiveExecutablePath": "lark-cli"
+    },
+    {
+      "providerId": "lark-cli",
+      "version": "1.0.71",
+      "platform": "darwin",
+      "architecture": "arm64",
+      "url": "https://github.com/larksuite/cli/releases/download/v1.0.71/lark-cli-1.0.71-darwin-arm64.tar.gz",
+      "sha256": "84887a35f8cc5ff8604846a78bcf2952ba453fac583a3f605da13cbb932d2556",
+      "archiveType": "tar.gz",
+      "executableName": "lark-cli",
+      "archiveExecutablePath": "lark-cli"
+    },
+    {
+      "providerId": "lark-cli",
+      "version": "1.0.71",
+      "platform": "win32",
+      "architecture": "x64",
+      "url": "https://github.com/larksuite/cli/releases/download/v1.0.71/lark-cli-1.0.71-windows-amd64.zip",
+      "sha256": "34c01c50d634e1975ea4e92900b5bc9946887dee3155682408ec57cb8b920e64",
+      "archiveType": "zip",
+      "executableName": "lark-cli.exe",
+      "archiveExecutablePath": "lark-cli.exe"
+    },
+    {
+      "providerId": "lark-cli",
+      "version": "1.0.71",
+      "platform": "win32",
+      "architecture": "arm64",
+      "url": "https://github.com/larksuite/cli/releases/download/v1.0.71/lark-cli-1.0.71-windows-arm64.zip",
+      "sha256": "52b43b685fe4a034589d5e5cfd331b02426e628ca7185531c0c92f9bbda781dd",
+      "archiveType": "zip",
+      "executableName": "lark-cli.exe",
+      "archiveExecutablePath": "lark-cli.exe"
+    }
+  ]
+}

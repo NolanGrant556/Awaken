@@ -2,6 +2,7 @@ package connectors
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"awaken/src/mcpclient"
@@ -118,10 +119,43 @@ func TestBuiltinConnectorDefinitionsDeclareProviderFacts(t *testing.T) {
 	}
 	for _, definition := range definitions {
 		if definition.ID == "dingtalk-workspace" || definition.ID == "lark-cli" {
+			if definition.Kind != KindCLI || definition.McpConfigFactory != nil {
+				t.Errorf("%s must be a CLI-only connector", definition.ID)
+			}
 			if !tool.HasCapability(definition.Capabilities, tool.CapabilityMessageSend) {
 				t.Errorf("%s missing message capability", definition.ID)
 			}
 		}
+	}
+}
+
+func TestCLIConnectorRejectsMCPLifecycleAndAcceptsAuthenticatedReadiness(t *testing.T) {
+	runtime := &providerTestRuntime{}
+	registry := NewRegistry(runtime, nil)
+	if err := registry.LoadSources(context.Background(), []ConnectorSource{NewBuiltinSource()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Connect(context.Background(), "lark-cli"); !errors.Is(err, ErrConnectorActionUnsupported) {
+		t.Fatalf("CLI connector entered MCP lifecycle: %v", err)
+	}
+	registry.SetCLIControlToken("secret")
+	snapshot := CLIConnectorReadiness{
+		ProviderID: "lark-cli", Activation: CLIActivationEnabled, Install: CLIInstallInstalled,
+		Executable: CLIExecutableAvailable, Configuration: CLIConfigurationReady,
+		Authentication: CLIAuthenticationAuthorized, Overall: CLIOverallReady, UpdatedAt: "2026-07-17T00:00:00Z",
+	}
+	if err := registry.UpdateCLIReadiness("wrong", "lark-cli", snapshot); !errors.Is(err, ErrCLIReadinessUnauthorized) {
+		t.Fatalf("wrong control token accepted: %v", err)
+	}
+	if err := registry.UpdateCLIReadiness("secret", "lark-cli", snapshot); err != nil {
+		t.Fatal(err)
+	}
+	status, err := registry.Status("lark-cli")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.State != StateConnected || status.ProviderReadiness != tool.ProviderReady || status.CLIReadiness == nil {
+		t.Fatalf("CLI readiness was not projected: %+v", status)
 	}
 }
 

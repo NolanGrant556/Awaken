@@ -7,6 +7,10 @@ import {
   type AwakenBridge,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
+  type CliActivation,
+  type CliConnectorStateEvent,
+  type CliConnectorView,
+  type CliProviderId,
   type DesktopPreferences,
   type DesktopPreferencesSaveRequest,
   type DesktopOperationResult,
@@ -54,6 +58,11 @@ import {
 } from "../shared/pets.js";
 
 const subscriptions = new Map<string, RunStreamHandlers>();
+const cliConnectorStateHandlers = new Set<(event: CliConnectorStateEvent) => void>();
+
+ipcRenderer.on("awaken:cli-connector-state", (_event, payload: CliConnectorStateEvent) => {
+  for (const handler of cliConnectorStateHandlers) handler(payload);
+});
 
 function toDesktopPlatform(platform: string): DesktopPlatform {
   switch (platform) {
@@ -152,6 +161,16 @@ const bridge: AwakenBridge = {
       questionId,
       answer,
     }) as Promise<void>,
+  resolveExternalInteraction: (
+    runId: string,
+    interactionId: string,
+    resolution: "completed" | "cancelled" | "expired" | "failed",
+  ) =>
+    ipcRenderer.invoke("awaken:resolve-external-interaction", {
+      runId,
+      interactionId,
+      resolution,
+    }) as Promise<void>,
   subscribeRun: async (runId: string, handlers: RunStreamHandlers, afterCursor?: number) => {
     const subscriptionId = crypto.randomUUID();
     subscriptions.set(subscriptionId, handlers);
@@ -184,6 +203,34 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:connect-connector", connectorId) as Promise<RuntimeConnectorActionResponse>,
   disconnectConnector: (connectorId: string) =>
     ipcRenderer.invoke("awaken:disconnect-connector", connectorId) as Promise<RuntimeConnectorActionResponse>,
+  listCliConnectors: () =>
+    ipcRenderer.invoke("awaken:list-cli-connectors") as Promise<CliConnectorView[]>,
+  refreshCliConnector: (providerId: CliProviderId) =>
+    ipcRenderer.invoke("awaken:refresh-cli-connector", providerId) as Promise<CliConnectorView>,
+  installCliConnector: (providerId: CliProviderId) =>
+    ipcRenderer.invoke("awaken:install-cli-connector", providerId) as Promise<CliConnectorView>,
+  cancelCliInstall: (providerId: CliProviderId) =>
+    ipcRenderer.invoke("awaken:cancel-cli-install", providerId) as Promise<CliConnectorView>,
+  selectCliExecutable: (providerId: CliProviderId) =>
+    ipcRenderer.invoke("awaken:select-cli-executable", providerId) as Promise<CliConnectorView>,
+  startCliConfigure: (providerId: CliProviderId) =>
+    ipcRenderer.invoke("awaken:configure-cli-connector", providerId) as Promise<CliConnectorView>,
+  startCliAuth: (providerId: CliProviderId) =>
+    ipcRenderer.invoke("awaken:start-cli-auth", providerId) as Promise<CliConnectorView>,
+  cancelCliAuth: (providerId: CliProviderId) =>
+    ipcRenderer.invoke("awaken:cancel-cli-auth", providerId) as Promise<CliConnectorView>,
+  retryCliAuth: (providerId: CliProviderId) =>
+    ipcRenderer.invoke("awaken:retry-cli-auth", providerId) as Promise<CliConnectorView>,
+  setCliConnectorActivation: (providerId: CliProviderId, activation: CliActivation) =>
+    ipcRenderer.invoke("awaken:set-cli-activation", providerId, activation) as Promise<CliConnectorView>,
+  logoutCliConnector: (providerId: CliProviderId) =>
+    ipcRenderer.invoke("awaken:logout-cli-connector", providerId) as Promise<CliConnectorView>,
+  uninstallManagedCli: (providerId: CliProviderId) =>
+    ipcRenderer.invoke("awaken:uninstall-managed-cli", providerId) as Promise<CliConnectorView>,
+  subscribeCliConnectorState: (handler) => {
+    cliConnectorStateHandlers.add(handler);
+    return () => cliConnectorStateHandlers.delete(handler);
+  },
   listMcpServers: () =>
     ipcRenderer.invoke("awaken:list-mcp-servers") as Promise<RuntimeMcpServer[]>,
   configureMcpServers: (request: ConfigureMcpServersRequest) =>

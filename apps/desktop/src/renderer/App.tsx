@@ -3998,6 +3998,7 @@ export function App() {
                     onCliProductActionHandoff={(action) => {
                       void handleCliProductActionHandoff(action);
                     }}
+                    activeWorkspaceRoot={workspacePath}
                   />
                 </>
               ) : (

@@ -143,6 +143,7 @@ export type RuntimeClient = {
   installCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
   cancelCliInstall: (providerId: CliProviderId) => Promise<CliConnectorView>;
   startCliAuth: (providerId: CliProviderId) => Promise<CliConnectorView>;
+  cancelCliAuth: (providerId: CliProviderId) => Promise<CliConnectorView>;
   retryCliAuth: (providerId: CliProviderId) => Promise<CliConnectorView>;
   setCliConnectorActivation: (providerId: CliProviderId, activation: CliActivation) => Promise<CliConnectorView>;
   logoutCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
@@ -260,6 +261,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     installCliConnector: (providerId) => bridge.installCliConnector(providerId),
     cancelCliInstall: (providerId) => bridge.cancelCliInstall(providerId),
     startCliAuth: (providerId) => bridge.startCliAuth(providerId),
+    cancelCliAuth: (providerId) => bridge.cancelCliAuth(providerId),
     retryCliAuth: (providerId) => bridge.retryCliAuth(providerId),
     setCliConnectorActivation: (providerId, activation) => bridge.setCliConnectorActivation(providerId, activation),
     logoutCliConnector: (providerId) => bridge.logoutCliConnector(providerId),

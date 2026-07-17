@@ -41,12 +41,17 @@ func TestReadSkillPreviewPreservesFrontmatterAndBody(t *testing.T) {
 }
 
 func TestCatalogEntryIDExcludesSourcesWithoutPreviewEntryPoints(t *testing.T) {
-	for _, source := range []SourceOrigin{SourceBundled, SourceMcp} {
+	for _, source := range []SourceOrigin{SourceMcp} {
 		if id := CatalogEntryID(&SkillDefinition{
 			ID: "not-previewable", Source: source, SkillFilePath: "/not/a/local/capability/SKILL.md",
 		}); id != "" {
 			t.Fatalf("%s skill must not expose a local preview identity: %q", source, id)
 		}
+	}
+	if id := CatalogEntryID(&SkillDefinition{
+		ID: "missing-entrypoint", Source: SourceBundled, SkillFilePath: "",
+	}); id != "" {
+		t.Fatalf("skill without a SKILL.md path must not expose a preview identity: %q", id)
 	}
 }
 
@@ -132,7 +137,7 @@ func TestReadSkillPreviewRejectsRootReplacementAndEscapingEntrypoint(t *testing.
 		t.Fatal(err)
 	}
 	if err := os.Symlink(replacement, packageRoot); err != nil {
-		t.Fatal(err)
+		t.Skipf("symlink unavailable on this platform: %v", err)
 	}
 	if _, err := ReadSkillPreview(def); !errors.Is(err, ErrSkillPreviewPathDenied) {
 		t.Fatalf("expected root replacement rejection, got %v", err)

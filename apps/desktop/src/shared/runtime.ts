@@ -1032,6 +1032,8 @@ export type AwakenBridge = {
   getSkillPreview: (request: GetSkillPreviewRequest) => Promise<SkillPreviewResponse>;
   installSkill: (request: InstallSkillRequest) => Promise<InstallSkillResponse>;
   deleteSkill: (request: DeleteSkillRequest) => Promise<DeleteSkillResponse>;
+  disableSkill: (id: string) => Promise<void>;
+  enableSkill: (id: string) => Promise<void>;
   listModelProviders: () => Promise<ModelProvider[]>;
   listModelProfiles: () => Promise<RuntimeModelProfileSummary[]>;
   saveModelProfile: (

@@ -303,7 +303,9 @@ describe("ModelProfileStore", () => {
     expect(await readFile(join(configDir, ".env"), "utf8")).toContain(
       `AWAKEN_API_KEY_${saved.id}="test-key"`,
     );
-    expect((await stat(join(configDir, ".env"))).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect((await stat(join(configDir, ".env"))).mode & 0o777).toBe(0o600);
+    }
   });
 
   it("does not persist profile metadata when .env key writing fails", async () => {

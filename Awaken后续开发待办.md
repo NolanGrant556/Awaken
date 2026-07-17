@@ -58,11 +58,11 @@
   - 通知用户后台任务的开始、成功、失败和等待操作状态；涉及扫码、授权、主动提问或专用审核时进入等待状态，不伪装成无人值守完成。
   - 覆盖时区/DST、重启恢复、睡眠唤醒、取消、并发、任务修改和 macOS/Windows 实机验收。
 
-- [ ] **兼容用户级 `.agent/skills`**
-  - macOS：自动发现 `~/.agent/skills/`，实际路径为 `/Users/<用户名>/.agent/skills/`。
-  - Windows：自动发现 `%USERPROFILE%\.agent\skills\`，实际路径为 `C:\Users\<用户名>\.agent\skills\`。
+- [ ] **兼容用户级 `.agents/skills`**
+  - macOS：自动发现 `~/.agents/skills/`，实际路径为 `/Users/<用户名>/.agents/skills/`。
+  - Windows：自动发现 `%USERPROFILE%\.agents\skills\`，实际路径为 `C:\Users\<用户名>\.agents\skills\`。
   - 作为用户级兼容 Skill 来源接入现有发现、去重、诊断和调用链。
-  - `~/.awaken/skills` 继续作为 Awaken 自有的全局 Skill 安装目录；不自动迁移、覆盖或删除 `.agent/skills` 中的包。
+  - `~/.awaken/skills` 继续作为 Awaken 自有的全局 Skill 安装目录；不自动迁移、覆盖或删除 `.agents/skills` 中的包。
 
 - [ ] **钉钉、飞书官方 CLI 一键安装与扫码授权**
   - 在连接器页面检测钉钉、飞书官方 CLI 是否已安装，并提供点击即安装入口，不要求用户手动打开终端执行命令。

@@ -1159,6 +1159,10 @@ ipcMain.handle("awaken:start-cli-auth", async (_event, providerId: CliProviderId
 	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
 	return cliConnectorManager.startAuth(providerId);
 });
+ipcMain.handle("awaken:cancel-cli-auth", async (_event, providerId: CliProviderId) => {
+	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
+	return cliConnectorManager.cancelAuth(providerId);
+});
 ipcMain.handle("awaken:retry-cli-auth", async (_event, providerId: CliProviderId) => {
 	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
 	return cliConnectorManager.retryAuth(providerId);

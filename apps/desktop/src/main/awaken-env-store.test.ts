@@ -25,7 +25,9 @@ describe("AwakenEnvStore", () => {
     await expect(store.getKey("profile-one")).resolves.toBe("key with spaces and # hash");
     await expect(store.getKey("profile-two")).resolves.toBe("line-one\nline-two=ok");
     const envPath = join(awakenHome, ".env");
-    expect((await stat(envPath)).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect((await stat(envPath)).mode & 0o777).toBe(0o600);
+    }
     const raw = await readFile(envPath, "utf8");
     expect(raw).toContain("AWAKEN_API_KEY_profile-one=");
     expect(raw).toContain("AWAKEN_API_KEY_profile-two=");

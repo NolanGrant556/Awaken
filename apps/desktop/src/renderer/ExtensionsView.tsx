@@ -42,13 +42,8 @@ export type McpToolInfo = {
 export type ExtensionSection = "connectors" | "skills";
 
 type ConnectorKind = "mcp" | "cli";
-export type SkillView = "awaken" | "project" | "user";
+export type SkillView = "awaken" | "project" | "user" | "agents";
 type SkillInstallScope = "project" | "global";
-
-type PendingSkillDelete = {
-  skill: RuntimeSkill;
-  projectRoot?: string;
-};
 
 type SkillProjectGroup = {
   root: string;
@@ -61,11 +56,19 @@ type VisibleSkillProjectGroup = SkillProjectGroup & {
   visibleSkills: RuntimeSkill[];
 };
 
+type SkillAgentsGroup = {
+  root: string;
+  label: string;
+  skills: RuntimeSkill[];
+  isGlobal: boolean;
+};
+
 type ExtensionsViewProps = {
   section: ExtensionSection;
   desktopReady: boolean;
   runtimeClient: RuntimeClient;
   onNotice: (message: string) => void;
+  activeWorkspaceRoot?: string;
 };
 
 const MCP_EXAMPLE = `{
@@ -91,6 +94,7 @@ export const SKILL_VIEW_TABS: Array<{ id: SkillView; label: string }> = [
   { id: "awaken", label: "Awaken Skills" },
   { id: "project", label: "项目 Skills" },
   { id: "user", label: "全局 Skills" },
+  { id: "agents", label: "Agents Skills" },
 ];
 
 const CLI_CONNECTOR_KEYWORDS = ["cli", "dingtalk", "钉钉", "lark", "飞书"];
@@ -169,6 +173,8 @@ function sourceLabel(source: string): string {
       return "附加目录";
     case "plugin":
       return "插件";
+    case "agents":
+      return "Agents";
     case "bundled":
       return "随附";
     case "legacy":
@@ -179,38 +185,14 @@ function sourceLabel(source: string): string {
   }
 }
 
-export function skillSourceLabel(source: string): string {
-  switch (source) {
-    case "project":
-      return "项目";
-    case "user":
-      return "全局";
-    case "bundled":
-      return "Awaken 内置";
-    default:
-      return sourceLabel(source);
-  }
-}
-
-export function isSkillPackageDeletable(skill: Pick<RuntimeSkill, "sourceOrigin">): boolean {
-  return skill.sourceOrigin === "project" || skill.sourceOrigin === "user";
-}
-
 export function canPreviewSkill(
   skill: Pick<RuntimeSkill, "catalogEntryId" | "skillFilePath" | "sourceOrigin">,
 ): boolean {
   return (
-    skill.sourceOrigin !== "bundled" &&
     skill.sourceOrigin !== "mcp" &&
     Boolean(skill.catalogEntryId?.trim()) &&
     Boolean(skill.skillFilePath?.trim())
   );
-}
-
-export function shouldRenderSkillDeleteAction(
-  skill: Pick<RuntimeSkill, "sourceOrigin">,
-): boolean {
-  return skill.sourceOrigin !== "bundled";
 }
 
 export function isSkillVisibleInView(
@@ -222,8 +204,14 @@ export function isSkillVisibleInView(
       return skill.sourceOrigin === "bundled";
     case "project":
       return skill.sourceOrigin === "project";
+    case "agents":
+      return skill.sourceOrigin === "agents";
     case "user":
-      return skill.sourceOrigin !== "project" && skill.sourceOrigin !== "bundled";
+      return (
+        skill.sourceOrigin !== "project" &&
+        skill.sourceOrigin !== "bundled" &&
+        skill.sourceOrigin !== "agents"
+      );
   }
 }
 
@@ -255,16 +243,21 @@ export function skillDiagnosticText(
   return [diagnostic.code, diagnostic.message].filter(Boolean).join(": ");
 }
 
-function skillLastInvokedLabel(value?: string): string {
-  if (!value) return "暂无";
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
-}
-
 function projectLabelFromRoot(root: string): string {
   const cleaned = root.trim().replace(/[\\/]+$/, "");
   if (!cleaned) return "未命名项目";
   return cleaned.split(/[\\/]/).pop() || cleaned;
+}
+
+function agentsSkillSourceRoot(rootDir: string): string | undefined {
+  const cleaned = rootDir.trim().replace(/[\\/]+$/, "");
+  const match = cleaned.match(/^(.+)[\\/]\.agents[\\/]skills[\\/][^\\/]+$/i);
+  return match?.[1];
+}
+
+function isAgentsSkillGlobal(sourceRoot: string, projectRoots: string[]): boolean {
+  const normalized = sourceRoot.trim().toLowerCase();
+  return !projectRoots.some((root) => root.trim().toLowerCase() === normalized);
 }
 
 type SkillListLoadResult = {
@@ -343,6 +336,20 @@ function dedupePaths(paths: Array<string | undefined>): string[] {
   return result;
 }
 
+export function dedupeSkills(skills: RuntimeSkill[]): RuntimeSkill[] {
+  const seen = new Set<string>();
+  const result: RuntimeSkill[] = [];
+  for (const skill of skills) {
+    const key = `${skill.id}\x00${skill.sourceOrigin}\x00${skill.rootDir ?? ""}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(skill);
+  }
+  return result;
+}
+
 function fileToBase64(file: File): Promise<string> {
   return file.arrayBuffer().then((buffer) => {
     const bytes = new Uint8Array(buffer);
@@ -361,6 +368,7 @@ export function ExtensionsView({
   desktopReady,
   runtimeClient,
   onNotice,
+  activeWorkspaceRoot,
 }: ExtensionsViewProps) {
   const [connectors, setConnectors] = useState<RuntimeConnector[]>([]);
   const [mcpServers, setMcpServers] = useState<RuntimeMcpServer[]>([]);
@@ -373,6 +381,9 @@ export function ExtensionsView({
     DEFAULT_SKILL_VIEW,
   );
   const [expandedProjectRoots, setExpandedProjectRoots] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [expandedAgentsRoots, setExpandedAgentsRoots] = useState<Set<string>>(
     () => new Set(),
   );
   const [loading, setLoading] = useState(false);
@@ -391,11 +402,10 @@ export function ExtensionsView({
     useState<SkillInstallScope>("project");
   const [skillInstallProjectRoot, setSkillInstallProjectRoot] = useState("");
   const [pickingSkillProjectRoot, setPickingSkillProjectRoot] = useState(false);
-  const [pendingSkillDelete, setPendingSkillDelete] =
-    useState<PendingSkillDelete | null>(null);
   const [skillPreviewTarget, setSkillPreviewTarget] =
     useState<SkillPreviewTarget | null>(null);
-  const [deletingSkill, setDeletingSkill] = useState(false);
+  const [skillToggleStates, setSkillToggleStates] = useState<Record<string, boolean>>({});
+  const [busySkillId, setBusySkillId] = useState<string | null>(null);
   const [mcpSettingsOpen, setMcpSettingsOpen] = useState(false);
   const [selectedMcpServer, setSelectedMcpServer] = useState<RuntimeMcpServer | null>(null);
   const [mcpSettingsConfigText, setMcpSettingsConfigText] = useState("");
@@ -425,6 +435,7 @@ export function ExtensionsView({
       const projectRoots = dedupePaths([
         projectRootOverride,
         skillProjectRoot,
+        activeWorkspaceRoot,
         runtimeInfo?.defaultWorkspace,
         ...runtimeProjects.map((project) => project.workspaceRoot),
       ]);
@@ -435,6 +446,12 @@ export function ExtensionsView({
         loadSkillListsForRoots(skillRoots, runtimeClient.listSkills),
       ]);
       const nextSkillLists = nextSkillResults.map((result) => result.skills);
+      const allSkills = dedupeSkills(nextSkillLists.flat());
+      console.debug("[ExtensionsView] activeWorkspaceRoot:", activeWorkspaceRoot, "projectRoots:", projectRoots);
+      nextSkillLists.forEach((list, index) => {
+        console.debug(`[ExtensionsView] projectRoot[${index}]=${projectRoots[index]} agents count=${list.filter((s) => s.sourceOrigin === "agents").length}`, list.filter((s) => s.sourceOrigin === "agents").map((s) => ({ id: s.id, root: s.rootDir })));
+      });
+      console.debug("[ExtensionsView] deduped agents skills:", allSkills.filter((s) => s.sourceOrigin === "agents").map((s) => ({ id: s.id, root: s.rootDir })));
       const nextProjectRoot =
         projectRootOverride?.trim() ||
         skillProjectRoot.trim() ||
@@ -449,7 +466,7 @@ export function ExtensionsView({
       }
       setConnectors(nextConnectors);
       setMcpServers(nextMcpServers);
-      setSkills(nextSkillLists[0] ?? []);
+      setSkills(allSkills);
       setSkillProjectGroups(
         projectRoots.map((root, index) => ({
           root,
@@ -473,6 +490,14 @@ export function ExtensionsView({
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [desktopReady]);
+
+  useEffect(() => {
+    if (!desktopReady || !activeWorkspaceRoot?.trim()) {
+      return;
+    }
+    void refresh(false, activeWorkspaceRoot);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWorkspaceRoot]);
 
   useEffect(() => {
     if (!desktopReady || section !== "connectors") {
@@ -604,11 +629,35 @@ export function ExtensionsView({
         (skill) =>
           skill.sourceOrigin !== "project" &&
           skill.sourceOrigin !== "user" &&
+          skill.sourceOrigin !== "agents" &&
           skill.sourceOrigin !== "mcp" &&
           skill.sourceOrigin !== "bundled",
       ),
     [visibleSkills],
   );
+
+  const visibleAgentsSkillGroups = useMemo<SkillAgentsGroup[]>(() => {
+    const projectRoots = skillProjectGroups.map((group) => group.root);
+    const groups = new Map<string, RuntimeSkill[]>();
+    for (const skill of visibleSkills.filter(
+      (skill) => skill.sourceOrigin === "agents",
+    )) {
+      const sourceRoot = agentsSkillSourceRoot(skill.rootDir ?? "");
+      if (!sourceRoot) {
+        continue;
+      }
+      const list = groups.get(sourceRoot) ?? [];
+      list.push(skill);
+      groups.set(sourceRoot, list);
+    }
+    return Array.from(groups.entries()).map(([root, skills]) => {
+      const global = isAgentsSkillGlobal(root, projectRoots);
+      const label = global
+        ? "全局 Agents Skills"
+        : projectLabelFromRoot(root);
+      return { root, label, skills, isGlobal: global };
+    });
+  }, [visibleSkills, skillProjectGroups]);
 
   async function handleConnectorAction(connector: RuntimeConnector): Promise<void> {
     setBusyConnectorId(connector.id);
@@ -803,27 +852,6 @@ export function ExtensionsView({
     }
   }
 
-  async function handleDeleteSkill(): Promise<void> {
-    if (!pendingSkillDelete) return;
-    const { skill, projectRoot } = pendingSkillDelete;
-    setDeletingSkill(true);
-    setErrorMessage(null);
-    try {
-      await runtimeClient.deleteSkill({
-        id: skill.id,
-        sourceOrigin: skill.sourceOrigin,
-        projectRoot: skill.sourceOrigin === "project" ? projectRoot : undefined,
-      });
-      setPendingSkillDelete(null);
-      onNotice(`已删除 ${skill.displayName || skill.name}，Skill 包已移到废纸篓`);
-      await refresh(true, projectRoot);
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Skill 删除失败");
-    } finally {
-      setDeletingSkill(false);
-    }
-  }
-
   async function handlePickSkillProjectRoot(): Promise<void> {
     setPickingSkillProjectRoot(true);
     setErrorMessage(null);
@@ -847,6 +875,18 @@ export function ExtensionsView({
 
   function toggleProjectSkillGroup(root: string): void {
     setExpandedProjectRoots((current) => {
+      const next = new Set(current);
+      if (next.has(root)) {
+        next.delete(root);
+      } else {
+        next.add(root);
+      }
+      return next;
+    });
+  }
+
+  function toggleAgentsSkillGroup(root: string): void {
+    setExpandedAgentsRoots((current) => {
       const next = new Set(current);
       if (next.has(root)) {
         next.delete(root);
@@ -936,14 +976,49 @@ export function ExtensionsView({
     );
   }
 
+  async function handleToggleSkill(
+    skill: RuntimeSkill,
+    skillKey: string,
+    nextEnabled: boolean,
+  ): Promise<void> {
+    if (busySkillId === skill.id) {
+      return;
+    }
+    setBusySkillId(skill.id);
+    setSkillToggleStates((current) => ({
+      ...current,
+      [skillKey]: nextEnabled,
+    }));
+    setErrorMessage(null);
+    try {
+      if (nextEnabled) {
+        await runtimeClient.enableSkill(skill.id);
+        onNotice(`${skill.displayName || skill.name} 已启用`);
+      } else {
+        await runtimeClient.disableSkill(skill.id);
+        onNotice(`${skill.displayName || skill.name} 已停用`);
+      }
+      await refresh(false);
+    } catch (error) {
+      setSkillToggleStates((current) => ({
+        ...current,
+        [skillKey]: !nextEnabled,
+      }));
+      setErrorMessage(error instanceof Error ? error.message : "Skill 操作失败");
+    } finally {
+      setBusySkillId(null);
+    }
+  }
+
   function renderSkillCard(skill: RuntimeSkill, projectRoot?: string) {
-    const skillPath = skill.skillFilePath || skill.rootDir;
-    const deletable = isSkillPackageDeletable(skill);
     const diagnostics = (skill.diagnostics ?? [])
       .map(skillDiagnosticText)
       .filter(Boolean);
     const previewable = canPreviewSkill(skill);
     const skillName = skill.displayName || skill.name;
+    const skillKey = `${skill.id}:${skill.sourceOrigin}:${projectRoot ?? ""}`;
+    const disabledByDefault = skill.state === "disabled_by_policy";
+    const toggledOn = skillToggleStates[skillKey] ?? !disabledByDefault;
     const cardBody = (
       <>
         <span className="extension-card-icon" aria-hidden="true">
@@ -952,25 +1027,9 @@ export function ExtensionsView({
         <span className="extension-card-copy">
           <span className="extension-card-title-row">
             <span className="extension-card-heading">{skillName}</span>
-            <span className={`extension-state extension-state-${skill.state}`}>
-              {stateLabel(skill.state)}
-            </span>
           </span>
           <span className="extension-card-description">
             {skill.whenToUse || skill.description}
-          </span>
-          <span className="extension-card-meta">
-            <span>{skillSourceLabel(skill.sourceOrigin)}</span>
-            <span>{skill.context}</span>
-            <span>最近调用：{skillLastInvokedLabel(skill.lastInvokedAt)}</span>
-            {skillPath ? (
-              <span className="extension-card-path" title={skillPath}>
-                {skillPath}
-              </span>
-            ) : null}
-            {skill.requiredMcpServers?.length ? (
-              <span>MCP: {skill.requiredMcpServers.join(", ")}</span>
-            ) : null}
           </span>
           {diagnostics.length > 0 ? (
             <span className="extension-card-diagnostic" title={diagnostics.join(" · ")}>
@@ -983,7 +1042,7 @@ export function ExtensionsView({
     return (
       <article
         className="extension-card extension-skill-card"
-        key={`${skill.id}:${skill.sourceOrigin}:${projectRoot ?? ""}`}
+        key={skillKey}
       >
         {previewable ? (
           <button
@@ -1004,22 +1063,19 @@ export function ExtensionsView({
             {cardBody}
           </span>
         )}
-        {shouldRenderSkillDeleteAction(skill) ? (
+        <div className="extension-card-actions extension-card-actions-skill">
           <button
             type="button"
-            className="extension-card-action extension-card-action-danger"
-            aria-label={`删除 ${skill.displayName || skill.name}`}
-            title={
-              deletable
-                ? `删除 ${skill.displayName || skill.name}`
-                : "此 Skill 不属于项目或全局 .awaken/skills，不能在这里删除"
-            }
-            disabled={!deletable || deletingSkill}
-            onClick={() => setPendingSkillDelete({ skill, projectRoot })}
+            className={`mcp-toggle-switch${toggledOn ? " mcp-toggle-switch-on" : " mcp-toggle-switch-off"}`}
+            aria-label={toggledOn ? `停用 ${skillName}` : `启用 ${skillName}`}
+            disabled={busySkillId === skill.id}
+            onClick={() => {
+              void handleToggleSkill(skill, skillKey, !toggledOn);
+            }}
           >
-            <Trash2 size={18} strokeWidth={1.9} />
+            <span className="mcp-toggle-switch-thumb" />
           </button>
-        ) : null}
+        </div>
       </article>
     );
   }
@@ -1070,6 +1126,50 @@ export function ExtensionsView({
               <div className="extension-empty">
                 {group.errorMessage ?? "暂无项目 Skills"}
               </div>
+            )}
+          </div>
+        ) : null}
+      </section>
+    );
+  }
+
+  function renderAgentsSkillGroup(group: SkillAgentsGroup, index: number) {
+    const expanded = expandedAgentsRoots.has(group.root);
+    const bodyId = `skill-agents-group-${index}`;
+    const countText = `${group.skills.length} Skill`;
+    const projectRoot = group.isGlobal ? undefined : group.root;
+    return (
+      <section className="skill-project-group" key={group.root}>
+        <button
+          type="button"
+          className="skill-project-toggle"
+          aria-expanded={expanded}
+          aria-controls={bodyId}
+          onClick={() => toggleAgentsSkillGroup(group.root)}
+        >
+          <span className="skill-project-chevron" aria-hidden="true">
+            {expanded ? (
+              <ChevronDown size={17} strokeWidth={1.9} />
+            ) : (
+              <ChevronRight size={17} strokeWidth={1.9} />
+            )}
+          </span>
+          <span className="skill-project-copy">
+            <span className="skill-project-name">{group.label}</span>
+            <span className="skill-project-path" title={group.root}>
+              {projectRoot ?? group.root}
+            </span>
+          </span>
+          <span className="skill-project-count">{countText}</span>
+        </button>
+        {expanded ? (
+          <div className="skill-project-body" id={bodyId}>
+            {group.skills.length > 0 ? (
+              <div className="extension-grid">
+                {group.skills.map((skill) => renderSkillCard(skill, projectRoot))}
+              </div>
+            ) : (
+              <div className="extension-empty">暂无 Agents Skills</div>
             )}
           </div>
         ) : null}
@@ -1246,6 +1346,16 @@ export function ExtensionsView({
                   )}
                 </div>
               </section>
+            ) : activeSkillView === "agents" ? (
+              <section className="extension-section" aria-label="Agents Skills">
+                <div className="skill-project-list">
+                  {visibleAgentsSkillGroups.length > 0 ? (
+                    visibleAgentsSkillGroups.map(renderAgentsSkillGroup)
+                  ) : (
+                    <div className="extension-empty">暂无 Agents Skills</div>
+                  )}
+                </div>
+              </section>
             ) : (
               <>
                 <section className="extension-section" aria-label="全局 Skills">
@@ -1288,53 +1398,6 @@ export function ExtensionsView({
           }
         }}
       />
-
-      <Dialog
-        open={pendingSkillDelete !== null}
-        title="删除 Skill"
-        onOpenChange={(open) => {
-          if (!open && !deletingSkill) {
-            setPendingSkillDelete(null);
-          }
-        }}
-        footer={
-          <>
-            <Button
-              variant="default"
-              size="md"
-              disabled={deletingSkill}
-              onClick={() => setPendingSkillDelete(null)}
-            >
-              取消
-            </Button>
-            <Button
-              className="skill-delete-confirm-button"
-              variant="primary"
-              size="md"
-              loading={deletingSkill}
-              onClick={() => {
-                void handleDeleteSkill();
-              }}
-            >
-              <Trash2 size={15} strokeWidth={1.9} />
-              确认删除
-            </Button>
-          </>
-        }
-      >
-        <div className="extension-dialog-body skill-delete-dialog-body">
-          <p>
-            确定要删除 Skill「
-            <strong>
-              {pendingSkillDelete?.skill.displayName || pendingSkillDelete?.skill.name}
-            </strong>
-            」吗？
-          </p>
-          <p className="extension-dialog-note">
-            确认后会立即从对应的 .awaken/skills 目录移除，并将完整 Skill 包移动到系统废纸篓。
-          </p>
-        </div>
-      </Dialog>
 
       <Dialog
         open={mcpDialogOpen}

@@ -162,6 +162,8 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 	mux.HandleFunc("POST /v1/skills/preview", skillH.handlePreviewSkill)
 	mux.HandleFunc("POST /v1/skills/install", skillH.handleInstallSkill)
 	mux.HandleFunc("DELETE /v1/skills/{id}", skillH.handleDeleteSkill)
+	mux.HandleFunc("POST /v1/skills/{id}/enable", skillH.handleEnableSkill)
+	mux.HandleFunc("POST /v1/skills/{id}/disable", skillH.handleDisableSkill)
 	// POST /v1/skills/{id}/execute reserved for follow-up
 	return mux
 }

@@ -834,30 +834,56 @@ describe("ModelProfileStore", () => {
       });
     });
 
-    it("deduplicates provider queries across multiple profiles", async () => {
-      const fetchMock = vi.fn(async () =>
-        Promise.resolve({
+    it("deduplicates provider queries and returns one balance entry per provider", async () => {
+      const fetchMock = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+        const url = String(input);
+        if (url.includes("/user/balance")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              is_available: true,
+              balance_infos: [
+                {
+                  currency: "USD",
+                  total_balance: "30.00",
+                  granted_balance: "0.00",
+                  topped_up_balance: "30.00",
+                },
+              ],
+            }),
+          } as Response;
+        }
+        return {
           ok: true,
           status: 200,
           json: async () => ({
-            is_available: true,
-            balance_infos: [
+            usage: {
+              limit: "100",
+              used: "69",
+              remaining: "31",
+              resetTime: "2026-01-10T00:00:00.000Z",
+            },
+            limits: [
               {
-                currency: "USD",
-                total_balance: "30.00",
-                granted_balance: "0.00",
-                topped_up_balance: "30.00",
+                window: { duration: 300, timeUnit: "TIME_UNIT_MINUTE" },
+                detail: {
+                  limit: "100",
+                  used: "25",
+                  remaining: "75",
+                  resetTime: "2026-01-06T04:00:00.000Z",
+                },
               },
             ],
           }),
-        } as Response),
-      );
+        } as Response;
+      });
       vi.stubGlobal("fetch", fetchMock);
 
       const store = new ModelProfileStore(configDir);
       await store.saveProfile({
         providerId: "deepseek",
-        displayName: "DeepSeek",
+        displayName: "DeepSeek Pro",
         modelId: "deepseek-v4-pro",
         baseURL: "https://api.deepseek.com",
         protocol: "openai_chat",
@@ -868,12 +894,34 @@ describe("ModelProfileStore", () => {
       });
       await store.saveProfile({
         providerId: "deepseek",
-        displayName: "DeepSeek",
+        displayName: "DeepSeek Flash",
         modelId: "deepseek-v4-flash",
         baseURL: "https://api.deepseek.com",
         protocol: "openai_chat",
         authScheme: "bearer",
-        apiKey: "sk-test",
+        apiKey: "sk-test-2",
+        enabled: true,
+        isDefault: false,
+      });
+      await store.saveProfile({
+        providerId: "kimi-coding-plan",
+        displayName: "Kimi Coding A",
+        modelId: "kimi-for-coding",
+        baseURL: "https://api.kimi.com/coding/v1",
+        protocol: "openai_chat",
+        authScheme: "bearer",
+        apiKey: "sk-kimi-1",
+        enabled: true,
+        isDefault: false,
+      });
+      await store.saveProfile({
+        providerId: "kimi-coding-plan",
+        displayName: "Kimi Coding B",
+        modelId: "kimi-for-coding-highspeed",
+        baseURL: "https://api.kimi.com/coding/v1",
+        protocol: "openai_chat",
+        authScheme: "bearer",
+        apiKey: "sk-kimi-2",
         enabled: true,
         isDefault: false,
       });
@@ -881,7 +929,15 @@ describe("ModelProfileStore", () => {
       const result = await store.fetchBalances();
 
       expect(result).toHaveLength(2);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(result.map((entry) => entry.provider_id)).toEqual([
+        "deepseek",
+        "kimi-coding-plan",
+      ]);
+      expect(result.map((entry) => entry.display_name)).toEqual([
+        "DeepSeek",
+        "Kimi Coding Plan",
+      ]);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     });
   });
 });

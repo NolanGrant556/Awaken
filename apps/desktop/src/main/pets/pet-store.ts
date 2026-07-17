@@ -18,7 +18,6 @@ import {
 import { createTransparentSpritesheet } from "./png-utils.js";
 
 const PETS_CONFIG_FILE = "pets.json";
-const PETS_INDEX_FILE = "index.json";
 const PETS_DATA_DIR = path.join("data", "pets");
 const MAX_DISMISSED_NOTIFICATION_KEYS = 500;
 
@@ -72,39 +71,46 @@ function normalizeManifest(value: unknown): PetManifest | null {
   const candidate = value as Record<string, unknown>;
   if (
     typeof candidate.id !== "string" ||
-    typeof candidate.sourceId !== "string" ||
     typeof candidate.displayName !== "string" ||
-    typeof candidate.description !== "string" ||
-    typeof candidate.spritesheetFile !== "string" ||
-    typeof candidate.source !== "string"
+    typeof candidate.description !== "string"
   ) {
     return null;
   }
-  const source = candidate.source;
-  if (
-    source !== "awaken-builtin" &&
-    source !== "awaken-local" &&
-    source !== "codex-custom"
-  ) {
-    return null;
-  }
-  const expectedId = petIdForSource(source, candidate.sourceId);
+
+  const source: PetSource =
+    candidate.source === "awaken-builtin" ||
+    candidate.source === "awaken-local" ||
+    candidate.source === "codex-custom"
+      ? candidate.source
+      : "codex-custom";
+
+  const sourceId =
+    typeof candidate.sourceId === "string" ? candidate.sourceId : candidate.id;
+
+  const expectedId = petIdForSource(source, sourceId);
   if (candidate.id !== expectedId) {
     return null;
   }
-  const spritesheetFile = candidate.spritesheetFile;
+
+  let spritesheetFile = "spritesheet.png";
+  if (typeof candidate.spritesheetFile === "string") {
+    spritesheetFile = candidate.spritesheetFile;
+  } else if (typeof candidate.spritesheetPath === "string") {
+    spritesheetFile = path.basename(candidate.spritesheetPath);
+  }
   if (
     spritesheetFile !== "spritesheet.png" &&
     spritesheetFile !== "spritesheet.webp"
   ) {
     return null;
   }
+
   const spriteVersionNumber =
     candidate.spriteVersionNumber === 2 ? 2 : 1;
   return {
     schemaVersion: 1,
     id: candidate.id,
-    sourceId: candidate.sourceId,
+    sourceId,
     displayName: candidate.displayName,
     description: candidate.description,
     spriteVersionNumber,
@@ -134,25 +140,33 @@ export class PetStore {
   private catalog: Map<string, PetManifest> = new Map();
   private readonly configFilePath: string;
   private readonly dataDir: string;
-  private readonly indexFilePath: string;
 
   constructor(configDir: string, userDataDir: string) {
     this.configFilePath = path.join(configDir, PETS_CONFIG_FILE);
     this.dataDir = path.join(userDataDir, PETS_DATA_DIR);
-    this.indexFilePath = path.join(this.dataDir, PETS_INDEX_FILE);
   }
 
   async initialize(): Promise<void> {
     await fs.mkdir(this.dataDir, { recursive: true });
     this.settings = await this.readSettings();
-    this.catalog = await this.readCatalog();
+    this.catalog = await this.scanCatalog();
+    await this.removeLegacyIndexFile();
+    this.validateSelectedPetId();
+  }
+
+  async refreshCatalog(): Promise<void> {
+    this.catalog = await this.scanCatalog();
+    this.validateSelectedPetId();
+  }
+
+  private validateSelectedPetId(): void {
     if (
       this.settings.selectedPetId &&
       !this.catalog.has(this.settings.selectedPetId)
     ) {
       this.settings.selectedPetId = null;
       this.settings.overlayOpen = false;
-      await this.writeSettings();
+      void this.writeSettings();
     }
   }
 
@@ -166,17 +180,29 @@ export class PetStore {
       "awaken-local": 1,
       "codex-custom": 2,
     };
-    return Array.from(this.catalog.values())
-      .map((manifest) => this.toSummary(manifest))
-      .sort((a, b) => {
-        const aSelected = a.id === this.settings.selectedPetId ? 0 : 1;
-        const bSelected = b.id === this.settings.selectedPetId ? 0 : 1;
-        if (aSelected !== bSelected) return aSelected - bSelected;
-        if (sourceOrder[a.source] !== sourceOrder[b.source]) {
-          return sourceOrder[a.source] - sourceOrder[b.source];
-        }
-        return a.displayName.localeCompare(b.displayName);
-      });
+
+    // Deduplicate by sourceId, preferring higher-priority sources.
+    const bySourceId = new Map<string, PetSummary>();
+    for (const manifest of this.catalog.values()) {
+      const summary = this.toSummary(manifest);
+      const existing = bySourceId.get(summary.sourceId);
+      if (
+        !existing ||
+        sourceOrder[summary.source] < sourceOrder[existing.source]
+      ) {
+        bySourceId.set(summary.sourceId, summary);
+      }
+    }
+
+    return Array.from(bySourceId.values()).sort((a, b) => {
+      const aSelected = a.id === this.settings.selectedPetId ? 0 : 1;
+      const bSelected = b.id === this.settings.selectedPetId ? 0 : 1;
+      if (aSelected !== bSelected) return aSelected - bSelected;
+      if (sourceOrder[a.source] !== sourceOrder[b.source]) {
+        return sourceOrder[a.source] - sourceOrder[b.source];
+      }
+      return a.displayName.localeCompare(b.displayName);
+    });
   }
 
   getAllManifests(): PetManifest[] {
@@ -373,7 +399,7 @@ export class PetStore {
           importedAt: new Date().toISOString(),
         };
         this.catalog.set(petId, restored);
-        await this.writeCatalog();
+        await this.writeManifest(restored);
         return { manifest: restored, updated: true };
       }
       return { manifest: existing, updated: false };
@@ -426,7 +452,7 @@ export class PetStore {
     }
 
     this.catalog.set(petId, manifest);
-    await this.writeCatalog();
+    await this.writeManifest(manifest);
 
     return { manifest, updated: Boolean(existing) };
   }
@@ -441,12 +467,11 @@ export class PetStore {
       importedAt: new Date().toISOString(),
     };
     this.catalog.set(petId, updated);
-    await this.writeCatalog();
+    await this.writeManifest(updated);
   }
 
   async removeCatalogEntry(petId: string): Promise<void> {
     this.catalog.delete(petId);
-    await this.writeCatalog();
     const targetDir = this.petDir(petId);
     await fs.rm(targetDir, { recursive: true, force: true });
     if (this.settings.selectedPetId === petId) {
@@ -517,42 +542,26 @@ export class PetStore {
     );
   }
 
-  private async readCatalog(): Promise<Map<string, PetManifest>> {
+  private async scanCatalog(): Promise<Map<string, PetManifest>> {
     const catalog = new Map<string, PetManifest>();
     let entries: string[] = [];
     try {
-      const text = await fs.readFile(this.indexFilePath, "utf8");
-      const parsed = JSON.parse(text) as unknown;
-      if (Array.isArray(parsed)) {
-        for (const item of parsed) {
-          const manifest = normalizeManifest(item);
-          if (manifest) {
-            catalog.set(manifest.id, manifest);
-          }
-        }
-      }
+      entries = await fs.readdir(this.dataDir);
     } catch {
-      // If index is missing, fall back to scanning directories.
+      entries = [];
     }
 
-    if (catalog.size === 0) {
+    for (const entry of entries) {
+      if (entry.startsWith(".") || entry === "index.json") continue;
+      const petJsonPath = path.join(this.dataDir, entry, "pet.json");
       try {
-        entries = await fs.readdir(this.dataDir);
-      } catch {
-        entries = [];
-      }
-      for (const entry of entries) {
-        if (entry.startsWith(".")) continue;
-        const petJsonPath = path.join(this.dataDir, entry, "pet.json");
-        try {
-          const text = await fs.readFile(petJsonPath, "utf8");
-          const manifest = normalizeManifest(JSON.parse(text));
-          if (manifest) {
-            catalog.set(manifest.id, manifest);
-          }
-        } catch {
-          // Ignore unreadable directories.
+        const text = await fs.readFile(petJsonPath, "utf8");
+        const manifest = normalizeManifest(JSON.parse(text));
+        if (manifest) {
+          catalog.set(manifest.id, manifest);
         }
+      } catch {
+        // Ignore unreadable directories.
       }
     }
 
@@ -570,16 +579,22 @@ export class PetStore {
     return catalog;
   }
 
-  private async writeCatalog(): Promise<void> {
-    const list = Array.from(this.catalog.values()).sort((a, b) =>
-      a.id.localeCompare(b.id),
-    );
-    await fs.mkdir(path.dirname(this.indexFilePath), { recursive: true });
+  private async writeManifest(manifest: PetManifest): Promise<void> {
+    const targetDir = this.petDir(manifest.id);
+    await fs.mkdir(targetDir, { recursive: true });
     await fs.writeFile(
-      this.indexFilePath,
-      `${JSON.stringify(list, null, 2)}\n`,
+      path.join(targetDir, "pet.json"),
+      `${JSON.stringify(manifest, null, 2)}\n`,
       "utf8",
     );
+  }
+
+  private async removeLegacyIndexFile(): Promise<void> {
+    try {
+      await fs.rm(path.join(this.dataDir, "index.json"), { force: true });
+    } catch {
+      // Ignore errors from the legacy index cleanup.
+    }
   }
 }
 

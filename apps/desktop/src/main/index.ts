@@ -944,6 +944,7 @@ function broadcastPetCatalogChanged(): void {
 function registerPetIpcHandlers(): void {
   ipcMain.handle(PET_IPC_CHANNELS.listPets, async () => {
     if (!petStore) throw new Error("Pet store unavailable");
+    await petStore.refreshCatalog();
     return petStore.listPets();
   });
 

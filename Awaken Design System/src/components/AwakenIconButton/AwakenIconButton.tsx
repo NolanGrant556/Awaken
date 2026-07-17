@@ -6,6 +6,7 @@ export type AwakenIconButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   label: string;
   variant?: "square" | "circle";
   size?: "sm" | "md";
+  showTooltip?: boolean;
   children: ReactNode;
 };
 
@@ -13,8 +14,10 @@ export function AwakenIconButton({
   label,
   variant = "square",
   size = "md",
+  showTooltip = true,
   children,
   disabled,
+  title,
   ...props
 }: AwakenIconButtonProps) {
   const dimension = size === "sm" ? 28 : 32;
@@ -24,7 +27,7 @@ export function AwakenIconButton({
     <button
       type="button"
       aria-label={label}
-      title={label}
+      title={showTooltip ? (title ?? label) : undefined}
       disabled={disabled}
       {...props}
       style={{
@@ -67,5 +70,5 @@ export function AwakenIconButton({
     </button>
   );
 
-  return <AwakenTooltip label={label}>{button}</AwakenTooltip>;
+  return <AwakenTooltip label={label} disabled={!showTooltip}>{button}</AwakenTooltip>;
 }

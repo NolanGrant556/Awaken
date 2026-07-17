@@ -17,7 +17,7 @@ export type CliConnectorDialogAction =
   | "install"
   | "cancel_install"
   | "authorize"
-  | "waiting_authorization"
+  | "cancel_authorization"
   | "retry_authorization"
   | "logout"
   | "unsupported";
@@ -33,8 +33,8 @@ export function cliConnectorDialogAction(
   if (authSession && ["failed", "cancelled"].includes(authSession.phase)) {
     return "retry_authorization";
   }
-  if (authSession) return "waiting_authorization";
-  return "authorize";
+  if (authSession) return "cancel_authorization";
+  return "retry_authorization";
 }
 
 type CliConnectorDetailDialogProps = {
@@ -46,14 +46,14 @@ type CliConnectorDetailDialogProps = {
   loadingProfile?: boolean;
   busy?: boolean;
   onOpenChange: (open: boolean) => void;
-  onAction: (action: Exclude<CliConnectorDialogAction, "waiting_authorization" | "unsupported">) => void;
+  onAction: (action: Exclude<CliConnectorDialogAction, "unsupported">) => void;
 };
 
 const actionLabels: Record<CliConnectorDialogAction, string> = {
   install: "安装",
   cancel_install: "取消安装",
   authorize: "点击授权",
-  waiting_authorization: "等待网页登录",
+  cancel_authorization: "取消授权",
   retry_authorization: "重新授权",
   logout: "已连接",
   unsupported: "当前平台不支持",
@@ -78,7 +78,7 @@ export function CliConnectorDetailDialog({
   const action = cliConnectorDialogAction(readiness, authSession);
   const connected = action === "logout";
   const installing = action === "cancel_install";
-  const waiting = action === "waiting_authorization";
+  const waiting = action === "cancel_authorization";
   const name = readiness.account?.displayName?.trim() || (loadingProfile && connected ? "加载中…" : "—");
   const organization = readiness.account?.organization?.trim() || (loadingProfile && connected ? "加载中…" : "—");
   const title = connected
@@ -95,10 +95,16 @@ export function CliConnectorDetailDialog({
       : waiting
         ? "请在已打开的官方网页完成授权"
         : readiness.install === "installed"
-          ? "CLI 与官方 Skills 已安装"
+          ? readiness.safeError?.message || "CLI 与官方 Skills 已安装，当前未授权"
           : readiness.safeError?.message || "尚未安装";
   const progress = Math.max(0, Math.min(100, installProgress?.percent ?? 0));
-  const actionable = action !== "waiting_authorization" && action !== "unsupported";
+  const actionable = action !== "unsupported";
+  const handleOpenChange = (nextOpen: boolean): void => {
+    if (!nextOpen && action === "cancel_authorization") {
+      onAction("cancel_authorization");
+    }
+    onOpenChange(nextOpen);
+  };
 
   return (
     <Dialog
@@ -106,12 +112,13 @@ export function CliConnectorDetailDialog({
       className="cli-connector-detail-dialog"
       title={title}
       titleVisuallyHidden
-      onOpenChange={onOpenChange}
+      showCloseTooltip={false}
+      onOpenChange={handleOpenChange}
       footer={
         <Button
           className={[
             "cli-connector-detail-action",
-            action === "cancel_install" ? "cli-connector-detail-action-cancel" : "",
+            action === "cancel_install" || action === "cancel_authorization" ? "cli-connector-detail-action-cancel" : "",
             action === "logout" ? "cli-connector-detail-action-connected" : "",
           ].filter(Boolean).join(" ")}
           variant={action === "install" || action === "authorize" || action === "retry_authorization" ? "primary" : "default"}

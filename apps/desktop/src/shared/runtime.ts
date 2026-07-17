@@ -1021,6 +1021,7 @@ export type AwakenBridge = {
   installCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
   cancelCliInstall: (providerId: CliProviderId) => Promise<CliConnectorView>;
   startCliAuth: (providerId: CliProviderId) => Promise<CliConnectorView>;
+  cancelCliAuth: (providerId: CliProviderId) => Promise<CliConnectorView>;
   retryCliAuth: (providerId: CliProviderId) => Promise<CliConnectorView>;
   setCliConnectorActivation: (providerId: CliProviderId, activation: CliActivation) => Promise<CliConnectorView>;
   logoutCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;

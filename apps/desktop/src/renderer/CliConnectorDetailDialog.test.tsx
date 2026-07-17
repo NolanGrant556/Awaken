@@ -61,7 +61,18 @@ describe("CliConnectorDetailDialog", () => {
       configuration: "ready",
       authentication: "required",
       overall: "action_required",
-    }))).toBe("authorize");
+    }))).toBe("retry_authorization");
+    expect(cliConnectorDialogAction(readiness({
+      install: "installed",
+      executable: "available",
+      configuration: "ready",
+      authentication: "in_progress",
+      overall: "working",
+    }), {
+      id: "waiting-auth",
+      provider: "dingtalk-workspace",
+      phase: "waiting_user",
+    })).toBe("cancel_authorization");
     expect(cliConnectorDialogAction(readiness({
       install: "installed",
       executable: "available",
@@ -80,6 +91,125 @@ describe("CliConnectorDetailDialog", () => {
       authentication: "authorized",
       overall: "ready",
     }))).toBe("logout");
+  });
+
+  it("lets the user cancel authorization while the external browser is waiting", async () => {
+    const onAction = vi.fn();
+    await act(async () => {
+      root.render(
+        <CliConnectorDetailDialog
+          open
+          connector={connector}
+          readiness={readiness({
+            install: "installed",
+            executable: "available",
+            configuration: "ready",
+            authentication: "in_progress",
+            overall: "working",
+          })}
+          authSession={{
+            id: "waiting-auth",
+            provider: "dingtalk-workspace",
+            phase: "waiting_user",
+          }}
+          onOpenChange={vi.fn()}
+          onAction={onAction}
+        />,
+      );
+    });
+
+    expect(document.body.textContent).toContain("请在已打开的官方网页完成授权");
+    const cancel = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "取消授权");
+    expect(cancel?.disabled).toBe(false);
+    await act(async () => cancel?.click());
+    expect(onAction).toHaveBeenCalledWith("cancel_authorization");
+  });
+
+  it("cancels an active authorization session when the detail dialog closes", async () => {
+    const onAction = vi.fn();
+    const onOpenChange = vi.fn();
+    await act(async () => {
+      root.render(
+        <CliConnectorDetailDialog
+          open
+          connector={connector}
+          readiness={readiness({
+            install: "installed",
+            executable: "available",
+            configuration: "ready",
+            authentication: "in_progress",
+            overall: "working",
+          })}
+          authSession={{
+            id: "waiting-auth",
+            provider: "dingtalk-workspace",
+            phase: "waiting_user",
+          }}
+          onOpenChange={onOpenChange}
+          onAction={onAction}
+        />,
+      );
+    });
+
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>("button[aria-label='关闭']")?.click();
+    });
+    expect(onAction).toHaveBeenCalledOnce();
+    expect(onAction).toHaveBeenCalledWith("cancel_authorization");
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("keeps an active installation running when the detail dialog closes", async () => {
+    const onAction = vi.fn();
+    const onOpenChange = vi.fn();
+    await act(async () => {
+      root.render(
+        <CliConnectorDetailDialog
+          open
+          connector={connector}
+          readiness={readiness({ install: "installing", overall: "working" })}
+          installProgress={{ phase: "downloading_cli", percent: 42, label: "正在下载官方 CLI" }}
+          onOpenChange={onOpenChange}
+          onAction={onAction}
+        />,
+      );
+    });
+
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>("button[aria-label='关闭']")?.click();
+    });
+    expect(onAction).not.toHaveBeenCalled();
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("renders an installed but logged-out connector as reauthorization without an install failure", async () => {
+    const onAction = vi.fn();
+    await act(async () => {
+      root.render(
+        <CliConnectorDetailDialog
+          open
+          connector={connector}
+          readiness={readiness({
+            install: "installed",
+            executable: "available",
+            configuration: "ready",
+            authentication: "required",
+            overall: "action_required",
+          })}
+          onOpenChange={vi.fn()}
+          onAction={onAction}
+        />,
+      );
+    });
+
+    expect(document.body.textContent).toContain("CLI 与官方 Skills 已安装，当前未授权");
+    expect(document.body.textContent).not.toContain("CLI 操作失败");
+    const reauthorize = Array.from(document.querySelectorAll("button"))
+      .find((button) => button.textContent === "重新授权");
+    expect(reauthorize).toBeTruthy();
+    await act(async () => reauthorize?.click());
+    expect(onAction).toHaveBeenCalledWith("retry_authorization");
   });
 
   it("shows live progress and sends cancel installation from the footer button", async () => {
@@ -102,6 +232,25 @@ describe("CliConnectorDetailDialog", () => {
     const cancel = Array.from(document.querySelectorAll("button")).find((button) => button.textContent === "取消安装");
     await act(async () => cancel?.click());
     expect(onAction).toHaveBeenCalledWith("cancel_install");
+  });
+
+  it("keeps the close control accessible without rendering a close tooltip", async () => {
+    await act(async () => {
+      root.render(
+        <CliConnectorDetailDialog
+          open
+          connector={connector}
+          readiness={readiness()}
+          onOpenChange={vi.fn()}
+          onAction={vi.fn()}
+        />,
+      );
+    });
+
+    const close = document.querySelector<HTMLButtonElement>("button[aria-label='关闭']");
+    expect(close).toBeTruthy();
+    expect(close?.getAttribute("title")).toBeNull();
+    expect(document.querySelector("[role='tooltip']")).toBeNull();
   });
 
   it("renders the connected control green-ready and exposes real logout on click", async () => {

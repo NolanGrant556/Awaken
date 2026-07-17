@@ -84,6 +84,22 @@ type ManagerOptions = {
 const providers: CliProviderId[] = ["dingtalk-workspace", "lark-cli"];
 const maxArchiveBytes = 128 * 1024 * 1024;
 const commandOutputLimit = 1024 * 1024;
+const larkVerificationHosts = new Set([
+  "accounts.feishu.cn",
+  "open.feishu.cn",
+  "accounts.larksuite.com",
+  "open.larksuite.com",
+]);
+const larkServiceEndpoints = new Set([
+  "accounts.feishu.cn/oauth/v1/app/registration",
+  "accounts.feishu.cn/oauth/v1/device_authorization",
+  "accounts.feishu.cn/oauth/v1/revoke",
+  "accounts.larksuite.com/oauth/v1/app/registration",
+  "accounts.larksuite.com/oauth/v1/device_authorization",
+  "accounts.larksuite.com/oauth/v1/revoke",
+  "open.feishu.cn/open-apis/authen/v2/oauth/token",
+  "open.larksuite.com/open-apis/authen/v2/oauth/token",
+]);
 
 export class CliConnectorError extends Error {
   constructor(
@@ -123,8 +139,7 @@ export class CliConnectorManager {
     await fs.chmod(this.root, 0o700);
     await fs.chmod(this.managedBinPath(), 0o700);
     await fs.rm(this.authRoot, { recursive: true, force: true });
-    await fs.mkdir(this.authRoot, { recursive: true, mode: 0o700 });
-    await fs.chmod(this.authRoot, 0o700);
+    await this.ensureAuthRoot();
     this.manifest = await this.loadManifest();
     this.installations = await this.loadInstallations();
     if (await pathExists(this.installationsPath)) await fs.chmod(this.installationsPath, 0o600);
@@ -143,6 +158,7 @@ export class CliConnectorManager {
 
   async refreshProvider(providerId: CliProviderId): Promise<CliConnectorView> {
     this.assertProvider(providerId);
+    if (this.installControllers.has(providerId)) return this.view(providerId);
     return this.refresh(providerId);
   }
 
@@ -293,6 +309,7 @@ export class CliConnectorManager {
       ...this.readiness(providerId),
       authentication: "in_progress",
       overall: "working",
+      safeError: undefined,
       updatedAt: new Date().toISOString(),
     });
     if (providerId === "dingtalk-workspace") {
@@ -311,6 +328,9 @@ export class CliConnectorManager {
   async cancelAuth(providerId: CliProviderId): Promise<CliConnectorView> {
     const session = this.authSessions.get(providerId);
     if (!session) return this.view(providerId);
+    // Remove ownership before terminating the child so a late exit event cannot
+    // turn this explicit cancellation into a failed authorization state.
+    this.authSessions.delete(providerId);
     session.child?.kill();
     session.view.phase = "cancelled";
     session.view.safeMessage = "授权已取消";
@@ -320,11 +340,9 @@ export class CliConnectorManager {
       ...this.readiness(providerId),
       authentication: "required",
       overall: "action_required",
+      safeError: undefined,
       updatedAt: new Date().toISOString(),
     });
-    this.emit(providerId);
-    this.authSessions.delete(providerId);
-    this.emit(providerId);
     return this.view(providerId);
   }
 
@@ -344,6 +362,7 @@ export class CliConnectorManager {
 
   async logout(providerId: CliProviderId): Promise<CliConnectorView> {
     const executable = this.requireExecutable(providerId);
+    await this.ensureAuthRoot();
     const args = providerId === "dingtalk-workspace"
       ? ["auth", "logout", "--format", "json"]
       : ["auth", "logout", "--json"];
@@ -369,11 +388,12 @@ export class CliConnectorManager {
   }
 
   async dispose(): Promise<void> {
+    const sessions = [...this.authSessions.values()];
     for (const controller of this.installControllers.values()) controller.abort();
-    for (const session of this.authSessions.values()) session.child?.kill();
+    for (const session of sessions) session.child?.kill();
     this.installControllers.clear();
     this.authSessions.clear();
-    await fs.rm(this.authRoot, { recursive: true, force: true });
+    await Promise.all(sessions.map((session) => this.cleanupSessionFiles(session)));
   }
 
   private async refresh(providerId: CliProviderId): Promise<CliConnectorView> {
@@ -476,6 +496,7 @@ export class CliConnectorManager {
     account?: CliAccountProfile;
     safeError?: { code: string; message: string; recovery?: string };
   }> {
+    await this.ensureAuthRoot();
     const args = providerId === "dingtalk-workspace"
       ? ["auth", "status", "--format", "json"]
       : ["auth", "status", "--json", "--verify"];
@@ -484,10 +505,12 @@ export class CliConnectorManager {
     if (result.exitCode === 0) {
       const authenticated = providerId === "dingtalk-workspace"
         ? booleanField(envelope, ["authenticated"])
-        : booleanField(envelope, ["ok", "verified"]);
+        : isLarkUserAuthorized(envelope);
       if (authenticated) {
-        // auth status is the readiness source of truth. dws doctor is diagnostics
-        // only and must not override a verified authorized login.
+        // Provider auth status is the readiness source of truth. For Lark,
+        // top-level verified describes the effective identity and can remain
+        // true for the bot after user logout, so only a verified, available
+        // user identity proves the connector's user authorization.
         const account = await this.loadAccountProfile(providerId, executablePath, envelope ?? null);
         return {
           configuration: "ready",
@@ -548,6 +571,7 @@ export class CliConnectorManager {
   private async startLarkSplitAuth(session: AuthSessionInternal, executable: string): Promise<void> {
     try {
       const initiated = await runCommand(executable, ["auth", "login", "--recommend", "--no-wait", "--json"], session.directory, 30_000);
+      if (this.authSessions.get("lark-cli") !== session) return;
       if (initiated.exitCode !== 0) throw new CliConnectorError("CLI_AUTH_START_FAILED", "无法发起飞书授权", "retry");
       const payload = parseJSONObject(initiated.stdout);
       const verificationUrl = stringField(payload, ["verification_url", "verification_uri_complete", "verification_uri"]);
@@ -558,6 +582,7 @@ export class CliConnectorManager {
       session.view.safeMessage = "请在已打开的飞书页面完成授权";
       this.emit("lark-cli");
       await this.presentVerificationUrl(session, verificationUrl);
+      if (this.authSessions.get("lark-cli") !== session) return;
       session.view.phase = "confirming";
       session.view.safeMessage = "等待飞书确认授权…";
       const child = spawn(executable, ["auth", "login", "--device-code", deviceCode, "--json"], safeSpawnOptions(session.directory));
@@ -640,6 +665,7 @@ export class CliConnectorManager {
   }
 
   private async createAuthSession(providerId: CliProviderId, message: string): Promise<AuthSessionInternal> {
+    await this.ensureAuthRoot();
     const id = randomUUID();
     const directory = path.join(this.authRoot, providerId, id);
     await fs.mkdir(directory, { recursive: true, mode: 0o700 });
@@ -654,6 +680,11 @@ export class CliConnectorManager {
 
   private async cleanupSessionFiles(session: AuthSessionInternal): Promise<void> {
     await fs.rm(session.directory, { recursive: true, force: true });
+  }
+
+  private async ensureAuthRoot(): Promise<void> {
+    await fs.mkdir(this.authRoot, { recursive: true, mode: 0o700 });
+    await fs.chmod(this.authRoot, 0o700);
   }
 
   private monitorVerificationUrl(
@@ -676,6 +707,7 @@ export class CliConnectorManager {
   }
 
   private async presentVerificationUrl(session: AuthSessionInternal, verificationUrl: string): Promise<void> {
+    if (this.authSessions.get(session.view.provider) !== session) return;
     const safeUrl = authVerificationUrl(verificationUrl, session.view.provider);
     if (!safeUrl || session.openedVerificationUrl === safeUrl) return;
     session.openedVerificationUrl = safeUrl;
@@ -965,18 +997,39 @@ export function authVerificationUrl(raw: string, providerId: CliProviderId): str
     try {
       const url = new URL(candidate);
       if (url.protocol !== "https:") continue;
-      const host = url.hostname.toLowerCase();
       const allowed = providerId === "dingtalk-workspace"
-        ? host === "dingtalk.com" || host.endsWith(".dingtalk.com")
-        : ["feishu.cn", "larksuite.com", "larkoffice.com"].some(
-            (suffix) => host === suffix || host.endsWith(`.${suffix}`),
-          );
+        ? isDingTalkVerificationUrl(url)
+        : isLarkVerificationUrl(url);
       if (allowed) return url.toString();
     } catch {
       // Ignore malformed or non-provider URLs from CLI output.
     }
   }
   return undefined;
+}
+
+function isLarkUserAuthorized(envelope: Record<string, unknown> | undefined): boolean {
+  if (!envelope || typeof envelope.identities !== "object" || !envelope.identities) return false;
+  const identities = envelope.identities as Record<string, unknown>;
+  if (typeof identities.user !== "object" || !identities.user) return false;
+  const user = identities.user as Record<string, unknown>;
+  return user.available === true && user.verified === true;
+}
+
+function isDingTalkVerificationUrl(url: URL): boolean {
+  const host = url.hostname.toLowerCase();
+  const pathname = url.pathname.length > 1 ? url.pathname.replace(/\/+$/, "") : url.pathname;
+  return host === "login.dingtalk.com"
+    && (url.port === "" || url.port === "443")
+    && pathname === "/oauth2/auth";
+}
+
+function isLarkVerificationUrl(url: URL): boolean {
+  const host = url.hostname.toLowerCase();
+  if (!larkVerificationHosts.has(host)) return false;
+
+  const pathname = url.pathname.length > 1 ? url.pathname.replace(/\/+$/, "") : url.pathname;
+  return !larkServiceEndpoints.has(`${host}${pathname}`);
 }
 
 export function safeCliEnvironment(): NodeJS.ProcessEnv {

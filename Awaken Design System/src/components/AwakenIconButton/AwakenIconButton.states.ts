@@ -51,4 +51,15 @@ export const AwakenIconButtonStates: AwakenIconButtonState[] = [
       children: createElement(PanelRightClose, { size: 16, strokeWidth: 2 }),
     } as unknown as Partial<ComponentProps<typeof AwakenIconButton>>,
   },
+  {
+    id: "accessible-label-only",
+    label: "仅保留无障碍名称",
+    props: {
+      label: "关闭",
+      variant: "square",
+      size: "sm",
+      showTooltip: false,
+      children: createElement(X, { size: 15, strokeWidth: 1.9 }),
+    } as unknown as Partial<ComponentProps<typeof AwakenIconButton>>,
+  },
 ];

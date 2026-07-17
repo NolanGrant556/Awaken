@@ -211,14 +211,8 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:install-cli-connector", providerId) as Promise<CliConnectorView>,
   cancelCliInstall: (providerId: CliProviderId) =>
     ipcRenderer.invoke("awaken:cancel-cli-install", providerId) as Promise<CliConnectorView>,
-  selectCliExecutable: (providerId: CliProviderId) =>
-    ipcRenderer.invoke("awaken:select-cli-executable", providerId) as Promise<CliConnectorView>,
-  startCliConfigure: (providerId: CliProviderId) =>
-    ipcRenderer.invoke("awaken:configure-cli-connector", providerId) as Promise<CliConnectorView>,
   startCliAuth: (providerId: CliProviderId) =>
     ipcRenderer.invoke("awaken:start-cli-auth", providerId) as Promise<CliConnectorView>,
-  cancelCliAuth: (providerId: CliProviderId) =>
-    ipcRenderer.invoke("awaken:cancel-cli-auth", providerId) as Promise<CliConnectorView>,
   retryCliAuth: (providerId: CliProviderId) =>
     ipcRenderer.invoke("awaken:retry-cli-auth", providerId) as Promise<CliConnectorView>,
   setCliConnectorActivation: (providerId: CliProviderId, activation: CliActivation) =>

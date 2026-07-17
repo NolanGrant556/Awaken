@@ -101,7 +101,7 @@ function processInfo() {
 }
 
 function startDesktopScreen() {
-  const command = `cd ${shellQuote(rootDir)} && npm run dev:desktop`;
+  const command = `cd ${shellQuote(rootDir)} && npm run dev:desktop:managed`;
   const result = run("screen", ["-dmS", screenName, "bash", "-lc", command]);
   if (!result.ok) {
     throw new Error(

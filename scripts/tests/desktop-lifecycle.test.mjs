@@ -114,6 +114,27 @@ describe("desktop process ownership", () => {
 
 });
 
+describe("desktop managed entrypoint", () => {
+  it("does not run the foreground cleanup hook inside its own screen session", () => {
+    const rootPackage = JSON.parse(
+      readFileSync(join(repoRoot, "package.json"), "utf8"),
+    );
+    const openDesktopSource = readFileSync(
+      join(repoRoot, "scripts", "open-desktop.mjs"),
+      "utf8",
+    );
+
+    assert.equal(rootPackage.scripts["predev:desktop"], "npm run close:desktop");
+    assert.equal(rootPackage.scripts["dev:desktop"], "npm run dev:desktop:managed");
+    assert.equal(typeof rootPackage.scripts["dev:desktop:managed"], "string");
+    assert.equal(rootPackage.scripts["predev:desktop:managed"], undefined);
+    assert.match(
+      openDesktopSource,
+      /const command = `cd \$\{shellQuote\(rootDir\)\} && npm run dev:desktop:managed`;/,
+    );
+  });
+});
+
 describe("desktop package staging", () => {
   it("removes generated package outputs without creating runtime staging", () => {
     const root = mkdtempSync(join(tmpdir(), "awaken-desktop-clean-"));

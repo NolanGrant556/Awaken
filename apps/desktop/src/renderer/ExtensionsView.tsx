@@ -20,7 +20,6 @@ import {
   AwakenDialog as Dialog,
 } from "@awaken/design-system";
 import type {
-  CliConnectorReadiness,
   CliConnectorView,
   CliProviderId,
   RuntimeConnector,
@@ -36,7 +35,10 @@ import {
   type SkillPreviewTarget,
 } from "./SkillPreviewDialog";
 import { ConnectorBrandIcon } from "./ConnectorBrandIcon";
-import { CliConnectorDetailDialog } from "./CliConnectorDetailDialog";
+import {
+  CliConnectorDetailDialog,
+  type CliConnectorDialogAction,
+} from "./CliConnectorDetailDialog";
 import { cliConnectorProductCopy } from "./cliConnectorProduct";
 
 export type McpToolInfo = {
@@ -62,24 +64,17 @@ type VisibleSkillProjectGroup = SkillProjectGroup & {
   visibleSkills: RuntimeSkill[];
 };
 
-export type CliProductActionHandoff = {
-  providerId: CliProviderId;
-  displayName: string;
-};
-
 type SkillAgentsGroup = {
   root: string;
   label: string;
   skills: RuntimeSkill[];
   isGlobal: boolean;
 };
-
 type ExtensionsViewProps = {
   section: ExtensionSection;
   desktopReady: boolean;
   runtimeClient: RuntimeClient;
   onNotice: (message: string) => void;
-  onCliProductActionHandoff?: (action: CliProductActionHandoff) => void;
   activeWorkspaceRoot?: string;
 };
 
@@ -183,71 +178,6 @@ function sourceLabel(source: string): string {
     default:
       return source;
   }
-}
-
-type CliPrimaryAction =
-  | {
-      kind: "local";
-      label: string;
-      visual: "plus" | "text";
-      run: (client: RuntimeClient, providerId: CliProviderId) => Promise<CliConnectorView>;
-    }
-  | {
-      kind: "handoff";
-      label: string;
-      visual: "text";
-    }
-  | {
-      kind: "unsupported";
-      label: string;
-      visual: "plus";
-    };
-
-function cliPrimaryAction(readiness: CliConnectorReadiness): CliPrimaryAction {
-  if (readiness.install === "installing") {
-    return {
-      kind: "local",
-      label: "取消",
-      visual: "text",
-      run: (client, id) => client.cancelCliInstall(id),
-    };
-  }
-  if (readiness.install === "unsupported") {
-    return { kind: "unsupported", label: "当前平台不支持", visual: "plus" };
-  }
-  if (readiness.install !== "installed" || readiness.executable !== "available") {
-    return {
-      kind: "local",
-      label: "安装",
-      visual: "plus",
-      run: (client, id) => client.installCliConnector(id),
-    };
-  }
-  if (readiness.configuration === "required") {
-    return {
-      kind: "local",
-      label: "配置应用",
-      visual: "text",
-      run: (client, id) => client.startCliConfigure(id),
-    };
-  }
-  if (readiness.authentication !== "authorized") {
-    return { kind: "handoff", label: "发起登录", visual: "text" };
-  }
-  if (readiness.activation === "disabled") {
-    return {
-      kind: "local",
-      label: "启用",
-      visual: "text",
-      run: (client, id) => client.setCliConnectorActivation(id, "enabled"),
-    };
-  }
-  return {
-    kind: "local",
-    label: "停用",
-    visual: "text",
-    run: (client, id) => client.setCliConnectorActivation(id, "disabled"),
-  };
 }
 
 export function skillSourceLabel(source: string): string {
@@ -449,7 +379,6 @@ export function ExtensionsView({
   desktopReady,
   runtimeClient,
   onNotice,
-  onCliProductActionHandoff,
   activeWorkspaceRoot,
 }: ExtensionsViewProps) {
   const [connectors, setConnectors] = useState<RuntimeConnector[]>([]);
@@ -502,7 +431,6 @@ export function ExtensionsView({
   const [loadingMcpSettings, setLoadingMcpSettings] = useState(false);
 
   const normalizedQuery = query.trim().toLowerCase();
-
   async function refresh(showLoading = true, projectRootOverride?: string): Promise<void> {
     if (!desktopReady) {
       setErrorMessage("Awaken runtime 未启动");
@@ -1066,42 +994,38 @@ export function ExtensionsView({
     }
   }
 
-  async function handleCliPrimaryAction(
-    connector: RuntimeConnector,
-    readiness: CliConnectorReadiness,
-  ): Promise<void> {
-    const providerId = connector.id as CliProviderId;
-    const primary = cliPrimaryAction(readiness);
-    if (primary.kind === "unsupported") {
-      setErrorMessage("当前平台不支持该官方 CLI");
-      return;
-    }
-    if (primary.kind === "local") {
-      // Install can take a while; keep the card interactive so "取消" works via readiness updates.
-      if (primary.visual === "plus") {
-        setErrorMessage(null);
-        void runtimeClient
-          .installCliConnector(providerId)
-          .then((next) => {
-            setCliConnectors((current) =>
-              [...current.filter((entry) => entry.providerId !== providerId), next].sort((a, b) =>
-                a.providerId.localeCompare(b.providerId),
-              ),
-            );
-          })
-          .catch((error) => {
-            setErrorMessage(error instanceof Error ? error.message : "CLI 安装失败");
-          });
-        return;
-      }
-      await handleCliAction(providerId, () => primary.run(runtimeClient, providerId));
-      return;
-    }
-    const product = cliConnectorProductCopy(providerId);
-    onCliProductActionHandoff?.({
-      providerId,
-      displayName: product?.displayName || connector.displayName,
+  function startCliInstall(providerId: CliProviderId): void {
+    setErrorMessage(null);
+    void runtimeClient.installCliConnector(providerId).then((next) => {
+      setCliConnectors((current) => [
+        ...current.filter((entry) => entry.providerId !== providerId),
+        next,
+      ].sort((a, b) => a.providerId.localeCompare(b.providerId)));
+    }).catch((error) => {
+      setErrorMessage(error instanceof Error ? error.message : "CLI 安装失败");
     });
+  }
+
+  function handleCliDialogAction(providerId: CliProviderId, action: CliConnectorDialogAction): void {
+    if (action === "install") {
+      startCliInstall(providerId);
+      return;
+    }
+    if (action === "cancel_install") {
+      void handleCliAction(providerId, () => runtimeClient.cancelCliInstall(providerId));
+      return;
+    }
+    if (action === "authorize") {
+      void handleCliAction(providerId, () => runtimeClient.startCliAuth(providerId));
+      return;
+    }
+    if (action === "retry_authorization") {
+      void handleCliAction(providerId, () => runtimeClient.retryCliAuth(providerId));
+      return;
+    }
+    if (action === "logout") {
+      void handleCliAction(providerId, () => runtimeClient.logoutCliConnector(providerId));
+    }
   }
 
   function renderCliConnectorCard(connector: RuntimeConnector) {
@@ -1111,22 +1035,13 @@ export function ExtensionsView({
     const busy = busyConnectorId === connector.id;
     const providerId = connector.id as CliProviderId;
     const ready = readiness.overall === "ready" && readiness.authentication === "authorized";
-    const unsupported = readiness.install === "unsupported";
-    const primary = cliPrimaryAction(readiness);
     const product = cliConnectorProductCopy(providerId);
     const displayName = product?.displayName || connector.displayName;
     const description = product?.description || connector.description?.trim() || "官方 CLI 连接器";
-    const actionLabel = unsupported
-      ? `${displayName} 当前平台不支持`
-      : ready
-        ? `查看 ${displayName} 连接详情`
-        : primary.visual === "plus"
-          ? `安装 ${displayName}`
-          : `${primary.label}${displayName ? ` ${displayName}` : ""}`;
+    const actionLabel = `打开 ${displayName} 连接设置`;
     const actionClassName = [
       "extension-card-action",
       ready ? "extension-card-action-ready" : "",
-      !ready && primary.visual === "text" ? "extension-card-action-label" : "",
     ]
       .filter(Boolean)
       .join(" ");
@@ -1135,13 +1050,9 @@ export function ExtensionsView({
         <button
           type="button"
           className="extension-card-main"
-          disabled={busy || unsupported}
+          disabled={busy}
           onClick={() => {
-            if (ready) {
-              void openCliConnectorDetail(providerId);
-              return;
-            }
-            void handleCliPrimaryAction(connector, readiness);
+            void openCliConnectorDetail(providerId);
           }}
         >
           <ConnectorBrandIcon providerId={providerId} />
@@ -1162,21 +1073,15 @@ export function ExtensionsView({
           type="button"
           className={actionClassName}
           aria-label={actionLabel}
-          disabled={busy || unsupported}
+          disabled={busy}
           onClick={() => {
-            if (ready) {
-              void openCliConnectorDetail(providerId);
-              return;
-            }
-            void handleCliPrimaryAction(connector, readiness);
+            void openCliConnectorDetail(providerId);
           }}
         >
           {ready ? (
             <Check size={18} strokeWidth={2.2} />
-          ) : primary.visual === "plus" ? (
-            <Plus size={18} strokeWidth={1.9} />
           ) : (
-            <span>{primary.label}</span>
+            <Plus size={18} strokeWidth={1.9} />
           )}
         </button>
       </article>
@@ -1659,6 +1564,8 @@ export function ExtensionsView({
           ?? connectors.find((entry) => entry.id === cliDetailConnectorId)?.cliReadiness
           ?? null
         }
+        authSession={cliConnectors.find((entry) => entry.providerId === cliDetailConnectorId)?.authSession}
+        installProgress={cliConnectors.find((entry) => entry.providerId === cliDetailConnectorId)?.installProgress}
         loadingProfile={cliDetailLoading}
         busy={cliDetailConnectorId !== null && busyConnectorId === cliDetailConnectorId}
         onOpenChange={(open) => {
@@ -1667,13 +1574,9 @@ export function ExtensionsView({
             setCliDetailLoading(false);
           }
         }}
-        onLogout={() => {
+        onAction={(action) => {
           if (!cliDetailConnectorId) return;
-          const providerId = cliDetailConnectorId;
-          void handleCliAction(providerId, () => runtimeClient.logoutCliConnector(providerId)).then(() => {
-            setCliDetailConnectorId(null);
-            setCliDetailLoading(false);
-          });
+          handleCliDialogAction(cliDetailConnectorId, action);
         }}
       />
 

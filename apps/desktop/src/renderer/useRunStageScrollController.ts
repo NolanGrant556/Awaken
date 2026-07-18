@@ -591,10 +591,18 @@ export function useRunStageScrollController({
       return;
     }
 
+    const isAtScrollBottom = isNearScrollBottom({
+      scrollTop: nextScrollTop,
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+      threshold: 2,
+    });
+
     if (
       shouldPauseLatestOutputFollowForScroll({
         previousScrollTop,
         nextScrollTop,
+        isAtScrollBottom,
       })
     ) {
       dispatchInteraction({ type: "pause-by-user", cancelPendingPromptAnchor: false });
@@ -608,12 +616,6 @@ export function useRunStageScrollController({
       containerHeight: element.clientHeight,
       bottomReserve: composerOutputGapPx,
       threshold: LATEST_OUTPUT_FOLLOW_THRESHOLD,
-    });
-    const isAtScrollBottom = isNearScrollBottom({
-      scrollTop: nextScrollTop,
-      scrollHeight: element.scrollHeight,
-      clientHeight: element.clientHeight,
-      threshold: 2,
     });
 
     let hasResumeIntent = state.resumeIntent !== "none";
@@ -807,6 +809,21 @@ export function useRunStageScrollController({
 
     const resizeObserver = new ResizeObserver(() => {
       measureLatestTurnMinHeight(latestPromptId);
+      // 异步高度变化（mermaid 占位坍缩、SVG/图片注入）发生时，following 状态下
+      // 在同一帧 re-pin 到 native tail；RO 回调先于 paint，校正不可见。
+      // 暂停、pending anchor 和非 follow 的程序滚动期间不介入，避免与用户意图
+      // 或进行中的 anchor/marker 滚动冲突。
+      const state = interactionStateRef.current;
+      const hasConflictingProgrammaticScroll =
+        state.programmaticScrollReason !== "none" &&
+        state.programmaticScrollReason !== "follow_latest";
+      if (
+        state.followMode === "following_latest" &&
+        !state.pendingPromptAnchorTurnId &&
+        !hasConflictingProgrammaticScroll
+      ) {
+        scrollLatestTurnToScrollTail(latestPromptId, "follow_latest");
+      }
     });
     resizeObserver.observe(element);
     resizeObserver.observe(turn);

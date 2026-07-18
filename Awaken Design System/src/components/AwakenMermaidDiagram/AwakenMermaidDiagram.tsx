@@ -1,6 +1,5 @@
 import {
   type CSSProperties,
-  type PointerEvent as ReactPointerEvent,
   useEffect,
   useId,
   useRef,
@@ -47,7 +46,33 @@ const EXPANDED_ZOOM_STEP = 0.25;
 
 let mermaidInitialized = false;
 
+// SVG 渲染结果缓存：会话切换/重挂载时同一份图直接复用，
+// 避免重复的动态 import + 异步渲染带来的 loading 闪烁与高度抖动。
+const MERMAID_SVG_CACHE_LIMIT = 50;
+const mermaidSvgCache = new Map<string, string>();
+
+function readCachedMermaidSvg(chart: string): string | null {
+  return mermaidSvgCache.get(chart) ?? null;
+}
+
+function writeCachedMermaidSvg(chart: string, svg: string): void {
+  mermaidSvgCache.delete(chart);
+  mermaidSvgCache.set(chart, svg);
+  while (mermaidSvgCache.size > MERMAID_SVG_CACHE_LIMIT) {
+    const oldest = mermaidSvgCache.keys().next().value;
+    if (oldest === undefined) {
+      break;
+    }
+    mermaidSvgCache.delete(oldest);
+  }
+}
+
 async function renderMermaid(id: string, chart: string) {
+  const cached = readCachedMermaidSvg(chart);
+  if (cached !== null) {
+    return { svg: cached };
+  }
+
   const { default: mermaid } = await import("mermaid");
 
   if (!mermaidInitialized) {
@@ -59,7 +84,9 @@ async function renderMermaid(id: string, chart: string) {
     mermaidInitialized = true;
   }
 
-  return mermaid.render(id, chart);
+  const result = await mermaid.render(id, chart);
+  writeCachedMermaidSvg(chart, result.svg);
+  return result;
 }
 
 function errorMessageFor(error: unknown): string {
@@ -288,7 +315,10 @@ export function AwakenMermaidDiagram({
   const reactId = useId();
   const diagramId = `awaken-mermaid-${reactId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const normalizedChart = chart.trim();
-  const [renderState, setRenderState] = useState<MermaidRenderState>({ status: "loading" });
+  const [renderState, setRenderState] = useState<MermaidRenderState>(() => {
+    const cached = readCachedMermaidSvg(normalizedChart);
+    return cached !== null ? { status: "ready", svg: cached } : { status: "loading" };
+  });
   const [copyState, setCopyState] = useState<CopyState>("idle");
   const [isExpanded, setIsExpanded] = useState(false);
   const [expandedZoom, setExpandedZoom] = useState(DEFAULT_EXPANDED_ZOOM);
@@ -297,7 +327,10 @@ export function AwakenMermaidDiagram({
   const [isPanning, setIsPanning] = useState(false);
   const copyResetTimerRef = useRef<number | undefined>(undefined);
   const expandedDiagramRef = useRef<HTMLDivElement | null>(null);
+  const expandedScrollRef = useRef<HTMLDivElement | null>(null);
   const panStateRef = useRef<PanState | null>(null);
+  const panOffsetRef = useRef<PanOffset>({ x: 0, y: 0 });
+  panOffsetRef.current = panOffset;
 
   useEffect(() => {
     let cancelled = false;
@@ -309,7 +342,10 @@ export function AwakenMermaidDiagram({
       };
     }
 
-    setRenderState({ status: "loading" });
+    setRenderState(() => {
+      const cached = readCachedMermaidSvg(normalizedChart);
+      return cached !== null ? { status: "ready", svg: cached } : { status: "loading" };
+    });
     renderMermaid(diagramId, normalizedChart)
       .then(({ svg }) => {
         if (!cancelled) {
@@ -390,56 +426,104 @@ export function AwakenMermaidDiagram({
     setIsExpanded(true);
   }
 
+  function centerExpandedScroll() {
+    const element = expandedScrollRef.current;
+    if (!element) {
+      return;
+    }
+    element.scrollLeft = (element.scrollWidth - element.clientWidth) / 2;
+    element.scrollTop = (element.scrollHeight - element.clientHeight) / 2;
+  }
+
   function handleResetView() {
     setExpandedZoom(DEFAULT_EXPANDED_ZOOM);
     setPanOffset({ x: 0, y: 0 });
-  }
-
-  function handlePanStart(event: ReactPointerEvent<HTMLDivElement>) {
-    if (event.button !== 0) {
-      return;
-    }
-
-    panStateRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      panX: panOffset.x,
-      panY: panOffset.y,
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
-    setIsPanning(true);
-    event.preventDefault();
-  }
-
-  function handlePanMove(event: ReactPointerEvent<HTMLDivElement>) {
-    const panState = panStateRef.current;
-
-    if (!panState || panState.pointerId !== event.pointerId) {
-      return;
-    }
-
-    setPanOffset({
-      x: panState.panX + event.clientX - panState.startX,
-      y: panState.panY + event.clientY - panState.startY,
+    window.requestAnimationFrame(() => {
+      centerExpandedScroll();
     });
-    event.preventDefault();
   }
 
-  function handlePanEnd(event: ReactPointerEvent<HTMLDivElement>) {
-    const panState = panStateRef.current;
-
-    if (!panState || panState.pointerId !== event.pointerId) {
-      return;
+  // 手势起点监听必须用原生事件：实测发现此渲染链路中 React 委托的
+  // onPointerDown 对真实鼠标输入不派发（原生事件正常冒泡到 #root，
+  // 直接调用 prop 与 JS dispatchEvent 均正常），合成事件层在此断裂，
+  // 因此 pointerdown 绕过 React 合成事件直接挂在 DOM 上。
+  useEffect(() => {
+    if (!isExpanded || renderState.status !== "ready") {
+      return undefined;
     }
 
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
+    const element = expandedScrollRef.current;
+    if (!element) {
+      return undefined;
+    }
+    const scrollElement: HTMLDivElement = element;
+
+    function handleNativePointerDown(event: PointerEvent) {
+      if (event.button !== 0) {
+        return;
+      }
+
+      panStateRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        panX: panOffsetRef.current.x,
+        panY: panOffsetRef.current.y,
+      };
+      try {
+        scrollElement.setPointerCapture(event.pointerId);
+      } catch {
+        // capture 不可用时 window 级 move/up 监听仍保证手势完整
+      }
+      setIsPanning(true);
+      event.preventDefault();
     }
 
-    panStateRef.current = null;
-    setIsPanning(false);
-  }
+    element.addEventListener("pointerdown", handleNativePointerDown);
+    return () => {
+      element.removeEventListener("pointerdown", handleNativePointerDown);
+    };
+  }, [isExpanded, renderState.status]);
+
+  useEffect(() => {
+    if (!isPanning) {
+      return undefined;
+    }
+
+    function handleWindowPointerMove(event: PointerEvent) {
+      const panState = panStateRef.current;
+
+      if (!panState || panState.pointerId !== event.pointerId) {
+        return;
+      }
+
+      setPanOffset({
+        x: panState.panX + event.clientX - panState.startX,
+        y: panState.panY + event.clientY - panState.startY,
+      });
+      event.preventDefault();
+    }
+
+    function handleWindowPointerEnd(event: PointerEvent) {
+      const panState = panStateRef.current;
+
+      if (!panState || panState.pointerId !== event.pointerId) {
+        return;
+      }
+
+      panStateRef.current = null;
+      setIsPanning(false);
+    }
+
+    window.addEventListener("pointermove", handleWindowPointerMove);
+    window.addEventListener("pointerup", handleWindowPointerEnd);
+    window.addEventListener("pointercancel", handleWindowPointerEnd);
+    return () => {
+      window.removeEventListener("pointermove", handleWindowPointerMove);
+      window.removeEventListener("pointerup", handleWindowPointerEnd);
+      window.removeEventListener("pointercancel", handleWindowPointerEnd);
+    };
+  }, [isPanning]);
 
   useEffect(() => {
     if (!isExpanded || renderState.status !== "ready") {
@@ -458,6 +542,7 @@ export function AwakenMermaidDiagram({
         width: rect.width,
         height: rect.height,
       });
+      centerExpandedScroll();
     });
 
     return () => {
@@ -465,23 +550,37 @@ export function AwakenMermaidDiagram({
     };
   }, [isExpanded, renderState]);
 
+  // zoom 变化时保持视口中心点稳定（scroll 驱动 pan 后无需重置浏览位置）
+  const previousExpandedZoomRef = useRef(expandedZoom);
+  useEffect(() => {
+    const element = expandedScrollRef.current;
+    const previousZoom = previousExpandedZoomRef.current;
+    previousExpandedZoomRef.current = expandedZoom;
+
+    if (!element || !isExpanded || previousZoom === expandedZoom) {
+      return;
+    }
+
+    const ratio = expandedZoom / previousZoom;
+    element.scrollLeft = (element.scrollLeft + element.clientWidth / 2) * ratio - element.clientWidth / 2;
+    element.scrollTop = (element.scrollTop + element.clientHeight / 2) * ratio - element.clientHeight / 2;
+  }, [expandedZoom, isExpanded]);
+
   const rootClassName = className
     ? `assistant-mermaid-diagram ${className}`
     : "assistant-mermaid-diagram";
   const canCopy = normalizedChart.length > 0;
   const canResetView =
     expandedZoom !== DEFAULT_EXPANDED_ZOOM || panOffset.x !== 0 || panOffset.y !== 0;
-  const expandedFrameStyle = expandedDiagramSize
-    ? ({
-        "--assistant-mermaid-pan-x": `${panOffset.x}px`,
-        "--assistant-mermaid-pan-y": `${panOffset.y}px`,
-        width: `${expandedDiagramSize.width * expandedZoom}px`,
-        height: `${expandedDiagramSize.height * expandedZoom}px`,
-      } as CSSProperties)
-    : ({
-        "--assistant-mermaid-pan-x": `${panOffset.x}px`,
-        "--assistant-mermaid-pan-y": `${panOffset.y}px`,
-      } as CSSProperties);
+  const expandedFrameStyle: CSSProperties = {
+    transform: `translate(${panOffset.x}px, ${panOffset.y}px)`,
+    ...(expandedDiagramSize
+      ? {
+          width: `${expandedDiagramSize.width * expandedZoom}px`,
+          height: `${expandedDiagramSize.height * expandedZoom}px`,
+        }
+      : {}),
+  };
 
   if (renderState.status === "ready") {
     return (
@@ -528,11 +627,8 @@ export function AwakenMermaidDiagram({
                 />
               </div>
               <div
+                ref={expandedScrollRef}
                 className={`assistant-mermaid-expanded-scroll${isPanning ? " is-panning" : ""}`}
-                onPointerDown={handlePanStart}
-                onPointerMove={handlePanMove}
-                onPointerUp={handlePanEnd}
-                onPointerCancel={handlePanEnd}
               >
                 <div
                   className="assistant-mermaid-expanded-zoom-frame"

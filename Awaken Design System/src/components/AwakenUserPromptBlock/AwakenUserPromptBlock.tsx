@@ -246,7 +246,7 @@ export function AwakenUserPromptBlock({
                 height: "24px",
                 borderRadius: "8px",
                 background: "var(--aw-bg-fill-light)",
-                borderColor: "rgba(31, 31, 31, 0.08)",
+                borderColor: "var(--aw-border-light)",
               }}
             />
           </div>

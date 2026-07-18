@@ -540,7 +540,7 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  scrollbar-color: rgba(115, 115, 115, 0.36) transparent;
+  scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 36%, transparent) transparent;
   scrollbar-width: thin;
 }
 
@@ -608,7 +608,7 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   min-width: 0;
   max-width: 168px;
   height: var(--execution-prompt-attachment-size);
-  border: 1px solid rgba(31, 31, 31, 0.08);
+  border: 1px solid var(--aw-border-light);
   border-radius: 8px;
   overflow: hidden;
   background: var(--aw-bg-fill-light);
@@ -735,7 +735,7 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   min-height: 28px;
   border: 0;
   border-radius: var(--aw-radius-pill);
-  background: rgba(115, 115, 115, 0.36);
+  background: color-mix(in srgb, var(--aw-text-tertiary) 36%, transparent);
 }
 
 .execution-prompt-bubble-text::-webkit-scrollbar-button {
@@ -1196,7 +1196,7 @@ button.tool-trace-line:focus-visible {
   min-width: 0;
   margin: 2px 0;
   padding: 14px;
-  overflow: auto;
+  overflow: hidden;
   border: 1px solid var(--aw-border-light);
   border-radius: 8px;
   background: var(--aw-bg-white);
@@ -1211,8 +1211,8 @@ button.tool-trace-line:focus-visible {
   padding: 2px;
   border: 1px solid var(--aw-border-light);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+  background: color-mix(in srgb, var(--aw-surface-raised) 92%, transparent);
+  box-shadow: 0 4px 14px rgba(28, 25, 23, 0.08);
 }
 
 .assistant-mermaid-diagram > .assistant-mermaid-toolbar {
@@ -1277,7 +1277,7 @@ button.tool-trace-line:focus-visible {
   min-height: 44px;
   border: 0;
   border-radius: var(--aw-radius-pill);
-  background: rgba(115, 115, 115, 0.28);
+  background: color-mix(in srgb, var(--aw-text-tertiary) 28%, transparent);
 }
 
 .assistant-mermaid-diagram::-webkit-scrollbar-button {
@@ -1288,15 +1288,16 @@ button.tool-trace-line:focus-visible {
 
 .assistant-mermaid-diagram-svg {
   display: flex;
-  width: max-content;
-  min-width: 100%;
+  width: 100%;
   min-height: 100%;
   justify-content: center;
 }
 
 .assistant-mermaid-diagram-svg svg {
   display: block;
-  max-width: none;
+  max-width: 100%;
+  max-height: 340px;
+  width: auto;
   height: auto;
 }
 
@@ -1307,7 +1308,7 @@ button.tool-trace-line:focus-visible {
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(15, 23, 42, 0.38);
+  background: var(--aw-overlay-backdrop);
 }
 
 .assistant-mermaid-expanded-panel {
@@ -1349,8 +1350,8 @@ button.tool-trace-line:focus-visible {
   padding: 2px;
   border: 1px solid var(--aw-border-light);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+  background: color-mix(in srgb, var(--aw-surface-raised) 92%, transparent);
+  box-shadow: 0 4px 14px rgba(28, 25, 23, 0.08);
 }
 
 .assistant-mermaid-zoom-range {
@@ -1375,11 +1376,11 @@ button.tool-trace-line:focus-visible {
 
 .assistant-mermaid-expanded-scroll {
   position: relative;
-  display: block;
+  display: flex;
   min-width: 0;
   min-height: 0;
   padding: 16px;
-  overflow: hidden;
+  overflow: auto;
   border: 1px solid var(--aw-border-light);
   border-radius: 8px;
   background: var(--aw-bg-white);
@@ -1394,20 +1395,13 @@ button.tool-trace-line:focus-visible {
 }
 
 .assistant-mermaid-expanded-zoom-frame {
-  position: absolute;
-  top: 50%;
-  left: 50%;
+  flex: 0 0 auto;
   display: flex;
   align-items: flex-start;
   justify-content: center;
   min-width: 0;
   min-height: 0;
-  transform: translate(
-    calc(-50% + var(--assistant-mermaid-pan-x, 0px)),
-    calc(-50% + var(--assistant-mermaid-pan-y, 0px))
-  );
-  transform-origin: center;
-  will-change: transform;
+  margin: auto;
 }
 
 .assistant-mermaid-expanded-svg {
@@ -1441,7 +1435,7 @@ button.tool-trace-line:focus-visible {
   min-height: 44px;
   border: 0;
   border-radius: var(--aw-radius-pill);
-  background: rgba(115, 115, 115, 0.28);
+  background: color-mix(in srgb, var(--aw-text-tertiary) 28%, transparent);
 }
 
 .assistant-mermaid-expanded-scroll::-webkit-scrollbar-button {
@@ -1614,7 +1608,7 @@ button.tool-trace-line:focus-visible {
 .aw-run-stage-scroll,
 .aw-workbench-inspector,
 .light-inspector-detail {
-  scrollbar-color: rgba(115, 115, 115, 0.28) transparent;
+  scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 28%, transparent) transparent;
   scrollbar-width: thin;
 }
 
@@ -1645,7 +1639,7 @@ button.tool-trace-line:focus-visible {
   min-height: 44px;
   border: 0;
   border-radius: var(--aw-radius-pill);
-  background: rgba(115, 115, 115, 0.28);
+  background: color-mix(in srgb, var(--aw-text-tertiary) 28%, transparent);
 }
 
 .aw-run-stage-scroll::-webkit-scrollbar-button,
@@ -1758,7 +1752,7 @@ button.tool-trace-line:focus-visible {
   line-height: 20px !important;
   overflow-x: hidden !important;
   overflow-y: auto !important;
-  scrollbar-color: rgba(115, 115, 115, 0.28) transparent;
+  scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 28%, transparent) transparent;
   scrollbar-width: thin;
 }
 
@@ -1782,7 +1776,7 @@ button.tool-trace-line:focus-visible {
   min-height: 44px;
   border: 0;
   border-radius: var(--aw-radius-pill);
-  background: rgba(115, 115, 115, 0.28);
+  background: color-mix(in srgb, var(--aw-text-tertiary) 28%, transparent);
 }
 
 .composer-bar textarea::-webkit-scrollbar-button {
@@ -1810,7 +1804,7 @@ button.tool-trace-line:focus-visible {
   width: 42px;
   height: 42px;
   flex: 0 0 42px;
-  border: 1px solid rgba(31, 31, 31, 0.08);
+  border: 1px solid var(--aw-border-light);
   border-radius: 8px;
   overflow: hidden;
   background: var(--aw-bg-fill-light);
@@ -2133,9 +2127,7 @@ button.tool-trace-line:focus-visible {
   border: 1px solid var(--aw-border-main);
   border-radius: var(--aw-radius-panel);
   background: var(--aw-bg-white);
-  box-shadow:
-    0 18px 48px rgba(15, 18, 25, 0.14),
-    0 2px 8px rgba(15, 18, 25, 0.06);
+  box-shadow: var(--aw-shadow-menu);
 }
 
 .composer-bar-center .composer-bar-model-menu {
@@ -2359,7 +2351,7 @@ button.tool-trace-line:focus-visible {
     max-height: none;
     overflow: auto;
     border-left: 1px solid var(--aw-border-light);
-    box-shadow: -18px 0 42px rgba(15, 23, 42, 0.1);
+    box-shadow: -18px 0 42px rgba(28, 25, 23, 0.1);
   }
 
   .aw-workbench-shell-inspector-collapsed .aw-workbench-inspector {

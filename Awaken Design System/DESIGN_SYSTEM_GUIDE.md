@@ -13,6 +13,10 @@ Awaken owns its visual language through its own tokens and components. Keep Awak
 ## Token Rules
 
 - Preserve existing `--aw-*` variables for compatibility.
+- Tokens are split into two classes, kept in separate labeled sections of `tokens/tokens.css`:
+  - **Skin tokens** (pure visual: colors and shadow color values) may be iterated freely for style work.
+  - **Skeleton tokens** (layout-measured: spacing, icon sizes, radius, font metrics, layout widths) are frozen; changing any of them is treated as an interaction change and must go through the middle-region review checklist.
+- Each status family (success, warning, error, running) has exactly one base hue; soft bg/border, status bg/text, and diff variants must derive from that base instead of introducing new hues.
 - Product text defaults to `14px / 20px`.
 - Default icon size is `16px`; compact icons may use `14px`.
 - Default control radius is `8px`; default card, popover, and panel radius is `12px`.

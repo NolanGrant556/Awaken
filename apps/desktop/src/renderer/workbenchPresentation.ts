@@ -532,13 +532,20 @@ export function shouldPauseLatestOutputFollowForWheel({
 export function shouldPauseLatestOutputFollowForScroll({
   previousScrollTop,
   nextScrollTop,
+  isAtScrollBottom,
   threshold = 1,
 }: {
   previousScrollTop: number | null;
   nextScrollTop: number;
+  isAtScrollBottom: boolean;
   threshold?: number;
 }): boolean {
   if (previousScrollTop === null || !Number.isFinite(previousScrollTop)) {
+    return false;
+  }
+  // scrollTop 下降但仍贴底是 scrollHeight 收缩时浏览器的被动钳制，
+  // 属于布局事件，不是用户上滑意图。
+  if (isAtScrollBottom) {
     return false;
   }
   return nextScrollTop < previousScrollTop - Math.max(0, threshold);

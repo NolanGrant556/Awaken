@@ -1,7 +1,7 @@
 @import "../../tokens/components.css";
 
 .aw-new-task-button kbd {
-  border-color: rgba(255, 255, 255, 0.22) !important;
-  background: rgba(255, 255, 255, 0.12) !important;
-  color: rgba(255, 255, 255, 0.84) !important;
+  border-color: color-mix(in srgb, var(--aw-text-onblack) 22%, transparent) !important;
+  background: color-mix(in srgb, var(--aw-text-onblack) 12%, transparent) !important;
+  color: color-mix(in srgb, var(--aw-text-onblack) 84%, transparent) !important;
 }

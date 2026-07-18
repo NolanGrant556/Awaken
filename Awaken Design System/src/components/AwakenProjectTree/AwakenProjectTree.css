@@ -221,13 +221,13 @@
 }
 
 .aw-project-row-menu-item--danger {
-  color: var(--aw-color-danger, #c2410c);
+  color: var(--aw-status-danger);
 }
 
 .aw-project-row-menu-item--danger:hover,
 .aw-project-row-menu-item--danger:focus-visible {
-  background: var(--aw-bg-danger-soft, rgba(194, 65, 12, 0.08));
-  color: var(--aw-color-danger, #c2410c);
+  background: var(--aw-surface-danger);
+  color: var(--aw-status-danger);
 }
 
 .aw-project-empty-children {

@@ -168,6 +168,30 @@ func TestFileLockExclusionAndStaleRecovery(t *testing.T) {
 	reclaimed.Release()
 }
 
+func TestFileLockHeartbeatRefreshesExpiry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "heartbeat.lock")
+	lock, err := AcquireLock(path, "dream", 80*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Release()
+	var before lockOwner
+	if err := ReadJSON(path, &before); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if err := lock.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	var after lockOwner
+	if err := ReadJSON(path, &after); err != nil {
+		t.Fatal(err)
+	}
+	if !after.HeartbeatAt.After(before.HeartbeatAt) || !after.ExpiresAt.After(before.ExpiresAt) {
+		t.Fatalf("heartbeat did not renew lock: before=%+v after=%+v", before, after)
+	}
+}
+
 func TestFileLockUnreadableOwnerFailsClosed(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "store.lock")

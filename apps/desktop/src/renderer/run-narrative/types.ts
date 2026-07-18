@@ -87,6 +87,7 @@ export type RunNarrativeItem =
   | { kind: "exploring"; id: string; actions: RunAction[]; status: "active" | "done" }
   | { kind: "tool"; id: string; title: string; detail?: string; status: ToolDisplayState; toolStatus?: string }
   | { kind: "fileChange"; id: string; files: ChangedFile[]; status: "active" | "done" }
+  | { kind: "memoryReceipt"; id: string; title: string; detail?: string; status: "done" | "error" }
   | {
       kind: "deliverables";
       id: string;

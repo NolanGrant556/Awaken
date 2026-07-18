@@ -207,7 +207,9 @@ function createMockRuntimeClient(): RuntimeClient {
     updateMemorySettings: vi.fn(async () => ({ revision: 1, value: { enabled: true, automaticRecall: true, proactiveMemory: true, autoDream: false } })),
     startMemoryDream: vi.fn(async () => ({ taskId: "dream", status: "queued" as const, scopes: ["user" as const], createdAt: new Date(0).toISOString() })),
     getMemoryDream: vi.fn(async () => ({ taskId: "dream", status: "completed" as const, scopes: ["user" as const], createdAt: new Date(0).toISOString() })),
+    listMemoryDreams: vi.fn(async () => []),
     cancelMemoryDream: vi.fn(async () => undefined),
+    onMemoryDreamReceipt: vi.fn(() => () => {}),
   } satisfies RuntimeClient;
 }
 

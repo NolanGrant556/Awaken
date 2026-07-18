@@ -219,6 +219,14 @@ function stubElectronBridge(): void {
       onPetThreadActivationRequested: vi.fn(() => () => {}),
       openAwakenPetsDirectory: vi.fn(async () => undefined),
       openCodexPetsDirectory: vi.fn(async () => undefined),
+      listMemories: vi.fn(async () => []),
+      getMemory: vi.fn(async () => { throw new Error("not found"); }),
+      deleteMemory: vi.fn(async () => undefined),
+      getMemorySettings: vi.fn(async () => ({ revision: 0, value: { enabled: true, automaticRecall: true, proactiveMemory: true, autoDream: false } })),
+      updateMemorySettings: vi.fn(async () => ({ revision: 1, value: { enabled: true, automaticRecall: true, proactiveMemory: true, autoDream: false } })),
+      startMemoryDream: vi.fn(async () => ({ taskId: "dream", status: "queued" as const, scopes: ["user" as const], createdAt: new Date(0).toISOString() })),
+      getMemoryDream: vi.fn(async () => ({ taskId: "dream", status: "completed" as const, scopes: ["user" as const], createdAt: new Date(0).toISOString() })),
+      cancelMemoryDream: vi.fn(async () => undefined),
     } satisfies AwakenBridge,
   });
 }

@@ -31,6 +31,8 @@ const (
 	SemanticKindTurnBoundary       SemanticKind = "turn_boundary"
 	SemanticKindRunTerminal        SemanticKind = "run_terminal"
 	SemanticKindPersistenceWarning SemanticKind = "persistence_warning"
+	SemanticKindMemoryRecalled     SemanticKind = "memory_recalled"
+	SemanticKindMemoryMutated      SemanticKind = "memory_mutated"
 )
 
 // SemanticRecord is the canonical durable execution-journal record (schema_version=2).

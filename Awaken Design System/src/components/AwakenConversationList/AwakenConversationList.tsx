@@ -85,7 +85,7 @@ const statusToneStyles: Record<ComponentTone, CSSProperties> = {
     borderColor: "var(--aw-success-soft-border)",
   },
   permission: {
-    color: "var(--aw-warning)",
+    color: "var(--aw-warning-text)",
     background: "var(--aw-warning-soft-bg)",
     borderColor: "var(--aw-warning-soft-border)",
   },
@@ -95,7 +95,7 @@ const statusToneStyles: Record<ComponentTone, CSSProperties> = {
     borderColor: "var(--aw-success-soft-border)",
   },
   warning: {
-    color: "var(--aw-warning)",
+    color: "var(--aw-warning-text)",
     background: "var(--aw-warning-soft-bg)",
     borderColor: "var(--aw-warning-soft-border)",
   },

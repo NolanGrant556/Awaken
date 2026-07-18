@@ -22,7 +22,7 @@ const toneStyles: Record<ComponentTone, React.CSSProperties> = {
   permission: {
     borderColor: "var(--aw-warning-soft-border)",
     background: "var(--aw-warning-soft-bg)",
-    color: "var(--aw-warning)",
+    color: "var(--aw-warning-text)",
   },
   success: {
     borderColor: "var(--aw-success-soft-border)",
@@ -32,7 +32,7 @@ const toneStyles: Record<ComponentTone, React.CSSProperties> = {
   warning: {
     borderColor: "var(--aw-warning-soft-border)",
     background: "var(--aw-warning-soft-bg)",
-    color: "var(--aw-warning)",
+    color: "var(--aw-warning-text)",
   },
   error: {
     borderColor: "var(--aw-error-soft-border)",

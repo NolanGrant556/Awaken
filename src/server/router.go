@@ -157,6 +157,7 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 	}
 	dreamH := memoryDreamHandlers{memoryHandlers: memoryH, runner: memory.NewDreamRunner()}
 	mux.HandleFunc("POST /v1/memory/dream", dreamH.handleStart)
+	mux.HandleFunc("GET /v1/memory/dream", dreamH.handleList)
 	mux.HandleFunc("GET /v1/memory/dream/{task_id}", dreamH.handleGet)
 	mux.HandleFunc("POST /v1/memory/dream/{task_id}/cancel", dreamH.handleCancel)
 	if cfg.manager != nil {

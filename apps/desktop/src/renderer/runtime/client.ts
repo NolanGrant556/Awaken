@@ -211,7 +211,9 @@ export type RuntimeClient = {
   updateMemorySettings: (request: MemorySettingsPatch) => Promise<MemorySettingsDocument>;
   startMemoryDream: (projectId?: string) => Promise<MemoryDreamTask>;
   getMemoryDream: (taskId: string) => Promise<MemoryDreamTask>;
+  listMemoryDreams: (projectId?: string, limit?: number) => Promise<MemoryDreamTask[]>;
   cancelMemoryDream: (taskId: string) => Promise<void>;
+  onMemoryDreamReceipt: (handler: (task: MemoryDreamTask) => void) => () => void;
   subscribeRun: (
     runId: string,
     handlers: SubscribeHandlers,
@@ -336,7 +338,9 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     updateMemorySettings: (request) => bridge.updateMemorySettings(request),
     startMemoryDream: (projectId) => bridge.startMemoryDream(projectId),
     getMemoryDream: (taskId) => bridge.getMemoryDream(taskId),
+    listMemoryDreams: (projectId, limit) => bridge.listMemoryDreams(projectId, limit),
     cancelMemoryDream: (taskId) => bridge.cancelMemoryDream(taskId),
+    onMemoryDreamReceipt: (handler) => bridge.onMemoryDreamReceipt(handler),
     subscribeRun: async (runId, handlers, afterCursor) => {
       let lastCursor = afterCursor ?? 0;
       let terminalSeen = false;

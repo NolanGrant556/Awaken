@@ -9,6 +9,7 @@ import {
   nativeTheme,
   nativeImage,
   net,
+  powerMonitor,
   protocol,
   screen as electronScreen,
   shell,
@@ -111,6 +112,7 @@ import {
   SystemSkillsSyncError,
 } from "./system-skills-importer.js";
 import { CliConnectorManager } from "./cli-connectors/manager.js";
+import { MemoryDreamSchedulerStore } from "./memory-dream-scheduler-store.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let runtimeBaseUrl: string | null = null;
@@ -164,6 +166,11 @@ let pendingPetThreadId: string | null = null;
 let isQuitting = false;
 let projectTrashWorkerTimer: NodeJS.Timeout | null = null;
 let projectTrashWorkerRunning = false;
+let memoryDreamSchedulerStore: MemoryDreamSchedulerStore | null = null;
+let memoryDreamSchedulerTimer: NodeJS.Timeout | null = null;
+let automaticDreamRunning = false;
+const activeDreamTaskIds = new Set<string>();
+const completedDreamTaskIds = new Set<string>();
 
 type StreamSubscription = {
   controller: AbortController;
@@ -714,6 +721,7 @@ async function pumpRunEvents(
           continue;
         }
         consumeSSEFrame(frame, (event) => {
+          trackMemoryActivity(event);
           sendToRenderer(
             "awaken:run-event",
             {
@@ -728,6 +736,7 @@ async function pumpRunEvents(
 
     if (buffer.trim()) {
       consumeSSEFrame(buffer, (event) => {
+        trackMemoryActivity(event);
         sendToRenderer(
           "awaken:run-event",
           {
@@ -1113,6 +1122,151 @@ ipcMain.handle("awaken:get-runtime-info", async () => {
     console.error("[awaken-desktop] failed to get runtime info");
     throw new Error("Runtime unavailable");
 	}
+});
+
+type MemoryWire = {
+  memory_id: string;
+  name: string;
+  description: string;
+  type: "user" | "feedback" | "project" | "reference";
+  status: "active" | "superseded";
+  revision: number;
+  updated_at: string;
+  source_thread_id: string;
+  source_record_id: string;
+  scope: "user" | "project";
+  content?: string;
+};
+
+type MemorySettingsDocumentWire = {
+  revision: number;
+  value: { enabled: boolean; automatic_recall: boolean; proactive_memory: boolean; auto_dream: boolean };
+};
+
+type MemoryDreamTaskWire = {
+  task_id: string;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  scopes: Array<"user" | "project">;
+  reports?: Record<string, { updated: number; superseded: number; conflicts: number; skipped: number }>;
+  error_code?: string;
+  error_message?: string;
+  created_at: string;
+  started_at?: string;
+  finished_at?: string;
+};
+
+const normalizeMemory = (item: MemoryWire) => ({
+  memoryId: item.memory_id, name: item.name, description: item.description,
+  type: item.type, status: item.status, revision: item.revision, updatedAt: item.updated_at,
+  sourceThreadId: item.source_thread_id, sourceRecordId: item.source_record_id,
+  scope: item.scope, content: item.content,
+});
+const normalizeMemorySettings = (document: MemorySettingsDocumentWire) => ({
+  revision: document.revision,
+  value: { enabled: document.value.enabled, automaticRecall: document.value.automatic_recall, proactiveMemory: document.value.proactive_memory, autoDream: document.value.auto_dream },
+});
+const normalizeMemoryDream = (task: MemoryDreamTaskWire) => ({
+  taskId: task.task_id, status: task.status, scopes: task.scopes, reports: task.reports,
+  errorCode: task.error_code, errorMessage: task.error_message, createdAt: task.created_at,
+  startedAt: task.started_at, finishedAt: task.finished_at,
+});
+
+async function startMemoryDreamTask(projectId: string | undefined, scopes: Array<"user" | "project">): Promise<ReturnType<typeof normalizeMemoryDream>> {
+  const profile = await modelProfileStore?.resolveDefaultRunProfile();
+  if (!profile) throw new Error("请先配置并启用主模型。");
+  const task = normalizeMemoryDream(await requestRuntime<MemoryDreamTaskWire>("/v1/memory/dream", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project_id: projectId, scopes, model_profile: normalizeModelProfileRunConfig(profile) }) }));
+  activeDreamTaskIds.add(task.taskId);
+  return task;
+}
+
+async function getMemoryDreamTask(taskId: string): Promise<ReturnType<typeof normalizeMemoryDream>> {
+  const task = normalizeMemoryDream(await requestRuntime<MemoryDreamTaskWire>(`/v1/memory/dream/${encodeURIComponent(taskId)}`));
+  if (["completed", "failed", "cancelled"].includes(task.status)) activeDreamTaskIds.delete(taskId);
+  if (task.status === "completed" && !completedDreamTaskIds.has(taskId)) {
+    completedDreamTaskIds.add(taskId);
+    memoryDreamSchedulerStore?.recordSuccessfulDream();
+  }
+  return task;
+}
+
+async function waitForMemoryDream(taskId: string): Promise<void> {
+  for (;;) {
+    const task = await getMemoryDreamTask(taskId);
+    if (task.status === "completed") return;
+    if (task.status === "failed" || task.status === "cancelled") throw new Error(task.errorMessage || `Dream ${task.status}`);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+}
+
+async function cancelActiveDreams(): Promise<void> {
+  const tasks = [...activeDreamTaskIds];
+  await Promise.allSettled(tasks.map((taskId) => requestRuntimeOK(`/v1/memory/dream/${encodeURIComponent(taskId)}/cancel`, { method: "POST" })));
+  for (const taskId of tasks) activeDreamTaskIds.delete(taskId);
+}
+
+async function runAutomaticDreamIfEligible(): Promise<void> {
+  if (automaticDreamRunning || !runtimeBaseUrl || !memoryDreamSchedulerStore?.eligible() || powerMonitor.getSystemIdleTime() < 5 * 60) return;
+  automaticDreamRunning = true;
+  try {
+    const settings = normalizeMemorySettings(await requestRuntime<MemorySettingsDocumentWire>("/v1/memory/settings"));
+    if (!settings.value.enabled || !settings.value.autoDream) return;
+    const threads = await requestRuntime<RuntimeThreadWire[]>("/v1/threads");
+    if (threads.some((thread) => Boolean(thread.active_run_id)) || activeDreamTaskIds.size > 0) return;
+    const projects = await requestRuntime<RuntimeProjectWire[]>("/v1/projects?include_removed=false");
+    const userTask = await startMemoryDreamTask(undefined, ["user"]);
+    await waitForMemoryDream(userTask.taskId);
+    for (const project of projects.filter((item) => item.state === "active")) {
+      const projectTask = await startMemoryDreamTask(project.project_id, ["project"]);
+      await waitForMemoryDream(projectTask.taskId);
+    }
+  } catch (error) {
+    console.error("automatic_memory_dream_failed", error);
+  } finally {
+    automaticDreamRunning = false;
+  }
+}
+
+function trackMemoryActivity(event: AguiEvent): void {
+  if (event.type === "RUN_FINISHED" && event.runId) memoryDreamSchedulerStore?.recordCompletedRun(event.runId);
+  if (["AWAKEN_MEMORY_CREATED", "AWAKEN_MEMORY_UPDATED", "AWAKEN_MEMORY_SUPERSEDED", "AWAKEN_MEMORY_DELETED"].includes(event.type)) {
+    memoryDreamSchedulerStore?.recordMemoryMutation(event.recordId || `${event.runId ?? "run"}:${event.seq ?? event.streamCursor ?? 0}`);
+  }
+}
+
+ipcMain.handle("awaken:list-memories", async (_event, request = {}) => {
+  const input = request as { query?: string; scope?: string; projectId?: string; limit?: number; type?: string; status?: string };
+  const params = new URLSearchParams();
+  if (input.query) params.set("query", input.query);
+  if (input.scope) params.set("scope", input.scope);
+  if (input.projectId) params.set("project_id", input.projectId);
+  if (input.limit) params.set("limit", String(input.limit));
+  if (input.type) params.set("type", input.type);
+  if (input.status) params.set("status", input.status);
+  const items = await requestRuntime<MemoryWire[]>(`/v1/memories?${params.toString()}`);
+  return items.map(normalizeMemory);
+});
+ipcMain.handle("awaken:get-memory", async (_event, memoryId: string, projectId?: string) => {
+  const suffix = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
+  return normalizeMemory(await requestRuntime<MemoryWire>(`/v1/memories/${encodeURIComponent(memoryId)}${suffix}`));
+});
+ipcMain.handle("awaken:delete-memory", async (_event, memoryId: string, expectedRevision: number, projectId?: string) => {
+  const suffix = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
+  await requestRuntimeOK(`/v1/memories/${encodeURIComponent(memoryId)}${suffix}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expected_revision: expectedRevision }) });
+  memoryDreamSchedulerStore?.recordMemoryMutation(`settings-delete:${memoryId}:${expectedRevision}`);
+});
+ipcMain.handle("awaken:get-memory-settings", async () => normalizeMemorySettings(await requestRuntime<MemorySettingsDocumentWire>("/v1/memory/settings")));
+ipcMain.handle("awaken:update-memory-settings", async (_event, request) => {
+  const input = request as { expectedRevision: number; enabled?: boolean; automaticRecall?: boolean; proactiveMemory?: boolean; autoDream?: boolean };
+  return normalizeMemorySettings(await requestRuntime<MemorySettingsDocumentWire>("/v1/memory/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expected_revision: input.expectedRevision, enabled: input.enabled, automatic_recall: input.automaticRecall, proactive_memory: input.proactiveMemory, auto_dream: input.autoDream }) }));
+});
+ipcMain.handle("awaken:start-memory-dream", async (_event, projectId?: string) => {
+  const scopes: Array<"user" | "project"> = projectId ? ["user", "project"] : ["user"];
+  return startMemoryDreamTask(projectId, scopes);
+});
+ipcMain.handle("awaken:get-memory-dream", async (_event, taskId: string) => getMemoryDreamTask(taskId));
+ipcMain.handle("awaken:cancel-memory-dream", async (_event, taskId: string) => {
+  await requestRuntimeOK(`/v1/memory/dream/${encodeURIComponent(taskId)}/cancel`, { method: "POST" });
+  activeDreamTaskIds.delete(taskId);
 });
 
 ipcMain.handle("awaken:list-connectors", async () => {
@@ -1707,6 +1861,7 @@ ipcMain.handle(
 
 ipcMain.handle("awaken:start-run", async (_event, request: StartRunRequest) => {
   return runDesktopOperation(async () => {
+	await cancelActiveDreams();
     const body = normalizeStartRunRequest(request);
     const defaultProfile = await modelProfileStore?.resolveDefaultRunProfile();
     if (!defaultProfile) {
@@ -1958,6 +2113,8 @@ app.whenReady().then(async () => {
     });
   }
   const configDir = await ensureConfigDir();
+  memoryDreamSchedulerStore = new MemoryDreamSchedulerStore(configDir);
+  await memoryDreamSchedulerStore.initialize();
   desktopPreferencesStore = new DesktopPreferencesStore(configDir);
   await desktopPreferencesStore.initialize();
   nativeTheme.on("updated", () => {
@@ -2078,6 +2235,7 @@ app.whenReady().then(async () => {
       void cliConnectorManager?.refreshAll();
     }
   });
+  memoryDreamSchedulerTimer = setInterval(() => void runAutomaticDreamIfEligible(), 60_000);
 
   app.on("activate", () => {
     if (!mainWindowRef || mainWindowRef.isDestroyed()) {
@@ -2099,6 +2257,8 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   isQuitting = true;
   stopProjectTrashWorker();
+  if (memoryDreamSchedulerTimer) clearInterval(memoryDreamSchedulerTimer);
+  memoryDreamSchedulerTimer = null;
   for (const subscription of subscriptions.values()) {
     subscription.controller.abort();
   }

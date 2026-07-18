@@ -2,6 +2,7 @@ package agentcore
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -348,6 +349,36 @@ func TestRequestBuilderIncludesSkillSummary(t *testing.T) {
 	req := builder.BuildLLMRequestFromEnvelope(envelope)
 	if !strings.Contains(req.SystemPrompt, skillSummary) {
 		t.Fatalf("expected skill summary in system prompt, got %s", req.SystemPrompt)
+	}
+}
+
+func TestRequestBuilderInjectsHostMemoryBeforeSkillAndAddsDelta(t *testing.T) {
+	builder := NewRequestBuilder(AgentConfig{
+		MemoryContextProvider: func() (string, error) { return "<awaken_memory_context>index</awaken_memory_context>", nil },
+		SkillContextBlocks:    []ContextBlock{{ID: "skill", Content: "skill body"}},
+	})
+	envelope := builder.BuildContextEnvelope(convcontext.New(), []tool.ToolSchema{})
+	if len(envelope.SystemBlocks) < 3 || envelope.SystemBlocks[1].ID != "memory_context" || envelope.SystemBlocks[2].ID != "skill" {
+		t.Fatalf("memory must be host-owned before Skill bodies: %+v", envelope.SystemBlocks)
+	}
+	found := false
+	for _, delta := range envelope.Deltas {
+		if delta.Type == ContextDeltaMemoryHit && strings.HasPrefix(delta.Summary, "index:") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("memory delta missing: %+v", envelope.Deltas)
+	}
+}
+
+func TestRequestBuilderDegradesWhenMemoryProviderFails(t *testing.T) {
+	builder := NewRequestBuilder(AgentConfig{MemoryContextProvider: func() (string, error) { return "", fmt.Errorf("offline") }})
+	envelope := builder.BuildContextEnvelope(convcontext.New(), []tool.ToolSchema{})
+	for _, block := range envelope.SystemBlocks {
+		if block.ID == "memory_context" {
+			t.Fatalf("failed provider injected a block: %+v", block)
+		}
 	}
 }
 

@@ -3,6 +3,7 @@ package agentcore
 import (
 	"bytes"
 	stdcontext "context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -61,6 +62,9 @@ func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *Reque
 			}
 			runner.conversation.Context.SetMessages(result.Messages)
 			runner.compactInvokedSkillContext()
+			if runner.config.MemoryRecallReset != nil {
+				runner.config.MemoryRecallReset()
+			}
 			return nil
 		},
 	)
@@ -393,6 +397,13 @@ func (r *Runner) prepareLLMRequest(ctx stdcontext.Context, events *runEventEmitt
 	if err != nil {
 		return LLMRequest{}, err
 	}
+	if events != nil && r.config.MemoryRecallDrain != nil {
+		if receipts := r.config.MemoryRecallDrain(); len(receipts) > 0 {
+			if err := events.memoryRecalled(ctx, receipts); err != nil {
+				return LLMRequest{}, err
+			}
+		}
+	}
 	if r.failureSupervisor != nil {
 		if recovery := FormatRecoveryContext(r.failureSupervisor.PendingRecovery()); recovery != "" {
 			llmReq.SystemPrompt = strings.TrimSpace(llmReq.SystemPrompt) +
@@ -403,6 +414,20 @@ func (r *Runner) prepareLLMRequest(ctx stdcontext.Context, events *runEventEmitt
 		return r.contextGovernor.PrepareRequest(ctx, llmReq, events)
 	}
 	return r.contextGovernor.PrepareRequest(ctx, llmReq, nil)
+}
+
+func (e *runEventEmitter) memoryRecalled(ctx stdcontext.Context, receipts []MemoryRecallReceipt) error {
+	if len(receipts) == 0 {
+		return nil
+	}
+	event := AwakenEvent{Type: MemoryRecalledEventType, MemoryReceipts: append([]MemoryRecallReceipt(nil), receipts...)}
+	e.fillIDs(&event)
+	payload := map[string]any{"count": len(receipts), "memories": receipts}
+	if e.recorder != nil {
+		return e.persistDurable(ctx, "memory_recalled", NewSemanticRecord(SemanticKindMemoryRecalled, e.threadID, e.runID, e.turnID(), "", e.sessionID, payload), event)
+	}
+	e.sink.Emit(event)
+	return nil
 }
 
 func (r *Runner) compactConversationForRetry(ctx stdcontext.Context, events *runEventEmitter) (bool, error) {
@@ -1494,6 +1519,10 @@ func (e *runEventEmitter) emitToolResultBatch(
 		}
 	}
 	records = append(records, ToolResultSemanticRecord(e.threadID, e.runID, e.turnID(), e.sessionID, result))
+	memoryReceipt, hasMemoryReceipt := memoryMutationReceipt(result)
+	if hasMemoryReceipt {
+		records = append(records, NewSemanticRecord(SemanticKindMemoryMutated, e.threadID, e.runID, e.turnID(), result.ToolCallID, e.sessionID, map[string]any{"memory": memoryReceipt}))
+	}
 	records = append(records, fileChangeSemanticRecords(e.threadID, e.runID, e.turnID(), e.sessionID, result)...)
 	live := make([]AwakenEvent, 0, len(semanticFacts)+len(artifacts)+1)
 	for _, fact := range semanticFacts {
@@ -1501,6 +1530,11 @@ func (e *runEventEmitter) emitToolResultBatch(
 		live = append(live, fact)
 	}
 	live = append(live, event)
+	if hasMemoryReceipt {
+		memoryEvent := AwakenEvent{Type: MemoryMutatedEventType, ToolCallID: result.ToolCallID, ToolName: result.Name, MemoryReceipts: []MemoryRecallReceipt{memoryReceipt}}
+		e.fillIDs(&memoryEvent)
+		live = append(live, memoryEvent)
+	}
 	for _, artifact := range artifacts {
 		e.fillIDs(&artifact)
 		records = append(records, ArtifactSemanticRecord(e.threadID, e.runID, e.turnID(), e.sessionID, artifact))
@@ -1511,6 +1545,43 @@ func (e *runEventEmitter) emitToolResultBatch(
 	}
 	emitLive(e.sink, live...)
 	return nil
+}
+
+func memoryMutationReceipt(result ToolExecutionResult) (MemoryRecallReceipt, bool) {
+	if result.Name != "memory" {
+		return MemoryRecallReceipt{}, false
+	}
+	receipt := MemoryRecallReceipt{Status: "rejected", ErrorCode: firstNonEmpty(result.ErrorCode, result.Outcome.ErrorCode)}
+	if result.IsError || result.Outcome.IsError() {
+		return receipt, true
+	}
+	var payload map[string]any
+	if json.Unmarshal([]byte(result.Content), &payload) != nil {
+		return MemoryRecallReceipt{}, false
+	}
+	receipt.MemoryID = memoryPayloadString(payload, "memory_id")
+	receipt.Scope = memoryPayloadString(payload, "scope")
+	receipt.Type = memoryPayloadString(payload, "type")
+	receipt.Action = memoryPayloadString(payload, "action")
+	receipt.Status = memoryPayloadString(payload, "status")
+	if revision, ok := payload["revision"].(float64); ok {
+		receipt.Revision = int(revision)
+	}
+	if receipt.Action == "delete" {
+		receipt.Status = "deleted"
+	}
+	if receipt.MemoryID == "" || receipt.Action == "" {
+		return MemoryRecallReceipt{}, false
+	}
+	return receipt, true
+}
+
+func memoryPayloadString(payload map[string]any, key string) string {
+	value, exists := payload[key]
+	if !exists || value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
 }
 
 func toolResultAppliedMutation(result ToolExecutionResult) bool {

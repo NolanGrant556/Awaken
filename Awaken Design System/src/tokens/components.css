@@ -1416,6 +1416,7 @@ button.tool-trace-line:focus-visible {
   width: 100% !important;
   height: 100% !important;
   max-width: none !important;
+  max-height: none !important;
 }
 
 .assistant-mermaid-expanded-scroll::-webkit-scrollbar {

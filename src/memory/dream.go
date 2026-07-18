@@ -3,7 +3,6 @@ package memory
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -59,8 +58,8 @@ func (s *Store) All(scope Scope, includeSuperseded bool) ([]Record, error) {
 	return s.scanRoot(root, scope, includeSuperseded)
 }
 
-// ApplyMaintenance validates the entire plan before writing and rolls back
-// every changed topic if an in-process commit step fails.
+// ApplyMaintenance validates the full plan, stages every changed topic plus
+// the derived index, and publishes them through a recoverable transaction.
 func (s *Store) ApplyMaintenance(plan MaintenancePlan, source Source) (MaintenanceReport, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -134,48 +133,23 @@ func (s *Store) ApplyMaintenance(plan MaintenancePlan, source Source) (Maintenan
 		return report, nil
 	}
 
-	originals := map[string][]byte{}
-	paths := make([]string, 0, len(changed))
+	files := map[string][]byte{}
 	for _, record := range changed {
-		data, readErr := os.ReadFile(record.Path)
-		if readErr != nil {
-			return MaintenanceReport{}, readErr
+		data, encodeErr := encodeRecord(record)
+		if encodeErr != nil {
+			return MaintenanceReport{}, encodeErr
 		}
-		originals[record.Path] = data
-		paths = append(paths, record.Path)
+		files[record.Path] = data
 	}
-	sort.Strings(paths)
-	written := make([]string, 0, len(paths))
-	rollback := func(cause error) error {
-		var rollbackErr error
-		for _, path := range written {
-			if restoreErr := atomicWrite(path, originals[path]); restoreErr != nil {
-				rollbackErr = errors.Join(rollbackErr, restoreErr)
-			}
+	finalRecords := make([]Record, 0, len(byID))
+	for _, record := range byID {
+		if record.Status == StatusActive {
+			finalRecords = append(finalRecords, record)
 		}
-		if rebuildErr := s.rebuildIndexLocked(root, plan.Scope); rebuildErr != nil {
-			rollbackErr = errors.Join(rollbackErr, rebuildErr)
-		}
-		if rollbackErr != nil {
-			return fmt.Errorf("%w (rollback failed: %v)", cause, rollbackErr)
-		}
-		return cause
 	}
-	for _, path := range paths {
-		var record Record
-		for _, candidate := range changed {
-			if candidate.Path == path {
-				record = candidate
-				break
-			}
-		}
-		if err := writeRecord(record); err != nil {
-			return MaintenanceReport{}, rollback(err)
-		}
-		written = append(written, path)
-	}
-	if err := s.rebuildIndexLocked(root, plan.Scope); err != nil {
-		return MaintenanceReport{}, rollback(err)
+	files[filepath.Join(root, IndexFilename)] = buildIndexData(finalRecords)
+	if err := s.commitMaintenanceTransaction(root, files); err != nil {
+		return MaintenanceReport{}, err
 	}
 	return report, nil
 }
@@ -183,16 +157,19 @@ func (s *Store) ApplyMaintenance(plan MaintenancePlan, source Source) (Maintenan
 type DreamStatus string
 
 const (
-	DreamQueued    DreamStatus = "queued"
-	DreamRunning   DreamStatus = "running"
-	DreamCompleted DreamStatus = "completed"
-	DreamFailed    DreamStatus = "failed"
-	DreamCancelled DreamStatus = "cancelled"
+	DreamQueued      DreamStatus = "queued"
+	DreamRunning     DreamStatus = "running"
+	DreamCompleted   DreamStatus = "completed"
+	DreamFailed      DreamStatus = "failed"
+	DreamCancelled   DreamStatus = "cancelled"
+	DreamInterrupted DreamStatus = "interrupted"
 )
 
 type DreamTask struct {
 	TaskID       string                      `json:"task_id"`
 	Status       DreamStatus                 `json:"status"`
+	Phase        string                      `json:"phase"`
+	ProjectID    string                      `json:"project_id,omitempty"`
 	Scopes       []Scope                     `json:"scopes"`
 	Reports      map[Scope]MaintenanceReport `json:"reports,omitempty"`
 	ErrorCode    string                      `json:"error_code,omitempty"`
@@ -203,28 +180,56 @@ type DreamTask struct {
 }
 
 type DreamRunner struct {
-	mu      sync.RWMutex
-	tasks   map[string]DreamTask
-	cancels map[string]context.CancelFunc
+	mu       sync.RWMutex
+	tasks    map[string]DreamTask
+	cancels  map[string]context.CancelFunc
+	taskRoot string
+	loadErr  error
 }
 
 func NewDreamRunner() *DreamRunner {
-	return &DreamRunner{tasks: map[string]DreamTask{}, cancels: map[string]context.CancelFunc{}}
+	home, err := filestore.ResolveAwakenHome("")
+	if err != nil {
+		return &DreamRunner{tasks: map[string]DreamTask{}, cancels: map[string]context.CancelFunc{}, loadErr: err}
+	}
+	return NewDreamRunnerWithRoot(filepath.Join(home, "memory", "dream-tasks"))
 }
 
-func (r *DreamRunner) Start(parent context.Context, store *Store, cfg llm.Config, scopes []Scope) DreamTask {
+func NewDreamRunnerWithRoot(root string) *DreamRunner {
+	r := &DreamRunner{tasks: map[string]DreamTask{}, cancels: map[string]context.CancelFunc{}, taskRoot: filepath.Clean(root)}
+	r.loadErr = r.loadTasks()
+	return r
+}
+
+func (r *DreamRunner) Start(parent context.Context, store *Store, cfg llm.Config, scopes []Scope, projectID ...string) (DreamTask, error) {
+	if r.loadErr != nil {
+		return DreamTask{}, r.loadErr
+	}
 	if len(scopes) == 0 {
 		scopes = []Scope{ScopeProject, ScopeUser}
 	}
 	now := time.Now().UTC()
-	task := DreamTask{TaskID: "dream_" + strings.ReplaceAll(uuid.NewString(), "-", ""), Status: DreamQueued, Scopes: append([]Scope(nil), scopes...), Reports: map[Scope]MaintenanceReport{}, CreatedAt: now}
+	project := ""
+	if len(projectID) > 0 {
+		project = strings.TrimSpace(projectID[0])
+	}
+	task := DreamTask{TaskID: "dream_" + strings.ReplaceAll(uuid.NewString(), "-", ""), Status: DreamQueued, Phase: "queued", ProjectID: project, Scopes: append([]Scope(nil), scopes...), Reports: map[Scope]MaintenanceReport{}, CreatedAt: now}
 	ctx, cancel := context.WithCancel(parent)
 	r.mu.Lock()
 	r.tasks[task.TaskID] = task
 	r.cancels[task.TaskID] = cancel
+	err := r.persistLocked(task)
+	if err != nil {
+		delete(r.tasks, task.TaskID)
+		delete(r.cancels, task.TaskID)
+	}
 	r.mu.Unlock()
+	if err != nil {
+		cancel()
+		return DreamTask{}, err
+	}
 	go r.run(ctx, store, cfg, task.TaskID)
-	return task
+	return task, nil
 }
 
 func (r *DreamRunner) Get(taskID string) (DreamTask, bool) {
@@ -243,9 +248,33 @@ func (r *DreamRunner) Cancel(taskID string) bool {
 	return ok
 }
 
+func (r *DreamRunner) List(limit int, projectID string) []DreamTask {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	projectID = strings.TrimSpace(projectID)
+	result := make([]DreamTask, 0, len(r.tasks))
+	for _, task := range r.tasks {
+		if (projectID == "" && task.ProjectID != "") || (projectID != "" && task.ProjectID != "" && task.ProjectID != projectID) {
+			continue
+		}
+		result = append(result, task)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
+	if len(result) > limit {
+		result = result[:limit]
+	}
+	return result
+}
+
 func (r *DreamRunner) run(ctx context.Context, store *Store, cfg llm.Config, taskID string) {
 	now := time.Now().UTC()
-	r.update(taskID, func(task *DreamTask) { task.Status = DreamRunning; task.StartedAt = &now })
+	if err := r.update(taskID, func(task *DreamTask) { task.Status = DreamRunning; task.Phase = "planning"; task.StartedAt = &now }); err != nil {
+		r.finish(taskID, DreamFailed, "DREAM_TASK_PERSIST_FAILED", err.Error())
+		return
+	}
 	task, _ := r.Get(taskID)
 	for _, scope := range task.Scopes {
 		if err := ctx.Err(); err != nil {
@@ -262,13 +291,44 @@ func (r *DreamRunner) run(ctx context.Context, store *Store, cfg llm.Config, tas
 			r.finish(taskID, DreamFailed, "DREAM_LOCKED", err.Error())
 			return
 		}
+		heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+		heartbeatErr := make(chan error, 1)
+		go func() {
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-heartbeatCtx.Done():
+					return
+				case <-ticker.C:
+					if refreshErr := lock.Refresh(); refreshErr != nil {
+						select {
+						case heartbeatErr <- refreshErr:
+						default:
+						}
+						return
+					}
+				}
+			}
+		}()
 		plan, planErr := buildMaintenancePlan(ctx, store, cfg, scope)
+		if planErr == nil {
+			if heartbeatFailure := pollHeartbeatError(heartbeatErr); heartbeatFailure != nil {
+				planErr = heartbeatFailure
+			} else {
+				_ = r.update(taskID, func(task *DreamTask) { task.Phase = "applying" })
+			}
+		}
 		if planErr == nil {
 			var report MaintenanceReport
 			report, planErr = store.ApplyMaintenance(plan, Source{ThreadID: "system_dream", RecordID: taskID, CapturedBy: "dream"})
 			if planErr == nil {
-				r.update(taskID, func(task *DreamTask) { task.Reports[scope] = report })
+				planErr = r.update(taskID, func(task *DreamTask) { task.Reports[scope] = report })
 			}
+		}
+		stopHeartbeat()
+		if heartbeatFailure := pollHeartbeatError(heartbeatErr); planErr == nil && heartbeatFailure != nil {
+			planErr = heartbeatFailure
 		}
 		releaseErr := lock.Release()
 		if planErr != nil {
@@ -283,17 +343,19 @@ func (r *DreamRunner) run(ctx context.Context, store *Store, cfg llm.Config, tas
 	r.finish(taskID, DreamCompleted, "", "")
 }
 
-func (r *DreamRunner) update(taskID string, mutate func(*DreamTask)) {
+func (r *DreamRunner) update(taskID string, mutate func(*DreamTask)) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	task := r.tasks[taskID]
 	mutate(&task)
 	r.tasks[taskID] = task
+	return r.persistLocked(task)
 }
 func (r *DreamRunner) finish(taskID string, status DreamStatus, code, message string) {
 	now := time.Now().UTC()
-	r.update(taskID, func(task *DreamTask) {
+	_ = r.update(taskID, func(task *DreamTask) {
 		task.Status = status
+		task.Phase = "terminal"
 		task.ErrorCode = code
 		task.ErrorMessage = boundedError(message, 300)
 		task.FinishedAt = &now
@@ -301,6 +363,65 @@ func (r *DreamRunner) finish(taskID string, status DreamStatus, code, message st
 	r.mu.Lock()
 	delete(r.cancels, taskID)
 	r.mu.Unlock()
+}
+
+func pollHeartbeatError(ch <-chan error) error {
+	select {
+	case err := <-ch:
+		return fmt.Errorf("dream maintenance lock heartbeat failed: %w", err)
+	default:
+		return nil
+	}
+}
+
+func (r *DreamRunner) taskPath(taskID string) string {
+	return filepath.Join(r.taskRoot, taskID+".json")
+}
+
+func (r *DreamRunner) persistLocked(task DreamTask) error {
+	if err := filestore.EnsureDir(r.taskRoot); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(task, "", "  ")
+	if err != nil {
+		return err
+	}
+	return filestore.WriteFileAtomic(r.taskPath(task.TaskID), append(data, '\n'))
+}
+
+func (r *DreamRunner) loadTasks() error {
+	if err := filestore.EnsureDir(r.taskRoot); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(r.taskRoot)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		var task DreamTask
+		if err := filestore.ReadJSON(filepath.Join(r.taskRoot, entry.Name()), &task); err != nil {
+			return fmt.Errorf("memory dream: read durable task %s: %w", entry.Name(), err)
+		}
+		if !strings.HasPrefix(task.TaskID, "dream_") || filepath.Base(task.TaskID) != task.TaskID || task.TaskID+".json" != entry.Name() {
+			return fmt.Errorf("memory dream: invalid durable task identity in %s", entry.Name())
+		}
+		if task.Status == DreamQueued || task.Status == DreamRunning {
+			task.Status = DreamInterrupted
+			task.Phase = "terminal"
+			task.ErrorCode = "DREAM_INTERRUPTED_RESTART"
+			task.ErrorMessage = "Dream 因 Awaken 重启而中断，可重新发起整理。"
+			task.FinishedAt = &now
+			if err := r.persistLocked(task); err != nil {
+				return err
+			}
+		}
+		r.tasks[task.TaskID] = task
+	}
+	return nil
 }
 
 func buildMaintenancePlan(ctx context.Context, store *Store, cfg llm.Config, scope Scope) (MaintenancePlan, error) {

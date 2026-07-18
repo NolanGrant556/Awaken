@@ -4,11 +4,11 @@
 
 本文是 Awaken 长期记忆与 Dream 的当前事实与目标设计权威。
 
-**当前支持：** Core 已实现 user/project Markdown topic、`MEMORY.md` 索引、受控 `memory` 工具、host 注入来源 identity、revision/敏感内容/重复门禁、请求构建期索引注入、复用当前主模型 profile 的非阻塞 selector、最多 5 条有界主题召回和 compact 后预算复位。主动记忆默认开启，由主模型在正常任务推理中决定是否调用工具。Memory 调用与 recall 进入 SemanticJournal/AG-UI 前转为无正文 receipt。Desktop Settings 已提供四个开关、搜索/筛选/正文与来源查看、revision 删除、手动 Dream 和取消；Auto Dream 已接入持久化活动计数、24 小时、5 分钟 idle、active-run gate 和新 run 取消；不提供人工创建、编辑或 supersede。
+**当前支持：** Core 已实现 user/project Markdown topic、`MEMORY.md` 索引、受控 `memory` 工具、host 注入来源 identity、revision/敏感内容/重复门禁、请求构建期索引注入、复用当前主模型 profile 的非阻塞 selector、最多 5 条有界主题召回和 compact 后预算复位。主动记忆默认开启，由主模型在正常任务推理中决定是否调用工具。Memory 调用与 recall 进入 SemanticJournal/AG-UI 前转为无正文 receipt；Workbench 已投影 recall/mutation 紧凑回执。Desktop Settings 已提供四个开关、搜索/筛选/正文与来源查看、revision 删除、手动 Dream 和取消；Auto Dream 已接入持久化活动计数、24 小时、5 分钟 idle、active-run gate 和新 run 取消；不提供人工创建、编辑或 supersede。Dream task/report 已原子持久化，Core 重启会把未完成任务恢复为 `interrupted`，Desktop 通过任务列表重放维护回执；scope lock 定期 heartbeat，批量 Apply 使用 staged transaction、活动 marker、失败关闭读取和 crash rollback，主题与 `MEMORY.md` 不会以半套状态参与召回。
 
-**当前不支持：** child recall 继承、Workbench receipt 展示、Dream task 与 maintenance receipt 的重启恢复、lock heartbeat 和跨进程 crash-atomic 批量切换均未实现。Settings 的查看/筛选/详情清空、开关持久化和手动 Dream，以及未来持续称呼指令触发真实 selector、search/update、completion receipt 与简短收尾，已完成当前 macOS Desktop 验收；自动 Dream idle、删除和恢复链仍未形成全域 Desktop 基线。
+**当前不支持：** 当前产品尚无正式 subagent/child Agent 能力，因此不实现 child recall 继承。待 subagent 域建立正式 parent/child identity、workspace 与权限边界后，本域必须实现 5.3 的 `MemoryRecallSnapshot` 继承门禁，不能让 child 自行扩大 user/project scope。Settings 的查看/筛选/详情清空、开关持久化和手动 Dream，以及未来持续称呼指令触发真实 selector、search/update、completion receipt 与简短收尾，已完成当前 macOS Desktop 验收；本轮新增的 Workbench 回执、Dream 重启恢复、heartbeat 与 crash recovery 已有自动化，真实 Desktop 中断/重启和跨平台基线仍待验收。
 
-本文未标注“当前支持”的恢复和 Workbench 内容均为**已确认但尚未实现的设计约束**。
+本文未标注“当前支持”的 child 内容属于**已确认但依赖正式 subagent 能力的后置设计约束**。
 
 本域拥有：
 
@@ -158,7 +158,7 @@ source_record_id: record_...
 
 ## 5. 召回合同
 
-5.1 与 5.2 的请求期索引、递归候选扫描、主模型 selector、最近成功工具名、非阻塞预取、allowlist、自动注入和 session accounting 当前已接入主 run；compact 成功会复位召回预算。5.3 的 child 继承尚未实现；当前尚未把显式 `memory get/update` 接触记录并入自动召回去重集合。
+5.1 与 5.2 的请求期索引、递归候选扫描、主模型 selector、最近成功工具名、非阻塞预取、allowlist、自动注入和 session accounting 当前已接入主 run；compact 成功会复位召回预算。5.3 是正式 subagent 能力落地后的强制后置项，当前没有 child runtime，因此尚未实现；当前也尚未把显式 `memory get/update` 接触记录并入自动召回去重集合。
 
 ### 5.1 常驻索引
 
@@ -191,6 +191,8 @@ run 建立时读取允许 scope 的 `MEMORY.md`，按合计预算形成 host-own
 每条注入内容携带 `memory_id`、scope、type、updated/observed time、source identity 和陈旧提示。记忆描述代码、外部状态或日期时必须先验证当前事实；冲突时以当前可观察状态为准，并通过受控 update/supersede 修正 Memory。
 
 ### 5.3 Run 与 child Agent
+
+本节当前不运行。正式 subagent 完成后，subagent 域必须先提供不可伪造的 parent/child identity、父 `MemoryRecallSnapshot`、canonical workspace 和权限快照，本域再按以下约束接入；不得以“child 自己再跑一次 selector”代替继承。
 
 - 第一次成功召回形成 run-scoped `MemoryRecallSnapshot`；同一 run 不因磁盘变化替换已注入内容；
 - run 内后续 turn 可追加新的 recall receipts，但不得无界重复同一文件；
@@ -254,7 +256,7 @@ Memory 工具进入 run 固定 ToolAvailabilitySnapshot。实现该工具意味�
 
 ### 7.2 Dream 目标
 
-本节 7.2 的 plan/validate/apply、scope lock、手动启动/查询/取消当前已实现；7.3 的自动触发门槛和新 run 取消已实现，heartbeat/重启恢复仍是缺口；7.4 的 source journal 窄搜索、跨进程 staged 原子切换和 maintenance durable receipt 仍是目标设计。
+本节 7.2 的 plan/validate/apply、scope lock、手动启动/查询/取消当前已实现；7.3 的自动触发门槛、新 run 取消和每分钟 heartbeat 已实现；7.4 的跨进程 staged transaction、crash rollback、durable task/report 与重启恢复已实现。source journal 窄搜索仍未实现，Dream 当前只使用合法 Memory topic manifest。
 
 Dream 是低频 Memory maintenance，不是第二个面向用户任务的 Agent loop。它负责：
 
@@ -282,7 +284,7 @@ Dream 不自动硬删除唯一事实或 user Memory。高度确定的精确重�
 - 距离上次成功 Dream 至少 24 小时；
 - 自上次成功后至少 5 个完成的主 run，或至少 20 个 Memory mutation。
 
-每个 scope 使用 `.maintenance-lock`，包含 holder identity、started_at、heartbeat 和上次成功时间。锁 holder 不存在或超过 1 小时无 heartbeat 才可回收。新用户 run 开始时取消仍在分析阶段的 Dream；进入原子 apply 后允许完成当前短提交，但不得持有 Agent/model 资源继续扩展工作。
+每个 scope 使用 `.maintenance-lock`，包含 holder identity、acquired/heartbeat/expiry 时间；Dream 每分钟续约一小时 TTL。锁 holder 进程已不存在或超过一小时未成功 heartbeat 才可回收，refresh/release 前必须验证仍是同一 owner，不能删除新 owner 的锁。新用户 run 开始时取消仍在分析阶段的 Dream；进入原子 apply 后允许完成当前短提交，但不得持有 Agent/model 资源继续扩展工作。
 
 ### 7.4 Dream 输入与执行
 
@@ -296,6 +298,8 @@ Dream 按以下阶段执行：
 6. **Report**：持久化无正文 receipt，展示 created/updated/merged/superseded/conflict/skipped 数量。
 
 Dream child 只能调用 host-owned Memory list/get/search/plan 能力和受控的 source lookup；没有普通 mutation tool。最终写入由 Memory service 批量提交，Dream 文本本身不是 authority。
+
+Apply 在 `<scope>/.maintenance-transactions/<transaction_id>/` 保存 before/after 与 manifest，并先发布 `.maintenance-transaction.json` 活动 marker。所有协作 Store 在 marker 存在时先检查 scope lock：live owner 仍在提交则 fail closed，不读取半套文件；owner 已死亡或过期则由新 owner 按 manifest 回滚 `prepared/committing`，或完成 `committed` 清理。marker 删除并 fsync 根目录后批次才对召回可见。任务自身持久化在 `~/.awaken/memory/dream-tasks/<task_id>.json`，只含状态、阶段、scope、project identity、统计和有界错误，不含模型凭据或 Memory 正文。
 
 ## 8. 上下文、事件与 HTTP
 
@@ -314,7 +318,7 @@ memory_recalled
 memory_mutated
 ```
 
-`memory_maintenance` 尚未实现。
+Dream 不伪装成 thread 内的 SemanticJournal record。维护任务的 durable authority 是 Dream task JSON；Desktop live 收到同一 task terminal receipt，重启或 thread replay 时从 `GET /v1/memory/dream` 按 task identity 重新投影。普通 recall/mutation 仍由 thread SemanticJournal 重放。
 
 耐久 payload 只保存 memory IDs、scope、type、action、revision、status、source identity、counts 和 error code，不保存主题正文或 daily-log 原文。live 与 replay 通过 09 域唯一 projector 产生：
 
@@ -325,9 +329,10 @@ AWAKEN_MEMORY_UPDATED
 AWAKEN_MEMORY_SUPERSEDED
 AWAKEN_MEMORY_DELETED
 AWAKEN_MEMORY_REJECTED
-AWAKEN_MEMORY_MAINTENANCE_STARTED
-AWAKEN_MEMORY_MAINTENANCE_COMPLETED
-AWAKEN_MEMORY_MAINTENANCE_FAILED
+AWAKEN_MEMORY_DREAM_COMPLETED
+AWAKEN_MEMORY_DREAM_FAILED
+AWAKEN_MEMORY_DREAM_CANCELLED
+AWAKEN_MEMORY_DREAM_INTERRUPTED
 ```
 
 重放按 identity hydrate 当前 Memory：记录仍存在时显示当前 name/scope；已经删除时只显示“该记忆已删除”，不能从 journal 恢复正文。未知/旧 Memory event 按 09 域 unknown 容错。
@@ -344,6 +349,7 @@ GET    /v1/memory/settings
 PATCH  /v1/memory/settings
 POST   /v1/memory/dream
 GET    /v1/memory/dream/{task_id}
+GET    /v1/memory/dream
 POST   /v1/memory/dream/{task_id}/cancel
 ```
 
@@ -362,7 +368,7 @@ Settings 新增“记忆”页：
 
 Workbench：
 
-- recall 在执行过程显示“使用了 N 条记忆”，默认折叠，不平铺正文；
+- recall 在执行过程显示“已召回 N 条记忆”，进入 execution-process 折叠，不平铺正文；
 - create/update/supersede/delete 显示明确 receipt；
 - 主动记忆和 Dream 完成显示紧凑通知，不创建通用 approval 状态；
 - Dream 不占用用户当前 turn，不向 final answer 注入维护推理；
@@ -395,7 +401,7 @@ Workbench：
 - Memory mutation 只能经过 host-owned service；
 - Secret、认证材料、完整 prompt、完整 transcript 不进入 Memory；
 - Dream 不建立第二 Agent loop，不自动硬删除不确定事实，不绕过 revision 和原子提交；
-- 尚未实现的恢复和 Workbench 能力必须明确标为缺口，不能由设置开关或手动入口推断为已支持。
+- 依赖正式 subagent 的 child 继承与尚未实现的 source journal 窄搜索必须明确标为缺口，不能由主 Agent 召回或手动 Dream 入口推断为已支持。
 
 ## 11. 目标代码 owner
 

@@ -84,11 +84,14 @@ export type MemoryDreamStatus =
   | "running"
   | "completed"
   | "failed"
-  | "cancelled";
+  | "cancelled"
+  | "interrupted";
 
 export type MemoryDreamTask = {
   taskId: string;
   status: MemoryDreamStatus;
+  phase?: string;
+  projectId?: string;
   scopes: MemoryScope[];
   reports?: Partial<Record<MemoryScope, { updated: number; superseded: number; conflicts: number; skipped: number }>>;
   errorCode?: string;
@@ -1080,7 +1083,9 @@ export type AwakenBridge = {
   updateMemorySettings: (request: MemorySettingsPatch) => Promise<MemorySettingsDocument>;
   startMemoryDream: (projectId?: string) => Promise<MemoryDreamTask>;
   getMemoryDream: (taskId: string) => Promise<MemoryDreamTask>;
+  listMemoryDreams: (projectId?: string, limit?: number) => Promise<MemoryDreamTask[]>;
   cancelMemoryDream: (taskId: string) => Promise<void>;
+  onMemoryDreamReceipt: (handler: (task: MemoryDreamTask) => void) => () => void;
   getRuntimeInfo: () => Promise<RuntimeInfo>;
   listConnectors: () => Promise<RuntimeConnector[]>;
   connectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;

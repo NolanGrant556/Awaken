@@ -340,6 +340,9 @@ func (s *Store) ReadSelected(scope Scope, filenames []string) ([]Record, error) 
 }
 
 func (s *Store) candidatesLocked(root string, scope Scope) ([]Candidate, error) {
+	if err := s.ensureMaintenanceReady(root); err != nil {
+		return nil, err
+	}
 	type topicFile struct {
 		filename string
 		path     string
@@ -410,6 +413,9 @@ func (s *Store) Index(scope Scope) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if err := s.ensureMaintenanceReady(root); err != nil {
+		return "", err
+	}
 	data, err := os.ReadFile(filepath.Join(root, IndexFilename))
 	if errors.Is(err, os.ErrNotExist) {
 		if _, statErr := os.Stat(root); errors.Is(statErr, os.ErrNotExist) {
@@ -453,10 +459,16 @@ func (s *Store) prepareRoot(scope Scope) (string, error) {
 	if err := filestore.WithinRoot(root, root); err != nil {
 		return "", err
 	}
+	if err := s.ensureMaintenanceReady(root); err != nil {
+		return "", err
+	}
 	return root, nil
 }
 
 func (s *Store) scanRoot(root string, scope Scope, includeSuperseded bool) ([]Record, error) {
+	if err := s.ensureMaintenanceReady(root); err != nil {
+		return nil, err
+	}
 	var records []Record
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -580,20 +592,28 @@ func boundTopicContent(content string, maxLines, maxBytes int) string {
 }
 
 func writeRecord(record Record) error {
-	if err := validateRecord(record); err != nil {
+	data, err := encodeRecord(record)
+	if err != nil {
 		return err
+	}
+	return atomicWrite(record.Path, data)
+}
+
+func encodeRecord(record Record) ([]byte, error) {
+	if err := validateRecord(record); err != nil {
+		return nil, err
 	}
 	header, err := yaml.Marshal(record)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	data := append([]byte("---\n"), header...)
 	data = append(data, []byte("---\n\n")...)
 	data = append(data, []byte(strings.TrimSpace(record.Content)+"\n")...)
 	if len(data) > maxTopicBytes {
-		return fmt.Errorf("memory: topic exceeds %d bytes", maxTopicBytes)
+		return nil, fmt.Errorf("memory: topic exceeds %d bytes", maxTopicBytes)
 	}
-	return atomicWrite(record.Path, data)
+	return data, nil
 }
 
 func (s *Store) rebuildIndexLocked(root string, scope Scope) error {
@@ -604,6 +624,11 @@ func (s *Store) rebuildIndexLocked(root string, scope Scope) error {
 	if err != nil {
 		return err
 	}
+	data := buildIndexData(records)
+	return atomicWrite(filepath.Join(root, IndexFilename), data)
+}
+
+func buildIndexData(records []Record) []byte {
 	sort.SliceStable(records, func(i, j int) bool { return records[i].UpdatedAt.After(records[j].UpdatedAt) })
 	var buf bytes.Buffer
 	for _, record := range records {
@@ -613,7 +638,7 @@ func (s *Store) rebuildIndexLocked(root string, scope Scope) error {
 		}
 		buf.WriteString(line)
 	}
-	return atomicWrite(filepath.Join(root, IndexFilename), buf.Bytes())
+	return buf.Bytes()
 }
 
 func splitFrontmatter(data []byte) ([]byte, []byte, error) {

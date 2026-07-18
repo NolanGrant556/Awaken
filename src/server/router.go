@@ -7,6 +7,7 @@ import (
 	"awaken/src/agentcore"
 	"awaken/src/connectors"
 	"awaken/src/mcpclient"
+	"awaken/src/memory"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
 	"awaken/src/skills"
@@ -142,6 +143,22 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 	mcpH := mcpHandlers{manager: cfg.manager, workspaceRoot: cfg.workspaceRoot}
 	mux.HandleFunc("GET /v1/mcp/tools", mcpH.handleListTools)
 	mux.HandleFunc("GET /v1/tools", handleListTools)
+	memoryH := memoryHandlers{defaultWorkspace: cfg.workspaceRoot}
+	if cfg.runService != nil {
+		memoryH.projects = cfg.runService.ProjectService()
+	}
+	mux.HandleFunc("GET /v1/memories", memoryH.handleList)
+	mux.HandleFunc("GET /v1/memories/{memory_id}", memoryH.handleGet)
+	mux.HandleFunc("DELETE /v1/memories/{memory_id}", memoryH.handleDelete)
+	if settingsStore, err := memory.NewSettingsStore(); err == nil {
+		settingsH := memorySettingsHandlers{store: settingsStore}
+		mux.HandleFunc("GET /v1/memory/settings", settingsH.handleGet)
+		mux.HandleFunc("PATCH /v1/memory/settings", settingsH.handleUpdate)
+	}
+	dreamH := memoryDreamHandlers{memoryHandlers: memoryH, runner: memory.NewDreamRunner()}
+	mux.HandleFunc("POST /v1/memory/dream", dreamH.handleStart)
+	mux.HandleFunc("GET /v1/memory/dream/{task_id}", dreamH.handleGet)
+	mux.HandleFunc("POST /v1/memory/dream/{task_id}/cancel", dreamH.handleCancel)
 	if cfg.manager != nil {
 		mux.HandleFunc("GET /v1/mcp/servers", mcpH.handleListServers)
 		mux.HandleFunc("POST /v1/mcp/servers", mcpH.handleConfigureServers)

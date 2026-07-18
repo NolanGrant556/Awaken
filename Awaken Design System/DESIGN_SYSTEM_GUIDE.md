@@ -1,13 +1,13 @@
 # Awaken Design System Guide
 
-Awaken uses the TraeWork package in `reference/traework/` as a visual reference, not as a runtime dependency. Keep Awaken component APIs, runtime behavior, and brand assets intact.
+Awaken owns its visual language through its own tokens and components. Keep Awaken component APIs, runtime behavior, and brand assets intact.
 
 ## Visual Direction
 
 - Light mode is the first supported target.
 - Awaken logo and wordmark are the only primary brand assets.
 - Use neutral surfaces, restrained borders, and typography for hierarchy.
-- Use black or near-black for the primary action; do not import the TraeWork purple brand system.
+- Use black or near-black for the primary action; brand and accent colors must come from Awaken semantic tokens.
 - Avoid decorative backgrounds, glow effects, nested cards, and ad hoc color palettes.
 
 ## Token Rules
@@ -21,7 +21,7 @@ Awaken uses the TraeWork package in `reference/traework/` as a visual reference,
 
 ## Component Rules
 
-- Do not expose TraeWork `.ds-*` classes as Awaken public API.
+- Expose only Awaken `aw-*` classes and `Awaken*` component APIs; do not introduce external design-system class names as public API.
 - Do not replace React component contracts to chase visual polish.
 - Prefer changing tokens and existing `aw-*` classes before editing component behavior.
 - Hover, active, focus, selected, and disabled states must preserve layout size.

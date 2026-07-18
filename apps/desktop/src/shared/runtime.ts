@@ -37,6 +37,67 @@ export type DesktopPreferencesSaveRequest = {
   theme?: AwakenThemePreference;
 };
 
+export type MemoryScope = "user" | "project";
+export type MemoryType = "user" | "feedback" | "project" | "reference";
+
+export type RuntimeMemory = {
+  memoryId: string;
+  name: string;
+  description: string;
+  type: MemoryType;
+  status: "active" | "superseded";
+  revision: number;
+  updatedAt: string;
+  sourceThreadId: string;
+  sourceRecordId: string;
+  scope: MemoryScope;
+  content?: string;
+};
+
+export type MemoryListRequest = {
+  query?: string;
+  scope?: MemoryScope;
+  projectId?: string;
+  limit?: number;
+  type?: MemoryType;
+  status?: "active" | "superseded";
+};
+
+export type MemorySettings = {
+  enabled: boolean;
+  automaticRecall: boolean;
+  proactiveMemory: boolean;
+  autoDream: boolean;
+};
+
+export type MemorySettingsDocument = {
+  revision: number;
+  value: MemorySettings;
+};
+
+export type MemorySettingsPatch = Partial<MemorySettings> & {
+  expectedRevision: number;
+};
+
+export type MemoryDreamStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type MemoryDreamTask = {
+  taskId: string;
+  status: MemoryDreamStatus;
+  scopes: MemoryScope[];
+  reports?: Partial<Record<MemoryScope, { updated: number; superseded: number; conflicts: number; skipped: number }>>;
+  errorCode?: string;
+  errorMessage?: string;
+  createdAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+};
+
 export type RuntimeRunStatus =
   | "running"
   | "cancelling"
@@ -1012,6 +1073,14 @@ export type AwakenBridge = {
   unsubscribeRun: (subscriptionId: string) => void;
   getDesktopPreferences: () => Promise<DesktopPreferences>;
   saveDesktopPreferences: (request: DesktopPreferencesSaveRequest) => Promise<DesktopPreferences>;
+  listMemories: (request?: MemoryListRequest) => Promise<RuntimeMemory[]>;
+  getMemory: (memoryId: string, projectId?: string) => Promise<RuntimeMemory>;
+  deleteMemory: (memoryId: string, expectedRevision: number, projectId?: string) => Promise<void>;
+  getMemorySettings: () => Promise<MemorySettingsDocument>;
+  updateMemorySettings: (request: MemorySettingsPatch) => Promise<MemorySettingsDocument>;
+  startMemoryDream: (projectId?: string) => Promise<MemoryDreamTask>;
+  getMemoryDream: (taskId: string) => Promise<MemoryDreamTask>;
+  cancelMemoryDream: (taskId: string) => Promise<void>;
   getRuntimeInfo: () => Promise<RuntimeInfo>;
   listConnectors: () => Promise<RuntimeConnector[]>;
   connectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;

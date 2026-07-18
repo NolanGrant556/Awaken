@@ -129,6 +129,13 @@ type Tool interface {
 	Execute(ctx context.Context, input string) (string, error)
 }
 
+// SemanticJournalSanitizer lets a tool replace its durable call/result payload
+// with a receipt. It does not alter the live model-facing execution result.
+type SemanticJournalSanitizer interface {
+	SemanticJournalArguments(input string) string
+	SemanticJournalResult(output string) string
+}
+
 type ReadOnlyTool interface {
 	IsReadOnly() bool
 }

@@ -1,6 +1,8 @@
 package agentcore
 
 import (
+	stdcontext "context"
+
 	"awaken/src/agentcore/subagent"
 	"awaken/src/context"
 	"awaken/src/prompt"
@@ -20,6 +22,15 @@ type AgentConfig struct {
 	EntryPoint        string
 	Workspace         WorkspaceConfig
 	SkillSummary      string
+	// MemoryContextProvider reads the current host-owned Memory indexes at
+	// request build time. Failures degrade to no Memory block.
+	MemoryContextProvider func() (string, error)
+	// MemoryRecallStart launches non-blocking manifest selection for a user
+	// turn. MemoryContextProvider exposes a completed result later.
+	MemoryRecallStart func(stdcontext.Context, string, []string)
+	MemoryRecallEnd   func()
+	MemoryRecallDrain func() []MemoryRecallReceipt
+	MemoryRecallReset func()
 	AutoToolPolicy    AutoToolPolicy
 	// ToolExposure selects the model-visible tool pool. Empty Mode uses
 	// DefaultToolExposurePolicy applies generic explicit hide/show rules.
@@ -61,6 +72,17 @@ type AgentConfig struct {
 	ToolSessionState *tool.ToolSessionState
 	// ModelContentStore owns tool-result media blobs beneath the thread session.
 	ModelContentStore tool.ModelContentStore
+}
+
+type MemoryRecallReceipt struct {
+	MemoryID  string `json:"memory_id"`
+	Scope     string `json:"scope"`
+	Type      string `json:"type"`
+	Revision  int    `json:"revision"`
+	Bytes     int    `json:"bytes"`
+	Action    string `json:"action,omitempty"`
+	Status    string `json:"status,omitempty"`
+	ErrorCode string `json:"error_code,omitempty"`
 }
 
 // ComposerSkillSelectionContext records the current run and the ordered Skills

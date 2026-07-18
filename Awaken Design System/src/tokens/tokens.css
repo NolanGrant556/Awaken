@@ -1,44 +1,52 @@
 :root {
   color-scheme: light;
 
+  /* ============================================================
+     皮肤变量（纯视觉：颜色/阴影色值，不参与布局测量，可安全迭代）
+     骨架变量见文件下半部分；骨架变更 = 交互变更，必须走中间区域复核
+     ============================================================ */
+
+  /* Neutral scale (warm / stone): fills & borders derive from rgb(120,113,106) */
+
   /* Background */
-  --aw-bg-main: #ffffff;
-  --aw-bg-nav: #f5f5f5;
+  --aw-bg-main: #fffefe;
+  --aw-bg-nav: #f7f6f4;
   --aw-bg-white: #ffffff;
-  --aw-bg-fill-light: rgba(115, 115, 115, 0.08);
-  --aw-bg-fill-main: rgba(115, 115, 115, 0.12);
-  --aw-bg-fill-dark: rgba(115, 115, 115, 0.16);
-  --aw-overlay-backdrop: rgba(0, 0, 0, 0.28);
+  --aw-bg-fill-light: rgba(120, 113, 106, 0.08);
+  --aw-bg-fill-main: rgba(120, 113, 106, 0.12);
+  --aw-bg-fill-dark: rgba(120, 113, 106, 0.16);
+  --aw-overlay-backdrop: rgba(28, 25, 23, 0.28);
 
   /* Text */
-  --aw-text-primary: #171717;
-  --aw-text-secondary: #404040;
-  --aw-text-tertiary: #737373;
-  --aw-text-disabled: #a1a1a1;
+  --aw-text-primary: #1c1917;
+  --aw-text-secondary: #44403c;
+  --aw-text-tertiary: #78716c;
+  --aw-text-disabled: #a8a29e;
   --aw-text-blue: #2f74ff;
   --aw-text-onblack: #ffffff;
 
   /* Border */
-  --aw-border-main: rgba(115, 115, 115, 0.12);
-  --aw-border-light: rgba(115, 115, 115, 0.08);
-  --aw-border-active: rgba(0, 0, 0, 0.72);
-  --aw-border-control: rgba(115, 115, 115, 0.14);
-  --aw-border-control-hover: rgba(115, 115, 115, 0.22);
+  --aw-border-main: rgba(120, 113, 106, 0.12);
+  --aw-border-light: rgba(120, 113, 106, 0.08);
+  --aw-border-active: rgba(28, 25, 23, 0.72);
+  --aw-border-control: rgba(120, 113, 106, 0.14);
+  --aw-border-control-hover: rgba(120, 113, 106, 0.22);
 
   /* Button */
-  --aw-button-black: #262626;
-  --aw-button-black-hover: #171717;
-  --aw-button-black-active: #0a0a0a;
+  --aw-button-black: #292524;
+  --aw-button-black-hover: #1c1917;
+  --aw-button-black-active: #0c0a09;
 
-  /* Status */
+  /* Status base hues: each family has exactly one base; all soft/bg/diff/text
+     variants below must derive from it (same rgb, different alpha/shade) */
   --aw-success: #15a877;
   --aw-warning: #e27900;
   --aw-error: #e8463a;
   --aw-accent-purple: #4b3fe3;
   --aw-accent: var(--aw-accent-purple);
 
-  --aw-success-soft-bg: rgba(64, 176, 139, 0.12);
-  --aw-success-soft-border: rgba(64, 176, 139, 0.18);
+  --aw-success-soft-bg: rgba(21, 168, 119, 0.12);
+  --aw-success-soft-border: rgba(21, 168, 119, 0.18);
   --aw-warning-soft-bg: rgba(226, 121, 0, 0.12);
   --aw-warning-soft-border: rgba(226, 121, 0, 0.16);
   --aw-error-soft-bg: rgba(232, 70, 58, 0.12);
@@ -48,57 +56,57 @@
   --aw-surface-canvas: var(--aw-bg-main);
   --aw-surface-navigation: var(--aw-bg-nav);
   --aw-surface-chrome: var(--aw-bg-main);
-  --aw-surface-work: #ffffff;
+  --aw-surface-work: #fffefe;
   --aw-surface-detail: #ffffff;
   --aw-surface-raised: #ffffff;
-  --aw-surface-panel: #f5f5f5;
-  --aw-surface-panel-muted: rgba(115, 115, 115, 0.08);
-  --aw-surface-hover: rgba(115, 115, 115, 0.08);
+  --aw-surface-panel: #f7f6f4;
+  --aw-surface-panel-muted: rgba(120, 113, 106, 0.08);
+  --aw-surface-hover: rgba(120, 113, 106, 0.08);
   --aw-surface-composer: var(--aw-bg-fill-light);
-  --aw-surface-code: #f5f5f5;
-  --aw-surface-selection: rgba(115, 115, 115, 0.12);
+  --aw-surface-code: #f7f6f4;
+  --aw-surface-selection: rgba(120, 113, 106, 0.12);
   --aw-surface-focus: rgba(255, 255, 255, 1);
   --aw-surface-danger: rgba(232, 70, 58, 0.08);
-  --aw-surface-status-pill: rgba(115, 115, 115, 0.08);
-  --aw-surface-muted-fill: rgba(115, 115, 115, 0.08);
+  --aw-surface-status-pill: rgba(120, 113, 106, 0.08);
+  --aw-surface-muted-fill: rgba(120, 113, 106, 0.08);
   --aw-surface-sidebar: var(--aw-surface-navigation);
   --aw-surface-stage: var(--aw-surface-work);
   --aw-surface-inspector: var(--aw-surface-detail);
   --aw-surface-runtime-pill: var(--aw-surface-status-pill);
   --aw-text-muted: var(--aw-text-secondary);
   --aw-text-subtle: var(--aw-text-tertiary);
-  --aw-text-code: #17181a;
+  --aw-text-code: #1c1917;
   --aw-text-selection: #2f74ff;
   --aw-status-running: var(--aw-text-blue);
-  --aw-status-running-bg: rgba(0, 129, 242, 0.11);
-  --aw-status-running-border: rgba(0, 129, 242, 0.18);
+  --aw-status-running-bg: rgba(47, 116, 255, 0.11);
+  --aw-status-running-border: rgba(47, 116, 255, 0.18);
   --aw-status-waiting: var(--aw-warning);
-  --aw-status-waiting-bg: rgba(234, 88, 12, 0.12);
-  --aw-status-waiting-text: #c46f11;
+  --aw-status-waiting-bg: rgba(226, 121, 0, 0.12);
+  --aw-status-waiting-text: #b05e00;
   --aw-status-success: var(--aw-success);
-  --aw-status-success-bg: rgba(34, 197, 94, 0.12);
-  --aw-status-success-text: #1e8b56;
+  --aw-status-success-bg: rgba(21, 168, 119, 0.12);
+  --aw-status-success-text: #0e7a55;
   --aw-status-danger: var(--aw-error);
-  --aw-status-danger-bg: rgba(242, 90, 90, 0.14);
-  --aw-status-danger-text: #c9382f;
-  --aw-diff-added: rgba(34, 197, 94, 0.12);
-  --aw-diff-added-text: #166534;
-  --aw-diff-removed: rgba(242, 90, 90, 0.14);
-  --aw-diff-removed-text: #b42318;
-  --aw-diff-changed: rgba(245, 158, 11, 0.14);
-  --aw-diff-changed-text: #8a4b00;
-  --aw-terminal-bg: #17181a;
+  --aw-status-danger-bg: rgba(232, 70, 58, 0.14);
+  --aw-status-danger-text: #c23529;
+  --aw-diff-added: rgba(21, 168, 119, 0.12);
+  --aw-diff-added-text: #0e7a55;
+  --aw-diff-removed: rgba(232, 70, 58, 0.14);
+  --aw-diff-removed-text: #c23529;
+  --aw-diff-changed: rgba(226, 121, 0, 0.14);
+  --aw-diff-changed-text: #b05e00;
+  --aw-terminal-bg: #1c1917;
   --aw-terminal-text: #ffffff;
   --aw-brand-wordmark-filter: none;
   --aw-composer-surface: var(--aw-bg-white);
-  --aw-composer-border: rgba(0, 0, 0, 0.18);
+  --aw-composer-border: rgba(28, 25, 23, 0.18);
   --aw-composer-shadow:
-    0 14px 40px rgba(23, 23, 23, 0.07),
-    0 1px 2px rgba(23, 23, 23, 0.04);
+    0 14px 40px rgba(28, 25, 23, 0.07),
+    0 1px 2px rgba(28, 25, 23, 0.04);
   --aw-composer-shadow-focus:
     var(--aw-shadow-focus),
-    0 14px 40px rgba(23, 23, 23, 0.08);
-  --aw-composer-attachment-remove-bg: rgba(23, 23, 23, 0.72);
+    0 14px 40px rgba(28, 25, 23, 0.08);
+  --aw-composer-attachment-remove-bg: rgba(28, 25, 23, 0.72);
   --aw-composer-attachment-remove-fg: var(--aw-text-onblack);
   --aw-composer-attachment-remove-border: transparent;
   --aw-composer-attachment-remove-shadow: none;
@@ -111,10 +119,22 @@
     ),
     radial-gradient(
       ellipse at 50% 82%,
-      rgba(23, 23, 23, 0.09) 0%,
-      rgba(23, 23, 23, 0.04) 46%,
-      rgba(23, 23, 23, 0) 76%
+      rgba(28, 25, 23, 0.09) 0%,
+      rgba(28, 25, 23, 0.04) 46%,
+      rgba(28, 25, 23, 0) 76%
     );
+
+  /* Shadow（仅颜色基为暖黑；偏移/模糊/扩展数值冻结） */
+  --aw-shadow-menu: 0 12px 32px rgba(28, 25, 23, 0.12), 0 2px 8px rgba(28, 25, 23, 0.08);
+  --aw-shadow-popover: var(--aw-shadow-menu);
+  --aw-shadow-toast: 0 12px 32px rgba(28, 25, 23, 0.12);
+  --aw-shadow-raised: 0 1px 2px rgba(28, 25, 23, 0.04);
+  --aw-shadow-focus: 0 0 0 2px rgba(28, 25, 23, 0.08);
+
+  /* ============================================================
+     骨架变量（布局测量相关：尺寸/间距/字度/圆角/宽度，冻结）
+     修改任一值都会改变中间区域测量与滚动定位，视同交互变更
+     ============================================================ */
 
   /* Spacing */
   --aw-space-1: 2px;
@@ -147,13 +167,6 @@
   --aw-radius-control: var(--aw-radius-sm);
   --aw-radius-panel: var(--aw-radius-md);
   --aw-radius-workbench: var(--aw-radius-md);
-
-  /* Shadow */
-  --aw-shadow-menu: 0 12px 32px rgba(23, 23, 23, 0.12), 0 2px 8px rgba(23, 23, 23, 0.08);
-  --aw-shadow-popover: var(--aw-shadow-menu);
-  --aw-shadow-toast: 0 12px 32px rgba(23, 23, 23, 0.12);
-  --aw-shadow-raised: 0 1px 2px rgba(23, 23, 23, 0.04);
-  --aw-shadow-focus: 0 0 0 2px rgba(0, 0, 0, 0.08);
 
   /* Font */
   --aw-font-sans: "SF Pro Text", "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -203,13 +216,18 @@
 :root[data-aw-theme="dark"] {
   color-scheme: dark;
 
+  /* ============================================================
+     皮肤变量（纯视觉：颜色/阴影色值，不参与布局测量，可安全迭代）
+     深色中性基：表面已是暖黑，填充/边框由暖白 rgb(237,235,232) 派生
+     ============================================================ */
+
   /* Background */
   --aw-bg-main: #0f0f0e;
   --aw-bg-nav: #161614;
   --aw-bg-white: #1b1b19;
-  --aw-bg-fill-light: rgba(255, 255, 255, 0.07);
-  --aw-bg-fill-main: rgba(255, 255, 255, 0.11);
-  --aw-bg-fill-dark: rgba(255, 255, 255, 0.16);
+  --aw-bg-fill-light: rgba(237, 235, 232, 0.07);
+  --aw-bg-fill-main: rgba(237, 235, 232, 0.11);
+  --aw-bg-fill-dark: rgba(237, 235, 232, 0.16);
   --aw-overlay-backdrop: rgba(0, 0, 0, 0.58);
 
   /* Text */
@@ -221,18 +239,18 @@
   --aw-text-onblack: #11110f;
 
   /* Border */
-  --aw-border-main: rgba(255, 255, 255, 0.12);
-  --aw-border-light: rgba(255, 255, 255, 0.08);
-  --aw-border-active: rgba(255, 255, 255, 0.74);
-  --aw-border-control: rgba(255, 255, 255, 0.16);
-  --aw-border-control-hover: rgba(255, 255, 255, 0.26);
+  --aw-border-main: rgba(237, 235, 232, 0.12);
+  --aw-border-light: rgba(237, 235, 232, 0.08);
+  --aw-border-active: rgba(237, 235, 232, 0.74);
+  --aw-border-control: rgba(237, 235, 232, 0.16);
+  --aw-border-control-hover: rgba(237, 235, 232, 0.26);
 
   /* Button */
   --aw-button-black: #f2f1ed;
   --aw-button-black-hover: #ffffff;
   --aw-button-black-active: #dfddd7;
 
-  /* Status */
+  /* Status base hues (same one-base-per-family rule as light) */
   --aw-success: #49c89c;
   --aw-warning: #f0a64a;
   --aw-error: #ff756b;
@@ -253,15 +271,15 @@
   --aw-surface-detail: #171715;
   --aw-surface-raised: #20201d;
   --aw-surface-panel: #1a1a18;
-  --aw-surface-panel-muted: rgba(255, 255, 255, 0.07);
-  --aw-surface-hover: rgba(255, 255, 255, 0.08);
-  --aw-surface-composer: rgba(255, 255, 255, 0.08);
+  --aw-surface-panel-muted: rgba(237, 235, 232, 0.07);
+  --aw-surface-hover: rgba(237, 235, 232, 0.08);
+  --aw-surface-composer: rgba(237, 235, 232, 0.08);
   --aw-surface-code: #141413;
-  --aw-surface-selection: rgba(255, 255, 255, 0.13);
+  --aw-surface-selection: rgba(237, 235, 232, 0.13);
   --aw-surface-focus: #262521;
   --aw-surface-danger: rgba(255, 117, 107, 0.11);
-  --aw-surface-status-pill: rgba(255, 255, 255, 0.08);
-  --aw-surface-muted-fill: rgba(255, 255, 255, 0.07);
+  --aw-surface-status-pill: rgba(237, 235, 232, 0.08);
+  --aw-surface-muted-fill: rgba(237, 235, 232, 0.07);
   --aw-surface-sidebar: var(--aw-surface-navigation);
   --aw-surface-stage: var(--aw-surface-work);
   --aw-surface-inspector: var(--aw-surface-detail);
@@ -282,20 +300,20 @@
   --aw-diff-removed-text: #ffa19a;
   --aw-diff-changed: rgba(240, 166, 74, 0.15);
   --aw-diff-changed-text: #e8b35f;
-  --aw-terminal-bg: #090908;
+  --aw-terminal-bg: #0c0a09;
   --aw-terminal-text: #f2f1ed;
   --aw-brand-wordmark-filter: invert(1) brightness(1.08);
   --aw-composer-surface: #1b1b19;
-  --aw-composer-border: rgba(255, 255, 255, 0.24);
+  --aw-composer-border: rgba(237, 235, 232, 0.24);
   --aw-composer-shadow:
     0 20px 44px rgba(0, 0, 0, 0.34),
-    0 1px 0 rgba(255, 255, 255, 0.03);
+    0 1px 0 rgba(237, 235, 232, 0.03);
   --aw-composer-shadow-focus:
     var(--aw-shadow-focus),
     0 22px 48px rgba(0, 0, 0, 0.42);
   --aw-composer-attachment-remove-bg: rgba(245, 245, 241, 0.94);
   --aw-composer-attachment-remove-fg: #111110;
-  --aw-composer-attachment-remove-border: rgba(255, 255, 255, 0.32);
+  --aw-composer-attachment-remove-border: rgba(237, 235, 232, 0.32);
   --aw-composer-attachment-remove-shadow: 0 4px 12px rgba(0, 0, 0, 0.32);
   --aw-composer-halo:
     radial-gradient(
@@ -311,12 +329,12 @@
       rgba(0, 0, 0, 0) 78%
     );
 
-  /* Shadow */
+  /* Shadow（仅颜色基调整；偏移/模糊/扩展数值冻结） */
   --aw-shadow-menu: 0 18px 48px rgba(0, 0, 0, 0.42), 0 2px 8px rgba(0, 0, 0, 0.3);
   --aw-shadow-popover: var(--aw-shadow-menu);
   --aw-shadow-toast: 0 18px 48px rgba(0, 0, 0, 0.36);
   --aw-shadow-raised: 0 1px 2px rgba(0, 0, 0, 0.32);
-  --aw-shadow-focus: 0 0 0 2px rgba(255, 255, 255, 0.16);
+  --aw-shadow-focus: 0 0 0 2px rgba(237, 235, 232, 0.16);
 }
 
 @media (max-width: 1180px) {

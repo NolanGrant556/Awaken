@@ -2094,18 +2094,21 @@ describe("App workbench presentation", () => {
       shouldPauseLatestOutputFollowForScroll({
         previousScrollTop: 240,
         nextScrollTop: 220,
+        isAtScrollBottom: false,
       }),
     ).toBe(true);
     expect(
       shouldPauseLatestOutputFollowForScroll({
         previousScrollTop: 240,
         nextScrollTop: 260,
+        isAtScrollBottom: false,
       }),
     ).toBe(false);
     expect(
       shouldPauseLatestOutputFollowForScroll({
         previousScrollTop: null,
         nextScrollTop: 220,
+        isAtScrollBottom: false,
       }),
     ).toBe(false);
     expect(shouldRequestLatestOutputFollowResumeForWheel({ deltaY: 12 })).toBe(
@@ -2138,6 +2141,26 @@ describe("App workbench presentation", () => {
         currentY: 112,
       }),
     ).toBe(false);
+  });
+
+  it("does not pause latest output follow when the browser passively clamps a shrinking tail", () => {
+    // scrollHeight 收缩（mermaid 坍缩、process Disclosure 折叠）时浏览器把
+    // 贴底的 scrollTop 钳小：下降幅度再大，只要仍贴底就不是用户上滑。
+    expect(
+      shouldPauseLatestOutputFollowForScroll({
+        previousScrollTop: 1160,
+        nextScrollTop: 560,
+        isAtScrollBottom: true,
+      }),
+    ).toBe(false);
+    // 同样的下降发生在离开底部之后，仍是真实的用户上滑。
+    expect(
+      shouldPauseLatestOutputFollowForScroll({
+        previousScrollTop: 1160,
+        nextScrollTop: 560,
+        isAtScrollBottom: false,
+      }),
+    ).toBe(true);
   });
 
   it("does not resume latest output follow until the user asks to return to the tail", () => {

@@ -44,8 +44,20 @@ const followUpNarrativeItems: RunNarrativeItem[] = [
   },
 ];
 
+const followUpAnswerNarrativeItems: RunNarrativeItem[] = [
+  ...followUpNarrativeItems,
+  {
+    kind: "answer",
+    id: "answer:run-2:final",
+    markdown: "follow-up final answer",
+    status: "done",
+    isFinal: true,
+  },
+];
+
 type ControllerHarnessHandle = {
   submitFollowUp: () => void;
+  appendFollowUpAnswer: () => void;
 };
 
 const ControllerHarness = forwardRef<ControllerHarnessHandle>(
@@ -65,12 +77,20 @@ const ControllerHarness = forwardRef<ControllerHarnessHandle>(
           controller.prepareForRunStart();
           setNarrativeItems([...followUpNarrativeItems]);
         },
+        appendFollowUpAnswer: () => {
+          setNarrativeItems([...followUpAnswerNarrativeItems]);
+        },
       }),
       [controller.prepareForRunStart],
     );
 
     return (
-      <div data-run-stage ref={controller.setRunStageScrollElement}>
+      <div
+        data-run-stage
+        data-return-to-latest-visible={String(controller.returnToLatestVisible)}
+        ref={controller.setRunStageScrollElement}
+        onScroll={controller.handleRunStageScroll}
+      >
         {controller.narrativeSections.turns.map((turn) => (
           <section key={turn.id} data-execution-turn-id={turn.id}>
             <div className="execution-turn-header">{turn.prompt.text}</div>
@@ -100,10 +120,16 @@ function domRect(top: number, height: number): DOMRect {
   };
 }
 
+type ResizeObserverRecord = {
+  callback: ResizeObserverCallback;
+  targets: Element[];
+};
+
 describe("useRunStageScrollController prompt anchor timing", () => {
   let host: HTMLDivElement;
   let root: Root | undefined;
   let animationFrameCallbacks: FrameRequestCallback[];
+  let resizeObserverRecords: ResizeObserverRecord[];
   let scrollToMock: ReturnType<typeof vi.fn>;
   let originalScrollToDescriptor: PropertyDescriptor | undefined;
 
@@ -117,12 +143,28 @@ describe("useRunStageScrollController prompt anchor timing", () => {
     host = document.createElement("div");
     document.body.append(host);
     animationFrameCallbacks = [];
+    resizeObserverRecords = [];
 
     vi.stubGlobal(
       "ResizeObserver",
       class ResizeObserverMock {
-        observe(): void {}
-        unobserve(): void {}
+        private readonly record: ResizeObserverRecord;
+
+        constructor(callback: ResizeObserverCallback) {
+          this.record = { callback, targets: [] };
+          resizeObserverRecords.push(this.record);
+        }
+
+        observe(target: Element): void {
+          this.record.targets.push(target);
+        }
+
+        unobserve(target: Element): void {
+          this.record.targets = this.record.targets.filter(
+            (observed) => observed !== target,
+          );
+        }
+
         disconnect(): void {}
       },
     );
@@ -260,5 +302,118 @@ describe("useRunStageScrollController prompt anchor timing", () => {
         ?.querySelector<HTMLElement>(".execution-turn-header")
         ?.getBoundingClientRect().top,
     ).toBe(RUN_STAGE_TOP);
+  });
+
+  describe("streaming layout follow", () => {
+    function defineRunStageScrollGeometry(
+      element: HTMLElement,
+      scrollHeight: number,
+    ): void {
+      Object.defineProperties(element, {
+        clientHeight: { configurable: true, value: RUN_STAGE_HEIGHT },
+        scrollHeight: { configurable: true, value: scrollHeight },
+      });
+    }
+
+    function flushAnimationFrames(): void {
+      const callbacks = animationFrameCallbacks.splice(0);
+      for (const callback of callbacks) {
+        callback(16);
+      }
+    }
+
+    function triggerLatestTurnResizeObserver(runStage: HTMLElement): void {
+      const followUpTurn = runStage.querySelector(
+        `[data-execution-turn-id="${FOLLOW_UP_PROMPT_ID}"]`,
+      );
+      const record = resizeObserverRecords.find((entry) =>
+        entry.targets.includes(followUpTurn as Element),
+      );
+      expect(record).toBeDefined();
+      record?.callback([], {} as ResizeObserver);
+    }
+
+    function renderFollowingController(): { runStage: HTMLElement } {
+      const harnessRef = createRef<ControllerHarnessHandle>();
+      root = createRoot(host);
+      act(() => {
+        root?.render(<ControllerHarness ref={harnessRef} />);
+      });
+
+      const runStage = host.querySelector<HTMLElement>("[data-run-stage]");
+      expect(runStage).not.toBeNull();
+      defineRunStageScrollGeometry(runStage!, RUN_STAGE_SCROLL_HEIGHT);
+      runStage!.scrollTop = INITIAL_SCROLL_TOP;
+
+      act(() => {
+        harnessRef.current?.submitFollowUp();
+      });
+      act(() => {
+        harnessRef.current?.appendFollowUpAnswer();
+      });
+      act(() => {
+        flushAnimationFrames();
+      });
+      return { runStage: runStage! };
+    }
+
+    it("re-pins to the latest tail when the latest turn resize observer fires while following", () => {
+      const { runStage } = renderFollowingController();
+      expect(runStage.scrollTop).toBe(RUN_STAGE_SCROLL_HEIGHT - RUN_STAGE_HEIGHT);
+      expect(runStage.dataset.returnToLatestVisible).toBe("false");
+
+      scrollToMock.mockClear();
+      // mermaid 渲染、SVG/图片注入等异步增高，触发布局 observer。
+      defineRunStageScrollGeometry(runStage, 2_400);
+      act(() => {
+        triggerLatestTurnResizeObserver(runStage);
+      });
+
+      expect(scrollToMock).toHaveBeenCalledWith({
+        top: 2_400 - RUN_STAGE_HEIGHT,
+        behavior: "auto",
+      });
+      expect(runStage.scrollTop).toBe(2_400 - RUN_STAGE_HEIGHT);
+    });
+
+    it("does not re-pin from the resize observer after the user pauses follow", () => {
+      const { runStage } = renderFollowingController();
+
+      act(() => {
+        runStage.dispatchEvent(
+          new WheelEvent("wheel", { deltaY: -12, bubbles: true }),
+        );
+      });
+      expect(runStage.dataset.returnToLatestVisible).toBe("true");
+
+      scrollToMock.mockClear();
+      defineRunStageScrollGeometry(runStage, 3_000);
+      act(() => {
+        triggerLatestTurnResizeObserver(runStage);
+      });
+
+      expect(scrollToMock).not.toHaveBeenCalled();
+      expect(runStage.dataset.returnToLatestVisible).toBe("true");
+    });
+
+    it("ignores passive scroll clamping at the bottom but still pauses for a real upward scroll", () => {
+      const { runStage } = renderFollowingController();
+      expect(runStage.dataset.returnToLatestVisible).toBe("false");
+
+      // scrollHeight 收缩时浏览器把贴底的 scrollTop 钳到新的 max，不算用户上滑。
+      defineRunStageScrollGeometry(runStage, 1_200);
+      runStage.scrollTop = 1_200 - RUN_STAGE_HEIGHT;
+      act(() => {
+        runStage.dispatchEvent(new Event("scroll"));
+      });
+      expect(runStage.dataset.returnToLatestVisible).toBe("false");
+
+      // 离开底部之后的向上滚动仍然是用户暂停。
+      runStage.scrollTop = 400;
+      act(() => {
+        runStage.dispatchEvent(new Event("scroll"));
+      });
+      expect(runStage.dataset.returnToLatestVisible).toBe("true");
+    });
   });
 });

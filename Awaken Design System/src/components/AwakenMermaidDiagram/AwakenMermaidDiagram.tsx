@@ -2,6 +2,7 @@ import {
   type CSSProperties,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -48,8 +49,153 @@ let mermaidInitialized = false;
 
 // SVG 渲染结果缓存：会话切换/重挂载时同一份图直接复用，
 // 避免重复的动态 import + 异步渲染带来的 loading 闪烁与高度抖动。
+// 缓存内容只是模板；写入 DOM 前必须按挂载实例重新作用域化内部 ID。
 const MERMAID_SVG_CACHE_LIMIT = 50;
 const mermaidSvgCache = new Map<string, string>();
+
+const SVG_ID_REFERENCE_LIST_ATTRIBUTES = new Set([
+  "aria-activedescendant",
+  "aria-controls",
+  "aria-describedby",
+  "aria-details",
+  "aria-labelledby",
+  "aria-owns",
+  "for",
+  "headers",
+]);
+
+const SVG_LOCAL_HREF_ATTRIBUTES = new Set(["href", "xlink:href"]);
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function replaceUrlFragmentReferences(
+  value: string,
+  scopedIds: ReadonlyMap<string, string>,
+): string {
+  return value.replace(
+    /url\(\s*["']?[^)]*?#([^)"'\s]+)["']?\s*\)/g,
+    (reference, referencedId: string) => {
+      const scopedId = scopedIds.get(referencedId);
+      return scopedId ? reference.replace(`#${referencedId}`, `#${scopedId}`) : reference;
+    },
+  );
+}
+
+function replaceLocalHrefReference(
+  value: string,
+  scopedIds: ReadonlyMap<string, string>,
+): string {
+  const match = value.match(/^(\s*)#([^\s]+)(\s*)$/);
+  if (!match) {
+    return value;
+  }
+
+  const scopedId = scopedIds.get(match[2]);
+  return scopedId ? `${match[1]}#${scopedId}${match[3]}` : value;
+}
+
+function replaceIdReferenceList(
+  value: string,
+  scopedIds: ReadonlyMap<string, string>,
+): string {
+  return value
+    .split(/(\s+)/)
+    .map((token) => scopedIds.get(token) ?? token)
+    .join("");
+}
+
+function replaceTimingReferences(
+  value: string,
+  scopedIds: ReadonlyMap<string, string>,
+): string {
+  return value.replace(
+    /(^|[;\s])([^;\s]+?)(?=\.)/g,
+    (reference, prefix: string, referencedId: string) => {
+      const scopedId = scopedIds.get(referencedId);
+      return scopedId ? `${prefix}${scopedId}` : reference;
+    },
+  );
+}
+
+function scopeMermaidSvgIds(svg: string, scope: string): string {
+  if (typeof DOMParser === "undefined" || typeof XMLSerializer === "undefined") {
+    return svg;
+  }
+
+  const document = new DOMParser().parseFromString(svg, "image/svg+xml");
+  if (document.querySelector("parsererror")) {
+    return svg;
+  }
+
+  const root = document.documentElement;
+  const elements = [root, ...Array.from(root.querySelectorAll("*"))];
+  const scopedIds = new Map<string, string>();
+  const safeScope = scope.replace(/[^a-zA-Z0-9_-]/g, "-");
+  const normalizedScope = /^[a-zA-Z_]/.test(safeScope) ? safeScope : `awaken-${safeScope}`;
+
+  for (const element of elements) {
+    const currentId = element.getAttribute("id");
+    if (!currentId || scopedIds.has(currentId)) {
+      continue;
+    }
+    scopedIds.set(currentId, `${normalizedScope}-${scopedIds.size}`);
+  }
+
+  if (scopedIds.size === 0) {
+    return svg;
+  }
+
+  const originalRootId = root.getAttribute("id");
+  for (const element of elements) {
+    const currentId = element.getAttribute("id");
+    if (currentId) {
+      const scopedId = scopedIds.get(currentId);
+      if (scopedId) {
+        element.setAttribute("id", scopedId);
+      }
+    }
+
+    for (const attribute of Array.from(element.attributes)) {
+      if (attribute.name === "id") {
+        continue;
+      }
+
+      let nextValue = replaceUrlFragmentReferences(attribute.value, scopedIds);
+      if (SVG_LOCAL_HREF_ATTRIBUTES.has(attribute.name)) {
+        nextValue = replaceLocalHrefReference(nextValue, scopedIds);
+      } else if (SVG_ID_REFERENCE_LIST_ATTRIBUTES.has(attribute.name)) {
+        nextValue = replaceIdReferenceList(nextValue, scopedIds);
+      } else if (attribute.name === "begin" || attribute.name === "end") {
+        nextValue = replaceTimingReferences(nextValue, scopedIds);
+      }
+
+      if (nextValue !== attribute.value) {
+        element.setAttributeNS(attribute.namespaceURI, attribute.name, nextValue);
+      }
+    }
+  }
+
+  if (originalRootId) {
+    const scopedRootId = scopedIds.get(originalRootId);
+    if (scopedRootId) {
+      const rootSelector = new RegExp(
+        `#${escapeRegExp(originalRootId)}(?=[^a-zA-Z0-9_-]|$)`,
+        "g",
+      );
+      for (const styleElement of Array.from(root.querySelectorAll("style"))) {
+        const currentCss = styleElement.textContent ?? "";
+        styleElement.textContent = replaceUrlFragmentReferences(
+          currentCss.replace(rootSelector, `#${scopedRootId}`),
+          scopedIds,
+        );
+      }
+    }
+  }
+
+  return new XMLSerializer().serializeToString(root);
+}
 
 function readCachedMermaidSvg(chart: string): string | null {
   return mermaidSvgCache.get(chart) ?? null;
@@ -572,6 +718,18 @@ export function AwakenMermaidDiagram({
   const canCopy = normalizedChart.length > 0;
   const canResetView =
     expandedZoom !== DEFAULT_EXPANDED_ZOOM || panOffset.x !== 0 || panOffset.y !== 0;
+  const scopedInlineSvg = useMemo(() => {
+    if (renderState.status !== "ready") {
+      return null;
+    }
+    return scopeMermaidSvgIds(renderState.svg, `${diagramId}-inline`);
+  }, [diagramId, renderState]);
+  const scopedExpandedSvg = useMemo(() => {
+    if (!isExpanded || renderState.status !== "ready") {
+      return null;
+    }
+    return scopeMermaidSvgIds(renderState.svg, `${diagramId}-expanded`);
+  }, [diagramId, isExpanded, renderState]);
   const expandedFrameStyle: CSSProperties = {
     transform: `translate(${panOffset.x}px, ${panOffset.y}px)`,
     ...(expandedDiagramSize
@@ -594,7 +752,7 @@ export function AwakenMermaidDiagram({
         />
         <div
           className="assistant-mermaid-diagram-svg"
-          dangerouslySetInnerHTML={{ __html: renderState.svg }}
+          dangerouslySetInnerHTML={{ __html: scopedInlineSvg ?? renderState.svg }}
         />
         {isExpanded ? (
           <div
@@ -637,7 +795,7 @@ export function AwakenMermaidDiagram({
                   <div
                     ref={expandedDiagramRef}
                     className="assistant-mermaid-diagram-svg assistant-mermaid-expanded-svg"
-                    dangerouslySetInnerHTML={{ __html: renderState.svg }}
+                    dangerouslySetInnerHTML={{ __html: scopedExpandedSvg ?? renderState.svg }}
                   />
                 </div>
               </div>

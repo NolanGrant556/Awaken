@@ -42,17 +42,16 @@ Awaken Design System/
 
 ## 入口契约
 
-Awaken 本地只允许两套入口：
-
-1. Awaken 使用入口：
+Awaken Desktop 的正式平台入口由仓库根 `README.md` 唯一定义。macOS 当前从仓库根目录启动和关闭：
 
 ```bash
-npm run dev:desktop
+npm run open:desktop
+npm run close:desktop
 ```
 
-用户和开发者都通过同一个入口打开同一个 Awaken Desktop，看到同一套界面形态。
+Windows 当前使用前台入口 `npm run dev:desktop`，并在对应终端按 `Ctrl+C` 关闭。平台验收范围和入口细节不在本文档重复维护。
 
-2. 组件独立观测入口：
+组件独立观测入口：
 
 从仓库根目录启动并打开 Gallery：
 

@@ -36,7 +36,7 @@ const toneConfig: Record<ApprovalRiskTone, ToneConfig> = {
   },
   warning: {
     AwakenIcon: AlertTriangle,
-    color: "var(--aw-warning)",
+    color: "var(--aw-warning-text)",
     softBg: "var(--aw-warning-soft-bg)",
     softBorder: "var(--aw-warning-soft-border)",
   },

@@ -14,7 +14,7 @@ Awaken owns its visual language through its own tokens and components. Keep Awak
 
 - Preserve existing `--aw-*` variables for compatibility.
 - Tokens are split into two classes, kept in separate labeled sections of `tokens/tokens.css`:
-  - **Skin tokens** (pure visual: colors and shadow color values) may be iterated freely for style work.
+  - **Skin tokens** (pure visual: colors and shadow color values) are geometry-safe because they do not participate in layout measurement, but every change still requires visual, light/dark theme, and accessibility acceptance.
   - **Skeleton tokens** (layout-measured: spacing, icon sizes, radius, font metrics, layout widths) are frozen; changing any of them is treated as an interaction change and must go through the middle-region review checklist.
 - Each status family (success, warning, error, running) has exactly one base hue; soft bg/border, status bg/text, and diff variants must derive from that base instead of introducing new hues.
 - Product text defaults to `14px / 20px`.
@@ -40,4 +40,4 @@ Before shipping visual changes, verify:
 - `npm --workspace @awaken/desktop run typecheck`
 - `npm --workspace @awaken/desktop run test`
 
-For Desktop visual QA, use the official root command `npm run dev:desktop` through a single `awaken-dev-desktop` screen session.
+For Desktop visual QA on macOS, use the official root commands `npm run open:desktop` and `npm run close:desktop`. Windows currently uses the foreground `npm run dev:desktop` entry. The root `README.md` is the sole authority for current platform entry details.

@@ -2,7 +2,8 @@
   color-scheme: light;
 
   /* ============================================================
-     皮肤变量（纯视觉：颜色/阴影色值，不参与布局测量，可安全迭代）
+     皮肤变量（纯视觉：颜色/阴影色值，不参与布局测量）
+     对几何与滚动定位安全，仍必须通过视觉、浅色/深色主题与无障碍验收
      骨架变量见文件下半部分；骨架变更 = 交互变更，必须走中间区域复核
      ============================================================ */
 
@@ -41,6 +42,7 @@
      variants below must derive from it (same rgb, different alpha/shade) */
   --aw-success: #15a877;
   --aw-warning: #e27900;
+  --aw-warning-text: #9b4e00;
   --aw-error: #e8463a;
   --aw-accent-purple: #4b3fe3;
   --aw-accent: var(--aw-accent-purple);
@@ -82,7 +84,7 @@
   --aw-status-running-border: rgba(47, 116, 255, 0.18);
   --aw-status-waiting: var(--aw-warning);
   --aw-status-waiting-bg: rgba(226, 121, 0, 0.12);
-  --aw-status-waiting-text: #b05e00;
+  --aw-status-waiting-text: var(--aw-warning-text);
   --aw-status-success: var(--aw-success);
   --aw-status-success-bg: rgba(21, 168, 119, 0.12);
   --aw-status-success-text: #0e7a55;
@@ -94,7 +96,7 @@
   --aw-diff-removed: rgba(232, 70, 58, 0.14);
   --aw-diff-removed-text: #c23529;
   --aw-diff-changed: rgba(226, 121, 0, 0.14);
-  --aw-diff-changed-text: #b05e00;
+  --aw-diff-changed-text: var(--aw-warning-text);
   --aw-terminal-bg: #1c1917;
   --aw-terminal-text: #ffffff;
   --aw-brand-wordmark-filter: none;
@@ -217,7 +219,8 @@
   color-scheme: dark;
 
   /* ============================================================
-     皮肤变量（纯视觉：颜色/阴影色值，不参与布局测量，可安全迭代）
+     皮肤变量（纯视觉：颜色/阴影色值，不参与布局测量）
+     对几何与滚动定位安全，仍必须通过视觉、浅色/深色主题与无障碍验收
      深色中性基：表面已是暖黑，填充/边框由暖白 rgb(237,235,232) 派生
      ============================================================ */
 
@@ -253,6 +256,7 @@
   /* Status base hues (same one-base-per-family rule as light) */
   --aw-success: #49c89c;
   --aw-warning: #f0a64a;
+  --aw-warning-text: #e0a24a;
   --aw-error: #ff756b;
   --aw-accent-purple: #9f9aff;
 
@@ -289,7 +293,7 @@
   --aw-status-running-bg: rgba(138, 179, 255, 0.16);
   --aw-status-running-border: rgba(138, 179, 255, 0.24);
   --aw-status-waiting-bg: rgba(240, 166, 74, 0.15);
-  --aw-status-waiting-text: #e0a24a;
+  --aw-status-waiting-text: var(--aw-warning-text);
   --aw-status-success-bg: rgba(73, 200, 156, 0.15);
   --aw-status-success-text: #75d8b3;
   --aw-status-danger-bg: rgba(255, 117, 107, 0.15);
@@ -299,7 +303,7 @@
   --aw-diff-removed: rgba(255, 117, 107, 0.15);
   --aw-diff-removed-text: #ffa19a;
   --aw-diff-changed: rgba(240, 166, 74, 0.15);
-  --aw-diff-changed-text: #e8b35f;
+  --aw-diff-changed-text: var(--aw-warning-text);
   --aw-terminal-bg: #0c0a09;
   --aw-terminal-text: #f2f1ed;
   --aw-brand-wordmark-filter: invert(1) brightness(1.08);

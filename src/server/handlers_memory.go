@@ -123,8 +123,17 @@ func (h memoryDreamHandlers) handleStart(w http.ResponseWriter, r *http.Request)
 	}
 	profile := request.ModelProfile
 	config := llm.Config{APIKey: profile.APIKey, BaseURL: profile.BaseURL, Model: profile.ModelID, Protocol: llm.Protocol(profile.Protocol), Temperature: profile.Temperature, MaxTokens: profile.MaxTokens, AuthScheme: profile.AuthScheme, ContextWindow: profile.ContextWindow}
-	task := h.runner.Start(context.Background(), store, config, request.Scopes)
+	task, err := h.runner.Start(context.Background(), store, config, request.Scopes, request.ProjectID)
+	if err != nil {
+		writeErrorJSON(w, http.StatusInternalServerError, "DREAM_TASK_PERSIST_FAILED", err.Error())
+		return
+	}
 	writeJSON(w, http.StatusAccepted, task)
+}
+
+func (h memoryDreamHandlers) handleList(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	writeJSON(w, http.StatusOK, h.runner.List(limit, r.URL.Query().Get("project_id")))
 }
 
 func (h memoryDreamHandlers) handleGet(w http.ResponseWriter, r *http.Request) {
@@ -247,6 +256,8 @@ func writeMemoryError(w http.ResponseWriter, err error) {
 		writeErrorJSON(w, http.StatusConflict, "MEMORY_DUPLICATE", err.Error())
 	case errors.Is(err, memory.ErrSensitive):
 		writeErrorJSON(w, http.StatusUnprocessableEntity, "MEMORY_SENSITIVE_CONTENT", err.Error())
+	case errors.Is(err, memory.ErrMaintenanceInProgress):
+		writeErrorJSON(w, http.StatusConflict, "MEMORY_MAINTENANCE_IN_PROGRESS", err.Error())
 	default:
 		writeErrorJSON(w, http.StatusBadRequest, "MEMORY_INVALID", err.Error())
 	}

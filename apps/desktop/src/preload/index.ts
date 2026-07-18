@@ -64,9 +64,13 @@ import {
 
 const subscriptions = new Map<string, RunStreamHandlers>();
 const cliConnectorStateHandlers = new Set<(event: CliConnectorStateEvent) => void>();
+const memoryDreamReceiptHandlers = new Set<(task: MemoryDreamTask) => void>();
 
 ipcRenderer.on("awaken:cli-connector-state", (_event, payload: CliConnectorStateEvent) => {
   for (const handler of cliConnectorStateHandlers) handler(payload);
+});
+ipcRenderer.on("awaken:memory-dream-receipt", (_event, task: MemoryDreamTask) => {
+  for (const handler of memoryDreamReceiptHandlers) handler(task);
 });
 
 function toDesktopPlatform(platform: string): DesktopPlatform {
@@ -127,8 +131,14 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:start-memory-dream", projectId) as Promise<MemoryDreamTask>,
   getMemoryDream: (taskId: string) =>
     ipcRenderer.invoke("awaken:get-memory-dream", taskId) as Promise<MemoryDreamTask>,
+  listMemoryDreams: (projectId?: string, limit = 5) =>
+    ipcRenderer.invoke("awaken:list-memory-dreams", projectId, limit) as Promise<MemoryDreamTask[]>,
   cancelMemoryDream: (taskId: string) =>
     ipcRenderer.invoke("awaken:cancel-memory-dream", taskId) as Promise<void>,
+  onMemoryDreamReceipt: (handler) => {
+    memoryDreamReceiptHandlers.add(handler);
+    return () => memoryDreamReceiptHandlers.delete(handler);
+  },
   getRun: (runId: string) =>
     ipcRenderer.invoke("awaken:get-run", runId) as Promise<RuntimeRun>,
   getThreadTranscript: (threadId: string) =>

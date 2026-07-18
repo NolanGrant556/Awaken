@@ -171,6 +171,7 @@ let memoryDreamSchedulerTimer: NodeJS.Timeout | null = null;
 let automaticDreamRunning = false;
 const activeDreamTaskIds = new Set<string>();
 const completedDreamTaskIds = new Set<string>();
+const emittedDreamReceiptTaskIds = new Set<string>();
 
 type StreamSubscription = {
   controller: AbortController;
@@ -1145,7 +1146,9 @@ type MemorySettingsDocumentWire = {
 
 type MemoryDreamTaskWire = {
   task_id: string;
-  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  status: "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
+  phase: string;
+  project_id?: string;
   scopes: Array<"user" | "project">;
   reports?: Record<string, { updated: number; superseded: number; conflicts: number; skipped: number }>;
   error_code?: string;
@@ -1166,7 +1169,7 @@ const normalizeMemorySettings = (document: MemorySettingsDocumentWire) => ({
   value: { enabled: document.value.enabled, automaticRecall: document.value.automatic_recall, proactiveMemory: document.value.proactive_memory, autoDream: document.value.auto_dream },
 });
 const normalizeMemoryDream = (task: MemoryDreamTaskWire) => ({
-  taskId: task.task_id, status: task.status, scopes: task.scopes, reports: task.reports,
+  taskId: task.task_id, status: task.status, phase: task.phase, projectId: task.project_id, scopes: task.scopes, reports: task.reports,
   errorCode: task.error_code, errorMessage: task.error_message, createdAt: task.created_at,
   startedAt: task.started_at, finishedAt: task.finished_at,
 });
@@ -1181,7 +1184,13 @@ async function startMemoryDreamTask(projectId: string | undefined, scopes: Array
 
 async function getMemoryDreamTask(taskId: string): Promise<ReturnType<typeof normalizeMemoryDream>> {
   const task = normalizeMemoryDream(await requestRuntime<MemoryDreamTaskWire>(`/v1/memory/dream/${encodeURIComponent(taskId)}`));
-  if (["completed", "failed", "cancelled"].includes(task.status)) activeDreamTaskIds.delete(taskId);
+  if (["completed", "failed", "cancelled", "interrupted"].includes(task.status)) {
+    activeDreamTaskIds.delete(taskId);
+    if (!emittedDreamReceiptTaskIds.has(taskId)) {
+      emittedDreamReceiptTaskIds.add(taskId);
+      mainWindowRef?.webContents.send("awaken:memory-dream-receipt", task);
+    }
+  }
   if (task.status === "completed" && !completedDreamTaskIds.has(taskId)) {
     completedDreamTaskIds.add(taskId);
     memoryDreamSchedulerStore?.recordSuccessfulDream();
@@ -1193,7 +1202,7 @@ async function waitForMemoryDream(taskId: string): Promise<void> {
   for (;;) {
     const task = await getMemoryDreamTask(taskId);
     if (task.status === "completed") return;
-    if (task.status === "failed" || task.status === "cancelled") throw new Error(task.errorMessage || `Dream ${task.status}`);
+    if (["failed", "cancelled", "interrupted"].includes(task.status)) throw new Error(task.errorMessage || `Dream ${task.status}`);
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 }
@@ -1264,6 +1273,12 @@ ipcMain.handle("awaken:start-memory-dream", async (_event, projectId?: string) =
   return startMemoryDreamTask(projectId, scopes);
 });
 ipcMain.handle("awaken:get-memory-dream", async (_event, taskId: string) => getMemoryDreamTask(taskId));
+ipcMain.handle("awaken:list-memory-dreams", async (_event, projectId?: string, limit = 5) => {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (projectId) params.set("project_id", projectId);
+  const tasks = await requestRuntime<MemoryDreamTaskWire[]>(`/v1/memory/dream?${params.toString()}`);
+  return tasks.map(normalizeMemoryDream);
+});
 ipcMain.handle("awaken:cancel-memory-dream", async (_event, taskId: string) => {
   await requestRuntimeOK(`/v1/memory/dream/${encodeURIComponent(taskId)}/cancel`, { method: "POST" });
   activeDreamTaskIds.delete(taskId);

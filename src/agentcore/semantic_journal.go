@@ -82,19 +82,31 @@ func NewSemanticRecord(kind SemanticKind, threadID, runID, turnID, parentID, ses
 }
 
 func ToolCallSemanticRecord(threadID, runID, turnID, sessionID, parentID string, call convcontext.ToolCall) SemanticRecord {
+	arguments := call.Function.Arguments
+	if registered, err := tool.GetRegisteredTool(call.Function.Name); err == nil {
+		if sanitizer, ok := registered.Runtime.(tool.SemanticJournalSanitizer); ok {
+			arguments = sanitizer.SemanticJournalArguments(arguments)
+		}
+	}
 	payload := map[string]any{
 		"tool_call_id": call.ID,
 		"tool_name":    call.Function.Name,
-		"arguments":    call.Function.Arguments,
+		"arguments":    arguments,
 	}
 	return NewSemanticRecord(SemanticKindToolCall, threadID, runID, turnID, parentID, sessionID, payload)
 }
 
 func ToolResultSemanticRecord(threadID, runID, turnID, sessionID string, result ToolExecutionResult) SemanticRecord {
+	content := result.Content
+	if registered, err := tool.GetRegisteredTool(result.Name); err == nil {
+		if sanitizer, ok := registered.Runtime.(tool.SemanticJournalSanitizer); ok {
+			content = sanitizer.SemanticJournalResult(content)
+		}
+	}
 	payload := map[string]any{
 		"tool_call_id": result.ToolCallID,
 		"tool_name":    result.Name,
-		"content":      result.Content,
+		"content":      content,
 		"is_error":     result.IsError,
 	}
 	if result.Outcome.Status != "" {

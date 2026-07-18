@@ -49,7 +49,24 @@ export type AguiEventType =
   | "AWAKEN_ARTIFACT_UPDATED"
   | "AWAKEN_TOOL_RECOVERY_REQUIRED"
   | "AWAKEN_TOOL_RETRY_BLOCKED"
+  | "AWAKEN_MEMORY_RECALLED"
+  | "AWAKEN_MEMORY_CREATED"
+  | "AWAKEN_MEMORY_UPDATED"
+  | "AWAKEN_MEMORY_SUPERSEDED"
+  | "AWAKEN_MEMORY_DELETED"
+  | "AWAKEN_MEMORY_REJECTED"
   | "AWAKEN_UNKNOWN_EVENT";
+
+export type AguiMemoryReceipt = {
+  memoryId: string;
+  scope: string;
+  memoryType: string;
+  revision: number;
+  bytes?: number;
+  action?: string;
+  status?: string;
+  errorCode?: string;
+};
 
 export type AguiArtifactStatus = "ready" | "pending" | "error";
 
@@ -84,6 +101,7 @@ export type AguiEvent = {
   toolCallName?: string;
   content?: string;
   result?: string;
+  memories?: AguiMemoryReceipt[];
   progress?: string;
   commandStream?: string;
   patch?: string;

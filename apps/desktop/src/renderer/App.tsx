@@ -4301,6 +4301,7 @@ export function App() {
       <DesktopSettingsDialog
         open={modelSettingsOpen}
         runtimeClient={runtimeClient}
+        currentProjectId={activeThreadProjectId ?? selectedProjectId}
         themePreference={appearanceThemePreference}
         themeSaving={appearanceSaving}
         themeMessage={appearanceMessage}

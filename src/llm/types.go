@@ -34,7 +34,9 @@ type Config struct {
 type RequestPurpose string
 
 const (
-	RequestPurposeCompactSummary RequestPurpose = "compact_summary"
+	RequestPurposeCompactSummary    RequestPurpose = "compact_summary"
+	RequestPurposeMemoryRecall      RequestPurpose = "memory_recall"
+	RequestPurposeMemoryMaintenance RequestPurpose = "memory_maintenance"
 )
 
 // Request 是统一请求结构

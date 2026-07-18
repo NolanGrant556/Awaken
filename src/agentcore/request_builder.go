@@ -1,6 +1,7 @@
 package agentcore
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"strings"
 
@@ -62,6 +63,15 @@ func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool
 		Model:              rb.config.ModelConfig.Model,
 		Temperature:        rb.config.ModelConfig.Temperature,
 		MaxTokens:          rb.config.ModelConfig.MaxTokens,
+	}
+	if rb.config.MemoryContextProvider != nil {
+		if content, err := rb.config.MemoryContextProvider(); err == nil && strings.TrimSpace(content) != "" {
+			block := ContextBlock{ID: "memory_context", Content: content}
+			envelope.SystemBlocks = append(envelope.SystemBlocks, block)
+			envelope.SystemContextItems = append(envelope.SystemContextItems, ContextItem{ID: block.ID, Type: "memory_context", Content: content})
+			digest := sha256.Sum256([]byte(content))
+			envelope.Deltas = append(envelope.Deltas, ContextDelta{Type: ContextDeltaMemoryHit, Summary: fmt.Sprintf("index:%x", digest[:8])})
+		}
 	}
 	for _, block := range rb.config.SkillContextBlocks {
 		if strings.TrimSpace(block.Content) == "" {

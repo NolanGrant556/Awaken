@@ -14,7 +14,9 @@ import (
 
 	"awaken/src/agentcore"
 	"awaken/src/connectors"
+	"awaken/src/llm"
 	"awaken/src/mcpclient"
+	"awaken/src/memory"
 	"awaken/src/runtime"
 	"awaken/src/server"
 	"awaken/src/skillruntime"
@@ -55,6 +57,14 @@ func main() {
 			if workspaceRoot == "" {
 				workspaceRoot = defaultWorkspace
 			}
+			recallManager, recallErr := memory.NewRecallManager(workspaceRoot, llm.Config{
+				APIKey: modelCfg.APIKey, BaseURL: modelCfg.BaseURL, Model: modelCfg.Model,
+				Protocol: llm.Protocol(modelCfg.Protocol), Temperature: modelCfg.Temperature,
+				MaxTokens: modelCfg.MaxTokens, AuthScheme: modelCfg.AuthScheme, ContextWindow: modelCfg.ContextWindow,
+			})
+			if recallErr != nil {
+				log.Printf("[memory] automatic recall disabled: %v", recallErr)
+			}
 			agentCfg := agentcore.AgentConfig{
 				MaxThoughts: 0,
 				EntryPoint:  "awaken-core",
@@ -62,6 +72,38 @@ func main() {
 				SkillSummary: skills.FormatRuntimeSkillSummary(
 					skillRegistry.PreviewLocalSources(skills.LocalSourceDirs(workspaceRoot)),
 				),
+				MemoryContextProvider: func() (string, error) {
+					if recallManager != nil {
+						return recallManager.Context()
+					}
+					return memory.BuildIndexContext(workspaceRoot)
+				},
+				MemoryRecallStart: func(ctx context.Context, query string, recentTools []string) {
+					if recallManager != nil {
+						recallManager.StartTurnWithTools(ctx, query, recentTools)
+					}
+				},
+				MemoryRecallEnd: func() {
+					if recallManager != nil {
+						recallManager.EndTurn()
+					}
+				},
+				MemoryRecallDrain: func() []agentcore.MemoryRecallReceipt {
+					if recallManager == nil {
+						return nil
+					}
+					receipts := recallManager.DrainPromotedReceipts()
+					result := make([]agentcore.MemoryRecallReceipt, 0, len(receipts))
+					for _, receipt := range receipts {
+						result = append(result, agentcore.MemoryRecallReceipt{MemoryID: receipt.MemoryID, Scope: string(receipt.Scope), Type: string(receipt.Type), Revision: receipt.Revision, Bytes: receipt.Bytes})
+					}
+					return result
+				},
+				MemoryRecallReset: func() {
+					if recallManager != nil {
+						recallManager.ResetAfterCompaction()
+					}
+				},
 				Workspace: agentcore.WorkspaceConfig{
 					ScopeID:           workspace.ScopeID,
 					Root:              workspace.WorkspaceRoot,

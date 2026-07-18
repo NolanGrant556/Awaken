@@ -22,8 +22,6 @@ Awaken Design System/
 │   └── styles.css               # Gallery 专用样式，不应变成组件样式事实源
 ├── smoke/                       # 自动化渲染冒烟检查
 │   └── render-smoke.mjs         # server-render 所有 Awaken*Demo
-├── reference/                   # 外部设计参考源，不作为运行时依赖
-│   └── traework/                # TRAE Work 静态设计包镜像
 ├── dist/                        # 构建产物，由 build 生成，不手写维护
 ├── DESIGN_SYSTEM_GUIDE.md       # Awaken 视觉消费与 Agent 作者规则
 ├── index.html                   # Gallery HTML 入口
@@ -38,7 +36,6 @@ Awaken Design System/
 - `src/components/` 是组件真实实现；`gallery/` 只负责观测，不承载产品逻辑。
 - `src/tokens/` 是颜色、间距、字体、边框、组件基础类等设计令牌事实源。
 - `dist/` 是生成目录，可以删除后重建；不要在里面修 bug。
-- `reference/traework/` 是 TRAE Work 视觉参考源；不要把 `.ds-*` 类名作为 Awaken 运行时公共 API。
 - `DESIGN_SYSTEM_GUIDE.md` 是后续视觉改动的作者规则，优先于临时审美判断。
 - `gallery/registry.ts` 决定哪些组件拥有独立观测 URL。
 - `src/index.ts` 决定哪些能力对 Desktop 或外部项目公开。

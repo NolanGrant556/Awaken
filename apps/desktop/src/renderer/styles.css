@@ -31,6 +31,15 @@ pre {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.desktop-root :where(input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]),
+.desktop-root .assistant-message-markdown,
+.desktop-root .aw-text-selectable {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .desktop-root-electron {

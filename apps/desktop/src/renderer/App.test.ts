@@ -91,6 +91,7 @@ function stubElectronBridge(): void {
   vi.stubGlobal("window", {
     awaken: {
       platform: "macos",
+      onSelectAllRequested: vi.fn(() => () => {}),
       relaunchDesktop: vi.fn(async () => undefined),
       getSearchSettings: vi.fn(async () => ({
         providers: {

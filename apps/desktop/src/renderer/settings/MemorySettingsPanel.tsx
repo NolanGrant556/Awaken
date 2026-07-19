@@ -259,7 +259,7 @@ export function MemorySettingsPanel({ runtimeClient, currentProjectId }: { runti
           {!memories.length ? <div className="memory-empty">暂无符合条件的记忆</div> : null}
         </div>
         <div className="memory-detail" aria-label="记忆详情">
-          {selected ? <><h2>{selected.name}</h2><p className="memory-detail-description">{selected.description}</p><pre>{selected.content}</pre><dl><dt>来源任务</dt><dd>{selected.sourceThreadId}</dd><dt>Revision</dt><dd>{selected.revision}</dd></dl></> : <div className="memory-empty">选择一条记忆查看正文</div>}
+          {selected ? <><h2>{selected.name}</h2><p className="memory-detail-description">{selected.description}</p><pre className="aw-text-selectable">{selected.content}</pre><dl><dt>来源任务</dt><dd>{selected.sourceThreadId}</dd><dt>Revision</dt><dd>{selected.revision}</dd></dl></> : <div className="memory-empty">选择一条记忆查看正文</div>}
         </div>
       </div>
     </section>

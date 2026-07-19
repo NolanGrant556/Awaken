@@ -1037,6 +1037,7 @@ export type SearchProviderTestResult = {
 
 export type AwakenBridge = {
   platform: DesktopPlatform;
+  onSelectAllRequested: (callback: () => void) => () => void;
   relaunchDesktop: () => Promise<void>;
   getSearchSettings: () => Promise<SearchSettings>;
   saveSearchSettings: (

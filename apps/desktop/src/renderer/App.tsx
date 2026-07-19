@@ -86,6 +86,7 @@ import {
   turnMarkerRailDisplay,
   type NarrativeTurnBodySegment,
 } from "./workbenchPresentation";
+import { selectAllInFocusedEditor } from "./desktop-selection";
 import { useComposerLifecycle } from "./useComposerLifecycle";
 import { useRunStageScrollController } from "./useRunStageScrollController";
 import {
@@ -1516,6 +1517,12 @@ export function App() {
     }, 2000);
     return () => window.clearTimeout(timer);
   }, [notice]);
+
+  useEffect(() => {
+    return window.awaken?.onSelectAllRequested(() => {
+      selectAllInFocusedEditor(document);
+    });
+  }, []);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent): void {

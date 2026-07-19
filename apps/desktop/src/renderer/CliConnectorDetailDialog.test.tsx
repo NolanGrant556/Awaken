@@ -250,6 +250,7 @@ describe("CliConnectorDetailDialog", () => {
     const close = document.querySelector<HTMLButtonElement>("button[aria-label='关闭']");
     expect(close).toBeTruthy();
     expect(close?.getAttribute("title")).toBeNull();
+    expect(close?.closest(".aw-dialog__head--title-visually-hidden")).toBeTruthy();
     expect(document.querySelector("[role='tooltip']")).toBeNull();
   });
 

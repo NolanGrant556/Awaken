@@ -112,7 +112,6 @@ export function CliConnectorDetailDialog({
       className="cli-connector-detail-dialog"
       title={title}
       titleVisuallyHidden
-      showCloseTooltip={false}
       onOpenChange={handleOpenChange}
       footer={
         <Button

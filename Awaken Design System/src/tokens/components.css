@@ -260,7 +260,7 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
   width: 22px;
   height: 22px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--aw-radius-compact);
   background: transparent;
   color: var(--aw-text-secondary);
   cursor: pointer;
@@ -269,6 +269,13 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
     color 140ms ease,
     transform 140ms ease;
   -webkit-app-region: no-drag;
+}
+
+.workbench-chrome-icon svg,
+.aw-workbench-inspector-toggle svg {
+  width: var(--aw-icon-size-16);
+  height: var(--aw-icon-size-16);
+  stroke-width: var(--aw-icon-stroke);
 }
 
 .workbench-chrome-icon:hover,
@@ -481,7 +488,7 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   width: 28px;
   height: 28px;
   padding: 0;
-  border-radius: 7px;
+  border-radius: var(--aw-radius-control);
   background: transparent;
   color: var(--aw-text-tertiary);
   cursor: pointer;
@@ -524,7 +531,7 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   margin: 0;
   padding: 7px 12px;
   border: 1px solid var(--aw-border-light);
-  border-radius: 7px;
+  border-radius: var(--aw-radius-control);
   background: var(--aw-bg-white);
   color: var(--aw-text-primary);
   font-size: var(--aw-font-size-sm);
@@ -609,7 +616,7 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   max-width: 168px;
   height: var(--execution-prompt-attachment-size);
   border: 1px solid var(--aw-border-light);
-  border-radius: 8px;
+  border-radius: var(--aw-radius-control);
   overflow: hidden;
   background: var(--aw-bg-fill-light);
 }
@@ -812,7 +819,7 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   gap: 7px;
   padding: 5px 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--aw-radius-compact);
   background: transparent;
   color: var(--aw-text-secondary);
   text-align: left;
@@ -1109,7 +1116,7 @@ button.tool-trace-line:focus-visible {
 .assistant-message-code {
   max-width: 100%;
   padding: 1px 5px;
-  border-radius: var(--aw-radius-control);
+  border-radius: var(--aw-radius-compact);
   background: var(--aw-bg-fill-main);
   color: var(--aw-text-primary);
   font-family: var(--aw-font-mono);
@@ -1127,8 +1134,8 @@ button.tool-trace-line:focus-visible {
   margin: 0;
   padding: 12px;
   overflow: auto;
-  border: 1px solid var(--aw-border-light);
-  border-radius: 8px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-control);
   background: var(--aw-surface-code);
   color: var(--aw-text-code);
   font-family: var(--aw-font-mono);
@@ -1154,8 +1161,8 @@ button.tool-trace-line:focus-visible {
   max-width: 100%;
   min-width: 0;
   overflow: auto;
-  border: 1px solid var(--aw-border-light);
-  border-radius: 8px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-control);
 }
 
 .assistant-message-table {
@@ -1197,8 +1204,8 @@ button.tool-trace-line:focus-visible {
   margin: 2px 0;
   padding: 14px;
   overflow: hidden;
-  border: 1px solid var(--aw-border-light);
-  border-radius: 8px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-control);
   background: var(--aw-bg-white);
 }
 
@@ -1210,9 +1217,9 @@ button.tool-trace-line:focus-visible {
   gap: 2px;
   padding: 2px;
   border: 1px solid var(--aw-border-light);
-  border-radius: 8px;
+  border-radius: var(--aw-radius-control);
   background: color-mix(in srgb, var(--aw-surface-raised) 92%, transparent);
-  box-shadow: 0 4px 14px rgba(28, 25, 23, 0.08);
+  box-shadow: var(--aw-shadow-raised);
 }
 
 .assistant-mermaid-diagram > .assistant-mermaid-toolbar {
@@ -1228,10 +1235,16 @@ button.tool-trace-line:focus-visible {
   height: 28px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--aw-radius-compact);
   background: transparent;
   color: var(--aw-text-muted);
   cursor: pointer;
+}
+
+.assistant-mermaid-action svg {
+  width: var(--aw-icon-size-14);
+  height: var(--aw-icon-size-14);
+  stroke-width: var(--aw-icon-stroke);
 }
 
 .assistant-mermaid-action:hover,
@@ -1321,7 +1334,7 @@ button.tool-trace-line:focus-visible {
   min-height: 0;
   padding: 10px;
   border: 1px solid var(--aw-border-main);
-  border-radius: 12px;
+  border-radius: var(--aw-radius-panel);
   background: var(--aw-bg-white);
   box-shadow: var(--aw-shadow-popover);
 }
@@ -1349,9 +1362,9 @@ button.tool-trace-line:focus-visible {
   min-width: 0;
   padding: 2px;
   border: 1px solid var(--aw-border-light);
-  border-radius: 8px;
+  border-radius: var(--aw-radius-control);
   background: color-mix(in srgb, var(--aw-surface-raised) 92%, transparent);
-  box-shadow: 0 4px 14px rgba(28, 25, 23, 0.08);
+  box-shadow: var(--aw-shadow-raised);
 }
 
 .assistant-mermaid-zoom-range {
@@ -1382,7 +1395,7 @@ button.tool-trace-line:focus-visible {
   padding: 16px;
   overflow: auto;
   border: 1px solid var(--aw-border-light);
-  border-radius: 8px;
+  border-radius: var(--aw-radius-control);
   background: var(--aw-bg-white);
   cursor: grab;
   overscroll-behavior: contain;
@@ -1533,7 +1546,7 @@ button.tool-trace-line:focus-visible {
   width: 100%;
   height: 30px;
   padding: 0 8px;
-  border-radius: 6px;
+  border-radius: var(--aw-radius-compact);
   background: transparent;
   color: var(--aw-text-secondary);
   font-size: var(--aw-font-size-sm);
@@ -1703,7 +1716,7 @@ button.tool-trace-line:focus-visible {
   min-height: 94px;
   padding: 18px 18px 14px 22px;
   border: 1px solid var(--aw-composer-border);
-  border-radius: 18px;
+  border-radius: var(--aw-radius-composer);
   background: var(--aw-composer-surface);
   box-shadow: var(--aw-composer-shadow);
   transition:
@@ -1738,7 +1751,7 @@ button.tool-trace-line:focus-visible {
   grid-template-rows: minmax(60px, 1fr) auto;
   align-content: stretch;
   min-height: 148px;
-  border-radius: 18px;
+  border-radius: var(--aw-radius-composer);
 }
 
 .composer-bar-center .composer-bar-input-row {
@@ -1806,7 +1819,7 @@ button.tool-trace-line:focus-visible {
   height: 42px;
   flex: 0 0 42px;
   border: 1px solid var(--aw-border-light);
-  border-radius: 8px;
+  border-radius: var(--aw-radius-control);
   overflow: hidden;
   background: var(--aw-bg-fill-light);
 }
@@ -1910,7 +1923,7 @@ button.tool-trace-line:focus-visible {
   gap: 8px;
   min-height: 86px;
   padding: 16px 16px 12px 20px;
-  border-radius: 18px;
+  border-radius: var(--aw-radius-composer);
 }
 
 .composer-bar-meta {
@@ -2102,6 +2115,13 @@ button.tool-trace-line:focus-visible {
   flex: 0 0 auto;
 }
 
+.composer-bar-model-trigger-icon svg,
+.composer-bar-model-trigger-chevron {
+  width: var(--aw-icon-size-14);
+  height: var(--aw-icon-size-14);
+  stroke-width: var(--aw-icon-stroke);
+}
+
 .composer-bar-model-trigger-label {
   min-width: 0;
   overflow: hidden;
@@ -2174,7 +2194,7 @@ button.tool-trace-line:focus-visible {
   min-height: 36px;
   padding: 0 10px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--aw-radius-control);
   background: transparent;
   color: var(--aw-text-primary);
   font-size: var(--aw-font-size-sm);
@@ -2207,11 +2227,17 @@ button.tool-trace-line:focus-visible {
   place-items: center;
   width: 24px;
   height: 24px;
-  border-radius: 6px;
+  border-radius: var(--aw-radius-compact);
   background: var(--aw-bg-fill-light);
   color: var(--aw-text-secondary);
   font-size: 12px;
   font-weight: var(--aw-font-weight-semibold);
+}
+
+.composer-bar-model-option-icon svg {
+  width: var(--aw-icon-size-14);
+  height: var(--aw-icon-size-14);
+  stroke-width: var(--aw-icon-stroke);
 }
 
 .composer-bar-model-option-label {

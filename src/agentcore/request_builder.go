@@ -45,16 +45,25 @@ func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool
 	}); ok {
 		messages = modelProvider.GetMessagesForModel()
 	}
+	messages = attributeContextMessages(messages)
+	// Journal replay deliberately restores the complete local conversation,
+	// including durable media. Project that history through the currently
+	// selected model's capability contract before estimating or serializing the
+	// request. The projection is a deep clone, so switching models never erases
+	// attachment data from the thread.
+	messages = projectMessagesForModelCapabilities(messages, rb.config.ModelConfig.Capabilities)
+	attributedTools := rb.attributeToolSchemas(tools)
 
 	envelope := ContextEnvelope{
 		SystemBlocks: []ContextBlock{
-			{ID: "system_prompt", Content: staticContent},
+			{ID: "system_prompt", Kind: ContextContributionSystemPrompt, Content: staticContent},
 		},
 		SystemContextItems: []ContextItem{
 			runtimeSnapshotSystemItem(snapshot),
 		},
 		Attachments:        contextAttachmentsFromMessages(messages),
 		ToolSchemas:        cloneToolDefinitions(tools),
+		AttributedTools:    cloneAttributedToolSchemas(attributedTools),
 		RuntimeSnapshot:    snapshot,
 		CacheKeys:          rb.buildCacheKeys(staticContent, tools, snapshot),
 		Deltas:             rb.buildContextDeltas(snapshot, tools),
@@ -64,32 +73,52 @@ func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool
 		Temperature:        rb.config.ModelConfig.Temperature,
 		MaxTokens:          rb.config.ModelConfig.MaxTokens,
 	}
+	envelope.EpochSources = append(envelope.EpochSources,
+		ContextEpochSourceCandidate{SourceKey: "system_prompt", Kind: ContextContributionSystemPrompt, Content: strings.ReplaceAll(staticContent, "{{.RuntimeInfo}}", ""), State: ContextEpochSourceUpdated},
+		ContextEpochSourceCandidate{SourceKey: "runtime_context", Kind: ContextContributionRuntimeContext, Content: prompt.FormatRuntimeInfo(snapshot.ToRuntimeInfo()), State: ContextEpochSourceUpdated},
+	)
 	if rb.config.MemoryContextProvider != nil {
-		if content, err := rb.config.MemoryContextProvider(); err == nil && strings.TrimSpace(content) != "" {
-			block := ContextBlock{ID: "memory_context", Content: content}
+		content, err := rb.config.MemoryContextProvider()
+		switch {
+		case err != nil:
+			envelope.EpochSources = append(envelope.EpochSources, ContextEpochSourceCandidate{SourceKey: "memory_context", Kind: ContextContributionMemory, State: ContextEpochSourceUnavailable})
+		case strings.TrimSpace(content) == "":
+			envelope.EpochSources = append(envelope.EpochSources, ContextEpochSourceCandidate{SourceKey: "memory_context", Kind: ContextContributionMemory, State: ContextEpochSourceRemoved})
+		default:
+			block := ContextBlock{ID: "memory_context", Kind: ContextContributionMemory, Content: content}
 			envelope.SystemBlocks = append(envelope.SystemBlocks, block)
 			envelope.SystemContextItems = append(envelope.SystemContextItems, ContextItem{ID: block.ID, Type: "memory_context", Content: content})
 			digest := sha256.Sum256([]byte(content))
 			envelope.Deltas = append(envelope.Deltas, ContextDelta{Type: ContextDeltaMemoryHit, Summary: fmt.Sprintf("index:%x", digest[:8])})
+			envelope.EpochSources = append(envelope.EpochSources, ContextEpochSourceCandidate{SourceKey: "memory_context", Kind: ContextContributionMemory, Content: content, State: ContextEpochSourceUpdated})
 		}
 	}
 	for _, block := range rb.config.SkillContextBlocks {
 		if strings.TrimSpace(block.Content) == "" {
 			continue
 		}
+		block.Kind = ContextContributionSkillActivation
 		envelope.SystemBlocks = append(envelope.SystemBlocks, block)
 		envelope.SystemContextItems = append(envelope.SystemContextItems, ContextItem{
 			ID:      firstNonEmptyAttachmentValue(block.ID, "skill_activation"),
 			Type:    "skill_activation",
 			Content: block.Content,
 		})
+		envelope.EpochSources = append(envelope.EpochSources, ContextEpochSourceCandidate{
+			SourceKey: firstNonEmptyAttachmentValue(block.ID, "skill_activation"), Kind: ContextContributionSkillActivation,
+			Content: block.Content, State: ContextEpochSourceUpdated,
+		})
 	}
 	// Append the host-generated explicit selection after every Skill body.
 	// A Skill may contain arbitrary instructions, including text that mimics
 	// this block, but it cannot replace the typed Runtime-owned binding.
 	if block, item, ok := hostComposerSkillSelectionBlock(rb.config.ComposerSkillSelection); ok {
+		block.Kind = ContextContributionSkillActivation
 		envelope.SystemBlocks = append(envelope.SystemBlocks, block)
 		envelope.SystemContextItems = append(envelope.SystemContextItems, item)
+		envelope.EpochSources = append(envelope.EpochSources, ContextEpochSourceCandidate{
+			SourceKey: item.ID, Kind: ContextContributionSkillActivation, Content: item.Content, State: ContextEpochSourceUpdated,
+		})
 	}
 	envelope.ContextWindowState = NewContextEngine(contextWindowConfigFromModelConfig(rb.config.ModelConfig)).Evaluate(envelope)
 	return envelope
@@ -97,16 +126,24 @@ func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool
 
 func (rb *RequestBuilder) BuildLLMRequestFromEnvelope(envelope ContextEnvelope) LLMRequest {
 	envelopeCopy := envelope
-	return LLMRequest{
+	req := LLMRequest{
 		SystemPrompt:       rb.buildSystemPromptFromEnvelope(envelope),
+		PromptSections:     promptSectionsFromEnvelope(envelope),
 		Messages:           cloneContextMessages(envelope.Messages),
 		Tools:              cloneToolDefinitions(envelope.ToolSchemas),
+		AttributedTools:    cloneAttributedToolSchemas(envelope.AttributedTools),
 		Model:              envelope.Model,
 		Temperature:        envelope.Temperature,
 		MaxTokens:          envelope.MaxTokens,
 		ContextWindowState: envelope.ContextWindowState,
 		EnvelopeDebug:      &envelopeCopy,
+		EpochSources:       cloneContextEpochSourceCandidates(envelope.EpochSources),
 	}
+	snapshot := buildContextUsageSnapshot(req, "current_projection", "", string(rb.config.ModelConfig.Protocol), "", nil)
+	req.ContextUsage = snapshot
+	req.ContextWindowState.EstimatedTokens = snapshot.EstimatedInputTokens
+	req.ContextWindowState.UsageSnapshot = &snapshot
+	return req
 }
 
 func (rb *RequestBuilder) buildStaticSystemPrompt() string {
@@ -120,24 +157,118 @@ func (rb *RequestBuilder) buildStaticSystemPrompt() string {
 }
 
 func (rb *RequestBuilder) buildSystemPromptFromEnvelope(envelope ContextEnvelope) string {
+	return envelopeProjectedSystemPrompt(envelope)
+}
+
+func envelopeProjectedSystemPrompt(envelope ContextEnvelope) string {
 	staticContent := ""
 	if len(envelope.SystemBlocks) > 0 {
 		staticContent = envelope.SystemBlocks[0].Content
 	}
-	var skillParts []string
+	var trailing []string
 	for i, block := range envelope.SystemBlocks {
-		if i == 0 {
+		if i == 0 || strings.TrimSpace(block.Content) == "" {
 			continue
 		}
-		if strings.TrimSpace(block.Content) == "" {
-			continue
-		}
-		skillParts = append(skillParts, block.Content)
+		trailing = append(trailing, block.Content)
 	}
-	if len(skillParts) > 0 {
-		staticContent = strings.TrimSpace(staticContent) + "\n\n" + strings.Join(skillParts, "\n\n")
+	if len(trailing) > 0 {
+		staticContent = strings.TrimSpace(staticContent) + "\n\n" + strings.Join(trailing, "\n\n")
 	}
 	return prompt.BuildEffectiveSystemPrompt(staticContent, envelope.RuntimeSnapshot.ToRuntimeInfo())
+}
+
+func promptSectionsFromEnvelope(envelope ContextEnvelope) []PromptSection {
+	sections := make([]PromptSection, 0, len(envelope.SystemBlocks)+1)
+	if len(envelope.SystemBlocks) > 0 {
+		base := envelope.SystemBlocks[0]
+		content := strings.ReplaceAll(base.Content, "{{.RuntimeInfo}}", "")
+		if strings.TrimSpace(content) != "" {
+			sections = append(sections, PromptSection{ID: base.ID, Kind: ContextContributionSystemPrompt, Content: content})
+		}
+		runtimeContent := prompt.FormatRuntimeInfo(envelope.RuntimeSnapshot.ToRuntimeInfo())
+		if strings.TrimSpace(runtimeContent) != "" {
+			sections = append(sections, PromptSection{ID: "runtime_context", Kind: ContextContributionRuntimeContext, Content: runtimeContent})
+		}
+	}
+	for index, block := range envelope.SystemBlocks {
+		if index == 0 || strings.TrimSpace(block.Content) == "" {
+			continue
+		}
+		kind := block.Kind
+		if kind == "" {
+			kind = ContextContributionOther
+		}
+		sections = append(sections, PromptSection{ID: block.ID, Kind: kind, Content: block.Content})
+	}
+	return sections
+}
+
+func attributeContextMessages(messages []convcontext.Message) []convcontext.Message {
+	attributed := cloneContextMessages(messages)
+	lastUser := -1
+	for index := range attributed {
+		if attributed[index].Role == convcontext.RoleUser {
+			lastUser = index
+		}
+	}
+	currentTurnID := ""
+	for index := range attributed {
+		message := &attributed[index]
+		if message.Role == convcontext.RoleUser {
+			digest := sha256.Sum256([]byte(fmt.Sprintf("turn\x00%d\x00%s", index, message.Content)))
+			currentTurnID = fmt.Sprintf("ctxturn_%x", digest[:8])
+		}
+		if message.Origin == "" {
+			switch {
+			case message.Role == convcontext.RoleTool:
+				message.Origin = convcontext.MessageOriginToolResult
+			case index == lastUser:
+				message.Origin = convcontext.MessageOriginCurrentInput
+			case strings.TrimSpace(message.CompactBoundaryID) != "":
+				message.Origin = convcontext.MessageOriginCompactSummary
+			default:
+				message.Origin = convcontext.MessageOriginConversationHistory
+			}
+		}
+		if strings.TrimSpace(message.MessageID) == "" {
+			digest := sha256.Sum256([]byte(fmt.Sprintf("%d\x00%s\x00%s\x00%s", index, message.Role, message.ToolCallID, message.Content)))
+			message.MessageID = fmt.Sprintf("ctxmsg_%x", digest[:8])
+		}
+		if strings.TrimSpace(message.TurnID) == "" {
+			if currentTurnID == "" {
+				digest := sha256.Sum256([]byte(fmt.Sprintf("turn\x00%d\x00%s", index, message.Content)))
+				currentTurnID = fmt.Sprintf("ctxturn_%x", digest[:8])
+			}
+			message.TurnID = currentTurnID
+		}
+	}
+	return attributed
+}
+
+func (rb *RequestBuilder) attributeToolSchemas(schemas []tool.ToolSchema) []AttributedToolSchema {
+	result := make([]AttributedToolSchema, 0, len(schemas))
+	for _, schema := range schemas {
+		provenance := ToolSchemaProvenance{}
+		var runtime tool.Tool
+		if rb.config.ToolAvailabilitySnapshot != nil {
+			if entry, err := rb.config.ToolAvailabilitySnapshot.Lookup(schema.Function.Name); err == nil {
+				provenance = ToolSchemaProvenance{Origin: entry.Origin, ProviderID: entry.Provider.ProviderID, RegistrationID: entry.RegistrationID}
+				runtime = entry.Runtime
+			}
+		}
+		if provenance.Origin == "" {
+			if registered, err := tool.GetRegisteredTool(schema.Function.Name); err == nil {
+				provenance = ToolSchemaProvenance{Origin: registered.Origin, ProviderID: registered.Provider.ProviderID, RegistrationID: registered.RegistrationID}
+				runtime = registered.Runtime
+			}
+		}
+		if provenance.Origin == tool.SourceSkill {
+			provenance.SkillCatalog = contextUsageSkillCatalog(runtime, rb.config.ModelConfig.ContextWindow)
+		}
+		result = append(result, AttributedToolSchema{Schema: schema, Provenance: provenance})
+	}
+	return result
 }
 
 func (rb *RequestBuilder) getTools() []tool.ToolSchema {
@@ -178,6 +309,18 @@ func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 
 type contextWindowToolDescriptionProvider interface {
 	ModelDescriptionForContext(contextWindowTokens int) string
+}
+
+type contextWindowSkillCatalogProvider interface {
+	ModelCatalogForContext(contextWindowTokens int) string
+}
+
+func contextUsageSkillCatalog(runtime tool.Tool, contextWindowTokens int) string {
+	provider, ok := runtime.(contextWindowSkillCatalogProvider)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(provider.ModelCatalogForContext(contextWindowTokens))
 }
 
 func requestToolModelDescription(runtime tool.Tool, definition tool.ToolDefinition, contextWindowTokens int) string {
@@ -329,8 +472,20 @@ func cloneContextMessages(messages []convcontext.Message) []convcontext.Message 
 	result := make([]convcontext.Message, len(messages))
 	for i, message := range messages {
 		result[i] = message
+		result[i].Attachments = append([]convcontext.MessageAttachment(nil), message.Attachments...)
+		result[i].ModelContent = tool.CloneModelContent(message.ModelContent)
 		result[i].ToolCalls = append([]convcontext.ToolCall(nil), message.ToolCalls...)
+		if message.ProviderOpaqueState != nil {
+			state := *message.ProviderOpaqueState
+			result[i].ProviderOpaqueState = &state
+		}
 	}
+	return result
+}
+
+func cloneAttributedToolSchemas(schemas []AttributedToolSchema) []AttributedToolSchema {
+	result := make([]AttributedToolSchema, len(schemas))
+	copy(result, schemas)
 	return result
 }
 

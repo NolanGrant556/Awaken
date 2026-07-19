@@ -23,6 +23,7 @@ const (
 	maxTurnDiffChars                  = 50000
 	maxOutputContinuationAttempts     = 1
 	maxOutputContinuationPromptPrefix = "请继续上一条回答，从中断处继续，不要重复已经输出的内容。"
+	toolResultOffloadThresholdBytes   = 32 * 1024
 )
 
 var ErrPersistenceFailed = errors.New("persistence_error")
@@ -75,30 +76,38 @@ func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *Reque
 // post-compact conversation. Attachment bytes never enter the journal; only
 // their identity and storage key are kept so replay can rehydrate owned blobs.
 type SemanticCompactedMessage struct {
-	Role              string                          `json:"role"`
-	Content           string                          `json:"content"`
-	ToolCalls         []context.ToolCall              `json:"tool_calls,omitempty"`
-	ToolCallID        string                          `json:"tool_call_id,omitempty"`
-	Name              string                          `json:"name,omitempty"`
-	IsError           bool                            `json:"is_error,omitempty"`
-	CompactBoundaryID string                          `json:"compact_boundary_id,omitempty"`
-	Attachments       []SemanticUserMessageAttachment `json:"attachments,omitempty"`
-	ModelContent      []tool.ModelContentPart         `json:"model_content,omitempty"`
+	Role                string                              `json:"role"`
+	Content             string                              `json:"content"`
+	ToolCalls           []context.ToolCall                  `json:"tool_calls,omitempty"`
+	ToolCallID          string                              `json:"tool_call_id,omitempty"`
+	Name                string                              `json:"name,omitempty"`
+	IsError             bool                                `json:"is_error,omitempty"`
+	CompactBoundaryID   string                              `json:"compact_boundary_id,omitempty"`
+	Attachments         []SemanticUserMessageAttachment     `json:"attachments,omitempty"`
+	ModelContent        []tool.ModelContentPart             `json:"model_content,omitempty"`
+	Origin              context.MessageOrigin               `json:"origin,omitempty"`
+	MessageID           string                              `json:"message_id,omitempty"`
+	TurnID              string                              `json:"turn_id,omitempty"`
+	ProviderOpaqueState *context.ProviderOpaqueMessageState `json:"provider_opaque_state,omitempty"`
 }
 
 func semanticCompactedMessages(messages []context.Message) []SemanticCompactedMessage {
 	out := make([]SemanticCompactedMessage, 0, len(messages))
 	for _, message := range messages {
 		out = append(out, SemanticCompactedMessage{
-			Role:              string(message.Role),
-			Content:           message.Content,
-			ToolCalls:         append([]context.ToolCall(nil), message.ToolCalls...),
-			ToolCallID:        message.ToolCallID,
-			Name:              message.Name,
-			IsError:           message.IsError,
-			CompactBoundaryID: message.CompactBoundaryID,
-			Attachments:       semanticUserMessageAttachments(message.Attachments),
-			ModelContent:      tool.CloneModelContent(message.ModelContent),
+			Role:                string(message.Role),
+			Content:             message.Content,
+			ToolCalls:           append([]context.ToolCall(nil), message.ToolCalls...),
+			ToolCallID:          message.ToolCallID,
+			Name:                message.Name,
+			IsError:             message.IsError,
+			CompactBoundaryID:   message.CompactBoundaryID,
+			Attachments:         semanticUserMessageAttachments(message.Attachments),
+			ModelContent:        tool.CloneModelContent(message.ModelContent),
+			Origin:              message.Origin,
+			MessageID:           message.MessageID,
+			TurnID:              message.TurnID,
+			ProviderOpaqueState: message.ProviderOpaqueState,
 		})
 	}
 	return out
@@ -217,7 +226,6 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 			return "", runErr
 		}
 		r.contextGovernor.RecordResponseUsage(lastAPIUsageTokens(response))
-
 		events.finishReasoningIfOpen()
 		events.finishTextIfOpen()
 		if err := events.persistenceFailure(); err != nil {
@@ -228,7 +236,7 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 		if len(response.ToolCalls) > 0 {
 			toolCalls := llmToolCallsToContext(response.ToolCalls)
 			results := r.executeToolCalls(ctx, toolCalls, events)
-			r.conversation.ToolExchange(response.Content, toolCalls, toolExecutionResultsToContext(results))
+			r.conversation.ToolExchangeWithProviderState(response.Content, toolCalls, toolExecutionResultsToContext(results), response.ProviderOpaqueState)
 			if stop, stopErr := r.stopAfterToolExchangeIfNeeded(ctx, events, i); stop {
 				return "", stopErr
 			}
@@ -241,7 +249,7 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 		if response.MaxOutputReached {
 			if response.Content != "" {
 				continuedOutput.WriteString(response.Content)
-				r.conversation.AssistantOutput(response.Content, nil)
+				r.conversation.AssistantOutputWithProviderState(response.Content, nil, response.ProviderOpaqueState)
 			}
 			if maxOutputContinuations < maxOutputContinuationAttempts {
 				maxOutputContinuations++
@@ -260,7 +268,10 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 		if handled, finalAnswer := r.handleXMLFallback(ctx, response.Content, events); handled {
 			if finalAnswer != "" {
 				finalAnswer = continuedOutput.String() + finalAnswer
-				finalState := r.latestContextWindowState()
+				finalState, snapshotErr := r.persistCurrentContextSnapshot(ctx, events)
+				if snapshotErr != nil {
+					return "", snapshotErr
+				}
 				events.emitTurnDiff(ctx, r.config.Workspace.Root)
 				events.turnFinished(ctx, TerminalReasonCompleted, "")
 				events.runFinished(ctx, finalAnswer, finalState, TerminalReasonCompleted)
@@ -281,9 +292,12 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 			return "", llm.ErrEmptyResponse
 		}
 		finalContent := continuedOutput.String() + response.Content
-		r.conversation.AssistantOutput(response.Content, nil)
-		finalState := r.latestContextWindowState()
+		r.conversation.AssistantOutputWithProviderState(response.Content, nil, response.ProviderOpaqueState)
 		events.finishTextIfOpen()
+		finalState, snapshotErr := r.persistCurrentContextSnapshot(ctx, events)
+		if snapshotErr != nil {
+			return "", snapshotErr
+		}
 		events.emitTurnDiff(ctx, r.config.Workspace.Root)
 		events.turnFinished(ctx, TerminalReasonCompleted, "")
 		events.runFinished(ctx, finalContent, finalState, TerminalReasonCompleted)
@@ -357,14 +371,49 @@ func (r *Runner) buildLLMRequest() (LLMRequest, error) {
 	return llmReq, nil
 }
 
-func (r *Runner) latestContextWindowState() *ContextWindowState {
+func (r *Runner) persistCurrentContextSnapshot(ctx stdcontext.Context, events *runEventEmitter) (*ContextWindowState, error) {
 	llmReq, err := r.buildLLMRequest()
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	evaluated := r.contextGovernor.evaluateRequest(llmReq)
-	state := evaluated.ContextWindowState
-	return &state
+	llmReq, err = r.applyContextEpoch(ctx, llmReq, events)
+	if err != nil {
+		return nil, err
+	}
+	protocol := string(llm.ResolveProtocol(r.transportConfig(llmReq)))
+	snapshot := buildContextUsageSnapshot(llmReq, "current_projection", "", protocol, "", nil)
+	llmReq.ContextWindowState.EstimatedTokens = snapshot.EstimatedInputTokens
+	llmReq.ContextWindowState.UsageSnapshot = &snapshot
+	if events != nil {
+		if err := events.contextSnapshot(ctx, snapshot); err != nil {
+			return nil, err
+		}
+	}
+	state := llmReq.ContextWindowState
+	return &state, nil
+}
+
+// ProjectCurrentContextUsage builds the exact current-next-request projection
+// without issuing a provider request. Thread replay uses it to replace missing
+// or obsolete local estimates while preserving provider usage as a separate
+// historical fact.
+func (a *Agent) ProjectCurrentContextUsage(ctx stdcontext.Context) (ContextUsageSnapshot, *ContextEpochReceipt, error) {
+	if a == nil {
+		return ContextUsageSnapshot{}, nil, fmt.Errorf("agent unavailable")
+	}
+	runner := NewRunner(a.config, a.conversation, a.reqBuilder)
+	runner.threadID = a.threadID
+	req, err := runner.buildLLMRequest()
+	if err != nil {
+		return ContextUsageSnapshot{}, nil, err
+	}
+	req, err = runner.applyContextEpoch(ctx, req, nil)
+	if err != nil {
+		return ContextUsageSnapshot{}, nil, err
+	}
+	protocol := string(llm.ResolveProtocol(runner.transportConfig(req)))
+	snapshot := buildContextUsageSnapshot(req, "current_projection", "", protocol, "", nil)
+	return snapshot, req.ContextEpoch, nil
 }
 
 func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*llm.Response, error) {
@@ -372,24 +421,162 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*ll
 	if err != nil {
 		return nil, err
 	}
+	requestID := newAwakenID("model_request")
+	config := r.transportConfig(llmReq)
+	request := llm.Request{
+		RequestID: requestID, SystemPrompt: llmReq.SystemPrompt, Messages: llmReq.Messages,
+		Tools: llmReq.Tools, Model: llmReq.Model, Temperature: llmReq.Temperature,
+		MaxTokens: llmReq.MaxTokens, Purpose: llm.RequestPurposeAgentTurn,
+		AffinityScopeID: r.threadID,
+	}
+	prepared, err := llm.PrepareRequest(config, request, true)
+	if err != nil {
+		return nil, err
+	}
+	protocol := string(prepared.Protocol)
+	snapshot := buildContextUsageSnapshot(llmReq, "sent_request", requestID, protocol, prepared.RequestShapeDigest, prepared.Body)
+	llmReq.ContextWindowState.EstimatedTokens = snapshot.EstimatedInputTokens
+	llmReq.ContextWindowState.UsageSnapshot = &snapshot
+	llmReq.ContextUsage = snapshot
+	if events != nil {
+		if err := events.modelRequest(ctx, snapshot); err != nil {
+			return nil, err
+		}
+	}
 	observer := llm.StreamObserver{}
 	if events != nil {
 		observer.OnContent = llm.StreamCallback(events.onLLMDelta)
 		observer.OnToolCallDelta = events.onToolCallArgsDelta
 	}
-	return llm.StreamInvokeWithObserver(ctx, llm.Config{
-		APIKey:      r.config.ModelConfig.APIKey,
-		BaseURL:     r.config.ModelConfig.BaseURL,
-		Model:       llmReq.Model,
-		Protocol:    llm.Protocol(r.config.ModelConfig.Protocol),
-		Temperature: llmReq.Temperature,
-		MaxTokens:   llmReq.MaxTokens,
-		AuthScheme:  r.config.ModelConfig.AuthScheme,
-	}, llm.Request{
-		SystemPrompt: llmReq.SystemPrompt,
-		Messages:     llmReq.Messages,
-		Tools:        llmReq.Tools,
-	}, observer)
+	started := time.Now()
+	response, streamErr := llm.StreamPreparedWithObserver(ctx, config, prepared, observer)
+	if response != nil && prepared.Cache.ReasoningReplay && strings.TrimSpace(response.Thinking) != "" {
+		revision := config.CredentialRevision
+		if revision == 0 {
+			revision = 1
+		}
+		response.ProviderOpaqueState = &context.ProviderOpaqueMessageState{
+			ProviderID: strings.ToLower(strings.TrimSpace(config.ProviderID)), ProfileID: strings.TrimSpace(config.ProfileID),
+			CredentialRevision: revision, ModelID: llmReq.Model, ProtocolFamily: protocol,
+			EndpointContractID: prepared.Cache.EndpointContract, Content: response.Thinking,
+		}
+		if events != nil {
+			if persistErr := events.providerOpaqueState(ctx, response.ProviderOpaqueState); persistErr != nil {
+				return nil, persistErr
+			}
+		}
+	}
+	usage := modelUsageRecord(requestID, llmReq.Model, protocol, config, request.Purpose, prepared, started, response, streamErr, ctx.Err())
+	if llmReq.ContextEpoch != nil {
+		usage.ContextEpochID = llmReq.ContextEpoch.EpochID
+		usage.PrefixDigest = llmReq.ContextEpoch.BaselineDigest
+		usage.InvalidationReason = llmReq.ContextEpoch.BoundaryReason
+	}
+	if events != nil {
+		if persistErr := events.modelUsage(ctx, usage); persistErr != nil {
+			return nil, persistErr
+		}
+	}
+	return response, streamErr
+}
+
+func (e *runEventEmitter) providerOpaqueState(ctx stdcontext.Context, state *context.ProviderOpaqueMessageState) error {
+	if e == nil || e.recorder == nil || state == nil || strings.TrimSpace(state.Content) == "" {
+		return nil
+	}
+	persistCtx, cancel := durablePersistenceContext(ctx)
+	defer cancel()
+	record := e.withAgentIdentity(NewSemanticRecord(
+		SemanticKindProviderOpaqueState, e.threadID, e.runID, e.turnID(), "", e.sessionID,
+		map[string]any{"message_id": e.ensureAssistantMessageID(), "state": state},
+	))
+	if err := e.recorder.Append(persistCtx, record); err != nil {
+		return e.notePersistenceFailure("provider_opaque_state_append", err)
+	}
+	if err := e.recorder.Flush(persistCtx); err != nil {
+		return e.notePersistenceFailure("provider_opaque_state_flush", err)
+	}
+	return nil
+}
+
+func (r *Runner) transportConfig(llmReq LLMRequest) llm.Config {
+	return llm.Config{
+		APIKey:             r.config.ModelConfig.APIKey,
+		BaseURL:            r.config.ModelConfig.BaseURL,
+		Model:              llmReq.Model,
+		Protocol:           llm.Protocol(r.config.ModelConfig.Protocol),
+		ProviderID:         r.config.ModelConfig.ProviderID,
+		ProfileID:          r.config.ModelConfig.ProfileID,
+		CredentialRevision: r.config.ModelConfig.CredentialRevision,
+		Temperature:        llmReq.Temperature,
+		MaxTokens:          llmReq.MaxTokens,
+		AuthScheme:         r.config.ModelConfig.AuthScheme,
+	}
+}
+
+func modelUsageRecord(requestID, model, protocol string, config llm.Config, purpose llm.RequestPurpose, prepared llm.PreparedRequest, started time.Time, response *llm.Response, callErr, contextErr error) ModelUsageRecord {
+	credentialRevision := config.CredentialRevision
+	if credentialRevision == 0 {
+		credentialRevision = 1
+	}
+	record := ModelUsageRecord{
+		SchemaVersion: 1, RequestID: requestID, Purpose: string(purpose),
+		ProviderID: config.ProviderID, ProfileID: config.ProfileID, CredentialRevision: credentialRevision,
+		ModelID: model, ProtocolFamily: protocol, EndpointContractID: prepared.Cache.EndpointContract,
+		CacheMode: string(prepared.Cache.Mode), CacheKeyApplied: prepared.Cache.KeyApplied,
+		LatencyMS: time.Since(started).Milliseconds(),
+		Status:    ModelUsageSucceeded, CompletedAt: time.Now().UTC(),
+	}
+	if response != nil {
+		record.ProviderRequestID = response.ProviderRequestID
+	}
+	if response != nil && response.Usage != nil {
+		record.UsageComplete = true
+		record.InputTokens = cloneTokenPointer(response.Usage.InputTokens)
+		record.CachedInputTokens = cloneTokenPointer(response.Usage.CachedInputTokens)
+		record.UncachedInputTokens = cloneTokenPointer(response.Usage.UncachedInputTokens)
+		record.CacheWriteTokens = cloneTokenPointer(response.Usage.CacheWriteTokens)
+		record.OutputTokens = cloneTokenPointer(response.Usage.OutputTokens)
+		record.ReasoningTokens = cloneTokenPointer(response.Usage.ReasoningTokens)
+		record.TotalTokens = cloneTokenPointer(response.Usage.TotalTokens)
+		record.RawUsage = rawModelUsage(response.Usage.Raw)
+	}
+	if callErr != nil {
+		record.Status = ModelUsageFailed
+		record.ErrorCode = "request_failed"
+		if contextErr != nil {
+			record.Status = ModelUsageCancelled
+			record.ErrorCode = "cancelled"
+		}
+	}
+	applyPricing(&record)
+	return record
+}
+
+// BuildModelUsageRecord is shared by non-thread authorities such as DreamTask.
+// It contains no journal side effect; the owning authority persists the result.
+func BuildModelUsageRecord(requestID, model, protocol string, config llm.Config, purpose llm.RequestPurpose, prepared llm.PreparedRequest, started time.Time, response *llm.Response, callErr, contextErr error) ModelUsageRecord {
+	return modelUsageRecord(requestID, model, protocol, config, purpose, prepared, started, response, callErr, contextErr)
+}
+
+func cloneTokenPointer(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func rawModelUsage(value llm.RawUsage) RawModelUsage {
+	return RawModelUsage{
+		NormalizerID: value.NormalizerID, PromptTokens: cloneTokenPointer(value.PromptTokens),
+		InputTokens: cloneTokenPointer(value.InputTokens), CompletionTokens: cloneTokenPointer(value.CompletionTokens),
+		OutputTokens: cloneTokenPointer(value.OutputTokens), TotalTokens: cloneTokenPointer(value.TotalTokens),
+		ReasoningTokens: cloneTokenPointer(value.ReasoningTokens),
+		CachedTokens:    cloneTokenPointer(value.CachedTokens), PromptCacheHitTokens: cloneTokenPointer(value.PromptCacheHitTokens),
+		PromptCacheMissTokens: cloneTokenPointer(value.PromptCacheMissTokens), CacheReadInputTokens: cloneTokenPointer(value.CacheReadInputTokens),
+		CacheCreationInputTokens: cloneTokenPointer(value.CacheCreationInputTokens),
+	}
 }
 
 func (r *Runner) prepareLLMRequest(ctx stdcontext.Context, events *runEventEmitter) (LLMRequest, error) {
@@ -408,12 +595,76 @@ func (r *Runner) prepareLLMRequest(ctx stdcontext.Context, events *runEventEmitt
 		if recovery := FormatRecoveryContext(r.failureSupervisor.PendingRecovery()); recovery != "" {
 			llmReq.SystemPrompt = strings.TrimSpace(llmReq.SystemPrompt) +
 				"\n\nRuntime recovery directive (must be followed before the next tool call):\n" + recovery
+			llmReq.PromptSections = append(llmReq.PromptSections, PromptSection{
+				ID: "runtime_recovery", Kind: ContextContributionOther, Content: recovery,
+			})
+			llmReq.EpochSources = append(llmReq.EpochSources, ContextEpochSourceCandidate{
+				SourceKey: "runtime_recovery", Kind: ContextContributionOther,
+				Content: recovery, State: ContextEpochSourceUpdated,
+			})
 		}
 	}
+	var preparedRequest LLMRequest
 	if events != nil {
-		return r.contextGovernor.PrepareRequest(ctx, llmReq, events)
+		preparedRequest, err = r.contextGovernor.PrepareRequest(ctx, llmReq, events)
+	} else {
+		preparedRequest, err = r.contextGovernor.PrepareRequest(ctx, llmReq, nil)
 	}
-	return r.contextGovernor.PrepareRequest(ctx, llmReq, nil)
+	if err != nil {
+		return LLMRequest{}, err
+	}
+	return r.applyContextEpoch(ctx, preparedRequest, events)
+}
+
+func (r *Runner) applyContextEpoch(ctx stdcontext.Context, req LLMRequest, events *runEventEmitter) (LLMRequest, error) {
+	if r == nil || r.config.ContextEpochStore == nil || r.config.SubagentOrigin != nil {
+		return req, nil
+	}
+	config := r.transportConfig(req)
+	candidate := contextEpochCandidate(
+		r.threadID, r.config.ModelConfig, req,
+		llm.EndpointContractIDForConfig(config), llm.NormalizeBaseURLForContract(config.BaseURL),
+	)
+	projection, err := r.config.ContextEpochStore.Project(ctx, candidate)
+	if err != nil {
+		return LLMRequest{}, fmt.Errorf("project context epoch: %w", err)
+	}
+	req.SystemPrompt = projection.SystemPrompt
+	req.PromptSections = projection.PromptSections
+	req.Tools = projection.Tools
+	req.AttributedTools = projection.AttributedTools
+	req.ContextEpoch = &projection.Receipt
+	snapshot := buildContextUsageSnapshot(req, "current_projection", "", string(llm.ResolveProtocol(config)), "", nil)
+	req.ContextUsage = snapshot
+	req.ContextWindowState.EstimatedTokens = snapshot.EstimatedInputTokens
+	req.ContextWindowState.UsageSnapshot = &snapshot
+	if events != nil && projection.Receipt.State != "unchanged" {
+		if err := events.contextEpoch(ctx, projection.Receipt); err != nil {
+			return LLMRequest{}, err
+		}
+	}
+	return req, nil
+}
+
+func (e *runEventEmitter) contextEpoch(ctx stdcontext.Context, receipt ContextEpochReceipt) error {
+	if e == nil || e.recorder == nil {
+		return nil
+	}
+	payload := map[string]any{
+		"epoch_id": receipt.EpochID, "baseline_digest": receipt.BaselineDigest,
+		"state": receipt.State, "boundary_reason": receipt.BoundaryReason,
+		"baseline_sequence": receipt.BaselineSequence,
+	}
+	persistCtx, cancel := durablePersistenceContext(ctx)
+	defer cancel()
+	record := e.withAgentIdentity(NewSemanticRecord(SemanticKindContextEpoch, e.threadID, e.runID, e.turnID(), "", e.sessionID, payload))
+	if err := e.recorder.Append(persistCtx, record); err != nil {
+		return e.notePersistenceFailure("context_epoch_append", err)
+	}
+	if err := e.recorder.Flush(persistCtx); err != nil {
+		return e.notePersistenceFailure("context_epoch_flush", err)
+	}
+	return nil
 }
 
 func (e *runEventEmitter) memoryRecalled(ctx stdcontext.Context, receipts []MemoryRecallReceipt) error {
@@ -427,6 +678,68 @@ func (e *runEventEmitter) memoryRecalled(ctx stdcontext.Context, receipts []Memo
 		return e.persistDurable(ctx, "memory_recalled", NewSemanticRecord(SemanticKindMemoryRecalled, e.threadID, e.runID, e.turnID(), "", e.sessionID, payload), event)
 	}
 	e.sink.Emit(event)
+	return nil
+}
+
+func (e *runEventEmitter) modelRequest(ctx stdcontext.Context, snapshot ContextUsageSnapshot) error {
+	event := AwakenEvent{Type: ContextSnapshotEventType, ContextUsageSnapshot: &snapshot}
+	e.fillIDs(&event)
+	if e.recorder == nil {
+		e.sink.Emit(event)
+		return nil
+	}
+	records := []SemanticRecord{
+		e.withAgentIdentity(ContextSnapshotSemanticRecord(e.threadID, e.runID, e.turnID(), e.sessionID, snapshot)),
+		e.withAgentIdentity(ModelRequestSemanticRecord(e.threadID, e.runID, e.turnID(), e.sessionID, snapshot)),
+	}
+	persistCtx, cancel := durablePersistenceContext(ctx)
+	defer cancel()
+	if err := PersistDurableBatch(persistCtx, e.recorder, e.sink, records, event); err != nil {
+		return e.notePersistenceFailure("model_request_append", err)
+	}
+	// The model_request record must be on stable storage before the provider
+	// side effect starts.
+	if err := e.recorder.Flush(persistCtx); err != nil {
+		return e.notePersistenceFailure("model_request_flush", err)
+	}
+	return nil
+}
+
+func (e *runEventEmitter) contextSnapshot(ctx stdcontext.Context, snapshot ContextUsageSnapshot) error {
+	event := AwakenEvent{Type: ContextSnapshotEventType, ContextUsageSnapshot: &snapshot}
+	e.fillIDs(&event)
+	if e.recorder == nil {
+		e.sink.Emit(event)
+		return nil
+	}
+	persistCtx, cancel := durablePersistenceContext(ctx)
+	defer cancel()
+	record := e.withAgentIdentity(ContextSnapshotSemanticRecord(e.threadID, e.runID, e.turnID(), e.sessionID, snapshot))
+	if err := PersistDurable(persistCtx, e.recorder, e.sink, record, event); err != nil {
+		return e.notePersistenceFailure("context_snapshot_append", err)
+	}
+	if err := e.recorder.Flush(persistCtx); err != nil {
+		return e.notePersistenceFailure("context_snapshot_flush", err)
+	}
+	return nil
+}
+
+func (e *runEventEmitter) modelUsage(ctx stdcontext.Context, usage ModelUsageRecord) error {
+	event := AwakenEvent{Type: ModelUsageEventType, ModelUsage: &usage}
+	e.fillIDs(&event)
+	if e.recorder == nil {
+		e.sink.Emit(event)
+		return nil
+	}
+	persistCtx, cancel := durablePersistenceContext(ctx)
+	defer cancel()
+	record := e.withAgentIdentity(ModelUsageSemanticRecord(e.threadID, e.runID, e.turnID(), e.sessionID, usage))
+	if err := PersistDurable(persistCtx, e.recorder, e.sink, record, event); err != nil {
+		return e.notePersistenceFailure("model_usage_append", err)
+	}
+	if err := e.recorder.Flush(persistCtx); err != nil {
+		return e.notePersistenceFailure("model_usage_flush", err)
+	}
 	return nil
 }
 
@@ -557,6 +870,11 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 			))
 		}
 		result := r.toolRuntime.Execute(executionCtx, call)
+		if offloadErr := r.offloadLargeToolResult(runCtx, &result); offloadErr != nil {
+			cancel()
+			result = syntheticPersistenceFailureResult(call, fmt.Errorf("tool result offload: %w", offloadErr))
+			terminateReason = TerminalReasonPersistenceError
+		}
 		if events != nil {
 			r.toolRuntime.sink = events.sink
 			if persistErr := events.persistenceFailure(); persistErr != nil {
@@ -620,6 +938,34 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 		events.setPendingTerminalReason(terminateReason)
 	}
 	return results
+}
+
+func (r *Runner) offloadLargeToolResult(ctx stdcontext.Context, result *ToolExecutionResult) error {
+	if r == nil || result == nil || r.config.ToolResultOffloadStore == nil {
+		return nil
+	}
+	content := result.Content
+	if result.Outcome.Status != "" && len(result.Outcome.Content) > len(content) {
+		content = result.Outcome.Content
+	}
+	if len([]byte(content)) <= toolResultOffloadThresholdBytes {
+		return nil
+	}
+	receipt, err := r.config.ToolResultOffloadStore.OffloadToolResult(ctx, r.threadID, result.ToolCallID, content)
+	if err != nil {
+		return err
+	}
+	projection := fmt.Sprintf(
+		"[TOOL_RESULT_OFFLOADED]\nstorage_key=%s\nsha256=%s\nbytes=%d\npreview=%s",
+		receipt.StorageKey, receipt.Digest, receipt.ByteSize, receipt.Preview,
+	)
+	result.Content = projection
+	result.Truncated = true
+	if result.Outcome.Status != "" {
+		result.Outcome.Content = projection
+		result.Outcome.Truncated = true
+	}
+	return nil
 }
 
 func (r *Runner) currentImplicitParentPool() []string {
@@ -908,11 +1254,11 @@ func lastAPIUsageTokens(response *llm.Response) int {
 	if response == nil || response.Usage == nil {
 		return 0
 	}
-	if response.Usage.TotalTokens > 0 {
-		return response.Usage.TotalTokens
+	if response.Usage.TotalTokens != nil && *response.Usage.TotalTokens > 0 {
+		return *response.Usage.TotalTokens
 	}
-	if response.Usage.InputTokens > 0 {
-		return response.Usage.InputTokens
+	if response.Usage.InputTokens != nil && *response.Usage.InputTokens > 0 {
+		return *response.Usage.InputTokens
 	}
 	return 0
 }
@@ -1034,6 +1380,7 @@ type runEventEmitter struct {
 	persistenceErr        error
 	suppressRunLifecycle  bool
 	agentID               string
+	auxiliaryRequestIndex int
 }
 
 func newRunEventEmitter(threadID string, sink EventSink) *runEventEmitter {
@@ -1294,7 +1641,6 @@ func (e *runEventEmitter) runFinished(ctx stdcontext.Context, content string, st
 	}
 	if state != nil {
 		applyContextWindowEstimate(&event, *state)
-		event.ContextActualTokens = state.LastAPIUsageTokens
 	}
 	e.fillIDs(&event)
 	if e.recorder != nil {

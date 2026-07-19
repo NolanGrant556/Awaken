@@ -122,9 +122,16 @@ func TestInvokeOpenAIUsageResponse(t *testing.T) {
 	if resp.Usage == nil {
 		t.Fatal("expected usage to be populated")
 	}
-	if resp.Usage.InputTokens != 11 || resp.Usage.OutputTokens != 7 || resp.Usage.TotalTokens != 18 {
+	if tokenValue(resp.Usage.InputTokens) != 11 || tokenValue(resp.Usage.OutputTokens) != 7 || tokenValue(resp.Usage.TotalTokens) != 18 {
 		t.Fatalf("unexpected usage: %+v", resp.Usage)
 	}
+}
+
+func tokenValue(value *int) int {
+	if value == nil {
+		return -1
+	}
+	return *value
 }
 
 func TestInvokeSendsToolCallMessages(t *testing.T) {

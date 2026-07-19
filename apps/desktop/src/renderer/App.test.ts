@@ -1,10 +1,12 @@
 import React from "react";
 import {
   AwakenComposerBar,
+  AwakenContextUsagePanel,
   AwakenProjectTree,
   AwakenUserPromptBlock,
   pastedImageFilesFromClipboardData,
   shouldSubmitComposerInputKey,
+  shouldActivateComposerMetaItemKey,
   slashPaletteStyleForAnchor,
   slashPreviewStyleForAnchor,
 } from "@awaken/design-system";
@@ -12,6 +14,8 @@ import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   App,
+  contextUsageMeta,
+  contextUsagePanelData,
   isUserQuestionSelectionAnswered,
   nextUserQuestionPromptIndex,
   promptNarrativeTokensForComposer,
@@ -56,6 +60,7 @@ import {
   activeTurnIdForAnchor,
   composerBottomSafeArea,
   composerContentBottomInset,
+  contextUsagePanelBottomOffset,
   diffLineStats,
   groupNarrativeByTurns,
   isNearLatestTurnOutputTail,
@@ -141,7 +146,10 @@ function stubElectronBridge(): void {
       getRuntimeLogs: vi.fn(async () => []),
       listMcpTools: vi.fn(async () => []),
       listSkills: vi.fn(async () => []),
-      getSkillPreview: vi.fn(async () => ({ frontmatterRaw: "", bodyMarkdown: "" })),
+      getSkillPreview: vi.fn(async () => ({
+        frontmatterRaw: "",
+        bodyMarkdown: "",
+      })),
       installSkill: vi.fn(),
       deleteSkill: vi.fn(),
       disableSkill: vi.fn(),
@@ -220,12 +228,40 @@ function stubElectronBridge(): void {
       openAwakenPetsDirectory: vi.fn(async () => undefined),
       openCodexPetsDirectory: vi.fn(async () => undefined),
       listMemories: vi.fn(async () => []),
-      getMemory: vi.fn(async () => { throw new Error("not found"); }),
+      getMemory: vi.fn(async () => {
+        throw new Error("not found");
+      }),
       deleteMemory: vi.fn(async () => undefined),
-      getMemorySettings: vi.fn(async () => ({ revision: 0, value: { enabled: true, automaticRecall: true, proactiveMemory: true, autoDream: false } })),
-      updateMemorySettings: vi.fn(async () => ({ revision: 1, value: { enabled: true, automaticRecall: true, proactiveMemory: true, autoDream: false } })),
-      startMemoryDream: vi.fn(async () => ({ taskId: "dream", status: "queued" as const, scopes: ["user" as const], createdAt: new Date(0).toISOString() })),
-      getMemoryDream: vi.fn(async () => ({ taskId: "dream", status: "completed" as const, scopes: ["user" as const], createdAt: new Date(0).toISOString() })),
+      getMemorySettings: vi.fn(async () => ({
+        revision: 0,
+        value: {
+          enabled: true,
+          automaticRecall: true,
+          proactiveMemory: true,
+          autoDream: false,
+        },
+      })),
+      updateMemorySettings: vi.fn(async () => ({
+        revision: 1,
+        value: {
+          enabled: true,
+          automaticRecall: true,
+          proactiveMemory: true,
+          autoDream: false,
+        },
+      })),
+      startMemoryDream: vi.fn(async () => ({
+        taskId: "dream",
+        status: "queued" as const,
+        scopes: ["user" as const],
+        createdAt: new Date(0).toISOString(),
+      })),
+      getMemoryDream: vi.fn(async () => ({
+        taskId: "dream",
+        status: "completed" as const,
+        scopes: ["user" as const],
+        createdAt: new Date(0).toISOString(),
+      })),
       listMemoryDreams: vi.fn(async () => []),
       cancelMemoryDream: vi.fn(async () => undefined),
       onMemoryDreamReceipt: vi.fn(() => () => {}),
@@ -242,10 +278,7 @@ describe("shouldResetActiveThreadForWorkspaceChange", () => {
 
   it("returns false when switching within the same workspace", () => {
     expect(
-      shouldResetActiveThreadForWorkspaceChange(
-        "/tmp/project",
-        "/tmp/project",
-      ),
+      shouldResetActiveThreadForWorkspaceChange("/tmp/project", "/tmp/project"),
     ).toBe(false);
   });
 
@@ -436,13 +469,17 @@ describe("Composer Slash Palette helpers", () => {
     expect(clearSlashTriggerFromComposerValue("/daily")).toBe("");
     expect(clearSlashTriggerFromComposerValue("hello /daily")).toBe("hello ");
     expect(clearSlashTriggerFromComposerValue("hello /")).toBe("hello ");
-    expect(clearSlashTriggerFromComposerValue("hello/daily")).toBe("hello/daily");
+    expect(clearSlashTriggerFromComposerValue("hello/daily")).toBe(
+      "hello/daily",
+    );
   });
 
   it("places tokens based on where the slash trigger was typed", () => {
-    expect(composerTokenPlacementForSlashTrigger(slashTriggerFromComposerValue("/doc"))).toBe(
-      "before",
-    );
+    expect(
+      composerTokenPlacementForSlashTrigger(
+        slashTriggerFromComposerValue("/doc"),
+      ),
+    ).toBe("before");
     expect(
       composerTokenPlacementForSlashTrigger(
         slashTriggerFromComposerValue("hello /doc"),
@@ -659,6 +696,12 @@ describe("UserQuestionPrompt pager contract", () => {
 });
 
 describe("AwakenComposerBar layout contract", () => {
+  it("activates meta controls from browser Space key values", () => {
+    expect(shouldActivateComposerMetaItemKey(" ")).toBe(true);
+    expect(shouldActivateComposerMetaItemKey("Spacebar")).toBe(true);
+    expect(shouldActivateComposerMetaItemKey("Enter")).toBe(false);
+  });
+
   it("keeps dock input at one row while center keeps the homepage row budget", () => {
     const baseProps = {
       value: "",
@@ -680,6 +723,34 @@ describe("AwakenComposerBar layout contract", () => {
     expect(dockHtml).toContain('rows="1"');
     expect(centerHtml).toContain("composer-bar-center");
     expect(centerHtml).toContain('rows="3"');
+  });
+
+  it("exposes the context trigger as an expanded dialog control", () => {
+    const html = renderToString(
+      React.createElement(AwakenComposerBar, {
+        value: "",
+        onChange: vi.fn(),
+        variant: "dock",
+        metaItems: [
+          {
+            id: "context",
+            label: "上下文",
+            value: "12K / 112K 可用输入",
+            progress: 12_000 / 112_000,
+            onClick: vi.fn(),
+            ariaHaspopup: "dialog",
+            ariaExpanded: true,
+            ariaControls: "context-panel",
+          },
+        ],
+      }),
+    );
+
+    expect(html).toContain('aria-haspopup="dialog"');
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('aria-controls="context-panel"');
+    expect(html).toContain("12K / 112K 可用输入");
+    expect(html).not.toContain("约 12K");
   });
 
   it("renders attachment previews and warning copy inside the composer surface", () => {
@@ -849,6 +920,213 @@ describe("AwakenComposerBar layout contract", () => {
   });
 });
 
+describe("context usage presentation", () => {
+  it("anchors the panel to the measured composer bar without the output safe gap", () => {
+    expect(contextUsagePanelBottomOffset({ composerBarInset: 88 })).toBe(100);
+    expect(contextUsagePanelBottomOffset({ composerBarInset: -20 })).toBe(28);
+  });
+
+  it("uses the local estimate and effective input window instead of provider actual tokens", () => {
+    expect(
+      contextUsageMeta({
+        eventType: "AWAKEN_CONTEXT_SNAPSHOT",
+        estimatedTokens: 24_000,
+        actualTokens: 99_000,
+        modelWindow: 128_000,
+        outputReserve: 16_000,
+        effectiveWindow: 112_000,
+      }),
+    ).toEqual({
+      label: "上下文",
+      value: "24k / 112k 可用输入",
+      progress: 24_000 / 112_000,
+    });
+  });
+
+  it("projects typed breakdowns without exposing model-call accounting in the panel", () => {
+    const data = contextUsagePanelData({
+      eventType: "AWAKEN_CONTEXT_SNAPSHOT",
+      snapshot: {
+        schemaVersion: 4,
+        snapshotId: "ctx-1",
+        estimatorId: "awaken_leaf_v4",
+        basis: "current_projection",
+        modelWindowTokens: 128_000,
+        outputReserveTokens: 16_000,
+        effectiveInputWindowTokens: 112_000,
+        estimatedInputTokens: 24_000,
+        warningThresholdTokens: 95_000,
+        autoCompactThresholdTokens: 100_800,
+        compactTargetTokens: 40_000,
+        contributions: [
+          { kind: "system_prompt", estimatedTokens: 2_000, sourceCount: 1 },
+          { kind: "builtin_tools", estimatedTokens: 6_000, sourceCount: 10 },
+          { kind: "mcp", estimatedTokens: 8_000, sourceCount: 4 },
+          { kind: "skills", estimatedTokens: 1_000, sourceCount: 1 },
+          { kind: "memory", estimatedTokens: 500, sourceCount: 1 },
+          { kind: "conversation", estimatedTokens: 6_500, sourceCount: 8 },
+        ],
+        generatedAt: "2026-07-19T00:00:00Z",
+      },
+      latestModelUsage: {
+        schemaVersion: 1,
+        requestId: "req-1",
+        purpose: "agent_turn",
+        inputTokens: 22_000,
+        usageComplete: false,
+        latencyMs: 20,
+        status: "succeeded",
+        completedAt: "2026-07-19T00:00:01Z",
+      },
+      modelUsages: [
+        {
+          schemaVersion: 1,
+          requestId: "req-1",
+          purpose: "agent_turn",
+          inputTokens: 22_000,
+          cachedInputTokens: 2_000,
+          uncachedInputTokens: 20_000,
+          outputTokens: 800,
+          calculatedCostUsd: 0.01,
+          usageComplete: true,
+          latencyMs: 20,
+          status: "succeeded",
+          completedAt: "2026-07-19T00:00:01Z",
+        },
+        {
+          schemaVersion: 1,
+          requestId: "req-title",
+          purpose: "thread_title",
+          inputTokens: 100,
+          cachedInputTokens: 0,
+          uncachedInputTokens: 100,
+          outputTokens: 5,
+          calculatedCostUsd: 0.001,
+          usageComplete: true,
+          latencyMs: 10,
+          status: "succeeded",
+          completedAt: "2026-07-19T00:00:02Z",
+        },
+      ],
+    });
+
+    expect(data?.contributions).toEqual([
+      { id: "system_prompt", label: "系统提示词", estimatedTokens: 2_000 },
+      { id: "builtin_tools", label: "内置工具", estimatedTokens: 6_000 },
+      { id: "mcp", label: "MCP", estimatedTokens: 8_000 },
+      { id: "skills", label: "技能", estimatedTokens: 1_000 },
+      { id: "memory", label: "记忆", estimatedTokens: 500 },
+      { id: "conversation", label: "对话", estimatedTokens: 6_500 },
+    ]);
+    const html = renderToString(
+      React.createElement(AwakenContextUsagePanel, {
+        ...data!,
+        onClose: vi.fn(),
+      }),
+    );
+    expect(html).toContain("系统提示词");
+    expect(html).toContain("上下文用量");
+    expect(html).toContain("24K");
+    expect(html).toContain("112K");
+    expect(html).toContain("Token");
+    expect(html).not.toContain("上下文用了");
+    expect(html).not.toContain("约 24K");
+    expect(html).not.toContain("模型总窗口");
+    expect(html).not.toContain("已预留输出");
+    expect(html).not.toContain("自动压缩阈值");
+    expect(html).not.toContain("本地估算");
+    expect(html).not.toContain("可用输入已使用");
+    expect(html).not.toContain("运行环境");
+    expect(html).not.toContain("本轮输入");
+    expect(html).not.toContain("对话历史");
+    expect(html).not.toContain("MCP 与动态工具");
+    expect(html).not.toContain("技能与记忆");
+    expect(html).not.toContain("最近一次模型调用");
+    expect(html).not.toContain("本轮模型调用");
+    expect(html).not.toContain("供应商返回");
+    expect(html).not.toContain("主调用");
+    expect(html).not.toContain("辅助调用");
+    expect(html).not.toContain("US$0.011000");
+  });
+
+  it("keeps legacy aggregates honest when no typed breakdown exists", () => {
+    const data = contextUsagePanelData({
+      eventType: "AWAKEN_CONTEXT_ESTIMATED",
+      modelWindow: 128_000,
+      outputReserve: 16_000,
+      effectiveWindow: 112_000,
+      estimatedTokens: 12_000,
+      autoCompactThreshold: 100_800,
+    });
+    const html = renderToString(
+      React.createElement(AwakenContextUsagePanel, {
+        ...data!,
+        onClose: vi.fn(),
+      }),
+    );
+    expect(html).toContain("暂无分类明细");
+  });
+
+  it("does not fabricate a Skill/Memory split for v1 combined records", () => {
+    const data = contextUsagePanelData({
+      eventType: "AWAKEN_CONTEXT_SNAPSHOT",
+      snapshot: {
+        schemaVersion: 1,
+        snapshotId: "ctx-v1",
+        estimatorId: "awaken_leaf_v1",
+        basis: "current_projection",
+        modelWindowTokens: 128_000,
+        outputReserveTokens: 16_000,
+        effectiveInputWindowTokens: 112_000,
+        estimatedInputTokens: 12_000,
+        warningThresholdTokens: 95_000,
+        autoCompactThresholdTokens: 100_800,
+        compactTargetTokens: 40_000,
+        contributions: [
+          { kind: "system_prompt", estimatedTokens: 2_000, sourceCount: 1 },
+          { kind: "skills_memory", estimatedTokens: 10_000, sourceCount: 2 },
+        ],
+        generatedAt: "2026-07-19T00:00:00Z",
+      },
+    });
+
+    expect(data?.contributions).toEqual([]);
+  });
+
+  it("retains the original v3 breakdown until a continued thread produces v4", () => {
+    const data = contextUsagePanelData({
+      eventType: "AWAKEN_CONTEXT_SNAPSHOT",
+      snapshot: {
+        schemaVersion: 3,
+        snapshotId: "ctx-v3",
+        estimatorId: "awaken_leaf_v3",
+        basis: "sent_request",
+        modelWindowTokens: 128_000,
+        outputReserveTokens: 16_000,
+        effectiveInputWindowTokens: 112_000,
+        estimatedInputTokens: 12_000,
+        warningThresholdTokens: 95_000,
+        autoCompactThresholdTokens: 100_800,
+        compactTargetTokens: 40_000,
+        contributions: [
+          { kind: "builtin_tools", estimatedTokens: 10_000, sourceCount: 10 },
+          { kind: "skills", estimatedTokens: 2_000, sourceCount: 1 },
+        ],
+        generatedAt: "2026-07-19T00:00:00Z",
+      },
+    });
+
+    expect(data?.contributions).toEqual([
+      { id: "system_prompt", label: "系统提示词", estimatedTokens: 0 },
+      { id: "builtin_tools", label: "内置工具", estimatedTokens: 10_000 },
+      { id: "mcp", label: "MCP", estimatedTokens: 0 },
+      { id: "skills", label: "技能", estimatedTokens: 2_000 },
+      { id: "memory", label: "记忆", estimatedTokens: 0 },
+      { id: "conversation", label: "对话", estimatedTokens: 0 },
+    ]);
+  });
+});
+
 describe("AwakenUserPromptBlock layout contract", () => {
   it("renders the prompt bubble as a collapsed expandable surface", () => {
     const html = renderToString(
@@ -902,9 +1180,7 @@ describe("AwakenUserPromptBlock layout contract", () => {
     expect(html.indexOf("你好，你看到这个 skill 不?")).toBeLessThan(
       html.indexOf("deep-research"),
     );
-    expect(html.indexOf("deep-research")).toBeLessThan(
-      html.indexOf("请继续"),
-    );
+    expect(html.indexOf("deep-research")).toBeLessThan(html.indexOf("请继续"));
     const promptStart = html.indexOf(
       '<p class="execution-prompt-bubble-text">',
     );
@@ -1019,7 +1295,9 @@ describe("AwakenUserPromptBlock layout contract", () => {
         expanded: true,
       }),
     );
-    expect(expandedHtml).not.toContain("execution-prompt-bubble-attachment-more");
+    expect(expandedHtml).not.toContain(
+      "execution-prompt-bubble-attachment-more",
+    );
     expect(expandedHtml).toContain("file-5.xlsx");
   });
 
@@ -1064,9 +1342,9 @@ describe("prompt token text projection", () => {
       },
     ];
 
-    expect(
-      promptTextAfterTokenLeadingText("请使用  这个技能写", tokens),
-    ).toBe(" 这个技能写");
+    expect(promptTextAfterTokenLeadingText("请使用  这个技能写", tokens)).toBe(
+      " 这个技能写",
+    );
     expect(promptTextAfterTokenLeadingText("请使用", tokens)).toBe("");
   });
 });
@@ -1196,7 +1474,9 @@ describe("prompt attachment view models", () => {
       detail: "PDF · 24 KB",
       extension: "PDF",
     });
-    expect(views[0]?.tooltip).toContain("路径: .../nolangrant/Desktop/specification.pdf");
+    expect(views[0]?.tooltip).toContain(
+      "路径: .../nolangrant/Desktop/specification.pdf",
+    );
   });
 });
 
@@ -1208,15 +1488,24 @@ describe("project workspace helpers", () => {
     [{ status: "succeeded", phase: "completed" }, "succeeded"],
     [{ status: "failed", phase: "failed" }, "failed"],
     [{ status: "blocked", phase: "cancelled" }, "failed"],
-  ] as const)("classifies durable project operation %o as %s", (operation, expected) => {
-    expect(projectOperationReconciliationState(operation)).toBe(expected);
-  });
+  ] as const)(
+    "classifies durable project operation %o as %s",
+    (operation, expected) => {
+      expect(projectOperationReconciliationState(operation)).toBe(expected);
+    },
+  );
 
   it("waits for the durable project state before reconciling a terminal trash operation", () => {
-    expect(canReconcileTrackedTrashOperation("failed", "trash_pending")).toBe(false);
+    expect(canReconcileTrackedTrashOperation("failed", "trash_pending")).toBe(
+      false,
+    );
     expect(canReconcileTrackedTrashOperation("failed", "active")).toBe(true);
-    expect(canReconcileTrackedTrashOperation("succeeded", "trash_pending")).toBe(false);
-    expect(canReconcileTrackedTrashOperation("succeeded", "removed")).toBe(true);
+    expect(
+      canReconcileTrackedTrashOperation("succeeded", "trash_pending"),
+    ).toBe(false);
+    expect(canReconcileTrackedTrashOperation("succeeded", "removed")).toBe(
+      true,
+    );
   });
 
   it("persists valid trash trackers, removes malformed entries, and replaces duplicates", () => {
@@ -1286,9 +1575,9 @@ describe("project workspace helpers", () => {
       { id: "project-keep", label: "keep", path: "/tmp/keep" },
     ];
 
-    expect(removeWorkspaceProject(projects, "project-demo")).toEqual(
-      [{ id: "project-keep", label: "keep", path: "/tmp/keep" }],
-    );
+    expect(removeWorkspaceProject(projects, "project-demo")).toEqual([
+      { id: "project-keep", label: "keep", path: "/tmp/keep" },
+    ]);
   });
 });
 

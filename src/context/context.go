@@ -19,6 +19,18 @@ const (
 	RoleTool      Role = "tool"
 )
 
+// MessageOrigin is host-owned provenance used for context accounting and
+// replay. Provider adapters deliberately do not serialize these fields.
+type MessageOrigin string
+
+const (
+	MessageOriginConversationHistory MessageOrigin = "conversation_history"
+	MessageOriginCurrentInput        MessageOrigin = "current_input"
+	MessageOriginToolResult          MessageOrigin = "tool_result"
+	MessageOriginCompactSummary      MessageOrigin = "compact_summary"
+	MessageOriginSynthetic           MessageOrigin = "synthetic"
+)
+
 type Message struct {
 	Role              Role                    `json:"role"`
 	Content           string                  `json:"content"`
@@ -29,6 +41,27 @@ type Message struct {
 	IsError           bool                    `json:"is_error,omitempty"`
 	CompactBoundaryID string                  `json:"compact_boundary_id,omitempty"`
 	ModelContent      []tool.ModelContentPart `json:"model_content,omitempty"`
+	Origin            MessageOrigin           `json:"origin,omitempty"`
+	MessageID         string                  `json:"message_id,omitempty"`
+	TurnID            string                  `json:"turn_id,omitempty"`
+	// ProviderProjectionText is request-only host text produced by capability
+	// admission. It is estimated and serialized to the provider, but never
+	// persisted into the conversation or SemanticJournal.
+	ProviderProjectionText string `json:"-"`
+	// ProviderOpaqueState is local replay state for a verified provider
+	// contract. It is deliberately excluded from generic JSON, projections,
+	// Memory and telemetry.
+	ProviderOpaqueState *ProviderOpaqueMessageState `json:"-"`
+}
+
+type ProviderOpaqueMessageState struct {
+	ProviderID         string `json:"provider_id"`
+	ProfileID          string `json:"profile_id"`
+	CredentialRevision uint64 `json:"credential_revision"`
+	ModelID            string `json:"model_id"`
+	ProtocolFamily     string `json:"protocol_family"`
+	EndpointContractID string `json:"endpoint_contract_id"`
+	Content            string `json:"content"`
 }
 
 type MessageAttachment struct {
@@ -115,12 +148,17 @@ func (c *Context) AddUserMessageWithAttachments(content string, attachments []Me
 }
 
 func (c *Context) AddAssistantMessage(content string, toolCalls []ToolCall) {
+	c.AddAssistantMessageWithProviderState(content, toolCalls, nil)
+}
+
+func (c *Context) AddAssistantMessageWithProviderState(content string, toolCalls []ToolCall, state *ProviderOpaqueMessageState) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.messages = append(c.messages, Message{
-		Role:      RoleAssistant,
-		Content:   content,
-		ToolCalls: toolCalls,
+		Role:                RoleAssistant,
+		Content:             content,
+		ToolCalls:           toolCalls,
+		ProviderOpaqueState: cloneProviderOpaqueMessageState(state),
 	})
 }
 
@@ -274,6 +312,9 @@ func EstimateTokens(text string) int {
 
 func EstimateAttachmentPayloadTokens(kind string, content string) int {
 	if strings.EqualFold(strings.TrimSpace(kind), "image") {
+		if strings.TrimSpace(content) == "" {
+			return 0
+		}
 		return roughImageAttachmentTokenEstimate
 	}
 	return EstimateTokens(content)
@@ -292,6 +333,9 @@ func EstimateMessageAttachmentTokens(attachment MessageAttachment) int {
 func EstimateModelContentTokens(part tool.ModelContentPart) int {
 	total := EstimateTokens(part.Type) + EstimateTokens(part.MimeType) + EstimateTokens(part.DisplayName)
 	if part.Type == "image" || part.Type == "file" {
+		if strings.TrimSpace(part.DataBase64) == "" {
+			return total
+		}
 		return total + roughImageAttachmentTokenEstimate
 	}
 	return total
@@ -322,11 +366,22 @@ func cloneMessages(messages []Message) []Message {
 	result := make([]Message, len(messages))
 	for i, message := range messages {
 		result[i] = message
+		// Provider projection is ephemeral request state, not conversation state.
+		result[i].ProviderProjectionText = ""
 		result[i].Attachments = cloneAttachments(message.Attachments)
 		result[i].ModelContent = tool.CloneModelContent(message.ModelContent)
 		result[i].ToolCalls = append([]ToolCall(nil), message.ToolCalls...)
+		result[i].ProviderOpaqueState = cloneProviderOpaqueMessageState(message.ProviderOpaqueState)
 	}
 	return result
+}
+
+func cloneProviderOpaqueMessageState(state *ProviderOpaqueMessageState) *ProviderOpaqueMessageState {
+	if state == nil {
+		return nil
+	}
+	cloned := *state
+	return &cloned
 }
 
 func cloneAttachments(attachments []MessageAttachment) []MessageAttachment {
@@ -368,6 +423,11 @@ func (conv *Conversation) AssistantOutput(content string, toolCalls []ToolCall) 
 	conv.UpdatedAt = time.Now()
 }
 
+func (conv *Conversation) AssistantOutputWithProviderState(content string, toolCalls []ToolCall, state *ProviderOpaqueMessageState) {
+	conv.Context.AddAssistantMessageWithProviderState(content, toolCalls, state)
+	conv.UpdatedAt = time.Now()
+}
+
 func (conv *Conversation) ToolResult(toolCallID, name, result string) {
 	conv.Context.AddToolResult(toolCallID, name, result)
 	conv.UpdatedAt = time.Now()
@@ -382,7 +442,12 @@ type ToolResult struct {
 }
 
 func (conv *Conversation) ToolExchange(content string, toolCalls []ToolCall, results []ToolResult) {
-	conv.AssistantOutput(content, toolCalls)
+	conv.ToolExchangeWithProviderState(content, toolCalls, results, nil)
+	conv.UpdatedAt = time.Now()
+}
+
+func (conv *Conversation) ToolExchangeWithProviderState(content string, toolCalls []ToolCall, results []ToolResult, state *ProviderOpaqueMessageState) {
+	conv.AssistantOutputWithProviderState(content, toolCalls, state)
 	for _, result := range results {
 		conv.Context.AddToolResultWithModelContent(result.ToolCallID, result.Name, result.Content, result.ModelContent, result.IsError)
 	}

@@ -32,15 +32,22 @@ type openaiChatRequest struct {
 	Thinking       *openaiThinkingConfig    `json:"thinking,omitempty"`
 	EnableThinking *bool                    `json:"enable_thinking,omitempty"`
 	Reasoning      *openaiReasoningConfig   `json:"reasoning,omitempty"`
+	StreamOptions  *openaiStreamOptions     `json:"stream_options,omitempty"`
+	PromptCacheKey string                   `json:"prompt_cache_key,omitempty"`
 	Tools          []map[string]interface{} `json:"tools,omitempty"`
 }
 
+type openaiStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
+}
+
 type openaiChatMessage struct {
-	Role       string           `json:"role"`
-	Content    interface{}      `json:"content,omitempty"`
-	ToolCalls  []openaiToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string           `json:"tool_call_id,omitempty"`
-	Name       string           `json:"name,omitempty"`
+	Role             string           `json:"role"`
+	Content          interface{}      `json:"content,omitempty"`
+	ReasoningContent string           `json:"reasoning_content,omitempty"`
+	ToolCalls        []openaiToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string           `json:"tool_call_id,omitempty"`
+	Name             string           `json:"name,omitempty"`
 }
 
 type openaiToolCall struct {
@@ -89,11 +96,22 @@ type openaiStreamResponse struct {
 }
 
 type openAIUsage struct {
-	PromptTokens     int `json:"prompt_tokens,omitempty"`
-	CompletionTokens int `json:"completion_tokens,omitempty"`
-	TotalTokens      int `json:"total_tokens,omitempty"`
-	InputTokens      int `json:"input_tokens,omitempty"`
-	OutputTokens     int `json:"output_tokens,omitempty"`
+	PromptTokens             *int `json:"prompt_tokens,omitempty"`
+	CompletionTokens         *int `json:"completion_tokens,omitempty"`
+	TotalTokens              *int `json:"total_tokens,omitempty"`
+	InputTokens              *int `json:"input_tokens,omitempty"`
+	OutputTokens             *int `json:"output_tokens,omitempty"`
+	CachedTokens             *int `json:"cached_tokens,omitempty"`
+	PromptCacheHitTokens     *int `json:"prompt_cache_hit_tokens,omitempty"`
+	PromptCacheMissTokens    *int `json:"prompt_cache_miss_tokens,omitempty"`
+	CacheReadInputTokens     *int `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationInputTokens *int `json:"cache_creation_input_tokens,omitempty"`
+	PromptTokensDetails      *struct {
+		CachedTokens *int `json:"cached_tokens,omitempty"`
+	} `json:"prompt_tokens_details,omitempty"`
+	CompletionTokensDetails *struct {
+		ReasoningTokens *int `json:"reasoning_tokens,omitempty"`
+	} `json:"completion_tokens_details,omitempty"`
 }
 
 type openaiStreamToolCall struct {
@@ -109,16 +127,32 @@ type openaiStreamToolCall struct {
 // --- 实现 Transport 接口 ---
 
 func (t *openaiTransport) Invoke(ctx stdctx.Context, cfg Config, req Request) (*Response, error) {
+	prepared, err := prepareOpenAIRequest(cfg, req, false)
+	if err != nil {
+		return nil, err
+	}
+	return t.invokePrepared(ctx, cfg, prepared)
+}
+
+func prepareOpenAIRequest(cfg Config, req Request, stream bool) (PreparedRequest, error) {
 	url := cfg.BaseURL + "/chat/completions"
 	req = applyRequestPolicy(cfg, req)
+	cacheMetadata, affinityKey := promptCacheMetadata(cfg, req)
 
 	chatReq := openaiChatRequest{
 		Model:       resolveModel(cfg, req),
-		Messages:    buildOpenAIMessages(req),
+		Messages:    buildOpenAIMessages(cfg, req, cacheMetadata),
 		Temperature: resolveTemperature(cfg, req),
 		MaxTokens:   resolveMaxTokens(cfg, req),
+		Stream:      stream,
 	}
 	applyOpenAIReasoningControls(&chatReq, cfg, req)
+	if affinityKey != "" {
+		chatReq.PromptCacheKey = affinityKey
+		if stream {
+			chatReq.StreamOptions = &openaiStreamOptions{IncludeUsage: true}
+		}
+	}
 
 	if len(req.Tools) > 0 {
 		chatReq.Tools = convertToolsToOpenAI(req.Tools)
@@ -126,10 +160,15 @@ func (t *openaiTransport) Invoke(ctx stdctx.Context, cfg Config, req Request) (*
 
 	body, err := json.Marshal(chatReq)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+		return PreparedRequest{}, fmt.Errorf("failed to marshal request: %w", err)
 	}
+	prepared := newPreparedRequest(req, ProtocolOpenAIChat, url, body, stream)
+	prepared.Cache = cacheMetadata
+	return prepared, nil
+}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+func (t *openaiTransport) invokePrepared(ctx stdctx.Context, cfg Config, prepared PreparedRequest) (*Response, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, prepared.Endpoint, bytes.NewReader(prepared.Body))
 	if err != nil {
 		return nil, requestBuildError(err)
 	}
@@ -156,7 +195,11 @@ func (t *openaiTransport) Invoke(ctx stdctx.Context, cfg Config, req Request) (*
 	}
 
 	choice := chatResp.Choices[0]
-	return responseFromOpenAIMessage(choice.Message.Content, choice.Message.ReasoningContent, choice.Message.ToolCalls, choice.FinishReason, choiceUsage(chatResp.Usage))
+	result, responseErr := responseFromOpenAIMessage(choice.Message.Content, choice.Message.ReasoningContent, choice.Message.ToolCalls, choice.FinishReason, choiceUsage(chatResp.Usage, usageNormalizerID(cfg)))
+	if result != nil {
+		result.ProviderRequestID = providerRequestID(resp)
+	}
+	return result, responseErr
 }
 
 func (t *openaiTransport) StreamInvoke(ctx stdctx.Context, cfg Config, req Request, callback StreamCallback) (*Response, error) {
@@ -164,31 +207,18 @@ func (t *openaiTransport) StreamInvoke(ctx stdctx.Context, cfg Config, req Reque
 }
 
 func (t *openaiTransport) StreamInvokeWithObserver(ctx stdctx.Context, cfg Config, req Request, observer StreamObserver) (*Response, error) {
-	url := cfg.BaseURL + "/chat/completions"
-	req = applyRequestPolicy(cfg, req)
-
-	chatReq := openaiChatRequest{
-		Model:       resolveModel(cfg, req),
-		Messages:    buildOpenAIMessages(req),
-		Temperature: resolveTemperature(cfg, req),
-		MaxTokens:   resolveMaxTokens(cfg, req),
-		Stream:      true,
-	}
-	applyOpenAIReasoningControls(&chatReq, cfg, req)
-
-	if len(req.Tools) > 0 {
-		chatReq.Tools = convertToolsToOpenAI(req.Tools)
-	}
-
-	body, err := json.Marshal(chatReq)
+	prepared, err := prepareOpenAIRequest(cfg, req, true)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+		return nil, err
 	}
+	return t.streamPrepared(ctx, cfg, prepared, observer)
+}
 
+func (t *openaiTransport) streamPrepared(ctx stdctx.Context, cfg Config, prepared PreparedRequest, observer StreamObserver) (*Response, error) {
 	streamCtx, cancel := stdctx.WithCancel(ctx)
 	defer cancel()
 
-	httpReq, err := http.NewRequestWithContext(streamCtx, http.MethodPost, url, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(streamCtx, http.MethodPost, prepared.Endpoint, bytes.NewReader(prepared.Body))
 	if err != nil {
 		return nil, requestBuildError(err)
 	}
@@ -205,9 +235,9 @@ func (t *openaiTransport) StreamInvokeWithObserver(ctx stdctx.Context, cfg Confi
 		return nil, requestFailedError(resp)
 	}
 
-	state := newOpenAIStreamState(observer)
+	state := newOpenAIStreamState(observer, usageNormalizerID(cfg))
 	scanner := bufio.NewScanner(resp.Body)
-	watchdog := newStreamIdleWatchdog(cancel, streamIdleTimeoutForRequest(req))
+	watchdog := newStreamIdleWatchdog(cancel, streamIdleTimeoutForPrepared(prepared))
 	defer watchdog.Stop()
 
 	for scanner.Scan() {
@@ -233,12 +263,16 @@ func (t *openaiTransport) StreamInvokeWithObserver(ctx stdctx.Context, cfg Confi
 		return nil, fmt.Errorf("failed to read stream: %w", err)
 	}
 
-	return state.response()
+	result, responseErr := state.response()
+	if result != nil {
+		result.ProviderRequestID = providerRequestID(resp)
+	}
+	return result, responseErr
 }
 
 // --- 辅助函数 ---
 
-func buildOpenAIMessages(req Request) []openaiChatMessage {
+func buildOpenAIMessages(cfg Config, req Request, cache PreparedPromptCache) []openaiChatMessage {
 	messages := []openaiChatMessage{}
 	if req.SystemPrompt != "" {
 		messages = append(messages, openaiChatMessage{Role: "system", Content: req.SystemPrompt})
@@ -247,10 +281,14 @@ func buildOpenAIMessages(req Request) []openaiChatMessage {
 	if len(req.Messages) > 0 {
 		for index := 0; index < len(req.Messages); {
 			msg := req.Messages[index]
-			messages = append(messages, openaiChatMessage{
+			message := openaiChatMessage{
 				Role: string(msg.Role), Content: openAIContentForMessage(msg),
 				ToolCalls: contextToolCallsToOpenAI(msg.ToolCalls), ToolCallID: msg.ToolCallID, Name: msg.Name,
-			})
+			}
+			if msg.Role == context.RoleAssistant {
+				message.ReasoningContent = replayProviderOpaqueReasoning(cfg, req, cache, msg.ProviderOpaqueState)
+			}
+			messages = append(messages, message)
 			index++
 			if msg.Role != context.RoleAssistant || len(msg.ToolCalls) == 0 {
 				continue
@@ -275,6 +313,25 @@ func buildOpenAIMessages(req Request) []openaiChatMessage {
 		messages = append(messages, openaiChatMessage{Role: "user", Content: req.UserPrompt})
 	}
 	return messages
+}
+
+func replayProviderOpaqueReasoning(cfg Config, req Request, cache PreparedPromptCache, state *context.ProviderOpaqueMessageState) string {
+	if state == nil || !cache.ReasoningReplay || strings.TrimSpace(state.Content) == "" {
+		return ""
+	}
+	revision := cfg.CredentialRevision
+	if revision == 0 {
+		revision = 1
+	}
+	if state.ProviderID != normalizeProviderID(cfg.ProviderID) ||
+		state.ProfileID != strings.TrimSpace(cfg.ProfileID) ||
+		state.CredentialRevision != revision ||
+		state.ModelID != resolveModel(cfg, req) ||
+		state.ProtocolFamily != string(resolveProtocol(cfg)) ||
+		state.EndpointContractID != cache.EndpointContract {
+		return ""
+	}
+	return state.Content
 }
 
 func openAIToolMediaUserContent(messages []context.Message) interface{} {
@@ -330,7 +387,7 @@ func openAIContentForMessage(msg context.Message) interface{} {
 	}
 
 	blocks := make([]map[string]interface{}, 0, len(msg.Attachments)+1)
-	userText := userTextWithAttachmentPaths(msg.Content, msg.Attachments)
+	userText := userTextWithProviderProjection(msg.Content, msg.Attachments, msg.ProviderProjectionText)
 	if strings.TrimSpace(userText) != "" {
 		blocks = append(blocks, map[string]interface{}{
 			"type": "text",
@@ -423,6 +480,9 @@ func applyOpenAIReasoningControls(chatReq *openaiChatRequest, cfg Config, req Re
 	if !req.DisableReasoning {
 		return
 	}
+	if !vendorPrivateFieldsAllowed(cfg) {
+		return
+	}
 	if isKimiK27Code(strings.ToLower(resolveModel(cfg, req))) {
 		return
 	}
@@ -513,12 +573,13 @@ func convertToolsToOpenAI(tools []tool.ToolSchema) []map[string]interface{} {
 // --- OpenAI Stream State ---
 
 type openAIStreamState struct {
-	observer   StreamObserver
-	content    strings.Builder
-	thinking   strings.Builder
-	toolCalls  map[int]*openaiStreamToolAccumulator
-	usage      *Usage
-	stopReason string
+	observer          StreamObserver
+	content           strings.Builder
+	thinking          strings.Builder
+	toolCalls         map[int]*openaiStreamToolAccumulator
+	usage             *Usage
+	stopReason        string
+	usageNormalizerID string
 }
 
 type openaiStreamToolAccumulator struct {
@@ -528,10 +589,10 @@ type openaiStreamToolAccumulator struct {
 	arguments strings.Builder
 }
 
-func newOpenAIStreamState(observer StreamObserver) *openAIStreamState {
+func newOpenAIStreamState(observer StreamObserver, normalizerID string) *openAIStreamState {
 	return &openAIStreamState{
-		observer:  observer,
-		toolCalls: make(map[int]*openaiStreamToolAccumulator),
+		observer: observer, toolCalls: make(map[int]*openaiStreamToolAccumulator),
+		usageNormalizerID: normalizerID,
 	}
 }
 
@@ -540,7 +601,7 @@ func (s *openAIStreamState) consume(data string) {
 	if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 		return
 	}
-	if usage := choiceUsage(chunk.Usage); usage != nil {
+	if usage := choiceUsage(chunk.Usage, s.usageNormalizerID); usage != nil {
 		s.usage = usage
 	}
 
@@ -614,30 +675,107 @@ func (s *openAIStreamState) response() (*Response, error) {
 	return result, nil
 }
 
-func choiceUsage(raw *openAIUsage) *Usage {
+func choiceUsage(raw *openAIUsage, normalizerID string) *Usage {
 	if raw == nil {
 		return nil
 	}
-	input := raw.PromptTokens
-	if input == 0 {
-		input = raw.InputTokens
+	input := firstValidTokenPointer(raw.PromptTokens, raw.InputTokens)
+	output := firstValidTokenPointer(raw.CompletionTokens, raw.OutputTokens)
+	total := validTokenPointer(raw.TotalTokens)
+	cached := firstValidTokenPointer(
+		raw.PromptCacheHitTokens,
+		raw.CachedTokens,
+		promptDetailsCachedTokens(raw.PromptTokensDetails),
+		raw.CacheReadInputTokens,
+	)
+	cacheWrite := validTokenPointer(raw.CacheCreationInputTokens)
+	rawReasoning := completionDetailsReasoningTokens(raw.CompletionTokensDetails)
+	reasoning := rawReasoning
+	if output != nil && reasoning != nil && *reasoning > *output {
+		value := *output
+		reasoning = &value
 	}
-	output := raw.CompletionTokens
-	if output == 0 {
-		output = raw.OutputTokens
+	var uncached *int
+	if normalizerID == "deepseek_cache_usage_v1" &&
+		raw.PromptCacheHitTokens != nil && raw.PromptCacheMissTokens != nil &&
+		*raw.PromptCacheHitTokens >= 0 && *raw.PromptCacheMissTokens >= 0 {
+		value := *raw.PromptCacheHitTokens + *raw.PromptCacheMissTokens
+		if input == nil {
+			input = &value
+		}
 	}
-	total := raw.TotalTokens
-	if total == 0 && (input > 0 || output > 0) {
-		total = input + output
+	if input != nil && (cached != nil || cacheWrite != nil) {
+		cachedValue := 0
+		if cached != nil {
+			cachedValue = *cached
+		}
+		cacheWriteValue := 0
+		if cacheWrite != nil {
+			cacheWriteValue = *cacheWrite
+		}
+		if cachedValue+cacheWriteValue <= *input {
+			value := *input - cachedValue - cacheWriteValue
+			uncached = &value
+		}
 	}
-	if input == 0 && output == 0 && total == 0 {
+	if raw.PromptCacheHitTokens != nil && raw.PromptCacheMissTokens != nil && input != nil &&
+		*raw.PromptCacheHitTokens >= 0 && *raw.PromptCacheMissTokens >= 0 &&
+		*raw.PromptCacheHitTokens+*raw.PromptCacheMissTokens == *input {
+		value := *raw.PromptCacheMissTokens
+		uncached = &value
+	}
+	if input == nil && output == nil && total == nil && cached == nil && cacheWrite == nil && raw.PromptCacheMissTokens == nil {
 		return nil
 	}
-	return &Usage{
-		InputTokens:  input,
-		OutputTokens: output,
-		TotalTokens:  total,
+	if total == nil {
+		total = sumTokenPointers(input, output)
 	}
+	return &Usage{
+		InputTokens: input, CachedInputTokens: cached, UncachedInputTokens: uncached,
+		CacheWriteTokens: cacheWrite, OutputTokens: output, ReasoningTokens: reasoning, TotalTokens: total,
+		Raw: RawUsage{
+			NormalizerID: normalizerID, PromptTokens: raw.PromptTokens, InputTokens: raw.InputTokens,
+			CompletionTokens: raw.CompletionTokens, OutputTokens: raw.OutputTokens, TotalTokens: raw.TotalTokens,
+			CachedTokens: raw.CachedTokens, PromptCacheHitTokens: raw.PromptCacheHitTokens,
+			PromptCacheMissTokens: raw.PromptCacheMissTokens, CacheReadInputTokens: raw.CacheReadInputTokens,
+			CacheCreationInputTokens: raw.CacheCreationInputTokens, ReasoningTokens: rawReasoning,
+		},
+	}
+}
+
+func completionDetailsReasoningTokens(details *struct {
+	ReasoningTokens *int `json:"reasoning_tokens,omitempty"`
+}) *int {
+	if details == nil {
+		return nil
+	}
+	return validTokenPointer(details.ReasoningTokens)
+}
+
+func promptDetailsCachedTokens(details *struct {
+	CachedTokens *int `json:"cached_tokens,omitempty"`
+}) *int {
+	if details == nil {
+		return nil
+	}
+	return details.CachedTokens
+}
+
+func firstValidTokenPointer(values ...*int) *int {
+	for _, value := range values {
+		if normalized := validTokenPointer(value); normalized != nil {
+			return normalized
+		}
+	}
+	return nil
+}
+
+func validTokenPointer(value *int) *int {
+	if value == nil || *value < 0 {
+		return nil
+	}
+	normalized := *value
+	return &normalized
 }
 
 func (s *openAIStreamState) sortedToolCalls() []ToolCall {

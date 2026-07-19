@@ -131,6 +131,13 @@ func streamIdleTimeoutForRequest(req Request) time.Duration {
 	return streamIdleTimeout()
 }
 
+func streamIdleTimeoutForPrepared(req PreparedRequest) time.Duration {
+	if req.StreamIdleTimeout != 0 {
+		return req.StreamIdleTimeout
+	}
+	return streamIdleTimeout()
+}
+
 func durationFromEnvMS(name string, fallback time.Duration) time.Duration {
 	raw := strings.TrimSpace(os.Getenv(name))
 	if raw == "" {
@@ -336,6 +343,18 @@ func applyAuthHeaders(httpReq *http.Request, cfg Config, protocol Protocol) {
 	} else {
 		httpReq.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 	}
+}
+
+func providerRequestID(resp *http.Response) string {
+	if resp == nil {
+		return ""
+	}
+	for _, name := range []string{"x-request-id", "x-ds-request-id", "request-id", "x-requestid"} {
+		if value := strings.TrimSpace(resp.Header.Get(name)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func requestFailedError(resp *http.Response) error {

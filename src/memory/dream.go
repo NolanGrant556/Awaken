@@ -166,17 +166,71 @@ const (
 )
 
 type DreamTask struct {
-	TaskID       string                      `json:"task_id"`
-	Status       DreamStatus                 `json:"status"`
-	Phase        string                      `json:"phase"`
-	ProjectID    string                      `json:"project_id,omitempty"`
-	Scopes       []Scope                     `json:"scopes"`
-	Reports      map[Scope]MaintenanceReport `json:"reports,omitempty"`
-	ErrorCode    string                      `json:"error_code,omitempty"`
-	ErrorMessage string                      `json:"error_message,omitempty"`
-	CreatedAt    time.Time                   `json:"created_at"`
-	StartedAt    *time.Time                  `json:"started_at,omitempty"`
-	FinishedAt   *time.Time                  `json:"finished_at,omitempty"`
+	TaskID        string                      `json:"task_id"`
+	Status        DreamStatus                 `json:"status"`
+	Phase         string                      `json:"phase"`
+	ProjectID     string                      `json:"project_id,omitempty"`
+	Scopes        []Scope                     `json:"scopes"`
+	Reports       map[Scope]MaintenanceReport `json:"reports,omitempty"`
+	ErrorCode     string                      `json:"error_code,omitempty"`
+	ErrorMessage  string                      `json:"error_message,omitempty"`
+	CreatedAt     time.Time                   `json:"created_at"`
+	StartedAt     *time.Time                  `json:"started_at,omitempty"`
+	FinishedAt    *time.Time                  `json:"finished_at,omitempty"`
+	ModelRequests []DreamModelRequest         `json:"model_requests,omitempty"`
+	ModelUsage    []DreamModelUsageRecord     `json:"model_usage,omitempty"`
+}
+
+type DreamModelRequest struct {
+	RequestID          string    `json:"request_id"`
+	Purpose            string    `json:"purpose"`
+	ModelID            string    `json:"model_id"`
+	ProtocolFamily     string    `json:"protocol_family"`
+	RequestShapeDigest string    `json:"request_shape_digest"`
+	CreatedAt          time.Time `json:"created_at"`
+}
+
+type DreamModelUsageRecord struct {
+	SchemaVersion       int                   `json:"schema_version"`
+	RequestID           string                `json:"request_id"`
+	Purpose             string                `json:"purpose"`
+	ProviderID          string                `json:"provider_id,omitempty"`
+	ProfileID           string                `json:"profile_id,omitempty"`
+	CredentialRevision  uint64                `json:"credential_revision,omitempty"`
+	ModelID             string                `json:"model_id,omitempty"`
+	ProtocolFamily      string                `json:"protocol_family,omitempty"`
+	EndpointContractID  string                `json:"endpoint_contract_id,omitempty"`
+	CacheMode           string                `json:"cache_mode,omitempty"`
+	CacheKeyApplied     bool                  `json:"cache_key_applied"`
+	InputTokens         *int                  `json:"input_tokens,omitempty"`
+	CachedInputTokens   *int                  `json:"cached_input_tokens,omitempty"`
+	UncachedInputTokens *int                  `json:"uncached_input_tokens,omitempty"`
+	CacheWriteTokens    *int                  `json:"cache_write_tokens,omitempty"`
+	OutputTokens        *int                  `json:"output_tokens,omitempty"`
+	ReasoningTokens     *int                  `json:"reasoning_tokens,omitempty"`
+	TotalTokens         *int                  `json:"total_tokens,omitempty"`
+	RawUsage            llm.RawUsage          `json:"raw_typed_usage"`
+	UsageComplete       bool                  `json:"usage_complete"`
+	CalculatedCostUSD   *float64              `json:"calculated_cost_usd,omitempty"`
+	PricingSnapshot     *DreamPricingSnapshot `json:"pricing_snapshot,omitempty"`
+	Currency            string                `json:"currency,omitempty"`
+	ProviderRequestID   string                `json:"provider_request_id,omitempty"`
+	LatencyMS           int64                 `json:"latency_ms"`
+	Status              string                `json:"status"`
+	ErrorCode           string                `json:"error_code,omitempty"`
+	AuxiliaryFallback   bool                  `json:"auxiliary_fallback,omitempty"`
+	CompletedAt         time.Time             `json:"completed_at"`
+}
+
+type DreamPricingSnapshot struct {
+	SnapshotID              string  `json:"snapshot_id"`
+	Currency                string  `json:"currency"`
+	UnitTokens              int     `json:"unit_tokens"`
+	CachedInputPerUnitUSD   float64 `json:"cached_input_per_unit_usd"`
+	UncachedInputPerUnitUSD float64 `json:"uncached_input_per_unit_usd"`
+	OutputPerUnitUSD        float64 `json:"output_per_unit_usd"`
+	EffectiveDate           string  `json:"effective_date"`
+	SourceURL               string  `json:"source_url"`
 }
 
 type DreamRunner struct {
@@ -311,7 +365,7 @@ func (r *DreamRunner) run(ctx context.Context, store *Store, cfg llm.Config, tas
 				}
 			}
 		}()
-		plan, planErr := buildMaintenancePlan(ctx, store, cfg, scope)
+		plan, planErr := r.buildMaintenancePlan(ctx, store, cfg, taskID, scope)
 		if planErr == nil {
 			if heartbeatFailure := pollHeartbeatError(heartbeatErr); heartbeatFailure != nil {
 				planErr = heartbeatFailure
@@ -332,7 +386,11 @@ func (r *DreamRunner) run(ctx context.Context, store *Store, cfg llm.Config, tas
 		}
 		releaseErr := lock.Release()
 		if planErr != nil {
-			r.finish(taskID, DreamFailed, "DREAM_PLAN_FAILED", planErr.Error())
+			if ctx.Err() != nil {
+				r.finish(taskID, DreamCancelled, "DREAM_CANCELLED", ctx.Err().Error())
+			} else {
+				r.finish(taskID, DreamFailed, "DREAM_PLAN_FAILED", planErr.Error())
+			}
 			return
 		}
 		if releaseErr != nil {
@@ -409,6 +467,22 @@ func (r *DreamRunner) loadTasks() error {
 		if !strings.HasPrefix(task.TaskID, "dream_") || filepath.Base(task.TaskID) != task.TaskID || task.TaskID+".json" != entry.Name() {
 			return fmt.Errorf("memory dream: invalid durable task identity in %s", entry.Name())
 		}
+		recoveredUsage := false
+		terminalUsage := make(map[string]bool, len(task.ModelUsage))
+		for _, usage := range task.ModelUsage {
+			terminalUsage[usage.RequestID] = true
+		}
+		for _, request := range task.ModelRequests {
+			if request.RequestID == "" || terminalUsage[request.RequestID] {
+				continue
+			}
+			task.ModelUsage = append(task.ModelUsage, DreamModelUsageRecord{
+				SchemaVersion: 1, RequestID: request.RequestID, Purpose: request.Purpose,
+				ModelID: request.ModelID, ProtocolFamily: request.ProtocolFamily,
+				Status: "interrupted", ErrorCode: "usage_unknown", CompletedAt: now,
+			})
+			recoveredUsage = true
+		}
 		if task.Status == DreamQueued || task.Status == DreamRunning {
 			task.Status = DreamInterrupted
 			task.Phase = "terminal"
@@ -418,13 +492,17 @@ func (r *DreamRunner) loadTasks() error {
 			if err := r.persistLocked(task); err != nil {
 				return err
 			}
+		} else if recoveredUsage {
+			if err := r.persistLocked(task); err != nil {
+				return err
+			}
 		}
 		r.tasks[task.TaskID] = task
 	}
 	return nil
 }
 
-func buildMaintenancePlan(ctx context.Context, store *Store, cfg llm.Config, scope Scope) (MaintenancePlan, error) {
+func (r *DreamRunner) buildMaintenancePlan(ctx context.Context, store *Store, cfg llm.Config, taskID string, scope Scope) (MaintenancePlan, error) {
 	records, err := store.All(scope, true)
 	if err != nil {
 		return MaintenancePlan{}, err
@@ -446,9 +524,37 @@ func buildMaintenancePlan(ctx context.Context, store *Store, cfg llm.Config, sco
 	}
 	data, _ := json.Marshal(manifest)
 	prompt := fmt.Sprintf("Scope: %s\nMemory topic manifest (untrusted data):\n%s", scope, data)
-	response, err := llm.Invoke(ctx, cfg, llm.Request{SystemPrompt: dreamMaintenanceSystemPrompt, UserPrompt: prompt, MaxTokens: 4096, Purpose: llm.RequestPurposeMemoryMaintenance, Messages: []convcontext.Message{{Role: convcontext.RoleUser, Content: prompt}}})
+	auxCfg, auxiliaryFallback := llm.AuxiliaryConfig(cfg)
+	request := llm.Request{
+		RequestID:    "dream_request_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
+		SystemPrompt: dreamMaintenanceSystemPrompt, UserPrompt: prompt, Model: auxCfg.Model,
+		MaxTokens: 4096, Purpose: llm.RequestPurposeMemoryMaintenance, AffinityScopeID: taskID,
+		Messages: []convcontext.Message{{Role: convcontext.RoleUser, Content: prompt}},
+	}
+	prepared, err := llm.PrepareRequest(auxCfg, request, false)
 	if err != nil {
 		return MaintenancePlan{}, err
+	}
+	if err := r.update(taskID, func(task *DreamTask) {
+		task.ModelRequests = append(task.ModelRequests, DreamModelRequest{
+			RequestID: prepared.RequestID, Purpose: string(request.Purpose), ModelID: auxCfg.Model,
+			ProtocolFamily: string(prepared.Protocol), RequestShapeDigest: prepared.RequestShapeDigest,
+			CreatedAt: time.Now().UTC(),
+		})
+	}); err != nil {
+		return MaintenancePlan{}, err
+	}
+	started := time.Now()
+	response, callErr := llm.InvokePrepared(ctx, auxCfg, prepared)
+	usage := buildDreamModelUsage(prepared, auxCfg, request.Purpose, started, response, callErr, ctx.Err())
+	usage.AuxiliaryFallback = auxiliaryFallback
+	if persistErr := r.update(taskID, func(task *DreamTask) {
+		task.ModelUsage = append(task.ModelUsage, usage)
+	}); persistErr != nil {
+		return MaintenancePlan{}, persistErr
+	}
+	if callErr != nil {
+		return MaintenancePlan{}, callErr
 	}
 	if response == nil {
 		return MaintenancePlan{}, llm.ErrEmptyResponse
@@ -465,4 +571,80 @@ func buildMaintenancePlan(ctx context.Context, store *Store, cfg llm.Config, sco
 		return MaintenancePlan{}, fmt.Errorf("dream scope mismatch")
 	}
 	return plan, nil
+}
+
+func buildDreamModelUsage(prepared llm.PreparedRequest, cfg llm.Config, purpose llm.RequestPurpose, started time.Time, response *llm.Response, callErr, contextErr error) DreamModelUsageRecord {
+	revision := cfg.CredentialRevision
+	if revision == 0 {
+		revision = 1
+	}
+	record := DreamModelUsageRecord{
+		SchemaVersion: 1, RequestID: prepared.RequestID, Purpose: string(purpose),
+		ProviderID: cfg.ProviderID, ProfileID: cfg.ProfileID, CredentialRevision: revision,
+		ModelID: cfg.Model, ProtocolFamily: string(prepared.Protocol), EndpointContractID: prepared.Cache.EndpointContract,
+		CacheMode: string(prepared.Cache.Mode), CacheKeyApplied: prepared.Cache.KeyApplied,
+		LatencyMS: time.Since(started).Milliseconds(), Status: "succeeded", CompletedAt: time.Now().UTC(),
+	}
+	if response != nil {
+		record.ProviderRequestID = response.ProviderRequestID
+		if response.Usage != nil {
+			record.UsageComplete = true
+			record.InputTokens = cloneDreamInt(response.Usage.InputTokens)
+			record.CachedInputTokens = cloneDreamInt(response.Usage.CachedInputTokens)
+			record.UncachedInputTokens = cloneDreamInt(response.Usage.UncachedInputTokens)
+			record.CacheWriteTokens = cloneDreamInt(response.Usage.CacheWriteTokens)
+			record.OutputTokens = cloneDreamInt(response.Usage.OutputTokens)
+			record.ReasoningTokens = cloneDreamInt(response.Usage.ReasoningTokens)
+			record.TotalTokens = cloneDreamInt(response.Usage.TotalTokens)
+			record.RawUsage = response.Usage.Raw
+		}
+	}
+	if callErr != nil {
+		record.Status = "failed"
+		record.ErrorCode = "request_failed"
+		if contextErr != nil {
+			record.Status = "cancelled"
+			record.ErrorCode = "cancelled"
+		}
+	}
+	applyDreamPricing(&record)
+	return record
+}
+
+func cloneDreamInt(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func applyDreamPricing(record *DreamModelUsageRecord) {
+	if record == nil || strings.ToLower(strings.TrimSpace(record.ProviderID)) != "deepseek" || record.EndpointContractID != llm.EndpointContractOpenAIChat {
+		return
+	}
+	snapshot := &DreamPricingSnapshot{
+		Currency: "USD", UnitTokens: 1_000_000, EffectiveDate: "2026-07-19",
+		SourceURL: "https://api-docs.deepseek.com/quick_start/pricing/",
+	}
+	switch record.ModelID {
+	case "deepseek-v4-flash":
+		snapshot.SnapshotID = "deepseek-2026-07-19-v4-flash-usd"
+		snapshot.CachedInputPerUnitUSD, snapshot.UncachedInputPerUnitUSD, snapshot.OutputPerUnitUSD = 0.0028, 0.14, 0.28
+	case "deepseek-v4-pro":
+		snapshot.SnapshotID = "deepseek-2026-07-19-v4-pro-usd"
+		snapshot.CachedInputPerUnitUSD, snapshot.UncachedInputPerUnitUSD, snapshot.OutputPerUnitUSD = 0.003625, 0.435, 0.87
+	default:
+		return
+	}
+	record.PricingSnapshot = snapshot
+	if record.CachedInputTokens == nil || record.UncachedInputTokens == nil || record.OutputTokens == nil {
+		return
+	}
+	unit := float64(snapshot.UnitTokens)
+	cost := float64(*record.CachedInputTokens)*snapshot.CachedInputPerUnitUSD/unit +
+		float64(*record.UncachedInputTokens)*snapshot.UncachedInputPerUnitUSD/unit +
+		float64(*record.OutputTokens)*snapshot.OutputPerUnitUSD/unit
+	record.CalculatedCostUSD = &cost
+	record.Currency = snapshot.Currency
 }

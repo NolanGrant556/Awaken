@@ -27,11 +27,12 @@ type AgentConfig struct {
 	MemoryContextProvider func() (string, error)
 	// MemoryRecallStart launches non-blocking manifest selection for a user
 	// turn. MemoryContextProvider exposes a completed result later.
-	MemoryRecallStart func(stdcontext.Context, string, []string)
-	MemoryRecallEnd   func()
-	MemoryRecallDrain func() []MemoryRecallReceipt
-	MemoryRecallReset func()
-	AutoToolPolicy    AutoToolPolicy
+	MemoryRecallStart        func(stdcontext.Context, string, []string)
+	MemoryRecallSetAuthority func(ModelCallAuthority)
+	MemoryRecallEnd          func()
+	MemoryRecallDrain        func() []MemoryRecallReceipt
+	MemoryRecallReset        func()
+	AutoToolPolicy           AutoToolPolicy
 	// ToolExposure selects the model-visible tool pool. Empty Mode uses
 	// DefaultToolExposurePolicy applies generic explicit hide/show rules.
 	ToolExposure tool.ToolExposurePolicy
@@ -72,6 +73,24 @@ type AgentConfig struct {
 	ToolSessionState *tool.ToolSessionState
 	// ModelContentStore owns tool-result media blobs beneath the thread session.
 	ModelContentStore tool.ModelContentStore
+	// ToolResultOffloadStore durably admits large text results once before
+	// either the journal or model context observes them.
+	ToolResultOffloadStore ToolResultOffloadStore
+	// ContextEpochStore pins the exact provider prefix and host-owned source
+	// snapshots beneath the owning thread. nil keeps lightweight unit runners
+	// storage-free.
+	ContextEpochStore ContextEpochStore
+}
+
+type ToolResultOffloadReceipt struct {
+	StorageKey string
+	Digest     string
+	ByteSize   int
+	Preview    string
+}
+
+type ToolResultOffloadStore interface {
+	OffloadToolResult(stdcontext.Context, string, string, string) (ToolResultOffloadReceipt, error)
 }
 
 type MemoryRecallReceipt struct {
@@ -132,6 +151,9 @@ type ModelConfig struct {
 	BaseURL               string
 	Model                 string
 	Protocol              string
+	ProviderID            string
+	ProfileID             string
+	CredentialRevision    uint64
 	Temperature           float64
 	MaxTokens             int
 	AuthScheme            string
@@ -142,13 +164,18 @@ type ModelConfig struct {
 
 type LLMRequest struct {
 	SystemPrompt       string
+	PromptSections     []PromptSection
 	Messages           []context.Message
 	Tools              []tool.ToolSchema
+	AttributedTools    []AttributedToolSchema
 	Model              string
 	Temperature        float64
 	MaxTokens          int
 	ContextWindowState ContextWindowState
+	ContextUsage       ContextUsageSnapshot
 	EnvelopeDebug      *ContextEnvelope
+	EpochSources       []ContextEpochSourceCandidate
+	ContextEpoch       *ContextEpochReceipt
 }
 
 type RuntimeInfoProvider interface {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	convcontext "awaken/src/context"
+	"awaken/src/llm"
 	"awaken/src/tool"
 )
 
@@ -79,6 +80,64 @@ func NewSemanticRecord(kind SemanticKind, threadID, runID, turnID, parentID, ses
 		Timestamp:     time.Now().UTC(),
 		Payload:       payload,
 	}
+}
+
+func semanticPayload(value any) map[string]any {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return map[string]any{}
+	}
+	var payload map[string]any
+	if json.Unmarshal(raw, &payload) != nil {
+		return map[string]any{}
+	}
+	return payload
+}
+
+func ContextSnapshotSemanticRecord(threadID, runID, turnID, sessionID string, snapshot ContextUsageSnapshot) SemanticRecord {
+	return NewSemanticRecord(SemanticKindContextSnapshot, threadID, runID, turnID, "", sessionID, semanticPayload(snapshot))
+}
+
+func ContextEpochSemanticRecord(threadID, runID, turnID, sessionID string, receipt ContextEpochReceipt) SemanticRecord {
+	return NewSemanticRecord(SemanticKindContextEpoch, threadID, runID, turnID, "", sessionID, map[string]any{
+		"epoch_id": receipt.EpochID, "baseline_digest": receipt.BaselineDigest,
+		"state": receipt.State, "boundary_reason": receipt.BoundaryReason,
+		"baseline_sequence": receipt.BaselineSequence,
+	})
+}
+
+func ModelRequestSemanticRecord(threadID, runID, turnID, sessionID string, snapshot ContextUsageSnapshot) SemanticRecord {
+	payload := map[string]any{
+		"request_id":             snapshot.RequestID,
+		"purpose":                "agent_turn",
+		"model_id":               snapshot.ModelID,
+		"protocol_family":        snapshot.ProtocolFamily,
+		"request_shape_digest":   snapshot.RequestShapeDigest,
+		"estimated_input_tokens": snapshot.EstimatedInputTokens,
+		"contributions":          snapshot.Contributions,
+		"created_at":             snapshot.GeneratedAt,
+	}
+	return NewSemanticRecord(SemanticKindModelRequest, threadID, runID, turnID, "", sessionID, payload)
+}
+
+func AuxiliaryModelRequestSemanticRecord(
+	threadID, runID, turnID, sessionID string,
+	requestID string,
+	purpose llm.RequestPurpose,
+	modelID, protocolFamily, requestShapeDigest string,
+	estimatedInputTokens, retryIndex int,
+) SemanticRecord {
+	payload := map[string]any{
+		"request_id": requestID, "purpose": string(purpose), "model_id": modelID,
+		"protocol_family": protocolFamily, "request_shape_digest": requestShapeDigest,
+		"estimated_input_tokens": estimatedInputTokens, "retry_index": retryIndex,
+		"created_at": time.Now().UTC(),
+	}
+	return NewSemanticRecord(SemanticKindModelRequest, threadID, runID, turnID, "", sessionID, payload)
+}
+
+func ModelUsageSemanticRecord(threadID, runID, turnID, sessionID string, usage ModelUsageRecord) SemanticRecord {
+	return NewSemanticRecord(SemanticKindModelUsage, threadID, runID, turnID, usage.RequestID, sessionID, semanticPayload(usage))
 }
 
 func ToolCallSemanticRecord(threadID, runID, turnID, sessionID, parentID string, call convcontext.ToolCall) SemanticRecord {

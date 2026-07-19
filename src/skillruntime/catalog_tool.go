@@ -102,14 +102,22 @@ func (t *CatalogTool) Description() string {
 // own 1%-of-context budget instead of applying the generic 1,800-rune tool
 // description cap a second time.
 func (t *CatalogTool) ModelDescriptionForContext(contextWindowTokens int) string {
+	listing := t.ModelCatalogForContext(contextWindowTokens)
+	if listing == "" {
+		return "Load an installed Skill by name and apply its instructions to the current task."
+	}
+	return skillTriggerRulesPrefix + listing
+}
+
+// ModelCatalogForContext exposes only the model-visible Skill discovery
+// listing (name, source, description and when-to-use). Agent Core uses this
+// typed boundary to account catalog metadata separately from the builtin
+// Skill tool wrapper and from full activated Skill instructions.
+func (t *CatalogTool) ModelCatalogForContext(contextWindowTokens int) string {
 	if t == nil || t.Registry == nil {
-		return "Load an installed Skill by name and apply its instructions to the current task."
+		return ""
 	}
-	snapshot := CompileCatalog(t.Registry.ListModelInvocable(), contextWindowTokens)
-	if strings.TrimSpace(snapshot.Listing) == "" {
-		return "Load an installed Skill by name and apply its instructions to the current task."
-	}
-	return skillTriggerRulesPrefix + snapshot.Listing
+	return strings.TrimSpace(CompileCatalog(t.Registry.ListModelInvocable(), contextWindowTokens).Listing)
 }
 
 // skillTriggerRulesPrefix carries the mandatory Skill selection rules right

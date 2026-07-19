@@ -25,6 +25,7 @@ GET    /v1/threads
 PATCH  /v1/threads/{thread_id}
 DELETE /v1/threads/{thread_id}
 GET    /v1/threads/{thread_id}/transcript
+POST   /v1/threads/{thread_id}/context-snapshot
 POST   /v1/runs
 GET    /v1/runs/{run_id}
 GET    /v1/runs/{run_id}/events
@@ -34,7 +35,7 @@ GET    /v1/runs/{run_id}/audit
 POST   /v1/shutdown
 ```
 
-`/v1/shutdown` 只有注入 shutdown callback 才注册。`/audit` 当前返回空数组，查询链尚未接通；其审计语义由 04 域记录。
+`/v1/shutdown` 只有注入 shutdown callback 才注册。`/audit` 当前返回空数组，查询链尚未接通；其审计语义由 04 域记录。`POST /v1/threads/{thread_id}/context-snapshot` 接收与 run 相同的 `model_profile`，只重建并耐久化该 thread 的当前下一请求 projection；不发 provider 请求，响应为 204。Desktop 在 GET transcript 前调用它；没有可运行 profile 时直接读取历史 transcript。
 
 ### 3.2 项目与可恢复删除
 

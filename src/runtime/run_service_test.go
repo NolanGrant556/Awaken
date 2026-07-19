@@ -85,14 +85,17 @@ func TestRunServiceUsesModelProfileForNewAndExistingThreads(t *testing.T) {
 			modelCfg := agentcore.ModelConfig{Model: "legacy-model"}
 			if profile != nil {
 				modelCfg = agentcore.ModelConfig{
-					APIKey:        profile.APIKey,
-					BaseURL:       profile.BaseURL,
-					Model:         profile.ModelID,
-					Protocol:      profile.Protocol,
-					AuthScheme:    profile.AuthScheme,
-					Temperature:   profile.Temperature,
-					MaxTokens:     profile.MaxTokens,
-					ContextWindow: profile.ContextWindow,
+					APIKey:             profile.APIKey,
+					BaseURL:            profile.BaseURL,
+					Model:              profile.ModelID,
+					Protocol:           profile.Protocol,
+					ProviderID:         profile.ProviderID,
+					ProfileID:          profile.ProfileID,
+					CredentialRevision: profile.CredentialRevision,
+					AuthScheme:         profile.AuthScheme,
+					Temperature:        profile.Temperature,
+					MaxTokens:          profile.MaxTokens,
+					ContextWindow:      profile.ContextWindow,
 				}
 			}
 			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
@@ -116,21 +119,22 @@ func TestRunServiceUsesModelProfileForNewAndExistingThreads(t *testing.T) {
 		Input:     "first",
 		Workspace: WorkspaceConfig{WorkspaceRoot: workspace},
 		ModelProfile: &ModelProfileConfig{
-			ProfileID:     "profile-a",
-			ProviderID:    "deepseek",
-			ModelID:       "deepseek-v4-pro",
-			BaseURL:       "https://api.deepseek.com",
-			Protocol:      "openai_chat",
-			AuthScheme:    "bearer",
-			APIKey:        "secret-a",
-			ContextWindow: 400000,
+			ProfileID:          "profile-a",
+			ProviderID:         "deepseek",
+			ModelID:            "deepseek-v4-pro",
+			BaseURL:            "https://api.deepseek.com",
+			Protocol:           "openai_chat",
+			AuthScheme:         "bearer",
+			APIKey:             "secret-a",
+			CredentialRevision: 1,
+			ContextWindow:      400000,
 		},
 	})
 	if err != nil {
 		t.Fatalf("StartRun returned error: %v", err)
 	}
 	firstCfg := <-observed
-	if firstCfg.Model != "deepseek-v4-pro" || firstCfg.APIKey != "secret-a" || firstCfg.ContextWindow != 400000 {
+	if firstCfg.Model != "deepseek-v4-pro" || firstCfg.ProviderID != "deepseek" || firstCfg.ProfileID != "profile-a" || firstCfg.CredentialRevision != 1 || firstCfg.APIKey != "secret-a" || firstCfg.ContextWindow != 400000 {
 		t.Fatalf("unexpected first model config: %+v", firstCfg)
 	}
 	waitForRunStatus(t, service, first.RunID, "finished")
@@ -515,6 +519,24 @@ func TestModelProfileCacheKeyIncludesNativePDFCapability(t *testing.T) {
 	withPDF.SupportsNativePDF = true
 	if modelProfileCacheKey(base) == modelProfileCacheKey(&withPDF) {
 		t.Fatal("supports_native_pdf must participate in the profile cache key")
+	}
+}
+
+func TestModelProfileCacheKeyUsesCredentialRevisionButIgnoresLegacyPromptCacheOverride(t *testing.T) {
+	base := &ModelProfileConfig{
+		ProfileID: "profile", ProviderID: "kimi-cn", ModelID: "kimi-k2.6",
+		BaseURL: "https://api.moonshot.cn/v1", CredentialRevision: 1,
+		PromptCacheKey: "legacy-one",
+	}
+	legacyOverride := *base
+	legacyOverride.PromptCacheKey = "legacy-two"
+	if modelProfileCacheKey(base) != modelProfileCacheKey(&legacyOverride) {
+		t.Fatal("legacy prompt_cache_key must not affect active transport identity")
+	}
+	rotated := *base
+	rotated.CredentialRevision = 2
+	if modelProfileCacheKey(base) == modelProfileCacheKey(&rotated) {
+		t.Fatal("credential revision must participate in active transport identity")
 	}
 }
 

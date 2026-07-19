@@ -314,4 +314,24 @@ describe("projectAguiEventToNarrative", () => {
     expect(receipts[1]).toMatchObject({ title: "记忆整理完成", detail: "更新 1 条 · 归档 2 条 · 冲突 0 条", status: "done" });
     expect(JSON.stringify(receipts)).not.toContain("topic body");
   });
+
+  it("deduplicates Dream receipts by task identity instead of terminal status", () => {
+    let state = createInitialRunNarrativeState();
+    for (const recordId of ["dream_1", "dream_2", "dream_2"]) {
+      state = projectAguiEventToNarrative(state, {
+        type: "AWAKEN_MEMORY_DREAM_FAILED",
+        recordId,
+        errorCode: "DREAM_PLAN_FAILED",
+      });
+    }
+
+    const receipts = state.committedItems.filter(
+      (item) => item.kind === "memoryReceipt",
+    );
+    expect(receipts).toHaveLength(2);
+    expect(receipts.map((item) => item.id)).toEqual([
+      "dream:dream_1",
+      "dream:dream_2",
+    ]);
+  });
 });

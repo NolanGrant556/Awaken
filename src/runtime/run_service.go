@@ -27,19 +27,19 @@ import (
 )
 
 var (
-	ErrInvalidInput               = errors.New("input is required")
-	ErrRunNotFound                = errors.New("run not found")
-	ErrRunTerminal                = errors.New("run is already finished")
-	ErrRunCancelling              = errors.New("run is being cancelled")
-	ErrThreadNotFound             = errors.New("thread not found")
-	ErrThreadWorkspaceMismatch    = errors.New("thread workspace mismatch")
-	ErrThreadBusy                 = errors.New("thread already has an active run")
-	ErrThreadLabelInvalid         = errors.New("thread label is required")
-	ErrMissingModelProfile        = errors.New("model profile is required")
-	ErrUnsupportedInputAttachment = errors.New("model does not support image input")
-	ErrUserQuestionNotFound         = errors.New("user question not found")
-	ErrExternalInteractionNotFound  = errors.New("external interaction not found")
-	ErrPersistenceUnavailable       = agentcore.ErrPersistenceUnavailable
+	ErrInvalidInput                = errors.New("input is required")
+	ErrRunNotFound                 = errors.New("run not found")
+	ErrRunTerminal                 = errors.New("run is already finished")
+	ErrRunCancelling               = errors.New("run is being cancelled")
+	ErrThreadNotFound              = errors.New("thread not found")
+	ErrThreadWorkspaceMismatch     = errors.New("thread workspace mismatch")
+	ErrThreadBusy                  = errors.New("thread already has an active run")
+	ErrThreadLabelInvalid          = errors.New("thread label is required")
+	ErrMissingModelProfile         = errors.New("model profile is required")
+	ErrUnsupportedInputAttachment  = errors.New("model does not support image input")
+	ErrUserQuestionNotFound        = errors.New("user question not found")
+	ErrExternalInteractionNotFound = errors.New("external interaction not found")
+	ErrPersistenceUnavailable      = agentcore.ErrPersistenceUnavailable
 )
 
 const maxRetainedThreads = 100
@@ -103,21 +103,22 @@ type ComposerTokenPayload struct {
 }
 
 type ModelProfileConfig struct {
-	ProfileID         string  `json:"profile_id,omitempty"`
-	ProviderID        string  `json:"provider_id,omitempty"`
-	DisplayName       string  `json:"display_name,omitempty"`
-	ModelID           string  `json:"model_id,omitempty"`
-	BaseURL           string  `json:"base_url,omitempty"`
-	Protocol          string  `json:"protocol,omitempty"`
-	AuthScheme        string  `json:"auth_scheme,omitempty"`
-	APIKey            string  `json:"api_key,omitempty"`
-	Temperature       float64 `json:"temperature,omitempty"`
-	MaxTokens         int     `json:"max_tokens,omitempty"`
-	ContextWindow     int     `json:"context_window,omitempty"`
-	PromptCacheKey    string  `json:"prompt_cache_key,omitempty"`
-	SupportsVision    bool    `json:"supports_vision,omitempty"`
-	SupportsNativePDF bool    `json:"supports_native_pdf,omitempty"`
-	SupportsVideo     bool    `json:"supports_video,omitempty"`
+	ProfileID          string  `json:"profile_id,omitempty"`
+	ProviderID         string  `json:"provider_id,omitempty"`
+	DisplayName        string  `json:"display_name,omitempty"`
+	ModelID            string  `json:"model_id,omitempty"`
+	BaseURL            string  `json:"base_url,omitempty"`
+	Protocol           string  `json:"protocol,omitempty"`
+	AuthScheme         string  `json:"auth_scheme,omitempty"`
+	APIKey             string  `json:"api_key,omitempty"`
+	Temperature        float64 `json:"temperature,omitempty"`
+	MaxTokens          int     `json:"max_tokens,omitempty"`
+	ContextWindow      int     `json:"context_window,omitempty"`
+	PromptCacheKey     string  `json:"prompt_cache_key,omitempty"`
+	CredentialRevision uint64  `json:"credential_revision,omitempty"`
+	SupportsVision     bool    `json:"supports_vision,omitempty"`
+	SupportsNativePDF  bool    `json:"supports_native_pdf,omitempty"`
+	SupportsVideo      bool    `json:"supports_video,omitempty"`
 }
 
 type Executor interface {
@@ -133,6 +134,7 @@ func (f ExecutorFunc) Run(ctx context.Context, input string, sink agentcore.Even
 type RunService struct {
 	mu                sync.RWMutex
 	projectMutationMu sync.RWMutex
+	contextSnapshotMu sync.Mutex
 	// runWG tracks in-flight run goroutines. Terminal run status is
 	// observable before the final transcript flush completes; tests and
 	// shutdown paths use drainRunWorkers to join those trailing writes.
@@ -228,6 +230,7 @@ type ThreadTitleSource string
 
 const (
 	ThreadTitleSourceFirstUser ThreadTitleSource = "first_user"
+	ThreadTitleSourceLocal     ThreadTitleSource = "local"
 	ThreadTitleSourceLLM       ThreadTitleSource = "llm"
 	ThreadTitleSourceManual    ThreadTitleSource = "manual"
 )
@@ -835,6 +838,10 @@ func shouldGenerateThreadTitleForClient(client ClientInfo) bool {
 }
 
 func (s *RunService) scheduleThreadTitleGeneration(ctx context.Context, threadID, seedRunID, firstUserMessage string, attachments []RunInputAttachment, composerTokens []ComposerToken, profile *ModelProfileConfig) {
+	if title := localThreadTitle(firstUserMessage, attachments, composerTokens); title != "" {
+		s.applyAutomaticThreadTitle(threadID, seedRunID, title, ThreadTitleSourceLocal)
+		return
+	}
 	if profile == nil {
 		log.Printf("[thread-title] skip generation: missing model profile thread=%s run=%s", threadID, seedRunID)
 		s.markThreadTitleFailed(threadID, seedRunID)
@@ -842,13 +849,14 @@ func (s *RunService) scheduleThreadTitleGeneration(ctx context.Context, threadID
 	}
 
 	prompt := buildThreadTitlePrompt(firstUserMessage, attachments, composerTokens, profile)
+	authority := s.threadModelCallAuthority(threadID, seedRunID)
 	attempts := len(threadTitleRetryDelays) + 1
 	for attempt := 1; attempt <= attempts; attempt++ {
 		if !s.shouldAttemptGeneratedThreadTitle(threadID, seedRunID) {
 			return
 		}
 		titleCtx, cancel := context.WithTimeout(ctx, threadTitleGenerationTimeout)
-		title, err := generateThreadTitleWithProfileFn(titleCtx, profile, prompt)
+		title, err := generateThreadTitleWithProfileFn(titleCtx, profile, prompt, authority, attempt-1)
 		cancel()
 		title = validGeneratedThreadTitle(title, firstUserMessage)
 		if err == nil && title != "" {
@@ -876,7 +884,24 @@ func (s *RunService) scheduleThreadTitleGeneration(ctx context.Context, threadID
 	}
 }
 
+func (s *RunService) threadModelCallAuthority(threadID, runID string) agentcore.ModelCallAuthority {
+	s.mu.RLock()
+	session := s.sessions[runID]
+	s.mu.RUnlock()
+	if session == nil {
+		return agentcore.ModelCallAuthority{ThreadID: threadID, RunID: runID}
+	}
+	return agentcore.ModelCallAuthority{
+		ThreadID: threadID, RunID: runID, SessionID: "", Recorder: session.semanticRecorderSnapshot(),
+		Sink: sessionEventSink{session: session},
+	}
+}
+
 func (s *RunService) ApplyGeneratedThreadTitle(threadID, seedRunID, title string) {
+	s.applyAutomaticThreadTitle(threadID, seedRunID, title, ThreadTitleSourceLLM)
+}
+
+func (s *RunService) applyAutomaticThreadTitle(threadID, seedRunID, title string, source ThreadTitleSource) {
 	threadID = strings.TrimSpace(threadID)
 	seedRunID = strings.TrimSpace(seedRunID)
 	title = cleanGeneratedThreadTitle(title)
@@ -903,9 +928,9 @@ func (s *RunService) ApplyGeneratedThreadTitle(threadID, seedRunID, title string
 	var persisted ThreadSnapshot
 	var err error
 	for attempt := 0; attempt < 8; attempt++ {
-		persisted, err = s.threadStore.UpdateThreadTitleMetadata(threadID, title, ThreadTitleSourceLLM, ThreadTitleStatusReady, seedRunID, now)
+		persisted, err = s.threadStore.UpdateThreadTitleMetadata(threadID, title, source, ThreadTitleStatusReady, seedRunID, now)
 		if err == nil &&
-			persisted.TitleSource == ThreadTitleSourceLLM &&
+			persisted.TitleSource == source &&
 			persisted.TitleStatus == ThreadTitleStatusReady &&
 			persisted.TitleSeedRunID == seedRunID &&
 			persisted.Label == title {
@@ -914,7 +939,7 @@ func (s *RunService) ApplyGeneratedThreadTitle(threadID, seedRunID, title string
 		time.Sleep(5 * time.Millisecond)
 	}
 	if err != nil ||
-		persisted.TitleSource != ThreadTitleSourceLLM ||
+		persisted.TitleSource != source ||
 		persisted.TitleStatus != ThreadTitleStatusReady ||
 		persisted.TitleSeedRunID != seedRunID ||
 		persisted.Label != title {
@@ -1021,7 +1046,7 @@ func modelProfileCacheKey(profile *ModelProfileConfig) string {
 		strconv.FormatFloat(profile.Temperature, 'g', -1, 64),
 		strconv.Itoa(profile.MaxTokens),
 		strconv.Itoa(profile.ContextWindow),
-		profile.PromptCacheKey,
+		strconv.FormatUint(profile.CredentialRevision, 10),
 		strconv.FormatBool(profile.SupportsVision),
 		strconv.FormatBool(profile.SupportsNativePDF),
 		strconv.FormatBool(profile.SupportsVideo),
@@ -1258,7 +1283,8 @@ func (s *RunService) GetThreadTranscript(threadID string) (ThreadTranscript, err
 			if durable, exists := durableRuns[runID]; exists {
 				published := make([]agentcore.SemanticRecord, 0, len(durable.SemanticRecords))
 				for _, record := range durable.SemanticRecords {
-					if _, visible := active.publishedIDs[record.RecordID]; visible {
+					_, visible := active.publishedIDs[record.RecordID]
+					if visible || isActiveTranscriptReplaySupplement(record.Kind) {
 						published = append(published, record)
 					}
 				}
@@ -1287,6 +1313,17 @@ func (s *RunService) GetThreadTranscript(threadID string) (ThreadTranscript, err
 	}, nil
 }
 
+func isActiveTranscriptReplaySupplement(kind agentcore.SemanticKind) bool {
+	switch kind {
+	case agentcore.SemanticKindContextSnapshot,
+		agentcore.SemanticKindContextEpoch,
+		agentcore.SemanticKindModelUsage:
+		return true
+	default:
+		return false
+	}
+}
+
 func canonicalizeActiveTranscriptEvents(events []Event, durableRecords []agentcore.SemanticRecord) []Event {
 	durableByID := make(map[string]agentcore.SemanticRecord, len(durableRecords))
 	assistantMessages := make(map[string]struct{})
@@ -1306,11 +1343,17 @@ func canonicalizeActiveTranscriptEvents(events []Event, durableRecords []agentco
 	}
 
 	result := make([]Event, 0, len(events))
+	visibleSemantic := make(map[string]struct{}, len(durableRecords))
+	var nextSeq uint64
 	for _, event := range events {
+		if event.Seq >= nextSeq {
+			nextSeq = event.Seq + 1
+		}
 		if event.Kind == EventKindSemantic {
 			if canonical, ok := durableByID[event.SemanticRecord.RecordID]; ok {
 				event.SemanticRecord = canonical
 			}
+			visibleSemantic[event.SemanticRecord.RecordID] = struct{}{}
 			result = append(result, event)
 			continue
 		}
@@ -1332,6 +1375,16 @@ func canonicalizeActiveTranscriptEvents(events []Event, durableRecords []agentco
 			}
 		}
 		result = append(result, event)
+	}
+	for _, record := range durableRecords {
+		if _, visible := visibleSemantic[record.RecordID]; visible {
+			continue
+		}
+		result = append(result, Event{
+			Kind: EventKindSemantic, Seq: nextSeq, Timestamp: record.Timestamp,
+			ThreadID: record.ThreadID, RunID: record.RunID, SemanticRecord: record,
+		})
+		nextSeq++
 	}
 	return result
 }

@@ -75,6 +75,20 @@ func TestProjectSemanticRecordsToolOrder(t *testing.T) {
 	}
 }
 
+func TestProjectSemanticRecordSuppressesLocalContextAuthorities(t *testing.T) {
+	for _, kind := range []agentcore.SemanticKind{
+		agentcore.SemanticKindContextEpoch,
+		agentcore.SemanticKindProviderOpaqueState,
+	} {
+		record := agentcore.NewSemanticRecord(kind, "thread-1", "run-1", "turn-1", "", "", map[string]any{
+			"content": "must-not-enter-wire",
+		})
+		if frames := projectSemanticRecord(record); len(frames) != 0 {
+			t.Fatalf("local authority %s projected to wire: %+v", kind, frames)
+		}
+	}
+}
+
 func TestArtifactV2SemanticRoundTrip(t *testing.T) {
 	event := agentcore.AwakenEvent{
 		Type:                    agentcore.ArtifactCreatedEventType,
@@ -323,3 +337,55 @@ func TestProjectSemanticToolExecutionMetadata(t *testing.T) {
 		t.Fatalf("dependency metadata lost: %+v", frame)
 	}
 }
+
+func TestProjectSemanticContextSnapshotAndModelUsageForLiveReplay(t *testing.T) {
+	now := time.Now().UTC()
+	snapshot := agentcore.ContextUsageSnapshot{
+		SchemaVersion: 4, SnapshotID: "ctx_1", EstimatorID: "awaken_leaf_v4", Basis: "sent_request",
+		RequestID: "req_1", ModelID: "model", ProtocolFamily: "openai_chat", RequestShapeDigest: "digest",
+		ModelWindowTokens: 128000, OutputReserveTokens: 16000, EffectiveInputWindowTokens: 112000,
+		EstimatedInputTokens: 42, WarningThresholdTokens: 95000, AutoCompactThresholdTokens: 100000,
+		CompactTargetTokens: 33000, GeneratedAt: now,
+		Contributions: []agentcore.ContextUsageContribution{{Kind: agentcore.ContextContributionConversation, EstimatedTokens: 42, SourceCount: 1}},
+	}
+	usage := agentcore.ModelUsageRecord{
+		SchemaVersion: 1, RequestID: "req_1", Purpose: "agent_turn", ModelID: "model",
+		ProtocolFamily: "openai_chat", InputTokens: intPtr(40), OutputTokens: intPtr(2), TotalTokens: intPtr(42),
+		UsageComplete: true, RetryIndex: 2, AuxiliaryFallback: true, CalculatedCostUSD: floatPtr(0.125), Currency: "USD",
+		PricingSnapshot: &agentcore.PricingSnapshot{SnapshotID: "price_1", ProviderID: "deepseek", ModelID: "model", Currency: "USD", UnitTokens: 1_000_000, EffectiveDate: "2026-07-19", SourceURL: "https://example.test/pricing"},
+		LatencyMS:       25, Status: agentcore.ModelUsageSucceeded, CompletedAt: now,
+	}
+	records := []agentcore.SemanticRecord{
+		agentcore.ContextSnapshotSemanticRecord("thread", "run", "turn", "session", snapshot),
+		agentcore.ModelRequestSemanticRecord("thread", "run", "turn", "session", snapshot),
+		agentcore.ModelUsageSemanticRecord("thread", "run", "turn", "session", usage),
+	}
+	for index := range records {
+		records[index].Seq = uint64(index + 1)
+		records[index].Timestamp = now
+	}
+	frames := ProjectSemanticRecords(records)
+	if len(frames) != 2 || frames[0].Type != EventAwakenContextSnapshot || frames[1].Type != EventAwakenModelUsage {
+		t.Fatalf("unexpected context/usage projection: %+v", frames)
+	}
+	if frames[0].ContextUsageSnapshot == nil || frames[0].ContextUsageSnapshot.EstimatedInputTokens != 42 || len(frames[0].ContextUsageSnapshot.Contributions) != 1 {
+		t.Fatalf("context breakdown was lost: %+v", frames[0])
+	}
+	if frames[1].ModelUsage == nil || frames[1].ModelUsage.RequestID != "req_1" || frames[1].ModelUsage.InputTokens == nil || *frames[1].ModelUsage.InputTokens != 40 {
+		t.Fatalf("model usage was lost: %+v", frames[1])
+	}
+	if frames[1].ModelUsage.RetryIndex != 2 || !frames[1].ModelUsage.AuxiliaryFallback || frames[1].ModelUsage.CalculatedCostUSD == nil || frames[1].ModelUsage.PricingSnapshot == nil {
+		t.Fatalf("pricing/retry fields were lost: %+v", frames[1].ModelUsage)
+	}
+
+	legacy := ProjectSemanticRecord(agentcore.SemanticRecord{
+		SchemaVersion: 2, RecordID: "legacy", Seq: 9, ThreadID: "thread", RunID: "run",
+		Kind: agentcore.SemanticKindRunTerminal, Timestamp: now, Payload: map[string]any{"status": "finished"},
+	})
+	if len(legacy) != 1 || legacy[0].ContextUsageSnapshot != nil {
+		t.Fatalf("legacy record must not fabricate category details: %+v", legacy)
+	}
+}
+
+func intPtr(value int) *int           { return &value }
+func floatPtr(value float64) *float64 { return &value }

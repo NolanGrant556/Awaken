@@ -164,14 +164,14 @@ func (a *McpToolAdapter) IsReadOnly() bool { return a.readOnly }
 
 // Definition implements tool.Tool.
 func (a *McpToolAdapter) Definition() tool.ToolDefinition {
-	source := a.providerManifest.Source
-	if source == "" {
-		source = tool.SourceMCP
-	}
 	return tool.ToolDefinition{
-		Name:         a.prefixedName,
-		DisplayName:  a.prefixedName,
-		Source:       source,
+		Name:        a.prefixedName,
+		DisplayName: a.prefixedName,
+		// Every definition produced by this adapter is an MCP tool schema sent
+		// to the model. Connector ownership remains available through the
+		// ProviderManifest; it must not reclassify model-visible MCP schemas as
+		// Awaken built-ins in context accounting.
+		Source:       tool.SourceMCP,
 		Description:  a.Description(),
 		OutputSchema: a.outputSchema,
 		ProviderID:   a.providerManifest.ProviderID,

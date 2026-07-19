@@ -169,6 +169,9 @@ func TestOrphanRunRecoverySynthesizesInterruptedOutcome(t *testing.T) {
 		"tool_name":    "shell",
 		"arguments":    `{"command":"sleep 1"}`,
 	}))
+	_ = journal.Append(ctx, agentcore.NewSemanticRecord(agentcore.SemanticKindModelRequest, "thread_orphan", "run_orphan", "turn_1", "", "", map[string]any{
+		"request_id": "request_orphan", "purpose": "agent_turn", "model_id": "test-model", "protocol_family": "openai_chat",
+	}))
 	_ = journal.Close()
 
 	records, err := ReadExecutionJournal(path)
@@ -184,7 +187,7 @@ func TestOrphanRunRecoverySynthesizesInterruptedOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("recoverOrphanRuns: %v", err)
 	}
-	var sawResult, sawTerminal bool
+	var sawResult, sawUsage, sawTerminal bool
 	for _, record := range recovered {
 		if record.Seq == 0 {
 			t.Fatalf("recovered record %s returned seq=0: %+v", record.Kind, record)
@@ -212,9 +215,20 @@ func TestOrphanRunRecoverySynthesizesInterruptedOutcome(t *testing.T) {
 				t.Fatalf("unexpected terminal payload: %#v", record.Payload)
 			}
 		}
+		if record.Kind == agentcore.SemanticKindModelUsage {
+			sawUsage = true
+			if stringPayload(record.Payload, "request_id") != "request_orphan" ||
+				stringPayload(record.Payload, "status") != "interrupted" ||
+				stringPayload(record.Payload, "error_code") != "usage_unknown" {
+				t.Fatalf("unexpected recovered model usage: %#v", record.Payload)
+			}
+			if _, exists := record.Payload["input_tokens"]; exists {
+				t.Fatalf("recovery must not invent provider usage: %#v", record.Payload)
+			}
+		}
 	}
-	if !sawResult || !sawTerminal {
-		t.Fatalf("expected synthetic tool_result and run_terminal, got %+v", recovered)
+	if !sawResult || !sawUsage || !sawTerminal {
+		t.Fatalf("expected synthetic tool_result, model_usage, and run_terminal, got %+v", recovered)
 	}
 	durable, err := ReadExecutionJournal(path)
 	if err != nil {

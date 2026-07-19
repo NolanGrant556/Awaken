@@ -58,6 +58,8 @@ const (
 	ToolRetryBlockedEventType        AwakenEventType = "ToolRetryBlocked"
 	MemoryRecalledEventType          AwakenEventType = "MemoryRecalled"
 	MemoryMutatedEventType           AwakenEventType = "MemoryMutated"
+	ContextSnapshotEventType         AwakenEventType = "ContextSnapshot"
+	ModelUsageEventType              AwakenEventType = "ModelUsage"
 )
 
 type ArtifactStatus string
@@ -104,6 +106,8 @@ type AwakenEvent struct {
 	ContextAutoCompactThreshold      int
 	ContextCompactTarget             int
 	ContextEstimatedDeltaTokens      int
+	ContextUsageSnapshot             *ContextUsageSnapshot
+	ModelUsage                       *ModelUsageRecord
 	CompactMode                      CompactMode
 	CompactBoundaryID                string
 	CompactPreEstimate               *int

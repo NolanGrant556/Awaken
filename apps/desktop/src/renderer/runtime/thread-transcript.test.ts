@@ -61,6 +61,49 @@ function makeTranscript(): RuntimeThreadTranscript {
 }
 
 describe("thread transcript replay helpers", () => {
+  it("retains the last durable context snapshot across a later run without one", () => {
+    const transcript = makeTranscript();
+    transcript.runs[0].events.splice(2, 0, {
+      type: "AWAKEN_CONTEXT_SNAPSHOT",
+      seq: 40,
+      runId: "run-1",
+      threadId: "thread-1",
+      contextUsageSnapshot: {
+        schemaVersion: 4,
+        snapshotId: "ctx-durable",
+        estimatorId: "awaken_leaf_v4",
+        basis: "current_projection",
+        modelWindowTokens: 128_000,
+        outputReserveTokens: 16_000,
+        effectiveInputWindowTokens: 112_000,
+        estimatedInputTokens: 12_000,
+        warningThresholdTokens: 95_000,
+        autoCompactThresholdTokens: 100_800,
+        compactTargetTokens: 40_000,
+        contributions: [
+          {
+            kind: "conversation",
+            estimatedTokens: 12_000,
+            sourceCount: 3,
+          },
+        ],
+        generatedAt: "2026-06-24T00:00:09Z",
+      },
+    });
+
+    const state = actionsForThreadTranscript(transcript).reduce(
+      reduceRuntimeState,
+      createInitialRuntimeState(),
+    );
+
+    expect(state.runId).toBe("run-2");
+    expect(state.inspectorSummary.contextWindow?.snapshot).toMatchObject({
+      schemaVersion: 4,
+      snapshotId: "ctx-durable",
+      estimatedInputTokens: 12_000,
+    });
+  });
+
   it("replays durable attachment cards and composer tokens without text inference", () => {
     const transcript: RuntimeThreadTranscript = {
       thread: {

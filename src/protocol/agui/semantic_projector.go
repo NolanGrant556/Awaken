@@ -49,6 +49,30 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 	case agentcore.SemanticKindRunStarted:
 		base.Type = EventRunStarted
 		return []Event{base}
+	case agentcore.SemanticKindContextSnapshot:
+		var snapshot agentcore.ContextUsageSnapshot
+		if decodeSemanticPayload(payload, &snapshot) != nil {
+			return nil
+		}
+		base.Type = EventAwakenContextSnapshot
+		base.ContextUsageSnapshot = mapContextUsageSnapshot(&snapshot)
+		return []Event{base}
+	case agentcore.SemanticKindModelRequest:
+		// Request composition is durable for audit/recovery but the separate
+		// context_snapshot record owns the renderer projection.
+		return nil
+	case agentcore.SemanticKindContextEpoch, agentcore.SemanticKindProviderOpaqueState:
+		// These records are local durability authorities. Their payloads must not
+		// enter AG-UI, renderer state, Memory or telemetry.
+		return nil
+	case agentcore.SemanticKindModelUsage:
+		var usage agentcore.ModelUsageRecord
+		if decodeSemanticPayload(payload, &usage) != nil {
+			return nil
+		}
+		base.Type = EventAwakenModelUsage
+		base.ModelUsage = mapModelUsageRecord(&usage)
+		return []Event{base}
 	case agentcore.SemanticKindMemoryRecalled:
 		memoryEvent := base
 		memoryEvent.Type = EventAwakenMemoryRecalled
@@ -315,6 +339,14 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		unknown.RawType = string(record.Kind)
 		return []Event{unknown}
 	}
+}
+
+func decodeSemanticPayload(payload map[string]any, target any) error {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(raw, target)
 }
 
 func applyOutcomePayload(dst *Event, payload map[string]any) {
@@ -595,6 +627,14 @@ func awakenEventFromAGUI(frame Event) agentcore.AwakenEvent {
 		ArtifactContent:         frame.ArtifactContent,
 		ArtifactStatus:          agentcore.ArtifactStatus(frame.ArtifactStatus),
 	}
+	if frame.ContextUsageSnapshot != nil {
+		snapshot := contextUsageSnapshotFromWire(frame.ContextUsageSnapshot)
+		event.ContextUsageSnapshot = &snapshot
+	}
+	if frame.ModelUsage != nil {
+		usage := modelUsageRecordFromWire(frame.ModelUsage)
+		event.ModelUsage = &usage
+	}
 	switch frame.Type {
 	case EventRunStarted:
 		event.Type = agentcore.RunStartedEventType
@@ -628,8 +668,77 @@ func awakenEventFromAGUI(frame Event) agentcore.AwakenEvent {
 		event.Type = agentcore.TurnFinishedEventType
 	case EventAwakenToolPermissionDecided:
 		event.Type = agentcore.ToolPermissionDecidedEventType
+	case EventAwakenContextSnapshot:
+		event.Type = agentcore.ContextSnapshotEventType
+	case EventAwakenModelUsage:
+		event.Type = agentcore.ModelUsageEventType
 	default:
 		event.Type = agentcore.AwakenEventType(frame.RawType)
 	}
 	return event
+}
+
+func contextUsageSnapshotFromWire(value *ContextUsageSnapshot) agentcore.ContextUsageSnapshot {
+	snapshot := agentcore.ContextUsageSnapshot{
+		SchemaVersion: value.SchemaVersion, SnapshotID: value.SnapshotID, EstimatorID: value.EstimatorID,
+		Basis: value.Basis, RequestID: value.RequestID, ModelID: value.ModelID, ProtocolFamily: value.ProtocolFamily,
+		RequestShapeDigest: value.RequestShapeDigest, ModelWindowTokens: value.ModelWindowTokens,
+		OutputReserveTokens: value.OutputReserveTokens, EffectiveInputWindowTokens: value.EffectiveInputWindowTokens,
+		EstimatedInputTokens: value.EstimatedInputTokens, WarningThresholdTokens: value.WarningThresholdTokens,
+		AutoCompactThresholdTokens: value.AutoCompactThresholdTokens, CompactTargetTokens: value.CompactTargetTokens,
+	}
+	snapshot.GeneratedAt, _ = time.Parse(time.RFC3339Nano, value.GeneratedAt)
+	for _, contribution := range value.Contributions {
+		snapshot.Contributions = append(snapshot.Contributions, agentcore.ContextUsageContribution{
+			Kind: agentcore.ContextContributionKind(contribution.Kind), EstimatedTokens: contribution.EstimatedTokens,
+			SourceCount: contribution.SourceCount,
+		})
+	}
+	return snapshot
+}
+
+func modelUsageRecordFromWire(value *ModelUsageRecord) agentcore.ModelUsageRecord {
+	usage := agentcore.ModelUsageRecord{
+		SchemaVersion: value.SchemaVersion, RequestID: value.RequestID, Purpose: value.Purpose,
+		ProviderID: value.ProviderID, ProfileID: value.ProfileID, CredentialRevision: value.CredentialRevision,
+		ModelID: value.ModelID, ProtocolFamily: value.ProtocolFamily, EndpointContractID: value.EndpointContractID,
+		CacheMode: value.CacheMode, CacheKeyApplied: value.CacheKeyApplied,
+		ContextEpochID: value.ContextEpochID, PrefixDigest: value.PrefixDigest, InvalidationReason: value.InvalidationReason,
+		RetryIndex: value.RetryIndex, AuxiliaryFallback: value.AuxiliaryFallback,
+		InputTokens: cloneIntPointer(value.InputTokens), CachedInputTokens: cloneIntPointer(value.CachedInputTokens),
+		UncachedInputTokens: cloneIntPointer(value.UncachedInputTokens), CacheWriteTokens: cloneIntPointer(value.CacheWriteTokens),
+		OutputTokens: cloneIntPointer(value.OutputTokens), ReasoningTokens: cloneIntPointer(value.ReasoningTokens),
+		TotalTokens:   cloneIntPointer(value.TotalTokens),
+		RawUsage:      rawModelUsageRecordFromWire(value.RawUsage),
+		UsageComplete: value.UsageComplete, CalculatedCostUSD: cloneFloatPointer(value.CalculatedCostUSD),
+		PricingSnapshot: pricingSnapshotFromWire(value.PricingSnapshot), Currency: value.Currency,
+		ProviderRequestID: value.ProviderRequestID, LatencyMS: value.LatencyMS,
+		Status: agentcore.ModelUsageStatus(value.Status), ErrorCode: value.ErrorCode,
+	}
+	usage.CompletedAt, _ = time.Parse(time.RFC3339Nano, value.CompletedAt)
+	return usage
+}
+
+func pricingSnapshotFromWire(value *PricingSnapshot) *agentcore.PricingSnapshot {
+	if value == nil {
+		return nil
+	}
+	return &agentcore.PricingSnapshot{
+		SnapshotID: value.SnapshotID, ProviderID: value.ProviderID, ModelID: value.ModelID,
+		Currency: value.Currency, UnitTokens: value.UnitTokens,
+		CachedInputPerUnitUSD: value.CachedInputPerUnitUSD, UncachedInputPerUnitUSD: value.UncachedInputPerUnitUSD,
+		OutputPerUnitUSD: value.OutputPerUnitUSD, EffectiveDate: value.EffectiveDate, SourceURL: value.SourceURL,
+	}
+}
+
+func rawModelUsageRecordFromWire(value RawModelUsage) agentcore.RawModelUsage {
+	return agentcore.RawModelUsage{
+		NormalizerID: value.NormalizerID, PromptTokens: cloneIntPointer(value.PromptTokens),
+		InputTokens: cloneIntPointer(value.InputTokens), CompletionTokens: cloneIntPointer(value.CompletionTokens),
+		OutputTokens: cloneIntPointer(value.OutputTokens), ReasoningTokens: cloneIntPointer(value.ReasoningTokens),
+		TotalTokens:  cloneIntPointer(value.TotalTokens),
+		CachedTokens: cloneIntPointer(value.CachedTokens), PromptCacheHitTokens: cloneIntPointer(value.PromptCacheHitTokens),
+		PromptCacheMissTokens: cloneIntPointer(value.PromptCacheMissTokens), CacheReadInputTokens: cloneIntPointer(value.CacheReadInputTokens),
+		CacheCreationInputTokens: cloneIntPointer(value.CacheCreationInputTokens),
+	}
 }

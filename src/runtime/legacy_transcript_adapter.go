@@ -189,6 +189,19 @@ func projectV1Event(out *[]agentcore.SemanticRecord, seq *uint64, record Transcr
 			"diff":      event.Diff,
 			"truncated": event.Truncated,
 		})
+	case agentcore.ContextSnapshotEventType:
+		if event.ContextUsageSnapshot == nil {
+			return
+		}
+		encoded, err := json.Marshal(event.ContextUsageSnapshot)
+		if err != nil {
+			return
+		}
+		var payload map[string]any
+		if json.Unmarshal(encoded, &payload) != nil {
+			return
+		}
+		appendProjected(out, seq, base, agentcore.SemanticKindContextSnapshot, payload)
 	default:
 		// Other recoverable events stay as runtime_notice for audit continuity.
 		if isRecoverableTranscriptEvent(event.Type) {

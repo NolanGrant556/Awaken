@@ -30,6 +30,8 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		ContextAutoCompactThreshold:      event.ContextAutoCompactThreshold,
 		ContextCompactTarget:             event.ContextCompactTarget,
 		ContextEstimatedDeltaTokens:      event.ContextEstimatedDeltaTokens,
+		ContextUsageSnapshot:             mapContextUsageSnapshot(event.ContextUsageSnapshot),
+		ModelUsage:                       mapModelUsageRecord(event.ModelUsage),
 		ContextCompactMode:               string(event.CompactMode),
 		ContextCompactBoundaryID:         event.CompactBoundaryID,
 		ContextCompactPreEstimate:        cloneIntPointer(event.CompactPreEstimate),
@@ -80,6 +82,12 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 	case agentcore.MemoryMutatedEventType:
 		base.Memories = mapMemoryReceipts(event.MemoryReceipts)
 		base.Type = memoryMutationEventType(base.Memories)
+		return []Event{base}
+	case agentcore.ContextSnapshotEventType:
+		base.Type = EventAwakenContextSnapshot
+		return []Event{base}
+	case agentcore.ModelUsageEventType:
+		base.Type = EventAwakenModelUsage
 		return []Event{base}
 	case agentcore.TurnStartedEventType:
 		base.Type = EventAwakenTurnStarted
@@ -401,6 +409,82 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.Message = event.Content
 		base.RawEvent = rawAwakenEvent(event)
 		return []Event{base}
+	}
+}
+
+func mapContextUsageSnapshot(snapshot *agentcore.ContextUsageSnapshot) *ContextUsageSnapshot {
+	if snapshot == nil {
+		return nil
+	}
+	mapped := &ContextUsageSnapshot{
+		SchemaVersion: snapshot.SchemaVersion, SnapshotID: snapshot.SnapshotID, EstimatorID: snapshot.EstimatorID,
+		Basis: snapshot.Basis, RequestID: snapshot.RequestID, ModelID: snapshot.ModelID,
+		ProtocolFamily: snapshot.ProtocolFamily, RequestShapeDigest: snapshot.RequestShapeDigest,
+		ModelWindowTokens: snapshot.ModelWindowTokens, OutputReserveTokens: snapshot.OutputReserveTokens,
+		EffectiveInputWindowTokens: snapshot.EffectiveInputWindowTokens, EstimatedInputTokens: snapshot.EstimatedInputTokens,
+		WarningThresholdTokens: snapshot.WarningThresholdTokens, AutoCompactThresholdTokens: snapshot.AutoCompactThresholdTokens,
+		CompactTargetTokens: snapshot.CompactTargetTokens, GeneratedAt: snapshot.GeneratedAt.UTC().Format(time.RFC3339Nano),
+	}
+	for _, contribution := range snapshot.Contributions {
+		mapped.Contributions = append(mapped.Contributions, ContextUsageContribution{
+			Kind: string(contribution.Kind), EstimatedTokens: contribution.EstimatedTokens, SourceCount: contribution.SourceCount,
+		})
+	}
+	return mapped
+}
+
+func mapModelUsageRecord(usage *agentcore.ModelUsageRecord) *ModelUsageRecord {
+	if usage == nil {
+		return nil
+	}
+	return &ModelUsageRecord{
+		SchemaVersion: usage.SchemaVersion, RequestID: usage.RequestID, Purpose: usage.Purpose,
+		ProviderID: usage.ProviderID, ProfileID: usage.ProfileID, CredentialRevision: usage.CredentialRevision,
+		ModelID: usage.ModelID, ProtocolFamily: usage.ProtocolFamily, EndpointContractID: usage.EndpointContractID,
+		CacheMode: usage.CacheMode, CacheKeyApplied: usage.CacheKeyApplied,
+		ContextEpochID: usage.ContextEpochID, PrefixDigest: usage.PrefixDigest, InvalidationReason: usage.InvalidationReason,
+		RetryIndex: usage.RetryIndex, AuxiliaryFallback: usage.AuxiliaryFallback,
+		InputTokens: cloneIntPointer(usage.InputTokens), CachedInputTokens: cloneIntPointer(usage.CachedInputTokens),
+		UncachedInputTokens: cloneIntPointer(usage.UncachedInputTokens), CacheWriteTokens: cloneIntPointer(usage.CacheWriteTokens),
+		OutputTokens: cloneIntPointer(usage.OutputTokens), ReasoningTokens: cloneIntPointer(usage.ReasoningTokens),
+		TotalTokens:   cloneIntPointer(usage.TotalTokens),
+		RawUsage:      mapRawModelUsage(usage.RawUsage),
+		UsageComplete: usage.UsageComplete, CalculatedCostUSD: cloneFloatPointer(usage.CalculatedCostUSD),
+		PricingSnapshot: mapPricingSnapshot(usage.PricingSnapshot), Currency: usage.Currency,
+		ProviderRequestID: usage.ProviderRequestID, LatencyMS: usage.LatencyMS,
+		Status: string(usage.Status), ErrorCode: usage.ErrorCode, CompletedAt: usage.CompletedAt.UTC().Format(time.RFC3339Nano),
+	}
+}
+
+func mapPricingSnapshot(value *agentcore.PricingSnapshot) *PricingSnapshot {
+	if value == nil {
+		return nil
+	}
+	return &PricingSnapshot{
+		SnapshotID: value.SnapshotID, ProviderID: value.ProviderID, ModelID: value.ModelID,
+		Currency: value.Currency, UnitTokens: value.UnitTokens,
+		CachedInputPerUnitUSD: value.CachedInputPerUnitUSD, UncachedInputPerUnitUSD: value.UncachedInputPerUnitUSD,
+		OutputPerUnitUSD: value.OutputPerUnitUSD, EffectiveDate: value.EffectiveDate, SourceURL: value.SourceURL,
+	}
+}
+
+func cloneFloatPointer(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func mapRawModelUsage(usage agentcore.RawModelUsage) RawModelUsage {
+	return RawModelUsage{
+		NormalizerID: usage.NormalizerID, PromptTokens: cloneIntPointer(usage.PromptTokens),
+		InputTokens: cloneIntPointer(usage.InputTokens), CompletionTokens: cloneIntPointer(usage.CompletionTokens),
+		OutputTokens: cloneIntPointer(usage.OutputTokens), ReasoningTokens: cloneIntPointer(usage.ReasoningTokens),
+		TotalTokens:  cloneIntPointer(usage.TotalTokens),
+		CachedTokens: cloneIntPointer(usage.CachedTokens), PromptCacheHitTokens: cloneIntPointer(usage.PromptCacheHitTokens),
+		PromptCacheMissTokens: cloneIntPointer(usage.PromptCacheMissTokens), CacheReadInputTokens: cloneIntPointer(usage.CacheReadInputTokens),
+		CacheCreationInputTokens: cloneIntPointer(usage.CacheCreationInputTokens),
 	}
 }
 

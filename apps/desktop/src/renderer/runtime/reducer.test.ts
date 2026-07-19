@@ -1046,6 +1046,93 @@ describe("runtime reducer run narrative projection", () => {
     });
   });
 
+  it("keeps the current context estimate separate from provider usage", () => {
+    const state = dispatch([
+      runEvent({
+        type: "AWAKEN_CONTEXT_SNAPSHOT",
+        seq: 1,
+        contextUsageSnapshot: {
+          schemaVersion: 4,
+          snapshotId: "ctx-1",
+          estimatorId: "awaken_leaf_v4",
+          basis: "sent_request",
+          requestId: "req-1",
+          modelWindowTokens: 256000,
+          outputReserveTokens: 16000,
+          effectiveInputWindowTokens: 240000,
+          estimatedInputTokens: 92000,
+          warningThresholdTokens: 204000,
+          autoCompactThresholdTokens: 216000,
+          compactTargetTokens: 72000,
+          generatedAt: "2026-07-19T00:00:00Z",
+          contributions: [
+            { kind: "system_prompt", estimatedTokens: 2000, sourceCount: 1 },
+            {
+              kind: "conversation",
+              estimatedTokens: 90000,
+              sourceCount: 20,
+            },
+          ],
+        },
+      }),
+      runEvent({
+        type: "AWAKEN_MODEL_USAGE",
+        seq: 2,
+        modelUsage: {
+          schemaVersion: 1,
+          requestId: "req-1",
+          purpose: "agent_turn",
+          inputTokens: 88400,
+          outputTokens: 2100,
+          totalTokens: 90500,
+          usageComplete: true,
+          latencyMs: 30,
+          status: "succeeded",
+          completedAt: "2026-07-19T00:00:01Z",
+        },
+      }),
+      runEvent({
+        type: "AWAKEN_MODEL_USAGE",
+        seq: 3,
+        modelUsage: {
+          schemaVersion: 1,
+          requestId: "req-title",
+          purpose: "thread_title",
+          inputTokens: 200,
+          outputTokens: 12,
+          totalTokens: 212,
+          usageComplete: true,
+          latencyMs: 10,
+          status: "succeeded",
+          completedAt: "2026-07-19T00:00:02Z",
+        },
+      }),
+    ]);
+
+    expect(state.inspectorSummary.contextWindow).toMatchObject({
+      estimatedTokens: 92000,
+      actualTokens: undefined,
+      modelWindow: 256000,
+      outputReserve: 16000,
+      effectiveWindow: 240000,
+      snapshot: {
+        snapshotId: "ctx-1",
+        contributions: expect.arrayContaining([
+          expect.objectContaining({ kind: "conversation", estimatedTokens: 90000 }),
+        ]),
+      },
+      latestModelUsage: {
+        requestId: "req-1",
+        inputTokens: 88400,
+        totalTokens: 90500,
+      },
+      modelUsages: [
+        expect.objectContaining({ requestId: "req-1", purpose: "agent_turn" }),
+        expect.objectContaining({ requestId: "req-title", purpose: "thread_title" }),
+      ],
+    });
+  });
+
   it("keeps compact observability working from legacy fallback fields", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Compact fallback" },

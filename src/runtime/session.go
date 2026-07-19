@@ -108,6 +108,15 @@ func (s *Session) SetSemanticRecorder(recorder agentcore.SemanticRecorder) {
 	s.mu.Unlock()
 }
 
+func (s *Session) semanticRecorderSnapshot() agentcore.SemanticRecorder {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.semanticRecorder
+}
+
 func cloneComposerTokens(tokens []ComposerToken) []ComposerToken {
 	if len(tokens) == 0 {
 		return nil

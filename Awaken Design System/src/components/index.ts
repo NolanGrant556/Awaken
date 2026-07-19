@@ -15,6 +15,7 @@ export * from "./AwakenComposerBar";
 export * from "./AwakenComposerDock";
 export * from "./AwakenComposerInput";
 export * from "./AwakenContextButton";
+export * from "./AwakenContextUsagePanel";
 export * from "./AwakenConversationList";
 export * from "./AwakenCopyButton";
 export * from "./AwakenDisclosure";

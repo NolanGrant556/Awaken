@@ -3,13 +3,15 @@ package llm
 import "strings"
 
 func applyRequestPolicy(cfg Config, req Request) Request {
-	if req.Purpose != RequestPurposeCompactSummary {
+	switch req.Purpose {
+	case RequestPurposeThreadTitle, RequestPurposeCompactSummary, RequestPurposeMemoryRecall, RequestPurposeMemoryMaintenance:
+		return applyAuxiliaryRequestPolicy(cfg, req)
+	default:
 		return req
 	}
-	return applyCompactSummaryRequestPolicy(cfg, req)
 }
 
-func applyCompactSummaryRequestPolicy(cfg Config, req Request) Request {
+func applyAuxiliaryRequestPolicy(cfg Config, req Request) Request {
 	model := strings.ToLower(resolveModel(cfg, req))
 	key := providerModelKey(cfg, req)
 

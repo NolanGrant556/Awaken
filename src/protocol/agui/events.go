@@ -59,6 +59,8 @@ const (
 	EventAwakenMemorySuperseded             EventType = "AWAKEN_MEMORY_SUPERSEDED"
 	EventAwakenMemoryDeleted                EventType = "AWAKEN_MEMORY_DELETED"
 	EventAwakenMemoryRejected               EventType = "AWAKEN_MEMORY_REJECTED"
+	EventAwakenContextSnapshot              EventType = "AWAKEN_CONTEXT_SNAPSHOT"
+	EventAwakenModelUsage                   EventType = "AWAKEN_MODEL_USAGE"
 	EventAwakenUnknown                      EventType = "AWAKEN_UNKNOWN_EVENT"
 )
 
@@ -77,82 +79,174 @@ type MemoryReceipt struct {
 	ErrorCode string `json:"errorCode,omitempty"`
 }
 
+type ContextUsageContribution struct {
+	Kind            string `json:"kind"`
+	EstimatedTokens int    `json:"estimatedTokens"`
+	SourceCount     int    `json:"sourceCount"`
+}
+
+type ContextUsageSnapshot struct {
+	SchemaVersion              int                        `json:"schemaVersion"`
+	SnapshotID                 string                     `json:"snapshotId"`
+	EstimatorID                string                     `json:"estimatorId"`
+	Basis                      string                     `json:"basis"`
+	RequestID                  string                     `json:"requestId,omitempty"`
+	ModelID                    string                     `json:"modelId,omitempty"`
+	ProtocolFamily             string                     `json:"protocolFamily,omitempty"`
+	RequestShapeDigest         string                     `json:"requestShapeDigest,omitempty"`
+	ModelWindowTokens          int                        `json:"modelWindowTokens"`
+	OutputReserveTokens        int                        `json:"outputReserveTokens"`
+	EffectiveInputWindowTokens int                        `json:"effectiveInputWindowTokens"`
+	EstimatedInputTokens       int                        `json:"estimatedInputTokens"`
+	WarningThresholdTokens     int                        `json:"warningThresholdTokens"`
+	AutoCompactThresholdTokens int                        `json:"autoCompactThresholdTokens"`
+	CompactTargetTokens        int                        `json:"compactTargetTokens"`
+	Contributions              []ContextUsageContribution `json:"contributions,omitempty"`
+	GeneratedAt                string                     `json:"generatedAt"`
+}
+
+type ModelUsageRecord struct {
+	SchemaVersion       int              `json:"schemaVersion"`
+	RequestID           string           `json:"requestId"`
+	Purpose             string           `json:"purpose"`
+	ProviderID          string           `json:"providerId,omitempty"`
+	ProfileID           string           `json:"profileId,omitempty"`
+	CredentialRevision  uint64           `json:"credentialRevision,omitempty"`
+	ModelID             string           `json:"modelId,omitempty"`
+	ProtocolFamily      string           `json:"protocolFamily,omitempty"`
+	EndpointContractID  string           `json:"endpointContractId,omitempty"`
+	CacheMode           string           `json:"cacheMode,omitempty"`
+	CacheKeyApplied     bool             `json:"cacheKeyApplied"`
+	ContextEpochID      string           `json:"contextEpochId,omitempty"`
+	PrefixDigest        string           `json:"prefixDigest,omitempty"`
+	InvalidationReason  string           `json:"invalidationReason,omitempty"`
+	RetryIndex          int              `json:"retryIndex,omitempty"`
+	AuxiliaryFallback   bool             `json:"auxiliaryFallback,omitempty"`
+	InputTokens         *int             `json:"inputTokens,omitempty"`
+	CachedInputTokens   *int             `json:"cachedInputTokens,omitempty"`
+	UncachedInputTokens *int             `json:"uncachedInputTokens,omitempty"`
+	CacheWriteTokens    *int             `json:"cacheWriteTokens,omitempty"`
+	OutputTokens        *int             `json:"outputTokens,omitempty"`
+	ReasoningTokens     *int             `json:"reasoningTokens,omitempty"`
+	TotalTokens         *int             `json:"totalTokens,omitempty"`
+	RawUsage            RawModelUsage    `json:"rawTypedUsage"`
+	UsageComplete       bool             `json:"usageComplete"`
+	CalculatedCostUSD   *float64         `json:"calculatedCostUsd,omitempty"`
+	PricingSnapshot     *PricingSnapshot `json:"pricingSnapshot,omitempty"`
+	Currency            string           `json:"currency,omitempty"`
+	ProviderRequestID   string           `json:"providerRequestId,omitempty"`
+	LatencyMS           int64            `json:"latencyMs"`
+	Status              string           `json:"status"`
+	ErrorCode           string           `json:"errorCode,omitempty"`
+	CompletedAt         string           `json:"completedAt"`
+}
+
+type PricingSnapshot struct {
+	SnapshotID              string  `json:"snapshotId"`
+	ProviderID              string  `json:"providerId"`
+	ModelID                 string  `json:"modelId"`
+	Currency                string  `json:"currency"`
+	UnitTokens              int     `json:"unitTokens"`
+	CachedInputPerUnitUSD   float64 `json:"cachedInputPerUnitUsd"`
+	UncachedInputPerUnitUSD float64 `json:"uncachedInputPerUnitUsd"`
+	OutputPerUnitUSD        float64 `json:"outputPerUnitUsd"`
+	EffectiveDate           string  `json:"effectiveDate"`
+	SourceURL               string  `json:"sourceUrl"`
+}
+
+type RawModelUsage struct {
+	NormalizerID             string `json:"normalizerId"`
+	PromptTokens             *int   `json:"promptTokens,omitempty"`
+	InputTokens              *int   `json:"inputTokens,omitempty"`
+	CompletionTokens         *int   `json:"completionTokens,omitempty"`
+	OutputTokens             *int   `json:"outputTokens,omitempty"`
+	ReasoningTokens          *int   `json:"reasoningTokens,omitempty"`
+	TotalTokens              *int   `json:"totalTokens,omitempty"`
+	CachedTokens             *int   `json:"cachedTokens,omitempty"`
+	PromptCacheHitTokens     *int   `json:"promptCacheHitTokens,omitempty"`
+	PromptCacheMissTokens    *int   `json:"promptCacheMissTokens,omitempty"`
+	CacheReadInputTokens     *int   `json:"cacheReadInputTokens,omitempty"`
+	CacheCreationInputTokens *int   `json:"cacheCreationInputTokens,omitempty"`
+}
+
 type Event struct {
 	Type EventType `json:"type"`
 	Seq  uint64    `json:"seq,omitempty"`
 	// StreamCursor is the live transport resume cursor. It is intentionally
 	// independent from Seq, which is the stable semantic frame sequence for
 	// durable records.
-	StreamCursor                     uint64          `json:"streamCursor,omitempty"`
-	SemanticSeq                      uint64          `json:"semanticSeq,omitempty"`
-	RecordID                         string          `json:"recordId,omitempty"`
-	Timestamp                        int64           `json:"timestamp,omitempty"`
-	ThreadID                         string          `json:"threadId,omitempty"`
-	RunID                            string          `json:"runId,omitempty"`
-	TurnID                           string          `json:"turnId,omitempty"`
-	QueryChainID                     string          `json:"queryChainId,omitempty"`
-	Depth                            int             `json:"depth,omitempty"`
-	TurnCount                        int             `json:"turnCount,omitempty"`
-	Status                           string          `json:"status,omitempty"`
-	MessageID                        string          `json:"messageId,omitempty"`
-	ParentRunID                      string          `json:"parentRunId,omitempty"`
-	ParentMessageID                  string          `json:"parentMessageId,omitempty"`
-	Role                             string          `json:"role,omitempty"`
-	Name                             string          `json:"name,omitempty"`
-	Delta                            string          `json:"delta,omitempty"`
-	ToolCallID                       string          `json:"toolCallId,omitempty"`
-	ToolCallName                     string          `json:"toolCallName,omitempty"`
-	Content                          string          `json:"content,omitempty"`
-	Result                           string          `json:"result,omitempty"`
-	Progress                         string          `json:"progress,omitempty"`
-	CommandStream                    string          `json:"commandStream,omitempty"`
-	Patch                            string          `json:"patch,omitempty"`
-	PatchSummary                     string          `json:"patchSummary,omitempty"`
-	Diff                             string          `json:"diff,omitempty"`
-	Truncated                        bool            `json:"truncated,omitempty"`
-	Message                          string          `json:"message,omitempty"`
-	Code                             string          `json:"code,omitempty"`
-	TerminalReason                   string          `json:"terminalReason,omitempty"`
-	TransitionReason                 string          `json:"transitionReason,omitempty"`
-	ContextModelWindow               int             `json:"contextModelWindow,omitempty"`
-	ContextOutputReserve             int             `json:"contextOutputReserve,omitempty"`
-	ContextEffectiveWindow           int             `json:"contextEffectiveWindow,omitempty"`
-	ContextEstimatedTokens           int             `json:"contextEstimatedTokens,omitempty"`
-	ContextActualTokens              int             `json:"contextActualTokens,omitempty"`
-	ContextWarningThreshold          int             `json:"contextWarningThreshold,omitempty"`
-	ContextAutoCompactThreshold      int             `json:"contextAutoCompactThreshold,omitempty"`
-	ContextCompactTarget             int             `json:"contextCompactTarget,omitempty"`
-	ContextEstimatedDeltaTokens      int             `json:"contextEstimatedDeltaTokens,omitempty"`
-	ContextCompactMode               string          `json:"contextCompactMode,omitempty"`
-	ContextCompactBoundaryID         string          `json:"contextCompactBoundaryId,omitempty"`
-	ContextCompactPreEstimate        *int            `json:"contextCompactPreEstimateTokens,omitempty"`
-	ContextCompactPostEstimate       *int            `json:"contextCompactPostEstimateTokens,omitempty"`
-	CompactMode                      string          `json:"compactMode,omitempty"`
-	CompactBoundaryID                string          `json:"compactBoundaryId,omitempty"`
-	CompactPreEstimate               *int            `json:"compactPreEstimate,omitempty"`
-	CompactPostEstimate              *int            `json:"compactPostEstimate,omitempty"`
-	CompactSummaryModel              string          `json:"compactSummaryModel,omitempty"`
-	CompactFallbackUsed              *bool           `json:"compactFallbackUsed,omitempty"`
-	CompactToolResultsPruned         *bool           `json:"compactToolResultsPruned,omitempty"`
-	CompactToolResultsPrunedCount    int             `json:"compactToolResultsPrunedCount,omitempty"`
-	CompactPrunedSafeGroupCount      int             `json:"compactPrunedSafeGroupCount,omitempty"`
-	CompactPrunedMessageCount        int             `json:"compactPrunedMessageCount,omitempty"`
-	CompactSummaryMaxTokens          int             `json:"compactSummaryMaxTokens,omitempty"`
-	CompactSummaryRetryCount         int             `json:"compactSummaryRetryCount,omitempty"`
-	CompactSummaryRawChars           int             `json:"compactSummaryRawChars,omitempty"`
-	CompactSummaryParsedSections     int             `json:"compactSummaryParsedSections,omitempty"`
-	CompactSummaryMeaningfulSections int             `json:"compactSummaryMeaningfulSections,omitempty"`
-	CompactSummaryQualityIssue       string          `json:"compactSummaryQualityIssue,omitempty"`
-	CompactSummarySourceHadUser      *bool           `json:"compactSummarySourceHadUser,omitempty"`
-	CompactSummaryLatestUserPinned   *bool           `json:"compactSummaryLatestUserPinned,omitempty"`
-	CompactFallbackMarker            string          `json:"compactFallbackMarker,omitempty"`
-	CompactFailureReason             string          `json:"compactFailureReason,omitempty"`
-	Memories                         []MemoryReceipt `json:"memories,omitempty"`
-	StaticPermissionBehavior         string          `json:"staticPermissionBehavior,omitempty"`
-	StaticPermissionReason           string          `json:"staticPermissionReason,omitempty"`
-	ToolDecisionAction               string          `json:"toolDecisionAction,omitempty"`
-	ToolDecisionSource               string          `json:"toolDecisionSource,omitempty"`
-	ToolDecisionReason               string          `json:"toolDecisionReason,omitempty"`
+	StreamCursor                     uint64                `json:"streamCursor,omitempty"`
+	SemanticSeq                      uint64                `json:"semanticSeq,omitempty"`
+	RecordID                         string                `json:"recordId,omitempty"`
+	Timestamp                        int64                 `json:"timestamp,omitempty"`
+	ThreadID                         string                `json:"threadId,omitempty"`
+	RunID                            string                `json:"runId,omitempty"`
+	TurnID                           string                `json:"turnId,omitempty"`
+	QueryChainID                     string                `json:"queryChainId,omitempty"`
+	Depth                            int                   `json:"depth,omitempty"`
+	TurnCount                        int                   `json:"turnCount,omitempty"`
+	Status                           string                `json:"status,omitempty"`
+	MessageID                        string                `json:"messageId,omitempty"`
+	ParentRunID                      string                `json:"parentRunId,omitempty"`
+	ParentMessageID                  string                `json:"parentMessageId,omitempty"`
+	Role                             string                `json:"role,omitempty"`
+	Name                             string                `json:"name,omitempty"`
+	Delta                            string                `json:"delta,omitempty"`
+	ToolCallID                       string                `json:"toolCallId,omitempty"`
+	ToolCallName                     string                `json:"toolCallName,omitempty"`
+	Content                          string                `json:"content,omitempty"`
+	Result                           string                `json:"result,omitempty"`
+	Progress                         string                `json:"progress,omitempty"`
+	CommandStream                    string                `json:"commandStream,omitempty"`
+	Patch                            string                `json:"patch,omitempty"`
+	PatchSummary                     string                `json:"patchSummary,omitempty"`
+	Diff                             string                `json:"diff,omitempty"`
+	Truncated                        bool                  `json:"truncated,omitempty"`
+	Message                          string                `json:"message,omitempty"`
+	Code                             string                `json:"code,omitempty"`
+	TerminalReason                   string                `json:"terminalReason,omitempty"`
+	TransitionReason                 string                `json:"transitionReason,omitempty"`
+	ContextModelWindow               int                   `json:"contextModelWindow,omitempty"`
+	ContextOutputReserve             int                   `json:"contextOutputReserve,omitempty"`
+	ContextEffectiveWindow           int                   `json:"contextEffectiveWindow,omitempty"`
+	ContextEstimatedTokens           int                   `json:"contextEstimatedTokens,omitempty"`
+	ContextActualTokens              int                   `json:"contextActualTokens,omitempty"`
+	ContextWarningThreshold          int                   `json:"contextWarningThreshold,omitempty"`
+	ContextAutoCompactThreshold      int                   `json:"contextAutoCompactThreshold,omitempty"`
+	ContextCompactTarget             int                   `json:"contextCompactTarget,omitempty"`
+	ContextEstimatedDeltaTokens      int                   `json:"contextEstimatedDeltaTokens,omitempty"`
+	ContextUsageSnapshot             *ContextUsageSnapshot `json:"contextUsageSnapshot,omitempty"`
+	ModelUsage                       *ModelUsageRecord     `json:"modelUsage,omitempty"`
+	ContextCompactMode               string                `json:"contextCompactMode,omitempty"`
+	ContextCompactBoundaryID         string                `json:"contextCompactBoundaryId,omitempty"`
+	ContextCompactPreEstimate        *int                  `json:"contextCompactPreEstimateTokens,omitempty"`
+	ContextCompactPostEstimate       *int                  `json:"contextCompactPostEstimateTokens,omitempty"`
+	CompactMode                      string                `json:"compactMode,omitempty"`
+	CompactBoundaryID                string                `json:"compactBoundaryId,omitempty"`
+	CompactPreEstimate               *int                  `json:"compactPreEstimate,omitempty"`
+	CompactPostEstimate              *int                  `json:"compactPostEstimate,omitempty"`
+	CompactSummaryModel              string                `json:"compactSummaryModel,omitempty"`
+	CompactFallbackUsed              *bool                 `json:"compactFallbackUsed,omitempty"`
+	CompactToolResultsPruned         *bool                 `json:"compactToolResultsPruned,omitempty"`
+	CompactToolResultsPrunedCount    int                   `json:"compactToolResultsPrunedCount,omitempty"`
+	CompactPrunedSafeGroupCount      int                   `json:"compactPrunedSafeGroupCount,omitempty"`
+	CompactPrunedMessageCount        int                   `json:"compactPrunedMessageCount,omitempty"`
+	CompactSummaryMaxTokens          int                   `json:"compactSummaryMaxTokens,omitempty"`
+	CompactSummaryRetryCount         int                   `json:"compactSummaryRetryCount,omitempty"`
+	CompactSummaryRawChars           int                   `json:"compactSummaryRawChars,omitempty"`
+	CompactSummaryParsedSections     int                   `json:"compactSummaryParsedSections,omitempty"`
+	CompactSummaryMeaningfulSections int                   `json:"compactSummaryMeaningfulSections,omitempty"`
+	CompactSummaryQualityIssue       string                `json:"compactSummaryQualityIssue,omitempty"`
+	CompactSummarySourceHadUser      *bool                 `json:"compactSummarySourceHadUser,omitempty"`
+	CompactSummaryLatestUserPinned   *bool                 `json:"compactSummaryLatestUserPinned,omitempty"`
+	CompactFallbackMarker            string                `json:"compactFallbackMarker,omitempty"`
+	CompactFailureReason             string                `json:"compactFailureReason,omitempty"`
+	Memories                         []MemoryReceipt       `json:"memories,omitempty"`
+	StaticPermissionBehavior         string                `json:"staticPermissionBehavior,omitempty"`
+	StaticPermissionReason           string                `json:"staticPermissionReason,omitempty"`
+	ToolDecisionAction               string                `json:"toolDecisionAction,omitempty"`
+	ToolDecisionSource               string                `json:"toolDecisionSource,omitempty"`
+	ToolDecisionReason               string                `json:"toolDecisionReason,omitempty"`
 	// ProfileName is the ExecutionProfile name applied to this call (Task 16
 	// unified observability). Surfaced on AWAKEN_TOOL_PERMISSION_DECIDED.
 	ProfileName string `json:"profileName,omitempty"`

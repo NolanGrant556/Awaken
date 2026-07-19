@@ -66,6 +66,7 @@ type anthropicStreamEvent struct {
 	Index        int                    `json:"index,omitempty"`
 	ContentBlock *anthropicContentBlock `json:"content_block,omitempty"`
 	Delta        *anthropicStreamDelta  `json:"delta,omitempty"`
+	Usage        *anthropicUsage        `json:"usage,omitempty"`
 }
 
 type anthropicStreamDelta struct {
@@ -77,8 +78,10 @@ type anthropicStreamDelta struct {
 }
 
 type anthropicUsage struct {
-	InputTokens  int `json:"input_tokens,omitempty"`
-	OutputTokens int `json:"output_tokens,omitempty"`
+	InputTokens              *int `json:"input_tokens,omitempty"`
+	OutputTokens             *int `json:"output_tokens,omitempty"`
+	CacheReadInputTokens     *int `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationInputTokens *int `json:"cache_creation_input_tokens,omitempty"`
 }
 
 // --- 实现 Transport 接口 ---
@@ -92,10 +95,18 @@ func buildAnthropicMessagesURL(baseURL string) string {
 }
 
 func (t *anthropicTransport) Invoke(ctx stdctx.Context, cfg Config, req Request) (*Response, error) {
+	prepared, err := prepareAnthropicRequest(cfg, req, false)
+	if err != nil {
+		return nil, err
+	}
+	return t.invokePrepared(ctx, cfg, prepared)
+}
+
+func prepareAnthropicRequest(cfg Config, req Request, stream bool) (PreparedRequest, error) {
 	url := buildAnthropicMessagesURL(cfg.BaseURL)
 	messages, err := buildAnthropicMessages(req)
 	if err != nil {
-		return nil, err
+		return PreparedRequest{}, err
 	}
 
 	anthropicReq := anthropicRequest{
@@ -104,14 +115,18 @@ func (t *anthropicTransport) Invoke(ctx stdctx.Context, cfg Config, req Request)
 		Messages:  messages,
 		Tools:     convertToolsToAnthropic(req.Tools),
 		MaxTokens: resolveMaxTokens(cfg, req),
+		Stream:    stream,
 	}
 
 	body, err := json.Marshal(anthropicReq)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+		return PreparedRequest{}, fmt.Errorf("failed to marshal request: %w", err)
 	}
+	return newPreparedRequest(req, ProtocolAnthropicMessages, url, body, stream), nil
+}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+func (t *anthropicTransport) invokePrepared(ctx stdctx.Context, cfg Config, prepared PreparedRequest) (*Response, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, prepared.Endpoint, bytes.NewReader(prepared.Body))
 	if err != nil {
 		return nil, requestBuildError(err)
 	}
@@ -133,7 +148,11 @@ func (t *anthropicTransport) Invoke(ctx stdctx.Context, cfg Config, req Request)
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	return responseFromAnthropic(anthropicResp)
+	result, responseErr := responseFromAnthropic(anthropicResp)
+	if result != nil {
+		result.ProviderRequestID = providerRequestID(resp)
+	}
+	return result, responseErr
 }
 
 func (t *anthropicTransport) StreamInvoke(ctx stdctx.Context, cfg Config, req Request, callback StreamCallback) (*Response, error) {
@@ -141,30 +160,18 @@ func (t *anthropicTransport) StreamInvoke(ctx stdctx.Context, cfg Config, req Re
 }
 
 func (t *anthropicTransport) StreamInvokeWithObserver(ctx stdctx.Context, cfg Config, req Request, observer StreamObserver) (*Response, error) {
-	url := buildAnthropicMessagesURL(cfg.BaseURL)
-	messages, err := buildAnthropicMessages(req)
+	prepared, err := prepareAnthropicRequest(cfg, req, true)
 	if err != nil {
 		return nil, err
 	}
+	return t.streamPrepared(ctx, cfg, prepared, observer)
+}
 
-	anthropicReq := anthropicRequest{
-		Model:     resolveModel(cfg, req),
-		System:    req.SystemPrompt,
-		Messages:  messages,
-		Tools:     convertToolsToAnthropic(req.Tools),
-		MaxTokens: resolveMaxTokens(cfg, req),
-		Stream:    true,
-	}
-
-	body, err := json.Marshal(anthropicReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
+func (t *anthropicTransport) streamPrepared(ctx stdctx.Context, cfg Config, prepared PreparedRequest, observer StreamObserver) (*Response, error) {
 	streamCtx, cancel := stdctx.WithCancel(ctx)
 	defer cancel()
 
-	httpReq, err := http.NewRequestWithContext(streamCtx, http.MethodPost, url, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(streamCtx, http.MethodPost, prepared.Endpoint, bytes.NewReader(prepared.Body))
 	if err != nil {
 		return nil, requestBuildError(err)
 	}
@@ -184,7 +191,7 @@ func (t *anthropicTransport) StreamInvokeWithObserver(ctx stdctx.Context, cfg Co
 	state := newAnthropicStreamState(observer)
 	scanner := bufio.NewScanner(resp.Body)
 	currentEvent := ""
-	watchdog := newStreamIdleWatchdog(cancel, streamIdleTimeoutForRequest(req))
+	watchdog := newStreamIdleWatchdog(cancel, streamIdleTimeoutForPrepared(prepared))
 	defer watchdog.Stop()
 
 	for scanner.Scan() {
@@ -215,7 +222,11 @@ func (t *anthropicTransport) StreamInvokeWithObserver(ctx stdctx.Context, cfg Co
 		return nil, fmt.Errorf("failed to read stream: %w", err)
 	}
 
-	return state.response()
+	result, responseErr := state.response()
+	if result != nil {
+		result.ProviderRequestID = providerRequestID(resp)
+	}
+	return result, responseErr
 }
 
 // --- 消息转换 ---
@@ -368,7 +379,7 @@ func anthropicUserContent(msg context.Message) interface{} {
 	}
 
 	blocks := make([]map[string]interface{}, 0, len(msg.Attachments)+1)
-	userText := userTextWithAttachmentPaths(msg.Content, msg.Attachments)
+	userText := userTextWithProviderProjection(msg.Content, msg.Attachments, msg.ProviderProjectionText)
 	if strings.TrimSpace(userText) != "" {
 		blocks = append(blocks, map[string]interface{}{
 			"type": "text",
@@ -499,6 +510,7 @@ func (s *anthropicStreamState) consume(data string, event string) {
 		}
 
 	case "message_delta":
+		s.usage = mergeAnthropicResponseUsage(s.usage, anthropicResponseUsage(streamEvent.Usage))
 		if streamEvent.Delta != nil && streamEvent.Delta.StopReason != "" {
 			s.stopReason = strings.TrimSpace(streamEvent.Delta.StopReason)
 		}
@@ -587,13 +599,72 @@ func anthropicResponseUsage(raw *anthropicUsage) *Usage {
 	if raw == nil {
 		return nil
 	}
-	total := raw.InputTokens + raw.OutputTokens
-	if raw.InputTokens == 0 && raw.OutputTokens == 0 {
+	nonCached := validTokenPointer(raw.InputTokens)
+	output := validTokenPointer(raw.OutputTokens)
+	cached := validTokenPointer(raw.CacheReadInputTokens)
+	cacheWrite := validTokenPointer(raw.CacheCreationInputTokens)
+	input := sumTokenPointers(nonCached, cached, cacheWrite)
+	total := sumTokenPointers(input, output)
+	if nonCached == nil && output == nil && cached == nil && cacheWrite == nil {
 		return nil
 	}
 	return &Usage{
-		InputTokens:  raw.InputTokens,
-		OutputTokens: raw.OutputTokens,
-		TotalTokens:  total,
+		InputTokens: input, CachedInputTokens: cached, UncachedInputTokens: nonCached,
+		CacheWriteTokens: cacheWrite, OutputTokens: output, TotalTokens: total,
+		Raw: RawUsage{
+			NormalizerID: "anthropic_usage_v2", InputTokens: raw.InputTokens,
+			OutputTokens: raw.OutputTokens, CacheReadInputTokens: raw.CacheReadInputTokens,
+			CacheCreationInputTokens: raw.CacheCreationInputTokens,
+		},
 	}
+}
+
+func mergeAnthropicResponseUsage(left, right *Usage) *Usage {
+	if left == nil {
+		return right
+	}
+	if right == nil {
+		return left
+	}
+	nonCached := right.UncachedInputTokens
+	if nonCached == nil {
+		nonCached = left.UncachedInputTokens
+	}
+	cached := right.CachedInputTokens
+	if cached == nil {
+		cached = left.CachedInputTokens
+	}
+	cacheWrite := right.CacheWriteTokens
+	if cacheWrite == nil {
+		cacheWrite = left.CacheWriteTokens
+	}
+	output := right.OutputTokens
+	if output == nil {
+		output = left.OutputTokens
+	}
+	input := sumTokenPointers(nonCached, cached, cacheWrite)
+	return &Usage{
+		InputTokens: input, CachedInputTokens: cached, UncachedInputTokens: nonCached,
+		CacheWriteTokens: cacheWrite, OutputTokens: output, TotalTokens: sumTokenPointers(input, output),
+		Raw: RawUsage{
+			NormalizerID: "anthropic_usage_v2", InputTokens: nonCached, OutputTokens: output,
+			CacheReadInputTokens: cached, CacheCreationInputTokens: cacheWrite,
+		},
+	}
+}
+
+func sumTokenPointers(values ...*int) *int {
+	hasValue := false
+	total := 0
+	for _, value := range values {
+		if value == nil || *value < 0 {
+			continue
+		}
+		hasValue = true
+		total += *value
+	}
+	if !hasValue {
+		return nil
+	}
+	return &total
 }

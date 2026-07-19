@@ -21,7 +21,6 @@ export type AwakenDialogProps = {
   ariaLabelledBy?: string;
   size?: "default" | "large";
   titleVisuallyHidden?: boolean;
-  showCloseTooltip?: boolean;
   initialFocusRef?: RefObject<HTMLElement | null>;
   className?: string;
   bodyClassName?: string;
@@ -47,7 +46,6 @@ export function AwakenDialog({
   ariaLabelledBy,
   size = "default",
   titleVisuallyHidden = false,
-  showCloseTooltip = true,
   initialFocusRef,
   className,
   bodyClassName,
@@ -138,7 +136,12 @@ export function AwakenDialog({
           }
         }}
       >
-        <header className="aw-dialog__head">
+        <header
+          className={[
+            "aw-dialog__head",
+            titleVisuallyHidden ? "aw-dialog__head--title-visually-hidden" : "",
+          ].filter(Boolean).join(" ")}
+        >
           <h2
             className={[
               "aw-dialog__title",
@@ -151,7 +154,7 @@ export function AwakenDialog({
           <AwakenIconButton
             label="关闭"
             size="sm"
-            showTooltip={showCloseTooltip}
+            showTooltip={false}
             onClick={() => onOpenChange(false)}
           >
             <X size={15} strokeWidth={1.9} />

@@ -49,6 +49,30 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 	case agentcore.SemanticKindRunStarted:
 		base.Type = EventRunStarted
 		return []Event{base}
+	case agentcore.SemanticKindMemoryRecalled:
+		memoryEvent := base
+		memoryEvent.Type = EventAwakenMemoryRecalled
+		raw, err := json.Marshal(payload["memories"])
+		if err == nil {
+			var receipts []agentcore.MemoryRecallReceipt
+			if json.Unmarshal(raw, &receipts) == nil {
+				for _, receipt := range receipts {
+					memoryEvent.Memories = append(memoryEvent.Memories, MemoryReceipt{MemoryID: receipt.MemoryID, Scope: receipt.Scope, Type: receipt.Type, Revision: receipt.Revision, Bytes: receipt.Bytes})
+				}
+			}
+		}
+		return []Event{memoryEvent}
+	case agentcore.SemanticKindMemoryMutated:
+		memoryEvent := base
+		raw, err := json.Marshal(payload["memory"])
+		if err == nil {
+			var receipt agentcore.MemoryRecallReceipt
+			if json.Unmarshal(raw, &receipt) == nil {
+				memoryEvent.Memories = mapMemoryReceipts([]agentcore.MemoryRecallReceipt{receipt})
+			}
+		}
+		memoryEvent.Type = memoryMutationEventType(memoryEvent.Memories)
+		return []Event{memoryEvent}
 	case agentcore.SemanticKindUserMessage:
 		// User prompts are restored via run metadata; no AG-UI frame required.
 		return nil

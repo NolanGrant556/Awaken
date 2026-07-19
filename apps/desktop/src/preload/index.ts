@@ -24,6 +24,10 @@ import {
   type ModelProfileSaveRequest,
   type ModelProfileTestResult,
   type ModelProvider,
+  type MemoryDreamTask,
+  type MemoryListRequest,
+  type MemorySettingsDocument,
+  type MemorySettingsPatch,
   type ProjectMutationResult,
   type RuntimeConnector,
   type RuntimeConnectorActionResponse,
@@ -33,6 +37,7 @@ import {
   type RuntimeMcpServer,
   type RuntimeMcpServerConfigResponse,
   type RuntimeModelProfileSummary,
+  type RuntimeMemory,
   type RuntimeRun,
   type RuntimeProject,
   type RuntimeProjectOperation,
@@ -59,9 +64,13 @@ import {
 
 const subscriptions = new Map<string, RunStreamHandlers>();
 const cliConnectorStateHandlers = new Set<(event: CliConnectorStateEvent) => void>();
+const memoryDreamReceiptHandlers = new Set<(task: MemoryDreamTask) => void>();
 
 ipcRenderer.on("awaken:cli-connector-state", (_event, payload: CliConnectorStateEvent) => {
   for (const handler of cliConnectorStateHandlers) handler(payload);
+});
+ipcRenderer.on("awaken:memory-dream-receipt", (_event, task: MemoryDreamTask) => {
+  for (const handler of memoryDreamReceiptHandlers) handler(task);
 });
 
 function toDesktopPlatform(platform: string): DesktopPlatform {
@@ -108,6 +117,28 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:save-search-settings", request),
   testSearchProvider: (request) =>
     ipcRenderer.invoke("awaken:test-search-provider", request),
+  listMemories: (request?: MemoryListRequest) =>
+    ipcRenderer.invoke("awaken:list-memories", request) as Promise<RuntimeMemory[]>,
+  getMemory: (memoryId: string, projectId?: string) =>
+    ipcRenderer.invoke("awaken:get-memory", memoryId, projectId) as Promise<RuntimeMemory>,
+  deleteMemory: (memoryId: string, expectedRevision: number, projectId?: string) =>
+    ipcRenderer.invoke("awaken:delete-memory", memoryId, expectedRevision, projectId) as Promise<void>,
+  getMemorySettings: () =>
+    ipcRenderer.invoke("awaken:get-memory-settings") as Promise<MemorySettingsDocument>,
+  updateMemorySettings: (request: MemorySettingsPatch) =>
+    ipcRenderer.invoke("awaken:update-memory-settings", request) as Promise<MemorySettingsDocument>,
+  startMemoryDream: (projectId?: string) =>
+    ipcRenderer.invoke("awaken:start-memory-dream", projectId) as Promise<MemoryDreamTask>,
+  getMemoryDream: (taskId: string) =>
+    ipcRenderer.invoke("awaken:get-memory-dream", taskId) as Promise<MemoryDreamTask>,
+  listMemoryDreams: (projectId?: string, limit = 5) =>
+    ipcRenderer.invoke("awaken:list-memory-dreams", projectId, limit) as Promise<MemoryDreamTask[]>,
+  cancelMemoryDream: (taskId: string) =>
+    ipcRenderer.invoke("awaken:cancel-memory-dream", taskId) as Promise<void>,
+  onMemoryDreamReceipt: (handler) => {
+    memoryDreamReceiptHandlers.add(handler);
+    return () => memoryDreamReceiptHandlers.delete(handler);
+  },
   getRun: (runId: string) =>
     ipcRenderer.invoke("awaken:get-run", runId) as Promise<RuntimeRun>,
   getThreadTranscript: (threadId: string) =>

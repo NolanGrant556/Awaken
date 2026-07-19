@@ -26,6 +26,10 @@ import {
   type ModelProfileSaveRequest,
   type ModelProfileTestResult,
   type ModelProvider,
+  type MemoryDreamTask,
+  type MemoryListRequest,
+  type MemorySettingsDocument,
+  type MemorySettingsPatch,
   type ProjectMutationResult,
   type RuntimeConnector,
   type RuntimeConnectorActionResponse,
@@ -34,6 +38,7 @@ import {
   type RuntimeMcpServer,
   type RuntimeMcpServerConfigResponse,
   type RuntimeModelProfileSummary,
+  type RuntimeMemory,
   type RuntimeRun,
   type RuntimeProject,
   type RuntimeProjectOperation,
@@ -199,6 +204,16 @@ export type RuntimeClient = {
   ) => Promise<void>;
   getDesktopPreferences: () => Promise<DesktopPreferences>;
   saveDesktopPreferences: (request: DesktopPreferencesSaveRequest) => Promise<DesktopPreferences>;
+  listMemories: (request?: MemoryListRequest) => Promise<RuntimeMemory[]>;
+  getMemory: (memoryId: string, projectId?: string) => Promise<RuntimeMemory>;
+  deleteMemory: (memoryId: string, expectedRevision: number, projectId?: string) => Promise<void>;
+  getMemorySettings: () => Promise<MemorySettingsDocument>;
+  updateMemorySettings: (request: MemorySettingsPatch) => Promise<MemorySettingsDocument>;
+  startMemoryDream: (projectId?: string) => Promise<MemoryDreamTask>;
+  getMemoryDream: (taskId: string) => Promise<MemoryDreamTask>;
+  listMemoryDreams: (projectId?: string, limit?: number) => Promise<MemoryDreamTask[]>;
+  cancelMemoryDream: (taskId: string) => Promise<void>;
+  onMemoryDreamReceipt: (handler: (task: MemoryDreamTask) => void) => () => void;
   subscribeRun: (
     runId: string,
     handlers: SubscribeHandlers,
@@ -316,6 +331,16 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     resolveExternalInteraction: bridge.resolveExternalInteraction,
     getDesktopPreferences: () => bridge.getDesktopPreferences(),
     saveDesktopPreferences: (request) => bridge.saveDesktopPreferences(request),
+    listMemories: (request) => bridge.listMemories(request),
+    getMemory: (memoryId, projectId) => bridge.getMemory(memoryId, projectId),
+    deleteMemory: (memoryId, expectedRevision, projectId) => bridge.deleteMemory(memoryId, expectedRevision, projectId),
+    getMemorySettings: () => bridge.getMemorySettings(),
+    updateMemorySettings: (request) => bridge.updateMemorySettings(request),
+    startMemoryDream: (projectId) => bridge.startMemoryDream(projectId),
+    getMemoryDream: (taskId) => bridge.getMemoryDream(taskId),
+    listMemoryDreams: (projectId, limit) => bridge.listMemoryDreams(projectId, limit),
+    cancelMemoryDream: (taskId) => bridge.cancelMemoryDream(taskId),
+    onMemoryDreamReceipt: (handler) => bridge.onMemoryDreamReceipt(handler),
     subscribeRun: async (runId, handlers, afterCursor) => {
       let lastCursor = afterCursor ?? 0;
       let terminalSeen = false;

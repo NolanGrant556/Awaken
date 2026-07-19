@@ -174,14 +174,17 @@
   --aw-icon-size-16: 16px;
   --aw-icon-size-20: 20px;
   --aw-icon-size-24: 24px;
+  --aw-icon-stroke: 1.75;
 
   /* Radius */
+  --aw-radius-compact: 6px;
   --aw-radius-sm: 8px;
   --aw-radius-md: 12px;
   --aw-radius-lg: 12px;
   --aw-radius-pill: 999px;
   --aw-radius-control: var(--aw-radius-sm);
   --aw-radius-panel: var(--aw-radius-md);
+  --aw-radius-composer: 16px;
   --aw-radius-workbench: var(--aw-radius-md);
 
   /* Font */

@@ -21,7 +21,8 @@ Awaken owns its visual language through its own tokens and components. Keep Awak
 - Long-form assistant answers use a dedicated `14px / 22px` reading rhythm, with `20px / 28px`, `16px / 24px`, and `14px / 20px` heading tiers.
 - Weight roles are regular `400`, medium `500`, semibold `600`, bold `650`, and heavy `700`; use the role token instead of local `700` / `800` values.
 - Default icon size is `16px`; compact icons may use `14px`.
-- Default control radius is `8px`; default card, popover, and panel radius is `12px`.
+- Line icons default to a `1.75` optical stroke; brand marks and filled status graphics keep their authored geometry.
+- Compact controls use a `6px` radius, default controls use `8px`, cards / popovers / panels use `12px`, and the composer surface uses `16px`.
 - Interactive neutral states must move through `--aw-bg-fill-light`, `--aw-bg-fill-main`, and `--aw-bg-fill-dark`.
 - Status colors are semantic only: success, warning, error, running, and permission states.
 

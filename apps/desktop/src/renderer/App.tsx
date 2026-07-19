@@ -56,6 +56,7 @@ import type {
   AwakenThemePreference,
   ComposerToken,
   DesktopOperationIssue,
+  MemoryDreamTask,
   RuntimeInfo,
   RuntimeProject,
   RunInputAttachment,
@@ -64,6 +65,7 @@ import type {
   RuntimeThread,
   StartRunRequest,
 } from "../shared/runtime";
+import type { AguiEvent } from "../shared/agui";
 import {
   createInitialRuntimeState,
   reduceRuntimeState,
@@ -917,6 +919,21 @@ function writeStoredValue(key: string, value: string): void {
   }
 }
 
+function dreamTaskReceiptEvent(task: MemoryDreamTask): AguiEvent | undefined {
+  if (!["completed", "failed", "cancelled", "interrupted"].includes(task.status)) {
+    return undefined;
+  }
+  const suffix = task.status.toUpperCase();
+  return {
+    type: `AWAKEN_MEMORY_DREAM_${suffix}` as AguiEvent["type"],
+    recordId: task.taskId,
+    timestamp: Date.parse(task.finishedAt ?? task.createdAt),
+    errorCode: task.errorCode,
+    message: task.errorMessage,
+    diagnostic: { reports: task.reports ?? {}, projectId: task.projectId },
+  };
+}
+
 export function App() {
   const runtimeClientRef = useRef(createRuntimeClient());
   const unsubscribeRef = useRef<null | (() => void)>(null);
@@ -1005,6 +1022,11 @@ export function App() {
   const [selectedProjectId, setSelectedProjectId] = useState<
     string | undefined
   >(undefined);
+  useEffect(() => runtimeClient.onMemoryDreamReceipt((task) => {
+    if (task.projectId && task.projectId !== selectedProjectId) return;
+    const event = dreamTaskReceiptEvent(task);
+    if (event) dispatch({ type: "run/event", event, receivedAtMs: Date.now() });
+  }), [runtimeClient, selectedProjectId]);
   const [expandedProjectIds, setExpandedProjectIds] = useState<string[]>([]);
   const [removedProjectIds, setRemovedProjectIds] = useState<string[]>([]);
   const [defaultBackendProjectId, setDefaultBackendProjectId] = useState<
@@ -2368,6 +2390,16 @@ export function App() {
       transcript.thread.workspace.workspaceRoot,
     );
     applyRuntimeActions(actionsForThreadTranscript(transcript));
+    void runtimeClient.listMemoryDreams(transcript.thread.projectId, 5).then((tasks) => {
+      if (threadLoadSeqRef.current !== loadSeq) return;
+      for (const task of tasks.slice().reverse()) {
+        const event = dreamTaskReceiptEvent(task);
+        if (event) dispatch({ type: "run/event", event, receivedAtMs: Date.now() });
+      }
+    }).catch(() => {
+      // Dream receipts are auxiliary to transcript recovery; runtime errors
+      // remain visible through the Settings task status.
+    });
 
     const latestRun = transcript.runs[transcript.runs.length - 1]?.run;
     if (!latestRun) {
@@ -3531,6 +3563,16 @@ export function App() {
         />
       );
     }
+    if (item.kind === "memoryReceipt") {
+      return (
+        <ToolTraceLine
+          key={key}
+          title={item.title}
+          detail={item.detail}
+          status={item.status}
+        />
+      );
+    }
     if (item.kind === "deliverables") {
       const threadId = runtimeState.activeThreadId ?? runtimeState.threadId;
       return (
@@ -4301,6 +4343,7 @@ export function App() {
       <DesktopSettingsDialog
         open={modelSettingsOpen}
         runtimeClient={runtimeClient}
+        currentProjectId={activeThreadProjectId ?? selectedProjectId}
         themePreference={appearanceThemePreference}
         themeSaving={appearanceSaving}
         themeMessage={appearanceMessage}

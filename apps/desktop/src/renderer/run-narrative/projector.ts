@@ -310,6 +310,18 @@ export function projectAguiEventToNarrative(
     case "AWAKEN_COMPACT_FINISHED":
     case "AWAKEN_COMPACT_FAILED":
       return commitCompactBoundary(base, event);
+    case "AWAKEN_MEMORY_RECALLED":
+    case "AWAKEN_MEMORY_CREATED":
+    case "AWAKEN_MEMORY_UPDATED":
+    case "AWAKEN_MEMORY_SUPERSEDED":
+    case "AWAKEN_MEMORY_DELETED":
+    case "AWAKEN_MEMORY_REJECTED":
+      return commitMemoryReceipt(base, event);
+    case "AWAKEN_MEMORY_DREAM_COMPLETED":
+    case "AWAKEN_MEMORY_DREAM_FAILED":
+    case "AWAKEN_MEMORY_DREAM_CANCELLED":
+    case "AWAKEN_MEMORY_DREAM_INTERRUPTED":
+      return commitDreamReceipt(base, event);
     case "RUN_FINISHED":
       return markLatestAnswerFinal(commitActive(base, "done"), event);
     case "RUN_ERROR":
@@ -332,6 +344,63 @@ export function projectAguiEventToNarrative(
     default:
       return base;
   }
+}
+
+function commitMemoryReceipt(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
+  const count = event.memories?.length ?? 0;
+  const titles: Record<string, string> = {
+    AWAKEN_MEMORY_RECALLED: count > 0 ? `已召回 ${count} 条记忆` : "未召回相关记忆",
+    AWAKEN_MEMORY_CREATED: "已写入长期记忆",
+    AWAKEN_MEMORY_UPDATED: "已更新长期记忆",
+    AWAKEN_MEMORY_SUPERSEDED: "已归档旧记忆",
+    AWAKEN_MEMORY_DELETED: "已删除长期记忆",
+    AWAKEN_MEMORY_REJECTED: "记忆操作未写入",
+  };
+  const metadata = (event.memories ?? []).map((memory) =>
+    [memory.scope === "project" ? "项目" : "用户", memory.memoryType, `r${memory.revision}`]
+      .filter(Boolean)
+      .join(" · "),
+  );
+  const detail = [...metadata, event.errorCode ?? ""].filter(Boolean).join("；");
+  const item: RunNarrativeItem = {
+    kind: "memoryReceipt",
+    id: `memory:${event.recordId ?? eventScopedId(event, event.type)}`,
+    title: titles[event.type] ?? "记忆已处理",
+    detail: detail || undefined,
+    status: event.type === "AWAKEN_MEMORY_REJECTED" ? "error" : "done",
+  };
+  return { ...state, committedItems: upsertCommitted(state.committedItems, item) };
+}
+
+function commitDreamReceipt(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
+  const report = event.diagnostic?.reports as Record<string, { updated?: number; superseded?: number; conflicts?: number }> | undefined;
+  const totals = Object.values(report ?? {}).reduce<{ updated: number; superseded: number; conflicts: number }>(
+    (sum, item) => ({
+      updated: sum.updated + (item.updated ?? 0),
+      superseded: sum.superseded + (item.superseded ?? 0),
+      conflicts: sum.conflicts + (item.conflicts ?? 0),
+    }),
+    { updated: 0, superseded: 0, conflicts: 0 },
+  );
+  const completed = event.type === "AWAKEN_MEMORY_DREAM_COMPLETED";
+  const title = completed
+    ? "记忆整理完成"
+    : event.type === "AWAKEN_MEMORY_DREAM_INTERRUPTED"
+      ? "记忆整理因重启中断"
+      : event.type === "AWAKEN_MEMORY_DREAM_CANCELLED"
+        ? "记忆整理已取消"
+        : "记忆整理失败";
+  const detail = completed
+    ? `更新 ${totals.updated} 条 · 归档 ${totals.superseded} 条 · 冲突 ${totals.conflicts} 条`
+    : event.message || event.errorCode;
+  const item: RunNarrativeItem = {
+    kind: "memoryReceipt",
+    id: `dream:${event.recordId ?? eventScopedId(event, event.type)}`,
+    title,
+    detail,
+    status: completed ? "done" : "error",
+  };
+  return { ...state, committedItems: upsertCommitted(state.committedItems, item) };
 }
 
 function eventKey(event: AguiEvent): string | undefined {
@@ -514,6 +583,7 @@ function applyStatus(
     case "deliverables":
       return item;
     case "tool":
+    case "memoryReceipt":
       return status === "done" || status === "error" ? { ...item, status } : item;
     case "answer":
       return status === "done" || status === "error" ? { ...item, status } : item;

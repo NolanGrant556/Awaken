@@ -70,6 +70,17 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.Message = event.Error
 		base.Code = event.Code
 		return []Event{base}
+	case agentcore.MemoryRecalledEventType:
+		base.Type = EventAwakenMemoryRecalled
+		base.Memories = make([]MemoryReceipt, 0, len(event.MemoryReceipts))
+		for _, receipt := range event.MemoryReceipts {
+			base.Memories = append(base.Memories, MemoryReceipt{MemoryID: receipt.MemoryID, Scope: receipt.Scope, Type: receipt.Type, Revision: receipt.Revision, Bytes: receipt.Bytes})
+		}
+		return []Event{base}
+	case agentcore.MemoryMutatedEventType:
+		base.Memories = mapMemoryReceipts(event.MemoryReceipts)
+		base.Type = memoryMutationEventType(base.Memories)
+		return []Event{base}
 	case agentcore.TurnStartedEventType:
 		base.Type = EventAwakenTurnStarted
 		return []Event{base}
@@ -390,6 +401,32 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.Message = event.Content
 		base.RawEvent = rawAwakenEvent(event)
 		return []Event{base}
+	}
+}
+
+func mapMemoryReceipts(receipts []agentcore.MemoryRecallReceipt) []MemoryReceipt {
+	result := make([]MemoryReceipt, 0, len(receipts))
+	for _, receipt := range receipts {
+		result = append(result, MemoryReceipt{MemoryID: receipt.MemoryID, Scope: receipt.Scope, Type: receipt.Type, Revision: receipt.Revision, Bytes: receipt.Bytes, Action: receipt.Action, Status: receipt.Status, ErrorCode: receipt.ErrorCode})
+	}
+	return result
+}
+
+func memoryMutationEventType(receipts []MemoryReceipt) EventType {
+	if len(receipts) == 0 || receipts[0].Status == "rejected" {
+		return EventAwakenMemoryRejected
+	}
+	switch receipts[0].Action {
+	case "create":
+		return EventAwakenMemoryCreated
+	case "update":
+		return EventAwakenMemoryUpdated
+	case "supersede":
+		return EventAwakenMemorySuperseded
+	case "delete":
+		return EventAwakenMemoryDeleted
+	default:
+		return EventAwakenMemoryRejected
 	}
 }
 

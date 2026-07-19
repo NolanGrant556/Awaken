@@ -294,4 +294,24 @@ describe("projectAguiEventToNarrative", () => {
     }
     expect(notice.detail).toContain("use_specialized_artifact_tool");
   });
+
+  it("projects bounded Memory and Dream receipts without topic bodies", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_MEMORY_RECALLED",
+      recordId: "memory-recall-1",
+      memories: [{ memoryId: "mem_1", scope: "user", memoryType: "user", revision: 2 }],
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_MEMORY_DREAM_COMPLETED",
+      recordId: "dream_1",
+      diagnostic: { reports: { user: { updated: 1, superseded: 2, conflicts: 0 } } },
+    });
+
+    const receipts = state.committedItems.filter((item) => item.kind === "memoryReceipt");
+    expect(receipts).toHaveLength(2);
+    expect(receipts[0]).toMatchObject({ title: "已召回 1 条记忆", detail: "用户 · user · r2", status: "done" });
+    expect(receipts[1]).toMatchObject({ title: "记忆整理完成", detail: "更新 1 条 · 归档 2 条 · 冲突 0 条", status: "done" });
+    expect(JSON.stringify(receipts)).not.toContain("topic body");
+  });
 });

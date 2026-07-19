@@ -16,6 +16,7 @@ type ContextEnvelope struct {
 	SystemContextItems []ContextItem
 	Attachments        []ContextAttachment
 	ToolSchemas        []tool.ToolSchema
+	AttributedTools    []AttributedToolSchema
 	RuntimeSnapshot    RuntimeSnapshot
 	ContextWindowState ContextWindowState
 	CacheKeys          []ContextCacheKey
@@ -25,10 +26,37 @@ type ContextEnvelope struct {
 	Model              string
 	Temperature        float64
 	MaxTokens          int
+	EpochSources       []ContextEpochSourceCandidate
+}
+
+// PromptSection is a host-owned contribution wrapper. Content is sent only as
+// part of the normal system prompt; Kind/ID never cross the provider boundary.
+type PromptSection struct {
+	ID      string
+	Kind    ContextContributionKind
+	Content string
+}
+
+// ToolSchemaProvenance preserves the pinned catalog identity that was lost
+// when tool definitions were flattened to provider JSON.
+type ToolSchemaProvenance struct {
+	Origin         tool.ToolSource
+	ProviderID     tool.ProviderID
+	RegistrationID string
+	// SkillCatalog is the exact model-visible catalog listing embedded in the
+	// unified Skill tool description. It remains host-owned provenance: the
+	// provider sees only the ordinary lowered tool definition.
+	SkillCatalog string `json:"skill_catalog,omitempty"`
+}
+
+type AttributedToolSchema struct {
+	Schema     tool.ToolSchema
+	Provenance ToolSchemaProvenance
 }
 
 type ContextBlock struct {
 	ID         string
+	Kind       ContextContributionKind
 	Content    string
 	SkillID    string
 	SourcePath string

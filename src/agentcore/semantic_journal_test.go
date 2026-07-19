@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -426,6 +427,65 @@ func (r *failingRecorder) Flush(context.Context) error {
 		return errors.New("fsync failed")
 	}
 	return nil
+}
+
+func TestContextEpochJournalRecordContainsOnlyRedactedReceipt(t *testing.T) {
+	recorder := &failingRecorder{}
+	emitter := newRunEventEmitter("thread-epoch", EventSinkFunc(func(AwakenEvent) {}))
+	emitter.recorder = recorder
+	if err := emitter.contextEpoch(context.Background(), ContextEpochReceipt{
+		EpochID: "epoch-1", BaselineDigest: "digest-1", State: "updated",
+		BoundaryReason: "append_only_host_delta", BaselineSequence: 2,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(recorder.records)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "prompt body") || strings.Contains(string(encoded), "workspace path") {
+		t.Fatalf("context epoch receipt leaked sidecar content: %s", encoded)
+	}
+	if len(recorder.records) != 1 || recorder.records[0].Kind != SemanticKindContextEpoch {
+		t.Fatalf("unexpected epoch records: %+v", recorder.records)
+	}
+}
+
+func TestModelRequestIsFlushedBeforeProviderAndUsageReusesRequestID(t *testing.T) {
+	recorder := &failingRecorder{}
+	server := newRunnerStreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if recorder.flushes == 0 {
+			t.Fatal("provider request started before model_request fsync")
+		}
+		if semanticKindIndex(recorder.records, SemanticKindModelRequest) < 0 {
+			t.Fatal("provider request started before model_request append")
+		}
+		writeRunnerStreamLines(t, w, []string{
+			`data: {"choices":[{"delta":{"content":"done"}}],"usage":{"prompt_tokens":11,"completion_tokens":2,"total_tokens":13}}`,
+			`data: [DONE]`,
+		})
+	})
+	defer server.Close()
+
+	agent := NewAgentWithThreadID(testAgentConfig(server.URL, 2), "thread_model_usage")
+	agent.SetRunIdentity("run_model_usage", "session_model_usage")
+	agent.SetSemanticRecorder(recorder)
+	if _, err := agent.RunStreamWithEvents(context.Background(), "hello", EventSinkFunc(func(AwakenEvent) {})); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	requestIndex := semanticKindIndex(recorder.records, SemanticKindModelRequest)
+	usageIndex := semanticKindIndex(recorder.records, SemanticKindModelUsage)
+	if requestIndex < 0 || usageIndex <= requestIndex {
+		t.Fatalf("model request/usage order is invalid: %+v", recorder.records)
+	}
+	requestID := strings.TrimSpace(fmt.Sprint(recorder.records[requestIndex].Payload["request_id"]))
+	usageID := strings.TrimSpace(fmt.Sprint(recorder.records[usageIndex].Payload["request_id"]))
+	if requestID == "" || requestID != usageID || recorder.records[usageIndex].ParentID != requestID {
+		t.Fatalf("usage did not reuse request identity: request=%q usage=%q parent=%q", requestID, usageID, recorder.records[usageIndex].ParentID)
+	}
+	if semanticKindIndex(recorder.records, SemanticKindContextSnapshot) < 0 {
+		t.Fatal("context snapshots were not persisted")
+	}
 }
 
 func TestContextCompactionIsFlushedBeforeConversationChanges(t *testing.T) {

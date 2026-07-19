@@ -901,6 +901,80 @@ func TestGetThreadTranscriptEndpointReturnsMappedRuns(t *testing.T) {
 	}
 }
 
+func TestRefreshThreadContextSnapshotEndpointPersistsReplayableV4Detail(t *testing.T) {
+	t.Setenv("AWAKEN_HOME", t.TempDir())
+	workspace := t.TempDir()
+	runService := awruntime.NewRunServiceWithModelProfiles(
+		func(workspace awruntime.WorkspaceConfig, threadID string, profile *awruntime.ModelProfileConfig) *agentcore.Agent {
+			cfg := agentcore.ModelConfig{}
+			if profile != nil {
+				cfg = agentcore.ModelConfig{
+					APIKey: profile.APIKey, BaseURL: profile.BaseURL, Model: profile.ModelID,
+					Protocol: profile.Protocol, ProviderID: profile.ProviderID, ProfileID: profile.ProfileID,
+					CredentialRevision: profile.CredentialRevision, MaxTokens: profile.MaxTokens,
+					ContextWindow: profile.ContextWindow,
+				}
+			}
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				ModelConfig: cfg, Workspace: agentcore.WorkspaceConfig{Root: workspace.WorkspaceRoot},
+				ContextEpochStore: awruntime.NewContextEpochStore(),
+			}, threadID)
+		},
+		func(agent *agentcore.Agent) awruntime.Executor {
+			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+				return "done", nil
+			})
+		},
+	)
+	ts := httptest.NewServer(NewRouter(runService, nil))
+	defer ts.Close()
+
+	profileJSON := `{"profile_id":"profile-deepseek","provider_id":"deepseek","model_id":"deepseek-v4-pro","base_url":"https://api.deepseek.com","protocol":"openai_chat","api_key":"secret","credential_revision":1,"context_window":1000000,"max_tokens":16000}`
+	createBody := fmt.Sprintf(`{"input":"legacy thread","workspace":{"workspace_root":%q},"model_profile":%s}`, workspace, profileJSON)
+	createdResp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(createBody))
+	if err != nil {
+		t.Fatalf("create seed run: %v", err)
+	}
+	defer createdResp.Body.Close()
+	var run awruntime.Run
+	if err := json.NewDecoder(createdResp.Body).Decode(&run); err != nil {
+		t.Fatalf("decode seed run: %v", err)
+	}
+	waitHTTPRunTerminal(t, ts.URL, run.RunID)
+
+	refreshBody := fmt.Sprintf(`{"model_profile":%s}`, profileJSON)
+	refreshResp, err := http.Post(ts.URL+"/v1/threads/"+run.ThreadID+"/context-snapshot", "application/json", strings.NewReader(refreshBody))
+	if err != nil {
+		t.Fatalf("refresh context snapshot: %v", err)
+	}
+	defer refreshResp.Body.Close()
+	if refreshResp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(refreshResp.Body)
+		t.Fatalf("expected 204 from context refresh, got %d: %s", refreshResp.StatusCode, body)
+	}
+
+	transcriptResp, err := http.Get(ts.URL + "/v1/threads/" + run.ThreadID + "/transcript")
+	if err != nil {
+		t.Fatalf("read refreshed transcript: %v", err)
+	}
+	defer transcriptResp.Body.Close()
+	var transcript threadTranscriptResponse
+	if err := json.NewDecoder(transcriptResp.Body).Decode(&transcript); err != nil {
+		t.Fatalf("decode refreshed transcript: %v", err)
+	}
+	found := false
+	for _, frame := range transcript.Runs[len(transcript.Runs)-1].Events {
+		if frame.Type == agui.EventAwakenContextSnapshot && frame.ContextUsageSnapshot != nil {
+			found = frame.ContextUsageSnapshot.SchemaVersion == 4 && len(frame.ContextUsageSnapshot.Contributions) > 0
+		}
+	}
+	if !found {
+		t.Fatalf("expected replayable v4 context snapshot, got %+v", transcript.Runs[len(transcript.Runs)-1].Events)
+	}
+}
+
 func TestGetThreadTranscriptEndpointProjectsDurableSemanticFramesAfterRestart(t *testing.T) {
 	t.Setenv("AWAKEN_HOME", t.TempDir())
 	workspace := t.TempDir()

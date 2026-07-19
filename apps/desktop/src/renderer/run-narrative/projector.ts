@@ -404,6 +404,9 @@ function commitDreamReceipt(state: RunNarrativeState, event: AguiEvent): RunNarr
 }
 
 function eventKey(event: AguiEvent): string | undefined {
+  if (event.type.startsWith("AWAKEN_MEMORY_DREAM_") && event.recordId) {
+    return `${event.type}:dream:${event.recordId}`;
+  }
   const stableSeq = event.semanticSeq ?? event.seq;
   if (typeof stableSeq === "number") {
     // One durable SemanticRecord can project into multiple AG-UI frames

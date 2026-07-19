@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -203,6 +204,21 @@ func semanticRecordToV1Transcript(record agentcore.SemanticRecord) ([]Transcript
 			TurnID:    record.TurnID,
 			Diff:      stringPayload(record.Payload, "diff"),
 			Truncated: boolPayload(record.Payload, "truncated"),
+		}
+		return []TranscriptRecord{eventRecord(base, event)}, true
+	case agentcore.SemanticKindContextSnapshot:
+		encoded, err := json.Marshal(record.Payload)
+		if err != nil {
+			return nil, false
+		}
+		var snapshot agentcore.ContextUsageSnapshot
+		if json.Unmarshal(encoded, &snapshot) != nil {
+			return nil, false
+		}
+		event := agentcore.AwakenEvent{
+			Type: agentcore.ContextSnapshotEventType, Timestamp: ts,
+			ThreadID: record.ThreadID, RunID: record.RunID, TurnID: record.TurnID,
+			ContextUsageSnapshot: &snapshot,
 		}
 		return []TranscriptRecord{eventRecord(base, event)}, true
 	case agentcore.SemanticKindTurnBoundary:

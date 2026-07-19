@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -332,7 +333,7 @@ func TestTitleMetadataRestoredAfterRestart(t *testing.T) {
 func TestGeneratedTitlePersistsForNewThread(t *testing.T) {
 	setRuntimeUserDataDir(t)
 	originalGenerate := generateThreadTitleWithProfileFn
-	generateThreadTitleWithProfileFn = func(ctx context.Context, profile *ModelProfileConfig, prompt string) (string, error) {
+	generateThreadTitleWithProfileFn = func(ctx context.Context, profile *ModelProfileConfig, prompt string, _ agentcore.ModelCallAuthority, _ int) (string, error) {
 		return "订单分析", nil
 	}
 	t.Cleanup(func() {
@@ -365,7 +366,7 @@ func TestGeneratedTitlePersistsForNewThread(t *testing.T) {
 	)
 
 	run, err := service.StartRun(StartRunRequest{
-		Input:     "帮我分析这批订单",
+		Input:     "请根据订单、库存、交期与供应风险生成完整分析报告",
 		Workspace: WorkspaceConfig{WorkspaceRoot: root},
 		Client:    ClientInfo{EntryPoint: "desktop"},
 		ModelProfile: &ModelProfileConfig{
@@ -401,13 +402,70 @@ func TestGeneratedTitlePersistsForNewThread(t *testing.T) {
 	}
 }
 
+func TestLocalThreadTitleUsesShortInputSkillAndAttachmentWithoutModelCall(t *testing.T) {
+	if got := localThreadTitle("整理订单风险", nil, nil); got != "整理订单风险" {
+		t.Fatalf("short Chinese title=%q", got)
+	}
+	if got := localThreadTitle("summarize quarterly sales", nil, nil); got != "summarize quarterly sales" {
+		t.Fatalf("short English title=%q", got)
+	}
+	if got := localThreadTitle("这份材料具体说明了什么？", nil, nil); got != "" {
+		t.Fatalf("question should require auxiliary title, got %q", got)
+	}
+	if got := localThreadTitle("long input", nil, []ComposerToken{{ID: "skill", Type: "skill", Label: "供应链复盘"}}); got != "供应链复盘" {
+		t.Fatalf("skill title=%q", got)
+	}
+	if got := localThreadTitle("long input", []RunInputAttachment{{DisplayName: "季度报告.xlsx"}}, nil); got != "季度报告.xlsx" {
+		t.Fatalf("attachment title=%q", got)
+	}
+}
+
+func TestGenerateThreadTitleRecordsPurposeAndTerminalUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"成本治理"},"finish_reason":"stop"}],"usage":{"prompt_tokens":20,"completion_tokens":3,"total_tokens":23}}`))
+	}))
+	defer server.Close()
+	journal, err := NewExecutionJournal(filepath.Join(t.TempDir(), "thread.jsonl"), "thread-title-usage")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	_, err = generateThreadTitleWithProfile(context.Background(), &ModelProfileConfig{
+		APIKey: "test", BaseURL: server.URL, ModelID: "mock", ProviderID: "custom", Protocol: "openai_chat",
+	}, "prompt", agentcore.ModelCallAuthority{ThreadID: "thread-title-usage", RunID: "run-title", Recorder: journal}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := journal.SnapshotRecords()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var requestID string
+	var usage agentcore.ModelUsageRecord
+	for _, record := range records {
+		switch record.Kind {
+		case agentcore.SemanticKindModelRequest:
+			if record.Payload["purpose"] == "thread_title" {
+				requestID, _ = record.Payload["request_id"].(string)
+			}
+		case agentcore.SemanticKindModelUsage:
+			encoded, _ := json.Marshal(record.Payload)
+			_ = json.Unmarshal(encoded, &usage)
+		}
+	}
+	if requestID == "" || usage.RequestID != requestID || usage.Purpose != "thread_title" || usage.InputTokens == nil || *usage.InputTokens != 20 {
+		t.Fatalf("request=%q usage=%+v", requestID, usage)
+	}
+}
+
 func TestThreadTitleGenerationRetriesLowQualityThenPersistsTitle(t *testing.T) {
 	setRuntimeUserDataDir(t)
 	originalGenerate := generateThreadTitleWithProfileFn
 	originalRetryDelays := threadTitleRetryDelays
 	threadTitleRetryDelays = []time.Duration{time.Millisecond, time.Millisecond}
 	var calls atomic.Int32
-	generateThreadTitleWithProfileFn = func(ctx context.Context, profile *ModelProfileConfig, prompt string) (string, error) {
+	generateThreadTitleWithProfileFn = func(ctx context.Context, profile *ModelProfileConfig, prompt string, _ agentcore.ModelCallAuthority, _ int) (string, error) {
 		switch calls.Add(1) {
 		case 1:
 			return "", errors.New("transient provider error")
@@ -454,7 +512,7 @@ func TestThreadTitleGenerationFailureKeepsFallbackTitle(t *testing.T) {
 	originalGenerate := generateThreadTitleWithProfileFn
 	originalRetryDelays := threadTitleRetryDelays
 	threadTitleRetryDelays = []time.Duration{time.Millisecond, time.Millisecond}
-	generateThreadTitleWithProfileFn = func(ctx context.Context, profile *ModelProfileConfig, prompt string) (string, error) {
+	generateThreadTitleWithProfileFn = func(ctx context.Context, profile *ModelProfileConfig, prompt string, _ agentcore.ModelCallAuthority, _ int) (string, error) {
 		return "这些呢？", nil
 	}
 	t.Cleanup(func() {
@@ -514,7 +572,7 @@ func TestGenerateThreadTitleWithProfileUsesProviderRequestPolicy(t *testing.T) {
 		BaseURL:  server.URL,
 		ModelID:  "kimi-for-coding",
 		Protocol: "openai_chat",
-	}, "prompt")
+	}, "prompt", agentcore.ModelCallAuthority{}, 0)
 	if err != nil {
 		t.Fatalf("generateThreadTitleWithProfile returned error: %v", err)
 	}

@@ -1,8 +1,11 @@
 package memory
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +13,7 @@ import (
 	"time"
 
 	"awaken/src/filestore"
+	"awaken/src/llm"
 )
 
 func TestDreamPromptPreservesDurablePreferencesAndAvoidsChurn(t *testing.T) {
@@ -37,6 +41,80 @@ func TestDreamRunnerRecoversInterruptedTaskAfterRestart(t *testing.T) {
 	if task, ok := reloaded.Get(task.TaskID); !ok || task.Status != DreamInterrupted {
 		t.Fatalf("interrupted receipt was not durable: %+v", task)
 	}
+}
+
+func TestDreamRunnerRecoversOrphanModelRequestInsideTaskAuthority(t *testing.T) {
+	root := t.TempDir()
+	task := DreamTask{
+		TaskID: "dream_usage_restart", Status: DreamRunning, Phase: "planning",
+		Scopes: []Scope{ScopeUser}, CreatedAt: time.Now().UTC().Add(-time.Minute),
+		ModelRequests: []DreamModelRequest{{
+			RequestID: "dream_request_orphan", Purpose: "memory_maintenance", ModelID: "deepseek-v4-flash",
+			ProtocolFamily: "openai_chat", RequestShapeDigest: "digest", CreatedAt: time.Now().UTC().Add(-time.Second),
+		}},
+	}
+	data, _ := json.Marshal(task)
+	if err := filestore.WriteFileAtomic(filepath.Join(root, task.TaskID+".json"), data); err != nil {
+		t.Fatal(err)
+	}
+	runner := NewDreamRunnerWithRoot(root)
+	recovered, ok := runner.Get(task.TaskID)
+	if !ok || len(recovered.ModelUsage) != 1 || recovered.ModelUsage[0].Status != "interrupted" || recovered.ModelUsage[0].ErrorCode != "usage_unknown" {
+		t.Fatalf("orphan Dream usage was not recovered: %+v", recovered)
+	}
+}
+
+func TestDreamRunnerClassifiesCancellationDuringModelResponseAsCancelled(t *testing.T) {
+	requestStarted := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		close(requestStarted)
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	store := NewStoreWithRoots(t.TempDir(), t.TempDir())
+	if _, err := store.Create(CreateInput{
+		Scope: ScopeUser, Type: TypeFeedback, Name: "称呼偏好",
+		Description: "称呼用户为 Nolan", Content: "以后称呼用户为 Nolan。",
+		Source: Source{ThreadID: "thread", RecordID: "record", CapturedBy: "main_agent"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runner := NewDreamRunnerWithRoot(t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	task, err := runner.Start(ctx, store, llm.Config{
+		APIKey: "test-key", BaseURL: server.URL, Model: "test-model", Protocol: llm.ProtocolOpenAIChat,
+	}, []Scope{ScopeUser})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-requestStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Dream model request did not start")
+	}
+	cancel()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		current, ok := runner.Get(task.TaskID)
+		if ok && current.Status == DreamCancelled {
+			if current.ErrorCode != "DREAM_CANCELLED" || current.ErrorMessage != context.Canceled.Error() {
+				t.Fatalf("unexpected cancellation receipt: %+v", current)
+			}
+			return
+		}
+		if ok && (current.Status == DreamFailed || current.Status == DreamCompleted) {
+			t.Fatalf("Dream cancellation was misclassified: %+v", current)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("Dream did not reach cancelled status: %+v", task)
 }
 
 func TestMaintenanceRecoveryRollsBackPartiallyPublishedBatch(t *testing.T) {

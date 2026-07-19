@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	convcontext "awaken/src/context"
+	"awaken/src/llm"
 	"awaken/src/skillruntime"
 	"awaken/src/skills"
 	"awaken/src/tool"
@@ -129,6 +130,86 @@ func TestRequestBuilderBuildsCompleteRequest(t *testing.T) {
 	}
 }
 
+func TestRequestBuilderProjectsHistoricalImagesForTextOnlyModel(t *testing.T) {
+	ctx := convcontext.New()
+	ctx.AddUserMessageWithAttachments("", []convcontext.MessageAttachment{{
+		ID: "image-1", Kind: "image", MimeType: "image/png", DisplayName: "history.png", DataBase64: "aGVsbG8=",
+	}})
+
+	builder := NewRequestBuilder(AgentConfig{ModelConfig: ModelConfig{
+		Model: "deepseek-v4-pro", Protocol: string(llm.ProtocolOpenAIChat), ProviderID: "deepseek",
+		Capabilities: tool.ModelCapabilities{SupportsVision: false},
+	}})
+	request := builder.Build(ctx, nil)
+	if got := request.Messages[0].Attachments[0].DataBase64; got != "" {
+		t.Fatalf("text-only request retained image bytes: %q", got)
+	}
+	if request.Messages[0].Content != "" {
+		t.Fatalf("capability admission must not rewrite durable message content, got %q", request.Messages[0].Content)
+	}
+	if !strings.Contains(request.Messages[0].ProviderProjectionText, unsupportedVisionProjectionPrefix) ||
+		!strings.Contains(request.Messages[0].ProviderProjectionText, "history.png") {
+		t.Fatalf("expected deterministic request-only text projection, got %q", request.Messages[0].ProviderProjectionText)
+	}
+	if original := ctx.GetMessages()[0].Attachments[0].DataBase64; original != "aGVsbG8=" {
+		t.Fatalf("request projection mutated durable conversation media: %q", original)
+	}
+
+	prepared, err := llm.PrepareRequest(llm.Config{
+		APIKey: "test", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro",
+		Protocol: llm.ProtocolOpenAIChat, ProviderID: "deepseek",
+	}, llm.Request{
+		SystemPrompt: request.SystemPrompt, Messages: request.Messages, Tools: request.Tools, Model: request.Model,
+	}, true)
+	if err != nil {
+		t.Fatalf("prepare text-only request: %v", err)
+	}
+	if strings.Contains(string(prepared.Body), `"image_url"`) || strings.Contains(string(prepared.Body), "aGVsbG8=") {
+		t.Fatalf("prepared DeepSeek body leaked an unsupported image block: %s", prepared.Body)
+	}
+}
+
+func TestRequestBuilderPreservesHistoricalImagesForVisionModel(t *testing.T) {
+	ctx := convcontext.New()
+	ctx.AddUserMessageWithAttachments("inspect", []convcontext.MessageAttachment{{
+		ID: "image-1", Kind: "image", MimeType: "image/png", DisplayName: "history.png", DataBase64: "aGVsbG8=",
+	}})
+
+	request := NewRequestBuilder(AgentConfig{ModelConfig: ModelConfig{
+		Model: "vision-model", Capabilities: tool.ModelCapabilities{SupportsVision: true},
+	}}).Build(ctx, nil)
+	if got := request.Messages[0].Attachments[0].DataBase64; got != "aGVsbG8=" {
+		t.Fatalf("vision request lost image bytes: %q", got)
+	}
+	if strings.Contains(request.Messages[0].ProviderProjectionText, unsupportedVisionProjectionPrefix) {
+		t.Fatalf("vision request received text-only projection: %q", request.Messages[0].ProviderProjectionText)
+	}
+	stale := []convcontext.Message{{
+		Role: convcontext.RoleUser, Content: "inspect", ProviderProjectionText: unsupportedVisionProjectionPrefix,
+		Attachments: []convcontext.MessageAttachment{{Kind: "image", DataBase64: "aGVsbG8="}},
+	}}
+	if got := projectMessagesForModelCapabilities(stale, tool.ModelCapabilities{SupportsVision: true})[0].ProviderProjectionText; got != "" {
+		t.Fatalf("vision projection inherited a prior text-only run note: %q", got)
+	}
+}
+
+func TestModelCapabilityProjectionDropsUnsupportedToolMediaOnlyFromRequestClone(t *testing.T) {
+	original := []convcontext.Message{{
+		Role: convcontext.RoleTool,
+		ModelContent: []tool.ModelContentPart{
+			{Type: "image", MimeType: "image/png", DisplayName: "chart.png", DataBase64: "aW1hZ2U="},
+			{Type: "file", MimeType: "application/pdf", DisplayName: "report.pdf", DataBase64: "cGRm"},
+		},
+	}}
+	projected := projectMessagesForModelCapabilities(original, tool.ModelCapabilities{})
+	if projected[0].ModelContent[0].DataBase64 != "" || projected[0].ModelContent[1].DataBase64 != "" {
+		t.Fatalf("unsupported tool media remained provider-visible: %+v", projected[0].ModelContent)
+	}
+	if original[0].ModelContent[0].DataBase64 == "" || original[0].ModelContent[1].DataBase64 == "" {
+		t.Fatalf("projection mutated original tool media: %+v", original[0].ModelContent)
+	}
+}
+
 func TestRequestBuilderUsesRegisteredTools(t *testing.T) {
 	toolName := "request_builder_registered_tool"
 	if err := tool.RegisterTool(runnerTestTool{name: toolName}); err != nil {
@@ -230,9 +311,16 @@ func TestRequestBuilderInjectsSkillTriggerRulesAndCatalogIntoFinalToolSchema(t *
 	request := builder.Build(convcontext.New(), nil)
 
 	var skillDescription string
+	var skillCatalog string
 	for _, candidate := range request.Tools {
 		if candidate.Function.Name == skillruntime.CatalogToolName {
 			skillDescription = candidate.Function.Description
+			break
+		}
+	}
+	for _, candidate := range request.AttributedTools {
+		if candidate.Schema.Function.Name == skillruntime.CatalogToolName {
+			skillCatalog = candidate.Provenance.SkillCatalog
 			break
 		}
 	}
@@ -259,6 +347,12 @@ func TestRequestBuilderInjectsSkillTriggerRulesAndCatalogIntoFinalToolSchema(t *
 	}
 	if strings.Contains(request.SystemPrompt, "Trigger rules (mandatory):") {
 		t.Fatalf("system prompt duplicated the authoritative trigger rules: %s", request.SystemPrompt)
+	}
+	if !strings.Contains(skillCatalog, "- documents [user]: Create polished documents deliverables.") {
+		t.Fatalf("typed Skill provenance omitted the model-visible catalog listing: %q", skillCatalog)
+	}
+	if strings.Contains(skillCatalog, "Trigger rules (mandatory):") || strings.Contains(skillCatalog, "manual-only") {
+		t.Fatalf("Skill catalog provenance must exclude the builtin wrapper and model-disabled Skills: %q", skillCatalog)
 	}
 }
 

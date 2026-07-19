@@ -32,6 +32,31 @@ func TestToolResultStorePersistsDescriptorsWithoutInlineBase64(t *testing.T) {
 	}
 }
 
+func TestToolResultStoreOffloadsTextAsThreadOwned0600Blob(t *testing.T) {
+	setRuntimeUserDataDir(t)
+	store := NewToolResultStore()
+	content := strings.Repeat("large-result-", 4000)
+	receipt, err := store.OffloadToolResult(context.Background(), "thread-text", "call-text", content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := ownedToolResultPath(receipt.StorageKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != content {
+		t.Fatalf("offloaded blob mismatch: err=%v bytes=%d", err, len(data))
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("offloaded blob mode=%v err=%v", info.Mode().Perm(), err)
+	}
+	if receipt.ByteSize != len(content) || receipt.Digest == "" || receipt.Preview == "" {
+		t.Fatalf("invalid receipt: %+v", receipt)
+	}
+}
+
 func TestToolResultStoreMissingBlobWarnsWithoutDroppingDescriptor(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("AWAKEN_HOME", home)

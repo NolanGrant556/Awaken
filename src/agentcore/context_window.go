@@ -2,7 +2,6 @@ package agentcore
 
 import (
 	stdcontext "context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -46,6 +45,7 @@ type ContextWindowState struct {
 	ConsecutiveCompactFailures  int
 	HasAttemptedReactiveCompact bool
 	CompactCircuitOpen          bool
+	UsageSnapshot               *ContextUsageSnapshot
 }
 
 type CompactResult struct {
@@ -126,7 +126,25 @@ func NewContextWindowStateWithConfig(envelope ContextEnvelope, config ContextWin
 		EstimatedDeltaTokens:  estimateContextDeltaTokens(envelope),
 		LastCompactBoundaryID: lastCompactBoundaryID(envelope.Messages),
 	}
+	projection := contextProjectionRequest(envelope, state)
+	snapshot := buildContextUsageSnapshot(projection, "current_projection", "", "", "", nil)
+	state.EstimatedTokens = snapshot.EstimatedInputTokens
+	state.UsageSnapshot = &snapshot
 	return state
+}
+
+func contextProjectionRequest(envelope ContextEnvelope, state ContextWindowState) LLMRequest {
+	req := LLMRequest{
+		SystemPrompt: envelopeProjectedSystemPrompt(envelope), PromptSections: promptSectionsFromEnvelope(envelope),
+		Messages: envelope.Messages, Tools: envelope.ToolSchemas, AttributedTools: envelope.AttributedTools,
+		Model: envelope.Model, ContextWindowState: state,
+	}
+	if len(req.AttributedTools) == 0 {
+		for _, schema := range envelope.ToolSchemas {
+			req.AttributedTools = append(req.AttributedTools, AttributedToolSchema{Schema: schema})
+		}
+	}
+	return req
 }
 
 func (state ContextWindowState) ShouldWarn() bool {
@@ -161,29 +179,22 @@ func (state ContextWindowState) Summary() string {
 }
 
 func EstimateContextEnvelopeTokens(envelope ContextEnvelope) int {
-	total := 0
-	for _, block := range envelope.SystemBlocks {
-		total += convcontext.EstimateTokens(block.Content)
-	}
-	for _, item := range envelope.UserContextItems {
-		total += convcontext.EstimateTokens(item.Content)
-	}
-	for _, item := range envelope.SystemContextItems {
-		total += convcontext.EstimateTokens(item.Content)
+	req := contextProjectionRequest(envelope, ContextWindowState{})
+	snapshot := buildContextUsageSnapshot(req, "current_projection", "", "", "", nil)
+	total := snapshot.EstimatedInputTokens
+	messageAttachments := make(map[string]struct{})
+	for _, message := range envelope.Messages {
+		for _, attachment := range message.Attachments {
+			messageAttachments[attachment.ID] = struct{}{}
+		}
 	}
 	for _, attachment := range envelope.Attachments {
+		if _, counted := messageAttachments[attachment.ID]; counted && attachment.ID != "" {
+			continue
+		}
 		total += convcontext.EstimateTokens(attachment.Kind)
 		total += convcontext.EstimateTokens(attachment.Path)
 		total += convcontext.EstimateAttachmentPayloadTokens(attachment.Kind, attachment.Content)
-	}
-	for _, message := range envelope.Messages {
-		total += estimateMessageTokens(message)
-	}
-	if len(envelope.ToolSchemas) > 0 {
-		data, err := json.Marshal(envelope.ToolSchemas)
-		if err == nil {
-			total += convcontext.EstimateTokens(string(data))
-		}
 	}
 	return total
 }
@@ -199,6 +210,7 @@ func estimateContextDeltaTokens(envelope ContextEnvelope) int {
 
 func estimateMessageTokens(message convcontext.Message) int {
 	total := convcontext.EstimateTokens(message.Content)
+	total += convcontext.EstimateTokens(message.ProviderProjectionText)
 	total += convcontext.EstimateTokens(message.Name)
 	total += convcontext.EstimateTokens(message.ToolCallID)
 	for _, toolCall := range message.ToolCalls {

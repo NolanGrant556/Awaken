@@ -1,5 +1,10 @@
 import type { RunStepItem } from "@awaken/design-system";
-import type { AguiArtifactStatus, AguiEvent } from "./agui";
+import type {
+  AguiArtifactStatus,
+  AguiContextUsageSnapshot,
+  AguiEvent,
+  AguiModelUsageRecord,
+} from "./agui";
 import {
   toolDisplayStateFromStatus,
   type ToolDisplayState,
@@ -103,6 +108,9 @@ export type ContextWindowRecord = {
   autoCompactThreshold?: number;
   compactTarget?: number;
   estimatedDeltaTokens?: number;
+  snapshot?: AguiContextUsageSnapshot;
+  latestModelUsage?: AguiModelUsageRecord;
+  modelUsages?: AguiModelUsageRecord[];
 };
 
 type CompactFallbackState = "structured" | "legacy";
@@ -846,19 +854,43 @@ function normalizeArtifactStatus(value?: string): AguiArtifactStatus | undefined
 }
 
 function contextWindowRecord(event: AguiEvent): ContextWindowRecord {
+  const snapshot = event.contextUsageSnapshot;
+  const agentTurnUsage =
+    event.modelUsage?.purpose === "agent_turn" ? event.modelUsage : undefined;
   return {
     eventType: event.type,
     message: event.message,
-    modelWindow: event.contextModelWindow,
-    outputReserve: event.contextOutputReserve,
-    effectiveWindow: event.contextEffectiveWindow,
-    estimatedTokens: event.contextEstimatedTokens,
+    modelWindow: snapshot?.modelWindowTokens ?? event.contextModelWindow,
+    outputReserve: snapshot?.outputReserveTokens ?? event.contextOutputReserve,
+    effectiveWindow:
+      snapshot?.effectiveInputWindowTokens ?? event.contextEffectiveWindow,
+    estimatedTokens:
+      snapshot?.estimatedInputTokens ?? event.contextEstimatedTokens,
     actualTokens: event.contextActualTokens,
-    warningThreshold: event.contextWarningThreshold,
-    autoCompactThreshold: event.contextAutoCompactThreshold,
-    compactTarget: event.contextCompactTarget,
+    warningThreshold:
+      snapshot?.warningThresholdTokens ?? event.contextWarningThreshold,
+    autoCompactThreshold:
+      snapshot?.autoCompactThresholdTokens ??
+      event.contextAutoCompactThreshold,
+    compactTarget: snapshot?.compactTargetTokens ?? event.contextCompactTarget,
     estimatedDeltaTokens: event.contextEstimatedDeltaTokens,
+    snapshot,
+    latestModelUsage: agentTurnUsage,
+    modelUsages: event.modelUsage ? [event.modelUsage] : [],
   };
+}
+
+function mergeModelUsages(
+  previous: AguiModelUsageRecord[] | undefined,
+  next: AguiModelUsageRecord[] | undefined,
+): AguiModelUsageRecord[] {
+  const merged = [...(previous ?? [])];
+  for (const usage of next ?? []) {
+    const index = merged.findIndex((entry) => entry.requestId === usage.requestId);
+    if (index >= 0) merged[index] = usage;
+    else merged.push(usage);
+  }
+  return merged;
 }
 
 function hasContextWindowPayload(event: AguiEvent): boolean {
@@ -872,7 +904,8 @@ function hasContextWindowPayload(event: AguiEvent): boolean {
     event.contextAutoCompactThreshold,
     event.contextCompactTarget,
     event.contextEstimatedDeltaTokens,
-  ].some((value) => typeof value === "number" && Number.isFinite(value));
+  ].some((value) => typeof value === "number" && Number.isFinite(value)) ||
+    Boolean(event.contextUsageSnapshot);
 }
 
 function mergeContextWindowRecord(
@@ -897,6 +930,9 @@ function mergeContextWindowRecord(
     compactTarget: next.compactTarget ?? previous.compactTarget,
     estimatedDeltaTokens:
       next.estimatedDeltaTokens ?? previous.estimatedDeltaTokens,
+    snapshot: next.snapshot ?? previous.snapshot,
+    latestModelUsage: next.latestModelUsage ?? previous.latestModelUsage,
+    modelUsages: mergeModelUsages(previous.modelUsages, next.modelUsages),
   };
 }
 
@@ -1336,7 +1372,17 @@ export function reduceRuntimeState(
 		externalInteractions: [],
 		artifacts: [],
         turnDiff: undefined,
-        inspectorSummary: createInspectorSummary(),
+        // Context usage is thread-scoped next-request state, not run-local
+        // presentation state. Keep the last durable snapshot while a follow-up
+        // starts and while transcript replay advances across later runs that
+        // may have terminated before producing their own snapshot.
+        inspectorSummary: {
+          ...createInspectorSummary(),
+          contextWindow:
+            state.activeThreadId || state.threadId
+              ? state.inspectorSummary.contextWindow
+              : undefined,
+        },
         narrative: shouldAppendNarrative(state)
           ? appendRunRequestedNarrative(
               state.narrative,
@@ -2206,10 +2252,33 @@ export function reduceRuntimeState(
             },
           );
           break;
+        case "AWAKEN_CONTEXT_SNAPSHOT": {
+          nextState.inspectorSummary = {
+            ...nextState.inspectorSummary,
+            contextWindow: mergeContextWindowRecord(
+              nextState.inspectorSummary.contextWindow,
+              action.event,
+            ),
+          };
+          break;
+        }
+        case "AWAKEN_MODEL_USAGE": {
+          nextState.inspectorSummary = {
+            ...nextState.inspectorSummary,
+            contextWindow: mergeContextWindowRecord(
+              nextState.inspectorSummary.contextWindow,
+              action.event,
+            ),
+          };
+          break;
+        }
         case "AWAKEN_CONTEXT_ESTIMATED":
         case "AWAKEN_CONTEXT_WARNING":
         case "AWAKEN_CONTEXT_BLOCKED": {
-          const contextWindow = contextWindowRecord(action.event);
+          const contextWindow = mergeContextWindowRecord(
+            nextState.inspectorSummary.contextWindow,
+            action.event,
+          );
           nextState.inspectorSummary = {
             ...nextState.inspectorSummary,
             contextWindow,

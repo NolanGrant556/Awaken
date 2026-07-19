@@ -142,6 +142,20 @@ func TestMCPProviderManifestIncludesOptionalMetadataAndReadiness(t *testing.T) {
 	if manifest.ProviderID != "connector:mail:send" || manifest.Source != tool.SourceConnector {
 		t.Fatalf("unexpected provider identity: %+v", manifest)
 	}
+	if definition := adapter.Definition(); definition.Source != tool.SourceMCP {
+		t.Fatalf("connector-backed model schema must retain MCP origin, got %+v", definition)
+	}
+	if err := tool.RegisterToolForce(adapter); err != nil {
+		t.Fatalf("register connector-backed MCP tool: %v", err)
+	}
+	defer tool.UnregisterTool(adapter.Name())
+	registered, err := tool.GetRegisteredTool(adapter.Name())
+	if err != nil {
+		t.Fatalf("read connector-backed MCP registration: %v", err)
+	}
+	if registered.Origin != tool.SourceMCP || registered.Provider.Source != tool.SourceConnector {
+		t.Fatalf("registration must separate MCP origin from connector ownership: %+v", registered)
+	}
 	if !tool.HasCapability(manifest.Capabilities, tool.CapabilityMessageSend) {
 		t.Fatalf("message capability missing: %+v", manifest.Capabilities)
 	}

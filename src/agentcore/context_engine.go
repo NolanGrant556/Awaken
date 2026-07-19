@@ -4,6 +4,8 @@ import (
 	stdcontext "context"
 	"errors"
 	"fmt"
+
+	"awaken/src/llm"
 )
 
 var errContextCompactCircuitOpen = errors.New("context compact circuit open")
@@ -154,12 +156,16 @@ func (g *contextGovernor) compactForRequest(ctx stdcontext.Context, llmReq LLMRe
 	if events != nil {
 		events.emitCompactStarted(state, mode)
 	}
-	result, err := g.engine.Compact(ctx, CompactRequest{
+	compactRequest := CompactRequest{
 		Mode:         mode,
 		Envelope:     *llmReq.EnvelopeDebug,
 		Messages:     llmReq.Messages,
 		TargetTokens: llmReq.ContextWindowState.CompactTarget,
-	})
+	}
+	if emitter, ok := events.(*runEventEmitter); ok && emitter != nil {
+		compactRequest.summaryInvoker = emitter.invokeCompactSummary
+	}
+	result, err := g.engine.Compact(ctx, compactRequest)
 	if err != nil {
 		g.recordCompactFailure()
 		failedState := g.withRunState(llmReq.ContextWindowState)
@@ -222,10 +228,9 @@ func compactMode(reactive bool) CompactMode {
 }
 
 func compactSummaryModel(envelope ContextEnvelope) string {
-	if envelope.CompactModelConfig.Model != "" {
-		return envelope.CompactModelConfig.Model
-	}
-	return envelope.Model
+	cfg := llmConfigForCompaction(envelope)
+	aux, _ := llm.AuxiliaryConfig(cfg)
+	return aux.Model
 }
 
 func newContextWindowBlockedError(state ContextWindowState, cause error) error {

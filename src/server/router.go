@@ -105,6 +105,7 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 		mux.HandleFunc("PATCH /v1/threads/{thread_id}", handlers.handleRenameThread)
 		mux.HandleFunc("DELETE /v1/threads/{thread_id}", handlers.handleDeleteThread)
 		mux.HandleFunc("GET /v1/threads/{thread_id}/transcript", handlers.handleGetThreadTranscript)
+		mux.HandleFunc("POST /v1/threads/{thread_id}/context-snapshot", handlers.handleRefreshThreadContextSnapshot)
 		mux.HandleFunc("POST /v1/runs", handlers.handleCreateRun)
 		mux.HandleFunc("GET /v1/runs/{run_id}", handlers.handleGetRun)
 		mux.HandleFunc("GET /v1/runs/{run_id}/events", handlers.handleRunEvents)

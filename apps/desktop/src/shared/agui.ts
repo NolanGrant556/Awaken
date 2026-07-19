@@ -55,6 +55,8 @@ export type AguiEventType =
   | "AWAKEN_MEMORY_SUPERSEDED"
   | "AWAKEN_MEMORY_DELETED"
   | "AWAKEN_MEMORY_REJECTED"
+  | "AWAKEN_CONTEXT_SNAPSHOT"
+  | "AWAKEN_MODEL_USAGE"
   | "AWAKEN_MEMORY_DREAM_COMPLETED"
   | "AWAKEN_MEMORY_DREAM_FAILED"
   | "AWAKEN_MEMORY_DREAM_CANCELLED"
@@ -78,6 +80,115 @@ export type AguiArtifactRole = "deliverable" | "preview" | "support";
 
 export type AguiRunOutcome = {
   type: string;
+};
+
+export type AguiContextContributionKind =
+  | "system_prompt"
+  | "rules_project"
+  | "runtime_context"
+  | "builtin_tools"
+  | "mcp"
+  | "skills"
+  | "memory"
+  | "conversation"
+  // v1 contribution kinds remain readable for old SemanticJournal records.
+  | "mcp_dynamic_tools"
+  | "skills_memory"
+  | "subagent_definitions"
+  | "conversation_history"
+  | "tool_results"
+  | "attachments_media"
+  | "current_input"
+  | "other";
+
+export type AguiContextUsageContribution = {
+  kind: AguiContextContributionKind;
+  estimatedTokens: number;
+  sourceCount: number;
+};
+
+export type AguiContextUsageSnapshot = {
+  schemaVersion: number;
+  snapshotId: string;
+  estimatorId: string;
+  basis: "current_projection" | "sent_request";
+  requestId?: string;
+  modelId?: string;
+  protocolFamily?: string;
+  requestShapeDigest?: string;
+  modelWindowTokens: number;
+  outputReserveTokens: number;
+  effectiveInputWindowTokens: number;
+  estimatedInputTokens: number;
+  warningThresholdTokens: number;
+  autoCompactThresholdTokens: number;
+  compactTargetTokens: number;
+  contributions?: AguiContextUsageContribution[];
+  generatedAt: string;
+};
+
+export type AguiModelUsageRecord = {
+  schemaVersion: number;
+  requestId: string;
+  purpose: string;
+  providerId?: string;
+  profileId?: string;
+  credentialRevision?: number;
+  modelId?: string;
+  protocolFamily?: string;
+  endpointContractId?: string;
+  cacheMode?: string;
+  cacheKeyApplied?: boolean;
+  contextEpochId?: string;
+  prefixDigest?: string;
+  invalidationReason?: string;
+  retryIndex?: number;
+  auxiliaryFallback?: boolean;
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  uncachedInputTokens?: number;
+  cacheWriteTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+  totalTokens?: number;
+  rawTypedUsage?: AguiRawModelUsage;
+  usageComplete: boolean;
+  calculatedCostUsd?: number;
+  pricingSnapshot?: AguiPricingSnapshot;
+  currency?: string;
+  providerRequestId?: string;
+  latencyMs: number;
+  status: "succeeded" | "failed" | "cancelled" | "interrupted";
+  errorCode?: string;
+  completedAt: string;
+};
+
+export type AguiPricingSnapshot = {
+  snapshotId: string;
+  providerId: string;
+  modelId: string;
+  currency: string;
+  unitTokens: number;
+  cachedInputPerUnitUsd: number;
+  uncachedInputPerUnitUsd: number;
+  outputPerUnitUsd: number;
+  effectiveDate: string;
+  sourceUrl: string;
+};
+
+export type AguiRawModelUsage = {
+  normalizerId: string;
+  promptTokens?: number;
+  inputTokens?: number;
+  completionTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+  totalTokens?: number;
+  cachedTokens?: number;
+  promptCacheHitTokens?: number;
+  promptCacheMissTokens?: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
 };
 
 export type AguiEvent = {
@@ -126,6 +237,8 @@ export type AguiEvent = {
   contextAutoCompactThreshold?: number;
   contextCompactTarget?: number;
   contextEstimatedDeltaTokens?: number;
+  contextUsageSnapshot?: AguiContextUsageSnapshot;
+  modelUsage?: AguiModelUsageRecord;
   contextCompactMode?: string;
   contextCompactBoundaryId?: string;
   contextCompactPreEstimateTokens?: number;

@@ -45,10 +45,7 @@ export type TurnMarkerRailDisplay = {
 };
 
 export type LatestOutputFollowMode =
-  | "idle"
-  | "anchoring"
-  | "following_latest"
-  | "paused_by_user";
+  "idle" | "anchoring" | "following_latest" | "paused_by_user";
 
 export type LatestOutputResumeIntent =
   | "none"
@@ -58,11 +55,7 @@ export type LatestOutputResumeIntent =
   | "return_button";
 
 export type ProgrammaticRunStageScrollReason =
-  | "none"
-  | "anchor_prompt"
-  | "follow_latest"
-  | "marker_jump"
-  | "thread_restore";
+  "none" | "anchor_prompt" | "follow_latest" | "marker_jump" | "thread_restore";
 
 const TURN_MARKER_MIN_TURN_COUNT = 3;
 const TURN_MARKER_REGULAR_LIMIT = 12;
@@ -74,7 +67,10 @@ const TURN_MARKER_REGULAR_SIZE = { itemHeight: 18, gap: 14 };
 const TURN_MARKER_COMPACT_SIZE = { itemHeight: 12, gap: 8 };
 const TURN_MARKER_SUMMARY_SIZE = { itemHeight: 8, gap: 5 };
 
-export function diffLineStats(diff?: string): { added: number; removed: number } {
+export function diffLineStats(diff?: string): {
+  added: number;
+  removed: number;
+} {
   if (!diff) {
     return { added: 0, removed: 0 };
   }
@@ -201,7 +197,11 @@ function sampledTurnMarkerItems({
     addIndex(Math.round((step * (turnCount - 1)) / (itemCount - 1)));
   }
 
-  for (let index = 0; indexes.size < itemCount && index < turnCount; index += 1) {
+  for (
+    let index = 0;
+    indexes.size < itemCount && index < turnCount;
+    index += 1
+  ) {
     addIndex(index);
   }
 
@@ -232,30 +232,32 @@ export function turnMarkerRailDisplay({
   const availableHeight = Math.max(0, railHeight);
   if (
     turnCount <= TURN_MARKER_REGULAR_LIMIT &&
-    (
-      availableHeight === 0 ||
-      markerSetHeight({ count: turnCount, ...TURN_MARKER_REGULAR_SIZE }) <= availableHeight
-    )
+    (availableHeight === 0 ||
+      markerSetHeight({ count: turnCount, ...TURN_MARKER_REGULAR_SIZE }) <=
+        availableHeight)
   ) {
     return { mode: "regular", items: turnMarkerItemsForAll(cleanTurnIds) };
   }
 
   if (
     turnCount <= TURN_MARKER_COMPACT_LIMIT &&
-    (
-      availableHeight === 0 ||
-      markerSetHeight({ count: turnCount, ...TURN_MARKER_COMPACT_SIZE }) <= availableHeight
-    )
+    (availableHeight === 0 ||
+      markerSetHeight({ count: turnCount, ...TURN_MARKER_COMPACT_SIZE }) <=
+        availableHeight)
   ) {
     return { mode: "compact", items: turnMarkerItemsForAll(cleanTurnIds) };
   }
 
-  const summaryCapacity = availableHeight === 0
-    ? TURN_MARKER_SUMMARY_LIMIT
-    : Math.min(
-      TURN_MARKER_SUMMARY_LIMIT,
-      markerCapacityForHeight({ height: availableHeight, ...TURN_MARKER_SUMMARY_SIZE }),
-    );
+  const summaryCapacity =
+    availableHeight === 0
+      ? TURN_MARKER_SUMMARY_LIMIT
+      : Math.min(
+          TURN_MARKER_SUMMARY_LIMIT,
+          markerCapacityForHeight({
+            height: availableHeight,
+            ...TURN_MARKER_SUMMARY_SIZE,
+          }),
+        );
   if (summaryCapacity < TURN_MARKER_MIN_TURN_COUNT) {
     return { mode: "hidden", items: [] };
   }
@@ -291,6 +293,21 @@ export function turnMarkerRailHeight({
     stageHeight -
       Math.max(0, topInset) -
       Math.max(Math.max(0, minimumBottom), bottomSafeArea),
+  );
+}
+
+export function contextUsagePanelBottomOffset({
+  composerBarInset,
+  gap = 12,
+  minimum = 28,
+}: {
+  composerBarInset: number;
+  gap?: number;
+  minimum?: number;
+}): number {
+  return Math.max(
+    Math.max(0, minimum),
+    Math.max(0, composerBarInset) + Math.max(0, gap),
   );
 }
 
@@ -383,7 +400,10 @@ export function scrollTopForPromptAnchor({
   promptTop: number;
   anchorOffset: number;
 }): number {
-  return Math.max(0, currentScrollTop + promptTop - containerTop - anchorOffset);
+  return Math.max(
+    0,
+    currentScrollTop + promptTop - containerTop - anchorOffset,
+  );
 }
 
 export function activeTurnIdForAnchor({
@@ -437,7 +457,10 @@ export function anchoredTurnMinHeight({
   anchorOffset: number;
   bottomReserve?: number;
 }): number {
-  return Math.max(0, containerHeight - anchorOffset - Math.max(0, bottomReserve));
+  return Math.max(
+    0,
+    containerHeight - anchorOffset - Math.max(0, bottomReserve),
+  );
 }
 
 export function latestTurnMinHeightBottomReserve({
@@ -503,7 +526,10 @@ export function isNearLatestTurnOutputTail({
   bottomReserve: number;
   threshold: number;
 }): boolean {
-  const visibleHeight = Math.max(1, containerHeight - Math.max(0, bottomReserve));
+  const visibleHeight = Math.max(
+    1,
+    containerHeight - Math.max(0, bottomReserve),
+  );
   return outputBottom - containerTop <= visibleHeight + Math.max(0, threshold);
 }
 

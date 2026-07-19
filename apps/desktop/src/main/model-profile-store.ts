@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type {
@@ -129,6 +129,7 @@ type StoredModelProfile = {
   isDefault: boolean;
   advanced?: ModelProfileAdvanced;
   keyLast4?: string;
+  credentialRevision?: number;
 };
 
 type StoreFile = {
@@ -277,29 +278,25 @@ async function testModelEndpoint(
   apiKey: string,
   signal: AbortSignal,
 ): Promise<Response> {
-  if (provider.id === "kimi-coding-plan" || provider.id === "volcengine") {
-    return fetch(`${baseURL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: modelId || provider.default_model,
-        messages: [{ role: "user", content: "ping" }],
-        ...(provider.id === "kimi-coding-plan" ? { temperature: 1 } : {}),
-        max_tokens: 1,
-        stream: false,
-      }),
-      signal,
-    });
-  }
-  return fetch(`${baseURL}/models`, {
-    method: "GET",
+	const body = connectionTestBody(provider, modelId);
+  return fetch(`${baseURL}/chat/completions`, {
+    method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
     },
+    body,
     signal,
+  });
+}
+
+function connectionTestBody(provider: ModelProviderWire, modelId: string): string {
+  return JSON.stringify({
+    model: modelId || provider.default_model,
+    messages: [{ role: "user", content: "ping" }],
+    ...(provider.id === "kimi-coding-plan" ? { temperature: 1 } : {}),
+    max_tokens: 1,
+    stream: false,
   });
 }
 
@@ -310,7 +307,105 @@ function providerTestSuccessMessage(provider: ModelProviderWire): string {
   if (provider.id === "volcengine") {
     return "连接测试通过：火山 Coding Plan 已响应 chat/completions。";
   }
-  return "连接测试通过：服务已响应 /models。";
+  return "连接测试通过：服务已响应 chat/completions。";
+}
+
+type ConnectionUsage = {
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  uncachedInputTokens?: number;
+  cacheWriteTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+  totalTokens?: number;
+  rawTypedUsage?: Record<string, number>;
+};
+
+function finiteUsage(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+function connectionUsage(body: unknown): ConnectionUsage {
+  if (!body || typeof body !== "object") return {};
+  const usage = (body as { usage?: Record<string, unknown> }).usage;
+  if (!usage || typeof usage !== "object") return {};
+  const inputTokens = finiteUsage(usage.prompt_tokens ?? usage.input_tokens);
+  const cachedInputTokens = finiteUsage(
+    usage.cached_tokens ?? usage.prompt_cache_hit_tokens ?? usage.cache_read_input_tokens,
+  );
+  const cacheWriteTokens = finiteUsage(usage.cache_creation_input_tokens);
+  const outputTokens = finiteUsage(usage.completion_tokens ?? usage.output_tokens);
+  const completionDetails = usage.completion_tokens_details;
+  const reasoningTokens = finiteUsage(
+    usage.reasoning_tokens ??
+      (completionDetails && typeof completionDetails === "object"
+        ? (completionDetails as Record<string, unknown>).reasoning_tokens
+        : undefined),
+  );
+  const totalTokens = finiteUsage(usage.total_tokens);
+  const uncachedInputTokens =
+    inputTokens !== undefined &&
+    (cachedInputTokens !== undefined || cacheWriteTokens !== undefined) &&
+    (cachedInputTokens ?? 0) + (cacheWriteTokens ?? 0) <= inputTokens
+      ? inputTokens - (cachedInputTokens ?? 0) - (cacheWriteTokens ?? 0)
+      : undefined;
+  const rawTypedUsage = Object.fromEntries(
+    Object.entries(usage).filter(([, value]) => finiteUsage(value) !== undefined),
+  ) as Record<string, number>;
+  return {
+    inputTokens,
+    cachedInputTokens,
+    uncachedInputTokens,
+    cacheWriteTokens,
+    outputTokens,
+    reasoningTokens,
+    totalTokens,
+    rawTypedUsage,
+  };
+}
+
+function connectionPricing(
+  providerId: string,
+  baseURL: string,
+  modelId: string,
+  usage: ConnectionUsage,
+): Record<string, unknown> {
+  if (providerId !== "deepseek" || baseURL !== "https://api.deepseek.com") return {};
+  const rates =
+    modelId === "deepseek-v4-flash"
+      ? { cached: 0.0028, uncached: 0.14, output: 0.28 }
+      : modelId === "deepseek-v4-pro"
+        ? { cached: 0.003625, uncached: 0.435, output: 0.87 }
+        : undefined;
+  if (!rates) return {};
+  const pricingSnapshot = {
+    snapshot_id: `deepseek-2026-07-19-${modelId.replace("deepseek-", "")}-usd`,
+    provider_id: providerId,
+    model_id: modelId,
+    currency: "USD",
+    unit_tokens: 1_000_000,
+    cached_input_per_unit_usd: rates.cached,
+    uncached_input_per_unit_usd: rates.uncached,
+    output_per_unit_usd: rates.output,
+    effective_date: "2026-07-19",
+    source_url: "https://api-docs.deepseek.com/quick_start/pricing/",
+  };
+  const calculatedCostUSD =
+    usage.cachedInputTokens !== undefined &&
+    usage.uncachedInputTokens !== undefined &&
+    usage.outputTokens !== undefined
+      ? (usage.cachedInputTokens * rates.cached +
+          usage.uncachedInputTokens * rates.uncached +
+          usage.outputTokens * rates.output) /
+        1_000_000
+      : undefined;
+  return {
+    pricing_snapshot: pricingSnapshot,
+    calculated_cost_usd: calculatedCostUSD,
+    currency: "USD",
+  };
 }
 
 function toSummary(
@@ -349,6 +444,7 @@ function toSummary(
       supports_native_pdf: advanced.supportsNativePDF,
       supports_video: advanced.supportsVideo,
     },
+    credential_revision: profile.credentialRevision ?? 1,
   };
 }
 
@@ -403,6 +499,12 @@ function normalizeStoredProfile(profile: StoredModelProfile): StoredModelProfile
     isDefault: profile.isDefault === true,
     advanced: profile.advanced,
     keyLast4,
+    credentialRevision:
+      typeof profile.credentialRevision === "number" &&
+      Number.isFinite(profile.credentialRevision) &&
+      profile.credentialRevision >= 1
+        ? Math.floor(profile.credentialRevision)
+        : 1,
   };
 }
 
@@ -428,6 +530,7 @@ function dedupeStoredProfiles(profiles: StoredModelProfile[]): StoredModelProfil
 export class ModelProfileStore {
   private filePath: string;
   private cacheDir: string;
+  private usageDir: string;
   private envStore: ModelProfileKeyStore;
   private observedCredentialStates = new Map<string, "unreadable">();
   private mutationQueue: Promise<void> = Promise.resolve();
@@ -439,6 +542,7 @@ export class ModelProfileStore {
   ) {
     this.filePath = path.join(awakenHome, "config", MODEL_PROFILES_FILE);
     this.cacheDir = path.join(awakenHome, "cache");
+    this.usageDir = path.join(awakenHome, "usage", "model-profiles");
     this.envStore = envStore;
   }
 
@@ -561,6 +665,7 @@ export class ModelProfileStore {
       isDefault: request.isDefault ?? existing?.isDefault ?? store.profiles.length === 0,
       advanced,
       keyLast4: existing?.keyLast4,
+      credentialRevision: existing?.credentialRevision ?? 1,
     };
 
     let apiKeyToPersist: string | undefined;
@@ -573,6 +678,18 @@ export class ModelProfileStore {
     if (apiKeyToPersist !== undefined) {
       profile.keyLast4 = apiKeyToPersist.slice(-4);
     }
+
+    let previousKeyForMutation: string | undefined;
+    if (apiKeyToPersist !== undefined) {
+      previousKeyForMutation = await this.envStore.getKey(profile.id);
+      if (
+        existing &&
+        previousKeyForMutation !== "" &&
+        previousKeyForMutation !== apiKeyToPersist
+      ) {
+        profile.credentialRevision = (existing.credentialRevision ?? 1) + 1;
+      }
+    }
     if (!profile.enabled) {
       profile.isDefault = false;
     }
@@ -584,12 +701,11 @@ export class ModelProfileStore {
 
     this.ensureSingleDefault(store, profile.id);
     if (apiKeyToPersist !== undefined) {
-      const previousKey = await this.envStore.getKey(profile.id);
       await this.envStore.setKey(profile.id, apiKeyToPersist);
       try {
         await this.writeStore(store);
       } catch (error) {
-        await this.restoreProfileKey(profile.id, previousKey);
+        await this.restoreProfileKey(profile.id, previousKeyForMutation ?? "");
         throw error;
       }
       this.observedCredentialStates.delete(profile.id);
@@ -666,6 +782,7 @@ export class ModelProfileStore {
       maxTokens: advanced.maxTokens,
       contextWindow: advanced.contextWindow,
       promptCacheKey: advanced.promptCacheKey,
+      credentialRevision: profile.credentialRevision ?? 1,
       supportsVision: advanced.supportsVision,
       supportsNativePDF: advanced.supportsNativePDF,
       supportsVideo: advanced.supportsVideo,
@@ -678,6 +795,37 @@ export class ModelProfileStore {
       store.profiles.find((entry) => entry.isDefault) ??
       store.profiles.find((entry) => entry.enabled);
     return profile ? await this.toSummary(profile) : undefined;
+  }
+
+  private connectionUsageScope(
+    request: ModelProfileSaveRequest,
+    providerId: string,
+    baseURL: string,
+    modelId: string,
+  ): string {
+    const explicit = request.id?.trim() || request.templateProfileId?.trim();
+    if (explicit) return explicit.replace(/[^A-Za-z0-9._-]/g, "_");
+    return `profile_${createHash("sha256")
+      .update(`${providerId}\0${baseURL}\0${modelId}`)
+      .digest("hex")
+      .slice(0, 24)}`;
+  }
+
+  private async appendConnectionUsage(
+    scope: string,
+    record: Record<string, unknown>,
+  ): Promise<void> {
+    await fs.mkdir(this.usageDir, { recursive: true, mode: 0o700 });
+    await fs.chmod(this.usageDir, 0o700);
+    const target = path.join(this.usageDir, `${scope}.jsonl`);
+    const handle = await fs.open(target, "a", 0o600);
+    try {
+      await handle.chmod(0o600);
+      await handle.write(`${JSON.stringify(record)}\n`);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
   }
 
   async testProfile(request: ModelProfileSaveRequest): Promise<ModelProfileTestResult> {
@@ -697,14 +845,67 @@ export class ModelProfileStore {
     }
     const baseURL = normalizeProviderBaseURL(provider, request.baseURL);
     const modelId = normalizeProviderModelId(provider, request.modelId);
+    const requestId = `connection_${randomUUID().replaceAll("-", "")}`;
+    const requestBody = connectionTestBody(provider, modelId);
+    const requestShapeDigest = createHash("sha256").update(requestBody).digest("hex");
+    const usageScope = this.connectionUsageScope(request, provider.id, baseURL, modelId);
+    const startedAt = Date.now();
+    await this.appendConnectionUsage(usageScope, {
+      schema_version: 1,
+      kind: "model_request",
+      request_id: requestId,
+      purpose: "connection_test",
+      provider_id: provider.id,
+      model_id: modelId,
+      protocol_family: provider.protocol,
+      request_shape_digest: requestShapeDigest,
+      max_output_tokens: 1,
+      created_at: new Date(startedAt).toISOString(),
+    });
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
     try {
       const response = await testModelEndpoint(provider, baseURL, modelId, apiKey, controller.signal);
+      let parsedBody: unknown;
+      try {
+        parsedBody = await response.json();
+      } catch {
+        parsedBody = undefined;
+      }
+      const usage = connectionUsage(parsedBody);
+      const pricing = connectionPricing(provider.id, baseURL, modelId, usage);
+      await this.appendConnectionUsage(usageScope, {
+        schema_version: 1,
+        kind: "model_usage",
+        request_id: requestId,
+        purpose: "connection_test",
+        provider_id: provider.id,
+        model_id: modelId,
+        protocol_family: provider.protocol,
+        input_tokens: usage.inputTokens,
+        cached_input_tokens: usage.cachedInputTokens,
+        uncached_input_tokens: usage.uncachedInputTokens,
+        cache_write_tokens: usage.cacheWriteTokens,
+        output_tokens: usage.outputTokens,
+        reasoning_tokens: usage.reasoningTokens,
+        total_tokens: usage.totalTokens,
+        raw_typed_usage: usage.rawTypedUsage,
+        ...pricing,
+        usage_complete: usage.inputTokens !== undefined || usage.outputTokens !== undefined,
+        provider_request_id: response.headers?.get?.("x-request-id") || undefined,
+        latency_ms: Date.now() - startedAt,
+        status: response.ok ? "succeeded" : "failed",
+        error_code: response.ok ? undefined : `http_${response.status}`,
+        completed_at: new Date().toISOString(),
+      });
       if (response.ok) {
-        if (provider.id !== "kimi-coding-plan" && provider.id !== "volcengine") {
+        if (
+          parsedBody !== undefined &&
+          provider.id !== "kimi-coding-plan" &&
+          provider.id !== "volcengine"
+        ) {
           try {
-            const overrides = parseProviderCapabilities(await response.json());
+            const overrides = parseProviderCapabilities(parsedBody);
             this.capabilityOverrides = mergeCapabilityOverrides(
               this.capabilityOverrides,
               { [provider.id]: overrides },
@@ -712,13 +913,27 @@ export class ModelProfileStore {
             setCapabilityOverrides(this.capabilityOverrides);
             await saveCapabilityOverrides(this.cacheDir, this.capabilityOverrides);
           } catch {
-            // Ignore parse failures; the connection test itself succeeded.
+            // A successful connection test does not depend on capability parsing.
           }
         }
         return { ok: true, message: providerTestSuccessMessage(provider) };
       }
       return { ok: false, message: providerTestStatusMessage(response.status, provider) };
     } catch (error) {
+      await this.appendConnectionUsage(usageScope, {
+        schema_version: 1,
+        kind: "model_usage",
+        request_id: requestId,
+        purpose: "connection_test",
+        provider_id: provider.id,
+        model_id: modelId,
+        protocol_family: provider.protocol,
+        usage_complete: false,
+        latency_ms: Date.now() - startedAt,
+        status: error instanceof Error && error.name === "AbortError" ? "cancelled" : "failed",
+        error_code: error instanceof Error && error.name === "AbortError" ? "timeout" : "transport_error",
+        completed_at: new Date().toISOString(),
+      });
       if (error instanceof Error && error.name === "AbortError") {
         return { ok: false, message: "连接测试超时：8 秒内未收到服务响应。" };
       }

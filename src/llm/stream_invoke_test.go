@@ -138,7 +138,7 @@ func TestStreamInvokeOpenAIUsageChunk(t *testing.T) {
 	if resp.Usage == nil {
 		t.Fatal("expected usage to be populated")
 	}
-	if resp.Usage.InputTokens != 9 || resp.Usage.OutputTokens != 4 || resp.Usage.TotalTokens != 13 {
+	if tokenValue(resp.Usage.InputTokens) != 9 || tokenValue(resp.Usage.OutputTokens) != 4 || tokenValue(resp.Usage.TotalTokens) != 13 {
 		t.Fatalf("unexpected usage: %+v", resp.Usage)
 	}
 }

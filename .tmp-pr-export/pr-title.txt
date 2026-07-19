@@ -1,0 +1,1 @@
+feat(cache): make cache hit/miss/cost visible, correct compaction, diagnose cold segments

@@ -314,7 +314,7 @@ pre {
   background: transparent;
   color: var(--aw-text-secondary);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
   cursor: pointer;
 }
 
@@ -344,7 +344,7 @@ pre {
     var(--aw-text-secondary) 64%,
     var(--aw-border-main)
   );
-  outline: 2px solid color-mix(in srgb, var(--aw-accent) 16%, transparent);
+  outline: 2px solid var(--aw-focus-ring);
   outline-offset: 1px;
 }
 
@@ -370,7 +370,7 @@ pre {
   margin: 0;
   color: var(--aw-text-secondary);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
   line-height: 1.3;
 }
 
@@ -404,7 +404,7 @@ pre {
     var(--aw-border-main) 62%,
     var(--aw-text-secondary)
   );
-  box-shadow: 0 8px 22px rgba(20, 24, 31, 0.06);
+  box-shadow: var(--aw-shadow-card-hover);
 }
 
 .extension-card-compact {
@@ -488,7 +488,7 @@ pre {
   background: var(--aw-bg-fill-light);
   color: var(--aw-text-tertiary);
   font-size: 18px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
 }
 
 .cli-connector-detail-link.is-connected {
@@ -500,7 +500,7 @@ pre {
   margin: 0;
   color: var(--aw-text-primary);
   font-size: 17px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
   line-height: 1.25;
 }
 
@@ -528,7 +528,7 @@ pre {
   gap: 8px;
   color: var(--aw-text-primary);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--aw-font-weight-bold);
 }
 
 .cli-connector-detail-status-dot {
@@ -552,7 +552,7 @@ pre {
 
 .cli-connector-detail-row strong {
   color: var(--aw-text-primary);
-  font-weight: 650;
+  font-weight: var(--aw-font-weight-bold);
 }
 
 .cli-connector-detail-state,
@@ -598,7 +598,7 @@ pre {
   gap: 16px;
   color: var(--aw-text-primary);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: var(--aw-font-weight-bold);
 }
 
 .cli-connector-install-progress-copy strong {
@@ -907,7 +907,7 @@ button.extension-card-main:focus-visible {
   overflow: hidden;
   color: var(--aw-text-primary);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -945,7 +945,7 @@ button.extension-card-main:focus-visible {
   background: var(--aw-bg-fill-light);
   color: var(--aw-text-tertiary);
   font-size: 11px;
-  font-weight: 750;
+  font-weight: var(--aw-font-weight-heavy);
   line-height: 1;
 }
 
@@ -1171,7 +1171,7 @@ button.extension-card-main:focus-visible {
   height: 18px;
   border-radius: 50%;
   background: var(--aw-bg-white);
-  box-shadow: 0 1px 3px rgba(20, 24, 31, 0.14);
+  box-shadow: var(--aw-shadow-control);
   transition: transform var(--aw-transition-fast);
 }
 
@@ -1185,7 +1185,7 @@ button.extension-card-main:focus-visible {
 }
 
 .mcp-toggle-switch:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--aw-accent) 24%, transparent);
+  outline: 2px solid var(--aw-focus-ring);
   outline-offset: 2px;
 }
 
@@ -1277,7 +1277,7 @@ button.extension-card-main:focus-visible {
   background: var(--aw-bg-fill-light);
   color: var(--aw-text-secondary);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
   white-space: nowrap;
 }
 
@@ -1336,7 +1336,7 @@ button.extension-card-main:focus-visible {
     var(--aw-text-secondary) 64%,
     var(--aw-border-main)
   );
-  outline: 2px solid color-mix(in srgb, var(--aw-accent) 16%, transparent);
+  outline: 2px solid var(--aw-focus-ring);
   outline-offset: 1px;
 }
 
@@ -1373,7 +1373,7 @@ button.extension-card-main:focus-visible {
 .extension-dialog-note {
   color: color-mix(in srgb, var(--aw-warning) 72%, var(--aw-text-secondary));
   font-size: 12px;
-  font-weight: 750;
+  font-weight: var(--aw-font-weight-heavy);
 }
 
 .skill-delete-confirm-button {
@@ -1400,7 +1400,7 @@ button.extension-card-main:focus-visible {
 .skill-install-project-root > span {
   color: var(--aw-text-secondary);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
 }
 
 .skill-install-segmented {
@@ -1422,7 +1422,7 @@ button.extension-card-main:focus-visible {
   color: var(--aw-text-secondary);
   font: inherit;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
   cursor: pointer;
 }
 
@@ -1431,7 +1431,7 @@ button.extension-card-main:focus-visible {
 .skill-install-segmented .skill-install-segment-active {
   background: var(--aw-bg-white);
   color: var(--aw-text-primary);
-  box-shadow: 0 1px 3px rgb(15 23 42 / 10%);
+  box-shadow: var(--aw-shadow-control);
   outline: none;
 }
 
@@ -1479,7 +1479,7 @@ button.extension-card-main:focus-visible {
 .extension-dropzone strong {
   color: var(--aw-text-primary);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
 }
 
 .extension-dropzone-active,
@@ -1587,7 +1587,7 @@ button.extension-card-main:focus-visible {
   padding: 4px 10px;
   color: var(--aw-text-primary);
   font-size: 18px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
   line-height: 1.25;
 }
 
@@ -1601,11 +1601,9 @@ button.extension-card-main:focus-visible {
   border-radius: var(--aw-radius-pill);
   background: var(--aw-button-black);
   color: var(--aw-text-onblack);
-  box-shadow:
-    0 12px 30px rgba(15, 18, 25, 0.18),
-    0 2px 6px rgba(15, 18, 25, 0.08);
+  box-shadow: var(--aw-shadow-toast);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--aw-font-weight-bold);
   line-height: 1.45;
   pointer-events: none;
   text-align: center;
@@ -1629,11 +1627,11 @@ button.extension-card-main:focus-visible {
   min-height: 34px;
   padding: 0 10px;
   border: 0;
-  border-radius: var(--aw-radius-md);
+  border-radius: var(--aw-radius-control);
   background: transparent;
   color: var(--aw-text-secondary);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--aw-font-weight-bold);
   text-align: left;
   cursor: pointer;
 }
@@ -1697,7 +1695,7 @@ button.extension-card-main:focus-visible {
   margin: 0;
   color: var(--aw-text-primary);
   font-size: 28px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
   line-height: 1.15;
 }
 
@@ -1718,7 +1716,7 @@ button.extension-card-main:focus-visible {
   background: transparent;
   color: var(--aw-text-secondary);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
   cursor: pointer;
 }
 
@@ -1775,7 +1773,7 @@ button.extension-card-main:focus-visible {
   margin: 0;
   color: var(--aw-text-primary);
   font-size: 15px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
   line-height: 1.3;
 }
 
@@ -1846,7 +1844,7 @@ button.extension-card-main:focus-visible {
 .memory-filter-trigger:disabled { color: var(--aw-text-tertiary); cursor: default; }
 .memory-filter-trigger[aria-expanded="true"] {
   border-color: var(--aw-border-active);
-  box-shadow: 0 0 0 2px var(--aw-surface-hover);
+  box-shadow: var(--aw-shadow-focus);
 }
 .memory-filter-menu {
   position: absolute;
@@ -1860,7 +1858,7 @@ button.extension-card-main:focus-visible {
   overflow-y: auto;
   padding: 5px;
   border: 1px solid var(--aw-border-main);
-  border-radius: 9px;
+  border-radius: var(--aw-radius-panel);
   background: var(--aw-surface-raised);
   box-shadow: var(--aw-shadow-menu);
 }
@@ -1995,7 +1993,7 @@ button.extension-card-main:focus-visible {
   background: var(--aw-surface-raised);
   color: var(--aw-text-tertiary);
   font-size: 18px;
-  font-weight: 700;
+  font-weight: var(--aw-font-weight-bold);
 }
 
 .pets-settings-preview-meta {
@@ -2007,14 +2005,14 @@ button.extension-card-main:focus-visible {
 .pets-settings-preview-label {
   color: var(--aw-text-tertiary);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--aw-font-weight-bold);
   line-height: 1.25;
 }
 
 .pets-settings-preview-meta strong {
   color: var(--aw-text-primary);
   font-size: 16px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
   line-height: 1.25;
 }
 
@@ -2043,7 +2041,7 @@ button.extension-card-main:focus-visible {
   margin: 0;
   color: var(--aw-text-primary);
   font-size: 15px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
   line-height: 1.3;
 }
 
@@ -2119,7 +2117,7 @@ button.extension-card-main:focus-visible {
   overflow: hidden;
   color: var(--aw-text-primary);
   font-size: 14px;
-  font-weight: 700;
+  font-weight: var(--aw-font-weight-bold);
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2172,7 +2170,7 @@ button.extension-card-main:focus-visible {
   margin: 0;
   color: var(--aw-text-primary);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
 }
 
 .pets-settings-errors ul {
@@ -2207,7 +2205,7 @@ button.extension-card-main:focus-visible {
   background: transparent;
   color: var(--aw-text-secondary);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
   cursor: pointer;
   transition:
     background-color var(--aw-transition-fast),
@@ -2278,7 +2276,7 @@ button.extension-card-main:focus-visible {
     var(--aw-border-main) 72%,
     var(--aw-text-secondary)
   );
-  box-shadow: 0 8px 22px rgba(20, 24, 31, 0.06);
+  box-shadow: var(--aw-shadow-card-hover);
 }
 
 .model-provider-toggle {
@@ -2312,12 +2310,21 @@ button.extension-card-main:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
 }
 
 .model-provider-chevron {
   color: var(--aw-text-tertiary);
   transition: transform var(--aw-transition-fast);
+}
+
+.model-provider-chevron,
+.model-picker-chevron,
+.model-custom-picker-trigger svg,
+.model-provider-secret-toggle svg {
+  width: var(--aw-icon-size-16);
+  height: var(--aw-icon-size-16);
+  stroke-width: var(--aw-icon-stroke);
 }
 
 .model-provider-toggle[aria-expanded="true"] .model-provider-chevron {
@@ -2354,7 +2361,7 @@ button.extension-card-main:focus-visible {
 .model-provider-field > label {
   color: var(--aw-text-muted);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--aw-font-weight-bold);
 }
 
 .model-provider-template-note {
@@ -2398,7 +2405,7 @@ button.extension-card-main:focus-visible {
   width: 28px;
   height: 26px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--aw-radius-compact);
   background: transparent;
   color: var(--aw-text-secondary);
   cursor: pointer;
@@ -2412,7 +2419,7 @@ button.extension-card-main:focus-visible {
 }
 
 .model-custom-picker-trigger:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--aw-accent) 36%, transparent);
+  outline: 2px solid var(--aw-focus-ring);
   outline-offset: 1px;
 }
 
@@ -2430,7 +2437,7 @@ button.extension-card-main:focus-visible {
   height: 34px;
   padding: 0 14px 0 10px;
   border: 1px solid var(--aw-border-main);
-  border-radius: var(--aw-radius-panel);
+  border-radius: var(--aw-radius-control);
   background: var(--aw-surface-raised);
   color: var(--aw-text-primary);
   font: inherit;
@@ -2455,7 +2462,7 @@ button.extension-card-main:focus-visible {
 }
 
 .model-picker-trigger:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--aw-accent) 18%, transparent);
+  outline: 2px solid var(--aw-focus-ring);
   outline-offset: 1px;
 }
 
@@ -2483,7 +2490,7 @@ button.extension-card-main:focus-visible {
   border: 1px solid var(--aw-border-main);
   border-radius: var(--aw-radius-panel);
   background: var(--aw-surface-raised);
-  box-shadow: 0 10px 24px rgba(20, 24, 31, 0.14);
+  box-shadow: var(--aw-shadow-popover);
 }
 
 .model-picker-option {
@@ -2514,7 +2521,7 @@ button.extension-card-main:focus-visible {
 }
 
 .model-picker-option-selected {
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
 }
 
 .model-provider-secret-field {
@@ -2536,7 +2543,7 @@ button.extension-card-main:focus-visible {
   width: 26px;
   height: 26px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--aw-radius-compact);
   background: transparent;
   color: var(--aw-text-tertiary);
   cursor: pointer;
@@ -2550,7 +2557,7 @@ button.extension-card-main:focus-visible {
 }
 
 .model-provider-secret-toggle:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--aw-accent) 36%, transparent);
+  outline: 2px solid var(--aw-focus-ring);
   outline-offset: 1px;
 }
 
@@ -2579,7 +2586,7 @@ button.extension-card-main:focus-visible {
 .model-provider-capability-copy strong {
   color: var(--aw-text-primary);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--aw-font-weight-bold);
 }
 
 .model-provider-capability-copy span {
@@ -2609,7 +2616,7 @@ button.extension-card-main:focus-visible {
   gap: 6px;
   color: var(--aw-text-secondary);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--aw-font-weight-bold);
   text-decoration: none;
 }
 
@@ -2665,7 +2672,7 @@ button.extension-card-main:focus-visible {
   background: var(--aw-bg-fill-light);
   color: var(--aw-text-secondary);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
 }
 
 .configured-models-head span:nth-child(2),
@@ -2698,7 +2705,7 @@ button.extension-card-main:focus-visible {
   background: var(--aw-surface-raised);
   color: var(--aw-text-secondary);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
 }
 
 .configured-model-copy {
@@ -2716,7 +2723,7 @@ button.extension-card-main:focus-visible {
 .configured-model-copy strong {
   color: var(--aw-text-primary);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--aw-font-weight-bold);
 }
 
 .configured-model-credential-status {
@@ -2774,7 +2781,7 @@ button.extension-card-main:focus-visible {
   height: 14px;
   border-radius: 999px;
   background: var(--aw-surface-raised);
-  box-shadow: 0 2px 5px rgba(20, 24, 31, 0.15);
+  box-shadow: var(--aw-shadow-control);
   transition: transform var(--aw-transition-fast);
 }
 
@@ -2788,7 +2795,7 @@ button.extension-card-main:focus-visible {
 }
 
 .configured-model-switch input:focus-visible + span {
-  outline: 2px solid color-mix(in srgb, var(--aw-accent) 55%, transparent);
+  outline: 2px solid var(--aw-focus-ring);
   outline-offset: 2px;
 }
 
@@ -2876,13 +2883,13 @@ button.extension-card-main:focus-visible {
   background: var(--aw-surface-raised);
   color: var(--aw-text-secondary);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
   text-align: right;
 }
 
 .configured-context-input:focus {
   border-color: color-mix(in srgb, var(--aw-accent) 48%, var(--aw-border-main));
-  outline: 2px solid color-mix(in srgb, var(--aw-accent) 18%, transparent);
+  outline: 2px solid var(--aw-focus-ring);
   outline-offset: 1px;
 }
 
@@ -2928,7 +2935,7 @@ button.extension-card-main:focus-visible {
   background: transparent;
   color: var(--aw-text-secondary);
   font: inherit;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
   line-height: 1;
   cursor: pointer;
   pointer-events: auto;
@@ -2955,7 +2962,7 @@ button.extension-card-main:focus-visible {
 }
 
 .configured-context-anchor:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--aw-accent) 32%, transparent);
+  outline: 2px solid var(--aw-focus-ring);
   outline-offset: 1px;
 }
 
@@ -2967,7 +2974,7 @@ button.extension-card-main:focus-visible {
   height: 26px;
   color: var(--aw-text-secondary);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
 }
 
 .configured-token-input {
@@ -2980,13 +2987,13 @@ button.extension-card-main:focus-visible {
   background: var(--aw-surface-raised);
   color: var(--aw-text-secondary);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
   text-align: right;
 }
 
 .configured-token-input:focus {
   border-color: color-mix(in srgb, var(--aw-accent) 48%, var(--aw-border-main));
-  outline: 2px solid color-mix(in srgb, var(--aw-accent) 18%, transparent);
+  outline: 2px solid var(--aw-focus-ring);
   outline-offset: 1px;
 }
 
@@ -3178,7 +3185,7 @@ button.extension-card-main:focus-visible {
   margin: 0;
   color: var(--aw-text-primary);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--aw-font-weight-bold);
   line-height: 18px;
 }
 
@@ -3327,7 +3334,7 @@ button.extension-card-main:focus-visible {
   background: var(--aw-surface-status-pill);
   color: var(--aw-text-code);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--aw-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -3396,7 +3403,7 @@ button.extension-card-main:focus-visible {
 
 .workspace-picker-label {
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--aw-font-weight-bold);
   color: var(--aw-text-muted);
 }
 
@@ -3461,7 +3468,7 @@ button.extension-card-main:focus-visible {
 
 .panel-heading h2 {
   font-size: 14px;
-  font-weight: 700;
+  font-weight: var(--aw-font-weight-bold);
 }
 
 .panel-heading span {
@@ -3548,7 +3555,7 @@ button.extension-card-main:focus-visible {
 .a2ui-text-title {
   color: var(--aw-text-primary);
   font-size: 14px;
-  font-weight: 700;
+  font-weight: var(--aw-font-weight-bold);
 }
 
 .a2ui-text-caption {
@@ -3561,7 +3568,7 @@ button.extension-card-main:focus-visible {
   padding: 3px 8px;
   border-radius: var(--aw-radius-pill);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--aw-font-weight-bold);
 }
 
 .a2ui-badge-safe {
@@ -3672,7 +3679,7 @@ button.extension-card-main:focus-visible {
   margin: 0;
   color: var(--aw-text-primary);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
 }
 
 .mcp-settings-section-header {
@@ -3692,7 +3699,7 @@ button.extension-card-main:focus-visible {
   background: var(--aw-bg-fill-light);
   color: var(--aw-text-tertiary);
   font-size: 11px;
-  font-weight: 750;
+  font-weight: var(--aw-font-weight-heavy);
 }
 
 .mcp-settings-code {
@@ -3717,7 +3724,7 @@ button.extension-card-main:focus-visible {
     var(--aw-text-secondary) 64%,
     var(--aw-border-main)
   );
-  outline: 2px solid color-mix(in srgb, var(--aw-accent) 16%, transparent);
+  outline: 2px solid var(--aw-focus-ring);
   outline-offset: 1px;
 }
 
@@ -3776,7 +3783,7 @@ button.extension-card-main:focus-visible {
   min-width: 0;
   color: var(--aw-text-primary);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--aw-font-weight-bold);
 }
 
 .mcp-tools-list li > span:not(.mcp-tool-readonly) {
@@ -3796,7 +3803,7 @@ button.extension-card-main:focus-visible {
   background: var(--aw-bg-fill-light);
   color: var(--aw-text-tertiary);
   font-size: 11px;
-  font-weight: 750;
+  font-weight: var(--aw-font-weight-heavy);
 }
 
 .mcp-logs-panel {
@@ -3914,7 +3921,7 @@ button.extension-card-main:focus-visible {
   padding: 12px 14px 4px;
   color: var(--aw-text-primary);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
 }
 
 .profile-balance-credential-recovery {
@@ -3976,7 +3983,7 @@ button.extension-card-main:focus-visible {
   background: var(--aw-surface-raised);
   color: var(--aw-text-secondary);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
 }
 
 .profile-balance-item-info {
@@ -3989,7 +3996,7 @@ button.extension-card-main:focus-visible {
   overflow: hidden;
   color: var(--aw-text-primary);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
   line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4074,13 +4081,13 @@ button.extension-card-main:focus-visible {
 .balance-quota-name {
   color: var(--aw-text-secondary);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
 }
 
 .balance-quota-value {
   color: var(--aw-text-primary);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: var(--aw-font-weight-heavy);
 }
 
 .balance-quota-bar {
@@ -4204,7 +4211,7 @@ button.extension-card-main:focus-visible {
   padding: 0 10px;
   color: var(--aw-text-secondary);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--aw-font-weight-bold);
   border: 1px solid var(--aw-border-main);
   border-radius: var(--aw-radius-md);
   background: var(--aw-bg-white);

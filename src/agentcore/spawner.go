@@ -109,6 +109,7 @@ func CreateSubagent(parent AgentConfig, spawn SpawnConfig) (AgentConfig, error) 
 		SkillContextBlocks:           append([]ContextBlock(nil), parent.SkillContextBlocks...),
 		ToolSessionState:             tool.NewToolSessionState(parent.Workspace.Root),
 		ModelContentStore:            parent.ModelContentStore,
+		ToolResultOffloadStore:       parent.ToolResultOffloadStore,
 		SubagentBoundary:             &childBoundary,
 		SubagentOrigin:               childOrigin,
 	}

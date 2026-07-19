@@ -290,6 +290,41 @@ func compactSummaryLLMCall(ctx stdcontext.Context, cfg llm.Config, req llm.Reque
 	return resp.Content, nil
 }
 
+func (e *runEventEmitter) invokeCompactSummary(ctx stdcontext.Context, cfg llm.Config, req llm.Request) (string, error) {
+	auxCfg, auxiliaryFallback := llm.AuxiliaryConfig(cfg)
+	req.Model = auxCfg.Model
+	req.Purpose = llm.RequestPurposeCompactSummary
+	req.AffinityScopeID = e.threadID
+	req.RequestID = ""
+	retryIndex := e.auxiliaryRequestIndex
+	e.auxiliaryRequestIndex++
+	resp, err := StreamRecordedModel(ctx, ModelCallAuthority{
+		ThreadID: e.threadID, RunID: e.runID, TurnID: e.turnID(), SessionID: e.sessionID,
+		Recorder: e.recorder, Sink: e.sink,
+	}, auxCfg, req, llm.StreamObserver{}, retryIndex, auxiliaryFallback)
+	if err != nil {
+		if requiredTemperature, ok := llm.RequiredTemperatureFromError(err); ok {
+			retryReq := req
+			retryReq.RequestID = ""
+			retryReq.TemperatureOverride = &requiredTemperature
+			retryReq.OmitTemperature = false
+			retryIndex = e.auxiliaryRequestIndex
+			e.auxiliaryRequestIndex++
+			resp, err = StreamRecordedModel(ctx, ModelCallAuthority{
+				ThreadID: e.threadID, RunID: e.runID, TurnID: e.turnID(), SessionID: e.sessionID,
+				Recorder: e.recorder, Sink: e.sink,
+			}, auxCfg, retryReq, llm.StreamObserver{}, retryIndex, auxiliaryFallback)
+		}
+	}
+	if err != nil {
+		return "", err
+	}
+	if resp == nil {
+		return "", nil
+	}
+	return resp.Content, nil
+}
+
 func buildCompactSummaryRequestMessages(groups [][]convcontext.Message) ([]convcontext.Message, int) {
 	flat := make([]convcontext.Message, 0)
 	toolResultsPruned := 0
@@ -534,6 +569,9 @@ func llmConfigForCompaction(envelope ContextEnvelope) llm.Config {
 		BaseURL:               modelCfg.BaseURL,
 		Model:                 model,
 		Protocol:              llm.Protocol(modelCfg.Protocol),
+		ProviderID:            modelCfg.ProviderID,
+		ProfileID:             modelCfg.ProfileID,
+		CredentialRevision:    modelCfg.CredentialRevision,
 		Temperature:           modelCfg.Temperature,
 		MaxTokens:             modelCfg.MaxTokens,
 		AuthScheme:            modelCfg.AuthScheme,

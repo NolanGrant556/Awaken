@@ -41,7 +41,7 @@ func TestAnthropicToolResultCarriesImageAndPDFInCompositeContent(t *testing.T) {
 }
 
 func TestOpenAIToolResultsPrecedeOneAssociatedMediaMessage(t *testing.T) {
-	messages := buildOpenAIMessages(toolMediaRequest())
+	messages := buildOpenAIMessages(Config{}, toolMediaRequest(), PreparedPromptCache{})
 	if len(messages) != 4 {
 		t.Fatalf("messages=%+v", messages)
 	}

@@ -1635,6 +1635,25 @@ ipcMain.handle("awaken:get-run", async (_event, runId: string) => {
 });
 
 ipcMain.handle("awaken:get-thread-transcript", async (_event, threadId: string) => {
+  let profile: Awaited<ReturnType<ModelProfileStore["resolveDefaultRunProfile"]>>;
+  try {
+    profile = await modelProfileStore?.resolveDefaultRunProfile();
+  } catch {
+    // Transcript history remains readable when credentials are unavailable.
+    // A current projection will be generated once a runnable profile exists.
+    profile = undefined;
+  }
+  if (profile) {
+    await requestRuntimeOK(`/v1/threads/${threadId}/context-snapshot`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model_profile: normalizeModelProfileRunConfig(profile),
+      }),
+    });
+  }
   const transcript = await requestRuntime<RuntimeThreadTranscriptWire>(
     `/v1/threads/${threadId}/transcript`,
     {

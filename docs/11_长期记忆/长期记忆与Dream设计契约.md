@@ -4,7 +4,7 @@
 
 本文是 Awaken 长期记忆与 Dream 的当前事实与目标设计权威。
 
-**当前支持：** Core 已实现 user/project Markdown topic、`MEMORY.md` 索引、受控 `memory` 工具、host 注入来源 identity、revision/敏感内容/重复门禁、请求构建期索引注入、复用当前主模型 profile 的非阻塞 selector、最多 5 条有界主题召回和 compact 后预算复位。主动记忆默认开启，由主模型在正常任务推理中决定是否调用工具。Memory 调用与 recall 进入 SemanticJournal/AG-UI 前转为无正文 receipt；Workbench 已投影 recall/mutation 紧凑回执。Desktop Settings 已提供四个开关、搜索/筛选/正文与来源查看、revision 删除、手动 Dream 和取消；Auto Dream 已接入持久化活动计数、24 小时、5 分钟 idle、active-run gate 和新 run 取消；不提供人工创建、编辑或 supersede。Dream task/report 已原子持久化，Core 重启会把未完成任务恢复为 `interrupted`，Desktop 通过任务列表重放维护回执；scope lock 定期 heartbeat，批量 Apply 使用 staged transaction、活动 marker、失败关闭读取和 crash rollback，主题与 `MEMORY.md` 不会以半套状态参与召回。
+**当前支持：** Core 已实现 user/project Markdown topic、`MEMORY.md` 索引、受控 `memory` 工具、host 注入来源 identity、revision/敏感内容/重复门禁、请求构建期索引注入、复用当前 profile 的凭据/endpoint 并按 provider 辅助模型策略执行非阻塞 selector、最多 5 条有界主题召回和 compact 后预算复位。主动记忆默认开启，由主模型在正常任务推理中决定是否调用工具。Memory 调用与 recall 进入 SemanticJournal/AG-UI 前转为无正文 receipt；Workbench 已投影 recall/mutation 紧凑回执。Desktop Settings 已提供四个开关、搜索/筛选/正文与来源查看、revision 删除、手动 Dream 和取消；Auto Dream 已接入持久化活动计数、24 小时、5 分钟 idle、active-run gate 和新 run 取消；不提供人工创建、编辑或 supersede。Dream task/report 已原子持久化，其独立 authority 同时保存 `memory_maintenance` request/usage；Core 重启会把未完成 task 和没有终态 usage 的请求恢复为 `interrupted`/`usage_unknown`。Desktop 对 live 终态回执保存纯展示用的 `taskId -> threadId` 绑定，任务列表只把已绑定回执重放到原线程，无绑定的历史任务只在 Settings 中可见；scope lock 定期 heartbeat，批量 Apply 使用 staged transaction、活动 marker、失败关闭读取和 crash rollback，主题与 `MEMORY.md` 不会以半套状态参与召回。
 
 **当前不支持：** 当前产品尚无正式 subagent/child Agent 能力，因此不实现 child recall 继承。待 subagent 域建立正式 parent/child identity、workspace 与权限边界后，本域必须实现 5.3 的 `MemoryRecallSnapshot` 继承门禁，不能让 child 自行扩大 user/project scope。
 
@@ -31,7 +31,7 @@ Awaken 采用 `sourcecode` 参考项目的核心 Memory 形态：
 1. Markdown 文件是记忆内容 authority；
 2. `MEMORY.md` 是小型索引，不承载完整正文；
 3. 每个主题文件使用 YAML frontmatter 提供名称、描述和类型；
-4. 召回先扫描文件头，再由 selector 从 manifest 中选择最多 5 个文件；Awaken 不配置独立小模型，selector 复用当前任务的主模型 profile；
+4. 召回先扫描文件头，再由 selector 从 manifest 中选择最多 5 个文件；selector 复用当前任务 profile 的凭据、endpoint 和协议，但模型由 host 辅助策略选择，并使用独立 `memory_recall` purpose/affinity；
 5. 被选文件按行数和字节数有界注入；
 6. 已读或已召回文件在当前上下文中去重；
 7. Dream 低频整理主题文件和索引，合并重复、修正冲突并清理过时入口。
@@ -175,7 +175,7 @@ run 建立时读取允许 scope 的 `MEMORY.md`，按合计预算形成 host-own
 3. 记录 filename、absolute path、mtime、description、type、scope、revision；
 4. 按 mtime 新到旧排序，每个 scope 最多保留 200 个候选；
 5. 过滤本 thread 已召回以及当前 run 已通过 Memory read/update 接触的文件；
-6. 把当前用户 query、最近成功工具名和候选 manifest 交给 selector；selector 复用当前主模型 profile，不存在独立高低模型配置；
+6. 把当前用户 query、最近成功工具名和候选 manifest 交给 selector；selector 使用 `memory_recall` purpose、256 token 上限和 provider 辅助模型策略，火山/custom 无安全映射时复用主模型并记录 `auxiliaryFallback`；
 7. selector 用 JSON schema 返回最多 5 个合法 filename；不确定时返回空数组；
 8. host 按 manifest allowlist 反查文件，不接受 selector 生成的任意路径；
 9. 并行读取选中文件，每个最多 200 行、4,096 bytes；截断时保留开头并提示用 Memory read 读取完整内容；
@@ -301,7 +301,7 @@ Dream 按以下阶段执行：
 
 Dream child 只能调用 host-owned Memory list/get/search/plan 能力和受控的 source lookup；没有普通 mutation tool。最终写入由 Memory service 批量提交，Dream 文本本身不是 authority。
 
-Apply 在 `<scope>/.maintenance-transactions/<transaction_id>/` 保存 before/after 与 manifest，并先发布 `.maintenance-transaction.json` 活动 marker。所有协作 Store 在 marker 存在时先检查 scope lock：live owner 仍在提交则 fail closed，不读取半套文件；owner 已死亡或过期则由新 owner 按 manifest 回滚 `prepared/committing`，或完成 `committed` 清理。marker 删除并 fsync 根目录后批次才对召回可见。任务自身持久化在 `~/.awaken/memory/dream-tasks/<task_id>.json`，只含状态、阶段、scope、project identity、统计和有界错误，不含模型凭据或 Memory 正文。
+Apply 在 `<scope>/.maintenance-transactions/<transaction_id>/` 保存 before/after 与 manifest，并先发布 `.maintenance-transaction.json` 活动 marker。所有协作 Store 在 marker 存在时先检查 scope lock：live owner 仍在提交则 fail closed，不读取半套文件；owner 已死亡或过期则由新 owner 按 manifest 回滚 `prepared/committing`，或完成 `committed` 清理。marker 删除并 fsync 根目录后批次才对召回可见。任务自身持久化在 `~/.awaken/memory/dream-tasks/<task_id>.json`，含状态、阶段、scope、project identity、统计、有界错误和脱敏 `model_requests`/`model_usage`，不含模型凭据、prompt 或 Memory 正文。Dream 模型调用使用 `memory_maintenance` purpose、独立 task affinity、4096 token 上限和同一 provider 辅助模型策略；request 在发送前耐久，缺终态 usage 的恢复为 `interrupted + usage_unknown`。
 
 ## 8. 上下文、事件与 HTTP
 
@@ -320,7 +320,7 @@ memory_recalled
 memory_mutated
 ```
 
-Dream 不伪装成 thread 内的 SemanticJournal record。维护任务的 durable authority 是 Dream task JSON；Desktop live 收到同一 task terminal receipt，重启或 thread replay 时从 `GET /v1/memory/dream` 按 task identity 重新投影。普通 recall/mutation 仍由 thread SemanticJournal 重放。
+Dream 不伪装成 thread 内的 SemanticJournal record。维护任务与其模型 request/usage 的 durable authority 是 Dream task JSON；Desktop live 收到 task terminal receipt 时把 task identity 绑定到当时的 active thread，重启或 thread replay 时从 `GET /v1/memory/dream` 读取任务，但只按该展示绑定重新投影到原线程。展示绑定不是 Dream 状态 authority；绑定缺失时任务仍在 Settings 可见，不得投影到任意新线程。普通 recall/mutation 仍由 thread SemanticJournal 重放；recall selector 的 `memory_recall` request/usage 属于发起它的 thread。
 
 耐久 payload 只保存 memory IDs、scope、type、action、revision、status、source identity、counts 和 error code，不保存主题正文或 daily-log 原文。live 与 replay 通过 09 域唯一 projector 产生：
 
@@ -375,7 +375,7 @@ Workbench：
 - 主动记忆和 Dream 完成显示紧凑通知，不创建通用 approval 状态；
 - Dream 不占用用户当前 turn，不向 final answer 注入维护推理；
 - 右侧 Inspector 当前不承载 Memory 详情；
-- 页面切换、重连和重启按 durable identity 保持一致。
+- 页面切换、重连和重启按 durable identity 保持一致；Dream 回执只回放到 live 收到它的原线程，旧的无绑定任务不进入新线程。
 
 ## 10. 异常、恢复与不变量
 
@@ -387,7 +387,7 @@ Workbench：
 | 主题读取在选择后变化 | revision/hash 不一致则跳过，不注入选择时未审核的新内容 |
 | create/update 写入失败 | Memory 工具失败，不发成功 receipt，不更新模型内 Memory truth |
 | 索引写入失败 | 主题 authority 保留并标记 index dirty；重建前 Settings 明示，不能只留下悬空索引 |
-| Dream 被新 run 取消 | staged 内容清理，锁释放；无 live authority 变化 |
+| Dream 被新 run 取消 | staged 内容清理，锁释放；模型请求或响应解码期的 `context canceled` 也记为 `cancelled` 而不是 `failed`；无 live authority 变化 |
 | Dream plan revision 冲突 | 冲突项跳过或整批失败，不能覆盖用户刚编辑的 Memory |
 | Core/Desktop 重启 | 锁按 holder/heartbeat 恢复；未提交 staged 数据不参与召回 |
 | 用户删除来源 thread | Memory 保留，source 标记 unavailable；不从其他 thread 猜来源 |
@@ -410,10 +410,10 @@ Workbench：
 | 层 | owner |
 | --- | --- |
 | Markdown parser/store/index/lock | `src/memory` |
-| recall selector、prefetch、snapshot | `src/memory`、`src/runtime` |
+| recall selector、prefetch、snapshot、`memory_recall` usage | `src/memory`、`src/runtime`、`src/agentcore/model_call.go` |
 | request context injection | `src/agentcore/request_builder.go`、context envelope |
 | model-visible Memory tool | `src/tools/memory`、`src/tool` snapshot/policy |
-| 主动记忆指导、Dream plan/apply | `src/memory`、`src/runtime`；child orchestration 复用 `src/agentcore` |
+| 主动记忆指导、Dream plan/apply 与独立 usage authority | `src/memory`、`src/runtime`；child orchestration 复用 `src/agentcore` |
 | SemanticRecord 与 replay | `src/agentcore`、`src/runtime` |
 | HTTP/SSE | `src/server`、`src/protocol/agui` |
 | preload/Main bridge、Settings、Workbench | `apps/desktop` |

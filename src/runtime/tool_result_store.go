@@ -2,13 +2,17 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
+	"awaken/src/agentcore"
 	"awaken/src/filestore"
 	"awaken/src/tool"
 )
@@ -20,6 +24,48 @@ const maxToolResultBlobBytes = 20 * 1024 * 1024
 type ToolResultStore struct{}
 
 func NewToolResultStore() *ToolResultStore { return &ToolResultStore{} }
+
+func (s *ToolResultStore) OffloadToolResult(
+	_ context.Context,
+	threadID, toolCallID, content string,
+) (agentcore.ToolResultOffloadReceipt, error) {
+	if strings.TrimSpace(threadID) == "" || strings.TrimSpace(toolCallID) == "" {
+		return agentcore.ToolResultOffloadReceipt{}, fmt.Errorf("tool result offload requires thread and tool call identity")
+	}
+	storageKey := filepath.ToSlash(filepath.Join(
+		safeTranscriptFileName(threadID), "tool-results", safeTranscriptFileName(toolCallID), "content.txt",
+	))
+	targetPath, err := ownedToolResultPath(storageKey)
+	if err != nil {
+		return agentcore.ToolResultOffloadReceipt{}, err
+	}
+	if err := filestore.EnsureDir(filepath.Dir(targetPath)); err != nil {
+		return agentcore.ToolResultOffloadReceipt{}, err
+	}
+	if err := os.Chmod(filepath.Dir(targetPath), filestore.DirPerm); err != nil {
+		return agentcore.ToolResultOffloadReceipt{}, err
+	}
+	data := []byte(content)
+	if err := filestore.WriteFileAtomic(targetPath, data); err != nil {
+		return agentcore.ToolResultOffloadReceipt{}, err
+	}
+	if err := os.Chmod(targetPath, 0o600); err != nil {
+		return agentcore.ToolResultOffloadReceipt{}, err
+	}
+	digest := sha256.Sum256(data)
+	preview := strings.TrimSpace(content)
+	previewBytes := []byte(preview)
+	if len(previewBytes) > 512 {
+		previewBytes = previewBytes[:512]
+		for len(previewBytes) > 0 && !utf8.Valid(previewBytes) {
+			previewBytes = previewBytes[:len(previewBytes)-1]
+		}
+		preview = string(previewBytes) + "…"
+	}
+	return agentcore.ToolResultOffloadReceipt{
+		StorageKey: storageKey, Digest: hex.EncodeToString(digest[:]), ByteSize: len(data), Preview: preview,
+	}, nil
+}
 
 func (s *ToolResultStore) PersistToolResult(
 	_ context.Context,

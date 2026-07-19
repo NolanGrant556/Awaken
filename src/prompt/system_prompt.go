@@ -30,6 +30,15 @@ func (p *SystemPrompt) Build() string {
 }
 
 func (p *SystemPrompt) buildEffectivePrompt() string {
+	runtimeInfoStr := FormatRuntimeInfo(p.runtimeInfo)
+
+	return replaceTemplateVar(p.staticContent, runtimeInfoStr)
+}
+
+// FormatRuntimeInfo returns the exact provider-visible replacement for the
+// RuntimeInfo placeholder. Keeping this formatter public lets context
+// accounting attribute the runtime leaf without parsing prompt prose.
+func FormatRuntimeInfo(info RuntimeInfo) string {
 	runtimeInfoStr := fmt.Sprintf(
 		"### 当前运行环境\n\n"+
 			"- **工作目录**: %s\n"+
@@ -38,18 +47,17 @@ func (p *SystemPrompt) buildEffectivePrompt() string {
 			"- **入口方式**: %s\n"+
 			"- **可用工具**: %s\n"+
 			"- **可用 Skills**: %s",
-		p.runtimeInfo.WorkingDir,
-		p.runtimeInfo.CurrentDate,
-		p.runtimeInfo.ModelName,
-		p.runtimeInfo.EntryPoint,
-		p.runtimeInfo.ToolSummary,
-		p.runtimeInfo.SkillSummary,
+		info.WorkingDir,
+		info.CurrentDate,
+		info.ModelName,
+		info.EntryPoint,
+		info.ToolSummary,
+		info.SkillSummary,
 	)
-	if len(p.runtimeInfo.AttachedFiles) > 0 {
-		runtimeInfoStr += "\n- **已授权附件**:\n" + formatRuntimeAttachedFiles(p.runtimeInfo.AttachedFiles)
+	if len(info.AttachedFiles) > 0 {
+		runtimeInfoStr += "\n- **已授权附件**:\n" + formatRuntimeAttachedFiles(info.AttachedFiles)
 	}
-
-	return replaceTemplateVar(p.staticContent, runtimeInfoStr)
+	return runtimeInfoStr
 }
 
 func formatRuntimeAttachedFiles(files []RuntimeAttachedFile) string {

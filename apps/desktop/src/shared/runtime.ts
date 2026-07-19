@@ -108,7 +108,7 @@ export type RuntimeRunStatus =
   | "error"
   | "cancelled";
 
-export type ThreadTitleSource = "first_user" | "llm" | "manual";
+export type ThreadTitleSource = "first_user" | "local" | "llm" | "manual";
 
 export type ThreadTitleStatus = "pending" | "ready" | "failed";
 
@@ -741,6 +741,7 @@ export type RuntimeModelProfileSummaryWire = {
   enabled: boolean;
   is_default: boolean;
   profile_status: ModelCredentialStatus;
+  credential_revision?: number;
   advanced?: ModelProfileAdvancedWire;
 };
 
@@ -748,6 +749,7 @@ export type RuntimeModelProfileSummary = {
   id: string;
   providerId: string;
   displayName: string;
+  credentialRevision?: number;
   modelId: string;
   baseURL: string;
   protocol: string;
@@ -935,6 +937,7 @@ export type ModelProfileRunConfigWire = {
   max_tokens?: number;
   context_window?: number;
   prompt_cache_key?: string;
+  credential_revision?: number;
   supports_vision?: boolean;
   supports_native_pdf?: boolean;
   supports_video?: boolean;
@@ -953,6 +956,7 @@ export type ModelProfileRunConfig = {
   maxTokens?: number;
   contextWindow?: number;
   promptCacheKey?: string;
+  credentialRevision?: number;
   supportsVision?: boolean;
   supportsNativePDF?: boolean;
   supportsVideo?: boolean;
@@ -1353,6 +1357,7 @@ export function normalizeModelProfileSummary(
     id: profile.id,
     providerId: profile.provider_id,
     displayName: profile.display_name,
+    credentialRevision: profile.credential_revision ?? 1,
     modelId: profile.model_id,
     baseURL: profile.base_url,
     protocol: profile.protocol,
@@ -1382,6 +1387,7 @@ export function normalizeModelProfileRunConfig(
     max_tokens: profile.maxTokens,
     context_window: profile.contextWindow,
     prompt_cache_key: profile.promptCacheKey,
+    credential_revision: profile.credentialRevision,
     supports_vision: profile.supportsVision,
     supports_native_pdf: profile.supportsNativePDF,
     supports_video: profile.supportsVideo,

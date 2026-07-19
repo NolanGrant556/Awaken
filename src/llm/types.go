@@ -24,6 +24,9 @@ type Config struct {
 	BaseURL               string
 	Model                 string
 	Protocol              Protocol
+	ProviderID            string
+	ProfileID             string
+	CredentialRevision    uint64
 	Temperature           float64
 	MaxTokens             int
 	AuthScheme            string
@@ -34,13 +37,17 @@ type Config struct {
 type RequestPurpose string
 
 const (
+	RequestPurposeAgentTurn         RequestPurpose = "agent_turn"
+	RequestPurposeThreadTitle       RequestPurpose = "thread_title"
 	RequestPurposeCompactSummary    RequestPurpose = "compact_summary"
 	RequestPurposeMemoryRecall      RequestPurpose = "memory_recall"
 	RequestPurposeMemoryMaintenance RequestPurpose = "memory_maintenance"
+	RequestPurposeConnectionTest    RequestPurpose = "connection_test"
 )
 
 // Request 是统一请求结构
 type Request struct {
+	RequestID           string
 	SystemPrompt        string
 	UserPrompt          string
 	Model               string
@@ -52,26 +59,72 @@ type Request struct {
 	StreamIdleTimeout   time.Duration
 	DisableReasoning    bool
 	Purpose             RequestPurpose
+	AffinityScopeID     string
+	ReasoningPolicy     string
 	Messages            []context.Message
 	Tools               []tool.ToolSchema
 }
 
+// PreparedRequest is the immutable, protocol-lowered HTTP request. Callers
+// persist its digest before invoking SendPrepared; transports must not rebuild
+// or mutate Body after this point.
+type PreparedRequest struct {
+	RequestID          string
+	Protocol           Protocol
+	Endpoint           string
+	Body               []byte
+	RequestShapeDigest string
+	Stream             bool
+	StreamIdleTimeout  time.Duration
+	Cache              PreparedPromptCache
+}
+
+type PreparedPromptCache struct {
+	CapabilityID     string
+	EndpointContract string
+	Mode             PromptCacheMode
+	KeyApplied       bool
+	ReasoningReplay  bool
+}
+
 // Response 是统一响应结构
 type Response struct {
-	Content          string
-	Thinking         string
-	ToolCalls        []ToolCall
-	Usage            *Usage
-	IsFinished       bool
-	StopReason       string
-	MaxOutputReached bool
+	Content             string
+	Thinking            string
+	ToolCalls           []ToolCall
+	Usage               *Usage
+	IsFinished          bool
+	StopReason          string
+	MaxOutputReached    bool
+	ProviderRequestID   string
+	ProviderOpaqueState *context.ProviderOpaqueMessageState
 }
 
 // Usage 是 provider 返回的可选 token 用量信息。
 type Usage struct {
-	InputTokens  int
-	OutputTokens int
-	TotalTokens  int
+	InputTokens         *int
+	CachedInputTokens   *int
+	UncachedInputTokens *int
+	CacheWriteTokens    *int
+	OutputTokens        *int
+	ReasoningTokens     *int
+	TotalTokens         *int
+	Raw                 RawUsage
+}
+
+type RawUsage struct {
+	NormalizerID             string `json:"normalizer_id"`
+	PromptTokens             *int   `json:"prompt_tokens,omitempty"`
+	InputTokens              *int   `json:"input_tokens,omitempty"`
+	CompletionTokens         *int   `json:"completion_tokens,omitempty"`
+	OutputTokens             *int   `json:"output_tokens,omitempty"`
+	ReasoningTokens          *int   `json:"reasoning_tokens,omitempty"`
+	TotalTokens              *int   `json:"total_tokens,omitempty"`
+	CachedTokens             *int   `json:"cached_tokens,omitempty"`
+	PromptCacheHitTokens     *int   `json:"prompt_cache_hit_tokens,omitempty"`
+	PromptCacheMissTokens    *int   `json:"prompt_cache_miss_tokens,omitempty"`
+	CacheReadInputTokens     *int   `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationInputTokens *int   `json:"cache_creation_input_tokens,omitempty"`
 }
 
 // ToolCall 是统一工具调用结构

@@ -2,9 +2,11 @@ package runtime
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"awaken/src/agentcore"
 	convcontext "awaken/src/context"
 	"awaken/src/llm"
 )
@@ -159,12 +161,18 @@ func normalizeGeneratedTitleText(value string) string {
 // issuing real network requests.
 var generateThreadTitleWithProfileFn = generateThreadTitleWithProfile
 
-func generateThreadTitleWithProfile(ctx context.Context, profile *ModelProfileConfig, prompt string) (string, error) {
+func generateThreadTitleWithProfile(
+	ctx context.Context,
+	profile *ModelProfileConfig,
+	prompt string,
+	authority agentcore.ModelCallAuthority,
+	retryIndex int,
+) (string, error) {
 	if profile == nil {
 		return "", ErrMissingModelProfile
 	}
 
-	cfg := llm.Config{
+	mainCfg := llm.Config{
 		APIKey:        profile.APIKey,
 		BaseURL:       profile.BaseURL,
 		Model:         profile.ModelID,
@@ -174,17 +182,20 @@ func generateThreadTitleWithProfile(ctx context.Context, profile *ModelProfileCo
 		AuthScheme:    profile.AuthScheme,
 		ContextWindow: profile.ContextWindow,
 	}
+	cfg, auxiliaryFallback := llm.AuxiliaryConfig(mainCfg)
 
-	resp, err := llm.Invoke(ctx, cfg, llm.Request{
+	resp, err := agentcore.InvokeRecordedModel(ctx, authority, cfg, llm.Request{
 		SystemPrompt:     "You generate very short chat session titles. Output only the title text. No quotes, periods, newlines, or explanations.",
 		UserPrompt:       prompt,
+		Model:            cfg.Model,
 		MaxTokens:        threadTitleMaxTokens,
 		DisableReasoning: true,
-		Purpose:          llm.RequestPurposeCompactSummary,
+		Purpose:          llm.RequestPurposeThreadTitle,
+		AffinityScopeID:  authority.ThreadID,
 		Messages: []convcontext.Message{
 			{Role: convcontext.RoleUser, Content: prompt},
 		},
-	})
+	}, retryIndex, auxiliaryFallback)
 	if err != nil {
 		return "", err
 	}
@@ -192,4 +203,43 @@ func generateThreadTitleWithProfile(ctx context.Context, profile *ModelProfileCo
 		return "", llm.ErrEmptyResponse
 	}
 	return cleanGeneratedThreadTitle(resp.Content), nil
+}
+
+func localThreadTitle(firstUserMessage string, attachments []RunInputAttachment, composerTokens []ComposerToken) string {
+	if tokens := skillComposerTokens(composerTokens); len(tokens) > 0 {
+		for _, token := range tokens {
+			if title := trimThreadLabel(firstNonEmpty(token.Label, token.ID)); title != "" {
+				return title
+			}
+		}
+	}
+	for _, attachment := range attachments {
+		name := strings.TrimSpace(firstNonEmpty(attachment.DisplayName, filepath.Base(attachment.Path)))
+		if name != "" && name != "." {
+			return trimThreadLabel(name)
+		}
+	}
+
+	value := strings.TrimSpace(firstUserMessage)
+	if value == "" || strings.ContainsAny(value, "\r\n?？") {
+		return ""
+	}
+	hasHan := false
+	hanCount := 0
+	for _, r := range value {
+		if r >= '\u4e00' && r <= '\u9fff' {
+			hasHan = true
+			hanCount++
+		}
+	}
+	if hasHan {
+		if hanCount <= 12 && len([]rune(value)) <= 16 {
+			return trimThreadLabel(value)
+		}
+		return ""
+	}
+	if words := strings.Fields(value); len(words) > 0 && len(words) <= 8 {
+		return trimThreadLabel(value)
+	}
+	return ""
 }

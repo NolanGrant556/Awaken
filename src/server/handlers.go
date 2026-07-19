@@ -44,6 +44,10 @@ type resolveExternalInteractionRequest struct {
 	Resolution string `json:"resolution"`
 }
 
+type refreshThreadContextSnapshotRequest struct {
+	ModelProfile *awruntime.ModelProfileConfig `json:"model_profile"`
+}
+
 type errorResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
@@ -196,6 +200,41 @@ func (h runHandlers) handleGetThreadTranscript(w http.ResponseWriter, r *http.Re
 	}
 
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (h runHandlers) handleRefreshThreadContextSnapshot(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	var req refreshThreadContextSnapshotRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+	transcript, err := h.runService.GetThreadTranscript(threadID)
+	if err != nil {
+		if errors.Is(err, awruntime.ErrThreadNotFound) {
+			writeErrorJSON(w, http.StatusNotFound, "THREAD_NOT_FOUND", err.Error())
+			return
+		}
+		writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to read thread before context refresh")
+		return
+	}
+	if h.syncSkillsForWorkspace != nil {
+		h.syncSkillsForWorkspace(transcript.Thread.Workspace.WorkspaceRoot)
+	}
+	if _, err := h.runService.RefreshThreadContextSnapshot(r.Context(), threadID, req.ModelProfile); err != nil {
+		switch {
+		case errors.Is(err, awruntime.ErrThreadNotFound):
+			writeErrorJSON(w, http.StatusNotFound, "THREAD_NOT_FOUND", err.Error())
+		case errors.Is(err, awruntime.ErrMissingModelProfile):
+			writeErrorJSON(w, http.StatusBadRequest, "MISSING_MODEL_PROFILE", err.Error())
+		case errors.Is(err, awruntime.ErrPersistenceUnavailable):
+			writeErrorJSON(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", err.Error())
+		default:
+			writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to refresh thread context snapshot")
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h runHandlers) handleGetRun(w http.ResponseWriter, r *http.Request) {

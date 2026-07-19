@@ -60,6 +60,7 @@ func main() {
 			recallManager, recallErr := memory.NewRecallManager(workspaceRoot, llm.Config{
 				APIKey: modelCfg.APIKey, BaseURL: modelCfg.BaseURL, Model: modelCfg.Model,
 				Protocol: llm.Protocol(modelCfg.Protocol), Temperature: modelCfg.Temperature,
+				ProviderID: modelCfg.ProviderID, ProfileID: modelCfg.ProfileID, CredentialRevision: modelCfg.CredentialRevision,
 				MaxTokens: modelCfg.MaxTokens, AuthScheme: modelCfg.AuthScheme, ContextWindow: modelCfg.ContextWindow,
 			})
 			if recallErr != nil {
@@ -81,6 +82,16 @@ func main() {
 				MemoryRecallStart: func(ctx context.Context, query string, recentTools []string) {
 					if recallManager != nil {
 						recallManager.StartTurnWithTools(ctx, query, recentTools)
+					}
+				},
+				MemoryRecallSetAuthority: func(authority agentcore.ModelCallAuthority) {
+					if recallManager != nil {
+						recallManager.SetModelInvoker(func(ctx context.Context, cfg llm.Config, req llm.Request, retryIndex int, auxiliaryFallback bool) (*llm.Response, error) {
+							if strings.TrimSpace(req.AffinityScopeID) == "" {
+								req.AffinityScopeID = authority.ThreadID
+							}
+							return agentcore.InvokeRecordedModel(ctx, authority, cfg, req, retryIndex, auxiliaryFallback)
+						})
 					}
 				},
 				MemoryRecallEnd: func() {
@@ -114,8 +125,10 @@ func main() {
 					ProtectedRoots:    workspace.ProtectedRoots,
 					TemporaryWorkRoot: workspace.TemporaryWorkRoot,
 				},
-				ExecutionProfile:  workspace.ExecutionProfile,
-				ModelContentStore: runtime.NewToolResultStore(),
+				ExecutionProfile:       workspace.ExecutionProfile,
+				ModelContentStore:      runtime.NewToolResultStore(),
+				ToolResultOffloadStore: runtime.NewToolResultStore(),
+				ContextEpochStore:      runtime.NewContextEpochStore(),
 			}
 			return agentcore.NewAgentWithThreadID(agentCfg, threadID)
 		},
@@ -200,14 +213,17 @@ func modelConfigFromProfile(profile *runtime.ModelProfileConfig) agentcore.Model
 		return agentcore.ModelConfig{}
 	}
 	return agentcore.ModelConfig{
-		APIKey:        profile.APIKey,
-		BaseURL:       profile.BaseURL,
-		Model:         profile.ModelID,
-		Protocol:      profile.Protocol,
-		Temperature:   profile.Temperature,
-		MaxTokens:     profile.MaxTokens,
-		AuthScheme:    profile.AuthScheme,
-		ContextWindow: profile.ContextWindow,
+		APIKey:             profile.APIKey,
+		BaseURL:            profile.BaseURL,
+		Model:              profile.ModelID,
+		Protocol:           profile.Protocol,
+		ProviderID:         profile.ProviderID,
+		ProfileID:          profile.ProfileID,
+		CredentialRevision: profile.CredentialRevision,
+		Temperature:        profile.Temperature,
+		MaxTokens:          profile.MaxTokens,
+		AuthScheme:         profile.AuthScheme,
+		ContextWindow:      profile.ContextWindow,
 		Capabilities: tool.ModelCapabilities{
 			SupportsVision:    profile.SupportsVision,
 			SupportsNativePDF: profile.SupportsNativePDF,

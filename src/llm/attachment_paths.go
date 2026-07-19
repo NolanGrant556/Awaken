@@ -40,3 +40,16 @@ func userTextWithAttachmentPaths(content string, attachments []convcontext.Messa
 		return strings.TrimRight(content, "\n") + "\n\n" + attachmentPaths
 	}
 }
+
+func userTextWithProviderProjection(content string, attachments []convcontext.MessageAttachment, projection string) string {
+	text := userTextWithAttachmentPaths(content, attachments)
+	projection = strings.TrimSpace(projection)
+	switch {
+	case projection == "":
+		return text
+	case strings.TrimSpace(text) == "":
+		return projection
+	default:
+		return strings.TrimRight(text, "\n") + "\n\n" + projection
+	}
+}

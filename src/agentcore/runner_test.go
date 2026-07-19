@@ -607,11 +607,13 @@ data: {"type":"message_stop"}`,
 		RunStartedEventType,
 		TurnStartedEventType,
 		ContextEstimatedEventType,
+		ContextSnapshotEventType,
 		ReasoningStartedEventType,
 		ReasoningDeltaEventType,
 		ToolCallArgsDeltaEventType,
 		ToolCallArgsDeltaEventType,
 		ToolCallArgsDeltaEventType,
+		ModelUsageEventType,
 		ReasoningFinishedEventType,
 		ToolCallStartedEventType,
 		ToolCallArgsEventType,
@@ -623,9 +625,12 @@ data: {"type":"message_stop"}`,
 		TurnFinishedEventType,
 		TurnStartedEventType,
 		ContextEstimatedEventType,
+		ContextSnapshotEventType,
 		TextMessageStartedEventType,
 		TextDeltaEventType,
+		ModelUsageEventType,
 		TextMessageFinishedEventType,
+		ContextSnapshotEventType,
 		TurnFinishedEventType,
 		RunFinishedEventType,
 	}
@@ -637,26 +642,26 @@ data: {"type":"message_stop"}`,
 			t.Fatalf("unexpected event type at %d: want %s got %s (%v)", i, want, gotTypes[i], gotTypes)
 		}
 	}
-	if gotEvents[5].Delta != "{" || gotEvents[6].Delta != "\"value\":\"hello\"" || gotEvents[7].Delta != "}" {
-		t.Fatalf("unexpected tool args deltas: %q %q %q", gotEvents[5].Delta, gotEvents[6].Delta, gotEvents[7].Delta)
+	if gotEvents[6].Delta != "{" || gotEvents[7].Delta != "\"value\":\"hello\"" || gotEvents[8].Delta != "}" {
+		t.Fatalf("unexpected tool args deltas: %q %q %q", gotEvents[6].Delta, gotEvents[7].Delta, gotEvents[8].Delta)
 	}
-	if gotEvents[9].ToolName != toolName || gotEvents[10].ToolName != toolName || gotEvents[11].ToolName != toolName {
-		t.Fatalf("expected tool identity on start/args/end events, got %q %q %q", gotEvents[9].ToolName, gotEvents[10].ToolName, gotEvents[11].ToolName)
+	if gotEvents[11].ToolName != toolName || gotEvents[12].ToolName != toolName || gotEvents[13].ToolName != toolName {
+		t.Fatalf("expected tool identity on start/args/end events, got %q %q %q", gotEvents[11].ToolName, gotEvents[12].ToolName, gotEvents[13].ToolName)
 	}
-	if gotEvents[10].Arguments != `{"value":"hello"}` {
-		t.Fatalf("expected complete tool args fallback, got %q", gotEvents[10].Arguments)
+	if gotEvents[12].Arguments != `{"value":"hello"}` {
+		t.Fatalf("expected complete tool args fallback, got %q", gotEvents[12].Arguments)
 	}
-	if gotEvents[12].ToolProgressStage != "started" || gotEvents[13].ToolProgressStage != "completed" {
-		t.Fatalf("unexpected runtime tool progress events: %+v %+v", gotEvents[12], gotEvents[13])
+	if gotEvents[14].ToolProgressStage != "started" || gotEvents[15].ToolProgressStage != "completed" {
+		t.Fatalf("unexpected runtime tool progress events: %+v %+v", gotEvents[14], gotEvents[15])
 	}
-	if gotEvents[15].Content != "echo:hello" {
-		t.Fatalf("expected tool result content echo:hello, got %q", gotEvents[15].Content)
+	if gotEvents[17].Content != "echo:hello" {
+		t.Fatalf("expected tool result content echo:hello, got %q", gotEvents[17].Content)
 	}
-	if gotEvents[15].ToolStatus == "" {
-		t.Fatalf("expected tool result to carry toolStatus, got %+v", gotEvents[15])
+	if gotEvents[17].ToolStatus == "" {
+		t.Fatalf("expected tool result to carry toolStatus, got %+v", gotEvents[17])
 	}
-	if gotEvents[20].Delta != "done" {
-		t.Fatalf("expected final text delta done, got %q", gotEvents[20].Delta)
+	if gotEvents[23].Delta != "done" {
+		t.Fatalf("expected final text delta done, got %q", gotEvents[23].Delta)
 	}
 }
 
@@ -917,9 +922,12 @@ func TestRunnerRunStreamWithEventsPlainQA(t *testing.T) {
 		RunStartedEventType,
 		TurnStartedEventType,
 		ContextEstimatedEventType,
+		ContextSnapshotEventType,
 		TextMessageStartedEventType,
 		TextDeltaEventType,
+		ModelUsageEventType,
 		TextMessageFinishedEventType,
+		ContextSnapshotEventType,
 		TurnFinishedEventType,
 		RunFinishedEventType,
 	}
@@ -1031,7 +1039,8 @@ func TestRunnerThinkingOnlyResponseIsNotEmpty(t *testing.T) {
 	}
 	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
 	runner.streamLLMFunc = func(context.Context, *runEventEmitter) (*llm.Response, error) {
-		return &llm.Response{Thinking: "reasoning only", Usage: &llm.Usage{InputTokens: 7}}, nil
+		inputTokens := 7
+		return &llm.Response{Thinking: "reasoning only", Usage: &llm.Usage{InputTokens: &inputTokens}}, nil
 	}
 
 	answer, err := runner.RunStreamWithEvents(context.Background(), EventSinkFunc(func(event AwakenEvent) {}))

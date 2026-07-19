@@ -29,6 +29,7 @@ import type {
 import type { RuntimeClient } from "../runtime/client";
 import { PetsSettingsPanel } from "./PetsSettingsPanel";
 import { SearchSettingsPanel } from "./SearchSettingsPanel";
+import { MemorySettingsPanel } from "./MemorySettingsPanel";
 
 export type DraftState = {
   profileId?: string;
@@ -47,7 +48,7 @@ export type DraftState = {
 };
 
 type ModelSettingsSection = "configure" | "configured";
-type SettingsDialogSection = "models" | "search" | "appearance" | "pets";
+type SettingsDialogSection = "models" | "search" | "memory" | "appearance" | "pets";
 
 type ConfiguredProfileDraft = {
   enabled: boolean;
@@ -98,6 +99,7 @@ type DesktopSettingsDialogProps = {
   onThemePreferenceChange: (theme: AwakenThemePreference) => void;
   onOpenChange: (open: boolean) => void;
   onProfilesChanged: () => void;
+  currentProjectId?: string;
   initialSection?: SettingsDialogSection;
   initialModelSection?: ModelSettingsSection;
 };
@@ -448,6 +450,7 @@ export function DesktopSettingsDialog({
   onThemePreferenceChange,
   onOpenChange,
   onProfilesChanged,
+  currentProjectId,
   initialSection = "models",
   initialModelSection = "configure",
 }: DesktopSettingsDialogProps) {
@@ -958,6 +961,19 @@ export function DesktopSettingsDialog({
           <button
             type="button"
             role="tab"
+            aria-selected={activeSettingsSection === "memory"}
+            className={`settings-dialog-nav-item${
+              activeSettingsSection === "memory"
+                ? " settings-dialog-nav-item-active"
+                : ""
+            }`}
+            onClick={() => setActiveSettingsSection("memory")}
+          >
+            记忆
+          </button>
+          <button
+            type="button"
+            role="tab"
             aria-selected={activeSettingsSection === "appearance"}
             className={`settings-dialog-nav-item${
               activeSettingsSection === "appearance"
@@ -991,6 +1007,8 @@ export function DesktopSettingsDialog({
                 ? "模型"
                 : activeSettingsSection === "search"
                   ? "搜索"
+                : activeSettingsSection === "memory"
+                  ? "记忆"
                 : activeSettingsSection === "appearance"
                   ? "外观"
                   : "宠物"}
@@ -1041,6 +1059,8 @@ export function DesktopSettingsDialog({
 
           {activeSettingsSection === "search" ? (
             <SearchSettingsPanel runtimeClient={runtimeClient} />
+          ) : activeSettingsSection === "memory" ? (
+            <MemorySettingsPanel runtimeClient={runtimeClient} currentProjectId={currentProjectId} />
           ) : activeSettingsSection === "appearance" ? (
             <AppearanceSettings
               themePreference={themePreference}

@@ -225,6 +225,14 @@ func (a *Agent) RunStreamWithEvents(ctx stdcontext.Context, userInput string, si
 	// otherwise a failed journal write leaks an unpersisted prompt into the next
 	// run on the same in-memory Agent.
 	a.conversation.UserInputWithAttachments(userInput, attachments)
+	if a.config.MemoryRecallStart != nil {
+		recallCtx, cancelRecall := stdcontext.WithCancel(ctx)
+		defer cancelRecall()
+		a.config.MemoryRecallStart(recallCtx, userInput, recentSuccessfulToolNames(a.conversation.Context.GetMessages(), 5))
+		if a.config.MemoryRecallEnd != nil {
+			defer a.config.MemoryRecallEnd()
+		}
+	}
 
 	runner := NewRunner(a.config, a.conversation, a.reqBuilder)
 	runner.threadID = a.threadID
@@ -238,6 +246,26 @@ func (a *Agent) RunStreamWithEvents(ctx stdcontext.Context, userInput string, si
 	a.config = runner.config
 	a.reqBuilder = NewRequestBuilder(a.config)
 	return result, err
+}
+
+func recentSuccessfulToolNames(messages []context.Message, limit int) []string {
+	if limit <= 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	result := make([]string, 0, limit)
+	for i := len(messages) - 1; i >= 0 && len(result) < limit; i-- {
+		message := messages[i]
+		if message.Role != context.RoleTool || message.IsError {
+			continue
+		}
+		name := strings.TrimSpace(message.Name)
+		if name != "" && !seen[name] {
+			seen[name] = true
+			result = append(result, name)
+		}
+	}
+	return result
 }
 
 // PrepareUserMessage persists a composer-selected Skill turn before Skill

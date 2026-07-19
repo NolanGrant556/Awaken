@@ -79,6 +79,22 @@ POST   /v1/skills/install
 
 `/v1/mcp/servers*` 依赖 MCP manager；connector routes 依赖 registry。Skill list/install 始终注册，registry 缺失时返回 503。`POST /v1/skills/{id}/execute` 未注册，只是保留 handler。
 
+### 3.4 Memory 与 Dream
+
+```text
+GET    /v1/memories
+GET    /v1/memories/{memory_id}
+DELETE /v1/memories/{memory_id}
+GET    /v1/memory/settings
+PATCH  /v1/memory/settings
+POST   /v1/memory/dream
+GET    /v1/memory/dream
+GET    /v1/memory/dream/{task_id}
+POST   /v1/memory/dream/{task_id}/cancel
+```
+
+Memory list/get/delete 与 Dream routes 始终注册；project scope 只有在 ProjectService 可解析 project/workspace identity 时可用。settings routes 只有 `MemorySettingsStore` 成功建立时注册。正文、revision、scope、Dream task 与恢复语义由 11 域拥有；Renderer 只通过 Main/preload typed bridge 调用，不把任意绝对路径当作授权。
+
 ## 4. SSE wire
 
 `GET /v1/runs/{run_id}/events` 返回 `text/event-stream`。每个 frame：

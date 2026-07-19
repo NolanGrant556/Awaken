@@ -469,7 +469,7 @@ pre {
   overflow: hidden;
   border: 1px solid var(--aw-border-light);
   border-radius: var(--aw-radius-md);
-  background: #ffffff;
+  background: var(--aw-surface-raised);
 }
 
 .cli-connector-detail-awaken img {
@@ -492,8 +492,8 @@ pre {
 }
 
 .cli-connector-detail-link.is-connected {
-  background: color-mix(in srgb, #16a34a 16%, transparent);
-  color: #16a34a;
+  background: var(--aw-status-success-bg);
+  color: var(--aw-status-success);
 }
 
 .cli-connector-detail-title {
@@ -535,7 +535,7 @@ pre {
   width: 8px;
   height: 8px;
   border-radius: 999px;
-  background: #16a34a;
+  background: var(--aw-status-success);
 }
 
 .cli-connector-detail-row {
@@ -581,8 +581,8 @@ pre {
 }
 
 .cli-connector-detail-state-dot.is-waiting {
-  background: #d97706;
-  box-shadow: 0 0 0 4px color-mix(in srgb, #d97706 12%, transparent);
+  background: var(--aw-status-waiting);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--aw-status-waiting) 12%, transparent);
 }
 
 .cli-connector-install-progress {
@@ -637,9 +637,9 @@ pre {
 }
 
 .cli-connector-detail-action-connected {
-  border-color: color-mix(in srgb, #16a34a 28%, transparent) !important;
-  color: #15803d !important;
-  background: color-mix(in srgb, #16a34a 12%, transparent) !important;
+  border-color: color-mix(in srgb, var(--aw-status-success) 28%, transparent) !important;
+  color: var(--aw-status-success-text) !important;
+  background: var(--aw-status-success-bg) !important;
 }
 
 .cli-connector-detail-action-connected:hover,
@@ -856,22 +856,22 @@ button.extension-card-main:focus-visible {
 }
 
 .extension-brand-icon-dingtalk {
-  border-color: color-mix(in srgb, #007fff 35%, var(--aw-border-light));
-  background: #007fff;
+  border-color: color-mix(in srgb, var(--aw-brand-dingtalk) 35%, var(--aw-border-light));
+  background: var(--aw-brand-dingtalk);
 }
 
 .extension-brand-icon-lark {
-  background: #ffffff;
+  background: var(--aw-surface-raised);
 }
 
 .extension-card-action-ready {
-  color: #16a34a;
+  color: var(--aw-status-success);
 }
 
 .extension-card-action-ready:hover:enabled,
 .extension-card-action-ready:focus-visible {
-  background: color-mix(in srgb, #16a34a 12%, transparent);
-  color: #15803d;
+  background: var(--aw-status-success-bg);
+  color: var(--aw-status-success-text);
 }
 
 .extension-card-action-label {
@@ -1379,11 +1379,11 @@ button.extension-card-main:focus-visible {
 .skill-delete-confirm-button {
   background: var(--aw-error) !important;
   border-color: var(--aw-error) !important;
-  color: #fff !important;
+  color: var(--aw-status-danger-foreground) !important;
 }
 
 .skill-delete-confirm-button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--aw-error) 86%, #000) !important;
+  background: var(--aw-status-danger-hover) !important;
 }
 
 .skill-delete-dialog-body strong {
@@ -2729,7 +2729,7 @@ button.extension-card-main:focus-visible {
 }
 
 .configured-model-credential-status-unreadable {
-  color: var(--aw-text-danger, #b42318);
+  color: var(--aw-status-danger-text);
 }
 
 .configured-model-switch {
@@ -2779,8 +2779,8 @@ button.extension-card-main:focus-visible {
 }
 
 .configured-model-switch input:checked + span {
-  background: #62d891;
-  box-shadow: inset 0 0 0 1px rgba(31, 149, 80, 0.18);
+  background: var(--aw-status-success);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--aw-status-success) 18%, transparent);
 }
 
 .configured-model-switch input:checked + span::after {
@@ -2829,8 +2829,8 @@ button.extension-card-main:focus-visible {
   border-radius: 999px;
   background: linear-gradient(
     to right,
-    #9fdbf6 0%,
-    #9fdbf6 var(--context-fill),
+    var(--aw-context-meter-fill) 0%,
+    var(--aw-context-meter-fill) var(--context-fill),
     var(--aw-bg-fill-light) var(--context-fill),
     var(--aw-bg-fill-light) 100%
   );
@@ -2842,7 +2842,7 @@ button.extension-card-main:focus-visible {
   margin-top: -4px;
   border: 0;
   border-radius: 999px;
-  background: #168fd2;
+  background: var(--aw-context-meter-indicator);
   appearance: none;
 }
 
@@ -2855,7 +2855,7 @@ button.extension-card-main:focus-visible {
 .configured-context-range::-moz-range-progress {
   height: 10px;
   border-radius: 999px;
-  background: #9fdbf6;
+  background: var(--aw-context-meter-fill);
 }
 
 .configured-context-range::-moz-range-thumb {
@@ -2863,7 +2863,7 @@ button.extension-card-main:focus-visible {
   height: 18px;
   border: 0;
   border-radius: 999px;
-  background: #168fd2;
+  background: var(--aw-context-meter-indicator);
 }
 
 .configured-context-input {
@@ -2943,7 +2943,7 @@ button.extension-card-main:focus-visible {
   width: 2px;
   height: 8px;
   border-radius: 999px;
-  background: #168fd2;
+  background: var(--aw-context-meter-indicator);
   opacity: 0.86;
   transform: translateX(-50%);
 }

@@ -11,51 +11,53 @@ import (
 type AwakenEventType string
 
 const (
-	RunStartedEventType             AwakenEventType = "RunStarted"
-	RunFinishedEventType            AwakenEventType = "RunFinished"
-	RunErrorEventType               AwakenEventType = "RunError"
-	TurnStartedEventType            AwakenEventType = "TurnStarted"
-	TurnFinishedEventType           AwakenEventType = "TurnFinished"
-	TextMessageStartedEventType     AwakenEventType = "TextMessageStarted"
-	TextDeltaEventType              AwakenEventType = "TextDelta"
-	TextMessageFinishedEventType    AwakenEventType = "TextMessageFinished"
-	ReasoningStartedEventType       AwakenEventType = "ReasoningStarted"
-	ReasoningDeltaEventType         AwakenEventType = "ReasoningDelta"
-	ReasoningFinishedEventType      AwakenEventType = "ReasoningFinished"
-	ToolCallStartedEventType        AwakenEventType = "ToolCallStarted"
-	ToolCallArgsDeltaEventType      AwakenEventType = "ToolCallArgsDelta"
-	ToolCallArgsEventType           AwakenEventType = "ToolCallArgs"
-	ToolCallFinishedEventType       AwakenEventType = "ToolCallFinished"
-	ToolProgressEventType           AwakenEventType = "ToolProgress"
-	ToolPermissionDecidedEventType  AwakenEventType = "ToolPermissionDecided"
-	ToolResultEventType             AwakenEventType = "ToolResult"
-	CommandOutputEventType          AwakenEventType = "CommandOutput"
-	PatchUpdatedEventType           AwakenEventType = "PatchUpdated"
-	TurnDiffEventType               AwakenEventType = "TurnDiff"
-	ContextEstimatedEventType       AwakenEventType = "ContextEstimated"
-	ContextWarningEventType         AwakenEventType = "ContextWarning"
-	ContextBlockedEventType         AwakenEventType = "ContextBlocked"
-	CompactStartedEventType         AwakenEventType = "CompactStarted"
-	CompactFinishedEventType        AwakenEventType = "CompactFinished"
-	CompactFailedEventType          AwakenEventType = "CompactFailed"
-	ToolPairingRepairedEventType    AwakenEventType = "ToolPairingRepaired"
-	AuthRequiredEventType           AwakenEventType = "AuthRequired"
-	RuntimePrepareEventType         AwakenEventType = "RuntimePrepare"
-	RuntimePrepareStartedEventType  AwakenEventType = "RuntimePrepareStarted"
-	RuntimePrepareProgressEventType AwakenEventType = "RuntimePrepareProgress"
-	RuntimeReadyEventType           AwakenEventType = "RuntimeReady"
-	RuntimeRepairFailedEventType    AwakenEventType = "RuntimeRepairFailed"
-	RuntimeMissingEventType         AwakenEventType = "RuntimeMissing"
-	UserQuestionRequestedType             AwakenEventType = "UserQuestionRequested"
-	UserQuestionResolvedType              AwakenEventType = "UserQuestionResolved"
-	ExternalInteractionRequestedType      AwakenEventType = "ExternalInteractionRequested"
-	ExternalInteractionResolvedType       AwakenEventType = "ExternalInteractionResolved"
-	ArtifactCreatedEventType        AwakenEventType = "ArtifactCreated"
-	ArtifactUpdatedEventType        AwakenEventType = "ArtifactUpdated"
-	SkillActivatedEventType         AwakenEventType = "SkillActivated"
-	ResourceReceiptEventType        AwakenEventType = "ResourceReceipt"
-	ToolRecoveryRequiredEventType   AwakenEventType = "ToolRecoveryRequired"
-	ToolRetryBlockedEventType       AwakenEventType = "ToolRetryBlocked"
+	RunStartedEventType              AwakenEventType = "RunStarted"
+	RunFinishedEventType             AwakenEventType = "RunFinished"
+	RunErrorEventType                AwakenEventType = "RunError"
+	TurnStartedEventType             AwakenEventType = "TurnStarted"
+	TurnFinishedEventType            AwakenEventType = "TurnFinished"
+	TextMessageStartedEventType      AwakenEventType = "TextMessageStarted"
+	TextDeltaEventType               AwakenEventType = "TextDelta"
+	TextMessageFinishedEventType     AwakenEventType = "TextMessageFinished"
+	ReasoningStartedEventType        AwakenEventType = "ReasoningStarted"
+	ReasoningDeltaEventType          AwakenEventType = "ReasoningDelta"
+	ReasoningFinishedEventType       AwakenEventType = "ReasoningFinished"
+	ToolCallStartedEventType         AwakenEventType = "ToolCallStarted"
+	ToolCallArgsDeltaEventType       AwakenEventType = "ToolCallArgsDelta"
+	ToolCallArgsEventType            AwakenEventType = "ToolCallArgs"
+	ToolCallFinishedEventType        AwakenEventType = "ToolCallFinished"
+	ToolProgressEventType            AwakenEventType = "ToolProgress"
+	ToolPermissionDecidedEventType   AwakenEventType = "ToolPermissionDecided"
+	ToolResultEventType              AwakenEventType = "ToolResult"
+	CommandOutputEventType           AwakenEventType = "CommandOutput"
+	PatchUpdatedEventType            AwakenEventType = "PatchUpdated"
+	TurnDiffEventType                AwakenEventType = "TurnDiff"
+	ContextEstimatedEventType        AwakenEventType = "ContextEstimated"
+	ContextWarningEventType          AwakenEventType = "ContextWarning"
+	ContextBlockedEventType          AwakenEventType = "ContextBlocked"
+	CompactStartedEventType          AwakenEventType = "CompactStarted"
+	CompactFinishedEventType         AwakenEventType = "CompactFinished"
+	CompactFailedEventType           AwakenEventType = "CompactFailed"
+	ToolPairingRepairedEventType     AwakenEventType = "ToolPairingRepaired"
+	AuthRequiredEventType            AwakenEventType = "AuthRequired"
+	RuntimePrepareEventType          AwakenEventType = "RuntimePrepare"
+	RuntimePrepareStartedEventType   AwakenEventType = "RuntimePrepareStarted"
+	RuntimePrepareProgressEventType  AwakenEventType = "RuntimePrepareProgress"
+	RuntimeReadyEventType            AwakenEventType = "RuntimeReady"
+	RuntimeRepairFailedEventType     AwakenEventType = "RuntimeRepairFailed"
+	RuntimeMissingEventType          AwakenEventType = "RuntimeMissing"
+	UserQuestionRequestedType        AwakenEventType = "UserQuestionRequested"
+	UserQuestionResolvedType         AwakenEventType = "UserQuestionResolved"
+	ExternalInteractionRequestedType AwakenEventType = "ExternalInteractionRequested"
+	ExternalInteractionResolvedType  AwakenEventType = "ExternalInteractionResolved"
+	ArtifactCreatedEventType         AwakenEventType = "ArtifactCreated"
+	ArtifactUpdatedEventType         AwakenEventType = "ArtifactUpdated"
+	SkillActivatedEventType          AwakenEventType = "SkillActivated"
+	ResourceReceiptEventType         AwakenEventType = "ResourceReceipt"
+	ToolRecoveryRequiredEventType    AwakenEventType = "ToolRecoveryRequired"
+	ToolRetryBlockedEventType        AwakenEventType = "ToolRetryBlocked"
+	MemoryRecalledEventType          AwakenEventType = "MemoryRecalled"
+	MemoryMutatedEventType           AwakenEventType = "MemoryMutated"
 )
 
 type ArtifactStatus string
@@ -122,6 +124,7 @@ type AwakenEvent struct {
 	CompactSummaryLatestUserPinned   *bool
 	CompactFallbackMarker            string
 	CompactFailureReason             string
+	MemoryReceipts                   []MemoryRecallReceipt
 	StaticPermissionBehavior         string
 	StaticPermissionReason           string
 	ToolDecisionAction               string
@@ -149,53 +152,53 @@ type AwakenEvent struct {
 	ToolProgressPercentage int
 	// ToolOutcome fields (Phase 1). Canonical status lives in ToolStatus;
 	// Desktop maps it to ToolDisplayState and must not infer from content.
-	ToolStatus              string
-	TransportStatus         string
-	SemanticStatus          string
-	ProcessStatus           string
-	ProcessExitCode         *int
-	ProcessTimedOut         bool
-	ErrorCode               string
-	ErrorCategory           string
-	Retryable               bool
-	RecoveryOptions         []string
-	DurationMs              int64
-	Diagnostic              map[string]any
-	ToolDefinition          tool.ToolDefinition
-	RiskHints               *tool.RiskHints
-	AffectedPaths           []string
-	AuthProvider            string
-	AuthURL                 string
-	RuntimeName             string
-	RuntimeVersion          string
-	QuestionID                   string
-	QuestionAnswer               string
-	InteractionID                string
-	InteractionResolution        string
-	InteractionTitle             string
-	InteractionSafeMessage       string
-	InteractionVerificationURL   string
-	InteractionQRImageURL        string
-	InteractionProvider          string
-	InteractionRecoveries        []string
-	InteractionRequiresReplay    bool
-	ArtifactContractVersion int
-	ArtifactRole            tool.ArtifactRole
-	ArtifactProducer        string
-	ArtifactID              string
-	ArtifactTitle           string
-	ArtifactDescription     string
-	ArtifactKind            string
-	ArtifactPath            string
-	ArtifactContent         string
-	ArtifactStatus          ArtifactStatus
-	SkillID                 string
-	SkillVersion            string
-	ResourcePath            string
-	ResourceSHA256          string
-	ResourceSize            int64
-	ResourceMode            string
-	ResourceSource          string
+	ToolStatus                 string
+	TransportStatus            string
+	SemanticStatus             string
+	ProcessStatus              string
+	ProcessExitCode            *int
+	ProcessTimedOut            bool
+	ErrorCode                  string
+	ErrorCategory              string
+	Retryable                  bool
+	RecoveryOptions            []string
+	DurationMs                 int64
+	Diagnostic                 map[string]any
+	ToolDefinition             tool.ToolDefinition
+	RiskHints                  *tool.RiskHints
+	AffectedPaths              []string
+	AuthProvider               string
+	AuthURL                    string
+	RuntimeName                string
+	RuntimeVersion             string
+	QuestionID                 string
+	QuestionAnswer             string
+	InteractionID              string
+	InteractionResolution      string
+	InteractionTitle           string
+	InteractionSafeMessage     string
+	InteractionVerificationURL string
+	InteractionQRImageURL      string
+	InteractionProvider        string
+	InteractionRecoveries      []string
+	InteractionRequiresReplay  bool
+	ArtifactContractVersion    int
+	ArtifactRole               tool.ArtifactRole
+	ArtifactProducer           string
+	ArtifactID                 string
+	ArtifactTitle              string
+	ArtifactDescription        string
+	ArtifactKind               string
+	ArtifactPath               string
+	ArtifactContent            string
+	ArtifactStatus             ArtifactStatus
+	SkillID                    string
+	SkillVersion               string
+	ResourcePath               string
+	ResourceSHA256             string
+	ResourceSize               int64
+	ResourceMode               string
+	ResourceSource             string
 }
 
 var awakenIDCounter uint64

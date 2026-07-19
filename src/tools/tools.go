@@ -10,6 +10,7 @@ import (
 	_ "awaken/src/tools/git_remote"
 	_ "awaken/src/tools/glob"
 	_ "awaken/src/tools/grep"
+	_ "awaken/src/tools/memory"
 	_ "awaken/src/tools/read"
 	_ "awaken/src/tools/trash_file"
 	_ "awaken/src/tools/web_search"

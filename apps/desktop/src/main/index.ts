@@ -24,6 +24,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { AguiEvent } from "../shared/agui.js";
 import {
+  DESKTOP_SELECT_ALL_REQUESTED_CHANNEL,
+  isDesktopSelectAllShortcut,
+} from "../shared/desktop-selection.js";
+import {
   normalizeModelProfileBalancesResult,
   normalizeModelProvider,
   normalizeModelProfileRunConfig,
@@ -852,6 +856,14 @@ function createMainWindow(): BrowserWindow {
     },
   });
   mainWindowRef = mainWindow;
+
+  mainWindow.webContents.on("before-input-event", (event, input) => {
+    if (!isDesktopSelectAllShortcut(input)) {
+      return;
+    }
+    event.preventDefault();
+    mainWindow.webContents.send(DESKTOP_SELECT_ALL_REQUESTED_CHANNEL);
+  });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);

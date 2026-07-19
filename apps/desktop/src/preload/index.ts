@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type { AguiEvent } from "../shared/agui.js";
+import { DESKTOP_SELECT_ALL_REQUESTED_CHANNEL } from "../shared/desktop-selection.js";
 import {
   type AttachmentPickResult,
   type ArtifactOpenRequest,
@@ -109,6 +110,12 @@ ipcRenderer.on("awaken:run-closed", (_event, payload: { subscriptionId: string }
 
 const bridge: AwakenBridge = {
   platform: toDesktopPlatform(process.platform),
+  onSelectAllRequested: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on(DESKTOP_SELECT_ALL_REQUESTED_CHANNEL, handler);
+    return () =>
+      ipcRenderer.removeListener(DESKTOP_SELECT_ALL_REQUESTED_CHANNEL, handler);
+  },
   relaunchDesktop: () =>
     ipcRenderer.invoke("awaken:relaunch-desktop") as Promise<void>,
   getSearchSettings: () =>

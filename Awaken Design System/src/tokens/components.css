@@ -37,7 +37,7 @@
 }
 
 :focus-visible {
-  outline: 2px solid var(--aw-border-active);
+  outline: 2px solid var(--aw-focus-ring);
   outline-offset: 2px;
 }
 
@@ -669,7 +669,7 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 }
 
 .execution-prompt-bubble:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--aw-accent) 52%, transparent);
+  outline: 2px solid var(--aw-focus-ring);
   outline-offset: 2px;
 }
 
@@ -940,14 +940,14 @@ button.tool-trace-line:focus-visible {
   max-width: 100%;
   min-width: 0;
   color: var(--aw-text-primary);
-  font-size: var(--aw-font-size-sm);
-  line-height: 1.68;
+  font-size: var(--aw-font-size-reading);
+  line-height: var(--aw-line-height-reading);
   overflow-wrap: anywhere;
 }
 
 .assistant-message-markdown {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   box-sizing: border-box;
   width: 100%;
   max-width: 100%;
@@ -991,7 +991,7 @@ button.tool-trace-line:focus-visible {
 .assistant-message h4,
 .assistant-message h5,
 .assistant-message h6 {
-  margin: 4px 0 0;
+  margin: 6px 0 0;
   color: var(--aw-text-primary);
   font-weight: var(--aw-font-weight-bold);
   overflow-wrap: anywhere;
@@ -999,21 +999,21 @@ button.tool-trace-line:focus-visible {
 }
 
 .assistant-message h1 {
-  font-size: var(--aw-font-size-lg);
-  line-height: var(--aw-line-height-lg);
+  font-size: var(--aw-font-size-reading-h1);
+  line-height: var(--aw-line-height-reading-h1);
 }
 
 .assistant-message h2 {
-  font-size: var(--aw-font-size-base);
-  line-height: var(--aw-line-height-base);
+  font-size: var(--aw-font-size-reading-h2);
+  line-height: var(--aw-line-height-reading-h2);
 }
 
 .assistant-message h3,
 .assistant-message h4,
 .assistant-message h5,
 .assistant-message h6 {
-  font-size: var(--aw-font-size-sm);
-  line-height: var(--aw-line-height-sm);
+  font-size: var(--aw-font-size-reading-h3);
+  line-height: var(--aw-line-height-reading-h3);
 }
 
 .assistant-message p {
@@ -1132,7 +1132,7 @@ button.tool-trace-line:focus-visible {
   background: var(--aw-surface-code);
   color: var(--aw-text-code);
   font-family: var(--aw-font-mono);
-  font-size: var(--aw-font-size-sm);
+  font-size: 13px;
   line-height: var(--aw-line-height-base);
 }
 
@@ -1162,8 +1162,8 @@ button.tool-trace-line:focus-visible {
   width: 100%;
   border-collapse: collapse;
   background: var(--aw-bg-white);
-  font-size: var(--aw-font-size-sm);
-  line-height: var(--aw-line-height-sm);
+  font-size: 13px;
+  line-height: var(--aw-line-height-base);
 }
 
 .assistant-message-table th,
@@ -1241,7 +1241,7 @@ button.tool-trace-line:focus-visible {
 }
 
 .assistant-mermaid-action:focus-visible {
-  outline: 2px solid var(--aw-border-active);
+  outline: 2px solid var(--aw-focus-ring);
   outline-offset: 2px;
 }
 
@@ -1361,7 +1361,7 @@ button.tool-trace-line:focus-visible {
 }
 
 .assistant-mermaid-zoom-range:focus-visible {
-  outline: 2px solid var(--aw-border-active);
+  outline: 2px solid var(--aw-focus-ring);
   outline-offset: 2px;
 }
 
@@ -1675,11 +1675,11 @@ button.tool-trace-line:focus-visible {
 
 .aw-task-welcome__message {
   margin: 0;
-  color: var(--aw-text-tertiary);
-  font-size: 12px;
-  font-weight: 400;
+  color: var(--aw-text-secondary);
+  font-size: 13px;
+  font-weight: var(--aw-font-weight-medium);
   letter-spacing: 0;
-  line-height: 18px;
+  line-height: var(--aw-line-height-base);
   white-space: nowrap;
 }
 
@@ -2083,7 +2083,7 @@ button.tool-trace-line:focus-visible {
 }
 
 .composer-bar-model-trigger:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--aw-accent) 42%, transparent);
+  outline: 2px solid var(--aw-focus-ring);
   outline-offset: 2px;
 }
 
@@ -2193,7 +2193,7 @@ button.tool-trace-line:focus-visible {
 
 .composer-bar-model-option:focus-visible,
 .composer-bar-model-menu-action:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--aw-accent) 36%, transparent);
+  outline: 2px solid var(--aw-focus-ring);
   outline-offset: 1px;
 }
 

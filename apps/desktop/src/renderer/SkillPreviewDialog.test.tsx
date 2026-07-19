@@ -41,6 +41,35 @@ describe("SkillPreviewDialog", () => {
     vi.restoreAllMocks();
   });
 
+  it("keeps the close button accessible without visible close hints", async () => {
+    const onOpenChange = vi.fn();
+
+    await act(async () => {
+      root.render(
+        <SkillPreviewDialog
+          target={{ catalogEntryId: "skill" }}
+          runtimeClient={{
+            getSkillPreview: vi.fn().mockResolvedValue({
+              frontmatterRaw: "---\nname: skill\n---",
+              bodyMarkdown: "# Skill body",
+            }),
+          }}
+          onOpenChange={onOpenChange}
+        />,
+      );
+    });
+
+    const closeButton = document.querySelector<HTMLButtonElement>('button[aria-label="关闭"]');
+    expect(closeButton).not.toBeNull();
+    expect(closeButton?.getAttribute("title")).toBeNull();
+
+    await act(async () => closeButton?.focus());
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+
+    await act(async () => closeButton?.click());
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
   it("focuses the single scroll region and ignores a stale preview response", async () => {
     const first = deferred<SkillPreviewResponse>();
     const second = deferred<SkillPreviewResponse>();

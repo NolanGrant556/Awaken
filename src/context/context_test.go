@@ -3,6 +3,8 @@ package context
 import (
 	"strings"
 	"testing"
+
+	"awaken/src/tool"
 )
 
 func TestContextDoesNotStoreSystemPrompt(t *testing.T) {
@@ -97,5 +99,17 @@ func TestEstimateAttachmentPayloadTokensKeepsImageEstimateSeparateFromBase64Leng
 	}
 	if textTokens <= imageTokens {
 		t.Fatalf("expected text payload estimate to exceed image rough estimate, got text=%d image=%d", textTokens, imageTokens)
+	}
+}
+
+func TestEstimateMediaTokensExcludeProviderOmittedPayloads(t *testing.T) {
+	if got := EstimateAttachmentPayloadTokens("image", ""); got != 0 {
+		t.Fatalf("expected omitted image payload to contribute zero media tokens, got %d", got)
+	}
+	part := tool.ModelContentPart{Type: "image", MimeType: "image/png", DisplayName: "chart.png"}
+	metadataOnly := EstimateModelContentTokens(part)
+	part.DataBase64 = "aW1hZ2U="
+	if withPayload := EstimateModelContentTokens(part); withPayload <= metadataOnly {
+		t.Fatalf("expected admitted media payload estimate above metadata-only estimate: metadata=%d payload=%d", metadataOnly, withPayload)
 	}
 }

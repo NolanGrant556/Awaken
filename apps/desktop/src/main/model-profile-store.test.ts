@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -170,6 +170,52 @@ describe("ModelProfileStore", () => {
     );
   });
 
+  it("writes connection-test request and nullable usage to an independent profile JSONL", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        headers: { get: (name: string) => name === "x-request-id" ? "provider-req-1" : null },
+        json: async () => ({
+          usage: { prompt_tokens: 20, cached_tokens: 5, completion_tokens: 1, total_tokens: 21 },
+        }),
+      }) as Response),
+    );
+    const store = new ModelProfileStore(configDir);
+    await expect(store.testProfile({
+      id: "profile-usage",
+      providerId: "deepseek",
+      displayName: "DeepSeek",
+      modelId: "deepseek-v4-pro",
+      baseURL: "https://api.deepseek.com",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "secret-key-not-for-ledger",
+      enabled: true,
+      isDefault: true,
+    })).resolves.toMatchObject({ ok: true });
+
+    const usageRoot = join(configDir, "usage", "model-profiles");
+    expect(await readdir(usageRoot)).toEqual(["profile-usage.jsonl"]);
+    const text = await readFile(join(usageRoot, "profile-usage.jsonl"), "utf8");
+    const records = text.trim().split("\n").map((line) => JSON.parse(line));
+    expect(records).toHaveLength(2);
+    expect(records[0]).toMatchObject({ kind: "model_request", purpose: "connection_test", max_output_tokens: 1 });
+    expect(records[1]).toMatchObject({
+      kind: "model_usage",
+      request_id: records[0].request_id,
+      input_tokens: 20,
+      cached_input_tokens: 5,
+      uncached_input_tokens: 15,
+      output_tokens: 1,
+      provider_request_id: "provider-req-1",
+      pricing_snapshot: { effective_date: "2026-07-19" },
+    });
+    expect(text).not.toContain("secret-key-not-for-ledger");
+    expect((await stat(join(usageRoot, "profile-usage.jsonl"))).mode & 0o777).toBe(0o600);
+  });
+
   it("tests the selected K3 model ID", async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as Response);
     vi.stubGlobal("fetch", fetchMock);
@@ -294,9 +340,17 @@ describe("ModelProfileStore", () => {
 
     const rawModels = await readFile(modelsPath(), "utf8");
     const persisted = JSON.parse(rawModels) as {
-      profiles: Array<{ keyLast4?: string; credential?: unknown; apiKey?: string }>;
+      profiles: Array<{
+        keyLast4?: string;
+        credential?: unknown;
+        apiKey?: string;
+        credentialRevision?: number;
+      }>;
     };
-    expect(persisted.profiles[0]).toMatchObject({ keyLast4: "-key" });
+    expect(persisted.profiles[0]).toMatchObject({
+      keyLast4: "-key",
+      credentialRevision: 1,
+    });
     expect(persisted.profiles[0]?.credential).toBeUndefined();
     expect(persisted.profiles[0]?.apiKey).toBeUndefined();
     expect(rawModels).not.toContain("test-key");
@@ -306,6 +360,114 @@ describe("ModelProfileStore", () => {
     if (process.platform !== "win32") {
       expect((await stat(join(configDir, ".env"))).mode & 0o777).toBe(0o600);
     }
+  });
+
+  it("increments credentialRevision only when an existing API key actually changes", async () => {
+    const store = new ModelProfileStore(configDir);
+    const created = await store.saveProfile({
+      providerId: "deepseek",
+      displayName: "DeepSeek",
+      modelId: "deepseek-v4-pro",
+      baseURL: "https://api.deepseek.com",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "first-key",
+      enabled: true,
+      isDefault: true,
+    });
+    expect(created.credential_revision).toBe(1);
+    await expect(store.resolveDefaultRunProfile()).resolves.toMatchObject({
+      credentialRevision: 1,
+    });
+
+    const sameKey = await store.saveProfile({
+      id: created.id,
+      providerId: "deepseek",
+      displayName: "DeepSeek same key",
+      modelId: "deepseek-v4-pro",
+      baseURL: "https://api.deepseek.com",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "first-key",
+      enabled: true,
+      isDefault: true,
+    });
+    expect(sameKey.credential_revision).toBe(1);
+
+    const metadataOnly = await store.saveProfile({
+      id: created.id,
+      providerId: "deepseek",
+      displayName: "DeepSeek metadata only",
+      modelId: "deepseek-v4-pro",
+      baseURL: "https://api.deepseek.com",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      enabled: true,
+      isDefault: true,
+    });
+    expect(metadataOnly.credential_revision).toBe(1);
+
+    const changedKey = await store.saveProfile({
+      id: created.id,
+      providerId: "deepseek",
+      displayName: "DeepSeek rotated",
+      modelId: "deepseek-v4-pro",
+      baseURL: "https://api.deepseek.com",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "second-key",
+      enabled: true,
+      isDefault: true,
+    });
+    expect(changedKey.credential_revision).toBe(2);
+
+    const repeatedSecondKey = await store.saveProfile({
+      id: created.id,
+      providerId: "deepseek",
+      displayName: "DeepSeek rotated",
+      modelId: "deepseek-v4-pro",
+      baseURL: "https://api.deepseek.com",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "second-key",
+      enabled: true,
+      isDefault: true,
+    });
+    expect(repeatedSecondKey.credential_revision).toBe(2);
+    await expect(store.resolveDefaultRunProfile()).resolves.toMatchObject({
+      credentialRevision: 2,
+    });
+  });
+
+  it("interprets legacy profiles without credentialRevision as stable revision 1", async () => {
+    await writeModels(
+      JSON.stringify({
+        version: 1,
+        profiles: [
+          {
+            id: "legacy-deepseek",
+            providerId: "deepseek",
+            displayName: "DeepSeek",
+            modelId: "deepseek-v4-pro",
+            baseURL: "https://api.deepseek.com",
+            protocol: "openai_chat",
+            authScheme: "bearer",
+            enabled: true,
+            isDefault: true,
+            keyLast4: "-key",
+          },
+        ],
+      }),
+    );
+    await new AwakenEnvStore(configDir).setKey("legacy-deepseek", "legacy-key");
+
+    const store = new ModelProfileStore(configDir);
+    await expect(store.listProfiles()).resolves.toEqual([
+      expect.objectContaining({ credential_revision: 1 }),
+    ]);
+    await expect(store.resolveDefaultRunProfile()).resolves.toMatchObject({
+      credentialRevision: 1,
+    });
   });
 
   it("does not persist profile metadata when .env key writing fails", async () => {
@@ -675,11 +837,12 @@ describe("ModelProfileStore", () => {
 
     expect(result).toEqual({
       ok: true,
-      message: "连接测试通过：服务已响应 /models。",
+      message: "连接测试通过：服务已响应 chat/completions。",
     });
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://api.deepseek.com/models",
+      "https://api.deepseek.com/chat/completions",
       expect.objectContaining({
+        method: "POST",
         headers: expect.objectContaining({
           Authorization: "Bearer shared-key",
         }),

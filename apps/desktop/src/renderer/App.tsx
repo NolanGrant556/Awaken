@@ -22,6 +22,7 @@ import {
   AwakenAssistantMessage as AssistantMessage,
   AwakenButton as Button,
   AwakenComposerBar as ComposerBar,
+  AwakenContextUsagePanel as ContextUsagePanel,
   AwakenDisclosure as Disclosure,
   AwakenDialog as Dialog,
   AwakenDeliverableList as DeliverableList,
@@ -42,6 +43,7 @@ import {
   AwakenComposerDock as ComposerDock,
   type ComposerBarMetaItem,
   type ComposerBarStructuredInputValue,
+  type AwakenContextUsagePanelProps,
   type NavItem,
   type PlatformKind,
   type ProjectItem,
@@ -77,6 +79,7 @@ import type { PromptNarrativeToken, RunNarrativeItem } from "./run-narrative";
 import { projectPetActivity } from "./pets/pet-activity-projector";
 import {
   projectNarrativeTurnBodySegments,
+  contextUsagePanelBottomOffset,
   shouldShowAssistantAnswerFooter,
   shouldUseCenterComposer,
   turnMarkerRailHeight,
@@ -104,11 +107,14 @@ import {
 } from "./projectWorkspace";
 import { DesktopSettingsDialog } from "./settings/DesktopSettingsDialog";
 import { ProfileBalancePopover } from "./ProfileBalancePopover";
-import {
-  ExtensionsView,
-  type ExtensionSection,
-} from "./ExtensionsView";
+import { ExtensionsView, type ExtensionSection } from "./ExtensionsView";
 import { ExternalActionGate } from "./ExternalActionGate";
+import {
+  assignDreamReceiptToThread,
+  dreamTasksForThreadReplay,
+  parseDreamReceiptThreadAssignments,
+  type DreamReceiptThreadAssignments,
+} from "./memoryDreamReceipts";
 import {
   MAX_COMPOSER_IMAGE_BYTES,
   SUPPORTED_COMPOSER_IMAGE_MIME_TYPES,
@@ -284,9 +290,7 @@ export function reconcileComposerStructuredInput(
     ),
     leadingTexts: Object.fromEntries(
       nextValue.tokens
-        .filter(
-          (token) => remainingTokenIds.has(token.id) && token.leadingText,
-        )
+        .filter((token) => remainingTokenIds.has(token.id) && token.leadingText)
         .map((token) => [token.id, token.leadingText]),
     ),
     value: nextValue.value,
@@ -643,10 +647,7 @@ export function UserQuestionPrompt({
 }
 
 export function shouldShowSidebarThreadSpinner(thread: ThreadItem): boolean {
-  if (
-    thread.runStatus === "running" ||
-    thread.runStatus === "cancelling"
-  ) {
+  if (thread.runStatus === "running" || thread.runStatus === "cancelling") {
     return true;
   }
   if (thread.runStatus) {
@@ -706,7 +707,9 @@ export function resolveWorkspaceRootForRun(args: {
       activeThreadWorkspacePath,
       workspacePath,
       defaultProjectRemoved ? undefined : defaultWorkspacePath,
-    ].find((candidate) => candidate?.trim())?.trim() ?? ""
+    ]
+      .find((candidate) => candidate?.trim())
+      ?.trim() ?? ""
   );
 }
 
@@ -753,37 +756,130 @@ function rawToolId(selectionId: string): string {
   return selectionId;
 }
 
-function contextUsageMeta(
+export function contextUsageMeta(
   contextWindow: ReturnType<
     typeof createInitialRuntimeState
   >["inspectorSummary"]["contextWindow"],
 ): Pick<ComposerBarMetaItem, "label" | "value" | "progress"> | undefined {
   const usageValue =
-    typeof contextWindow?.actualTokens === "number"
-      ? contextWindow.actualTokens
-      : contextWindow?.estimatedTokens;
+    contextWindow?.snapshot?.estimatedInputTokens ??
+    contextWindow?.estimatedTokens;
   const usage = formatTokenCount(usageValue);
-  const modelWindow = formatTokenCount(contextWindow?.modelWindow);
-  if (usage && modelWindow) {
+  const effectiveWindowValue =
+    contextWindow?.snapshot?.effectiveInputWindowTokens ??
+    contextWindow?.effectiveWindow ??
+    (typeof contextWindow?.modelWindow === "number"
+      ? Math.max(
+          0,
+          contextWindow.modelWindow - (contextWindow.outputReserve ?? 0),
+        )
+      : undefined);
+  const effectiveWindow = formatTokenCount(effectiveWindowValue);
+  if (usage && effectiveWindow) {
     const progress =
       typeof usageValue === "number" &&
-      typeof contextWindow?.modelWindow === "number" &&
-      contextWindow.modelWindow > 0
-        ? usageValue / contextWindow.modelWindow
+      typeof effectiveWindowValue === "number" &&
+      effectiveWindowValue > 0
+        ? usageValue / effectiveWindowValue
         : undefined;
     return {
-      label: "context windows",
-      value: `${usage} / ${modelWindow}`,
+      label: "上下文",
+      value: `${usage} / ${effectiveWindow} 可用输入`,
       progress,
     };
   }
   if (usage) {
     return {
-      label: "context windows",
+      label: "上下文",
       value: usage,
     };
   }
   return undefined;
+}
+
+const CONTEXT_PANEL_CONTRIBUTIONS = [
+  { id: "system_prompt", label: "系统提示词" },
+  { id: "builtin_tools", label: "内置工具" },
+  { id: "mcp", label: "MCP" },
+  { id: "skills", label: "技能" },
+  { id: "memory", label: "记忆" },
+  { id: "conversation", label: "对话" },
+] as const;
+
+export function contextUsagePanelData(
+  contextWindow: ReturnType<
+    typeof createInitialRuntimeState
+  >["inspectorSummary"]["contextWindow"],
+): Omit<AwakenContextUsagePanelProps, "id" | "onClose"> | undefined {
+  if (!contextWindow) {
+    return undefined;
+  }
+  const snapshot = contextWindow.snapshot;
+  const estimatedInputTokens =
+    snapshot?.estimatedInputTokens ?? contextWindow.estimatedTokens;
+  const outputReserveTokens =
+    snapshot?.outputReserveTokens ?? contextWindow.outputReserve ?? 0;
+  const modelWindowTokens =
+    snapshot?.modelWindowTokens ?? contextWindow.modelWindow;
+  const effectiveInputWindowTokens =
+    snapshot?.effectiveInputWindowTokens ??
+    contextWindow.effectiveWindow ??
+    (typeof modelWindowTokens === "number"
+      ? Math.max(0, modelWindowTokens - outputReserveTokens)
+      : undefined);
+  if (
+    typeof estimatedInputTokens !== "number" ||
+    typeof modelWindowTokens !== "number" ||
+    typeof effectiveInputWindowTokens !== "number"
+  ) {
+    return undefined;
+  }
+  const rawContributions = snapshot?.contributions ?? [];
+  const supportedKinds = new Set<string>(
+    CONTEXT_PANEL_CONTRIBUTIONS.map((contribution) => contribution.id),
+  );
+  const hasRetainedContributionContract =
+    ((snapshot?.schemaVersion === 4 &&
+      snapshot.estimatorId === "awaken_leaf_v4") ||
+      (snapshot?.schemaVersion === 3 &&
+        snapshot.estimatorId === "awaken_leaf_v3")) &&
+    rawContributions.every((contribution) =>
+      supportedKinds.has(contribution.kind),
+    );
+  const tokensByKind = new Map<string, number>();
+  if (hasRetainedContributionContract) {
+    for (const contribution of rawContributions) {
+      tokensByKind.set(
+        contribution.kind,
+        (tokensByKind.get(contribution.kind) ?? 0) +
+          contribution.estimatedTokens,
+      );
+    }
+  }
+  const classifiedTokens = Array.from(tokensByKind.values()).reduce(
+    (sum, tokens) => sum + tokens,
+    0,
+  );
+  const hasCompleteBreakdown =
+    rawContributions.length > 0 &&
+    hasRetainedContributionContract &&
+    classifiedTokens === estimatedInputTokens;
+  return {
+    estimatedInputTokens,
+    effectiveInputWindowTokens,
+    modelWindowTokens,
+    outputReserveTokens,
+    autoCompactThresholdTokens:
+      snapshot?.autoCompactThresholdTokens ??
+      contextWindow.autoCompactThreshold ??
+      0,
+    contributions: hasCompleteBreakdown
+      ? CONTEXT_PANEL_CONTRIBUTIONS.map((contribution) => ({
+          ...contribution,
+          estimatedTokens: tokensByKind.get(contribution.id) ?? 0,
+        }))
+      : [],
+  };
 }
 
 function modelProfileLabel(profile: RuntimeModelProfileSummary): string {
@@ -829,6 +925,8 @@ const MAX_INSPECTOR_WIDTH = 520;
 const LAYOUT_STEP = 12;
 const INSPECTOR_RESPONSIVE_COLLAPSE_QUERY = "(max-width: 1180px)";
 const STORED_THEME_KEY = "awaken:appearance:theme";
+const DREAM_RECEIPT_THREAD_ASSIGNMENTS_STORAGE_KEY =
+  "awaken:memory:dreamReceiptThreadAssignments";
 const SYSTEM_THEME_QUERY = "(prefers-color-scheme: dark)";
 
 function clampNumber(value: number, min: number, max: number): number {
@@ -920,7 +1018,9 @@ function writeStoredValue(key: string, value: string): void {
 }
 
 function dreamTaskReceiptEvent(task: MemoryDreamTask): AguiEvent | undefined {
-  if (!["completed", "failed", "cancelled", "interrupted"].includes(task.status)) {
+  if (
+    !["completed", "failed", "cancelled", "interrupted"].includes(task.status)
+  ) {
     return undefined;
   }
   const suffix = task.status.toUpperCase();
@@ -960,6 +1060,14 @@ export function App() {
     undefined,
     createInitialRuntimeState,
   );
+  const activeThreadIdRef = useRef(runtimeState.activeThreadId);
+  activeThreadIdRef.current = runtimeState.activeThreadId;
+  const dreamReceiptThreadAssignmentsRef =
+    useRef<DreamReceiptThreadAssignments>(
+      parseDreamReceiptThreadAssignments(
+        readStoredString(DREAM_RECEIPT_THREAD_ASSIGNMENTS_STORAGE_KEY),
+      ),
+    );
   const petThreadActivationRef = useRef<(threadId: string) => void>(() => {});
   petThreadActivationRef.current = (threadId: string) => {
     void handleSelectConversation(threadId);
@@ -982,16 +1090,21 @@ export function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [resolvingExternalInteractionId, setResolvingExternalInteractionId] =
     useState<string | null>(null);
-  const [openingArtifactId, setOpeningArtifactId] = useState<string | null>(null);
-  const [answeringUserQuestionId, setAnsweringUserQuestionId] =
-    useState<string | null>(null);
+  const [openingArtifactId, setOpeningArtifactId] = useState<string | null>(
+    null,
+  );
+  const [answeringUserQuestionId, setAnsweringUserQuestionId] = useState<
+    string | null
+  >(null);
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
   const [modelProfiles, setModelProfiles] = useState<
     RuntimeModelProfileSummary[]
   >([]);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
-  const [modelSettingsInitialModelSection, setModelSettingsInitialModelSection] =
-    useState<"configure" | "configured">("configure");
+  const [
+    modelSettingsInitialModelSection,
+    setModelSettingsInitialModelSection,
+  ] = useState<"configure" | "configured">("configure");
   const [runCreateIssue, setRunCreateIssue] =
     useState<DesktopOperationIssue | null>(null);
   const [appearanceThemePreference, setAppearanceThemePreference] =
@@ -1003,9 +1116,14 @@ export function App() {
     systemAppearanceTheme,
   );
   const [appearanceSaving, setAppearanceSaving] = useState(false);
-  const [appearanceMessage, setAppearanceMessage] = useState<string | null>(null);
+  const [appearanceMessage, setAppearanceMessage] = useState<string | null>(
+    null,
+  );
   const [profilePopoverOpen, setProfilePopoverOpen] = useState(false);
   const profileButtonRef = useRef<HTMLDivElement>(null);
+  const [contextUsagePanelOpen, setContextUsagePanelOpen] = useState(false);
+  const contextUsageTriggerRef = useRef<HTMLButtonElement>(null);
+  const contextUsagePanelRef = useRef<HTMLDivElement>(null);
   const [workspacePath, setWorkspacePath] = useState("");
   const [createProjectDialogOpen, setCreateProjectDialogOpen] = useState(false);
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
@@ -1022,11 +1140,28 @@ export function App() {
   const [selectedProjectId, setSelectedProjectId] = useState<
     string | undefined
   >(undefined);
-  useEffect(() => runtimeClient.onMemoryDreamReceipt((task) => {
-    if (task.projectId && task.projectId !== selectedProjectId) return;
-    const event = dreamTaskReceiptEvent(task);
-    if (event) dispatch({ type: "run/event", event, receivedAtMs: Date.now() });
-  }), [runtimeClient, selectedProjectId]);
+  useEffect(
+    () =>
+      runtimeClient.onMemoryDreamReceipt((task) => {
+        if (task.projectId && task.projectId !== selectedProjectId) return;
+        const threadId = activeThreadIdRef.current;
+        if (!threadId) return;
+        const assignments = assignDreamReceiptToThread(
+          dreamReceiptThreadAssignmentsRef.current,
+          task.taskId,
+          threadId,
+        );
+        dreamReceiptThreadAssignmentsRef.current = assignments;
+        writeStoredValue(
+          DREAM_RECEIPT_THREAD_ASSIGNMENTS_STORAGE_KEY,
+          JSON.stringify(assignments),
+        );
+        const event = dreamTaskReceiptEvent(task);
+        if (event)
+          dispatch({ type: "run/event", event, receivedAtMs: Date.now() });
+      }),
+    [runtimeClient, selectedProjectId],
+  );
   const [expandedProjectIds, setExpandedProjectIds] = useState<string[]>([]);
   const [removedProjectIds, setRemovedProjectIds] = useState<string[]>([]);
   const [defaultBackendProjectId, setDefaultBackendProjectId] = useState<
@@ -1422,7 +1557,8 @@ export function App() {
       .map<WorkspaceProject>((project) => ({
         id: project.projectId,
         backendProjectId: project.projectId,
-        label: project.displayName || workspaceLabelForPath(project.workspaceRoot),
+        label:
+          project.displayName || workspaceLabelForPath(project.workspaceRoot),
         path: project.workspaceRoot,
       }));
     setProjectsFromWorkspace((current) =>
@@ -1495,9 +1631,7 @@ export function App() {
       }
 
       const terminal = checked.filter(
-        (
-          result,
-        ): result is Exclude<(typeof checked)[number], undefined> =>
+        (result): result is Exclude<(typeof checked)[number], undefined> =>
           Boolean(result && result.state !== "pending"),
       );
       if (terminal.length > 0) {
@@ -1508,8 +1642,7 @@ export function App() {
           }
           const reconciled = terminal.filter(({ tracked, state }) => {
             const project = projects.find(
-              (candidate) =>
-                candidate.projectId === tracked.backendProjectId,
+              (candidate) => candidate.projectId === tracked.backendProjectId,
             );
             return canReconcileTrackedTrashOperation(state, project?.state);
           });
@@ -1519,14 +1652,15 @@ export function App() {
             const reconciledIds = new Set(
               reconciled.map(({ tracked }) => tracked.operationId),
             );
-            const failed = reconciled.filter(
-              ({ state }) => state === "failed",
-            );
+            const failed = reconciled.filter(({ state }) => state === "failed");
             if (failed.length > 0) {
               setExpandedProjectIds((current) => {
                 const next = [...current];
                 for (const { tracked } of failed) {
-                  if (tracked.wasExpanded && !next.includes(tracked.projectId)) {
+                  if (
+                    tracked.wasExpanded &&
+                    !next.includes(tracked.projectId)
+                  ) {
                     next.push(tracked.projectId);
                   }
                 }
@@ -1536,9 +1670,7 @@ export function App() {
                 `未能将“${failed[0].tracked.label}”移到废纸篓，项目、历史和磁盘文件均保持不变。`,
               );
             } else {
-              setNotice(
-                `已将“${reconciled[0].tracked.label}”移到废纸篓。`,
-              );
+              setNotice(`已将“${reconciled[0].tracked.label}”移到废纸篓。`);
             }
             setTrackedTrashOperations((current) =>
               current.filter(
@@ -2045,7 +2177,11 @@ export function App() {
         ? next
         : [DEFAULT_WORKSPACE_PROJECT_ID, ...next];
     });
-  }, [defaultProjectRemoved, hasDefaultWorkspaceProject, projectsFromWorkspace]);
+  }, [
+    defaultProjectRemoved,
+    hasDefaultWorkspaceProject,
+    projectsFromWorkspace,
+  ]);
 
   useEffect(() => {
     if (
@@ -2076,12 +2212,60 @@ export function App() {
     (workspaceLabelProjectId
       ? projectLabelById.get(workspaceLabelProjectId)
       : undefined) ??
-    (workspaceLabelPath
-      ? workspaceLabelForPath(workspaceLabelPath)
-      : "awaken");
+    (workspaceLabelPath ? workspaceLabelForPath(workspaceLabelPath) : "awaken");
   const contextMeta = contextUsageMeta(
     runtimeState.inspectorSummary.contextWindow,
   );
+  const contextPanelData = contextUsagePanelData(
+    runtimeState.inspectorSummary.contextWindow,
+  );
+  const contextUsagePanelId = "awaken-context-usage-panel";
+
+  function closeContextUsagePanel(returnFocus: boolean): void {
+    setContextUsagePanelOpen(false);
+    if (returnFocus && typeof window !== "undefined") {
+      window.requestAnimationFrame(() =>
+        contextUsageTriggerRef.current?.focus(),
+      );
+    }
+  }
+
+  useEffect(() => {
+    if (!contextUsagePanelOpen) {
+      return;
+    }
+    function handlePointerDown(event: MouseEvent): void {
+      const target = event.target as Node;
+      if (
+        !contextUsagePanelRef.current?.contains(target) &&
+        !contextUsageTriggerRef.current?.contains(target)
+      ) {
+        closeContextUsagePanel(true);
+      }
+    }
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeContextUsagePanel(true);
+      }
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [contextUsagePanelOpen]);
+
+  useEffect(() => {
+    setContextUsagePanelOpen(false);
+  }, [runtimeState.activeThreadId]);
+
+  useEffect(() => {
+    if (!contextPanelData) {
+      setContextUsagePanelOpen(false);
+    }
+  }, [contextPanelData]);
   const modelMetaItem: ComposerBarMetaItem =
     enabledModelProfiles.length > 0 && selectedModelProfile
       ? {
@@ -2115,7 +2299,19 @@ export function App() {
   const composerMetaItems: ComposerBarMetaItem[] = [
     modelMetaItem,
     { id: "workspace", label: activeProjectLabel },
-    ...(contextMeta ? [{ id: "context", ...contextMeta }] : []),
+    ...(contextMeta
+      ? [
+          {
+            id: "context",
+            ...contextMeta,
+            onClick: () => setContextUsagePanelOpen((current) => !current),
+            buttonRef: contextUsageTriggerRef,
+            ariaHaspopup: "dialog" as const,
+            ariaExpanded: contextUsagePanelOpen,
+            ariaControls: contextUsagePanelId,
+          },
+        ]
+      : []),
   ];
 
   function projectAction(projectId: string, label: string) {
@@ -2242,10 +2438,7 @@ export function App() {
     ...projectsFromWorkspace
       .filter(
         (project) =>
-          !isSameWorkspacePath(
-            project.path,
-            effectiveDefaultWorkspacePath,
-          ),
+          !isSameWorkspacePath(project.path, effectiveDefaultWorkspacePath),
       )
       .map((project) => {
         const threads = threadItemsForProject(project.id);
@@ -2260,10 +2453,9 @@ export function App() {
         };
       }),
   ];
-  const activeProjectId =
-    runtimeState.activeThreadId
-      ? `thread:${runtimeState.activeThreadId}`
-      : selectedProjectId;
+  const activeProjectId = runtimeState.activeThreadId
+    ? `thread:${runtimeState.activeThreadId}`
+    : selectedProjectId;
   const inspectorPlaceholderItems = [
     {
       id: "right-sidebar-placeholder",
@@ -2281,6 +2473,7 @@ export function App() {
   });
   const {
     activeWorkbenchTurnId,
+    composerBarInsetPx,
     composerBarSafeAreaPx,
     composerContentInsetPx,
     setComposerDockElement,
@@ -2386,20 +2579,27 @@ export function App() {
       return undefined;
     }
 
-    syncProjectSelectionForWorkspace(
-      transcript.thread.workspace.workspaceRoot,
-    );
+    syncProjectSelectionForWorkspace(transcript.thread.workspace.workspaceRoot);
     applyRuntimeActions(actionsForThreadTranscript(transcript));
-    void runtimeClient.listMemoryDreams(transcript.thread.projectId, 5).then((tasks) => {
-      if (threadLoadSeqRef.current !== loadSeq) return;
-      for (const task of tasks.slice().reverse()) {
-        const event = dreamTaskReceiptEvent(task);
-        if (event) dispatch({ type: "run/event", event, receivedAtMs: Date.now() });
-      }
-    }).catch(() => {
-      // Dream receipts are auxiliary to transcript recovery; runtime errors
-      // remain visible through the Settings task status.
-    });
+    void runtimeClient
+      .listMemoryDreams(transcript.thread.projectId, 5)
+      .then((tasks) => {
+        if (threadLoadSeqRef.current !== loadSeq) return;
+        const assignedTasks = dreamTasksForThreadReplay(
+          tasks,
+          threadId,
+          dreamReceiptThreadAssignmentsRef.current,
+        );
+        for (const task of assignedTasks.slice().reverse()) {
+          const event = dreamTaskReceiptEvent(task);
+          if (event)
+            dispatch({ type: "run/event", event, receivedAtMs: Date.now() });
+        }
+      })
+      .catch(() => {
+        // Dream receipts are auxiliary to transcript recovery; runtime errors
+        // remain visible through the Settings task status.
+      });
 
     const latestRun = transcript.runs[transcript.runs.length - 1]?.run;
     if (!latestRun) {
@@ -2457,7 +2657,8 @@ export function App() {
       return;
     }
     const currentSlashTrigger = slashTriggerFromComposerValue(composerValue);
-    const placement = composerTokenPlacementForSlashTrigger(currentSlashTrigger);
+    const placement =
+      composerTokenPlacementForSlashTrigger(currentSlashTrigger);
     const leadingText =
       placement === "after" && currentSlashTrigger
         ? composerValue.slice(0, currentSlashTrigger.start)
@@ -2471,7 +2672,9 @@ export function App() {
         : [...current, tokenWithPlacement],
     );
     setComposerTokenPlacements((current) =>
-      current[token.id] === placement ? current : { ...current, [token.id]: placement },
+      current[token.id] === placement
+        ? current
+        : { ...current, [token.id]: placement },
     );
     setComposerTokenLeadingTexts((current) => {
       if (!leadingText) {
@@ -2578,7 +2781,9 @@ export function App() {
     }
     if (event.key === "Escape") {
       event.preventDefault();
-      setComposerValue((current) => clearSlashTriggerFromComposerValue(current));
+      setComposerValue((current) =>
+        clearSlashTriggerFromComposerValue(current),
+      );
       setSlashActiveActionId(undefined);
       return;
     }
@@ -2599,7 +2804,9 @@ export function App() {
     }
     const activeIndex = Math.max(
       0,
-      selectableActions.findIndex((action) => action.id === slashActiveActionId),
+      selectableActions.findIndex(
+        (action) => action.id === slashActiveActionId,
+      ),
     );
     if (event.key === "ArrowDown") {
       setSlashActiveActionId(
@@ -2708,11 +2915,7 @@ export function App() {
           )?.id;
       const isNewThread = forceNewThread || !runtimeState.activeThreadId;
       const nextThreadLabel = isNewThread
-        ? composerThreadLabel(
-            prompt,
-            draftAttachments,
-            draftComposerTokens,
-          )
+        ? composerThreadLabel(prompt, draftAttachments, draftComposerTokens)
         : "";
       const attachedFiles = runInputAttachments
         .filter((attachment) => attachment.kind === "file" && attachment.path)
@@ -2724,7 +2927,9 @@ export function App() {
         input: prompt,
         attachments: forceNewThread ? [] : runInputAttachments,
         composerTokens: forceNewThread ? [] : draftComposerTokens,
-        threadId: forceNewThread ? undefined : runtimeState.activeThreadId || undefined,
+        threadId: forceNewThread
+          ? undefined
+          : runtimeState.activeThreadId || undefined,
         workspace: {
           workspaceRoot,
           readableRoots: workspaceRoot ? [workspaceRoot] : [],
@@ -2826,16 +3031,11 @@ export function App() {
   function threadsForProject(projectId: string): ThreadItem[] {
     return runtimeState.threads.filter(
       (thread) =>
-        projectIdForThread(
-          thread,
-          effectiveDefaultWorkspacePath,
-        ) === projectId,
+        projectIdForThread(thread, effectiveDefaultWorkspacePath) === projectId,
     );
   }
 
-  function syncProjectSelectionForWorkspace(
-    nextWorkspacePath?: string,
-  ): void {
+  function syncProjectSelectionForWorkspace(nextWorkspacePath?: string): void {
     if (!nextWorkspacePath) {
       return;
     }
@@ -2855,9 +3055,7 @@ export function App() {
     workspaceTargetPathRef.current = nextWorkspacePath;
     setWorkspacePath(nextWorkspacePath);
     setExpandedProjectIds((current) =>
-      current.includes(nextProjectId)
-        ? current
-        : [...current, nextProjectId],
+      current.includes(nextProjectId) ? current : [...current, nextProjectId],
     );
   }
 
@@ -2903,10 +3101,7 @@ export function App() {
       const operation = result.operation;
       const operationState = projectOperationReconciliationState(operation);
       if (operationState === "failed") {
-        await Promise.all([
-          refreshProjects(),
-          loadThreadsIntoState(),
-        ]);
+        await Promise.all([refreshProjects(), loadThreadsIntoState()]);
         setNotice(
           pending.action === "trash"
             ? "未能移到废纸篓，项目、历史和磁盘文件均保持不变。"
@@ -2931,9 +3126,7 @@ export function App() {
           current.filter((id) => id !== pending.projectId),
         );
         setPendingProjectDelete(null);
-        setNotice(
-          `正在将“${pending.label}”移到废纸篓，Awaken 会自动完成。`,
-        );
+        setNotice(`正在将“${pending.label}”移到废纸篓，Awaken 会自动完成。`);
         const refreshResults = await Promise.allSettled([
           refreshProjects(),
           loadThreadsIntoState(),
@@ -2969,10 +3162,7 @@ export function App() {
     } catch (error) {
       console.error("project_delete_ui_failed", error);
       setNotice("项目操作暂时失败，请稍后重试。");
-      await Promise.all([
-        refreshProjects().catch(() => []),
-        refreshThreads(),
-      ]);
+      await Promise.all([refreshProjects().catch(() => []), refreshThreads()]);
     } finally {
       setProjectDeleteSubmitting(false);
     }
@@ -3194,9 +3384,7 @@ export function App() {
       setWorkspacePath(result.path);
       setSelectedProjectId(nextProjectId);
       setExpandedProjectIds((current) =>
-        current.includes(nextProjectId)
-          ? current
-          : [...current, nextProjectId],
+        current.includes(nextProjectId) ? current : [...current, nextProjectId],
       );
       setCreateProjectDialogOpen(false);
     } catch (error) {
@@ -4032,6 +4220,23 @@ export function App() {
                                   aria-hidden="true"
                                 />
                               </button>
+                            </div>
+                          ) : null}
+                          {contextUsagePanelOpen && contextPanelData ? (
+                            <div
+                              className="context-usage-overlay"
+                              style={{
+                                bottom: contextUsagePanelBottomOffset({
+                                  composerBarInset: composerBarInsetPx,
+                                }),
+                              }}
+                            >
+                              <ContextUsagePanel
+                                id={contextUsagePanelId}
+                                ref={contextUsagePanelRef}
+                                {...contextPanelData}
+                                onClose={() => closeContextUsagePanel(true)}
+                              />
                             </div>
                           ) : null}
                         </>

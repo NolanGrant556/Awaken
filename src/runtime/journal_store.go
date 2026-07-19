@@ -154,7 +154,8 @@ func loadSemanticRecordsForThread(path string) ([]agentcore.SemanticRecord, int,
 
 func messagesFromSemanticRecords(records []agentcore.SemanticRecord) []convcontext.Message {
 	messages := make([]convcontext.Message, 0, len(records))
-	pendingAssistant := map[string]*convcontext.Message{}
+	pendingAssistant := map[string]int{}
+	pendingProviderState := map[string]*convcontext.ProviderOpaqueMessageState{}
 
 	for _, record := range records {
 		if strings.TrimSpace(stringPayload(record.Payload, "agent_id")) != "" {
@@ -172,14 +173,32 @@ func messagesFromSemanticRecords(records []agentcore.SemanticRecord) []convconte
 				),
 			})
 		case agentcore.SemanticKindAssistantMessage:
-			msg := convcontext.Message{
-				Role:    convcontext.RoleAssistant,
-				Content: stringPayload(record.Payload, "content"),
+			id := stringPayload(record.Payload, "message_id")
+			if index, exists := pendingAssistant[id]; id != "" && exists && index >= 0 && index < len(messages) {
+				messages[index].Content = stringPayload(record.Payload, "content")
+				continue
+			}
+			msg := convcontext.Message{Role: convcontext.RoleAssistant, Content: stringPayload(record.Payload, "content"), MessageID: id}
+			if state := pendingProviderState[id]; state != nil {
+				msg.ProviderOpaqueState = state
 			}
 			messages = append(messages, msg)
-			if id := stringPayload(record.Payload, "message_id"); id != "" {
-				pendingAssistant[id] = &messages[len(messages)-1]
+			if id != "" {
+				pendingAssistant[id] = len(messages) - 1
 			}
+		case agentcore.SemanticKindProviderOpaqueState:
+			id := stringPayload(record.Payload, "message_id")
+			state, ok := providerOpaqueStateFromPayload(record.Payload)
+			if !ok || id == "" {
+				continue
+			}
+			pendingProviderState[id] = state
+			if index, exists := pendingAssistant[id]; exists && index >= 0 && index < len(messages) {
+				messages[index].ProviderOpaqueState = state
+				continue
+			}
+			messages = append(messages, convcontext.Message{Role: convcontext.RoleAssistant, MessageID: id, ProviderOpaqueState: state})
+			pendingAssistant[id] = len(messages) - 1
 		case agentcore.SemanticKindToolCall:
 			call := convcontext.ToolCall{
 				ID:   stringPayload(record.Payload, "tool_call_id"),
@@ -231,7 +250,8 @@ func messagesFromSemanticRecords(records []agentcore.SemanticRecord) []convconte
 				continue
 			}
 			messages = compacted
-			pendingAssistant = map[string]*convcontext.Message{}
+			pendingAssistant = map[string]int{}
+			pendingProviderState = map[string]*convcontext.ProviderOpaqueMessageState{}
 		}
 	}
 	_ = pendingAssistant
@@ -284,21 +304,41 @@ func compactedMessagesFromSemanticRecord(threadID string, payload map[string]any
 			}
 		}
 		messages = append(messages, convcontext.Message{
-			Role:              role,
-			Content:           content,
-			Attachments:       transcriptAttachmentsToContextAttachments(attachments),
-			ToolCalls:         append([]convcontext.ToolCall(nil), message.ToolCalls...),
-			ToolCallID:        message.ToolCallID,
-			Name:              message.Name,
-			IsError:           message.IsError,
-			CompactBoundaryID: compactBoundaryID,
-			ModelContent:      hydratedModelContent,
+			Role:                role,
+			Content:             content,
+			Attachments:         transcriptAttachmentsToContextAttachments(attachments),
+			ToolCalls:           append([]convcontext.ToolCall(nil), message.ToolCalls...),
+			ToolCallID:          message.ToolCallID,
+			Name:                message.Name,
+			IsError:             message.IsError,
+			CompactBoundaryID:   compactBoundaryID,
+			ModelContent:        hydratedModelContent,
+			Origin:              message.Origin,
+			MessageID:           message.MessageID,
+			TurnID:              message.TurnID,
+			ProviderOpaqueState: message.ProviderOpaqueState,
 		})
 	}
 	if err := convcontext.ValidateToolResultPairing(messages); err != nil {
 		return nil, false
 	}
 	return messages, true
+}
+
+func providerOpaqueStateFromPayload(payload map[string]any) (*convcontext.ProviderOpaqueMessageState, bool) {
+	raw, ok := payload["state"]
+	if !ok || raw == nil {
+		return nil, false
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil, false
+	}
+	var state convcontext.ProviderOpaqueMessageState
+	if err := json.Unmarshal(encoded, &state); err != nil || strings.TrimSpace(state.Content) == "" {
+		return nil, false
+	}
+	return &state, true
 }
 
 func executionOutcomePayload(payload map[string]any) (tool.ExecutionOutcome, bool) {
@@ -322,8 +362,9 @@ func executionOutcomePayload(payload map[string]any) (tool.ExecutionOutcome, boo
 
 func recoverOrphanRuns(ctx context.Context, journal *ExecutionJournal, records []agentcore.SemanticRecord) ([]agentcore.SemanticRecord, error) {
 	type runState struct {
-		terminal  bool
-		openCalls map[string]agentcore.SemanticRecord
+		terminal          bool
+		openCalls         map[string]agentcore.SemanticRecord
+		openModelRequests map[string]agentcore.SemanticRecord
 	}
 	runs := map[string]*runState{}
 	for _, record := range records {
@@ -333,7 +374,7 @@ func recoverOrphanRuns(ctx context.Context, journal *ExecutionJournal, records [
 		}
 		state, ok := runs[runID]
 		if !ok {
-			state = &runState{openCalls: map[string]agentcore.SemanticRecord{}}
+			state = &runState{openCalls: map[string]agentcore.SemanticRecord{}, openModelRequests: map[string]agentcore.SemanticRecord{}}
 			runs[runID] = state
 		}
 		switch record.Kind {
@@ -347,13 +388,39 @@ func recoverOrphanRuns(ctx context.Context, journal *ExecutionJournal, records [
 		case agentcore.SemanticKindToolResult:
 			callID := stringPayload(record.Payload, "tool_call_id")
 			delete(state.openCalls, callID)
+		case agentcore.SemanticKindModelRequest:
+			requestID := stringPayload(record.Payload, "request_id")
+			if requestID != "" {
+				state.openModelRequests[requestID] = record
+			}
+		case agentcore.SemanticKindModelUsage:
+			requestID := stringPayload(record.Payload, "request_id")
+			delete(state.openModelRequests, requestID)
 		}
 	}
 
 	var appended []agentcore.SemanticRecord
 	for runID, state := range runs {
-		if state.terminal && len(state.openCalls) == 0 {
+		if state.terminal && len(state.openCalls) == 0 && len(state.openModelRequests) == 0 {
 			continue
+		}
+		for requestID, requestRecord := range state.openModelRequests {
+			usage := agentcore.ModelUsageRecord{
+				SchemaVersion: 1, RequestID: requestID,
+				Purpose:        stringPayload(requestRecord.Payload, "purpose"),
+				ModelID:        stringPayload(requestRecord.Payload, "model_id"),
+				ProtocolFamily: stringPayload(requestRecord.Payload, "protocol_family"),
+				Status:         agentcore.ModelUsageInterrupted, ErrorCode: "usage_unknown",
+				CompletedAt: time.Now().UTC(),
+			}
+			usageRecord := agentcore.ModelUsageSemanticRecord(
+				journal.ThreadID(), runID, requestRecord.TurnID, requestRecord.SessionID, usage,
+			)
+			assigned, err := journal.AppendAssigned(ctx, usageRecord)
+			if err != nil {
+				return appended, err
+			}
+			appended = append(appended, assigned)
 		}
 		for callID, callRecord := range state.openCalls {
 			outcome := SyntheticInterruptedToolResult()

@@ -60,6 +60,16 @@ func TestRuntimeInfoUpdates(t *testing.T) {
 	}
 }
 
+func TestRuntimeDateUsesDayGranularityForStablePromptPrefix(t *testing.T) {
+	info := NewRuntimeInfo()
+	if len(info.CurrentDate) != len("2006-01-02") {
+		t.Fatalf("runtime date must be day-granular, got %q", info.CurrentDate)
+	}
+	if strings.Contains(info.CurrentDate, ":") || strings.Contains(info.CurrentDate, " ") {
+		t.Fatalf("runtime date leaked time-of-day into system prefix: %q", info.CurrentDate)
+	}
+}
+
 func TestBuildEffectiveSystemPromptIncludesAttachedFiles(t *testing.T) {
 	runtimeInfo := NewRuntimeInfo()
 	runtimeInfo.SetAttachedFiles([]RuntimeAttachedFile{

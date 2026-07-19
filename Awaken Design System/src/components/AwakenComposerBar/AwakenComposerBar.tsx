@@ -5,6 +5,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
   ReactNode,
+  Ref,
 } from "react";
 import { Check, ChevronDown, FileText, X } from "lucide-react";
 import { AwakenComposerInput } from "../AwakenComposerInput";
@@ -39,6 +40,10 @@ export type ComposerBarMetaItem = {
   icon?: ReactNode;
   onClick?: () => void;
   disabled?: boolean;
+  buttonRef?: Ref<HTMLButtonElement>;
+  ariaHaspopup?: "dialog" | "menu" | "listbox" | "tree" | "grid";
+  ariaExpanded?: boolean;
+  ariaControls?: string;
   menuItems?: ComposerBarMetaMenuItem[];
   menuFooterAction?: ComposerBarMetaAction;
 };
@@ -189,6 +194,10 @@ export type AwakenComposerBarProps = {
   onPasteImages?: (files: File[]) => void;
 };
 
+export function shouldActivateComposerMetaItemKey(key: string): boolean {
+  return key === " " || key === "Spacebar";
+}
+
 export function AwakenComposerBar({
   value,
   onChange,
@@ -334,9 +343,20 @@ export function AwakenComposerBar({
       return (
         <button
           key={item.id}
+          ref={item.buttonRef}
           type="button"
           className={className}
+          aria-haspopup={item.ariaHaspopup}
+          aria-expanded={item.ariaExpanded}
+          aria-controls={item.ariaControls}
+          disabled={item.disabled}
           onClick={item.onClick}
+          onKeyDown={(event) => {
+            if (shouldActivateComposerMetaItemKey(event.key)) {
+              event.preventDefault();
+              item.onClick?.();
+            }
+          }}
         >
           {content}
         </button>

@@ -47,12 +47,15 @@ func TestResolveDefaultWorkspaceFallsBackToCwdWhenUnset(t *testing.T) {
 
 func TestModelConfigFromProfileUsesOnlyProfile(t *testing.T) {
 	profile := &runtime.ModelProfileConfig{
-		APIKey:        "profile-key",
-		BaseURL:       "https://profile.example",
-		ModelID:       "profile-model",
-		Protocol:      "openai_chat",
-		AuthScheme:    "bearer",
-		ContextWindow: 1000000,
+		ProfileID:          "profile-1",
+		ProviderID:         "deepseek",
+		CredentialRevision: 3,
+		APIKey:             "profile-key",
+		BaseURL:            "https://profile.example",
+		ModelID:            "profile-model",
+		Protocol:           "openai_chat",
+		AuthScheme:         "bearer",
+		ContextWindow:      1000000,
 	}
 
 	got := modelConfigFromProfile(profile)
@@ -61,6 +64,9 @@ func TestModelConfigFromProfileUsesOnlyProfile(t *testing.T) {
 	}
 	if got.ContextWindow != 1000000 {
 		t.Fatalf("expected profile context window, got %+v", got)
+	}
+	if got.ProfileID != "profile-1" || got.ProviderID != "deepseek" || got.CredentialRevision != 3 {
+		t.Fatalf("expected profile identity and credential revision, got %+v", got)
 	}
 	if got.AutoCompactTokenLimit != 0 || got.Temperature != 0 || got.MaxTokens != 0 {
 		t.Fatalf("profile config inherited non-profile values: %+v", got)

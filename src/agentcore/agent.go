@@ -225,6 +225,12 @@ func (a *Agent) RunStreamWithEvents(ctx stdcontext.Context, userInput string, si
 	// otherwise a failed journal write leaks an unpersisted prompt into the next
 	// run on the same in-memory Agent.
 	a.conversation.UserInputWithAttachments(userInput, attachments)
+	if a.config.MemoryRecallSetAuthority != nil {
+		a.config.MemoryRecallSetAuthority(ModelCallAuthority{
+			ThreadID: a.threadID, RunID: a.runID, SessionID: a.sessionID,
+			Recorder: a.recorder, Sink: sink,
+		})
+	}
 	if a.config.MemoryRecallStart != nil {
 		recallCtx, cancelRecall := stdcontext.WithCancel(ctx)
 		defer cancelRecall()

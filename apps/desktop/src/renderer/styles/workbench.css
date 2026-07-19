@@ -449,6 +449,21 @@
   transform: translateX(-50%);
 }
 
+.context-usage-overlay {
+  position: absolute;
+  right: 16px;
+  left: 16px;
+  z-index: 6;
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+  pointer-events: none;
+}
+
+.context-usage-overlay > .aw-context-usage-panel {
+  pointer-events: auto;
+}
+
 .return-to-latest-button {
   display: inline-flex;
   align-items: center;

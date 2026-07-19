@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   calculateAutoCompactThreshold,
   effectiveContextWindow,
+  normalizeModelProfileRunConfig,
+  normalizeModelProfileSummary,
   normalizeModelProvider,
   normalizeRuntimeRun,
   normalizeStartRunRequest,
@@ -44,6 +46,38 @@ describe("runtime shared model provider normalization", () => {
     expect(calculateAutoCompactThreshold(1_000_000)).toBe(885_600);
     expect(calculateAutoCompactThreshold(8_000)).toBe(0);
     expect(calculateAutoCompactThreshold(12_000, 20_000)).toBe(0);
+  });
+
+  it("defaults legacy credential revisions to 1 and sends explicit run revisions", () => {
+    expect(
+      normalizeModelProfileSummary({
+        id: "profile-1",
+        provider_id: "deepseek",
+        display_name: "DeepSeek",
+        model_id: "deepseek-v4-pro",
+        base_url: "https://api.deepseek.com",
+        protocol: "openai_chat",
+        auth_scheme: "bearer",
+        has_key: true,
+        enabled: true,
+        is_default: true,
+        profile_status: "ready",
+      }).credentialRevision,
+    ).toBe(1);
+
+    expect(
+      normalizeModelProfileRunConfig({
+        profileId: "profile-1",
+        providerId: "deepseek",
+        displayName: "DeepSeek",
+        modelId: "deepseek-v4-pro",
+        baseURL: "https://api.deepseek.com",
+        protocol: "openai_chat",
+        authScheme: "bearer",
+        apiKey: "secret",
+        credentialRevision: 4,
+      }),
+    ).toMatchObject({ credential_revision: 4 });
   });
 });
 

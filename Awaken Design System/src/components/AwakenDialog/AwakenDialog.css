@@ -38,6 +38,10 @@
   padding: var(--aw-space-7) var(--aw-space-8) var(--aw-space-4);
 }
 
+.aw-dialog__head--title-visually-hidden {
+  justify-content: flex-end;
+}
+
 .aw-dialog__title {
   margin: 0;
   min-width: 0;

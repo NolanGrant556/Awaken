@@ -75,7 +75,7 @@ body,
   padding: 9px 30px 18px 30px;
   border: 1px solid rgba(17, 24, 39, 0.11);
   border-radius: 16px;
-  color: var(--aw-text-primary, #171717);
+  color: var(--aw-text-primary, #1c1917);
   background: rgba(255, 255, 255, 0.94);
   box-shadow: none;
   backdrop-filter: blur(10px);
@@ -147,7 +147,7 @@ body,
   -webkit-line-clamp: 2;
   font-size: 12px;
   line-height: 16px;
-  color: var(--aw-text-secondary, #3f3f46);
+  color: var(--aw-text-secondary, #44403c);
 }
 
 .pet-work-bubble-expanded .pet-work-bubble-body {
@@ -164,7 +164,7 @@ body,
   padding: 0;
   border: 1px solid rgba(17, 24, 39, 0.08);
   border-radius: 50%;
-  color: var(--aw-text-secondary, #52525b);
+  color: var(--aw-text-secondary, #44403c);
   background: rgba(255, 255, 255, 0.96);
   box-shadow: none;
   cursor: pointer;
@@ -183,7 +183,7 @@ body,
   border: none;
   background: transparent;
   box-shadow: none;
-  color: var(--aw-text-tertiary, #71717a);
+  color: var(--aw-text-tertiary, #78716c);
   font-size: 12px;
 }
 
@@ -194,7 +194,7 @@ body,
   padding: 1px 6px;
   border: 1px solid rgba(17, 24, 39, 0.1);
   border-radius: 7px;
-  color: var(--aw-text-primary, #18181b);
+  color: var(--aw-text-primary, #1c1917);
   background: rgba(255, 255, 255, 0.9);
   box-shadow: none;
   cursor: pointer;

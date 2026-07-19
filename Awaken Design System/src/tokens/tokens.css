@@ -91,6 +91,8 @@
   --aw-status-danger: var(--aw-error);
   --aw-status-danger-bg: rgba(232, 70, 58, 0.14);
   --aw-status-danger-text: #c23529;
+  --aw-status-danger-foreground: #ffffff;
+  --aw-status-danger-hover: color-mix(in srgb, var(--aw-error) 86%, #000000);
   --aw-diff-added: rgba(21, 168, 119, 0.12);
   --aw-diff-added-text: #0e7a55;
   --aw-diff-removed: rgba(232, 70, 58, 0.14);
@@ -99,6 +101,11 @@
   --aw-diff-changed-text: var(--aw-warning-text);
   --aw-terminal-bg: #1c1917;
   --aw-terminal-text: #ffffff;
+  /* Third-party brand identity stays fixed across Awaken themes. */
+  --aw-brand-dingtalk: #007fff;
+  /* Product-specific informational accents; not third-party brand colors. */
+  --aw-context-meter-fill: #9fdbf6;
+  --aw-context-meter-indicator: #168fd2;
   --aw-brand-wordmark-filter: none;
   --aw-composer-surface: var(--aw-bg-white);
   --aw-composer-border: rgba(28, 25, 23, 0.18);
@@ -298,6 +305,8 @@
   --aw-status-success-text: #75d8b3;
   --aw-status-danger-bg: rgba(255, 117, 107, 0.15);
   --aw-status-danger-text: #ff9a92;
+  --aw-status-danger-foreground: #11110f;
+  --aw-status-danger-hover: color-mix(in srgb, var(--aw-error) 86%, #ffffff);
   --aw-diff-added: rgba(73, 200, 156, 0.15);
   --aw-diff-added-text: #87ddb9;
   --aw-diff-removed: rgba(255, 117, 107, 0.15);

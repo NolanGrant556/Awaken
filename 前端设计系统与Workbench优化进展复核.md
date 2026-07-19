@@ -2,172 +2,171 @@
 
 > 复核日期：2026-07-19
 >
-> 复核对象：`c462d63d` 之后尚未提交的当前工作树
+> 复核范围：`f72ab9fd`、`910376a3`、`9b3bc07e`、`0135d7d6` 四个已落地提交
 >
-> 文件定位：这是本次任务的进展审计报告，不替代 `docs/` 中的产品、架构和验收权威。
+> 文件定位：这是「前端设计系统与 Workbench 优化」的阶段交接文档，只说明已完成的第一步和下一步执行方向，不替代 `docs/` 中的产品、架构与验收权威。
 
-## 一、结论
+## 一、阶段结论
 
-当前已经从“设计系统第一步”推进到了“提交前收口”阶段：
+第一步已经完成。这一步不是重做 Workbench，而是先建立可继续迭代的视觉基础和交互稳定性基线：
 
-- 皮肤变量与骨架变量已经分层，暖调中性色、状态色、阴影和滚动条的第一轮视觉收敛基本完成；骨架 token 的数值没有在这一轮被修改。
-- Workbench 流式输出跳动的两条主因已经在正确 owner 内修复，并补了状态机文档与自动化测试。
-- Mermaid 的展开、缩放、自由拖动和双滚动条问题已经完成实现；用户已确认主要故障消失，上一轮也留下了真实 Electron/CDP 通过记录。
-- 本次重新执行的 UI smoke、UI/Desktop typecheck 和 Desktop 全量测试均通过。
+- Awaken 已拥有清晰的 skin / skeleton token 边界，视觉改动与会影响测量、滚动和定位的结构改动不再混在一起。
+- 浅色与深色的中性表面、文字、边框、阴影和状态色已完成第一轮语义收敛，关键小字、状态和控件的可读性也已纳入设计系统约束。
+- Composer、项目树、新建任务、用户 prompt、滚动条和图表等现有组件已开始统一消费语义 token，不再依靠各自的临时色值和阴影。
+- Workbench 的 streaming follow、被动布局变化和 native tail 处理已在 scroll controller / 纯决策 owner 内稳定，为后续视觉与几何优化提供了可信的交互底座。
+- Mermaid 的 inline、展开、缩放、拖动、复位、重开与多实例渲染已有组件测试和独立的真实 Electron 原生指针回归。
 
-但这批改动现在还不应被描述为“全部闭环”，也不建议马上继续扩大视觉改造范围。提交前至少要处理一个确定性正确性问题：**按 Mermaid 源码复用完整 SVG 会让重复图表产生重复 DOM ID**。另外，真实 Electron 回归脚本、当前 HEAD 的 Workbench 动态证据和三态视觉 baseline 尚未进入可持续的仓库资产。
+因此，当前任务不再是「继续收掉第一步的修复尾项」，而是正式进入第二步：**从基础一致性转向 Workbench 核心场景的整体体验优化。**
 
-因此，下一步不是继续调字号、间距或结构，而是先把当前批次收口。
+## 二、第一步完成了什么
 
-## 二、现在进展到哪里
+### 2.1 设计系统的迭代边界已经建立
 
-| 范围 | 当前状态 | 判断依据 |
-| --- | --- | --- |
-| Design token 分层 | 基本完成 | [DESIGN_SYSTEM_GUIDE.md](<Awaken Design System/DESIGN_SYSTEM_GUIDE.md>) 和 [tokens.css](<Awaken Design System/src/tokens/tokens.css>) 已明确 skin/skeleton；本次只改了颜色、透明度和阴影色基，没有改 spacing、radius、font metrics、layout width 数值 |
-| 浅色/深色视觉色板 | 第一轮完成，产品确认未完全闭环 | 暖调 neutral、状态色族、surface、border、shadow 已同时覆盖 light/dark；当前只完成了有限真实窗口观察，尚无 light/dark/system 的完整对照证据 |
-| 组件视觉消费 | 已完成一批，尚未全仓收口 | Composer、ProjectTree、UserPrompt、共享滚动条和多处边框/阴影已改用语义 token；产品层仍有文件类型色、连接器品牌色、宠物状态色等硬编码或受控例外待分类 |
-| Workbench 流式稳定性 | 实现与自动化完成，真实 AC 待补齐 | [useRunStageScrollController.ts](apps/desktop/src/renderer/useRunStageScrollController.ts) 已处理异步高度变化 re-pin 和被动 scrollHeight 收缩；[交互状态机与滚动布局.md](docs/01_桌面工作台/中间交互区域/交互状态机与滚动布局.md) 已同步；新增 4 条相关回归覆盖 |
-| Mermaid 拖拽/缩放 | 主故障已解决，仍有缓存缺陷 | 原生 `pointerdown` 绕过真实 Electron 中失效的 React 合成事件；100% 与放大后的拖拽已由用户和上一轮 CDP 记录确认，但 SVG 跨实例缓存存在重复 ID 风险 |
-| 自动化 | 本次通过 | 69 个 Design System 组件 smoke；Desktop 50 个测试文件、482 个测试全部通过；UI/Desktop typecheck 和 `git diff --check` 通过 |
-| 真实 Desktop | 可正常启动，完整验收未完成 | 本次按正式入口启动了 `Awaken Desktop`，窗口为 `1442×900`，只读观察到 center 空态和新色板正常渲染，随后恢复为关闭状态；本次没有重新执行完整 streaming/Mermaid 动态旅程 |
+[Awaken Design System Guide](<Awaken Design System/DESIGN_SYSTEM_GUIDE.md>) 现在明确区分：
 
-复核前的工作树包含 15 个已跟踪修改文件和 1 个未跟踪测试文件，tracked diff 为 506 行新增、196 行删除。它实际混合了三种不同性质的工作：
+- skin token 负责颜色和阴影色值，不参与布局测量，但仍必须通过主题、真实视觉和无障碍验收；
+- skeleton token 负责间距、字体度量、圆角、控件尺寸和布局宽度；修改它们等同于交互变更，必须进入 Workbench 中间区域复核与真实 Desktop 验收；
+- `Awaken Design System` 继续保持 UI-only，产品状态、runtime、Electron 和滚动决策仍由 Desktop 拥有。
 
-1. 纯视觉 token/组件收敛；
-2. Workbench 滚动状态行为修复；
-3. Mermaid 渲染、缓存和 pointer 交互修复。
+这些边界让后续优化可以清楚地回答「改的是视觉语言、组件结构，还是 Workbench 交互几何」。
 
-这说明最初“先换皮肤”的方向是对的，但当前工作树已经不再是单纯的 skin 批次，后续评审、验收和提交需要按三类风险分别处理。
+### 2.2 第一轮视觉语言已经统一
 
-## 三、现在还存在什么问题
+当前已形成一套可继续迭代的 Awaken 视觉基底：
 
-### P1：Mermaid SVG 缓存会复用内部 ID
+- 以暖调中性表面建立页面层级，减少无差别纯白、冷灰和临时透明色的混用；
+- success / warning / error / running 各自回归单一基色家族，文字、背景、边框和 diff 状态不再互相脱节；
+- 菜单、弹层、composer、控件边框和滚动条开始共享语义 token；
+- light 是主设计目标，dark 保持对等语义和可读性，不另建一套无关的色板。
 
-[AwakenMermaidDiagram.tsx](<Awaken Design System/src/components/AwakenMermaidDiagram/AwakenMermaidDiagram.tsx>) 第 49–89、318–352 行用 `chart` 文本作为 key，缓存并复用最终 SVG 字符串。Mermaid 会把每次调用的 render ID 写进 SVG 的 wrapper、selector、marker、`defs` 和 `url(#...)` 引用；同一张图在同一页面出现两次时，第二个组件会直接拿到第一份 SVG，因而出现重复 DOM ID 和跨图引用风险。
+这一步完成的是「视觉语言的底座」，不代表所有界面已经完成最终视觉设计。
 
-这不是纯理论问题：本次代码审计确认 Mermaid 的输出包含实例 render ID。当前新增测试中的“remount 不再次 render”还把这个不安全策略固化成了预期行为，却没有覆盖“两张相同图同时存在”。
+### 2.3 Workbench 已具备继续优化的稳定基础
 
-最小处置方向：缓存必须具有图实例身份，或者每个挂载实例仍生成唯一 SVG/内部 ID；同时新增“两张相同 Mermaid 同屏”的回归测试。不要只把 `chart + theme` 拼进 key，因为那仍不能区分两个同时存在的实例。
+本轮没有把 Workbench 当作普通聊天容器重排，而是保留了 [架构契约](docs/01_桌面工作台/中间交互区域/架构契约.md) 规定的：
 
-### P1：真正能捕获故障的 Electron 回归仍是临时文件
+- `RunStage` 唯一滚动、定位、overlay 和 composer ownership；
+- `ExecutionFeed` 只承载 narrative / turn；
+- composer 只保留 `center` / `dock` 两种形态；
+- prompt anchor、follow / paused、return-to-latest 和 composer 测量共用同一坐标与滚动体系。
 
-真实 Electron 事件分发差异正是这次 Mermaid 连续误判的根因，但能复现它的 CDP 脚本仍位于 `/tmp/mermaid-pan-e2e.mjs`。它不受版本控制、不会随仓库分发，也不会成为提交前门禁。
+在这些不变量内，streaming 内容增长、被动高度变化和恢复 follow 的行为已有更确定的 controller 与测试基线。后续才能安全地处理信息层级、密度、间距和状态表达。
 
-仓库内的 [AwakenMermaidDiagramPan.test.tsx](apps/desktop/src/renderer/AwakenMermaidDiagramPan.test.tsx) 当前还是未跟踪文件，而且运行在 jsdom 中。它能验证 pan 状态计算，却不能证明真实鼠标 `pointerdown` 会经过 Electron 的原生事件链。
+### 2.4 高风险图表交互已转为可持续回归
 
-因此当前状态是“这次修好了”，还不是“以后改坏会自动发现”。
+Mermaid 不再依赖临时个人会话或一次性脚本验证。当前仓库已同时保留：
 
-### P1：Workbench 当前 HEAD 的验收证据仍未闭环
+- 组件与 jsdom 回归，覆盖多实例渲染、缓存身份和 pan 状态计算；
+- 使用隔离 userData 的 Electron Gallery fixture；
+- 通过原生鼠标事件验证 inline 滚动边界、100% / 400% 拖动、reset、close / reopen 的仓库内回归入口。
 
-[验收规范](docs/01_桌面工作台/中间交互区域/验收规范.md) 要求 scroll/follow/ResizeObserver 等动态行为提供真实 Desktop 录屏或连续关键帧，并要求视觉变更提供当前 HEAD 截图与 manifest。现有 [baseline manifest](docs/01_桌面工作台/中间交互区域/验收基线/manifest.json) 仍明确标记为 `legacy-unverified`、`requiresRecapture: true`。
+这部分现在是设计系统的稳定能力，不再是下一阶段的主任务。
 
-本轮至少还需要补：
+### 2.5 四个提交的阶段分工
 
-- AC-007：异步 Mermaid/SVG 高度变化时，用户上滚后的 paused 视图不被拉回；
-- AC-008：明确恢复后回到唯一 native tail，后续继续 follow；
-- AC-010：Mermaid 增长靠近底部时，输出与多行 composer 的安全间距稳定；
-- center/dock/marker 三态的当前 HEAD 截图与完整 manifest；
-- light/dark，必要时 follow-system 的真实视觉检查。
+| 提交 | 阶段作用 |
+| --- | --- |
+| `f72ab9fd` `feat(frontend): refine visuals and stabilize workbench` | 建立 skin / skeleton 边界，完成第一轮语义视觉收敛，稳定 Workbench follow 与 Mermaid 交互 |
+| `910376a3` `fix(design-system): close visual accessibility gaps` | 收敛对比度、可访问名称、主题与作者规则 |
+| `9b3bc07e` `fix(mermaid): isolate cached svg instances` | 建立 Mermaid 多实例唯一身份与对应回归 |
+| `0135d7d6` `test(mermaid): add real Electron interaction regression` | 把 Electron 原生事件链验收收敛成隔离、可重复的仓库测试资产 |
 
-用户对 Mermaid 主故障的确认是有效验收信号，但不能替代上述 Workbench 合同规定的整套动态证据。
+## 三、下一步：完成三个 Workbench 黄金场景
 
-### P1：浅色 warning 小字对比度不足
+下一步不应以「继续找全仓零散色值」为主线，也不应启动新的 Workbench 架构重写。主线应改为：**用现有产品能力做好新建任务、任务执行中、任务完成与交付物三个高频真实场景。**
 
-[tokens.css](<Awaken Design System/src/tokens/tokens.css>) 当前 `--aw-status-waiting-text: #b05e00` 叠在 `rgba(226, 121, 0, 0.12)` 的浅色背景上，按当前浅色 surface 计算约为 `4.17:1`。它实际用于 12px runtime pill 和 11px A2UI warning badge，低于普通文本常用的 `4.5:1` 目标。
+### 3.1 黄金场景 A：新建任务
 
-这也说明“skin token 不改变滚动几何”是正确的，但不等于“任意颜色变化都天然安全”。皮肤层仍必须做对比度、主题和真实视觉复核。
+目标是让用户一进入 Workbench 就知道「我现在可以做什么、在哪里输入、当前将使用什么上下文」。
 
-### P2：规则文档还有两处边界不够准确
+本场景优先优化：
 
-- [DESIGN_SYSTEM_GUIDE.md](<Awaken Design System/DESIGN_SYSTEM_GUIDE.md>) 把 skin token 写成“may be iterated freely”。更准确的含义应是“不改变布局几何”，而不是免除对比度、可读性、overlay 和主题验收。
-- 同一文件和 [Awaken Design System README](<Awaken Design System/README.md>) 仍把 `npm run dev:desktop` 写成正式 Desktop 入口；根 README 的当前正式入口是 `npm run open:desktop`，文档之间存在入口漂移。
+- `TaskWelcome` 与 center composer 的主次关系、垂直重心和空间平衡；
+- 文本输入、附件、Skill token、模型与 workspace 信息的层级；
+- 默认、hover、focus、有草稿、有附件和 token-only 等已支持状态；
+- 左侧导航与中间空态的视觉层级，但不在本阶段新增项目筛选或 Context picker 能力。
 
-### P2：`moduleResolution` 改动缺少本任务内理由
+这是第二步的第一个实施切片：状态较少、交互风险最低，适合先确立后两个场景共用的排版、间距、表面和控件语言。
 
-[Awaken Design System/tsconfig.json](<Awaken Design System/tsconfig.json>) 把 `moduleResolution` 从 `Node` 改为 `Bundler`。`Bundler` 对 Vite 项目本身合理，但它不属于视觉或 Mermaid 行为修复的必然部分；本次额外用 `Node` override 运行开发 typecheck 和声明构建也都通过。
+### 3.2 黄金场景 B：任务执行中
 
-提交前应二选一：给出明确的构建兼容理由并作为独立 tooling 变更提交，或从本批次移除。不要让无解释的工程配置变更混在 UI 修复里。
+目标是让用户能迅速分辨「我的要求、Agent 正在做的事、当前状态和已经产生的内容」，而不是看到平铺的日志。
 
-### P2：React 合成 `pointerdown` 失效的根因仍未知
+本场景优先优化：
 
-当前原生 listener 是合理且已验证的窄修复，但仓库里 sidebar/inspector resize 和 pet overlay 仍使用 React `onPointerDown`。目前没有证据说明它们也坏了，也没有证据说明问题只会发生在 Mermaid portal/overlay 链路。
+- prompt header、thinking / exploration、tool trace、streaming answer 之间的层级和阅读密度；
+- running、waiting、error、cancelled 等已支持状态的一致表达；
+- 多行 composer、return-to-latest、marker rail 与运行内容的安全间距；
+- 在保留 follow / paused、prompt anchor 和单一 native tail 的前提下，改善长任务的节奏和可扫读性。
 
-后续应做一次有限 blast-radius 复核，不应立即全仓改成原生事件。
+该场景是 Workbench 的核心，任何 skeleton token、DOM 层级、overflow、position 或 composer 几何改动都必须单独审查，不得作为「顺手调样式」混入。
 
-### P2：流式 rAF 节流仍只是性能候选，不是已确认缺陷
+### 3.3 黄金场景 C：任务完成与交付物
 
-上一轮提到的 O(n²) 或 rAF throttling 尚无本次 Performance trace、长会话基准或丢帧数据。现在不应直接实现；先测量 chunk 频率、commit 次数和长消息帧时间，再决定是否需要批处理。
+目标是让任务结果成为视觉重心，并让用户清楚地进入「阅读结论、打开交付物、继续追问」。
 
-## 四、下一步应该做什么
+本场景优先优化：
 
-### 第一步：收掉当前正确性风险
+- final answer 与已折叠「执行过程」的主次关系；
+- 交付物标题、文件类型、数量、打开 / 展开动作和终态提示的信息密度；
+- 无交付物、单交付物和多交付物等已支持组合；
+- final answer、deliverables 和 dock composer 之间的结束感与后续行动关系。
 
-1. 修正 Mermaid 缓存的实例唯一性，并增加“两张相同图同屏”的测试。
-2. 把 `AwakenMermaidDiagramPan.test.tsx` 纳入版本控制。
-3. 修正浅色 warning 文本对比度，并复核 dark 对应值。
-4. 明确 `tsconfig.json` 的 `moduleResolution` 是否属于本任务；不属于就移出本批次。
-5. 把 skin token 的文档表述改为“几何安全但仍需视觉/无障碍验收”，并统一正式启动入口。
+本阶段只优化已实现的交付物展示与安全打开入口，不把尚未接线的右侧 Inspector 当作现有能力。
 
-### 第二步：把真实 Electron 验收变成可重复资产
+## 四、第二步的实施顺序
 
-将 `/tmp/mermaid-pan-e2e.mjs` 收敛成仓库内维护的 Electron/CDP 回归入口，使用可删除 fixture thread，不依赖个人真实业务会话。至少覆盖：
+### 4.1 用真实 Desktop 建立三场景当前基准
 
-- 展开、100% 四向拖动；
-- 400% 缩放后反向拖动；
-- reset、关闭、重新展开；
-- 两张相同 Mermaid 同屏；
-- inline 不出现双滚动条；
-- 切 thread 后回到图表不出现明显 loading/高度跳变。
+在修改样式前，先用可删除的测试 thread / workspace 准备三个真实状态，记录当前 HEAD、主题、窗口尺寸和截图。观察结果放在任务上下文或临时验收目录，不新建第二套长期产品规范。
 
-这条真实运行测试和 jsdom 单元测试应同时保留：前者防事件链回归，后者快速验证状态计算。
+这一轮先回答三个问题：
 
-### 第三步：完成 Workbench 当前 HEAD 验收
+1. 每个场景的第一视觉焦点是否正确；
+2. 用户是否能在不阅读所有内容的情况下理解当前阶段；
+3. 现有组件差距应由 token、局部组件，还是 Desktop 场景编排 owner 解决。
 
-按 [验收规范](docs/01_桌面工作台/中间交互区域/验收规范.md) 执行 AC-007、AC-008、AC-010 以及受视觉变更影响的 center/dock/marker 检查，保存动态证据，并原子更新三张 baseline 与 manifest。任何一项不符合契约时停止替换 baseline，报告差异。
+### 4.2 按 A → B → C 做竖向切片
 
-### 第四步：按风险拆分交付
+每个场景都完成一个闭环再进入下一个：
 
-建议至少拆为三个可独立审查和回滚的提交：
+1. 在现有 Design System 组件和 states 中定义或补齐可观测的 UI 状态；
+2. 优先修改语义 token 和现有 `Awaken*` 组件，确实需要几何变更时再单独进入 skeleton / Workbench 契约复核；
+3. Desktop 只负责组合 props、callbacks、slots 和场景级样式，不把 runtime 或滚动策略下沉到 Design System；
+4. 在 Gallery 检查组件状态，再在真实 Awaken Desktop 完成场景验收；
+5. 如果改变产品行为、owner、状态或验收基线，同一任务更新对应唯一权威文档。
 
-1. Design System 纯视觉 token 与组件色值收敛；
-2. Workbench 流式 follow/passive-layout 修复、测试和状态机文档；
-3. Mermaid 展开/pan/cache 修复、单元测试和真实 Electron 回归。
+### 4.3 三场景通过后再做横向扩展
 
-`moduleResolution` 如确需保留，单独放入 tooling 提交并写清原因。
+三个黄金场景共用的视觉语言稳定后，再把已验证的 token 和组件模式扩展到 Settings、连接器、Skills 和其他页面。不在黄金场景尚未定型时进行全仓扫描式重绘。
 
-### 第五步：再继续下一轮纯视觉优化
+## 五、第二步的范围边界
 
-当前批次闭环后，再做剩余硬编码色的分类收敛：文件类型色、连接器品牌色、宠物 level/focus 色应升级为明确语义 token，或登记为受控品牌/功能例外。仍然只动颜色、边框色、阴影色和状态视觉，不动字号、行高、padding、margin、overflow ownership、DOM 层级和 Workbench 定位结构。
+### 本阶段包含
 
-## 五、本次实际验证记录
+- 已实现三场景的信息层级、排版、表面、状态、密度和局部几何优化；
+- 相关 `Awaken*` 组件、states、demo、语义 token 与 Desktop 场景样式；
+- light 主目标、dark 对等性与必要的响应式复核；
+- 适用的自动化、真实 Desktop 动态验收与当前 HEAD 截图。
 
-本次复核实际执行：
+### 本阶段不包含
 
-```text
-npm run smoke:ui
-  通过：69 components
+- 重新打开已闭环的 Mermaid、对比度或回归脚本修复，除非下一阶段实际产生新回归；
+- 用第三种 composer variant、第二个滚动容器或新 overlay 坐标系重做 Workbench；
+- 新增 Inspector、Context picker、run 中队列或新 runtime / protocol 状态；
+- 用外部 UI 库替换 Awaken Design System 的组件所有权；
+- 脱离三个黄金场景的全仓硬编码色值清理或大规模 CSS 整理。
 
-npm run typecheck:ui
-  通过
+## 六、第二步的完成标准
 
-npm --workspace @awaken/desktop run test
-  通过：50 test files / 482 tests
+只有同时满足以下条件，才能宣称三个黄金场景完成：
 
-npm run typecheck:desktop
-  通过
+1. 新建任务、执行中、完成与交付物都已在真实 Awaken Desktop 中准备和人工复核，不用 Gallery 冒充产品验收。
+2. 三个场景的主视觉焦点、状态层级和下一行动清晰，且共用同一套 token 和组件语言。
+3. Design System 仍保持 UI-only，Desktop 仍拥有业务编排、滚动、runtime 和 Electron 边界。
+4. Workbench 的 `RunStage`、`ExecutionFeed`、`center` / `dock`、prompt anchor、follow / paused、overlay 和 composer 测量不变量没有被绕过。
+5. 适用的自动化、UI smoke、Desktop typecheck / test 和 [Workbench 验收规范](docs/01_桌面工作台/中间交互区域/验收规范.md) AC 在本次工作区实际通过。
+6. 三态当前 HEAD 截图与 manifest 完整；涉及滚动、follow、sticky 或 composer 测量的改动同时有录屏或连续关键帧。
+7. 如果产品行为、owner、状态机或验收基线发生变化，已同步更新对应唯一权威，没有在本文档中建立第二套规范。
 
-git diff --check
-  通过
-
-npx tsc --noEmit --moduleResolution Node
-npx tsc -p tsconfig.build.json --moduleResolution Node --noEmit
-  均通过，用于判断 tsconfig 改动是否为当前代码的必要条件
-
-npm run open:desktop
-  通过：Awaken Desktop 1442×900，center 空态正常渲染
-
-npm run close:desktop
-  通过：screen 与相关进程已停止，恢复复核前状态
-```
-
-本次没有重新运行 `/tmp/mermaid-pan-e2e.mjs`，也没有把 center 空态截图写成正式 baseline；因此本报告把 Mermaid 的用户确认、上一轮 CDP PASS、本次自动化和本次只读 Desktop 观察分开陈述，没有把它们合并成“完整 Desktop 验收已通过”。
+建议下一个实施批次从「黄金场景 A：新建任务」开始，完成它的当前 Desktop 基准、Design System 状态和真实 Desktop 验收后，再进入执行中场景。

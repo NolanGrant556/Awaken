@@ -6,7 +6,9 @@
 
 **当前支持：** Core 已实现 user/project Markdown topic、`MEMORY.md` 索引、受控 `memory` 工具、host 注入来源 identity、revision/敏感内容/重复门禁、请求构建期索引注入、复用当前主模型 profile 的非阻塞 selector、最多 5 条有界主题召回和 compact 后预算复位。主动记忆默认开启，由主模型在正常任务推理中决定是否调用工具。Memory 调用与 recall 进入 SemanticJournal/AG-UI 前转为无正文 receipt；Workbench 已投影 recall/mutation 紧凑回执。Desktop Settings 已提供四个开关、搜索/筛选/正文与来源查看、revision 删除、手动 Dream 和取消；Auto Dream 已接入持久化活动计数、24 小时、5 分钟 idle、active-run gate 和新 run 取消；不提供人工创建、编辑或 supersede。Dream task/report 已原子持久化，Core 重启会把未完成任务恢复为 `interrupted`，Desktop 通过任务列表重放维护回执；scope lock 定期 heartbeat，批量 Apply 使用 staged transaction、活动 marker、失败关闭读取和 crash rollback，主题与 `MEMORY.md` 不会以半套状态参与召回。
 
-**当前不支持：** 当前产品尚无正式 subagent/child Agent 能力，因此不实现 child recall 继承。待 subagent 域建立正式 parent/child identity、workspace 与权限边界后，本域必须实现 5.3 的 `MemoryRecallSnapshot` 继承门禁，不能让 child 自行扩大 user/project scope。Settings 的查看/筛选/详情清空、开关持久化和手动 Dream，以及未来持续称呼指令触发真实 selector、search/update、completion receipt 与简短收尾，已完成当前 macOS Desktop 验收；本轮新增的 Workbench 回执、Dream 重启恢复、heartbeat 与 crash recovery 已有自动化，真实 Desktop 中断/重启和跨平台基线仍待验收。
+**当前不支持：** 当前产品尚无正式 subagent/child Agent 能力，因此不实现 child recall 继承。待 subagent 域建立正式 parent/child identity、workspace 与权限边界后，本域必须实现 5.3 的 `MemoryRecallSnapshot` 继承门禁，不能让 child 自行扩大 user/project scope。
+
+**当前验收边界：** Settings 的查看/筛选/详情清空、开关持久化和手动 Dream，以及未来持续称呼指令触发真实 selector、search/update、completion receipt 与简短收尾，已完成当前 macOS Desktop 验收；Workbench 回执、Dream 重启恢复、heartbeat 与 crash recovery 已有自动化，真实 Desktop 中断恢复和跨平台基线仍待验收。
 
 本文未标注“当前支持”的 child 内容属于**已确认但依赖正式 subagent 能力的后置设计约束**。
 
@@ -339,7 +341,7 @@ AWAKEN_MEMORY_DREAM_INTERRUPTED
 
 ### 8.3 HTTP 与 Desktop bridge
 
-目标 route：
+当前 route：
 
 ```text
 GET    /v1/memories
@@ -403,9 +405,9 @@ Workbench：
 - Dream 不建立第二 Agent loop，不自动硬删除不确定事实，不绕过 revision 和原子提交；
 - 依赖正式 subagent 的 child 继承与尚未实现的 source journal 窄搜索必须明确标为缺口，不能由主 Agent 召回或手动 Dream 入口推断为已支持。
 
-## 11. 目标代码 owner
+## 11. 代码 owner
 
-| 层 | 目标 owner |
+| 层 | owner |
 | --- | --- |
 | Markdown parser/store/index/lock | `src/memory` |
 | recall selector、prefetch、snapshot | `src/memory`、`src/runtime` |
@@ -417,4 +419,4 @@ Workbench：
 | preload/Main bridge、Settings、Workbench | `apps/desktop` |
 | UI-only primitives | `Awaken Design System`，不得读取 Core/文件/store |
 
-实现时不得把 store、召回、安全判断或 Dream scheduler 放进 renderer，也不得让 Design System 持有业务状态。
+实现不得把 store、召回、安全判断或 Dream scheduler 放进 renderer，也不得让 Design System 持有业务状态。

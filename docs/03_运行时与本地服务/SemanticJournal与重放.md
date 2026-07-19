@@ -9,10 +9,12 @@ thread, run_started, user_message, assistant_message,
 tool_call, tool_result, artifact, file_change, turn_diff,
 permission_decision, skill_activated, resource_receipt,
 runtime_notice, recovery_decision, context_compacted, turn_boundary,
-run_terminal, persistence_warning
+run_terminal, persistence_warning, memory_recalled, memory_mutated
 ```
 
 `permission_decision` 是工具自动策略或 transform 的记录，不代表通用 Approval 能力。
+
+`memory_recalled` 与 `memory_mutated` 只保存 Memory identity、scope/type、action、revision、status、count、source identity 和错误码，不保存主题正文。Dream maintenance task/report 的耐久 authority 是 `~/.awaken/memory/dream-tasks/`，不写入 thread SemanticJournal；其恢复和投影由 11 域定义。
 
 ## 2. Journal-first 写入顺序
 
@@ -77,4 +79,4 @@ tool call/result payload 持久保存 tool/environment snapshot ID、provider ID
 - 耐久、工具媒体与模型历史恢复：`src/runtime/journal_store.go`、`tool_result_store.go`、`transcript_store.go`、`session.go`。
 - wire 投影：`src/protocol/agui/semantic_projector.go`。
 
-自动化必须覆盖压缩 append/flush 先于内存替换、持久化失败保留旧内存上下文、重建 `RunService` 后 summary+tail 精确恢复、坏 compaction fail closed、tool pairing、attachment/tool-media storage key 重放、blob 缺失 warning 和 Base64 不落盘。真实 Desktop 还需执行一次含 `Read` 图片/PDF 的重启回放，并确认旧新工具卡片都不崩溃。
+自动化必须覆盖压缩 append/flush 先于内存替换、持久化失败保留旧内存上下文、重建 `RunService` 后 summary+tail 精确恢复、坏 compaction fail closed、tool pairing、attachment/tool-media storage key 重放、blob 缺失 warning、Base64 不落盘，以及 Memory receipt 无正文且 live/replay 同投影。真实 Desktop 还需执行一次含 `Read` 图片/PDF 的重启回放，并确认旧新工具卡片都不崩溃；Memory/Dream 的额外重启旅程按 11 域验收执行。

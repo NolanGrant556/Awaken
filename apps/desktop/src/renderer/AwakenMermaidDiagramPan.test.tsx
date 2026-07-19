@@ -158,6 +158,9 @@ describe("AwakenMermaidDiagram expanded pan", () => {
       'button[aria-label="Close expanded diagram"]',
     );
     expect(closeButton).toBeTruthy();
+    expect(closeButton?.getAttribute("title")).toBeNull();
+    await act(async () => closeButton?.focus());
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
     await act(async () => {
       closeButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });

@@ -362,17 +362,14 @@ function MermaidDiagramToolbar({
       </AwakenTooltip>
 
       {expanded ? (
-        <AwakenTooltip label="Close expanded diagram">
-          <button
-            type="button"
-            className="assistant-mermaid-action"
-            aria-label="Close expanded diagram"
-            title="Close expanded diagram"
-            onClick={onClose}
-          >
-            <X size={16} strokeWidth={2} />
-          </button>
-        </AwakenTooltip>
+        <button
+          type="button"
+          className="assistant-mermaid-action"
+          aria-label="Close expanded diagram"
+          onClick={onClose}
+        >
+          <X size={16} strokeWidth={2} />
+        </button>
       ) : null}
     </div>
   );

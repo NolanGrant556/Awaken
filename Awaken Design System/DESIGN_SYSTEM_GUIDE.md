@@ -29,6 +29,7 @@ Awaken owns its visual language through its own tokens and components. Keep Awak
 - Do not replace React component contracts to chase visual polish.
 - Prefer changing tokens and existing `aw-*` classes before editing component behavior.
 - Hover, active, focus, selected, and disabled states must preserve layout size.
+- X-shaped close controls keep an accessible label but do not render a visible tooltip or native `title`; a visually hidden dialog title must leave the close control aligned to the top-right.
 - Text must not overflow controls; use truncation only where the component already implies a single line.
 
 ## Validation

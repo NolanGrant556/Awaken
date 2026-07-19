@@ -2,7 +2,7 @@
 
 > 更新日期：2026-07-19
 >
-> 当前范围：第一步与第二步已经落地；第三步是不改变当前交互逻辑的前端视觉细节精修
+> 当前范围：三步代码实现均已落地；第三步真实 Desktop 视觉复核由 Nolan 后续完成
 >
 > 文件定位：这是「前端设计系统与 Workbench 优化」的阶段交接文档，负责说明每一步的目标、边界、验证状态和涵盖提交，不替代 `docs/` 中的产品、架构与验收权威。
 
@@ -12,7 +12,7 @@
 | --- | --- | --- | --- |
 | 第一步：设计系统基础与 Workbench 稳定基线 | 已完成 | 建立 skin / skeleton 边界，完成第一轮视觉语言收敛，稳定 Workbench follow 与 Mermaid 真实 Electron 交互 | `f72ab9fd`、`910376a3`、`9b3bc07e`、`0135d7d6` |
 | 第二步：skin / token 语义收敛 | 已完成 | 让连接器、扩展、模型设置和 pet overlay 的目标颜色回归语义 token，同时保持原有几何与交互 | `a874b665` |
-| 第三步：前端视觉细节精修 | 待实施 | 保留现有交互结构与逻辑，系统调整颜色、字体、圆角、图标 / 图案、边框阴影、尺寸与状态细节 | 尚无实际提交；暂按 3 个视觉范围规划 |
+| 第三步：前端视觉细节精修 | 代码实现完成，待视觉复核 | 保留现有交互结构与逻辑，系统调整颜色、字体、圆角、图标 / 图案、边框阴影、尺寸与状态细节 | `47319757`、`ba7bf38e`、`4d6c6463` |
 
 前两步建立的稳定性、组件结构与 Workbench 交互逻辑是第三步的正确基线。第三步不重排内容、不重构组件形态、不改变交互流程；所有改动只服务于现有界面的颜色、字体、圆角、图案、尺寸、边框、阴影和视觉状态完成度。
 
@@ -130,7 +130,7 @@ Mermaid 不再依赖临时个人会话或一次性脚本验证。当前仓库已
 | --- | --- |
 | `a874b665` `refactor(frontend): finish skin token convergence` | 在 `tokens.css`、Desktop 场景样式和 pet overlay fallback 中完成状态色、基础色、钉钉品牌色与 context meter token 收敛；该提交只包含 3 个代码文件，没有混入其他线程的文档改动 |
 
-## 四、第三步：前端视觉细节精修（待实施）
+## 四、第三步：前端视觉细节精修（代码实现完成，待真实 Desktop 视觉复核）
 
 ### 4.1 方向
 
@@ -138,43 +138,33 @@ Mermaid 不再依赖临时个人会话或一次性脚本验证。当前仓库已
 
 本步所说的「优化前端」只指视觉细节精修：不改界面在做什么、内容出现在哪里、用户如何操作，只提升现有界面的颜色准确度、排版质感、形状一致性、图形完成度和尺寸精度。
 
-### 4.2 视觉优化范围
+### 4.2 已完成的视觉优化
 
-| 视觉项 | 可调整内容 | 不改变的事 |
+| 视觉项 | 本轮实际调整 | 未改变的事 |
 | --- | --- | --- |
-| 颜色 | 页面 / 卡片 / 控件表面、文字对比、边框、状态色、hover / active / selected / focus / disabled 色值、light / dark 对等 | 状态含义、状态映射和交互触发条件 |
-| 字体 | 字号、行高、字重、字色、必要的字距与代码字体呈现 | 文本内容、信息顺序、折叠阈值和阅读逻辑 |
-| 圆角与边缘 | button、input、card、popover、menu、dialog 的圆角族、边框粗细 / 透明度、分割线和阴影参数 | 层级 ownership、overlay 定位、弹层打开 / 关闭方式 |
-| 图标与图案 | 图标尺寸、线宽、视觉重心、光学对齐、状态图形、空态图案和已有装饰资产 | 图标的功能含义、按钮语义、可访问名称和点击行为 |
-| 尺寸与密度 | 控件高度、内边距、组件间距、图标与文字比例、卡片内部密度和可见焦点轮廓 | DOM 顺序、容器归属、滚动逻辑、响应式折叠规则和操作热区语义 |
+| 颜色与主题 | light 改为更清楚的暖白画布、导航与 raised surface 层级；中性 fill / border 提高精度；dark 同步表面、边界与三级文字可见性；focus 使用统一 accent ring | 状态含义、状态映射和交互触发条件 |
+| 字体 | assistant 正文建立 `14px / 22px` 阅读节奏和 `20 / 16 / 14px` 标题层级；代码块与表格提升到 `13px / 20px`；regular / medium / semibold / bold / heavy 字重角色明确为 `400 / 500 / 600 / 650 / 700` | 文本内容、信息顺序、折叠阈值和阅读逻辑 |
+| 圆角与边缘 | 建立 compact / control / panel / composer 的 `6 / 8 / 12 / 16px` 层级；composer 从 18px 收到 16px；菜单、卡片、图表工具栏、模型选择器按组件角色消费对应圆角与边框 | 层级 ownership、overlay 定位、弹层打开 / 关闭方式 |
+| 图标与图案 | 高频线性图标统一 `1.75` 光学线宽，常规图标为 16px、紧凑图标为 14px；覆盖 Workbench chrome、composer、项目树、Mermaid 工具栏与模型设置图标 | 图标功能、按钮语义、可访问名称和点击行为 |
+| 阴影与状态 | 菜单、popover、toast、raised card、hover card、switch thumb 和 composer 使用统一暖黑环境光 / 接触阴影；Desktop 的冷灰硬编码阴影已移除；已有 hover / active / selected / focus / disabled 只改变视觉呈现 | 状态数量、触发条件、DOM 顺序、滚动逻辑和操作热区语义 |
 
-视觉值不是为了减少字面量数量而调整。每次改动都必须能指出具体观感问题，并在同一界面状态下用前后对比证明改善。
+这些改动针对的是原有界面层级偏平、长文正文偏小、标题层级不清、局部 `700 / 800` 过重、composer 光晕偏散、浮层阴影仍混用冷灰、焦点环不统一和线性图标光学规格分散等具体问题，不是单纯减少 CSS 字面量。
 
-### 4.3 实施顺序
+### 4.3 实际实现分层
 
-1. **颜色与主题精修**
-   - 实际选择更合适的 surface、text、border、shadow 和 status 值，而不只是替换 token 名称；
-   - light 是主设计目标，dark 保持语义对等、对比度和焦点可见；
-   - 保留第三方品牌色、文件类型色和有明确产品语义的状态色。
-2. **字体与文字细节精修**
-   - 在保持现有文本角色和内容顺序的前提下，调整字号、行高、字重、字色和代码字体规格；
-   - 优先解决过小、过淡、行高不协调、中英文基线不齐和数字 / 代码视觉跳动；
-   - 字体参数改变后不得修改 prompt 折叠逻辑或滚动算法来适配。
-3. **圆角、边框、阴影与图形精修**
-   - 在既有组件上统一 control / card / panel / popover 的圆角层级与边缘质感；
-   - 统一图标的线宽、尺寸、光学对齐与状态表达，不改图标功能或操作热区；
-   - 阴影与边框只改变观感，不通过新增容器、改变 z-index ownership 或重排 DOM 实现。
-4. **尺寸与状态细节精修**
-   - 调整按钮、输入框、卡片、徽标、菜单项和图标的尺寸、padding 与 gap，但不改变容器关系和布局规则；
-   - hover、active、selected、focus、disabled、loading、success、warning 与 error 只精修视觉呈现，不增删状态或改变触发条件；
-   - 若某个尺寸需要改动滚动 controller、anchor、composer 测量、响应式逻辑或 React 结构才能成立，则收回该尺寸改动，不修改交互逻辑迁就视觉。
+1. `tokens.css` 负责 light / dark 色阶、语义阴影、focus ring、字重、阅读排版、圆角和图标光学规格；
+2. `components.css` 与既有 `Awaken*/*.css` 负责 assistant 阅读层级、composer、Deliverable、项目树、Mermaid 与 sidebar action 的视觉消费；
+3. Desktop `styles.css` / `styles/workbench.css` 只消费这些角色并收敛局部视觉值；
+4. 本轮没有修改任何 `.tsx`、controller、projector、reducer、runtime、组件 API 或事件处理。
 
-### 4.4 可修改 Owner
+### 4.4 实际修改 Owner
 
-- `Awaken Design System/src/tokens/tokens.css` 与 `components.css`：视觉 token 与通用组件样式；
-- `Awaken Design System/src/components/Awaken*/*.css`：既有组件的颜色、字体、圆角、边框、阴影、尺寸与状态样式；
-- `apps/desktop/src/renderer/styles.css` 与 `styles/*.css`：Desktop 场景中的纯视觉消费与局部样式；
-- 现有 SVG / 图标 / 图案资产：可修改 vector path、stroke、fill 和光学对齐，但不改功能语义、可访问名称或事件绑定。
+- `Awaken Design System/src/tokens/tokens.css`、`components.css` 与 `DESIGN_SYSTEM_GUIDE.md`；
+- `Awaken Design System/src/components/AwakenComposerBar/AwakenComposerBar.css`；
+- `Awaken Design System/src/components/AwakenDeliverableCard/AwakenDeliverableCard.css`；
+- `Awaken Design System/src/components/AwakenProjectTree/AwakenProjectTree.css`；
+- `Awaken Design System/src/components/AwakenSidebarSectionAction/AwakenSidebarSectionAction.css`；
+- `apps/desktop/src/renderer/styles.css` 与 `apps/desktop/src/renderer/styles/workbench.css`。
 
 ### 4.5 不可修改的边界
 
@@ -185,39 +175,34 @@ Mermaid 不再依赖临时个人会话或一次性脚本验证。当前仓库已
 - 不改焦点顺序、键盘语义、ARIA、点击热区语义和响应式折叠规则；
 - 不以任何视觉精修理由突破以上边界。
 
-### 4.6 验证与验收
+### 4.6 本轮代码级验证
 
-代码级最小门禁：
+- `npm run build:ui` 通过；
+- `npm run typecheck:ui` 通过；
+- `npm run smoke:ui` 通过，69 个设计系统组件完成 SSR render smoke；
+- `npm run typecheck:desktop` 通过；
+- `npm --workspace @awaken/desktop run test` 通过，52 个测试文件、488 个测试通过；
+- `git diff --check` 通过。
 
-- `npm run build:ui`；
-- `npm run typecheck:ui`；
-- `npm run smoke:ui`；
-- `npm --workspace @awaken/desktop run test`；
-- `npm run typecheck:desktop`；
-- 受影响组件的邻近测试；
-- `git diff --check`。
+这些结果证明当前代码可构建、可通过类型检查、组件可渲染且 Desktop 现有自动化没有因视觉 CSS 改动回归，不等同于真实视觉验收。
 
-真实 Desktop 验收：
+### 4.7 真实 Desktop 视觉复核状态
 
-- 在同一窗口尺寸、主题和界面状态下保存改动前后截图，逐项说明颜色、字体、圆角、图形、边缘或尺寸的具体改善；
-- light 是主目标，dark 检查对比度、状态语义和图标 / 边界可见性；
-- 检查 hover、active、selected、focus、disabled 等已有状态，并保留键盘 focus ring 与可访问名称；
-- 视觉尺寸发生变化时，按 [复核清单](docs/01_桌面工作台/中间交互区域/复核清单.md) 证明 anchor、follow、composer、marker、return 和响应式行为没有因视觉改动发生变化；
-- 一旦出现交互行为、内容归属、状态逻辑或滚动测量变化，该视觉改动不通过，不修改交互契约为它放行。
+按 Nolan 本轮要求，开发线程没有启动 Awaken，也没有生成当前 HEAD 的 light / dark、hover / focus 或前后对比截图。因此本章状态只能写为「代码实现完成，待真实 Desktop 视觉复核」，不能写成视觉验收完成。
 
-### 4.7 完成标准
+后续复核仍应在同一窗口尺寸、主题和界面状态下检查：
 
-- 用户可以在前后对比中直接看到视觉质感差异，而不是只在 CSS 或 token diff 中看到变化；
-- 同类控件具有稳定的颜色、字体、圆角、边缘、图标和尺寸规则；
-- light / dark、基础状态和键盘 focus 都能保持可读、可见与语义一致；
-- 当前 Workbench 的交互逻辑、组件结构、内容顺序、滚动、anchor、follow、composer 和状态表达与改动前一致。
+- light / dark 的表面层级、正文可读性、状态语义、边界和图标可见性；
+- hover、active、selected、focus、disabled 等已有视觉状态；
+- assistant 长文、代码块、表格、composer、侧栏、Deliverable、Mermaid、扩展页和模型设置；
+- 按 [复核清单](docs/01_桌面工作台/中间交互区域/复核清单.md) 确认 anchor、follow、composer、marker、return 和响应式行为没有因视觉尺寸变化而改变。
 
-### 4.8 第三步计划提交
+一旦发现交互行为、内容归属、状态逻辑或滚动测量变化，应撤回对应视觉值，不修改交互契约为视觉方案放行。
 
-第三步尚未实施，因此不虚构提交哈希。暂按以下 3 个视觉范围组织，每个提交必须同时携带自身影响范围内的测试与视觉证据：
+### 4.8 第三步涵盖提交
 
-| 计划提交 | 状态 | 预计范围 |
+| 提交 | 阶段作用 |
 | --- | --- | --- |
-| `style(design-system): refine color and typography` | 待产生，无哈希 | light / dark 颜色、文字对比、字号、行高、字重与代码字体细节 |
-| `style(design-system): refine shape iconography and sizing` | 待产生，无哈希 | 圆角、边框、阴影、图标 / 图案、控件尺寸、padding 与 gap |
-| `style(desktop): apply visual polish without interaction changes` | 待产生，无哈希 | Desktop 消费与场景细节收敛，保持现有交互与结构不变 |
+| `47319757` `style(design-system): refine color and typography` | 精修 light / dark surface、文字、边界、focus 与语义阴影；建立 assistant 阅读排版和字重角色 |
+| `ba7bf38e` `style(design-system): refine shape iconography and sizing` | 建立 6 / 8 / 12 / 16px 圆角层级与 1.75 图标线宽，精修 composer、Deliverable、项目树和 Mermaid 视觉 |
+| `4d6c6463` `style(desktop): apply visual polish without interaction changes` | 让 Desktop 扩展、设置、模型选择、toast、switch 和 Workbench 浮层消费统一字体、圆角、focus 与阴影角色 |

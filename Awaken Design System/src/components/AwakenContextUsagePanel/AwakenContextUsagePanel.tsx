@@ -8,6 +8,28 @@ export type AwakenContextUsageContribution = {
   estimatedTokens: number;
 };
 
+// AwakenContextUsageModelUsage mirrors the renderer-side AguiModelUsageRecord
+// fields the panel needs. The Design System component must not import from
+// renderer/shared, so the shape is re-declared here and the renderer is
+// responsible for projecting only the documented fields.
+export type AwakenContextUsageModelUsage = {
+  status?: "succeeded" | "failed" | "cancelled" | "interrupted";
+  cacheMode?: string;
+  cacheKeyApplied?: boolean;
+  cachedInputTokens?: number | null;
+  uncachedInputTokens?: number | null;
+  cacheWriteTokens?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  reasoningTokens?: number | null;
+  totalTokens?: number | null;
+  calculatedCostUsd?: number | null;
+  currency?: string;
+  invalidationReason?: string;
+  purpose?: string;
+  errorCode?: string;
+};
+
 export type AwakenContextUsagePanelProps = {
   id?: string;
   estimatedInputTokens: number;
@@ -16,6 +38,7 @@ export type AwakenContextUsagePanelProps = {
   outputReserveTokens: number;
   autoCompactThresholdTokens: number;
   contributions?: AwakenContextUsageContribution[];
+  latestModelUsage?: AwakenContextUsageModelUsage | null;
   onClose: () => void;
 };
 
@@ -35,6 +58,66 @@ export function formatContextUsageTokens(value: number | undefined): string {
   return String(Math.round(normalized));
 }
 
+type CacheState = {
+  label: string;
+  tone: "hit" | "miss" | "unknown";
+};
+
+// resolveCacheState maps the provider cache mode and nullable cached tokens to
+// a single user-facing label. `undocumented` (e.g. Volcano Coding Plan) is
+// always "未确认" because the provider has not confirmed a cache contract;
+// we never claim a hit or miss for it.
+function resolveCacheState(
+  usage: AwakenContextUsageModelUsage,
+): CacheState | null {
+  const mode = usage.cacheMode;
+  if (!mode) {
+    return null;
+  }
+  if (mode === "undocumented") {
+    return { label: "未确认", tone: "unknown" };
+  }
+  if (usage.cachedInputTokens == null) {
+    return { label: "未知", tone: "unknown" };
+  }
+  if (usage.cachedInputTokens > 0) {
+    return { label: "已命中", tone: "hit" };
+  }
+  return { label: "未命中", tone: "miss" };
+}
+
+function formatCostLabel(
+  usage: AwakenContextUsageModelUsage,
+): string | undefined {
+  // calculatedCostUsd === null/undefined means the provider has no price
+  // contract (Kimi Coding Plan / Volcano / custom). Show "未知" rather than
+  // fabricating a zero.
+  if (usage.calculatedCostUsd == null) {
+    return "未知";
+  }
+  const symbol = usage.currency === "USD" ? "$" : "";
+  return `${symbol}${usage.calculatedCostUsd.toFixed(4)}`;
+}
+
+// hasLastRequestSignal returns true when the usage record carries at least one
+// cache, cost or invalidation signal worth showing. A record with only
+// status/purpose/inputTokens carries no cache or cost information and would
+// just add noise, so it does not trigger the section.
+function hasLastRequestSignal(
+  usage: AwakenContextUsageModelUsage | null | undefined,
+): usage is AwakenContextUsageModelUsage {
+  if (!usage) {
+    return false;
+  }
+  return (
+    usage.cacheMode !== undefined ||
+    usage.cachedInputTokens != null ||
+    usage.uncachedInputTokens != null ||
+    usage.calculatedCostUsd != null ||
+    (usage.invalidationReason !== undefined && usage.invalidationReason !== "")
+  );
+}
+
 export const AwakenContextUsagePanel = forwardRef<
   HTMLDivElement,
   AwakenContextUsagePanelProps
@@ -44,6 +127,7 @@ export const AwakenContextUsagePanel = forwardRef<
     estimatedInputTokens,
     effectiveInputWindowTokens,
     contributions = [],
+    latestModelUsage,
     onClose,
   },
   forwardedRef,
@@ -62,6 +146,14 @@ export const AwakenContextUsagePanel = forwardRef<
   useEffect(() => {
     closeButtonRef.current?.focus();
   }, []);
+
+  const showLastRequest = hasLastRequestSignal(latestModelUsage);
+  const cacheState = showLastRequest
+    ? resolveCacheState(latestModelUsage)
+    : null;
+  const costLabel = showLastRequest
+    ? formatCostLabel(latestModelUsage)
+    : undefined;
 
   return (
     <div
@@ -160,6 +252,69 @@ export const AwakenContextUsagePanel = forwardRef<
             <p className="aw-context-usage-panel__empty">暂无分类明细</p>
           )}
         </section>
+
+        {showLastRequest ? (
+          <section
+            className="aw-context-usage-panel__last-request"
+            aria-label="上次请求缓存与成本"
+          >
+            <h3 className="aw-context-usage-panel__subtitle">上次请求</h3>
+            <dl>
+              {cacheState ? (
+                <div className="aw-context-usage-panel__row">
+                  <dt>缓存</dt>
+                  <dd>
+                    <span
+                      className={`aw-context-usage-panel__badge aw-context-usage-panel__badge--${cacheState.tone}`}
+                    >
+                      {cacheState.label}
+                    </span>
+                  </dd>
+                </div>
+              ) : null}
+              {latestModelUsage.cachedInputTokens != null ? (
+                <div className="aw-context-usage-panel__row">
+                  <dt>命中 Token</dt>
+                  <dd>
+                    {formatContextUsageTokens(
+                      latestModelUsage.cachedInputTokens,
+                    )}
+                  </dd>
+                </div>
+              ) : null}
+              {latestModelUsage.uncachedInputTokens != null ? (
+                <div className="aw-context-usage-panel__row">
+                  <dt>未命中 Token</dt>
+                  <dd>
+                    {formatContextUsageTokens(
+                      latestModelUsage.uncachedInputTokens,
+                    )}
+                  </dd>
+                </div>
+              ) : null}
+              {latestModelUsage.outputTokens != null ? (
+                <div className="aw-context-usage-panel__row">
+                  <dt>输出 Token</dt>
+                  <dd>
+                    {formatContextUsageTokens(latestModelUsage.outputTokens)}
+                  </dd>
+                </div>
+              ) : null}
+              {costLabel !== undefined ? (
+                <div className="aw-context-usage-panel__row">
+                  <dt>成本</dt>
+                  <dd>{costLabel}</dd>
+                </div>
+              ) : null}
+              {latestModelUsage.invalidationReason ? (
+                <div className="aw-context-usage-panel__row">
+                  <dt>失效原因</dt>
+                  <dd>{latestModelUsage.invalidationReason}</dd>
+                </div>
+              ) : null}
+            </dl>
+          </section>
+        ) : null}
 
       </div>
     </div>

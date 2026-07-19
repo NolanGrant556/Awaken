@@ -880,6 +880,28 @@ export function contextUsagePanelData(
           estimatedTokens: tokensByKind.get(contribution.id) ?? 0,
         }))
       : [],
+    latestModelUsage: contextWindow.latestModelUsage
+      ? {
+          status: contextWindow.latestModelUsage.status,
+          cacheMode: contextWindow.latestModelUsage.cacheMode,
+          cacheKeyApplied: contextWindow.latestModelUsage.cacheKeyApplied,
+          cachedInputTokens: contextWindow.latestModelUsage.cachedInputTokens,
+          uncachedInputTokens:
+            contextWindow.latestModelUsage.uncachedInputTokens,
+          cacheWriteTokens: contextWindow.latestModelUsage.cacheWriteTokens,
+          inputTokens: contextWindow.latestModelUsage.inputTokens,
+          outputTokens: contextWindow.latestModelUsage.outputTokens,
+          reasoningTokens: contextWindow.latestModelUsage.reasoningTokens,
+          totalTokens: contextWindow.latestModelUsage.totalTokens,
+          calculatedCostUsd:
+            contextWindow.latestModelUsage.calculatedCostUsd,
+          currency: contextWindow.latestModelUsage.currency,
+          invalidationReason:
+            contextWindow.latestModelUsage.invalidationReason,
+          purpose: contextWindow.latestModelUsage.purpose,
+          errorCode: contextWindow.latestModelUsage.errorCode,
+        }
+      : null,
   };
 }
 

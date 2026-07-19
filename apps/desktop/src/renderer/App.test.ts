@@ -1050,6 +1050,137 @@ describe("context usage presentation", () => {
     expect(html).not.toContain("US$0.011000");
   });
 
+  it("projects last-request cache hit and cost when latestModelUsage carries signal", () => {
+    const data = contextUsagePanelData({
+      eventType: "AWAKEN_CONTEXT_SNAPSHOT",
+      snapshot: {
+        schemaVersion: 4,
+        snapshotId: "ctx-1",
+        estimatorId: "awaken_leaf_v4",
+        basis: "current_projection",
+        modelWindowTokens: 128_000,
+        outputReserveTokens: 16_000,
+        effectiveInputWindowTokens: 112_000,
+        estimatedInputTokens: 24_000,
+        warningThresholdTokens: 95_000,
+        autoCompactThresholdTokens: 100_800,
+        compactTargetTokens: 40_000,
+        contributions: [
+          { kind: "system_prompt", estimatedTokens: 2_000, sourceCount: 1 },
+          { kind: "builtin_tools", estimatedTokens: 6_000, sourceCount: 10 },
+          { kind: "mcp", estimatedTokens: 8_000, sourceCount: 4 },
+          { kind: "skills", estimatedTokens: 1_000, sourceCount: 1 },
+          { kind: "memory", estimatedTokens: 500, sourceCount: 1 },
+          { kind: "conversation", estimatedTokens: 6_500, sourceCount: 8 },
+        ],
+        generatedAt: "2026-07-19T00:00:00Z",
+      },
+      latestModelUsage: {
+        schemaVersion: 1,
+        requestId: "req-1",
+        purpose: "agent_turn",
+        cacheMode: "automatic_prefix",
+        cacheKeyApplied: false,
+        cachedInputTokens: 18_000,
+        uncachedInputTokens: 6_000,
+        outputTokens: 800,
+        calculatedCostUsd: 0.0123,
+        currency: "USD",
+        usageComplete: true,
+        latencyMs: 20,
+        status: "succeeded",
+        completedAt: "2026-07-19T00:00:01Z",
+      },
+    });
+    expect(data?.latestModelUsage).toEqual({
+      status: "succeeded",
+      cacheMode: "automatic_prefix",
+      cacheKeyApplied: false,
+      cachedInputTokens: 18_000,
+      uncachedInputTokens: 6_000,
+      cacheWriteTokens: undefined,
+      inputTokens: undefined,
+      outputTokens: 800,
+      reasoningTokens: undefined,
+      totalTokens: undefined,
+      calculatedCostUsd: 0.0123,
+      currency: "USD",
+      invalidationReason: undefined,
+      purpose: "agent_turn",
+      errorCode: undefined,
+    });
+    const html = renderToString(
+      React.createElement(AwakenContextUsagePanel, {
+        ...data!,
+        onClose: vi.fn(),
+      }),
+    );
+    expect(html).toContain("上次请求");
+    expect(html).toContain("已命中");
+    expect(html).toContain("命中 Token");
+    expect(html).toContain("18K");
+    expect(html).toContain("未命中 Token");
+    expect(html).toContain("6.0K");
+    expect(html).toContain("输出 Token");
+    expect(html).toContain("成本");
+    expect(html).toContain("$0.0123");
+  });
+
+  it("shows cache as 未确认 and cost as 未知 for undocumented providers", () => {
+    const data = contextUsagePanelData({
+      eventType: "AWAKEN_CONTEXT_SNAPSHOT",
+      snapshot: {
+        schemaVersion: 4,
+        snapshotId: "ctx-1",
+        estimatorId: "awaken_leaf_v4",
+        basis: "current_projection",
+        modelWindowTokens: 128_000,
+        outputReserveTokens: 16_000,
+        effectiveInputWindowTokens: 112_000,
+        estimatedInputTokens: 24_000,
+        warningThresholdTokens: 95_000,
+        autoCompactThresholdTokens: 100_800,
+        compactTargetTokens: 40_000,
+        contributions: [
+          { kind: "system_prompt", estimatedTokens: 2_000, sourceCount: 1 },
+          { kind: "builtin_tools", estimatedTokens: 6_000, sourceCount: 10 },
+          { kind: "mcp", estimatedTokens: 8_000, sourceCount: 4 },
+          { kind: "skills", estimatedTokens: 1_000, sourceCount: 1 },
+          { kind: "memory", estimatedTokens: 500, sourceCount: 1 },
+          { kind: "conversation", estimatedTokens: 6_500, sourceCount: 8 },
+        ],
+        generatedAt: "2026-07-19T00:00:00Z",
+      },
+      latestModelUsage: {
+        schemaVersion: 1,
+        requestId: "req-1",
+        purpose: "agent_turn",
+        cacheMode: "undocumented",
+        cacheKeyApplied: false,
+        inputTokens: 24_000,
+        outputTokens: 800,
+        calculatedCostUsd: undefined,
+        currency: "USD",
+        usageComplete: true,
+        latencyMs: 20,
+        status: "succeeded",
+        completedAt: "2026-07-19T00:00:01Z",
+      },
+    });
+    const html = renderToString(
+      React.createElement(AwakenContextUsagePanel, {
+        ...data!,
+        onClose: vi.fn(),
+      }),
+    );
+    expect(html).toContain("上次请求");
+    expect(html).toContain("未确认");
+    expect(html).toContain("成本");
+    expect(html).toContain("未知");
+    expect(html).not.toContain("已命中");
+    expect(html).not.toContain("未命中");
+  });
+
   it("keeps legacy aggregates honest when no typed breakdown exists", () => {
     const data = contextUsagePanelData({
       eventType: "AWAKEN_CONTEXT_ESTIMATED",

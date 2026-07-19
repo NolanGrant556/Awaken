@@ -88,7 +88,7 @@
   max-height: var(--composer-bar-slash-max-height, 210px);
   padding: 4px;
   border: 1px solid var(--aw-border-light);
-  border-radius: 8px;
+  border-radius: var(--aw-radius-panel);
   background: var(--aw-bg-white);
   box-shadow: var(--aw-shadow-menu);
   overflow-y: auto;
@@ -127,7 +127,7 @@
   height: 26px;
   padding: 0 6px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--aw-radius-compact);
   background: transparent;
   color: var(--aw-text-primary);
   text-align: left;
@@ -164,6 +164,12 @@
   color: currentColor;
 }
 
+.composer-bar-slash-option-icon svg {
+  width: var(--aw-icon-size-14);
+  height: var(--aw-icon-size-14);
+  stroke-width: var(--aw-icon-stroke);
+}
+
 .composer-bar-slash-option-label {
   min-width: 0;
   overflow: hidden;
@@ -186,10 +192,10 @@
   max-width: 220px;
   max-height: min(150px, calc(100vh - 16px));
   padding: 8px 9px;
-  border-radius: 8px;
+  border-radius: var(--aw-radius-control);
   background: var(--aw-terminal-bg);
   color: var(--aw-terminal-text);
-  box-shadow: 0 7px 18px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--aw-shadow-popover);
   pointer-events: none;
   overflow: hidden;
 }

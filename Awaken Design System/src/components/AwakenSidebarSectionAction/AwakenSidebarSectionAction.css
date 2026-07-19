@@ -7,7 +7,7 @@
   height: 22px;
   padding: 0;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--aw-radius-compact);
   background: transparent;
   color: var(--aw-text-tertiary);
   cursor: pointer;
@@ -15,6 +15,12 @@
     background-color var(--aw-transition-fast),
     color var(--aw-transition-fast),
     opacity var(--aw-transition-fast);
+}
+
+.aw-sidebar-section-action svg {
+  width: var(--aw-icon-size-14);
+  height: var(--aw-icon-size-14);
+  stroke-width: var(--aw-icon-stroke);
 }
 
 .aw-sidebar-section-action:hover,

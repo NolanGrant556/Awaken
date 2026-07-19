@@ -114,14 +114,21 @@ func (store *ContextEpochFileStore) Project(_ context.Context, candidate agentco
 			state = "rotated"
 			reason = boundary
 		} else {
-			updated, boundary := updateContextEpoch(&current, candidate)
+			updated, boundary, detail := updateContextEpoch(&current, candidate)
 			if boundary != "" {
 				current = newContextEpoch(candidate, current.BaselineSequence+1)
 				state = "rotated"
 				reason = boundary
 			} else if updated {
 				state = "updated"
-				reason = "append_only_host_delta"
+				// Carry the changed segment labels (source keys and `tool:<name>`)
+				// into the reason so a cache miss can be diagnosed to a specific
+				// trailing prefix segment instead of a generic "host delta".
+				if detail != "" {
+					reason = "append_only_host_delta:" + detail
+				} else {
+					reason = "append_only_host_delta"
+				}
 			}
 		}
 	}
@@ -202,9 +209,9 @@ func contextEpochBoundaryReason(current contextEpochSidecar, candidate agentcore
 	}
 }
 
-func updateContextEpoch(current *contextEpochSidecar, candidate agentcore.ContextEpochCandidate) (bool, string) {
+func updateContextEpoch(current *contextEpochSidecar, candidate agentcore.ContextEpochCandidate) (bool, string, string) {
 	if current == nil {
-		return false, "missing_epoch"
+		return false, "missing_epoch", ""
 	}
 	candidateSources := make(map[string]agentcore.ContextEpochSourceCandidate, len(candidate.Sources))
 	for _, source := range candidate.Sources {
@@ -213,6 +220,20 @@ func updateContextEpoch(current *contextEpochSidecar, candidate agentcore.Contex
 		}
 	}
 	updated := false
+	// changedSegments collects the host-owned segments that changed without
+	// triggering a cold boundary. It is reported back to the caller so the
+	// BoundaryReason can carry per-segment diagnostics (e.g.
+	// `append_only_host_delta:runtime_context,skills`), letting the user see
+	// exactly which trailing prefix segment invalidated the cache.
+	var changedSegments []string
+	noteChanged := func(label string) {
+		for _, existing := range changedSegments {
+			if existing == label {
+				return
+			}
+		}
+		changedSegments = append(changedSegments, label)
+	}
 	for index := range current.SourceSnapshots {
 		snapshot := &current.SourceSnapshots[index]
 		next, exists := candidateSources[snapshot.SourceKey]
@@ -224,12 +245,13 @@ func updateContextEpoch(current *contextEpochSidecar, candidate agentcore.Contex
 			if snapshot.State != agentcore.ContextEpochSourceUnavailable {
 				snapshot.State = agentcore.ContextEpochSourceUnavailable
 				updated = true
+				noteChanged(snapshot.SourceKey)
 			}
 			continue
 		}
 		if snapshot.SourceKey == "system_prompt" && next.State != agentcore.ContextEpochSourceRemoved &&
 			agentcore.ContextEpochSourceDigest(next.Content) != snapshot.BaselineDigest {
-			return false, "system_prompt_changed"
+			return false, "system_prompt_changed", ""
 		}
 		if next.State == agentcore.ContextEpochSourceRemoved {
 			if snapshot.State == agentcore.ContextEpochSourceRemoved {
@@ -237,6 +259,7 @@ func updateContextEpoch(current *contextEpochSidecar, candidate agentcore.Contex
 			}
 			appendContextEpochDelta(current, snapshot, agentcore.ContextEpochSourceRemoved, "")
 			updated = true
+			noteChanged(snapshot.SourceKey)
 			continue
 		}
 		digest := agentcore.ContextEpochSourceDigest(next.Content)
@@ -250,6 +273,7 @@ func updateContextEpoch(current *contextEpochSidecar, candidate agentcore.Contex
 		snapshot.Kind = next.Kind
 		appendContextEpochDelta(current, snapshot, agentcore.ContextEpochSourceUpdated, next.Content)
 		updated = true
+		noteChanged(snapshot.SourceKey)
 	}
 	for _, source := range canonicalEpochSourceMap(candidateSources) {
 		if source.State == agentcore.ContextEpochSourceUnavailable || source.State == agentcore.ContextEpochSourceRemoved {
@@ -262,6 +286,7 @@ func updateContextEpoch(current *contextEpochSidecar, candidate agentcore.Contex
 		current.SourceSnapshots = append(current.SourceSnapshots, snapshot)
 		appendContextEpochDelta(current, &current.SourceSnapshots[len(current.SourceSnapshots)-1], agentcore.ContextEpochSourceUpdated, source.Content)
 		updated = true
+		noteChanged(source.SourceKey)
 	}
 
 	candidateTools := make(map[string]agentcore.ContextEpochToolCandidate, len(candidate.Tools))
@@ -271,17 +296,17 @@ func updateContextEpoch(current *contextEpochSidecar, candidate agentcore.Contex
 	for _, existing := range current.Tools {
 		next, exists := candidateTools[existing.Name]
 		if !exists {
-			return false, "tool_removed"
+			return false, "tool_removed", ""
 		}
 		delete(candidateTools, existing.Name)
 		if agentcore.ContextEpochToolDigest(next) != existing.Digest {
-			return false, "tool_schema_changed"
+			return false, "tool_schema_changed", ""
 		}
 	}
 	newTools := make([]agentcore.ContextEpochToolCandidate, 0, len(candidateTools))
 	for _, entry := range candidateTools {
 		if !agentcore.ContextEpochToolIsDynamic(entry) {
-			return false, "canonical_tool_added"
+			return false, "canonical_tool_added", ""
 		}
 		newTools = append(newTools, entry)
 	}
@@ -291,8 +316,9 @@ func updateContextEpoch(current *contextEpochSidecar, candidate agentcore.Contex
 			FirstSeen: uint64(len(current.Tools) + 1), Schema: entry.Schema, Provenance: entry.Provenance,
 		})
 		updated = true
+		noteChanged("tool:" + entry.Schema.Function.Name)
 	}
-	return updated, ""
+	return updated, "", strings.Join(changedSegments, ",")
 }
 
 func appendContextEpochDelta(epoch *contextEpochSidecar, snapshot *contextEpochSourceSnapshot, state agentcore.ContextEpochSourceState, value string) {

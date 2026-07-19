@@ -155,6 +155,37 @@ func (state ContextWindowState) ShouldAutoCompact() bool {
 	return state.AutoCompactThreshold > 0 && state.EstimatedTokens >= state.AutoCompactThreshold
 }
 
+// ShouldAutoCompactByActualUsage is a parallel proactive-compact trigger that
+// uses the last provider-reported input usage plus the locally-estimated delta
+// accumulated since that request. It catches cases where the v4 leaf estimator
+// is too optimistic compared to the real provider usage: a too-late compact
+// would otherwise surface as a reactive compact or a provider prompt-too-long
+// failure.
+//
+// This trigger is intentionally parallel and non-replacing:
+//   - it never overrides EstimatedTokens or the v4 estimator;
+//   - it does not change the ContextUsageSnapshot contributions or their sum;
+//   - LastAPIUsageTokens == 0 (no prior request, or just after a successful
+//     compact) leaves this trigger inert, so only ShouldAutoCompact drives
+//     the decision in those cases.
+//
+// EstimatedDeltaTokens only accounts for host-owned trailing deltas (MCP,
+// Skill, Memory, runtime, day boundary); user input and tool results added
+// since the last request are not in the delta, so this trigger may still fire
+// slightly late. That is acceptable: the goal is to avoid the far worse case
+// of firing too late and hitting a provider context-length error.
+func (state ContextWindowState) ShouldAutoCompactByActualUsage() bool {
+	if state.AutoCompactThreshold <= 0 || state.LastAPIUsageTokens <= 0 {
+		return false
+	}
+	projected := state.LastAPIUsageTokens + state.EstimatedDeltaTokens
+	if projected < state.LastAPIUsageTokens {
+		// Overflow guard: treat as over threshold.
+		return true
+	}
+	return projected >= state.AutoCompactThreshold
+}
+
 func (state ContextWindowState) ShouldBlock() bool {
 	return state.blockingThreshold() > 0 && state.EstimatedTokens >= state.blockingThreshold()
 }

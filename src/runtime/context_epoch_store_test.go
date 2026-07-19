@@ -82,6 +82,44 @@ func TestContextEpochKeepsStableBaselineAcrossDeltasAndRestart(t *testing.T) {
 	}
 }
 
+func TestContextEpochAppendOnlyDeltaReasonCarriesChangedSegments(t *testing.T) {
+	t.Setenv(awakenHomeEnv, t.TempDir())
+	store := NewContextEpochStore()
+	candidate := testContextEpochCandidate()
+	candidate.Sources = []agentcore.ContextEpochSourceCandidate{
+		{SourceKey: "system_prompt", Kind: agentcore.ContextContributionSystemPrompt, Content: "BASE", State: agentcore.ContextEpochSourceUpdated},
+		{SourceKey: "runtime_context", Kind: agentcore.ContextContributionRuntimeContext, Content: "RUNTIME=v1", State: agentcore.ContextEpochSourceUpdated},
+	}
+	if _, err := store.Project(context.Background(), candidate); err != nil {
+		t.Fatalf("initial projection: %v", err)
+	}
+
+	// Append a runtime_context delta and a new skills source. Neither rotates
+	// the epoch; both must show up in the BoundaryReason so a cache miss can
+	// be diagnosed to the specific trailing segments that changed.
+	changed := candidate
+	changed.Sources = []agentcore.ContextEpochSourceCandidate{
+		{SourceKey: "system_prompt", Kind: agentcore.ContextContributionSystemPrompt, Content: "BASE", State: agentcore.ContextEpochSourceUpdated},
+		{SourceKey: "runtime_context", Kind: agentcore.ContextContributionRuntimeContext, Content: "RUNTIME=v2", State: agentcore.ContextEpochSourceUpdated},
+		{SourceKey: "skills", Kind: agentcore.ContextContributionSkills, Content: "skill catalog v2", State: agentcore.ContextEpochSourceUpdated},
+	}
+	second, err := store.Project(context.Background(), changed)
+	if err != nil {
+		t.Fatalf("append delta projection: %v", err)
+	}
+	if second.Receipt.State != "updated" {
+		t.Fatalf("expected append-only update state, got %+v", second.Receipt)
+	}
+	if !strings.HasPrefix(second.Receipt.BoundaryReason, "append_only_host_delta:") {
+		t.Fatalf("expected reason to carry changed segment labels, got %q", second.Receipt.BoundaryReason)
+	}
+	for _, segment := range []string{"runtime_context", "skills"} {
+		if !strings.Contains(second.Receipt.BoundaryReason, segment) {
+			t.Fatalf("expected reason to mention %q, got %q", segment, second.Receipt.BoundaryReason)
+		}
+	}
+}
+
 func TestContextEpochThreeFullReplayToolTurnsKeepCanonicalPrefix(t *testing.T) {
 	t.Setenv(awakenHomeEnv, t.TempDir())
 	store := NewContextEpochStore()

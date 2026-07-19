@@ -72,7 +72,11 @@ func (g *contextGovernor) PrepareRequest(ctx stdcontext.Context, llmReq LLMReque
 	if events != nil {
 		events.emitContextWindow(llmReq.ContextWindowState)
 	}
-	if llmReq.ContextWindowState.ShouldAutoCompact() {
+	// ShouldAutoCompact drives the v4-estimator path. ShouldAutoCompactByActualUsage
+	// is a parallel trigger based on the last provider-reported usage plus the
+	// locally-estimated delta; it catches cases where the v4 estimate is too
+	// optimistic. Either trigger fires a proactive compact.
+	if llmReq.ContextWindowState.ShouldAutoCompact() || llmReq.ContextWindowState.ShouldAutoCompactByActualUsage() {
 		compactedReq, err := g.compactForRequest(ctx, llmReq, events, false)
 		if err != nil {
 			if llmReq.ContextWindowState.ShouldBlock() && g.compactCircuitOpen {
@@ -192,6 +196,11 @@ func (g *contextGovernor) compactForRequest(ctx stdcontext.Context, llmReq LLMRe
 		}
 	}
 	g.consecutiveCompactFailures = 0
+	// A successful compact changes the conversation, so the previous
+	// provider-reported usage no longer corresponds to the next request's
+	// input. Reset the actual-usage trigger so ShouldAutoCompactByActualUsage
+	// stays inert until the next response sets a fresh LastAPIUsageTokens.
+	g.lastAPIUsageTokens = 0
 	if events != nil {
 		events.emitCompactFinished(state, result, compactSummaryModel(*llmReq.EnvelopeDebug))
 	}

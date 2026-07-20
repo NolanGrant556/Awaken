@@ -1254,6 +1254,10 @@ func lastAPIUsageTokens(response *llm.Response) int {
 	if response == nil || response.Usage == nil {
 		return 0
 	}
+	// Within one run, the next provider request re-admits the previous
+	// assistant output. Prefer total usage as a conservative approximation of
+	// that continuation input; compatible providers that omit total usage fall
+	// back to their reported input usage.
 	if response.Usage.TotalTokens != nil && *response.Usage.TotalTokens > 0 {
 		return *response.Usage.TotalTokens
 	}

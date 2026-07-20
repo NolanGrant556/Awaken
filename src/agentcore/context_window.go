@@ -156,11 +156,12 @@ func (state ContextWindowState) ShouldAutoCompact() bool {
 }
 
 // ShouldAutoCompactByActualUsage is a parallel proactive-compact trigger that
-// uses the last provider-reported input usage plus the locally-estimated delta
-// accumulated since that request. It catches cases where the v4 leaf estimator
-// is too optimistic compared to the real provider usage: a too-late compact
-// would otherwise surface as a reactive compact or a provider prompt-too-long
-// failure.
+// uses the last provider-reported continuation usage plus the locally-estimated
+// delta accumulated since that request. The runner prefers provider total usage
+// because the next request re-admits the previous assistant output, and falls
+// back to input usage when total is unavailable. It catches cases where the v4
+// leaf estimator is too optimistic: a too-late compact would otherwise surface
+// as a reactive compact or a provider prompt-too-long failure.
 //
 // This trigger is intentionally parallel and non-replacing:
 //   - it never overrides EstimatedTokens or the v4 estimator;

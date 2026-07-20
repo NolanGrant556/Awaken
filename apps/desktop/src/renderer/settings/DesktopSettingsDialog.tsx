@@ -1,5 +1,4 @@
 import {
-  type CSSProperties,
   useCallback,
   useEffect,
   useMemo,
@@ -7,17 +6,13 @@ import {
   useState,
 } from "react";
 import {
-  ChevronDown,
-  Eye,
-  EyeOff,
-  KeyRound,
-  Monitor,
-  Moon,
-  Sun,
-} from "lucide-react";
-import {
+  AwakenAppearanceSettings,
   AwakenButton as Button,
+  AwakenConfiguredModels,
   AwakenDialog as Dialog,
+  AwakenModelProviderForm,
+  AwakenSettings,
+  AwakenSettingsProviderCard,
 } from "@awaken/design-system";
 import { calculateAutoCompactThreshold } from "../../shared/runtime";
 import type {
@@ -49,6 +44,27 @@ export type DraftState = {
 
 type ModelSettingsSection = "configure" | "configured";
 type SettingsDialogSection = "models" | "search" | "memory" | "appearance" | "pets";
+
+const SETTINGS_NAV_ITEMS = [
+  { id: "models", label: "模型" },
+  { id: "search", label: "搜索" },
+  { id: "memory", label: "记忆" },
+  { id: "appearance", label: "外观" },
+  { id: "pets", label: "宠物" },
+];
+
+const MODEL_SETTINGS_TABS = [
+  { id: "configure", label: "模型配置" },
+  { id: "configured", label: "已配置模型" },
+];
+
+const SETTINGS_SECTION_TITLES: Record<SettingsDialogSection, string> = {
+  models: "模型",
+  search: "搜索",
+  memory: "记忆",
+  appearance: "外观",
+  pets: "宠物",
+};
 
 type ConfiguredProfileDraft = {
   enabled: boolean;
@@ -116,58 +132,11 @@ export function AppearanceSettings({
   onThemePreferenceChange,
 }: AppearanceSettingsProps) {
   return (
-    <section className="appearance-settings" aria-label="外观">
-      <div className="appearance-settings-row">
-        <div className="appearance-settings-copy">
-          <h2>主题</h2>
-        </div>
-        <div
-          className="theme-choice-group"
-          role="radiogroup"
-          aria-label="主题"
-        >
-          <button
-            type="button"
-            className={`theme-choice${
-              themePreference === "system" ? " theme-choice-active" : ""
-            }`}
-            role="radio"
-            aria-checked={themePreference === "system"}
-            disabled={themeSaving}
-            onClick={() => onThemePreferenceChange("system")}
-          >
-            <Monitor size={17} strokeWidth={1.9} />
-            <span>跟随系统</span>
-          </button>
-          <button
-            type="button"
-            className={`theme-choice${
-              themePreference === "light" ? " theme-choice-active" : ""
-            }`}
-            role="radio"
-            aria-checked={themePreference === "light"}
-            disabled={themeSaving}
-            onClick={() => onThemePreferenceChange("light")}
-          >
-            <Sun size={17} strokeWidth={1.9} />
-            <span>浅色</span>
-          </button>
-          <button
-            type="button"
-            className={`theme-choice${
-              themePreference === "dark" ? " theme-choice-active" : ""
-            }`}
-            role="radio"
-            aria-checked={themePreference === "dark"}
-            disabled={themeSaving}
-            onClick={() => onThemePreferenceChange("dark")}
-          >
-            <Moon size={17} strokeWidth={1.9} />
-            <span>黑色</span>
-          </button>
-        </div>
-      </div>
-    </section>
+    <AwakenAppearanceSettings
+      value={themePreference}
+      disabled={themeSaving}
+      onValueChange={onThemePreferenceChange}
+    />
   );
 }
 
@@ -466,9 +435,6 @@ export function DesktopSettingsDialog({
   const [expandedProviderId, setExpandedProviderId] = useState<string | null>(
     null,
   );
-  const [openModelPickerProviderId, setOpenModelPickerProviderId] = useState<
-    string | null
-  >(null);
   const [draft, setDraft] = useState<DraftState | null>(null);
   const [saving, setSaving] = useState(false);
   const [savingConfigured, setSavingConfigured] = useState(false);
@@ -543,7 +509,6 @@ export function DesktopSettingsDialog({
 
   function collapseProviderEditor(): void {
     setExpandedProviderId(null);
-    setOpenModelPickerProviderId(null);
     setDraft(null);
     setShowApiKey(false);
   }
@@ -551,7 +516,6 @@ export function DesktopSettingsDialog({
   useEffect(() => {
     if (!open) {
       setExpandedProviderId(null);
-      setOpenModelPickerProviderId(null);
       setDraft(null);
       setActiveSection(initialModelSection);
       setActiveSettingsSection(initialSection);
@@ -605,7 +569,6 @@ export function DesktopSettingsDialog({
 
     setExpandedProviderId(provider.id);
     setDraft(createDraftForProvider(provider));
-    setOpenModelPickerProviderId(null);
     setShowApiKey(false);
     setMessage(null);
   }
@@ -619,7 +582,6 @@ export function DesktopSettingsDialog({
     setActiveSection("configure");
     setExpandedProviderId(provider.id);
     setDraft(draftFromExistingProfile(profile, provider));
-    setOpenModelPickerProviderId(null);
     setShowApiKey(false);
     setMessage(
       profile.profileStatus === "unreadable"
@@ -919,144 +881,23 @@ export function DesktopSettingsDialog({
         </Button>
       }
     >
-      <div className="settings-dialog-shell">
-        {toastMessage ? (
-          <div
-            className="model-settings-toast"
-            role="status"
-            aria-live="polite"
-          >
-            {toastMessage}
-          </div>
-        ) : null}
-        <div className="settings-dialog-sidebar">
-          <div className="settings-dialog-sidebar-title">设置</div>
-          <nav className="settings-dialog-nav" aria-label="Settings sections">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeSettingsSection === "models"}
-            className={`settings-dialog-nav-item${
-              activeSettingsSection === "models"
-                ? " settings-dialog-nav-item-active"
-                : ""
-            }`}
-            onClick={() => setActiveSettingsSection("models")}
-          >
-            模型
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeSettingsSection === "search"}
-            className={`settings-dialog-nav-item${
-              activeSettingsSection === "search"
-                ? " settings-dialog-nav-item-active"
-                : ""
-            }`}
-            onClick={() => setActiveSettingsSection("search")}
-          >
-            搜索
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeSettingsSection === "memory"}
-            className={`settings-dialog-nav-item${
-              activeSettingsSection === "memory"
-                ? " settings-dialog-nav-item-active"
-                : ""
-            }`}
-            onClick={() => setActiveSettingsSection("memory")}
-          >
-            记忆
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeSettingsSection === "appearance"}
-            className={`settings-dialog-nav-item${
-              activeSettingsSection === "appearance"
-                ? " settings-dialog-nav-item-active"
-                : ""
-            }`}
-            onClick={() => setActiveSettingsSection("appearance")}
-          >
-            外观
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeSettingsSection === "pets"}
-            className={`settings-dialog-nav-item${
-              activeSettingsSection === "pets"
-                ? " settings-dialog-nav-item-active"
-                : ""
-            }`}
-            onClick={() => setActiveSettingsSection("pets")}
-          >
-            宠物
-          </button>
-          </nav>
-        </div>
-
-        <div className="model-settings">
-          <div className="model-settings-toolbar">
-            <h1 className="model-settings-title">
-              {activeSettingsSection === "models"
-                ? "模型"
-                : activeSettingsSection === "search"
-                  ? "搜索"
-                : activeSettingsSection === "memory"
-                  ? "记忆"
-                : activeSettingsSection === "appearance"
-                  ? "外观"
-                  : "宠物"}
-            </h1>
-            {activeSettingsSection === "models" ? (
-              <div
-                className="model-settings-tabs"
-                role="tablist"
-                aria-label="模型功能区"
-              >
-                <button
-                  type="button"
-                  className={`model-settings-tab${
-                    activeSection === "configure"
-                      ? " model-settings-tab-active"
-                      : ""
-                  }`}
-                  role="tab"
-                  aria-selected={activeSection === "configure"}
-                  onClick={() => setActiveSection("configure")}
-                >
-                  模型配置
-                </button>
-                <button
-                  type="button"
-                  className={`model-settings-tab${
-                    activeSection === "configured"
-                      ? " model-settings-tab-active"
-                      : ""
-                  }`}
-                  role="tab"
-                  aria-selected={activeSection === "configured"}
-                  onClick={() => setActiveSection("configured")}
-                >
-                  已配置模型
-                </button>
-              </div>
-            ) : null}
-          </div>
-          {activeSettingsSection === "models" && message ? (
-            <div className="model-settings-message">
-              <span>{message}</span>
-            </div>
-          ) : null}
-          {activeSettingsSection === "appearance" && themeMessage ? (
-            <div className="model-settings-message">{themeMessage}</div>
-          ) : null}
-
+      <AwakenSettings
+        navItems={SETTINGS_NAV_ITEMS}
+        activeSectionId={activeSettingsSection}
+        sectionTitle={SETTINGS_SECTION_TITLES[activeSettingsSection]}
+        tabs={activeSettingsSection === "models" ? MODEL_SETTINGS_TABS : undefined}
+        activeTabId={activeSection}
+        message={
+          activeSettingsSection === "models"
+            ? message
+            : activeSettingsSection === "appearance"
+              ? themeMessage
+              : null
+        }
+        toast={toastMessage}
+        onSelectSection={(section) => setActiveSettingsSection(section as SettingsDialogSection)}
+        onSelectTab={(section) => setActiveSection(section as ModelSettingsSection)}
+      >
           {activeSettingsSection === "search" ? (
             <SearchSettingsPanel runtimeClient={runtimeClient} />
           ) : activeSettingsSection === "memory" ? (
@@ -1073,8 +914,6 @@ export function DesktopSettingsDialog({
             <section className="model-provider-list" aria-label="模型配置">
               {providers.map((provider) => {
                 const isExpanded = expandedProviderId === provider.id;
-                const isModelPickerOpen =
-                  openModelPickerProviderId === provider.id;
                 const providerProfiles =
                   profilesByProviderId.get(provider.id) ?? [];
                 const configuredModelList = providerProfiles
@@ -1085,657 +924,149 @@ export function DesktopSettingsDialog({
                     ? draft
                     : createDraftForProvider(provider);
                 return (
-                  <div className="model-provider-card" key={provider.id}>
-                    <button
-                      type="button"
-                      className="model-provider-toggle"
-                      aria-expanded={isExpanded}
-                      onClick={() => selectProvider(provider)}
-                    >
-                      <span className="model-provider-icon">
-                        {provider.displayName.slice(0, 1)}
-                      </span>
-                      <span className="model-provider-title">
-                        <strong>{provider.displayName}</strong>
-                      </span>
-                      <ChevronDown
-                        className="model-provider-chevron"
-                        size={15}
-                        strokeWidth={1.9}
-                      />
-                    </button>
-                    {isExpanded ? (
-                      <div className="model-provider-form">
-                        {configuredModelList ? (
-                          <div className="model-provider-template-note">
-                            {providerDraft.profileId
-                              ? `正在更新已配置模型：${providerDraft.modelId}。新的全局 API key 只有安全保存成功后才会替换原凭据。`
-                              : `已配置模型：${configuredModelList}。当前提交会新增模型配置；同厂商同模型 ID 会提示失败。`}
-                          </div>
-                        ) : null}
-                        {provider.allowCustomModel ? (
-                          <div className="model-provider-field">
-                            <label
-                              id={`${provider.id}-model-label`}
-                              htmlFor={`${provider.id}-model-input`}
-                            >
-                              模型
-                            </label>
-                            <div className="model-custom-picker">
-                              <input
-                                id={`${provider.id}-model-input`}
-                                value={providerDraft.modelId}
-                                aria-expanded={isModelPickerOpen}
-                                aria-controls={`${provider.id}-model-suggestions`}
-                                onClick={() =>
-                                  setOpenModelPickerProviderId((current) =>
-                                    current === provider.id
-                                      ? null
-                                      : provider.id,
-                                  )
-                                }
-                                onChange={(event) => {
-                                  const nextModelId = event.target.value;
-                                  setDraft({
-                                    ...providerDraft,
-                                    modelId: nextModelId,
-                                    advanced: advancedWithModelCapability(
-                                      provider,
-                                      nextModelId,
-                                      providerDraft.advanced,
-                                      true,
-                                    ),
-                                  });
-                                }}
-                                onKeyDown={(event) => {
-                                  if (event.key === "Escape") {
-                                    setOpenModelPickerProviderId(null);
-                                  }
-                                }}
-                              />
-                              <button
-                                type="button"
-                                className="model-custom-picker-trigger"
-                                aria-haspopup="listbox"
-                                aria-expanded={isModelPickerOpen}
-                                aria-label="展开模型建议"
-                                onClick={() =>
-                                  setOpenModelPickerProviderId((current) =>
-                                    current === provider.id
-                                      ? null
-                                      : provider.id,
-                                  )
-                                }
-                              >
-                                <ChevronDown
-                                  className="model-picker-chevron"
-                                  size={16}
-                                  strokeWidth={1.9}
-                                />
-                              </button>
-                              {isModelPickerOpen ? (
-                                <div
-                                  id={`${provider.id}-model-suggestions`}
-                                  className="model-picker-menu"
-                                  role="listbox"
-                                  aria-labelledby={`${provider.id}-model-label`}
-                                >
-                                  {provider.models.map((model) => (
-                                    <button
-                                      key={model}
-                                      type="button"
-                                      className={`model-picker-option${
-                                        providerDraft.modelId === model
-                                          ? " model-picker-option-selected"
-                                          : ""
-                                      }`}
-                                      role="option"
-                                      aria-selected={
-                                        providerDraft.modelId === model
-                                      }
-                                      onClick={() => {
-                                        setDraft({
-                                          ...providerDraft,
-                                          modelId: model,
-                                          advanced: advancedWithModelCapability(
-                                            provider,
-                                            model,
-                                            providerDraft.advanced,
-                                            true,
-                                          ),
-                                        });
-                                        setOpenModelPickerProviderId(null);
-                                      }}
-                                    >
-                                      <span>{model}</span>
-                                    </button>
-                                  ))}
-                                </div>
-                              ) : null}
-                            </div>
-                          </div>
-                        ) : provider.endpointModel ? (
-                          <label>
-                            <span>模型</span>
-                            <input
-                              list={`${provider.id}-models`}
-                              value={
-                                provider.endpointModel
-                                  ? providerDraft.endpointId ||
-                                    providerDraft.modelId
-                                  : providerDraft.modelId
-                              }
-                              onChange={(event) => {
-                                const nextModelId = event.target.value;
-                                setDraft({
-                                  ...providerDraft,
-                                  endpointId: provider.endpointModel
-                                    ? nextModelId
-                                    : providerDraft.endpointId,
-                                  modelId: nextModelId,
-                                  advanced: advancedWithModelCapability(
-                                    provider,
-                                    nextModelId,
-                                    providerDraft.advanced,
-                                    true,
-                                  ),
-                                });
-                              }}
-                            />
-                            <datalist id={`${provider.id}-models`}>
-                              {provider.models.map((model) => (
-                                <option key={model} value={model} />
-                              ))}
-                            </datalist>
-                          </label>
-                        ) : (
-                          <div className="model-provider-field">
-                            <label id={`${provider.id}-model-label`}>
-                              模型
-                            </label>
-                            <div className="model-picker">
-                              <button
-                                type="button"
-                                className="model-picker-trigger"
-                                aria-haspopup="listbox"
-                                aria-expanded={isModelPickerOpen}
-                                aria-labelledby={`${provider.id}-model-label`}
-                                onClick={() =>
-                                  setOpenModelPickerProviderId((current) =>
-                                    current === provider.id
-                                      ? null
-                                      : provider.id,
-                                  )
-                                }
-                                onKeyDown={(event) => {
-                                  if (event.key === "Escape") {
-                                    setOpenModelPickerProviderId(null);
-                                  }
-                                }}
-                              >
-                                <span>{providerDraft.modelId}</span>
-                                <ChevronDown
-                                  className="model-picker-chevron"
-                                  size={16}
-                                  strokeWidth={1.9}
-                                />
-                              </button>
-                              {isModelPickerOpen ? (
-                                <div
-                                  className="model-picker-menu"
-                                  role="listbox"
-                                  aria-labelledby={`${provider.id}-model-label`}
-                                >
-                                  {provider.models.map((model) => (
-                                    <button
-                                      key={model}
-                                      type="button"
-                                      className={`model-picker-option${
-                                        providerDraft.modelId === model
-                                          ? " model-picker-option-selected"
-                                          : ""
-                                      }`}
-                                      role="option"
-                                      aria-selected={
-                                        providerDraft.modelId === model
-                                      }
-                                      onClick={() => {
-                                        setDraft({
-                                          ...providerDraft,
-                                          modelId: model,
-                                          advanced: advancedWithModelCapability(
-                                            provider,
-                                            model,
-                                            providerDraft.advanced,
-                                            true,
-                                          ),
-                                        });
-                                        setOpenModelPickerProviderId(null);
-                                      }}
-                                    >
-                                      <span>{model}</span>
-                                    </button>
-                                  ))}
-                                </div>
-                              ) : null}
-                            </div>
-                          </div>
-                        )}
-                        <label>
-                          <span>Base URL</span>
-                          <input
-                            value={providerDraft.baseURL}
-                            onChange={(event) =>
-                              setDraft({
-                                ...providerDraft,
-                                baseURL: event.target.value,
-                              })
-                            }
-                          />
-                        </label>
-                        <div className="model-provider-field">
-                          <label htmlFor={`${provider.id}-api-key`}>
-                            API 密钥
-                          </label>
-                          <div className="model-provider-secret-field">
-                            <input
-                              id={`${provider.id}-api-key`}
-                              type={showApiKey ? "text" : "password"}
-                              value={providerDraft.apiKey}
-                              placeholder={`输入 ${provider.keyEnvName}`}
-                              onChange={(event) =>
-                                setDraft({
-                                  ...providerDraft,
-                                  apiKey: event.target.value,
-                                })
-                              }
-                            />
-                            <button
-                              type="button"
-                              className="model-provider-secret-toggle"
-                              aria-label={
-                                showApiKey ? "隐藏 API 密钥" : "显示 API 密钥"
-                              }
-                              aria-pressed={showApiKey}
-                              onClick={() =>
-                                setShowApiKey((current) => !current)
-                              }
-                            >
-                              {showApiKey ? (
-                                <EyeOff size={15} strokeWidth={1.9} />
-                              ) : (
-                                <Eye size={15} strokeWidth={1.9} />
-                              )}
-                            </button>
-                          </div>
-                        </div>
-                        {providerHasEditableCapabilities(provider) ? (
-                          <div className="model-provider-field">
-                            <label>输入能力</label>
-                            <div className="model-provider-capability-grid">
-                              <label className="model-provider-capability-card">
-                                <span className="model-provider-capability-copy">
-                                  <strong>支持图片输入</strong>
-                                  <span>
-                                    用于输入框图片粘贴、预览与发送 gating。
-                                  </span>
-                                </span>
-                                <span className="configured-model-switch">
-                                  <input
-                                    type="checkbox"
-                                    checked={
-                                      providerDraft.advanced?.supportsVision ===
-                                      true
-                                    }
-                                    onChange={(event) =>
-                                      setDraft({
-                                        ...providerDraft,
-                                        advanced: {
-                                          ...providerDraft.advanced,
-                                          supportsVision: event.target.checked,
-                                          supportsVideo: event.target.checked
-                                            ? (providerDraft.advanced
-                                                ?.supportsVideo ?? false)
-                                            : false,
-                                        },
-                                      })
-                                    }
-                                    aria-label={`${providerDraft.modelId} 支持图片输入`}
-                                  />
-                                  <span />
-                                </span>
-                              </label>
-                              <label className="model-provider-capability-card">
-                                <span className="model-provider-capability-copy">
-                                  <strong>支持原生 PDF 输入</strong>
-                                  <span>
-                                    开启后 Read 会直接向模型发送 PDF；关闭时使用视觉模型的 Poppler 页面渲染回退。
-                                  </span>
-                                </span>
-                                <span className="configured-model-switch">
-                                  <input
-                                    type="checkbox"
-                                    checked={
-                                      providerDraft.advanced?.supportsNativePDF ===
-                                      true
-                                    }
-                                    onChange={(event) =>
-                                      setDraft({
-                                        ...providerDraft,
-                                        advanced: {
-                                          ...providerDraft.advanced,
-                                          supportsNativePDF: event.target.checked,
-                                        },
-                                      })
-                                    }
-                                    aria-label={`${providerDraft.modelId} 支持原生 PDF 输入`}
-                                  />
-                                  <span />
-                                </span>
-                              </label>
-                              <label className="model-provider-capability-card">
-                                <span className="model-provider-capability-copy">
-                                  <strong>支持视频输入</strong>
-                                  <span>
-                                    当前只保存能力位，输入框暂不开放视频上传。
-                                  </span>
-                                </span>
-                                <span className="configured-model-switch">
-                                  <input
-                                    type="checkbox"
-                                    checked={
-                                      providerDraft.advanced?.supportsVideo ===
-                                      true
-                                    }
-                                    disabled={
-                                      providerDraft.advanced?.supportsVision !==
-                                      true
-                                    }
-                                    onChange={(event) =>
-                                      setDraft({
-                                        ...providerDraft,
-                                        advanced: {
-                                          ...providerDraft.advanced,
-                                          supportsVision: event.target.checked
-                                            ? true
-                                            : (providerDraft.advanced
-                                                ?.supportsVision ?? false),
-                                          supportsVideo: event.target.checked,
-                                        },
-                                      })
-                                    }
-                                    aria-label={`${providerDraft.modelId} 支持视频输入`}
-                                  />
-                                  <span />
-                                </span>
-                              </label>
-                            </div>
-                          </div>
-                        ) : null}
-                        <div className="model-provider-form-footer">
-                          <div className="model-provider-link-row">
-                            <a
-                              href={provider.apiDocsURL}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              <KeyRound size={14} />
-                              获取 API 密钥
-                            </a>
-                          </div>
-                          <div className="model-provider-form-actions">
-                            <Button
-                              variant="default"
-                              size="md"
-                              loading={testing}
-                              disabled={saving}
-                              onClick={() => {
-                                void testDraft();
-                              }}
-                            >
-                              测试连接
-                            </Button>
-                            <Button
-                              variant="primary"
-                              size="md"
-                              loading={saving}
-                              disabled={testing}
-                              onClick={() => {
-                                void saveDraft();
-                              }}
-                            >
-                              提交
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
+                  <AwakenSettingsProviderCard
+                    key={provider.id}
+                    name={provider.displayName}
+                    expanded={isExpanded}
+                    onExpandedChange={() => selectProvider(provider)}
+                  >
+                    <AwakenModelProviderForm
+                      providerId={provider.id}
+                      modelMode={provider.allowCustomModel ? "custom" : provider.endpointModel ? "endpoint" : "select"}
+                      models={provider.models}
+                      modelId={provider.endpointModel ? providerDraft.endpointId || providerDraft.modelId : providerDraft.modelId}
+                      baseURL={providerDraft.baseURL}
+                      apiKey={providerDraft.apiKey}
+                      apiKeyPlaceholder={`输入 ${provider.keyEnvName}`}
+                      apiDocsURL={provider.apiDocsURL}
+                      templateNote={
+                        configuredModelList
+                          ? providerDraft.profileId
+                            ? `正在更新已配置模型：${providerDraft.modelId}。新的全局 API key 只有安全保存成功后才会替换原凭据。`
+                            : `已配置模型：${configuredModelList}。当前提交会新增模型配置；同厂商同模型 ID 会提示失败。`
+                          : null
+                      }
+                      showApiKey={showApiKey}
+                      editableCapabilities={providerHasEditableCapabilities(provider)}
+                      supportsVision={providerDraft.advanced?.supportsVision === true}
+                      supportsNativePDF={providerDraft.advanced?.supportsNativePDF === true}
+                      supportsVideo={providerDraft.advanced?.supportsVideo === true}
+                      saving={saving}
+                      testing={testing}
+                      onModelChange={(nextModelId) =>
+                        setDraft({
+                          ...providerDraft,
+                          endpointId: provider.endpointModel ? nextModelId : providerDraft.endpointId,
+                          modelId: nextModelId,
+                          advanced: advancedWithModelCapability(
+                            provider,
+                            nextModelId,
+                            providerDraft.advanced,
+                            true,
+                          ),
+                        })
+                      }
+                      onBaseURLChange={(baseURL) => setDraft({ ...providerDraft, baseURL })}
+                      onApiKeyChange={(apiKey) => setDraft({ ...providerDraft, apiKey })}
+                      onShowApiKeyChange={setShowApiKey}
+                      onCapabilityChange={(capability, checked) => {
+                        if (capability === "supportsVision") {
+                          setDraft({
+                            ...providerDraft,
+                            advanced: {
+                              ...providerDraft.advanced,
+                              supportsVision: checked,
+                              supportsVideo: checked ? (providerDraft.advanced?.supportsVideo ?? false) : false,
+                            },
+                          });
+                        } else if (capability === "supportsVideo") {
+                          setDraft({
+                            ...providerDraft,
+                            advanced: {
+                              ...providerDraft.advanced,
+                              supportsVision: checked ? true : (providerDraft.advanced?.supportsVision ?? false),
+                              supportsVideo: checked,
+                            },
+                          });
+                        } else {
+                          setDraft({
+                            ...providerDraft,
+                            advanced: {
+                              ...providerDraft.advanced,
+                              supportsNativePDF: checked,
+                            },
+                          });
+                        }
+                      }}
+                      onTest={() => void testDraft()}
+                      onSubmit={() => void saveDraft()}
+                    />
+                  </AwakenSettingsProviderCard>
                 );
               })}
             </section>
           ) : (
-            <section className="configured-models" aria-label="已配置模型">
-              <div className="configured-models-table">
-                <div className="configured-models-row configured-models-head">
-                  <span>模型名称</span>
-                  <span>启用状态</span>
-                  <span>上下文长度</span>
-                  <span>自动压缩阈值</span>
-                  <span>输出上限</span>
-                  <span aria-hidden="true" />
-                </div>
-                {profiles.length === 0 ? (
-                  <div className="configured-models-empty">暂无已配置模型</div>
-                ) : (
-                  profiles.map((profile) => {
-                    const contextWindowMax = contextWindowMaxForProfile(
-                      profile,
-                      providers,
-                    );
-                    const effectiveAnchor = contextWindowAnchor(contextWindowMax);
-                    const profileDraft = configuredDrafts[profile.id] ?? {
-                      enabled: profile.enabled,
-                      contextWindow: contextWindowForProfile(profile, providers),
-                      contextWindowInput: contextWindowForProfile(
-                        profile,
-                        providers,
-                      ).toString(),
-                      maxTokens: maxTokensForProfile(profile),
-                      maxTokensInput: maxTokensForProfile(profile).toString(),
-                    };
-                    const contextStyle = {
-                      "--context-fill": `${contextWindowFill(
-                        profileDraft.contextWindow,
-                        contextWindowMax,
-                      )}%`,
-                      "--context-anchor": `${contextWindowFill(
-                        effectiveAnchor,
-                        contextWindowMax,
-                      )}%`,
-                    } as CSSProperties;
-                    return (
-                      <div className="configured-models-row" key={profile.id}>
-                        <div className="configured-model-name">
-                          <span className="configured-model-icon">
-                            {profile.displayName.slice(0, 1)}
-                          </span>
-                          <span className="configured-model-copy">
-                            <strong>{profile.modelId}</strong>
-                            {credentialStatusLabel(profile.profileStatus) ? (
-                              <span className={`configured-model-credential-status configured-model-credential-status-${profile.profileStatus}`}>
-                                {credentialStatusLabel(profile.profileStatus)}
-                              </span>
-                            ) : null}
-                          </span>
-                        </div>
-                        <label className="configured-model-switch">
-                          <input
-                            type="checkbox"
-                            checked={profileDraft.enabled}
-                            onChange={(event) =>
-                              updateConfiguredDraft(profile.id, {
-                                enabled: event.target.checked,
-                              })
-                            }
-                            aria-label={`${profile.modelId} 启用状态`}
-                          />
-                          <span />
-                        </label>
-                        <div
-                          className="configured-context"
-                          style={contextStyle}
-                        >
-                          <div className="configured-context-main">
-                            <input
-                              className="configured-context-range"
-                              type="range"
-                              min={CONTEXT_WINDOW_MIN}
-                              max={contextWindowMax}
-                              step={CONTEXT_WINDOW_SLIDER_STEP}
-                              value={profileDraft.contextWindow}
-                              onChange={(event) =>
-                                updateConfiguredContextWindow(
-                                  profile.id,
-                                  Number(event.target.value),
-                                )
-                              }
-                              onPointerUp={() =>
-                                snapConfiguredContextWindow(profile.id)
-                              }
-                              onKeyUp={() =>
-                                snapConfiguredContextWindow(profile.id)
-                              }
-                              onBlur={() =>
-                                snapConfiguredContextWindow(profile.id)
-                              }
-                              aria-label={`${profile.modelId} 上下文长度`}
-                            />
-                            <input
-                              className="configured-context-input"
-                              type="text"
-                              inputMode="numeric"
-                              pattern="[0-9]*"
-                              value={profileDraft.contextWindowInput}
-                              onChange={(event) =>
-                                updateConfiguredContextWindowInput(
-                                  profile.id,
-                                  event.target.value,
-                                )
-                              }
-                              onBlur={() =>
-                                commitConfiguredContextWindowInput(profile.id)
-                              }
-                              aria-label={`${profile.modelId} 精确上下文长度`}
-                            />
-                          </div>
-                          <div className="configured-context-scale">
-                            <span className="configured-context-scale-label configured-context-scale-start">
-                              8K
-                            </span>
-                            <button
-                              type="button"
-                              className="configured-context-anchor"
-                              onClick={() =>
-                                updateConfiguredContextWindow(
-                                  profile.id,
-                                  effectiveAnchor,
-                                )
-                              }
-                              aria-label={`${profile.modelId} 设置上下文长度为 ${effectiveAnchor}`}
-                            >
-                              {formatContextWindow(effectiveAnchor)}
-                            </button>
-                            <span className="configured-context-scale-label configured-context-scale-end">
-                              {formatContextWindow(contextWindowMax)}
-                            </span>
-                          </div>
-                        </div>
-                        <span className="configured-compression-value">
-                          {calculateAutoCompactThreshold(
-                            profileDraft.contextWindow,
-                          )}
-                        </span>
-                        <input
-                          className="configured-token-input"
-                          type="text"
-                          inputMode="numeric"
-                          pattern="[0-9]*"
-                          value={profileDraft.maxTokensInput}
-                          onChange={(event) =>
-                            updateConfiguredMaxTokensInput(
-                              profile.id,
-                              event.target.value,
-                            )
-                          }
-                          onBlur={() =>
-                            commitConfiguredMaxTokensInput(profile.id)
-                          }
-                          aria-label={`${profile.modelId} 输出 token 上限`}
-                        />
-                        <div className="configured-models-actions">
-                          <div className="configured-models-save-actions">
-                            <Button
-                              variant="default"
-                              size="md"
-                              disabled={
-                                !configuredHasChanges ||
-                                savingConfigured ||
-                                Boolean(deletingProfileId)
-                              }
-                              onClick={resetConfiguredDrafts}
-                            >
-                              取消
-                            </Button>
-                            <Button
-                              variant="primary"
-                              size="md"
-                              loading={savingConfigured}
-                              disabled={
-                                !configuredHasChanges ||
-                                Boolean(deletingProfileId)
-                              }
-                              onClick={() => {
-                                void saveConfiguredDrafts();
-                              }}
-                            >
-                              保存
-                            </Button>
-                          </div>
-                          <Button
-                            variant="default"
-                            size="md"
-                            disabled={
-                              savingConfigured || Boolean(deletingProfileId)
-                            }
-                            onClick={() => editExistingProfile(profile)}
-                          >
-                            更新 API key
-                          </Button>
-                          <Button
-                            className="configured-models-delete"
-                            variant="default"
-                            size="md"
-                            loading={deletingProfileId === profile.id}
-                            disabled={
-                              savingConfigured || Boolean(deletingProfileId)
-                            }
-                            onClick={() => {
-                              void deleteConfiguredProfile(profile);
-                            }}
-                          >
-                            删除
-                          </Button>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </section>
+            <AwakenConfiguredModels
+              models={profiles.map((profile) => {
+                const contextWindowMax = contextWindowMaxForProfile(profile, providers);
+                const effectiveAnchor = contextWindowAnchor(contextWindowMax);
+                const profileDraft = configuredDrafts[profile.id] ?? {
+                  enabled: profile.enabled,
+                  contextWindow: contextWindowForProfile(profile, providers),
+                  contextWindowInput: contextWindowForProfile(profile, providers).toString(),
+                  maxTokens: maxTokensForProfile(profile),
+                  maxTokensInput: maxTokensForProfile(profile).toString(),
+                };
+                return {
+                  id: profile.id,
+                  displayName: profile.displayName,
+                  modelId: profile.modelId,
+                  credentialStatus: credentialStatusLabel(profile.profileStatus),
+                  credentialTone: profile.profileStatus === "unreadable" ? "unreadable" as const : "default" as const,
+                  enabled: profileDraft.enabled,
+                  contextWindow: profileDraft.contextWindow,
+                  contextWindowInput: profileDraft.contextWindowInput,
+                  contextWindowMin: CONTEXT_WINDOW_MIN,
+                  contextWindowMax,
+                  contextWindowStep: CONTEXT_WINDOW_SLIDER_STEP,
+                  contextFill: contextWindowFill(profileDraft.contextWindow, contextWindowMax),
+                  contextAnchor: contextWindowFill(effectiveAnchor, contextWindowMax),
+                  contextAnchorValue: effectiveAnchor,
+                  contextAnchorLabel: formatContextWindow(effectiveAnchor),
+                  contextEndLabel: formatContextWindow(contextWindowMax),
+                  compressionValue: calculateAutoCompactThreshold(profileDraft.contextWindow),
+                  maxTokensInput: profileDraft.maxTokensInput,
+                };
+              })}
+              hasChanges={configuredHasChanges}
+              saving={savingConfigured}
+              deletingModelId={deletingProfileId}
+              onEnabledChange={(profileId, enabled) => updateConfiguredDraft(profileId, { enabled })}
+              onContextRangeChange={updateConfiguredContextWindow}
+              onContextRangeCommit={snapConfiguredContextWindow}
+              onContextInputChange={updateConfiguredContextWindowInput}
+              onContextInputCommit={commitConfiguredContextWindowInput}
+              onContextAnchorSelect={(profileId) =>
+                updateConfiguredContextWindow(
+                  profileId,
+                  contextWindowAnchor(configuredContextWindowMax(profileId)),
+                )
+              }
+              onMaxTokensInputChange={updateConfiguredMaxTokensInput}
+              onMaxTokensInputCommit={commitConfiguredMaxTokensInput}
+              onReset={resetConfiguredDrafts}
+              onSave={() => void saveConfiguredDrafts()}
+              onUpdateApiKey={(profileId) => {
+                const profile = profiles.find((item) => item.id === profileId);
+                if (profile) editExistingProfile(profile);
+              }}
+              onDelete={(profileId) => {
+                const profile = profiles.find((item) => item.id === profileId);
+                if (profile) void deleteConfiguredProfile(profile);
+              }}
+            />
           )}
-        </div>
-      </div>
+      </AwakenSettings>
     </Dialog>
   );
 }

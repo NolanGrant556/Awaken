@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Brain, Check, ChevronDown, Search, Trash2 } from "lucide-react";
+import {
+  AwakenMemorySettings,
+  type AwakenMemoryFilterValue,
+} from "@awaken/design-system";
 import type {
   MemoryScope,
   MemorySettings,
@@ -15,86 +18,6 @@ const switchCopy: Array<{ key: keyof MemorySettings; title: string; description:
   { key: "proactiveMemory", title: "主动记忆", description: "主模型在正常任务中自行判断是否值得长期保存。" },
   { key: "autoDream", title: "Auto Dream", description: "空闲并达到整理阈值时自动维护历史记忆。" },
 ];
-
-type FilterValue = string | number;
-
-type FilterOption<T extends FilterValue> = {
-  value: T;
-  label: string;
-};
-
-function MemoryFilterSelect<T extends FilterValue>({
-  label,
-  value,
-  options,
-  onChange,
-  placeholder = "（待选择）",
-  disabled = false,
-}: {
-  label: string;
-  value: T;
-  options: Array<FilterOption<T>>;
-  onChange: (value: T) => void;
-  placeholder?: string;
-  disabled?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const selectedLabel = options.find((option) => option.value === value)?.label ?? placeholder;
-
-  useEffect(() => {
-    if (!open) return;
-    const closeOnOutsidePress = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("pointerdown", closeOnOutsidePress);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsidePress);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [open]);
-
-  return (
-    <div className="memory-filter" ref={rootRef}>
-      <button
-        type="button"
-        className="memory-filter-trigger"
-        aria-label={label}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        disabled={disabled}
-        onClick={() => setOpen((current) => !current)}
-      >
-        <span>{selectedLabel}</span>
-        <ChevronDown size={15} aria-hidden="true" />
-      </button>
-      {open ? (
-        <div className="memory-filter-menu" role="listbox" aria-label={label}>
-          {options.map((option) => (
-            <button
-              type="button"
-              className={`memory-filter-option${option.value === value ? " memory-filter-option-selected" : ""}`}
-              role="option"
-              aria-selected={option.value === value}
-              key={option.value}
-              onClick={() => {
-                onChange(option.value);
-                setOpen(false);
-              }}
-            >
-              <span>{option.label}</span>
-              <Check size={14} aria-hidden="true" />
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 export function memoryDreamStatusLabel(status: string): string {
   return ({
@@ -230,38 +153,42 @@ export function MemorySettingsPanel({ runtimeClient, currentProjectId }: { runti
   }
 
   return (
-    <section className="memory-settings" aria-label="记忆">
-      <div className="memory-settings-switches">
-        {switchCopy.map((item) => (
-          <div className="memory-settings-switch-row" key={item.key}>
-            <div><strong>{item.title}</strong><p>{item.description}</p></div>
-            <button type="button" className={`mcp-toggle-switch${settings?.[item.key] ? " mcp-toggle-switch-on" : " mcp-toggle-switch-off"}`} aria-label={`${settings?.[item.key] ? "关闭" : "开启"}${item.title}`} aria-pressed={settings?.[item.key] ?? false} disabled={!settings || busy} onClick={() => void toggle(item.key)}><span className="mcp-toggle-switch-thumb" /></button>
-          </div>
-        ))}
-      </div>
-
-      <div className="memory-settings-toolbar">
-        <div className="memory-search"><Search size={16} /><input aria-label="搜索记忆" placeholder="搜索记忆" value={query} onChange={(event) => changeFilter(setQuery, event.target.value)} /></div>
-        <MemoryFilterSelect label="记忆范围" value={scope} options={[{ value: "user", label: "用户记忆" }, { value: "project", label: "项目记忆" }]} onChange={(next) => changeFilter(setScope, next as MemoryScope)} />
-        {scope === "project" ? <MemoryFilterSelect label="项目" value={projectId} options={projects.map((project) => ({ value: project.projectId, label: project.displayName }))} placeholder="（项目待选择）" disabled={!projects.length} onChange={(next) => changeFilter(setProjectId, next)} /> : null}
-        <MemoryFilterSelect label="记忆类型" value={type} options={[{ value: "", label: "全部类型" }, { value: "user", label: "用户" }, { value: "feedback", label: "反馈" }, { value: "project", label: "项目" }, { value: "reference", label: "参考" }]} onChange={(next) => changeFilter(setType, next as MemoryType | "")} />
-        <MemoryFilterSelect label="记忆状态" value={status} options={[{ value: "", label: "全部状态" }, { value: "active", label: "有效" }, { value: "superseded", label: "已替代" }]} onChange={(next) => changeFilter(setStatus, next as typeof status)} />
-        <MemoryFilterSelect label="更新时间" value={updatedWithinDays} options={[{ value: 0, label: "全部时间" }, { value: 7, label: "最近 7 天" }, { value: 30, label: "最近 30 天" }]} onChange={(next) => changeFilter(setUpdatedWithinDays, next)} />
-        <button type="button" className="memory-dream-button" disabled={busy || (scope === "project" && !projectId) || dreamStatus === "queued" || dreamStatus === "running"} onClick={() => void startDream()}><Brain size={16} />立即整理</button>
-        {dreamTaskId && (dreamStatus === "queued" || dreamStatus === "running") ? <button type="button" onClick={() => void runtimeClient.cancelMemoryDream(dreamTaskId)}>取消</button> : null}
-      </div>
-      {dreamStatus ? <div className="memory-dream-status" role="status">记忆整理：{memoryDreamStatusLabel(dreamStatus)}</div> : null}
-      {message ? <div className="model-settings-message" role="status">{message}</div> : null}
-
-      <div className="memory-settings-content">
-        <div className="memory-list" aria-label="记忆列表">
-          {memories.map((memory) => <article className={`memory-list-item${selected?.memoryId === memory.memoryId ? " memory-list-item-selected" : ""}`} key={memory.memoryId}><button type="button" onClick={() => void openMemory(memory)}><strong>{memory.name}</strong><span>{memory.description}</span><small>{memory.scope} · {memory.type} · {new Date(memory.updatedAt).toLocaleString()}</small></button><button type="button" className="memory-delete-button" aria-label={`删除 ${memory.name}`} onClick={() => void removeMemory(memory)}><Trash2 size={15} /></button></article>)}
-          {!memories.length ? <div className="memory-empty">暂无符合条件的记忆</div> : null}
-        </div>
-        <div className="memory-detail" aria-label="记忆详情">
-          {selected ? <><h2>{selected.name}</h2><p className="memory-detail-description">{selected.description}</p><pre className="aw-text-selectable">{selected.content}</pre><dl><dt>来源任务</dt><dd>{selected.sourceThreadId}</dd><dt>Revision</dt><dd>{selected.revision}</dd></dl></> : <div className="memory-empty">选择一条记忆查看正文</div>}
-        </div>
-      </div>
-    </section>
+    <AwakenMemorySettings
+      switches={switchCopy.map((item) => ({
+        id: item.key,
+        title: item.title,
+        description: item.description,
+        checked: settings?.[item.key] ?? false,
+      }))}
+      filters={[
+        { id: "scope", label: "记忆范围", value: scope, options: [{ value: "user", label: "用户记忆" }, { value: "project", label: "项目记忆" }] },
+        ...(scope === "project" ? [{ id: "project", label: "项目", value: projectId, options: projects.map((project) => ({ value: project.projectId, label: project.displayName })), placeholder: "（项目待选择）", disabled: !projects.length }] : []),
+        { id: "type", label: "记忆类型", value: type, options: [{ value: "", label: "全部类型" }, { value: "user", label: "用户" }, { value: "feedback", label: "反馈" }, { value: "project", label: "项目" }, { value: "reference", label: "参考" }] },
+        { id: "status", label: "记忆状态", value: status, options: [{ value: "", label: "全部状态" }, { value: "active", label: "有效" }, { value: "superseded", label: "已替代" }] },
+        { id: "updated", label: "更新时间", value: updatedWithinDays, options: [{ value: 0, label: "全部时间" }, { value: 7, label: "最近 7 天" }, { value: 30, label: "最近 30 天" }] },
+      ]}
+      query={query}
+      memories={memories.map((memory) => ({ id: memory.memoryId, name: memory.name, description: memory.description, meta: `${memory.scope} · ${memory.type} · ${new Date(memory.updatedAt).toLocaleString()}` }))}
+      selectedMemoryId={selected?.memoryId}
+      detail={selected ? { name: selected.name, description: selected.description, content: selected.content ?? "", sourceThreadId: selected.sourceThreadId, revision: selected.revision } : null}
+      busy={!settings || busy}
+      canStartDream={scope !== "project" || Boolean(projectId)}
+      dreamRunning={Boolean(dreamTaskId && (dreamStatus === "queued" || dreamStatus === "running"))}
+      dreamStatusLabel={dreamStatus ? memoryDreamStatusLabel(dreamStatus) : null}
+      message={message}
+      onToggleSwitch={(key) => void toggle(key as keyof MemorySettings)}
+      onQueryChange={(value) => changeFilter(setQuery, value)}
+      onFilterChange={(id: string, value: AwakenMemoryFilterValue) => {
+        if (id === "scope") changeFilter(setScope, value as MemoryScope);
+        else if (id === "project") changeFilter(setProjectId, String(value));
+        else if (id === "type") changeFilter(setType, value as MemoryType | "");
+        else if (id === "status") changeFilter(setStatus, value as typeof status);
+        else if (id === "updated") changeFilter(setUpdatedWithinDays, Number(value));
+      }}
+      onStartDream={() => void startDream()}
+      onCancelDream={() => { if (dreamTaskId) void runtimeClient.cancelMemoryDream(dreamTaskId); }}
+      onOpenMemory={(memoryId) => { const memory = memories.find((item) => item.memoryId === memoryId); if (memory) void openMemory(memory); }}
+      onDeleteMemory={(memoryId) => { const memory = memories.find((item) => item.memoryId === memoryId); if (memory) void removeMemory(memory); }}
+    />
   );
 }

@@ -37,8 +37,8 @@ Awaken Design System/
 - `src/tokens/` 是颜色、间距、字体、边框、组件基础类等设计令牌事实源。
 - `dist/` 是生成目录，可以删除后重建；不要在里面修 bug。
 - `DESIGN_SYSTEM_GUIDE.md` 是后续视觉改动的作者规则，优先于临时审美判断。
-- `gallery/registry.ts` 决定哪些独立组件或组件族拥有顶层观测 URL。
-- Gallery 左侧的“Awaken 设计系统 / 组件目录”是固定目录头，只有下方的组件入口列表参与纵向滚动。
+- `gallery/registry.ts` 决定哪些独立组件或组件族拥有顶层观测 URL，以及入口所属的 Gallery 目录分区。
+- Gallery 左侧的“Awaken 设计系统 / 组件目录”是固定目录头，只有下方的目录分区和组件入口参与纵向滚动。
 - `src/index.ts` 决定哪些能力对 Desktop 或外部项目公开。
 
 ## 入口契约
@@ -80,6 +80,7 @@ http://127.0.0.1:5173/#/components/<component-id>
 http://127.0.0.1:5173/#/components/awaken-composer-bar
 http://127.0.0.1:5173/#/components/awaken-execution-feed
 http://127.0.0.1:5173/#/components/awaken-light-inspector-rail
+http://127.0.0.1:5173/#/components/awaken-product-logo
 ```
 
 `npm run dev:ui` 只是启动组件观测服务的命令。真正的观测入口是注册表中的独立组件或组件族 URL。组件族可以在一个入口内集中展示完整组合及其可复用小组件；`http://127.0.0.1:5173/` 会自动落到某个已注册 URL，本身不作为独立入口。
@@ -107,7 +108,10 @@ http://127.0.0.1:5173/#/components/awaken-skills
 http://127.0.0.1:5173/#/components/awaken-sidebar
 http://127.0.0.1:5173/#/components/awaken-account
 http://127.0.0.1:5173/#/components/awaken-settings
+http://127.0.0.1:5173/#/components/awaken-connectors
 ```
+
+Gallery 左栏当前先显示“原子组件”目录，再显示“组件与组件库”。“原子组件”中的“产品 LOGO”入口对应 `AwakenProductLogo`，直接拥有 `src/assets/product-logo.png` 这份官方 256×256 方形产品标志。横向 `AWAKEN` 字标仍由 `logo-wordmark.png` 负责；两者用途不同，不得互相裁切替代。
 
 “「技能」组件库”入口同时观测完整 Skills 组合、Skill 卡片、开关、项目文件夹、项目窗口和 Markdown 预览窗口；这些小组件保留独立源码和公开导出，但不重复占用 Gallery 侧栏。
 
@@ -116,6 +120,8 @@ http://127.0.0.1:5173/#/components/awaken-settings
 “「账户」组件库”集中展示 `AwakenAccount` 完整组合、`AwakenProfileButton` 个人入口和 `AwakenProfileBalancePanel` 额度/设置面板；运行时额度请求留在 Desktop，Design System 只接收数据和回调。
 
 “「设置」组件库”集中展示 Desktop 直接消费的 `AwakenSettings` 完整组合，以及设置导航、模型页签、供应商卡、真实模型选择与配置表单、可调的已配置模型表格、主题选择器、搜索设置、记忆设置和宠物设置视图。Gallery 只注入 mock 数据；模型、搜索、记忆、外观与宠物分区的运行时读取、保存和副作用仍由 Desktop 拥有。
+
+“「连接器」组件库”集中展示 Desktop 直接消费的 `AwakenConnectors` 完整 MCP/CLI 组合，以及连接器卡片、品牌图标、server 开关、CLI 详情、MCP 配置和 MCP 设置弹窗。Gallery 只注入 mock 状态；连接器目录、MCP server snapshot、CLI readiness、安装/授权、配置保存、日志读取与持久化仍由 Desktop Main/Core/Renderer 对应 owner 负责。
 
 ## 组件文件夹契约
 
@@ -138,7 +144,13 @@ src/components/AwakenComponentName/
 - `*.states.ts`：可观测状态与 mock props。
 - `*.demo.tsx`：由 Gallery 渲染的独立视觉 demo。
 - `README.md`：给人和 Coding Agent 看的组件契约。
-- `index.ts`：组件导出。
+- `index.ts`：生产组件、类型和需要共享的状态导出；不得导出 `*.demo.tsx`。
+
+生产包与 Gallery 使用两个独立入口：
+
+- `src/index.ts` 与 `src/components/index.ts` 是 `@awaken/design-system` 的正式生产出口，只包含 Desktop 可消费的组件、类型、tokens 与资源。
+- `gallery/demos.ts` 是 Gallery-only Demo 出口；`gallery/registry.ts` 直接引用各组件的 `*.demo.tsx`。
+- `npm run build` 会分别生成 `dist/index.js` / `dist/index.css` 和仅供 smoke 使用的 `dist/gallery.js` / `dist/gallery.css`。Desktop 只消费正式 `index` 出口，不能引入 `gallery` 产物。
 
 ## Coding Agent 规则
 
@@ -146,6 +158,8 @@ src/components/AwakenComponentName/
 - 数据通过 props 进入，行为通过 callbacks 传出。
 - 组件 props 或视觉状态变化时，必须同步更新可观测 states。
 - 新的独立组件或组件族 demo 必须注册到 `gallery/registry.ts`；组件族内部小组件可以只在对应组件族 demo 中集中展示。
+- 组件目录 `index.ts` 不得导出 `*.demo.tsx`；新增 Demo 时同时加入 `gallery/demos.ts`，防止 Demo JavaScript 和 Demo CSS 进入 Desktop renderer。
+- 官方方形产品标志只能通过 `AwakenProductLogo` 使用；Desktop 和其他 consumer 不保留或注入第二份方形 Awaken 图标。
 - Desktop 应优先通过 `@awaken/design-system` 包出口使用组件，不要从 `Awaken Design System/src/...` 做源码路径 import。
 - 独立组件必须能通过自己的 `#/components/<component-id>` URL 打开；归属于组件族的小组件必须在组件族 URL 中可查看和交互。
 
@@ -158,4 +172,4 @@ npm --workspace @awaken/design-system run typecheck
 npm --workspace @awaken/design-system run smoke:render
 ```
 
-`smoke:render` 会 server-render 所有导出的 `Awaken*Demo` 组件。如果 demo 缺失或渲染失败，命令会失败。
+`smoke:render` 会从 Gallery-only bundle server-render 所有 `Awaken*Demo` 组件，同时继续用生产 bundle 检查正式组件状态。如果 demo 缺失、渲染失败，或生产/Gallery 构建边界失效，命令会失败。

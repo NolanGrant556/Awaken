@@ -1,83 +1,88 @@
 import type { ComponentType } from "react";
-import { AwakenAccountDemo } from "../src/components/AwakenAccount";
-import { AwakenActivityLineDemo } from "../src/components/AwakenActivityLine";
-import { AwakenApprovalCardDemo } from "../src/components/AwakenApprovalCard";
-import { AwakenAppShellDemo } from "../src/components/AwakenAppShell";
-import { AwakenArtifactCardDemo } from "../src/components/AwakenArtifactCard";
-import { AwakenDeliverableCardDemo } from "../src/components/AwakenDeliverableCard";
-import { AwakenDeliverableListDemo } from "../src/components/AwakenDeliverableList";
-import { AwakenArtifactGridDemo } from "../src/components/AwakenArtifactGrid";
-import { AwakenAssistantMessageDemo } from "../src/components/AwakenAssistantMessage";
-import { AwakenAvatarDemo } from "../src/components/AwakenAvatar";
-import { AwakenBrandRowDemo } from "../src/components/AwakenBrandRow";
-import { AwakenButtonDemo } from "../src/components/AwakenButton";
-import { AwakenCenterStageDemo } from "../src/components/AwakenCenterStage";
-import { AwakenComposerDemo } from "../src/components/AwakenComposer";
-import { AwakenComposerBarDemo } from "../src/components/AwakenComposerBar";
-import { AwakenComposerDockDemo } from "../src/components/AwakenComposerDock";
-import { AwakenComposerInputDemo } from "../src/components/AwakenComposerInput";
-import { AwakenContextButtonDemo } from "../src/components/AwakenContextButton";
-import { AwakenConversationListDemo } from "../src/components/AwakenConversationList";
-import { AwakenCopyButtonDemo } from "../src/components/AwakenCopyButton";
-import { AwakenDisclosureDemo } from "../src/components/AwakenDisclosure";
-import { AwakenDividerDemo } from "../src/components/AwakenDivider";
-import { AwakenDialogDemo } from "../src/components/AwakenDialog";
-import { AwakenDropdownDemo } from "../src/components/AwakenDropdown";
-import { AwakenExecutionFeedDemo } from "../src/components/AwakenExecutionFeed";
-import { AwakenExploringGroupDemo } from "../src/components/AwakenExploringGroup";
-import { AwakenFileChangeSummaryDemo } from "../src/components/AwakenFileChangeSummary";
-import { AwakenIconDemo } from "../src/components/AwakenIcon";
-import { AwakenIconButtonDemo } from "../src/components/AwakenIconButton";
-import { AwakenInspectorRailDemo } from "../src/components/AwakenInspectorRail";
-import { AwakenInspectorTabsDemo } from "../src/components/AwakenInspectorTabs";
-import { AwakenKbdDemo } from "../src/components/AwakenKbd";
-import { AwakenLightInspectorRailDemo } from "../src/components/AwakenLightInspectorRail";
-import { AwakenMarkdownAnswerDemo } from "../src/components/AwakenMarkdownAnswer";
-import { AwakenModelSelectorDemo } from "../src/components/AwakenModelSelector";
-import { AwakenModeToggleDemo } from "../src/components/AwakenModeToggle";
-import { AwakenNarrativeFeedDemo } from "../src/components/AwakenNarrativeFeed";
-import { AwakenOriginalThinkingDemo } from "../src/components/AwakenOriginalThinking";
-import { AwakenPillDemo } from "../src/components/AwakenPill";
-import { AwakenPlatformProviderDemo } from "../src/components/AwakenPlatformProvider";
-import { AwakenPopoverDemo } from "../src/components/AwakenPopover";
-import { AwakenPromptCardDemo } from "../src/components/AwakenPromptCard";
-import { AwakenQuickActionChipDemo } from "../src/components/AwakenQuickActionChip";
-import { AwakenQuickActionGridDemo } from "../src/components/AwakenQuickActionGrid";
-import { AwakenRunStageDemo } from "../src/components/AwakenRunStage";
-import { AwakenRunStepDemo } from "../src/components/AwakenRunStep";
-import { AwakenRunTimelineDemo } from "../src/components/AwakenRunTimeline";
-import { AwakenSendButtonDemo } from "../src/components/AwakenSendButton";
-import { AwakenSelectableCardDemo } from "../src/components/AwakenSelectableCard";
-import { AwakenSettingsDemo } from "../src/components/AwakenSettings";
-import { AwakenSidebarDemo } from "../src/components/AwakenSidebar";
-import { AwakenSkillsDemo } from "../src/components/AwakenSkills";
-import { AwakenStatusPillDemo } from "../src/components/AwakenStatusPill";
-import { AwakenTaskWelcomeDemo } from "../src/components/AwakenTaskWelcome";
-import { AwakenThinkingBlockDemo } from "../src/components/AwakenThinkingBlock";
-import { AwakenThoughtTraceDemo } from "../src/components/AwakenThoughtTrace";
-import { AwakenToastDemo } from "../src/components/AwakenToast";
-import { AwakenToolActionRowDemo } from "../src/components/AwakenToolActionRow";
-import { AwakenTooltipDemo } from "../src/components/AwakenTooltip";
-import { AwakenToolTraceGroupDemo } from "../src/components/AwakenToolTraceGroup";
-import { AwakenToolTraceLineDemo } from "../src/components/AwakenToolTraceLine";
-import { AwakenTopBarDemo } from "../src/components/AwakenTopBar";
-import { AwakenUserPromptBlockDemo } from "../src/components/AwakenUserPromptBlock";
-import { AwakenWindowTitleBarDemo } from "../src/components/AwakenWindowTitleBar";
-import { AwakenWorkbenchChromeDemo } from "../src/components/AwakenWorkbenchChrome";
-import { AwakenWorkbenchShellDemo } from "../src/components/AwakenWorkbenchShell";
+import { AwakenAccountDemo } from "../src/components/AwakenAccount/AwakenAccount.demo";
+import { AwakenActivityLineDemo } from "../src/components/AwakenActivityLine/AwakenActivityLine.demo";
+import { AwakenApprovalCardDemo } from "../src/components/AwakenApprovalCard/AwakenApprovalCard.demo";
+import { AwakenAppShellDemo } from "../src/components/AwakenAppShell/AwakenAppShell.demo";
+import { AwakenArtifactCardDemo } from "../src/components/AwakenArtifactCard/AwakenArtifactCard.demo";
+import { AwakenDeliverableCardDemo } from "../src/components/AwakenDeliverableCard/AwakenDeliverableCard.demo";
+import { AwakenDeliverableListDemo } from "../src/components/AwakenDeliverableList/AwakenDeliverableList.demo";
+import { AwakenArtifactGridDemo } from "../src/components/AwakenArtifactGrid/AwakenArtifactGrid.demo";
+import { AwakenAssistantMessageDemo } from "../src/components/AwakenAssistantMessage/AwakenAssistantMessage.demo";
+import { AwakenAvatarDemo } from "../src/components/AwakenAvatar/AwakenAvatar.demo";
+import { AwakenBrandRowDemo } from "../src/components/AwakenBrandRow/AwakenBrandRow.demo";
+import { AwakenButtonDemo } from "../src/components/AwakenButton/AwakenButton.demo";
+import { AwakenCenterStageDemo } from "../src/components/AwakenCenterStage/AwakenCenterStage.demo";
+import { AwakenComposerDemo } from "../src/components/AwakenComposer/AwakenComposer.demo";
+import { AwakenComposerBarDemo } from "../src/components/AwakenComposerBar/AwakenComposerBar.demo";
+import { AwakenComposerDockDemo } from "../src/components/AwakenComposerDock/AwakenComposerDock.demo";
+import { AwakenComposerInputDemo } from "../src/components/AwakenComposerInput/AwakenComposerInput.demo";
+import { AwakenContextButtonDemo } from "../src/components/AwakenContextButton/AwakenContextButton.demo";
+import { AwakenConversationListDemo } from "../src/components/AwakenConversationList/AwakenConversationList.demo";
+import { AwakenConnectorsDemo } from "../src/components/AwakenConnectors/AwakenConnectors.demo";
+import { AwakenCopyButtonDemo } from "../src/components/AwakenCopyButton/AwakenCopyButton.demo";
+import { AwakenDisclosureDemo } from "../src/components/AwakenDisclosure/AwakenDisclosure.demo";
+import { AwakenDividerDemo } from "../src/components/AwakenDivider/AwakenDivider.demo";
+import { AwakenDialogDemo } from "../src/components/AwakenDialog/AwakenDialog.demo";
+import { AwakenDropdownDemo } from "../src/components/AwakenDropdown/AwakenDropdown.demo";
+import { AwakenExecutionFeedDemo } from "../src/components/AwakenExecutionFeed/AwakenExecutionFeed.demo";
+import { AwakenExploringGroupDemo } from "../src/components/AwakenExploringGroup/AwakenExploringGroup.demo";
+import { AwakenFileChangeSummaryDemo } from "../src/components/AwakenFileChangeSummary/AwakenFileChangeSummary.demo";
+import { AwakenIconDemo } from "../src/components/AwakenIcon/AwakenIcon.demo";
+import { AwakenIconButtonDemo } from "../src/components/AwakenIconButton/AwakenIconButton.demo";
+import { AwakenInspectorRailDemo } from "../src/components/AwakenInspectorRail/AwakenInspectorRail.demo";
+import { AwakenInspectorTabsDemo } from "../src/components/AwakenInspectorTabs/AwakenInspectorTabs.demo";
+import { AwakenKbdDemo } from "../src/components/AwakenKbd/AwakenKbd.demo";
+import { AwakenLightInspectorRailDemo } from "../src/components/AwakenLightInspectorRail/AwakenLightInspectorRail.demo";
+import { AwakenMarkdownAnswerDemo } from "../src/components/AwakenMarkdownAnswer/AwakenMarkdownAnswer.demo";
+import { AwakenModelSelectorDemo } from "../src/components/AwakenModelSelector/AwakenModelSelector.demo";
+import { AwakenModeToggleDemo } from "../src/components/AwakenModeToggle/AwakenModeToggle.demo";
+import { AwakenNarrativeFeedDemo } from "../src/components/AwakenNarrativeFeed/AwakenNarrativeFeed.demo";
+import { AwakenOriginalThinkingDemo } from "../src/components/AwakenOriginalThinking/AwakenOriginalThinking.demo";
+import { AwakenPillDemo } from "../src/components/AwakenPill/AwakenPill.demo";
+import { AwakenPlatformProviderDemo } from "../src/components/AwakenPlatformProvider/AwakenPlatformProvider.demo";
+import { AwakenPopoverDemo } from "../src/components/AwakenPopover/AwakenPopover.demo";
+import { AwakenPromptCardDemo } from "../src/components/AwakenPromptCard/AwakenPromptCard.demo";
+import { AwakenProductLogoDemo } from "../src/components/AwakenProductLogo/AwakenProductLogo.demo";
+import { AwakenQuickActionChipDemo } from "../src/components/AwakenQuickActionChip/AwakenQuickActionChip.demo";
+import { AwakenQuickActionGridDemo } from "../src/components/AwakenQuickActionGrid/AwakenQuickActionGrid.demo";
+import { AwakenRunStageDemo } from "../src/components/AwakenRunStage/AwakenRunStage.demo";
+import { AwakenRunStepDemo } from "../src/components/AwakenRunStep/AwakenRunStep.demo";
+import { AwakenRunTimelineDemo } from "../src/components/AwakenRunTimeline/AwakenRunTimeline.demo";
+import { AwakenSendButtonDemo } from "../src/components/AwakenSendButton/AwakenSendButton.demo";
+import { AwakenSelectableCardDemo } from "../src/components/AwakenSelectableCard/AwakenSelectableCard.demo";
+import { AwakenSettingsDemo } from "../src/components/AwakenSettings/AwakenSettings.demo";
+import { AwakenSidebarDemo } from "../src/components/AwakenSidebar/AwakenSidebar.demo";
+import { AwakenSkillsDemo } from "../src/components/AwakenSkills/AwakenSkills.demo";
+import { AwakenStatusPillDemo } from "../src/components/AwakenStatusPill/AwakenStatusPill.demo";
+import { AwakenTaskWelcomeDemo } from "../src/components/AwakenTaskWelcome/AwakenTaskWelcome.demo";
+import { AwakenThinkingBlockDemo } from "../src/components/AwakenThinkingBlock/AwakenThinkingBlock.demo";
+import { AwakenThoughtTraceDemo } from "../src/components/AwakenThoughtTrace/AwakenThoughtTrace.demo";
+import { AwakenToastDemo } from "../src/components/AwakenToast/AwakenToast.demo";
+import { AwakenToolActionRowDemo } from "../src/components/AwakenToolActionRow/AwakenToolActionRow.demo";
+import { AwakenTooltipDemo } from "../src/components/AwakenTooltip/AwakenTooltip.demo";
+import { AwakenToolTraceGroupDemo } from "../src/components/AwakenToolTraceGroup/AwakenToolTraceGroup.demo";
+import { AwakenToolTraceLineDemo } from "../src/components/AwakenToolTraceLine/AwakenToolTraceLine.demo";
+import { AwakenTopBarDemo } from "../src/components/AwakenTopBar/AwakenTopBar.demo";
+import { AwakenUserPromptBlockDemo } from "../src/components/AwakenUserPromptBlock/AwakenUserPromptBlock.demo";
+import { AwakenWindowTitleBarDemo } from "../src/components/AwakenWindowTitleBar/AwakenWindowTitleBar.demo";
+import { AwakenWorkbenchChromeDemo } from "../src/components/AwakenWorkbenchChrome/AwakenWorkbenchChrome.demo";
+import { AwakenWorkbenchShellDemo } from "../src/components/AwakenWorkbenchShell/AwakenWorkbenchShell.demo";
 
 export type AwakenGalleryEntry = {
   id: string;
   name: string;
   displayName: string;
   demo: ComponentType;
+  category?: "atomic";
 };
 
 export const awakenGalleryEntries: AwakenGalleryEntry[] = [
+  { id: "awaken-product-logo", name: "AwakenProductLogo", displayName: "产品 LOGO", demo: AwakenProductLogoDemo, category: "atomic" },
   { id: "awaken-sidebar", name: "AwakenSidebar", displayName: "「左侧栏」组件库", demo: AwakenSidebarDemo },
   { id: "awaken-skills", name: "AwakenSkills", displayName: "「技能」组件库", demo: AwakenSkillsDemo },
   { id: "awaken-settings", name: "AwakenSettings", displayName: "「设置」组件库", demo: AwakenSettingsDemo },
   { id: "awaken-account", name: "AwakenAccount", displayName: "「账户」组件库", demo: AwakenAccountDemo },
+  { id: "awaken-connectors", name: "AwakenConnectors", displayName: "「连接器」组件库", demo: AwakenConnectorsDemo },
   { id: "awaken-activity-line", name: "AwakenActivityLine", displayName: "活动状态行", demo: AwakenActivityLineDemo },
   { id: "awaken-approval-card", name: "AwakenApprovalCard", displayName: "审批卡片", demo: AwakenApprovalCardDemo },
   { id: "awaken-app-shell", name: "AwakenAppShell", displayName: "应用外壳", demo: AwakenAppShellDemo },
@@ -141,3 +146,16 @@ export const awakenGalleryEntries: AwakenGalleryEntry[] = [
   { id: "awaken-workbench-chrome", name: "AwakenWorkbenchChrome", displayName: "工作台框架", demo: AwakenWorkbenchChromeDemo },
   { id: "awaken-workbench-shell", name: "AwakenWorkbenchShell", displayName: "工作台外壳", demo: AwakenWorkbenchShellDemo },
 ];
+
+export const awakenGallerySections = [
+  {
+    id: "atomic",
+    label: "原子组件",
+    entries: awakenGalleryEntries.filter((entry) => entry.category === "atomic"),
+  },
+  {
+    id: "components",
+    label: "组件与组件库",
+    entries: awakenGalleryEntries.filter((entry) => entry.category !== "atomic"),
+  },
+] as const;

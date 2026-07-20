@@ -1,27 +1,21 @@
+import {
+  AwakenConnectorBrandIcon,
+  type AwakenConnectorBrandIconProps,
+} from "@awaken/design-system";
 import type { CliProviderId } from "../shared/runtime";
 import dingtalkLogo from "./assets/brands/dingtalk.png";
 import feishuLogo from "./assets/brands/feishu.png";
 
-type ConnectorBrandIconProps = {
-  providerId: string;
-};
+type ConnectorBrandIconProps = Pick<AwakenConnectorBrandIconProps, "providerId">;
 
 export function ConnectorBrandIcon({ providerId }: ConnectorBrandIconProps) {
-  if (providerId === "dingtalk-workspace") {
-    return (
-      <span className="extension-brand-icon extension-brand-icon-dingtalk" aria-hidden="true">
-        <img src={dingtalkLogo} alt="" draggable={false} />
-      </span>
-    );
-  }
-  if (providerId === "lark-cli") {
-    return (
-      <span className="extension-brand-icon extension-brand-icon-lark" aria-hidden="true">
-        <img src={feishuLogo} alt="" draggable={false} />
-      </span>
-    );
-  }
-  return null;
+  return (
+    <AwakenConnectorBrandIcon
+      providerId={providerId}
+      imageSrc={providerId === "dingtalk-workspace" ? dingtalkLogo : providerId === "lark-cli" ? feishuLogo : undefined}
+      tone={providerId === "dingtalk-workspace" ? "dingtalk" : providerId === "lark-cli" ? "lark" : "neutral"}
+    />
+  );
 }
 
 export function isCliBrandProvider(providerId: string): providerId is CliProviderId {

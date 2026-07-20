@@ -1,0 +1,170 @@
+@import "../../tokens/components.css";
+
+.aw-dialog.aw-cli-connector-detail-dialog {
+  width: min(360px, calc(100vw - 48px));
+  max-height: min(520px, calc(100vh - 48px));
+}
+
+.aw-dialog.aw-cli-connector-detail-dialog .aw-dialog__head { padding: 12px 12px 0; }
+.aw-dialog.aw-cli-connector-detail-dialog .aw-dialog__body { padding: 4px 20px 8px; }
+.aw-dialog.aw-cli-connector-detail-dialog .aw-dialog__foot { padding: 8px 20px 16px; }
+
+.aw-cli-connector-detail {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  text-align: center;
+}
+
+.aw-cli-connector-detail__brands {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.aw-cli-connector-detail__link {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-tertiary);
+  font-size: 18px;
+  font-weight: var(--aw-font-weight-heavy);
+}
+
+.aw-cli-connector-detail__link[data-connected="true"] {
+  background: var(--aw-status-success-bg);
+  color: var(--aw-status-success);
+}
+
+.aw-cli-connector-detail__title {
+  margin: 0;
+  color: var(--aw-text-primary);
+  font-size: 17px;
+  font-weight: var(--aw-font-weight-heavy);
+  line-height: 1.25;
+}
+
+.aw-cli-connector-detail__description {
+  margin: 0;
+  max-width: 28ch;
+  color: var(--aw-text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.aw-cli-connector-detail__account,
+.aw-cli-connector-detail__state,
+.aw-cli-connector-detail__progress {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-bg-fill-light);
+  text-align: left;
+}
+
+.aw-cli-connector-detail__account,
+.aw-cli-connector-detail__progress { display: grid; gap: 8px; }
+
+.aw-cli-connector-detail__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--aw-text-primary);
+  font-size: 13px;
+  font-weight: var(--aw-font-weight-bold);
+}
+
+.aw-cli-connector-detail__status > span,
+.aw-cli-connector-detail__state > span:first-child {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--aw-radius-pill);
+}
+
+.aw-cli-connector-detail__status > span { background: var(--aw-status-success); }
+
+.aw-cli-connector-detail__row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  color: var(--aw-text-secondary);
+  font-size: 13px;
+}
+
+.aw-cli-connector-detail__row > span { flex: 0 0 2.5em; }
+.aw-cli-connector-detail__row strong { color: var(--aw-text-primary); font-weight: var(--aw-font-weight-bold); }
+
+.aw-cli-connector-detail__state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--aw-text-secondary);
+  font-size: 13px;
+}
+
+.aw-cli-connector-detail__state > span:first-child { background: var(--aw-text-tertiary); }
+.aw-cli-connector-detail__state > span[data-waiting="true"] {
+  background: var(--aw-status-waiting);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--aw-status-waiting) 12%, transparent);
+}
+
+.aw-cli-connector-detail__progress { gap: 9px; }
+.aw-cli-connector-detail__progress-copy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--aw-text-primary);
+  font-size: 13px;
+  font-weight: var(--aw-font-weight-bold);
+}
+.aw-cli-connector-detail__progress-copy strong { font-variant-numeric: tabular-nums; }
+.aw-cli-connector-detail__progress-track {
+  width: 100%;
+  height: 7px;
+  overflow: hidden;
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-bg-fill-main);
+}
+.aw-cli-connector-detail__progress-track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--aw-button-black);
+  transition: width 180ms ease;
+}
+.aw-cli-connector-detail__progress p { margin: 0; color: var(--aw-text-tertiary); font-size: 11px; }
+
+.aw-cli-connector-detail__action { width: 100%; }
+.aw-cli-connector-detail__action[data-action="cancel_install"],
+.aw-cli-connector-detail__action[data-action="cancel_authorization"] {
+  color: var(--aw-error) !important;
+  background: color-mix(in srgb, var(--aw-error) 10%, transparent) !important;
+}
+.aw-cli-connector-detail__action[data-action="logout"] {
+  border-color: color-mix(in srgb, var(--aw-status-success) 28%, transparent) !important;
+  color: var(--aw-status-success-text) !important;
+  background: var(--aw-status-success-bg) !important;
+}
+.aw-cli-connector-detail__action[data-action="logout"]:hover,
+.aw-cli-connector-detail__action[data-action="logout"]:focus-visible {
+  border-color: color-mix(in srgb, var(--aw-error) 28%, transparent) !important;
+  color: var(--aw-error) !important;
+  background: color-mix(in srgb, var(--aw-error) 10%, transparent) !important;
+}
+.aw-cli-connector-detail__connected-label,
+.aw-cli-connector-detail__logout-label { align-items: center; justify-content: center; gap: 6px; }
+.aw-cli-connector-detail__connected-label { display: inline-flex; }
+.aw-cli-connector-detail__logout-label { display: none; }
+.aw-cli-connector-detail__action[data-action="logout"]:hover .aw-cli-connector-detail__connected-label,
+.aw-cli-connector-detail__action[data-action="logout"]:focus-visible .aw-cli-connector-detail__connected-label { display: none; }
+.aw-cli-connector-detail__action[data-action="logout"]:hover .aw-cli-connector-detail__logout-label,
+.aw-cli-connector-detail__action[data-action="logout"]:focus-visible .aw-cli-connector-detail__logout-label { display: inline-flex; }
+
+@media (prefers-reduced-motion: reduce) {
+  .aw-cli-connector-detail__progress-track > span { transition: none; }
+}

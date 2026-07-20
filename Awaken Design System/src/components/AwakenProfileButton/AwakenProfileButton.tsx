@@ -8,6 +8,8 @@ export type AwakenProfileButtonProps = {
   subtitle?: string;
   avatarFallback: string;
   avatarSrc?: string;
+  expanded?: boolean;
+  controls?: string;
   onClick?: () => void;
 };
 
@@ -54,6 +56,8 @@ export function AwakenProfileButton({
   subtitle,
   avatarFallback,
   avatarSrc,
+  expanded,
+  controls,
   onClick,
 }: AwakenProfileButtonProps) {
   const handleEnter = (e: MouseEvent<HTMLButtonElement>) => {
@@ -74,6 +78,9 @@ export function AwakenProfileButton({
       type="button"
       onClick={onClick}
       aria-label={`用户 ${name}`}
+      aria-haspopup="dialog"
+      aria-expanded={expanded}
+      aria-controls={controls}
       style={buttonStyle}
       onMouseEnter={handleEnter}
       onMouseLeave={handleLeave}

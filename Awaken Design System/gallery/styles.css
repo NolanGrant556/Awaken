@@ -5,11 +5,13 @@
 html, body, #root { height: 100%; }
 body { margin: 0; min-width: 1024px; overflow-y: hidden; overflow-x: auto; color: var(--aw-text-primary); background: var(--aw-surface-canvas, #f7f7f5); font-family: var(--aw-font-sans); }
 .ads-gallery { height: 100vh; min-height: 0; display: grid; grid-template-columns: 292px minmax(0, 1fr); overflow: hidden; }
-.ads-gallery-sidebar { min-height: 0; border-right: 1px solid var(--aw-border-main); background: var(--aw-bg-nav); padding: 16px 10px; overflow-y: auto; overflow-x: hidden; }
-.ads-gallery-brand { display: grid; gap: 4px; padding: 8px 10px 16px; }
-.ads-gallery-brand span { font-weight: 700; }
-.ads-gallery-brand strong { color: var(--aw-text-tertiary); font-size: 12px; font-weight: 500; }
-.ads-gallery-sidebar nav { display: grid; gap: 2px; }
+.ads-gallery-sidebar { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); border-right: 1px solid var(--aw-border-main); background: var(--aw-bg-nav); overflow: hidden; }
+.ads-gallery-brand { display: grid; gap: 12px; padding: 24px 20px 16px; border-bottom: 1px solid var(--aw-border-main); background: var(--aw-bg-nav); }
+.ads-gallery-brand__title { font-weight: 700; }
+.ads-gallery-brand__catalog { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.ads-gallery-brand__catalog span { color: var(--aw-text-secondary); font-size: 13px; line-height: 18px; font-weight: 600; }
+.ads-gallery-brand__catalog strong { color: var(--aw-text-tertiary); font-size: 12px; font-weight: 500; }
+.ads-gallery-sidebar nav { min-height: 0; display: grid; align-content: start; gap: 2px; padding: 8px 10px 16px; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; }
 .ads-gallery-sidebar button { display: grid; gap: 2px; border: 0; background: transparent; border-radius: 8px; padding: 8px 10px; text-align: left; color: var(--aw-text-secondary); font: inherit; cursor: pointer; min-width: 0; }
 .ads-gallery-sidebar button:hover, .ads-gallery-sidebar button.is-active { background: var(--aw-bg-fill-main); color: var(--aw-text-primary); }
 .ads-gallery-entry-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }

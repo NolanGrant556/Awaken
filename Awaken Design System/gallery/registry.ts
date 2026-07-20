@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+import { AwakenAccountDemo } from "../src/components/AwakenAccount";
 import { AwakenActivityLineDemo } from "../src/components/AwakenActivityLine";
 import { AwakenApprovalCardDemo } from "../src/components/AwakenApprovalCard";
 import { AwakenAppShellDemo } from "../src/components/AwakenAppShell";
@@ -35,14 +36,10 @@ import { AwakenMarkdownAnswerDemo } from "../src/components/AwakenMarkdownAnswer
 import { AwakenModelSelectorDemo } from "../src/components/AwakenModelSelector";
 import { AwakenModeToggleDemo } from "../src/components/AwakenModeToggle";
 import { AwakenNarrativeFeedDemo } from "../src/components/AwakenNarrativeFeed";
-import { AwakenNewTaskButtonDemo } from "../src/components/AwakenNewTaskButton";
 import { AwakenOriginalThinkingDemo } from "../src/components/AwakenOriginalThinking";
 import { AwakenPillDemo } from "../src/components/AwakenPill";
 import { AwakenPlatformProviderDemo } from "../src/components/AwakenPlatformProvider";
 import { AwakenPopoverDemo } from "../src/components/AwakenPopover";
-import { AwakenPrimaryNavDemo } from "../src/components/AwakenPrimaryNav";
-import { AwakenProfileButtonDemo } from "../src/components/AwakenProfileButton";
-import { AwakenProjectTreeDemo } from "../src/components/AwakenProjectTree";
 import { AwakenPromptCardDemo } from "../src/components/AwakenPromptCard";
 import { AwakenQuickActionChipDemo } from "../src/components/AwakenQuickActionChip";
 import { AwakenQuickActionGridDemo } from "../src/components/AwakenQuickActionGrid";
@@ -51,8 +48,8 @@ import { AwakenRunStepDemo } from "../src/components/AwakenRunStep";
 import { AwakenRunTimelineDemo } from "../src/components/AwakenRunTimeline";
 import { AwakenSendButtonDemo } from "../src/components/AwakenSendButton";
 import { AwakenSelectableCardDemo } from "../src/components/AwakenSelectableCard";
+import { AwakenSettingsDemo } from "../src/components/AwakenSettings";
 import { AwakenSidebarDemo } from "../src/components/AwakenSidebar";
-import { AwakenSidebarSectionActionDemo } from "../src/components/AwakenSidebarSectionAction";
 import { AwakenSkillsDemo } from "../src/components/AwakenSkills";
 import { AwakenStatusPillDemo } from "../src/components/AwakenStatusPill";
 import { AwakenTaskWelcomeDemo } from "../src/components/AwakenTaskWelcome";
@@ -68,7 +65,6 @@ import { AwakenUserPromptBlockDemo } from "../src/components/AwakenUserPromptBlo
 import { AwakenWindowTitleBarDemo } from "../src/components/AwakenWindowTitleBar";
 import { AwakenWorkbenchChromeDemo } from "../src/components/AwakenWorkbenchChrome";
 import { AwakenWorkbenchShellDemo } from "../src/components/AwakenWorkbenchShell";
-import { AwakenWorkbenchSidebarFrameDemo } from "../src/components/AwakenWorkbenchSidebarFrame";
 
 export type AwakenGalleryEntry = {
   id: string;
@@ -78,6 +74,7 @@ export type AwakenGalleryEntry = {
 };
 
 export const awakenGalleryEntries: AwakenGalleryEntry[] = [
+  { id: "awaken-account", name: "AwakenAccount", displayName: "「账户」组件库", demo: AwakenAccountDemo },
   { id: "awaken-activity-line", name: "AwakenActivityLine", displayName: "活动状态行", demo: AwakenActivityLineDemo },
   { id: "awaken-approval-card", name: "AwakenApprovalCard", displayName: "审批卡片", demo: AwakenApprovalCardDemo },
   { id: "awaken-app-shell", name: "AwakenAppShell", displayName: "应用外壳", demo: AwakenAppShellDemo },
@@ -114,14 +111,10 @@ export const awakenGalleryEntries: AwakenGalleryEntry[] = [
   { id: "awaken-model-selector", name: "AwakenModelSelector", displayName: "模型选择器", demo: AwakenModelSelectorDemo },
   { id: "awaken-mode-toggle", name: "AwakenModeToggle", displayName: "模式切换", demo: AwakenModeToggleDemo },
   { id: "awaken-narrative-feed", name: "AwakenNarrativeFeed", displayName: "叙事动态流", demo: AwakenNarrativeFeedDemo },
-  { id: "awaken-new-task-button", name: "AwakenNewTaskButton", displayName: "新任务按钮", demo: AwakenNewTaskButtonDemo },
   { id: "awaken-original-thinking", name: "AwakenOriginalThinking", displayName: "原始思考动效", demo: AwakenOriginalThinkingDemo },
   { id: "awaken-pill", name: "AwakenPill", displayName: "胶囊标签", demo: AwakenPillDemo },
   { id: "awaken-platform-provider", name: "AwakenPlatformProvider", displayName: "平台提供器", demo: AwakenPlatformProviderDemo },
   { id: "awaken-popover", name: "AwakenPopover", displayName: "弹出层", demo: AwakenPopoverDemo },
-  { id: "awaken-primary-nav", name: "AwakenPrimaryNav", displayName: "主导航", demo: AwakenPrimaryNavDemo },
-  { id: "awaken-profile-button", name: "AwakenProfileButton", displayName: "个人入口", demo: AwakenProfileButtonDemo },
-  { id: "awaken-project-tree", name: "AwakenProjectTree", displayName: "项目树", demo: AwakenProjectTreeDemo },
   { id: "awaken-prompt-card", name: "AwakenPromptCard", displayName: "提示卡片", demo: AwakenPromptCardDemo },
   { id: "awaken-quick-action-chip", name: "AwakenQuickActionChip", displayName: "快捷动作标签", demo: AwakenQuickActionChipDemo },
   { id: "awaken-quick-action-grid", name: "AwakenQuickActionGrid", displayName: "快捷动作网格", demo: AwakenQuickActionGridDemo },
@@ -130,8 +123,8 @@ export const awakenGalleryEntries: AwakenGalleryEntry[] = [
   { id: "awaken-run-timeline", name: "AwakenRunTimeline", displayName: "运行时间线", demo: AwakenRunTimelineDemo },
   { id: "awaken-send-button", name: "AwakenSendButton", displayName: "发送按钮", demo: AwakenSendButtonDemo },
   { id: "awaken-selectable-card", name: "AwakenSelectableCard", displayName: "选择卡片", demo: AwakenSelectableCardDemo },
-  { id: "awaken-sidebar", name: "AwakenSidebar", displayName: "侧栏", demo: AwakenSidebarDemo },
-  { id: "awaken-sidebar-section-action", name: "AwakenSidebarSectionAction", displayName: "侧栏区块动作", demo: AwakenSidebarSectionActionDemo },
+  { id: "awaken-settings", name: "AwakenSettings", displayName: "「设置」组件库", demo: AwakenSettingsDemo },
+  { id: "awaken-sidebar", name: "AwakenSidebar", displayName: "「左侧栏」组件库", demo: AwakenSidebarDemo },
   { id: "awaken-skills", name: "AwakenSkills", displayName: "「技能」组件库", demo: AwakenSkillsDemo },
   { id: "awaken-status-pill", name: "AwakenStatusPill", displayName: "状态胶囊", demo: AwakenStatusPillDemo },
   { id: "awaken-task-welcome", name: "AwakenTaskWelcome", displayName: "任务欢迎区", demo: AwakenTaskWelcomeDemo },
@@ -147,5 +140,4 @@ export const awakenGalleryEntries: AwakenGalleryEntry[] = [
   { id: "awaken-window-title-bar", name: "AwakenWindowTitleBar", displayName: "窗口标题栏", demo: AwakenWindowTitleBarDemo },
   { id: "awaken-workbench-chrome", name: "AwakenWorkbenchChrome", displayName: "工作台框架", demo: AwakenWorkbenchChromeDemo },
   { id: "awaken-workbench-shell", name: "AwakenWorkbenchShell", displayName: "工作台外壳", demo: AwakenWorkbenchShellDemo },
-  { id: "awaken-workbench-sidebar-frame", name: "AwakenWorkbenchSidebarFrame", displayName: "工作台侧栏框架", demo: AwakenWorkbenchSidebarFrameDemo },
 ];

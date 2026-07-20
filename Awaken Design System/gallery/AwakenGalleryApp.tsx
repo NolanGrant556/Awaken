@@ -68,10 +68,13 @@ export function AwakenGalleryApp() {
     <main className="ads-gallery">
       <aside className="ads-gallery-sidebar">
         <div className="ads-gallery-brand">
-          <span>Awaken 设计系统</span>
-          <strong>{awakenGalleryEntries.length} 个组件</strong>
+          <span className="ads-gallery-brand__title">Awaken 设计系统</span>
+          <div className="ads-gallery-brand__catalog">
+            <span>组件目录</span>
+            <strong>{awakenGalleryEntries.length} 个组件</strong>
+          </div>
         </div>
-        <nav aria-label="组件列表">
+        <nav aria-label="组件目录">
           {awakenGalleryEntries.map((entry) => (
             <button
               key={entry.id}

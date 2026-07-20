@@ -1,13 +1,44 @@
+import { readFile } from "node:fs/promises";
 import React from "react";
 import { renderToString } from "react-dom/server";
 import * as AwakenDesignSystem from "../dist/index.js";
+import * as AwakenGalleryDemos from "../dist/gallery.js";
 
-const demoEntries = Object.entries(AwakenDesignSystem)
+const productionDemoExports = Object.keys(AwakenDesignSystem).filter((name) => name.endsWith("Demo"));
+
+if (productionDemoExports.length > 0) {
+  throw new Error(`Production bundle must not export Gallery demos: ${productionDemoExports.join(", ")}`);
+}
+
+const demoOnlySelectors = [
+  ".aw-account-demo",
+  ".aw-connectors-demo",
+  ".aw-project-skill-folder-demo",
+  ".aw-settings-demo",
+  ".aw-sidebar-demo",
+  ".aw-skill-card-demo",
+  ".aw-skills-demo",
+];
+const [productionCss, galleryCss] = await Promise.all([
+  readFile(new URL("../dist/index.css", import.meta.url), "utf8"),
+  readFile(new URL("../dist/gallery.css", import.meta.url), "utf8"),
+]);
+
+for (const selector of demoOnlySelectors) {
+  if (productionCss.includes(selector)) {
+    throw new Error(`Production CSS includes Gallery-only selector: ${selector}`);
+  }
+  if (!galleryCss.includes(selector)) {
+    throw new Error(`Gallery CSS is missing expected demo selector: ${selector}`);
+  }
+}
+
+const demoEntries = Object.entries(AwakenGalleryDemos)
   .filter(([name, value]) => name.startsWith("Awaken") && name.endsWith("Demo") && typeof value === "function")
   .sort(([a], [b]) => a.localeCompare(b));
 
 if (demoEntries.length === 0) {
-  throw new Error("No Awaken component demos were exported");
+  throw new Error("No Awaken component demos were exported from the Gallery-only bundle");
 }
 
 for (const [name, Demo] of demoEntries) {

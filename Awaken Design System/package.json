@@ -20,7 +20,8 @@
   ],
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5173",
-    "build": "vite build && npm run build:types && npm run copy:assets",
+    "build": "vite build && npm run build:gallery-library && npm run build:types && npm run copy:assets",
+    "build:gallery-library": "vite build --mode gallery-library",
     "build:gallery": "vite build --mode gallery",
     "build:types": "tsc -p tsconfig.build.json",
     "copy:assets": "node ../scripts/copy-design-system-assets.mjs",

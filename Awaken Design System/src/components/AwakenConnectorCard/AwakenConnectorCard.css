@@ -1,0 +1,193 @@
+@import "../../tokens/components.css";
+
+.aw-connector-card {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 88px;
+  padding: 14px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-panel);
+  transition: border-color var(--aw-transition-fast), box-shadow var(--aw-transition-fast), background-color var(--aw-transition-fast);
+}
+
+.aw-connector-card:hover {
+  border-color: color-mix(in srgb, var(--aw-border-main) 62%, var(--aw-text-secondary));
+  box-shadow: var(--aw-shadow-card-hover);
+}
+
+.aw-connector-card[data-variant="server"] {
+  min-height: 78px;
+}
+
+.aw-connector-card--cli {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0;
+  padding: 0;
+  align-items: stretch;
+}
+
+.aw-connector-card__main {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  width: 100%;
+  min-height: 88px;
+  padding: 14px;
+  border: 0;
+  border-radius: var(--aw-radius-md);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.aw-connector-card__main:focus-visible,
+.aw-connector-card__action:focus-visible {
+  outline: none;
+  box-shadow: var(--aw-shadow-focus);
+}
+
+.aw-connector-card__main:disabled,
+.aw-connector-card__action:disabled {
+  cursor: not-allowed;
+  opacity: 0.44;
+}
+
+.aw-connector-card__icon {
+  display: inline-grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-raised);
+  color: var(--aw-text-secondary);
+}
+
+.aw-connector-card__copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.aw-connector-card__title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.aw-connector-card__title {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--aw-text-primary);
+  font-size: 14px;
+  font-weight: var(--aw-font-weight-heavy);
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-connector-card__description,
+.aw-connector-card__error {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--aw-text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.aw-connector-card__error {
+  color: var(--aw-error);
+}
+
+.aw-connector-card__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.aw-connector-card__tags > span,
+.aw-connector-card__status {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 20px;
+  padding: 0 7px;
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-tertiary);
+  font-size: 11px;
+  font-weight: var(--aw-font-weight-heavy);
+  line-height: 1;
+}
+
+.aw-connector-card__status {
+  flex: 0 0 auto;
+}
+
+.aw-connector-card__status[data-tone="success"] {
+  background: color-mix(in srgb, var(--aw-success) 13%, var(--aw-bg-white));
+  color: color-mix(in srgb, var(--aw-success) 72%, var(--aw-text-primary));
+}
+
+.aw-connector-card__status[data-tone="warning"] {
+  background: color-mix(in srgb, var(--aw-warning) 18%, var(--aw-bg-white));
+  color: color-mix(in srgb, var(--aw-warning) 74%, var(--aw-text-primary));
+}
+
+.aw-connector-card__status[data-tone="error"] {
+  background: color-mix(in srgb, var(--aw-error) 10%, var(--aw-bg-white));
+  color: color-mix(in srgb, var(--aw-error) 72%, var(--aw-text-primary));
+}
+
+.aw-connector-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.aw-connector-card__action {
+  display: inline-grid;
+  place-items: center;
+  align-self: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--aw-radius-md);
+  background: transparent;
+  color: var(--aw-text-secondary);
+  cursor: pointer;
+}
+
+.aw-connector-card--cli > .aw-connector-card__action {
+  margin-right: 14px;
+}
+
+.aw-connector-card__action:hover:enabled {
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-primary);
+}
+
+.aw-connector-card__action[data-ready="true"] {
+  color: var(--aw-status-success);
+}
+
+.aw-connector-card__action[data-ready="true"]:hover:enabled {
+  background: var(--aw-status-success-bg);
+  color: var(--aw-status-success-text);
+}

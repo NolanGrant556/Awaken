@@ -5,19 +5,19 @@ import {
   Check,
   FileUp,
   FolderOpen,
-  Plus,
-  Plug,
   RefreshCw,
-  Server,
-  Settings,
-  Trash2,
   Upload,
   Wrench,
-  X,
 } from "lucide-react";
 import {
   AwakenButton as Button,
+  AwakenCliConnectorDetailDialog,
+  AwakenConnectors,
   AwakenDialog as Dialog,
+  AwakenMcpConfigDialog,
+  AwakenMcpSettingsDialog,
+  type AwakenCliConnectorAction,
+  type AwakenConnectorCardItem,
 } from "@awaken/design-system";
 import type {
   CliConnectorView,
@@ -34,12 +34,9 @@ import {
   SkillPreviewDialog,
   type SkillPreviewTarget,
 } from "./SkillPreviewDialog";
-import { ConnectorBrandIcon } from "./ConnectorBrandIcon";
-import {
-  CliConnectorDetailDialog,
-  type CliConnectorDialogAction,
-} from "./CliConnectorDetailDialog";
 import { cliConnectorProductCopy } from "./cliConnectorProduct";
+import dingtalkLogo from "./assets/brands/dingtalk.png";
+import feishuLogo from "./assets/brands/feishu.png";
 
 export type McpToolInfo = {
   name: string;
@@ -90,11 +87,6 @@ const MCP_EXAMPLE = `{
   }
 }`;
 
-const CONNECTOR_KIND_TABS: Array<{ id: ConnectorKind; label: string }> = [
-  { id: "mcp", label: "MCP" },
-  { id: "cli", label: "CLI" },
-];
-
 export const DEFAULT_SKILL_VIEW: SkillView = "awaken";
 
 export const SKILL_VIEW_TABS: Array<{ id: SkillView; label: string }> = [
@@ -121,6 +113,18 @@ function connectorCategoryLabel(category: string): string {
     default:
       return "其他";
   }
+}
+
+function connectorBrandLogo(providerId: string): string | undefined {
+  if (providerId === "dingtalk-workspace") return dingtalkLogo;
+  if (providerId === "lark-cli") return feishuLogo;
+  return undefined;
+}
+
+function connectorBrandTone(providerId: string): "dingtalk" | "lark" | "neutral" {
+  if (providerId === "dingtalk-workspace") return "dingtalk";
+  if (providerId === "lark-cli") return "lark";
+  return "neutral";
 }
 
 function stateLabel(state: string): string {
@@ -178,6 +182,72 @@ function sourceLabel(source: string): string {
     default:
       return source;
   }
+}
+
+function mcpConnectorCardItem(
+  connector: RuntimeConnector,
+  busyConnectorId: string | null,
+): AwakenConnectorCardItem {
+  return {
+    id: connector.id,
+    variant: "catalog",
+    displayName: connector.displayName,
+    description: connector.provider || connectorCategoryLabel(connector.category),
+    state: connector.state,
+    stateLabel: stateLabel(connector.state),
+    tags: [
+      connectorCategoryLabel(connector.category),
+      sourceLabel(connector.sourceOrigin),
+      ...(connector.serverNames ?? []),
+    ],
+    connected: connector.state === "connected",
+    busy: busyConnectorId === connector.id,
+  };
+}
+
+function mcpServerCardItem(
+  server: RuntimeMcpServer,
+  busyMcpServerName: string | null,
+): AwakenConnectorCardItem {
+  return {
+    id: server.name,
+    variant: "server",
+    displayName: server.name,
+    description: server.errorReason || `${server.transport} · ${server.scope}`,
+    state: server.state,
+    stateLabel: stateLabel(server.state),
+    enabled: server.state !== "disabled",
+    busy: busyMcpServerName === server.name,
+  };
+}
+
+function cliConnectorCardItem(
+  connector: RuntimeConnector,
+  cliConnectors: CliConnectorView[],
+  busyConnectorId: string | null,
+): AwakenConnectorCardItem | null {
+  const view = cliConnectors.find((entry) => entry.providerId === connector.id);
+  const readiness = view?.readiness ?? connector.cliReadiness;
+  if (!readiness) return null;
+  const ready = readiness.overall === "ready" && readiness.authentication === "authorized";
+  const product = cliConnectorProductCopy(connector.id);
+  const errors = [
+    readiness.safeError && !ready ? readiness.safeError.message : "",
+    connector.legacyMcpReviewRequired
+      ? "检测到同名旧 MCP 配置，因内容已被修改而保留。请在 MCP servers 中复核后手动处理。"
+      : "",
+  ].filter(Boolean);
+  return {
+    id: connector.id,
+    variant: "cli",
+    displayName: product?.displayName || connector.displayName,
+    description: product?.description || connector.description?.trim() || "官方 CLI 连接器",
+    brandLogoSrc: connectorBrandLogo(connector.id),
+    brandTone: connectorBrandTone(connector.id),
+    connected: ready,
+    busy: busyConnectorId === connector.id,
+    errors,
+  };
 }
 
 export function skillSourceLabel(source: string): string {
@@ -941,42 +1011,6 @@ export function ExtensionsView({
     });
   }
 
-  function renderConnectorCard(connector: RuntimeConnector) {
-    const connected = connector.state === "connected";
-    return (
-      <article className="extension-card" key={connector.id}>
-        <div className="extension-card-icon" aria-hidden="true">
-          <Plug size={20} strokeWidth={1.9} />
-        </div>
-        <div className="extension-card-copy">
-          <div className="extension-card-title-row">
-            <h3>{connector.displayName}</h3>
-            <span className={`extension-state extension-state-${connector.state}`}>
-              {stateLabel(connector.state)}
-            </span>
-          </div>
-          <p>{connector.provider || connectorCategoryLabel(connector.category)}</p>
-          <div className="extension-card-meta">
-            <span>{connectorCategoryLabel(connector.category)}</span>
-            <span>{sourceLabel(connector.sourceOrigin)}</span>
-            {connector.serverNames?.length ? <span>{connector.serverNames.join(", ")}</span> : null}
-          </div>
-        </div>
-        <button
-          type="button"
-          className="extension-card-action"
-          aria-label={connected ? `断开 ${connector.displayName}` : `连接 ${connector.displayName}`}
-          disabled={busyConnectorId === connector.id}
-          onClick={() => {
-            void handleConnectorAction(connector);
-          }}
-        >
-          {connected ? <X size={18} strokeWidth={1.9} /> : <Plus size={18} strokeWidth={1.9} />}
-        </button>
-      </article>
-    );
-  }
-
   async function openCliConnectorDetail(providerId: CliProviderId): Promise<void> {
     setCliDetailConnectorId(providerId);
     setCliDetailLoading(true);
@@ -1006,7 +1040,7 @@ export function ExtensionsView({
     });
   }
 
-  function handleCliDialogAction(providerId: CliProviderId, action: CliConnectorDialogAction): void {
+  function handleCliDialogAction(providerId: CliProviderId, action: AwakenCliConnectorAction): void {
     if (action === "install") {
       startCliInstall(providerId);
       return;
@@ -1030,109 +1064,6 @@ export function ExtensionsView({
     if (action === "logout") {
       void handleCliAction(providerId, () => runtimeClient.logoutCliConnector(providerId));
     }
-  }
-
-  function renderCliConnectorCard(connector: RuntimeConnector) {
-    const view = cliConnectors.find((entry) => entry.providerId === connector.id);
-    const readiness = view?.readiness ?? connector.cliReadiness;
-    if (!readiness) return null;
-    const busy = busyConnectorId === connector.id;
-    const providerId = connector.id as CliProviderId;
-    const ready = readiness.overall === "ready" && readiness.authentication === "authorized";
-    const product = cliConnectorProductCopy(providerId);
-    const displayName = product?.displayName || connector.displayName;
-    const description = product?.description || connector.description?.trim() || "官方 CLI 连接器";
-    const actionLabel = `打开 ${displayName} 连接设置`;
-    const actionClassName = [
-      "extension-card-action",
-      ready ? "extension-card-action-ready" : "",
-    ]
-      .filter(Boolean)
-      .join(" ");
-    return (
-      <article className="extension-card extension-card-cli-product" key={connector.id}>
-        <button
-          type="button"
-          className="extension-card-main"
-          disabled={busy}
-          onClick={() => {
-            void openCliConnectorDetail(providerId);
-          }}
-        >
-          <ConnectorBrandIcon providerId={providerId} />
-          <div className="extension-card-copy">
-            <div className="extension-card-title-row">
-              <h3>{displayName}</h3>
-            </div>
-            <p className="extension-card-description">{description}</p>
-            {readiness.safeError && !ready ? (
-              <div className="extension-card-error">{readiness.safeError.message}</div>
-            ) : null}
-            {connector.legacyMcpReviewRequired ? (
-              <div className="extension-card-error">检测到同名旧 MCP 配置，因内容已被修改而保留。请在 MCP servers 中复核后手动处理。</div>
-            ) : null}
-          </div>
-        </button>
-        <button
-          type="button"
-          className={actionClassName}
-          aria-label={actionLabel}
-          disabled={busy}
-          onClick={() => {
-            void openCliConnectorDetail(providerId);
-          }}
-        >
-          {ready ? (
-            <Check size={18} strokeWidth={2.2} />
-          ) : (
-            <Plus size={18} strokeWidth={1.9} />
-          )}
-        </button>
-      </article>
-    );
-  }
-
-  function renderMcpServerCard(server: RuntimeMcpServer) {
-    const disabled = server.state === "disabled";
-    return (
-      <article className="extension-card extension-card-compact" key={server.name}>
-        <div className="extension-card-icon" aria-hidden="true">
-          <Server size={20} strokeWidth={1.9} />
-        </div>
-        <div className="extension-card-copy">
-          <div className="extension-card-title-row">
-            <h3>{server.name}</h3>
-            <span className={`extension-state extension-state-${server.state}`}>
-              {stateLabel(server.state)}
-            </span>
-          </div>
-          <p>{server.errorReason || `${server.transport} · ${server.scope}`}</p>
-        </div>
-        <div className="extension-card-actions">
-          <button
-            type="button"
-            className={`mcp-toggle-switch${disabled ? " mcp-toggle-switch-off" : " mcp-toggle-switch-on"}`}
-            aria-label={disabled ? `启用 ${server.name}` : `停用 ${server.name}`}
-            disabled={busyMcpServerName === server.name}
-            onClick={() => {
-              void handleToggleMcpServer(server);
-            }}
-          >
-            <span className="mcp-toggle-switch-thumb" />
-          </button>
-          <button
-            type="button"
-            className="extension-card-action"
-            aria-label={`设置 ${server.name}`}
-            onClick={() => {
-              void loadMcpSettings(server);
-            }}
-          >
-            <Settings size={18} strokeWidth={1.9} />
-          </button>
-        </div>
-      </article>
-    );
   }
 
   async function handleToggleSkill(
@@ -1336,17 +1267,131 @@ export function ExtensionsView({
     );
   }
 
-  const title = section === "connectors" ? "连接器" : "技能";
-  const subtitle =
-    section === "connectors"
-      ? "管理 MCP servers 与 CLI 连接器，连接外部系统和工具。"
-      : "管理 Awaken、项目与全局 Skills，扩展 Awaken 的执行能力。";
-  const primaryAction =
-    section === "connectors"
-      ? { label: "配置 MCP", icon: <Plus size={16} strokeWidth={1.9} /> }
-      : { label: "安装 Skill", icon: <Upload size={16} strokeWidth={1.9} /> };
-  const showPrimaryAction =
-    section === "skills" || activeConnectorKind === "mcp";
+  const builtInMcpConnectorItems = visibleAwakenBuiltInMcpConnectors.map((connector) =>
+    mcpConnectorCardItem(connector, busyConnectorId),
+  );
+  const userMcpConnectorItems = [
+    ...visibleUserInstalledMcpConnectors.map((connector) =>
+      mcpConnectorCardItem(connector, busyConnectorId),
+    ),
+    ...visibleMcpServers.map((server) => mcpServerCardItem(server, busyMcpServerName)),
+  ];
+  const cliConnectorItems = visibleCliConnectors
+    .map((connector) => cliConnectorCardItem(connector, cliConnectors, busyConnectorId))
+    .filter((item): item is AwakenConnectorCardItem => item !== null);
+  const selectedCliConnector = connectors.find((entry) => entry.id === cliDetailConnectorId) ?? null;
+  const selectedCliView = cliConnectors.find((entry) => entry.providerId === cliDetailConnectorId);
+  const selectedCliReadiness = selectedCliView?.readiness ?? selectedCliConnector?.cliReadiness ?? null;
+  const selectedCliProduct = selectedCliConnector
+    ? cliConnectorProductCopy(selectedCliConnector.id)
+    : null;
+
+  if (section === "connectors") {
+    return (
+      <>
+        <AwakenConnectors
+          activeKind={activeConnectorKind}
+          searchValue={query}
+          builtInMcpConnectors={builtInMcpConnectorItems}
+          userMcpConnectors={userMcpConnectorItems}
+          cliConnectors={cliConnectorItems}
+          loading={loading}
+          errorMessage={errorMessage}
+          onKindChange={setActiveConnectorKind}
+          onSearchChange={setQuery}
+          onRefresh={() => { void refresh(); }}
+          onConfigureMcp={() => setMcpDialogOpen(true)}
+          onConnectorAction={(item) => {
+            if (item.variant === "cli") {
+              void openCliConnectorDetail(item.id as CliProviderId);
+              return;
+            }
+            const connector = connectors.find((entry) => entry.id === item.id);
+            if (connector) void handleConnectorAction(connector);
+          }}
+          onMcpServerEnabledChange={(item) => {
+            const server = mcpServers.find((entry) => entry.name === item.id);
+            if (server) void handleToggleMcpServer(server);
+          }}
+          onMcpServerSettings={(item) => {
+            const server = mcpServers.find((entry) => entry.name === item.id);
+            if (server) void loadMcpSettings(server);
+          }}
+        />
+
+        <AwakenCliConnectorDetailDialog
+          open={cliDetailConnectorId !== null}
+          providerId={selectedCliConnector?.id ?? cliDetailConnectorId ?? ""}
+          displayName={selectedCliProduct?.displayName || selectedCliConnector?.displayName || "CLI"}
+          description={selectedCliProduct?.description || selectedCliConnector?.description?.trim() || "官方 CLI 连接器"}
+          readiness={selectedCliReadiness ? {
+            install: selectedCliReadiness.install,
+            executable: selectedCliReadiness.executable,
+            authentication: selectedCliReadiness.authentication,
+            account: selectedCliReadiness.account,
+            safeErrorMessage: selectedCliReadiness.safeError?.message,
+          } : null}
+          authSession={selectedCliView?.authSession ? { phase: selectedCliView.authSession.phase } : undefined}
+          installProgress={selectedCliView?.installProgress ? {
+            percent: selectedCliView.installProgress.percent,
+            label: selectedCliView.installProgress.label,
+          } : undefined}
+          brandLogoSrc={selectedCliConnector ? connectorBrandLogo(selectedCliConnector.id) : undefined}
+          brandTone={connectorBrandTone(selectedCliConnector?.id ?? "")}
+          loadingProfile={cliDetailLoading}
+          busy={cliDetailConnectorId !== null && busyConnectorId === cliDetailConnectorId}
+          onOpenChange={(open) => {
+            if (!open) {
+              setCliDetailConnectorId(null);
+              setCliDetailLoading(false);
+            }
+          }}
+          onAction={(action) => {
+            if (cliDetailConnectorId) handleCliDialogAction(cliDetailConnectorId, action);
+          }}
+        />
+
+        <AwakenMcpConfigDialog
+          open={mcpDialogOpen}
+          value={mcpConfigText}
+          errorMessage={mcpDialogOpen ? errorMessage : null}
+          busy={configuringMcp}
+          onOpenChange={setMcpDialogOpen}
+          onValueChange={setMcpConfigText}
+          onSubmit={() => { void handleConfigureMcp(); }}
+        />
+
+        <AwakenMcpSettingsDialog
+          open={mcpSettingsOpen}
+          serverName={selectedMcpServer?.name}
+          scopeLabel={mcpSettingsScope ? sourceLabel(mcpSettingsScope) : ""}
+          configValue={mcpSettingsConfigText}
+          tools={mcpTools}
+          logs={mcpLogs}
+          errorMessage={mcpSettingsError}
+          loading={loadingMcpSettings}
+          saving={savingMcpConfig}
+          onOpenChange={(open) => {
+            setMcpSettingsOpen(open);
+            if (!open) {
+              setSelectedMcpServer(null);
+              setMcpSettingsConfigText("");
+              setMcpSettingsScope("");
+              setMcpSettingsError(null);
+              setMcpTools([]);
+              setMcpLogs([]);
+            }
+          }}
+          onConfigValueChange={setMcpSettingsConfigText}
+          onDelete={() => { void handleDeleteMcpServer(); }}
+          onSave={() => { void handleSaveMcpConfig(); }}
+        />
+      </>
+    );
+  }
+
+  const title = "技能";
+  const subtitle = "管理 Awaken、项目与全局 Skills，扩展 Awaken 的执行能力。";
 
   return (
     <section className="extension-view" aria-label={title}>
@@ -1368,70 +1413,40 @@ export function ExtensionsView({
             >
               <RefreshCw size={16} strokeWidth={1.9} />
             </button>
-            {showPrimaryAction ? (
-              <Button
-                variant="primary"
-                size="md"
-                onClick={() => {
-                  if (section === "connectors") {
-                    setMcpDialogOpen(true);
-                  } else {
-                    setSkillInstallScope("project");
-                    setSkillInstallProjectRoot(skillProjectRoot);
-                    setSkillDialogOpen(true);
-                  }
-                }}
-              >
-                {primaryAction.icon}
-                {primaryAction.label}
-              </Button>
-            ) : null}
+            <Button
+              variant="primary"
+              size="md"
+              onClick={() => {
+                setSkillInstallScope("project");
+                setSkillInstallProjectRoot(skillProjectRoot);
+                setSkillDialogOpen(true);
+              }}
+            >
+              <Upload size={16} strokeWidth={1.9} />
+              安装 Skill
+            </Button>
           </div>
         </header>
 
-        <div
-          className={`extension-toolbar${
-            section === "connectors" || section === "skills"
-              ? " extension-toolbar-with-tabs"
-              : ""
-          }`}
-        >
-          {section === "connectors" || section === "skills" ? (
-            <div
-              className="extension-category-tabs"
-              role="tablist"
-              aria-label={section === "connectors" ? "连接器分类" : "技能视图"}
-            >
-              {(section === "connectors" ? CONNECTOR_KIND_TABS : SKILL_VIEW_TABS).map((tab) => (
+        <div className="extension-toolbar extension-toolbar-with-tabs">
+          <div className="extension-category-tabs" role="tablist" aria-label="技能视图">
+              {SKILL_VIEW_TABS.map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
                   className={`extension-category-tab${
-                    (section === "connectors"
-                      ? activeConnectorKind === tab.id
-                      : activeSkillView === tab.id)
+                    activeSkillView === tab.id
                       ? " extension-category-tab-active"
                       : ""
                   }`}
                   role="tab"
-                  aria-selected={
-                    section === "connectors"
-                      ? activeConnectorKind === tab.id
-                      : activeSkillView === tab.id
-                  }
-                  onClick={() => {
-                    if (section === "connectors") {
-                      setActiveConnectorKind(tab.id as ConnectorKind);
-                    } else {
-                      setActiveSkillView(tab.id as SkillView);
-                    }
-                  }}
+                  aria-selected={activeSkillView === tab.id}
+                  onClick={() => setActiveSkillView(tab.id as SkillView)}
                 >
                   {tab.label}
                 </button>
               ))}
-            </div>
-          ) : null}
+          </div>
           <input
             value={query}
             placeholder="搜索..."
@@ -1441,48 +1456,7 @@ export function ExtensionsView({
 
         {errorMessage ? <div className="extension-message" role="alert">{errorMessage}</div> : null}
 
-        {section === "connectors" ? (
-          <div className="extension-sections">
-            {activeConnectorKind === "mcp" ? (
-              <>
-                <section className="extension-section">
-                  <h2>Awaken 内置</h2>
-                  <div className="extension-grid">
-                    {visibleAwakenBuiltInMcpConnectors.length > 0 ? (
-                      visibleAwakenBuiltInMcpConnectors.map(renderConnectorCard)
-                    ) : (
-                      <div className="extension-empty">暂无内置 MCP</div>
-                    )}
-                  </div>
-                </section>
-                <section className="extension-section">
-                  <h2>用户安装</h2>
-                  <div className="extension-grid">
-                    {visibleUserInstalledMcpConnectors.length + visibleMcpServers.length > 0 ? (
-                      <>
-                        {visibleUserInstalledMcpConnectors.map(renderConnectorCard)}
-                        {visibleMcpServers.map(renderMcpServerCard)}
-                      </>
-                    ) : (
-                      <div className="extension-empty">暂无用户安装 MCP</div>
-                    )}
-                  </div>
-                </section>
-              </>
-            ) : (
-              <section className="extension-section" aria-label="CLI">
-                <div className="extension-grid">
-                  {visibleCliConnectors.length > 0 ? (
-                    visibleCliConnectors.map(renderCliConnectorCard)
-                  ) : (
-                    <div className="extension-empty">暂无 CLI</div>
-                  )}
-                </div>
-              </section>
-            )}
-          </div>
-        ) : (
-          <div className="extension-sections">
+        <div className="extension-sections">
             {activeSkillView === "awaken" ? (
               <section className="extension-section" aria-label="Awaken Skills">
                 <div className="extension-grid">
@@ -1544,8 +1518,7 @@ export function ExtensionsView({
                 ) : null}
               </>
             )}
-          </div>
-        )}
+        </div>
       </div>
 
       <SkillPreviewDialog
@@ -1557,179 +1530,6 @@ export function ExtensionsView({
           }
         }}
       />
-
-      <CliConnectorDetailDialog
-        open={cliDetailConnectorId !== null}
-        connector={
-          connectors.find((entry) => entry.id === cliDetailConnectorId) ?? null
-        }
-        readiness={
-          cliConnectors.find((entry) => entry.providerId === cliDetailConnectorId)?.readiness
-          ?? connectors.find((entry) => entry.id === cliDetailConnectorId)?.cliReadiness
-          ?? null
-        }
-        authSession={cliConnectors.find((entry) => entry.providerId === cliDetailConnectorId)?.authSession}
-        installProgress={cliConnectors.find((entry) => entry.providerId === cliDetailConnectorId)?.installProgress}
-        loadingProfile={cliDetailLoading}
-        busy={cliDetailConnectorId !== null && busyConnectorId === cliDetailConnectorId}
-        onOpenChange={(open) => {
-          if (!open) {
-            setCliDetailConnectorId(null);
-            setCliDetailLoading(false);
-          }
-        }}
-        onAction={(action) => {
-          if (!cliDetailConnectorId) return;
-          handleCliDialogAction(cliDetailConnectorId, action);
-        }}
-      />
-
-      <Dialog
-        open={mcpDialogOpen}
-        title="配置 MCP"
-        onOpenChange={setMcpDialogOpen}
-        footer={
-          <>
-            <Button
-              variant="default"
-              size="md"
-              disabled={configuringMcp}
-              onClick={() => setMcpDialogOpen(false)}
-            >
-              取消
-            </Button>
-            <Button
-              variant="primary"
-              size="md"
-              loading={configuringMcp}
-              disabled={mcpConfigText.trim() === ""}
-              onClick={() => {
-                void handleConfigureMcp();
-              }}
-            >
-              <Check size={15} strokeWidth={1.9} />
-              确认
-            </Button>
-          </>
-        }
-      >
-        <div className="extension-dialog-body">
-          <p>粘贴 MCP Servers 配置 JSON。支持 `mcpServers` 简写和 Awaken `servers` 配置。</p>
-          <textarea
-            className="extension-code-input"
-            value={mcpConfigText}
-            spellCheck={false}
-            onChange={(event) => setMcpConfigText(event.target.value)}
-          />
-          <div className="extension-dialog-note">配置前确认来源和命令参数，避免运行不可信服务。</div>
-        </div>
-      </Dialog>
-
-      <Dialog
-        open={mcpSettingsOpen}
-        title={selectedMcpServer ? `${selectedMcpServer.name} 设置` : "MCP 设置"}
-        onOpenChange={(open) => {
-          setMcpSettingsOpen(open);
-          if (!open) {
-            setSelectedMcpServer(null);
-            setMcpSettingsConfigText("");
-            setMcpSettingsScope("");
-            setMcpSettingsError(null);
-            setMcpTools([]);
-            setMcpLogs([]);
-          }
-        }}
-        footer={
-          <div className="mcp-settings-footer">
-            <Button
-              variant="default"
-              size="md"
-              className="mcp-settings-delete-btn"
-              style={{ color: "var(--aw-error)" }}
-              disabled={savingMcpConfig}
-              onClick={() => {
-                void handleDeleteMcpServer();
-              }}
-            >
-              <Trash2 size={15} strokeWidth={1.9} />
-              删除
-            </Button>
-            <div className="mcp-settings-footer-actions">
-              <Button
-                variant="default"
-                size="md"
-                disabled={savingMcpConfig}
-                onClick={() => setMcpSettingsOpen(false)}
-              >
-                取消
-              </Button>
-              <Button
-                variant="primary"
-                size="md"
-                loading={savingMcpConfig}
-                disabled={mcpSettingsConfigText.trim() === ""}
-                onClick={() => {
-                  void handleSaveMcpConfig();
-                }}
-              >
-                <Check size={15} strokeWidth={1.9} />
-                保存
-              </Button>
-            </div>
-          </div>
-        }
-      >
-        <div className="mcp-settings-dialog-body">
-          {mcpSettingsError ? <div className="extension-message" role="alert">{mcpSettingsError}</div> : null}
-
-          <section className="mcp-settings-section">
-            <div className="mcp-settings-section-header">
-              <h3>配置</h3>
-              <span className="mcp-settings-scope">{mcpSettingsScope ? sourceLabel(mcpSettingsScope) : ""}</span>
-            </div>
-            <textarea
-              className="mcp-settings-code"
-              value={mcpSettingsConfigText}
-              spellCheck={false}
-              disabled={loadingMcpSettings}
-              onChange={(event) => setMcpSettingsConfigText(event.target.value)}
-            />
-          </section>
-
-          <section className="mcp-settings-section">
-            <h3>方法</h3>
-            {mcpTools.length > 0 ? (
-              <ul className="mcp-tools-list">
-                {mcpTools.map((tool) => (
-                  <li key={tool.name}>
-                    <code>{tool.name}</code>
-                    <span>{tool.description}</span>
-                    {tool.readOnly ? <span className="mcp-tool-readonly">只读</span> : null}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="mcp-settings-empty">尚未获取到工具</div>
-            )}
-          </section>
-
-          <section className="mcp-settings-section">
-            <h3>日志</h3>
-            {mcpLogs.length > 0 ? (
-              <div className="mcp-logs-panel">
-                {mcpLogs.map((entry) => (
-                  <div key={entry.id} className={`mcp-log-line mcp-log-line-${entry.stream}`}>
-                    <span className="mcp-log-time">{new Date(entry.timestamp).toLocaleTimeString()}</span>
-                    <span className="mcp-log-text">{entry.line}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="mcp-settings-empty">暂无相关日志</div>
-            )}
-          </section>
-        </div>
-      </Dialog>
 
       <Dialog
         open={skillDialogOpen}

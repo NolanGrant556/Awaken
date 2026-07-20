@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { awakenGalleryEntries } from "./registry";
+import { awakenGalleryEntries, awakenGallerySections } from "./registry";
 
 const componentRoutePrefix = "#/components/";
 
@@ -75,17 +75,24 @@ export function AwakenGalleryApp() {
           </div>
         </div>
         <nav aria-label="组件目录">
-          {awakenGalleryEntries.map((entry) => (
-            <button
-              key={entry.id}
-              type="button"
-              className={entry.id === activeId ? "is-active" : ""}
-              aria-label={`${entry.displayName} ${entry.name}`}
-              onClick={() => selectComponent(entry.id)}
-            >
-              <span className="ads-gallery-entry-name">{entry.displayName}</span>
-              <span className="ads-gallery-entry-code">{entry.name}</span>
-            </button>
+          {awakenGallerySections.map((section) => (
+            <div className="ads-gallery-nav-section" key={section.id}>
+              <h2>{section.label}</h2>
+              <div className="ads-gallery-nav-section__entries">
+                {section.entries.map((entry) => (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    className={entry.id === activeId ? "is-active" : ""}
+                    aria-label={`${entry.displayName} ${entry.name}`}
+                    onClick={() => selectComponent(entry.id)}
+                  >
+                    <span className="ads-gallery-entry-name">{entry.displayName}</span>
+                    <span className="ads-gallery-entry-code">{entry.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
       </aside>

@@ -1,0 +1,18 @@
+.aw-product-logo {
+  display: block;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  user-select: none;
+}
+
+.aw-product-logo[data-size="sm"] {
+  width: 32px;
+  height: 32px;
+}
+
+.aw-product-logo[data-size="lg"] {
+  width: 64px;
+  height: 64px;
+}

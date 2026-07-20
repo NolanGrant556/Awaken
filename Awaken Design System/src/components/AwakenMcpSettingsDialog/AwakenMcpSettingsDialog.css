@@ -1,0 +1,56 @@
+@import "../../tokens/components.css";
+
+.aw-dialog.aw-mcp-settings-dialog { width: min(900px, calc(100vw - 48px)); }
+.aw-mcp-settings-dialog__body { display: grid; gap: 22px; min-width: 0; }
+.aw-mcp-settings-dialog__body section { display: grid; gap: 10px; min-width: 0; }
+.aw-mcp-settings-dialog__body h3 { margin: 0; color: var(--aw-text-primary); font-size: 14px; font-weight: var(--aw-font-weight-heavy); }
+.aw-mcp-settings-dialog__body section > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.aw-mcp-settings-dialog__body section > header > span,
+.aw-mcp-settings-dialog__tools em {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 7px;
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-tertiary);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: var(--aw-font-weight-heavy);
+}
+.aw-mcp-settings-dialog__body textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 160px;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-primary);
+  font-family: var(--aw-font-mono);
+  font-size: 13px;
+  line-height: 1.55;
+  resize: vertical;
+}
+.aw-mcp-settings-dialog__body textarea:focus { border-color: var(--aw-border-control-hover); outline: none; box-shadow: var(--aw-shadow-focus); }
+.aw-mcp-settings-dialog__footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; }
+.aw-mcp-settings-dialog__footer > div { display: flex; align-items: center; gap: 10px; }
+.aw-mcp-settings-dialog__delete { color: var(--aw-error) !important; background: color-mix(in srgb, var(--aw-error) 8%, transparent) !important; border-color: color-mix(in srgb, var(--aw-error) 24%, var(--aw-border-main)) !important; }
+.aw-mcp-settings-dialog__delete:hover:not(:disabled) { background: color-mix(in srgb, var(--aw-error) 14%, transparent) !important; }
+.aw-mcp-settings-dialog__tools { display: grid; gap: 8px; min-width: 0; margin: 0; padding: 0; list-style: none; }
+.aw-mcp-settings-dialog__tools li { display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 10px 12px; border: 1px solid var(--aw-border-main); border-radius: var(--aw-radius-md); background: var(--aw-surface-panel); }
+.aw-mcp-settings-dialog__tools code { flex: 0 0 auto; min-width: 0; color: var(--aw-text-primary); font-size: 13px; font-weight: var(--aw-font-weight-bold); }
+.aw-mcp-settings-dialog__tools li > span { flex: 1 1 auto; min-width: 0; color: var(--aw-text-secondary); font-size: 12px; line-height: 1.45; }
+.aw-mcp-settings-dialog__logs { display: grid; gap: 4px; max-height: 260px; padding: 12px 14px; overflow: auto; border: 1px solid var(--aw-border-main); border-radius: var(--aw-radius-md); background: var(--aw-bg-fill-light); font-family: var(--aw-font-mono); font-size: 12px; line-height: 1.5; }
+.aw-mcp-settings-dialog__logs > div { display: flex; gap: 10px; min-width: 0; }
+.aw-mcp-settings-dialog__logs time { flex: 0 0 auto; color: var(--aw-text-tertiary); }
+.aw-mcp-settings-dialog__logs span { min-width: 0; color: var(--aw-text-secondary); white-space: pre-wrap; word-break: break-word; }
+.aw-mcp-settings-dialog__logs > div[data-stream="stderr"] span { color: color-mix(in srgb, var(--aw-error) 80%, var(--aw-text-secondary)); }
+.aw-mcp-settings-dialog__empty { padding: 18px; border: 1px dashed var(--aw-border-main); border-radius: var(--aw-radius-md); color: var(--aw-text-tertiary); font-size: 13px; text-align: center; }
+.aw-mcp-settings-dialog__error { padding: 10px 12px; border: 1px solid var(--aw-error-soft-border); border-radius: var(--aw-radius-md); background: var(--aw-error-soft-bg); color: var(--aw-text-primary); font-size: 13px; }
+
+@media (max-width: 640px) {
+  .aw-mcp-settings-dialog__footer { align-items: stretch; flex-direction: column-reverse; }
+  .aw-mcp-settings-dialog__footer > div { justify-content: flex-end; }
+}

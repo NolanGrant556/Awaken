@@ -11,7 +11,11 @@ body { margin: 0; min-width: 1024px; overflow-y: hidden; overflow-x: auto; color
 .ads-gallery-brand__catalog { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .ads-gallery-brand__catalog span { color: var(--aw-text-secondary); font-size: 13px; line-height: 18px; font-weight: 600; }
 .ads-gallery-brand__catalog strong { color: var(--aw-text-tertiary); font-size: 12px; font-weight: 500; }
-.ads-gallery-sidebar nav { min-height: 0; display: grid; align-content: start; gap: 2px; padding: 8px 10px 16px; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; }
+.ads-gallery-sidebar nav { min-height: 0; display: grid; align-content: start; gap: 14px; padding: 10px 10px 16px; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; }
+.ads-gallery-nav-section { display: grid; gap: 4px; min-width: 0; }
+.ads-gallery-nav-section + .ads-gallery-nav-section { padding-top: 12px; border-top: 1px solid var(--aw-border-main); }
+.ads-gallery-nav-section h2 { margin: 0; padding: 0 10px 4px; color: var(--aw-text-tertiary); font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .04em; }
+.ads-gallery-nav-section__entries { display: grid; gap: 2px; min-width: 0; }
 .ads-gallery-sidebar button { display: grid; gap: 2px; border: 0; background: transparent; border-radius: 8px; padding: 8px 10px; text-align: left; color: var(--aw-text-secondary); font: inherit; cursor: pointer; min-width: 0; }
 .ads-gallery-sidebar button:hover, .ads-gallery-sidebar button.is-active { background: var(--aw-bg-fill-main); color: var(--aw-text-primary); }
 .ads-gallery-entry-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }

@@ -55,6 +55,7 @@ apps/desktop/resources/bin/
 
 # Local agent/workspace files
 sourcecode/
+.tmp-pr-export/
 .codex/
 .claude/
 CLAUDE.md

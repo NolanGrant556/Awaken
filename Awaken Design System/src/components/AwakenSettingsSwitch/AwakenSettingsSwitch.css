@@ -1,0 +1,18 @@
+@import "../../tokens/components.css";
+
+.aw-settings-switch { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; color: var(--aw-text-primary); cursor: pointer; }
+.aw-settings-switch--card { padding: 14px; border: 1px solid var(--aw-border-main); border-radius: 12px; background: var(--aw-surface-raised); }
+.aw-settings-switch__copy { display: grid; gap: 4px; min-width: 0; }
+.aw-settings-switch__copy strong { font-size: 13px; font-weight: var(--aw-font-weight-heavy); line-height: 1.3; }
+.aw-settings-switch__copy > span { color: var(--aw-text-secondary); font-size: 12px; line-height: 1.45; }
+.aw-settings-switch--disabled { cursor: not-allowed; opacity: 0.52; }
+
+.configured-model-switch { position: relative; display: inline-flex; justify-self: center; width: 36px; height: 20px; align-items: center; }
+.configured-model-switch input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.configured-model-switch input:disabled { cursor: not-allowed; }
+.configured-model-switch span { width: 36px; height: 20px; border-radius: 999px; background: var(--aw-bg-fill-light); box-shadow: inset 0 0 0 1px var(--aw-border-light); transition: background-color var(--aw-transition-fast), box-shadow var(--aw-transition-fast); }
+.configured-model-switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 999px; background: var(--aw-surface-raised); box-shadow: var(--aw-shadow-control); transition: transform var(--aw-transition-fast); }
+.configured-model-switch input:checked + span { background: var(--aw-status-success); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--aw-status-success) 18%, transparent); }
+.configured-model-switch input:checked + span::after { transform: translateX(16px); }
+.configured-model-switch input:focus-visible + span { outline: 2px solid var(--aw-focus-ring); outline-offset: 2px; }
+.configured-model-switch input:disabled + span { opacity: 0.45; }

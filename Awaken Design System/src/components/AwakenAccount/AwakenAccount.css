@@ -1,0 +1,11 @@
+@import "../../tokens/components.css";
+
+.aw-account {
+  width: min(100%, var(--aw-sidebar-width));
+  min-width: 0;
+}
+
+.aw-account > div,
+.aw-account > div > div {
+  width: 100%;
+}

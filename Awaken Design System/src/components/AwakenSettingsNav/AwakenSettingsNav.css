@@ -1,0 +1,43 @@
+@import "../../tokens/components.css";
+
+.settings-dialog-nav {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.settings-dialog-nav-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--aw-radius-control);
+  background: transparent;
+  color: var(--aw-text-secondary);
+  font-size: 13px;
+  font-weight: var(--aw-font-weight-bold);
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-dialog-nav-item:hover,
+.settings-dialog-nav-item:focus-visible,
+.settings-dialog-nav-item-active {
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-primary);
+}
+
+.settings-dialog-nav-item:focus-visible {
+  outline: 2px solid var(--aw-focus-ring);
+  outline-offset: 1px;
+}
+
+.settings-dialog-nav-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}

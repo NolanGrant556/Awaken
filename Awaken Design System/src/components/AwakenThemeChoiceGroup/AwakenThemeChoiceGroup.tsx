@@ -1,0 +1,51 @@
+import "./AwakenThemeChoiceGroup.css";
+import { Monitor, Moon, Sun } from "lucide-react";
+
+export type AwakenThemeChoiceValue = "system" | "light" | "dark";
+
+export type AwakenThemeChoiceGroupProps = {
+  value: AwakenThemeChoiceValue;
+  disabled?: boolean;
+  onValueChange?: (value: AwakenThemeChoiceValue) => void;
+};
+
+const choices = [
+  { value: "system", label: "跟随系统", Icon: Monitor },
+  { value: "light", label: "浅色", Icon: Sun },
+  { value: "dark", label: "黑色", Icon: Moon },
+] as const;
+
+export function AwakenThemeChoiceGroup({ value, disabled = false, onValueChange }: AwakenThemeChoiceGroupProps) {
+  return (
+    <div className="theme-choice-group" role="radiogroup" aria-label="主题">
+      {choices.map(({ value: choiceValue, label, Icon }) => {
+        const selected = choiceValue === value;
+        return (
+          <button
+            key={choiceValue}
+            type="button"
+            className={["theme-choice", selected ? "theme-choice-active" : ""].filter(Boolean).join(" ")}
+            role="radio"
+            aria-checked={selected}
+            disabled={disabled}
+            onClick={() => onValueChange?.(choiceValue)}
+          >
+            <Icon size={17} strokeWidth={1.9} aria-hidden="true" />
+            <span>{label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export function AwakenAppearanceSettings(props: AwakenThemeChoiceGroupProps) {
+  return (
+    <section className="appearance-settings" aria-label="外观">
+      <div className="appearance-settings-row">
+        <div className="appearance-settings-copy"><h2>主题</h2></div>
+        <AwakenThemeChoiceGroup {...props} />
+      </div>
+    </section>
+  );
+}

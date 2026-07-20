@@ -1,5 +1,5 @@
 import { createElement, type ComponentProps } from "react";
-import { FolderPlus, ListFilter, MessageCirclePlus } from "lucide-react";
+import { FolderPlus, ListFilter, MessageCirclePlus, Plug, Wrench } from "lucide-react";
 import { AwakenSidebarSectionAction } from "../AwakenSidebarSectionAction";
 import type { AwakenSidebar } from "./AwakenSidebar";
 
@@ -11,85 +11,134 @@ export type AwakenSidebarState = {
 
 const noop = () => {};
 
+function projectAction(label: string) {
+  return createElement(
+    AwakenSidebarSectionAction,
+    {
+      label: `New session in ${label}`,
+      children: createElement(MessageCirclePlus, { size: 13, strokeWidth: 1.85 }),
+    },
+  );
+}
+
+function projectMenuItems() {
+  return [
+    { id: "remove-project", label: "从 Awaken 移除", onSelect: noop },
+    { id: "delete-project-history", label: "删除 Awaken 历史", tone: "danger" as const, onSelect: noop },
+    { id: "trash-project", label: "移到废纸篓", tone: "danger" as const, onSelect: noop },
+  ];
+}
+
+function threadMenuItems() {
+  return [
+    { id: "rename-thread", label: "重命名", onSelect: noop },
+    { id: "delete-thread", label: "删除会话", tone: "danger" as const, onSelect: noop },
+  ];
+}
+
 export const AwakenSidebarStates: AwakenSidebarState[] = [
   {
-    id: "desktop-sidebar",
-    label: "完整侧边栏",
+    id: "current-desktop-sidebar",
+    label: "Awaken 当前侧栏",
     props: {
       title: "Awaken",
       navItems: [
-        { id: "runs", label: "运行", badge: 2 },
-        { id: "projects", label: "项目" },
-        { id: "settings", label: "设置" },
-      ],
-      activeNavId: "runs",
-      conversations: [
         {
-          id: "design-system-docs",
-          label: "补齐组件用途说明",
-          timeLabel: "now",
-          statusLabel: "进行中",
-          statusTone: "local",
+          id: "connectors",
+          label: "连接器",
+          icon: createElement(Plug, { size: 16, strokeWidth: 1.9 }),
         },
         {
-          id: "runtime-smoke",
-          label: "桌面运行 smoke",
-          timeLabel: "1h",
-          statusLabel: "已完成",
-          statusTone: "success",
+          id: "skills",
+          label: "技能",
+          icon: createElement(Wrench, { size: 16, strokeWidth: 1.9 }),
         },
       ],
-      activeConversationId: "design-system-docs",
+      activeNavId: "skills",
+      conversations: [],
       projects: [
         {
-          id: "awaken",
-          label: "Awaken",
+          id: "management",
+          label: "09_经营管理部",
           kind: "project",
-          timeLabel: "当前",
-          action: createElement(
-            AwakenSidebarSectionAction,
-            {
-              label: "新建会话",
-              children: createElement(MessageCirclePlus, { size: 13, strokeWidth: 1.85 }),
-            },
-          ),
+          path: "/Users/nolangrant/Awaken 测试集/Nolan实业有限公司/09_经营管理部",
+          action: projectAction("09_经营管理部"),
+          menuItems: projectMenuItems(),
           children: [
-            { id: "group-3", kind: "thread", label: "Design System 第 3 组", timeLabel: "16" },
-            { id: "desktop", kind: "thread", label: "apps/desktop", timeLabel: "8" },
+            { id: "weekly-review", kind: "thread", label: "管理层周报", menuItems: threadMenuItems() },
+          ],
+        },
+        {
+          id: "legal",
+          label: "08_行政与法务部",
+          kind: "project",
+          path: "/Users/nolangrant/Awaken 测试集/Nolan实业有限公司/08_行政与法务部",
+          action: projectAction("08_行政与法务部"),
+          menuItems: projectMenuItems(),
+          children: [
+            { id: "contract-check", kind: "thread", label: "合同条款检查", menuItems: threadMenuItems() },
+          ],
+        },
+        {
+          id: "service",
+          label: "07_客户服务部",
+          kind: "project",
+          path: "/Users/nolangrant/Awaken 测试集/Nolan实业有限公司/07_客户服务部",
+          action: projectAction("07_客户服务部"),
+          menuItems: projectMenuItems(),
+          children: [
+            { id: "service-summary", kind: "thread", label: "客户问题汇总", menuItems: threadMenuItems() },
+          ],
+        },
+        {
+          id: "finance",
+          label: "01_财务部",
+          kind: "project",
+          path: "/Users/nolangrant/Awaken 测试集/Nolan实业有限公司/01_财务部",
+          action: projectAction("01_财务部"),
+          menuItems: projectMenuItems(),
+          children: [
+            {
+              id: "finance-attachment",
+              kind: "thread",
+              label: "项目附件确认",
+              isLoading: true,
+              menuItems: threadMenuItems(),
+            },
           ],
         },
       ],
-      activeProjectId: "group-3",
-      expandedIds: ["awaken"],
-      defaultExpandedIds: ["awaken"],
-      profileName: "Nolan Grant",
-      profileAvatarFallback: "NG",
+      activeProjectId: "finance-attachment",
+      expandedIds: ["finance"],
+      defaultExpandedIds: ["finance"],
+      profileName: "Nolan",
+      profileAvatarFallback: "AW",
       profileAvatarSrc: undefined,
-      newTaskShortcut: "N",
-      newTaskLabel: "新建任务",
-      conversationSectionLabel: "最近任务",
-      projectSectionLabel: "项目",
-      showProjectCount: true,
+      newTaskShortcut: "",
+      newTaskLabel: "New Agent",
+      conversationSectionLabel: "",
+      projectSectionLabel: "Projects",
+      showProjectCount: false,
       projectSectionActions: createElement(
         "span",
         { style: { display: "inline-flex", alignItems: "center", gap: 2 } },
         createElement(
           AwakenSidebarSectionAction,
           {
-            label: "筛选项目",
+            label: "Filter projects",
             children: createElement(ListFilter, { size: 13, strokeWidth: 1.85 }),
           },
         ),
         createElement(
           AwakenSidebarSectionAction,
           {
-            label: "添加文件夹",
+            label: "Add folder",
             children: createElement(FolderPlus, { size: 13, strokeWidth: 1.85 }),
           },
         ),
       ),
-      profileSubtitle: "本机运行时已连接",
-      showBrand: true,
+      profileSubtitle: undefined,
+      showBrand: false,
       platform: "macos",
       onSelectNav: noop,
       onSelectConversation: noop,

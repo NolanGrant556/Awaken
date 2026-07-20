@@ -1055,6 +1055,30 @@ func TestRunnerThinkingOnlyResponseIsNotEmpty(t *testing.T) {
 	}
 }
 
+func TestLastAPIUsageTokensPrefersTotalUsageForContinuation(t *testing.T) {
+	inputTokens := 88_000
+	outputTokens := 4_000
+	totalTokens := inputTokens + outputTokens
+	response := &llm.Response{Usage: &llm.Usage{
+		InputTokens:  &inputTokens,
+		OutputTokens: &outputTokens,
+		TotalTokens:  &totalTokens,
+	}}
+
+	if got := lastAPIUsageTokens(response); got != totalTokens {
+		t.Fatalf("expected total continuation usage %d, got %d", totalTokens, got)
+	}
+}
+
+func TestLastAPIUsageTokensFallsBackToInputUsage(t *testing.T) {
+	inputTokens := 88_000
+	response := &llm.Response{Usage: &llm.Usage{InputTokens: &inputTokens}}
+
+	if got := lastAPIUsageTokens(response); got != inputTokens {
+		t.Fatalf("expected input-usage fallback %d, got %d", inputTokens, got)
+	}
+}
+
 func TestRunEventEmitterCompactStructuredFields(t *testing.T) {
 	var gotEvents []AwakenEvent
 	emitter := newRunEventEmitter("thread-1", EventSinkFunc(func(event AwakenEvent) {

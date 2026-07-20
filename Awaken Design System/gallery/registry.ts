@@ -74,6 +74,9 @@ export type AwakenGalleryEntry = {
 };
 
 export const awakenGalleryEntries: AwakenGalleryEntry[] = [
+  { id: "awaken-sidebar", name: "AwakenSidebar", displayName: "「左侧栏」组件库", demo: AwakenSidebarDemo },
+  { id: "awaken-skills", name: "AwakenSkills", displayName: "「技能」组件库", demo: AwakenSkillsDemo },
+  { id: "awaken-settings", name: "AwakenSettings", displayName: "「设置」组件库", demo: AwakenSettingsDemo },
   { id: "awaken-account", name: "AwakenAccount", displayName: "「账户」组件库", demo: AwakenAccountDemo },
   { id: "awaken-activity-line", name: "AwakenActivityLine", displayName: "活动状态行", demo: AwakenActivityLineDemo },
   { id: "awaken-approval-card", name: "AwakenApprovalCard", displayName: "审批卡片", demo: AwakenApprovalCardDemo },
@@ -123,9 +126,6 @@ export const awakenGalleryEntries: AwakenGalleryEntry[] = [
   { id: "awaken-run-timeline", name: "AwakenRunTimeline", displayName: "运行时间线", demo: AwakenRunTimelineDemo },
   { id: "awaken-send-button", name: "AwakenSendButton", displayName: "发送按钮", demo: AwakenSendButtonDemo },
   { id: "awaken-selectable-card", name: "AwakenSelectableCard", displayName: "选择卡片", demo: AwakenSelectableCardDemo },
-  { id: "awaken-settings", name: "AwakenSettings", displayName: "「设置」组件库", demo: AwakenSettingsDemo },
-  { id: "awaken-sidebar", name: "AwakenSidebar", displayName: "「左侧栏」组件库", demo: AwakenSidebarDemo },
-  { id: "awaken-skills", name: "AwakenSkills", displayName: "「技能」组件库", demo: AwakenSkillsDemo },
   { id: "awaken-status-pill", name: "AwakenStatusPill", displayName: "状态胶囊", demo: AwakenStatusPillDemo },
   { id: "awaken-task-welcome", name: "AwakenTaskWelcome", displayName: "任务欢迎区", demo: AwakenTaskWelcomeDemo },
   { id: "awaken-thinking-block", name: "AwakenThinkingBlock", displayName: "思考块", demo: AwakenThinkingBlockDemo },

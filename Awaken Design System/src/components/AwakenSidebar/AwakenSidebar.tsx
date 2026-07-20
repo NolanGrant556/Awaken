@@ -33,6 +33,8 @@ export type AwakenSidebarProps = {
   showProjectCount?: boolean;
   projectSectionActions?: ReactNode;
   profileSubtitle?: string;
+  profileExpanded?: boolean;
+  profileControls?: string;
   showBrand?: boolean;
   platform?: PlatformKind;
   onSelectNav?: (id: string) => void;
@@ -114,6 +116,8 @@ export function AwakenSidebar({
   showProjectCount = true,
   projectSectionActions,
   profileSubtitle,
+  profileExpanded,
+  profileControls,
   showBrand = true,
   platform = "macos",
   onSelectNav,
@@ -193,6 +197,8 @@ export function AwakenSidebar({
             subtitle={profileSubtitle}
             avatarFallback={profileAvatarFallback}
             avatarSrc={profileAvatarSrc}
+            expanded={profileExpanded}
+            controls={profileControls}
             onClick={onProfileClick}
           />
         </div>

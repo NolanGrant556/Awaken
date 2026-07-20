@@ -4,6 +4,7 @@ import { Folder, FolderOpen, MoreHorizontal } from "lucide-react";
 import type { ProjectItem } from "../../types";
 import { AwakenDropdown } from "../AwakenDropdown";
 import { AwakenIcon } from "../AwakenIcon";
+import { AwakenSidebarThreadSpinner } from "../AwakenSidebarThreadSpinner";
 
 export type AwakenProjectTreeProps = {
   items: ProjectItem[];
@@ -24,17 +25,6 @@ const emptyStyle: CSSProperties = {
   color: "var(--aw-text-tertiary)",
   fontSize: "var(--aw-font-size-xs)",
   lineHeight: "var(--aw-line-height-xs)",
-};
-
-const spinnerStyle: CSSProperties = {
-  display: "inline-block",
-  width: 14,
-  height: 14,
-  border: "2px solid var(--aw-border-main)",
-  borderTopColor: "var(--aw-text-tertiary)",
-  borderRadius: "999px",
-  animation: "spin 900ms linear infinite",
-  flexShrink: 0,
 };
 
 export function AwakenProjectTree({
@@ -183,7 +173,7 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
               </span>
             ) : null}
           </span>
-          {isLoading ? <span style={spinnerStyle} aria-label="加载中" /> : null}
+          {isLoading ? <AwakenSidebarThreadSpinner /> : null}
           {showTimeLabel ? <span className="aw-project-row-meta">{item.timeLabel}</span> : null}
         </button>
         {item.action || item.menuItems?.length ? (

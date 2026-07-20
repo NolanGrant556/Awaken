@@ -1,0 +1,42 @@
+@import "../../tokens/components.css";
+
+.model-settings-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding: 0;
+}
+
+.model-settings-tab {
+  min-width: 0;
+  height: 34px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--aw-radius-md);
+  background: transparent;
+  color: var(--aw-text-secondary);
+  font-size: 13px;
+  font-weight: var(--aw-font-weight-heavy);
+  cursor: pointer;
+}
+
+.model-settings-tab:hover,
+.model-settings-tab:focus-visible {
+  color: var(--aw-text-primary);
+}
+
+.model-settings-tab:focus-visible {
+  outline: 2px solid var(--aw-focus-ring);
+  outline-offset: 1px;
+}
+
+.model-settings-tab-active {
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-primary);
+}
+
+.model-settings-tab:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}

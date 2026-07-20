@@ -38,6 +38,7 @@ Awaken Design System/
 - `dist/` 是生成目录，可以删除后重建；不要在里面修 bug。
 - `DESIGN_SYSTEM_GUIDE.md` 是后续视觉改动的作者规则，优先于临时审美判断。
 - `gallery/registry.ts` 决定哪些独立组件或组件族拥有顶层观测 URL。
+- Gallery 左侧的“Awaken 设计系统 / 组件目录”是固定目录头，只有下方的组件入口列表参与纵向滚动。
 - `src/index.ts` 决定哪些能力对 Desktop 或外部项目公开。
 
 ## 入口契约
@@ -103,9 +104,18 @@ Awaken Design System/gallery/registry.ts
 
 ```text
 http://127.0.0.1:5173/#/components/awaken-skills
+http://127.0.0.1:5173/#/components/awaken-sidebar
+http://127.0.0.1:5173/#/components/awaken-account
+http://127.0.0.1:5173/#/components/awaken-settings
 ```
 
-该入口同时观测完整 Skills 组合、Skill 卡片、开关、项目文件夹、项目窗口和 Markdown 预览窗口；这些小组件保留独立源码和公开导出，但不重复占用 Gallery 侧栏。
+“「技能」组件库”入口同时观测完整 Skills 组合、Skill 卡片、开关、项目文件夹、项目窗口和 Markdown 预览窗口；这些小组件保留独立源码和公开导出，但不重复占用 Gallery 侧栏。
+
+“「左侧栏」组件库”同样先观测 Desktop 当前使用的 `AwakenWorkbenchSidebarFrame + AwakenSidebar` 完整组合，再集中展示 New Agent、主导航、项目树、区块动作和线程运行指示，并补充项目/会话更多菜单与项目树空状态；账户入口只在完整组合中保留实际位置，不在该组件族内重复展开。
+
+“「账户」组件库”集中展示 `AwakenAccount` 完整组合、`AwakenProfileButton` 个人入口和 `AwakenProfileBalancePanel` 额度/设置面板；运行时额度请求留在 Desktop，Design System 只接收数据和回调。
+
+“「设置」组件库”集中展示 Desktop 直接消费的 `AwakenSettings` 完整组合，以及设置导航、模型页签、供应商卡、真实模型选择与配置表单、可调的已配置模型表格、主题选择器、搜索设置、记忆设置和宠物设置视图。Gallery 只注入 mock 数据；模型、搜索、记忆、外观与宠物分区的运行时读取、保存和副作用仍由 Desktop 拥有。
 
 ## 组件文件夹契约
 

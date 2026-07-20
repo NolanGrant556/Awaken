@@ -1,0 +1,112 @@
+@import "../../tokens/components.css";
+
+.aw-dialog.aw-skill-preview {
+  width: min(920px, calc(100vw - 80px));
+  max-height: min(720px, calc(100vh - 80px));
+}
+
+.aw-skill-preview .aw-dialog__head {
+  justify-content: flex-end;
+  padding: var(--aw-space-5) var(--aw-space-6) var(--aw-space-3);
+}
+
+.aw-skill-preview__scroll {
+  padding: 0 var(--aw-space-9) var(--aw-space-9);
+  scroll-behavior: auto;
+}
+
+.aw-skill-preview__scroll:focus-visible {
+  outline: none;
+}
+
+.aw-skill-preview__content {
+  display: grid;
+  gap: var(--aw-space-8);
+  width: min(100%, 920px);
+  min-width: 0;
+  margin: 0 auto;
+  padding: var(--aw-space-3) 0 var(--aw-space-7);
+}
+
+.aw-skill-preview__status {
+  padding: var(--aw-space-9) 0;
+  color: var(--aw-text-tertiary);
+  text-align: center;
+}
+
+.aw-skill-preview__error {
+  display: grid;
+  gap: var(--aw-space-2);
+  padding: var(--aw-space-6);
+  border: 1px solid color-mix(in srgb, var(--aw-error) 32%, var(--aw-border-main));
+  border-radius: var(--aw-radius-md);
+  background: color-mix(in srgb, var(--aw-error) 7%, var(--aw-bg-white));
+  color: var(--aw-text-secondary);
+}
+
+.aw-skill-preview__error strong {
+  color: var(--aw-error);
+}
+
+.aw-skill-preview__frontmatter {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: var(--aw-space-6);
+  overflow-x: auto;
+  overflow-y: visible;
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-code);
+  color: var(--aw-text-code);
+  font-family: var(--aw-font-mono);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-base);
+  white-space: pre;
+}
+
+.aw-skill-preview__frontmatter code {
+  font: inherit;
+}
+
+.aw-skill-preview__markdown {
+  gap: var(--aw-space-5);
+  font-size: var(--aw-font-size-base);
+  line-height: 1.72;
+}
+
+.aw-skill-preview__markdown h1 {
+  font-size: 28px;
+  line-height: 1.25;
+}
+
+.aw-skill-preview__markdown h2 {
+  margin-top: var(--aw-space-6);
+  font-size: 20px;
+  line-height: 1.35;
+}
+
+.aw-skill-preview__markdown h3 {
+  margin-top: var(--aw-space-5);
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.aw-skill-preview__markdown .assistant-message-code-block,
+.aw-skill-preview__markdown .assistant-message-table-wrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+@media (max-width: 720px) {
+  .aw-dialog.aw-skill-preview {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+  }
+
+  .aw-skill-preview__scroll {
+    padding-right: var(--aw-space-6);
+    padding-left: var(--aw-space-6);
+  }
+}

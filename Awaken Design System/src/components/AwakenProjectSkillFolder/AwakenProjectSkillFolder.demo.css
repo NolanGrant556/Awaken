@@ -1,0 +1,98 @@
+.aw-project-skill-folder-demo__surface {
+  display: grid;
+  gap: var(--aw-space-8);
+  min-width: 0;
+  padding: var(--aw-space-8);
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-bg-white);
+}
+
+.aw-project-skill-folder-demo__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aw-space-7);
+}
+
+.aw-project-skill-folder-demo__hint {
+  min-width: 0;
+  margin: 0;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+}
+
+.aw-project-skill-folder-demo__theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: var(--aw-space-2);
+  padding: var(--aw-space-2);
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-bg-fill-light);
+}
+
+.aw-project-skill-folder-demo__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(226px, 1fr));
+  justify-items: center;
+  gap: var(--aw-space-7);
+  min-width: 0;
+}
+
+.aw-project-skill-folder-demo__dialog-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--aw-space-7);
+  margin-bottom: var(--aw-space-7);
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+}
+
+.aw-project-skill-folder-demo__skill-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--aw-space-5);
+}
+
+.aw-project-skill-folder-demo__skill {
+  display: grid;
+  gap: var(--aw-space-3);
+  min-width: 0;
+  min-height: 96px;
+  padding: var(--aw-space-7);
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-bg-white);
+}
+
+.aw-project-skill-folder-demo__skill strong {
+  overflow: hidden;
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-base);
+  line-height: var(--aw-line-height-base);
+  font-weight: var(--aw-font-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-project-skill-folder-demo__skill span {
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+}
+
+@media (max-width: 720px) {
+  .aw-project-skill-folder-demo__toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .aw-project-skill-folder-demo__skill-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

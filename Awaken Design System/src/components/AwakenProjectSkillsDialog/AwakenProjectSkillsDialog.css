@@ -1,0 +1,81 @@
+@import "../../tokens/components.css";
+
+.aw-dialog.aw-project-skills-dialog {
+  width: min(980px, calc(100vw - 80px));
+  max-height: min(720px, calc(100vh - 64px));
+}
+
+.aw-project-skills-dialog__content {
+  display: grid;
+  gap: var(--aw-space-7);
+  min-width: 0;
+}
+
+.aw-project-skills-dialog__heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--aw-space-7);
+}
+
+.aw-project-skills-dialog__heading > div {
+  display: grid;
+  gap: var(--aw-space-2);
+  min-width: 0;
+}
+
+.aw-project-skills-dialog__heading strong {
+  overflow: hidden;
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-base);
+  line-height: var(--aw-line-height-base);
+  font-weight: var(--aw-font-weight-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-project-skills-dialog__heading div span {
+  overflow: hidden;
+  color: var(--aw-text-tertiary);
+  font-family: var(--aw-font-mono);
+  font-size: var(--aw-font-size-xs);
+  line-height: var(--aw-line-height-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-project-skills-dialog__heading > span {
+  flex: 0 0 auto;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+  white-space: nowrap;
+}
+
+.aw-project-skills-dialog__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  gap: var(--aw-space-5) var(--aw-space-6);
+  min-width: 0;
+}
+
+.aw-project-skills-dialog__empty {
+  display: grid;
+  place-items: center;
+  min-height: 180px;
+  border: 1px dashed var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-sm);
+}
+
+@media (max-width: 720px) {
+  .aw-project-skills-dialog__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .aw-dialog.aw-project-skills-dialog {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+  }
+}

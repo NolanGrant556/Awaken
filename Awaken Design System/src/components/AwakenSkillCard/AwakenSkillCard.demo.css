@@ -1,0 +1,13 @@
+.aw-skill-card-demo__stack {
+  display: grid;
+  gap: var(--aw-space-5);
+  max-width: 720px;
+}
+
+.aw-skill-card-demo__notice {
+  min-height: 20px;
+  margin: 0;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+}

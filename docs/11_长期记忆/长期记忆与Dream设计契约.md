@@ -416,7 +416,7 @@ Workbench：
 | 主动记忆指导、Dream plan/apply 与独立 usage authority | `src/memory`、`src/runtime`；child orchestration 复用 `src/agentcore` |
 | SemanticRecord 与 replay | `src/agentcore`、`src/runtime` |
 | HTTP/SSE | `src/server`、`src/protocol/agui` |
-| preload/Main bridge、Settings、Workbench | `apps/desktop` |
-| UI-only primitives | `Awaken Design System`，不得读取 Core/文件/store |
+| preload/Main bridge、Settings 数据/副作用、Workbench | `apps/desktop` |
+| Settings 记忆管理视图与 UI-only primitives | `Awaken Design System`，只接收 props/callbacks，不得读取 Core/文件/store |
 
 实现不得把 store、召回、安全判断或 Dream scheduler 放进 renderer，也不得让 Design System 持有业务状态。

@@ -220,6 +220,161 @@ func TestContextGovernorRecordResponseUsageSetsLastAPIUsageTokens(t *testing.T) 
 	}
 }
 
+func TestShouldAutoCompactByActualUsage(t *testing.T) {
+	cases := []struct {
+		name     string
+		state    ContextWindowState
+		expected bool
+	}{
+		{
+			name:     "no prior usage is inert",
+			state:    testContextWindowStateWithActual(0, 5000),
+			expected: false,
+		},
+		{
+			name:     "v4 estimate below threshold and actual below threshold stays inert",
+			state:    testContextWindowStateWithActual(80000, 5000),
+			expected: false,
+		},
+		{
+			name:     "actual plus delta crosses threshold even when v4 estimate is below",
+			state:    testContextWindowStateWithActual(88000, 3000),
+			expected: true,
+		},
+		{
+			name:     "actual alone crosses threshold",
+			state:    testContextWindowStateWithActual(91000, 0),
+			expected: true,
+		},
+		{
+			name: "delta overflow guards to over threshold",
+			state: ContextWindowState{
+				AutoCompactThreshold: 90000,
+				LastAPIUsageTokens:   int(^uint(0)>>1) - 1,
+				EstimatedDeltaTokens: 100,
+			},
+			expected: true,
+		},
+		{
+			name: "zero threshold is inert",
+			state: ContextWindowState{
+				AutoCompactThreshold: 0,
+				LastAPIUsageTokens:   100000,
+				EstimatedDeltaTokens: 0,
+			},
+			expected: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.state.ShouldAutoCompactByActualUsage(); got != tc.expected {
+				t.Fatalf("ShouldAutoCompactByActualUsage=%v, want %v (state=%+v)", got, tc.expected, tc.state)
+			}
+		})
+	}
+}
+
+func testContextWindowStateWithActual(lastAPIUsage, delta int) ContextWindowState {
+	state := testContextWindowState(2000)
+	state.LastAPIUsageTokens = lastAPIUsage
+	state.EstimatedDeltaTokens = delta
+	return state
+}
+
+func TestPrepareRequestAutoCompactsByActualUsageEvenWhenV4EstimateIsBelowThreshold(t *testing.T) {
+	originalMessages := []convcontext.Message{{Role: convcontext.RoleUser, Content: "context"}}
+	compactedMessages := []convcontext.Message{{
+		Role:              convcontext.RoleUser,
+		Content:           "summary",
+		CompactBoundaryID: "compact-actual-1",
+	}}
+	originalEnvelope := ContextEnvelope{Messages: originalMessages}
+	compactedEnvelope := ContextEnvelope{Messages: compactedMessages}
+
+	engine := &fakeContextEngine{
+		evaluateFn: func(envelope ContextEnvelope) ContextWindowState {
+			// v4 estimate stays well below the 90_000 auto-compact threshold so
+			// ShouldAutoCompact alone would not fire. The governor must still
+			// compact because LastAPIUsageTokens + EstimatedDeltaTokens crosses
+			// the threshold.
+			state := testContextWindowState(20000)
+			state.LastAPIUsageTokens = 88000
+			state.EstimatedDeltaTokens = 4000
+			return state
+		},
+		compactFn: func(ctx stdcontext.Context, req CompactRequest) (CompactResult, error) {
+			return CompactResult{
+				BoundaryID:      "compact-actual-1",
+				Messages:        compactedMessages,
+				EstimatedTokens: 2000,
+			}, nil
+		},
+	}
+
+	governor := newContextGovernor(engine, func() (LLMRequest, error) {
+		return LLMRequest{
+			Messages:      compactedMessages,
+			EnvelopeDebug: &compactedEnvelope,
+		}, nil
+	}, func(_ stdcontext.Context, result CompactResult) error {
+		return nil
+	})
+	// Simulate a prior request whose provider-reported usage is high enough
+	// that, combined with the locally-estimated delta, the parallel trigger
+	// fires even though the v4 estimate is below threshold.
+	governor.RecordResponseUsage(88000)
+
+	sink := &fakeContextEventSink{}
+	req, err := governor.PrepareRequest(stdcontext.Background(), LLMRequest{
+		Messages:      originalMessages,
+		EnvelopeDebug: &originalEnvelope,
+	}, sink)
+	if err != nil {
+		t.Fatalf("PrepareRequest returned error: %v", err)
+	}
+	if engine.compactCalls != 1 {
+		t.Fatalf("expected one compact attempt driven by actual usage, got %d", engine.compactCalls)
+	}
+	// Successful compact must reset the actual-usage trigger so the next
+	// PrepareRequest does not loop on stale LastAPIUsageTokens.
+	if governor.lastAPIUsageTokens != 0 {
+		t.Fatalf("expected lastAPIUsageTokens reset after successful compact, got %d", governor.lastAPIUsageTokens)
+	}
+	if req.ContextWindowState.LastAPIUsageTokens != 0 {
+		t.Fatalf("expected rebuilt state to reflect reset lastAPIUsageTokens, got %d", req.ContextWindowState.LastAPIUsageTokens)
+	}
+}
+
+func TestPrepareRequestDoesNotCompactWhenBothEstimateAndActualAreBelowThreshold(t *testing.T) {
+	envelope := ContextEnvelope{
+		Messages: []convcontext.Message{{Role: convcontext.RoleUser, Content: "small"}},
+	}
+	engine := &fakeContextEngine{
+		evaluateFn: func(envelope ContextEnvelope) ContextWindowState {
+			state := testContextWindowState(20000)
+			state.LastAPIUsageTokens = 30000
+			state.EstimatedDeltaTokens = 1000
+			return state
+		},
+	}
+	governor := newContextGovernor(engine, func() (LLMRequest, error) {
+		return LLMRequest{}, nil
+	}, nil)
+	governor.RecordResponseUsage(30000)
+
+	sink := &fakeContextEventSink{}
+	_, err := governor.PrepareRequest(stdcontext.Background(), LLMRequest{
+		Messages:      envelope.Messages,
+		EnvelopeDebug: &envelope,
+	}, sink)
+	if err != nil {
+		t.Fatalf("PrepareRequest returned error: %v", err)
+	}
+	if engine.compactCalls != 0 {
+		t.Fatalf("expected no compact when both estimate and actual are below threshold, got %d", engine.compactCalls)
+	}
+}
+
 func testContextWindowState(estimatedTokens int) ContextWindowState {
 	return ContextWindowState{
 		ModelWindow:          116000,

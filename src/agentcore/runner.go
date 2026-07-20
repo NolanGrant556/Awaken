@@ -653,7 +653,8 @@ func (e *runEventEmitter) contextEpoch(ctx stdcontext.Context, receipt ContextEp
 	payload := map[string]any{
 		"epoch_id": receipt.EpochID, "baseline_digest": receipt.BaselineDigest,
 		"state": receipt.State, "boundary_reason": receipt.BoundaryReason,
-		"baseline_sequence": receipt.BaselineSequence,
+		"creation_boundary_reason": receipt.CreationBoundaryReason,
+		"baseline_sequence":        receipt.BaselineSequence,
 	}
 	persistCtx, cancel := durablePersistenceContext(ctx)
 	defer cancel()

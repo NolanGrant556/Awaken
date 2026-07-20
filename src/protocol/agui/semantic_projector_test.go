@@ -342,7 +342,8 @@ func TestProjectSemanticContextSnapshotAndModelUsageForLiveReplay(t *testing.T) 
 	now := time.Now().UTC()
 	snapshot := agentcore.ContextUsageSnapshot{
 		SchemaVersion: 4, SnapshotID: "ctx_1", EstimatorID: "awaken_leaf_v4", Basis: "sent_request",
-		RequestID: "req_1", ModelID: "model", ProtocolFamily: "openai_chat", RequestShapeDigest: "digest",
+		RequestID: "req_1", ModelID: "model", ProtocolFamily: "openai_chat", ContextEpochID: "epoch_1",
+		ContextEpochBoundaryReason: "tool_schema_changed", RequestShapeDigest: "digest",
 		ModelWindowTokens: 128000, OutputReserveTokens: 16000, EffectiveInputWindowTokens: 112000,
 		EstimatedInputTokens: 42, WarningThresholdTokens: 95000, AutoCompactThresholdTokens: 100000,
 		CompactTargetTokens: 33000, GeneratedAt: now,
@@ -368,7 +369,7 @@ func TestProjectSemanticContextSnapshotAndModelUsageForLiveReplay(t *testing.T) 
 	if len(frames) != 2 || frames[0].Type != EventAwakenContextSnapshot || frames[1].Type != EventAwakenModelUsage {
 		t.Fatalf("unexpected context/usage projection: %+v", frames)
 	}
-	if frames[0].ContextUsageSnapshot == nil || frames[0].ContextUsageSnapshot.EstimatedInputTokens != 42 || len(frames[0].ContextUsageSnapshot.Contributions) != 1 {
+	if frames[0].ContextUsageSnapshot == nil || frames[0].ContextUsageSnapshot.EstimatedInputTokens != 42 || frames[0].ContextUsageSnapshot.ContextEpochID != "epoch_1" || frames[0].ContextUsageSnapshot.ContextEpochBoundaryReason != "tool_schema_changed" || len(frames[0].ContextUsageSnapshot.Contributions) != 1 {
 		t.Fatalf("context breakdown was lost: %+v", frames[0])
 	}
 	if frames[1].ModelUsage == nil || frames[1].ModelUsage.RequestID != "req_1" || frames[1].ModelUsage.InputTokens == nil || *frames[1].ModelUsage.InputTokens != 40 {

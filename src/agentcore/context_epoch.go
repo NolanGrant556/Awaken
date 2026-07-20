@@ -53,11 +53,12 @@ type ContextEpochCandidate struct {
 }
 
 type ContextEpochReceipt struct {
-	EpochID          string `json:"epoch_id"`
-	BaselineDigest   string `json:"baseline_digest"`
-	State            string `json:"state"`
-	BoundaryReason   string `json:"boundary_reason,omitempty"`
-	BaselineSequence uint64 `json:"baseline_sequence"`
+	EpochID                string `json:"epoch_id"`
+	BaselineDigest         string `json:"baseline_digest"`
+	State                  string `json:"state"`
+	BoundaryReason         string `json:"boundary_reason,omitempty"`
+	CreationBoundaryReason string `json:"creation_boundary_reason,omitempty"`
+	BaselineSequence       uint64 `json:"baseline_sequence"`
 }
 
 type ContextEpochProjection struct {

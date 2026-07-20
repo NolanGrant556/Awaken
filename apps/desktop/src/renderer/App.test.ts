@@ -735,8 +735,8 @@ describe("AwakenComposerBar layout contract", () => {
         metaItems: [
           {
             id: "context",
-            label: "上下文",
-            value: "12K / 112K 可用输入",
+            label: "上下文窗口",
+            value: "12K / 112K",
             progress: 12_000 / 112_000,
             onClick: vi.fn(),
             ariaHaspopup: "dialog",
@@ -750,7 +750,9 @@ describe("AwakenComposerBar layout contract", () => {
     expect(html).toContain('aria-haspopup="dialog"');
     expect(html).toContain('aria-expanded="true"');
     expect(html).toContain('aria-controls="context-panel"');
-    expect(html).toContain("12K / 112K 可用输入");
+    expect(html).toContain("上下文窗口");
+    expect(html).toContain("12K / 112K");
+    expect(html).not.toContain("可用输入");
     expect(html).not.toContain("约 12K");
   });
 
@@ -927,7 +929,7 @@ describe("context usage presentation", () => {
     expect(contextUsagePanelBottomOffset({ composerBarInset: -20 })).toBe(28);
   });
 
-  it("uses the local estimate and effective input window instead of provider actual tokens", () => {
+  it("uses the latest complete provider usage as current accumulated context", () => {
     expect(
       contextUsageMeta({
         eventType: "AWAKEN_CONTEXT_SNAPSHOT",
@@ -936,12 +938,221 @@ describe("context usage presentation", () => {
         modelWindow: 128_000,
         outputReserve: 16_000,
         effectiveWindow: 112_000,
+        latestModelUsage: {
+          schemaVersion: 1,
+          requestId: "req-1",
+          purpose: "agent_turn",
+          inputTokens: 22_000,
+          outputTokens: 800,
+          totalTokens: 22_800,
+          usageComplete: true,
+          latencyMs: 20,
+          status: "succeeded",
+          completedAt: "2026-07-19T00:00:01Z",
+        },
       }),
     ).toEqual({
-      label: "上下文",
-      value: "24k / 112k 可用输入",
-      progress: 24_000 / 112_000,
+      label: "上下文窗口",
+      value: "23k / 112k",
+      progress: 22_800 / 112_000,
     });
+  });
+
+  it("reconciles provider actual usage into the existing six fields", () => {
+    const data = contextUsagePanelData({
+      eventType: "AWAKEN_CONTEXT_SNAPSHOT",
+      snapshot: {
+        schemaVersion: 4,
+        snapshotId: "ctx-actual",
+        estimatorId: "awaken_leaf_v4",
+        basis: "current_projection",
+        modelId: "model-a",
+        protocolFamily: "openai_chat",
+        modelWindowTokens: 128_000,
+        outputReserveTokens: 16_000,
+        effectiveInputWindowTokens: 112_000,
+        estimatedInputTokens: 24_000,
+        warningThresholdTokens: 95_000,
+        autoCompactThresholdTokens: 100_800,
+        compactTargetTokens: 40_000,
+        contributions: [
+          { kind: "system_prompt", estimatedTokens: 2_000, sourceCount: 1 },
+          { kind: "builtin_tools", estimatedTokens: 6_000, sourceCount: 10 },
+          { kind: "mcp", estimatedTokens: 8_000, sourceCount: 4 },
+          { kind: "skills", estimatedTokens: 1_000, sourceCount: 1 },
+          { kind: "memory", estimatedTokens: 500, sourceCount: 1 },
+          { kind: "conversation", estimatedTokens: 6_500, sourceCount: 8 },
+        ],
+        generatedAt: "2026-07-19T00:00:02Z",
+      },
+      latestModelUsage: {
+        schemaVersion: 1,
+        requestId: "req-actual",
+        purpose: "agent_turn",
+        modelId: "model-a",
+        protocolFamily: "openai_chat",
+        inputTokens: 27_200,
+        outputTokens: 800,
+        totalTokens: 28_000,
+        usageComplete: true,
+        latencyMs: 20,
+        status: "succeeded",
+        completedAt: "2026-07-19T00:00:01Z",
+      },
+    });
+
+    expect(data?.estimatedInputTokens).toBe(28_000);
+    expect(data?.contributions).toEqual([
+      { id: "system_prompt", label: "系统提示词", estimatedTokens: 2_000 },
+      { id: "builtin_tools", label: "内置工具", estimatedTokens: 6_000 },
+      { id: "mcp", label: "MCP", estimatedTokens: 8_000 },
+      { id: "skills", label: "技能", estimatedTokens: 1_000 },
+      { id: "memory", label: "记忆", estimatedTokens: 500 },
+      { id: "conversation", label: "对话", estimatedTokens: 10_500 },
+    ]);
+    expect(
+      data?.contributions?.reduce(
+        (sum, contribution) => sum + contribution.estimatedTokens,
+        0,
+      ),
+    ).toBe(28_000);
+  });
+
+  it("does not reuse provider usage after an incompatible context identity change", () => {
+    const data = contextUsagePanelData({
+      eventType: "AWAKEN_CONTEXT_SNAPSHOT",
+      snapshot: {
+        schemaVersion: 4,
+        snapshotId: "ctx-epoch-b",
+        estimatorId: "awaken_leaf_v4",
+        basis: "current_projection",
+        modelId: "model-a",
+        protocolFamily: "openai_chat",
+        contextEpochId: "epoch-b",
+        contextEpochBoundaryReason: "compact_succeeded",
+        modelWindowTokens: 128_000,
+        outputReserveTokens: 16_000,
+        effectiveInputWindowTokens: 112_000,
+        estimatedInputTokens: 24_000,
+        warningThresholdTokens: 95_000,
+        autoCompactThresholdTokens: 100_800,
+        compactTargetTokens: 40_000,
+        contributions: [
+          { kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 },
+        ],
+        generatedAt: "2026-07-19T00:00:02Z",
+      },
+      latestModelUsage: {
+        schemaVersion: 1,
+        requestId: "req-model-a",
+        purpose: "agent_turn",
+        modelId: "model-a",
+        protocolFamily: "openai_chat",
+        contextEpochId: "epoch-a",
+        totalTokens: 99_000,
+        usageComplete: true,
+        latencyMs: 20,
+        status: "succeeded",
+        completedAt: "2026-07-19T00:00:01Z",
+      },
+    });
+
+    expect(data?.estimatedInputTokens).toBe(24_000);
+  });
+
+  it("keeps the latest provider actual across a tool-schema-only epoch rotation", () => {
+    const data = contextUsagePanelData({
+      eventType: "AWAKEN_CONTEXT_SNAPSHOT",
+      snapshot: {
+        schemaVersion: 4,
+        snapshotId: "ctx-tool-epoch-b",
+        estimatorId: "awaken_leaf_v4",
+        basis: "current_projection",
+        modelId: "model-a",
+        protocolFamily: "openai_chat",
+        contextEpochId: "epoch-b",
+        contextEpochBoundaryReason: "tool_schema_changed",
+        modelWindowTokens: 128_000,
+        outputReserveTokens: 16_000,
+        effectiveInputWindowTokens: 112_000,
+        estimatedInputTokens: 24_000,
+        warningThresholdTokens: 95_000,
+        autoCompactThresholdTokens: 100_800,
+        compactTargetTokens: 40_000,
+        contributions: [
+          { kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 },
+        ],
+        generatedAt: "2026-07-19T00:00:02Z",
+      },
+      latestModelUsage: {
+        schemaVersion: 1,
+        requestId: "req-model-a",
+        purpose: "agent_turn",
+        modelId: "model-a",
+        protocolFamily: "openai_chat",
+        contextEpochId: "epoch-a",
+        totalTokens: 28_000,
+        usageComplete: true,
+        latencyMs: 20,
+        status: "succeeded",
+        completedAt: "2026-07-19T00:00:01Z",
+      },
+    });
+
+    expect(data?.estimatedInputTokens).toBe(28_000);
+  });
+
+  it("does not reuse usage from another provider profile with the same model protocol", () => {
+    const data = contextUsagePanelData(
+      {
+        eventType: "AWAKEN_CONTEXT_SNAPSHOT",
+        snapshot: {
+          schemaVersion: 4,
+          snapshotId: "ctx-provider-b",
+          estimatorId: "awaken_leaf_v4",
+          basis: "current_projection",
+          modelId: "shared-model",
+          protocolFamily: "openai_chat",
+          contextEpochId: "epoch-b",
+          modelWindowTokens: 128_000,
+          outputReserveTokens: 16_000,
+          effectiveInputWindowTokens: 112_000,
+          estimatedInputTokens: 24_000,
+          warningThresholdTokens: 95_000,
+          autoCompactThresholdTokens: 100_800,
+          compactTargetTokens: 40_000,
+          contributions: [
+            { kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 },
+          ],
+          generatedAt: "2026-07-19T00:00:02Z",
+        },
+        latestModelUsage: {
+          schemaVersion: 1,
+          requestId: "req-provider-a",
+          purpose: "agent_turn",
+          providerId: "provider-a",
+          profileId: "profile-a",
+          credentialRevision: 1,
+          modelId: "shared-model",
+          protocolFamily: "openai_chat",
+          contextEpochId: "epoch-a",
+          totalTokens: 99_000,
+          usageComplete: true,
+          latencyMs: 20,
+          status: "succeeded",
+          completedAt: "2026-07-19T00:00:01Z",
+        },
+      },
+      {
+        id: "profile-b",
+        providerId: "provider-b",
+        credentialRevision: 1,
+        modelId: "shared-model",
+        protocol: "openai_chat",
+      },
+    );
+
+    expect(data?.estimatedInputTokens).toBe(24_000);
   });
 
   it("projects typed breakdowns without exposing model-call accounting in the panel", () => {

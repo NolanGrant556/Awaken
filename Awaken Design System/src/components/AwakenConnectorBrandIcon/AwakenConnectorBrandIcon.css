@@ -1,0 +1,40 @@
+@import "../../tokens/components.css";
+
+.aw-connector-brand-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 46px;
+  height: 46px;
+  overflow: hidden;
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-raised);
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-base);
+  font-weight: var(--aw-font-weight-heavy);
+}
+
+.aw-connector-brand-icon[data-size="sm"] {
+  width: 40px;
+  height: 40px;
+}
+
+.aw-connector-brand-icon[data-tone="dingtalk"] {
+  border-color: color-mix(in srgb, var(--aw-brand-dingtalk) 35%, var(--aw-border-light));
+  background: var(--aw-brand-dingtalk);
+  color: white;
+}
+
+.aw-connector-brand-icon[data-tone="lark"] {
+  background: var(--aw-surface-raised);
+  color: #2563eb;
+}
+
+.aw-connector-brand-icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  image-rendering: -webkit-optimize-contrast;
+}

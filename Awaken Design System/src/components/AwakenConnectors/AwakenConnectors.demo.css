@@ -1,0 +1,39 @@
+.aw-connectors-demo { gap: var(--aw-space-9); }
+.aw-connectors-demo__controls { display: flex; align-items: center; justify-content: space-between; gap: var(--aw-space-7); min-width: 0; }
+.aw-connectors-demo__controls p,
+.aw-connectors-demo__composition > header h3,
+.aw-connectors-demo__composition > header p,
+.aw-connectors-demo__parts > header h3,
+.aw-connectors-demo__parts > header p,
+.aw-connectors-demo__part-list h4,
+.aw-connectors-demo__part-list p { margin: 0; }
+.aw-connectors-demo__controls p,
+.aw-connectors-demo__composition > header p,
+.aw-connectors-demo__parts > header p,
+.aw-connectors-demo__part-list p { color: var(--aw-text-secondary); font-size: var(--aw-font-size-sm); line-height: var(--aw-line-height-sm); }
+.aw-connectors-demo__controls > div { display: inline-flex; flex: 0 0 auto; gap: var(--aw-space-2); padding: var(--aw-space-2); border: 1px solid var(--aw-border-light); border-radius: var(--aw-radius-sm); background: var(--aw-bg-fill-light); }
+.aw-connectors-demo__composition,
+.aw-connectors-demo__parts,
+.aw-connectors-demo__composition > header,
+.aw-connectors-demo__parts > header { display: grid; min-width: 0; }
+.aw-connectors-demo__composition,
+.aw-connectors-demo__parts { gap: var(--aw-space-7); }
+.aw-connectors-demo__composition > header,
+.aw-connectors-demo__parts > header { gap: var(--aw-space-2); }
+.aw-connectors-demo__composition > header h3,
+.aw-connectors-demo__parts > header h3 { color: var(--aw-text-primary); font-size: var(--aw-font-size-lg); line-height: var(--aw-line-height-lg); }
+.aw-connectors-demo__composition-canvas { height: 780px; overflow: hidden; border: 1px solid var(--aw-border-main); border-radius: var(--aw-radius-md); }
+.aw-connectors-demo__parts { padding-top: var(--aw-space-11); border-top: 1px solid var(--aw-border-main); }
+.aw-connectors-demo__part-list { display: grid; min-width: 0; border-top: 1px solid var(--aw-border-light); }
+.aw-connectors-demo__part-list > article { display: grid; grid-template-columns: 250px minmax(0, 1fr); align-items: center; gap: var(--aw-space-9); min-width: 0; padding: var(--aw-space-8) 0; border-bottom: 1px solid var(--aw-border-light); }
+.aw-connectors-demo__part-list > article > header { display: grid; gap: var(--aw-space-2); min-width: 0; }
+.aw-connectors-demo__part-list h4 { color: var(--aw-text-primary); font-size: var(--aw-font-size-base); line-height: var(--aw-line-height-base); }
+.aw-connectors-demo__part-list code { color: var(--aw-text-tertiary); font-family: var(--aw-font-mono); font-size: var(--aw-font-size-xs); }
+.aw-connectors-demo__part-canvas { min-width: 0; }
+.aw-connectors-demo__card-stack { display: grid; gap: var(--aw-space-4); }
+.aw-connectors-demo__inline { display: flex; align-items: center; gap: var(--aw-space-5); color: var(--aw-text-secondary); font-size: var(--aw-font-size-sm); }
+
+@media (max-width: 820px) {
+  .aw-connectors-demo__part-list > article { grid-template-columns: minmax(0, 1fr); }
+  .aw-connectors-demo__controls { align-items: flex-start; flex-direction: column; }
+}

@@ -5,7 +5,7 @@ Awaken owns its visual language through its own tokens and components. Keep Awak
 ## Visual Direction
 
 - Light mode is the first supported target.
-- Awaken logo and wordmark are the only primary brand assets.
+- `AwakenProductLogo` owns the official square product logo; `logo-wordmark.png` owns the horizontal wordmark. They are the only primary brand assets and must not substitute for each other through cropping.
 - Use neutral surfaces, restrained borders, and typography for hierarchy.
 - Use black or near-black for the primary action; brand and accent colors must come from Awaken semantic tokens.
 - Avoid decorative backgrounds, glow effects, nested cards, and ad hoc color palettes.
@@ -29,6 +29,7 @@ Awaken owns its visual language through its own tokens and components. Keep Awak
 ## Component Rules
 
 - Expose only Awaken `aw-*` classes and `Awaken*` component APIs; do not introduce external design-system class names as public API.
+- Keep `*.demo.tsx` and `*.demo.css` behind the Gallery-only entry; production component barrels must not export Demo modules.
 - Do not replace React component contracts to chase visual polish.
 - Prefer changing tokens and existing `aw-*` classes before editing component behavior.
 - Hover, active, focus, selected, and disabled states must preserve layout size.

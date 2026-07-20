@@ -419,7 +419,8 @@ func mapContextUsageSnapshot(snapshot *agentcore.ContextUsageSnapshot) *ContextU
 	mapped := &ContextUsageSnapshot{
 		SchemaVersion: snapshot.SchemaVersion, SnapshotID: snapshot.SnapshotID, EstimatorID: snapshot.EstimatorID,
 		Basis: snapshot.Basis, RequestID: snapshot.RequestID, ModelID: snapshot.ModelID,
-		ProtocolFamily: snapshot.ProtocolFamily, RequestShapeDigest: snapshot.RequestShapeDigest,
+		ProtocolFamily: snapshot.ProtocolFamily, ContextEpochID: snapshot.ContextEpochID,
+		ContextEpochBoundaryReason: snapshot.ContextEpochBoundaryReason, RequestShapeDigest: snapshot.RequestShapeDigest,
 		ModelWindowTokens: snapshot.ModelWindowTokens, OutputReserveTokens: snapshot.OutputReserveTokens,
 		EffectiveInputWindowTokens: snapshot.EffectiveInputWindowTokens, EstimatedInputTokens: snapshot.EstimatedInputTokens,
 		WarningThresholdTokens: snapshot.WarningThresholdTokens, AutoCompactThresholdTokens: snapshot.AutoCompactThresholdTokens,

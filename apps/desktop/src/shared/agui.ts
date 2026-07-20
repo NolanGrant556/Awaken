@@ -115,6 +115,8 @@ export type AguiContextUsageSnapshot = {
   requestId?: string;
   modelId?: string;
   protocolFamily?: string;
+  contextEpochId?: string;
+  contextEpochBoundaryReason?: string;
   requestShapeDigest?: string;
   modelWindowTokens: number;
   outputReserveTokens: number;

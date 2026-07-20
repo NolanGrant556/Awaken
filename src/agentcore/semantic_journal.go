@@ -102,7 +102,8 @@ func ContextEpochSemanticRecord(threadID, runID, turnID, sessionID string, recei
 	return NewSemanticRecord(SemanticKindContextEpoch, threadID, runID, turnID, "", sessionID, map[string]any{
 		"epoch_id": receipt.EpochID, "baseline_digest": receipt.BaselineDigest,
 		"state": receipt.State, "boundary_reason": receipt.BoundaryReason,
-		"baseline_sequence": receipt.BaselineSequence,
+		"creation_boundary_reason": receipt.CreationBoundaryReason,
+		"baseline_sequence":        receipt.BaselineSequence,
 	})
 }
 

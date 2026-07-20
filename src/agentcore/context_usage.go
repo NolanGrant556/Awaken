@@ -67,6 +67,8 @@ type ContextUsageSnapshot struct {
 	RequestSequence            int                        `json:"request_sequence,omitempty"`
 	ModelID                    string                     `json:"model_id,omitempty"`
 	ProtocolFamily             string                     `json:"protocol_family,omitempty"`
+	ContextEpochID             string                     `json:"context_epoch_id,omitempty"`
+	ContextEpochBoundaryReason string                     `json:"context_epoch_boundary_reason,omitempty"`
 	RequestShapeDigest         string                     `json:"request_shape_digest,omitempty"`
 	ModelWindowTokens          int                        `json:"model_window_tokens"`
 	OutputReserveTokens        int                        `json:"output_reserve_tokens"`
@@ -237,9 +239,16 @@ func buildContextUsageSnapshot(req LLMRequest, basis, requestID, protocol, shape
 		At        int64
 	}{requestID, shapeDigest, total, generatedAt.UnixNano()})
 	digest := sha256.Sum256(snapshotSeed)
+	contextEpochID := ""
+	contextEpochBoundaryReason := ""
+	if req.ContextEpoch != nil {
+		contextEpochID = req.ContextEpoch.EpochID
+		contextEpochBoundaryReason = req.ContextEpoch.CreationBoundaryReason
+	}
 	return ContextUsageSnapshot{
 		SchemaVersion: 4, SnapshotID: "ctx_" + hex.EncodeToString(digest[:12]), EstimatorID: contextEstimatorID,
-		Basis: basis, RequestID: requestID, ModelID: req.Model, ProtocolFamily: protocol, RequestShapeDigest: shapeDigest,
+		Basis: basis, RequestID: requestID, ModelID: req.Model, ProtocolFamily: protocol, ContextEpochID: contextEpochID,
+		ContextEpochBoundaryReason: contextEpochBoundaryReason, RequestShapeDigest: shapeDigest,
 		ModelWindowTokens: state.ModelWindow, OutputReserveTokens: state.OutputReserve,
 		EffectiveInputWindowTokens: state.EffectiveWindow, EstimatedInputTokens: total,
 		WarningThresholdTokens: state.WarningThreshold, AutoCompactThresholdTokens: state.AutoCompactThreshold,

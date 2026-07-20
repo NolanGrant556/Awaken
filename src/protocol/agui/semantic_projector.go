@@ -682,6 +682,7 @@ func contextUsageSnapshotFromWire(value *ContextUsageSnapshot) agentcore.Context
 	snapshot := agentcore.ContextUsageSnapshot{
 		SchemaVersion: value.SchemaVersion, SnapshotID: value.SnapshotID, EstimatorID: value.EstimatorID,
 		Basis: value.Basis, RequestID: value.RequestID, ModelID: value.ModelID, ProtocolFamily: value.ProtocolFamily,
+		ContextEpochID: value.ContextEpochID, ContextEpochBoundaryReason: value.ContextEpochBoundaryReason,
 		RequestShapeDigest: value.RequestShapeDigest, ModelWindowTokens: value.ModelWindowTokens,
 		OutputReserveTokens: value.OutputReserveTokens, EffectiveInputWindowTokens: value.EffectiveInputWindowTokens,
 		EstimatedInputTokens: value.EstimatedInputTokens, WarningThresholdTokens: value.WarningThresholdTokens,

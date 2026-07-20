@@ -74,6 +74,7 @@ func TestContextUsageSnapshotUsesToolProvenanceAndBalancesPreparedOverhead(t *te
 		},
 		ContextWindowState: state,
 		Model:              "test-model",
+		ContextEpoch:       &ContextEpochReceipt{EpochID: "epoch-1", CreationBoundaryReason: "tool_schema_changed"},
 	}
 	for _, attributed := range req.AttributedTools {
 		req.Tools = append(req.Tools, attributed.Schema)
@@ -117,5 +118,11 @@ func TestContextUsageSnapshotUsesToolProvenanceAndBalancesPreparedOverhead(t *te
 	}
 	if sum != snapshot.EstimatedInputTokens {
 		t.Fatalf("prepared composition is unbalanced: sum=%d total=%d", sum, snapshot.EstimatedInputTokens)
+	}
+	if snapshot.ContextEpochID != "epoch-1" {
+		t.Fatalf("context snapshot lost epoch identity: %+v", snapshot)
+	}
+	if snapshot.ContextEpochBoundaryReason != "tool_schema_changed" {
+		t.Fatalf("context snapshot lost epoch boundary reason: %+v", snapshot)
 	}
 }

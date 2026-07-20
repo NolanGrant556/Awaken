@@ -61,26 +61,27 @@ type contextEpochDelta struct {
 }
 
 type contextEpochSidecar struct {
-	SchemaVersion       int                          `json:"schema_version"`
-	EpochID             string                       `json:"epoch_id"`
-	ThreadID            string                       `json:"thread_id"`
-	BaselineSequence    uint64                       `json:"baseline_sequence"`
-	ExactBaselineText   string                       `json:"exact_baseline_text"`
-	BaselineDigest      string                       `json:"baseline_digest"`
-	PromptSchemaVersion string                       `json:"prompt_schema_version"`
-	WorkspaceRoot       string                       `json:"workspace_root"`
-	ProviderID          string                       `json:"provider_id"`
-	ProfileID           string                       `json:"profile_id"`
-	CredentialRevision  uint64                       `json:"credential_revision"`
-	ModelID             string                       `json:"model_id"`
-	ProtocolFamily      string                       `json:"protocol_family"`
-	EndpointContractID  string                       `json:"endpoint_contract_id"`
-	NormalizedBaseURL   string                       `json:"normalized_base_url"`
-	CompactBoundaryID   string                       `json:"compact_boundary_id,omitempty"`
-	SourceSnapshots     []contextEpochSourceSnapshot `json:"source_snapshots"`
-	Tools               []contextEpochToolSnapshot   `json:"tools"`
-	Deltas              []contextEpochDelta          `json:"deltas,omitempty"`
-	UpdatedAt           time.Time                    `json:"updated_at"`
+	SchemaVersion          int                          `json:"schema_version"`
+	EpochID                string                       `json:"epoch_id"`
+	ThreadID               string                       `json:"thread_id"`
+	BaselineSequence       uint64                       `json:"baseline_sequence"`
+	ExactBaselineText      string                       `json:"exact_baseline_text"`
+	BaselineDigest         string                       `json:"baseline_digest"`
+	PromptSchemaVersion    string                       `json:"prompt_schema_version"`
+	WorkspaceRoot          string                       `json:"workspace_root"`
+	ProviderID             string                       `json:"provider_id"`
+	ProfileID              string                       `json:"profile_id"`
+	CredentialRevision     uint64                       `json:"credential_revision"`
+	ModelID                string                       `json:"model_id"`
+	ProtocolFamily         string                       `json:"protocol_family"`
+	EndpointContractID     string                       `json:"endpoint_contract_id"`
+	NormalizedBaseURL      string                       `json:"normalized_base_url"`
+	CompactBoundaryID      string                       `json:"compact_boundary_id,omitempty"`
+	CreationBoundaryReason string                       `json:"creation_boundary_reason,omitempty"`
+	SourceSnapshots        []contextEpochSourceSnapshot `json:"source_snapshots"`
+	Tools                  []contextEpochToolSnapshot   `json:"tools"`
+	Deltas                 []contextEpochDelta          `json:"deltas,omitempty"`
+	UpdatedAt              time.Time                    `json:"updated_at"`
 }
 
 func (store *ContextEpochFileStore) Project(_ context.Context, candidate agentcore.ContextEpochCandidate) (agentcore.ContextEpochProjection, error) {
@@ -133,6 +134,9 @@ func (store *ContextEpochFileStore) Project(_ context.Context, candidate agentco
 		}
 	}
 
+	if state == "created" || state == "rotated" {
+		current.CreationBoundaryReason = reason
+	}
 	if state != "unchanged" {
 		current.UpdatedAt = time.Now().UTC()
 		if err := persistContextEpoch(dir, current); err != nil {
@@ -346,7 +350,8 @@ func projectContextEpoch(epoch contextEpochSidecar, state, reason string) agentc
 		SystemPrompt: epoch.ExactBaselineText,
 		Receipt: agentcore.ContextEpochReceipt{
 			EpochID: epoch.EpochID, BaselineDigest: epoch.BaselineDigest, State: state,
-			BoundaryReason: reason, BaselineSequence: epoch.BaselineSequence,
+			BoundaryReason: reason, CreationBoundaryReason: epoch.CreationBoundaryReason,
+			BaselineSequence: epoch.BaselineSequence,
 		},
 	}
 	for _, snapshot := range epoch.SourceSnapshots {

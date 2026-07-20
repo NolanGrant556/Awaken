@@ -93,6 +93,8 @@ type ContextUsageSnapshot struct {
 	RequestID                  string                     `json:"requestId,omitempty"`
 	ModelID                    string                     `json:"modelId,omitempty"`
 	ProtocolFamily             string                     `json:"protocolFamily,omitempty"`
+	ContextEpochID             string                     `json:"contextEpochId,omitempty"`
+	ContextEpochBoundaryReason string                     `json:"contextEpochBoundaryReason,omitempty"`
 	RequestShapeDigest         string                     `json:"requestShapeDigest,omitempty"`
 	ModelWindowTokens          int                        `json:"modelWindowTokens"`
 	OutputReserveTokens        int                        `json:"outputReserveTokens"`

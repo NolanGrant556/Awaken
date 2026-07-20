@@ -26,6 +26,9 @@ func TestContextEpochKeepsStableBaselineAcrossDeltasAndRestart(t *testing.T) {
 	if first.Receipt.State != "created" || first.Receipt.BoundaryReason != "initial_baseline" {
 		t.Fatalf("unexpected initial receipt: %+v", first.Receipt)
 	}
+	if first.Receipt.CreationBoundaryReason != "initial_baseline" {
+		t.Fatalf("initial epoch lost its durable creation boundary: %+v", first.Receipt)
+	}
 	if got := contextEpochToolNames(first.Tools); strings.Join(got, ",") != "alpha,beta,mcp-zulu" {
 		t.Fatalf("expected canonical builtin/category order, got %v", got)
 	}
@@ -55,6 +58,9 @@ func TestContextEpochKeepsStableBaselineAcrossDeltasAndRestart(t *testing.T) {
 	}
 	if third.SystemPrompt != second.SystemPrompt || third.Receipt.EpochID != second.Receipt.EpochID {
 		t.Fatalf("restart did not reuse exact epoch bytes\nwant=%q\n got=%q", second.SystemPrompt, third.SystemPrompt)
+	}
+	if third.Receipt.CreationBoundaryReason != "initial_baseline" {
+		t.Fatalf("restart lost the stable epoch creation boundary: %+v", third.Receipt)
 	}
 
 	unavailable := changed
@@ -207,6 +213,9 @@ func TestContextEpochDynamicToolsAppendByFirstDiscoveryAndUnsafeChangesRotate(t 
 	}
 	if third.Receipt.EpochID == second.Receipt.EpochID || third.Receipt.BoundaryReason != "tool_removed" {
 		t.Fatalf("tool removal did not create an explicit cold boundary: %+v", third.Receipt)
+	}
+	if third.Receipt.CreationBoundaryReason != "tool_removed" {
+		t.Fatalf("tool removal boundary was not retained on the new epoch: %+v", third.Receipt)
 	}
 
 	compacted := removed

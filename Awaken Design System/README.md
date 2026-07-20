@@ -37,7 +37,7 @@ Awaken Design System/
 - `src/tokens/` 是颜色、间距、字体、边框、组件基础类等设计令牌事实源。
 - `dist/` 是生成目录，可以删除后重建；不要在里面修 bug。
 - `DESIGN_SYSTEM_GUIDE.md` 是后续视觉改动的作者规则，优先于临时审美判断。
-- `gallery/registry.ts` 决定哪些组件拥有独立观测 URL。
+- `gallery/registry.ts` 决定哪些独立组件或组件族拥有顶层观测 URL。
 - `src/index.ts` 决定哪些能力对 Desktop 或外部项目公开。
 
 ## 入口契约
@@ -81,7 +81,7 @@ http://127.0.0.1:5173/#/components/awaken-execution-feed
 http://127.0.0.1:5173/#/components/awaken-light-inspector-rail
 ```
 
-`npm run dev:ui` 只是启动组件观测服务的命令。真正的观测入口是每个组件自己的 URL。`http://127.0.0.1:5173/` 会自动落到某个组件 URL，本身不作为独立入口。
+`npm run dev:ui` 只是启动组件观测服务的命令。真正的观测入口是注册表中的独立组件或组件族 URL。组件族可以在一个入口内集中展示完整组合及其可复用小组件；`http://127.0.0.1:5173/` 会自动落到某个已注册 URL，本身不作为独立入口。
 
 ## 组件 URL 规则
 
@@ -98,6 +98,14 @@ AwakenLightInspectorRail -> awaken-light-inspector-rail
 ```text
 Awaken Design System/gallery/registry.ts
 ```
+
+同一产品能力下的小组件可以集中到一个组件族入口，例如：
+
+```text
+http://127.0.0.1:5173/#/components/awaken-skills
+```
+
+该入口同时观测完整 Skills 组合、Skill 卡片、开关、项目文件夹、项目窗口和 Markdown 预览窗口；这些小组件保留独立源码和公开导出，但不重复占用 Gallery 侧栏。
 
 ## 组件文件夹契约
 
@@ -127,9 +135,9 @@ src/components/AwakenComponentName/
 - 组件必须保持 UI-only：不能调用 runtime、Electron IPC、AG-UI、A2UI、SSE、本地文件系统或 `window.awaken`。
 - 数据通过 props 进入，行为通过 callbacks 传出。
 - 组件 props 或视觉状态变化时，必须同步更新可观测 states。
-- 每个新组件 demo 都必须注册到 `gallery/registry.ts`。
+- 新的独立组件或组件族 demo 必须注册到 `gallery/registry.ts`；组件族内部小组件可以只在对应组件族 demo 中集中展示。
 - Desktop 应优先通过 `@awaken/design-system` 包出口使用组件，不要从 `Awaken Design System/src/...` 做源码路径 import。
-- 一个组件只有能通过自己的 `#/components/<component-id>` URL 打开时，才算完成。
+- 独立组件必须能通过自己的 `#/components/<component-id>` URL 打开；归属于组件族的小组件必须在组件族 URL 中可查看和交互。
 
 ## 验证
 

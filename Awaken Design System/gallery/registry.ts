@@ -53,6 +53,7 @@ import { AwakenSendButtonDemo } from "../src/components/AwakenSendButton";
 import { AwakenSelectableCardDemo } from "../src/components/AwakenSelectableCard";
 import { AwakenSidebarDemo } from "../src/components/AwakenSidebar";
 import { AwakenSidebarSectionActionDemo } from "../src/components/AwakenSidebarSectionAction";
+import { AwakenSkillsDemo } from "../src/components/AwakenSkills";
 import { AwakenStatusPillDemo } from "../src/components/AwakenStatusPill";
 import { AwakenTaskWelcomeDemo } from "../src/components/AwakenTaskWelcome";
 import { AwakenThinkingBlockDemo } from "../src/components/AwakenThinkingBlock";
@@ -131,6 +132,7 @@ export const awakenGalleryEntries: AwakenGalleryEntry[] = [
   { id: "awaken-selectable-card", name: "AwakenSelectableCard", displayName: "选择卡片", demo: AwakenSelectableCardDemo },
   { id: "awaken-sidebar", name: "AwakenSidebar", displayName: "侧栏", demo: AwakenSidebarDemo },
   { id: "awaken-sidebar-section-action", name: "AwakenSidebarSectionAction", displayName: "侧栏区块动作", demo: AwakenSidebarSectionActionDemo },
+  { id: "awaken-skills", name: "AwakenSkills", displayName: "「技能」组件库", demo: AwakenSkillsDemo },
   { id: "awaken-status-pill", name: "AwakenStatusPill", displayName: "状态胶囊", demo: AwakenStatusPillDemo },
   { id: "awaken-task-welcome", name: "AwakenTaskWelcome", displayName: "任务欢迎区", demo: AwakenTaskWelcomeDemo },
   { id: "awaken-thinking-block", name: "AwakenThinkingBlock", displayName: "思考块", demo: AwakenThinkingBlockDemo },

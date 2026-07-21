@@ -21,7 +21,7 @@ Awaken Design System/
 │   ├── main.tsx                 # Gallery Vite 入口
 │   └── styles.css               # Gallery 专用样式，不应变成组件样式事实源
 ├── smoke/                       # 自动化渲染冒烟检查
-│   └── render-smoke.mjs         # server-render 所有 Awaken*Demo
+│   └── render-smoke.ts          # server-render 所有 Awaken*Demo
 ├── dist/                        # 构建产物，由 build 生成，不手写维护
 ├── DESIGN_SYSTEM_GUIDE.md       # Awaken 视觉消费与 Agent 作者规则
 ├── index.html                   # Gallery HTML 入口
@@ -158,6 +158,7 @@ src/components/AwakenComponentName/
 
 ## Coding Agent 规则
 
+- 本目录内的可执行源码统一使用 TypeScript：React/JSX 文件使用 `.tsx`，其余逻辑使用 `.ts`；CSS、HTML、JSON、Markdown、静态资源和生成后的 `dist/*.js` 不属于这一源码后缀约束。
 - 组件必须保持 UI-only：不能调用 runtime、Electron IPC、AG-UI、A2UI、SSE、本地文件系统或 `window.awaken`。
 - 数据通过 props 进入，行为通过 callbacks 传出。
 - 组件 props 或视觉状态变化时，必须同步更新可观测 states。

@@ -79,7 +79,7 @@ http://127.0.0.1:5173/#/components/<component-id>
 ```text
 http://127.0.0.1:5173/#/components/awaken-composer-bar
 http://127.0.0.1:5173/#/components/awaken-run-stage
-http://127.0.0.1:5173/#/components/awaken-light-inspector-rail
+http://127.0.0.1:5173/#/components/awaken-workbench-shell
 http://127.0.0.1:5173/#/components/awaken-product-logo
 ```
 
@@ -92,7 +92,7 @@ http://127.0.0.1:5173/#/components/awaken-product-logo
 ```text
 AwakenComposerBar -> awaken-composer-bar
 AwakenExecutionFeed -> awaken-execution-feed
-AwakenLightInspectorRail -> awaken-light-inspector-rail
+AwakenWorkbenchShell -> awaken-workbench-shell
 ```
 
 已注册组件 URL 的唯一事实源是：
@@ -115,7 +115,9 @@ Gallery 左栏按“原子组件”“左侧栏组件”“中间交互区组件
 
 “原子组件”收纳按钮、图标、输入、徽标、浮层等可独立复用的基础视觉或交互单元。其中“产品 LOGO”入口对应 `AwakenProductLogo`，直接拥有 `src/assets/product-logo.png` 这份官方 256×256 方形产品标志。横向 `AWAKEN` 字标仍由 `logo-wordmark.png` 负责；两者用途不同，不得互相裁切替代。
 
-“左侧栏组件”收纳 `AwakenSidebar`、Skills、Settings、Account、Connectors 等当前侧栏组件族。“中间交互区组件”只收纳 Desktop 当前采用的 `RunStage`、center/dock `ComposerBar`、执行叙事、提示与回答、工具轨迹和最终交付物组件；该分组的 Gallery 状态统一一行一列展示，便于按完整可用宽度复核中间区组件，但不改变 Desktop 对滚动、overlay、composer 和 runtime 编排的 ownership。其中“输入栏”组件族先用真实 Workbench 缩略场景标出 `AwakenComposerDock` 的底部停靠边界，再集中展示 `AwakenComposerBar` 的可编辑状态和 `AwakenUserPromptBlock` 的已提交提示状态；三个组件保留独立源码和公开导出，原 `awaken-user-prompt-block`、`awaken-composer-dock` URL 会跳转到该组件族入口。“运行阶段”组件族先用完整运行缩略场景标出 `AwakenRunStage` 的滚动/停靠 ownership 与 `AwakenExecutionFeed` 的叙事边界，再补充 RunStage 自身状态；两个组件保留独立源码和公开导出，原 `awaken-execution-feed` URL 会跳转到该组件族入口。“「最终交付物」组件库”集中展示 `AwakenDeliverableCard` 的单文件状态与 `AwakenDeliverableList` 的列表组合状态；两者同样保留独立源码和公开导出，原 `awaken-deliverable-card`、`awaken-deliverable-list` URL 会跳转到统一入口。“布局 / 组合组件”收纳应用外壳、窗口/顶栏、Inspector 以及 Workbench 框架等跨区域界面结构。
+“左侧栏组件”收纳 `AwakenSidebar`、Skills、Settings、Account、Connectors 等当前侧栏组件族。“中间交互区组件”只收纳 Desktop 当前采用的 `RunStage`、center/dock `ComposerBar`、执行叙事、提示与回答、工具轨迹和最终交付物组件；该分组的 Gallery 状态统一一行一列展示，便于按完整可用宽度复核中间区组件，但不改变 Desktop 对滚动、overlay、composer 和 runtime 编排的 ownership。其中“输入栏”组件族先用真实 Workbench 缩略场景标出 `AwakenComposerDock` 的底部停靠边界，再集中展示 `AwakenComposerBar` 的可编辑状态和 `AwakenUserPromptBlock` 的已提交提示状态；三个组件保留独立源码和公开导出，原 `awaken-user-prompt-block`、`awaken-composer-dock` URL 会跳转到该组件族入口。“运行阶段”组件族先用完整运行缩略场景标出 `AwakenRunStage` 的滚动/停靠 ownership 与 `AwakenExecutionFeed` 的叙事边界，再补充 RunStage 自身状态；两个组件保留独立源码和公开导出，原 `awaken-execution-feed` URL 会跳转到该组件族入口。“「最终交付物」组件库”集中展示 `AwakenDeliverableCard` 的单文件状态与 `AwakenDeliverableList` 的列表组合状态；两者同样保留独立源码和公开导出，原 `awaken-deliverable-card`、`awaken-deliverable-list` URL 会跳转到统一入口。
+
+“布局 / 组合组件”当前只注册“「工作台框架」组件库”，统一展示 Desktop 正在消费的 `AwakenAppShell`、`AwakenWorkbenchChrome`、`AwakenWorkbenchShell` 和标准 `AwakenInspectorRail`。平台值由 Desktop runtime 传入，macOS 窗口按钮和拖拽区域仍由 Electron 原生窗口负责；设计系统不再提供重复的平台 Provider 或模拟窗口标题栏。旧的 `awaken-app-shell`、`awaken-inspector-rail`、`awaken-light-inspector-rail`、`awaken-workbench-chrome` 等 URL 会跳转到统一入口。
 
 “「技能」组件库”入口同时观测完整 Skills 组合、Skill 卡片、开关、项目文件夹、项目窗口和 Markdown 预览窗口；这些小组件保留独立源码和公开导出，但不重复占用 Gallery 侧栏。
 

@@ -24,9 +24,7 @@ export { AwakenExecutionFeedDemo } from "../src/components/AwakenExecutionFeed/A
 export { AwakenIconDemo } from "../src/components/AwakenIcon/AwakenIcon.demo";
 export { AwakenIconButtonDemo } from "../src/components/AwakenIconButton/AwakenIconButton.demo";
 export { AwakenInspectorRailDemo } from "../src/components/AwakenInspectorRail/AwakenInspectorRail.demo";
-export { AwakenInspectorTabsDemo } from "../src/components/AwakenInspectorTabs/AwakenInspectorTabs.demo";
 export { AwakenKbdDemo } from "../src/components/AwakenKbd/AwakenKbd.demo";
-export { AwakenLightInspectorRailDemo } from "../src/components/AwakenLightInspectorRail/AwakenLightInspectorRail.demo";
 export { AwakenMcpConfigDialogDemo } from "../src/components/AwakenMcpConfigDialog/AwakenMcpConfigDialog.demo";
 export { AwakenMcpSettingsDialogDemo } from "../src/components/AwakenMcpSettingsDialog/AwakenMcpSettingsDialog.demo";
 export { AwakenMemorySettingsDemo } from "../src/components/AwakenMemorySettings/AwakenMemorySettings.demo";
@@ -36,7 +34,6 @@ export { AwakenNewTaskButtonDemo } from "../src/components/AwakenNewTaskButton/A
 export { AwakenOriginalThinkingDemo } from "../src/components/AwakenOriginalThinking/AwakenOriginalThinking.demo";
 export { AwakenPetsSettingsDemo } from "../src/components/AwakenPetsSettings/AwakenPetsSettings.demo";
 export { AwakenPillDemo } from "../src/components/AwakenPill/AwakenPill.demo";
-export { AwakenPlatformProviderDemo } from "../src/components/AwakenPlatformProvider/AwakenPlatformProvider.demo";
 export { AwakenPopoverDemo } from "../src/components/AwakenPopover/AwakenPopover.demo";
 export { AwakenPrimaryNavDemo } from "../src/components/AwakenPrimaryNav/AwakenPrimaryNav.demo";
 export { AwakenProductLogoDemo } from "../src/components/AwakenProductLogo/AwakenProductLogo.demo";
@@ -70,9 +67,7 @@ export { AwakenToastDemo } from "../src/components/AwakenToast/AwakenToast.demo"
 export { AwakenToolTraceGroupDemo } from "../src/components/AwakenToolTraceGroup/AwakenToolTraceGroup.demo";
 export { AwakenToolTraceLineDemo } from "../src/components/AwakenToolTraceLine/AwakenToolTraceLine.demo";
 export { AwakenTooltipDemo } from "../src/components/AwakenTooltip/AwakenTooltip.demo";
-export { AwakenTopBarDemo } from "../src/components/AwakenTopBar/AwakenTopBar.demo";
 export { AwakenUserPromptBlockDemo } from "../src/components/AwakenUserPromptBlock/AwakenUserPromptBlock.demo";
-export { AwakenWindowTitleBarDemo } from "../src/components/AwakenWindowTitleBar/AwakenWindowTitleBar.demo";
 export { AwakenWorkbenchChromeDemo } from "../src/components/AwakenWorkbenchChrome/AwakenWorkbenchChrome.demo";
 export { AwakenWorkbenchShellDemo } from "../src/components/AwakenWorkbenchShell/AwakenWorkbenchShell.demo";
 export { AwakenWorkbenchSidebarFrameDemo } from "../src/components/AwakenWorkbenchSidebarFrame/AwakenWorkbenchSidebarFrame.demo";

@@ -1,6 +1,5 @@
 export * from "./components";
 export { useAwakenAutoScrollTail } from "./hooks/useAwakenAutoScrollTail";
-export { useAwakenPlatform } from "./hooks/useAwakenPlatform";
 export type {
   PlatformKind,
   ComponentSize,

@@ -1,6 +1,6 @@
 # AwakenWorkbenchChrome
 
-此目录包含一个独立的 Awaken 设计系统组件、可观测演示状态，以及对应的 Gallery 入口。
+此目录包含 Workbench 顶部控制组件及其可观测状态；Gallery 由“「工作台框架」组件库”统一承载。
 
 ## 用途
 
@@ -11,7 +11,8 @@
 - `AwakenWorkbenchChrome.tsx` - 组件实现。
 - `AwakenWorkbenchChrome.css` - 组件局部样式入口。
 - `AwakenWorkbenchChrome.states.ts` - 可观测状态与模拟 props。
-- `AwakenWorkbenchChrome.demo.tsx` - 独立 Gallery 演示。
+- `AwakenWorkbenchChrome.demo.tsx` - 工作台框架组件库内的顶部控制演示。
+- `AwakenWorkbenchChrome.demo.css` - 顶部控制在完整工作台宽度内的演示样式。
 - `index.ts` - 组件导出。
 
 ## 规则

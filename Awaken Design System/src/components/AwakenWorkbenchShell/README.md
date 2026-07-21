@@ -1,21 +1,24 @@
 # AwakenWorkbenchShell
 
-此目录包含一个独立的 Awaken 设计系统组件、可观测演示状态，以及对应的 Gallery 入口。
+此目录包含 Workbench 主舞台与 Inspector 的布局组件、可观测状态，以及统一的“工作台框架”Gallery 入口。
 
 ## 用途
 
-`AwakenWorkbenchShell` 用于组织 Workbench 主舞台和可选 Inspector 侧栏，通常把运行舞台作为 `stage`，把变更、终端或文件详情作为 `inspector`。父级负责生成舞台内容、Inspector tabs 和选中状态，本组件只负责两栏布局和 Inspector 区域的外层语义。
+`AwakenWorkbenchShell` 负责主舞台和可选 Inspector 的两栏布局、Inspector 折叠槽位与 resize 边界。父级负责运行内容、折叠状态和 resize 交互；组件不读取运行数据，也不决定 Inspector 详情。
+
+Gallery 的“「工作台框架」组件库”统一展示 Desktop 当前消费的 `AwakenAppShell`、`AwakenWorkbenchChrome`、`AwakenWorkbenchShell` 和 `AwakenInspectorRail`。其中 Desktop 的 Inspector 当前仍是禁用占位项，不代表详情能力已实现。
 
 ## 文件
 
 - `AwakenWorkbenchShell.tsx` - 组件实现。
 - `AwakenWorkbenchShell.css` - 组件局部样式入口。
-- `AwakenWorkbenchShell.states.ts` - 可观测状态与模拟 props。
-- `AwakenWorkbenchShell.demo.tsx` - 独立 Gallery 演示。
+- `AwakenWorkbenchShell.states.ts` - 当前布局状态。
+- `AwakenWorkbenchShell.demo.tsx` - “工作台框架”组件库 Gallery 入口，首屏用真实组合缩略图标出四个框架组件的嵌套位置。
+- `AwakenWorkbenchShell.demo.css` - Gallery 关系图、组件边界标注与响应式缩略场景样式。
 - `index.ts` - 组件导出。
 
 ## 规则
 
 - 仅包含 UI：不产生 runtime、Electron、AG-UI、A2UI 或文件系统副作用。
 - 通过 props 输入，通过回调输出。
-- 公共 API 变化时同步更新可观测状态。
+- 滚动、overlay、composer、折叠和 resize ownership 变化时，必须同步中间交互区契约与真实 Desktop 验收。

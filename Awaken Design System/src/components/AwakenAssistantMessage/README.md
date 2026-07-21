@@ -21,5 +21,6 @@
 - 仅包含 UI：不产生 runtime、Electron、AG-UI、A2UI 或文件系统副作用。
 - 不渲染任意 raw HTML；Mermaid 只来自 fenced code block。
 - 底部复制只复制 `markdown` prop，不读取 Thought、工具轨迹或 DOM 渲染文本。
+- 最终回答底部操作区固定为左侧执行时间、右侧复制按钮；`elapsedMs` 缺失时复制按钮仍保持右对齐。
 - 通过 props 输入，通过回调输出。
 - 公共 API 变化时同步更新可观测状态。

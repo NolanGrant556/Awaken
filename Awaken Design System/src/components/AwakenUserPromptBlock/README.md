@@ -1,6 +1,6 @@
 # AwakenUserPromptBlock
 
-此目录包含一个独立的 Awaken 设计系统组件、可观测演示状态，以及对应的 Gallery 入口。
+此目录包含一个独立的 Awaken 设计系统组件和可观测演示状态；Gallery 在“输入栏 `AwakenComposerBar`”组件族入口中集中展示这些状态。
 
 ## 用途
 
@@ -15,7 +15,7 @@
 - `AwakenUserPromptBlock.tsx` - 组件实现。
 - `AwakenUserPromptBlock.css` - 组件局部样式入口。
 - `AwakenUserPromptBlock.states.ts` - 可观测状态与模拟 props。
-- `AwakenUserPromptBlock.demo.tsx` - 独立 Gallery 演示。
+- `AwakenUserPromptBlock.demo.tsx` - 供 Gallery bundle 渲染冒烟使用；顶层观测入口由 `AwakenComposerBar.demo.tsx` 统一承载。
 - `index.ts` - 组件导出。
 
 ## 规则

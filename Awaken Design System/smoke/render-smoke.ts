@@ -1,8 +1,27 @@
 import { readFile } from "node:fs/promises";
-import React from "react";
+import React, { type ComponentType } from "react";
 import { renderToString } from "react-dom/server";
-import * as AwakenDesignSystem from "../dist/index.js";
-import * as AwakenGalleryDemos from "../dist/gallery.js";
+import type { AwakenAssistantMessageProps } from "../src/index";
+
+type AwakenDesignSystemModule = typeof import("../src/index");
+type AwakenGalleryDemosModule = typeof import("../gallery/demos");
+
+function requireAssistantMessageProps(
+  stateId: string,
+  props: Partial<AwakenAssistantMessageProps>,
+): AwakenAssistantMessageProps {
+  if (typeof props.markdown !== "string") {
+    throw new Error(`AwakenAssistantMessage state ${stateId} is missing markdown`);
+  }
+  return { ...props, markdown: props.markdown };
+}
+
+const AwakenDesignSystem = (await import(
+  new URL("../dist/index.js", import.meta.url).href
+)) as AwakenDesignSystemModule;
+const AwakenGalleryDemos = (await import(
+  new URL("../dist/gallery.js", import.meta.url).href
+)) as AwakenGalleryDemosModule;
 
 const productionDemoExports = Object.keys(AwakenDesignSystem).filter((name) => name.endsWith("Demo"));
 
@@ -33,8 +52,12 @@ for (const selector of demoOnlySelectors) {
   }
 }
 
-const demoEntries = Object.entries(AwakenGalleryDemos)
-  .filter(([name, value]) => name.startsWith("Awaken") && name.endsWith("Demo") && typeof value === "function")
+const galleryExports: Record<string, unknown> = AwakenGalleryDemos;
+const demoEntries = Object.entries(galleryExports)
+  .filter(
+    (entry): entry is [string, ComponentType] =>
+      entry[0].startsWith("Awaken") && entry[0].endsWith("Demo") && typeof entry[1] === "function",
+  )
   .sort(([a], [b]) => a.localeCompare(b));
 
 if (demoEntries.length === 0) {
@@ -69,8 +92,11 @@ if (!footerState) {
   throw new Error("AwakenAssistantMessage completed-answer-footer state is missing");
 }
 
+const richMarkdownProps = requireAssistantMessageProps(richMarkdownState.id, richMarkdownState.props);
+const footerProps = requireAssistantMessageProps(footerState.id, footerState.props);
+
 const richMarkdownHtml = renderToString(
-  React.createElement(AwakenDesignSystem.AwakenAssistantMessage, richMarkdownState.props),
+  React.createElement(AwakenDesignSystem.AwakenAssistantMessage, richMarkdownProps),
 );
 
 if (richMarkdownHtml.includes("**粗体**") || !richMarkdownHtml.includes("<strong>粗体</strong>")) {
@@ -86,7 +112,7 @@ if (!richMarkdownHtml.includes("assistant-mermaid-diagram")) {
 }
 
 const footerHtml = renderToString(
-  React.createElement(AwakenDesignSystem.AwakenAssistantMessage, footerState.props),
+  React.createElement(AwakenDesignSystem.AwakenAssistantMessage, footerProps),
 );
 
 if (!footerHtml.includes("assistant-message-footer")) {

@@ -1,0 +1,18 @@
+.aw-workbench-chrome-demo > .ads-component-demo-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.aw-framework-preview--chrome {
+  --aw-sidebar-width: 260px;
+  --aw-inspector-width: 300px;
+  height: 48px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: 10px;
+  background: var(--aw-bg-main);
+}
+
+.aw-framework-preview--chrome .workbench-chrome-right {
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+  line-height: var(--aw-line-height-xs);
+}

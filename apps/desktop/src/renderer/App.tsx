@@ -27,7 +27,7 @@ import {
   AwakenDialog as Dialog,
   AwakenDeliverableList as DeliverableList,
   AwakenExecutionFeed as ExecutionFeed,
-  AwakenLightInspectorRail as LightInspectorRail,
+  AwakenInspectorRail as InspectorRail,
   AwakenSelectableCard as SelectableCard,
   AwakenSidebar as Sidebar,
   AwakenSidebarSectionAction as SidebarSectionAction,
@@ -4625,7 +4625,7 @@ export function App() {
                     </RunStage>
                   }
                   inspector={
-                    <LightInspectorRail
+                    <InspectorRail
                       title="On Awaken"
                       items={inspectorPlaceholderItems}
                       activeId="right-sidebar-placeholder"

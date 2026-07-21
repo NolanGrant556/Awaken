@@ -2,6 +2,7 @@ package agentcore
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -127,6 +128,83 @@ func TestRequestBuilderBuildsCompleteRequest(t *testing.T) {
 	}
 	if !strings.Contains(req.SystemPrompt, "test-model") || !strings.Contains(req.SystemPrompt, "test-entry") {
 		t.Fatalf("expected runtime info in system prompt: %s", req.SystemPrompt)
+	}
+}
+
+func TestRequestBuilderDeclaresSameTaskHistoryContinuity(t *testing.T) {
+	ctx := convcontext.New()
+	ctx.AddUserMessage("你好")
+	ctx.AddAssistantMessage("你好，Nolan！有什么我可以帮你的吗？", nil)
+	ctx.AddUserMessage("你看到我上一个对话是什么不？")
+
+	req := NewRequestBuilder(AgentConfig{}).Build(ctx, []tool.ToolSchema{})
+	for _, expected := range []string{
+		"If any messages appear before the current user input",
+		"They are not a separate conversation",
+		"上一个对话",
+		"Do not claim that the system did not provide them",
+	} {
+		if !strings.Contains(req.SystemPrompt, expected) {
+			t.Fatalf("same-task continuity contract missing %q from system prompt: %s", expected, req.SystemPrompt)
+		}
+	}
+
+	if len(req.Messages) != 3 ||
+		req.Messages[0].Role != convcontext.RoleUser || req.Messages[0].Content != "你好" ||
+		req.Messages[1].Role != convcontext.RoleAssistant || req.Messages[1].Content != "你好，Nolan！有什么我可以帮你的吗？" ||
+		req.Messages[2].Role != convcontext.RoleUser || req.Messages[2].Content != "你看到我上一个对话是什么不？" {
+		t.Fatalf("continuity contract must preserve the standard ordered message history: %+v", req.Messages)
+	}
+	if req.Messages[0].Origin != convcontext.MessageOriginConversationHistory ||
+		req.Messages[1].Origin != convcontext.MessageOriginConversationHistory ||
+		req.Messages[2].Origin != convcontext.MessageOriginCurrentInput {
+		t.Fatalf("unexpected host-owned history attribution: %+v", req.Messages)
+	}
+	fresh := convcontext.New()
+	fresh.AddUserMessage("全新任务")
+	freshReq := NewRequestBuilder(AgentConfig{}).Build(fresh, []tool.ToolSchema{})
+	if freshReq.SystemPrompt != req.SystemPrompt {
+		t.Fatal("conversation continuity block must remain byte-stable across history lengths")
+	}
+
+	prepared, err := llm.PrepareRequest(llm.Config{
+		APIKey: "test", BaseURL: "https://api.kimi.com/coding/v1", Model: "k3",
+		Protocol: llm.ProtocolOpenAIChat, ProviderID: "kimi-coding-plan", ProfileID: "k3-test",
+	}, llm.Request{
+		SystemPrompt: req.SystemPrompt,
+		Messages:     req.Messages,
+		Model:        "k3",
+	}, true)
+	if err != nil {
+		t.Fatalf("prepare OpenAI-compatible continuity request: %v", err)
+	}
+	var body struct {
+		Messages []map[string]any `json:"messages"`
+	}
+	if err := json.Unmarshal(prepared.Body, &body); err != nil {
+		t.Fatalf("decode prepared continuity request: %v", err)
+	}
+	if len(body.Messages) != 4 {
+		t.Fatalf("expected system plus three ordered messages, got %+v", body.Messages)
+	}
+	for index, expected := range []struct {
+		role    string
+		content string
+	}{
+		{role: "system", content: "If any messages appear before the current user input"},
+		{role: "user", content: "你好"},
+		{role: "assistant", content: "你好，Nolan！有什么我可以帮你的吗？"},
+		{role: "user", content: "你看到我上一个对话是什么不？"},
+	} {
+		message := body.Messages[index]
+		if message["role"] != expected.role || !strings.Contains(fmt.Sprint(message["content"]), expected.content) {
+			t.Fatalf("unexpected provider message %d: %+v", index, message)
+		}
+		for _, hostField := range []string{"origin", "message_id", "turn_id", "thread_id", "run_id", "session_id", "created_at"} {
+			if _, exists := message[hostField]; exists {
+				t.Fatalf("provider message leaked host-only field %q: %+v", hostField, message)
+			}
+		}
 	}
 }
 
@@ -510,7 +588,7 @@ func TestRequestBuilderBuildsContextEnvelope(t *testing.T) {
 	})
 
 	envelope := builder.BuildContextEnvelope(ctx, tools)
-	if len(envelope.SystemBlocks) != 1 || envelope.SystemBlocks[0].Content != "static {{.RuntimeInfo}}" {
+	if len(envelope.SystemBlocks) != 2 || envelope.SystemBlocks[0].Content != "static {{.RuntimeInfo}}" || envelope.SystemBlocks[1].ID != conversationContinuityBlockID {
 		t.Fatalf("unexpected system blocks: %+v", envelope.SystemBlocks)
 	}
 	if len(envelope.SystemContextItems) != 1 || envelope.SystemContextItems[0].Type != "runtime_snapshot" {

@@ -35,11 +35,12 @@ func TestRequestBuilderAppendsAuthoritativeComposerSkillSelectionAfterSkillBodie
 	selection.Selections[0].SkillID = "mutated-after-build"
 
 	envelope := builder.BuildContextEnvelope(convcontext.New(), []tool.ToolSchema{})
-	if len(envelope.SystemBlocks) != 3 {
+	if len(envelope.SystemBlocks) != 4 {
 		t.Fatalf("system blocks=%+v", envelope.SystemBlocks)
 	}
 	if envelope.SystemBlocks[1].ID != "skill_activation_pptx" ||
-		envelope.SystemBlocks[2].ID != composerSkillSelectionBlockID {
+		envelope.SystemBlocks[2].ID != composerSkillSelectionBlockID ||
+		envelope.SystemBlocks[3].ID != conversationContinuityBlockID {
 		t.Fatalf("host binding must follow every Skill body: %+v", envelope.SystemBlocks)
 	}
 	host := envelope.SystemBlocks[2].Content

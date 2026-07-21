@@ -15,18 +15,18 @@ body { margin: 0; min-width: 1024px; overflow-y: hidden; overflow-x: auto; color
 .ads-gallery-nav-section { display: grid; gap: 4px; min-width: 0; }
 .ads-gallery-nav-section + .ads-gallery-nav-section { padding-top: 4px; border-top: 1px solid var(--aw-border-main); }
 .ads-gallery-nav-section h2 { margin: 0; }
-.ads-gallery-nav-section__toggle { width: 100%; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto 16px; align-items: center; gap: 8px; border: 0; border-radius: 7px; padding: 8px 10px; background: transparent; color: var(--aw-text-tertiary); font: inherit; font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .04em; text-align: left; cursor: pointer; }
+.ads-gallery-nav-section__toggle { width: 100%; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto 16px; align-items: center; gap: 8px; border: 0; border-radius: 7px; padding: 8px 10px; background: transparent; color: var(--aw-text-tertiary); font: inherit; font-size: 12px; line-height: 16px; font-weight: 600; letter-spacing: .04em; text-align: left; cursor: pointer; }
 .ads-gallery-nav-section__toggle:hover { background: var(--aw-bg-fill-light); color: var(--aw-text-secondary); }
 .ads-gallery-nav-section__toggle:focus-visible, .ads-gallery-entry-button:focus-visible { outline: 2px solid var(--aw-focus-ring); outline-offset: -2px; }
-.ads-gallery-nav-section__count { color: var(--aw-text-tertiary); font-size: 10px; line-height: 14px; font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.ads-gallery-nav-section__count { color: var(--aw-text-tertiary); font-size: 9px; line-height: 12px; font-variant-numeric: tabular-nums; letter-spacing: 0; }
 .ads-gallery-nav-section__chevron { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; transform: rotate(-90deg); transition: transform 160ms ease; }
 .ads-gallery-nav-section__toggle[aria-expanded="true"] .ads-gallery-nav-section__chevron { transform: rotate(0); }
 .ads-gallery-nav-section__entries { display: grid; gap: 2px; min-width: 0; }
 .ads-gallery-nav-section__entries[hidden] { display: none; }
 .ads-gallery-entry-button { display: grid; gap: 2px; border: 0; background: transparent; border-radius: 8px; padding: 8px 10px; text-align: left; color: var(--aw-text-secondary); font: inherit; cursor: pointer; min-width: 0; }
 .ads-gallery-entry-button:hover, .ads-gallery-entry-button.is-active { background: var(--aw-bg-fill-main); color: var(--aw-text-primary); }
-.ads-gallery-entry-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.ads-gallery-entry-code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--aw-text-tertiary); font-size: 11px; line-height: 14px; font-family: var(--aw-font-mono); }
+.ads-gallery-entry-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; line-height: 14px; font-weight: 600; }
+.ads-gallery-entry-code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--aw-text-tertiary); font-size: 10px; line-height: 14px; font-family: var(--aw-font-mono); }
 .ads-gallery-stage { min-width: 0; min-height: 0; padding: 44px; overflow: auto; }
 .ads-component-demo { display: grid; gap: 20px; max-width: 1180px; }
 .ads-component-demo-header h2 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 0; font-size: 26px; line-height: 34px; }

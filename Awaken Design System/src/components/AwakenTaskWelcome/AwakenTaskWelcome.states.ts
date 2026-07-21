@@ -9,22 +9,8 @@ export type AwakenTaskWelcomeState = {
 
 export const AwakenTaskWelcomeStates: AwakenTaskWelcomeState[] = [
   {
-    id: "default",
-    label: "默认空任务欢迎区",
+    id: "desktop-current",
+    label: "Desktop 当前欢迎区",
     props: {},
-  },
-  {
-    id: "short-message",
-    label: "短说明文案",
-    props: {
-      message: "本地运行，安全可控。",
-    },
-  },
-  {
-    id: "long-message",
-    label: "较长说明文案",
-    props: {
-      message: "把复杂任务交给 Awaken，从规划到执行保持清晰、可审查、可继续。",
-    },
   },
 ];

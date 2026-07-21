@@ -28,7 +28,6 @@ export * from "./AwakenInspectorRail";
 export * from "./AwakenInspectorTabs";
 export * from "./AwakenKbd";
 export * from "./AwakenLightInspectorRail";
-export * from "./AwakenMarkdownAnswer";
 export * from "./AwakenMarkdownRenderer";
 export * from "./AwakenMermaidDiagram";
 export * from "./AwakenMemorySettings";

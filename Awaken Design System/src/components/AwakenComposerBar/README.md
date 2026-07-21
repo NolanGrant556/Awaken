@@ -6,7 +6,7 @@
 
 `AwakenComposerBar` 用于提供紧凑任务输入栏，可作为中心入口或底部 dock 输入栏使用，并展示 repo/model/status 等元信息。它适合运行中的追加输入、首屏快速开始和停靠 composer；父级负责受控输入、结构化 token、metaItems、提交/停止和添加上下文动作，本组件负责选择原生 `AwakenComposerInput` 或统一 plaintext token editor，并布局 `AwakenContextButton` 与发送按钮。
 
-当前 Desktop 首屏空闲态使用 `variant="center"`，并显式传入空 `value`、空 `placeholder` 与空 `metaItems`，使组件呈现为干净的居中输入框，仅保留加上下文和发送控制。
+当前 Desktop 的 `center` 与 `dock` 形态共享同一个受控模型选择入口：父级通过 `metaItems` 传入当前模型、可选模型、选中回调和“添加模型”动作，组件负责列表的展开、收起、选中标记及键盘关闭。Gallery 使用 mock profile 复现这条交互，但不读取或保存真实模型配置。
 
 无结构化 token 时继续使用原生 textarea。结构化 token 存在时，整个输入流只有一个 `contenteditable="plaintext-only"` editing host；每个 token 是带稳定 `data-composer-token-id` 的 `contenteditable="false"` 原子节点，token 前文、token 间正文和最后尾文都可在同一光标、选区与 IME 上下文中编辑。长前缀自然换行后，剩余宽度允许时 token、尾文与光标继续当前行；token 的视觉间距不改写正文值。
 
@@ -18,7 +18,7 @@
 - `AwakenComposerInlineInput.tsx` - 带结构化 token 时的单一 editing host 与 DOM ↔ structured state adapter。
 - `AwakenComposerBar.css` - 组件局部样式入口。
 - `AwakenComposerBar.states.ts` - 可观测状态与模拟 props。
-- `AwakenComposerBar.demo.tsx` - “输入栏”组件族 Gallery 演示，同时观测 `AwakenUserPromptBlock` 的已提交提示状态。
+- `AwakenComposerBar.demo.tsx` - “输入栏”组件族 Gallery 演示；先用真实 Workbench 缩略场景标出 `AwakenComposerDock` 的底部停靠边界，再观测 ComposerBar 状态和 `AwakenUserPromptBlock` 的已提交提示状态。
 - `index.ts` - 组件导出。
 
 ## 规则

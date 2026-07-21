@@ -27,7 +27,6 @@ export { AwakenInspectorRailDemo } from "../src/components/AwakenInspectorRail/A
 export { AwakenInspectorTabsDemo } from "../src/components/AwakenInspectorTabs/AwakenInspectorTabs.demo";
 export { AwakenKbdDemo } from "../src/components/AwakenKbd/AwakenKbd.demo";
 export { AwakenLightInspectorRailDemo } from "../src/components/AwakenLightInspectorRail/AwakenLightInspectorRail.demo";
-export { AwakenMarkdownAnswerDemo } from "../src/components/AwakenMarkdownAnswer/AwakenMarkdownAnswer.demo";
 export { AwakenMcpConfigDialogDemo } from "../src/components/AwakenMcpConfigDialog/AwakenMcpConfigDialog.demo";
 export { AwakenMcpSettingsDialogDemo } from "../src/components/AwakenMcpSettingsDialog/AwakenMcpSettingsDialog.demo";
 export { AwakenMemorySettingsDemo } from "../src/components/AwakenMemorySettings/AwakenMemorySettings.demo";

@@ -1,5 +1,10 @@
+import { createElement } from "react";
 import type { ComponentProps } from "react";
-import type { AwakenComposerBar } from "./AwakenComposerBar";
+import { Settings } from "lucide-react";
+import type {
+  AwakenComposerBar,
+  ComposerBarMetaItem,
+} from "./AwakenComposerBar";
 
 export type AwakenComposerBarState = {
   id: string;
@@ -8,6 +13,42 @@ export type AwakenComposerBarState = {
 };
 
 const noop = () => {};
+
+const modelMetaItem: ComposerBarMetaItem = {
+  id: "model",
+  label: "deepseek-v4-pro",
+  menuItems: [
+    {
+      id: "deepseek-v4-pro",
+      label: "deepseek-v4-pro",
+      icon: "D",
+      selected: true,
+      onSelect: noop,
+    },
+    {
+      id: "kimi-k2.6",
+      label: "kimi-k2.6",
+      icon: "K",
+      onSelect: noop,
+    },
+    {
+      id: "kimi-for-coding-highspeed",
+      label: "kimi-for-coding-highspeed",
+      icon: "K",
+      onSelect: noop,
+    },
+  ],
+  menuFooterAction: {
+    label: "添加模型",
+    icon: createElement(Settings, { size: 16, strokeWidth: 1.9 }),
+    onClick: noop,
+  },
+};
+
+const composerMetaItems: ComposerBarMetaItem[] = [
+  modelMetaItem,
+  { id: "repo", label: "Awaken" },
+];
 
 export const AwakenComposerBarStates: AwakenComposerBarState[] = [
   {
@@ -23,10 +64,7 @@ export const AwakenComposerBarStates: AwakenComposerBarState[] = [
       isReady: false,
       submitMode: "send",
       variant: "dock",
-      metaItems: [
-        { id: "repo", label: "Awaken" },
-        { id: "model", label: "GPT-5" },
-      ],
+      metaItems: composerMetaItems,
     } as unknown as Partial<ComponentProps<typeof AwakenComposerBar>>,
   },
   {
@@ -37,7 +75,7 @@ export const AwakenComposerBarStates: AwakenComposerBarState[] = [
       placeholder: "",
       isReady: false,
       variant: "center",
-      metaItems: [],
+      metaItems: composerMetaItems,
     } as unknown as Partial<ComponentProps<typeof AwakenComposerBar>>,
   },
   {

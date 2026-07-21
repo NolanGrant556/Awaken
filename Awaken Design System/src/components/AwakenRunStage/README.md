@@ -11,7 +11,7 @@
 - `AwakenRunStage.tsx` - 组件实现。
 - `AwakenRunStage.css` - 组件局部样式入口。
 - `AwakenRunStage.states.ts` - 可观测状态与模拟 props。
-- `AwakenRunStage.demo.tsx` - 独立 Gallery 演示。
+- `AwakenRunStage.demo.tsx` - “运行阶段”组件族 Gallery 演示；先展示 `AwakenRunStage + AwakenExecutionFeed + AwakenComposerDock` 的真实组合，再补充 RunStage 自身状态。
 - `index.ts` - 组件导出。
 
 ## 规则

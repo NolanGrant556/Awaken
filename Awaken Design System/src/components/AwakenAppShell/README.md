@@ -10,6 +10,7 @@
 
 - `AwakenAppShell.tsx` - 组件实现。
 - `AwakenAppShell.css` - 组件局部样式入口。
+- `AwakenAppShell.demo.css` - Gallery 预览画布与槽位占位样式。
 - `AwakenAppShell.states.ts` - 可观测状态与模拟 props。
 - `AwakenAppShell.demo.tsx` - 独立 Gallery 演示。
 - `index.ts` - 组件导出。

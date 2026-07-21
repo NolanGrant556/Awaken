@@ -4315,11 +4315,8 @@ export function App() {
           sidebar={
             <WorkbenchSidebarFrame>
               <Sidebar
-                title="Awaken"
-                showBrand={false}
                 navItems={navItems}
                 activeNavId={activeNavId}
-                conversations={[]}
                 projects={repositoryProjects}
                 activeProjectId={activeProjectId}
                 expandedIds={expandedProjectIds}
@@ -4328,7 +4325,6 @@ export function App() {
                 profileAvatarFallback="AW"
                 newTaskLabel="New Agent"
                 newTaskShortcut=""
-                conversationSectionLabel=""
                 projectSectionLabel="Projects"
                 projectSectionActions={
                   <span className="sidebar-section-actions">

@@ -23,10 +23,10 @@ function routeForComponent(id: string): string {
 }
 
 function resolveComponentId(id: string): string {
-  if (awakenGalleryEntries.some((entry) => entry.id === id)) {
-    return id;
-  }
-  return awakenGalleryEntries[0]?.id ?? "";
+  const entry = awakenGalleryEntries.find(
+    (candidate) => candidate.id === id || candidate.aliases?.includes(id),
+  );
+  return entry?.id ?? awakenGalleryEntries[0]?.id ?? "";
 }
 
 function ensureComponentRoute(id: string): void {
@@ -157,7 +157,10 @@ export function AwakenGalleryApp() {
           ))}
         </nav>
       </aside>
-      <section className="ads-gallery-stage">
+      <section
+        className="ads-gallery-stage"
+        data-gallery-category={activeEntry?.category}
+      >
         {Demo ? <Demo /> : null}
       </section>
     </main>

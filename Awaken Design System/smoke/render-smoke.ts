@@ -83,6 +83,9 @@ const richMarkdownState = AwakenDesignSystem.AwakenAssistantMessageStates.find(
 const footerState = AwakenDesignSystem.AwakenAssistantMessageStates.find(
   (state) => state.id === "completed-answer-footer",
 );
+const completedStatesWithoutElapsed = AwakenDesignSystem.AwakenAssistantMessageStates.filter(
+  (state) => state.props.status === "done" && typeof state.props.elapsedMs !== "number",
+);
 
 if (!richMarkdownState) {
   throw new Error("AwakenAssistantMessage rich-markdown state is missing");
@@ -90,6 +93,14 @@ if (!richMarkdownState) {
 
 if (!footerState) {
   throw new Error("AwakenAssistantMessage completed-answer-footer state is missing");
+}
+
+if (completedStatesWithoutElapsed.length > 0) {
+  throw new Error(
+    `AwakenAssistantMessage completed states must show elapsed timing: ${completedStatesWithoutElapsed
+      .map((state) => state.id)
+      .join(", ")}`,
+  );
 }
 
 const richMarkdownProps = requireAssistantMessageProps(richMarkdownState.id, richMarkdownState.props);
@@ -131,6 +142,10 @@ if (!footerHtml.includes("Copy final answer")) {
   throw new Error("AwakenAssistantMessage did not render the final answer copy action");
 }
 
+if (!footerHtml.includes('<span class="assistant-message-footer-copy"><span')) {
+  throw new Error("AwakenAssistantMessage should place the copy action wrapper directly in the footer layout");
+}
+
 if (footerHtml.includes(">Copy final answer</span>")) {
   throw new Error("AwakenAssistantMessage should render the final answer copy action as an icon-only control");
 }
@@ -148,6 +163,10 @@ if (!copyOnlyFooterHtml.includes("assistant-message-footer")) {
 
 if (!copyOnlyFooterHtml.includes("Copy final answer")) {
   throw new Error("AwakenAssistantMessage should keep the final answer copy action without elapsed timing");
+}
+
+if (!copyOnlyFooterHtml.includes('<span class="assistant-message-footer-copy"><span')) {
+  throw new Error("AwakenAssistantMessage should keep the copy-only footer action right-aligned");
 }
 
 if (copyOnlyFooterHtml.includes("Agent ran")) {

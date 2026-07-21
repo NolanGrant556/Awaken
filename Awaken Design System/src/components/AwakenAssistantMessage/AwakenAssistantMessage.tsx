@@ -56,15 +56,16 @@ export function AwakenAssistantMessage({
               执行时间 {formatElapsedMs(elapsedMs)}
             </span>
           ) : null}
-          <AwakenCopyButton
-            className="assistant-message-footer-copy"
-            text={markdown}
-            label="Copy final answer"
-            copiedLabel="Copied final answer"
-            errorLabel="Copy failed"
-            iconOnly
-            feedbackDurationMs={2000}
-          />
+          <span className="assistant-message-footer-copy">
+            <AwakenCopyButton
+              text={markdown}
+              label="Copy final answer"
+              copiedLabel="Copied final answer"
+              errorLabel="Copy failed"
+              iconOnly
+              feedbackDurationMs={2000}
+            />
+          </span>
         </footer>
       ) : null}
     </article>

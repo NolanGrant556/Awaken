@@ -14,8 +14,8 @@ export const AwakenToolTraceLineStates: AwakenToolTraceLineState[] = [
     id: "active",
     label: "工具执行中",
     props: {
-      title: "运行 npm run typecheck",
-      detail: "等待 TypeScript 输出。",
+      title: "shell",
+      detail: "Tool is running",
       status: "active",
       onSelect: noop,
     } as unknown as Partial<ComponentProps<typeof AwakenToolTraceLine>>,
@@ -24,8 +24,8 @@ export const AwakenToolTraceLineStates: AwakenToolTraceLineState[] = [
     id: "done",
     label: "已完成",
     props: {
-      title: "读取组件实现",
-      detail: "AwakenToolTraceLine.tsx 已确认。",
+      title: "apply_patch",
+      detail: "Tool returned content",
       status: "done",
       onSelect: noop,
     } as unknown as Partial<ComponentProps<typeof AwakenToolTraceLine>>,
@@ -34,8 +34,8 @@ export const AwakenToolTraceLineStates: AwakenToolTraceLineState[] = [
     id: "error",
     label: "工具失败",
     props: {
-      title: "打开 Gallery 预览失败",
-      detail: "端口不可用，需要父级展示终端详情。",
+      title: "skill__dws",
+      detail: "Tool returned an error",
       status: "error",
       onSelect: noop,
     } as unknown as Partial<ComponentProps<typeof AwakenToolTraceLine>>,
@@ -44,8 +44,8 @@ export const AwakenToolTraceLineStates: AwakenToolTraceLineState[] = [
     id: "static",
     label: "仅展示",
     props: {
-      title: "记录补充信息",
-      detail: "没有选择回调时，这一行不会表现为按钮。",
+      title: "artifact_publish",
+      detail: "Tool returned content",
       status: "done",
       onSelect: undefined,
     } as unknown as Partial<ComponentProps<typeof AwakenToolTraceLine>>,

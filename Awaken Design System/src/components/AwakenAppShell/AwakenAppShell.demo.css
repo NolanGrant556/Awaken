@@ -1,0 +1,78 @@
+.aw-app-shell-demo__viewport {
+  --aw-sidebar-width: clamp(132px, 34%, 220px);
+  --aw-chrome-height: 44px;
+
+  width: 100%;
+  height: 220px;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-lg);
+  background: var(--aw-bg-main);
+}
+
+.aw-app-shell-demo__chrome,
+.aw-app-shell-demo__sidebar,
+.aw-app-shell-demo__main {
+  min-width: 0;
+  height: 100%;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+}
+
+.aw-app-shell-demo__chrome {
+  display: flex;
+  align-items: center;
+  padding: 0 16px 0 calc(var(--aw-sidebar-width) + 16px);
+  overflow: hidden;
+  border-bottom: 1px solid var(--aw-border-light);
+  background: color-mix(in srgb, var(--aw-bg-main) 92%, transparent);
+  font-weight: var(--aw-font-weight-semibold);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.aw-app-shell-sidebar-collapsed .aw-app-shell-demo__chrome {
+  padding-left: 16px;
+}
+
+.aw-app-shell-demo__sidebar {
+  padding: var(--aw-sidebar-top-inset, 8px) 14px 14px;
+  overflow: hidden;
+  background: var(--aw-bg-nav);
+}
+
+.aw-app-shell-demo__main {
+  padding: 18px;
+  overflow: hidden;
+  background: var(--aw-bg-main);
+}
+
+@media (max-width: 720px) {
+  .aw-app-shell-demo__viewport {
+    --aw-sidebar-width: clamp(118px, 38%, 160px);
+  }
+
+  .aw-app-shell-demo__chrome,
+  .aw-app-shell-demo__sidebar,
+  .aw-app-shell-demo__main {
+    font-size: var(--aw-font-size-xs);
+    line-height: var(--aw-line-height-xs);
+  }
+
+  .aw-app-shell-demo__chrome {
+    padding-right: 12px;
+    padding-left: calc(var(--aw-sidebar-width) + 12px);
+  }
+
+  .aw-app-shell-sidebar-collapsed .aw-app-shell-demo__chrome {
+    padding-left: 12px;
+  }
+
+  .aw-app-shell-demo__sidebar,
+  .aw-app-shell-demo__main {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+}

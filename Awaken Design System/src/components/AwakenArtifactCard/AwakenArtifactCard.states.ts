@@ -45,10 +45,10 @@ export const AwakenArtifactCardStates: AwakenArtifactCardState[] = [
     id: "long-path",
     label: "长路径",
     props: {
-      title: "AwakenConversationList.states.ts",
+      title: "AwakenWorkbenchSidebarFrame.states.ts",
       description: "验证两行说明和较长路径在卡片内截断，不挤压变更图标。",
       changeType: "modified",
-      path: "Awaken Design System/src/components/AwakenConversationList/AwakenConversationList.states.ts",
+      path: "Awaken Design System/src/components/AwakenWorkbenchSidebarFrame/AwakenWorkbenchSidebarFrame.states.ts",
     } as unknown as Partial<ComponentProps<typeof AwakenArtifactCard>>,
   },
 ];

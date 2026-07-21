@@ -41,7 +41,6 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
     id: "current-desktop-sidebar",
     label: "Awaken 当前侧栏",
     props: {
-      title: "Awaken",
       navItems: [
         {
           id: "connectors",
@@ -55,7 +54,6 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
         },
       ],
       activeNavId: "skills",
-      conversations: [],
       projects: [
         {
           id: "management",
@@ -116,7 +114,6 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
       profileAvatarSrc: undefined,
       newTaskShortcut: "",
       newTaskLabel: "New Agent",
-      conversationSectionLabel: "",
       projectSectionLabel: "Projects",
       showProjectCount: false,
       projectSectionActions: createElement(
@@ -138,10 +135,8 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
         ),
       ),
       profileSubtitle: undefined,
-      showBrand: false,
       platform: "macos",
       onSelectNav: noop,
-      onSelectConversation: noop,
       onSelectProject: noop,
       onNewTask: noop,
       onExpandedChange: noop,
@@ -152,14 +147,11 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
     id: "minimal",
     label: "精简导航",
     props: {
-      title: "Awaken",
       navItems: [
         { id: "runs", label: "运行" },
         { id: "settings", label: "设置" },
       ],
       activeNavId: "settings",
-      conversations: [],
-      activeConversationId: undefined,
       projects: [],
       activeProjectId: undefined,
       expandedIds: [],
@@ -169,15 +161,12 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
       profileAvatarSrc: undefined,
       newTaskShortcut: "N",
       newTaskLabel: "新建任务",
-      conversationSectionLabel: "",
       projectSectionLabel: "",
       showProjectCount: false,
       projectSectionActions: null,
       profileSubtitle: undefined,
-      showBrand: false,
       platform: "macos",
       onSelectNav: noop,
-      onSelectConversation: noop,
       onSelectProject: noop,
       onNewTask: noop,
       onExpandedChange: noop,
@@ -188,17 +177,12 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
     id: "loading-project",
     label: "项目加载中",
     props: {
-      title: "Awaken",
       navItems: [
         { id: "runs", label: "运行" },
         { id: "integrations", label: "集成", disabled: true },
         { id: "settings", label: "设置" },
       ],
       activeNavId: "runs",
-      conversations: [
-        { id: "handoff", label: "继续上次任务", timeLabel: "昨天", statusLabel: "待继续" },
-      ],
-      activeConversationId: "handoff",
       projects: [
         {
           id: "workspace",
@@ -218,15 +202,12 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
       profileAvatarSrc: undefined,
       newTaskShortcut: "N",
       newTaskLabel: "新建任务",
-      conversationSectionLabel: "最近任务",
       projectSectionLabel: "项目",
       showProjectCount: true,
       projectSectionActions: null,
       profileSubtitle: "正在扫描工作区",
-      showBrand: true,
       platform: "macos",
       onSelectNav: noop,
-      onSelectConversation: noop,
       onSelectProject: noop,
       onNewTask: noop,
       onExpandedChange: noop,
@@ -237,21 +218,11 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
     id: "long-labels",
     label: "长文案",
     props: {
-      title: "Awaken 本机桌面运行工作区",
       navItems: [
         { id: "context", label: "当前工作区上下文与权限记录", badge: 5 },
         { id: "runtime", label: "本机运行时状态" },
       ],
       activeNavId: "context",
-      conversations: [
-        {
-          id: "long-task",
-          label: "围绕第 3 组设计系统组件补齐用途说明和状态示例",
-          timeLabel: "刚刚",
-          statusLabel: "文档整理中",
-        },
-      ],
-      activeConversationId: "long-task",
       projects: [
         {
           id: "long-project",
@@ -272,7 +243,6 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
       profileAvatarSrc: undefined,
       newTaskShortcut: "N",
       newTaskLabel: "新建带当前上下文的任务",
-      conversationSectionLabel: "最近任务",
       projectSectionLabel: "当前项目与组件分组",
       showProjectCount: true,
       projectSectionActions: createElement(
@@ -283,10 +253,8 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
         },
       ),
       profileSubtitle: "/Users/nolangrant/Awaken",
-      showBrand: true,
       platform: "macos",
       onSelectNav: noop,
-      onSelectConversation: noop,
       onSelectProject: noop,
       onNewTask: noop,
       onExpandedChange: noop,

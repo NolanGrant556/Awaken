@@ -4,7 +4,7 @@ import type { AwakenAppShell } from "./AwakenAppShell";
 export type AwakenAppShellState = {
   id: string;
   label: string;
-  props: Partial<ComponentProps<typeof AwakenAppShell>>;
+  props: ComponentProps<typeof AwakenAppShell>;
 };
 
 export const AwakenAppShellStates: AwakenAppShellState[] = [
@@ -17,7 +17,7 @@ export const AwakenAppShellStates: AwakenAppShellState[] = [
       chrome: "窗口标题栏和全局操作区",
       sidebarCollapsed: false,
       platform: "macos",
-    } as unknown as Partial<ComponentProps<typeof AwakenAppShell>>,
+    },
   },
   {
     id: "sidebar-collapsed",
@@ -28,7 +28,7 @@ export const AwakenAppShellStates: AwakenAppShellState[] = [
       chrome: "窗口标题栏保留全局上下文",
       sidebarCollapsed: true,
       platform: "macos",
-    } as unknown as Partial<ComponentProps<typeof AwakenAppShell>>,
+    },
   },
   {
     id: "web-shell",
@@ -37,6 +37,6 @@ export const AwakenAppShellStates: AwakenAppShellState[] = [
       sidebar: "Web 侧栏导航",
       main: "嵌入式页面主体",
       platform: "web",
-    } as unknown as Partial<ComponentProps<typeof AwakenAppShell>>,
+    },
   },
 ];

@@ -54,17 +54,17 @@ export const AwakenArtifactGridStates: AwakenArtifactGridState[] = [
       items: [
         {
           id: "long-component",
-          title: "AwakenConversationList.states.ts",
+          title: "AwakenWorkbenchSidebarFrame.states.ts",
           description: "用于验证网格中的卡片在长标题和长路径下仍保持等宽排列。",
           changeType: "modified",
-          path: "Awaken Design System/src/components/AwakenConversationList/AwakenConversationList.states.ts",
+          path: "Awaken Design System/src/components/AwakenWorkbenchSidebarFrame/AwakenWorkbenchSidebarFrame.states.ts",
         },
         {
           id: "long-readme",
           title: "README.md",
           description: "补充用途、场景和父子责任边界。",
           changeType: "modified",
-          path: "Awaken Design System/src/components/AwakenApprovalCard/README.md",
+          path: "Awaken Design System/src/components/AwakenArtifactGrid/README.md",
         },
       ],
     } as unknown as Partial<ComponentProps<typeof AwakenArtifactGrid>>,

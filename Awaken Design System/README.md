@@ -111,7 +111,11 @@ http://127.0.0.1:5173/#/components/awaken-settings
 http://127.0.0.1:5173/#/components/awaken-connectors
 ```
 
-Gallery 左栏当前先显示“原子组件”目录，再显示“组件与组件库”。“原子组件”中的“产品 LOGO”入口对应 `AwakenProductLogo`，直接拥有 `src/assets/product-logo.png` 这份官方 256×256 方形产品标志。横向 `AWAKEN` 字标仍由 `logo-wordmark.png` 负责；两者用途不同，不得互相裁切替代。
+Gallery 左栏按“原子组件”“左侧栏组件”“布局 / 组合组件”三个目录分区。每个分区标题都是可访问的展开/收起按钮，显示当前入口数量；首次打开 URL 时只展开当前组件所属分区，切换 hash 到其他分区的组件时对应分区自动展开。所有 Gallery 注册项必须在 `registry.ts` 显式声明分类，不能回退为没有归属的一列长清单。
+
+“原子组件”收纳按钮、图标、输入、徽标、浮层等可独立复用的基础视觉或交互单元。其中“产品 LOGO”入口对应 `AwakenProductLogo`，直接拥有 `src/assets/product-logo.png` 这份官方 256×256 方形产品标志。横向 `AWAKEN` 字标仍由 `logo-wordmark.png` 负责；两者用途不同，不得互相裁切替代。
+
+“左侧栏组件”收纳 `AwakenSidebar`、Skills、Settings、Account、Connectors 等当前侧栏组件族。“布局 / 组合组件”收纳应用外壳、Workbench、运行叙事、交付物等由多个基础单元构成的界面结构。
 
 “「技能」组件库”入口同时观测完整 Skills 组合、Skill 卡片、开关、项目文件夹、项目窗口和 Markdown 预览窗口；这些小组件保留独立源码和公开导出，但不重复占用 Gallery 侧栏。
 

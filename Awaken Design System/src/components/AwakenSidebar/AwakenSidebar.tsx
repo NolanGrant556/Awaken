@@ -1,24 +1,18 @@
 import "./AwakenSidebar.css";
 import type { CSSProperties, ReactNode } from "react";
 import type {
-  ConversationItem,
   NavItem,
   PlatformKind,
   ProjectItem,
 } from "../../types";
-import { AwakenBrandRow } from "../AwakenBrandRow";
 import { AwakenNewTaskButton } from "../AwakenNewTaskButton";
 import { AwakenPrimaryNav } from "../AwakenPrimaryNav";
-import { AwakenConversationList } from "../AwakenConversationList";
 import { AwakenProjectTree } from "../AwakenProjectTree";
 import { AwakenProfileButton } from "../AwakenProfileButton";
 
 export type AwakenSidebarProps = {
-  title?: string;
   navItems?: NavItem[];
   activeNavId?: string;
-  conversations?: ConversationItem[];
-  activeConversationId?: string;
   projects?: ProjectItem[];
   activeProjectId?: string;
   expandedIds?: string[];
@@ -28,17 +22,14 @@ export type AwakenSidebarProps = {
   profileAvatarSrc?: string;
   newTaskShortcut?: string;
   newTaskLabel?: ReactNode;
-  conversationSectionLabel?: string;
   projectSectionLabel?: string;
   showProjectCount?: boolean;
   projectSectionActions?: ReactNode;
   profileSubtitle?: string;
   profileExpanded?: boolean;
   profileControls?: string;
-  showBrand?: boolean;
   platform?: PlatformKind;
   onSelectNav?: (id: string) => void;
-  onSelectConversation?: (id: string) => void;
   onSelectProject?: (id: string) => void;
   onNewTask?: () => void;
   onExpandedChange?: (ids: string[]) => void;
@@ -59,7 +50,7 @@ const sidebarStyle: CSSProperties = {
 const topStyle: CSSProperties = {
   display: "grid",
   gap: 12,
-  padding: "16px 14px 10px",
+  padding: "calc(var(--aw-sidebar-top-inset, 8px) + 4px) 14px 10px",
 };
 
 const scrollStyle: CSSProperties = {
@@ -97,11 +88,8 @@ const bottomStyle: CSSProperties = {
 };
 
 export function AwakenSidebar({
-  title = "Awaken",
   navItems = [],
   activeNavId,
-  conversations = [],
-  activeConversationId,
   projects = [],
   activeProjectId,
   expandedIds,
@@ -111,37 +99,25 @@ export function AwakenSidebar({
   profileAvatarSrc,
   newTaskShortcut = "N",
   newTaskLabel = "新建任务",
-  conversationSectionLabel = "对话",
   projectSectionLabel = "项目",
   showProjectCount = true,
   projectSectionActions,
   profileSubtitle,
   profileExpanded,
   profileControls,
-  showBrand = true,
   platform = "macos",
   onSelectNav,
-  onSelectConversation,
   onSelectProject,
   onNewTask,
   onExpandedChange,
   onProfileClick,
   profileButtonRef,
 }: AwakenSidebarProps) {
-  const showConversations = conversationSectionLabel !== "" || conversations.length > 0;
   const showProjects = projectSectionLabel !== "" || projects.length > 0;
 
   return (
     <aside className="aw-sidebar" aria-label="Awaken 导航" style={sidebarStyle}>
-      <div
-        style={{
-          ...topStyle,
-          padding: showBrand
-            ? topStyle.padding
-            : "calc(var(--aw-sidebar-top-inset, 8px) + 4px) 14px 10px",
-        }}
-      >
-        {showBrand ? <AwakenBrandRow title={title} /> : null}
+      <div style={topStyle}>
         <AwakenNewTaskButton
           onClick={onNewTask}
           shortcut={newTaskShortcut}
@@ -154,19 +130,6 @@ export function AwakenSidebar({
       <AwakenPrimaryNav items={navItems} activeId={activeNavId} onSelect={onSelectNav} />
 
       <div className="aw-scroll-hidden" style={scrollStyle}>
-        {showConversations ? (
-          <section style={sectionStyle}>
-            <div style={sectionHeadStyle}>
-              <span>{conversationSectionLabel}</span>
-            </div>
-            <AwakenConversationList
-              items={conversations}
-              activeId={activeConversationId}
-              onSelect={onSelectConversation}
-            />
-          </section>
-        ) : null}
-
         {showProjects ? (
           <section style={sectionStyle}>
             <div style={sectionHeadStyle}>

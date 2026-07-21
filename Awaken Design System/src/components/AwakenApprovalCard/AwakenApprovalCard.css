@@ -1,7 +1,0 @@
-@import "../../tokens/components.css";
-
-/* AwakenApprovalCard currently uses shared Awaken Design System tokens and component classes. */
-
-.aw-approval-card-demo-grid {
-  grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
-}

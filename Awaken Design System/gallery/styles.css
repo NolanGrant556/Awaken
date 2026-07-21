@@ -11,13 +11,20 @@ body { margin: 0; min-width: 1024px; overflow-y: hidden; overflow-x: auto; color
 .ads-gallery-brand__catalog { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .ads-gallery-brand__catalog span { color: var(--aw-text-secondary); font-size: 13px; line-height: 18px; font-weight: 600; }
 .ads-gallery-brand__catalog strong { color: var(--aw-text-tertiary); font-size: 12px; font-weight: 500; }
-.ads-gallery-sidebar nav { min-height: 0; display: grid; align-content: start; gap: 14px; padding: 10px 10px 16px; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; }
+.ads-gallery-sidebar nav { min-height: 0; display: grid; align-content: start; gap: 4px; padding: 10px 10px 16px; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; }
 .ads-gallery-nav-section { display: grid; gap: 4px; min-width: 0; }
-.ads-gallery-nav-section + .ads-gallery-nav-section { padding-top: 12px; border-top: 1px solid var(--aw-border-main); }
-.ads-gallery-nav-section h2 { margin: 0; padding: 0 10px 4px; color: var(--aw-text-tertiary); font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .04em; }
+.ads-gallery-nav-section + .ads-gallery-nav-section { padding-top: 4px; border-top: 1px solid var(--aw-border-main); }
+.ads-gallery-nav-section h2 { margin: 0; }
+.ads-gallery-nav-section__toggle { width: 100%; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto 16px; align-items: center; gap: 8px; border: 0; border-radius: 7px; padding: 8px 10px; background: transparent; color: var(--aw-text-tertiary); font: inherit; font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .04em; text-align: left; cursor: pointer; }
+.ads-gallery-nav-section__toggle:hover { background: var(--aw-bg-fill-light); color: var(--aw-text-secondary); }
+.ads-gallery-nav-section__toggle:focus-visible, .ads-gallery-entry-button:focus-visible { outline: 2px solid var(--aw-focus-ring); outline-offset: -2px; }
+.ads-gallery-nav-section__count { color: var(--aw-text-tertiary); font-size: 10px; line-height: 14px; font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.ads-gallery-nav-section__chevron { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; transform: rotate(-90deg); transition: transform 160ms ease; }
+.ads-gallery-nav-section__toggle[aria-expanded="true"] .ads-gallery-nav-section__chevron { transform: rotate(0); }
 .ads-gallery-nav-section__entries { display: grid; gap: 2px; min-width: 0; }
-.ads-gallery-sidebar button { display: grid; gap: 2px; border: 0; background: transparent; border-radius: 8px; padding: 8px 10px; text-align: left; color: var(--aw-text-secondary); font: inherit; cursor: pointer; min-width: 0; }
-.ads-gallery-sidebar button:hover, .ads-gallery-sidebar button.is-active { background: var(--aw-bg-fill-main); color: var(--aw-text-primary); }
+.ads-gallery-nav-section__entries[hidden] { display: none; }
+.ads-gallery-entry-button { display: grid; gap: 2px; border: 0; background: transparent; border-radius: 8px; padding: 8px 10px; text-align: left; color: var(--aw-text-secondary); font: inherit; cursor: pointer; min-width: 0; }
+.ads-gallery-entry-button:hover, .ads-gallery-entry-button.is-active { background: var(--aw-bg-fill-main); color: var(--aw-text-primary); }
 .ads-gallery-entry-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .ads-gallery-entry-code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--aw-text-tertiary); font-size: 11px; line-height: 14px; font-family: var(--aw-font-mono); }
 .ads-gallery-stage { min-width: 0; min-height: 0; padding: 44px; overflow: auto; }

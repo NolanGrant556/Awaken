@@ -4,7 +4,7 @@
 
 ## 用途
 
-`AwakenSidebar` 用于组合桌面端左侧导航栏，包括品牌、新建任务、一级导航、对话列表、项目树和账户触发位置。父级负责提供各区数据、选中项、回调和是否显示分区；组件负责把这些子组件按侧边栏布局组装起来，不直接管理路由、会话加载、项目读取或账户面板内容。
+`AwakenSidebar` 用于组合桌面端左侧导航栏，包括新建任务、一级导航、项目树和账户触发位置。父级负责提供各区数据、选中项、回调和是否显示分区；组件负责把这些子组件按侧边栏布局组装起来，不直接管理路由、会话加载、项目读取或账户面板内容。
 
 ## 当前 Desktop 组合
 
@@ -18,7 +18,7 @@
 
 项目树同时展示当前真实支持的项目/会话更多菜单、展开与选中状态，以及“暂无项目”“暂无会话”两种空状态。`AwakenDropdown`、`AwakenTooltip`、`AwakenAvatar` 与 `AwakenIcon` 是多个产品区域共享的通用组件，因此继续保留自己的组件目录入口，只在左侧栏组合中按真实关系复用。
 
-当前 Desktop 传入 `showBrand={false}`、空 conversations 和空 conversation section label，因此 `AwakenBrandRow` 与 `AwakenConversationList` 不在当前可见组合中；它们继续作为可选公开组件和独立 Gallery 入口保留。
+侧栏不再保留品牌行或独立“最近对话”列表；顶部直接从 `New Agent` 开始，当前线程只在 Projects 项目树下按 workspace 归属展示。
 
 ## 文件
 

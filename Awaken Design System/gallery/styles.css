@@ -33,6 +33,7 @@ body { margin: 0; min-width: 1024px; overflow-y: hidden; overflow-x: auto; color
 .ads-component-demo-header h2 code { color: var(--aw-text-tertiary); font-size: 13px; line-height: 18px; font-family: var(--aw-font-mono); font-weight: 500; }
 .ads-component-demo-header p { margin: 6px 0 0; color: var(--aw-text-tertiary); }
 .ads-component-demo-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); align-items: start; }
+.ads-gallery-stage[data-gallery-category="workbench"] .ads-component-demo-grid { grid-template-columns: minmax(0, 1fr); }
 .ads-component-demo-state { display: grid; gap: 12px; border: 1px solid var(--aw-border-main); border-radius: 12px; background: var(--aw-bg-white); padding: 14px; min-width: 0; }
 .ads-component-demo-state h3 { margin: 0; color: var(--aw-text-tertiary); font-size: 12px; line-height: 16px; text-transform: uppercase; letter-spacing: 0; }
 .ads-component-demo-canvas { min-width: 0; display: grid; gap: 10px; align-items: start; }

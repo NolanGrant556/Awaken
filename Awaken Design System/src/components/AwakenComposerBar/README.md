@@ -1,6 +1,6 @@
 # AwakenComposerBar
 
-此目录包含一个独立的 Awaken 设计系统组件、可观测演示状态，以及对应的 Gallery 入口。
+此目录包含一个独立的 Awaken 设计系统组件、可观测演示状态，以及集中展示输入与已提交提示的 Gallery 组件族入口。
 
 ## 用途
 
@@ -18,7 +18,7 @@
 - `AwakenComposerInlineInput.tsx` - 带结构化 token 时的单一 editing host 与 DOM ↔ structured state adapter。
 - `AwakenComposerBar.css` - 组件局部样式入口。
 - `AwakenComposerBar.states.ts` - 可观测状态与模拟 props。
-- `AwakenComposerBar.demo.tsx` - 独立 Gallery 演示。
+- `AwakenComposerBar.demo.tsx` - “输入栏”组件族 Gallery 演示，同时观测 `AwakenUserPromptBlock` 的已提交提示状态。
 - `index.ts` - 组件导出。
 
 ## 规则

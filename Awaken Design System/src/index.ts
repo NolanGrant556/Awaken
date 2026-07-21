@@ -14,8 +14,6 @@ export type {
   QuickActionItem,
   ModelOption,
   RunStepItem,
-  ArtifactItem,
-  ArtifactChangeType,
   ToastItem,
   ApprovalRiskTone,
   ApprovalItem,

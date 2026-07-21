@@ -654,7 +654,7 @@ export function AwakenComposerBar({
       }`}
     >
       {topMetaItems.length > 0 ? (
-        <div className="composer-bar-meta" aria-label="AwakenComposer context">
+        <div className="composer-bar-meta" aria-label="Awaken composer context">
           {topMetaItems.map((item) => renderMetaItem(item))}
         </div>
       ) : null}
@@ -728,7 +728,7 @@ export function AwakenComposerBar({
       {bottomMetaItems.length > 0 ? (
         <div
           className="composer-bar-meta composer-bar-meta-bottom"
-          aria-label="AwakenComposer context"
+          aria-label="Awaken composer context"
         >
           {bottomMetaItems.map((item) => renderMetaItem(item))}
         </div>

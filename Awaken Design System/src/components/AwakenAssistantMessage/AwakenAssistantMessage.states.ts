@@ -20,8 +20,9 @@ export const AwakenAssistantMessageStates: AwakenAssistantMessageState[] = [
     id: "completed-answer",
     label: "完成回答",
     props: {
-      markdown: "已检查 `AwakenComposer` 的 props。它负责组合输入框、模式切换、模型选择和发送按钮，提交后的实际运行由父级处理。\n\n- 保留 Plan/Act 模式\n- 保留停止态按钮\n- 不在组件内访问文件系统",
+      markdown: "已检查 `AwakenComposerBar` 的 props。它负责组合输入框、上下文、状态信息和发送按钮，提交后的实际运行由父级处理。\n\n- 保留 center/dock 形态\n- 保留停止态按钮\n- 不在组件内访问文件系统",
       status: "done",
+      elapsedMs: 18000,
     } as unknown as Partial<ComponentProps<typeof AwakenAssistantMessage>>,
   },
   {
@@ -52,8 +53,9 @@ export const AwakenAssistantMessageStates: AwakenAssistantMessageState[] = [
     id: "table",
     label: "表格与列表",
     props: {
-      markdown: "组件 | 责任\n--- | ---\nAwakenArtifactCard | 展示单个文件产物\nAwakenArtifactGrid | 排列多个产物卡片\n\n1. 父级提供数据\n2. 子组件只负责展示",
+      markdown: "组件 | 责任\n--- | ---\nAwakenDeliverableCard | 展示单个最终交付物\nAwakenDeliverableList | 排列最终交付物卡片\n\n1. 父级提供数据\n2. 子组件只负责展示",
       status: "done",
+      elapsedMs: 23000,
     } as unknown as Partial<ComponentProps<typeof AwakenAssistantMessage>>,
   },
   {
@@ -91,6 +93,7 @@ export const AwakenAssistantMessageStates: AwakenAssistantMessageState[] = [
         "```",
       ].join("\n"),
       status: "done",
+      elapsedMs: 42000,
     } as unknown as Partial<ComponentProps<typeof AwakenAssistantMessage>>,
   },
   {
@@ -112,6 +115,7 @@ export const AwakenAssistantMessageStates: AwakenAssistantMessageState[] = [
         "```",
       ].join("\n"),
       status: "done",
+      elapsedMs: 9000,
     } as unknown as Partial<ComponentProps<typeof AwakenAssistantMessage>>,
   },
   {
@@ -131,6 +135,7 @@ export const AwakenAssistantMessageStates: AwakenAssistantMessageState[] = [
         "```",
       ].join("\n"),
       status: "done",
+      elapsedMs: 31000,
     } as unknown as Partial<ComponentProps<typeof AwakenAssistantMessage>>,
   },
   {
@@ -168,6 +173,7 @@ export const AwakenAssistantMessageStates: AwakenAssistantMessageState[] = [
         "```",
       ].join("\n"),
       status: "done",
+      elapsedMs: 78000,
     } as unknown as Partial<ComponentProps<typeof AwakenAssistantMessage>>,
   },
   {
@@ -176,6 +182,7 @@ export const AwakenAssistantMessageStates: AwakenAssistantMessageState[] = [
     props: {
       markdown: "这是一段较长的助手说明，用于验证普通段落在回答气泡中保持可读。组件只处理轻量 markdown 渲染、列表和表格排版，不负责消息流排序、头像、时间戳或复制等外围动作。",
       status: "done",
+      elapsedMs: 12000,
     } as unknown as Partial<ComponentProps<typeof AwakenAssistantMessage>>,
   },
 ];

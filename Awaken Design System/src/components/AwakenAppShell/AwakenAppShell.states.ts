@@ -14,7 +14,7 @@ export const AwakenAppShellStates: AwakenAppShellState[] = [
     props: {
       sidebar: "左侧导航、会话列表和项目入口",
       main: "运行工作台主区域，承载当前任务的执行内容",
-      chrome: "窗口标题栏和全局操作区",
+      chrome: "工作台顶部控制和全局状态区",
       sidebarCollapsed: false,
       platform: "macos",
     },
@@ -25,7 +25,7 @@ export const AwakenAppShellStates: AwakenAppShellState[] = [
     props: {
       sidebar: "收起后不可见的导航内容",
       main: "主区域接管剩余宽度，用于专注查看执行结果",
-      chrome: "窗口标题栏保留全局上下文",
+      chrome: "工作台顶部控制保留全局上下文",
       sidebarCollapsed: true,
       platform: "macos",
     },

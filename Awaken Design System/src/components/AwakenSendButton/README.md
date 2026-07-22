@@ -1,6 +1,6 @@
 # AwakenSendButton
 
-此目录包含一个独立的 Awaken 设计系统组件、可观测演示状态，以及对应的 Gallery 入口。
+此目录包含一个独立的 Awaken 设计系统生产组件和可复用状态；它不再重复占用 Gallery 顶层入口。
 
 ## 用途
 
@@ -11,7 +11,6 @@
 - `AwakenSendButton.tsx` - 组件实现。
 - `AwakenSendButton.css` - 组件局部样式入口。
 - `AwakenSendButton.states.ts` - 可观测状态与模拟 props。
-- `AwakenSendButton.demo.tsx` - 独立 Gallery 演示。
 - `index.ts` - 组件导出。
 
 ## 规则
@@ -19,3 +18,4 @@
 - 仅包含 UI：不产生 runtime、Electron、AG-UI、A2UI 或文件系统副作用。
 - 通过 props 输入，通过回调输出。
 - 公共 API 变化时同步更新可观测状态。
+- Gallery 在“输入栏”组件族的完整 Composer 中观测可发送、空输入、发送中、停止运行和禁用状态；原 `awaken-send-button` URL 跳转到该组件族。

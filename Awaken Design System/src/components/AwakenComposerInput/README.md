@@ -1,6 +1,6 @@
 # AwakenComposerInput
 
-此目录包含一个独立的 Awaken 设计系统组件、可观测演示状态，以及对应的 Gallery 入口。
+此目录包含输入栏内部使用的 Awaken 设计系统输入组件和可观测演示状态。
 
 ## 用途
 
@@ -11,7 +11,7 @@
 - `AwakenComposerInput.tsx` - 组件实现。
 - `AwakenComposerInput.css` - 组件局部样式入口。
 - `AwakenComposerInput.states.ts` - 可观测状态与模拟 props。
-- `AwakenComposerInput.demo.tsx` - 独立 Gallery 演示。
+- Gallery 不再为它提供独立原子组件入口；输入状态统一在 `AwakenComposerBar.demo.tsx` 的“输入栏”组件族中观测，原 `awaken-composer-input` URL 会跳转到该入口。
 - `index.ts` - 组件导出。
 
 ## 规则

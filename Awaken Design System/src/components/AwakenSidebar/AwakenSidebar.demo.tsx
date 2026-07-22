@@ -1,16 +1,20 @@
 import "./AwakenSidebar.css";
 import "./AwakenSidebar.demo.css";
 import { useEffect, useRef, useState } from "react";
-import { FolderPlus, ListFilter } from "lucide-react";
+import { FolderPlus, ListFilter, Monitor } from "lucide-react";
 import { AwakenButton } from "../AwakenButton";
+import { AwakenDialog } from "../AwakenDialog";
 import { AwakenNewTaskButton } from "../AwakenNewTaskButton";
 import { AwakenPrimaryNav } from "../AwakenPrimaryNav";
 import { AwakenProjectTree } from "../AwakenProjectTree";
+import { AwakenSelectableCard } from "../AwakenSelectableCard";
 import { AwakenSidebarSectionAction } from "../AwakenSidebarSectionAction";
 import { AwakenSidebarThreadSpinner } from "../AwakenSidebarThreadSpinner";
 import { AwakenWorkbenchSidebarFrame } from "../AwakenWorkbenchSidebarFrame";
 import { AwakenSidebar } from "./AwakenSidebar";
 import { AwakenSidebarStates } from "./AwakenSidebar.states";
+
+type SidebarDialogMode = "create-project" | "detach-project" | "rename-thread" | null;
 
 export function AwakenSidebarDemo() {
   const desktopProps = AwakenSidebarStates[0]?.props ?? {};
@@ -19,6 +23,8 @@ export function AwakenSidebarDemo() {
   const [activeNavId, setActiveNavId] = useState(desktopProps.activeNavId);
   const [activeProjectId, setActiveProjectId] = useState(desktopProps.activeProjectId);
   const [expandedIds, setExpandedIds] = useState<string[]>(desktopProps.expandedIds ?? []);
+  const [dialogMode, setDialogMode] = useState<SidebarDialogMode>(null);
+  const [renameDraft, setRenameDraft] = useState("设计系统清理");
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [lastAction, setLastAction] = useState("当前展示 Awaken Desktop 正在使用的左侧栏组合。");
   const originalThemeRef = useRef<string | null>(null);
@@ -69,11 +75,47 @@ export function AwakenSidebarDemo() {
     setLastAction(`已选择${topLevel?.label ?? child?.label ?? id}。`);
   }
 
+  function closeDialog(result?: string): void {
+    setDialogMode(null);
+    if (result) {
+      setLastAction(result);
+    }
+  }
+
+  const dialogTitle = dialogMode === "create-project"
+    ? "Create project"
+    : dialogMode === "detach-project"
+      ? "从 Awaken 移除项目"
+      : "重命名会话";
+
+  const dialogFooter = dialogMode === "create-project" ? (
+    <>
+      <AwakenButton onClick={() => closeDialog("已模拟选择现有文件夹。")}>Use existing folder</AwakenButton>
+      <AwakenButton variant="primary" onClick={() => closeDialog("已模拟创建本地项目。")}>Next</AwakenButton>
+    </>
+  ) : dialogMode === "detach-project" ? (
+    <>
+      <AwakenButton onClick={() => closeDialog()}>取消</AwakenButton>
+      <AwakenButton variant="primary" onClick={() => closeDialog("已模拟从 Awaken 移除项目。")}>确认移除</AwakenButton>
+    </>
+  ) : (
+    <>
+      <AwakenButton onClick={() => closeDialog()}>取消</AwakenButton>
+      <AwakenButton
+        variant="primary"
+        disabled={!renameDraft.trim()}
+        onClick={() => closeDialog(`已模拟把会话重命名为“${renameDraft.trim()}”。`)}
+      >
+        确认
+      </AwakenButton>
+    </>
+  );
+
   return (
     <section className="ads-component-demo aw-sidebar-demo" aria-label="「左侧栏」组件库 AwakenSidebar 演示">
       <header className="ads-component-demo-header">
-        <h2>「左侧栏」组件库 <code>AwakenSidebar</code></h2>
-        <p>先查看 Awaken Desktop 当前完整组合，再逐个识别和操作其中可复用的小组件。</p>
+        <h2>「左侧栏」组件库 <code>AwakenSidebar + AwakenDialog</code></h2>
+        <p>先查看 Awaken Desktop 当前完整组合，再操作项目菜单、区块工具提示和包含真实选择卡片的创建项目弹窗。</p>
       </header>
 
       <div className="aw-sidebar-demo__controls">
@@ -132,7 +174,7 @@ export function AwakenSidebarDemo() {
       <section className="aw-sidebar-demo__parts" aria-labelledby="aw-sidebar-parts-title">
         <header className="aw-sidebar-demo__section-heading">
           <h3 id="aw-sidebar-parts-title">可独立组合的小组件</h3>
-          <p>每个组件仍保留独立目录、Props、states 与 Demo，但统一在当前组件库入口中查看。</p>
+          <p>组件源码、Props 与 states 继续独立维护；真实组合统一在当前组件库入口中查看，不再为内部小组件建立重复的顶层 Demo。</p>
         </header>
 
         <div className="aw-sidebar-demo__part-list">
@@ -144,8 +186,6 @@ export function AwakenSidebarDemo() {
             </header>
             <div className="aw-sidebar-demo__part-canvas aw-sidebar-demo__part-canvas--sidebar-width">
               <AwakenNewTaskButton
-                shortcut=""
-                platform="macos"
                 onClick={() => setLastAction("已触发 New Agent 回调（Gallery 模拟）。")}
               >
                 New Agent
@@ -166,11 +206,11 @@ export function AwakenSidebarDemo() {
 
           <article className="aw-sidebar-demo__part">
             <header>
-              <h4>项目树</h4>
-              <code>AwakenProjectTree</code>
-              <p>共享项目选中与展开状态；悬停项目或线程可查看新建会话与更多菜单。</p>
+              <h4>项目树与更多菜单</h4>
+              <code>AwakenProjectTree + AwakenDropdown</code>
+              <p>共享项目选中与展开状态；本观测区常显省略号，点击后查看 Desktop 正在使用的更多菜单。</p>
             </header>
-            <div className="aw-sidebar-demo__part-canvas aw-sidebar-demo__part-canvas--sidebar-width">
+            <div className="aw-sidebar-demo__part-canvas aw-sidebar-demo__part-canvas--sidebar-width aw-sidebar-demo__part-canvas--menu-visible">
               <AwakenProjectTree
                 items={projects}
                 activeId={activeProjectId}
@@ -219,7 +259,7 @@ export function AwakenSidebarDemo() {
           <article className="aw-sidebar-demo__part">
             <header>
               <h4>侧栏区块动作</h4>
-              <code>AwakenSidebarSectionAction</code>
+              <code>AwakenSidebarSectionAction + AwakenTooltip</code>
               <p>承载筛选与添加文件夹等紧凑图标操作，并提供 Tooltip。</p>
             </header>
             <div className="aw-sidebar-demo__part-canvas aw-sidebar-demo__standalone-actions">
@@ -228,8 +268,56 @@ export function AwakenSidebarDemo() {
             </div>
           </article>
 
+          <article className="aw-sidebar-demo__part">
+            <header>
+              <h4>侧栏弹窗流程</h4>
+              <code>AwakenDialog + AwakenIconButton + AwakenSelectableCard</code>
+              <p>集中观测 App 从左侧栏触发的创建项目、移除项目和重命名会话；关闭图标按钮与本地来源选择卡片均使用真实组合。</p>
+            </header>
+            <div className="aw-sidebar-demo__part-canvas aw-sidebar-demo__dialog-actions">
+              <AwakenButton onClick={() => setDialogMode("create-project")}>创建项目</AwakenButton>
+              <AwakenButton onClick={() => setDialogMode("detach-project")}>移除项目</AwakenButton>
+              <AwakenButton onClick={() => setDialogMode("rename-thread")}>重命名会话</AwakenButton>
+            </div>
+          </article>
+
         </div>
       </section>
+
+      <AwakenDialog
+        open={dialogMode !== null}
+        title={dialogTitle}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeDialog();
+          }
+        }}
+        footer={dialogFooter}
+      >
+        {dialogMode === "create-project" ? (
+          <div className="aw-sidebar-demo__dialog-card">
+            <AwakenSelectableCard
+              selected
+              icon={<Monitor size={18} strokeWidth={1.9} />}
+              title="Local"
+              description="Use a folder on this Mac as an Awaken project."
+            />
+          </div>
+        ) : dialogMode === "detach-project" ? (
+          <p className="aw-sidebar-demo__dialog-copy">
+            “Awaken”会从侧栏移除。3 条历史会话和磁盘文件都会保留。
+          </p>
+        ) : dialogMode === "rename-thread" ? (
+          <label className="aw-sidebar-demo__rename-field">
+            <span>会话标题</span>
+            <input
+              value={renameDraft}
+              onChange={(event) => setRenameDraft(event.target.value)}
+              placeholder="请输入会话标题"
+            />
+          </label>
+        ) : null}
+      </AwakenDialog>
     </section>
   );
 }

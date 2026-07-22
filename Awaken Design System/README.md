@@ -113,32 +113,32 @@ http://127.0.0.1:5173/#/components/awaken-connectors
 
 Gallery 左栏按“原子组件”“左侧栏组件”“中间交互区组件”“布局 / 组合组件”四个目录分区。每个分区标题都是可访问的展开/收起按钮，显示当前入口数量；首次打开 URL 时只展开当前组件所属分区，切换 hash 到其他分区的组件时对应分区自动展开。所有 Gallery 注册项必须在 `registry.ts` 显式声明分类，不能回退为没有归属的一列长清单。
 
-“原子组件”收纳按钮、图标、输入、徽标、浮层等可独立复用的基础视觉或交互单元。其中“产品 LOGO”入口对应 `AwakenProductLogo`，直接拥有 `src/assets/product-logo.png` 这份官方 256×256 方形产品标志。横向 `AWAKEN` 字标仍由 `logo-wordmark.png` 负责；两者用途不同，不得互相裁切替代。
+“原子组件”只保留确实需要脱离业务场景单独观测的视觉单元。当前入口为产品 LOGO、头像和原始思考动效；图标按钮、弹出层、发送按钮、选择卡片与工具提示仍保留生产源码和公开导出，但随真实消费组件族观测，不再用虚构状态重复占用目录。通用界面图形直接使用 `lucide-react`，不再维护只包裹 SVG path 的 `AwakenIcon`；原 `awaken-icon` URL 跳转到展示其真实替代位置的“「左侧栏」组件库”。其中“产品 LOGO”入口对应 `AwakenProductLogo`，直接拥有 `src/assets/product-logo.png` 这份官方 256×256 方形产品标志。横向 `AWAKEN` 字标仍由 `logo-wordmark.png` 负责；两者用途不同，不得互相裁切替代。
 
-“左侧栏组件”收纳 `AwakenSidebar`、Skills、Settings、Account、Connectors 等当前侧栏组件族。“中间交互区组件”只收纳 Desktop 当前采用的 `RunStage`、center/dock `ComposerBar`、执行叙事、提示与回答、工具轨迹和最终交付物组件；该分组的 Gallery 状态统一一行一列展示，便于按完整可用宽度复核中间区组件，但不改变 Desktop 对滚动、overlay、composer 和 runtime 编排的 ownership。其中“输入栏”组件族先用真实 Workbench 缩略场景标出 `AwakenComposerDock` 的底部停靠边界，再集中展示 `AwakenComposerBar` 的可编辑状态和 `AwakenUserPromptBlock` 的已提交提示状态；三个组件保留独立源码和公开导出，原 `awaken-user-prompt-block`、`awaken-composer-dock` URL 会跳转到该组件族入口。“运行阶段”组件族先用完整运行缩略场景标出 `AwakenRunStage` 的滚动/停靠 ownership 与 `AwakenExecutionFeed` 的叙事边界，再补充 RunStage 自身状态；两个组件保留独立源码和公开导出，原 `awaken-execution-feed` URL 会跳转到该组件族入口。“「最终交付物」组件库”集中展示 `AwakenDeliverableCard` 的单文件状态与 `AwakenDeliverableList` 的列表组合状态；两者同样保留独立源码和公开导出，原 `awaken-deliverable-card`、`awaken-deliverable-list` URL 会跳转到统一入口。
+“左侧栏组件”收纳 `AwakenSidebar`、Skills、Settings、Account、Connectors 等当前侧栏组件族。“中间交互区组件”只收纳 Desktop 当前采用的 `RunStage`、center/dock `ComposerBar`、执行叙事、提示与回答、工具轨迹和最终交付物组件；该分组的 Gallery 状态统一一行一列展示，便于按完整可用宽度复核中间区组件，但不改变 Desktop 对滚动、overlay、composer 和 runtime 编排的 ownership。其中“输入栏”组件族用真实 Workbench 缩略场景明确区分上方滚动输出与底部停靠输入栏，并从真实“上下文窗口”元信息入口打开 `RunStage.overlay` 中的 `AwakenContextUsagePanel`；随后集中展示 `AwakenComposerBar`、底层 `AwakenComposerInput`、由 `AwakenIconButton` 实现的添加上下文按钮、`AwakenSendButton` 的发送/停止状态、两者的 `AwakenTooltip`，以及 `AwakenUserPromptBlock` 的已提交提示及复制状态。相关组件保留独立源码和公开导出，但不重复占用 Gallery 目录；原 `awaken-composer-input`、`awaken-context-button`、`awaken-user-prompt-block`、`awaken-composer-dock`、`awaken-icon-button`、`awaken-send-button`、`awaken-tooltip` URL 均跳转到该组件族入口。“助手消息”组件族通过已完成回答底部操作区观测 `AwakenCopyButton` 的真实回答复制状态；复制组件保留独立源码和公开导出，原 `awaken-copy-button` URL 跳转到该组件族入口。“运行阶段”组件族先用完整运行缩略场景标出 `AwakenRunStage` 的滚动/停靠 ownership 与 `AwakenExecutionFeed` 的叙事边界，再补充 RunStage 自身状态；两个组件保留独立源码和公开导出，原 `awaken-execution-feed` URL 会跳转到该组件族入口。“工具轨迹”组件族先展示 Desktop 在最终回答后由 `AwakenDisclosure` 收纳“执行过程”的真实组合，再集中观测 `AwakenToolTraceGroup` 与 `AwakenToolTraceLine`；三者保留独立源码和公开导出，原 `awaken-disclosure`、`awaken-tool-trace-group`、`awaken-tool-trace-line` URL 均跳转到统一入口。“「最终交付物」组件库”集中展示 `AwakenDeliverableCard` 的单文件状态与 `AwakenDeliverableList` 的列表组合状态；两者同样保留独立源码和公开导出，原 `awaken-deliverable-card`、`awaken-deliverable-list` URL 会跳转到统一入口。
 
 “布局 / 组合组件”当前只注册“「工作台框架」组件库”，统一展示 Desktop 正在消费的 `AwakenAppShell`、`AwakenWorkbenchChrome`、`AwakenWorkbenchShell` 和标准 `AwakenInspectorRail`。平台值由 Desktop runtime 传入，macOS 窗口按钮和拖拽区域仍由 Electron 原生窗口负责；设计系统不再提供重复的平台 Provider 或模拟窗口标题栏。旧的 `awaken-app-shell`、`awaken-inspector-rail`、`awaken-light-inspector-rail`、`awaken-workbench-chrome` 等 URL 会跳转到统一入口。
 
 “「技能」组件库”入口同时观测完整 Skills 组合、Skill 卡片、开关、项目文件夹、项目窗口和 Markdown 预览窗口；这些小组件保留独立源码和公开导出，但不重复占用 Gallery 侧栏。
 
-“「左侧栏」组件库”同样先观测 Desktop 当前使用的 `AwakenWorkbenchSidebarFrame + AwakenSidebar` 完整组合，再集中展示 New Agent、主导航、项目树、区块动作和线程运行指示，并补充项目/会话更多菜单与项目树空状态；账户入口只在完整组合中保留实际位置，不在该组件族内重复展开。
+“「左侧栏」组件库”同样先观测 Desktop 当前使用的 `AwakenWorkbenchSidebarFrame + AwakenSidebar` 完整组合，再集中展示 New Agent、主导航、项目树、区块动作和线程运行指示，并补充项目/会话更多菜单、项目树空状态，以及创建项目、移除项目和重命名会话三个 App 级真实弹窗流程；账户入口只在完整组合中保留实际位置，不在该组件族内重复展开。`AwakenDropdown` 保留独立源码和公开导出，并在项目树的真实更多菜单中观测；它不再用虚构的模型、视图菜单重复占用原子组件目录，原 `awaken-dropdown` URL 跳转到“「左侧栏」组件库”。跨产品区域复用的 `AwakenDialog` 同样保留独立源码和公开导出，但不再重复占用原子组件目录；弹窗关闭动作继续使用 `AwakenIconButton`，创建项目流程在弹窗内观测 Desktop 当前唯一支持的本地 `AwakenSelectableCard`。技能、设置和连接器仍在各自组件族中观测相应弹窗；原 `awaken-dialog` 与 `awaken-selectable-card` URL 均跳转到“「左侧栏」组件库”。
 
-“「账户」组件库”集中展示 `AwakenAccount` 完整组合、`AwakenProfileButton` 个人入口和 `AwakenProfileBalancePanel` 额度/设置面板；运行时额度请求留在 Desktop，Design System 只接收数据和回调。
+“「账户」组件库”集中展示 `AwakenAccount` 完整组合、`AwakenProfileButton` 个人入口和 `AwakenProfileBalancePanel` 额度/设置面板；`AwakenPopover` 只作为账户与项目菜单等真实组合的浮层能力观测，不再展示虚构的模型、Plan/Act 或权限菜单，原 `awaken-popover` URL 跳转到本组件族。运行时额度请求留在 Desktop，Design System 只接收数据和回调。
 
-“「设置」组件库”集中展示 Desktop 直接消费的 `AwakenSettings` 完整组合，以及设置导航、模型页签、供应商卡、真实模型选择与配置表单、可调的已配置模型表格、主题选择器、搜索设置、记忆设置和宠物设置视图。Gallery 只注入 mock 数据；模型、搜索、记忆、外观与宠物分区的运行时读取、保存和副作用仍由 Desktop 拥有。
+“「设置」组件库”集中展示 Desktop 直接消费的 `AwakenSettings` 完整组合，以及设置导航、模型页签、供应商卡、真实模型选择与配置表单、可调的已配置模型表格、主题选择器、搜索设置、记忆设置和宠物设置视图。跨组件族复用的 `AwakenButton` 保留独立源码和公开导出，但不再重复占用原子组件目录；其取消、保存、测试连接、更新 API key、删除等真实状态随设置、连接器、账户和技能组合观测，原 `awaken-button` URL 跳转到本组件族。Gallery 只注入 mock 数据；模型、搜索、记忆、外观与宠物分区的运行时读取、保存和副作用仍由 Desktop 拥有。
 
 “「连接器」组件库”集中展示 Desktop 直接消费的 `AwakenConnectors` 完整 MCP/CLI 组合，以及连接器卡片、品牌图标、server 开关、CLI 详情、MCP 配置和 MCP 设置弹窗。Gallery 只注入 mock 状态；连接器目录、MCP server snapshot、CLI readiness、安装/授权、配置保存、日志读取与持久化仍由 Desktop Main/Core/Renderer 对应 owner 负责。
 
 ## 组件文件夹契约
 
-每个组件都应该独立放在自己的文件夹里：
+每个组件都应该独立放在自己的文件夹里；只有拥有顶层 Gallery 入口的组件或组件族必须保留独立 `*.demo.tsx`，被组件族收纳的小组件由组件族 Demo 观测：
 
 ```text
 src/components/AwakenComponentName/
 ├── AwakenComponentName.tsx
 ├── AwakenComponentName.css
 ├── AwakenComponentName.states.ts
-├── AwakenComponentName.demo.tsx
+├── AwakenComponentName.demo.tsx # 仅顶层 Gallery 入口必需
 ├── README.md
 └── index.ts
 ```
@@ -148,7 +148,7 @@ src/components/AwakenComponentName/
 - `*.tsx`：组件实现。
 - `*.css`：组件局部样式入口。
 - `*.states.ts`：可观测状态与 mock props。
-- `*.demo.tsx`：由 Gallery 渲染的独立视觉 demo。
+- `*.demo.tsx`：由 Gallery 渲染的顶层组件或组件族 demo；被组件族收纳的小组件不重复维护独立 demo。
 - `README.md`：给人和 Coding Agent 看的组件契约。
 - `index.ts`：生产组件、类型和需要共享的状态导出；不得导出 `*.demo.tsx`。
 

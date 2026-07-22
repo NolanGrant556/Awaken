@@ -1,6 +1,6 @@
 # AwakenSidebar
 
-左侧栏的 UI-only 组合组件。Gallery 中只注册“「左侧栏」组件库”这一处入口：页面先展示 Awaken Desktop 当前完整组合，再集中展示当前组合中使用的独立小组件。每个公开小组件仍拥有自己的目录、API、states、Demo 和 README，但不单独占用 Gallery 侧栏入口。
+左侧栏的 UI-only 组合组件。Gallery 中只注册“「左侧栏」组件库”这一处入口：页面先展示 Awaken Desktop 当前完整组合，再集中展示当前组合中使用的独立小组件。每个公开小组件仍拥有自己的目录、API、states 和 README；真实组合由组件族 Demo 统一观测，不再为内部小组件维护重复的顶层 Demo。
 
 ## 用途
 
@@ -11,12 +11,14 @@
 - `AwakenWorkbenchSidebarFrame + AwakenSidebar`：完整左侧栏组合与外层边界。
 - `AwakenNewTaskButton`：`New Agent` 主入口。
 - `AwakenPrimaryNav`：连接器与技能入口。
-- `AwakenProjectTree`：Projects 项目与线程树。
+- `AwakenProjectTree + AwakenDropdown`：Projects 项目与线程树，以及项目/会话的真实更多操作菜单。
 - `AwakenSidebarSectionAction`：筛选、添加文件夹和项目行内动作。
 - `AwakenSidebarThreadSpinner`：只在 running / cancelling 线程行末显示的运行指示。
 - `AwakenProfileButton`：只作为 Nolan 账户入口在完整侧栏中出现；它与额度面板的完整组合归入独立“「账户」组件库”。
+- `AwakenDialog + AwakenIconButton`：保留统一模态与关闭按钮能力；Gallery 在本组件族中观测创建项目、移除项目和重命名会话三个 App 级真实流程。
+- `AwakenSelectableCard`：只在创建项目弹窗中展示 Desktop 当前支持的本地文件夹来源，不展示尚未支持的远程或云端来源。
 
-项目树同时展示当前真实支持的项目/会话更多菜单、展开与选中状态，以及“暂无项目”“暂无会话”两种空状态。`AwakenDropdown`、`AwakenTooltip`、`AwakenAvatar` 与 `AwakenIcon` 是多个产品区域共享的通用组件，因此继续保留自己的组件目录入口，只在左侧栏组合中按真实关系复用。
+项目树同时展示当前真实支持的项目/会话更多菜单、展开与选中状态，以及“暂无项目”“暂无会话”两种空状态。`AwakenDropdown` 保留自己的组件目录与公开导出，但不再单独占用 Gallery 入口；`AwakenTooltip` 随侧栏区块动作和其他真实消费组件观测，`AwakenAvatar` 仍保留独立入口。New Agent 加号、项目树箭头和账户入口箭头直接使用 `lucide-react`，不再经过重复的 `AwakenIcon` 包装层。
 
 侧栏不再保留品牌行或独立“最近对话”列表；顶部直接从 `New Agent` 开始，当前线程只在 Projects 项目树下按 workspace 归属展示。
 
@@ -34,3 +36,4 @@
 - 仅包含 UI：不产生 runtime、Electron、AG-UI、A2UI 或文件系统副作用。
 - 通过 props 输入，通过回调输出。
 - 公共 API 变化时同步更新可观测状态。
+- 原 `awaken-dialog`、`awaken-dropdown`、`awaken-icon` 与 `awaken-selectable-card` URL 均跳转到“「左侧栏」组件库”；技能、设置和连接器各自在自己的组件族中继续观测对应弹窗。

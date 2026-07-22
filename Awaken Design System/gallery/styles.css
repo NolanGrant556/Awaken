@@ -61,10 +61,10 @@ body { margin: 0; min-width: 1024px; overflow-y: hidden; overflow-x: auto; color
 .ads-workbench-scene-label--focus { color: var(--aw-text-blue); }
 .ads-workbench-scene-label--focus b { background: var(--aw-accent-soft, var(--aw-bg-fill-main)); color: var(--aw-text-blue); }
 
-.ads-workbench-scene__narrative-context { display: grid; gap: 12px; width: min(680px, 100%); justify-self: center; opacity: .62; }
+.ads-workbench-scene__narrative-context { display: grid; align-content: end; gap: 12px; width: min(680px, 100%); min-height: 100%; justify-self: center; }
 .ads-workbench-scene__dock-stack { display: grid; gap: 9px; width: 100%; }
-.ads-workbench-scene--composer .aw-composer-dock { padding-top: 34px; border-top: 2px solid var(--aw-border-active); background: color-mix(in srgb, var(--aw-surface-work) 94%, var(--aw-accent)); }
-.ads-workbench-scene--composer .aw-composer-dock::before { content: ""; position: absolute; inset: 0; border-top: 1px solid color-mix(in srgb, var(--aw-border-active) 36%, transparent); pointer-events: none; }
+.ads-workbench-scene__context-overlay { position: absolute; right: 32px; bottom: 184px; left: 32px; z-index: 6; display: flex; justify-content: center; min-width: 0; pointer-events: none; }
+.ads-workbench-scene__context-overlay > .aw-context-usage-panel { width: min(680px, 100%); max-height: 315px; pointer-events: auto; }
 
 .ads-workbench-scene__feed-focus { display: grid; gap: 12px; width: min(716px, 100%); justify-self: center; padding: 14px 16px 18px; border: 2px solid var(--aw-border-active); border-radius: var(--aw-radius-panel); background: color-mix(in srgb, var(--aw-bg-white) 88%, var(--aw-accent)); }
 .ads-workbench-scene__feed-focus > .execution-feed { width: 100%; }

@@ -4,7 +4,7 @@
 
 ## 用途
 
-`AwakenComposerBar` 用于提供紧凑任务输入栏，可作为中心入口或底部 dock 输入栏使用，并展示 repo/model/status 等元信息。它适合运行中的追加输入、首屏快速开始和停靠 composer；父级负责受控输入、结构化 token、metaItems、提交/停止和添加上下文动作，本组件负责选择原生 `AwakenComposerInput` 或统一 plaintext token editor，并布局 `AwakenContextButton` 与发送按钮。
+`AwakenComposerBar` 用于提供紧凑任务输入栏，可作为中心入口或底部 dock 输入栏使用，并展示 repo/model/status 等元信息。它适合运行中的追加输入、首屏快速开始和停靠 composer；父级负责受控输入、结构化 token、metaItems、提交/停止和添加上下文动作，本组件负责选择原生 `AwakenComposerInput` 或统一 plaintext token editor，并布局由 `AwakenIconButton` 实现的 `AwakenContextButton`、`AwakenSendButton` 和两者的 `AwakenTooltip`。
 
 当前 Desktop 的 `center` 与 `dock` 形态共享同一个受控模型选择入口：父级通过 `metaItems` 传入当前模型、可选模型、选中回调和“添加模型”动作，组件负责列表的展开、收起、选中标记及键盘关闭。Gallery 使用 mock profile 复现这条交互，但不读取或保存真实模型配置。
 
@@ -18,7 +18,7 @@
 - `AwakenComposerInlineInput.tsx` - 带结构化 token 时的单一 editing host 与 DOM ↔ structured state adapter。
 - `AwakenComposerBar.css` - 组件局部样式入口。
 - `AwakenComposerBar.states.ts` - 可观测状态与模拟 props。
-- `AwakenComposerBar.demo.tsx` - “输入栏”组件族 Gallery 演示；先用真实 Workbench 缩略场景标出 `AwakenComposerDock` 的底部停靠边界，再观测 ComposerBar 状态和 `AwakenUserPromptBlock` 的已提交提示状态。
+- `AwakenComposerBar.demo.tsx` - “输入栏”组件族 Gallery 演示；先用真实 Workbench 缩略场景区分上方滚动输出与底部停靠输入栏，并通过真实元信息入口打开 `AwakenContextUsagePanel`，再集中观测 ComposerBar、底层 ComposerInput、添加上下文图标按钮、发送/停止按钮、工具提示和已提交提示状态。
 - `index.ts` - 组件导出。
 
 ## 规则
@@ -28,3 +28,4 @@
 - token label/source/path 不进入 `value`；selection、复制、持久化和提交均只使用结构化 segment。
 - 不使用 zero-width caret sentinel；空 segment 由真实空文本节点表示。
 - 公共 API 变化时同步更新可观测状态。
+- 原 `awaken-composer-input`、`awaken-context-button`、`awaken-user-prompt-block`、`awaken-composer-dock`、`awaken-icon-button`、`awaken-send-button` 与 `awaken-tooltip` URL 均跳转到“输入栏”组件族；这些小组件继续保留生产源码与公开导出。

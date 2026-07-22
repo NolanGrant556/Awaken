@@ -1,6 +1,6 @@
 # AwakenDisclosure
 
-此目录包含一个独立的 Awaken 设计系统组件、可观测演示状态，以及对应的 Gallery 入口。
+此目录包含一个独立的 Awaken 设计系统组件及其可观测状态。Gallery 将它集中放在“工具轨迹”组件族中展示，不再单独占用目录入口。
 
 ## 用途
 
@@ -19,3 +19,4 @@
 - 仅包含 UI：不产生 runtime、Electron、AG-UI、A2UI 或文件系统副作用。
 - 通过 props 输入，通过回调输出。
 - 公共 API 变化时同步更新可观测状态。
+- 原 `awaken-disclosure` URL 跳转到 `awaken-tool-trace`，用于观察 Desktop 中“执行过程”收纳工具轨迹的真实组合。

@@ -2,7 +2,6 @@ import "./AwakenSidebar.css";
 import type { CSSProperties, ReactNode } from "react";
 import type {
   NavItem,
-  PlatformKind,
   ProjectItem,
 } from "../../types";
 import { AwakenNewTaskButton } from "../AwakenNewTaskButton";
@@ -20,7 +19,6 @@ export type AwakenSidebarProps = {
   profileName?: string;
   profileAvatarFallback?: string;
   profileAvatarSrc?: string;
-  newTaskShortcut?: string;
   newTaskLabel?: ReactNode;
   projectSectionLabel?: string;
   showProjectCount?: boolean;
@@ -28,7 +26,6 @@ export type AwakenSidebarProps = {
   profileSubtitle?: string;
   profileExpanded?: boolean;
   profileControls?: string;
-  platform?: PlatformKind;
   onSelectNav?: (id: string) => void;
   onSelectProject?: (id: string) => void;
   onNewTask?: () => void;
@@ -97,7 +94,6 @@ export function AwakenSidebar({
   profileName = "",
   profileAvatarFallback = "",
   profileAvatarSrc,
-  newTaskShortcut = "N",
   newTaskLabel = "新建任务",
   projectSectionLabel = "项目",
   showProjectCount = true,
@@ -105,7 +101,6 @@ export function AwakenSidebar({
   profileSubtitle,
   profileExpanded,
   profileControls,
-  platform = "macos",
   onSelectNav,
   onSelectProject,
   onNewTask,
@@ -120,8 +115,6 @@ export function AwakenSidebar({
       <div style={topStyle}>
         <AwakenNewTaskButton
           onClick={onNewTask}
-          shortcut={newTaskShortcut}
-          platform={platform}
         >
           {newTaskLabel}
         </AwakenNewTaskButton>

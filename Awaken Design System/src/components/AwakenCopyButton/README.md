@@ -1,6 +1,6 @@
 # AwakenCopyButton
 
-此目录包含一个独立的 Awaken 设计系统组件、可观测演示状态，以及对应的 Gallery 入口。
+此目录包含一个独立的 Awaken 设计系统组件及其可观测状态。它不再单独占用 Gallery 目录入口；真实复制状态随“助手消息”和“输入栏”组件族一起观测。
 
 ## 用途
 
@@ -11,7 +11,6 @@
 - `AwakenCopyButton.tsx` - 组件实现。
 - `AwakenCopyButton.css` - 组件局部样式入口。
 - `AwakenCopyButton.states.ts` - 可观测状态与模拟 props。
-- `AwakenCopyButton.demo.tsx` - 独立 Gallery 演示。
 - `index.ts` - 组件导出。
 
 ## 规则
@@ -19,3 +18,4 @@
 - 仅包含 UI：不产生 runtime、Electron、AG-UI、A2UI 或文件系统副作用。
 - 通过 props 输入，通过回调输出。
 - 公共 API 变化时同步更新可观测状态。
+- 原 `awaken-copy-button` URL 跳转到“助手消息”组件库；组件源码和公开导出继续供 `AwakenAssistantMessage`、`AwakenUserPromptBlock` 等正式组件使用。

@@ -1,5 +1,5 @@
 import { createElement, type ComponentProps } from "react";
-import { Cloud, Monitor } from "lucide-react";
+import { Monitor } from "lucide-react";
 import type { AwakenSelectableCard } from "./AwakenSelectableCard";
 
 export type AwakenSelectableCardState = {
@@ -17,19 +17,19 @@ export const AwakenSelectableCardStates: AwakenSelectableCardState[] = [
     props: {
       selected: true,
       icon: createElement(Monitor, { size: 18, strokeWidth: 1.9 }),
-      title: "本地",
-      description: "从这台 Mac 选择一个已有文件夹。",
+      title: "Local",
+      description: "Use a folder on this Mac as an Awaken project.",
       onSelect: noop,
     } as Partial<ComponentProps<typeof AwakenSelectableCard>>,
   },
   {
-    id: "remote-disabled",
-    label: "未来态禁用",
+    id: "local-available",
+    label: "本地可选",
     props: {
-      disabled: true,
-      icon: createElement(Cloud, { size: 18, strokeWidth: 1.9 }),
-      title: "远程",
-      description: "远程仓库和云工作区稍后开放。",
+      selected: false,
+      icon: createElement(Monitor, { size: 18, strokeWidth: 1.9 }),
+      title: "Local",
+      description: "Use a folder on this Mac as an Awaken project.",
       onSelect: noop,
     } as Partial<ComponentProps<typeof AwakenSelectableCard>>,
   },

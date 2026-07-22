@@ -10,12 +10,8 @@ export type {
   ConversationItem,
   ProjectItem,
   ProjectMenuItem,
-  QuickActionItem,
-  ModelOption,
   RunStepItem,
-  ToastItem,
   ApprovalRiskTone,
   ApprovalItem,
-  ComposerMode,
   ComposerReadyState,
 } from "./types";

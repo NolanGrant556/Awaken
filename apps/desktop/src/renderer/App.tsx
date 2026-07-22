@@ -4324,7 +4324,6 @@ export function App() {
                 profileName="Nolan"
                 profileAvatarFallback="AW"
                 newTaskLabel="New Agent"
-                newTaskShortcut=""
                 projectSectionLabel="Projects"
                 projectSectionActions={
                   <span className="sidebar-section-actions">
@@ -4345,7 +4344,6 @@ export function App() {
                   </span>
                 }
                 showProjectCount={false}
-                platform={platform}
                 onSelectNav={handleSelectNav}
                 onSelectProject={handleSelectProject}
                 onExpandedChange={setExpandedProjectIds}

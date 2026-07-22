@@ -3,37 +3,16 @@ import { AwakenAccountDemo } from "../src/components/AwakenAccount/AwakenAccount
 import { AwakenDeliverableListDemo } from "../src/components/AwakenDeliverableList/AwakenDeliverableList.demo";
 import { AwakenAssistantMessageDemo } from "../src/components/AwakenAssistantMessage/AwakenAssistantMessage.demo";
 import { AwakenAvatarDemo } from "../src/components/AwakenAvatar/AwakenAvatar.demo";
-import { AwakenButtonDemo } from "../src/components/AwakenButton/AwakenButton.demo";
 import { AwakenComposerBarDemo } from "../src/components/AwakenComposerBar/AwakenComposerBar.demo";
-import { AwakenComposerInputDemo } from "../src/components/AwakenComposerInput/AwakenComposerInput.demo";
-import { AwakenContextButtonDemo } from "../src/components/AwakenContextButton/AwakenContextButton.demo";
 import { AwakenConnectorsDemo } from "../src/components/AwakenConnectors/AwakenConnectors.demo";
-import { AwakenCopyButtonDemo } from "../src/components/AwakenCopyButton/AwakenCopyButton.demo";
-import { AwakenDisclosureDemo } from "../src/components/AwakenDisclosure/AwakenDisclosure.demo";
-import { AwakenDividerDemo } from "../src/components/AwakenDivider/AwakenDivider.demo";
-import { AwakenDialogDemo } from "../src/components/AwakenDialog/AwakenDialog.demo";
-import { AwakenDropdownDemo } from "../src/components/AwakenDropdown/AwakenDropdown.demo";
-import { AwakenIconDemo } from "../src/components/AwakenIcon/AwakenIcon.demo";
-import { AwakenIconButtonDemo } from "../src/components/AwakenIconButton/AwakenIconButton.demo";
-import { AwakenKbdDemo } from "../src/components/AwakenKbd/AwakenKbd.demo";
-import { AwakenModelSelectorDemo } from "../src/components/AwakenModelSelector/AwakenModelSelector.demo";
-import { AwakenModeToggleDemo } from "../src/components/AwakenModeToggle/AwakenModeToggle.demo";
 import { AwakenOriginalThinkingDemo } from "../src/components/AwakenOriginalThinking/AwakenOriginalThinking.demo";
-import { AwakenPillDemo } from "../src/components/AwakenPill/AwakenPill.demo";
-import { AwakenPopoverDemo } from "../src/components/AwakenPopover/AwakenPopover.demo";
 import { AwakenProductLogoDemo } from "../src/components/AwakenProductLogo/AwakenProductLogo.demo";
-import { AwakenQuickActionChipDemo } from "../src/components/AwakenQuickActionChip/AwakenQuickActionChip.demo";
 import { AwakenRunStageDemo } from "../src/components/AwakenRunStage/AwakenRunStage.demo";
-import { AwakenSendButtonDemo } from "../src/components/AwakenSendButton/AwakenSendButton.demo";
-import { AwakenSelectableCardDemo } from "../src/components/AwakenSelectableCard/AwakenSelectableCard.demo";
 import { AwakenSettingsDemo } from "../src/components/AwakenSettings/AwakenSettings.demo";
 import { AwakenSidebarDemo } from "../src/components/AwakenSidebar/AwakenSidebar.demo";
 import { AwakenSkillsDemo } from "../src/components/AwakenSkills/AwakenSkills.demo";
-import { AwakenStatusPillDemo } from "../src/components/AwakenStatusPill/AwakenStatusPill.demo";
 import { AwakenTaskWelcomeDemo } from "../src/components/AwakenTaskWelcome/AwakenTaskWelcome.demo";
 import { AwakenThoughtTraceDemo } from "../src/components/AwakenThoughtTrace/AwakenThoughtTrace.demo";
-import { AwakenToastDemo } from "../src/components/AwakenToast/AwakenToast.demo";
-import { AwakenTooltipDemo } from "../src/components/AwakenTooltip/AwakenTooltip.demo";
 import { AwakenToolTraceGroupDemo } from "../src/components/AwakenToolTraceGroup/AwakenToolTraceGroup.demo";
 import { AwakenWorkbenchShellDemo } from "../src/components/AwakenWorkbenchShell/AwakenWorkbenchShell.demo";
 
@@ -50,10 +29,10 @@ export type AwakenGalleryCategory = "atomic" | "sidebar" | "workbench" | "compos
 
 export const awakenGalleryEntries: AwakenGalleryEntry[] = [
   { id: "awaken-product-logo", name: "AwakenProductLogo", displayName: "产品 LOGO", demo: AwakenProductLogoDemo, category: "atomic" },
-  { id: "awaken-sidebar", name: "AwakenSidebar", displayName: "「左侧栏」组件库", demo: AwakenSidebarDemo, category: "sidebar" },
+  { id: "awaken-sidebar", name: "AwakenSidebar", displayName: "「左侧栏」组件库", demo: AwakenSidebarDemo, category: "sidebar", aliases: ["awaken-dialog", "awaken-dropdown", "awaken-icon", "awaken-selectable-card"] },
   { id: "awaken-skills", name: "AwakenSkills", displayName: "「技能」组件库", demo: AwakenSkillsDemo, category: "sidebar" },
-  { id: "awaken-settings", name: "AwakenSettings", displayName: "「设置」组件库", demo: AwakenSettingsDemo, category: "sidebar" },
-  { id: "awaken-account", name: "AwakenAccount", displayName: "「账户」组件库", demo: AwakenAccountDemo, category: "sidebar" },
+  { id: "awaken-settings", name: "AwakenSettings", displayName: "「设置」组件库", demo: AwakenSettingsDemo, category: "sidebar", aliases: ["awaken-button"] },
+  { id: "awaken-account", name: "AwakenAccount", displayName: "「账户」组件库", demo: AwakenAccountDemo, category: "sidebar", aliases: ["awaken-popover"] },
   { id: "awaken-connectors", name: "AwakenConnectors", displayName: "「连接器」组件库", demo: AwakenConnectorsDemo, category: "sidebar" },
   {
     id: "awaken-deliverables",
@@ -63,41 +42,20 @@ export const awakenGalleryEntries: AwakenGalleryEntry[] = [
     category: "workbench",
     aliases: ["awaken-deliverable-card", "awaken-deliverable-list"],
   },
-  { id: "awaken-assistant-message", name: "AwakenAssistantMessage", displayName: "「助手消息」组件库", demo: AwakenAssistantMessageDemo, category: "workbench" },
+  { id: "awaken-assistant-message", name: "AwakenAssistantMessage", displayName: "「助手消息」组件库", demo: AwakenAssistantMessageDemo, category: "workbench", aliases: ["awaken-copy-button"] },
   { id: "awaken-avatar", name: "AwakenAvatar", displayName: "头像", demo: AwakenAvatarDemo, category: "atomic" },
-  { id: "awaken-button", name: "AwakenButton", displayName: "按钮", demo: AwakenButtonDemo, category: "atomic" },
-  { id: "awaken-composer-bar", name: "AwakenComposerBar", displayName: "「输入栏」组件库", demo: AwakenComposerBarDemo, category: "workbench", aliases: ["awaken-user-prompt-block", "awaken-composer-dock"] },
-  { id: "awaken-composer-input", name: "AwakenComposerInput", displayName: "输入框", demo: AwakenComposerInputDemo, category: "atomic" },
-  { id: "awaken-context-button", name: "AwakenContextButton", displayName: "上下文按钮", demo: AwakenContextButtonDemo, category: "atomic" },
-  { id: "awaken-copy-button", name: "AwakenCopyButton", displayName: "复制按钮", demo: AwakenCopyButtonDemo, category: "atomic" },
-  { id: "awaken-disclosure", name: "AwakenDisclosure", displayName: "展开折叠", demo: AwakenDisclosureDemo, category: "atomic" },
-  { id: "awaken-divider", name: "AwakenDivider", displayName: "分隔线", demo: AwakenDividerDemo, category: "atomic" },
-  { id: "awaken-dialog", name: "AwakenDialog", displayName: "弹窗", demo: AwakenDialogDemo, category: "atomic" },
-  { id: "awaken-dropdown", name: "AwakenDropdown", displayName: "下拉菜单", demo: AwakenDropdownDemo, category: "atomic" },
-  { id: "awaken-icon", name: "AwakenIcon", displayName: "图标", demo: AwakenIconDemo, category: "atomic" },
-  { id: "awaken-icon-button", name: "AwakenIconButton", displayName: "图标按钮", demo: AwakenIconButtonDemo, category: "atomic" },
-  { id: "awaken-kbd", name: "AwakenKbd", displayName: "快捷键标记", demo: AwakenKbdDemo, category: "atomic" },
-  { id: "awaken-model-selector", name: "AwakenModelSelector", displayName: "模型选择器", demo: AwakenModelSelectorDemo, category: "atomic" },
-  { id: "awaken-mode-toggle", name: "AwakenModeToggle", displayName: "模式切换", demo: AwakenModeToggleDemo, category: "atomic" },
+  { id: "awaken-composer-bar", name: "AwakenComposerBar", displayName: "「输入栏」组件库", demo: AwakenComposerBarDemo, category: "workbench", aliases: ["awaken-composer-input", "awaken-context-button", "awaken-user-prompt-block", "awaken-composer-dock", "awaken-icon-button", "awaken-send-button", "awaken-tooltip"] },
   { id: "awaken-original-thinking", name: "AwakenOriginalThinking", displayName: "原始思考动效", demo: AwakenOriginalThinkingDemo, category: "atomic" },
-  { id: "awaken-pill", name: "AwakenPill", displayName: "胶囊标签", demo: AwakenPillDemo, category: "atomic" },
-  { id: "awaken-popover", name: "AwakenPopover", displayName: "弹出层", demo: AwakenPopoverDemo, category: "atomic" },
-  { id: "awaken-quick-action-chip", name: "AwakenQuickActionChip", displayName: "快捷动作标签", demo: AwakenQuickActionChipDemo, category: "atomic" },
   { id: "awaken-run-stage", name: "AwakenRunStage", displayName: "「运行阶段」组件库", demo: AwakenRunStageDemo, category: "workbench", aliases: ["awaken-execution-feed"] },
-  { id: "awaken-send-button", name: "AwakenSendButton", displayName: "发送按钮", demo: AwakenSendButtonDemo, category: "atomic" },
-  { id: "awaken-selectable-card", name: "AwakenSelectableCard", displayName: "选择卡片", demo: AwakenSelectableCardDemo, category: "atomic" },
-  { id: "awaken-status-pill", name: "AwakenStatusPill", displayName: "状态胶囊", demo: AwakenStatusPillDemo, category: "atomic" },
   { id: "awaken-task-welcome", name: "AwakenTaskWelcome", displayName: "「任务欢迎区」组件库", demo: AwakenTaskWelcomeDemo, category: "workbench" },
   { id: "awaken-thought-trace", name: "AwakenThoughtTrace", displayName: "「思路轨迹」组件库", demo: AwakenThoughtTraceDemo, category: "workbench" },
-  { id: "awaken-toast", name: "AwakenToast", displayName: "提示通知", demo: AwakenToastDemo, category: "atomic" },
-  { id: "awaken-tooltip", name: "AwakenTooltip", displayName: "工具提示", demo: AwakenTooltipDemo, category: "atomic" },
   {
     id: "awaken-tool-trace",
     name: "AwakenToolTraceGroup",
     displayName: "「工具轨迹」组件库",
     demo: AwakenToolTraceGroupDemo,
     category: "workbench",
-    aliases: ["awaken-tool-trace-group", "awaken-tool-trace-line"],
+    aliases: ["awaken-disclosure", "awaken-tool-trace-group", "awaken-tool-trace-line"],
   },
   {
     id: "awaken-workbench-shell",

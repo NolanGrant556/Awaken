@@ -1,7 +1,7 @@
 import "./AwakenProfileButton.css";
 import type { CSSProperties, MouseEvent } from "react";
+import { ChevronUp } from "lucide-react";
 import { AwakenAvatar } from "../AwakenAvatar";
-import { AwakenIcon } from "../AwakenIcon";
 
 export type AwakenProfileButtonProps = {
   name: string;
@@ -93,9 +93,7 @@ export function AwakenProfileButton({
         {subtitle ? <span style={subtitleStyle}>{subtitle}</span> : null}
       </span>
       <span style={{ display: "inline-flex", color: "var(--aw-text-tertiary)" }}>
-        <AwakenIcon size={16}>
-          <path d="M6 15l6-6 6 6" />
-        </AwakenIcon>
+        <ChevronUp size={16} strokeWidth={1.85} aria-hidden="true" />
       </span>
     </button>
   );

@@ -1,9 +1,8 @@
 import "./AwakenProjectTree.css";
 import { useState, type CSSProperties } from "react";
-import { Folder, FolderOpen, MoreHorizontal } from "lucide-react";
+import { ChevronRight, Folder, FolderOpen, MoreHorizontal } from "lucide-react";
 import type { ProjectItem } from "../../types";
 import { AwakenDropdown } from "../AwakenDropdown";
-import { AwakenIcon } from "../AwakenIcon";
 import { AwakenSidebarThreadSpinner } from "../AwakenSidebarThreadSpinner";
 
 export type AwakenProjectTreeProps = {
@@ -167,9 +166,7 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
             <span className="aw-project-row-label">{item.label}</span>
             {showInlineChevron ? (
               <span className="aw-project-inline-chevron" aria-hidden="true">
-                <AwakenIcon size={14}>
-                  <path d="M9 6l6 6-6 6" />
-                </AwakenIcon>
+                <ChevronRight size={14} strokeWidth={1.85} aria-hidden="true" />
               </span>
             ) : null}
           </span>

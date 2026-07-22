@@ -15,19 +15,6 @@ export const AwakenNewTaskButtonStates: AwakenNewTaskButtonState[] = [
     label: "侧边栏入口",
     props: {
       onClick: noop,
-      shortcut: "N",
-      platform: "macos",
-      children: "新建任务",
-      disabled: false,
-    } as unknown as Partial<ComponentProps<typeof AwakenNewTaskButton>>,
-  },
-  {
-    id: "windows-shortcut",
-    label: "Windows 快捷键",
-    props: {
-      onClick: noop,
-      shortcut: "Ctrl+N",
-      platform: "windows",
       children: "新建任务",
       disabled: false,
     } as unknown as Partial<ComponentProps<typeof AwakenNewTaskButton>>,
@@ -37,8 +24,6 @@ export const AwakenNewTaskButtonStates: AwakenNewTaskButtonState[] = [
     label: "暂不可用",
     props: {
       onClick: noop,
-      shortcut: "N",
-      platform: "macos",
       children: "正在启动运行时",
       disabled: true,
     } as unknown as Partial<ComponentProps<typeof AwakenNewTaskButton>>,
@@ -48,8 +33,6 @@ export const AwakenNewTaskButtonStates: AwakenNewTaskButtonState[] = [
     label: "长入口文案",
     props: {
       onClick: noop,
-      shortcut: "N",
-      platform: "macos",
       children: "新建带当前工作区上下文的任务",
       disabled: false,
     } as unknown as Partial<ComponentProps<typeof AwakenNewTaskButton>>,

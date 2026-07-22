@@ -65,24 +65,6 @@ export type ProjectMenuItem = {
   onSelect?: () => void;
 };
 
-// === 快捷任务 ===
-
-export type QuickActionItem = {
-  id: string;
-  label: string;       // chip 显示文本
-  prompt: string;      // 点击后填入 composer 的完整文本
-  icon?: React.ReactNode;
-  disabled?: boolean;
-};
-
-// === 模型选项 ===
-
-export type ModelOption = {
-  id: string;
-  label: string;
-  disabled?: boolean;
-};
-
 // === 运行步骤 ===
 
 export type RunStepItem = {
@@ -92,15 +74,6 @@ export type RunStepItem = {
   description?: string;
   tag?: string;         // 右侧 code 标签，如 "scope"
   status: RunStepStatus;
-};
-
-// === Toast ===
-
-export type ToastItem = {
-  id: string;
-  message: string;
-  duration?: number;    // ms，默认 1500
-  tone?: ComponentTone;
 };
 
 // === Approval / Permission ===
@@ -119,7 +92,5 @@ export type ApprovalItem = {
 };
 
 // === Composer 状态 ===
-
-export type ComposerMode = "Plan" | "Act";
 
 export type ComposerReadyState = boolean; // 由业务层根据 value.length > 0 计算后传入

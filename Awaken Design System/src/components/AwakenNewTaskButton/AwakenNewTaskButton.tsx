@@ -1,13 +1,9 @@
 import "./AwakenNewTaskButton.css";
 import type { ButtonHTMLAttributes, CSSProperties, MouseEvent } from "react";
-import type { PlatformKind } from "../../types";
-import { AwakenIcon } from "../AwakenIcon";
-import { AwakenKbd } from "../AwakenKbd";
+import { Plus } from "lucide-react";
 
 export type AwakenNewTaskButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "onClick"> & {
   onClick?: () => void;
-  shortcut?: string;
-  platform?: PlatformKind;
 };
 
 const buttonStyle: CSSProperties = {
@@ -37,8 +33,6 @@ const leftStyle: CSSProperties = {
 
 export function AwakenNewTaskButton({
   onClick,
-  shortcut,
-  platform = "macos",
   disabled,
   children = "新建任务",
   className,
@@ -80,13 +74,9 @@ export function AwakenNewTaskButton({
       {...props}
     >
       <span style={leftStyle}>
-        <AwakenIcon>
-          <path d="M12 5v14" />
-          <path d="M5 12h14" />
-        </AwakenIcon>
+        <Plus size={16} strokeWidth={1.85} aria-hidden="true" />
         <span>{children}</span>
       </span>
-      {shortcut ? <AwakenKbd platform={platform}>{shortcut}</AwakenKbd> : null}
     </button>
   );
 }

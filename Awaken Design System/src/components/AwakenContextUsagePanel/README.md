@@ -5,4 +5,4 @@
 - `AwakenContextUsagePanel.tsx`：结构、格式化和局部初始焦点。
 - `AwakenContextUsagePanel.css`：基于现有 Design System token 的亮暗主题与窄窗口内部滚动。
 - `AwakenContextUsagePanel.states.ts`：分类与旧记录降级状态。
-- `AwakenContextUsagePanel.demo.tsx`：Gallery 演示。
+- `AwakenContextUsagePanel.demo.tsx`：独立渲染夹具；面向人工观测的可点击场景由 `AwakenComposerBar.demo.tsx` 统一展示。

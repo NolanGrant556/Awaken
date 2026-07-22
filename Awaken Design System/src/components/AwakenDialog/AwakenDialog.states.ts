@@ -16,14 +16,14 @@ export const AwakenDialogStates: AwakenDialogState[] = [
     label: "创建项目",
     props: {
       open: true,
-      title: "创建项目",
+      title: "Create project",
       onOpenChange: noop,
-      children: "选择项目来源后，可以继续使用已有本地文件夹。",
+      children: "Use a folder on this Mac as an Awaken project.",
       footer: createElement(
         "div",
         { style: { display: "inline-flex", gap: 8 } },
-        createElement(AwakenButton, { variant: "default", size: "md", children: "使用现有文件夹" }),
-        createElement(AwakenButton, { variant: "primary", size: "md", children: "下一步" }),
+        createElement(AwakenButton, { variant: "default", size: "md", children: "Use existing folder" }),
+        createElement(AwakenButton, { variant: "primary", size: "md", children: "Next" }),
       ),
     } as Partial<ComponentProps<typeof AwakenDialog>>,
   },
@@ -32,7 +32,7 @@ export const AwakenDialogStates: AwakenDialogState[] = [
     label: "关闭状态",
     props: {
       open: false,
-      title: "创建项目",
+      title: "Create project",
       onOpenChange: noop,
       children: "关闭状态不会渲染弹窗。",
     } as Partial<ComponentProps<typeof AwakenDialog>>,

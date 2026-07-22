@@ -38,8 +38,8 @@ export function AwakenAccountDemo() {
   return (
     <section className="ads-component-demo aw-account-demo" aria-label="「账户」组件库 AwakenAccount 演示">
       <header className="ads-component-demo-header">
-        <h2>「账户」组件库 <code>AwakenAccount</code></h2>
-        <p>集中管理左下角个人入口、模型额度面板与设置动作，不归属于左侧栏组件目录。</p>
+        <h2>「账户」组件库 <code>AwakenAccount + AwakenPopover</code></h2>
+        <p>集中管理左下角个人入口、真实账户弹出层、模型额度面板与设置动作，不归属于左侧栏组件目录。</p>
       </header>
 
       <div className="aw-account-demo__controls">
@@ -67,7 +67,7 @@ export function AwakenAccountDemo() {
       <section className="aw-account-demo__composition" aria-labelledby="aw-account-composition-title">
         <header className="aw-account-demo__section-heading">
           <h3 id="aw-account-composition-title">完整组合</h3>
-          <p><code>AwakenAccount</code> 组合个人入口、额度查询结果和设置动作。</p>
+          <p><code>AwakenAccount</code> 通过 <code>AwakenPopover</code> 组合个人入口、额度查询结果和设置动作；点击 Nolan 可验证打开与关闭。</p>
         </header>
         <div className="aw-account-demo__composition-canvas">
           <AwakenAccount

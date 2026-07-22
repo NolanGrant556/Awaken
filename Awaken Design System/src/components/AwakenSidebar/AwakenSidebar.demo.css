@@ -178,8 +178,16 @@
   width: min(100%, var(--aw-sidebar-width));
 }
 
+.aw-sidebar-demo__part-canvas--menu-visible .aw-project-row-actions {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+
 .aw-sidebar-demo__section-actions,
-.aw-sidebar-demo__standalone-actions {
+.aw-sidebar-demo__standalone-actions,
+.aw-sidebar-demo__dialog-actions {
   display: inline-flex;
   align-items: center;
   gap: var(--aw-space-2);
@@ -190,6 +198,47 @@
   color: var(--aw-text-tertiary);
   font-size: var(--aw-font-size-xs);
   line-height: var(--aw-line-height-xs);
+}
+
+.aw-sidebar-demo__dialog-actions {
+  flex-wrap: wrap;
+}
+
+.aw-sidebar-demo__dialog-card {
+  width: min(100%, 420px);
+}
+
+.aw-sidebar-demo__dialog-copy {
+  margin: 0;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+}
+
+.aw-sidebar-demo__rename-field {
+  display: grid;
+  gap: var(--aw-space-3);
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+}
+
+.aw-sidebar-demo__rename-field input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 var(--aw-space-4);
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-bg-main);
+  color: var(--aw-text-primary);
+  font: inherit;
+  outline: none;
+}
+
+.aw-sidebar-demo__rename-field input:focus {
+  border-color: var(--aw-border-strong);
+  box-shadow: 0 0 0 2px var(--aw-focus-ring);
 }
 
 .aw-sidebar-demo__spinner-row {

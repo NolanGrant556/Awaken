@@ -15,7 +15,7 @@ export const AwakenButtonStates: AwakenButtonState[] = [
       variant: "default",
       size: "md",
       loading: false,
-      children: "查看详情",
+      children: "取消",
       disabled: false,
     } as unknown as Partial<ComponentProps<typeof AwakenButton>>,
   },
@@ -25,7 +25,7 @@ export const AwakenButtonStates: AwakenButtonState[] = [
     props: {
       variant: "primary",
       size: "md",
-      children: "开始运行",
+      children: "保存",
     } as unknown as Partial<ComponentProps<typeof AwakenButton>>,
   },
   {
@@ -34,7 +34,7 @@ export const AwakenButtonStates: AwakenButtonState[] = [
     props: {
       variant: "ghost",
       size: "sm",
-      children: "稍后",
+      children: "打开 Awaken 目录",
     } as unknown as Partial<ComponentProps<typeof AwakenButton>>,
   },
   {
@@ -44,7 +44,7 @@ export const AwakenButtonStates: AwakenButtonState[] = [
       variant: "primary",
       size: "md",
       loading: true,
-      children: "正在保存",
+      children: "保存",
     } as unknown as Partial<ComponentProps<typeof AwakenButton>>,
   },
   {
@@ -54,7 +54,7 @@ export const AwakenButtonStates: AwakenButtonState[] = [
       variant: "default",
       size: "md",
       disabled: true,
-      children: "等待输入",
+      children: "保存",
     } as unknown as Partial<ComponentProps<typeof AwakenButton>>,
   },
   {
@@ -63,7 +63,7 @@ export const AwakenButtonStates: AwakenButtonState[] = [
     props: {
       variant: "default",
       size: "lg",
-      children: "打开本次运行的完整审计记录",
+      children: "更新 API key",
     } as unknown as Partial<ComponentProps<typeof AwakenButton>>,
   },
 ];

@@ -28,7 +28,6 @@ func toolCallIDFromContext(ctx context.Context) string {
 	return ""
 }
 
-
 const ToolName = "delegate_external_agent"
 
 type delegateInput struct {
@@ -75,10 +74,10 @@ func (t *DelegateExternalAgentTool) InputSchema() tool.ToolParametersSchema {
 		AdditionalProperties: &noExtra,
 		Required:             []string{"action"},
 		Properties: map[string]tool.ToolParam{
-			"action":  {Type: "string", Description: "list | status | start | message | cancel | close", Enum: []any{"list", "status", "start", "message", "cancel", "close"}},
-			"runner":  {Type: "string", Description: "runner ID"},
-			"message": {Type: "string", Description: "prompt text"},
-			"cwd":     {Type: "string", Description: "working directory"},
+			"action":              {Type: "string", Description: "list | status | start | message | cancel | close", Enum: []any{"list", "status", "start", "message", "cancel", "close"}},
+			"runner":              {Type: "string", Description: "runner ID"},
+			"message":             {Type: "string", Description: "prompt text"},
+			"cwd":                 {Type: "string", Description: "working directory"},
 			"max_runtime_seconds": {Type: "integer", Description: "per-turn timeout"},
 		},
 	}
@@ -173,9 +172,9 @@ func (t *DelegateExternalAgentTool) listRunners() (string, error) {
 	items := make([]map[string]any, 0, len(runners))
 	for _, r := range runners {
 		items = append(items, map[string]any{
-			"id":             r.ID,
-			"command":        r.Command,
-			"args":           r.Args,
+			"id":              r.ID,
+			"command":         r.Command,
+			"args":            r.Args,
 			"permission_mode": string(r.PermissionMode),
 		})
 	}

@@ -9,8 +9,8 @@ import (
 )
 
 type fakeClient struct {
-	caps            AgentCapabilitiesSnapshot
-	promptResult    TurnResult
+	caps              AgentCapabilitiesSnapshot
+	promptResult      TurnResult
 	permissionRequest *PermissionRequest
 }
 

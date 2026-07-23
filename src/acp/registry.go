@@ -11,8 +11,8 @@ import (
 
 // Registry loads user-scoped ACP runner configurations.
 type Registry struct {
-	mu      sync.RWMutex
-	fileMu  sync.Mutex
+	mu       sync.RWMutex
+	fileMu   sync.Mutex
 	userPath string
 	runners  map[string]RunnerConfig
 }

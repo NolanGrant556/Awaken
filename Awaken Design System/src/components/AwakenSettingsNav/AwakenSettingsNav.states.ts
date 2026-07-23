@@ -1,11 +1,12 @@
 import type { AwakenSettingsNavProps } from "./AwakenSettingsNav";
+import { Brain, Cpu, Palette, PawPrint, Search } from "lucide-react";
 
 export const AwakenSettingsNavItems: AwakenSettingsNavProps["items"] = [
-  { id: "models", label: "模型" },
-  { id: "search", label: "搜索" },
-  { id: "memory", label: "记忆" },
-  { id: "appearance", label: "外观" },
-  { id: "pets", label: "宠物" },
+  { id: "models", label: "模型", icon: Cpu },
+  { id: "search", label: "搜索", icon: Search },
+  { id: "memory", label: "记忆", icon: Brain },
+  { id: "appearance", label: "外观", icon: Palette },
+  { id: "pets", label: "宠物", icon: PawPrint },
 ];
 
 export const AwakenSettingsNavStates = [

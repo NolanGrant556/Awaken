@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  AwakenMemoryLightFlowLayout,
   AwakenMemorySettings,
   type AwakenMemoryFilterValue,
 } from "@awaken/design-system";
 import type {
+  AwakenTheme,
   MemoryScope,
   MemorySettings,
   MemoryType,
@@ -29,7 +31,15 @@ export function memoryDreamStatusLabel(status: string): string {
   } as Record<string, string>)[status] ?? "状态未知";
 }
 
-export function MemorySettingsPanel({ runtimeClient, currentProjectId }: { runtimeClient: RuntimeClient; currentProjectId?: string }) {
+export function MemorySettingsPanel({
+  runtimeClient,
+  currentProjectId,
+  theme = "light",
+}: {
+  runtimeClient: RuntimeClient;
+  currentProjectId?: string;
+  theme?: AwakenTheme;
+}) {
   const [settings, setSettings] = useState<MemorySettings | null>(null);
   const [revision, setRevision] = useState(0);
   const [projects, setProjects] = useState<RuntimeProject[]>([]);
@@ -153,42 +163,48 @@ export function MemorySettingsPanel({ runtimeClient, currentProjectId }: { runti
   }
 
   return (
-    <AwakenMemorySettings
-      switches={switchCopy.map((item) => ({
-        id: item.key,
-        title: item.title,
-        description: item.description,
-        checked: settings?.[item.key] ?? false,
-      }))}
-      filters={[
-        { id: "scope", label: "记忆范围", value: scope, options: [{ value: "user", label: "用户记忆" }, { value: "project", label: "项目记忆" }] },
-        ...(scope === "project" ? [{ id: "project", label: "项目", value: projectId, options: projects.map((project) => ({ value: project.projectId, label: project.displayName })), placeholder: "（项目待选择）", disabled: !projects.length }] : []),
-        { id: "type", label: "记忆类型", value: type, options: [{ value: "", label: "全部类型" }, { value: "user", label: "用户" }, { value: "feedback", label: "反馈" }, { value: "project", label: "项目" }, { value: "reference", label: "参考" }] },
-        { id: "status", label: "记忆状态", value: status, options: [{ value: "", label: "全部状态" }, { value: "active", label: "有效" }, { value: "superseded", label: "已替代" }] },
-        { id: "updated", label: "更新时间", value: updatedWithinDays, options: [{ value: 0, label: "全部时间" }, { value: 7, label: "最近 7 天" }, { value: 30, label: "最近 30 天" }] },
-      ]}
-      query={query}
-      memories={memories.map((memory) => ({ id: memory.memoryId, name: memory.name, description: memory.description, meta: `${memory.scope} · ${memory.type} · ${new Date(memory.updatedAt).toLocaleString()}` }))}
-      selectedMemoryId={selected?.memoryId}
-      detail={selected ? { name: selected.name, description: selected.description, content: selected.content ?? "", sourceThreadId: selected.sourceThreadId, revision: selected.revision } : null}
-      busy={!settings || busy}
-      canStartDream={scope !== "project" || Boolean(projectId)}
-      dreamRunning={Boolean(dreamTaskId && (dreamStatus === "queued" || dreamStatus === "running"))}
-      dreamStatusLabel={dreamStatus ? memoryDreamStatusLabel(dreamStatus) : null}
-      message={message}
-      onToggleSwitch={(key) => void toggle(key as keyof MemorySettings)}
-      onQueryChange={(value) => changeFilter(setQuery, value)}
-      onFilterChange={(id: string, value: AwakenMemoryFilterValue) => {
-        if (id === "scope") changeFilter(setScope, value as MemoryScope);
-        else if (id === "project") changeFilter(setProjectId, String(value));
-        else if (id === "type") changeFilter(setType, value as MemoryType | "");
-        else if (id === "status") changeFilter(setStatus, value as typeof status);
-        else if (id === "updated") changeFilter(setUpdatedWithinDays, Number(value));
-      }}
-      onStartDream={() => void startDream()}
-      onCancelDream={() => { if (dreamTaskId) void runtimeClient.cancelMemoryDream(dreamTaskId); }}
-      onOpenMemory={(memoryId) => { const memory = memories.find((item) => item.memoryId === memoryId); if (memory) void openMemory(memory); }}
-      onDeleteMemory={(memoryId) => { const memory = memories.find((item) => item.memoryId === memoryId); if (memory) void removeMemory(memory); }}
-    />
+    <AwakenMemoryLightFlowLayout
+      className="desktop-memory-settings"
+      theme={theme}
+      titleAs="h1"
+    >
+      <AwakenMemorySettings
+        switches={switchCopy.map((item) => ({
+          id: item.key,
+          title: item.title,
+          description: item.description,
+          checked: settings?.[item.key] ?? false,
+        }))}
+        filters={[
+          { id: "scope", label: "记忆范围", value: scope, options: [{ value: "user", label: "用户记忆" }, { value: "project", label: "项目记忆" }] },
+          ...(scope === "project" ? [{ id: "project", label: "项目", value: projectId, options: projects.map((project) => ({ value: project.projectId, label: project.displayName })), placeholder: "（项目待选择）", disabled: !projects.length }] : []),
+          { id: "type", label: "记忆类型", value: type, options: [{ value: "", label: "全部类型" }, { value: "user", label: "用户" }, { value: "feedback", label: "反馈" }, { value: "project", label: "项目" }, { value: "reference", label: "参考" }] },
+          { id: "status", label: "记忆状态", value: status, options: [{ value: "", label: "全部状态" }, { value: "active", label: "有效" }, { value: "superseded", label: "已替代" }] },
+          { id: "updated", label: "更新时间", value: updatedWithinDays, options: [{ value: 0, label: "全部时间" }, { value: 7, label: "最近 7 天" }, { value: 30, label: "最近 30 天" }] },
+        ]}
+        query={query}
+        memories={memories.map((memory) => ({ id: memory.memoryId, name: memory.name, description: memory.description, meta: `${memory.scope} · ${memory.type} · ${new Date(memory.updatedAt).toLocaleString()}` }))}
+        selectedMemoryId={selected?.memoryId}
+        detail={selected ? { name: selected.name, description: selected.description, content: selected.content ?? "", sourceThreadId: selected.sourceThreadId, revision: selected.revision } : null}
+        busy={!settings || busy}
+        canStartDream={scope !== "project" || Boolean(projectId)}
+        dreamRunning={Boolean(dreamTaskId && (dreamStatus === "queued" || dreamStatus === "running"))}
+        dreamStatusLabel={dreamStatus ? memoryDreamStatusLabel(dreamStatus) : null}
+        message={message}
+        onToggleSwitch={(key) => void toggle(key as keyof MemorySettings)}
+        onQueryChange={(value) => changeFilter(setQuery, value)}
+        onFilterChange={(id: string, value: AwakenMemoryFilterValue) => {
+          if (id === "scope") changeFilter(setScope, value as MemoryScope);
+          else if (id === "project") changeFilter(setProjectId, String(value));
+          else if (id === "type") changeFilter(setType, value as MemoryType | "");
+          else if (id === "status") changeFilter(setStatus, value as typeof status);
+          else if (id === "updated") changeFilter(setUpdatedWithinDays, Number(value));
+        }}
+        onStartDream={() => void startDream()}
+        onCancelDream={() => { if (dreamTaskId) void runtimeClient.cancelMemoryDream(dreamTaskId); }}
+        onOpenMemory={(memoryId) => { const memory = memories.find((item) => item.memoryId === memoryId); if (memory) void openMemory(memory); }}
+        onDeleteMemory={(memoryId) => { const memory = memories.find((item) => item.memoryId === memoryId); if (memory) void removeMemory(memory); }}
+      />
+    </AwakenMemoryLightFlowLayout>
   );
 }

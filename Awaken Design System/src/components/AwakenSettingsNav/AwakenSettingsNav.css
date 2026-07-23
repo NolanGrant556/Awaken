@@ -1,20 +1,22 @@
 @import "../../tokens/components.css";
 
-.settings-dialog-nav {
+.aw-settings-nav {
   display: grid;
   align-content: start;
   gap: 4px;
   min-width: 0;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
-.settings-dialog-nav-item {
+.aw-settings-nav__item {
   display: flex;
   align-items: center;
+  gap: 10px;
   width: 100%;
-  min-height: 34px;
-  padding: 0 10px;
+  min-height: 42px;
+  padding: 0 12px;
   border: 0;
   border-radius: var(--aw-radius-control);
   background: transparent;
@@ -25,19 +27,28 @@
   cursor: pointer;
 }
 
-.settings-dialog-nav-item:hover,
-.settings-dialog-nav-item:focus-visible,
-.settings-dialog-nav-item-active {
-  background: var(--aw-bg-fill-light);
+.aw-settings-nav__item svg { flex: 0 0 auto; color: var(--aw-text-tertiary); }
+.aw-settings-nav__item span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.aw-settings-nav__item:hover,
+.aw-settings-nav__item:focus-visible,
+.aw-settings-nav__item--active {
+  background: var(--aw-bg-fill-main);
   color: var(--aw-text-primary);
 }
 
-.settings-dialog-nav-item:focus-visible {
+.aw-settings-nav__item--active svg { color: var(--aw-text-secondary); }
+
+.aw-settings-nav__item:focus-visible {
   outline: 2px solid var(--aw-focus-ring);
   outline-offset: 1px;
 }
 
-.settings-dialog-nav-item:disabled {
+.aw-settings-nav__item:disabled {
   cursor: not-allowed;
   opacity: 0.48;
+}
+
+@media (max-width: 680px) {
+  .aw-settings-nav__item { gap: 8px; padding-inline: 9px; }
 }

@@ -1,0 +1,27 @@
+@import "../../tokens/components.css";
+
+.aw-model-settings {
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  min-width: 0;
+}
+
+.aw-model-settings__tabs {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--aw-border-light);
+}
+
+.aw-model-settings__content {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-width: 0;
+}
+
+.aw-model-settings__content > * {
+  width: 100%;
+}

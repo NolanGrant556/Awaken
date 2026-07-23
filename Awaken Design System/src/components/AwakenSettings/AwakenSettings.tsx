@@ -1,22 +1,27 @@
 import "./AwakenSettings.css";
-import type { CSSProperties, ReactNode } from "react";
+import { ArrowLeft } from "lucide-react";
+import type { CSSProperties, ReactNode, Ref } from "react";
 import { AwakenSettingsNav, type AwakenSettingsNavItem } from "../AwakenSettingsNav";
-import { AwakenSettingsTabs, type AwakenSettingsTabItem } from "../AwakenSettingsTabs";
+
+export type AwakenSettingsPresentation = "screen" | "embedded";
+export type AwakenSettingsContentLayout = "standard" | "full-bleed";
 
 export type AwakenSettingsProps = {
   title?: string;
   navItems: AwakenSettingsNavItem[];
   activeSectionId: string;
   sectionTitle: string;
-  tabs?: AwakenSettingsTabItem[];
-  activeTabId?: string;
   message?: ReactNode;
   toast?: ReactNode;
   children: ReactNode;
+  presentation?: AwakenSettingsPresentation;
+  contentLayout?: AwakenSettingsContentLayout;
+  backLabel?: string;
   className?: string;
   style?: CSSProperties;
+  rootRef?: Ref<HTMLElement>;
+  onBack?: () => void;
   onSelectSection: (id: string) => void;
-  onSelectTab?: (id: string) => void;
 };
 
 export function AwakenSettings({
@@ -24,49 +29,74 @@ export function AwakenSettings({
   navItems,
   activeSectionId,
   sectionTitle,
-  tabs,
-  activeTabId,
   message,
   toast,
   children,
+  presentation = "screen",
+  contentLayout = "standard",
+  backLabel = "返回应用",
   className,
   style,
+  rootRef,
+  onBack,
   onSelectSection,
-  onSelectTab,
 }: AwakenSettingsProps) {
   return (
-    <div
-      className={["settings-dialog-shell", className ?? ""].filter(Boolean).join(" ")}
+    <section
+      ref={rootRef}
+      className={[
+        "aw-settings-shell",
+        `aw-settings-shell--${presentation}`,
+        `aw-settings-shell--${contentLayout}`,
+        className ?? "",
+      ].filter(Boolean).join(" ")}
       style={style}
+      role={presentation === "screen" ? "dialog" : undefined}
+      aria-modal={presentation === "screen" ? true : undefined}
+      aria-label={`${title}工作区`}
+      tabIndex={-1}
     >
       {toast ? (
-        <div className="model-settings-toast" role="status" aria-live="polite">
+        <div className="aw-settings-toast" role="status" aria-live="polite">
           {toast}
         </div>
       ) : null}
-      <div className="settings-dialog-sidebar">
-        <div className="settings-dialog-sidebar-title">{title}</div>
+      <aside className="aw-settings-sidebar">
+        <div className="aw-settings-sidebar__head">
+          {onBack ? (
+            <button type="button" className="aw-settings-back" onClick={onBack}>
+              <ArrowLeft size={17} strokeWidth={1.8} aria-hidden="true" />
+              <span>{backLabel}</span>
+            </button>
+          ) : null}
+          <div className="aw-settings-sidebar__title">{title}</div>
+        </div>
         <AwakenSettingsNav
           items={navItems}
           activeId={activeSectionId}
           onSelect={onSelectSection}
         />
-      </div>
+      </aside>
 
-      <div className="model-settings">
-        <div className="model-settings-toolbar">
-          <h1 className="model-settings-title">{sectionTitle}</h1>
-          {tabs?.length ? (
-            <AwakenSettingsTabs
-              items={tabs}
-              activeId={activeTabId}
-              onSelect={onSelectTab}
-            />
-          ) : null}
-        </div>
-        {message ? <div className="model-settings-message">{message}</div> : null}
-        {children}
-      </div>
-    </div>
+      <main
+        className={[
+          "aw-settings-main",
+          contentLayout === "full-bleed" ? "aw-settings-main--full-bleed" : "",
+        ].filter(Boolean).join(" ")}
+        aria-label={`${sectionTitle}设置`}
+      >
+        {contentLayout === "full-bleed" ? children : (
+          <div className="aw-settings-scroll">
+            <div className="aw-settings-page">
+              <header className="aw-settings-page__header">
+                <h1 className="aw-settings-page__title">{sectionTitle}</h1>
+              </header>
+              {message ? <div className="model-settings-message">{message}</div> : null}
+              {children}
+            </div>
+          </div>
+        )}
+      </main>
+    </section>
   );
 }

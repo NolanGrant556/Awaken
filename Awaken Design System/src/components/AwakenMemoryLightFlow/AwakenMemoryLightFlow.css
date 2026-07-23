@@ -1,0 +1,49 @@
+@import "../../tokens/components.css";
+
+.aw-memory-light-flow {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 168px;
+  overflow: hidden;
+  background: var(--aw-surface-raised);
+  isolation: isolate;
+  pointer-events: none;
+}
+
+.aw-memory-light-flow *,
+.aw-memory-light-flow *::before,
+.aw-memory-light-flow *::after {
+  box-sizing: border-box;
+}
+
+.aw-memory-light-flow::after {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 72% 42%, var(--aw-memory-light-flow-bloom), transparent 58%);
+  content: "";
+}
+
+.aw-memory-light-flow--light {
+  --aw-memory-light-flow-surface: rgba(247, 250, 248, 0.92);
+  --aw-memory-light-flow-bloom: rgba(46, 181, 115, 0.15);
+  color-scheme: light;
+}
+
+.aw-memory-light-flow--dark {
+  --aw-memory-light-flow-surface: rgba(17, 21, 17, 0.94);
+  --aw-memory-light-flow-bloom: rgba(86, 230, 174, 0.09);
+  color-scheme: dark;
+}
+
+.aw-memory-light-flow__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aw-memory-light-flow__canvas {
+    animation: none;
+  }
+}

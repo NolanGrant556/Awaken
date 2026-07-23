@@ -1,8 +1,10 @@
 import "./AwakenSettingsNav.css";
+import type { LucideIcon } from "lucide-react";
 
 export type AwakenSettingsNavItem = {
   id: string;
   label: string;
+  icon?: LucideIcon;
   disabled?: boolean;
 };
 
@@ -16,25 +18,26 @@ export type AwakenSettingsNavProps = {
 export function AwakenSettingsNav({
   items,
   activeId,
-  ariaLabel = "Settings sections",
+  ariaLabel = "设置分区",
   onSelect,
 }: AwakenSettingsNavProps) {
   return (
-    <nav className="settings-dialog-nav" role="tablist" aria-label={ariaLabel}>
+    <nav className="aw-settings-nav" role="tablist" aria-label={ariaLabel}>
       {items.map((item) => (
         <button
           key={item.id}
           type="button"
           className={[
-            "settings-dialog-nav-item",
-            item.id === activeId ? "settings-dialog-nav-item-active" : "",
+            "aw-settings-nav__item",
+            item.id === activeId ? "aw-settings-nav__item--active" : "",
           ].filter(Boolean).join(" ")}
           role="tab"
           aria-selected={item.id === activeId}
           disabled={item.disabled}
           onClick={() => onSelect?.(item.id)}
         >
-          {item.label}
+          {item.icon ? <item.icon size={17} strokeWidth={1.8} aria-hidden="true" /> : null}
+          <span>{item.label}</span>
         </button>
       ))}
     </nav>

@@ -1,15 +1,31 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "./AwakenMemorySettings.demo.css";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenMemoryLightFlowLayout } from "../AwakenMemoryLightFlow";
 import { AwakenSettingsSectionPreview } from "../AwakenSettings/AwakenSettingsSectionPreview";
-import { AwakenMemorySettings } from "./AwakenMemorySettings";
-import { AwakenMemorySettingsSample } from "./AwakenMemorySettings.states";
+import { AwakenMemorySettings, type AwakenMemoryFilterValue } from "./AwakenMemorySettings";
+import { AwakenMemorySettingsSample, AwakenMemorySettingsSampleDetails } from "./AwakenMemorySettings.states";
 
 export function AwakenMemorySettingsDemo() {
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [switches, setSwitches] = useState(AwakenMemorySettingsSample.switches);
+  const [filters, setFilters] = useState(AwakenMemorySettingsSample.filters);
+  const [query, setQuery] = useState("");
+  const [memories, setMemories] = useState(AwakenMemorySettingsSample.memories);
+  const [selectedMemoryId, setSelectedMemoryId] = useState<string | null>(null);
   const originalThemeRef = useRef<string | null>(null);
+
+  const visibleMemories = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    const values = Object.fromEntries(filters.map((filter) => [filter.id, filter.value]));
+    return memories.filter((memory) => {
+      if (values.scope === "project") return false;
+      if (values.type && memory.kind !== values.type) return false;
+      if (values.status && memory.status !== values.status) return false;
+      if (normalizedQuery && !`${memory.name}\n${memory.description}`.toLocaleLowerCase().includes(normalizedQuery)) return false;
+      return true;
+    });
+  }, [filters, memories, query]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -45,9 +61,22 @@ export function AwakenMemorySettingsDemo() {
           <AwakenMemorySettings
             {...AwakenMemorySettingsSample}
             switches={switches}
+            filters={filters}
+            query={query}
+            memories={visibleMemories}
+            selectedMemoryId={selectedMemoryId}
+            detail={selectedMemoryId ? AwakenMemorySettingsSampleDetails[selectedMemoryId] ?? null : null}
             onToggleSwitch={(id) => setSwitches((current) => current.map((item) => (
               item.id === id ? { ...item, checked: !item.checked } : item
             )))}
+            onQueryChange={setQuery}
+            onFilterChange={(id: string, value: AwakenMemoryFilterValue) => setFilters((current) => current.map((filter) => filter.id === id ? { ...filter, value } : filter))}
+            onOpenMemory={setSelectedMemoryId}
+            onCloseMemory={() => setSelectedMemoryId(null)}
+            onDeleteMemory={(id) => {
+              setMemories((current) => current.filter((memory) => memory.id !== id));
+              setSelectedMemoryId(null);
+            }}
           />
         </AwakenMemoryLightFlowLayout>
       </AwakenSettingsSectionPreview>

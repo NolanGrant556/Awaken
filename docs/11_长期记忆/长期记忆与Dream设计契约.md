@@ -236,7 +236,7 @@ Memory 工具进入 run 固定 ToolAvailabilitySnapshot。实现该工具意味�
 
 ### 7.1 主 Agent 主动记忆
 
-当前 Core 默认提供本节主动记忆指导和 `memory` 工具，由主模型在正常任务推理中自行决定是否调用；没有 terminal 后 extractor 或 extraction cursor。Settings 的 Memory、自动召回、主动记忆和 Auto Dream 四个开关均已持久化并接入现有行为；手动“立即整理”不依赖 Auto Dream 开关。
+当前 Core 默认提供本节主动记忆指导和 `memory` 工具，由主模型在正常任务推理中自行决定是否调用；没有 terminal 后 extractor 或 extraction cursor。Settings 的 Memory、自动召回、主动记忆和 Auto Dream 四个开关均已持久化并接入现有行为；手动“更新记忆”不依赖 Auto Dream 开关。
 
 主动记忆默认开启，行为参考 `sourcecode` 主 Agent 始终获得 Memory 保存规则的路径：
 
@@ -276,7 +276,7 @@ Dream 不自动硬删除唯一事实或 user Memory。高度确定的精确重�
 
 ### 7.3 触发与锁
 
-手动入口：Settings 的“立即整理”。
+手动入口：Settings“最近动态”模块的“更新记忆”。
 
 自动入口必须同时满足：
 
@@ -363,10 +363,12 @@ Desktop renderer 只能通过 typed preload/Main bridge 调用 loopback route；
 
 - 与模型、搜索、外观、宠物共用 `AwakenSettings` 固定左栏；记忆页右侧使用 full-bleed 内容视口，光流和记忆内容属于同一个纵向滚动根节点；
 - Memory 总开关、自动召回、主动记忆和 Auto Dream；
-- user/project、type、status、更新时间使用 Desktop 自绘且等宽的下拉筛选，不使用平台原生 `select` 菜单；项目范围只读取当前明确选择的一个 active project，没有当前项目时显示“（项目待选择）”，不跨全部项目聚合；项目菜单限定高度并滚动；
-- 搜索或筛选条件变化时立即清空已选详情和旧列表，丢弃晚到的旧列表/详情请求；查看正文和来源后允许用户按 revision 删除已有记忆；Settings 不提供创建、编辑或 supersede；
-- 最近 Dream 时间、统计、冲突和“立即整理/取消”；
-- Dream 排队、运行、完成、失败和取消状态均使用中文产品文案；
+- 下方管理区不显示额外“记忆管理”总标题，在同一纵向滚动页中直接固定展示两个模块且不使用互斥标签切换：上方“最近动态”不显示附加说明或独立的“最近一次整理”汇总卡片，直接以动态列表展示当前更新与整理结果；“更新记忆”与运行中的取消入口位于“最近更新与整理”列表标题栏。动态行保持单行，只显示类型、标题和时间，不在行内重复描述或 Dream 统计；可见标题按 32 个字符截断并追加 `.....`，完整标题、描述和统计仍在点击后的详情弹窗展示。下方“记忆库”以搜索、筛选和全宽主题行展示当前查询结果，不再常驻左右列表/详情分栏；点击主题后通过高于 full-screen Settings 外壳的 `AwakenDialog` 大弹窗按需读取正文、来源与 revision，并允许用户按 revision 删除；详情中的范围、类型、状态和更新时间采用圆点分隔的紧凑单行元数据，仅状态保留轻量底色，不改变任何字段语义。Settings 不提供创建、编辑、打开文件夹或 supersede；
+- 记忆库的 user/project 分段范围、项目选择、搜索、type、status 与更新时间只作用于记忆库，不得切换或清空上方最近动态。项目记忆库只读取当前明确选择的一个 active project，没有当前项目时显示“（项目待选择）”，不跨全部项目聚合；项目选择与 type、status、更新时间仍使用 Desktop 自绘菜单，不使用平台原生 `select`，其中 type、status、更新时间收敛到筛选弹层，项目菜单限定高度并滚动；
+- 搜索或筛选条件变化时立即清空已选详情和旧列表，丢弃晚到的旧列表/详情请求；大详情关闭后恢复到触发主题，删除成功后关闭详情并刷新列表；
+- “最近动态”是独立于记忆库筛选状态的全局只读投影。Desktop 通过现有 typed route 分别读取 user store、每个已登记 active project store 及其 durable Dream task/report，去重后按时间倒序保留最近 40 条供 UI 投影；搜索、范围、项目、type、status 与更新时间变化均不得改变该投影。UI 默认展示最新 6 条，每次“显示更多”增加 6 条，最多展示 18 条，到达当前可见上限后以“收起”恢复为 6 条；折叠只改变渲染数量，不改变 Desktop 已加载的全局活动数据，也不创建列表内部滚动区。单个项目读取失败时保留其他已成功范围并显示错误。项目 Memory 打开正文或删除时必须携带原项目 identity，不得因记忆库当前范围而访问错误 store。该投影不是 revision 历史、删除审计或完整时间序列，不能据此生成日/周/月趋势图；
+- 最近 Dream 时间、updated/superseded/conflicts/skipped 统计和“更新记忆/取消”；
+- Dream 排队、运行、完成、失败、取消和中断状态均使用中文产品文案；
 - store/索引损坏、来源缺失和陈旧提示。
 
 Workbench：
@@ -420,6 +422,6 @@ Workbench：
 | preload/Main bridge、Settings 数据/副作用、Workbench | `apps/desktop` |
 | Settings 全窗口框架、记忆管理视图与 UI-only primitives | `Awaken Design System`，只接收 props/callbacks，不得读取 Core/文件/store |
 
-`AwakenSettings` 提供全窗口左右分栏和 standard/full-bleed 内容视口；`AwakenMemoryLightFlow` 与 `AwakenMemoryLightFlowLayout` 都属于 UI-only primitives，后者只组合与左侧“记忆”导航一致的装饰性脑形图标、标题、装饰层和 `AwakenMemorySettings` children。Desktop 只传入当前生效主题与既有 UI props/callbacks，并随记忆分区挂载/卸载；这些组件都不能持有 Memory settings、Dream、runtime、Electron bridge 或偏好存储。
+`AwakenSettings` 提供全窗口左右分栏和 standard/full-bleed 内容视口；`AwakenMemoryLightFlow` 与 `AwakenMemoryLightFlowLayout` 都属于 UI-only primitives，后者只组合与左侧“记忆”导航一致的装饰性脑形图标、标题、装饰层和 `AwakenMemorySettings` children。`AwakenMemorySettings` 可以持有筛选弹层和两类详情弹窗开合等纯展示状态，但 Memory/Dream 数据、查询条件、按需详情、revision 删除和任务动作仍由 Desktop 注入。Desktop 只传入当前生效主题与既有 UI props/callbacks，并随记忆分区挂载/卸载；这些组件都不能持有 Memory settings、Dream authority、runtime、Electron bridge 或偏好存储。
 
 实现不得把 store、召回、安全判断或 Dream scheduler 放进 renderer，也不得让 Design System 持有业务状态。

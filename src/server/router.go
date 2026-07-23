@@ -4,10 +4,12 @@ import (
 	"io"
 	"net/http"
 
+	"awaken/src/acp"
 	"awaken/src/agentcore"
 	"awaken/src/connectors"
 	"awaken/src/mcpclient"
 	"awaken/src/memory"
+	"awaken/src/modelprofile"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
 	"awaken/src/skills"
@@ -75,6 +77,46 @@ func NewRouterWithWorkspaceAndSkillSync(runService *awruntime.RunService, infoPr
 	return newRouterInternal(cfg)
 }
 
+// NewRouterWithWorkspaceSkillSyncAndACP builds a fully-wired router that also
+// exposes ACP runner/session/permission routes when acpManager is non-nil.
+func NewRouterWithWorkspaceSkillSyncAndACP(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry, skillRegistry *skills.SkillRegistry, acpManager *acp.Manager, workspaceRoot string, syncSkillsForWorkspace func(string), shutdown ...func()) http.Handler {
+	return NewRouterWithControl(runService, infoProvider, manager, connectorRegistry, skillRegistry, acpManager, workspaceRoot, syncSkillsForWorkspace, nil, shutdown...)
+}
+
+// NewRouterWithControl builds a fully-wired router that also exposes bridge-only
+// control routes protected by a Bearer control token.
+func NewRouterWithControl(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry, skillRegistry *skills.SkillRegistry, acpManager *acp.Manager, workspaceRoot string, syncSkillsForWorkspace func(string), control *ControlConfig, shutdown ...func()) http.Handler {
+	cfg := routerConfig{
+		runService:             runService,
+		infoProvider:           infoProvider,
+		manager:                manager,
+		connectorRegistry:      connectorRegistry,
+		skillRegistry:          skillRegistry,
+		workspaceRoot:          workspaceRoot,
+		syncSkillsForWorkspace: syncSkillsForWorkspace,
+		acpManager:             acpManager,
+		control:                control,
+	}
+	if len(shutdown) > 0 {
+		cfg.shutdown = shutdown[0]
+	}
+	return newRouterInternal(cfg)
+}
+
+// ControlConfig groups the runtime identity and lease manager used for bridge-only
+// control routes.
+type ControlConfig struct {
+	Identity          *awruntime.RuntimeIdentity
+	LeaseManager      *awruntime.LeaseManager
+	ACPSessionManager *awruntime.ACPSessionManager
+	ModelProfileStore ACPModelProfileStore
+}
+
+type ACPModelProfileStore interface {
+	ListReady() (modelprofile.ProfileCatalog, error)
+	Resolve(profileID string) (modelprofile.ResolvedProfile, error)
+}
+
 type routerConfig struct {
 	runService             *awruntime.RunService
 	infoProvider           RuntimeInfoProvider
@@ -85,6 +127,8 @@ type routerConfig struct {
 	workspaceRoot          string
 	syncSkillsForWorkspace func(string)
 	shutdown               func()
+	acpManager             *acp.Manager
+	control                *ControlConfig
 }
 
 func newRouterInternal(cfg routerConfig) http.Handler {
@@ -100,6 +144,7 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 			runService:             cfg.runService,
 			skillRegistry:          cfg.skillRegistry,
 			syncSkillsForWorkspace: cfg.syncSkillsForWorkspace,
+			acpManager:             cfg.acpManager,
 		}
 		mux.HandleFunc("GET /v1/threads", handlers.handleListThreads)
 		mux.HandleFunc("PATCH /v1/threads/{thread_id}", handlers.handleRenameThread)
@@ -185,6 +230,56 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 	mux.HandleFunc("DELETE /v1/skills/{id}", skillH.handleDeleteSkill)
 	mux.HandleFunc("POST /v1/skills/{id}/enable", skillH.handleEnableSkill)
 	mux.HandleFunc("POST /v1/skills/{id}/disable", skillH.handleDisableSkill)
+	if cfg.acpManager != nil {
+		acpH := acpHandlers{manager: cfg.acpManager, runService: cfg.runService}
+		mux.HandleFunc("GET /v1/acp/runners", acpH.handleListRunners)
+		mux.HandleFunc("POST /v1/acp/runners", acpH.handleCreateRunner)
+		mux.HandleFunc("PATCH /v1/acp/runners/{runner_id}", acpH.handleUpdateRunner)
+		mux.HandleFunc("DELETE /v1/acp/runners/{runner_id}", acpH.handleDeleteRunner)
+		mux.HandleFunc("POST /v1/acp/runners/{runner_id}/probe", acpH.handleProbeRunner)
+		mux.HandleFunc("GET /v1/acp/sessions", acpH.handleListSessions)
+		mux.HandleFunc("POST /v1/acp/sessions/{runner_id}/close", acpH.handleCloseSession)
+		mux.HandleFunc("POST /v1/runs/{run_id}/acp-permissions/{interaction_id}/resolve", acpH.handleResolvePermission)
+	}
+	if cfg.control != nil && cfg.control.Identity != nil {
+		ctrl := controlHandlers{
+			identity:     cfg.control.Identity,
+			leaseManager: cfg.control.LeaseManager,
+			runService:   cfg.runService,
+		}
+		controlMux := http.NewServeMux()
+		controlMux.HandleFunc("GET /v1/control/runtime/identity", ctrl.handleRuntimeIdentity)
+		controlMux.HandleFunc("POST /v1/control/leases", ctrl.handleCreateLease)
+		controlMux.HandleFunc("POST /v1/control/leases/{lease_id}/heartbeat", ctrl.handleHeartbeatLease)
+		controlMux.HandleFunc("DELETE /v1/control/leases/{lease_id}", ctrl.handleReleaseLease)
+		acpSessionCtrl := acpSessionControlHandlers{
+			runService:        cfg.runService,
+			acpSessionManager: cfg.control.ACPSessionManager,
+		}
+		controlMux.HandleFunc("POST /v1/control/acp/sessions", acpSessionCtrl.handleCreateACPSession)
+		controlMux.HandleFunc("GET /v1/control/acp/sessions/{session_id}", acpSessionCtrl.handleGetACPSession)
+		controlMux.HandleFunc("POST /v1/control/acp/sessions/{session_id}/close", acpSessionCtrl.handleCloseACPSession)
+		acpProfileCtrl := acpModelProfileControlHandlers{store: cfg.control.ModelProfileStore}
+		controlMux.HandleFunc("GET /v1/control/acp/model-profiles", acpProfileCtrl.handleList)
+		if cfg.runService != nil && cfg.control.ACPSessionManager != nil {
+			acpRunCtrl := acpRunControlHandlers{
+				runService:        cfg.runService,
+				acpSessionManager: cfg.control.ACPSessionManager,
+				acpManager:        cfg.acpManager,
+				identity:          cfg.control.Identity,
+				modelProfileStore: cfg.control.ModelProfileStore,
+			}
+			controlMux.HandleFunc("POST /v1/control/acp/sessions/{session_id}/runs", acpRunCtrl.handleCreateACPRun)
+			controlMux.HandleFunc("DELETE /v1/control/acp/sessions/{session_id}/current-run/{run_id}", acpRunCtrl.handleClearCurrentRun)
+			controlMux.HandleFunc("GET /v1/control/acp/sessions/{session_id}/runs/{run_id}/events", acpRunCtrl.handleACPRunEvents)
+			controlMux.HandleFunc("POST /v1/control/acp/sessions/{session_id}/runs/{run_id}/cancel", acpRunCtrl.handleCancelACPRun)
+			if cfg.acpManager != nil {
+				controlMux.HandleFunc("POST /v1/control/acp/sessions/{session_id}/runs/{run_id}/permissions/{interaction_id}/resolve", acpRunCtrl.handleResolveACPPermission)
+			}
+		}
+		auth := ControlTokenMiddleware(cfg.control.Identity.ControlToken)
+		mux.Handle("/v1/control/", auth(controlMux))
+	}
 	// POST /v1/skills/{id}/execute reserved for follow-up
 	return mux
 }

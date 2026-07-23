@@ -334,4 +334,107 @@ describe("projectAguiEventToNarrative", () => {
       "dream:dream_2",
     ]);
   });
+
+  it("projects ACP session and turn lifecycle into committed items", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_ACP_SESSION_CHANGED",
+      runId: "run-1",
+      toolCallId: "call-acp-1",
+      status: "started",
+      acpRunnerId: "claude-code",
+      acpSessionId: "sess-1",
+      message: "Session started",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_ACP_TURN_CHANGED",
+      runId: "run-1",
+      toolCallId: "call-acp-1",
+      status: "started",
+      acpRunnerId: "claude-code",
+      acpSessionId: "sess-1",
+      message: "Turn started",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_ACP_TURN_CHANGED",
+      runId: "run-1",
+      toolCallId: "call-acp-1",
+      status: "finished",
+      acpRunnerId: "claude-code",
+      acpSessionId: "sess-1",
+      message: "Turn finished",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_ACP_SESSION_CHANGED",
+      runId: "run-1",
+      toolCallId: "call-acp-1",
+      status: "closed",
+      acpRunnerId: "claude-code",
+      acpSessionId: "sess-1",
+      message: "Session closed",
+    });
+
+    const sessions = state.committedItems.filter((item) => item.kind === "acpSession");
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({
+      id: "acp-session:run-1:claude-code:sess-1",
+      runnerId: "claude-code",
+      sessionId: "sess-1",
+      status: "closed",
+      message: "Session closed",
+    });
+  });
+
+  it("projects ACP tool snapshots into committed items", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_ACP_TOOL_CHANGED",
+      runId: "run-1",
+      toolCallId: "call-acp-1",
+      acpRunnerId: "claude-code",
+      acpSessionId: "sess-1",
+      acpToolCallId: "tool-1",
+      toolCallName: "Read",
+      message: "Reading file",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_ACP_TOOL_CHANGED",
+      runId: "run-1",
+      toolCallId: "call-acp-1",
+      acpRunnerId: "claude-code",
+      acpSessionId: "sess-1",
+      acpToolCallId: "tool-1",
+      toolCallName: "Read",
+      content: "Read",
+      message: "Reading file updated",
+    });
+
+    const tools = state.committedItems.filter((item) => item.kind === "acpTool");
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({
+      id: "acp-tool:run-1:claude-code:sess-1:tool-1",
+      title: "Read",
+      detail: "Reading file updated",
+      status: "active",
+    });
+  });
+
+  it("ignores ACP permission request and resolution events", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_ACP_PERMISSION_REQUESTED",
+      runId: "run-1",
+      interactionId: "perm-1",
+      acpRunnerId: "claude-code",
+      acpPermissionOptions: [{ optionId: "allow", name: "Allow" }],
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_ACP_PERMISSION_RESOLVED",
+      runId: "run-1",
+      interactionId: "perm-1",
+      status: "allow",
+    });
+
+    expect(state.committedItems).toHaveLength(0);
+  });
 });

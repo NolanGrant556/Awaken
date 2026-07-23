@@ -61,11 +61,22 @@ const (
 	EventAwakenMemoryRejected               EventType = "AWAKEN_MEMORY_REJECTED"
 	EventAwakenContextSnapshot              EventType = "AWAKEN_CONTEXT_SNAPSHOT"
 	EventAwakenModelUsage                   EventType = "AWAKEN_MODEL_USAGE"
+	EventAwakenACPSessionChanged            EventType = "AWAKEN_ACP_SESSION_CHANGED"
+	EventAwakenACPTurnChanged               EventType = "AWAKEN_ACP_TURN_CHANGED"
+	EventAwakenACPToolChanged               EventType = "AWAKEN_ACP_TOOL_CHANGED"
+	EventAwakenACPPermissionRequested       EventType = "AWAKEN_ACP_PERMISSION_REQUESTED"
+	EventAwakenACPPermissionResolved        EventType = "AWAKEN_ACP_PERMISSION_RESOLVED"
 	EventAwakenUnknown                      EventType = "AWAKEN_UNKNOWN_EVENT"
 )
 
 type RunOutcome struct {
 	Type string `json:"type"`
+}
+
+type ACPPermissionOption struct {
+	OptionID string `json:"optionId"`
+	Name     string `json:"name"`
+	Kind     string `json:"kind,omitempty"`
 }
 
 type MemoryReceipt struct {
@@ -316,7 +327,13 @@ type Event struct {
 	InteractionQRImageURL      string           `json:"interactionQrImageUrl,omitempty"`
 	InteractionProvider        string           `json:"interactionProvider,omitempty"`
 	InteractionRecoveries      []string         `json:"interactionRecoveries,omitempty"`
-	ArtifactContractVersion    int              `json:"artifactContractVersion,omitempty"`
+	// ACP fields surfaced on AWAKEN_ACP_* events.
+	ACPSessionID               string                `json:"acpSessionId,omitempty"`
+	ACPRunnerID                string                `json:"acpRunnerId,omitempty"`
+	ACPTurnID                  string                `json:"acpTurnId,omitempty"`
+	ACPToolCallID              string                `json:"acpToolCallId,omitempty"`
+	ACPPermissionOptions       []ACPPermissionOption `json:"acpPermissionOptions,omitempty"`
+	ArtifactContractVersion    int                   `json:"artifactContractVersion,omitempty"`
 	ArtifactRole               string           `json:"artifactRole,omitempty"`
 	ArtifactProducer           string           `json:"artifactProducer,omitempty"`
 	ArtifactID                 string           `json:"artifactId,omitempty"`

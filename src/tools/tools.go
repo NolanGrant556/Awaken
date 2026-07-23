@@ -5,6 +5,7 @@ import (
 	_ "awaken/src/tools/ask_user"
 	_ "awaken/src/tools/bash"
 	_ "awaken/src/tools/calculator"
+	_ "awaken/src/tools/configure_acp_runner"
 	_ "awaken/src/tools/dependency_install"
 	_ "awaken/src/tools/edit"
 	_ "awaken/src/tools/git_remote"
@@ -15,4 +16,5 @@ import (
 	_ "awaken/src/tools/trash_file"
 	_ "awaken/src/tools/web_search"
 	_ "awaken/src/tools/write"
+	_ "awaken/src/tools/delegate_external_agent"
 )

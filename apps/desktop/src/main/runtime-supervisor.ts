@@ -4,17 +4,24 @@ import {
   type SpawnOptions,
 } from "node:child_process";
 import { createServer } from "node:net";
+import { createHash } from "node:crypto";
 import { userInfo } from "node:os";
 import { createInterface } from "node:readline";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app } from "electron";
 import { resolveSystemSkillsTargetRoot } from "./system-skills-importer.js";
+import { RuntimeControlClient, type RuntimeManifest } from "./runtime-control.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export type SupervisorStatus =
-  "stopped" | "starting" | "running" | "crashed" | "stopping";
+  | "stopped"
+  | "starting"
+  | "running"
+  | "external-attached"
+  | "crashed"
+  | "stopping";
 
 export interface RuntimeLogEntry {
   id: number;
@@ -48,6 +55,7 @@ export interface RuntimeSupervisorDeps {
   allocatePort?: () => Promise<number>;
   loginEnvironmentTimeoutMs?: number;
   now?: () => number;
+  readManifest?: (userDataDir: string) => Promise<RuntimeManifest | undefined>;
   resolveBinaryPath?: () => string;
   resolveLoginUserEnvironment?: ResolveLoginUserEnvironment;
   resolveProductEnvironment?: ResolveProductEnvironment;
@@ -302,11 +310,22 @@ async function waitForHealth(
   throw new Error(`runtime did not become healthy within ${timeoutMs}ms`);
 }
 
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export class RuntimeSupervisor {
   private options: SupervisorOptions;
   private deps: Required<RuntimeSupervisorDeps>;
   private child: ChildProcess | null = null;
   private runtimeBaseUrl: string | undefined;
+  private controlClient: RuntimeControlClient | null = null;
+  private runtimeIdentity: string | undefined;
 
   private status: SupervisorStatus = "stopped";
   private statusInfo: SupervisorStatusInfo = { status: "stopped" };
@@ -331,6 +350,9 @@ export class RuntimeSupervisor {
       allocatePort: deps.allocatePort ?? allocatePort,
       loginEnvironmentTimeoutMs,
       now: deps.now ?? Date.now,
+      readManifest:
+        deps.readManifest ??
+        (async (userDataDir) => RuntimeControlClient.readManifest(userDataDir)),
       resolveBinaryPath: deps.resolveBinaryPath ?? resolveBinaryPath,
       resolveLoginUserEnvironment:
         deps.resolveLoginUserEnvironment ??
@@ -366,6 +388,38 @@ export class RuntimeSupervisor {
     const productEnvironment = await this.deps.resolveProductEnvironment();
     if (this.startGeneration !== myGen) {
       return this.getStatus();
+    }
+
+    const userDataDir = app.getPath("userData");
+    try {
+      const manifest = await this.deps.readManifest(userDataDir);
+      if (manifest && isPidAlive(manifest.pid)) {
+        const expectedRuntimeIdentity = `packaged:${this.digestUserDataDir(userDataDir)}`;
+        const client = new RuntimeControlClient(manifest);
+        await client.verifyIdentity(expectedRuntimeIdentity);
+        this.runtimeBaseUrl = manifest.base_url;
+        const ownerID = `desktop-${userDataDir}`;
+        if (manifest.owner_mode === "desktop") {
+          this.appendLog({
+            timestamp: this.deps.now(),
+            stream: "stderr",
+            line: "attaching to existing desktop-owned Core instance",
+          });
+        }
+        await client.createLease(ownerID, "desktop");
+        this.controlClient = client;
+        this.runtimeIdentity = manifest.runtime_identity;
+        this.setStatus("external-attached");
+        return this.getStatus();
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.appendLog({
+        timestamp: this.deps.now(),
+        stream: "stderr",
+        line: `existing manifest attach failed: ${message}`,
+      });
+      // Fall through to spawn a new Core.
     }
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -420,6 +474,19 @@ export class RuntimeSupervisor {
           break;
         }
         this.runtimeBaseUrl = baseUrl;
+        try {
+          await this.attachControlLease(baseUrl, app.getPath("userData"));
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.appendLog({
+            timestamp: this.deps.now(),
+            stream: "stderr",
+            line: `control lease attach failed: ${message}`,
+          });
+          // A lease failure is not fatal: the Core is still usable through
+          // regular Desktop routes; ACP bridge clients may not be able to reuse
+          // this instance until the lease is established.
+        }
         this.setStatus("running");
         return this.getStatus();
       } catch (err) {
@@ -465,6 +532,12 @@ export class RuntimeSupervisor {
     // Invalidate any in-flight start() loop so it stops spawning/retrying and
     // does not overwrite the stopped state we are about to set.
     this.startGeneration++;
+    if (this.status === "external-attached") {
+      this.runtimeBaseUrl = undefined;
+      await this.releaseControlLease();
+      this.setStatus("stopped");
+      return;
+    }
     if (
       !this.child ||
       this.child.exitCode !== null ||
@@ -472,6 +545,7 @@ export class RuntimeSupervisor {
     ) {
       this.child = null;
       this.runtimeBaseUrl = undefined;
+      await this.releaseControlLease();
       this.setStatus("stopped");
       return;
     }
@@ -480,6 +554,7 @@ export class RuntimeSupervisor {
     const baseUrl = this.runtimeBaseUrl;
     this.child = null;
     this.runtimeBaseUrl = undefined;
+    await this.releaseControlLease();
 
     if (baseUrl) {
       try {
@@ -535,7 +610,7 @@ export class RuntimeSupervisor {
     extra?: { exitCode?: number; errorMessage?: string },
   ): void {
     this.status = status;
-    if (status === "running") {
+    if (status === "running" || status === "external-attached") {
       this.statusInfo = { status, runtimeBaseUrl: this.runtimeBaseUrl };
     } else {
       this.statusInfo = { status, ...extra };
@@ -628,6 +703,46 @@ export class RuntimeSupervisor {
       this.deps.waitForHealth(baseUrl),
       startupFailure,
     ]).finally(cleanup);
+  }
+
+  private async attachControlLease(baseUrl: string, userDataDir: string): Promise<void> {
+    const manifest = await RuntimeControlClient.readManifest(userDataDir);
+    if (!manifest) {
+      // No manifest means the Core was started without runtime identity support
+      // (e.g. tests or legacy launch). Desktop continues without a control lease.
+      return;
+    }
+    if (manifest.base_url !== baseUrl) {
+      throw new Error(
+        `manifest base_url ${manifest.base_url} does not match expected ${baseUrl}`,
+      );
+    }
+    const expectedRuntimeIdentity = `packaged:${this.digestUserDataDir(userDataDir)}`;
+    const client = new RuntimeControlClient(manifest);
+    await client.verifyIdentity(expectedRuntimeIdentity);
+    await client.createLease(`desktop-${app.getPath("userData")}`, "desktop");
+    this.controlClient = client;
+    this.runtimeIdentity = manifest.runtime_identity;
+  }
+
+  private async releaseControlLease(): Promise<void> {
+    if (this.controlClient) {
+      try {
+        await this.controlClient.releaseLease();
+      } catch {
+        // Best effort: the Core will reclaim the lease via TTL.
+      }
+      this.controlClient = null;
+      this.runtimeIdentity = undefined;
+    }
+  }
+
+  private digestUserDataDir(userDataDir: string): string {
+    // Mirror Go normalizeProjectWorkspaceRoot + stableProjectID.
+    const cleaned = normalize(userDataDir.trim());
+    const normalized = process.platform === "win32" ? cleaned.toLowerCase() : cleaned;
+    const digest = createHash("sha256").update(normalized).digest("hex").slice(0, 24);
+    return `project_${digest}`;
   }
 
   private terminateChild(child: ChildProcess): Promise<void> {

@@ -60,4 +60,23 @@ for (const target of targets) {
     process.exit(1);
   }
   console.log(`[build-binary] done: ${outputPath}`);
+
+  const acpBinName = platform === "win32" ? "awaken-acp.exe" : "awaken-acp";
+  const acpOutputPath = join(outputDir, acpBinName);
+  console.log(`[build-binary] building awaken-acp for ${target} -> ${acpOutputPath}`);
+  try {
+    execFileSync("go", ["build", "-o", acpOutputPath, "./cmd/awaken-acp"], {
+      cwd: root,
+      env: {
+        ...process.env,
+        GOOS: goOS(platform),
+        GOARCH: goArch(arch),
+      },
+      stdio: "inherit",
+    });
+  } catch (err) {
+    console.error("[build-binary] failed to build awaken-acp:", err.message);
+    process.exit(1);
+  }
+  console.log(`[build-binary] done: ${acpOutputPath}`);
 }

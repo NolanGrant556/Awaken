@@ -403,6 +403,65 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.Code = firstNonEmpty(event.Code, event.ErrorCode)
 		copyToolOutcomeFields(&base, event)
 		return []Event{base}
+	case agentcore.ACPSessionStartedEventType:
+		base.Type = EventAwakenACPSessionChanged
+		base.Status = "started"
+		base.ToolCallID = event.ToolCallID
+		base.Message = event.Content
+		copyACPFields(&base, event)
+		return []Event{base}
+	case agentcore.ACPSessionClosedEventType:
+		base.Type = EventAwakenACPSessionChanged
+		base.Status = "closed"
+		base.ToolCallID = event.ToolCallID
+		base.Message = event.Content
+		copyACPFields(&base, event)
+		return []Event{base}
+	case agentcore.ACPSessionInterruptedEventType:
+		base.Type = EventAwakenACPSessionChanged
+		base.Status = "interrupted"
+		base.ToolCallID = event.ToolCallID
+		base.Message = firstNonEmpty(event.Error, event.Content)
+		copyACPFields(&base, event)
+		return []Event{base}
+	case agentcore.ACPTurnStartedEventType:
+		base.Type = EventAwakenACPTurnChanged
+		base.Status = "started"
+		base.ToolCallID = event.ToolCallID
+		base.Message = event.Content
+		copyACPFields(&base, event)
+		return []Event{base}
+	case agentcore.ACPTurnFinishedEventType:
+		base.Type = EventAwakenACPTurnChanged
+		base.Status = "finished"
+		base.ToolCallID = event.ToolCallID
+		base.Content = event.Content
+		base.Message = event.Content
+		copyACPFields(&base, event)
+		return []Event{base}
+	case agentcore.ACPToolSnapshotEventType:
+		base.Type = EventAwakenACPToolChanged
+		base.ToolCallID = event.ToolCallID
+		base.ToolCallName = event.ToolName
+		base.Content = event.Content
+		base.Message = event.Content
+		copyACPFields(&base, event)
+		return []Event{base}
+	case agentcore.ACPPermissionRequestedEventType:
+		base.Type = EventAwakenACPPermissionRequested
+		base.ToolCallID = event.ToolCallID
+		base.InteractionID = event.InteractionID
+		base.Message = event.Content
+		copyACPFields(&base, event)
+		return []Event{base}
+	case agentcore.ACPPermissionResolvedEventType:
+		base.Type = EventAwakenACPPermissionResolved
+		base.ToolCallID = event.ToolCallID
+		base.InteractionID = event.InteractionID
+		base.Message = event.Content
+		base.Status = event.Content
+		copyACPFields(&base, event)
+		return []Event{base}
 	default:
 		base.Type = EventAwakenUnknown
 		base.RawType = string(event.Type)
@@ -550,6 +609,84 @@ func copyToolOutcomeFields(dst *Event, event agentcore.AwakenEvent) {
 		}
 		applyExecutionMetadata(dst, event.Diagnostic)
 	}
+}
+
+func copyACPFields(dst *Event, event agentcore.AwakenEvent) {
+	if len(event.Diagnostic) > 0 {
+		dst.Diagnostic = make(map[string]any, len(event.Diagnostic))
+		for key, value := range event.Diagnostic {
+			dst.Diagnostic[key] = value
+		}
+	}
+	// Promote stable ACP identity fields from the diagnostic blob to typed wire
+	// fields so the renderer does not need to parse raw diagnostic maps.
+	if v, ok := stringDiagnostic(event.Diagnostic, "runner_id"); ok {
+		dst.ACPRunnerID = v
+	}
+	if v, ok := stringDiagnostic(event.Diagnostic, "acp_session_id"); ok {
+		dst.ACPSessionID = v
+	}
+	if v, ok := stringDiagnostic(event.Diagnostic, "turn_id"); ok {
+		dst.ACPTurnID = v
+	}
+	if v, ok := stringDiagnostic(event.Diagnostic, "acp_tool_call_id"); ok {
+		dst.ACPToolCallID = v
+	}
+	dst.ACPPermissionOptions = acpPermissionOptionsFromDiagnostic(event.Diagnostic)
+}
+
+func stringDiagnostic(diagnostic map[string]any, key string) (string, bool) {
+	if diagnostic == nil {
+		return "", false
+	}
+	raw, ok := diagnostic[key]
+	if !ok {
+		return "", false
+	}
+	v, ok := raw.(string)
+	return v, ok
+}
+
+func acpPermissionOptionsFromDiagnostic(diagnostic map[string]any) []ACPPermissionOption {
+	if diagnostic == nil {
+		return nil
+	}
+	raw, ok := diagnostic["options"]
+	if !ok {
+		return nil
+	}
+
+	var maps []map[string]any
+	switch v := raw.(type) {
+	case []any:
+		for _, item := range v {
+			if m, ok := item.(map[string]any); ok {
+				maps = append(maps, m)
+			}
+		}
+	case []map[string]any:
+		maps = v
+	default:
+		return nil
+	}
+
+	out := make([]ACPPermissionOption, 0, len(maps))
+	for _, m := range maps {
+		opt := ACPPermissionOption{}
+		if v, ok := m["option_id"].(string); ok {
+			opt.OptionID = v
+		}
+		if v, ok := m["name"].(string); ok {
+			opt.Name = v
+		}
+		if v, ok := m["kind"].(string); ok {
+			opt.Kind = v
+		}
+		if opt.OptionID != "" {
+			out = append(out, opt)
+		}
+	}
+	return out
 }
 
 func copySkillFields(dst *Event, event agentcore.AwakenEvent) {

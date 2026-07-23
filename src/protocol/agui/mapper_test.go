@@ -537,6 +537,116 @@ func TestMapEventArtifactUpdated(t *testing.T) {
 	}
 }
 
+func TestMapEventACPSessionLifecycle(t *testing.T) {
+	cases := []struct {
+		agentcoreType agentcore.AwakenEventType
+		expectedType  EventType
+		expectedStatus string
+	}{
+		{agentcore.ACPSessionStartedEventType, EventAwakenACPSessionChanged, "started"},
+		{agentcore.ACPSessionClosedEventType, EventAwakenACPSessionChanged, "closed"},
+		{agentcore.ACPSessionInterruptedEventType, EventAwakenACPSessionChanged, "interrupted"},
+	}
+	for _, tc := range cases {
+		events := MapEvent(agentcore.AwakenEvent{
+			Type:       tc.agentcoreType,
+			ThreadID:   "thread-1",
+			RunID:      "run-1",
+			ToolCallID: "tool-1",
+			Content:    "acp session event",
+			Diagnostic: map[string]any{"runner_id": "codex", "acp_session_id": "sess-1"},
+		})
+		if len(events) != 1 {
+			t.Fatalf("expected 1 event for %s, got %d", tc.agentcoreType, len(events))
+		}
+		got := events[0]
+		if got.Type != tc.expectedType {
+			t.Fatalf("expected %s, got %s", tc.expectedType, got.Type)
+		}
+		if got.Status != tc.expectedStatus {
+			t.Fatalf("expected status %q, got %q", tc.expectedStatus, got.Status)
+		}
+		if got.ToolCallID != "tool-1" || got.Diagnostic["runner_id"] != "codex" {
+			t.Fatalf("unexpected payload: %+v", got)
+		}
+	}
+}
+
+func TestMapEventACPTurnLifecycle(t *testing.T) {
+	started := MapEvent(agentcore.AwakenEvent{
+		Type:       agentcore.ACPTurnStartedEventType,
+		ToolCallID: "tool-1",
+		Content:    "turn started",
+		Diagnostic: map[string]any{"runner_id": "codex", "turn_id": "turn-1"},
+	})
+	if len(started) != 1 || started[0].Type != EventAwakenACPTurnChanged || started[0].Status != "started" {
+		t.Fatalf("unexpected turn started event: %+v", started)
+	}
+
+	finished := MapEvent(agentcore.AwakenEvent{
+		Type:       agentcore.ACPTurnFinishedEventType,
+		ToolCallID: "tool-1",
+		Content:    "turn result text",
+		Diagnostic: map[string]any{"runner_id": "codex", "turn_id": "turn-1", "stop_reason": "tool_use"},
+	})
+	if len(finished) != 1 || finished[0].Type != EventAwakenACPTurnChanged || finished[0].Status != "finished" {
+		t.Fatalf("unexpected turn finished event: %+v", finished)
+	}
+	if finished[0].Content != "turn result text" {
+		t.Fatalf("expected content to be preserved, got %q", finished[0].Content)
+	}
+}
+
+func TestMapEventACPToolSnapshot(t *testing.T) {
+	events := MapEvent(agentcore.AwakenEvent{
+		Type:       agentcore.ACPToolSnapshotEventType,
+		ToolCallID: "host-tool-1",
+		ToolName:   "edit",
+		Content:    "Updated note.md",
+		Diagnostic: map[string]any{"runner_id": "codex", "tool_call_id": "acp-tool-1", "status": "completed"},
+	})
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	got := events[0]
+	if got.Type != EventAwakenACPToolChanged {
+		t.Fatalf("expected AWAKEN_ACP_TOOL_CHANGED, got %s", got.Type)
+	}
+	if got.ToolCallID != "host-tool-1" || got.ToolCallName != "edit" || got.Content != "Updated note.md" {
+		t.Fatalf("unexpected tool snapshot payload: %+v", got)
+	}
+}
+
+func TestMapEventACPPermissionLifecycle(t *testing.T) {
+	requested := MapEvent(agentcore.AwakenEvent{
+		Type:          agentcore.ACPPermissionRequestedEventType,
+		ToolCallID:    "tool-1",
+		InteractionID: "perm-1",
+		Content:       "Allow editing note.md?",
+		Diagnostic:    map[string]any{"runner_id": "codex", "kind": "file_edit"},
+	})
+	if len(requested) != 1 || requested[0].Type != EventAwakenACPPermissionRequested {
+		t.Fatalf("unexpected permission requested event: %+v", requested)
+	}
+	if requested[0].InteractionID != "perm-1" || requested[0].Message != "Allow editing note.md?" {
+		t.Fatalf("unexpected permission requested payload: %+v", requested[0])
+	}
+
+	resolved := MapEvent(agentcore.AwakenEvent{
+		Type:          agentcore.ACPPermissionResolvedEventType,
+		ToolCallID:    "tool-1",
+		InteractionID: "perm-1",
+		Content:       "allow",
+		Diagnostic:    map[string]any{"runner_id": "codex", "cancelled": false},
+	})
+	if len(resolved) != 1 || resolved[0].Type != EventAwakenACPPermissionResolved {
+		t.Fatalf("unexpected permission resolved event: %+v", resolved)
+	}
+	if resolved[0].Status != "allow" || resolved[0].InteractionID != "perm-1" {
+		t.Fatalf("unexpected permission resolved payload: %+v", resolved[0])
+	}
+}
+
 func TestMapEventUnknownFallsBackWithRawPayload(t *testing.T) {
 	events := MapEvent(agentcore.AwakenEvent{
 		Type:      agentcore.AwakenEventType("FutureEvent"),

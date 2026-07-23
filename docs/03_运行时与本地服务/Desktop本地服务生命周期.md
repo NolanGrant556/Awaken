@@ -56,6 +56,23 @@ core 异常退出后状态为 `crashed`。重新启动会恢复线程历史，�
 - 当前没有把外部远程 runtime URL 作为正式 Desktop 产品入口。
 - 当前不保证 crash 后自动续跑 active run，只保证可确认历史恢复。
 
+## `awaken-acp` 入口
+
+除 Desktop 外，Awaken 还提供一个小型 stdio ACP Agent 入口 `cmd/awaken-acp`。它由 `src/acp/agentbridge` 实现，行为如下：
+
+- 通过 `--startup=desktop|core|fail` 指定没有 ready Core 时的策略；默认 `desktop`。
+- 复用同一 userData identity 的现有 Core；没有时按策略拉起 Desktop 或启动一个受 lease 管理的 headless Core，禁止无约束多 Core 写同一 userData。
+- Desktop 在启动前会先读取同一 userData 的 manifest：若存在存活且 identity 校验通过的 headless Core，则进入 `external-attached` 状态并创建 desktop lease，不再 spawn 第二个 Core。
+- Core 在 `<AWAKEN_USER_DATA_DIR>/runtime/core.json` 发布 manifest（含随机 loopback base URL、control token、runtime identity 和 PID），launcher 校验 identity、PID 存活和 authenticated `/v1/control/runtime/identity` 后 attach。
+- attach 后通过 authenticated control routes 创建 bridge lease，并每 10 秒 heartbeat；stdio EOF 或 signal 触发 5 秒有界清理，cancel active run、close session、释放 lease。
+- 不执行模型与工具，只转发 ACP session lifecycle 和 prompt 到 Core HTTP routes。
+
+模型配置由 Core 从 canonical `~/.awaken/config/models.json` 与 `~/.awaken/.env` 只读解析。`session/new` 只向 client 返回 enabled + ready profile 的非敏感 selector；client 可提交 opaque profile ID，不能提交 provider、Base URL、运行参数或 API key。未选择时使用默认 ready profile，否则回退首个 ready profile。profile/API key 不得写入 manifest、日志、journal、Renderer 或 ACP wire。
+
+`--startup=core` 会移除继承环境中的 `AWAKEN_HOME` 覆盖并固定注入当前用户的 `~/.awaken`，因此只启动受管 Core，不需要 Desktop 或 Electron credential helper。配置损坏、无可用 profile、显式选择已禁用/缺 key profile时返回 `ACP_MODEL_PROFILE_UNAVAILABLE`，不静默切换付费 provider。
+
+`awaken-acp` 是机器调用入口；仍禁止用户直接运行和长期维护裸 `awaken-core`。
+
 ## 测试与真实 Desktop 验收
 
 自动化 owner：[`apps/desktop/src/main/runtime-supervisor.test.ts`](../../apps/desktop/src/main/runtime-supervisor.test.ts)、[`scripts/tests/desktop-lifecycle.test.mjs`](../../scripts/tests/desktop-lifecycle.test.mjs)。测试覆盖随机端口、重试、健康超时、generation、环境清理和升级关闭。

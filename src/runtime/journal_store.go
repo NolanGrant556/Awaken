@@ -784,6 +784,25 @@ func semanticRecordsWithTerminalLast(records []agentcore.SemanticRecord) []agent
 	return ordered
 }
 
+func acpReplayEvent(record agentcore.SemanticRecord, eventType agentcore.AwakenEventType) agentcore.AwakenEvent {
+	diagnostic := make(map[string]any, len(record.Payload))
+	for k, v := range record.Payload {
+		diagnostic[k] = v
+	}
+	return agentcore.AwakenEvent{
+		Type:          eventType,
+		Timestamp:     record.Timestamp,
+		ThreadID:      record.ThreadID,
+		RunID:         record.RunID,
+		TurnID:        record.TurnID,
+		ToolCallID:    stringPayload(record.Payload, "tool_call_id"),
+		ToolName:      stringPayload(record.Payload, "tool_name"),
+		Content:       stringPayload(record.Payload, "content"),
+		InteractionID: stringPayload(record.Payload, "interaction_id"),
+		Diagnostic:    diagnostic,
+	}
+}
+
 func semanticRecordToAgentEvents(record agentcore.SemanticRecord) []agentcore.AwakenEvent {
 	// Local projection keeps runtime independent of importing projector cycles in tests.
 	switch record.Kind {
@@ -913,6 +932,22 @@ func semanticRecordToAgentEvents(record agentcore.SemanticRecord) []agentcore.Aw
 			TerminalReason:   agentcore.TerminalReason(stringPayload(record.Payload, "terminal_reason")),
 			TransitionReason: agentcore.TransitionReason(stringPayload(record.Payload, "transition_reason")),
 		}}
+	case agentcore.SemanticKindACPSessionStarted:
+		return []agentcore.AwakenEvent{acpReplayEvent(record, agentcore.ACPSessionStartedEventType)}
+	case agentcore.SemanticKindACPSessionClosed:
+		return []agentcore.AwakenEvent{acpReplayEvent(record, agentcore.ACPSessionClosedEventType)}
+	case agentcore.SemanticKindACPSessionInterrupted:
+		return []agentcore.AwakenEvent{acpReplayEvent(record, agentcore.ACPSessionInterruptedEventType)}
+	case agentcore.SemanticKindACPTurnStarted:
+		return []agentcore.AwakenEvent{acpReplayEvent(record, agentcore.ACPTurnStartedEventType)}
+	case agentcore.SemanticKindACPTurnFinished:
+		return []agentcore.AwakenEvent{acpReplayEvent(record, agentcore.ACPTurnFinishedEventType)}
+	case agentcore.SemanticKindACPToolSnapshot:
+		return []agentcore.AwakenEvent{acpReplayEvent(record, agentcore.ACPToolSnapshotEventType)}
+	case agentcore.SemanticKindACPPermissionRequested:
+		return []agentcore.AwakenEvent{acpReplayEvent(record, agentcore.ACPPermissionRequestedEventType)}
+	case agentcore.SemanticKindACPPermissionResolved:
+		return []agentcore.AwakenEvent{acpReplayEvent(record, agentcore.ACPPermissionResolvedEventType)}
 	case agentcore.SemanticKindRunTerminal:
 		status := stringPayload(record.Payload, "status")
 		if status == "finished" {

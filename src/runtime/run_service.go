@@ -69,9 +69,12 @@ type TaskScope struct {
 type WorkspaceConfig = TaskScope
 
 type ClientInfo struct {
-	SessionID  string `json:"session_id"`
-	RequestID  string `json:"request_id"`
-	EntryPoint string `json:"entrypoint"`
+	SessionID     string `json:"session_id"`
+	RequestID     string `json:"request_id"`
+	EntryPoint    string `json:"entrypoint"`
+	Source        string `json:"source,omitempty"`
+	ClientName    string `json:"client_name,omitempty"`
+	ClientVersion string `json:"client_version,omitempty"`
 }
 
 type StartRunRequest struct {
@@ -224,6 +227,10 @@ type Thread struct {
 	createdAt         time.Time
 	updatedAt         time.Time
 	deletionRequested bool
+	source            string
+	clientName        string
+	clientVersion     string
+	acpSessionID      string
 }
 
 type ThreadTitleSource string
@@ -256,6 +263,10 @@ type ThreadSnapshot struct {
 	Workspace      WorkspaceConfig   `json:"workspace"`
 	CreatedAt      time.Time         `json:"created_at"`
 	UpdatedAt      time.Time         `json:"updated_at"`
+	Source         string            `json:"source,omitempty"`
+	ClientName     string            `json:"client_name,omitempty"`
+	ClientVersion  string            `json:"client_version,omitempty"`
+	ACPSessionID   string            `json:"acp_session_id,omitempty"`
 }
 
 type ThreadTranscriptRun struct {
@@ -416,6 +427,19 @@ func (s *RunService) isThreadActive(threadID string) bool {
 	defer s.mu.RUnlock()
 	thread := s.threads[threadID]
 	return thread != nil && thread.activeRunID != ""
+}
+
+// ActiveRunCount returns the number of threads that currently have an active run.
+func (s *RunService) ActiveRunCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	count := 0
+	for _, thread := range s.threads {
+		if thread.activeRunID != "" {
+			count++
+		}
+	}
+	return count
 }
 
 func (s *RunService) closeAndEvictDeletedThread(threadID string) error {
@@ -603,6 +627,10 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 				modelProfileKey: modelProfileKey,
 				createdAt:       firstNonZeroTime(restored.CreatedAt, restoredMeta.Snapshot.CreatedAt, now),
 				updatedAt:       now,
+				source:          restoredMeta.Snapshot.Source,
+				clientName:      restoredMeta.Snapshot.ClientName,
+				clientVersion:   restoredMeta.Snapshot.ClientVersion,
+				acpSessionID:    restoredMeta.Snapshot.ACPSessionID,
 			}
 			s.sessions[runID] = session
 			threadSnapshot = s.threads[threadID].snapshot()
@@ -678,6 +706,10 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			modelProfileKey: modelProfileKey,
 			createdAt:       now,
 			updatedAt:       now,
+			source:          req.Client.Source,
+			clientName:      req.Client.ClientName,
+			clientVersion:   req.Client.ClientVersion,
+			acpSessionID:    req.Client.SessionID,
 		}
 		s.pruneInactiveThreadsLocked()
 		threadSnapshot = s.threads[threadID].snapshot()
@@ -1950,6 +1982,10 @@ func (t *Thread) snapshot() ThreadSnapshot {
 		Workspace:      t.workspace,
 		CreatedAt:      t.createdAt,
 		UpdatedAt:      t.updatedAt,
+		Source:         t.source,
+		ClientName:     t.clientName,
+		ClientVersion:  t.clientVersion,
+		ACPSessionID:   t.acpSessionID,
 	}
 }
 

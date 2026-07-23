@@ -201,6 +201,7 @@ func main() {
 	})
 
 	var leaseManager *runtime.LeaseManager
+	var acpSessionManager *runtime.ACPSessionManager
 	var control *server.ControlConfig
 	if userDataDir != "" {
 		runtimeIdentity, err = runtime.GenerateRuntimeIdentity(userDataDir, *ownerMode, baseURL)
@@ -221,9 +222,11 @@ func main() {
 				shutdownOnce()
 			})
 		}
+		acpSessionManager = runtime.NewACPSessionManager(runService, runService.ProjectService())
 		control = &server.ControlConfig{
-			Identity:     runtimeIdentity,
-			LeaseManager: leaseManager,
+			Identity:          runtimeIdentity,
+			LeaseManager:      leaseManager,
+			ACPSessionManager: acpSessionManager,
 		}
 	}
 

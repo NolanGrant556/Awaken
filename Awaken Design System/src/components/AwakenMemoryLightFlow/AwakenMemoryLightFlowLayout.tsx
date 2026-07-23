@@ -1,4 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useRef } from "react";
+import { Brain } from "lucide-react";
 import { AwakenMemoryLightFlow } from "./AwakenMemoryLightFlow";
 import type { AwakenMemoryLightFlowTheme } from "./AwakenMemoryLightFlow.model";
 import "./AwakenMemoryLightFlowLayout.css";
@@ -95,7 +96,15 @@ export function AwakenMemoryLightFlowLayout({
     >
       <div className="aw-memory-light-flow-layout__ambient">
         <AwakenMemoryLightFlow theme={theme} />
-        <Heading className="aw-memory-light-flow-layout__title">{title}</Heading>
+        <Heading className="aw-memory-light-flow-layout__title">
+          <Brain
+            className="aw-memory-light-flow-layout__title-icon"
+            size={28}
+            strokeWidth={1.8}
+            aria-hidden="true"
+          />
+          <span>{title}</span>
+        </Heading>
       </div>
       <div className="aw-memory-light-flow-layout__content">
         {children}

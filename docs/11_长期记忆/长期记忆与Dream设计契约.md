@@ -420,6 +420,6 @@ Workbench：
 | preload/Main bridge、Settings 数据/副作用、Workbench | `apps/desktop` |
 | Settings 全窗口框架、记忆管理视图与 UI-only primitives | `Awaken Design System`，只接收 props/callbacks，不得读取 Core/文件/store |
 
-`AwakenSettings` 提供全窗口左右分栏和 standard/full-bleed 内容视口；`AwakenMemoryLightFlow` 与 `AwakenMemoryLightFlowLayout` 都属于 UI-only primitives，后者只组合标题、装饰层和 `AwakenMemorySettings` children。Desktop 只传入当前生效主题与既有 UI props/callbacks，并随记忆分区挂载/卸载；这些组件都不能持有 Memory settings、Dream、runtime、Electron bridge 或偏好存储。
+`AwakenSettings` 提供全窗口左右分栏和 standard/full-bleed 内容视口；`AwakenMemoryLightFlow` 与 `AwakenMemoryLightFlowLayout` 都属于 UI-only primitives，后者只组合与左侧“记忆”导航一致的装饰性脑形图标、标题、装饰层和 `AwakenMemorySettings` children。Desktop 只传入当前生效主题与既有 UI props/callbacks，并随记忆分区挂载/卸载；这些组件都不能持有 Memory settings、Dream、runtime、Electron bridge 或偏好存储。
 
 实现不得把 store、召回、安全判断或 Dream scheduler 放进 renderer，也不得让 Design System 持有业务状态。

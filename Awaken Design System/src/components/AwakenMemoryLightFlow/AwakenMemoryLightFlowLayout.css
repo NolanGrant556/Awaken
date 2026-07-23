@@ -56,12 +56,22 @@
   bottom: 18px;
   left: 28px;
   z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 11px;
   margin: 0;
   color: var(--aw-text-primary);
   font-size: 30px;
   font-weight: var(--aw-font-weight-heavy);
   line-height: 1.15;
   letter-spacing: -0.03em;
+}
+
+.aw-memory-light-flow-layout__title-icon {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  color: currentColor;
 }
 
 .aw-memory-light-flow-layout__content {
@@ -80,7 +90,7 @@
 }
 
 .aw-memory-light-flow-layout__content .memory-settings-switches {
-  width: min(100%, 560px);
+  width: 100%;
   grid-template-columns: minmax(0, 1fr);
   grid-auto-rows: minmax(60px, auto);
   gap: 0;
@@ -234,7 +244,13 @@
   .aw-memory-light-flow-layout__title {
     bottom: 16px;
     left: 24px;
+    gap: 10px;
     font-size: 28px;
+  }
+
+  .aw-memory-light-flow-layout__title-icon {
+    width: 26px;
+    height: 26px;
   }
 
   .aw-memory-light-flow-layout__content {

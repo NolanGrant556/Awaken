@@ -2,7 +2,10 @@ package agentbridge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,9 +23,9 @@ func writeTestManifest(t *testing.T, userDataDir string, id *runtime.RuntimeIden
 	}
 }
 
-func testManifest(t *testing.T, userDataDir, ownerMode string) *runtime.RuntimeIdentity {
+func testManifest(t *testing.T, userDataDir, ownerMode, baseURL string) *runtime.RuntimeIdentity {
 	t.Helper()
-	id, err := runtime.GenerateRuntimeIdentity(userDataDir, ownerMode, "http://127.0.0.1:18080")
+	id, err := runtime.GenerateRuntimeIdentity(userDataDir, ownerMode, baseURL)
 	if err != nil {
 		t.Fatalf("generate identity: %v", err)
 	}
@@ -30,17 +33,56 @@ func testManifest(t *testing.T, userDataDir, ownerMode string) *runtime.RuntimeI
 	return id
 }
 
+func testControlServer(t *testing.T, token, runtimeIdentity, instanceID, ownerMode string) (*httptest.Server, *bool, *bool) {
+	t.Helper()
+	created := false
+	released := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if auth := r.Header.Get("Authorization"); auth != "Bearer "+token {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		switch r.Method + " " + r.URL.Path {
+		case "GET /v1/control/runtime/identity":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"runtime_identity": runtimeIdentity,
+				"instance_id":      instanceID,
+				"owner_mode":       ownerMode,
+				"base_url":         "http://" + r.Host,
+			})
+		case "POST /v1/control/leases":
+			created = true
+			writeJSON(w, http.StatusCreated, map[string]any{
+				"lease_id":   "lease_test_123",
+				"owner_kind": "bridge",
+				"owner_id":   "owner-test",
+				"expires_at": time.Now().UTC().Add(30 * time.Second).Format(time.RFC3339Nano),
+				"ttl_ms":     30000,
+			})
+		case "DELETE /v1/control/leases/lease_test_123":
+			released = true
+			writeJSON(w, http.StatusOK, map[string]any{"status": "released"})
+		default:
+			http.Error(w, "not found", http.StatusNotFound)
+		}
+	}))
+	return srv, &created, &released
+}
+
+func writeJSON(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
 func TestLaunchAttachesToExistingManifest(t *testing.T) {
 	dir := t.TempDir()
-	id := testManifest(t, dir, "headless")
+	id := testManifest(t, dir, "headless", "http://127.0.0.1:18080")
+	id.ControlToken = "test-token"
+	srv, created, released := testControlServer(t, "test-token", id.RuntimeIdentity, id.InstanceID, "headless")
+	defer srv.Close()
+	id.BaseURL = srv.URL
 	writeTestManifest(t, dir, id)
-
-	var released bool
-	releaseLeaseHook = func(baseURL, token, leaseID string) error {
-		released = true
-		return nil
-	}
-	defer func() { releaseLeaseHook = nil }()
 
 	launcher := Launcher{UserDataDir: dir, Strategy: StartupFail}
 	res, err := launcher.Launch(context.Background())
@@ -50,14 +92,20 @@ func TestLaunchAttachesToExistingManifest(t *testing.T) {
 	if res.Identity.InstanceID != id.InstanceID {
 		t.Fatalf("instance mismatch: got %q, want %q", res.Identity.InstanceID, id.InstanceID)
 	}
-	if res.LeaseID != "lease_placeholder" {
+	if res.LeaseID != "lease_test_123" {
 		t.Fatalf("unexpected lease: %q", res.LeaseID)
+	}
+	if res.OwnerID == "" {
+		t.Fatal("ownerID is empty")
+	}
+	if !*created {
+		t.Fatal("lease create endpoint was not called")
 	}
 	if err := res.Close(); err != nil {
 		t.Fatalf("close failed: %v", err)
 	}
-	if !released {
-		t.Fatal("lease was not released")
+	if !*released {
+		t.Fatal("lease release endpoint was not called")
 	}
 }
 
@@ -71,7 +119,11 @@ func TestLaunchFailStrategyReturnsErrorWhenNoManifest(t *testing.T) {
 
 func TestLaunchCoreSpawnStrategyWaitsForManifest(t *testing.T) {
 	dir := t.TempDir()
-	id := testManifest(t, dir, "headless")
+	id := testManifest(t, dir, "headless", "http://127.0.0.1:18080")
+	id.ControlToken = "test-token"
+	srv, created, _ := testControlServer(t, "test-token", id.RuntimeIdentity, id.InstanceID, "headless")
+	defer srv.Close()
+	id.BaseURL = srv.URL
 
 	spawned := false
 	launcher := Launcher{
@@ -101,6 +153,9 @@ func TestLaunchCoreSpawnStrategyWaitsForManifest(t *testing.T) {
 	}
 	if res.Identity.InstanceID != id.InstanceID {
 		t.Fatalf("instance mismatch: got %q, want %q", res.Identity.InstanceID, id.InstanceID)
+	}
+	if !*created {
+		t.Fatal("lease create endpoint was not called")
 	}
 	if err := res.Close(); err != nil {
 		t.Fatalf("close failed: %v", err)
@@ -138,9 +193,6 @@ func TestLaunchCoreSpawnStrategyCleansUpOnTimeout(t *testing.T) {
 		},
 	}
 
-	releaseLeaseHook = func(baseURL, token, leaseID string) error { return nil }
-	defer func() { releaseLeaseHook = nil }()
-
 	start := time.Now()
 	_, err := launcher.Launch(context.Background())
 	if err == nil {
@@ -164,7 +216,7 @@ func TestLaunchCoreSpawnStrategyCleansUpOnTimeout(t *testing.T) {
 
 func TestLaunchIdentityMismatchRejectsManifest(t *testing.T) {
 	dir := t.TempDir()
-	id := testManifest(t, dir, "headless")
+	id := testManifest(t, dir, "headless", "http://127.0.0.1:18080")
 	writeTestManifest(t, dir, id)
 
 	launcher := Launcher{UserDataDir: dir, Strategy: StartupFail, IdentityParam: "other-identity"}
@@ -175,13 +227,28 @@ func TestLaunchIdentityMismatchRejectsManifest(t *testing.T) {
 
 func TestLaunchCreateLeaseFailurePropagates(t *testing.T) {
 	dir := t.TempDir()
-	id := testManifest(t, dir, "headless")
+	id := testManifest(t, dir, "headless", "http://127.0.0.1:18080")
 	writeTestManifest(t, dir, id)
 
-	createLeaseHook = func(ctx context.Context, baseURL, token, ownerID string) (*runtimeLease, error) {
-		return nil, errors.New("lease denied")
-	}
-	defer func() { createLeaseHook = nil }()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" && r.URL.Path == "/v1/control/leases" {
+			http.Error(w, `{"error":"lease denied"}`, http.StatusBadRequest)
+			return
+		}
+		if r.Method == "GET" && r.URL.Path == "/v1/control/runtime/identity" {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"runtime_identity": id.RuntimeIdentity,
+				"instance_id":      id.InstanceID,
+				"owner_mode":       id.OwnerMode,
+				"base_url":         id.BaseURL,
+			})
+			return
+		}
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer srv.Close()
+	id.BaseURL = srv.URL
+	writeTestManifest(t, dir, id)
 
 	launcher := Launcher{UserDataDir: dir, Strategy: StartupFail}
 	if _, err := launcher.Launch(context.Background()); err == nil {
@@ -190,13 +257,12 @@ func TestLaunchCreateLeaseFailurePropagates(t *testing.T) {
 }
 
 func TestLaunchDoubleCheckAfterLockAvoidsDuplicateSpawn(t *testing.T) {
-	// This test verifies the locked double-check path by writing the manifest
-	// inside SpawnCoreFunc. Because the fast path runs without the lock and sees
-	// no manifest, Launch enters the locked section; the double-check then finds
-	// the manifest written by the first SpawnCoreFunc call and skips a second
-	// spawn.
 	dir := t.TempDir()
-	id := testManifest(t, dir, "headless")
+	id := testManifest(t, dir, "headless", "http://127.0.0.1:18080")
+	id.ControlToken = "test-token"
+	srv, _, _ := testControlServer(t, "test-token", id.RuntimeIdentity, id.InstanceID, "headless")
+	defer srv.Close()
+	id.BaseURL = srv.URL
 
 	spawnCount := 0
 	launcher := Launcher{
@@ -231,15 +297,15 @@ func TestDefaultUserDataDirPackaged(t *testing.T) {
 	if goruntime.GOOS != "windows" {
 		t.Skip("windows-only test")
 	}
-	localAppData := os.Getenv("LOCALAPPDATA")
-	if localAppData == "" {
-		t.Skip("LOCALAPPDATA not set")
+	appData := os.Getenv("APPDATA")
+	if appData == "" {
+		t.Skip("APPDATA not set")
 	}
 	dir, err := DefaultUserDataDir(false)
 	if err != nil {
 		t.Fatalf("default userData dir: %v", err)
 	}
-	expected := filepath.Join(localAppData, "@awaken", "desktop")
+	expected := filepath.Join(appData, "@awaken", "desktop")
 	if dir != expected {
 		t.Fatalf("unexpected default dir: got %q, want %q", dir, expected)
 	}
@@ -254,5 +320,26 @@ func TestComputeRuntimeIdentityIsStable(t *testing.T) {
 	}
 	if a != b {
 		t.Fatalf("identity not stable: %q vs %q", a, b)
+	}
+}
+
+func TestDefaultSpawnDesktopReturnsTypedErrorWhenMissing(t *testing.T) {
+	t.Setenv("AWAKEN_DESKTOP_PATH", "")
+	// Exercise the default function directly; the real executable location is
+	// unlikely to have a sibling Awaken directory in tests.
+	tmp := t.TempDir()
+	err := defaultSpawnDesktop(context.Background(), tmp)
+	if !errors.Is(err, ErrDesktopBinaryNotFound) {
+		t.Fatalf("expected ErrDesktopBinaryNotFound, got %v", err)
+	}
+}
+
+func TestDefaultSpawnDesktopUsesEnvOverride(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "nonexistent-desktop")
+	t.Setenv("AWAKEN_DESKTOP_PATH", missing)
+	err := defaultSpawnDesktop(context.Background(), dir)
+	if !errors.Is(err, ErrDesktopBinaryNotFound) {
+		t.Fatalf("expected ErrDesktopBinaryNotFound for missing env override, got %v", err)
 	}
 }

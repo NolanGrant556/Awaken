@@ -28,26 +28,30 @@ const (
 	runtimeSubdir                = "runtime"
 )
 
+// ErrManifestOwnedByOther is returned when the manifest file is owned by a live
+// Core instance with a different instance_id.
+var ErrManifestOwnedByOther = errors.New("runtime manifest owned by another running instance")
+
 // RuntimeIdentity is the durable discovery record for a single awaken-core
 // instance. It is written to the userData-specific runtime directory and used
 // by awaken-acp to locate and authenticate against the Core.
 type RuntimeIdentity struct {
-	SchemaVersion  int       `json:"schema_version"`
-	RuntimeIdentity string   `json:"runtime_identity"`
-	InstanceID     string    `json:"instance_id"`
-	PID            int       `json:"pid"`
-	OwnerMode      string    `json:"owner_mode"`
-	BaseURL        string    `json:"base_url"`
-	ControlToken   string    `json:"control_token"`
-	StartedAt      time.Time `json:"started_at"`
+	SchemaVersion   int       `json:"schema_version"`
+	RuntimeIdentity string    `json:"runtime_identity"`
+	InstanceID      string    `json:"instance_id"`
+	PID             int       `json:"pid"`
+	OwnerMode       string    `json:"owner_mode"`
+	BaseURL         string    `json:"base_url"`
+	ControlToken    string    `json:"control_token"`
+	StartedAt       time.Time `json:"started_at"`
 }
 
 // RuntimeManifestPaths locates the manifest and lock files for a given userData
 // directory.
 type RuntimeManifestPaths struct {
-	Dir       string
-	Manifest  string
-	Lock      string
+	Dir      string
+	Manifest string
+	Lock     string
 }
 
 // ResolveRuntimeManifestPaths returns the runtime directory, manifest path and
@@ -109,6 +113,35 @@ func WriteManifest(userDataDir string, id *RuntimeIdentity) error {
 		return fmt.Errorf("write manifest: %w", err)
 	}
 	return nil
+}
+
+// CompareAndSwapManifest writes the manifest only if no other live Core owns the
+// userData directory. If an existing manifest exists, its PID is alive, and its
+// instance_id differs from expectedInstanceID, ErrManifestOwnedByOther is
+// returned.
+func CompareAndSwapManifest(userDataDir, expectedInstanceID string, id *RuntimeIdentity) error {
+	existing, err := ReadManifest(userDataDir)
+	if err == nil && existing != nil && existing.PID > 0 && processAlive(existing.PID) && existing.InstanceID != expectedInstanceID {
+		return fmt.Errorf("%w (instance_id=%s pid=%d)", ErrManifestOwnedByOther, existing.InstanceID, existing.PID)
+	}
+	return WriteManifest(userDataDir, id)
+}
+
+// DeleteManifestIfOwned removes the manifest only when it is owned by the given
+// instanceID or does not exist. A mismatching live manifest returns
+// ErrManifestOwnedByOther.
+func DeleteManifestIfOwned(userDataDir, instanceID string) error {
+	existing, err := ReadManifest(userDataDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read manifest before delete: %w", err)
+	}
+	if existing.InstanceID != instanceID {
+		return fmt.Errorf("%w (instance_id=%s)", ErrManifestOwnedByOther, existing.InstanceID)
+	}
+	return DeleteManifest(userDataDir)
 }
 
 // ReadManifest reads and returns the manifest if it exists.

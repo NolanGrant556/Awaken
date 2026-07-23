@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -38,6 +37,8 @@ type ACPSessionMapping struct {
 	CurrentRunID  string
 	CanonicalCWD  string
 	Visibility    string // "visible" or "ephemeral"
+	ClientName    string
+	ClientVersion string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
@@ -94,13 +95,15 @@ func (m *ACPSessionManager) CreateSession(ctx context.Context, req ACPSessionCre
 
 	now := time.Now().UTC()
 	mapping := &ACPSessionMapping{
-		ACPSessionID: req.ACPSessionID,
-		ProjectID:    projectID,
-		ThreadID:     threadID,
-		CanonicalCWD: cwd,
-		Visibility:   req.Visibility,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ACPSessionID:  req.ACPSessionID,
+		ProjectID:     projectID,
+		ThreadID:      threadID,
+		CanonicalCWD:  cwd,
+		Visibility:    req.Visibility,
+		ClientName:    req.ClientName,
+		ClientVersion: req.ClientVersion,
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 
 	m.mu.Lock()
@@ -139,6 +142,9 @@ func (m *ACPSessionManager) CloseSession(ctx context.Context, acpSessionID strin
 	if mapping.CurrentRunID != "" && m.runService != nil {
 		_, _ = m.runService.CancelRun(mapping.CurrentRunID)
 	}
+	if mapping.Visibility == "ephemeral" && m.runService != nil {
+		_ = m.runService.DeleteThread(mapping.ThreadID)
+	}
 	return nil
 }
 
@@ -168,6 +174,23 @@ func (m *ACPSessionManager) ClearCurrentRun(acpSessionID, runID string) {
 		mapping.CurrentRunID = ""
 		mapping.UpdatedAt = time.Now().UTC()
 	}
+}
+
+// UpdateThreadID updates the thread associated with an ACP session. It is used
+// when the first run lazily creates the thread that was only reserved during
+// session creation.
+func (m *ACPSessionManager) UpdateThreadID(acpSessionID, threadID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	mapping, ok := m.sessions[acpSessionID]
+	if !ok {
+		return ErrACPSessionNotFound
+	}
+	delete(m.threadToSession, mapping.ThreadID)
+	mapping.ThreadID = threadID
+	m.threadToSession[threadID] = acpSessionID
+	mapping.UpdatedAt = time.Now().UTC()
+	return nil
 }
 
 func (m *ACPSessionManager) ensureProjectAndThread(ctx context.Context, cwd string, req ACPSessionCreateRequest) (string, string, error) {
@@ -211,9 +234,6 @@ func CanonicalizeCWD(cwd string) (string, error) {
 	// Reject NUL and other illegal characters at the URI/path level.
 	if strings.ContainsRune(cwd, '\x00') {
 		return "", errors.New("cwd contains NUL")
-	}
-	if _, err := url.ParseRequestURI(filepath.ToSlash(cwd)); err != nil {
-		return "", fmt.Errorf("cwd is not a valid path: %w", err)
 	}
 
 	cleaned := filepath.Clean(cwd)

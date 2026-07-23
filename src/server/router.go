@@ -252,6 +252,22 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 		controlMux.HandleFunc("POST /v1/control/acp/sessions", acpSessionCtrl.handleCreateACPSession)
 		controlMux.HandleFunc("GET /v1/control/acp/sessions/{session_id}", acpSessionCtrl.handleGetACPSession)
 		controlMux.HandleFunc("POST /v1/control/acp/sessions/{session_id}/close", acpSessionCtrl.handleCloseACPSession)
+		if cfg.runService != nil && cfg.control.ACPSessionManager != nil {
+			acpRunCtrl := acpRunControlHandlers{
+				runService:        cfg.runService,
+				acpSessionManager: cfg.control.ACPSessionManager,
+				acpManager:        cfg.acpManager,
+				identity:          cfg.control.Identity,
+			}
+			controlMux.HandleFunc("POST /v1/control/acp/sessions/{session_id}/runs", acpRunCtrl.handleCreateACPRun)
+			controlMux.HandleFunc("POST /v1/control/acp/sessions/{session_id}/current-run/{run_id}", acpRunCtrl.handleSetCurrentRun)
+			controlMux.HandleFunc("DELETE /v1/control/acp/sessions/{session_id}/current-run", acpRunCtrl.handleClearCurrentRun)
+			controlMux.HandleFunc("GET /v1/control/acp/sessions/{session_id}/runs/{run_id}/events", acpRunCtrl.handleACPRunEvents)
+			controlMux.HandleFunc("POST /v1/control/acp/sessions/{session_id}/runs/{run_id}/cancel", acpRunCtrl.handleCancelACPRun)
+			if cfg.acpManager != nil {
+				controlMux.HandleFunc("POST /v1/control/acp/sessions/{session_id}/runs/{run_id}/permissions/{interaction_id}/resolve", acpRunCtrl.handleResolveACPPermission)
+			}
+		}
 		auth := ControlTokenMiddleware(cfg.control.Identity.ControlToken)
 		mux.Handle("/v1/control/", auth(controlMux))
 	}

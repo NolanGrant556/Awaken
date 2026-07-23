@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -29,9 +30,9 @@ import (
 	"awaken/src/skills"
 	"awaken/src/tool"
 	_ "awaken/src/tools"
+	bashtool "awaken/src/tools/bash"
 	configureacprunner "awaken/src/tools/configure_acp_runner"
 	delegateexternalagent "awaken/src/tools/delegate_external_agent"
-	bashtool "awaken/src/tools/bash"
 )
 
 func main() {
@@ -208,19 +209,20 @@ func main() {
 		if err != nil {
 			log.Fatalf("generate runtime identity: %v", err)
 		}
-		if err := runtime.WriteManifest(userDataDir, runtimeIdentity); err != nil {
+		if err := runtime.CompareAndSwapManifest(userDataDir, runtimeIdentity.InstanceID, runtimeIdentity); err != nil {
+			if errors.Is(err, runtime.ErrManifestOwnedByOther) {
+				log.Fatalf("runtime manifest owned by another instance: %v", err)
+			}
 			log.Fatalf("write runtime manifest: %v", err)
 		}
 		log.Printf("[runtime] manifest written for instance %s at %s", runtimeIdentity.InstanceID, baseURL)
 		if *ownerMode == "headless" {
 			leaseManager = runtime.NewLeaseManager(func() {
-				if runService.ActiveRunCount() > 0 {
-					// Active runs block idle shutdown. The lease manager will be
-					// re-triggered after the next reap interval.
-					return
-				}
 				shutdownOnce()
-			})
+			}, runtime.WithActiveRunCountFunc(runService.ActiveRunCount))
+		} else {
+			// Desktop mode still exposes control lease routes for Desktop attach.
+			leaseManager = runtime.NewLeaseManager(nil)
 		}
 		acpSessionManager = runtime.NewACPSessionManager(runService, runService.ProjectService())
 		control = &server.ControlConfig{
@@ -285,7 +287,7 @@ func main() {
 		log.Printf("awaken-core shutdown error: %v", err)
 	}
 	if userDataDir != "" && runtimeIdentity != nil {
-		if err := runtime.DeleteManifest(userDataDir); err != nil {
+		if err := runtime.DeleteManifestIfOwned(userDataDir, runtimeIdentity.InstanceID); err != nil {
 			log.Printf("awaken-core delete manifest error: %v", err)
 		}
 	}

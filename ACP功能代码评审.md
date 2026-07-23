@@ -2,11 +2,11 @@
 
 ## 1. 评审结论
 
-本次未提交改动已经搭出了较完整的 ACP Client 骨架：第三方 SDK 被限制在 `src/acp/protocol`，Manager、runner registry、委派工具、Core route、AG-UI typed event、Desktop 设置页和 Workbench projection 的分层方向基本符合方案。
+当前分支已经搭出了较完整的 ACP Client 骨架，并新增了 Phase 5 ACP Agent bridge、runtime discovery/control route、lease、Desktop control client 和 `cmd/awaken-acp`。第三方 SDK 仍被限制在 `src/acp/protocol` 与 `src/acp/agentbridge`，总体分层方向合理。
 
-初次评审的 2 个 P0、7 个 P1 已完成大部分针对性修改；二次复核仍发现 **1 个 P0、5 个 P1**，当前结论仍为 **request changes**。最主要的阻塞是 ACP permission event 被延迟到工具结束后才发布，导致工具等待用户选择、用户却看不到 gate 的闭环死锁。当前也没有真实 Desktop + 真实 runner 的验收证据。
+初次与二次评审的问题已有针对性修改；本次对 Phase 5 生产路径的三次复核发现 **5 个 P0、8 个 P1**，当前结论仍为 **request changes**。新增单元测试大多通过，但 launcher、事件映射、permission 回写、session close 和多 Core ownership 的真实路径仍不可用或会产生错误终态。
 
-本文件 §3–§8 保留初次评审及修复说明，**当前复核结论以 §10 为准**。Phase 5 的八项产品与安全决策已经在方案文档中收敛为目标契约，但实现仍未开始，不能宣称“Awaken 可被其他 ACP client 当作 Agent 调用”为当前支持。
+本文件 §3–§10 保留前两次评审及修复说明，**当前复核结论以 §11 为准**。Phase 5 已有代码骨架，但尚未达到“Awaken 可被其他 ACP client 当作 Agent 调用”的完成条件。
 
 ## 2. 变更规模
 
@@ -390,7 +390,7 @@ Manager 在检查冲突后释放锁，再执行 probe/spawn/initialize/new sessi
 
 **结论**：QwenPaw 的独立 stdio Agent 证明了“client 负责启动、直接信任 cwd”的产品模型可行。Awaken 采用这两点，并借鉴其 **approval bridge、进程树清理、capability 不声明、meta 标记来源**；差异在于 Awaken 通过 launcher/discovery/lease 复用或受管启动同一 userData identity 的 Core，不允许无约束的多个 Core 同时写同一运行时数据。
 
-## 10. 二次复核结论（当前）
+## 10. 二次复核结论（已修复基线）
 
 ### Review 总结
 
@@ -490,3 +490,239 @@ Manager 在检查冲突后释放锁，再执行 probe/spawn/initialize/new sessi
 
 - `go test ./src/runtime/...` 全包仍有 Windows 文件句柄锁定导致的既有测试失败（`TestFileStoreLifecycleJournalRollForwardAndSnapshotRebuild`），与本次 ACP 改动无关。
 - 未运行真实 Desktop，也未使用真实 ACP runner 完成 permission、cancel 与 replay 闭环。
+
+## 11. 三次复核结论：Phase 5 当前实现
+
+### Review 总结
+
+- 评审基线：`origin/main...HEAD`，共 106 个文件，约 `+12522/-255`；其中 Phase 5（`65409fd0..HEAD`）为 34 个文件，约 `+3998/-29`。
+- 整体结论：**request changes**。
+- 二次复核的 run identity、env DTO、cancel/timeout 分类、UTF-8 边界和 replay projector 已修复；permission live gate 不再等待工具结束才出现。
+- Phase 5 目前是可编译的骨架，不是可交付链路。生产 launcher 仍有 placeholder，bridge 使用了错误的 AG-UI event 名，permission 回写到错误的 Core subsystem，session close 不能保证取消 run，Desktop/headless Core 也没有实现方案要求的单实例接管。
+- 当前发现：**5 个 P0、8 个 P1**。
+
+### P0（必须修）
+
+#### P0-1 launcher 的三个生产启动策略没有真正接通
+
+位置：`src/acp/agentbridge/launcher.go:219`、`src/acp/agentbridge/launcher.go:279`、`src/acp/agentbridge/launcher.go:284`、`cmd/awaken-acp/main.go:40`、`scripts/build-binary.mjs:47`
+
+当前生产路径存在以下阻塞：
+
+1. `createLease` 默认返回硬编码的 `lease_placeholder`，`releaseLease` 是 no-op；测试还把该 placeholder 写成期望值。
+2. `defaultSpawnDesktop` 在所有平台都直接返回 `desktop spawn not implemented`，所以默认 `--startup=desktop` 在没有 manifest 时必定失败。
+3. `cmd/awaken-acp` 没有设置 `CoreBinaryPath`，因此 `--startup=core` 会在 `core binary path is required` 处失败。
+4. 即使传入 binary，launcher 只设置 `AWAKEN_OWNER_MODE=headless`，但 Core 读取的是 `--owner-mode` flag，实际仍以 `desktop` owner 启动。
+5. 构建和打包脚本只生成 `awaken-core`，没有生成或随安装包发布 `awaken-acp`，外部 client 没有稳定 command 可配置。
+
+这意味着除“碰巧存在一个可读 manifest”的路径外，文档声明的 Desktop auto-start 和 managed headless Core 都无法使用；existing-manifest 路径也没有真实 lease。
+
+建议修改：
+
+1. 删除 hook 之外的 placeholder，实现真实 authenticated lease create/release，并先完成 identity endpoint 校验。
+2. 为 Windows/macOS/Linux 实现正式 Desktop 启动器；为 packaged/dev identity 共享唯一的 executable/userData resolver。
+3. 从 `awaken-acp` 自身安装位置解析配套 `awaken-core`，spawn 时传 `--owner-mode=headless`。
+4. 构建、签名和打包两个 binary，补一个不替换 hook 的 packaged-layout 启动测试。
+
+#### P0-2 bridge 使用不存在的 AG-UI event 名，文本/工具更新不会发送且失败 run 会伪装成成功
+
+位置：`src/acp/agentbridge/session.go:78`、`src/acp/agentbridge/agent.go:215`、`src/acp/agentbridge/coreclient.go:35`
+
+`handleFrame` 匹配 `TEXT_DELTA`、`TOOL_CALL_STARTED`、`TOOL_CALL_FINISHED`、`TOOL_RESULT`，但当前 wire 的真实类型是：
+
+- `TEXT_MESSAGE_CONTENT`，文本位于 `frame.Delta`；
+- `TOOL_CALL_START`；
+- `TOOL_CALL_END`；
+- `TOOL_CALL_RESULT`。
+
+因此正常 Awaken run 的 assistant 文本与工具进度会全部落入 default 分支被静默丢弃。即使收到 `RUN_ERROR` 或失败 terminal，当前代码也不记录 terminal outcome；SSE 关闭后 `Agent.Prompt` 一律返回 `StopReasonEndTurn`。此外同一个带 30 秒总超时的 `http.Client` 被用于 SSE，合法的长 turn 会在 30 秒被主动断开。
+
+工具状态还使用 `"running"`，而 ACP v1 的有效值是 `pending | in_progress | completed | failed`。
+
+建议修改：
+
+1. 直接使用 `agui.Event*` 常量匹配，文本读取 `Delta`，ACP 状态使用 SDK 常量。
+2. 建立明确的 terminal accumulator：`RUN_FINISHED`、`RUN_ERROR`、cancelled 和 transport closed 分别映射对应 ACP stop reason/error，不能把 stream EOF 当成功。
+3. SSE 使用没有整体 request timeout、但有 dial/header/idle watchdog 的独立 client。
+4. 增加真实 `RunService -> router SSE -> bridgeSession -> AgentSideConnection` 集成测试，断言文本、工具、错误、cancel 和超过 30 秒的 turn。
+
+#### P0-3 permission 选择被回写到错误的 Core route，真实 ACP option 也会被误判
+
+位置：`src/acp/agentbridge/session.go:152`、`src/acp/agentbridge/session.go:207`、`src/acp/agentbridge/session.go:218`
+
+bridge 监听的是 `AWAKEN_ACP_PERMISSION_REQUESTED`，它对应 ACP Client manager 中的 pending permission；但选择后调用的是通用 `/external-interactions/{id}/resolve`。这两个 pending map 完全不同，所以真实请求会得到 not found，原 ACP permission 继续等待直到超时。
+
+同时 `permissionOptionKind` 只识别 `"allow"` / `"deny"`，ACP v1 实际 kind 是 `allow_once`、`allow_always`、`reject_once`、`reject_always`。当前测试使用了协议中不存在的简化 kind，掩盖了错误。
+
+建议修改：
+
+- 对 `AWAKEN_ACP_PERMISSION_REQUESTED` 调用现有 `/v1/runs/{run_id}/acp-permissions/{interaction_id}/resolve` 语义，携带 exact `option_id` 或 `cancelled=true`，由 Core pending record 校验 run/session/runner/option。
+- 若 Phase 5 还要把 Awaken 自己的 finite-choice external interaction 转成 ACP permission，应监听 `AWAKEN_EXTERNAL_INTERACTION_REQUESTED` 并建立独立映射，不能混用两个 interaction namespace。
+- 增加真实等待测试：Core pending goroutine 在 client allow/reject/cancel 后解除，错误 option 与迟到响应被拒绝。
+
+#### P0-4 `session/close` 和 stdio EOF 不会可靠取消 active Core run
+
+位置：`src/acp/agentbridge/session.go:29`、`src/acp/agentbridge/session.go:61`、`src/runtime/acp_session.go:128`、`src/runtime/acp_session.go:147`
+
+`ACPSessionManager.SetCurrentRun/ClearCurrentRun` 没有任何生产调用，Core mapping 的 `CurrentRunID` 始终为空。bridge close 时先 cancel `s.ctx`；`Prompt` 收到 `s.ctx.Done()` 后直接返回，没有调用 `CancelRun`。随后 Core `CloseSession` 也因 `CurrentRunID == ""` 无法取消 run。
+
+结果是 `session/close`、stdio EOF 或 bridge signal 可以让 client 认为会话已关闭，但模型和工具仍在 Core 中继续执行副作用。`Agent.Cancel` 读取 `session.currentRunID` 时也没有获取 session mutex，并发 prompt/cancel 存在 data race。
+
+建议修改：
+
+1. 用 session-specific authenticated start-run control route 原子建立 `session -> run` 关联，或在创建 run 后立即 `SetCurrentRun`、terminal 后 `ClearCurrentRun`。
+2. `ctx.Done`、`s.ctx.Done`、close 和 EOF 都必须在有界 context 中调用同一个幂等 cancel-and-wait-terminal 流程。
+3. 所有 `currentRunID` 读写统一受 `bridgeSession.mu` 保护，并防止两个并发 prompt 都通过空值检查。
+4. 测试必须查询 Core run 状态，证明 close/EOF 后不是只清了 bridge map，而是真正形成 cancelled terminal。
+
+#### P0-5 Desktop/headless Core 的单实例 ownership 与 lease 交接尚未实现
+
+位置：`apps/desktop/src/main/runtime-supervisor.ts:391`、`apps/desktop/src/main/runtime-supervisor.ts:663`、`cmd/awaken-core/main.go:211`、`cmd/awaken-core/main.go:216`、`src/acp/agentbridge/launcher.go:20`、`src/acp/agentbridge/launcher.go:127`
+
+当前 ownership 链路有多处互相冲突：
+
+- Desktop supervisor 总是先 spawn 自己的 Core，之后才读取 manifest；它从未在 spawn 前发现并 attach 已有 headless Core。
+- Desktop 计算的 expected identity 是规范化路径字符串，而 Go 是 `packaged:project_<sha256前12字节>`，校验必然失败；错误又被降级为 non-fatal。
+- desktop-owned Core 把 `LeaseManager` 留为 nil，因此 bridge 的真实 create-lease route 会返回 503。
+- 所有 bridge 共用固定 owner ID `awaken-acp-bridge`，会拿到同一个 lease；任一 bridge release 后，其余 bridge 的 heartbeat 失效。
+- 启动 headless Core 的 launcher 在自己退出时直接 `Process.Kill`，无视其他 bridge lease、Desktop lease和 active run。
+- 每个 Core 都无条件覆盖 manifest，退出时也无条件删除；两个 Core 竞争时，一个实例可以覆盖或删除另一个实例的 discovery record。
+
+这违反 Phase 5 最核心的“同一 userData identity 只有一个可发现 Core”和 lease ownership，不仅会留下孤儿，还可能杀掉仍被其他 client 使用的 Core。
+
+建议修改：
+
+1. Desktop supervisor 启动前执行与 launcher 相同的 manifest + authenticated identity 校验，命中 headless Core 时进入明确的 `external-attached` 状态而不是 spawn。
+2. 所有 Core 都提供 LeaseManager；只有 headless owner 根据 lease/active-run/idle budget决定自退，desktop owner 仅记账。
+3. 每个 bridge 使用随机 UUID owner ID；launcher 退出只 release lease，不直接 kill 已发布 manifest 的 Core。
+4. manifest publish/delete 使用 instance compare-and-swap：只能删除自己仍拥有的 manifest。
+5. runtime identity 算法只由一处共享或以 manifest 值为准，Desktop 不手写另一套不等价算法。
+6. 增加真实多进程测试：两个 bridge 并发、Desktop 接管 headless、任一 bridge 退出、Desktop 退出和 Core crash 都不产生重复 Core或误杀。
+
+### P1（应该修）
+
+#### P1-1 LeaseManager 会在读锁下修改 map，且没有实现 30 秒 idle budget
+
+位置：`src/runtime/lease.go:162`、`src/runtime/lease.go:185`
+
+`LeaseCount` 和 `shouldIdleShutdown` 持 `RLock` 后调用 `reapExpiredLocked` 删除 map entry，属于错误的锁模式；并发 heartbeat/create/reap 时可能 data race 或 map 并发访问。
+
+`headlessIdleBudget` 常量没有被使用。manager 在第一次发现零 lease 时立即调用 callback 并退出：没有等待 30 秒；若 callback 因 active run 返回，reaper 仍永久退出，run terminal 后也不会重新开始 idle 倒计时。
+
+建议使用单一写锁完成 reap + snapshot，并显式维护 `idleSince`/timer；新 lease 或 active run 重置 idle，只有连续 idle 满 budget 才 shutdown。
+
+#### P1-2 visible/ephemeral、来源 metadata 和 client identity 没有按契约落盘
+
+位置：`src/acp/agentbridge/agent.go:153`、`src/runtime/acp_session.go:126`、`src/runtime/acp_session.go:173`
+
+- 方案定义 `_meta["awaken.ephemeral"]=true`，实现却读取字符串 `awaken_visibility`。
+- `CloseSession` 明确没有删除 ephemeral thread，也没有 cleanup worker，Phase 5 checklist 却勾选了 ephemeral 生命周期。
+- `InitializeRequest.ClientInfo` 没有保存；NewSession 又从非标准 meta 猜 `client_name/client_version`。
+- `ensureProjectAndThread` 直接丢弃 request，thread 没有持久化 `source=acp_bridge`、client、ACP session、canonical cwd 等审计 metadata。
+
+建议统一使用已确认 meta key，保存 initialize client info，在首次 run/thread 创建时写 durable metadata，并为 ephemeral close 增加 terminal/no-lease 条件和可重试清理任务。
+
+#### P1-3 control token 没有覆盖 bridge 实际使用的 run/event/cancel/permission routes
+
+位置：`src/acp/agentbridge/coreclient.go:247`、`src/acp/agentbridge/coreclient.go:273`、`src/acp/agentbridge/coreclient.go:296`、`src/acp/agentbridge/coreclient.go:316`
+
+session mapping route受 Bearer token 保护，但 bridge 随后使用无 token 的普通 `/v1/runs`、SSE、cancel 和 external-interaction route。方案 §13.4 要求 bridge session/run/event/permission 全部进入 authenticated control surface；当前 control token 只保护发现和空 mapping，无法保护真正的控制动作。
+
+建议新增窄的 `/v1/control/acp/sessions/{id}/runs...` surface，在 Core 内校验 session/thread/run ownership；bridge 不再直接调用 Desktop 公共 run route。
+
+#### P1-4 Windows 默认 userData 与 Desktop identity 不一致
+
+位置：`src/acp/agentbridge/launcher.go:247`、`apps/desktop/src/main/index.ts:129`
+
+launcher 在 Windows 使用 `%LOCALAPPDATA%\@awaken\desktop`，Electron Desktop 明确使用 `app.getPath("appData")`，通常对应 `%APPDATA%`。默认 `awaken-acp` 因此不会读取 Desktop 发布的 manifest，而会操作另一套目录。
+
+建议把 identity/userData 解析提取成跨语言 golden contract，并至少用 Windows packaged/dev fixture 验证 launcher 与 Desktop 路径完全一致。
+
+#### P1-5 session 输入处理会静默丢失合法内容并拒绝常见 cwd
+
+位置：`src/acp/agentbridge/agent.go:239`、`src/runtime/acp_session.go:215`
+
+- 多个 text block 最终只返回 `parts[0]`，其余文本静默丢失。
+- 非空 `additionalDirectories` 与 `mcpServers` 被静默忽略；首版不支持时应明确返回 unsupported/invalid params。
+- `CanonicalizeCWD` 对本地文件路径调用 `url.ParseRequestURI`，带空格等合法文件名可能被 URI 规则拒绝；路径有效性不应由 URI parser决定。
+
+建议拼接全部 text block；对未支持字段 fail closed；cwd 只做平台路径、存在性、目录和 symlink canonicalization。
+
+#### P1-6 SSE 没有实现 cursor 重连
+
+位置：`src/acp/agentbridge/session.go:52`、`src/acp/agentbridge/coreclient.go:319`
+
+每个 prompt 只以 cursor 0 建一次 SSE；bridge 不记录 `streamCursor`，任何瞬时断线都直接结束 prompt。方案要求按 `(instance_id, run_id, seq)` 去重并从最后 cursor 重连，当前 checklist 将 event mapping 标成完成但缺少该恢复能力。
+
+建议跟踪最后确认 cursor，对 retryable transport error 做有界重连；Core identity 改变或 run terminal 后禁止重放 prompt。
+
+#### P1-7 ACP live event 仍不是“立即 durable”
+
+位置：`src/agentcore/semantic_journal.go:340`、`src/agentcore/runner.go:1888`
+
+二次复核的 UI 死锁已解除：ACP event 会立即 live publish，最终 batch 也避免重复 live。但 semantic record 仍要等 `delegate_external_agent` 整个工具结束才写 journal。Core 在 permission 等待或长 turn 中崩溃时，已展示的 session/turn/tool/permission fact 会从 replay 消失。
+
+建议为 ACP live facts 提供独立 assigned append；最终 tool-result batch 不再重复持久化这些 record，并增加 crash-at-permission/restart replay 测试。
+
+#### P1-8 当前支持文档互相冲突且多处超前声明
+
+位置：`README.md:32`、`docs/02_主智能体闭环/索引.md:10`、`docs/02_主智能体闭环/ACP智能体协作设计与实施方案.md:21`、`docs/03_运行时与本地服务/Desktop本地服务生命周期.md:59`
+
+README 和方案把 Phase 5 launcher、event projection、permission、cancel/close 写成当前支持；02 域索引仍明确写“Phase 5 目标，不在当前支持范围”。当前代码与测试支持后者，且方案 checklist 勾选了尚未实现的 Desktop attach、真实 lease、ephemeral lifecycle。
+
+修复代码前应把权威文档恢复为“当前不支持/已知缺口”；代码与真实验收完成后再一次性切换为当前支持，不能用单元测试存在替代产品事实。
+
+### 建议
+
+1. 禁止 production 函数保留 `placeholder` 并让测试断言 placeholder；未实现 stage 应显式返回 typed not-implemented。
+2. agentbridge 测试应复用 `agui.Event*` 与 ACP SDK enum，不手写 `"TEXT_DELTA"`、`"running"`、`"allow"` 等协议中不存在的字符串。
+3. 增加一条无 hook 的进程级 smoke：构建两个 binary，启动 `awaken-acp --startup=core`，通过真实 stdio ACP connection 完成 initialize/new/prompt/text/tool/cancel/close，再断言进程树和 manifest。
+4. `go test -race` 本机因 CGO 未启用无法执行；lease/session 并发修复后应在支持 race detector 的 CI 强制运行。
+
+### 优点
+
+- Phase 5 类型被集中在 `src/acp/agentbridge`，没有把 ACP SDK 泄漏进 runtime/server/Desktop。
+- manifest 使用随机 loopback、实例 token、原子写和 identity endpoint，目标安全边界方向正确。
+- cwd 明确采用“信任本地 client、无需 Desktop 授权”，并复用正常 project upsert，符合已确认产品决策。
+- 二次复核的 env read/write DTO、run identity、cancel/timeout 分类、UTF-8 和 replay projector 均有对应测试。
+
+### 本次验证
+
+通过：
+
+- `go test -count=1 -timeout 180s ./src/acp/...`：`src/acp`、`src/acp/agentbridge`、`src/acp/protocol` 通过。
+- `go test -count=1 -timeout 60s ./src/runtime ./src/server -run 'Test(Lease|CanonicalizeCWD|StableCWDHash|ACP|Control|HandleCreateACP|HandleGetACP|HandleCloseACP)'`。
+- `go test` 组合中的 `src/protocol/agui`、`delegate_external_agent`、`configure_acp_runner`、`cmd/awaken-core` 通过。
+- `go build ./cmd/awaken-acp` 与 `go build ./cmd/awaken-core`。
+- `npm.cmd --workspace @awaken/desktop test -- runtime-control runtime-supervisor ACPSettingsPanel ExternalActionGate run-narrative/projector runtime/reducer`：6 files，116 passed，2 skipped。
+- `npm.cmd --workspace @awaken/desktop run typecheck`。
+
+未通过或未执行：
+
+- 扩大 Go 组合测试未全绿：`src/runtime` 有多项 Windows 文件句柄/权限及既有环境失败；`src/server` 包含 400 response、`pongpong` 与 compact smoke timeout；`src/agentcore` 包含 composer、CRLF diff 和本机 WSL/bash 失败。本轮没有足够证据把它们全部归因于 ACP，也不能给出全绿声明。
+- `go test -race` 因本机未启用 CGO无法执行。
+- `git diff --check origin/main...HEAD` 未通过：`src/acp/process_windows.go:39` 存在 EOF 多余空行。
+- 未按 README 正式入口运行真实 Desktop，未使用 compatibility suite、Zed 或另一个真实 ACP client。
+
+### 11.2 本次修复说明（当前工作区）
+
+针对 §11.1 中 5 个 P0 与高优先级 P1 进行了实现修复，要点如下：
+
+- **P0-1 launcher 生产策略**：删除 `lease_placeholder` 与相关 hook；`Launcher.attach` 先 `VerifyIdentity` 再通过 `CoreClient.CreateLease/ReleaseLease` 走真实 HTTP lease；`defaultSpawnCore` 传 `--owner-mode=headless` flag；`cmd/awaken-acp` 默认从同级目录解析 `awaken-core[.exe]`；`defaultSpawnDesktop` 支持 `AWAKEN_DESKTOP_PATH` 与相邻 Desktop 可执行文件搜索。
+- **P0-2 bridge 事件名与终端状态**：`session.go` 改用 `agui.Event*` 常量；文本从 `frame.Delta` 读取；工具状态使用 SDK `pending/in_progress/completed/failed`；新增 terminal accumulator，区分 `RUN_FINISHED`/`RUN_ERROR`/`RUN_CANCELLED`；SSE 使用独立 `SSEClient`（`Timeout=0`，5s 连接超时）。
+- **P0-3 permission 回写**：`resolvePermission` 改为调用 `/v1/control/acp/sessions/{session_id}/runs/{run_id}/permissions/{interaction_id}/resolve` 控制路由，携带 `option_id`/`cancelled`；支持 `allow_once/allow_always/reject_once/reject_always`。
+- **P0-4 run cancel 与并发**：新增 `/v1/control/acp/sessions/{session_id}/runs` 创建 run 后 `SetCurrentRun`，`Prompt` 在 defer 中 `ClearCurrentRun`；`ctx.Done()` 统一走 `cancelAndWait`；所有 `currentRunID` 读写受 `s.mu` 保护。
+- **P0-5 单实例 ownership**：Desktop supervisor 启动前先读取 manifest，对存活的 headless Core 进入 `external-attached` 并创建 desktop lease；desktop owner 也提供 `LeaseManager`；bridge owner ID 改为随机 UUID；manifest 使用 `CompareAndSwapManifest` 与 `DeleteManifestIfOwned` 防止误覆盖/误删。
+- **P1-1 lease 锁模式与 idle budget**：`LeaseCount`/`shouldIdleShutdown` 改为写锁；实现 30s idle budget，`activeRunCountFunc` 可阻塞 shutdown，run terminal 后重新倒计时。
+- **P1-2 metadata**：使用 `awaken.ephemeral` meta；`InitializeRequest.ClientInfo` 的 name/version 保存到 bridge 并在 `NewSession` 透传；thread 快照新增 `source/client_name/client_version/acp_session_id` 并在 create-run 时写入；`CloseSession` 对 ephemeral thread 调用 `DeleteThread`。
+- **P1-3 control token 覆盖**：bridge 的 run/event/cancel/permission/current-run 全部迁入 `/v1/control/acp/sessions/...`，由 `ControlTokenMiddleware` 统一保护。
+- **P1-4 Windows userData 路径**：`DefaultUserDataDir` Windows 路径改为 `%APPDATA%`，与 Desktop `app.getPath("appData")` 一致。
+- **P1-5 输入处理**：`extractTextPrompt` 拼接全部 text block；非空 `additionalDirectories`/`mcpServers` 返回 invalid params；`CanonicalizeCWD` 移除 `url.ParseRequestURI`。
+- **P1-8 文档冲突**：更新 README、`docs/02_主智能体闭环/索引.md`、`ACP智能体协作设计与实施方案.md`、`docs/03_运行时与本地服务/Desktop本地服务生命周期.md`，将 Phase 5 未验收的能力明确标为已知缺口，不再超前声明为当前支持。
+
+### 11.3 仍待后续验证的缺口
+
+- 真实第三方 ACP client（Zed、Codex CLI 等）的端到端 prompt/permission/cancel 闭环。
+- 超过 30 秒的长 turn SSE 稳定性与 cursor 重连（P1-6）。
+- ACP live event 的独立 durable append 与崩溃后 replay（P1-7）。
+- 多 bridge 并发、Desktop 接管 headless、Core crash 后的多进程竞争测试（P0-5 已有单元测试，但缺少真实多进程验收）。

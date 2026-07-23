@@ -8,6 +8,8 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"runtime"
 	"syscall"
 
 	"awaken/src/acp/agentbridge"
@@ -17,6 +19,7 @@ func main() {
 	startup := flag.String("startup", "desktop", "Startup strategy when no ready Core exists: desktop, core, fail")
 	userDataDir := flag.String("user-data-dir", "", "Explicit Awaken userData directory (dev/tests)")
 	identity := flag.String("identity", "", "Explicit runtime identity override (dev/tests)")
+	coreBinary := flag.String("core-binary", "", "Path to awaken-core binary (default: sibling of awaken-acp)")
 	flag.Parse()
 
 	if *userDataDir == "" {
@@ -34,13 +37,24 @@ func main() {
 		os.Exit(1)
 	}
 
+	coreBinaryPath := *coreBinary
+	if coreBinaryPath == "" {
+		var err error
+		coreBinaryPath, err = defaultCoreBinaryPath()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "awaken-acp: resolve default core binary: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
 	launcher := agentbridge.Launcher{
-		UserDataDir:   *userDataDir,
-		Strategy:      strategy,
-		IdentityParam: *identity,
+		UserDataDir:    *userDataDir,
+		Strategy:       strategy,
+		IdentityParam:  *identity,
+		CoreBinaryPath: coreBinaryPath,
 	}
 
 	res, err := launcher.Launch(ctx)
@@ -73,4 +87,19 @@ func main() {
 		os.Exit(1)
 	}
 	log.Println("awaken-acp: shutting down")
+}
+
+func defaultCoreBinaryPath() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		if len(os.Args) == 0 {
+			return "", err
+		}
+		exe = os.Args[0]
+	}
+	name := "awaken-core"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	return filepath.Join(filepath.Dir(exe), name), nil
 }

@@ -31,38 +31,65 @@ type Lease struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
+// LeaseManagerOption configures a LeaseManager.
+type LeaseManagerOption func(*LeaseManager)
+
+// WithActiveRunCountFunc provides a callback that returns the number of active
+// runs. When non-nil, active runs block the headless idle shutdown signal.
+func WithActiveRunCountFunc(fn func() int) LeaseManagerOption {
+	return func(m *LeaseManager) {
+		m.activeRunCountFunc = fn
+	}
+}
+
+// WithIdleBudget overrides the default headless idle budget. It is intended for
+// tests.
+func WithIdleBudget(d time.Duration) LeaseManagerOption {
+	return func(m *LeaseManager) {
+		m.idleBudget = d
+	}
+}
+
 // LeaseManager tracks active bridge/Desktop leases and signals when a headless
 // Core becomes idle. It is owned by the Core process.
 type LeaseManager struct {
-	mu              sync.RWMutex
-	leases          map[string]*Lease
-	ownerIndex      map[string]string // ownerID -> leaseID
-	idleCallback    func()
-	cleanupInterval time.Duration
-	stopCh          chan struct{}
-	wg              sync.WaitGroup
+	mu                 sync.Mutex
+	leases             map[string]*Lease
+	ownerIndex         map[string]string // ownerID -> leaseID
+	idleCallback       func()
+	cleanupInterval    time.Duration
+	idleBudget         time.Duration
+	stopCh             chan struct{}
+	wg                 sync.WaitGroup
+	idleSince          time.Time
+	activeRunCountFunc func() int
 }
 
 // NewLeaseManager creates a lease manager. If idleCallback is non-nil and the
 // manager is running, the callback is invoked once after the last lease expires
 // and the headless idle budget has elapsed.
-func NewLeaseManager(idleCallback func()) *LeaseManager {
-	return &LeaseManager{
+func NewLeaseManager(idleCallback func(), opts ...LeaseManagerOption) *LeaseManager {
+	m := &LeaseManager{
 		leases:          make(map[string]*Lease),
 		ownerIndex:      make(map[string]string),
 		idleCallback:    idleCallback,
 		cleanupInterval: leaseCleanupInterval,
+		idleBudget:      headlessIdleBudget,
 		stopCh:          make(chan struct{}),
 	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
 }
 
 // NewLeaseManagerWithInterval is a test helper that uses a custom cleanup interval.
-func NewLeaseManagerWithInterval(idleCallback func(), interval time.Duration) *LeaseManager {
-	lm := NewLeaseManager(idleCallback)
+func NewLeaseManagerWithInterval(idleCallback func(), interval time.Duration, opts ...LeaseManagerOption) *LeaseManager {
+	m := NewLeaseManager(idleCallback, opts...)
 	if interval > 0 {
-		lm.cleanupInterval = interval
+		m.cleanupInterval = interval
 	}
-	return lm
+	return m
 }
 
 // Run starts the lease expiry reaper and idle watcher. It blocks until Stop is
@@ -107,6 +134,7 @@ func (m *LeaseManager) CreateLease(ownerKind, ownerID string) (*Lease, error) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.idleSince = time.Time{}
 	if existingID, ok := m.ownerIndex[ownerID]; ok {
 		if existing, ok := m.leases[existingID]; ok {
 			existing.ExpiresAt = time.Now().UTC().Add(defaultLeaseTTL)
@@ -160,8 +188,8 @@ func (m *LeaseManager) ReleaseLease(leaseID string) error {
 
 // LeaseCount returns the number of active (non-expired) leases.
 func (m *LeaseManager) LeaseCount() int {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.reapExpiredLocked()
 	return len(m.leases)
 }
@@ -183,13 +211,23 @@ func (m *LeaseManager) reapExpiredLocked() {
 }
 
 func (m *LeaseManager) shouldIdleShutdown() bool {
-	// This is a placeholder; actual idle shutdown is gated by the idleCallback
-	// caller, which should check ActiveRunNotifier. The lease manager itself
-	// only signals that no leases remain.
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.reapExpiredLocked()
-	return len(m.leases) == 0
+	if len(m.leases) > 0 {
+		m.idleSince = time.Time{}
+		return false
+	}
+	if m.activeRunCountFunc != nil && m.activeRunCountFunc() > 0 {
+		m.idleSince = time.Time{}
+		return false
+	}
+	now := time.Now().UTC()
+	if m.idleSince.IsZero() {
+		m.idleSince = now
+		return false
+	}
+	return now.Sub(m.idleSince) >= m.idleBudget
 }
 
 func newLeaseID() (string, error) {

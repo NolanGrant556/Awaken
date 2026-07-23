@@ -62,6 +62,7 @@ core 异常退出后状态为 `crashed`。重新启动会恢复线程历史，�
 
 - 通过 `--startup=desktop|core|fail` 指定没有 ready Core 时的策略；默认 `desktop`。
 - 复用同一 userData identity 的现有 Core；没有时按策略拉起 Desktop 或启动一个受 lease 管理的 headless Core，禁止无约束多 Core 写同一 userData。
+- Desktop 在启动前会先读取同一 userData 的 manifest：若存在存活且 identity 校验通过的 headless Core，则进入 `external-attached` 状态并创建 desktop lease，不再 spawn 第二个 Core。
 - Core 在 `<AWAKEN_USER_DATA_DIR>/runtime/core.json` 发布 manifest（含随机 loopback base URL、control token、runtime identity 和 PID），launcher 校验 identity、PID 存活和 authenticated `/v1/control/runtime/identity` 后 attach。
 - attach 后通过 authenticated control routes 创建 bridge lease，并每 10 秒 heartbeat；stdio EOF 或 signal 触发 5 秒有界清理，cancel active run、close session、释放 lease。
 - 不执行模型与工具，只转发 ACP session lifecycle 和 prompt 到 Core HTTP routes。

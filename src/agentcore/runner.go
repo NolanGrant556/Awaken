@@ -1867,6 +1867,11 @@ func (e *runEventEmitter) emitToolResultBatch(
 			RuntimeRepairFailedEventType,
 			RuntimeMissingEventType:
 			records = append(records, RuntimeNoticeSemanticRecord(e.threadID, e.runID, e.turnID(), e.sessionID, fact))
+		case ACPSessionStartedEventType, ACPSessionClosedEventType, ACPSessionInterruptedEventType,
+			ACPTurnStartedEventType, ACPTurnFinishedEventType,
+			ACPToolSnapshotEventType,
+			ACPPermissionRequestedEventType, ACPPermissionResolvedEventType:
+			records = append(records, ACPSemanticRecord(e.threadID, e.runID, e.turnID(), e.sessionID, fact))
 		}
 	}
 	records = append(records, ToolResultSemanticRecord(e.threadID, e.runID, e.turnID(), e.sessionID, result))
@@ -1878,7 +1883,12 @@ func (e *runEventEmitter) emitToolResultBatch(
 	live := make([]AwakenEvent, 0, len(semanticFacts)+len(artifacts)+1)
 	for _, fact := range semanticFacts {
 		e.fillIDs(&fact)
-		live = append(live, fact)
+		// ACP events are emitted live during tool execution by
+		// artifactBufferingSink so that gates and progress appear immediately.
+		// Only durable persistence remains for the final batch.
+		if !isACPEventType(fact.Type) {
+			live = append(live, fact)
+		}
 	}
 	live = append(live, event)
 	if hasMemoryReceipt {
@@ -1896,6 +1906,17 @@ func (e *runEventEmitter) emitToolResultBatch(
 	}
 	emitLive(e.sink, live...)
 	return nil
+}
+
+func isACPEventType(t AwakenEventType) bool {
+	switch t {
+	case ACPSessionStartedEventType, ACPSessionClosedEventType, ACPSessionInterruptedEventType,
+		ACPTurnStartedEventType, ACPTurnFinishedEventType,
+		ACPToolSnapshotEventType,
+		ACPPermissionRequestedEventType, ACPPermissionResolvedEventType:
+		return true
+	}
+	return false
 }
 
 func memoryMutationReceipt(result ToolExecutionResult) (MemoryRecallReceipt, bool) {

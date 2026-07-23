@@ -6,6 +6,7 @@ import { PassThrough } from "node:stream";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
+import { type RuntimeManifest } from "./runtime-control.js";
 
 vi.mock("electron", () => ({
   app: {
@@ -524,6 +525,7 @@ describe("RuntimeSupervisor", () => {
       },
       {
         allocatePort: async () => 19001,
+        readManifest: async () => undefined,
         resolveBinaryPath: () => "/fake/awaken-core",
         resolveLoginUserEnvironment: async () => ({}),
         spawnProcess,
@@ -563,6 +565,7 @@ describe("RuntimeSupervisor", () => {
       },
       {
         allocatePort,
+        readManifest: async () => undefined,
         resolveBinaryPath: () => "/fake/awaken-core",
         resolveLoginUserEnvironment: async () => ({}),
         spawnProcess: () => {
@@ -639,6 +642,7 @@ describe("RuntimeSupervisor", () => {
       },
       {
         allocatePort: async () => 19001,
+        readManifest: async () => undefined,
         resolveBinaryPath: () => "/fake/awaken-core",
         resolveLoginUserEnvironment: async () => ({}),
         spawnProcess,
@@ -658,5 +662,128 @@ describe("RuntimeSupervisor", () => {
 
     expect(spawnProcess).toHaveBeenCalledTimes(1);
     expect(supervisor.getStatus().status).toBe("stopped");
+  });
+
+  it("attaches to an existing headless Core without spawning", async () => {
+    const spawnProcess = vi.fn(() => asChild(new FakeChild()));
+    const killSpy = vi.spyOn(process, "kill").mockReturnValue(true);
+    const userDataDir = "/tmp/awaken-user-data";
+    const baseUrl = "http://127.0.0.1:19080";
+    // Golden values produced by Go runtime.ComputeRuntimeIdentity for this
+    // fixture path. Keep this independent from the TypeScript implementation.
+    const expectedRuntimeIdentity =
+      process.platform === "win32"
+        ? "packaged:project_59630c22b41f016e0f64764f"
+        : "packaged:project_827c0b56d396072e11788079";
+    const manifest: RuntimeManifest = {
+      schema_version: 1,
+      runtime_identity: expectedRuntimeIdentity,
+      instance_id: "core_existing_instance",
+      pid: 12345,
+      owner_mode: "headless",
+      base_url: baseUrl,
+      control_token: "existing-token",
+      started_at: new Date().toISOString(),
+    };
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          runtime_identity: expectedRuntimeIdentity,
+          instance_id: manifest.instance_id,
+          owner_mode: "headless",
+          base_url: baseUrl,
+        }),
+        { status: 200 },
+      ),
+    ).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          lease_id: "lease_ext_123",
+          owner_kind: "desktop",
+          owner_id: `desktop-${userDataDir}`,
+          expires_at: new Date().toISOString(),
+          ttl_ms: 30000,
+          heartbeat_ms: 10000,
+        }),
+        { status: 201 },
+      ),
+    ).mockResolvedValueOnce(
+      new Response(JSON.stringify({ status: "released" }), { status: 200 }),
+    );
+
+    const supervisor = new RuntimeSupervisor(
+      {},
+      {
+        resolveLoginUserEnvironment: async () => ({}),
+        spawnProcess,
+        readManifest: async () => manifest,
+      },
+    );
+
+    try {
+      const info = await supervisor.start();
+
+      expect(spawnProcess).not.toHaveBeenCalled();
+      expect(info).toEqual({
+        status: "external-attached",
+        runtimeBaseUrl: baseUrl,
+      });
+
+      await supervisor.stop();
+      const deleteCall = fetchSpy.mock.calls.find((call) => {
+        const [url, init] = call as [string, RequestInit];
+        return (
+          typeof url === "string" &&
+          url.includes("/v1/control/leases/lease_ext_123") &&
+          init?.method === "DELETE"
+        );
+      });
+      expect(deleteCall).toBeDefined();
+    } finally {
+      killSpy.mockRestore();
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("falls back to spawning when the existing manifest identity does not match", async () => {
+    const spawnProcess = vi.fn(() => asChild(new FakeChild()));
+    const killSpy = vi.spyOn(process, "kill").mockReturnValue(true);
+    const manifest: RuntimeManifest = {
+      schema_version: 1,
+      runtime_identity: "packaged:other-identity",
+      instance_id: "core_other_instance",
+      pid: 12345,
+      owner_mode: "headless",
+      base_url: "http://127.0.0.1:19080",
+      control_token: "other-token",
+      started_at: new Date().toISOString(),
+    };
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(
+      new Error("identity mismatch"),
+    );
+
+    const supervisor = new RuntimeSupervisor(
+      {},
+      {
+        allocatePort: async () => 19001,
+        resolveLoginUserEnvironment: async () => ({}),
+        resolveBinaryPath: () => "/fake/awaken-core",
+        spawnProcess,
+        waitForHealth: vi.fn(async () => {}),
+        readManifest: async () => manifest,
+      },
+    );
+
+    try {
+      const info = await supervisor.start();
+
+      expect(spawnProcess).toHaveBeenCalledTimes(1);
+      expect(info.status).toBe("running");
+    } finally {
+      killSpy.mockRestore();
+      fetchSpy.mockRestore();
+    }
   });
 });

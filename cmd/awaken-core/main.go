@@ -2,7 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
+	"flag"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,11 +16,15 @@ import (
 	"syscall"
 	"time"
 
+	"awaken/src/acp"
+	"awaken/src/acp/protocol"
 	"awaken/src/agentcore"
 	"awaken/src/connectors"
+	"awaken/src/desktopdata"
 	"awaken/src/llm"
 	"awaken/src/mcpclient"
 	"awaken/src/memory"
+	"awaken/src/modelprofile"
 	"awaken/src/runtime"
 	"awaken/src/server"
 	"awaken/src/skillruntime"
@@ -24,12 +32,27 @@ import (
 	"awaken/src/tool"
 	_ "awaken/src/tools"
 	bashtool "awaken/src/tools/bash"
+	configureacprunner "awaken/src/tools/configure_acp_runner"
+	delegateexternalagent "awaken/src/tools/delegate_external_agent"
 )
 
 func main() {
+	ownerMode := flag.String("owner-mode", "desktop", "Core owner mode: desktop or headless")
+	flag.Parse()
+
 	addr := os.Getenv("AWAKEN_CORE_ADDR")
 	if addr == "" {
-		addr = "127.0.0.1:8787"
+		addr = "127.0.0.1:0"
+	}
+
+	userDataDir := strings.TrimSpace(os.Getenv("AWAKEN_USER_DATA_DIR"))
+	var runtimeIdentity *runtime.RuntimeIdentity
+	if userDataDir != "" && (*ownerMode == "desktop" || *ownerMode == "headless") {
+		if err := os.MkdirAll(userDataDir, 0o700); err != nil {
+			log.Fatalf("ensure userData dir: %v", err)
+		}
+	} else if *ownerMode == "headless" {
+		log.Fatalf("headless mode requires AWAKEN_USER_DATA_DIR")
 	}
 
 	defaultWorkspace := resolveDefaultWorkspace()
@@ -49,6 +72,10 @@ func main() {
 	}
 	skillManager := skillruntime.NewManager(skillRegistry, skillruntime.StdLogger{})
 	skillManager.RefreshTools()
+
+	acpManager := buildACPManager(defaultWorkspace)
+	delegateexternalagent.SetManager(acpManager)
+	configureacprunner.SetRegistry(acpManager.Registry())
 
 	runService := runtime.NewRunServiceWithModelProfiles(
 		func(workspace runtime.WorkspaceConfig, threadID string, profile *runtime.ModelProfileConfig) *agentcore.Agent {
@@ -160,29 +187,77 @@ func main() {
 		go projectService.RunCleanupWorker(cleanupCtx)
 	}
 
-	srv := &http.Server{
-		Addr: addr,
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatalf("failed to listen on %s: %v", addr, err)
 	}
+	actualAddr := listener.Addr().(*net.TCPAddr)
+	baseURL := fmt.Sprintf("http://127.0.0.1:%d", actualAddr.Port)
 
 	shutdownCh := make(chan struct{}, 1)
 	shutdownOnce := sync.OnceFunc(func() {
-		shutdownCh <- struct{}{}
+		select {
+		case shutdownCh <- struct{}{}:
+		default:
+		}
 	})
 
-	srv.Handler = server.NewRouterWithWorkspaceAndSkillSync(
-		runService,
-		infoProvider,
-		manager,
-		connRegistry,
-		skillRegistry,
-		defaultWorkspace,
-		syncSkillsForWorkspace,
-		shutdownOnce,
-	)
+	var leaseManager *runtime.LeaseManager
+	var acpSessionManager *runtime.ACPSessionManager
+	var control *server.ControlConfig
+	if userDataDir != "" {
+		runtimeIdentity, err = runtime.GenerateRuntimeIdentity(userDataDir, *ownerMode, baseURL)
+		if err != nil {
+			log.Fatalf("generate runtime identity: %v", err)
+		}
+		if err := runtime.CompareAndSwapManifest(userDataDir, runtimeIdentity.InstanceID, runtimeIdentity); err != nil {
+			if errors.Is(err, runtime.ErrManifestOwnedByOther) {
+				log.Fatalf("runtime manifest owned by another instance: %v", err)
+			}
+			log.Fatalf("write runtime manifest: %v", err)
+		}
+		log.Printf("[runtime] manifest written for instance %s at %s", runtimeIdentity.InstanceID, baseURL)
+		if *ownerMode == "headless" {
+			leaseManager = runtime.NewLeaseManager(func() {
+				shutdownOnce()
+			}, runtime.WithActiveRunCountFunc(runService.ActiveRunCount))
+		} else {
+			// Desktop mode still exposes control lease routes for Desktop attach.
+			leaseManager = runtime.NewLeaseManager(nil)
+		}
+		acpSessionManager = runtime.NewACPSessionManager(runService, runService.ProjectService())
+		control = &server.ControlConfig{
+			Identity:          runtimeIdentity,
+			LeaseManager:      leaseManager,
+			ACPSessionManager: acpSessionManager,
+			ModelProfileStore: modelprofile.NewUserStore(desktopdata.AwakenHomeRoot()),
+		}
+	}
+
+	srv := &http.Server{
+		Handler: server.NewRouterWithControl(
+			runService,
+			infoProvider,
+			manager,
+			connRegistry,
+			skillRegistry,
+			acpManager,
+			defaultWorkspace,
+			syncSkillsForWorkspace,
+			control,
+			shutdownOnce,
+		),
+	}
+
+	if leaseManager != nil {
+		leaseCtx, cancelLeases := context.WithCancel(context.Background())
+		defer cancelLeases()
+		go leaseManager.Run(leaseCtx)
+	}
 
 	go func() {
-		log.Printf("awaken-core listening on http://%s", addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("awaken-core listening on http://%s", baseURL)
+		if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("awaken-core server error: %v", err)
 		}
 	}()
@@ -198,6 +273,13 @@ func main() {
 	log.Println("awaken-core shutting down")
 	cancelCleanup()
 	bashtool.CancelAllTasks()
+	if acpManager != nil {
+		acpCtx, acpCancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer acpCancel()
+		if err := acpManager.CloseAll(acpCtx); err != nil {
+			log.Printf("awaken-core acp close error: %v", err)
+		}
+	}
 	if err := runService.FlushTranscripts(); err != nil {
 		log.Printf("awaken-core flush transcripts error: %v", err)
 	}
@@ -205,6 +287,14 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("awaken-core shutdown error: %v", err)
+	}
+	if userDataDir != "" && runtimeIdentity != nil {
+		if err := runtime.DeleteManifestIfOwned(userDataDir, runtimeIdentity.InstanceID); err != nil {
+			log.Printf("awaken-core delete manifest error: %v", err)
+		}
+	}
+	if leaseManager != nil {
+		leaseManager.Stop()
 	}
 }
 
@@ -315,6 +405,28 @@ func buildSkillRegistry(manager *mcpclient.Manager, workspace string) *skills.Sk
 
 	log.Printf("[skills] loaded %d skill definitions", len(registry.ListAll()))
 	return registry
+}
+
+// buildACPManager loads the user-scoped runner config and starts the ACP manager.
+// The manager is created even if no runners are configured so routes degrade
+// gracefully. ACP runners are intentionally user-scoped only; project-level
+// runner configs are not loaded or merged.
+func buildACPManager(defaultWorkspace string) *acp.Manager {
+	_ = defaultWorkspace
+	userPath := ""
+	if home := desktopdata.AwakenHomeRoot(); home != "" {
+		userPath = acp.ConfigPath(home)
+	}
+	registry := acp.NewRegistry(userPath)
+	if err := registry.Load(); err != nil {
+		log.Printf("[acp] registry load failed: %v", err)
+	}
+	manager := acp.NewManager(registry, func(ctx context.Context, snapshot acp.RunnerSnapshot, cwd string) (acp.Client, error) {
+		return protocol.NewClient(ctx, snapshot, cwd)
+	})
+	manager.SetPermissionAwaiter(acp.NewChanPermissionAwaiter())
+	log.Printf("[acp] loaded %d runners", len(registry.All()))
+	return manager
 }
 
 // resolveDefaultWorkspace returns the startup default workspace. When the

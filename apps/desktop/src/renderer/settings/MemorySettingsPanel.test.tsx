@@ -19,9 +19,10 @@ describe("MemorySettingsPanel", () => {
     expect(html).toContain("立即整理");
     expect(html).toContain("aw-memory-light-flow-layout");
     expect(html).toContain("aw-memory-light-flow-layout__title");
+    expect(html).toContain("aw-memory-light-flow-layout__title-icon");
     expect(html).toContain("aw-memory-light-flow-layout__content");
     expect(html).toContain("aw-memory-light-flow-layout__scroll-thumb");
-    expect(html).toContain(">记忆</h1>");
+    expect(html).toContain("<span>记忆</span>");
     expect(html).toContain("aw-memory-light-flow--light");
     expect(html).toContain("<canvas");
     expect(html).not.toContain("<select");

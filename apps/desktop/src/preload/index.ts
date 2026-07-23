@@ -2,6 +2,11 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type { AguiEvent } from "../shared/agui.js";
 import { DESKTOP_SELECT_ALL_REQUESTED_CHANNEL } from "../shared/desktop-selection.js";
 import {
+  type ACPRunnerCreateRequest,
+  type ACPRunnerProbeResult,
+  type ACPRunnersSettings,
+  type ACPRunnerUpdateRequest,
+  type ACPRunnerView,
   type AttachmentPickResult,
   type ArtifactOpenRequest,
   type ArtifactOpenResult,
@@ -124,6 +129,16 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:save-search-settings", request),
   testSearchProvider: (request) =>
     ipcRenderer.invoke("awaken:test-search-provider", request),
+  getACPRunners: () =>
+    ipcRenderer.invoke("awaken:get-acp-runners") as Promise<ACPRunnersSettings>,
+  createACPRunner: (request: ACPRunnerCreateRequest) =>
+    ipcRenderer.invoke("awaken:create-acp-runner", request) as Promise<ACPRunnerView>,
+  updateACPRunner: (runnerId: string, request: ACPRunnerUpdateRequest) =>
+    ipcRenderer.invoke("awaken:update-acp-runner", runnerId, request) as Promise<ACPRunnerView>,
+  deleteACPRunner: (runnerId: string) =>
+    ipcRenderer.invoke("awaken:delete-acp-runner", runnerId) as Promise<void>,
+  probeACPRunner: (runnerId: string) =>
+    ipcRenderer.invoke("awaken:probe-acp-runner", runnerId) as Promise<ACPRunnerProbeResult>,
   listMemories: (request?: MemoryListRequest) =>
     ipcRenderer.invoke("awaken:list-memories", request) as Promise<RuntimeMemory[]>,
   getMemory: (memoryId: string, projectId?: string) =>
@@ -208,6 +223,18 @@ const bridge: AwakenBridge = {
       runId,
       interactionId,
       resolution,
+    }) as Promise<void>,
+  resolveACPPermission: (
+    runId: string,
+    interactionId: string,
+    optionId: string,
+    cancelled: boolean,
+  ) =>
+    ipcRenderer.invoke("awaken:resolve-acp-permission", {
+      runId,
+      interactionId,
+      optionId,
+      cancelled,
     }) as Promise<void>,
   subscribeRun: async (runId: string, handlers: RunStreamHandlers, afterCursor?: number) => {
     const subscriptionId = crypto.randomUUID();

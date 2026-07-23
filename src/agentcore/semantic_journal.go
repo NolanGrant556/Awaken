@@ -244,6 +244,48 @@ func RuntimeNoticeSemanticRecord(threadID, runID, turnID, sessionID string, even
 	return record
 }
 
+func ACPSemanticRecord(threadID, runID, turnID, sessionID string, event AwakenEvent) SemanticRecord {
+	var kind SemanticKind
+	switch event.Type {
+	case ACPSessionStartedEventType:
+		kind = SemanticKindACPSessionStarted
+	case ACPSessionClosedEventType:
+		kind = SemanticKindACPSessionClosed
+	case ACPSessionInterruptedEventType:
+		kind = SemanticKindACPSessionInterrupted
+	case ACPTurnStartedEventType:
+		kind = SemanticKindACPTurnStarted
+	case ACPTurnFinishedEventType:
+		kind = SemanticKindACPTurnFinished
+	case ACPToolSnapshotEventType:
+		kind = SemanticKindACPToolSnapshot
+	case ACPPermissionRequestedEventType:
+		kind = SemanticKindACPPermissionRequested
+	case ACPPermissionResolvedEventType:
+		kind = SemanticKindACPPermissionResolved
+	}
+	payload := map[string]any{
+		"event_type":     string(event.Type),
+		"tool_call_id":   event.ToolCallID,
+		"tool_name":      event.ToolName,
+		"content":        firstNonEmpty(event.Content, event.Error),
+		"interaction_id": event.InteractionID,
+	}
+	if len(event.Diagnostic) > 0 {
+		for k, v := range event.Diagnostic {
+			if k == "env" {
+				continue
+			}
+			payload[k] = v
+		}
+	}
+	record := NewSemanticRecord(kind, threadID, runID, turnID, event.ToolCallID, sessionID, payload)
+	if !event.Timestamp.IsZero() {
+		record.Timestamp = event.Timestamp.UTC()
+	}
+	return record
+}
+
 func outcomeToMap(outcome tool.ExecutionOutcome) map[string]any {
 	raw, err := json.Marshal(outcome)
 	if err != nil {
@@ -285,6 +327,20 @@ func (s *artifactBufferingSink) Emit(event AwakenEvent) {
 		RuntimeRepairFailedEventType,
 		RuntimeMissingEventType:
 		s.semanticFacts = append(s.semanticFacts, event)
+		return
+	case ACPSessionStartedEventType,
+		ACPSessionClosedEventType,
+		ACPSessionInterruptedEventType,
+		ACPTurnStartedEventType,
+		ACPTurnFinishedEventType,
+		ACPToolSnapshotEventType,
+		ACPPermissionRequestedEventType,
+		ACPPermissionResolvedEventType:
+		s.semanticFacts = append(s.semanticFacts, event)
+		// ACP events must be published live immediately so that permission gates
+		// and turn progress appear while the external agent turn is still running.
+		// They are also retained for durable batch persistence when the tool finishes.
+		s.inner.Emit(event)
 		return
 	default:
 		s.inner.Emit(event)

@@ -7,6 +7,7 @@ type ExternalActionGateProps = {
   onConfirmDone: () => void;
   onCancel: () => void;
   onRetry?: () => void;
+  onResolveACPOption?: (optionId: string) => void;
 };
 
 export function ExternalActionGate({
@@ -16,7 +17,9 @@ export function ExternalActionGate({
   onConfirmDone,
   onCancel,
   onRetry,
+  onResolveACPOption,
 }: ExternalActionGateProps) {
+  const isACPPermission = interaction.kind === "acp-permission";
   const canCancel = interaction.recoveries.includes("cancel");
   const canConfirm = interaction.recoveries.includes("confirm_done");
   const canRetry =
@@ -40,37 +43,59 @@ export function ExternalActionGate({
         <strong>{title}</strong>
         <span>{interaction.safeMessage ?? "请完成外部操作后继续"}</span>
       </div>
-      <div className="cli-auth-qr-frame">
-        {interaction.qrImageUrl ? (
-          <img src={interaction.qrImageUrl} alt="授权二维码" width={224} height={224} />
-        ) : (
-          <div className="cli-auth-qr-placeholder">
-            {interaction.verificationUrl ? "使用下方链接完成授权" : "等待授权信息"}
+      {isACPPermission && interaction.options && interaction.options.length > 0 ? (
+        <div className="cli-auth-card-actions cli-auth-card-actions--options">
+          {interaction.options.map((option) => (
+            <button
+              key={option.optionId}
+              type="button"
+              disabled={resolving}
+              onClick={() => onResolveACPOption?.(option.optionId)}
+            >
+              {option.name}
+            </button>
+          ))}
+          {canCancel ? (
+            <button type="button" disabled={resolving} onClick={onCancel}>
+              取消
+            </button>
+          ) : null}
+        </div>
+      ) : (
+        <>
+          <div className="cli-auth-qr-frame">
+            {interaction.qrImageUrl ? (
+              <img src={interaction.qrImageUrl} alt="授权二维码" width={224} height={224} />
+            ) : (
+              <div className="cli-auth-qr-placeholder">
+                {interaction.verificationUrl ? "使用下方链接完成授权" : "等待授权信息"}
+              </div>
+            )}
           </div>
-        )}
-      </div>
-      <div className="cli-auth-card-actions">
-        {interaction.verificationUrl ? (
-          <a href={interaction.verificationUrl} target="_blank" rel="noreferrer">
-            打开授权链接
-          </a>
-        ) : null}
-        {canConfirm ? (
-          <button type="button" disabled={resolving} onClick={onConfirmDone}>
-            我已完成
-          </button>
-        ) : null}
-        {canRetry && onRetry ? (
-          <button type="button" disabled={resolving} onClick={onRetry}>
-            重新获取
-          </button>
-        ) : null}
-        {canCancel ? (
-          <button type="button" disabled={resolving} onClick={onCancel}>
-            取消
-          </button>
-        ) : null}
-      </div>
+          <div className="cli-auth-card-actions">
+            {interaction.verificationUrl ? (
+              <a href={interaction.verificationUrl} target="_blank" rel="noreferrer">
+                打开授权链接
+              </a>
+            ) : null}
+            {canConfirm ? (
+              <button type="button" disabled={resolving} onClick={onConfirmDone}>
+                我已完成
+              </button>
+            ) : null}
+            {canRetry && onRetry ? (
+              <button type="button" disabled={resolving} onClick={onRetry}>
+                重新获取
+              </button>
+            ) : null}
+            {canCancel ? (
+              <button type="button" disabled={resolving} onClick={onCancel}>
+                取消
+              </button>
+            ) : null}
+          </div>
+        </>
+      )}
     </section>
   );
 }

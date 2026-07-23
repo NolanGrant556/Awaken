@@ -74,6 +74,14 @@ export type InspectorSelection =
   | { kind: "fileChange"; id: string }
   | { kind: "deliverables"; id: string };
 
+export type ACPDisplayStatus =
+  | "active"
+  | "done"
+  | "error"
+  | "interrupted"
+  | "closed"
+  | "started";
+
 export type RunNarrativeItem =
   | {
       kind: "prompt";
@@ -88,6 +96,24 @@ export type RunNarrativeItem =
   | { kind: "tool"; id: string; title: string; detail?: string; status: ToolDisplayState; toolStatus?: string }
   | { kind: "fileChange"; id: string; files: ChangedFile[]; status: "active" | "done" }
   | { kind: "memoryReceipt"; id: string; title: string; detail?: string; status: "done" | "error" }
+  | {
+      kind: "acpSession";
+      id: string;
+      runnerId: string;
+      sessionId?: string;
+      status: ACPDisplayStatus;
+      message?: string;
+    }
+  | {
+      kind: "acpTool";
+      id: string;
+      runnerId: string;
+      sessionId?: string;
+      acpToolCallId?: string;
+      title: string;
+      detail?: string;
+      status: ACPDisplayStatus;
+    }
   | {
       kind: "deliverables";
       id: string;

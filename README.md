@@ -11,7 +11,7 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 - 左侧栏负责项目与线程入口；
 - 中间工作区负责输入、运行叙事、状态反馈和最终交付物；
 - 右侧 Inspector 当前只是占位面，不应被理解为已经接通的详情面板；
-- Settings 承载模型、搜索、长期记忆、外观和桌面宠物等配置面；
+- Settings 承载模型、搜索、长期记忆、外观、桌面宠物和 ACP runner 等配置面；
 - Desktop 负责启动、监督和关闭本地 `awaken-core`，用户不需要单独运行 Core；
 - `Awaken Design System` 是纯 UI 组件包和 Gallery，不拥有产品状态、后端策略或运行时协议。
 
@@ -29,6 +29,7 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 | MCP runtime | user/project/dynamic 配置、stdio/http/sse、动态工具直通、可选 Artifact metadata、认证与 prompt/resource Skill bridge | [06 MCP 运行时](docs/06_MCP运行时/索引.md) |
 | 连接器 | MCP/CLI provider 目录、官方 CLI 安装与授权、生命周期、readiness 与重启 ownership 边界 | [07 连接器](docs/07_连接器/索引.md) |
 | 技能 | 多来源 Universal Skill 发现、按需正文/资源、composer 当前选择的 run-scoped 确定性绑定、统一 catalog、inline/真实 child fork、MCP 动态来源与恢复，以及随 App 分发的 word/excel/ppt/pdf/code-search/PDF_Max 内置 Skill 包 | [08 技能](docs/08_技能/索引.md) |
+| ACP Client | runner 配置、probe 与 Desktop 设置页；`delegate_external_agent` 工具、会话生命周期与权限处理已在 Core 实现；Workbench 嵌套进度与 permission gate UI 仍为后续工作 | [02 主智能体闭环](docs/02_主智能体闭环/索引.md) |
 | AG-UI 与 A2UI | Awaken 自有事件到 AG-UI-compatible wire 的映射；A2UI 仅作参考 | [09 AG-UI 与 A2UI 协议](docs/09_AGUI与A2UI协议/索引.md) |
 | Computer Use | 明确当前不支持的边界，以及实现时必须遵守的目标设计合同 | [10 计算机操作能力](docs/10_计算机操作能力/索引.md) |
 | 长期记忆与 Dream | Markdown Memory、主模型相关性召回、受控工具、无正文事件、Settings 查看/删除、手动/空闲期 Dream、Workbench 紧凑回执与 Dream 重启恢复 | [11 长期记忆](docs/11_长期记忆/索引.md) |

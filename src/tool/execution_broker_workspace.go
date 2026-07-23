@@ -131,7 +131,7 @@ func CanonicalBrokerWorkspaceScope(permissionContext PermissionContext) (BrokerW
 
 	writableRoots := make([]string, 0, len(normalized.WritableRoots))
 	for _, root := range normalized.WritableRoots {
-		realRoot, resolveErr := resolvePathWithExistingAncestor(root)
+		realRoot, resolveErr := ResolvePathWithExistingAncestor(root)
 		if resolveErr != nil {
 			return BrokerWorkspaceScope{}, fmt.Errorf("resolve writable root %q: %w", root, resolveErr)
 		}
@@ -154,7 +154,7 @@ func CanonicalBrokerWorkspaceScope(permissionContext PermissionContext) (BrokerW
 		if relative, relErr := filepath.Rel(normalized.WorkspaceRoot, root); relErr == nil && !relativePathEscapes(relative) {
 			protectedRoots = append(protectedRoots, filepath.Clean(relative))
 		}
-		if realRoot, resolveErr := resolvePathWithExistingAncestor(root); resolveErr == nil && PathWithinRoot(realRoot, workspaceRoot) {
+		if realRoot, resolveErr := ResolvePathWithExistingAncestor(root); resolveErr == nil && PathWithinRoot(realRoot, workspaceRoot) {
 			relative, relErr := filepath.Rel(workspaceRoot, realRoot)
 			if relErr != nil || relativePathEscapes(relative) {
 				return BrokerWorkspaceScope{}, fmt.Errorf("project resolved protected root %q into workspace", root)
@@ -940,7 +940,7 @@ func normalizeExecutionBrokerRequestScope(workspaceRoot string, request Executio
 		if !ok {
 			continue
 		}
-		realRoot, err := resolvePathWithExistingAncestor(filepath.Join(workspaceRoot, cleaned))
+		realRoot, err := ResolvePathWithExistingAncestor(filepath.Join(workspaceRoot, cleaned))
 		if err != nil {
 			return nil, nil, fmt.Errorf("resolve writable root %q: %w", input, err)
 		}
@@ -966,7 +966,7 @@ func normalizeExecutionBrokerRequestScope(workspaceRoot string, request Executio
 		// Preserve the lexical location so deleting a protected symlink or a
 		// not-yet-created protected root is denied.
 		protectedRoots = append(protectedRoots, cleaned)
-		if realRoot, resolveErr := resolvePathWithExistingAncestor(filepath.Join(workspaceRoot, cleaned)); resolveErr == nil && PathWithinRoot(realRoot, workspaceRoot) {
+		if realRoot, resolveErr := ResolvePathWithExistingAncestor(filepath.Join(workspaceRoot, cleaned)); resolveErr == nil && PathWithinRoot(realRoot, workspaceRoot) {
 			relative, relErr := filepath.Rel(workspaceRoot, realRoot)
 			if relErr != nil || relativePathEscapes(relative) {
 				return nil, nil, fmt.Errorf("protected root %q cannot be projected into workspace", input)

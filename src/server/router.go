@@ -79,6 +79,12 @@ func NewRouterWithWorkspaceAndSkillSync(runService *awruntime.RunService, infoPr
 // NewRouterWithWorkspaceSkillSyncAndACP builds a fully-wired router that also
 // exposes ACP runner/session/permission routes when acpManager is non-nil.
 func NewRouterWithWorkspaceSkillSyncAndACP(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry, skillRegistry *skills.SkillRegistry, acpManager *acp.Manager, workspaceRoot string, syncSkillsForWorkspace func(string), shutdown ...func()) http.Handler {
+	return NewRouterWithControl(runService, infoProvider, manager, connectorRegistry, skillRegistry, acpManager, workspaceRoot, syncSkillsForWorkspace, nil, shutdown...)
+}
+
+// NewRouterWithControl builds a fully-wired router that also exposes bridge-only
+// control routes protected by a Bearer control token.
+func NewRouterWithControl(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry, skillRegistry *skills.SkillRegistry, acpManager *acp.Manager, workspaceRoot string, syncSkillsForWorkspace func(string), control *ControlConfig, shutdown ...func()) http.Handler {
 	cfg := routerConfig{
 		runService:             runService,
 		infoProvider:           infoProvider,
@@ -88,11 +94,19 @@ func NewRouterWithWorkspaceSkillSyncAndACP(runService *awruntime.RunService, inf
 		workspaceRoot:          workspaceRoot,
 		syncSkillsForWorkspace: syncSkillsForWorkspace,
 		acpManager:             acpManager,
+		control:                control,
 	}
 	if len(shutdown) > 0 {
 		cfg.shutdown = shutdown[0]
 	}
 	return newRouterInternal(cfg)
+}
+
+// ControlConfig groups the runtime identity and lease manager used for bridge-only
+// control routes.
+type ControlConfig struct {
+	Identity     *awruntime.RuntimeIdentity
+	LeaseManager *awruntime.LeaseManager
 }
 
 type routerConfig struct {
@@ -106,6 +120,7 @@ type routerConfig struct {
 	syncSkillsForWorkspace func(string)
 	shutdown               func()
 	acpManager             *acp.Manager
+	control                *ControlConfig
 }
 
 func newRouterInternal(cfg routerConfig) http.Handler {
@@ -217,6 +232,24 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 		mux.HandleFunc("GET /v1/acp/sessions", acpH.handleListSessions)
 		mux.HandleFunc("POST /v1/acp/sessions/{runner_id}/close", acpH.handleCloseSession)
 		mux.HandleFunc("POST /v1/runs/{run_id}/acp-permissions/{interaction_id}/resolve", acpH.handleResolvePermission)
+	}
+	if cfg.control != nil && cfg.control.Identity != nil {
+		ctrl := controlHandlers{
+			identity:     cfg.control.Identity,
+			leaseManager: cfg.control.LeaseManager,
+			runService:   cfg.runService,
+		}
+		controlMux := http.NewServeMux()
+		controlMux.HandleFunc("GET /v1/control/runtime/identity", ctrl.handleRuntimeIdentity)
+		controlMux.HandleFunc("POST /v1/control/leases", ctrl.handleCreateLease)
+		controlMux.HandleFunc("POST /v1/control/leases/{lease_id}/heartbeat", ctrl.handleHeartbeatLease)
+		controlMux.HandleFunc("DELETE /v1/control/leases/{lease_id}", ctrl.handleReleaseLease)
+		acpSessionCtrl := acpSessionControlHandlers{runService: cfg.runService}
+		controlMux.HandleFunc("POST /v1/control/acp/sessions", acpSessionCtrl.handleCreateACPSession)
+		controlMux.HandleFunc("GET /v1/control/acp/sessions/{session_id}", acpSessionCtrl.handleGetACPSession)
+		controlMux.HandleFunc("POST /v1/control/acp/sessions/{session_id}/close", acpSessionCtrl.handleCloseACPSession)
+		auth := ControlTokenMiddleware(cfg.control.Identity.ControlToken)
+		mux.Handle("/v1/control/", auth(controlMux))
 	}
 	// POST /v1/skills/{id}/execute reserved for follow-up
 	return mux

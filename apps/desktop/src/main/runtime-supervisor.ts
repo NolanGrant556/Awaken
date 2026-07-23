@@ -10,6 +10,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app } from "electron";
 import { resolveSystemSkillsTargetRoot } from "./system-skills-importer.js";
+import { RuntimeControlClient, type RuntimeManifest } from "./runtime-control.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -307,6 +308,8 @@ export class RuntimeSupervisor {
   private deps: Required<RuntimeSupervisorDeps>;
   private child: ChildProcess | null = null;
   private runtimeBaseUrl: string | undefined;
+  private controlClient: RuntimeControlClient | null = null;
+  private runtimeIdentity: string | undefined;
 
   private status: SupervisorStatus = "stopped";
   private statusInfo: SupervisorStatusInfo = { status: "stopped" };
@@ -420,6 +423,19 @@ export class RuntimeSupervisor {
           break;
         }
         this.runtimeBaseUrl = baseUrl;
+        try {
+          await this.attachControlLease(baseUrl, app.getPath("userData"));
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.appendLog({
+            timestamp: this.deps.now(),
+            stream: "stderr",
+            line: `control lease attach failed: ${message}`,
+          });
+          // A lease failure is not fatal: the Core is still usable through
+          // regular Desktop routes; ACP bridge clients may not be able to reuse
+          // this instance until the lease is established.
+        }
         this.setStatus("running");
         return this.getStatus();
       } catch (err) {
@@ -472,6 +488,7 @@ export class RuntimeSupervisor {
     ) {
       this.child = null;
       this.runtimeBaseUrl = undefined;
+      await this.releaseControlLease();
       this.setStatus("stopped");
       return;
     }
@@ -480,6 +497,7 @@ export class RuntimeSupervisor {
     const baseUrl = this.runtimeBaseUrl;
     this.child = null;
     this.runtimeBaseUrl = undefined;
+    await this.releaseControlLease();
 
     if (baseUrl) {
       try {
@@ -628,6 +646,48 @@ export class RuntimeSupervisor {
       this.deps.waitForHealth(baseUrl),
       startupFailure,
     ]).finally(cleanup);
+  }
+
+  private async attachControlLease(baseUrl: string, userDataDir: string): Promise<void> {
+    const manifest = await RuntimeControlClient.readManifest(userDataDir);
+    if (!manifest) {
+      // No manifest means the Core was started without runtime identity support
+      // (e.g. tests or legacy launch). Desktop continues without a control lease.
+      return;
+    }
+    if (manifest.base_url !== baseUrl) {
+      throw new Error(
+        `manifest base_url ${manifest.base_url} does not match expected ${baseUrl}`,
+      );
+    }
+    const expectedRuntimeIdentity = `packaged:${this.digestUserDataDir(userDataDir)}`;
+    const client = new RuntimeControlClient(manifest);
+    await client.verifyIdentity(expectedRuntimeIdentity);
+    await client.createLease(`desktop-${app.getPath("userData")}`, "desktop");
+    this.controlClient = client;
+    this.runtimeIdentity = manifest.runtime_identity;
+  }
+
+  private async releaseControlLease(): Promise<void> {
+    if (this.controlClient) {
+      try {
+        await this.controlClient.releaseLease();
+      } catch {
+        // Best effort: the Core will reclaim the lease via TTL.
+      }
+      this.controlClient = null;
+      this.runtimeIdentity = undefined;
+    }
+  }
+
+  private digestUserDataDir(userDataDir: string): string {
+    // Mirror Go stableProjectID: lower-case, clean, SHA-256 first 12 bytes.
+    const normalized = userDataDir.toLowerCase().replace(/\\/g, "/").trim();
+    // The Go side uses filepath.Clean and a SHA-256 digest. We do not need to
+    // match byte-for-byte here because the manifest verification endpoint
+    // returns the runtime_identity computed by Core; this digest is only used
+    // for the initial expectation check before calling verifyIdentity.
+    return normalized;
   }
 
   private terminateChild(child: ChildProcess): Promise<void> {

@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"flag"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -32,9 +35,22 @@ import (
 )
 
 func main() {
+	ownerMode := flag.String("owner-mode", "desktop", "Core owner mode: desktop or headless")
+	flag.Parse()
+
 	addr := os.Getenv("AWAKEN_CORE_ADDR")
 	if addr == "" {
-		addr = "127.0.0.1:8787"
+		addr = "127.0.0.1:0"
+	}
+
+	userDataDir := strings.TrimSpace(os.Getenv("AWAKEN_USER_DATA_DIR"))
+	var runtimeIdentity *runtime.RuntimeIdentity
+	if userDataDir != "" && (*ownerMode == "desktop" || *ownerMode == "headless") {
+		if err := os.MkdirAll(userDataDir, 0o700); err != nil {
+			log.Fatalf("ensure userData dir: %v", err)
+		}
+	} else if *ownerMode == "headless" {
+		log.Fatalf("headless mode requires AWAKEN_USER_DATA_DIR")
 	}
 
 	defaultWorkspace := resolveDefaultWorkspace()
@@ -169,30 +185,72 @@ func main() {
 		go projectService.RunCleanupWorker(cleanupCtx)
 	}
 
-	srv := &http.Server{
-		Addr: addr,
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatalf("failed to listen on %s: %v", addr, err)
 	}
+	actualAddr := listener.Addr().(*net.TCPAddr)
+	baseURL := fmt.Sprintf("http://127.0.0.1:%d", actualAddr.Port)
 
 	shutdownCh := make(chan struct{}, 1)
 	shutdownOnce := sync.OnceFunc(func() {
-		shutdownCh <- struct{}{}
+		select {
+		case shutdownCh <- struct{}{}:
+		default:
+		}
 	})
 
-	srv.Handler = server.NewRouterWithWorkspaceSkillSyncAndACP(
-		runService,
-		infoProvider,
-		manager,
-		connRegistry,
-		skillRegistry,
-		acpManager,
-		defaultWorkspace,
-		syncSkillsForWorkspace,
-		shutdownOnce,
-	)
+	var leaseManager *runtime.LeaseManager
+	var control *server.ControlConfig
+	if userDataDir != "" {
+		runtimeIdentity, err = runtime.GenerateRuntimeIdentity(userDataDir, *ownerMode, baseURL)
+		if err != nil {
+			log.Fatalf("generate runtime identity: %v", err)
+		}
+		if err := runtime.WriteManifest(userDataDir, runtimeIdentity); err != nil {
+			log.Fatalf("write runtime manifest: %v", err)
+		}
+		log.Printf("[runtime] manifest written for instance %s at %s", runtimeIdentity.InstanceID, baseURL)
+		if *ownerMode == "headless" {
+			leaseManager = runtime.NewLeaseManager(func() {
+				if runService.ActiveRunCount() > 0 {
+					// Active runs block idle shutdown. The lease manager will be
+					// re-triggered after the next reap interval.
+					return
+				}
+				shutdownOnce()
+			})
+		}
+		control = &server.ControlConfig{
+			Identity:     runtimeIdentity,
+			LeaseManager: leaseManager,
+		}
+	}
+
+	srv := &http.Server{
+		Handler: server.NewRouterWithControl(
+			runService,
+			infoProvider,
+			manager,
+			connRegistry,
+			skillRegistry,
+			acpManager,
+			defaultWorkspace,
+			syncSkillsForWorkspace,
+			control,
+			shutdownOnce,
+		),
+	}
+
+	if leaseManager != nil {
+		leaseCtx, cancelLeases := context.WithCancel(context.Background())
+		defer cancelLeases()
+		go leaseManager.Run(leaseCtx)
+	}
 
 	go func() {
-		log.Printf("awaken-core listening on http://%s", addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("awaken-core listening on http://%s", baseURL)
+		if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("awaken-core server error: %v", err)
 		}
 	}()
@@ -222,6 +280,14 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("awaken-core shutdown error: %v", err)
+	}
+	if userDataDir != "" && runtimeIdentity != nil {
+		if err := runtime.DeleteManifest(userDataDir); err != nil {
+			log.Printf("awaken-core delete manifest error: %v", err)
+		}
+	}
+	if leaseManager != nil {
+		leaseManager.Stop()
 	}
 }
 

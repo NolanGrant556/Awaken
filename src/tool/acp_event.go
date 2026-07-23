@@ -7,12 +7,12 @@ import "context"
 type ACPEventType string
 
 const (
-	ACPEventTypeSessionStarted   ACPEventType = "acp_session_started"
-	ACPEventTypeSessionClosed    ACPEventType = "acp_session_closed"
-	ACPEventTypeSessionInterrupted ACPEventType = "acp_session_interrupted"
-	ACPEventTypeTurnStarted      ACPEventType = "acp_turn_started"
-	ACPEventTypeTurnFinished     ACPEventType = "acp_turn_finished"
-	ACPEventTypeToolSnapshot     ACPEventType = "acp_tool_snapshot"
+	ACPEventTypeSessionStarted      ACPEventType = "acp_session_started"
+	ACPEventTypeSessionClosed       ACPEventType = "acp_session_closed"
+	ACPEventTypeSessionInterrupted  ACPEventType = "acp_session_interrupted"
+	ACPEventTypeTurnStarted         ACPEventType = "acp_turn_started"
+	ACPEventTypeTurnFinished        ACPEventType = "acp_turn_finished"
+	ACPEventTypeToolSnapshot        ACPEventType = "acp_tool_snapshot"
 	ACPEventTypePermissionRequested ACPEventType = "acp_permission_requested"
 	ACPEventTypePermissionResolved  ACPEventType = "acp_permission_resolved"
 )

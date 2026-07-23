@@ -1,34 +1,23 @@
 import "./AwakenMemorySettings.css";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import {
+  ArrowLeft,
   BookOpenText,
   Brain,
-  Check,
-  ChevronDown,
   ChevronRight,
   Clock3,
   Folder,
   History,
   MessageSquare,
   RefreshCw,
-  Search,
-  SlidersHorizontal,
   UserRound,
 } from "lucide-react";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenDialog } from "../AwakenDialog";
 import { AwakenMarkdownRenderer } from "../AwakenMarkdownRenderer";
+import { AwakenProjectSkillFolder } from "../AwakenProjectSkillFolder";
 
-export type AwakenMemorySwitchItem = { id: string; title: string; description: string; checked: boolean };
-export type AwakenMemoryFilterValue = string | number;
-export type AwakenMemoryFilterItem = {
-  id: string;
-  label: string;
-  value: AwakenMemoryFilterValue;
-  options: Array<{ value: AwakenMemoryFilterValue; label: string }>;
-  placeholder?: string;
-  disabled?: boolean;
-};
+export type AwakenMemorySwitchItem = { id: string; title: string; description: string; checked: boolean; disabled?: boolean };
 export type AwakenMemoryTopicKind = "user" | "feedback" | "project" | "reference";
 export type AwakenMemoryListItem = {
   id: string;
@@ -47,6 +36,22 @@ export type AwakenMemoryDetail = AwakenMemoryListItem & {
   sourceThreadId: string;
   revision: string | number;
 };
+export type AwakenMemoryLibrarySummary = {
+  userTopicCount: number;
+  userTopicCountCapped?: boolean;
+  userUpdatedLabel?: string;
+  projectCount: number;
+  projectTopicCount: number;
+  projectTopicCountCapped?: boolean;
+  projectUpdatedLabel?: string;
+};
+export type AwakenMemoryProjectSummary = {
+  id: string;
+  name: string;
+  topicCount: number;
+  topicCountCapped?: boolean;
+  updatedLabel?: string;
+};
 export type AwakenMemoryActivityItem = {
   id: string;
   kind: "memory" | "dream";
@@ -64,69 +69,28 @@ export type AwakenMemoryActivityItem = {
 
 export type AwakenMemorySettingsProps = {
   switches: AwakenMemorySwitchItem[];
-  filters: AwakenMemoryFilterItem[];
-  query: string;
   memories: AwakenMemoryListItem[];
+  librarySummary?: AwakenMemoryLibrarySummary;
+  memoryProjects?: AwakenMemoryProjectSummary[];
+  libraryLoading?: boolean;
   activities?: AwakenMemoryActivityItem[];
   selectedMemoryId?: string | null;
   detail?: AwakenMemoryDetail | null;
   busy?: boolean;
+  busySwitchId?: string | null;
+  dreamBusy?: boolean;
   canStartDream?: boolean;
   dreamRunning?: boolean;
   dreamStatusLabel?: string | null;
   message?: string | null;
   onToggleSwitch?: (id: string) => void;
-  onQueryChange?: (query: string) => void;
-  onFilterChange?: (id: string, value: AwakenMemoryFilterValue) => void;
+  onOpenLibraryScope?: (scope: "user" | "project", projectId?: string) => void;
   onStartDream?: () => void;
   onCancelDream?: () => void;
   onOpenMemory?: (id: string, projectId?: string) => void;
   onCloseMemory?: () => void;
   onDeleteMemory?: (id: string) => void;
 };
-
-function AwakenMemoryFilterSelect({ filter, onChange }: { filter: AwakenMemoryFilterItem; onChange?: (value: AwakenMemoryFilterValue) => void }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const selectedLabel = filter.options.find((option) => option.value === filter.value)?.label ?? filter.placeholder ?? "（待选择）";
-
-  useEffect(() => {
-    if (!open) return;
-    const closeOnOutsidePress = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        setOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", closeOnOutsidePress);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsidePress);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [open]);
-
-  return (
-    <div className="memory-filter" ref={rootRef}>
-      <button type="button" className="memory-filter-trigger" aria-label={filter.label} aria-haspopup="listbox" aria-expanded={open} disabled={filter.disabled} onClick={() => setOpen((current) => !current)}>
-        <span>{selectedLabel}</span><ChevronDown size={15} aria-hidden="true" />
-      </button>
-      {open ? (
-        <div className="memory-filter-menu" role="listbox" aria-label={filter.label}>
-          {filter.options.map((option) => (
-            <button type="button" className={`memory-filter-option${option.value === filter.value ? " memory-filter-option-selected" : ""}`} role="option" aria-selected={option.value === filter.value} key={option.value} onClick={() => { onChange?.(option.value); setOpen(false); }}>
-              <span>{option.label}</span><Check size={14} aria-hidden="true" />
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 function MemoryTopicIcon({ kind = "reference" }: { kind?: AwakenMemoryTopicKind }) {
   const iconProps = { size: 18, strokeWidth: 1.8, "aria-hidden": true } as const;
@@ -136,33 +100,26 @@ function MemoryTopicIcon({ kind = "reference" }: { kind?: AwakenMemoryTopicKind 
   return <BookOpenText {...iconProps} />;
 }
 
-function MemoryScopeTabs({ filter, onChange }: { filter?: AwakenMemoryFilterItem; onChange?: (value: AwakenMemoryFilterValue) => void }) {
-  if (!filter) return null;
-  return (
-    <div className="memory-scope-tabs" role="group" aria-label={filter.label}>
-      {filter.options.map((option) => (
-        <button
-          type="button"
-          className={option.value === filter.value ? "memory-scope-tab memory-scope-tab-active" : "memory-scope-tab"}
-          aria-pressed={option.value === filter.value}
-          key={option.value}
-          onClick={() => onChange?.(option.value)}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function isFilterActive(filter: AwakenMemoryFilterItem): boolean {
-  return filter.value !== "" && filter.value !== 0;
-}
-
 const MEMORY_ACTIVITY_TITLE_LIMIT = 32;
 const MEMORY_ACTIVITY_INITIAL_VISIBLE = 6;
 const MEMORY_ACTIVITY_VISIBLE_STEP = 6;
 const MEMORY_ACTIVITY_MAX_VISIBLE = 18;
+const EMPTY_LIBRARY_SUMMARY: AwakenMemoryLibrarySummary = {
+  userTopicCount: 0,
+  projectCount: 0,
+  projectTopicCount: 0,
+};
+
+type MemoryLibraryView =
+  | { kind: "user" }
+  | { kind: "projects" }
+  | { kind: "project"; projectId: string; projectName: string }
+  | null;
+
+type MemoryLibraryDetailContext = {
+  memoryId: string;
+  returnView: Exclude<MemoryLibraryView, null>;
+};
 
 function truncateActivityTitle(title: string): string {
   const characters = Array.from(title);
@@ -170,71 +127,112 @@ function truncateActivityTitle(title: string): string {
   return `${characters.slice(0, MEMORY_ACTIVITY_TITLE_LIMIT).join("")}.....`;
 }
 
+function topicCountLabel(count: number, capped = false): string {
+  if (capped) return `至少 ${count} 个主题`;
+  return `${count} 个主题`;
+}
+
+function MemoryDetailContent({ detail }: { detail: AwakenMemoryDetail }) {
+  return (
+    <div className="memory-detail-dialog-content">
+      <p className="memory-detail-description">{detail.description}</p>
+      <div className="memory-detail-tags" aria-label={`${detail.scopeLabel}，${detail.typeLabel}，${detail.statusLabel}，${detail.updatedLabel}`}>
+        <span>{detail.scopeLabel}</span><i aria-hidden="true" />
+        <span>{detail.typeLabel}</span><i aria-hidden="true" />
+        <span className={detail.status === "superseded" ? "memory-detail-tag-superseded" : "memory-detail-tag-active"}>{detail.statusLabel}</span><i aria-hidden="true" />
+        <span>{detail.updatedLabel}</span>
+      </div>
+      <div className="memory-detail-document aw-text-selectable">
+        <AwakenMarkdownRenderer markdown={detail.content} fallback="这条记忆没有正文。" renderImages={false} renderMermaid={false} allowedLinkProtocols={["http", "https"]} />
+      </div>
+      <dl className="memory-detail-meta"><dt>来源任务</dt><dd>{detail.sourceThreadId}</dd><dt>Revision</dt><dd>{detail.revision}</dd></dl>
+    </div>
+  );
+}
+
 export function AwakenMemorySettings({
   switches,
-  filters,
-  query,
   memories,
+  librarySummary = EMPTY_LIBRARY_SUMMARY,
+  memoryProjects = [],
+  libraryLoading = false,
   activities = [],
   selectedMemoryId,
   detail,
   busy = false,
+  busySwitchId = null,
+  dreamBusy = false,
   canStartDream = true,
   dreamRunning = false,
   dreamStatusLabel,
   message,
   onToggleSwitch,
-  onQueryChange,
-  onFilterChange,
+  onOpenLibraryScope,
   onStartDream,
   onCancelDream,
   onOpenMemory,
   onCloseMemory,
   onDeleteMemory,
 }: AwakenMemorySettingsProps) {
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [libraryView, setLibraryView] = useState<MemoryLibraryView>(null);
+  const [libraryDetailContext, setLibraryDetailContext] = useState<MemoryLibraryDetailContext | null>(null);
   const [activeActivity, setActiveActivity] = useState<AwakenMemoryActivityItem | null>(null);
   const [dismissedDetailId, setDismissedDetailId] = useState<string | null>(null);
   const [visibleActivityCount, setVisibleActivityCount] = useState(MEMORY_ACTIVITY_INITIAL_VISIBLE);
-  const filterPanelRef = useRef<HTMLDivElement>(null);
-
-  const scopeFilter = filters.find((filter) => filter.id === "scope");
-  const projectFilter = filters.find((filter) => filter.id === "project");
-  const secondaryFilters = filters.filter((filter) => !["scope", "project"].includes(filter.id));
-  const activeFilterCount = secondaryFilters.filter(isFilterActive).length;
   const detailOpen = Boolean(detail && detail.id !== dismissedDetailId);
   const maximumVisibleActivities = Math.min(activities.length, MEMORY_ACTIVITY_MAX_VISIBLE);
   const visibleActivities = activities.slice(0, Math.min(visibleActivityCount, maximumVisibleActivities));
   const canExpandActivities = visibleActivityCount < maximumVisibleActivities;
   const nextActivityBatchSize = Math.min(MEMORY_ACTIVITY_VISIBLE_STEP, maximumVisibleActivities - visibleActivityCount);
 
-  useEffect(() => {
-    if (!filtersOpen) return;
-    const closeOnOutsidePress = (event: PointerEvent) => {
-      if (!filterPanelRef.current?.contains(event.target as Node)) setFiltersOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        setFiltersOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", closeOnOutsidePress);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsidePress);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [filtersOpen]);
-
-  function openMemory(memoryId: string, projectId?: string) {
+  function openMemory(memoryId: string, projectId?: string, returnView: Exclude<MemoryLibraryView, null> | null = null) {
     setDismissedDetailId(null);
+    setLibraryDetailContext(returnView ? { memoryId, returnView } : null);
     onOpenMemory?.(memoryId, projectId);
   }
 
+  function openLibraryScope(scope: "user" | "project", projectId?: string, projectName?: string) {
+    setLibraryView(scope === "user"
+      ? { kind: "user" }
+      : { kind: "project", projectId: projectId ?? "", projectName: projectName ?? "项目记忆" });
+    onOpenLibraryScope?.(scope, projectId);
+  }
+
+  function closeLibrary() {
+    if (libraryDetailContext) {
+      setDismissedDetailId(libraryDetailContext.memoryId);
+      setLibraryDetailContext(null);
+      onCloseMemory?.();
+    }
+    setLibraryView(null);
+  }
+
+  function openLibraryMemory(memoryId: string, projectId?: string) {
+    if (libraryView?.kind !== "project" && libraryView?.kind !== "user") return;
+    const returnView: Exclude<MemoryLibraryView, null> = libraryView.kind === "project"
+      ? { kind: "projects" }
+      : { kind: "user" };
+    openMemory(memoryId, projectId, returnView);
+  }
+
+  const libraryDetailOpen = Boolean(
+    libraryDetailContext
+      && detailOpen
+      && detail?.id === libraryDetailContext.memoryId,
+  );
+  const libraryDialogTitle = libraryDetailOpen && detail
+    ? detail.name
+    : libraryView?.kind === "project"
+    ? libraryView.projectName
+    : libraryView?.kind === "user"
+      ? "用户记忆"
+      : "项目记忆";
+  const libraryShowsTopics = libraryView?.kind === "user" || libraryView?.kind === "project";
+
   function closeMemoryDetail() {
-    setDismissedDetailId(detail?.id ?? null);
+    setDismissedDetailId(detail?.id ?? libraryDetailContext?.memoryId ?? null);
+    if (libraryDetailContext) setLibraryView(libraryDetailContext.returnView);
+    setLibraryDetailContext(null);
     onCloseMemory?.();
   }
 
@@ -244,7 +242,7 @@ export function AwakenMemorySettings({
         {switches.map((item) => (
           <div className="memory-settings-switch-row" key={item.id}>
             <div><strong>{item.title}</strong><p>{item.description}</p></div>
-            <button type="button" className={`mcp-toggle-switch${item.checked ? " mcp-toggle-switch-on" : " mcp-toggle-switch-off"}`} aria-label={`${item.checked ? "关闭" : "开启"}${item.title}`} aria-pressed={item.checked} disabled={busy} onClick={() => onToggleSwitch?.(item.id)}><span className="mcp-toggle-switch-thumb" /></button>
+            <button type="button" className={`mcp-toggle-switch${item.checked ? " mcp-toggle-switch-on" : " mcp-toggle-switch-off"}`} aria-label={`${item.checked ? "关闭" : "开启"}${item.title}`} aria-pressed={item.checked} aria-busy={busySwitchId === item.id || undefined} disabled={busy || item.disabled || busySwitchId === item.id} onClick={() => onToggleSwitch?.(item.id)}><span className="mcp-toggle-switch-thumb" /></button>
           </div>
         ))}
       </div>
@@ -266,7 +264,7 @@ export function AwakenMemorySettings({
               <header>
                 <div><History size={17} aria-hidden="true" /><strong>最近更新与整理</strong></div>
                 <div className="memory-manager-actions">
-                  <button type="button" className="memory-dream-button" disabled={busy || !canStartDream || dreamRunning} onClick={onStartDream}><Brain size={15} aria-hidden="true" />更新记忆</button>
+                  <button type="button" className="memory-dream-button" disabled={dreamBusy || !canStartDream || dreamRunning} onClick={onStartDream}><Brain size={15} aria-hidden="true" />更新记忆</button>
                   {dreamRunning ? <button type="button" className="memory-cancel-button" onClick={onCancelDream}>取消</button> : null}
                 </div>
               </header>
@@ -311,57 +309,99 @@ export function AwakenMemorySettings({
           <header className="memory-manager-section-header">
             <div>
               <h3 id="memory-library-title">记忆库</h3>
-              <p>搜索、筛选并查看跨任务保存的主题记忆。</p>
             </div>
           </header>
 
-          <div className="memory-library">
-            <div className="memory-search-row">
-              <label className="memory-search"><Search size={17} aria-hidden="true" /><input aria-label="搜索记忆" placeholder="搜索记忆" value={query} onChange={(event) => onQueryChange?.(event.target.value)} /></label>
-              <div className="memory-filter-panel-root" ref={filterPanelRef}>
-                <button type="button" className={`memory-filter-panel-trigger${filtersOpen ? " memory-filter-panel-trigger-open" : ""}`} aria-expanded={filtersOpen} aria-haspopup="dialog" onClick={() => setFiltersOpen((current) => !current)}>
-                  <SlidersHorizontal size={16} aria-hidden="true" />筛选{activeFilterCount ? ` ${activeFilterCount}` : ""}
-                </button>
-                {filtersOpen ? (
-                  <div className="memory-filter-panel" role="dialog" aria-label="筛选记忆">
-                    {secondaryFilters.map((filter) => (
-                      <div className="memory-filter-panel-row" key={filter.id}>
-                        <span>{filter.label}</span>
-                        <AwakenMemoryFilterSelect filter={filter} onChange={(value) => onFilterChange?.(filter.id, value)} />
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="memory-library-scope-row">
-              <MemoryScopeTabs filter={scopeFilter} onChange={(value) => scopeFilter && onFilterChange?.(scopeFilter.id, value)} />
-              {projectFilter ? <AwakenMemoryFilterSelect filter={projectFilter} onChange={(value) => onFilterChange?.(projectFilter.id, value)} /> : null}
-            </div>
-
-            <div className="memory-topic-list" aria-label="记忆列表">
-              {memories.map((memory) => (
-                <article className={`memory-topic-row${selectedMemoryId === memory.id ? " memory-topic-row-selected" : ""}`} key={memory.id}>
-                  <button type="button" aria-haspopup="dialog" onClick={() => openMemory(memory.id, memory.projectId)}>
-                    <span className="memory-topic-icon"><MemoryTopicIcon kind={memory.kind} /></span>
-                    <span className="memory-topic-copy">
-                      <strong>{memory.name}</strong>
-                      <span>{memory.description}</span>
-                      <small><span>{memory.scopeLabel}</span><i aria-hidden="true" /><span>{memory.typeLabel}</span><i aria-hidden="true" /><span className={memory.status === "superseded" ? "memory-status-superseded" : "memory-status-active"}>{memory.statusLabel}</span><i aria-hidden="true" /><span>{memory.updatedLabel}</span></small>
-                    </span>
-                    <span className="memory-topic-action">查看<ChevronRight size={17} aria-hidden="true" /></span>
-                  </button>
-                </article>
-              ))}
-              {!memories.length ? <div className="memory-empty"><BookOpenText size={22} aria-hidden="true" /><span>暂无符合条件的记忆</span></div> : null}
-            </div>
+          <div className="memory-library-overview">
+            <button type="button" className="memory-library-entry" aria-haspopup="dialog" onClick={() => openLibraryScope("user")}>
+              <span className="memory-library-entry-icon"><UserRound size={19} strokeWidth={1.8} aria-hidden="true" /></span>
+              <span className="memory-library-entry-copy">
+                <strong>用户记忆</strong>
+                <span>用户资料、协作偏好与个人参考入口</span>
+                <small>{topicCountLabel(librarySummary.userTopicCount, librarySummary.userTopicCountCapped)}{librarySummary.userUpdatedLabel ? ` · 最近更新 ${librarySummary.userUpdatedLabel}` : ""}</small>
+              </span>
+              <span className="memory-library-entry-action">查看<ChevronRight size={17} aria-hidden="true" /></span>
+            </button>
+            <button type="button" className="memory-library-entry" aria-haspopup="dialog" onClick={() => setLibraryView({ kind: "projects" })}>
+              <span className="memory-library-entry-icon"><Folder size={19} strokeWidth={1.8} aria-hidden="true" /></span>
+              <span className="memory-library-entry-copy">
+                <strong>项目记忆</strong>
+                <span>按工作区保存的项目背景、决策与参考入口</span>
+                <small>{librarySummary.projectCount} 个项目 · {topicCountLabel(librarySummary.projectTopicCount, librarySummary.projectTopicCountCapped)}{librarySummary.projectUpdatedLabel ? ` · 最近更新 ${librarySummary.projectUpdatedLabel}` : ""}</small>
+              </span>
+              <span className="memory-library-entry-action">查看<ChevronRight size={17} aria-hidden="true" /></span>
+            </button>
           </div>
         </section>
       </section>
 
       <AwakenDialog
-        open={detailOpen}
+        open={Boolean(libraryView)}
+        title={libraryDialogTitle}
+        size="large"
+        className="memory-library-dialog"
+        bodyClassName={libraryDetailOpen ? "memory-detail-dialog-body" : "memory-library-dialog-body"}
+        onOpenChange={(open) => {
+          if (!open) {
+            if (libraryDetailOpen) closeMemoryDetail();
+            else closeLibrary();
+          }
+        }}
+        footer={libraryDetailOpen && detail ? (
+          <div className="memory-detail-dialog-actions">
+            <button type="button" className="memory-detail-delete" onClick={() => onDeleteMemory?.(detail.id)}>删除记忆</button>
+            <AwakenButton onClick={closeMemoryDetail}>关闭</AwakenButton>
+          </div>
+        ) : <AwakenButton onClick={closeLibrary}>关闭</AwakenButton>}
+      >
+        {libraryDetailOpen && detail ? <MemoryDetailContent detail={detail} /> : null}
+
+        {!libraryDetailOpen && libraryView?.kind === "projects" ? (
+          <div className="memory-project-browser">
+            <div className="memory-project-folder-grid" aria-label="已有记忆的项目">
+              {memoryProjects.map((project) => (
+                <AwakenProjectSkillFolder
+                  key={project.id}
+                  projectName={project.name}
+                  countLabel={topicCountLabel(project.topicCount, project.topicCountCapped)}
+                  size="compact"
+                  aria-label={`查看${project.name}的项目记忆`}
+                  onOpen={() => openLibraryScope("project", project.id, project.name)}
+                />
+              ))}
+              {!memoryProjects.length ? <div className="memory-empty"><Folder size={22} aria-hidden="true" /><span>暂无产生记忆的项目</span></div> : null}
+            </div>
+          </div>
+        ) : null}
+
+        {!libraryDetailOpen && libraryShowsTopics ? (
+          <div className="memory-topic-browser">
+            {libraryView.kind === "project" ? (
+              <button type="button" className="memory-library-back" onClick={() => setLibraryView({ kind: "projects" })}><ArrowLeft size={15} aria-hidden="true" />返回项目列表</button>
+            ) : null}
+            <div className="memory-topic-list" aria-label="记忆列表">
+              {!libraryLoading ? memories.map((memory) => (
+                <article className={`memory-topic-row${selectedMemoryId === memory.id ? " memory-topic-row-selected" : ""}`} key={memory.id}>
+                  <button type="button" aria-haspopup="dialog" onClick={() => openLibraryMemory(memory.id, memory.projectId)}>
+                    <span className="memory-topic-icon"><MemoryTopicIcon kind={memory.kind} /></span>
+                    <span className="memory-topic-copy">
+                      <strong>{memory.name}</strong>
+                      <span>{memory.description}</span>
+                      <small><span>{memory.typeLabel}</span><i aria-hidden="true" /><span className={memory.status === "superseded" ? "memory-status-superseded" : "memory-status-active"}>{memory.statusLabel}</span><i aria-hidden="true" /><span>{memory.updatedLabel}</span></small>
+                    </span>
+                    <span className="memory-topic-action">查看<ChevronRight size={17} aria-hidden="true" /></span>
+                  </button>
+                </article>
+              )) : null}
+              {libraryLoading ? <div className="memory-empty"><RefreshCw size={22} className="memory-loading-icon" aria-hidden="true" /><span>正在读取记忆</span></div> : null}
+              {!libraryLoading && !memories.length ? <div className="memory-empty"><BookOpenText size={22} aria-hidden="true" /><span>暂无记忆</span></div> : null}
+            </div>
+          </div>
+        ) : null}
+      </AwakenDialog>
+
+      <AwakenDialog
+        open={detailOpen && !libraryDetailContext}
         title={detail?.name ?? "记忆详情"}
         size="large"
         className="memory-detail-dialog"
@@ -374,21 +414,7 @@ export function AwakenMemorySettings({
           </div>
         ) : undefined}
       >
-        {detail ? (
-          <div className="memory-detail-dialog-content">
-            <p className="memory-detail-description">{detail.description}</p>
-            <div className="memory-detail-tags" aria-label={`${detail.scopeLabel}，${detail.typeLabel}，${detail.statusLabel}，${detail.updatedLabel}`}>
-              <span>{detail.scopeLabel}</span><i aria-hidden="true" />
-              <span>{detail.typeLabel}</span><i aria-hidden="true" />
-              <span className={detail.status === "superseded" ? "memory-detail-tag-superseded" : "memory-detail-tag-active"}>{detail.statusLabel}</span><i aria-hidden="true" />
-              <span>{detail.updatedLabel}</span>
-            </div>
-            <div className="memory-detail-document aw-text-selectable">
-              <AwakenMarkdownRenderer markdown={detail.content} fallback="这条记忆没有正文。" renderImages={false} renderMermaid={false} allowedLinkProtocols={["http", "https"]} />
-            </div>
-            <dl className="memory-detail-meta"><dt>来源任务</dt><dd>{detail.sourceThreadId}</dd><dt>Revision</dt><dd>{detail.revision}</dd></dl>
-          </div>
-        ) : null}
+        {detail ? <MemoryDetailContent detail={detail} /> : null}
       </AwakenDialog>
 
       <AwakenDialog

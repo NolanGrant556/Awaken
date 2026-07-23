@@ -101,15 +101,155 @@ describe("MemorySettingsPanel recent activity behavior", () => {
       ]);
     });
     const activityIdsBefore = (latestMemorySettingsProps?.activities as Array<{ id: string }>).map((activity) => activity.id);
-    const callsBefore = listMemoryCalls.length;
-
     await act(async () => {
-      const onFilterChange = latestMemorySettingsProps?.onFilterChange as (id: string, value: string) => void;
-      onFilterChange("scope", "project");
+      const onOpenLibraryScope = latestMemorySettingsProps?.onOpenLibraryScope as (scope: string, projectId?: string) => void;
+      onOpenLibraryScope("project", project.projectId);
     });
-    await waitForAssertion(() => expect(latestMemorySettingsProps?.canStartDream).toBe(false));
+    await waitForAssertion(() => {
+      expect(latestMemorySettingsProps?.canStartDream).toBe(true);
+      expect(listMemoryCalls.at(-1)).toEqual(expect.objectContaining({ scope: "project", projectId: project.projectId }));
+    });
 
     expect((latestMemorySettingsProps?.activities as Array<{ id: string }>).map((activity) => activity.id)).toEqual(activityIdsBefore);
-    expect(listMemoryCalls).toHaveLength(callsBefore);
+  });
+
+  it("does not mark Dream as busy while Auto Dream settings are saving", async () => {
+    let finishSettingsUpdate: ((value: {
+      revision: number;
+      value: { enabled: boolean; automaticRecall: boolean; proactiveMemory: boolean; autoDream: boolean };
+    }) => void) | undefined;
+    const runtimeClient = {
+      getMemorySettings: async () => ({
+        revision: 1,
+        value: { enabled: true, automaticRecall: true, proactiveMemory: true, autoDream: false },
+      }),
+      updateMemorySettings: vi.fn(() => new Promise((resolve) => { finishSettingsUpdate = resolve; })),
+      listProjects: async () => [],
+      listMemories: async () => [],
+      listMemoryDreams: async () => [],
+    } as unknown as RuntimeClient;
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    roots.push(root);
+
+    await act(async () => { root.render(<MemorySettingsPanel runtimeClient={runtimeClient} />); });
+    await waitForAssertion(() => {
+      expect(latestMemorySettingsProps?.busy).toBe(false);
+      expect(latestMemorySettingsProps?.busySwitchId).toBe(null);
+      expect(latestMemorySettingsProps?.dreamBusy).toBe(false);
+    });
+
+    act(() => {
+      const onToggleSwitch = latestMemorySettingsProps?.onToggleSwitch as (key: string) => void;
+      onToggleSwitch("autoDream");
+    });
+    await waitForAssertion(() => {
+      expect(latestMemorySettingsProps?.busy).toBe(false);
+      expect(latestMemorySettingsProps?.busySwitchId).toBe("autoDream");
+      expect(latestMemorySettingsProps?.dreamBusy).toBe(false);
+    });
+
+    await act(async () => {
+      finishSettingsUpdate?.({
+        revision: 2,
+        value: { enabled: true, automaticRecall: true, proactiveMemory: true, autoDream: true },
+      });
+    });
+    await waitForAssertion(() => {
+      expect(latestMemorySettingsProps?.busy).toBe(false);
+      expect(latestMemorySettingsProps?.busySwitchId).toBe(null);
+      expect(latestMemorySettingsProps?.dreamBusy).toBe(false);
+    });
+  });
+
+  it("turns off and locks dependent settings, then enables all of them with the master switch", async () => {
+    let settingsDocument = {
+      revision: 1,
+      value: { enabled: true, automaticRecall: true, proactiveMemory: true, autoDream: true },
+    };
+    const updateMemorySettings = vi.fn(async (patch: Record<string, unknown>) => {
+      settingsDocument = {
+        revision: settingsDocument.revision + 1,
+        value: {
+          enabled: typeof patch.enabled === "boolean" ? patch.enabled : settingsDocument.value.enabled,
+          automaticRecall: typeof patch.automaticRecall === "boolean" ? patch.automaticRecall : settingsDocument.value.automaticRecall,
+          proactiveMemory: typeof patch.proactiveMemory === "boolean" ? patch.proactiveMemory : settingsDocument.value.proactiveMemory,
+          autoDream: typeof patch.autoDream === "boolean" ? patch.autoDream : settingsDocument.value.autoDream,
+        },
+      };
+      return settingsDocument;
+    });
+    const runtimeClient = {
+      getMemorySettings: async () => settingsDocument,
+      updateMemorySettings,
+      listProjects: async () => [],
+      listMemories: async () => [],
+      listMemoryDreams: async () => [],
+    } as unknown as RuntimeClient;
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    roots.push(root);
+
+    await act(async () => { root.render(<MemorySettingsPanel runtimeClient={runtimeClient} />); });
+    await waitForAssertion(() => {
+      const switches = latestMemorySettingsProps?.switches as Array<{ id: string; checked: boolean; disabled?: boolean }>;
+      expect(switches.map(({ id, checked, disabled }) => ({ id, checked, disabled }))).toEqual([
+        { id: "enabled", checked: true, disabled: false },
+        { id: "automaticRecall", checked: true, disabled: false },
+        { id: "proactiveMemory", checked: true, disabled: false },
+        { id: "autoDream", checked: true, disabled: false },
+      ]);
+      expect(latestMemorySettingsProps?.canStartDream).toBe(true);
+    });
+
+    await act(async () => {
+      const onToggleSwitch = latestMemorySettingsProps?.onToggleSwitch as (key: string) => void;
+      onToggleSwitch("enabled");
+    });
+    await waitForAssertion(() => {
+      expect(updateMemorySettings).toHaveBeenLastCalledWith({
+        expectedRevision: 1,
+        enabled: false,
+        automaticRecall: false,
+        proactiveMemory: false,
+        autoDream: false,
+      });
+      const switches = latestMemorySettingsProps?.switches as Array<{ id: string; checked: boolean; disabled?: boolean }>;
+      expect(switches.map(({ id, checked, disabled }) => ({ id, checked, disabled }))).toEqual([
+        { id: "enabled", checked: false, disabled: false },
+        { id: "automaticRecall", checked: false, disabled: true },
+        { id: "proactiveMemory", checked: false, disabled: true },
+        { id: "autoDream", checked: false, disabled: true },
+      ]);
+      expect(latestMemorySettingsProps?.canStartDream).toBe(false);
+    });
+
+    act(() => {
+      const onToggleSwitch = latestMemorySettingsProps?.onToggleSwitch as (key: string) => void;
+      onToggleSwitch("automaticRecall");
+    });
+    expect(updateMemorySettings).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      const onToggleSwitch = latestMemorySettingsProps?.onToggleSwitch as (key: string) => void;
+      onToggleSwitch("enabled");
+    });
+    await waitForAssertion(() => {
+      expect(updateMemorySettings).toHaveBeenLastCalledWith({
+        expectedRevision: 2,
+        enabled: true,
+        automaticRecall: true,
+        proactiveMemory: true,
+        autoDream: true,
+      });
+      const switches = latestMemorySettingsProps?.switches as Array<{ id: string; checked: boolean; disabled?: boolean }>;
+      expect(switches.map(({ id, checked, disabled }) => ({ id, checked, disabled }))).toEqual([
+        { id: "enabled", checked: true, disabled: false },
+        { id: "automaticRecall", checked: true, disabled: false },
+        { id: "proactiveMemory", checked: true, disabled: false },
+        { id: "autoDream", checked: true, disabled: false },
+      ]);
+      expect(latestMemorySettingsProps?.canStartDream).toBe(true);
+    });
   });
 });

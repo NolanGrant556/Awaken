@@ -7,6 +7,8 @@ export type AwakenProjectSkillFolderProps = Omit<
 > & {
   projectName: string;
   skillCount?: number;
+  countLabel?: string;
+  size?: "default" | "compact";
   open?: boolean;
   onOpen?: () => void;
 };
@@ -14,6 +16,8 @@ export type AwakenProjectSkillFolderProps = Omit<
 export function AwakenProjectSkillFolder({
   projectName,
   skillCount,
+  countLabel,
+  size = "default",
   open = false,
   onOpen,
   disabled,
@@ -23,9 +27,9 @@ export function AwakenProjectSkillFolder({
   "aria-expanded": ariaExpanded,
   ...props
 }: AwakenProjectSkillFolderProps) {
-  const countLabel = skillCount === undefined
+  const resolvedCountLabel = countLabel ?? (skillCount === undefined
     ? undefined
-    : `${skillCount} ${skillCount === 1 ? "Skill" : "Skills"}`;
+    : `${skillCount} ${skillCount === 1 ? "Skill" : "Skills"}`);
 
   return (
     <button
@@ -33,8 +37,10 @@ export function AwakenProjectSkillFolder({
       aria-label={ariaLabel ?? `打开 ${projectName} 的项目 Skills`}
       aria-expanded={ariaExpanded ?? open}
       data-open={open ? "true" : "false"}
+      data-size={size}
       disabled={disabled}
       {...props}
+      title={projectName}
       className={[
         "aw-project-skill-folder",
         className ?? "",
@@ -64,8 +70,8 @@ export function AwakenProjectSkillFolder({
         <span className="aw-project-skill-folder__face">
           <span className="aw-project-skill-folder__copy">
             <span className="aw-project-skill-folder__name">{projectName}</span>
-            {countLabel ? (
-              <span className="aw-project-skill-folder__count">{countLabel}</span>
+            {resolvedCountLabel ? (
+              <span className="aw-project-skill-folder__count">{resolvedCountLabel}</span>
             ) : null}
           </span>
         </span>

@@ -3,6 +3,7 @@
 .aw-project-skill-folder {
   --aw-project-skill-folder-width: 178px;
   --aw-project-skill-folder-height: 220px;
+  --aw-project-skill-folder-scale: 1;
   position: relative;
   display: grid;
   place-items: center;
@@ -21,12 +22,20 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+.aw-project-skill-folder[data-size="compact"] {
+  --aw-project-skill-folder-scale: 0.86;
+  width: 198px;
+  height: 246px;
+  padding: 12px 10px;
+}
+
 .aw-project-skill-folder__stage {
   position: relative;
   display: block;
   width: var(--aw-project-skill-folder-width);
   height: var(--aw-project-skill-folder-height);
-  transform: translate3d(0, 0, 0) rotateX(0) rotateY(0) rotateZ(0);
+  transform: scale(var(--aw-project-skill-folder-scale)) translate3d(0, 0, 0) rotateX(0) rotateY(0) rotateZ(0);
+  transform-origin: center;
   transform-style: preserve-3d;
   transition: transform 420ms cubic-bezier(0.2, 0.82, 0.2, 1);
   will-change: transform;
@@ -192,7 +201,7 @@
 .aw-project-skill-folder:hover .aw-project-skill-folder__stage,
 .aw-project-skill-folder:focus-visible .aw-project-skill-folder__stage,
 .aw-project-skill-folder[data-open="true"] .aw-project-skill-folder__stage {
-  transform: translate3d(-2px, -8px, 0) rotateX(-3deg) rotateY(8deg) rotateZ(-1deg);
+  transform: scale(var(--aw-project-skill-folder-scale)) translate3d(-2px, -8px, 0) rotateX(-3deg) rotateY(8deg) rotateZ(-1deg);
 }
 
 .aw-project-skill-folder:hover .aw-project-skill-folder__layer--back,
@@ -239,7 +248,7 @@
 }
 
 .aw-project-skill-folder:active .aw-project-skill-folder__stage {
-  transform: translate3d(-1px, -3px, 0) rotateX(-1deg) rotateY(4deg) rotateZ(-0.5deg);
+  transform: scale(var(--aw-project-skill-folder-scale)) translate3d(-1px, -3px, 0) rotateX(-1deg) rotateY(4deg) rotateZ(-0.5deg);
   transition-duration: 120ms;
 }
 
@@ -248,7 +257,10 @@
   opacity: 0.46;
 }
 
-.aw-project-skill-folder:disabled .aw-project-skill-folder__stage,
+.aw-project-skill-folder:disabled .aw-project-skill-folder__stage {
+  transform: scale(var(--aw-project-skill-folder-scale));
+}
+
 .aw-project-skill-folder:disabled .aw-project-skill-folder__layer,
 .aw-project-skill-folder:disabled .aw-project-skill-folder__face {
   transform: none;
@@ -258,7 +270,7 @@
   .aw-project-skill-folder:hover .aw-project-skill-folder__stage,
   .aw-project-skill-folder:focus-visible .aw-project-skill-folder__stage,
   .aw-project-skill-folder:active .aw-project-skill-folder__stage {
-    transform: translate3d(0, -3px, 0);
+    transform: scale(var(--aw-project-skill-folder-scale)) translate3d(0, -3px, 0);
   }
 
   .aw-project-skill-folder:hover .aw-project-skill-folder__layer--back,

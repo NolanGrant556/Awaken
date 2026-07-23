@@ -44,6 +44,26 @@ func (a *Agent) SetConnection(conn *acpsdk.AgentSideConnection) {
 	}
 }
 
+// CloseAllSessions cancels active runs and removes all local session mappings.
+// It is called during bridge shutdown.
+func (a *Agent) CloseAllSessions(ctx context.Context) {
+	a.mu.Lock()
+	sessions := make([]*bridgeSession, 0, len(a.sessions))
+	for _, s := range a.sessions {
+		sessions = append(sessions, s)
+	}
+	a.sessions = make(map[string]*bridgeSession)
+	a.mu.Unlock()
+	for _, s := range sessions {
+		if s.cancel != nil {
+			s.cancel()
+		}
+		if s.mapping != nil {
+			_ = a.CoreClient.CloseACPSession(ctx, s.mapping.ACPSessionID)
+		}
+	}
+}
+
 // Authenticate rejects authentication requests; Awaken does not require client
 // authentication beyond manifest control token.
 func (a *Agent) Authenticate(ctx context.Context, params acpsdk.AuthenticateRequest) (acpsdk.AuthenticateResponse, error) {

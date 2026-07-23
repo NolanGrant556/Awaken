@@ -4,6 +4,7 @@ package runtime
 
 import (
 	"os"
+	"syscall"
 )
 
 func processAlive(pid int) bool {
@@ -12,5 +13,5 @@ func processAlive(pid int) bool {
 		return false
 	}
 	// Signal 0 checks process existence without delivering a signal.
-	return proc.Signal(os.Signal(nil)) == nil
+	return proc.Signal(syscall.Signal(0)) == nil
 }

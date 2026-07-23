@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"awaken/src/acp"
 	"awaken/src/tool"
@@ -41,6 +42,8 @@ type delegateInput struct {
 type DelegateExternalAgentTool struct {
 	Manager *acp.Manager
 }
+
+var _ tool.OutcomeTool = (*DelegateExternalAgentTool)(nil)
 
 var defaultTool = &DelegateExternalAgentTool{}
 
@@ -146,7 +149,7 @@ func (t *DelegateExternalAgentTool) Execute(ctx context.Context, input string) (
 		return "", fmt.Errorf("action is required")
 	}
 	if t.Manager == nil {
-		return "", fmt.Errorf("acp manager not available")
+		return "", fmt.Errorf("%s: manager not available", acp.ErrCodeRunnerNotReady)
 	}
 
 	switch req.Action {
@@ -165,6 +168,87 @@ func (t *DelegateExternalAgentTool) Execute(ctx context.Context, input string) (
 	default:
 		return "", fmt.Errorf("unknown action %q", req.Action)
 	}
+}
+
+func (t *DelegateExternalAgentTool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObserver) (tool.ExecutionOutcome, error) {
+	started := time.Now().UTC()
+	content, err := t.Execute(ctx, input)
+	if err != nil {
+		return delegateFailureOutcome(err).WithTiming(started, time.Now().UTC()), nil
+	}
+
+	var details map[string]any
+	if json.Unmarshal([]byte(content), &details) == nil {
+		if code, _ := details["error_code"].(string); strings.TrimSpace(code) != "" {
+			message, _ := details["error_message"].(string)
+			if strings.TrimSpace(message) == "" {
+				message = code
+			}
+			outcome := delegateFailureOutcome(fmt.Errorf("%s: %s", code, message))
+			outcome.Content = content
+			outcome.Details = details
+			return outcome.WithTiming(started, time.Now().UTC()), nil
+		}
+	}
+
+	outcome := tool.SucceededOutcome(content)
+	outcome.Details = details
+	return outcome.WithTiming(started, time.Now().UTC()), nil
+}
+
+func delegateFailureOutcome(err error) tool.ExecutionOutcome {
+	message := err.Error()
+	code := "acp_delegate_failed"
+	category := tool.ErrorCategoryTool
+	retryable := true
+
+	for _, candidate := range []string{
+		acp.ErrCodeRunnerNotConfigured,
+		acp.ErrCodeRunnerNotReady,
+		acp.ErrCodeStartTimeout,
+		acp.ErrCodeProtocolVersionMismatch,
+		acp.ErrCodeCapabilityUnsupported,
+		acp.ErrCodeSessionConflict,
+		acp.ErrCodeSessionMissing,
+		acp.ErrCodePermissionDenied,
+		acp.ErrCodePermissionExpired,
+		acp.ErrCodeTurnTimeout,
+		acp.ErrCodeTurnCancelled,
+		acp.ErrCodeTransportClosed,
+		acp.ErrCodeOutputLimitExceeded,
+	} {
+		if strings.Contains(message, candidate) {
+			code = candidate
+			break
+		}
+	}
+
+	switch code {
+	case acp.ErrCodeRunnerNotConfigured, acp.ErrCodeSessionConflict, acp.ErrCodeSessionMissing:
+		category, retryable = tool.ErrorCategoryDomain, false
+	case acp.ErrCodePermissionDenied, acp.ErrCodePermissionExpired:
+		category, retryable = tool.ErrorCategoryPolicy, false
+	case acp.ErrCodeCapabilityUnsupported:
+		category, retryable = tool.ErrorCategoryDomain, false
+	case acp.ErrCodeRunnerNotReady, acp.ErrCodeStartTimeout, acp.ErrCodeProtocolVersionMismatch,
+		acp.ErrCodeTurnTimeout, acp.ErrCodeTransportClosed, acp.ErrCodeOutputLimitExceeded:
+		category, retryable = tool.ErrorCategoryRuntime, true
+	case acp.ErrCodeTurnCancelled:
+		category, retryable = tool.ErrorCategoryDomain, false
+	default:
+		if strings.Contains(message, "invalid input") || strings.Contains(message, " is required") || strings.Contains(message, "unknown action") {
+			code, category, retryable = "acp_delegate_invalid_input", tool.ErrorCategoryValidation, false
+		}
+	}
+
+	outcome := tool.FailedOutcome(message, code, category, retryable)
+	if code == acp.ErrCodePermissionDenied {
+		outcome.Status = tool.OutcomeDenied
+	}
+	if code == acp.ErrCodeTurnCancelled {
+		outcome.Status = tool.OutcomeCancelled
+	}
+	return outcome
 }
 
 func (t *DelegateExternalAgentTool) listRunners() (string, error) {

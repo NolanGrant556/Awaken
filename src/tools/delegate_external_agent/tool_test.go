@@ -2,11 +2,47 @@ package delegateexternalagent
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"awaken/src/acp"
 	"awaken/src/tool"
 )
+
+func TestDelegateExternalAgentImplementsOutcomeTool(t *testing.T) {
+	var _ tool.OutcomeTool = (*DelegateExternalAgentTool)(nil)
+}
+
+func TestExecuteOutcomeClassifiesInvalidInput(t *testing.T) {
+	task := &DelegateExternalAgentTool{}
+	outcome, err := task.ExecuteOutcome(context.Background(), `{`, nil)
+	if err != nil {
+		t.Fatalf("ExecuteOutcome returned transport error: %v", err)
+	}
+	if outcome.Status != tool.OutcomeFailed || outcome.ErrorCode != "acp_delegate_invalid_input" {
+		t.Fatalf("unexpected outcome: %+v", outcome)
+	}
+	if outcome.Retryable {
+		t.Fatal("invalid input must not be retryable")
+	}
+}
+
+func TestExecuteOutcomeClassifiesMissingRuntime(t *testing.T) {
+	task := &DelegateExternalAgentTool{}
+	outcome, err := task.ExecuteOutcome(context.Background(), `{"action":"list"}`, nil)
+	if err != nil {
+		t.Fatalf("ExecuteOutcome returned transport error: %v", err)
+	}
+	if outcome.Status != tool.OutcomeFailed || outcome.ErrorCode != acp.ErrCodeRunnerNotReady {
+		t.Fatalf("unexpected outcome: %+v", outcome)
+	}
+	if !outcome.Retryable {
+		t.Fatal("missing ACP runtime must be retryable")
+	}
+	if !strings.Contains(outcome.ErrorMessage, "manager not available") {
+		t.Fatalf("unexpected error message: %q", outcome.ErrorMessage)
+	}
+}
 
 func TestACPUpdateHandlerEmitsToolSnapshot(t *testing.T) {
 	var emitted []tool.ACPEvent

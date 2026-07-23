@@ -7,37 +7,37 @@
      骨架变量见文件下半部分；骨架变更 = 交互变更，必须走中间区域复核
      ============================================================ */
 
-  /* Neutral scale (warm / stone): fills & borders derive from rgb(87,83,78) */
+  /* Neutral scale: near-white surfaces; fills & borders derive from rgb(82,82,88) */
 
   /* Background */
-  --aw-bg-main: #fdfcfb;
-  --aw-bg-nav: #f5f3ef;
+  --aw-bg-main: #ffffff;
+  --aw-bg-nav: #f7f7f8;
   --aw-bg-white: #ffffff;
-  --aw-bg-fill-light: rgba(87, 83, 78, 0.07);
-  --aw-bg-fill-main: rgba(87, 83, 78, 0.11);
-  --aw-bg-fill-dark: rgba(87, 83, 78, 0.16);
-  --aw-overlay-backdrop: rgba(28, 25, 23, 0.28);
+  --aw-bg-fill-light: rgba(82, 82, 88, 0.06);
+  --aw-bg-fill-main: rgba(82, 82, 88, 0.1);
+  --aw-bg-fill-dark: rgba(82, 82, 88, 0.15);
+  --aw-overlay-backdrop: rgba(0, 0, 0, 0.28);
 
   /* Text */
-  --aw-text-primary: #1c1917;
-  --aw-text-secondary: #504b46;
-  --aw-text-tertiary: #746e68;
-  --aw-text-disabled: #aaa49e;
+  --aw-text-primary: #1d1d1f;
+  --aw-text-secondary: #505054;
+  --aw-text-tertiary: #747478;
+  --aw-text-disabled: #aaaab0;
   --aw-text-blue: #2f74ff;
   --aw-text-onblack: #ffffff;
 
   /* Border */
-  --aw-border-main: rgba(87, 83, 78, 0.16);
-  --aw-border-light: rgba(87, 83, 78, 0.1);
-  --aw-border-active: rgba(28, 25, 23, 0.72);
-  --aw-border-control: rgba(87, 83, 78, 0.2);
-  --aw-border-control-hover: rgba(87, 83, 78, 0.32);
+  --aw-border-main: rgba(82, 82, 88, 0.16);
+  --aw-border-light: rgba(82, 82, 88, 0.1);
+  --aw-border-active: rgba(29, 29, 31, 0.72);
+  --aw-border-control: rgba(82, 82, 88, 0.2);
+  --aw-border-control-hover: rgba(82, 82, 88, 0.32);
   --aw-focus-ring: color-mix(in srgb, var(--aw-accent) 58%, transparent);
 
   /* Button */
-  --aw-button-black: #292524;
-  --aw-button-black-hover: #1c1917;
-  --aw-button-black-active: #0c0a09;
+  --aw-button-black: #2c2c2e;
+  --aw-button-black-hover: #1d1d1f;
+  --aw-button-black-active: #111113;
 
   /* Status base hues: each family has exactly one base; all soft/bg/diff/text
      variants below must derive from it (same rgb, different alpha/shade) */
@@ -59,26 +59,26 @@
   --aw-surface-canvas: var(--aw-bg-main);
   --aw-surface-navigation: var(--aw-bg-nav);
   --aw-surface-chrome: var(--aw-bg-main);
-  --aw-surface-work: #fffefe;
+  --aw-surface-work: #ffffff;
   --aw-surface-detail: #ffffff;
   --aw-surface-raised: #ffffff;
-  --aw-surface-panel: #f7f5f2;
-  --aw-surface-panel-muted: rgba(87, 83, 78, 0.07);
-  --aw-surface-hover: rgba(87, 83, 78, 0.07);
+  --aw-surface-panel: #f7f7f8;
+  --aw-surface-panel-muted: rgba(82, 82, 88, 0.06);
+  --aw-surface-hover: rgba(82, 82, 88, 0.06);
   --aw-surface-composer: var(--aw-bg-fill-light);
-  --aw-surface-code: #f5f3ef;
-  --aw-surface-selection: rgba(87, 83, 78, 0.11);
+  --aw-surface-code: #f5f5f6;
+  --aw-surface-selection: rgba(82, 82, 88, 0.1);
   --aw-surface-focus: rgba(255, 255, 255, 1);
   --aw-surface-danger: rgba(232, 70, 58, 0.08);
-  --aw-surface-status-pill: rgba(87, 83, 78, 0.07);
-  --aw-surface-muted-fill: rgba(87, 83, 78, 0.07);
+  --aw-surface-status-pill: rgba(82, 82, 88, 0.06);
+  --aw-surface-muted-fill: rgba(82, 82, 88, 0.06);
   --aw-surface-sidebar: var(--aw-surface-navigation);
   --aw-surface-stage: var(--aw-surface-work);
   --aw-surface-inspector: var(--aw-surface-detail);
   --aw-surface-runtime-pill: var(--aw-surface-status-pill);
   --aw-text-muted: var(--aw-text-secondary);
   --aw-text-subtle: var(--aw-text-tertiary);
-  --aw-text-code: #1c1917;
+  --aw-text-code: #1d1d1f;
   --aw-text-selection: #2f74ff;
   --aw-status-running: var(--aw-text-blue);
   --aw-status-running-bg: rgba(47, 116, 255, 0.11);
@@ -109,15 +109,15 @@
   --aw-context-meter-indicator: #168fd2;
   --aw-brand-wordmark-filter: none;
   --aw-composer-surface: var(--aw-bg-white);
-  --aw-composer-border: rgba(87, 83, 78, 0.24);
+  --aw-composer-border: rgba(82, 82, 88, 0.24);
   --aw-composer-shadow:
-    0 22px 56px rgba(28, 25, 23, 0.1),
-    0 5px 14px rgba(28, 25, 23, 0.05),
-    0 1px 2px rgba(28, 25, 23, 0.05);
+    0 22px 56px rgba(29, 29, 31, 0.1),
+    0 5px 14px rgba(29, 29, 31, 0.05),
+    0 1px 2px rgba(29, 29, 31, 0.05);
   --aw-composer-shadow-focus:
     var(--aw-shadow-focus),
-    0 24px 60px rgba(28, 25, 23, 0.12);
-  --aw-composer-attachment-remove-bg: rgba(28, 25, 23, 0.72);
+    0 24px 60px rgba(29, 29, 31, 0.12);
+  --aw-composer-attachment-remove-bg: rgba(29, 29, 31, 0.72);
   --aw-composer-attachment-remove-fg: var(--aw-text-onblack);
   --aw-composer-attachment-remove-border: transparent;
   --aw-composer-attachment-remove-shadow: none;
@@ -130,21 +130,21 @@
     ),
     radial-gradient(
       ellipse at 50% 82%,
-      rgba(28, 25, 23, 0.07) 0%,
-      rgba(28, 25, 23, 0.025) 46%,
-      rgba(28, 25, 23, 0) 74%
+      rgba(29, 29, 31, 0.07) 0%,
+      rgba(29, 29, 31, 0.025) 46%,
+      rgba(29, 29, 31, 0) 74%
     );
 
-  /* Shadow（暖黑环境光 + 接触阴影；仅影响绘制，不参与布局测量） */
+  /* Shadow（中性环境光 + 接触阴影；仅影响绘制，不参与布局测量） */
   --aw-shadow-menu:
-    0 18px 48px rgba(28, 25, 23, 0.14),
-    0 4px 14px rgba(28, 25, 23, 0.07),
-    0 1px 2px rgba(28, 25, 23, 0.05);
+    0 18px 48px rgba(29, 29, 31, 0.14),
+    0 4px 14px rgba(29, 29, 31, 0.07),
+    0 1px 2px rgba(29, 29, 31, 0.05);
   --aw-shadow-popover: var(--aw-shadow-menu);
-  --aw-shadow-toast: 0 18px 42px rgba(28, 25, 23, 0.18), 0 3px 10px rgba(28, 25, 23, 0.08);
-  --aw-shadow-raised: 0 1px 2px rgba(28, 25, 23, 0.06), 0 8px 24px rgba(28, 25, 23, 0.04);
-  --aw-shadow-card-hover: 0 12px 30px rgba(28, 25, 23, 0.08), 0 2px 6px rgba(28, 25, 23, 0.05);
-  --aw-shadow-control: 0 1px 3px rgba(28, 25, 23, 0.14);
+  --aw-shadow-toast: 0 18px 42px rgba(29, 29, 31, 0.18), 0 3px 10px rgba(29, 29, 31, 0.08);
+  --aw-shadow-raised: 0 1px 2px rgba(29, 29, 31, 0.06), 0 8px 24px rgba(29, 29, 31, 0.04);
+  --aw-shadow-card-hover: 0 12px 30px rgba(29, 29, 31, 0.08), 0 2px 6px rgba(29, 29, 31, 0.05);
+  --aw-shadow-control: 0 1px 3px rgba(29, 29, 31, 0.14);
   --aw-shadow-focus: 0 0 0 3px color-mix(in srgb, var(--aw-accent) 16%, transparent);
 
   /* ============================================================

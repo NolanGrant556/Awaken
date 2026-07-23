@@ -1,6 +1,6 @@
 # AwakenSkillCard
 
-所有来源共用的 Skill 卡片。卡片主体负责请求 `SKILL.md` 预览，右侧 `AwakenSkillToggle` 独立请求启停，两种操作不会互相触发。
+所有来源共用的 Skill 卡片。卡片主体负责请求 `SKILL.md` 预览，右侧原子 `AwakenSwitch` 独立请求启停，两种操作不会互相触发。
 
 ## Props
 

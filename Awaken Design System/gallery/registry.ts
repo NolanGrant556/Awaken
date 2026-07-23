@@ -5,6 +5,7 @@ import { AwakenAssistantMessageDemo } from "../src/components/AwakenAssistantMes
 import { AwakenAvatarDemo } from "../src/components/AwakenAvatar/AwakenAvatar.demo";
 import { AwakenAppearanceSettingsDemo } from "../src/components/AwakenAppearanceSettings/AwakenAppearanceSettings.demo";
 import { AwakenComposerBarDemo } from "../src/components/AwakenComposerBar/AwakenComposerBar.demo";
+import { AwakenFolderDemo } from "../src/components/AwakenFolder/AwakenFolder.demo";
 import { AwakenConnectorsDemo } from "../src/components/AwakenConnectors/AwakenConnectors.demo";
 import { AwakenMemorySettingsDemo } from "../src/components/AwakenMemorySettings/AwakenMemorySettings.demo";
 import { AwakenModelSettingsDemo } from "../src/components/AwakenModelSettings/AwakenModelSettings.demo";
@@ -16,6 +17,7 @@ import { AwakenSearchSettingsDemo } from "../src/components/AwakenSearchSettings
 import { AwakenPetsSettingsDemo } from "../src/components/AwakenPetsSettings/AwakenPetsSettings.demo";
 import { AwakenSidebarDemo } from "../src/components/AwakenSidebar/AwakenSidebar.demo";
 import { AwakenSkillsDemo } from "../src/components/AwakenSkills/AwakenSkills.demo";
+import { AwakenSwitchDemo } from "../src/components/AwakenSwitch/AwakenSwitch.demo";
 import { AwakenTaskWelcomeDemo } from "../src/components/AwakenTaskWelcome/AwakenTaskWelcome.demo";
 import { AwakenThoughtTraceDemo } from "../src/components/AwakenThoughtTrace/AwakenThoughtTrace.demo";
 import { AwakenToolTraceGroupDemo } from "../src/components/AwakenToolTraceGroup/AwakenToolTraceGroup.demo";
@@ -34,6 +36,8 @@ export type AwakenGalleryCategory = "atomic" | "sidebar" | "settings" | "workben
 
 export const awakenGalleryEntries: AwakenGalleryEntry[] = [
   { id: "awaken-product-logo", name: "AwakenProductLogo", displayName: "产品 LOGO", demo: AwakenProductLogoDemo, category: "atomic" },
+  { id: "awaken-switch", name: "AwakenSwitch", displayName: "开关", demo: AwakenSwitchDemo, category: "atomic", aliases: ["awaken-skill-toggle", "awaken-connector-toggle", "awaken-settings-switch"] },
+  { id: "awaken-folder", name: "AwakenFolder", displayName: "文件夹", demo: AwakenFolderDemo, category: "atomic", aliases: ["awaken-project-skill-folder"] },
   { id: "awaken-sidebar", name: "AwakenSidebar", displayName: "「左侧栏」组件库", demo: AwakenSidebarDemo, category: "sidebar", aliases: ["awaken-dialog", "awaken-dropdown", "awaken-icon", "awaken-selectable-card"] },
   { id: "awaken-skills", name: "AwakenSkills", displayName: "「技能」组件库", demo: AwakenSkillsDemo, category: "sidebar" },
   { id: "awaken-account", name: "AwakenAccount", displayName: "「账户」组件库", demo: AwakenAccountDemo, category: "sidebar", aliases: ["awaken-popover"] },

@@ -1,11 +1,11 @@
 import "./AwakenSkills.demo.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AwakenButton } from "../AwakenButton";
-import { AwakenProjectSkillFolder } from "../AwakenProjectSkillFolder";
+import { AwakenFolder } from "../AwakenFolder";
 import { AwakenProjectSkillsDialog } from "../AwakenProjectSkillsDialog";
 import { AwakenSkillCard } from "../AwakenSkillCard";
 import { AwakenSkillPreviewDialog } from "../AwakenSkillPreviewDialog";
-import { AwakenSkillToggle } from "../AwakenSkillToggle";
+import { AwakenSwitch } from "../AwakenSwitch";
 import { AwakenSkills } from "./AwakenSkills";
 import type {
   AwakenSkillGroup,
@@ -199,13 +199,13 @@ export function AwakenSkillsDemo() {
           <article className="aw-skills-demo__part">
             <header>
               <h4>Skill 开关</h4>
-              <code>AwakenSkillToggle</code>
+              <code>AwakenSwitch</code>
               <p>只负责受控启停状态，可脱离卡片独立使用。</p>
             </header>
             <div className="aw-skills-demo__part-canvas aw-skills-demo__toggle-row">
               {componentSampleSkill ? (
                 <>
-                  <AwakenSkillToggle
+                  <AwakenSwitch
                     checked={componentSampleSkill.enabled}
                     label={componentSampleSkill.name}
                     onCheckedChange={(enabled) => updateSkill(componentSampleSkill, enabled)}
@@ -219,14 +219,14 @@ export function AwakenSkillsDemo() {
           <article className="aw-skills-demo__part aw-skills-demo__part--folder">
             <header>
               <h4>项目 Skill 文件夹</h4>
-              <code>AwakenProjectSkillFolder</code>
+              <code>AwakenFolder</code>
               <p>项目级入口；窗口打开期间持续保持展开。</p>
             </header>
             <div className="aw-skills-demo__part-canvas aw-skills-demo__folder-canvas">
               {componentSampleProject ? (
-                <AwakenProjectSkillFolder
-                  projectName={componentSampleProject.name}
-                  skillCount={componentSampleProject.skills.length}
+                <AwakenFolder
+                  label={componentSampleProject.name}
+                  meta={`${componentSampleProject.skills.length} ${componentSampleProject.skills.length === 1 ? "Skill" : "Skills"}`}
                   open={isolatedProjectOpen}
                   onOpen={() => setIsolatedProjectOpen(true)}
                 />

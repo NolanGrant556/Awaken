@@ -1,0 +1,77 @@
+@import "../../tokens/components.css";
+
+.aw-switch {
+  --aw-switch-width: 40px;
+  --aw-switch-height: 22px;
+  --aw-switch-thumb-size: 18px;
+  --aw-switch-thumb-offset: 2px;
+  --aw-switch-thumb-travel: 18px;
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: var(--aw-switch-width);
+  height: var(--aw-switch-height);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--aw-radius-pill);
+  background: color-mix(in srgb, var(--aw-text-tertiary) 42%, var(--aw-surface-raised));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--aw-text-tertiary) 18%, transparent);
+  cursor: pointer;
+  transition:
+    background-color var(--aw-transition-fast),
+    box-shadow var(--aw-transition-fast),
+    opacity var(--aw-transition-fast);
+}
+
+.aw-switch[data-size="compact"] {
+  --aw-switch-width: 36px;
+  --aw-switch-height: 20px;
+  --aw-switch-thumb-size: 14px;
+  --aw-switch-thumb-offset: 3px;
+  --aw-switch-thumb-travel: 16px;
+}
+
+.aw-switch[data-checked="true"] {
+  background: var(--aw-success);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--aw-success) 18%, transparent);
+}
+
+.aw-switch__thumb {
+  position: absolute;
+  top: var(--aw-switch-thumb-offset);
+  left: var(--aw-switch-thumb-offset);
+  width: var(--aw-switch-thumb-size);
+  height: var(--aw-switch-thumb-size);
+  border-radius: 50%;
+  background: var(--aw-surface-raised);
+  box-shadow: var(--aw-shadow-control);
+  transition: transform var(--aw-transition-fast);
+}
+
+.aw-switch[data-checked="true"] .aw-switch__thumb {
+  transform: translateX(var(--aw-switch-thumb-travel));
+}
+
+.aw-switch:focus-visible {
+  outline: none;
+  box-shadow: var(--aw-shadow-focus);
+}
+
+.aw-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.aw-switch[data-busy="true"]:disabled {
+  cursor: wait;
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aw-switch,
+  .aw-switch__thumb {
+    transition: none;
+  }
+
+}

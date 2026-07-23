@@ -2,6 +2,7 @@ import "./AwakenPetsSettings.css";
 import type { ReactNode } from "react";
 import { RefreshCw } from "lucide-react";
 import { AwakenButton } from "../AwakenButton";
+import { AwakenSwitch } from "../AwakenSwitch";
 import { AwakenTooltip } from "../AwakenTooltip";
 
 export type AwakenPetSettingsItem = {
@@ -73,7 +74,7 @@ export function AwakenPetsSettings({
             <AwakenButton variant="ghost" size="sm" onClick={onOpenCodexDirectory}>打开 Codex 目录</AwakenButton>
           </div>
         </div>
-        <label className="pets-settings-toggle"><input type="checkbox" checked={autoImport} readOnly={!onToggleAutoImport} onChange={onToggleAutoImport} /><span>启动时自动导入 Codex 自定义宠物</span></label>
+        <div className="pets-settings-toggle"><AwakenSwitch checked={autoImport} label="启动时自动导入 Codex 自定义宠物" disabled={!onToggleAutoImport} size="compact" onCheckedChange={onToggleAutoImport} /><span>启动时自动导入 Codex 自定义宠物</span></div>
         <div className="pets-settings-list" role="radiogroup" aria-label="选择宠物">
           {pets.length === 0 ? <div className="pets-settings-empty">暂无可用宠物</div> : pets.map((pet) => (
             <label key={pet.id} className={`pets-settings-item${pet.selected ? " pets-settings-item-active" : ""}${!pet.available ? " pets-settings-item-missing" : ""}`}>

@@ -4,7 +4,7 @@ import { AwakenButton } from "../AwakenButton";
 import { AwakenCliConnectorDetailDialog } from "../AwakenCliConnectorDetailDialog";
 import { AwakenConnectorBrandIcon } from "../AwakenConnectorBrandIcon";
 import { AwakenConnectorCard } from "../AwakenConnectorCard";
-import { AwakenConnectorToggle } from "../AwakenConnectorToggle";
+import { AwakenSwitch } from "../AwakenSwitch";
 import { AwakenMcpConfigDialog } from "../AwakenMcpConfigDialog";
 import { AwakenMcpSettingsDialog } from "../AwakenMcpSettingsDialog";
 import { AwakenConnectors } from "./AwakenConnectors";
@@ -141,8 +141,8 @@ export function AwakenConnectorsDemo() {
             <AwakenConnectorBrandIcon providerId="dingtalk-workspace" label="钉钉" tone="dingtalk" />
             <AwakenConnectorBrandIcon providerId="lark-cli" label="飞书" tone="lark" />
           </div></article>
-          <article><header><h4>连接器开关</h4><code>AwakenConnectorToggle</code><p>受控表达用户 MCP server 的启停与忙碌状态。</p></header><div className="aw-connectors-demo__part-canvas aw-connectors-demo__inline">
-            <AwakenConnectorToggle checked={enabledById["puppeteer-user"] ?? false} label="puppeteer" onCheckedChange={(enabled) => setEnabledById((current) => ({ ...current, "puppeteer-user": enabled }))} />
+          <article><header><h4>连接器开关</h4><code>AwakenSwitch</code><p>受控表达用户 MCP server 的启停与忙碌状态。</p></header><div className="aw-connectors-demo__part-canvas aw-connectors-demo__inline">
+            <AwakenSwitch checked={enabledById["puppeteer-user"] ?? false} label="puppeteer" onCheckedChange={(enabled) => setEnabledById((current) => ({ ...current, "puppeteer-user": enabled }))} />
             <span>{enabledById["puppeteer-user"] ? "已启用" : "已停用"}</span>
           </div></article>
           <article><header><h4>CLI 详情窗口</h4><code>AwakenCliConnectorDetailDialog</code><p>覆盖安装、授权、进度、账户与退出登录。</p></header><div className="aw-connectors-demo__part-canvas"><AwakenButton onClick={() => setCliDialog("dingtalk-workspace")}>打开 CLI 详情</AwakenButton></div></article>

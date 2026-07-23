@@ -15,7 +15,8 @@ import {
 import { AwakenButton } from "../AwakenButton";
 import { AwakenDialog } from "../AwakenDialog";
 import { AwakenMarkdownRenderer } from "../AwakenMarkdownRenderer";
-import { AwakenProjectSkillFolder } from "../AwakenProjectSkillFolder";
+import { AwakenFolder } from "../AwakenFolder";
+import { AwakenSwitch } from "../AwakenSwitch";
 
 export type AwakenMemorySwitchItem = { id: string; title: string; description: string; checked: boolean; disabled?: boolean };
 export type AwakenMemoryTopicKind = "user" | "feedback" | "project" | "reference";
@@ -242,7 +243,7 @@ export function AwakenMemorySettings({
         {switches.map((item) => (
           <div className="memory-settings-switch-row" key={item.id}>
             <div><strong>{item.title}</strong><p>{item.description}</p></div>
-            <button type="button" className={`mcp-toggle-switch${item.checked ? " mcp-toggle-switch-on" : " mcp-toggle-switch-off"}`} aria-label={`${item.checked ? "关闭" : "开启"}${item.title}`} aria-pressed={item.checked} aria-busy={busySwitchId === item.id || undefined} disabled={busy || item.disabled || busySwitchId === item.id} onClick={() => onToggleSwitch?.(item.id)}><span className="mcp-toggle-switch-thumb" /></button>
+            <AwakenSwitch checked={item.checked} label={item.title} busy={busySwitchId === item.id} disabled={busy || item.disabled} onCheckedChange={() => onToggleSwitch?.(item.id)} />
           </div>
         ))}
       </div>
@@ -360,10 +361,10 @@ export function AwakenMemorySettings({
           <div className="memory-project-browser">
             <div className="memory-project-folder-grid" aria-label="已有记忆的项目">
               {memoryProjects.map((project) => (
-                <AwakenProjectSkillFolder
+                <AwakenFolder
                   key={project.id}
-                  projectName={project.name}
-                  countLabel={topicCountLabel(project.topicCount, project.topicCountCapped)}
+                  label={project.name}
+                  meta={topicCountLabel(project.topicCount, project.topicCountCapped)}
                   size="compact"
                   aria-label={`查看${project.name}的项目记忆`}
                   onOpen={() => openLibraryScope("project", project.id, project.name)}

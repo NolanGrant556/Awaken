@@ -1,9 +1,9 @@
 @import "../../tokens/components.css";
 
-.aw-project-skill-folder {
-  --aw-project-skill-folder-width: 178px;
-  --aw-project-skill-folder-height: 220px;
-  --aw-project-skill-folder-scale: 1;
+.aw-folder {
+  --aw-folder-width: 178px;
+  --aw-folder-height: 220px;
+  --aw-folder-scale: 1;
   position: relative;
   display: grid;
   place-items: center;
@@ -22,27 +22,27 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-.aw-project-skill-folder[data-size="compact"] {
-  --aw-project-skill-folder-scale: 0.86;
+.aw-folder[data-size="compact"] {
+  --aw-folder-scale: 0.86;
   width: 198px;
   height: 246px;
   padding: 12px 10px;
 }
 
-.aw-project-skill-folder__stage {
+.aw-folder__stage {
   position: relative;
   display: block;
-  width: var(--aw-project-skill-folder-width);
-  height: var(--aw-project-skill-folder-height);
-  transform: scale(var(--aw-project-skill-folder-scale)) translate3d(0, 0, 0) rotateX(0) rotateY(0) rotateZ(0);
+  width: var(--aw-folder-width);
+  height: var(--aw-folder-height);
+  transform: scale(var(--aw-folder-scale)) translate3d(0, 0, 0) rotateX(0) rotateY(0) rotateZ(0);
   transform-origin: center;
   transform-style: preserve-3d;
   transition: transform 420ms cubic-bezier(0.2, 0.82, 0.2, 1);
   will-change: transform;
 }
 
-.aw-project-skill-folder__layer,
-.aw-project-skill-folder__face {
+.aw-folder__layer,
+.aw-folder__face {
   position: absolute;
   inset: 0;
   display: block;
@@ -56,18 +56,18 @@
     background-color var(--aw-transition-normal);
 }
 
-.aw-project-skill-folder__layer--back {
+.aw-folder__layer--back {
   inset: 13px 0 0;
   overflow: visible;
   border-radius: var(--aw-radius-md);
   background: var(--aw-surface-panel, var(--aw-bg-fill-light));
   box-shadow:
-    0 1px 2px rgba(28, 25, 23, 0.04),
-    0 8px 22px rgba(28, 25, 23, 0.04);
+    0 1px 2px rgba(29, 29, 31, 0.04),
+    0 8px 22px rgba(29, 29, 31, 0.04);
   transform: translate3d(5px, 3px, -24px) rotateZ(0.8deg);
 }
 
-.aw-project-skill-folder__layer--back::before {
+.aw-folder__layer--back::before {
   content: "";
   position: absolute;
   top: -14px;
@@ -80,7 +80,7 @@
   background: inherit;
 }
 
-.aw-project-skill-folder__layer--back::after {
+.aw-folder__layer--back::after {
   content: "";
   position: absolute;
   top: 0;
@@ -90,25 +90,25 @@
   background: var(--aw-border-light);
 }
 
-.aw-project-skill-folder__layer--paper-rear,
-.aw-project-skill-folder__layer--paper-front {
+.aw-folder__layer--paper-rear,
+.aw-folder__layer--paper-front {
   overflow: hidden;
   border-radius: var(--aw-radius-sm);
 }
 
-.aw-project-skill-folder__layer--paper-rear {
+.aw-folder__layer--paper-rear {
   inset: 23px 9px 12px 17px;
   background: color-mix(in srgb, var(--aw-surface-panel) 72%, var(--aw-surface-raised));
   transform: translate3d(5px, 1px, -14px) rotateZ(0.3deg);
 }
 
-.aw-project-skill-folder__layer--paper-front {
+.aw-folder__layer--paper-front {
   inset: 29px 7px 10px 12px;
   background: var(--aw-surface-raised, var(--aw-bg-white));
   transform: translate3d(3px, 0, -5px) rotateZ(-0.2deg);
 }
 
-.aw-project-skill-folder__sheet-lines {
+.aw-folder__sheet-lines {
   position: absolute;
   top: 24px;
   right: 18px;
@@ -125,7 +125,7 @@
   );
 }
 
-.aw-project-skill-folder__face {
+.aw-folder__face {
   inset: 45px 0 0;
   overflow: hidden;
   padding: 16px 16px 15px;
@@ -135,7 +135,7 @@
   transform: translate3d(0, 0, 9px);
 }
 
-.aw-project-skill-folder__face::before {
+.aw-folder__face::before {
   content: "";
   position: absolute;
   top: 0;
@@ -150,7 +150,7 @@
   opacity: 0.72;
 }
 
-.aw-project-skill-folder__face::after {
+.aw-folder__face::after {
   content: "";
   position: absolute;
   top: 15px;
@@ -166,7 +166,7 @@
   pointer-events: none;
 }
 
-.aw-project-skill-folder__copy {
+.aw-folder__copy {
   position: absolute;
   right: 16px;
   bottom: 15px;
@@ -176,14 +176,14 @@
   min-width: 0;
 }
 
-.aw-project-skill-folder__name,
-.aw-project-skill-folder__count {
+.aw-folder__name,
+.aw-folder__count {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.aw-project-skill-folder__name {
+.aw-folder__name {
   color: var(--aw-text-primary);
   font-size: var(--aw-font-size-xs);
   line-height: var(--aw-line-height-xs);
@@ -191,96 +191,96 @@
   letter-spacing: 0.01em;
 }
 
-.aw-project-skill-folder__count {
+.aw-folder__count {
   color: var(--aw-text-tertiary);
   font-size: var(--aw-font-size-xs);
   line-height: var(--aw-line-height-xs);
   font-weight: var(--aw-font-weight-regular);
 }
 
-.aw-project-skill-folder:hover .aw-project-skill-folder__stage,
-.aw-project-skill-folder:focus-visible .aw-project-skill-folder__stage,
-.aw-project-skill-folder[data-open="true"] .aw-project-skill-folder__stage {
-  transform: scale(var(--aw-project-skill-folder-scale)) translate3d(-2px, -8px, 0) rotateX(-3deg) rotateY(8deg) rotateZ(-1deg);
+.aw-folder:hover .aw-folder__stage,
+.aw-folder:focus-visible .aw-folder__stage,
+.aw-folder[data-open="true"] .aw-folder__stage {
+  transform: scale(var(--aw-folder-scale)) translate3d(-2px, -8px, 0) rotateX(-3deg) rotateY(8deg) rotateZ(-1deg);
 }
 
-.aw-project-skill-folder:hover .aw-project-skill-folder__layer--back,
-.aw-project-skill-folder:focus-visible .aw-project-skill-folder__layer--back,
-.aw-project-skill-folder[data-open="true"] .aw-project-skill-folder__layer--back {
+.aw-folder:hover .aw-folder__layer--back,
+.aw-folder:focus-visible .aw-folder__layer--back,
+.aw-folder[data-open="true"] .aw-folder__layer--back {
   border-color: var(--aw-border-control-hover);
   transform: translate3d(12px, -3px, -22px) rotateZ(2.5deg);
 }
 
-.aw-project-skill-folder:hover .aw-project-skill-folder__layer--back::before,
-.aw-project-skill-folder:focus-visible .aw-project-skill-folder__layer--back::before,
-.aw-project-skill-folder[data-open="true"] .aw-project-skill-folder__layer--back::before {
+.aw-folder:hover .aw-folder__layer--back::before,
+.aw-folder:focus-visible .aw-folder__layer--back::before,
+.aw-folder[data-open="true"] .aw-folder__layer--back::before {
   border-color: var(--aw-border-control-hover);
 }
 
-.aw-project-skill-folder:hover .aw-project-skill-folder__layer--paper-rear,
-.aw-project-skill-folder:focus-visible .aw-project-skill-folder__layer--paper-rear,
-.aw-project-skill-folder[data-open="true"] .aw-project-skill-folder__layer--paper-rear {
+.aw-folder:hover .aw-folder__layer--paper-rear,
+.aw-folder:focus-visible .aw-folder__layer--paper-rear,
+.aw-folder[data-open="true"] .aw-folder__layer--paper-rear {
   border-color: var(--aw-border-control-hover);
   transform: translate3d(24px, -6px, -12px) rotateZ(4deg);
 }
 
-.aw-project-skill-folder:hover .aw-project-skill-folder__layer--paper-front,
-.aw-project-skill-folder:focus-visible .aw-project-skill-folder__layer--paper-front,
-.aw-project-skill-folder[data-open="true"] .aw-project-skill-folder__layer--paper-front {
+.aw-folder:hover .aw-folder__layer--paper-front,
+.aw-folder:focus-visible .aw-folder__layer--paper-front,
+.aw-folder[data-open="true"] .aw-folder__layer--paper-front {
   border-color: var(--aw-border-control-hover);
   transform: translate3d(38px, 1px, -3px) rotateZ(6deg);
 }
 
-.aw-project-skill-folder:hover .aw-project-skill-folder__face,
-.aw-project-skill-folder:focus-visible .aw-project-skill-folder__face,
-.aw-project-skill-folder[data-open="true"] .aw-project-skill-folder__face {
+.aw-folder:hover .aw-folder__face,
+.aw-folder:focus-visible .aw-folder__face,
+.aw-folder[data-open="true"] .aw-folder__face {
   border-color: var(--aw-border-control-hover);
   box-shadow: var(--aw-shadow-card-hover);
   transform: translate3d(-5px, 1px, 15px) rotateY(-4deg) rotateZ(-0.7deg);
 }
 
-.aw-project-skill-folder:focus-visible {
+.aw-folder:focus-visible {
   outline: none;
 }
 
-.aw-project-skill-folder:focus-visible .aw-project-skill-folder__face {
+.aw-folder:focus-visible .aw-folder__face {
   box-shadow: var(--aw-shadow-card-hover), var(--aw-shadow-focus);
 }
 
-.aw-project-skill-folder:active .aw-project-skill-folder__stage {
-  transform: scale(var(--aw-project-skill-folder-scale)) translate3d(-1px, -3px, 0) rotateX(-1deg) rotateY(4deg) rotateZ(-0.5deg);
+.aw-folder:active .aw-folder__stage {
+  transform: scale(var(--aw-folder-scale)) translate3d(-1px, -3px, 0) rotateX(-1deg) rotateY(4deg) rotateZ(-0.5deg);
   transition-duration: 120ms;
 }
 
-.aw-project-skill-folder:disabled {
+.aw-folder:disabled {
   cursor: not-allowed;
   opacity: 0.46;
 }
 
-.aw-project-skill-folder:disabled .aw-project-skill-folder__stage {
-  transform: scale(var(--aw-project-skill-folder-scale));
+.aw-folder:disabled .aw-folder__stage {
+  transform: scale(var(--aw-folder-scale));
 }
 
-.aw-project-skill-folder:disabled .aw-project-skill-folder__layer,
-.aw-project-skill-folder:disabled .aw-project-skill-folder__face {
+.aw-folder:disabled .aw-folder__layer,
+.aw-folder:disabled .aw-folder__face {
   transform: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .aw-project-skill-folder:hover .aw-project-skill-folder__stage,
-  .aw-project-skill-folder:focus-visible .aw-project-skill-folder__stage,
-  .aw-project-skill-folder:active .aw-project-skill-folder__stage {
-    transform: scale(var(--aw-project-skill-folder-scale)) translate3d(0, -3px, 0);
+  .aw-folder:hover .aw-folder__stage,
+  .aw-folder:focus-visible .aw-folder__stage,
+  .aw-folder:active .aw-folder__stage {
+    transform: scale(var(--aw-folder-scale)) translate3d(0, -3px, 0);
   }
 
-  .aw-project-skill-folder:hover .aw-project-skill-folder__layer--back,
-  .aw-project-skill-folder:focus-visible .aw-project-skill-folder__layer--back,
-  .aw-project-skill-folder:hover .aw-project-skill-folder__layer--paper-rear,
-  .aw-project-skill-folder:focus-visible .aw-project-skill-folder__layer--paper-rear,
-  .aw-project-skill-folder:hover .aw-project-skill-folder__layer--paper-front,
-  .aw-project-skill-folder:focus-visible .aw-project-skill-folder__layer--paper-front,
-  .aw-project-skill-folder:hover .aw-project-skill-folder__face,
-  .aw-project-skill-folder:focus-visible .aw-project-skill-folder__face {
+  .aw-folder:hover .aw-folder__layer--back,
+  .aw-folder:focus-visible .aw-folder__layer--back,
+  .aw-folder:hover .aw-folder__layer--paper-rear,
+  .aw-folder:focus-visible .aw-folder__layer--paper-rear,
+  .aw-folder:hover .aw-folder__layer--paper-front,
+  .aw-folder:focus-visible .aw-folder__layer--paper-front,
+  .aw-folder:hover .aw-folder__face,
+  .aw-folder:focus-visible .aw-folder__face {
     transform: none;
   }
 }

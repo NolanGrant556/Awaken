@@ -1,0 +1,14 @@
+.aw-folder-demo__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(226px, 1fr));
+  align-items: start;
+  gap: var(--aw-space-7);
+}
+
+.aw-folder-demo__state {
+  display: grid;
+  justify-items: center;
+  gap: var(--aw-space-3);
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+}

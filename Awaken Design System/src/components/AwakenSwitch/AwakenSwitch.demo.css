@@ -1,0 +1,31 @@
+.aw-switch-demo__interactive,
+.aw-switch-demo__states article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aw-space-8);
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+}
+
+.aw-switch-demo__interactive {
+  max-width: 300px;
+  margin-bottom: var(--aw-space-8);
+  padding: var(--aw-space-7);
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-panel);
+}
+
+.aw-switch-demo__states {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--aw-space-5);
+}
+
+.aw-switch-demo__states article {
+  padding: var(--aw-space-6);
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-raised);
+}

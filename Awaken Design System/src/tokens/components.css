@@ -2372,7 +2372,7 @@ button.tool-trace-line:focus-visible {
     max-height: none;
     overflow: auto;
     border-left: 1px solid var(--aw-border-light);
-    box-shadow: -18px 0 42px rgba(28, 25, 23, 0.1);
+    box-shadow: -18px 0 42px rgba(29, 29, 31, 0.1);
   }
 
   .aw-workbench-shell-inspector-collapsed .aw-workbench-inspector {
@@ -2442,39 +2442,6 @@ button.tool-trace-line:focus-visible {
   background: color-mix(in srgb, var(--aw-warning) 18%, var(--aw-bg-white));
   color: color-mix(in srgb, var(--aw-warning) 74%, var(--aw-text-primary));
 }
-
-.mcp-toggle-switch {
-  position: relative;
-  width: 40px;
-  height: 22px;
-  padding: 0;
-  border: 0;
-  border-radius: 999px;
-  background: var(--aw-border-main);
-  cursor: pointer;
-  transition:
-    background-color var(--aw-transition-fast),
-    opacity var(--aw-transition-fast);
-}
-
-.mcp-toggle-switch-on { background: var(--aw-success); }
-.mcp-toggle-switch-off { background: var(--aw-error); }
-
-.mcp-toggle-switch-thumb {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--aw-bg-white);
-  box-shadow: var(--aw-shadow-control);
-  transition: transform var(--aw-transition-fast);
-}
-
-.mcp-toggle-switch-on .mcp-toggle-switch-thumb { transform: translateX(18px); }
-.mcp-toggle-switch:disabled { cursor: default; opacity: 0.45; }
-.mcp-toggle-switch:focus-visible { outline: 2px solid var(--aw-focus-ring); outline-offset: 2px; }
 
 /* Preview chrome helpers */
 .preview-root {

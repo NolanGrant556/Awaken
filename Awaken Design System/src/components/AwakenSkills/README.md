@@ -6,8 +6,8 @@ Skills 管理页的 UI-only 组合组件。Gallery 中只注册“「技能」�
 
 - `AwakenSkills`：受控的四视图组合面板，只拥有来源切换、搜索投影和组合布局。
 - `AwakenSkillCard`：独立目录中的统一 Skill 卡片；卡片主体触发预览，右侧开关独立触发启停。
-- `AwakenSkillToggle`：独立目录中的受控 Skill switch。
-- `AwakenProjectSkillFolder`：独立目录中的项目入口，项目窗口打开期间通过 `open` 保持展开。
+- `AwakenSwitch`：原子目录中的受控 switch；Skill 卡片通过兼容外壳消费同一视觉实现。
+- `AwakenFolder`：原子目录中的项目入口，项目窗口打开期间通过 `open` 保持展开。
 - `AwakenProjectSkillsDialog`：独立目录中的项目 Skills 窗口，组合统一卡片列表。
 - `AwakenSkillPreviewDialog`：独立目录中的只读 `SKILL.md` 阅读窗口，展示原始 YAML frontmatter 与安全 Markdown 正文。
 

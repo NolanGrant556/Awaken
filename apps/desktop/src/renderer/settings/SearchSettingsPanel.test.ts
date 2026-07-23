@@ -14,7 +14,7 @@ describe("SearchSettingsPanel", () => {
 
     expect(html).toContain("Exa");
     expect(html).toContain("Tavily");
-    expect(html).toContain("mcp-toggle-switch");
+    expect(html).toContain("aw-switch");
     expect(html.match(/测试连接/g)).toHaveLength(2);
     expect(html).toContain("免 key");
     expect(html).not.toContain("API key");

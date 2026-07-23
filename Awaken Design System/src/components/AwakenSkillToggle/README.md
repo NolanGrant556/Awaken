@@ -1,6 +1,6 @@
 # AwakenSkillToggle
 
-Skill 启停状态的受控 switch。组件只展示状态并通过 `onCheckedChange` 请求变更，不调用 runtime 或持久化接口。
+Skill 启停状态的兼容语义外壳，视觉和交互统一委托给原子组件 `AwakenSwitch`。组件只展示状态并通过 `onCheckedChange` 请求变更，不调用 runtime 或持久化接口。
 
 ## Props
 

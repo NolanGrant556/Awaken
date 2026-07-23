@@ -9,16 +9,23 @@ import (
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
+	"strings"
 	"time"
 
 	"awaken/src/runtime"
+
+	"github.com/google/uuid"
 )
 
 const (
 	runtimeLockTTL       = 30 * time.Second
 	manifestPollInterval = 200 * time.Millisecond
-	leaseOwnerID         = "awaken-acp-bridge"
+	lockOwnerID          = "awaken-acp-launcher"
 )
+
+// ErrDesktopBinaryNotFound is returned when the Desktop executable cannot be
+// resolved next to the awaken-acp binary.
+var ErrDesktopBinaryNotFound = errors.New("desktop binary not found")
 
 // manifestWaitTimeout is the budget for waiting for a spawned Core to publish
 // its manifest. Tests override it to avoid long sleeps.
@@ -39,6 +46,7 @@ type LaunchResult struct {
 	ControlToken string
 	BaseURL      string
 	LeaseID      string
+	OwnerID      string
 	OwnerMode    string
 	// Close releases the lease and any spawned headless Core. It is safe to
 	// call multiple times.
@@ -47,12 +55,12 @@ type LaunchResult struct {
 
 // Launcher discovers or starts a managed awaken-core.
 type Launcher struct {
-	UserDataDir       string
-	Strategy          StartupStrategy
-	CoreBinaryPath    string
-	IdentityParam     string // Optional explicit identity for dev/tests.
-	SpawnDesktopFunc  func(ctx context.Context, userDataDir string) error
-	SpawnCoreFunc     func(ctx context.Context, userDataDir, coreBinaryPath string) (*exec.Cmd, error)
+	UserDataDir      string
+	Strategy         StartupStrategy
+	CoreBinaryPath   string
+	IdentityParam    string // Optional explicit identity for dev/tests.
+	SpawnDesktopFunc func(ctx context.Context, userDataDir string) error
+	SpawnCoreFunc    func(ctx context.Context, userDataDir, coreBinaryPath string) (*exec.Cmd, error)
 }
 
 // Launch follows the documented state machine: validate manifest, attach if
@@ -84,7 +92,7 @@ func (l *Launcher) Launch(ctx context.Context) (*LaunchResult, error) {
 	}
 
 	// Acquire the runtime lock before spawning.
-	lock, err := runtime.AcquireRuntimeLock(l.UserDataDir, leaseOwnerID, runtimeLockTTL)
+	lock, err := runtime.AcquireRuntimeLock(l.UserDataDir, lockOwnerID, runtimeLockTTL)
 	if err != nil {
 		return nil, fmt.Errorf("acquire runtime lock: %w", err)
 	}
@@ -125,14 +133,16 @@ func (l *Launcher) Launch(ctx context.Context) (*LaunchResult, error) {
 	}
 
 	// Wrap close to also terminate a headless Core we spawned.
-	originalClose := res.Close
-	res.Close = func() error {
-		_ = originalClose()
-		if spawned != nil && spawned.Process != nil {
-			_ = spawned.Process.Kill()
-			_ = spawned.Wait()
+	if l.Strategy == StartupCore && spawned != nil {
+		originalClose := res.Close
+		res.Close = func() error {
+			_ = originalClose()
+			if spawned.Process != nil {
+				_ = spawned.Process.Kill()
+				_ = spawned.Wait()
+			}
+			return nil
 		}
-		return nil
 	}
 	return res, nil
 }
@@ -166,7 +176,12 @@ func (l *Launcher) waitForManifest(ctx context.Context, expectedRuntimeIdentity 
 }
 
 func (l *Launcher) attach(ctx context.Context, manifest *runtime.RuntimeIdentity) (*LaunchResult, error) {
-	lease, err := createLease(ctx, manifest.BaseURL, manifest.ControlToken, leaseOwnerID)
+	client := NewCoreClient(manifest.BaseURL, manifest.ControlToken)
+	if err := client.VerifyIdentity(ctx, manifest); err != nil {
+		return nil, fmt.Errorf("verify identity: %w", err)
+	}
+	ownerID := uuid.NewString()
+	leaseID, _, err := client.CreateLease(ctx, ownerID)
 	if err != nil {
 		return nil, fmt.Errorf("create lease: %w", err)
 	}
@@ -174,10 +189,11 @@ func (l *Launcher) attach(ctx context.Context, manifest *runtime.RuntimeIdentity
 		Identity:     manifest,
 		ControlToken: manifest.ControlToken,
 		BaseURL:      manifest.BaseURL,
-		LeaseID:      lease.LeaseID,
+		LeaseID:      leaseID,
+		OwnerID:      ownerID,
 		OwnerMode:    manifest.OwnerMode,
 		Close: func() error {
-			return releaseLease(manifest.BaseURL, manifest.ControlToken, lease.LeaseID)
+			return client.ReleaseLease(context.Background(), leaseID)
 		},
 	}, nil
 }
@@ -209,42 +225,8 @@ func ComputeRuntimeIdentity(userDataDir string) string {
 	return runtime.ComputeRuntimeIdentity(userDataDir)
 }
 
-var (
-	// createLeaseHook and releaseLeaseHook are swappable for tests. Production
-	// code leaves them nil; nil means use the default placeholder behavior.
-	createLeaseHook  func(ctx context.Context, baseURL, token, ownerID string) (*runtimeLease, error)
-	releaseLeaseHook func(baseURL, token, leaseID string) error
-)
-
-func createLease(ctx context.Context, baseURL, token, ownerID string) (*runtimeLease, error) {
-	if createLeaseHook != nil {
-		return createLeaseHook(ctx, baseURL, token, ownerID)
-	}
-	// Placeholder: real HTTP call is implemented once the control client is
-	// wired in Stage 5. For Stage 4 tests use a fake transport.
-	_ = ctx
-	_ = baseURL
-	_ = token
-	return &runtimeLease{LeaseID: "lease_placeholder", OwnerID: ownerID}, nil
-}
-
-func releaseLease(baseURL, token, leaseID string) error {
-	if releaseLeaseHook != nil {
-		return releaseLeaseHook(baseURL, token, leaseID)
-	}
-	_ = baseURL
-	_ = token
-	_ = leaseID
-	return nil
-}
-
-type runtimeLease struct {
-	LeaseID string
-	OwnerID string
-}
-
 // DefaultUserDataDir returns the packaged identity userData directory. On
-// Windows it uses %LOCALAPPDATA%\@awaken\desktop; on macOS
+// Windows it uses %APPDATA%\@awaken\desktop; on macOS
 // ~/Library/Application Support/@awaken/desktop; on Linux
 // ~/.config/@awaken/desktop. The dev variant uses @awaken-dev.
 func DefaultUserDataDir(dev bool) (string, error) {
@@ -256,11 +238,11 @@ func DefaultUserDataDir(dev bool) (string, error) {
 	}
 	switch goruntime.GOOS {
 	case "windows":
-		localAppData := os.Getenv("LOCALAPPDATA")
-		if localAppData == "" {
-			return "", errors.New("LOCALAPPDATA not set")
+		appData := os.Getenv("APPDATA")
+		if appData == "" {
+			return "", errors.New("APPDATA not set")
 		}
-		return filepath.Join(append([]string{localAppData}, segments...)...), nil
+		return filepath.Join(append([]string{appData}, segments...)...), nil
 	case "darwin":
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -277,19 +259,49 @@ func DefaultUserDataDir(dev bool) (string, error) {
 }
 
 func defaultSpawnDesktop(ctx context.Context, userDataDir string) error {
-	_ = ctx
-	return fmt.Errorf("desktop spawn not implemented on %s", goruntime.GOOS)
+	desktopPath := os.Getenv("AWAKEN_DESKTOP_PATH")
+	if desktopPath == "" {
+		exe, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("locate awaken-acp binary: %w", err)
+		}
+		exeDir := filepath.Dir(exe)
+		switch goruntime.GOOS {
+		case "windows":
+			desktopPath = filepath.Join(exeDir, "Awaken", "Awaken.exe")
+		case "darwin":
+			desktopPath = filepath.Join(exeDir, "Awaken.app")
+		default:
+			desktopPath = filepath.Join(exeDir, "Awaken", "awaken")
+		}
+	}
+	if _, err := os.Stat(desktopPath); err != nil {
+		return fmt.Errorf("%w: %s", ErrDesktopBinaryNotFound, desktopPath)
+	}
+
+	program := desktopPath
+	var args []string
+	if goruntime.GOOS == "darwin" && strings.HasSuffix(desktopPath, ".app") {
+		program = "open"
+		args = []string{"-a", desktopPath}
+	}
+
+	cmd := exec.CommandContext(ctx, program, args...)
+	cmd.Env = append(os.Environ(), "AWAKEN_USER_DATA_DIR="+userDataDir)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start desktop: %w", err)
+	}
+	return nil
 }
 
 func defaultSpawnCore(ctx context.Context, userDataDir, coreBinaryPath string) (*exec.Cmd, error) {
 	if coreBinaryPath == "" {
 		return nil, errors.New("core binary path is required for --startup=core")
 	}
-	cmd := exec.CommandContext(ctx, coreBinaryPath)
-	cmd.Env = append(os.Environ(),
-		"AWAKEN_USER_DATA_DIR="+userDataDir,
-		"AWAKEN_OWNER_MODE=headless",
-	)
+	cmd := exec.CommandContext(ctx, coreBinaryPath, "--owner-mode=headless")
+	cmd.Env = append(os.Environ(), "AWAKEN_USER_DATA_DIR="+userDataDir)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 
 	acpsdk "github.com/coder/acp-go-sdk"
@@ -14,11 +15,13 @@ import (
 // stdio ACP agent by delegating session lifecycle and prompt execution to a
 // managed awaken-core via its HTTP control routes.
 type Agent struct {
-	CoreClient *CoreClient
-	AgentInfo  acpsdk.Implementation
-	mu         sync.RWMutex
-	sessions   map[string]*bridgeSession
-	conn       *acpsdk.AgentSideConnection
+	CoreClient    *CoreClient
+	AgentInfo     acpsdk.Implementation
+	mu            sync.RWMutex
+	sessions      map[string]*bridgeSession
+	conn          *acpsdk.AgentSideConnection
+	clientName    string
+	clientVersion string
 }
 
 // NewAgent creates an agent bound to a Core client.
@@ -78,6 +81,12 @@ func (a *Agent) Initialize(ctx context.Context, params acpsdk.InitializeRequest)
 	if params.ProtocolVersion != acpsdk.ProtocolVersionNumber {
 		return acpsdk.InitializeResponse{}, fmt.Errorf("unsupported protocol version %d", params.ProtocolVersion)
 	}
+	if params.ClientInfo != nil {
+		a.mu.Lock()
+		a.clientName = params.ClientInfo.Name
+		a.clientVersion = params.ClientInfo.Version
+		a.mu.Unlock()
+	}
 	return acpsdk.InitializeResponse{
 		ProtocolVersion: acpsdk.ProtocolVersionNumber,
 		AgentInfo:       &a.AgentInfo,
@@ -107,10 +116,13 @@ func (a *Agent) Cancel(ctx context.Context, params acpsdk.CancelNotification) er
 	if !ok {
 		return nil
 	}
-	if session.currentRunID == "" {
+	session.mu.Lock()
+	runID := session.currentRunID
+	session.mu.Unlock()
+	if runID == "" {
 		return nil
 	}
-	return a.CoreClient.CancelRun(ctx, session.currentRunID)
+	return a.CoreClient.CancelRunControl(ctx, session.mapping.ACPSessionID, runID)
 }
 
 // CloseSession closes a session and cancels any active run.
@@ -149,23 +161,42 @@ func (a *Agent) NewSession(ctx context.Context, params acpsdk.NewSessionRequest)
 	if params.Cwd == "" {
 		return acpsdk.NewSessionResponse{}, acpsdk.NewInvalidParams(map[string]any{"field": "cwd", "error": "cwd is required"})
 	}
-	visibility := "visible"
-	if meta, ok := params.Meta["awaken_visibility"].(string); ok && meta != "" {
-		if meta != "visible" && meta != "ephemeral" {
-			return acpsdk.NewSessionResponse{}, acpsdk.NewInvalidParams(map[string]any{"field": "visibility", "error": "visibility must be visible or ephemeral"})
-		}
-		visibility = meta
+	if len(params.AdditionalDirectories) > 0 {
+		return acpsdk.NewSessionResponse{}, acpsdk.NewInvalidParams(map[string]any{"field": "additionalDirectories", "error": "additional workspace roots are not supported"})
 	}
-	clientName := ""
-	clientVersion := ""
+	if len(params.McpServers) > 0 {
+		return acpsdk.NewSessionResponse{}, acpsdk.NewInvalidParams(map[string]any{"field": "mcpServers", "error": "MCP servers are not supported"})
+	}
+
+	visibility := "visible"
 	if params.Meta != nil {
-		if v, ok := params.Meta["client_name"].(string); ok {
+		if v, ok := params.Meta["awaken.ephemeral"]; ok {
+			switch val := v.(type) {
+			case bool:
+				if val {
+					visibility = "ephemeral"
+				}
+			case string:
+				if val == "true" {
+					visibility = "ephemeral"
+				}
+			}
+		}
+	}
+
+	a.mu.RLock()
+	clientName := a.clientName
+	clientVersion := a.clientVersion
+	a.mu.RUnlock()
+	if params.Meta != nil {
+		if v, ok := params.Meta["client_name"].(string); ok && v != "" {
 			clientName = v
 		}
-		if v, ok := params.Meta["client_version"].(string); ok {
+		if v, ok := params.Meta["client_version"].(string); ok && v != "" {
 			clientVersion = v
 		}
 	}
+
 	acpSessionID := newACPSessionID()
 	mapping, err := a.CoreClient.CreateACPSession(ctx, acpSessionID, params.Cwd, visibility, clientName, clientVersion)
 	if err != nil {
@@ -206,13 +237,14 @@ func (a *Agent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (acpsdk
 	if err != nil {
 		return acpsdk.PromptResponse{}, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
 	}
-	if err := session.Prompt(ctx, text); err != nil {
+	stopReason, err := session.Prompt(ctx, text)
+	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonCancelled}, nil
 		}
 		return acpsdk.PromptResponse{}, err
 	}
-	return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}, nil
+	return acpsdk.PromptResponse{StopReason: stopReason}, nil
 }
 
 // ResumeSession is not supported.
@@ -248,5 +280,5 @@ func extractTextPrompt(blocks []acpsdk.ContentBlock) (string, error) {
 	if len(parts) == 0 {
 		return "", errors.New("no text content found")
 	}
-	return parts[0], nil
+	return strings.Join(parts, "\n"), nil
 }

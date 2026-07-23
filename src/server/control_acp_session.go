@@ -74,6 +74,8 @@ func (h *acpSessionControlHandlers) handleCreateACPSession(w http.ResponseWriter
 		"thread_id":      mapping.ThreadID,
 		"canonical_cwd":  mapping.CanonicalCWD,
 		"visibility":     mapping.Visibility,
+		"client_name":    mapping.ClientName,
+		"client_version": mapping.ClientVersion,
 	})
 }
 
@@ -99,6 +101,8 @@ func (h *acpSessionControlHandlers) handleGetACPSession(w http.ResponseWriter, r
 		"current_run_id": mapping.CurrentRunID,
 		"canonical_cwd":  mapping.CanonicalCWD,
 		"visibility":     mapping.Visibility,
+		"client_name":    mapping.ClientName,
+		"client_version": mapping.ClientVersion,
 	})
 }
 

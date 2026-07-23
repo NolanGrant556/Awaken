@@ -2,7 +2,7 @@
 
 ## 1. 文档状态
 
-本文是 ACP（Agent Client Protocol）能力的目标设计与可执行实施方案。Awaken 作为 ACP Client 的 Phase 0–4 已在本仓库实现；Phase 5（Awaken 作为 ACP Agent 的 stdio bridge）已实现核心链路。
+本文是 ACP（Agent Client Protocol）能力的目标设计与可执行实施方案。Awaken 作为 ACP Client 的 Phase 0–4 已在本仓库实现；Phase 5（Awaken 作为 ACP Agent 的 stdio bridge）已实现核心生产路径，真实第三方 client 端到端验收与跨 Core 重启恢复仍为已知缺口。
 
 - 当前支持：
   - `github.com/coder/acp-go-sdk@v0.13.5` 已固定并封装在 `src/acp/protocol`，SDK 类型不越界；
@@ -18,13 +18,17 @@
   - 新增 AI 可调用工具 `configure_acp_runner`，用于在用户级 ACP 配置中增删改 runner，不经过 TaskScope 文件桥，不触碰项目级路径。
 - 当前支持（Phase 5）：
   - `cmd/awaken-acp` 入口与 `src/acp/agentbridge` 实现 stdio ACP Agent；
-  - launcher 支持 `--startup=desktop|core|fail`，复用或受管启动 awaken-core，获取 control token lease；
+  - launcher 支持 `--startup=desktop|core|fail`，复用或受管启动 awaken-core，通过真实 HTTP control routes 创建/heartbeat/release lease；
   - ACP `initialize`、`session/new`、`session/prompt`、`session/cancel`、`session/close` 映射到 Core project/thread/run；
-  - Core 运行时事件投影为 ACP `session/update`（text delta、tool call/update、permission request）；
-  - 权限选择异步回写 Core 外部交互；`session/cancel` 传播到当前 run；stdio EOF/signal 触发 5 秒有界清理。
+  - Core 运行时事件经 AG-UI 常量正确投影为 ACP `session/update`（text delta、tool call/update、permission request），RUN_ERROR 不再伪装成成功；
+  - 权限选择通过 `/v1/control/acp/sessions/{session_id}/runs/{run_id}/permissions/{interaction_id}/resolve` 回写到 ACP permission awaiter，支持 `allow_once/allow_always/reject_once/reject_always`；
+  - `session/cancel`、stdio EOF/signal 通过 `SetCurrentRun`/`CancelRun` 可靠传播到当前 Core run，并触发 5 秒有界清理；
+  - Desktop 在启动前发现并 attach 已有 headless Core，避免重复 spawn；manifest 使用 CAS 与 instance-owned 删除防止多 Core 竞争；
+  - bridge 的 run/event/cancel/permission 全部走 authenticated `/v1/control/acp/sessions/...` 控制面。
 - 当前不支持：
   - 真实 runner（Codex、Claude Code、OpenCode、Qwen Code）的端到端 smoke 与 Desktop 视觉验收（依赖本机安装与 Windows Desktop 环境，本次未执行）；
   - 跨 Core 重启的 ACP 会话恢复（活跃 session 在重启后标记为 interrupted，不重放外部任务）；
+  - SSE cursor 重连、长 turn 中 ACP live event 的独立 durable append；
   - `fs`/`terminal` client capability、image/audio/resource prompt block、任意 ACP extension method；
   - ACP compatibility suite 与 Zed 等第三方 client 的正式验收（需外部 client 环境）。
 - 已确认的目标：先让 Awaken 作为 ACP Client 委派本地外部 Agent；双向互操作中的“Awaken 作为 ACP Agent”在出站链路稳定后实施。

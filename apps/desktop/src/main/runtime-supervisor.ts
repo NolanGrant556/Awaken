@@ -15,7 +15,12 @@ import { RuntimeControlClient, type RuntimeManifest } from "./runtime-control.js
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export type SupervisorStatus =
-  "stopped" | "starting" | "running" | "crashed" | "stopping";
+  | "stopped"
+  | "starting"
+  | "running"
+  | "external-attached"
+  | "crashed"
+  | "stopping";
 
 export interface RuntimeLogEntry {
   id: number;
@@ -49,6 +54,7 @@ export interface RuntimeSupervisorDeps {
   allocatePort?: () => Promise<number>;
   loginEnvironmentTimeoutMs?: number;
   now?: () => number;
+  readManifest?: (userDataDir: string) => Promise<RuntimeManifest | undefined>;
   resolveBinaryPath?: () => string;
   resolveLoginUserEnvironment?: ResolveLoginUserEnvironment;
   resolveProductEnvironment?: ResolveProductEnvironment;
@@ -303,6 +309,15 @@ async function waitForHealth(
   throw new Error(`runtime did not become healthy within ${timeoutMs}ms`);
 }
 
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export class RuntimeSupervisor {
   private options: SupervisorOptions;
   private deps: Required<RuntimeSupervisorDeps>;
@@ -334,6 +349,9 @@ export class RuntimeSupervisor {
       allocatePort: deps.allocatePort ?? allocatePort,
       loginEnvironmentTimeoutMs,
       now: deps.now ?? Date.now,
+      readManifest:
+        deps.readManifest ??
+        (async (userDataDir) => RuntimeControlClient.readManifest(userDataDir)),
       resolveBinaryPath: deps.resolveBinaryPath ?? resolveBinaryPath,
       resolveLoginUserEnvironment:
         deps.resolveLoginUserEnvironment ??
@@ -369,6 +387,38 @@ export class RuntimeSupervisor {
     const productEnvironment = await this.deps.resolveProductEnvironment();
     if (this.startGeneration !== myGen) {
       return this.getStatus();
+    }
+
+    const userDataDir = app.getPath("userData");
+    try {
+      const manifest = await this.deps.readManifest(userDataDir);
+      if (manifest && isPidAlive(manifest.pid)) {
+        const expectedRuntimeIdentity = `packaged:${this.digestUserDataDir(userDataDir)}`;
+        const client = new RuntimeControlClient(manifest);
+        await client.verifyIdentity(expectedRuntimeIdentity);
+        this.runtimeBaseUrl = manifest.base_url;
+        const ownerID = `desktop-${userDataDir}`;
+        if (manifest.owner_mode === "desktop") {
+          this.appendLog({
+            timestamp: this.deps.now(),
+            stream: "stderr",
+            line: "attaching to existing desktop-owned Core instance",
+          });
+        }
+        await client.createLease(ownerID, "desktop");
+        this.controlClient = client;
+        this.runtimeIdentity = manifest.runtime_identity;
+        this.setStatus("external-attached");
+        return this.getStatus();
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.appendLog({
+        timestamp: this.deps.now(),
+        stream: "stderr",
+        line: `existing manifest attach failed: ${message}`,
+      });
+      // Fall through to spawn a new Core.
     }
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -481,6 +531,12 @@ export class RuntimeSupervisor {
     // Invalidate any in-flight start() loop so it stops spawning/retrying and
     // does not overwrite the stopped state we are about to set.
     this.startGeneration++;
+    if (this.status === "external-attached") {
+      this.runtimeBaseUrl = undefined;
+      await this.releaseControlLease();
+      this.setStatus("stopped");
+      return;
+    }
     if (
       !this.child ||
       this.child.exitCode !== null ||
@@ -553,7 +609,7 @@ export class RuntimeSupervisor {
     extra?: { exitCode?: number; errorMessage?: string },
   ): void {
     this.status = status;
-    if (status === "running") {
+    if (status === "running" || status === "external-attached") {
       this.statusInfo = { status, runtimeBaseUrl: this.runtimeBaseUrl };
     } else {
       this.statusInfo = { status, ...extra };

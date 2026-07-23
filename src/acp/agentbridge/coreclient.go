@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -25,6 +26,7 @@ type CoreClient struct {
 	BaseURL      string
 	ControlToken string
 	HTTPClient   *http.Client
+	SSEClient    *http.Client
 }
 
 // NewCoreClient creates a client bound to a launched Core.
@@ -33,6 +35,12 @@ func NewCoreClient(baseURL, controlToken string) *CoreClient {
 		BaseURL:      strings.TrimRight(baseURL, "/"),
 		ControlToken: controlToken,
 		HTTPClient:   &http.Client{Timeout: 30 * time.Second},
+		SSEClient: &http.Client{
+			Timeout: 0,
+			Transport: &http.Transport{
+				DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
+			},
+		},
 	}
 }
 
@@ -144,11 +152,13 @@ func (c *CoreClient) HeartbeatLease(ctx context.Context, leaseID string) (time.T
 
 // ACPSessionMapping is the bridge-local view of a Core ACP session.
 type ACPSessionMapping struct {
-	ACPSessionID string `json:"acp_session_id"`
-	ProjectID    string `json:"project_id"`
-	ThreadID     string `json:"thread_id"`
-	CanonicalCWD string `json:"canonical_cwd"`
-	Visibility   string `json:"visibility"`
+	ACPSessionID  string `json:"acp_session_id"`
+	ProjectID     string `json:"project_id"`
+	ThreadID      string `json:"thread_id"`
+	CanonicalCWD  string `json:"canonical_cwd"`
+	Visibility    string `json:"visibility"`
+	ClientName    string `json:"client_name,omitempty"`
+	ClientVersion string `json:"client_version,omitempty"`
 }
 
 // CreateACPSession asks Core to map an ACP session to a project/thread.
@@ -326,7 +336,7 @@ func (c *CoreClient) StreamRunEvents(ctx context.Context, runID string, afterCur
 			return
 		}
 		req.Header.Set("Accept", "text/event-stream")
-		resp, err := c.HTTPClient.Do(req)
+		resp, err := c.SSEClient.Do(req)
 		if err != nil {
 			errCh <- err
 			return
@@ -352,6 +362,166 @@ func (c *CoreClient) StreamRunEvents(ctx context.Context, runID string, afterCur
 		}
 	}()
 	return out, errCh
+}
+
+// CreateRunForSession starts a run scoped to an ACP session via the control
+// route protected by the bridge control token.
+func (c *CoreClient) CreateRunForSession(ctx context.Context, sessionID, threadID, input, workspaceRoot string) (*Run, error) {
+	payload := map[string]string{
+		"thread_id":      threadID,
+		"input":          input,
+		"workspace_root": workspaceRoot,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	u := c.BaseURL + "/v1/control/acp/sessions/" + url.PathEscape(sessionID) + "/runs"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", c.authHeader())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("create run for session request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		return nil, fmt.Errorf("create run for session status %d", resp.StatusCode)
+	}
+	var run Run
+	if err := json.NewDecoder(resp.Body).Decode(&run); err != nil {
+		return nil, fmt.Errorf("decode run for session: %w", err)
+	}
+	return &run, nil
+}
+
+// SetCurrentRun records the active run for a session.
+func (c *CoreClient) SetCurrentRun(ctx context.Context, sessionID, runID string) error {
+	u := c.BaseURL + "/v1/control/acp/sessions/" + url.PathEscape(sessionID) + "/current-run/" + url.PathEscape(runID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", c.authHeader())
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("set current run request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("set current run status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// ClearCurrentRun removes the active run association for a session.
+func (c *CoreClient) ClearCurrentRun(ctx context.Context, sessionID string) error {
+	u := c.BaseURL + "/v1/control/acp/sessions/" + url.PathEscape(sessionID) + "/current-run"
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", c.authHeader())
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("clear current run request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("clear current run status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// StreamRunEventsControl reads the SSE event stream for a run via the control
+// route protected by the bridge control token.
+func (c *CoreClient) StreamRunEventsControl(ctx context.Context, sessionID, runID string, afterCursor uint64) (<-chan EventFrame, <-chan error) {
+	out := make(chan EventFrame)
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(out)
+		defer close(errCh)
+		u := c.BaseURL + "/v1/control/acp/sessions/" + url.PathEscape(sessionID) + "/runs/" + url.PathEscape(runID) + "/events?after_cursor=" + strconv.FormatUint(afterCursor, 10)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		req.Header.Set("Authorization", c.authHeader())
+		req.Header.Set("Accept", "text/event-stream")
+		resp, err := c.SSEClient.Do(req)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			errCh <- fmt.Errorf("event stream status %d", resp.StatusCode)
+			return
+		}
+		if err := readSSE(ctx, resp.Body, func(data []byte) error {
+			var frame agui.Event
+			if err := json.Unmarshal(data, &frame); err != nil {
+				return err
+			}
+			select {
+			case out <- frame:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}); err != nil && !errors.Is(err, context.Canceled) {
+			errCh <- err
+		}
+	}()
+	return out, errCh
+}
+
+// CancelRunControl cancels a run via the control route.
+func (c *CoreClient) CancelRunControl(ctx context.Context, sessionID, runID string) error {
+	u := c.BaseURL + "/v1/control/acp/sessions/" + url.PathEscape(sessionID) + "/runs/" + url.PathEscape(runID) + "/cancel"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", c.authHeader())
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("cancel run control request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotFound {
+		return fmt.Errorf("cancel run control status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// ResolveACPPermission resolves an ACP permission request via the control route.
+func (c *CoreClient) ResolveACPPermission(ctx context.Context, sessionID, runID, interactionID, optionID string, cancelled bool) error {
+	payload := map[string]any{"option_id": optionID, "cancelled": cancelled}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	u := c.BaseURL + "/v1/control/acp/sessions/" + url.PathEscape(sessionID) + "/runs/" + url.PathEscape(runID) + "/permissions/" + url.PathEscape(interactionID) + "/resolve"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", c.authHeader())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("resolve acp permission request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("resolve acp permission status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 func readSSE(ctx context.Context, r io.Reader, onData func([]byte) error) error {

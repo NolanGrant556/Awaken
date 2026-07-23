@@ -1,4 +1,5 @@
 export { AwakenAccountDemo } from "../src/components/AwakenAccount/AwakenAccount.demo";
+export { AwakenAppearanceSettingsDemo } from "../src/components/AwakenAppearanceSettings/AwakenAppearanceSettings.demo";
 export { AwakenAppShellDemo } from "../src/components/AwakenAppShell/AwakenAppShell.demo";
 export { AwakenAssistantMessageDemo } from "../src/components/AwakenAssistantMessage/AwakenAssistantMessage.demo";
 export { AwakenAvatarDemo } from "../src/components/AwakenAvatar/AwakenAvatar.demo";
@@ -18,6 +19,7 @@ export { AwakenInspectorRailDemo } from "../src/components/AwakenInspectorRail/A
 export { AwakenMcpConfigDialogDemo } from "../src/components/AwakenMcpConfigDialog/AwakenMcpConfigDialog.demo";
 export { AwakenMcpSettingsDialogDemo } from "../src/components/AwakenMcpSettingsDialog/AwakenMcpSettingsDialog.demo";
 export { AwakenMemorySettingsDemo } from "../src/components/AwakenMemorySettings/AwakenMemorySettings.demo";
+export { AwakenModelSettingsDemo } from "../src/components/AwakenModelSettings/AwakenModelSettings.demo";
 export { AwakenNewTaskButtonDemo } from "../src/components/AwakenNewTaskButton/AwakenNewTaskButton.demo";
 export { AwakenOriginalThinkingDemo } from "../src/components/AwakenOriginalThinking/AwakenOriginalThinking.demo";
 export { AwakenPetsSettingsDemo } from "../src/components/AwakenPetsSettings/AwakenPetsSettings.demo";

@@ -4,7 +4,7 @@
 
 本文是 Awaken 长期记忆与 Dream 的当前事实与目标设计权威。
 
-**当前支持：** Core 已实现 user/project Markdown topic、`MEMORY.md` 索引、受控 `memory` 工具、host 注入来源 identity、revision/敏感内容/重复门禁、请求构建期索引注入、复用当前 profile 的凭据/endpoint 并按 provider 辅助模型策略执行非阻塞 selector、最多 5 条有界主题召回和 compact 后预算复位。主动记忆默认开启，由主模型在正常任务推理中决定是否调用工具。Memory 调用与 recall 进入 SemanticJournal/AG-UI 前转为无正文 receipt；Workbench 已投影 recall/mutation 紧凑回执。Desktop Settings 已提供四个开关、搜索/筛选/正文与来源查看、revision 删除、手动 Dream 和取消；Auto Dream 已接入持久化活动计数、24 小时、5 分钟 idle、active-run gate 和新 run 取消；不提供人工创建、编辑或 supersede。Dream task/report 已原子持久化，其独立 authority 同时保存 `memory_maintenance` request/usage；Core 重启会把未完成 task 和没有终态 usage 的请求恢复为 `interrupted`/`usage_unknown`。Desktop 对 live 终态回执保存纯展示用的 `taskId -> threadId` 绑定，任务列表只把已绑定回执重放到原线程，无绑定的历史任务只在 Settings 中可见；scope lock 定期 heartbeat，批量 Apply 使用 staged transaction、活动 marker、失败关闭读取和 crash rollback，主题与 `MEMORY.md` 不会以半套状态参与召回。
+**当前支持：** Core 已实现 user/project Markdown topic、`MEMORY.md` 索引、受控 `memory` 工具、host 注入来源 identity、revision/敏感内容/重复门禁、请求构建期索引注入、复用当前 profile 的凭据/endpoint 并按 provider 辅助模型策略执行非阻塞 selector、最多 5 条有界主题召回和 compact 后预算复位。主动记忆默认开启，由主模型在正常任务推理中决定是否调用工具。Memory 调用与 recall 进入 SemanticJournal/AG-UI 前转为无正文 receipt；Workbench 已投影 recall/mutation 紧凑回执。Desktop Settings 使用覆盖内容窗口的全窗口左右分栏，并已提供四个开关、搜索/筛选/正文与来源查看、revision 删除、手动 Dream 和取消；记忆分区由 `MemorySettingsPanel` 通过 `AwakenMemoryLightFlowLayout` 组合纯装饰 `AwakenMemoryLightFlow` 与现有 `AwakenMemorySettings`，Gallery 与 Desktop 共用该 UI 布局且不增加设置项、业务状态或 Memory 请求。Auto Dream 已接入持久化活动计数、24 小时、5 分钟 idle、active-run gate 和新 run 取消；不提供人工创建、编辑或 supersede。Dream task/report 已原子持久化，其独立 authority 同时保存 `memory_maintenance` request/usage；Core 重启会把未完成 task 和没有终态 usage 的请求恢复为 `interrupted`/`usage_unknown`。Desktop 对 live 终态回执保存纯展示用的 `taskId -> threadId` 绑定，任务列表只把已绑定回执重放到原线程，无绑定的历史任务只在 Settings 中可见；scope lock 定期 heartbeat，批量 Apply 使用 staged transaction、活动 marker、失败关闭读取和 crash rollback，主题与 `MEMORY.md` 不会以半套状态参与召回。
 
 **当前不支持：** 当前产品尚无正式 subagent/child Agent 能力，因此不实现 child recall 继承。待 subagent 域建立正式 parent/child identity、workspace 与权限边界后，本域必须实现 5.3 的 `MemoryRecallSnapshot` 继承门禁，不能让 child 自行扩大 user/project scope。
 
@@ -359,8 +359,9 @@ Desktop renderer 只能通过 typed preload/Main bridge 调用 loopback route；
 
 ## 9. Desktop 产品行为
 
-Settings 新增“记忆”页：
+全窗口 Settings 工作区中的“记忆”页：
 
+- 与模型、搜索、外观、宠物共用 `AwakenSettings` 固定左栏；记忆页右侧使用 full-bleed 内容视口，光流和记忆内容属于同一个纵向滚动根节点；
 - Memory 总开关、自动召回、主动记忆和 Auto Dream；
 - user/project、type、status、更新时间使用 Desktop 自绘且等宽的下拉筛选，不使用平台原生 `select` 菜单；项目范围只读取当前明确选择的一个 active project，没有当前项目时显示“（项目待选择）”，不跨全部项目聚合；项目菜单限定高度并滚动；
 - 搜索或筛选条件变化时立即清空已选详情和旧列表，丢弃晚到的旧列表/详情请求；查看正文和来源后允许用户按 revision 删除已有记忆；Settings 不提供创建、编辑或 supersede；
@@ -417,6 +418,8 @@ Workbench：
 | SemanticRecord 与 replay | `src/agentcore`、`src/runtime` |
 | HTTP/SSE | `src/server`、`src/protocol/agui` |
 | preload/Main bridge、Settings 数据/副作用、Workbench | `apps/desktop` |
-| Settings 记忆管理视图与 UI-only primitives | `Awaken Design System`，只接收 props/callbacks，不得读取 Core/文件/store |
+| Settings 全窗口框架、记忆管理视图与 UI-only primitives | `Awaken Design System`，只接收 props/callbacks，不得读取 Core/文件/store |
+
+`AwakenSettings` 提供全窗口左右分栏和 standard/full-bleed 内容视口；`AwakenMemoryLightFlow` 与 `AwakenMemoryLightFlowLayout` 都属于 UI-only primitives，后者只组合标题、装饰层和 `AwakenMemorySettings` children。Desktop 只传入当前生效主题与既有 UI props/callbacks，并随记忆分区挂载/卸载；这些组件都不能持有 Memory settings、Dream、runtime、Electron bridge 或偏好存储。
 
 实现不得把 store、召回、安全判断或 Dream scheduler 放进 renderer，也不得让 Design System 持有业务状态。

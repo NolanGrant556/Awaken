@@ -3,12 +3,17 @@ import { AwakenAccountDemo } from "../src/components/AwakenAccount/AwakenAccount
 import { AwakenDeliverableListDemo } from "../src/components/AwakenDeliverableList/AwakenDeliverableList.demo";
 import { AwakenAssistantMessageDemo } from "../src/components/AwakenAssistantMessage/AwakenAssistantMessage.demo";
 import { AwakenAvatarDemo } from "../src/components/AwakenAvatar/AwakenAvatar.demo";
+import { AwakenAppearanceSettingsDemo } from "../src/components/AwakenAppearanceSettings/AwakenAppearanceSettings.demo";
 import { AwakenComposerBarDemo } from "../src/components/AwakenComposerBar/AwakenComposerBar.demo";
 import { AwakenConnectorsDemo } from "../src/components/AwakenConnectors/AwakenConnectors.demo";
+import { AwakenMemorySettingsDemo } from "../src/components/AwakenMemorySettings/AwakenMemorySettings.demo";
+import { AwakenModelSettingsDemo } from "../src/components/AwakenModelSettings/AwakenModelSettings.demo";
 import { AwakenOriginalThinkingDemo } from "../src/components/AwakenOriginalThinking/AwakenOriginalThinking.demo";
 import { AwakenProductLogoDemo } from "../src/components/AwakenProductLogo/AwakenProductLogo.demo";
 import { AwakenRunStageDemo } from "../src/components/AwakenRunStage/AwakenRunStage.demo";
 import { AwakenSettingsDemo } from "../src/components/AwakenSettings/AwakenSettings.demo";
+import { AwakenSearchSettingsDemo } from "../src/components/AwakenSearchSettings/AwakenSearchSettings.demo";
+import { AwakenPetsSettingsDemo } from "../src/components/AwakenPetsSettings/AwakenPetsSettings.demo";
 import { AwakenSidebarDemo } from "../src/components/AwakenSidebar/AwakenSidebar.demo";
 import { AwakenSkillsDemo } from "../src/components/AwakenSkills/AwakenSkills.demo";
 import { AwakenTaskWelcomeDemo } from "../src/components/AwakenTaskWelcome/AwakenTaskWelcome.demo";
@@ -25,15 +30,20 @@ export type AwakenGalleryEntry = {
   aliases?: readonly string[];
 };
 
-export type AwakenGalleryCategory = "atomic" | "sidebar" | "workbench" | "composition";
+export type AwakenGalleryCategory = "atomic" | "sidebar" | "settings" | "workbench" | "composition";
 
 export const awakenGalleryEntries: AwakenGalleryEntry[] = [
   { id: "awaken-product-logo", name: "AwakenProductLogo", displayName: "产品 LOGO", demo: AwakenProductLogoDemo, category: "atomic" },
   { id: "awaken-sidebar", name: "AwakenSidebar", displayName: "「左侧栏」组件库", demo: AwakenSidebarDemo, category: "sidebar", aliases: ["awaken-dialog", "awaken-dropdown", "awaken-icon", "awaken-selectable-card"] },
   { id: "awaken-skills", name: "AwakenSkills", displayName: "「技能」组件库", demo: AwakenSkillsDemo, category: "sidebar" },
-  { id: "awaken-settings", name: "AwakenSettings", displayName: "「设置」组件库", demo: AwakenSettingsDemo, category: "sidebar", aliases: ["awaken-button"] },
   { id: "awaken-account", name: "AwakenAccount", displayName: "「账户」组件库", demo: AwakenAccountDemo, category: "sidebar", aliases: ["awaken-popover"] },
   { id: "awaken-connectors", name: "AwakenConnectors", displayName: "「连接器」组件库", demo: AwakenConnectorsDemo, category: "sidebar" },
+  { id: "awaken-settings", name: "AwakenSettings", displayName: "设置页框架", demo: AwakenSettingsDemo, category: "settings", aliases: ["awaken-button"] },
+  { id: "awaken-model-settings", name: "AwakenModelSettings", displayName: "模型设置", demo: AwakenModelSettingsDemo, category: "settings" },
+  { id: "awaken-search-settings", name: "AwakenSearchSettings", displayName: "搜索设置", demo: AwakenSearchSettingsDemo, category: "settings" },
+  { id: "awaken-memory-settings", name: "AwakenMemorySettings", displayName: "记忆设置", demo: AwakenMemorySettingsDemo, category: "settings", aliases: ["awaken-memory-light-flow"] },
+  { id: "awaken-appearance-settings", name: "AwakenAppearanceSettings", displayName: "外观设置", demo: AwakenAppearanceSettingsDemo, category: "settings", aliases: ["awaken-theme-choice-group"] },
+  { id: "awaken-pets-settings", name: "AwakenPetsSettings", displayName: "宠物设置", demo: AwakenPetsSettingsDemo, category: "settings" },
   {
     id: "awaken-deliverables",
     name: "AwakenDeliverableList",
@@ -86,6 +96,11 @@ export const awakenGallerySections = [
     id: "sidebar",
     label: "左侧栏组件",
     entries: awakenGalleryEntries.filter((entry) => entry.category === "sidebar"),
+  },
+  {
+    id: "settings",
+    label: "设置页组件",
+    entries: awakenGalleryEntries.filter((entry) => entry.category === "settings"),
   },
   {
     id: "workbench",

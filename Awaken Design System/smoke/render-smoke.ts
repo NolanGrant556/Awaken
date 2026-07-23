@@ -52,6 +52,18 @@ for (const selector of demoOnlySelectors) {
   }
 }
 
+if (!productionCss.includes(".aw-memory-light-flow-layout")) {
+  throw new Error("Production CSS is missing the shared AwakenMemoryLightFlow layout");
+}
+
+if (productionCss.includes("记忆控制")) {
+  throw new Error("AwakenMemoryLightFlow layout must not inject a secondary memory-control heading");
+}
+
+if (productionCss.includes(".aw-memory-light-flow-demo__content")) {
+  throw new Error("Production CSS must not include the retired Gallery-only memory layout");
+}
+
 const galleryExports: Record<string, unknown> = AwakenGalleryDemos;
 const demoEntries = Object.entries(galleryExports)
   .filter(

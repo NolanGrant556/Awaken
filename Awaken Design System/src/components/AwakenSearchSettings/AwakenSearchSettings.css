@@ -29,16 +29,6 @@
 .search-channel-test-button:disabled { opacity: 0.5; }
 .search-channel-test-result { margin-top: 8px; color: var(--aw-text-secondary); font-size: 12px; }
 
-.extension-state { display: inline-flex; align-items: center; flex: 0 0 auto; max-width: 100%; min-height: 20px; padding: 0 7px; border-radius: var(--aw-radius-pill); background: var(--aw-bg-fill-light); color: var(--aw-text-tertiary); font-size: 11px; font-weight: var(--aw-font-weight-heavy); line-height: 1; }
-.extension-state-connected { background: color-mix(in srgb, var(--aw-success) 13%, var(--aw-bg-white)); color: color-mix(in srgb, var(--aw-success) 72%, var(--aw-text-primary)); }
-.mcp-toggle-switch { position: relative; width: 40px; height: 22px; padding: 0; border: 0; border-radius: 999px; background: var(--aw-border-main); cursor: pointer; transition: background-color var(--aw-transition-fast), opacity var(--aw-transition-fast); }
-.mcp-toggle-switch-on { background: var(--aw-success); }
-.mcp-toggle-switch-off { background: var(--aw-error); }
-.mcp-toggle-switch-thumb { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--aw-bg-white); box-shadow: var(--aw-shadow-control); transition: transform var(--aw-transition-fast); }
-.mcp-toggle-switch-on .mcp-toggle-switch-thumb { transform: translateX(18px); }
-.mcp-toggle-switch:disabled { cursor: default; opacity: 0.45; }
-.mcp-toggle-switch:focus-visible { outline: 2px solid var(--aw-focus-ring); outline-offset: 2px; }
-
 @media (max-width: 720px) {
   .search-channel-card { grid-template-columns: 44px minmax(0, 1fr); }
   .search-channel-actions { grid-column: 2; justify-content: space-between; }

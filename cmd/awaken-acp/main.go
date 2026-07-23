@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -54,8 +55,22 @@ func main() {
 	}()
 
 	log.Printf("awaken-acp: attached to %s (owner=%s lease=%s)", res.Identity.InstanceID, res.OwnerMode, res.LeaseID)
-	// TODO(Stage 5): instantiate stdio ACP server using res.BaseURL and res.ControlToken.
 
-	<-ctx.Done()
+	coreClient := agentbridge.NewCoreClient(res.BaseURL, res.ControlToken)
+	if err := coreClient.VerifyIdentity(ctx, res.Identity); err != nil {
+		fmt.Fprintf(os.Stderr, "awaken-acp: identity verification failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	agent := agentbridge.NewAgent(coreClient)
+	server := agentbridge.Server{
+		Agent:      agent,
+		LeaseID:    res.LeaseID,
+		CoreClient: coreClient,
+	}
+	if err := server.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		fmt.Fprintf(os.Stderr, "awaken-acp: server error: %v\n", err)
+		os.Exit(1)
+	}
 	log.Println("awaken-acp: shutting down")
 }

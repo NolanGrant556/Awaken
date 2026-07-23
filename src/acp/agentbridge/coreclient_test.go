@@ -180,3 +180,55 @@ func TestCoreClientStreamRunEvents(t *testing.T) {
 		t.Fatalf("unexpected frames: %v", got)
 	}
 }
+
+func TestCoreClientCreateRunForSessionUsesCoreOwnedScope(t *testing.T) {
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method+" "+r.URL.Path != "POST /v1/control/acp/sessions/acp_1/runs" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"run_id":    "run_1",
+			"thread_id": "thread_1",
+			"status":    "running",
+		})
+	}))
+	defer server.Close()
+
+	client := NewCoreClient(server.URL, "token")
+	if _, err := client.CreateRunForSession(context.Background(), "acp_1", "hello", "profile_1"); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if body["input"] != "hello" {
+		t.Fatalf("input mismatch: %v", body["input"])
+	}
+	if body["model_profile_id"] != "profile_1" {
+		t.Fatalf("model profile mismatch: %v", body["model_profile_id"])
+	}
+	if _, exists := body["thread_id"]; exists {
+		t.Fatal("bridge must not submit Core-owned thread_id")
+	}
+	if _, exists := body["workspace_root"]; exists {
+		t.Fatal("bridge must not submit Core-owned workspace_root")
+	}
+}
+
+func TestCoreClientCreateRunForSessionIncludesBoundedErrorBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"MISSING_MODEL_PROFILE","message":"model profile is required"}`))
+	}))
+	defer server.Close()
+
+	client := NewCoreClient(server.URL, "token")
+	_, err := client.CreateRunForSession(context.Background(), "acp_1", "hello", "")
+	if err == nil {
+		t.Fatal("expected create run error")
+	}
+	if !strings.Contains(err.Error(), "MISSING_MODEL_PROFILE") {
+		t.Fatalf("expected response body in error, got %v", err)
+	}
+}

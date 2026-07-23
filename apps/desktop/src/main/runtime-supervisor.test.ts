@@ -669,7 +669,12 @@ describe("RuntimeSupervisor", () => {
     const killSpy = vi.spyOn(process, "kill").mockReturnValue(true);
     const userDataDir = "/tmp/awaken-user-data";
     const baseUrl = "http://127.0.0.1:19080";
-    const expectedRuntimeIdentity = `packaged:${userDataDir}`;
+    // Golden values produced by Go runtime.ComputeRuntimeIdentity for this
+    // fixture path. Keep this independent from the TypeScript implementation.
+    const expectedRuntimeIdentity =
+      process.platform === "win32"
+        ? "packaged:project_59630c22b41f016e0f64764f"
+        : "packaged:project_827c0b56d396072e11788079";
     const manifest: RuntimeManifest = {
       schema_version: 1,
       runtime_identity: expectedRuntimeIdentity,

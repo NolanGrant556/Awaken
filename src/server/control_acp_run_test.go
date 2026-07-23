@@ -14,8 +14,37 @@ import (
 
 	"awaken/src/acp"
 	"awaken/src/agentcore"
+	"awaken/src/modelprofile"
 	awruntime "awaken/src/runtime"
 )
+
+type fakeACPModelProfileStore struct{}
+
+func (fakeACPModelProfileStore) ListReady() (modelprofile.ProfileCatalog, error) {
+	return modelprofile.ProfileCatalog{
+		DefaultProfileID: "profile-default",
+		Profiles: []modelprofile.ProfileSummary{
+			{ID: "profile-default", ProviderID: "deepseek", DisplayName: "Default", ModelID: "deepseek-v4-flash", IsDefault: true},
+			{ID: "profile-other", ProviderID: "kimi-cn", DisplayName: "Other", ModelID: "kimi-k2.6"},
+		},
+	}, nil
+}
+
+func (fakeACPModelProfileStore) Resolve(profileID string) (modelprofile.ResolvedProfile, error) {
+	if profileID == "" {
+		profileID = "profile-default"
+	}
+	if profileID != "profile-default" && profileID != "profile-other" {
+		return modelprofile.ResolvedProfile{}, modelprofile.ErrProfileUnavailable
+	}
+	return modelprofile.ResolvedProfile{
+		ProfileSummary: modelprofile.ProfileSummary{
+			ID: profileID, ProviderID: "deepseek", DisplayName: profileID, ModelID: "deepseek-v4-flash",
+		},
+		BaseURL: "https://api.deepseek.com", Protocol: "openai_chat", AuthScheme: "bearer",
+		APIKey: "test-only", MaxTokens: 1024, ContextWindow: 8192, CredentialRevision: 1,
+	}, nil
+}
 
 func TestControlACPRunLifecycle(t *testing.T) {
 	userDataDir := t.TempDir()
@@ -29,12 +58,17 @@ func TestControlACPRunLifecycle(t *testing.T) {
 	control := &ControlConfig{
 		Identity:          id,
 		ACPSessionManager: acpSessionManager,
+		ModelProfileStore: fakeACPModelProfileStore{},
 	}
 
 	workspaceRoot := t.TempDir()
 	release := make(chan struct{})
 	started := make(chan struct{})
-	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
+	selectedProfile := make(chan string, 1)
+	runService := awruntime.NewRunServiceWithModelProfiles(func(_ awruntime.WorkspaceConfig, threadID string, profile *awruntime.ModelProfileConfig) *agentcore.Agent {
+		selectedProfile <- profile.ProfileID
+		return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+	}, func(agent *agentcore.Agent) awruntime.Executor {
 		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
 			sink.Emit(agentcore.AwakenEvent{Type: agentcore.TextDeltaEventType, MessageID: "msg-1", Role: "assistant", Delta: "hello"})
@@ -71,10 +105,24 @@ func TestControlACPRunLifecycle(t *testing.T) {
 	}
 	threadID := createResp["thread_id"].(string)
 
+	// A run request cannot escape the thread reserved for this ACP session.
+	invalidRunBody, _ := json.Marshal(map[string]any{
+		"thread_id": "thread_from_another_session",
+		"input":     "hello",
+	})
+	req = httptest.NewRequest(http.MethodPost, "/v1/control/acp/sessions/"+sessionID+"/runs", bytes.NewReader(invalidRunBody))
+	req.Header.Set("Authorization", "Bearer "+id.ControlToken)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("cross-session thread: expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
 	// Create run.
 	runBody, _ := json.Marshal(map[string]any{
-		"thread_id": threadID,
-		"input":     "hello",
+		"thread_id":        threadID,
+		"input":            "hello",
+		"model_profile_id": "profile-other",
 	})
 	req = httptest.NewRequest(http.MethodPost, "/v1/control/acp/sessions/"+sessionID+"/runs", bytes.NewReader(runBody))
 	req.Header.Set("Authorization", "Bearer "+id.ControlToken)
@@ -90,18 +138,12 @@ func TestControlACPRunLifecycle(t *testing.T) {
 	if run.RunID == "" {
 		t.Fatalf("expected run id, got: %+v", run)
 	}
+	if got := <-selectedProfile; got != "profile-other" {
+		t.Fatalf("expected selected profile, got %q", got)
+	}
 	// The reserved session thread is created lazily; the actual run thread may
 	// differ from the reserved thread ID.
 	threadID = run.ThreadID
-
-	// Set current run route is idempotent.
-	req = httptest.NewRequest(http.MethodPost, "/v1/control/acp/sessions/"+sessionID+"/current-run/"+run.RunID, nil)
-	req.Header.Set("Authorization", "Bearer "+id.ControlToken)
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("set current run: expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
 
 	// Stream events.
 	<-started
@@ -141,7 +183,7 @@ func TestControlACPRunLifecycle(t *testing.T) {
 	}
 
 	// Clear current run.
-	req = httptest.NewRequest(http.MethodDelete, "/v1/control/acp/sessions/"+sessionID+"/current-run", nil)
+	req = httptest.NewRequest(http.MethodDelete, "/v1/control/acp/sessions/"+sessionID+"/current-run/"+run.RunID, nil)
 	req.Header.Set("Authorization", "Bearer "+id.ControlToken)
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -179,6 +221,7 @@ func TestControlACPResolvePermission(t *testing.T) {
 	control := &ControlConfig{
 		Identity:          id,
 		ACPSessionManager: acpSessionManager,
+		ModelProfileStore: fakeACPModelProfileStore{},
 	}
 
 	workspaceRoot := t.TempDir()

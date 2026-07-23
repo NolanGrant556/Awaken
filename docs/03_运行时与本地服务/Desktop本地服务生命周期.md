@@ -67,7 +67,11 @@ core 异常退出后状态为 `crashed`。重新启动会恢复线程历史，�
 - attach 后通过 authenticated control routes 创建 bridge lease，并每 10 秒 heartbeat；stdio EOF 或 signal 触发 5 秒有界清理，cancel active run、close session、释放 lease。
 - 不执行模型与工具，只转发 ACP session lifecycle 和 prompt 到 Core HTTP routes。
 
-`awaken-acp` 是机器调用入口，但仍禁止用户直接运行和长期维护裸 `awaken-core`。
+模型配置由 Core 从 canonical `~/.awaken/config/models.json` 与 `~/.awaken/.env` 只读解析。`session/new` 只向 client 返回 enabled + ready profile 的非敏感 selector；client 可提交 opaque profile ID，不能提交 provider、Base URL、运行参数或 API key。未选择时使用默认 ready profile，否则回退首个 ready profile。profile/API key 不得写入 manifest、日志、journal、Renderer 或 ACP wire。
+
+`--startup=core` 会移除继承环境中的 `AWAKEN_HOME` 覆盖并固定注入当前用户的 `~/.awaken`，因此只启动受管 Core，不需要 Desktop 或 Electron credential helper。配置损坏、无可用 profile、显式选择已禁用/缺 key profile时返回 `ACP_MODEL_PROFILE_UNAVAILABLE`，不静默切换付费 provider。
+
+`awaken-acp` 是机器调用入口；仍禁止用户直接运行和长期维护裸 `awaken-core`。
 
 ## 测试与真实 Desktop 验收
 

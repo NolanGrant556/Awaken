@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"awaken/src/acp"
+	"awaken/src/modelprofile"
 	awruntime "awaken/src/runtime"
 )
 
@@ -16,12 +17,14 @@ type acpRunControlHandlers struct {
 	acpSessionManager *awruntime.ACPSessionManager
 	acpManager        *acp.Manager
 	identity          *awruntime.RuntimeIdentity
+	modelProfileStore ACPModelProfileStore
 }
 
 type acpRunCreateRequest struct {
-	ThreadID      string `json:"thread_id"`
-	Input         string `json:"input"`
-	WorkspaceRoot string `json:"workspace_root"`
+	ThreadID       string `json:"thread_id"`
+	Input          string `json:"input"`
+	WorkspaceRoot  string `json:"workspace_root"`
+	ModelProfileID string `json:"model_profile_id"`
 }
 
 type resolveACPPermissionRequest struct {
@@ -55,6 +58,44 @@ func (h *acpRunControlHandlers) handleCreateACPRun(w http.ResponseWriter, r *htt
 		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
 		return
 	}
+	if req.ThreadID != "" && req.ThreadID != mapping.ThreadID {
+		writeErrorJSON(w, http.StatusBadRequest, "ACP_SESSION_SCOPE_MISMATCH", "thread_id does not belong to this ACP session")
+		return
+	}
+	if req.WorkspaceRoot != "" {
+		canonicalRoot, canonicalErr := awruntime.CanonicalizeCWD(req.WorkspaceRoot)
+		if canonicalErr != nil {
+			writeErrorJSON(w, http.StatusBadRequest, "INVALID_WORKSPACE_ROOT", canonicalErr.Error())
+			return
+		}
+		if canonicalRoot != mapping.CanonicalCWD {
+			writeErrorJSON(w, http.StatusBadRequest, "ACP_SESSION_SCOPE_MISMATCH", "workspace_root does not belong to this ACP session")
+			return
+		}
+	}
+	if h.modelProfileStore == nil {
+		writeErrorJSON(w, http.StatusServiceUnavailable, "ACP_MODEL_PROFILE_UNAVAILABLE", "model profiles are unavailable")
+		return
+	}
+	profile, err := h.modelProfileStore.Resolve(req.ModelProfileID)
+	if err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "ACP_MODEL_PROFILE_UNAVAILABLE", "the selected Awaken model profile is unavailable")
+		return
+	}
+	if err := h.acpSessionManager.BeginRun(sessionID); err != nil {
+		if errors.Is(err, awruntime.ErrACPSessionBusy) {
+			writeErrorJSON(w, http.StatusConflict, "ACP_SESSION_BUSY", err.Error())
+			return
+		}
+		writeErrorJSON(w, http.StatusInternalServerError, "ACP_SESSION_RESERVE_FAILED", err.Error())
+		return
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			h.acpSessionManager.AbortRun(sessionID)
+		}
+	}()
 
 	threadID := req.ThreadID
 	if threadID == "" {
@@ -77,6 +118,7 @@ func (h *acpRunControlHandlers) handleCreateACPRun(w http.ResponseWriter, r *htt
 			ClientName:    mapping.ClientName,
 			ClientVersion: mapping.ClientVersion,
 		},
+		ModelProfile: runtimeModelProfile(profile),
 	}
 	if threadID != "" {
 		startReq.ThreadID = threadID
@@ -90,6 +132,7 @@ func (h *acpRunControlHandlers) handleCreateACPRun(w http.ResponseWriter, r *htt
 		run, err = h.runService.StartRun(startReq)
 		if err == nil {
 			if updateErr := h.acpSessionManager.UpdateThreadID(sessionID, run.ThreadID); updateErr != nil {
+				_, _ = h.runService.CancelRun(run.RunID)
 				writeErrorJSON(w, http.StatusInternalServerError, "THREAD_UPDATE_FAILED", updateErr.Error())
 				return
 			}
@@ -118,36 +161,33 @@ func (h *acpRunControlHandlers) handleCreateACPRun(w http.ResponseWriter, r *htt
 	}
 
 	if err := h.acpSessionManager.SetCurrentRun(sessionID, run.RunID); err != nil {
+		_, _ = h.runService.CancelRun(run.RunID)
 		writeErrorJSON(w, http.StatusInternalServerError, "SET_CURRENT_RUN_FAILED", err.Error())
 		return
 	}
+	committed = true
 
 	writeJSON(w, http.StatusCreated, run)
 }
 
-func (h *acpRunControlHandlers) handleSetCurrentRun(w http.ResponseWriter, r *http.Request) {
-	if h.acpSessionManager == nil {
-		writeErrorJSON(w, http.StatusServiceUnavailable, "ACP_SESSION_UNAVAILABLE", "acp session manager not initialized")
-		return
+func runtimeModelProfile(profile modelprofile.ResolvedProfile) *awruntime.ModelProfileConfig {
+	return &awruntime.ModelProfileConfig{
+		ProfileID:          profile.ID,
+		ProviderID:         profile.ProviderID,
+		DisplayName:        profile.DisplayName,
+		ModelID:            profile.ModelID,
+		BaseURL:            profile.BaseURL,
+		Protocol:           profile.Protocol,
+		AuthScheme:         profile.AuthScheme,
+		APIKey:             profile.APIKey,
+		Temperature:        profile.Temperature,
+		MaxTokens:          profile.MaxTokens,
+		ContextWindow:      profile.ContextWindow,
+		CredentialRevision: profile.CredentialRevision,
+		SupportsVision:     profile.SupportsVision,
+		SupportsNativePDF:  profile.SupportsNativePDF,
+		SupportsVideo:      profile.SupportsVideo,
 	}
-
-	sessionID := r.PathValue("session_id")
-	runID := r.PathValue("run_id")
-	if _, err := h.acpSessionManager.GetSession(sessionID); err != nil {
-		if errors.Is(err, awruntime.ErrACPSessionNotFound) {
-			writeErrorJSON(w, http.StatusNotFound, "ACP_SESSION_NOT_FOUND", err.Error())
-			return
-		}
-		writeErrorJSON(w, http.StatusInternalServerError, "ACP_SESSION_GET_FAILED", err.Error())
-		return
-	}
-
-	if err := h.acpSessionManager.SetCurrentRun(sessionID, runID); err != nil {
-		writeErrorJSON(w, http.StatusInternalServerError, "SET_CURRENT_RUN_FAILED", err.Error())
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (h *acpRunControlHandlers) handleClearCurrentRun(w http.ResponseWriter, r *http.Request) {
@@ -157,7 +197,8 @@ func (h *acpRunControlHandlers) handleClearCurrentRun(w http.ResponseWriter, r *
 	}
 
 	sessionID := r.PathValue("session_id")
-	mapping, err := h.acpSessionManager.GetSession(sessionID)
+	runID := r.PathValue("run_id")
+	_, err := h.acpSessionManager.GetSession(sessionID)
 	if err != nil {
 		if errors.Is(err, awruntime.ErrACPSessionNotFound) {
 			writeErrorJSON(w, http.StatusNotFound, "ACP_SESSION_NOT_FOUND", err.Error())
@@ -167,7 +208,7 @@ func (h *acpRunControlHandlers) handleClearCurrentRun(w http.ResponseWriter, r *
 		return
 	}
 
-	h.acpSessionManager.ClearCurrentRun(sessionID, mapping.CurrentRunID)
+	h.acpSessionManager.ClearCurrentRun(sessionID, runID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "cleared"})
 }
 
@@ -347,4 +388,3 @@ func (h *acpRunControlHandlers) handleResolveACPPermission(w http.ResponseWriter
 
 	writeJSON(w, http.StatusOK, map[string]any{"resolved": true})
 }
-

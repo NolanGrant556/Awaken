@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -341,5 +342,65 @@ func TestDefaultSpawnDesktopUsesEnvOverride(t *testing.T) {
 	err := defaultSpawnDesktop(context.Background(), dir)
 	if !errors.Is(err, ErrDesktopBinaryNotFound) {
 		t.Fatalf("expected ErrDesktopBinaryNotFound for missing env override, got %v", err)
+	}
+}
+
+func TestReplaceProcessEnvPinsHeadlessAwakenRoots(t *testing.T) {
+	got := replaceProcessEnv([]string{
+		"PATH=C:\\tools",
+		"AWAKEN_HOME=C:\\untrusted",
+		"awaken_user_data_dir=C:\\old",
+	}, map[string]string{
+		"AWAKEN_HOME":          `C:\Users\tester\.awaken`,
+		"AWAKEN_USER_DATA_DIR": `C:\Users\tester\AppData\Awaken`,
+	})
+	joined := strings.Join(got, "\n")
+	if strings.Contains(joined, `C:\untrusted`) || strings.Contains(joined, `C:\old`) {
+		t.Fatalf("old Awaken roots must be removed: %v", got)
+	}
+	for _, expected := range []string{
+		"PATH=C:\\tools",
+		`AWAKEN_HOME=C:\Users\tester\.awaken`,
+		`AWAKEN_USER_DATA_DIR=C:\Users\tester\AppData\Awaken`,
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("missing %q in %v", expected, got)
+		}
+	}
+}
+
+func TestFindDesktopBinaryFromPackagedResources(t *testing.T) {
+	root := t.TempDir()
+	acpDir := filepath.Join(root, "resources", "bin", goruntime.GOOS+"-test")
+	if err := os.MkdirAll(acpDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	acpName := "awaken-acp"
+	desktopPath := ""
+	switch goruntime.GOOS {
+	case "windows":
+		acpName += ".exe"
+		desktopPath = filepath.Join(root, "Awaken.exe")
+	case "darwin":
+		appDir := filepath.Join(root, "Awaken.app")
+		acpDir = filepath.Join(appDir, "Contents", "Resources", "bin", "darwin-test")
+		if err := os.MkdirAll(acpDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		desktopPath = appDir
+	default:
+		desktopPath = filepath.Join(root, "awaken")
+	}
+	if goruntime.GOOS != "darwin" {
+		if err := os.WriteFile(desktopPath, []byte("test"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := findDesktopBinary(filepath.Join(acpDir, acpName))
+	if err != nil {
+		t.Fatalf("find desktop binary: %v", err)
+	}
+	if got != desktopPath {
+		t.Fatalf("desktop path mismatch: got %q, want %q", got, desktopPath)
 	}
 }

@@ -56,6 +56,18 @@ core 异常退出后状态为 `crashed`。重新启动会恢复线程历史，�
 - 当前没有把外部远程 runtime URL 作为正式 Desktop 产品入口。
 - 当前不保证 crash 后自动续跑 active run，只保证可确认历史恢复。
 
+## `awaken-acp` 入口
+
+除 Desktop 外，Awaken 还提供一个小型 stdio ACP Agent 入口 `cmd/awaken-acp`。它由 `src/acp/agentbridge` 实现，行为如下：
+
+- 通过 `--startup=desktop|core|fail` 指定没有 ready Core 时的策略；默认 `desktop`。
+- 复用同一 userData identity 的现有 Core；没有时按策略拉起 Desktop 或启动一个受 lease 管理的 headless Core，禁止无约束多 Core 写同一 userData。
+- Core 在 `<AWAKEN_USER_DATA_DIR>/runtime/core.json` 发布 manifest（含随机 loopback base URL、control token、runtime identity 和 PID），launcher 校验 identity、PID 存活和 authenticated `/v1/control/runtime/identity` 后 attach。
+- attach 后通过 authenticated control routes 创建 bridge lease，并每 10 秒 heartbeat；stdio EOF 或 signal 触发 5 秒有界清理，cancel active run、close session、释放 lease。
+- 不执行模型与工具，只转发 ACP session lifecycle 和 prompt 到 Core HTTP routes。
+
+`awaken-acp` 是机器调用入口，但仍禁止用户直接运行和长期维护裸 `awaken-core`。
+
 ## 测试与真实 Desktop 验收
 
 自动化 owner：[`apps/desktop/src/main/runtime-supervisor.test.ts`](../../apps/desktop/src/main/runtime-supervisor.test.ts)、[`scripts/tests/desktop-lifecycle.test.mjs`](../../scripts/tests/desktop-lifecycle.test.mjs)。测试覆盖随机端口、重试、健康超时、generation、环境清理和升级关闭。

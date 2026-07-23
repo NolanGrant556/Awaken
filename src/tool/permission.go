@@ -339,6 +339,58 @@ func (c PermissionContext) ResolvePath(path string) string {
 	return c.Normalize().resolvePath(path)
 }
 
+// ResolveACPCwd validates a working directory for an external ACP runner.
+// Empty or "." cwd resolves to the workspace root. Relative paths are joined
+// to the workspace root; absolute paths are checked as-is. The candidate must
+// be contained within the workspace root after Clean/Abs/EvalSymlinks, must
+// not fall inside a protected task-scope root, and must not resolve to a
+// sensitive path. The returned path is the cleaned, lexical workspace path.
+func (c PermissionContext) ResolveACPCwd(cwd string) (string, error) {
+	normalized := c.Normalize()
+	if normalized.WorkspaceRoot == "" {
+		return "", fmt.Errorf("workspace root not available")
+	}
+
+	cwd = strings.TrimSpace(cwd)
+	if cwd == "" || cwd == "." {
+		return normalized.WorkspaceRoot, nil
+	}
+
+	candidate := normalized.resolvePath(cwd)
+	rootReal, err := ResolvePathWithExistingAncestor(normalized.WorkspaceRoot)
+	if err != nil {
+		return "", fmt.Errorf("workspace root cannot be resolved: %w", err)
+	}
+
+	if !PathWithinRoot(candidate, normalized.WorkspaceRoot) {
+		return "", fmt.Errorf("cwd %q is outside workspace root", cwd)
+	}
+
+	realPath, err := ResolvePathWithExistingAncestor(candidate)
+	if err != nil {
+		return "", fmt.Errorf("cwd %q cannot be resolved: %w", cwd, err)
+	}
+	if !PathWithinRoot(realPath, rootReal) {
+		return "", fmt.Errorf("cwd %q resolves outside workspace root", cwd)
+	}
+
+	for _, protectedRoot := range normalized.ProtectedRoots {
+		realProtected, err := ResolvePathWithExistingAncestor(protectedRoot)
+		if err != nil {
+			continue
+		}
+		if PathWithinRoot(realPath, realProtected) {
+			return "", fmt.Errorf("cwd %q is inside protected task-scope root %q", cwd, protectedRoot)
+		}
+	}
+
+	if err := normalized.checkResolvedSensitiveAbsolutePath(realPath); err != nil {
+		return "", fmt.Errorf("cwd %q is a sensitive path: %w", cwd, err)
+	}
+
+	return candidate, nil
+}
+
 // IsWithinWorkspaceResolved resolves symlinks before checking workspace
 // boundary. It returns false if the path cannot be resolved, treating
 // unresolvable paths as unsafe.
@@ -450,7 +502,7 @@ func (c PermissionContext) ResolveRecoverableDeletePathChecked(path string) (str
 		if PathWithinRoot(protectedRoot, resolved) {
 			return "", &RecoverableDeletePathError{Path: resolved, Reason: "path contains a protected task-scope root"}
 		}
-		if realProtectedRoot, resolveErr := resolvePathWithExistingAncestor(protectedRoot); resolveErr == nil && PathWithinRoot(realProtectedRoot, realPath) {
+		if realProtectedRoot, resolveErr := ResolvePathWithExistingAncestor(protectedRoot); resolveErr == nil && PathWithinRoot(realProtectedRoot, realPath) {
 			return "", &RecoverableDeletePathError{Path: resolved, Reason: "real path contains a protected task-scope root"}
 		}
 	}
@@ -482,7 +534,7 @@ func (c PermissionContext) resolveMutationPathWithinRootsChecked(path string, ro
 	if err := c.checkSensitiveAbsolutePath(resolved); err != nil {
 		return "", err
 	}
-	realPath, err := resolvePathWithExistingAncestor(resolved)
+	realPath, err := ResolvePathWithExistingAncestor(resolved)
 	if err != nil {
 		return "", fmt.Errorf("path %q cannot be resolved safely for mutation: %w", path, err)
 	}
@@ -508,7 +560,7 @@ func (c PermissionContext) resolvePathWithinRootsChecked(path string, roots []st
 		return "", "", fmt.Errorf("path %q resolves to %q which is outside %s roots", path, resolved, rootKind)
 	}
 
-	realPath, err := resolvePathWithExistingAncestor(resolved)
+	realPath, err := ResolvePathWithExistingAncestor(resolved)
 	if err != nil {
 		return "", "", fmt.Errorf("path %q cannot be resolved safely inside %s roots: %w", path, rootKind, err)
 	}
@@ -532,7 +584,7 @@ func checkPathWithinRealRoots(path, resolved, realPath string, roots []string, r
 
 	resolvedRootCount := 0
 	for _, root := range roots {
-		realRoot, err := resolvePathWithExistingAncestor(root)
+		realRoot, err := ResolvePathWithExistingAncestor(root)
 		if err != nil {
 			continue
 		}
@@ -553,10 +605,10 @@ func checkPathWithinRealRoots(path, resolved, realPath string, roots []string, r
 	)
 }
 
-// resolvePathWithExistingAncestor resolves every symlink in an existing path.
+// ResolvePathWithExistingAncestor resolves every symlink in an existing path.
 // For a path whose leaf does not exist yet, it resolves the nearest existing
 // ancestor and appends the missing suffix. Broken symlinks fail closed.
-func resolvePathWithExistingAncestor(path string) (string, error) {
+func ResolvePathWithExistingAncestor(path string) (string, error) {
 	cursor := filepath.Clean(path)
 	missing := make([]string, 0, 2)
 	for {
@@ -764,19 +816,19 @@ func (c PermissionContext) checkSensitiveAbsolutePath(path string) error {
 func (c PermissionContext) checkResolvedSensitiveAbsolutePath(realPath string) error {
 	protectedRoots := make([]string, 0, len(c.ProtectedRoots))
 	for _, protectedRoot := range c.ProtectedRoots {
-		if realProtectedRoot, err := resolvePathWithExistingAncestor(protectedRoot); err == nil {
+		if realProtectedRoot, err := ResolvePathWithExistingAncestor(protectedRoot); err == nil {
 			protectedRoots = append(protectedRoots, realProtectedRoot)
 		}
 	}
 
 	matcher := NewSensitivePathMatcher()
 	if matcher.HomeDir != "" {
-		if realHome, err := resolvePathWithExistingAncestor(matcher.HomeDir); err == nil {
+		if realHome, err := ResolvePathWithExistingAncestor(matcher.HomeDir); err == nil {
 			matcher.HomeDir = realHome
 		}
 	}
 	if matcher.ConfigDir != "" {
-		if realConfigDir, err := resolvePathWithExistingAncestor(matcher.ConfigDir); err == nil {
+		if realConfigDir, err := ResolvePathWithExistingAncestor(matcher.ConfigDir); err == nil {
 			matcher.ConfigDir = realConfigDir
 		}
 	}

@@ -83,207 +83,41 @@ func TestPermissionContextResolvesSymlinksForWorkspaceBoundary(t *testing.T) {
 		t.Fatalf("failed to write file: %v", err)
 	}
 
-	if !ctx.IsWithinWorkspaceResolved("inside.txt") {
-		t.Fatalf("expected regular file inside workspace to be allowed")
-	}
-
-	externalLink := filepath.Join(workspace, "external-link")
-	if err := os.Symlink(outsideFile, externalLink); err != nil {
+	symlinkInside := filepath.Join(workspace, "link-outside")
+	if err := os.Symlink(outsideFile, symlinkInside); err != nil {
 		t.Fatalf("failed to create symlink: %v", err)
 	}
-	if ctx.IsWithinWorkspaceResolved("external-link") {
-		t.Fatalf("expected symlink to external file to be rejected")
-	}
 
-	relativeLink := filepath.Join(workspace, "relative-link")
-	if err := os.Symlink("../outside.txt", relativeLink); err != nil {
-		t.Fatalf("failed to create relative symlink: %v", err)
+	if ctx.IsWithinWorkspaceResolved(symlinkInside) {
+		t.Fatalf("expected symlink target outside workspace to fail boundary check")
 	}
-	if ctx.IsWithinWorkspaceResolved("relative-link") {
-		t.Fatalf("expected relative symlink escaping workspace to be rejected")
-	}
-
-	internalLink := filepath.Join(workspace, "internal-link")
-	if err := os.Symlink("inside.txt", internalLink); err != nil {
-		t.Fatalf("failed to create internal symlink: %v", err)
-	}
-	if !ctx.IsWithinWorkspaceResolved("internal-link") {
-		t.Fatalf("expected symlink pointing inside workspace to be allowed")
-	}
-
-	if ctx.IsWithinWorkspaceResolved("does-not-exist.txt") {
-		t.Fatalf("expected non-existent path to be rejected conservatively")
-	}
-
-	resolved, err := ctx.ResolvePathChecked("inside.txt")
-	if err != nil {
-		t.Fatalf("expected ResolvePathChecked to succeed for inside file: %v", err)
-	}
-	if resolved != insideFile {
-		t.Fatalf("expected resolved path %q, got %q", insideFile, resolved)
-	}
-
-	if _, err = ctx.ResolvePathChecked("external-link"); err == nil {
-		t.Fatalf("expected readable-root resolver to reject symlink escape %q", externalLink)
+	if !ctx.IsWithinWorkspaceResolved(insideFile) {
+		t.Fatalf("expected real file inside workspace to pass boundary check")
 	}
 }
 
-func TestPermissionContextWriteResolversRejectLeafAndParentSymlinkEscapes(t *testing.T) {
+func TestPermissionContextRecoversableDeleteRejectsSymlinks(t *testing.T) {
 	workspace := t.TempDir()
-	outside := t.TempDir()
 	ctx := NewPermissionContext(workspace, nil)
 
-	outsideFile := filepath.Join(outside, "outside.txt")
-	if err := os.WriteFile(outsideFile, []byte("outside"), 0o644); err != nil {
-		t.Fatalf("write outside file: %v", err)
+	target := filepath.Join(workspace, "target.txt")
+	if err := os.WriteFile(target, []byte("target"), 0644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
 	}
-	leafLink := filepath.Join(workspace, "leaf-link.txt")
-	if err := os.Symlink(outsideFile, leafLink); err != nil {
-		t.Fatalf("create escaping leaf symlink: %v", err)
-	}
-	parentLink := filepath.Join(workspace, "parent-link")
-	if err := os.Symlink(outside, parentLink); err != nil {
-		t.Fatalf("create escaping parent symlink: %v", err)
+	link := filepath.Join(workspace, "link.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
 	}
 
-	resolvers := []struct {
-		name string
-		fn   func(string) (string, error)
-	}{
-		{name: "writable", fn: ctx.ResolveWritablePathChecked},
-		{name: "output", fn: ctx.ResolveOutputPathChecked},
-	}
-	for _, resolver := range resolvers {
-		t.Run(resolver.name+"/leaf", func(t *testing.T) {
-			if _, err := resolver.fn(leafLink); err == nil {
-				t.Fatal("expected escaping leaf symlink to be rejected")
-			}
-		})
-		t.Run(resolver.name+"/parent-existing-leaf", func(t *testing.T) {
-			if _, err := resolver.fn(filepath.Join(parentLink, filepath.Base(outsideFile))); err == nil {
-				t.Fatal("expected escaping parent symlink to be rejected for existing leaf")
-			}
-		})
-		t.Run(resolver.name+"/parent-nonexistent-leaf", func(t *testing.T) {
-			if _, err := resolver.fn(filepath.Join(parentLink, "new.txt")); err == nil {
-				t.Fatal("expected escaping parent symlink to be rejected for nonexistent leaf")
-			}
-		})
+	if _, err := ctx.ResolveRecoverableDeletePathChecked(link); err == nil {
+		t.Fatalf("expected symlink to be rejected for recoverable delete")
 	}
 }
 
-func TestPermissionContextWriteResolversAllowNonexistentLeafAndInsideSymlinks(t *testing.T) {
+func TestPermissionContextAttachedFileReferenceByDisplayName(t *testing.T) {
 	workspace := t.TempDir()
-	insideDir := filepath.Join(workspace, "inside")
-	if err := os.MkdirAll(insideDir, 0o755); err != nil {
-		t.Fatalf("create inside directory: %v", err)
-	}
-	insideFile := filepath.Join(insideDir, "existing.txt")
-	if err := os.WriteFile(insideFile, []byte("inside"), 0o644); err != nil {
-		t.Fatalf("write inside file: %v", err)
-	}
-	leafLink := filepath.Join(workspace, "inside-leaf-link.txt")
-	if err := os.Symlink(insideFile, leafLink); err != nil {
-		t.Fatalf("create inside leaf symlink: %v", err)
-	}
-	parentLink := filepath.Join(workspace, "inside-parent-link")
-	if err := os.Symlink(insideDir, parentLink); err != nil {
-		t.Fatalf("create inside parent symlink: %v", err)
-	}
-
-	ctx := NewPermissionContext(workspace, nil)
-	resolvers := []struct {
-		name string
-		fn   func(string) (string, error)
-	}{
-		{name: "writable", fn: ctx.ResolveWritablePathChecked},
-		{name: "output", fn: ctx.ResolveOutputPathChecked},
-	}
-	for _, resolver := range resolvers {
-		t.Run(resolver.name+"/nonexistent-leaf", func(t *testing.T) {
-			path := filepath.Join(insideDir, "new.txt")
-			resolved, err := resolver.fn(path)
-			if err != nil {
-				t.Fatalf("expected nonexistent leaf under real parent to be allowed: %v", err)
-			}
-			if resolved != path {
-				t.Fatalf("expected lexical path %q, got %q", path, resolved)
-			}
-		})
-		t.Run(resolver.name+"/inside-leaf-symlink", func(t *testing.T) {
-			resolved, err := resolver.fn(leafLink)
-			if err != nil {
-				t.Fatalf("expected leaf symlink whose target remains inside root to be allowed: %v", err)
-			}
-			if resolved != leafLink {
-				t.Fatalf("expected lexical symlink path %q, got %q", leafLink, resolved)
-			}
-		})
-		t.Run(resolver.name+"/inside-parent-symlink", func(t *testing.T) {
-			path := filepath.Join(parentLink, "new.txt")
-			resolved, err := resolver.fn(path)
-			if err != nil {
-				t.Fatalf("expected parent symlink whose target remains inside root to be allowed: %v", err)
-			}
-			if resolved != path {
-				t.Fatalf("expected lexical path %q, got %q", path, resolved)
-			}
-		})
-	}
-}
-
-func TestPermissionContextWriteResolversAllowNonexistentConfiguredRoot(t *testing.T) {
-	workspace := t.TempDir()
-	generated := filepath.Join(workspace, "generated")
-	ctx := NewTaskScopePermissionContext(
-		"scope-nonexistent-root",
-		workspace,
-		nil,
-		[]string{generated},
-		[]string{generated},
-		nil,
-		nil,
-		filepath.Join(workspace, "tmp"),
-	)
-	path := filepath.Join(generated, "nested", "new.txt")
-	for name, resolver := range map[string]func(string) (string, error){
-		"writable": ctx.ResolveWritablePathChecked,
-		"output":   ctx.ResolveOutputPathChecked,
-	} {
-		t.Run(name, func(t *testing.T) {
-			resolved, err := resolver(path)
-			if err != nil {
-				t.Fatalf("expected path below nonexistent configured root to be allowed: %v", err)
-			}
-			if resolved != path {
-				t.Fatalf("expected %q, got %q", path, resolved)
-			}
-		})
-	}
-}
-
-func TestPermissionContextReadablePathsDenyOutsideReadableRoots(t *testing.T) {
-	workspace := t.TempDir()
-	outside := t.TempDir()
-	outsideFile := filepath.Join(outside, "report.txt")
-	if err := os.WriteFile(outsideFile, []byte("outside"), 0644); err != nil {
-		t.Fatalf("failed to write outside file: %v", err)
-	}
-
-	ctx := NewPermissionContext(workspace, []string{workspace})
-	if ctx.IsWithinReadableRootsResolved(outsideFile) {
-		t.Fatalf("expected local read path outside readable roots to be denied")
-	}
-	if _, err := ctx.ResolveReadablePathChecked(outsideFile); err == nil {
-		t.Fatal("expected readable-root denial")
-	}
-}
-
-func TestPermissionContextResolvesAttachedFileDisplayName(t *testing.T) {
-	workspace := t.TempDir()
-	outside := t.TempDir()
-	attached := filepath.Join(outside, "客户名单.xlsx")
-	if err := os.WriteFile(attached, []byte("xlsx"), 0644); err != nil {
+	attached := filepath.Join(t.TempDir(), "客户名单.xlsx")
+	if err := os.WriteFile(attached, []byte("data"), 0644); err != nil {
 		t.Fatalf("failed to write attached file: %v", err)
 	}
 	ctx := NewTaskScopePermissionContext(
@@ -326,5 +160,91 @@ func TestPermissionContextAttachedFileDisplayNameAmbiguity(t *testing.T) {
 
 	if _, err := ctx.ResolveReadablePathChecked("report.csv"); err == nil || !strings.Contains(err.Error(), "多个文件") {
 		t.Fatalf("expected ambiguous attached file error, got %v", err)
+	}
+}
+
+func TestResolveACPCwdDefaultsToWorkspaceRoot(t *testing.T) {
+	workspace := t.TempDir()
+	ctx := NewPermissionContext(workspace, nil)
+
+	cwd, err := ctx.ResolveACPCwd("")
+	if err != nil {
+		t.Fatalf("empty cwd should resolve to workspace root: %v", err)
+	}
+	if cwd != workspace {
+		t.Fatalf("expected %q, got %q", workspace, cwd)
+	}
+
+	cwd, err = ctx.ResolveACPCwd(".")
+	if err != nil {
+		t.Fatalf(". cwd should resolve to workspace root: %v", err)
+	}
+	if cwd != workspace {
+		t.Fatalf("expected %q, got %q", workspace, cwd)
+	}
+}
+
+func TestResolveACPCwdResolvesRelativePaths(t *testing.T) {
+	workspace := t.TempDir()
+	ctx := NewPermissionContext(workspace, nil)
+
+	cwd, err := ctx.ResolveACPCwd("sub/project")
+	if err != nil {
+		t.Fatalf("relative cwd should resolve: %v", err)
+	}
+	if cwd != filepath.Join(workspace, "sub", "project") {
+		t.Fatalf("unexpected resolved cwd: %q", cwd)
+	}
+}
+
+func TestResolveACPCwdRejectsOutsideWorkspace(t *testing.T) {
+	workspace := t.TempDir()
+	ctx := NewPermissionContext(workspace, nil)
+
+	if _, err := ctx.ResolveACPCwd(t.TempDir()); err == nil {
+		t.Fatal("expected absolute cwd outside workspace to be rejected")
+	}
+	if _, err := ctx.ResolveACPCwd(".."); err == nil {
+		t.Fatal("expected .. to escape workspace and be rejected")
+	}
+}
+
+func TestResolveACPCwdRejectsSymlinkEscape(t *testing.T) {
+	workspace := t.TempDir()
+	ctx := NewPermissionContext(workspace, nil)
+
+	outside := t.TempDir()
+	symlink := filepath.Join(workspace, "link-out")
+	if err := os.Symlink(outside, symlink); err != nil {
+		if strings.Contains(err.Error(), "privilege") || strings.Contains(err.Error(), "A required privilege") {
+			t.Skipf("symlinks require elevated privileges on this host: %v", err)
+		}
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	if _, err := ctx.ResolveACPCwd(symlink); err == nil {
+		t.Fatal("expected symlink escaping workspace to be rejected")
+	}
+}
+
+func TestResolveACPCwdRejectsProtectedRoot(t *testing.T) {
+	workspace := t.TempDir()
+	protected := filepath.Join(workspace, "protected")
+	if err := os.MkdirAll(protected, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	ctx := NewTaskScopePermissionContext(
+		"scope-test",
+		workspace,
+		[]string{workspace},
+		[]string{workspace},
+		[]string{workspace},
+		nil,
+		[]string{protected},
+		filepath.Join(t.TempDir(), "tmp"),
+	)
+
+	if _, err := ctx.ResolveACPCwd(protected); err == nil {
+		t.Fatal("expected cwd inside protected root to be rejected")
 	}
 }

@@ -434,6 +434,10 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	toolCtx = tool.ContextWithModelCapabilities(toolCtx, rt.modelCapabilities)
 	toolCtx = tool.ContextWithToolSessionState(toolCtx, rt.toolSessionState)
 	toolCtx = tool.ContextWithModelContentStore(toolCtx, rt.modelContentStore)
+	toolCtx = ContextWithEventSink(toolCtx, rt.sink)
+	toolCtx = tool.ContextWithACPEventEmitter(toolCtx, func(e tool.ACPEvent) {
+		rt.sink.Emit(MapACPEvent(e))
+	})
 	toolCtx = tool.ContextWithToolExecutionIdentity(toolCtx, tool.ToolExecutionIdentity{
 		RunID:      rt.runID,
 		ToolCallID: result.ToolCallID,

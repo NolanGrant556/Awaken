@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"awaken/src/acp"
 	"awaken/src/agentcore"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
@@ -18,6 +19,7 @@ type runHandlers struct {
 	runService             *awruntime.RunService
 	skillRegistry          *skills.SkillRegistry
 	syncSkillsForWorkspace func(string)
+	acpManager             *acp.Manager
 }
 
 // Keep the local name for the SSE cursor conversion below while sharing the
@@ -399,6 +401,9 @@ func (h runHandlers) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 		}
 		writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to cancel run")
 		return
+	}
+	if h.acpManager != nil && run.ThreadID != "" {
+		h.acpManager.CancelAllForThread(r.Context(), run.ThreadID)
 	}
 
 	writeJSON(w, http.StatusOK, run)

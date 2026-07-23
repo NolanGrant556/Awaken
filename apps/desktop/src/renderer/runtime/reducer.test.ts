@@ -2316,3 +2316,77 @@ describe("runtime reducer thread title lifecycle", () => {
     expect(otherThread?.label).toBe("other thread");
   });
 });
+
+describe("runtime reducer ACP permission gate", () => {
+  it("creates an acp-permission external interaction with options", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "delegate" },
+      { type: "run/created", run: makeRun() },
+      runEvent({
+        type: "AWAKEN_ACP_PERMISSION_REQUESTED",
+        runId: "run-1",
+        interactionId: "perm-1",
+        toolCallId: "call-acp-1",
+        acpRunnerId: "claude-code",
+        message: "Claude Code wants to edit files",
+        acpPermissionOptions: [
+          { optionId: "allow", name: "Allow" },
+          { optionId: "deny", name: "Deny" },
+        ],
+      }),
+    ]);
+
+    expect(state.externalInteractions).toHaveLength(1);
+    expect(state.externalInteractions[0]).toMatchObject({
+      id: "perm-1",
+      kind: "acp-permission",
+      title: "Claude Code wants to edit files",
+      provider: "claude-code",
+      recoveries: ["acp_option"],
+      options: [
+        { optionId: "allow", name: "Allow" },
+        { optionId: "deny", name: "Deny" },
+      ],
+    });
+  });
+
+  it("removes the acp-permission interaction on resolution", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "delegate" },
+      { type: "run/created", run: makeRun() },
+      runEvent({
+        type: "AWAKEN_ACP_PERMISSION_REQUESTED",
+        runId: "run-1",
+        interactionId: "perm-1",
+        acpRunnerId: "claude-code",
+        acpPermissionOptions: [{ optionId: "allow", name: "Allow" }],
+      }),
+      runEvent({
+        type: "AWAKEN_ACP_PERMISSION_RESOLVED",
+        runId: "run-1",
+        interactionId: "perm-1",
+        status: "allow",
+      }),
+    ]);
+
+    expect(state.externalInteractions).toHaveLength(0);
+  });
+
+  it("does not create ACP permission interactions after the run is finished", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "delegate" },
+      { type: "run/created", run: makeRun() },
+      { type: "run/cancelRequested" },
+      { type: "run/cancelSync", run: makeRun({ status: "cancelled" }) },
+      runEvent({
+        type: "AWAKEN_ACP_PERMISSION_REQUESTED",
+        runId: "run-1",
+        interactionId: "perm-1",
+        acpRunnerId: "claude-code",
+        acpPermissionOptions: [{ optionId: "allow", name: "Allow" }],
+      }),
+    ]);
+
+    expect(state.externalInteractions).toHaveLength(0);
+  });
+});

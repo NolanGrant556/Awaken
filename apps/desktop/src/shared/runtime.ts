@@ -1035,6 +1035,56 @@ export type SearchProviderTestResult = {
   message: string;
 };
 
+export type ACPPermissionMode = "ask" | "deny";
+
+export type ACPRunnerEnvVar = {
+  key: string;
+  has_value: boolean;
+};
+
+// ACPRunnerView is the redacted runner DTO returned by Core. Secret env values
+// are never sent to the Renderer; only the key and a has_value flag are exposed.
+export type ACPRunnerView = {
+  id: string;
+  enabled: boolean;
+  command: string;
+  args: string[];
+  env: ACPRunnerEnvVar[];
+  permission_mode: ACPPermissionMode;
+  startup_timeout_seconds: number;
+  turn_timeout_seconds: number;
+  max_frame_bytes: number;
+};
+
+// ACPRunnerCreateRequest is the write DTO used when creating a runner.
+// It carries full env values because it originates from user input in the
+// settings UI, not from a redacted API response.
+export type ACPRunnerCreateRequest = {
+  id: string;
+  enabled: boolean;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  permission_mode: ACPPermissionMode;
+  startup_timeout_seconds: number;
+  turn_timeout_seconds: number;
+  max_frame_bytes: number;
+};
+
+export type ACPRunnersSettings = {
+  runners: ACPRunnerView[];
+};
+
+export type ACPRunnerProbeResult = {
+  runner_id: string;
+  ready: boolean;
+};
+
+export type ACPRunnerUpdateRequest = Partial<Omit<ACPRunnerCreateRequest, "id" | "env">> & {
+  env_set?: Record<string, string>;
+  env_remove?: string[];
+};
+
 export type AwakenBridge = {
   platform: DesktopPlatform;
   onSelectAllRequested: (callback: () => void) => () => void;
@@ -1046,6 +1096,16 @@ export type AwakenBridge = {
   testSearchProvider: (
     request: SearchProviderTestRequest,
   ) => Promise<SearchProviderTestResult>;
+  getACPRunners: () => Promise<ACPRunnersSettings>;
+  createACPRunner: (
+    request: ACPRunnerCreateRequest,
+  ) => Promise<ACPRunnerView>;
+  updateACPRunner: (
+    runnerId: string,
+    request: ACPRunnerUpdateRequest,
+  ) => Promise<ACPRunnerView>;
+  deleteACPRunner: (runnerId: string) => Promise<void>;
+  probeACPRunner: (runnerId: string) => Promise<ACPRunnerProbeResult>;
   getRun: (runId: string) => Promise<RuntimeRun>;
   getThreadTranscript: (threadId: string) => Promise<RuntimeThreadTranscript>;
   listThreads: () => Promise<RuntimeThread[]>;
@@ -1072,6 +1132,12 @@ export type AwakenBridge = {
     runId: string,
     interactionId: string,
     resolution: "completed" | "cancelled" | "expired" | "failed",
+  ) => Promise<void>;
+  resolveACPPermission: (
+    runId: string,
+    interactionId: string,
+    optionId: string,
+    cancelled: boolean,
   ) => Promise<void>;
   subscribeRun: (
     runId: string,

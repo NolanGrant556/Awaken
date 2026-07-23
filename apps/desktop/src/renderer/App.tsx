@@ -75,7 +75,12 @@ import {
   type RuntimeAction,
   type UserQuestionItem,
 } from "./runtime/reducer";
-import type { PromptNarrativeToken, RunNarrativeItem } from "./run-narrative";
+import type {
+  ACPDisplayStatus,
+  PromptNarrativeToken,
+  RunNarrativeItem,
+} from "./run-narrative";
+import type { ToolDisplayState } from "../shared/toolStatus";
 import { projectPetActivity } from "./pets/pet-activity-projector";
 import {
   projectNarrativeTurnBodySegments,
@@ -2099,6 +2104,36 @@ export function App() {
     }
   }
 
+  async function resolveActiveACPPermission(
+    optionId: string,
+    cancelled = false,
+  ): Promise<void> {
+    if (!runtimeState.runId || !activeExternalInteraction) {
+      return;
+    }
+    if (resolvingExternalInteractionId === activeExternalInteraction.id) {
+      return;
+    }
+    setNotice(null);
+    setResolvingExternalInteractionId(activeExternalInteraction.id);
+    try {
+      await runtimeClient.resolveACPPermission(
+        runtimeState.runId,
+        activeExternalInteraction.id,
+        optionId,
+        cancelled,
+      );
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Failed to resolve ACP permission",
+      );
+    } finally {
+      setResolvingExternalInteractionId(null);
+    }
+  }
+
   useEffect(() => {
     if (!desktopReady) {
       return;
@@ -3983,6 +4018,29 @@ export function App() {
         />
       );
     }
+    if (item.kind === "acpSession") {
+      const title = item.message
+        ? `${acpRunnerLabel(item.runnerId)} · ${item.message}`
+        : acpRunnerLabel(item.runnerId);
+      return (
+        <ToolTraceLine
+          key={key}
+          title={title}
+          detail={item.sessionId}
+          status={acpDisplayStatusToToolStatus(item.status)}
+        />
+      );
+    }
+    if (item.kind === "acpTool") {
+      return (
+        <ToolTraceLine
+          key={key}
+          title={item.title}
+          detail={item.detail}
+          status={acpDisplayStatusToToolStatus(item.status)}
+        />
+      );
+    }
     if (item.kind === "deliverables") {
       const threadId = runtimeState.activeThreadId ?? runtimeState.threadId;
       return (
@@ -4099,6 +4157,30 @@ export function App() {
     return output || fallback || result;
   }
 
+  function acpRunnerLabel(runnerId: string): string {
+    return runnerId
+      .split("-")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+  }
+
+  function acpDisplayStatusToToolStatus(status: ACPDisplayStatus): ToolDisplayState {
+    switch (status) {
+      case "started":
+      case "active":
+        return "active";
+      case "done":
+      case "closed":
+        return "done";
+      case "error":
+        return "error";
+      case "interrupted":
+        return "interrupted";
+      default:
+        return "active";
+    }
+  }
+
   const platform = runtimeClient.platform as PlatformKind;
   const composerBarAttachments = composerAttachmentViews(composerAttachments);
   const layoutStyle = {
@@ -4110,6 +4192,7 @@ export function App() {
     if (activeExternalInteraction) {
       const resolving =
         resolvingExternalInteractionId === activeExternalInteraction.id;
+      const isACPPermission = activeExternalInteraction.kind === "acp-permission";
       return (
         <ExternalActionGate
           compact
@@ -4119,7 +4202,14 @@ export function App() {
             void resolveActiveExternalInteraction("completed");
           }}
           onCancel={() => {
-            void resolveActiveExternalInteraction("cancelled");
+            if (isACPPermission) {
+              void resolveActiveACPPermission("", true);
+            } else {
+              void resolveActiveExternalInteraction("cancelled");
+            }
+          }}
+          onResolveACPOption={(optionId) => {
+            void resolveActiveACPPermission(optionId);
           }}
         />
       );

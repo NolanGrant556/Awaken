@@ -5,6 +5,7 @@ import {
   type ToolDisplayState,
 } from "../../shared/toolStatus";
 import type {
+  ACPDisplayStatus,
   CompactBoundaryItem,
   PromptNarrativeToken,
   RunAction,
@@ -322,6 +323,17 @@ export function projectAguiEventToNarrative(
     case "AWAKEN_MEMORY_DREAM_CANCELLED":
     case "AWAKEN_MEMORY_DREAM_INTERRUPTED":
       return commitDreamReceipt(base, event);
+    case "AWAKEN_ACP_SESSION_CHANGED":
+      return commitACPSession(base, event);
+    case "AWAKEN_ACP_TURN_CHANGED":
+      return commitACPTurn(base, event);
+    case "AWAKEN_ACP_TOOL_CHANGED":
+      return commitACPTool(base, event);
+    case "AWAKEN_ACP_PERMISSION_REQUESTED":
+    case "AWAKEN_ACP_PERMISSION_RESOLVED":
+      // Permission gates are handled by the runtime reducer; the narrative only
+      // needs to avoid treating these as unknown events.
+      return base;
     case "RUN_FINISHED":
       return markLatestAnswerFinal(commitActive(base, "done"), event);
     case "RUN_ERROR":
@@ -399,6 +411,100 @@ function commitDreamReceipt(state: RunNarrativeState, event: AguiEvent): RunNarr
     title,
     detail,
     status: completed ? "done" : "error",
+  };
+  return { ...state, committedItems: upsertCommitted(state.committedItems, item) };
+}
+
+function acpSessionItemId(event: AguiEvent): string {
+  const scope = eventScope(event);
+  const runnerId = event.acpRunnerId ?? "unknown";
+  const sessionId = event.acpSessionId ?? event.toolCallId ?? "current";
+  return `acp-session:${scope}:${runnerId}:${sessionId}`;
+}
+
+function acpToolItemId(event: AguiEvent): string {
+  const scope = eventScope(event);
+  const runnerId = event.acpRunnerId ?? "unknown";
+  const sessionId = event.acpSessionId ?? event.toolCallId ?? "current";
+  const toolCallId = event.acpToolCallId ?? event.toolCallId ?? event.toolCallName ?? "snapshot";
+  return `acp-tool:${scope}:${runnerId}:${sessionId}:${toolCallId}`;
+}
+
+function acpDisplayStatus(event: AguiEvent): ACPDisplayStatus {
+  const status = event.status?.toLowerCase();
+  switch (status) {
+    case "started":
+      return "started";
+    case "active":
+      return "active";
+    case "finished":
+    case "done":
+      return "done";
+    case "closed":
+      return "closed";
+    case "interrupted":
+      return "interrupted";
+    case "error":
+    case "failed":
+      return "error";
+    default:
+      return "active";
+  }
+}
+
+function acpRunnerLabel(runnerId?: string): string {
+  if (!runnerId) {
+    return "External agent";
+  }
+  return runnerId
+    .split("-")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function commitACPSession(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
+  const status = acpDisplayStatus(event);
+  const runnerId = event.acpRunnerId ?? "unknown";
+  const message = event.message ?? event.content ?? "";
+  const item: RunNarrativeItem = {
+    kind: "acpSession",
+    id: acpSessionItemId(event),
+    runnerId,
+    sessionId: event.acpSessionId,
+    status,
+    message: message || undefined,
+  };
+  return { ...state, committedItems: upsertCommitted(state.committedItems, item) };
+}
+
+function commitACPTurn(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
+  const status = acpDisplayStatus(event);
+  const runnerId = event.acpRunnerId ?? "unknown";
+  const message = event.message ?? event.content ?? "";
+  const item: RunNarrativeItem = {
+    kind: "acpSession",
+    id: acpSessionItemId(event),
+    runnerId,
+    sessionId: event.acpSessionId,
+    status,
+    message: message || undefined,
+  };
+  return { ...state, committedItems: upsertCommitted(state.committedItems, item) };
+}
+
+function commitACPTool(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
+  const runnerId = event.acpRunnerId ?? "unknown";
+  const title = event.toolCallName || event.content || "External agent tool";
+  const detail = event.message && event.message !== event.content ? event.message : undefined;
+  const item: RunNarrativeItem = {
+    kind: "acpTool",
+    id: acpToolItemId(event),
+    runnerId,
+    sessionId: event.acpSessionId,
+    acpToolCallId: event.acpToolCallId,
+    title,
+    detail,
+    status: "active",
   };
   return { ...state, committedItems: upsertCommitted(state.committedItems, item) };
 }
@@ -587,6 +693,8 @@ function applyStatus(
       return item;
     case "tool":
     case "memoryReceipt":
+    case "acpSession":
+    case "acpTool":
       return status === "done" || status === "error" ? { ...item, status } : item;
     case "answer":
       return status === "done" || status === "error" ? { ...item, status } : item;

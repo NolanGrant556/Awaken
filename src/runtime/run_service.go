@@ -418,6 +418,19 @@ func (s *RunService) isThreadActive(threadID string) bool {
 	return thread != nil && thread.activeRunID != ""
 }
 
+// ActiveRunCount returns the number of threads that currently have an active run.
+func (s *RunService) ActiveRunCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	count := 0
+	for _, thread := range s.threads {
+		if thread.activeRunID != "" {
+			count++
+		}
+	}
+	return count
+}
+
 func (s *RunService) closeAndEvictDeletedThread(threadID string) error {
 	s.mu.RLock()
 	thread := s.threads[threadID]

@@ -1,6 +1,6 @@
 # AwakenProjectSkillFolder
 
-项目内容视图的白色竖向档案资料夹入口。组件用顶部标签耳、后封套、两层纸张、较低的前封面和右上角圆形穿孔建立文件夹轮廓，只负责造型、项目名称、数量文案和交互回调，不读取项目目录，也不拥有 Dialog、Skill 或 Memory 预览状态。
+旧项目 Skills API 的兼容语义外壳，视觉和交互统一委托给原子组件 `AwakenFolder`。新 consumer 应直接使用 `AwakenFolder`；本组件只负责把 `projectName`、`skillCount` 和 `countLabel` 映射为通用名称与辅助信息。
 
 ## Props
 

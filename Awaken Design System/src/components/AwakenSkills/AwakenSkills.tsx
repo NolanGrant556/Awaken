@@ -1,7 +1,7 @@
 import "./AwakenSkills.css";
 import { Search } from "lucide-react";
 import type { HTMLAttributes } from "react";
-import { AwakenProjectSkillFolder } from "../AwakenProjectSkillFolder";
+import { AwakenFolder } from "../AwakenFolder";
 import { AwakenProjectSkillsDialog } from "../AwakenProjectSkillsDialog";
 import { AwakenSkillCard } from "../AwakenSkillCard";
 import type {
@@ -170,10 +170,10 @@ export function AwakenSkills({
           visibleProjects.length > 0 ? (
             <div className="aw-skills__folder-grid">
               {visibleProjects.map((project) => (
-                <AwakenProjectSkillFolder
+                <AwakenFolder
                   key={project.id}
-                  projectName={project.name}
-                  skillCount={project.skills.length}
+                  label={project.name}
+                  meta={`${project.skills.length} ${project.skills.length === 1 ? "Skill" : "Skills"}`}
                   open={openProjectId === project.id}
                   onOpen={() => onProjectOpenChange(project.id)}
                 />

@@ -1,7 +1,7 @@
 import "./AwakenSkillCard.css";
 import { FileText, Wrench } from "lucide-react";
 import type { HTMLAttributes } from "react";
-import { AwakenSkillToggle } from "../AwakenSkillToggle";
+import { AwakenSwitch } from "../AwakenSwitch";
 import type { AwakenSkillItem } from "../AwakenSkills/AwakenSkills.types";
 
 export type AwakenSkillCardProps = Omit<
@@ -67,7 +67,7 @@ export function AwakenSkillCard({
         </div>
       )}
       <div className="aw-skill-card__actions">
-        <AwakenSkillToggle
+        <AwakenSwitch
           checked={skill.enabled}
           label={skill.name}
           busy={skill.busy}

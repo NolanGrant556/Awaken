@@ -1,4 +1,5 @@
 import "./AwakenSettingsSwitch.css";
+import { AwakenSwitch } from "../AwakenSwitch";
 
 export type AwakenSettingsSwitchProps = {
   label: string;
@@ -22,24 +23,12 @@ export function AwakenSettingsSwitch({
   onCheckedChange,
 }: AwakenSettingsSwitchProps) {
   const unavailable = disabled || busy || !onCheckedChange;
-  const control = (
-    <span className="configured-model-switch">
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={unavailable}
-        aria-label={ariaLabel ?? label}
-        aria-busy={busy || undefined}
-        onChange={(event) => onCheckedChange?.(event.target.checked)}
-      />
-      <span />
-    </span>
-  );
+  const control = <AwakenSwitch checked={checked} label={ariaLabel ?? label} busy={busy} disabled={unavailable} size="compact" onCheckedChange={onCheckedChange} />;
 
   if (variant === "control") return control;
 
   return (
-    <label
+    <div
       className={[
         "aw-settings-switch",
         `aw-settings-switch--${variant}`,
@@ -51,6 +40,6 @@ export function AwakenSettingsSwitch({
         {description ? <span>{description}</span> : null}
       </span>
       {control}
-    </label>
+    </div>
   );
 }

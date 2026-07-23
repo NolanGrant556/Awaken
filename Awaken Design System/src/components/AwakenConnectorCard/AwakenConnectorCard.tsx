@@ -1,7 +1,7 @@
 import "./AwakenConnectorCard.css";
 import { Check, Plus, Plug, Server, Settings, X } from "lucide-react";
 import { AwakenConnectorBrandIcon } from "../AwakenConnectorBrandIcon";
-import { AwakenConnectorToggle } from "../AwakenConnectorToggle";
+import { AwakenSwitch } from "../AwakenSwitch";
 import type { AwakenConnectorCardItem } from "../AwakenConnectors/AwakenConnectors.types";
 
 export type AwakenConnectorCardProps = {
@@ -85,7 +85,7 @@ export function AwakenConnectorCard({
       </span>
       {item.variant === "server" ? (
         <span className="aw-connector-card__actions">
-          <AwakenConnectorToggle
+          <AwakenSwitch
             checked={item.enabled ?? false}
             label={item.displayName}
             busy={item.busy}

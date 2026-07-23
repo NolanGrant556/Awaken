@@ -217,7 +217,7 @@ describe("AwakenMemorySettings recent activity disclosure", () => {
     act(() => entries[1]?.click());
     const persistentLibraryDialog = document.querySelector<HTMLElement>(".memory-library-dialog");
     const persistentBackdrop = persistentLibraryDialog?.closest(".aw-dialog-backdrop");
-    const projectFolder = document.querySelector<HTMLButtonElement>(".aw-project-skill-folder");
+    const projectFolder = document.querySelector<HTMLButtonElement>(".aw-folder");
     expect(projectFolder?.textContent).toContain("这是一个名称很长的项目记忆文件夹");
     expect(projectFolder?.textContent).toContain("1 个主题");
     expect(projectFolder?.dataset.size).toBe("compact");
@@ -268,7 +268,7 @@ describe("AwakenMemorySettings recent activity disclosure", () => {
     expect(document.querySelector(".memory-library-dialog")).toBe(persistentLibraryDialog);
     expect(document.querySelector(".memory-library-dialog")?.closest(".aw-dialog-backdrop")).toBe(persistentBackdrop);
     expect(document.querySelector(".memory-library-dialog")?.textContent).toContain("项目记忆");
-    expect(document.querySelector(".aw-project-skill-folder")?.textContent).toContain("这是一个名称很长的项目记忆文件夹");
+    expect(document.querySelector(".aw-folder")?.textContent).toContain("这是一个名称很长的项目记忆文件夹");
     expect(document.querySelector(".memory-topic-row")).toBeNull();
   });
 });

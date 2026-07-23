@@ -14,8 +14,10 @@ import {
   AwakenCliConnectorDetailDialog,
   AwakenConnectors,
   AwakenDialog as Dialog,
+  AwakenFolder,
   AwakenMcpConfigDialog,
   AwakenMcpSettingsDialog,
+  AwakenSwitch,
   type AwakenCliConnectorAction,
   type AwakenConnectorCardItem,
 } from "@awaken/design-system";
@@ -1154,71 +1156,73 @@ export function ExtensionsView({
           </span>
         )}
         <div className="extension-card-actions extension-card-actions-skill">
-          <button
-            type="button"
-            className={`mcp-toggle-switch${toggledOn ? " mcp-toggle-switch-on" : " mcp-toggle-switch-off"}`}
-            aria-label={toggledOn ? `停用 ${skillName}` : `启用 ${skillName}`}
+          <AwakenSwitch
+            checked={toggledOn}
+            label={skillName}
             disabled={busySkillId === skill.id}
-            onClick={() => {
-              void handleToggleSkill(skill, skillKey, !toggledOn);
+            onCheckedChange={(enabled) => {
+              void handleToggleSkill(skill, skillKey, enabled);
             }}
-          >
-            <span className="mcp-toggle-switch-thumb" />
-          </button>
+          />
         </div>
       </article>
     );
   }
 
-  function renderProjectSkillGroup(group: VisibleSkillProjectGroup, index: number) {
+  function projectSkillCountText(group: VisibleSkillProjectGroup) {
+    if (group.errorMessage) {
+      return "读取失败";
+    }
+    if (normalizedQuery && group.visibleSkills.length !== group.skills.length) {
+      return `${group.visibleSkills.length}/${group.skills.length} Skill`;
+    }
+    return `${group.skills.length} Skill`;
+  }
+
+  function renderProjectSkillFolder(group: VisibleSkillProjectGroup, index: number) {
     const expanded = expandedProjectRoots.has(group.root);
     const bodyId = `skill-project-group-${index}`;
-    let countText = `${group.skills.length} Skill`;
-    if (group.errorMessage) {
-      countText = "读取失败";
-    } else if (
-      normalizedQuery &&
-      group.visibleSkills.length !== group.skills.length
-    ) {
-      countText = `${group.visibleSkills.length}/${group.skills.length} Skill`;
-    }
     return (
-      <section className="skill-project-group" key={group.root}>
-        <button
-          type="button"
-          className="skill-project-toggle"
-          aria-expanded={expanded}
-          aria-controls={bodyId}
-          onClick={() => toggleProjectSkillGroup(group.root)}
-        >
-          <span className="skill-project-chevron" aria-hidden="true">
-            {expanded ? (
-              <ChevronDown size={17} strokeWidth={1.9} />
-            ) : (
-              <ChevronRight size={17} strokeWidth={1.9} />
-            )}
-          </span>
+      <AwakenFolder
+        key={group.root}
+        label={group.label}
+        meta={projectSkillCountText(group)}
+        size="compact"
+        open={expanded}
+        aria-label={`${expanded ? "收起" : "打开"}${group.label} 项目 Skills`}
+        aria-controls={bodyId}
+        onOpen={() => toggleProjectSkillGroup(group.root)}
+      />
+    );
+  }
+
+  function renderProjectSkillBody(group: VisibleSkillProjectGroup, index: number) {
+    if (!expandedProjectRoots.has(group.root)) {
+      return null;
+    }
+    const bodyId = `skill-project-group-${index}`;
+    return (
+      <section className="skill-project-panel" id={bodyId} key={group.root}>
+        <header className="skill-project-panel-heading">
           <span className="skill-project-copy">
             <span className="skill-project-name">{group.label}</span>
             <span className="skill-project-path" title={group.root}>
               {group.root}
             </span>
           </span>
-          <span className="skill-project-count">{countText}</span>
-        </button>
-        {expanded ? (
-          <div className="skill-project-body" id={bodyId}>
-            {group.visibleSkills.length > 0 ? (
-              <div className="extension-grid">
-                {group.visibleSkills.map((skill) => renderSkillCard(skill, group.root))}
-              </div>
-            ) : (
-              <div className="extension-empty">
-                {group.errorMessage ?? "暂无项目 Skills"}
-              </div>
-            )}
-          </div>
-        ) : null}
+          <span className="skill-project-count">{projectSkillCountText(group)}</span>
+        </header>
+        <div className="skill-project-body">
+          {group.visibleSkills.length > 0 ? (
+            <div className="extension-grid">
+              {group.visibleSkills.map((skill) => renderSkillCard(skill, group.root))}
+            </div>
+          ) : (
+            <div className="extension-empty">
+              {group.errorMessage ?? "暂无项目 Skills"}
+            </div>
+          )}
+        </div>
       </section>
     );
   }
@@ -1471,13 +1475,18 @@ export function ExtensionsView({
               </section>
             ) : activeSkillView === "project" ? (
               <section className="extension-section" aria-label="项目 Skills">
-                <div className="skill-project-list">
-                  {visibleProjectSkillGroups.length > 0 ? (
-                    visibleProjectSkillGroups.map(renderProjectSkillGroup)
-                  ) : (
-                    <div className="extension-empty">暂无项目 Skills</div>
-                  )}
-                </div>
+                {visibleProjectSkillGroups.length > 0 ? (
+                  <>
+                    <div className="skill-project-folder-grid">
+                      {visibleProjectSkillGroups.map(renderProjectSkillFolder)}
+                    </div>
+                    <div className="skill-project-panels">
+                      {visibleProjectSkillGroups.map(renderProjectSkillBody)}
+                    </div>
+                  </>
+                ) : (
+                  <div className="extension-empty">暂无项目 Skills</div>
+                )}
               </section>
             ) : activeSkillView === "agents" ? (
               <section className="extension-section" aria-label="Agents Skills">

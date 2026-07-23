@@ -1,5 +1,6 @@
 import "./AwakenSearchSettings.css";
 import { Search, Wifi } from "lucide-react";
+import { AwakenSwitch } from "../AwakenSwitch";
 
 export type AwakenSearchProviderItem = {
   id: string;
@@ -59,16 +60,12 @@ export function AwakenSearchSettings({
                 <Wifi size={15} strokeWidth={1.9} />
                 {provider.testing ? "测试中…" : "测试连接"}
               </button>
-              <button
-                type="button"
-                className={`mcp-toggle-switch${provider.enabled ? " mcp-toggle-switch-on" : " mcp-toggle-switch-off"}`}
-                aria-label={`${provider.enabled ? "关闭" : "开启"} ${provider.name}`}
-                aria-pressed={provider.enabled}
+              <AwakenSwitch
+                checked={provider.enabled}
+                label={provider.name}
                 disabled={provider.disabled || provider.toggleDisabled}
-                onClick={() => onToggleProvider?.(provider.id)}
-              >
-                <span className="mcp-toggle-switch-thumb" />
-              </button>
+                onCheckedChange={() => onToggleProvider?.(provider.id)}
+              />
             </div>
           </article>
         ))}

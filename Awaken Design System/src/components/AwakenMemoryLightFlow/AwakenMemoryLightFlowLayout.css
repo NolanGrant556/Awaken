@@ -129,7 +129,7 @@
   line-height: 1.45;
 }
 
-.aw-memory-light-flow-layout__content .memory-settings-switch-row .mcp-toggle-switch {
+.aw-memory-light-flow-layout__content .memory-settings-switch-row .aw-switch {
   flex: 0 0 auto;
 }
 

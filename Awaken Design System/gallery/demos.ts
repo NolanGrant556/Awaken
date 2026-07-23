@@ -15,6 +15,7 @@ export { AwakenDeliverableCardDemo } from "../src/components/AwakenDeliverableCa
 export { AwakenDeliverableListDemo } from "../src/components/AwakenDeliverableList/AwakenDeliverableList.demo";
 export { AwakenDisclosureDemo } from "../src/components/AwakenDisclosure/AwakenDisclosure.demo";
 export { AwakenExecutionFeedDemo } from "../src/components/AwakenExecutionFeed/AwakenExecutionFeed.demo";
+export { AwakenFolderDemo } from "../src/components/AwakenFolder/AwakenFolder.demo";
 export { AwakenInspectorRailDemo } from "../src/components/AwakenInspectorRail/AwakenInspectorRail.demo";
 export { AwakenMcpConfigDialogDemo } from "../src/components/AwakenMcpConfigDialog/AwakenMcpConfigDialog.demo";
 export { AwakenMcpSettingsDialogDemo } from "../src/components/AwakenMcpSettingsDialog/AwakenMcpSettingsDialog.demo";
@@ -44,6 +45,7 @@ export { AwakenSkillCardDemo } from "../src/components/AwakenSkillCard/AwakenSki
 export { AwakenSkillPreviewDialogDemo } from "../src/components/AwakenSkillPreviewDialog/AwakenSkillPreviewDialog.demo";
 export { AwakenSkillToggleDemo } from "../src/components/AwakenSkillToggle/AwakenSkillToggle.demo";
 export { AwakenSkillsDemo } from "../src/components/AwakenSkills/AwakenSkills.demo";
+export { AwakenSwitchDemo } from "../src/components/AwakenSwitch/AwakenSwitch.demo";
 export { AwakenTaskWelcomeDemo } from "../src/components/AwakenTaskWelcome/AwakenTaskWelcome.demo";
 export { AwakenThemeChoiceGroupDemo } from "../src/components/AwakenThemeChoiceGroup/AwakenThemeChoiceGroup.demo";
 export { AwakenThoughtTraceDemo } from "../src/components/AwakenThoughtTrace/AwakenThoughtTrace.demo";

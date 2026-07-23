@@ -5,11 +5,39 @@ import type {
   ModelProvider,
   RuntimeModelProfileSummary,
 } from "../../shared/runtime";
+import type { RuntimeClient } from "../runtime/client";
 import {
   AppearanceSettings,
+  DesktopSettingsDialog,
   draftFromExistingProfile,
   toSaveRequest,
 } from "./DesktopSettingsDialog";
+
+describe("DesktopSettingsDialog", () => {
+  it("renders the shared full-window settings workspace without a dialog card", () => {
+    const html = renderToString(
+      React.createElement(DesktopSettingsDialog, {
+        open: true,
+        runtimeClient: {} as RuntimeClient,
+        theme: "light",
+        themePreference: "system",
+        themeSaving: false,
+        themeMessage: null,
+        onThemePreferenceChange: vi.fn(),
+        onOpenChange: vi.fn(),
+        onProfilesChanged: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("aw-settings-shell--screen");
+    expect(html).toContain("aw-settings-sidebar");
+    expect(html).toContain("返回应用");
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain('aria-modal="true"');
+    expect(html).not.toContain("aw-dialog__body");
+    expect(html).not.toContain("aw-dialog__foot");
+  });
+});
 
 describe("AppearanceSettings", () => {
   it("renders system, light, and dark theme choices with the selected state", () => {

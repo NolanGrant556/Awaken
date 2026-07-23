@@ -1,0 +1,13 @@
+.aw-settings-section-preview {
+  min-width: 0;
+  height: min(760px, calc(100vh - 170px));
+  min-height: 620px;
+  overflow: hidden;
+  border: 1px solid var(--aw-border-main);
+  background: var(--aw-bg-white);
+}
+
+.aw-settings-section-preview > .aw-settings-shell--embedded {
+  min-height: 0;
+  border: 0;
+}

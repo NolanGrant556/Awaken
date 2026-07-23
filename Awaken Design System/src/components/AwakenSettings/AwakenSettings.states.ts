@@ -1,5 +1,4 @@
 import { AwakenSettingsNavItems } from "../AwakenSettingsNav";
-import { AwakenModelSettingsTabs } from "../AwakenSettingsTabs";
 import type { AwakenSettingsProps } from "./AwakenSettings";
 
 export const AwakenSettingsStates = [
@@ -10,9 +9,8 @@ export const AwakenSettingsStates = [
       navItems: AwakenSettingsNavItems,
       activeSectionId: "models",
       sectionTitle: "模型",
-      tabs: AwakenModelSettingsTabs,
-      activeTabId: "configure",
       children: "模型设置内容",
+      presentation: "embedded",
       onSelectSection: () => undefined,
     },
   },
@@ -24,6 +22,7 @@ export const AwakenSettingsStates = [
       activeSectionId: "appearance",
       sectionTitle: "外观",
       children: "外观设置内容",
+      presentation: "embedded",
       onSelectSection: () => undefined,
     },
   },

@@ -2407,6 +2407,75 @@ button.tool-trace-line:focus-visible {
   }
 }
 
+/* Shared status and switch primitives */
+.extension-state {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  max-width: 100%;
+  min-height: 20px;
+  padding: 0 7px;
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-tertiary);
+  font-size: 11px;
+  font-weight: var(--aw-font-weight-heavy);
+  line-height: 1;
+}
+
+.extension-state-connected,
+.extension-state-loaded {
+  background: color-mix(in srgb, var(--aw-success) 13%, var(--aw-bg-white));
+  color: color-mix(in srgb, var(--aw-success) 72%, var(--aw-text-primary));
+}
+
+.extension-state-failed,
+.extension-state-invalid {
+  background: color-mix(in srgb, var(--aw-error) 10%, var(--aw-bg-white));
+  color: color-mix(in srgb, var(--aw-error) 72%, var(--aw-text-primary));
+}
+
+.extension-state-pending,
+.extension-state-needs-auth,
+.extension-state-disabled_by_policy,
+.extension-state-shadowed {
+  background: color-mix(in srgb, var(--aw-warning) 18%, var(--aw-bg-white));
+  color: color-mix(in srgb, var(--aw-warning) 74%, var(--aw-text-primary));
+}
+
+.mcp-toggle-switch {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--aw-border-main);
+  cursor: pointer;
+  transition:
+    background-color var(--aw-transition-fast),
+    opacity var(--aw-transition-fast);
+}
+
+.mcp-toggle-switch-on { background: var(--aw-success); }
+.mcp-toggle-switch-off { background: var(--aw-error); }
+
+.mcp-toggle-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--aw-bg-white);
+  box-shadow: var(--aw-shadow-control);
+  transition: transform var(--aw-transition-fast);
+}
+
+.mcp-toggle-switch-on .mcp-toggle-switch-thumb { transform: translateX(18px); }
+.mcp-toggle-switch:disabled { cursor: default; opacity: 0.45; }
+.mcp-toggle-switch:focus-visible { outline: 2px solid var(--aw-focus-ring); outline-offset: 2px; }
+
 /* Preview chrome helpers */
 .preview-root {
   position: relative;

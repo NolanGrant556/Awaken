@@ -1,0 +1,17 @@
+.aw-memory-settings-demo__controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aw-space-5);
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+}
+
+.aw-memory-settings-demo__theme-toggle {
+  display: inline-flex;
+  gap: var(--aw-space-2);
+  padding: var(--aw-space-2);
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-bg-fill-light);
+}

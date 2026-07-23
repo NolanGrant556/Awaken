@@ -38,14 +38,3 @@ export function AwakenThemeChoiceGroup({ value, disabled = false, onValueChange 
     </div>
   );
 }
-
-export function AwakenAppearanceSettings(props: AwakenThemeChoiceGroupProps) {
-  return (
-    <section className="appearance-settings" aria-label="外观">
-      <div className="appearance-settings-row">
-        <div className="appearance-settings-copy"><h2>主题</h2></div>
-        <AwakenThemeChoiceGroup {...props} />
-      </div>
-    </section>
-  );
-}

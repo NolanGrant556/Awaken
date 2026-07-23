@@ -17,6 +17,13 @@ describe("MemorySettingsPanel", () => {
     expect(html).toContain("Auto Dream");
     expect(html).toContain("搜索记忆");
     expect(html).toContain("立即整理");
+    expect(html).toContain("aw-memory-light-flow-layout");
+    expect(html).toContain("aw-memory-light-flow-layout__title");
+    expect(html).toContain("aw-memory-light-flow-layout__content");
+    expect(html).toContain("aw-memory-light-flow-layout__scroll-thumb");
+    expect(html).toContain(">记忆</h1>");
+    expect(html).toContain("aw-memory-light-flow--light");
+    expect(html).toContain("<canvas");
     expect(html).not.toContain("<select");
     expect(html).not.toContain("创建记忆");
     expect(html).not.toContain("编辑记忆");
@@ -28,5 +35,17 @@ describe("MemorySettingsPanel", () => {
     expect(memoryDreamStatusLabel("completed")).toBe("整理完成");
     expect(memoryDreamStatusLabel("failed")).toBe("整理失败");
     expect(memoryDreamStatusLabel("cancelled")).toBe("已取消");
+  });
+
+  it("forwards the effective Desktop theme to the decorative light flow", () => {
+    const html = renderToString(
+      React.createElement(MemorySettingsPanel, {
+        runtimeClient: {} as RuntimeClient,
+        theme: "dark",
+      }),
+    );
+
+    expect(html).toContain("aw-memory-light-flow--dark");
+    expect(html).not.toContain("aw-memory-light-flow--light");
   });
 });

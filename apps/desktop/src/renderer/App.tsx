@@ -4244,6 +4244,8 @@ export function App() {
       <div
         className={`desktop-root desktop-root-electron ${inspectorPresentation.rootClassName}`}
         style={layoutStyle}
+        aria-hidden={modelSettingsOpen || undefined}
+        inert={modelSettingsOpen || undefined}
       >
         <AppShell
           platform={platform}
@@ -4765,6 +4767,7 @@ export function App() {
         open={modelSettingsOpen}
         runtimeClient={runtimeClient}
         currentProjectId={activeThreadProjectId ?? selectedProjectId}
+        theme={appearanceTheme}
         themePreference={appearanceThemePreference}
         themeSaving={appearanceSaving}
         themeMessage={appearanceMessage}

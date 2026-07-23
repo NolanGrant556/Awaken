@@ -7,15 +7,16 @@ import {
 } from "react";
 import {
   AwakenAppearanceSettings,
-  AwakenButton as Button,
   AwakenConfiguredModels,
-  AwakenDialog as Dialog,
+  AwakenModelSettings,
   AwakenModelProviderForm,
   AwakenSettings,
+  AwakenSettingsNavItems,
   AwakenSettingsProviderCard,
 } from "@awaken/design-system";
 import { calculateAutoCompactThreshold } from "../../shared/runtime";
 import type {
+  AwakenTheme,
   AwakenThemePreference,
   ModelProfileSaveRequest,
   ModelProvider,
@@ -44,14 +45,6 @@ export type DraftState = {
 
 type ModelSettingsSection = "configure" | "configured";
 type SettingsDialogSection = "models" | "search" | "memory" | "appearance" | "pets";
-
-const SETTINGS_NAV_ITEMS = [
-  { id: "models", label: "模型" },
-  { id: "search", label: "搜索" },
-  { id: "memory", label: "记忆" },
-  { id: "appearance", label: "外观" },
-  { id: "pets", label: "宠物" },
-];
 
 const MODEL_SETTINGS_TABS = [
   { id: "configure", label: "模型配置" },
@@ -109,6 +102,7 @@ function credentialRecoveryMessage(
 type DesktopSettingsDialogProps = {
   open: boolean;
   runtimeClient: RuntimeClient;
+  theme: AwakenTheme;
   themePreference: AwakenThemePreference;
   themeSaving: boolean;
   themeMessage: string | null;
@@ -123,18 +117,21 @@ type DesktopSettingsDialogProps = {
 type AppearanceSettingsProps = {
   themePreference: AwakenThemePreference;
   themeSaving: boolean;
+  message?: string | null;
   onThemePreferenceChange: (theme: AwakenThemePreference) => void;
 };
 
 export function AppearanceSettings({
   themePreference,
   themeSaving,
+  message,
   onThemePreferenceChange,
 }: AppearanceSettingsProps) {
   return (
     <AwakenAppearanceSettings
       value={themePreference}
       disabled={themeSaving}
+      message={message}
       onValueChange={onThemePreferenceChange}
     />
   );
@@ -413,6 +410,7 @@ export function toSaveRequest(
 export function DesktopSettingsDialog({
   open,
   runtimeClient,
+  theme,
   themePreference,
   themeSaving,
   themeMessage,
@@ -446,6 +444,8 @@ export function DesktopSettingsDialog({
   const [message, setMessage] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+  const settingsRootRef = useRef<HTMLElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
 
   const providerById = useMemo(() => {
     return new Map(providers.map((provider) => [provider.id, provider]));
@@ -531,6 +531,28 @@ export function DesktopSettingsDialog({
     setActiveSection(initialModelSection);
     void loadModelSettings();
   }, [loadModelSettings, open, initialSection, initialModelSection]);
+
+  useEffect(() => {
+    if (!open) return;
+    restoreFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const focusFrame = window.requestAnimationFrame(() => {
+      settingsRootRef.current?.focus();
+    });
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onOpenChange(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener("keydown", handleKeyDown);
+      restoreFocusRef.current?.focus();
+      restoreFocusRef.current = null;
+    };
+  }, [onOpenChange, open]);
 
   useEffect(() => {
     return () => {
@@ -870,47 +892,45 @@ export function DesktopSettingsDialog({
     }
   }
 
+  if (!open) return null;
+
   return (
-    <Dialog
-      open={open}
-      title="设置"
-      onOpenChange={onOpenChange}
-      footer={
-        <Button variant="default" size="md" onClick={() => onOpenChange(false)}>
-          关闭
-        </Button>
-      }
-    >
       <AwakenSettings
-        navItems={SETTINGS_NAV_ITEMS}
+        rootRef={settingsRootRef}
+        presentation="screen"
+        contentLayout={activeSettingsSection === "memory" ? "full-bleed" : "standard"}
+        navItems={AwakenSettingsNavItems}
         activeSectionId={activeSettingsSection}
         sectionTitle={SETTINGS_SECTION_TITLES[activeSettingsSection]}
-        tabs={activeSettingsSection === "models" ? MODEL_SETTINGS_TABS : undefined}
-        activeTabId={activeSection}
-        message={
-          activeSettingsSection === "models"
-            ? message
-            : activeSettingsSection === "appearance"
-              ? themeMessage
-              : null
-        }
         toast={toastMessage}
+        onBack={() => onOpenChange(false)}
         onSelectSection={(section) => setActiveSettingsSection(section as SettingsDialogSection)}
-        onSelectTab={(section) => setActiveSection(section as ModelSettingsSection)}
       >
           {activeSettingsSection === "search" ? (
             <SearchSettingsPanel runtimeClient={runtimeClient} />
           ) : activeSettingsSection === "memory" ? (
-            <MemorySettingsPanel runtimeClient={runtimeClient} currentProjectId={currentProjectId} />
+            <MemorySettingsPanel
+              runtimeClient={runtimeClient}
+              currentProjectId={currentProjectId}
+              theme={theme}
+            />
           ) : activeSettingsSection === "appearance" ? (
             <AppearanceSettings
               themePreference={themePreference}
               themeSaving={themeSaving}
+              message={themeMessage}
               onThemePreferenceChange={onThemePreferenceChange}
             />
           ) : activeSettingsSection === "pets" ? (
             <PetsSettingsPanel runtimeClient={runtimeClient} />
-          ) : activeSection === "configure" ? (
+          ) : (
+            <AwakenModelSettings
+              tabs={MODEL_SETTINGS_TABS}
+              activeTabId={activeSection}
+              message={message}
+              onSelectTab={(section) => setActiveSection(section as ModelSettingsSection)}
+            >
+            {activeSection === "configure" ? (
             <section className="model-provider-list" aria-label="模型配置">
               {providers.map((provider) => {
                 const isExpanded = expandedProviderId === provider.id;
@@ -1005,7 +1025,7 @@ export function DesktopSettingsDialog({
                 );
               })}
             </section>
-          ) : (
+            ) : (
             <AwakenConfiguredModels
               models={profiles.map((profile) => {
                 const contextWindowMax = contextWindowMaxForProfile(profile, providers);
@@ -1065,8 +1085,9 @@ export function DesktopSettingsDialog({
                 if (profile) void deleteConfiguredProfile(profile);
               }}
             />
+            )}
+            </AwakenModelSettings>
           )}
       </AwakenSettings>
-    </Dialog>
   );
 }

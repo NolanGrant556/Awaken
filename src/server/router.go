@@ -105,8 +105,9 @@ func NewRouterWithControl(runService *awruntime.RunService, infoProvider Runtime
 // ControlConfig groups the runtime identity and lease manager used for bridge-only
 // control routes.
 type ControlConfig struct {
-	Identity     *awruntime.RuntimeIdentity
-	LeaseManager *awruntime.LeaseManager
+	Identity          *awruntime.RuntimeIdentity
+	LeaseManager      *awruntime.LeaseManager
+	ACPSessionManager *awruntime.ACPSessionManager
 }
 
 type routerConfig struct {
@@ -244,7 +245,10 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 		controlMux.HandleFunc("POST /v1/control/leases", ctrl.handleCreateLease)
 		controlMux.HandleFunc("POST /v1/control/leases/{lease_id}/heartbeat", ctrl.handleHeartbeatLease)
 		controlMux.HandleFunc("DELETE /v1/control/leases/{lease_id}", ctrl.handleReleaseLease)
-		acpSessionCtrl := acpSessionControlHandlers{runService: cfg.runService}
+		acpSessionCtrl := acpSessionControlHandlers{
+			runService:        cfg.runService,
+			acpSessionManager: cfg.control.ACPSessionManager,
+		}
 		controlMux.HandleFunc("POST /v1/control/acp/sessions", acpSessionCtrl.handleCreateACPSession)
 		controlMux.HandleFunc("GET /v1/control/acp/sessions/{session_id}", acpSessionCtrl.handleGetACPSession)
 		controlMux.HandleFunc("POST /v1/control/acp/sessions/{session_id}/close", acpSessionCtrl.handleCloseACPSession)

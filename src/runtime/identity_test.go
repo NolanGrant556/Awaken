@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -173,5 +174,78 @@ func TestDeleteManifest(t *testing.T) {
 	// Double delete is safe.
 	if err := DeleteManifest(root); err != nil {
 		t.Fatalf("second delete: %v", err)
+	}
+}
+
+func TestCompareAndSwapManifestWritesWhenEmpty(t *testing.T) {
+	root := t.TempDir()
+	id, err := GenerateRuntimeIdentity(root, "headless", "http://127.0.0.1:1")
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if err := CompareAndSwapManifest(root, id.InstanceID, id); err != nil {
+		t.Fatalf("cas write empty: %v", err)
+	}
+	loaded, err := ReadManifest(root)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if loaded.InstanceID != id.InstanceID {
+		t.Fatal("instance_id mismatch")
+	}
+}
+
+func TestCompareAndSwapManifestRejectsOtherLiveInstance(t *testing.T) {
+	root := t.TempDir()
+	other, _ := GenerateRuntimeIdentity(root, "headless", "http://127.0.0.1:1")
+	other.InstanceID = "core_other_instance"
+	other.PID = os.Getpid()
+	if err := WriteManifest(root, other); err != nil {
+		t.Fatalf("write other: %v", err)
+	}
+
+	id, _ := GenerateRuntimeIdentity(root, "headless", "http://127.0.0.1:1")
+	if err := CompareAndSwapManifest(root, id.InstanceID, id); !errors.Is(err, ErrManifestOwnedByOther) {
+		t.Fatalf("expected ErrManifestOwnedByOther, got %v", err)
+	}
+}
+
+func TestCompareAndSwapManifestOverwritesSameInstance(t *testing.T) {
+	root := t.TempDir()
+	id, _ := GenerateRuntimeIdentity(root, "headless", "http://127.0.0.1:1")
+	id.PID = os.Getpid()
+	if err := WriteManifest(root, id); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	id2, _ := GenerateRuntimeIdentity(root, "headless", "http://127.0.0.1:2")
+	id2.InstanceID = id.InstanceID
+	if err := CompareAndSwapManifest(root, id2.InstanceID, id2); err != nil {
+		t.Fatalf("cas overwrite same: %v", err)
+	}
+	loaded, _ := ReadManifest(root)
+	if loaded.BaseURL != "http://127.0.0.1:2" {
+		t.Fatalf("expected update, got %s", loaded.BaseURL)
+	}
+}
+
+func TestDeleteManifestIfOwned(t *testing.T) {
+	root := t.TempDir()
+	id, _ := GenerateRuntimeIdentity(root, "headless", "http://127.0.0.1:1")
+	if err := WriteManifest(root, id); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := DeleteManifestIfOwned(root, "different-instance"); !errors.Is(err, ErrManifestOwnedByOther) {
+		t.Fatalf("expected ErrManifestOwnedByOther, got %v", err)
+	}
+	if err := DeleteManifestIfOwned(root, id.InstanceID); err != nil {
+		t.Fatalf("delete owned: %v", err)
+	}
+	if _, err := ReadManifest(root); !os.IsNotExist(err) {
+		t.Fatalf("expected not exist, got %v", err)
+	}
+	// Deleting when missing is safe.
+	if err := DeleteManifestIfOwned(root, id.InstanceID); err != nil {
+		t.Fatalf("delete missing: %v", err)
 	}
 }

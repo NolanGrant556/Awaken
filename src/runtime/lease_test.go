@@ -89,7 +89,7 @@ func TestLeaseIdleCallback(t *testing.T) {
 	called := make(chan struct{}, 1)
 	lm := NewLeaseManagerWithInterval(func() {
 		called <- struct{}{}
-	}, 100*time.Millisecond)
+	}, 100*time.Millisecond, WithIdleBudget(100*time.Millisecond))
 	lease, _ := lm.CreateLease("bridge", "bridge-1")
 	lm.mu.Lock()
 	lm.leases[lease.LeaseID].ExpiresAt = time.Now().UTC().Add(-time.Second)
@@ -103,6 +103,64 @@ func TestLeaseIdleCallback(t *testing.T) {
 	case <-called:
 	case <-time.After(2 * time.Second):
 		t.Fatal("idle callback was not called")
+	}
+}
+
+func TestLeaseIdleCallbackBlockedByActiveRun(t *testing.T) {
+	called := make(chan struct{}, 1)
+	activeRuns := 1
+	lm := NewLeaseManagerWithInterval(func() {
+		called <- struct{}{}
+	}, 100*time.Millisecond, WithActiveRunCountFunc(func() int { return activeRuns }), WithIdleBudget(100*time.Millisecond))
+	lease, _ := lm.CreateLease("bridge", "bridge-1")
+	lm.mu.Lock()
+	lm.leases[lease.LeaseID].ExpiresAt = time.Now().UTC().Add(-time.Second)
+	lm.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go lm.Run(ctx)
+
+	select {
+	case <-called:
+		t.Fatal("idle callback called while active runs exist")
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	activeRuns = 0
+	select {
+	case <-called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("idle callback was not called after active runs completed")
+	}
+}
+
+func TestLeaseIdleBudgetContinuous(t *testing.T) {
+	called := make(chan struct{}, 1)
+	lm := NewLeaseManagerWithInterval(func() {
+		called <- struct{}{}
+	}, 50*time.Millisecond, WithIdleBudget(150*time.Millisecond))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go lm.Run(ctx)
+
+	lease, _ := lm.CreateLease("bridge", "bridge-1")
+	lm.mu.Lock()
+	lm.leases[lease.LeaseID].ExpiresAt = time.Now().UTC().Add(-time.Second)
+	lm.mu.Unlock()
+
+	// Before the continuous idle budget elapses, no callback.
+	select {
+	case <-called:
+		t.Fatal("idle callback called without continuous idle")
+	case <-time.After(80 * time.Millisecond):
+	}
+
+	select {
+	case <-called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("idle callback was not called after continuous idle budget")
 	}
 }
 

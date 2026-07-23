@@ -23,72 +23,133 @@ type bridgeSession struct {
 	mu                 sync.Mutex
 	currentRunID       string
 	pendingPermissions map[string][]agui.ACPPermissionOption
+	terminalErr        error
+	stopReason         acpsdk.StopReason
 }
 
 // Prompt starts a run for this session and streams ACP updates until terminal.
-func (s *bridgeSession) Prompt(ctx context.Context, text string) error {
+func (s *bridgeSession) Prompt(ctx context.Context, text string) (acpsdk.StopReason, error) {
 	s.mu.Lock()
 	if s.currentRunID != "" {
 		s.mu.Unlock()
-		return errors.New("session already has an active prompt")
+		return "", errors.New("session already has an active prompt")
 	}
 	s.mu.Unlock()
 
 	runCtx, runCancel := context.WithCancel(s.ctx)
 	defer runCancel()
 
-	run, err := s.coreClient.CreateRun(runCtx, s.mapping.ThreadID, text, s.mapping.CanonicalCWD)
+	run, err := s.coreClient.CreateRunForSession(runCtx, s.mapping.ACPSessionID, s.mapping.ThreadID, text, s.mapping.CanonicalCWD)
 	if err != nil {
-		return fmt.Errorf("create run: %w", err)
+		return "", fmt.Errorf("create run: %w", err)
 	}
 	s.mu.Lock()
 	s.currentRunID = run.RunID
 	s.pendingPermissions = make(map[string][]agui.ACPPermissionOption)
+	s.terminalErr = nil
+	s.stopReason = ""
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
 		s.currentRunID = ""
 		s.pendingPermissions = nil
 		s.mu.Unlock()
+		_ = s.coreClient.ClearCurrentRun(context.Background(), s.mapping.ACPSessionID)
 	}()
 
-	frames, errs := s.coreClient.StreamRunEvents(runCtx, run.RunID, 0)
+	if err := s.coreClient.SetCurrentRun(runCtx, s.mapping.ACPSessionID, run.RunID); err != nil {
+		return "", fmt.Errorf("set current run: %w", err)
+	}
+
+	frames, errs := s.coreClient.StreamRunEventsControl(runCtx, s.mapping.ACPSessionID, run.RunID, 0)
 	for {
 		select {
 		case <-ctx.Done():
-			_ = s.coreClient.CancelRun(context.Background(), run.RunID)
-			return ctx.Err()
+			runCancel()
+			s.cancelAndWait(run.RunID)
+			return acpsdk.StopReasonCancelled, nil
 		case <-s.ctx.Done():
-			return s.ctx.Err()
+			runCancel()
+			s.cancelAndWait(run.RunID)
+			return acpsdk.StopReasonCancelled, nil
 		case err := <-errs:
 			if err != nil {
-				return fmt.Errorf("event stream: %w", err)
+				return "", fmt.Errorf("event stream: %w", err)
 			}
-			return nil
+			return s.terminalResult()
 		case frame, ok := <-frames:
 			if !ok {
-				return nil
+				return s.terminalResult()
 			}
 			if err := s.handleFrame(run.RunID, frame); err != nil {
-				return err
+				return "", err
 			}
 		}
 	}
 }
 
+func (s *bridgeSession) terminalResult() (acpsdk.StopReason, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.terminalErr != nil {
+		return s.stopReason, s.terminalErr
+	}
+	if s.stopReason != "" {
+		return s.stopReason, nil
+	}
+	return acpsdk.StopReasonEndTurn, nil
+}
+
+func (s *bridgeSession) cancelAndWait(runID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = s.coreClient.CancelRunControl(ctx, s.mapping.ACPSessionID, runID)
+	frames, errs := s.coreClient.StreamRunEventsControl(ctx, s.mapping.ACPSessionID, runID, 0)
+	for range frames {
+	}
+	select {
+	case <-errs:
+	case <-ctx.Done():
+	}
+}
+
 func (s *bridgeSession) handleFrame(runID string, frame EventFrame) error {
 	switch frame.Type {
-	case "RUN_STARTED", "RUN_FINISHED":
+	case agui.EventRunStarted:
 		return nil
-	case "TEXT_DELTA":
-		return s.emitTextDelta(stringValue(frame.Content))
-	case "TOOL_CALL_STARTED":
-		return s.emitToolCall(frame.ToolCallID, frame.ToolCallName, "running")
-	case "TOOL_CALL_FINISHED":
-		return s.emitToolCallUpdate(frame.ToolCallID, "completed", "")
-	case "TOOL_RESULT":
-		return s.emitToolCallUpdate(frame.ToolCallID, "completed", stringValue(frame.Content))
-	case "AWAKEN_ACP_PERMISSION_REQUESTED":
+	case agui.EventRunFinished:
+		s.mu.Lock()
+		s.stopReason = acpsdk.StopReasonEndTurn
+		s.terminalErr = nil
+		s.mu.Unlock()
+		return nil
+	case agui.EventRunError:
+		s.mu.Lock()
+		s.terminalErr = fmt.Errorf("run error: %s: %s", frame.Code, frame.Message)
+		s.stopReason = acpsdk.StopReasonEndTurn
+		if frame.Code == "RUN_CANCELLED" {
+			s.stopReason = acpsdk.StopReasonCancelled
+			s.terminalErr = nil
+		}
+		s.mu.Unlock()
+		return nil
+	case agui.EventTextMessageContent:
+		return s.emitTextDelta(frame.Delta)
+	case agui.EventToolCallStart:
+		return s.emitToolCall(frame.ToolCallID, frame.ToolCallName, string(acpsdk.ToolCallStatusPending))
+	case agui.EventToolCallEnd:
+		return s.emitToolCallUpdate(frame.ToolCallID, string(acpsdk.ToolCallStatusCompleted), "")
+	case agui.EventToolCallResult:
+		content := frame.Result
+		if content == "" {
+			content = frame.Content
+		}
+		status := string(acpsdk.ToolCallStatusCompleted)
+		if frame.Code != "" || frame.Message != "" {
+			status = string(acpsdk.ToolCallStatusFailed)
+		}
+		return s.emitToolCallUpdate(frame.ToolCallID, status, content)
+	case agui.EventAwakenACPPermissionRequested:
 		return s.handlePermissionRequest(runID, frame)
 	default:
 		// Drop unknown frames silently.
@@ -197,25 +258,31 @@ func (s *bridgeSession) handlePermissionRequest(runID string, frame EventFrame) 
 	return nil
 }
 
-// resolvePermission maps the selected option to an external interaction
-// resolution and resolves it in Core. An empty optionID means cancelled.
+// resolvePermission forwards the selected option to Core via the control route.
+// An empty optionID means cancelled.
 func (s *bridgeSession) resolvePermission(runID, interactionID, optionID string) error {
-	resolution := "cancelled"
-	if optionID != "" {
+	cancelled := optionID == ""
+	if !cancelled {
 		kind := s.permissionOptionKind(interactionID, optionID)
 		switch kind {
-		case "allow":
-			resolution = "completed"
-		case "deny":
-			resolution = "failed"
+		case string(acpsdk.PermissionOptionKindAllowOnce),
+			string(acpsdk.PermissionOptionKindAllowAlways),
+			"allow":
+			// allow -> completed
+		case string(acpsdk.PermissionOptionKindRejectOnce),
+			string(acpsdk.PermissionOptionKindRejectAlways),
+			"deny":
+			// deny -> failed; still forwarded as a selected option
 		default:
-			resolution = "failed"
+			// Unknown option kind: treat as cancellation for safety.
+			cancelled = true
+			optionID = ""
 		}
 	}
 	s.mu.Lock()
 	delete(s.pendingPermissions, interactionID)
 	s.mu.Unlock()
-	if err := s.coreClient.resolveExternalInteraction(context.Background(), runID, interactionID, resolution); err != nil {
+	if err := s.coreClient.ResolveACPPermission(context.Background(), s.mapping.ACPSessionID, runID, interactionID, optionID, cancelled); err != nil {
 		log.Printf("agentbridge: resolve permission %s error: %v", interactionID, err)
 		return err
 	}

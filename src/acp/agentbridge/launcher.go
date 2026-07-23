@@ -132,18 +132,6 @@ func (l *Launcher) Launch(ctx context.Context) (*LaunchResult, error) {
 		return nil, err
 	}
 
-	// Wrap close to also terminate a headless Core we spawned.
-	if l.Strategy == StartupCore && spawned != nil {
-		originalClose := res.Close
-		res.Close = func() error {
-			_ = originalClose()
-			if spawned.Process != nil {
-				_ = spawned.Process.Kill()
-				_ = spawned.Wait()
-			}
-			return nil
-		}
-	}
 	return res, nil
 }
 
@@ -265,14 +253,9 @@ func defaultSpawnDesktop(ctx context.Context, userDataDir string) error {
 		if err != nil {
 			return fmt.Errorf("locate awaken-acp binary: %w", err)
 		}
-		exeDir := filepath.Dir(exe)
-		switch goruntime.GOOS {
-		case "windows":
-			desktopPath = filepath.Join(exeDir, "Awaken", "Awaken.exe")
-		case "darwin":
-			desktopPath = filepath.Join(exeDir, "Awaken.app")
-		default:
-			desktopPath = filepath.Join(exeDir, "Awaken", "awaken")
+		desktopPath, err = findDesktopBinary(exe)
+		if err != nil {
+			return err
 		}
 	}
 	if _, err := os.Stat(desktopPath); err != nil {
@@ -296,18 +279,86 @@ func defaultSpawnDesktop(ctx context.Context, userDataDir string) error {
 	return nil
 }
 
+func findDesktopBinary(acpExecutable string) (string, error) {
+	dir := filepath.Dir(acpExecutable)
+	var candidates []string
+	for i := 0; i < 6; i++ {
+		switch goruntime.GOOS {
+		case "windows":
+			candidates = append(candidates,
+				filepath.Join(dir, "Awaken.exe"),
+				filepath.Join(dir, "Awaken", "Awaken.exe"),
+			)
+		case "darwin":
+			if strings.HasSuffix(strings.ToLower(dir), ".app") {
+				candidates = append(candidates, dir)
+			}
+			candidates = append(candidates, filepath.Join(dir, "Awaken.app"))
+		default:
+			candidates = append(candidates,
+				filepath.Join(dir, "awaken"),
+				filepath.Join(dir, "Awaken", "awaken"),
+			)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	for _, candidate := range candidates {
+		info, err := os.Stat(candidate)
+		if err == nil && (info.Mode().IsRegular() || info.IsDir()) {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("%w: searched from %s", ErrDesktopBinaryNotFound, filepath.Dir(acpExecutable))
+}
+
 func defaultSpawnCore(ctx context.Context, userDataDir, coreBinaryPath string) (*exec.Cmd, error) {
 	if coreBinaryPath == "" {
 		return nil, errors.New("core binary path is required for --startup=core")
 	}
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve Awaken home: %w", err)
+	}
 	cmd := exec.CommandContext(ctx, coreBinaryPath, "--owner-mode=headless")
-	cmd.Env = append(os.Environ(), "AWAKEN_USER_DATA_DIR="+userDataDir)
+	cmd.Env = replaceProcessEnv(os.Environ(), map[string]string{
+		"AWAKEN_USER_DATA_DIR":     userDataDir,
+		"AWAKEN_HOME":              filepath.Join(homeDir, ".awaken"),
+		"AWAKEN_DEFAULT_WORKSPACE": "",
+	})
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
 	return cmd, nil
+}
+
+func replaceProcessEnv(base []string, replacements map[string]string) []string {
+	result := make([]string, 0, len(base)+len(replacements))
+	for _, entry := range base {
+		key, _, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		matched := false
+		for replacementKey := range replacements {
+			if strings.EqualFold(key, replacementKey) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			result = append(result, entry)
+		}
+	}
+	for key, value := range replacements {
+		result = append(result, key+"="+value)
+	}
+	return result
 }
 
 // processAlive checks whether a process with the given PID exists. On Windows it

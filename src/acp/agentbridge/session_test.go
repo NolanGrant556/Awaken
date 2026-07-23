@@ -3,6 +3,7 @@ package agentbridge
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -131,9 +132,7 @@ func TestSessionRunCancellation(t *testing.T) {
 		case "POST /v1/control/acp/sessions/acp_1/runs":
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(map[string]string{"run_id": "run_1", "thread_id": "thread_1", "status": "running"})
-		case "POST /v1/control/acp/sessions/acp_1/current-run/run_1":
-			w.WriteHeader(http.StatusOK)
-		case "DELETE /v1/control/acp/sessions/acp_1/current-run":
+		case "DELETE /v1/control/acp/sessions/acp_1/current-run/run_1":
 			w.WriteHeader(http.StatusOK)
 		case "GET /v1/control/acp/sessions/acp_1/runs/run_1/events":
 			w.Header().Set("Content-Type", "text/event-stream")
@@ -175,6 +174,78 @@ func TestSessionRunCancellation(t *testing.T) {
 	}
 }
 
+func TestSessionRejectsEventStreamEOFBeforeTerminal(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "POST /v1/control/acp/sessions/acp_1/runs":
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]string{"run_id": "run_1", "thread_id": "thread_1", "status": "running"})
+		case "GET /v1/control/acp/sessions/acp_1/runs/run_1/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+		case "DELETE /v1/control/acp/sessions/acp_1/current-run/run_1":
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	s := &bridgeSession{
+		mapping:    &ACPSessionMapping{ACPSessionID: "acp_1", ThreadID: "thread_1"},
+		coreClient: NewCoreClient(server.URL, "token"),
+		ctx:        context.Background(),
+	}
+	if _, err := s.Prompt(context.Background(), "hello"); err == nil {
+		t.Fatal("expected premature event stream EOF to fail")
+	}
+}
+
+func TestSessionReconnectsFromLastEventCursor(t *testing.T) {
+	streamCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "POST /v1/control/acp/sessions/acp_1/runs":
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]string{"run_id": "run_1", "thread_id": "thread_1", "status": "running"})
+		case "GET /v1/control/acp/sessions/acp_1/runs/run_1/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			streamCount++
+			if streamCount == 1 {
+				_, _ = fmt.Fprintln(w, `data: {"type":"TEXT_MESSAGE_CONTENT","delta":"hello","streamCursor":10}`)
+				_, _ = fmt.Fprintln(w)
+				return
+			}
+			if got := r.URL.Query().Get("after_cursor"); got != "10" {
+				t.Errorf("reconnect cursor: got %q, want 10", got)
+			}
+			_, _ = fmt.Fprintln(w, `data: {"type":"RUN_FINISHED","streamCursor":20}`)
+			_, _ = fmt.Fprintln(w)
+		case "DELETE /v1/control/acp/sessions/acp_1/current-run/run_1":
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	s := &bridgeSession{
+		mapping:    &ACPSessionMapping{ACPSessionID: "acp_1", ThreadID: "thread_1"},
+		coreClient: NewCoreClient(server.URL, "token"),
+		ctx:        context.Background(),
+	}
+	stopReason, err := s.Prompt(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("prompt after reconnect: %v", err)
+	}
+	if stopReason != acpsdk.StopReasonEndTurn {
+		t.Fatalf("stop reason: got %q", stopReason)
+	}
+	if streamCount != 2 {
+		t.Fatalf("expected one reconnect, got %d streams", streamCount)
+	}
+}
+
 func TestSessionEventMapping(t *testing.T) {
 	s := &bridgeSession{
 		mapping:    &ACPSessionMapping{ACPSessionID: "acp_1"},
@@ -191,7 +262,7 @@ func TestSessionEventMapping(t *testing.T) {
 		{Type: agui.EventRunFinished, RunID: "run_1"},
 	}
 	for _, frame := range frames {
-		if err := s.handleFrame("run_1", frame); err != nil {
+		if err := s.handleFrame(context.Background(), "run_1", frame); err != nil {
 			t.Fatalf("handle frame %s: %v", frame.Type, err)
 		}
 	}
@@ -216,7 +287,7 @@ func TestSessionEventMappingRunError(t *testing.T) {
 		{Type: agui.EventRunError, RunID: "run_1", Code: "RUN_CANCELLED", Message: "cancelled by user"},
 	}
 	for _, frame := range frames {
-		if err := s.handleFrame("run_1", frame); err != nil {
+		if err := s.handleFrame(context.Background(), "run_1", frame); err != nil {
 			t.Fatalf("handle frame %s: %v", frame.Type, err)
 		}
 	}
@@ -227,5 +298,57 @@ func TestSessionEventMappingRunError(t *testing.T) {
 	}
 	if stopReason != acpsdk.StopReasonCancelled {
 		t.Fatalf("expected cancelled stop reason, got %q", stopReason)
+	}
+}
+
+func TestSessionDedupesDurableAssistantProjectionAfterLiveChunks(t *testing.T) {
+	s := &bridgeSession{}
+	if got := s.dedupeTextDelta("msg_1", "ACP_"); got != "ACP_" {
+		t.Fatalf("first chunk: got %q", got)
+	}
+	if got := s.dedupeTextDelta("msg_1", "OK"); got != "OK" {
+		t.Fatalf("second chunk: got %q", got)
+	}
+	if got := s.dedupeTextDelta("msg_1", "ACP_OK"); got != "" {
+		t.Fatalf("durable replay must be suppressed, got %q", got)
+	}
+	if got := s.dedupeTextDelta("msg_2", "other"); got != "other" {
+		t.Fatalf("different message must remain independent, got %q", got)
+	}
+}
+
+func TestSessionPromptSendsSelectedModelProfileID(t *testing.T) {
+	var createBody map[string]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "POST /v1/control/acp/sessions/acp_1/runs":
+			_ = json.NewDecoder(r.Body).Decode(&createBody)
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]string{"run_id": "run_1", "thread_id": "thread_1", "status": "running"})
+		case "GET /v1/control/acp/sessions/acp_1/runs/run_1/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprint(w, "data: {\"type\":\"RUN_FINISHED\",\"runId\":\"run_1\",\"streamCursor\":1000}\n\n")
+		case "DELETE /v1/control/acp/sessions/acp_1/current-run/run_1":
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	s := &bridgeSession{
+		mapping:           &ACPSessionMapping{ACPSessionID: "acp_1", ThreadID: "thread_1"},
+		coreClient:        NewCoreClient(server.URL, "token"),
+		ctx:               context.Background(),
+		selectedProfileID: "profile-other",
+	}
+	if _, err := s.Prompt(context.Background(), "hello"); err != nil {
+		t.Fatalf("prompt: %v", err)
+	}
+	if createBody["model_profile_id"] != "profile-other" {
+		t.Fatalf("expected selected profile ID, got %q", createBody["model_profile_id"])
+	}
+	if _, leaked := createBody["api_key"]; leaked {
+		t.Fatal("bridge must never submit an API key")
 	}
 }

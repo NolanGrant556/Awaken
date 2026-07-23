@@ -1,10 +1,56 @@
 package runtime
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestACPSessionRunReservationAndSnapshotIsolation(t *testing.T) {
+	manager := NewACPSessionManager(nil, nil)
+	manager.sessions["session_1"] = &ACPSessionMapping{
+		ACPSessionID: "session_1",
+		ThreadID:     "thread_1",
+	}
+
+	if err := manager.BeginRun("session_1"); err != nil {
+		t.Fatalf("begin run: %v", err)
+	}
+	if err := manager.BeginRun("session_1"); !errors.Is(err, ErrACPSessionBusy) {
+		t.Fatalf("expected busy reservation, got %v", err)
+	}
+	if err := manager.SetCurrentRun("session_1", "run_1"); err != nil {
+		t.Fatalf("set current run: %v", err)
+	}
+	if err := manager.SetCurrentRun("session_1", "run_2"); !errors.Is(err, ErrACPSessionBusy) {
+		t.Fatalf("expected active run to reject replacement, got %v", err)
+	}
+
+	snapshot, err := manager.GetSession("session_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot.CurrentRunID = "mutated"
+	actual, err := manager.GetSession("session_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actual.CurrentRunID != "run_1" {
+		t.Fatalf("GetSession exposed mutable state: %q", actual.CurrentRunID)
+	}
+
+	manager.ClearCurrentRun("session_1", "run_2")
+	actual, _ = manager.GetSession("session_1")
+	if actual.CurrentRunID != "run_1" {
+		t.Fatal("a stale run id cleared the active run")
+	}
+	manager.ClearCurrentRun("session_1", "run_1")
+	actual, _ = manager.GetSession("session_1")
+	if actual.CurrentRunID != "" {
+		t.Fatalf("expected current run cleared, got %q", actual.CurrentRunID)
+	}
+}
 
 func TestCanonicalizeCWD(t *testing.T) {
 	root := t.TempDir()

@@ -24,6 +24,7 @@ import (
 	"awaken/src/llm"
 	"awaken/src/mcpclient"
 	"awaken/src/memory"
+	"awaken/src/modelprofile"
 	"awaken/src/runtime"
 	"awaken/src/server"
 	"awaken/src/skillruntime"
@@ -229,6 +230,7 @@ func main() {
 			Identity:          runtimeIdentity,
 			LeaseManager:      leaseManager,
 			ACPSessionManager: acpSessionManager,
+			ModelProfileStore: modelprofile.NewUserStore(desktopdata.AwakenHomeRoot()),
 		}
 	}
 

@@ -2,7 +2,7 @@
 
 ## 1. 文档状态
 
-本文是 ACP（Agent Client Protocol）能力的目标设计与可执行实施方案。Awaken 作为 ACP Client 的 Phase 0–4 已在本仓库实现；Phase 5（Awaken 作为 ACP Agent 的 stdio bridge）已实现核心生产路径，真实第三方 client 端到端验收与跨 Core 重启恢复仍为已知缺口。
+本文是 ACP（Agent Client Protocol）能力的目标设计与可执行实施方案。Awaken 作为 ACP Client 的 Phase 0–4 已在本仓库实现；Phase 5（Awaken 作为 ACP Agent 的 stdio bridge）已实现 transport、runtime discovery、session、模型选择与 authenticated control path。2026-07-23 已用真实 stdio client adapter 完成 Desktop-owned Core 与 `--startup=core` 的默认模型 prompt；compatibility suite、Zed、另一个真实 client，以及 headless 多 bridge/TTL/Desktop 接管验收仍是完成声明前的缺口。
 
 - 当前支持：
   - `github.com/coder/acp-go-sdk@v0.13.5` 已固定并封装在 `src/acp/protocol`，SDK 类型不越界；
@@ -19,16 +19,18 @@
 - 当前支持（Phase 5）：
   - `cmd/awaken-acp` 入口与 `src/acp/agentbridge` 实现 stdio ACP Agent；
   - launcher 支持 `--startup=desktop|core|fail`，复用或受管启动 awaken-core，通过真实 HTTP control routes 创建/heartbeat/release lease；
-  - ACP `initialize`、`session/new`、`session/prompt`、`session/cancel`、`session/close` 映射到 Core project/thread/run；
+  - ACP `initialize`、`session/new`、`session/prompt`、`session/cancel`、`session/close` 已映射到 Core；`session/new` 返回标准 model config option，client 可通过 `session/set_config_option` 选择 Awaken 已配置的可用 profile；
+  - client 不选择时使用 session 建立时的 enabled + ready 默认 profile；没有可用默认时回退到配置顺序中的首个 enabled + ready profile；
   - Core 运行时事件经 AG-UI 常量正确投影为 ACP `session/update`（text delta、tool call/update、permission request），RUN_ERROR 不再伪装成成功；
   - 权限选择通过 `/v1/control/acp/sessions/{session_id}/runs/{run_id}/permissions/{interaction_id}/resolve` 回写到 ACP permission awaiter，支持 `allow_once/allow_always/reject_once/reject_always`；
-  - `session/cancel`、stdio EOF/signal 通过 `SetCurrentRun`/`CancelRun` 可靠传播到当前 Core run，并触发 5 秒有界清理；
+  - Core 在创建 run 时原子保留并绑定 ACP session；`session/cancel`、stdio EOF/signal 通过精确的 session/run identity 传播，并触发 5 秒有界清理；
+  - 同一 Core 实例内的 SSE 瞬时断线会从最后确认的 `streamCursor` 有界重连并去重；未收到 terminal 的 EOF 不再被视为成功；
   - Desktop 在启动前发现并 attach 已有 headless Core，避免重复 spawn；manifest 使用 CAS 与 instance-owned 删除防止多 Core 竞争；
   - bridge 的 run/event/cancel/permission 全部走 authenticated `/v1/control/acp/sessions/...` 控制面。
 - 当前不支持：
   - 真实 runner（Codex、Claude Code、OpenCode、Qwen Code）的端到端 smoke 与 Desktop 视觉验收（依赖本机安装与 Windows Desktop 环境，本次未执行）；
   - 跨 Core 重启的 ACP 会话恢复（活跃 session 在重启后标记为 interrupted，不重放外部任务）；
-  - SSE cursor 重连、长 turn 中 ACP live event 的独立 durable append；
+  - 跨 Core 重启后的 stream/session 恢复、长 turn 中 ACP live event 的独立 durable append；
   - `fs`/`terminal` client capability、image/audio/resource prompt block、任意 ACP extension method；
   - ACP compatibility suite 与 Zed 等第三方 client 的正式验收（需外部 client 环境）。
 - 已确认的目标：先让 Awaken 作为 ACP Client 委派本地外部 Agent；双向互操作中的“Awaken 作为 ACP Agent”在出站链路稳定后实施。
@@ -466,7 +468,7 @@ POST   /v1/runs/{run_id}/acp-permissions/{interaction_id}/resolve
 
 ## 13. Awaken 作为 ACP Agent 的目标设计
 
-本章属于**已确认但尚未实现的设计约束**。它用于 Zed、其他 ACP client 或另一个 Agent 通过 ACP 驱动 Awaken；不能写成当前支持。
+本章包含 Phase 5 已落地的设计约束和仍待完成的外部验收项。transport、runtime discovery、lease、session/control route、模型 selector 与默认 profile prompt 已实现；headless/第三方 client 正式验收尚未完成，不能把整章概括为全部验收通过。
 
 ### 13.1 形态选择
 
@@ -535,6 +537,20 @@ manifest 固定 schema：
 - manifest 用唯一临时文件原子 replace；Core 正常退出删除，异常残留由下一 launcher 在持有 runtime lock 后清理。
 - `<AWAKEN_USER_DATA_DIR>/runtime/core.lock` 串行化发现与启动。lock 只覆盖“二次发现—spawn/launch—ready 或失败”的临界区，不被长期持有。多个 `awaken-acp` 可以并发存在，但必须复用同一 identity 的可发现 Core，不能各自启动一个写同一 userData 的 Core。
 
+#### 13.4.1 入站 run 的模型 profile ownership
+
+ACP client 可以选择 Awaken 已配置的模型，但选择值只是 opaque profile ID；provider、Base URL、运行参数和 credential 始终由 Awaken 本地配置拥有：
+
+- Core 只读解析 `~/.awaken/config/models.json` 与 `~/.awaken/.env`，复用 Desktop 的 profile ID、enabled/default、配置顺序和 `AWAKEN_API_KEY_<profileId>` 合同；
+- authenticated `GET /v1/control/acp/model-profiles` 只返回 enabled + ready profile 的 ID、provider ID、展示名、model ID 和默认项，不返回 Base URL、auth scheme、运行参数、key 尾号或 API key；
+- `session/new` 把上述列表作为标准 ACP `SessionConfigOption(category=model)` 返回；支持的 client 通过 `session/set_config_option` 设置 model profile ID，不支持 selector 的 client 直接使用默认值；
+- session 建立时选择 enabled + ready 默认 profile；没有可用默认时选择配置顺序中的首个 enabled + ready profile。选择固定在 session 内，不能在 active prompt 中改变；
+- create-run wire 只额外接受 `model_profile_id`。Core 必须再次确认该 ID 当前仍 enabled + ready，再在本地解析完整 `ModelProfileConfig`；client 不能提交 provider、model、Base URL、capability、参数或 API key；
+- profile 在 prompt 前被删除、禁用或失去 key 时返回 `ACP_MODEL_PROFILE_UNAVAILABLE`，不能静默换到另一付费 provider；只有 session 初始未选择时才执行默认/首项回退；
+- API key 不进入 manifest、thread metadata、journal、日志、Renderer 或 ACP wire。
+
+该方案的代价是本地 ACP client 能知道当前配置了哪些 provider/model，并可选择可能具有不同价格或额度的 profile。边界接受这一点：`awaken-acp` 是当前用户主动配置的本地 Agent，选择范围只包含用户已经启用且凭据可读的配置；custom Base URL 和凭据仍不可由 client 注入。profile 文件在 session 建立后变化时，旧 selector 可能失效并得到 typed error，client 应重新建立 session 获取新列表。
+
 ### 13.5 Desktop 未运行时的启动策略
 
 `awaken-acp` 支持 `--startup=desktop|core|fail`：
@@ -554,6 +570,8 @@ headless 生命周期：
 5. 启动失败必须清理自己创建的进程、lock 和 manifest；不得杀死 identity 不匹配的进程。
 
 Core 是 lease 与 idle 判定的唯一 owner。manifest 只做发现，不保存动态 lease 列表。Desktop-owned Core 由 Desktop 进程所有，不因 bridge lease 归零退出；headless Core 没有 lease 但仍有 active run 时不退出，run terminal 后重新开始 idle budget。Desktop 从 headless Core detach 只释放 Desktop lease，不把并非自己 spawn 的 Core 当子进程强杀。
+
+`--startup=core` 不需要 credential broker。模型 key 的当前权威是 `~/.awaken/.env` 明文文件而非 Electron `safeStorage`；launcher 会把正式 `~/.awaken` 作为 canonical `AWAKEN_HOME` 注入 headless Core，并移除 client 继承环境中同名覆盖。Core 使用与 Desktop 相同的文件身份只读解析 profile/key，因此只启动 `awaken-core`，不创建 Desktop 或 Electron helper。`.env` 损坏、权限拒绝或无 enabled + ready profile 时 fail closed，返回 `ACP_MODEL_PROFILE_UNAVAILABLE`。
 
 实现 Phase 5 时必须同步修改 README 与 03 域的 Desktop 唯一入口契约：允许 `awaken-acp --startup=core` 作为机器调用入口，但仍禁止用户直接运行和长期维护裸 `awaken-core`。
 
@@ -666,9 +684,12 @@ Core 是 lease 与 idle 判定的唯一 owner。manifest 只做发现，不保�
 - [x] 实现 ACP session 到 project/thread/run 的映射、visible/ephemeral 生命周期与 trusted cwd TaskScope 建立。
 - [x] 实现 Awaken semantic event -> ACP update、单 gate permission、cancel 和 session close。
 - [x] 增加 identity 隔离、launcher/manifest/token/multi-bridge、lease heartbeat/TTL、Desktop attach headless。
+- [x] 实现 §13.4.1 的标准 ACP model selector、Core 本地 profile 解析与 default/first-ready fallback；client 只能提交 profile ID，不能注入 credential 或 provider 配置。
+- [x] `--startup=core` 固定注入 canonical `~/.awaken`，Core 只读复用当前 `models.json + .env`，无需 Desktop/credential broker。
+- [x] 增加 profile 解析 fail-closed、非敏感 catalog、selector、显式选择 create-run 和重复文本投影回归测试；真实 Desktop attach 与 core-only 默认模型 stdio prompt 已通过。
 - [ ] 使用 ACP compatibility suite、Zed 和另一个真实 ACP client 实测 Desktop attach、Desktop auto-start、headless Core 三种路径（依赖外部 client 环境，本次未执行）。
 
-退出条件：外部 client 可直接启动 `awaken-acp`；已有 Core 时复用，缺失时按策略拉起 Desktop 或唯一受管 headless Core；client cwd 无弹窗成为 session TaskScope root；可见/ephemeral thread、多轮、工具、permission、取消、重连和关闭均有单一 terminal；Desktop/bridge 退出不留孤儿或重复 Core；真实 client 验收有本次证据。
+退出条件：外部 client 可直接启动 `awaken-acp`；已有 Core 时复用，缺失时按策略拉起 Desktop 或唯一受管 headless Core；三条启动路径都能解析 Awaken-owned profile，client 只能选择已配置 ID且不能向 ACP/manifest/log 注入或读取 credential；client cwd 无弹窗成为 session TaskScope root；可见/ephemeral thread、多轮、工具、permission、取消、重连和关闭均有单一 terminal；Desktop/bridge 退出不留孤儿或重复 Core；真实 client 验收有本次证据。
 
 ## 15. 测试矩阵
 
@@ -733,14 +754,15 @@ Phase 5 必须在 packaged identity 下用 ACP compatibility suite、Zed 和另�
 
 1. Desktop 已运行：client 启动 `awaken-acp` 后只 attach；确认没有第二 Core，visible thread 出现在 canonical cwd 对应 project。
 2. Desktop 未运行、默认策略：client 启动 `awaken-acp` 后由正式入口拉起 Desktop，30 秒内完成 initialize/new/prompt；第二个 bridge 并发启动时复用同一 `instance_id`。
-3. Desktop 未运行、`--startup=core`：只启动受管 headless Core，不出现 Desktop 窗口；随后启动 Desktop，确认 supervisor attach 同一 Core、已有 thread 可见且没有重复进程。
+3. Desktop 未运行、`--startup=core`：只启动受管 headless Core，不出现 Desktop/Electron helper；确认 Core 从 canonical `~/.awaken` 解析默认或 client 选择的 profile，真实 prompt 成功。随后启动 Desktop，确认 supervisor attach 同一 Core、已有 thread 可见且没有重复进程。
 4. `--startup=fail`：无 Core 时快速失败；有 Core 时成功 attach，且不得隐式拉起任何进程。
 5. cwd：传入一个 Desktop 从未打开过的绝对目录，无授权弹窗即可创建/复用 project；相对、不存在、文件和非法路径被拒绝；工具仍不能越出该 cwd TaskScope。
-6. thread：默认 visible session 多轮复用同一 thread；ephemeral session close 后只删除符合 terminal/no-lease 条件的临时 thread，不删除 project 或可见 thread。
+6. thread：默认 visible session 多轮复用同一 thread；ephemeral session close 会先取消并等待 active run 进入 terminal，再删除临时 thread，不删除 project 或可见 thread。bridge lease 管理 Core 进程存活，不作为单个 ephemeral thread 的删除条件。
 7. permission：支持 capability 的 client 完成 allow/reject/cancel；不支持 permission 的 client 得到 denied/unsupported，不在 Desktop 产生可操作 gate，也不自动批准。
 8. 恢复：bridge 断线重连按 cursor 去重；历史 permission 只读且不重新请求；Core 中途退出不自动重放可能已有副作用的 prompt。
 9. lease：bridge 正常退出立即释放；强杀 bridge 后 lease 在 TTL 内回收；active run 阻止 headless idle exit，terminal 后按预算退出且不留孤儿。
 10. identity/security：开发版与安装版 manifest 互不串用；stale PID、错误 instance、非 loopback URL、错误 token 均被拒绝，日志/journal/UI 不出现 token。
+11. model profile：`session/new` 只暴露非敏感 ready selector；显式 profile ID 生效，未选择使用默认/首个 ready；未知、disabled、missing-key ID 被拒绝；任何 provider/Base URL/参数/credential 注入均无效；`.env` 损坏或无可用 profile 时返回 `ACP_MODEL_PROFILE_UNAVAILABLE`。
 
 验收证据至少保存 client/version、启动参数、runtime identity、instance ID（可脱敏）、thread/run ID、关键进程树、协议结果和 Desktop 截图；token 与 cwd 原文不进入共享报告。
 

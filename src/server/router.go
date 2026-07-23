@@ -9,6 +9,7 @@ import (
 	"awaken/src/connectors"
 	"awaken/src/mcpclient"
 	"awaken/src/memory"
+	"awaken/src/modelprofile"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
 	"awaken/src/skills"
@@ -108,6 +109,12 @@ type ControlConfig struct {
 	Identity          *awruntime.RuntimeIdentity
 	LeaseManager      *awruntime.LeaseManager
 	ACPSessionManager *awruntime.ACPSessionManager
+	ModelProfileStore ACPModelProfileStore
+}
+
+type ACPModelProfileStore interface {
+	ListReady() (modelprofile.ProfileCatalog, error)
+	Resolve(profileID string) (modelprofile.ResolvedProfile, error)
 }
 
 type routerConfig struct {
@@ -252,16 +259,18 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 		controlMux.HandleFunc("POST /v1/control/acp/sessions", acpSessionCtrl.handleCreateACPSession)
 		controlMux.HandleFunc("GET /v1/control/acp/sessions/{session_id}", acpSessionCtrl.handleGetACPSession)
 		controlMux.HandleFunc("POST /v1/control/acp/sessions/{session_id}/close", acpSessionCtrl.handleCloseACPSession)
+		acpProfileCtrl := acpModelProfileControlHandlers{store: cfg.control.ModelProfileStore}
+		controlMux.HandleFunc("GET /v1/control/acp/model-profiles", acpProfileCtrl.handleList)
 		if cfg.runService != nil && cfg.control.ACPSessionManager != nil {
 			acpRunCtrl := acpRunControlHandlers{
 				runService:        cfg.runService,
 				acpSessionManager: cfg.control.ACPSessionManager,
 				acpManager:        cfg.acpManager,
 				identity:          cfg.control.Identity,
+				modelProfileStore: cfg.control.ModelProfileStore,
 			}
 			controlMux.HandleFunc("POST /v1/control/acp/sessions/{session_id}/runs", acpRunCtrl.handleCreateACPRun)
-			controlMux.HandleFunc("POST /v1/control/acp/sessions/{session_id}/current-run/{run_id}", acpRunCtrl.handleSetCurrentRun)
-			controlMux.HandleFunc("DELETE /v1/control/acp/sessions/{session_id}/current-run", acpRunCtrl.handleClearCurrentRun)
+			controlMux.HandleFunc("DELETE /v1/control/acp/sessions/{session_id}/current-run/{run_id}", acpRunCtrl.handleClearCurrentRun)
 			controlMux.HandleFunc("GET /v1/control/acp/sessions/{session_id}/runs/{run_id}/events", acpRunCtrl.handleACPRunEvents)
 			controlMux.HandleFunc("POST /v1/control/acp/sessions/{session_id}/runs/{run_id}/cancel", acpRunCtrl.handleCancelACPRun)
 			if cfg.acpManager != nil {

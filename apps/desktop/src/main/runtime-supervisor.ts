@@ -4,9 +4,10 @@ import {
   type SpawnOptions,
 } from "node:child_process";
 import { createServer } from "node:net";
+import { createHash } from "node:crypto";
 import { userInfo } from "node:os";
 import { createInterface } from "node:readline";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app } from "electron";
 import { resolveSystemSkillsTargetRoot } from "./system-skills-importer.js";
@@ -737,13 +738,11 @@ export class RuntimeSupervisor {
   }
 
   private digestUserDataDir(userDataDir: string): string {
-    // Mirror Go stableProjectID: lower-case, clean, SHA-256 first 12 bytes.
-    const normalized = userDataDir.toLowerCase().replace(/\\/g, "/").trim();
-    // The Go side uses filepath.Clean and a SHA-256 digest. We do not need to
-    // match byte-for-byte here because the manifest verification endpoint
-    // returns the runtime_identity computed by Core; this digest is only used
-    // for the initial expectation check before calling verifyIdentity.
-    return normalized;
+    // Mirror Go normalizeProjectWorkspaceRoot + stableProjectID.
+    const cleaned = normalize(userDataDir.trim());
+    const normalized = process.platform === "win32" ? cleaned.toLowerCase() : cleaned;
+    const digest = createHash("sha256").update(normalized).digest("hex").slice(0, 24);
+    return `project_${digest}`;
   }
 
   private terminateChild(child: ChildProcess): Promise<void> {

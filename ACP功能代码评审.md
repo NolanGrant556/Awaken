@@ -4,9 +4,9 @@
 
 当前分支已经搭出了较完整的 ACP Client 骨架，并新增了 Phase 5 ACP Agent bridge、runtime discovery/control route、lease、Desktop control client 和 `cmd/awaken-acp`。第三方 SDK 仍被限制在 `src/acp/protocol` 与 `src/acp/agentbridge`，总体分层方向合理。
 
-初次与二次评审的问题已有针对性修改；本次对 Phase 5 生产路径的三次复核发现 **5 个 P0、8 个 P1**，当前结论仍为 **request changes**。新增单元测试大多通过，但 launcher、事件映射、permission 回写、session close 和多 Core ownership 的真实路径仍不可用或会产生错误终态。
+初次至第四次复核问题均已有针对性修改。第五次复核使用 README 正式入口、真实 Desktop 和独立 stdio ACP client adapter 验收，发现入站 prompt 缺少模型配置来源。第六次复核已按“client 只选择 Awaken 已配置 profile ID，不得注入 API key；未选择使用默认/首个 ready profile”完成修复，并用 Desktop-owned Core 真实 stdio prompt 验证通过。当前代码评审结论为 **模型选择 P0 已解阻，未发现新的合并阻塞代码问题**；headless 与第三方 client 正式验收仍未完成。
 
-本文件 §3–§10 保留前两次评审及修复说明，**当前复核结论以 §11 为准**。Phase 5 已有代码骨架，但尚未达到“Awaken 可被其他 ACP client 当作 Agent 调用”的完成条件。
+本文件 §3–§13 保留前五次评审及修复说明，**当前复核结论以 §14 为准**。Phase 5 的 transport、session、runtime discovery、模型 selector 与控制面已经实现；compatibility suite、Zed/另一真实 client 和 headless 多进程验收完成前，仍不宣称 Phase 5 全部验收通过。
 
 ## 2. 变更规模
 
@@ -726,3 +726,326 @@ README 和方案把 Phase 5 launcher、event projection、permission、cancel/cl
 - 超过 30 秒的长 turn SSE 稳定性与 cursor 重连（P1-6）。
 - ACP live event 的独立 durable append 与崩溃后 replay（P1-7）。
 - 多 bridge 并发、Desktop 接管 headless、Core crash 后的多进程竞争测试（P0-5 已有单元测试，但缺少真实多进程验收）。
+
+## 12. 四次复核结论：三次复核修复与 Phase 5 完整性
+
+### 12.1 Review 总结
+
+- 评审基线：`81eec3ad` 及其后的本地未提交修改；重点复核 `src/acp/agentbridge`、ACP control routes、`ACPSessionManager`、lease/launcher、Desktop runtime supervisor 与 Phase 5 文档。
+- 三次复核列出的 launcher、AG-UI event、permission 回写、cancel/close、control token、Windows userData 与 Desktop attach 等问题已完成实质修复。
+- 本轮新发现 3 个高优先级生命周期问题和 5 个中优先级完整性问题；均已直接在当前工作区修复并增加聚焦回归测试。
+- 当前结论：**未发现新的合并阻塞代码问题**。仍缺真实第三方 ACP client、packaged Desktop auto-start/attach 和多进程竞争的本次验收证据，因此不能把这些未执行项写成“已通过”。
+
+### 12.2 本轮发现并修复的问题
+
+#### P0-1 headless Core 被创建它的 bridge 无条件杀死
+
+位置：`src/acp/agentbridge/launcher.go`
+
+`--startup=core` 的 bridge 在退出时先释放 lease，随后直接 `Process.Kill`。如果期间 Desktop 或第二个 bridge 已 attach 并持有 lease，第一个 bridge 仍会杀死共享 Core，违反“同一 userData identity 单 Core + lease owner”契约。
+
+修复：bridge 退出只释放自己的 lease。headless Core 是否退出由 Core 内的 lease manager、active run count 与 idle budget 唯一决定；只有 spawn 后尚未完成 attach 的失败路径才允许 launcher 回收自己刚创建的进程。
+
+#### P0-2 Desktop 无法接管 headless Core
+
+位置：`apps/desktop/src/main/runtime-supervisor.ts`
+
+Desktop 原实现把规范化 userData 路径本身拼成 `packaged:<path>`，而 Go Core 使用规范化路径的 SHA-256 前 12 字节生成 identity。两端算法必然不一致，`external-attached` 的真实接管会失败并尝试 spawn 第二个 Core。
+
+修复：Desktop 使用与 Go `normalizeProjectWorkspaceRoot + stableProjectID` 相同的平台路径规范化和 SHA-256 截断算法；`runtime-supervisor.test.ts` 改为按同一契约构造 manifest fixture。
+
+#### P0-3 session/run 绑定存在覆盖与越界窗口
+
+位置：`src/runtime/acp_session.go`、`src/server/control_acp_run.go`、`src/server/router.go`
+
+原实现先启动 run、再写 `CurrentRunID`，且 `SetCurrentRun` 可以覆盖已有 run；公开的 set-current route 也允许 bridge 写入任意 run ID。并发 prompt 可能同时穿过 busy check，迟到的 clear 还能清掉后续 run。create-run 请求也可携带另一个 thread/workspace。
+
+修复：
+
+- Core 新增 `BeginRun/AbortRun` 原子 reservation，同一 session 在 StartRun 窗口内也只能有一个 prompt；
+- `SetCurrentRun` 禁止覆盖不同 active run，`GetSession` 返回快照而不是暴露可变内部指针；
+- 删除 bridge 可调用的 set-current route，由 create-run handler 成为唯一绑定 owner；
+- clear-current 必须携带精确 run ID，旧 run 的迟到清理不能影响新 run；
+- thread ID 与 canonical workspace 必须匹配 session mapping，跨 session/scope 请求返回 400；
+- StartRun 后的 mapping/commit 失败会主动 cancel 已创建 run，不留下未跟踪运行。
+
+#### P1-1 event stream 提前 EOF 被误判为成功
+
+位置：`src/acp/agentbridge/session.go`、`src/acp/agentbridge/coreclient.go`
+
+原实现从已关闭 error channel 读到零值 `nil` 后调用 `terminalResult`，而没有 terminal 时该函数默认返回 `end_turn`。网络断线因此可能伪装成成功。
+
+修复：只有收到 `RUN_FINISHED` 或 `RUN_ERROR` 才设置 `terminalSeen`；frame/error channel 均关闭且没有 terminal 时返回 transport error。SSE reader 也会处理 EOF 前未以空行结束的最后一个 data frame。
+
+#### P1-2 SSE cursor 没有重连与去重
+
+位置：`src/acp/agentbridge/session.go`
+
+修复：记录最后确认的 `streamCursor`（兼容回退 `seq`），瞬时断线最多重连 3 次并从 `after_cursor` 继续；重复 cursor 不再二次投影。该能力只覆盖同一 Core/run，Core 重启后的 session 恢复仍明确不支持。
+
+#### P1-3 bridge 本地并发 prompt 仍有竞态
+
+位置：`src/acp/agentbridge/session.go`
+
+原 busy check 在 Core create-run 前释放互斥锁，两个 goroutine 都可能看到空 `currentRunID`。
+
+修复：增加覆盖整个 Prompt 生命周期的 `promptActive` reservation；Core 侧的 `BeginRun` 再提供跨请求第二层保护。
+
+#### P1-4 permission 请求未绑定 run 生命周期
+
+位置：`src/acp/agentbridge/session.go`
+
+原 `RequestPermission` 使用 session 级 context，run cancel 或 terminal 后请求仍可能挂起；pending option 又在 Core resolve 成功前删除，失败后无法安全重试。
+
+修复：permission 请求改用 run context，run 结束立即取消；pending option 仅在 Core 成功接受 resolution 后删除。
+
+#### P1-5 ephemeral session 在 active run terminal 前删除 thread
+
+位置：`src/runtime/acp_session.go`
+
+原 close 发出 cancel 后立即调用 `DeleteThread` 并忽略错误；active run 尚未 terminal 时删除通常失败，但 mapping 已移除，导致临时 thread 泄漏且无法重试。
+
+修复：session 进入 closing 状态，拒绝新 run；对 active run 发出 cancel 并等待 terminal，再删除 ephemeral thread。任何等待/删除失败都会保留 mapping 并解除 closing，允许 client 重试 close。visible thread 始终保留。
+
+#### P1-6 packaged Desktop 默认路径解析错误
+
+位置：`src/acp/agentbridge/launcher.go`
+
+`awaken-acp` 被打包在 `resources/bin/<platform-arch>`，旧 resolver 却只检查 `<binary-dir>/Awaken/...`，无法找到安装根目录的 Desktop executable。
+
+修复：从 ACP binary 所在目录向上有限搜索 packaged layout；保留 `AWAKEN_DESKTOP_PATH` 显式覆盖，并新增 packaged resources 布局测试。
+
+#### P1-7 cwd 与 meta 契约过宽
+
+位置：`src/runtime/acp_session.go`、`src/acp/agentbridge/agent.go`
+
+修复：存在目录在所有平台都必须成功完成 symlink canonicalization；`awaken.ephemeral` 只接受 JSON boolean；client name/version 只信任 initialize 的 `ClientInfo`，不接受 session meta 覆盖审计来源。
+
+#### P1-8 多轮 prompt 仍提交首轮的预留 thread ID
+
+位置：`src/acp/agentbridge/coreclient.go`、`src/acp/agentbridge/session.go`
+
+首轮 run 会把 Core 中的预留 thread ID 更新为实际 thread ID，但 bridge-local mapping 仍保留旧值；第二轮若再次提交旧 thread ID，会被正确的 scope 校验拒绝。
+
+修复：create-run control 请求收窄为只提交 input；thread/workspace 完全由 Core session mapping 决定，bridge 不再复制或覆盖 Core-owned scope。另将 ACP cancel 绑定到本地 prompt context，使 cancel 即使发生在 create-run HTTP 尚未返回的窗口内也能终止请求。
+
+### 12.3 Phase 5 完整性判断
+
+代码层已具备以下闭环：真实 lease 与 heartbeat、Desktop/core/fail 启动策略、同 identity 单 Core、Desktop attach headless、trusted client cwd、project/thread/run 映射、text/tool/permission 投影、精确 option 回写、cancel/close、ephemeral terminal 后清理、同 Core cursor 重连和来源 metadata。
+
+仍需外部环境完成的验收，不属于本轮可在纯单元测试中证明的代码修复：
+
+1. 用 ACP compatibility suite、Zed 与另一个真实 ACP client 验证 initialize/new/prompt/permission/cancel/close。
+2. 用实际安装包验证 Desktop 未运行时 auto-start，以及 `--startup=core` 后 Desktop 接管同一 Core。
+3. 执行真实多进程测试：两个 bridge 并发、bridge 强杀后 TTL 回收、Desktop lease 存在时首个 bridge 退出不影响 Core。
+4. 验证超过 30 秒的真实长 turn、Core crash 后“不自动重放”的明确终态，以及 token 不进入日志/UI。
+5. ACP live semantic event 的独立 durable append 仍是已知缺口；当前 live 与正常 terminal replay 已有实现，但 Core 在 permission/长 turn 中崩溃时，最后一批尚未 append 的 live fact 可能丢失。
+
+### 12.4 本次验证
+
+通过：
+
+- `go test -count=1 -timeout 180s ./src/acp/...`：`src/acp`、`src/acp/agentbridge`、`src/acp/protocol` 通过
+- `go test ./src/runtime -run 'Test(CanonicalizeCWD|StableCWDHash|ACPSession)' -count=1 -timeout 60s`
+- `go test ./src/server -run 'TestControlACP' -count=1 -timeout 60s`
+- `npm.cmd --workspace @awaken/desktop test -- runtime-supervisor`：13 passed，2 skipped
+- `npm.cmd --workspace @awaken/desktop run typecheck`
+- `go build ./cmd/awaken-acp`、`go build ./cmd/awaken-core`
+- `git diff --check`：通过，仅有工作区 LF/CRLF 转换提示
+
+新增回归覆盖：
+
+- session run reservation、active run 不可覆盖、mapping snapshot 隔离、精确 run clear；
+- control create-run 拒绝跨 session thread；
+- bridge create-run 不提交 Core-owned thread/workspace，支持预留 thread 被替换后的多轮 prompt；
+- premature SSE EOF 失败；
+- 断线后从最后 cursor 重连；
+- packaged resources 到 Desktop executable 的路径解析；
+- Desktop attach identity digest 与 manifest fixture 一致。
+
+尚未执行或无法声明通过：
+
+- 真实 Desktop/安装包与真实第三方 ACP client 验收；
+- `go test -race`（当前 Windows 环境未提供可用 race detector toolchain）；
+- 全仓与既有环境相关的长耗时测试不作为本轮聚焦验证的“全绿”证据。
+
+## 13. 五次复核结论：真实 ACP + Desktop 验收
+
+### 13.1 Review 总结
+
+- 复核日期：2026-07-23。
+- 复核范围：当前未提交 Phase 5 修改、README 正式 Desktop 启动链路、实际 runtime manifest、`awaken-acp` stdio initialize/new/prompt，以及重启后的真实 Desktop 界面。
+- 验收方式：重新构建 `awaken-core.exe` 与 `awaken-acp.exe`，通过 `npm run dev:desktop` 启动当前工作区 Desktop；再使用基于仓库 ACP SDK 的独立 client adapter，以子进程方式连接真实 `awaken-acp.exe --startup=fail`。该 adapter 不是 HTTP mock，也不绕过 stdio bridge。
+- 当前结论：**Phase 5 暂不具备可交付的真实 prompt 闭环，存在 P0 阻塞。**
+
+### 13.2 已通过的真实链路
+
+1. README 正式入口能够启动当前工作区 Desktop、Core 与随机 loopback runtime。
+2. Core 在当前 Desktop userData identity 下发布 manifest；验收未记录或复制 control token。
+3. `awaken-acp --startup=fail` 能发现并 attach Desktop-owned Core，没有启动第二个 Core。
+4. ACP `initialize` 成功，`session/new` 能按 client cwd 创建 session mapping。
+5. Computer Use 复核确认重启后的 Awaken Desktop 正常显示唯一窗口、Awaken project 与已配置默认模型 `deepseek-v4-flash`。
+
+以上只证明 discovery、认证、attach 和 session 建立可用，不证明 Agent prompt 可用。
+
+### 13.3 P0：入站 ACP run 没有服务端模型配置来源
+
+位置：
+
+- `src/server/control_acp_run.go`
+- `src/runtime/run_service.go`
+- `apps/desktop/src/main/model-profile-store.ts`
+- `apps/desktop/src/main/index.ts`
+
+真实 stdio 调用结果：
+
+```text
+initialize      -> success
+session/new     -> success
+session/prompt  -> HTTP 400 MISSING_MODEL_PROFILE
+```
+
+根因：
+
+1. profile-aware `RunService` 明确要求 `StartRunRequest.ModelProfile` 非空；
+2. Renderer 发起的普通 Desktop run 由 Electron Main 调用 `ModelProfileStore.resolveDefaultRunProfile()`，再把完整运行配置注入 `/v1/runs`；
+3. ACP control handler 直接构造 `StartRunRequest`，没有任何模型 profile provider；
+4. `awaken-acp` 也不应让任意 ACP client 在 prompt 中提交 provider、endpoint 或 credential。
+
+这不是“缺少第三方 client 环境”，而是所有真实 client 都会稳定触发的产品代码缺口。即使 Desktop 已经配置且 UI 正在显示默认模型，ACP prompt 仍失败。
+
+### 13.4 本轮已直接修复的问题
+
+#### P0-1 Desktop runtime identity 少了 `project_` 前缀
+
+真实 manifest 的 identity 形如 `packaged:project_<digest>`。第四次修复虽然让 TypeScript 改用与 Go 相同的路径规范化与 SHA-256 截断，却返回了裸 digest，Desktop 仍无法匹配真实 Core。
+
+修复：
+
+- `RuntimeSupervisor.digestUserDataDir` 返回 `project_<digest>`；
+- 测试改用 Go 契约产生的固定 golden value，不再用 TypeScript 被测实现生成自身期望值。
+
+#### P1-1 create-run 错误丢失 Core 响应体
+
+原 bridge 只返回 HTTP status，第一次真实验收只能看到 400，无法定位 canonical error。
+
+修复：
+
+- `CoreClient.CreateRunForSession` 在非 201 时读取最多 8 KiB 响应体并加入错误；
+- 增加 `MISSING_MODEL_PROFILE` 响应体回归测试；
+- 上限避免异常 Core 返回无界内容。
+
+### 13.5 Phase 5 解阻方案
+
+第五次复核提出的 Electron/safeStorage broker 方案建立在错误的凭据存储假设上，已由 §14 的实现取代。当前权威方案是：client 通过标准 ACP selector 选择 Awaken-owned profile ID；Core 从 canonical `models.json + .env` 只读解析完整配置；未选择时使用默认/首个 ready profile；client 永远不能提交或读取 API key、Base URL 与 provider 参数。
+
+### 13.6 本次验证状态
+
+通过：
+
+- 当前工作区 Desktop 正式启动与真实 UI 检查；
+- 当前二进制构建；
+- Desktop-owned Core discovery、identity、attach；
+- ACP stdio `initialize`、`session/new`；
+- 错误响应体诊断准确返回 `MISSING_MODEL_PROFILE`。
+
+失败：
+
+- ACP stdio `session/prompt`：模型执行前失败，无 text/tool/permission/terminal 成功证据。
+
+未执行：
+
+- `--startup=desktop` 在 Desktop 完全未运行时的安装包 auto-start；
+- `--startup=core` 的真实 prompt；
+- Zed/compatibility suite、permission/cancel、多 bridge 与长 turn。
+
+## 14. 六次复核结论：模型选择 P0 解阻
+
+### 14.1 决策与风险判断
+
+采用的合同：
+
+1. ACP client 只能通过标准 `session/set_config_option` 选择 Awaken 返回的 opaque profile ID；
+2. selector 只包含 enabled + ready profile 的 ID、provider、展示名、model ID 和默认标志；
+3. client 不能提交 provider、Base URL、运行参数、capability 或 API key；
+4. 未选择时使用 session 建立时的默认 ready profile；没有可用默认时使用配置顺序中的首个 ready profile；
+5. active prompt 中禁止切换；显式选择随后被删除、禁用或失去 key 时返回 `ACP_MODEL_PROFILE_UNAVAILABLE`，不静默切换其他 provider。
+
+可接受风险：
+
+- 本地 client 能看到用户配置了哪些 provider/model，并可能选择成本不同的已启用 profile；这是模型 selector 的必要可见性，且范围不超过当前用户主动启用的配置。
+- profile ID 是稳定的本地配置标识；它不是 secret，但不写入共享验收报告。
+- `models.json` 与 `.env` 是两个文件，不是跨进程事务；Core 在每次 prompt 前重新解析并 fail closed，避免使用半更新或已失效配置。
+- Go 增加只读 parser 后必须与 Desktop 的文件格式保持 parity；写权限仍只属于 Electron Main，Go 不归一化写回。
+
+不可接受并已阻断：
+
+- client 直接提交模型名并借此构造任意 provider/endpoint；
+- client 注入或读取 API key；
+- 选择 disabled、missing-key、未知或配置读取失败的 profile；
+- 默认项失效后静默切换到另一个付费 provider。
+
+### 14.2 实现
+
+- `src/modelprofile/user_store.go`
+  - 只读解析 `~/.awaken/config/models.json` 与 `~/.awaken/.env`；
+  - 复用 profile ID、enabled/default、文件顺序、credential revision 与内置 capability；
+  - `.env` 损坏时整份 fail closed，不跳过坏行；
+  - 只向 catalog 返回 ready profile，完整 key 只进入 Core 内存的 `ModelProfileConfig`。
+- `src/server/control_acp_model_profiles.go`
+  - 新增 authenticated `GET /v1/control/acp/model-profiles`；
+  - 响应不包含 Base URL、auth scheme、参数、key 尾号或 API key。
+- `src/server/control_acp_run.go`
+  - create-run 只接受额外的 `model_profile_id`；
+  - Core 本地解析并设置 `StartRunRequest.ModelProfile`，未知/失效 ID 返回 typed error。
+- `src/acp/agentbridge`
+  - `session/new` 返回 category=`model` 的标准 ACP selector；
+  - `session/set_config_option` 只接受已广告 profile ID；
+  - session prompt 提交 profile ID，不提交完整配置或 key；
+  - 修复真实验收发现的 ephemeral text delta 与 durable assistant projection 重复输出。
+- `src/acp/agentbridge/launcher.go`
+  - `--startup=core` 移除继承的 `AWAKEN_HOME`/userData 覆盖，固定注入当前用户 canonical `~/.awaken` 与目标 userData；
+  - 不再需要第五次方案中的 Electron/safeStorage credential broker。当前 key 权威本来就是 `.env` 明文文件。
+
+### 14.3 本次真实验收
+
+环境：Windows、README `npm run dev:desktop`、当前工作区重建的 `awaken-core.exe` 与 `awaken-acp.exe`、独立 stdio ACP client adapter。
+
+Desktop-owned Core 与 `--startup=core` 两条路径结果均为：
+
+```text
+initialize      -> success
+session/new     -> success，返回 model selector
+session/prompt  -> success
+assistant       -> ACP_MODEL_SELECTION_E2E_OK
+stop_reason     -> end_turn
+```
+
+第一次成功 prompt 暴露 assistant 文本重复一次；journal 中模型结果只有一份，原因是 bridge 同时投影 ephemeral chunk 与相同 message ID 的 durable 完整消息。本轮已按 message ID 累积并压掉重复的 durable projection，第二次真实 stdio prompt 返回单一文本。
+
+`--startup=core` 验收期间未启动 Electron/Desktop，prompt 后未留下 `awaken-acp`、`awaken-core` 或 Electron 进程。该证据证明 core-only 默认模型 prompt；尚未覆盖长 run lease、第二 bridge 和随后 Desktop attach。
+
+### 14.4 自动化
+
+通过：
+
+- `go test ./src/modelprofile -count=1`
+- `go test ./src/acp/agentbridge -count=1 -timeout 120s`
+- `go test ./src/server -run 'TestControlACP' -count=1 -timeout 120s`
+- `go test ./cmd/awaken-core -count=1`
+- `npm run build:binary`
+
+新增覆盖：
+
+- 默认/显式 profile 解析、missing-key fallback、未知选择、损坏 `.env` fail-closed；
+- 非敏感 catalog 不包含 API key/Base URL/auth scheme；
+- ACP model selector 与 active session 选择；
+- create-run 只提交 profile ID，不提交 key；
+- headless 环境覆盖清理；
+- live/durable assistant 文本去重。
+
+未完成：
+
+- `--startup=core` 的长 run lease、第二 bridge、TTL/idle budget 与随后 Desktop attach；
+- compatibility suite、Zed 与另一个实际 ACP client；
+- permission、cancel、多 bridge、长 turn 与 Core crash 的真实进程级验收。

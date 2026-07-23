@@ -44,6 +44,47 @@ func NewCoreClient(baseURL, controlToken string) *CoreClient {
 	}
 }
 
+type ACPModelProfileSummary struct {
+	ID          string `json:"id"`
+	ProviderID  string `json:"provider_id"`
+	DisplayName string `json:"display_name"`
+	ModelID     string `json:"model_id"`
+	IsDefault   bool   `json:"is_default"`
+}
+
+type ACPModelProfileCatalog struct {
+	Profiles         []ACPModelProfileSummary `json:"profiles"`
+	DefaultProfileID string                   `json:"default_profile_id"`
+}
+
+// ListACPModelProfiles returns only non-sensitive, ready Awaken profiles that
+// may be selected by the local ACP client.
+func (c *CoreClient) ListACPModelProfiles(ctx context.Context) (*ACPModelProfileCatalog, error) {
+	u := c.BaseURL + "/v1/control/acp/model-profiles"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", c.authHeader())
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("list ACP model profiles request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
+		return nil, fmt.Errorf("list ACP model profiles status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var catalog ACPModelProfileCatalog
+	if err := json.NewDecoder(resp.Body).Decode(&catalog); err != nil {
+		return nil, fmt.Errorf("decode ACP model profiles: %w", err)
+	}
+	if len(catalog.Profiles) == 0 || strings.TrimSpace(catalog.DefaultProfileID) == "" {
+		return nil, errors.New("no usable ACP model profile")
+	}
+	return &catalog, nil
+}
+
 func (c *CoreClient) authHeader() string {
 	return "Bearer " + c.ControlToken
 }
@@ -99,7 +140,7 @@ func (c *CoreClient) CreateLease(ctx context.Context, ownerID string) (string, t
 		return "", time.Time{}, fmt.Errorf("lease status %d", resp.StatusCode)
 	}
 	var body struct {
-		LeaseID  string    `json:"lease_id"`
+		LeaseID   string    `json:"lease_id"`
 		ExpiresAt time.Time `json:"expires_at"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
@@ -164,11 +205,11 @@ type ACPSessionMapping struct {
 // CreateACPSession asks Core to map an ACP session to a project/thread.
 func (c *CoreClient) CreateACPSession(ctx context.Context, acpSessionID, cwd, visibility, clientName, clientVersion string) (*ACPSessionMapping, error) {
 	payload := map[string]string{
-		"acp_session_id":  acpSessionID,
-		"cwd":             cwd,
-		"visibility":      visibility,
-		"client_name":     clientName,
-		"client_version":  clientVersion,
+		"acp_session_id": acpSessionID,
+		"cwd":            cwd,
+		"visibility":     visibility,
+		"client_name":    clientName,
+		"client_version": clientVersion,
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -366,11 +407,10 @@ func (c *CoreClient) StreamRunEvents(ctx context.Context, runID string, afterCur
 
 // CreateRunForSession starts a run scoped to an ACP session via the control
 // route protected by the bridge control token.
-func (c *CoreClient) CreateRunForSession(ctx context.Context, sessionID, threadID, input, workspaceRoot string) (*Run, error) {
-	payload := map[string]string{
-		"thread_id":      threadID,
-		"input":          input,
-		"workspace_root": workspaceRoot,
+func (c *CoreClient) CreateRunForSession(ctx context.Context, sessionID, input, modelProfileID string) (*Run, error) {
+	payload := map[string]string{"input": input}
+	if selected := strings.TrimSpace(modelProfileID); selected != "" {
+		payload["model_profile_id"] = selected
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -389,7 +429,8 @@ func (c *CoreClient) CreateRunForSession(ctx context.Context, sessionID, threadI
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
-		return nil, fmt.Errorf("create run for session status %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
+		return nil, fmt.Errorf("create run for session status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	var run Run
 	if err := json.NewDecoder(resp.Body).Decode(&run); err != nil {
@@ -398,28 +439,9 @@ func (c *CoreClient) CreateRunForSession(ctx context.Context, sessionID, threadI
 	return &run, nil
 }
 
-// SetCurrentRun records the active run for a session.
-func (c *CoreClient) SetCurrentRun(ctx context.Context, sessionID, runID string) error {
-	u := c.BaseURL + "/v1/control/acp/sessions/" + url.PathEscape(sessionID) + "/current-run/" + url.PathEscape(runID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", c.authHeader())
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("set current run request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("set current run status %d", resp.StatusCode)
-	}
-	return nil
-}
-
 // ClearCurrentRun removes the active run association for a session.
-func (c *CoreClient) ClearCurrentRun(ctx context.Context, sessionID string) error {
-	u := c.BaseURL + "/v1/control/acp/sessions/" + url.PathEscape(sessionID) + "/current-run"
+func (c *CoreClient) ClearCurrentRun(ctx context.Context, sessionID, runID string) error {
+	u := c.BaseURL + "/v1/control/acp/sessions/" + url.PathEscape(sessionID) + "/current-run/" + url.PathEscape(runID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
 	if err != nil {
 		return err
@@ -553,6 +575,9 @@ func readSSE(ctx context.Context, r io.Reader, onData func([]byte) error) error 
 	}
 	if err := scanner.Err(); err != nil && !errors.Is(err, context.Canceled) {
 		return err
+	}
+	if len(data) > 0 {
+		return onData(data)
 	}
 	return nil
 }

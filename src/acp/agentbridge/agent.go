@@ -118,7 +118,11 @@ func (a *Agent) Cancel(ctx context.Context, params acpsdk.CancelNotification) er
 	}
 	session.mu.Lock()
 	runID := session.currentRunID
+	promptCancel := session.promptCancel
 	session.mu.Unlock()
+	if promptCancel != nil {
+		promptCancel()
+	}
 	if runID == "" {
 		return nil
 	}
@@ -167,19 +171,16 @@ func (a *Agent) NewSession(ctx context.Context, params acpsdk.NewSessionRequest)
 	if len(params.McpServers) > 0 {
 		return acpsdk.NewSessionResponse{}, acpsdk.NewInvalidParams(map[string]any{"field": "mcpServers", "error": "MCP servers are not supported"})
 	}
+	catalog, err := a.CoreClient.ListACPModelProfiles(ctx)
+	if err != nil {
+		return acpsdk.NewSessionResponse{}, fmt.Errorf("list Awaken model profiles: %w", err)
+	}
 
 	visibility := "visible"
 	if params.Meta != nil {
 		if v, ok := params.Meta["awaken.ephemeral"]; ok {
-			switch val := v.(type) {
-			case bool:
-				if val {
-					visibility = "ephemeral"
-				}
-			case string:
-				if val == "true" {
-					visibility = "ephemeral"
-				}
+			if val, ok := v.(bool); ok && val {
+				visibility = "ephemeral"
 			}
 		}
 	}
@@ -188,15 +189,6 @@ func (a *Agent) NewSession(ctx context.Context, params acpsdk.NewSessionRequest)
 	clientName := a.clientName
 	clientVersion := a.clientVersion
 	a.mu.RUnlock()
-	if params.Meta != nil {
-		if v, ok := params.Meta["client_name"].(string); ok && v != "" {
-			clientName = v
-		}
-		if v, ok := params.Meta["client_version"].(string); ok && v != "" {
-			clientVersion = v
-		}
-	}
-
 	acpSessionID := newACPSessionID()
 	mapping, err := a.CoreClient.CreateACPSession(ctx, acpSessionID, params.Cwd, visibility, clientName, clientVersion)
 	if err != nil {
@@ -204,11 +196,13 @@ func (a *Agent) NewSession(ctx context.Context, params acpsdk.NewSessionRequest)
 	}
 	sessionCtx, cancel := context.WithCancel(context.Background())
 	session := &bridgeSession{
-		mapping:     mapping,
-		conn:        nil, // set by Prompt
-		ctx:         sessionCtx,
-		cancel:      cancel,
-		coreClient:  a.CoreClient,
+		mapping:           mapping,
+		conn:              nil, // set by Prompt
+		ctx:               sessionCtx,
+		cancel:            cancel,
+		coreClient:        a.CoreClient,
+		modelProfiles:     append([]ACPModelProfileSummary(nil), catalog.Profiles...),
+		selectedProfileID: catalog.DefaultProfileID,
 	}
 	a.mu.Lock()
 	if a.conn != nil {
@@ -217,7 +211,8 @@ func (a *Agent) NewSession(ctx context.Context, params acpsdk.NewSessionRequest)
 	a.sessions[acpSessionID] = session
 	a.mu.Unlock()
 	return acpsdk.NewSessionResponse{
-		SessionId: acpsdk.SessionId(acpSessionID),
+		SessionId:     acpsdk.SessionId(acpSessionID),
+		ConfigOptions: session.modelConfigOptions(),
 	}, nil
 }
 
@@ -254,11 +249,42 @@ func (a *Agent) ResumeSession(ctx context.Context, params acpsdk.ResumeSessionRe
 	return acpsdk.ResumeSessionResponse{}, acpsdk.NewMethodNotFound("session/resume")
 }
 
-// SetSessionConfigOption is not supported.
+// SetSessionConfigOption lets the client select an Awaken-owned ready model
+// profile by opaque ID. Provider config and credentials never cross ACP.
 func (a *Agent) SetSessionConfigOption(ctx context.Context, params acpsdk.SetSessionConfigOptionRequest) (acpsdk.SetSessionConfigOptionResponse, error) {
 	_ = ctx
-	_ = params
-	return acpsdk.SetSessionConfigOptionResponse{}, acpsdk.NewMethodNotFound("session/setConfigOption")
+	if params.ValueId == nil {
+		return acpsdk.SetSessionConfigOptionResponse{}, acpsdk.NewInvalidParams(map[string]any{"error": "model config requires a value ID"})
+	}
+	if params.ValueId.ConfigId != acpsdk.SessionConfigId("model") {
+		return acpsdk.SetSessionConfigOptionResponse{}, acpsdk.NewInvalidParams(map[string]any{"field": "configId", "error": "unknown session config option"})
+	}
+	a.mu.RLock()
+	session, ok := a.sessions[string(params.ValueId.SessionId)]
+	a.mu.RUnlock()
+	if !ok {
+		return acpsdk.SetSessionConfigOptionResponse{}, acpsdk.NewInvalidParams(map[string]any{"error": "session not found"})
+	}
+	selected := string(params.ValueId.Value)
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	if session.promptActive {
+		return acpsdk.SetSessionConfigOptionResponse{}, acpsdk.NewInvalidParams(map[string]any{"error": "model cannot change during an active prompt"})
+	}
+	found := false
+	for _, profile := range session.modelProfiles {
+		if profile.ID == selected {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return acpsdk.SetSessionConfigOptionResponse{}, acpsdk.NewInvalidParams(map[string]any{"field": "value", "error": "model profile is not available"})
+	}
+	session.selectedProfileID = selected
+	return acpsdk.SetSessionConfigOptionResponse{
+		ConfigOptions: session.modelConfigOptionsLocked(),
+	}, nil
 }
 
 // SetSessionMode is not supported.

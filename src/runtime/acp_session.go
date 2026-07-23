@@ -15,11 +15,11 @@ import (
 )
 
 const (
-	ACPThreadSource        = "acp_bridge"
-	ACPMetadataClientName  = "acp_client_name"
+	ACPThreadSource          = "acp_bridge"
+	ACPMetadataClientName    = "acp_client_name"
 	ACPMetadataClientVersion = "acp_client_version"
-	ACPMetadataSessionID   = "acp_session_id"
-	ACPMetadataEphemeral   = "awaken.ephemeral"
+	ACPMetadataSessionID     = "acp_session_id"
+	ACPMetadataEphemeral     = "awaken.ephemeral"
 )
 
 var (
@@ -41,6 +41,8 @@ type ACPSessionMapping struct {
 	ClientVersion string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+	runStarting   bool
+	closing       bool
 }
 
 // ACPProjectService is the narrow project surface the ACP session manager
@@ -107,11 +109,16 @@ func (m *ACPSessionManager) CreateSession(ctx context.Context, req ACPSessionCre
 	}
 
 	m.mu.Lock()
+	if _, exists := m.sessions[req.ACPSessionID]; exists {
+		m.mu.Unlock()
+		return nil, ErrACPSessionExists
+	}
 	m.sessions[req.ACPSessionID] = mapping
 	m.threadToSession[threadID] = req.ACPSessionID
 	m.mu.Unlock()
 
-	return mapping, nil
+	result := *mapping
+	return &result, nil
 }
 
 // GetSession returns an existing session mapping.
@@ -122,12 +129,13 @@ func (m *ACPSessionManager) GetSession(acpSessionID string) (*ACPSessionMapping,
 	if !ok {
 		return nil, ErrACPSessionNotFound
 	}
-	return mapping, nil
+	result := *mapping
+	return &result, nil
 }
 
-// CloseSession cancels the active run and removes the mapping. It does not
-// delete the visible thread; ephemeral thread deletion is handled by the caller
-// or cleanup worker.
+// CloseSession cancels the active run and removes the mapping. Visible threads
+// remain durable; ephemeral threads are deleted only after the active run is
+// terminal.
 func (m *ACPSessionManager) CloseSession(ctx context.Context, acpSessionID string) error {
 	m.mu.Lock()
 	mapping, ok := m.sessions[acpSessionID]
@@ -135,17 +143,72 @@ func (m *ACPSessionManager) CloseSession(ctx context.Context, acpSessionID strin
 		m.mu.Unlock()
 		return ErrACPSessionNotFound
 	}
-	delete(m.sessions, acpSessionID)
-	delete(m.threadToSession, mapping.ThreadID)
+	if mapping.closing {
+		m.mu.Unlock()
+		return ErrACPSessionBusy
+	}
+	mapping.closing = true
+	snapshot := *mapping
 	m.mu.Unlock()
 
-	if mapping.CurrentRunID != "" && m.runService != nil {
-		_, _ = m.runService.CancelRun(mapping.CurrentRunID)
+	cleanupSucceeded := false
+	defer func() {
+		if cleanupSucceeded {
+			return
+		}
+		m.mu.Lock()
+		if current, exists := m.sessions[acpSessionID]; exists {
+			current.closing = false
+		}
+		m.mu.Unlock()
+	}()
+
+	if snapshot.CurrentRunID != "" && m.runService != nil {
+		if _, err := m.runService.CancelRun(snapshot.CurrentRunID); err != nil && !errors.Is(err, ErrRunNotFound) {
+			return fmt.Errorf("cancel ACP session run: %w", err)
+		}
 	}
-	if mapping.Visibility == "ephemeral" && m.runService != nil {
-		_ = m.runService.DeleteThread(mapping.ThreadID)
+	if snapshot.Visibility == "ephemeral" && m.runService != nil {
+		if snapshot.CurrentRunID != "" {
+			if err := m.waitForTerminal(ctx, snapshot.CurrentRunID); err != nil {
+				return err
+			}
+		}
+		if err := m.runService.DeleteThread(snapshot.ThreadID); err != nil && !errors.Is(err, ErrThreadNotFound) {
+			return fmt.Errorf("delete ephemeral ACP thread: %w", err)
+		}
 	}
+
+	m.mu.Lock()
+	if current, exists := m.sessions[acpSessionID]; exists && current == mapping {
+		delete(m.sessions, acpSessionID)
+		delete(m.threadToSession, current.ThreadID)
+	}
+	m.mu.Unlock()
+	cleanupSucceeded = true
 	return nil
+}
+
+func (m *ACPSessionManager) waitForTerminal(ctx context.Context, runID string) error {
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		run, err := m.runService.GetRun(runID)
+		if errors.Is(err, ErrRunNotFound) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("get ACP session run: %w", err)
+		}
+		if isTerminalStatus(run.Status) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait for ACP session run terminal: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 // SetCurrentRun records the active run for a session. The run must belong to
@@ -157,9 +220,40 @@ func (m *ACPSessionManager) SetCurrentRun(acpSessionID, runID string) error {
 	if !ok {
 		return ErrACPSessionNotFound
 	}
+	if mapping.CurrentRunID != "" && mapping.CurrentRunID != runID {
+		return ErrACPSessionBusy
+	}
 	mapping.CurrentRunID = runID
+	mapping.runStarting = false
 	mapping.UpdatedAt = time.Now().UTC()
 	return nil
+}
+
+// BeginRun reserves the session while StartRun is in progress. The reservation
+// closes the race between the bridge's busy check and Core assigning a run ID.
+func (m *ACPSessionManager) BeginRun(acpSessionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	mapping, ok := m.sessions[acpSessionID]
+	if !ok {
+		return ErrACPSessionNotFound
+	}
+	if mapping.closing || mapping.runStarting || mapping.CurrentRunID != "" {
+		return ErrACPSessionBusy
+	}
+	mapping.runStarting = true
+	mapping.UpdatedAt = time.Now().UTC()
+	return nil
+}
+
+// AbortRun clears a pending BeginRun reservation after StartRun fails.
+func (m *ACPSessionManager) AbortRun(acpSessionID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if mapping, ok := m.sessions[acpSessionID]; ok && mapping.runStarting {
+		mapping.runStarting = false
+		mapping.UpdatedAt = time.Now().UTC()
+	}
 }
 
 // ClearCurrentRun removes the active run association when it finishes.
@@ -213,10 +307,10 @@ func (m *ACPSessionManager) ensureProjectAndThread(ctx context.Context, cwd stri
 
 // ACPSessionCreateRequest is the Core-side input for session/new.
 type ACPSessionCreateRequest struct {
-	ACPSessionID string `json:"acp_session_id"`
-	CWD          string `json:"cwd"`
-	Visibility   string `json:"visibility"`
-	ClientName   string `json:"client_name"`
+	ACPSessionID  string `json:"acp_session_id"`
+	CWD           string `json:"cwd"`
+	Visibility    string `json:"visibility"`
+	ClientName    string `json:"client_name"`
 	ClientVersion string `json:"client_version"`
 }
 
@@ -238,15 +332,9 @@ func CanonicalizeCWD(cwd string) (string, error) {
 
 	cleaned := filepath.Clean(cwd)
 	var err error
-	if runtime.GOOS != "windows" {
-		cleaned, err = filepath.EvalSymlinks(cleaned)
-		if err != nil {
-			return "", fmt.Errorf("cwd symlinks cannot be resolved: %w", err)
-		}
-	} else {
-		// On Windows, EvalSymlinks may fail for non-existent path components;
-		// existence is checked next.
-		cleaned, _ = filepath.EvalSymlinks(cleaned)
+	cleaned, err = filepath.EvalSymlinks(cleaned)
+	if err != nil {
+		return "", fmt.Errorf("cwd symlinks cannot be resolved: %w", err)
 	}
 
 	info, err := os.Stat(cleaned)

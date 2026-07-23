@@ -124,6 +124,28 @@ func TestCoreClientCreateACPSession(t *testing.T) {
 	}
 }
 
+func TestCoreClientResolveExternalInteraction(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.Method + " " + r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewCoreClient(server.URL, "token")
+	if err := client.resolveExternalInteraction(context.Background(), "run_1", "ix_1", "completed"); err != nil {
+		t.Fatalf("resolve external interaction: %v", err)
+	}
+	if gotPath != "POST /v1/runs/run_1/external-interactions/ix_1/resolve" {
+		t.Fatalf("unexpected path: %q", gotPath)
+	}
+	if gotBody["resolution"] != "completed" {
+		t.Fatalf("unexpected resolution: %q", gotBody["resolution"])
+	}
+}
+
 func TestCoreClientStreamRunEvents(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method+" "+r.URL.Path != "GET /v1/runs/run_1/events" {

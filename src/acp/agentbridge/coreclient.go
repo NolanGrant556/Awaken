@@ -268,17 +268,15 @@ func (c *CoreClient) CreateRun(ctx context.Context, threadID, input, workspaceRo
 	return &run, nil
 }
 
-// resolveACPPermission resolves an ACP permission request for a run.
-func (c *CoreClient) resolveACPPermission(ctx context.Context, runID, interactionID, optionID string) error {
-	payload := map[string]any{
-		"option_id": optionID,
-		"cancelled": optionID == "" || optionID == "cancelled",
-	}
+// resolveExternalInteraction resolves a generic external interaction for a run.
+// resolution must be one of completed, cancelled, expired, failed.
+func (c *CoreClient) resolveExternalInteraction(ctx context.Context, runID, interactionID, resolution string) error {
+	payload := map[string]string{"resolution": resolution}
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/v1/runs/"+url.PathEscape(runID)+"/acp-permissions/"+url.PathEscape(interactionID)+"/resolve", bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/v1/runs/"+url.PathEscape(runID)+"/external-interactions/"+url.PathEscape(interactionID)+"/resolve", bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
@@ -288,8 +286,8 @@ func (c *CoreClient) resolveACPPermission(ctx context.Context, runID, interactio
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("resolve permission status %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("resolve external interaction status %d", resp.StatusCode)
 	}
 	return nil
 }

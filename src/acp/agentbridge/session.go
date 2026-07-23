@@ -5,21 +5,24 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
+	"awaken/src/protocol/agui"
 	acpsdk "github.com/coder/acp-go-sdk"
 )
 
 // bridgeSession tracks one inbound ACP session and its current run.
 type bridgeSession struct {
-	mapping      *ACPSessionMapping
-	conn         *acpsdk.AgentSideConnection
-	ctx          context.Context
-	cancel       context.CancelFunc
-	coreClient   *CoreClient
-	mu           sync.Mutex
-	currentRunID string
+	mapping            *ACPSessionMapping
+	conn               *acpsdk.AgentSideConnection
+	ctx                context.Context
+	cancel             context.CancelFunc
+	coreClient         *CoreClient
+	mu                 sync.Mutex
+	currentRunID       string
+	pendingPermissions map[string][]agui.ACPPermissionOption
 }
 
 // Prompt starts a run for this session and streams ACP updates until terminal.
@@ -40,10 +43,12 @@ func (s *bridgeSession) Prompt(ctx context.Context, text string) error {
 	}
 	s.mu.Lock()
 	s.currentRunID = run.RunID
+	s.pendingPermissions = make(map[string][]agui.ACPPermissionOption)
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
 		s.currentRunID = ""
+		s.pendingPermissions = nil
 		s.mu.Unlock()
 	}()
 
@@ -166,26 +171,66 @@ func (s *bridgeSession) handlePermissionRequest(runID string, frame EventFrame) 
 	}
 	interactionID := frame.InteractionID
 	toolCallID := frame.ToolCallID
+	s.mu.Lock()
+	s.pendingPermissions[interactionID] = frame.ACPPermissionOptions
+	s.mu.Unlock()
+
 	// Resolve permission asynchronously so the event stream keeps flowing.
-	go func(requestID, tcID string) {
+	go func(requestID, tcID string, opts []acpsdk.PermissionOption) {
 		resp, err := s.conn.RequestPermission(s.ctx, acpsdk.RequestPermissionRequest{
 			SessionId: acpsdk.SessionId(s.mapping.ACPSessionID),
 			ToolCall: acpsdk.ToolCallUpdate{
 				ToolCallId: acpsdk.ToolCallId(tcID),
 			},
-			Options: options,
+			Options: opts,
 		})
 		if err != nil {
-			_ = s.coreClient.resolveACPPermission(context.Background(), runID, requestID, "")
+			_ = s.resolvePermission(runID, requestID, "")
 			return
 		}
 		optionID := ""
 		if resp.Outcome.Selected != nil {
 			optionID = string(resp.Outcome.Selected.OptionId)
 		}
-		_ = s.coreClient.resolveACPPermission(context.Background(), runID, requestID, optionID)
-	}(interactionID, toolCallID)
+		_ = s.resolvePermission(runID, requestID, optionID)
+	}(interactionID, toolCallID, options)
 	return nil
+}
+
+// resolvePermission maps the selected option to an external interaction
+// resolution and resolves it in Core. An empty optionID means cancelled.
+func (s *bridgeSession) resolvePermission(runID, interactionID, optionID string) error {
+	resolution := "cancelled"
+	if optionID != "" {
+		kind := s.permissionOptionKind(interactionID, optionID)
+		switch kind {
+		case "allow":
+			resolution = "completed"
+		case "deny":
+			resolution = "failed"
+		default:
+			resolution = "failed"
+		}
+	}
+	s.mu.Lock()
+	delete(s.pendingPermissions, interactionID)
+	s.mu.Unlock()
+	if err := s.coreClient.resolveExternalInteraction(context.Background(), runID, interactionID, resolution); err != nil {
+		log.Printf("agentbridge: resolve permission %s error: %v", interactionID, err)
+		return err
+	}
+	return nil
+}
+
+func (s *bridgeSession) permissionOptionKind(interactionID, optionID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, opt := range s.pendingPermissions[interactionID] {
+		if opt.OptionID == optionID {
+			return opt.Kind
+		}
+	}
+	return ""
 }
 
 func stringValue(v any) string {

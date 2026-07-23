@@ -33,7 +33,7 @@ describe("ACPSettingsPanel", () => {
     expect(html).toContain("qwen_code");
     expect(html).toContain("claude_code");
     expect(html).toContain("codex");
-    expect(html).toContain("mcp-toggle-switch");
+    expect(html).toContain("aw-switch");
     expect(html).toContain("探测");
     expect(html).not.toContain('type="password"');
   });

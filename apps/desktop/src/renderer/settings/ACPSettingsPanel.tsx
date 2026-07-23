@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import {
   AwakenButton as Button,
+  AwakenSwitch,
   AwakenTooltip as Tooltip,
 } from "@awaken/design-system";
 import type {
@@ -581,15 +582,11 @@ export function ACPSettingsPanel({ runtimeClient }: ACPSettingsPanelProps) {
                       {probe?.busy ? "探测中…" : "探测"}
                     </button>
                   </Tooltip>
-                  <button
-                    type="button"
-                    className={`mcp-toggle-switch${runner.enabled ? " mcp-toggle-switch-on" : " mcp-toggle-switch-off"}`}
-                    aria-label={`${runner.enabled ? "禁用" : "启用"} ${id}`}
-                    aria-pressed={runner.enabled}
-                    onClick={() => void handleToggle(id)}
-                  >
-                    <span className="mcp-toggle-switch-thumb" />
-                  </button>
+                  <AwakenSwitch
+                    checked={runner.enabled}
+                    label={`${id} ACP runner`}
+                    onCheckedChange={() => void handleToggle(id)}
+                  />
                 </div>
               </article>
             );
@@ -625,17 +622,14 @@ export function ACPSettingsPanel({ runtimeClient }: ACPSettingsPanelProps) {
                 />
               </label>
 
-              <label className="acp-runner-field acp-runner-field-inline">
+              <div className="acp-runner-field acp-runner-field-inline">
                 <span>启用</span>
-                <button
-                  type="button"
-                  className={`mcp-toggle-switch${form.enabled ? " mcp-toggle-switch-on" : " mcp-toggle-switch-off"}`}
-                  aria-pressed={form.enabled}
-                  onClick={() => updateForm({ enabled: !form.enabled })}
-                >
-                  <span className="mcp-toggle-switch-thumb" />
-                </button>
-              </label>
+                <AwakenSwitch
+                  checked={form.enabled}
+                  label="ACP runner"
+                  onCheckedChange={(enabled) => updateForm({ enabled })}
+                />
+              </div>
 
               <label className="acp-runner-field">
                 <span>启动命令</span>

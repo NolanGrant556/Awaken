@@ -32,7 +32,17 @@ type SettingsStore struct {
 var settingsMu sync.Mutex
 
 func DefaultSettings() Settings {
-	return Settings{Enabled: true, AutomaticRecall: true, ProactiveMemory: true, AutoDream: false}
+	return Settings{Enabled: true, AutomaticRecall: true, ProactiveMemory: true, AutoDream: true}
+}
+
+func normalizeSettings(settings Settings) Settings {
+	if settings.Enabled {
+		return settings
+	}
+	settings.AutomaticRecall = false
+	settings.ProactiveMemory = false
+	settings.AutoDream = false
+	return settings
 }
 
 func NewSettingsStore() (*SettingsStore, error) {
@@ -54,6 +64,7 @@ func (s *SettingsStore) Get() (SettingsDocument, error) {
 	if errors.Is(err, os.ErrNotExist) {
 		return SettingsDocument{Revision: 0, Value: DefaultSettings()}, nil
 	}
+	document.Value = normalizeSettings(document.Value)
 	return document, err
 }
 
@@ -78,6 +89,8 @@ func (s *SettingsStore) Update(expectedRevision uint64, patch SettingsPatch) (Se
 		if expectedRevision == 0 {
 			current = DefaultSettings()
 		}
+		current = normalizeSettings(current)
+		wasEnabled := current.Enabled
 		if patch.Enabled != nil {
 			current.Enabled = *patch.Enabled
 		}
@@ -90,6 +103,11 @@ func (s *SettingsStore) Update(expectedRevision uint64, patch SettingsPatch) (Se
 		if patch.AutoDream != nil {
 			current.AutoDream = *patch.AutoDream
 		}
-		return current, nil
+		if patch.Enabled != nil && *patch.Enabled && !wasEnabled {
+			current.AutomaticRecall = true
+			current.ProactiveMemory = true
+			current.AutoDream = true
+		}
+		return normalizeSettings(current), nil
 	})
 }

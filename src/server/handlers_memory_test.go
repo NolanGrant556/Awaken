@@ -93,7 +93,7 @@ func TestMemorySettingsHTTPKeepsFourSwitchesWithRevisionCAS(t *testing.T) {
 	router := NewRouter(nil, nil)
 	initial := httptest.NewRecorder()
 	router.ServeHTTP(initial, httptest.NewRequest(http.MethodGet, "/v1/memory/settings", nil))
-	if initial.Code != http.StatusOK || !strings.Contains(initial.Body.String(), `"automatic_recall":true`) || !strings.Contains(initial.Body.String(), `"auto_dream":false`) {
+	if initial.Code != http.StatusOK || !strings.Contains(initial.Body.String(), `"automatic_recall":true`) || !strings.Contains(initial.Body.String(), `"auto_dream":true`) {
 		t.Fatalf("initial status=%d body=%s", initial.Code, initial.Body.String())
 	}
 
@@ -103,8 +103,20 @@ func TestMemorySettingsHTTPKeepsFourSwitchesWithRevisionCAS(t *testing.T) {
 		t.Fatalf("updated status=%d body=%s", updated.Code, updated.Body.String())
 	}
 
+	disabled := httptest.NewRecorder()
+	router.ServeHTTP(disabled, httptest.NewRequest(http.MethodPatch, "/v1/memory/settings", strings.NewReader(`{"expected_revision":1,"enabled":false}`)))
+	if disabled.Code != http.StatusOK || !strings.Contains(disabled.Body.String(), `"revision":2`) || !strings.Contains(disabled.Body.String(), `"enabled":false`) || !strings.Contains(disabled.Body.String(), `"automatic_recall":false`) || !strings.Contains(disabled.Body.String(), `"proactive_memory":false`) || !strings.Contains(disabled.Body.String(), `"auto_dream":false`) {
+		t.Fatalf("disabled status=%d body=%s", disabled.Code, disabled.Body.String())
+	}
+
+	reenabled := httptest.NewRecorder()
+	router.ServeHTTP(reenabled, httptest.NewRequest(http.MethodPatch, "/v1/memory/settings", strings.NewReader(`{"expected_revision":2,"enabled":true}`)))
+	if reenabled.Code != http.StatusOK || !strings.Contains(reenabled.Body.String(), `"revision":3`) || !strings.Contains(reenabled.Body.String(), `"enabled":true`) || !strings.Contains(reenabled.Body.String(), `"automatic_recall":true`) || !strings.Contains(reenabled.Body.String(), `"proactive_memory":true`) || !strings.Contains(reenabled.Body.String(), `"auto_dream":true`) {
+		t.Fatalf("reenabled status=%d body=%s", reenabled.Code, reenabled.Body.String())
+	}
+
 	conflict := httptest.NewRecorder()
-	router.ServeHTTP(conflict, httptest.NewRequest(http.MethodPatch, "/v1/memory/settings", strings.NewReader(`{"expected_revision":0,"enabled":false}`)))
+	router.ServeHTTP(conflict, httptest.NewRequest(http.MethodPatch, "/v1/memory/settings", strings.NewReader(`{"expected_revision":2,"enabled":true}`)))
 	if conflict.Code != http.StatusConflict {
 		t.Fatalf("conflict status=%d body=%s", conflict.Code, conflict.Body.String())
 	}

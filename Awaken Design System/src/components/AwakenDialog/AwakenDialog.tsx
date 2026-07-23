@@ -81,6 +81,7 @@ export function AwakenDialog({
     function handleKeyDown(event: KeyboardEvent): void {
       if (event.key === "Escape") {
         event.preventDefault();
+        event.stopPropagation();
         onOpenChange(false);
       }
     }

@@ -1,5 +1,6 @@
 import type { RunStepItem } from "@awaken/design-system";
 import type {
+  AguiACPPermissionOption,
   AguiArtifactStatus,
   AguiContextUsageSnapshot,
   AguiEvent,
@@ -306,6 +307,7 @@ export type UserQuestionItem = {
 
 export type ExternalInteractionItem = {
   id: string;
+  kind: "external" | "acp-permission";
   title?: string;
   safeMessage?: string;
   verificationUrl?: string;
@@ -313,6 +315,8 @@ export type ExternalInteractionItem = {
   provider?: string;
   recoveries: string[];
   sourceTool?: string;
+  /** ACP permission options surfaced when kind is "acp-permission". */
+  options?: AguiACPPermissionOption[];
 };
 
 const initialState: RuntimeViewState = {
@@ -2546,6 +2550,7 @@ export function reduceRuntimeState(
             nextState.externalInteractions,
             {
               id: interactionId,
+              kind: "external",
               title: action.event.interactionTitle,
               safeMessage: action.event.interactionSafeMessage,
               verificationUrl: action.event.interactionVerificationUrl ?? action.event.authUrl,
@@ -2562,6 +2567,43 @@ export function reduceRuntimeState(
         case "AWAKEN_EXTERNAL_INTERACTION_RESOLVED": {
           const interactionId =
             action.event.interactionId ?? action.event.toolCallId ?? "external-interaction";
+          nextState.externalInteractions = removeExternalInteraction(
+            nextState.externalInteractions,
+            interactionId,
+          );
+          break;
+        }
+        case "AWAKEN_ACP_PERMISSION_REQUESTED": {
+          // Ephemeral composer gate only — never create narrative/step records.
+          if (
+            nextState.status === "finished" ||
+            nextState.status === "error" ||
+            nextState.status === "cancelled"
+          ) {
+            break;
+          }
+          const interactionId =
+            action.event.interactionId ?? action.event.toolCallId ?? "acp-permission";
+          nextState.externalInteractions = upsertExternalInteraction(
+            nextState.externalInteractions,
+            {
+              id: interactionId,
+              kind: "acp-permission",
+              title: action.event.message ?? "外部 Agent 请求权限",
+              safeMessage: action.event.acpRunnerId
+                ? `${action.event.acpRunnerId} 需要你的确认`
+                : "外部 Agent 需要你的确认",
+              provider: action.event.acpRunnerId,
+              recoveries: ["acp_option"],
+              sourceTool: action.event.toolCallName,
+              options: action.event.acpPermissionOptions ?? [],
+            },
+          );
+          break;
+        }
+        case "AWAKEN_ACP_PERMISSION_RESOLVED": {
+          const interactionId =
+            action.event.interactionId ?? action.event.toolCallId ?? "acp-permission";
           nextState.externalInteractions = removeExternalInteraction(
             nextState.externalInteractions,
             interactionId,

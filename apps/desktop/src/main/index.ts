@@ -39,6 +39,11 @@ import {
   normalizeRuntimeThreadTranscript,
   normalizeRuntimeThread,
   normalizeStartRunRequest,
+  type ACPRunnerCreateRequest,
+  type ACPRunnerProbeResult,
+  type ACPRunnersSettings,
+  type ACPRunnerUpdateRequest,
+  type ACPRunnerView,
   type AttachmentPickResult,
   type ArtifactOpenRequest,
   type ArtifactOpenResult,
@@ -1610,6 +1615,55 @@ ipcMain.handle(
   },
 );
 
+ipcMain.handle("awaken:get-acp-runners", async (): Promise<ACPRunnersSettings> => {
+  return requestRuntime<ACPRunnersSettings>("/v1/acp/runners", { method: "GET" });
+});
+
+ipcMain.handle(
+  "awaken:create-acp-runner",
+  async (_event, request: ACPRunnerCreateRequest): Promise<ACPRunnerView> => {
+    return requestRuntime<ACPRunnerView>("/v1/acp/runners", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+  },
+);
+
+ipcMain.handle(
+  "awaken:update-acp-runner",
+  async (
+    _event,
+    runnerId: string,
+    request: ACPRunnerUpdateRequest,
+  ): Promise<ACPRunnerView> => {
+    return requestRuntime<ACPRunnerView>(
+      `/v1/acp/runners/${encodeURIComponent(runnerId)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+      },
+    );
+  },
+);
+
+ipcMain.handle("awaken:delete-acp-runner", async (_event, runnerId: string): Promise<void> => {
+  await requestRuntimeOK(`/v1/acp/runners/${encodeURIComponent(runnerId)}`, {
+    method: "DELETE",
+  });
+});
+
+ipcMain.handle(
+  "awaken:probe-acp-runner",
+  async (_event, runnerId: string): Promise<ACPRunnerProbeResult> => {
+    return requestRuntime<ACPRunnerProbeResult>(
+      `/v1/acp/runners/${encodeURIComponent(runnerId)}/probe`,
+      { method: "POST" },
+    );
+  },
+);
+
 ipcMain.handle("awaken:relaunch-desktop", () => {
   setImmediate(() => {
     if (isDevServer && process.platform === "darwin") {
@@ -1965,6 +2019,33 @@ ipcMain.handle(
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ resolution: payload.resolution }),
+      },
+    );
+  },
+);
+
+ipcMain.handle(
+  "awaken:resolve-acp-permission",
+  async (
+    _event,
+    payload: {
+      runId: string;
+      interactionId: string;
+      optionId: string;
+      cancelled: boolean;
+    },
+  ) => {
+    await requestRuntimeOK(
+      `/v1/runs/${payload.runId}/acp-permissions/${payload.interactionId}/resolve`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          option_id: payload.optionId,
+          cancelled: payload.cancelled,
+        }),
       },
     );
   },

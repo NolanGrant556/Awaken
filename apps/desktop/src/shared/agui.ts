@@ -45,6 +45,11 @@ export type AguiEventType =
   | "AWAKEN_USER_QUESTION_RESOLVED"
   | "AWAKEN_EXTERNAL_INTERACTION_REQUESTED"
   | "AWAKEN_EXTERNAL_INTERACTION_RESOLVED"
+  | "AWAKEN_ACP_SESSION_CHANGED"
+  | "AWAKEN_ACP_TURN_CHANGED"
+  | "AWAKEN_ACP_TOOL_CHANGED"
+  | "AWAKEN_ACP_PERMISSION_REQUESTED"
+  | "AWAKEN_ACP_PERMISSION_RESOLVED"
   | "AWAKEN_ARTIFACT_CREATED"
   | "AWAKEN_ARTIFACT_UPDATED"
   | "AWAKEN_TOOL_RECOVERY_REQUIRED"
@@ -77,6 +82,12 @@ export type AguiMemoryReceipt = {
 export type AguiArtifactStatus = "ready" | "pending" | "error";
 
 export type AguiArtifactRole = "deliverable" | "preview" | "support";
+
+export type AguiACPPermissionOption = {
+  optionId: string;
+  name: string;
+  kind?: string;
+};
 
 export type AguiRunOutcome = {
   type: string;
@@ -337,6 +348,12 @@ export type AguiEvent = {
   interactionQrImageUrl?: string;
   interactionProvider?: string;
   interactionRecoveries?: string[];
+  // ACP fields surfaced on AWAKEN_ACP_* events.
+  acpSessionId?: string;
+  acpRunnerId?: string;
+  acpTurnId?: string;
+  acpToolCallId?: string;
+  acpPermissionOptions?: AguiACPPermissionOption[];
   artifactId?: string;
   artifactTitle?: string;
   artifactDescription?: string;

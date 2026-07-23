@@ -12,8 +12,11 @@ import (
 	"syscall"
 	"time"
 
+	"awaken/src/acp"
+	"awaken/src/acp/protocol"
 	"awaken/src/agentcore"
 	"awaken/src/connectors"
+	"awaken/src/desktopdata"
 	"awaken/src/llm"
 	"awaken/src/mcpclient"
 	"awaken/src/memory"
@@ -23,6 +26,8 @@ import (
 	"awaken/src/skills"
 	"awaken/src/tool"
 	_ "awaken/src/tools"
+	configureacprunner "awaken/src/tools/configure_acp_runner"
+	delegateexternalagent "awaken/src/tools/delegate_external_agent"
 	bashtool "awaken/src/tools/bash"
 )
 
@@ -49,6 +54,10 @@ func main() {
 	}
 	skillManager := skillruntime.NewManager(skillRegistry, skillruntime.StdLogger{})
 	skillManager.RefreshTools()
+
+	acpManager := buildACPManager(defaultWorkspace)
+	delegateexternalagent.SetManager(acpManager)
+	configureacprunner.SetRegistry(acpManager.Registry())
 
 	runService := runtime.NewRunServiceWithModelProfiles(
 		func(workspace runtime.WorkspaceConfig, threadID string, profile *runtime.ModelProfileConfig) *agentcore.Agent {
@@ -169,12 +178,13 @@ func main() {
 		shutdownCh <- struct{}{}
 	})
 
-	srv.Handler = server.NewRouterWithWorkspaceAndSkillSync(
+	srv.Handler = server.NewRouterWithWorkspaceSkillSyncAndACP(
 		runService,
 		infoProvider,
 		manager,
 		connRegistry,
 		skillRegistry,
+		acpManager,
 		defaultWorkspace,
 		syncSkillsForWorkspace,
 		shutdownOnce,
@@ -198,6 +208,13 @@ func main() {
 	log.Println("awaken-core shutting down")
 	cancelCleanup()
 	bashtool.CancelAllTasks()
+	if acpManager != nil {
+		acpCtx, acpCancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer acpCancel()
+		if err := acpManager.CloseAll(acpCtx); err != nil {
+			log.Printf("awaken-core acp close error: %v", err)
+		}
+	}
 	if err := runService.FlushTranscripts(); err != nil {
 		log.Printf("awaken-core flush transcripts error: %v", err)
 	}
@@ -315,6 +332,28 @@ func buildSkillRegistry(manager *mcpclient.Manager, workspace string) *skills.Sk
 
 	log.Printf("[skills] loaded %d skill definitions", len(registry.ListAll()))
 	return registry
+}
+
+// buildACPManager loads the user-scoped runner config and starts the ACP manager.
+// The manager is created even if no runners are configured so routes degrade
+// gracefully. ACP runners are intentionally user-scoped only; project-level
+// runner configs are not loaded or merged.
+func buildACPManager(defaultWorkspace string) *acp.Manager {
+	_ = defaultWorkspace
+	userPath := ""
+	if home := desktopdata.AwakenHomeRoot(); home != "" {
+		userPath = acp.ConfigPath(home)
+	}
+	registry := acp.NewRegistry(userPath)
+	if err := registry.Load(); err != nil {
+		log.Printf("[acp] registry load failed: %v", err)
+	}
+	manager := acp.NewManager(registry, func(ctx context.Context, snapshot acp.RunnerSnapshot, cwd string) (acp.Client, error) {
+		return protocol.NewClient(ctx, snapshot, cwd)
+	})
+	manager.SetPermissionAwaiter(acp.NewChanPermissionAwaiter())
+	log.Printf("[acp] loaded %d runners", len(registry.All()))
+	return manager
 }
 
 // resolveDefaultWorkspace returns the startup default workspace. When the

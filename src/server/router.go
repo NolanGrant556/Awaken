@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 
+	"awaken/src/acp"
 	"awaken/src/agentcore"
 	"awaken/src/connectors"
 	"awaken/src/mcpclient"
@@ -75,6 +76,25 @@ func NewRouterWithWorkspaceAndSkillSync(runService *awruntime.RunService, infoPr
 	return newRouterInternal(cfg)
 }
 
+// NewRouterWithWorkspaceSkillSyncAndACP builds a fully-wired router that also
+// exposes ACP runner/session/permission routes when acpManager is non-nil.
+func NewRouterWithWorkspaceSkillSyncAndACP(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry, skillRegistry *skills.SkillRegistry, acpManager *acp.Manager, workspaceRoot string, syncSkillsForWorkspace func(string), shutdown ...func()) http.Handler {
+	cfg := routerConfig{
+		runService:             runService,
+		infoProvider:           infoProvider,
+		manager:                manager,
+		connectorRegistry:      connectorRegistry,
+		skillRegistry:          skillRegistry,
+		workspaceRoot:          workspaceRoot,
+		syncSkillsForWorkspace: syncSkillsForWorkspace,
+		acpManager:             acpManager,
+	}
+	if len(shutdown) > 0 {
+		cfg.shutdown = shutdown[0]
+	}
+	return newRouterInternal(cfg)
+}
+
 type routerConfig struct {
 	runService             *awruntime.RunService
 	infoProvider           RuntimeInfoProvider
@@ -85,6 +105,7 @@ type routerConfig struct {
 	workspaceRoot          string
 	syncSkillsForWorkspace func(string)
 	shutdown               func()
+	acpManager             *acp.Manager
 }
 
 func newRouterInternal(cfg routerConfig) http.Handler {
@@ -100,6 +121,7 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 			runService:             cfg.runService,
 			skillRegistry:          cfg.skillRegistry,
 			syncSkillsForWorkspace: cfg.syncSkillsForWorkspace,
+			acpManager:             cfg.acpManager,
 		}
 		mux.HandleFunc("GET /v1/threads", handlers.handleListThreads)
 		mux.HandleFunc("PATCH /v1/threads/{thread_id}", handlers.handleRenameThread)
@@ -185,6 +207,17 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 	mux.HandleFunc("DELETE /v1/skills/{id}", skillH.handleDeleteSkill)
 	mux.HandleFunc("POST /v1/skills/{id}/enable", skillH.handleEnableSkill)
 	mux.HandleFunc("POST /v1/skills/{id}/disable", skillH.handleDisableSkill)
+	if cfg.acpManager != nil {
+		acpH := acpHandlers{manager: cfg.acpManager, runService: cfg.runService}
+		mux.HandleFunc("GET /v1/acp/runners", acpH.handleListRunners)
+		mux.HandleFunc("POST /v1/acp/runners", acpH.handleCreateRunner)
+		mux.HandleFunc("PATCH /v1/acp/runners/{runner_id}", acpH.handleUpdateRunner)
+		mux.HandleFunc("DELETE /v1/acp/runners/{runner_id}", acpH.handleDeleteRunner)
+		mux.HandleFunc("POST /v1/acp/runners/{runner_id}/probe", acpH.handleProbeRunner)
+		mux.HandleFunc("GET /v1/acp/sessions", acpH.handleListSessions)
+		mux.HandleFunc("POST /v1/acp/sessions/{runner_id}/close", acpH.handleCloseSession)
+		mux.HandleFunc("POST /v1/runs/{run_id}/acp-permissions/{interaction_id}/resolve", acpH.handleResolvePermission)
+	}
 	// POST /v1/skills/{id}/execute reserved for follow-up
 	return mux
 }

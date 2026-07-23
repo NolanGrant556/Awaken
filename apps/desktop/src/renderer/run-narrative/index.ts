@@ -7,6 +7,7 @@ export {
 } from "./projector";
 
 export type {
+  ACPDisplayStatus,
   ChangedFile,
   DeliverableFile,
   DeliverableFileType,

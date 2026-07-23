@@ -38,6 +38,14 @@ const (
 	SemanticKindModelUsage          SemanticKind = "model_usage"
 	SemanticKindContextEpoch        SemanticKind = "context_epoch"
 	SemanticKindProviderOpaqueState SemanticKind = "provider_opaque_state"
+	SemanticKindACPSessionStarted   SemanticKind = "acp_session_started"
+	SemanticKindACPSessionClosed    SemanticKind = "acp_session_closed"
+	SemanticKindACPSessionInterrupted SemanticKind = "acp_session_interrupted"
+	SemanticKindACPTurnStarted      SemanticKind = "acp_turn_started"
+	SemanticKindACPTurnFinished     SemanticKind = "acp_turn_finished"
+	SemanticKindACPToolSnapshot     SemanticKind = "acp_tool_snapshot"
+	SemanticKindACPPermissionRequested SemanticKind = "acp_permission_requested"
+	SemanticKindACPPermissionResolved  SemanticKind = "acp_permission_resolved"
 )
 
 // SemanticRecord is the canonical durable execution-journal record (schema_version=2).

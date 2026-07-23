@@ -1,5 +1,10 @@
 import type { AguiEvent } from "./agui";
 import {
+  type ACPRunnerCreateRequest,
+  type ACPRunnerProbeResult,
+  type ACPRunnersSettings,
+  type ACPRunnerUpdateRequest,
+  type ACPRunnerView,
   type AttachmentPickResult,
   type ArtifactOpenRequest,
   type ArtifactOpenResult,
@@ -140,6 +145,11 @@ export type RuntimeClient = {
   getSearchSettings: () => Promise<SearchSettings>;
   saveSearchSettings: (request: SearchSettingsSaveRequest) => Promise<SearchSettingsSaveResult>;
   testSearchProvider: (request: SearchProviderTestRequest) => Promise<SearchProviderTestResult>;
+  getACPRunners: () => Promise<ACPRunnersSettings>;
+  createACPRunner: (request: ACPRunnerCreateRequest) => Promise<ACPRunnerView>;
+  updateACPRunner: (runnerId: string, request: ACPRunnerUpdateRequest) => Promise<ACPRunnerView>;
+  deleteACPRunner: (runnerId: string) => Promise<void>;
+  probeACPRunner: (runnerId: string) => Promise<ACPRunnerProbeResult>;
   listConnectors: () => Promise<RuntimeConnector[]>;
   connectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
   disconnectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
@@ -201,6 +211,12 @@ export type RuntimeClient = {
     runId: string,
     interactionId: string,
     resolution: "completed" | "cancelled" | "expired" | "failed",
+  ) => Promise<void>;
+  resolveACPPermission: (
+    runId: string,
+    interactionId: string,
+    optionId: string,
+    cancelled: boolean,
   ) => Promise<void>;
   getDesktopPreferences: () => Promise<DesktopPreferences>;
   saveDesktopPreferences: (request: DesktopPreferencesSaveRequest) => Promise<DesktopPreferences>;
@@ -268,6 +284,11 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     getSearchSettings: () => bridge.getSearchSettings(),
     saveSearchSettings: (request) => bridge.saveSearchSettings(request),
     testSearchProvider: (request) => bridge.testSearchProvider(request),
+    getACPRunners: () => bridge.getACPRunners(),
+    createACPRunner: (request) => bridge.createACPRunner(request),
+    updateACPRunner: (runnerId, request) => bridge.updateACPRunner(runnerId, request),
+    deleteACPRunner: (runnerId) => bridge.deleteACPRunner(runnerId),
+    probeACPRunner: (runnerId) => bridge.probeACPRunner(runnerId),
     listConnectors: () => bridge.listConnectors(),
     connectConnector: (connectorId) => bridge.connectConnector(connectorId),
     disconnectConnector: (connectorId) => bridge.disconnectConnector(connectorId),
@@ -329,6 +350,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     cancelRun: bridge.cancelRun,
     answerUserQuestion: bridge.answerUserQuestion,
     resolveExternalInteraction: bridge.resolveExternalInteraction,
+    resolveACPPermission: bridge.resolveACPPermission,
     getDesktopPreferences: () => bridge.getDesktopPreferences(),
     saveDesktopPreferences: (request) => bridge.saveDesktopPreferences(request),
     listMemories: (request) => bridge.listMemories(request),

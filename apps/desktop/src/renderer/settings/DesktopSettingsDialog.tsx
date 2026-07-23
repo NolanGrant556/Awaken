@@ -26,6 +26,7 @@ import type { RuntimeClient } from "../runtime/client";
 import { PetsSettingsPanel } from "./PetsSettingsPanel";
 import { SearchSettingsPanel } from "./SearchSettingsPanel";
 import { MemorySettingsPanel } from "./MemorySettingsPanel";
+import { ACPSettingsPanel } from "./ACPSettingsPanel";
 
 export type DraftState = {
   profileId?: string;
@@ -44,11 +45,16 @@ export type DraftState = {
 };
 
 type ModelSettingsSection = "configure" | "configured";
-type SettingsDialogSection = "models" | "search" | "memory" | "appearance" | "pets";
+type SettingsDialogSection = "models" | "search" | "memory" | "appearance" | "pets" | "acp";
 
 const MODEL_SETTINGS_TABS = [
   { id: "configure", label: "模型配置" },
   { id: "configured", label: "已配置模型" },
+];
+
+const SETTINGS_NAV_ITEMS = [
+  ...AwakenSettingsNavItems,
+  { id: "acp", label: "ACP" },
 ];
 
 const SETTINGS_SECTION_TITLES: Record<SettingsDialogSection, string> = {
@@ -57,6 +63,7 @@ const SETTINGS_SECTION_TITLES: Record<SettingsDialogSection, string> = {
   memory: "记忆",
   appearance: "外观",
   pets: "宠物",
+  acp: "外部 Agent / ACP",
 };
 
 type ConfiguredProfileDraft = {
@@ -899,7 +906,7 @@ export function DesktopSettingsDialog({
         rootRef={settingsRootRef}
         presentation="screen"
         contentLayout={activeSettingsSection === "memory" ? "full-bleed" : "standard"}
-        navItems={AwakenSettingsNavItems}
+        navItems={SETTINGS_NAV_ITEMS}
         activeSectionId={activeSettingsSection}
         sectionTitle={SETTINGS_SECTION_TITLES[activeSettingsSection]}
         toast={toastMessage}
@@ -923,6 +930,8 @@ export function DesktopSettingsDialog({
             />
           ) : activeSettingsSection === "pets" ? (
             <PetsSettingsPanel runtimeClient={runtimeClient} />
+          ) : activeSettingsSection === "acp" ? (
+            <ACPSettingsPanel runtimeClient={runtimeClient} />
           ) : (
             <AwakenModelSettings
               tabs={MODEL_SETTINGS_TABS}

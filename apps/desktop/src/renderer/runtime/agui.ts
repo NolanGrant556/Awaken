@@ -1,4 +1,5 @@
 export type {
+  AguiACPPermissionOption,
   AguiArtifactStatus,
   AguiContextUsageSnapshot,
   AguiEvent,

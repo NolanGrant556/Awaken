@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { AwakenMemorySettings } from "@awaken/design-system";
 import type { MemoryDreamTask, RuntimeMemory, RuntimeProject } from "../../shared/runtime";
 import type { RuntimeClient } from "../runtime/client";
-import { loadRecentActivitySnapshot, MemorySettingsPanel, memoryDreamStatusLabel, memoryRelativeTime } from "./MemorySettingsPanel";
+import { buildMemoryLibraryPresentation, loadRecentActivitySnapshot, MemorySettingsPanel, memoryDreamStatusLabel, memoryRelativeTime } from "./MemorySettingsPanel";
 
 describe("MemorySettingsPanel", () => {
   it("stacks recent activity above the library without create or edit actions", () => {
@@ -17,10 +17,13 @@ describe("MemorySettingsPanel", () => {
     expect(html).toContain("自动召回");
     expect(html).toContain("主动记忆");
     expect(html).toContain("Auto Dream");
-    expect(html).toContain("搜索记忆");
+    expect(html).not.toContain("搜索记忆");
     expect(html).toContain("更新记忆");
     expect(html).not.toContain("立即整理");
     expect(html).toContain("记忆库");
+    expect(html).toContain("memory-library-overview");
+    expect(html).toContain("用户资料、协作偏好与个人参考入口");
+    expect(html).toContain("按工作区保存的项目背景、决策与参考入口");
     expect(html).toContain("最近动态");
     expect(html).not.toContain("查看记忆更新与整理结果。");
     expect(html).not.toContain("显示当前记录，不代表完整版本历史");
@@ -52,8 +55,6 @@ describe("MemorySettingsPanel", () => {
     const html = renderToString(
       React.createElement(AwakenMemorySettings, {
         switches: [],
-        filters: [],
-        query: "",
         memories: [],
         activities: [
           {
@@ -168,6 +169,53 @@ describe("MemorySettingsPanel", () => {
     expect(snapshot.memories).toEqual([]);
     expect(snapshot.dreamTasks).toEqual([]);
     expect(snapshot.errors).toEqual(["项目一读取失败：project unavailable"]);
+  });
+
+  it("builds a file-oriented library summary from user and project topic metadata", () => {
+    const projectOne = {
+      projectId: "project-1",
+      workspaceRoot: "/tmp/project-1",
+      displayName: "项目一",
+      state: "active",
+      createdAt: "2026-07-23T08:00:00Z",
+      updatedAt: "2026-07-23T08:00:00Z",
+      version: 1,
+    } satisfies RuntimeProject;
+    const projectTwo = { ...projectOne, projectId: "project-2", displayName: "空项目" } satisfies RuntimeProject;
+    const baseMemory: RuntimeMemory = {
+      memoryId: "user-1",
+      name: "用户称呼",
+      description: "称呼用户为 Nolan",
+      type: "user",
+      status: "active",
+      revision: 1,
+      updatedAt: "2026-07-23T08:00:00Z",
+      sourceThreadId: "thread-user",
+      sourceRecordId: "record-user",
+      scope: "user",
+    };
+
+    const presentation = buildMemoryLibraryPresentation([
+      { memory: baseMemory },
+      { memory: { ...baseMemory, memoryId: "project-memory", scope: "project", type: "project", updatedAt: "2026-07-23T09:00:00Z" }, projectId: "project-1", projectName: "项目一" },
+    ], [projectOne, projectTwo], new Date("2026-07-23T10:00:00Z").getTime());
+
+    expect(presentation.summary).toEqual({
+      userTopicCount: 1,
+      userTopicCountCapped: false,
+      userUpdatedLabel: "2 小时前",
+      projectCount: 1,
+      projectTopicCount: 1,
+      projectTopicCountCapped: false,
+      projectUpdatedLabel: "1 小时前",
+    });
+    expect(presentation.projects).toEqual([{
+      id: "project-1",
+      name: "项目一",
+      topicCount: 1,
+      topicCountCapped: false,
+      updatedLabel: "1 小时前",
+    }]);
   });
 
   it("uses Chinese copy for every Dream task status", () => {

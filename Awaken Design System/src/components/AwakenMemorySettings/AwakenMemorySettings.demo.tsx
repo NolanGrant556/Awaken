@@ -3,29 +3,42 @@ import "./AwakenMemorySettings.demo.css";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenMemoryLightFlowLayout } from "../AwakenMemoryLightFlow";
 import { AwakenSettingsSectionPreview } from "../AwakenSettings/AwakenSettingsSectionPreview";
-import { AwakenMemorySettings, type AwakenMemoryFilterValue } from "./AwakenMemorySettings";
+import { AwakenMemorySettings } from "./AwakenMemorySettings";
 import { AwakenMemorySettingsSample, AwakenMemorySettingsSampleDetails } from "./AwakenMemorySettings.states";
 
 export function AwakenMemorySettingsDemo() {
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [switches, setSwitches] = useState(AwakenMemorySettingsSample.switches);
-  const [filters, setFilters] = useState(AwakenMemorySettingsSample.filters);
-  const [query, setQuery] = useState("");
+  const [libraryScope, setLibraryScope] = useState<"user" | "project">("user");
+  const [libraryProjectId, setLibraryProjectId] = useState("");
   const [memories, setMemories] = useState(AwakenMemorySettingsSample.memories);
   const [selectedMemoryId, setSelectedMemoryId] = useState<string | null>(null);
   const originalThemeRef = useRef<string | null>(null);
+  const memoryEnabled = switches.find((item) => item.id === "enabled")?.checked ?? false;
 
   const visibleMemories = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase();
-    const values = Object.fromEntries(filters.map((filter) => [filter.id, filter.value]));
     return memories.filter((memory) => {
-      if (values.scope === "project") return false;
-      if (values.type && memory.kind !== values.type) return false;
-      if (values.status && memory.status !== values.status) return false;
-      if (normalizedQuery && !`${memory.name}\n${memory.description}`.toLocaleLowerCase().includes(normalizedQuery)) return false;
-      return true;
+      if (libraryScope === "user") return !memory.projectId;
+      return memory.projectId === libraryProjectId;
     });
-  }, [filters, memories, query]);
+  }, [libraryProjectId, libraryScope, memories]);
+
+  const librarySummary = useMemo(() => {
+    const userMemories = memories.filter((memory) => !memory.projectId);
+    const projectMemories = memories.filter((memory) => memory.projectId);
+    return {
+      userTopicCount: userMemories.length,
+      userUpdatedLabel: userMemories[0]?.updatedLabel,
+      projectCount: new Set(projectMemories.map((memory) => memory.projectId)).size,
+      projectTopicCount: projectMemories.length,
+      projectUpdatedLabel: projectMemories[0]?.updatedLabel,
+    };
+  }, [memories]);
+
+  const memoryProjects = useMemo(() => (AwakenMemorySettingsSample.memoryProjects ?? []).map((project) => ({
+    ...project,
+    topicCount: memories.filter((memory) => memory.projectId === project.id).length,
+  })).filter((project) => project.topicCount > 0), [memories]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -60,17 +73,28 @@ export function AwakenMemorySettingsDemo() {
         <AwakenMemoryLightFlowLayout theme={theme} titleAs="h1">
           <AwakenMemorySettings
             {...AwakenMemorySettingsSample}
-            switches={switches}
-            filters={filters}
-            query={query}
+            switches={switches.map((item) => ({
+              ...item,
+              disabled: item.id !== "enabled" && !memoryEnabled,
+            }))}
             memories={visibleMemories}
+            librarySummary={librarySummary}
+            memoryProjects={memoryProjects}
+            canStartDream={memoryEnabled}
             selectedMemoryId={selectedMemoryId}
             detail={selectedMemoryId ? AwakenMemorySettingsSampleDetails[selectedMemoryId] ?? null : null}
-            onToggleSwitch={(id) => setSwitches((current) => current.map((item) => (
-              item.id === id ? { ...item, checked: !item.checked } : item
-            )))}
-            onQueryChange={setQuery}
-            onFilterChange={(id: string, value: AwakenMemoryFilterValue) => setFilters((current) => current.map((filter) => filter.id === id ? { ...filter, value } : filter))}
+            onToggleSwitch={(id) => setSwitches((current) => {
+              const memoryEnabled = current.find((item) => item.id === "enabled")?.checked ?? false;
+              if (id !== "enabled" && !memoryEnabled) return current;
+              if (id === "enabled") {
+                return current.map((item) => ({ ...item, checked: !memoryEnabled }));
+              }
+              return current.map((item) => item.id === id ? { ...item, checked: !item.checked } : item);
+            })}
+            onOpenLibraryScope={(scope, projectId) => {
+              setLibraryScope(scope);
+              setLibraryProjectId(projectId ?? "");
+            }}
             onOpenMemory={setSelectedMemoryId}
             onCloseMemory={() => setSelectedMemoryId(null)}
             onDeleteMemory={(id) => {

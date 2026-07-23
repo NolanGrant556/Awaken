@@ -80,7 +80,7 @@ func GenerateRuntimeIdentity(userDataDir, ownerMode, baseURL string) (*RuntimeId
 	}
 	return &RuntimeIdentity{
 		SchemaVersion:   runtimeManifestSchemaVersion,
-		RuntimeIdentity: computeRuntimeIdentity(userDataDir),
+		RuntimeIdentity: ComputeRuntimeIdentity(userDataDir),
 		InstanceID:      "core_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
 		PID:             os.Getpid(),
 		OwnerMode:       ownerMode,
@@ -181,7 +181,7 @@ func AcquireRuntimeLock(userDataDir, ownerID string, ttl time.Duration) (*filest
 	return filestore.AcquireLock(paths.Lock, ownerID, ttl)
 }
 
-func computeRuntimeIdentity(userDataDir string) string {
+func ComputeRuntimeIdentity(userDataDir string) string {
 	// Use a stable digest of the canonical userData path so packaged and dev
 	// identities remain separate while each identity converges across restarts.
 	canonical := normalizeProjectWorkspaceRoot(userDataDir)

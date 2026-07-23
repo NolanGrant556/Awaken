@@ -12,9 +12,9 @@ import (
 // controlHandlers serves bridge-only control routes protected by the control
 // token middleware.
 type controlHandlers struct {
-	identity      *runtime.RuntimeIdentity
-	leaseManager  *runtime.LeaseManager
-	runService    *runtime.RunService
+	identity     *runtime.RuntimeIdentity
+	leaseManager *runtime.LeaseManager
+	runService   *runtime.RunService
 }
 
 func (h *controlHandlers) handleRuntimeIdentity(w http.ResponseWriter, r *http.Request) {
@@ -57,11 +57,11 @@ func (h *controlHandlers) handleCreateLease(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"lease_id":   lease.LeaseID,
-		"owner_kind": lease.OwnerKind,
-		"owner_id":   lease.OwnerID,
-		"expires_at": lease.ExpiresAt.Format(time.RFC3339Nano),
-		"ttl_ms":     30000,
+		"lease_id":     lease.LeaseID,
+		"owner_kind":   lease.OwnerKind,
+		"owner_id":     lease.OwnerID,
+		"expires_at":   lease.ExpiresAt.Format(time.RFC3339Nano),
+		"ttl_ms":       30000,
 		"heartbeat_ms": 10000,
 	})
 }

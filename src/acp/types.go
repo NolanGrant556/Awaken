@@ -10,7 +10,7 @@ import (
 type PermissionMode string
 
 const (
-	PermissionModeAsk PermissionMode = "ask"
+	PermissionModeAsk  PermissionMode = "ask"
 	PermissionModeDeny PermissionMode = "deny"
 )
 
@@ -50,15 +50,15 @@ type ConversationKey struct {
 type ConversationState string
 
 const (
-	ConversationStateAbsent      ConversationState = "absent"
-	ConversationStateStarting    ConversationState = "starting"
-	ConversationStateReady       ConversationState = "ready"
-	ConversationStatePrompting   ConversationState = "prompting"
+	ConversationStateAbsent            ConversationState = "absent"
+	ConversationStateStarting          ConversationState = "starting"
+	ConversationStateReady             ConversationState = "ready"
+	ConversationStatePrompting         ConversationState = "prompting"
 	ConversationStateWaitingPermission ConversationState = "waiting_permission"
-	ConversationStateCancelling  ConversationState = "cancelling"
-	ConversationStateClosing     ConversationState = "closing"
-	ConversationStateClosed      ConversationState = "closed"
-	ConversationStateFailed      ConversationState = "failed"
+	ConversationStateCancelling        ConversationState = "cancelling"
+	ConversationStateClosing           ConversationState = "closing"
+	ConversationStateClosed            ConversationState = "closed"
+	ConversationStateFailed            ConversationState = "failed"
 )
 
 // TurnState holds the active prompt turn for a conversation.
@@ -115,13 +115,13 @@ type PermissionResolution struct {
 
 // TurnResult is the terminal result of an ACP prompt turn.
 type TurnResult struct {
-	StopReason     string
-	AssistantText  string
-	ToolSummary    ToolSummary
-	Truncated      bool
+	StopReason      string
+	AssistantText   string
+	ToolSummary     ToolSummary
+	Truncated       bool
 	SideEffectState string
-	ErrorCode      string
-	ErrorMessage   string
+	ErrorCode       string
+	ErrorMessage    string
 }
 
 // ToolSummary aggregates external tool call outcomes for one turn.
@@ -134,10 +134,10 @@ type ToolSummary struct {
 // AgentCapabilitiesSnapshot captures the subset of ACP agent capabilities that
 // Awaken cares about.
 type AgentCapabilitiesSnapshot struct {
-	ProtocolVersion     int
-	SupportsTextPrompt  bool
-	SupportsImagePrompt bool
-	SupportsAudioPrompt bool
+	ProtocolVersion         int
+	SupportsTextPrompt      bool
+	SupportsImagePrompt     bool
+	SupportsAudioPrompt     bool
 	SupportsEmbeddedContext bool
 }
 
@@ -201,13 +201,13 @@ type Client interface {
 
 // SessionSummary is the safe, non-secret view of a live conversation.
 type SessionSummary struct {
-	ThreadID       string
-	RunnerID       string
-	ACPSessionID   string
-	State          ConversationState
-	WorkspaceRoot  string
-	ActiveTurnID   string
+	ThreadID          string
+	RunnerID          string
+	ACPSessionID      string
+	State             ConversationState
+	WorkspaceRoot     string
+	ActiveTurnID      string
 	PendingPermission *PermissionRequest
-	StartedAt      time.Time
-	UpdatedAt      time.Time
+	StartedAt         time.Time
+	UpdatedAt         time.Time
 }

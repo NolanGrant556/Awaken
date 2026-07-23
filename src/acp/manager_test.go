@@ -238,7 +238,9 @@ func (c *fakeClientForConcurrency) Prompt(ctx context.Context, sessionID, turnID
 	return acp.TurnResult{}, nil
 }
 func (c *fakeClientForConcurrency) Cancel(ctx context.Context, sessionID string) error { return nil }
-func (c *fakeClientForConcurrency) CloseSession(ctx context.Context, sessionID string) error { return nil }
+func (c *fakeClientForConcurrency) CloseSession(ctx context.Context, sessionID string) error {
+	return nil
+}
 func (c *fakeClientForConcurrency) Close() error { return nil }
 
 type probeFakeClient struct {
@@ -249,10 +251,12 @@ func (c *probeFakeClient) Initialize(ctx context.Context) (acp.AgentCapabilities
 	c.onInit()
 	return acp.AgentCapabilitiesSnapshot{SupportsTextPrompt: true}, nil
 }
-func (c *probeFakeClient) NewSession(ctx context.Context, cwd string) (string, error) { return "session-1", nil }
+func (c *probeFakeClient) NewSession(ctx context.Context, cwd string) (string, error) {
+	return "session-1", nil
+}
 func (c *probeFakeClient) Prompt(ctx context.Context, sessionID, turnID, text string, handler acp.UpdateHandler, permission acp.PermissionHandler) (acp.TurnResult, error) {
 	return acp.TurnResult{}, nil
 }
-func (c *probeFakeClient) Cancel(ctx context.Context, sessionID string) error { return nil }
+func (c *probeFakeClient) Cancel(ctx context.Context, sessionID string) error       { return nil }
 func (c *probeFakeClient) CloseSession(ctx context.Context, sessionID string) error { return nil }
-func (c *probeFakeClient) Close() error { return nil }
+func (c *probeFakeClient) Close() error                                             { return nil }

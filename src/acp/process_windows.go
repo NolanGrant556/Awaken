@@ -36,4 +36,3 @@ func envKeyIsCaseInsensitive() bool { return true }
 func normalizeEnvKey(k string) string { return k }
 
 func shouldOverrideKey(key, existing string) bool { return true }
-

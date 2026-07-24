@@ -220,6 +220,7 @@ pre {
   height: 100%;
   overflow-x: hidden;
   overflow-y: auto;
+  scrollbar-gutter: stable both-edges;
   background: var(--aw-surface-work);
   scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 46%, transparent)
     transparent;

@@ -121,6 +121,7 @@ export function AwakenSkills({
   const visibleProjects = filterProjects(projects, query);
   const visibleGlobalGroups = filterGroups(globalGroups, query);
   const visibleAgentGroups = filterGroups(agentGroups, query);
+  const visibleAgentSkills = visibleAgentGroups.flatMap((group) => group.skills);
   const activeProject = visibleProjects.find((project) => project.id === openProjectId) ?? null;
 
   return (
@@ -212,29 +213,12 @@ export function AwakenSkills({
         ) : null}
 
         {activeView === "agents" ? (
-          visibleAgentGroups.length > 0 ? (
-            <div className="aw-skills__sections">
-              {visibleAgentGroups.map((group) => (
-                <section className="aw-skills__section" key={group.id}>
-                  <header className="aw-skills__section-heading">
-                    <div>
-                      <h3>{group.label}</h3>
-                      {group.path ? <p>{group.path}</p> : null}
-                    </div>
-                    <span>{group.skills.length} Skills</span>
-                  </header>
-                  <SkillGrid
-                    skills={group.skills}
-                    emptyMessage="暂无 Agents Skills"
-                    onPreview={onSkillPreview}
-                    onToggle={onSkillToggle}
-                  />
-                </section>
-              ))}
-            </div>
-          ) : (
-            <div className="aw-skills__empty">暂无 Agents Skills</div>
-          )
+          <SkillGrid
+            skills={visibleAgentSkills}
+            emptyMessage="暂无 Agents Skills"
+            onPreview={onSkillPreview}
+            onToggle={onSkillToggle}
+          />
         ) : null}
       </div>
 

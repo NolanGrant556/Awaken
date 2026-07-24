@@ -75,11 +75,11 @@ export function AwakenConnectors({
           </div>
           <div className="aw-connectors__header-actions">
             <button type="button" className="aw-connectors__refresh" aria-label="刷新" disabled={loading} onClick={onRefresh}>
-              <RefreshCw size={16} strokeWidth={1.9} />
+              <RefreshCw size={15} strokeWidth={1.9} />
             </button>
             {activeKind === "mcp" ? (
-              <AwakenButton variant="primary" size="md" onClick={onConfigureMcp}>
-                <Plus size={16} strokeWidth={1.9} />配置 MCP
+              <AwakenButton variant="primary" size="sm" onClick={onConfigureMcp}>
+                <Plus size={15} strokeWidth={1.9} />配置 MCP
               </AwakenButton>
             ) : null}
           </div>

@@ -29,6 +29,19 @@
   padding: 12px 10px;
 }
 
+.aw-folder[data-size="dense"] {
+  --aw-folder-scale: 0.76;
+  width: 164px;
+  height: 204px;
+  padding: 8px 6px;
+}
+
+.aw-folder[data-size="dense"] .aw-folder__name,
+.aw-folder[data-size="dense"] .aw-folder__count {
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+}
+
 .aw-folder__stage {
   position: relative;
   display: block;

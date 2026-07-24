@@ -1,0 +1,105 @@
+package server
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"awaken/src/mcpclient"
+)
+
+func TestParseMCPServersConfigAcceptsStreamableHTTPAlias(t *testing.T) {
+	configs, err := parseMCPServersConfig(`{
+		"mcpServers": {
+			"remote-example": {
+				"type": "streamable-http",
+				"url": "https://mcp.example.test/mcp",
+				"headers": {"X-Test": "placeholder"}
+			}
+		}
+	}`)
+	if err != nil {
+		t.Fatalf("parse Streamable HTTP alias: %v", err)
+	}
+
+	cfg, ok := configs["remote_example"]
+	if !ok {
+		t.Fatalf("normalized config missing: %+v", configs)
+	}
+	if cfg.TransportKind() != mcpclient.TransportHTTP || cfg.HTTP == nil {
+		t.Fatalf("expected HTTP transport, got kind=%q config=%+v", cfg.TransportKind(), cfg)
+	}
+	if cfg.HTTP.URL != "https://mcp.example.test/mcp" {
+		t.Fatalf("unexpected endpoint: %q", cfg.HTTP.URL)
+	}
+	if cfg.HTTP.Headers["X-Test"] != "placeholder" {
+		t.Fatalf("headers were not preserved: %+v", cfg.HTTP.Headers)
+	}
+}
+
+func TestParseMCPServersConfigKeepsHTTPAsCanonicalStreamableTransport(t *testing.T) {
+	for _, configText := range []string{
+		`{"mcpServers":{"remote":{"type":"http","url":"https://mcp.example.test/mcp"}}}`,
+		`{"mcpServers":{"remote":{"url":"https://mcp.example.test/mcp"}}}`,
+	} {
+		configs, err := parseMCPServersConfig(configText)
+		if err != nil {
+			t.Fatalf("parse HTTP shorthand %s: %v", configText, err)
+		}
+		if got := configs["remote"].TransportKind(); got != mcpclient.TransportHTTP {
+			t.Fatalf("expected HTTP transport, got %q", got)
+		}
+	}
+}
+
+func TestParseMCPServersConfigListsSupportedRemoteTransports(t *testing.T) {
+	_, err := parseMCPServersConfig(
+		`{"mcpServers":{"remote":{"type":"socket","url":"https://mcp.example.test/mcp"}}}`,
+	)
+	if err == nil {
+		t.Fatal("expected unsupported transport error")
+	}
+	for _, expected := range []string{"streamable-http", "http", "sse"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("error %q does not list %q", err, expected)
+		}
+	}
+}
+
+func TestConfigureMCPServersPersistsStreamableHTTPAliasAsCanonicalHTTP(t *testing.T) {
+	awakenHome := t.TempDir()
+	t.Setenv("AWAKEN_HOME", awakenHome)
+	mgr := mcpclient.NewManager(mcpclient.WithLogger(testLogger{}))
+	router := NewRouterWithWorkspace(nil, nil, mgr, nil, nil, "")
+	configText := `{"mcpServers":{"remote-example":{"type":"streamable-http","url":"http://127.0.0.1:1/mcp"}}}`
+	body, err := json.Marshal(configureMCPServersRequest{ConfigText: configText})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/mcp/servers", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	storedConfig, err := mcpclient.LoadUserConfig()
+	if err != nil {
+		t.Fatalf("load persisted user config: %v", err)
+	}
+	stored := storedConfig.Servers["remote_example"]
+	if stored.HTTP == nil || stored.HTTP.URL != "http://127.0.0.1:1/mcp" {
+		t.Fatalf("expected canonical HTTP config, got %+v", stored)
+	}
+	encoded, err := json.Marshal(storedConfig)
+	if err != nil {
+		t.Fatalf("marshal persisted user config: %v", err)
+	}
+	if strings.Contains(string(encoded), "streamable-http") {
+		t.Fatalf("persisted config retained input alias: %s", encoded)
+	}
+}

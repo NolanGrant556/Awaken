@@ -1,5 +1,5 @@
 import "./AwakenSkillCard.css";
-import { FileText, Wrench } from "lucide-react";
+import { FileText, Trash2, Wrench } from "lucide-react";
 import type { HTMLAttributes } from "react";
 import { AwakenSwitch } from "../AwakenSwitch";
 import type { AwakenSkillItem } from "../AwakenSkills/AwakenSkills.types";
@@ -11,12 +11,16 @@ export type AwakenSkillCardProps = Omit<
   skill: AwakenSkillItem;
   onPreview?: () => void;
   onEnabledChange?: (enabled: boolean) => void;
+  onDelete?: () => void;
+  deleting?: boolean;
 };
 
 export function AwakenSkillCard({
   skill,
   onPreview,
   onEnabledChange,
+  onDelete,
+  deleting = false,
   className,
   ...props
 }: AwakenSkillCardProps) {
@@ -71,9 +75,21 @@ export function AwakenSkillCard({
           checked={skill.enabled}
           label={skill.name}
           busy={skill.busy}
-          disabled={skill.toggleDisabled || !onEnabledChange}
+          disabled={deleting || skill.toggleDisabled || !onEnabledChange}
           onCheckedChange={onEnabledChange}
         />
+        {onDelete ? (
+          <button
+            type="button"
+            className="aw-skill-card__delete"
+            aria-label={`删除 ${skill.name}`}
+            disabled={deleting || skill.busy}
+            onClick={onDelete}
+          >
+            <Trash2 size={13} strokeWidth={1.9} aria-hidden="true" />
+            {deleting ? "删除中" : "删除"}
+          </button>
+        ) : null}
       </div>
     </article>
   );

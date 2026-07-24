@@ -185,11 +185,12 @@ func (m *Manager) nextServerSeq() uint64 {
 func (m *Manager) Start(ctx context.Context, servers []ScopedMcpServerConfig) {
 	var wg sync.WaitGroup
 	for _, scoped := range servers {
+		seq := m.nextServerSeq()
 		wg.Add(1)
-		go func(scoped ScopedMcpServerConfig) {
+		go func(scoped ScopedMcpServerConfig, seq uint64) {
 			defer wg.Done()
-			m.startOne(ctx, scoped)
-		}(scoped)
+			m.startOne(ctx, scoped, seq)
+		}(scoped, seq)
 	}
 	wg.Wait()
 }
@@ -197,7 +198,7 @@ func (m *Manager) Start(ctx context.Context, servers []ScopedMcpServerConfig) {
 // startOne wires a single server into the manager and kicks off the
 // connect goroutine. The function returns once the initial state has been
 // recorded (pending, or failed if the config is unusable).
-func (m *Manager) startOne(ctx context.Context, scoped ScopedMcpServerConfig) {
+func (m *Manager) startOne(ctx context.Context, scoped ScopedMcpServerConfig, seq uint64) {
 	kind := scoped.Config.TransportKind()
 	if kind == "" {
 		m.mu.Lock()
@@ -207,7 +208,7 @@ func (m *Manager) startOne(ctx context.Context, scoped ScopedMcpServerConfig) {
 			config:      scoped.Config,
 			state:       StateFailed,
 			errorReason: "invalid transport config",
-			seq:         m.nextServerSeq(),
+			seq:         seq,
 		}
 		m.mu.Unlock()
 		m.logger.Warnf("mcp server %q has invalid transport, marking failed", scoped.Name)
@@ -221,7 +222,7 @@ func (m *Manager) startOne(ctx context.Context, scoped ScopedMcpServerConfig) {
 			config:    scoped.Config,
 			transport: kind,
 			state:     StateDisabled,
-			seq:       m.nextServerSeq(),
+			seq:       seq,
 		}
 		m.mu.Unlock()
 		m.logger.Debugf("mcp server %q restored in disabled state", scoped.Name)
@@ -236,7 +237,7 @@ func (m *Manager) startOne(ctx context.Context, scoped ScopedMcpServerConfig) {
 			transport:   kind,
 			state:       StateFailed,
 			errorReason: "ws transport not supported in v1",
-			seq:         m.nextServerSeq(),
+			seq:         seq,
 		}
 		m.mu.Unlock()
 		m.logger.Warnf("mcp server %q uses unsupported ws transport, marking failed", scoped.Name)
@@ -249,7 +250,7 @@ func (m *Manager) startOne(ctx context.Context, scoped ScopedMcpServerConfig) {
 		config:    scoped.Config,
 		transport: kind,
 		state:     StatePending,
-		seq:       m.nextServerSeq(),
+		seq:       seq,
 	}
 	m.mu.Lock()
 	m.servers[scoped.Name] = server
@@ -488,7 +489,9 @@ func (m *Manager) Reconnect(ctx context.Context, name string) error {
 func (m *Manager) RestartWithConfig(ctx context.Context, scoped ScopedMcpServerConfig) error {
 	m.mu.Lock()
 	server, exists := m.servers[scoped.Name]
+	var seq uint64
 	if exists {
+		seq = server.seq
 		if server.cancelCtx != nil {
 			server.cancelCtx()
 		}
@@ -507,7 +510,11 @@ func (m *Manager) RestartWithConfig(ctx context.Context, scoped ScopedMcpServerC
 		m.emitEvent(ServerEvent{Type: EventDisconnected, ServerName: scoped.Name})
 	}
 
-	m.Start(ctx, []ScopedMcpServerConfig{scoped})
+	if exists {
+		m.startOne(ctx, scoped, seq)
+	} else {
+		m.Start(ctx, []ScopedMcpServerConfig{scoped})
+	}
 	return nil
 }
 

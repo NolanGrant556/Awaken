@@ -3,6 +3,36 @@
 .aw-dialog.aw-mcp-config-dialog { width: min(720px, calc(100vw - 48px)); }
 .aw-mcp-config-dialog__body { display: grid; gap: 14px; }
 .aw-mcp-config-dialog__body p { margin: 0; color: var(--aw-text-secondary); font-size: 13px; line-height: 1.55; }
+.aw-mcp-config-dialog__modes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-bg-fill-light);
+}
+.aw-mcp-config-dialog__modes button {
+  min-width: 0;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--aw-radius-md) - 2px);
+  background: transparent;
+  color: var(--aw-text-secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: var(--aw-font-weight-heavy);
+  cursor: pointer;
+}
+.aw-mcp-config-dialog__modes button:hover:enabled { color: var(--aw-text-primary); }
+.aw-mcp-config-dialog__modes button:focus-visible { outline: none; box-shadow: var(--aw-shadow-focus); }
+.aw-mcp-config-dialog__modes button[data-active="true"] {
+  border-color: var(--aw-border-main);
+  background: var(--aw-surface-raised);
+  color: var(--aw-text-primary);
+  box-shadow: var(--aw-shadow-control);
+}
+.aw-mcp-config-dialog__modes button:disabled { cursor: default; opacity: 0.58; }
 .aw-mcp-config-dialog__body textarea {
   width: 100%;
   min-width: 0;
@@ -21,3 +51,7 @@
 .aw-mcp-config-dialog__body textarea:focus { border-color: var(--aw-border-control-hover); outline: none; box-shadow: var(--aw-shadow-focus); }
 .aw-mcp-config-dialog__note { color: color-mix(in srgb, var(--aw-warning) 72%, var(--aw-text-secondary)); font-size: 12px; font-weight: var(--aw-font-weight-heavy); }
 .aw-mcp-config-dialog__error { padding: 10px 12px; border: 1px solid var(--aw-error-soft-border); border-radius: var(--aw-radius-md); background: var(--aw-error-soft-bg); color: var(--aw-text-primary); font-size: 13px; }
+
+@media (max-width: 560px) {
+  .aw-mcp-config-dialog__modes { grid-template-columns: minmax(0, 1fr); }
+}

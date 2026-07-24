@@ -12,6 +12,8 @@ export type AwakenProjectSkillsDialogProps = {
   onOpenChange: (open: boolean) => void;
   onSkillPreview: (skill: AwakenSkillItem) => void;
   onSkillToggle: (skill: AwakenSkillItem, enabled: boolean) => void;
+  onSkillDelete?: (skill: AwakenSkillItem) => void;
+  deletingSkillId?: string | null;
 };
 
 export function AwakenProjectSkillsDialog({
@@ -20,6 +22,8 @@ export function AwakenProjectSkillsDialog({
   onOpenChange,
   onSkillPreview,
   onSkillToggle,
+  onSkillDelete,
+  deletingSkillId = null,
 }: AwakenProjectSkillsDialogProps) {
   return (
     <AwakenDialog
@@ -32,11 +36,12 @@ export function AwakenProjectSkillsDialog({
       {project ? (
         <div className="aw-project-skills-dialog__content">
           <div className="aw-project-skills-dialog__heading">
-            <div>
-              <strong>{project.name}</strong>
-              {project.path ? <span>{project.path}</span> : null}
-            </div>
-            <span>{project.skills.length} Skills</span>
+            {project.path ? (
+              <span className="aw-project-skills-dialog__path">{project.path}</span>
+            ) : null}
+            <span className="aw-project-skills-dialog__count">
+              {project.skills.length} Skills
+            </span>
           </div>
           {project.skills.length > 0 ? (
             <div className="aw-project-skills-dialog__grid">
@@ -46,6 +51,8 @@ export function AwakenProjectSkillsDialog({
                   skill={skill}
                   onPreview={(skill.previewable ?? true) ? () => onSkillPreview(skill) : undefined}
                   onEnabledChange={(enabled) => onSkillToggle(skill, enabled)}
+                  onDelete={onSkillDelete ? () => onSkillDelete(skill) : undefined}
+                  deleting={deletingSkillId === skill.id}
                 />
               ))}
             </div>

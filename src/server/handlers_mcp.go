@@ -502,6 +502,9 @@ func parseMCPServerEntry(raw json.RawMessage) (mcpclient.McpServerConfig, error)
 		if transport == "" {
 			transport = string(mcpclient.TransportHTTP)
 		}
+		if transport == "streamable-http" {
+			transport = string(mcpclient.TransportHTTP)
+		}
 		httpCfg := &mcpclient.HTTPTransportConfig{
 			URL:     strings.TrimSpace(shorthand.URL),
 			Headers: shorthand.Headers,
@@ -514,7 +517,10 @@ func parseMCPServerEntry(raw json.RawMessage) (mcpclient.McpServerConfig, error)
 		case mcpclient.TransportWS:
 			cfg.WS = httpCfg
 		default:
-			return mcpclient.McpServerConfig{}, fmt.Errorf("unsupported transport %q", transport)
+			return mcpclient.McpServerConfig{}, fmt.Errorf(
+				"unsupported transport %q; use http or streamable-http for Streamable HTTP, or sse for legacy HTTP+SSE",
+				transport,
+			)
 		}
 	}
 	if !cfg.Valid() {

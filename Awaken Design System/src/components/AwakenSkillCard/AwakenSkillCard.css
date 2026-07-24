@@ -137,9 +137,43 @@
 
 .aw-skill-card__actions {
   display: grid;
+  align-content: center;
   place-items: center;
-  width: 66px;
-  padding-right: var(--aw-space-6);
+  gap: var(--aw-space-3);
+  width: 76px;
+  padding: var(--aw-space-4) var(--aw-space-5) var(--aw-space-4) 0;
+}
+
+.aw-skill-card__delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--aw-space-2);
+  min-height: 26px;
+  padding: 0 var(--aw-space-3);
+  border: 0;
+  border-radius: var(--aw-radius-sm);
+  background: transparent;
+  color: var(--aw-error);
+  font: inherit;
+  font-size: var(--aw-font-size-xs);
+  line-height: var(--aw-line-height-xs);
+  cursor: pointer;
+}
+
+.aw-skill-card__delete:hover:not(:disabled),
+.aw-skill-card__delete:focus-visible {
+  background: color-mix(in srgb, var(--aw-error) 10%, transparent);
+  outline: none;
+}
+
+.aw-skill-card__delete:focus-visible {
+  box-shadow: var(--aw-shadow-focus);
+}
+
+.aw-skill-card__delete:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 @media (prefers-reduced-motion: reduce) {

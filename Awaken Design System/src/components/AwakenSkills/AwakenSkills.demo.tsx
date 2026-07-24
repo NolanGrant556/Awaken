@@ -56,6 +56,7 @@ export function AwakenSkillsDemo() {
   const [returnProjectId, setReturnProjectId] = useState<string | null>(null);
   const [previewSkill, setPreviewSkill] = useState<AwakenSkillItem | null>(null);
   const [isolatedProjectOpen, setIsolatedProjectOpen] = useState(false);
+  const [deletedSkillIds, setDeletedSkillIds] = useState<string[]>([]);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [enabledById, setEnabledById] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(AwakenSkillsAllStates.map((item) => [item.id, item.enabled]))
@@ -67,8 +68,11 @@ export function AwakenSkillsDemo() {
     [enabledById],
   );
   const projects = useMemo(
-    () => applyEnabledProjects(AwakenSkillsProjectStates, enabledById),
-    [enabledById],
+    () => applyEnabledProjects(AwakenSkillsProjectStates, enabledById).map((project) => ({
+      ...project,
+      skills: project.skills.filter((skill) => !deletedSkillIds.includes(skill.id)),
+    })),
+    [deletedSkillIds, enabledById],
   );
   const globalGroups = useMemo(
     () => applyEnabledGroups(AwakenSkillsGlobalStates, enabledById),
@@ -275,6 +279,10 @@ export function AwakenSkillsDemo() {
           handlePreview(skill);
         }}
         onSkillToggle={updateSkill}
+        onSkillDelete={(skill) => {
+          setDeletedSkillIds((current) =>
+            current.includes(skill.id) ? current : [...current, skill.id]);
+        }}
       />
 
       <AwakenSkillPreviewDialog

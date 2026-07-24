@@ -2,7 +2,8 @@
 
 .aw-dialog.aw-project-skills-dialog {
   width: min(980px, calc(100vw - 80px));
-  max-height: min(720px, calc(100vh - 64px));
+  min-height: min(640px, calc(100vh - 64px));
+  max-height: min(640px, calc(100vh - 64px));
 }
 
 .aw-project-skills-dialog__content {
@@ -62,6 +63,7 @@
 
   .aw-dialog.aw-project-skills-dialog {
     width: calc(100vw - 24px);
+    min-height: min(640px, calc(100vh - 24px));
     max-height: calc(100vh - 24px);
   }
 }

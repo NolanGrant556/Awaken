@@ -729,7 +729,8 @@ button.extension-card-main:focus-visible {
   max-height: min(720px, calc(100vh - 80px));
 }
 
-.skill-preview-dialog .aw-dialog__head {
+.skill-preview-dialog .aw-dialog__head,
+.aw-project-skills-dialog--preview .aw-dialog__head {
   justify-content: flex-end;
   padding: var(--aw-space-5) var(--aw-space-6) var(--aw-space-3);
 }
@@ -750,6 +751,17 @@ button.extension-card-main:focus-visible {
   min-width: 0;
   margin: 0 auto;
   padding: var(--aw-space-3) 0 var(--aw-space-7);
+}
+
+.aw-project-skills-dialog--preview .skill-preview-content {
+  min-height: min(500px, calc(100vh - 220px));
+}
+
+.aw-project-skills-dialog--preview .skill-preview-status {
+  display: grid;
+  place-items: center;
+  min-height: min(440px, calc(100vh - 280px));
+  padding: 0;
 }
 
 .skill-preview-status {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -38,6 +38,7 @@ import type {
 } from "../shared/runtime";
 import type { RuntimeClient } from "./runtime/client";
 import {
+  SkillPreviewContent,
   SkillPreviewDialog,
   type SkillPreviewTarget,
 } from "./SkillPreviewDialog";
@@ -559,8 +560,7 @@ export function ExtensionsView({
   const [pickingSkillProjectRoot, setPickingSkillProjectRoot] = useState(false);
   const [skillPreviewTarget, setSkillPreviewTarget] =
     useState<SkillPreviewTarget | null>(null);
-  const [skillPreviewReturnProjectRoot, setSkillPreviewReturnProjectRoot] =
-    useState<string | null>(null);
+  const projectSkillPreviewScrollRef = useRef<HTMLDivElement>(null);
   const [skillToggleStates, setSkillToggleStates] = useState<Record<string, boolean>>({});
   const [busySkillId, setBusySkillId] = useState<string | null>(null);
   const [pendingSkillDelete, setPendingSkillDelete] =
@@ -828,6 +828,15 @@ export function ExtensionsView({
     openProjectSkillGroup,
     skillToggleStates,
   ]);
+
+  const projectSkillPreviewTarget =
+    skillPreviewTarget?.projectRoot === openProjectRoot
+      ? skillPreviewTarget
+      : null;
+  const projectSkillDeleteTarget =
+    pendingSkillDelete?.projectRoot === openProjectRoot
+      ? pendingSkillDelete
+      : null;
 
   const visibleUserSkills = useMemo(
     () => visibleSkills.filter((skill) => skill.sourceOrigin === "user"),
@@ -1110,12 +1119,9 @@ export function ExtensionsView({
         sourceOrigin: skill.sourceOrigin,
         projectRoot: skill.sourceOrigin === "project" ? projectRoot : undefined,
       });
-      setPendingSkillDelete(null);
       onNotice(`已删除 ${skill.displayName || skill.name}，Skill 包已移到废纸篓`);
       await refresh(true, projectRoot);
-      if (projectRoot) {
-        setOpenProjectRoot(projectRoot);
-      }
+      setPendingSkillDelete(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Skill 删除失败";
       setSkillDeleteError(message);
@@ -1126,12 +1132,8 @@ export function ExtensionsView({
   }
 
   function cancelSkillDelete(): void {
-    const projectRoot = pendingSkillDelete?.projectRoot;
     setPendingSkillDelete(null);
     setSkillDeleteError(null);
-    if (projectRoot) {
-      setOpenProjectRoot(projectRoot);
-    }
   }
 
   async function handlePickSkillProjectRoot(): Promise<void> {
@@ -1260,13 +1262,10 @@ export function ExtensionsView({
     if (!canPreviewSkill(skill)) {
       return;
     }
-    setSkillPreviewReturnProjectRoot(projectRoot ?? null);
-    if (projectRoot) {
-      setOpenProjectRoot(null);
-    }
     setSkillPreviewTarget({
       catalogEntryId: skill.catalogEntryId!,
       projectRoot,
+      skillId: skill.id,
     });
   }
 
@@ -1276,9 +1275,6 @@ export function ExtensionsView({
     }
     setSkillDeleteError(null);
     setPendingSkillDelete({ skill, projectRoot });
-    if (projectRoot) {
-      setOpenProjectRoot(null);
-    }
   }
 
   function renderSkillCard(skill: RuntimeSkill, projectRoot?: string) {
@@ -1701,6 +1697,78 @@ export function ExtensionsView({
         open={openProjectSkillDialog !== null}
         project={openProjectSkillDialog}
         deletingSkillId={deletingSkill ? pendingSkillDelete?.skill.id : null}
+        detailView={projectSkillPreviewTarget ? {
+          mode: "preview",
+          title: "SKILL.md 预览",
+          titleVisuallyHidden: true,
+          bodyClassName: "skill-preview-dialog-scroll",
+          bodyRef: projectSkillPreviewScrollRef,
+          bodyTabIndex: 0,
+          content: (
+            <SkillPreviewContent
+              target={projectSkillPreviewTarget}
+              runtimeClient={runtimeClient}
+              scrollRef={projectSkillPreviewScrollRef}
+            />
+          ),
+          returnFocusSkillId: projectSkillPreviewTarget.skillId,
+          returnFocusAction: "preview",
+        } : projectSkillDeleteTarget ? {
+          mode: "delete",
+          title: "删除 Skill",
+          content: (
+            <div className="extension-dialog-body skill-delete-dialog-body">
+              <p>
+                确定要删除 Skill「
+                <strong>
+                  {projectSkillDeleteTarget.skill.displayName
+                    || projectSkillDeleteTarget.skill.name}
+                </strong>
+                」吗？
+              </p>
+              <p className="extension-dialog-note">
+                确认后会立即从对应的 .awaken/skills 目录移除，并将完整 Skill 包移动到系统废纸篓。
+              </p>
+              {skillDeleteError ? (
+                <div className="extension-message" role="alert">{skillDeleteError}</div>
+              ) : null}
+            </div>
+          ),
+          footer: (
+            <>
+              <Button
+                autoFocus
+                variant="default"
+                size="md"
+                disabled={deletingSkill}
+                onClick={cancelSkillDelete}
+              >
+                取消
+              </Button>
+              <Button
+                className="skill-delete-confirm-button"
+                variant="primary"
+                size="md"
+                loading={deletingSkill}
+                onClick={() => {
+                  void handleDeleteSkill();
+                }}
+              >
+                <Trash2 size={15} strokeWidth={1.9} />
+                确认删除
+              </Button>
+            </>
+          ),
+          returnFocusSkillId: projectSkillDeleteTarget.skill.id,
+          returnFocusAction: "delete",
+        } : null}
+        onDetailClose={() => {
+          if (projectSkillPreviewTarget) {
+            setSkillPreviewTarget(null);
+          } else if (projectSkillDeleteTarget && !deletingSkill) {
+            cancelSkillDelete();
+          }
+        }}
         onOpenChange={(open) => {
           if (!open) {
             setOpenProjectRoot(null);
@@ -1731,21 +1799,17 @@ export function ExtensionsView({
       />
 
       <SkillPreviewDialog
-        target={skillPreviewTarget}
+        target={skillPreviewTarget?.projectRoot ? null : skillPreviewTarget}
         runtimeClient={runtimeClient}
         onOpenChange={(open) => {
           if (!open) {
             setSkillPreviewTarget(null);
-            if (skillPreviewReturnProjectRoot) {
-              setOpenProjectRoot(skillPreviewReturnProjectRoot);
-            }
-            setSkillPreviewReturnProjectRoot(null);
           }
         }}
       />
 
       <Dialog
-        open={pendingSkillDelete !== null}
+        open={pendingSkillDelete !== null && !pendingSkillDelete.projectRoot}
         title="删除 Skill"
         onOpenChange={(open) => {
           if (!open && !deletingSkill) {

@@ -115,12 +115,20 @@ describe("ExtensionsView project Skills flow", () => {
     expect(
       projectDialog?.querySelector(".aw-project-skills-dialog__path")?.textContent,
     ).toBe(projectRoot);
+    const projectBackdrop = projectDialog?.closest(".aw-dialog-backdrop");
 
     const previewButton = document.querySelector<HTMLButtonElement>(
       '[aria-label="查看 项目报告 的 SKILL.md"]',
     );
     await act(async () => previewButton?.click());
     await settle();
+    const previewDialog = document.querySelector<HTMLElement>(
+      '.aw-project-skills-dialog--preview[role="dialog"]',
+    );
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+    expect(previewDialog).toBe(projectDialog);
+    expect(previewDialog?.closest(".aw-dialog-backdrop")).toBe(projectBackdrop);
+    expect(document.querySelector(".skill-preview-dialog")).toBeNull();
     expect(getSkillPreview).toHaveBeenCalledWith({
       catalogEntryId: "catalog-project-report",
       projectRoot,
@@ -128,15 +136,24 @@ describe("ExtensionsView project Skills flow", () => {
     expect(document.body.textContent).toContain("项目报告正文");
 
     const previewClose = document.querySelector<HTMLButtonElement>(
-      '.skill-preview-dialog button[aria-label="关闭"]',
+      '.aw-project-skills-dialog--preview button[aria-label="关闭"]',
     );
     await act(async () => previewClose?.click());
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("项目报告");
+    const returnedProjectDialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+    expect(returnedProjectDialog).toBe(projectDialog);
+    expect(returnedProjectDialog?.closest(".aw-dialog-backdrop")).toBe(projectBackdrop);
+    expect(returnedProjectDialog?.textContent).toContain("项目报告");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe(
+      "查看 项目报告 的 SKILL.md",
+    );
 
     const deleteButton = document.querySelector<HTMLButtonElement>(
       '[aria-label="删除 项目报告"]',
     );
     await act(async () => deleteButton?.click());
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+    expect(document.querySelector('[role="dialog"]')).toBe(projectDialog);
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
       "确定要删除 Skill",
     );

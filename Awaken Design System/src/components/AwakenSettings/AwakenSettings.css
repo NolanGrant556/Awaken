@@ -19,6 +19,11 @@
   user-select: none;
 }
 
+/* 同 AwakenDialog：tabIndex={-1} 的根容器只承接程序化焦点，不画焦点环。 */
+.aw-settings-shell:focus-visible {
+  outline: none;
+}
+
 .aw-settings-shell :where(
   input,
   textarea,

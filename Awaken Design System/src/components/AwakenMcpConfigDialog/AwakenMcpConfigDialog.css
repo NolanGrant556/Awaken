@@ -32,7 +32,8 @@
   color: var(--aw-text-primary);
   box-shadow: var(--aw-shadow-control);
 }
-.aw-mcp-config-dialog__modes button:disabled { cursor: default; opacity: 0.58; }
+/* disabled 只来自提交中的 busy，属于瞬时态，因此不切换光标。 */
+.aw-mcp-config-dialog__modes button:disabled { cursor: pointer; opacity: 0.58; }
 .aw-mcp-config-dialog__body textarea {
   width: 100%;
   min-width: 0;

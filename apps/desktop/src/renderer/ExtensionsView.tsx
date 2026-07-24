@@ -1445,6 +1445,7 @@ export function ExtensionsView({
         meta={projectSkillCountText(group)}
         size="dense"
         open={open}
+        showNativeTitle={false}
         aria-label={`打开${group.label} 项目 Skills`}
         onOpen={() => setOpenProjectRoot(group.root)}
       />

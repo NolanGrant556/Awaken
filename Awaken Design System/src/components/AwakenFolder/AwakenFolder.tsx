@@ -9,6 +9,7 @@ export type AwakenFolderProps = Omit<
   meta?: string;
   size?: "default" | "compact" | "dense";
   open?: boolean;
+  showNativeTitle?: boolean;
   onOpen?: () => void;
 };
 
@@ -17,6 +18,7 @@ export function AwakenFolder({
   meta,
   size = "default",
   open = false,
+  showNativeTitle = true,
   onOpen,
   disabled,
   className,
@@ -34,7 +36,7 @@ export function AwakenFolder({
       data-size={size}
       disabled={disabled}
       {...props}
-      title={label}
+      title={showNativeTitle ? label : undefined}
       className={["aw-folder", className ?? ""].filter(Boolean).join(" ")}
       onClick={(event) => {
         onClick?.(event);

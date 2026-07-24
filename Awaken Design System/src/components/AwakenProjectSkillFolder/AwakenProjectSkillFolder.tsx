@@ -31,5 +31,5 @@ export function AwakenProjectSkillFolder({
     ? undefined
     : `${skillCount} ${skillCount === 1 ? "Skill" : "Skills"}`);
 
-  return <AwakenFolder label={projectName} meta={resolvedCountLabel} size={size} open={open} onOpen={onOpen} disabled={disabled} className={className} onClick={onClick} aria-label={ariaLabel ?? `打开 ${projectName} 的项目 Skills`} aria-expanded={ariaExpanded ?? open} {...props} />;
+  return <AwakenFolder label={projectName} meta={resolvedCountLabel} size={size} open={open} showNativeTitle={false} onOpen={onOpen} disabled={disabled} className={className} onClick={onClick} aria-label={ariaLabel ?? `打开 ${projectName} 的项目 Skills`} aria-expanded={ariaExpanded ?? open} {...props} />;
 }

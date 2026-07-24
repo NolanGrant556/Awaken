@@ -279,10 +279,6 @@ export function AwakenSkillsDemo() {
           handlePreview(skill);
         }}
         onSkillToggle={updateSkill}
-        onSkillDelete={(skill) => {
-          setDeletedSkillIds((current) =>
-            current.includes(skill.id) ? current : [...current, skill.id]);
-        }}
       />
 
       <AwakenSkillPreviewDialog
@@ -291,6 +287,23 @@ export function AwakenSkillsDemo() {
         contentKey={previewSkill?.id}
         frontmatterRaw={preview?.frontmatterRaw}
         markdown={preview?.markdown}
+        skill={previewSkill ? {
+          name: previewSkill.name,
+          sourceLabel: previewSkill.sourceLabel ?? "Skill",
+          description: previewSkill.description,
+          enabled: previewSkill.enabled,
+          toggleDisabled: previewSkill.toggleDisabled,
+        } : undefined}
+        deletable={previewSkill?.scope === "project" || previewSkill?.scope === "global"}
+        onEnabledChange={previewSkill ? (enabled) => {
+          updateSkill(previewSkill, enabled);
+          setPreviewSkill((current) => current ? { ...current, enabled } : current);
+        } : undefined}
+        onDelete={previewSkill ? () => {
+          setDeletedSkillIds((current) =>
+            current.includes(previewSkill.id) ? current : [...current, previewSkill.id]);
+          setPreviewSkill(null);
+        } : undefined}
         onOpenChange={(open) => {
           if (open) {
             return;

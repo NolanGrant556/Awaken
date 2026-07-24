@@ -25,6 +25,17 @@ const projectSkill: RuntimeSkill = {
   context: "inline",
 };
 
+const bundledSkill: RuntimeSkill = {
+  ...projectSkill,
+  id: "bundled-report",
+  catalogEntryId: "catalog-bundled-report",
+  name: "bundled-report",
+  displayName: "内置报告",
+  sourceOrigin: "bundled",
+  rootDir: "/runtime/system-skills/bundled-report",
+  skillFilePath: "/runtime/system-skills/bundled-report/SKILL.md",
+};
+
 async function settle(): Promise<void> {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -60,7 +71,9 @@ describe("ExtensionsView project Skills flow", () => {
 
   it("opens a project window, previews SKILL.md, and deletes through confirmation", async () => {
     let deleted = false;
-    const listSkills = vi.fn(async () => (deleted ? [] : [projectSkill]));
+    const listSkills = vi.fn(async () =>
+      deleted ? [bundledSkill] : [projectSkill, bundledSkill],
+    );
     const getSkillPreview = vi.fn(async () => ({
       frontmatterRaw: "---\nname: project-report\n---",
       bodyMarkdown: "# 项目报告正文",
@@ -100,6 +113,18 @@ describe("ExtensionsView project Skills flow", () => {
     });
     await settle();
 
+    const bundledCard = document.querySelector<HTMLElement>(".aw-skill-card");
+    expect(bundledCard?.textContent).toContain("内置报告");
+    expect(bundledCard?.querySelector(".aw-switch")?.getAttribute("data-size")).toBe(
+      "compact",
+    );
+    expect(bundledCard?.querySelector(".aw-skill-card__title-row")?.textContent).toContain(
+      "内置报告Awaken 内置",
+    );
+    expect(bundledCard?.textContent).not.toContain("可预览 SKILL.md");
+    expect(bundledCard?.querySelector('[aria-label^="删除"]')).toBeNull();
+    expect(document.querySelector(".extension-skill-card")).toBeNull();
+
     await act(async () => buttonByText("项目 Skills")?.click());
     const folder = document.querySelector<HTMLButtonElement>(
       '[aria-label="打开marketing 项目 Skills"]',
@@ -112,6 +137,9 @@ describe("ExtensionsView project Skills flow", () => {
     const projectDialog = document.querySelector('[role="dialog"]');
     expect(projectDialog?.textContent).toContain("marketing");
     expect(projectDialog?.textContent).toContain("项目报告");
+    expect(
+      projectDialog?.querySelector(".aw-skill-card .aw-switch")?.getAttribute("data-size"),
+    ).toBe("compact");
     expect(
       projectDialog?.querySelector(".aw-project-skills-dialog__heading strong"),
     ).toBeNull();
@@ -131,12 +159,16 @@ describe("ExtensionsView project Skills flow", () => {
     expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
     expect(previewDialog).toBe(projectDialog);
     expect(previewDialog?.closest(".aw-dialog-backdrop")).toBe(projectBackdrop);
-    expect(document.querySelector(".skill-preview-dialog")).toBeNull();
+    expect(document.querySelector(".aw-skill-preview")).toBeNull();
     expect(getSkillPreview).toHaveBeenCalledWith({
       catalogEntryId: "catalog-project-report",
       projectRoot,
     });
     expect(document.body.textContent).toContain("项目报告正文");
+    expect(previewDialog?.querySelector(".aw-skill-preview-summary")?.textContent).toContain(
+      "项目报告项目",
+    );
+    expect(previewDialog?.querySelector(".aw-skill-preview__delete")).not.toBeNull();
 
     const previewClose = document.querySelector<HTMLButtonElement>(
       '.aw-project-skills-dialog--preview button[aria-label="关闭"]',
@@ -151,8 +183,14 @@ describe("ExtensionsView project Skills flow", () => {
       "查看 项目报告 的 SKILL.md",
     );
 
+    expect(document.querySelector('[aria-label="删除 项目报告"]')).toBeNull();
+    const reopenedPreviewButton = document.querySelector<HTMLButtonElement>(
+      '[aria-label="查看 项目报告 的 SKILL.md"]',
+    );
+    await act(async () => reopenedPreviewButton?.click());
+    await settle();
     const deleteButton = document.querySelector<HTMLButtonElement>(
-      '[aria-label="删除 项目报告"]',
+      ".aw-skill-preview__delete",
     );
     await act(async () => deleteButton?.click());
     expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);

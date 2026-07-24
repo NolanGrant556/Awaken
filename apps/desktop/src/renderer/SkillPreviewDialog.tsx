@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import {
-  AwakenDialog as Dialog,
-  AwakenMarkdownRenderer,
+  AwakenSkillPreviewContent,
+  AwakenSkillPreviewDeleteButton,
+  AwakenSkillPreviewDialog as AwakenSkillPreviewDialogComponent,
 } from "@awaken/design-system";
 import type { SkillPreviewResponse } from "../shared/runtime";
 import type { RuntimeClient } from "./runtime/client";
@@ -12,23 +13,37 @@ export type SkillPreviewTarget = {
   skillId?: string;
 };
 
+export type SkillPreviewPresentation = {
+  name: string;
+  sourceLabel: string;
+  description: string;
+  enabled: boolean;
+  toggleDisabled?: boolean;
+  deletable?: boolean;
+  deleting?: boolean;
+};
+
 type SkillPreviewDialogProps = {
   target: SkillPreviewTarget | null;
+  presentation: SkillPreviewPresentation | null;
   runtimeClient: Pick<RuntimeClient, "getSkillPreview">;
+  onEnabledChange?: (enabled: boolean) => void;
+  onDelete?: () => void;
   onOpenChange: (open: boolean) => void;
 };
 
 type SkillPreviewContentProps = {
   target: SkillPreviewTarget | null;
+  presentation: SkillPreviewPresentation | null;
   runtimeClient: Pick<RuntimeClient, "getSkillPreview">;
   scrollRef: RefObject<HTMLDivElement | null>;
+  onEnabledChange?: (enabled: boolean) => void;
 };
 
-export function SkillPreviewContent({
-  target,
-  runtimeClient,
-  scrollRef,
-}: SkillPreviewContentProps) {
+function useSkillPreviewDocument(
+  target: SkillPreviewTarget | null,
+  runtimeClient: Pick<RuntimeClient, "getSkillPreview">,
+) {
   const [preview, setPreview] = useState<SkillPreviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -37,7 +52,6 @@ export function SkillPreviewContent({
   useEffect(() => {
     const requestVersion = requestVersionRef.current + 1;
     requestVersionRef.current = requestVersion;
-    scrollRef.current?.scrollTo({ top: 0 });
 
     if (!target) {
       setPreview(null);
@@ -49,7 +63,6 @@ export function SkillPreviewContent({
     setPreview(null);
     setErrorMessage(null);
     setLoading(true);
-    scrollRef.current?.focus();
 
     void runtimeClient
       .getSkillPreview({
@@ -61,7 +74,6 @@ export function SkillPreviewContent({
           return;
         }
         setPreview(nextPreview);
-        scrollRef.current?.scrollTo({ top: 0 });
       })
       .catch((error: unknown) => {
         if (requestVersionRef.current !== requestVersion) {
@@ -76,67 +88,68 @@ export function SkillPreviewContent({
           setLoading(false);
         }
       });
-  }, [runtimeClient, scrollRef, target]);
+  }, [runtimeClient, target]);
+
+  return { preview, loading, errorMessage };
+}
+
+export function SkillPreviewContent({
+  target,
+  presentation,
+  runtimeClient,
+  scrollRef,
+  onEnabledChange,
+}: SkillPreviewContentProps) {
+  const { preview, loading, errorMessage } = useSkillPreviewDocument(target, runtimeClient);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 });
+    if (target) {
+      scrollRef.current?.focus();
+    }
+  }, [scrollRef, target]);
 
   return (
-    <div className="skill-preview-content">
-      {loading ? (
-        <div className="skill-preview-status" role="status" aria-live="polite">
-          正在读取 SKILL.md…
-        </div>
-      ) : null}
-      {errorMessage ? (
-        <div className="skill-preview-error" role="alert">
-          <strong>无法预览 SKILL.md</strong>
-          <span>{errorMessage}</span>
-        </div>
-      ) : null}
-      {preview ? (
-        <>
-          {preview.frontmatterRaw ? (
-            <pre className="skill-preview-frontmatter" aria-label="YAML frontmatter">
-              <code className="language-yaml">{preview.frontmatterRaw}</code>
-            </pre>
-          ) : null}
-          <AwakenMarkdownRenderer
-            className="assistant-message assistant-message-markdown skill-preview-markdown"
-            markdown={preview.bodyMarkdown}
-            fallback=""
-            renderMermaid={false}
-            renderImages={false}
-            allowedLinkProtocols={["http", "https"]}
-          />
-        </>
-      ) : null}
-    </div>
+    <AwakenSkillPreviewContent
+      frontmatterRaw={preview?.frontmatterRaw}
+      markdown={preview?.bodyMarkdown}
+      loading={loading}
+      errorMessage={errorMessage}
+      skill={presentation ?? undefined}
+      deleting={presentation?.deleting}
+      documentRef={scrollRef}
+      onEnabledChange={onEnabledChange}
+    />
   );
 }
 
+export const SkillPreviewDeleteButton = AwakenSkillPreviewDeleteButton;
+
 export function SkillPreviewDialog({
   target,
+  presentation,
   runtimeClient,
+  onEnabledChange,
+  onDelete,
   onOpenChange,
 }: SkillPreviewDialogProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const { preview, loading, errorMessage } = useSkillPreviewDocument(target, runtimeClient);
 
   return (
-    <Dialog
+    <AwakenSkillPreviewDialogComponent
       open={target !== null}
-      title="SKILL.md 预览"
-      titleVisuallyHidden
-      size="large"
-      className="skill-preview-dialog"
-      bodyClassName="skill-preview-dialog-scroll"
-      bodyRef={scrollRef}
-      bodyTabIndex={0}
-      initialFocusRef={scrollRef}
+      title={presentation ? `${presentation.name} 的 SKILL.md` : "SKILL.md 预览"}
+      contentKey={target ? `${target.catalogEntryId}:${target.projectRoot ?? ""}` : undefined}
+      frontmatterRaw={preview?.frontmatterRaw}
+      markdown={preview?.bodyMarkdown}
+      loading={loading}
+      errorMessage={errorMessage}
+      skill={presentation ?? undefined}
+      deletable={presentation?.deletable}
+      deleting={presentation?.deleting}
+      onEnabledChange={onEnabledChange}
+      onDelete={onDelete}
       onOpenChange={onOpenChange}
-    >
-      <SkillPreviewContent
-        target={target}
-        runtimeClient={runtimeClient}
-        scrollRef={scrollRef}
-      />
-    </Dialog>
+    />
   );
 }

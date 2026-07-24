@@ -47,9 +47,6 @@ apps/desktop/resources/bin/
 # macOS
 .DS_Store
 
-# Local reference recordings
-视频/
-
 # Local Awaken runtime transcripts
 .awaken/
 
@@ -60,4 +57,5 @@ sourcecode/
 .claude/
 CLAUDE.md
 openspec/
+.trae/
 .trae/skills/

@@ -33,13 +33,6 @@ export function AwakenProjectSkillsDialogDemo() {
             skills: current.skills.map((item) => item.id === skill.id ? { ...item, enabled } : item),
           }));
         }}
-        onSkillDelete={(skill) => {
-          setProject((current) => ({
-            ...current,
-            skills: current.skills.filter((item) => item.id !== skill.id),
-          }));
-          setNotice(`已请求删除：${skill.name}`);
-        }}
       />
     </section>
   );

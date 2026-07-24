@@ -27,7 +27,7 @@ const (
 // SkillCatalogMinTruncatedDescChars is the floor below which a per-entry
 // truncated description stops being useful for the model to judge a match;
 // below it the whole catalog degrades to names-only instead of unreadable
-// fragments. Mirrors Claude Code's SkillTool prompt MIN_DESC_LENGTH.
+// fragments.
 const SkillCatalogMinTruncatedDescChars = 20
 
 type CatalogEntry struct {

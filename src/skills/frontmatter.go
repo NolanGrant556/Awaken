@@ -31,7 +31,7 @@ var commonToolAliases = map[string]string{
 
 // ParseFrontmatter extracts YAML frontmatter and Markdown body from raw
 // SKILL.md content. Parsing is intentionally permissive: unknown fields are
-// preserved, Claude Code spellings are normalized, and execution-readiness
+// preserved, supported field aliases are normalized, and execution-readiness
 // declarations never make the package invalid.
 func ParseFrontmatter(raw string) (*SkillDefinition, error) {
 	fm, body, err := splitFrontmatter(raw)

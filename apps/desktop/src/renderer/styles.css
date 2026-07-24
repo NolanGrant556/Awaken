@@ -498,12 +498,6 @@ pre {
   font-size: 13px;
 }
 
-.skill-project-list {
-  display: grid;
-  gap: 10px;
-  min-width: 0;
-}
-
 .skill-project-folder-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(164px, 1fr));
@@ -511,99 +505,6 @@ pre {
   justify-items: center;
   gap: var(--aw-space-3);
   min-width: 0;
-}
-
-.skill-project-group {
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid var(--aw-border-main);
-  border-radius: var(--aw-radius-md);
-  background: var(--aw-surface-panel);
-}
-
-.skill-project-toggle {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) max-content;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  min-height: 68px;
-  padding: 13px 15px;
-  border: 0;
-  background: transparent;
-  color: var(--aw-text-primary);
-  text-align: left;
-  cursor: pointer;
-}
-
-.skill-project-toggle:hover,
-.skill-project-toggle:focus-visible {
-  background: var(--aw-bg-fill-light);
-  outline: none;
-}
-
-.skill-project-chevron {
-  display: inline-grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  color: var(--aw-text-secondary);
-}
-
-.skill-project-copy {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.skill-project-name {
-  overflow: hidden;
-  color: var(--aw-text-primary);
-  font-size: 14px;
-  font-weight: 850;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.skill-project-path {
-  overflow: hidden;
-  color: var(--aw-text-tertiary);
-  font-family: var(--aw-font-mono);
-  font-size: 12px;
-  line-height: 1.3;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.skill-project-count {
-  display: inline-flex;
-  align-items: center;
-  min-height: 24px;
-  padding: 0 9px;
-  border-radius: var(--aw-radius-pill);
-  background: var(--aw-bg-fill-light);
-  color: var(--aw-text-secondary);
-  font-size: 12px;
-  font-weight: var(--aw-font-weight-heavy);
-  white-space: nowrap;
-}
-
-.skill-project-body {
-  display: grid;
-  gap: 12px;
-  min-width: 0;
-  padding: 0 14px 14px;
-  border-top: 1px solid var(--aw-border-light);
-}
-
-.skill-project-body .extension-grid,
-.skill-project-body .extension-empty {
-  margin-top: 14px;
-}
-
-.skill-project-body .extension-grid {
-  grid-template-columns: repeat(2, minmax(260px, 1fr));
 }
 
 .aw-dialog:has(.extension-dialog-body) {
@@ -777,18 +678,6 @@ pre {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .skill-project-body .extension-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .skill-project-toggle {
-    grid-template-columns: 24px minmax(0, 1fr);
-  }
-
-  .skill-project-count {
-    grid-column: 2;
-    justify-self: flex-start;
-  }
 }
 
 .inspector-section {

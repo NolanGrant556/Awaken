@@ -26,6 +26,7 @@ Skills 管理页的 UI-only 组合组件。Gallery 中只注册“「技能」�
 ## 交互与可访问性
 
 - 四个来源遵循 `Awaken Skills`、`项目 Skills`、`全局 Skills`、`Agents Skills` 的顺序。
+- Agents Skills 将 consumer 提供的来源组扁平为一个直接可见的 Skill 卡片网格；组标签和路径只参与搜索，不渲染折叠标题、数量徽标或外层分组卡片。
 - Skill 卡片主体与开关是两个独立可聚焦控件，切换开关不会打开预览。
 - 开关使用 `role="switch"` 与 `aria-checked`；busy 和 disabled 状态不会触发回调。
 - 项目文件夹的展开状态与项目 Dialog 保持一致。

@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ChevronDown,
-  ChevronRight,
   Check,
   FileUp,
   FolderOpen,
@@ -70,11 +68,9 @@ type VisibleSkillProjectGroup = SkillProjectGroup & {
   visibleSkills: RuntimeSkill[];
 };
 
-type SkillAgentsGroup = {
-  root: string;
-  label: string;
-  skills: RuntimeSkill[];
-  isGlobal: boolean;
+type VisibleAgentsSkill = {
+  skill: RuntimeSkill;
+  projectRoot?: string;
 };
 
 type PendingSkillDelete = {
@@ -566,9 +562,6 @@ export function ExtensionsView({
     DEFAULT_SKILL_VIEW,
   );
   const [openProjectRoot, setOpenProjectRoot] = useState<string | null>(null);
-  const [expandedAgentsRoots, setExpandedAgentsRoots] = useState<Set<string>>(
-    () => new Set(),
-  );
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [busyConnectorId, setBusyConnectorId] = useState<string | null>(null);
@@ -970,26 +963,22 @@ export function ExtensionsView({
     [visibleSkills],
   );
 
-  const visibleAgentsSkillGroups = useMemo<SkillAgentsGroup[]>(() => {
+  const visibleAgentsSkills = useMemo<VisibleAgentsSkill[]>(() => {
     const projectRoots = skillProjectGroups.map((group) => group.root);
-    const groups = new Map<string, RuntimeSkill[]>();
-    for (const skill of visibleSkills.filter(
-      (skill) => skill.sourceOrigin === "agents",
-    )) {
+    return visibleSkills.flatMap((skill) => {
+      if (skill.sourceOrigin !== "agents") {
+        return [];
+      }
       const sourceRoot = agentsSkillSourceRoot(skill.rootDir ?? "");
       if (!sourceRoot) {
-        continue;
+        return [];
       }
-      const list = groups.get(sourceRoot) ?? [];
-      list.push(skill);
-      groups.set(sourceRoot, list);
-    }
-    return Array.from(groups.entries()).map(([root, skills]) => {
-      const global = isAgentsSkillGlobal(root, projectRoots);
-      const label = global
-        ? "全局 Agents Skills"
-        : projectLabelFromRoot(root);
-      return { root, label, skills, isGlobal: global };
+      return [{
+        skill,
+        projectRoot: isAgentsSkillGlobal(sourceRoot, projectRoots)
+          ? undefined
+          : sourceRoot,
+      }];
     });
   }, [visibleSkills, skillProjectGroups]);
 
@@ -1261,18 +1250,6 @@ export function ExtensionsView({
     }
   }
 
-  function toggleAgentsSkillGroup(root: string): void {
-    setExpandedAgentsRoots((current) => {
-      const next = new Set(current);
-      if (next.has(root)) {
-        next.delete(root);
-      } else {
-        next.add(root);
-      }
-      return next;
-    });
-  }
-
   async function openCliConnectorDetail(providerId: CliProviderId): Promise<void> {
     setCliDetailConnectorId(providerId);
     setCliDetailLoading(true);
@@ -1471,50 +1448,6 @@ export function ExtensionsView({
         aria-label={`打开${group.label} 项目 Skills`}
         onOpen={() => setOpenProjectRoot(group.root)}
       />
-    );
-  }
-
-  function renderAgentsSkillGroup(group: SkillAgentsGroup, index: number) {
-    const expanded = expandedAgentsRoots.has(group.root);
-    const bodyId = `skill-agents-group-${index}`;
-    const countText = `${group.skills.length} Skill`;
-    const projectRoot = group.isGlobal ? undefined : group.root;
-    return (
-      <section className="skill-project-group" key={group.root}>
-        <button
-          type="button"
-          className="skill-project-toggle"
-          aria-expanded={expanded}
-          aria-controls={bodyId}
-          onClick={() => toggleAgentsSkillGroup(group.root)}
-        >
-          <span className="skill-project-chevron" aria-hidden="true">
-            {expanded ? (
-              <ChevronDown size={17} strokeWidth={1.9} />
-            ) : (
-              <ChevronRight size={17} strokeWidth={1.9} />
-            )}
-          </span>
-          <span className="skill-project-copy">
-            <span className="skill-project-name">{group.label}</span>
-            <span className="skill-project-path" title={group.root}>
-              {projectRoot ?? group.root}
-            </span>
-          </span>
-          <span className="skill-project-count">{countText}</span>
-        </button>
-        {expanded ? (
-          <div className="skill-project-body" id={bodyId}>
-            {group.skills.length > 0 ? (
-              <div className="extension-grid">
-                {group.skills.map((skill) => renderSkillCard(skill, projectRoot))}
-              </div>
-            ) : (
-              <div className="extension-empty">暂无 Agents Skills</div>
-            )}
-          </div>
-        ) : null}
-      </section>
     );
   }
 
@@ -1750,9 +1683,11 @@ export function ExtensionsView({
               </section>
             ) : activeSkillView === "agents" ? (
               <section className="extension-section" aria-label="Agents Skills">
-                <div className="skill-project-list">
-                  {visibleAgentsSkillGroups.length > 0 ? (
-                    visibleAgentsSkillGroups.map(renderAgentsSkillGroup)
+                <div className="extension-grid">
+                  {visibleAgentsSkills.length > 0 ? (
+                    visibleAgentsSkills.map(({ skill, projectRoot }) =>
+                      renderSkillCard(skill, projectRoot),
+                    )
                   ) : (
                     <div className="extension-empty">暂无 Agents Skills</div>
                   )}

@@ -36,6 +36,30 @@ const bundledSkill: RuntimeSkill = {
   skillFilePath: "/runtime/system-skills/bundled-report/SKILL.md",
 };
 
+const globalAgentsSkill: RuntimeSkill = {
+  ...projectSkill,
+  id: "agents-global-dws",
+  catalogEntryId: "catalog-agents-global-dws",
+  name: "dws",
+  displayName: "DWS",
+  description: "管理钉钉产品能力",
+  sourceOrigin: "agents",
+  rootDir: "/Users/test/.agents/skills/dws",
+  skillFilePath: "/Users/test/.agents/skills/dws/SKILL.md",
+};
+
+const projectAgentsSkill: RuntimeSkill = {
+  ...projectSkill,
+  id: "agents-project-review",
+  catalogEntryId: "catalog-agents-project-review",
+  name: "project-review",
+  displayName: "项目代码复核",
+  description: "按项目规范执行变更复核",
+  sourceOrigin: "agents",
+  rootDir: `${projectRoot}/.agents/skills/project-review`,
+  skillFilePath: `${projectRoot}/.agents/skills/project-review/SKILL.md`,
+};
+
 async function settle(): Promise<void> {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -209,6 +233,49 @@ describe("ExtensionsView project Skills flow", () => {
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
       "这个项目还没有 Skills",
     );
+  });
+
+  it("shows all Agents Skills directly without collapsible source groups", async () => {
+    const runtimeClient = {
+      getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
+      listProjects: vi.fn(async () => []),
+      listConnectors: vi.fn(async () => []),
+      listCliConnectors: vi.fn(async () => []),
+      listMcpServers: vi.fn(async () => []),
+      listSkills: vi.fn(async () => [globalAgentsSkill, projectAgentsSkill]),
+      getSkillPreview: vi.fn(async () => ({
+        frontmatterRaw: "---\nname: project-review\n---",
+        bodyMarkdown: "# 项目代码复核",
+      })),
+      subscribeCliConnectorState: vi.fn(() => () => undefined),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <ExtensionsView
+          section="skills"
+          desktopReady
+          runtimeClient={runtimeClient}
+          activeWorkspaceRoot={projectRoot}
+          onNotice={vi.fn()}
+        />,
+      );
+    });
+    await settle();
+
+    await act(async () => buttonByText("Agents Skills")?.click());
+    const agentsSection = document.querySelector<HTMLElement>(
+      'section[aria-label="Agents Skills"]',
+    );
+    const cards = agentsSection?.querySelectorAll(".aw-skill-card");
+
+    expect(cards).toHaveLength(2);
+    expect(agentsSection?.textContent).toContain("DWS");
+    expect(agentsSection?.textContent).toContain("项目代码复核");
+    expect(agentsSection?.querySelector("[aria-expanded]")).toBeNull();
+    expect(agentsSection?.querySelector(".skill-project-group")).toBeNull();
+    expect(agentsSection?.textContent).not.toContain("全局 Agents Skills");
+    expect(agentsSection?.textContent).not.toContain(projectRoot);
   });
 
   it("syncs an external project Skill deletion and closes its stale preview", async () => {

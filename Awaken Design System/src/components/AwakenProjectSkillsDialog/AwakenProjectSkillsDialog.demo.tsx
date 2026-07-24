@@ -13,7 +13,7 @@ export function AwakenProjectSkillsDialogDemo() {
     <section className="ads-component-demo" aria-label="项目 Skills 窗口 AwakenProjectSkillsDialog 组件演示">
       <header className="ads-component-demo-header">
         <h2>项目 Skills 窗口 <code>AwakenProjectSkillsDialog</code></h2>
-        <p>承接项目文件夹的下一层交互，统一展示项目名称、路径和 Skill 卡片。</p>
+        <p>承接项目文件夹的下一层交互，标题标识项目，内容区保留路径和 Skill 卡片。</p>
       </header>
       <div className="ads-component-demo-state">
         <h3>实时交互</h3>
@@ -32,6 +32,13 @@ export function AwakenProjectSkillsDialogDemo() {
             ...current,
             skills: current.skills.map((item) => item.id === skill.id ? { ...item, enabled } : item),
           }));
+        }}
+        onSkillDelete={(skill) => {
+          setProject((current) => ({
+            ...current,
+            skills: current.skills.filter((item) => item.id !== skill.id),
+          }));
+          setNotice(`已请求删除：${skill.name}`);
         }}
       />
     </section>

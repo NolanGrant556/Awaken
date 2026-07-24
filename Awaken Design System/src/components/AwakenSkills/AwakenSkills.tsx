@@ -174,6 +174,7 @@ export function AwakenSkills({
                   key={project.id}
                   label={project.name}
                   meta={`${project.skills.length} ${project.skills.length === 1 ? "Skill" : "Skills"}`}
+                  size="dense"
                   open={openProjectId === project.id}
                   onOpen={() => onProjectOpenChange(project.id)}
                 />

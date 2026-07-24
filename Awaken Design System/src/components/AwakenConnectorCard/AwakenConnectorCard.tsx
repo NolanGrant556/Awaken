@@ -20,12 +20,21 @@ function statusTone(state: AwakenConnectorCardItem["state"]): string {
   return "neutral";
 }
 
+function hasDistinctDescription(item: AwakenConnectorCardItem): boolean {
+  const description = item.description.trim();
+  return Boolean(description) && description.localeCompare(item.displayName.trim(), undefined, {
+    sensitivity: "accent",
+  }) !== 0;
+}
+
 export function AwakenConnectorCard({
   item,
   onPrimaryAction,
   onEnabledChange,
   onSettings,
 }: AwakenConnectorCardProps) {
+  const showDescription = hasDistinctDescription(item);
+  const hasMcpServerControls = item.variant === "server" || Boolean(item.mcpServerName);
   if (item.variant === "cli") {
     const actionLabel = `打开 ${item.displayName} 连接设置`;
     return (
@@ -41,10 +50,13 @@ export function AwakenConnectorCard({
             imageSrc={item.brandLogoSrc}
             label={item.displayName}
             tone={item.brandTone}
+            size="sm"
           />
           <span className="aw-connector-card__copy">
             <strong className="aw-connector-card__title">{item.displayName}</strong>
-            <span className="aw-connector-card__description">{item.description}</span>
+            {showDescription ? (
+              <span className="aw-connector-card__description">{item.description}</span>
+            ) : null}
             {item.errors?.map((error) => (
               <span className="aw-connector-card__error" key={error}>{error}</span>
             ))}
@@ -58,7 +70,7 @@ export function AwakenConnectorCard({
           disabled={item.busy}
           onClick={() => onPrimaryAction?.(item)}
         >
-          {item.connected ? <Check size={18} strokeWidth={2.2} /> : <Plus size={18} strokeWidth={1.9} />}
+          {item.connected ? <Check size={16} strokeWidth={2.2} /> : <Plus size={16} strokeWidth={1.9} />}
         </button>
       </article>
     );
@@ -67,7 +79,7 @@ export function AwakenConnectorCard({
   return (
     <article className="aw-connector-card" data-variant={item.variant}>
       <span className="aw-connector-card__icon" aria-hidden="true">
-        {item.variant === "server" ? <Server size={20} strokeWidth={1.9} /> : <Plug size={20} strokeWidth={1.9} />}
+        {item.variant === "server" ? <Server size={18} strokeWidth={1.9} /> : <Plug size={18} strokeWidth={1.9} />}
       </span>
       <span className="aw-connector-card__copy">
         <span className="aw-connector-card__title-row">
@@ -76,14 +88,16 @@ export function AwakenConnectorCard({
             <span className="aw-connector-card__status" data-tone={statusTone(item.state)}>{item.stateLabel}</span>
           ) : null}
         </span>
-        <span className="aw-connector-card__description">{item.description}</span>
+        {showDescription ? (
+          <span className="aw-connector-card__description">{item.description}</span>
+        ) : null}
         {item.tags?.length ? (
           <span className="aw-connector-card__tags">
             {item.tags.map((tag) => <span key={tag}>{tag}</span>)}
           </span>
         ) : null}
       </span>
-      {item.variant === "server" ? (
+      {hasMcpServerControls ? (
         <span className="aw-connector-card__actions">
           <AwakenSwitch
             checked={item.enabled ?? false}
@@ -95,9 +109,10 @@ export function AwakenConnectorCard({
             type="button"
             className="aw-connector-card__action"
             aria-label={`设置 ${item.displayName}`}
+            disabled={item.busy}
             onClick={() => onSettings?.(item)}
           >
-            <Settings size={18} strokeWidth={1.9} />
+            <Settings size={16} strokeWidth={1.9} />
           </button>
         </span>
       ) : (
@@ -108,7 +123,7 @@ export function AwakenConnectorCard({
           disabled={item.busy}
           onClick={() => onPrimaryAction?.(item)}
         >
-          {item.connected ? <X size={18} strokeWidth={1.9} /> : <Plus size={18} strokeWidth={1.9} />}
+          {item.connected ? <X size={16} strokeWidth={1.9} /> : <Plus size={16} strokeWidth={1.9} />}
         </button>
       )}
     </article>

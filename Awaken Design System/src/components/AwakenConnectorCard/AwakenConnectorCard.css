@@ -2,12 +2,12 @@
 
 .aw-connector-card {
   display: grid;
-  grid-template-columns: 46px minmax(0, 1fr) auto;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
-  min-height: 88px;
-  padding: 14px;
+  min-height: 78px;
+  padding: 10px 12px;
   border: 1px solid var(--aw-border-main);
   border-radius: var(--aw-radius-md);
   background: var(--aw-surface-panel);
@@ -20,7 +20,7 @@
 }
 
 .aw-connector-card[data-variant="server"] {
-  min-height: 78px;
+  min-height: 64px;
 }
 
 .aw-connector-card--cli {
@@ -32,13 +32,13 @@
 
 .aw-connector-card__main {
   display: grid;
-  grid-template-columns: 46px minmax(0, 1fr);
+  grid-template-columns: 40px minmax(0, 1fr);
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
   width: 100%;
-  min-height: 88px;
-  padding: 14px;
+  min-height: 72px;
+  padding: 10px 12px;
   border: 0;
   border-radius: var(--aw-radius-md);
   background: transparent;
@@ -63,8 +63,8 @@
 .aw-connector-card__icon {
   display: inline-grid;
   place-items: center;
-  width: 46px;
-  height: 46px;
+  width: 40px;
+  height: 40px;
   border: 1px solid var(--aw-border-light);
   border-radius: var(--aw-radius-md);
   background: var(--aw-surface-raised);
@@ -73,7 +73,7 @@
 
 .aw-connector-card__copy {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -90,7 +90,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--aw-text-primary);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: var(--aw-font-weight-heavy);
   line-height: 1.25;
   text-overflow: ellipsis;
@@ -103,21 +103,23 @@
   min-width: 0;
   overflow: hidden;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
   color: var(--aw-text-secondary);
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .aw-connector-card__error {
+  -webkit-line-clamp: 2;
   color: var(--aw-error);
 }
 
 .aw-connector-card__tags {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-wrap: nowrap;
+  gap: 5px;
   min-width: 0;
+  overflow: hidden;
 }
 
 .aw-connector-card__tags > span,
@@ -125,14 +127,15 @@
   display: inline-flex;
   align-items: center;
   max-width: 100%;
-  min-height: 20px;
-  padding: 0 7px;
+  min-height: 18px;
+  padding: 0 6px;
   border-radius: var(--aw-radius-pill);
   background: var(--aw-bg-fill-light);
   color: var(--aw-text-tertiary);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: var(--aw-font-weight-heavy);
   line-height: 1;
+  white-space: nowrap;
 }
 
 .aw-connector-card__status {
@@ -164,8 +167,8 @@
   display: inline-grid;
   place-items: center;
   align-self: center;
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   padding: 0;
   border: 0;
   border-radius: var(--aw-radius-md);
@@ -175,7 +178,7 @@
 }
 
 .aw-connector-card--cli > .aw-connector-card__action {
-  margin-right: 14px;
+  margin-right: 10px;
 }
 
 .aw-connector-card__action:hover:enabled {

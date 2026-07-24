@@ -13,28 +13,13 @@
 
 .aw-project-skills-dialog__heading {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: var(--aw-space-7);
 }
 
-.aw-project-skills-dialog__heading > div {
-  display: grid;
-  gap: var(--aw-space-2);
+.aw-project-skills-dialog__path {
   min-width: 0;
-}
-
-.aw-project-skills-dialog__heading strong {
-  overflow: hidden;
-  color: var(--aw-text-primary);
-  font-size: var(--aw-font-size-base);
-  line-height: var(--aw-line-height-base);
-  font-weight: var(--aw-font-weight-bold);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.aw-project-skills-dialog__heading div span {
   overflow: hidden;
   color: var(--aw-text-tertiary);
   font-family: var(--aw-font-mono);
@@ -44,8 +29,9 @@
   white-space: nowrap;
 }
 
-.aw-project-skills-dialog__heading > span {
+.aw-project-skills-dialog__count {
   flex: 0 0 auto;
+  margin-left: auto;
   color: var(--aw-text-tertiary);
   font-size: var(--aw-font-size-sm);
   line-height: var(--aw-line-height-sm);

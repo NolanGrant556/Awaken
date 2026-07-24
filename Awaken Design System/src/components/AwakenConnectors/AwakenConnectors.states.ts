@@ -45,6 +45,8 @@ export const AwakenBuiltInMcpConnectorStates: AwakenConnectorCardItem[] = [
     stateLabel: "已连接",
     tags: ["开发", "内置", "playwright"],
     connected: true,
+    enabled: true,
+    mcpServerName: "playwright",
   },
   {
     id: "puppeteer",
@@ -55,23 +57,25 @@ export const AwakenBuiltInMcpConnectorStates: AwakenConnectorCardItem[] = [
     stateLabel: "已连接",
     tags: ["开发", "内置", "puppeteer"],
     connected: true,
+    enabled: true,
+    mcpServerName: "puppeteer",
   },
 ];
 
 export const AwakenUserMcpConnectorStates: AwakenConnectorCardItem[] = [
   {
-    id: "puppeteer-user",
+    id: "filesystem-user",
     variant: "server",
-    displayName: "puppeteer",
+    displayName: "filesystem",
     description: "stdio · user",
     state: "connected",
     stateLabel: "已连接",
     enabled: true,
   },
   {
-    id: "playwright-user",
+    id: "postgres-user",
     variant: "server",
-    displayName: "playwright",
+    displayName: "postgres",
     description: "stdio · user",
     state: "connected",
     stateLabel: "已连接",
@@ -126,6 +130,15 @@ export const AwakenMcpConfigExample = `{
     "example-server": {
       "command": "npx",
       "args": ["-y", "mcp-server-example"]
+    }
+  }
+}`;
+
+export const AwakenMcpStreamableHttpConfigExample = `{
+  "mcpServers": {
+    "remote-example": {
+      "type": "streamable-http",
+      "url": "https://mcp.example.test/mcp"
     }
   }
 }`;

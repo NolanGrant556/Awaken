@@ -209,6 +209,87 @@ if (errorFooterHtml.includes("assistant-message-footer")) {
   throw new Error("AwakenAssistantMessage should not render the footer for error answers");
 }
 
+const streamableMcpDialogHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenMcpConfigDialog, {
+    open: true,
+    mode: "streamable-http",
+    value: '{"mcpServers":{"remote":{"type":"streamable-http","url":"https://mcp.example.test/mcp"}}}',
+    onOpenChange: () => undefined,
+    onModeChange: () => undefined,
+    onValueChange: () => undefined,
+    onSubmit: () => undefined,
+  }),
+);
+
+if (
+  !streamableMcpDialogHtml.includes("本地进程（stdio）") ||
+  !streamableMcpDialogHtml.includes("Streamable HTTP") ||
+  !streamableMcpDialogHtml.includes('aria-selected="true"') ||
+  !streamableMcpDialogHtml.includes("兼容")
+) {
+  throw new Error("AwakenMcpConfigDialog should expose distinct stdio and Streamable HTTP modes");
+}
+
+const repeatedConnectorDescriptionHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenConnectorCard, {
+    item: {
+      id: "playwright",
+      variant: "catalog",
+      displayName: "Playwright",
+      description: "Playwright",
+      state: "connected",
+      stateLabel: "已连接",
+      connected: true,
+    },
+  }),
+);
+
+if (repeatedConnectorDescriptionHtml.includes("aw-connector-card__description")) {
+  throw new Error("AwakenConnectorCard should suppress a description that repeats its title");
+}
+
+const usefulConnectorDescriptionHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenConnectorCard, {
+    item: {
+      id: "filesystem",
+      variant: "server",
+      displayName: "filesystem",
+      description: "stdio · user",
+      state: "connected",
+      stateLabel: "已连接",
+      enabled: true,
+    },
+  }),
+);
+
+if (!usefulConnectorDescriptionHtml.includes("aw-connector-card__description")) {
+  throw new Error("AwakenConnectorCard should retain useful supporting text");
+}
+
+const installedCatalogControlsHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenConnectorCard, {
+    item: {
+      id: "playwright",
+      variant: "catalog",
+      displayName: "Playwright",
+      description: "Playwright",
+      state: "connected",
+      stateLabel: "已连接",
+      connected: true,
+      enabled: true,
+      mcpServerName: "playwright",
+    },
+  }),
+);
+
+if (
+  !installedCatalogControlsHtml.includes('role="switch"') ||
+  !installedCatalogControlsHtml.includes("设置 Playwright") ||
+  installedCatalogControlsHtml.includes("断开 Playwright")
+) {
+  throw new Error("Installed MCP catalog cards should render server switch and settings controls");
+}
+
 const unclosedMermaidHtml = renderToString(
   React.createElement(AwakenDesignSystem.AwakenAssistantMessage, {
     markdown: "```mermaid\nflowchart LR\n  A --> B",

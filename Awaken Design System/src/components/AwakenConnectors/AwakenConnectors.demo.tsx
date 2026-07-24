@@ -5,7 +5,7 @@ import { AwakenCliConnectorDetailDialog } from "../AwakenCliConnectorDetailDialo
 import { AwakenConnectorBrandIcon } from "../AwakenConnectorBrandIcon";
 import { AwakenConnectorCard } from "../AwakenConnectorCard";
 import { AwakenSwitch } from "../AwakenSwitch";
-import { AwakenMcpConfigDialog } from "../AwakenMcpConfigDialog";
+import { AwakenMcpConfigDialog, type AwakenMcpConfigMode } from "../AwakenMcpConfigDialog";
 import { AwakenMcpSettingsDialog } from "../AwakenMcpSettingsDialog";
 import { AwakenConnectors } from "./AwakenConnectors";
 import type { AwakenConnectorCardItem, AwakenConnectorKind } from "./AwakenConnectors.types";
@@ -16,6 +16,7 @@ import {
   AwakenCliInstalledLoggedOutState,
   AwakenMcpConfigExample,
   AwakenMcpLogStates,
+  AwakenMcpStreamableHttpConfigExample,
   AwakenMcpToolStates,
   AwakenUserMcpConnectorStates,
 } from "./AwakenConnectors.states";
@@ -27,6 +28,9 @@ function includesQuery(item: AwakenConnectorCardItem, query: string): boolean {
     .some((value) => value.toLowerCase().includes(normalized));
 }
 
+const sampleUserMcpId = AwakenUserMcpConnectorStates[0].id;
+const sampleUserMcpName = AwakenUserMcpConnectorStates[0].displayName;
+
 export function AwakenConnectorsDemo() {
   const [activeKind, setActiveKind] = useState<AwakenConnectorKind>("mcp");
   const [searchValue, setSearchValue] = useState("");
@@ -35,9 +39,14 @@ export function AwakenConnectorsDemo() {
     Object.fromEntries(AwakenBuiltInMcpConnectorStates.map((item) => [item.id, item.connected ?? false])),
   );
   const [enabledById, setEnabledById] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(AwakenUserMcpConnectorStates.map((item) => [item.id, item.enabled ?? false])),
+    Object.fromEntries(
+      [...AwakenBuiltInMcpConnectorStates, ...AwakenUserMcpConnectorStates]
+        .filter((item) => item.variant === "server" || item.mcpServerName)
+        .map((item) => [item.id, item.enabled ?? false]),
+    ),
   );
   const [configOpen, setConfigOpen] = useState(false);
+  const [configMode, setConfigMode] = useState<AwakenMcpConfigMode>("stdio");
   const [configValue, setConfigValue] = useState(AwakenMcpConfigExample);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsServerName, setSettingsServerName] = useState("playwright");
@@ -59,13 +68,23 @@ export function AwakenConnectorsDemo() {
   }, []);
 
   const builtIn = useMemo(() => AwakenBuiltInMcpConnectorStates
-    .map((item) => ({
-      ...item,
-      connected: connectedById[item.id],
-      state: connectedById[item.id] ? "connected" as const : "disconnected" as const,
-      stateLabel: connectedById[item.id] ? "已连接" : "未连接",
-    }))
-    .filter((item) => includesQuery(item, searchValue)), [connectedById, searchValue]);
+    .map((item) => {
+      const hasServerControls = Boolean(item.mcpServerName);
+      const enabled = hasServerControls ? enabledById[item.id] ?? false : undefined;
+      const connected = connectedById[item.id] ?? false;
+      return {
+        ...item,
+        connected,
+        enabled,
+        state: hasServerControls && !enabled
+          ? "disabled" as const
+          : connected ? "connected" as const : "disconnected" as const,
+        stateLabel: hasServerControls && !enabled
+          ? "已停用"
+          : connected ? "已连接" : "未连接",
+      };
+    })
+    .filter((item) => includesQuery(item, searchValue)), [connectedById, enabledById, searchValue]);
   const userMcp = useMemo(() => AwakenUserMcpConnectorStates
     .map((item) => ({ ...item, enabled: enabledById[item.id] }))
     .filter((item) => includesQuery(item, searchValue)), [enabledById, searchValue]);
@@ -116,7 +135,7 @@ export function AwakenConnectorsDemo() {
             onConnectorAction={handlePrimaryAction}
             onMcpServerEnabledChange={(item, enabled) => setEnabledById((current) => ({ ...current, [item.id]: enabled }))}
             onMcpServerSettings={(item) => {
-              setSettingsServerName(item.displayName);
+              setSettingsServerName(item.mcpServerName ?? item.displayName);
               setSettingsOpen(true);
             }}
           />
@@ -132,7 +151,7 @@ export function AwakenConnectorsDemo() {
               item={sampleServer}
               onEnabledChange={(item, enabled) => setEnabledById((current) => ({ ...current, [item.id]: enabled }))}
               onSettings={(item) => {
-                setSettingsServerName(item.displayName);
+                setSettingsServerName(item.mcpServerName ?? item.displayName);
                 setSettingsOpen(true);
               }}
             />
@@ -142,8 +161,8 @@ export function AwakenConnectorsDemo() {
             <AwakenConnectorBrandIcon providerId="lark-cli" label="飞书" tone="lark" />
           </div></article>
           <article><header><h4>连接器开关</h4><code>AwakenSwitch</code><p>受控表达用户 MCP server 的启停与忙碌状态。</p></header><div className="aw-connectors-demo__part-canvas aw-connectors-demo__inline">
-            <AwakenSwitch checked={enabledById["puppeteer-user"] ?? false} label="puppeteer" onCheckedChange={(enabled) => setEnabledById((current) => ({ ...current, "puppeteer-user": enabled }))} />
-            <span>{enabledById["puppeteer-user"] ? "已启用" : "已停用"}</span>
+            <AwakenSwitch checked={enabledById[sampleUserMcpId] ?? false} label={sampleUserMcpName} onCheckedChange={(enabled) => setEnabledById((current) => ({ ...current, [sampleUserMcpId]: enabled }))} />
+            <span>{enabledById[sampleUserMcpId] ? "已启用" : "已停用"}</span>
           </div></article>
           <article><header><h4>CLI 详情窗口</h4><code>AwakenCliConnectorDetailDialog</code><p>覆盖安装、授权、进度、账户与退出登录。</p></header><div className="aw-connectors-demo__part-canvas"><AwakenButton onClick={() => setCliDialog("dingtalk-workspace")}>打开 CLI 详情</AwakenButton></div></article>
           <article><header><h4>MCP 配置窗口</h4><code>AwakenMcpConfigDialog</code><p>配置 JSON、风险说明和提交状态。</p></header><div className="aw-connectors-demo__part-canvas"><AwakenButton onClick={() => setConfigOpen(true)}>打开 MCP 配置</AwakenButton></div></article>
@@ -168,7 +187,27 @@ export function AwakenConnectorsDemo() {
           }
         }}
       />
-      <AwakenMcpConfigDialog open={configOpen} value={configValue} onOpenChange={setConfigOpen} onValueChange={setConfigValue} onSubmit={() => setConfigOpen(false)} />
+      <AwakenMcpConfigDialog
+        open={configOpen}
+        mode={configMode}
+        value={configValue}
+        onOpenChange={setConfigOpen}
+        onModeChange={(mode) => {
+          setConfigValue((currentValue) => {
+            const normalized = currentValue.trim();
+            const isUntouchedExample =
+              normalized === AwakenMcpConfigExample.trim() ||
+              normalized === AwakenMcpStreamableHttpConfigExample.trim();
+            if (normalized !== "" && !isUntouchedExample) {
+              return currentValue;
+            }
+            return mode === "stdio" ? AwakenMcpConfigExample : AwakenMcpStreamableHttpConfigExample;
+          });
+          setConfigMode(mode);
+        }}
+        onValueChange={setConfigValue}
+        onSubmit={() => setConfigOpen(false)}
+      />
       <AwakenMcpSettingsDialog
         open={settingsOpen}
         serverName={settingsServerName}

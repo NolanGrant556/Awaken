@@ -6,6 +6,7 @@ import {
   FileUp,
   FolderOpen,
   RefreshCw,
+  Trash2,
   Upload,
   Wrench,
 } from "lucide-react";
@@ -17,9 +18,13 @@ import {
   AwakenFolder,
   AwakenMcpConfigDialog,
   AwakenMcpSettingsDialog,
+  AwakenProjectSkillsDialog,
   AwakenSwitch,
   type AwakenCliConnectorAction,
   type AwakenConnectorCardItem,
+  type AwakenMcpConfigMode,
+  type AwakenSkillItem,
+  type AwakenSkillProject,
 } from "@awaken/design-system";
 import type {
   CliConnectorView,
@@ -69,6 +74,12 @@ type SkillAgentsGroup = {
   skills: RuntimeSkill[];
   isGlobal: boolean;
 };
+
+type PendingSkillDelete = {
+  skill: RuntimeSkill;
+  projectRoot?: string;
+};
+
 type ExtensionsViewProps = {
   section: ExtensionSection;
   desktopReady: boolean;
@@ -77,7 +88,7 @@ type ExtensionsViewProps = {
   activeWorkspaceRoot?: string;
 };
 
-const MCP_EXAMPLE = `{
+const MCP_STDIO_EXAMPLE = `{
   "mcpServers": {
     "example-server": {
       "command": "npx",
@@ -88,6 +99,29 @@ const MCP_EXAMPLE = `{
     }
   }
 }`;
+
+const MCP_STREAMABLE_HTTP_EXAMPLE = `{
+  "mcpServers": {
+    "remote-example": {
+      "type": "streamable-http",
+      "url": "https://mcp.example.test/mcp"
+    }
+  }
+}`;
+
+export function nextMcpConfigTextForMode(
+  currentValue: string,
+  nextMode: AwakenMcpConfigMode,
+): string {
+  const normalized = currentValue.trim();
+  const isUntouchedExample =
+    normalized === MCP_STDIO_EXAMPLE.trim() ||
+    normalized === MCP_STREAMABLE_HTTP_EXAMPLE.trim();
+  if (normalized !== "" && !isUntouchedExample) {
+    return currentValue;
+  }
+  return nextMode === "stdio" ? MCP_STDIO_EXAMPLE : MCP_STREAMABLE_HTTP_EXAMPLE;
+}
 
 export const DEFAULT_SKILL_VIEW: SkillView = "awaken";
 
@@ -100,6 +134,35 @@ export const SKILL_VIEW_TABS: Array<{ id: SkillView; label: string }> = [
 
 export function connectorKind(connector: RuntimeConnector): ConnectorKind {
   return connector.kind;
+}
+
+export function connectorOwnedMcpServerNames(
+  connectors: RuntimeConnector[],
+): Set<string> {
+  const names = new Set<string>();
+  for (const connector of connectors) {
+    if (connectorKind(connector) !== "mcp") continue;
+    for (const name of connector.serverNames ?? []) {
+      if (name.trim()) names.add(name);
+    }
+  }
+  return names;
+}
+
+export function isUserInstalledMcpServer(
+  server: Pick<RuntimeMcpServer, "name" | "sourceConnectorId">,
+  connectorOwnedNames: ReadonlySet<string>,
+): boolean {
+  return !server.sourceConnectorId?.trim() && !connectorOwnedNames.has(server.name);
+}
+
+export function findConnectorOwnedMcpServer(
+  connector: Pick<RuntimeConnector, "serverNames">,
+  servers: RuntimeMcpServer[],
+): RuntimeMcpServer | undefined {
+  const serverNames = connector.serverNames ?? [];
+  if (serverNames.length !== 1) return undefined;
+  return servers.find((server) => server.name === serverNames[0]);
 }
 
 function connectorCategoryLabel(category: string): string {
@@ -189,21 +252,28 @@ function sourceLabel(source: string): string {
 function mcpConnectorCardItem(
   connector: RuntimeConnector,
   busyConnectorId: string | null,
+  ownedServer: RuntimeMcpServer | undefined,
+  busyMcpServerName: string | null,
 ): AwakenConnectorCardItem {
+  const renderedState = ownedServer?.state ?? connector.state;
   return {
     id: connector.id,
     variant: "catalog",
     displayName: connector.displayName,
     description: connector.provider || connectorCategoryLabel(connector.category),
-    state: connector.state,
-    stateLabel: stateLabel(connector.state),
+    state: renderedState,
+    stateLabel: stateLabel(renderedState),
     tags: [
       connectorCategoryLabel(connector.category),
       sourceLabel(connector.sourceOrigin),
       ...(connector.serverNames ?? []),
     ],
     connected: connector.state === "connected",
-    busy: busyConnectorId === connector.id,
+    enabled: ownedServer ? ownedServer.state !== "disabled" : undefined,
+    mcpServerName: ownedServer?.name,
+    busy:
+      busyConnectorId === connector.id ||
+      (ownedServer !== undefined && busyMcpServerName === ownedServer.name),
   };
 }
 
@@ -464,9 +534,7 @@ export function ExtensionsView({
   const [activeSkillView, setActiveSkillView] = useState<SkillView>(
     DEFAULT_SKILL_VIEW,
   );
-  const [expandedProjectRoots, setExpandedProjectRoots] = useState<Set<string>>(
-    () => new Set(),
-  );
+  const [openProjectRoot, setOpenProjectRoot] = useState<string | null>(null);
   const [expandedAgentsRoots, setExpandedAgentsRoots] = useState<Set<string>>(
     () => new Set(),
   );
@@ -477,7 +545,8 @@ export function ExtensionsView({
   const [cliDetailLoading, setCliDetailLoading] = useState(false);
   const [busyMcpServerName, setBusyMcpServerName] = useState<string | null>(null);
   const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
-  const [mcpConfigText, setMcpConfigText] = useState(MCP_EXAMPLE);
+  const [mcpConfigMode, setMcpConfigMode] = useState<AwakenMcpConfigMode>("stdio");
+  const [mcpConfigText, setMcpConfigText] = useState(MCP_STDIO_EXAMPLE);
   const [configuringMcp, setConfiguringMcp] = useState(false);
   const [skillDialogOpen, setSkillDialogOpen] = useState(false);
   const [skillFile, setSkillFile] = useState<File | null>(null);
@@ -490,8 +559,14 @@ export function ExtensionsView({
   const [pickingSkillProjectRoot, setPickingSkillProjectRoot] = useState(false);
   const [skillPreviewTarget, setSkillPreviewTarget] =
     useState<SkillPreviewTarget | null>(null);
+  const [skillPreviewReturnProjectRoot, setSkillPreviewReturnProjectRoot] =
+    useState<string | null>(null);
   const [skillToggleStates, setSkillToggleStates] = useState<Record<string, boolean>>({});
   const [busySkillId, setBusySkillId] = useState<string | null>(null);
+  const [pendingSkillDelete, setPendingSkillDelete] =
+    useState<PendingSkillDelete | null>(null);
+  const [deletingSkill, setDeletingSkill] = useState(false);
+  const [skillDeleteError, setSkillDeleteError] = useState<string | null>(null);
   const [mcpSettingsOpen, setMcpSettingsOpen] = useState(false);
   const [selectedMcpServer, setSelectedMcpServer] = useState<RuntimeMcpServer | null>(null);
   const [mcpSettingsConfigText, setMcpSettingsConfigText] = useState("");
@@ -665,15 +740,21 @@ export function ExtensionsView({
     [visibleMcpConnectors],
   );
 
+  const connectorOwnedMcpServers = useMemo(
+    () => connectorOwnedMcpServerNames(connectors),
+    [connectors],
+  );
+
   const visibleMcpServers = useMemo(
     () =>
       mcpServers.filter(
         (server) =>
-          matchesQuery(server.name, normalizedQuery) ||
-          matchesQuery(server.transport, normalizedQuery) ||
-          matchesQuery(server.errorReason, normalizedQuery),
+          isUserInstalledMcpServer(server, connectorOwnedMcpServers) &&
+          (matchesQuery(server.name, normalizedQuery) ||
+            matchesQuery(server.transport, normalizedQuery) ||
+            matchesQuery(server.errorReason, normalizedQuery)),
       ),
-    [mcpServers, normalizedQuery],
+    [connectorOwnedMcpServers, mcpServers, normalizedQuery],
   );
 
   const visibleSkills = useMemo(
@@ -707,6 +788,46 @@ export function ExtensionsView({
         ),
     [skillProjectGroups, normalizedQuery],
   );
+
+  const openProjectSkillGroup = visibleProjectSkillGroups.find(
+    (group) => group.root === openProjectRoot,
+  );
+
+  const openProjectSkillDialog = useMemo<AwakenSkillProject | null>(() => {
+    if (!openProjectSkillGroup) {
+      return null;
+    }
+    return {
+      id: openProjectSkillGroup.root,
+      name: openProjectSkillGroup.label,
+      path: openProjectSkillGroup.root,
+      skills: openProjectSkillGroup.visibleSkills.map((skill): AwakenSkillItem => {
+        const skillKey = `${skill.id}:${skill.sourceOrigin}:${openProjectSkillGroup.root}`;
+        const diagnostics = (skill.diagnostics ?? [])
+          .map(skillDiagnosticText)
+          .filter(Boolean);
+        return {
+          id: skill.id,
+          name: skill.displayName || skill.name,
+          description: skill.whenToUse || skill.description,
+          enabled:
+            skillToggleStates[skillKey] ?? skill.state !== "disabled_by_policy",
+          scope: "project",
+          sourceLabel: skillSourceLabel(skill.sourceOrigin),
+          diagnostic: diagnostics.length > 0 ? diagnostics.join(" · ") : undefined,
+          previewable: canPreviewSkill(skill),
+          busy: busySkillId === skill.id,
+          toggleDisabled: busySkillId === skill.id || deletingSkill,
+          projectId: openProjectSkillGroup.root,
+        };
+      }),
+    };
+  }, [
+    busySkillId,
+    deletingSkill,
+    openProjectSkillGroup,
+    skillToggleStates,
+  ]);
 
   const visibleUserSkills = useMemo(
     () => visibleSkills.filter((skill) => skill.sourceOrigin === "user"),
@@ -830,6 +951,13 @@ export function ExtensionsView({
     } finally {
       setConfiguringMcp(false);
     }
+  }
+
+  function handleMcpConfigModeChange(nextMode: AwakenMcpConfigMode): void {
+    setMcpConfigText((currentValue) =>
+      nextMcpConfigTextForMode(currentValue, nextMode));
+    setMcpConfigMode(nextMode);
+    setErrorMessage(null);
   }
 
   async function loadMcpSettings(server: RuntimeMcpServer): Promise<void> {
@@ -968,6 +1096,44 @@ export function ExtensionsView({
     }
   }
 
+  async function handleDeleteSkill(): Promise<void> {
+    if (!pendingSkillDelete) {
+      return;
+    }
+    const { skill, projectRoot } = pendingSkillDelete;
+    setDeletingSkill(true);
+    setSkillDeleteError(null);
+    setErrorMessage(null);
+    try {
+      await runtimeClient.deleteSkill({
+        id: skill.id,
+        sourceOrigin: skill.sourceOrigin,
+        projectRoot: skill.sourceOrigin === "project" ? projectRoot : undefined,
+      });
+      setPendingSkillDelete(null);
+      onNotice(`已删除 ${skill.displayName || skill.name}，Skill 包已移到废纸篓`);
+      await refresh(true, projectRoot);
+      if (projectRoot) {
+        setOpenProjectRoot(projectRoot);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Skill 删除失败";
+      setSkillDeleteError(message);
+      setErrorMessage(message);
+    } finally {
+      setDeletingSkill(false);
+    }
+  }
+
+  function cancelSkillDelete(): void {
+    const projectRoot = pendingSkillDelete?.projectRoot;
+    setPendingSkillDelete(null);
+    setSkillDeleteError(null);
+    if (projectRoot) {
+      setOpenProjectRoot(projectRoot);
+    }
+  }
+
   async function handlePickSkillProjectRoot(): Promise<void> {
     setPickingSkillProjectRoot(true);
     setErrorMessage(null);
@@ -987,18 +1153,6 @@ export function ExtensionsView({
     } finally {
       setPickingSkillProjectRoot(false);
     }
-  }
-
-  function toggleProjectSkillGroup(root: string): void {
-    setExpandedProjectRoots((current) => {
-      const next = new Set(current);
-      if (next.has(root)) {
-        next.delete(root);
-      } else {
-        next.add(root);
-      }
-      return next;
-    });
   }
 
   function toggleAgentsSkillGroup(root: string): void {
@@ -1102,11 +1256,37 @@ export function ExtensionsView({
     }
   }
 
+  function openSkillPreview(skill: RuntimeSkill, projectRoot?: string): void {
+    if (!canPreviewSkill(skill)) {
+      return;
+    }
+    setSkillPreviewReturnProjectRoot(projectRoot ?? null);
+    if (projectRoot) {
+      setOpenProjectRoot(null);
+    }
+    setSkillPreviewTarget({
+      catalogEntryId: skill.catalogEntryId!,
+      projectRoot,
+    });
+  }
+
+  function requestSkillDelete(skill: RuntimeSkill, projectRoot?: string): void {
+    if (!isSkillPackageDeletable(skill)) {
+      return;
+    }
+    setSkillDeleteError(null);
+    setPendingSkillDelete({ skill, projectRoot });
+    if (projectRoot) {
+      setOpenProjectRoot(null);
+    }
+  }
+
   function renderSkillCard(skill: RuntimeSkill, projectRoot?: string) {
     const diagnostics = (skill.diagnostics ?? [])
       .map(skillDiagnosticText)
       .filter(Boolean);
     const previewable = canPreviewSkill(skill);
+    const deletable = isSkillPackageDeletable(skill);
     const skillName = skill.displayName || skill.name;
     const skillKey = `${skill.id}:${skill.sourceOrigin}:${projectRoot ?? ""}`;
     const disabledByDefault = skill.state === "disabled_by_policy";
@@ -1141,12 +1321,7 @@ export function ExtensionsView({
             type="button"
             className="extension-card-main"
             aria-label={`查看 ${skillName} 的 SKILL.md`}
-            onClick={() => {
-              setSkillPreviewTarget({
-                catalogEntryId: skill.catalogEntryId!,
-                projectRoot,
-              });
-            }}
+            onClick={() => openSkillPreview(skill, projectRoot)}
           >
             {cardBody}
           </button>
@@ -1164,6 +1339,18 @@ export function ExtensionsView({
               void handleToggleSkill(skill, skillKey, enabled);
             }}
           />
+          {deletable ? (
+            <button
+              type="button"
+              className="extension-card-delete-skill"
+              aria-label={`删除 ${skillName}`}
+              disabled={deletingSkill}
+              onClick={() => requestSkillDelete(skill, projectRoot)}
+            >
+              <Trash2 size={14} strokeWidth={1.9} aria-hidden="true" />
+              删除
+            </button>
+          ) : null}
         </div>
       </article>
     );
@@ -1179,51 +1366,18 @@ export function ExtensionsView({
     return `${group.skills.length} Skill`;
   }
 
-  function renderProjectSkillFolder(group: VisibleSkillProjectGroup, index: number) {
-    const expanded = expandedProjectRoots.has(group.root);
-    const bodyId = `skill-project-group-${index}`;
+  function renderProjectSkillFolder(group: VisibleSkillProjectGroup) {
+    const open = openProjectRoot === group.root;
     return (
       <AwakenFolder
         key={group.root}
         label={group.label}
         meta={projectSkillCountText(group)}
-        size="compact"
-        open={expanded}
-        aria-label={`${expanded ? "收起" : "打开"}${group.label} 项目 Skills`}
-        aria-controls={bodyId}
-        onOpen={() => toggleProjectSkillGroup(group.root)}
+        size="dense"
+        open={open}
+        aria-label={`打开${group.label} 项目 Skills`}
+        onOpen={() => setOpenProjectRoot(group.root)}
       />
-    );
-  }
-
-  function renderProjectSkillBody(group: VisibleSkillProjectGroup, index: number) {
-    if (!expandedProjectRoots.has(group.root)) {
-      return null;
-    }
-    const bodyId = `skill-project-group-${index}`;
-    return (
-      <section className="skill-project-panel" id={bodyId} key={group.root}>
-        <header className="skill-project-panel-heading">
-          <span className="skill-project-copy">
-            <span className="skill-project-name">{group.label}</span>
-            <span className="skill-project-path" title={group.root}>
-              {group.root}
-            </span>
-          </span>
-          <span className="skill-project-count">{projectSkillCountText(group)}</span>
-        </header>
-        <div className="skill-project-body">
-          {group.visibleSkills.length > 0 ? (
-            <div className="extension-grid">
-              {group.visibleSkills.map((skill) => renderSkillCard(skill, group.root))}
-            </div>
-          ) : (
-            <div className="extension-empty">
-              {group.errorMessage ?? "暂无项目 Skills"}
-            </div>
-          )}
-        </div>
-      </section>
     );
   }
 
@@ -1271,12 +1425,23 @@ export function ExtensionsView({
     );
   }
 
-  const builtInMcpConnectorItems = visibleAwakenBuiltInMcpConnectors.map((connector) =>
-    mcpConnectorCardItem(connector, busyConnectorId),
+  const builtInMcpConnectorItems = visibleAwakenBuiltInMcpConnectors.map(
+    (connector) =>
+      mcpConnectorCardItem(
+        connector,
+        busyConnectorId,
+        findConnectorOwnedMcpServer(connector, mcpServers),
+        busyMcpServerName,
+      ),
   );
   const userMcpConnectorItems = [
     ...visibleUserInstalledMcpConnectors.map((connector) =>
-      mcpConnectorCardItem(connector, busyConnectorId),
+      mcpConnectorCardItem(
+        connector,
+        busyConnectorId,
+        findConnectorOwnedMcpServer(connector, mcpServers),
+        busyMcpServerName,
+      ),
     ),
     ...visibleMcpServers.map((server) => mcpServerCardItem(server, busyMcpServerName)),
   ];
@@ -1304,7 +1469,10 @@ export function ExtensionsView({
           onKindChange={setActiveConnectorKind}
           onSearchChange={setQuery}
           onRefresh={() => { void refresh(); }}
-          onConfigureMcp={() => setMcpDialogOpen(true)}
+          onConfigureMcp={() => {
+            setErrorMessage(null);
+            setMcpDialogOpen(true);
+          }}
           onConnectorAction={(item) => {
             if (item.variant === "cli") {
               void openCliConnectorDetail(item.id as CliProviderId);
@@ -1314,11 +1482,13 @@ export function ExtensionsView({
             if (connector) void handleConnectorAction(connector);
           }}
           onMcpServerEnabledChange={(item) => {
-            const server = mcpServers.find((entry) => entry.name === item.id);
+            const serverName = item.mcpServerName ?? item.id;
+            const server = mcpServers.find((entry) => entry.name === serverName);
             if (server) void handleToggleMcpServer(server);
           }}
           onMcpServerSettings={(item) => {
-            const server = mcpServers.find((entry) => entry.name === item.id);
+            const serverName = item.mcpServerName ?? item.id;
+            const server = mcpServers.find((entry) => entry.name === serverName);
             if (server) void loadMcpSettings(server);
           }}
         />
@@ -1357,10 +1527,12 @@ export function ExtensionsView({
 
         <AwakenMcpConfigDialog
           open={mcpDialogOpen}
+          mode={mcpConfigMode}
           value={mcpConfigText}
           errorMessage={mcpDialogOpen ? errorMessage : null}
           busy={configuringMcp}
           onOpenChange={setMcpDialogOpen}
+          onModeChange={handleMcpConfigModeChange}
           onValueChange={setMcpConfigText}
           onSubmit={() => { void handleConfigureMcp(); }}
         />
@@ -1476,14 +1648,9 @@ export function ExtensionsView({
             ) : activeSkillView === "project" ? (
               <section className="extension-section" aria-label="项目 Skills">
                 {visibleProjectSkillGroups.length > 0 ? (
-                  <>
-                    <div className="skill-project-folder-grid">
-                      {visibleProjectSkillGroups.map(renderProjectSkillFolder)}
-                    </div>
-                    <div className="skill-project-panels">
-                      {visibleProjectSkillGroups.map(renderProjectSkillBody)}
-                    </div>
-                  </>
+                  <div className="skill-project-folder-grid">
+                    {visibleProjectSkillGroups.map(renderProjectSkillFolder)}
+                  </div>
                 ) : (
                   <div className="extension-empty">暂无项目 Skills</div>
                 )}
@@ -1530,15 +1697,102 @@ export function ExtensionsView({
         </div>
       </div>
 
+      <AwakenProjectSkillsDialog
+        open={openProjectSkillDialog !== null}
+        project={openProjectSkillDialog}
+        deletingSkillId={deletingSkill ? pendingSkillDelete?.skill.id : null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setOpenProjectRoot(null);
+          }
+        }}
+        onSkillPreview={(item) => {
+          const group = openProjectSkillGroup;
+          const skill = group?.skills.find((entry) => entry.id === item.id);
+          if (group && skill) {
+            openSkillPreview(skill, group.root);
+          }
+        }}
+        onSkillToggle={(item, enabled) => {
+          const group = openProjectSkillGroup;
+          const skill = group?.skills.find((entry) => entry.id === item.id);
+          if (group && skill) {
+            const skillKey = `${skill.id}:${skill.sourceOrigin}:${group.root}`;
+            void handleToggleSkill(skill, skillKey, enabled);
+          }
+        }}
+        onSkillDelete={(item) => {
+          const group = openProjectSkillGroup;
+          const skill = group?.skills.find((entry) => entry.id === item.id);
+          if (group && skill) {
+            requestSkillDelete(skill, group.root);
+          }
+        }}
+      />
+
       <SkillPreviewDialog
         target={skillPreviewTarget}
         runtimeClient={runtimeClient}
         onOpenChange={(open) => {
           if (!open) {
             setSkillPreviewTarget(null);
+            if (skillPreviewReturnProjectRoot) {
+              setOpenProjectRoot(skillPreviewReturnProjectRoot);
+            }
+            setSkillPreviewReturnProjectRoot(null);
           }
         }}
       />
+
+      <Dialog
+        open={pendingSkillDelete !== null}
+        title="删除 Skill"
+        onOpenChange={(open) => {
+          if (!open && !deletingSkill) {
+            cancelSkillDelete();
+          }
+        }}
+        footer={
+          <>
+            <Button
+              variant="default"
+              size="md"
+              disabled={deletingSkill}
+              onClick={cancelSkillDelete}
+            >
+              取消
+            </Button>
+            <Button
+              className="skill-delete-confirm-button"
+              variant="primary"
+              size="md"
+              loading={deletingSkill}
+              onClick={() => {
+                void handleDeleteSkill();
+              }}
+            >
+              <Trash2 size={15} strokeWidth={1.9} />
+              确认删除
+            </Button>
+          </>
+        }
+      >
+        <div className="extension-dialog-body skill-delete-dialog-body">
+          <p>
+            确定要删除 Skill「
+            <strong>
+              {pendingSkillDelete?.skill.displayName || pendingSkillDelete?.skill.name}
+            </strong>
+            」吗？
+          </p>
+          <p className="extension-dialog-note">
+            确认后会立即从对应的 .awaken/skills 目录移除，并将完整 Skill 包移动到系统废纸篓。
+          </p>
+          {skillDeleteError ? (
+            <div className="extension-message" role="alert">{skillDeleteError}</div>
+          ) : null}
+        </div>
+      </Dialog>
 
       <Dialog
         open={skillDialogOpen}

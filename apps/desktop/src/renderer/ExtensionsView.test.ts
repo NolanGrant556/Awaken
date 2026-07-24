@@ -1,15 +1,102 @@
 import { describe, expect, it, vi } from "vitest";
-import type { RuntimeSkill, RuntimeToolInfo } from "../shared/runtime";
+import type {
+  RuntimeConnector,
+  RuntimeMcpServer,
+  RuntimeSkill,
+  RuntimeToolInfo,
+} from "../shared/runtime";
 import {
   DEFAULT_SKILL_VIEW,
   SKILL_VIEW_TABS,
   canPreviewSkill,
+  connectorOwnedMcpServerNames,
   dedupeSkills,
+  findConnectorOwnedMcpServer,
+  isUserInstalledMcpServer,
   isSkillVisibleInView,
   loadMcpSettingsResources,
   loadSkillListsForRoots,
+  nextMcpConfigTextForMode,
   skillDiagnosticText,
 } from "./ExtensionsView";
+
+describe("MCP configuration modes", () => {
+  it("switches untouched examples between stdio and Streamable HTTP", () => {
+    const stdioExample = nextMcpConfigTextForMode("", "stdio");
+    expect(stdioExample).toContain('"command": "npx"');
+
+    const httpExample = nextMcpConfigTextForMode(stdioExample, "streamable-http");
+    expect(httpExample).toContain('"type": "streamable-http"');
+    expect(httpExample).toContain('"url": "https://mcp.example.test/mcp"');
+  });
+
+  it("does not discard pasted configuration when the user changes mode", () => {
+    const pasted = '{"mcpServers":{"private":{"url":"https://private.example.test/mcp"}}}';
+    expect(nextMcpConfigTextForMode(pasted, "streamable-http")).toBe(pasted);
+  });
+});
+
+describe("MCP source grouping", () => {
+  const connector = {
+    id: "playwright",
+    kind: "mcp",
+    displayName: "Playwright",
+    category: "code",
+    state: "connected",
+    sourceOrigin: "builtin",
+    authType: "none",
+    serverNames: ["playwright"],
+  } satisfies RuntimeConnector;
+
+  it("keeps connector-owned MCP snapshots out of the user-installed group", () => {
+    const ownedNames = connectorOwnedMcpServerNames([connector]);
+    const restoredBuiltin = {
+      name: "playwright",
+      state: "connected",
+      transport: "stdio",
+      scope: "user",
+    } satisfies RuntimeMcpServer;
+    const dynamicConnectorServer = {
+      name: "browser-local",
+      state: "connected",
+      transport: "stdio",
+      scope: "user",
+      sourceConnectorId: "browser-local",
+    } satisfies RuntimeMcpServer;
+
+    expect(isUserInstalledMcpServer(restoredBuiltin, ownedNames)).toBe(false);
+    expect(isUserInstalledMcpServer(dynamicConnectorServer, ownedNames)).toBe(false);
+  });
+
+  it("keeps standalone user or project MCP servers in the user-installed group", () => {
+    const ownedNames = connectorOwnedMcpServerNames([{ ...connector, serverNames: [] }]);
+    const standalone = {
+      name: "playwright",
+      state: "connected",
+      transport: "stdio",
+      scope: "project",
+    } satisfies RuntimeMcpServer;
+
+    expect(isUserInstalledMcpServer(standalone, ownedNames)).toBe(true);
+  });
+
+  it("resolves the single owned server used by an installed connector card", () => {
+    const server = {
+      name: "playwright",
+      state: "disabled",
+      transport: "stdio",
+      scope: "user",
+    } satisfies RuntimeMcpServer;
+
+    expect(findConnectorOwnedMcpServer(connector, [server])).toBe(server);
+    expect(
+      findConnectorOwnedMcpServer(
+        { serverNames: ["playwright", "playwright-helper"] },
+        [server],
+      ),
+    ).toBeUndefined();
+  });
+});
 
 describe("loadSkillListsForRoots", () => {
   it("keeps loading other projects when one project root is invalid", async () => {

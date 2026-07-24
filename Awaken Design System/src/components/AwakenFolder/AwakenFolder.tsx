@@ -7,7 +7,7 @@ export type AwakenFolderProps = Omit<
 > & {
   label: string;
   meta?: string;
-  size?: "default" | "compact";
+  size?: "default" | "compact" | "dense";
   open?: boolean;
   onOpen?: () => void;
 };

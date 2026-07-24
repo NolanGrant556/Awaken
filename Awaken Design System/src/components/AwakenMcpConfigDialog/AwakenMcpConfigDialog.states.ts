@@ -2,5 +2,6 @@ import { AwakenMcpConfigExample } from "../AwakenConnectors/AwakenConnectors.sta
 
 export const AwakenMcpConfigDialogState = {
   open: false,
+  mode: "stdio" as const,
   value: AwakenMcpConfigExample,
 };

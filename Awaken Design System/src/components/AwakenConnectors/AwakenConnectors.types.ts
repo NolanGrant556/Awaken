@@ -24,6 +24,7 @@ export type AwakenConnectorCardItem = {
   tags?: string[];
   connected?: boolean;
   enabled?: boolean;
+  mcpServerName?: string;
   busy?: boolean;
   brandLogoSrc?: string;
   brandTone?: "dingtalk" | "lark" | "neutral";

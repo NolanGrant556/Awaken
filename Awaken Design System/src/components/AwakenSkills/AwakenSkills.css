@@ -123,7 +123,7 @@
 
 .aw-skills__folder-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(226px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(164px, 1fr));
   align-items: start;
   justify-items: center;
   gap: var(--aw-space-6);

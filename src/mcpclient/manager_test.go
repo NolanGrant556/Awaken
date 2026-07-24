@@ -3,6 +3,7 @@ package mcpclient
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -200,6 +201,44 @@ func TestManagerRestoresDisabledConfigWithoutConnecting(t *testing.T) {
 	}
 	if snapshot.State != StateDisabled || snapshot.Scope != ScopeProject {
 		t.Fatalf("disabled config was not restored: %+v", snapshot)
+	}
+}
+
+func TestManagerRestartWithConfigPreservesSnapshotOrder(t *testing.T) {
+	disabled := false
+	mgr := NewManager(WithLogger(noopLogger{}))
+	configs := []ScopedMcpServerConfig{
+		{Name: "playwright", Scope: ScopeUser, Config: McpServerConfig{
+			HTTP: &HTTPTransportConfig{URL: "https://playwright.invalid/mcp"}, Enabled: &disabled,
+		}},
+		{Name: "puppeteer", Scope: ScopeUser, Config: McpServerConfig{
+			HTTP: &HTTPTransportConfig{URL: "https://puppeteer.invalid/mcp"}, Enabled: &disabled,
+		}},
+		{Name: "github", Scope: ScopeUser, Config: McpServerConfig{
+			HTTP: &HTTPTransportConfig{URL: "https://github.invalid/mcp"}, Enabled: &disabled,
+		}},
+	}
+	mgr.Start(context.Background(), configs)
+	t.Cleanup(func() { mgr.Shutdown(context.Background()) })
+
+	names := func() []string {
+		snapshots := mgr.Snapshot()
+		result := make([]string, 0, len(snapshots))
+		for _, snapshot := range snapshots {
+			result = append(result, snapshot.Name)
+		}
+		return result
+	}
+	want := []string{"playwright", "puppeteer", "github"}
+	if got := names(); !slices.Equal(got, want) {
+		t.Fatalf("initial snapshot order = %v, want %v", got, want)
+	}
+
+	if err := mgr.RestartWithConfig(context.Background(), configs[0]); err != nil {
+		t.Fatalf("RestartWithConfig: %v", err)
+	}
+	if got := names(); !slices.Equal(got, want) {
+		t.Fatalf("snapshot order after restart = %v, want %v", got, want)
 	}
 }
 

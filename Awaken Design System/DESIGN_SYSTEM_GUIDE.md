@@ -5,7 +5,7 @@ Awaken owns its visual language through its own tokens and components. Keep Awak
 ## Visual Direction
 
 - Light mode is the first supported target.
-- `AwakenProductLogo` owns the official square product logo; `logo-wordmark.png` owns the horizontal wordmark. They are the only primary brand assets and must not substitute for each other through cropping.
+- `AwakenProductLogo` owns the official square product logo; `logo-wordmark.svg` owns the horizontal wordmark. They are the only primary brand assets and must not substitute for each other through cropping.
 - Use neutral surfaces, restrained borders, and typography for hierarchy.
 - Use black or near-black for the primary action; brand and accent colors must come from Awaken semantic tokens.
 - Avoid decorative backgrounds, glow effects, nested cards, and ad hoc color palettes.

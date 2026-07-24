@@ -8,4 +8,4 @@
 - `sm`、`md`、`lg` 分别对应 32px、40px、64px。
 - 默认提供 `Awaken` 替代文本；已有等价文字上下文时使用 `decorative`。
 
-横向 `AWAKEN` 字标仍由 `logo-wordmark.png` 负责，不得用横向字标替代本组件。
+横向 `AWAKEN` 字标仍由 `logo-wordmark.svg` 负责，不得用横向字标替代本组件。

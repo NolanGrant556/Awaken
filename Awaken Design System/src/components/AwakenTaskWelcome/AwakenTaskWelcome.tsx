@@ -1,5 +1,5 @@
 import "./AwakenTaskWelcome.css";
-import logo from "../../assets/logo-wordmark.png";
+import logo from "../../assets/logo-wordmark.svg";
 
 export type AwakenTaskWelcomeProps = {
   logoSrc?: string;

@@ -1,6 +1,6 @@
 # AwakenProjectSkillsDialog
 
-项目 Skill 文件夹打开后的受控窗口。项目名称只在窗口标题中出现，内容区展示路径、数量和统一 `AwakenSkillCard` 列表。
+项目 Skill 文件夹打开后的受控固定尺寸窗口。项目名称只在窗口标题中出现，内容区展示路径、数量和统一 `AwakenSkillCard` 列表；列表、预览和删除确认共用同一个约 `980 × 640` 的 Dialog，内容超出时只在 body 内滚动。
 
 ## Props
 

@@ -4,7 +4,10 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeSkill } from "../shared/runtime";
-import { ExtensionsView } from "./ExtensionsView";
+import {
+  ExtensionsView,
+  SKILL_CATALOG_SYNC_INTERVAL_MS,
+} from "./ExtensionsView";
 import type { RuntimeClient } from "./runtime/client";
 
 const projectRoot = "/workspace/marketing";
@@ -168,5 +171,64 @@ describe("ExtensionsView project Skills flow", () => {
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
       "这个项目还没有 Skills",
     );
+  });
+
+  it("syncs an external project Skill deletion and closes its stale preview", async () => {
+    let skillExistsOnDisk = true;
+    const listSkills = vi.fn(async () =>
+      skillExistsOnDisk ? [projectSkill] : [],
+    );
+    const runtimeClient = {
+      getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
+      listProjects: vi.fn(async () => []),
+      listConnectors: vi.fn(async () => []),
+      listCliConnectors: vi.fn(async () => []),
+      listMcpServers: vi.fn(async () => []),
+      listSkills,
+      getSkillPreview: vi.fn(async () => ({
+        frontmatterRaw: "---\nname: project-report\n---",
+        bodyMarkdown: "# 项目报告正文",
+      })),
+      subscribeCliConnectorState: vi.fn(() => () => undefined),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <ExtensionsView
+          section="skills"
+          desktopReady
+          runtimeClient={runtimeClient}
+          activeWorkspaceRoot={projectRoot}
+          onNotice={vi.fn()}
+        />,
+      );
+    });
+    await settle();
+
+    await act(async () => buttonByText("项目 Skills")?.click());
+    const folder = document.querySelector<HTMLButtonElement>(
+      '[aria-label="打开marketing 项目 Skills"]',
+    );
+    await act(async () => folder?.click());
+    const projectDialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    const previewButton = document.querySelector<HTMLButtonElement>(
+      '[aria-label="查看 项目报告 的 SKILL.md"]',
+    );
+    await act(async () => previewButton?.click());
+    await settle();
+    expect(projectDialog?.textContent).toContain("项目报告正文");
+
+    skillExistsOnDisk = false;
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, SKILL_CATALOG_SYNC_INTERVAL_MS + 100),
+      );
+    });
+    await settle();
+
+    expect(listSkills.mock.calls.length).toBeGreaterThan(1);
+    expect(document.querySelector('[role="dialog"]')).toBe(projectDialog);
+    expect(projectDialog?.textContent).not.toContain("项目报告正文");
+    expect(projectDialog?.textContent).toContain("这个项目还没有 Skills");
   });
 });

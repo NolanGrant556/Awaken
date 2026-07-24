@@ -19,7 +19,7 @@ type SidebarDialogMode = "create-project" | "detach-project" | "rename-thread" |
 export function AwakenSidebarDemo() {
   const desktopProps = AwakenSidebarStates[0]?.props ?? {};
   const navItems = desktopProps.navItems ?? [];
-  const projects = desktopProps.projects ?? [];
+  const [projects, setProjects] = useState(desktopProps.projects ?? []);
   const [activeNavId, setActiveNavId] = useState(desktopProps.activeNavId);
   const [activeProjectId, setActiveProjectId] = useState(desktopProps.activeProjectId);
   const [expandedIds, setExpandedIds] = useState<string[]>(desktopProps.expandedIds ?? []);
@@ -73,6 +73,15 @@ export function AwakenSidebarDemo() {
     const topLevel = projects.find((item) => item.id === id);
     const child = projects.flatMap((item) => item.children ?? []).find((item) => item.id === id);
     setLastAction(`已选择${topLevel?.label ?? child?.label ?? id}。`);
+  }
+
+  function reorderProjects(ids: string[]): void {
+    const byId = new Map(projects.map((project) => [project.id, project]));
+    setProjects(ids.flatMap((id) => {
+      const project = byId.get(id);
+      return project ? [project] : [];
+    }));
+    setLastAction("已调整项目顺序（Gallery 模拟）。");
   }
 
   function closeDialog(result?: string): void {
@@ -150,12 +159,14 @@ export function AwakenSidebarDemo() {
             <AwakenWorkbenchSidebarFrame>
               <AwakenSidebar
                 {...desktopProps}
+                projects={projects}
                 activeNavId={activeNavId}
                 activeProjectId={activeProjectId}
                 expandedIds={expandedIds}
                 projectSectionActions={projectSectionActions}
                 onSelectNav={selectNav}
                 onSelectProject={selectProject}
+                onReorderProjects={reorderProjects}
                 onExpandedChange={setExpandedIds}
                 onNewTask={() => setLastAction("已触发 New Agent 回调（Gallery 模拟）。")}
                 onProfileClick={() => setLastAction("已触发 Nolan 个人入口回调（Gallery 模拟）。")}
@@ -165,7 +176,7 @@ export function AwakenSidebarDemo() {
           <div className="aw-sidebar-demo__composition-note">
             <span>当前 Desktop 组合</span>
             <strong>无品牌行、无最近对话区</strong>
-            <p>保留 New Agent、连接器/技能导航、Projects 项目树、运行中线程指示、行内菜单和 Nolan 个人入口。</p>
+            <p>保留 New Agent、连接器/技能导航、项目工作区项目树、运行中线程指示、行内菜单和 Nolan 个人入口。</p>
             <output aria-live="polite">{lastAction}</output>
           </div>
         </div>
@@ -217,6 +228,7 @@ export function AwakenSidebarDemo() {
                 expandedIds={expandedIds}
                 onExpandedChange={setExpandedIds}
                 onSelect={selectProject}
+                onReorder={reorderProjects}
               />
             </div>
           </article>

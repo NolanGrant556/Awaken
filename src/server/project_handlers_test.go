@@ -76,6 +76,59 @@ func TestProjectLifecycleRESTCreateDetachAndIdempotency(t *testing.T) {
 	}
 }
 
+func TestProjectLifecycleRESTReordersEveryActiveProject(t *testing.T) {
+	t.Setenv("AWAKEN_HOME", t.TempDir())
+	service := awruntime.NewRunService(nil, nil)
+	router := NewRouter(service, nil)
+
+	projects := make([]awruntime.Project, 0, 3)
+	for _, displayName := range []string{"first", "second", "third"} {
+		create := projectJSONRequest(t, router, http.MethodPost, "/v1/projects", map[string]any{
+			"workspace_root": t.TempDir(),
+			"display_name":   displayName,
+		}, "")
+		if create.Code != http.StatusCreated {
+			t.Fatalf("create %s: %d %s", displayName, create.Code, create.Body.String())
+		}
+		var project awruntime.Project
+		if err := json.Unmarshal(create.Body.Bytes(), &project); err != nil {
+			t.Fatal(err)
+		}
+		projects = append(projects, project)
+	}
+
+	wanted := []string{projects[0].ProjectID, projects[2].ProjectID, projects[1].ProjectID}
+	reorder := projectJSONRequest(t, router, http.MethodPut, "/v1/projects/order", map[string]any{
+		"project_ids": wanted,
+	}, "")
+	if reorder.Code != http.StatusOK {
+		t.Fatalf("expected reorder 200, got %d: %s", reorder.Code, reorder.Body.String())
+	}
+	var ordered []awruntime.Project
+	if err := json.Unmarshal(reorder.Body.Bytes(), &ordered); err != nil {
+		t.Fatal(err)
+	}
+	for index, projectID := range wanted {
+		if ordered[index].ProjectID != projectID {
+			t.Fatalf("unexpected order at %d: got %s want %s", index, ordered[index].ProjectID, projectID)
+		}
+	}
+
+	invalid := projectJSONRequest(t, router, http.MethodPut, "/v1/projects/order", map[string]any{
+		"project_ids": wanted[:2],
+	}, "")
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("expected incomplete order 400, got %d: %s", invalid.Code, invalid.Body.String())
+	}
+	var apiError errorResponse
+	if err := json.Unmarshal(invalid.Body.Bytes(), &apiError); err != nil {
+		t.Fatal(err)
+	}
+	if apiError.Error != "PROJECT_ORDER_INVALID" {
+		t.Fatalf("unexpected reorder error: %+v", apiError)
+	}
+}
+
 func TestProjectLifecycleRESTTrashPrepareClaimFail(t *testing.T) {
 	t.Setenv("AWAKEN_HOME", t.TempDir())
 	service := awruntime.NewRunService(nil, nil)

@@ -1,3 +1,7 @@
 @import "../../tokens/components.css";
 
-/* AwakenPrimaryNav currently uses shared Awaken Design System tokens and component classes. */
+.aw-primary-nav svg {
+  width: var(--aw-icon-size-20);
+  height: var(--aw-icon-size-20);
+  stroke-width: 1.9;
+}

@@ -39,7 +39,7 @@ function WorkbenchAnatomySidebar() {
         <span><Wrench size={12} aria-hidden="true" />技能</span>
       </div>
       <div className="aw-workbench-anatomy__projects">
-        <strong>Projects</strong>
+        <strong>项目工作区</strong>
         <span><Folder size={12} aria-hidden="true" />04_市场部</span>
         <span><Folder size={12} aria-hidden="true" />01_财务部</span>
       </div>

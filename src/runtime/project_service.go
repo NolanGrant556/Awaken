@@ -20,6 +20,7 @@ var (
 	ErrIdempotencyKeyRequired   = errors.New("idempotency key is required")
 	ErrIdempotencyKeyConflict   = errors.New("idempotency key already belongs to another operation")
 	ErrProjectPathInvalid       = errors.New("project path is invalid")
+	ErrProjectOrderInvalid      = errors.New("project order must contain every active project exactly once")
 )
 
 func ProjectErrorCode(err error) string {
@@ -42,6 +43,8 @@ func ProjectErrorCode(err error) string {
 		return "IDEMPOTENCY_KEY_CONFLICT"
 	case errors.Is(err, ErrProjectPathInvalid):
 		return "PROJECT_PATH_INVALID"
+	case errors.Is(err, ErrProjectOrderInvalid):
+		return "PROJECT_ORDER_INVALID"
 	default:
 		return "INTERNAL_ERROR"
 	}
@@ -107,6 +110,15 @@ func (s *ProjectService) UpsertProject(workspaceRoot, displayName string) (Proje
 	}
 	s.runService.setProjectDeletionFence(root, false)
 	return project, nil
+}
+
+// ReorderProjects replaces the complete active-project order in one durable
+// mutation. Requiring the full set prevents concurrent or stale clients from
+// silently dropping a project from navigation.
+func (s *ProjectService) ReorderProjects(projectIDs []string) ([]Project, error) {
+	s.runService.lockProjectMutation()
+	defer s.runService.unlockProjectMutation()
+	return s.store.ReorderProjects(projectIDs, time.Now().UTC())
 }
 
 func (s *ProjectService) DetachProject(projectID, idempotencyKey string) (ProjectOperation, error) {

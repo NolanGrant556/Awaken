@@ -106,6 +106,7 @@ function createMockRuntimeClient(): RuntimeClient {
     deleteThread: vi.fn(async () => ({ ok: true as const })),
     listProjects: vi.fn(async () => []),
     upsertProject: vi.fn(async () => ({} as never)),
+    reorderProjects: vi.fn(async () => ({} as never)),
     detachProject: vi.fn(async () => ({} as never)),
     deleteProjectThreads: vi.fn(async () => ({} as never)),
     trashProject: vi.fn(async () => ({} as never)),

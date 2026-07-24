@@ -3,6 +3,83 @@
 .aw-project-node {
   display: grid;
   gap: 1px;
+  position: relative;
+}
+
+.aw-project-node--reorderable > .aw-project-row > .aw-project-row-main {
+  cursor: grab;
+}
+
+.aw-project-node--dragging {
+  opacity: 0.34;
+}
+
+.aw-project-node--dragging > .aw-project-row {
+  transform: scale(0.985);
+}
+
+.aw-project-node--drop-before::before,
+.aw-project-node--drop-after::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  right: 8px;
+  left: 8px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--aw-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--aw-accent) 12%, transparent);
+  pointer-events: none;
+}
+
+.aw-project-node--drop-before::before {
+  top: -2px;
+}
+
+.aw-project-node--drop-after::after {
+  bottom: -2px;
+}
+
+body.aw-project-reordering,
+body.aw-project-reordering * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+.aw-project-drag-preview {
+  position: fixed;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  max-width: min(280px, calc(100vw - 24px));
+  min-height: 38px;
+  gap: 9px;
+  padding: 0 13px;
+  border: 1px solid color-mix(in srgb, var(--aw-text-primary) 12%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--aw-surface-raised) 92%, transparent);
+  box-shadow:
+    0 12px 28px color-mix(in srgb, #000 24%, transparent),
+    0 2px 8px color-mix(in srgb, #000 16%, transparent);
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-base);
+  font-weight: var(--aw-font-weight-medium);
+  line-height: var(--aw-line-height-base);
+  pointer-events: none;
+  transform: translateY(-50%);
+  backdrop-filter: blur(14px) saturate(1.12);
+}
+
+.aw-project-drag-preview svg {
+  flex: 0 0 auto;
+  color: var(--aw-text-secondary);
+}
+
+.aw-project-drag-preview span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .aw-project-row {
@@ -17,7 +94,8 @@
   color: var(--aw-project-row-color);
   transition:
     background-color var(--aw-transition-fast),
-    color var(--aw-transition-fast);
+    color var(--aw-transition-fast),
+    transform var(--aw-transition-fast);
 }
 
 .aw-project-node--active > .aw-project-row {
@@ -111,9 +189,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
-  flex: 0 0 14px;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
   color: var(--aw-text-tertiary);
   opacity: 0;
   transform: translateX(-2px);
@@ -171,8 +249,8 @@
 .aw-project-row-menu-trigger {
   display: inline-grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   border: 0;
   border-radius: var(--aw-radius-compact);

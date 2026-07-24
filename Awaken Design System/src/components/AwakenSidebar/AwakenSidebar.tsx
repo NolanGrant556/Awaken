@@ -28,6 +28,8 @@ export type AwakenSidebarProps = {
   profileControls?: string;
   onSelectNav?: (id: string) => void;
   onSelectProject?: (id: string) => void;
+  onReorderProjects?: (ids: string[]) => void;
+  projectReorderDisabled?: boolean;
   onNewTask?: () => void;
   onExpandedChange?: (ids: string[]) => void;
   onProfileClick?: () => void;
@@ -64,17 +66,17 @@ const sectionHeadStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
-  minHeight: 24,
-  padding: "0 6px 4px",
+  minHeight: 28,
+  padding: "0 8px 4px 10px",
   color: "var(--aw-text-tertiary)",
-  fontSize: "var(--aw-font-size-xs)",
-  lineHeight: "var(--aw-line-height-xs)",
+  fontSize: "var(--aw-font-size-sm)",
+  lineHeight: "var(--aw-line-height-sm)",
   fontWeight: "var(--aw-font-weight-medium)",
 };
 
 const headCountStyle: CSSProperties = {
   color: "var(--aw-text-tertiary)",
-  fontSize: "var(--aw-font-size-xs)",
+  fontSize: "var(--aw-font-size-sm)",
 };
 
 const bottomStyle: CSSProperties = {
@@ -95,7 +97,7 @@ export function AwakenSidebar({
   profileAvatarFallback = "",
   profileAvatarSrc,
   newTaskLabel = "新建任务",
-  projectSectionLabel = "项目",
+  projectSectionLabel = "项目工作区",
   showProjectCount = true,
   projectSectionActions,
   profileSubtitle,
@@ -103,6 +105,8 @@ export function AwakenSidebar({
   profileControls,
   onSelectNav,
   onSelectProject,
+  onReorderProjects,
+  projectReorderDisabled,
   onNewTask,
   onExpandedChange,
   onProfileClick,
@@ -141,6 +145,8 @@ export function AwakenSidebar({
               defaultExpandedIds={defaultExpandedIds}
               onExpandedChange={onExpandedChange}
               onSelect={onSelectProject}
+              onReorder={onReorderProjects}
+              reorderDisabled={projectReorderDisabled}
             />
           </section>
         ) : null}

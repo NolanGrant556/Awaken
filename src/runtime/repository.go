@@ -28,6 +28,7 @@ type ProjectRepository interface {
 	OperationThreadIDs(operationID string) ([]string, error)
 
 	EnsureProjectActive(root, displayName string, now time.Time) (Project, error)
+	ReorderProjects(projectIDs []string, now time.Time) ([]Project, error)
 	CommitDetach(projectID, idempotencyKey string, now time.Time) (ProjectOperation, error)
 	CommitDeleteHistory(project Project, idempotencyKey string, now time.Time) (ProjectOperation, []string, error)
 	CommitDeleteThread(project Project, threadID, idempotencyKey string, now time.Time) (ProjectOperation, error)

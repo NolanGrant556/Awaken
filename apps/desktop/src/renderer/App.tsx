@@ -737,6 +737,24 @@ function sameWorkspaceProjects(
   );
 }
 
+export function resolveBackendProjectOrder(
+  ids: string[],
+  defaultBackendProjectId: string | undefined,
+  projects: WorkspaceProject[],
+): string[] | undefined {
+  const backendById = new Map(
+    projects.map((project) => [project.id, project.backendProjectId]),
+  );
+  const backendIds = ids.map((id) =>
+    id === DEFAULT_WORKSPACE_PROJECT_ID
+      ? defaultBackendProjectId
+      : backendById.get(id),
+  );
+  return backendIds.every((id): id is string => Boolean(id))
+    ? backendIds
+    : undefined;
+}
+
 function formatTokenCount(value?: number): string | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return undefined;
@@ -1382,6 +1400,9 @@ export function App() {
     [runtimeClient, selectedProjectId],
   );
   const [expandedProjectIds, setExpandedProjectIds] = useState<string[]>([]);
+  const [projectOrderIds, setProjectOrderIds] = useState<string[]>([]);
+  const [projectReorderSubmitting, setProjectReorderSubmitting] = useState(false);
+  const projectReorderSubmittingRef = useRef(false);
   const [removedProjectIds, setRemovedProjectIds] = useState<string[]>([]);
   const [defaultBackendProjectId, setDefaultBackendProjectId] = useState<
     string | undefined
@@ -1768,6 +1789,20 @@ export function App() {
       defaultProject && defaultProject.state !== "active"
         ? [DEFAULT_WORKSPACE_PROJECT_ID]
         : [],
+    );
+
+    const nextProjectOrderIds = projects
+      .filter((project) => project.state === "active")
+      .map((project) =>
+        isSameWorkspacePath(project.workspaceRoot, configuredDefaultWorkspacePath)
+          ? DEFAULT_WORKSPACE_PROJECT_ID
+          : project.projectId,
+      );
+    setProjectOrderIds((current) =>
+      current.length === nextProjectOrderIds.length &&
+      current.every((id, index) => id === nextProjectOrderIds[index])
+        ? current
+        : nextProjectOrderIds,
     );
 
     const nextProjects = projects
@@ -2210,7 +2245,7 @@ export function App() {
     ? undefined
     : defaultWorkspacePath;
   // Without a user-selected workspace there is no implicit default project;
-  // Projects shows a true empty state until the user opens/adds a project.
+  // 项目工作区 shows a true empty state until the user opens/adds a project.
   const hasDefaultWorkspaceProject = Boolean(
     effectiveDefaultWorkspacePath?.trim(),
   );
@@ -2670,7 +2705,7 @@ export function App() {
   const defaultProjectThreads = threadItemsForProject(
     DEFAULT_WORKSPACE_PROJECT_ID,
   );
-  const repositoryProjects: ProjectItem[] = [
+  const unorderedRepositoryProjects: ProjectItem[] = [
     ...(removedProjectIdSet.has(DEFAULT_WORKSPACE_PROJECT_ID) ||
     !hasDefaultWorkspaceProject
       ? []
@@ -2709,6 +2744,19 @@ export function App() {
           children: threads.length > 0 ? threads : undefined,
         };
       }),
+  ];
+  const repositoryProjectById = new Map(
+    unorderedRepositoryProjects.map((project) => [project.id, project]),
+  );
+  const orderedRepositoryProjectIds = new Set(projectOrderIds);
+  const repositoryProjects: ProjectItem[] = [
+    ...projectOrderIds.flatMap((id) => {
+      const project = repositoryProjectById.get(id);
+      return project ? [project] : [];
+    }),
+    ...unorderedRepositoryProjects.filter(
+      (project) => !orderedRepositoryProjectIds.has(project.id),
+    ),
   ];
   const activeProjectId = runtimeState.activeThreadId
     ? `thread:${runtimeState.activeThreadId}`
@@ -3541,6 +3589,47 @@ export function App() {
     if (projectPath) {
       workspaceTargetPathRef.current = projectPath;
       setWorkspacePath(projectPath);
+    }
+  }
+
+  async function handleReorderProjects(ids: string[]): Promise<void> {
+    if (!desktopReady || projectReorderSubmittingRef.current) return;
+    const backendIds = resolveBackendProjectOrder(
+      ids,
+      defaultBackendProjectId,
+      projectsFromWorkspace,
+    );
+    if (!backendIds) {
+      setNotice("项目顺序暂时无法保存，请刷新后重试。");
+      await refreshProjects();
+      return;
+    }
+
+    const previousOrder = projectOrderIds;
+    projectReorderSubmittingRef.current = true;
+    setProjectReorderSubmitting(true);
+    setProjectOrderIds(ids);
+    setNotice(null);
+    try {
+      const result = await runtimeClient.reorderProjects(backendIds);
+      if (!result.ok) {
+        setProjectOrderIds(previousOrder);
+        setNotice(result.message);
+        await refreshProjects();
+        return;
+      }
+      applyRuntimeProjects(result.projects);
+    } catch (error) {
+      setProjectOrderIds(previousOrder);
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "项目顺序暂时未保存，已恢复原顺序，请稍后重试。",
+      );
+      await refreshProjects();
+    } finally {
+      projectReorderSubmittingRef.current = false;
+      setProjectReorderSubmitting(false);
     }
   }
 
@@ -4416,7 +4505,7 @@ export function App() {
                 profileName="Nolan"
                 profileAvatarFallback="AW"
                 newTaskLabel="New Agent"
-                projectSectionLabel="Projects"
+                projectSectionLabel="项目工作区"
                 projectSectionActions={
                   <span className="sidebar-section-actions">
                     <SidebarSectionAction
@@ -4438,6 +4527,10 @@ export function App() {
                 showProjectCount={false}
                 onSelectNav={handleSelectNav}
                 onSelectProject={handleSelectProject}
+                onReorderProjects={(ids) => {
+                  void handleReorderProjects(ids);
+                }}
+                projectReorderDisabled={!desktopReady || projectReorderSubmitting}
                 onExpandedChange={setExpandedProjectIds}
                 onNewTask={handleNewTask}
                 onProfileClick={() => setProfilePopoverOpen(true)}

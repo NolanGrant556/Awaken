@@ -16,9 +16,9 @@
 
 ## 3. 公共 API 动作
 
-具体 method、path 与注册条件只查 09 域。项目域提供：列出项目（默认排除 removed）、upsert workspace project、detach 且保留历史和目录、逻辑删除项目历史、prepare trash-and-purge、列出未终态 trash operation、查询 operation，以及只在合法等待阶段取消 operation。
+具体 method、path 与注册条件只查 09 域。项目域提供：列出项目（默认排除 removed）、upsert workspace project、以完整active project id序列替换侧栏顺序、detach 且保留历史和目录、逻辑删除项目历史、prepare trash-and-purge、列出未终态 trash operation、查询 operation，以及只在合法等待阶段取消 operation。
 
-修改类公共请求必须带 `Idempotency-Key`。同 key/同 project/action 返回同 operation；同 key 被其他 operation 占用返回冲突。“删除会话”内部使用稳定 `thread-delete:<thread-id>`，重复请求不重复创建 job。
+创建operation的修改请求必须带 `Idempotency-Key`。同 key/同 project/action 返回同 operation；同 key 被其他 operation 占用返回冲突。“删除会话”内部使用稳定 `thread-delete:<thread-id>`，重复请求不重复创建 job。项目排序使用幂等的完整替换 `PUT`，body为 `{"project_ids":[...]}`，不创建operation，也不修改project `version/updated_at`；请求必须包含当前每个active project且每个id恰好一次。
 
 ## 4. Worker 内部动作
 
@@ -46,12 +46,13 @@
 | `IDEMPOTENCY_KEY_CONFLICT` | 409 | key 属于其他 operation |
 | `IDEMPOTENCY_KEY_REQUIRED` | 400 | 修改请求缺 key |
 | `PROJECT_PATH_INVALID` | 400 | workspace path 无效 |
+| `PROJECT_ORDER_INVALID` | 400 | 排序缺少active project、包含重复/空id或非active project |
 
 未知错误返回 `INTERNAL_ERROR`；详细错误只写带 operation id 的结构化日志，Renderer 显示稳定 notice。
 
 ## 6. FileStore transaction
 
-项目、operation、idempotency index、operation-thread cutoff 和 cleanup jobs 的 authority 是活动 generation 下的 `lifecycle/mutations.jsonl`。每个领域 commit 形成一条包含完整 post-state 的 mutation：
+项目、项目顺序、operation、idempotency index、operation-thread cutoff 和 cleanup jobs 的 authority 是活动 generation 下的 `lifecycle/mutations.jsonl`。每个领域 commit 形成一条包含完整 post-state 的 mutation；`ReorderProjects` mutation保存完整 `project_order`，新增项目排在现有顺序之前，removed项目可保留在内部顺序尾部但不进入active侧栏：
 
 ```text
 获取 store.lock
@@ -103,10 +104,11 @@ Renderer 启动无条件调用项目列表 API，并只把返回的 stable `proj
 6. cutoff 后新建 thread 不被旧 operation 误删。
 7. Renderer 不能直接调用文件删除命令。
 8. FileStore lifecycle mutation journal-first；snapshot 损坏只能重建，不能反向覆盖 journal。
+9. Renderer与localStorage不得成为项目顺序authority；拖拽只产生乐观UI，Core拒绝后必须按FileStore回滚。
 
 ## 11. 验证
 
-- `src/runtime/file_desktop_store_test.go`、`project_service_test.go`：状态、idempotency、cutoff、lease、fingerprint、crash recovery、cleanup、restart replay。
+- `src/runtime/file_desktop_store_test.go`、`project_service_test.go`：状态、项目排序完整性与restart replay、idempotency、cutoff、lease、fingerprint、crash recovery、cleanup。
 - `src/server/project_handlers_test.go`：routes、HTTP 错误、attempt 链。
 - `apps/desktop/src/main/project-trash-worker.test.ts`：claim、path replacement、invocation boundary、attempt、vanished staging。
 - `apps/desktop/src/renderer/App.test.ts`、`projectWorkspace` tests：tracker 与 reconcile。

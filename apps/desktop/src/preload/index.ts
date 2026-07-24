@@ -46,6 +46,7 @@ import {
   type RuntimeMemory,
   type RuntimeRun,
   type RuntimeProject,
+  type ProjectReorderResult,
   type RuntimeProjectOperation,
   type RuntimeSkill,
   type SkillPreviewResponse,
@@ -178,6 +179,8 @@ const bridge: AwakenBridge = {
       workspaceRoot,
       displayName,
     }) as Promise<UpsertProjectResult>,
+  reorderProjects: (projectIds: string[]) =>
+    ipcRenderer.invoke("awaken:reorder-projects", projectIds) as Promise<ProjectReorderResult>,
   detachProject: (projectId: string, idempotencyKey: string) =>
     ipcRenderer.invoke("awaken:detach-project", {
       projectId,

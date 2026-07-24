@@ -70,6 +70,7 @@ type fileLifecycleState struct {
 	OperationThreads map[string][]string         `json:"operation_threads"` // operation_id -> thread ids
 	CleanupJobs      map[string]fileCleanupJob   `json:"cleanup_jobs"`      // by job_id
 	DesktopState     map[string]string           `json:"desktop_state"`
+	ProjectOrder     []string                    `json:"project_order,omitempty"`
 }
 
 func newFileLifecycleState() *fileLifecycleState {
@@ -128,6 +129,7 @@ type fileLifecycleMutation struct {
 	SoftDeleteOpID    string              `json:"soft_delete_op_id,omitempty"`
 	PurgeSessions     []string            `json:"purge_sessions,omitempty"`
 	LastWorkspace     *string             `json:"last_workspace,omitempty"`
+	ProjectOrder      *[]string           `json:"project_order,omitempty"`
 }
 
 type fileSessionMetadata struct {
@@ -360,6 +362,9 @@ func (s *FileDesktopStore) applyMutation(state *fileLifecycleState, mutation fil
 		} else {
 			state.DesktopState["last_workspace_path"] = *mutation.LastWorkspace
 		}
+	}
+	if mutation.ProjectOrder != nil {
+		state.ProjectOrder = append([]string(nil), (*mutation.ProjectOrder)...)
 	}
 	return nil
 }
@@ -595,10 +600,12 @@ func (s *FileDesktopStore) ensureProjectLocked(root string, reactivate bool) (st
 		UpdatedAt:     now,
 		Version:       1,
 	}
+	projectOrder := append([]string{project.ProjectID}, s.orderedProjectIDsLocked()...)
 	if err := s.commitMutation(fileLifecycleMutation{
-		Kind:     "EnsureProject",
-		Now:      now,
-		Projects: []Project{project},
+		Kind:         "EnsureProject",
+		Now:          now,
+		Projects:     []Project{project},
+		ProjectOrder: &projectOrder,
 	}); err != nil {
 		return "", err
 	}
@@ -851,6 +858,10 @@ func (s *FileDesktopStore) ProjectStateForWorkspace(root string) (ProjectState, 
 func (s *FileDesktopStore) ListProjects(includeRemoved bool) ([]Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.listProjectsLocked(includeRemoved), nil
+}
+
+func (s *FileDesktopStore) listProjectsLocked(includeRemoved bool) []Project {
 	projects := make([]Project, 0, len(s.state.Projects))
 	for _, project := range s.state.Projects {
 		if !includeRemoved && project.State == ProjectStateRemoved {
@@ -858,7 +869,21 @@ func (s *FileDesktopStore) ListProjects(includeRemoved bool) ([]Project, error) 
 		}
 		projects = append(projects, project)
 	}
-	sort.Slice(projects, func(i, j int) bool {
+	orderRank := make(map[string]int, len(s.state.ProjectOrder))
+	for index, projectID := range s.state.ProjectOrder {
+		if _, exists := orderRank[projectID]; !exists {
+			orderRank[projectID] = index
+		}
+	}
+	sort.SliceStable(projects, func(i, j int) bool {
+		iRank, iOrdered := orderRank[projects[i].ProjectID]
+		jRank, jOrdered := orderRank[projects[j].ProjectID]
+		if iOrdered != jOrdered {
+			return iOrdered
+		}
+		if iOrdered && iRank != jRank {
+			return iRank < jRank
+		}
 		if !projects[i].UpdatedAt.Equal(projects[j].UpdatedAt) {
 			return projects[i].UpdatedAt.After(projects[j].UpdatedAt)
 		}
@@ -867,7 +892,16 @@ func (s *FileDesktopStore) ListProjects(includeRemoved bool) ([]Project, error) 
 		}
 		return projects[i].ProjectID < projects[j].ProjectID
 	})
-	return projects, nil
+	return projects
+}
+
+func (s *FileDesktopStore) orderedProjectIDsLocked() []string {
+	projects := s.listProjectsLocked(true)
+	ids := make([]string, 0, len(projects))
+	for _, project := range projects {
+		ids = append(ids, project.ProjectID)
+	}
+	return ids
 }
 
 func (s *FileDesktopStore) ProjectByID(projectID string) (Project, error) {
@@ -1027,6 +1061,57 @@ func (s *FileDesktopStore) EnsureProjectActive(root, displayName string, now tim
 		return Project{}, err
 	}
 	return s.state.Projects[projectID], nil
+}
+
+func (s *FileDesktopStore) ReorderProjects(projectIDs []string, now time.Time) ([]Project, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lock, err := s.lockStore()
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Release()
+
+	active := make(map[string]struct{})
+	for projectID, project := range s.state.Projects {
+		if project.State == ProjectStateActive {
+			active[projectID] = struct{}{}
+		}
+	}
+	requested := make([]string, 0, len(projectIDs))
+	seen := make(map[string]struct{}, len(projectIDs))
+	for _, rawProjectID := range projectIDs {
+		projectID := strings.TrimSpace(rawProjectID)
+		if projectID == "" {
+			return nil, ErrProjectOrderInvalid
+		}
+		if _, duplicate := seen[projectID]; duplicate {
+			return nil, ErrProjectOrderInvalid
+		}
+		if _, exists := active[projectID]; !exists {
+			return nil, ErrProjectOrderInvalid
+		}
+		seen[projectID] = struct{}{}
+		requested = append(requested, projectID)
+	}
+	if len(seen) != len(active) {
+		return nil, ErrProjectOrderInvalid
+	}
+
+	projectOrder := append([]string(nil), requested...)
+	for _, projectID := range s.orderedProjectIDsLocked() {
+		if _, isActive := active[projectID]; !isActive {
+			projectOrder = append(projectOrder, projectID)
+		}
+	}
+	if err := s.commitMutation(fileLifecycleMutation{
+		Kind:         "ReorderProjects",
+		Now:          now,
+		ProjectOrder: &projectOrder,
+	}); err != nil {
+		return nil, err
+	}
+	return s.listProjectsLocked(true), nil
 }
 
 func (s *FileDesktopStore) CommitDetach(projectID, idempotencyKey string, now time.Time) (ProjectOperation, error) {

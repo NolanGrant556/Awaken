@@ -123,9 +123,9 @@
 
 .aw-skills__folder-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(164px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(164px, 1fr));
   align-items: start;
-  justify-items: center;
+  justify-items: start;
   gap: var(--aw-space-6);
   min-width: 0;
 }

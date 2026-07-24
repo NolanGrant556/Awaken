@@ -501,9 +501,9 @@ pre {
 
 .skill-project-folder-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(164px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(164px, 1fr));
   align-items: start;
-  justify-items: center;
+  justify-items: start;
   gap: var(--aw-space-3);
   min-width: 0;
 }

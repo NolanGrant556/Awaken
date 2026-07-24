@@ -155,6 +155,7 @@ describe("ExtensionsView project Skills flow", () => {
     );
     expect(folder).not.toBeNull();
     expect(folder?.dataset.size).toBe("dense");
+    expect(folder?.getAttribute("title")).toBeNull();
     expect(document.querySelector(".skill-project-panel")).toBeNull();
 
     await act(async () => folder?.click());

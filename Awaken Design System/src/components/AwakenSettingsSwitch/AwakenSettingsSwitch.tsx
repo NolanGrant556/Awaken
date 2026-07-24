@@ -22,7 +22,9 @@ export function AwakenSettingsSwitch({
   variant = "inline",
   onCheckedChange,
 }: AwakenSettingsSwitchProps) {
-  const unavailable = disabled || busy || !onCheckedChange;
+  // busy 必须阻止重复操作，但它是瞬时态：外层行不跟着变灰或换光标，避免保存时闪烁。
+  const permanentlyUnavailable = disabled || !onCheckedChange;
+  const unavailable = permanentlyUnavailable || busy;
   const control = <AwakenSwitch checked={checked} label={ariaLabel ?? label} busy={busy} disabled={unavailable} size="compact" onCheckedChange={onCheckedChange} />;
 
   if (variant === "control") return control;
@@ -32,7 +34,7 @@ export function AwakenSettingsSwitch({
       className={[
         "aw-settings-switch",
         `aw-settings-switch--${variant}`,
-        unavailable ? "aw-settings-switch--disabled" : "",
+        permanentlyUnavailable ? "aw-settings-switch--disabled" : "",
       ].filter(Boolean).join(" ")}
     >
       <span className="aw-settings-switch__copy">

@@ -38,7 +38,8 @@
   color: var(--aw-text-primary);
   box-shadow: var(--aw-shadow-raised);
 }
-.theme-choice:disabled { cursor: progress; opacity: 0.72; }
+/* disabled 只在保存主题期间为真；见 AwakenSwitch.css，忙碌态不换光标。 */
+.theme-choice:disabled { cursor: pointer; opacity: 0.72; }
 
 @media (max-width: 820px) {
   .theme-choice-group { width: 100%; grid-template-columns: 1fr; }

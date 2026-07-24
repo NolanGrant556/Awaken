@@ -25,6 +25,12 @@
   animation: panel-in var(--aw-transition-normal);
 }
 
+/* tabIndex={-1} 只为承接程序化焦点，不是键盘可达目标；Chromium 在脚本 focus 且上一次
+   输入来自键盘时会让它命中 :focus-visible，被全局规则画上整块面板的焦点环。 */
+.aw-dialog:focus-visible {
+  outline: none;
+}
+
 .aw-dialog--large {
   width: min(1100px, calc(100vw - 64px));
   max-height: min(860px, calc(100vh - 48px));

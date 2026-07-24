@@ -37,7 +37,8 @@ export function AwakenButton({
     fontWeight: "var(--aw-font-weight-semibold)",
     lineHeight: "var(--aw-line-height-base)",
     whiteSpace: "nowrap",
-    cursor: disabled || loading ? "not-allowed" : "pointer",
+    // loading 是瞬时态，切换光标会在点击瞬间闪一下系统禁止图标；只有真正不可用才换。
+    cursor: disabled && !loading ? "not-allowed" : "pointer",
     opacity: disabled || loading ? 0.45 : 1,
     transition: "background-color var(--aw-transition-fast), color var(--aw-transition-fast), border-color var(--aw-transition-fast), opacity var(--aw-transition-fast)",
   };

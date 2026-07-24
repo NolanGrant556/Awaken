@@ -63,8 +63,10 @@
   opacity: 0.45;
 }
 
+/* busy 只持续一次 IPC 往返。macOS 会把 wait/progress 画成指针处的系统忙碌转盘，
+   换光标（含回退到 :disabled 的 not-allowed）都会在点击瞬间闪一下，所以保持 pointer 不变。 */
 .aw-switch[data-busy="true"]:disabled {
-  cursor: wait;
+  cursor: pointer;
   opacity: 1;
 }
 

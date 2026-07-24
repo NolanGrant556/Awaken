@@ -54,9 +54,10 @@
   box-shadow: var(--aw-shadow-focus);
 }
 
+/* 这里的 disabled 只来自 item.busy，是一次异步操作的瞬时态，因此不切换光标。 */
 .aw-connector-card__main:disabled,
 .aw-connector-card__action:disabled {
-  cursor: not-allowed;
+  cursor: pointer;
   opacity: 0.44;
 }
 

@@ -167,6 +167,8 @@ src/components/AwakenComponentName/
 - 组件 props 或视觉状态变化时，必须同步更新可观测 states。
 - 新的独立组件或组件族 demo 必须注册到 `gallery/registry.ts`；组件族内部小组件可以只在对应组件族 demo 中集中展示。
 - 组件目录 `index.ts` 不得导出 `*.demo.tsx`；新增 Demo 时同时加入 `gallery/demos.ts`，防止 Demo JavaScript 和 Demo CSS 进入 Desktop renderer。
+- 瞬时忙碌态（`busy`、`loading`、保存中）不得切换鼠标光标。macOS 把 `wait` / `progress` 画成指针处的系统忙碌转盘，`not-allowed` / `default` 也会在点击瞬间闪一下；只有长期不可用状态才使用 `not-allowed`。忙碌态同样不改变颜色和透明度。
+- 仅为承接程序化焦点而存在的 `tabIndex={-1}` 容器必须自行关闭 `:focus-visible` 焦点环。Chromium 在脚本 `focus()` 且上一次输入来自键盘时会让这类容器命中 `:focus-visible`，被 `tokens/components.css` 的全局规则画上整块面板的 outline。`tabIndex={0}` 的键盘可达区域必须保留可见焦点样式。
 - 官方方形产品标志只能通过 `AwakenProductLogo` 使用；Desktop 和其他 consumer 不保留或注入第二份方形 Awaken 图标。
 - Desktop 应优先通过 `@awaken/design-system` 包出口使用组件，不要从 `Awaken Design System/src/...` 做源码路径 import。
 - 独立组件必须能通过自己的 `#/components/<component-id>` URL 打开；归属于组件族的小组件必须在组件族 URL 中可查看和交互。

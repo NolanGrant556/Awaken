@@ -5,6 +5,7 @@ import {
   AwakenProjectTree,
   AwakenUserPromptBlock,
   pastedImageFilesFromClipboardData,
+  reorderProjectIds,
   shouldSubmitComposerInputKey,
   shouldActivateComposerMetaItemKey,
   slashPaletteStyleForAnchor,
@@ -22,6 +23,7 @@ import {
   promptTextAfterTokenLeadingText,
   promptTokenViews,
   reconcileComposerStructuredInput,
+  resolveBackendProjectOrder,
   resolveWorkspaceRootForRun,
   selectedUserQuestionLabels,
   shouldResetActiveThreadForWorkspaceChange,
@@ -113,6 +115,7 @@ function stubElectronBridge(): void {
       deleteThread: vi.fn(async () => ({ ok: true as const })),
       listProjects: vi.fn(async () => []),
       upsertProject: vi.fn(),
+      reorderProjects: vi.fn(),
       detachProject: vi.fn(),
       deleteProjectThreads: vi.fn(),
       trashProject: vi.fn(),
@@ -296,6 +299,39 @@ describe("shouldResetActiveThreadForWorkspaceChange", () => {
         "/tmp/project-b",
       ),
     ).toBe(true);
+  });
+});
+
+describe("project ordering", () => {
+  it("moves only the dragged top-level project around the target", () => {
+    expect(
+      reorderProjectIds(["a", "b", "c", "d"], "a", "c", "after"),
+    ).toEqual(["b", "c", "a", "d"]);
+    expect(
+      reorderProjectIds(["a", "b", "c", "d"], "d", "b", "before"),
+    ).toEqual(["a", "d", "b", "c"]);
+  });
+
+  it("keeps the order stable for an invalid or self target", () => {
+    const ids = ["a", "b", "c"];
+    expect(reorderProjectIds(ids, "b", "b", "after")).toBe(ids);
+    expect(reorderProjectIds(ids, "missing", "b", "before")).toBe(ids);
+  });
+
+  it("maps the renderer default project id to its durable backend id", () => {
+    expect(
+      resolveBackendProjectOrder(
+        ["project-b", DEFAULT_WORKSPACE_PROJECT_ID, "project-a"],
+        "backend-default",
+        [
+          { id: "project-a", backendProjectId: "backend-a", label: "A", path: "/a" },
+          { id: "project-b", backendProjectId: "backend-b", label: "B", path: "/b" },
+        ],
+      ),
+    ).toEqual(["backend-b", "backend-default", "backend-a"]);
+    expect(
+      resolveBackendProjectOrder([DEFAULT_WORKSPACE_PROJECT_ID], undefined, []),
+    ).toBeUndefined();
   });
 });
 

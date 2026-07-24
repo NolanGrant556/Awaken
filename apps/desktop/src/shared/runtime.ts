@@ -307,6 +307,10 @@ export type UpsertProjectResult =
   | { ok: true; project: RuntimeProject }
   | { ok: false; code: string; message: string };
 
+export type ProjectReorderResult =
+  | { ok: true; projects: RuntimeProject[] }
+  | { ok: false; code: string; message: string };
+
 export type ThreadDeleteResult =
   | { ok: true }
   | { ok: false; code: string; message: string };
@@ -1113,6 +1117,7 @@ export type AwakenBridge = {
   deleteThread: (threadId: string) => Promise<ThreadDeleteResult>;
   listProjects: (includeRemoved?: boolean) => Promise<RuntimeProject[]>;
   upsertProject: (workspaceRoot: string, displayName?: string) => Promise<UpsertProjectResult>;
+  reorderProjects: (projectIds: string[]) => Promise<ProjectReorderResult>;
   detachProject: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;
   deleteProjectThreads: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;
   trashProject: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;

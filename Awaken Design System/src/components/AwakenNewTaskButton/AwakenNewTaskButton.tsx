@@ -10,14 +10,14 @@ const buttonStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
-  height: 32,
-  padding: "0 10px",
+  height: 40,
+  padding: "0 12px",
   border: "1px solid var(--aw-button-black)",
   borderRadius: "var(--aw-radius-sm)",
   background: "var(--aw-button-black)",
   color: "var(--aw-text-onblack)",
-  fontSize: "var(--aw-font-size-base)",
-  lineHeight: "var(--aw-line-height-base)",
+  fontSize: "var(--aw-font-size-lg)",
+  lineHeight: "var(--aw-line-height-lg)",
   fontWeight: "var(--aw-font-weight-semibold)",
   textAlign: "left",
   cursor: "pointer",
@@ -26,7 +26,7 @@ const buttonStyle: CSSProperties = {
 
 const leftStyle: CSSProperties = {
   display: "inline-flex",
-  gap: 9,
+  gap: 10,
   alignItems: "center",
   minWidth: 0,
 };
@@ -74,7 +74,7 @@ export function AwakenNewTaskButton({
       {...props}
     >
       <span style={leftStyle}>
-        <Plus size={16} strokeWidth={1.85} aria-hidden="true" />
+        <Plus size={20} strokeWidth={1.9} aria-hidden="true" />
         <span>{children}</span>
       </span>
     </button>

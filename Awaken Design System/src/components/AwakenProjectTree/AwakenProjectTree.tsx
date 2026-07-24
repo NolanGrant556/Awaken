@@ -1,5 +1,14 @@
 import "./AwakenProjectTree.css";
-import { useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
+import { createPortal } from "react-dom";
 import { ChevronRight, Folder, FolderOpen, MoreHorizontal } from "lucide-react";
 import type { ProjectItem } from "../../types";
 import { AwakenDropdown } from "../AwakenDropdown";
@@ -12,7 +21,45 @@ export type AwakenProjectTreeProps = {
   defaultExpandedIds?: string[];
   onExpandedChange?: (ids: string[]) => void;
   onSelect?: (id: string) => void;
+  onReorder?: (ids: string[]) => void;
+  reorderDisabled?: boolean;
 };
+
+type DropPosition = "before" | "after";
+
+type DropTarget = {
+  id: string;
+  position: DropPosition;
+};
+
+type PointerSession = {
+  pointerId: number;
+  sourceId: string;
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
+  active: boolean;
+  activationTimer?: number;
+};
+
+const REORDER_HOLD_DELAY_MS = 160;
+const REORDER_MOVE_THRESHOLD_PX = 6;
+
+export function reorderProjectIds(
+  ids: string[],
+  sourceId: string,
+  targetId: string,
+  position: DropPosition,
+): string[] {
+  if (sourceId === targetId || !ids.includes(sourceId) || !ids.includes(targetId)) {
+    return ids;
+  }
+  const next = ids.filter((id) => id !== sourceId);
+  const targetIndex = next.indexOf(targetId);
+  next.splice(position === "after" ? targetIndex + 1 : targetIndex, 0, sourceId);
+  return next;
+}
 
 const listStyle: CSSProperties = {
   display: "grid",
@@ -33,10 +80,25 @@ export function AwakenProjectTree({
   defaultExpandedIds = [],
   onExpandedChange,
   onSelect,
+  onReorder,
+  reorderDisabled = false,
 }: AwakenProjectTreeProps) {
   const [internalExpanded, setInternalExpanded] = useState<string[]>(defaultExpandedIds);
+  const [dragSourceId, setDragSourceId] = useState<string>();
+  const [dragPoint, setDragPoint] = useState<{ x: number; y: number }>();
+  const [dropTarget, setDropTarget] = useState<DropTarget>();
+  const pointerSessionRef = useRef<PointerSession | undefined>(undefined);
+  const dropTargetRef = useRef<DropTarget | undefined>(undefined);
+  const suppressClickRef = useRef<string | undefined>(undefined);
+  const itemsRef = useRef(items);
+  const onReorderRef = useRef(onReorder);
+  const reorderDisabledRef = useRef(reorderDisabled);
   const isControlled = expandedIds !== undefined;
   const expanded = isControlled ? expandedIds : internalExpanded;
+
+  itemsRef.current = items;
+  onReorderRef.current = onReorder;
+  reorderDisabledRef.current = reorderDisabled;
 
   const setExpanded = (next: string[]) => {
     if (!isControlled) setInternalExpanded(next);
@@ -47,6 +109,155 @@ export function AwakenProjectTree({
     setExpanded(
       expanded.includes(id) ? expanded.filter((x) => x !== id) : [...expanded, id],
     );
+  };
+
+  const resetPointerSession = useCallback(() => {
+    const session = pointerSessionRef.current;
+    if (session?.activationTimer !== undefined) {
+      window.clearTimeout(session.activationTimer);
+    }
+    pointerSessionRef.current = undefined;
+    document.body.classList.remove("aw-project-reordering");
+    setDragSourceId(undefined);
+    setDragPoint(undefined);
+    dropTargetRef.current = undefined;
+    setDropTarget(undefined);
+  }, []);
+
+  const activatePointerSession = useCallback(() => {
+    const session = pointerSessionRef.current;
+    if (!session || session.active || reorderDisabledRef.current) return;
+    session.active = true;
+    suppressClickRef.current = session.sourceId;
+    document.body.classList.add("aw-project-reordering");
+    setDragSourceId(session.sourceId);
+    setDragPoint({ x: session.currentX, y: session.currentY });
+  }, []);
+
+  useEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => {
+      const session = pointerSessionRef.current;
+      if (!session || session.pointerId !== event.pointerId) return;
+      const distance = Math.hypot(
+        event.clientX - session.startX,
+        event.clientY - session.startY,
+      );
+      session.currentX = event.clientX;
+      session.currentY = event.clientY;
+      if (!session.active && distance >= REORDER_MOVE_THRESHOLD_PX) {
+        activatePointerSession();
+      }
+      if (!session.active) return;
+      event.preventDefault();
+      setDragPoint({ x: event.clientX, y: event.clientY });
+      const row = document
+        .elementFromPoint(event.clientX, event.clientY)
+        ?.closest<HTMLElement>(".aw-project-row[data-aw-project-id]");
+      const targetId = row?.dataset.awProjectId;
+      if (!row || !targetId || targetId === session.sourceId) {
+        dropTargetRef.current = undefined;
+        setDropTarget(undefined);
+        return;
+      }
+      const bounds = row.getBoundingClientRect();
+      const nextTarget: DropTarget = {
+        id: targetId,
+        position: event.clientY < bounds.top + bounds.height / 2 ? "before" : "after",
+      };
+      dropTargetRef.current = nextTarget;
+      setDropTarget(nextTarget);
+    };
+
+    const finishPointerSession = (event: PointerEvent) => {
+      const session = pointerSessionRef.current;
+      if (!session || session.pointerId !== event.pointerId) return;
+      if (session.active) {
+        event.preventDefault();
+        const target = dropTargetRef.current;
+        if (target) {
+          const ids = itemsRef.current.map((item) => item.id);
+          const next = reorderProjectIds(ids, session.sourceId, target.id, target.position);
+          if (next.some((id, index) => id !== ids[index])) {
+            onReorderRef.current?.(next);
+          }
+        }
+        window.setTimeout(() => {
+          if (suppressClickRef.current === session.sourceId) {
+            suppressClickRef.current = undefined;
+          }
+        }, 0);
+      }
+      resetPointerSession();
+    };
+
+    const cancelPointerSession = (event: PointerEvent) => {
+      const session = pointerSessionRef.current;
+      if (!session || session.pointerId !== event.pointerId) return;
+      suppressClickRef.current = undefined;
+      resetPointerSession();
+    };
+
+    window.addEventListener("pointermove", handlePointerMove, { passive: false });
+    window.addEventListener("pointerup", finishPointerSession);
+    window.addEventListener("pointercancel", cancelPointerSession);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", finishPointerSession);
+      window.removeEventListener("pointercancel", cancelPointerSession);
+      resetPointerSession();
+    };
+  }, [activatePointerSession, resetPointerSession]);
+
+  const beginPointerSession = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    item: ProjectItem,
+  ) => {
+    if (
+      event.button !== 0 ||
+      item.disabled ||
+      reorderDisabled ||
+      !onReorder ||
+      items.length < 2
+    ) {
+      return;
+    }
+    const session: PointerSession = {
+      pointerId: event.pointerId,
+      sourceId: item.id,
+      startX: event.clientX,
+      startY: event.clientY,
+      currentX: event.clientX,
+      currentY: event.clientY,
+      active: false,
+    };
+    session.activationTimer = window.setTimeout(
+      activatePointerSession,
+      REORDER_HOLD_DELAY_MS,
+    );
+    pointerSessionRef.current = session;
+  };
+
+  const consumeSuppressedClick = (id: string): boolean => {
+    if (suppressClickRef.current !== id) return false;
+    suppressClickRef.current = undefined;
+    return true;
+  };
+
+  const handleReorderKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    id: string,
+  ) => {
+    if (!event.altKey || reorderDisabled || !onReorder) return;
+    const direction = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;
+    if (direction === 0) return;
+    const ids = items.map((item) => item.id);
+    const index = ids.indexOf(id);
+    const targetIndex = index + direction;
+    if (index < 0 || targetIndex < 0 || targetIndex >= ids.length) return;
+    event.preventDefault();
+    const next = [...ids];
+    [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+    onReorder(next);
   };
 
   if (!items || items.length === 0) {
@@ -64,8 +275,29 @@ export function AwakenProjectTree({
           expanded={expanded}
           onToggle={toggle}
           onSelect={onSelect}
+          reorderable={Boolean(onReorder) && !reorderDisabled && items.length > 1}
+          dragSourceId={dragSourceId}
+          dropTarget={dropTarget}
+          onPointerDown={beginPointerSession}
+          onReorderKeyDown={handleReorderKeyDown}
+          consumeSuppressedClick={consumeSuppressedClick}
         />
       ))}
+      {dragSourceId && dragPoint && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="aw-project-drag-preview"
+              style={{ left: dragPoint.x + 12, top: dragPoint.y + 10 }}
+              aria-hidden="true"
+            >
+              <Folder size={19} strokeWidth={1.75} />
+              <span>
+                {items.find((item) => item.id === dragSourceId)?.label ?? dragSourceId}
+              </span>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
@@ -77,9 +309,28 @@ type NodeProps = {
   expanded: string[];
   onToggle: (id: string) => void;
   onSelect?: (id: string) => void;
+  reorderable?: boolean;
+  dragSourceId?: string;
+  dropTarget?: DropTarget;
+  onPointerDown?: (event: ReactPointerEvent<HTMLButtonElement>, item: ProjectItem) => void;
+  onReorderKeyDown?: (event: KeyboardEvent<HTMLButtonElement>, id: string) => void;
+  consumeSuppressedClick?: (id: string) => boolean;
 };
 
-function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: NodeProps) {
+function ProjectNode({
+  item,
+  depth,
+  activeId,
+  expanded,
+  onToggle,
+  onSelect,
+  reorderable = false,
+  dragSourceId,
+  dropTarget,
+  onPointerDown,
+  onReorderKeyDown,
+  consumeSuppressedClick,
+}: NodeProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const childItems = item.children ?? [];
   const hasChildren = childItems.length > 0;
@@ -92,12 +343,17 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
   const isExpandable = isProject || hasChildren;
   const showTimeLabel = !isProject && item.timeLabel;
   const showInlineChevron = isExpandable;
+  const isTopLevel = depth === 0;
+  const isDragging = isTopLevel && dragSourceId === item.id;
+  const dropPosition = isTopLevel && dropTarget?.id === item.id
+    ? dropTarget.position
+    : undefined;
 
-  const rowHeight = depth === 0 ? 32 : 28;
+  const rowHeight = depth === 0 ? 36 : 32;
   const fontSize =
-    depth === 0 ? "var(--aw-font-size-sm)" : "var(--aw-font-size-xs)";
+    depth === 0 ? "var(--aw-font-size-base)" : "var(--aw-font-size-sm)";
   const lineHeight =
-    depth === 0 ? "var(--aw-line-height-sm)" : "var(--aw-line-height-xs)";
+    depth === 0 ? "var(--aw-line-height-base)" : "var(--aw-line-height-sm)";
   const idleColor =
     depth === 0 ? "var(--aw-text-secondary)" : "var(--aw-text-tertiary)";
   const baseColor = isActive ? "var(--aw-text-primary)" : idleColor;
@@ -110,6 +366,9 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
     isActive ? "aw-project-node--active" : "",
     isDisabled ? "aw-project-node--disabled" : "",
     menuOpen ? "aw-project-node--menu-open" : "",
+    reorderable && isTopLevel ? "aw-project-node--reorderable" : "",
+    isDragging ? "aw-project-node--dragging" : "",
+    dropPosition ? `aw-project-node--drop-${dropPosition}` : "",
   ].filter(Boolean).join(" ");
 
   const rowStyle = {
@@ -122,12 +381,16 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
   const rowButtonStyle: CSSProperties = {
     fontSize,
     lineHeight,
+    fontWeight: isProject
+      ? "var(--aw-font-weight-medium)"
+      : "var(--aw-font-weight-regular)",
     cursor: isDisabled ? "not-allowed" : "pointer",
     opacity: isDisabled ? 0.6 : 1,
   };
 
   const handleClick = () => {
     if (isDisabled) return;
+    if (consumeSuppressedClick?.(item.id)) return;
     if (isExpandable) {
       onToggle(item.id);
     }
@@ -142,23 +405,31 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
 
   return (
     <div className={nodeClassName}>
-      <div className="aw-project-row" style={rowStyle}>
+      <div
+        className="aw-project-row"
+        style={rowStyle}
+        data-aw-project-id={isTopLevel ? item.id : undefined}
+      >
         <button
           type="button"
           className="aw-project-row-main"
           disabled={isDisabled}
           onClick={handleClick}
+          onPointerDown={isTopLevel ? (event) => onPointerDown?.(event, item) : undefined}
+          onKeyDown={isTopLevel ? (event) => onReorderKeyDown?.(event, item.id) : undefined}
           title={item.path ?? item.label}
           aria-current={isActive ? "true" : undefined}
           aria-expanded={isExpandable ? isExpanded : undefined}
+          aria-grabbed={isDragging || undefined}
+          aria-keyshortcuts={reorderable && isTopLevel ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
           style={rowButtonStyle}
         >
           <span className="aw-project-row-icon">
             {isProject ? (
               isExpanded ? (
-                <FolderOpen size={18} strokeWidth={1.5} aria-hidden="true" />
+                <FolderOpen size={20} strokeWidth={1.75} aria-hidden="true" />
               ) : (
-                <Folder size={18} strokeWidth={1.5} aria-hidden="true" />
+                <Folder size={20} strokeWidth={1.75} aria-hidden="true" />
               )
             ) : null}
           </span>
@@ -166,7 +437,7 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
             <span className="aw-project-row-label">{item.label}</span>
             {showInlineChevron ? (
               <span className="aw-project-inline-chevron" aria-hidden="true">
-                <ChevronRight size={14} strokeWidth={1.85} aria-hidden="true" />
+                <ChevronRight size={16} strokeWidth={1.85} aria-hidden="true" />
               </span>
             ) : null}
           </span>
@@ -190,7 +461,7 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
                     title={`${item.label} 更多操作`}
                     disabled={isDisabled}
                   >
-                    <MoreHorizontal size={14} strokeWidth={1.9} />
+                    <MoreHorizontal size={16} strokeWidth={1.9} />
                   </button>
                 }
               >
@@ -232,6 +503,9 @@ function ProjectNode({ item, depth, activeId, expanded, onToggle, onSelect }: No
               expanded={expanded}
               onToggle={onToggle}
               onSelect={onSelect}
+              dragSourceId={dragSourceId}
+              dropTarget={dropTarget}
+              consumeSuppressedClick={consumeSuppressedClick}
             />
           )) : (
             <div className="aw-project-empty-children">暂无会话</div>

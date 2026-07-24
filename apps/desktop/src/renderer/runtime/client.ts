@@ -36,6 +36,7 @@ import {
   type MemorySettingsDocument,
   type MemorySettingsPatch,
   type ProjectMutationResult,
+  type ProjectReorderResult,
   type RuntimeConnector,
   type RuntimeConnectorActionResponse,
   type RuntimeInfo,
@@ -194,6 +195,7 @@ export type RuntimeClient = {
   deleteThread: (threadId: string) => Promise<ThreadDeleteResult>;
   listProjects: (includeRemoved?: boolean) => Promise<RuntimeProject[]>;
   upsertProject: (workspaceRoot: string, displayName?: string) => Promise<UpsertProjectResult>;
+  reorderProjects: (projectIds: string[]) => Promise<ProjectReorderResult>;
   detachProject: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;
   deleteProjectThreads: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;
   trashProject: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;
@@ -336,6 +338,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     listProjects: (includeRemoved) => bridge.listProjects(includeRemoved),
     upsertProject: (workspaceRoot, displayName) =>
       bridge.upsertProject(workspaceRoot, displayName),
+    reorderProjects: (projectIds) => bridge.reorderProjects(projectIds),
     detachProject: (projectId, idempotencyKey) =>
       bridge.detachProject(projectId, idempotencyKey),
     deleteProjectThreads: (projectId, idempotencyKey) =>

@@ -375,6 +375,74 @@ func TestFileStoreDetachKeepsHistoryAndReAddReusesProjectID(t *testing.T) {
 	}
 }
 
+func TestFileStoreProjectOrderPersistsAcrossRestart(t *testing.T) {
+	root := setFileStoreTestRoots(t)
+	store, err := newFileDesktopStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 7, 24, 9, 0, 0, 0, time.UTC)
+	first, err := store.EnsureProjectActive(t.TempDir(), "first", base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.EnsureProjectActive(t.TempDir(), "second", base.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, err := store.EnsureProjectActive(t.TempDir(), "third", base.Add(2*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wanted := []string{first.ProjectID, third.ProjectID, second.ProjectID}
+	projects, err := store.ReorderProjects(wanted, base.Add(3*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := projectIDs(projects); strings.Join(got, ",") != strings.Join(wanted, ",") {
+		t.Fatalf("unexpected project order: got %v want %v", got, wanted)
+	}
+	if _, err := store.ReorderProjects([]string{first.ProjectID, second.ProjectID}, base.Add(4*time.Minute)); !errors.Is(err, ErrProjectOrderInvalid) {
+		t.Fatalf("incomplete project order must fail, got %v", err)
+	}
+	if _, err := store.ReorderProjects([]string{first.ProjectID, first.ProjectID, second.ProjectID}, base.Add(4*time.Minute)); !errors.Is(err, ErrProjectOrderInvalid) {
+		t.Fatalf("duplicate project order must fail, got %v", err)
+	}
+
+	reopened, err := newFileDesktopStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartedProjects, err := reopened.ListProjects(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := projectIDs(restartedProjects); strings.Join(got, ",") != strings.Join(wanted, ",") {
+		t.Fatalf("project order did not survive restart: got %v want %v", got, wanted)
+	}
+
+	newest, err := reopened.EnsureProjectActive(t.TempDir(), "newest", base.Add(5*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	withNewest, err := reopened.ListProjects(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := projectIDs(withNewest); len(got) != 4 || got[0] != newest.ProjectID || strings.Join(got[1:], ",") != strings.Join(wanted, ",") {
+		t.Fatalf("new project must prepend without disturbing saved order: got %v", got)
+	}
+}
+
+func projectIDs(projects []Project) []string {
+	ids := make([]string, 0, len(projects))
+	for _, project := range projects {
+		ids = append(ids, project.ProjectID)
+	}
+	return ids
+}
+
 func TestFileStoreDeleteHistorySoftDeletesAndCleanupPurges(t *testing.T) {
 	setFileStoreTestRoots(t)
 	workspaceRoot := t.TempDir()

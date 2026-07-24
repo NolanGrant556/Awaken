@@ -65,6 +65,7 @@ import {
   type ModelProviderWire,
   type PickedAttachmentFile,
   type ProjectMutationResult,
+  type ProjectReorderResult,
   type RuntimeConnector,
   type RuntimeConnectorActionResponse,
   type RuntimeInfoWire,
@@ -1802,6 +1803,35 @@ ipcMain.handle(
         error: error instanceof Error ? error.message : String(error),
       });
       return { ok: false, code, message: upsertProjectFailureMessage(error) };
+    }
+  },
+);
+
+ipcMain.handle(
+  "awaken:reorder-projects",
+  async (_event, projectIds: string[]): Promise<ProjectReorderResult> => {
+    try {
+      const projects = await requestRuntimeDomain<RuntimeProjectWire[]>(
+        "/v1/projects/order",
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ project_ids: projectIds }),
+        },
+      );
+      return { ok: true, projects: projects.map(normalizeRuntimeProject) };
+    } catch (error) {
+      const code = error instanceof RuntimeDomainError ? error.code : "INTERNAL_ERROR";
+      console.error("reorder_projects_failed", {
+        projectIds,
+        code,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return {
+        ok: false,
+        code,
+        message: "项目顺序暂时未保存，已恢复原顺序，请稍后重试。",
+      };
     }
   },
 );

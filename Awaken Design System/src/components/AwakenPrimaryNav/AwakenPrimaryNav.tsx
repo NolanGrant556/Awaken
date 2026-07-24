@@ -10,7 +10,7 @@ export type AwakenPrimaryNavProps = {
 
 const navStyle: CSSProperties = {
   display: "grid",
-  gap: 3,
+  gap: 4,
   padding: "0 14px 10px",
 };
 
@@ -19,15 +19,15 @@ const rowBase: CSSProperties = {
   gridTemplateColumns: "20px minmax(0, 1fr) auto",
   alignItems: "center",
   width: "100%",
-  height: 32,
-  gap: 9,
-  padding: "0 10px",
+  height: 38,
+  gap: 10,
+  padding: "0 12px",
   border: 0,
   borderRadius: "var(--aw-radius-sm)",
   background: "transparent",
   color: "var(--aw-text-secondary)",
-  fontSize: "var(--aw-font-size-base)",
-  lineHeight: "var(--aw-line-height-base)",
+  fontSize: "var(--aw-font-size-lg)",
+  lineHeight: "var(--aw-line-height-lg)",
   fontWeight: "var(--aw-font-weight-semibold)",
   textAlign: "left",
   cursor: "pointer",

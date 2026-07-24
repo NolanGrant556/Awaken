@@ -42,6 +42,7 @@ POST   /v1/shutdown
 ```text
 GET    /v1/projects
 POST   /v1/projects
+PUT    /v1/projects/order
 DELETE /v1/projects/{project_id}
 DELETE /v1/projects/{project_id}/threads
 POST   /v1/projects/{project_id}/trash

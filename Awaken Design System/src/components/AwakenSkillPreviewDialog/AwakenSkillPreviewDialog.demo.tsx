@@ -7,6 +7,7 @@ type PreviewMode = "content" | "loading" | "error";
 
 export function AwakenSkillPreviewDialogDemo() {
   const [mode, setMode] = useState<PreviewMode | null>(null);
+  const [enabled, setEnabled] = useState(true);
 
   return (
     <section className="ads-component-demo" aria-label="Skill 预览窗口 AwakenSkillPreviewDialog 组件演示">
@@ -35,6 +36,15 @@ export function AwakenSkillPreviewDialogDemo() {
         markdown={mode === "content" ? AwakenSkillPreviewDialogState.markdown : undefined}
         loading={mode === "loading"}
         errorMessage={mode === "error" ? "Skill 文件已移动或当前没有读取权限。" : null}
+        skill={{
+          name: "品牌内容审查",
+          sourceLabel: "项目",
+          description: "审查公众号、海报、落地页和短视频文案是否符合品牌规范。",
+          enabled,
+        }}
+        deletable
+        onEnabledChange={setEnabled}
+        onDelete={() => setMode(null)}
         onOpenChange={(open) => {
           if (!open) {
             setMode(null);

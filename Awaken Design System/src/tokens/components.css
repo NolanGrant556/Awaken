@@ -259,6 +259,7 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
   flex: 0 0 auto;
   width: 22px;
   height: 22px;
+  padding: 0;
   border: 0;
   border-radius: var(--aw-radius-compact);
   background: transparent;

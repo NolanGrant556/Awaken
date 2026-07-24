@@ -6,6 +6,12 @@
   max-height: min(640px, calc(100vh - 64px));
 }
 
+.aw-dialog.aw-project-skills-dialog--preview {
+  width: min(820px, calc(100vw - 80px));
+  min-height: min(720px, calc(100vh - 48px));
+  max-height: min(720px, calc(100vh - 48px));
+}
+
 .aw-project-skills-dialog__content {
   display: grid;
   gap: var(--aw-space-7);
@@ -65,5 +71,10 @@
     width: calc(100vw - 24px);
     min-height: min(640px, calc(100vh - 24px));
     max-height: min(640px, calc(100vh - 24px));
+  }
+
+  .aw-dialog.aw-project-skills-dialog--preview {
+    min-height: min(720px, calc(100vh - 24px));
+    max-height: min(720px, calc(100vh - 24px));
   }
 }

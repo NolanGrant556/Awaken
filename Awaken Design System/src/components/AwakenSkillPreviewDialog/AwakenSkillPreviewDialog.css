@@ -1,22 +1,109 @@
 @import "../../tokens/components.css";
 
 .aw-dialog.aw-skill-preview {
-  width: min(920px, calc(100vw - 80px));
-  max-height: min(720px, calc(100vh - 80px));
+  width: min(820px, calc(100vw - 80px));
+  min-height: min(720px, calc(100vh - 48px));
+  max-height: min(720px, calc(100vh - 48px));
 }
 
-.aw-skill-preview .aw-dialog__head {
+.aw-skill-preview .aw-dialog__head,
+.aw-project-skills-dialog--preview .aw-dialog__head {
   justify-content: flex-end;
   padding: var(--aw-space-5) var(--aw-space-6) var(--aw-space-3);
 }
 
-.aw-skill-preview__scroll {
-  padding: 0 var(--aw-space-9) var(--aw-space-9);
-  scroll-behavior: auto;
+.aw-skill-preview__body {
+  min-height: 0;
+  overflow: hidden;
+  padding: 0 var(--aw-space-9) var(--aw-space-6);
 }
 
-.aw-skill-preview__scroll:focus-visible {
+.aw-skill-preview-surface {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--aw-space-6);
+  width: min(100%, 920px);
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  margin: 0 auto;
+}
+
+.aw-skill-preview-summary {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--aw-space-5);
+  min-width: 0;
+}
+
+.aw-skill-preview-summary__icon {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-raised);
+  color: var(--aw-text-secondary);
+}
+
+.aw-skill-preview-summary__copy {
+  display: grid;
+  gap: var(--aw-space-2);
+  min-width: 0;
+}
+
+.aw-skill-preview-summary__title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--aw-space-3);
+  min-width: 0;
+}
+
+.aw-skill-preview-summary__title strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-xl);
+  line-height: var(--aw-line-height-xl);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-skill-preview-summary__title span {
+  flex: 0 0 auto;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+}
+
+.aw-skill-preview-summary__copy p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-base);
+  line-height: var(--aw-line-height-base);
+}
+
+.aw-skill-preview-document {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-panel);
+  scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 38%, transparent) transparent;
+  scrollbar-width: thin;
+}
+
+.aw-skill-preview-document:focus-visible {
   outline: none;
+  box-shadow: inset var(--aw-shadow-focus);
 }
 
 .aw-skill-preview__content {
@@ -25,7 +112,7 @@
   width: min(100%, 920px);
   min-width: 0;
   margin: 0 auto;
-  padding: var(--aw-space-3) 0 var(--aw-space-7);
+  padding: var(--aw-space-7);
 }
 
 .aw-skill-preview__status {
@@ -53,12 +140,12 @@
   width: 100%;
   min-width: 0;
   margin: 0;
-  padding: var(--aw-space-6);
+  padding: 0;
   overflow-x: auto;
   overflow-y: visible;
-  border: 1px solid var(--aw-border-light);
-  border-radius: var(--aw-radius-md);
-  background: var(--aw-surface-code);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--aw-text-code);
   font-family: var(--aw-font-mono);
   font-size: var(--aw-font-size-sm);
@@ -93,20 +180,52 @@
   line-height: 1.4;
 }
 
-.aw-skill-preview__markdown .assistant-message-code-block,
+.aw-skill-preview__markdown .assistant-message-code-block {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
 .aw-skill-preview__markdown .assistant-message-table-wrap {
   overflow-x: auto;
   overflow-y: hidden;
 }
 
+.aw-skill-preview .aw-dialog__foot,
+.aw-project-skills-dialog--preview .aw-dialog__foot {
+  justify-content: flex-start;
+  padding-top: 0;
+}
+
+.aw-skill-preview__delete.aw-button {
+  border-color: color-mix(in srgb, var(--aw-error) 32%, var(--aw-border-main));
+  background: color-mix(in srgb, var(--aw-error) 9%, transparent);
+  color: var(--aw-error);
+}
+
+.aw-skill-preview__delete.aw-button:hover:not(:disabled),
+.aw-skill-preview__delete.aw-button:focus-visible {
+  background: color-mix(in srgb, var(--aw-error) 15%, transparent);
+}
+
 @media (max-width: 720px) {
   .aw-dialog.aw-skill-preview {
     width: calc(100vw - 24px);
-    max-height: calc(100vh - 24px);
+    min-height: min(720px, calc(100vh - 24px));
+    max-height: min(720px, calc(100vh - 24px));
   }
 
-  .aw-skill-preview__scroll {
+  .aw-skill-preview__body {
     padding-right: var(--aw-space-6);
     padding-left: var(--aw-space-6);
+  }
+
+  .aw-skill-preview-summary {
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+    gap: var(--aw-space-4);
+  }
+
+  .aw-skill-preview-summary__icon {
+    width: 40px;
+    height: 40px;
   }
 }

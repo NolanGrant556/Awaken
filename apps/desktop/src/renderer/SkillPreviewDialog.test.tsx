@@ -6,6 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SkillPreviewResponse } from "../shared/runtime";
 import { SkillPreviewDialog, type SkillPreviewTarget } from "./SkillPreviewDialog";
 
+const presentation = {
+  name: "Skill",
+  sourceLabel: "全局",
+  description: "用于验证统一的 Skill 预览信息区与文档阅读区。",
+  enabled: true,
+  deletable: true,
+};
+
 type Deferred<T> = {
   promise: Promise<T>;
   resolve: (value: T) => void;
@@ -48,12 +56,15 @@ describe("SkillPreviewDialog", () => {
       root.render(
         <SkillPreviewDialog
           target={{ catalogEntryId: "skill" }}
+          presentation={presentation}
           runtimeClient={{
             getSkillPreview: vi.fn().mockResolvedValue({
               frontmatterRaw: "---\nname: skill\n---",
               bodyMarkdown: "# Skill body",
             }),
           }}
+          onEnabledChange={vi.fn()}
+          onDelete={vi.fn()}
           onOpenChange={onOpenChange}
         />,
       );
@@ -61,6 +72,11 @@ describe("SkillPreviewDialog", () => {
 
     const closeButton = document.querySelector<HTMLButtonElement>('button[aria-label="关闭"]');
     expect(closeButton).not.toBeNull();
+    expect(document.querySelector(".aw-skill-preview-summary")?.textContent).toContain(
+      "Skill全局",
+    );
+    expect(document.querySelector(".aw-skill-preview__delete")).not.toBeNull();
+    expect(document.querySelector(".aw-skill-preview-document")).not.toBeNull();
     expect(closeButton?.getAttribute("title")).toBeNull();
 
     await act(async () => closeButton?.focus());
@@ -82,17 +98,19 @@ describe("SkillPreviewDialog", () => {
       root.render(
         <SkillPreviewDialog
           target={{ catalogEntryId: "first" }}
+          presentation={presentation}
           runtimeClient={{ getSkillPreview }}
           onOpenChange={onOpenChange}
         />,
       );
     });
-    expect(document.activeElement?.classList.contains("skill-preview-dialog-scroll")).toBe(true);
+    expect(document.activeElement?.classList.contains("aw-skill-preview-document")).toBe(true);
 
     await act(async () => {
       root.render(
         <SkillPreviewDialog
           target={{ catalogEntryId: "second", projectRoot: "/workspace" }}
+          presentation={presentation}
           runtimeClient={{ getSkillPreview }}
           onOpenChange={onOpenChange}
         />,

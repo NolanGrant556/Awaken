@@ -8,7 +8,6 @@ import {
   RefreshCw,
   Trash2,
   Upload,
-  Wrench,
 } from "lucide-react";
 import {
   AwakenButton as Button,
@@ -19,7 +18,7 @@ import {
   AwakenMcpConfigDialog,
   AwakenMcpSettingsDialog,
   AwakenProjectSkillsDialog,
-  AwakenSwitch,
+  AwakenSkillCard,
   type AwakenCliConnectorAction,
   type AwakenConnectorCardItem,
   type AwakenMcpConfigMode,
@@ -39,7 +38,9 @@ import type {
 import type { RuntimeClient } from "./runtime/client";
 import {
   SkillPreviewContent,
+  SkillPreviewDeleteButton,
   SkillPreviewDialog,
+  type SkillPreviewPresentation,
   type SkillPreviewTarget,
 } from "./SkillPreviewDialog";
 import { cliConnectorProductCopy } from "./cliConnectorProduct";
@@ -930,6 +931,16 @@ export function ExtensionsView({
     pendingSkillDelete?.projectRoot === openProjectRoot
       ? pendingSkillDelete
       : null;
+  const projectSkillPreviewSkill = projectSkillPreviewTarget
+    ? openProjectSkillGroup?.skills.find(
+        (skill) => skill.catalogEntryId === projectSkillPreviewTarget.catalogEntryId,
+      ) ?? null
+    : null;
+  const standaloneSkillPreviewSkill = skillPreviewTarget && !skillPreviewTarget.projectRoot
+    ? skills.find(
+        (skill) => skill.catalogEntryId === skillPreviewTarget.catalogEntryId,
+      ) ?? null
+    : null;
 
   const visibleUserSkills = useMemo(
     () => visibleSkills.filter((skill) => skill.sourceOrigin === "user"),
@@ -1370,78 +1381,71 @@ export function ExtensionsView({
     setPendingSkillDelete({ skill, projectRoot });
   }
 
+  function createSkillPreviewPresentation(
+    skill: RuntimeSkill,
+    projectRoot?: string,
+  ): SkillPreviewPresentation {
+    const skillKey = `${skill.id}:${skill.sourceOrigin}:${projectRoot ?? ""}`;
+    const deletingThisSkill = Boolean(
+      deletingSkill
+      && pendingSkillDelete?.skill.id === skill.id
+      && pendingSkillDelete.projectRoot === projectRoot,
+    );
+    return {
+      name: skill.displayName || skill.name,
+      sourceLabel: skillSourceLabel(skill.sourceOrigin),
+      description: skill.whenToUse || skill.description,
+      enabled:
+        skillToggleStates[skillKey] ?? skill.state !== "disabled_by_policy",
+      toggleDisabled: busySkillId === skill.id || deletingThisSkill,
+      deletable: isSkillPackageDeletable(skill),
+      deleting: deletingThisSkill,
+    };
+  }
+
   function renderSkillCard(skill: RuntimeSkill, projectRoot?: string) {
     const diagnostics = (skill.diagnostics ?? [])
       .map(skillDiagnosticText)
       .filter(Boolean);
     const previewable = canPreviewSkill(skill);
-    const deletable = isSkillPackageDeletable(skill);
     const skillName = skill.displayName || skill.name;
     const skillKey = `${skill.id}:${skill.sourceOrigin}:${projectRoot ?? ""}`;
     const disabledByDefault = skill.state === "disabled_by_policy";
     const toggledOn = skillToggleStates[skillKey] ?? !disabledByDefault;
-    const cardBody = (
-      <>
-        <span className="extension-card-icon" aria-hidden="true">
-          <Wrench size={20} strokeWidth={1.9} />
-        </span>
-        <span className="extension-card-copy">
-          <span className="extension-card-title-row">
-            <span className="extension-card-heading">{skillName}</span>
-          </span>
-          <span className="extension-card-description">
-            {skill.whenToUse || skill.description}
-          </span>
-          {diagnostics.length > 0 ? (
-            <span className="extension-card-diagnostic" title={diagnostics.join(" · ")}>
-              诊断：{diagnostics.join(" · ")}
-            </span>
-          ) : null}
-        </span>
-      </>
-    );
+    const cardSkill: AwakenSkillItem = {
+      id: skill.id,
+      name: skillName,
+      description: skill.whenToUse || skill.description,
+      enabled: toggledOn,
+      scope:
+        skill.sourceOrigin === "bundled"
+          ? "awaken"
+          : skill.sourceOrigin === "project"
+            ? "project"
+            : skill.sourceOrigin === "user"
+              ? "global"
+              : skill.sourceOrigin === "agents"
+                ? "agents"
+                : skill.sourceOrigin === "mcp"
+                  ? "mcp"
+                  : "other",
+      sourceLabel: skillSourceLabel(skill.sourceOrigin),
+      diagnostic:
+        diagnostics.length > 0 ? `诊断：${diagnostics.join(" · ")}` : undefined,
+      previewable,
+      busy: busySkillId === skill.id,
+      toggleDisabled: busySkillId === skill.id,
+      projectId: projectRoot,
+    };
     return (
-      <article
-        className="extension-card extension-skill-card"
+      <AwakenSkillCard
         key={skillKey}
-      >
-        {previewable ? (
-          <button
-            type="button"
-            className="extension-card-main"
-            aria-label={`查看 ${skillName} 的 SKILL.md`}
-            onClick={() => openSkillPreview(skill, projectRoot)}
-          >
-            {cardBody}
-          </button>
-        ) : (
-          <span className="extension-card-main extension-card-main-static">
-            {cardBody}
-          </span>
-        )}
-        <div className="extension-card-actions extension-card-actions-skill">
-          <AwakenSwitch
-            checked={toggledOn}
-            label={skillName}
-            disabled={busySkillId === skill.id}
-            onCheckedChange={(enabled) => {
-              void handleToggleSkill(skill, skillKey, enabled);
-            }}
-          />
-          {deletable ? (
-            <button
-              type="button"
-              className="extension-card-delete-skill"
-              aria-label={`删除 ${skillName}`}
-              disabled={deletingSkill}
-              onClick={() => requestSkillDelete(skill, projectRoot)}
-            >
-              <Trash2 size={14} strokeWidth={1.9} aria-hidden="true" />
-              删除
-            </button>
-          ) : null}
-        </div>
-      </article>
+        skill={cardSkill}
+        onPreview={previewable ? () => openSkillPreview(skill, projectRoot) : undefined}
+        onEnabledChange={(enabled) => {
+          void handleToggleSkill(skill, skillKey, enabled);
+        }}
+      />
     );
   }
 
@@ -1789,23 +1793,41 @@ export function ExtensionsView({
       <AwakenProjectSkillsDialog
         open={openProjectSkillDialog !== null}
         project={openProjectSkillDialog}
-        deletingSkillId={deletingSkill ? pendingSkillDelete?.skill.id : null}
-        detailView={projectSkillPreviewTarget ? {
+        detailView={projectSkillPreviewTarget && projectSkillPreviewSkill ? {
           mode: "preview",
-          title: "SKILL.md 预览",
+          title: `${projectSkillPreviewSkill.displayName || projectSkillPreviewSkill.name} 的 SKILL.md`,
           titleVisuallyHidden: true,
-          bodyClassName: "skill-preview-dialog-scroll",
-          bodyRef: projectSkillPreviewScrollRef,
-          bodyTabIndex: 0,
+          initialFocusRef: projectSkillPreviewScrollRef,
           content: (
             <SkillPreviewContent
               target={projectSkillPreviewTarget}
+              presentation={createSkillPreviewPresentation(
+                projectSkillPreviewSkill,
+                openProjectSkillGroup?.root,
+              )}
               runtimeClient={runtimeClient}
               scrollRef={projectSkillPreviewScrollRef}
+              onEnabledChange={(enabled) => {
+                const projectRoot = openProjectSkillGroup?.root;
+                if (!projectRoot) {
+                  return;
+                }
+                const skillKey = `${projectSkillPreviewSkill.id}:${projectSkillPreviewSkill.sourceOrigin}:${projectRoot}`;
+                void handleToggleSkill(projectSkillPreviewSkill, skillKey, enabled);
+              }}
             />
           ),
+          footer: isSkillPackageDeletable(projectSkillPreviewSkill) ? (
+            <SkillPreviewDeleteButton
+              deleting={deletingSkill}
+              onDelete={() => {
+                const projectRoot = openProjectSkillGroup?.root;
+                setSkillPreviewTarget(null);
+                requestSkillDelete(projectSkillPreviewSkill, projectRoot);
+              }}
+            />
+          ) : undefined,
           returnFocusSkillId: projectSkillPreviewTarget.skillId,
-          returnFocusAction: "preview",
         } : projectSkillDeleteTarget ? {
           mode: "delete",
           title: "删除 Skill",
@@ -1853,7 +1875,6 @@ export function ExtensionsView({
             </>
           ),
           returnFocusSkillId: projectSkillDeleteTarget.skill.id,
-          returnFocusAction: "delete",
         } : null}
         onDetailClose={() => {
           if (projectSkillPreviewTarget) {
@@ -1882,18 +1903,24 @@ export function ExtensionsView({
             void handleToggleSkill(skill, skillKey, enabled);
           }
         }}
-        onSkillDelete={(item) => {
-          const group = openProjectSkillGroup;
-          const skill = group?.skills.find((entry) => entry.id === item.id);
-          if (group && skill) {
-            requestSkillDelete(skill, group.root);
-          }
-        }}
       />
 
       <SkillPreviewDialog
         target={skillPreviewTarget?.projectRoot ? null : skillPreviewTarget}
+        presentation={standaloneSkillPreviewSkill
+          ? createSkillPreviewPresentation(standaloneSkillPreviewSkill)
+          : null}
         runtimeClient={runtimeClient}
+        onEnabledChange={standaloneSkillPreviewSkill ? (enabled) => {
+          const skillKey = `${standaloneSkillPreviewSkill.id}:${standaloneSkillPreviewSkill.sourceOrigin}:`;
+          void handleToggleSkill(standaloneSkillPreviewSkill, skillKey, enabled);
+        } : undefined}
+        onDelete={standaloneSkillPreviewSkill && isSkillPackageDeletable(standaloneSkillPreviewSkill)
+          ? () => {
+              setSkillPreviewTarget(null);
+              requestSkillDelete(standaloneSkillPreviewSkill);
+            }
+          : undefined}
         onOpenChange={(open) => {
           if (!open) {
             setSkillPreviewTarget(null);

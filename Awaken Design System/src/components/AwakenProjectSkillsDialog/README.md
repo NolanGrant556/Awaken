@@ -1,6 +1,6 @@
 # AwakenProjectSkillsDialog
 
-项目 Skill 文件夹打开后的受控固定尺寸窗口。项目名称只在窗口标题中出现，内容区展示路径、数量和统一 `AwakenSkillCard` 列表；列表、预览和删除确认共用同一个约 `980 × 640` 的 Dialog，内容超出时只在 body 内滚动。
+项目 Skill 文件夹打开后的受控固定尺寸窗口。项目名称只在窗口标题中出现，内容区展示路径、数量和统一 `AwakenSkillCard` 列表。项目列表保持约 `980 × 640`；切换到预览时复用同一个 Dialog 节点并采用约 `820 × 720` 的阅读比例，内容超出时只在正文区域滚动。
 
 ## Props
 
@@ -9,9 +9,7 @@
 - `onOpenChange`：关闭或重新打开请求。
 - `onSkillPreview`：卡片主体请求预览。
 - `onSkillToggle`：卡片开关请求改变状态。
-- `onSkillDelete`：存在时为项目 Skill 卡片显示删除入口并回传请求。
-- `deletingSkillId`：标记正在删除的 Skill，禁用其卡片操作。
-- `detailView`：在同一个 Dialog 内把卡片列表切换为预览或删除确认内容；切换期间不卸载 Dialog、遮罩或项目窗口上下文。
+- `detailView`：在同一个 Dialog 内把卡片列表切换为预览或删除确认内容；`mode="preview"` 自动应用统一 Skill 预览正文布局，consumer 注入 `AwakenSkillPreviewContent` 与统一删除按钮即可。小卡片不承载删除操作，切换期间不卸载 Dialog、遮罩或项目窗口上下文。
 - `onDetailClose`：详情状态下关闭按钮或 Escape 的返回请求，consumer 应切回项目 Skill 列表。
 
 组件不读取项目目录、不加载 `SKILL.md`、不判断删除权限，也不拥有 runtime 状态。

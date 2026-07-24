@@ -76,7 +76,7 @@ const (
 
 // ToolHint preserves author-supplied allowed-tools guidance without turning
 // it into an execution allow-list. Canonical is an optional Awaken alias that
-// helps the model understand common Claude Code tool names.
+// helps the model understand common tool names used by Skill authors.
 type ToolHint struct {
 	Declared  string `json:"declared"`
 	Canonical string `json:"canonical,omitempty"`

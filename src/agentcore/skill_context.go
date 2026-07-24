@@ -26,10 +26,10 @@ func skillActivationSourcePath(plan *skillruntime.SkillActivationPlan) string {
 	return strings.TrimRight(root, "/\\") + "/SKILL.md"
 }
 
-// compactInvokedSkillContext mirrors the Claude Code recovery budget: most
-// recent invocations first, at most 5k estimated tokens per Skill and 25k in
-// total. The source path remains in the recovery notice so the model can use
-// Read when it needs the full package instructions again.
+// compactInvokedSkillContext enforces Awaken's recovery budget: most recent
+// invocations first, at most 5k estimated tokens per Skill and 25k in total.
+// The source path remains in the recovery notice so the model can use Read
+// when it needs the full package instructions again.
 func (r *Runner) compactInvokedSkillContext() {
 	if r == nil || len(r.config.SkillContextBlocks) == 0 {
 		return

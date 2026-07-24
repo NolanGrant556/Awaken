@@ -125,8 +125,8 @@ func (t *CatalogTool) ModelCatalogForContext(contextWindowTokens int) string {
 // available" in the same place. This is a deterministic Prompt constraint,
 // not a host-side matcher: the model still judges whether a task matches a
 // Skill's description. It sits outside the Catalog's own 1%-of-context
-// budget, mirroring how Claude Code's SkillTool prompt and Codex's skills
-// developer fragment both place trigger rules beside their listings.
+// budget so tightening the listing budget cannot weaken Awaken's selection
+// and invocation contract.
 const skillTriggerRulesPrefix = `Load one installed Skill by exact catalog name.
 
 Trigger rules (mandatory):

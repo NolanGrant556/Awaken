@@ -725,8 +725,9 @@ button.extension-card-main:focus-visible {
 }
 
 .aw-dialog.skill-preview-dialog {
-  width: min(920px, calc(100vw - 80px));
-  max-height: min(720px, calc(100vh - 80px));
+  width: min(980px, calc(100vw - 80px));
+  min-height: min(640px, calc(100vh - 64px));
+  max-height: min(640px, calc(100vh - 64px));
 }
 
 .skill-preview-dialog .aw-dialog__head,
@@ -843,7 +844,8 @@ button.extension-card-main:focus-visible {
 @media (max-width: 720px) {
   .aw-dialog.skill-preview-dialog {
     width: calc(100vw - 24px);
-    max-height: calc(100vh - 24px);
+    min-height: min(640px, calc(100vh - 24px));
+    max-height: min(640px, calc(100vh - 24px));
   }
 
   .skill-preview-dialog-scroll {

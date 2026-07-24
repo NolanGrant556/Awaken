@@ -420,6 +420,12 @@ type SkillListLoadResult = {
   errorMessage?: string;
 };
 
+type SkillCatalogSnapshot = {
+  skills: RuntimeSkill[];
+  projectGroups: SkillProjectGroup[];
+  signature: string;
+};
+
 type McpSettingsLoadResult = {
   config?: RuntimeMcpServerConfigResponse;
   configErrorMessage?: string;
@@ -476,6 +482,27 @@ export async function loadSkillListsForRoots(
   );
 }
 
+function buildSkillCatalogSnapshot(
+  projectRoots: string[],
+  results: SkillListLoadResult[],
+): SkillCatalogSnapshot {
+  const skillLists = results.map((result) => result.skills);
+  const skills = dedupeSkills(skillLists.flat());
+  const projectGroups = projectRoots.map((root, index) => ({
+    root,
+    label: projectLabelFromRoot(root),
+    skills: (skillLists[index] ?? []).filter(
+      (skill) => skill.sourceOrigin === "project",
+    ),
+    errorMessage: results[index]?.errorMessage,
+  }));
+  return {
+    skills,
+    projectGroups,
+    signature: JSON.stringify({ skills, projectGroups }),
+  };
+}
+
 function dedupePaths(paths: Array<string | undefined>): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -503,6 +530,8 @@ export function dedupeSkills(skills: RuntimeSkill[]): RuntimeSkill[] {
   }
   return result;
 }
+
+export const SKILL_CATALOG_SYNC_INTERVAL_MS = 1_000;
 
 function fileToBase64(file: File): Promise<string> {
   return file.arrayBuffer().then((buffer) => {
@@ -561,6 +590,9 @@ export function ExtensionsView({
   const [skillPreviewTarget, setSkillPreviewTarget] =
     useState<SkillPreviewTarget | null>(null);
   const projectSkillPreviewScrollRef = useRef<HTMLDivElement>(null);
+  const skillProjectRootsRef = useRef<string[]>([]);
+  const skillSnapshotSignatureRef = useRef("");
+  const skillSyncInFlightRef = useRef(false);
   const [skillToggleStates, setSkillToggleStates] = useState<Record<string, boolean>>({});
   const [busySkillId, setBusySkillId] = useState<string | null>(null);
   const [pendingSkillDelete, setPendingSkillDelete] =
@@ -578,6 +610,15 @@ export function ExtensionsView({
   const [loadingMcpSettings, setLoadingMcpSettings] = useState(false);
 
   const normalizedQuery = query.trim().toLowerCase();
+  function applySkillCatalogSnapshot(snapshot: SkillCatalogSnapshot): void {
+    if (skillSnapshotSignatureRef.current === snapshot.signature) {
+      return;
+    }
+    skillSnapshotSignatureRef.current = snapshot.signature;
+    setSkills(snapshot.skills);
+    setSkillProjectGroups(snapshot.projectGroups);
+  }
+
   async function refresh(showLoading = true, projectRootOverride?: string): Promise<void> {
     if (!desktopReady) {
       setErrorMessage("Awaken runtime 未启动");
@@ -628,16 +669,9 @@ export function ExtensionsView({
       setConnectors(nextConnectors);
       setCliConnectors(nextCliConnectors);
       setMcpServers(nextMcpServers);
-      setSkills(allSkills);
-      setSkillProjectGroups(
-        projectRoots.map((root, index) => ({
-          root,
-          label: projectLabelFromRoot(root),
-          skills: (nextSkillLists[index] ?? []).filter(
-            (skill) => skill.sourceOrigin === "project",
-          ),
-          errorMessage: nextSkillResults[index]?.errorMessage,
-        })),
+      skillProjectRootsRef.current = projectRoots;
+      applySkillCatalogSnapshot(
+        buildSkillCatalogSnapshot(projectRoots, nextSkillResults),
       );
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "扩展列表加载失败");
@@ -684,6 +718,65 @@ export function ExtensionsView({
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [desktopReady, section]);
+
+  useEffect(() => {
+    if (!desktopReady || section !== "skills") {
+      return;
+    }
+    let disposed = false;
+    const syncSkillsFromDisk = async (): Promise<void> => {
+      if (skillSyncInFlightRef.current) {
+        return;
+      }
+      skillSyncInFlightRef.current = true;
+      try {
+        const projectRoots = skillProjectRootsRef.current;
+        const roots = projectRoots.length > 0 ? projectRoots : [undefined];
+        const results = await loadSkillListsForRoots(
+          roots,
+          runtimeClient.listSkills,
+        );
+        if (disposed || results.some((result) => result.errorMessage)) {
+          return;
+        }
+        applySkillCatalogSnapshot(
+          buildSkillCatalogSnapshot(projectRoots, results),
+        );
+      } finally {
+        skillSyncInFlightRef.current = false;
+      }
+    };
+    const timer = setInterval(() => {
+      void syncSkillsFromDisk();
+    }, SKILL_CATALOG_SYNC_INTERVAL_MS);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [desktopReady, runtimeClient, section]);
+
+  useEffect(() => {
+    if (!skillPreviewTarget) {
+      return;
+    }
+    const previewExists = skillPreviewTarget.projectRoot
+      ? skillProjectGroups.some(
+          (group) =>
+            group.root === skillPreviewTarget.projectRoot &&
+            group.skills.some(
+              (skill) =>
+                skill.catalogEntryId === skillPreviewTarget.catalogEntryId,
+            ),
+        )
+      : skills.some(
+          (skill) =>
+            skill.catalogEntryId === skillPreviewTarget.catalogEntryId,
+        );
+    if (!previewExists) {
+      setSkillPreviewTarget(null);
+    }
+  }, [skillPreviewTarget, skillProjectGroups, skills]);
 
   useEffect(() => {
     if (!mcpSettingsOpen || !selectedMcpServer) {

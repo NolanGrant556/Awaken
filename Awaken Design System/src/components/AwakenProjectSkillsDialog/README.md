@@ -11,5 +11,7 @@
 - `onSkillToggle`：卡片开关请求改变状态。
 - `onSkillDelete`：存在时为项目 Skill 卡片显示删除入口并回传请求。
 - `deletingSkillId`：标记正在删除的 Skill，禁用其卡片操作。
+- `detailView`：在同一个 Dialog 内把卡片列表切换为预览或删除确认内容；切换期间不卸载 Dialog、遮罩或项目窗口上下文。
+- `onDetailClose`：详情状态下关闭按钮或 Escape 的返回请求，consumer 应切回项目 Skill 列表。
 
 组件不读取项目目录、不加载 `SKILL.md`、不判断删除权限，也不拥有 runtime 状态。

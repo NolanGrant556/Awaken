@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import {
   AwakenDialog as Dialog,
   AwakenMarkdownRenderer,
@@ -9,6 +9,7 @@ import type { RuntimeClient } from "./runtime/client";
 export type SkillPreviewTarget = {
   catalogEntryId: string;
   projectRoot?: string;
+  skillId?: string;
 };
 
 type SkillPreviewDialogProps = {
@@ -17,16 +18,21 @@ type SkillPreviewDialogProps = {
   onOpenChange: (open: boolean) => void;
 };
 
-export function SkillPreviewDialog({
+type SkillPreviewContentProps = {
+  target: SkillPreviewTarget | null;
+  runtimeClient: Pick<RuntimeClient, "getSkillPreview">;
+  scrollRef: RefObject<HTMLDivElement | null>;
+};
+
+export function SkillPreviewContent({
   target,
   runtimeClient,
-  onOpenChange,
-}: SkillPreviewDialogProps) {
+  scrollRef,
+}: SkillPreviewContentProps) {
   const [preview, setPreview] = useState<SkillPreviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const requestVersionRef = useRef(0);
-  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const requestVersion = requestVersionRef.current + 1;
@@ -43,6 +49,7 @@ export function SkillPreviewDialog({
     setPreview(null);
     setErrorMessage(null);
     setLoading(true);
+    scrollRef.current?.focus();
 
     void runtimeClient
       .getSkillPreview({
@@ -69,7 +76,48 @@ export function SkillPreviewDialog({
           setLoading(false);
         }
       });
-  }, [runtimeClient, target]);
+  }, [runtimeClient, scrollRef, target]);
+
+  return (
+    <div className="skill-preview-content">
+      {loading ? (
+        <div className="skill-preview-status" role="status" aria-live="polite">
+          正在读取 SKILL.md…
+        </div>
+      ) : null}
+      {errorMessage ? (
+        <div className="skill-preview-error" role="alert">
+          <strong>无法预览 SKILL.md</strong>
+          <span>{errorMessage}</span>
+        </div>
+      ) : null}
+      {preview ? (
+        <>
+          {preview.frontmatterRaw ? (
+            <pre className="skill-preview-frontmatter" aria-label="YAML frontmatter">
+              <code className="language-yaml">{preview.frontmatterRaw}</code>
+            </pre>
+          ) : null}
+          <AwakenMarkdownRenderer
+            className="assistant-message assistant-message-markdown skill-preview-markdown"
+            markdown={preview.bodyMarkdown}
+            fallback=""
+            renderMermaid={false}
+            renderImages={false}
+            allowedLinkProtocols={["http", "https"]}
+          />
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+export function SkillPreviewDialog({
+  target,
+  runtimeClient,
+  onOpenChange,
+}: SkillPreviewDialogProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   return (
     <Dialog
@@ -84,36 +132,11 @@ export function SkillPreviewDialog({
       initialFocusRef={scrollRef}
       onOpenChange={onOpenChange}
     >
-      <div className="skill-preview-content">
-        {loading ? (
-          <div className="skill-preview-status" role="status" aria-live="polite">
-            正在读取 SKILL.md…
-          </div>
-        ) : null}
-        {errorMessage ? (
-          <div className="skill-preview-error" role="alert">
-            <strong>无法预览 SKILL.md</strong>
-            <span>{errorMessage}</span>
-          </div>
-        ) : null}
-        {preview ? (
-          <>
-            {preview.frontmatterRaw ? (
-              <pre className="skill-preview-frontmatter" aria-label="YAML frontmatter">
-                <code className="language-yaml">{preview.frontmatterRaw}</code>
-              </pre>
-            ) : null}
-            <AwakenMarkdownRenderer
-              className="assistant-message assistant-message-markdown skill-preview-markdown"
-              markdown={preview.bodyMarkdown}
-              fallback=""
-              renderMermaid={false}
-              renderImages={false}
-              allowedLinkProtocols={["http", "https"]}
-            />
-          </>
-        ) : null}
-      </div>
+      <SkillPreviewContent
+        target={target}
+        runtimeClient={runtimeClient}
+        scrollRef={scrollRef}
+      />
     </Dialog>
   );
 }
